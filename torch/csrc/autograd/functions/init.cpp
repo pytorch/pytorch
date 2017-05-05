@@ -78,7 +78,7 @@ PyObject* getTupleAttr(PyObject* obj, void* _unused)
 {
   HANDLE_TH_ERRORS
   THPCppFunction* self = (THPCppFunction*)obj;
-  auto& arr = (T*)(self->cdata.get())->*ptr;
+  auto& arr = ((T*)(self->cdata.get()))->*ptr;
   auto num_elems = arr.size();
   THPObjectPtr py_tuple = PyTuple_New(num_elems);
   if (!py_tuple) return NULL;
@@ -95,7 +95,7 @@ PyObject* getValueAttr(PyObject* obj, void* _unused)
 {
   HANDLE_TH_ERRORS
   THPCppFunction* self = (THPCppFunction*)obj;
-  auto& val = (T*)(self->cdata.get())->*ptr;
+  auto& val = ((T*)(self->cdata.get()))->*ptr;
   return Convert(val);
   END_HANDLE_TH_ERRORS
 }
