@@ -621,6 +621,22 @@ THC_API void THCTensor_(qr)(THCState *state, THCTensor *rq_, THCTensor *rr_, THC
 
   int info;
 #if defined(THC_REAL_IS_FLOAT)
+  magma_sgeqrf2_gpu(m, n, a_data, m, tau_data, &info);
+#else
+  magma_dgeqrf2_gpu(m, n, a_data, m, tau_data, &info);
+#endif
+
+  if (info != 0)
+    THError("MAGMA geqrf2 : Argument %d : illegal value.", -info);
+
+  THCTensor_(narrow)(state, a, a, 0, 0, k);
+  THCTensor_(triu)(state, rr_, a, 0);
+  THCTensor_(free)(state, a);
+
+  a = THCTensor_(newColumnMajor)(state, rq_, a_);
+  a_data = THCTensor_(data)(state, a);
+
+#if defined(THC_REAL_IS_FLOAT)
   magma_sgeqrf_gpu(m, n, a_data, m, tau_data, work_data, &info);
 #else
   magma_dgeqrf_gpu(m, n, a_data, m, tau_data, work_data, &info);
@@ -631,10 +647,6 @@ THC_API void THCTensor_(qr)(THCState *state, THCTensor *rq_, THCTensor *rr_, THC
 
   THCTensor *q = THCTensor_(newColumnMajor)(state, rq_, a);
   real *q_data = THCTensor_(data)(state, q);
-
-  THCTensor_(narrow)(state, a, a, 0, 0, k);
-  THCTensor_(triu)(state, rr_, a, 0);
-  THCTensor_(free)(state, a);
 
 #if defined(THC_REAL_IS_FLOAT)
   magma_sorgqr_gpu(m, k, k, q_data, m, tau_data, work_data, nb, &info);
