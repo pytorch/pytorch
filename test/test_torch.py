@@ -1400,6 +1400,12 @@ class TestTorch(TestCase):
         ))
         check_qr(a, expected_q, expected_r)
 
+        # check big matrix
+        a = torch.randn(1000, 1000)
+        q, r = torch.qr(a)
+        a_qr = torch.mm(q, r)
+        self.assertEqual(a, a_qr, prec=1e-3)
+
     @skipIfNoLapack
     def test_ormqr(self):
         mat1 = torch.randn(10, 10)
