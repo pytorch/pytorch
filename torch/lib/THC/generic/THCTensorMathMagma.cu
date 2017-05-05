@@ -608,15 +608,22 @@ THC_API void THCTensor_(qr)(THCState *state, THCTensor *rq_, THCTensor *rr_, THC
   int k = (m < n ? m : n);
 
 #ifdef MAGMA_V2
+#if defined(THC_REAL_IS_FLOAT)
   int nb = magma_get_sgeqrf_nb(m, n);
 #else
+  int nb = magma_get_dgeqrf_nb(m, n);
+#endif
+#else
+#if defined(THC_REAL_IS_FLOAT)
   int nb = magma_get_sgeqrf_nb(m);
+#else
+  int nb = magma_get_dgeqrf_nb(m);
+#endif
 #endif
 
   real *a_data = THCTensor_(data)(state, a);
-  real *tau_data = th_magma_malloc_pinned<real>(n*n);
-
-  THCTensor *work = THCTensor_(newWithSize1d)(state, (2*k + ((n+31)/32)*32)*nb);
+  real *tau_data = th_magma_malloc_pinned<real>(k);
+  THCTensor *work = THCTensor_(newWithSize1d)(state, (2*k + magma_roundup(n, 32))*nb);
   real *work_data = THCTensor_(data)(state, work);
 
   int info;
