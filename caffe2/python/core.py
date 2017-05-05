@@ -203,6 +203,16 @@ class BlobReference(object):
         return lambda *args, **kwargs: self._CreateAndAddToNet(
             op_type, *args, **kwargs)
 
+    def __dir__(self):
+        additional_methods = [
+            op
+            for op in _REGISTERED_OPERATORS
+            if '_ENGINE_' not in op or '_ENGINE_CUDNN' in op]
+        return sorted(set(
+            dir(type(self)) +
+            self.__dict__.keys() +
+            additional_methods))
+
 
 def ScopedName(name):
     """prefix the name with the current scope."""
@@ -1749,6 +1759,16 @@ class Net(object):
             )
         return lambda *args, **kwargs: self._CreateAndAddToSelf(
             op_type, *args, **kwargs)
+
+    def __dir__(self):
+        additional_methods = [
+            op
+            for op in _REGISTERED_OPERATORS
+            if '_ENGINE_' not in op]
+        return sorted(set(
+            dir(type(self)) +
+            self.__dict__.keys() +
+            additional_methods))
 
     def Python(
         self, f, grad_f=None, python_func_type=None, pass_workspace=False,
