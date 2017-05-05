@@ -307,6 +307,16 @@ class TestAppendNet(test_util.TestCase):
         netB.AppendNet(netA)
         self.assertFalse("in1" in netB.external_inputs)
 
+    def test_external_inputs_merged_correctlyB(self):
+        netA = core.Net("A")
+        netA.Sum(["in1", "in2"], ["sum1"])
+        self.assertTrue("in1" in netA.external_inputs)
+
+        netB = core.Net("B")
+        netB.Sum(["in3", "in4"], ["in1"])
+        netA.AppendNet(netB)  # note different order than in prev test
+        self.assertTrue("in1" in netA.external_inputs)
+
 
 if __name__ == '__main__':
     unittest.main()
