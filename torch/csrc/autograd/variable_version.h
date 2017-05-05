@@ -18,6 +18,9 @@ struct VariableVersion {
   int var_refcnt() { return version_block[2]; }
 
   void join_with(VariableVersion &other) {
+    if (this == &other) {
+      return;
+    }
     cleanup();
     version_block = other.version_block;
     version_block[1]++;
