@@ -47,6 +47,14 @@ class CNNModelHelper(ModelHelper):
             **kwargs
         )
 
+    def VideoInput(self, blob_in, blob_out, **kwargs):
+        return brew.video_input(
+            self,
+            blob_in,
+            blob_out,
+            **kwargs
+        )
+
     def PadImage(self, blob_in, blob_out, **kwargs):
         # TODO(wyiming): remove this dummy helper later
         self.net.PadImage(blob_in, blob_out, **kwargs)

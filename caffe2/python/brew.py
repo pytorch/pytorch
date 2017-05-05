@@ -51,6 +51,7 @@ class HelperWrapper(object):
         'group_conv': group_conv,
         'group_conv_deprecated': group_conv_deprecated,
         'image_input': image_input,
+        'video_input': video_input,
         'add_weight_decay': add_weight_decay,
     }
 
