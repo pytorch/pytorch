@@ -35,6 +35,15 @@ REGISTER_CPU_OPERATOR(
     RecurrentNetworkGradientOp<float, CPUContext>);
 OPERATOR_SCHEMA(RecurrentNetworkGradient);
 
+REGISTER_CPU_OPERATOR(
+    rnn_internal_accumulate_gradient_input,
+    AccumulateInputGradientOp<float, CPUContext>);
+OPERATOR_SCHEMA(rnn_internal_accumulate_gradient_input)
+    .NumInputs(2)
+    .NumOutputs(1)
+    .Private()
+    .SetDoc("--internal--");
+
 struct GetRecurrentNetworkGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   std::vector<OperatorDef> GetGradientDefs() override {

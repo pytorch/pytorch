@@ -519,6 +519,7 @@ void addObjectMethods(py::module& m) {
   py::class_<OpSchema>(m, "OpSchema")
       .def_property_readonly("file", &OpSchema::file)
       .def_property_readonly("line", &OpSchema::line)
+      .def_property_readonly("private", &OpSchema::private_op)
       .def_property_readonly(
           "doc", &OpSchema::doc, py::return_value_policy::reference)
       .def_property_readonly("arg_desc", &OpSchema::arg_desc)

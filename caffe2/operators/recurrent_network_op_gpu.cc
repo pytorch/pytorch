@@ -9,5 +9,9 @@ REGISTER_CUDA_OPERATOR(
 REGISTER_CUDA_OPERATOR(
     RecurrentNetworkGradient,
     RecurrentNetworkGradientOp<float, CUDAContext>);
+
+REGISTER_CUDA_OPERATOR(
+    rnn_internal_accumulate_gradient_input,
+    AccumulateInputGradientOp<float, CUDAContext>);
 }
 }
