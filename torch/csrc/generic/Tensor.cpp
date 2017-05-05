@@ -822,9 +822,9 @@ PyTypeObject THPTensorStatelessType = {
 #include "SparseTensor.cpp"
 #endif
 
+#ifndef THD_GENERIC_FILE
 void THPTensor_(initCopyMethods)()
 {
-#ifndef THD_GENERIC_FILE
   auto& h = THTensor_(copy_functions);
   // copy from same type
   THPInsertCopyFunction(h, &THTensor_(copy));
@@ -867,8 +867,28 @@ void THPTensor_(initCopyMethods)()
   THPInsertCopyFunction(b, &THCpuTensor_(copyAsyncCuda), true);
   #undef THCpuTensor_
 #endif
-#endif // !defined(THD_GENERIC_FILE)
 }
+#else
+void THPTensor_(initCopyMethods)()
+{
+  // TODO: cross type copies
+  auto& h = THTensor_(copy_functions);
+  THPInsertCopyFunction(h, &THDTensor_(copy));
+
+  #define THCpuTensor_(name) TH_CONCAT_4(TH, Real, Tensor_, name)
+  #define THCpuTensor TH_CONCAT_3(TH, Real, Tensor)
+  #define THPCpuTensorType TH_CONCAT_3(THP, Real, TensorType)
+  extern THPCopyList THCpuTensor_(copy_functions);
+  auto& b = THCpuTensor_(copy_functions);
+
+  THDPInsertCopyFunctionFromMaster(h, &THDTensor_(copyFromMaster), &THPCpuTensorType);
+  THDPInsertCopyFunctionFromWorker(b, THDTensor_(copyFromWorker));
+
+  #undef THCpuTensor
+  #undef THCpuTensor_
+  #undef THPCpuTensorType
+}
+#endif // !defined(THD_GENERIC_FILE)
 
 bool THPTensor_(init)(PyObject *module)
 {

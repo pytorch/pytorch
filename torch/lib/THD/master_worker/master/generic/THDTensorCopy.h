@@ -4,7 +4,7 @@
 
 THD_API void THDTensor_(copy)(THDTensor *tensor, THDTensor *src);
 
-THD_API void THDTensor_(copyFromMaster)(THDTensorDescriptor* from, THDTensor *to);
-THD_API void THDTensor_(copyFromWorker)(THDTensor *from, THDTensorDescriptor *to);
+THD_API void THDTensor_(copyFromMaster)(THDTensor *to, THDTensorDescriptor* from);
+THD_API void THDTensor_(copyFromWorker)(THDTensorDescriptor *to, THDTensor *from);
 
 #endif
