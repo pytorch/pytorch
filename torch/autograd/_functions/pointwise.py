@@ -80,7 +80,7 @@ class Sigmoid(InplaceFunction):
         backend = type2backend[type(result.data)]
         backend.Sigmoid_updateGradInput(backend.library_state, None, grad_output.data,
                                         grad_input.data, result.data)
-        return grad_input
+        return grad_input, None
 
 
 class Sinh(Function):
