@@ -37,10 +37,11 @@ struct VariableVersion {
   }
 
   void cleanup() {
-    if (!saved_ref) --version_block[2];
-    if (--version_block[1]) return;
-    delete[] version_block;
+    auto vb = version_block;
     version_block = nullptr;
+    if (!saved_ref) --vb[2];
+    if (--vb[1]) return;
+    delete[] vb;
   }
 
   ~VariableVersion() { cleanup(); }
