@@ -1477,9 +1477,9 @@ class TestNN(NNTestCase):
         padded = torch.cat([pad(i * 100 + torch.arange(1, 5 * l + 1).view(l, 1, 5), max_length)
                             for i, l in enumerate(lengths, 1)], 1)
         padded = Variable(padded, requires_grad=True)
-        expected_data = [[torch.arange(1, 6) + i * 100 for i in range(batch_size)] for batch_size in batch_sizes]
+        expected_data = [[torch.arange(1, 6) + (i+1) * 100 + 5*n for i in range(batch_size)] for n, batch_size in enumerate(batch_sizes)]
         expected_data = list(itertools.chain.from_iterable(expected_data))
-        expected_data = torch.cat(expected_data)
+        expected_data = torch.stack(expected_data,dim=0)
 
         for batch_first in (True, False):
             src = padded
