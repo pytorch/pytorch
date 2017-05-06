@@ -441,7 +441,7 @@ def tanh(input):
 
 
 def sigmoid(input):
-    return _autograd_functions.Sigmoid()(input)
+    return _autograd_functions.Sigmoid.apply(input)
 
 
 # etc.
