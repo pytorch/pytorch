@@ -75,7 +75,7 @@ class Sigmoid(InplaceFunction):
 
     @staticmethod
     def backward(ctx, grad_output):
-        result, = self.saved_variables
+        result, = ctx.saved_variables
         grad_input = Variable(grad_output.data.new(ctx.input_size).zero_())
         backend = type2backend[type(result.data)]
         backend.Sigmoid_updateGradInput(backend.library_state, None, grad_output.data,
