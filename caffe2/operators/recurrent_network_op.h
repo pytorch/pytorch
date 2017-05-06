@@ -49,8 +49,7 @@ struct ScratchWorkspaces {
   std::shared_ptr<Workspace> forwardSharedWs = nullptr;
 };
 
-void UpdateTimestepBlob(Workspace* ws, std::string blob_name, int t) {
-  std::cout << "Create blob " << blob_name << " timestep:" << t << std::endl;
+inline void UpdateTimestepBlob(Workspace* ws, std::string blob_name, int t) {
   ws->CreateBlob(blob_name)->template GetMutable<TensorCPU>()->Resize(1);
   auto timestepBlob = ws->GetBlob(blob_name);
   CAFFE_ENFORCE(timestepBlob);
