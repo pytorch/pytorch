@@ -351,10 +351,10 @@ class Variable(_C._VariableBase):
         return Tanh(True)(self)
 
     def sigmoid(self):
-        return Sigmoid()(self)
+        return Sigmoid.apply(self)
 
     def sigmoid_(self):
-        return Sigmoid(True)(self)
+        return Sigmoid.apply(self, True)
 
     def sin(self):
         return Sin()(self)
