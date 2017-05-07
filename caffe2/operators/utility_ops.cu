@@ -191,32 +191,35 @@ REGISTER_CUDA_OPERATOR(Gather, GatherOp<CUDAContext>);
  * b=0,...,B-1
  * idx=Indices[i]
  */
-template<typename T_INDEX>
-__global__ void 
-AxpySliceKernel(
-             const TIndex N,
-             const TIndex B,
-             const TIndex slice_size,
-             const float** alpha,
-             const float** X,
-             const T_INDEX* Indices, 
-             float* Y,
-             const TIndex M) {
+template <typename T_INDEX>
+__global__ void AxpySliceKernel(
+    const float* weight0,
+    const TIndex N,
+    const TIndex B,
+    const TIndex slice_size,
+    const float** alpha,
+    const float** X,
+    const T_INDEX* Indices,
+    float* Y,
+    const TIndex M) {
+  // This implementation requires that the first weight is 1.0
+  CUDA_KERNEL_ASSERT(weight0[0] == 1.0);
   for (int i = blockIdx.x; i < N; i += gridDim.x) {
     T_INDEX idx = Indices[i];
     float* y_offset = Y + (idx * slice_size);
     for (int b = 0; b < B; b++) {
+      float a = *alpha[b];
       const float* x_offset = X[b] + (i * slice_size);
       for (int j = threadIdx.x; j < slice_size; j += blockDim.x) {
-        atomicAdd(&y_offset[j], (*alpha[b]) * x_offset[j]);
+        atomicAdd(&y_offset[j], a * x_offset[j]);
       }
     }
   }
 }
 
 template <>
-bool ScatterWeightedSumOp<float,CUDAContext>::RunOnDevice() {
-    return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(this, Input(2));
+bool ScatterWeightedSumOp<float, CUDAContext>::RunOnDevice() {
+  return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(this, Input(2));
 }
 
 template <>
@@ -239,47 +242,51 @@ bool ScatterWeightedSumOp<float,CUDAContext>::DoRunWithType() {
   TIndex block_size = M / N;
 
   T* data = output->template mutable_data<T>();
-  const Index* Indices = indices.template data<Index>();
 
-  float w0;
-  context_.Copy<float,CUDAContext,CPUContext>(1, weight0.template data<float>(), &w0);
-  OPERATOR_NEEDS_FEATURE(
-    w0 == 1.0,
-    "ScatterWeightedSumOp only supports weight_0=1 on CUDAContext");
-
-  const TIndex B = (InputSize()-3)/2;
-
-  // In order to have all device pointers of x_i (and weight_i similarly) consecutively 
-  // in device memory, copy pointers to a host vector and then copy back into a device array.
+  // In order to have all device pointers of x_i (and weight_i similarly)
+  // consecutively in device memory, copy pointers to a host vector and then
+  // copy back into a device array.
+  const TIndex B = (InputSize() - 3) / 2;
   x_data_host_.Resize(B);
   weights_host_.Resize(B);
   x_data_device_.Resize(B);
   weights_device_.Resize(B);
-  CAFFE_ENFORCE(x_data_host_.size() == B); 
-  CAFFE_ENFORCE(weights_host_.size() == B); 
-  CAFFE_ENFORCE(x_data_device_.size() == B); 
-  CAFFE_ENFORCE(weights_device_.size() == B); 
+
   const float** x_data_host = x_data_host_.mutable_data<const float*>();
   const float** weights_host = weights_host_.mutable_data<const float*>();
   const float** x_data_device = x_data_device_.mutable_data<const float*>();
   const float** weights_device = weights_device_.mutable_data<const float*>();
+
   for (int inp = 3; inp < InputSize(); inp += 2) {
-    x_data_host [(inp-3)/2] = static_cast<const float*>(Input(inp).raw_data());
-    weights_host[(inp-3)/2] = static_cast<const float*>(Input(inp+1).raw_data());
+    int idx = (inp - 3) / 2;
+    x_data_host[idx] = static_cast<const float*>(Input(inp).raw_data());
+    weights_host[idx] = static_cast<const float*>(Input(inp + 1).raw_data());
   }
-  context_.Copy<const float*,CPUContext,CUDAContext>(B, x_data_host, x_data_device);
-  context_.Copy<const float*,CPUContext,CUDAContext>(B, weights_host, weights_device);
+  context_.Copy<const float*, CPUContext, CUDAContext>(
+      B, x_data_host, x_data_device);
+  context_.Copy<const float*, CPUContext, CUDAContext>(
+      B, weights_host, weights_device);
 
   AxpySliceKernel<<<
-    std::min<TIndex>(K, CAFFE_MAXIMUM_NUM_BLOCKS),
-    CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>
-    (
-      K, B, block_size, weights_device, x_data_device, Indices, data, M
-    );
+      std::min<TIndex>(K, CAFFE_MAXIMUM_NUM_BLOCKS),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context_.cuda_stream()>>>(
+      weight0.template data<float>(),
+      K,
+      B,
+      block_size,
+      weights_device,
+      x_data_device,
+      indices.template data<Index>(),
+      data,
+      M);
 
   return true;
 }
 
-REGISTER_CUDA_OPERATOR(ScatterWeightedSum, ScatterWeightedSumOp<float,CUDAContext>);
+REGISTER_CUDA_OPERATOR(
+    ScatterWeightedSum,
+    ScatterWeightedSumOp<float, CUDAContext>);
 
 }  // namespace caffe2
