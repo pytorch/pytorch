@@ -902,6 +902,13 @@ class TestAutograd(TestCase):
         self.assertEqual(y.grad.data, torch.ones(5))
         self.assertEqual(z.grad.data, torch.ones(5) * 2)
 
+    def test_volatile_assignment(self):
+        x = Variable(torch.randn(5, 5))
+        y = Variable(torch.randn(5), volatile=True)
+
+        x[0] = y
+        self.assertTrue(x.volatile)
+
     def test_backward_copy(self):
         # This tests checks backward engine for a very subtle bug that appreared
         # in one of the initial versions of autograd. Gradients tensors were
