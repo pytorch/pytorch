@@ -11,8 +11,8 @@ from hypothesis import given
 
 
 class TestResize(hu.HypothesisTestCase):
-    @given(width_scale=st.floats(0.2, 4.0),
-           height_scale=st.floats(0.2, 4.0),
+    @given(width_scale=st.floats(0.2, 4.0) | st.just(2.0),
+           height_scale=st.floats(0.2, 4.0) | st.just(2.0),
            size_w=st.integers(16, 128),
            size_h=st.integers(16, 128),
            input_channels=st.integers(1, 4),
