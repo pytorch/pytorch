@@ -64,7 +64,6 @@ class Sigmoid(InplaceFunction):
 
     @staticmethod
     def forward(ctx, i, inplace=False):
-        ctx.input_size = i.size()
         if inplace:
             ctx.mark_dirty(i)
             result = i.sigmoid_()
@@ -77,7 +76,7 @@ class Sigmoid(InplaceFunction):
     def backward(ctx, grad_output):
         result, = ctx.saved_variables
         if grad_output.volatile:
-            grad_input = Variable(grad_output.data.new(ctx.input_size).zero_(), volatile=True)
+            grad_input = Variable(grad_output.data.new(grad_output.size()), volatile=True)
             backend = type2backend[type(result.data)]
             backend.Sigmoid_updateGradInput(backend.library_state, None, grad_output.data,
                                             grad_input.data, result.data)
