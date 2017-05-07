@@ -134,7 +134,7 @@ class TestAutograd(TestCase):
 
             x = Variable(torch.randn(5, 5), requires_grad=True)
             y = x + 2
-            y.backward(go1, retain_variables=True)
+            y.backward(go1, retain_graph=True)
             x_grad = x.grad
             x_grad_clone = x.grad.data.clone()
 
@@ -153,7 +153,7 @@ class TestAutograd(TestCase):
         y = Variable(torch.randn(2, 2), requires_grad=True)
 
         z = x ** 2 + y * x + y ** 2
-        z.backward(Variable(torch.ones(2, 2), requires_grad=True), retain_variables=True)
+        z.backward(Variable(torch.ones(2, 2), requires_grad=True), retain_graph=True)
 
         x_grad = 2 * x.data + y.data
         y_grad = x.data + 2 * y.data
@@ -171,7 +171,7 @@ class TestAutograd(TestCase):
         x = Variable(torch.randn(2, 2), requires_grad=True)
         y = Variable(torch.randn(2, 2), requires_grad=True)
         z = x ** 2 + y * x + y ** 2
-        z.backward(Variable(torch.ones(2, 2)), retain_variables=True)
+        z.backward(Variable(torch.ones(2, 2)), retain_graph=True)
 
         x_grad = 2 * x.data + y.data
         y_grad = x.data + 2 * y.data
@@ -261,15 +261,15 @@ class TestAutograd(TestCase):
         z = x ** 2 + x * 2 + x * y + y
         x.register_hook(lambda *args: bw_hook(0, *args))
         test = z.register_hook(lambda *args: bw_hook(1, *args))
-        z.backward(torch.ones(5, 5), retain_variables=True)
+        z.backward(torch.ones(5, 5), retain_graph=True)
         self.assertEqual(counter[0], 1)
 
         test2 = z.register_hook(lambda *args: bw_hook(2, *args))
-        z.backward(torch.ones(5, 5), retain_variables=True)
+        z.backward(torch.ones(5, 5), retain_graph=True)
         self.assertEqual(counter[0], 4)
 
         test2.remove()
-        z.backward(torch.ones(5, 5), retain_variables=True)
+        z.backward(torch.ones(5, 5), retain_graph=True)
         self.assertEqual(counter[0], 5)
 
         def bw_hook_modify(grad):
@@ -278,7 +278,7 @@ class TestAutograd(TestCase):
         test.remove()
         z.register_hook(bw_hook_modify)
         y.grad.data.zero_()
-        z.backward(torch.ones(5, 5), retain_variables=True)
+        z.backward(torch.ones(5, 5), retain_graph=True)
         self.assertEqual(y.grad.data, (x.data + 1) * 2)
 
         y.register_hook(bw_hook_modify)
@@ -618,7 +618,7 @@ class TestAutograd(TestCase):
         w = z * y
         z.add_(2)
         # Add doesn't need it's inputs to do backward, so it shouldn't raise
-        q.backward(torch.ones(5, 5), retain_variables=True)
+        q.backward(torch.ones(5, 5), retain_graph=True)
         # Mul saves both inputs in forward, so it should raise
         self.assertRaises(RuntimeError, lambda: w.backward(torch.ones(5, 5)))
 
@@ -627,9 +627,9 @@ class TestAutograd(TestCase):
         r = z + y
         w = z.add_(y)
         # w is a the last expression, so this should succeed
-        w.backward(torch.ones(5, 5), retain_variables=True)
+        w.backward(torch.ones(5, 5), retain_graph=True)
         # r doesn't use the modified value in backward, so it should succeed
-        r.backward(torch.ones(5, 5), retain_variables=True)
+        r.backward(torch.ones(5, 5), retain_graph=True)
         # q uses dirty z, so it should raise
         self.assertRaises(RuntimeError, lambda: q.backward(torch.ones(5, 5)))
 
@@ -641,9 +641,9 @@ class TestAutograd(TestCase):
         prev_version = z._version
         w = z.exp_()
         self.assertNotEqual(z._version, prev_version)
-        r.backward(torch.ones(5, 5), retain_variables=True)
+        r.backward(torch.ones(5, 5), retain_graph=True)
         self.assertEqual(x.grad.data, torch.ones(5, 5) / 2)
-        w.backward(torch.ones(5, 5), retain_variables=True)
+        w.backward(torch.ones(5, 5), retain_graph=True)
         self.assertEqual(x.grad.data, torch.Tensor(5, 5).fill_((1 + math.e) / 2))
         self.assertRaises(RuntimeError, lambda: q.backward(torch.ones(5, 5)))
 
@@ -799,7 +799,7 @@ class TestAutograd(TestCase):
         x = Variable(torch.randn(10, 10), requires_grad=True)
         y = Variable(torch.randn(10, 10), requires_grad=True)
         a = x * 2
-        (y + a).sum().backward(retain_variables=True)
+        (y + a).sum().backward(retain_graph=True)
         a.detach_()
         self.assertFalse(a.requires_grad)
         (y + a).sum().backward()  # this won't backprop to x
@@ -1063,20 +1063,20 @@ class TestAutograd(TestCase):
         z = last_sample + 2
         self.assertFalse(z.requires_grad)
 
-        self.assertRaises(RuntimeError, lambda: z.backward(retain_variables=True))
+        self.assertRaises(RuntimeError, lambda: z.backward(retain_graph=True))
         samples_multi.reinforce(torch.randn(2, 5))
-        self.assertRaises(RuntimeError, lambda: z.backward(retain_variables=True))
+        self.assertRaises(RuntimeError, lambda: z.backward(retain_graph=True))
         samples_multi_flat.reinforce(torch.randn(5))
-        self.assertRaises(RuntimeError, lambda: z.backward(retain_variables=True))
+        self.assertRaises(RuntimeError, lambda: z.backward(retain_graph=True))
         samples_bernoulli.reinforce(torch.randn(2, 10))
-        self.assertRaises(RuntimeError, lambda: z.backward(retain_variables=True))
+        self.assertRaises(RuntimeError, lambda: z.backward(retain_graph=True))
         samples_norm.reinforce(torch.randn(2, 10))
-        self.assertRaises(RuntimeError, lambda: z.backward(retain_variables=True))
+        self.assertRaises(RuntimeError, lambda: z.backward(retain_graph=True))
         samples_norm_std.reinforce(torch.randn(2, 10))
         # We don't have to specify rewards w.r.t. last_sample - it doesn't
         # require gradient
 
-        last_sample.backward(retain_variables=True)
+        last_sample.backward(retain_graph=True)
         z.backward()
 
         self.assertGreater(x.grad.data.abs().sum(), 0)
