@@ -160,7 +160,7 @@ Pooling Layers
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: AdaptiveMaxPool2d
-    :members:       
+    :members:
 
 :hidden:`AdaptiveAvgPool1d`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -174,7 +174,7 @@ Pooling Layers
 .. autoclass:: AdaptiveAvgPool2d
     :members:
 
-       
+
 Non-linear Activations
 ----------------------------------
 
@@ -682,7 +682,7 @@ Pooling functions
 
 .. autofunction:: adaptive_avg_pool2d
 
-   
+
 Non-linear activation functions
 -------------------------------
 
@@ -813,6 +813,11 @@ Distance functions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: pairwise_distance
+
+:hidden:`cosine_similarity`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: cosine_similarity
 
 
 Loss functions
