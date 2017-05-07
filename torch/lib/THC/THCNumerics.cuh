@@ -246,6 +246,15 @@ struct THCNumerics<half> {
 #endif
   }
 
+static inline __host__ __device__ half lgamma(half a) {
+#ifdef __CUDA_ARCH__
+    float fa = __half2float(a);
+    return __float2half(lgammaf(fa));
+#else // __CUDA_ARCH__
+    return THC_float2half(lgammaf(THC_half2float(a)));
+#endif
+  }
+
   static inline __host__ __device__ half cos(half a) {
 #ifdef __CUDA_ARCH__
 #ifdef CUDA_HALF_INSTRUCTIONS
