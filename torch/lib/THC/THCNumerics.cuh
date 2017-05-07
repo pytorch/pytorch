@@ -527,6 +527,7 @@ struct THCNumerics<float> {
   static inline __host__ __device__ bool eq(float a, float b) { return a == b; }
   static inline __host__ __device__ bool ne(float a, float b) { return a != b; }
 
+  static inline __host__ __device__  float lgamma(float a) { return lgamma(a);}
   static inline __host__ __device__  float exp  (float a) { return   expf(a); }
   static inline __host__ __device__  float exp10(float a) { return exp10f(a); }
   static inline __host__ __device__  float log  (float a) { return   logf(a); }
@@ -571,6 +572,7 @@ struct THCNumerics<double> {
   static inline __host__ __device__ bool eq(double a, double b) { return a == b; }
   static inline __host__ __device__ bool ne(double a, double b) { return a != b; }
 
+  static inline __host__ __device__  double lgamma(double a) { return ::lgamma(a);}
   static inline __host__ __device__  double exp  (double a) { return   ::exp(a); }
   static inline __host__ __device__  double exp10(double a) { return ::exp10(a); }
   static inline __host__ __device__  double log  (double a) { return   ::log(a); }
