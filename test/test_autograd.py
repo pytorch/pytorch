@@ -574,6 +574,29 @@ class TestAutograd(TestCase):
         a += b
         self.assertTrue(a.requires_grad)
 
+    def test_grad_assignment(self):
+        x = Variable(torch.randn(5, 5))
+        a = Variable(torch.randn(2, 2))  # size mismatch
+        b = Variable(torch.randn(5, 5).long())  # type mismatch
+
+        with self.assertRaises(RuntimeError):
+            x.grad = Variable(torch.randn(2, 2))
+        with self.assertRaises(RuntimeError):
+            x.grad = Variable(torch.randn(5, 5).long())
+        with self.assertRaises(RuntimeError):
+            x.grad = x
+
+        if not torch.cuda.is_available():
+            raise unittest.SkipTest("CUDA not available")
+        with self.assertRaises(RuntimeError):
+            x.grad = Variable(torch.randn(5, 5).cuda())
+
+        if torch.cuda.device_count() < 2:
+            raise unittest.SkipTest("At least 2 CUDA devices needed")
+        x = Variable(torch.randn(5, 5).cuda(0))
+        with self.assertRaises(RuntimeError):
+            x.grad = Variable(torch.randn(5, 5).cuda(1))
+
     def test_duplicate_backward_root(self):
         a = Variable(torch.randn(5, 5), requires_grad=True)
         b = Variable(torch.randn(5, 5), requires_grad=True)

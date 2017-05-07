@@ -7,6 +7,7 @@
 #include "torch/csrc/Types.h"
 #include "torch/csrc/autograd/python_cpp_function.h"
 #include "torch/csrc/autograd/python_hook.h"
+#include "torch/csrc/autograd/functions/accumulate_grad.h"
 #include "torch/csrc/cuda/AutoGPU.h"
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/Exceptions.h"
@@ -239,28 +240,6 @@ int THPVariable_set_data(THPVariable *self, PyObject *data)
   return 0;
 }
 
-PyObject *THPVariable_get_raw_grad(THPVariable *self)
-{
-  auto& var = *self->cdata;
-  if (!var.grad) {
-    Py_RETURN_NONE;
-  }
-  return THPVariable_Wrap(var.grad);
-}
-
-int THPVariable_set_raw_grad(THPVariable *self, PyObject *data)
-{
-  auto& var = *self->cdata;
-  if (data == Py_None) {
-    var.grad.reset();
-    return 0;
-  }
-  THPUtils_assertRet(-1, THPVariable_Check(data),
-      "expected Variable or None (got %s)", THPUtils_typename(data));
-  var.grad = ((THPVariable*)data)->cdata;
-  return 0;
-}
-
 PyObject *THPVariable_get_grad(THPVariable *self)
 {
   auto& var = *self->cdata;
@@ -268,6 +247,38 @@ PyObject *THPVariable_get_grad(THPVariable *self)
     Py_RETURN_NONE;
   }
   return THPVariable_Wrap(var.grad);
+}
+
+int THPVariable_set_grad(THPVariable *self, PyObject *other)
+{
+  auto& var = *self->cdata;
+  if (other == Py_None) {
+    var.grad.reset();
+    return 0;
+  }
+
+  THPUtils_assertRet(-1, THPVariable_Check(other),
+      "expected Variable or None (got %s)", THPUtils_typename(other));
+  THPUtils_assertRet(-1, self != (THPVariable*)other,
+      "can't assign Variable as its own grad");
+
+  auto& other_var = ((THPVariable*)other)->cdata;
+
+  // Make sure the data is ok
+  THPUtils_assertRet(-1, other_var->data->type() == var.data->type(),
+      "assigned grad has data of a different type");
+  THPUtils_assertRet(-1, other_var->data->isCuda() == var.data->isCuda(),
+      "assigned grad has data located on a different device");
+  THPUtils_assertRet(-1, other_var->data->getDevice() == var.data->getDevice(),
+      "assigned grad has data located on a different device");
+  THPUtils_assertRet(-1, other_var->data->sizes() == var.data->sizes(),
+      "assigned grad has data of a different size");
+
+  var.grad = other_var;
+  if (auto grad_acc = var.grad_accumulator.lock()) {
+    ((AccumulateGrad*)grad_acc.get())->variable_grad = other_var;
+  }
+  return 0;
 }
 
 PyObject *THPVariable_get_volatile(THPVariable *self)
@@ -313,8 +324,7 @@ int THPVariable_set_requires_grad(THPVariable *self, PyObject *obj)
     return -1;
   }
   var.requires_grad = obj == Py_True;
-  auto grad_accumulator = var.grad_accumulator.lock();
-  if (grad_accumulator) {
+  if (auto grad_accumulator = var.grad_accumulator.lock()) {
     grad_accumulator->is_executable = var.requires_grad;
   }
   return 0;
@@ -350,8 +360,8 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"_grad_fn", (getter)THPVariable_get_grad_fn, (setter)THPVariable_set_grad_fn, NULL, NULL},
   {"is_leaf", (getter)THPVariable_is_leaf, NULL, NULL, NULL},
   {"data", (getter)THPVariable_get_data, (setter)THPVariable_set_data, NULL, NULL},
-  {"_grad", (getter)THPVariable_get_raw_grad, (setter)THPVariable_set_raw_grad, NULL, NULL},
-  {"grad", (getter)THPVariable_get_grad, NULL, NULL, NULL},
+  {"_grad", (getter)THPVariable_get_grad, (setter)THPVariable_set_grad, NULL, NULL}, // only for legacy reasons
+  {"grad", (getter)THPVariable_get_grad, (setter)THPVariable_set_grad, NULL, NULL},
   {"volatile", (getter)THPVariable_get_volatile, (setter)THPVariable_set_volatile, NULL, NULL},
   {"output_nr", (getter)THPVariable_get_output_nr, NULL, NULL, NULL},
   {"requires_grad", (getter)THPVariable_get_requires_grad, (setter)THPVariable_set_requires_grad, NULL, NULL},
