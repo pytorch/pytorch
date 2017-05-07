@@ -35,7 +35,7 @@ private:
 
   port_type _port;
 
-  std::vector<std::unique_ptr<std::mutex>> _mutexes;
+  std::vector<std::mutex> _mutexes;
 };
 
 struct WorkerCommandChannel {
