@@ -53,7 +53,7 @@ class Prod(Function):
             if zero_idx.dim() == 0:
                 return grad_output.mul(ctx.result).expand_as(input).div(input), None
             elif zero_idx.size(0) > 1:
-                return Variable(grad_output.data.new(ctx.input_size).zero_()), None
+                return (grad_output * 0).expand_as(input), None
             else:
                 grad_input = Variable(grad_output.data.new(ctx.input_size).zero_())
                 zero_idx = tuple(zero_idx[0].cpu())
