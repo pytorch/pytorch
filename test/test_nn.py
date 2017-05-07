@@ -1477,9 +1477,10 @@ class TestNN(NNTestCase):
         padded = torch.cat([pad(i * 100 + torch.arange(1, 5 * l + 1).view(l, 1, 5), max_length)
                             for i, l in enumerate(lengths, 1)], 1)
         padded = Variable(padded, requires_grad=True)
-        expected_data = [[torch.arange(1, 6) + (i+1) * 100 + 5*n for i in range(batch_size)] for n, batch_size in enumerate(batch_sizes)]
+        expected_data = [[torch.arange(1, 6) + (i + 1) * 100 + 5 * n for i in range(batch_size)]
+                         for n, batch_size in enumerate(batch_sizes)]
         expected_data = list(itertools.chain.from_iterable(expected_data))
-        expected_data = torch.stack(expected_data,dim=0)
+        expected_data = torch.stack(expected_data, dim=0)
 
         for batch_first in (True, False):
             src = padded
@@ -2068,7 +2069,7 @@ class TestNN(NNTestCase):
         output3.backward(grad)
         gi1 = input1_1.grad.data.clone()
         gi2 = input2_1.grad.data.clone()
-        grad_input2 = module2.backward([input1,input2],grad)
+        grad_input2 = module2.backward([input1, input2], grad)
 
         self.assertEqual(output.data, output2)
         self.assertEqual([gi1, gi2], grad_input2)

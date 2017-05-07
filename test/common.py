@@ -169,7 +169,7 @@ class TestCase(unittest.TestCase):
         if prec is None:
             prec = self.precision
 
-        x, y = self.unwrapVariables(x,y)
+        x, y = self.unwrapVariables(x, y)
 
         if torch.is_tensor(x) and torch.is_tensor(y):
             def assertTensorsEqual(a, b):
@@ -211,7 +211,7 @@ class TestCase(unittest.TestCase):
         if prec is None:
             prec = self.precision
 
-        x, y = self.unwrapVariables(x,y)
+        x, y = self.unwrapVariables(x, y)
 
         if torch.is_tensor(x) and torch.is_tensor(y):
             if x.size() != y.size():
