@@ -5,6 +5,7 @@
 #include <sys/poll.h>
 #include <atomic>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <tuple>
@@ -33,6 +34,8 @@ private:
   std::thread _error_thread;
 
   port_type _port;
+
+  std::vector<std::unique_ptr<std::mutex>> _mutexes;
 };
 
 struct WorkerCommandChannel {
