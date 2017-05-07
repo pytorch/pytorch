@@ -41,17 +41,15 @@ PyObject * THPVariable_Wrap(const std::shared_ptr<Variable>& var)
   return var->pyobj;
 }
 
-// This function DOES NOT steal a reference to data and grad_fn
-PyObject * THPVariable_New(PyObject *data, PyObject *_grad_fn)
+// This function DOES NOT steal a reference to data
+PyObject * THPVariable_NewWithFunction(PyObject *data, const std::shared_ptr<torch::autograd::Function>& grad_fn)
 {
   THPUtils_assert(THPModule_isTensor(data), "data must be a Tensor");
-  THPUtils_assert(THPFunction_Check(_grad_fn), "grad_fn must be a Function");
-  THPFunction *grad_fn = (THPFunction*)_grad_fn;
-  auto v = std::make_shared<Variable>(torch::createTensor(data), grad_fn->cdata.is_executable, false);
+  auto v = std::make_shared<Variable>(torch::createTensor(data), grad_fn->is_executable, false);
   PyObject* obj = THPVariable_NewWithVar((PyTypeObject*)THPVariableClass, v);
   if (obj) {
     v->pyobj = obj;
-    v->grad_fn = THPFunction_asFunction((THPFunction*)grad_fn);
+    v->grad_fn = grad_fn;
     ((THPVariable*)obj)->data = data;
     Py_INCREF(data);
   }
