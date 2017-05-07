@@ -1,4 +1,5 @@
 import sys
+import torch
 import torch._C as _C
 from collections import OrderedDict
 import torch.sparse as sparse
@@ -115,7 +116,7 @@ class Variable(_C._VariableBase):
 
     __nonzero__ = __bool__
 
-    def backward(self, gradient=None, retain_variables=False):
+    def backward(self, gradient=None, retain_graph=None, create_graph=None, retain_variables=None):
         """Computes the gradient of current variable w.r.t. graph leaves.
 
         The graph is differentiated using the chain rule. If the variable is
@@ -128,28 +129,20 @@ class Variable(_C._VariableBase):
         them before calling it.
 
         Arguments:
-            gradient (Tensor): Gradient of the differentiated function
-                w.r.t. the data. Required only if the data has more than one
-                element. Type and location should match these of ``self.data``.
-            retain_variables (bool): If ``True``, buffers necessary for computing
-                gradients won't be freed after use. It is only necessary to
-                specify ``True`` if you want to differentiate some subgraph multiple
-                times (in some cases it will be much more efficient to use
-                `autograd.backward`).
+        grad_variables (Tensor, Variable or None): Gradient w.r.t. the variable.
+            If it is a tensor, it will be automatically converted to a Variable
+            that is volatile unless ``create_graph`` is True. None values can be
+            specified for scalar Variables or ones that don't require grad. If a
+            None value would be acceptable then this argument is optional.
+        retain_graph (bool, optional): If False, the graph used to compute the grads
+            will be freed. Note that in nearly all cases setting this option to True
+            is not needed and often can be worked around in a much more efficient
+            way. Defaults to the value of ``create_graph``.
+        create_graph (bool, optional): If true, graph of the derivative will
+            be constructed, allowing to compute higher order derivative products.
+            Defaults to False, unless ``gradient`` is a volatile Variable.
         """
-        if self.volatile:
-            raise RuntimeError('calling backward on a volatile variable')
-        if gradient is None and self.requires_grad:
-            if self.data.numel() != 1:
-                raise RuntimeError(
-                    'backward should be called only on a scalar (i.e. 1-element tensor) '
-                    'or with gradient w.r.t. the variable')
-            gradient = self.data.new().resize_as_(self.data).fill_(1)
-        if not isinstance(gradient, Variable):
-            if gradient is not None and not torch.is_tensor(gradient):
-                raise TypeError("gradient has to be a Tensor, Variable or None")
-            gradient = Variable(gradient, volatile=True)
-        self._execution_engine.run_backward((self,), (gradient,), retain_variables)
+        torch.autograd.backward(self, gradient, retain_graph, create_graph, retain_variables)
 
     def register_hook(self, hook):
         """Registers a backward hook.

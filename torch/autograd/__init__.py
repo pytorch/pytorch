@@ -74,11 +74,16 @@ def backward(variables, grad_variables=None, retain_graph=None, create_graph=Non
             Defaults to False, unless ``grad_variables`` contains at least one
             non-volatile Variable.
     """
-    variables = tuple(variables)
+    variables = (variables,) if isinstance(variables, Variable) else tuple(variables)
 
     if grad_variables is None:
-        grad_variables = (None,) * len(variables)
-    grad_variables, create_graph = _make_grads(variables, list(grad_variables), create_graph)
+        grad_variables = [None] * len(variables)
+    elif isinstance(grad_variables, Variable) or torch.is_tensor(grad_variables):
+        grad_variables = [grad_variables]
+    else:
+        grad_variables = list(grad_variables)
+
+    grad_variables, create_graph = _make_grads(variables, grad_variables, create_graph)
 
     if retain_variables is not None:
         if retain_graph is not None:
@@ -133,9 +138,11 @@ def grad(outputs, inputs, grad_outputs=None, retain_graph=None, create_graph=Non
     outputs = (outputs,) if isinstance(outputs, Variable) else tuple(outputs)
     inputs = (inputs,) if isinstance(inputs, Variable) else tuple(inputs)
     if grad_outputs is None:
-        grad_outputs = (None,) * len(outputs)
+        grad_outputs = [None] * len(outputs)
     elif isinstance(grad_outputs, Variable) or torch.is_tensor(grad_outputs):
-        grad_outputs = (grad_outputs,)
+        grad_outputs = [grad_outputs]
+    else:
+        grad_outputs = list(grad_outputs)
 
     grad_outputs, create_graph = _make_grads(outputs, grad_outputs, create_graph)
     if retain_graph is None:
