@@ -401,6 +401,12 @@ class TestNN(NNTestCase):
         self.assertEqual(module.weight.grad.data, module.weight.data.clone().zero_())
         self.assertEqual(module.bias.grad.data, module.bias.data.clone().zero_())
 
+        # non-volatile grad should be zeroed out of place
+        initial = module.weight.grad = Variable(torch.ones(5, 5))
+        module.zero_grad()
+        self.assertIsNot(module.weight.grad, initial)
+        self.assertEqual(module.weight.grad.data, torch.zeros(5, 5))
+
     def test_volatile(self):
         module = nn.Conv2d(2, 5, kernel_size=3, padding=1)
         input = torch.randn(1, 2, 10, 10)
