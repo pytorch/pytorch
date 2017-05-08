@@ -155,7 +155,7 @@ class TestCase(unittest.TestCase):
         if isinstance(x, Variable) and isinstance(y, Variable):
             return x.data, y.data
         elif isinstance(x, Variable) or isinstance(y, Variable):
-            raise AssertionError("cannot compare %s and %s" % (type(x), type(y)))
+            raise AssertionError("cannot compare {} and {}".format(type(x), type(y)))
         return x, y
 
     def assertEqual(self, x, y, prec=None, message=''):
