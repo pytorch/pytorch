@@ -130,10 +130,14 @@ class CNNModelHelper(ModelHelper):
         return brew.fc_sparse(self, *args, **kwargs)
 
     def Dropout(self, *args, **kwargs):
-        return brew.dropout(self, *args, **kwargs)
+        return brew.dropout(
+            self, *args, order=self.order, use_cudnn=self.use_cudnn, **kwargs
+        )
 
     def LRN(self, *args, **kwargs):
-        return brew.lrn(self, order=self.order, *args, **kwargs)
+        return brew.lrn(
+            self, *args, order=self.order, use_cudnn=self.use_cudnn, **kwargs
+        )
 
     def Softmax(self, *args, **kwargs):
         return brew.softmax(self, *args, use_cudnn=self.use_cudnn, **kwargs)
@@ -176,6 +180,9 @@ class CNNModelHelper(ModelHelper):
         return brew.max_pool(
             self, *args, use_cudnn=self.use_cudnn, order=self.order, **kwargs
         )
+
+    def MaxPoolWithIndex(self, *args, **kwargs):
+        return brew.max_pool_with_index(self, *args, order=self.order, **kwargs)
 
     def AveragePool(self, *args, **kwargs):
         return brew.average_pool(

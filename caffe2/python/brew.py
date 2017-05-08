@@ -33,6 +33,7 @@ class HelperWrapper(object):
         'dropout': dropout,
         'max_pool': max_pool,
         'average_pool': average_pool,
+        'max_pool_with_index' : max_pool_with_index,
         'lrn': lrn,
         'softmax': softmax,
         'instance_norm': instance_norm,

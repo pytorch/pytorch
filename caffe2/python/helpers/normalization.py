@@ -8,15 +8,24 @@ from __future__ import unicode_literals
 from caffe2.python import core
 
 
-def lrn(model, blob_in, blob_out, order="NCHW", **kwargs):
+def lrn(model, blob_in, blob_out, order="NCHW", use_cudnn=False, **kwargs):
     """LRN"""
-    return model.net.LRN(
+    if use_cudnn:
+        kwargs['engine'] = 'CUDNN'
+        blobs_out = blob_out
+    else:
+        blobs_out = [blob_out, "_" + blob_out + "_scale"]
+    lrn = model.net.LRN(
         blob_in,
-        [blob_out, "_" + blob_out + "_scale"],
+        blobs_out,
         order=order,
         **kwargs
-    )[0]
+    )
 
+    if use_cudnn:
+        return lrn
+    else:
+        return lrn[0]
 
 def softmax(model, blob_in, blob_out=None, use_cudnn=False, **kwargs):
     """Softmax."""
