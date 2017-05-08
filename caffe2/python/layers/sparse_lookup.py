@@ -104,8 +104,8 @@ class SparseLookup(ModelLayer):
 
     def add_ops(self, net):
         if schema.equal_schemas(self.input_record, IdList):
-            if self.reducer == 'Sum':
-                net.SparseLengthsSum(
+            if self.reducer in ['Sum', 'Mean']:
+                net.__getattr__('SparseLengths' + self.reducer)(
                     [
                         self.w,
                         self.input_record.items(),
@@ -160,8 +160,8 @@ class SparseLookup(ModelLayer):
                     engine='fp16'
                 )
         elif schema.equal_schemas(self.input_record, IdScoreList):
-            if self.reducer == 'Sum':
-                net.SparseLengthsWeightedSum(
+            if self.reducer in ['Sum', 'Mean']:
+                net.__getattr__('SparseLengthsWeighted' + self.reducer)(
                     [
                         self.w,
                         self.input_record.values(),
@@ -172,7 +172,7 @@ class SparseLookup(ModelLayer):
                     engine='fp16'
                 )
             else:
-                raise "Only Sum is supported for IdScoreList input." +\
+                raise "Only Sum, Mean is supported for IdScoreList input." +\
                     "Trying to create with {}".format(self.reducer)
         else:
             raise "Unsupported input type {0}".format(self.input_record)
