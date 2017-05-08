@@ -46,10 +46,8 @@ class Sequential(Module):
             for key, module in args[0].items():
                 self.add_module(key, module)
         else:
-            idx = 0
-            for module in args:
+            for idx, module in enumerate(args):
                 self.add_module(str(idx), module)
-                idx += 1
 
     def __getitem__(self, idx):
         if idx < 0 or idx >= len(self._modules):
