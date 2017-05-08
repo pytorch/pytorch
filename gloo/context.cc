@@ -30,6 +30,7 @@ std::unique_ptr<transport::Pair>& Context::getPair(int i) {
 }
 
 int Context::nextSlot(int numToSkip) {
+  GLOO_ENFORCE_GT(numToSkip, 0);
   auto temp = slot_;
   slot_ += numToSkip;
   return temp;

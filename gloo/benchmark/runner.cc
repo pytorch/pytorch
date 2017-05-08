@@ -63,6 +63,16 @@ Runner::Runner(const options& options) : options_(options) {
   }
 #endif
 
+  // Create backing context that allows us to quickly create
+  // other contexts
+  rendezvous::RedisStore redisStore(options_.redisHost, options_.redisPort);
+  rendezvous::PrefixStore prefixStore(options_.prefix, redisStore);
+  auto backingContext = std::make_shared<rendezvous::Context>(
+    options_.contextRank, options_.contextSize);
+  backingContext->connectFullMesh(prefixStore, device_);
+  contextFactory_ = std::make_shared<rendezvous::ContextFactory>(
+    backingContext);
+
   // Create broadcast algorithm to synchronize between participants
   broadcast_.reset(
     new BroadcastOneToAll<long>(newContext(), {&broadcastValue_}, 1));
@@ -99,16 +109,7 @@ std::shared_ptr<Context> Runner::newContext() {
   }
 #endif
 
-  std::stringstream prefix;
-  prefix << options_.prefix << "-" << prefixCounter_++;
-
-  auto context =
-    std::make_shared<rendezvous::Context>(
-      options_.contextRank, options_.contextSize);
-
-  rendezvous::RedisStore redisStore(options_.redisHost, options_.redisPort);
-  rendezvous::PrefixStore prefixStore(prefix.str(), redisStore);
-  context->connectFullMesh(prefixStore, device_);
+  auto context = contextFactory_->makeContext(device_);
   return context;
 }
 

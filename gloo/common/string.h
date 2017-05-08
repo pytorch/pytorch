@@ -10,6 +10,7 @@
 #pragma once
 
 #include <sstream>
+#include <vector>
 
 namespace gloo {
 

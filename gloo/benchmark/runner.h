@@ -43,7 +43,7 @@ class Runner {
   void printDistribution(int elements);
 
   options options_;
-  int prefixCounter_ = 0;
+  std::shared_ptr<::gloo::rendezvous::ContextFactory> contextFactory_;
 
   std::shared_ptr<transport::Device> device_;
 
