@@ -26,10 +26,11 @@ class RNNCell(object):
     As a result base class will provice apply_over_sequence method, which
     allows you to apply recurrent operations over a sequence of any length.
     '''
-    def __init__(self, name, forward_only=False):
+    def __init__(self, name, dropout_ratio=None, forward_only=False):
         self.name = name
         self.recompute_blobs = []
         self.forward_only = forward_only
+        self.dropout_ratio = dropout_ratio
 
     def scope(self, name):
         return self.name + '/' + name if self.name is not None else name
@@ -58,7 +59,12 @@ class RNNCell(object):
             states=states_prev,
             timestep=timestep,
         )
-        return recurrent.recurrent_net(
+        if outputs_with_grads is None:
+            outputs_with_grads = self.get_outputs_with_grads()
+        # states_for_all_steps consits of combination of
+        # states gather for all steps and final states. It looks like this:
+        # (state_1_all, state_1_final, state_2_all, state_2_final, ...)
+        states_for_all_steps = recurrent.recurrent_net(
             net=model.net,
             cell_net=step_model.net,
             inputs=[(input_t, preprocessed_inputs)],
@@ -66,18 +72,23 @@ class RNNCell(object):
             links=dict(zip(states_prev, states)),
             timestep=timestep,
             scope=self.name,
-            outputs_with_grads=(
-                outputs_with_grads
-                if outputs_with_grads is not None
-                else self.get_outputs_with_grads()
-            ),
+            outputs_with_grads=outputs_with_grads,
             recompute_blobs_on_backward=self.recompute_blobs,
             forward_only=self.forward_only,
         )
+        output = self._prepare_output_sequence(
+            model,
+            states_for_all_steps,
+            outputs_with_grads,
+        )
+        return output, states_for_all_steps
 
     def apply(self, model, input_t, seq_lengths, states, timestep):
         input_t = self.prepare_input(model, input_t)
-        return self._apply(model, input_t, seq_lengths, states, timestep)
+        states = self._apply(
+            model, input_t, seq_lengths, states, timestep)
+        output = self._prepare_output(model, states)
+        return output, states
 
     def _apply(
         self,
@@ -121,7 +132,13 @@ class RNNCell(object):
         (sequence_length, batch_size, input_dim) or a single input with shape
         (1, batch_size, input_dim).
         '''
-        raise NotImplementedError('Abstract method')
+        return input_blob
+
+    def get_output_state_index(self):
+        '''
+        Return index into state list of the "primary" step-wise output.
+        '''
+        return 0
 
     def get_state_names(self):
         '''
@@ -131,11 +148,41 @@ class RNNCell(object):
         '''
         raise NotImplementedError('Abstract method')
 
-    def output_state_index(self):
-        '''
-        Return index into state list of the "primary" step-wise output.
-        '''
-        return 0
+    def _prepare_output(self, model, states):
+        output = states[self.get_output_state_index()]
+        if self.dropout_ratio is not None:
+            output = self._apply_dropout(model, output)
+        return output
+
+    def _prepare_output_sequence(self, model, states, outputs_with_grads):
+        output_state_index = 2 * self.get_output_state_index()
+        output = states[output_state_index]
+        if self.dropout_ratio is not None:
+            # The general problem here is outputs_with_grads sort of overrides
+            # get_output_state_index() method.
+            # We intentionally do not do anything about it. Instead we are
+            # trying to be explicit here and if we add dropout to the states,
+            # but the gradient is not being propagates through them -
+            # - we throw an error (since dropout is useless in this case).
+            assert output_state_index in outputs_with_grads, (
+                'You are adding dropout to the cell outputs, '
+                'but the gradient is not propagated through it'
+            )
+            output = self._apply_dropout(model, output)
+        return output
+
+    def _apply_dropout(self, model, output):
+        with core.NameScope(self.name or ''):
+            output, _ = model.net.Dropout(
+                output,
+                [
+                    self.scope('output_with_dropout'),
+                    self.scope('output_dropout_mask'),
+                ],
+                ratio=float(self.dropout_ratio),
+                is_test=int(self.forward_only),
+            )
+        return output
 
 
 class LSTMCell(RNNCell):
@@ -146,11 +193,10 @@ class LSTMCell(RNNCell):
         hidden_size,
         forget_bias,
         memory_optimization,
-        name,
-        forward_only=False,
         drop_states=False,
+        **kwargs
     ):
-        super(LSTMCell, self).__init__(name, forward_only)
+        super(LSTMCell, self).__init__(**kwargs)
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.forget_bias = float(forget_bias)
@@ -393,16 +439,11 @@ class MultiRNNCell(RNNCell):
     to the next layer.
     '''
 
-    def __init__(
-        self,
-        cells,
-        name,
-        forward_only=False,
-    ):
+    def __init__(self, cells, **kwargs):
         '''
         cells: list of RNNCell instances, from input to output side.
         '''
-        super(MultiRNNCell, self).__init__(name, forward_only)
+        super(MultiRNNCell, self).__init__(**kwargs)
         self.cells = cells
 
         self.state_names = []
@@ -456,18 +497,20 @@ class MultiRNNCell(RNNCell):
                 timestep,
                 extra_inputs=(None if i > 0 else extra_inputs),
             )
+            # Since we're using here non-public method _apply, instead of apply,
+            # we have to manually extract output from states
+            layer_input = layer_cell._prepare_output(model, layer_next_states)
             next_states.extend(layer_next_states)
-            layer_input = layer_next_states[0]
         return next_states
 
     def get_state_names(self):
         return self.state_names
 
-    def output_state_index(self):
+    def get_output_state_index(self):
         index = 0
         for cell in self.cells[:-1]:
             index += len(cell.get_state_names())
-        index += self.cells[-1].output_state_index()
+        index += self.cells[-1].get_output_state_index()
         return index
 
 
@@ -479,14 +522,13 @@ class AttentionCell(RNNCell):
         encoder_outputs,
         decoder_cell,
         decoder_state_dim,
-        name,
         attention_type,
         weighted_encoder_outputs,
         forget_bias,
         attention_memory_optimization,
-        forward_only=False,
+        **kwargs
     ):
-        super(AttentionCell, self).__init__(name, forward_only)
+        super(AttentionCell, self).__init__(**kwargs)
         self.encoder_output_dim = encoder_output_dim
         self.encoder_outputs = encoder_outputs
         self.decoder_cell = decoder_cell
@@ -522,9 +564,19 @@ class AttentionCell(RNNCell):
                 self.encoder_output_dim,
             )],
         )
+        # TODO: we should use prepare_output method here,
+        # but because of the recurrent_net's edge case with we
+        # have to know which states is being used to compute attention.
+        # So instead of manupulating with output of the cell,
+        # we have to work with the output state directly.
+        # In other words, if output of decoder_cell is not equal to
+        # one of decoder_cell states (the one - get_output_state_index()),
+        # then this logic is broken. Right now, that can happen if
+        # there is a dropout, so we explicitly check dropout has been disabled.
+        assert self.decoder_cell.dropout_ratio is None
 
         hidden_t_intermediate = \
-            decoder_states[self.decoder_cell.output_state_index()]
+            decoder_states[self.decoder_cell.get_output_state_index()]
 
         if self.attention_type == AttentionType.Recurrent:
             (
@@ -566,7 +618,7 @@ class AttentionCell(RNNCell):
             self.scope('hidden_t_external'),
         )
         output = list(decoder_states) + [attention_weighted_encoder_context_t]
-        output[self.decoder_cell.output_state_index()] = hidden_t
+        output[self.decoder_cell.get_output_state_index()] = hidden_t
         model.net.AddExternalOutputs(*output)
 
         return output
@@ -595,23 +647,77 @@ class AttentionCell(RNNCell):
 
     def get_state_names(self):
         state_names = list(self.decoder_cell.get_state_names())
-        state_names[self.output_state_index()] = self.scope(
+        state_names[self.get_output_state_index()] = self.scope(
             'hidden_t_external',
         )
         state_names.append(self.scope('attention_weighted_encoder_context_t'))
         return state_names
 
     def get_outputs_with_grads(self):
+        # Note, this `2 *` comes from the fact that recurrent_net
+        # returns (state_1_all, state_1_final, state_2_all, state_2_final, ...)
+        # Hopefully, this could be improved later on recurrent_net side
         return [
-            self.output_state_index(),
-            len(self.get_state_names()) - 1,
+            2 * self.decoder_cell.get_output_state_index(),
+            2 * (len(self.get_state_names()) - 1),
         ]
 
     def get_output_size(self):
         return self.decoder_state_dim + self.encoder_output_dim
 
-    def output_state_index(self):
-        return self.decoder_cell.output_state_index()
+    def get_output_state_index(self):
+        return self.decoder_cell.get_output_state_index()
+
+    def _prepare_output(self, model, states):
+        decoder_cell_output = states[self.decoder_cell.get_output_state_index()]
+        attention_context = states[-1]
+        with core.NameScope(self.name or ''):
+            output, _ = model.net.Concat(
+                [decoder_cell_output, attention_context],
+                [
+                    'states_and_context_combination',
+                    '_states_and_context_combination_concat_dims',
+                ],
+                axis=2,
+            )
+        if self.dropout_ratio is not None:
+            output = self._apply_dropout(model, output)
+        return output
+
+    def _prepare_output_sequence(self, model, states, outputs_with_grads):
+        decoder_cell_output_index = (
+            2 * self.decoder_cell.get_output_state_index()
+        )
+        attention_context_index = 2 * (len(self.get_state_names()) - 1)
+        with core.NameScope(self.name or ''):
+            output, _ = model.net.Concat(
+                [
+                    states[decoder_cell_output_index],
+                    states[attention_context_index],
+                ],
+                [
+                    'states_and_context_combination',
+                    '_states_and_context_combination_concat_dims',
+                ],
+                axis=2,
+            )
+        if self.dropout_ratio is not None:
+            # The general problem here is outputs_with_grads sort of overrides
+            # get_output_state_index() method.
+            # We intentionally do not do anything about it. Instead we are
+            # trying to be explicit here and if we add dropout to the states,
+            # but the gradient is not being propagates through them -
+            # - we throw an error (since dropout is useless in this case).
+            assert decoder_cell_output_index in outputs_with_grads, (
+                'You are adding dropout to the cell outputs, '
+                'but the gradient is not propagated through it'
+            )
+            assert attention_context_index in outputs_with_grads, (
+                'You are adding dropout to the attention context outputs, '
+                'but the gradient is not propagated through it'
+            )
+            output = self._apply_dropout(model, output)
+        return output
 
 
 class LSTMWithAttentionCell(AttentionCell):
@@ -804,7 +910,7 @@ def _LSTM(
     # outputs_with_grads argument indexes into final layer
     outputs_with_grads = [4 * (num_layers - 1) + i for i in outputs_with_grads]
 
-    result = multicell.apply_over_sequence(
+    _, result = multicell.apply_over_sequence(
         model=model,
         inputs=input_blob,
         seq_lengths=seq_lengths,
@@ -1082,7 +1188,7 @@ def LSTMWithAttention(
         attention_memory_optimization=attention_memory_optimization,
         forward_only=forward_only,
     )
-    return cell.apply_over_sequence(
+    _, result = cell.apply_over_sequence(
         model=model,
         inputs=decoder_inputs,
         seq_lengths=decoder_input_lengths,
@@ -1093,6 +1199,7 @@ def LSTMWithAttention(
         ),
         outputs_with_grads=outputs_with_grads,
     )
+    return result
 
 
 def _layered_LSTM(

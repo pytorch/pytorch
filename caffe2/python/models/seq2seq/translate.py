@@ -164,7 +164,7 @@ class Seq2SeqModelCaffe2EnsembleDecoder(object):
         states_prev = step_model.net.AddExternalInputs(*[
             s + '_prev' for s in decoder_cell.get_state_names()
         ])
-        states = decoder_cell.apply(
+        _, states = decoder_cell.apply(
             model=step_model,
             input_t=embedded_tokens_t_prev,
             seq_lengths=fake_seq_lengths,

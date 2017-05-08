@@ -602,7 +602,7 @@ class RNNCellTest(hu.HypothesisTestCase):
                 decoder_state_dim=decoder_state_dim,
                 scope='external/LSTMWithAttention',
             )
-            op = model.net._net.op[-1]
+            op = model.net._net.op[-2]
         workspace.RunNetOnce(model.param_init_net)
 
         # This is original decoder_inputs after linear layer
@@ -713,8 +713,7 @@ class RNNCellTest(hu.HypothesisTestCase):
            dim_in=st.integers(1, 3),
            max_num_units=st.integers(1, 3),
            num_layers=st.integers(2, 3),
-           batch_size=st.integers(1, 3),
-           **hu.gcs)
+           batch_size=st.integers(1, 3))
     def test_multi_lstm(
         self,
         input_length,
@@ -722,37 +721,34 @@ class RNNCellTest(hu.HypothesisTestCase):
         max_num_units,
         num_layers,
         batch_size,
-        gc,
-        dc,
     ):
         model = CNNModelHelper(name='external')
-        with core.DeviceScope(gc):
-            (
-                input_sequence,
-                seq_lengths,
-            ) = model.net.AddExternalInputs(
-                'input_sequence',
-                'seq_lengths',
-            )
-            dim_out = [
-                np.random.randint(1, max_num_units + 1)
-                for _ in range(num_layers)
-            ]
-            h_all, h_last, c_all, c_last = rnn_cell.LSTM(
-                model=model,
-                input_blob=input_sequence,
-                seq_lengths=seq_lengths,
-                initial_states=None,
-                dim_in=dim_in,
-                dim_out=dim_out,
-                scope='test',
-                outputs_with_grads=(0,),
-                return_params=False,
-                memory_optimization=False,
-                forget_bias=0.0,
-                forward_only=False,
-                return_last_layer_only=True,
-            )
+        (
+            input_sequence,
+            seq_lengths,
+        ) = model.net.AddExternalInputs(
+            'input_sequence',
+            'seq_lengths',
+        )
+        dim_out = [
+            np.random.randint(1, max_num_units + 1)
+            for _ in range(num_layers)
+        ]
+        h_all, h_last, c_all, c_last = rnn_cell.LSTM(
+            model=model,
+            input_blob=input_sequence,
+            seq_lengths=seq_lengths,
+            initial_states=None,
+            dim_in=dim_in,
+            dim_out=dim_out,
+            scope='test',
+            outputs_with_grads=(0,),
+            return_params=False,
+            memory_optimization=False,
+            forget_bias=0.0,
+            forward_only=False,
+            return_last_layer_only=True,
+        )
 
         workspace.RunNetOnce(model.param_init_net)
 
