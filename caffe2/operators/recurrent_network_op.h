@@ -188,7 +188,7 @@ class RecurrentNetworkOp final : public Operator<Context> {
     aliases_ = constructAliases();
 
     if (stepNetDef_.type() == "rnn") {
-      LOG(INFO) << "Use RecurrentNetworkExecutor";
+      VLOG(0) << "Use RecurrentNetworkExecutor";
       rnnExecutor_ = caffe2::make_unique<RecurrentNetworkExecutor>(stepNetDef_);
     } else {
       CAFFE_ENFORCE(stepNetDef_.type() != "async_dag");
