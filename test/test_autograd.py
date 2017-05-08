@@ -185,7 +185,7 @@ class TestAutograd(TestCase):
         expected_x_hv = torch.ones(2, 2) * 5
         expected_y_hv = torch.ones(2, 2) * 4
 
-        self.assertEqual(x_hv[0], expected_x_hv)
+        self.assertEqual(x_hv[0].data, expected_x_hv)
         self.assertEqual(x.grad.data, x_grad)
         self.assertEqual(y.grad.data, y_grad)
 
@@ -195,7 +195,7 @@ class TestAutograd(TestCase):
             grad_outputs=torch.ones(2, 2),
             only_inputs=False)
 
-        self.assertEqual(x_hv[0], expected_x_hv)
+        self.assertEqual(x_hv[0].data, expected_x_hv)
         self.assertEqual(x.grad.data, x_grad)
         self.assertEqual(y.grad.data, y_grad + expected_y_hv)
 
@@ -215,7 +215,7 @@ class TestAutograd(TestCase):
             grad_x_expected = 2 * x.data + y.data
             self.assertIsNone(y.grad)
             self.assertIsNone(x.grad)
-            self.assertEqual(grad_x, grad_x_expected)
+            self.assertEqual(grad_x.data, grad_x_expected)
 
             x = x + 0.05 * grad_x
 
@@ -243,8 +243,8 @@ class TestAutograd(TestCase):
         grad_a, grad_b = torch.autograd.grad(
             (a + 2 * b), [a, b], grad_outputs=go, create_graph=True)
 
-        self.assertEqual(grad_a, go)
-        self.assertEqual(grad_b, go * 2)
+        self.assertEqual(grad_a.data, go)
+        self.assertEqual(grad_b.data, go * 2)
         self.assertFalse(hook_called[0])
         self.assertIsNone(x.grad)
 
@@ -508,7 +508,7 @@ class TestAutograd(TestCase):
             indexed_var_t = indexed_var.data
             if not torch.is_tensor(indexed_tensor):
                 indexed_var_t = indexed_var_t[0]
-            self.assertEqual(indexed_tensor, indexed_var)
+            self.assertEqual(indexed_tensor, indexed_var_t)
 
             indexed_var.sum().backward()
             expected_grad = torch.zeros(4, 4)

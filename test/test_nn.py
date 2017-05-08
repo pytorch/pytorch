@@ -1489,7 +1489,7 @@ class TestNN(NNTestCase):
 
             # check output
             packed = rnn_utils.pack_padded_sequence(src, lengths, batch_first=batch_first)
-            self.assertEqual(packed.data, expected_data)
+            self.assertEqual(packed.data.data, expected_data)
             self.assertEqual(packed.batch_sizes, batch_sizes)
 
             # test inverse
