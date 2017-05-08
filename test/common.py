@@ -155,14 +155,8 @@ class TestCase(unittest.TestCase):
     def unwrapVariables(self, x, y):
         if isinstance(x, Variable) and isinstance(y, Variable):
             return x.data, y.data
-        if isinstance(x, Variable) and torch.is_tensor(y):
-            return x.data, y
-        if isinstance(x, Variable) and isinstance(y, Number):
-            return x.data[0], y
-        if torch.is_tensor(x) and isinstance(y, Variable):
-            return x, y.data
-        if isinstance(x, Number) and isinstance(y, Variable):
-            return x, y.data[0]
+        elif isinstance(x, Variable) or isinstance(y, Variable):
+            raise AssertionError("cannot compare %s and %s" % (type(x), type(y)))
         return x, y
 
     def assertEqual(self, x, y, prec=None, message=''):
