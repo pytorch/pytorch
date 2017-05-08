@@ -233,6 +233,7 @@ THSTensor *THSTensor_(newClone)(THSTensor *self) {
 
   THSTensor_(_set)(other, self->indices, self->values);
 
+  other->coalesced = self->coalesced;
   other->nnz = self->nnz;
   return other;
 }

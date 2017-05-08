@@ -278,6 +278,13 @@ class TestSparse(TestCase):
         self.assertEqual(exp_i, x._indices())
         self.assertEqual(exp_v, x._values())
 
+    def test_clone(self):
+        x, _, _ = self._gen_sparse(4, 20, 5)
+        x = x.coalesce()
+        self.assertTrue(x.is_coalesced())
+        y = x.clone()
+        self.assertTrue(y.is_coalesced())
+
     def test_transpose(self):
         x = self._gen_sparse(4, 20, 5)[0]
         y = x.to_dense()
