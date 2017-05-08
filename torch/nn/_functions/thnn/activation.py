@@ -1,7 +1,7 @@
 import torch
 from torch.autograd.function import Function, InplaceFunction
 from torch._thnn import type2backend
-# from torch.autograd.variable import Variable
+from torch.autograd.variable import Variable
 
 from . import _all_functions
 
@@ -162,18 +162,10 @@ class Threshold(Function):
             grad_input = Variable(input.data.new(input.size()), volatile=True)
             backend = type2backend[type(input.data)]
             backend.Threshold_updateGradInput(backend.library_state, input.data, grad_output.data,
-                                            grad_input.data, ctx.threshold, ctx.value, ctx.inplace)
+                                            grad_input.data, ctx.threshold, ctx.value, False)
         else:
-            if not ctx.inplace:
-                grad_input = grad_output.clone()
-            else:
-                grad_input = grad_output
-            if grad_input.data.is_cuda:
-                grad_input = grad_input.cpu()
-                grad_input.data.apply_(lambda x : ctx.value if x <= ctx.threshold else x)
-                grad_input = grad_input.cuda()
-            else:
-                grad_input.data.apply_(lambda x : ctx.value if x <= ctx.threshold else x)
+            mask = input > ctx.threshold
+            grad_input = mask.type_as(grad_output) * grad_output
         return grad_input, None, None, None
 
 
