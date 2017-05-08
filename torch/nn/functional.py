@@ -765,4 +765,4 @@ def normalize(input, p=2, dim=1, eps=1e-12):
         dim (int): the dimension to reduce
         eps (float): small value to avoid division by zero
     """
-    return input / input.norm(p, dim).clamp(min=eps).expand_as(input)
+    return input / input.norm(p, dim, True).clamp(min=eps).expand_as(input)
