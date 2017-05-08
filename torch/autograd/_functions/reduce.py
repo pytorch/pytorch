@@ -203,12 +203,12 @@ class Norm(Function):
         if ctx.dim is None:
             input, = ctx.saved_variables
             if ctx.norm_type == 2:
-                scale = (grad_output[0] / ctx.norm).data[0]
-                return input.mul(scale), None, None
+                scale_v = (grad_output[0] / ctx.norm).expand_as(input)
+                return input.mul(scale_v), None, None
             else:
                 pow = input.abs().pow(ctx.norm_type - 2)
-                scale = (grad_output[0] / ctx.norm ** (ctx.norm_type - 1)).data[0]
-                return input.mul(pow).mul(scale), None, None
+                scale_v = (grad_output[0] / ctx.norm ** (ctx.norm_type - 1)).expand_as(input)
+                return input.mul(pow).mul(scale_v), None, None
         else:
             input, output = ctx.saved_variables
             big_grad_output = grad_output.expand_as(input)
