@@ -11,8 +11,10 @@
 #include "caffe2/core/tensor.h"
 #include "caffe2/core/typeid.h"
 #include "caffe2/core/types.h"
+#include "caffe2/utils/simple_queue.h"
 
 CAFFE2_DECLARE_int(caffe2_tensor_chunk_size);
+CAFFE2_DECLARE_int(caffe2_max_tensor_serializer_threads);
 
 namespace caffe2 {
 
@@ -202,6 +204,32 @@ void TensorSerializer<Context>::SerializeWithChunkSize(
 
 #ifndef __ANDROID__
   std::vector<std::future<void>> futures;
+  auto processChunk = [&](int64_t chunkStart) {
+    BlobProto blob_proto;
+    blob_proto.set_name(name);
+    blob_proto.set_type(kTensorBlobType);
+    TensorProto& proto = *blob_proto.mutable_tensor();
+    proto.set_name(name);
+    this->Serialize(
+        tensor, name, blob_proto.mutable_tensor(), chunkStart, chunk_size);
+    acceptor(
+        MakeString(name, kChunkIdSeparator, chunkStart / chunk_size),
+        blob_proto.SerializeAsString());
+  };
+
+  // Poorman's IOBound ThreadPool
+  SimpleQueue<size_t> chunkQueue;
+  auto task = [&]() {
+    size_t chunkStart;
+    while (chunkQueue.Pop(&chunkStart)) {
+      processChunk(chunkStart);
+    }
+  };
+  if (tensor.size() > chunk_size) {
+    for (int i = 0; i < FLAGS_caffe2_max_tensor_serializer_threads; ++i) {
+      futures.emplace_back(std::async(std::launch::async, task));
+    }
+  }
 #endif
 
   VLOG(1) << "Serializing blob " << name;
@@ -211,33 +239,21 @@ void TensorSerializer<Context>::SerializeWithChunkSize(
        chunkBegin < std::max(tensor.size(), static_cast<TIndex>(1));
        chunkBegin += chunk_size) {
     VLOG(2) << "Starting a chunk at " << chunkBegin;
-    auto task = [&](size_t chunkStart) {
-      BlobProto blob_proto;
-      blob_proto.set_name(name);
-      blob_proto.set_type(kTensorBlobType);
-      TensorProto& proto = *blob_proto.mutable_tensor();
-      proto.set_name(name);
-      this->Serialize(
-          tensor, name, blob_proto.mutable_tensor(), chunkStart, chunk_size);
-      acceptor(
-          MakeString(
-              name, kChunkIdSeparator, chunkStart / chunk_size),
-          blob_proto.SerializeAsString());
-    };
 #ifndef __ANDROID__
     if (tensor.size() > chunk_size) {
-      futures.emplace_back(std::async(std::launch::async, task, chunkBegin));
+      chunkQueue.Push(chunkBegin);
     } else {
       // Sync mode for small tensors
-      task(chunkBegin);
+      processChunk(chunkBegin);
     }
 #else
     // Since Android does not have std::future, we will always do sync mode
-    task(chunkBegin);
+    processChunk(chunkBegin);
 #endif
   }
 
 #ifndef __ANDROID__
+  chunkQueue.NoMoreJobs();
   for (auto& fut : futures) {
     fut.get();
   }
