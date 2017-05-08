@@ -184,40 +184,41 @@ class Kthvalue(_SelectionFunction):
 
 class Norm(Function):
 
-    def __init__(self, norm_type=2, dim=None):
-        super(Norm, self).__init__()
-        self.norm_type = norm_type
-        self.dim = dim
+    @staticmethod
+    def forward(ctx, input, norm_type=2, dim=None):
+        ctx.norm_type = norm_type
+        ctx.dim = dim
 
-    def forward(self, input):
-        if self.dim is None:
-            self.norm = input.norm(self.norm_type)
-            self.save_for_backward(input)
-            return input.new((self.norm,))
+        if dim is None:
+            ctx.norm = input.norm(norm_type)
+            ctx.save_for_backward(input)
+            return input.new((ctx.norm,))
         else:
-            output = input.norm(self.norm_type, self.dim)
-            self.save_for_backward(input, output)
+            output = input.norm(norm_type, dim)
+            ctx.save_for_backward(input, output)
             return output
 
-    def backward(self, grad_output):
-        if self.dim is None:
-            input, = self.saved_tensors
-            if self.norm_type == 2:
-                return input.mul(grad_output[0] / self.norm)
+    @staticmethod
+    def backward(ctx, grad_output):
+        if ctx.dim is None:
+            input, = ctx.saved_variables
+            if ctx.norm_type == 2:
+                scale = (grad_output[0] / ctx.norm).data[0]
+                return input.mul(scale), None, None
             else:
-                pow = input.abs().pow(self.norm_type - 2)
-                scale = grad_output[0] / self.norm ** (self.norm_type - 1)
-                return input.mul(pow).mul(scale)
+                pow = input.abs().pow(ctx.norm_type - 2)
+                scale = (grad_output[0] / ctx.norm ** (ctx.norm_type - 1)).data[0]
+                return input.mul(pow).mul(scale), None, None
         else:
-            input, output = self.saved_tensors
+            input, output = ctx.saved_variables
             big_grad_output = grad_output.expand_as(input)
-            if self.norm_type == 2:
+            if ctx.norm_type == 2:
                 big_output = output.expand_as(input)
-                return input.mul(big_grad_output).div(big_output)
+                return input.mul(big_grad_output).div(big_output), None, None
             else:
-                pow = input.abs().pow(self.norm_type - 2)
-                big_output = output.pow(self.norm_type - 1).expand_as(input)
-                return input.mul(pow).mul(big_grad_output).div(big_output)
+                pow = input.abs().pow(ctx.norm_type - 2)
+                big_output = output.pow(ctx.norm_type - 1).expand_as(input)
+                return input.mul(pow).mul(big_grad_output).div(big_output), None, None
 
 
 # TODO: renorm
