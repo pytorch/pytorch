@@ -107,6 +107,14 @@ class Variable(_C._VariableBase):
     def __repr__(self):
         return 'Variable containing:' + self.data.__repr__()
 
+    def __bool__(self):
+        if self.data.numel() == 0:
+            return False
+        raise RuntimeError("bool value of Variable objects containing non-empty " +
+                           torch.typename(self.data) + " is ambiguous")
+
+    __nonzero__ = __bool__
+
     def backward(self, gradient=None, retain_variables=False):
         """Computes the gradient of current variable w.r.t. graph leaves.
 

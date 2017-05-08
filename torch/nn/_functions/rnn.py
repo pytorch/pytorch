@@ -111,7 +111,7 @@ def Recurrent(inner, reverse=False):
         for i in steps:
             hidden = inner(input[i], hidden, *weight)
             # hack to handle LSTM
-            output.append(isinstance(hidden, tuple) and hidden[0] or hidden)
+            output.append(hidden[0] if isinstance(hidden, tuple) else hidden)
 
         if reverse:
             output.reverse()
