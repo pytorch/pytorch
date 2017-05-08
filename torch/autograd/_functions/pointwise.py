@@ -135,6 +135,7 @@ class Clamp(Function):
         mask = (i.ge(ctx._min_val) * i.le(ctx._max_val)).type_as(i)
         return grad_output * mask, None, None
 
+
 class Sqrt(Function):
 
     def forward(self, i):
