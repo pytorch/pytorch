@@ -2071,6 +2071,7 @@ class TestNN(NNTestCase):
         gi2 = input2_1.grad.data.clone()
 
         self.assertEqual(output.data, output2)
+        # TODO: this assertion is incorrect, fix needed
         # self.assertEqual([gi1, gi2], output3)
 
         self.assertTrue(gradcheck(lambda x1, x2: F.bilinear(x1, x2, module.weight, module.bias), (input1_1, input2_1)))
