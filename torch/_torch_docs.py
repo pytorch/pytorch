@@ -1755,7 +1755,7 @@ Example::
 
 add_docstr(torch._C.kthvalue,
            """
-kthvalue(input, k, dim=None, keepdim=False, out=None) -> (Tensor, LongTensor)
+kthvalue(input, k, dim=None, keepdim=True, out=None) -> (Tensor, LongTensor)
 
 Returns the :attr:`k` th smallest element of the given :attr:`input` Tensor along a given dimension.
 
@@ -2133,7 +2133,7 @@ Example::
     0.4729
 
 
-.. function:: max(input, dim, keepdim=False, max=None, max_indices=None) -> (Tensor, LongTensor)
+.. function:: max(input, dim, keepdim=True, max=None, max_indices=None) -> (Tensor, LongTensor)
 
 Returns the maximum value of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
 Also returns the index location of each maximum value found.
@@ -2245,7 +2245,7 @@ Example::
     0.32398951053619385
 
 
-.. function:: mean(input, dim, keepdim=False, out=None) -> Tensor
+.. function:: mean(input, dim, keepdim=True, out=None) -> Tensor
 
 Returns the mean value of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
 
@@ -2291,7 +2291,7 @@ Example::
 
 add_docstr(torch._C.median,
            """
-median(input, dim=-1, keepdim=False, values=None, indices=None) -> (Tensor, LongTensor)
+median(input, dim=-1, keepdim=True, values=None, indices=None) -> (Tensor, LongTensor)
 
 Returns the median value of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
 Also returns the index location of the median value as a `LongTensor`.
@@ -2369,7 +2369,7 @@ Example::
     -0.22663167119026184
 
 
-.. function:: min(input, dim, keepdim=False, min=None, min_indices=None) -> (Tensor, LongTensor)
+.. function:: min(input, dim, keepdim=True, min=None, min_indices=None) -> (Tensor, LongTensor)
 
 Returns the minimum value of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
 Also returns the index location of each minimum value found.
@@ -2484,7 +2484,7 @@ Example::
 
 add_docstr(torch._C.mode,
            """
-mode(input, dim=-1, keepdim=False, values=None, indices=None) -> (Tensor, LongTensor)
+mode(input, dim=-1, keepdim=True, values=None, indices=None) -> (Tensor, LongTensor)
 
 Returns the mode value of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
 Also returns the index location of the mode value as a `LongTensor`.
@@ -2814,7 +2814,7 @@ Example::
     1.0338925067372466
 
 
-.. function:: norm(input, p, dim, keepdim=False, out=None) -> Tensor
+.. function:: norm(input, p, dim, keepdim=True, out=None) -> Tensor
 
 Returns the p-norm of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
 
@@ -3129,7 +3129,7 @@ Example::
     0.005537458061418483
 
 
-.. function:: prod(input, dim, keepdim=False, out=None) -> Tensor
+.. function:: prod(input, dim, keepdim=True, out=None) -> Tensor
 
 Returns the product of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
 
@@ -3779,7 +3779,7 @@ Example::
     1.3782334731508061
 
 
-.. function:: std(input, dim, keepdim=False, out=None) -> Tensor
+.. function:: std(input, dim, keepdim=True, out=None) -> Tensor
 
 Returns the standard-deviation of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
 
@@ -3836,7 +3836,7 @@ Example::
     0.9969287421554327
 
 
-.. function:: sum(input, dim, keepdim=False, out=None) -> Tensor
+.. function:: sum(input, dim, keepdim=True, out=None) -> Tensor
 
 Returns the sum of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
 
@@ -4406,7 +4406,7 @@ Example::
     1.899527506513334
 
 
-.. function:: var(input, dim, keepdim=False, out=None) -> Tensor
+.. function:: var(input, dim, keepdim=True, out=None) -> Tensor
 
 Returns the variance of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
 

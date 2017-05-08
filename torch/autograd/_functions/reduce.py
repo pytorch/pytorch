@@ -7,7 +7,7 @@ from ..variable import Variable
 class Sum(Function):
 
     @staticmethod
-    def forward(ctx, input, dim=None, keepdim=False):
+    def forward(ctx, input, dim=None, keepdim=True):
         ctx.dim = dim
         ctx.keepdim = keepdim
         ctx.input_size = input.size()
@@ -32,7 +32,7 @@ class Sum(Function):
 class Prod(Function):
 
     @staticmethod
-    def forward(ctx, input, dim=None, keepdim=False):
+    def forward(ctx, input, dim=None, keepdim=True):
         ctx.dim = dim
         ctx.keepdim = keepdim
         ctx.input_size = input.size()
@@ -101,7 +101,7 @@ class Prod(Function):
 class Mean(Function):
 
     @staticmethod
-    def forward(ctx, input, dim=None, keepdim=False):
+    def forward(ctx, input, dim=None, keepdim=True):
         ctx.dim = dim
         ctx.keepdim = keepdim
         ctx.input_size = input.size()
@@ -132,7 +132,7 @@ class _SelectionFunction(Function):
     # kthvalue not only requires us to pass a dim, but also preceed it with k.
     additional_args = tuple()
 
-    def __init__(self, dim=None, keepdim=False):
+    def __init__(self, dim=None, keepdim=True):
         super(_SelectionFunction, self).__init__()
         self.dim = dim
         self.keepdim = keepdim
@@ -196,14 +196,14 @@ class Median(_SelectionFunction):
 class Kthvalue(_SelectionFunction):
     has_all_reduce = False
 
-    def __init__(self, k, dim=None, keepdim=False):
+    def __init__(self, k, dim=None, keepdim=True):
         super(Kthvalue, self).__init__(dim, keepdim)
         self.additional_args = (k,)
 
 
 class Norm(Function):
 
-    def __init__(self, norm_type=2, dim=None, keepdim=False):
+    def __init__(self, norm_type=2, dim=None, keepdim=True):
         super(Norm, self).__init__()
         self.norm_type = norm_type
         self.dim = dim
