@@ -122,20 +122,18 @@ class Abs(Function):
 
 class Clamp(Function):
 
-    def __init__(self, min_val, max_val):
-        super(Clamp, self).__init__()
-        self.min_val = min_val
-        self.max_val = max_val
+    @staticmethod
+    def forward(ctx, i, min_val, max_val):
+        ctx.save_for_backward(i)
+        ctx._min_val = min_val
+        ctx._max_val = max_val
+        return i.clamp(min_val, max_val)
 
-    def forward(self, i):
-        self.save_for_backward(i)
-        return i.clamp(self.min_val, self.max_val)
-
-    def backward(self, grad_output):
-        i, = self.saved_tensors
-        mask = i.ge(self.min_val) * i.le(self.max_val)
-        return grad_output * mask.type_as(grad_output)
-
+    @staticmethod
+    def backward(ctx, grad_output):
+        i, = ctx.saved_variables
+        mask = (i.ge(ctx._min_val) * i.le(ctx._max_val)).type_as(i)
+        return grad_output * mask, None, None
 
 class Sqrt(Function):
 
@@ -241,16 +239,17 @@ class Cmax(Function):
 
 class CmaxConstant(Function):
 
-    def __init__(self, constant):
-        super(CmaxConstant, self).__init__()
-        self.constant = constant
+    @staticmethod
+    def forward(ctx, i, constant):
+        ctx.save_for_backward(i)
+        ctx._constant = constant
+        return i.clamp(min=constant)
 
-    def forward(self, i):
-        self._max_buffer = i.gt(self.constant).type_as(i)
-        return i.clamp(min=self.constant)
-
-    def backward(self, grad_output):
-        return grad_output * self._max_buffer
+    @staticmethod
+    def backward(ctx, grad_output):
+        i, = ctx.saved_variables
+        mask = i.gt(ctx._constant).type_as(i)
+        return grad_output * mask, None
 
 
 class Cmin(Function):
@@ -268,16 +267,17 @@ class Cmin(Function):
 
 class CminConstant(Function):
 
-    def __init__(self, constant):
-        super(CminConstant, self).__init__()
-        self.constant = constant
+    @staticmethod
+    def forward(ctx, i, constant):
+        ctx.save_for_backward(i)
+        ctx._constant = constant
+        return i.clamp(max=constant)
 
-    def forward(self, i):
-        self._min_buffer = i.lt(self.constant).type_as(i)
-        return i.clamp(max=self.constant)
-
-    def backward(self, grad_output):
-        return grad_output * self._min_buffer
+    @staticmethod
+    def backward(ctx, grad_output):
+        i, = ctx.saved_variables
+        mask = i.lt(ctx._constant).type_as(i)
+        return grad_output * mask, None
 
 
 class _ConstantGrad(Function):

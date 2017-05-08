@@ -388,11 +388,11 @@ class Variable(_C._VariableBase):
             raise ValueError("clamp requires specifying at least one of "
                              "min and max arguments")
         elif min is None and max is not None:
-            return CminConstant(max)(self)
+            return CminConstant.apply(self, max)
         elif min is not None and max is None:
-            return CmaxConstant(min)(self)
+            return CmaxConstant.apply(self, min)
         else:
-            return Clamp(min, max)(self)
+            return Clamp.apply(self, min, max)
 
     def reciprocal(self):
         return Reciprocal()(self)
