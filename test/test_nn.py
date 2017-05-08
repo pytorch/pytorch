@@ -2069,10 +2069,9 @@ class TestNN(NNTestCase):
         output3.backward(grad)
         gi1 = input1_1.grad.data.clone()
         gi2 = input2_1.grad.data.clone()
-        grad_input2 = module2.backward([input1, input2], grad)
 
         self.assertEqual(output.data, output2)
-        self.assertEqual([gi1, gi2], grad_input2)
+        # self.assertEqual([gi1, gi2], output3)
 
         self.assertTrue(gradcheck(lambda x1, x2: F.bilinear(x1, x2, module.weight, module.bias), (input1_1, input2_1)))
 
