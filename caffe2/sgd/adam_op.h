@@ -150,6 +150,7 @@ class SparseAdamOp final : public Operator<Context> {
 
     for (auto i = 0; i < n; ++i) {
       auto idx = indices[i];
+
       if (block_size == 1) {
         float gi = gradIn[i];
         float mi = moment1Out[idx] =
@@ -162,6 +163,28 @@ class SparseAdamOp final : public Operator<Context> {
       } else {
         auto offsetI = i * block_size;
         auto offsetIdx = idx * block_size;
+
+#ifndef NDEBUG
+        CAFFE_ENFORCE_GE(
+            Input(PARAM).size(),
+            block_size + offsetIdx,
+            def().input(PARAM),
+            ", out of bound,  idx:",
+            idx,
+            " for input i:",
+            i,
+            " and block size:",
+            block_size);
+        CAFFE_ENFORCE_GE(
+            Input(GRAD).size(),
+            block_size + offsetI,
+            def().input(GRAD),
+            ", out of bound idx, idx:",
+            idx,
+            " for input i:",
+            i);
+#endif
+
         adam_compute(
             block_size,
             paramIn + offsetIdx,
