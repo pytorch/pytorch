@@ -11,6 +11,11 @@ CAFFE2_DEFINE_int(
     1000000,
     "Chunk size to split tensor data into");
 
+CAFFE2_DEFINE_int(
+    caffe2_max_tensor_serializer_threads,
+    16,
+    "Maximal number of threads that can be used for tensor serialization");
+
 namespace caffe2 {
 /**
  * @brief StringSerializer is the serializer for String.
