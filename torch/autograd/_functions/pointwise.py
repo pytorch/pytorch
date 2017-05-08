@@ -139,12 +139,14 @@ class Clamp(Function):
 
 class Sqrt(Function):
 
-    def forward(self, i):
-        self.save_for_backward(i)
+    @staticmethod
+    def forward(ctx, i):
+        ctx.save_for_backward(i)
         return i.sqrt()
 
-    def backward(self, grad_output):
-        i, = self.saved_tensors
+    @staticmethod
+    def backward(ctx, grad_output):
+        i, = ctx.saved_variables
         return grad_output.mul(i.pow(-0.5)).div(2)
 
 

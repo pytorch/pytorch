@@ -407,7 +407,7 @@ class Variable(_C._VariableBase):
         return Frac()(self)
 
     def sqrt(self):
-        return Sqrt()(self)
+        return Sqrt.apply(self)
 
     def round(self):
         return Round()(self)
