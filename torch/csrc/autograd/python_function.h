@@ -53,6 +53,7 @@ extern PyTypeObject THPFunctionType;
 extern PyObject *THPFunctionClass;
 extern PyObject *THPStochasticFunctionClass;
 
+// XXX: this function requires the GIL (it can have side effects).
 std::shared_ptr<torch::autograd::PyFunction> THPFunction_asFunction(THPFunction* self);
 
 inline bool THPFunction_Check(PyObject* obj) {

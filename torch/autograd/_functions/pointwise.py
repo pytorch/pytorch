@@ -2,6 +2,7 @@ from itertools import repeat
 
 from ..._thnn import type2backend
 from ..function import Function, InplaceFunction
+from ..variable import Variable
 
 
 class Exp(InplaceFunction):
@@ -61,22 +62,27 @@ class Tanh(InplaceFunction):
 
 class Sigmoid(InplaceFunction):
 
-    def forward(self, i):
-        if self.inplace:
-            self.mark_dirty(i)
+    @staticmethod
+    def forward(ctx, i, inplace=False):
+        if inplace:
+            ctx.mark_dirty(i)
             result = i.sigmoid_()
         else:
             result = i.sigmoid()
-        self.save_for_backward(result)
+        ctx.save_for_backward(result)
         return result
 
-    def backward(self, grad_output):
-        result, = self.saved_tensors
-        grad_input = grad_output.new()
-        backend = type2backend[type(result)]
-        backend.Sigmoid_updateGradInput(backend.library_state, None, grad_output,
-                                        grad_input, result)
-        return grad_input
+    @staticmethod
+    def backward(ctx, grad_output):
+        result, = ctx.saved_variables
+        if grad_output.volatile:
+            grad_input = Variable(grad_output.data.new(grad_output.size()), volatile=True)
+            backend = type2backend[type(result.data)]
+            backend.Sigmoid_updateGradInput(backend.library_state, None, grad_output.data,
+                                            grad_input.data, result.data)
+        else:
+            grad_input = grad_output * ((1 - result) * result)
+        return grad_input, None
 
 
 class Sinh(Function):
