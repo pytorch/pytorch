@@ -206,7 +206,6 @@ def apply_recurrent_attention(
         scope=scope,
     )
     return attention_weighted_encoder_context, attention_weights_3d, [
-        decoder_hidden_encoder_outputs_sum_tmp,
         decoder_hidden_encoder_outputs_sum,
     ]
 
