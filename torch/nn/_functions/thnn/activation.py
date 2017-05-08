@@ -161,8 +161,15 @@ class Threshold(Function):
         if grad_output.volatile:
             grad_input = Variable(input.data.new(input.size()), volatile=True)
             backend = type2backend[type(input.data)]
-            backend.Threshold_updateGradInput(backend.library_state, input.data, grad_output.data,
-                                            grad_input.data, ctx.threshold, ctx.value, False)
+            backend.Threshold_updateGradInput(
+                backend.library_state,
+                input.data,
+                grad_output.data,
+                grad_input.data,
+                ctx.threshold,
+                ctx.value,
+                False
+            )
         else:
             mask = input > ctx.threshold
             grad_input = mask.type_as(grad_output) * grad_output
