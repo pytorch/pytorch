@@ -118,6 +118,7 @@ class TestCase(hu.HypothesisTestCase):
                 [common_world],
                 size=comm_size,
                 rank=comm_rank,
+                sync=True,
                 engine=op_engine))
         return (store_handler, common_world)
 

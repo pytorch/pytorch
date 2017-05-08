@@ -19,7 +19,8 @@ class CreateCommonWorld final : public Operator<Context> {
   CreateCommonWorld(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         size_(OperatorBase::template GetSingleArgument<int>("size", 0)),
-        rank_(OperatorBase::template GetSingleArgument<int>("rank", 0)) {
+        rank_(OperatorBase::template GetSingleArgument<int>("rank", 0)),
+        sync_(OperatorBase::template GetSingleArgument<bool>("sync", false)) {
     CAFFE_ENFORCE(def().has_name(), "CreateCommonWorld operator requires name");
     CAFFE_ENFORCE(rank_ >= 0 && rank_ < size_);
     name_ = def().name();
@@ -39,11 +40,13 @@ class CreateCommonWorld final : public Operator<Context> {
     auto context = std::make_shared<::gloo::rendezvous::Context>(rank_, size_);
     context->connectFullMesh(store, device_);
 
-    // Switch pairs to synchronous mode
-    for (int i = 0; i < context->size; i++) {
-      auto& pair = context->getPair(i);
-      if (pair) {
-        pair->setSync(true, false);
+    // Switch pairs to synchronous mode if configured to do so
+    if (sync_) {
+      for (int i = 0; i < context->size; i++) {
+        auto& pair = context->getPair(i);
+        if (pair) {
+          pair->setSync(true, false);
+        }
       }
     }
 
@@ -57,6 +60,7 @@ class CreateCommonWorld final : public Operator<Context> {
 
   const int size_;
   const int rank_;
+  const bool sync_;
 
   std::string name_;
   std::shared_ptr<::gloo::transport::Device> device_;
