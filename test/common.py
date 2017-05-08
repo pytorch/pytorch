@@ -7,7 +7,6 @@ import contextlib
 from functools import wraps
 from itertools import product
 from copy import deepcopy
-from numbers import Number
 
 import torch
 import torch.cuda
