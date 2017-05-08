@@ -561,9 +561,7 @@ class TestTorch(TestCase):
         self.assertEqual(res5, res.sum(0, False))
 
         res6 = torch.addbmm(.1, res2, .5, b1, b2)
-        # temporarily need to select to remove leading dimension,
-        # because addbmm does not currently broadcast
-        self.assertEqual(res6, res2 * .1 + (res.sum(0) * .5).select(0,0))
+        self.assertEqual(res6, res2 * .1 + (res.sum(0) * .5))
 
     def test_baddbmm(self):
         num_batches = 10
@@ -1042,7 +1040,11 @@ class TestTorch(TestCase):
                     return t0_fn(t1) if fn != "lerp" else t0_fn(t1, 0.5)
                 r1 = tensorfn_inplace(largeExpanded, smallExpanded)
                 r2 = tensorfn_inplace(largeExpandedClone, small)
-                self.assertEqual(r1, r2)
+                # in-place pointwise operations don't actually work on 0-strided tensors
+                # (numpy has the same issue)
+                if (0 not in largeExpanded.stride() and 0 not in smallExpanded.stride()
+                    and 0 not in largeExpandedClone.stride() and 0 not in small.stride()):
+                    self.assertEqual(r1, r2)
 
                 broadcastable = (dims_small == dims_full)
                 if not broadcastable:

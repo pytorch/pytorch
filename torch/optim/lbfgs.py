@@ -70,7 +70,8 @@ class LBFGS(Optimizer):
         offset = 0
         for p in self._params:
             numel = p.numel()
-            p.data.add_(step_size, update[offset:offset + numel])
+            # view as to avoid deprecated pointwise semantics
+            p.data.add_(step_size, update[offset:offset + numel].view_as(p.data))
             offset += numel
         assert offset == self._numel()
 

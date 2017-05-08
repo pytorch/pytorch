@@ -123,7 +123,7 @@ class Bilinear(Module):
             self.gradWeight[k].addmm_(self.buff1.t(), input[1])
 
         if self.bias is not None:
-            self.gradBias.add_(scale, gradOutput.sum(0, True))
+            self.gradBias.add_(scale, gradOutput.sum(0))
 
     def __repr__(self):
         return str(type(self)) + \
