@@ -27,10 +27,18 @@ class SparseSize:
         self._size = size
         self._nnz = nnz
         self._dimI = dimI
+    @staticmethod
+    def from_sparse(s):
+        return SparseSize(s.size(), s._indices().size()[0], s._nnz())
     def size(self):
         """Logical size of the sparse tensor; i.e., what you would get if
         you called s.to_dense().size()"""
         return self._size
+    def setSize(self, size):
+        """Change the logical size of the sparse tensor."""
+        assert len(size) >= self._dimI
+        self._size = size
+        return self
     def dimI(self):
         """Number of sparse dimensions in the sparse tensor.  Despite this
         name, this is NOT the dimension of indices (indices is always 2D)."""
@@ -592,7 +600,7 @@ class TestSparse(TestCase):
             raise ValueError("mask is not coalesced")
         if x.size() != s.size():
             raise ValueError("sparse_mask operands have incompatible sizes")
-        ss = SparseSize(size=x.size(), dimI=s._indices().size()[0], nnz=s._nnz())
+        ss = SparseSize.from_sparse(s).setSize(x.size())
         r = ss.new_sparse(dense2sparse(type(x)), s._indices())
         v = r._values()
         for i, js in enumerate(s._indices().t()):
