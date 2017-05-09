@@ -117,9 +117,9 @@ class SpatialDivisiveNormalization(Module):
             self.coef = self._coef.view(1, *self._coef.size()).expand_as(self.localstds)
 
         # normalize std dev
-        self.adjustedstds = self.divider.updateOutput([self.localstds, self.coef])
+        self.adjustedstds = self.divider.updateOutput([self.localstds, self.coef.contiguous().view_as(self.localstds)])
         self.thresholdedstds = self.thresholder.updateOutput(self.adjustedstds)
-        self.output = self.normalizer.updateOutput([input, self.thresholdedstds])
+        self.output = self.normalizer.updateOutput([input, self.thresholdedstds.contiguous().view_as(input)])
 
         return self.output
 
@@ -128,9 +128,9 @@ class SpatialDivisiveNormalization(Module):
         self.gradInput.resize_as_(input).zero_()
 
         # backprop through all modules
-        gradnorm = self.normalizer.updateGradInput([input, self.thresholdedstds], gradOutput)
+        gradnorm = self.normalizer.updateGradInput([input, self.thresholdedstds.contiguous().view_as(input)], gradOutput)
         gradadj = self.thresholder.updateGradInput(self.adjustedstds, gradnorm[1])
-        graddiv = self.divider.updateGradInput([self.localstds, self.coef], gradadj)
+        graddiv = self.divider.updateGradInput([self.localstds, self.coef.contiguous().view_as(self.localstds)], gradadj)
         self.gradInput.add_(self.stdestimator.updateGradInput(input, graddiv[0]))
         self.gradInput.add_(gradnorm[0])
 
