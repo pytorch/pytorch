@@ -77,6 +77,18 @@ class Optimizer(object):
         """
         return self._aux_params
 
+    # TODO(xlwang): In transfer learning, parameter initialized from pretrained
+    # model might require a different learning rate than otherwise initialized.
+    # To this end, here we implement a python solution where
+    # `base_learning_rate` is scaled by `scale`, by calling
+    # `scale_learning_rate`; Alternatively, we can achieve same effect by
+    # rewriting the LearningRate operator in C++
+    # Note that it is the responsibility of specific optimizer to decide what
+    # logic should be used for `scale_learning_rate`
+    def scale_learning_rate(self, *args, **kwargs):
+        raise NotImplementedError(
+            "Optimizer Need to Implement `scale_learning_rate` method.")
+
 
 class SgdOptimizer(Optimizer):
     def __init__(self, base_learning_rate=0.01, policy='fixed',
@@ -128,6 +140,10 @@ class SgdOptimizer(Optimizer):
                 param
             )
 
+    def scale_learning_rate(self, scale):
+        self.base_learning_rate *= scale
+        return
+
 
 class AdagradOptimizer(Optimizer):
     def __init__(self, alpha=0.01, epsilon=1e-4, policy="fixed",
@@ -175,6 +191,10 @@ class AdagradOptimizer(Optimizer):
                 engine=self.engine
             )
 
+    def scale_learning_rate(self, scale):
+        self.alpha *= scale
+        return
+
 
 class FtrlOptimizer(Optimizer):
     def __init__(self, alpha=0.01, beta=1e-4, lambda1=0, lambda2=0,
@@ -219,6 +239,11 @@ class FtrlOptimizer(Optimizer):
                 lambda1=self.lambda1,
                 lambda2=self.lambda2
             )
+
+    def scale_learning_rate(self, scale):
+        self.alpha *= scale
+        return
+
 
 class AdamOptimizer(Optimizer):
     def __init__(self, alpha=0.001, beta1=0.9, beta2=0.999, epsilon=1e-8,
@@ -277,6 +302,9 @@ class AdamOptimizer(Optimizer):
                 beta2=self.beta2,
                 epsilon=self.epsilon)
 
+    def scale_learning_rate(self, scale):
+        self.alpha *= scale
+        return
 
 def build_sgd(model, base_learning_rate, **kwargs):
     sgd_optimizer = SgdOptimizer(base_learning_rate, **kwargs)
