@@ -127,6 +127,7 @@ class Softmin(Function):
         return grad_input.mul(-1)
 
 
+# TODO: This class should be removed once THNN function support Variable backward
 class Threshold(Function):
 
     @staticmethod

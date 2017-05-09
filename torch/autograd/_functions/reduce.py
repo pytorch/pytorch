@@ -185,16 +185,16 @@ class Kthvalue(_SelectionFunction):
 class Norm(Function):
 
     @staticmethod
-    def forward(ctx, input, norm_type=2, dim=None):
-        ctx.norm_type = norm_type
+    def forward(ctx, input, p=2, dim=None):
+        ctx.p = p
         ctx.dim = dim
 
         if dim is None:
-            ctx.norm = input.norm(norm_type)
+            ctx.norm = input.norm(p)
             ctx.save_for_backward(input)
             return input.new((ctx.norm,))
         else:
-            output = input.norm(norm_type, dim)
+            output = input.norm(p, dim)
             ctx.save_for_backward(input, output)
             return output
 
@@ -202,22 +202,22 @@ class Norm(Function):
     def backward(ctx, grad_output):
         if ctx.dim is None:
             input, = ctx.saved_variables
-            if ctx.norm_type == 2:
-                scale_v = (grad_output[0] / ctx.norm).expand_as(input)
+            if ctx.p == 2:
+                scale_v = (grad_output / ctx.norm).expand_as(input)
                 return input.mul(scale_v), None, None
             else:
-                pow = input.abs().pow(ctx.norm_type - 2)
-                scale_v = (grad_output[0] / ctx.norm ** (ctx.norm_type - 1)).expand_as(input)
+                pow = input.abs().pow(ctx.p - 2)
+                scale_v = (grad_output / ctx.norm ** (ctx.p - 1)).expand_as(input)
                 return input.mul(pow).mul(scale_v), None, None
         else:
             input, output = ctx.saved_variables
             big_grad_output = grad_output.expand_as(input)
-            if ctx.norm_type == 2:
+            if ctx.p == 2:
                 big_output = output.expand_as(input)
                 return input.mul(big_grad_output).div(big_output), None, None
             else:
-                pow = input.abs().pow(ctx.norm_type - 2)
-                big_output = output.pow(ctx.norm_type - 1).expand_as(input)
+                pow = input.abs().pow(ctx.p - 2)
+                big_output = output.pow(ctx.p - 1).expand_as(input)
                 return input.mul(pow).mul(big_grad_output).div(big_output), None, None
 
 
