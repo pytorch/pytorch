@@ -2,7 +2,24 @@ from bisect import bisect_right
 from .optimizer import Optimizer
 
 
-class LambdaLR(object):
+class _LR_Scheduler(object):
+    def __init__(self, optimizer, last_epoch=-1):
+        self.optimizer = optimizer
+        self.last_epoch = last_epoch
+        self.base_lrs = list(map(lambda group: group['lr'], optimizer.param_groups))
+
+    def lr_expression(self):
+        raise NotImplementedError()
+
+    def step(self, epoch=None):
+        if epoch is None:
+            epoch = self.last_epoch = self.last_epoch + 1
+        self.last_epoch = epoch
+        for param_group, lr in zip(self.optimizer.param_groups, self.lr_expression()):
+            param_group['lr'] = lr
+
+
+class LambdaLR(_LR_Scheduler):
     def __init__(self, optimizer, lr_lambda, last_epoch=-1):
         self.optimizer = optimizer
         self.base_lrs = list(map(lambda group: group['lr'], optimizer.param_groups))
@@ -14,16 +31,14 @@ class LambdaLR(object):
                     len(optimizer.param_groups), len(lr_lambda)))
             self.lr_lambdas = list(lr_lambda)
         self.last_epoch = last_epoch
+        super(LambdaLR, self).__init__(optimizer, last_epoch)
 
-    def step(self, epoch=None):
-        if epoch is None:
-            epoch = self.last_epoch + 1
-        self.last_epoch = epoch
-        for param_group, base_lr, lr_lambda in zip(self.optimizer.param_groups, self.base_lrs, self.lr_lambdas):
-            param_group['lr'] = base_lr * lr_lambda(epoch)
+    def lr_expression(self):
+        return [base_lr * lmbda(self.last_epoch)
+                for lmbda, base_lr in zip(self.lr_lambdas, self.base_lrs)]
 
 
-class StepLR(LambdaLR):
+class StepLR(_LR_Scheduler):
     """Sets the learning rate of each parameter group to the initial lr
     decayed by gamma every step_size epochs.
 
@@ -46,10 +61,16 @@ class StepLR(LambdaLR):
     """
 
     def __init__(self, optimizer, step_size, gamma=0.1, last_epoch=-1):
-        super(StepLR, self).__init__(optimizer, lambda epoch: gamma ** (epoch // step_size), last_epoch)
+        self.step_size = step_size
+        self.gamma = gamma
+        super(StepLR, self).__init__(optimizer, last_epoch)
+
+    def lr_expression(self):
+        return [base_lr * self.gamma ** (self.last_epoch // self.step_size)
+                for base_lr in self.base_lrs]
 
 
-class MultiStepLR(LambdaLR):
+class MultiStepLR(_LR_Scheduler):
     """Set the learning rate of each parameter group to the initial lr decayed
     by gamma once the number of epoch reaches one of the milestones.
 
@@ -74,12 +95,16 @@ class MultiStepLR(LambdaLR):
         if not list(milestones) == sorted(milestones):
             raise ValueError('Milestones should be a list of'
                              ' increasing integers. Got {}', milestones)
-        super(MultiStepLR, self).__init__(optimizer,
-                                          lambda epoch: gamma ** bisect_right(milestones, epoch),
-                                          last_epoch)
+        self.milestones = milestones
+        self.gamma = gamma
+        super(MultiStepLR, self).__init__(optimizer, last_epoch)
+
+    def lr_expression(self):
+        return [base_lr * self.gamma ** bisect_right(self.milestones, self.last_epoch)
+                for base_lr in self.base_lrs]
 
 
-class ExponentialLR(LambdaLR):
+class ExponentialLR(_LR_Scheduler):
     """Set the learning rate of each parameter group to the initial lr decayed
     by gamma every epoch.
 
@@ -89,9 +114,12 @@ class ExponentialLR(LambdaLR):
     """
 
     def __init__(self, optimizer, gamma, last_epoch=-1):
-        super(ExponentialLR, self).__init__(optimizer,
-                                            lambda epoch: gamma ** epoch,
-                                            last_epoch)
+        self.gamma = gamma
+        super(ExponentialLR, self).__init__(optimizer, last_epoch)
+
+    def lr_expression(self):
+        return [base_lr * self.gamma ** self.last_epoch
+                for base_lr in self.base_lrs]
 
 
 class ReduceLROnPlateau(object):
