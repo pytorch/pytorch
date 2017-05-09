@@ -2,8 +2,8 @@
 
 #include "caffe2/core/context_gpu.h"
 
-#include "gloo/cuda.h"
-#include "gloo/transport/tcp/device.h"
+#include <gloo/cuda.h>
+#include <gloo/transport/tcp/device.h>
 
 namespace caffe2 {
 namespace gloo {

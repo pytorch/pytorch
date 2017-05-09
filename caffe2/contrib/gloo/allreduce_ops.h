@@ -5,8 +5,8 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
 
-#include "gloo/algorithm.h"
-#include "gloo/context.h"
+#include <gloo/algorithm.h>
+#include <gloo/context.h>
 
 namespace caffe2 {
 namespace gloo {
