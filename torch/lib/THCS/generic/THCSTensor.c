@@ -440,7 +440,7 @@ void THCTensor_(sparseSelect)(THCState *state, THCSTensor *r_, THCTensor *t, THC
   THCTensor_(resizeNd)(state, rValues, nDimV + 1, size, NULL);
   THFree(size);
   THCudaLongTensor *rIndices = THCudaLongTensor_newClone(state, indices_);
-  THCSTensor_(_move)(state, r_, rIndices, rValues);
+  THCSTensor_(_move)(state, r_, rIndices, rValues); // consumes rIndices and rValues
   r_->coalesced = 1; // invariant
 
   THCudaLongTensor *indices = THCudaLongTensor_newWithSize1d(state, nnz);
