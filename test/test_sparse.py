@@ -280,6 +280,10 @@ class TestSparse(TestCase):
 
     def test_clone(self):
         x, _, _ = self._gen_sparse(4, 20, 5)
+        if self.is_uncoalesced:
+            self.assertFalse(x.is_coalesced())
+            y = x.clone()
+            self.assertFalse(y.is_coalesced())
         x = x.coalesce()
         self.assertTrue(x.is_coalesced())
         y = x.clone()
