@@ -49,6 +49,8 @@ struct TensorUtils {
                        THLongStorage* strides);                         \
     static void resizeAs(THCState* state, TENSOR_TYPE* dst,             \
                          TENSOR_TYPE* src);                             \
+    static void squeeze1d(THCState *state, TENSOR_TYPE *dst,            \
+                          TENSOR_TYPE *src, int dimension);             \
     static DATA_TYPE* getData(THCState* state, TENSOR_TYPE* t);         \
     static ptrdiff_t getNumElements(THCState* state, TENSOR_TYPE* t);        \
     static long getSize(THCState* state, TENSOR_TYPE* t, int dim);      \
