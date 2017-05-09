@@ -11,10 +11,11 @@ from caffe2.proto import caffe2_pb2
 
 _OPTIMIZER_ITERATION_NAME = "optimizer_iteration"
 
+AuxOptimizerParams = namedtuple("AuxOptimizerParams", ["local", "shared"])
+
 class Optimizer(object):
     def __init__(self):
-        AuxParams = namedtuple("AuxParams", ["local", "shared"])
-        self._aux_params = AuxParams(local=[], shared=[])
+        self._aux_params = AuxOptimizerParams(local=[], shared=[])
 
     def __call__(self, net, param_init_net, param, grad):
         raise NotImplementedError()

@@ -196,6 +196,9 @@ class LayerModelHelper(model_helper.ModelHelper):
         self._loss = loss
 
     def __getattr__(self, layer):
+        if layer.startswith('__'):
+            raise AttributeError(layer)
+
         # TODO(amalevich): Add add support for ifbpy inline documentation
         if layers.layer_exists(layer):
             def wrapper(*args, **kwargs):
