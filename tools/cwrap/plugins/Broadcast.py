@@ -32,23 +32,32 @@ class Broadcast(CWrapPlugin):
         """}""")
 
     POST_CODE_IN_PLACE_TEMPLATE = Template(
-        """${arg_op_b} = ${arg_op_b}_save;""")
+        """${arg_op_other} = ${arg_op_other}_save;""")
 
-    PRE_CODE_IN_PLACE_TEMPLATE = Template(
-        """THTensor *${arg_op_b}_save = ${arg_op_b};
-           THLongStoragePtr ${arg_op_a}_size = THTensor_(newSizeOf)(LIBRARY_STATE ${arg_op_a});
-           THTensorPtr ${arg_op_b}_guard = THTensor_(new)(LIBRARY_STATE_NOARGS);
-           ${arg_op_b}=${arg_op_b}_guard.get();
-           ptrdiff_t ${arg_op_a}_nElem = THTensor_(nElement)(LIBRARY_STATE ${arg_op_a});
-           ptrdiff_t ${arg_op_b}_nElem = THTensor_(nElement)(LIBRARY_STATE ${arg_op_b}_save);
-           bool raise = ${raise_errors} || (${arg_op_a}_nElem != ${arg_op_b}_nElem);
-           int expanded_err =
-               THTensor_(expand)(LIBRARY_STATE ${arg_op_b}, ${arg_op_b}_save, ${arg_op_a}_size.get(), raise);
-           if (expanded_err != 0 && !raise) {
+    DEPRECATED_WARNING_IN_PLACE = \
+        """PyErr_WarnEx(PyExc_UserWarning, "${op_a} and ${op_other} not broadcastable, but have the same number of "
+                                           "elements.  Falling back to deprecated pointwise behavior.", 1);"""
+
+    IN_PLACE_ARG_OP_OTHER = Template(
+        """THTensor *${arg_op_other}_save = ${arg_op_other};
+           THTensorPtr ${arg_op_other}_guard = THTensor_(new)(LIBRARY_STATE_NOARGS);
+           ${arg_op_other}=${arg_op_other}_guard.get();
+           ptrdiff_t ${arg_op_other}_nElem = THTensor_(nElement)(LIBRARY_STATE ${arg_op_other}_save);
+           bool ${arg_op_other}_raise = ${raise_errors} || (${arg_op_a}_nElem != ${arg_op_other}_nElem);
+           int ${arg_op_other}_err =
+                THTensor_(expand)(LIBRARY_STATE ${arg_op_other}, ${arg_op_other}_save, ${arg_op_a}_size.get(), ${arg_op_other}_raise);
+           if (${arg_op_other}_err != 0 && !${arg_op_other}_raise) {
         """
         + POST_CODE_IN_PLACE_TEMPLATE.template + "\n"
-        + DEPRECATED_WARNING + "\n" +
+        + DEPRECATED_WARNING_IN_PLACE + "\n" +
         """}""")
+
+    PRE_CODE_IN_PLACE_TEMPLATE = Template(
+        """THLongStoragePtr ${arg_op_a}_size = THTensor_(newSizeOf)(LIBRARY_STATE ${arg_op_a});
+           ptrdiff_t ${arg_op_a}_nElem = THTensor_(nElement)(LIBRARY_STATE ${arg_op_a});
+           ${code_arg_op_other1}
+           ${code_arg_op_other2}
+        """)
 
     def initialize(self, cwrap):
         self.cwrap = cwrap
@@ -74,18 +83,23 @@ class Broadcast(CWrapPlugin):
             arg_op_a = "arg_" + op_a
 
             if in_place:
+                code_arg_op_other1=self.IN_PLACE_ARG_OP_OTHER.substitute(
+                    op_a=op_a,
+                    op_other=op_b,
+                    arg_op_a=arg_op_a,
+                    arg_op_other=arg_op_b,
+                    raise_errors=raise_errors)
+                code_arg_op_other2=""
                 new_code_pre.append(self.PRE_CODE_IN_PLACE_TEMPLATE.substitute(
                     op_a=op_a,
-                    op_b=op_b,
                     arg_op_a=arg_op_a,
-                    arg_op_b=arg_op_b,
+                    code_arg_op_other1=code_arg_op_other1,
+                    code_arg_op_other2=code_arg_op_other2,
                     raise_errors=raise_errors))
                 new_code_pre.append("")
 
                 new_code_post.append(self.POST_CODE_IN_PLACE_TEMPLATE.substitute(
-                    arg_op_a=arg_op_a,
-                    arg_op_b=arg_op_b,
-                    raise_errors=raise_errors))
+                    arg_op_other=arg_op_b))
                 new_code_post.append("")
             else:
                 new_code_pre.append(self.PRE_CODE_OUT_PLACE_TEMPLATE.substitute(
