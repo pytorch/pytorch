@@ -609,9 +609,9 @@
     - cname: dist
       return: accreal
       arguments:
-        - THTensor* self
-        - arg: THTensor* other
-          broadcast: self
+        - arg: THTensor* self
+          broadcast: other
+        - THTensor* other
         - arg: real p
           default: AS_REAL(2)
 ]]
@@ -673,9 +673,9 @@
   arguments:
     - arg: THTensor* destination
       output: True
-    - THTensor* self
-    - arg: THTensor* other
-      broadcast: self
+    - arg: THTensor* self
+      broadcast: other
+    - THTensor* other
 ]]
 
 [[
@@ -685,9 +685,9 @@
   return: argument 0
   arguments:
     - THTensor* self
-    - THTensor* self
-    - arg: THTensor* other
-      broadcast: self inplace
+    - arg: THTensor* self
+      broadcast: other inplace
+    - THTensor* other
 ]]
 
 
@@ -710,9 +710,9 @@
       arguments:
         - arg: THTensor* destination
           output: True
-        - THTensor* self
-        - arg: THTensor* exponent
-          broadcast: self fallback
+        - arg: THTensor* self
+          broadcast: exponent fallback
+        - THTensor* exponent
     - cname: tpow
       arguments:
         - arg: THTensor* destination
@@ -735,9 +735,9 @@
     - cname: cpow
       arguments:
         - THTensor* self
-        - THTensor* self
-        - arg: THTensor* exponent
-          broadcast: self inplace fallback
+        - arg: THTensor* self
+          broadcast: exponent inplace fallback
+        - THTensor* exponent
 ]]
 
 [[
@@ -749,9 +749,9 @@
   arguments:
     - arg: THTensor* destination
       output: True
-    - THTensor* self
-    - arg: THTensor* end
-      broadcast: self
+    - arg: THTensor* self
+      broadcast: end
+    - THTensor* end
     - real weight
 ]]
 
@@ -762,9 +762,9 @@
   cname: lerp
   arguments:
     - THTensor* self
-    - THTensor* self
-    - arg: THTensor* end
-      broadcast: self inplace
+    - arg: THTensor* self
+      broadcast: end inplace
+    - THTensor* end
     - real weight
 ]]
 
@@ -946,11 +946,11 @@
       arguments:
         - arg: THTensor* result
           output: True
-        - THTensor* self
+        - arg: THTensor* self
+          broadcast: other fallback
         - arg: real value
           default: AS_REAL(1)
-        - arg: THTensor* other
-          broadcast: self fallback
+        - THTensor* other
     - sparse: True
       cname: spcadd
       arguments:
@@ -974,11 +974,11 @@
     - cname: cadd
       arguments:
         - THTensor* self
-        - THTensor* self
+        - arg: THTensor* self
+          broadcast: other inplace fallback
         - arg: real value
           default: AS_REAL(1)
-        - arg: THTensor* other
-          broadcast: self inplace fallback
+        - THTensor* other
     - sparse: True
       cname: spcadd
       arguments:
@@ -1005,11 +1005,11 @@
       arguments:
         - arg: THTensor* result
           output: True
-        - THTensor* self
+        - arg: THTensor* self
+          broadcast: other fallback
         - arg: real value
           default: AS_REAL(1)
-        - arg: THTensor* other
-          broadcast: self fallback
+        - THTensor* other
 ]]
 
 [[
@@ -1024,11 +1024,11 @@
     - cname: csub
       arguments:
         - THTensor* self
-        - THTensor* self
+        - arg: THTensor* self
+          broadcast: other inplace fallback
         - arg: real value
           default: AS_REAL(1)
-        - arg: THTensor* other
-          broadcast: self inplace fallback
+        - THTensor* other
 ]]
 
 
@@ -1047,9 +1047,9 @@
       arguments:
         - arg: THTensor* result
           output: True
-        - THTensor* self
+        - arg: THTensor* self
+          broadcast: other fallback
         - arg: THTensor* other
-          broadcast: self fallback
 ]]
 
 [[
@@ -1064,9 +1064,9 @@
     - cname: cmul
       arguments:
         - THTensor* self
-        - THTensor* self
-        - arg: THTensor* other
-          broadcast: self inplace fallback
+        - arg: THTensor* self
+          broadcast: other inplace fallback
+        - THTensor* other
 ]]
 
 
@@ -1085,9 +1085,9 @@
       arguments:
         - arg: THTensor* result
           output: True
-        - THTensor* self
-        - arg: THTensor* other
-          broadcast: self fallback
+        - arg: THTensor* self
+          broadcast: other fallback
+        - THTensor* other
 ]]
 
 [[
@@ -1102,9 +1102,9 @@
     - cname: cdiv
       arguments:
         - THTensor* self
-        - THTensor* self
-        - arg: THTensor* other
-          broadcast: self inplace fallback
+        - arg: THTensor* self
+          broadcast: other inplace fallback
+        - THTensor* other
 ]]
 
 
@@ -1123,9 +1123,9 @@
       arguments:
         - arg: THTensor* result
           output: True
-        - THTensor* self
-        - arg: THTensor* other
-          broadcast: self fallback
+        - arg: THTensor* self
+          broadcast: other fallback
+        - THTensor* other
 ]]
 
 [[
@@ -1140,9 +1140,9 @@
     - cname: cfmod
       arguments:
         - THTensor* self
-        - THTensor* self
-        - arg: THTensor* other
-          broadcast: self inplace fallback
+        - arg: THTensor* self
+          broadcast: other inplace fallback
+        - THTensor* other
 ]]
 
 
@@ -1161,9 +1161,9 @@
       arguments:
         - arg: THTensor* result
           output: True
-        - THTensor* self
+        - arg: THTensor* self
+          broadcast: other fallback
         - arg: THTensor* other
-          broadcast: self fallback
 ]]
 
 [[
@@ -1178,9 +1178,9 @@
     - cname: cremainder
       arguments:
         - THTensor* self
-        - THTensor* self
-        - arg: THTensor* other
-          broadcast: self inplace fallback
+        - arg: THTensor* self
+          broadcast: other inplace fallback
+        - THTensor* other
 ]]
 
 [[

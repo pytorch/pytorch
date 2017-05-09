@@ -65,11 +65,11 @@ class Broadcast(CWrapPlugin):
                 continue
 
             params = arg.get('broadcast').split(" ")
-            op_a = params[0]
+            op_a =  arg.get('assign_name', arg['name'])
             in_place = "inplace" in params
             raise_errors = "false" if "fallback" in params else "true"
 
-            op_b = arg.get('assign_name', arg['name'])
+            op_b = params[0]
             arg_op_b = "arg_" + op_b
             arg_op_a = "arg_" + op_a
 
