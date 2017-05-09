@@ -466,8 +466,10 @@ void THCTensor_(sparseSelect)(THCState *state, THCSTensor *r_, THCTensor *t, THC
   THCTensor_(free)(state, t_view);
 }
 
-void THCTensor_(sparseCopy)(THCState *state, THCTensor *r_, THCTensor *dense, THCSTensor *sparse) {
-  THCAssertSameGPU(THCSTensor_(checkGPU)(state, 1, 3, sparse, r_, dense));
+void THCTensor_(sparseCopy)(THCState *state, THCTensor *r_, THCTensor *dense, THCSTensor *sparse_) {
+  THCAssertSameGPU(THCSTensor_(checkGPU)(state, 1, 3, sparse_, r_, dense));
+
+  THCSTensor *sparse = THCSTensor_(newCoalesce)(state, sparse_);
 
   const ptrdiff_t nnz = THCSTensor_(nnz)(state, sparse);
   if (nnz == 0) {
