@@ -15,11 +15,14 @@ from torch.autograd import Variable
 
 torch.set_default_tensor_type('torch.DoubleTensor')
 
+SEED = 0
+
 
 def run_tests():
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument('--seed', type=int, default=123)
     args, remaining = parser.parse_known_args()
+    SEED = args.seed
     torch.manual_seed(args.seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed)
@@ -117,6 +120,11 @@ def is_iterable(obj):
 
 class TestCase(unittest.TestCase):
     precision = 1e-5
+
+    def setUp(self):
+        torch.manual_seed(SEED)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(SEED)
 
     def assertTensorsSlowEqual(self, x, y, prec=None, message=''):
         max_err = 0
