@@ -574,4 +574,27 @@ class Cumsum(Function):
         return grad_input
 
 
-# TODO: unfold
+class Unfold(Function):
+
+    @staticmethod
+    def forward(ctx, input, dim, size, step):
+        ctx.input_size = input.size()
+        ctx.input_numel = input.numel()
+        ctx.dim = dim
+        ctx.size = size
+        ctx.step = step
+        result = input.unfold(dim, size, step)
+        ctx.mark_shared_storage((input, result))
+        return result
+
+    @staticmethod
+    @once_differentiable
+    def backward(ctx, grad_output):
+        idx = grad_output.new().long()
+        torch.arange(0, ctx.input_numel, out=idx)
+        idx = idx.view(ctx.input_size)
+        idx_unfolded = idx.unfold(ctx.dim, ctx.size, ctx.step)
+        idx_unfolded = idx_unfolded.contiguous().view(-1)
+        grad_input = grad_output.new(ctx.input_numel).zero_()
+        grad_input.index_add_(0, idx_unfolded, grad_output.view(-1))
+        return grad_input.view(ctx.input_size), None, None, None
