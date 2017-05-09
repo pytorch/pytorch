@@ -142,7 +142,9 @@ class Threshold(Function):
 
         if inplace:
             ctx.mark_dirty(input)
-        output = input.new(input.size())
+            output = input
+        else:
+            output = input.new(input.size())
         ctx.save_for_backward(input)
 
         backend = type2backend[type(input)]
@@ -172,8 +174,7 @@ class Threshold(Function):
                 False
             )
         else:
-            mask = input > ctx.threshold
-            grad_input = mask.type_as(grad_output) * grad_output
+            grad_input = grad_output.masked_fill(input > ctx.threshold, 0)
         return grad_input, None, None, None
 
 
