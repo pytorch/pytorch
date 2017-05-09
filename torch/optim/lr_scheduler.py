@@ -2,7 +2,7 @@ from bisect import bisect_right
 from .optimizer import Optimizer
 
 
-class _LR_Scheduler(object):
+class _LRScheduler(object):
     def __init__(self, optimizer, last_epoch=-1):
         self.optimizer = optimizer
         self.last_epoch = last_epoch
@@ -19,7 +19,7 @@ class _LR_Scheduler(object):
             param_group['lr'] = lr
 
 
-class LambdaLR(_LR_Scheduler):
+class LambdaLR(_LRScheduler):
     def __init__(self, optimizer, lr_lambda, last_epoch=-1):
         self.optimizer = optimizer
         self.base_lrs = list(map(lambda group: group['lr'], optimizer.param_groups))
@@ -38,7 +38,7 @@ class LambdaLR(_LR_Scheduler):
                 for lmbda, base_lr in zip(self.lr_lambdas, self.base_lrs)]
 
 
-class StepLR(_LR_Scheduler):
+class StepLR(_LRScheduler):
     """Sets the learning rate of each parameter group to the initial lr
     decayed by gamma every step_size epochs.
 
@@ -70,7 +70,7 @@ class StepLR(_LR_Scheduler):
                 for base_lr in self.base_lrs]
 
 
-class MultiStepLR(_LR_Scheduler):
+class MultiStepLR(_LRScheduler):
     """Set the learning rate of each parameter group to the initial lr decayed
     by gamma once the number of epoch reaches one of the milestones.
 
@@ -104,7 +104,7 @@ class MultiStepLR(_LR_Scheduler):
                 for base_lr in self.base_lrs]
 
 
-class ExponentialLR(_LR_Scheduler):
+class ExponentialLR(_LRScheduler):
     """Set the learning rate of each parameter group to the initial lr decayed
     by gamma every epoch.
 
