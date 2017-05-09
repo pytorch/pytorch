@@ -108,7 +108,7 @@ class _TensorBase(object):
             storage as the original `Tensor`
 
         Args:
-            *mask (torch.sparse.Tensor): The sparse tensor to mask by.
+            mask (torch.sparse.Tensor): The sparse tensor to mask by.
 
         Example:
             >>> x = torch.Tensor([[1, 2, 3], [4, 5, 6]])
