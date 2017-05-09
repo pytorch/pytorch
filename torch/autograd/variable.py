@@ -706,40 +706,28 @@ class Variable(_C._VariableBase):
         return Bernoulli()(self)
 
     def eq(self, other):
-        if isinstance(other, Variable):
-            return Eq()(self, other)
         assert not torch.is_tensor(other), "can't compare Variable and tensor"
-        return Eq(other)(self)
+        return Eq.apply(self, other)
 
     def ne(self, other):
-        if isinstance(other, Variable):
-            return Ne()(self, other)
         assert not torch.is_tensor(other), "can't compare Variable and tensor"
-        return Ne(other)(self)
+        return Ne.apply(self, other)
 
     def gt(self, other):
-        if isinstance(other, Variable):
-            return Gt()(self, other)
         assert not torch.is_tensor(other), "can't compare Variable and tensor"
-        return Gt(other)(self)
+        return Gt.apply(self, other)
 
     def ge(self, other):
-        if isinstance(other, Variable):
-            return Ge()(self, other)
         assert not torch.is_tensor(other), "can't compare Variable and tensor"
-        return Ge(other)(self)
+        return Ge.apply(self, other)
 
     def lt(self, other):
-        if isinstance(other, Variable):
-            return Lt()(self, other)
         assert not torch.is_tensor(other), "can't compare Variable and tensor"
-        return Lt(other)(self)
+        return Lt.apply(self, other)
 
     def le(self, other):
-        if isinstance(other, Variable):
-            return Le()(self, other)
         assert not torch.is_tensor(other), "can't compare Variable and tensor"
-        return Le(other)(self)
+        return Le.apply(self, other)
 
     def __add__(self, other):
         return self.add(other)

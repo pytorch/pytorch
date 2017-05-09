@@ -94,8 +94,9 @@ class FunctionMeta(type):
 
     def __init__(cls, name, bases, attrs):
         for super_cls in cls.mro():
-            if 'forward' in super_cls.__dict__:
-                has_static_forward = isinstance(super_cls.__dict__['forward'], staticmethod)
+            forward = super_cls.__dict__.get('forward')
+            if forward is not None:
+                has_static_forward = isinstance(forward, staticmethod) or isinstance(forward, classmethod)
                 break
 
         setattr(cls, '_is_legacy', not has_static_forward)
