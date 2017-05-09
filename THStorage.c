@@ -104,6 +104,49 @@ TH_API int THLongStorage_inferSize2(THLongStorage *output, long *sizesA, long di
   return 0;
 }
 
+TH_API int THLongStorage_inferSizeN(THLongStorage *output, int n, long **sizes, long *dims, int raiseErrors) {
+  THArgCheck(n > 0, 2, "n must be greater than 0");
+  THArgCheck(sizes != NULL, 1, "sizesA must not be null");
+  THArgCheck(dims != NULL, 1, "dims must not be null");
+
+  ptrdiff_t ndim = 0;
+  for (int j = 0; j < n; ++j) {
+    THArgCheck(sizes[ j ] != NULL, 1, "size %d must not be null", j);
+    THArgCheck(dims[ j ], 1, "Can't expand empty tensor %d", j);
+    ptrdiff_t ndim = dims[ j ] > ndim ? dims[ j ] : ndim;
+  }
+
+  long *expandedSizes = THAlloc(sizeof(long)*ndim);
+
+  for (long i = ndim - 1; i >= 0; --i) {
+    long max_dim_size = 1;
+    long offset = ndim - 1 - i;
+    for (int j  = 0; j < n; ++j) {
+      long dim = dims[ j ] - 1 - offset;
+      long size = (dim >= 0) ? sizes[ i ][ dim ] : 1;
+      if (size != max_dim_size) {
+        if (max_dim_size == 1){
+          max_dim_size = size;
+        } else if (size == 1) {
+          // we'll expand, nothing to do
+        } else {
+          THFree(expandedSizes);
+          if (raiseErrors) {
+            THError("The size of tensor %i (%ld) must match the expanded size of tensor (%ld) at "
+                    "non-singleton dimension %ld.", j, size, max_dim_size, i);
+          }
+          return -1;
+        }
+      }
+    }
+    expandedSizes[ i ] = max_dim_size;
+  }
+  THLongStorage_resize(output, ndim);
+  memcpy(THLongStorage_data(output), expandedSizes, sizeof(long)*ndim);
+  THFree(expandedSizes);
+  return 0;
+}
+
 TH_API int THLongStorage_inferExpandGeometry(long *tensorSizes, long *tensorStrides, long tensorDim, THLongStorage *sizes, long **esz, long **est, int raiseErrors) {
   ptrdiff_t ndim = THLongStorage_size(sizes);
 
