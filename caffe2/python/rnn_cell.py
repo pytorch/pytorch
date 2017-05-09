@@ -327,25 +327,25 @@ class MILSTMCell(LSTMCell):
             [],
             [self.scope('alpha')],
             shape=[4 * self.hidden_size],
-            value=1.0
+            value=1.0,
         )
         beta1 = model.param_init_net.ConstantFill(
             [],
             [self.scope('beta1')],
             shape=[4 * self.hidden_size],
-            value=1.0
+            value=1.0,
         )
         beta2 = model.param_init_net.ConstantFill(
             [],
             [self.scope('beta2')],
             shape=[4 * self.hidden_size],
-            value=1.0
+            value=1.0,
         )
         b = model.param_init_net.ConstantFill(
             [],
             [self.scope('b')],
             shape=[4 * self.hidden_size],
-            value=0.0
+            value=0.0,
         )
         model.params.extend([alpha, beta1, beta2, b])
         # alpha * (xW^T * hU^T)
@@ -354,45 +354,23 @@ class MILSTMCell(LSTMCell):
             [prev_t, input_t],
             self.scope('alpha_tdash')
         )
-        # Shape: [batch_size, 4 * hidden_size]
-        alpha_tdash_rs, _ = model.net.Reshape(
-            alpha_tdash,
-            [self.scope('alpha_tdash_rs'), self.scope('alpha_tdash_old_shape')],
-            shape=[-1, 4 * self.hidden_size],
-        )
         alpha_t = model.net.Mul(
-            [alpha_tdash_rs, alpha],
+            [alpha_tdash, alpha],
             self.scope('alpha_t'),
             broadcast=1,
-            use_grad_hack=1
         )
         # beta1 * hU^T
-        # Shape: [batch_size, 4 * hidden_size]
-        prev_t_rs, _ = model.net.Reshape(
-            prev_t,
-            [self.scope('prev_t_rs'), self.scope('prev_t_old_shape')],
-            shape=[-1, 4 * self.hidden_size],
-        )
         beta1_t = model.net.Mul(
-            [prev_t_rs, beta1],
+            [prev_t, beta1],
             self.scope('beta1_t'),
             broadcast=1,
-            use_grad_hack=1
         )
         # beta2 * xW^T
-        # Shape: [batch_szie, 4 * hidden_size]
-        input_t_rs, _ = model.net.Reshape(
-            input_t,
-            [self.scope('input_t_rs'), self.scope('input_t_old_shape')],
-            shape=[-1, 4 * self.hidden_size],
-        )
         beta2_t = model.net.Mul(
-            [input_t_rs, beta2],
+            [input_t, beta2],
             self.scope('beta2_t'),
             broadcast=1,
-            use_grad_hack=1
         )
-        # Add 'em all up
         gates_tdash = model.net.Sum(
             [alpha_t, beta1_t, beta2_t],
             self.scope('gates_tdash')
@@ -401,17 +379,9 @@ class MILSTMCell(LSTMCell):
             [gates_tdash, b],
             self.scope('gates_t'),
             broadcast=1,
-            use_grad_hack=1
         )
-        # # Shape: [1, batch_size, 4 * hidden_size]
-        gates_t_rs, _ = model.net.Reshape(
-            gates_t,
-            [self.scope('gates_t_rs'), self.scope('gates_t_old_shape')],
-            shape=[1, -1, 4 * self.hidden_size],
-        )
-
         hidden_t_intermediate, cell_t = model.net.LSTMUnit(
-            [hidden_t_prev, cell_t_prev, gates_t_rs, seq_lengths, timestep],
+            [hidden_t_prev, cell_t_prev, gates_t, seq_lengths, timestep],
             [self.scope('hidden_t_intermediate'), self.scope('cell_t')],
             forget_bias=self.forget_bias,
             drop_states=self.drop_states,
