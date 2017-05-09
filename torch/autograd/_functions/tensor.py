@@ -596,5 +596,6 @@ class Unfold(Function):
         idx_unfolded = idx.unfold(ctx.dim, ctx.size, ctx.step)
         idx_unfolded = idx_unfolded.contiguous().view(-1)
         grad_input = grad_output.new(ctx.input_numel).zero_()
-        grad_input.index_add_(0, idx_unfolded, grad_output.view(-1))
+        grad_output = grad_output.contiguous().view(-1)
+        grad_input.index_add_(0, idx_unfolded, grad_output)
         return grad_input.view(ctx.input_size), None, None, None
