@@ -3,17 +3,21 @@ import torch
 from ..function import Function
 
 
+# TODO: once Cpp-style functions are implemented we can detach a and b
+# before calling forward.
 class _CompareOp(Function):
 
-    def __init__(self, scalar=None):
-        super(_CompareOp, self).__init__()
-        self.scalar = scalar
-
-    def forward(self, tensor1, tensor2=None):
-        other = tensor2 if tensor2 is not None else self.scalar
-        mask = getattr(tensor1, self.fn_name)(other)
-        self.mark_non_differentiable(mask)
+    @classmethod
+    def forward(cls, ctx, a, b):
+        ctx.b_tensor = torch.is_tensor(b)
+        mask = getattr(a, cls.fn_name)(b)
+        ctx.mark_non_differentiable(mask)
         return mask
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        grad_input = grad_output * 0
+        return grad_input, (grad_input if ctx.b_tensor else None)
 
 
 class Eq(_CompareOp):

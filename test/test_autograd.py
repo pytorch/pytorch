@@ -682,6 +682,24 @@ class TestAutograd(TestCase):
         x.add_(2)
         self.assertRaises(RuntimeError, lambda: z.backward(torch.ones(5, 5)))
 
+    def test_mark_non_differentiable(self):
+        class MyFunction(Function):
+            @staticmethod
+            def forward(ctx, input):
+                output = input > 0
+                ctx.mark_non_differentiable(output)
+                return output
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return (grad_output * 0).type(torch.DoubleTensor)
+
+        x = Variable(torch.randn(5, 5), requires_grad=True)
+        mask = MyFunction.apply(x)
+        self.assertFalse(mask.requires_grad)
+        y = x.masked_fill(mask, 0)
+        y.sum().backward()
+
     def test_shared_storage(self):
         x = Variable(torch.ones(5, 5))
         y = x.t()
