@@ -2168,13 +2168,13 @@ Example::
      0.9288
      1.0695
      0.7426
-    [torch.FloatTensor of size 4]
+    [torch.FloatTensor of size 4x1]
     ,
      2
      0
      0
      0
-    [torch.LongTensor of size 4]
+    [torch.LongTensor of size 4x1]
     )
 
 .. function:: max(input, other, out=None) -> Tensor
@@ -2277,7 +2277,7 @@ Example::
      0.0997
      0.2464
     -0.2157
-    [torch.FloatTensor of size 4]
+    [torch.FloatTensor of size 4x1]
 
     >>> torch.mean(a, 1, True)
 
@@ -2337,13 +2337,13 @@ Example::
      0.1404
      0.0212
     -0.7257
-    [torch.FloatTensor of size 4]
+    [torch.FloatTensor of size 4x1]
     ,
      0
      2
      4
      1
-    [torch.LongTensor of size 4]
+    [torch.LongTensor of size 4x1]
     )
 
 """)
@@ -2404,13 +2404,13 @@ Example::
     0.2073
     2.4507
     0.7666
-    torch.FloatTensor of size 4]
+    torch.FloatTensor of size 4x1]
 
     3
     2
     2
     1
-    torch.LongTensor of size 4]
+    torch.LongTensor of size 4x1]
 
 .. function:: min(input, other, out=None) -> Tensor
 
@@ -2530,13 +2530,13 @@ Example::
     -0.7646
     -2.0068
     -1.5371
-    [torch.FloatTensor of size 4]
+    [torch.FloatTensor of size 4x1]
     ,
      3
      4
      2
      0
-    [torch.LongTensor of size 4]
+    [torch.LongTensor of size 4x1]
     )
 
 """)
@@ -2847,7 +2847,7 @@ Example::
      0.7888
      0.9077
      0.6026
-    [torch.FloatTensor of size 4]
+    [torch.FloatTensor of size 4x1]
 
     >>> torch.norm(a, 0, 1, True)
 
@@ -3161,7 +3161,7 @@ Example::
      0.0808
      0.6197
      0.1952
-    [torch.FloatTensor of size 4]
+    [torch.FloatTensor of size 4x1]
 
 """)
 
@@ -3811,7 +3811,7 @@ Example::
      1.1025
      1.0045
      0.6725
-    [torch.FloatTensor of size 4]
+    [torch.FloatTensor of size 4x1]
 
 """)
 
@@ -3868,7 +3868,7 @@ Example::
      0.0698
     -2.4767
      2.2440
-    [torch.FloatTensor of size 4]
+    [torch.FloatTensor of size 4x1]
 
 """)
 
@@ -4438,7 +4438,7 @@ Example::
      0.9509
      0.7548
      0.6949
-    [torch.FloatTensor of size 4]
+    [torch.FloatTensor of size 4x1]
 
 """)
 
