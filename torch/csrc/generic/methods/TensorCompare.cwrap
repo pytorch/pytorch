@@ -13,7 +13,8 @@
         - arg: THBoolTensor* result
           output: True
         - THTensor* self
-        - THTensor* other
+        - arg: THTensor* other
+          broadcast: self fallback
 ]]
 
 [[
@@ -29,7 +30,8 @@
       arguments:
         - THTensor* self
         - THTensor* self
-        - THTensor* other
+        - arg: THTensor* other
+          broadcast: self inplace fallback
 ]]
 
 [[
@@ -48,7 +50,8 @@
         - arg: THBoolTensor* result
           output: True
         - THTensor* tensor
-        - THTensor* other
+        - arg: THTensor* other
+          broadcast: tensor fallback
     - cname: ltValueT
       arguments:
         - arg: THTensor* result
@@ -60,7 +63,8 @@
         - arg: THTensor* result
           output: True
         - THTensor* tensor
-        - THTensor* other
+        - arg: THTensor* other
+          broadcast: tensor fallback
 ]]
 
 
@@ -79,7 +83,8 @@
         - arg: THBoolTensor* result
           output: True
         - THTensor* self
-        - THTensor* other
+        - arg: THTensor* other
+          broadcast: self fallback
 ]]
 
 [[
@@ -95,7 +100,8 @@
       arguments:
         - THTensor* self
         - THTensor* self
-        - THTensor* other
+        - arg: THTensor* other
+          broadcast: self inplace fallback
 ]]
 
 [[
@@ -114,7 +120,8 @@
         - arg: THBoolTensor* result
           output: True
         - THTensor* tensor
-        - THTensor* other
+        - arg: THTensor* other
+          broadcast: tensor fallback
     - cname: gtValueT
       arguments:
         - arg: THTensor* result
@@ -126,7 +133,8 @@
         - arg: THTensor* result
           output: True
         - THTensor* tensor
-        - THTensor* other
+        - arg: THTensor* other
+          broadcast: tensor fallback
 ]]
 
 
@@ -145,7 +153,8 @@
         - arg: THBoolTensor* result
           output: True
         - THTensor* self
-        - THTensor* other
+        - arg: THTensor* other
+          broadcast: self fallback
 ]]
 
 [[
@@ -161,7 +170,8 @@
       arguments:
         - THTensor* self
         - THTensor* self
-        - THTensor* other
+        - arg: THTensor* other
+          broadcast: self inplace fallback
 ]]
 
 [[
@@ -180,7 +190,8 @@
         - arg: THBoolTensor* result
           output: True
         - THTensor* tensor
-        - THTensor* other
+        - arg: THTensor* other
+          broadcast: tensor fallback
     - cname: leValueT
       arguments:
         - arg: THTensor* result
@@ -192,7 +203,8 @@
         - arg: THTensor* result
           output: True
         - THTensor* tensor
-        - THTensor* other
+        - arg: THTensor* other
+          broadcast: tensor fallback
 ]]
 
 
@@ -211,7 +223,8 @@
         - arg: THBoolTensor* result
           output: True
         - THTensor* self
-        - THTensor* other
+        - arg: THTensor* other
+          broadcast: self fallback
 ]]
 
 [[
@@ -227,7 +240,8 @@
       arguments:
         - THTensor* self
         - THTensor* self
-        - THTensor* other
+        - arg: THTensor* other
+          broadcast: self inplace fallback
 ]]
 
 [[
@@ -246,7 +260,8 @@
         - arg: THBoolTensor* result
           output: True
         - THTensor* tensor
-        - THTensor* other
+        - arg: THTensor* other
+          broadcast: tensor fallback
     - cname: geValueT
       arguments:
         - arg: THTensor* result
@@ -258,7 +273,8 @@
         - arg: THTensor* result
           output: True
         - THTensor* tensor
-        - THTensor* other
+        - arg: THTensor* other
+          broadcast: tensor fallback
 ]]
 
 
@@ -277,7 +293,8 @@
         - arg: THBoolTensor* result
           output: True
         - THTensor* self
-        - THTensor* other
+        - arg: THTensor* other
+          broadcast: self fallback
 ]]
 
 [[
@@ -293,7 +310,8 @@
       arguments:
         - THTensor* self
         - THTensor* self
-        - THTensor* other
+        - arg: THTensor* other
+          broadcast: self inplace fallback
 ]]
 
 [[
@@ -312,7 +330,8 @@
         - arg: THBoolTensor* result
           output: True
         - THTensor* tensor
-        - THTensor* other
+        - arg: THTensor* other
+          broadcast: tensor fallback
     - cname: eqValueT
       arguments:
         - arg: THTensor* result
@@ -324,7 +343,8 @@
         - arg: THTensor* result
           output: True
         - THTensor* tensor
-        - THTensor* other
+        - arg: THTensor* other
+          broadcast: tensor fallback
 ]]
 
 
@@ -343,7 +363,8 @@
         - arg: THBoolTensor* result
           output: True
         - THTensor* self
-        - THTensor* other
+        - arg: THTensor* other
+          broadcast: self fallback
 ]]
 
 [[
@@ -359,7 +380,8 @@
       arguments:
         - THTensor* self
         - THTensor* self
-        - THTensor* other
+        - arg: THTensor* other
+          broadcast: self inplace fallback
 ]]
 
 [[
@@ -378,7 +400,8 @@
         - arg: THBoolTensor* result
           output: True
         - THTensor* tensor
-        - THTensor* other
+        - arg: THTensor* other
+          broadcast: tensor fallback
     - cname: neValueT
       arguments:
         - arg: THTensor* result
@@ -390,7 +413,8 @@
         - arg: THTensor* result
           output: True
         - THTensor* tensor
-        - THTensor* other
+        - arg: THTensor* other
+          broadcast: tensor fallback
 ]]
 
 [[
@@ -407,7 +431,8 @@
       - arg: THTensor* result
         output: True
       - THTensor* self
-      - THTensor* other
+      - arg: THTensor* other
+        broadcast: self fallback
     - cname: min
       return: argument 0,1
       arguments:
@@ -436,7 +461,8 @@
       - arg: THTensor* result
         output: True
       - THTensor* self
-      - THTensor* other
+      - arg: THTensor* other
+        broadcast: self fallback
     - cname: max
       return: argument 0,1
       arguments:
