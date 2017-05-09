@@ -2,7 +2,7 @@
 
 #include "caffe2/distributed/store_handler.h"
 
-#include "gloo/rendezvous/store.h"
+#include <gloo/rendezvous/store.h>
 
 namespace caffe2 {
 namespace gloo {

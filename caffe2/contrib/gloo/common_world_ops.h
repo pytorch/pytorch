@@ -3,8 +3,8 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/distributed/store_handler.h"
 
-#include "gloo/rendezvous/context.h"
-#include "gloo/rendezvous/prefix_store.h"
+#include <gloo/rendezvous/context.h>
+#include <gloo/rendezvous/prefix_store.h>
 
 #include "store_handler.h"
 

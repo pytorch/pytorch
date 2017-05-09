@@ -1,8 +1,8 @@
 #include "allreduce_ops.h"
 
-#include "gloo/allreduce_halving_doubling.h"
-#include "gloo/allreduce_ring.h"
-#include "gloo/allreduce_ring_chunked.h"
+#include <gloo/allreduce_halving_doubling.h>
+#include <gloo/allreduce_ring.h>
+#include <gloo/allreduce_ring_chunked.h>
 
 namespace caffe2 {
 namespace gloo {
