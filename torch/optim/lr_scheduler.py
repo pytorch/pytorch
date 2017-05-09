@@ -17,7 +17,8 @@ class LambdaLR(object):
 
     def step(self, epoch=None):
         if epoch is None:
-            epoch = self.last_epoch = self.last_epoch + 1
+            epoch = self.last_epoch + 1
+        self.last_epoch = epoch
         for param_group, base_lr, lr_lambda in zip(self.optimizer.param_groups, self.base_lrs, self.lr_lambdas):
             param_group['lr'] = base_lr * lr_lambda(epoch)
 
@@ -186,6 +187,7 @@ class ReduceLROnPlateau(object):
         current = metrics
         if epoch is None:
             epoch = self.last_epoch = self.last_epoch + 1
+        self.last_epoch = epoch
 
         if self.is_better(current, self.best):
             self.best = current
