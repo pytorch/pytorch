@@ -978,14 +978,16 @@ class TestTorch(TestCase):
         # all out-of-place functions
         fns = [
             "dist", "atan2", "pow", "lerp", "add",
-            "sub", "mul", "div", "fmod", "remainder"
+            "sub", "mul", "div", "fmod", "remainder",
+            "eq", "ge", "gt", "le", "lt", "max", "min", "ne"
         ]
         # functions with no torch. equivalent
         fns_no_torch = ["sub"]
         # functions with no inplace equivalent
-        fns_no_inplace = ["dist"]
+        fns_no_inplace = ["dist", "max", "min"]
         # functions with fallback to equal nElem behavior
-        fns_fallback = ["add", "sub", "div", "mul", "pow", "fmod", "remainder"]
+        fns_fallback = ["add", "sub", "div", "mul", "pow", "fmod", "remainder",
+                        "eq", "ge", "gt", "le", "lt", "max", "min", "ne"]
 
         for fn in fns:
             (dims_small, dims_large, dims_full) = select_broadcastable_dims()
@@ -1059,7 +1061,8 @@ class TestTorch(TestCase):
 
     @staticmethod
     def _test_broadcast_fallback(self, cast):
-        fns_fallback = ["add", "sub", "div", "mul", "pow", "fmod", "remainder"]
+        fns_fallback = ["add", "sub", "div", "mul", "pow", "fmod", "remainder",
+                        "eq", "ge", "gt", "le", "lt", "max", "min", "ne"]
         for fn in fns_fallback:
             # case 1: both broadcastable and nElems equal -- verify that we broadcast
             t0 = torch.randn(1, 4).float()
