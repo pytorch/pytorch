@@ -13,7 +13,7 @@ class _LR_Scheduler(object):
 
     def step(self, epoch=None):
         if epoch is None:
-            epoch = self.last_epoch = self.last_epoch + 1
+            epoch = self.last_epoch + 1
         self.last_epoch = epoch
         for param_group, lr in zip(self.optimizer.param_groups, self.lr_expression()):
             param_group['lr'] = lr
