@@ -554,7 +554,6 @@ void THTensor_(sparseCopy)(THTensor *r_, THTensor *dense, THSTensor *sparse_)
     THTensor_(free)(srcBuffer);
     THTensor_(free)(dstBuffer);
   } else {
-    #pragma omp parallel for private(k)
     for (k = 0; k < sparse->nnz; k++) {
       long index = r_->storageOffset;
       for (long d = 0; d < sparse->nDimensionI; d++) {
