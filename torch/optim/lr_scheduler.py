@@ -3,7 +3,7 @@ from .optimizer import Optimizer
 
 
 class LambdaLR(object):
-    def __init__(self, optimizer, lr_lambda):
+    def __init__(self, optimizer, lr_lambda, last_epoch=-1):
         self.optimizer = optimizer
         self.base_lrs = list(map(lambda group: group['lr'], optimizer.param_groups))
         if not isinstance(lr_lambda, list) and not isinstance(lr_lambda, tuple):
@@ -13,7 +13,7 @@ class LambdaLR(object):
                 raise ValueError("Expected {} lr_lambdas, but got {}".format(
                     len(optimizer.param_groups), len(lr_lambda)))
             self.lr_lambdas = list(lr_lambda)
-        self.last_epoch = -1
+        self.last_epoch = last_epoch
 
     def step(self, epoch=None):
         if epoch is None:
@@ -44,8 +44,8 @@ class StepLR(LambdaLR):
         >>>     validate(...)
     """
 
-    def __init__(self, optimizer, step_size, gamma=0.1):
-        super(StepLR, self).__init__(optimizer, lambda epoch: gamma ** (epoch // step_size))
+    def __init__(self, optimizer, step_size, gamma=0.1, last_epoch=-1):
+        super(StepLR, self).__init__(optimizer, lambda epoch: gamma ** (epoch // step_size), last_epoch)
 
 
 class MultiStepLR(LambdaLR):
@@ -69,12 +69,13 @@ class MultiStepLR(LambdaLR):
         >>>     validate(...)
     """
 
-    def __init__(self, optimizer, milestones, gamma=0.1):
+    def __init__(self, optimizer, milestones, gamma=0.1, last_epoch=-1):
         if not list(milestones) == sorted(milestones):
             raise ValueError('Milestones should be a list of'
                              ' increasing integers. Got {}', milestones)
         super(MultiStepLR, self).__init__(optimizer,
-                                          lambda epoch: gamma ** bisect_right(milestones, epoch))
+                                          lambda epoch: gamma ** bisect_right(milestones, epoch),
+                                          last_epoch)
 
 
 class ExponentialLR(LambdaLR):
@@ -86,8 +87,10 @@ class ExponentialLR(LambdaLR):
         gamma (float): Multiplicative factor of learning rate decay.
     """
 
-    def __init__(self, optimizer, gamma):
-        super(ExponentialLR, self).__init__(optimizer, lambda epoch: gamma ** epoch)
+    def __init__(self, optimizer, gamma, last_epoch=-1):
+        super(ExponentialLR, self).__init__(optimizer,
+                                            lambda epoch: gamma ** epoch,
+                                            last_epoch)
 
 
 class ReduceLROnPlateau(object):
