@@ -596,14 +596,10 @@ class TestSparse(TestCase):
         r = ss.new_sparse(dense2sparse(type(x)), s._indices())
         v = r._values()
         for i, js in enumerate(s._indices().t()):
-            m = x
-            for j in js:
-                # NB: m[j] will happily accept a negative index; but sparse_mask
-                # really shouldnot!
-                if j < 0:
-                    raise IndexError("negative index is out of range")
-                m = m[j]
-            v[i] = m
+            if any(j < 0 for j in js):
+                raise IndexError("negative index is out of range")
+            # js is a tensor, and indexing by a tensor does something different
+            v[i] = x[tuple(js)]
         return r
 
     def prop_sparse_mask_py(self, x, s):
