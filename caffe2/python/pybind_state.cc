@@ -851,16 +851,33 @@ void addGlobalMethods(py::module& m) {
 
   // we support 2 possible signatures of python op: (inputs, outputs) or
   // (inputs, outputs, workspace)
-  m.def("register_python_op", [](py::object func, bool pass_workspace) {
-    using namespace python_detail;
-    CAFFE_ENFORCE(func != py::none());
-    const std::string name = func.attr("__name__").cast<std::string>();
-    // Unique name since registry is never cleared.
-    const std::string token = name + to_string(gRegistery().size());
-    CAFFE_ENFORCE(gRegistery().find(name) == gRegistery().end());
-    gRegistery()[token] = Func{func, pass_workspace};
-    return token;
-  });
+  m.def(
+      "register_python_op",
+      [](py::object func,
+         bool pass_workspace,
+         std::string name,
+         bool allow_prefix) {
+        using namespace python_detail;
+        CAFFE_ENFORCE(func != py::none());
+        std::string token;
+        if (allow_prefix) {
+          if (!name.empty()) {
+            name += ":";
+          }
+          name += func.attr("__name__").cast<std::string>();
+          token = name;
+          for (int i = 1; gRegistery().count(token) > 0; ++i) {
+            token = name + ":" + to_string(i);
+          }
+        } else {
+          token = name;
+        }
+        CAFFE_ENFORCE(
+            !gRegistery().count(token),
+            "Cannot register python op: token already exists");
+        gRegistery()[token] = Func{func, pass_workspace};
+        return token;
+      });
 
   m.def(
       "register_python_gradient_op",
