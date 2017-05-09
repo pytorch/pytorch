@@ -107,6 +107,14 @@ class Variable(_C._VariableBase):
     def __repr__(self):
         return 'Variable containing:' + self.data.__repr__()
 
+    def __bool__(self):
+        if self.data.numel() == 0:
+            return False
+        raise RuntimeError("bool value of Variable objects containing non-empty " +
+                           torch.typename(self.data) + " is ambiguous")
+
+    __nonzero__ = __bool__
+
     def backward(self, gradient=None, retain_variables=False):
         """Computes the gradient of current variable w.r.t. graph leaves.
 
@@ -388,11 +396,11 @@ class Variable(_C._VariableBase):
             raise ValueError("clamp requires specifying at least one of "
                              "min and max arguments")
         elif min is None and max is not None:
-            return CminConstant(max)(self)
+            return CminConstant.apply(self, max)
         elif min is not None and max is None:
-            return CmaxConstant(min)(self)
+            return CmaxConstant.apply(self, min)
         else:
-            return Clamp(min, max)(self)
+            return Clamp.apply(self, min, max)
 
     def reciprocal(self):
         return Reciprocal()(self)

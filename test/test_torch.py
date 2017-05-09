@@ -63,6 +63,9 @@ class TestTorch(TestCase):
     def test_sinh(self):
         self._testMathByName('sinh')
 
+    def test_lgamma(self):
+        self._testMathByName('lgamma')
+
     def test_asin(self):
         self._testMath(torch.asin, lambda x: math.asin(x) if abs(x) <= 1 else float('nan'))
 
@@ -1396,6 +1399,12 @@ class TestTorch(TestCase):
              1.5543122344752192e-15, 4.0824829046386757e-01)
         ))
         check_qr(a, expected_q, expected_r)
+
+        # check big matrix
+        a = torch.randn(1000, 1000)
+        q, r = torch.qr(a)
+        a_qr = torch.mm(q, r)
+        self.assertEqual(a, a_qr, prec=1e-3)
 
     @skipIfNoLapack
     def test_ormqr(self):
