@@ -1,6 +1,7 @@
 #ifndef CAFFE2_CORE_OPERATOR_H_
 #define CAFFE2_CORE_OPERATOR_H_
 
+#include <array>
 #include <climits>
 #include <cstddef>
 #include <exception>
