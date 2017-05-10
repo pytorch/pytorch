@@ -215,7 +215,7 @@ class Module(object):
             while not isinstance(var, Variable):
                 var = var[0]
             grad_fn = var.grad_fn
-            if grad_fn is not None and
+            if grad_fn is not None:
                 for hook in self._backward_hooks.values():
                     wrapper = functools.partial(hook, self)
                     functools.update_wrapper(wrapper, hook)
