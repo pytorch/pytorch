@@ -3,13 +3,27 @@ from .optimizer import Optimizer
 
 
 class _LRScheduler(object):
-    def __init__(self, optimizer, last_epoch=-1):
+    def __init__(self, optimizer, base_lrs=None, last_epoch=-1):
         self.optimizer = optimizer
         self.last_epoch = last_epoch
-        self.base_lrs = list(map(lambda group: group['lr'], optimizer.param_groups))
+        if base_lrs is None:
+            if last_epoch == -1:
+                self.base_lrs = list(map(lambda group: group['lr'], optimizer.param_groups))
+            else:
+                raise ValueError('base_lrs need to be specified when last_epoch != -1')
+        else:
+            if isinstance(base_lrs, list) or isinstance(base_lrs, tuple):
+                if len(base_lrs) != len(optimizer.param_groups):
+                    raise ValueError(
+                        'len(lr)={} does not match len(param_groups)={}'.format(
+                            len(base_lrs), len(optimizer.param_groups)
+                        ))
+                self.base_lrs = base_lrs
+            else:
+                self.base_lrs = [base_lrs] * len(optimizer.param_groups)
 
     def lr_expression(self):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def step(self, epoch=None):
         if epoch is None:
@@ -20,7 +34,7 @@ class _LRScheduler(object):
 
 
 class LambdaLR(_LRScheduler):
-    def __init__(self, optimizer, lr_lambda, last_epoch=-1):
+    def __init__(self, optimizer, lr_lambda, base_lrs=None, last_epoch=-1):
         self.optimizer = optimizer
         self.base_lrs = list(map(lambda group: group['lr'], optimizer.param_groups))
         if not isinstance(lr_lambda, list) and not isinstance(lr_lambda, tuple):
@@ -31,7 +45,7 @@ class LambdaLR(_LRScheduler):
                     len(optimizer.param_groups), len(lr_lambda)))
             self.lr_lambdas = list(lr_lambda)
         self.last_epoch = last_epoch
-        super(LambdaLR, self).__init__(optimizer, last_epoch)
+        super(LambdaLR, self).__init__(optimizer, base_lrs, last_epoch)
 
     def lr_expression(self):
         return [base_lr * lmbda(self.last_epoch)
@@ -60,10 +74,10 @@ class StepLR(_LRScheduler):
         >>>     validate(...)
     """
 
-    def __init__(self, optimizer, step_size, gamma=0.1, last_epoch=-1):
+    def __init__(self, optimizer, step_size, gamma=0.1, base_lrs=None, last_epoch=-1):
         self.step_size = step_size
         self.gamma = gamma
-        super(StepLR, self).__init__(optimizer, last_epoch)
+        super(StepLR, self).__init__(optimizer, base_lrs, last_epoch)
 
     def lr_expression(self):
         return [base_lr * self.gamma ** (self.last_epoch // self.step_size)
@@ -91,13 +105,13 @@ class MultiStepLR(_LRScheduler):
         >>>     validate(...)
     """
 
-    def __init__(self, optimizer, milestones, gamma=0.1, last_epoch=-1):
+    def __init__(self, optimizer, milestones, gamma=0.1, base_lrs=None, last_epoch=-1):
         if not list(milestones) == sorted(milestones):
             raise ValueError('Milestones should be a list of'
                              ' increasing integers. Got {}', milestones)
         self.milestones = milestones
         self.gamma = gamma
-        super(MultiStepLR, self).__init__(optimizer, last_epoch)
+        super(MultiStepLR, self).__init__(optimizer, base_lrs, last_epoch)
 
     def lr_expression(self):
         return [base_lr * self.gamma ** bisect_right(self.milestones, self.last_epoch)
@@ -113,9 +127,9 @@ class ExponentialLR(_LRScheduler):
         gamma (float): Multiplicative factor of learning rate decay.
     """
 
-    def __init__(self, optimizer, gamma, last_epoch=-1):
+    def __init__(self, optimizer, gamma, base_lrs=None, last_epoch=-1):
         self.gamma = gamma
-        super(ExponentialLR, self).__init__(optimizer, last_epoch)
+        super(ExponentialLR, self).__init__(optimizer, base_lrs, last_epoch)
 
     def lr_expression(self):
         return [base_lr * self.gamma ** self.last_epoch
