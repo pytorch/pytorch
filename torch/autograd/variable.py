@@ -496,7 +496,6 @@ class Variable(_C._VariableBase):
 
     def var(self, dim=None, keepdim=True, unbiased=True):
         mean = self.mean(dim, keepdim)
-
         if dim is None:
             mean = mean.view(*(1 for s in self.size()))
         # we could just set keepdim to True, but this preserves some fidelity
