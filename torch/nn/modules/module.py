@@ -338,7 +338,7 @@ class Module(object):
         if len(missing) > 0:
             raise KeyError('missing keys in state_dict: "{}"'.format(missing))
 
-    def parameters(self, memo=None):
+    def parameters(self):
         """Returns an iterator over module parameters.
 
         This is typically passed to an optimizer.
@@ -349,7 +349,7 @@ class Module(object):
             <class 'torch.FloatTensor'> (20L,)
             <class 'torch.FloatTensor'> (20L, 1L, 5L, 5L)
         """
-        for name, param in self.named_parameters(memo):
+        for name, param in self.named_parameters():
             yield param
 
     def named_parameters(self, memo=None, prefix=''):
