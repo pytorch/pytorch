@@ -4,6 +4,9 @@ from .optimizer import Optimizer
 
 class _LRScheduler(object):
     def __init__(self, optimizer, base_lrs=None, last_epoch=-1):
+        if not isinstance(optimizer, Optimizer):
+            raise TypeError('{} is not an Optimizer'.format(
+                type(optimizer).__name__))
         self.optimizer = optimizer
         self.last_epoch = last_epoch
         if base_lrs is None:
