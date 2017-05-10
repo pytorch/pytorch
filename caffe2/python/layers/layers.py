@@ -5,7 +5,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import schema, scope
+from caffe2.python import core, schema, scope
 from caffe2.python.layers.tags import TagContext
 
 from collections import namedtuple
@@ -102,13 +102,16 @@ def create_layer(layer_name, *args, **kwargs):
 LayerPsParam = namedtuple('LayerPsParam', ['sparse_key', 'average_length'])
 
 
-# TODO(amalevich): Modify this to some better struct, something closer to
-# ParameterInfo.
-LayerParameter = namedtuple(
-    'LayerParameter',
-    ['parameter', 'optimizer', 'initializer', 'ps_param'])
-LayerParameter.__new__.__defaults__ = (None, None, None, None)
+class LayerParameter(object):
 
+    def __init__(self, parameter=None, optimizer=None, initializer=None,
+                 ps_param=None):
+        assert isinstance(parameter, core.BlobReference), \
+            "expect {0} to be a blob reference".format(str(parameter))
+        self.parameter = parameter
+        self.optimizer = optimizer
+        self.initializer = initializer
+        self.ps_param = ps_param
 
 def is_request_only_scalar(scalar):
     if len(scalar.field_metadata()) == 0:
@@ -238,6 +241,10 @@ class ModelLayer(object):
                     # all params (looks a bit safer and breaking less
                     # abstractions) or extend Net interface to this type of
                     # operations better
+                    # TODO(xlwang) init_net._net.op has type google.protobuf.\
+                    # internal.containers.RepeatedCompositeFieldContainer, but
+                    # the version of protobuf in fbcode does not support append
+                    # so extend is used
                     init_net._net.op.extend([param.initializer])
             if context == InstantiationContext.TRAINING:
                 self.add_train_ops(net)
