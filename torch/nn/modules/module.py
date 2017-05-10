@@ -338,7 +338,7 @@ class Module(object):
         if len(missing) > 0:
             raise KeyError('missing keys in state_dict: "{}"'.format(missing))
 
-    def parameters(self, memo=None):
+    def parameters(self):
         """Returns an iterator over module parameters.
 
         This is typically passed to an optimizer.
