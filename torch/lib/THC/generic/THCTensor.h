@@ -71,6 +71,7 @@ THC_API THCTensor *THCTensor_(newExpand)(THCState *state, THCTensor *tensor, THL
 
 THC_API int THCTensor_(expand)(THCState *state, THCTensor *r, THCTensor *tensor, THLongStorage *sizes, int raiseErrors);
 THC_API int THCTensor_(expand2)(THCState *state, THCTensor *ra, THCTensor *rb, THCTensor *opa, THCTensor *opb, int raiseErrors);
+THC_API int THCTensor_(expand3)(THCState *state, THCTensor *ra, THCTensor *rb, THCTensor *rc, THCTensor *opa, THCTensor *opb, THCTensor *opc, int raiseErrors);
 
 THC_API void THCTensor_(resize)(THCState *state, THCTensor *tensor, THLongStorage *size, THLongStorage *stride);
 THC_API void THCTensor_(resizeAs)(THCState *state, THCTensor *tensor, THCTensor *src);
