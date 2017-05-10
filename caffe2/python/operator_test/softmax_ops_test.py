@@ -179,6 +179,72 @@ class TestSoftmaxOps(hu.HypothesisTestCase):
         self.assertGradientChecks(
             gc, op, [X, label], 0, [1], stepsize=1e-4, threshold=1e-2)
 
+    @given(
+        n=st.integers(2, 5),
+        D=st.integers(4, 16),
+        only_loss=st.booleans(),
+        label_prob=st.booleans(),
+        **hu.gcs
+    )
+    def test_softmax_with_loss_axis_2(
+        self, n, D, only_loss, label_prob,
+        gc, dc
+    ):
+        X = np.random.rand(n, n, D).astype(np.float32)
+        X = X + 1e-2
+
+        if label_prob:
+            label = np.random.rand(n, n, D).astype(np.float32)
+            label /= label.sum(axis=2, keepdims=True)
+        else:
+            label = (np.random.rand(n, n) * D).astype(np.int32)
+
+        # Reference implementation of cross entropy with soft labels
+        def label_softmax_crossent(X, label):
+            probs = np.zeros((n, n, D))
+            rowmax = np.zeros((n, n))
+            for i in range(n):
+                for j in range(n):
+                    rowmax[i, j] = max(X[i, j, ])
+                    # We need to subtract the max to avoid numerical issues
+                    probs[i, j] = X[i, j] - rowmax[i, j]
+                    exps = np.exp(probs[i, j, ])
+                    norm = sum(exps)
+                    probs[i, j, ] = exps / norm
+            label_xent = 0
+            for i in range(n):
+                for j in range(n):
+                    if label_prob:
+                        for k in range(D):
+                            label_xent += (
+                                -np.log(max(probs[i, j, k], 1e-20)) *
+                                label[i, j, k]
+                            )
+                    else:
+                        label_xent += -np.log(max(probs[i, j, label[i, j]], 1e-20))
+
+            avgloss = label_xent / float(n * n)
+            return (probs, avgloss)
+
+        op = core.CreateOperator(
+            "SoftmaxWithLoss",
+            ["X", "label"],
+            ["probs", "avgloss"],
+            only_loss=only_loss,
+            label_prob=label_prob,
+            axis=2,
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[X, label],
+            reference=label_softmax_crossent,
+        )
+
+        self.assertGradientChecks(
+            gc, op, [X, label], 0, [1], stepsize=1e-4, threshold=1e-2)
+
     @unittest.skipIf(not workspace.has_gpu_support, "No gpu support")
     @given(**hu.gcs_gpu_only)
     def test_softmax_with_loss_large(self, gc, dc):
