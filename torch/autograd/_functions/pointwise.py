@@ -242,8 +242,8 @@ class Atan(Function):
         return grad_output * i.mul(i).add_(1).reciprocal()
 
 
-class Reciprocal(Function):
 # TODO: make inplace and update grad formulas
+class Reciprocal(Function):
 
     @staticmethod
     def forward(ctx, i):
@@ -393,7 +393,7 @@ class Rsqrt(InplaceFunction):
 class Addcmul(InplaceFunction):
 
     @staticmethod
-    def forward(ctx, add_tensor, mul_tensor1, mul_tensor2, scale = 1.0, inplace = False):
+    def forward(ctx, add_tensor, mul_tensor1, mul_tensor2, scale=1.0, inplace=False):
         ctx._scale = scale
         ctx.save_for_backward(mul_tensor1, mul_tensor2)
         if inplace:
@@ -422,7 +422,7 @@ class Addcmul(InplaceFunction):
 class Addcdiv(InplaceFunction):
 
     @staticmethod
-    def forward(ctx, add_tensor, div_tensor1, div_tensor2, scale = 1.0, inplace = False):
+    def forward(ctx, add_tensor, div_tensor1, div_tensor2, scale=1.0, inplace=False):
         ctx._scale = scale
         ctx.save_for_backward(div_tensor1, div_tensor2)
         if inplace:
