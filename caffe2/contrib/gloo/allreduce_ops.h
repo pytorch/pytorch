@@ -13,7 +13,7 @@ namespace gloo {
 
 template <typename T, class Context>
 class AllreduceOp final : public Operator<Context> {
-  enum Mode { RING_FULL, RING_CHUNKED };
+  enum Mode { RING_FULL, RING_CHUNKED, HALVING_DOUBLING };
 
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -37,20 +37,20 @@ class AllreduceOp final : public Operator<Context> {
 
  protected:
   void initialize() {
-    Mode mode = RING_FULL;
+    Mode mode = HALVING_DOUBLING;
     auto bytes = Input(1).nbytes();
+
+    // Store which inputs/outputs this instance initialized with
+    update(init_);
 
     // Pretty arbitrary threshold but seems to work well.
     // Logic for switching between algorithms in a topology
     // dependent manner will eventually move to Gloo itself.
-    if (bytes < (256 * 1024)) {
-      mode = RING_FULL;
+    if (bytes < (4 * 1024 * 1024) || init_.context->size >= 16) {
+      mode = HALVING_DOUBLING;
     } else {
       mode = RING_CHUNKED;
     }
-
-    // Store which inputs/outputs this instance initialized with
-    update(init_);
 
     // Verify inputs == ouputs
     CAFFE_ENFORCE_EQ(init_.inputs.size(), init_.outputs.size());
@@ -71,11 +71,15 @@ class AllreduceOp final : public Operator<Context> {
       case RING_CHUNKED:
         initializeRingChunked();
         return;
+      case HALVING_DOUBLING:
+        initializeHalvingDoubling();
+        return;
     }
 
     CAFFE_ENFORCE(false, "Unreachable code");
   }
 
+  void initializeHalvingDoubling();
   void initializeRingFull();
   void initializeRingChunked();
 

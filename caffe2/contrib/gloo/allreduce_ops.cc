@@ -8,14 +8,20 @@ namespace caffe2 {
 namespace gloo {
 
 template <typename T, class Context>
-void AllreduceOp<T, Context>::initializeRingFull() {
+void AllreduceOp<T, Context>::initializeHalvingDoubling() {
   algorithm_.reset(new ::gloo::AllreduceHalvingDoubling<T>(
       init_.context, init_.outputs, init_.size));
 }
 
 template <typename T, class Context>
+void AllreduceOp<T, Context>::initializeRingFull() {
+  algorithm_.reset(
+      new ::gloo::AllreduceRing<T>(init_.context, init_.outputs, init_.size));
+}
+
+template <typename T, class Context>
 void AllreduceOp<T, Context>::initializeRingChunked() {
-  algorithm_.reset(new ::gloo::AllreduceHalvingDoubling<T>(
+  algorithm_.reset(new ::gloo::AllreduceRingChunked<T>(
       init_.context, init_.outputs, init_.size));
 }
 
