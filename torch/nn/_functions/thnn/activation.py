@@ -174,7 +174,8 @@ class Threshold(Function):
                 False
             )
         else:
-            grad_input = grad_output.masked_fill(input > ctx.threshold, 0)
+            mask = input > ctx.threshold
+            grad_input = mask.type_as(grad_output) * grad_output
         return grad_input, None, None, None
 
 
