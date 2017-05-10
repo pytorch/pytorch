@@ -349,7 +349,7 @@ class Module(object):
             <class 'torch.FloatTensor'> (20L,)
             <class 'torch.FloatTensor'> (20L, 1L, 5L, 5L)
         """
-        for name, param in self.named_parameters():
+        for name, param in self.named_parameters(memo):
             yield param
 
     def named_parameters(self, memo=None, prefix=''):
