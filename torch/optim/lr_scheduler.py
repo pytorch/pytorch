@@ -15,8 +15,8 @@ class _LRScheduler(object):
             if isinstance(base_lrs, list) or isinstance(base_lrs, tuple):
                 if len(base_lrs) != len(optimizer.param_groups):
                     raise ValueError(
-                        'len(lr)={} does not match len(param_groups)={}'.format(
-                            len(base_lrs), len(optimizer.param_groups)
+                        'Expected {} lr_lambdas, but got {}'.format(
+                            len(optimizer.param_groups), len(base_lrs)
                         ))
                 self.base_lrs = base_lrs
             else:
