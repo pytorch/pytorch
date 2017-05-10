@@ -402,7 +402,8 @@ class Rsqrt(InplaceFunction):
 class Addcmul(InplaceFunction):
 
     @staticmethod
-    def forward(ctx, add_tensor, *args, inplace=False):
+    def forward(ctx, add_tensor, *args, **argsd):
+        inplace = argsd.get("inplace", False)
         if len(args) == 3 and type(args[-1]) != bool:
             scale, mul_tensor1, mul_tensor2 = args
             ctx._have_scale = 1
@@ -451,7 +452,8 @@ class Addcmul(InplaceFunction):
 class Addcdiv(InplaceFunction):
 
     @staticmethod
-    def forward(ctx, add_tensor, *args, inplace=False):
+    def forward(ctx, add_tensor, *args, **argsd):
+        inplace = argsd.get("inplace", False)
         if len(args) == 3 and type(args[-1]) != bool:
             scale, div_tensor1, div_tensor2 = args
             ctx._have_scale = 1
