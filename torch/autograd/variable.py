@@ -582,10 +582,10 @@ class Variable(_C._VariableBase):
     def _addcop(self, op, args):
         if len(args) == 3:
             # scale, tensor1, tensor2
-            return op.apply(self, *args)
+            return op.apply(self, args[1], args[2], args[0])
         else:
             # tensor1, tensor2
-            return op.apply(self, 1.0, *args)
+            return op.apply(self, *args)
 
     def addcmul(self, *args):
         return self._addcop(Addcmul, args)

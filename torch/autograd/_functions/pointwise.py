@@ -142,15 +142,12 @@ class Clamp(Function):
 
     @staticmethod
     def forward(ctx, i, min_val, max_val):
-        ctx.save_for_backward(i)
-        ctx._min_val = min_val
-        ctx._max_val = max_val
+        ctx._mask = (i.ge(min_val) * i.le(max_val))
         return i.clamp(min_val, max_val)
 
     @staticmethod
     def backward(ctx, grad_output):
-        i, = ctx.saved_variables
-        mask = (i.ge(ctx._min_val) * i.le(ctx._max_val)).type_as(i)
+        mask = Variable(ctx._mask.type_as(grad_output.data))
         return grad_output * mask, None, None
 
 
@@ -164,7 +161,7 @@ class Sqrt(Function):
     @staticmethod
     def backward(ctx, grad_output):
         i, = ctx.saved_variables
-        return grad_output.mul(i.pow(-0.5)).div(2)
+        return grad_output.mul(i.pow(-0.5)).div_(2)
 
 
 class Sin(Function):
@@ -229,7 +226,7 @@ class Acos(Function):
     @staticmethod
     def backward(ctx, grad_output):
         i, = ctx.saved_variables
-        return grad_output.mul((1 - i.mul(i)).sqrt().reciprocal()).neg()
+        return grad_output.mul((1 - i.mul(i)).sqrt().reciprocal()).neg_()
 
 
 class Atan(Function):
@@ -242,10 +239,11 @@ class Atan(Function):
     @staticmethod
     def backward(ctx, grad_output):
         i, = ctx.saved_variables
-        return grad_output * i.mul(i).add(1).reciprocal()
+        return grad_output * i.mul(i).add_(1).reciprocal()
 
 
 class Reciprocal(Function):
+# TODO: make inplace and update grad formulas
 
     @staticmethod
     def forward(ctx, i):
@@ -263,16 +261,15 @@ class Cmax(Function):
 
     @staticmethod
     def forward(ctx, a, b):
-        ctx.save_for_backward(a, b)
+        ctx._mask = a.gt(b)
         return a.max(b)
 
     @staticmethod
     def backward(ctx, grad_output):
-        a, b = ctx.saved_variables
-        mask = a.gt(b).type_as(a)
+        mask = Variable(ctx._mask.type_as(grad_output.data))
         return (
             grad_output * mask,
-            grad_output * mask.eq(0).type_as(grad_output)
+            grad_output * Variable(ctx._mask.eq(0).type_as(grad_output.data))
         )
 
 
@@ -280,14 +277,12 @@ class CmaxConstant(Function):
 
     @staticmethod
     def forward(ctx, i, constant):
-        ctx.save_for_backward(i)
-        ctx._constant = constant
+        ctx._mask = i.gt(constant)
         return i.clamp(min=constant)
 
     @staticmethod
     def backward(ctx, grad_output):
-        i, = ctx.saved_variables
-        mask = i.gt(ctx._constant).type_as(i)
+        mask = Variable(ctx._mask.type_as(grad_output.data))
         return grad_output * mask, None
 
 
@@ -295,16 +290,15 @@ class Cmin(Function):
 
     @staticmethod
     def forward(ctx, a, b):
-        ctx.save_for_backward(a, b)
+        ctx._mask = a.lt(b).type_as(a)
         return a.min(b)
 
     @staticmethod
     def backward(ctx, grad_output):
-        a, b = ctx.saved_variables
-        mask = a.lt(b).type_as(a)
+        mask = Variable(ctx._mask.type_as(grad_output.data))
         return (
             grad_output * mask,
-            grad_output * mask.eq(0).type_as(grad_output)
+            grad_output * Variable(ctx._mask.eq(0).type_as(grad_output.data))
         )
 
 
@@ -312,14 +306,12 @@ class CminConstant(Function):
 
     @staticmethod
     def forward(ctx, i, constant):
-        ctx.save_for_backward(i)
-        ctx._constant = constant
+        ctx._mask = i.lt(constant)
         return i.clamp(max=constant)
 
     @staticmethod
     def backward(ctx, grad_output):
-        i, = ctx.saved_variables
-        mask = i.lt(ctx._constant).type_as(i)
+        mask = Variable(ctx._mask.type_as(grad_output.data))
         return grad_output * mask, None
 
 
@@ -378,7 +370,6 @@ class Lerp(Function):
     @staticmethod
     def backward(ctx, grad_output):
         return grad_output.mul(1 - ctx._weight), grad_output.mul(ctx._weight), None
-        # TODO: grad for weight?
 
 
 class Rsqrt(InplaceFunction):
@@ -402,22 +393,7 @@ class Rsqrt(InplaceFunction):
 class Addcmul(InplaceFunction):
 
     @staticmethod
-    def forward(ctx, add_tensor, *args, **argsd):
-        inplace = argsd.get("inplace", False)
-        if len(args) == 3 and type(args[-1]) != bool:
-            scale, mul_tensor1, mul_tensor2 = args
-            ctx._have_scale = 1
-        elif len(args) == 3:
-            scale = 1.0
-            mul_tensor1, mul_tensor2, inplace = args
-            ctx._have_scale = 0
-        elif len(args) == 4:
-            scale, mul_tensor1, mul_tensor2, inplace = args
-            ctx._have_scale = 1
-        else:
-            scale = 1.0
-            mul_tensor1, mul_tensor2 = args
-            ctx._have_scale = 0
+    def forward(ctx, add_tensor, mul_tensor1, mul_tensor2, scale = 1.0, inplace = False):
         ctx._scale = scale
         ctx.save_for_backward(mul_tensor1, mul_tensor2)
         if inplace:
@@ -434,40 +410,19 @@ class Addcmul(InplaceFunction):
         if ctx.needs_input_grad[0]:
             grad_add = grad_output
 
-        if ctx._have_scale:
-            assert not ctx.needs_input_grad[1], "Gradient of scale not implemented"
-
-        if ctx.needs_input_grad[1 + ctx._have_scale]:
+        if ctx.needs_input_grad[1]:
             grad_mul1 = grad_output.mul(mul_tensor2).mul(ctx._scale)
 
-        if ctx.needs_input_grad[2 + ctx._have_scale]:
+        if ctx.needs_input_grad[2]:
             grad_mul2 = grad_output.mul(mul_tensor1).mul(ctx._scale)
 
-        if ctx._have_scale:
-            return grad_add, None, grad_mul1, grad_mul2, None
-        else:
-            return grad_add, grad_mul1, grad_mul2, None
+        return grad_add, grad_mul1, grad_mul2, None, None
 
 
 class Addcdiv(InplaceFunction):
 
     @staticmethod
-    def forward(ctx, add_tensor, *args, **argsd):
-        inplace = argsd.get("inplace", False)
-        if len(args) == 3 and type(args[-1]) != bool:
-            scale, div_tensor1, div_tensor2 = args
-            ctx._have_scale = 1
-        elif len(args) == 3:
-            scale = 1.0
-            div_tensor1, div_tensor2, inplace = args
-            ctx._have_scale = 0
-        elif len(args) == 4:
-            scale, div_tensor1, div_tensor2, inplace = args
-            ctx._have_scale = 1
-        else:
-            scale = 1.0
-            div_tensor1, div_tensor2 = args
-            ctx._have_scale = 0
+    def forward(ctx, add_tensor, div_tensor1, div_tensor2, scale = 1.0, inplace = False):
         ctx._scale = scale
         ctx.save_for_backward(div_tensor1, div_tensor2)
         if inplace:
@@ -484,19 +439,13 @@ class Addcdiv(InplaceFunction):
         if ctx.needs_input_grad[0]:
             grad_add = grad_output
 
-        if ctx._have_scale:
-            assert not ctx.needs_input_grad[1], "Gradient of scale not implemented"
-
-        if ctx.needs_input_grad[1 + ctx._have_scale]:
+        if ctx.needs_input_grad[1]:
             grad_div1 = grad_output.div(div_tensor2).mul(ctx._scale)
 
-        if ctx.needs_input_grad[2 + ctx._have_scale]:
+        if ctx.needs_input_grad[2]:
             div_tensor2_sq = div_tensor2.mul(div_tensor2)
             grad_div2 = grad_output.mul(div_tensor1).div(div_tensor2_sq).neg().mul(ctx._scale)
 
-        if ctx._have_scale:
-            return grad_add, None, grad_div1, grad_div2, None
-        else:
-            return grad_add, grad_div1, grad_div2, None
+        return grad_add, grad_div1, grad_div2, None, None
 
 # TODO: atan2 + inplace
