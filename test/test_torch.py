@@ -946,12 +946,15 @@ class TestTorch(TestCase):
 
     @staticmethod
     def _test_broadcast(self, cast):
-        def select_broadcastable_dims():
+        def select_broadcastable_dims(dims_full=None):
             # select full dimensionality
-            ndims = random.randint(1, 4)
-            dims_full = []
-            for _ in range(ndims):
-                dims_full = dims_full + [random.randint(1, 8)]
+            if dims_full is None:
+                dims_full=[]
+                ndims = random.randint(1, 4)
+                for _ in range(ndims):
+                    dims_full = dims_full + [random.randint(1, 8)]
+            else:
+                ndims = len(dims_full)
 
             # select actual dimensions for ops:
             # larger: full ndims, individual sizes may be reduced
@@ -979,15 +982,21 @@ class TestTorch(TestCase):
         fns = [
             "dist", "atan2", "pow", "lerp", "add",
             "sub", "mul", "div", "fmod", "remainder",
-            "eq", "ge", "gt", "le", "lt", "max", "min", "ne"
+            "eq", "ge", "gt", "le", "lt", "max", "min", "ne",
+            "addcdiv", "addcmul"
         ]
         # functions with no torch. equivalent
         fns_no_torch = ["sub"]
         # functions with no inplace equivalent
         fns_no_inplace = ["dist", "max", "min"]
+        # functions with no out-of-place tensor version
+        fns_no_out_place = []
         # functions with fallback to equal nElem behavior
         fns_fallback = ["add", "sub", "div", "mul", "pow", "fmod", "remainder",
-                        "eq", "ge", "gt", "le", "lt", "max", "min", "ne"]
+                        "eq", "ge", "gt", "le", "lt", "max", "min", "ne",
+                        "addcdiv", "addcmul"]
+        # functions with three tensor arguments
+        fns_3_args = ["addcdiv", "addcmul"]
 
         for fn in fns:
             (dims_small, dims_large, dims_full) = select_broadcastable_dims()
@@ -997,108 +1006,182 @@ class TestTorch(TestCase):
             large = cast(large)
             smallExpanded = small.expand(*dims_full)
             largeExpanded = large.expand(*dims_full)
-            # run through tensor versions of functions
-            # and verify fully expanded inputs give same results
-            fntensor_large_expanded = getattr(largeExpanded, fn)
-            fntensor_large_non_expanded = getattr(large, fn)
+            small2 = None
+            small2Expanded = None
+            if fn in fns_3_args:
+                # create another smaller tensor
+                (dims_small2, _, _) = select_broadcastable_dims(dims_full)
+                small2 = torch.randn(*dims_small2).float()
+                small2 = cast(small2)
+                small2Expanded = small2.expand(*dims_full)
 
-            def tensorfn(myfn, t):
-                return myfn(t) if fn != "lerp" else myfn(t, 0.5)
-            r1 = tensorfn(fntensor_large_expanded, smallExpanded)
-            r2 = tensorfn(fntensor_large_non_expanded, small)
-            self.assertEqual(r1, r2)
-            # other order
-            fntensor_small_expanded = getattr(smallExpanded, fn)
-            fntensor_small_non_expanded = getattr(small, fn)
-            r1 = tensorfn(fntensor_small_expanded, largeExpanded)
-            r2 = tensorfn(fntensor_small_non_expanded, large)
-            self.assertEqual(r1, r2)
+            if fn not in fns_no_out_place:
+                # run through tensor versions of functions
+                # and verify fully expanded inputs give same results
+                fntensor_large_expanded = getattr(largeExpanded, fn)
+                fntensor_large_non_expanded = getattr(large, fn)
+
+                def tensorfn(myfn, t1, t2):
+                    if fn == "lerp":
+                        return myfn(t1, 0.5)
+                    elif fn in fns_3_args:
+                        return myfn(1, t1, t2)
+                    else:
+                        return myfn(t1)
+                r1 = tensorfn(fntensor_large_expanded, smallExpanded, small2Expanded)
+                r2 = tensorfn(fntensor_large_non_expanded, small, small2)
+                self.assertEqual(r1, r2)
+                # other order
+                fntensor_small_expanded = getattr(smallExpanded, fn)
+                fntensor_small_non_expanded = getattr(small, fn)
+                r1 = tensorfn(fntensor_small_expanded, largeExpanded, small2Expanded)
+                r2 = tensorfn(fntensor_small_non_expanded, large, small2)
+                self.assertEqual(r1, r2)
+                if fn in fns_3_args:
+                    fntensor_small2_expanded = getattr(small2Expanded, fn)
+                    fntensor_small2_non_expanded = getattr(small2, fn)
+                    r1 = tensorfn(fntensor_small2_expanded, smallExpanded, largeExpanded)
+                    r2 = tensorfn(fntensor_small2_non_expanded, small, large)
+                    self.assertEqual(r1, r2)
+                    r1 = tensorfn(fntensor_small2_expanded, largeExpanded, smallExpanded)
+                    r2 = tensorfn(fntensor_small2_non_expanded, large, small)
+                    self.assertEqual(r1, r2)
 
             # now for torch. versions of functions
             if fn not in fns_no_torch:
                 fntorch = getattr(torch, fn)
 
-                def torchfn(t1, t2):
-                    return (fntorch(t1, t2) if fn != "lerp"
-                            else fntorch(t1, t2, 0.5))
-                r1 = torchfn(large, small)
-                r2 = torchfn(largeExpanded, smallExpanded)
+                def torchfn(t1, t2, t3):
+                    if fn == "lerp":
+                        return fntorch(t1, t2, 0.5)
+                    elif fn in fns_3_args:
+                        return fntorch(t1, 1.0, t2, t3)
+                    else:
+                        return fntorch(t1, t2)
+                r1 = torchfn(large, small, small2)
+                r2 = torchfn(largeExpanded, smallExpanded, small2Expanded)
                 self.assertEqual(r1, r2)
                 # other order
-                r1 = torchfn(small, large)
-                r2 = torchfn(smallExpanded, largeExpanded)
+                r1 = torchfn(small, large, small2)
+                r2 = torchfn(smallExpanded, largeExpanded, small2Expanded)
                 self.assertEqual(r1, r2)
+                if fn in fns_3_args:
+                    r1 = torchfn(small2, small, large)
+                    r2 = torchfn(small2Expanded, smallExpanded, largeExpanded)
+                    self.assertEqual(r1, r2)
+                    r1 = torchfn(small2, large, small)
+                    r2 = torchfn(small2Expanded, largeExpanded, smallExpanded)
+                    self.assertEqual(r1, r2)
 
             # now for in place functions
             if fn not in fns_no_inplace:
                 # in-place tensor is not broadcastable; test only guaranteed
-                # to work by broadcasting other argument
+                # to work by broadcasting other argument(s)
 
-                # need to clone largeExpanded so we can reuse
+                # need to clone largeExpanded so we can reuse, since functions are in-place
                 largeExpandedClone = largeExpanded.clone()
 
-                def tensorfn_inplace(t0, t1):
+                def tensorfn_inplace(t0, t1, t2=None):
                     t0_fn = getattr(t0, fn + "_")
-                    return t0_fn(t1) if fn != "lerp" else t0_fn(t1, 0.5)
-                r1 = tensorfn_inplace(largeExpanded, smallExpanded)
-                r2 = tensorfn_inplace(largeExpandedClone, small)
-                # in-place pointwise operations don't actually work on 0-strided tensors
-                # (numpy has the same issue)
-                if (0 not in largeExpanded.stride() and 0 not in smallExpanded.stride()
-                    and 0 not in largeExpandedClone.stride() and 0 not in small.stride()):
+                    if fn == "lerp":
+                        return t0_fn(t1, 0.5)
+                    elif fn in fns_3_args:
+                        return t0_fn(1.0, t1, t2)
+                    else:
+                        return t0_fn(t1)
+                r1 = tensorfn_inplace(largeExpanded, smallExpanded, small2Expanded)
+                r2 = tensorfn_inplace(largeExpandedClone, small, small2)
+                # in-place pointwise operations don't actually work if the in-place
+                # tensor is 0-strided (numpy has the same issue)
+                if (0 not in largeExpanded.stride() and 0 not in largeExpandedClone.stride()):
                     self.assertEqual(r1, r2)
 
-                broadcastable = (dims_small == dims_full)
-                if not broadcastable:
-                    if (fn not in fns_fallback) or (fn in fns_fallback and small.numel() != largeExpanded.numel()):
-                        self.assertRaises(RuntimeError, lambda: tensorfn_inplace(small, largeExpanded))
-                    if (fn not in fns_fallback) or (fn in fns_fallback and small.numel() != large.numel()):
-                        self.assertRaises(RuntimeError, lambda: tensorfn_inplace(small, large))
+                def broadcastable(t0, t1, t2=None):
+                    try:
+                        t1.expand_as(t0)
+                        if t2 is not None:
+                            t2.expand_as(t0)
+                    except RuntimeError:
+                        return False
+                    return True
+
+                def _test_in_place_broadcastable(t0, t1, t2=None):
+                    if not broadcastable(t0, t1, t2):
+                        same_size = t0.numel() == t1.numel() and (t0.numel() == t2.numel() if t2 is not None else True)
+                        if (fn not in fns_fallback) or (fn in fns_fallback and not same_size):
+                            self.assertRaises(RuntimeError, lambda: tensorfn_inplace(t0, t1, t2))
+                    else:
+                        tensorfn_inplace(t0, t1, t2)
+
+                if fn not in fns_3_args:
+                    _test_in_place_broadcastable(small, largeExpanded)
+                    _test_in_place_broadcastable(small, large)
+                else:
+                    _test_in_place_broadcastable(small2, smallExpanded, largeExpanded)
+                    _test_in_place_broadcastable(small2, small, large)
 
     def test_broadcast(self):
-        for i in range(100):
-            self._test_broadcast(self, lambda t: t)
+        self._test_broadcast(self, lambda t: t)
 
     @staticmethod
     def _test_broadcast_fallback(self, cast):
+        # functions that should fallback to pointwise behavior
         fns_fallback = ["add", "sub", "div", "mul", "pow", "fmod", "remainder",
-                        "eq", "ge", "gt", "le", "lt", "max", "min", "ne"]
+                        "eq", "ge", "gt", "le", "lt", "max", "min", "ne",
+                        "addcdiv", "addcmul"]
+        # functions with three tensor arguments
+        fns_3_args = ["addcdiv", "addcmul"]
+
         for fn in fns_fallback:
             # case 1: both broadcastable and nElems equal -- verify that we broadcast
             t0 = torch.randn(1, 4).float()
             t0 = cast(t0)
             t1 = torch.randn(4, 1).float()
             t1 = cast(t1)
+            t2 = torch.randn(4).float()
+            t2 = cast(t2)
             broadcastSize = torch.Size([4, 4])
             t0_fn = getattr(t0, fn)
             t1_fn = getattr(t1, fn)
 
-            def tensorfn(myfn, t):
-                return myfn(t) if fn != "lerp" else myfn(t, 0.5)
-            r0 = tensorfn(t0_fn, t1)
-            r1 = tensorfn(t1_fn, t0)
+            def tensorfn(myfn, t1, t2):
+                if fn == "lerp":
+                    return myfn(t1, 0.5)
+                elif fn in fns_3_args:
+                    return myfn(1.0, t1, t2)
+                else:
+                    return myfn(t1)
+            r0 = tensorfn(t0_fn, t1, t2)
+            r1 = tensorfn(t1_fn, t0, t2)
             self.assertEqual(broadcastSize, r0.size())
             self.assertEqual(broadcastSize, r1.size())
 
             # case 2: broadcastable and not nElemes equal -- tested by test_fallback
+
             # case 3: not broadcastable nElems equal -- verify we fallback
-            t0 = torch.randn(1, 4).float()
-            t1 = torch.randn(2, 2).float()
+            t0 = torch.randn(1, 6).float()
+            t1 = torch.randn(2, 3).float()
+            t2 = torch.randn(3, 2).float()
             t0_fn = getattr(t0, fn)
             t1_fn = getattr(t1, fn)
+            t2_fn = getattr(t2, fn)
 
             def verifyFallbackWarnings(w):
                 self.assertEqual(len(w), 1)
                 self.assertTrue(issubclass(w[0].category, UserWarning))
                 self.assertTrue("Falling back" in str(w[0].message))
             with warnings.catch_warnings(record=True) as w:
-                r0 = tensorfn(t0_fn, t1)
+                r0 = tensorfn(t0_fn, t1, t2)
                 verifyFallbackWarnings(w)
             with warnings.catch_warnings(record=True) as w:
-                r1 = tensorfn(t1_fn, t0)
+                r1 = tensorfn(t1_fn, t0, t2)
+                verifyFallbackWarnings(w)
+            with warnings.catch_warnings(record=True) as w:
+                r2 = tensorfn(t2_fn, t0, t1)
                 verifyFallbackWarnings(w)
             self.assertEqual(t0.size(), r0.size())
             self.assertEqual(t1.size(), r1.size())
+            self.assertEqual(t2.size(), r2.size())
 
             # case 4: not broadcastable and not nEleme equal -- tested by test_fallback
 
