@@ -225,6 +225,17 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPEngine_queue_callback(PyObject *self, PyObject *_callback) {
+  std::shared_ptr<PyObject> callback(_callback, [](PyObject *obj) { AutoGIL gil; Py_DECREF(obj); });
+  Py_INCREF(_callback);
+  engine.queue_callback([callback]() {
+    AutoGIL gil;
+    THPObjectPtr result {PyObject_CallFunctionObjArgs(callback.get(), NULL)};
+    if (!result) throw python_error();
+  });
+  Py_RETURN_NONE;
+}
+
 PyObject *THPEngine_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
   return type->tp_alloc(type, 0);
@@ -232,6 +243,7 @@ PyObject *THPEngine_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 
 static struct PyMethodDef THPEngine_methods[] = {
   {(char*)"run_backward", (PyCFunction)THPEngine_run_backward, METH_VARARGS | METH_KEYWORDS, NULL},
+  {(char*)"queue_callback", (PyCFunction)THPEngine_queue_callback, METH_O, NULL},
   {NULL}
 };
 
