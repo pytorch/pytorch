@@ -975,9 +975,9 @@ auto THTensor<real>::lerp(const Tensor& a, const Tensor& b, scalar_type weight) 
 }
 
 template<>
-auto THTensor<real>::mean(const Tensor& src, int dimension) -> THTensor& {
+auto THTensor<real>::mean(const Tensor& src, int dimension, int keepdim) -> THTensor& {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-  THTensor_(mean)(tensor, const_tensor_cast(src).tensor, dimension);
+  THTensor_(mean)(tensor, const_tensor_cast(src).tensor, dimension, keepdim);
   return *this;
 #else
   throw std::runtime_error("floating point functions are available only for\
@@ -986,9 +986,9 @@ auto THTensor<real>::mean(const Tensor& src, int dimension) -> THTensor& {
 }
 
 template<>
-auto THTensor<real>::std(const Tensor& src, int dimension, int flag) -> THTensor& {
+auto THTensor<real>::std(const Tensor& src, int dimension, int flag, int keepdim) -> THTensor& {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-  THTensor_(std)(tensor, const_tensor_cast(src).tensor, dimension, flag);
+  THTensor_(std)(tensor, const_tensor_cast(src).tensor, dimension, flag, keepdim);
   return *this;
 #else
   throw std::runtime_error("floating point functions are available only for\
@@ -997,9 +997,9 @@ auto THTensor<real>::std(const Tensor& src, int dimension, int flag) -> THTensor
 }
 
 template<>
-auto THTensor<real>::var(const Tensor& src, int dimension, int flag) -> THTensor& {
+auto THTensor<real>::var(const Tensor& src, int dimension, int flag, int keepdim) -> THTensor& {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-  THTensor_(var)(tensor, const_tensor_cast(src).tensor, dimension, flag);
+  THTensor_(var)(tensor, const_tensor_cast(src).tensor, dimension, flag, keepdim);
   return *this;
 #else
   throw std::runtime_error("floating point functions are available only for\
@@ -1010,9 +1010,10 @@ auto THTensor<real>::var(const Tensor& src, int dimension, int flag) -> THTensor
 template<>
 auto THTensor<real>::norm(const Tensor& src,
                           scalar_type value,
-                          int dimension) -> THTensor& {
+                          int dimension,
+                          int keepdim) -> THTensor& {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-  THTensor_(norm)(tensor, const_tensor_cast(src).tensor, value, dimension);
+  THTensor_(norm)(tensor, const_tensor_cast(src).tensor, value, dimension, keepdim);
   return *this;
 #else
   throw std::runtime_error("floating point functions are available only for\
@@ -1591,60 +1592,60 @@ auto THTensor<real>::match(const Tensor& m1, const Tensor& m2,
 
 template<>
 auto THTensor<real>::max(const Tensor& indices_, const Tensor& src,
-                         int dimension) -> THTensor& {
+                         int dimension, int keepdim) -> THTensor& {
   const THTensor &src_t = const_tensor_cast(src);
   const THTensor<long> &indices__t = const_long_cast(indices_);
-  THTensor_(max)(tensor, indices__t.tensor, src_t.tensor, dimension);
+  THTensor_(max)(tensor, indices__t.tensor, src_t.tensor, dimension, keepdim);
   return *this;
 }
 
 template<>
 auto THTensor<real>::min(const Tensor& indices_, const Tensor& src,
-                         int dimension) -> THTensor& {
+                         int dimension, int keepdim) -> THTensor& {
   const THTensor &src_t = const_tensor_cast(src);
   const THTensor<long> &indices__t = const_long_cast(indices_);
-  THTensor_(min)(tensor, indices__t.tensor, src_t.tensor, dimension);
+  THTensor_(min)(tensor, indices__t.tensor, src_t.tensor, dimension, keepdim);
   return *this;
 }
 
 template<>
 auto THTensor<real>::kthvalue(const Tensor& indices_, const Tensor& src,
-                              long k, int dimension) -> THTensor& {
+                              long k, int dimension, int keepdim) -> THTensor& {
   const THTensor &src_t = const_tensor_cast(src);
   const THTensor<long> &indices__t = const_long_cast(indices_);
-  THTensor_(kthvalue)(tensor, indices__t.tensor, src_t.tensor, k, dimension);
+  THTensor_(kthvalue)(tensor, indices__t.tensor, src_t.tensor, k, dimension, keepdim);
   return *this;
 }
 
 template<>
 auto THTensor<real>::mode(const Tensor& indices_, const Tensor& src,
-                          int dimension) -> THTensor& {
+                          int dimension, int keepdim) -> THTensor& {
   const THTensor &src_t = const_tensor_cast(src);
   const THTensor<long> &indices__t = const_long_cast(indices_);
-  THTensor_(mode)(tensor, indices__t.tensor, src_t.tensor, dimension);
+  THTensor_(mode)(tensor, indices__t.tensor, src_t.tensor, dimension, keepdim);
   return *this;
 }
 
 template<>
 auto THTensor<real>::median(const Tensor& indices_, const Tensor& src,
-                            int dimension) -> THTensor& {
+                            int dimension, int keepdim) -> THTensor& {
   const THTensor &src_t = const_tensor_cast(src);
   const THTensor<long> &indices__t = const_long_cast(indices_);
-  THTensor_(median)(tensor, indices__t.tensor, src_t.tensor, dimension);
+  THTensor_(median)(tensor, indices__t.tensor, src_t.tensor, dimension, keepdim);
   return *this;
 }
 
 template<>
-auto THTensor<real>::sum(const Tensor& src, int dimension) -> THTensor& {
+auto THTensor<real>::sum(const Tensor& src, int dimension, int keepdim) -> THTensor& {
   const THTensor &src_t = const_tensor_cast(src);
-  THTensor_(sum)(tensor, src_t.tensor, dimension);
+  THTensor_(sum)(tensor, src_t.tensor, dimension, keepdim);
   return *this;
 }
 
 template<>
-auto THTensor<real>::prod(const Tensor& src, int dimension) -> THTensor& {
+auto THTensor<real>::prod(const Tensor& src, int dimension, int keepdim) -> THTensor& {
   const THTensor &src_t = const_tensor_cast(src);
-  THTensor_(prod)(tensor, src_t.tensor, dimension);
+  THTensor_(prod)(tensor, src_t.tensor, dimension, keepdim);
   return *this;
 }
 

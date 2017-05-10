@@ -7,36 +7,41 @@ from ..variable import Variable
 class Sum(Function):
 
     @staticmethod
-    def forward(ctx, input, dim=None):
+    def forward(ctx, input, dim=None, keepdim=True):
         ctx.dim = dim
+        ctx.keepdim = keepdim
         ctx.input_size = input.size()
         if dim is None:
             return input.new((input.sum(),))
         else:
-            return input.sum(dim)
+            return input.sum(dim, keepdim)
 
     @staticmethod
     def backward(ctx, grad_output):
         if ctx.dim is None:
-            return grad_output.expand(ctx.input_size), None
+            return grad_output.expand(ctx.input_size), None, None
         else:
+            if ctx.keepdim is False:
+                grad_output = grad_output.unsqueeze(ctx.dim)
+
             repeats = [1 for _ in ctx.input_size]
             repeats[ctx.dim] = ctx.input_size[ctx.dim]
-            return grad_output.repeat(*repeats), None
+            return grad_output.repeat(*repeats), None, None
 
 
 class Prod(Function):
 
     @staticmethod
-    def forward(ctx, input, dim=None):
+    def forward(ctx, input, dim=None, keepdim=True):
         ctx.dim = dim
+        ctx.keepdim = keepdim
         ctx.input_size = input.size()
         if dim is None:
             ctx.result = input.prod()
             ctx.save_for_backward(input)
             return input.new((ctx.result,))
         else:
-            output = input.prod(dim)
+            output = input.prod(dim, keepdim)
             ctx.save_for_backward(input, output)
             return output
 
@@ -59,8 +64,11 @@ class Prod(Function):
         else:
             input, output = ctx.saved_variables
             dim = ctx.dim if ctx.dim >= 0 else ctx.dim + input.dim()
+            if ctx.keepdim is False:
+                grad_output = grad_output.unsqueeze(dim)
+
             zero_mask = input == 0
-            slice_zero_count = zero_mask.sum(dim)
+            slice_zero_count = zero_mask.sum(dim, True)
             total_zeros = slice_zero_count.sum()
             grad_input = grad_output.mul(output).expand_as(input).div(input)
             if total_zeros == 0:
@@ -93,24 +101,28 @@ class Prod(Function):
 class Mean(Function):
 
     @staticmethod
-    def forward(ctx, input, dim=None):
+    def forward(ctx, input, dim=None, keepdim=True):
         ctx.dim = dim
+        ctx.keepdim = keepdim
         ctx.input_size = input.size()
         if dim is None:
             return input.new((input.mean(),))
         else:
-            return input.mean(dim)
+            return input.mean(dim, keepdim)
 
     @staticmethod
     def backward(ctx, grad_output):
         if ctx.dim is None:
             grad_input_val = grad_output / reduce(lambda x, y: x * y, ctx.input_size, 1)
-            return grad_input_val.expand(ctx.input_size), None
+            return grad_input_val.expand(ctx.input_size), None, None
         else:
+            if ctx.keepdim is False:
+                grad_output = grad_output.unsqueeze(ctx.dim)
+
             repeats = [1 for _ in ctx.input_size]
             dim_size = ctx.input_size[ctx.dim]
             repeats[ctx.dim] = dim_size
-            return grad_output.repeat(*repeats).div_(dim_size), None
+            return grad_output.repeat(*repeats).div_(dim_size), None, None
 
 
 class _SelectionFunction(Function):
@@ -120,9 +132,10 @@ class _SelectionFunction(Function):
     # kthvalue not only requires us to pass a dim, but also preceed it with k.
     additional_args = tuple()
 
-    def __init__(self, dim=None):
+    def __init__(self, dim=None, keepdim=True):
         super(_SelectionFunction, self).__init__()
         self.dim = dim
+        self.keepdim = keepdim
 
     def forward(self, input):
         fn = getattr(input, type(self).__name__.lower())
@@ -136,7 +149,7 @@ class _SelectionFunction(Function):
                 dim = input.dim() - 1
             else:
                 dim = self.dim
-            args = (dim,)
+            args = (dim, self.keepdim)
             if self.additional_args:
                 args = self.additional_args + args
             output, indices = fn(*args)
@@ -153,7 +166,13 @@ class _SelectionFunction(Function):
                 dim = input.dim() - 1
             else:
                 dim = self.dim
+
             indices, = self.saved_tensors
+            if self.keepdim is False:
+                grad_output = grad_output.unsqueeze(dim)
+                grad_indices = grad_indices.unsqueeze(dim)
+                indices = indices.unsqueeze(dim)
+
             grad_input.scatter_(dim, indices, grad_output)
         return grad_input
 
@@ -177,17 +196,18 @@ class Median(_SelectionFunction):
 class Kthvalue(_SelectionFunction):
     has_all_reduce = False
 
-    def __init__(self, k, dim=None):
-        super(Kthvalue, self).__init__(dim)
+    def __init__(self, k, dim=None, keepdim=True):
+        super(Kthvalue, self).__init__(dim, keepdim)
         self.additional_args = (k,)
 
 
 class Norm(Function):
 
-    def __init__(self, norm_type=2, dim=None):
+    def __init__(self, norm_type=2, dim=None, keepdim=True):
         super(Norm, self).__init__()
         self.norm_type = norm_type
         self.dim = dim
+        self.keepdim = keepdim
 
     def forward(self, input):
         if self.dim is None:
@@ -195,7 +215,7 @@ class Norm(Function):
             self.save_for_backward(input)
             return input.new((self.norm,))
         else:
-            output = input.norm(self.norm_type, self.dim)
+            output = input.norm(self.norm_type, self.dim, self.keepdim)
             self.save_for_backward(input, output)
             return output
 
@@ -210,6 +230,11 @@ class Norm(Function):
                 return input.mul(pow).mul(scale)
         else:
             input, output = self.saved_tensors
+
+            if self.keepdim is False:
+                grad_output = grad_output.unsqueeze(self.dim)
+                output = output.unsqueeze(self.dim)
+
             big_grad_output = grad_output.expand_as(input)
             if self.norm_type == 2:
                 big_output = output.expand_as(input)

@@ -891,9 +891,9 @@ auto THCTensor<real>::lerp(const Tensor& a, const Tensor& b, scalar_type weight)
 }
 
 template<>
-auto THCTensor<real>::mean(const Tensor& src, int dimension) -> THCTensor& {
+auto THCTensor<real>::mean(const Tensor& src, int dimension, int keepdim) -> THCTensor& {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-  THCTensor_(mean)(state, tensor, const_tensor_cast(src).tensor, dimension);
+  THCTensor_(mean)(state, tensor, const_tensor_cast(src).tensor, dimension, keepdim);
   return *this;
 #else
   throw std::runtime_error("floating point functions are available only for\
@@ -902,9 +902,9 @@ auto THCTensor<real>::mean(const Tensor& src, int dimension) -> THCTensor& {
 }
 
 template<>
-auto THCTensor<real>::std(const Tensor& src, int dimension, int flag) -> THCTensor& {
+auto THCTensor<real>::std(const Tensor& src, int dimension, int flag, int keepdim) -> THCTensor& {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-  THCTensor_(std)(state, tensor, const_tensor_cast(src).tensor, dimension, flag);
+  THCTensor_(std)(state, tensor, const_tensor_cast(src).tensor, dimension, flag, keepdim);
   return *this;
 #else
   throw std::runtime_error("floating point functions are available only for\
@@ -913,9 +913,9 @@ auto THCTensor<real>::std(const Tensor& src, int dimension, int flag) -> THCTens
 }
 
 template<>
-auto THCTensor<real>::var(const Tensor& src, int dimension, int flag) -> THCTensor& {
+auto THCTensor<real>::var(const Tensor& src, int dimension, int flag, int keepdim) -> THCTensor& {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-  THCTensor_(var)(state, tensor, const_tensor_cast(src).tensor, dimension, flag);
+  THCTensor_(var)(state, tensor, const_tensor_cast(src).tensor, dimension, flag, keepdim);
   return *this;
 #else
   throw std::runtime_error("floating point functions are available only for\
@@ -924,9 +924,9 @@ auto THCTensor<real>::var(const Tensor& src, int dimension, int flag) -> THCTens
 }
 
 template<>
-auto THCTensor<real>::norm(const Tensor& src, scalar_type value, int dimension) -> THCTensor& {
+auto THCTensor<real>::norm(const Tensor& src, scalar_type value, int dimension, int keepdim) -> THCTensor& {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-  THCTensor_(norm)(state, tensor, const_tensor_cast(src).tensor, value, dimension);
+  THCTensor_(norm)(state, tensor, const_tensor_cast(src).tensor, value, dimension, keepdim);
   return *this;
 #else
   throw std::runtime_error("floating point functions are available only for\
@@ -1503,51 +1503,51 @@ auto THCTensor<real>::match(const Tensor& m1, const Tensor& m2,
 
 template<>
 auto THCTensor<real>::max(const Tensor& indices_, const Tensor& src,
-                          int dimension) -> THCTensor& {
+                          int dimension, int keepdim) -> THCTensor& {
   const THCTensor &src_t = const_tensor_cast(src);
   const THCTensor<long> &indices__t = const_long_cast(indices_);
-  THCTensor_(max)(state, tensor, indices__t.tensor, src_t.tensor, dimension);
+  THCTensor_(max)(state, tensor, indices__t.tensor, src_t.tensor, dimension, keepdim);
   return *this;
 }
 
 template<>
 auto THCTensor<real>::min(const Tensor& indices_, const Tensor& src,
-                          int dimension) -> THCTensor& {
+                          int dimension, int keepdim) -> THCTensor& {
   const THCTensor &src_t = const_tensor_cast(src);
   const THCTensor<long> &indices__t = const_long_cast(indices_);
-  THCTensor_(min)(state, tensor, indices__t.tensor, src_t.tensor, dimension);
+  THCTensor_(min)(state, tensor, indices__t.tensor, src_t.tensor, dimension, keepdim);
   return *this;
 }
 
 template<>
 auto THCTensor<real>::kthvalue(const Tensor& indices_, const Tensor& src,
-                               long k, int dimension) -> THCTensor& {
+                               long k, int dimension, int keepdim) -> THCTensor& {
   throw std::runtime_error("unsupported operation 'kthvalue'");
 }
 
 template<>
 auto THCTensor<real>::mode(const Tensor& indices_, const Tensor& src,
-                           int dimension) -> THCTensor& {
+                           int dimension, int keepdim) -> THCTensor& {
   throw std::runtime_error("unsupported operation 'mode'");
 }
 
 template<>
 auto THCTensor<real>::median(const Tensor& indices_, const Tensor& src,
-                             int dimension) -> THCTensor& {
+                             int dimension, int keepdim) -> THCTensor& {
   throw std::runtime_error("unsupported operation 'median'");
 }
 
 template<>
-auto THCTensor<real>::sum(const Tensor& src, int dimension) -> THCTensor& {
+auto THCTensor<real>::sum(const Tensor& src, int dimension, int keepdim) -> THCTensor& {
   const THCTensor &src_t = const_tensor_cast(src);
-  THCTensor_(sum)(state, tensor, src_t.tensor, dimension);
+  THCTensor_(sum)(state, tensor, src_t.tensor, dimension, keepdim);
   return *this;
 }
 
 template<>
-auto THCTensor<real>::prod(const Tensor& src, int dimension) -> THCTensor& {
+auto THCTensor<real>::prod(const Tensor& src, int dimension, int keepdim) -> THCTensor& {
   const THCTensor &src_t = const_tensor_cast(src);
-  THCTensor_(prod)(state, tensor, src_t.tensor, dimension);
+  THCTensor_(prod)(state, tensor, src_t.tensor, dimension, keepdim);
   return *this;
 }
 
