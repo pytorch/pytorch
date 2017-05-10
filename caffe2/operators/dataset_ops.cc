@@ -460,38 +460,34 @@ class UnPackRecordsOp : public Operator<CPUContext> {
 
     CAFFE_ENFORCE_GE(numRows, 0);
 
-    if (numRows == 0) {
-      return true;
-    }
-
-    const auto& inputZero = inputs[0];
-    CAFFE_ENFORCE(inputZero);
-
-    const auto numTensors = inputZero->size();
-
-    CAFFE_ENFORCE_EQ(numTensors, fields_.size());
-    CAFFE_ENFORCE_EQ(numTensors, OutputSize());
+    auto numTensors = OutputSize();
 
     // Precomputer the output sizes to avoid resizing
     std::vector<std::vector<TIndex>> outputDims(numTensors);
+    std::vector<const TypeMeta*> metas(numTensors);
 
-    for (int i = 0; i < numTensors; ++i) {
-      outputDims[i] = inputs[0]->at(i).dims();
-      outputDims[i][0] = 0;
+    CAFFE_ENFORCE(
+        numRows > 0 || InputSize() > 1,
+        "Unpacking empty record without shape will leave output blobs in "
+        "undefined state.");
+
+    if (InputSize() == 1) {
+      getShapeAndMetaFromInput(outputDims, metas);
+    } else {
+      getShapeAndMetaFromPrototypeBlobs(outputDims, metas);
     }
 
     for (int i = 0; i < numRows; ++i) {
       CAFFE_ENFORCE(inputs[i]);
       for (int j = 0; j < inputs[i]->size(); ++j) {
         const auto& input = inputs[i]->at(j);
-        const auto& inputZeroTensor = inputZero->at(j);
 
         // Checks to ensure that dimensions/sizes match
-        CAFFE_ENFORCE_EQ(inputZeroTensor.ndim(), input.ndim());
-        CAFFE_ENFORCE(inputZeroTensor.meta() == input.meta());
+        CAFFE_ENFORCE_EQ(outputDims[j].size(), input.ndim());
+        CAFFE_ENFORCE(*metas[j] == input.meta());
         // We look from first dimension, because we concat on the first.
         for (int k = 1; k < input.ndim(); ++k) {
-          CAFFE_ENFORCE_EQ(input.dims()[k], inputZeroTensor.dims()[k]);
+          CAFFE_ENFORCE_EQ(input.dims()[k], outputDims[j][k]);
         }
 
         outputDims[j][0] += input.dim(0);
@@ -502,26 +498,22 @@ class UnPackRecordsOp : public Operator<CPUContext> {
     std::vector<void*> destinations(numTensors);
     for (int i = 0; i < numTensors; ++i) {
       Output(i)->Resize(outputDims[i]);
-      destinations[i] = Output(i)->raw_mutable_data(inputZero->at(i).meta());
+      destinations[i] = Output(i)->raw_mutable_data(*metas[i]);
     }
 
     for (int i = 0; i < numRows; ++i) {
       for (int j = 0; j < numTensors; ++j) {
         const auto& input = inputs[i]->at(j);
-        // Skip empty tensors
-        if (input.size() == 0) {
-          continue;
-        }
 
         context_.CopyItems<CPUContext, CPUContext>(
-            inputZero->at(j).meta(),
+            *metas[j],
             input.size(),
             input.raw_data() /* src */,
             destinations[j] /* dst */
             );
 
         destinations[j] =
-            (char*)destinations[j] + input.size() * inputZero->at(j).itemsize();
+            (char*)destinations[j] + input.size() * input.itemsize();
       }
     }
 
@@ -529,6 +521,42 @@ class UnPackRecordsOp : public Operator<CPUContext> {
   }
 
  private:
+  void getShapeAndMetaFromInput(
+    std::vector<std::vector<TIndex>>& outputDims,
+    std::vector<const TypeMeta*>& metas
+  ) {
+    const auto* inputs = Input(0).template data<SharedTensorVectorPtr>();
+
+    const auto& inputZero = inputs[0];
+    CAFFE_ENFORCE(inputZero);
+
+    const auto numTensors = inputZero->size();
+
+    CAFFE_ENFORCE_EQ(numTensors, fields_.size());
+    CAFFE_ENFORCE_EQ(numTensors, OutputSize());
+
+    for (int i = 0; i < numTensors; ++i) {
+      outputDims[i] = inputZero->at(i).dims();
+      outputDims[i][0] = 0;
+      metas[i] = &inputZero->at(i).meta();
+    }
+  }
+
+  void getShapeAndMetaFromPrototypeBlobs(
+    std::vector<std::vector<TIndex>>& outputDims,
+    std::vector<const TypeMeta*>& metas
+  ) {
+    const auto numTensors = fields_.size();
+    CAFFE_ENFORCE_EQ(numTensors, InputSize() - 1);
+    CAFFE_ENFORCE_EQ(numTensors, OutputSize());
+    for (int i = 0; i < numTensors; ++i) {
+      const auto& input = Input(i + 1);
+      outputDims[i] = input.dims();
+      outputDims[i][0] = 0;
+      metas[i] = &input.meta();
+    }
+  }
+
   std::vector<std::string> fields_;
 };
 
@@ -823,7 +851,7 @@ class AppendOp final : public Operator<Context> {
     auto& b = Input(1);
     auto* c = Output(0);
     CAFFE_ENFORCE(b.ndim() >= 1);
-    if (a.size() == 0) {
+    if (a.size() == 0 && a.dim(0) == 0) {
       c->CopyFrom(b);
       return true;
     }
@@ -881,7 +909,7 @@ class AtomicAppendOp final : public Operator<Context> {
       auto& a = Input(1 + i);
       auto& b = Input(1 + i + numFields);
       auto* c = Output(i);
-      if (a.size() == 0) {
+      if (a.size() == 0 && a.dim(0) == 0) {
         c->CopyFrom(b);
         continue;
       }
@@ -1312,9 +1340,11 @@ OPERATOR_SCHEMA(PackRecords)
     .NumInputs(1, INT_MAX)
     .NumOutputs(1)
     .SetDoc(R"DOC(
-            Given a dataset under a schema specified by the `fields` argument will pack all the input tensors into one,
-            where each tensor element represents a row of data (batch of size 1). This format allows easier use with the rest of Caffe2 operators.
-    )DOC")
+Given a dataset under a schema specified by the `fields` argument will pack all
+the input tensors into one, where each tensor element represents a row of data
+(batch of size 1). This format allows easier use with the rest of Caffe2
+operators.
+)DOC")
     .Arg(
         "fields",
         "List of strings representing the string names in the format"
@@ -1322,19 +1352,28 @@ OPERATOR_SCHEMA(PackRecords)
     .Output(
         0,
         "tensor",
-        "One dimensional tensor having a complex type of SharedTensorVectorPtr. In order to reverse it back to the original input it has to be inserted into UnPackRecordsOp.");
+        "One dimensional tensor having a complex type of SharedTensorVectorPtr."
+        " In order to reverse it back to the original input it has to be "
+        "inserted into UnPackRecordsOp.");
 
 OPERATOR_SCHEMA(UnPackRecords)
-    .NumInputs(1)
+    .NumInputs(1, INT_MAX)
     .NumOutputs(1, INT_MAX)
     .SetDoc(R"DOC(
-            Given a packed dataset (packed by the PackRecordsOp) and the `fields` argument describing the datasets schema returns the original dataset format.
-            Number of returned tensors is equal to the number of fields in the `fields` argument.
-    )DOC")
+Given a packed dataset (packed by the PackRecordsOp) and the `fields` argument
+describing the datasets schema returns the original dataset format. Number of
+returned tensors is equal to the number of fields in the `fields` argument.
+
+The first input is the packed tensor to be unpacked. Optionally, you can provide
+prototype tensors to give the expected shapes of the output tensors. This is
+helpful when you expected to unpack empty tensor, e.g., output of a sapmling
+process.
+)DOC")
     .Arg(
         "fields",
         "List of strings representing the string names in the format"
-        "specified in the doc for CreateTreeCursor.");
+        "specified in the doc for CreateTreeCursor.")
+    .Input(0, "packed_tensor", "The tensor to be unpacked");
 
 SHOULD_NOT_DO_GRADIENT(CreateTreeCursor);
 SHOULD_NOT_DO_GRADIENT(ResetCursor);
@@ -1348,8 +1387,8 @@ SHOULD_NOT_DO_GRADIENT(CreateTensorVector);
 SHOULD_NOT_DO_GRADIENT(TensorVectorSize);
 SHOULD_NOT_DO_GRADIENT(ConcatTensorVector);
 SHOULD_NOT_DO_GRADIENT(CollectTensor);
-SHOULD_NOT_DO_GRADIENT(UnPack);
-SHOULD_NOT_DO_GRADIENT(Pack);
+SHOULD_NOT_DO_GRADIENT(UnPackRecords);
+SHOULD_NOT_DO_GRADIENT(PackRecords);
 } // namespace
 CAFFE_KNOWN_TYPE(std::unique_ptr<TreeCursor>);
 CAFFE_KNOWN_TYPE(TensorVectorPtr<CPUContext>);
