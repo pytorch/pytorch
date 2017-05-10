@@ -302,19 +302,31 @@ bool SoftmaxWithLossOp<float, CUDAContext>::RunOnDevice() {
   auto* avg_loss = Output(1); // Average loss
   const float* weights = (InputSize() > 2 ? Input(2).data<float>() : NULL);
 
-  int N = X.dim32(0);
-  int D = X.dim32(1);
+  const auto canonical_axis = X.canonical_axis_index(axis_);
+  int N, D;
+  if (spatial_mode_) {
+    N = X.dim32(0);
+    D = X.dim32(1);
+  } else {
+    N = X.size_to_dim(canonical_axis); // batch size
+    D = X.size_from_dim(canonical_axis);
+  }
   P->ResizeLike(X);
   total_weight_ptr_.Resize(1);
   DCHECK(!(spatial_mode_ && label_prob_mode_)); // Do not currently support both
   if (!spatial_mode_) {
-    DCHECK_EQ(X.ndim(), 2);
-    if (!label_prob_mode_) {
-      DCHECK((T.ndim() == 1) || (T.ndim() == 2 && T.dim32(1) == 1));
+    if (label_prob_mode_) {
+      DCHECK_GE(T.ndim(), 2);
+      DCHECK_EQ(T.size_to_dim(canonical_axis), N);
+      DCHECK_EQ(T.size_from_dim(canonical_axis), D);
     } else {
-      DCHECK(T.ndim() == 2 && T.dim32(0) == N && T.dim32(1) == D);
+      if (T.ndim() == canonical_axis) {
+        DCHECK_EQ(T.size(), N);
+      } else {
+        DCHECK_EQ(T.size_to_dim(canonical_axis), N);
+        DCHECK_EQ(T.size_from_dim(canonical_axis), 1);
+      }
     }
-    DCHECK_EQ(T.dim32(0), N);
 
     avg_loss->Resize(vector<TIndex>());
     if (losses_.size() != N) {
@@ -458,8 +470,15 @@ bool SoftmaxWithLossGradientOp<float, CUDAContext>::RunOnDevice() {
   auto* dX = Output(0);
   dX->ResizeLike(X);
 
-  int N = X.dim32(0);
-  int D = X.dim32(1);
+  const auto canonical_axis = X.canonical_axis_index(axis_);
+  int N, D;
+  if (spatial_mode_) {
+    N = X.dim32(0);
+    D = X.dim32(1);
+  } else {
+    N = X.size_to_dim(canonical_axis); // batch size
+    D = X.size_from_dim(canonical_axis);
+  }
 
   if (only_loss_) {
     // Memory saving trick to share the buffer with the softmax output.
@@ -470,11 +489,18 @@ bool SoftmaxWithLossGradientOp<float, CUDAContext>::RunOnDevice() {
   total_weight_ptr_.Resize(1);
 
   if (!spatial_mode_) {
-    DCHECK_EQ(X.ndim(), 2);
-    DCHECK(
-        (T.ndim() == 1) || (T.ndim() == 2 && T.dim32(1) == 1) ||
-        (T.ndim() == 2 && T.dim32(0) == N && T.dim32(1) == D));
-    DCHECK_EQ(T.dim32(0), N);
+    if (label_prob_mode_) {
+      DCHECK_GE(T.ndim(), 2);
+      DCHECK_EQ(T.size_to_dim(canonical_axis), N);
+      DCHECK_EQ(T.size_from_dim(canonical_axis), D);
+    } else {
+      if (T.ndim() == canonical_axis) {
+        DCHECK_EQ(T.size(), N);
+      } else {
+        DCHECK_EQ(T.size_to_dim(canonical_axis), N);
+        DCHECK_EQ(T.size_from_dim(canonical_axis), 1);
+      }
+    }
 
     // Subtract 1 from labeled positions
     if (!label_prob_mode_) {

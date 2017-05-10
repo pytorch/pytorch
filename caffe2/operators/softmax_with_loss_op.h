@@ -17,7 +17,13 @@ class SoftmaxWithLossOp final : public Operator<Context> {
         spatial_mode_(OperatorBase::GetSingleArgument<int>("spatial", 0)),
         label_prob_mode_(OperatorBase::GetSingleArgument<int>("label_prob", 0)),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
+            OperatorBase::GetSingleArgument<string>("order", "NCHW"))),
+        axis_(OperatorBase::GetSingleArgument<int>("axis", 1)) {
+    if (spatial_mode_) {
+      CAFFE_ENFORCE(
+          axis_ == 1,
+          "There is no support for non-standard axis (!= 1) in spatial mode");
+    }
     CAFFE_ENFORCE(scale_ >= 0);
     CAFFE_ENFORCE_EQ(
         order_, StorageOrder::NCHW, "Only NCHW order is supported right now.");
@@ -31,6 +37,7 @@ class SoftmaxWithLossOp final : public Operator<Context> {
   int spatial_mode_;
   int label_prob_mode_;
   StorageOrder order_;
+  int axis_;
 
   Tensor<Context> losses_; // Per example loss
   Tensor<Context> rowmax_; // per example row max
@@ -49,7 +56,13 @@ class SoftmaxWithLossGradientOp final : public Operator<Context> {
         label_prob_mode_(OperatorBase::GetSingleArgument<int>("label_prob", 0)),
         order_(StringToStorageOrder(
             OperatorBase::GetSingleArgument<string>("order", "NCHW"))),
-        only_loss_(OperatorBase::GetSingleArgument<bool>("only_loss", false)) {
+        only_loss_(OperatorBase::GetSingleArgument<bool>("only_loss", false)),
+        axis_(OperatorBase::GetSingleArgument<int>("axis", 1)) {
+    if (spatial_mode_) {
+      CAFFE_ENFORCE(
+          axis_ == 1,
+          "There is no support for non-standard axis (!= 1) in spatial mode");
+    }
     CAFFE_ENFORCE(scale_ >= 0);
     CAFFE_ENFORCE_EQ(
         order_, StorageOrder::NCHW, "Only NCHW order is supported right now.");
@@ -67,6 +80,7 @@ class SoftmaxWithLossGradientOp final : public Operator<Context> {
   Tensor<Context> total_weight_ptr_;
   StorageOrder order_;
   bool only_loss_;
+  int axis_;
 };
 
 } // namespace caffe2

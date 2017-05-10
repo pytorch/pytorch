@@ -16,23 +16,28 @@ OPERATOR_SCHEMA(SoftmaxWithLoss)
         [](const OperatorDef& def, const vector<TensorShape>& in) {
           ArgumentHelper helper(def);
           auto spatial_mode = helper.GetSingleArgument<int32_t>("spatial", 0);
+          auto axis = helper.GetSingleArgument<int32_t>("axis", 1);
 
           vector<TensorShape> out(2);
 
           auto logits = in[0]; // Tensor with Shape [batch_size, num_classes]
           auto labels = in[1]; // Tensor with shape [batch_size, ]
 
-          auto batch_size = logits.dims().Get(0);
-          auto num_classes = logits.dims().Get(1);
-
           if (!spatial_mode) {
-            // Labels must only be 1D or 2D
-            CAFFE_ENFORCE(labels.dims().size() <= 2);
+            const auto canonical_axis =
+                canonical_axis_index_(axis, logits.dims().size());
+            const int batch_size =
+                size_to_dim_(canonical_axis, GetDimsVector(logits));
+            const int num_classes =
+                size_from_dim_(canonical_axis, GetDimsVector(logits));
 
             out[0].set_data_type(logits.data_type());
             out[0].add_dims(batch_size);
             out[0].add_dims(num_classes);
           } else {
+            auto batch_size = logits.dims().Get(0);
+            auto num_classes = logits.dims().Get(1);
+
             DCHECK_EQ(logits.dims_size(), 4);
             DCHECK_EQ(labels.dims_size(), 3);
             out[0].set_data_type(logits.data_type());
@@ -82,8 +87,16 @@ bool SoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
   auto& T = Input(1); // Labels / targets
   auto* P = Output(0); // Probabilities from softmax
   auto* avg_loss = Output(1); // Average loss
-  int N = X.dim32(0);
-  int D = X.dim32(1);
+
+  const auto canonical_axis = X.canonical_axis_index(axis_);
+  int N, D;
+  if (spatial_mode_) {
+    N = X.dim32(0);
+    D = X.dim32(1);
+  } else {
+    N = X.size_to_dim(canonical_axis); // batch size
+    D = X.size_from_dim(canonical_axis);
+  }
 
   P->ResizeLike(X);
 
@@ -98,13 +111,18 @@ bool SoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
   DCHECK(!(spatial_mode_ && label_prob_mode_));
 
   if (!spatial_mode_) {
-    DCHECK_EQ(X.ndim(), 2);
-    if (!label_prob_mode_) {
-      DCHECK((T.ndim() == 1) || (T.ndim() == 2 && T.dim32(1) == 1));
+    if (label_prob_mode_) {
+      DCHECK_GE(T.ndim(), 2);
+      DCHECK_EQ(T.size_to_dim(canonical_axis), N);
+      DCHECK_EQ(T.size_from_dim(canonical_axis), D);
     } else {
-      DCHECK(T.ndim() == 2 && T.dim32(0) == N && T.dim32(1) == D);
+      if (T.ndim() == canonical_axis) {
+        DCHECK_EQ(T.size(), N);
+      } else {
+        DCHECK_EQ(T.size_to_dim(canonical_axis), N);
+        DCHECK_EQ(T.size_from_dim(canonical_axis), 1);
+      }
     }
-    DCHECK_EQ(T.dim32(0), N);
 
     if (sum_multiplier_.size() != D) {
       sum_multiplier_.Resize(D);
@@ -262,17 +280,29 @@ bool SoftmaxWithLossGradientOp<float, CPUContext>::RunOnDevice() {
   auto* dX = Output(0);
   const float* weights = (InputSize() > 4 ? Input(2).data<float>() : nullptr);
 
-  int N = X.dim32(0);
-  int D = X.dim32(1);
+  const auto canonical_axis = X.canonical_axis_index(axis_);
+  int N, D;
+  if (spatial_mode_) {
+    N = X.dim32(0);
+    D = X.dim32(1);
+  } else {
+    N = X.size_to_dim(canonical_axis); // batch size
+    D = X.size_from_dim(canonical_axis);
+  }
   dX->ResizeLike(X);
-  DCHECK_EQ(T.dim32(0), N);
 
   if (!spatial_mode_) {
-    DCHECK_EQ(X.ndim(), 2);
-    if (!label_prob_mode_) {
-      DCHECK((T.ndim() == 1) || (T.ndim() == 2 && T.dim32(1) == 1));
+    if (label_prob_mode_) {
+      DCHECK_GE(T.ndim(), 2);
+      DCHECK_EQ(T.size_to_dim(canonical_axis), N);
+      DCHECK_EQ(T.size_from_dim(canonical_axis), D);
     } else {
-      DCHECK(T.ndim() == 2 && T.dim32(0) == N && T.dim32(1) == D);
+      if (T.ndim() == canonical_axis) {
+        DCHECK_EQ(T.size(), N);
+      } else {
+        DCHECK_EQ(T.size_to_dim(canonical_axis), N);
+        DCHECK_EQ(T.size_from_dim(canonical_axis), 1);
+      }
     }
 
     const float* Pdata = P.data<float>();
@@ -340,6 +370,8 @@ bool SoftmaxWithLossGradientOp<float, CPUContext>::RunOnDevice() {
           &context_);
     }
   } else {
+    DCHECK_EQ(T.dim32(0), N);
+
     // Spatial mode, compute softmax for each x, y location
     DCHECK_EQ(X.ndim(), 4);
     DCHECK_EQ(T.ndim(), 3);
