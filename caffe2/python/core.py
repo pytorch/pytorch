@@ -75,13 +75,17 @@ def GetGlobalInitArgs():
 _WORKER_INIT_CALLS = []
 
 
-def register_worker_init_call(func, *args, **kwargs):
+def worker_init_func(func):
     """
-    Function calls registered here will be called with given args at startup
-    in each of the worker nodes. The function as well as all of the arguments
-    passed must be picklable.
+    By decorating a function with this, each call to the function will be
+    recorded at workflow time and replayed in each of the works at startup.
+    Used for example for registering caffe python operators.
     """
-    _WORKER_INIT_CALLS.append((func, args, kwargs))
+    def call(*args, **kwargs):
+        _WORKER_INIT_CALLS.append((func, args, kwargs))
+        return func(*args, **kwargs)
+
+    return call
 
 
 def GetWorkerInitCalls():
@@ -308,7 +312,6 @@ def CreateOperator(
 
 def _RegisterPythonImpl(
     f, grad_f=None, python_func_type=None, pass_workspace=False, name=None,
-    allow_prefix=True,
 ):
     if python_func_type:
         func = python_func_type(f)
@@ -320,7 +323,7 @@ def _RegisterPythonImpl(
         if isinstance(grad_f, tuple):
             grad_f = grad_f[0](*grad_f[1], **grad_f[2])
 
-    token = C.register_python_op(f, pass_workspace, name or '', allow_prefix)
+    token = C.register_python_op(f, pass_workspace, name or '')
     if grad_f:
         C.register_python_gradient_op(token, grad_f)
     return token
@@ -1798,24 +1801,18 @@ class Net(object):
         manipulate the workspace directly), use on your own risk.
         """
         assert(IsOperator('Python'))
-        registry_args = dict(
-            f=f,
-            grad_f=grad_f,
-            python_func_type=python_func_type,
-            pass_workspace=pass_workspace,
-            name='%s:%d' % (str(self), len(self.Proto().op)),
-            allow_prefix=True,
-        )
-        token = _RegisterPythonImpl(**registry_args)
         if isinstance(f, tuple) or isinstance(grad_f, tuple):
             # if we got a tuple, we will make sure this tuple will be
             # registered to run at startup on each of the workers in a
-            # distributed run. Here we make sure that the registration
-            # will happen with the exact same token, or fail if the token
-            # already exists.
-            registry_args['name'] = token
-            registry_args['allow_prefix'] = False
-            register_worker_init_call(_RegisterPythonImpl, **registry_args)
+            # distributed run.
+            registry = worker_init_func(_RegisterPythonImpl)
+        else:
+            registry = _RegisterPythonImpl
+
+        token = registry(
+            f, grad_f, python_func_type, pass_workspace=pass_workspace,
+            name='%s:%d' % (str(self), len(self.Proto().op))
+        )
         return lambda *args, **kwargs: self._CreateAndAddToSelf(
             'Python', token=token, *args, **kwargs)
 

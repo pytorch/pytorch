@@ -853,28 +853,17 @@ void addGlobalMethods(py::module& m) {
   // (inputs, outputs, workspace)
   m.def(
       "register_python_op",
-      [](py::object func,
-         bool pass_workspace,
-         std::string name,
-         bool allow_prefix) {
+      [](py::object func, bool pass_workspace, std::string name) {
         using namespace python_detail;
         CAFFE_ENFORCE(func != py::none());
-        std::string token;
-        if (allow_prefix) {
-          if (!name.empty()) {
-            name += ":";
-          }
-          name += func.attr("__name__").cast<std::string>();
-          token = name;
-          for (int i = 1; gRegistery().count(token) > 0; ++i) {
-            token = name + ":" + to_string(i);
-          }
-        } else {
-          token = name;
+        if (!name.empty()) {
+          name += ":";
         }
-        CAFFE_ENFORCE(
-            !gRegistery().count(token),
-            "Cannot register python op: token already exists");
+        name += func.attr("__name__").cast<std::string>();
+        std::string token = name;
+        for (int i = 1; gRegistery().count(token) > 0; ++i) {
+          token = name + ":" + to_string(i);
+        }
         gRegistery()[token] = Func{func, pass_workspace};
         return token;
       });
