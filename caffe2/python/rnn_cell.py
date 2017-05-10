@@ -329,13 +329,13 @@ class MILSTMCell(LSTMCell):
             shape=[4 * self.hidden_size],
             value=1.0,
         )
-        beta1 = model.param_init_net.ConstantFill(
+        beta_h = model.param_init_net.ConstantFill(
             [],
             [self.scope('beta1')],
             shape=[4 * self.hidden_size],
             value=1.0,
         )
-        beta2 = model.param_init_net.ConstantFill(
+        beta_i = model.param_init_net.ConstantFill(
             [],
             [self.scope('beta2')],
             shape=[4 * self.hidden_size],
@@ -347,38 +347,34 @@ class MILSTMCell(LSTMCell):
             shape=[4 * self.hidden_size],
             value=0.0,
         )
-        model.params.extend([alpha, beta1, beta2, b])
-        # alpha * (xW^T * hU^T)
+        model.params.extend([alpha, beta_h, beta_i, b])
+
+        # alpha * input_t + beta_h
         # Shape: [1, batch_size, 4 * hidden_size]
-        alpha_tdash = model.net.Mul(
-            [prev_t, input_t],
-            self.scope('alpha_tdash')
+        alpha_by_input_t_plus_beta_h = model.net.ElementwiseLinear(
+            [input_t, alpha, beta_h],
+            self.scope('alpha_by_input_t_plus_beta_h'),
+            axis=2,
         )
-        alpha_t = model.net.Mul(
-            [alpha_tdash, alpha],
-            self.scope('alpha_t'),
-            broadcast=1,
+        # (alpha * input_t + beta_h) * prev_t =
+        # alpha * input_t * prev_t + beta_h * prev_t
+        # Shape: [1, batch_size, 4 * hidden_size]
+        alpha_by_input_t_plus_beta_h_by_prev_t = model.net.Mul(
+            [alpha_by_input_t_plus_beta_h, prev_t],
+            self.scope('alpha_by_input_t_plus_beta_h_by_prev_t')
         )
-        # beta1 * hU^T
-        beta1_t = model.net.Mul(
-            [prev_t, beta1],
-            self.scope('beta1_t'),
-            broadcast=1,
+        # beta_i * input_t + b
+        # Shape: [1, batch_size, 4 * hidden_size]
+        beta_i_by_input_t_plus_b = model.net.ElementwiseLinear(
+            [input_t, beta_i, b],
+            self.scope('beta_i_by_input_t_plus_b'),
+            axis=2,
         )
-        # beta2 * xW^T
-        beta2_t = model.net.Mul(
-            [input_t, beta2],
-            self.scope('beta2_t'),
-            broadcast=1,
-        )
-        gates_tdash = model.net.Sum(
-            [alpha_t, beta1_t, beta2_t],
-            self.scope('gates_tdash')
-        )
-        gates_t = model.net.Add(
-            [gates_tdash, b],
-            self.scope('gates_t'),
-            broadcast=1,
+        # alpha * input_t * prev_t + beta_h * prev_t + beta_i * input_t + b
+        # Shape: [1, batch_size, 4 * hidden_size]
+        gates_t = model.net.Sum(
+            [alpha_by_input_t_plus_beta_h_by_prev_t, beta_i_by_input_t_plus_b],
+            self.scope('gates_t')
         )
         hidden_t_intermediate, cell_t = model.net.LSTMUnit(
             [hidden_t_prev, cell_t_prev, gates_t, seq_lengths, timestep],

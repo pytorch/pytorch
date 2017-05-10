@@ -8,18 +8,30 @@
 namespace caffe2 {
 template <typename T, class Context, class Engine = DefaultEngine>
 class ElementwiseLinearOp final : public Operator<Context> {
-  public:
-   USE_SIMPLE_CTOR_DTOR(ElementwiseLinearOp);
-   USE_OPERATOR_CONTEXT_FUNCTIONS;
-   bool RunOnDevice() override;
+ public:
+  ElementwiseLinearOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
+        axis_(OperatorBase::GetSingleArgument<int>("axis", 1)) {}
+
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  bool RunOnDevice() override;
+
+ protected:
+  int axis_;
 };
 
 template <typename T, class Context, class Engine = DefaultEngine>
 class ElementwiseLinearGradientOp final : public Operator<Context> {
  public:
-   USE_SIMPLE_CTOR_DTOR(ElementwiseLinearGradientOp);
-   USE_OPERATOR_CONTEXT_FUNCTIONS;
-   bool RunOnDevice() override;
+  ElementwiseLinearGradientOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
+        axis_(OperatorBase::GetSingleArgument<int>("axis", 1)) {}
+
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  bool RunOnDevice() override;
+
+ protected:
+  int axis_;
 };
 
 } // namespace caffe2
