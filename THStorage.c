@@ -106,14 +106,14 @@ TH_API int THLongStorage_inferSize2(THLongStorage *output, long *sizesA, long di
 
 TH_API int THLongStorage_inferSizeN(THLongStorage *output, int n, long **sizes, long *dims, int raiseErrors) {
   THArgCheck(n > 0, 2, "n must be greater than 0");
-  THArgCheck(sizes != NULL, 1, "sizesA must not be null");
+  THArgCheck(sizes != NULL, 1, "sizes must not be null");
   THArgCheck(dims != NULL, 1, "dims must not be null");
 
   ptrdiff_t ndim = 0;
   for (int j = 0; j < n; ++j) {
     THArgCheck(sizes[ j ] != NULL, 1, "size %d must not be null", j);
     THArgCheck(dims[ j ], 1, "Can't expand empty tensor %d", j);
-    ptrdiff_t ndim = dims[ j ] > ndim ? dims[ j ] : ndim;
+    ndim = dims[ j ] > ndim ? dims[ j ] : ndim;
   }
 
   long *expandedSizes = THAlloc(sizeof(long)*ndim);
@@ -123,7 +123,7 @@ TH_API int THLongStorage_inferSizeN(THLongStorage *output, int n, long **sizes, 
     long offset = ndim - 1 - i;
     for (int j  = 0; j < n; ++j) {
       long dim = dims[ j ] - 1 - offset;
-      long size = (dim >= 0) ? sizes[ i ][ dim ] : 1;
+      long size = (dim >= 0) ? sizes[ j ][ dim ] : 1;
       if (size != max_dim_size) {
         if (max_dim_size == 1){
           max_dim_size = size;
@@ -139,6 +139,7 @@ TH_API int THLongStorage_inferSizeN(THLongStorage *output, int n, long **sizes, 
         }
       }
     }
+
     expandedSizes[ i ] = max_dim_size;
   }
   THLongStorage_resize(output, ndim);
