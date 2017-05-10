@@ -37,10 +37,20 @@ OPERATOR_SCHEMA(RecurrentNetworkGradient);
 
 REGISTER_CPU_OPERATOR(
     rnn_internal_accumulate_gradient_input,
-    AccumulateInputGradientOp<float, CPUContext>);
+    RNNAccumulateInputGradientOp<float, CPUContext>);
 OPERATOR_SCHEMA(rnn_internal_accumulate_gradient_input)
     .NumInputs(2)
     .NumOutputs(1)
+    .Private()
+    .SetDoc("--internal--");
+
+REGISTER_CPU_OPERATOR(
+    rnn_internal_apply_link,
+    RNNApplyLinkOp<float, CPUContext>);
+OPERATOR_SCHEMA(rnn_internal_apply_link)
+    .NumInputs(2)
+    .NumOutputs(2)
+    .EnforceInplace({{1, 1}})
     .Private()
     .SetDoc("--internal--");
 
@@ -91,6 +101,50 @@ REGISTER_GRADIENT(RecurrentNetwork, GetRecurrentNetworkGradient);
 }
 
 namespace detail {
+
+void PrependOps(std::vector<OperatorDef> ops, NetDef* netdef) {
+  for (auto& o : netdef->op()) {
+    ops.push_back(o);
+  }
+  netdef->mutable_op()->Clear();
+  for (auto& o : ops) {
+    auto* ao = netdef->add_op();
+    ao->CopyFrom(o);
+  }
+}
+
+void AddApplyLinkOps(
+    const vector<Link>& links,
+    std::string timestep,
+    const DeviceOption& device_option,
+    NetDef* netdef) {
+  std::vector<OperatorDef> ops;
+  for (auto& link : links) {
+    OperatorDef opdef;
+    opdef.set_type("rnn_internal_apply_link");
+    opdef.add_input(timestep);
+    opdef.add_input(link.external);
+    opdef.add_output(link.internal);
+    opdef.add_output(link.external);
+    opdef.mutable_device_option()->CopyFrom(device_option);
+
+    Argument* offset_arg = opdef.add_arg();
+    offset_arg->set_name("offset");
+    offset_arg->set_i(link.offset);
+
+    Argument* window_arg = opdef.add_arg();
+    window_arg->set_name("window");
+    window_arg->set_i(link.window);
+
+    ops.push_back(opdef);
+
+    netdef->add_external_input(link.internal);
+    netdef->add_external_input(link.external);
+  }
+
+  detail::PrependOps(ops, netdef);
+}
+
 void extractLinks(
     OperatorBase* op,
     const std::string& internalArg,
