@@ -46,7 +46,7 @@ struct Link {
 
 struct ScratchWorkspaces {
   std::vector<std::shared_ptr<Workspace>> stepWorkspaces;
-  std::shared_ptr<Workspace> forwardSharedWs = nullptr;
+  std::shared_ptr<Workspace> sharedBlobsWs = nullptr;
 };
 
 inline void UpdateTimestepBlob(Workspace* ws, std::string blob_name, int t) {
@@ -144,7 +144,7 @@ void applyLink(const Link& link, size_t t, Workspace* ws) {
   CAFFE_ENFORCE(externalTensorBlob);
   auto* externalTensor =
       externalTensorBlob->template GetMutable<Tensor<Context>>();
-  CAFFE_ENFORCE_GT(externalTensor->size(), 0);
+  CAFFE_ENFORCE_GT(externalTensor->size(), 0, "Error with " + link.external);
   const TIndex externalTimestepSize =
       externalTensor->size() / externalTensor->dim(0);
   auto* externalData = externalTensor->template mutable_data<T>() +
@@ -244,13 +244,13 @@ class RecurrentNetworkOp final : public Operator<Context> {
     * but we instead store that blob in the shared workspace so all
     * steps can use the same buffer on forward pass.
     */
-  void initializeBlobsToRecomputeOnBackward(Workspace* forwardSharedWs) {
+  void initializeBlobsToRecomputeOnBackward(Workspace* sharedBlobsWs) {
     std::vector<std::string> v;
     const auto& blobs = OperatorBase::GetRepeatedArgument<std::string>(
         "recompute_blobs_on_backward", v);
     for (const auto& b : blobs) {
       // Note: if the blob already was created, this is a no-op.
-      forwardSharedWs->CreateBlob(b);
+      sharedBlobsWs->CreateBlob(b);
     }
   }
 
@@ -285,15 +285,15 @@ class RecurrentNetworkOp final : public Operator<Context> {
         OperatorBase::Output<detail::ScratchWorkspaces>(OutputSize() - 1);
     std::vector<std::shared_ptr<Workspace>>& stepWorkspaces =
         scratch->stepWorkspaces;
-    std::shared_ptr<Workspace>& forwardSharedWs = scratch->forwardSharedWs;
-    if (!forwardSharedWs) {
-      forwardSharedWs = std::make_shared<Workspace>(sharedWs_);
+    std::shared_ptr<Workspace>& sharedBlobsWs = scratch->sharedBlobsWs;
+    if (!sharedBlobsWs) {
+      sharedBlobsWs = std::make_shared<Workspace>(sharedWs_);
     }
 
     // Caller can decide that some of the forward activations
     // are recomputed on backward pass. Then those activations do not
     // have to be stored in step workspaces but can be shared.
-    initializeBlobsToRecomputeOnBackward(forwardSharedWs.get());
+    initializeBlobsToRecomputeOnBackward(sharedBlobsWs.get());
 
     if (has_backward_pass && seqLen > stepWorkspaces.size()) {
       stepWorkspaces.resize(seqLen);
@@ -301,11 +301,10 @@ class RecurrentNetworkOp final : public Operator<Context> {
 
     for (auto t = 0; t < seqLen; ++t) {
       auto& currentStepWorkspace =
-          (has_backward_pass ? stepWorkspaces[t] : forwardSharedWs);
+          (has_backward_pass ? stepWorkspaces[t] : sharedBlobsWs);
       if (!currentStepWorkspace) {
         CHECK(has_backward_pass);
-        currentStepWorkspace =
-            std::make_shared<Workspace>(forwardSharedWs.get());
+        currentStepWorkspace = std::make_shared<Workspace>(sharedBlobsWs.get());
       }
 
       for (const auto& link : links_) {
@@ -353,7 +352,6 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
   RecurrentNetworkGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         sharedWs_(ws),
-        localWs_(ws),
         timestep_(OperatorBase::template GetSingleArgument<std::string>(
             "timestep",
             "timestep")),
@@ -537,9 +535,32 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
     }
   }
 
+  void CreateSharedBlobs(
+      const std::shared_ptr<Workspace>& step0Ws,
+      Workspace* sharedBlobsWs) {
+    /**
+      * Create all output blobs created by ops of the backward step net, they
+      * can be shared.
+      */
+    for (auto& op : stepNetDef_.op()) {
+      for (const string& outp : op.output()) {
+        if (!step0Ws->HasBlob(outp)) {
+          sharedBlobsWs->CreateBlob(outp);
+        }
+      }
+    }
+  }
+
   bool RunOnDevice() {
     const auto seqLen = Input(gradInputs_.size()).dim32(0);
     VLOG(1) << "seqLen: " << seqLen;
+
+    const detail::ScratchWorkspaces& scratch =
+        OperatorBase::Input<detail::ScratchWorkspaces>(InputSize() - 1);
+    const std::vector<std::shared_ptr<Workspace>>& stepWorkspaces =
+        scratch.stepWorkspaces;
+    CAFFE_ENFORCE_GE(stepWorkspaces.size(), seqLen);
+    Workspace& sharedBlobsWs = *scratch.sharedBlobsWs.get();
 
     const auto batchSize = Input(0).dim32(1);
     for (auto& param : params_) {
@@ -551,7 +572,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
       CAFFE_ENFORCE(gBlob);
       auto* g = gBlob->template GetMutable<Tensor<Context>>();
 
-      auto agBlob = localWs_.CreateBlob(param.accGrad);
+      auto agBlob = sharedBlobsWs.CreateBlob(param.accGrad);
       CAFFE_ENFORCE(agBlob);
       auto* ag = agBlob->template GetMutable<Tensor<Context>>();
       g->ResizeLike(p);
@@ -630,36 +651,21 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
       }
     };
 
-    const detail::ScratchWorkspaces& scratch =
-        OperatorBase::Input<detail::ScratchWorkspaces>(InputSize() - 1);
-    const std::vector<std::shared_ptr<Workspace>>& stepWorkspaces =
-        scratch.stepWorkspaces;
-    CAFFE_ENFORCE_GE(stepWorkspaces.size(), seqLen);
-
     accumulateFinalInputGradients();
 
+    // Create shared blobs for blobs that can be shared between
+    // all timesteps.
+    if (stepWorkspaces.size() > 0) {
+      CreateSharedBlobs(stepWorkspaces[0], &sharedBlobsWs);
+    }
     for (int32_t t = seqLen - 1; t >= 0; --t) {
-      // We use local workspace for all the blobs which are not a part
-      // of backward links. This way we reuse memory for all the internal
-      // gradient blobs of the backward step net across all the timesteps
-      localWs_.SetParentWorkspace(stepWorkspaces[t].get());
       for (const auto& link : links_) {
-        detail::applyLink<T, Context>(link, t, &localWs_);
+        detail::applyLink<T, Context>(link, t, &sharedBlobsWs);
       }
 
-      // We create different nets in the localWs_.
-      // There is no name clash here as localWs_ is a private
-      // workspace of this operator. The reason for this is that
-      // otherwise if we use the same net at each timestep,
-      // its inputs / outputs won't peak up new blobs after
-      // attaching a new parent using SetParentWorkspace
-      auto old_net_name = stepNetDef_.name();
-      auto net_name = MakeString(old_net_name, "_", t);
-      auto* stepNet = localWs_.GetNet(net_name);
+      auto* stepNet = stepWorkspaces[t].get()->GetNet(stepNetDef_.name());
       if (stepNet == nullptr) {
-        stepNetDef_.set_name(net_name);
-        stepNet = localWs_.CreateNet(stepNetDef_);
-        stepNetDef_.set_name(old_net_name);
+        stepNet = stepWorkspaces[t].get()->CreateNet(stepNetDef_);
       }
       CAFFE_ENFORCE(stepNet);
       stepNet->RunAsync();
@@ -669,7 +675,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
       // Swap the accumulated gradients with the actual gradients so
       // the rest of the network sees the accumulated gradients.
       using std::swap;
-      auto accGradBlob = localWs_.GetBlob(param.accGrad);
+      auto accGradBlob = sharedBlobsWs.GetBlob(param.accGrad);
       auto gradBlob = sharedWs_->GetBlob(param.grad);
       CAFFE_ENFORCE(accGradBlob);
       CAFFE_ENFORCE(gradBlob);
@@ -723,7 +729,6 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
  protected:
   NetDef stepNetDef_;
   Workspace* sharedWs_;
-  Workspace localWs_;
   std::vector<detail::Link> links_;
   std::vector<detail::Param> params_;
   std::vector<detail::RecurrentGradient> recurrentGradients_;
