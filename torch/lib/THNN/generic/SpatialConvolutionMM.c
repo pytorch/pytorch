@@ -174,6 +174,7 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
       THTensor *output_t = THTensor_(newSelect)(output, 0, t);
       THTensor *finput_t = THTensor_(newSelect)(finput, 0, t);
 
+#pragma omp critical(updateOutputFrame)
       THNN_(SpatialConvolutionMM_updateOutput_frame)
 	(input_t, output_t, weight, bias, finput_t,
 	 kW, kH, dW, dH, padW, padH,
@@ -268,6 +269,7 @@ void THNN_(SpatialConvolutionMM_updateGradInput)(
       THTensor *gradOutput_t = THTensor_(newSelect)(gradOutput, 0, t);
       THTensor *fgradInput_t = THTensor_(newSelect)(fgradInput, 0, t);
 
+#pragma omp critical(updateGradInputFrame)
       THNN_(SpatialConvolutionMM_updateGradInput_frame)(gradInput_t, gradOutput_t,
 							tweight, fgradInput_t,
 							kW, kH, dW, dH, padW, padH);
