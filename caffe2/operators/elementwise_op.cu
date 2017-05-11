@@ -163,14 +163,21 @@ void device_reduce(
     CUDAContext* context) {
   // Determine temporary device storage requirements
   size_t temp_storage_bytes = 0;
-  cub::DeviceReduce::Sum(NULL, temp_storage_bytes, d_in, d_out, N);
+  cub::DeviceReduce::Sum(
+      NULL, temp_storage_bytes, d_in, d_out, N, context->cuda_stream());
 
   auto buffer_size = temp_storage_bytes / sizeof(T);
   buffer_size += temp_storage_bytes % sizeof(T) != 0 ? 1 : 0;
   buffer->Resize(buffer_size);
   void* d_temp_storage = static_cast<void*>(buffer->template mutable_data<T>());
   // Run sum-reduction
-  cub::DeviceReduce::Sum(d_temp_storage, temp_storage_bytes, d_in, d_out, N);
+  cub::DeviceReduce::Sum(
+      d_temp_storage,
+      temp_storage_bytes,
+      d_in,
+      d_out,
+      N,
+      context->cuda_stream());
 }
 
 template <typename T, int BLOCK_THREADS>
