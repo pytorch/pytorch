@@ -13,14 +13,13 @@ import unittest
 
 class TestSpatialBN(hu.HypothesisTestCase):
 
-    @unittest.skipIf(not workspace.has_gpu_support, "No gpu support")
     @given(size=st.integers(7, 10),
            input_channels=st.integers(1, 10),
            batch_size=st.integers(1, 3),
            seed=st.integers(0, 65535),
            order=st.sampled_from(["NCHW", "NHWC"]),
            epsilon=st.floats(min_value=1e-5, max_value=1e-2),
-           **hu.gcs_gpu_only)
+           **hu.gcs)
     def test_spatialbn_test_mode_3d(
             self, size, input_channels, batch_size, seed, order, epsilon,
             gc, dc):
@@ -54,6 +53,7 @@ class TestSpatialBN(hu.HypothesisTestCase):
             X = X.transpose(0, 2, 3, 4, 1)
         self.assertReferenceChecks(gc, op, [X, scale, bias, mean, var],
                                    reference_spatialbn_test)
+        self.assertDeviceChecks(dc, op, [X, scale, bias, mean, var], [0])
 
     @unittest.skipIf(not workspace.has_gpu_support, "No gpu support")
     @given(size=st.integers(7, 10),
@@ -62,7 +62,7 @@ class TestSpatialBN(hu.HypothesisTestCase):
            seed=st.integers(0, 65535),
            order=st.sampled_from(["NCHW", "NHWC"]),
            epsilon=st.floats(min_value=1e-5, max_value=1e-2),
-           **hu.gcs_gpu_only)
+           **hu.gcs)
     def test_spatialbn_test_mode_1d(
             self, size, input_channels, batch_size, seed, order, epsilon,
             gc, dc):
@@ -209,14 +209,13 @@ class TestSpatialBN(hu.HypothesisTestCase):
             self.assertGradientChecks(gc, op, [X, scale, bias, mean, var],
                                       input_to_check, [0])
 
-    @unittest.skipIf(not workspace.has_gpu_support, "No gpu support")
     @given(size=st.integers(7, 10),
            input_channels=st.integers(1, 10),
            batch_size=st.integers(1, 3),
            seed=st.integers(0, 65535),
            order=st.sampled_from(["NCHW", "NHWC"]),
            epsilon=st.floats(min_value=1e-5, max_value=1e-2),
-           **hu.gcs_gpu_only)
+           **hu.gcs)
     def test_spatialbn_train_mode_gradient_check_1d(
             self, size, input_channels, batch_size, seed, order, epsilon,
             gc, dc):
