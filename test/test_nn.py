@@ -1673,7 +1673,6 @@ class TestNN(NNTestCase):
             self.assertEqual(hidden1, hidden2)
 
     def _test_rnn_retain_variables(self, dtype):
-
         rnns = [nn.LSTM(10, 20, num_layers=2).type(dtype),
                 nn.GRU(10, 20, num_layers=2).type(dtype),
                 nn.RNN(10, 20, num_layers=2).type(dtype)]
@@ -1688,7 +1687,6 @@ class TestNN(NNTestCase):
                 output[0].sum().backward(retain_graph=True)
                 grads2 = [input.grad.data] + [p.grad.data for p in rnn.parameters()]
                 self.assertEqual(grads, grads2)
-
 
     def test_rnn_retain_variables(self):
         self._test_rnn_retain_variables(torch.DoubleTensor)
