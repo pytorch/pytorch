@@ -1,6 +1,24 @@
 from . import CWrapPlugin
 from string import Template
 
+# For out of place:
+# Two args: expand the two args together
+# Three args (fused kernels): (e.g. addcmul) expand all three args together
+# Sketch of proof that this is the same:
+# consider addcmul, under expansion we want: a + (b * c) = (a + b * c) [all expanded together]
+# Let e(i, j) be the expansion of i with j, e(i, j, k) be the expansion of i with j,k
+#
+# Then a + (b * c) = e(a, e(b,c) * e(c,b)) + e(e(b,c)   * e(c,b), a)
+#                  = e(a, e(b,c))          + e(e(b,c)   * e(c,b), a)    (only size matters for second param)
+#                  = e(a,b,c)              + e(e(b,c)   * e(c,b), a)    (by associativity of max in expand)
+#                  = e(a,b,c)              + e(b,c,a)   * e(c,b,a)      (see L1)
+# which is a + b * c all expanded together
+#
+# L1: Show e(i * j, a) = e(i,a) * e(j,a) where i,j have same size
+# Consider any index _{ s_0, ..., s_n}
+# e(i * j, a) = (i*j)_{f(s_0), ...,f(s_n)} where f is the expansion of that dimension with a
+#             = i_{f(s_0), ..., f(s_n)} * j_{f(s_0), ..., f(s_n)} by definition of pointwise operator
+#             = e(i,a) * e(j,a)
 
 class Broadcast(CWrapPlugin):
     DEPRECATED_WARNING = \
