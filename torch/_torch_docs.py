@@ -178,7 +178,8 @@ addcdiv(tensor, value=1, tensor1, tensor2, out=None) -> Tensor
 Performs the element-wise division of :attr:`tensor1` by :attr:`tensor2`,
 multiply the result by the scalar :attr:`value` and add it to :attr:`tensor`.
 
-The number of elements must match, but sizes do not matter.
+The shapes of :attr:`tensor`, :attr:`tensor1`, and :attr:`tensor2` must be
+:ref:`broadcastable <broadcasting-semantics>`.
 
 For inputs of type `FloatTensor` or `DoubleTensor`, :attr:`value` must be a real number, otherwise an integer
 
@@ -209,7 +210,8 @@ Performs the element-wise multiplication of :attr:`tensor1`
 by :attr:`tensor2`, multiply the result by the scalar :attr:`value`
 and add it to :attr:`tensor`.
 
-The number of elements must match, but sizes do not matter.
+The shapes of :attr:`tensor`, :attr:`tensor1`, and :attr:`tensor2` must be
+:ref:`broadcastable <broadcasting-semantics>`.
 
 For inputs of type `FloatTensor` or `DoubleTensor`, :attr:`value` must be a real number, otherwise an integer
 
