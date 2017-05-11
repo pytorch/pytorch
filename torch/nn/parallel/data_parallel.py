@@ -6,7 +6,6 @@ from .parallel_apply import parallel_apply
 
 
 class DataParallel(Module):
-
     """Implements data parallelism at the module level.
 
     This container parallelizes the application of the given module by

@@ -114,7 +114,9 @@ def barrier(group=group.WORLD):
     return torch._C._dist_barrier(group)
 
 
-def new_group(ranks):
+def new_group(ranks=None):
     assert torch.distributed._initialized == _INITIALIZED_PG, \
         "collective only supported in process-group mode"
+    if ranks is None:
+        ranks = list(range(get_num_processes()))
     return torch._C._dist_new_group(ranks)

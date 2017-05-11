@@ -1,8 +1,6 @@
 import torch
 from . import nccl
-from torch._utils import _accumulate
-
-# TODO: sync streams when implemented
+from torch._utils import _accumulate, _take_tensors, _flatten_tensors, _unflatten_tensors
 
 
 def broadcast(tensor, devices):
@@ -26,7 +24,6 @@ def broadcast(tensor, devices):
         nccl.broadcast(tensors)
         return tuple(tensors)
 
-    # TODO: copy to a pinned buffer first (if copy is from CPU)
     return tuple(tensor.cuda(gpu, async=True) for gpu in devices)
 
 
@@ -207,45 +204,3 @@ def gather(tensors, dim=0, destination=None):
         result.narrow(dim, chunk_start, tensor.size(dim)).copy_(tensor, True)
         chunk_start += tensor.size(dim)
     return result
-
-
-def _flatten_tensors(tensors):
-    """Flatten tensors into a single contiguous 1D buffer"""
-    if len(tensors) == 1:
-        return tensors[0].contiguous().view(-1)
-    size = sum(tensor.numel() for tensor in tensors)
-    offset = 0
-    flat = tensors[0].new(size)
-    for tensor in tensors:
-        flat.narrow(0, offset, tensor.numel()).copy_(tensor, broadcast=False)
-        offset += tensor.numel()
-    return flat
-
-
-def _unflatten_tensors(flat, tensors):
-    """View a flat buffer using the sizes of tensors"""
-    outputs = []
-    offset = 0
-    for tensor in tensors:
-        outputs.append(flat.narrow(0, offset, tensor.numel()).view_as(tensor))
-        offset += tensor.numel()
-    return tuple(outputs)
-
-
-def _take_tensors(tensors, size_limit):
-    """Groups tensors into lists of up to size_limit bytes"""
-    buf = []
-    size = 0
-    last_type = type(tensors[0]) if len(tensors) > 0 else None
-    for tensor in tensors:
-        t = type(tensor)
-        param_size = tensor.numel() * tensor.element_size()
-        if t is not last_type or (size + param_size > size_limit and size > 0):
-            yield buf
-            last_type = t
-            size = 0
-            buf = []
-        buf.append(tensor)
-        size += param_size
-    if len(buf) > 0:
-        yield buf

@@ -55,3 +55,6 @@ def init_master_worker(backend, init_method='env://', **kwargs):
     _extend_scope(collectives)
     _extend_scope(remote_types)
     assert torch._C._dist_init_extension(True, reduce_op, group)
+
+
+_register_stream = torch._C._dist_register_stream
