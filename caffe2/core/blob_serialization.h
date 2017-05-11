@@ -202,8 +202,6 @@ void TensorSerializer<Context>::SerializeWithChunkSize(
     chunk_size = FLAGS_caffe2_tensor_chunk_size;
   }
 
-#ifndef __ANDROID__
-  std::vector<std::future<void>> futures;
   auto processChunk = [&](int64_t chunkStart) {
     BlobProto blob_proto;
     blob_proto.set_name(name);
@@ -217,6 +215,8 @@ void TensorSerializer<Context>::SerializeWithChunkSize(
         blob_proto.SerializeAsString());
   };
 
+#ifndef __ANDROID__
+  std::vector<std::future<void>> futures;
   // Poorman's IOBound ThreadPool
   SimpleQueue<size_t> chunkQueue;
   auto task = [&]() {
