@@ -117,11 +117,13 @@ CPP_FLAGS=" -std=c++11 "
 build libshm
 
 if [[ $WITH_DISTRIBUTED -eq 1 ]]; then
-    GLOO_FLAGS=""
-    if [[ $WITH_CUDA -eq 1 ]]; then
+    if [ -d "gloo" ]; then
+      GLOO_FLAGS=""
+      if [[ $WITH_CUDA -eq 1 ]]; then
         GLOO_FLAGS="-DUSE_CUDA=1 -DNCCL_ROOT_DIR=$INSTALL_DIR"
+      fi
+      build gloo "$GLOO_FLAGS"
     fi
-    build gloo "$GLOO_FLAGS"
     build THD
 fi
 

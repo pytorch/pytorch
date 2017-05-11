@@ -21,11 +21,13 @@ namespace worker {
 namespace detail {
 
 void sendValueToMaster(long long value) {
-  dataChannel->send(IntScalar(value), 0);
+  IntScalar scalar(value);
+  dataChannel->send(scalar, 0);
 }
 
 void sendValueToMaster(double value) {
-  dataChannel->send(FloatScalar(value), 0);
+  FloatScalar scalar(value);
+  dataChannel->send(scalar, 0);
 }
 
 thpp::Tensor* unpackRetrieveTensor(rpc::RPCMessage& message) {

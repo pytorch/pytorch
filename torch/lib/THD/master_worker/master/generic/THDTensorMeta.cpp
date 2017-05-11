@@ -87,6 +87,24 @@ void THDTensor_(_resize5d)(THDTensor *tensor, long size0, long size1, long size2
   long sizes[] = {size0, size1, size2, size3, size4};
   THDTensor_(_resize)(tensor, 2, sizes, nullptr);
 }
+
+void THDTensor_(_squeeze1d)(THDTensor *self, THDTensor *src, int dimension) {
+  if (!src)
+    src = self;
+
+  THArgCheck((dimension >= 0) && (dimension < src->nDimension), 2, "dimension out of range");
+
+  THDTensor_(set)(self, src);
+
+  if (src->size[dimension] == 1 && src->nDimension > 1) {
+    for (std::size_t d = dimension; d < self->nDimension-1; d++) {
+      self->size[d] = self->size[d+1];
+      self->stride[d] = self->stride[d+1];
+    }
+    self->nDimension--;
+  }
+}
+
 static void THDTensor_(_set)(THDTensor *self, THDStorage *storage,
                              ptrdiff_t storageOffset, int nDimension,
                              long *size, long *stride) {
@@ -115,10 +133,17 @@ static void THDTensor_(_set)(THDTensor *self, THDStorage *storage,
 static THDTensor *THDTensor_(_alloc)() {
   THDTensor *new_tensor = new THDTensor();
   std::memset(reinterpret_cast<void*>(new_tensor), 0, sizeof(THDTensor));
-  new_tensor->tensor_id = THDState::s_nextId++;
+  new_tensor->size = nullptr;
+  new_tensor->stride = nullptr;
+  new_tensor->nDimension = 0;
+
+  new_tensor->storage = nullptr;
+  new_tensor->storageOffset = 0;
+
   new_tensor->refcount = 1;
   new_tensor->flag = TH_TENSOR_REFCOUNTED;
-  // TODO: allocate storage
+
+  new_tensor->tensor_id = THDState::s_nextId++;
   return new_tensor;
 }
 

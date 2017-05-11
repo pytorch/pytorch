@@ -138,18 +138,18 @@ void DataChannelGloo::allGatherT(std::vector<thpp::Tensor*>& output,
   auto ret = _cache->getAlgorithm<CollectiveType::ALL_GATHER, T>(
     group_id, _groups.at(group_id), input_device, tensor_bytes, all_tensor_bytes, input.numel());
 
-  std::memcpy(GlooCache::input_buffer(ret).get(), input.data(), tensor_bytes);
 
   {
     std::lock_guard<std::mutex> lock(*GlooCache::mutex(ret));
+    std::memcpy(GlooCache::input_buffer(ret).get(), input.data(), tensor_bytes);
     GlooCache::algorithm(ret)->run();
+    for (std::size_t i = 0; i < output.size(); i++) {
+      std::memcpy(output.at(i)->data(),
+                  GlooCache::output_buffer(ret).get() + (i * tensor_bytes),
+                  tensor_bytes);
+    }
   }
 
-  for (std::size_t i = 0; i < output.size(); i++) {
-    std::memcpy(output.at(i)->data(),
-                GlooCache::output_buffer(ret).get() + (i * tensor_bytes),
-                tensor_bytes);
-  }
 }
 
 void DataChannelGloo::allGather(std::vector<thpp::Tensor*>& output,
@@ -189,12 +189,12 @@ void DataChannelGloo::allReduceT(thpp::Tensor& t, THDReduceOp operation,
   auto ret = _cache->getAlgorithm<CollectiveType::ALL_REDUCE, T>(
     group_id, _groups.at(group_id), getDeviceType(t), tensor_bytes, t.numel(), operation);
 
-  GlooCache::memcpy_input(ret, t);
   {
     std::lock_guard<std::mutex> lock(*GlooCache::mutex(ret));
+    GlooCache::memcpy_input(ret, t);
     GlooCache::algorithm(ret)->run();
+    GlooCache::memcpy_output(ret, t);
   }
-  GlooCache::memcpy_output(ret, t);
 }
 
 void DataChannelGloo::allReduce(thpp::Tensor& data, THDReduceOp operation,
@@ -219,18 +219,19 @@ void DataChannelGloo::broadcastT(thpp::Tensor& data, rank_type src_rank,
     group_id, _groups.at(group_id), getDeviceType(data), tensor_bytes, data.numel(),
     _groups.at(group_id).mustGetGroupRank(src_rank));
 
-  if (_rank == src_rank) {
-    GlooCache::memcpy_input(ret, data);
-  }
-
   {
     std::lock_guard<std::mutex> lock(*GlooCache::mutex(ret));
+    if (_rank == src_rank) {
+      GlooCache::memcpy_input(ret, data);
+    }
+
     GlooCache::algorithm(ret)->run();
+
+    if (_rank != src_rank) {
+      GlooCache::memcpy_output(ret, data);
+    }
   }
 
-  if (_rank != src_rank) {
-    GlooCache::memcpy_output(ret, data);
-  }
 }
 
 
@@ -241,7 +242,7 @@ void DataChannelGloo::broadcast(thpp::Tensor& data, rank_type src_rank,
 }
 
 
-void DataChannelGloo::send(const Scalar& data, rank_type dst_rank) {
+void DataChannelGloo::send(Scalar& data, rank_type dst_rank) {
   throw std::runtime_error("DataChannelGloo does not support send");
 }
 

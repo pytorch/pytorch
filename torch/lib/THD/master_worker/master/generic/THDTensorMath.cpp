@@ -61,7 +61,12 @@ void THDTensor_(scatterFill)(THDTensor *self, int dim, THDLongTensor *index, rea
   );
 }
 
-void THDTensor_(max)(THDTensor *self, THDLongTensor *indices_, THDTensor *src, int dimension) {
+THD_API void THDTensor_(scatterAdd)(THDTensor *self, int dim, THDLongTensor *index,
+                                 THDTensor *src) {
+  THError("scatterAdd not implemented");
+}
+
+void THDTensor_(max)(THDTensor *self, THDLongTensor *indices_, THDTensor *src, int dimension, int keepdim) {
   THArgCheck(dimension >= 0 && dimension < src->nDimension, 2, "dimension %d out of range",
       dimension + TH_INDEX_BASE);
 
@@ -72,12 +77,17 @@ void THDTensor_(max)(THDTensor *self, THDLongTensor *indices_, THDTensor *src, i
   THLongStorage_free(dim);
 
   masterCommandChannel->sendMessage(
-    packMessage(Functions::tensorMax, self, indices_, src, dimension),
+    packMessage(Functions::tensorMax, self, indices_, src, dimension, keepdim),
     THDState::s_current_worker
   );
+
+  if (!keepdim) {
+    THDTensor_(_squeeze1d)(self, self, dimension);
+    THDLongTensor__squeeze1d(indices_, indices_, dimension);
+  }
 }
 
-void THDTensor_(min)(THDTensor *self, THDLongTensor *indices_, THDTensor *src, int dimension) {
+void THDTensor_(min)(THDTensor *self, THDLongTensor *indices_, THDTensor *src, int dimension, int keepdim) {
   THArgCheck(dimension >= 0 && dimension < src->nDimension, 2, "dimension %d out of range",
       dimension + TH_INDEX_BASE);
 
@@ -88,12 +98,17 @@ void THDTensor_(min)(THDTensor *self, THDLongTensor *indices_, THDTensor *src, i
   THLongStorage_free(dim);
 
   masterCommandChannel->sendMessage(
-    packMessage(Functions::tensorMin, self, indices_, src, dimension),
+    packMessage(Functions::tensorMin, self, indices_, src, dimension, keepdim),
     THDState::s_current_worker
   );
+
+  if (!keepdim) {
+    THDTensor_(_squeeze1d)(self, self, dimension);
+    THDLongTensor__squeeze1d(indices_, indices_, dimension);
+  }
 }
 
-void THDTensor_(kthvalue)(THDTensor *self, THDLongTensor *indices_, THDTensor *src, long k, int dimension) {
+void THDTensor_(kthvalue)(THDTensor *self, THDLongTensor *indices_, THDTensor *src, long k, int dimension, int keepdim) {
   THArgCheck(dimension >= 0 && dimension < src->nDimension, 3, "dimension out of range");
   THArgCheck(k > 0 && k <= src->size[dimension], 2, "selected index out of range");
 
@@ -104,12 +119,17 @@ void THDTensor_(kthvalue)(THDTensor *self, THDLongTensor *indices_, THDTensor *s
   THLongStorage_free(dim);
 
   masterCommandChannel->sendMessage(
-    packMessage(Functions::tensorKthvalue, self, indices_, src, k, dimension),
+    packMessage(Functions::tensorKthvalue, self, indices_, src, k, dimension, keepdim),
     THDState::s_current_worker
   );
+
+  if (!keepdim) {
+    THDTensor_(_squeeze1d)(self, self, dimension);
+    THDLongTensor__squeeze1d(indices_, indices_, dimension);
+  }
 }
 
-void THDTensor_(mode)(THDTensor *self, THDLongTensor *indices_, THDTensor *src, int dimension) {
+void THDTensor_(mode)(THDTensor *self, THDLongTensor *indices_, THDTensor *src, int dimension, int keepdim) {
   THArgCheck(dimension >= 0 && dimension < src->nDimension, 3, "dimension out of range");
 
   THLongStorage *dim = THDTensor_(newSizeOf)(src);
@@ -119,19 +139,25 @@ void THDTensor_(mode)(THDTensor *self, THDLongTensor *indices_, THDTensor *src, 
   THLongStorage_free(dim);
 
   masterCommandChannel->sendMessage(
-    packMessage(Functions::tensorMode, self, indices_, src, dimension),
+    packMessage(Functions::tensorMode, self, indices_, src, dimension, keepdim),
     THDState::s_current_worker
   );
+
+  if (!keepdim) {
+    THDTensor_(_squeeze1d)(self, self, dimension);
+    THDLongTensor__squeeze1d(indices_, indices_, dimension);
+  }
 }
 
-void THDTensor_(median)(THDTensor *self, THDLongTensor *indices_, THDTensor *src, int dimension) {
+void THDTensor_(median)(THDTensor *self, THDLongTensor *indices_, THDTensor *src, int dimension, int keepdim) {
   THArgCheck(dimension >= 0 && dimension < src->nDimension, 3, "dimension out of range");
 
   long t_size_dim = src->size[dimension];
   long k = (t_size_dim - 1) >> 1; /* take middle or one-before-middle element */
 
-  THDTensor_(kthvalue)(self, indices_, src, k + 1, dimension);
+  THDTensor_(kthvalue)(self, indices_, src, k + 1, dimension, keepdim);
 }
+
 
 void THDTensor_(fill)(THDTensor *tensor, real value) {
   masterCommandChannel->sendMessage(
@@ -620,7 +646,7 @@ void THDTensor_(lerp)(THDTensor *r_, THDTensor *a, THDTensor *b, real weight) {
   );
 }
 
-void THDTensor_(mean)(THDTensor *r_, THDTensor *t, int dimension) {
+void THDTensor_(mean)(THDTensor *r_, THDTensor *t, int dimension, int keepdim) {
   THArgCheck(dimension >= 0 && dimension < THDTensor_(nDimension)(t), 2,
              "invalid dimension %d", dimension + TH_INDEX_BASE);
 
@@ -630,12 +656,16 @@ void THDTensor_(mean)(THDTensor *r_, THDTensor *t, int dimension) {
   THLongStorage_free(dim);
 
   masterCommandChannel->sendMessage(
-    packMessage(Functions::tensorMean, r_, t, dimension),
+    packMessage(Functions::tensorMean, r_, t, dimension, keepdim),
     THDState::s_current_worker
   );
+
+  if (!keepdim) {
+    THDTensor_(_squeeze1d)(r_, r_, dimension);
+  }
 }
 
-void THDTensor_(std)(THDTensor *r_, THDTensor *t, int dimension, int flag) {
+void THDTensor_(std)(THDTensor *r_, THDTensor *t, int dimension, int flag, int keepdim) {
   THArgCheck(dimension >= 0 && dimension < THDTensor_(nDimension)(t), 3,
              "invalid dimension %d", dimension + TH_INDEX_BASE);
 
@@ -645,12 +675,16 @@ void THDTensor_(std)(THDTensor *r_, THDTensor *t, int dimension, int flag) {
   THLongStorage_free(dim);
 
   masterCommandChannel->sendMessage(
-    packMessage(Functions::tensorStd, r_, t, dimension, flag),
+    packMessage(Functions::tensorStd, r_, t, dimension, flag, keepdim),
     THDState::s_current_worker
   );
+
+  if (!keepdim) {
+    THDTensor_(_squeeze1d)(r_, r_, dimension);
+  }
 }
 
-void THDTensor_(var)(THDTensor *r_, THDTensor *t, int dimension, int flag) {
+void THDTensor_(var)(THDTensor *r_, THDTensor *t, int dimension, int flag, int keepdim) {
   THArgCheck(dimension >= 0 && dimension < THDTensor_(nDimension)(t), 3,
              "invalid dimension %d", dimension + TH_INDEX_BASE);
 
@@ -660,12 +694,16 @@ void THDTensor_(var)(THDTensor *r_, THDTensor *t, int dimension, int flag) {
   THLongStorage_free(dim);
 
   masterCommandChannel->sendMessage(
-    packMessage(Functions::tensorVar, r_, t, dimension, flag),
+    packMessage(Functions::tensorVar, r_, t, dimension, flag, keepdim),
     THDState::s_current_worker
   );
+
+  if (!keepdim) {
+    THDTensor_(_squeeze1d)(r_, r_, dimension);
+  }
 }
 
-void THDTensor_(norm)(THDTensor *r_, THDTensor *t, real value, int dimension) {
+void THDTensor_(norm)(THDTensor *r_, THDTensor *t, real value, int dimension, int keepdim) {
   THArgCheck(dimension >= 0 && dimension < THDTensor_(nDimension)(t), 3,
              "invalid dimension %d", dimension + TH_INDEX_BASE);
 
@@ -675,9 +713,13 @@ void THDTensor_(norm)(THDTensor *r_, THDTensor *t, real value, int dimension) {
   THLongStorage_free(dim);
 
   masterCommandChannel->sendMessage(
-    packMessage(Functions::tensorNorm, r_, t, dimension, value),
+    packMessage(Functions::tensorNorm, r_, t, dimension, keepdim, value),
     THDState::s_current_worker
   );
+
+  if (!keepdim) {
+    THDTensor_(_squeeze1d)(r_, r_, dimension);
+  }
 }
 
 accreal THDTensor_(normall)(THDTensor *tensor, real value) {
@@ -844,5 +886,45 @@ int THDTensor_(logicalany)(THDTensor *tensor) {
 }
 
 #endif // defined(TH_REAL_IS_BYTE)
+
+THD_API void THDTensor_(clshift)(THDTensor *r_, THDTensor *t, THDTensor *src) {
+  THError("clshift not implemented");
+}
+
+THD_API void THDTensor_(crshift)(THDTensor *r_, THDTensor *t, THDTensor *src) {
+  THError("crshift not implemented");
+}
+
+THD_API void THDTensor_(cbitand)(THDTensor *r_, THDTensor *t, THDTensor *src) {
+  THError("cbitand not implemented");
+}
+
+THD_API void THDTensor_(cbitor)(THDTensor *r_, THDTensor *t, THDTensor *src) {
+  THError("cbitor not implemented");
+}
+
+THD_API void THDTensor_(cbitxor)(THDTensor *r_, THDTensor *t, THDTensor *src) {
+  THError("cbitxor not implemented");
+}
+
+THD_API void THDTensor_(lshift)(THDTensor *r_, THDTensor *t, real value) {
+  THError("lshift not implemented");
+}
+
+THD_API void THDTensor_(rshift)(THDTensor *r_, THDTensor *t, real value) {
+  THError("rshift not implemented");
+}
+
+THD_API void THDTensor_(bitand)(THDTensor *r_, THDTensor *t, real value) {
+  THError("bitand not implemented");
+}
+
+THD_API void THDTensor_(bitor)(THDTensor *r_, THDTensor *t, real value) {
+  THError("bitor not implemented");
+}
+
+THD_API void THDTensor_(bitxor)(THDTensor *r_, THDTensor *t, real value) {
+  THError("bitxor not implemented");
+}
 
 #endif // TH_GENERIC_FILE

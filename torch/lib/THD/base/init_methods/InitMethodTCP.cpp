@@ -7,6 +7,7 @@
 #include <netinet/tcp.h>
 #include <unistd.h>
 #include <sys/types.h>
+#include <sys/socket.h>
 #include <fcntl.h>
 #include <algorithm>
 #include <array>
@@ -18,8 +19,8 @@
 #include <sstream>
 #include <iterator>
 
-#define UID_LENGTH 60
-#define MAX_MSG_LENGTH 4000
+constexpr size_t num_rand_bytes = 32;
+constexpr size_t max_msg_length = 4000;
 
 namespace thd {
 namespace init {
@@ -31,18 +32,19 @@ std::string getRandomString()
     "0123456789"
     "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
     "abcdefghijklmnopqrstuvwxyz";
-  constexpr std::size_t max_index = (sizeof(charset) - 1);
-
   int fd;
-  unsigned int seed;
+  uint8_t rand_bytes[num_rand_bytes];
+  ssize_t bytes_read;
   SYSCHECK(fd = open("/dev/urandom", O_RDONLY));
-  SYSCHECK(read(fd, &seed, sizeof(seed)));
+  SYSCHECK(bytes_read = read(fd, &rand_bytes, sizeof(rand_bytes)));
+  if (bytes_read != sizeof(rand_bytes))
+    throw std::runtime_error("failed to read from /dev/urandom");
   SYSCHECK(::close(fd));
-  std::mt19937 prng {seed};
 
-  std::string str(UID_LENGTH, 0);
-  for (std::size_t i = 0; i < UID_LENGTH; ++i) {
-    str[i] = charset[prng() % max_index];
+  std::string str;
+  str.reserve(num_rand_bytes);
+  for (uint8_t *byte = rand_bytes; byte != rand_bytes + num_rand_bytes; ++byte) {
+    str.push_back(charset[(*byte) % (sizeof(charset) - 1)]);
   }
   return str;
 }
@@ -100,7 +102,6 @@ int bindMulticastSocket(struct sockaddr* address, struct sockaddr_storage *sock_
   int socket, optval;
   SYSCHECK(socket = ::socket(address->sa_family, SOCK_DGRAM, 0));
   optval = 1; SYSCHECK(::setsockopt(socket, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(int)));
-  optval = 1; SYSCHECK(::setsockopt(socket, SOL_SOCKET, SO_REUSEPORT, &optval, sizeof(int)));
 
   if (address->sa_family == AF_INET) {
     struct sockaddr_in *sock_addr_ipv4 = reinterpret_cast<struct sockaddr_in*>(sock_addr);
@@ -153,8 +154,8 @@ std::vector<MulticastMessage> getMessages(struct sockaddr* addr, rank_type world
 
   std::set<std::string> msgs = {packed_msg};
 
-  char recv_message[MAX_MSG_LENGTH];
-  if (packed_msg.length() + 1 > MAX_MSG_LENGTH) {
+  char recv_message[max_msg_length];
+  if (packed_msg.length() + 1 > max_msg_length) {
     throw std::logic_error("message too long for multicast init");
   }
 
@@ -173,6 +174,8 @@ std::vector<MulticastMessage> getMessages(struct sockaddr* addr, rank_type world
     try {
       SYSCHECK(::recv(socket, recv_message, sizeof(recv_message), 0));
       std::string recv_message_str(recv_message);
+
+      if (recv_message_str == packed_msg) continue; // ignore multicast loopback
 
       // We should ignore messages comming from different group
       auto recv_msg = MulticastMessage(recv_message_str);

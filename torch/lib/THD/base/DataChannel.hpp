@@ -88,7 +88,7 @@ struct DataChannel {
                       rank_type dst_rank, THDGroup group_id = THDGroupWORLD) = 0;
   virtual void broadcast(thpp::Tensor& data, rank_type src_rank,
                          THDGroup group_id = THDGroupWORLD) = 0;
-  virtual void send(const Scalar& value, rank_type src_rank) = 0;
+  virtual void send(Scalar& value, rank_type src_rank) = 0;
   virtual void send(thpp::Tensor& data, rank_type dst_rank) = 0;
   virtual void receive(Scalar& value, rank_type src_rank) = 0;
   virtual void receive(thpp::Tensor& data) = 0; // receive from any source

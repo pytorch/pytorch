@@ -777,8 +777,9 @@ static void tensorMax(rpc::RPCMessage& raw_message) {
   thpp::Tensor *indices_ = unpackRetrieveTensor(raw_message);
   thpp::Tensor *src = unpackRetrieveTensor(raw_message);
   int dimension = unpackInteger(raw_message);
+  int keepdim = unpackInteger(raw_message);
   finalize(raw_message);
-  tensor->max(*indices_, *src, dimension);
+  tensor->max(*indices_, *src, dimension, keepdim);
 }
 
 static void tensorMin(rpc::RPCMessage& raw_message) {
@@ -786,8 +787,9 @@ static void tensorMin(rpc::RPCMessage& raw_message) {
   thpp::Tensor *indices_ = unpackRetrieveTensor(raw_message);
   thpp::Tensor *src = unpackRetrieveTensor(raw_message);
   int dimension = unpackInteger(raw_message);
+  int keepdim = unpackInteger(raw_message);
   finalize(raw_message);
-  tensor->min(*indices_, *src, dimension);
+  tensor->min(*indices_, *src, dimension, keepdim);
 }
 
 static void tensorKthvalue(rpc::RPCMessage& raw_message) {
@@ -796,8 +798,9 @@ static void tensorKthvalue(rpc::RPCMessage& raw_message) {
   thpp::Tensor *src = unpackRetrieveTensor(raw_message);
   int k = unpackInteger(raw_message);
   int dimension = unpackInteger(raw_message);
+  int keepdim = unpackInteger(raw_message);
   finalize(raw_message);
-  tensor->kthvalue(*indices_, *src, k, dimension);
+  tensor->kthvalue(*indices_, *src, k, dimension, keepdim);
 }
 
 static void tensorMode(rpc::RPCMessage& raw_message) {
@@ -805,8 +808,9 @@ static void tensorMode(rpc::RPCMessage& raw_message) {
   thpp::Tensor *indices_ = unpackRetrieveTensor(raw_message);
   thpp::Tensor *src = unpackRetrieveTensor(raw_message);
   int dimension = unpackInteger(raw_message);
+  int keepdim = unpackInteger(raw_message);
   finalize(raw_message);
-  tensor->mode(*indices_, *src, dimension);
+  tensor->mode(*indices_, *src, dimension, keepdim);
 }
 
 static void tensorMedian(rpc::RPCMessage& raw_message) {
@@ -814,24 +818,27 @@ static void tensorMedian(rpc::RPCMessage& raw_message) {
   thpp::Tensor *indices_ = unpackRetrieveTensor(raw_message);
   thpp::Tensor *src = unpackRetrieveTensor(raw_message);
   int dimension = unpackInteger(raw_message);
+  int keepdim = unpackInteger(raw_message);
   finalize(raw_message);
-  tensor->median(*indices_, *src, dimension);
+  tensor->median(*indices_, *src, dimension, keepdim);
 }
 
 static void tensorSum(rpc::RPCMessage& raw_message) {
   thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
   thpp::Tensor *src = unpackRetrieveTensor(raw_message);
   int dimension = unpackInteger(raw_message);
+  int keepdim = unpackInteger(raw_message);
   finalize(raw_message);
-  tensor->sum(*src, dimension);
+  tensor->sum(*src, dimension, keepdim);
 }
 
 static void tensorProd(rpc::RPCMessage& raw_message) {
   thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
   thpp::Tensor *src = unpackRetrieveTensor(raw_message);
   int dimension = unpackInteger(raw_message);
+  int keepdim = unpackInteger(raw_message);
   finalize(raw_message);
-  tensor->prod(*src, dimension);
+  tensor->prod(*src, dimension, keepdim);
 }
 
 static void tensorCumsum(rpc::RPCMessage& raw_message) {
