@@ -411,10 +411,10 @@ class Addcmul(InplaceFunction):
             grad_add = grad_output
 
         if ctx.needs_input_grad[1]:
-            grad_mul1 = grad_output.mul(mul_tensor2).mul(ctx._scale)
+            grad_mul1 = grad_output.mul(mul_tensor2).mul_(ctx._scale)
 
         if ctx.needs_input_grad[2]:
-            grad_mul2 = grad_output.mul(mul_tensor1).mul(ctx._scale)
+            grad_mul2 = grad_output.mul(mul_tensor1).mul_(ctx._scale)
 
         return grad_add, grad_mul1, grad_mul2, None, None
 
@@ -440,11 +440,11 @@ class Addcdiv(InplaceFunction):
             grad_add = grad_output
 
         if ctx.needs_input_grad[1]:
-            grad_div1 = grad_output.div(div_tensor2).mul(ctx._scale)
+            grad_div1 = grad_output.div(div_tensor2).mul_(ctx._scale)
 
         if ctx.needs_input_grad[2]:
             div_tensor2_sq = div_tensor2.mul(div_tensor2)
-            grad_div2 = grad_output.mul(div_tensor1).div(div_tensor2_sq).neg().mul(ctx._scale)
+            grad_div2 = grad_output.mul(div_tensor1).div(div_tensor2_sq).neg_().mul_(ctx._scale)
 
         return grad_add, grad_div1, grad_div2, None, None
 

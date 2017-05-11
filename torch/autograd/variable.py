@@ -579,19 +579,25 @@ class Variable(_C._VariableBase):
     def dot(self, other):
         return Dot.apply(self, other)
 
-    def _addcop(self, op, args):
+    def _addcop(self, op, args, inplace):
         if len(args) == 3:
-            # scale, tensor1, tensor2
-            return op.apply(self, args[1], args[2], args[0])
+            # args == [scale, tensor1, tensor2]
+            return op.apply(self, args[1], args[2], args[0], inplace)
         else:
-            # tensor1, tensor2
-            return op.apply(self, *args)
+            # args == [tensor1, tensor2]
+            return op.apply(self, args[0], args[1], 1.0, inplace)
 
     def addcmul(self, *args):
-        return self._addcop(Addcmul, args)
+        return self._addcop(Addcmul, args, False)
 
     def addcdiv(self, *args):
-        return self._addcop(Addcdiv, args)
+        return self._addcop(Addcdiv, args, False)
+
+    def addcmul_(self, *args):
+        return self._addcop(Addcmul, args, True)
+
+    def addcdiv_(self, *args):
+        return self._addcop(Addcdiv, args, True)
 
     def norm(self, p=2, dim=None, keepdim=True):
         return Norm(p, dim, keepdim)(self)
