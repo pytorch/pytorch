@@ -29,16 +29,18 @@ class GRUFused(Function):
         gradInput = gradOutput.new()
         input_gate, hidden_gate, bias = self.saved_tensors
 
+        igc = input_gate.clone()
+        hgc = hidden_gate.clone()
         self.backend.GRUFused_updateGradInput(
             self.backend.library_state,
-            input_gate, hidden_gate, gradOutput, gradInput)
+            igc, hgc, gradOutput, gradInput)
         if bias is not None:
-            gb1 = input_gate.sum(0).squeeze()
-            gb2 = hidden_gate.sum(0).squeeze()
+            gb1 = igc.sum(0).squeeze()
+            gb2 = hgc.sum(0).squeeze()
 
-            return input_gate, hidden_gate, gradInput, gb1, gb2
+            return igc, hgc, gradInput, gb1, gb2
         else:
-            return input_gate, hidden_gate, gradInput
+            return igc, hgc, gradInput
 
 
 class LSTMFused(Function):
@@ -70,16 +72,16 @@ class LSTMFused(Function):
         gradInput = gradOutput[0].new()
         gradInputCell = gradOutput[0].new()
         saved_tens, local_go, cx, cy, bias = self.saved_tensors
-
+        lgo_clone = local_go.clone()
         self.backend.LSTMFused_updateGradInput(
             self.backend.library_state,
-            saved_tens, local_go, cx, cy,
+            saved_tens, lgo_clone, cx, cy,
             gradOutput[0], gradOutput[1], gradInput)
 
         if bias is not None:
-            gb1 = local_go.sum(0).squeeze()
-            gb2 = local_go.sum(0).squeeze()
+            gb1 = lgo_clone.sum(0).squeeze()
+            gb2 = lgo_clone.sum(0).squeeze()
 
-            return local_go, local_go, gradInput, gb1, gb2
+            return lgo_clone, lgo_clone, gradInput, gb1, gb2
         else:
-            return local_go, local_go, gradInput
+            return lgo_clone, lgo_clone, gradInput
