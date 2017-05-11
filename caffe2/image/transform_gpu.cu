@@ -15,9 +15,15 @@ namespace {
 
 // input in (int8, NHWC), output in (fp32, NCHW)
 template <typename In, typename Out>
-__global__
-void transform_kernel(const int N, const int C, const int H, const int W,
-                      const float mean, const float std, const In* in, Out* out) {
+__global__ void transform_kernel(
+    const int N,
+    const int C,
+    const int H,
+    const int W,
+    const float* mean,
+    const float* std,
+    const In* in,
+    Out* out) {
   const int n = blockIdx.x;
 
   const int nStride = C*H*W;
@@ -33,7 +39,8 @@ void transform_kernel(const int N, const int C, const int H, const int W,
         int in_idx = c + C*w + C*W*h;  // HWC
         int out_idx = c*H*W + h*W + w;  // CHW
 
-        output_ptr[out_idx] = convert::To<float,Out>((convert::To<In,float>(input_ptr[in_idx])-mean) / std);
+        output_ptr[out_idx] = convert::To<float,Out>(
+          (convert::To<In,float>(input_ptr[in_idx])-mean[c]) * std[c]);
       }
     }
   }
@@ -42,7 +49,10 @@ void transform_kernel(const int N, const int C, const int H, const int W,
 }
 
 template <typename T_IN, typename T_OUT, class Context>
-bool TransformOnGPU(Tensor<Context>& X, Tensor<Context> *Y, float mean, float std, Context *context) {
+
+bool TransformOnGPU(Tensor<Context>& X, Tensor<Context> *Y,
+                    Tensor<Context>& mean, Tensor<Context>& std,
+                    Context *context) {
   // data comes in as NHWC
   const int N = X.dim32(0), C = X.dim32(3), H = X.dim32(1), W = X.dim32(2);
   // data goes out as NCHW
@@ -51,11 +61,23 @@ bool TransformOnGPU(Tensor<Context>& X, Tensor<Context> *Y, float mean, float st
   auto* input_data = X.template data<T_IN>();
   auto* output_data = Y->template mutable_data<T_OUT>();
 
-  transform_kernel<T_IN,T_OUT><<<N, dim3(16,16), 0, context->cuda_stream()>>>(N,C,H,W, mean, std, input_data, output_data);
+  transform_kernel<
+    T_IN, T_OUT><<<N, dim3(16, 16), 0, context->cuda_stream()>>>(
+      N, C, H, W, mean.template data<float>(), std.template data<float>(),
+      input_data, output_data);
   return true;
 };
 
-template bool TransformOnGPU<uint8_t, float, CUDAContext>(Tensor<CUDAContext>& X, Tensor<CUDAContext> *Y, float std, float mean, CUDAContext *context);
-template bool TransformOnGPU<uint8_t, float16, CUDAContext>(Tensor<CUDAContext>& X, Tensor<CUDAContext> *Y, float std, float mean, CUDAContext *context);
+template bool TransformOnGPU<uint8_t, float, CUDAContext>(Tensor<CUDAContext>& X,
+                                                          Tensor<CUDAContext> *Y,
+                                                          Tensor<CUDAContext>& mean,
+                                                          Tensor<CUDAContext>& std,
+                                                          CUDAContext *context);
+
+template bool TransformOnGPU<uint8_t, float16, CUDAContext>(Tensor<CUDAContext>& X,
+                                                            Tensor<CUDAContext> *Y,
+                                                            Tensor<CUDAContext>& mean,
+                                                            Tensor<CUDAContext>& std,
+                                                            CUDAContext *context);
 
 }  // namespace caffe2

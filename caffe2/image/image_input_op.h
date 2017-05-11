@@ -15,6 +15,8 @@
 
 namespace caffe2 {
 
+class CUDAContext;
+
 template <class Context>
 class ImageInputOp final
     : public PrefetchOperator<Context> {
@@ -32,8 +34,23 @@ class ImageInputOp final
   bool CopyPrefetched() override;
 
  private:
-  bool GetImageAndLabelFromDBValue(
-      const string& value, cv::Mat* img, int item_id);
+  using BoundingBox = struct {
+    bool valid;
+    int ymin;
+    int xmin;
+    int height;
+    int width;
+  };
+
+  // Structure to store per-image information
+  // This can be modified by the DecodeAnd* so needs
+  // to be privatized per launch.
+  using PerImageArg = struct {
+    BoundingBox bounding_params;
+  };
+
+  bool GetImageAndLabelAndInfoFromDBValue(
+      const string& value, cv::Mat* img, PerImageArg& info, int item_id);
   void DecodeAndTransform(
       const std::string value, float *image_data, int item_id,
       const int channels, std::mt19937 *randgen,
@@ -50,13 +67,21 @@ class ImageInputOp final
   TensorCPU prefetched_label_;
   Tensor<Context> prefetched_image_on_device_;
   Tensor<Context> prefetched_label_on_device_;
+  // Default parameters for images
+  PerImageArg default_arg_;
   int batch_size_;
-  float mean_;
-  float std_;
   bool color_;
   int scale_;
+  // Minsize is similar to scale except that it will only
+  // force the image to scale up if it is too small. In other words,
+  // it ensures that both dimensions of the image are at least minsize_
+  int minsize_;
   bool warp_;
   int crop_;
+  std::vector<float> mean_;
+  std::vector<float> std_;
+  Tensor<Context> mean_gpu_;
+  Tensor<Context> std_gpu_;
   bool mirror_;
   bool is_test_;
   bool use_caffe_datum_;
@@ -70,7 +95,6 @@ class ImageInputOp final
   TensorProto_DataType output_type_;
 };
 
-
 template <class Context>
 ImageInputOp<Context>::ImageInputOp(
       const OperatorDef& operator_def, Workspace* ws)
@@ -78,10 +102,9 @@ ImageInputOp<Context>::ImageInputOp(
         reader_(nullptr),
         batch_size_(
             OperatorBase::template GetSingleArgument<int>("batch_size", 0)),
-        mean_(OperatorBase::template GetSingleArgument<float>("mean", 0.)),
-        std_(OperatorBase::template GetSingleArgument<float>("std", 1.)),
         color_(OperatorBase::template GetSingleArgument<int>("color", 1)),
         scale_(OperatorBase::template GetSingleArgument<int>("scale", -1)),
+        minsize_(OperatorBase::template GetSingleArgument<int>("minsize", -1)),
         warp_(OperatorBase::template GetSingleArgument<int>("warp", 0)),
         crop_(OperatorBase::template GetSingleArgument<int>("crop", -1)),
         mirror_(OperatorBase::template GetSingleArgument<int>("mirror", 0)),
@@ -96,6 +119,22 @@ ImageInputOp<Context>::ImageInputOp(
         // output type only supported with CUDA and use_gpu_transform for now
         output_type_(cast::GetCastDataType(this->arg_helper(), "output_type"))
 {
+  mean_ = OperatorBase::template GetRepeatedArgument<float>(
+    "mean_per_channel",
+    {OperatorBase::template GetSingleArgument<float>("mean", 0.)});
+
+  std_ = OperatorBase::template GetRepeatedArgument<float>(
+    "std_per_channel",
+    {OperatorBase::template GetSingleArgument<float>("std", 1.)});
+
+  default_arg_.bounding_params = {
+    false,
+    OperatorBase::template GetSingleArgument<int>("bounding_ymin", -1),
+    OperatorBase::template GetSingleArgument<int>("bounding_xmin", -1),
+    OperatorBase::template GetSingleArgument<int>("bounding_height", -1),
+    OperatorBase::template GetSingleArgument<int>("bounding_width", -1),
+  };
+
   if (operator_def.input_size() == 0) {
     LOG(ERROR) << "You are using an old ImageInputOp format that creates "
                        "a local db reader. Consider moving to the new style "
@@ -110,10 +149,34 @@ ImageInputOp<Context>::ImageInputOp(
     reader_ = owned_reader_.get();
   }
   CAFFE_ENFORCE_GT(batch_size_, 0, "Batch size should be nonnegative.");
-  CAFFE_ENFORCE_GT(scale_, 0, "Must provide the scaling factor.");
+  CAFFE_ENFORCE((scale_ > 0) != (minsize_ > 0),
+                "Must provide one and only one of scaling or minsize");
   CAFFE_ENFORCE_GT(crop_, 0, "Must provide the cropping value.");
   CAFFE_ENFORCE_GE(
-      scale_, crop_, "The scale value must be no smaller than the crop value.");
+    scale_ > 0 ? scale_ : minsize_,
+    crop_, "The scale/minsize value must be no smaller than the crop value.");
+
+  CAFFE_ENFORCE_EQ(
+      mean_.size(),
+      std_.size(),
+      "The mean and std. dev vectors must be of the same size.");
+  CAFFE_ENFORCE(mean_.size() == 1 || mean_.size() == 3,
+                "The mean and std. dev vectors must be of size 1 or 3");
+
+  if (default_arg_.bounding_params.ymin < 0
+      || default_arg_.bounding_params.xmin < 0
+      || default_arg_.bounding_params.height < 0
+      || default_arg_.bounding_params.width < 0) {
+    default_arg_.bounding_params.valid = false;
+  } else {
+    default_arg_.bounding_params.valid = true;
+  }
+
+  if (mean_.size() == 1) {
+    // We are going to extend to 3 using the first value
+    mean_.resize(3, mean_[0]);
+    std_.resize(3, std_[0]);
+  }
 
   LOG(INFO) << "Creating an image input op with the following setting: ";
   LOG(INFO) << "    Using " << num_decode_threads_ << " CPU threads;";
@@ -123,14 +186,57 @@ ImageInputOp<Context>::ImageInputOp(
   LOG(INFO) << "    Outputting in batches of " << batch_size_ << " images;";
   LOG(INFO) << "    Treating input image as "
             << (color_ ? "color " : "grayscale ") << "image;";
-  LOG(INFO) << "    Scaling image to " << scale_
-            << (warp_ ? " with " : " without ") << "warping;";
-  LOG(INFO) << "    " << (is_test_ ? "Central" : "Random") << " cropping image to " << crop_
+  if (default_arg_.bounding_params.valid) {
+    LOG(INFO) << "    Applying a default bounding box of Y ["
+              << default_arg_.bounding_params.ymin << "; "
+              << default_arg_.bounding_params.ymin +
+      default_arg_.bounding_params.height
+              << ") x X ["
+              << default_arg_.bounding_params.xmin << "; "
+              << default_arg_.bounding_params.xmin +
+      default_arg_.bounding_params.width
+              << ")";
+  }
+  if (scale_ > 0) {
+    LOG(INFO) << "    Scaling image to " << scale_
+              << (warp_ ? " with " : " without ") << "warping;";
+  } else {
+    // Here, minsize_ > 0
+    LOG(INFO) << "    Ensuring minimum image size of " << minsize_
+              << (warp_ ? " with " : " without ") << "warping;";
+  }
+  LOG(INFO) << "    " << (is_test_ ? "Central" : "Random")
+            << " cropping image to " << crop_
             << (mirror_ ? " with " : " without ") << "random mirroring;";
-  LOG(INFO) << "    Subtract mean " << mean_ << " and divide by std " << std_
-            << ";";
+
+  auto mit = mean_.begin();
+  auto sit = std_.begin();
+
+  for (int i = 0;
+       mit != mean_.end() && sit != std_.end();
+       ++mit, ++sit, ++i) {
+    LOG(INFO) << "    Default [Channel " << i << "] Subtract mean " << *mit
+              << " and divide by std " << *sit << ".";
+    // We actually will use the inverse of std, so inverse it here
+    *sit = 1.f / *sit;
+  }
   LOG(INFO) << "    Outputting images as "
             << OperatorBase::template GetSingleArgument<string>("output_type", "unknown") << ".";
+
+  if (gpu_transform_) {
+    if (!std::is_same<Context, CUDAContext>::value) {
+      throw std::runtime_error("use_gpu_transform only for GPUs");
+    } else {
+      mean_gpu_.Resize(mean_.size());
+      std_gpu_.Resize(std_.size());
+
+      context_.template Copy<float, CPUContext, Context>(
+        mean_.size(), mean_.data(), mean_gpu_.template mutable_data<float>());
+      context_.template Copy<float, CPUContext, Context>(
+        std_.size(), std_.data(), std_gpu_.template mutable_data<float>());
+    }
+  }
+
   prefetched_image_.Resize(
       TIndex(batch_size_),
       TIndex(crop_),
@@ -140,9 +246,10 @@ ImageInputOp<Context>::ImageInputOp(
 }
 
 template <class Context>
-bool ImageInputOp<Context>::GetImageAndLabelFromDBValue(
+bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
     const string& value,
     cv::Mat* img,
+    ImageInputOp<Context>::PerImageArg& info,
     int item_id) {
   //
   // recommend using --caffe2_use_fatal_for_enforce=1 when using ImageInputOp
@@ -150,6 +257,9 @@ bool ImageInputOp<Context>::GetImageAndLabelFromDBValue(
   // CAFFE_ENFORCE are silently dropped by the thread worker functions
   //
   cv::Mat src;
+
+  // Use the default information for images
+  info = default_arg_;
   if (use_caffe_datum_) {
     // The input is a caffe datum format.
     caffe::Datum datum;
@@ -197,6 +307,17 @@ bool ImageInputOp<Context>::GetImageAndLabelFromDBValue(
     CAFFE_ENFORCE(protos.ParseFromString(value));
     const TensorProto& image_proto = protos.protos(0);
     const TensorProto& label_proto = protos.protos(1);
+    if (protos.protos_size() == 3) {
+      // We have bounding box information
+      const TensorProto& bounding_proto = protos.protos(2);
+      DCHECK_EQ(bounding_proto.data_type(), TensorProto::INT32);
+      DCHECK_EQ(bounding_proto.int32_data_size(), 4);
+      info.bounding_params.valid = true;
+      info.bounding_params.ymin = bounding_proto.int32_data(0);
+      info.bounding_params.xmin = bounding_proto.int32_data(1);
+      info.bounding_params.height = bounding_proto.int32_data(2);
+      info.bounding_params.width = bounding_proto.int32_data(3);
+    }
 
     if (image_proto.data_type() == TensorProto::STRING) {
       // encoded image string.
@@ -256,6 +377,69 @@ bool ImageInputOp<Context>::GetImageAndLabelFromDBValue(
   // Note(Yangqing): I believe that the mat should be created continuous.
   CAFFE_ENFORCE(img->isContinuous());
 
+  // Sanity check now that we decoded everything
+
+  // Ensure that the bounding box is legit
+  if (info.bounding_params.valid
+      && (src.rows < info.bounding_params.ymin + info.bounding_params.height
+        || src.cols < info.bounding_params.xmin + info.bounding_params.width
+     )) {
+    info.bounding_params.valid = false;
+  }
+
+  // Apply the bounding box if requested
+  if (info.bounding_params.valid) {
+    // If we reach here, we know the parameters are sane
+    cv::Rect bounding_box(info.bounding_params.xmin, info.bounding_params.ymin,
+                          info.bounding_params.width, info.bounding_params.height);
+    *img = (*img)(bounding_box);
+
+    /*
+    LOG(INFO) << "Did bounding with ymin:"
+              << info.bounding_params.ymin << " xmin:" << info.bounding_params.xmin
+              << " height:" << info.bounding_params.height
+              << " width:" << info.bounding_params.width << "\n";
+    LOG(INFO) << "Bounded matrix: " << img;
+    */
+  } else {
+    // LOG(INFO) << "No bounding\n";
+  }
+
+  int scaled_width, scaled_height;
+  cv::Mat scaled_img;
+
+  int scale_to_use = scale_ > 0 ? scale_ : minsize_;
+  if (warp_) {
+    scaled_width = scale_to_use;
+    scaled_height = scale_to_use;
+  } else if (img->rows > img->cols) {
+    scaled_width = scale_to_use;
+    scaled_height =
+        static_cast<float>(img->rows) * scale_to_use / img->cols;
+  } else {
+    scaled_height = scale_to_use;
+    scaled_width =
+        static_cast<float>(img->cols) * scale_to_use / img->rows;
+  }
+  if ((scale_ > 0 &&
+       (scaled_height != img->rows || scaled_width != img->cols))
+      || (scaled_height > img->rows || scaled_width > img->cols)) {
+    // We rescale in all cases if we are using scale_
+    // but only to make the image bigger if using minsize_
+    /*
+    LOG(INFO) << "Scaling to " << scaled_width << " x " << scaled_height
+              << " From " << img->cols << " x " << img->rows;
+    */
+    cv::resize(
+        *img,
+        scaled_img,
+        cv::Size(scaled_width, scaled_height),
+        0,
+        0,
+        cv::INTER_AREA);
+    *img = scaled_img;
+  }
+
   // TODO(Yangqing): return false if any error happens.
   return true;
 }
@@ -268,12 +452,11 @@ void TransformImage(
     float* image_data,
     const int crop,
     const bool mirror,
-    const float mean,
-    const float std,
+    const std::vector<float>& mean,
+    const std::vector<float>& std,
     std::mt19937* randgen,
     std::bernoulli_distribution* mirror_this_image,
     bool is_test = false) {
-
   CAFFE_ENFORCE_GE(
       scaled_img.rows, crop, "Image height must be bigger than crop.");
   CAFFE_ENFORCE_GE(
@@ -291,7 +474,6 @@ void TransformImage(
     height_offset =
       std::uniform_int_distribution<>(0, scaled_img.rows - crop)(*randgen);
   }
-  float std_inv = 1.f / std;
 
   if (mirror && (*mirror_this_image)(*randgen)) {
     // Copy mirrored image.
@@ -299,7 +481,8 @@ void TransformImage(
       for (int w = width_offset + crop - 1; w >= width_offset; --w) {
         const uint8_t* cv_data = scaled_img.ptr(h) + w * channels;
         for (int c = 0; c < channels; ++c) {
-          *(image_data++) = (static_cast<float>(cv_data[c]) - mean) * std_inv;
+          *(image_data++) =
+              (static_cast<float>(cv_data[c]) - mean[c]) * std[c];
         }
       }
     }
@@ -309,7 +492,8 @@ void TransformImage(
       for (int w = width_offset; w < width_offset + crop; ++w) {
         const uint8_t* cv_data = scaled_img.ptr(h) + w * channels;
         for (int c = 0; c < channels; ++c) {
-          *(image_data++) = (static_cast<float>(cv_data[c]) - mean) * std_inv;
+          *(image_data++) =
+              (static_cast<float>(cv_data[c]) - mean[c]) * std[c];
         }
       }
     }
@@ -374,30 +558,11 @@ void ImageInputOp<Context>::DecodeAndTransform(
       std::bernoulli_distribution *mirror_this_image) {
   cv::Mat img;
   // Decode the image
-  CHECK(GetImageAndLabelFromDBValue(value, &img, item_id));
-
-  int scaled_width, scaled_height;
-  cv::Mat scaled_img;
-  if (warp_) {
-    scaled_width = scale_;
-    scaled_height = scale_;
-  } else if (img.rows > img.cols) {
-    scaled_width = scale_;
-    scaled_height = static_cast<float>(img.rows) * scale_ / img.cols;
-  } else {
-    scaled_height = scale_;
-    scaled_width = static_cast<float>(img.cols) * scale_ / img.rows;
-  }
-  if (scaled_height != img.rows || scaled_width != img.cols) {
-    cv::resize(img, scaled_img, cv::Size(scaled_width, scaled_height),
-               0, 0, cv::INTER_AREA);
-  } else {
-    // No scaling needs to be done.
-    scaled_img = img;
-  }
+  PerImageArg info;
+  CHECK(GetImageAndLabelAndInfoFromDBValue(value, &img, info, item_id));
 
   // Factor out the image transformation
-  TransformImage<Context>(scaled_img, channels, image_data, crop_, mirror_,
+  TransformImage<Context>(img, channels, image_data, crop_, mirror_,
                           mean_, std_, randgen, mirror_this_image, is_test_);
 }
 
@@ -409,30 +574,11 @@ void ImageInputOp<Context>::DecodeAndTransposeOnly(
 
   cv::Mat img;
   // Decode the image
-  CHECK(GetImageAndLabelFromDBValue(value, &img, item_id));
-
-  int scaled_width, scaled_height;
-  cv::Mat scaled_img;
-  if (warp_) {
-    scaled_width = scale_;
-    scaled_height = scale_;
-  } else if (img.rows > img.cols) {
-    scaled_width = scale_;
-    scaled_height = static_cast<float>(img.rows) * scale_ / img.cols;
-  } else {
-    scaled_height = scale_;
-    scaled_width = static_cast<float>(img.cols) * scale_ / img.rows;
-  }
-  if (scaled_height != img.rows || scaled_width != img.cols) {
-    cv::resize(img, scaled_img, cv::Size(scaled_width, scaled_height),
-               0, 0, cv::INTER_AREA);
-  } else {
-    // No scaling needs to be done.
-    scaled_img = img;
-  }
+  PerImageArg info;
+  CHECK(GetImageAndLabelAndInfoFromDBValue(value, &img, info, item_id));
 
   // Factor out the image transformation
-  CropTransposeImage<Context>(scaled_img, channels, image_data, crop_, mirror_,
+  CropTransposeImage<Context>(img, channels, image_data, crop_, mirror_,
                               randgen, mirror_this_image, is_test_);
 }
 
@@ -541,9 +687,13 @@ bool ImageInputOp<Context>::CopyPrefetched() {
     if (gpu_transform_) {
       // GPU transform kernel allows explicitly setting output type
       if (output_type_ == TensorProto_DataType_FLOAT) {
-        TransformOnGPU<uint8_t,float,Context>(prefetched_image_on_device_, image_output, std_, mean_, &context_);
+        TransformOnGPU<uint8_t,float,Context>(prefetched_image_on_device_,
+                                              image_output, mean_gpu_,
+                                              std_gpu_, &context_);
       } else if (output_type_ == TensorProto_DataType_FLOAT16) {
-        TransformOnGPU<uint8_t,float16,Context>(prefetched_image_on_device_, image_output, std_, mean_, &context_);
+        TransformOnGPU<uint8_t,float16,Context>(prefetched_image_on_device_,
+                                                image_output, mean_gpu_,
+                                                std_gpu_, &context_);
       }  else {
         return false;
       }
