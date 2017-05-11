@@ -484,6 +484,9 @@ class Variable(_C._VariableBase):
     def cumsum(self, dim):
         return Cumsum(dim)(self)
 
+    def unfold(self, dim, size, step):
+        return Unfold.apply(self, dim, size, step)
+
     def var(self, dim=None, keepdim=True, unbiased=True):
         mean = self.mean(dim, keepdim)
         if dim is None:
