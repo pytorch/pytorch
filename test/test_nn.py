@@ -1673,16 +1673,20 @@ class TestNN(NNTestCase):
             self.assertEqual(hidden1, hidden2)
 
     def _test_rnn_retain_variables(self, dtype):
-        rnn = nn.LSTM(10, 20, num_layers=2).type(dtype)
-        input = Variable(torch.randn(5, 6, 10).type(dtype), requires_grad=True)
-        output = rnn(input)
-        output[0].sum().backward(retain_graph=True)
-        grads = [input.grad.data.clone()] + [p.grad.data.clone() for p in rnn.parameters()]
-        rnn.zero_grad()
-        input.grad.data.zero_()
-        output[0].sum().backward(retain_graph=True)
-        grads2 = [input.grad.data] + [p.grad.data for p in rnn.parameters()]
-        self.assertEqual(grads, grads2)
+        rnns = [nn.LSTM(10, 20, num_layers=2).type(dtype),
+                nn.GRU(10, 20, num_layers=2).type(dtype),
+                nn.RNN(10, 20, num_layers=2).type(dtype)]
+        for rnn in rnns:
+            input = Variable(torch.randn(5, 6, 10).type(dtype), requires_grad=True)
+            output = rnn(input)
+            output[0].sum().backward(retain_graph=True)
+            grads = [input.grad.data.clone()] + [p.grad.data.clone() for p in rnn.parameters()]
+            for i in range(4):
+                rnn.zero_grad()
+                input.grad.data.zero_()
+                output[0].sum().backward(retain_graph=True)
+                grads2 = [input.grad.data] + [p.grad.data for p in rnn.parameters()]
+                self.assertEqual(grads, grads2)
 
     def test_rnn_retain_variables(self):
         self._test_rnn_retain_variables(torch.DoubleTensor)
