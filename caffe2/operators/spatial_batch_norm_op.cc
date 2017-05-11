@@ -8,11 +8,17 @@ bool SpatialBNOp<CPUContext>::RunOnDevice() {
   const auto& scale = Input(SCALE);
   const auto& bias = Input(BIAS);
 
-  DCHECK_EQ(X.ndim(), 4);
+  CAFFE_ENFORCE_GE(X.ndim(), 3);
   const int N = X.dim32(0);
-  const int C = (order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(3));
+  const int C =
+      (order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(X.ndim() - 1));
   const int H = (order_ == StorageOrder::NCHW ? X.dim32(2) : X.dim32(1));
-  const int W = (order_ == StorageOrder::NCHW ? X.dim32(3) : X.dim32(2));
+  const int W = X.ndim() > 3
+      ? (order_ == StorageOrder::NCHW ? X.dim32(3) : X.dim32(2))
+      : 1;
+  const int D = X.ndim() > 4
+      ? (order_ == StorageOrder::NCHW ? X.dim32(4) : X.dim32(3))
+      : 1;
   DCHECK_EQ(scale.ndim(), 1);
   DCHECK_EQ(bias.ndim(), 1);
   DCHECK_EQ(scale.dim32(0), C);
@@ -42,27 +48,27 @@ bool SpatialBNOp<CPUContext>::RunOnDevice() {
     var.setZero();
     switch (order_) {
       case StorageOrder::NCHW: {
-        ConstEigenArrayMap<float> X_arr(X.data<float>(), H * W, N * C);
+        ConstEigenArrayMap<float> X_arr(X.data<float>(), H * W * D, N * C);
         for (int nc = 0; nc < N * C; ++nc) {
           mean(nc % C) += X_arr.col(nc).sum();
         }
-        mean /= N * H * W;
+        mean /= N * H * W * D;
         for (int nc = 0; nc < N * C; ++nc) {
           var(nc % C) += (X_arr.col(nc) - mean(nc % C)).matrix().squaredNorm();
         }
-        var /= N * H * W;
+        var /= N * H * W * D;
         break;
       }
       case StorageOrder::NHWC: {
-        ConstEigenArrayMap<float> X_arr(X.data<float>(), C, N * H * W);
-        for (int i = 0; i < N * H * W; ++i) {
+        ConstEigenArrayMap<float> X_arr(X.data<float>(), C, N * H * W * D);
+        for (int i = 0; i < N * H * W * D; ++i) {
           mean += X_arr.col(i);
         }
-        mean /= N * H * W;
-        for (int i = 0; i < N * H * W; ++i) {
+        mean /= N * H * W * D;
+        for (int i = 0; i < N * H * W * D; ++i) {
           var += (X_arr.col(i) - mean) * (X_arr.col(i) - mean);
         }
-        var /= N * H * W;
+        var /= N * H * W * D;
         break;
       }
       default:
@@ -75,12 +81,14 @@ bool SpatialBNOp<CPUContext>::RunOnDevice() {
     // Check if they are initialized
     if (!running_mean->size()) {
       running_mean->Resize(C);
-      EigenVectorArrayMap<float> running_mean_map(running_mean->mutable_data<float>(), C);
+      EigenVectorArrayMap<float> running_mean_map(
+          running_mean->mutable_data<float>(), C);
       running_mean_map.setZero();
     }
     if (!running_var->size()) {
       running_var->Resize(C);
-      EigenVectorArrayMap<float> running_var_map(running_var->mutable_data<float>(), C);
+      EigenVectorArrayMap<float> running_var_map(
+          running_var->mutable_data<float>(), C);
       running_var_map.setZero();
     }
     EigenVectorArrayMap<float> running_mean_arr(
@@ -118,16 +126,17 @@ bool SpatialBNOp<CPUContext>::RunOnDevice() {
       bias_arr - mean_arr * inv_std * scale_arr;
   switch (order_) {
     case StorageOrder::NHWC: {
-      EigenArrayMap<float>(Y->mutable_data<float>(), C, N * H * W) =
-          (ConstEigenArrayMap<float>(X.data<float>(), C, N * H * W).colwise() *
+      EigenArrayMap<float>(Y->mutable_data<float>(), C, N * H * W * D) =
+          (ConstEigenArrayMap<float>(X.data<float>(), C, N * H * W * D)
+               .colwise() *
            new_scale)
               .colwise() +
           new_bias;
       break;
     }
     case StorageOrder::NCHW: {
-      EigenArrayMap<float> Y_arr(Y->mutable_data<float>(), H * W, N * C);
-      ConstEigenArrayMap<float> X_arr(X.data<float>(), H * W, N * C);
+      EigenArrayMap<float> Y_arr(Y->mutable_data<float>(), H * W * D, N * C);
+      ConstEigenArrayMap<float> X_arr(X.data<float>(), H * W * D, N * C);
       for (int nc = 0; nc < N * C; ++nc) {
         Y_arr.col(nc) = X_arr.col(nc) * new_scale(nc % C) + new_bias(nc % C);
       }
@@ -157,7 +166,9 @@ OPERATOR_SCHEMA(SpatialBN)
                     helper.GetSingleArgument<string>("order", "NCHW"));
                 const TensorShape &X = in[0];
                 const int N =  X.dims(0);
-                const int C = (order == StorageOrder::NCHW ? X.dims(1) : X.dims(3));
+                const int C =
+                    (order == StorageOrder::NCHW ? X.dims(1)
+                                                 : X.dims(X.dims_size() - 1));
 
                 out.push_back(in[0]);
                 TensorShape meanvar_tp =
