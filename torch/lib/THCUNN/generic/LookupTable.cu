@@ -29,12 +29,12 @@ void THNN_(LookupTable_accGradParameters)(
   }
 
   ptrdiff_t numel = THCIndexTensor_(nElement)(state, input);
-  long stride = THCTensor_(stride)(state, gradWeight, 0);
+  int64_t stride = THCTensor_(stride)(state, gradWeight, 0);
 
   cudaStream_t stream = THCState_getCurrentStream(state);
 
   if (numel <= 768 && !scaleGradByFreq) {
-    dim3 grid(THCCeilDiv(stride, (long) 4));
+    dim3 grid(THCCeilDiv(stride, (int64_t) 4));
     dim3 block(128);
 
     cunn_LookupTable_accGradParametersKernelByFeature<<<grid, block, 0, stream>>>(
@@ -83,7 +83,7 @@ void THNN_(LookupTable_accGradParameters)(
       thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
       sortedIndicesIter, sortedIndicesIter + numel,
-      origIndicesIter, ThrustLTOp<long>());
+      origIndicesIter, ThrustLTOp<int64_t>());
   }
 
   THCIndex_t *sortedIndices_data = THCIndexTensor_(data)(state, sortedIndices);
@@ -122,12 +122,12 @@ void THNN_(LookupTable_accGradParameters)(
       thrust::make_reverse_iterator(sortedIndices_ptr),
       thrust::make_reverse_iterator(count_ptr + numel),
       thrust::make_reverse_iterator(count_ptr + numel),
-      thrust::equal_to<long>(),
-      thrust::maximum<long>()
+      thrust::equal_to<int64_t>(),
+      thrust::maximum<int64_t>()
     );
   }
 
-  dim3 grid(THCCeilDiv(numel, (ptrdiff_t) 4), THCCeilDiv(stride, (long) 128));
+  dim3 grid(THCCeilDiv(numel, (ptrdiff_t) 4), THCCeilDiv(stride, (int64_t) 128));
   dim3 block(32, 4);
   cunn_LookupTable_accGradParametersKernel<real, accreal><<<grid, block, 0, stream>>>(
     sortedIndices_data,
@@ -169,7 +169,7 @@ void THNN_(LookupTable_renorm)(
   }
 
   THCIndex_t numel = THCIndexTensor_(nElement)(state, idx);
-  long stride = THCTensor_(stride)(state, weight, 0);
+  int64_t stride = THCTensor_(stride)(state, weight, 0);
 
   // get the unique indices
   thrust::device_ptr<real> weight_ptr(THCTensor_(data)(state, weight));

@@ -12,13 +12,13 @@ static inline void THNN_(VolumetricAveragePooling_shapeCheck)(
                          int dT,
                          int dW,
                          int dH) {
-  long nslices;
-  long itime;
-  long iheight;
-  long iwidth;
-  long otime;
-  long oheight;
-  long owidth;
+  int64_t nslices;
+  int64_t itime;
+  int64_t iheight;
+  int64_t iwidth;
+  int64_t otime;
+  int64_t oheight;
+  int64_t owidth;
   int ndim = input->nDimension;
   int dimN = 0;
   int dimt = 1;
@@ -69,13 +69,13 @@ static inline void THNN_(VolumetricAveragePooling_shapeCheck)(
 static void THNN_(VolumetricAveragePooling_updateOutput_frame)(
           real *input_p,
           real *output_p,
-          long nslices,
-          long itime,
-          long iwidth,
-          long iheight,
-          long otime,
-          long owidth,
-          long oheight,
+          int64_t nslices,
+          int64_t itime,
+          int64_t iwidth,
+          int64_t iheight,
+          int64_t otime,
+          int64_t owidth,
+          int64_t oheight,
           int kT,
           int kW,
           int kH,
@@ -83,12 +83,12 @@ static void THNN_(VolumetricAveragePooling_updateOutput_frame)(
           int dW,
           int dH)
 {
-  long k;
+  int64_t k;
 #pragma omp parallel for private(k)
   for (k = 0; k < nslices; k++)
   {
     /* loop over output */
-    long i, j, ti;
+    int64_t i, j, ti;
     for (ti = 0; ti < otime; ti++)
     {
       for (i = 0; i < oheight; i++)
@@ -135,13 +135,13 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
           int dW,
           int dH)
 {
-  long nslices;
-  long itime;
-  long iheight;
-  long iwidth;
-  long otime;
-  long oheight;
-  long owidth;
+  int64_t nslices;
+  int64_t itime;
+  int64_t iheight;
+  int64_t iwidth;
+  int64_t otime;
+  int64_t oheight;
+  int64_t owidth;
   real *input_data;
   real *output_data;
 
@@ -192,11 +192,11 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
   }
   else  /* batch mode */
   {
-    long p;
-    long nBatch = input->size[0];
+    int64_t p;
+    int64_t nBatch = input->size[0];
 
-    long istride = nslices * itime * iwidth * iheight;
-    long ostride = nslices * otime * owidth * oheight;
+    int64_t istride = nslices * itime * iwidth * iheight;
+    int64_t ostride = nslices * otime * owidth * oheight;
 
     /* resize output */
     THTensor_(resize5d)(output, nBatch, nslices, otime, oheight, owidth);
@@ -224,13 +224,13 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
 static void THNN_(VolumetricAveragePooling_updateGradInput_frame)(
           real *gradInput_p,
           real *gradOutput_p,
-          long nslices,
-          long itime,
-          long iwidth,
-          long iheight,
-          long otime,
-          long owidth,
-          long oheight,
+          int64_t nslices,
+          int64_t itime,
+          int64_t iwidth,
+          int64_t iheight,
+          int64_t otime,
+          int64_t owidth,
+          int64_t oheight,
           int kT,
           int kW,
           int kH,
@@ -238,12 +238,12 @@ static void THNN_(VolumetricAveragePooling_updateGradInput_frame)(
           int dW,
           int dH)
 {
-  long k;
+  int64_t k;
 #pragma omp parallel for private(k)
   for (k = 0; k < nslices; k++)
   {
     /* loop over output */
-    long i, j, ti;
+    int64_t i, j, ti;
     for (ti = 0; ti < otime; ti++)
     {
       for (i = 0; i < oheight; i++)
@@ -347,11 +347,11 @@ void THNN_(VolumetricAveragePooling_updateGradInput)(
   }
   else /* batch mode */
   {
-    long p;
-    long nBatch = input->size[0];
+    int64_t p;
+    int64_t nBatch = input->size[0];
 
-    long istride = nslices * itime * iwidth * iheight;
-    long ostride = nslices * otime * owidth * oheight;
+    int64_t istride = nslices * itime * iwidth * iheight;
+    int64_t ostride = nslices * otime * owidth * oheight;
 
 #pragma omp parallel for private(p)
     for (p = 0; p < nBatch; p++)

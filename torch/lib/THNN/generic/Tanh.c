@@ -35,7 +35,7 @@ void THNN_(Tanh_updateGradInput)(
     real* ptr_gradOutput = THTensor_(data)(gradOutput);
     real* ptr_gradInput  = THTensor_(data)(gradInput);
     real* ptr_output     = THTensor_(data)(output);
-    long i;
+    int64_t i;
 
 #pragma omp parallel for private(i)
     for (i = 0; i < THTensor_(nElement)(gradInput); i++)

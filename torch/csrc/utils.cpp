@@ -204,7 +204,7 @@ struct TupleType: public Type {
   bool is_matching(PyObject *object) {
     if (!PyTuple_Check(object)) return false;
     auto num_elements = PyTuple_GET_SIZE(object);
-    if (num_elements != (long)types.size()) return false;
+    if (num_elements != (int64_t)types.size()) return false;
     for (int i = 0; i < num_elements; i++) {
       if (!types[i]->is_matching(PyTuple_GET_ITEM(object, i)))
         return false;

@@ -1,89 +1,99 @@
 #pragma once
 
+#include <mutex>
 #include <memory>
 #include <functional>
 #include <THPP/THPP.h>
 
 #include "torch/csrc/autograd/function.h"
-#include "torch/csrc/autograd/saved_variable.h"
+#include "torch/csrc/autograd/variable_version.h"
 #include "torch/csrc/Types.h"
 
 namespace torch { namespace autograd {
 
-struct VariableVersion;
+struct Variable : std::enable_shared_from_this<Variable> {
 
-struct Variable : public Function {
+  struct SavedVariable {
+    SavedVariable()
+      : data()
+      , version()
+      , expected_version(-1) {}
+
+    SavedVariable(const Variable& variable, Function* saved_for)
+      : data(variable.data->clone_shallow())
+      , grad_accumulator(variable.grad_accumulator)
+      , version(std::move(variable.version_counter->new_saved_ref()))
+      , requires_grad(variable.requires_grad)
+      , is_volatile(false)
+      , expected_version(**variable.version_counter) {
+        if (variable.grad_fn.get() == saved_for) {
+          weak_grad_fn = variable.grad_fn;
+        } else {
+          grad_fn = variable.grad_fn;
+        }
+      }
+
+    std::unique_ptr<thpp::Tensor> data;
+    std::shared_ptr<Function> grad_fn;
+    // this field is only necessary in case when a grad_fn saves a reference to
+    // one of the outputs of the forward fn. Saving the pointer in grad_fn
+    // would create a reference cycle. If this field is used, grad_fn is
+    // guaranteed to hold a nullptr;
+    std::weak_ptr<Function> weak_grad_fn;
+    std::weak_ptr<Function> grad_accumulator;
+    std::unique_ptr<VariableVersion> version;
+    bool requires_grad;
+    bool is_volatile;
+    int expected_version;
+
+    std::shared_ptr<Variable> unpack();
+
+    std::unique_ptr<thpp::Tensor> unpack_data() {
+      auto var = unpack();
+      return var ? std::move(var->data) : nullptr;
+    }
+  };
+
+  // WARNING: this registers the Variable as a new output
   Variable(
       std::unique_ptr<thpp::Tensor> data,
-      std::shared_ptr<Function> creator);
+      std::shared_ptr<Function> grad_fn);
+
   Variable(
       std::unique_ptr<thpp::Tensor> data,
       bool requires_grad,
       bool is_volatile);
 
-  void backward(std::shared_ptr<Variable> gradOutput);
-  virtual variable_list apply(const variable_list& gradOutputs) override;
+  std::shared_ptr<Function> get_grad_accumulator();
 
-  SavedVariable save() const;
-  static SavedVariable save_opt(Variable* var);
+  inline SavedVariable save(Function* saved_for) {
+    return SavedVariable(*this, saved_for);
+  }
 
-  static inline std::shared_ptr<Variable> of(std::unique_ptr<thpp::Tensor> data) {
+  static inline SavedVariable save_opt(Variable* var, Function* saved_for) {
+    return var ? var->save(saved_for) : SavedVariable();
+  }
+
+  static inline std::shared_ptr<Variable> of(std::unique_ptr<thpp::Tensor> data, bool is_volatile=false) {
     if (!data) {
       return std::shared_ptr<Variable>();
     }
-    return std::make_shared<Variable>(std::move(data), 0, 0);
+    return std::make_shared<Variable>(std::move(data), false, is_volatile);
   }
 
   std::unique_ptr<thpp::Tensor> data;
-  std::shared_ptr<Function> creator;
+  std::shared_ptr<Function> grad_fn;
   std::shared_ptr<Variable> grad;
   std::unique_ptr<VariableVersion> version_counter;
+  std::vector<std::shared_ptr<FunctionPreHook>> hooks;
+  std::weak_ptr<Function> grad_accumulator;
+  std::mutex grad_accumulator_lock;
+  bool requires_grad;
+  bool is_volatile;
   int output_nr;
   PyObject *pyobj;  // weak reference
 };
 
-struct VariableVersion {
-  VariableVersion() {
-    saved_ref = false;
-    version_block = new int[3];
-    version_block[0] = 0; // version
-    version_block[1] = 1; // refcount
-    version_block[2] = 1; // number of variables currently using the counter
-  };
-
-  int operator++(int) { return version_block[0]++; }
-
-  int operator*() { return *version_block; }
-
-  int var_refcnt() { return version_block[2]; }
-
-  void join_with(VariableVersion &other) {
-    cleanup();
-    version_block = other.version_block;
-    version_block[1]++;
-    version_block[2]++;
-  }
-
-  VariableVersion* new_saved_ref() {
-    auto new_ver = new VariableVersion();
-    new_ver->cleanup();
-    new_ver->version_block = version_block;
-    version_block[1]++;
-    new_ver->saved_ref = true;
-    return new_ver;
-  }
-
-  void cleanup() {
-    if (!saved_ref) --version_block[2];
-    if (--version_block[1]) return;
-    delete[] version_block;
-    version_block = nullptr;
-  }
-
-  ~VariableVersion() { cleanup(); }
-
-  int *version_block;
-  bool saved_ref;
-};
+using SavedVariable = Variable::SavedVariable;
 
 }} // namespace torch::autograd

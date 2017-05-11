@@ -123,7 +123,7 @@ inline dim3 getNoncontigReduceBlock() {
   return dim3(THC_NONCONTIG_REDUCE_BLOCK_SIZE);
 }
 
-inline dim3 getContigReduceBlock(ptrdiff_t numSlices, long reductionSize) {
+inline dim3 getContigReduceBlock(ptrdiff_t numSlices, int64_t reductionSize) {
   // If the number of slices is low but the reduction dimension size
   // is high, then we should increase block size for greater parallelism.
   // Aim for at least 32 warps per SM (assume 15 SMs; don't bother
@@ -141,8 +141,8 @@ inline dim3 getContigReduceBlock(ptrdiff_t numSlices, long reductionSize) {
   }
 
   // Scale up block size based on the reduction dimension size
-  long warpsInReductionSize = THCCeilDiv(reductionSize, 32L);
-  int numWarps = warpsInReductionSize > (long) maxWarps ?
+  int64_t warpsInReductionSize = THCCeilDiv(reductionSize, (int64_t) 32);
+  int numWarps = warpsInReductionSize > (int64_t) maxWarps ?
     maxWarps : (int) warpsInReductionSize;
 
   return dim3(numWarps * 32);
@@ -171,8 +171,8 @@ bool THC_reduceDim(THCState* state,
                    int dim) {
   ptrdiff_t inElements = TensorUtils<TensorType>::getNumElements(state, in);
 
-  long reductionSize = TensorUtils<TensorType>::getSize(state, in, dim);
-  long reductionStride = TensorUtils<TensorType>::getStride(state, in, dim);
+  int64_t reductionSize = TensorUtils<TensorType>::getSize(state, in, dim);
+  int64_t reductionStride = TensorUtils<TensorType>::getStride(state, in, dim);
   ptrdiff_t outElements = inElements / reductionSize;
 
   if (TensorUtils<TensorType>::getDims(state, out) > MAX_CUTORCH_DIMS ||
@@ -292,13 +292,13 @@ bool THC_reduceDim(THCState* state,
     HANDLE_OUT_CASE(unsigned int, outInfo.dims, inInfo.dims);
   } else {
     TensorInfo<typename TensorUtils<TensorType>::DataType,
-               unsigned long> outInfo =
-      getTensorInfo<TensorType, unsigned long>(state, out);
+               uint64_t> outInfo =
+      getTensorInfo<TensorType, uint64_t>(state, out);
     outInfo.collapseDims();
 
     TensorInfo<typename TensorUtils<TensorType>::DataType,
-               unsigned long> inInfo =
-      getTensorInfo<TensorType, unsigned long>(state, in);
+               uint64_t> inInfo =
+      getTensorInfo<TensorType, uint64_t>(state, in);
     inInfo.reduceDim(dim);
     inInfo.collapseDims();
 
@@ -306,9 +306,9 @@ bool THC_reduceDim(THCState* state,
     // version and the completely generic version, to reduce
     // compilation time.
     if (outInfo.isContiguous() && inInfo.isContiguous()) {
-      HANDLE_CASE(unsigned long, -2, -2);
+      HANDLE_CASE(uint64_t, -2, -2);
     } else {
-      HANDLE_CASE(unsigned long, -1, -1);
+      HANDLE_CASE(uint64_t, -1, -1);
     }
   }
 #undef HANDLE_CASE

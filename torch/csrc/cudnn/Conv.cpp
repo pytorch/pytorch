@@ -251,7 +251,7 @@ void* tensorPointer(cudnnDataType_t dataType, THVoidTensor* tensor, int groupIdx
   char* ptr = (char*) tensor->storage->data;
   ptr += elementSize * tensor->storageOffset;
   if (groupIdx > 0) {
-    long size = 1;
+    int64_t size = 1;
     for (int i = dim; i < tensor->nDimension; ++i) {
       size *= tensor->size[i];
     }
@@ -273,7 +273,7 @@ Convolution::Convolution(
 {
   CHECK_ARG(input->nDimension <= 5);
   CHECK_ARG(input->nDimension == output->nDimension);
-  CHECK_ARG((long)pad.size() == input->nDimension - 2);
+  CHECK_ARG((int64_t)pad.size() == input->nDimension - 2);
   CHECK_ARG(pad.size() == stride.size());
   memset(&params, 0, sizeof(ConvolutionParams));
   params.dataType = dataType;

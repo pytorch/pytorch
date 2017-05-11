@@ -2,18 +2,18 @@
 #define TH_GENERIC_FILE "generic/VolumetricFractionalMaxPooling.c"
 #else
 
-static long* THNN_(VolumetricFractionalMaxPooling_generateIntervals)(
+static int64_t* THNN_(VolumetricFractionalMaxPooling_generateIntervals)(
   real sample,
-  long inputSize,
-  long outputSize,
+  int64_t inputSize,
+  int64_t outputSize,
   int poolSize) {
   real alpha = (real) (inputSize - poolSize) / (real) (outputSize - 1);
-  long* sequence = (long*) THAlloc(sizeof(long) * outputSize);
+  int64_t* sequence = (int64_t*) THAlloc(sizeof(int64_t) * outputSize);
 
-  long i;
+  int64_t i;
   for (i = 0; i < outputSize - 1; ++i) {
     sequence[i] =
-      (long) ((i + sample) * alpha) - (long) (sample * alpha);
+      (int64_t) ((i + sample) * alpha) - (int64_t) (sample * alpha);
   }
   sequence[outputSize - 1] = inputSize - poolSize;
 
@@ -25,47 +25,47 @@ static void THNN_(VolumetricFractionalMaxPooling_updateOutput_frame)(
   real* output,
   THIndex_t* indices,
   real* randomSamples,
-  long numPlanes,
-  long inputT, long inputW, long inputH,
-  long outputT, long outputW, long outputH,
+  int64_t numPlanes,
+  int64_t inputT, int64_t inputW, int64_t inputH,
+  int64_t outputT, int64_t outputW, int64_t outputH,
   int poolSizeT, int poolSizeW, int poolSizeH) {
-  long plane;
+  int64_t plane;
 #pragma omp parallel for private(plane)
   for (plane = 0; plane < numPlanes; ++plane) {
     /* each plane contains 3 random samples, one for T, one for W, and one for H */
     real* randomSamplesForPlane = randomSamples + plane * 3;
 
     /* Generate interval sequence */
-    long* sequenceT =
+    int64_t* sequenceT =
       THNN_(VolumetricFractionalMaxPooling_generateIntervals)(
         randomSamplesForPlane[0], inputT, outputT, poolSizeT);
-    long* sequenceW =
+    int64_t* sequenceW =
       THNN_(VolumetricFractionalMaxPooling_generateIntervals)(
         randomSamplesForPlane[1], inputW, outputW, poolSizeW);
-    long* sequenceH =
+    int64_t* sequenceH =
       THNN_(VolumetricFractionalMaxPooling_generateIntervals)(
         randomSamplesForPlane[2], inputH, outputH, poolSizeH);
 
     /* loop over output */
-    long h, w, t;
+    int64_t h, w, t;
 
     real* inputForPlane = input + plane * inputT * inputW * inputH;
     real* outputForPlane = output + plane * outputT * outputW * outputH;
     THIndex_t* indicesForPlane = indices + plane * outputT * outputW * outputH;
 
     for (h = 0; h < outputH; ++h) {
-      long inputHStart = sequenceH[h];
+      int64_t inputHStart = sequenceH[h];
 
       for (w = 0; w < outputW; ++w) {
-        long inputWStart = sequenceW[w];
+        int64_t inputWStart = sequenceW[w];
 
         for (t = 0; t < outputT; ++t) {
-          long inputTStart = sequenceT[t];
+          int64_t inputTStart = sequenceT[t];
 
           real maxVal = -THInf;
-          long maxIndex = -1;
+          int64_t maxIndex = -1;
 
-          long h2, w2, t2;
+          int64_t h2, w2, t2;
           for (h2 = inputHStart; h2 < inputHStart + poolSizeH; ++h2) {
             for (w2 = inputWStart; w2 < inputWStart + poolSizeW; ++w2) {
               for (t2 = inputTStart; t2 < inputTStart + poolSizeT; ++t2) {
@@ -73,7 +73,7 @@ static void THNN_(VolumetricFractionalMaxPooling_updateOutput_frame)(
                 THAssert(w2 >= 0 && w2 < inputW);
                 THAssert(t2 >= 0 && t2 < inputT);
 
-                long planeIndex = h2 * inputW * inputT + w2 * inputT + t2;
+                int64_t planeIndex = h2 * inputW * inputT + w2 * inputT + t2;
                 real val = inputForPlane[planeIndex];
                 if (val > maxVal) {
                   maxVal = val;
@@ -108,13 +108,13 @@ void THNN_(VolumetricFractionalMaxPooling_updateOutput)(
     THIndexTensor *indices,
     THTensor *randomSamples) {
 
-  long numBatch = 1;
+  int64_t numBatch = 1;
   int planeDim = 0;
   int heightDim = 1;
   int widthDim = 2;
   int timeDim = 3;
 
-  long numInputDims = THTensor_(nDimension)(input);
+  int64_t numInputDims = THTensor_(nDimension)(input);
   THNN_ARGCHECK(numInputDims == 4 || numInputDims == 5, 2, input,
 		"4D or 5D (batch mode) tensor expected for input, but got: %s");
 
@@ -127,10 +127,10 @@ void THNN_(VolumetricFractionalMaxPooling_updateOutput)(
   }
 
   /* sizes */
-  long numPlanes = THTensor_(size)(input, planeDim);
-  long inputH = THTensor_(size)(input, heightDim);
-  long inputW = THTensor_(size)(input, widthDim);
-  long inputT = THTensor_(size)(input, timeDim);
+  int64_t numPlanes = THTensor_(size)(input, planeDim);
+  int64_t inputH = THTensor_(size)(input, heightDim);
+  int64_t inputW = THTensor_(size)(input, widthDim);
+  int64_t inputT = THTensor_(size)(input, timeDim);
 
   THArgCheck(outputH + poolSizeH - 1 < inputH, 9,
              "poolSizeH (%d) too large relative to input height (%d)",
@@ -163,7 +163,7 @@ void THNN_(VolumetricFractionalMaxPooling_updateOutput)(
     /* indices will contain the locations for each output point */
     THIndexTensor_(resize5d)(indices, numBatch, numPlanes, outputH, outputW, outputT);
 
-    long batch;
+    int64_t batch;
 #pragma omp parallel for private(batch)
     for (batch = 0; batch < numBatch; ++batch) {
       THNN_(VolumetricFractionalMaxPooling_updateOutput_frame)(
@@ -184,22 +184,22 @@ static void THNN_(VolumetricFractionalMaxPooling_updateGradInput_frame)(
   real* gradInput,
   real* gradOutput,
   THIndex_t* indices,
-  long numPlanes,
-  long inputT, long inputW, long inputH,
-  long outputT, long outputW, long outputH) {
-  long plane;
+  int64_t numPlanes,
+  int64_t inputT, int64_t inputW, int64_t inputH,
+  int64_t outputT, int64_t outputW, int64_t outputH) {
+  int64_t plane;
 #pragma omp parallel for private(plane)
   for (plane = 0; plane < numPlanes; plane++) {
     real* gradInputForPlane = gradInput + plane * inputT * inputW * inputH;
     real* gradOutputForPlane = gradOutput + plane * outputT * outputW * outputH;
     THIndex_t* indicesForPlane = indices + plane * outputT * outputW * outputH;
 
-    long h, w, t;
+    int64_t h, w, t;
     for (h = 0; h < outputH; ++h) {
       for (w = 0; w < outputW; ++w) {
         for (t = 0; t < outputT; ++t) {
-          long outputIndex = h * outputW * outputT + w * outputT + t;
-          long index = indicesForPlane[outputIndex] - TH_INDEX_BASE;
+          int64_t outputIndex = h * outputW * outputT + w * outputT + t;
+          int64_t index = indicesForPlane[outputIndex] - TH_INDEX_BASE;
           THAssert(index >= 0 && index < inputT * inputW * inputH);
 
           gradInputForPlane[index] += gradOutputForPlane[outputIndex];
@@ -218,13 +218,13 @@ void THNN_(VolumetricFractionalMaxPooling_updateGradInput)(
     int poolSizeT, int poolSizeW, int poolSizeH,
     THIndexTensor *indices) {
 
-  long numBatch = 1;
+  int64_t numBatch = 1;
   int planeDim = 0;
   int heightDim = 1;
   int widthDim = 2;
   int timeDim = 3;
 
-  long numInputDims = THTensor_(nDimension)(input);
+  int64_t numInputDims = THTensor_(nDimension)(input);
   if (numInputDims == 5) {
     numBatch = THTensor_(size)(input, 0);
     planeDim = 1;
@@ -234,10 +234,10 @@ void THNN_(VolumetricFractionalMaxPooling_updateGradInput)(
   }
 
   /* sizes */
-  long numPlanes = THTensor_(size)(input, planeDim);
-  long inputH = THTensor_(size)(input, heightDim);
-  long inputW = THTensor_(size)(input, widthDim);
-  long inputT = THTensor_(size)(input, timeDim);
+  int64_t numPlanes = THTensor_(size)(input, planeDim);
+  int64_t inputH = THTensor_(size)(input, heightDim);
+  int64_t inputW = THTensor_(size)(input, widthDim);
+  int64_t inputT = THTensor_(size)(input, timeDim);
 
   THArgCheck(outputT == THTensor_(size)(gradOutput, timeDim), 3,
              "gradOutput time unexpected");
@@ -261,7 +261,7 @@ void THNN_(VolumetricFractionalMaxPooling_updateGradInput)(
       THIndexTensor_(data)(indices),
       numPlanes, inputT, inputW, inputH, outputT, outputW, outputH);
   } else {
-    long batch;
+    int64_t batch;
 #pragma omp parallel for private(batch)
     for (batch = 0; batch < numBatch; ++batch) {
       THNN_(VolumetricFractionalMaxPooling_updateGradInput_frame)(

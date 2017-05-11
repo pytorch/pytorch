@@ -8,8 +8,8 @@
 
 static void THCTensor_(copyArray1d)(THCState *state, THCTensor *self, real *src, int k)
 {
-  long size[1] = { k };
-  long stride[1] = { 1 };
+  int64_t size[1] = { k };
+  int64_t stride[1] = { 1 };
   THCTensor_(resizeNd)(state, self, 1, size, stride);
   size_t len = k * sizeof(real);
   THCudaCheck(cudaMemcpy(self->storage->data + self->storageOffset, src, len, cudaMemcpyHostToDevice));
@@ -17,8 +17,8 @@ static void THCTensor_(copyArray1d)(THCState *state, THCTensor *self, real *src,
 
 static void THCTensor_(copyArray2d)(THCState *state, THCTensor *self, real *src, int m, int n)
 {
-  long size[2] = { m, n };
-  long stride[2] = { 1, m };
+  int64_t size[2] = { m, n };
+  int64_t stride[2] = { 1, m };
   THCTensor_(resizeNd)(state, self, 2, size, stride);
   size_t len = m * n * sizeof(real);
   THCudaCheck(cudaMemcpy(self->storage->data + self->storageOffset, src, len, cudaMemcpyHostToDevice));
@@ -51,8 +51,8 @@ static THCTensor* THCTensor_(newColumnMajor)(THCState *state, THCTensor *self, T
   else
     THCTensor_(retain)(state, self);
 
-  long size[2] = { src->size[0], src->size[1] };
-  long stride[2] = { 1, src->size[0] };
+  int64_t size[2] = { src->size[0], src->size[1] };
+  int64_t stride[2] = { 1, src->size[0] };
 
   THCTensor_(resizeNd)(state, self, 2, size, stride);
   THCTensor_(copy)(state, self, src);

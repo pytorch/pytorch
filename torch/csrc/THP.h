@@ -9,7 +9,7 @@
 // define PyInt_* macros for Python 3.x
 #ifndef PyInt_Check
 #define PyInt_Check             PyLong_Check
-#define PyInt_FromLong          PyLong_FromLong
+#define PyInt_FromLong          PyLong_FromLongLong
 #define PyInt_AsLong            PyLong_AsLong
 #define PyInt_Type              PyLong_Type
 #endif
@@ -19,7 +19,18 @@
 #define LIBRARY_STATE_NOARGS
 #define LIBRARY_STATE_TYPE
 
-#define THP_API extern "C"
+#ifdef _WIN32
+# ifdef _THP_CORE
+#  define THP_API extern "C" __declspec(dllexport)
+#  define THP_CLASS __declspec(dllexport)
+# else
+#  define THP_API extern "C" __declspec(dllimport)
+#  define THP_CLASS __declspec(dllimport)
+# endif
+#else
+# define THP_API extern "C"
+# define THP_CLASS
+#endif
 
 #include "PtrWrapper.h"
 #include "Exceptions.h"

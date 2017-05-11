@@ -41,7 +41,7 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
   name: nDimension
   sparse: yes
   python_name: ndimension
-  return: long
+  return: int64_t
   arguments:
   - THSTensor* self
 ]]
@@ -55,8 +55,9 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: nnz
+  python_name: _nnz
   sparse: yes
-  return: long
+  return: int64_t
   arguments:
   - THSTensor* self
 ]]
@@ -72,6 +73,7 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: indices
+  python_name: _indices
   sparse: yes
   cname: newIndices
   return: THIndexTensor*
@@ -81,6 +83,7 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: values
+  python_name: _values
   sparse: yes
   cname: newValues
   return: THTensor*
@@ -133,8 +136,8 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
   return: THSTensor*
   arguments:
   - THSTensor* self
-  - long dim0
-  - long dim1
+  - int64_t dim0
+  - int64_t dim1
 ]]
 
 [[
@@ -144,8 +147,8 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
   return: argument 0
   arguments:
   - THSTensor* self
-  - long dim0
-  - long dim1
+  - int64_t dim0
+  - int64_t dim1
 ]]
 
 [[
@@ -414,7 +417,7 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 ]]
 
 [[
-  name: sparse_mask
+  name: _sparse_mask
   cname: sparseMask
   return: argument 0
   arguments:
