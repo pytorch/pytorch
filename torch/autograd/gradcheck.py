@@ -101,7 +101,7 @@ def get_analytical_jacobian(input, output):
         flat_grad_output.zero_()
         flat_grad_output[i] = 1
         zero_gradients(input)
-        output.backward(grad_output, retain_variables=True)
+        output.backward(grad_output, retain_graph=True)
         for jacobian_x, d_x in zip(jacobian, iter_gradients(input)):
             if d_x is None:
                 jacobian_x[:, i].zero_()

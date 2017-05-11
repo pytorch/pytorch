@@ -183,7 +183,7 @@ class TestNN(NNTestCase):
             return module(input)
 
     def _backward(self, module, input, output, grad_output):
-        output.backward(grad_output, retain_variables=True)
+        output.backward(grad_output, retain_graph=True)
         if input.grad is None:
             return None
         return input.grad.data
@@ -266,11 +266,11 @@ class TestNN(NNTestCase):
         self.assertEqual(counter['forwards'], 3)
         self.assertEqual(counter['backwards'], 0)
 
-        output.backward(torch.ones(5, 5) * 2, retain_variables=True)
+        output.backward(torch.ones(5, 5) * 2, retain_graph=True)
         self.assertEqual(counter['forwards'], 3)
         self.assertEqual(counter['backwards'], 1)
 
-        output.backward(torch.ones(5, 5) * 2, retain_variables=True)
+        output.backward(torch.ones(5, 5) * 2, retain_graph=True)
         self.assertEqual(counter['forwards'], 3)
         self.assertEqual(counter['backwards'], 2)
 
@@ -400,6 +400,12 @@ class TestNN(NNTestCase):
         module.zero_grad()
         self.assertEqual(module.weight.grad.data, module.weight.data.clone().zero_())
         self.assertEqual(module.bias.grad.data, module.bias.data.clone().zero_())
+
+        # non-volatile grad should be zeroed out of place
+        initial = module.weight.grad = Variable(torch.ones(5, 5))
+        module.zero_grad()
+        self.assertIsNot(module.weight.grad, initial)
+        self.assertEqual(module.weight.grad.data, torch.zeros(5, 5))
 
     def test_volatile(self):
         module = nn.Conv2d(2, 5, kernel_size=3, padding=1)
@@ -704,7 +710,7 @@ class TestNN(NNTestCase):
         grads = torch.arange(1, 101), torch.ones(10).div(1000)
         for norm_type in [0.5, 1.5, 2, 4, 'inf']:
             for p, g in zip(l.parameters(), grads):
-                p._grad = Variable(g.clone())
+                p._grad = Variable(g.clone().view_as(p.data))
             norm_before = compute_norm(norm_type)
             norm = clip_grad_norm(l.parameters(), max_norm, norm_type=norm_type)
             norm_after = compute_norm(norm_type)
@@ -868,7 +874,7 @@ class TestNN(NNTestCase):
 
         # Make sure backward works
         grad_output = torch.ones(output.size()).type(type)
-        output.backward(grad_output, retain_variables=True)
+        output.backward(grad_output, retain_graph=True)
         expected_grad = expected_grad(num_dim)
         self.assertEqual(input_var.grad.data, expected_grad.view_as(input))
 
@@ -1670,11 +1676,11 @@ class TestNN(NNTestCase):
         rnn = nn.LSTM(10, 20, num_layers=2).type(dtype)
         input = Variable(torch.randn(5, 6, 10).type(dtype), requires_grad=True)
         output = rnn(input)
-        output[0].sum().backward(retain_variables=True)
+        output[0].sum().backward(retain_graph=True)
         grads = [input.grad.data.clone()] + [p.grad.data.clone() for p in rnn.parameters()]
         rnn.zero_grad()
         input.grad.data.zero_()
-        output[0].sum().backward(retain_variables=True)
+        output[0].sum().backward(retain_graph=True)
         grads2 = [input.grad.data] + [p.grad.data for p in rnn.parameters()]
         self.assertEqual(grads, grads2)
 
@@ -1986,7 +1992,7 @@ class TestNN(NNTestCase):
 
         grad = torch.randn(2, 2, 5, 10, 10).cuda()[:, 1]
         assert not grad.is_contiguous()
-        output.backward(grad, retain_variables=True)
+        output.backward(grad, retain_graph=True)
         self.assertIsNotNone(input.grad)
         result = input.grad.data.clone()
         input.grad.data.zero_()

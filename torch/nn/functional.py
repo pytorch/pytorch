@@ -690,7 +690,7 @@ def pairwise_distance(x1, x2, p=2, eps=1e-6):
     assert x1.size() == x2.size(), "Input sizes must be equal."
     assert x1.dim() == 2, "Input must be a 2D matrix."
     diff = torch.abs(x1 - x2)
-    out = torch.pow(diff + eps, p).sum(dim=1)
+    out = torch.pow(diff + eps, p).sum(dim=1, keepdim=True)
     return torch.pow(out, 1. / p)
 
 
@@ -765,4 +765,4 @@ def normalize(input, p=2, dim=1, eps=1e-12):
         dim (int): the dimension to reduce
         eps (float): small value to avoid division by zero
     """
-    return input / input.norm(p, dim).clamp(min=eps).expand_as(input)
+    return input / input.norm(p, dim, True).clamp(min=eps).expand_as(input)

@@ -369,6 +369,7 @@ class Addcmul(InplaceFunction):
     def forward(self, add_tensor, mul_tensor1, mul_tensor2):
         self.save_for_backward(mul_tensor1, mul_tensor2)
         if self.inplace:
+            self.mark_dirty(add_tensor)
             return add_tensor.addcmul_(self.scale, mul_tensor1, mul_tensor2)
         else:
             return add_tensor.addcmul(self.scale, mul_tensor1, mul_tensor2)
@@ -398,6 +399,7 @@ class Addcdiv(InplaceFunction):
     def forward(self, add_tensor, div_tensor1, div_tensor2):
         self.save_for_backward(div_tensor1, div_tensor2)
         if self.inplace:
+            self.mark_dirty(add_tensor)
             return add_tensor.addcdiv_(self.scale, div_tensor1, div_tensor2)
         else:
             return add_tensor.addcdiv(self.scale, div_tensor1, div_tensor2)

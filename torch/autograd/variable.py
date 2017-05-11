@@ -1,4 +1,5 @@
 import sys
+import torch
 import torch._C as _C
 from collections import OrderedDict
 import torch.sparse as sparse
@@ -115,7 +116,7 @@ class Variable(_C._VariableBase):
 
     __nonzero__ = __bool__
 
-    def backward(self, gradient=None, retain_variables=False):
+    def backward(self, gradient=None, retain_graph=None, create_graph=None, retain_variables=None):
         """Computes the gradient of current variable w.r.t. graph leaves.
 
         The graph is differentiated using the chain rule. If the variable is
@@ -128,28 +129,20 @@ class Variable(_C._VariableBase):
         them before calling it.
 
         Arguments:
-            gradient (Tensor): Gradient of the differentiated function
-                w.r.t. the data. Required only if the data has more than one
-                element. Type and location should match these of ``self.data``.
-            retain_variables (bool): If ``True``, buffers necessary for computing
-                gradients won't be freed after use. It is only necessary to
-                specify ``True`` if you want to differentiate some subgraph multiple
-                times (in some cases it will be much more efficient to use
-                `autograd.backward`).
+        grad_variables (Tensor, Variable or None): Gradient w.r.t. the variable.
+            If it is a tensor, it will be automatically converted to a Variable
+            that is volatile unless ``create_graph`` is True. None values can be
+            specified for scalar Variables or ones that don't require grad. If a
+            None value would be acceptable then this argument is optional.
+        retain_graph (bool, optional): If False, the graph used to compute the grads
+            will be freed. Note that in nearly all cases setting this option to True
+            is not needed and often can be worked around in a much more efficient
+            way. Defaults to the value of ``create_graph``.
+        create_graph (bool, optional): If true, graph of the derivative will
+            be constructed, allowing to compute higher order derivative products.
+            Defaults to False, unless ``gradient`` is a volatile Variable.
         """
-        if self.volatile:
-            raise RuntimeError('calling backward on a volatile variable')
-        if gradient is None and self.requires_grad:
-            if self.data.numel() != 1:
-                raise RuntimeError(
-                    'backward should be called only on a scalar (i.e. 1-element tensor) '
-                    'or with gradient w.r.t. the variable')
-            gradient = self.data.new().resize_as_(self.data).fill_(1)
-        if not isinstance(gradient, Variable):
-            if gradient is not None and not torch.is_tensor(gradient):
-                raise TypeError("gradient has to be a Tensor, Variable or None")
-            gradient = Variable(gradient, volatile=True)
-        self._execution_engine.run_backward((self,), (gradient,), retain_variables)
+        torch.autograd.backward(self, gradient, retain_graph, create_graph, retain_variables)
 
     def register_hook(self, hook):
         """Registers a backward hook.
@@ -438,33 +431,33 @@ class Variable(_C._VariableBase):
     def rsqrt(self):
         return Rsqrt()(self)
 
-    def sum(self, dim=None):
-        return Sum.apply(self, dim)
+    def sum(self, dim=None, keepdim=True):
+        return Sum.apply(self, dim, keepdim)
 
-    def prod(self, dim=None):
-        return Prod.apply(self, dim)
+    def prod(self, dim=None, keepdim=True):
+        return Prod.apply(self, dim, keepdim)
 
-    def mean(self, dim=None):
-        return Mean.apply(self, dim)
+    def mean(self, dim=None, keepdim=True):
+        return Mean.apply(self, dim, keepdim)
 
-    def max(self, dim=None):
+    def max(self, dim=None, keepdim=True):
         if isinstance(dim, Variable):
             return Cmax()(self, dim)
-        return Max(dim)(self)
+        return Max(dim, keepdim)(self)
 
-    def min(self, dim=None):
+    def min(self, dim=None, keepdim=True):
         if isinstance(dim, Variable):
             return Cmin()(self, dim)
-        return Min(dim)(self)
+        return Min(dim, keepdim)(self)
 
-    def mode(self, dim):
-        return Mode(dim)(self)
+    def mode(self, dim, keepdim=True):
+        return Mode(dim, keepdim)(self)
 
-    def median(self, dim):
-        return Median(dim)(self)
+    def median(self, dim, keepdim=True):
+        return Median(dim, keepdim)(self)
 
-    def kthvalue(self, dim):
-        return Kthvalue(dim)(self)
+    def kthvalue(self, dim, keepdim=True):
+        return Kthvalue(dim, keepdim)(self)
 
     def sort(self, dim=None, descending=False):
         return Sort.apply(self, dim, descending, True)
@@ -491,23 +484,26 @@ class Variable(_C._VariableBase):
     def cumsum(self, dim):
         return Cumsum(dim)(self)
 
-    def var(self, dim=None, unbiased=True):
-        mean = self.mean(dim)
+    def var(self, dim=None, keepdim=True, unbiased=True):
+        mean = self.mean(dim, keepdim)
         if dim is None:
             mean = mean.view(*(1 for s in self.size()))
+        # we could just set keepdim to True, but this preserves some fidelity
+        elif keepdim is False:
+            mean = mean.unsqueeze(dim)
         mean_expanded = mean.expand_as(self)
         zero_centered = self.sub(mean_expanded)
-        var = zero_centered.mul(zero_centered).sum(dim)
+        var = zero_centered.mul(zero_centered).sum(dim, keepdim)
         numel = self.numel() if dim is None else self.size(dim)
         return var.div(numel - int(unbiased))
 
-    def std(self, dim=None, unbiased=True):
-        return self.var(dim, unbiased).sqrt()
+    def std(self, dim=None, keepdim=True):
+        return self.var(dim, keepdim).sqrt()
 
     def renorm(self, p, dim, maxnorm):
         t = self.transpose(dim, 0)
         flat = t.contiguous().view(self.size(0), -1)
-        norms = flat.norm(p, 1)
+        norms = flat.norm(p, 1, True)
         norms = norms.clamp(max=maxnorm).div(norms.add(1e-7))
         flat_out = flat.mul(norms.expand_as(flat))
         return flat_out.view(t.size()).transpose(dim, 0)
@@ -597,8 +593,8 @@ class Variable(_C._VariableBase):
     def addcdiv(self, *args):
         return self._addcop(Addcdiv, args)
 
-    def norm(self, p=2, dim=None):
-        return Norm.apply(self, p, dim)
+    def norm(self, p=2, dim=None, keepdim=True):
+        return Norm.apply(self, p, dim, keepdim)
 
     def dist(self, tensor, p=2):
         return Norm.apply(self - tensor, p)
@@ -710,40 +706,28 @@ class Variable(_C._VariableBase):
         return Bernoulli()(self)
 
     def eq(self, other):
-        if isinstance(other, Variable):
-            return Eq()(self, other)
         assert not torch.is_tensor(other), "can't compare Variable and tensor"
-        return Eq(other)(self)
+        return Eq.apply(self, other)
 
     def ne(self, other):
-        if isinstance(other, Variable):
-            return Ne()(self, other)
         assert not torch.is_tensor(other), "can't compare Variable and tensor"
-        return Ne(other)(self)
+        return Ne.apply(self, other)
 
     def gt(self, other):
-        if isinstance(other, Variable):
-            return Gt()(self, other)
         assert not torch.is_tensor(other), "can't compare Variable and tensor"
-        return Gt(other)(self)
+        return Gt.apply(self, other)
 
     def ge(self, other):
-        if isinstance(other, Variable):
-            return Ge()(self, other)
         assert not torch.is_tensor(other), "can't compare Variable and tensor"
-        return Ge(other)(self)
+        return Ge.apply(self, other)
 
     def lt(self, other):
-        if isinstance(other, Variable):
-            return Lt()(self, other)
         assert not torch.is_tensor(other), "can't compare Variable and tensor"
-        return Lt(other)(self)
+        return Lt.apply(self, other)
 
     def le(self, other):
-        if isinstance(other, Variable):
-            return Le()(self, other)
         assert not torch.is_tensor(other), "can't compare Variable and tensor"
-        return Le(other)(self)
+        return Le.apply(self, other)
 
     def __add__(self, other):
         return self.add(other)

@@ -338,7 +338,7 @@ class Module(object):
         if len(missing) > 0:
             raise KeyError('missing keys in state_dict: "{}"'.format(missing))
 
-    def parameters(self, memo=None):
+    def parameters(self):
         """Returns an iterator over module parameters.
 
         This is typically passed to an optimizer.
@@ -462,8 +462,11 @@ class Module(object):
         """Sets gradients of all model parameters to zero."""
         for p in self.parameters():
             if p.grad is not None:
-                p.grad.data.zero_()
-                p.grad.detach_()
+                if p.grad.volatile:
+                    p.grad.data.zero_()
+                else:
+                    data = p.grad.data
+                    p.grad = Variable(data.new().resize_as_(data).zero_())
 
     def share_memory(self):
         return self._apply(lambda t: t.share_memory_())

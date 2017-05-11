@@ -154,35 +154,50 @@ static struct PyGetSetDef batch_norm_backward_properties[] = {
 
 static struct PyGetSetDef conv_forward_properties[] = {
   THP_FUNCTION_DEFAULT_PROPERTIES,
-  {(char*)"stride", (getter)getTupleAttr<ConvForward, std::vector<int>, ConvParams, 
+  {(char*)"stride", (getter)getTupleAttr<ConvForward, std::vector<int>, ConvParams,
                                          &ConvParams::stride, long, PyInt_FromLong>, NULL, NULL, NULL},
-  {(char*)"padding", (getter)getTupleAttr<ConvForward, std::vector<int>, ConvParams, 
+  {(char*)"padding", (getter)getTupleAttr<ConvForward, std::vector<int>, ConvParams,
                                          &ConvParams::padding, long, PyInt_FromLong>, NULL, NULL, NULL},
-  {(char*)"dilation", (getter)getTupleAttr<ConvForward, std::vector<int>, ConvParams, 
+  {(char*)"dilation", (getter)getTupleAttr<ConvForward, std::vector<int>, ConvParams,
                                          &ConvParams::dilation, long, PyInt_FromLong>, NULL, NULL, NULL},
-  {(char*)"transposed", (getter)getValueAttr<ConvForward, bool, ConvParams, 
+  {(char*)"transposed", (getter)getValueAttr<ConvForward, bool, ConvParams,
                                          &ConvParams::transposed, long, PyBool_FromLong>, NULL, NULL, NULL},
-  {(char*)"output_padding", (getter)getTupleAttr<ConvForward, std::vector<int>, ConvParams, 
+  {(char*)"output_padding", (getter)getTupleAttr<ConvForward, std::vector<int>, ConvParams,
                                          &ConvParams::output_padding, long, PyInt_FromLong>, NULL, NULL, NULL},
-  {(char*)"groups", (getter)getValueAttr<ConvForward, int, ConvParams, 
+  {(char*)"groups", (getter)getValueAttr<ConvForward, int, ConvParams,
                                          &ConvParams::groups, long, PyInt_FromLong>, NULL, NULL, NULL},
   {NULL}
 };
 
 static struct PyGetSetDef conv_backward_properties[] = {
   THP_FUNCTION_DEFAULT_PROPERTIES,
-  {(char*)"stride", (getter)getTupleAttr<ConvBackward, std::vector<int>, ConvParams, 
+  {(char*)"stride", (getter)getTupleAttr<ConvBackward, std::vector<int>, ConvParams,
                                          &ConvParams::stride, long, PyInt_FromLong>, NULL, NULL, NULL},
-  {(char*)"padding", (getter)getTupleAttr<ConvBackward, std::vector<int>, ConvParams, 
+  {(char*)"padding", (getter)getTupleAttr<ConvBackward, std::vector<int>, ConvParams,
                                          &ConvParams::padding, long, PyInt_FromLong>, NULL, NULL, NULL},
-  {(char*)"dilation", (getter)getTupleAttr<ConvBackward, std::vector<int>, ConvParams, 
+  {(char*)"dilation", (getter)getTupleAttr<ConvBackward, std::vector<int>, ConvParams,
                                          &ConvParams::dilation, long, PyInt_FromLong>, NULL, NULL, NULL},
-  {(char*)"transposed", (getter)getValueAttr<ConvBackward, bool, ConvParams, 
+  {(char*)"transposed", (getter)getValueAttr<ConvBackward, bool, ConvParams,
                                          &ConvParams::transposed, long, PyBool_FromLong>, NULL, NULL, NULL},
-  {(char*)"output_padding", (getter)getTupleAttr<ConvBackward, std::vector<int>, ConvParams, 
+  {(char*)"output_padding", (getter)getTupleAttr<ConvBackward, std::vector<int>, ConvParams,
                                          &ConvParams::output_padding, long, PyInt_FromLong>, NULL, NULL, NULL},
-  {(char*)"groups", (getter)getValueAttr<ConvBackward, int, ConvParams, 
+  {(char*)"groups", (getter)getValueAttr<ConvBackward, int, ConvParams,
                                          &ConvParams::groups, long, PyInt_FromLong>, NULL, NULL, NULL},
+  {NULL}
+};
+
+static PyObject* accumulateGradVar(PyObject *_self, void* _unused)
+{
+  THPCppFunction* self = (THPCppFunction*)_self;
+  auto grad_acc = (AccumulateGrad*)self->cdata.get();
+  auto var = grad_acc->variable.lock();
+  if (!var) Py_RETURN_NONE;
+  return THPVariable_Wrap(var);
+}
+
+static struct PyGetSetDef accumulate_grad_properties[] = {
+  THP_FUNCTION_DEFAULT_PROPERTIES,
+  {(char*)"variable", accumulateGradVar, NULL, NULL, NULL},
   {NULL}
 };
 
@@ -200,7 +215,7 @@ bool THPAutograd_initFunctions(PyObject* _unused)
   addClass<ConvBackward, NoCtor>(module, ConvBackwardClass, "ConvNdBackward", conv_backward_properties);
 
   static PyTypeObject AccumulateGradClass;
-  addClass<AccumulateGrad, NoCtor>(module, AccumulateGradClass, "AccumulateGrad");
+  addClass<AccumulateGrad, NoCtor>(module, AccumulateGradClass, "AccumulateGrad", accumulate_grad_properties);
 
   static PyTypeObject AddClass, AddBackwardClass;
   addClass<Add, NoCtor>(module, AddClass, "Add");

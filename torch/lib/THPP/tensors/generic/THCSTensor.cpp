@@ -601,22 +601,22 @@ auto THCSTensor<real>::lerp(const Tensor& a, const Tensor& b, scalar_type weight
 }
 
 template<>
-auto THCSTensor<real>::mean(const Tensor& src, int dimension) -> THCSTensor& {
+auto THCSTensor<real>::mean(const Tensor& src, int dimension, int keepdim) -> THCSTensor& {
   throw std::runtime_error("THCSTensor::mean() not supported");
 }
 
 template<>
-auto THCSTensor<real>::std(const Tensor& src, int dimension, int flag) -> THCSTensor& {
+auto THCSTensor<real>::std(const Tensor& src, int dimension, int flag, int keepdim) -> THCSTensor& {
   throw std::runtime_error("THCSTensor::std() not supported");
 }
 
 template<>
-auto THCSTensor<real>::var(const Tensor& src, int dimension, int flag) -> THCSTensor& {
+auto THCSTensor<real>::var(const Tensor& src, int dimension, int flag, int keepdim) -> THCSTensor& {
   throw std::runtime_error("THCSTensor::var() not supported");
 }
 
 template<>
-auto THCSTensor<real>::norm(const Tensor& src, scalar_type value, int dimension) -> THCSTensor& {
+auto THCSTensor<real>::norm(const Tensor& src, scalar_type value, int dimension, int keepdim) -> THCSTensor& {
   throw std::runtime_error("THCSTensor::norm() not supported");
 }
 
@@ -930,37 +930,37 @@ auto THCSTensor<real>::match(const Tensor& m1, const Tensor& m2, scalar_type gai
 }
 
 template<>
-auto THCSTensor<real>::max(const Tensor& indices_, const Tensor& src, int dimension) -> THCSTensor& {
+auto THCSTensor<real>::max(const Tensor& indices_, const Tensor& src, int dimension, int keepdim) -> THCSTensor& {
   throw std::runtime_error("THCSTensor::max() not supported");
 }
 
 template<>
-auto THCSTensor<real>::min(const Tensor& indices_, const Tensor& src, int dimension) -> THCSTensor& {
+auto THCSTensor<real>::min(const Tensor& indices_, const Tensor& src, int dimension, int keepdim) -> THCSTensor& {
   throw std::runtime_error("THCSTensor::min() not supported");
 }
 
 template<>
-auto THCSTensor<real>::kthvalue(const Tensor& indices_, const Tensor& src, long k, int dimension) -> THCSTensor& {
+auto THCSTensor<real>::kthvalue(const Tensor& indices_, const Tensor& src, long k, int dimension, int keepdim) -> THCSTensor& {
   throw std::runtime_error("THCSTensor::kthvalue() not supported");
 }
 
 template<>
-auto THCSTensor<real>::mode(const Tensor& indices_, const Tensor& src, int dimension) -> THCSTensor& {
+auto THCSTensor<real>::mode(const Tensor& indices_, const Tensor& src, int dimension, int keepdim) -> THCSTensor& {
   throw std::runtime_error("THCSTensor::mode() not supported");
 }
 
 template<>
-auto THCSTensor<real>::median(const Tensor& indices_, const Tensor& src, int dimension) -> THCSTensor& {
+auto THCSTensor<real>::median(const Tensor& indices_, const Tensor& src, int dimension, int keepdim) -> THCSTensor& {
   throw std::runtime_error("THCSTensor::median() not supported");
 }
 
 template<>
-auto THCSTensor<real>::sum(const Tensor& src, int dimension) -> THCSTensor& {
+auto THCSTensor<real>::sum(const Tensor& src, int dimension, int keepdim) -> THCSTensor& {
   throw std::runtime_error("THCSTensor::sum() not supported");
 }
 
 template<>
-auto THCSTensor<real>::prod(const Tensor& src, int dimension) -> THCSTensor& {
+auto THCSTensor<real>::prod(const Tensor& src, int dimension, int keepdim) -> THCSTensor& {
   throw std::runtime_error("THCSTensor::prod() not supported");
 }
 

@@ -71,7 +71,7 @@ class MixtureTable(Module):
 
             self._gaterView = gaterInput.view(self.size)
             torch.mul(self._gaterView.expand_as(expertInputs), expertInputs, out=self._expert)
-            torch.sum(self._expert, self.dim, out=self.output)
+            torch.sum(self._expert, self.dim, True, out=self.output)
             self.output.resize_as_(expertInputs.select(self.dim, 0))
 
         return self.output
@@ -108,7 +108,7 @@ class MixtureTable(Module):
                 else:
                     self._expertView = self._expert.view(gradOutput.size(0), -1)
 
-                torch.sum(self._expertView, self.dimG, out=self._sum)
+                torch.sum(self._expertView, self.dimG, True, out=self._sum)
                 if self.dimG == 0:
                     gaterGradInput[i] = self._sum.select(self.dimG, 0)
                 else:
@@ -139,7 +139,7 @@ class MixtureTable(Module):
             else:
                 self._expertView2 = expert.view(gaterInput.size(0), gaterInput.size(1), -1)
 
-            torch.sum(self._expertView2, self.dimG + 1, out=gaterGradInput)
+            torch.sum(self._expertView2, self.dimG + 1, True, out=gaterGradInput)
             gaterGradInput.resize_as_(gaterInput)
 
             # expert updateGradInput

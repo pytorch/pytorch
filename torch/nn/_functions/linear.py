@@ -11,9 +11,7 @@ class Linear(Function):
         output = input.new(input.size(0), weight.size(0))
         output.addmm_(0, 1, input, weight.t())
         if bias is not None:
-            # cuBLAS doesn't support 0 strides in sger, so we can't use expand
-            ctx.add_buffer = input.new(input.size(0)).fill_(1)
-            output.addr_(ctx.add_buffer, bias)
+            output.add_(bias.expand_as(output))
         return output
 
     @staticmethod
@@ -26,7 +24,7 @@ class Linear(Function):
         if ctx.needs_input_grad[1]:
             grad_weight = torch.mm(grad_output.t(), input)
         if bias is not None and ctx.needs_input_grad[2]:
-            grad_bias = torch.mv(grad_output.t(), Variable(ctx.add_buffer))
+            grad_bias = grad_output.sum(0, False)
 
         if bias is not None:
             return grad_input, grad_weight, grad_bias
@@ -82,6 +80,6 @@ class Bilinear(Function):
             grad_weight = torch.mm(buff.t(), input2)
 
         if bias is not None and self.needs_input_grad[3]:
-            grad_bias = grad_output.sum(0)
+            grad_bias = grad_output.sum(0, True)
 
         return grad_input1, grad_input2, grad_weight, grad_bias
