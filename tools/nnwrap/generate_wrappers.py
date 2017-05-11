@@ -34,8 +34,8 @@ FUNCTION_TEMPLATE = Template("""\
 """)
 
 COMMON_TRANSFORMS = {
-    'THIndex_t': 'long',
-    'THCIndex_t': 'long',
+    'THIndex_t': 'int64_t',
+    'THCIndex_t': 'int64_t',
     'THInteger_t': 'int',
 }
 COMMON_CPU_TRANSFORMS = {

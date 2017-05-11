@@ -46,6 +46,7 @@ import struct
 from array import array
 from collections import namedtuple
 from functools import wraps
+import sys
 
 import torch
 import torch.legacy.nn as nn
@@ -54,6 +55,8 @@ from torch._thnn import type2backend
 from torch._utils import _import_dotted_name
 
 HAS_CUDA = torch.cuda.is_available()
+
+LONGLONG_TYPECODE = 'q' if sys.version[0] == '3' else 'l'
 
 LuaFunction = namedtuple('LuaFunction', ['size', 'dumped', 'upvalues'])
 
@@ -468,9 +471,9 @@ class T7Reader:
 
     def read_long(self):
         if self.long_size is None:
-            return self._read('l')
+            return self._read(LONGLONG_TYPECODE)
         elif self.long_size is 8:
-            return self._read('q')
+            return self._read(LONGLONG_TYPECODE)
         else:
             return self._read('i')
 
@@ -481,7 +484,7 @@ class T7Reader:
                 lst.append(self.read_long())
             return lst
         else:
-            arr = array('l')
+            arr = array(LONGLONG_TYPECODE)
             arr.fromfile(self.f, n)
             return arr.tolist()
 

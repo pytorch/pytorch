@@ -38,8 +38,9 @@ class StandaloneExtension(CWrapPlugin):
         'float': Template('THPFloatUtils_unpackReal($arg)'),
         'double': Template('THPDoubleUtils_unpackReal($arg)'),
         'bool': Template('($arg == Py_True ? true : false)'),
-        'int': Template('THPUtils_unpackLong($arg)'),
+        'int': Template('(int) THPUtils_unpackLong($arg)'),
         'long': Template('THPUtils_unpackLong($arg)'),
+        'int64_t': Template('THPUtils_unpackLong($arg)'),
         'void*': Template('(void*)THPUtils_unpackLong($arg)'),
         'THGenerator*': Template('THPGenerator_CData((THPGenerator*)$arg)'),
     }
@@ -59,6 +60,7 @@ class StandaloneExtension(CWrapPlugin):
         'bool': Template('PyBool_Check($arg)'),
         'int': Template('THPUtils_checkLong($arg)'),
         'long': Template('THPUtils_checkLong($arg)'),
+        'int64_t': Template('THPUtils_checkLong($arg)'),
         'void*': Template('THPUtils_checkLong($arg)'),
         'THGenerator*': Template('(PyObject*)Py_TYPE($arg) == THPGeneratorClass'),
     }
@@ -67,7 +69,7 @@ class StandaloneExtension(CWrapPlugin):
 PyObject * $name(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
-  int __argcount = args ? PyTuple_Size(args) : 0;
+  int __argcount = args ? (int) PyTuple_Size(args) : 0;
     $options
   } else {
     THPUtils_invalidArguments(args, NULL, "$name", 1, $expected_args);
@@ -91,6 +93,7 @@ PyObject * $name(PyObject *_unused, PyObject *args)
         'THIntTensor*': 'torch.IntTensor',
         'THLongStorage*': 'torch.LongStorage',
         'long': 'int',
+        'int64_t': 'int',
         'int': 'int',
         'real': 'float',
         'half': 'float',

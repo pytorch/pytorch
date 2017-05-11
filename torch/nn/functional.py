@@ -1,5 +1,7 @@
 """Functional interface"""
 
+from numbers import Integral
+
 import torch
 from . import _functions
 from .modules import utils
@@ -209,9 +211,8 @@ def avg_pool2d(input, kernel_size, stride=None, padding=0,
           tuple (sh x sw). Default is equal to kernel size
         padding: implicit zero padding on the input, a single number or
           a tuple (padh x padw), Default: 0
-        ceil_mode: operation that defines spatial output shape
-        count_include_pad: divide by the number of elements inside the
-          original non-padded image or kh * kw
+        ceil_mode: when True, will use `ceil` instead of `floor` in the formula to compute the output shape
+        count_include_pad: when True, will include the zero-padding in the averaging calculation
     """
     return _functions.thnn.AvgPool2d(kernel_size, stride, padding,
                                      ceil_mode, count_include_pad)(input)
@@ -219,7 +220,7 @@ def avg_pool2d(input, kernel_size, stride=None, padding=0,
 
 def avg_pool3d(input, kernel_size, stride=None):
     """Applies 3D average-pooling operation in kt x kh x kw regions by step
-    size kt x dh x dw steps. The number of output features is equal to the
+    size dt x dh x dw steps. The number of output features is equal to the
     number of input planes / dt.
     """
     return _functions.thnn.AvgPool3d(kernel_size, stride)(input)
@@ -446,8 +447,10 @@ def sigmoid(input):
 # etc.
 
 def linear(input, weight, bias=None):
-    state = _functions.linear.Linear()
-    return state(input, weight) if bias is None else state(input, weight, bias)
+    if bias is None:
+        return _functions.linear.Linear.apply(input, weight)
+    else:
+        return _functions.linear.Linear.apply(input, weight, bias)
 
 
 def bilinear(input1, input2, weight, bias=None):
@@ -611,9 +614,21 @@ def upsample_bilinear(input, size=None, scale_factor=None):
     Args:
         input (Variable): input
         size (int or Tuple[int, int]): output spatial size.
-        scale_factor (int): multiplier for spatial size. Has to be an integer.
+        scale_factor (int or Tuple[int, int]): multiplier for spatial size
     """
     return _functions.thnn.UpsamplingBilinear2d(size, scale_factor)(input)
+
+
+def _check_bilinear_2d_scale_factor(scale_factor):
+    scale_factor = _pair(scale_factor)
+    try:
+        assert len(scale_factor) == 2
+        assert all(isinstance(s, Integral) and s >= 1 for s in scale_factor)
+    except AssertionError as e:
+        raise ValueError('scale_factor must be a non-negative integer, '
+                         'or a tuple of non-negative integers for bilinear upsamplings, but got: '
+                         '{}'.format(scale_factor))
+    return scale_factor
 
 
 def pad(input, pad, mode='constant', value=0):
@@ -692,7 +707,7 @@ def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, s
     .. math::
         L(a, p, n) = \frac{1}{N} \left( \sum_{i=1}^N \max \{d(a_i, p_i) - d(a_i, n_i) + {\rm margin}, 0\} \right)
 
-    where :math: `d(x_i, y_i) = \| {\bf x}_i - {\bf y}_i \|_2^2`.
+    where :math:`d(x_i, y_i) = \| {\bf x}_i - {\bf y}_i \|_2^2`.
 
     Args:
         anchor: anchor input tensor
