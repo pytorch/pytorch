@@ -115,7 +115,7 @@ class ModelHelper(object):
     """
 
     def __init__(self, name=None, init_params=True, allow_not_known_ops=True,
-                 skip_sparse_optim=False, param_model=None):
+                 skip_sparse_optim=False, param_model=None, arg_scope=None):
         self.name = name or "model"
         self.net = core.Net(self.name)
 
@@ -138,6 +138,19 @@ class ModelHelper(object):
         self.skip_sparse_optim = skip_sparse_optim
         self.weights = []
         self.biases = []
+        self._arg_scope = {
+            'order': "NCHW",
+            'use_cudnn': True,
+            'cudnn_exhaustive_search': False,
+        }
+        if arg_scope is not None:
+            # Please notice value as None is not acceptable. We are not checking it
+            # here because we already have check in MakeArgument.
+            self._arg_scope.update(arg_scope)
+
+    @property
+    def arg_scope(self):
+        return self._arg_scope
 
     def get_name(self):
         return self.name
