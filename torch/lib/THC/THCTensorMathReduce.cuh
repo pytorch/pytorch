@@ -469,8 +469,8 @@ kernelTransformReduceOuterDimIndex(K *tgt1,
 
       for (unsigned col = 0; col < row_size; ++col) {
         // +1 for Lua index
-        acc = binary_op(thrust::make_pair<K, Index>(*src, col + TH_INDEX_BASE),
-                        acc);
+        acc = binary_op(acc,
+                        thrust::make_pair<K, Index>(*src, col + TH_INDEX_BASE));
         src += num_irows;
       }
 
@@ -550,7 +550,7 @@ kernelTransformReduceInnermostDimIndex(K *tgt1,
       K *src = src_ + row * row_size;
       // Sequential reduction within a thread.
       for (unsigned col = threadIdx.x; col < row_size; col += blockDim.x) {
-        acc = binary_op(thrust::make_pair<K, Index>(src[col], col + TH_INDEX_BASE), acc);
+        acc = binary_op(acc, thrust::make_pair<K, Index>(src[col], col + TH_INDEX_BASE));
       }
     }
 
@@ -568,7 +568,7 @@ kernelTransformReduceInnermostDimIndex(K *tgt1,
           thrust::make_pair<K, Index>(sline[threadIdx.x], iline[threadIdx.x]);
         thrust::pair<K, Index> arg2 =
           thrust::make_pair<K, Index>(sline[threadIdx.x + s], iline[threadIdx.x + s]);
-        thrust::pair<K, Index> res = binary_op(arg2, arg1);
+        thrust::pair<K, Index> res = binary_op(arg1, arg2);
 
         sline[threadIdx.x] = res.first;
         iline[threadIdx.x] = res.second;
@@ -665,7 +665,7 @@ struct MaxValuePair {
   __host__ __device__
   thrust::pair<T, Index> operator()(const thrust::pair<T, Index>& a,
                                     const thrust::pair<T, Index>& b) {
-    return THCNumerics<T>::gt(a.first, b.first) ? a : b;
+    return THCNumerics<T>::ge(a.first, b.first) ? a : b;
   }
 };
 
@@ -674,7 +674,7 @@ struct MinValuePair {
   __host__ __device__
   thrust::pair<T, Index> operator()(const thrust::pair<T, Index>& a,
                                     const thrust::pair<T, Index>& b) {
-    return THCNumerics<T>::lt(a.first, b.first) ? a : b;
+    return THCNumerics<T>::le(a.first, b.first) ? a : b;
   }
 };
 
