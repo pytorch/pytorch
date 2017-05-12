@@ -568,7 +568,7 @@ kernelTransformReduceInnermostDimIndex(K *tgt1,
           thrust::make_pair<K, Index>(sline[threadIdx.x], iline[threadIdx.x]);
         thrust::pair<K, Index> arg2 =
           thrust::make_pair<K, Index>(sline[threadIdx.x + s], iline[threadIdx.x + s]);
-        thrust::pair<K, Index> res = binary_op(arg1, arg2);
+        thrust::pair<K, Index> res = binary_op(arg2, arg1);
 
         sline[threadIdx.x] = res.first;
         iline[threadIdx.x] = res.second;
@@ -665,7 +665,7 @@ struct MaxValuePair {
   __host__ __device__
   thrust::pair<T, Index> operator()(const thrust::pair<T, Index>& a,
                                     const thrust::pair<T, Index>& b) {
-    return THCNumerics<T>::ge(a.first, b.first) ? a : b;
+    return THCNumerics<T>::gt(a.first, b.first) ? a : b;
   }
 };
 
@@ -674,7 +674,7 @@ struct MinValuePair {
   __host__ __device__
   thrust::pair<T, Index> operator()(const thrust::pair<T, Index>& a,
                                     const thrust::pair<T, Index>& b) {
-    return THCNumerics<T>::le(a.first, b.first) ? a : b;
+    return THCNumerics<T>::lt(a.first, b.first) ? a : b;
   }
 };
 
