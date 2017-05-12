@@ -520,6 +520,15 @@ class TestLRScheduler(TestCase):
         epochs = 20
         self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
 
+    def test_lambda_lr(self):
+        self.opt.param_groups[0]['lr'] = 0.05
+        self.opt.param_groups[1]['lr'] = 0.4
+        targets = [[0.05 * (0.9 ** x) for x in range(10)], [0.4 * (0.8 ** x) for x in range(10)]]
+        scheduler = LambdaLR(self.opt,
+                             lr_lambda=[lambda x1: 0.9 ** x1, lambda x2: 0.8 ** x2])
+        epochs = 10
+        self._test(scheduler, targets, epochs)
+
     def _test(self, scheduler, targets, epochs=10):
         for epoch in range(epochs):
             scheduler.step(epoch)

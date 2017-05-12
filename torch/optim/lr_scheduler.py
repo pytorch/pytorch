@@ -1,5 +1,5 @@
 from bisect import bisect_right
-from .optimizer import Optimizer
+from torch.optim.optimizer import Optimizer
 
 
 class _LRScheduler(object):
