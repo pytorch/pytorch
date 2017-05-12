@@ -23,15 +23,16 @@ def RNNTanhCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
 
 def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
     if input.is_cuda:
-        igates = input.expand(input.size(0), 4, input.size(1)) if w_ih is None else F.linear(input, w_ih)
+        igates = input.expand(4, input.size(0), input.size(1)).transpose(0, 1) if w_ih is None else F.linear(input,
+                                                                                                             w_ih)
         hgates = F.linear(hidden[0], w_hh)
         state = fusedBackend.LSTMFused()
         return state(igates, hgates, hidden[1]) if b_ih is None else state(igates, hgates, hidden[1], b_ih, b_hh)
 
     hx, cx = hidden
-    x_h = input.expand(input.size(0), 4, input.size(1)) if w_ih is None else F.linear(input, w_ih, b_ih)
+    x_h = input.expand(4, input.size(0), input.size(1)).transpose(0, 1) if w_ih is None else F.linear(input, w_ih, b_ih)
     gates = x_h + F.linear(hx, w_hh, b_hh)
-    ingate, forgetgate, cellgate, outgate = torch.unbind(gates, 1)
+    ingate, forgetgate, cellgate, outgate = torch.unbind(gates.view(input.size(0), 4, -1), 1)
 
     ingate = F.sigmoid(ingate)
     forgetgate = F.sigmoid(forgetgate)
@@ -46,15 +47,15 @@ def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
 
 def GRUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
     if input.is_cuda:
-        gi = input.expand(input.size(0), 3, input.size(1)) if w_ih is None else F.linear(input, w_ih)
+        gi = input.expand(3, input.size(0), input.size(1)).contiguous() if w_ih is None else F.linear(input, w_ih)
         gh = F.linear(hidden, w_hh)
         state = fusedBackend.GRUFused()
         return state(gi, gh, hidden) if b_ih is None else state(gi, gh, hidden, b_ih, b_hh)
 
-    gi = input.expand(input.size(0), 3, input.size(1)) if w_ih is None else F.linear(input, w_ih, b_ih)
+    gi = input.expand(3, input.size(0), input.size(1)).transpose(0, 1).contiguous() if w_ih is None else F.linear(input, w_ih, b_ih)
     gh = F.linear(hidden, w_hh, b_hh)
-    i_r, i_i, i_n = torch.unbind(gi, 1)
-    h_r, h_i, h_n = torch.unbind(gh, 1)
+    i_r, i_i, i_n = torch.unbind(gi.view(input.size(0), 3, -1), 1)
+    h_r, h_i, h_n = torch.unbind(gh.view(input.size(0), 3, -1), 1)
 
     resetgate = F.sigmoid(i_r + h_r)
     inputgate = F.sigmoid(i_i + h_i)
