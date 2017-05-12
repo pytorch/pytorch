@@ -319,6 +319,7 @@ IMPLEMENT_STATELESS(orgqr)
 IMPLEMENT_STATELESS(ormqr)
 IMPLEMENT_STATELESS(btrifact)
 IMPLEMENT_STATELESS(btrisolve)
+IMPLEMENT_STATELESS(spbqrfactsolve)
 
 #undef IMPLEMENT_STATELESS
 
@@ -651,6 +652,7 @@ static PyMethodDef TorchMethods[] = {
   {"saddmm",          (PyCFunction)THSPModule_sspaddmm,       METH_VARARGS | METH_KEYWORDS,  NULL},
   {"dsmm",            (PyCFunction)THSPModule_spmm,           METH_VARARGS | METH_KEYWORDS,  NULL},
   {"hsmm",            (PyCFunction)THSPModule_hspmm,          METH_VARARGS | METH_KEYWORDS,  NULL},
+  {"spbqrfactsolve",  (PyCFunction)THSPModule_spbqrfactsolve, METH_VARARGS | METH_KEYWORDS,  NULL},
   {NULL, NULL, 0, NULL}
 };
 

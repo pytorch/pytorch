@@ -437,3 +437,19 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
   arguments:
     - THSTensor* self
 ]]
+
+[[
+  name: spbqrfactsolve
+  cname: spbqrfactsolve
+  defined_if: IS_CUDA
+  only_stateless: true
+  return: argument 0
+  arguments:
+    - arg: THTensor* result
+      output: True
+    - THTensor* b
+    - THIndexTensor* Ai
+    - THTensor* Av
+    - arg: THSize* Asz
+      long_args: True
+]]

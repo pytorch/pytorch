@@ -6,6 +6,8 @@
 #include <thrust/device_ptr.h>
 #include <thrust/sequence.h>
 
+#include <cusolverSp.h>
+
 #define ROW_PTR2(t, r) (THCTensor_(data)(THCState *state, t) + (r) * (t)->stride[0])
 #define COL_PTR2(t, c) (THCTensor_(data)(THCState *state, t) + (c) * (t)->stride[1])
 
@@ -459,6 +461,104 @@ void THCSTensor_(cmul)(THCState *state, THCSTensor *r_, THCSTensor *t_, THCSTens
   THCSTensor_(free)(state, t);
   THCSTensor_(free)(state, src);
 }
+
+
+ void THCTensor_(spbqrfactsolve)(THCState *state, THCTensor *rx_, THCTensor *b, THCIndexTensor *Ai, THCTensor *Av, THLongStorage *Asz) {
+#if defined(THCS_REAL_IS_FLOAT) || defined(THCS_REAL_IS_DOUBLE)
+   THCAssertSameGPU(THCSTensor_(checkGPU)(state, 1, 3, rx_, b, Av));
+
+   THArgCheck(b->nDimension == 2, 2,
+              "Batch tensor b expected, got %dD tensor", b->nDimension);
+   THArgCheck(Av->nDimension == 2, 2,
+              "Batch tensor Av expected, got %dD tensor", Av->nDimension);
+
+   long nBatch = THCTensor_(size)(state, Av, 0);
+   long nnz = THCTensor_(size)(state, Av, 1);
+   long m = Asz->data[0];
+   long n = Asz->data[1];
+
+   THCTensor_(resize2d)(state, rx_, nBatch, m);
+
+   THCIndexTensor *rowIndices = THCIndexTensor_(newSelect)(state, Ai, 0, 0);
+   THCIndexTensor *colIndices = THCIndexTensor_(newSelect)(state, Ai, 0, 1);
+   THCudaIntTensor *csr = THCSTensor_(toCSR)(state, rowIndices, m, nnz);
+   THCudaIntTensor *colIndicesInt = THCudaIntTensor_newWithSize1d(state, colIndices->size[0]);
+   THCudaIntTensor_copyCudaLong(state, colIndicesInt, colIndices);
+
+   cusparseStatus_t cusparse_status;
+   cusolverStatus_t cusolver_status;
+   cudaError_t cuda_status;
+   csrqrInfo_t info;
+
+   cusolverSpHandle_t cusolverH;
+   cusolver_status = cusolverSpCreate(&cusolverH);
+   THAssert(CUSOLVER_STATUS_SUCCESS == cusolver_status);
+
+   cusparseMatDescr_t descrA;
+   size_t size_qr = 0;
+   size_t size_internal = 0;
+   void *buffer_qr = NULL;
+
+   cusparse_status = cusparseCreateMatDescr(&descrA);
+   THAssert(cusparse_status == CUSPARSE_STATUS_SUCCESS);
+
+   cusparseSetMatType(descrA, CUSPARSE_MATRIX_TYPE_GENERAL);
+   cusparseSetMatIndexBase(descrA, CUSPARSE_INDEX_BASE_ZERO);
+
+   cusolver_status = cusolverSpCreateCsrqrInfo(&info);
+   THAssert(cusolver_status == CUSOLVER_STATUS_SUCCESS);
+
+   cusolver_status = cusolverSpXcsrqrAnalysisBatched(
+       cusolverH, m, n, nnz,
+       descrA,
+       THCudaIntTensor_data(state, csr),
+       THCudaIntTensor_data(state, colIndicesInt),
+       info);
+   THAssert(cusolver_status == CUSOLVER_STATUS_SUCCESS);
+
+   cusolver_status =
+#if defined(THCS_REAL_IS_FLOAT)
+     cusolverSpScsrqrBufferInfoBatched(
+#elif defined(THCS_REAL_IS_DOUBLE)
+     cusolverSpDcsrqrBufferInfoBatched(
+#endif
+       cusolverH, m, n, nnz,
+       descrA,
+       THCTensor_(data)(state, Av),
+       THCudaIntTensor_data(state, csr),
+       THCudaIntTensor_data(state, colIndicesInt),
+       nBatch,
+       info,
+       &size_internal,
+       &size_qr);
+   THAssert(cusolver_status == CUSOLVER_STATUS_SUCCESS);
+
+   cuda_status = cudaMalloc((void**)&buffer_qr, size_qr);
+   THAssert(cuda_status == cudaSuccess);
+
+   cusolver_status =
+#if defined(THCS_REAL_IS_FLOAT)
+     cusolverSpScsrqrsvBatched(
+#elif defined(THCS_REAL_IS_DOUBLE)
+     cusolverSpDcsrqrsvBatched(
+#endif
+       cusolverH, m, n, nnz,
+       descrA,
+       THCTensor_(data)(state, Av),
+       THCudaIntTensor_data(state, csr),
+       THCudaIntTensor_data(state, colIndicesInt),
+       THCTensor_(data)(state, b),
+       THCTensor_(data)(state, rx_),
+       nBatch, info,
+       buffer_qr);
+   THAssert(cusolver_status == CUSOLVER_STATUS_SUCCESS);
+
+   cusolverSpDestroyCsrqrInfo(info);
+   cudaFree(buffer_qr);
+#else
+     THError("unimplemented data type");
+#endif
+ }
 
 #if defined(THCS_REAL_IS_FLOAT) || defined(THCS_REAL_IS_DOUBLE)
 void THCSTensor_(pow)(THCState *state, THCSTensor *r_, THCSTensor *t_, real value) {

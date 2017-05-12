@@ -28,6 +28,8 @@ TH_API void THCSTensor_(cadd)(THCState *state, THCSTensor *r_, THCSTensor *t, re
 TH_API void THCSTensor_(csub)(THCState *state, THCSTensor *r_, THCSTensor *t, real value, THCSTensor *src);
 TH_API void THCSTensor_(cmul)(THCState *state, THCSTensor *r_, THCSTensor *t, THCSTensor *src);
 
+TH_API void THCTensor_(spbqrfactsolve)(THCState *state, THCTensor *rx_, THCTensor *b, THCIndexTensor *Ai, THCTensor *Av, THLongStorage *Asz);
+
 #if defined(THCS_REAL_IS_FLOAT) || defined(THCS_REAL_IS_DOUBLE)
 TH_API void THCSTensor_(pow)(THCState *state, THCSTensor *r_, THCSTensor *t, real value);
 #endif
