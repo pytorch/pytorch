@@ -547,7 +547,6 @@ class TestSparse(TestCase):
         self._test_sparse_mask_shape([50, 30, 20], [2])
         self._test_sparse_mask_shape([5, 5, 5, 5, 5, 5], [2])
 
-
 class TestUncoalescedSparse(TestSparse):
     def setUp(self):
         super(TestUncoalescedSparse, self).setUp()
@@ -562,6 +561,17 @@ class TestCudaSparse(TestSparse):
         self.IndexTensor = torch.cuda.LongTensor
         self.ValueTensor = torch.cuda.DoubleTensor
         self.SparseTensor = torch.cuda.sparse.DoubleTensor
+
+
+    def test_spbqrfactsolve(self):
+        nBatch, nx = 3, 5
+        Ai = self.IndexTensor([range(nx), range(nx)])
+        Av = self.ValueTensor(nBatch, nx).fill_(1.0)
+        Asz = torch.Size([nx, nx])
+        b = self.ValueTensor(nBatch, nx).uniform_()
+
+        x_QR = torch.spbqrfactsolve(b, Ai, Av, Asz)
+        self.assertEqual(x_QR, b)
 
 
 @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
