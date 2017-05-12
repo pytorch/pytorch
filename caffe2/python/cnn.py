@@ -21,11 +21,19 @@ class CNNModelHelper(ModelHelper):
                  skip_sparse_optim=False,
                  param_model=None):
 
+        cnn_arg_scope = {
+            'order': order,
+            'use_cudnn': use_cudnn,
+            'cudnn_exhaustive_search': cudnn_exhaustive_search,
+        }
+        if ws_nbytes_limit:
+            cnn_arg_scope['ws_nbytes_limit'] = ws_nbytes_limit
         super(CNNModelHelper, self).__init__(
             skip_sparse_optim=skip_sparse_optim,
             name="CNN" if name is None else name,
             init_params=init_params,
             param_model=param_model,
+            arg_scope=cnn_arg_scope,
         )
 
         self.order = order

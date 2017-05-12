@@ -4,6 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 from caffe2.python import workspace, brew
 from caffe2.python.model_helper import ModelHelper
+from caffe2.python.cnn import CNNModelHelper
 
 import unittest
 import numpy as np
@@ -25,6 +26,7 @@ class BrewTest(unittest.TestCase):
         if not brew.has_helper(myhelper2):
             brew.Register(myhelper2)
         self.myhelper2 = myhelper2
+        self.model = ModelHelper(name="test_model")
 
     def test_dropout(self):
         p = 0.2
@@ -53,12 +55,12 @@ class BrewTest(unittest.TestCase):
         myhelper2 = self.myhelper2
         n = 15
         with brew.arg_scope([myhelper], val=n):
-            res = brew.myhelper(None)
+            res = brew.myhelper(self.model)
         self.assertEqual(n, res)
 
         with brew.arg_scope([myhelper, myhelper2], val=n):
-            res1 = brew.myhelper(None)
-            res2 = brew.myhelper2(None)
+            res1 = brew.myhelper(self.model)
+            res2 = brew.myhelper2(self.model)
         self.assertEqual([n, n], [res1, res2])
 
     def test_arg_scope_single(self):
@@ -93,12 +95,12 @@ class BrewTest(unittest.TestCase):
         with brew.arg_scope([myhelper], val=-3), \
              brew.arg_scope([myhelper], val=-2):
             with brew.arg_scope([myhelper], val=n):
-                res = brew.myhelper(None)
+                res = brew.myhelper(self.model)
                 self.assertEqual(n, res)
-            res = brew.myhelper(None)
+            res = brew.myhelper(self.model)
             self.assertEqual(res, -2)
 
-        res = brew.myhelper(None, val=15)
+        res = brew.myhelper(self.model, val=15)
         self.assertEqual(res, 15)
 
     def test_double_register(self):
@@ -114,3 +116,39 @@ class BrewTest(unittest.TestCase):
             pass
 
         self.assertFalse(brew.has_helper(myhelper3))
+
+    def test_model_helper(self):
+        X = np.random.rand(64, 32, 32, 3).astype(np.float32) - 0.5
+
+        workspace.FeedBlob("x", X)
+        my_arg_scope = {'order': 'NHWC'}
+        model = ModelHelper(name="test_model", arg_scope=my_arg_scope)
+        with brew.arg_scope(
+            brew.conv,
+            stride=2,
+            pad=2,
+            weight_init=('XavierFill', {}),
+            bias_init=('ConstantFill', {})
+        ):
+            brew.conv(
+                model=model,
+                blob_in="x",
+                blob_out="out",
+                dim_in=3,
+                dim_out=64,
+                kernel=3,
+            )
+
+        workspace.RunNetOnce(model.param_init_net)
+        workspace.RunNetOnce(model.net)
+        out = workspace.FetchBlob("out")
+        self.assertEqual(out.shape, (64, 17, 17, 64))
+
+    def test_cnn_model_helper_deprecated(self):
+        X = np.random.rand(64, 32, 32, 3).astype(np.float32) - 0.5
+
+        workspace.FeedBlob("x", X)
+        # CNNModelHelper is going to be deprecated soon. This test is only
+        # covering some CNNModelHelper logic
+        model = CNNModelHelper(name="test_model", order='NHWC')
+        self.assertEqual(model.arg_scope['order'], 'NHWC')

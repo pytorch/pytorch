@@ -7,6 +7,8 @@ from __future__ import unicode_literals
 
 import sys
 import copy
+import inspect
+from caffe2.python.model_helper import ModelHelper
 
 # flake8: noqa
 from caffe2.python.helpers.dropout import *
@@ -67,10 +69,30 @@ class HelperWrapper(object):
             )
 
         def scope_wrapper(*args, **kwargs):
+            new_kwargs = {}
+            if helper_name != 'arg_scope':
+                if len(args) > 0 and isinstance(args[0], ModelHelper):
+                    model = args[0]
+                elif 'model' in kwargs:
+                    model = kwargs['model']
+                else:
+                    raise RuntimeError(
+                "The first input of helper function should be model. " \
+                "Or you can provide it in kwargs as model=<your_model>.")
+                new_kwargs = copy.deepcopy(model.arg_scope)
+            func = self._registry[helper_name]
+            var_names, _, varkw, _= inspect.getargspec(func)
+            if varkw is None:
+                # this helper function does not take in random **kwargs
+                new_kwargs = {
+                    var_name: new_kwargs[var_name]
+                    for var_name in var_names if var_name in new_kwargs
+                }
+
             cur_scope = get_current_scope()
-            new_kwargs = copy.deepcopy(cur_scope.get(helper_name, {}))
+            new_kwargs.update(cur_scope.get(helper_name, {}))
             new_kwargs.update(kwargs)
-            return self._registry[helper_name](*args, **new_kwargs)
+            return func(*args, **new_kwargs)
 
         scope_wrapper.__name__ = helper_name
         return scope_wrapper
