@@ -47,12 +47,14 @@ def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
 
 def GRUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
     if input.is_cuda:
-        gi = input.expand(3, input.size(0), input.size(1)).contiguous() if w_ih is None else F.linear(input, w_ih)
+        gi = input.expand(3, input.size(0), input.size(1)).transpose(0, 1).contiguous() if w_ih is None else \
+            F.linear(input, w_ih)
         gh = F.linear(hidden, w_hh)
         state = fusedBackend.GRUFused()
         return state(gi, gh, hidden) if b_ih is None else state(gi, gh, hidden, b_ih, b_hh)
 
-    gi = input.expand(3, input.size(0), input.size(1)).transpose(0, 1).contiguous() if w_ih is None else F.linear(input, w_ih, b_ih)
+    gi = input.expand(3, input.size(0), input.size(1)).transpose(0, 1).contiguous() if w_ih is None else \
+        F.linear(input, w_ih, b_ih)
     gh = F.linear(hidden, w_hh, b_hh)
     i_r, i_i, i_n = torch.unbind(gi.view(input.size(0), 3, -1), 1)
     h_r, h_i, h_n = torch.unbind(gh.view(input.size(0), 3, -1), 1)
