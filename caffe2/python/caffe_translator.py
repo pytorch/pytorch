@@ -176,6 +176,11 @@ def TranslateInput(layer, pretrained_blobs, is_test):
     return [], []
 
 
+@TranslatorRegistry.Register("VideoData")
+def TranslateVideoData(layer, pretrained_blobs, is_test):
+    return [], []
+
+
 @TranslatorRegistry.Register("Data")
 def TranslateData(layer, pretrained_blobs, is_test):
     return [], []
@@ -223,6 +228,41 @@ def _TranslateStridePadKernelHelper(param, caffe_op):
         AddArgument(caffe_op, "kernel_w", param.kernel_w)
     else:
         AddArgument(caffe_op, "kernel", kernel)
+
+
+@TranslatorRegistry.Register("Convolution3D")
+def TranslateConvNd(layer, pretrained_blobs, is_test):
+    param = layer.convolution3d_param
+    caffe_op = BaseTranslate(layer, "Conv")
+    output = caffe_op.output[0]
+    caffe_op.input.append(output + '_w')
+
+    AddArgument(
+        caffe_op,
+        "kernels",
+        [param.kernel_depth, param.kernel_size, param.kernel_size])
+    AddArgument(
+        caffe_op,
+        "strides",
+        [param.temporal_stride, param.stride, param.stride])
+    temporal_pad = 0
+    spatial_pad = 0
+    if hasattr(param, 'temporal_pad'):
+        temporal_pad = param.temporal_pad
+    if hasattr(param, 'pad'):
+        spatial_pad = param.pad
+    AddArgument(caffe_op, "pads", [temporal_pad, spatial_pad, spatial_pad] * 2)
+
+    # weight
+    params = [
+        utils.NumpyArrayToCaffe2Tensor(pretrained_blobs[0], output + '_w')]
+    # bias
+    if len(pretrained_blobs) == 2:
+        caffe_op.input.append(output + '_b')
+        params.append(
+            utils.NumpyArrayToCaffe2Tensor(
+                pretrained_blobs[1].flatten(), output + '_b'))
+    return caffe_op, params
 
 
 @TranslatorRegistry.Register("Convolution")
@@ -305,6 +345,34 @@ def TranslatePool(layer, pretrained_blobs, is_test):
                     caffe2_legacy_pb2.CAFFE_LEGACY_POOLING)
     if param.global_pooling:
         AddArgument(caffe_op, "global_pooling", 1)
+    return caffe_op, []
+
+
+@TranslatorRegistry.Register("Pooling3D")
+def TranslatePool3D(layer, pretrained_blobs, is_test):
+    param = layer.pooling3d_param
+    if param.pool == caffe_pb2.Pooling3DParameter.MAX:
+        caffe_op = BaseTranslate(layer, "MaxPool")
+
+    elif param.pool == caffe_pb2.Pooling3DParameter.AVE:
+        caffe_op = BaseTranslate(layer, "AveragePool")
+    AddArgument(caffe_op, "order", "NCHW")
+    AddArgument(
+        caffe_op,
+        "kernels",
+        [param.kernel_depth, param.kernel_size, param.kernel_size])
+
+    AddArgument(
+        caffe_op,
+        "strides",
+        [param.temporal_stride, param.stride, param.stride])
+    temporal_pad = 0
+    spatial_pad = 0
+    if hasattr(param, 'temporal_pad'):
+        temporal_pad = param.temporal_pad
+    if hasattr(param, 'pad'):
+        spatial_pad = param.pad
+    AddArgument(caffe_op, "pads", [temporal_pad, spatial_pad, spatial_pad] * 2)
     return caffe_op, []
 
 
@@ -426,6 +494,49 @@ def TranslateInstanceNorm(layer, pretrained_blobs, is_test):
     caffe_op.input.extend([output + '_w', output + '_b'])
     AddArgument(caffe_op, "order", "NCHW")
     return caffe_op, [weight, bias]
+
+
+@TranslatorRegistry.Register("BatchNorm")
+def TranslateBatchNorm(layer, pretrained_blobs, is_test):
+    caffe_op = BaseTranslate(layer, "SpatialBN")
+    output = caffe_op.output[0]
+    param = layer.batch_norm_param
+    AddArgument(caffe_op, "is_test", is_test)
+    AddArgument(caffe_op, "epsilon", param.eps)
+    AddArgument(caffe_op, "order", "NCHW")
+
+    caffe_op.input.extend(
+        [output + "_scale",
+         output + "_bias",
+         output + "_mean",
+         output + "_var"])
+    if not is_test:
+        caffe_op.output.extend(
+            [output + "_mean",
+             output + "_var",
+             output + "_saved_mean",
+             output + "_saved_var"])
+
+    n_channels = pretrained_blobs[0].shape[0]
+    if pretrained_blobs[2][0] != 0:
+        mean = utils.NumpyArrayToCaffe2Tensor(
+            (1. / pretrained_blobs[2][0]) * pretrained_blobs[0],
+            output + '_mean')
+        var = utils.NumpyArrayToCaffe2Tensor(
+            (1. / pretrained_blobs[2][0]) * pretrained_blobs[1],
+            output + '_var')
+    else:
+        raise RuntimeError("scalar is zero.")
+    pretrained_blobs[2][0] = 1
+    pretrained_blobs[2] = np.tile(pretrained_blobs[2], (n_channels, ))
+    scale = utils.NumpyArrayToCaffe2Tensor(
+        pretrained_blobs[2],
+        output + '_scale')
+    bias = utils.NumpyArrayToCaffe2Tensor(
+        np.zeros_like(pretrained_blobs[2]),
+        output + '_bias')
+
+    return caffe_op, [scale, bias, mean, var]
 
 
 @TranslatorRegistry.Register("Eltwise")
