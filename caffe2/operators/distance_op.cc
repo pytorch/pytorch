@@ -31,6 +31,71 @@ bool SquaredL2DistanceOp<float, CPUContext>::RunOnDevice() {
 }
 
 template <>
+bool L1DistanceOp<float, CPUContext>::RunOnDevice() {
+  auto& X = Input(0);
+  auto& Y = Input(1);
+  auto* distance = Output(0);
+  CAFFE_ENFORCE_EQ(X.ndim(), Y.ndim());
+  for (int i = 0; i < X.ndim(); ++i) {
+    CAFFE_ENFORCE_EQ(X.dim32(i), Y.dim32(i));
+  }
+  distance->Resize(1);
+  const float* X_data = X.data<float>();
+  const float* Y_data = Y.data<float>();
+
+  *(distance->mutable_data<float>()) =
+      (ConstEigenVectorMap<float>(X_data, X.size()).array() -
+       ConstEigenVectorMap<float>(Y_data, Y.size()).array())
+          .abs()
+          .sum();
+  // L1(x, y) = sum(|x-y|)
+  return true;
+}
+
+template <>
+bool L1DistanceGradientOp<float, CPUContext>::RunOnDevice() {
+  auto& X = Input(0);
+  auto& Y = Input(1);
+  auto& dDistance = Input(2);
+  auto* dX = Output(0);
+  auto* dY = Output(1);
+  CAFFE_ENFORCE_EQ(X.ndim(), Y.ndim());
+  for (int i = 0; i < X.ndim(); ++i) {
+    CAFFE_ENFORCE_EQ(X.dim32(i), Y.dim32(i));
+  }
+  int N = X.ndim() > 0 ? X.dim32(0) : 1;
+  int D = N > 0 ? X.size() / N : 0;
+  CAFFE_ENFORCE(X.ndim() == Y.ndim());
+  for (int i = 0; i < X.ndim(); ++i) {
+    CAFFE_ENFORCE(X.dim32(i) == Y.dim32(i));
+  }
+  CAFFE_ENFORCE(dDistance.ndim() == 1);
+  CAFFE_ENFORCE(dDistance.dim32(0) == 1);
+  dX->ResizeLike(X);
+  dY->ResizeLike(Y);
+
+  for (int i = 0; i < N; ++i) {
+    auto offset = i * D;
+    for (int j = 0; j < D; ++j) {
+      const float temp =
+          (X.data<float>())[offset + j] - (Y.data<float>())[offset + j];
+      const float kEps = 1e-12;
+      if (temp < -kEps) {
+        dX->mutable_data<float>()[offset + j] = -(dDistance.data<float>())[0];
+        dY->mutable_data<float>()[offset + j] = (dDistance.data<float>())[0];
+      } else if (temp > kEps) {
+        dX->mutable_data<float>()[offset + j] = (dDistance.data<float>())[0];
+        dY->mutable_data<float>()[offset + j] = -(dDistance.data<float>())[0];
+      } else {
+        dX->mutable_data<float>()[offset + j] = 0;
+        dY->mutable_data<float>()[offset + j] = 0;
+      }
+    }
+  }
+  return true;
+}
+
+template <>
 bool DotProductOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(X_IN);
   auto& Y = Input(Y_IN);
@@ -228,6 +293,38 @@ class GetSquaredL2DistanceGradient : public GradientMakerBase {
   }
 };
 REGISTER_GRADIENT(SquaredL2Distance, GetSquaredL2DistanceGradient);
+
+// L1
+REGISTER_CPU_OPERATOR(L1Distance, L1DistanceOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(
+    L1DistanceGradient,
+    L1DistanceGradientOp<float, CPUContext>);
+
+OPERATOR_SCHEMA(L1Distance)
+    .NumInputs(2)
+    .NumOutputs(1)
+    .IdenticalTypeAndShapeOfInput(0)
+    .SetDoc(R"DOC(
+  Given two input float tensors X, Y, and produces one output float tensor
+  of the L1 difference between X and Y, computed as L1(x,y) = sum over |x-y|
+  )DOC")
+    .Input(0, "X", "1D input tensor")
+    .Output(0, "Y", "1D input tensor");
+
+OPERATOR_SCHEMA(L1DistanceGradient).NumInputs(3).NumOutputs(2);
+
+class GetL1DistanceGradient : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  vector<OperatorDef> GetGradientDefs() override {
+    return SingleGradientDef(
+        "L1DistanceGradient",
+        "",
+        vector<string>{I(0), I(1), GO(0)},
+        vector<string>{GI(0), GI(1)});
+  }
+};
+
+REGISTER_GRADIENT(L1Distance, GetL1DistanceGradient);
 
 // Dot Product
 REGISTER_CPU_OPERATOR(DotProduct, DotProductOp<float, CPUContext>);

@@ -72,6 +72,32 @@ class SquaredL2DistanceGradientOp final : public Operator<Context> {
 };
 
 template <typename T, class Context>
+class L1DistanceOp : public Operator<Context> {
+ public:
+  L1DistanceOp(const OperatorDef& def, Workspace* ws)
+      : Operator<Context>(def, ws) {}
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+
+  bool RunOnDevice() override;
+
+ protected:
+  // Input: X, Y; Output: Distance
+};
+
+template <typename T, class Context>
+class L1DistanceGradientOp : public Operator<Context> {
+ public:
+  L1DistanceGradientOp(const OperatorDef& def, Workspace* ws)
+      : Operator<Context>(def, ws) {}
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+
+  bool RunOnDevice() override;
+
+ protected:
+  // Input: X, Y, dDistance; Output: dX, dY
+};
+
+template <typename T, class Context>
 class DotProductOp : public Operator<Context> {
  public:
   DotProductOp(const OperatorDef& def, Workspace* ws)
