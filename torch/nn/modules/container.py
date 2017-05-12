@@ -50,12 +50,17 @@ class Sequential(Module):
                 self.add_module(str(idx), module)
 
     def __getitem__(self, idx):
-        if idx < 0 or idx >= len(self._modules):
+	if not (-len(self) <= idx < len(self)):
             raise IndexError('index {} is out of range'.format(idx))
-        it = iter(self._modules.values())
+        if idx < 0:
+            idx += len(self)
+	it = iter(self._modules.values())
         for i in range(idx):
             next(it)
         return next(it)
+
+    def __len__(self):
+        return len(self._modules)
 
     def forward(self, input):
         for module in self._modules.values():
@@ -92,6 +97,8 @@ class ModuleList(Module):
             self += modules
 
     def __getitem__(self, idx):
+	if not (-len(self) <= idx < len(self)):
+            raise IndexError('index {} is out of range'.format(idx))
         if idx < 0:
             idx += len(self)
         return self._modules[str(idx)]
@@ -161,6 +168,8 @@ class ParameterList(Module):
             self += parameters
 
     def __getitem__(self, idx):
+	if not (-len(self) <= idx < len(self)):
+            raise IndexError('index {} is out of range'.format(idx))
         if idx < 0:
             idx += len(self)
         return self._parameters[str(idx)]
