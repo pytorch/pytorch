@@ -8,7 +8,7 @@ bool SpatialBNGradientOp<CPUContext>::RunOnDevice() {
   const auto& dY = Input(OUTPUT_GRAD);
   const auto& scale = Input(SCALE);
 
-  CAFFE_ENFORCE_GE(X.ndim(), 3);
+  CAFFE_ENFORCE(X.ndim() >= 3 && X.ndim() <= 5);
   const int N = X.dim32(0);
   const int C =
       (order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(X.ndim() - 1));
@@ -19,6 +19,9 @@ bool SpatialBNGradientOp<CPUContext>::RunOnDevice() {
   const int D = X.ndim() > 4
       ? (order_ == StorageOrder::NCHW ? X.dim32(4) : X.dim32(3))
       : 1;
+
+  const int sample_size = H * W * D;
+
   DCHECK_EQ(scale.ndim(), 1);
   DCHECK_EQ(scale.dim32(0), C);
 
@@ -45,13 +48,14 @@ bool SpatialBNGradientOp<CPUContext>::RunOnDevice() {
   dBias_arr.setZero();
   dScale_arr.setZero();
 
-  const auto scaleInvVarNHW = scale_arr * inv_var_arr / (N * H * W * D);
+  const auto scaleInvVarNHW = scale_arr * inv_var_arr / (N * sample_size);
 
   switch (order_) {
     case StorageOrder::NCHW: {
-      ConstEigenArrayMap<float> X_arr(X.data<float>(), H * W * D, N * C);
-      ConstEigenArrayMap<float> dY_arr(dY.data<float>(), H * W * D, N * C);
-      EigenArrayMap<float> dX_arr(dX->mutable_data<float>(), H * W * D, N * C);
+      ConstEigenArrayMap<float> X_arr(X.data<float>(), sample_size, N * C);
+      ConstEigenArrayMap<float> dY_arr(dY.data<float>(), sample_size, N * C);
+      EigenArrayMap<float> dX_arr(
+          dX->mutable_data<float>(), sample_size, N * C);
       dX_arr.setZero();
 
       for (int nc = 0; nc < N * C; ++nc) {
@@ -64,27 +68,28 @@ bool SpatialBNGradientOp<CPUContext>::RunOnDevice() {
       for (int nc = 0; nc < N * C; ++nc) {
         int c = nc % C;
         dX_arr.col(nc) += scaleInvVarNHW(c) *
-            (dY_arr.col(nc) * N * H * W - dBias_arr(c) -
+            (dY_arr.col(nc) * N * sample_size - dBias_arr(c) -
              (X_arr.col(nc) - mean_arr[c]) * dScale_arr(c) * inv_var_arr(c));
       }
       break;
     }
     case StorageOrder::NHWC: {
-      ConstEigenArrayMap<float> X_arr(X.data<float>(), C, N * H * W * D);
-      ConstEigenArrayMap<float> dY_arr(dY.data<float>(), C, N * H * W * D);
-      EigenArrayMap<float> dX_arr(dX->mutable_data<float>(), C, N * H * W * D);
+      ConstEigenArrayMap<float> X_arr(X.data<float>(), C, N * sample_size);
+      ConstEigenArrayMap<float> dY_arr(dY.data<float>(), C, N * sample_size);
+      EigenArrayMap<float> dX_arr(
+          dX->mutable_data<float>(), C, N * sample_size);
       dX_arr.setZero();
 
       const auto dYRowSum = dY_arr.rowwise().sum();
       const auto XMinusMean = X_arr.colwise() - mean_arr;
       const auto dYMulXMinusMeanRowSum = (dY_arr * XMinusMean).rowwise().sum();
       const auto invVarSqr = inv_var_arr * inv_var_arr;
-      for (int nhw = 0; nhw < N * H * W * D; ++nhw) {
+      for (int nhw = 0; nhw < N * sample_size; ++nhw) {
         dBias_arr += dY_arr.col(nhw);
         dScale_arr +=
             (X_arr.col(nhw) - mean_arr) * inv_var_arr * dY_arr.col(nhw);
         dX_arr.col(nhw) += scaleInvVarNHW *
-            (dY_arr.col(nhw) * N * H * W * D - dYRowSum -
+            (dY_arr.col(nhw) * N * sample_size - dYRowSum -
              XMinusMean.col(nhw) * invVarSqr * dYMulXMinusMeanRowSum);
       }
       break;

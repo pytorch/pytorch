@@ -8,7 +8,7 @@ bool SpatialBNOp<CPUContext>::RunOnDevice() {
   const auto& scale = Input(SCALE);
   const auto& bias = Input(BIAS);
 
-  CAFFE_ENFORCE_GE(X.ndim(), 3);
+  CAFFE_ENFORCE(X.ndim() >= 3 && X.ndim() <= 5);
   const int N = X.dim32(0);
   const int C =
       (order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(X.ndim() - 1));
@@ -19,6 +19,8 @@ bool SpatialBNOp<CPUContext>::RunOnDevice() {
   const int D = X.ndim() > 4
       ? (order_ == StorageOrder::NCHW ? X.dim32(4) : X.dim32(3))
       : 1;
+
+  const int sample_size = H * W * D;
   DCHECK_EQ(scale.ndim(), 1);
   DCHECK_EQ(bias.ndim(), 1);
   DCHECK_EQ(scale.dim32(0), C);
@@ -48,27 +50,27 @@ bool SpatialBNOp<CPUContext>::RunOnDevice() {
     var.setZero();
     switch (order_) {
       case StorageOrder::NCHW: {
-        ConstEigenArrayMap<float> X_arr(X.data<float>(), H * W * D, N * C);
+        ConstEigenArrayMap<float> X_arr(X.data<float>(), sample_size, N * C);
         for (int nc = 0; nc < N * C; ++nc) {
           mean(nc % C) += X_arr.col(nc).sum();
         }
-        mean /= N * H * W * D;
+        mean /= N * sample_size;
         for (int nc = 0; nc < N * C; ++nc) {
           var(nc % C) += (X_arr.col(nc) - mean(nc % C)).matrix().squaredNorm();
         }
-        var /= N * H * W * D;
+        var /= N * sample_size;
         break;
       }
       case StorageOrder::NHWC: {
-        ConstEigenArrayMap<float> X_arr(X.data<float>(), C, N * H * W * D);
-        for (int i = 0; i < N * H * W * D; ++i) {
+        ConstEigenArrayMap<float> X_arr(X.data<float>(), C, N * sample_size);
+        for (int i = 0; i < N * sample_size; ++i) {
           mean += X_arr.col(i);
         }
-        mean /= N * H * W * D;
-        for (int i = 0; i < N * H * W * D; ++i) {
+        mean /= N * sample_size;
+        for (int i = 0; i < N * sample_size; ++i) {
           var += (X_arr.col(i) - mean) * (X_arr.col(i) - mean);
         }
-        var /= N * H * W * D;
+        var /= N * sample_size;
         break;
       }
       default:
@@ -126,8 +128,8 @@ bool SpatialBNOp<CPUContext>::RunOnDevice() {
       bias_arr - mean_arr * inv_std * scale_arr;
   switch (order_) {
     case StorageOrder::NHWC: {
-      EigenArrayMap<float>(Y->mutable_data<float>(), C, N * H * W * D) =
-          (ConstEigenArrayMap<float>(X.data<float>(), C, N * H * W * D)
+      EigenArrayMap<float>(Y->mutable_data<float>(), C, N * sample_size) =
+          (ConstEigenArrayMap<float>(X.data<float>(), C, N * sample_size)
                .colwise() *
            new_scale)
               .colwise() +
@@ -135,8 +137,8 @@ bool SpatialBNOp<CPUContext>::RunOnDevice() {
       break;
     }
     case StorageOrder::NCHW: {
-      EigenArrayMap<float> Y_arr(Y->mutable_data<float>(), H * W * D, N * C);
-      ConstEigenArrayMap<float> X_arr(X.data<float>(), H * W * D, N * C);
+      EigenArrayMap<float> Y_arr(Y->mutable_data<float>(), sample_size, N * C);
+      ConstEigenArrayMap<float> X_arr(X.data<float>(), sample_size, N * C);
       for (int nc = 0; nc < N * C; ++nc) {
         Y_arr.col(nc) = X_arr.col(nc) * new_scale(nc % C) + new_bias(nc % C);
       }
