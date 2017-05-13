@@ -559,7 +559,7 @@ Example::
 
 add_docstr(torch._C.cat,
            """
-cat(seq, dim=0) -> Tensor
+cat(seq, dim=0, out=None) -> Tensor
 
 Concatenates the given sequence of :attr:`seq` Tensors in the given dimension.
 
@@ -570,6 +570,7 @@ Concatenates the given sequence of :attr:`seq` Tensors in the given dimension.
 Args:
     seq (sequence of Tensors): Can be any python sequence of `Tensor` of the same type.
     dim (int, optional): The dimension over which the tensors are concatenated
+    out (Tensor, optional): Output argument
 
 Example::
 
