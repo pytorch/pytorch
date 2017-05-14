@@ -316,10 +316,10 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
                                  std::move(grad_weight),
                                  std::move(grad_bias));
   if (use_cudnn) {
-    return wrap_outputs(inputs, std::move(outputs), [&](FunctionFlags f) {
+    return wrap_outputs(grad_outputs, std::move(outputs), [&](FunctionFlags f) {
         return std::make_shared<ConvBackwardBackward>(
             f, *this,
-            grad_outputs[0]->save(this), weight_, bias_,
+            grad_outputs[0]->save(this), weight_.unpack()->save(this), bias_.unpack()->save(this),
             std::move(columns), std::move(ones), std::move(convolution));
     });
   } else {
