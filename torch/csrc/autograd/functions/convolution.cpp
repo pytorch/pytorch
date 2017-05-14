@@ -369,16 +369,14 @@ auto ConvBackwardBackward::apply(const variable_list& grad_outputs) -> variable_
       grad_input = input->newTensor();
       grad_input->resizeAs(*input);
       if (transposed) {
-        // ConvTranspose uses the same kernels as regular convolution
-        // but swaps forward and backward calls
-        cudnn_convolution_forward(
-            state, torch::cudnn::getCudnnHandle(), torch::cudnn::getCudnnDataType(*input),
-            (THVoidTensor*)grad_output->cdata(), (THVoidTensor*)weight->cdata(), (THVoidTensor*)grad_input->cdata(),
-            convolution.get(), benchmark);
-      } else {
         cudnn_convolution_backward_data(
             state, torch::cudnn::getCudnnHandle(), torch::cudnn::getCudnnDataType(*input),
             (THVoidTensor*)grad_output->cdata(), (THVoidTensor*)grad_input->cdata(), (THVoidTensor*)weight->cdata(),
+            convolution.get(), benchmark);
+      } else {
+        cudnn_convolution_forward(
+            state, torch::cudnn::getCudnnHandle(), torch::cudnn::getCudnnDataType(*input),
+            (THVoidTensor*)grad_output->cdata(), (THVoidTensor*)weight->cdata(), (THVoidTensor*)grad_input->cdata(),
             convolution.get(), benchmark);
       }
 #endif
