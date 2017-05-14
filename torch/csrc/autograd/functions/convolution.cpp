@@ -336,7 +336,7 @@ auto ConvBackward::releaseVariables() -> void {
 }
 
 auto ConvBackwardBackward::apply(const variable_list& grad_outputs) -> variable_list {
-  if (grad_outputs.size() != 1) throw std::runtime_error("expected one grad_output");
+  if (grad_outputs.size() != 3) throw std::runtime_error("expected three grad_output");
   if (is_padding_neg()) throw std::runtime_error("negative padding is not supported");
   if (is_output_padding_neg()) throw std::runtime_error("negative output_padding is not supported");
 
@@ -385,7 +385,7 @@ auto ConvBackwardBackward::apply(const variable_list& grad_outputs) -> variable_
         throw std::runtime_error("No support for ConvBackwardBackward without cudnn");
     }
   }
-
+/**
   if (should_compute_output(1) || should_compute_output(2)) {
     if (use_cudnn) {
 #ifdef WITH_CUDNN
@@ -410,17 +410,17 @@ auto ConvBackwardBackward::apply(const variable_list& grad_outputs) -> variable_
         throw std::runtime_error("No support for ConvBackwardBackward without cudnn");
     }
   }
-
+**
   if (k == 3) {
     if (should_compute_output(0)) {
         grad_input = view3d(*grad_input);
     }
     grad_weight = view3d(*grad_weight);
   }
-
-  auto outputs =  as_tensor_list(std::move(grad_input),
-                                 std::move(grad_weight),
-                                 std::move(grad_bias));
+**/
+  auto outputs =  as_tensor_list(std::move(grad_input));//,
+                                 //std::move(grad_weight),
+                                 //std::move(grad_bias));
   return wrap_outputs(grad_outputs, std::move(outputs), [&](FunctionFlags f) {
     return std::make_shared<Error>("ConvBackwardBackward is not differentiable", std::move(f));
   });
