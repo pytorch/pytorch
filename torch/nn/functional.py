@@ -369,11 +369,11 @@ def dropout(input, p=0.5, training=False, inplace=False):
 
 
 def threshold(input, threshold, value, inplace=False):
-    return _functions.thnn.auto.Threshold(threshold, value, inplace)(input)
+    return _functions.thnn.Threshold.apply(input, threshold, value, inplace)
 
 
 def relu(input, inplace=False):
-    return _functions.thnn.auto.Threshold(0, 0, inplace)(input)
+    return _functions.thnn.Threshold.apply(input, 0, 0, inplace)
 
 
 def hardtanh(input, min_val=-1., max_val=1., inplace=False):

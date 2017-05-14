@@ -408,7 +408,7 @@ class Variable(_C._VariableBase):
         return Frac()(self)
 
     def sqrt(self):
-        return Sqrt()(self)
+        return Sqrt.apply(self)
 
     def round(self):
         return Round()(self)
@@ -597,10 +597,10 @@ class Variable(_C._VariableBase):
         return self._addcop(Addcdiv, args)
 
     def norm(self, p=2, dim=None, keepdim=True):
-        return Norm(p, dim, keepdim)(self)
+        return Norm.apply(self, p, dim, keepdim)
 
     def dist(self, tensor, p=2):
-        return Norm(p)(self - tensor)
+        return Norm.apply(self - tensor, p)
 
     def index_add(self, dim, index, tensor):
         return IndexAdd.apply(self, dim, index, tensor)
