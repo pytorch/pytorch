@@ -34,7 +34,6 @@ class _LRScheduler(object):
 class LambdaLR(_LRScheduler):
     def __init__(self, optimizer, lr_lambda, last_epoch=-1):
         self.optimizer = optimizer
-        self.base_lrs = list(map(lambda group: group['lr'], optimizer.param_groups))
         if not isinstance(lr_lambda, list) and not isinstance(lr_lambda, tuple):
             self.lr_lambdas = [lr_lambda] * len(optimizer.param_groups)
         else:
