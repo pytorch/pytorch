@@ -193,7 +193,7 @@ class TestTorch(TestCase):
             "mean", "median", "mode", "norm", "prod",
             "std", "sum", "var", "max", "min"]
 
-        def normfn_attr(t, dim, keepdim=True):
+        def normfn_attr(t, dim, keepdim=False):
             attr = getattr(torch, "norm")
             return attr(t, 2, dim, keepdim)
 
@@ -201,13 +201,13 @@ class TestTorch(TestCase):
             x = torch.randn(3, 4, 5)
             fn_attr = getattr(torch, fn_name) if fn_name != "norm" else normfn_attr
 
-            def fn(t, dim, keepdim=True):
+            def fn(t, dim, keepdim=False):
                 ans = fn_attr(x, dim, keepdim)
                 return ans if not isinstance(ans, tuple) else ans[0]
 
             dim = random.randint(0, 2)
-            self.assertEqual(fn(x, dim, False).unsqueeze(dim), fn(x, dim))
-            self.assertEqual(x.ndimension() - 1, fn(x, dim, False).ndimension())
+            self.assertEqual(fn(x, dim).unsqueeze(dim), fn(x, dim, True))
+            self.assertEqual(x.ndimension() - 1, fn(x, dim).ndimension())
             self.assertEqual(x.ndimension(), fn(x, dim, True).ndimension())
 
             # check 1-d behavior
