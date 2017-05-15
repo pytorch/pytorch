@@ -47,8 +47,7 @@ TH_API void THNN_(ClassNLLCriterion_updateOutput)(
           THTensor *output,            // [OUT] a one-element tensor with loss
           bool sizeAverage,            // if true, the loss will be normalized by batch size and class weights
           THTensor *weights,           // [OPTIONAL] class weights
-          THTensor *total_weight,      // [BUFFER]
-          long ignore_index);          // target index to ignore (loss = 0, gradInput = 0)
+          THTensor *total_weight);     // [BUFFER]
 TH_API void THNN_(ClassNLLCriterion_updateGradInput)(
           THNNState *state,            // library's state
           THTensor *input,             // input tensor (1D/2D)
@@ -56,8 +55,7 @@ TH_API void THNN_(ClassNLLCriterion_updateGradInput)(
           THTensor *gradInput,         // [OUT] gradient w.r.t. input
           bool sizeAverage,            // if true, the loss will be normalized by batch size and class weights
           THTensor *weights,           // [OPTIONAL] class weights
-          THTensor *total_weight,      // [BUFFER]
-          long ignore_index);          // target index to ignore (loss = 0, gradInput = 0)
+          THTensor *total_weight);     // [BUFFER]
 
 TH_API void THNN_(SpatialClassNLLCriterion_updateOutput)(
           THNNState *state,            // library's state
