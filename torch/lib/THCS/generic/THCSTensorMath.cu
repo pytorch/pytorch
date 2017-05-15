@@ -230,6 +230,9 @@ void THCSTensor_(spcadd)(THCState *state, THCTensor *r_, THCTensor *dense, real 
     THCTensor_(resizeAs)(state, r, dense);
     THCTensor_(copy)(state, r, dense);
   } else {
+    if (!THCTensor_(isContiguous)(state, r_)) {
+      THError("CUDA sparse spcadd: known bug");
+    }
     r = THCTensor_(newContiguous)(state, r_);
   }
 
