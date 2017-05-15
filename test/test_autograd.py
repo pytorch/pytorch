@@ -1241,6 +1241,11 @@ class dont_convert(tuple):
 L = 20
 M = 10
 S = 5
+# 0. Class to test
+# 1. Constructor arguments tuple
+# 2. Call arguments tuple
+# 3. Optional: Sub-test name
+# 4. Optional: Dimensions to negate
 function_tests = [
     (Add, (), ((M, M), (M, M))),
     (Sub, (), ((M, M), (M, M))),

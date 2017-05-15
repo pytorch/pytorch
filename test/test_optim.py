@@ -78,12 +78,16 @@ class TestOptim(TestCase):
             # it into a sparse tensor
             params.grad.data.copy_(drosenbrock(params.data))
             # This is really goofy
+            # NB: We torture test the optimizer by returning an
+            # uncoalesced sparse tensor
             if w:
-                i = torch.LongTensor([[0]])
-                v = torch.DoubleTensor([params.grad.data[0]])
+                i = torch.LongTensor([[0, 0]])
+                x = params.grad.data[0]
+                v = torch.DoubleTensor([x/4., x - x/4.])
             else:
-                i = torch.LongTensor([[1]])
-                v = torch.DoubleTensor([params.grad.data[1]])
+                i = torch.LongTensor([[1, 1]])
+                y = params.grad.data[1]
+                v = torch.DoubleTensor([y - y/4., y/4.])
             x = sparse.DoubleTensor(i, v, torch.Size([2]))
             if sparse_grad:
                 params.grad.data = x
@@ -96,6 +100,9 @@ class TestOptim(TestCase):
             optimizer.step(functools.partial(eval, params, True, w))
             optimizer_c.step(functools.partial(eval, params_c, False, w))
             self.assertEqual(params.data, params_c.data)
+
+        optimizer.flush()
+        optimizer.flush()
 
         self.assertLessEqual(params.data.dist(solution), initial_dist)
 
@@ -155,6 +162,7 @@ class TestOptim(TestCase):
         self.assertEqual(state_dict, state_dict_c)
 
     def _test_basic_cases(self, constructor, ignore_multidevice=False):
+        # test saving/loading of state dict
         self._test_state_dict(
             torch.randn(10, 5),
             torch.randn(10),
@@ -216,6 +224,17 @@ class TestOptim(TestCase):
                 lr=1e-3)
         )
 
+    def test_sgd_sparse(self):
+        self._test_rosenbrock_sparse(
+            lambda params: optim.SGD(params, lr=1e-3)
+        )
+        self._test_rosenbrock_sparse(
+            lambda params: optim.SGD(params, lr=1e-3, weight_decay=1e-4)
+        )
+        self._test_rosenbrock_sparse(
+            lambda params: optim.SGD(params, lr=1e-3, momentum=0.9)
+        )
+
     def test_adam(self):
         self._test_rosenbrock(
             lambda params: optim.Adam(params, lr=1e-2),
@@ -232,6 +251,11 @@ class TestOptim(TestCase):
             lambda weight, bias: optim.Adam(
                 self._build_params_dict(weight, bias, lr=1e-2),
                 lr=1e-3)
+        )
+
+    def test_adam_sparse(self):
+        self._test_rosenbrock_sparse(
+            lambda params: optim.Adam(params, lr=1e-2)
         )
 
     def test_adadelta(self):
@@ -253,6 +277,11 @@ class TestOptim(TestCase):
         self._test_basic_cases(
             lambda weight, bias: optim.Adadelta(
                 self._build_params_dict(weight, bias, rho=0.95))
+        )
+
+    def test_adadelta_sparse(self):
+        self._test_rosenbrock_sparse(
+            lambda params: optim.Adadelta(params)
         )
 
     def test_adagrad(self):
@@ -281,6 +310,11 @@ class TestOptim(TestCase):
         self._test_rosenbrock_sparse(
             lambda params: optim.Adagrad(params, lr=1e-1)
         )
+        """
+        self._test_rosenbrock_sparse(
+            lambda params: optim.Adagrad(params, lr=1e-1, weight_decay=1e-2)
+        )
+        """
 
     def test_adamax(self):
         self._test_rosenbrock(
@@ -368,6 +402,11 @@ class TestOptim(TestCase):
             lambda weight, bias: optim.Rprop(
                 self._build_params_dict(weight, bias, lr=1e-2),
                 lr=1e-3)
+        )
+
+    def test_rprop_sparse(self):
+        self._test_rosenbrock_sparse(
+            lambda params: optim.Rprop(params, lr=1e-3)
         )
 
     def test_lbfgs(self):

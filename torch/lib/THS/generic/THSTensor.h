@@ -60,6 +60,7 @@ TH_API int THSTensor_(isSameSizeAs)(const THSTensor *self, const THSTensor *src)
 TH_API THSTensor *THSTensor_(newCoalesce)(THSTensor *self);
 
 TH_API void THTensor_(sparseMask)(THSTensor *r_, THTensor *t, THSTensor *mask);
+TH_API void THTensor_(sparseSelect)(THSTensor *r_, THTensor *t, THLongTensor *indices);
 
 TH_API void THSTensor_(free)(THSTensor *self);
 TH_API void THSTensor_(retain)(THSTensor *self);
