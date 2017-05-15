@@ -473,6 +473,7 @@ void THCTensor_(sparseCopy)(THCState *state, THCTensor *r_, THCTensor *dense, TH
 
   const ptrdiff_t nnz = THCSTensor_(nnz)(state, sparse);
   if (nnz == 0) {
+    THCTensor_(resizeAs)(state, r_, dense);
     THCTensor_(copy)(state, r_, dense);
     return;
   }
@@ -480,6 +481,7 @@ void THCTensor_(sparseCopy)(THCState *state, THCTensor *r_, THCTensor *dense, TH
   THCTensor *r = r_;
   if (r != dense) {
     THCTensor_(retain)(state, r);
+    THCTensor_(resizeAs)(state, r, dense);
     THCTensor_(copy)(state, r, dense);
   } else {
     r = THCTensor_(newContiguous)(state, r_);

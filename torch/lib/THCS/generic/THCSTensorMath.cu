@@ -219,6 +219,7 @@ void THCSTensor_(spcadd)(THCState *state, THCTensor *r_, THCTensor *dense, real 
 
   const ptrdiff_t nnz = THCSTensor_(nnz)(state, sparse);
   if (nnz == 0) {
+    THCTensor_(resizeAs)(state, r_, dense);
     THCTensor_(copy)(state, r_, dense);
     return;
   }
@@ -226,6 +227,7 @@ void THCSTensor_(spcadd)(THCState *state, THCTensor *r_, THCTensor *dense, real 
   THCTensor *r = r_;
   if (r != dense) {
     THCTensor_(retain)(state, r);
+    THCTensor_(resizeAs)(state, r, dense);
     THCTensor_(copy)(state, r, dense);
   } else {
     if (!THCTensor_(isContiguous)(state, r_)) {
