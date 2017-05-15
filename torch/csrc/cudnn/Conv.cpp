@@ -106,6 +106,35 @@ template<typename algo_t>
 struct algorithm_search {
 };
 
+cudnnStatus_t getWorkspaceSize(cudnnHandle_t handle, const Convolution& conv, cudnnConvolutionFwdAlgo_t algo, size_t* sz){
+    return cudnnGetConvolutionForwardWorkspaceSize(handle, conv.idesc.desc, conv.wdesc.desc, conv.cdesc.desc, conv.odesc.desc, algo, sz);
+}
+cudnnStatus_t getWorkspaceSize(cudnnHandle_t handle, const Convolution& conv, cudnnConvolutionBwdDataAlgo_t algo, size_t* sz){
+    return cudnnGetConvolutionBackwardDataWorkspaceSize(handle, conv.wdesc.desc, conv.odesc.desc, conv.cdesc.desc, conv.idesc.desc, algo, sz);
+}
+cudnnStatus_t getWorkspaceSize(cudnnHandle_t handle, const Convolution& conv, cudnnConvolutionBwdFilterAlgo_t algo, size_t* sz){
+    return cudnnGetConvolutionBackwardFilterWorkspaceSize(handle, conv.idesc.desc, conv.odesc.desc, conv.cdesc.desc, conv.wdesc.desc, algo, sz);
+}
+
+template<typename algo_t>
+size_t getMaxWorkspaceSize(cudnnHandle_t handle, const Convolution& conv, algo_t *algo, int n_algo, THCState* state){
+    size_t max_ws_size = 0;
+    size_t max_block_size = 0;
+    size_t total_gpu_mem = 0;
+    size_t free_gpu_mem = 0;
+    
+    THCudaCheck(THCudaMemGetInfoCached(state,&free_gpu_mem,&total_gpu_mem,&max_block_size));
+    
+    for(int i=0; i<n_algo; i++) {
+        cudnnStatus_t err;
+        size_t sz;
+        err = getWorkspaceSize(handle, conv, algo[i], &sz);
+        if(CUDNN_STATUS_SUCCESS != err || sz == 0 || sz < max_ws_size || sz > max_block_size) continue;
+        max_ws_size = sz;
+    }
+    return max_ws_size;
+}
+
 template<>
 struct algorithm_search<cudnnConvolutionFwdAlgo_t> {
   static constexpr auto DEFAULT_ALGO = CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM;
@@ -113,11 +142,27 @@ struct algorithm_search<cudnnConvolutionFwdAlgo_t> {
     return fwd_algos;
   }
 
-  static cudnnConvolutionFwdAlgoPerf_t findAlgorithm(cudnnHandle_t handle, const Convolution& conv) {
+  static cudnnConvolutionFwdAlgoPerf_t findAlgorithm(THCState* state, cudnnHandle_t handle, const Convolution& conv,
+						      void* in, void* out, void* wght) {
     int algoCount;
     cudnnConvolutionFwdAlgoPerf_t perfResults;
-    CHECK(cudnnFindConvolutionForwardAlgorithm(handle, conv.idesc.desc,
-        conv.wdesc.desc, conv.cdesc.desc, conv.odesc.desc, 1, &algoCount, &perfResults));
+    cudnnConvolutionFwdAlgo_t algo[] = {
+         CUDNN_CONVOLUTION_FWD_ALGO_GEMM,
+         CUDNN_CONVOLUTION_FWD_ALGO_FFT,
+         CUDNN_CONVOLUTION_FWD_ALGO_FFT_TILING,
+         CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_GEMM,
+         CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM,
+         CUDNN_CONVOLUTION_FWD_ALGO_DIRECT,
+         CUDNN_CONVOLUTION_FWD_ALGO_WINOGRAD,
+         CUDNN_CONVOLUTION_FWD_ALGO_WINOGRAD_NONFUSED
+    };
+    size_t max_ws_size = getMaxWorkspaceSize<cudnnConvolutionFwdAlgo_t>(handle,conv,algo,sizeof(algo)/sizeof(algo[0]),state);
+    Workspace ws(state, max_ws_size);
+
+    CHECK(cudnnFindConvolutionForwardAlgorithmEx(handle, conv.idesc.desc, in,
+        conv.wdesc.desc, wght, conv.cdesc.desc, conv.odesc.desc, out, 1, &algoCount, 
+        &perfResults, ws.data, ws.size));
+    
     return perfResults;
   }
 
@@ -140,11 +185,25 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgo_t> {
     return bwd_data_algos;
   }
 
-  static cudnnConvolutionBwdDataAlgoPerf_t findAlgorithm(cudnnHandle_t handle, const Convolution& conv) {
+  static cudnnConvolutionBwdDataAlgoPerf_t findAlgorithm(THCState* state,cudnnHandle_t handle, const Convolution& conv,
+							  void* in, void* out, void* wght) {
     int algoCount;
     cudnnConvolutionBwdDataAlgoPerf_t perfResults;
-    CHECK(cudnnFindConvolutionBackwardDataAlgorithm(handle, conv.wdesc.desc,
-        conv.odesc.desc, conv.cdesc.desc, conv.idesc.desc, 1, &algoCount, &perfResults));
+    cudnnConvolutionBwdDataAlgo_t algo[] = {
+         CUDNN_CONVOLUTION_BWD_DATA_ALGO_0,
+         CUDNN_CONVOLUTION_BWD_DATA_ALGO_1,
+         CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT,
+         CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT_TILING,
+         CUDNN_CONVOLUTION_BWD_DATA_ALGO_WINOGRAD,
+         CUDNN_CONVOLUTION_BWD_DATA_ALGO_WINOGRAD_NONFUSED
+    };
+    size_t max_ws_size = getMaxWorkspaceSize<cudnnConvolutionBwdDataAlgo_t>(handle,conv,algo,sizeof(algo)/sizeof(algo[0]),state);
+    Workspace ws(state, max_ws_size);
+    
+    CHECK(cudnnFindConvolutionBackwardDataAlgorithmEx(handle, conv.wdesc.desc, wght,
+        conv.odesc.desc, out, conv.cdesc.desc, conv.idesc.desc, in, 1, &algoCount, 
+        &perfResults, ws.data, ws.size));
+    
     return perfResults;
   }
 
@@ -168,11 +227,25 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgo_t> {
     return bwd_filter_algos;
   }
 
-  static cudnnConvolutionBwdFilterAlgoPerf_t findAlgorithm(cudnnHandle_t handle, const Convolution& conv) {
+  static cudnnConvolutionBwdFilterAlgoPerf_t findAlgorithm(THCState* state, cudnnHandle_t handle, const Convolution& conv,
+							    void* in, void* out, void* wght) {
     int algoCount;
     cudnnConvolutionBwdFilterAlgoPerf_t perfResults;
-    CHECK(cudnnFindConvolutionBackwardFilterAlgorithm(handle, conv.idesc.desc,
-        conv.odesc.desc, conv.cdesc.desc, conv.wdesc.desc, 1, &algoCount, &perfResults));
+    cudnnConvolutionBwdFilterAlgo_t algo[] = {
+         CUDNN_CONVOLUTION_BWD_FILTER_ALGO_0,
+         CUDNN_CONVOLUTION_BWD_FILTER_ALGO_1,
+         CUDNN_CONVOLUTION_BWD_FILTER_ALGO_FFT,
+         CUDNN_CONVOLUTION_BWD_FILTER_ALGO_FFT_TILING,
+         CUDNN_CONVOLUTION_BWD_FILTER_ALGO_3,
+         CUDNN_CONVOLUTION_BWD_FILTER_ALGO_WINOGRAD_NONFUSED
+    };
+    size_t max_ws_size = getMaxWorkspaceSize<cudnnConvolutionBwdFilterAlgo_t>(handle,conv,algo,sizeof(algo)/sizeof(algo[0]),state);
+    Workspace ws(state, max_ws_size);
+
+    CHECK(cudnnFindConvolutionBackwardFilterAlgorithmEx(handle, conv.idesc.desc, in,
+        conv.odesc.desc, out, conv.cdesc.desc, conv.wdesc.desc, wght, 1, &algoCount, 
+        &perfResults, ws.data, ws.size));
+    
     return perfResults;
   }
 
@@ -191,7 +264,7 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgo_t> {
 template<typename algo_t>
 void findAlgorithm(
     THCState* state, cudnnHandle_t handle, const Convolution& conv,
-    bool benchmark, algo_t* algo)
+    bool benchmark, void* in, void* out, void* wght, algo_t* algo)
 {
   using search = algorithm_search<algo_t>;
   auto& cache = search::cache();
@@ -205,27 +278,28 @@ void findAlgorithm(
     return;
   }
 
-  // findAlgorithm may call cudaFree()
-  std::lock_guard<std::mutex> lock(*THCCachingAllocator_getCudaFreeMutex());
   if (cache.find(conv.params, algo)) {
     // re-check cache since another thread may have benchmarked the algorithm
     return;
   }
-  auto perfResults = search::findAlgorithm(handle, conv);
+  auto perfResults = search::findAlgorithm(state, handle, conv, in, out, wght);
   if (perfResults.status == CUDNN_STATUS_SUCCESS) {
     *algo = perfResults.algo;
   } else {
     *algo = search::DEFAULT_ALGO;
   }
   cache.insert(conv.params, *algo);
+  
+  THCDeviceAllocator* allocator = THCCachingAllocator_get();
+  CUDA_CHECK(allocator->emptyCache(allocator->state));
 }
 
 template<typename algo_t>
 Workspace chooseAlgorithm(
     THCState* state, cudnnHandle_t handle, const Convolution& conv,
-    bool benchmark, algo_t* algo)
+    bool benchmark, void* in, void* out, void* wght, algo_t* algo)
 {
-  findAlgorithm(state, handle, conv, benchmark, algo);
+  findAlgorithm(state, handle, conv, benchmark, in, out, wght, algo);
 
   using search = algorithm_search<algo_t>;
   size_t workspace_size;
@@ -307,7 +381,11 @@ void cudnn_convolution_forward(
   int groups = info->groups;
 
   cudnnConvolutionFwdAlgo_t fwdAlg;
-  Workspace workspace = chooseAlgorithm(state, handle, *info, benchmark, &fwdAlg);
+  void* in   = tensorPointer(dataType, input, 0, groups, 1);
+  void* out  = tensorPointer(dataType, output, 0, groups, 1);
+  void* wght = tensorPointer(dataType, weight, 0, groups, 0);
+
+  Workspace workspace = chooseAlgorithm(state, handle, *info, benchmark, in, out, wght, &fwdAlg);
 
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
@@ -353,7 +431,10 @@ void cudnn_convolution_backward_data(
   int groups = info->params.groups;
 
   cudnnConvolutionBwdDataAlgo_t bwdDataAlg;
-  Workspace workspace = chooseAlgorithm(state, handle, *info, benchmark, &bwdDataAlg);
+  void* in = tensorPointer(dataType, gradInput, 0, groups, 1);
+  void* out = tensorPointer(dataType, gradOutput, 0, groups, 1);
+  void* wght = tensorPointer(dataType, weight, 0, groups, 0);
+  Workspace workspace = chooseAlgorithm(state, handle, *info, benchmark, in, out, wght, &bwdDataAlg);
 
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
@@ -378,7 +459,10 @@ void cudnn_convolution_backward_filter(
   int groups = info->params.groups;
 
   cudnnConvolutionBwdFilterAlgo_t bwdFilterAlg;
-  Workspace workspace = chooseAlgorithm(state, handle, *info, benchmark, &bwdFilterAlg);
+  void* in = tensorPointer(dataType, input, 0, groups, 1);
+  void* out = tensorPointer(dataType, gradOutput, 0, groups, 1);
+  void* wght = tensorPointer(dataType, gradWeight, 0, groups, 0);
+  Workspace workspace = chooseAlgorithm(state, handle, *info, benchmark, in, out, wght, &bwdFilterAlg);
 
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
