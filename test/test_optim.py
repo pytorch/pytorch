@@ -71,19 +71,21 @@ class TestOptim(TestCase):
         initial_dist = params.data.dist(solution)
 
         def eval(params, sparse_grad, w):
+            # Depending on w, provide only the x or y gradient
             optimizer.zero_grad()
             loss = rosenbrock(params)
             loss.backward()
-            # params.grad.data now has the computed gradient. Turn
-            # it into a sparse tensor
-            params.grad.data.copy_(drosenbrock(params.data))
-            # This is really goofy
+            grad = drosenbrock(params.data)
+            # NB: We torture test the optimizer by returning an
+            # uncoalesced sparse tensor
             if w:
-                i = torch.LongTensor([[0]])
-                v = torch.DoubleTensor([params.grad.data[0]])
+                i = torch.LongTensor([[0, 0]])
+                x = grad[0]
+                v = torch.DoubleTensor([x / 4., x - x / 4.])
             else:
-                i = torch.LongTensor([[1]])
-                v = torch.DoubleTensor([params.grad.data[1]])
+                i = torch.LongTensor([[1, 1]])
+                y = grad[1]
+                v = torch.DoubleTensor([y - y / 4., y / 4.])
             x = sparse.DoubleTensor(i, v, torch.Size([2]))
             if sparse_grad:
                 params.grad.data = x
@@ -92,7 +94,8 @@ class TestOptim(TestCase):
             return loss
 
         for i in range(2000):
-            w = torch.rand(1)[0] > 0.5
+            # Do cyclic coordinate descent
+            w = i % 2
             optimizer.step(functools.partial(eval, params, True, w))
             optimizer_c.step(functools.partial(eval, params_c, False, w))
             self.assertEqual(params.data, params_c.data)
