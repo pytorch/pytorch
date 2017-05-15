@@ -293,6 +293,7 @@ void THCSTensor_(spcadd)(THCState *state, THCTensor *r_, THCTensor *dense, real 
 
   THCIndexTensor_(free)(state, indices);
   THCTensor_(free)(state, values);
+  THCTensor_(free)(state, r);
 }
 
 void THCSTensor_(mul)(THCState *state, THCSTensor *r_, THCSTensor *t, real value) {

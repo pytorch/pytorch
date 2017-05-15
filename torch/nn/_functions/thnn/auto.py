@@ -222,6 +222,7 @@ def _generate_function_classes(scope_dict):
         'LookupTable',
         'PReLU',
         'RReLU',
+        'Threshold',
         'GRUFused',
         'LSTMFused',
         'unfolded',

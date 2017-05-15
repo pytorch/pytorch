@@ -343,8 +343,8 @@ Args:
 
 Example::
 
-    >>> vec1 = torch.arange(1, 4)
-    >>> vec2 = torch.arange(1, 3)
+    >>> vec1 = torch.arange(1, 3)
+    >>> vec2 = torch.arange(1, 2)
     >>> M = torch.zeros(3, 2)
     >>> torch.addr(M, vec1, vec2)
      1  2
@@ -559,7 +559,7 @@ Example::
 
 add_docstr(torch._C.cat,
            """
-cat(seq, dim=0) -> Tensor
+cat(seq, dim=0, out=None) -> Tensor
 
 Concatenates the given sequence of :attr:`seq` Tensors in the given dimension.
 
@@ -570,6 +570,7 @@ Concatenates the given sequence of :attr:`seq` Tensors in the given dimension.
 Args:
     seq (sequence of Tensors): Can be any python sequence of `Tensor` of the same type.
     dim (int, optional): The dimension over which the tensors are concatenated
+    out (Tensor, optional): Output argument
 
 Example::
 
@@ -3313,7 +3314,7 @@ add_docstr(torch._C.range,
            """
 range(start, end, step=1, out=None) -> Tensor
 
-returns a 1D Tensor of size :math:`floor((end - start) / step) + 1` with values
+Returns a 1D Tensor of size :math:`floor((end - start) / step) + 1` with values
 from :attr:`start` to :attr:`end` with step :attr:`step`. Step is the gap between two values in the tensor.
 :math:`x_{i+1} = x_i + step`
 
@@ -3353,7 +3354,7 @@ add_docstr(torch._C.arange,
            """
 arange(start, end, step=1, out=None) -> Tensor
 
-Teturns a 1D Tensor of size :math:`floor((end - start) / step)` with values
+Returns a 1D Tensor of size :math:`floor((end - start) / step)` with values
 from the interval ``[start, end)`` taken with step :attr:`step` starting from `start`.
 
 Args:

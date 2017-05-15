@@ -369,11 +369,11 @@ def dropout(input, p=0.5, training=False, inplace=False):
 
 
 def threshold(input, threshold, value, inplace=False):
-    return _functions.thnn.auto.Threshold(threshold, value, inplace)(input)
+    return _functions.thnn.Threshold.apply(input, threshold, value, inplace)
 
 
 def relu(input, inplace=False):
-    return _functions.thnn.auto.Threshold(0, 0, inplace)(input)
+    return _functions.thnn.Threshold.apply(input, 0, 0, inplace)
 
 
 def hardtanh(input, min_val=-1., max_val=1., inplace=False):
@@ -692,6 +692,25 @@ def pairwise_distance(x1, x2, p=2, eps=1e-6):
     diff = torch.abs(x1 - x2)
     out = torch.pow(diff + eps, p).sum(dim=1, keepdim=True)
     return torch.pow(out, 1. / p)
+
+
+def cosine_similarity(x1, x2, dim=1, eps=1e-8):
+    r"""Returns cosine similarity between x1 and x2, computed along dim.
+
+    Args:
+        x1 (Variable): First input.
+        x2 (Variable): Second input (of size matching x1).
+        dim (int, optional): Dimension of vectors. Default: 1
+        eps (float, optional): Small value to avoid division by zero. Default: 1e-8
+
+    Shape:
+        - Input: :math:`(\ast_1, D, \ast_2)` where D is at position `dim`.
+        - Output: :math:`(\ast_1, \ast_2)` where 1 is at position `dim`.
+    """
+    w12 = torch.sum(x1 * x2, dim)
+    w1 = torch.norm(x1, 2, dim)
+    w2 = torch.norm(x2, 2, dim)
+    return (w12 / (w1 * w2).clamp(min=eps)).squeeze()
 
 
 def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, swap=False):

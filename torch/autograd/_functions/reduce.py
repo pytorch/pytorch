@@ -51,16 +51,16 @@ class Prod(Function):
             input, = ctx.saved_variables
             zero_idx = (input.data == 0).nonzero()
             if zero_idx.dim() == 0:
-                return grad_output.mul(ctx.result).expand_as(input).div(input), None
+                return grad_output.mul(ctx.result).expand_as(input).div(input), None, None
             elif zero_idx.size(0) > 1:
-                return (grad_output * 0).expand_as(input), None
+                return (grad_output * 0).expand_as(input), None, None
             else:
                 grad_input = Variable(grad_output.data.new(ctx.input_size).zero_())
                 zero_idx = tuple(zero_idx[0].cpu())
                 to_add = input.data.new(ctx.input_size).zero_()
                 to_add[zero_idx] = 1.
                 grad_input[zero_idx] = grad_output * (input + Variable(to_add)).prod()
-                return grad_input, None
+                return grad_input, None, None
         else:
             input, output = ctx.saved_variables
             dim = ctx.dim if ctx.dim >= 0 else ctx.dim + input.dim()
@@ -72,7 +72,7 @@ class Prod(Function):
             total_zeros = slice_zero_count.sum()
             grad_input = grad_output.mul(output).expand_as(input).div(input)
             if total_zeros == 0:
-                return grad_input, None
+                return grad_input, None, None
 
             some_zeros = slice_zero_count.gt(0).expand_as(grad_input)
             grad_input[some_zeros] = 0
@@ -80,7 +80,7 @@ class Prod(Function):
             single_zero_idx = slice_zero_count.eq(1).nonzero()
 
             if len(single_zero_idx) == 0:
-                return grad_input, None
+                return grad_input, None, None
 
             for idx in single_zero_idx:
                 idx_tuple = tuple(idx.cpu())
@@ -95,7 +95,7 @@ class Prod(Function):
                 grad_idx_tuple = idx_tuple[:dim] + (zero_idx,) + idx_tuple[dim + 1:]
                 grad_input[grad_idx_tuple] = grad_output[idx_tuple] * input_copy.prod()
 
-            return grad_input, None
+            return grad_input, None, None
 
 
 class Mean(Function):
@@ -203,46 +203,47 @@ class Kthvalue(_SelectionFunction):
 
 class Norm(Function):
 
-    def __init__(self, norm_type=2, dim=None, keepdim=True):
-        super(Norm, self).__init__()
-        self.norm_type = norm_type
-        self.dim = dim
-        self.keepdim = keepdim
+    @staticmethod
+    def forward(ctx, input, p=2, dim=None, keepdim=True):
+        ctx.p = p
+        ctx.dim = dim
+        ctx.keepdim = keepdim
 
-    def forward(self, input):
-        if self.dim is None:
-            self.norm = input.norm(self.norm_type)
-            self.save_for_backward(input)
-            return input.new((self.norm,))
+        if dim is None:
+            ctx.norm = input.norm(p)
+            ctx.save_for_backward(input)
+            return input.new((ctx.norm,))
         else:
-            output = input.norm(self.norm_type, self.dim, self.keepdim)
-            self.save_for_backward(input, output)
+            output = input.norm(p, dim, keepdim)
+            ctx.save_for_backward(input, output)
             return output
 
-    def backward(self, grad_output):
-        if self.dim is None:
-            input, = self.saved_tensors
-            if self.norm_type == 2:
-                return input.mul(grad_output[0] / self.norm)
+    @staticmethod
+    def backward(ctx, grad_output):
+        if ctx.dim is None:
+            input, = ctx.saved_variables
+            if ctx.p == 2:
+                scale_v = (grad_output / ctx.norm).expand_as(input)
+                return input.mul(scale_v), None, None, None
             else:
-                pow = input.abs().pow(self.norm_type - 2)
-                scale = grad_output[0] / self.norm ** (self.norm_type - 1)
-                return input.mul(pow).mul(scale)
+                pow = input.abs().pow(ctx.p - 2)
+                scale_v = (grad_output / ctx.norm ** (ctx.p - 1)).expand_as(input)
+                return input.mul(pow).mul(scale_v), None, None, None
         else:
-            input, output = self.saved_tensors
+            input, output = ctx.saved_variables
 
-            if self.keepdim is False:
-                grad_output = grad_output.unsqueeze(self.dim)
-                output = output.unsqueeze(self.dim)
+            if ctx.keepdim is False:
+                grad_output = grad_output.unsqueeze(ctx.dim)
+                output = output.unsqueeze(ctx.dim)
 
             big_grad_output = grad_output.expand_as(input)
-            if self.norm_type == 2:
+            if ctx.p == 2:
                 big_output = output.expand_as(input)
-                return input.mul(big_grad_output).div(big_output)
+                return input.mul(big_grad_output).div(big_output), None, None, None
             else:
-                pow = input.abs().pow(self.norm_type - 2)
-                big_output = output.pow(self.norm_type - 1).expand_as(input)
-                return input.mul(pow).mul(big_grad_output).div(big_output)
+                pow = input.abs().pow(ctx.p - 2)
+                big_output = output.pow(ctx.p - 1).expand_as(input)
+                return input.mul(pow).mul(big_grad_output).div(big_output), None, None, None
 
 
 # TODO: renorm
