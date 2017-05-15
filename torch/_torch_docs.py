@@ -3314,7 +3314,7 @@ add_docstr(torch._C.range,
            """
 range(start, end, step=1, out=None) -> Tensor
 
-returns a 1D Tensor of size :math:`floor((end - start) / step) + 1` with values
+Returns a 1D Tensor of size :math:`floor((end - start) / step) + 1` with values
 from :attr:`start` to :attr:`end` with step :attr:`step`. Step is the gap between two values in the tensor.
 :math:`x_{i+1} = x_i + step`
 
