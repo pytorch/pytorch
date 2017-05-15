@@ -824,3 +824,22 @@ PyObject * THPTensor_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
   return THPCopyMethod(THTensor_(copy_functions), self, args, kwargs);
   END_HANDLE_TH_ERRORS
 }
+
+[[
+  name: __and__
+  with_stateless: True
+  return: argument 0
+  options:
+    - cname: bitand
+      arguments:
+        - arg: THTensor* result
+          output: True
+        - THTensor* self
+        - real value
+    - cname: cbitand
+      arguments:
+        - arg: THTensor* result
+          output: True
+        - THTensor* self
+        - THTensor* other
+]]
