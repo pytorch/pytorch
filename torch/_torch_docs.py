@@ -3354,7 +3354,7 @@ add_docstr(torch._C.arange,
            """
 arange(start, end, step=1, out=None) -> Tensor
 
-Teturns a 1D Tensor of size :math:`floor((end - start) / step)` with values
+Returns a 1D Tensor of size :math:`floor((end - start) / step)` with values
 from the interval ``[start, end)`` taken with step :attr:`step` starting from `start`.
 
 Args:
