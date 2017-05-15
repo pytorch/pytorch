@@ -932,3 +932,75 @@ PyObject * THPTensor_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
         - THTensor* self
         - THTensor* other
 ]]
+
+[[
+  name: __lshift__
+  with_stateless: True
+  return: argument 0
+  options:
+    - cname: lshift
+      arguments:
+        - arg: THTensor* result
+          output: True
+        - THTensor* self
+        - real value
+    - cname: clshift
+      arguments:
+        - arg: THTensor* result
+          output: True
+        - THTensor* self
+        - THTensor* other
+]]
+
+[[
+  name: __ilshift__
+  with_stateless: True
+  return: argument 0
+  options:
+    - cname: lshift
+      arguments:
+        - THTensor* self
+        - THTensor* self
+        - real value
+    - cname: clshift
+      arguments:
+        - THTensor* self
+        - THTensor* self
+        - THTensor* other
+]]
+
+[[
+  name: __rshift__
+  with_stateless: True
+  return: argument 0
+  options:
+    - cname: rshift
+      arguments:
+        - arg: THTensor* result
+          output: True
+        - THTensor* self
+        - real value
+    - cname: crshift
+      arguments:
+        - arg: THTensor* result
+          output: True
+        - THTensor* self
+        - THTensor* other
+]]
+
+[[
+  name: __irshift__
+  with_stateless: True
+  return: argument 0
+  options:
+    - cname: rshift
+      arguments:
+        - THTensor* self
+        - THTensor* self
+        - real value
+    - cname: crshift
+      arguments:
+        - THTensor* self
+        - THTensor* self
+        - THTensor* other
+]]
