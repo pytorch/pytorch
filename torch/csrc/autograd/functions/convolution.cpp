@@ -385,42 +385,8 @@ auto ConvBackwardBackward::apply(const variable_list& grad_outputs) -> variable_
         throw std::runtime_error("No support for ConvBackwardBackward without cudnn");
     }
   }
-/**
-  if (should_compute_output(1) || should_compute_output(2)) {
-    if (use_cudnn) {
-#ifdef WITH_CUDNN
-      grad_weight = weight->newTensor();
-      grad_weight->resizeAs(*weight);
-      cudnn_convolution_backward_filter(
-          state, torch::cudnn::getCudnnHandle(), torch::cudnn::getCudnnDataType(*input),
-          (THVoidTensor*)grad_output->cdata(), (THVoidTensor*)input->cdata(), (THVoidTensor*)grad_weight->cdata(),
-          convolution.get(), benchmark);
 
-      if (bias && should_compute_output(2)) {
-        grad_bias = bias->newTensor();
-        grad_bias->resizeAs(*bias);
-        cudnn_convolution_backward_bias(
-            state, torch::cudnn::getCudnnHandle(), torch::cudnn::getCudnnDataType(*input),
-            (THVoidTensor*)grad_output->cdata(), (THVoidTensor*)grad_bias->cdata(),
-            convolution.get());
-      }
-#endif
-    } else {
-        // TODO: fixed it in the future using THNN
-        throw std::runtime_error("No support for ConvBackwardBackward without cudnn");
-    }
-  }
-**
-  if (k == 3) {
-    if (should_compute_output(0)) {
-        grad_input = view3d(*grad_input);
-    }
-    grad_weight = view3d(*grad_weight);
-  }
-**/
-  auto outputs =  as_tensor_list(std::move(grad_input));//,
-                                 //std::move(grad_weight),
-                                 //std::move(grad_bias));
+  auto outputs =  as_tensor_list(std::move(grad_input));
   return wrap_outputs(grad_outputs, std::move(outputs), [&](FunctionFlags f) {
     return std::make_shared<Error>("ConvBackwardBackward is not differentiable", std::move(f));
   });
