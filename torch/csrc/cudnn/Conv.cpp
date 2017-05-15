@@ -157,9 +157,6 @@ struct algorithm_search<cudnnConvolutionFwdAlgo_t> {
     if(NULL != data){
          THCudaFree(state, data);
     }
-
-//    CHECK(cudnnFindConvolutionForwardAlgorithm(handle, conv.idesc.desc,
-//        conv.wdesc.desc, conv.cdesc.desc, conv.odesc.desc, 1, &algoCount, &perfResults));
     return perfResults;
   }
 
@@ -224,9 +221,6 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgo_t> {
     if(NULL != data){
          THCudaFree(state, data);
     }
-//    CHECK(cudnnFindConvolutionBackwardDataAlgorithm(handle, conv.wdesc.desc,
-//        conv.odesc.desc, conv.cdesc.desc, conv.idesc.desc, 1, &algoCount, &perfResults));
-
     return perfResults;
   }
 
@@ -292,10 +286,6 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgo_t> {
     if(NULL != data){
          THCudaFree(state, data);
     }
-
-//    CHECK(cudnnFindConvolutionBackwardFilterAlgorithm(handle, conv.idesc.desc,
-//        conv.odesc.desc, conv.cdesc.desc, conv.wdesc.desc, 1, &algoCount, &perfResults));
-
     return perfResults;
   }
 
