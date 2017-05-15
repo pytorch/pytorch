@@ -35,7 +35,7 @@ struct ConvParams {
 };
 
 struct ConvForward : public Function, public ConvParams {
-  explicit ConvForward(ConvParams params) : ConvParams(std::move(params)), high_grad(False) {}
+  explicit ConvForward(ConvParams params) : ConvParams(std::move(params)), high_grad(false) {}
   ConvForward(
     ConvParams params,
     SavedVariable weight,
@@ -43,7 +43,7 @@ struct ConvForward : public Function, public ConvParams {
     : ConvParams(std::move(params))
     , weight_(std::move(weight))
     , bias_(std::move(bias))
-    , high_grad(True) {}
+    , high_grad(true) {}
 
   virtual variable_list apply(const variable_list& inputs) override;
 
