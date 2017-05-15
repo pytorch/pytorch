@@ -345,13 +345,6 @@ class _TensorBase(object):
         return self.ge(other)
 
     # TODO: add native add or and xor in the libs
-
-    def __or__(self, other):
-        if (type(self).__name__ != 'ByteTensor' or
-                type(other).__name__ != 'ByteTensor'):
-            raise RuntimeError('logical operations are supported on ByteTensors only')
-        return (self + other).gt(0)
-
     def __xor__(self, other):
         if (type(self).__name__ != 'ByteTensor' or
                 type(other).__name__ != 'ByteTensor'):
