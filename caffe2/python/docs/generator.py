@@ -135,6 +135,7 @@ class OperatorDoc(object):
     def generateDoc(self, formatter):
         if self.schema.doc:
             formatter.parseAndAdd(self.schema.doc)
+            formatter.addLinebreak()
         else:
             formatter.addLine("No documentation yet.")
 
@@ -175,6 +176,7 @@ class OperatorDoc(object):
 
     def generateCodeLink(self, formatter):
         formatter.addHeader("Code", 3)
+        formatter.addLinebreak()
         formatter.addCodeLink(self.schema.file)
 
     def getInfo(self, formatter, name, impl):

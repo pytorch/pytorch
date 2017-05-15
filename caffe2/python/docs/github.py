@@ -20,9 +20,15 @@ class GHOpDocUploader(DocUploader):
 
 class GHMarkdown(Markdown):
     def addHeader(self, text, h=1):
-        if h == 2:
-            h = 1
-        self.addLine("{header} {text}".format(header=h * '#', text=text), True)
+        self.addLine("\n{header} {text}\n".format(header=h * '#', text=text), True)
+
+    def addDocHeader(self):
+        self.addLine("---")
+        self.addLine("docid: operators-catalogue")
+        self.addLine("title: Operators Catalogue")
+        self.addLine("layout: docs")
+        self.addLine("permalink: /docs/operators-catalogue.html")
+        self.addLine("---")
 
     def addTable(self, table, noTitle=False):
         self.addRaw("<table>")
@@ -35,7 +41,6 @@ class GHMarkdown(Markdown):
             self.addRaw("</tr>")
         self.addRaw("</table>")
 
-
 def getCodeLink(formatter, schema):
     formatter = formatter.clone()
     path = os.path.relpath(schema.file, "caffe2")
@@ -46,7 +51,7 @@ def getCodeLink(formatter, schema):
 
 
 class GHOperatorEngine(OperatorEngine):
-    def generateDoc(self, formatter, schema):
+    def generateDoc(self, formatter):
         for device, _ in self.getDeviceImpl():
             formatter.addCode('{engine}'.format(engine=self.engine), True)
             if device:
@@ -57,6 +62,7 @@ class GHOperatorEngine(OperatorEngine):
 class GHOperatorDoc(OperatorDoc):
     def generateCodeLink(self, formatter):
         formatter.addHeader("Code", 3)
+        formatter.addLinebreak()
         formatter.addRaw(getCodeLink(formatter, self.schema))
 
     def getInfo(self, formatter, name, impl):
@@ -75,8 +81,17 @@ class GHOpDocGenerator(OpDocGenerator):
     def getOperatorEngine(self, name):
         return GHOperatorEngine(name)
 
+    def createBody(self):
+        self.formatter.addDocHeader()
+        operators = self.getOperators()
+
+        for operator in operators:
+            operator.generateSchema(self.formatter)
+
+        self.content_body += self.formatter.dump()
+
 
 if __name__ == "__main__":
-    ops = GHOpDocGenerator(GHMarkdown())
+    ops = GHOpDocGenerator(GHMarkdown(), GHOpDocUploader)
     ops.createBody()
     print(ops.content_body)
