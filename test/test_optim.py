@@ -81,11 +81,11 @@ class TestOptim(TestCase):
             if w:
                 i = torch.LongTensor([[0, 0]])
                 x = grad[0]
-                v = torch.DoubleTensor([x/4., x - x/4.])
+                v = torch.DoubleTensor([x / 4., x - x / 4.])
             else:
                 i = torch.LongTensor([[1, 1]])
                 y = grad[1]
-                v = torch.DoubleTensor([y - y/4., y/4.])
+                v = torch.DoubleTensor([y - y / 4., y / 4.])
             x = sparse.DoubleTensor(i, v, torch.Size([2]))
             if sparse_grad:
                 params.grad.data = x
