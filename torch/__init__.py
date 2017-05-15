@@ -339,6 +339,7 @@ import torch.nn
 import torch.optim
 import torch.multiprocessing
 import torch.sparse
+import torch.utils.backcompat
 _C._init_names(list(torch._tensor_classes) + list(torch._storage_classes))
 
 # attach docstrings to torch and tensor functions

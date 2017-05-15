@@ -490,6 +490,18 @@ PyObject *THPModule_inferSize(PyObject *_unused, PyObject *args)
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject *THPModule_setBackcompatBroadcastWarn(PyObject *module, PyObject *arg) {
+  THPUtils_assert(PyBool_Check(arg), "set_backcompat_broadcast_warn expects a bool, "
+          "but got %s", THPUtils_typename(arg));
+  setBackCompatBroadcastWarn(arg == Py_True);
+  Py_RETURN_NONE;
+}
+
+static PyObject *THPModule_getBackcompatBroadcastWarn(PyObject *module)
+{
+  return getBackCompatBroadcastWarn() ? Py_True : Py_False;
+}
+
 #ifdef WITH_CUDA
 extern PyObject * THCPModule_initExtension(PyObject *self);
 extern PyObject * THCPModule_setDevice_wrap(PyObject *self, PyObject *arg);
@@ -549,6 +561,8 @@ static PyMethodDef TorchMethods[] = {
   {"_safe_call",      (PyCFunction)THPModule_safeCall,          METH_VARARGS | METH_KEYWORDS, NULL},
   {"_set_default_tensor_type", (PyCFunction)THPModule_setDefaultTensorType, METH_O, NULL},
   {"_infer_size",     (PyCFunction)THPModule_inferSize,         METH_VARARGS, NULL},
+  {"_set_backcompat_broadcast_warn", (PyCFunction)THPModule_setBackcompatBroadcastWarn, METH_O, NULL},
+  {"_get_backcompat_broadcast_warn", (PyCFunction)THPModule_getBackcompatBroadcastWarn, METH_NOARGS, NULL},
   {"get_num_threads", (PyCFunction)THPModule_getNumThreads,     METH_NOARGS,  NULL},
   {"set_num_threads", (PyCFunction)THPModule_setNumThreads,     METH_O,       NULL},
   {"from_numpy",      (PyCFunction)THPModule_fromNumpy,         METH_O,       NULL},

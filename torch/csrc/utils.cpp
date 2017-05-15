@@ -551,3 +551,13 @@ void THPPointer<THPGenerator>::free() {
 }
 
 template class THPPointer<THPGenerator>;
+
+static bool backCompatBroadcastWarn = false;
+
+void setBackCompatBroadcastWarn(bool warn) {
+  backCompatBroadcastWarn = true;
+}
+
+bool getBackCompatBroadcastWarn() {
+  return backCompatBroadcastWarn;
+}
