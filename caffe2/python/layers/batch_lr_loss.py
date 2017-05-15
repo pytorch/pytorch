@@ -62,7 +62,10 @@ class BatchLRLoss(ModelLayer):
                     weight_blob + '_float32',
                     to=core.DataType.FLOAT
                 )
-            weight_blob = net.StopGradient([weight_blob], [weight_blob])
+            weight_blob = net.StopGradient(
+                [weight_blob],
+                [net.NextScopedBlob('weight_stop_gradient')],
+            )
             xent = net.Mul(
                 [xent, weight_blob],
                 net.NextScopedBlob('weighted_cross_entropy'),
