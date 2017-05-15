@@ -52,6 +52,16 @@ class Broadcast(CWrapPlugin):
             ret += "ptrdiff_t ${arg_op_other}_nElem = THTensor_(nElement)(LIBRARY_STATE ${arg_op_other}_save);"
         return Template(ret)
 
+    OUT_PLACE_BACK_COMPAT_WARN_TEMPLATE = Template(
+        """if (getBackCompatBroadcastWarn()) {
+             bool same_shape = THTensor_(isSameSizeAs)(LIBRARY_STATE ${arg_op_a}_save, ${arg_op_other}_save);
+             if (!same_shape && ${arg_op_other}_err == 0 && (${arg_op_a}_nElem == ${arg_op_other}_nElem) && !${raise_errors}) {
+               PyErr_WarnEx(PyExc_UserWarning, "${op_a} and ${op_other} ARE broadcastable, and have the same number of "
+                                               "elements.  Changing behavior.", 1);
+             }
+           }
+        """)
+
     OUT_PLACE_PRE_EXPAND2_TEMPLATE = Template(
         """bool ${arg_op_other}_raise = ${raise_errors} || (${arg_op_a}_nElem != ${arg_op_other}_nElem);
            int ${arg_op_other}_err =
@@ -68,11 +78,12 @@ class Broadcast(CWrapPlugin):
     OUT_PLACE_PRE_EXPAND3_TEMPLATE = Template(
         """bool ${arg_op_other1}_raise = ${raise_errors} || (${arg_op_a}_nElem != ${arg_op_other1}_nElem);
            bool ${arg_op_other2}_raise = ${raise_errors} || (${arg_op_a}_nElem != ${arg_op_other2}_nElem);
-           int ${arg_op_a}_err =
+           int ${arg_op_other1}_err =
              THTensor_(expand3)(LIBRARY_STATE ${arg_op_a}, ${arg_op_other1}, ${arg_op_other2},
                                 ${arg_op_a}_save, ${arg_op_other1}_save, ${arg_op_other2}_save,
                                 ${arg_op_other1}_raise || ${arg_op_other2}_raise);
-           if (${arg_op_a}_err != 0 && !${arg_op_other1}_raise && !${arg_op_other2}_raise) {
+           int ${arg_op_other2}_err = ${arg_op_other1}_err;
+           if (${arg_op_other1}_err != 0 && !${arg_op_other1}_raise && !${arg_op_other2}_raise) {
              ${post_code}"""
              + DEPRECATED_WARNING3 + "\n"
         """}""")
@@ -107,6 +118,16 @@ class Broadcast(CWrapPlugin):
            ${expand_code}
         """)
 
+    IN_PLACE_BACK_COMPAT_WARN_TEMPLATE = Template(
+        """if (getBackCompatBroadcastWarn()) {
+             bool same_shape = THTensor_(isSameSizeAs)(LIBRARY_STATE ${arg_op_a}, ${arg_op_other}_save);
+             if (!same_shape && ${arg_op_other}_err == 0 && (${arg_op_a}_nElem == ${arg_op_other}_nElem) && !${raise_errors}) {
+               PyErr_WarnEx(PyExc_UserWarning, "${op_a} and ${op_other} ARE broadcastable, and have the same number of "
+                                               "elements.  Changing behavior.", 1);
+             }
+           }
+        """)
+
     IN_PLACE_PRE_EXPAND1_TEMPLATE = Template(
         """bool ${arg_op_other}_raise = ${raise_errors} || (${arg_op_a}_nElem != ${arg_op_other}_nElem);
            int ${arg_op_other}_err =
@@ -132,7 +153,7 @@ class Broadcast(CWrapPlugin):
            if (${arg_op_other2}_err != 0 && !${arg_op_other1}_raise && ${arg_op_other2}_raise) {
              skip_expand = true; // don't do further expansions
              ${post_code}"""
-         + DEPRECATED_WARNING3 + "\n" +
+           + DEPRECATED_WARNING3 + "\n" +
         """}""")
 
     IN_PLACE_PRE_TEMPLATE = Template(
@@ -222,8 +243,11 @@ class Broadcast(CWrapPlugin):
                         arg_op_other1=arg_op_b,
                         arg_op_other2=arg_op_c,
                         post_code=post_code)
+                    expand_code += self.IN_PLACE_BACK_COMPAT_WARN_TEMPLATE.substitute(op_b_mapping)
+                    expand_code += self.IN_PLACE_BACK_COMPAT_WARN_TEMPLATE.substitute(op_b_mapping)
                 else:
                     expand_code = self.IN_PLACE_PRE_EXPAND1_TEMPLATE.substitute(op_b_mapping, post_code=post_code)
+                    expand_code += self.IN_PLACE_BACK_COMPAT_WARN_TEMPLATE.substitute(op_b_mapping)
 
                 new_code_pre.append(self.IN_PLACE_PRE_TEMPLATE.substitute(
                     arg_op_a=arg_op_a,
@@ -283,8 +307,12 @@ class Broadcast(CWrapPlugin):
                             arg_op_other1=arg_op_b,
                             arg_op_other2=arg_op_c,
                             post_code=post_code)
+                        expand_code += self.OUT_PLACE_BACK_COMPAT_WARN_TEMPLATE.substitute(op_b_mapping)
+                        expand_code += self.OUT_PLACE_BACK_COMPAT_WARN_TEMPLATE.substitute(op_c_mapping)
+
                     else:
                         expand_code = self.OUT_PLACE_PRE_EXPAND2_TEMPLATE.substitute(op_b_mapping, post_code=post_code)
+                        expand_code += self.OUT_PLACE_BACK_COMPAT_WARN_TEMPLATE.substitute(op_b_mapping)
 
                 new_code_pre.append(self.OUT_PLACE_PRE_TEMPLATE.substitute(
                     code_arg_op_a=code_arg_op_a,
