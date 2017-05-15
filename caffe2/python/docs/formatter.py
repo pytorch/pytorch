@@ -64,7 +64,7 @@ class Markdown(Formatter):
                                                 text=text)
 
     def addLinebreak(self):
-        self.content += "\n\n"
+        self.content += "\n"
 
     def addHeader(self, text, h=1):
         self.addLine("{header} {text}".format(header=h * '#', text=text), True)
@@ -87,7 +87,7 @@ class Markdown(Formatter):
         if (inline):
             self.content += "`{text}`".format(text=text)
         else:
-            self.addRaw("\n````\n{text}\n````\n".format(text=text))
+            self.addRaw("\n\n```\n{text}```\n\n".format(text=text))
 
     def addTable(self, table, noTitle=False):
         self.addLinebreak()
