@@ -845,6 +845,23 @@ PyObject * THPTensor_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
 ]]
 
 [[
+  name: __iand__
+  with_stateless: True
+  return: argument 0
+  options:
+    - cname: bitand
+      arguments:
+        - THTensor* self
+        - THTensor* self
+        - real value
+    - cname: cbitand
+      arguments:
+        - THTensor* self
+        - THTensor* self
+        - THTensor* other
+]]
+
+[[
   name: __or__
   with_stateless: True
   return: argument 0
@@ -864,6 +881,23 @@ PyObject * THPTensor_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
 ]]
 
 [[
+  name: __ior__
+  with_stateless: True
+  return: argument 0
+  options:
+    - cname: bitor
+      arguments:
+        - THTensor* self
+        - THTensor* self
+        - real value
+    - cname: cbitor
+      arguments:
+        - THTensor* self
+        - THTensor* self
+        - THTensor* other
+]]
+
+[[
   name: __xor__
   with_stateless: True
   return: argument 0
@@ -878,6 +912,23 @@ PyObject * THPTensor_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
       arguments:
         - arg: THTensor* result
           output: True
+        - THTensor* self
+        - THTensor* other
+]]
+
+[[
+  name: __ixor__
+  with_stateless: True
+  return: argument 0
+  options:
+    - cname: bitxor
+      arguments:
+        - THTensor* self
+        - THTensor* self
+        - real value
+    - cname: cbitxor
+      arguments:
+        - THTensor* self
         - THTensor* self
         - THTensor* other
 ]]
