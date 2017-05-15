@@ -130,7 +130,7 @@ class _SparseBase(object):
         return self.coalesce()._values().norm(p)
 
     def sum(self):
-        return self._values().sum() # linear!
+        return self._values().sum()  # linear!
 
     def __str__(self):
         # NB: modest duplication with _tensor_str
