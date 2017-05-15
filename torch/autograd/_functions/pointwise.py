@@ -444,7 +444,7 @@ class Addcdiv(InplaceFunction):
 
         if ctx.needs_input_grad[2]:
             div_tensor2_sq = div_tensor2.mul(div_tensor2)
-            grad_div2 = grad_output.mul(div_tensor1).div(div_tensor2_sq).neg_().mul_(ctx._scale)
+            grad_div2 = grad_output.mul(div_tensor1).div(div_tensor2_sq).mul(-ctx._scale)
 
         return grad_add, grad_div1, grad_div2, None, None
 
