@@ -173,10 +173,11 @@ PyObject* functionToPyObject(std::shared_ptr<Function> cdata)
     return obj;
   }
 
-  auto it = cpp_function_types.find(std::type_index(typeid(*cdata)));
+  auto& fn = *cdata;
+  auto it = cpp_function_types.find(std::type_index(typeid(fn)));
   if (it == cpp_function_types.end()) {
     return PyErr_Format(PyExc_TypeError,
-        "Don't know how to create Python object for %s", typeid(*cdata).name());
+        "Don't know how to create Python object for %s", typeid(fn).name());
   }
 
   PyTypeObject* type = (PyTypeObject*)it->second.get();
