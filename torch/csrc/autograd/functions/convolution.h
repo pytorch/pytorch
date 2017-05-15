@@ -35,11 +35,22 @@ struct ConvParams {
 };
 
 struct ConvForward : public Function, public ConvParams {
-  explicit ConvForward(ConvParams params) : ConvParams(std::move(params)) {}
+  explicit ConvForward(ConvParams params) : ConvParams(std::move(params)), high_grad(False) {}
+  ConvForward(
+    ConvParams params,
+    SavedVariable weight,
+    SavedVariable bias)
+    : ConvParams(std::move(params))
+    , weight_(std::move(weight))
+    , bias_(std::move(bias))
+    , high_grad(True) {}
 
   virtual variable_list apply(const variable_list& inputs) override;
 
   std::vector<long> output_size(thpp::Tensor& input, thpp::Tensor& weight);
+  SavedVariable weight_;
+  SavedVariable bias_;
+  bool high_grad;
 };
 
 struct ConvBackward : public Function, public ConvParams {

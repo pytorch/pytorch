@@ -126,8 +126,8 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
 
   AutoGPU guard(inputs[0]->data->getDevice());
   auto input = inputs[0]->data->contiguous();
-  std::unique_ptr<Tensor> weight(inputs[1]->data->clone_shallow());
-  std::unique_ptr<Tensor> bias(inputs[2] ? inputs[2]->data->clone_shallow() : nullptr);
+  std::unique_ptr<Tensor> weight(high_grad ? weight_->data->clone_shallow(): inputs[1]->data->clone_shallow());
+  std::unique_ptr<Tensor> bias(high_grad ? bias_ : (inputs[2] ? inputs[2]->data->clone_shallow() : nullptr));
 
   int k = input->nDim();
   if (k == 3) {
@@ -193,7 +193,8 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
   return wrap_outputs(inputs, std::move(outputs), [&](FunctionFlags f) {
     return std::make_shared<ConvBackward>(
         f, *this,
-        inputs[0]->save(this), inputs[1]->save(this), Variable::save_opt(inputs[2].get(), this),
+        inputs[0]->save(this), high_grad ? weight_->save(this) : inputs[1]->save(this),
+        Variable::save_opt(high_grad ? bias_.get() : inputs[2].get(), this),
         std::move(columns), std::move(ones), std::move(convolution));
   });
 };
@@ -316,7 +317,7 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
                                  std::move(grad_weight),
                                  std::move(grad_bias));
   return wrap_outputs(grad_outputs, std::move(outputs), [&](FunctionFlags f) {
-    return std::make_shared<Error>("ConvBackward is not differentiable", std::move(f));
+    return std::make_shared<ConvForward>(*this, weight_->save(this), bias_->save(this));
   });
 };
 
