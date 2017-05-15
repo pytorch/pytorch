@@ -1,0 +1,507 @@
+Binary file build/lib.linux-x86_64-3.5/torch/lib/libTHNN.so.1 matches
+build/lib.linux-x86_64-3.5/torch/lib/THNN.h:  int padT ,
+build/lib.linux-x86_64-3.5/torch/lib/THNN.h:  int padT,
+build/lib.linux-x86_64-3.5/torch/lib/THNN.h:          int padT, int padW, int padH,
+build/lib.linux-x86_64-3.5/torch/lib/THNN.h:          int padT, int padW, int padH,
+build/lib.linux-x86_64-3.5/torch/lib/THNN.h:          int padT, int padW, int padH,
+build/lib.linux-x86_64-3.5/torch/lib/THCUNN.h:                  int padT, int padB);
+build/lib.linux-x86_64-3.5/torch/lib/THCUNN.h:                  int padT, int padB);
+build/lib.linux-x86_64-3.5/torch/lib/THCUNN.h:                  int padT, int padB);
+build/lib.linux-x86_64-3.5/torch/lib/THCUNN.h:                  int padT, int padB);
+build/lib.linux-x86_64-3.5/torch/lib/THCUNN.h:                  int padT, int padW, int padH);
+build/lib.linux-x86_64-3.5/torch/lib/THCUNN.h:                  int padT, int padW, int padH);
+build/lib.linux-x86_64-3.5/torch/lib/THCUNN.h:                  int padT, int padW, int padH,
+build/lib.linux-x86_64-3.5/torch/lib/THCUNN.h:                  int padT, int padW, int padH,
+build/lib.linux-x86_64-3.5/torch/lib/THCUNN.h:                  int padT, int padW, int padH,
+build/lib.linux-x86_64-3.5/torch/lib/THCUNN.h:                  int padT, int padW, int padH,
+build/lib.linux-x86_64-3.5/torch/lib/THCUNN.h:                  int padT, int padW, int padH,
+build/lib.linux-x86_64-3.5/torch/lib/THCUNN.h:                  int padT, int padW, int padH,
+build/lib.linux-x86_64-3.5/torch/lib/THCUNN.h:                  int padT, int padW, int padH,
+build/lib.linux-x86_64-3.5/torch/lib/THCUNN.h:                  int padT, int padW, int padH,
+build/lib.linux-x86_64-3.5/torch/lib/THCUNN.h:                  int padT, int padW, int padH,
+build/lib.linux-x86_64-3.5/torch/lib/THCUNN.h:                  int padT, int padW, int padH,
+build/lib.linux-x86_64-3.5/torch/lib/THCUNN.h:                  int padT, int padW, int padH,
+build/lib.linux-x86_64-3.5/torch/lib/THCUNN.h:                  int padT, int padW, int padH);
+build/lib.linux-x86_64-3.5/torch/lib/THCUNN.h:                  int padT, int padW, int padH);
+Binary file build/lib.linux-x86_64-3.5/torch/_C.cpython-35m-x86_64-linux-gnu.so matches
+build/lib.linux-x86_64-3.5/torch/legacy/nn/VolumetricMaxUnpooling.py:        self.padT = self.pooling.padT
+build/lib.linux-x86_64-3.5/torch/legacy/nn/VolumetricMaxUnpooling.py:            self.padT, self.padW, self.padH
+build/lib.linux-x86_64-3.5/torch/legacy/nn/VolumetricMaxUnpooling.py:            self.padT, self.padW, self.padH
+build/lib.linux-x86_64-3.5/torch/legacy/nn/VolumetricConvolution.py:    def __init__(self, nInputPlane, nOutputPlane, kT, kW, kH, dT=1, dW=1, dH=1, padT=0, padW=None, padH=None):
+build/lib.linux-x86_64-3.5/torch/legacy/nn/VolumetricConvolution.py:        self.padT = padT
+build/lib.linux-x86_64-3.5/torch/legacy/nn/VolumetricConvolution.py:        self.padW = padW if padW is not None else self.padT
+build/lib.linux-x86_64-3.5/torch/legacy/nn/VolumetricConvolution.py:                self.padT, self.padW, self.padH
+build/lib.linux-x86_64-3.5/torch/legacy/nn/VolumetricConvolution.py:                self.padT, self.padW, self.padH
+build/lib.linux-x86_64-3.5/torch/legacy/nn/VolumetricConvolution.py:                self.padT, self.padW, self.padH
+build/lib.linux-x86_64-3.5/torch/legacy/nn/VolumetricConvolution.py:                self.padT, self.padW, self.padH
+build/lib.linux-x86_64-3.5/torch/legacy/nn/VolumetricConvolution.py:                self.padT, self.padW, self.padH,
+build/lib.linux-x86_64-3.5/torch/legacy/nn/VolumetricConvolution.py:                self.padT, self.padW, self.padH,
+build/lib.linux-x86_64-3.5/torch/legacy/nn/VolumetricConvolution.py:           self.padT != 0 or self.padW != 0 or self.padH != 0:
+build/lib.linux-x86_64-3.5/torch/legacy/nn/VolumetricConvolution.py:        if self.padT != 0 or self.padW != 0 or self.padH != 0:
+build/lib.linux-x86_64-3.5/torch/legacy/nn/VolumetricConvolution.py:            s += ', {}, {}, {}'.format(self.padT, self.padW, self.padH)
+build/lib.linux-x86_64-3.5/torch/legacy/nn/VolumetricFullConvolution.py:                 padT=0, padW=0, padH=0,     # padding
+build/lib.linux-x86_64-3.5/torch/legacy/nn/VolumetricFullConvolution.py:        self.padT = padT
+build/lib.linux-x86_64-3.5/torch/legacy/nn/VolumetricFullConvolution.py:            adjT = self._calculateAdj(tT, self.kT, self.padT, self.dT)
+build/lib.linux-x86_64-3.5/torch/legacy/nn/VolumetricFullConvolution.py:            self.padT, self.padW, self.padH,
+build/lib.linux-x86_64-3.5/torch/legacy/nn/VolumetricFullConvolution.py:            adjT = self._calculateAdj(tT, self.kT, self.padT, self.dT)
+build/lib.linux-x86_64-3.5/torch/legacy/nn/VolumetricFullConvolution.py:            self.padT, self.padW, self.padH,
+build/lib.linux-x86_64-3.5/torch/legacy/nn/VolumetricFullConvolution.py:            adjT = self._calculateAdj(tT, self.kT, self.padT, self.dT)
+build/lib.linux-x86_64-3.5/torch/legacy/nn/VolumetricFullConvolution.py:            self.padT, self.padW, self.padH,
+build/lib.linux-x86_64-3.5/torch/legacy/nn/VolumetricFullConvolution.py:                self.padT != 0 or self.padW != 0 or self.padH != 0 or \
+build/lib.linux-x86_64-3.5/torch/legacy/nn/VolumetricFullConvolution.py:        if self.padT != 0 or self.padW != 0 or self.padH != 0 or \
+build/lib.linux-x86_64-3.5/torch/legacy/nn/VolumetricFullConvolution.py:            s += ', {}, {}, {}'.format(self.padT, self.padW, self.padH)
+build/lib.linux-x86_64-3.5/torch/legacy/nn/VolumetricMaxPooling.py:    def __init__(self, kT, kW, kH, dT=None, dW=None, dH=None, padT=0, padW=0, padH=0):
+build/lib.linux-x86_64-3.5/torch/legacy/nn/VolumetricMaxPooling.py:        self.padT = padT
+build/lib.linux-x86_64-3.5/torch/legacy/nn/VolumetricMaxPooling.py:            self.padT, self.padW, self.padH,
+build/lib.linux-x86_64-3.5/torch/legacy/nn/VolumetricMaxPooling.py:            self.padT, self.padW, self.padH,
+build/lib.linux-x86_64-3.5/torch/legacy/nn/VolumetricMaxPooling.py:        if self.padT != 0 or self.padW != 0 or self.padH != 0:
+build/lib.linux-x86_64-3.5/torch/legacy/nn/VolumetricMaxPooling.py:            s += ', {}, {}, {}'.format(self.padT, self.padW, self.padH)
+build/lib.linux-x86_64-3.5/torch/legacy/nn/VolumetricAveragePooling.py:    def __init__(self, kT, kW, kH, dT=None, dW=None, dH=None, padT=None,padW=None,
+build/lib.linux-x86_64-3.5/torch/legacy/nn/VolumetricAveragePooling.py:        self.padT = padT or 0
+build/lib.linux-x86_64-3.5/torch/legacy/nn/VolumetricAveragePooling.py:            self.padT,self.padW,self.padH,
+build/lib.linux-x86_64-3.5/torch/legacy/nn/VolumetricAveragePooling.py:            self.padT, self.padH,self.padW,
+build/lib.linux-x86_64-3.5/torch/legacy/nn/VolumetricAveragePooling.py:        self.padT,self.padH,self.padW,
+Binary file build/lib.linux-x86_64-3.5/torch/_thnn/_THNN.cpython-35m-x86_64-linux-gnu.so matches
+Binary file build/temp.linux-x86_64-3.5/torch/csrc/nn/THNN_generic.o matches
+Binary file build/temp.linux-x86_64-3.5/torch/csrc/nn/THNN.o matches
+Binary file test/data/legacy_modules.t7 matches
+torch/lib/THCUNN/SpatialReplicationPadding.cu:  int padT, int padB, int padL, int padR) {
+torch/lib/THCUNN/SpatialReplicationPadding.cu:  int iStartY = max(0, -padT);
+torch/lib/THCUNN/SpatialReplicationPadding.cu:  int oStartY = max(0, padT);
+torch/lib/THCUNN/SpatialReplicationPadding.cu:  int inputPointY = min(max(padT, outputPointY), input.getSize(2) + padT - 1) - oStartY + iStartY;
+torch/lib/THCUNN/SpatialReplicationPadding.cu:  int padT, int padB, int padL, int padR) {
+torch/lib/THCUNN/SpatialReplicationPadding.cu:  int iStartY = max(0, -padT);
+torch/lib/THCUNN/SpatialReplicationPadding.cu:  int oStartY = max(0, padT);
+torch/lib/THCUNN/SpatialReplicationPadding.cu:  int inputPointY = min(max(padT, outputPointY), gradInput.getSize(2) + padT - 1) - oStartY + iStartY;
+torch/lib/THCUNN/generic/VolumetricFullConvolution.cu:               int padT, int padW, int padH,
+torch/lib/THCUNN/generic/VolumetricFullConvolution.cu:  long outputDepth = (inputDepth - 1) * dT - 2*padT + kT + adjT;
+torch/lib/THCUNN/generic/VolumetricFullConvolution.cu:       int padT, int padW, int padH,
+torch/lib/THCUNN/generic/VolumetricFullConvolution.cu:      dT, dW, dH, padT, padW, padH,
+torch/lib/THCUNN/generic/VolumetricFullConvolution.cu:  long outputDepth = (inputDepth - 1) * dT - 2*padT + kT + adjT;
+torch/lib/THCUNN/generic/VolumetricFullConvolution.cu:      nOutputPlane, outputDepth, outputHeight, outputWidth, kT, kH, kW, padT, padH, padW, dT, dH, dW,
+torch/lib/THCUNN/generic/VolumetricFullConvolution.cu:       int padT, int padW, int padH,
+torch/lib/THCUNN/generic/VolumetricFullConvolution.cu:      dT, dW, dH, padT, padW, padH,
+torch/lib/THCUNN/generic/VolumetricFullConvolution.cu:  long outputDepth = (inputDepth - 1) * dT - 2*padT + kT + adjT;
+torch/lib/THCUNN/generic/VolumetricFullConvolution.cu:      nOutputPlane, outputDepth, outputHeight, outputWidth, kT, kH, kW, padT, padH, padW, dT, dH, dW,
+torch/lib/THCUNN/generic/VolumetricFullConvolution.cu:           int padT, int padW, int padH,
+torch/lib/THCUNN/generic/VolumetricFullConvolution.cu:      gradBias, dT, dW, dH, padT, padW, padH,
+torch/lib/THCUNN/generic/VolumetricFullConvolution.cu:  long outputDepth  = (inputDepth - 1) * dT - 2*padT + kT + adjT;
+torch/lib/THCUNN/generic/VolumetricFullConvolution.cu:      nOutputPlane, outputDepth, outputHeight, outputWidth, kT, kH, kW, padT, padH, padW, dT, dH, dW,
+torch/lib/THCUNN/generic/VolumetricMaxPooling.cu:           int padT, int padW, int padH,
+torch/lib/THCUNN/generic/VolumetricMaxPooling.cu:        kT, kW, kH, dT, dW, dH, padT, padW, padH,
+torch/lib/THCUNN/generic/VolumetricMaxPooling.cu:           int padT, int padW, int padH,
+torch/lib/THCUNN/generic/VolumetricMaxPooling.cu:        kT, kW, kH, dT, dW, dH, padT, padW, padH,
+torch/lib/THCUNN/generic/SpatialReplicationPadding.cu:           int padT, int padB) {
+torch/lib/THCUNN/generic/SpatialReplicationPadding.cu:  int outputH = inputH + padT + padB;
+torch/lib/THCUNN/generic/SpatialReplicationPadding.cu:    devInput, devOutput, padT, padB, padL, padR);
+torch/lib/THCUNN/generic/SpatialReplicationPadding.cu:           int padT, int padB) {
+torch/lib/THCUNN/generic/SpatialReplicationPadding.cu:  int oheight = iheight + padT + padB;
+torch/lib/THCUNN/generic/SpatialReplicationPadding.cu:    devGradInput, devGradOutput, padT, padB, padL, padR);
+torch/lib/THCUNN/generic/VolumetricDilatedConvolution.cu:                         int padT, int padH, int padW,
+torch/lib/THCUNN/generic/VolumetricDilatedConvolution.cu:  long outputDepth  = (inputDepth  + 2*padT - (dilationT * (kT - 1) + 1)) / dT + 1;
+torch/lib/THCUNN/generic/VolumetricDilatedConvolution.cu:           int padT, int padW, int padH,
+torch/lib/THCUNN/generic/VolumetricDilatedConvolution.cu:        kT, kH, kW, dT, dH, dW, padT, padH, padW,
+torch/lib/THCUNN/generic/VolumetricDilatedConvolution.cu:  long outputDepth  = (inputDepth  + 2*padT - (dilationT * (kT - 1) + 1)) / dT + 1;
+torch/lib/THCUNN/generic/VolumetricDilatedConvolution.cu:      kT, kH, kW, padT, padH, padW, dT, dH, dW,
+torch/lib/THCUNN/generic/VolumetricDilatedConvolution.cu:           int padT, int padW, int padH,
+torch/lib/THCUNN/generic/VolumetricDilatedConvolution.cu:        kT, kH, kW, dT, dH, dW, padT, padH, padW,
+torch/lib/THCUNN/generic/VolumetricDilatedConvolution.cu:  long outputDepth  = (inputDepth + 2*padT - (dilationT * (kT - 1) + 1)) / dT + 1;
+torch/lib/THCUNN/generic/VolumetricDilatedConvolution.cu:      kT, kH, kW, padT, padH, padW, dT, dH, dW,
+torch/lib/THCUNN/generic/VolumetricDilatedConvolution.cu:           int padT, int padW, int padH,
+torch/lib/THCUNN/generic/VolumetricDilatedConvolution.cu:        kT, kH, kW, dT, dH, dW, padT, padH, padW,
+torch/lib/THCUNN/generic/VolumetricDilatedConvolution.cu:  long outputDepth  = (inputDepth + 2*padT - (dilationT * (kT - 1) + 1)) / dT + 1;
+torch/lib/THCUNN/generic/VolumetricDilatedConvolution.cu:      nInputPlane, inputDepth, inputHeight, inputWidth, kT, kH, kW, padT, padH, padW, dT, dH, dW,
+torch/lib/THCUNN/generic/SpatialReflectionPadding.cu:           int padT, int padB) {
+torch/lib/THCUNN/generic/SpatialReflectionPadding.cu:  int outputH = inputH + padT + padB;
+torch/lib/THCUNN/generic/SpatialReflectionPadding.cu:    devInput, devOutput, padT, padB, padL, padR);
+torch/lib/THCUNN/generic/SpatialReflectionPadding.cu:           int padT, int padB) {
+torch/lib/THCUNN/generic/SpatialReflectionPadding.cu:  int oheight = iheight + padT + padB;
+torch/lib/THCUNN/generic/SpatialReflectionPadding.cu:    devGradInput, devGradOutput, padT, padB, padL, padR);
+torch/lib/THCUNN/generic/VolumetricMaxUnpooling.cu:           int padT, int padW, int padH)
+torch/lib/THCUNN/generic/VolumetricMaxUnpooling.cu:        dT, dW, dH, padT, padW, padH);
+torch/lib/THCUNN/generic/VolumetricMaxUnpooling.cu:                             padT, padH, padW, offsetZ);
+torch/lib/THCUNN/generic/VolumetricMaxUnpooling.cu:           int padT, int padW, int padH)
+torch/lib/THCUNN/generic/VolumetricMaxUnpooling.cu:        dT, dW, dH, padT, padW, padH);
+torch/lib/THCUNN/generic/VolumetricMaxUnpooling.cu:                                             padT, padH, padW, offsetZ);
+torch/lib/THCUNN/generic/VolumetricDilatedMaxPooling.cu:    cudaInput, cudaIndices, cudaOutput, kT, kH, dT, dH, dW, padT, padH, padW,\
+torch/lib/THCUNN/generic/VolumetricDilatedMaxPooling.cu:                         int padT, int padW, int padH,
+torch/lib/THCUNN/generic/VolumetricDilatedMaxPooling.cu:  THArgCheck(kT/2 >= padT && kW/2 >= padW && kH/2 >= padH, 13,
+torch/lib/THCUNN/generic/VolumetricDilatedMaxPooling.cu:             "kT: %d kW: %d, kH: %d, padT: %d, padW: %d, padH: %d",
+torch/lib/THCUNN/generic/VolumetricDilatedMaxPooling.cu:             kT, kW, kH, padT, padW, padH);
+torch/lib/THCUNN/generic/VolumetricDilatedMaxPooling.cu:    outputTime   = (int)(ceil((float)(inputTime - (dilationT * (kT - 1) + 1) + 2*padT) / dT)) + 1;
+torch/lib/THCUNN/generic/VolumetricDilatedMaxPooling.cu:    outputTime   = (int)(floor((float)(inputTime - (dilationT * (kT - 1) + 1) + 2*padT) / dT)) + 1;
+torch/lib/THCUNN/generic/VolumetricDilatedMaxPooling.cu:  if (padT || padW || padH)
+torch/lib/THCUNN/generic/VolumetricDilatedMaxPooling.cu:    if ((outputTime - 1)*dT >= inputTime + padT)
+torch/lib/THCUNN/generic/VolumetricDilatedMaxPooling.cu:           int padT, int padW, int padH,
+torch/lib/THCUNN/generic/VolumetricDilatedMaxPooling.cu:        dT, dW, dH, padT, padW, padH,
+torch/lib/THCUNN/generic/VolumetricDilatedMaxPooling.cu:    outputTime   = (int)(ceil((float)(inputTime - (dilationT * (kT - 1) + 1) + 2*padT) / dT)) + 1;
+torch/lib/THCUNN/generic/VolumetricDilatedMaxPooling.cu:    outputTime   = (int)(floor((float)(inputTime - (dilationT * (kT - 1) + 1) + 2*padT) / dT)) + 1;
+torch/lib/THCUNN/generic/VolumetricDilatedMaxPooling.cu:  if (padT || padW || padH)
+torch/lib/THCUNN/generic/VolumetricDilatedMaxPooling.cu:    if ((outputTime - 1)*dT >= inputTime + padT)
+torch/lib/THCUNN/generic/VolumetricDilatedMaxPooling.cu:                             padT, padH, padW, dilationT, dilationH, dilationW, offsetZ);
+torch/lib/THCUNN/generic/VolumetricDilatedMaxPooling.cu:           int padT, int padW, int padH,
+torch/lib/THCUNN/generic/VolumetricDilatedMaxPooling.cu:        dT, dW, dH, padT, padW, padH,
+torch/lib/THCUNN/generic/VolumetricDilatedMaxPooling.cu:                                             padT, padH, padW,
+torch/lib/THCUNN/generic/VolumetricConvolution.cu:                         int padT,
+torch/lib/THCUNN/generic/VolumetricConvolution.cu:  long outputHeight = (inputHeight + 2*padT - kT) / dT + 1;
+torch/lib/THCUNN/generic/VolumetricConvolution.cu:           int padT, int padW, int padH)
+torch/lib/THCUNN/generic/VolumetricConvolution.cu:        bias, dT, dW, dH, padT, padW, padH);
+torch/lib/THCUNN/generic/VolumetricConvolution.cu:  long outputHeight = (inputHeight + 2*padT - kT) / dT + 1;
+torch/lib/THCUNN/generic/VolumetricConvolution.cu:      nInputPlane, inputHeight, inputWidth, inputDepth, kT, kH, kW, padT, padH, padW, dT, dH, dW,
+torch/lib/THCUNN/generic/VolumetricConvolution.cu:           int padT, int padW, int padH)
+torch/lib/THCUNN/generic/VolumetricConvolution.cu:        NULL, dT, dW, dH, padT, padW, padH);
+torch/lib/THCUNN/generic/VolumetricConvolution.cu:  long outputHeight = (inputHeight + 2*padT - kT) / dT + 1;
+torch/lib/THCUNN/generic/VolumetricConvolution.cu:      nInputPlane, inputHeight, inputWidth, inputDepth, kT, kH, kW, padT, padH, padW, dT, dH, dW,
+torch/lib/THCUNN/generic/VolumetricConvolution.cu:           int padT, int padW, int padH,
+torch/lib/THCUNN/generic/VolumetricConvolution.cu:        gradBias, dT, dW, dH, padT, padW, padH);
+torch/lib/THCUNN/generic/VolumetricConvolution.cu:  long outputHeight = (inputHeight + 2*padT - kT) / dT + 1;
+torch/lib/THCUNN/generic/VolumetricConvolution.cu:      nInputPlane, inputHeight, inputWidth, inputDepth, kT, kH, kW, padT, padH, padW, dT, dH, dW,
+torch/lib/THCUNN/generic/THCUNN.h:                  int padT, int padB);
+torch/lib/THCUNN/generic/THCUNN.h:                  int padT, int padB);
+torch/lib/THCUNN/generic/THCUNN.h:                  int padT, int padB);
+torch/lib/THCUNN/generic/THCUNN.h:                  int padT, int padB);
+torch/lib/THCUNN/generic/THCUNN.h:                  int padT, int padW, int padH);
+torch/lib/THCUNN/generic/THCUNN.h:                  int padT, int padW, int padH);
+torch/lib/THCUNN/generic/THCUNN.h:                  int padT, int padW, int padH,
+torch/lib/THCUNN/generic/THCUNN.h:                  int padT, int padW, int padH,
+torch/lib/THCUNN/generic/THCUNN.h:                  int padT, int padW, int padH,
+torch/lib/THCUNN/generic/THCUNN.h:                  int padT, int padW, int padH,
+torch/lib/THCUNN/generic/THCUNN.h:                  int padT, int padW, int padH,
+torch/lib/THCUNN/generic/THCUNN.h:                  int padT, int padW, int padH,
+torch/lib/THCUNN/generic/THCUNN.h:                  int padT, int padW, int padH,
+torch/lib/THCUNN/generic/THCUNN.h:                  int padT, int padW, int padH,
+torch/lib/THCUNN/generic/THCUNN.h:                  int padT, int padW, int padH,
+torch/lib/THCUNN/generic/THCUNN.h:                  int padT, int padW, int padH,
+torch/lib/THCUNN/generic/THCUNN.h:                  int padT, int padW, int padH,
+torch/lib/THCUNN/generic/THCUNN.h:                  int padT, int padW, int padH);
+torch/lib/THCUNN/generic/THCUNN.h:                  int padT, int padW, int padH);
+torch/lib/THCUNN/SpatialReflectionPadding.cu:  int padT, int padB, int padL, int padR) {
+torch/lib/THCUNN/SpatialReflectionPadding.cu:  int iStartY = max(0, -padT);
+torch/lib/THCUNN/SpatialReflectionPadding.cu:  int oStartY = max(0, padT);
+torch/lib/THCUNN/SpatialReflectionPadding.cu:  int inputPointY = abs(outputPointY - padT)
+torch/lib/THCUNN/SpatialReflectionPadding.cu:                  - abs(outputPointY - (input.getSize(2) + padT - 1))
+torch/lib/THCUNN/SpatialReflectionPadding.cu:                  + 2 * padT + input.getSize(2) - 1
+torch/lib/THCUNN/SpatialReflectionPadding.cu:  int padT, int padB, int padL, int padR) {
+torch/lib/THCUNN/SpatialReflectionPadding.cu:  int iStartY = max(0, -padT);
+torch/lib/THCUNN/SpatialReflectionPadding.cu:  int oStartY = max(0, padT);
+torch/lib/THCUNN/SpatialReflectionPadding.cu:  int inputPointY = abs(outputPointY - padT)
+torch/lib/THCUNN/SpatialReflectionPadding.cu:                  - abs(outputPointY - (gradInput.getSize(2) + padT - 1))
+torch/lib/THCUNN/SpatialReflectionPadding.cu:                  + 2 * padT + gradInput.getSize(2) - 1
+torch/lib/THCUNN/VolumetricMaxUnpooling.cu:  int padT, int padH, int padW, int offsetZ)
+torch/lib/THCUNN/VolumetricMaxUnpooling.cu:    long start_t = iFrame * dT - padT;
+torch/lib/THCUNN/VolumetricMaxUnpooling.cu:  int padT, int padH, int padW, int offsetZ)
+torch/lib/THCUNN/VolumetricMaxUnpooling.cu:    long start_t = iFrame * dT - padT;
+torch/lib/THCUNN/VolumetricDilatedMaxPooling.cu:  int padT, int padH, int padW,
+torch/lib/THCUNN/VolumetricDilatedMaxPooling.cu:    int iFrame  = oFrame  * dT - padT;
+torch/lib/THCUNN/VolumetricDilatedMaxPooling.cu:  int padT, int padH, int padW,
+torch/lib/THCUNN/VolumetricDilatedMaxPooling.cu:    int iFrame  = oFrame  * dT - padT;
+torch/lib/THCUNN/VolumetricDilatedMaxPooling.cu:  int padT, int padH, int padW,
+torch/lib/THCUNN/VolumetricDilatedMaxPooling.cu:    int iFrame  = ((unsigned char*)(idx))[0] * dilationT + oFrame  * dT - padT;
+Binary file torch/lib/build/THNN/CMakeFiles/THNN.dir/init.c.o matches
+Binary file torch/lib/build/THNN/libTHNN.so.1 matches
+Binary file torch/lib/libTHNN.so.1 matches
+torch/lib/THNN/generic/VolumetricAveragePooling.c:                         int padT,
+torch/lib/THNN/generic/VolumetricAveragePooling.c:    otime=(long)(ceil((float)(itime - kT+ 2*padT) / dimt)) + 1;
+torch/lib/THNN/generic/VolumetricAveragePooling.c:    otime=(long)(floor((float)(itime - kT+ 2*padT) / dimt)) + 1;
+torch/lib/THNN/generic/VolumetricAveragePooling.c:  if (padW || padH || padT)
+torch/lib/THNN/generic/VolumetricAveragePooling.c:      if ((otime  - 1)*dimt >= itime  + padT)
+torch/lib/THNN/generic/VolumetricAveragePooling.c:          int padT,
+torch/lib/THNN/generic/VolumetricAveragePooling.c:          int padT ,
+torch/lib/THNN/generic/VolumetricAveragePooling.c:        padT,padW,padH,
+torch/lib/THNN/generic/VolumetricAveragePooling.c:    otime=(long)(ceil((float)(itime - kT+ 2*padT) / dimt)) + 1;
+torch/lib/THNN/generic/VolumetricAveragePooling.c:    otime=(long)(floor((float)(itime - kT+ 2*padT) / dimt)) + 1;
+torch/lib/THNN/generic/VolumetricAveragePooling.c:  if (padW || padH || padT)
+torch/lib/THNN/generic/VolumetricAveragePooling.c:      if ((otime  - 1)*dimt >= itime  + padT)
+torch/lib/THNN/generic/VolumetricAveragePooling.c:      padT, padW, padH,
+torch/lib/THNN/generic/VolumetricAveragePooling.c:        padT, padW, padH,
+torch/lib/THNN/generic/VolumetricAveragePooling.c:          int padT,
+torch/lib/THNN/generic/VolumetricAveragePooling.c:          int padT,
+torch/lib/THNN/generic/VolumetricAveragePooling.c:        padT,padW,padH,
+torch/lib/THNN/generic/VolumetricAveragePooling.c:      padT,padW,padH,
+torch/lib/THNN/generic/VolumetricAveragePooling.c:        padT,padW,padH,
+torch/lib/THNN/generic/VolumetricDilatedMaxPooling.c:             "kT: %d kW: %d, kH: %d, padT: %d, padW: %d, padH: %d",
+torch/lib/THNN/generic/VolumetricDilatedConvolution.c:                         int padT, int padH, int padW,
+torch/lib/THNN/generic/VolumetricDilatedConvolution.c:  long outputDepth  = (inputDepth  + 2*padT - (dilationT * (kT - 1) + 1)) / dT + 1;
+torch/lib/THNN/generic/VolumetricDilatedConvolution.c:          int padT, int padW, int padH,
+torch/lib/THNN/generic/VolumetricDilatedConvolution.c:        kT, kH, kW, dT, dH, dW, padT, padH, padW,
+torch/lib/THNN/generic/VolumetricDilatedConvolution.c:  long outputDepth  = (inputDepth  + 2*padT - (dilationT * (kT - 1) + 1)) / dT + 1;
+torch/lib/THNN/generic/VolumetricDilatedConvolution.c:      kT, kH, kW, padT, padH, padW, dT, dH, dW,
+torch/lib/THNN/generic/VolumetricDilatedConvolution.c:          int padT, int padW, int padH,
+torch/lib/THNN/generic/VolumetricDilatedConvolution.c:        kT, kH, kW, dT, dH, dW, padT, padH, padW,
+torch/lib/THNN/generic/VolumetricDilatedConvolution.c:  long outputDepth  = (inputDepth + 2*padT - (dilationT * (kT - 1) + 1)) / dT + 1;
+torch/lib/THNN/generic/VolumetricDilatedConvolution.c:      kT, kH, kW, padT, padH, padW, dT, dH, dW,
+torch/lib/THNN/generic/VolumetricDilatedConvolution.c:          int padT, int padW, int padH,
+torch/lib/THNN/generic/VolumetricDilatedConvolution.c:        kT, kH, kW, dT, dH, dW, padT, padH, padW,
+torch/lib/THNN/generic/VolumetricDilatedConvolution.c:  long outputDepth  = (inputDepth + 2*padT - (dilationT * (kT - 1) + 1)) / dT + 1;
+torch/lib/THNN/generic/VolumetricDilatedConvolution.c:      kT, kH, kW, padT, padH, padW, dT, dH, dW,
+torch/lib/THNN/generic/THNN.h:  int padT ,
+torch/lib/THNN/generic/THNN.h:  int padT,
+torch/lib/THNN/generic/THNN.h:          int padT, int padW, int padH,
+torch/lib/THNN/generic/THNN.h:          int padT, int padW, int padH,
+torch/lib/THNN/generic/THNN.h:          int padT, int padW, int padH,
+torch/lib/THNN.h:  int padT ,
+torch/lib/THNN.h:  int padT,
+torch/lib/THNN.h:          int padT, int padW, int padH,
+torch/lib/THNN.h:          int padT, int padW, int padH,
+torch/lib/THNN.h:          int padT, int padW, int padH,
+Binary file torch/lib/tmp_install/lib/libTHNN.so.1 matches
+torch/lib/tmp_install/include/THNN/generic/THNN.h:  int padT ,
+torch/lib/tmp_install/include/THNN/generic/THNN.h:  int padT,
+torch/lib/tmp_install/include/THNN/generic/THNN.h:          int padT, int padW, int padH,
+torch/lib/tmp_install/include/THNN/generic/THNN.h:          int padT, int padW, int padH,
+torch/lib/tmp_install/include/THNN/generic/THNN.h:          int padT, int padW, int padH,
+torch/lib/THCUNN.h:                  int padT, int padB);
+torch/lib/THCUNN.h:                  int padT, int padB);
+torch/lib/THCUNN.h:                  int padT, int padB);
+torch/lib/THCUNN.h:                  int padT, int padB);
+torch/lib/THCUNN.h:                  int padT, int padW, int padH);
+torch/lib/THCUNN.h:                  int padT, int padW, int padH);
+torch/lib/THCUNN.h:                  int padT, int padW, int padH,
+torch/lib/THCUNN.h:                  int padT, int padW, int padH,
+torch/lib/THCUNN.h:                  int padT, int padW, int padH,
+torch/lib/THCUNN.h:                  int padT, int padW, int padH,
+torch/lib/THCUNN.h:                  int padT, int padW, int padH,
+torch/lib/THCUNN.h:                  int padT, int padW, int padH,
+torch/lib/THCUNN.h:                  int padT, int padW, int padH,
+torch/lib/THCUNN.h:                  int padT, int padW, int padH,
+torch/lib/THCUNN.h:                  int padT, int padW, int padH,
+torch/lib/THCUNN.h:                  int padT, int padW, int padH,
+torch/lib/THCUNN.h:                  int padT, int padW, int padH,
+torch/lib/THCUNN.h:                  int padT, int padW, int padH);
+torch/lib/THCUNN.h:                  int padT, int padW, int padH);
+torch/lib/include/THNN/generic/THNN.h:  int padT ,
+torch/lib/include/THNN/generic/THNN.h:  int padT,
+torch/lib/include/THNN/generic/THNN.h:          int padT, int padW, int padH,
+torch/lib/include/THNN/generic/THNN.h:          int padT, int padW, int padH,
+torch/lib/include/THNN/generic/THNN.h:          int padT, int padW, int padH,
+Binary file torch/_C.cpython-35m-x86_64-linux-gnu.so matches
+torch/legacy/nn/VolumetricMaxUnpooling.py:        self.padT = self.pooling.padT
+torch/legacy/nn/VolumetricMaxUnpooling.py:            self.padT, self.padW, self.padH
+torch/legacy/nn/VolumetricMaxUnpooling.py:            self.padT, self.padW, self.padH
+torch/legacy/nn/VolumetricConvolution.py:    def __init__(self, nInputPlane, nOutputPlane, kT, kW, kH, dT=1, dW=1, dH=1, padT=0, padW=None, padH=None):
+torch/legacy/nn/VolumetricConvolution.py:        self.padT = padT
+torch/legacy/nn/VolumetricConvolution.py:        self.padW = padW if padW is not None else self.padT
+torch/legacy/nn/VolumetricConvolution.py:                self.padT, self.padW, self.padH
+torch/legacy/nn/VolumetricConvolution.py:                self.padT, self.padW, self.padH
+torch/legacy/nn/VolumetricConvolution.py:                self.padT, self.padW, self.padH
+torch/legacy/nn/VolumetricConvolution.py:                self.padT, self.padW, self.padH
+torch/legacy/nn/VolumetricConvolution.py:                self.padT, self.padW, self.padH,
+torch/legacy/nn/VolumetricConvolution.py:                self.padT, self.padW, self.padH,
+torch/legacy/nn/VolumetricConvolution.py:           self.padT != 0 or self.padW != 0 or self.padH != 0:
+torch/legacy/nn/VolumetricConvolution.py:        if self.padT != 0 or self.padW != 0 or self.padH != 0:
+torch/legacy/nn/VolumetricConvolution.py:            s += ', {}, {}, {}'.format(self.padT, self.padW, self.padH)
+torch/legacy/nn/VolumetricFullConvolution.py:                 padT=0, padW=0, padH=0,     # padding
+torch/legacy/nn/VolumetricFullConvolution.py:        self.padT = padT
+torch/legacy/nn/VolumetricFullConvolution.py:            adjT = self._calculateAdj(tT, self.kT, self.padT, self.dT)
+torch/legacy/nn/VolumetricFullConvolution.py:            self.padT, self.padW, self.padH,
+torch/legacy/nn/VolumetricFullConvolution.py:            adjT = self._calculateAdj(tT, self.kT, self.padT, self.dT)
+torch/legacy/nn/VolumetricFullConvolution.py:            self.padT, self.padW, self.padH,
+torch/legacy/nn/VolumetricFullConvolution.py:            adjT = self._calculateAdj(tT, self.kT, self.padT, self.dT)
+torch/legacy/nn/VolumetricFullConvolution.py:            self.padT, self.padW, self.padH,
+torch/legacy/nn/VolumetricFullConvolution.py:                self.padT != 0 or self.padW != 0 or self.padH != 0 or \
+torch/legacy/nn/VolumetricFullConvolution.py:        if self.padT != 0 or self.padW != 0 or self.padH != 0 or \
+torch/legacy/nn/VolumetricFullConvolution.py:            s += ', {}, {}, {}'.format(self.padT, self.padW, self.padH)
+torch/legacy/nn/VolumetricMaxPooling.py:    def __init__(self, kT, kW, kH, dT=None, dW=None, dH=None, padT=0, padW=0, padH=0):
+torch/legacy/nn/VolumetricMaxPooling.py:        self.padT = padT
+torch/legacy/nn/VolumetricMaxPooling.py:            self.padT, self.padW, self.padH,
+torch/legacy/nn/VolumetricMaxPooling.py:            self.padT, self.padW, self.padH,
+torch/legacy/nn/VolumetricMaxPooling.py:        if self.padT != 0 or self.padW != 0 or self.padH != 0:
+torch/legacy/nn/VolumetricMaxPooling.py:            s += ', {}, {}, {}'.format(self.padT, self.padW, self.padH)
+torch/legacy/nn/VolumetricAveragePooling.py:    def __init__(self, kT, kW, kH, dT=None, dW=None, dH=None, padT=0,padW=0,
+torch/legacy/nn/VolumetricAveragePooling.py:        self.padT = padT or 0
+torch/legacy/nn/VolumetricAveragePooling.py:            self.padT,self.padW,self.padH,
+torch/legacy/nn/VolumetricAveragePooling.py:            self.padT, self.padH,self.padW,
+torch/legacy/nn/VolumetricAveragePooling.py:        self.padT,self.padH,self.padW,
+Binary file torch/legacy/nn/__pycache__/VolumetricFullConvolution.cpython-35.pyc matches
+Binary file torch/legacy/nn/__pycache__/VolumetricMaxPooling.cpython-35.pyc matches
+Binary file torch/legacy/nn/__pycache__/VolumetricConvolution.cpython-35.pyc matches
+Binary file torch/legacy/nn/__pycache__/VolumetricMaxUnpooling.cpython-35.pyc matches
+Binary file torch/legacy/nn/__pycache__/VolumetricAveragePooling.cpython-35.pyc matches
+Binary file torch/_thnn/_THNN.cpython-35m-x86_64-linux-gnu.so matches
+torch/csrc/nn/THNN.cwrap:    - int padT
+torch/csrc/nn/THNN.cwrap:    - int padT
+torch/csrc/nn/THNN.cwrap:    - int padT
+torch/csrc/nn/THNN.cwrap:    - int padT
+torch/csrc/nn/THNN.cwrap:    - int padT
+torch/csrc/nn/THNN.cwrap:    - int padT
+torch/csrc/nn/THNN.cwrap:    - int padT
+torch/csrc/nn/THNN.cwrap:    - int padT
+torch/csrc/nn/THNN.cwrap:    - int padT
+torch/csrc/nn/THNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THCUNN.cwrap:    - int padT
+torch/csrc/nn/THNN.cpp:    THPUtils_invalidArguments(args, NULL, "FloatVolumetricAveragePooling_updateOutput", 1, "(int state, torch.FloatTensor input, torch.FloatTensor output, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, bool ceil_mode, bool count_include_pad)");
+torch/csrc/nn/THNN.cpp:    THPUtils_invalidArguments(args, NULL, "DoubleVolumetricAveragePooling_updateOutput", 1, "(int state, torch.DoubleTensor input, torch.DoubleTensor output, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, bool ceil_mode, bool count_include_pad)");
+torch/csrc/nn/THNN.cpp:    THPUtils_invalidArguments(args, NULL, "FloatVolumetricAveragePooling_updateGradInput", 1, "(int state, torch.FloatTensor input, torch.FloatTensor gradOutput, torch.FloatTensor gradInput, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, bool ceil_mode, bool count_include_pad)");
+torch/csrc/nn/THNN.cpp:    THPUtils_invalidArguments(args, NULL, "DoubleVolumetricAveragePooling_updateGradInput", 1, "(int state, torch.DoubleTensor input, torch.DoubleTensor gradOutput, torch.DoubleTensor gradInput, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, bool ceil_mode, bool count_include_pad)");
+torch/csrc/nn/THNN.cpp:    THPUtils_invalidArguments(args, NULL, "FloatVolumetricDilatedConvolution_updateOutput", 1, "(int state, torch.FloatTensor input, torch.FloatTensor output, torch.FloatTensor weight, [torch.FloatTensor bias or None], torch.FloatTensor columns, torch.FloatTensor ones, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, int dilationT, int dilationW, int dilationH)");
+torch/csrc/nn/THNN.cpp:    THPUtils_invalidArguments(args, NULL, "DoubleVolumetricDilatedConvolution_updateOutput", 1, "(int state, torch.DoubleTensor input, torch.DoubleTensor output, torch.DoubleTensor weight, [torch.DoubleTensor bias or None], torch.DoubleTensor columns, torch.DoubleTensor ones, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, int dilationT, int dilationW, int dilationH)");
+torch/csrc/nn/THNN.cpp:    THPUtils_invalidArguments(args, NULL, "FloatVolumetricDilatedConvolution_updateGradInput", 1, "(int state, torch.FloatTensor input, torch.FloatTensor gradOutput, torch.FloatTensor gradInput, torch.FloatTensor weight, torch.FloatTensor gradColumns, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, int dilationT, int dilationW, int dilationH)");
+torch/csrc/nn/THNN.cpp:    THPUtils_invalidArguments(args, NULL, "DoubleVolumetricDilatedConvolution_updateGradInput", 1, "(int state, torch.DoubleTensor input, torch.DoubleTensor gradOutput, torch.DoubleTensor gradInput, torch.DoubleTensor weight, torch.DoubleTensor gradColumns, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, int dilationT, int dilationW, int dilationH)");
+torch/csrc/nn/THNN.cpp:    THPUtils_invalidArguments(args, NULL, "FloatVolumetricDilatedConvolution_accGradParameters", 1, "(int state, torch.FloatTensor input, torch.FloatTensor gradOutput, torch.FloatTensor gradWeight, [torch.FloatTensor gradBias or None], torch.FloatTensor columns, torch.FloatTensor ones, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, int dilationT, int dilationW, int dilationH, float scale)");
+torch/csrc/nn/THNN.cpp:    THPUtils_invalidArguments(args, NULL, "DoubleVolumetricDilatedConvolution_accGradParameters", 1, "(int state, torch.DoubleTensor input, torch.DoubleTensor gradOutput, torch.DoubleTensor gradWeight, [torch.DoubleTensor gradBias or None], torch.DoubleTensor columns, torch.DoubleTensor ones, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, int dilationT, int dilationW, int dilationH, float scale)");
+torch/csrc/nn/THNN_generic.cwrap:       - arg: int padT
+torch/csrc/nn/THNN_generic.cwrap:       - arg: int padT
+torch/csrc/nn/THNN_generic.cwrap:       - arg: int padT
+torch/csrc/nn/THNN_generic.cwrap:       - arg: int padT
+torch/csrc/nn/THNN_generic.cwrap:       - arg: int padT
+torch/csrc/nn/THNN_generic.cwrap:       - arg: int padT
+torch/csrc/nn/THNN_generic.cwrap:       - arg: int padT
+torch/csrc/nn/THNN_generic.cwrap:       - arg: int padT
+torch/csrc/nn/THNN_generic.cwrap:       - arg: int padT
+torch/csrc/nn/THNN_generic.cwrap:       - arg: int padT
+torch/csrc/nn/THNN_generic.cwrap:       - arg: int padT
+torch/csrc/nn/THNN_generic.cwrap:       - arg: int padT
+torch/csrc/nn/THNN_generic.cwrap:       - arg: int padT
+torch/csrc/nn/THNN_generic.cwrap:       - arg: int padT
+torch/csrc/nn/THNN_generic.cwrap:       - arg: int padT
+torch/csrc/nn/THNN_generic.cwrap:       - arg: int padT
+torch/csrc/nn/THNN_generic.cwrap:       - arg: int padT
+torch/csrc/nn/THNN_generic.cwrap:       - arg: int padT
+torch/csrc/nn/THNN_generic.cwrap:       - arg: int padT
+torch/csrc/nn/THNN_generic.cwrap:       - arg: int padT
+torch/csrc/nn/THNN_generic.cwrap:       - arg: int padT
+torch/csrc/nn/THNN_generic.cwrap:       - arg: int padT
+torch/csrc/nn/THNN_generic.cwrap:       - arg: int padT
+torch/csrc/nn/THNN_generic.cwrap:       - arg: int padT
+torch/csrc/nn/THNN_generic.h:void VolumetricAveragePooling_updateOutput(thpp::Tensor* input, thpp::Tensor* output, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, bool ceil_mode, bool count_include_pad);
+torch/csrc/nn/THNN_generic.h:void VolumetricAveragePooling_updateGradInput(thpp::Tensor* input, thpp::Tensor* gradOutput, thpp::Tensor* gradInput, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, bool ceil_mode, bool count_include_pad);
+torch/csrc/nn/THNN_generic.h:void VolumetricDilatedConvolution_updateOutput(thpp::Tensor* input, thpp::Tensor* output, thpp::Tensor* weight, thpp::Tensor* bias, thpp::Tensor* columns, thpp::Tensor* ones, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, int dilationT, int dilationW, int dilationH);
+torch/csrc/nn/THNN_generic.h:void VolumetricDilatedConvolution_updateGradInput(thpp::Tensor* input, thpp::Tensor* gradOutput, thpp::Tensor* gradInput, thpp::Tensor* weight, thpp::Tensor* gradColumns, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, int dilationT, int dilationW, int dilationH);
+torch/csrc/nn/THNN_generic.h:void VolumetricDilatedConvolution_accGradParameters(thpp::Tensor* input, thpp::Tensor* gradOutput, thpp::Tensor* gradWeight, thpp::Tensor* gradBias, thpp::Tensor* columns, thpp::Tensor* ones, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, int dilationT, int dilationW, int dilationH, double scale);
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaHalfSpatialReflectionPadding_updateOutput", 1, "(int state, torch.cuda.HalfTensor input, torch.cuda.HalfTensor output, int padL, int padR, int padT, int padB)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaSpatialReflectionPadding_updateOutput", 1, "(int state, torch.cuda.FloatTensor input, torch.cuda.FloatTensor output, int padL, int padR, int padT, int padB)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaDoubleSpatialReflectionPadding_updateOutput", 1, "(int state, torch.cuda.DoubleTensor input, torch.cuda.DoubleTensor output, int padL, int padR, int padT, int padB)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaHalfSpatialReflectionPadding_updateGradInput", 1, "(int state, torch.cuda.HalfTensor input, torch.cuda.HalfTensor gradOutput, torch.cuda.HalfTensor gradInput, int padL, int padR, int padT, int padB)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaSpatialReflectionPadding_updateGradInput", 1, "(int state, torch.cuda.FloatTensor input, torch.cuda.FloatTensor gradOutput, torch.cuda.FloatTensor gradInput, int padL, int padR, int padT, int padB)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaDoubleSpatialReflectionPadding_updateGradInput", 1, "(int state, torch.cuda.DoubleTensor input, torch.cuda.DoubleTensor gradOutput, torch.cuda.DoubleTensor gradInput, int padL, int padR, int padT, int padB)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaHalfSpatialReplicationPadding_updateOutput", 1, "(int state, torch.cuda.HalfTensor input, torch.cuda.HalfTensor output, int padL, int padR, int padT, int padB)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaSpatialReplicationPadding_updateOutput", 1, "(int state, torch.cuda.FloatTensor input, torch.cuda.FloatTensor output, int padL, int padR, int padT, int padB)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaDoubleSpatialReplicationPadding_updateOutput", 1, "(int state, torch.cuda.DoubleTensor input, torch.cuda.DoubleTensor output, int padL, int padR, int padT, int padB)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaHalfSpatialReplicationPadding_updateGradInput", 1, "(int state, torch.cuda.HalfTensor input, torch.cuda.HalfTensor gradOutput, torch.cuda.HalfTensor gradInput, int padL, int padR, int padT, int padB)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaSpatialReplicationPadding_updateGradInput", 1, "(int state, torch.cuda.FloatTensor input, torch.cuda.FloatTensor gradOutput, torch.cuda.FloatTensor gradInput, int padL, int padR, int padT, int padB)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaDoubleSpatialReplicationPadding_updateGradInput", 1, "(int state, torch.cuda.DoubleTensor input, torch.cuda.DoubleTensor gradOutput, torch.cuda.DoubleTensor gradInput, int padL, int padR, int padT, int padB)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaHalfVolumetricConvolution_updateOutput", 1, "(int state, torch.cuda.HalfTensor input, torch.cuda.HalfTensor output, torch.cuda.HalfTensor weight, [torch.cuda.HalfTensor bias or None], torch.cuda.HalfTensor finput, torch.cuda.HalfTensor fgradInput, int dT, int dW, int dH, int padT, int padW, int padH)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaVolumetricConvolution_updateOutput", 1, "(int state, torch.cuda.FloatTensor input, torch.cuda.FloatTensor output, torch.cuda.FloatTensor weight, [torch.cuda.FloatTensor bias or None], torch.cuda.FloatTensor finput, torch.cuda.FloatTensor fgradInput, int dT, int dW, int dH, int padT, int padW, int padH)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaDoubleVolumetricConvolution_updateOutput", 1, "(int state, torch.cuda.DoubleTensor input, torch.cuda.DoubleTensor output, torch.cuda.DoubleTensor weight, [torch.cuda.DoubleTensor bias or None], torch.cuda.DoubleTensor finput, torch.cuda.DoubleTensor fgradInput, int dT, int dW, int dH, int padT, int padW, int padH)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaHalfVolumetricConvolution_updateGradInput", 1, "(int state, torch.cuda.HalfTensor input, torch.cuda.HalfTensor gradOutput, torch.cuda.HalfTensor gradInput, torch.cuda.HalfTensor weight, torch.cuda.HalfTensor finput, int dT, int dW, int dH, int padT, int padW, int padH)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaVolumetricConvolution_updateGradInput", 1, "(int state, torch.cuda.FloatTensor input, torch.cuda.FloatTensor gradOutput, torch.cuda.FloatTensor gradInput, torch.cuda.FloatTensor weight, torch.cuda.FloatTensor finput, int dT, int dW, int dH, int padT, int padW, int padH)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaDoubleVolumetricConvolution_updateGradInput", 1, "(int state, torch.cuda.DoubleTensor input, torch.cuda.DoubleTensor gradOutput, torch.cuda.DoubleTensor gradInput, torch.cuda.DoubleTensor weight, torch.cuda.DoubleTensor finput, int dT, int dW, int dH, int padT, int padW, int padH)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaHalfVolumetricConvolution_accGradParameters", 1, "(int state, torch.cuda.HalfTensor input, torch.cuda.HalfTensor gradOutput, torch.cuda.HalfTensor gradWeight, [torch.cuda.HalfTensor gradBias or None], torch.cuda.HalfTensor finput, torch.cuda.HalfTensor fgradInput, int dT, int dW, int dH, int padT, int padW, int padH, float scale)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaVolumetricConvolution_accGradParameters", 1, "(int state, torch.cuda.FloatTensor input, torch.cuda.FloatTensor gradOutput, torch.cuda.FloatTensor gradWeight, [torch.cuda.FloatTensor gradBias or None], torch.cuda.FloatTensor finput, torch.cuda.FloatTensor fgradInput, int dT, int dW, int dH, int padT, int padW, int padH, float scale)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaDoubleVolumetricConvolution_accGradParameters", 1, "(int state, torch.cuda.DoubleTensor input, torch.cuda.DoubleTensor gradOutput, torch.cuda.DoubleTensor gradWeight, [torch.cuda.DoubleTensor gradBias or None], torch.cuda.DoubleTensor finput, torch.cuda.DoubleTensor fgradInput, int dT, int dW, int dH, int padT, int padW, int padH, float scale)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaHalfVolumetricDilatedConvolution_updateOutput", 1, "(int state, torch.cuda.HalfTensor input, torch.cuda.HalfTensor output, torch.cuda.HalfTensor weight, [torch.cuda.HalfTensor bias or None], torch.cuda.HalfTensor columns, torch.cuda.HalfTensor ones, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, int dilationT, int dilationW, int dilationH)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaVolumetricDilatedConvolution_updateOutput", 1, "(int state, torch.cuda.FloatTensor input, torch.cuda.FloatTensor output, torch.cuda.FloatTensor weight, [torch.cuda.FloatTensor bias or None], torch.cuda.FloatTensor columns, torch.cuda.FloatTensor ones, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, int dilationT, int dilationW, int dilationH)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaDoubleVolumetricDilatedConvolution_updateOutput", 1, "(int state, torch.cuda.DoubleTensor input, torch.cuda.DoubleTensor output, torch.cuda.DoubleTensor weight, [torch.cuda.DoubleTensor bias or None], torch.cuda.DoubleTensor columns, torch.cuda.DoubleTensor ones, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, int dilationT, int dilationW, int dilationH)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaHalfVolumetricDilatedConvolution_updateGradInput", 1, "(int state, torch.cuda.HalfTensor input, torch.cuda.HalfTensor gradOutput, torch.cuda.HalfTensor gradInput, torch.cuda.HalfTensor weight, torch.cuda.HalfTensor gradColumns, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, int dilationT, int dilationW, int dilationH)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaVolumetricDilatedConvolution_updateGradInput", 1, "(int state, torch.cuda.FloatTensor input, torch.cuda.FloatTensor gradOutput, torch.cuda.FloatTensor gradInput, torch.cuda.FloatTensor weight, torch.cuda.FloatTensor gradColumns, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, int dilationT, int dilationW, int dilationH)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaDoubleVolumetricDilatedConvolution_updateGradInput", 1, "(int state, torch.cuda.DoubleTensor input, torch.cuda.DoubleTensor gradOutput, torch.cuda.DoubleTensor gradInput, torch.cuda.DoubleTensor weight, torch.cuda.DoubleTensor gradColumns, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, int dilationT, int dilationW, int dilationH)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaHalfVolumetricDilatedConvolution_accGradParameters", 1, "(int state, torch.cuda.HalfTensor input, torch.cuda.HalfTensor gradOutput, torch.cuda.HalfTensor gradWeight, [torch.cuda.HalfTensor gradBias or None], torch.cuda.HalfTensor columns, torch.cuda.HalfTensor ones, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, int dilationT, int dilationW, int dilationH, float scale)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaVolumetricDilatedConvolution_accGradParameters", 1, "(int state, torch.cuda.FloatTensor input, torch.cuda.FloatTensor gradOutput, torch.cuda.FloatTensor gradWeight, [torch.cuda.FloatTensor gradBias or None], torch.cuda.FloatTensor columns, torch.cuda.FloatTensor ones, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, int dilationT, int dilationW, int dilationH, float scale)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaDoubleVolumetricDilatedConvolution_accGradParameters", 1, "(int state, torch.cuda.DoubleTensor input, torch.cuda.DoubleTensor gradOutput, torch.cuda.DoubleTensor gradWeight, [torch.cuda.DoubleTensor gradBias or None], torch.cuda.DoubleTensor columns, torch.cuda.DoubleTensor ones, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, int dilationT, int dilationW, int dilationH, float scale)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaHalfVolumetricDilatedMaxPooling_updateOutput", 1, "(int state, torch.cuda.HalfTensor input, torch.cuda.HalfTensor output, torch.cuda.LongTensor indices, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, int dilationT, int dilationW, int dilationH, bool ceilMode)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaVolumetricDilatedMaxPooling_updateOutput", 1, "(int state, torch.cuda.FloatTensor input, torch.cuda.FloatTensor output, torch.cuda.LongTensor indices, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, int dilationT, int dilationW, int dilationH, bool ceilMode)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaDoubleVolumetricDilatedMaxPooling_updateOutput", 1, "(int state, torch.cuda.DoubleTensor input, torch.cuda.DoubleTensor output, torch.cuda.LongTensor indices, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, int dilationT, int dilationW, int dilationH, bool ceilMode)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaHalfVolumetricDilatedMaxPooling_updateGradInput", 1, "(int state, torch.cuda.HalfTensor input, torch.cuda.HalfTensor gradOutput, torch.cuda.HalfTensor gradInput, torch.cuda.LongTensor indices, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, int dilationT, int dilationW, int dilationH, bool ceilMode)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaVolumetricDilatedMaxPooling_updateGradInput", 1, "(int state, torch.cuda.FloatTensor input, torch.cuda.FloatTensor gradOutput, torch.cuda.FloatTensor gradInput, torch.cuda.LongTensor indices, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, int dilationT, int dilationW, int dilationH, bool ceilMode)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaDoubleVolumetricDilatedMaxPooling_updateGradInput", 1, "(int state, torch.cuda.DoubleTensor input, torch.cuda.DoubleTensor gradOutput, torch.cuda.DoubleTensor gradInput, torch.cuda.LongTensor indices, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, int dilationT, int dilationW, int dilationH, bool ceilMode)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaHalfVolumetricFullConvolution_updateOutput", 1, "(int state, torch.cuda.HalfTensor input, torch.cuda.HalfTensor output, torch.cuda.HalfTensor weight, [torch.cuda.HalfTensor bias or None], torch.cuda.HalfTensor finput, torch.cuda.HalfTensor fgradInput, int dT, int dW, int dH, int padT, int padW, int padH, int adjT, int adjW, int adjH)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaVolumetricFullConvolution_updateOutput", 1, "(int state, torch.cuda.FloatTensor input, torch.cuda.FloatTensor output, torch.cuda.FloatTensor weight, [torch.cuda.FloatTensor bias or None], torch.cuda.FloatTensor finput, torch.cuda.FloatTensor fgradInput, int dT, int dW, int dH, int padT, int padW, int padH, int adjT, int adjW, int adjH)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaDoubleVolumetricFullConvolution_updateOutput", 1, "(int state, torch.cuda.DoubleTensor input, torch.cuda.DoubleTensor output, torch.cuda.DoubleTensor weight, [torch.cuda.DoubleTensor bias or None], torch.cuda.DoubleTensor finput, torch.cuda.DoubleTensor fgradInput, int dT, int dW, int dH, int padT, int padW, int padH, int adjT, int adjW, int adjH)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaHalfVolumetricFullConvolution_updateGradInput", 1, "(int state, torch.cuda.HalfTensor input, torch.cuda.HalfTensor gradOutput, torch.cuda.HalfTensor gradInput, torch.cuda.HalfTensor weight, torch.cuda.HalfTensor finput, torch.cuda.HalfTensor fgradInput, int dT, int dW, int dH, int padT, int padW, int padH, int adjT, int adjW, int adjH)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaVolumetricFullConvolution_updateGradInput", 1, "(int state, torch.cuda.FloatTensor input, torch.cuda.FloatTensor gradOutput, torch.cuda.FloatTensor gradInput, torch.cuda.FloatTensor weight, torch.cuda.FloatTensor finput, torch.cuda.FloatTensor fgradInput, int dT, int dW, int dH, int padT, int padW, int padH, int adjT, int adjW, int adjH)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaDoubleVolumetricFullConvolution_updateGradInput", 1, "(int state, torch.cuda.DoubleTensor input, torch.cuda.DoubleTensor gradOutput, torch.cuda.DoubleTensor gradInput, torch.cuda.DoubleTensor weight, torch.cuda.DoubleTensor finput, torch.cuda.DoubleTensor fgradInput, int dT, int dW, int dH, int padT, int padW, int padH, int adjT, int adjW, int adjH)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaHalfVolumetricFullConvolution_accGradParameters", 1, "(int state, torch.cuda.HalfTensor input, torch.cuda.HalfTensor gradOutput, torch.cuda.HalfTensor gradWeight, [torch.cuda.HalfTensor gradBias or None], torch.cuda.HalfTensor finput, torch.cuda.HalfTensor fgradInput, int dT, int dW, int dH, int padT, int padW, int padH, int adjT, int adjW, int adjH, float scale)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaVolumetricFullConvolution_accGradParameters", 1, "(int state, torch.cuda.FloatTensor input, torch.cuda.FloatTensor gradOutput, torch.cuda.FloatTensor gradWeight, [torch.cuda.FloatTensor gradBias or None], torch.cuda.FloatTensor finput, torch.cuda.FloatTensor fgradInput, int dT, int dW, int dH, int padT, int padW, int padH, int adjT, int adjW, int adjH, float scale)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaDoubleVolumetricFullConvolution_accGradParameters", 1, "(int state, torch.cuda.DoubleTensor input, torch.cuda.DoubleTensor gradOutput, torch.cuda.DoubleTensor gradWeight, [torch.cuda.DoubleTensor gradBias or None], torch.cuda.DoubleTensor finput, torch.cuda.DoubleTensor fgradInput, int dT, int dW, int dH, int padT, int padW, int padH, int adjT, int adjW, int adjH, float scale)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaHalfVolumetricMaxPooling_updateOutput", 1, "(int state, torch.cuda.HalfTensor input, torch.cuda.HalfTensor output, torch.cuda.LongTensor indices, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, bool ceilMode)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaVolumetricMaxPooling_updateOutput", 1, "(int state, torch.cuda.FloatTensor input, torch.cuda.FloatTensor output, torch.cuda.LongTensor indices, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, bool ceilMode)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaDoubleVolumetricMaxPooling_updateOutput", 1, "(int state, torch.cuda.DoubleTensor input, torch.cuda.DoubleTensor output, torch.cuda.LongTensor indices, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, bool ceilMode)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaHalfVolumetricMaxPooling_updateGradInput", 1, "(int state, torch.cuda.HalfTensor input, torch.cuda.HalfTensor gradOutput, torch.cuda.HalfTensor gradInput, torch.cuda.LongTensor indices, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, bool ceilMode)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaVolumetricMaxPooling_updateGradInput", 1, "(int state, torch.cuda.FloatTensor input, torch.cuda.FloatTensor gradOutput, torch.cuda.FloatTensor gradInput, torch.cuda.LongTensor indices, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, bool ceilMode)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaDoubleVolumetricMaxPooling_updateGradInput", 1, "(int state, torch.cuda.DoubleTensor input, torch.cuda.DoubleTensor gradOutput, torch.cuda.DoubleTensor gradInput, torch.cuda.LongTensor indices, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, bool ceilMode)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaHalfVolumetricMaxUnpooling_updateOutput", 1, "(int state, torch.cuda.HalfTensor input, torch.cuda.HalfTensor output, torch.cuda.LongTensor indices, int outputTime, int outputWidth, int outputHeight, int dT, int dW, int dH, int padT, int padW, int padH)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaVolumetricMaxUnpooling_updateOutput", 1, "(int state, torch.cuda.FloatTensor input, torch.cuda.FloatTensor output, torch.cuda.LongTensor indices, int outputTime, int outputWidth, int outputHeight, int dT, int dW, int dH, int padT, int padW, int padH)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaDoubleVolumetricMaxUnpooling_updateOutput", 1, "(int state, torch.cuda.DoubleTensor input, torch.cuda.DoubleTensor output, torch.cuda.LongTensor indices, int outputTime, int outputWidth, int outputHeight, int dT, int dW, int dH, int padT, int padW, int padH)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaHalfVolumetricMaxUnpooling_updateGradInput", 1, "(int state, torch.cuda.HalfTensor input, torch.cuda.HalfTensor gradOutput, torch.cuda.HalfTensor gradInput, torch.cuda.LongTensor indices, int outputTime, int outputWidth, int outputHeight, int dT, int dW, int dH, int padT, int padW, int padH)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaVolumetricMaxUnpooling_updateGradInput", 1, "(int state, torch.cuda.FloatTensor input, torch.cuda.FloatTensor gradOutput, torch.cuda.FloatTensor gradInput, torch.cuda.LongTensor indices, int outputTime, int outputWidth, int outputHeight, int dT, int dW, int dH, int padT, int padW, int padH)");
+torch/csrc/nn/THCUNN.cpp:    THPUtils_invalidArguments(args, NULL, "CudaDoubleVolumetricMaxUnpooling_updateGradInput", 1, "(int state, torch.cuda.DoubleTensor input, torch.cuda.DoubleTensor gradOutput, torch.cuda.DoubleTensor gradInput, torch.cuda.LongTensor indices, int outputTime, int outputWidth, int outputHeight, int dT, int dW, int dH, int padT, int padW, int padH)");
+torch/csrc/nn/THNN_generic.cpp:void VolumetricAveragePooling_updateOutput(thpp::Tensor* input, thpp::Tensor* output, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, bool ceil_mode, bool count_include_pad)
+torch/csrc/nn/THNN_generic.cpp:            padT,
+torch/csrc/nn/THNN_generic.cpp:            padT,
+torch/csrc/nn/THNN_generic.cpp:void VolumetricAveragePooling_updateGradInput(thpp::Tensor* input, thpp::Tensor* gradOutput, thpp::Tensor* gradInput, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, bool ceil_mode, bool count_include_pad)
+torch/csrc/nn/THNN_generic.cpp:            padT,
+torch/csrc/nn/THNN_generic.cpp:            padT,
+torch/csrc/nn/THNN_generic.cpp:void VolumetricDilatedConvolution_updateOutput(thpp::Tensor* input, thpp::Tensor* output, thpp::Tensor* weight, thpp::Tensor* bias, thpp::Tensor* columns, thpp::Tensor* ones, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, int dilationT, int dilationW, int dilationH)
+torch/csrc/nn/THNN_generic.cpp:            padT,
+torch/csrc/nn/THNN_generic.cpp:            padT,
+torch/csrc/nn/THNN_generic.cpp:            padT,
+torch/csrc/nn/THNN_generic.cpp:            padT,
+torch/csrc/nn/THNN_generic.cpp:            padT,
+torch/csrc/nn/THNN_generic.cpp:void VolumetricDilatedConvolution_updateGradInput(thpp::Tensor* input, thpp::Tensor* gradOutput, thpp::Tensor* gradInput, thpp::Tensor* weight, thpp::Tensor* gradColumns, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, int dilationT, int dilationW, int dilationH)
+torch/csrc/nn/THNN_generic.cpp:            padT,
+torch/csrc/nn/THNN_generic.cpp:            padT,
+torch/csrc/nn/THNN_generic.cpp:            padT,
+torch/csrc/nn/THNN_generic.cpp:            padT,
+torch/csrc/nn/THNN_generic.cpp:            padT,
+torch/csrc/nn/THNN_generic.cpp:void VolumetricDilatedConvolution_accGradParameters(thpp::Tensor* input, thpp::Tensor* gradOutput, thpp::Tensor* gradWeight, thpp::Tensor* gradBias, thpp::Tensor* columns, thpp::Tensor* ones, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, int dilationT, int dilationW, int dilationH, double scale)
+torch/csrc/nn/THNN_generic.cpp:            padT,
+torch/csrc/nn/THNN_generic.cpp:            padT,
+torch/csrc/nn/THNN_generic.cpp:            padT,
+torch/csrc/nn/THNN_generic.cpp:            padT,
+torch/csrc/nn/THNN_generic.cpp:            padT,

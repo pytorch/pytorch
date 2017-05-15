@@ -600,13 +600,21 @@ class AvgPool3d(Module):
         >>> output = m(input)
     """
 
-    def __init__(self, kernel_size, stride=None):
+
+    ##first update, 3/23, Jeyte
+    ## added the same parameters as 2d version
+    def __init__(self, kernel_size, stride=None, padding=0, ceil_mode=False,
+                 count_include_pad=True):
         super(AvgPool3d, self).__init__()
         self.kernel_size = kernel_size
-        self.stride = stride
+        self.stride = stride or kernel_size
+        self.padding = padding 
+        self.ceil_mode = ceil_mode
+        self.count_include_pad = count_include_pad
 
     def forward(self, input):
-        return F.avg_pool3d(input, self.kernel_size, self.stride)
+        return F.avg_pool3d(input, self.kernel_size, self.stride,
+                            self.padding, self.ceil_mode, self.count_include_pad)
 
 
 class FractionalMaxPool2d(Module):
