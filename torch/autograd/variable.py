@@ -328,16 +328,16 @@ class Variable(_C._VariableBase):
             return PowConstant.apply(self, other)
 
     def exp(self):
-        return Exp()(self)
+        return Exp.apply(self)
 
     def exp_(self):
-        return Exp(inplace=True)(self)
+        return Exp.apply(self, True)
 
     def log(self):
-        return Log()(self)
+        return Log.apply(self)
 
     def log1p(self):
-        return Log1p()(self)
+        return Log1p.apply(self)
 
     def neg(self):
         return Negate.apply(self)
@@ -346,10 +346,10 @@ class Variable(_C._VariableBase):
         return Negate.apply(self, True)
 
     def tanh(self):
-        return Tanh()(self)
+        return Tanh.apply(self)
 
     def tanh_(self):
-        return Tanh(True)(self)
+        return Tanh.apply(self, True)
 
     def sigmoid(self):
         return Sigmoid.apply(self)
@@ -358,28 +358,28 @@ class Variable(_C._VariableBase):
         return Sigmoid.apply(self, True)
 
     def sin(self):
-        return Sin()(self)
+        return Sin.apply(self)
 
     def cos(self):
-        return Cos()(self)
+        return Cos.apply(self)
 
     def tan(self):
-        return Tan()(self)
+        return Tan.apply(self)
 
     def asin(self):
-        return Asin()(self)
+        return Asin.apply(self)
 
     def acos(self):
-        return Acos()(self)
+        return Acos.apply(self)
 
     def atan(self):
-        return Atan()(self)
+        return Atan.apply(self)
 
     def sinh(self):
-        return Sinh()(self)
+        return Sinh.apply(self)
 
     def cosh(self):
-        return Cosh()(self)
+        return Cosh.apply(self)
 
     def abs(self):
         return Abs.apply(self)
@@ -396,40 +396,40 @@ class Variable(_C._VariableBase):
             return Clamp.apply(self, min, max)
 
     def reciprocal(self):
-        return Reciprocal()(self)
+        return Reciprocal.apply(self)
 
     def floor(self):
-        return Floor()(self)
+        return Floor.apply(self)
 
     def ceil(self):
-        return Ceil()(self)
+        return Ceil.apply(self)
 
     def frac(self):
-        return Frac()(self)
+        return Frac.apply(self)
 
     def sqrt(self):
         return Sqrt.apply(self)
 
     def round(self):
-        return Round()(self)
+        return Round.apply(self)
 
     def sign(self):
-        return Sign()(self)
+        return Sign.apply(self)
 
     def trunc(self):
-        return Trunc()(self)
+        return Trunc.apply(self)
 
     def fmod(self, value):
-        return Fmod(value)(self)
+        return Fmod.apply(self, value)
 
     def remainder(self, value):
-        return Remainder(value)(self)
+        return Remainder.apply(self, value)
 
     def lerp(self, tensor, weight):
-        return Lerp(weight)(self, tensor)
+        return Lerp.apply(self, tensor, weight)
 
     def rsqrt(self):
-        return Rsqrt()(self)
+        return Rsqrt.apply(self)
 
     def sum(self, dim=None, keepdim=True):
         return Sum.apply(self, dim, keepdim)
@@ -442,12 +442,12 @@ class Variable(_C._VariableBase):
 
     def max(self, dim=None, keepdim=True):
         if isinstance(dim, Variable):
-            return Cmax()(self, dim)
+            return Cmax.apply(self, dim)
         return Max(dim, keepdim)(self)
 
     def min(self, dim=None, keepdim=True):
         if isinstance(dim, Variable):
-            return Cmin()(self, dim)
+            return Cmin.apply(self, dim)
         return Min(dim, keepdim)(self)
 
     def mode(self, dim, keepdim=True):
@@ -582,19 +582,25 @@ class Variable(_C._VariableBase):
     def dot(self, other):
         return Dot.apply(self, other)
 
-    def _addcop(self, op, args):
+    def _addcop(self, op, args, inplace):
         if len(args) == 3:
-            # scale, tensor1, tensor2
-            return op(args[0])(self, *args[1:])
+            # args == [scale, tensor1, tensor2]
+            return op.apply(self, args[1], args[2], args[0], inplace)
         else:
-            # tensor1, tensor2
-            return op()(self, *args)
+            # args == [tensor1, tensor2]
+            return op.apply(self, args[0], args[1], 1.0, inplace)
 
     def addcmul(self, *args):
-        return self._addcop(Addcmul, args)
+        return self._addcop(Addcmul, args, False)
 
     def addcdiv(self, *args):
-        return self._addcop(Addcdiv, args)
+        return self._addcop(Addcdiv, args, False)
+
+    def addcmul_(self, *args):
+        return self._addcop(Addcmul, args, True)
+
+    def addcdiv_(self, *args):
+        return self._addcop(Addcdiv, args, True)
 
     def norm(self, p=2, dim=None, keepdim=True):
         return Norm.apply(self, p, dim, keepdim)
