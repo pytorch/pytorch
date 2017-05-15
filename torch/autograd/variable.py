@@ -439,32 +439,32 @@ class Variable(_C._VariableBase):
     def rsqrt(self):
         return Rsqrt.apply(self)
 
-    def sum(self, dim=None, keepdim=True):
+    def sum(self, dim=None, keepdim=False):
         return Sum.apply(self, dim, keepdim)
 
-    def prod(self, dim=None, keepdim=True):
+    def prod(self, dim=None, keepdim=False):
         return Prod.apply(self, dim, keepdim)
 
-    def mean(self, dim=None, keepdim=True):
+    def mean(self, dim=None, keepdim=False):
         return Mean.apply(self, dim, keepdim)
 
-    def max(self, dim=None, keepdim=True):
+    def max(self, dim=None, keepdim=False):
         if isinstance(dim, Variable):
             return Cmax.apply(self, dim)
         return Max.apply(self, dim, keepdim)
 
-    def min(self, dim=None, keepdim=True):
+    def min(self, dim=None, keepdim=False):
         if isinstance(dim, Variable):
             return Cmin.apply(self, dim)
         return Min.apply(self, dim, keepdim)
 
-    def mode(self, dim=None, keepdim=True):
+    def mode(self, dim=None, keepdim=False):
         return Mode.apply(self, dim, keepdim)
 
-    def median(self, dim=None, keepdim=True):
+    def median(self, dim=None, keepdim=False):
         return Median.apply(self, dim, keepdim)
 
-    def kthvalue(self, k, dim=None, keepdim=True):
+    def kthvalue(self, k, dim=None, keepdim=False):
         return Kthvalue.apply(self, k, dim, keepdim)
 
     def sort(self, dim=None, descending=False):
@@ -495,7 +495,7 @@ class Variable(_C._VariableBase):
     def unfold(self, dim, size, step):
         return Unfold.apply(self, dim, size, step)
 
-    def var(self, dim=None, keepdim=True, unbiased=True):
+    def var(self, dim=None, keepdim=False, unbiased=True):
         mean = self.mean(dim, keepdim)
         if dim is None:
             mean = mean.view(*(1 for s in self.size()))
@@ -508,7 +508,7 @@ class Variable(_C._VariableBase):
         numel = self.numel() if dim is None else self.size(dim)
         return var.div(numel - int(unbiased))
 
-    def std(self, dim=None, keepdim=True):
+    def std(self, dim=None, keepdim=False):
         return self.var(dim, keepdim).sqrt()
 
     def renorm(self, p, dim, maxnorm):
@@ -610,7 +610,7 @@ class Variable(_C._VariableBase):
     def addcdiv_(self, *args):
         return self._addcop(Addcdiv, args, True)
 
-    def norm(self, p=2, dim=None, keepdim=True):
+    def norm(self, p=2, dim=None, keepdim=False):
         return Norm.apply(self, p, dim, keepdim)
 
     def dist(self, tensor, p=2):

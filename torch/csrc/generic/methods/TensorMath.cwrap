@@ -498,7 +498,7 @@
         - arg: long dim
           wrap_dim: self
         - arg: bool keepdim
-          default: "true"
+          default: "false"
 ]]
 
 [[
@@ -520,7 +520,7 @@
           wrap_dim: self
         - CONSTANT false
         - arg: bool keepdim
-          default: "true"
+          default: "false"
 ]]
 
 [[
@@ -542,7 +542,7 @@
           wrap_dim: self
         - CONSTANT false
         - arg: bool keepdim
-          default: "true"
+          default: "false"
 ]]
 
 [[
@@ -566,7 +566,7 @@
         - arg: long dim
           wrap_dim: self
         - arg: bool keepdim
-          default: "true"
+          default: "false"
 ]]
 
 [[
@@ -850,7 +850,7 @@
         - arg: long dim
           wrap_dim: self
         - arg: bool keepdim
-          default: "true"
+          default: "false"
 ]]
 
 [[
@@ -870,7 +870,7 @@
         - arg: long dim
           wrap_dim: self
         - arg: bool keepdim
-          default: "true"
+          default: "false"
 ]]
 
 [[

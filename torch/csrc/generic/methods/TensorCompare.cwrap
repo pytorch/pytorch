@@ -419,7 +419,7 @@
         - arg: long dim
           wrap_dim: self
         - arg: bool keepdim
-          default: "true"
+          default: "false"
 ]]
 
 [[
@@ -448,7 +448,7 @@
         - arg: long dim
           wrap_dim: self
         - arg: bool keepdim
-          default: "true"
+          default: "false"
 ]]
 
 [[
@@ -467,7 +467,7 @@
         - long k
         - CONSTANT __last_dim
         - arg: bool keepdim
-          default: "true"
+          default: "false"
     - arguments:
         - arg: THTensor* values
           output: True
@@ -478,7 +478,7 @@
         - arg: long dim
           wrap_dim: self
         - arg: bool keepdim
-          default: "true"
+          default: "false"
 ]]
 
 [[
@@ -495,7 +495,7 @@
         - THTensor* self
         - CONSTANT __last_dim
         - arg: bool keepdim
-          default: "true"
+          default: "false"
     - arguments:
         - arg: THTensor* values
           output: True
@@ -505,7 +505,7 @@
         - arg: long dim
           wrap_dim: self
         - arg: bool keepdim
-          default: "true"
+          default: "false"
 ]]
 
 [[
@@ -523,7 +523,7 @@
         - THTensor* self
         - CONSTANT __last_dim
         - arg: bool keepdim
-          default: "true"
+          default: "false"
     - arguments:
         - arg: THTensor* values
           output: True
@@ -533,7 +533,7 @@
         - arg: long dim
           wrap_dim: self
         - arg: bool keepdim
-          default: "true"
+          default: "false"
 ]]
 
 [[
