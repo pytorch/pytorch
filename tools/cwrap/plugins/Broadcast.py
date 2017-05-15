@@ -1,6 +1,16 @@
 from . import CWrapPlugin
 from string import Template
 
+# Arguments to the Broadcast Plugin:
+# broadcast: args_to_broadcast_against [inplace] [fallback]
+# [args_to_broadcast_against]: either a single argument (e.g. "arg1") or a comma-seperated
+#                              list of two arguments (e.g. "tensor1,tensor2") indicating
+#                              arguments to broadcast specified argument (usually "self") against
+# [inplace] will generate code for in-place function, which doesn't allow the in-place
+#           argument to be broadcast
+# [fallback] if tensors aren't broadcastable, preserves "element number" pointwise behavior,
+#            where only number of elements need to match, and tensors are viewed as 1-dimensional.
+
 # For out of place:
 # Two args: expand the two args together
 # Three args (fused kernels): (e.g. addcmul) expand all three args together
