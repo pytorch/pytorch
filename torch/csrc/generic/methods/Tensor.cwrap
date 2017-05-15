@@ -862,3 +862,22 @@ PyObject * THPTensor_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
         - THTensor* self
         - THTensor* other
 ]]
+
+[[
+  name: __xor__
+  with_stateless: True
+  return: argument 0
+  options:
+    - cname: bitxor
+      arguments:
+        - arg: THTensor* result
+          output: True
+        - THTensor* self
+        - real value
+    - cname: cbitxor
+      arguments:
+        - arg: THTensor* result
+          output: True
+        - THTensor* self
+        - THTensor* other
+]]
