@@ -824,3 +824,183 @@ PyObject * THPTensor_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
   return THPCopyMethod(THTensor_(copy_functions), self, args, kwargs);
   END_HANDLE_TH_ERRORS
 }
+
+[[
+  name: __and__
+  with_stateless: True
+  return: argument 0
+  options:
+    - cname: bitand
+      arguments:
+        - arg: THTensor* result
+          output: True
+        - THTensor* self
+        - real value
+    - cname: cbitand
+      arguments:
+        - arg: THTensor* result
+          output: True
+        - THTensor* self
+        - THTensor* other
+]]
+
+[[
+  name: __iand__
+  with_stateless: True
+  return: argument 0
+  options:
+    - cname: bitand
+      arguments:
+        - THTensor* self
+        - THTensor* self
+        - real value
+    - cname: cbitand
+      arguments:
+        - THTensor* self
+        - THTensor* self
+        - THTensor* other
+]]
+
+[[
+  name: __or__
+  with_stateless: True
+  return: argument 0
+  options:
+    - cname: bitor
+      arguments:
+        - arg: THTensor* result
+          output: True
+        - THTensor* self
+        - real value
+    - cname: cbitor
+      arguments:
+        - arg: THTensor* result
+          output: True
+        - THTensor* self
+        - THTensor* other
+]]
+
+[[
+  name: __ior__
+  with_stateless: True
+  return: argument 0
+  options:
+    - cname: bitor
+      arguments:
+        - THTensor* self
+        - THTensor* self
+        - real value
+    - cname: cbitor
+      arguments:
+        - THTensor* self
+        - THTensor* self
+        - THTensor* other
+]]
+
+[[
+  name: __xor__
+  with_stateless: True
+  return: argument 0
+  options:
+    - cname: bitxor
+      arguments:
+        - arg: THTensor* result
+          output: True
+        - THTensor* self
+        - real value
+    - cname: cbitxor
+      arguments:
+        - arg: THTensor* result
+          output: True
+        - THTensor* self
+        - THTensor* other
+]]
+
+[[
+  name: __ixor__
+  with_stateless: True
+  return: argument 0
+  options:
+    - cname: bitxor
+      arguments:
+        - THTensor* self
+        - THTensor* self
+        - real value
+    - cname: cbitxor
+      arguments:
+        - THTensor* self
+        - THTensor* self
+        - THTensor* other
+]]
+
+[[
+  name: __lshift__
+  with_stateless: True
+  return: argument 0
+  options:
+    - cname: lshift
+      arguments:
+        - arg: THTensor* result
+          output: True
+        - THTensor* self
+        - real value
+    - cname: clshift
+      arguments:
+        - arg: THTensor* result
+          output: True
+        - THTensor* self
+        - THTensor* other
+]]
+
+[[
+  name: __ilshift__
+  with_stateless: True
+  return: argument 0
+  options:
+    - cname: lshift
+      arguments:
+        - THTensor* self
+        - THTensor* self
+        - real value
+    - cname: clshift
+      arguments:
+        - THTensor* self
+        - THTensor* self
+        - THTensor* other
+]]
+
+[[
+  name: __rshift__
+  with_stateless: True
+  return: argument 0
+  options:
+    - cname: rshift
+      arguments:
+        - arg: THTensor* result
+          output: True
+        - THTensor* self
+        - real value
+    - cname: crshift
+      arguments:
+        - arg: THTensor* result
+          output: True
+        - THTensor* self
+        - THTensor* other
+]]
+
+[[
+  name: __irshift__
+  with_stateless: True
+  return: argument 0
+  options:
+    - cname: rshift
+      arguments:
+        - THTensor* self
+        - THTensor* self
+        - real value
+    - cname: crshift
+      arguments:
+        - THTensor* self
+        - THTensor* self
+        - THTensor* other
+]]
