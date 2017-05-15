@@ -10,8 +10,6 @@
 #include <mutex>
 #include <stdint.h>
 #include <unordered_map>
-#include <stdio.h>
-#include <stdlib.h>
 
 namespace torch { namespace cudnn {
 
