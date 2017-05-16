@@ -188,6 +188,7 @@ def _copyParams(params_from, params_to):
             assert param_from.type() == param_to.type()
             param_to.copy_(param_from)
 
+
 def forward(fn, input, hx, weight, output, hy):
     with torch.cuda.device_of(input):
         lib = cudnn.lib
