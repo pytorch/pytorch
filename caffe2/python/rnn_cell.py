@@ -14,8 +14,8 @@ from caffe2.python.attention import (
     apply_regular_attention,
     apply_recurrent_attention,
 )
-from caffe2.python import core, recurrent, workspace
-from caffe2.python.cnn import CNNModelHelper
+from caffe2.python import core, recurrent, workspace, brew
+from caffe2.python.model_helper import ModelHelper
 
 
 class RNNCell(object):
@@ -44,7 +44,7 @@ class RNNCell(object):
         outputs_with_grads=None,
     ):
         preprocessed_inputs = self.prepare_input(model, inputs)
-        step_model = CNNModelHelper(name=self.name, param_model=model)
+        step_model = ModelHelper(name=self.name, param_model=model)
         input_t, timestep = step_model.net.AddScopedExternalInputs(
             'input_t',
             'timestep',
@@ -102,7 +102,7 @@ class RNNCell(object):
         '''
         A single step of a recurrent network.
 
-        model: CNNModelHelper object new operators would be added to
+        model: ModelHelper object new operators would be added to
 
         input_t: single input with shape (1, batch_size, input_dim)
 
@@ -126,7 +126,7 @@ class RNNCell(object):
         If some operations in _apply method depend only on the input,
         not on recurrent states, they could be computed in advance.
 
-        model: CNNModelHelper object new operators would be added to
+        model: ModelHelper object new operators would be added to
 
         input_blob: either the whole input sequence with shape
         (sequence_length, batch_size, input_dim) or a single input with shape
@@ -229,7 +229,8 @@ class LSTMCell(RNNCell):
             )
             fc_input_dim += sum(extra_input_sizes)
 
-        gates_t = model.FC(
+        gates_t = brew.fc(
+            model,
             fc_input,
             self.scope('gates_t'),
             dim_in=fc_input_dim,
@@ -268,7 +269,8 @@ class LSTMCell(RNNCell):
         }
 
     def prepare_input(self, model, input_blob):
-        return model.FC(
+        return brew.fc(
+            model,
             input_blob,
             self.scope('i2h'),
             dim_in=self.input_size,
@@ -314,7 +316,8 @@ class MILSTMCell(LSTMCell):
             )
             fc_input_dim += sum(extra_input_sizes)
 
-        prev_t = model.FC(
+        prev_t = brew.fc(
+            model,
             fc_input,
             self.scope('prev_t'),
             dim_in=fc_input_dim,
@@ -601,7 +604,8 @@ class AttentionCell(RNNCell):
                 axes=[1, 2, 0],
             )
         if self.weighted_encoder_outputs is None:
-            self.weighted_encoder_outputs = model.FC(
+            self.weighted_encoder_outputs = brew.fc(
+                model,
                 self.encoder_outputs,
                 self.scope('weighted_encoder_outputs'),
                 dim_in=self.encoder_output_dim,
@@ -786,7 +790,7 @@ def _LSTM(
 
     cell_class: LSTMCell or compatible subclass
 
-    model: CNNModelHelper object new operators would be added to
+    model: ModelHelper object new operators would be added to
 
     input_blob: the input sequence in a format T x N x D
             where T is sequence size, N - batch size and D - input dimension
@@ -1099,7 +1103,7 @@ def LSTMWithAttention(
     where the decoder is the sequence the op is iterating over,
     while computing the attention context over the encoder.
 
-    model: CNNModelHelper object new operators would be added to
+    model: ModelHelper object new operators would be added to
 
     decoder_inputs: the input sequence in a format T x N x D
     where T is sequence size, N - batch size and D - input dimension

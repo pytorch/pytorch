@@ -5,7 +5,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import core, workspace, cnn, utils
+from caffe2.python import core, workspace, model_helper, utils, brew
 from caffe2.python.rnn_cell import LSTM
 from caffe2.proto import caffe2_pb2
 
@@ -54,7 +54,7 @@ class CharRNN(object):
 
     def CreateModel(self):
         log.debug("Start training")
-        model = cnn.CNNModelHelper(name="char_rnn")
+        model = model_helper.ModelHelper(name="char_rnn")
 
         input_blob, seq_lengths, hidden_init, cell_init, target = \
             model.net.AddExternalInputs(
@@ -68,29 +68,35 @@ class CharRNN(object):
         hidden_output_all, self.hidden_output, _, self.cell_state = LSTM(
             model, input_blob, seq_lengths, (hidden_init, cell_init),
             self.D, self.hidden_size, scope="LSTM")
-        output = model.FC(hidden_output_all, None, dim_in=self.hidden_size,
-                          dim_out=self.D, axis=2)
+        output = brew.fc(
+            model,
+            hidden_output_all,
+            None,
+            dim_in=self.hidden_size,
+            dim_out=self.D,
+            axis=2
+        )
 
         # axis is 2 as first two are T (time) and N (batch size).
         # We treat them as one big batch of size T * N
-        softmax = model.Softmax(output, 'softmax', axis=2)
+        softmax = model.net.Softmax(output, 'softmax', axis=2)
 
-        softmax_reshaped, _ = model.Reshape(
+        softmax_reshaped, _ = model.net.Reshape(
             softmax, ['softmax_reshaped', '_'], shape=[-1, self.D])
 
         # Create a copy of the current net. We will use it on the forward
         # pass where we don't need loss and backward operators
         self.forward_net = core.Net(model.net.Proto())
 
-        xent = model.LabelCrossEntropy([softmax_reshaped, target], 'xent')
+        xent = model.net.LabelCrossEntropy([softmax_reshaped, target], 'xent')
         # Loss is average both across batch and through time
         # Thats why the learning rate below is multiplied by self.seq_length
-        loss = model.AveragedLoss(xent, 'loss')
+        loss = model.net.AveragedLoss(xent, 'loss')
         model.AddGradientOperators([loss])
 
         # Hand made SGD update. Normally one can use helper functions
         # to build an optimizer
-        ITER = model.Iter("iter")
+        ITER = brew.iter(model, "iter")
         LR = model.LearningRate(
             ITER, "LR",
             base_lr=-0.1 * self.seq_length,
@@ -100,7 +106,7 @@ class CharRNN(object):
         # Update weights for each of the model parameters
         for param in model.params:
             param_grad = model.param_to_grad[param]
-            model.WeightedSum([param, ONE, param_grad, LR], param)
+            model.net.WeightedSum([param, ONE, param_grad, LR], param)
 
         self.model = model
         self.predictions = softmax

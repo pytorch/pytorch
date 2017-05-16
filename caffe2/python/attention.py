@@ -5,6 +5,8 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from caffe2.python import brew
+
 
 class AttentionType:
     Regular, Recurrent = range(2)
@@ -50,7 +52,8 @@ def _calc_attention_weights(
     # TODO: we could try to force some attention weights to be zeros,
     # based on encoder_lengths.
     # [batch_size, encoder_length, 1]
-    attention_weights_3d = model.Softmax(
+    attention_weights_3d = brew.softmax(
+        model,
         attention_logits_transposed,
         s(scope, 'attention_weights_3d'),
         engine='CUDNN',
@@ -110,7 +113,8 @@ def _apply_fc_weight_for_sum_match(
     scope,
     name,
 ):
-    output = model.FC(
+    output = brew.fc(
+        model,
         input,
         s(scope, name),
         dim_in=dim_in,
