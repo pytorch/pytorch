@@ -27,13 +27,13 @@ class SequentialSampler(Sampler):
     """
 
     def __init__(self, data_source):
-        self.num_samples = len(data_source)
+        self.data_source = data_source
 
     def __iter__(self):
-        return iter(range(self.num_samples))
+        return iter(range(len(self.data_source)))
 
     def __len__(self):
-        return self.num_samples
+        return len(self.data_source)
 
 
 class RandomSampler(Sampler):
@@ -44,13 +44,13 @@ class RandomSampler(Sampler):
     """
 
     def __init__(self, data_source):
-        self.num_samples = len(data_source)
+        self.data_source = data_source
 
     def __iter__(self):
-        return iter(torch.randperm(self.num_samples).long())
+        return iter(torch.randperm(len(self.data_source)).long())
 
     def __len__(self):
-        return self.num_samples
+        return len(self.data_source)
 
 
 class SubsetRandomSampler(Sampler):

@@ -91,6 +91,14 @@ class TestDataLoader(TestCase):
     def test_sequential_batch(self):
         self._test_sequential(DataLoader(self.dataset, batch_size=2))
 
+    def test_growing_dataset(self):
+        dataset = [torch.ones(4) for _ in range(4)]
+        dataloader_seq = DataLoader(dataset, shuffle=False)
+        dataloader_shuffle = DataLoader(dataset, shuffle=True)
+        dataset.append(torch.ones(4))
+        self.assertEqual(len(dataloader_seq), 5)
+        self.assertEqual(len(dataloader_shuffle), 5)
+
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_sequential_pin_memory(self):
         loader = DataLoader(self.dataset, batch_size=2, pin_memory=True)
