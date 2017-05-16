@@ -438,3 +438,138 @@ class SparseDataParallelModelTest(TestCase):
     def test_equiv_sparse(self):
         self._test_equiv_sparse(True)
         self._test_equiv_sparse(False)
+
+
+@unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
+@unittest.skipIf(workspace.NumCudaDevices() < 2, "Need at least 2 GPUs.")
+class ParallelizeGPUBMUFTest(TestCase):
+
+    def _run_model(self, gpu_devices):
+        '''
+        Helper function for test_equiv
+        '''
+        def input_builder_fun(model):
+            return None
+
+    def _model_build_fun(self, model, loss_scale):
+        fc = model.FC(
+            "data", "fc", 16, 1, ("ConstantFill", {}), ("ConstantFill", {})
+        )
+        fc_fl = model.FlattenToVec(fc, "fc_fl")
+        sigm = model.Sigmoid(fc_fl, "sigm")
+        sq = model.SquaredL2Distance([sigm, "label"], "sq")
+        loss = model.AveragedLoss(sq, "loss")
+        loss = model.Scale(loss, scale=loss_scale)
+        return [loss]
+
+    def _param_update_fun(self, model):
+        ITER = model.Iter("ITER")
+        LR = model.net.LearningRate(
+            [ITER],
+            "LR",
+            base_lr=(-0.1),
+            policy="fixed",
+        )
+        ONE = model.param_init_net.ConstantFill(
+            [], "ONE", shape=[1], value=1.0,
+        )
+        for param in model.GetParams():
+            grad = model.param_to_grad[param]
+            model.WeightedSum([param, ONE, grad, LR], param)
+
+    def _generate_data(self, gpu_devices):
+        np.random.seed(26)
+        # Each run has same input, independent of number of gpus
+        batch_size = 64
+        for _ in range(0, 10):
+            full_data = np.random.rand(batch_size, 16)
+            full_labels = np.round(full_data[:, 0])
+            batch_per_device = batch_size // len(gpu_devices)
+
+            for (j, g) in enumerate(gpu_devices):
+                st = j * batch_per_device
+                en = st + batch_per_device
+                data = full_data[st:en, :].astype(np.float32)
+                labels = full_labels[st:en].astype(np.float32)
+                with core.DeviceScope(core.DeviceOption(caffe2_pb2.CUDA, g)):
+                    workspace.FeedBlob("gpu_{}/data".format(g), data)
+                    workspace.FeedBlob("gpu_{}/label".format(g), labels)
+
+    def test_parallelize_gpu_bmuf(self):
+        model = cnn.CNNModelHelper(
+            order="NHWC",
+            name="test"
+        )
+        gpu_ids = [0, 1]
+
+        def input_builder_fun(model):
+            return None
+
+        self._generate_data(gpu_ids)
+
+        data_parallel_model.Parallelize_GPU_BMUF(
+            model,
+            input_builder_fun,
+            self._model_build_fun,
+            self._param_update_fun,
+            devices=gpu_ids,
+        )
+
+        data_parallel_model.RunInitNet(model)
+
+        # Check initial momentum params are zeros
+        self.assertEqual(model._device_grouped_blobs.keys(), ['fc_w', 'fc_b'])
+        self.assertEqual(workspace.FetchBlob('gpu_0/fc_b_v'), 0)
+        np.testing.assert_equal(
+            workspace.FetchBlob('gpu_0/fc_w_v'),
+            np.zeros(16).astype(np.float32).reshape(1, 16)
+        )
+
+        # Run the algorithm for one iteration to have non-zero params.
+        data_parallel_model.RunNet(model, 1)
+
+        # Save iteration momentum and post local update params
+        v_b_ = workspace.FetchBlob('gpu_0/fc_b_v')
+        v_w_ = workspace.FetchBlob('gpu_0/fc_w_v')
+
+        workspace.RunNetOnce(model.net)
+
+        b_0_ = workspace.FetchBlob('gpu_0/fc_b')
+        w_0_ = workspace.FetchBlob('gpu_0/fc_w')
+        b_1_ = workspace.FetchBlob('gpu_1/fc_b')
+        w_1_ = workspace.FetchBlob('gpu_1/fc_w')
+
+        def getBlockAvg(param_name):
+            param_0 = workspace.FetchBlob("gpu_0/{}".format(param_name))
+            param_1 = workspace.FetchBlob("gpu_1/{}".format(param_name))
+            return (param_0 + param_1) / 2
+
+        # Compute block gradients.
+        b_g_ = workspace.FetchBlob('gpu_0/fc_b_g')
+        w_g_ = workspace.FetchBlob('gpu_0/fc_w_g')
+        workspace.RunNetOnce(model._global_model_param_updates_net)
+
+        g_b = (b_0_ + b_1_) / 2 - b_g_
+        g_w = (w_0_ + w_1_) / 2 - w_g_
+        v_b = workspace.FetchBlob('gpu_0/fc_b_v')
+        v_w = workspace.FetchBlob('gpu_0/fc_w_v')
+
+        w_g = workspace.FetchBlob('gpu_0/fc_w_g')
+        b_g = workspace.FetchBlob('gpu_0/fc_b_g')
+        w_0 = workspace.FetchBlob('gpu_0/fc_w')
+        b_0 = workspace.FetchBlob('gpu_0/fc_b')
+        w_1 = workspace.FetchBlob('gpu_1/fc_w')
+        b_1 = workspace.FetchBlob('gpu_1/fc_b')
+
+        # Check momentum update step
+        np.testing.assert_equal(v_b, 0.5 * v_b_ + g_b)
+        np.testing.assert_equal(v_w, 0.5 * v_w_ + g_w)
+
+        np.testing.assert_equal(w_g, w_0)
+        np.testing.assert_equal(w_g, w_1)
+        np.testing.assert_equal(b_g, b_0)
+        np.testing.assert_equal(b_g, b_1)
+
+        # Check params update step
+        np.testing.assert_equal(w_0, w_g_ + v_w)
+        np.testing.assert_equal(b_0, b_g_ + v_b)
