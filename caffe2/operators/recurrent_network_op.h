@@ -406,7 +406,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
       p.param = def().input(param[i] + gradInputs_.size());
       // See GetRecurrentNetworkGradient to understand offseting here
       p.grad = def().output(i + numSequences_);
-      p.cellGradient = param_grads.empty() ? "" : param_grads[i];
+      p.cellGradient = param_grads.empty() ? "" : remappedName(param_grads[i]);
       p.accGrad = p.grad + "_acc";
       params.push_back(p);
     }
