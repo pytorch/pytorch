@@ -5,6 +5,7 @@
 #include "torch/csrc/autograd/functions/basic_ops.h"
 #include "torch/csrc/nn/THNN_generic.h"
 #include "torch/csrc/utils/auto_gpu.h"
+#include <iostream>
 
 #ifdef WITH_CUDNN
 #include "torch/csrc/cudnn/Conv.h"
@@ -143,6 +144,7 @@ static auto view3d(const Tensor& tensor) -> std::unique_ptr<Tensor> {
 
 auto ConvForward::apply(const variable_list& inputs) -> variable_list {
   if (forward_mode) {
+      std::cout << "ConvForward in forward mode" << std::endl;
       if (inputs.size() != 3) throw std::runtime_error("expected three inputs");
       if (is_padding_neg()) throw std::runtime_error("negative padding is not supported");
       if (is_output_padding_neg()) throw std::runtime_error("negative output_padding is not supported");
@@ -213,6 +215,7 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
       }
 
       auto outputs = as_tensor_list(std::move(output));
+      std::cout << "Created Backward convolution" << convolution.get() << std::endl;
       return wrap_outputs(inputs, std::move(outputs), [&](FunctionFlags f) {
         return std::make_shared<ConvBackward>(
             f, *this,
@@ -220,6 +223,7 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
             std::move(columns), std::move(ones), std::move(convolution));
       });
   } else {
+      std::cout << "ConvForward in grad mode" << std::endl;
       variable_list grad_outputs = inputs;
 //      if (grad_outputs.size() != 1) throw std::runtime_error("expected one grad_output");
       if (is_padding_neg()) throw std::runtime_error("negative padding is not supported");
@@ -340,6 +344,7 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
       variable_list input_wrap = as_variable_list(grad_outputs[0],
                                                   weight_.unpack(),
                                                   bias_.unpack());
+      std::cout << "Created Backward convolution" << convolution.get() << std::endl;
       return wrap_outputs(input_wrap, std::move(outputs), [&](FunctionFlags f) {
         return std::make_shared<ConvBackward>(
             f, *this,
@@ -352,6 +357,7 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
 
 auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
   if (forward_mode) {
+      std::cout << "ConvBackward in forward mode" << std::endl;
       variable_list inputs = grad_outputs;
       if (inputs.size() != 3) throw std::runtime_error("expected three inputs");
       if (is_padding_neg()) throw std::runtime_error("negative padding is not supported");
@@ -423,6 +429,7 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
       }
 
       auto outputs = as_tensor_list(std::move(output));
+      std::cout << "Created Forward convolution" << convolution.get() << std::endl;
       return wrap_outputs(inputs, std::move(outputs), [&](FunctionFlags f) {
         return std::make_shared<ConvForward>(
             f, *this,
@@ -430,6 +437,10 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
             std::move(columns), std::move(ones), std::move(convolution));
       });
   } else {
+      std::cout << "ConvBackward in grad mode" << std::endl;
+      std::cout << "convolution " << convolution.get() << std::endl;
+      std::cout << "columns " << columns.size() << std::endl;
+      std::cout << "ones " << ones.size() << std::endl;
 //      if (grad_outputs.size() != 1) throw std::runtime_error("expected one grad_output");
       if (is_padding_neg()) throw std::runtime_error("negative padding is not supported");
       if (is_output_padding_neg()) throw std::runtime_error("negative output_padding is not supported");
@@ -549,6 +560,7 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
       variable_list input_wrap = as_variable_list(grad_outputs[0],
                                                   weight_.unpack(),
                                                   bias_.unpack());
+      std::cout << "Created Forward convolution" << convolution.get() << std::endl;
       return wrap_outputs(input_wrap, std::move(outputs), [&](FunctionFlags f) {
         return std::make_shared<ConvForward>(
             f, *this,
