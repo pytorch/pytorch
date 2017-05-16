@@ -34,6 +34,12 @@ class TestTorch(TestCase):
                 res2 += i * j
             self.assertEqual(res1, res2)
 
+    def test_kwargs(self):
+        a = torch.range(0, 15).view(4, 4)
+        a.set_(a.storage(), 0, torch.Size([4, 4]), (4, 1))  # okay
+        a.set_(a.storage(), 0, torch.Size([4, 4]), strides=(4, 1))  # Torch: invalid memory size at THGeneral.c:257
+        a.set_(a.storage(), 0, size=torch.Size([4, 4]), strides=(4, 1))  # segfault
+
     def _testMath(self, torchfn, mathfn):
         size = (10, 5)
         # contiguous
