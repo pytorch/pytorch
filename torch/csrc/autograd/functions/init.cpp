@@ -46,6 +46,24 @@ struct ConvCtor {
   }
 };
 
+struct ConvBCtor {
+  ConvBackward* operator()(PyObject* args) {
+    ConvParams params;
+
+    TupleParser parser(args, 8);
+    parser.parse(params.stride);
+    parser.parse(params.padding);
+    parser.parse(params.dilation);
+    parser.parse(params.transposed);
+    parser.parse(params.output_padding);
+    parser.parse(params.groups);
+    parser.parse(params.benchmark);
+    parser.parse(params.cudnn_enabled);
+
+    return new ConvBackward(std::move(params));
+  }
+};
+
 struct DelayedErrorCtor {
   DelayedError* operator()(PyObject* args) {
     std::string msg;
@@ -212,7 +230,7 @@ bool THPAutograd_initFunctions(PyObject* _unused)
 
   static PyTypeObject ConvClass, ConvBackwardClass;
   addClass<ConvForward, ConvCtor>(module, ConvClass, "ConvNd", conv_forward_properties);
-  addClass<ConvBackward, NoCtor>(module, ConvBackwardClass, "ConvNdBackward", conv_backward_properties);
+  addClass<ConvBackward, ConvBCtor>(module, ConvBackwardClass, "ConvNdBackward", conv_backward_properties);
 
   static PyTypeObject AccumulateGradClass;
   addClass<AccumulateGrad, NoCtor>(module, AccumulateGradClass, "AccumulateGrad", accumulate_grad_properties);

@@ -11,6 +11,7 @@ from .modules.utils import _single, _pair, _triple
 
 # Convolutions
 ConvNd = torch._C._functions.ConvNd
+ConvNdBackward = torch._C._functions.ConvNdBackward
 
 
 def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1,
@@ -102,7 +103,7 @@ def conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1,
 
 def conv_transpose1d(input, weight, bias=None, stride=1, padding=0,
                      output_padding=0, groups=1, dilation=1):
-    f = ConvNd(_single(stride), _single(padding), _single(dilation), True,
+    f = ConvNdBackward(_single(stride), _single(padding), _single(dilation), True,
                _single(output_padding),
                groups, torch.backends.cudnn.benchmark, torch.backends.cudnn.enabled)
     return f(input, weight, bias)
@@ -129,7 +130,7 @@ def conv_transpose2d(input, weight, bias=None, stride=1, padding=0,
           added to the output. Can be a single number or a tuple. Default: 0
         dilation: the spacing between kernel elements. Default: 1
     """
-    f = ConvNd(_pair(stride), _pair(padding), _pair(dilation), True,
+    f = ConvNdBackward(_pair(stride), _pair(padding), _pair(dilation), True,
                _pair(output_padding), groups, torch.backends.cudnn.benchmark, torch.backends.cudnn.enabled)
     return f(input, weight, bias)
 
@@ -155,7 +156,7 @@ def conv_transpose3d(input, weight, bias=None, stride=1, padding=0,
           the number of groups
         dilation: the spacing between kernel elements. Default: 1
     """
-    f = ConvNd(_triple(stride), _triple(padding), _triple(dilation), True,
+    f = ConvNdBackward(_triple(stride), _triple(padding), _triple(dilation), True,
                _triple(output_padding), groups, torch.backends.cudnn.benchmark, torch.backends.cudnn.enabled)
     return f(input, weight, bias)
 

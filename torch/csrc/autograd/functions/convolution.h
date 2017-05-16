@@ -35,25 +35,46 @@ struct ConvParams {
 };
 
 struct ConvForward : public Function, public ConvParams {
-  explicit ConvForward(ConvParams params) : ConvParams(std::move(params)), high_grad(false) {}
+  explicit ConvForward(ConvParams params) : ConvParams(std::move(params)), forward_mode(true) {}
   ConvForward(
-    ConvParams params,
-    SavedVariable weight,
-    SavedVariable bias)
-    : ConvParams(std::move(params))
-    , weight_(std::move(weight))
-    , bias_(std::move(bias))
-    , high_grad(true) {}
+      FunctionFlags flags,
+      ConvParams params,
+      SavedVariable input,
+      SavedVariable weight,
+      SavedVariable bias,
+      tensor_list columns,
+      tensor_list ones,
+      std::unique_ptr<torch::cudnn::Convolution> convolution)
+    : Function(std::move(flags))
+    , ConvParams(std::move(params))
+    , convolution(std::move(convolution))
+    , forward_mode(false) {
+      if (is_executable) {
+        this->input_ = std::move(input);
+        this->weight_ = std::move(weight);
+        this->bias_ = std::move(bias);
+        this->columns = std::move(columns);
+        this->ones = std::move(ones);
+      }
+    }
 
   virtual variable_list apply(const variable_list& inputs) override;
 
   std::vector<long> output_size(thpp::Tensor& input, thpp::Tensor& weight);
+
+  virtual void releaseVariables() override;
+
+  SavedVariable input_;
   SavedVariable weight_;
   SavedVariable bias_;
-  bool high_grad;
+  tensor_list columns;
+  tensor_list ones;
+  std::unique_ptr<torch::cudnn::Convolution> convolution;
+  bool forward_mode;
 };
 
 struct ConvBackward : public Function, public ConvParams {
+  explicit ConvBackward(ConvParams params) : ConvParams(std::move(params)), forward_mode(true) {}
   ConvBackward(
       FunctionFlags flags,
       ConvParams params,
@@ -65,7 +86,8 @@ struct ConvBackward : public Function, public ConvParams {
       std::unique_ptr<torch::cudnn::Convolution> convolution)
     : Function(std::move(flags))
     , ConvParams(std::move(params))
-    , convolution(std::move(convolution)) {
+    , convolution(std::move(convolution))
+    , forward_mode(false) {
       if (is_executable) {
         this->input_ = std::move(input);
         this->weight_ = std::move(weight);
@@ -77,6 +99,8 @@ struct ConvBackward : public Function, public ConvParams {
 
   virtual variable_list apply(const variable_list& gradOutputs) override;
 
+  std::vector<long> output_size(thpp::Tensor& input, thpp::Tensor& weight);
+
   virtual void releaseVariables() override;
 
   SavedVariable input_;
@@ -85,6 +109,7 @@ struct ConvBackward : public Function, public ConvParams {
   tensor_list columns;
   tensor_list ones;
   std::unique_ptr<torch::cudnn::Convolution> convolution;
+  bool forward_mode;
 };
 
 }}
