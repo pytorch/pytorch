@@ -33,6 +33,9 @@ PyObject *THPStochasticFunctionClass = NULL;
 #define THPFunction_assert(condition, ...)                                     \
   if (!(condition)) { THPUtils_setError(__VA_ARGS__); throw python_error(); }
 
+/**
+ * Cast an object into a tuple, if it is not a tuple already.
+ */
 static bool _ensure_tuple(THPObjectPtr& obj)
 {
   if (PyTuple_Check(obj.get()))
@@ -45,6 +48,9 @@ static bool _ensure_tuple(THPObjectPtr& obj)
   return true;
 }
 
+/**
+ * Dispatch to Python to allocate and zero a tensor as per info.
+ */
 static PyObject* _allocate_grad_output(output_info_type& info, AutoGPU& gpu_guard)
 {
   // TODO: no need to do this for non-differentiable outputs
@@ -63,6 +69,11 @@ static PyObject* _allocate_grad_output(output_info_type& info, AutoGPU& gpu_guar
 
 namespace torch { namespace autograd {
 
+/**
+ * Legacy implementation of apply, which is invoked when forward() is NOT a static method.
+ * A lot of user-code defines forward() as a regular method, so this function is
+ * still important, but PyTorch should be moving away from this.
+ */
 auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
   AutoGIL gil;
 
@@ -111,7 +122,8 @@ auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
   });
 }
 
-// NOTE: this function is written in a way that assumes it's only called for backward
+// NOTE: this function is written in a way that assumes it's only called for backward;
+// it's used by engine.cpp (NB: this isn't the apply method on autograd Function)
 auto PyFunction::apply(const variable_list& inputs) -> variable_list {
   AutoGIL gil;
   AutoGPU _gpu_guard(-1);
@@ -122,6 +134,7 @@ auto PyFunction::apply(const variable_list& inputs) -> variable_list {
     return legacy_apply(inputs);
   }
 
+  // Massage a C++ variable_list into a Python arguments tuple
   auto num_inputs = inputs.size();
   THPObjectPtr pyInputs = PyTuple_New(num_inputs);
   if (!pyInputs) throw python_error();
@@ -148,7 +161,8 @@ auto PyFunction::apply(const variable_list& inputs) -> variable_list {
   auto& is_variable_input = *py_fn->is_variable_input;
   int num_outputs = PyTuple_GET_SIZE(r.get());
   int num_forward_inputs = is_variable_input.size();
-  // Returning too many results is ok, but only as long as they're all None
+  // Returning too many results is ok, but only as long as they're all None.
+  // Truncate the result tuple in that case.
   if (num_outputs > num_forward_inputs) {
     bool all_none = true;
     for (int i = num_forward_inputs; i < num_outputs; i++) {
@@ -170,6 +184,7 @@ auto PyFunction::apply(const variable_list& inputs) -> variable_list {
     throw std::runtime_error(msg);
   }
 
+  // Massage the Python results tuple back into a C++ variable_list
   variable_list results;
   results.reserve(num_outputs);
   for (int i = 0; i != num_outputs; ++i) {
@@ -680,7 +695,7 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *_inputs)
   ctx->needs_input_grad = input_info.needs_input_grad.release();
   ctx->is_variable_input = new std::vector<bool>(std::move(input_info.is_variable_input));
 
-  // Prepend ctx to tensor_input
+  // Prepend ctx to tensor_input, in preparation for static method call
   auto num_args = PyTuple_GET_SIZE(_inputs);
   THPObjectPtr ctx_tensor_input = PyTuple_New(num_args + 1);
   PyTuple_SET_ITEM(ctx_tensor_input.get(), 0, ctx_obj.release());

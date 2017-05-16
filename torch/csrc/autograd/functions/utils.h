@@ -26,6 +26,12 @@ inline tensor_list as_tensor_list(Args&& ... args) {
 }
 
 
+/**
+ * Create a Variable which records the result of applying the function ctr to
+ * inputs (having produced outputs), if necessary.  If any of the inputs are
+ * volatile, this function discards the input graph and returns just the
+ * outputs.
+ */
 variable_list wrap_outputs(const variable_list& inputs, tensor_list&& outputs,
                            function_constructor ctr);
 

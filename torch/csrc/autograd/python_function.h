@@ -40,10 +40,11 @@ struct THPFunction {
 
     std::vector<output_info_type> *output_info;
     std::vector<torch::autograd::SavedVariable> *saved_variables;
+    // For each input, true if the input is a THPVariable
     std::vector<bool> *is_variable_input;
     char has_freed_buffers;
 
-    // See a comment in THPFucntion_asFunction for details about this field.
+    // See a comment in THPFunction_asFunction for details about this field.
     std::weak_ptr<torch::autograd::PyFunction> cdata_ptr;
     torch::autograd::PyFunction cdata;
 };
