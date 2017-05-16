@@ -27,6 +27,7 @@ def lrn(model, blob_in, blob_out, order="NCHW", use_cudnn=False, **kwargs):
     else:
         return lrn[0]
 
+
 def softmax(model, blob_in, blob_out=None, use_cudnn=False, **kwargs):
     """Softmax."""
     if use_cudnn:
