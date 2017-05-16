@@ -73,13 +73,7 @@ class Node(object):
         others blobs.
 
         Additionally, a Node can be passed implementation-specific kwargs,
-        in order to specify properties of the node. When using AML Flow,
-        we currently support:
-            resource_requirements: a fblearner.flow.api.ResourceRequirements
-                                   specifying requirements for this Node.
-            flow_returns: a fblearner.flow.api.types.Schema object specifying
-                          the output schema of the Flow operator where the
-                          Node will run.
+        in order to specify properties of the node.
     """
 
     def __init__(self, node='local', **kwargs):
