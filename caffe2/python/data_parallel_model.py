@@ -186,8 +186,188 @@ def Parallelize_GPU(
     _SyncParams(devices, model_helper_obj, model_helper_obj.param_init_net)
 
     if optimize_gradient_memory:
-        _OptimizeGradientMemoryDEPRECATED(model_helper_obj, losses_by_gpu, devices)
+        _OptimizeGradientMemoryDEPRECATED(
+            model_helper_obj, losses_by_gpu, devices
+        )
 
+    model_helper_obj._data_parallel_model_init_nets = [
+        model_helper_obj.param_init_net,
+    ]
+    model_helper_obj._data_parallel_model_nets = [model_helper_obj.net]
+
+
+def Parallelize_GPU_BMUF(
+    model_helper_obj,
+    input_builder_fun,
+    forward_pass_builder_fun,
+    param_update_builder_fun,
+    block_learning_rate=1.0,
+    block_momentum=None,
+    devices=range(0, workspace.NumCudaDevices()),
+    net_type='dag',
+    master_gpu=None,
+):
+    '''
+    Function to create model that run on many GPUs and creates a net for
+    parameter_updates that can be run independently for number of iterations
+    then followed by another net that runs once to compute the final parameter
+    updates according to block wise model update filtering rule described
+    in : Scalable Training of Deep Learning Machines by Incremental Block
+    Training with Intra-block Parallel Optimization and Blockwise Model-Update
+    Filtering (ICASSP 2016).
+    '''
+    assert isinstance(model_helper_obj, model_helper.ModelHelper)
+
+    if master_gpu is None:
+        master_gpu = devices[0]
+
+    model_helper_obj._devices = devices
+    master_gpu_opt = core.DeviceOption(caffe2_pb2.CUDA, master_gpu)
+
+    num_workers = len(devices)
+    loss_scale = 1.0 / num_workers
+    if block_momentum is None:
+        block_momentum = 1.0 - 1.0 / num_workers
+
+    model_helper_obj.net.Proto().num_workers = num_workers
+    model_helper_obj.net.Proto().type = net_type
+
+    # A net for initializing global model parameters. Its called once in the
+    # same step as net parameters initialization.
+    model_helper_obj._global_model_init_net = core.Net('global_model_init')
+    model_helper_obj._global_model_init_net.Proto().type = net_type
+    model_helper_obj._global_model_init_net.Proto().num_workers = num_workers
+
+    # A net for computing final parameter updates. Its will run once after
+    # running net (local models updates) for `num_local_iterations` times.
+    model_helper_obj._global_model_param_updates_net = core.Net('global_model')
+    model_helper_obj._global_model_param_updates_net.Proto().type = net_type
+    model_helper_obj._global_model_param_updates_net.Proto().num_workers = \
+        num_workers
+
+    def _v(param):
+        return "{}_v".format(param)
+
+    def _g(param):
+        return "{}_g".format(param)
+
+    # Keep track of params that were in the model before: they are not
+    # data parallel, so we need to handle them separately
+    non_datapar_params = copy.copy(model_helper_obj.params)
+    model_helper_obj._losses_by_gpu = {}
+
+    def _InitializeModels(gpu_id):
+        input_builder_fun(model_helper_obj)
+        loss = forward_pass_builder_fun(model_helper_obj, loss_scale)
+        model_helper_obj._losses_by_gpu[gpu_id] = loss
+    _ForEachGPU(devices, _InitializeModels, scoped=True)
+
+    model_helper_obj._device_grouped_blobs =\
+        _GroupByDevice(devices, model_helper_obj.params, non_datapar_params)
+
+    _AddGradientOperators(
+        devices, model_helper_obj, model_helper_obj._losses_by_gpu
+    )
+
+    _InferBlobDevice(model_helper_obj)
+
+    def _InitializeParamUpdate(gpu_id):
+        param_update_builder_fun(model_helper_obj)
+    _ForEachGPU(devices, _InitializeParamUpdate, scoped=True)
+
+    # (Step-0) Initialize momentum parameters on master GPU.
+    for param_name in model_helper_obj._device_grouped_blobs.keys():
+        param = model_helper_obj._device_grouped_blobs[param_name][master_gpu]
+        with core.DeviceScope(master_gpu_opt):
+            model_helper_obj._global_model_init_net.ConstantFill(
+                param, _v(param), value=0.0
+            )
+            model_helper_obj._global_model_init_net.Copy(param, _g(param))
+
+    # (Step-1) Update models for num_local_iterations.
+
+    # (Step-2) Comute post-local-updates average of the params.
+    # Sum model params across GPUs and store resutls in param_avg blob.
+    for param_name in model_helper_obj._device_grouped_blobs.keys():
+        with core.DeviceScope(master_gpu_opt):
+            _AllReduce(
+                devices, model_helper_obj,
+                model_helper_obj._global_model_param_updates_net,
+                param_name
+            )
+
+    # (Step-3) Update momentum params :
+    # param_v = block_momentum * param_v
+    # + block_learning_Rate * (param_avg - param)
+    # param = param + param_v
+    for param_name in model_helper_obj._device_grouped_blobs.keys():
+        param = model_helper_obj._device_grouped_blobs[param_name][master_gpu]
+        with core.DeviceScope(master_gpu_opt):
+            # TODO(ataei) : Stop building the graph here to get model average ?
+            model_helper_obj._global_model_param_updates_net.Scale(
+                param, param, scale=1.0 / num_workers
+            )
+            model_helper_obj._global_model_param_updates_net.Sub(
+                [param, _g(param)], param
+            )
+            model_helper_obj._global_model_param_updates_net.Scale(
+                param, param, scale=block_learning_rate
+            )
+            model_helper_obj._global_model_param_updates_net.Scale(
+                _v(param), _v(param), scale=block_momentum
+            )
+            model_helper_obj._global_model_param_updates_net.Add(
+                [_v(param), param], _v(param)
+            )
+            model_helper_obj._global_model_param_updates_net.Add(
+                [_g(param), _v(param)], _g(param)
+            )
+            model_helper_obj._global_model_param_updates_net.Copy(
+                _g(param), param
+            )
+            _Broadcast(
+                devices, model_helper_obj,
+                model_helper_obj._global_model_param_updates_net,
+                param_name
+            )
+
+    model_helper_obj._data_parallel_model_init_nets = [
+        model_helper_obj.param_init_net,
+        model_helper_obj._global_model_init_net
+    ]
+    model_helper_obj._data_parallel_model_nets = [
+        model_helper_obj.net,
+        (model_helper_obj._global_model_param_updates_net, 1)
+    ]
+
+
+def RunInitNet(model):
+    for init_net in model._data_parallel_model_init_nets:
+        workspace.RunNetOnce(init_net)
+    for net_iters in model._data_parallel_model_nets:
+        if isinstance(net_iters, tuple):
+            workspace.CreateNet(net_iters[0])
+        else:
+            workspace.CreateNet(net_iters)
+
+
+def RunNet(model, num_iterations):
+    for net_iter in model._data_parallel_model_nets:
+        if isinstance(net_iter, tuple):
+            workspace.RunNet(net_iter[0].Proto().name, net_iter[1])
+        else:
+            workspace.RunNet(model.net.Proto().name, num_iterations)
+
+
+def _ForEachGPU(gpu_ids, f, scoped=False, *args, **kwargs):
+    for gpu_id in gpu_ids:
+        device_opt = core.DeviceOption(caffe2_pb2.CUDA, gpu_id)
+        with core.DeviceScope(device_opt):
+            if scoped:
+                with core.NameScope("gpu_{}".format(gpu_id)):
+                    f(gpu_id, *args, **kwargs)
+            else:
+                f(gpu_id, *args, **kwargs)
 
 def _AddGradientOperators(devices, model, losses_by_gpu):
     def create_grad(lossp):
@@ -298,17 +478,23 @@ def _Broadcast(devices, model, net, param):
             )
 
 
-def _AllReduce(devices, model, net, param):
-    ''' Non-NCCL allreduce '''
-    grads_group = model._device_grouped_blobs[param].values()
+def _AllReduce(devices, model, net, param, use_nccl=False, control_input=None):
+    blobs_group = model._device_grouped_blobs[param].values()
+    if use_nccl:
+        log.info('Use NCCL for AllReduce')
+        model.NCCLAllreduce(
+            blobs_group, blobs_group, control_input=control_input
+        )
+        return
 
+    log.info('Use non-NCCL tree reduction AllReduce')
     def sum2(d1i, d2i):
         d1 = model._devices[d1i]
         d2 = model._devices[d2i]
         device_opt = core.DeviceOption(caffe2_pb2.CUDA, d1)
         with core.DeviceScope(device_opt):
             net.Sum(
-                [grads_group[d1], grads_group[d2]], [grads_group[d1]],
+                [blobs_group[d1], blobs_group[d2]], [blobs_group[d1]],
                 name="dpm",
             )
     if len(devices) == 8:
@@ -325,7 +511,7 @@ def _AllReduce(devices, model, net, param):
         sum2(0, 2)
         _Broadcast(devices, model, net, param)
     else:
-        model.Sum(grads_group, grads_group[0], name="dpm")
+        net.Sum(blobs_group, blobs_group[0], name="dpm")
         _Broadcast(devices, model, net, param)
 
 
@@ -543,17 +729,11 @@ def _AllReduceGradientsSingleHost(devices, model, use_nccl):
         if _IsGPUBlob(model, grad_name):
             with core.DeviceScope(master_device_opt):
                 if not isinstance(grads_group[0], core.GradientSlice):
-                    if use_nccl:
-                        model.NCCLAllreduce(
-                            grads_group,
-                            grads_group,
-                            control_input=last_out,
-                        )
-
-                        # last_out is used to serialize the execution of nccls
-                        last_out = grads_group[0]
-                    else:
-                        _AllReduce(devices, model, model.net, grad_name)
+                    _AllReduce(
+                        devices, model, model.net, grad_name, use_nccl, last_out
+                    )
+                    # last_out is used to serialize the execution of nccls
+                    last_out = grads_group[0]
 
                 else:
                     # Sparse gradients: all-gather for indices and values
@@ -744,7 +924,6 @@ def _GroupByDevice(devices, params, non_data_params):
                 "Incorrect ordering: {}".format(ps)
 
     return grouped
-
 
 def _ValidateParams(params):
     set_params = set(params)
