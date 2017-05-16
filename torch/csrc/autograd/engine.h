@@ -32,7 +32,7 @@ struct Engine {
 
 
   // Given a list of (Function, int) pairs computes the value of the graph
-  // by following next_function references.
+  // by following next_function references.  int is the input number.
   void execute(
       const function_list& roots,
       variable_list& inputs,

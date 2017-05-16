@@ -49,7 +49,7 @@ static bool _ensure_tuple(THPObjectPtr& obj)
 }
 
 /**
- * Dispatch to Python to allocate and zero a tensor as per info.
+ * Call into Python to allocate and zero a tensor as per info.
  */
 static PyObject* _allocate_grad_output(output_info_type& info, AutoGPU& gpu_guard)
 {
@@ -70,9 +70,10 @@ static PyObject* _allocate_grad_output(output_info_type& info, AutoGPU& gpu_guar
 namespace torch { namespace autograd {
 
 /**
- * Legacy implementation of apply, which is invoked when forward() is NOT a static method.
- * A lot of user-code defines forward() as a regular method, so this function is
- * still important, but PyTorch should be moving away from this.
+ * Legacy implementation of apply, which is invoked during the backwards pass
+ * when backward is NOT implemented as a static method.  A lot of user-code
+ * defines this method as a regular method, so this function is still important,
+ * but PyTorch should be moving away from this.
  */
 auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
   AutoGIL gil;
