@@ -878,8 +878,11 @@ class TestAutograd(TestCase):
                 self.assertIs(x2.get_device(), 1)
 
         for t in [torch.DoubleTensor, torch.FloatTensor, torch.IntTensor, torch.ByteTensor]:
-            y = Variable(torch.randn(5, 5).type(t))
-            self.assertIs(type(x.type_as(y).data), t)
+            for var in (True, False):
+                y = torch.randn(5, 5).type(t)
+                if var:
+                    y = Variable(y)
+                self.assertIs(type(x.type_as(y).data), t)
 
     def test_isolated_node(self):
         x = Variable(torch.randn(5, 5), requires_grad=True)
