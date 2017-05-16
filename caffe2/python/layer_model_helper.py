@@ -132,7 +132,8 @@ class LayerModelHelper(model_helper.ModelHelper):
         self._layers.append(layer)
         for param in layer.get_parameters():
             assert isinstance(param.parameter, core.BlobReference)
-            self.param_to_optim[str(param.parameter)] = param.optimizer
+            self.param_to_optim[str(param.parameter)] = \
+                param.optimizer or self.default_optimizer
 
         # The primary value of adding everything to self.net - generation of the
         # operators right away, i.e. if error happens it'll be detected
@@ -231,8 +232,8 @@ class LayerModelHelper(model_helper.ModelHelper):
 
     def apply_optimizers(self, train_net, train_init_net, grad_map):
         for param, optimizer in self.param_to_optim.items():
-            if not optimizer:
-                optimizer = self.default_optimizer
+            assert optimizer is not None, \
+                "default optimizer must have been set in add_layer"
             # note that not all params has gradient and thus we sent None if
             # gradient does not exists
             optimizer(
