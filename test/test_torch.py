@@ -945,38 +945,40 @@ class TestTorch(TestCase):
         self.assertEqual(r2, r3[:-1], 0)
 
     @staticmethod
-    def _test_broadcast(self, cast):
-        def select_broadcastable_dims(dims_full=None):
-            # select full dimensionality
-            if dims_full is None:
-                dims_full=[]
-                ndims = random.randint(1, 4)
-                for _ in range(ndims):
-                    dims_full = dims_full + [random.randint(1, 8)]
-            else:
-                ndims = len(dims_full)
+    def _select_broadcastable_dims(self, dims_full=None):
+        # select full dimensionality
+        if dims_full is None:
+            dims_full=[]
+            ndims = random.randint(1, 4)
+            for _ in range(ndims):
+                dims_full = dims_full + [random.randint(1, 8)]
+        else:
+            ndims = len(dims_full)
 
-            # select actual dimensions for ops:
-            # larger: full ndims, individual sizes may be reduced
-            # smaller: possibly reduced ndims, sizes may be reduced
-            smaller_ndims = random.randint(1, ndims)
-            dims_small = []
-            dims_large = []
-            for i in range(ndims - 1, -1, -1):
-                j = random.randint(1, 3)
-                if j == 1:  # no reduced singleton dimension
-                    ds = dims_full[i]
-                    dl = dims_full[i]
-                elif j == 2:  # larger may have reduced singleton dimension
-                    ds = dims_full[i]
-                    dl = 1 if len(dims_small) < smaller_ndims else dims_full[i]
-                elif j == 3:  # smaller may have reduced singleton dimension
-                    ds = 1
-                    dl = dims_full[i]
-                dims_large = [dl] + dims_large
-                if len(dims_small) < smaller_ndims:
-                    dims_small = [ds] + dims_small
-            return (dims_small, dims_large, dims_full)
+        # select actual dimensions for ops:
+        # larger: full ndims, individual sizes may be reduced
+        # smaller: possibly reduced ndims, sizes may be reduced
+        smaller_ndims = random.randint(1, ndims)
+        dims_small = []
+        dims_large = []
+        for i in range(ndims - 1, -1, -1):
+            j = random.randint(1, 3)
+            if j == 1:  # no reduced singleton dimension
+                ds = dims_full[i]
+                dl = dims_full[i]
+            elif j == 2:  # larger may have reduced singleton dimension
+                ds = dims_full[i]
+                dl = 1 if len(dims_small) < smaller_ndims else dims_full[i]
+            elif j == 3:  # smaller may have reduced singleton dimension
+                ds = 1
+                dl = dims_full[i]
+            dims_large = [dl] + dims_large
+            if len(dims_small) < smaller_ndims:
+                dims_small = [ds] + dims_small
+        return (dims_small, dims_large, dims_full)
+
+    @staticmethod
+    def _test_broadcast(self, cast):
 
         # all out-of-place functions
         fns = [
@@ -999,7 +1001,7 @@ class TestTorch(TestCase):
         fns_3_args = ["addcdiv", "addcmul"]
 
         for fn in fns:
-            (dims_small, dims_large, dims_full) = select_broadcastable_dims()
+            (dims_small, dims_large, dims_full) = TestTorch._select_broadcastable_dims(self)
             small = torch.randn(*dims_small).float()
             small = cast(small)
             large = torch.randn(*dims_large).float()
@@ -1010,7 +1012,7 @@ class TestTorch(TestCase):
             small2Expanded = None
             if fn in fns_3_args:
                 # create another smaller tensor
-                (dims_small2, _, _) = select_broadcastable_dims(dims_full)
+                (dims_small2, _, _) = TestTorch._select_broadcastable_dims(self, dims_full)
                 small2 = torch.randn(*dims_small2).float()
                 small2 = cast(small2)
                 small2Expanded = small2.expand(*dims_full)
@@ -1187,6 +1189,51 @@ class TestTorch(TestCase):
 
     def test_broadcast_fallback(self):
         self._test_broadcast_fallback(self, lambda t: t)
+
+    @staticmethod
+    def _test_broadcast_fused_matmul(self, cast):
+        fns = ["baddbmm", "addbmm", "addmm", "addmv", "addr"]
+
+        for fn in fns:
+            batch_dim = random.randint(1, 8)
+            m_dim = random.randint(1, 8)
+            n_dim = random.randint(1, 8)
+            p_dim = random.randint(1, 8)
+
+            def dims_full_for_fn():
+                if fn == "baddbmm":
+                    return ([batch_dim, n_dim, p_dim], [batch_dim, n_dim, m_dim], [batch_dim, m_dim, p_dim])
+                elif fn == "addbmm":
+                    return ([n_dim, p_dim], [batch_dim, n_dim, m_dim], [batch_dim, m_dim, p_dim])
+                elif fn == "addmm":
+                    return ([n_dim, p_dim], [n_dim, m_dim], [m_dim, p_dim])
+                elif fn == "addmv":
+                    return ([n_dim], [n_dim, m_dim], [m_dim])
+                elif fn == "addr":
+                    return ([n_dim, m_dim], [n_dim], [m_dim])
+                else:
+                    raise AssertionError("unknown function")
+
+            (t0_dims_full, t1_dims, t2_dims) = dims_full_for_fn()
+            (t0_dims_small, _, _) = TestTorch._select_broadcastable_dims(self, t0_dims_full)
+
+            t0_small = torch.randn(*t0_dims_small).float()
+            t0_small = cast(t0_small)
+            t1 = torch.randn(*t1_dims).float()
+            t1 = cast(t1)
+            t2 = torch.randn(*t2_dims).float()
+            t2 = cast(t2)
+
+            t0_full = t0_small.expand(*t0_dims_full)
+            t0_full = cast(t0_full)
+
+            fntorch = getattr(torch, fn)
+            r0 = fntorch(t0_small, t1, t2)
+            r1 = fntorch(t0_full, t1, t2)
+            self.assertEqual(r0, r1)
+
+    def test_broadcast_fused_matmul(self):
+        self._test_broadcast_fused_matmul(self, lambda t: t)
 
     def test_randperm(self):
         _RNGState = torch.get_rng_state()
