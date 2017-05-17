@@ -59,9 +59,11 @@ class RNNCell(object):
             states=states_prev,
             timestep=timestep,
         )
+
         if outputs_with_grads is None:
-            outputs_with_grads = self.get_outputs_with_grads()
-        # states_for_all_steps consits of combination of
+            outputs_with_grads = [self.get_output_state_index() * 2]
+
+        # states_for_all_steps consists of combination of
         # states gather for all steps and final states. It looks like this:
         # (state_1_all, state_1_final, state_2_all, state_2_final, ...)
         states_for_all_steps = recurrent.recurrent_net(
@@ -74,12 +76,11 @@ class RNNCell(object):
             scope=self.name,
             outputs_with_grads=outputs_with_grads,
             recompute_blobs_on_backward=self.recompute_blobs,
-            forward_only=self.forward_only,
         )
+
         output = self._prepare_output_sequence(
             model,
             states_for_all_steps,
-            outputs_with_grads,
         )
         return output, states_for_all_steps
 
@@ -154,20 +155,10 @@ class RNNCell(object):
             output = self._apply_dropout(model, output)
         return output
 
-    def _prepare_output_sequence(self, model, states, outputs_with_grads):
+    def _prepare_output_sequence(self, model, states):
         output_state_index = 2 * self.get_output_state_index()
         output = states[output_state_index]
         if self.dropout_ratio is not None:
-            # The general problem here is outputs_with_grads sort of overrides
-            # get_output_state_index() method.
-            # We intentionally do not do anything about it. Instead we are
-            # trying to be explicit here and if we add dropout to the states,
-            # but the gradient is not being propagates through them -
-            # - we throw an error (since dropout is useless in this case).
-            assert output_state_index in outputs_with_grads, (
-                'You are adding dropout to the cell outputs, '
-                'but the gradient is not propagated through it'
-            )
             output = self._apply_dropout(model, output)
         return output
 
@@ -176,8 +167,8 @@ class RNNCell(object):
             output, _ = model.net.Dropout(
                 output,
                 [
-                    self.scope('output_with_dropout'),
-                    self.scope('output_dropout_mask'),
+                    str(output) + '_with_dropout',
+                    str(output) + '_dropout_mask',
                 ],
                 ratio=float(self.dropout_ratio),
                 is_test=int(self.forward_only),
@@ -280,9 +271,6 @@ class LSTMCell(RNNCell):
 
     def get_state_names(self):
         return (self.scope('hidden_t'), self.scope('cell_t'))
-
-    def get_outputs_with_grads(self):
-        return [0]
 
     def get_output_size(self):
         return self.hidden_size
@@ -485,15 +473,18 @@ class MultiRNNCell(RNNCell):
             )
             # Since we're using here non-public method _apply, instead of apply,
             # we have to manually extract output from states
-            layer_output = layer_cell._prepare_output(model, layer_next_states)
-
-            if i > 0 and i in self.residual_output_layers:
-                layer_input = model.net.Sum(
-                    [layer_output, layer_input],
-                    [layer_output],
+            if i != len(self.cells) - 1:
+                layer_output = layer_cell._prepare_output(
+                    model,
+                    layer_next_states,
                 )
-            else:
-                layer_input = layer_output
+                if i > 0 and i in self.residual_output_layers:
+                    layer_input = model.net.Sum(
+                        [layer_output, layer_input],
+                        [layer_output],
+                    )
+                else:
+                    layer_input = layer_output
 
             next_states.extend(layer_next_states)
         return next_states
@@ -509,7 +500,12 @@ class MultiRNNCell(RNNCell):
         return index
 
     def _prepare_output(self, model, states):
-        output = states[self.get_output_state_index()]
+
+        output = self.cells[-1]._prepare_output(
+            model,
+            states[-len(self.cells[-1].get_state_names()):],
+        )
+
         if self.dropout_ratio is not None:
             output = self._apply_dropout(model, output)
         if (len(self.cells) - 1) in self.residual_output_layers:
@@ -524,15 +520,16 @@ class MultiRNNCell(RNNCell):
             )
         return output
 
-    def _prepare_output_sequence(self, model, states, outputs_with_grads):
-        output_state_index = 2 * self.get_output_state_index()
-        output = states[output_state_index]
+    def _prepare_output_sequence(self, model, states):
+
+        output = self.cells[-1]._prepare_output_sequence(
+            model,
+            states[-(2 * len(self.cells[-1].get_state_names())):],
+        )
+
         if self.dropout_ratio is not None:
-            assert output_state_index in outputs_with_grads, (
-                'You are adding dropout to the cell outputs, '
-                'but the gradient is not propagated through it'
-            )
             output = self._apply_dropout(model, output)
+
         if (len(self.cells) - 1) in self.residual_output_layers:
             last_layer_input_index = 0
             for cell in self.cells[:-2]:
@@ -598,18 +595,8 @@ class AttentionCell(RNNCell):
                 self.encoder_output_dim,
             )],
         )
-        # TODO: we should use prepare_output method here,
-        # but because of the recurrent_net's edge case with we
-        # have to know which states is being used to compute attention.
-        # So instead of manupulating with output of the cell,
-        # we have to work with the output state directly.
-        # In other words, if output of decoder_cell is not equal to
-        # one of decoder_cell states (the one - get_output_state_index()),
-        # then this logic is broken. Right now, that can happen if
-        # there is a dropout, so we explicitly check dropout has been disabled.
-        assert self.decoder_cell.dropout_ratio is None
 
-        hidden_t_intermediate = self.decoder_cell._prepare_output(
+        self.hidden_t_intermediate = self.decoder_cell._prepare_output(
             model,
             decoder_states,
         )
@@ -624,7 +611,7 @@ class AttentionCell(RNNCell):
                 encoder_output_dim=self.encoder_output_dim,
                 encoder_outputs_transposed=self.encoder_outputs_transposed,
                 weighted_encoder_outputs=self.weighted_encoder_outputs,
-                decoder_hidden_state_t=hidden_t_intermediate,
+                decoder_hidden_state_t=self.hidden_t_intermediate,
                 decoder_hidden_state_dim=self.decoder_state_dim,
                 scope=self.name,
                 attention_weighted_encoder_context_t_prev=(
@@ -641,7 +628,7 @@ class AttentionCell(RNNCell):
                 encoder_output_dim=self.encoder_output_dim,
                 encoder_outputs_transposed=self.encoder_outputs_transposed,
                 weighted_encoder_outputs=self.weighted_encoder_outputs,
-                decoder_hidden_state_t=hidden_t_intermediate,
+                decoder_hidden_state_t=self.hidden_t_intermediate,
                 decoder_hidden_state_dim=self.decoder_state_dim,
                 scope=self.name,
             )
@@ -689,15 +676,6 @@ class AttentionCell(RNNCell):
         state_names.append(self.scope('attention_weighted_encoder_context_t'))
         return state_names
 
-    def get_outputs_with_grads(self):
-        # Note, this `2 *` comes from the fact that recurrent_net
-        # returns (state_1_all, state_1_final, state_2_all, state_2_final, ...)
-        # Hopefully, this could be improved later on recurrent_net side
-        return [
-            2 * self.decoder_cell.get_output_state_index(),
-            2 * (len(self.get_state_names()) - 1),
-        ]
-
     def get_output_size(self):
         return self.decoder_state_dim + self.encoder_output_dim
 
@@ -705,14 +683,10 @@ class AttentionCell(RNNCell):
         return self.decoder_cell.get_output_state_index()
 
     def _prepare_output(self, model, states):
-        decoder_cell_output = self.decoder_cell._prepare_output(
-            model,
-            states[:-1],
-        )
         attention_context = states[-1]
         with core.NameScope(self.name or ''):
             output, _ = model.net.Concat(
-                [decoder_cell_output, attention_context],
+                [self.hidden_t_intermediate, attention_context],
                 [
                     'states_and_context_combination',
                     '_states_and_context_combination_concat_dims',
@@ -723,12 +697,12 @@ class AttentionCell(RNNCell):
             output = self._apply_dropout(model, output)
         return output
 
-    def _prepare_output_sequence(self, model, states, outputs_with_grads):
+    def _prepare_output_sequence(self, model, states):
         decoder_output = self.decoder_cell._prepare_output_sequence(
             model,
             states[:-2],
-            outputs_with_grads[:-2],
         )
+
         attention_context_index = 2 * (len(self.get_state_names()) - 1)
         with core.NameScope(self.name or ''):
             output, _ = model.net.Concat(
@@ -743,24 +717,8 @@ class AttentionCell(RNNCell):
                 axis=2,
             )
         if self.dropout_ratio is not None:
-            # The general problem here is outputs_with_grads sort of overrides
-            # get_output_state_index() method.
-            # We intentionally do not do anything about it. Instead we are
-            # trying to be explicit here and if we add dropout to the states,
-            # but the gradient is not being propagates through them -
-            # - we throw an error (since dropout is useless in this case).
-            decoder_cell_output_index = (
-                2 * self.decoder_cell.get_output_state_index()
-            )
-            assert decoder_cell_output_index in outputs_with_grads, (
-                'You are adding dropout to the cell outputs, '
-                'but the gradient is not propagated through it'
-            )
-            assert attention_context_index in outputs_with_grads, (
-                'You are adding dropout to the attention context outputs, '
-                'but the gradient is not propagated through it'
-            )
             output = self._apply_dropout(model, output)
+
         return output
 
 
