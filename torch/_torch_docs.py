@@ -142,7 +142,8 @@ along the first dimension).
 same number of matrices.
 
 If :attr:`batch1` is a `b x n x m` Tensor, :attr:`batch2` is a `b x m x p`
-Tensor, :attr:`out` and :attr:`mat` will be `n x p` Tensors.
+Tensor, ::attr:`mat` must be :ref:`broadcastable <broadcasting-semantics>` with a `n x p` Tensor
+and attr:`out` will be a `n x p` Tensor.
 
 In other words,
 :math:`res = (beta * M) + (alpha * sum(batch1_i @ batch2_i, i = 0, b))`
@@ -242,7 +243,8 @@ Performs a matrix multiplication of the matrices :attr:`mat1` and :attr:`mat2`.
 The matrix :attr:`mat` is added to the final result.
 
 If :attr:`mat1` is a `n x m` Tensor, :attr:`mat2` is a `m x p` Tensor,
-:attr:`out` and :attr:`mat` will be `n x p` Tensors.
+then :attr:`mat` must be :ref:`broadcastable <broadcasting-semantics>` with a `n x p` Tensor and
+:attr:`out` will be a `n x p` Tensor.
 
 `alpha` and `beta` are scaling factors on `mat1 @ mat2` and `mat` respectively.
 
@@ -281,7 +283,8 @@ the vector :attr:`vec`.
 The vector :attr:`tensor` is added to the final result.
 
 If :attr:`mat` is a `n x m` Tensor, :attr:`vec` is a 1D Tensor of size `m`,
-:attr:`out` and :attr:`tensor` will be 1D of size `n`.
+then :attr:`tensor` must be :ref:`broadcastable <broadcasting-semantics>`
+with a 1D tensor of size `n` and :attr:`out` will be 1D tensor of size `n`.
 
 `alpha` and `beta` are scaling factors on `mat * vec` and `tensor` respectively.
 
@@ -326,7 +329,8 @@ In other words,
 :math:`out = (beta * mat) + (alpha * vec1 \otimes vec2)`
 
 If :attr:`vec1` is a vector of size `n` and :attr:`vec2` is a vector of size `m`,
-then :attr:`mat` must be a matrix of size `n x m`
+then :attr:`mat` must be :ref:`broadcastable <broadcasting-semantics>` with a matrix of size `n x m`
+and :attr:`out` will be a matrix of size `n x m`.
 
 For inputs of type `FloatTensor` or `DoubleTensor`, args :attr:`beta` and :attr:`alpha` must be real numbers, otherwise
 they should be integers
@@ -451,7 +455,8 @@ and :attr:`batch2`.
 number of matrices.
 
 If :attr:`batch1` is a `b x n x m` Tensor, :attr:`batch2` is a `b x m x p`
-Tensor, :attr:`out` and :attr:`mat` will be `b x n x p` Tensors.
+Tensor, then :attr:`mat` must be :ref:`broadcastable <broadcasting-semantics>` with a
+`b x n x p` Tensor and :attr:`out` will be a `b x n x p` Tensor.
 
 In other words,
 :math:`res_i = (beta * M_i) + (alpha * batch1_i \times batch2_i)`
