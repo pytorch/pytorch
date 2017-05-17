@@ -545,11 +545,13 @@ def _AddDistributedParameterSync(
             size=rendezvous['num_shards'],
             rank=rendezvous['shard_id'],
             engine=rendezvous['engine'],
+            status_blob="createcw_iter_status",
         )
         net.Broadcast(
             inputs=[comm_world, "gpu_{}/ITER".format(devices[0])],
             outputs=["gpu_{}/ITER".format(devices[0])],
             engine=rendezvous['engine'],
+            status_blob="broadcast_iter_status",
         )
 
     # Create a single common world for all broadcast operations.
@@ -567,11 +569,13 @@ def _AddDistributedParameterSync(
                     size=rendezvous['num_shards'],
                     rank=rendezvous['shard_id'],
                     engine=rendezvous['engine'],
+                    status_blob="createcw_broadcast_status",
                 )
             net.Broadcast(
                 inputs=[comm_world, param],
                 outputs=[param],
                 engine=rendezvous['engine'],
+                status_blob="broadcast_{}_status".format(str(param)),
             )
             return comm_world
 
@@ -652,6 +656,7 @@ def _AllReduceGradientsDistributed(
                         size=rendezvous['num_shards'],
                         rank=rendezvous['shard_id'],
                         engine=rendezvous['engine'],
+                        status_blob="create_cw_{}_status".format(comm_number),
                     )
                 model.net.Allreduce(
                     inputs=[comm_world] + grads,
@@ -659,6 +664,7 @@ def _AllReduceGradientsDistributed(
                     name=grad_name,
                     engine=all_reduce_engine,
                     control_input=control_input,
+                    status_blob="allreduce_{}_status".format(grad_name),
                 )
                 return comm_world
 

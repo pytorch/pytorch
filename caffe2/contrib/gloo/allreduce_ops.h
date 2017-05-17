@@ -2,10 +2,12 @@
 
 #include <algorithm>
 
+#include "caffe2/contrib/gloo/common.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
 
 #include <gloo/algorithm.h>
+#include <gloo/common/error.h>
 #include <gloo/context.h>
 
 namespace caffe2 {
@@ -19,7 +21,10 @@ class AllreduceOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   AllreduceOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+      : Operator<Context>(operator_def, ws), ws_(ws) {
+    status_blob_ =
+        OperatorBase::GetSingleArgument<std::string>("status_blob", "");
+  }
 
   virtual ~AllreduceOp() {}
 
@@ -31,7 +36,17 @@ class AllreduceOp final : public Operator<Context> {
     update(current_);
     CAFFE_ENFORCE(current_ == init_, "Inputs/outputs have changed");
 
-    algorithm_->run();
+    try {
+      algorithm_->run();
+    } catch (::gloo::IoException& ioe) {
+      LOG(ERROR) << "Caught gloo IO exception: " << ioe.what();
+      if (status_blob_ != "") {
+        signalFailure(ws_->CreateBlob(status_blob_), ioe);
+        return false;
+      } else {
+        throw ioe;
+      }
+    }
     return true;
   }
 
@@ -115,6 +130,8 @@ class AllreduceOp final : public Operator<Context> {
 
   GlooParameters init_;
   GlooParameters current_;
+  Workspace* ws_;
+  std::string status_blob_;
 };
 
 } // namespace gloo

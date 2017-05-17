@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include "caffe2/contrib/gloo/common.h"
 #include "caffe2/core/operator.h"
 
 #include <gloo/algorithm.h>
@@ -17,7 +18,11 @@ class BroadcastOp final : public Operator<Context> {
 
   BroadcastOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        root_(OperatorBase::template GetSingleArgument<int>("root", 0)) {}
+        root_(OperatorBase::template GetSingleArgument<int>("root", 0)),
+        ws_(ws) {
+    status_blob_ =
+        OperatorBase::GetSingleArgument<std::string>("status_blob", "");
+  }
 
   virtual ~BroadcastOp() {}
 
@@ -29,7 +34,17 @@ class BroadcastOp final : public Operator<Context> {
     update(current_);
     CAFFE_ENFORCE(current_ == init_, "Inputs/outputs have changed");
 
-    algorithm_->run();
+    try {
+      algorithm_->run();
+    } catch (::gloo::IoException& ioe) {
+      LOG(ERROR) << "Caught gloo IO exception: " << ioe.what();
+      if (status_blob_ != "") {
+        signalFailure(ws_->CreateBlob(status_blob_), ioe);
+        return false;
+      } else {
+        throw ioe;
+      }
+    }
     return true;
   }
 
@@ -122,6 +137,8 @@ class BroadcastOp final : public Operator<Context> {
 
   GlooParameters init_;
   GlooParameters current_;
+  Workspace* ws_;
+  std::string status_blob_;
 };
 
 } // namespace gloo

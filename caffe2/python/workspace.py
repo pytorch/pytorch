@@ -161,16 +161,17 @@ def RunNetOnce(net):
     return C.run_net_once(StringifyProto(net))
 
 
-def RunNet(name, num_iter=1):
+def RunNet(name, num_iter=1, allow_fail=False):
     """Runs a given net.
 
     Inputs:
       name: the name of the net, or a reference to the net.
       num_iter: number of iterations to run
+      allow_fail: if True, does not assert on net exec failure but returns False
     Returns:
       True or an exception.
     """
-    return C.run_net(StringifyNetName(name), num_iter)
+    return C.run_net(StringifyNetName(name), num_iter, allow_fail)
 
 
 def RunPlan(plan_or_step):
