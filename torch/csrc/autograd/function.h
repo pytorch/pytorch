@@ -30,6 +30,7 @@ struct FunctionFlags {
   // their precedence.
   bool is_executable = false;
   bool is_volatile = false;
+  // What functions take the output of this function as input.
   function_list next_functions;
 };
 
