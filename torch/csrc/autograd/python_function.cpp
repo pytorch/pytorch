@@ -34,7 +34,8 @@ PyObject *THPStochasticFunctionClass = NULL;
   if (!(condition)) { THPUtils_setError(__VA_ARGS__); throw python_error(); }
 
 /**
- * Cast an object into a tuple, if it is not a tuple already.
+ * Cast an object into a tuple, if it is not a tuple already.  Returns true
+ * if the original object was not a tuple.
  */
 static bool _ensure_tuple(THPObjectPtr& obj)
 {
@@ -312,6 +313,8 @@ PyObject *THPFunction_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 
 using t2var_type = std::unordered_map<PyObject *, THPVariable *>;
 
+// Bump the counters of all recorded dirty input tensors, adding each of them
+// into dirty_inputs.  Also does some sanity checking.
 static void _mark_dirty(THPFunction *self, t2var_type &t2var,
         std::unordered_set<PyObject *> &dirty_inputs)
 {
@@ -369,6 +372,16 @@ static void _transplant_var(Variable& var, const std::shared_ptr<Function>& fn, 
   }
 }
 
+// Given a Python tuple of raw output tensors (raw_output), set each of
+// the corresponding entries in a different Python tuple (outputs) with
+// these tensors wrapped with variables.  We save the gradient function (self)
+// to the variable if the output is not volatile (is_volatile).
+//
+// There is a considerable amount of complexity to handle if the operation
+// that produced these output tensors is inplace.  A mapping of *input*
+// tensors to variables (t2var) is used to test if this occurred, and
+// the set of dirty tensors (dirty_inputs) is used to figure out what to
+// do in this case.
 static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
     std::unordered_set<PyObject *> &dirty_inputs, PyObject *raw_output,
     PyObject *outputs, bool is_volatile)
@@ -459,6 +472,7 @@ static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
   }
 }
 
+// Save any variables that requested by to_save
 static void _save_variables(THPFunction* self, t2var_type &t2var)
 {
   if (!self->to_save) return;
@@ -536,6 +550,7 @@ static void _join_version_counters(THPFunction *self, t2var_type &t2var)
   self->shared_pairs = NULL;
 }
 
+// Mark requires_grad = 0 on non-differentiable variables (as per non_differentiable)
 static void _mark_non_differentiable(THPFunction *self, t2var_type &t2var)
 {
   if (!self->non_differentiable) return;
@@ -640,6 +655,7 @@ PyObject* process_outputs(THPFunction* grad_fn, const UnpackedInput& unpacked, T
     _mark_non_differentiable(grad_fn, t2var);
     _save_variables(grad_fn, t2var);
   } else {
+    // Everything is non-differentiable...
     // Remove unnecessary attributes
     Py_XDECREF(grad_fn->to_save);
     grad_fn->to_save = NULL;
