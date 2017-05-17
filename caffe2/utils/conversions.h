@@ -101,10 +101,10 @@ inline float cpu_half2float(float16 h) {
     exponent += 0x70;
   }
 
-  int temp = ((sign << 31) | (exponent << 23) | mantissa);
-
-  unsigned* rp = reinterpret_cast<unsigned*>(&temp);
-  return *rp;
+  unsigned i = ((sign << 31) | (exponent << 23) | mantissa);
+  float ret;
+  memcpy(&ret, &i, sizeof(i));
+  return ret;
 }
 
 }; // anonymous
