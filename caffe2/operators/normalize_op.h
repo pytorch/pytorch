@@ -27,7 +27,7 @@ class NormalizeGradientOp final : public Operator<Context> {
   bool RunOnDevice() override;
 
  private:
-  INPUT_TAGS(INPUT, OUTPUT, GRAD_OUT);
+  INPUT_TAGS(INPUT, GRAD_OUT);
   OUTPUT_TAGS(GRAD_IN);
 };
 
