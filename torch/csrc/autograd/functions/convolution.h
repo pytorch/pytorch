@@ -44,7 +44,7 @@ struct ConvForward : public Function, public ConvParams {
       SavedVariable bias,
       tensor_list columns,
       tensor_list ones,
-      std::unique_ptr<torch::cudnn::Convolution> convolution)
+      std::shared_ptr<torch::cudnn::Convolution> convolution)
     : Function(std::move(flags))
     , ConvParams(std::move(params))
     , convolution(std::move(convolution))
@@ -69,8 +69,10 @@ struct ConvForward : public Function, public ConvParams {
   SavedVariable bias_;
   tensor_list columns;
   tensor_list ones;
-  std::unique_ptr<torch::cudnn::Convolution> convolution;
+  std::shared_ptr<torch::cudnn::Convolution> convolution;
   bool forward_mode;
+  tensor_list columns_back;
+  tensor_list ones_back;
 };
 
 struct ConvBackward : public Function, public ConvParams {
@@ -83,7 +85,7 @@ struct ConvBackward : public Function, public ConvParams {
       SavedVariable bias,
       tensor_list columns,
       tensor_list ones,
-      std::unique_ptr<torch::cudnn::Convolution> convolution)
+      std::shared_ptr<torch::cudnn::Convolution> convolution)
     : Function(std::move(flags))
     , ConvParams(std::move(params))
     , convolution(std::move(convolution))
@@ -108,8 +110,10 @@ struct ConvBackward : public Function, public ConvParams {
   SavedVariable bias_;
   tensor_list columns;
   tensor_list ones;
-  std::unique_ptr<torch::cudnn::Convolution> convolution;
+  std::shared_ptr<torch::cudnn::Convolution> convolution;
   bool forward_mode;
+  tensor_list columns_back;
+  tensor_list ones_back;
 };
 
 }}
