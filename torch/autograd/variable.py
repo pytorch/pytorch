@@ -63,8 +63,14 @@ class Variable(_C._VariableBase):
         raise AttributeError(name)
 
     def __getitem__(self, key):
-        if isinstance(key, Variable) and type(key.data).__name__ == 'ByteTensor':
-            return MaskedSelect.apply(self, key)
+        if torch.is_tensor(key):
+            key = Variable(key)  # auto-wrap tensors
+        if isinstance(key, Variable):
+            if type(key.data).__name__ == 'ByteTensor':
+                return MaskedSelect.apply(self, key)
+            elif type(key.data).__name__ == 'LongTensor':
+                return IndexSelect.apply(self, 0, key)
+            # else fall through and raise an error in Index
         return Index.apply(self, key)
 
     def __setitem__(self, key, value):
@@ -232,7 +238,9 @@ class Variable(_C._VariableBase):
         return self
 
     def type_as(self, t):
-        return self.type(type(t.data))
+        if isinstance(t, Variable):
+            t = t.data
+        return self.type(type(t))
 
     def _get_type(self, name):
         module = torch._import_dotted_name(self.data.__module__)
