@@ -704,12 +704,19 @@ void addGlobalMethods(py::module& m) {
       },
       py::arg("net_def"),
       py::arg("overwrite") = kPyBindFalse);
-  m.def("run_net", [](const std::string& name, int num_iter) {
+  m.def("run_net", [](const std::string& name, int num_iter, bool allow_fail) {
     CAFFE_ENFORCE(gWorkspace);
     CAFFE_ENFORCE(gWorkspace->GetNet(name), "Can't find net ", name);
     py::gil_scoped_release g;
     for (int i = 0; i < num_iter; i++) {
-      CAFFE_ENFORCE(gWorkspace->RunNet(name), "Error running net ", name);
+      bool success = gWorkspace->RunNet(name);
+      if (!allow_fail) {
+        CAFFE_ENFORCE(success, "Error running net ", name);
+      } else {
+        if (!success) {
+          return false;
+        }
+      }
     }
     return true;
   });
