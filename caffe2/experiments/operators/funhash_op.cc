@@ -1,4 +1,4 @@
-#include "caffe2/operators/funhash_op.h"
+#include "caffe2/experiments/operators/funhash_op.h"
 
 namespace caffe2 {
 namespace {
