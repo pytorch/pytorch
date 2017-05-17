@@ -23,8 +23,14 @@ using function_list = std::vector<std::pair<std::shared_ptr<Function>, int>>;
 
 // State used to create "backward" functions
 struct FunctionFlags {
+  // Roughly speaking, is_executable corresponds to requires_grad.
+  // See http://pytorch.org/docs/notes/autograd.html for more details:
+  // both is_executable and is_volatile specify whether or not backwards
+  // gradient computation will be performed for a function, but they differ in
+  // their precedence.
   bool is_executable = false;
   bool is_volatile = false;
+  // What functions take the output of this function as input.
   function_list next_functions;
 };
 

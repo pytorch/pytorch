@@ -33,6 +33,10 @@ PyObject *THPStochasticFunctionClass = NULL;
 #define THPFunction_assert(condition, ...)                                     \
   if (!(condition)) { THPUtils_setError(__VA_ARGS__); throw python_error(); }
 
+/**
+ * Cast an object into a tuple, if it is not a tuple already.  Returns true
+ * if the original object was not a tuple.
+ */
 static bool _ensure_tuple(THPObjectPtr& obj)
 {
   if (PyTuple_Check(obj.get()))
@@ -45,6 +49,9 @@ static bool _ensure_tuple(THPObjectPtr& obj)
   return true;
 }
 
+/**
+ * Call into Python to allocate and zero a tensor as per info.
+ */
 static PyObject* _allocate_grad_output(output_info_type& info, AutoGPU& gpu_guard)
 {
   // TODO: no need to do this for non-differentiable outputs
@@ -111,7 +118,9 @@ auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
   });
 }
 
-// NOTE: this function is written in a way that assumes it's only called for backward
+// NOTE: this function is written in a way that assumes it's only called for backward;
+// it's used by engine.cpp.  This is responsible for forwarding a call from
+// C++'s Function::apply to a Python method "apply".
 auto PyFunction::apply(const variable_list& inputs) -> variable_list {
   AutoGIL gil;
   AutoGPU _gpu_guard(-1);
@@ -122,6 +131,7 @@ auto PyFunction::apply(const variable_list& inputs) -> variable_list {
     return legacy_apply(inputs);
   }
 
+  // Massage a C++ variable_list into a Python arguments tuple
   auto num_inputs = inputs.size();
   THPObjectPtr pyInputs = PyTuple_New(num_inputs);
   if (!pyInputs) throw python_error();
@@ -148,7 +158,8 @@ auto PyFunction::apply(const variable_list& inputs) -> variable_list {
   auto& is_variable_input = *py_fn->is_variable_input;
   int num_outputs = PyTuple_GET_SIZE(r.get());
   int num_forward_inputs = is_variable_input.size();
-  // Returning too many results is ok, but only as long as they're all None
+  // Returning too many results is ok, but only as long as they're all None.
+  // Truncate the result tuple in that case.
   if (num_outputs > num_forward_inputs) {
     bool all_none = true;
     for (int i = num_forward_inputs; i < num_outputs; i++) {
@@ -170,6 +181,7 @@ auto PyFunction::apply(const variable_list& inputs) -> variable_list {
     throw std::runtime_error(msg);
   }
 
+  // Massage the Python results tuple back into a C++ variable_list
   variable_list results;
   results.reserve(num_outputs);
   for (int i = 0; i != num_outputs; ++i) {
@@ -296,6 +308,8 @@ PyObject *THPFunction_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 
 using t2var_type = std::unordered_map<PyObject *, THPVariable *>;
 
+// Bump the counters of all recorded dirty input tensors, adding each of them
+// into dirty_inputs.  Also does some sanity checking.
 static void _mark_dirty(THPFunction *self, t2var_type &t2var,
         std::unordered_set<PyObject *> &dirty_inputs)
 {
@@ -353,6 +367,16 @@ static void _transplant_var(Variable& var, const std::shared_ptr<Function>& fn, 
   }
 }
 
+// Given a Python tuple of raw output tensors (raw_output), set each of
+// the corresponding entries in a different Python tuple (outputs) with
+// these tensors wrapped with variables.  We save the gradient function (self)
+// to the variable if the output is not volatile (is_volatile).
+//
+// There is a considerable amount of complexity to handle if the operation
+// that produced these output tensors is inplace.  A mapping of *input*
+// tensors to variables (t2var) is used to test if this occurred, and
+// the set of dirty tensors (dirty_inputs) is used to figure out what to
+// do in this case.
 static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
     std::unordered_set<PyObject *> &dirty_inputs, PyObject *raw_output,
     PyObject *outputs, bool is_volatile)
@@ -443,6 +467,7 @@ static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
   }
 }
 
+// Save any variables that requested by to_save
 static void _save_variables(THPFunction* self, t2var_type &t2var)
 {
   if (!self->to_save) return;
@@ -520,6 +545,7 @@ static void _join_version_counters(THPFunction *self, t2var_type &t2var)
   self->shared_pairs = NULL;
 }
 
+// Mark requires_grad = 0 on non-differentiable variables (as per non_differentiable)
 static void _mark_non_differentiable(THPFunction *self, t2var_type &t2var)
 {
   if (!self->non_differentiable) return;
@@ -680,7 +706,7 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *_inputs)
   ctx->needs_input_grad = input_info.needs_input_grad.release();
   ctx->is_variable_input = new std::vector<bool>(std::move(input_info.is_variable_input));
 
-  // Prepend ctx to tensor_input
+  // Prepend ctx to tensor_input, in preparation for static method call
   auto num_args = PyTuple_GET_SIZE(_inputs);
   THPObjectPtr ctx_tensor_input = PyTuple_New(num_args + 1);
   PyTuple_SET_ITEM(ctx_tensor_input.get(), 0, ctx_obj.release());
