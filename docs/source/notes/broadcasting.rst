@@ -19,18 +19,22 @@ Two tensors are "broadcastable" if the following rules hold:
 
 For Example::
 
+    >>> x=torch.FloatTensor(5,7,3)
+    >>> y=torch.FloatTensor(5,7,3)
+    # same shapes are always broadcastable
+
     >>> x=torch.FloatTensor()
     >>> y=torch.FloatTensor(2,2)
     # x and y are not broadcastable, because x does not have at least 1 dimension
     
     >>> x=torch.FloatTensor(5,1,4,1)
     >>> y=torch.FloatTensor(3,1,1)
-    # are broadcastable
+    # x and y are broadcastable
     
     # but:
     >>> x=torch.FloatTensor(5,2,4,1)
     >>> y=torch.FloatTensor(3,1,1)
-    # are not broadcastable, because in the 3rd trailing dimension 2 != 3
+    # x and y are not broadcastable, because in the 3rd trailing dimension 2 != 3
 
 If two tensors :attr:`x`, :attr:`y` are "broadcastable", the resulting tensor size
 is calculated as follows:
@@ -42,17 +46,18 @@ is calculated as follows:
 
 For Example::
 
+    # can line up trailing dimensions to make reading easier
     >>> x=torch.FloatTensor(5,1,4,1)
-    >>> y=torch.FloatTensor(3,1,1)
+    >>> y=torch.FloatTensor(  3,1,1)
     >>> (x+y).size()
     torch.Size([5, 3, 4, 1])
-    
+
+    # but not necessary:
     >>> x=torch.FloatTensor(1)
     >>> y=torch.FloatTensor(3,1,7)
     >>> (x+y).size()
     torch.Size([3, 1, 7])
 
-    # but:
     >>> x=torch.FloatTensor(5,2,4,1)
     >>> y=torch.FloatTensor(3,1,1)
     >>> (x+y).size()
