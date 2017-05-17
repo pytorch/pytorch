@@ -102,3 +102,28 @@ class TestSparseToDenseMask(TestCase):
         expected = np.array([-1, 1, 3], dtype=np.float)
         self.assertEqual(output.shape, expected.shape)
         np.testing.assert_array_equal(output, expected)
+
+    def test_sparse_to_dense_mask_presence_mask(self):
+        op = core.CreateOperator(
+            'SparseToDenseMask',
+            ['indices', 'values', 'default', 'lengths'],
+            ['output', 'presence_mask'],
+            mask=[11, 12],
+            return_presence_mask=True)
+        workspace.FeedBlob('indices', np.array([11, 12, 13], dtype=np.int32))
+        workspace.FeedBlob('values', np.array([11, 12, 13], dtype=np.float))
+        workspace.FeedBlob('default', np.array(-1, dtype=np.float))
+        workspace.FeedBlob('lengths', np.array([1, 2], dtype=np.int32))
+
+        workspace.RunOperatorOnce(op)
+
+        output = workspace.FetchBlob('output')
+        presence_mask = workspace.FetchBlob('presence_mask')
+        expected_output = np.array([[11, -1], [-1, 12]], dtype=np.float)
+        expected_presence_mask = np.array(
+            [[True, False], [False, True]],
+            dtype=np.bool)
+        self.assertEqual(output.shape, expected_output.shape)
+        np.testing.assert_array_equal(output, expected_output)
+        self.assertEqual(presence_mask.shape, expected_presence_mask.shape)
+        np.testing.assert_array_equal(presence_mask, expected_presence_mask)

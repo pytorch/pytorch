@@ -27,6 +27,9 @@ class SparseToDenseMaskOp : public Operator<CPUContext> {
         dense_[id] = i;
       }
     }
+
+    returnPresenceMask_ =
+        GetSingleArgument<bool>("return_presence_mask", false);
   }
 
   bool RunOnDevice() override {
@@ -59,6 +62,10 @@ class SparseToDenseMaskOp : public Operator<CPUContext> {
     int32_t default_length = sparse_indices.dim32(0);
     const int32_t* lengths_vec = nullptr;
     auto* output = Output(0);
+    Tensor<CPUContext>* presence_mask = nullptr;
+    if (returnPresenceMask_) {
+      presence_mask = Output(1);
+    }
     vector<TIndex> shape;
     if (InputSize() == 4) {
       auto& lengths = Input(LENGTHS);
@@ -74,6 +81,9 @@ class SparseToDenseMaskOp : public Operator<CPUContext> {
       shape.push_back(rows);
     }
     shape.push_back(cols);
+    if (returnPresenceMask_) {
+      presence_mask->Resize(shape);
+    }
     shape.insert(
         shape.end(), default_value.dims().begin(), default_value.dims().end());
     output->Resize(shape);
@@ -89,6 +99,11 @@ class SparseToDenseMaskOp : public Operator<CPUContext> {
           default_val,
           output_data + i * block_nbytes);
     }
+    bool* presence_mask_data = nullptr;
+    if (returnPresenceMask_) {
+      presence_mask_data = presence_mask->template mutable_data<bool>();
+      memset(presence_mask_data, (int)false, rows * cols);
+    }
 
     int32_t offset = 0;
     for (int r = 0; r < rows; r++) {
@@ -100,6 +115,9 @@ class SparseToDenseMaskOp : public Operator<CPUContext> {
               block_size,
               sparse_values_vec + (offset + c) * block_nbytes,
               output_data + (r * cols + idx) * block_nbytes);
+          if (returnPresenceMask_) {
+            presence_mask_data[r * cols + idx] = true;
+          }
         }
       }
       offset += lengths_vec[r];
@@ -114,6 +132,7 @@ class SparseToDenseMaskOp : public Operator<CPUContext> {
   std::unordered_map<int, int> sparse_;
   std::vector<int> dense_;
   int featuresCount_;
+  bool returnPresenceMask_;
 
   inline int getFeatureIdx(int id) const {
     if (id >= kMaxDenseSize) {
@@ -136,20 +155,33 @@ REGISTER_CPU_OPERATOR(SparseToDenseMask, SparseToDenseMaskOp);
 
 OPERATOR_SCHEMA(SparseToDenseMask)
     .NumInputs(3, 4)
-    .NumOutputs(1)
+    .NumOutputs(1, 2)
     .TensorInferenceFunction(
         [](const OperatorDef& def, const vector<TensorShape>& in) {
+          ArgumentHelper helper(def);
+          auto mask = helper.template GetRepeatedArgument<int>("mask");
+          bool return_presence_mask = helper.template GetSingleArgument<bool>(
+              "return_presence_mask", false);
           vector<TensorShape> out(1);
+
           if (in.size() == 4) {
             out[0].add_dims(in[3].dims(0));
           }
-          ArgumentHelper helper(def);
-          auto mask = helper.template GetRepeatedArgument<int>("mask");
           out[0].add_dims(mask.size());
           for (const auto dim : in[2].dims()) {
             out[0].add_dims(dim);
           }
           out[0].set_data_type(in[2].data_type());
+
+          if (return_presence_mask) {
+            out.emplace_back();
+            if (in.size() == 4) {
+              out[1].add_dims(in[3].dims(0));
+            }
+            out[1].add_dims(mask.size());
+            out[1].set_data_type(TensorProto::BOOL);
+          }
+
           return out;
         })
     .SetDoc(R"DOC(
@@ -178,6 +210,9 @@ of size `len(lengths) X len(mask)`
     .Arg(
         "mask",
         "list(int) argument with desired ids on the 'dense' output dimension")
+    .Arg(
+        "return_presence_mask",
+        "bool whether to return presence mask, false by default")
     .Input(0, "indices", "1-D int32/int64 tensor of concatenated ids of data")
     .Input(1, "values", "Data tensor, first dimension has to match `indices`")
     .Input(
@@ -195,7 +230,13 @@ of size `len(lengths) X len(mask)`
         "output",
         "Output tensor of the same type as `values` of shape `[len(lengths), "
         "len(mask)] + shape(default_value)` (if `lengths` is not provided the "
-        "first dimension is omitted)");
+        "first dimension is omitted)")
+    .Output(
+        1,
+        "presence_mask",
+        "Bool tensor of shape `[len(lengths), len(mask)]` (if `lengths` is not "
+        "provided the first dimension is omitted). True when a value for given "
+        "id was present, false otherwise.");
 
 NO_GRADIENT(SparseToDenseMask);
 } // namespace
