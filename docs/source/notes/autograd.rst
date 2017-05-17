@@ -92,15 +92,22 @@ no intermediate states are saved.
 How autograd encodes the history
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Each Variable has a ``.creator`` attribute, that points to the function, of
-which it is an output. This is an entry point to a directed acyclic graph (DAG)
-consisting of :class:`Function` objects as nodes, and references between them
-being the edges. Every time an operation is performed, a new :class:`Function`
-representing it is instantiated, its :meth:`~torch.autograd.Function.forward`
-method is called, and its output :class:`Variable` s creators are set to it.
-Then, by following the path from any :class:`Variable` to the leaves, it is
-possible to reconstruct the sequence of operations that has created the data,
-and automatically compute the gradients.
+Autograd is reverse automatic differentiation system.  Conceptually,
+autograd records a graph recording all of the operations that created
+the data as you execute operations, giving you a directed acyclic graph
+whose leaves are the input variables and roots are the output variables.
+By tracing this graph from roots to leaves, you can automatically
+compute the gradients using the chain rule.
+
+Internally, autograd represents this graph as a graph of
+:class:`Function` objects (really expressions), which can be
+:meth:`~torch.autograd.Function.apply` ed to compute the result of
+evaluating the graph.  When computing the forwards pass, autograd
+simultaneously performs the requested computations and builds up a graph
+representing the function that computes the gradient (the ``.grad_fn``
+attribute of each :class:`Variable` is an entry point into this graph).
+When the forwards pass is completed, we evaluate this graph in the
+backwards pass to compute the gradients.
 
 An important thing to note is that the graph is recreated from scratch at every
 iteration, and this is exactly what allows for using arbitrary Python control
