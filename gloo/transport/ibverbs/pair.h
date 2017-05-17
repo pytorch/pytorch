@@ -94,8 +94,7 @@ class Pair : public ::gloo::transport::Pair {
 
   void handleCompletion(struct ibv_wc* wc);
 
-  // Used to signal IO exceptions from one thread and propagate onto others.
-  void signalIoFailure(const std::string& msg);
+  void send(Buffer* buf, size_t offset, size_t length, size_t roffset);
 
  protected:
   std::shared_ptr<Device> dev_;
@@ -156,6 +155,8 @@ class Pair : public ::gloo::transport::Pair {
  private:
   std::exception_ptr ex_;
 
+  // Used to signal IO exceptions from one thread and propagate onto others.
+  void signalIoFailure(const std::string& msg);
   void checkErrorState();
 
   friend class Buffer;

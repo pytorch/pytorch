@@ -130,33 +130,10 @@ void Buffer::send(size_t offset, size_t length, size_t roffset) {
     std::cout << std::endl;
   }
 
-  struct ibv_sge list;
-  list.addr = (uint64_t)ptr_ + offset;
-  list.length = length;
-  list.lkey = mr_->lkey;
-
-  struct ibv_send_wr wr;
-  memset(&wr, 0, sizeof(wr));
-  wr.wr_id = slot_;
-  wr.sg_list = &list;
-  wr.num_sge = 1;
-  wr.opcode = IBV_WR_RDMA_WRITE_WITH_IMM;
-  wr.send_flags = IBV_SEND_SIGNALED;
-  wr.imm_data = slot_;
-
-  const struct ibv_mr* peer = pair_->getMemoryRegion(slot_);
-  GLOO_ENFORCE_NE(peer, (const struct ibv_mr*)nullptr);
-  wr.wr.rdma.remote_addr = (uint64_t)peer->addr + roffset;
-  wr.wr.rdma.rkey = peer->rkey;
-
-  struct ibv_send_wr* bad_wr;
-  rv = ibv_post_send(pair_->qp_, &wr, &bad_wr);
-  if (rv != 0) {
-    pair_->signalIoFailure(GLOO_ERROR_MSG("ibv_post_send: ", rv));
-  }
-
   // Increment number of sends in flight
   sendPending_++;
+
+  pair_->send(this, offset, length, roffset);
 }
 
 void Buffer::handleCompletion(struct ibv_wc* wc) {

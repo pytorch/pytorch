@@ -416,6 +416,33 @@ void Pair::handleCompletion(struct ibv_wc* wc) {
   }
 }
 
+void Pair::send(Buffer* buffer, size_t offset, size_t length, size_t roffset) {
+  struct ibv_sge list;
+  list.addr = (uint64_t)buffer->ptr_ + offset;
+  list.length = length;
+  list.lkey = buffer->mr_->lkey;
+
+  struct ibv_send_wr wr;
+  memset(&wr, 0, sizeof(wr));
+  wr.wr_id = buffer->slot_;
+  wr.sg_list = &list;
+  wr.num_sge = 1;
+  wr.opcode = IBV_WR_RDMA_WRITE_WITH_IMM;
+  wr.send_flags = IBV_SEND_SIGNALED;
+  wr.imm_data = buffer->slot_;
+
+  const struct ibv_mr* peer = getMemoryRegion(buffer->slot_);
+  GLOO_ENFORCE_NE(peer, (const struct ibv_mr*)nullptr);
+  wr.wr.rdma.remote_addr = (uint64_t)peer->addr + roffset;
+  wr.wr.rdma.rkey = peer->rkey;
+
+  struct ibv_send_wr* bad_wr;
+  auto rv = ibv_post_send(qp_, &wr, &bad_wr);
+  if (rv != 0) {
+    signalIoFailure(GLOO_ERROR_MSG("ibv_post_send: ", rv));
+  }
+}
+
 void Pair::signalIoFailure(const std::string& msg) {
   std::lock_guard<std::mutex> lock(m_);
   auto ex = ::gloo::IoException(msg);
