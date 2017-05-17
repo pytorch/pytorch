@@ -292,9 +292,11 @@ class AllreduceHalvingDoubling : public Algorithm {
           totalItemsToSend * sizeof(T));
     }
 
-    // send to smaller block (technically the beginning of allgather)
+    // Send to smaller block (technically the beginning of allgather)
+    bool sentToSmallerBlock = false;
     if (nextSmallerBlockSize_ != 0) {
       if (recvOffsets_[stepsWithinBlock_ - 1] < count_) {
+        sentToSmallerBlock = true;
         smallerBlockSendDataBuf_->send(
             recvOffsets_[stepsWithinBlock_ - 1] * sizeof(T),
             recvCounts_[stepsWithinBlock_ - 1] * sizeof(T));
@@ -320,11 +322,29 @@ class AllreduceHalvingDoubling : public Algorithm {
             sendCounts_[i] * sizeof(T));
       }
       numItems <<= 1;
+
+      // Send notification to the pair we just received from that
+      // we're done dealing with the receive buffer.
+      sendNotificationBufs_[i]->send();
     }
 
     // Broadcast ptrs_[0]
     for (int i = 1; i < ptrs_.size(); i++) {
       memcpy(ptrs_[i], ptrs_[0], bytes_);
+    }
+
+    // Wait for notifications from our peers within the block to make
+    // sure we can send data immediately without risking overwriting
+    // data in its receive buffer before it consumed that data.
+    for (int i = stepsWithinBlock_ - 1; i >= 0; i--) {
+      recvNotificationBufs_[i]->waitRecv();
+    }
+
+    // We have to be sure the send to the smaller block (if any) has
+    // completed before returning. If we don't, the buffer contents may
+    // be modified by our caller.
+    if (sentToSmallerBlock) {
+      smallerBlockSendDataBuf_->waitSend();
     }
   }
 
