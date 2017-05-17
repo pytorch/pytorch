@@ -408,12 +408,27 @@ class MultiRNNCell(RNNCell):
     to the next layer.
     '''
 
-    def __init__(self, cells, **kwargs):
+    def __init__(self, cells, residual_output_layers=None, **kwargs):
         '''
         cells: list of RNNCell instances, from input to output side.
+
+        name: string designating network component (for scoping)
+
+        residual_output_layers: list of indices of layers whose input will
+        be added elementwise to their output elementwise. (It is the
+        responsibility of the client code to ensure shape compatibility.)
+        Note that layer 0 (zero) cannot have residual output because of the
+        timing of prepare_input().
+
+        forward_only: used to construct inference-only network.
         '''
         super(MultiRNNCell, self).__init__(**kwargs)
         self.cells = cells
+
+        if residual_output_layers is None:
+            self.residual_output_layers = []
+        else:
+            self.residual_output_layers = residual_output_layers
 
         self.state_names = []
         for cell in self.cells:
@@ -456,11 +471,13 @@ class MultiRNNCell(RNNCell):
             states_index += num_states
 
             if i > 0:
-                layer_input = layer_cell.prepare_input(model, layer_input)
+                prepared_input = layer_cell.prepare_input(model, layer_input)
+            else:
+                prepared_input = layer_input
 
             layer_next_states = layer_cell._apply(
                 model,
-                layer_input,
+                prepared_input,
                 seq_lengths,
                 layer_states,
                 timestep,
@@ -468,7 +485,16 @@ class MultiRNNCell(RNNCell):
             )
             # Since we're using here non-public method _apply, instead of apply,
             # we have to manually extract output from states
-            layer_input = layer_cell._prepare_output(model, layer_next_states)
+            layer_output = layer_cell._prepare_output(model, layer_next_states)
+
+            if i > 0 and i in self.residual_output_layers:
+                layer_input = model.net.Sum(
+                    [layer_output, layer_input],
+                    [layer_output],
+                )
+            else:
+                layer_input = layer_output
+
             next_states.extend(layer_next_states)
         return next_states
 
@@ -481,6 +507,45 @@ class MultiRNNCell(RNNCell):
             index += len(cell.get_state_names())
         index += self.cells[-1].get_output_state_index()
         return index
+
+    def _prepare_output(self, model, states):
+        output = states[self.get_output_state_index()]
+        if self.dropout_ratio is not None:
+            output = self._apply_dropout(model, output)
+        if (len(self.cells) - 1) in self.residual_output_layers:
+            last_layer_input_index = 0
+            for cell in self.cells[:-2]:
+                last_layer_input_index += len(cell.get_state_names())
+            last_layer_input_index += self.cells[-2].get_output_state_index()
+            last_layer_input = states[last_layer_input_index]
+            output = model.net.Sum(
+                [output, last_layer_input],
+                [self.scope('residual_output')],
+            )
+        return output
+
+    def _prepare_output_sequence(self, model, states, outputs_with_grads):
+        output_state_index = 2 * self.get_output_state_index()
+        output = states[output_state_index]
+        if self.dropout_ratio is not None:
+            assert output_state_index in outputs_with_grads, (
+                'You are adding dropout to the cell outputs, '
+                'but the gradient is not propagated through it'
+            )
+            output = self._apply_dropout(model, output)
+        if (len(self.cells) - 1) in self.residual_output_layers:
+            last_layer_input_index = 0
+            for cell in self.cells[:-2]:
+                last_layer_input_index += 2 * len(cell.get_state_names())
+            last_layer_input_index += (
+                2 * self.cells[-2].get_output_state_index()
+            )
+            last_layer_input = states[last_layer_input_index]
+            output = model.net.Sum(
+                [output, last_layer_input],
+                [self.scope('residual_output_sequence')],
+            )
+        return output
 
 
 class AttentionCell(RNNCell):
@@ -544,8 +609,10 @@ class AttentionCell(RNNCell):
         # there is a dropout, so we explicitly check dropout has been disabled.
         assert self.decoder_cell.dropout_ratio is None
 
-        hidden_t_intermediate = \
-            decoder_states[self.decoder_cell.get_output_state_index()]
+        hidden_t_intermediate = self.decoder_cell._prepare_output(
+            model,
+            decoder_states,
+        )
 
         if self.attention_type == AttentionType.Recurrent:
             (
@@ -582,12 +649,11 @@ class AttentionCell(RNNCell):
         if self.attention_memory_optimization:
             self.recompute_blobs.extend(attention_blobs)
 
-        hidden_t = model.Copy(
-            hidden_t_intermediate,
+        output = list(decoder_states) + [attention_weighted_encoder_context_t]
+        output[self.decoder_cell.get_output_state_index()] = model.Copy(
+            output[self.decoder_cell.get_output_state_index()],
             self.scope('hidden_t_external'),
         )
-        output = list(decoder_states) + [attention_weighted_encoder_context_t]
-        output[self.decoder_cell.get_output_state_index()] = hidden_t
         model.net.AddExternalOutputs(*output)
 
         return output
@@ -639,7 +705,10 @@ class AttentionCell(RNNCell):
         return self.decoder_cell.get_output_state_index()
 
     def _prepare_output(self, model, states):
-        decoder_cell_output = states[self.decoder_cell.get_output_state_index()]
+        decoder_cell_output = self.decoder_cell._prepare_output(
+            model,
+            states[:-1],
+        )
         attention_context = states[-1]
         with core.NameScope(self.name or ''):
             output, _ = model.net.Concat(
@@ -655,14 +724,16 @@ class AttentionCell(RNNCell):
         return output
 
     def _prepare_output_sequence(self, model, states, outputs_with_grads):
-        decoder_cell_output_index = (
-            2 * self.decoder_cell.get_output_state_index()
+        decoder_output = self.decoder_cell._prepare_output_sequence(
+            model,
+            states[:-2],
+            outputs_with_grads[:-2],
         )
         attention_context_index = 2 * (len(self.get_state_names()) - 1)
         with core.NameScope(self.name or ''):
             output, _ = model.net.Concat(
                 [
-                    states[decoder_cell_output_index],
+                    decoder_output,
                     states[attention_context_index],
                 ],
                 [
@@ -678,6 +749,9 @@ class AttentionCell(RNNCell):
             # trying to be explicit here and if we add dropout to the states,
             # but the gradient is not being propagates through them -
             # - we throw an error (since dropout is useless in this case).
+            decoder_cell_output_index = (
+                2 * self.decoder_cell.get_output_state_index()
+            )
             assert decoder_cell_output_index in outputs_with_grads, (
                 'You are adding dropout to the cell outputs, '
                 'but the gradient is not propagated through it'
