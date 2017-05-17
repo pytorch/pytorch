@@ -20,7 +20,7 @@ class TestFunHash(hu.HypothesisTestCase):
            n_weight=st.integers(min_value=8, max_value=15),
            n_alpha=st.integers(min_value=3, max_value=8),
            sparsity=st.floats(min_value=0.1, max_value=1.0),
-           **hu.gcs)
+           **hu.gcs_cpu_only)
     def test_funhash(self, n_out, n_in, n_data, n_weight, n_alpha, sparsity,
                      gc, dc):
         A = np.random.rand(n_data, n_in)
@@ -35,11 +35,14 @@ class TestFunHash(hu.HypothesisTestCase):
         seg = seg.astype(np.int32)
 
         op = core.CreateOperator(
-            'SparseFunHash',
+            'FunHash',
             ['val', 'key', 'seg', 'weight', 'alpha'],
             ['out'],
             num_outputs=n_out)
 
+        # Check over multiple devices
+        self.assertDeviceChecks(
+            dc, op, [val, key, seg, weight, alpha], [0])
         # Gradient check wrt weight
         self.assertGradientChecks(
             gc, op, [val, key, seg, weight, alpha], 3, [0])
@@ -48,11 +51,14 @@ class TestFunHash(hu.HypothesisTestCase):
             gc, op, [val, key, seg, weight, alpha], 4, [0])
 
         op2 = core.CreateOperator(
-            'SparseFunHash',
+            'FunHash',
             ['val', 'key', 'seg', 'weight'],
             ['out'],
             num_outputs=n_out)
 
+        # Check over multiple devices
+        self.assertDeviceChecks(
+            dc, op2, [val, key, seg, weight], [0])
         # Gradient check wrt weight
         self.assertGradientChecks(
             gc, op2, [val, key, seg, weight], 3, [0])

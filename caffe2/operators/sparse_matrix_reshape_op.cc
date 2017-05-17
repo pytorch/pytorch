@@ -1,4 +1,4 @@
-#include "caffe2/experiments/operators/sparse_matrix_reshape_op.h"
+#include "caffe2/operators/sparse_matrix_reshape_op.h"
 
 namespace caffe2 {
 namespace {
