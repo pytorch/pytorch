@@ -70,12 +70,6 @@ static PyObject* _allocate_grad_output(output_info_type& info, AutoGPU& gpu_guar
 
 namespace torch { namespace autograd {
 
-/**
- * Legacy implementation of apply, which is invoked during the backwards pass
- * when backward is NOT implemented as a static method.  A lot of user-code
- * defines this method as a regular method, so this function is still important,
- * but PyTorch should be moving away from this.
- */
 auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
   AutoGIL gil;
 
@@ -125,7 +119,8 @@ auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
 }
 
 // NOTE: this function is written in a way that assumes it's only called for backward;
-// it's used by engine.cpp (NB: this isn't the apply method on autograd Function)
+// it's used by engine.cpp.  This is responsible for forwarding a call from
+// C++'s Function::apply to a Python method "apply".
 auto PyFunction::apply(const variable_list& inputs) -> variable_list {
   AutoGIL gil;
   AutoGPU _gpu_guard(-1);
@@ -655,7 +650,6 @@ PyObject* process_outputs(THPFunction* grad_fn, const UnpackedInput& unpacked, T
     _mark_non_differentiable(grad_fn, t2var);
     _save_variables(grad_fn, t2var);
   } else {
-    // Everything is non-differentiable...
     // Remove unnecessary attributes
     Py_XDECREF(grad_fn->to_save);
     grad_fn->to_save = NULL;
