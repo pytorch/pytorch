@@ -156,8 +156,8 @@ TEST_F(CudaAllreduceTest, MultipleAlgorithms) {
              allreduceHalvingDoubling,
              allreduceHalvingDoublingPipelined};
 
-  for (const auto& fn : fns) {
-    spawn(size, [&](std::shared_ptr<Context> context) {
+  spawn(size, [&](std::shared_ptr<Context> context) {
+    for (const auto& fn : fns) {
       // Run algorithm
       auto fixture = CudaFixture(context, 1, count);
       auto ptrs = fixture.getFloatPointers();
@@ -175,8 +175,8 @@ TEST_F(CudaAllreduceTest, MultipleAlgorithms) {
 
       // Verify result
       assertResult(fixture);
-    });
-  }
+    }
+  });
 }
 
 std::vector<int> genMemorySizes() {
