@@ -165,7 +165,7 @@ PyObject * THPTensor_(setIndex)(THPTensor *self, PyObject *args)
         - THStorage* sourceStorage
         - long storage_offset
         - THSize* size
-        - arg: THStride* strides
+        - arg: THStride* stride
           default: NULL
 ]]
 
