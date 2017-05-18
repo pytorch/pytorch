@@ -67,9 +67,8 @@ void Context::setPairs(std::vector<std::unique_ptr<transport::Pair>>&& pairs) {
 
 ContextFactory::ContextFactory(std::shared_ptr<::gloo::Context> backingContext)
     : backingContext_(backingContext) {
-
   // We make sure that we have a fully connected context
-  for(int i = 0; i < backingContext_->size; ++i) {
+  for (auto i = 0; i < backingContext_->size; i++) {
     if (i == backingContext_->rank) {
       continue;
     }
@@ -81,52 +80,75 @@ ContextFactory::ContextFactory(std::shared_ptr<::gloo::Context> backingContext)
       GLOO_THROW("Backing context not fully connected");
     }
   }
+
+  auto slot = backingContext_->nextSlot();
+
+  // Create buffers we'll later use to communicate pair addresses
+  recvData_.resize(backingContext_->size);
+  sendData_.resize(backingContext_->size);
+  recvBuffers_.resize(backingContext_->size);
+  sendBuffers_.resize(backingContext_->size);
+  for (auto i = 0; i < backingContext_->size; i++) {
+    if (i == backingContext_->rank) {
+      continue;
+    }
+
+    // Allocate memory for recv/send
+    recvData_[i].resize(kMaxAddressSize);
+    sendData_[i].resize(kMaxAddressSize);
+
+    // Create pairs
+    auto& pair = backingContext_->getPair(i);
+    auto recvPtr = recvData_[i].data();
+    auto recvSize = recvData_[i].size();
+    recvBuffers_[i] = pair->createRecvBuffer(slot, recvPtr, recvSize);
+    auto sendPtr = sendData_[i].data();
+    auto sendSize = sendData_[i].size();
+    sendBuffers_[i] = pair->createSendBuffer(slot, sendPtr, sendSize);
+  }
 }
 
 std::shared_ptr<::gloo::Context> ContextFactory::makeContext(
-  std::shared_ptr<transport::Device>& dev) {
+    std::shared_ptr<transport::Device>& dev) {
+  auto context = std::make_shared<Context>(
+      backingContext_->rank,
+      backingContext_->size);
+  std::vector<std::unique_ptr<transport::Pair>> pairs(context->size);
 
-  using syncData = struct {
-    std::vector<char> me;
-  };
+  // Assume it's the same for all pairs on a device
+  size_t addressSize = 0;
 
-  auto toReturn = std::make_shared<Context>(backingContext_->rank,
-                                            backingContext_->size);
-  std::vector<std::unique_ptr<transport::Pair>> pairs(toReturn->size);
-
-  size_t maxAddressSize = 0;
-  int startingSlot = backingContext_->nextSlot(
-    backingContext_->size*backingContext_->size);
-
-  std::vector<syncData> pairInfo(toReturn->size);
-
-  for (int i = 0; i < toReturn->size; ++i) {
-    if (i == toReturn->rank) {
+  // Create pairs
+  for (auto i = 0; i < context->size; i++) {
+    if (i == context->rank) {
       continue;
     }
-    auto& tPair = backingContext_->getPair(i);
-    pairs[i] = dev->createPair();
-    pairInfo[i].me = pairs[i]->address().bytes();
-    tPair->createSendBuffer(startingSlot +
-                            backingContext_->rank*backingContext_->size+i,
-                            pairInfo[i].me.data(),
-                            pairInfo[i].me.size())->send();
-    maxAddressSize = std::max(maxAddressSize, pairInfo[i].me.size());
+
+    auto pair = dev->createPair();
+    auto address = pair->address().bytes();
+    addressSize = address.size();
+    pairs[i] = std::move(pair);
+
+    // Send address of new pair to peer
+    GLOO_ENFORCE_LE(addressSize, sendData_[i].size());
+    sendData_[i].assign(address.begin(), address.end());
+    sendBuffers_[i]->send(0, addressSize);
   }
 
-  std::vector<char> recvBuffer(maxAddressSize);
-  for (int i = 0; i < toReturn->size; ++i) {
-    if (i == toReturn->rank) {
+  // Wait for remote addresses and connect peers
+  for (auto i = 0; i < context->size; i++) {
+    if (i == context->rank) {
       continue;
     }
-    auto& tPair = backingContext_->getPair(i);
-    tPair->createRecvBuffer(startingSlot +
-                            i*backingContext_->size+backingContext_->rank,
-                            recvBuffer.data(), recvBuffer.size())->waitRecv();
-    pairs[i]->connect(recvBuffer);
+
+    recvBuffers_[i]->waitRecv();
+    auto& data = recvData_[i];
+    auto address = std::vector<char>(&data[0], &data[addressSize]);
+    pairs[i]->connect(address);
   }
-  toReturn->setPairs(std::move(pairs));
-  return std::static_pointer_cast<::gloo::Context>(toReturn);
+
+  context->setPairs(std::move(pairs));
+  return std::static_pointer_cast<::gloo::Context>(context);
 }
 
 } // namespace rendezvous

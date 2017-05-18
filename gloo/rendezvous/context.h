@@ -36,6 +36,9 @@ class Context : public ::gloo::Context {
 
 class ContextFactory {
  public:
+  // Assume a pair's address is no bigger than 128 bytes
+  static constexpr auto kMaxAddressSize = 128;
+
   explicit ContextFactory(std::shared_ptr<::gloo::Context> backingContext);
 
   std::shared_ptr<::gloo::Context> makeContext(
@@ -43,6 +46,12 @@ class ContextFactory {
 
  protected:
   std::shared_ptr<::gloo::Context> backingContext_;
+
+  std::vector<std::vector<char>> recvData_;
+  std::vector<std::vector<char>> sendData_;
+
+  std::vector<std::unique_ptr<transport::Buffer>> recvBuffers_;
+  std::vector<std::unique_ptr<transport::Buffer>> sendBuffers_;
 };
 
 
