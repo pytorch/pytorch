@@ -261,6 +261,7 @@ if not hasattr(torch._C, 'CudaDoubleStorageBase'):
     torch._C.__dict__['_CudaStreamBase'] = _dummy_type('CudaStreamBase')
 
 
+@staticmethod
 def _lazy_new(cls, *args, **kwargs):
     _lazy_init()
     # We need this method only for lazy init, so we can remove it
