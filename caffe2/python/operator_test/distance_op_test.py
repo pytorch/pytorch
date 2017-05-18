@@ -14,7 +14,7 @@ class DistanceTest(hu.HypothesisTestCase):
                              min_dim=1,
                              max_dim=4,
                              dtype=np.float32),
-           **hu.gcs_cpu_only)
+           **hu.gcs)
     def test_L1_distance(self, inputs, gc, dc):
         X, Y = inputs
         # avoid kinks by moving away from 0
@@ -34,6 +34,7 @@ class DistanceTest(hu.HypothesisTestCase):
                                      np.linalg.norm((X - Y).flatten(), ord=1),
                                     rtol=1e-4, atol=1e-4)
 
+        self.assertDeviceChecks(dc, op, [X, Y], [0])
         # Gradient check wrt X
         self.assertGradientChecks(gc, op, [X, Y], 0, [0], stepsize=1e-2, threshold=1e-2)
         # Gradient check wrt Y

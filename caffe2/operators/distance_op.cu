@@ -2,6 +2,7 @@
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/distance_op.h"
+#include "caffe2/utils/conversions.h"
 
 #include <cub/block/block_reduce.cuh>
 
@@ -101,6 +102,122 @@ bool SquaredL2DistanceGradientOp<float, CUDAContext>::RunOnDevice() {
   // The gradient of the other side is basically the negative.
   math::Scale<float, CUDAContext>(
       X.size(), -1, dX->data<float>(), dY->mutable_data<float>(), &context_);
+  return true;
+}
+
+namespace {
+template <typename T>
+__global__ void L1DistanceKernel(
+    const int N,
+    const int D,
+    const T* X,
+    const T* Y,
+    T* distance) {
+  typedef cub::BlockReduce<float, CAFFE_CUDA_NUM_THREADS> BlockReduce;
+  __shared__ typename BlockReduce::TempStorage temp_storage;
+
+  for (int i = blockIdx.x; i < N; i += gridDim.x) {
+    float sum = 0.0f;
+    for (int j = threadIdx.x; j < D; j += blockDim.x) {
+      sum +=
+          abs(convert::To<T, float>(X[i * D + j]) -
+              convert::To<T, float>(Y[i * D + j]));
+    }
+
+    float aggregate = BlockReduce(temp_storage).Sum(sum);
+    __syncthreads();
+    if (threadIdx.x == 0) {
+      distance[i] = aggregate;
+    }
+  }
+}
+} // namespace
+
+template <>
+bool L1DistanceOp<float, CUDAContext>::RunOnDevice() {
+  auto& X = Input(0);
+  auto& Y = Input(1);
+  auto* distance = Output(0);
+  CAFFE_ENFORCE_EQ(X.ndim(), Y.ndim());
+  for (int i = 0; i < X.ndim(); ++i) {
+    CAFFE_ENFORCE_EQ(X.dim32(i), Y.dim32(i));
+  }
+  const int N = X.ndim() > 0 ? X.dim32(0) : 1;
+  const int D = N > 0 ? X.size() / N : 0;
+
+  distance->Resize(N);
+
+  L1DistanceKernel<<<
+      std::min(N, CAFFE_MAXIMUM_NUM_BLOCKS),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context_.cuda_stream()>>>(
+      N, D, X.data<float>(), Y.data<float>(), distance->mutable_data<float>());
+  math::Sum<float, CUDAContext>(
+      N, distance->data<float>(), distance->mutable_data<float>(), &context_);
+
+  distance->Resize(1);
+
+  return true;
+}
+
+namespace {
+template <typename T>
+__global__ void L1DistanceGradientKernel(
+    const int N,
+    const int D,
+    const T* X,
+    const T* Y,
+    const T* dDistance,
+    T* dX,
+    T* dY) {
+  CUDA_1D_KERNEL_LOOP(i, N * D) {
+    constexpr float kEps = 1e-12;
+    if (X[i] - Y[i] < -kEps) {
+      dX[i] = -dDistance[0];
+      dY[i] = dDistance[0];
+    } else if (X[i] - Y[i] > kEps) {
+      dX[i] = dDistance[0];
+      dY[i] = -dDistance[0];
+    } else {
+      dX[i] = 0;
+      dY[i] = 0;
+    }
+  }
+}
+} // namespace
+
+template <>
+bool L1DistanceGradientOp<float, CUDAContext>::RunOnDevice() {
+  auto& X = Input(0);
+  auto& Y = Input(1);
+  auto& dDistance = Input(2);
+  auto* dX = Output(0);
+  auto* dY = Output(1);
+  CAFFE_ENFORCE_EQ(X.ndim(), Y.ndim());
+  for (int i = 0; i < X.ndim(); ++i) {
+    CAFFE_ENFORCE_EQ(X.dim32(i), Y.dim32(i));
+  }
+  CAFFE_ENFORCE(dDistance.ndim() == 1);
+  CAFFE_ENFORCE(dDistance.dim32(0) == 1);
+  dX->ResizeLike(X);
+  dY->ResizeLike(Y);
+  const int N = X.ndim() > 0 ? X.dim32(0) : 1;
+  const int D = N > 0 ? X.size() / N : 0;
+
+  L1DistanceGradientKernel<<<
+      CAFFE_GET_BLOCKS(N * D),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context_.cuda_stream()>>>(
+      N,
+      D,
+      X.data<float>(),
+      Y.data<float>(),
+      dDistance.data<float>(),
+      dX->mutable_data<float>(),
+      dY->mutable_data<float>());
+
   return true;
 }
 
@@ -216,6 +333,11 @@ REGISTER_CUDA_OPERATOR(SquaredL2Distance,
                        SquaredL2DistanceOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(SquaredL2DistanceGradient,
                        SquaredL2DistanceGradientOp<float, CUDAContext>);
+
+REGISTER_CUDA_OPERATOR(L1Distance, L1DistanceOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(
+    L1DistanceGradient,
+    L1DistanceGradientOp<float, CUDAContext>);
 
 REGISTER_CUDA_OPERATOR(DotProduct, DotProductOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(
