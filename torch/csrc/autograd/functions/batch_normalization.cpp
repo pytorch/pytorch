@@ -18,7 +18,7 @@ namespace torch { namespace autograd {
 using thpp::Tensor;
 
 auto BatchNormForward::apply(const variable_list& inputs) -> variable_list {
-  if (inputs.size() != 3) throw std::runtime_error("expected three inputs");
+  check_input_variables("BatchNorm", inputs, 3, 1);
 
   auto& input = inputs[0];
   auto& weight = inputs[1];
@@ -85,6 +85,7 @@ auto BatchNormForward::apply(const variable_list& inputs) -> variable_list {
 };
 
 auto BatchNormBackward::apply(const variable_list& grad_outputs) -> variable_list {
+  check_input_variables("BatchNormBackward", grad_outputs, 1);
   auto input = this->input.unpack_data();
   auto weight = this->weight.unpack_data();
   auto bias = this->bias.unpack_data();

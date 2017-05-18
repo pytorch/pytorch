@@ -1317,6 +1317,10 @@ class TestNN(NNTestCase):
         # but it should work with the same type
         nn.functional.conv2d(inputs.float(), weights.float())
 
+    def test_Conv2d_missing_argument(self):
+        c = nn.Conv2d(3, 3, 3)
+        self.assertRaises(RuntimeError, lambda: c(None))
+
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_Conv2d_large_workspace(self):
         # These sizes require huge cuDNN workspaces. Make sure we choose a
