@@ -103,7 +103,7 @@ class ncclTypeWrapper<float> {
   static const ncclDataType_t type = ncclFloat;
 };
 
-#ifdef CUDA_HAS_HALF
+#ifdef CAFFE_HAS_CUDA_FP16
 template <>
 class ncclTypeWrapper<float16> {
  public:
@@ -233,7 +233,7 @@ void NCCL<T>::AllGather(const NCCLExecution& ex) {
 
 // Explicit instantiation
 template class NCCL<float>;
-#ifdef CUDA_HAS_HALF
+#ifdef CAFFE_HAS_CUDA_FP16
 template class NCCL<float16>;
 #endif
 }
