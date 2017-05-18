@@ -17,6 +17,11 @@ def _libcudnn():
         if hasattr(lib, 'cudnnGetErrorString'):
             lib.cudnnGetErrorString.restype = ctypes.c_char_p
             __cudnn_version = lib.cudnnGetVersion()
+            compile_version = torch._C._cudnn_version()
+            if __cudnn_version != compile_version:
+                raise RuntimeError(
+                    'cuDNN version mismatch: PyTorch was compiled against {} '
+                    'but linked against {}'.format(compile_version, __cudnn_version))
         else:
             lib = None
     return lib
