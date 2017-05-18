@@ -33,7 +33,7 @@ auto AccumulateGrad::acc_inplace(std::shared_ptr<Variable>& grad,
 
 auto AccumulateGrad::apply(const variable_list& grads) -> variable_list {
   // XXX: this method is not thread-safe!
-  if (grads.size() != 1) throw std::runtime_error("AccumulateGrad expects exactly 1 input");
+  check_input_variables("AccumulateGrad", grads, 1);
   auto var = variable.lock();
   auto new_grad = grads[0];
 
@@ -90,4 +90,3 @@ auto AccumulateGrad::apply(const variable_list& grads) -> variable_list {
 };
 
 }} // namespace torch::autograd
-

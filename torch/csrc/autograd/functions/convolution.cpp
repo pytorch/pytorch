@@ -121,7 +121,7 @@ static auto view3d(const Tensor& tensor) -> std::unique_ptr<Tensor> {
 }
 
 auto ConvForward::apply(const variable_list& inputs) -> variable_list {
-  check_input_variables("ConvNd", inputs, 3, 1);
+  check_input_variables("ConvNd", inputs, 3, 2);
   if (is_padding_neg()) throw std::runtime_error("negative padding is not supported");
   if (is_output_padding_neg()) throw std::runtime_error("negative output_padding is not supported");
 
