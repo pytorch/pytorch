@@ -286,12 +286,13 @@ class TestConvolution(hu.HypothesisTestCase):
         Output = collections.namedtuple("Output", ["Y", "engine", "order"])
         outputs = []
 
-        cudnn_v6p = workspace.GetCuDNNVersion() >= 6000
-        dilated_conv = dilation == 1
-        # cuDNN v6+ supports dilated convolutions
-        engine_list = ["", "CUDNN"] if cudnn_v6p or dilated_conv else [""]
-
         for order in ["NCHW", "NHWC"]:
+            cudnn_v6p = workspace.GetCuDNNVersion() >= 6000
+            dilated_conv = dilation > 1
+            # cuDNN v6+ supports dilated convolutions only for NCHW
+            engine_list = ["", "CUDNN"] \
+                if (not dilated_conv) or (cudnn_v6p and dilated_conv and order=="NCHW") \
+                else [""]
             for engine in engine_list:
                 op = core.CreateOperator(
                     "Conv",
