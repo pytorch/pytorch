@@ -247,8 +247,9 @@ ${cpu}
         arg_desc = sorted(list(arg_desc.keys()), key=len)
         arg_desc = ['"' + desc + '"' for desc in arg_desc]
         arg_str = ', '.join(arg_desc)
-        variables_str = '\n'.join(declaration.get('variables', []))
-        init_str = '\n'.join(declaration.get('init', []))
+        sep = '\n' + (' ' * 4)
+        variables_str = sep.join(declaration.get('variables', []))
+        init_str = sep.join(declaration.get('init', []))
         if 'stateless' in declaration['name']:
             readable_name = 'torch.' + declaration['python_name']
         else:
@@ -325,9 +326,11 @@ ${cpu}
                        for arg in option['arguments'])
 
         def has_long_args(declaration):
-            return any(arg.get('long_args', False)
-                       for option in declaration['options']
-                       for arg in option['arguments'])
+            long_args = [any(arg.get('long_args', False) for arg in option['arguments'])
+                         for option in declaration['options']]
+            if any(long_args) != all(long_args):
+                raise RuntimeError("Only some options have long_args")
+            return long_args[0]
 
         def has_output_args(declaration):
             return any(arg.get('output')
