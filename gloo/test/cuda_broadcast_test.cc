@@ -34,7 +34,7 @@ using Param = std::tuple<int, int, int, std::function<Func>>;
 class CudaBroadcastTest : public CudaBaseTest,
                           public ::testing::WithParamInterface<Param> {
  public:
-  void assertResult(CudaFixture& fixture, int root, int rootPointer) {
+  void assertResult(CudaFixture<float>& fixture, int root, int rootPointer) {
     // Expected is set to the expected value at ptr[0]
     const auto expected = root * fixture.srcs.size() + rootPointer;
     // Stride is difference between values at subsequent indices
@@ -56,8 +56,8 @@ TEST_P(CudaBroadcastTest, Default) {
   auto fn = std::get<3>(GetParam());
 
   spawn(processCount, [&](std::shared_ptr<Context> context) {
-      auto fixture = CudaFixture(context, pointerCount, elementCount);
-      auto ptrs = fixture.getFloatPointers();
+      auto fixture = CudaFixture<float>(context, pointerCount, elementCount);
+      auto ptrs = fixture.getPointers();
 
       // Run with varying root
       // TODO(PN): go up to processCount
@@ -91,8 +91,8 @@ TEST_P(CudaBroadcastTest, DefaultAsync) {
   auto fn = std::get<3>(GetParam());
 
   spawn(processCount, [&](std::shared_ptr<Context> context) {
-      auto fixture = CudaFixture(context, pointerCount, elementCount);
-      auto ptrs = fixture.getFloatPointers();
+      auto fixture = CudaFixture<float>(context, pointerCount, elementCount);
+      auto ptrs = fixture.getPointers();
       auto streams = fixture.getCudaStreams();
 
       // Run with varying root

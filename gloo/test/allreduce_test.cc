@@ -26,8 +26,14 @@ using Func = void(
     std::vector<float*> dataPtrs,
     int dataSize);
 
+using Func16 = void(
+    std::shared_ptr<::gloo::Context>,
+    std::vector<float16*> dataPtrs,
+    int dataSize);
+
 // Test parameterization.
 using Param = std::tuple<int, int, std::function<Func>>;
+using ParamHP = std::tuple<int, int, std::function<Func16>>;
 
 template <typename Algorithm>
 class AllreduceConstructorTest : public BaseTest {
@@ -68,11 +74,28 @@ static std::function<Func> allreduceRing = [](
   algorithm.run();
 };
 
+static std::function<Func16> allreduceRingHP = [](
+    std::shared_ptr<::gloo::Context> context,
+    std::vector<float16*> dataPtrs,
+    int dataSize) {
+  ::gloo::AllreduceRing<float16> algorithm(context, dataPtrs, dataSize);
+  algorithm.run();
+};
+
 static std::function<Func> allreduceRingChunked = [](
     std::shared_ptr<::gloo::Context> context,
     std::vector<float*> dataPtrs,
     int dataSize) {
   ::gloo::AllreduceRingChunked<float> algorithm(
+      context, dataPtrs, dataSize);
+  algorithm.run();
+};
+
+static std::function<Func16> allreduceRingChunkedHP = [](
+    std::shared_ptr<::gloo::Context> context,
+    std::vector<float16*> dataPtrs,
+    int dataSize) {
+  ::gloo::AllreduceRingChunked<float16> algorithm(
       context, dataPtrs, dataSize);
   algorithm.run();
 };
@@ -86,9 +109,21 @@ static std::function<Func> allreduceHalvingDoubling = [](
   algorithm.run();
 };
 
+static std::function<Func16> allreduceHalvingDoublingHP = [](
+    std::shared_ptr<::gloo::Context> context,
+    std::vector<float16*> dataPtrs,
+    int dataSize) {
+  ::gloo::AllreduceHalvingDoubling<float16> algorithm(
+      context, dataPtrs, dataSize);
+  algorithm.run();
+};
+
 // Test fixture.
 class AllreduceTest : public BaseTest,
                       public ::testing::WithParamInterface<Param> {};
+
+class AllreduceTestHP : public BaseTest,
+                        public ::testing::WithParamInterface<ParamHP> {};
 
 TEST_P(AllreduceTest, SinglePointer) {
   auto contextSize = std::get<0>(GetParam());
@@ -144,6 +179,33 @@ TEST_F(AllreduceTest, MultipleAlgorithms) {
       fn(context, {ptr.get()}, dataSize);
 
       expected = (contextSize * (contextSize - 1)) / 2;
+      for (int i = 0; i < dataSize; i++) {
+        ASSERT_EQ(expected, ptr[i]) << "Mismatch at index " << i;
+      }
+    }
+  });
+}
+
+TEST_F(AllreduceTestHP, HalfPrecisionTest) {
+  int contextSize = 4;
+  auto dataSize = 1000;
+  auto fns = {
+      allreduceRingHP, allreduceRingChunkedHP, allreduceHalvingDoublingHP};
+
+  spawnThreads(contextSize, [&](int contextRank) {
+    auto context =
+        std::make_shared<::gloo::rendezvous::Context>(contextRank, contextSize);
+    context->connectFullMesh(*store_, device_);
+
+    std::unique_ptr<float16[]> ptr(new float16[dataSize]);
+    for (const auto& fn : fns) {
+      for (int i = 0; i < dataSize; i++) {
+        ptr[i] = contextRank;
+      }
+
+      fn(context, {ptr.get()}, dataSize);
+
+      float16 expected(contextSize * (contextSize - 1) / 2);
       for (int i = 0; i < dataSize; i++) {
         ASSERT_EQ(expected, ptr[i]) << "Mismatch at index " << i;
       }

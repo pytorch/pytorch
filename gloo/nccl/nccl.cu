@@ -148,6 +148,12 @@ class ncclTypeWrapper<uint64_t> {
 };
 
 template <>
+class ncclTypeWrapper<float16> {
+ public:
+  static const ncclDataType_t type = ncclHalf;
+};
+
+template <>
 class ncclTypeWrapper<float> {
  public:
   static const ncclDataType_t type = ncclFloat;
@@ -305,6 +311,7 @@ DEFINE_NCCL_TYPES_AND_OPS(int8_t);
 DEFINE_NCCL_TYPES_AND_OPS(int32_t);
 DEFINE_NCCL_TYPES_AND_OPS(int64_t);
 DEFINE_NCCL_TYPES_AND_OPS(uint64_t);
+DEFINE_NCCL_TYPES_AND_OPS(float16);
 DEFINE_NCCL_TYPES_AND_OPS(float);
 DEFINE_NCCL_TYPES_AND_OPS(double);
 

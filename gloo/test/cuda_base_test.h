@@ -22,6 +22,7 @@ int cudaNumDevices();
 
 class CudaBaseTest : public BaseTest {};
 
+template <typename T>
 class CudaFixture {
  public:
   CudaFixture(const std::shared_ptr<Context> context, int devices, int count)
@@ -29,9 +30,9 @@ class CudaFixture {
         count(count) {
     for (int i = 0; i < devices; i++) {
       CudaDeviceScope scope(i);
-      srcs.push_back(CudaMemory<float>(count));
+      srcs.push_back(CudaMemory<T>(count));
       ptrs.push_back(
-        CudaDevicePointer<float>::create(*srcs.back(), count));
+        CudaDevicePointer<T>::create(*srcs.back(), count));
       streams.push_back(CudaStream(i));
     }
   }
@@ -62,8 +63,8 @@ class CudaFixture {
     }
   }
 
-  std::vector<float*> getFloatPointers() const {
-    std::vector<float*> out;
+  std::vector<T*> getPointers() const {
+    std::vector<T*> out;
     for (const auto& src : srcs) {
       out.push_back(*src);
     }
@@ -78,8 +79,8 @@ class CudaFixture {
     return out;
   }
 
-  std::vector<std::unique_ptr<float[]> > getHostBuffers() {
-    std::vector<std::unique_ptr<float[]> > out;
+  std::vector<std::unique_ptr<T[]> > getHostBuffers() {
+    std::vector<std::unique_ptr<T[]> > out;
     for (auto& src : srcs) {
       out.push_back(src.copyToHost());
     }
@@ -95,9 +96,9 @@ class CudaFixture {
 
   std::shared_ptr<Context> context;
   const int count;
-  std::vector<CudaDevicePointer<float> > ptrs;
+  std::vector<CudaDevicePointer<T> > ptrs;
   std::vector<CudaStream> streams;
-  std::vector<CudaMemory<float> > srcs;
+  std::vector<CudaMemory<T> > srcs;
 };
 
 } // namespace test

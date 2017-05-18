@@ -73,7 +73,7 @@ class CudaDeviceScope {
 };
 
 // Managed chunk of GPU memory.
-// Convience class used for tests and benchmarks.
+// Convenience class used for tests and benchmarks.
 template<typename T>
 class CudaMemory {
  public:
@@ -81,7 +81,7 @@ class CudaMemory {
   CudaMemory(CudaMemory&&) noexcept;
   ~CudaMemory();
 
-  void set(T val, size_t stride = 0, cudaStream_t stream = kStreamNotSet);
+  void set(int val, size_t stride = 0, cudaStream_t stream = kStreamNotSet);
 
   T* operator*() const {
     return ptr_;

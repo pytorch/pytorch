@@ -32,14 +32,14 @@ TEST_P(AllgatherTest, VarNumPointer) {
   auto numPtrs = std::get<2>(GetParam());
 
   spawn(contextSize, [&](std::shared_ptr<Context> context) {
-    Fixture inFixture(context, numPtrs, dataSize);
+    Fixture<float> inFixture(context, numPtrs, dataSize);
     inFixture.assignValues();
 
     std::unique_ptr<float[]> outPtr =
         gloo::make_unique<float[]>(numPtrs * dataSize * contextSize);
 
     AllgatherRing<float> algorithm(
-        context, inFixture.getFloatPointers(), outPtr.get(), dataSize);
+        context, inFixture.getPointers(), outPtr.get(), dataSize);
 
     algorithm.run();
 
@@ -64,7 +64,7 @@ TEST_F(AllgatherTest, MultipleAlgorithms) {
   auto numPtrs = 8;
 
   spawn(contextSize, [&](std::shared_ptr<Context> context) {
-    Fixture inFixture(context, numPtrs, dataSize);
+    Fixture<float> inFixture(context, numPtrs, dataSize);
     inFixture.assignValues();
 
     std::unique_ptr<float[]> outPtr =
@@ -72,7 +72,7 @@ TEST_F(AllgatherTest, MultipleAlgorithms) {
 
     for (int alg = 0; alg < 2; alg++) {
       AllgatherRing<float> algorithm(
-          context, inFixture.getFloatPointers(), outPtr.get(), dataSize);
+          context, inFixture.getPointers(), outPtr.get(), dataSize);
       algorithm.run();
 
       auto stride = contextSize * numPtrs;

@@ -45,6 +45,7 @@ struct options {
   bool showNanos = false;
   int inputs = 1;
   bool gpuDirect = false;
+  bool halfPrecision = false;
 };
 
 struct options parseOptions(int argc, char** argv);

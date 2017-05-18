@@ -19,6 +19,7 @@
 namespace gloo {
 namespace benchmark {
 
+template <typename T>
 class Benchmark {
  public:
   Benchmark(
@@ -38,13 +39,13 @@ class Benchmark {
   virtual void verify() {}
 
  protected:
-  virtual std::vector<float*> allocate(int inputs, int elements) {
-    std::vector<float*> ptrs;
+  virtual std::vector<T*> allocate(int inputs, int elements) {
+    std::vector<T*> ptrs;
 
     // Stride between successive values in any input.
     const auto stride = context_->size * inputs;
     for (int i = 0; i < inputs; i++) {
-      std::vector<float> memory(elements);
+      std::vector<T> memory(elements);
 
       // Value at memory[0]. Different for every input at every node.
       // This means all values across all inputs and all nodes are
@@ -62,7 +63,7 @@ class Benchmark {
   std::shared_ptr<::gloo::Context> context_;
   struct options options_;
   std::unique_ptr<::gloo::Algorithm> algorithm_;
-  std::vector<std::vector<float> > inputs_;
+  std::vector<std::vector<T> > inputs_;
 };
 
 } // namespace benchmark

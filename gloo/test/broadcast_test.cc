@@ -33,13 +33,13 @@ using Param = std::tuple<int, int, int, std::function<Func>>;
 class BroadcastTest : public BaseTest,
                       public ::testing::WithParamInterface<Param> {
  public:
-  void assertResult(Fixture& fixture, int root, int rootPointer) {
+  void assertResult(Fixture<float>& fixture, int root, int rootPointer) {
     // Expected is set to the expected value at ptr[0]
     const auto expected = root * fixture.srcs.size() + rootPointer;
     // Stride is difference between values at subsequent indices
     const auto stride = fixture.srcs.size() * fixture.context->size;
     // Verify all buffers passed by this instance
-    for (const auto& ptr : fixture.getFloatPointers()) {
+    for (const auto& ptr : fixture.getPointers()) {
       for (auto i = 0; i < fixture.count; i++) {
         ASSERT_EQ((i * stride) + expected, ptr[i])
           << "Mismatch at index " << i;
@@ -55,8 +55,8 @@ TEST_P(BroadcastTest, Default) {
   auto fn = std::get<3>(GetParam());
 
   spawn(processCount, [&](std::shared_ptr<Context> context) {
-      auto fixture = Fixture(context, pointerCount, elementCount);
-      auto ptrs = fixture.getFloatPointers();
+      auto fixture = Fixture<float>(context, pointerCount, elementCount);
+      auto ptrs = fixture.getPointers();
 
       // Run with varying root
       // TODO(PN): go up to processCount

@@ -9,6 +9,7 @@
 
 #include "gloo/cuda.h"
 #include "gloo/cuda_private.h"
+#include <cuda_fp16.h>
 
 namespace gloo {
 
@@ -274,6 +275,7 @@ INSTANTIATE_COPY_ASYNC(int8_t);
 INSTANTIATE_COPY_ASYNC(int32_t);
 INSTANTIATE_COPY_ASYNC(int64_t);
 INSTANTIATE_COPY_ASYNC(uint64_t);
+INSTANTIATE_COPY_ASYNC(float16);
 INSTANTIATE_COPY_ASYNC(float);
 INSTANTIATE_COPY_ASYNC(double);
 
@@ -309,6 +311,25 @@ static inline int cudaGetBlocks(const int N) {
         dst, src, n);                                                   \
   }
 
+#define DELEGATE_HALF_PRECISION_CUDA_BINARY_OPERATOR(Funcname, op)             \
+  __global__ void _Kernel_half_##Funcname(                                     \
+      half* dst, const half* src, const int n) {                               \
+    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < (n);               \
+         i += blockDim.x * gridDim.x) {                                        \
+      float r = __half2float(dst[i]) op __half2float(src[i]);                  \
+      dst[i] = __float2half(r);                                                \
+    }                                                                          \
+  }                                                                            \
+  template <>                                                                  \
+  void Funcname<float16>(                                                      \
+      float16* dst,                                                            \
+      const float16* src,                                                      \
+      size_t n,                                                                \
+      const cudaStream_t stream) {                                             \
+    _Kernel_half_##Funcname<<<cudaGetBlocks(n), kCudaNumThreads, 0, stream>>>( \
+        (half*)dst, (half*)src, n);                                            \
+  }
+
 DELEGATE_SIMPLE_CUDA_BINARY_OPERATOR(int8_t, cudaSum, +);
 DELEGATE_SIMPLE_CUDA_BINARY_OPERATOR(int8_t, cudaProduct, *);
 DELEGATE_SIMPLE_CUDA_BINARY_OPERATOR(int32_t, cudaSum, +);
@@ -321,6 +342,8 @@ DELEGATE_SIMPLE_CUDA_BINARY_OPERATOR(float, cudaSum, +);
 DELEGATE_SIMPLE_CUDA_BINARY_OPERATOR(float, cudaProduct, *);
 DELEGATE_SIMPLE_CUDA_BINARY_OPERATOR(double, cudaSum, +);
 DELEGATE_SIMPLE_CUDA_BINARY_OPERATOR(double, cudaProduct, *);
+DELEGATE_HALF_PRECISION_CUDA_BINARY_OPERATOR(cudaSum, +);
+DELEGATE_HALF_PRECISION_CUDA_BINARY_OPERATOR(cudaProduct, *);
 
 #define DELEGATE_SIMPLE_CUDA_BINARY_COMPARE(T, Funcname, op)            \
   __global__                                                            \
@@ -347,6 +370,26 @@ DELEGATE_SIMPLE_CUDA_BINARY_OPERATOR(double, cudaProduct, *);
         dst, src, n);                                                   \
   }
 
+#define DELEGATE_HALF_PRECISION_CUDA_BINARY_COMPARE(Funcname, op)              \
+  __global__ void _Kernel_half_##Funcname(                                     \
+      half* dst, const half* src, const int n) {                               \
+    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < (n);               \
+         i += blockDim.x * gridDim.x) {                                        \
+      if (__half2float(src[i]) op __half2float(dst[i])) {                      \
+        dst[i] = src[i];                                                       \
+      }                                                                        \
+    }                                                                          \
+  }                                                                            \
+  template <>                                                                  \
+  void Funcname<float16>(                                                      \
+      float16* dst,                                                            \
+      const float16* src,                                                      \
+      size_t n,                                                                \
+      const cudaStream_t stream) {                                             \
+    _Kernel_half_##Funcname<<<cudaGetBlocks(n), kCudaNumThreads, 0, stream>>>( \
+        (half*)dst, (half*)src, n);                                            \
+  }
+
 DELEGATE_SIMPLE_CUDA_BINARY_COMPARE(int8_t, cudaMin, <);
 DELEGATE_SIMPLE_CUDA_BINARY_COMPARE(int8_t, cudaMax, >);
 DELEGATE_SIMPLE_CUDA_BINARY_COMPARE(int32_t, cudaMin, <);
@@ -359,5 +402,7 @@ DELEGATE_SIMPLE_CUDA_BINARY_COMPARE(float, cudaMin, <);
 DELEGATE_SIMPLE_CUDA_BINARY_COMPARE(float, cudaMax, >);
 DELEGATE_SIMPLE_CUDA_BINARY_COMPARE(double, cudaMin, <);
 DELEGATE_SIMPLE_CUDA_BINARY_COMPARE(double, cudaMax, >);
+DELEGATE_HALF_PRECISION_CUDA_BINARY_COMPARE(cudaMin, <);
+DELEGATE_HALF_PRECISION_CUDA_BINARY_COMPARE(cudaMax, >);
 
 } // namespace gloo

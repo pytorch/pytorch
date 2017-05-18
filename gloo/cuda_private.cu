@@ -9,19 +9,35 @@
 
 #include "gloo/cuda_private.h"
 
+#include <cuda_fp16.h>
+
 #include "gloo/common/common.h"
+#include "gloo/types.h"
 
 namespace gloo {
 
 template<typename T>
 __global__ void initializeMemory(
     T* ptr,
-    const T val,
+    const int val,
     const size_t count,
     const size_t stride) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
   for (; i < count; i += blockDim.x) {
     ptr[i] = (i * stride) + val;
+  }
+}
+
+template<>
+__global__ void initializeMemory<float16>(
+    float16* ptr,
+    const int val,
+    const size_t count,
+    const size_t stride) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  half* ptrAsHalf = (half*) ptr;
+  for (; i < count; i += blockDim.x) {
+    ptrAsHalf[i] = __int2half_rn((i * stride) + val);
   }
 }
 
@@ -56,12 +72,12 @@ CudaMemory<T>::~CudaMemory() {
 }
 
 template<typename T>
-void CudaMemory<T>::set(T val, size_t stride, cudaStream_t stream) {
+void CudaMemory<T>::set(int val, size_t stride, cudaStream_t stream) {
   CudaDeviceScope scope(device_);
   if (stream == kStreamNotSet) {
-    initializeMemory<<<1, 32>>>(ptr_, val, elements, stride);
+    initializeMemory<T><<<1, 32>>>(ptr_, val, elements, stride);
   } else {
-    initializeMemory<<<1, 32, 0, stream>>>(ptr_, val, elements, stride);
+    initializeMemory<T><<<1, 32, 0, stream>>>(ptr_, val, elements, stride);
   }
 }
 
@@ -74,5 +90,6 @@ std::unique_ptr<T[]> CudaMemory<T>::copyToHost() const {
 
 // Instantiate template
 template class CudaMemory<float>;
+template class CudaMemory<float16>;
 
 } // namespace gloo

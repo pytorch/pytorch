@@ -15,6 +15,8 @@
 #include <Eigen/Core>
 #endif
 
+#include "gloo/types.h"
+
 namespace gloo {
 
 #ifdef GLOO_USE_EIGEN
@@ -79,7 +81,6 @@ void min(T* x, const T* y, size_t n) {
     x[i] = std::min(x[i], y[i]);
   }
 }
-
 #endif
 
 } // namespace gloo

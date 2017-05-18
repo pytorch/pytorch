@@ -51,6 +51,7 @@ static void usage(int status, const char* argv0) {
   X("      --iteration-time   Time to run benchmark for (default: 2s)");
   X("      --nanos            Display timing data in nanos instead of micros");
   X("      --gpudirect        Use GPUDirect (CUDA only)");
+  X("      --halfprecision    Use 16-bit floating point values");
   X("");
   X("BENCHMARK is one of:");
   X("  allreduce_ring");
@@ -99,6 +100,7 @@ struct options parseOptions(int argc, char** argv) {
       {"busy-poll", required_argument, nullptr, 0x1007},
       {"inputs", required_argument, nullptr, 0x1008},
       {"gpudirect", no_argument, nullptr, 0x1009},
+      {"halfprecision", no_argument, nullptr, 0x100a},
       {"help", no_argument, nullptr, 0xffff},
       {nullptr, 0, nullptr, 0}};
 
@@ -184,6 +186,11 @@ struct options parseOptions(int argc, char** argv) {
       case 0x1009: // --gpudirect
       {
         result.gpuDirect = true;
+        break;
+      }
+      case 0x100a: // --halfprecision
+      {
+        result.halfPrecision = true;
         break;
       }
       case 0xffff: // --help

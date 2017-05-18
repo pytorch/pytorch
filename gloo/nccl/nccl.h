@@ -16,6 +16,7 @@
 
 #include "gloo/common/logging.h"
 #include "gloo/cuda.h"
+#include "gloo/types.h"
 
 namespace gloo {
 namespace nccl {

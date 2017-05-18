@@ -113,7 +113,8 @@ std::shared_ptr<Context> Runner::newContext() {
   return context;
 }
 
-void Runner::run(BenchmarkFn& fn) {
+template <typename T>
+void Runner::run(BenchmarkFn<T>& fn) {
   printHeader();
 
   if (options_.elements > 0) {
@@ -130,7 +131,8 @@ void Runner::run(BenchmarkFn& fn) {
   }
 }
 
-void Runner::run(BenchmarkFn& fn, int n) {
+template <typename T>
+void Runner::run(BenchmarkFn<T>& fn, int n) {
     auto context = newContext();
     auto benchmark = fn(context);
     benchmark->initialize(n);
@@ -242,6 +244,11 @@ void Runner::printDistribution(int elements) {
   std::cout << std::setw(11) << samples_.size();
   std::cout << std::endl;
 }
+
+template void Runner::run(BenchmarkFn<float>& fn);
+template void Runner::run(BenchmarkFn<float>& fn, int n);
+template void Runner::run(BenchmarkFn<float16>& fn);
+template void Runner::run(BenchmarkFn<float16>& fn, int n);
 
 } // namespace benchmark
 } // namespace gloo

@@ -28,14 +28,21 @@ using Func = std::unique_ptr<::gloo::Algorithm>(
     int count,
     std::vector<cudaStream_t> streams);
 
+using Func16 = std::unique_ptr<::gloo::Algorithm>(
+    std::shared_ptr<::gloo::Context>&,
+    std::vector<float16*> ptrs,
+    int count,
+    std::vector<cudaStream_t> streams);
+
 // Test parameterization.
 using Param = std::tuple<int, int, std::function<Func>>;
+using ParamHP = std::tuple<int, int, std::function<Func16>>;
 
 // Test case
 class CudaAllreduceTest : public CudaBaseTest,
                           public ::testing::WithParamInterface<Param> {
  public:
-  void assertResult(CudaFixture& fixture) {
+  void assertResult(CudaFixture<float>& fixture) {
     // Size is the total number of pointers across the context
     const auto size = fixture.ptrs.size() * fixture.context->size;
     // Expected is set to the expected value at ptr[0]
@@ -54,6 +61,28 @@ class CudaAllreduceTest : public CudaBaseTest,
   }
 };
 
+class CudaAllreduceTestHP : public CudaBaseTest,
+                            public ::testing::WithParamInterface<ParamHP> {
+ public:
+  void assertResult(CudaFixture<float16>& fixture) {
+    // Size is the total number of pointers across the context
+    const auto size = fixture.ptrs.size() * fixture.context->size;
+    // Expected is set to the expected value at ptr[0]
+    const auto expected = (size * (size - 1)) / 2;
+    // The stride between values at subsequent indices is equal to
+    // "size", and we have "size" of them. Therefore, after
+    // allreduce, the stride between expected values is "size^2".
+    const auto stride = size * size;
+    // Verify all buffers passed by this instance
+    for (const auto& ptr : fixture.getHostBuffers()) {
+      for (int i = 0; i < fixture.count; i++) {
+        ASSERT_EQ((float16)((i * stride) + expected), ptr[i])
+          << "Mismatch at index " << i;
+      }
+    }
+  }
+};
+
 static std::function<Func> allreduceRing = [](
     std::shared_ptr<::gloo::Context>& context,
     std::vector<float*> ptrs,
@@ -61,6 +90,15 @@ static std::function<Func> allreduceRing = [](
     std::vector<cudaStream_t> streams) {
   return std::unique_ptr<::gloo::Algorithm>(
     new ::gloo::CudaAllreduceRing<float>(context, ptrs, count, streams));
+};
+
+static std::function<Func16> allreduceRingHP = [](
+    std::shared_ptr<::gloo::Context>& context,
+    std::vector<float16*> ptrs,
+    int count,
+    std::vector<cudaStream_t> streams) {
+  return std::unique_ptr<::gloo::Algorithm>(
+    new ::gloo::CudaAllreduceRing<float16>(context, ptrs, count, streams));
 };
 
 static std::function<Func> allreduceRingChunked = [](
@@ -72,6 +110,16 @@ static std::function<Func> allreduceRingChunked = [](
     new ::gloo::CudaAllreduceRingChunked<float>(context, ptrs, count, streams));
 };
 
+static std::function<Func16> allreduceRingChunkedHP = [](
+    std::shared_ptr<::gloo::Context>& context,
+    std::vector<float16*> ptrs,
+    int count,
+    std::vector<cudaStream_t> streams) {
+  return std::unique_ptr<::gloo::Algorithm>(
+      new ::gloo::CudaAllreduceRingChunked<float16>(
+          context, ptrs, count, streams));
+};
+
 static std::function<Func> allreduceHalvingDoubling = [](
     std::shared_ptr<::gloo::Context>& context,
     std::vector<float*> ptrs,
@@ -79,6 +127,16 @@ static std::function<Func> allreduceHalvingDoubling = [](
     std::vector<cudaStream_t> streams) {
   return std::unique_ptr<::gloo::Algorithm>(
       new ::gloo::CudaAllreduceHalvingDoubling<float>(
+          context, ptrs, count, streams));
+};
+
+static std::function<Func16> allreduceHalvingDoublingHP = [](
+    std::shared_ptr<::gloo::Context>& context,
+    std::vector<float16*> ptrs,
+    int count,
+    std::vector<cudaStream_t> streams) {
+  return std::unique_ptr<::gloo::Algorithm>(
+      new ::gloo::CudaAllreduceHalvingDoubling<float16>(
           context, ptrs, count, streams));
 };
 
@@ -92,6 +150,16 @@ static std::function<Func> allreduceHalvingDoublingPipelined = [](
           context, ptrs, count, streams));
 };
 
+static std::function<Func16> allreduceHalvingDoublingPipelinedHP = [](
+    std::shared_ptr<::gloo::Context>& context,
+    std::vector<float16*> ptrs,
+    int count,
+    std::vector<cudaStream_t> streams) {
+  return std::unique_ptr<::gloo::Algorithm>(
+      new ::gloo::CudaAllreduceHalvingDoublingPipelined<float16>(
+          context, ptrs, count, streams));
+};
+
 TEST_P(CudaAllreduceTest, SinglePointer) {
   auto size = std::get<0>(GetParam());
   auto count = std::get<1>(GetParam());
@@ -99,8 +167,8 @@ TEST_P(CudaAllreduceTest, SinglePointer) {
 
   spawn(size, [&](std::shared_ptr<Context> context) {
       // Run algorithm
-      auto fixture = CudaFixture(context, 1, count);
-      auto ptrs = fixture.getFloatPointers();
+      auto fixture = CudaFixture<float>(context, 1, count);
+      auto ptrs = fixture.getPointers();
       auto algorithm = fn(context, ptrs, count, {});
       fixture.assignValues();
       algorithm->run();
@@ -117,8 +185,8 @@ TEST_P(CudaAllreduceTest, MultiPointer) {
 
   spawn(size, [&](std::shared_ptr<Context> context) {
       // Run algorithm
-      auto fixture = CudaFixture(context, cudaNumDevices(), count);
-      auto ptrs = fixture.getFloatPointers();
+      auto fixture = CudaFixture<float>(context, cudaNumDevices(), count);
+      auto ptrs = fixture.getPointers();
       auto algorithm = fn(context, ptrs, count, {});
       fixture.assignValues();
       algorithm->run();
@@ -135,8 +203,8 @@ TEST_P(CudaAllreduceTest, MultiPointerAsync) {
 
   spawn(size, [&](std::shared_ptr<Context> context) {
       // Run algorithm
-      auto fixture = CudaFixture(context, cudaNumDevices(), count);
-      auto ptrs = fixture.getFloatPointers();
+      auto fixture = CudaFixture<float>(context, cudaNumDevices(), count);
+      auto ptrs = fixture.getPointers();
       auto streams = fixture.getCudaStreams();
       auto algorithm = fn(context, ptrs, count, streams);
       fixture.assignValuesAsync();
@@ -159,8 +227,8 @@ TEST_F(CudaAllreduceTest, MultipleAlgorithms) {
   spawn(size, [&](std::shared_ptr<Context> context) {
     for (const auto& fn : fns) {
       // Run algorithm
-      auto fixture = CudaFixture(context, 1, count);
-      auto ptrs = fixture.getFloatPointers();
+      auto fixture = CudaFixture<float>(context, 1, count);
+      auto ptrs = fixture.getPointers();
 
       auto algorithm = fn(context, ptrs, count, {});
       fixture.assignValues();
@@ -177,6 +245,29 @@ TEST_F(CudaAllreduceTest, MultipleAlgorithms) {
       assertResult(fixture);
     }
   });
+}
+
+TEST_F(CudaAllreduceTestHP, HalfPrecisionTest) {
+  auto size = 4;
+  auto count = 100;
+  auto fns = {allreduceRingHP,
+             allreduceRingChunkedHP,
+             allreduceHalvingDoublingHP,
+             allreduceHalvingDoublingPipelinedHP};
+  spawn(size, [&](std::shared_ptr<Context> context) {
+      for (const auto& fn : fns) {
+        // Run algorithm
+        auto fixture = CudaFixture<float16>(context, 1, count);
+        auto ptrs = fixture.getPointers();
+
+        auto algorithm = fn(context, ptrs, count, {});
+        fixture.assignValues();
+        algorithm->run();
+
+        // Verify result
+        assertResult(fixture);
+      }
+    });
 }
 
 std::vector<int> genMemorySizes() {

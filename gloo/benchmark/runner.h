@@ -24,15 +24,18 @@ namespace benchmark {
 
 class Runner {
  public:
-  using BenchmarkFn = std::function<
-   std::unique_ptr<Benchmark>(
-     std::shared_ptr<::gloo::Context>&)>;
+  template <typename T>
+  using BenchmarkFn = std::function<std::unique_ptr<Benchmark<T>>(
+      std::shared_ptr<::gloo::Context>&)>;
 
   explicit Runner(const options& options);
   ~Runner();
 
-  void run(BenchmarkFn& fn);
-  void run(BenchmarkFn& fn, int n);
+  template <typename T>
+  void run(BenchmarkFn<T>& fn);
+
+  template <typename T>
+  void run(BenchmarkFn<T>& fn, int n);
 
  protected:
   long broadcast(long value);

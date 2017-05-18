@@ -19,6 +19,7 @@
 #include "gloo/rendezvous/context.h"
 #include "gloo/rendezvous/hash_store.h"
 #include "gloo/transport/tcp/device.h"
+#include "gloo/types.h"
 
 namespace gloo {
 namespace test {
@@ -70,13 +71,14 @@ class BaseTest : public ::testing::Test {
   std::unique_ptr<::gloo::rendezvous::Store> store_;
 };
 
+template <typename T>
 class Fixture {
  public:
   Fixture(const std::shared_ptr<Context> context, int ptrs, int count)
       : context(context),
         count(count) {
     for (int i = 0; i < ptrs; i++) {
-      std::unique_ptr<float[]> ptr(new float[count]);
+      std::unique_ptr<T[]> ptr(new T[count]);
       srcs.push_back(std::move(ptr));
     }
   }
@@ -97,8 +99,8 @@ class Fixture {
     }
   }
 
-  std::vector<float*> getFloatPointers() const {
-    std::vector<float*> out;
+  std::vector<T*> getPointers() const {
+    std::vector<T*> out;
     for (const auto& src : srcs) {
       out.push_back(src.get());
     }
@@ -107,7 +109,7 @@ class Fixture {
 
   std::shared_ptr<Context> context;
   const int count;
-  std::vector<std::unique_ptr<float[]> > srcs;
+  std::vector<std::unique_ptr<T[]> > srcs;
 };
 
 } // namespace test
