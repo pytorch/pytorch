@@ -82,3 +82,26 @@ class TestElementwiseOps(hu.HypothesisTestCase):
 
         self.assertGradientChecks(
             gc, op, [X], 0, [0], stepsize=1e-4, threshold=1e-2)
+
+    @given(n=st.integers(5, 6), m=st.integers(4, 6), **hu.gcs)
+    def test_sigmoid(self, n, m, gc, dc):
+        X = np.random.rand(n, m).astype(np.float32)
+
+        def sigmoid(X):
+            return [1. / (1. + np.exp(-X))]
+
+        op = core.CreateOperator(
+            "Sigmoid",
+            ["X"],
+            ["Z"]
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[X],
+            reference=sigmoid,
+        )
+
+        self.assertGradientChecks(
+            gc, op, [X], 0, [0], stepsize=1e-4, threshold=1e-2)
