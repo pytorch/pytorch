@@ -164,16 +164,9 @@ PyObject * THPTensor_(setIndex)(THPTensor *self, PyObject *args)
         - THTensor* self
         - THStorage* sourceStorage
         - long storage_offset
-        - arg: THSize* size
-          long_args: True
-        - CONSTANT NULL
-    - cname: setStorage
-      arguments:
-        - THTensor* self
-        - THStorage* sourceStorage
-        - long storage_offset
         - THSize* size
-        - THStride* strides
+        - arg: THStride* stride
+          default: NULL
 ]]
 
 [[
