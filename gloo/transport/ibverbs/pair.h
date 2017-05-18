@@ -13,6 +13,7 @@
 #include <condition_variable>
 #include <exception>
 #include <list>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -31,8 +32,7 @@ namespace ibverbs {
 class Buffer;
 
 class Pair : public ::gloo::transport::Pair {
-  static constexpr int kBufferSlotMask = 0x7;
-  static constexpr int kMaxBuffers = kBufferSlotMask + 1;
+  static constexpr int kMaxBuffers = 8;
 
   // Use 3x the maximum number of buffers as the capacity
   // for entries in this pair's completion queue.
@@ -121,12 +121,9 @@ class Pair : public ::gloo::transport::Pair {
   std::condition_variable cv_;
 
   // For us to copy the remote peer's ibv_mr into.
-  // Use an array instead of container so that the Buffer
-  // class can use it without holding a lock.
-  std::array<struct ibv_mr, kMaxBuffers> peerMemoryRegions_;
-  std::atomic<uint64_t> peerMemoryRegionsReady_;
+  std::map<int, struct ibv_mr> peerMemoryRegions_;
 
-  // These lists store memory regions that the remote side of the pair
+  // These fields store memory regions that the remote side of the pair
   // can send to and that the local side of the pair can send from.
   //
   // After receiving a memory region from the remote side of the pair,
@@ -139,12 +136,12 @@ class Pair : public ::gloo::transport::Pair {
   // instance is kept around in the mappedSendRegions_ list until
   // the send operation complete.
   //
-  std::list<std::unique_ptr<MemoryRegion> > mappedSendRegions_;
+  std::map<int, std::unique_ptr<MemoryRegion> > mappedSendRegions_;
   std::list<std::unique_ptr<MemoryRegion> > mappedRecvRegions_;
 
   // Completions on behalf of buffers need to be forwarded to those buffers.
-  std::array<Buffer*, kMaxBuffers> sendCompletionHandlers_;
-  std::array<Buffer*, kMaxBuffers> recvCompletionHandlers_;
+  std::map<int, Buffer*> sendCompletionHandlers_;
+  std::map<int, Buffer*> recvCompletionHandlers_;
 
   void receiveMemoryRegion();
   void sendMemoryRegion(struct ibv_mr* mr, int slot);
