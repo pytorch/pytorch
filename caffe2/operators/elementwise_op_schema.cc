@@ -265,12 +265,15 @@ class GetDivGradient : public GradientMakerBase {
 };
 REGISTER_GRADIENT(Div, GetDivGradient);
 
-std::function<void(OpSchema&)> ComparisonDocGenerator(const char* name) {
+std::function<void(OpSchema&)> ComparisonDocGenerator(
+    const char* name,
+    const char* desc) {
   return [=](OpSchema& schema) {
     string doc = R"DOC(
-Performs element-wise comparison `{name}` (with limited broadcast support).
+Performs element-wise {desc} comparison `{name}` (with limited broadcast support).
 {broadcast_doc})DOC";
     ReplaceAll(doc, "{name}", name);
+    ReplaceAll(doc, "{desc}", desc);
     ReplaceAll(doc, "{broadcast_doc}", kBroadcastDoc);
     schema.SetDoc(doc);
     schema.Arg("broadcast", "Pass 1 to enable broadcasting");
@@ -290,16 +293,16 @@ Performs element-wise comparison `{name}` (with limited broadcast support).
   };
 }
 
-#define CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(name, symbol)  \
-  OPERATOR_SCHEMA(name).NumInputs(2).NumOutputs(1).FillUsing( \
-      ComparisonDocGenerator(symbol));                        \
+#define CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(name, symbol, desc) \
+  OPERATOR_SCHEMA(name).NumInputs(2).NumOutputs(1).FillUsing(      \
+      ComparisonDocGenerator(symbol, desc));                       \
   SHOULD_NOT_DO_GRADIENT(name)
 
-CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(LT, "<");
-CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(LE, "<=");
-CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(GT, ">");
-CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(GE, ">=");
-CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(EQ, "==");
+CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(LT, "<", "less than");
+CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(LE, "<=", "less or equal than");
+CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(GT, ">", "greater than");
+CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(GE, ">=", "greater or equal than");
+CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(EQ, "==", "equality");
 
 std::function<void(OpSchema&)> LogicalDocGenerator(const char* name) {
   return [=](OpSchema& schema) {
