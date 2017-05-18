@@ -158,18 +158,17 @@ class AllreduceHalvingDoubling : public Algorithm {
           offsetToMyBinaryBlock_ + myBinaryBlockSize_;
       const int destRank =
           offsetToSmallerBlock + rankInBinaryBlock_ % nextSmallerBlockSize_;
-      commPairs_.push_back(this->context_->getPair(destRank));
-      int myRank = this->context_->rank;
+      auto& destPair = this->context_->getPair(destRank);
+      const auto myRank = this->context_->rank;
       const auto slot = slotOffset_ +
           2 * (std::min(myRank, destRank) * this->contextSize_ +
                std::max(myRank, destRank));
-      smallerBlockSendDataBuf_ = std::move(
-          commPairs_.back().get()->createSendBuffer(slot, ptrs_[0], bytes_));
+      smallerBlockSendDataBuf_ = destPair->createSendBuffer(
+          slot, ptrs_[0], bytes_);
       const auto itemCount = recvCounts_[stepsWithinBlock_ - 1];
       if (itemCount > 0) {
-        smallerBlockRecvDataBuf_ =
-            std::move(commPairs_.back().get()->createRecvBuffer(
-                slot, &recvBuf_[bufferOffset], itemCount));
+        smallerBlockRecvDataBuf_ = destPair->createRecvBuffer(
+            slot, &recvBuf_[bufferOffset], itemCount * sizeof(T));
       }
     }
     if (nextLargerBlockSize_ != 0) {
@@ -198,20 +197,20 @@ class AllreduceHalvingDoubling : public Algorithm {
       for (int i = 0; i < numSendsAndReceivesToLargerBlock; i++) {
         const int destRank = offsetToLargerBlock +
             reverseLastNBits(destOrdinal, log2(nextLargerBlockSize_));
-        commPairs_.push_back(this->context_->getPair(destRank));
-        const int myRank = this->context_->rank;
+        auto& destPair = this->context_->getPair(destRank);
+        const auto myRank = this->context_->rank;
         const auto slot = slotOffset_ +
             2 * (std::min(myRank, destRank) * this->contextSize_ +
                  std::max(myRank, destRank));
         largerBlockSendDataBufs_.push_back(
-            commPairs_.back().get()->createSendBuffer(slot, ptrs[0], bytes_));
+            destPair->createSendBuffer(slot, ptrs[0], bytes_));
         if (sendCountToLargerBlock_ * i < totalItemsToSend) {
           const auto toSend = std::min(
               sendCountToLargerBlock_,
               totalItemsToSend - sendCountToLargerBlock_ * i);
           largerBlockRecvDataBufs_.push_back(
-              commPairs_.back().get()->createRecvBuffer(
-                  slot, &recvBuf_[bufferOffset], toSend));
+              destPair->createRecvBuffer(
+                  slot, &recvBuf_[bufferOffset], toSend * sizeof(T)));
           bufferOffset += toSend;
         }
         destOrdinal++;

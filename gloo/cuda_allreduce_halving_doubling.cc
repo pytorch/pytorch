@@ -172,18 +172,17 @@ CudaAllreduceHalvingDoubling<T, W>::CudaAllreduceHalvingDoubling(
         offsetToMyBinaryBlock_ + myBinaryBlockSize_;
     const int destRank = static_cast<int>(
         offsetToSmallerBlock + rankInBinaryBlock_ % nextSmallerBlockSize_);
+    auto& destPair = this->context_->getPair(destRank);
     const auto myRank = this->context_->rank;
     const auto slot = slotOffset_ +
         2 * (std::min(myRank, destRank) * this->contextSize_ +
              std::max(myRank, destRank));
-    commPairs_.push_back(this->context_->getPair(destRank));
-    smallerBlockSendDataBuf_ = std::move(
-        commPairs_.back().get()->createSendBuffer(slot, *scratch_, bytes_));
+    smallerBlockSendDataBuf_ = destPair->createSendBuffer(
+        slot, *scratch_, bytes_);
     const auto itemCount = recvCounts_[stepsWithinBlock_ - 1];
     if (itemCount > 0) {
-      smallerBlockRecvDataBuf_ =
-          std::move(commPairs_.back().get()->createRecvBuffer(
-              slot, &recvBuf_[bufferOffset], itemCount));
+      smallerBlockRecvDataBuf_ = destPair->createRecvBuffer(
+          slot, &recvBuf_[bufferOffset], itemCount * sizeof(T));
     }
   }
   if (nextLargerBlockSize_ != 0) {
@@ -212,20 +211,20 @@ CudaAllreduceHalvingDoubling<T, W>::CudaAllreduceHalvingDoubling(
     for (int i = 0; i < numSendsAndReceivesToLargerBlock; i++) {
       const int destRank = offsetToLargerBlock +
           reverseLastNBits(destOrdinal, log2(nextLargerBlockSize_));
-      commPairs_.push_back(this->context_->getPair(destRank));
+      auto& destPair = this->context_->getPair(destRank);
       const auto myRank = this->context_->rank;
       const auto slot = slotOffset_ +
           2 * (std::min(myRank, destRank) * this->contextSize_ +
                std::max(myRank, destRank));
       largerBlockSendDataBufs_.push_back(
-          commPairs_.back().get()->createSendBuffer(slot, *scratch_, bytes_));
+          destPair->createSendBuffer(slot, *scratch_, bytes_));
       if (sendCountToLargerBlock_ * i < totalItemsToSend) {
         const auto toSend = std::min(
             sendCountToLargerBlock_,
             totalItemsToSend - sendCountToLargerBlock_ * i);
         largerBlockRecvDataBufs_.push_back(
-            commPairs_.back().get()->createRecvBuffer(
-                slot, &recvBuf_[bufferOffset], toSend));
+            destPair->createRecvBuffer(
+                slot, &recvBuf_[bufferOffset], toSend * sizeof(T)));
         bufferOffset += toSend;
       }
       destOrdinal++;

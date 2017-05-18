@@ -350,6 +350,11 @@ bool Pair::read(Op& op) {
 
       // There must always be a non-zero number of bytes to read
       GLOO_ENFORCE_GT(iov.iov_len, 0);
+
+      // Bytes read must be in bounds for target buffer
+      GLOO_ENFORCE_LE(
+          op.preamble_.roffset_ + op.preamble_.length_,
+          op.buf_->size_);
     }
 
     // If busy-poll has been requested AND sync mode has been enabled for pair
