@@ -106,13 +106,13 @@ template<typename algo_t>
 struct algorithm_search {
 };
 
-cudnnStatus_t getWorkspaceSize(cudnnHandle_t handle, const Convolution& conv, const cudnnConvolutionFwdAlgo_t algo, size_t* sz){
+cudnnStatus_t getWorkspaceSize(cudnnHandle_t handle, const Convolution& conv, cudnnConvolutionFwdAlgo_t algo, size_t* sz){
     return cudnnGetConvolutionForwardWorkspaceSize(handle, conv.idesc.desc, conv.wdesc.desc, conv.cdesc.desc, conv.odesc.desc, algo, sz);
 }
-cudnnStatus_t getWorkspaceSize(cudnnHandle_t handle, const Convolution& conv, const cudnnConvolutionBwdDataAlgo_t algo, size_t* sz){
+cudnnStatus_t getWorkspaceSize(cudnnHandle_t handle, const Convolution& conv, cudnnConvolutionBwdDataAlgo_t algo, size_t* sz){
     return cudnnGetConvolutionBackwardDataWorkspaceSize(handle, conv.wdesc.desc, conv.odesc.desc, conv.cdesc.desc, conv.idesc.desc, algo, sz);
 }
-cudnnStatus_t getWorkspaceSize(cudnnHandle_t handle, const Convolution& conv, const cudnnConvolutionBwdFilterAlgo_t algo, size_t* sz){
+cudnnStatus_t getWorkspaceSize(cudnnHandle_t handle, const Convolution& conv, cudnnConvolutionBwdFilterAlgo_t algo, size_t* sz){
     return cudnnGetConvolutionBackwardFilterWorkspaceSize(handle, conv.idesc.desc, conv.odesc.desc, conv.cdesc.desc, conv.wdesc.desc, algo, sz);
 }
 
