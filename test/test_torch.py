@@ -1196,8 +1196,8 @@ class TestTorch(TestCase):
 
         for fn in fns:
             batch_dim = random.randint(1, 8)
-            m_dim = random.randint(1, 8)
             n_dim = random.randint(1, 8)
+            m_dim = random.randint(1, 8)
             p_dim = random.randint(1, 8)
 
             def dims_full_for_fn():
@@ -1234,6 +1234,49 @@ class TestTorch(TestCase):
 
     def test_broadcast_fused_matmul(self):
         self._test_broadcast_fused_matmul(self, lambda t: t)
+
+    @staticmethod
+    def _test_broadcast_batched_matmul(self, cast):
+        n_dim = random.randint(1, 8)
+        m_dim = random.randint(1, 8)
+        p_dim = random.randint(1, 8)
+        full_batch_dims = [random.randint(1,3) for i in range(random.randint(1,3))]
+        (batch_dims_small, _, _) = TestTorch._select_broadcastable_dims(self, full_batch_dims)
+
+        def verifyBatchedMatmul(fullLHS):
+            lhs_dims = [n_dim, m_dim]
+            rhs_dims = [m_dim, p_dim]
+            full_mat_dims = lhs_dims if fullLHS else rhs_dims
+            small_mat_dims = rhs_dims if fullLHS else lhs_dims
+
+            small = torch.randn(*(batch_dims_small + small_mat_dims)).float()
+            small = cast(small)
+            dim0 = torch.randn(*(small_mat_dims)).float()
+            dim0 = cast(dim0)
+            full = torch.randn(*(full_batch_dims + full_mat_dims)).float()
+            full = cast(full)
+            (lhsTensors, rhsTensors) = ((full,), (small, dim0)) if fullLHS else ((small, dim0), (full,))
+
+            for lhs in lhsTensors:
+                lhs_expanded = lhs.expand(*(torch.Size(full_batch_dims) + torch.Size(lhs_dims)))
+                lhs_expanded_matmul_fn = getattr(lhs_expanded, "__matmul__")
+                for rhs in rhsTensors:
+                    rhs_expanded = rhs.expand(*(torch.Size(full_batch_dims) + torch.Size(rhs_dims)))
+                    truth = lhs_expanded_matmul_fn(rhs_expanded)
+                    for l in (lhs, lhs_expanded):
+                        for r in (rhs, rhs_expanded):
+                            l_matmul_fn = getattr(l, "__matmul__")
+                            result = l_matmul_fn(r)
+                            self.assertEqual(truth, result)
+                # compare to bmm
+                bmm_result = torch.bmm(lhs_expanded.contiguous().view(-1, n_dim,  m_dim), rhs_expanded.contiguous().view(-1, m_dim, p_dim))
+                self.assertEqual(truth.view(-1, n_dim, p_dim), bmm_result)
+
+        verifyBatchedMatmul(False)
+        verifyBatchedMatmul(True)
+
+    def test_broadcast_batched_matmul(self):
+        self._test_broadcast_batched_matmul(self, lambda t: t)
 
     def test_randperm(self):
         _RNGState = torch.get_rng_state()
