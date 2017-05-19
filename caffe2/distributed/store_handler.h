@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -28,4 +29,14 @@ class StoreHandler {
       const std::vector<std::string>& names,
       const std::chrono::milliseconds& timeout = kDefaultTimeout) = 0;
 };
+
+struct StoreHandlerTimeoutException : public std::runtime_error {
+  StoreHandlerTimeoutException() = default;
+  explicit StoreHandlerTimeoutException(const std::string& msg)
+      : std::runtime_error(msg) {}
+};
+
+#define STORE_HANDLER_TIMEOUT(...)              \
+  throw ::caffe2::StoreHandlerTimeoutException( \
+      ::caffe2::MakeString("[", __FILE__, ":", __LINE__, "] ", __VA_ARGS__));
 }

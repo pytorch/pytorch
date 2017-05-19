@@ -1,13 +1,14 @@
 #pragma once
 
+#include "caffe2/contrib/gloo/common.h"
+#include "caffe2/contrib/gloo/store_handler.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/distributed/store_handler.h"
 
+#include <gloo/common/error.h>
 #include <gloo/rendezvous/context.h>
 #include <gloo/rendezvous/prefix_store.h>
 
-#include "caffe2/contrib/gloo/common.h"
-#include "store_handler.h"
 
 namespace caffe2 {
 namespace gloo {
@@ -60,17 +61,24 @@ class CreateCommonWorld final : public Operator<Context> {
           std::move(context);
     } catch (::gloo::IoException& ioe) {
       LOG(ERROR) << "Caught gloo IO exception: " << ioe.what();
-      if (status_blob_ != "") {
-        signalFailure(ws_->CreateBlob(status_blob_), ioe);
-        return false;
-      } else {
-        throw ioe;
-      }
+      return handleException(ioe);
+    } catch (::caffe2::StoreHandlerTimeoutException& te) {
+      LOG(ERROR) << "Caught store handler timeout exception: " << te.what();
+      return handleException(te);
     }
     return true;
   }
 
  private:
+  bool handleException(std::exception& ex) {
+    if (status_blob_ != "") {
+      signalFailure(ws_->CreateBlob(status_blob_), ex);
+      return false;
+    } else {
+      throw ex;
+    }
+  }
+
   std::shared_ptr<::gloo::transport::Device> createDevice();
 
   const int size_;
