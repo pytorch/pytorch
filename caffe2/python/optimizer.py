@@ -13,6 +13,7 @@ _OPTIMIZER_ITERATION_NAME = "optimizer_iteration"
 
 AuxOptimizerParams = namedtuple("AuxOptimizerParams", ["local", "shared"])
 
+
 class Optimizer(object):
     def __init__(self):
         self._aux_params = AuxOptimizerParams(local=[], shared=[])
@@ -30,10 +31,9 @@ class Optimizer(object):
                 iteration = param_init_net.ConstantFill(
                     [], _OPTIMIZER_ITERATION_NAME, shape=[1],
                     value=iter_val,
-                    dtype=core.DataType.INT32)
-
-            iter_mutex = param_init_net.CreateMutex([], ["iteration_mutex"])
-            net.AtomicIter([iter_mutex, iteration], [iteration])
+                    dtype=core.DataType.INT64)
+                iter_mutex = param_init_net.CreateMutex([], ["iteration_mutex"])
+                net.AtomicIter([iter_mutex, iteration], [iteration])
         else:
             iteration = param_init_net.GetBlobRef(_OPTIMIZER_ITERATION_NAME)
 
