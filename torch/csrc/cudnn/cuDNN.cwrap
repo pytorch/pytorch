@@ -50,7 +50,7 @@ extern THCState* state;
     - THTensor* output
     - std::vector<int> pad
     - std::vector<int> stride
-    - std::vector<int> dilation 
+    - std::vector<int> dilation
     - int groups
     - bool benchmark
 ]]
@@ -69,7 +69,7 @@ extern THCState* state;
     - THTensor* output
     - std::vector<int> pad
     - std::vector<int> stride
-    - std::vector<int> dilation 
+    - std::vector<int> dilation
     - int groups
     - bool benchmark
 ]]
@@ -149,3 +149,12 @@ extern THCState* state;
     - bool training
     - double epsilon
 ]]
+
+[[
+  name: cudnn_version
+  only_register: True
+]]
+static PyObject * THCUDNN_cudnn_version(PyObject *self, PyObject *args)
+{
+  return PyLong_FromLong(CUDNN_VERSION);
+}
