@@ -8,6 +8,7 @@ from __future__ import unicode_literals
 from caffe2.python import brew
 from caffe2.python.model_helper import ModelHelper
 from caffe2.proto import caffe2_pb2
+import logging
 
 
 class CNNModelHelper(ModelHelper):
@@ -20,6 +21,13 @@ class CNNModelHelper(ModelHelper):
                  ws_nbytes_limit=None, init_params=True,
                  skip_sparse_optim=False,
                  param_model=None):
+        logging.warning(
+            "[====DEPRECATE WARNING====]: you are creating an "
+            "object from CNNModelHelper class which will be deprecated soon. "
+            "Please use ModelHelper object with brew module. For more "
+            "information, please refer to caffe2.ai and python/brew.py, "
+            "python/brew_test.py for more information."
+        )
 
         cnn_arg_scope = {
             'order': order,
