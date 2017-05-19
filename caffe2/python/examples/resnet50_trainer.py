@@ -86,21 +86,11 @@ def AddMomentumParameterUpdate(train_model, LR):
         )
 
 
-def GetCheckpointParams(train_model):
-    prefix = "gpu_{}".format(train_model._devices[0])
-    params = [str(p) for p in train_model.GetParams(prefix)]
-    params.extend([str(p) + "_momentum" for p in params])
-    params.extend([str(p) for p in train_model.GetComputedParams(prefix)])
-
-    assert len(params) > 0
-    return params
-
-
 def SaveModel(args, train_model, epoch):
     prefix = "gpu_{}".format(train_model._devices[0])
     predictor_export_meta = pred_exp.PredictorExportMeta(
         predict_net=train_model.net.Proto(),
-        parameters=GetCheckpointParams(train_model),
+        parameters=data_parallel_model.GetCheckpointParams(train_model),
         inputs=[prefix + "/data"],
         outputs=[prefix + "/softmax"],
         shapes={
@@ -383,11 +373,9 @@ def Train(args):
     # load the pre-trained model and reset epoch
     if args.load_model_path is not None:
         LoadModel(args.load_model_path, train_model)
+
         # Sync the model params
-        data_parallel_model.FinalizeAfterCheckpoint(
-            train_model,
-            GetCheckpointParams(train_model),
-        )
+        data_parallel_model.FinalizeAfterCheckpoint(train_model)
 
         # reset epoch. load_model_path should end with *_X.mdl,
         # where X is the epoch number

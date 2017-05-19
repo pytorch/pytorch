@@ -150,7 +150,6 @@ def Parallelize_GPU(
     else:
         log.info("NOTE: Param builder function did not create any parameters.")
 
-
     log.info("Post-iteration operators for updating params")
     num_shards = 1 if rendezvous is None else rendezvous['num_shards']
     # The following check is necessary for ring reduce to work
@@ -162,6 +161,14 @@ def Parallelize_GPU(
         with core.DeviceScope(device_opt):
             with core.NameScope("gpu_{}".format(device)):
                 param_update_builder_fun(model_helper_obj)
+
+    (sync_blobs, sync_names) = _ComputeBlobsToSync(model_helper_obj)
+    sync_blobs_grouped = _GroupByDevice(
+        devices,
+        sync_blobs,
+        [],
+    )
+    model_helper_obj._device_grouped_blobs.update(sync_blobs_grouped)
 
     _InferBlobDevice(model_helper_obj)
     _AnalyzeOperators(model_helper_obj)
@@ -181,9 +188,12 @@ def Parallelize_GPU(
             model_helper_obj.param_init_net,
             model_helper_obj.param_init_net,
             rendezvous,
+            sync_names,
         )
 
-    _SyncParams(devices, model_helper_obj, model_helper_obj.param_init_net)
+    _SyncParams(
+        devices, model_helper_obj, model_helper_obj.param_init_net, sync_names
+    )
 
     if optimize_gradient_memory:
         _OptimizeGradientMemoryDEPRECATED(
@@ -369,6 +379,7 @@ def _ForEachGPU(gpu_ids, f, scoped=False, *args, **kwargs):
             else:
                 f(gpu_id, *args, **kwargs)
 
+
 def _AddGradientOperators(devices, model, losses_by_gpu):
     def create_grad(lossp):
         return model.ConstantFill(lossp, str(lossp) + "_grad", value=1.0)
@@ -409,9 +420,28 @@ def ExtractPredictorNet(model, inputs, outputs, device):
     return (predictor_net, params)
 
 
-def FinalizeAfterCheckpoint(model, blobs, sync_iter=True):
+def GetCheckpointParams(model):
+    '''
+    Returns a set of blobs that are needed for a complete check point.
+    They are blobs for the first gpu and iteration blobs.
+    '''
+    (all_blobs, _) = _ComputeBlobsToSync(model)
+    return {
+        b for b in all_blobs
+        if str(b).startswith("gpu_{}/".format(model._devices[0]))}
+
+
+def FinalizeAfterCheckpoint(model, blobs=None):
+    '''
+    This function should be called after loading parameters from a
+    checkpoint / initial parameters file.
+    '''
+
     if not hasattr(model, "_checkpoint_net"):
-        uniq_blob_names = [stripParamName(p) for p in blobs]
+        if blobs is None:
+            (_, uniq_blob_names) = _ComputeBlobsToSync(model)
+        else:
+            uniq_blob_names = [stripParamName(p) for p in blobs]
 
         # Synchronize to the blob lookup map, as the provided
         # blobs might have non-parameters, such as momemtum blobs.
@@ -447,14 +477,6 @@ def FinalizeAfterCheckpoint(model, blobs, sync_iter=True):
         # Setup sync of initial params
         _SyncParams(devices, model, model._checkpoint_net, uniq_blob_names)
 
-        # Sync ITER -- which is in CPU scope
-        if sync_iter:
-            with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU)):
-                for gpu_idx in devices[1:]:
-                    model._checkpoint_net.Copy(
-                        "gpu_{}/ITER".format(devices[0]),
-                        "gpu_{}/ITER".format(gpu_idx),
-                    )
         workspace.CreateNet(model._checkpoint_net)
 
     # Run the sync
@@ -481,13 +503,11 @@ def _Broadcast(devices, model, net, param):
 def _AllReduce(devices, model, net, param, use_nccl=False, control_input=None):
     blobs_group = model._device_grouped_blobs[param].values()
     if use_nccl:
-        log.info('Use NCCL for AllReduce')
         model.NCCLAllreduce(
             blobs_group, blobs_group, control_input=control_input
         )
         return
 
-    log.info('Use non-NCCL tree reduction AllReduce')
     def sum2(d1i, d2i):
         d1 = model._devices[d1i]
         d2 = model._devices[d2i]
@@ -515,10 +535,7 @@ def _AllReduce(devices, model, net, param, use_nccl=False, control_input=None):
         _Broadcast(devices, model, net, param)
 
 
-def _SyncParams(devices, model, net, unique_param_names=None):
-    if unique_param_names is None:
-        unique_param_names = model._param_names
-
+def _SyncParams(devices, model, net, unique_param_names):
     for param in unique_param_names:
         _Broadcast(devices, model, net, param)
 
@@ -529,30 +546,11 @@ def _AddDistributedParameterSync(
     init_net,
     net,
     rendezvous,
-    uniq_param_names=None,
+    uniq_param_names,
 ):
-    if uniq_param_names is None:
-        uniq_param_names = model._param_names
+    gpu_device_opt = core.DeviceOption(caffe2_pb2.CUDA, devices[0])
+    cpu_device_opt = core.DeviceOption(caffe2_pb2.CPU)
 
-    device_opt = core.DeviceOption(caffe2_pb2.CUDA, devices[0])
-
-    # ITER is in CPU scope :(
-    with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU)):
-        comm_world = init_net.CreateCommonWorld(
-            rendezvous['kv_handler'],
-            "iter_cw",
-            name=net.Proto().name + ".iter_cw_op",
-            size=rendezvous['num_shards'],
-            rank=rendezvous['shard_id'],
-            engine=rendezvous['engine'],
-            status_blob="createcw_iter_status",
-        )
-        net.Broadcast(
-            inputs=[comm_world, "gpu_{}/ITER".format(devices[0])],
-            outputs=["gpu_{}/ITER".format(devices[0])],
-            engine=rendezvous['engine'],
-            status_blob="broadcast_iter_status",
-        )
 
     # Create a single common world for all broadcast operations.
     # This is not a problem since they are executed sequentially.
@@ -578,6 +576,10 @@ def _AddDistributedParameterSync(
                 status_blob="broadcast_{}_status".format(str(param)),
             )
             return comm_world
+
+        device_opt = gpu_device_opt if _IsGPUBlob(
+            model, param_name
+        ) else cpu_device_opt
 
         if rendezvous['engine'] == 'GLOO':
             with core.DeviceScope(device_opt):
@@ -857,8 +859,14 @@ def _InferBlobDevice(model):
 
     def map_ops(proto):
         for op in proto.op:
+            device_option = op.device_option
+            if op.type == "Iter":
+                # Hack for Iters which have blob in CPU context
+                device_option = caffe2_pb2.DeviceOption()
+                device_option.device_type = caffe2_pb2.CPU
             for b in list(op.input) + list(op.output):
-                mapping[b] = op.device_option
+                if b not in mapping:
+                    mapping[b] = device_option
             if op.type.startswith('RecurrentNetwork'):
                 import google.protobuf.text_format as protobuftx
                 step_args = [a for a in op.arg if a.name.endswith("step_net")]
@@ -867,7 +875,6 @@ def _InferBlobDevice(model):
                     protobuftx.Merge(step_arg.s, step_proto)
                     map_ops(step_proto)
     map_ops(model.net.Proto())
-
     model._blob_to_device = mapping
 
 
@@ -931,6 +938,7 @@ def _GroupByDevice(devices, params, non_data_params):
 
     return grouped
 
+
 def _ValidateParams(params):
     set_params = set(params)
     if len(params) > len(set_params):
@@ -942,6 +950,28 @@ def _ValidateParams(params):
 
         assert len(params) == len(set_params), \
             "Duplicate entries in params: {}".format(dupes)
+
+
+def _ComputeBlobsToSync(model):
+    '''
+    We sync all blobs that are generated by param init net and
+    are 'data parallel', i.e assigned to a gpu
+    '''
+    sync_names = set()
+    blobs_to_sync = []
+    for op in model.param_init_net.Proto().op:
+        dp_outputs = [o for o in op.output if o.startswith("gpu_")]
+        sync_names.update([stripParamName(o) for o in dp_outputs])
+        blobs_to_sync.extend(dp_outputs)
+
+    # Sanity check
+    diff = set(model._param_names) - sync_names
+    assert diff == set(), \
+       "Some params not instantiated in param init net: {}".format(diff)
+
+    blobs_to_sync = sorted(blobs_to_sync)
+    blobs_to_sync = [core.BlobReference(b) for b in blobs_to_sync]
+    return (blobs_to_sync, sync_names)
 
 
 def _OptimizeGradientMemoryDEPRECATED(model, losses_by_gpu, devices):
