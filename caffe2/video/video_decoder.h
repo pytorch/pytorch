@@ -50,7 +50,7 @@ class Params {
   bool keyFrames_ = false;
 
   // Output image pixel format
-  PixelFormat pixelFormat_ = PixelFormat::PIX_FMT_RGB24;
+  AVPixelFormat pixelFormat_ = AVPixelFormat::AV_PIX_FMT_RGB24;
 
   // Index of stream to decode.
   // -1 will automatically decode the first video stream.
@@ -91,7 +91,7 @@ class Params {
   /**
    * Pixel format of output buffer, default PIX_FMT_RGB24
    */
-  Params& pixelFormat(PixelFormat pixelFormat) {
+  Params& pixelFormat(AVPixelFormat pixelFormat) {
     pixelFormat_ = pixelFormat;
     return *this;
   }
@@ -342,7 +342,7 @@ struct VideoMeta {
         width(-1),
         height(-1),
         codec_type(AVMEDIA_TYPE_VIDEO),
-        pixFormat(PixelFormat::PIX_FMT_RGB24) {}
+        pixFormat(AVPixelFormat::AV_PIX_FMT_RGB24) {}
 };
 
 class VideoDecoder {
