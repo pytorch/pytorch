@@ -31,7 +31,7 @@ void VideoDecoder::decodeLoop(
     VideoIOContext& ioctx,
     const Params& params,
     std::vector<std::unique_ptr<DecodedFrame>>& sampledFrames) {
-  PixelFormat pixFormat = params.pixelFormat_;
+  AVPixelFormat pixFormat = params.pixelFormat_;
 
   AVFormatContext* inputContext = avformat_alloc_context();
   AVStream* videoStream_ = nullptr;
