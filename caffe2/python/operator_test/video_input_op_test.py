@@ -11,7 +11,7 @@ import unittest
 import tempfile
 
 from caffe2.proto import caffe2_pb2
-from caffe2.python import workspace, cnn
+from caffe2.python import workspace, model_helper
 import numpy as np
 
 
@@ -83,7 +83,7 @@ class VideoInputOpTest(unittest.TestCase):
         video_db_dir = tempfile.mkdtemp()
 
         self.create_video_db(temp_list, video_db_dir)
-        model = cnn.CNNModelHelper(name="Video Loader from LMDB")
+        model = model_helper.ModelHelper(name="Video Loader from LMDB")
         reader = model.CreateDB(
             "sample",
             db=video_db_dir,

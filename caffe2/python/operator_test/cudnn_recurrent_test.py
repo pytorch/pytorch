@@ -3,7 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import cnn, workspace, core, rnn_cell
+from caffe2.python import model_helper, workspace, core, rnn_cell
 from caffe2.proto import caffe2_pb2
 
 import numpy as np
@@ -35,10 +35,10 @@ class TestLSTMs(unittest.TestCase):
                 [1, batch_size, hidden_dim], dtype=np.float32
             ))
 
-            own_model = cnn.CNNModelHelper(name="own_lstm")
+            own_model = model_helper.ModelHelper(name="own_lstm")
 
             input_shape = [T, batch_size, input_dim]
-            cudnn_model = cnn.CNNModelHelper(name="cudnn_lstm")
+            cudnn_model = model_helper.ModelHelper(name="cudnn_lstm")
             input_blob = cudnn_model.param_init_net.UniformFill(
                 [], "input", shape=input_shape)
             workspace.FeedBlob("CUDNN/hidden_init_cudnn", np.zeros(

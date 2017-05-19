@@ -4,7 +4,6 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import recurrent, workspace
-from caffe2.python.cnn import CNNModelHelper
 from caffe2.python.model_helper import ModelHelper
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
@@ -220,7 +219,7 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
         if we apply convolution over all elements simultaneously,
         since the whole input_state sequence was generated at the end.
     '''
-        model = CNNModelHelper(name='model')
+        model = ModelHelper(name='model')
         fake_inputs = model.param_init_net.UniformFill(
             [],
             'fake_inputs',
@@ -240,7 +239,7 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
             value=0.0,
             shape=[1, batch_size, state_size],
         )
-        step_model = CNNModelHelper(name='step_model', param_model=model)
+        step_model = ModelHelper(name='step_model', param_model=model)
         (
             fake_input_t,
             timestep,

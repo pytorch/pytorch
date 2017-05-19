@@ -5,7 +5,7 @@ from __future__ import unicode_literals
 
 from caffe2.python import core, gradient_checker, rnn_cell, workspace
 from caffe2.python.attention import AttentionType
-from caffe2.python.cnn import CNNModelHelper
+from caffe2.python.model_helper import ModelHelper
 import caffe2.python.hypothesis_test_util as hu
 
 from functools import partial
@@ -380,7 +380,7 @@ def _prepare_lstm(t, n, d, create_lstm, outputs_with_grads,
                   memory_optim, forget_bias, forward_only, drop_states):
     print("Dims: ", t, n, d)
 
-    model = CNNModelHelper(name='external')
+    model = ModelHelper(name='external')
     input_blob, seq_lengths, hidden_init, cell_init = (
         model.net.AddExternalInputs(
             'input_blob', 'seq_lengths', 'hidden_init', 'cell_init'))
@@ -570,7 +570,7 @@ class RNNCellTest(hu.HypothesisTestCase):
         ref,
         gc,
     ):
-        model = CNNModelHelper(name='external')
+        model = ModelHelper(name='external')
         with core.DeviceScope(gc):
             (
                 encoder_outputs,
@@ -722,7 +722,7 @@ class RNNCellTest(hu.HypothesisTestCase):
         num_layers,
         batch_size,
     ):
-        model = CNNModelHelper(name='external')
+        model = ModelHelper(name='external')
         (
             input_sequence,
             seq_lengths,
