@@ -102,6 +102,68 @@ class GPUDataParallelModelTest(TestCase):
             result_8gpus = self.run_model(range(8))
             self.assertTrue(np.allclose(result_1gpus, result_8gpus))
 
+    def test_checkpoint_params(self):
+        def add_input_ops(model):
+            pass
+
+        def add_model_ops(model):
+            model = cnn.CNNModelHelper(name="convtest", order="NCHW")
+            model.NHWC2NCHW("data", "data_nchw")
+            model.Conv("data_nchw", 'conv1', 3, 64,
+                       weight_init=("MSRAFill", {}), kernel=7,
+                       stride=2, pad=3, no_bias=0)
+            model.SpatialBN('conv1', 'conv1_spatbn_relu', 64, epsilon=1e-3)
+            model.Relu('conv1_spatbn_relu', 'conv1_spatbn_relu')
+            model.MaxPool('conv1_spatbn_relu', 'pool1', kernel=3, stride=2)
+            model.FC('pool1', 'fc', dim_in=(64 * 56 * 56), dim_out=100)
+            model.Sigmoid('fc', 'fc_sigm')
+            model.Softmax('fc_sigm', 'softmax')
+            model.LabelCrossEntropy(['softmax', 'label'], 'xent')
+            loss = model.AveragedLoss('xent', 'loss')
+
+            model.AddGradientOperators([loss])
+
+        def add_parameter_update_ops(model):
+            model.Iter("ITER")
+            LR = model.param_init_net.ConstantFill(
+                [], 'LR', shape=[1], value=0.1
+            )
+            for param in model.GetParams():
+                param_grad = model.param_to_grad[param]
+                param_momentum = model.param_init_net.ConstantFill(
+                    [param], param + '_momentum', value=0.0
+                )
+                model.net.MomentumSGDUpdate(
+                    [param_grad, param_momentum, LR, param],
+                    [param_grad, param_momentum, param],
+                )
+            model = cnn.CNNModelHelper(
+                order="NHWC",
+                name="test",
+            )
+            data_parallel_model.Parallelize_GPU(
+                model,
+                input_builder_fun=add_input_ops,
+                forward_pass_builder_fun=add_model_ops,
+                param_update_builder_fun=add_parameter_update_ops,
+                devices=[1, 2, 3],
+            )
+
+            # Only gpu_1 params should be returned (gpu_1 is the first gpu)
+            checkpoint_params = data_parallel_model.GetCheckpointParams(model)
+            for p in model.GetParams("gpu_1/"):
+                self.assertTrue(p in checkpoint_params)
+                self.assertTrue(p + "_momentum" in checkpoint_params)
+            for p in model.GetParams("gpu_2/"):
+                self.assertTrue(p in checkpoint_params)
+            for c in model.GetComputedParams("gpu_1/"):
+                self.assertFalse(c in checkpoint_params)
+            for c in model.GetComputedParams("gpu_2/"):
+                self.assertFalse(c in checkpoint_params)
+            self.assertFalse(core.BlobReference("gpu_1/data") in checkpoint_params)
+            self.assertTrue(core.BlobReference("gpu_1/ITER") in checkpoint_params)
+
+
 
 @unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
 @unittest.skipIf(workspace.NumCudaDevices() < 2, "Need at least 2 GPUs.")
@@ -289,7 +351,7 @@ class SparseDataParallelModelTest(TestCase):
                 else:
                     param_momentum = model.param_init_net.ConstantFill(
                         [param],
-                        '{}_momentum'.format(param),
+                        param + '_momentum',
                         value=0.0,
                     )
                     model.net.SparseMomentumSGDUpdate(
