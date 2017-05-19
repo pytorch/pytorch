@@ -6,6 +6,7 @@
 #include "caffe2/core/operator.h"
 
 #include <gloo/algorithm.h>
+#include <gloo/common/error.h>
 #include <gloo/context.h>
 
 namespace caffe2 {

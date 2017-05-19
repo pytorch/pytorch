@@ -1,10 +1,10 @@
 #pragma once
 
-#include "caffe2/core/blob.h"
+#include <exception>
 
-#include <gloo/common/error.h>
+#include "caffe2/core/blob.h"
 
 namespace caffe2 {
 
-void signalFailure(Blob* status_blob, ::gloo::IoException& exception);
+void signalFailure(Blob* status_blob, std::exception& exception);
 }
