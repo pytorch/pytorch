@@ -117,9 +117,10 @@ class TestPooling(hu.HypothesisTestCase):
            batch_size=st.integers(1, 3),
            order=st.sampled_from(["NCHW", "NHWC"]),
            method=st.sampled_from(["MaxPool", "AveragePool"]),
+           engine=st.sampled_from(["", "CUDNN"]),
            **hu.gcs)
     def test_pooling_3d(self, stride, pad, kernel, size, input_channels,
-                        batch_size, order, method, gc, dc):
+                        batch_size, order, method, engine, gc, dc):
         assume(pad < kernel)
         op = core.CreateOperator(
             method,
@@ -129,7 +130,7 @@ class TestPooling(hu.HypothesisTestCase):
             kernels=[kernel] * 3,
             pads=[pad] * 6,
             order=order,
-            engine="",
+            engine=engine,
         )
         X = np.random.rand(
             batch_size, size, size, size, input_channels).astype(np.float32)
