@@ -106,6 +106,35 @@ template<typename algo_t>
 struct algorithm_search {
 };
 
+cudnnStatus_t getWorkspaceSize(cudnnHandle_t handle, const Convolution& conv, const cudnnConvolutionFwdAlgo_t algo, size_t* sz){
+    return cudnnGetConvolutionForwardWorkspaceSize(handle, conv.idesc.desc, conv.wdesc.desc, conv.cdesc.desc, conv.odesc.desc, algo, sz);
+}
+cudnnStatus_t getWorkspaceSize(cudnnHandle_t handle, const Convolution& conv, const cudnnConvolutionBwdDataAlgo_t algo, size_t* sz){
+    return cudnnGetConvolutionBackwardDataWorkspaceSize(handle, conv.wdesc.desc, conv.odesc.desc, conv.cdesc.desc, conv.idesc.desc, algo, sz);
+}
+cudnnStatus_t getWorkspaceSize(cudnnHandle_t handle, const Convolution& conv, const cudnnConvolutionBwdFilterAlgo_t algo, size_t* sz){
+    return cudnnGetConvolutionBackwardFilterWorkspaceSize(handle, conv.idesc.desc, conv.odesc.desc, conv.cdesc.desc, conv.wdesc.desc, algo, sz);
+}
+
+template<typename algo_t>
+size_t getMaxWorkspaceSize(cudnnHandle_t handle, const Convolution& conv, algo_t *algo, int n_algo, THCState* state){
+    size_t max_ws_size = 0;
+    size_t max_block = 0;
+    size_t total_gpu_mem = 0;
+    size_t free_gpu_mem = 0;
+    
+    THCudaCheck(THCudaMemGetInfo1(state,&free_gpu_mem,&total_gpu_mem,&max_block));
+    
+    for(int i=0; i<n_algo; i++) {
+        cudnnStatus_t err;
+        size_t sz;
+        err = getWorkspaceSize(handle, conv, algo[i], &sz);
+        if(CUDNN_STATUS_SUCCESS != err || sz == 0 || sz < max_ws_size || sz > max_block) continue;
+        max_ws_size = sz;
+    }
+    return max_ws_size;
+}
+
 template<>
 struct algorithm_search<cudnnConvolutionFwdAlgo_t> {
   static constexpr auto DEFAULT_ALGO = CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM;
@@ -116,7 +145,6 @@ struct algorithm_search<cudnnConvolutionFwdAlgo_t> {
   static cudnnConvolutionFwdAlgoPerf_t findAlgorithm(THCState* state, cudnnHandle_t handle, const Convolution& conv,
 						      void* in, void* out, void* wght) {
     int algoCount;
-    cudnnStatus_t err;
     cudnnConvolutionFwdAlgoPerf_t perfResults;
     cudnnConvolutionFwdAlgo_t algo[] = {
 	    CUDNN_CONVOLUTION_FWD_ALGO_GEMM,
@@ -128,35 +156,13 @@ struct algorithm_search<cudnnConvolutionFwdAlgo_t> {
             CUDNN_CONVOLUTION_FWD_ALGO_WINOGRAD,
             CUDNN_CONVOLUTION_FWD_ALGO_WINOGRAD_NONFUSED
     };
-    size_t max_ws_size = 0;
-    void *data = NULL; // workspace
-    
-    for(int i=0; i<8; i++) {
-        size_t sz;
-        err = cudnnGetConvolutionForwardWorkspaceSize(handle, conv.idesc.desc, conv.wdesc.desc, conv.cdesc.desc, conv.odesc.desc, algo[i], &sz);
-        if(CUDNN_STATUS_SUCCESS != err || sz == 0 || sz < max_ws_size) continue;
-        if(NULL != data){
-	   THCudaFree(state, data);
-           data = NULL;
-	}
-	THCudaMalloc(state, &data, sz);
-	if(NULL != data){
-           max_ws_size = (sz<max_ws_size)? max_ws_size:sz;
-        }
-    }
-    if(NULL == data){ // in case we free mem before allocation of bigger chunk and failed on allocation after that
-       THCudaMalloc(state, &data, max_ws_size);
-       // if failed now then put workspace size equal to 0
-       max_ws_size = (NULL == data)? 0: max_ws_size;
-    }
+    size_t max_ws_size = getMaxWorkspaceSize<cudnnConvolutionFwdAlgo_t>(handle,conv,algo,sizeof(algo)/sizeof(algo[0]),state);
+    Workspace ws(state, max_ws_size);
 
     CHECK(cudnnFindConvolutionForwardAlgorithmEx(handle, conv.idesc.desc, in,
         conv.wdesc.desc, wght, conv.cdesc.desc, conv.odesc.desc, out, 1, &algoCount, 
-        &perfResults, data, max_ws_size));
+        &perfResults, ws.data, ws.size));
     
-    if(NULL != data){
-         THCudaFree(state, data);
-    }
     return perfResults;
   }
 
@@ -182,7 +188,6 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgo_t> {
   static cudnnConvolutionBwdDataAlgoPerf_t findAlgorithm(THCState* state,cudnnHandle_t handle, const Convolution& conv,
 							  void* in, void* out, void* wght) {
     int algoCount;
-    cudnnStatus_t err;
     cudnnConvolutionBwdDataAlgoPerf_t perfResults;
     cudnnConvolutionBwdDataAlgo_t algo[] = {
          CUDNN_CONVOLUTION_BWD_DATA_ALGO_0,
@@ -192,35 +197,13 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgo_t> {
          CUDNN_CONVOLUTION_BWD_DATA_ALGO_WINOGRAD,
          CUDNN_CONVOLUTION_BWD_DATA_ALGO_WINOGRAD_NONFUSED
     };
-    size_t max_ws_size = 0;
-    void *data = NULL; // workspace
+    size_t max_ws_size = getMaxWorkspaceSize<cudnnConvolutionBwdDataAlgo_t>(handle,conv,algo,sizeof(algo)/sizeof(algo[0]),state);
+    Workspace ws(state, max_ws_size);
     
-    for(int i=0; i<6; i++) {
-        size_t sz;
-        err = cudnnGetConvolutionBackwardDataWorkspaceSize(handle, conv.wdesc.desc, conv.odesc.desc, conv.cdesc.desc, conv.idesc.desc, algo[i], &sz);
-        if(CUDNN_STATUS_SUCCESS != err || sz == 0 || sz < max_ws_size) continue;
-        if(NULL != data){
-	   THCudaFree(state, data);
-           data = NULL;
-	}
-	THCudaMalloc(state, &data, sz);
-	if(NULL != data){
-           max_ws_size = (sz<max_ws_size)? max_ws_size:sz;
-        }
-    }
-    if(NULL == data){ // in case we free mem before allocation of bigger chunk and failed on allocation after that
-       THCudaMalloc(state, &data, max_ws_size);
-       // if failed now then put workspace size equal to 0
-       max_ws_size = (NULL == data)? 0: max_ws_size;
-    }
-
     CHECK(cudnnFindConvolutionBackwardDataAlgorithmEx(handle, conv.wdesc.desc, wght,
         conv.odesc.desc, out, conv.cdesc.desc, conv.idesc.desc, in, 1, &algoCount, 
-        &perfResults, data, max_ws_size));
+        &perfResults, ws.data, ws.size));
     
-    if(NULL != data){
-         THCudaFree(state, data);
-    }
     return perfResults;
   }
 
@@ -247,7 +230,6 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgo_t> {
   static cudnnConvolutionBwdFilterAlgoPerf_t findAlgorithm(THCState* state, cudnnHandle_t handle, const Convolution& conv,
 							    void* in, void* out, void* wght) {
     int algoCount;
-    cudnnStatus_t err;
     cudnnConvolutionBwdFilterAlgoPerf_t perfResults;
     cudnnConvolutionBwdFilterAlgo_t algo[] = {
          CUDNN_CONVOLUTION_BWD_FILTER_ALGO_0,
@@ -257,35 +239,13 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgo_t> {
          CUDNN_CONVOLUTION_BWD_FILTER_ALGO_3,
          CUDNN_CONVOLUTION_BWD_FILTER_ALGO_WINOGRAD_NONFUSED
     };
-    size_t max_ws_size = 0;
-    void *data = NULL; // workspace
-    
-    for(int i=0; i<6; i++) {
-        size_t sz;
-        err = cudnnGetConvolutionBackwardFilterWorkspaceSize(handle, conv.idesc.desc, conv.odesc.desc, conv.cdesc.desc, conv.wdesc.desc, algo[i], &sz);
-        if(CUDNN_STATUS_SUCCESS != err || sz == 0 || sz < max_ws_size) continue;
-        if(NULL != data){
-	   THCudaFree(state, data);
-           data = NULL;
-	}
-	THCudaMalloc(state, &data, sz);
-	if(NULL != data){
-           max_ws_size = (sz<max_ws_size)? max_ws_size:sz;
-        }
-    }
-    if(NULL == data){ // in case we free mem before allocation of bigger chunk and failed on allocation after that
-       THCudaMalloc(state, &data, max_ws_size);
-       // if failed now then put workspace size equal to 0
-       max_ws_size = (NULL == data)? 0: max_ws_size;
-    }
+    size_t max_ws_size = getMaxWorkspaceSize<cudnnConvolutionBwdFilterAlgo_t>(handle,conv,algo,sizeof(algo)/sizeof(algo[0]),state);
+    Workspace ws(state, max_ws_size);
 
     CHECK(cudnnFindConvolutionBackwardFilterAlgorithmEx(handle, conv.idesc.desc, in,
         conv.odesc.desc, out, conv.cdesc.desc, conv.wdesc.desc, wght, 1, &algoCount, 
-        &perfResults, data, max_ws_size));
+        &perfResults, ws.data, ws.size));
     
-    if(NULL != data){
-         THCudaFree(state, data);
-    }
     return perfResults;
   }
 
