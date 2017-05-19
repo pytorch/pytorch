@@ -7,16 +7,16 @@ import numpy as np
 import unittest
 
 from caffe2.proto import caffe2_pb2
-from caffe2.python import workspace, test_util, cnn
+from caffe2.python import workspace, test_util, model_helper, brew
 
 
 class TestShapeInference(test_util.TestCase):
 
     def testShapeInferenceSimpleFC(self):
-        m = cnn.CNNModelHelper()
+        m = model_helper.ModelHelper(name="test_model")
 
-        m.FC("data", "fc1", dim_in=96, dim_out=32)
-        m.FC("fc1", "fc2", dim_in=32, dim_out=55)
+        brew.fc(m, "data", "fc1", dim_in=96, dim_out=32)
+        brew.fc(m, "fc1", "fc2", dim_in=32, dim_out=55)
 
         (shapes, types) = workspace.InferShapesAndTypes(
             [m.param_init_net, m.net],
@@ -32,7 +32,7 @@ class TestShapeInference(test_util.TestCase):
         self.assertEquals(shapes['fc2'], [64, 55])
 
     def testShapeInferenceDistances(self):
-        model = cnn.CNNModelHelper()
+        model = model_helper.ModelHelper(name="test_model")
         model.SquaredL2Distance(["x", "y"], "zsq")
         model.CosineSimilarity(["x", "y"], "zcos")
         model.DotProduct(["x", "y"], "zdot")
@@ -42,17 +42,17 @@ class TestShapeInference(test_util.TestCase):
         self.InferTensorRunAndCompare(model)
 
     def testShapeInferenceConvNet(self):
-        model = cnn.CNNModelHelper(name="convtest", order="NCHW")
+        model = model_helper.ModelHelper(name="convtest")
         model.NHWC2NCHW("data", "data_nchw")
-        model.Conv("data_nchw", 'conv1', 3, 64,
+        brew.conv(model, "data_nchw", 'conv1', 3, 64,
                    weight_init=("MSRAFill", {}), kernel=7,
                    stride=2, pad=3, no_bias=0)
-        model.SpatialBN('conv1', 'conv1_spatbn_relu', 64, epsilon=1e-3)
-        model.Relu('conv1_spatbn_relu', 'conv1_spatbn_relu')
-        model.MaxPool('conv1_spatbn_relu', 'pool1', kernel=3, stride=2)
-        model.FC('pool1', 'fc', dim_in=(64 * 56 * 56), dim_out=100)
+        brew.spatial_bn(model, 'conv1', 'conv1_spatbn_relu', 64, epsilon=1e-3)
+        brew.relu(model, 'conv1_spatbn_relu', 'conv1_spatbn_relu')
+        brew.max_pool(model, 'conv1_spatbn_relu', 'pool1', kernel=3, stride=2)
+        brew.fc(model, 'pool1', 'fc', dim_in=(64 * 56 * 56), dim_out=100)
         model.Sigmoid('fc', 'fc_sigm')
-        model.Softmax('fc_sigm', 'softmax')
+        brew.softmax(model, 'fc_sigm', 'softmax')
         model.LabelCrossEntropy(['softmax', 'label'], 'xent')
         loss = model.AveragedLoss('xent', 'loss')
 
@@ -89,7 +89,7 @@ class TestShapeInference(test_util.TestCase):
         self.InferTensorRunAndCompare(model)
 
     def testShapeInferenceTranspose(self):
-        model = cnn.CNNModelHelper()
+        model = model_helper.ModelHelper(name="test_model")
 
         workspace.FeedBlob(
             "tensor",
@@ -97,14 +97,16 @@ class TestShapeInference(test_util.TestCase):
         )
 
         # Testing with axes undefined
-        model.Transpose(
+        brew.transpose(
+            model,
             ["tensor"],
             "transpose",
         )
         self.InferTensorRunAndCompare(model)
 
         # Testing with axes defined
-        model.Transpose(
+        brew.transpose(
+            model,
             ["tensor"],
             "transpose",
             axes=np.random.permutation(5)
@@ -113,7 +115,7 @@ class TestShapeInference(test_util.TestCase):
         return self.InferTensorRunAndCompare(model)
 
     def testShapeInferencePad(self):
-        model = cnn.CNNModelHelper(name="padtest")
+        model = model_helper.ModelHelper(name="padtest")
         model.PadImage("data", 'padded', pad_t=100, pad_l=37, pad_b=28,
                        pad_r=20, mode="constant", order="NCHW")
 
@@ -125,13 +127,13 @@ class TestShapeInference(test_util.TestCase):
         self.InferTensorRunAndCompare(model)
 
     def testShapeInferenceTwoClass(self):
-        model = cnn.CNNModelHelper(name="twoclass")
+        model = model_helper.ModelHelper(name="twoclass")
         model.MakeTwoClass("v", "v2")
         workspace.FeedBlob("v", np.random.rand(32).astype(np.float32))
         self.InferTensorRunAndCompare(model)
 
     def testShapeInferencePadZero(self):
-        model = cnn.CNNModelHelper(name="padtest")
+        model = model_helper.ModelHelper(name="padtest")
         model.PadImage("data", 'padded', pad=0, mode="constant",
                        order="NCHW")
 
@@ -143,7 +145,7 @@ class TestShapeInference(test_util.TestCase):
         self.InferTensorRunAndCompare(model)
 
     def testShapeInferenceMatMul(self):
-        model = cnn.CNNModelHelper()
+        model = model_helper.ModelHelper(name="test_model")
 
         model.MatMul(["x", "y"], "MatMul")
 
@@ -153,7 +155,7 @@ class TestShapeInference(test_util.TestCase):
         self.InferTensorRunAndCompare(model)
 
     def testShapeInferenceSoftmaxWithLoss(self):
-        model = cnn.CNNModelHelper()
+        model = model_helper.ModelHelper(name="test_model")
 
         model.SoftmaxWithLoss(
             ["logits", "labels"],
@@ -208,7 +210,7 @@ class TestShapeInference(test_util.TestCase):
         self.InferTensorRunAndCompare(model)
 
         # Test spatial model
-        model = cnn.CNNModelHelper()
+        model = model_helper.ModelHelper(name="test_model")
         workspace.FeedBlob(
             "img",
             np.random.rand(32, 19, 33, 28).astype(np.float32)
@@ -226,7 +228,7 @@ class TestShapeInference(test_util.TestCase):
 
     def testShapeInferenceIm2Col(self):
         # Test with NCHW
-        model = cnn.CNNModelHelper()
+        model = model_helper.ModelHelper(name="test_model")
         model.Im2Col("X", "Y", pad=1, kernel=4, dilation=2, stride=2,
                      order="NCHW")
 
@@ -238,7 +240,7 @@ class TestShapeInference(test_util.TestCase):
         self.InferTensorRunAndCompare(model)
 
         # Test with NHWC
-        model = cnn.CNNModelHelper()
+        model = model_helper.ModelHelper(name="test_model")
         model.Im2Col("X", "Y", pad=1, kernel=4, dilation=2, stride=2,
                      order="NHWC")
 
@@ -250,7 +252,7 @@ class TestShapeInference(test_util.TestCase):
         self.InferTensorRunAndCompare(model)
 
         # Test with different width and height
-        model = cnn.CNNModelHelper()
+        model = model_helper.ModelHelper(name="test_model")
         model.Im2Col("X", "Y", pad=1, kernel_h=8, kernel_w=4,
                      dilation=2, stride=2)
 
@@ -262,7 +264,7 @@ class TestShapeInference(test_util.TestCase):
         self.InferTensorRunAndCompare(model)
 
     def testShapeInferenceTile(self):
-        m = cnn.CNNModelHelper()
+        m = model_helper.ModelHelper(name="test_model")
 
         workspace.FeedBlob(
             "tensor",
@@ -276,27 +278,27 @@ class TestShapeInference(test_util.TestCase):
         self.InferTensorRunAndCompare(m)
 
     def testShapeInferenceFlatten(self):
-        model = cnn.CNNModelHelper()
+        model = model_helper.ModelHelper(name="test_model")
         model.FlattenToVec("X", "FlatVec")
         workspace.FeedBlob("X", np.random.rand(17, 5, 13).astype(np.float32))
 
         self.InferTensorRunAndCompare(model)
 
-        model = cnn.CNNModelHelper()
+        model = model_helper.ModelHelper(name="test_model")
         model.Flatten("X", "Flat")
         workspace.FeedBlob("X", np.random.rand(17, 5, 13).astype(np.float32))
 
         self.InferTensorRunAndCompare(model)
 
     def testShapeInferenceReshape(self):
-        model = cnn.CNNModelHelper()
+        model = model_helper.ModelHelper(name="test_model")
         model.Reshape("X", ["Reshaped", "Old_Shape"], shape=[8, 0, -1, 2])
         workspace.FeedBlob("X", np.random.rand(4, 26, 32).astype(np.float32))
 
         self.InferTensorRunAndCompare(model)
 
     def testCast(self):
-        model = cnn.CNNModelHelper()
+        model = model_helper.ModelHelper(name="test_model")
 
         types = [
             ('bool', np.bool, caffe2_pb2.TensorProto.BOOL),
@@ -324,7 +326,7 @@ class TestShapeInference(test_util.TestCase):
 
     def testShapeInferenceRoiPool(self):
         for is_test in [True, False]:
-            model = cnn.CNNModelHelper()
+            model = model_helper.ModelHelper(name="test_model")
             outputs = ['Y'] if is_test else ['Y', 'argmaxes']
             model.net.RoIPool(
                 ['X', 'R'], outputs, pooled_h=4, pooled_w=5, is_test=is_test)

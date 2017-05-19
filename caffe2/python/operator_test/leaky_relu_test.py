@@ -7,7 +7,7 @@ from hypothesis import given, assume
 import hypothesis.strategies as st
 from itertools import izip
 
-from caffe2.python import core, cnn
+from caffe2.python import core, model_helper
 import caffe2.python.hypothesis_test_util as hu
 
 
@@ -148,9 +148,10 @@ class TestLeakyRelu(hu.HypothesisTestCase):
            order=st.sampled_from(['NCHW', 'NHWC']),
            alpha=st.floats(0, 1),
            seed=st.integers(0, 1000))
-    def test_leaky_relu_cnn_helper(self, N, C, H, W, order, alpha, seed):
+    def test_leaky_relu_model_helper_helper(self, N, C, H, W, order, alpha, seed):
         np.random.seed(seed)
-        model = cnn.CNNModelHelper(order=order)
+        arg_scope = {'order': order}
+        model = model_helper.ModelHelper(name="test_model", arg_scope=arg_scope)
         model.LeakyRelu(
             'input',
             'output',

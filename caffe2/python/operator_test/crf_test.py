@@ -2,8 +2,8 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
-from caffe2.python import workspace, crf
-from caffe2.python.cnn import CNNModelHelper
+from caffe2.python import workspace, crf, brew
+from caffe2.python.model_helper import ModelHelper
 import numpy as np
 from scipy.misc import logsumexp
 import caffe2.python.hypothesis_test_util as hu
@@ -16,7 +16,7 @@ class TestCRFOp(hu.HypothesisTestCase):
     @given(num_tags=st.integers(2, 4),
            num_words=st.integers(2, 15))
     def test_crf_with_loss_op(self, num_tags, num_words):
-        model = CNNModelHelper(name='external')
+        model = ModelHelper(name='external')
         embeddings_dim = 200
         embeddings = np.random.randn(num_words, embeddings_dim).astype(np.float32)
         transitions = np.random.uniform(
@@ -32,7 +32,8 @@ class TestCRFOp(hu.HypothesisTestCase):
         workspace.FeedBlob(str(embeddings_blob), embeddings)
         workspace.FeedBlob(str(labels_blob), labels)
         workspace.FeedBlob(str(transitions_blob), transitions)
-        predictions_blob = model.FC(
+        predictions_blob = brew.fc(
+            model,
             embeddings_blob, "fc_0",
             embeddings_dim, num_tags,
             ('UniformFill', {'min': -1.0}, {'max': 1.0}),
@@ -58,7 +59,7 @@ class TestCRFOp(hu.HypothesisTestCase):
     @given(num_tags=st.integers(1, 4),
            num_words=st.integers(2, 4))
     def test_crf_gradient(self, num_tags, num_words):
-        base_model = CNNModelHelper(name='base_model')
+        base_model = ModelHelper(name='base_model')
         transitions = np.random.randn(
             num_tags + 2, num_tags + 2
         ).astype(np.float32)

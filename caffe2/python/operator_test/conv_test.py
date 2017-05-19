@@ -344,8 +344,9 @@ class TestConvolution(hu.HypothesisTestCase):
            do=st.sampled_from(hu.device_options),
            engine=st.sampled_from(["CUDNN", ""]))
     def test_convolution_sync(self, net_type, num_workers, do, engine):
-        from caffe2.python.cnn import CNNModelHelper
-        m = CNNModelHelper()
+        from caffe2.python.model_helper import ModelHelper
+        from caffe2.python import brew
+        m = ModelHelper(name="test_model")
         n = 1
         d = 2
         depth = 3
@@ -364,25 +365,25 @@ class TestConvolution(hu.HypothesisTestCase):
                 mid_2 = "{}_{}_m".format(i + 1, 2 * j + 1)
                 top = "{}_{}".format(i, j)
                 w1, b1, w2, b2 = np.random.randn(4).tolist()
-                m.Conv(
-                    bottom_1, mid_1,
+                brew.conv(
+                    m, bottom_1, mid_1,
                     dim_in=d, dim_out=d,
                     kernel=3,
-                    weight_init=m.ConstantInit(w1),
-                    bias_init=m.ConstantInit(b1),
+                    weight_init=('ConstantFill', dict(value=w1)),
+                    bias_init=('ConstantFill', dict(value=b1)),
                     cudnn_state=np.random.randint(0, 3),
                     stride=1,
                     pad=1,
                     deterministic=1,
                     engine=engine)
-                m.Conv(
-                    bottom_2, mid_2,
+                brew.conv(
+                    m, bottom_2, mid_2,
                     dim_in=d, dim_out=d,
                     kernel=3,
                     stride=1,
                     pad=1,
-                    weight_init=m.ConstantInit(w2),
-                    bias_init=m.ConstantInit(b2),
+                    weight_init=('ConstantFill', dict(value=w2)),
+                    bias_init=('ConstantFill', dict(value=b2)),
                     deterministic=1,
                     cudnn_state=np.random.randint(0, 3),
                     engine=engine)

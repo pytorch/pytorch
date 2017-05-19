@@ -206,7 +206,7 @@ class TestImport(hu.HypothesisTestCase):
     @settings(verbosity=Verbosity.verbose)
     def test_imageinput(self, size_tuple, means, stds, gc, dc):
         # TODO: Does not test on GPU and does not test use_gpu_transform
-        # WARNING: Using CNNModelHelper automatically does NHWC to NCHW
+        # WARNING: Using ModelHelper automatically does NHWC to NCHW
         # transformation if needed.
         width, height, minsize, crop = size_tuple
         means = [float(m) for m in means]

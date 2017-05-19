@@ -7,7 +7,7 @@ from hypothesis import given, assume
 import hypothesis.strategies as st
 from itertools import izip
 
-from caffe2.python import core, cnn
+from caffe2.python import core, model_helper, brew
 import caffe2.python.hypothesis_test_util as hu
 
 
@@ -227,10 +227,11 @@ class TestInstanceNorm(hu.HypothesisTestCase):
            order=st.sampled_from(['NCHW', 'NHWC']),
            epsilon=st.floats(1e-6, 1e-4),
            seed=st.integers(0, 1000))
-    def test_instance_norm_cnn_helper(self, N, C, H, W, order, epsilon, seed, is_test):
+    def test_instance_norm_model_helper_helper(self, N, C, H, W, order, epsilon, seed, is_test):
         np.random.seed(seed)
-        model = cnn.CNNModelHelper(order=order)
-        model.InstanceNorm(
+        model = model_helper.ModelHelper(name="test_model")
+        brew.instance_norm(
+            model,
             'input',
             'output',
             C,

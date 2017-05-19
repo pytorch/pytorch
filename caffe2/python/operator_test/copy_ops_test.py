@@ -7,7 +7,7 @@ import numpy as np
 
 import unittest
 from caffe2.proto import caffe2_pb2
-from caffe2.python import workspace, core, cnn
+from caffe2.python import workspace, core, model_helper, brew
 
 
 class CopyOpsTest(unittest.TestCase):
@@ -19,7 +19,7 @@ class CopyOpsTest(unittest.TestCase):
         workspace.ResetWorkspace()
 
     def run_test_copy_gradient(self, device_opt):
-        model = cnn.CNNModelHelper(name="copy_test")
+        model = model_helper.ModelHelper(name="copy_test")
         with core.DeviceScope(device_opt):
             x = model.net.AddExternalInputs("x")
             y = model.Copy(x, "y")
@@ -46,7 +46,7 @@ class CopyOpsTest(unittest.TestCase):
 
     @unittest.skipIf(workspace.NumCudaDevices() < 2, "Need at least 2 GPU.")
     def test_copy_gradient_multiple_gpus(self):
-        model = cnn.CNNModelHelper(name="copy_test")
+        model = model_helper.ModelHelper(name="copy_test")
 
         with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU, 0)):
             x_cpu = model.net.AddExternalInputs("x_cpu")
@@ -89,7 +89,7 @@ class CopyOpsTest(unittest.TestCase):
 
     @unittest.skipIf(workspace.NumCudaDevices() < 1, "Need at least 1 GPU.")
     def test_cpu2gpu_gpu2cpu_sparse_gradients(self):
-        model = cnn.CNNModelHelper(name="copy_test")
+        model = model_helper.ModelHelper(name="copy_test")
         v = model.param_init_net.UniformFill([], ["v"], shape=[16, 4])
         indices = model.param_init_net.UniformFill([], ["v"], shape=[16, 4])
         cpu_opt = core.DeviceOption(caffe2_pb2.CPU, 0)
@@ -103,7 +103,7 @@ class CopyOpsTest(unittest.TestCase):
 
         with core.DeviceScope(gpu_opt):
             ggpu = model.CopyCPUToGPU(g, "ggpu")
-            f = model.FC(ggpu, "out", dim_in=4, dim_out=6)
+            f = brew.fc(model, ggpu, "out", dim_in=4, dim_out=6)
             (softmax, loss) = model.SoftmaxWithLoss(
                 [f, "label"],
                 ["softmax", "loss"],
@@ -114,7 +114,7 @@ class CopyOpsTest(unittest.TestCase):
 
     @unittest.skipIf(workspace.NumCudaDevices() < 1, "Need at least 1 GPU.")
     def test_cpu2gpu_gpu2cpu_gradients(self):
-        model = cnn.CNNModelHelper(name="copy_test")
+        model = model_helper.ModelHelper(name="copy_test")
 
         batch = 32
         cpu_opt = core.DeviceOption(caffe2_pb2.CPU, 0)
@@ -122,12 +122,12 @@ class CopyOpsTest(unittest.TestCase):
 
         with core.NameScope("cpu"):
             with core.DeviceScope(cpu_opt):
-                x_cpu = model.FC('data', 'x_cpu', 16, 8)
+                x_cpu = brew.fc(model, 'data', 'x_cpu', 16, 8)
 
         with core.NameScope("gpu_0"):
             with core.DeviceScope(gpu_opt):
                 x_gpu = model.CopyCPUToGPU(x_cpu, "x_gpu")
-                pred_gpu = model.FC(x_gpu, "pred_gpu", 8, 4)
+                pred_gpu = brew.fc(model, x_gpu, "pred_gpu", 8, 4)
                 pred_cpu = model.CopyGPUToCPU(pred_gpu, "pred_cpu")
 
         with core.DeviceScope(cpu_opt):
