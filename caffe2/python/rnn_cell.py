@@ -555,7 +555,6 @@ class AttentionCell(RNNCell):
         decoder_state_dim,
         attention_type,
         weighted_encoder_outputs,
-        forget_bias,
         attention_memory_optimization,
         **kwargs
     ):
@@ -755,7 +754,6 @@ class LSTMWithAttentionCell(AttentionCell):
             name=name,
             attention_type=attention_type,
             weighted_encoder_outputs=weighted_encoder_outputs,
-            forget_bias=forget_bias,
             attention_memory_optimization=attention_memory_optimization,
             forward_only=forward_only,
         )
@@ -794,7 +792,6 @@ class MILSTMWithAttentionCell(AttentionCell):
             name=name,
             attention_type=attention_type,
             weighted_encoder_outputs=weighted_encoder_outputs,
-            forget_bias=forget_bias,
             attention_memory_optimization=attention_memory_optimization,
             forward_only=forward_only,
         )
