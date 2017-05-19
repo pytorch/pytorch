@@ -849,6 +849,9 @@ class TestCuda(TestCase):
     def test_broadcast_fused_matmul(self):
         TestTorch._test_broadcast_fused_matmul(self, lambda t: t.cuda())
 
+    def test_broadcast_batched_matmul(self):
+        TestTorch._test_broadcast_batched_matmul(self, lambda t: t.cuda())
+
     def test_btrifact(self):
         TestTorch._test_btrifact(self, lambda t: t.cuda())
 
