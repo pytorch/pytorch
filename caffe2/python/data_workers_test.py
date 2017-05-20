@@ -111,3 +111,83 @@ class DataWorkersTest(unittest.TestCase):
         # so the enqueue thread should be blocked.
         # Let's now shutdown and see it succeeds.
         self.assertTrue(coordinator.stop())
+
+    def testInputOrder(self):
+        #
+        # Create two models (train and validation) with same input blobs
+        # names and ensure that both will get the data in correct order
+        #
+        workspace.ResetWorkspace()
+        self.counters = {0: 0, 1: 1}
+
+        def dummy_fetcher_rnn_ordered1(fetcher_id, batch_size):
+            # Hardcoding some input blobs
+            T = 20
+            N = batch_size
+            D = 33
+            data = np.zeros((T, N, D))
+            data[0][0][0] = self.counters[fetcher_id]
+            label = np.random.randint(N, size=(T, N))
+            label[0][0] = self.counters[fetcher_id]
+            seq_lengths = np.random.randint(N, size=(N))
+            seq_lengths[0] = self.counters[fetcher_id]
+            self.counters[fetcher_id] += 1
+            return [data, label, seq_lengths]
+
+        workspace.ResetWorkspace()
+        model = cnn.CNNModelHelper(name="rnn_test_order")
+        coordinator = data_workers.init_data_input_workers(
+            model,
+            input_blob_names=["data2", "label2", "seq_lengths2"],
+            fetch_fun=dummy_fetcher_rnn_ordered1,
+            batch_size=32,
+            max_buffered_batches=1000,
+            num_worker_threads=1,
+            dont_rebatch=True,
+            input_source_name='train'
+        )
+        coordinator.start()
+
+        val_model = cnn.CNNModelHelper(name="rnn_test_order_val")
+        coordinator1 = data_workers.init_data_input_workers(
+            val_model,
+            input_blob_names=["data2", "label2", "seq_lengths2"],
+            fetch_fun=dummy_fetcher_rnn_ordered1,
+            batch_size=32,
+            max_buffered_batches=1000,
+            num_worker_threads=1,
+            dont_rebatch=True,
+            input_source_name='val'
+        )
+        coordinator1.start()
+
+        workspace.RunNetOnce(model.param_init_net)
+        workspace.CreateNet(model.net)
+        workspace.CreateNet(val_model.net)
+
+        while coordinator._coordinators[0]._inputs < 900:
+            time.sleep(0.01)
+
+        for m in (model, val_model):
+            print(m.net.Proto().name)
+            workspace.RunNet(m.net.Proto().name)
+            last_data = workspace.FetchBlob('data2')[0][0][0]
+            last_lab = workspace.FetchBlob('label2')[0][0]
+            last_seq = workspace.FetchBlob('seq_lengths2')[0]
+
+            # Run few rounds
+            for _i in range(10):
+                workspace.RunNet(m.net.Proto().name)
+                data = workspace.FetchBlob('data2')[0][0][0]
+                lab = workspace.FetchBlob('label2')[0][0]
+                seq = workspace.FetchBlob('seq_lengths2')[0]
+                self.assertEqual(data, last_data + 1)
+                self.assertEqual(lab, last_lab + 1)
+                self.assertEqual(seq, last_seq + 1)
+                last_data = data
+                last_lab = lab
+                last_seq = seq
+
+        time.sleep(0.2)
+
+        self.assertTrue(coordinator.stop())
