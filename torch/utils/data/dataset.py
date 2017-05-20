@@ -1,5 +1,6 @@
+import abc
 
-class Dataset(object):
+class Dataset:
     """An abstract class representing a Dataset.
 
     All other datasets should subclass it. All subclasses should override
@@ -7,9 +8,13 @@ class Dataset(object):
     supporting integer indexing in range from 0 to len(self) exclusive.
     """
 
+    __metaclass__ = abc.ABCMeta
+
+    @abc.abstractmethod
     def __getitem__(self, index):
         raise NotImplementedError
 
+    @abc.abstractmethod
     def __len__(self):
         raise NotImplementedError
 
