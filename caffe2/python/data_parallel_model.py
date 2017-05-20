@@ -969,7 +969,9 @@ def _ComputeBlobsToSync(model):
     assert diff == set(), \
        "Some params not instantiated in param init net: {}".format(diff)
 
-    blobs_to_sync = sorted(blobs_to_sync)
+    # Remove duplicates and sort
+    blobs_to_sync = sorted(list(set(blobs_to_sync)))
+
     blobs_to_sync = [core.BlobReference(b) for b in blobs_to_sync]
     return (blobs_to_sync, sync_names)
 
