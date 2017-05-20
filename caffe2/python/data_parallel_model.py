@@ -588,7 +588,7 @@ def _AddDistributedParameterSync(
             # Copy between GPU and CPU
             with core.DeviceScope(device_opt):
                 param_cpu = net.CopyGPUToCPU(param, str(param) + "cpu")
-            with core.DeviceOption(caffe2_pb2.CPU):
+            with core.DeviceScope(cpu_device_opt):
                 comm_world = broadcast(comm_world, param_cpu)
             with core.DeviceScope(device_opt):
                 net.CopyCPUToGPU(param_cpu, param)

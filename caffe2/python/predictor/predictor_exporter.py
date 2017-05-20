@@ -148,8 +148,11 @@ def set_model_info(meta_net_def, project_str, model_class_str, version):
 
 def save_to_db(db_type, db_destination, predictor_export_meta):
     meta_net_def = get_meta_net_def(predictor_export_meta)
-    workspace.FeedBlob(predictor_constants.META_NET_DEF,
-                       serde.serialize_protobuf_struct(meta_net_def))
+    with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU)):
+        workspace.FeedBlob(
+            predictor_constants.META_NET_DEF,
+            serde.serialize_protobuf_struct(meta_net_def)
+        )
 
     blobs_to_save = [predictor_constants.META_NET_DEF] + \
         predictor_export_meta.parameters
