@@ -461,7 +461,18 @@ bool DecodeClipFromMemoryBuffer(
         0, sampledFrames.size() - length * sampling_rate)(*randgen);
   }
 
+  CAFFE_ENFORCE_LT(
+    use_start_frm,
+    sampledFrames.size(),
+    "Starting frame must less than total number of video frames");
+
   int end_frm = use_start_frm + length * sampling_rate;
+
+  CAFFE_ENFORCE_LT(
+    end_frm,
+    sampledFrames.size(),
+    "Ending frame must less than total number of video frames");
+
   for (int i = use_start_frm; i < end_frm; i += sampling_rate) {
     if (i == use_start_frm) {
       image_size = sampledFrames[i]->height_ * sampledFrames[i]->width_;
