@@ -2137,7 +2137,7 @@ Example::
 .. function:: max(input, dim, keepdim=True, max=None, max_indices=None) -> (Tensor, LongTensor)
 
 Returns the maximum value of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
-Also returns the index location of each maximum value found.
+The second return value is the index location of each maximum value found (argmax).
 
 If :attr:`keepdim` is true, the output Tensors are of the same size as :attr:`input`
 except in the dimension :attr:`dim` where they are of size 1.  Otherwise, :attr:`dim`
@@ -2373,7 +2373,7 @@ Example::
 .. function:: min(input, dim, keepdim=True, min=None, min_indices=None) -> (Tensor, LongTensor)
 
 Returns the minimum value of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
-Also returns the index location of each minimum value found.
+The second return value is the index location of each minimum value found (argmin).
 
 If :attr:`keepdim` is true, the output Tensors are of the same size as :attr:`input`
 except in the dimension :attr:`dim` where they are of size 1.  Otherwise, :attr:`dim`
