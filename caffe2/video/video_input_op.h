@@ -35,13 +35,13 @@ class VideoInputOp final : public PrefetchOperator<Context> {
   bool GetClipAndLabelFromDBValue(
       const std::string& value,
       float*& buffer,
-      float* label_data,
+      int* label_data,
       std::mt19937* randgen);
 
   void DecodeAndTransform(
       const std::string value,
       float* clip_data,
-      float* label_data,
+      int* label_data,
       const int crop_size,
       const bool mirror,
       const float mean,
@@ -176,7 +176,7 @@ template <class Context>
 bool VideoInputOp<Context>::GetClipAndLabelFromDBValue(
     const string& value,
     float*& buffer,
-    float* label_data,
+    int* label_data,
     std::mt19937* randgen) {
   TensorProtos protos;
   CAFFE_ENFORCE(protos.ParseFromString(value));
@@ -186,13 +186,13 @@ bool VideoInputOp<Context>::GetClipAndLabelFromDBValue(
 
   // assign labels
   if (!multiple_label_) {
-    label_data[0] = static_cast<float>(label_proto.int32_data(0));
+    label_data[0] = label_proto.int32_data(0);
   } else {
     // For multiple label case, output label is a binary vector
     // where presented concepts are makred 1
-    memset(label_data, 0, sizeof(float) * num_of_labels_);
+    memset(label_data, 0, sizeof(int) * num_of_labels_);
     for (int i = 0; i < label_proto.int32_data_size(); i++) {
-      label_data[label_proto.int32_data(i)] = 1.f;
+      label_data[label_proto.int32_data(i)] = 1;
     }
   }
 
@@ -276,7 +276,7 @@ template <class Context>
 void VideoInputOp<Context>::DecodeAndTransform(
     const std::string value,
     float* clip_data,
-    float* label_data,
+    int* label_data,
     const int crop_size,
     const bool mirror,
     const float mean,
@@ -316,7 +316,7 @@ bool VideoInputOp<Context>::Prefetch() {
 
   // Call mutable_data() once to allocate the underlying memory.
   prefetched_clip_.mutable_data<float>();
-  prefetched_label_.mutable_data<float>();
+  prefetched_label_.mutable_data<int>();
 
   // Prefetching handled with a thread pool of "decode_threads" threads.
   std::mt19937 meta_randgen(time(nullptr));
@@ -330,7 +330,7 @@ bool VideoInputOp<Context>::Prefetch() {
     std::mt19937* randgen = &randgen_per_thread[item_id % num_decode_threads_];
 
     // get the label data pointer for the item_id -th example
-    float* label_data = prefetched_label_.mutable_data<float>() +
+    int* label_data = prefetched_label_.mutable_data<int>() +
         (multiple_label_ ? num_of_labels_ : 1) * item_id;
 
     // get the clip data pointer for the item_id -th example
