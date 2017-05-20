@@ -32,6 +32,26 @@ class _LRScheduler(object):
 
 
 class LambdaLR(_LRScheduler):
+    """Sets the learning rate of each parameter group to the initial lr
+    times a given function. When last_epoch=-1, sets initial lr as lr.
+
+    Args:
+        optimizer (Optimizer): Wrapped optimizer.
+        lr_lambda (function or list): A function which computes multiplicative
+            factor given an integer parameter epoch, or a list of such functions,
+            one for each group in optimizer.param_groups.
+        last_epoch (int): The index of last epoch. Default: -1.
+
+    Example:
+        >>> # Assuming optimizer has two groups.
+        >>> lambda1 = lambda epoch: epoch // 30
+        >>> lambda2 = lambda epoch: 0.95 ** epoch
+        >>> scheduler = LambdaLR(optimizer, lr_lambda=[lambda1, lambda2])
+        >>> for epoch in range(100):
+        >>>     scheduler.step()
+        >>>     train(...)
+        >>>     validate(...)
+    """
     def __init__(self, optimizer, lr_lambda, last_epoch=-1):
         self.optimizer = optimizer
         if not isinstance(lr_lambda, list) and not isinstance(lr_lambda, tuple):
@@ -51,12 +71,15 @@ class LambdaLR(_LRScheduler):
 
 class StepLR(_LRScheduler):
     """Sets the learning rate of each parameter group to the initial lr
-    decayed by gamma every step_size epochs.
+    decayed by gamma every step_size epochs. When last_epoch=-1, sets
+    initial lr as lr.
 
     Args:
         optimizer (Optimizer): Wrapped optimizer.
         step_size (int): Period of learning rate decay.
         gamma (float): Multiplicative factor of learning rate decay.
+            Default: -0.1.
+        last_epoch (int): The index of last epoch. Default: -1.
 
     Example:
         >>> # Assuming optimizer uses lr = 0.5 for all groups
@@ -83,12 +106,15 @@ class StepLR(_LRScheduler):
 
 class MultiStepLR(_LRScheduler):
     """Set the learning rate of each parameter group to the initial lr decayed
-    by gamma once the number of epoch reaches one of the milestones.
+    by gamma once the number of epoch reaches one of the milestones. When
+    last_epoch=-1, sets initial lr as lr.
 
     Args:
         optimizer (Optimizer): Wrapped optimizer.
         milestones (list): List of epoch indices. Must be increasing.
         gamma (float): Multiplicative factor of learning rate decay.
+            Default: -0.1.
+        last_epoch (int): The index of last epoch. Default: -1.
 
     Example:
         >>> # Assuming optimizer uses lr = 0.5 for all groups
@@ -117,11 +143,12 @@ class MultiStepLR(_LRScheduler):
 
 class ExponentialLR(_LRScheduler):
     """Set the learning rate of each parameter group to the initial lr decayed
-    by gamma every epoch.
+    by gamma every epoch. When last_epoch=-1, sets initial lr as lr.
 
     Args:
         optimizer (Optimizer): Wrapped optimizer.
         gamma (float): Multiplicative factor of learning rate decay.
+        last_epoch (int): The index of last epoch. Default: -1.
     """
 
     def __init__(self, optimizer, gamma, last_epoch=-1):
