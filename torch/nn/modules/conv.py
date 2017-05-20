@@ -376,7 +376,8 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
     composed of several input planes.
 
     This module can be seen as the gradient of Conv1d with respect to its input.
-    It is sometimes (but incorrectly) refered to as a deconvolutional operation.
+    It is also known as a fractionally-strided convolution, an à trous convolution, or
+    a deconvolution (although it is not an actual deconvolution operation).
 
     .. note::
 
@@ -429,7 +430,8 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
     composed of several input planes.
 
     This module can be seen as the gradient of Conv2d with respect to its input.
-    It is sometimes (but incorrectly) refered to as a deconvolutional operation.
+    It is also known as a fractionally-strided convolution, an à trous convolution, or
+    a deconvolution (although it is not an actual deconvolution operation).
 
     | :attr:`stride` controls the stride for the cross-correlation.
     | If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
@@ -531,7 +533,8 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
     and sums over the outputs from all input feature planes.
 
     **This module can be seen as the exact reverse of Conv3d**.
-    It is sometimes (but incorrectly) refered to as a deconvolutional operation.
+    It is also known as a fractionally-strided convolution, an à trous convolution, or
+    a deconvolution (although it is not an actual deconvolution operation).
 
     | :attr:`stride` controls the stride for the cross-correlation.
     | If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
