@@ -3230,6 +3230,14 @@ class TestTorch(TestCase):
         self.assertIsInstance(x[:-1], torch.Size)
         self.assertIsInstance(x + x, torch.Size)
 
+    # unit test for THTensor_(copyTranspose)
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_big_transpose(self):
+        t = torch.rand(456, 789)
+        t1 = t.t().contiguous()
+        t2 = torch.from_numpy(t.numpy().transpose())
+        self.assertEqual(t1, t2)
+
 # Functions to test negative dimension wrapping
 METHOD = 1
 INPLACE_METHOD = 2

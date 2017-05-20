@@ -816,6 +816,8 @@ PyTypeObject THPTensorStatelessType = {
 void THPTensor_(initCopyMethods)()
 {
   auto& h = THTensor_(copy_functions);
+  // copy from same type
+  THPInsertCopyFunction(h, &THTensor_(copy));
   // copy from CPU types
   THPInsertCopyFunction(h, &THTensor_(copyByte));
   THPInsertCopyFunction(h, &THTensor_(copyChar));
