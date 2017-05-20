@@ -106,8 +106,7 @@ class GPUDataParallelModelTest(TestCase):
         def add_input_ops(model):
             pass
 
-        def add_model_ops(model):
-            model = cnn.CNNModelHelper(name="convtest", order="NCHW")
+        def add_model_ops(model, loss_scale):
             model.NHWC2NCHW("data", "data_nchw")
             model.Conv("data_nchw", 'conv1', 3, 64,
                        weight_init=("MSRAFill", {}), kernel=7,
@@ -121,7 +120,11 @@ class GPUDataParallelModelTest(TestCase):
             model.LabelCrossEntropy(['softmax', 'label'], 'xent')
             loss = model.AveragedLoss('xent', 'loss')
 
-            model.AddGradientOperators([loss])
+            # Add a duplicate param init to ensure it does not cause issues
+            model.param_init_net.ConstantFill(
+                [], ["fc_w"], shape=((64 * 56 * 56), 1000)
+            )
+            return [loss]
 
         def add_parameter_update_ops(model):
             model.Iter("ITER")
@@ -137,31 +140,32 @@ class GPUDataParallelModelTest(TestCase):
                     [param_grad, param_momentum, LR, param],
                     [param_grad, param_momentum, param],
                 )
-            model = cnn.CNNModelHelper(
-                order="NHWC",
-                name="test",
-            )
-            data_parallel_model.Parallelize_GPU(
-                model,
-                input_builder_fun=add_input_ops,
-                forward_pass_builder_fun=add_model_ops,
-                param_update_builder_fun=add_parameter_update_ops,
-                devices=[1, 2, 3],
-            )
 
-            # Only gpu_1 params should be returned (gpu_1 is the first gpu)
-            checkpoint_params = data_parallel_model.GetCheckpointParams(model)
-            for p in model.GetParams("gpu_1/"):
-                self.assertTrue(p in checkpoint_params)
-                self.assertTrue(p + "_momentum" in checkpoint_params)
-            for p in model.GetParams("gpu_2/"):
-                self.assertTrue(p in checkpoint_params)
-            for c in model.GetComputedParams("gpu_1/"):
-                self.assertFalse(c in checkpoint_params)
-            for c in model.GetComputedParams("gpu_2/"):
-                self.assertFalse(c in checkpoint_params)
-            self.assertFalse(core.BlobReference("gpu_1/data") in checkpoint_params)
-            self.assertTrue(core.BlobReference("gpu_1/ITER") in checkpoint_params)
+        model = cnn.CNNModelHelper(
+            order="NHWC",
+            name="test",
+        )
+        data_parallel_model.Parallelize_GPU(
+            model,
+            input_builder_fun=add_input_ops,
+            forward_pass_builder_fun=add_model_ops,
+            param_update_builder_fun=add_parameter_update_ops,
+            devices=[1, 2, 3],
+        )
+
+        # Only gpu_1 params should be returned (gpu_1 is the first gpu)
+        checkpoint_params = data_parallel_model.GetCheckpointParams(model)
+        for p in model.GetParams("gpu_1/"):
+            self.assertTrue(p in checkpoint_params)
+            self.assertTrue(p + "_momentum" in checkpoint_params)
+        for p in model.GetParams("gpu_2/"):
+            self.assertFalse(p in checkpoint_params)
+        for c in model.GetComputedParams("gpu_1/"):
+            self.assertTrue(c in checkpoint_params)
+        for c in model.GetComputedParams("gpu_2/"):
+            self.assertFalse(c in checkpoint_params)
+        self.assertFalse(core.BlobReference("gpu_1/data") in checkpoint_params)
+        self.assertTrue(core.BlobReference("gpu_1/ITER") in checkpoint_params)
 
 
 
