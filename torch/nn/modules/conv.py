@@ -81,8 +81,8 @@ class Conv1d(_ConvNd):
     | :attr:`stride` controls the stride for the cross-correlation.
     | If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
       for :attr:`padding` number of points
-    | :attr:`dilation` controls the spacing between the kernel points. It is harder to describe,
-      but this `link`_ has a nice visualization of what :attr:`dilation` does.
+    | :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
+      It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
     | :attr:`groups` controls the connections between inputs and outputs.
     |       At groups=1, all inputs are convolved to all outputs.
     |       At groups=2, the operation becomes equivalent to having two conv layers
@@ -162,8 +162,8 @@ class Conv2d(_ConvNd):
     | :attr:`stride` controls the stride for the cross-correlation.
     | If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
       for :attr:`padding` number of points
-    | :attr:`dilation` controls the spacing between the kernel points. It is harder to describe,
-      but this `link`_ has a nice visualization of what :attr:`dilation` does.
+    | :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
+      It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
     | :attr:`groups` controls the connections between inputs and outputs.
     |       At groups=1, all inputs are convolved to all outputs.
     |       At groups=2, the operation becomes equivalent to having two conv layers
@@ -256,8 +256,8 @@ class Conv3d(_ConvNd):
     | :attr:`stride` controls the stride for the cross-correlation.
     | If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
       for :attr:`padding` number of points
-    | :attr:`dilation` controls the spacing between the kernel points. It is harder to describe,
-      but this `link`_ has a nice visualization of what :attr:`dilation` does.
+    | :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
+      It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
     | :attr:`groups` controls the connections between inputs and outputs.
     |       At groups=1, all inputs are convolved to all outputs.
     |       At groups=2, the operation becomes equivalent to having two conv layers
@@ -376,8 +376,21 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
     composed of several input planes.
 
     This module can be seen as the gradient of Conv1d with respect to its input.
-    It is also known as a fractionally-strided convolution, an à trous convolution, or
+    It is also known as a fractionally-strided convolution or
     a deconvolution (although it is not an actual deconvolution operation).
+
+    | :attr:`stride` controls the stride for the cross-correlation.
+    | If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
+      for :attr:`padding` number of points
+    | If :attr:`output_padding` is non-zero, then the output is implicitly zero-padded on one side
+      for :attr:`output_padding` number of points
+    | :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
+      It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
+    | :attr:`groups` controls the connections between inputs and outputs.
+    |       At groups=1, all inputs are convolved to all outputs.
+    |       At groups=2, the operation becomes equivalent to having two conv layers
+                 side by side, each seeing half the input channels,
+                 and producing half the output channels, and both subsequently concatenated.
 
     .. note::
 
@@ -395,6 +408,7 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
         output_padding (int or tuple, optional): Zero-padding added to one side of the output
         groups (int, optional): Number of blocked connections from input channels to output channels
         bias (bool, optional): If True, adds a learnable bias to the output
+        dilation (int or tuple, optional): Spacing between kernel elements
 
     Shape:
         - Input: :math:`(N, C_{in}, L_{in})`
@@ -430,7 +444,7 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
     composed of several input planes.
 
     This module can be seen as the gradient of Conv2d with respect to its input.
-    It is also known as a fractionally-strided convolution, an à trous convolution, or
+    It is also known as a fractionally-strided convolution or
     a deconvolution (although it is not an actual deconvolution operation).
 
     | :attr:`stride` controls the stride for the cross-correlation.
@@ -438,8 +452,8 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
       for :attr:`padding` number of points
     | If :attr:`output_padding` is non-zero, then the output is implicitly zero-padded on one side
       for :attr:`output_padding` number of points
-    | :attr:`dilation` controls the spacing between the kernel points. It is harder to describe,
-      but this `link`_ has a nice visualization of what :attr:`dilation` does.
+    | :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
+      It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
     | :attr:`groups` controls the connections between inputs and outputs.
     |       At groups=1, all inputs are convolved to all outputs.
     |       At groups=2, the operation becomes equivalent to having two conv layers
@@ -449,7 +463,7 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, :attr:`output_padding`
     can either be:
 
-        - a single ``int`` -- in which case the same value is used for the height and width dimension
+        - a single ``int`` -- in which case the same value is used for the height and width dimensions
         - a ``tuple`` of two ints -- in which case, the first `int` is used for the height dimension,
           and the second `int` for the width dimension
 
@@ -533,7 +547,7 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
     and sums over the outputs from all input feature planes.
 
     **This module can be seen as the exact reverse of Conv3d**.
-    It is also known as a fractionally-strided convolution, an à trous convolution, or
+    It is also known as a fractionally-strided convolution or
     a deconvolution (although it is not an actual deconvolution operation).
 
     | :attr:`stride` controls the stride for the cross-correlation.
@@ -541,6 +555,8 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
       for :attr:`padding` number of points
     | If :attr:`output_padding` is non-zero, then the output is implicitly zero-padded on one side
       for :attr:`output_padding` number of points
+    | :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
+      It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
     | :attr:`groups` controls the connections between inputs and outputs.
     |       At groups=1, all inputs are convolved to all outputs.
     |       At groups=2, the operation becomes equivalent to having two conv layers
@@ -550,7 +566,7 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, :attr:`output_padding`
     can either be:
 
-        - a single ``int`` -- in which case the same value is used for the height and width dimension
+        - a single ``int`` -- in which case the same value is used for the depth, height and width dimensions
         - a ``tuple`` of three ints -- in which case, the first `int` is used for the depth dimension,
           the second `int` for the width dimension and the third `int` for the width dimension
 
