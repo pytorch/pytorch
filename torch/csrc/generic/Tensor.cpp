@@ -507,15 +507,16 @@ static bool THPTensor_(_indexOnce)(PyObject *index, int &indexed_dim,
 
 #ifndef TH_REAL_IS_HALF
 static bool THPTensor_(checkAdvancedIndexing)(THPTensor *indexed, PyObject *arg) {
-  // MVP: ndim LongTensor arguments
+  // MVP: ndim sequence/LongTensor arguments
   long ndim = THTensor_(nDimension)(LIBRARY_STATE indexed->cdata);
 
+  // TODO: should only be list, tuple? why support strings, for example
   if (PySequence_Check(arg)) {
     Py_ssize_t indexers = PySequence_Size(arg);
     if (indexers == ndim) {
       for (Py_ssize_t i = 0; i < indexers; ++i) {
         PyObject *item = PySequence_GetItem(arg, i);
-        if (!THPIndexTensor_Check(item)) {
+        if (!THPIndexTensor_Check(item) && !PySequence_Check(item)) {
           return false;
         }
       }
@@ -562,18 +563,29 @@ static bool THPTensor_(_advancedIndex)(
   // where there are ndim(self) indexing Long Tensors that can be broadcasted
   // and iterated as one
   // TODO: empty indexer?
+  // TODO: handle TH errors macro?
+  // TODO: decref for getitem? other objects
 
   // First, verify that all of the indexers have the same shape, later we will
   // incorporate broadcasting
-  // Also assuming for now they are all 1D, and not 2D, 3D, etc.
   Py_ssize_t size = PySequence_Size(index);
-  THIndexTensor *first = ((THPIndexTensor *)PySequence_GetItem(index, 0))->cdata;
+  std::vector<THPIndexTensor*> indexers;
+
+  // TODO: override error to make more clear?
+  THPIndexTensor *first = (THPIndexTensor *)PyObject_CallFunctionObjArgs(THPLongTensorClass, PySequence_GetItem(index, 0), NULL);
+  if (!first) return false;
+  indexers.push_back(first);
+
   for (Py_ssize_t i = 1; i < size; ++i) {
-    if (!THIndexTensor_(isSameSizeAs)(LIBRARY_STATE first, ((THPIndexTensor *)PySequence_GetItem(index, i))->cdata)) {
+    THPIndexTensor *indexer = (THPIndexTensor *)PyObject_CallFunctionObjArgs(THPLongTensorClass, PySequence_GetItem(index, i), NULL);
+    if (!indexer) return false;
+
+    if (!THIndexTensor_(isSameSizeAs)(LIBRARY_STATE first->cdata, indexer->cdata)) {
       PyErr_Format(PyExc_IndexError,
           "When performing advanced indexing the shapes of the indexing Tensors must be the same");
       return false;
     }
+    indexers.push_back(indexer);
   }
 
   // Our strategy is to view the indexed Tensor as a 1D Tensor, calculate
@@ -581,15 +593,16 @@ static bool THPTensor_(_advancedIndex)(
   // indexSelect using those linear indices
   // TODO: example
 
-  THIndexTensor *linearIndices = THIndexTensor_(newWithSize1d)(LIBRARY_STATE THIndexTensor_(nElement)(LIBRARY_STATE first));
+  THIndexTensor *linearIndices = THIndexTensor_(newWithSize1d)(LIBRARY_STATE THIndexTensor_(nElement)(LIBRARY_STATE first->cdata));
   THLongStorage *indexerSize = THLongStorage_newWithSize(1);
   THLongStorage_set(indexerSize, 0, THIndexTensor_(nElement)(LIBRARY_STATE linearIndices));
 
+  // TODO: fix linear offset calc using strides of tensor rather than manual calculation
   for (ptrdiff_t i = 0; i < THIndexTensor_(nElement)(LIBRARY_STATE linearIndices); ++i) {
     long stride = 1; // is this an incorrect assumption? could the stride at the last dim be non-one?
     long linearIdx = 0;
     for (Py_ssize_t j = PySequence_Size(index) - 1; j >= 0; --j) {
-      THIndexTensor *indexer = ((THPIndexTensor *)PySequence_GetItem(index, j))->cdata;
+      THIndexTensor *indexer = indexers[j]->cdata;
 
       // The indexing tensor might not be one-dimensional, but we are generating a vector of
       // indices, so we need to view the indexer as 1D prior to getting the value for the
@@ -624,12 +637,13 @@ static bool THPTensor_(_advancedIndex)(
   // In the event that the indexing Tensors are not vectors, we need to reshape
   // the result to be the appropriate shape
   THTensor_(resizeNd)(LIBRARY_STATE result,
-                      THIndexTensor_(nDimension)(LIBRARY_STATE first),
-                      first->size,
-                      first->stride);
+                      THIndexTensor_(nDimension)(LIBRARY_STATE first->cdata),
+                      first->cdata->size,
+                      first->cdata->stride);
 
   tresult = result;
 
+  // TODO: free python objects
   THIndexTensor_(free)(LIBRARY_STATE linearIndices);
   THLongStorage_free(sizeAsStorage);
   THTensor_(free)(LIBRARY_STATE viewed);
