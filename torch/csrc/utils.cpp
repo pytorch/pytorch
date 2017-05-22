@@ -99,35 +99,6 @@ std::vector<int> THPUtils_unpackIntTuple(PyObject *arg)
   return values;
 }
 
-bool THPUtils_checkAdvancedIndexing(PyObject *arg) {
-  // Checks whether the specified selection object should trigger advanced
-  // indexing
-
-  // Case 1: arg is a non-tuple sequence object
-  if (PySequence_Check(arg) && !PyTuple_Check(arg)) return true;
-
-#ifdef WITH_NUMPY
-  // Case 2: arg is an nd-array with type integer or bool
-  if (PyArray_Check(arg) && (PyArray_TYPE((PyArrayObject*)arg) == NPY_INT64 || PyArray_TYPE((PyArrayObject*)arg) == NPY_BOOL)) return true;
-#endif
-
-  // Case 3: arg is a tuple containing at least one sequence object or ndarray
-  if (PyTuple_Check(arg)) {
-    for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(arg); ++i) {
-      PyObject *item = PyTuple_GET_ITEM(arg, i);
-      if (PySequence_Check(item)) {
-        return true;
-      }
-      // TODO: add check for LongTensor?
-#ifdef WITH_NUMPY
-      if (PyArray_Check(item) && (PyArray_TYPE((PyArrayObject*)item) == NPY_INT64 || PyArray_TYPE((PyArrayObject*)item) == NPY_BOOL)) return true;
-#endif
-    }
-  }
-
-  return false;
-}
-
 void THPUtils_setError(const char *format, ...)
 {
   static const size_t ERROR_BUFFER_SIZE = 1000;

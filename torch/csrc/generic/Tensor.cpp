@@ -505,14 +505,115 @@ static bool THPTensor_(_indexOnce)(PyObject *index, int &indexed_dim,
   return true;
 }
 
-static bool THPTensor_(_advancedIndex)(THPTensor *self, PyObject *index,
-    THTensorPtr &tresult, THStorage * &sresult, long &storage_offset)
+#ifndef TH_REAL_IS_HALF
+static bool THPTensor_(checkAdvancedIndexing)(THPTensor *indexed, PyObject *arg) {
+  // MVP: ndim LongTensor arguments
+  long ndim = THTensor_(nDimension)(LIBRARY_STATE indexed->cdata);
+
+  if (PySequence_Check(arg)) {
+    Py_ssize_t indexers = PySequence_Size(arg);
+    if (indexers == ndim) {
+      for (Py_ssize_t i = 0; i < indexers; ++i) {
+        PyObject *item = PySequence_GetItem(arg, i);
+        if (!THPIndexTensor_Check(item)) {
+          return false;
+        }
+      }
+      return true;
+    }
+  }
+  return false;
+
+  /**
+  // Checks whether the specified selection object should trigger advanced
+  // indexing
+
+  // Case 1: arg is a non-tuple sequence object
+  if (PySequence_Check(arg) && !PyTuple_Check(arg)) return true;
+
+#ifdef WITH_NUMPY
+  // Case 2: arg is an nd-array with type integer or bool
+  if (PyArray_Check(arg) && (PyArray_TYPE((PyArrayObject*)arg) == NPY_INT64 || PyArray_TYPE((PyArrayObject*)arg) == NPY_BOOL)) return true;
+#endif
+
+  // Case 3: arg is a tuple containing at least one sequence object or ndarray
+  if (PyTuple_Check(arg)) {
+    for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(arg); ++i) {
+      PyObject *item = PyTuple_GET_ITEM(arg, i);
+      if (PySequence_Check(item)) {
+        return true;
+      }
+      // TODO: add check for LongTensor?
+#ifdef WITH_NUMPY
+      if (PyArray_Check(item) && (PyArray_TYPE((PyArrayObject*)item) == NPY_INT64 || PyArray_TYPE((PyArrayObject*)item) == NPY_BOOL)) return true;
+#endif
+    }
+  }
+
+  return false;
+  **/
+}
+
+static bool THPTensor_(_advancedIndex)(
+    PyObject *index, THTensorPtr &tresult, THStorage * &sresult, long &storage_offset)
 {
   // Precondition: index is an object that specifies advanced indexing.
   // For now, we only support the simple integer-array indexing strategy
   // where there are ndim(self) indexing Long Tensors that can be broadcasted
   // and iterated as one
+  // TODO: empty indexer?
 
+  // First, verify that all of the indexers have the same shape, later we will
+  // incorporate broadcasting
+  // Also assuming for now they are all 1D, and not 2D, 3D, etc.
+  Py_ssize_t size = PySequence_Size(index);
+  THIndexTensor *first = ((THPIndexTensor *)PySequence_GetItem(index, 0))->cdata;
+  for (Py_ssize_t i = 1; i < size; ++i) {
+    if (!THIndexTensor_(isSameSizeAs)(LIBRARY_STATE first, ((THPIndexTensor *)PySequence_GetItem(index, i))->cdata)) {
+      PyErr_Format(PyExc_IndexError,
+          "When performing advanced indexing the shapes of the indexing Tensors must be the same");
+      return false;
+    }
+  }
+
+  // Our strategy is to view the indexed Tensor as a 1D Tensor, calculate
+  // the linear indices for each tuple of indexing elements, and then call
+  // indexSelect using those linear indices
+  // TODO: example
+
+  THIndexTensor *linearIndices = THIndexTensor_(newWithSize1d)(LIBRARY_STATE THIndexTensor_(nElement)(LIBRARY_STATE first));
+  for (ptrdiff_t i = 0; i < THIndexTensor_(nElement)(LIBRARY_STATE linearIndices); ++i) {
+    long stride = 1; // is this an incorrect assumption? could the stride at the last dim be non-one?
+    long linearIdx = 0;
+    for (Py_ssize_t j = PySequence_Size(index) - 1; j >= 0; --j) {
+      THIndexTensor *indexer = ((THPIndexTensor *)PySequence_GetItem(index, j))->cdata;
+      linearIdx += stride * THIndexTensor_(get1d)(LIBRARY_STATE indexer, i);
+      stride *= THTensor_(size)(LIBRARY_STATE tresult, j);
+    }
+    THIndexTensor_(set1d)(LIBRARY_STATE linearIndices, i, linearIdx);
+  }
+
+  /* printf("Generated linear indices:"); */
+  /* for (ptrdiff_t i = 0; i < THIndexTensor_(nElement)(LIBRARY_STATE linearIndices); ++i) { */
+  /*   printf(" %ld", THIndexTensor_(get1d)(LIBRARY_STATE linearIndices, i)); */
+  /* } */
+  /* printf("\n"); */
+
+  THLongStorage *sizeAsStorage = THLongStorage_newWithSize(1);
+  THLongStorage_set(sizeAsStorage, 0, THTensor_(nElement)(LIBRARY_STATE tresult));
+  THTensor *viewed = THTensor_(newView)(LIBRARY_STATE tresult, sizeAsStorage);
+
+  THTensor *result = THTensor_(new)(LIBRARY_STATE_NOARGS);
+  THTensor_(indexSelect)(LIBRARY_STATE result, viewed, 0, linearIndices);
+  THTensor_(free)(LIBRARY_STATE tresult);
+  tresult = result;
+
+  THIndexTensor_(free)(LIBRARY_STATE linearIndices);
+  THLongStorage_free(sizeAsStorage);
+  THTensor_(free)(LIBRARY_STATE viewed);
+  return true;
+
+  /**
   Py_ssize_t size = PySequence_Size(index);
   // TODO: assert size == self ndim
 
@@ -529,19 +630,26 @@ static bool THPTensor_(_advancedIndex)(THPTensor *self, PyObject *index,
   // as the broadcast result of the index Tensors
 
   return true;
+  **/
 }
+#endif // TH_REAL_IS_HALF
 
 // Handles indexing into a Tensor given a tuple, ellipses, sequence, etc. index
 static bool THPTensor_(_index)(THPTensor *self, PyObject *index,
     THTensorPtr &tresult, THStorage * &sresult, long &storage_offset)
 {
-  /* THPTensor_(_advancedIndex)(self, index, tresult, sresult, storage_offset); */
-
   // As a base case, we create a new Tensor that is a copy of the Tensor
   // we are indexing
   tresult = THTensor_(newWithTensor)(LIBRARY_STATE self->cdata);
   sresult = NULL;
   int indexed_dim = 0;
+
+  // Check and see if the indexing object triggers advanced indexing semantics
+#ifndef TH_REAL_IS_HALF
+  if (THPTensor_(checkAdvancedIndexing)(self, index)) {
+    return THPTensor_(_advancedIndex)(index, tresult, sresult, storage_offset);
+  }
+#endif // TH_REAL_IS_HALF
 
   if(PyTuple_Check(index)) {
     // num_index_dim is the number of indices in the tuple, num_effective_index
