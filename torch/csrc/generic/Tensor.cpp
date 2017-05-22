@@ -599,7 +599,6 @@ static bool THPTensor_(_advancedIndex)(
 
   // TODO: fix linear offset calc using strides of tensor rather than manual calculation
   for (ptrdiff_t i = 0; i < THIndexTensor_(nElement)(LIBRARY_STATE linearIndices); ++i) {
-    long stride = 1; // is this an incorrect assumption? could the stride at the last dim be non-one?
     long linearIdx = 0;
     for (Py_ssize_t j = PySequence_Size(index) - 1; j >= 0; --j) {
       THIndexTensor *indexer = indexers[j]->cdata;
@@ -608,10 +607,8 @@ static bool THPTensor_(_advancedIndex)(
       // indices, so we need to view the indexer as 1D prior to getting the value for the
       // particular dimension
       THIndexTensor *oned = THIndexTensor_(newView)(LIBRARY_STATE indexer, indexerSize);
-      linearIdx += stride * THIndexTensor_(get1d)(LIBRARY_STATE oned, i);
+      linearIdx += THTensor_(stride)(LIBRARY_STATE tresult, j) * THIndexTensor_(get1d)(LIBRARY_STATE oned, i);
       THIndexTensor_(free)(LIBRARY_STATE oned);
-
-      stride *= THTensor_(size)(LIBRARY_STATE tresult, j);
     }
     THIndexTensor_(set1d)(LIBRARY_STATE linearIndices, i, linearIdx);
   }
