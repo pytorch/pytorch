@@ -135,7 +135,7 @@ class CudaTransfer(Function):
     def forward(ctx, i, device_id=None, async=False):
         ctx.source_device = -1 if not i.is_cuda else i.get_device()
         ctx.source_was_cuda = i.is_cuda
-        if device_id:
+        if device_id is not None:
             return i.cuda(device_id, async=async)
         else:
             return i.cuda(async=async)
