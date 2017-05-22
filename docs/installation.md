@@ -2,7 +2,7 @@
 
 [![Build Status](https://travis-ci.org/caffe2/caffe2.svg?branch=cmake)](https://travis-ci.org/caffe2/caffe2)
 
-    git clone https://github.com/bwasti/caffe2.git
+    git clone https://github.com/caffe2/caffe2.git
     cd caffe2
     
 #### OS X
