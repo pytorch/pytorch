@@ -113,6 +113,10 @@ else()
   endif()
 endif()
 
+if(NOT APPLE AND UNIX)
+  list(APPEND Caffe2_DEPENDENCY_LIBS dl)
+endif()
+
 if (CAFFE2_CPU_FLAGS)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CAFFE2_CPU_FLAGS}")
 endif()
