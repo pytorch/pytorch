@@ -231,16 +231,23 @@ namespace {
 REGISTER_CPU_OPERATOR(LRN, LRNOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(LRNGradient, LRNGradientOp<float, CPUContext>);
 
-OPERATOR_SCHEMA(LRN).NumInputs(1).NumOutputs(2);
-OPERATOR_SCHEMA(LRNGradient).NumInputs(4).NumOutputs(1);
+OPERATOR_SCHEMA(LRN).NumInputs(1).NumOutputs(1,2);
+OPERATOR_SCHEMA(LRNGradient).NumInputs(3,4).NumOutputs(1);
 
 class GetLRNGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
-    return SingleGradientDef(
-        "LRNGradient", "",
-        vector<string>{I(0), O(0), O(1), GO(0)},
-        vector<string>{GI(0)});
+    if (def_.output_size() == 2) {
+      return SingleGradientDef(
+          "LRNGradient", "",
+          vector<string>{I(0), O(0), O(1), GO(0)},
+          vector<string>{GI(0)});
+    } else {
+      return SingleGradientDef(
+          "LRNGradient", "",
+          vector<string>{I(0), O(0), GO(0)},
+          vector<string>{GI(0)});
+    }
   }
 };
 REGISTER_GRADIENT(LRN, GetLRNGradient);
