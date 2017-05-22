@@ -112,9 +112,10 @@ class leak_checker(object):
             # test is no more than 4 higher than the 10th available at the
             # start. This attempts to catch file descriptor leaks, but allows
             # one-off initialization that may use up a file descriptor
-            available_fds = self._get_next_fds(10)
-            self.test_case.assertLessEqual(
-                available_fds[-1] - self.next_fds[-1], 5)
+            # TODO: Disabled because this check is too flaky
+            # available_fds = self._get_next_fds(10)
+            # self.test_case.assertLessEqual(
+            #     available_fds[-1] - self.next_fds[-1], 5)
             self.test_case.assertFalse(self.has_shm_files())
         return False
 

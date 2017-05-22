@@ -30,7 +30,7 @@ class _ContextMethodMixin(object):
         :func:`forward` **method, and all arguments should be inputs.**
 
         Every tensor that's been modified in-place in a call to :func:`forward`
-        should be given to this function, to ensure correcness of our checks.
+        should be given to this function, to ensure correctness of our checks.
         It doesn't matter wheter the function is called before or after
         modification.
         """

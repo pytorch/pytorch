@@ -52,12 +52,16 @@ struct ReadyQueue {
 
 struct GraphTask {
   std::exception_ptr exception;
+  // Indicates if an error occurred while executing any task.  When this is
+  // true, it signals all threads to stop executing.
   std::atomic_bool has_error;
   std::atomic<uint64_t> outstanding_tasks;
   bool keep_graph;
   bool has_any_work;
 
   std::mutex mutex;
+  // Notified when a task finishes executing.  Check outstanding_tasks to see
+  // if all tasks are done.
   std::condition_variable not_done;
   const Engine::callback_map& function_callbacks;
   std::unordered_map<Function*, InputBuffer> not_ready;
