@@ -507,23 +507,28 @@ static bool THPTensor_(_indexOnce)(PyObject *index, int &indexed_dim,
 
 #ifndef TH_REAL_IS_HALF
 static bool THPTensor_(checkAdvancedIndexing)(THPTensor *indexed, PyObject *arg) {
-  // MVP: ndim sequence/LongTensor arguments
+  // Currently we only support the integer-array indexing strategy for advanced
+  // indexing - where we have ndim sequence/LongTensor arguments
+
   long ndim = THTensor_(nDimension)(LIBRARY_STATE indexed->cdata);
 
-  // TODO: should only be list, tuple? why support strings, for example
-  if (PySequence_Check(arg)) {
-    Py_ssize_t indexers = PySequence_Size(arg);
-    if (indexers == ndim) {
-      for (Py_ssize_t i = 0; i < indexers; ++i) {
-        PyObject *item = PySequence_GetItem(arg, i);
-        if (!THPIndexTensor_Check(item) && !PySequence_Check(item)) {
-          return false;
-        }
+  // Verify that all of the inputs are either Tensors or Sequences.
+  if (PySequence_Check(arg) && PySequence_Size(arg) == ndim) {
+    for (Py_ssize_t i = 0; i < ndim; ++i) {
+      PyObject *item = PySequence_GetItem(arg, i);
+      if (!THPIndexTensor_Check(item) && !PySequence_Check(item)) {
+        Py_DECREF(item);
+        return false;
       }
-      return true;
+      Py_DECREF(item);
     }
+    return true;
   }
   return false;
+
+  // Full NumPy advanced indexing requirements are coded up below. To fully support
+  // such indexing will require changes to the actual indexing logic, so we will
+  // leave this commented out as a reference
 
   /**
   // Checks whether the specified selection object should trigger advanced
@@ -537,17 +542,17 @@ static bool THPTensor_(checkAdvancedIndexing)(THPTensor *indexed, PyObject *arg)
   if (PyArray_Check(arg) && (PyArray_TYPE((PyArrayObject*)arg) == NPY_INT64 || PyArray_TYPE((PyArrayObject*)arg) == NPY_BOOL)) return true;
 #endif
 
-  // Case 3: arg is a tuple containing at least one sequence object or ndarray
+  // Case 3: arg is a tuple containing at least one sequence object, ndarray, or LongTensor
   if (PyTuple_Check(arg)) {
     for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(arg); ++i) {
       PyObject *item = PyTuple_GET_ITEM(arg, i);
       if (PySequence_Check(item)) {
         return true;
       }
-      // TODO: add check for LongTensor?
 #ifdef WITH_NUMPY
       if (PyArray_Check(item) && (PyArray_TYPE((PyArrayObject*)item) == NPY_INT64 || PyArray_TYPE((PyArrayObject*)item) == NPY_BOOL)) return true;
 #endif
+      if (THPIndexTensor_Check(item)) return true;
     }
   }
 
@@ -560,18 +565,18 @@ static bool THPTensor_(_advancedIndex)(
 {
   // Precondition: index is an object that specifies advanced indexing.
   // For now, we only support the simple integer-array indexing strategy
-  // where there are ndim(self) indexing Long Tensors that can be broadcasted
-  // and iterated as one
-  // TODO: empty indexer?
-  // TODO: handle TH errors macro?
+  // where there are ndim(self) indexing sequences/LongTensors that can be
+  // broadcasted and iterated as one
+
   // TODO: decref for getitem? other objects
+  // Use *_Fast_* sequence operations?
 
   // First, verify that all of the indexers have the same shape, later we will
   // incorporate broadcasting
   Py_ssize_t size = PySequence_Size(index);
   std::vector<THPIndexTensor*> indexers;
 
-  // TODO: override error to make more clear?
+  // Get a reference to the first indexing object
   THPIndexTensor *first = (THPIndexTensor *)PyObject_CallFunctionObjArgs(THPLongTensorClass, PySequence_GetItem(index, 0), NULL);
   if (!first) return false;
   indexers.push_back(first);
