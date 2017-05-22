@@ -35,3 +35,16 @@ test/.coverage
 */**/*.so*
 */**/*.dylib*
 test/data/legacy_serialized.pt
+
+# IPython notebook checkpoints
+.ipynb_checkpoints
+
+# Editor temporaries
+*.swn
+*.swo
+*.swp
+*~
+
+# OSX dir files
+.DS_Store
+

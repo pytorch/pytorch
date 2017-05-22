@@ -496,7 +496,7 @@ class TestAutograd(TestCase):
         self.assertIsNone(w.grad_fn)
 
     def test_indexing(self):
-        x = torch.arange(1, 17).resize_(4, 4)
+        x = torch.arange(1, 17).view(4, 4)
         y = Variable(x, requires_grad=True)
 
         def check_index(idx):
@@ -526,6 +526,17 @@ class TestAutograd(TestCase):
         check_index(torch.LongTensor([0, 2]))
         check_index(torch.rand(4, 4).bernoulli().byte())
         check_index((Ellipsis, slice(2, None)))
+
+    def test_indexing_duplicates(self):
+        x = torch.arange(1, 17).view(4, 4)
+        y = Variable(x, requires_grad=True)
+
+        idx = torch.LongTensor([1, 1, 3, 2, 1, 2])
+        y[idx].sum().backward()
+        expected_grad = torch.zeros(4, 4)
+        for i in idx:
+            expected_grad[i] += 1
+        self.assertEqual(y.grad.data, expected_grad)
 
     def test_basic_op_grad(self):
         """Grad output might need to be reshaped to match the second argument."""
@@ -867,8 +878,11 @@ class TestAutograd(TestCase):
                 self.assertIs(x2.get_device(), 1)
 
         for t in [torch.DoubleTensor, torch.FloatTensor, torch.IntTensor, torch.ByteTensor]:
-            y = Variable(torch.randn(5, 5).type(t))
-            self.assertIs(type(x.type_as(y).data), t)
+            for var in (True, False):
+                y = torch.randn(5, 5).type(t)
+                if var:
+                    y = Variable(y)
+                self.assertIs(type(x.type_as(y).data), t)
 
     def test_isolated_node(self):
         x = Variable(torch.randn(5, 5), requires_grad=True)

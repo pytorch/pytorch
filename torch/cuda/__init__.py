@@ -96,6 +96,7 @@ def _after_fork(arg):
     if _initialized and _original_pid != os.getpid():
         _initialized = False
         _in_bad_fork = True
+        _CudaBase.__new__ = _lazy_new
 
 
 _register_after_fork(_after_fork, _after_fork)
@@ -260,6 +261,14 @@ if not hasattr(torch._C, 'CudaDoubleStorageBase'):
     torch._C.__dict__['_CudaStreamBase'] = _dummy_type('CudaStreamBase')
 
 
+@staticmethod
+def _lazy_new(cls, *args, **kwargs):
+    _lazy_init()
+    # We need this method only for lazy init, so we can remove it
+    del _CudaBase.__new__
+    return super(_CudaBase, cls).__new__(cls, *args, **kwargs)
+
+
 class _CudaBase(object):
     is_cuda = True
     is_sparse = False
@@ -268,11 +277,7 @@ class _CudaBase(object):
         with device(self.get_device()):
             return super(_CudaBase, self).type(*args, **kwargs)
 
-    def __new__(cls, *args, **kwargs):
-        _lazy_init()
-        # We need this method only for lazy init, so we can remove it
-        del _CudaBase.__new__
-        return super(_CudaBase, cls).__new__(cls, *args, **kwargs)
+    __new__ = _lazy_new
 
 
 class DoubleStorage(_CudaBase, torch._C.CudaDoubleStorageBase, _StorageBase):

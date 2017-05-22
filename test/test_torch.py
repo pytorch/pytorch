@@ -2479,6 +2479,9 @@ class TestTorch(TestCase):
         stride = (10, 360, 90, 1)
         t1.set_(t2.storage(), 0, size, stride)
         self.assertEqual(t1.stride(), stride)
+        t1.set_(t2.storage(), 0, size=size, stride=stride)
+        self.assertEqual(t1.size(), size)
+        self.assertEqual(t1.stride(), stride)
 
     def test_equal(self):
         # Contiguous, 1D

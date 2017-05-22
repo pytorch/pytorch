@@ -22,7 +22,7 @@ auto DelayedError::apply(const variable_list& inputs) -> variable_list {
 };
 
 auto Add::apply(const variable_list& inputs) -> variable_list {
-  if (inputs.size() != 2) throw std::runtime_error("Add expects exactly 2 inputs");
+  check_input_variables("Add", inputs, 2);
   auto& input1 = inputs[0]->data;
   auto& input2 = inputs[1]->data;
   AutoGPU guard(input1->getDevice());
@@ -41,9 +41,8 @@ auto Add::apply(const variable_list& inputs) -> variable_list {
 };
 
 auto AddBackward::apply(const variable_list& grad_outputs) -> variable_list {
-  if (grad_outputs.size() != 1) throw std::runtime_error("AddBackward expects exactly 1 grad_output");
+  check_input_variables("AddBackward", grad_outputs, 1);
   return {grad_outputs[0], grad_outputs[0]};
 };
 
 }} // namespace torch::autograd
-
