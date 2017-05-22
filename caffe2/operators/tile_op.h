@@ -10,7 +10,7 @@
 namespace caffe2 {
 
 // Copy a Blob n times along a specified axis.
-template <typename T, class Context>
+template <class Context>
 class TileOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -35,7 +35,9 @@ class TileOp : public Operator<Context> {
 
       const auto& input1 = Input(1);
       context_.template CopyItems<Context, CPUContext>(
-          input1.meta(), 1, static_cast<const char*>(input1.raw_data()),
+          input1.meta(),
+          1,
+          static_cast<const char*>(input1.raw_data()),
           &(temp_params[0]));
 
       if (InputSize() > 2) {
@@ -45,8 +47,10 @@ class TileOp : public Operator<Context> {
 
         const auto& input2 = Input(2);
         context_.template CopyItems<Context, CPUContext>(
-          input2.meta(), 1, static_cast<const char*>(input2.raw_data()),
-          &(temp_params[1]));
+            input2.meta(),
+            1,
+            static_cast<const char*>(input2.raw_data()),
+            &(temp_params[1]));
       } else {
         CAFFE_ENFORCE(
             OperatorBase::HasArgument("axis"),
@@ -88,19 +92,36 @@ class TileOp : public Operator<Context> {
     const char* input_data = static_cast<const char*>(input.raw_data());
     char* output_data =
         static_cast<char*>(output->raw_mutable_data(input.meta()));
-    for (auto i = 0; i < outer_dim; ++i) {
-      for (auto t = 0; t < tiles_; ++t) {
-        context_.template CopyItems<Context, Context>(
-            input.meta(), inner_dim, input_data, output_data);
-        output_data += inner_dim * input.itemsize();
-      }
-      input_data += inner_dim * input.itemsize();
-    }
+
+    DoTile(
+        input.meta(),
+        input.itemsize(),
+        outer_dim,
+        inner_dim,
+        input_data,
+        output_data);
 
     return true;
   }
 
  private:
+  void DoTile(
+      const TypeMeta& meta,
+      int item_size,
+      int outer_dim,
+      int inner_dim,
+      const char* input_data,
+      char* output_data) {
+    for (auto i = 0; i < outer_dim; ++i) {
+      for (auto t = 0; t < tiles_; ++t) {
+        context_.template CopyItems<Context, Context>(
+            meta, inner_dim, input_data, output_data);
+        output_data += inner_dim * item_size;
+      }
+      input_data += inner_dim * item_size;
+    }
+  }
+
   int32_t tiles_;
   int32_t axis_;
 };
@@ -129,18 +150,22 @@ class TileGradientOp : public Operator<Context> {
 
       const auto& input1 = Input(1);
       context_.template CopyItems<Context, CPUContext>(
-          input1.meta(), 1, static_cast<const char*>(input1.raw_data()),
+          input1.meta(),
+          1,
+          static_cast<const char*>(input1.raw_data()),
           &(temp_params[0]));
 
       if (InputSize() > 2) {
-       CAFFE_ENFORCE(
+        CAFFE_ENFORCE(
             Input(2).ndim() == 1 && Input(2).size() == 1,
             "Input `axis` should be a vector of size 1.");
 
         const auto& input2 = Input(2);
         context_.template CopyItems<Context, CPUContext>(
-          input2.meta(), 1, static_cast<const char*>(input2.raw_data()),
-          &(temp_params[1]));
+            input2.meta(),
+            1,
+            static_cast<const char*>(input2.raw_data()),
+            &(temp_params[1]));
       } else {
         CAFFE_ENFORCE(
             OperatorBase::HasArgument("axis"),
@@ -186,10 +211,29 @@ class TileGradientOp : public Operator<Context> {
     char* output_data =
         static_cast<char*>(output->raw_mutable_data(input.meta()));
 
+    DoTileGradient(
+        input.meta(),
+        input.itemsize(),
+        outer_dim,
+        inner_dim,
+        input_data,
+        output_data);
+
+    return true;
+  }
+
+ private:
+  void DoTileGradient(
+      const TypeMeta& meta,
+      int item_size,
+      int outer_dim,
+      int inner_dim,
+      const char* input_data,
+      char* output_data) {
     for (auto i = 0; i < outer_dim; ++i) {
       context_.template CopyItems<Context, Context>(
-          input.meta(), inner_dim, input_data, output_data);
-      input_data += inner_dim * input.itemsize();
+          meta, inner_dim, input_data, output_data);
+      input_data += inner_dim * item_size;
       for (auto t = 1; t < tiles_; ++t) {
         math::Axpy<T, Context>(
             inner_dim,
@@ -197,15 +241,12 @@ class TileGradientOp : public Operator<Context> {
             reinterpret_cast<const T*>(input_data),
             reinterpret_cast<T*>(output_data),
             &context_);
-        input_data += inner_dim * input.itemsize();
+        input_data += inner_dim * item_size;
       }
-      output_data += inner_dim * input.itemsize();
+      output_data += inner_dim * item_size;
     }
-
-    return true;
   }
 
- private:
   int32_t tiles_;
   int32_t axis_;
 };
