@@ -29,8 +29,8 @@ class _InstanceNorm(_BatchNorm):
             True, self.momentum, self.eps)
 
         # Reshape back
-        self.running_mean.copy_(running_mean.view(b, c).mean(0))
-        self.running_var.copy_(running_var.view(b, c).mean(0))
+        self.running_mean.copy_(running_mean.view(b, c).mean(0, keepdim=False))
+        self.running_var.copy_(running_var.view(b, c).mean(0, keepdim=False))
 
         return out.view(b, c, *input.size()[2:])
 

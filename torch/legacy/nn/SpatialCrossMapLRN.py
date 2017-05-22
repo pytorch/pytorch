@@ -115,7 +115,7 @@ class SpatialCrossMapLRN(Module):
             for n in range(batchSize):
                 torch.mul(gradOutput[n], self.output[n], out=paddedRatioCenter)
                 paddedRatioCenter.div_(self.scale[n])
-                torch.sum(self.paddedRatio.narrow(0, 0, self.size - 1), 0, out=self.accumRatio)
+                torch.sum(self.paddedRatio.narrow(0, 0, self.size - 1), 0, keepdim=False, out=self.accumRatio)
                 for c in range(channels):
                     self.accumRatio.add_(self.paddedRatio[c + self.size - 1])
                     self.gradInput[n][c].addcmul_(-cacheRatioValue, input[n][c], self.accumRatio)
