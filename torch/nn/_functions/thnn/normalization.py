@@ -125,7 +125,7 @@ class CrossMapLRN2d(Function):
                 torch.mul(grad_output[n], output[n], out=padded_ratio_center)
                 padded_ratio_center.div_(self.scale[n])
                 torch.sum(
-                    paddded_ratio.narrow(0, 0, self.size - 1), 0, out=accum_ratio)
+                    paddded_ratio.narrow(0, 0, self.size - 1), 0, keepdim=False, out=accum_ratio)
                 for c in range(channels):
                     accum_ratio.add_(paddded_ratio[c + self.size - 1])
                     grad_input[n][c].addcmul_(-cache_ratio_value, input[n][c],

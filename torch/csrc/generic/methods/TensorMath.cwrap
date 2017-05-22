@@ -497,8 +497,17 @@
         - THTensor* self
         - arg: long dim
           wrap_dim: self
-        - arg: bool keepdim
-          default: "false"
+        - bool keepdim
+    - cname: mean
+      return: argument 0
+      before_call: maybeThrowBackCompatKeepdimWarn("mean");
+      arguments:
+        - arg: THTensor* destination
+          output: True
+        - THTensor* self
+        - arg: long dim
+          wrap_dim: self
+        - CONSTANT false
 ]]
 
 [[
@@ -519,8 +528,18 @@
         - arg: long dim
           wrap_dim: self
         - CONSTANT false
-        - arg: bool keepdim
-          default: "false"
+        - bool keepdim
+    - cname: var
+      return: argument 0
+      before_call: maybeThrowBackCompatKeepdimWarn("var");
+      arguments:
+        - arg: THTensor* destination
+          output: True
+        - THTensor* self
+        - arg: long dim
+          wrap_dim: self
+        - CONSTANT false
+        - CONSTANT false
 ]]
 
 [[
@@ -541,8 +560,18 @@
         - arg: long dim
           wrap_dim: self
         - CONSTANT false
-        - arg: bool keepdim
-          default: "false"
+        - bool keepdim
+    - cname: std
+      return: argument 0
+      before_call: maybeThrowBackCompatKeepdimWarn("std");
+      arguments:
+        - arg: THTensor* destination
+          output: True
+        - THTensor* self
+        - arg: long dim
+          wrap_dim: self
+        - CONSTANT false
+        - CONSTANT false
 ]]
 
 [[
@@ -565,8 +594,18 @@
         - real p
         - arg: long dim
           wrap_dim: self
-        - arg: bool keepdim
-          default: "false"
+        - bool keepdim
+    - cname: norm
+      return: argument 0
+      before_call: maybeThrowBackCompatKeepdimWarn("norm");
+      arguments:
+        - arg: THTensor* destination
+          output: True
+        - THTensor* self
+        - real p
+        - arg: long dim
+          wrap_dim: self
+        - CONSTANT false
 ]]
 
 [[
@@ -856,8 +895,17 @@
         - THTensor* self
         - arg: long dim
           wrap_dim: self
-        - arg: bool keepdim
-          default: "false"
+        - bool keepdim
+    - cname: sum
+      return: argument 0
+      before_call: maybeThrowBackCompatKeepdimWarn("sum");
+      arguments:
+        - arg: THTensor* result
+          output: True
+        - THTensor* self
+        - arg: long dim
+          wrap_dim: self
+        - CONSTANT false
 ]]
 
 [[
@@ -876,8 +924,17 @@
         - THTensor* self
         - arg: long dim
           wrap_dim: self
-        - arg: bool keepdim
-          default: "false"
+        - bool keepdim
+    - cname: prod
+      return: argument 0
+      before_call: maybeThrowBackCompatKeepdimWarn("prod");
+      arguments:
+        - arg: THTensor* result
+          output: True
+        - THTensor* self
+        - arg: long dim
+          wrap_dim: self
+        - CONSTANT false
 ]]
 
 [[

@@ -561,3 +561,23 @@ void setBackCompatBroadcastWarn(bool warn) {
 bool getBackCompatBroadcastWarn() {
   return backCompatBroadcastWarn;
 }
+
+static bool backCompatKeepdimWarn = false;
+
+void setBackCompatKeepdimWarn(bool warn) {
+  backCompatKeepdimWarn = true;
+}
+
+bool getBackCompatKeepdimWarn() {
+  return backCompatKeepdimWarn;
+}
+
+bool maybeThrowBackCompatKeepdimWarn(char *func) {
+  if(getBackCompatKeepdimWarn()) {
+     std::ostringstream ss;
+     ss << "backwards compatibility: call to \"" << func
+        << "\" uses default value for keepdim which has changed default to False.  Consider passing as kwarg.",
+    PyErr_WarnEx(PyExc_UserWarning, ss.str().c_str(), 1);
+  }
+  return true;
+}

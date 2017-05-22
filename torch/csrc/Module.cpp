@@ -502,6 +502,18 @@ static PyObject *THPModule_getBackcompatBroadcastWarn(PyObject *module)
   return getBackCompatBroadcastWarn() ? Py_True : Py_False;
 }
 
+static PyObject *THPModule_setBackcompatKeepdimWarn(PyObject *module, PyObject *arg) {
+  THPUtils_assert(PyBool_Check(arg), "set_backcompat_keepdim_warn expects a bool, "
+          "but got %s", THPUtils_typename(arg));
+  setBackCompatKeepdimWarn(arg == Py_True);
+  Py_RETURN_NONE;
+}
+
+static PyObject *THPModule_getBackcompatKeepdimWarn(PyObject *module)
+{
+  return getBackCompatKeepdimWarn() ? Py_True : Py_False;
+}
+
 #ifdef WITH_CUDA
 extern PyObject * THCPModule_initExtension(PyObject *self);
 extern PyObject * THCPModule_setDevice_wrap(PyObject *self, PyObject *arg);
@@ -563,6 +575,8 @@ static PyMethodDef TorchMethods[] = {
   {"_infer_size",     (PyCFunction)THPModule_inferSize,         METH_VARARGS, NULL},
   {"_set_backcompat_broadcast_warn", (PyCFunction)THPModule_setBackcompatBroadcastWarn, METH_O, NULL},
   {"_get_backcompat_broadcast_warn", (PyCFunction)THPModule_getBackcompatBroadcastWarn, METH_NOARGS, NULL},
+  {"_set_backcompat_keepdim_warn", (PyCFunction)THPModule_setBackcompatKeepdimWarn, METH_O, NULL},
+  {"_get_backcompat_keepdim_warn", (PyCFunction)THPModule_getBackcompatKeepdimWarn, METH_NOARGS, NULL},
   {"get_num_threads", (PyCFunction)THPModule_getNumThreads,     METH_NOARGS,  NULL},
   {"set_num_threads", (PyCFunction)THPModule_setNumThreads,     METH_O,       NULL},
   {"from_numpy",      (PyCFunction)THPModule_fromNumpy,         METH_O,       NULL},

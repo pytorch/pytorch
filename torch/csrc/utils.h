@@ -180,8 +180,11 @@ struct mod_traits<_real, typename std::enable_if<std::is_integral<_real>::value>
 };
 
 void setBackCompatBroadcastWarn(bool warn);
-
 bool getBackCompatBroadcastWarn();
+
+void setBackCompatKeepdimWarn(bool warn);
+bool getBackCompatKeepdimWarn();
+bool maybeThrowBackCompatKeepdimWarn(char *func);
 
 #endif /* _THP_CORE */
 
