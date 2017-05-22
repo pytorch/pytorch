@@ -2500,6 +2500,8 @@ class TestTorch(TestCase):
         # Tests for Integer Array Indexing, Part I - Purely integer array
         # indexing
 
+        # TODO: add test for empty indexer
+
         # Case 1: Purely Integer Array Indexing
         reference = self._consecutive((10))
         self.assertEqual(reference[[0], ], self._consecutive((1)))

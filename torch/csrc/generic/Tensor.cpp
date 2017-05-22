@@ -582,16 +582,27 @@ static bool THPTensor_(_advancedIndex)(
   // TODO: example
 
   THIndexTensor *linearIndices = THIndexTensor_(newWithSize1d)(LIBRARY_STATE THIndexTensor_(nElement)(LIBRARY_STATE first));
+  THLongStorage *indexerSize = THLongStorage_newWithSize(1);
+  THLongStorage_set(indexerSize, 0, THIndexTensor_(nElement)(LIBRARY_STATE linearIndices));
+
   for (ptrdiff_t i = 0; i < THIndexTensor_(nElement)(LIBRARY_STATE linearIndices); ++i) {
     long stride = 1; // is this an incorrect assumption? could the stride at the last dim be non-one?
     long linearIdx = 0;
     for (Py_ssize_t j = PySequence_Size(index) - 1; j >= 0; --j) {
       THIndexTensor *indexer = ((THPIndexTensor *)PySequence_GetItem(index, j))->cdata;
-      linearIdx += stride * THIndexTensor_(get1d)(LIBRARY_STATE indexer, i);
+
+      // The indexing tensor might not be one-dimensional, but we are generating a vector of
+      // indices, so we need to view the indexer as 1D prior to getting the value for the
+      // particular dimension
+      THIndexTensor *oned = THIndexTensor_(newView)(LIBRARY_STATE indexer, indexerSize);
+      linearIdx += stride * THIndexTensor_(get1d)(LIBRARY_STATE oned, i);
+      THIndexTensor_(free)(LIBRARY_STATE oned);
+
       stride *= THTensor_(size)(LIBRARY_STATE tresult, j);
     }
     THIndexTensor_(set1d)(LIBRARY_STATE linearIndices, i, linearIdx);
   }
+  THLongStorage_free(indexerSize);
 
   /* printf("Generated linear indices:"); */
   /* for (ptrdiff_t i = 0; i < THIndexTensor_(nElement)(LIBRARY_STATE linearIndices); ++i) { */
@@ -604,8 +615,19 @@ static bool THPTensor_(_advancedIndex)(
   THTensor *viewed = THTensor_(newView)(LIBRARY_STATE tresult, sizeAsStorage);
 
   THTensor *result = THTensor_(new)(LIBRARY_STATE_NOARGS);
+
+  // Does index select create a copy?
   THTensor_(indexSelect)(LIBRARY_STATE result, viewed, 0, linearIndices);
+
   THTensor_(free)(LIBRARY_STATE tresult);
+
+  // In the event that the indexing Tensors are not vectors, we need to reshape
+  // the result to be the appropriate shape
+  THTensor_(resizeNd)(LIBRARY_STATE result,
+                      THIndexTensor_(nDimension)(LIBRARY_STATE first),
+                      first->size,
+                      first->stride);
+
   tresult = result;
 
   THIndexTensor_(free)(LIBRARY_STATE linearIndices);
