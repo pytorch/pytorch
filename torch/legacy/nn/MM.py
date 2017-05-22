@@ -25,9 +25,9 @@ class MM(Module):
             torch.mm(a, b, out=self.output)
         else:
             if self.transA:
-                a = a.transpose(2, 3)
+                a = a.transpose(1, 2)
             if self.transB:
-                b = b.transpose(2, 3)
+                b = b.transpose(1, 2)
 
             self.output.resize_(a.size(0), a.size(1), b.size(2))
             torch.bmm(a, b, out=self.output)
