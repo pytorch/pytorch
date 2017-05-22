@@ -119,17 +119,17 @@ cudnnStatus_t getWorkspaceSize(cudnnHandle_t handle, const Convolution& conv, cu
 template<typename algo_t>
 size_t getMaxWorkspaceSize(cudnnHandle_t handle, const Convolution& conv, algo_t *algo, int n_algo, THCState* state){
     size_t max_ws_size = 0;
-    size_t max_block = 0;
+    size_t max_block_size = 0;
     size_t total_gpu_mem = 0;
     size_t free_gpu_mem = 0;
     
-    THCudaCheck(THCudaMemGetInfo1(state,&free_gpu_mem,&total_gpu_mem,&max_block));
+    THCudaCheck(THCudaMemGetInfoCached(state,&free_gpu_mem,&total_gpu_mem,&max_block_size));
     
     for(int i=0; i<n_algo; i++) {
         cudnnStatus_t err;
         size_t sz;
         err = getWorkspaceSize(handle, conv, algo[i], &sz);
-        if(CUDNN_STATUS_SUCCESS != err || sz == 0 || sz < max_ws_size || sz > max_block) continue;
+        if(CUDNN_STATUS_SUCCESS != err || sz == 0 || sz < max_ws_size || sz > max_block_size) continue;
         max_ws_size = sz;
     }
     return max_ws_size;
@@ -147,14 +147,14 @@ struct algorithm_search<cudnnConvolutionFwdAlgo_t> {
     int algoCount;
     cudnnConvolutionFwdAlgoPerf_t perfResults;
     cudnnConvolutionFwdAlgo_t algo[] = {
-	    CUDNN_CONVOLUTION_FWD_ALGO_GEMM,
-	    CUDNN_CONVOLUTION_FWD_ALGO_FFT,
-	    CUDNN_CONVOLUTION_FWD_ALGO_FFT_TILING,
-	    CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_GEMM,
-	    CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM,
-	    CUDNN_CONVOLUTION_FWD_ALGO_DIRECT,
-            CUDNN_CONVOLUTION_FWD_ALGO_WINOGRAD,
-            CUDNN_CONVOLUTION_FWD_ALGO_WINOGRAD_NONFUSED
+         CUDNN_CONVOLUTION_FWD_ALGO_GEMM,
+         CUDNN_CONVOLUTION_FWD_ALGO_FFT,
+         CUDNN_CONVOLUTION_FWD_ALGO_FFT_TILING,
+         CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_GEMM,
+         CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM,
+         CUDNN_CONVOLUTION_FWD_ALGO_DIRECT,
+         CUDNN_CONVOLUTION_FWD_ALGO_WINOGRAD,
+         CUDNN_CONVOLUTION_FWD_ALGO_WINOGRAD_NONFUSED
     };
     size_t max_ws_size = getMaxWorkspaceSize<cudnnConvolutionFwdAlgo_t>(handle,conv,algo,sizeof(algo)/sizeof(algo[0]),state);
     Workspace ws(state, max_ws_size);
