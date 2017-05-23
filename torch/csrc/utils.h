@@ -161,7 +161,7 @@ struct THPUtils_typeTraits {};
 #include "generic/utils.h"
 #include <TH/THGenerateHalfType.h>
 
-THLongStoragePtr THPUtils_unpackSize(PyObject *arg);
+THLongStorage* THPUtils_unpackSize(PyObject *arg);
 bool THPUtils_tryUnpackLongs(PyObject *arg, THLongStoragePtr& result);
 bool THPUtils_tryUnpackLongVarArgs(PyObject *args, int ignore_first, THLongStoragePtr& result);
 PyObject * THPUtils_dispatchStateless(PyObject *tensor, const char *name, PyObject *args, PyObject *kwargs);

@@ -37,7 +37,7 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
   HANDLE_TH_ERRORS
   Py_ssize_t num_args = args ? PyTuple_Size(args) : 0;
 
-  THPStoragePtr self = (THPStorage *)type->tp_alloc(type, 0);
+  THPStoragePtr self((THPStorage *)type->tp_alloc(type, 0));
   THPUtils_assert(self, "failed to allocate a " THPStorageStr " object");
   THAllocator* allocator = NULL;
 
@@ -113,7 +113,7 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
         size, numel - offset, offset);
 
     real *data_ptr = storage_arg->cdata->data + offset;
-    THStoragePtr storage = THStorage_(newWithData)(LIBRARY_STATE data_ptr, size);
+    THStoragePtr storage(THStorage_(newWithData)(LIBRARY_STATE data_ptr, size));
     storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_VIEW;
     storage->view = storage_arg->cdata;
     THStorage_(retain)(LIBRARY_STATE storage_arg->cdata);
@@ -197,7 +197,7 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
     }
 
     real *data = THStorage_(data)(LIBRARY_STATE self->cdata);
-    THStoragePtr new_storage = THStorage_(newWithData)(LIBRARY_STATE data + start, slicelength);
+    THStoragePtr new_storage(THStorage_(newWithData)(LIBRARY_STATE data + start, slicelength));
     new_storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_VIEW;
     new_storage->view = self->cdata;
     THStorage_(retain)(LIBRARY_STATE self->cdata);

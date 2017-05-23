@@ -25,7 +25,7 @@ PyObject * THPSize_New(int dim, long *sizes)
 
 static PyObject * THPSize_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
-  THPObjectPtr self = PyTuple_Type.tp_new(type, args, kwargs);
+  THPObjectPtr self(PyTuple_Type.tp_new(type, args, kwargs));
   if (self) {
     for (Py_ssize_t i = 0; i < PyTuple_Size(self); ++i) {
       PyObject *item = PyTuple_GET_ITEM(self.get(), i);

@@ -13,7 +13,7 @@
 using thpp::Tensor;
 using torch::autograd::variable_list;
 
-static THPObjectPtr wrap_variables(const variable_list& c_variables);
+static PyObject* wrap_variables(const variable_list& c_variables);
 static variable_list unwrap_variables(PyObject* py_variables);
 static std::string hook_name(PyObject* hook);
 static void check_result(PyObject* original, PyObject* result, PyObject* hook);
@@ -38,13 +38,13 @@ auto PyFunctionPreHook::operator()(const variable_list& values) -> variable_list
 {
   AutoGIL gil;
 
-  THPObjectPtr value = THPVariable_Wrap(values.at(value_idx));
+  THPObjectPtr value(THPVariable_Wrap(values.at(value_idx)));
   if (!value) throw python_error();
 
   PyObject *key, *hook;
   Py_ssize_t pos = 0;
   while (PyDict_Next(dict, &pos, &key, &hook)) {
-    THPObjectPtr res = PyObject_CallFunctionObjArgs(hook, value.get(), nullptr);
+    THPObjectPtr res(PyObject_CallFunctionObjArgs(hook, value.get(), nullptr));
     if (!res) throw python_error();
     if (res == Py_None) continue;
     check_single_result(value.get(), res.get(), hook);
@@ -71,14 +71,14 @@ auto PyFunctionPostHook::operator()(
 {
   AutoGIL gil;
 
-  THPObjectPtr outputs = wrap_variables(_outputs);
-  THPObjectPtr inputs = wrap_variables(_inputs);
+  THPObjectPtr outputs(wrap_variables(_outputs));
+  THPObjectPtr inputs(wrap_variables(_inputs));
 
   PyObject *key, *hook;
   Py_ssize_t pos = 0;
   while (PyDict_Next(dict, &pos, &key, &hook)) {
-    THPObjectPtr res = PyObject_CallFunctionObjArgs(
-        hook, outputs.get(), inputs.get(), nullptr);
+    THPObjectPtr res(PyObject_CallFunctionObjArgs(
+        hook, outputs.get(), inputs.get(), nullptr));
     if (!res) throw python_error();
     if (res == Py_None) continue;
     check_result(outputs, res, hook);
@@ -91,17 +91,17 @@ auto PyFunctionPostHook::operator()(
 }} // namespace torch::autograd
 
 
-static THPObjectPtr wrap_variables(const variable_list& c_variables)
+static PyObject *wrap_variables(const variable_list& c_variables)
 {
   size_t num_vars = c_variables.size();
-  THPObjectPtr tuple = PyTuple_New(num_vars);
+  THPObjectPtr tuple(PyTuple_New(num_vars));
   if (!tuple) throw python_error();
   for (size_t i = 0; i < num_vars; ++i) {
-    THPObjectPtr var = THPVariable_Wrap(c_variables[i]);
+    THPObjectPtr var(THPVariable_Wrap(c_variables[i]));
     if (!var) throw python_error();
     PyTuple_SET_ITEM(tuple.get(), i, var.release());
   }
-  return tuple;
+  return tuple.release();
 }
 
 static variable_list unwrap_variables(PyObject* py_variables)  {
@@ -185,7 +185,7 @@ static void check_single_result(PyObject* _original, PyObject* _result, PyObject
 }
 
 static std::string hook_name(PyObject* hook) {
-  THPObjectPtr name = PyObject_GetAttrString(hook, "__name__");
+  THPObjectPtr name(PyObject_GetAttrString(hook, "__name__"));
   if (name && THPUtils_checkString(name.get())) {
     return THPUtils_unpackString(name.get());
   }

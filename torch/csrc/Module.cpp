@@ -63,7 +63,7 @@ static PyObject * THPModule_initNames(PyObject *self, PyObject *arg)
 {
   static std::vector<std::string> names;
 
-  THPObjectPtr types = PySequence_Fast(arg, "expected a sequence");
+  THPObjectPtr types(PySequence_Fast(arg, "expected a sequence"));
   if (!types) return NULL;
 
   int num_classes = PySequence_Fast_GET_SIZE(types.get());
@@ -73,7 +73,7 @@ static PyObject * THPModule_initNames(PyObject *self, PyObject *arg)
     THPUtils_assert(PyType_Check(obj), "expected a PyTypeObject");
     PyTypeObject* type = (PyTypeObject*)obj;
 
-    THPObjectPtr module_name = PyObject_GetAttrString(obj, "__module__");
+    THPObjectPtr module_name(PyObject_GetAttrString(obj, "__module__"));
     if (!module_name) return NULL;
     THPUtils_assert(THPUtils_checkString(module_name.get()),
         "expected __module__ to be a string");

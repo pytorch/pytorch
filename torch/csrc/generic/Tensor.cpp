@@ -49,7 +49,7 @@ PyObject * THPTensor_(New)(THTensor *tensor)
 
 static THTensor* THPTensor_(_new)()
 {
-  THTensorPtr tensor = THTensor_(new)(LIBRARY_STATE_NOARGS);
+  THTensorPtr tensor(THTensor_(new)(LIBRARY_STATE_NOARGS));
   if (!tensor->storage) {
     tensor->storage = THStorage_(new)(LIBRARY_STATE_NOARGS);
   }
@@ -58,7 +58,7 @@ static THTensor* THPTensor_(_new)()
 
 static THTensor* THPTensor_(_newWithSize)(THLongStorage *size)
 {
-  THTensorPtr tensor = THTensor_(newWithSize)(LIBRARY_STATE size, NULL);
+  THTensorPtr tensor(THTensor_(newWithSize)(LIBRARY_STATE size, NULL));
   if (!tensor->storage) {
     tensor->storage = THStorage_(new)(LIBRARY_STATE_NOARGS);
   }
@@ -107,13 +107,13 @@ THTensor* THPTensor_(fromNumpy)(PyObject *numpy_array) {
   if (PyArray_SIZE(array) != 0) {
     auto ndim = PyArray_NDIM(array);
     size_t storage_size = 1;
-    THLongStoragePtr sizes = THLongStorage_newWithSize(ndim);
+    THLongStoragePtr sizes(THLongStorage_newWithSize(ndim));
     long *sizes_data = sizes->data;
     for (int i = 0; i < ndim; ++i) {
       sizes_data[i] = PyArray_DIM(array, i);
     }
 
-    THLongStoragePtr strides = THLongStorage_newWithSize(ndim);
+    THLongStoragePtr strides(THLongStorage_newWithSize(ndim));
     long *strides_data = strides->data;
     for (int i = 0; i < ndim; ++i) {
       // numpy uses bytes, torch uses elements
@@ -130,15 +130,15 @@ THTensor* THPTensor_(fromNumpy)(PyObject *numpy_array) {
       storage_size += strides_data[i] * (sizes_data[i] - 1);
     }
 
-    THStoragePtr storage = THStorage_(newWithDataAndAllocator)(
+    THStoragePtr storage(THStorage_(newWithDataAndAllocator)(
         (real*)PyArray_DATA(array),
         storage_size,
         &THNumpyArrayAllocator,
-        new NumpyArrayAllocator(numpy_array));
+        new NumpyArrayAllocator(numpy_array)));
     THTensor *result = THTensor_(newWithStorage)(storage, 0, sizes, strides);
     return result;
   } else {
-    THStoragePtr storage = THStorage_(new)();
+    THStoragePtr storage(THStorage_(new)());
     THTensor *result = THTensor_(newWithStorage)(storage, 0, NULL, NULL);
     return result;
   }
@@ -150,7 +150,7 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
   HANDLE_TH_ERRORS
   Py_ssize_t num_args = args ? PyTuple_Size(args) : 0;
 
-  THPTensorPtr self = (THPTensor *)type->tp_alloc(type, 0);
+  THPTensorPtr self((THPTensor *)type->tp_alloc(type, 0));
   if (!self) {
     return NULL;
   }
@@ -209,7 +209,7 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
 
   // torch.Tensor(torch.Size sizes)
   if (num_args == 1 && THPSize_Check(first_arg)) {
-    THLongStoragePtr sizes = THPUtils_unpackSize(first_arg);
+    THLongStoragePtr sizes(THPUtils_unpackSize(first_arg));
     self->cdata = THPTensor_(_newWithSize)(sizes.get());
     return (PyObject *)self.release();
   }
@@ -226,8 +226,8 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
   // torch.Tensor(np.ndarray array)
   if (num_args == 1 && PyArray_Check(first_arg) &&
       PyArray_TYPE((PyArrayObject*)first_arg) == NUMPY_TYPE_ENUM) {
-    THPObjectPtr numpy_array =
-      PyArray_FromArray((PyArrayObject*)first_arg, nullptr, NPY_ARRAY_BEHAVED);
+    THPObjectPtr numpy_array(
+      PyArray_FromArray((PyArrayObject*)first_arg, nullptr, NPY_ARRAY_BEHAVED));
     self->cdata = THPTensor_(fromNumpy)(numpy_array.get());
     if (!self->cdata)
         return NULL;
@@ -246,7 +246,7 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
     }
 
     Py_INCREF(first_arg);
-    THPObjectPtr item = first_arg;
+    THPObjectPtr item(first_arg);
     std::vector<size_t> sizes;
     while ((length = PySequence_Length(item)) >= 0) {
       sizes.push_back(length);
@@ -264,11 +264,11 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
     // Last length check has set an error flag, so we need to clear it.
     PyErr_Clear();
 
-    THLongStoragePtr sizes_storage = THLongStorage_newWithSize(sizes.size());
+    THLongStoragePtr sizes_storage(THLongStorage_newWithSize(sizes.size()));
     long *sizes_data = sizes_storage->data;
     for (auto size: sizes)
       *sizes_data++ = size;
-    THTensorPtr tensor = THTensor_(newWithSize)(LIBRARY_STATE sizes_storage, NULL);
+    THTensorPtr tensor(THTensor_(newWithSize)(LIBRARY_STATE sizes_storage, NULL));
 
     int ndims = sizes.size();
     std::vector<size_t> indices(ndims);
@@ -574,13 +574,13 @@ static PyObject * THPTensor_(getValue)(THPTensor *self, PyObject *index)
   THCPAutoGPU __gpu_guard(NULL, (PyObject*)self);
 #endif
   if (mask) {
-    THTensorPtr t = THTensor_(new)(LIBRARY_STATE_NOARGS);
+    THTensorPtr t(THTensor_(new)(LIBRARY_STATE_NOARGS));
     THTensor_(maskedSelect)(LIBRARY_STATE t.get(), self->cdata, mask->cdata);
     return THPTensor_(New)(t.release());
   }
   if (THPIndexTensor_Check(index)) {
     THIndexTensor *index_t = ((THPIndexTensor*)index)->cdata;
-    THTensorPtr index_result = THTensor_(new)(LIBRARY_STATE_NOARGS);
+    THTensorPtr index_result(THTensor_(new)(LIBRARY_STATE_NOARGS));
     THTensor_(indexSelect)(LIBRARY_STATE index_result.get(), self->cdata, 0, index_t);
     return THPTensor_(New)(index_result.release());
   }
@@ -675,7 +675,7 @@ static int THPTensor_(setValue)(THPTensor *self, PyObject *index, PyObject *valu
 #endif
     } else {
       // TODO: try to do this without creating a temporary object
-      THPTensorPtr tmp = (THPTensor*)THPTensor_(New)(tresult.release());
+      THPTensorPtr tmp((THPTensor*)THPTensor_(New)(tresult.release()));
       if (!tmp)
         return -1;
       if (!THPCopy(THTensor_(copy_functions), (PyObject*)tmp.get(), value, false)) {

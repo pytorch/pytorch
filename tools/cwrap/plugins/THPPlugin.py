@@ -127,7 +127,7 @@ PyObject * $name(PyObject *self, PyObject *args, PyObject *kwargs)
     """)
 
     ALLOCATE_TMPL = Template("""\
-THP${type}TensorPtr _${name}_guard = (THP${type}Tensor*) THP${type}Tensor_NewEmpty();
+THP${type}TensorPtr _${name}_guard((THP${type}Tensor*) THP${type}Tensor_NewEmpty());
 if (!_${name}_guard.get()) return NULL;
 THP${type}Tensor* $name = _${name}_guard.get();
 """)
