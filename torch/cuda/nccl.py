@@ -157,10 +157,12 @@ def all_reduce(inputs, outputs=None, op=SUM):
                     count, data_type, op, comm[i], cudaStream()))
 
 
-def reduce(inputs, outputs=None, root=0, op=SUM):
+def reduce(inputs, outputs=None, root=0, op=SUM, streams=None):
     assert(root >= 0 and root < len(inputs))
     if outputs is None:
         outputs = inputs
+    if streams is None:
+        streams = [None] * len(inputs)
     _check_inputs(inputs, outputs)
     comm = communicator(inputs)
     count = inputs[0].numel()
@@ -171,7 +173,7 @@ def reduce(inputs, outputs=None, root=0, op=SUM):
                 check_error(lib.ncclReduce(
                     ctypes.c_void_p(inputs[i].data_ptr()),
                     ctypes.c_void_p(outputs[i].data_ptr()), count,
-                    data_type, op, root, comm[i], cudaStream()))
+                    data_type, op, root, comm[i], streams[i]))
 
 
 def broadcast(inputs, root=0):

@@ -92,7 +92,7 @@ def reduce_add(inputs, destination=None):
 
     if nccl.is_available(inputs) and inputs[0].get_device() == destination:
         outputs = [result] + [t.new(t.size()) for t in inputs[1:]]
-        nccl.reduce(inputs, outputs)
+        nccl.reduce(inputs, outputs, root=destination)
         return result
 
     for inp in inputs:
