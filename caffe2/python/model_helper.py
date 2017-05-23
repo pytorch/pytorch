@@ -318,32 +318,6 @@ class ModelHelper(object):
         return self.net.TensorProtosDBInput(
             dbreader, blob_out, batch_size=batch_size)
 
-    def AddOperator(self, op_type, inputs, parameters, *args, **kwargs):
-        """
-        Adds an operator to a model. Use parameters list
-        to specify which operator inputs are model parameters to be
-        optimized.
-
-        Example of usage:
-
-        model.SparseLengthsSum(
-             [embedding, indices, lengths],
-             parameters=[embedding],
-        )
-
-        Here embedding is a parameter to be optimized while indices
-        and lengths are not.
-        """
-
-        extra_parameters = filter(lambda x: (x not in inputs), parameters)
-        if len(extra_parameters) > 0:
-            raise Exception("Some parameters are not inputs: {}".format(
-                map(str, extra_parameters)
-            ))
-
-        self.params.extend(parameters)
-        return self.net.__getattr__(op_type)(inputs, *args, **kwargs)
-
     def GetDevices(self):
         assert len(self._devices) > 0, \
             "Use data_parallel_model to run model on multiple GPUs."
