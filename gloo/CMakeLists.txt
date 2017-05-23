@@ -52,6 +52,16 @@ if(FALSE)
   endforeach()
 endif()
 
+# Write configuration header.
+# Set variables so macros have GLOO_ prefix.
+set(GLOO_USE_CUDA ${USE_CUDA})
+set(GLOO_USE_REDIS ${USE_REDIS})
+set(GLOO_USE_IBVERBS ${USE_IBVERBS})
+configure_file(config.h.in config.h)
+
+# Prepend include path so that generated config.h is picked up.
+include_directories(BEFORE ${CMAKE_BINARY_DIR})
+
 add_library(gloo ${GLOO_STATIC_OR_SHARED} ${GLOO_SRCS})
 target_link_libraries(gloo ${gloo_DEPENDENCY_LIBS})
 if(USE_CUDA)
@@ -77,6 +87,8 @@ if(GLOO_INSTALL)
   if(USE_CUDA)
     install(TARGETS gloo_cuda DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)
   endif()
+  install(FILES ${CMAKE_BINARY_DIR}/gloo/config.h
+    DESTINATION ${CMAKE_INSTALL_PREFIX}/include/gloo)
   foreach(HEADER ${GLOO_HDRS})
     string(REGEX MATCH "(.*)[/\\]" DIR ${HEADER})
     string(REGEX REPLACE "${CMAKE_CURRENT_SOURCE_DIR}" "gloo" DIR ${DIR})

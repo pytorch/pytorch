@@ -14,7 +14,13 @@
 
 #include <infiniband/verbs.h>
 
+#include "gloo/config.h"
 #include "gloo/transport/device.h"
+
+// Check that configuration header was properly generated
+#if !GLOO_USE_IBVERBS
+#error "Expected GLOO_USE_IBVERBS to be defined"
+#endif
 
 namespace gloo {
 namespace transport {

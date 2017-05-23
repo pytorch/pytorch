@@ -18,7 +18,13 @@
 #include <hiredis.h>
 #endif
 
+#include "gloo/config.h"
 #include "gloo/rendezvous/store.h"
+
+// Check that configuration header was properly generated
+#if !GLOO_USE_REDIS
+#error "Expected GLOO_USE_REDIS to be defined"
+#endif
 
 namespace gloo {
 namespace rendezvous {

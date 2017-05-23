@@ -16,7 +16,13 @@
 #include <cuda_runtime.h>
 
 #include "gloo/algorithm.h"
+#include "gloo/config.h"
 #include "gloo/common/logging.h"
+
+// Check that configuration header was properly generated
+#if !GLOO_USE_CUDA
+#error "Expected GLOO_USE_CUDA to be defined"
+#endif
 
 namespace gloo {
 
