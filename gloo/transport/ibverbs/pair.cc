@@ -248,6 +248,7 @@ void Pair::sendMemoryRegion(struct ibv_mr* src, int slot) {
   // Keep memory region around until this send operation completes.
   // They are posted in FIFO order, but may complete in arbitrary order.
   // Therefore we store them in a map keyed on the buffer slot.
+  GLOO_ENFORCE_EQ(mappedSendRegions_.count(slot), 0);
   mappedSendRegions_[slot] = std::move(mr);
 }
 
@@ -283,6 +284,8 @@ void Pair::postReceive() {
 
 std::unique_ptr<::gloo::transport::Buffer>
 Pair::createSendBuffer(int slot, void* ptr, size_t size) {
+  std::unique_lock<std::mutex> lock(m_);
+  GLOO_ENFORCE_EQ(sendCompletionHandlers_.count(slot), 0);
   auto buffer = new Buffer(this, slot, ptr, size);
   sendCompletionHandlers_[slot] = buffer;
   return std::unique_ptr<::gloo::transport::Buffer>(buffer);
@@ -290,6 +293,8 @@ Pair::createSendBuffer(int slot, void* ptr, size_t size) {
 
 std::unique_ptr<::gloo::transport::Buffer>
 Pair::createRecvBuffer(int slot, void* ptr, size_t size) {
+  std::unique_lock<std::mutex> lock(m_);
+  GLOO_ENFORCE_EQ(recvCompletionHandlers_.count(slot), 0);
   auto buffer = new Buffer(this, slot, ptr, size);
   recvCompletionHandlers_[slot] = buffer;
   sendMemoryRegion(buffer->mr_, buffer->slot_);
@@ -319,6 +324,7 @@ void Pair::handleCompletionEvent() {
     GLOO_ENFORCE_EQ(rv, 0);
 
     // Now poll for work completions to drain the completion queue.
+    std::unique_lock<std::mutex> lock(m_);
     pollCompletions();
   } catch (const ::gloo::IoException&) {
     // Catch IO exceptions on the event handling thread. The exception has
@@ -326,6 +332,10 @@ void Pair::handleCompletionEvent() {
   }
 }
 
+// Polls this pair's completion queue for work completions. When
+// called from the device thread, this pair's mutex has already been
+// acquired. When called from the user thread, the mutex won't be
+// acquired (since there's only a single thread using this pair).
 void Pair::pollCompletions() {
   std::array<struct ibv_wc, kCompletionQueueCapacity> wc;
 
@@ -407,7 +417,6 @@ void Pair::handleCompletion(struct ibv_wc* wc) {
       ibv_wc_status_str(wc->status));
 
     {
-      std::lock_guard<std::mutex> lock(m_);
       GLOO_ENFORCE_GT(mappedRecvRegions_.size(), 0);
       auto mr = std::move(mappedRecvRegions_.front());
       mappedRecvRegions_.pop_front();
@@ -429,6 +438,8 @@ void Pair::handleCompletion(struct ibv_wc* wc) {
       ": ",
       ibv_wc_status_str(wc->status));
 
+    GLOO_ENFORCE_GT(mappedSendRegions_.size(), 0);
+    GLOO_ENFORCE_EQ(mappedSendRegions_.count(slot), 1);
     mappedSendRegions_.erase(slot);
   } else {
     GLOO_ENFORCE(false, "Unexpected completion with opcode: ", wc->opcode);
