@@ -82,12 +82,17 @@ ContextFactory::ContextFactory(std::shared_ptr<::gloo::Context> backingContext)
   }
 
   auto slot = backingContext_->nextSlot();
+  auto notificationSlot = backingContext_->nextSlot();
 
   // Create buffers we'll later use to communicate pair addresses
   recvData_.resize(backingContext_->size);
   sendData_.resize(backingContext_->size);
   recvBuffers_.resize(backingContext_->size);
   sendBuffers_.resize(backingContext_->size);
+  recvNotificationData_.resize(backingContext_->size);
+  sendNotificationData_.resize(backingContext_->size);
+  recvNotificationBuffers_.resize(backingContext_->size);
+  sendNotificationBuffers_.resize(backingContext_->size);
   for (auto i = 0; i < backingContext_->size; i++) {
     if (i == backingContext_->rank) {
       continue;
@@ -97,14 +102,30 @@ ContextFactory::ContextFactory(std::shared_ptr<::gloo::Context> backingContext)
     recvData_[i].resize(kMaxAddressSize);
     sendData_[i].resize(kMaxAddressSize);
 
-    // Create pairs
+    // Create pair
     auto& pair = backingContext_->getPair(i);
-    auto recvPtr = recvData_[i].data();
-    auto recvSize = recvData_[i].size();
-    recvBuffers_[i] = pair->createRecvBuffer(slot, recvPtr, recvSize);
-    auto sendPtr = sendData_[i].data();
-    auto sendSize = sendData_[i].size();
-    sendBuffers_[i] = pair->createSendBuffer(slot, sendPtr, sendSize);
+
+    // Create payload buffers
+    {
+      auto recvPtr = recvData_[i].data();
+      auto recvSize = recvData_[i].size();
+      recvBuffers_[i] = pair->createRecvBuffer(slot, recvPtr, recvSize);
+      auto sendPtr = sendData_[i].data();
+      auto sendSize = sendData_[i].size();
+      sendBuffers_[i] = pair->createSendBuffer(slot, sendPtr, sendSize);
+    }
+
+    // Create notification buffers
+    {
+      auto recvPtr = &recvNotificationData_[i];
+      auto recvSize = sizeof(*recvPtr);
+      recvNotificationBuffers_[i] =
+        pair->createRecvBuffer(notificationSlot, recvPtr, recvSize);
+      auto sendPtr = &sendNotificationData_[i];
+      auto sendSize = sizeof(*sendPtr);
+      sendNotificationBuffers_[i] =
+        pair->createSendBuffer(notificationSlot, sendPtr, sendSize);
+    }
   }
 }
 
@@ -145,6 +166,18 @@ std::shared_ptr<::gloo::Context> ContextFactory::makeContext(
     auto& data = recvData_[i];
     auto address = std::vector<char>(&data[0], &data[addressSize]);
     pairs[i]->connect(address);
+
+    // Notify peer that we've consumed the payload
+    sendNotificationBuffers_[i]->send();
+  }
+
+  // Wait for notification from peers
+  for (auto i = 0; i < context->size; i++) {
+    if (i == context->rank) {
+      continue;
+    }
+
+    recvNotificationBuffers_[i]->waitRecv();
   }
 
   context->setPairs(std::move(pairs));

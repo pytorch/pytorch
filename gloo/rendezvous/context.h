@@ -52,6 +52,12 @@ class ContextFactory {
 
   std::vector<std::unique_ptr<transport::Buffer>> recvBuffers_;
   std::vector<std::unique_ptr<transport::Buffer>> sendBuffers_;
+
+  std::vector<int> recvNotificationData_;
+  std::vector<std::unique_ptr<transport::Buffer>> recvNotificationBuffers_;
+
+  std::vector<int> sendNotificationData_;
+  std::vector<std::unique_ptr<transport::Buffer>> sendNotificationBuffers_;
 };
 
 
