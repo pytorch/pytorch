@@ -109,7 +109,7 @@ class AllreduceHalvingDoubling : public Algorithm {
     size_t bufferOffset = 0; // offset into recvBuf_
     for (int i = 0; i < stepsWithinBlock_; i++) {
       const int destRank = (this->context_->rank) ^ bitmask;
-      commPairs_.push_back(this->context_->getPair(destRank));
+      auto& pair = this->context_->getPair(destRank);
       sendOffsets_[i] = sendOffset + ((destRank & bitmask) ? stepChunkSize : 0);
       recvOffsets_[i] =
           recvOffset + ((this->context_->rank & bitmask) ? stepChunkSize : 0);
@@ -125,8 +125,7 @@ class AllreduceHalvingDoubling : public Algorithm {
       auto slot = slotOffset_ +
           2 * (std::min(myRank, destRank) * this->contextSize_ +
                std::max(myRank, destRank));
-      sendDataBufs_.push_back(
-          commPairs_[i].get()->createSendBuffer(slot, ptrs_[0], bytes_));
+      sendDataBufs_.push_back(pair->createSendBuffer(slot, ptrs_[0], bytes_));
       if (recvOffsets_[i] < count_) {
         // specifies number of elements received in each step
         if (recvOffsets_[i] + stepChunkSize > count_) {
@@ -135,8 +134,9 @@ class AllreduceHalvingDoubling : public Algorithm {
           recvCounts_[i] = stepChunkSize;
         }
       }
-      recvDataBufs_.push_back(commPairs_[i].get()->createRecvBuffer(
-          slot, &recvBuf_[bufferOffset], stepChunkBytes));
+      recvDataBufs_.push_back(
+          pair->createRecvBuffer(
+              slot, &recvBuf_[bufferOffset], stepChunkBytes));
       bufferOffset += stepChunkSize;
       if (this->context_->rank & bitmask) {
         sendOffset += stepChunkSize;
@@ -148,9 +148,9 @@ class AllreduceHalvingDoubling : public Algorithm {
 
       ++slot;
       sendNotificationBufs_.push_back(
-          commPairs_[i].get()->createSendBuffer(slot, &dummy_, sizeof(dummy_)));
+          pair->createSendBuffer(slot, &dummy_, sizeof(dummy_)));
       recvNotificationBufs_.push_back(
-          commPairs_[i].get()->createRecvBuffer(slot, &dummy_, sizeof(dummy_)));
+          pair->createRecvBuffer(slot, &dummy_, sizeof(dummy_)));
     }
 
     if (nextSmallerBlockSize_ != 0) {
@@ -368,9 +368,6 @@ class AllreduceHalvingDoubling : public Algorithm {
   // offsets at which data is reduced during the reduce-scatter and sent from in
   // the allgather
   std::vector<size_t> recvOffsets_;
-
-  std::vector<std::reference_wrapper<std::unique_ptr<transport::Pair>>>
-      commPairs_;
 
   std::vector<std::unique_ptr<transport::Buffer>> sendDataBufs_;
   std::vector<std::unique_ptr<transport::Buffer>> recvDataBufs_;

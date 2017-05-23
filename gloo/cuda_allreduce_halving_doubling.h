@@ -82,9 +82,6 @@ class CudaAllreduceHalvingDoubling : public Algorithm {
   // the allgather
   std::vector<size_t> recvOffsets_;
 
-  std::vector<std::reference_wrapper<std::unique_ptr<transport::Pair>>>
-      commPairs_;
-
   std::vector<std::unique_ptr<transport::Buffer>> sendDataBufs_;
   std::vector<std::unique_ptr<transport::Buffer>> recvDataBufs_;
 

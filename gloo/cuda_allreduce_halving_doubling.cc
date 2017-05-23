@@ -123,7 +123,7 @@ CudaAllreduceHalvingDoubling<T, W>::CudaAllreduceHalvingDoubling(
   size_t bufferOffset = 0; // offset into recvBuf_
   for (int i = 0; i < stepsWithinBlock_; i++) {
     const int destRank = static_cast<int>((this->context_->rank) ^ bitmask);
-    commPairs_.push_back(this->context_->getPair(destRank));
+    auto& pair = this->context_->getPair(destRank);
     const auto myRank = this->context_->rank;
     auto slot = slotOffset_ +
         2 * (std::min(myRank, destRank) * this->contextSize_ +
@@ -139,8 +139,7 @@ CudaAllreduceHalvingDoubling<T, W>::CudaAllreduceHalvingDoubling(
         sendCounts_[i] = stepChunkSize;
       }
     }
-    sendDataBufs_.push_back(
-        commPairs_[i].get()->createSendBuffer(slot, *scratch_, bytes_));
+    sendDataBufs_.push_back(pair->createSendBuffer(slot, *scratch_, bytes_));
     if (recvOffsets_[i] < count_) {
       // specifies number of elements received in each step
       if (recvOffsets_[i] + stepChunkSize > count_) {
@@ -149,8 +148,9 @@ CudaAllreduceHalvingDoubling<T, W>::CudaAllreduceHalvingDoubling(
         recvCounts_[i] = stepChunkSize;
       }
     }
-    recvDataBufs_.push_back(commPairs_[i].get()->createRecvBuffer(
-        slot, &recvBuf_[bufferOffset], stepChunkBytes));
+    recvDataBufs_.push_back(
+        pair->createRecvBuffer(
+            slot, &recvBuf_[bufferOffset], stepChunkBytes));
     bufferOffset += stepChunkSize;
     if (this->context_->rank & bitmask) {
       sendOffset += stepChunkSize;
@@ -162,9 +162,9 @@ CudaAllreduceHalvingDoubling<T, W>::CudaAllreduceHalvingDoubling(
 
     ++slot;
     sendNotificationBufs_.push_back(
-        commPairs_[i].get()->createSendBuffer(slot, &dummy_, sizeof(dummy_)));
+        pair->createSendBuffer(slot, &dummy_, sizeof(dummy_)));
     recvNotificationBufs_.push_back(
-        commPairs_[i].get()->createRecvBuffer(slot, &dummy_, sizeof(dummy_)));
+        pair->createRecvBuffer(slot, &dummy_, sizeof(dummy_)));
   }
 
   if (nextSmallerBlockSize_ != 0) {
