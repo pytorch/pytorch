@@ -591,11 +591,11 @@ class Repeat(Function):
         return grad_input
 
 
-def reverse_cumsum(x, dim):
+def sum_scan_exclusive(x, dim):
     ret = torch.cumsum(-x, dim=dim)
 
     end_idx = ret.size(dim) - 1
-    ret_sum = ret.narrow(dim, end_idx, 1)
+    ret_sum = ret.narrow(dim, end_idx, 1).clone()
     ret -= ret_sum.expand_as(ret)
     ret += x
     return ret
@@ -611,7 +611,7 @@ class Cumsum(Function):
         return torch.cumsum(input, dim=self.dim)
 
     def backward(self, grad_output):
-        return reverse_cumsum(grad_output, dim=self.dim)
+        return sum_scan_exclusive(grad_output, dim=self.dim)
 
 
 class Cumprod(Function):
@@ -676,7 +676,7 @@ class Cumprod(Function):
 
         so
 
-        grad_output = reverse_cumsum(grad_output * output) / input
+        grad_output = sum_scan_exclusiv(grad_output * output) / input
 
         If the input is nonzero, we need to calculate the dy_j / dx_k
         by using the formula (2), called in the code omitted_products.
@@ -706,72 +706,60 @@ class Cumprod(Function):
         #  Simple case with nonzero elements in the input
         if (input != 0).all():
             output = torch.cumprod(input, dim=self.dim)
-            return reverse_cumsum(output * grad_output, dim=self.dim) / input
+            return sum_scan_exclusive(output * grad_output, dim=self.dim) / input
 
-        if input.is_cuda:
-            idx = torch.cuda.LongTensor(range(dim_size))
-        else:
-            idx = torch.LongTensor(range(dim_size))
+        dim_padding = (slice(None, None),) * self.dim
 
-        ones = input.select(self.dim, 0).unsqueeze(self.dim).clone().fill_(1)
-        zeros = ones.clone().fill_(0)
+        ones_size = list(input.size())
+        ones_size[self.dim] = 1
+        ones = input.new().resize_(ones_size).fill_(1)
+        zeros = ones * 0
         grad_input = grad_output.new(input.size()).zero_()
         for k in range(dim_size):
             if k == 0:
                 prods_from_k_plus_1 = torch.cumprod(
-                    input.index_select(self.dim, idx[k + 1:dim_size]),
+                    input[dim_padding + (slice(k + 1, None),)],
                     dim=self.dim
                 )
 
-                ommitted_products = torch.cat(
+                omitted_products = torch.cat(
                     (ones, prods_from_k_plus_1),
                     self.dim
                 )
 
             elif k == dim_size - 1:
                 prods_until_k = torch.prod(
-                    input.index_select(self.dim, idx[:k]),
+                    input[dim_padding + (slice(None, k),)],
                     dim=self.dim
                 )
 
-                ommitted_products = prods_until_k
+                omitted_products = prods_until_k
 
             else:
                 prods_until_k = torch.prod(
-                    input.index_select(self.dim, idx[:k]),
+                    input[dim_padding + (slice(None, k),)],
                     dim=self.dim
                 )
 
                 prods_from_k_plus_1 = torch.cumprod(
-                    input.index_select(self.dim, idx[k + 1:dim_size]),
+                    input[dim_padding + (slice(k + 1, None),)],
                     dim=self.dim
                 )
 
-                ommitted_products = prods_until_k.expand_as(
+                omitted_products = prods_until_k.expand_as(
                     prods_from_k_plus_1) * prods_from_k_plus_1
 
-                ommitted_products = torch.cat(
-                    (prods_until_k, ommitted_products), self.dim)
+                omitted_products = torch.cat(
+                    (prods_until_k, omitted_products), self.dim)
 
-            # At this point ommitted_products is the same size
+            # At this point omitted_products is the same size
             # as input, except on the dimension dim where it's
             # dim_size - k
-            assert ommitted_products.size(self.dim) == dim_size - k
+            assert omitted_products.size(self.dim) == dim_size - k
 
-            if k != 0:
-                size_to_expand = list(input.size())
-                size_to_expand[self.dim] = k  # Adding zeros to missing dimensions
-                size_to_expand = torch.Size(size_to_expand)
-                ommitted_products = torch.cat(
-                    (zeros.expand(size_to_expand), ommitted_products),
-                    self.dim
-                )
-
-            grad_input.index_copy_(
-                self.dim,
-                idx.index(k),
-                torch.sum(grad_output * ommitted_products, dim=self.dim)
-            )
+            grad_input.select(self.dim, k).copy_(torch.sum(
+                grad_output[dim_padding + (slice(k, None),)] * omitted_products,
+                dim=self.dim).squeeze())
 
         return grad_input
 
