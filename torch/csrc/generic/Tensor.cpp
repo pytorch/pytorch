@@ -567,28 +567,47 @@ static bool THPTensor_(_advancedIndex)(
   // For now, we only support the simple integer-array indexing strategy
   // where there are ndim(self) indexing sequences/LongTensors that can be
   // broadcasted and iterated as one
+  // Precondition: tresult points to the Tensor we are indexing, and is also where
+  // we will store the output Tensor
 
-  // TODO: decref for getitem? other objects
-  // Use *_Fast_* sequence operations?
+  THPIndexTensor *first = NULL;
+  THIndexTensor *linearIndices = NULL;
+  THLongStorage *indexerSize = NULL, *sizeAsStorage = NULL;
+  THTensor *viewed = NULL, *result = NULL;
+  bool success = false;
+
+  // We take ownership of the THTensor input locally
+  THTensor *indexed = tresult.release();
 
   // First, verify that all of the indexers have the same shape, later we will
   // incorporate broadcasting
-  Py_ssize_t size = PySequence_Size(index);
+
+  // Indexers stores borrowed references
   std::vector<THPIndexTensor*> indexers;
+  PyObject *fast = PySequence_Fast(index, NULL);
+  if (fast == NULL) goto teardown;
 
   // Get a reference to the first indexing object
-  THPIndexTensor *first = (THPIndexTensor *)PyObject_CallFunctionObjArgs(THPLongTensorClass, PySequence_GetItem(index, 0), NULL);
-  if (!first) return false;
+  first = (THPIndexTensor *)PyObject_CallFunctionObjArgs(THPLongTensorClass, PySequence_Fast_GET_ITEM(fast, 0), NULL);
+  if (!first) {
+    PyErr_Format(PyExc_IndexError,
+        "When performing advanced indexing the indexing objects must be LongTensors or convertible to such");
+    goto teardown;
+  }
   indexers.push_back(first);
 
-  for (Py_ssize_t i = 1; i < size; ++i) {
-    THPIndexTensor *indexer = (THPIndexTensor *)PyObject_CallFunctionObjArgs(THPLongTensorClass, PySequence_GetItem(index, i), NULL);
-    if (!indexer) return false;
+  for (Py_ssize_t i = 1; i < PySequence_Fast_GET_SIZE(fast); ++i) {
+    THPIndexTensor *indexer = (THPIndexTensor *)PyObject_CallFunctionObjArgs(THPLongTensorClass, PySequence_Fast_GET_ITEM(fast, i), NULL);
+    if (!indexer) {
+      PyErr_Format(PyExc_IndexError,
+          "When performing advanced indexing the indexing objects must be LongTensors or convertible to such");
+      goto teardown;
+    }
 
     if (!THIndexTensor_(isSameSizeAs)(LIBRARY_STATE first->cdata, indexer->cdata)) {
       PyErr_Format(PyExc_IndexError,
           "When performing advanced indexing the shapes of the indexing Tensors must be the same");
-      return false;
+      goto teardown;
     }
     indexers.push_back(indexer);
   }
@@ -596,45 +615,35 @@ static bool THPTensor_(_advancedIndex)(
   // Our strategy is to view the indexed Tensor as a 1D Tensor, calculate
   // the linear indices for each tuple of indexing elements, and then call
   // indexSelect using those linear indices
-  // TODO: example
 
-  THIndexTensor *linearIndices = THIndexTensor_(newWithSize1d)(LIBRARY_STATE THIndexTensor_(nElement)(LIBRARY_STATE first->cdata));
-  THLongStorage *indexerSize = THLongStorage_newWithSize(1);
+  linearIndices = THIndexTensor_(newWithSize1d)(LIBRARY_STATE THIndexTensor_(nElement)(LIBRARY_STATE first->cdata));
+  indexerSize = THLongStorage_newWithSize(1);
   THLongStorage_set(indexerSize, 0, THIndexTensor_(nElement)(LIBRARY_STATE linearIndices));
 
-  // TODO: fix linear offset calc using strides of tensor rather than manual calculation
   for (ptrdiff_t i = 0; i < THIndexTensor_(nElement)(LIBRARY_STATE linearIndices); ++i) {
     long linearIdx = 0;
-    for (Py_ssize_t j = PySequence_Size(index) - 1; j >= 0; --j) {
+    for (Py_ssize_t j = PySequence_Fast_GET_SIZE(fast) - 1; j >= 0; --j) {
       THIndexTensor *indexer = indexers[j]->cdata;
 
       // The indexing tensor might not be one-dimensional, but we are generating a vector of
       // indices, so we need to view the indexer as 1D prior to getting the value for the
       // particular dimension
       THIndexTensor *oned = THIndexTensor_(newView)(LIBRARY_STATE indexer, indexerSize);
-      linearIdx += THTensor_(stride)(LIBRARY_STATE tresult, j) * THIndexTensor_(get1d)(LIBRARY_STATE oned, i);
+      linearIdx += THTensor_(stride)(LIBRARY_STATE indexed, j) * THIndexTensor_(get1d)(LIBRARY_STATE oned, i);
       THIndexTensor_(free)(LIBRARY_STATE oned);
     }
     THIndexTensor_(set1d)(LIBRARY_STATE linearIndices, i, linearIdx);
   }
-  THLongStorage_free(indexerSize);
 
-  /* printf("Generated linear indices:"); */
-  /* for (ptrdiff_t i = 0; i < THIndexTensor_(nElement)(LIBRARY_STATE linearIndices); ++i) { */
-  /*   printf(" %ld", THIndexTensor_(get1d)(LIBRARY_STATE linearIndices, i)); */
-  /* } */
-  /* printf("\n"); */
+  sizeAsStorage = THLongStorage_newWithSize(1);
+  THLongStorage_set(sizeAsStorage, 0, THTensor_(nElement)(LIBRARY_STATE indexed));
+  viewed = THTensor_(newView)(LIBRARY_STATE indexed, sizeAsStorage);
 
-  THLongStorage *sizeAsStorage = THLongStorage_newWithSize(1);
-  THLongStorage_set(sizeAsStorage, 0, THTensor_(nElement)(LIBRARY_STATE tresult));
-  THTensor *viewed = THTensor_(newView)(LIBRARY_STATE tresult, sizeAsStorage);
+  result = THTensor_(new)(LIBRARY_STATE_NOARGS);
 
-  THTensor *result = THTensor_(new)(LIBRARY_STATE_NOARGS);
-
-  // Does index select create a copy?
+  // Index Select makes a copy of the storage, thus it is enforcing NumPy semantics, which says that the
+  // array returned by advanced indexing is a copy, not a view
   THTensor_(indexSelect)(LIBRARY_STATE result, viewed, 0, linearIndices);
-
-  THTensor_(free)(LIBRARY_STATE tresult);
 
   // In the event that the indexing Tensors are not vectors, we need to reshape
   // the result to be the appropriate shape
@@ -643,32 +652,21 @@ static bool THPTensor_(_advancedIndex)(
                       first->cdata->size,
                       first->cdata->stride);
 
+  // result ptr takes ownership of result tensor
   tresult = result;
+  success = true;
 
-  // TODO: free python objects
-  THIndexTensor_(free)(LIBRARY_STATE linearIndices);
-  THLongStorage_free(sizeAsStorage);
-  THTensor_(free)(LIBRARY_STATE viewed);
-  return true;
+teardown:
+  Py_XDECREF(fast);
 
-  /**
-  Py_ssize_t size = PySequence_Size(index);
-  // TODO: assert size == self ndim
+  // Cleanup all TH memory, if it has been initialized
+  if (indexed != NULL) THTensor_(free)(LIBRARY_STATE indexed);
+  if (linearIndices != NULL) THIndexTensor_(free)(LIBRARY_STATE linearIndices);
+  if (indexerSize != NULL) THLongStorage_free(indexerSize);
+  if (sizeAsStorage != NULL) THLongStorage_free(sizeAsStorage);
+  if (viewed != NULL) THTensor_(free)(LIBRARY_STATE viewed);
 
-  // Verify all inputs are Long Tensors
-  for (Py_ssize_t i = 0; i < size; ++i) {
-    if (!THPLongTensor_Check(PySequence_GetItem(index, i))) {
-      PyErr_Format(PyExc_TypeError,
-        "advanced indexing currently only supports LongTensors");
-      return false;
-    }
-  }
-
-  // Next, we want to shape the size of the output. It is the same size
-  // as the broadcast result of the index Tensors
-
-  return true;
-  **/
+  return success;
 }
 #endif // TH_REAL_IS_HALF
 
