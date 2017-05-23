@@ -1,3 +1,4 @@
+# coding=utf-8
 import math
 import torch
 from torch.nn.parameter import Parameter
