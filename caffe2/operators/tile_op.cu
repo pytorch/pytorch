@@ -76,7 +76,7 @@ void TileGradientOp<float, CUDAContext>::DoTileGradient(
     char* output_data) {
   TileGradientAxpyKernel<float><<<
       std::min(outer_dim * inner_dim, CAFFE_MAXIMUM_NUM_BLOCKS),
-      std::min(tiles_, CAFFE_CUDA_NUM_THREADS),
+      CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
       outer_dim,
