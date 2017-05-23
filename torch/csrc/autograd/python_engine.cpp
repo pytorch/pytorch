@@ -183,7 +183,6 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
         auto& saved_outputs = fn_info.first;
         bool is_leaf = fn_info.second;
         AutoGIL gil;
-        std::lock_guard<std::mutex> guard(ctx.mutex);
         for (auto& saved_out : saved_outputs) {
           PyTuple_SET_ITEM(ctx.outputs.get(), saved_out.second,
             THPVariable_Wrap(grads[saved_out.first]));
