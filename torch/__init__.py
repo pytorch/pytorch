@@ -88,7 +88,7 @@ def is_tensor(obj):
     Args:
         obj (Object): Object to test
     """
-    return obj.__class__ in _tensor_classes
+    return type(obj) in _tensor_classes
 
 
 def is_storage(obj):
@@ -97,7 +97,7 @@ def is_storage(obj):
     Args:
         obj (Object): Object to test
     """
-    return obj.__class__ in _storage_classes
+    return type(obj) in _storage_classes
 
 
 def set_default_tensor_type(t):
@@ -335,6 +335,8 @@ import torch.autograd
 import torch.nn
 import torch.optim
 import torch.multiprocessing
+import torch.sparse
+_C._init_names(list(torch._tensor_classes) + list(torch._storage_classes))
 
 # attach docstrings to torch and tensor functions
 from . import _torch_docs, _tensor_docs

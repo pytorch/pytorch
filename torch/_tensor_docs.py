@@ -362,7 +362,7 @@ Returns the number of dimensions of this tensor.
 
 add_docstr(torch._C.FloatTensorBase.dist,
            """
-dist(other, p=2) -> Tensor
+dist(other, p=2) -> float
 
 See :func:`torch.dist`
 """)
@@ -1196,7 +1196,7 @@ In-place version of :meth:`~Tensor.rsqrt`
 
 add_docstr(torch._C.FloatTensorBase.scatter_,
            """
-scatter_(input, dim, index, src) -> Tensor
+scatter_(dim, index, src) -> Tensor
 
 Writes all values from the Tensor :attr:`src` into self at the indices specified
 in the :attr:`index` Tensor. The indices are specified with respect to the
@@ -1676,6 +1676,36 @@ Example:
     >>> z = x.view(-1, 8)  # the size -1 is inferred from other dimensions
     >>> z.size()
     torch.Size([2, 8])
+""")
+
+add_docstr(torch._C.FloatTensorBase.expand,
+           """
+expand(tensor, sizes) -> Tensor
+
+Returns a new view of the tensor with singleton dimensions expanded
+to a larger size.
+
+Tensor can be also expanded to a larger number of dimensions, and the
+new ones will be appended at the front.
+
+Expanding a tensor does not allocate new memory, but only creates a
+new view on the existing tensor where a dimension of size one is
+expanded to a larger size by setting the ``stride`` to 0. Any dimension
+of size 1 can be expanded to an arbitrary value without allocating new
+memory.
+
+Args:
+    *sizes (torch.Size or int...): The desired expanded size
+
+Example:
+    >>> x = torch.Tensor([[1], [2], [3]])
+    >>> x.size()
+    torch.Size([3, 1])
+    >>> x.expand(3, 4)
+     1  1  1  1
+     2  2  2  2
+     3  3  3  3
+    [torch.FloatTensor of size 3x4]
 """)
 
 add_docstr(torch._C.FloatTensorBase.zero_,

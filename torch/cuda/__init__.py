@@ -26,12 +26,7 @@ def is_available():
     if (not hasattr(torch._C, '_cuda_isDriverSufficient') or
             not torch._C._cuda_isDriverSufficient()):
         return False
-    try:
-        return torch._C._cuda_getDeviceCount() > 0
-    except RuntimeError as e:
-        if 'no CUDA-capable device is detected' in e.args[0]:
-            return False
-        raise
+    return torch._C._cuda_getDeviceCount() > 0
 
 
 def _sleep(cycles):
@@ -87,8 +82,8 @@ def _lazy_init():
         raise RuntimeError(
             "Cannot re-initialize CUDA in forked subprocess. " + msg)
     _check_driver()
-    assert torch._C._cuda_init()
-    assert torch._C._cuda_sparse_init()
+    torch._C._cuda_init()
+    torch._C._cuda_sparse_init()
     _cudart = _load_cudart()
     _cudart.cudaGetErrorName.restype = ctypes.c_char_p
     _cudart.cudaGetErrorString.restype = ctypes.c_char_p
@@ -101,6 +96,7 @@ def _after_fork(arg):
     if _initialized and _original_pid != os.getpid():
         _initialized = False
         _in_bad_fork = True
+        _CudaBase.__new__ = _lazy_new
 
 
 _register_after_fork(_after_fork, _after_fork)
@@ -265,6 +261,14 @@ if not hasattr(torch._C, 'CudaDoubleStorageBase'):
     torch._C.__dict__['_CudaStreamBase'] = _dummy_type('CudaStreamBase')
 
 
+@staticmethod
+def _lazy_new(cls, *args, **kwargs):
+    _lazy_init()
+    # We need this method only for lazy init, so we can remove it
+    del _CudaBase.__new__
+    return super(_CudaBase, cls).__new__(cls, *args, **kwargs)
+
+
 class _CudaBase(object):
     is_cuda = True
     is_sparse = False
@@ -273,11 +277,7 @@ class _CudaBase(object):
         with device(self.get_device()):
             return super(_CudaBase, self).type(*args, **kwargs)
 
-    def __new__(cls, *args, **kwargs):
-        _lazy_init()
-        # We need this method only for lazy init, so we can remove it
-        del _CudaBase.__new__
-        return super(_CudaBase, cls).__new__(cls, *args, **kwargs)
+    __new__ = _lazy_new
 
 
 class DoubleStorage(_CudaBase, torch._C.CudaDoubleStorageBase, _StorageBase):

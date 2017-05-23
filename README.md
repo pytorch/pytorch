@@ -20,11 +20,12 @@ We are in an early-release Beta. Expect some adventures and rough edges.
 - [Releases and Contributing](#releases-and-contributing)
 - [The Team](#the-team)
 
-| System | Python | Status |
+| System | 2.7 | 3.5 |
 | --- | --- | --- |
-| Linux CPU | 2.7.8, 2.7, 3.5, nightly | [![Build Status](https://travis-ci.org/pytorch/pytorch.svg?branch=master)](https://travis-ci.org/pytorch/pytorch) |
-| Linux GPU | 2.7 | [![Build Status](http://build.pytorch.org:8080/buildStatus/icon?job=pytorch-master-py2)](https://build.pytorch.org/job/pytorch-master-py2) |
-| Linux GPU | 3.5 | [![Build Status](http://build.pytorch.org:8080/buildStatus/icon?job=pytorch-master-py3)](https://build.pytorch.org/job/pytorch-master-py3) |
+| Linux CPU | [![Build Status](https://travis-ci.org/pytorch/pytorch.svg?branch=master)](https://travis-ci.org/pytorch/pytorch) | [![Build Status](https://travis-ci.org/pytorch/pytorch.svg?branch=master)](https://travis-ci.org/pytorch/pytorch) |
+| Linux GPU | [![Build Status](http://build.pytorch.org:8080/buildStatus/icon?job=pytorch-master-py2-linux)](https://build.pytorch.org/job/pytorch-master-py2-linux) | [![Build Status](http://build.pytorch.org:8080/buildStatus/icon?job=pytorch-master-py3-linux)](https://build.pytorch.org/job/pytorch-master-py3-linux) |
+| macOS CPU | [![Build Status](http://build.pytorch.org:8080/buildStatus/icon?job=pytorch-master-py2-osx-cpu)](https://build.pytorch.org/job/pytorch-master-py2-osx-cpu) | [![Build Status](http://build.pytorch.org:8080/buildStatus/icon?job=pytorch-master-py3-osx-cpu)](https://build.pytorch.org/job/pytorch-master-py3-osx-cpu) |
+
 
 ## More about PyTorch
 
@@ -116,9 +117,9 @@ We hope you never spend hours debugging your code because of bad stack traces or
 
 ### Fast and Lean
 
-PyTorch has minimal framework overhead. We integrate acceleration libraries 
-such as Intel MKL and NVIDIA (CuDNN, NCCL) to maximize speed. 
-At the core, its CPU and GPU Tensor and Neural Network backends 
+PyTorch has minimal framework overhead. We integrate acceleration libraries
+such as Intel MKL and NVIDIA (CuDNN, NCCL) to maximize speed.
+At the core, its CPU and GPU Tensor and Neural Network backends
 (TH, THC, THNN, THCUNN) are written as independent libraries with a C99 API.  
 They are mature and have been tested for years.
 
@@ -158,7 +159,7 @@ Once you have [anaconda](https://www.continuum.io/downloads) installed, here are
 
 If you want to compile with CUDA support, install
 - [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads) 7.5 or above
-- [NVIDIA CuDNN](https://developer.nvidia.com/cudnn) v5.x
+- [NVIDIA CuDNN](https://developer.nvidia.com/cudnn) v5.x or above
 
 If you want to disable CUDA support, export environment variable `NO_CUDA=1`.
 
@@ -169,23 +170,27 @@ On Linux
 export CMAKE_PREFIX_PATH=[anaconda root directory]
 
 # Install basic dependencies
-conda install numpy mkl setuptools cmake gcc cffi
+conda install numpy pyyaml mkl setuptools cmake gcc cffi
 
 # Add LAPACK support for the GPU
-conda install -c soumith magma-cuda75 # or magma-cuda80 if CUDA 8.0
+conda install -c soumith magma-cuda80 # or magma-cuda75 if CUDA 7.5
 ```
 
 On OSX
 ```bash
 export CMAKE_PREFIX_PATH=[anaconda root directory]
-conda install numpy setuptools cmake cffi
+conda install numpy pyyaml setuptools cmake cffi
 ```
 
 #### Install PyTorch
+On Linux
 ```bash
-export MACOSX_DEPLOYMENT_TARGET=10.9 # if OSX
-pip install -r requirements.txt
 python setup.py install
+```
+
+On OSX
+```bash
+MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py install
 ```
 
 ### Docker image
@@ -196,11 +201,11 @@ docker build -t pytorch-cudnnv6 .
 ```
 and run  with nvidia-docker:
 ```
-nvidia-docker run --rm -ti --ipc=host pytorch-cudnnv5
+nvidia-docker run --rm -ti --ipc=host pytorch-cudnnv6
 ```
 Please note that pytorch uses shared memory to share data between processes, so if torch multiprocessing is used (e.g.
 for multithreaded data loaders) the default shared memory segment size that container runs with is not enough, and you
-should increase shared memory size either with --ipc=host or --shm-size command line options to nvidia-docker run. 
+should increase shared memory size either with --ipc=host or --shm-size command line options to nvidia-docker run.
 
 
 ## Getting Started
@@ -218,8 +223,8 @@ Three pointers to get you started:
 
 ## Releases and Contributing
 
-PyTorch has a 90 day release cycle (major releases). 
-It's current state is Beta (v0.1.6), we expect no obvious bugs. Please let us know if you encounter a bug by [filing an issue](https://github.com/pytorch/pytorch/issues).
+PyTorch has a 90 day release cycle (major releases).
+It's current state is Beta, we expect no obvious bugs. Please let us know if you encounter a bug by [filing an issue](https://github.com/pytorch/pytorch/issues).
 
 We appreciate all contributions. If you are planning to contribute back bug-fixes, please do so without any further discussion.
 

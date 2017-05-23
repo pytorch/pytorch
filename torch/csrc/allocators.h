@@ -32,8 +32,8 @@ public:
     allocatorContext = ctx;
   }
 
-  void* malloc(long size);
-  void* realloc(void* ptr, long size);
+  void* malloc(ptrdiff_t size);
+  void* realloc(void* ptr, ptrdiff_t size);
   void free(void* ptr);
 
   THPObjectPtr object;
@@ -75,7 +75,7 @@ public:
   NumpyArrayAllocator(PyObject *wrapped_array):
       ObjectPtrAllocator(wrapped_array) {}
 
-  void* realloc(void* ptr, long size);
+  void* realloc(void* ptr, ptrdiff_t size);
   void free(void* ptr);
 };
 #endif

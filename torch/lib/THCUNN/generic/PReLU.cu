@@ -11,6 +11,7 @@ void THNN_(PReLU_updateOutput)(
 {
   THCTensor_(resizeAs)(state, output, input);
 
+  weight = THCTensor_(newContiguous)(state, weight);
   real *w = THCTensor_(data)(state, weight);
 
   if (nOutputPlane == 0)
@@ -40,6 +41,8 @@ void THNN_(PReLU_updateOutput)(
     THCudaCheck(cudaGetLastError());
     THCTensor_(free)(state, input);
   }
+
+  THCTensor_(free)(state, weight);
 }
 
 void THNN_(PReLU_updateGradInput)(
@@ -53,6 +56,7 @@ void THNN_(PReLU_updateGradInput)(
   THCUNN_check_nElement(state, input, gradOutput);
   THCTensor_(resizeAs)(state, gradInput, input);
 
+  weight = THCTensor_(newContiguous)(state, weight);
   real *w = THCTensor_(data)(state, weight);
   if (nOutputPlane == 0)
   {
@@ -84,6 +88,7 @@ void THNN_(PReLU_updateGradInput)(
     THCTensor_(free)(state, input);
     THCTensor_(free)(state, gradOutput);
   }
+  THCTensor_(free)(state, weight);
 }
 
 void THNN_(PReLU_accGradParameters)(
@@ -130,7 +135,7 @@ void THNN_(PReLU_accGradParameters)(
 
       if (ndim == 2)
       {
-        THCTensor_(sum)(state, gradWeightBuf, gradInput, 0);
+        THCTensor_(sum)(state, gradWeightBuf, gradInput, 0, 1);
         THCTensor_(cadd)(state, gradWeight, gradWeight, scale, gradWeightBuf);
       }
       else
@@ -142,8 +147,8 @@ void THNN_(PReLU_accGradParameters)(
         }
         THCTensor_(resize3d)(state, buffer, input->size[0], nOutputPlane, size3);
         THCTensor_(resize2d)(state, sumbuf, input->size[0], nOutputPlane);
-        THCTensor_(sum)(state, sumbuf, buffer, 2);
-        THCTensor_(sum)(state, gradWeightBuf, sumbuf, 0);
+        THCTensor_(sum)(state, sumbuf, buffer, 2, 1);
+        THCTensor_(sum)(state, gradWeightBuf, sumbuf, 0, 1);
         THCTensor_(cadd)(state, gradWeight, gradWeight, scale, gradWeightBuf);
         THCTensor_(free)(state, buffer);
       }

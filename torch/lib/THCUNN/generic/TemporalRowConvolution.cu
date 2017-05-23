@@ -62,6 +62,9 @@ void THNN_(TemporalRowConvolution_updateOutput)(
     THCUNN_assertSameGPU(state, 2, weight, bias);
   }
 
+  THArgCheck(THCTensor_(isContiguous)(state, weight), 4, "weight must be contiguous");
+  THArgCheck(!bias || THCTensor_(isContiguous)(state, bias), 5, "bias must be contiguous");
+
   // reshape weight if necessary
   int ndim = input->nDimension;
 
@@ -189,6 +192,8 @@ void THNN_(TemporalRowConvolution_updateGradInput)(
 
   THCUNN_assertSameGPU(state, 5, input, gradOutput, weight, gradColumns,
                        gradInput);
+
+  THArgCheck(THCTensor_(isContiguous)(state, weight), 4, "weight must be contiguous");
 
   int ndim = input->nDimension;
 

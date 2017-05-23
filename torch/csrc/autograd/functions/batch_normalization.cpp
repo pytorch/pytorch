@@ -1,6 +1,8 @@
 #include "batch_normalization.h"
 
 #include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/autograd/functions/utils.h"
+#include "torch/csrc/autograd/functions/basic_ops.h"
 #include "torch/csrc/nn/THNN_generic.h"
 #include "torch/csrc/utils/auto_gpu.h"
 
@@ -16,7 +18,7 @@ namespace torch { namespace autograd {
 using thpp::Tensor;
 
 auto BatchNormForward::apply(const variable_list& inputs) -> variable_list {
-  if (inputs.size() != 3) throw std::runtime_error("expected three inputs");
+  check_input_variables("BatchNorm", inputs, 3, 1);
 
   auto& input = inputs[0];
   auto& weight = inputs[1];
@@ -27,7 +29,8 @@ auto BatchNormForward::apply(const variable_list& inputs) -> variable_list {
 #ifdef WITH_CUDNN
   use_cudnn = (input->data->isCuda()
                && input->data->type() != thpp::Type::HALF
-               && weight && bias && cudnn_enabled);
+               && weight && bias
+               && cudnn_enabled && CUDNN_VERSION >= 5110L);
 #endif
 
   auto output = input->data->newTensor();
@@ -71,37 +74,39 @@ auto BatchNormForward::apply(const variable_list& inputs) -> variable_list {
         eps);
   }
 
-  auto creator = std::make_shared<BatchNormBackward>(
-      flags(inputs), *this, std::move(save_mean), std::move(save_std),
-      input->save(),
-      Variable::save_opt(weight.get()),
-      Variable::save_opt(bias.get()));
-  variable_list results(1);
-  results[0] = std::make_shared<Variable>(std::move(output), creator);
-  return results;
+  auto outputs = as_tensor_list(std::move(output));
+  return wrap_outputs(inputs, std::move(outputs), [&](FunctionFlags f) {
+    return std::make_shared<BatchNormBackward>(
+        f, *this, std::move(save_mean), std::move(save_std),
+        input->save(this),
+        Variable::save_opt(weight.get(), this),
+        Variable::save_opt(bias.get(), this));
+  });
 };
 
 auto BatchNormBackward::apply(const variable_list& grad_outputs) -> variable_list {
-  auto& input = this->input.unpack();
-  auto& weight = this->weight.unpack();
-  auto& bias = this->bias.unpack();
+  check_input_variables("BatchNormBackward", grad_outputs, 1);
+  auto input = this->input.unpack_data();
+  auto weight = this->weight.unpack_data();
+  auto bias = this->bias.unpack_data();
   AutoGPU guard(input->getDevice());
 
   bool use_cudnn = false;
 #ifdef WITH_CUDNN
   use_cudnn = (input->isCuda()
                && input->type() != thpp::Type::HALF
-               && weight && bias && training && cudnn_enabled);
+               && weight && bias && training
+               && cudnn_enabled && CUDNN_VERSION >= 5110L);
 #endif
 
   std::unique_ptr<Tensor> grad_input;
-  if (needs_input_grad(0) || use_cudnn) {
+  if (should_compute_output(0) || use_cudnn) {
     grad_input = input->newTensor();
     grad_input->resizeAs(*input);
   }
 
   std::unique_ptr<Tensor> grad_weight;
-  if (needs_input_grad(1) || use_cudnn) {
+  if (should_compute_output(1) || use_cudnn) {
     grad_weight = weight->newTensor();
     grad_weight->resizeAs(*weight);
     if (!use_cudnn) {
@@ -110,7 +115,7 @@ auto BatchNormBackward::apply(const variable_list& grad_outputs) -> variable_lis
   }
 
   std::unique_ptr<Tensor> grad_bias;
-  if (needs_input_grad(2) || use_cudnn) {
+  if (should_compute_output(2) || use_cudnn) {
     grad_bias = bias->newTensor();
     grad_bias->resizeAs(*bias);
     if (!use_cudnn) {
@@ -155,11 +160,12 @@ auto BatchNormBackward::apply(const variable_list& grad_outputs) -> variable_lis
         eps);
   }
 
-  variable_list results(3);
-  results[0] = Variable::of(std::move(grad_input));
-  results[1] = Variable::of(std::move(grad_weight));
-  results[2] = Variable::of(std::move(grad_bias));
-  return results;
+  auto outputs =  as_tensor_list(std::move(grad_input),
+                                 std::move(grad_weight),
+                                 std::move(grad_bias));
+  return wrap_outputs(grad_outputs, std::move(outputs), [&](FunctionFlags f) {
+    return std::make_shared<Error>("BatchNormBackward is not differentiable", std::move(f));
+  });
 };
 
 auto BatchNormBackward::releaseVariables() -> void {

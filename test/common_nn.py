@@ -88,7 +88,7 @@ module_tests = [
     dict(
         module_name='Softmax',
         input_size=(10, 20),
-        reference_fn=lambda i, _: torch.exp(i).div(torch.exp(i).sum(1).expand(10, 20))
+        reference_fn=lambda i, _: torch.exp(i).div(torch.exp(i).sum(1, True).expand(10, 20))
     ),
     dict(
         module_name='Softmax2d',
@@ -98,7 +98,7 @@ module_tests = [
     dict(
         module_name='LogSoftmax',
         input_size=(10, 20),
-        reference_fn=lambda i, _: torch.exp(i).div_(torch.exp(i).sum(1).expand(10, 20)).log_()
+        reference_fn=lambda i, _: torch.exp(i).div_(torch.exp(i).sum(1, True).expand(10, 20)).log_()
     ),
     dict(
         module_name='LogSoftmax',
@@ -379,6 +379,7 @@ class NNTestCase(TestCase):
         if isinstance(input, Variable):
             if input.requires_grad and input.grad is not None:
                 input.grad.data.zero_()
+                input.grad.detach_()
         elif torch.is_tensor(input):
             return
         else:
@@ -439,7 +440,6 @@ class NNTestCase(TestCase):
             return out
 
         res = tuple()
-        # TODO: enable non-contig tests
         input = contiguous(input)
         if jacobian_input:
             res += get_numerical_jacobian(fw, input, input, eps=1e-6),

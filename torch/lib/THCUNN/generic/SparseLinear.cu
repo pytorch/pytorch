@@ -44,6 +44,8 @@ void THNN_(SparseLinear_updateOutput)(
   THArgCheck(THCTensor_(nDimension)(state, output) == 2, 3, "output must be batchsize x outputsize");
   THArgCheck(checkSize1D(bias, outDim), 5, "bias size wrong");
 
+  weight = THCTensor_(newContiguous)(state, weight);
+  
   long batchnum = THCTensor_(size)(state, output, 0);
   long nnz = THCTensor_(size)(state, input, 0);
 
@@ -114,6 +116,7 @@ void THNN_(SparseLinear_updateOutput)(
   THCTensor_(free)(state, buffer);
   THCTensor_(free)(state, sel);
   THCTensor_(free)(state, values);
+  THCTensor_(free)(state, weight);
   THCudaIntTensor_free(state, rowbuf);
   THCudaIntTensor_free(state, colInds);
   THCudaIntTensor_free(state, csrPtrs);
@@ -137,6 +140,7 @@ void THNN_(SparseLinear_accGradParameters)(
   THArgCheck(checkSize2D(gradWeight, outDim, inDim), 4, "gradWeight size wrong");
   THArgCheck(checkSize1D(gradBias, outDim), 5, "gradBias size wrong");
 
+  weight = THCTensor_(newContiguous)(state, weight);
   long nnz = THCTensor_(size)(state, input, 0);
   long batchnum = THCTensor_(size)(state, gradOutput, 0);
 
@@ -202,7 +206,7 @@ void THNN_(SparseLinear_accGradParameters)(
       &one, THCTensor_(data)(state, gradWeight), inDim
   );
 
-  THCTensor_(sum)(state, buf, gradOutput, 0);
+  THCTensor_(sum)(state, buf, gradOutput, 0, 1);
   THCTensor_(resize1d)(state, buf, outDim);
   THCTensor_(cadd)(state, gradBias, gradBias, scale, buf);
 
@@ -212,6 +216,7 @@ void THNN_(SparseLinear_accGradParameters)(
     THCTensor_(cadd)(state, gradBias, gradBias, weightDecay, bias);
   }
 
+  THCTensor_(free)(state, weight);
   THCTensor_(free)(state, buf);
   THCTensor_(free)(state, sel);
   THCTensor_(free)(state, cols);

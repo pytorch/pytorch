@@ -1,47 +1,12 @@
 import torch
 import torch._C as _C
 import torch.utils.hooks as hooks
+from torch._six import with_metaclass
+import functools
 from collections import OrderedDict
 
 
-class Function(_C._FunctionBase):
-    """Records operation history and defines formulas for differentiating ops.
-
-    Every operation performed on :class:`Variable` s creates a new function
-    object, that performs the computation, and records that it happened.
-    The history is retained in the form of a DAG of functions, with edges
-    denoting data dependencies (``input <- output``). Then, when backward is
-    called, the graph is processed in the topological ordering, by calling
-    :func:`backward` methods of each :class:`Function` object, and passing
-    returned gradients on to next :class:`Function` s.
-
-    Normally, the only way users interact with functions is by creating
-    subclasses and defining new operations. This is a recommended way of
-    extending torch.autograd.
-
-    Since Function logic is a hotspot in most scripts, almost all of it
-    was moved to our C backend, to ensure that the framework overhead is
-    minimal.
-
-    Each function is meant to be used only once (in the forward pass).
-
-    Attributes:
-        saved_tensors: Tuple of Tensors that were saved in the call to
-            :func:`forward`.
-        needs_input_grad: Tuple of booleans of length :attr:`num_inputs`,
-            indicating whether a given input requires gradient. This can be
-            used to optimize buffers saved for backward, and ignoring gradient
-            computation in :func:`~Function.backward`.
-        num_inputs: Number of inputs given to :func:`forward`.
-        num_outputs: Number of tensors returned by :func:`forward`.
-        requires_grad: Boolean indicating whether the :func:`backward` will
-            ever need to be called.
-        previous_functions: Tuple of (int, Function) pairs of length
-            :attr:`num_inputs`. Each entry contains a reference to a
-            :class:`Function` that created corresponding input, and an index
-            of the previous function output that's been used.
-    """
-    __call__ = _C._FunctionBase._do_forward
+class _ContextMethodMixin(object):
 
     def save_for_backward(self, *tensors):
         """Saves given tensors for a future call to :func:`~Function.backward`.
@@ -65,7 +30,7 @@ class Function(_C._FunctionBase):
         :func:`forward` **method, and all arguments should be inputs.**
 
         Every tensor that's been modified in-place in a call to :func:`forward`
-        should be given to this function, to ensure correcness of our checks.
+        should be given to this function, to ensure correctness of our checks.
         It doesn't matter wheter the function is called before or after
         modification.
         """
@@ -106,6 +71,9 @@ class Function(_C._FunctionBase):
         """
         self.non_differentiable = args
 
+
+class _HookMixin(object):
+
     @staticmethod
     def _register_hook(backward_hooks, hook):
         if backward_hooks is None:
@@ -114,7 +82,74 @@ class Function(_C._FunctionBase):
         backward_hooks[handle.id] = hook
         return backward_hooks, handle
 
-    def forward(self, *input):
+
+class BackwardCFunction(_C._FunctionBase, _ContextMethodMixin, _HookMixin):
+    _is_legacy = False
+
+    def apply(self, *args):
+        return self._forward_cls.backward(self, *args)
+
+
+class FunctionMeta(type):
+
+    def __init__(cls, name, bases, attrs):
+        for super_cls in cls.mro():
+            forward = super_cls.__dict__.get('forward')
+            if forward is not None:
+                has_static_forward = isinstance(forward, staticmethod) or isinstance(forward, classmethod)
+                break
+
+        setattr(cls, '_is_legacy', not has_static_forward)
+
+        # old-style functions
+        if not has_static_forward:
+            return super(FunctionMeta, cls).__init__(name, bases, attrs)
+
+        backward_fn = type(name + 'Backward', (BackwardCFunction,), {'_forward_cls': cls})
+        setattr(cls, '_backward_cls', backward_fn)
+
+        return super(FunctionMeta, cls).__init__(name, bases, attrs)
+
+
+class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixin, _HookMixin)):
+    """Records operation history and defines formulas for differentiating ops.
+
+    Every operation performed on :class:`Variable` s creates a new function
+    object, that performs the computation, and records that it happened.
+    The history is retained in the form of a DAG of functions, with edges
+    denoting data dependencies (``input <- output``). Then, when backward is
+    called, the graph is processed in the topological ordering, by calling
+    :func:`backward` methods of each :class:`Function` object, and passing
+    returned gradients on to next :class:`Function` s.
+
+    Normally, the only way users interact with functions is by creating
+    subclasses and defining new operations. This is a recommended way of
+    extending torch.autograd.
+
+    Since Function logic is a hotspot in most scripts, almost all of it
+    was moved to our C backend, to ensure that the framework overhead is
+    minimal.
+
+    Each function is meant to be used only once (in the forward pass).
+
+    Attributes:
+        saved_tensors: Tuple of Tensors that were saved in the call to
+            :func:`forward`.
+        needs_input_grad: Tuple of booleans of length :attr:`num_inputs`,
+            indicating whether a given input requires gradient. This can be
+            used to optimize buffers saved for backward, and ignoring gradient
+            computation in :func:`~Function.backward`.
+        num_inputs: Number of inputs given to :func:`forward`.
+        num_outputs: Number of tensors returned by :func:`forward`.
+        requires_grad: Boolean indicating whether the :func:`backward` will
+            ever need to be called.
+    """
+
+    # only for backward compatibility
+    __call__ = _C._FunctionBase._do_forward
+
+    @staticmethod
+    def forward(*args, **kwargs):
         """Performs the operation.
 
         This function is to be overriden by all subclasses.
@@ -123,7 +158,8 @@ class Function(_C._FunctionBase):
         """
         raise NotImplementedError
 
-    def backward(self, *grad_output):
+    @staticmethod
+    def backward(*grad_outputs):
         """Defines a formula for differentiating the operation.
 
         This function is to be overriden by all subclasses.
@@ -135,6 +171,41 @@ class Function(_C._FunctionBase):
         be the gradient w.r.t. the corresponding input.
         """
         raise NotImplementedError
+
+
+def once_differentiable(fn):
+    from .variable import Variable
+
+    @functools.wraps(fn)
+    def wrapper(ctx, *args):
+        tensor_args = [arg.data if isinstance(arg, Variable) else arg
+                       for arg in args]
+        outputs = fn(ctx, *tensor_args)
+        # XXX: this is only an approximation of these flags - there's no way
+        # to figure out if fn didn't use ctx.saved_variables and as a result
+        # some Variables might require grad, even if no args do.
+        # Unfortunately, this leads to unexpected error messages ("no nodes
+        # require computing gradients"), but I don't have a better idea.
+        # These functions would raise an error in backward anyway.
+        volatile = any(arg.volatile if isinstance(arg, Variable) else False
+                       for arg in args)
+        requires_grad = any(arg.requires_grad if isinstance(arg, Variable) else False
+                            for arg in args)
+        if volatile:
+            def err_fn(*args):
+                return args
+            kwargs = {'volatile': True}
+        else:
+            err_fn = torch._C._functions.DelayedError(
+                b"trying to differentiate twice a function that was marked"
+                b"with @once_differentiable")
+            kwargs = {'requires_grad': requires_grad}
+        if not isinstance(outputs, tuple):
+            var = Variable(outputs, **kwargs) if outputs is not None else None
+            return err_fn(var)
+        return err_fn(*[Variable(o, **kwargs) if o is not None else None
+                      for o in outputs])
+    return wrapper
 
 
 class InplaceFunction(Function):

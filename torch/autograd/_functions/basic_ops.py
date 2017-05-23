@@ -1,200 +1,228 @@
 import torch
-from ..function import Function, InplaceFunction
+from ..function import Function, InplaceFunction, once_differentiable
 import math
 
 
-def maybe_view(tensor, size):
-    if tensor.size() == size:
-        return tensor
-    return tensor.contiguous().view(size)
+def maybe_view(variable, size):
+    if variable.size() == size:
+        return variable
+    return variable.contiguous().view(size)
 
 
 class Add(InplaceFunction):
 
-    def forward(self, a, b):
-        self.b_size = b.size()
-        if self.inplace:
-            self.mark_dirty(a)
+    @staticmethod
+    def forward(ctx, a, b, inplace=False):
+        ctx.b_size = b.size()
+        if inplace:
+            ctx.mark_dirty(a)
             return a.add_(b)
         else:
             return a.add(b)
 
-    def backward(self, grad_output):
-        return grad_output, maybe_view(grad_output, self.b_size)
+    @staticmethod
+    def backward(ctx, grad_output):
+        return grad_output, maybe_view(grad_output, ctx.b_size), None
 
 
 class Sub(InplaceFunction):
 
-    def forward(self, a, b):
-        self.b_size = b.size()
-        if self.inplace:
-            self.mark_dirty(a)
+    @staticmethod
+    def forward(ctx, a, b, inplace=False):
+        ctx.b_size = b.size()
+        if inplace:
+            ctx.mark_dirty(a)
             return a.sub_(b)
         else:
             return a.sub(b)
 
-    def backward(self, grad_output):
-        return grad_output, maybe_view(grad_output.neg(), self.b_size)
+    @staticmethod
+    def backward(ctx, grad_output):
+        return grad_output, maybe_view(grad_output.neg(), ctx.b_size), None
 
 
 class Mul(Function):
 
-    def forward(self, a, b):
-        self.b_size = b.size()
-        self.save_for_backward(a, b)
+    @staticmethod
+    def forward(ctx, a, b):
+        ctx.b_size = b.size()
+        ctx.save_for_backward(a, b)
         return a.mul(b)
 
-    def backward(self, grad_output):
-        a, b = self.saved_tensors
-        return grad_output.mul(b), maybe_view(grad_output.mul(a), self.b_size)
+    @staticmethod
+    def backward(ctx, grad_output):
+        a, b = ctx.saved_variables
+        return grad_output.mul(b), maybe_view(grad_output.mul(a), ctx.b_size)
 
 
 class Div(Function):
 
-    def forward(self, a, b):
-        self.b_size = b.size()
-        self.save_for_backward(a, b)
+    @staticmethod
+    def forward(ctx, a, b):
+        ctx.b_size = b.size()
+        ctx.save_for_backward(a, b)
         return a.div(b)
 
-    def backward(self, grad_output):
-        a, b = self.saved_tensors
-        return grad_output.div(b), maybe_view(grad_output.neg().mul(a).div_(b).div_(b), self.b_size)
+    @staticmethod
+    def backward(ctx, grad_output):
+        a, b = ctx.saved_variables
+        b_rec = b.reciprocal()
+        grad_a = grad_output.mul(b_rec)
+        grad_b = grad_output.neg().mul(a).mul(b_rec).mul(b_rec)
+        return grad_a, maybe_view(grad_b, ctx.b_size)
 
 
 class Pow(Function):
 
-    def forward(self, a, b):
-        self.b_size = b.size()
-        self.save_for_backward(a, b)
+    @staticmethod
+    def forward(ctx, a, b):
+        ctx.b_size = b.size()
+        ctx.save_for_backward(a, b)
         return a.pow(b)
 
-    def backward(self, grad_output):
-        a, b = self.saved_tensors
-        return grad_output.mul(b).mul_(a.pow(b - 1)), maybe_view(grad_output.mul(a.pow(b)).mul_(a.log()), self.b_size)
+    @staticmethod
+    def backward(ctx, grad_output):
+        a, b = ctx.saved_variables
+        grad_a = grad_output.mul(b).mul(a.pow(b - 1))
+        grad_b = grad_output.mul(a.pow(b)).mul(a.log())
+        return grad_a, maybe_view(grad_b, ctx.b_size)
+
+
+def sort_args(a, b):
+    return (a, b, True) if torch.is_tensor(a) else (b, a, False)
 
 
 class AddConstant(InplaceFunction):
 
-    def __init__(self, constant, inplace=False):
-        super(AddConstant, self).__init__(inplace)
-        self.constant = constant
-
-    def forward(self, a):
-        if self.inplace:
-            self.mark_dirty(a)
-            return a.add_(self.constant)
+    @staticmethod
+    def forward(ctx, a, b, inplace=False):
+        tensor, constant, ctx.tensor_first = sort_args(a, b)
+        if inplace:
+            ctx.mark_dirty(tensor)
+            return tensor.add_(constant)
         else:
-            return a.add(self.constant)
+            return tensor.add(constant)
 
-    def backward(self, grad_output):
-        return grad_output
+    @staticmethod
+    def backward(ctx, grad_output):
+        if ctx.tensor_first:
+            return grad_output, None, None
+        else:
+            return None, grad_output, None
 
 
 class SubConstant(InplaceFunction):
 
-    def __init__(self, constant, sub_tensor=False, inplace=False):
-        super(SubConstant, self).__init__(inplace)
-        self.constant = constant
-        self.sub_tensor = sub_tensor
-
-    def forward(self, a):
-        if self.sub_tensor:
-            if a.is_signed() and self.inplace:
-                self.mark_dirty(a)
-                return a.neg_().add_(self.constant)
+    @staticmethod
+    def forward(ctx, a, b, inplace=False):
+        tensor, constant, ctx.tensor_first = sort_args(a, b)
+        if ctx.tensor_first:
+            if inplace:
+                ctx.mark_dirty(tensor)
+                return tensor.sub_(constant)
             else:
-                assert not self.inplace, "can't perform (constant - tensor) " \
-                    "subtraction in-place on an unsigned type"
-                return a.new().resize_as_(a).fill_(self.constant).sub_(a)
+                return tensor.sub(constant)
         else:
-            if self.inplace:
-                self.mark_dirty(a)
-                return a.sub_(self.constant)
+            if inplace:
+                ctx.mark_dirty(tensor)
+                return tensor.neg_().add_(constant)
             else:
-                return a.sub(self.constant)
+                return tensor.neg().add_(constant)
 
-    def backward(self, grad_output):
-        if self.sub_tensor:
-            return grad_output.neg()
+    @staticmethod
+    def backward(ctx, grad_output):
+        if ctx.tensor_first:
+            return grad_output, None, None
         else:
-            return grad_output
+            return None, grad_output.neg(), None
 
 
 class MulConstant(InplaceFunction):
 
-    def __init__(self, constant, inplace=False):
-        super(MulConstant, self).__init__(inplace)
-        self.constant = constant
-
-    def forward(self, a):
-        if self.inplace:
-            self.mark_dirty(a)
-            return a.mul_(self.constant)
+    @staticmethod
+    def forward(ctx, a, b, inplace=False):
+        tensor, ctx.constant, ctx.tensor_first = sort_args(a, b)
+        if inplace:
+            ctx.mark_dirty(tensor)
+            return tensor.mul_(ctx.constant)
         else:
-            return a.mul(self.constant)
+            return tensor.mul(ctx.constant)
 
-    def backward(self, grad_output):
-        return grad_output.mul(self.constant)
+    @staticmethod
+    def backward(ctx, grad_output):
+        grad_input = grad_output.mul(ctx.constant)
+        if ctx.tensor_first:
+            return grad_input, None, None
+        else:
+            return None, grad_input, None
 
 
 class DivConstant(InplaceFunction):
 
-    def __init__(self, constant, div_by_tensor=False, inplace=False):
-        super(DivConstant, self).__init__(inplace)
-        self.constant = constant
-        self.div_by_tensor = div_by_tensor
-        if self.inplace and self.div_by_tensor:
-            # TODO: actually, as long as the type is floating point, we can
-            raise RuntimeError("can't perform (constant / tensor) division in-place")
-
-    def forward(self, a):
-        if self.div_by_tensor:
-            self.save_for_backward(a)
-            return a.new().resize_as_(a).fill_(self.constant).div_(a)
-        else:
-            if self.inplace:
-                return a.div_(self.constant)
+    @staticmethod
+    def forward(ctx, a, b, inplace=False):
+        tensor, ctx.constant, ctx.tensor_first = sort_args(a, b)
+        ctx.inplace = inplace
+        if ctx.tensor_first:
+            if inplace:
+                ctx.mark_dirty(tensor)
+                return tensor.div_(ctx.constant)
             else:
-                return a.div(self.constant)
-
-    def backward(self, grad_output):
-        if self.div_by_tensor:
-            a = self.saved_tensors[0]
-            return grad_output.neg().mul_(self.constant).div_(a).div_(a)
+                return tensor.div(ctx.constant)
         else:
-            return grad_output.div(self.constant)
+            ctx.save_for_backward(tensor)
+            if inplace:
+                ctx.mark_dirty(tensor)
+                return tensor.reciprocal_().mul_(ctx.constant)
+            else:
+                return tensor.reciprocal().mul_(ctx.constant)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        if ctx.tensor_first:
+            return grad_output.div(ctx.constant), None, None
+        else:
+            v, = ctx.saved_variables
+            if ctx.inplace:
+                return None, grad_output.mul(v).mul(v).div_(-ctx.constant), None
+            else:
+                v_rep = v.reciprocal()
+                return None, grad_output.mul_(-ctx.constant).mul(v_rep).mul(v_rep), None
 
 
 class PowConstant(Function):
 
-    def __init__(self, constant, tensor_power=False):
-        super(PowConstant, self).__init__()
-        self.constant = constant
-        self.tensor_power = tensor_power
-
-    def forward(self, a):
-        if self.tensor_power:
-            self.fw_result = torch.pow(self.constant, a)
-            return self.fw_result
+    @staticmethod
+    def forward(ctx, a, b):
+        tensor, ctx.constant, ctx.tensor_first = sort_args(a, b)
+        if ctx.tensor_first:
+            ctx.save_for_backward(tensor)
+            return tensor.pow(ctx.constant)
         else:
-            self.save_for_backward(a)
-            return a.pow(self.constant)
+            result = torch.pow(ctx.constant, tensor)
+            ctx.save_for_backward(result)
+            return result
 
-    def backward(self, grad_output):
-        if self.tensor_power:
-            return grad_output.mul(self.fw_result).mul_(math.log(self.constant))
+    @staticmethod
+    def backward(ctx, grad_output):
+        if ctx.tensor_first:
+            var, = ctx.saved_variables
+            return grad_output.mul(ctx.constant).mul(var.pow(ctx.constant - 1)), None
         else:
-            a = self.saved_tensors[0]
-            return grad_output.mul(self.constant).mul_(a.pow(self.constant - 1))
+            var_result, = ctx.saved_variables
+            return None, grad_output.mul(var_result).mul_(math.log(ctx.constant))
 
 
 class Negate(InplaceFunction):
 
-    def forward(self, i):
-        if self.inplace:
+    @staticmethod
+    def forward(ctx, i, inplace=False):
+        if inplace:
+            ctx.mark_dirty(i)
             return i.neg_()
         else:
             return i.neg()
 
-    def backward(self, grad_output):
-        return grad_output.neg()
+    @staticmethod
+    def backward(ctx, grad_output):
+        return grad_output.neg(), None

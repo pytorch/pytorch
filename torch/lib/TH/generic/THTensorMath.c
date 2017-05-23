@@ -715,7 +715,10 @@ void THTensor_(remainder)(THTensor *r_, THTensor *t, real value)
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
           rp[i] = (value == 0)? NAN : tp[i] - value * floor(tp[i] / value);
 #else
-          rp[i] = tp[i] - value * (tp[i] / value); // There is no NAN for integers
+          // There is no NAN for integers
+          rp[i] = tp[i] % value;
+          if (rp[i] * value < 0)
+            rp[i] += value;
 #endif
       }
   } else {
@@ -723,7 +726,8 @@ void THTensor_(remainder)(THTensor *r_, THTensor *t, real value)
       TH_TENSOR_APPLY2(real, r_, real, t, *r__data = (value == 0)? NAN : *t_data - value * floor(*t_data / value););
 #else
        // There is no NAN for integers
-      TH_TENSOR_APPLY2(real, r_, real, t, *r__data = *t_data - value * (*t_data / value););
+      TH_TENSOR_APPLY2(real, r_, real, t, *r__data = *t_data % value;
+                                          if (*r__data * value < 0) *r__data += value;);
 #endif
   }
 }
@@ -991,7 +995,10 @@ void THTensor_(cremainder)(THTensor *r_, THTensor *t, THTensor *src)
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
           rp[i] = (sp[i] == 0)? NAN : tp[i] - sp[i] * floor(tp[i] / sp[i]);
 #else
-          rp[i] = tp[i] - sp[i] * (tp[i] / sp[i]); // There is no NAN for integers
+          // There is no NAN for integers
+          rp[i] = tp[i] % sp[i];
+          if (rp[i] * sp[i] < 0)
+            rp[i] += sp[i];
 #endif
       }
   } else {
@@ -999,7 +1006,8 @@ void THTensor_(cremainder)(THTensor *r_, THTensor *t, THTensor *src)
       TH_TENSOR_APPLY3(real, r_, real, t, real, src, *r__data = (*src_data == 0)? NAN : *t_data - *src_data * floor(*t_data / *src_data););
 #else
       // There is no NAN for integers
-      TH_TENSOR_APPLY3(real, r_, real, t, real, src, *r__data = *t_data - *src_data * (*t_data / *src_data););
+      TH_TENSOR_APPLY3(real, r_, real, t, real, src, *r__data = *t_data % *src_data;
+                                                     if (*r__data * *src_data < 0) *r__data += *src_data;);
 #endif
 
   }
@@ -1357,7 +1365,10 @@ void THTensor_(addr)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor 
     THTensor_(copy)(r_, t);
   }
 
-  if(beta != 1)
+  if(beta == 0) {
+    THTensor_(zero)(r_);
+  }
+  else if(beta != 1)
     THTensor_(mul)(r_, r_, beta);
 
   if(r_->stride[0] == 1)
@@ -1474,7 +1485,7 @@ ptrdiff_t THTensor_(numel)(THTensor *t)
   return THTensor_(nElement)(t);
 }
 
-void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension)
+void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension, int keepdim)
 {
   THLongStorage *dim;
 
@@ -1543,9 +1554,14 @@ void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
     THTensor_(free)(tempValues_);
     THLongTensor_free(tempIndices_);
   }
+
+  if (!keepdim) {
+    THTensor_(squeeze1d)(values_, values_, dimension);
+    THLongTensor_squeeze1d(indices_, indices_, dimension);
+  }
 }
 
-void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension)
+void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension, int keepdim)
 {
   THLongStorage *dim;
 
@@ -1611,10 +1627,15 @@ void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
                             *tempIndices__data = *tempIndices__dimOffset;
                           });
   }
+
+  if (!keepdim) {
+    THTensor_(squeeze1d)(values_, values_, dimension);
+    THLongTensor_squeeze1d(indices_, indices_, dimension);
+  }
 }
 
 
-void THTensor_(sum)(THTensor *r_, THTensor *t, int dimension)
+void THTensor_(sum)(THTensor *r_, THTensor *t, int dimension, int keepdim)
 {
   THLongStorage *dim;
 
@@ -1644,9 +1665,13 @@ void THTensor_(sum)(THTensor *r_, THTensor *t, int dimension)
     TH_TENSOR_APPLY2(real, temp_, real, t, *temp__data = *temp__data + *t_data;);
     THTensor_(free)(temp_);
   }
+
+  if (!keepdim) {
+    THTensor_(squeeze1d)(r_, r_, dimension);
+  }
 }
 
-void THTensor_(prod)(THTensor *r_, THTensor *t, int dimension)
+void THTensor_(prod)(THTensor *r_, THTensor *t, int dimension, int keepdim)
 {
   THLongStorage *dim;
 
@@ -1675,6 +1700,10 @@ void THTensor_(prod)(THTensor *r_, THTensor *t, int dimension)
 
     TH_TENSOR_APPLY2(real, temp_, real, t, *temp__data = *temp__data * *t_data;);
     THTensor_(free)(temp_);
+  }
+
+  if (!keepdim) {
+    THTensor_(squeeze1d)(r_, r_, dimension);
   }
 }
 
@@ -2244,7 +2273,7 @@ static void THTensor_(quickselect)(real *arr, long *idx, long k, long elements, 
 #undef REAL_SWAP
 #undef BOTH_SWAP
 
-void THTensor_(mode)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension)
+void THTensor_(mode)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension, int keepdim)
 {
   THLongStorage *dim;
   THTensor *temp_;
@@ -2302,9 +2331,13 @@ void THTensor_(mode)(THTensor *values_, THLongTensor *indices_, THTensor *t, int
 
   THTensor_(free)(temp_);
   THLongTensor_free(tempi_);
+  if (!keepdim) {
+    THTensor_(squeeze1d)(values_, values_, dimension);
+    THLongTensor_squeeze1d(indices_, indices_, dimension);
+  }
 }
 
-void THTensor_(kthvalue)(THTensor *values_, THLongTensor *indices_, THTensor *t, long k, int dimension)
+void THTensor_(kthvalue)(THTensor *values_, THLongTensor *indices_, THTensor *t, long k, int dimension, int keepdim)
 {
   THLongStorage *dim;
   THTensor *temp_;
@@ -2344,9 +2377,13 @@ void THTensor_(kthvalue)(THTensor *values_, THLongTensor *indices_, THTensor *t,
 
   THTensor_(free)(temp_);
   THLongTensor_free(tempi_);
+  if (!keepdim) {
+    THTensor_(squeeze1d)(values_, values_, dimension);
+    THLongTensor_squeeze1d(indices_, indices_, dimension);
+  }
 }
 
-void THTensor_(median)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension)
+void THTensor_(median)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension, int keepdim)
 {
   long t_size_dim, k;
 
@@ -2355,7 +2392,7 @@ void THTensor_(median)(THTensor *values_, THLongTensor *indices_, THTensor *t, i
   t_size_dim = THTensor_(size)(t, dimension);
   k = (t_size_dim-1) >> 1; /* take middle or one-before-middle element */
 
-  THTensor_(kthvalue)(values_, indices_, t, k+1, dimension);
+  THTensor_(kthvalue)(values_, indices_, t, k+1, dimension, keepdim);
 }
 
 void THTensor_(topk)(THTensor *rt_, THLongTensor *ri_, THTensor *t, long k, int dim, int dir, int sorted)
@@ -2686,7 +2723,7 @@ TENSOR_IMPLEMENT_LOGICAL(ne,!=)
 LAB_IMPLEMENT_BASIC_FUNCTION(abs,labs)
 #endif /* long only part */
 
-#if defined(TH_REAL_IS_INT)
+#if defined(TH_REAL_IS_SHORT) || defined(TH_REAL_IS_INT)
 LAB_IMPLEMENT_BASIC_FUNCTION(abs,abs)
 #endif /* int only part */
 
@@ -2710,6 +2747,7 @@ TENSOR_IMPLEMENT_LOGICAL_SUM(logicalany, ||, 0)
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
 
 LAB_IMPLEMENT_BASIC_FUNCTION(log,log)
+LAB_IMPLEMENT_BASIC_FUNCTION(lgamma,lgamma)
 LAB_IMPLEMENT_BASIC_FUNCTION(log1p,log1p)
 LAB_IMPLEMENT_BASIC_FUNCTION(sigmoid,TH_sigmoid)
 LAB_IMPLEMENT_BASIC_FUNCTION(exp,exp)
@@ -2747,16 +2785,16 @@ void THTensor_(lerp)(THTensor *r_, THTensor *a, THTensor *b, real weight)
   TH_TENSOR_APPLY3(real, r_, real, a, real, b, *r__data = TH_lerp(*a_data, *b_data, weight););
 }
 
-void THTensor_(mean)(THTensor *r_, THTensor *t, int dimension)
+void THTensor_(mean)(THTensor *r_, THTensor *t, int dimension, int keepdim)
 {
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimension)(t), 2, "invalid dimension %d",
       dimension + TH_INDEX_BASE);
 
-  THTensor_(sum)(r_, t, dimension);
+  THTensor_(sum)(r_, t, dimension, keepdim);
   THTensor_(div)(r_, r_, t->size[dimension]);
 }
 
-void THTensor_(std)(THTensor *r_, THTensor *t, int dimension, int flag)
+void THTensor_(std)(THTensor *r_, THTensor *t, int dimension, int flag, int keepdim)
 {
   THLongStorage *dim;
 
@@ -2795,9 +2833,13 @@ void THTensor_(std)(THTensor *r_, THTensor *t, int dimension, int flag)
                          sum2 = (sum2 < 0 ? 0 : sum2);
                          *r__data = (real)sqrt(sum2);
                        });
+
+  if (!keepdim) {
+    THTensor_(squeeze1d)(r_, r_, dimension);
+  }
 }
 
-void THTensor_(var)(THTensor *r_, THTensor *t, int dimension, int flag)
+void THTensor_(var)(THTensor *r_, THTensor *t, int dimension, int flag, int keepdim)
 {
   THLongStorage *dim;
 
@@ -2836,9 +2878,13 @@ void THTensor_(var)(THTensor *r_, THTensor *t, int dimension, int flag)
                          sum2 = (sum2 < 0 ? 0 : sum2);
                          *r__data = (real)sum2;
                        });
+
+  if (!keepdim) {
+    THTensor_(squeeze1d)(r_, r_, dimension);
+  }
 }
 
-void THTensor_(norm)(THTensor *r_, THTensor *t, real value, int dimension)
+void THTensor_(norm)(THTensor *r_, THTensor *t, real value, int dimension, int keepdim)
 {
   THLongStorage *dim;
 
@@ -2864,6 +2910,10 @@ void THTensor_(norm)(THTensor *r_, THTensor *t, real value, int dimension)
                          for(i = 0; i < t_size; i++)
                            sum += pow(fabs(t_data[i*t_stride]), value);
                          *r__data = pow(sum, 1.0/value);)
+  }
+
+  if (!keepdim) {
+    THTensor_(squeeze1d)(r_, r_, dimension);
   }
 }
 

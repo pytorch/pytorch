@@ -39,21 +39,25 @@ def chunk(tensor, chunks, dim=0):
     return split(tensor, split_size, dim)
 
 
-def stack(sequence, dim=0):
+def stack(sequence, dim=0, out=None):
     """Concatenates sequence of tensors along a new dimension.
 
     All tensors need to be of the same size.
 
     Arguments:
-        sqequence (Sequence): sequence of tensors to concatenate.
+        sequence (Sequence): sequence of tensors to concatenate.
         dim (int): dimension to insert. Has to be between 0 and the number
             of dimensions of concatenated tensors (inclusive).
     """
     if len(sequence) == 0:
-        raise TypeError("stack expects a non-empty sequence of tensors")
+        raise ValueError("stack expects a non-empty sequence of tensors")
     if dim < 0:
         dim += sequence[0].dim()
-    return torch.cat(list(t.unsqueeze(dim) for t in sequence), dim)
+    inputs = [t.unsqueeze(dim) for t in sequence]
+    if out is None:
+        return torch.cat(inputs, dim)
+    else:
+        return torch.cat(inputs, dim, out=out)
 
 
 def unbind(tensor, dim=0):

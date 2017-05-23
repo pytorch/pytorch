@@ -117,6 +117,7 @@ class _DistTestBase(object):
         self._barrier()
 
     # SEND RECV
+    @unittest.skipIf(BACKEND == 'gloo', "Gloo does not support send/recv")
     def test_send_recv(self):
         rank = dist.get_rank()
         tensor = _build_tensor(rank + 1)
@@ -136,6 +137,8 @@ class _DistTestBase(object):
         self._barrier()
 
     # SEND RECV ANY SOURCE
+    @unittest.skipIf(BACKEND == 'gloo',
+                     "Gloo does not support send/recv from any source")
     def test_send_recv_any_source(self):
         rank = dist.get_rank()
         tensor = _build_tensor(10, rank)
@@ -156,6 +159,7 @@ class _DistTestBase(object):
         self._barrier()
 
     # ISEND
+    @unittest.skipIf(BACKEND == 'gloo', "Gloo does not support isend")
     def test_isend(self):
         rank = dist.get_rank()
         world_size = dist.get_num_processes()
@@ -175,6 +179,7 @@ class _DistTestBase(object):
         self._barrier()
 
     # IRECV
+    @unittest.skipIf(BACKEND == 'gloo', "Gloo does not support irecv")
     def test_irecv(self):
         rank = dist.get_rank()
         world_size = dist.get_num_processes()
@@ -196,13 +201,17 @@ class _DistTestBase(object):
         self._barrier()
 
     # BROADCAST
-    def _test_broadcast_helper(self, group, group_id, rank):
+    def _test_broadcast_helper(self, group, group_id, rank, cuda=False):
         for src in group:
             expected_tensor = _build_tensor(src + 1)
+            if cuda:
+                expected_tensor = expected_tensor.cuda()
             if rank == src:
                 dist.broadcast(expected_tensor, src, group_id)
             else:
                 tensor = _build_tensor(src + 1, -1)
+                if cuda:
+                    tensor = tensor.cuda()
                 dist.broadcast(tensor, src, group_id)
                 self.assertEqual(tensor, expected_tensor)
 
@@ -211,6 +220,11 @@ class _DistTestBase(object):
     def test_broadcast(self):
         group, group_id, rank = self._init_global_test()
         self._test_broadcast_helper(group, group_id, rank)
+
+    @unittest.skipIf(BACKEND != 'gloo', "Only Gloo backend supports CUDA allReduce")
+    def test_broadcast_cuda(self):
+        group, group_id, rank = self._init_global_test()
+        self._test_broadcast_helper(group, group_id, rank, True)
 
     def test_broadcast_group(self):
         group, group_id, rank = self._init_group_test()
@@ -229,12 +243,14 @@ class _DistTestBase(object):
 
         self._barrier()
 
+    @unittest.skipIf(BACKEND == 'gloo', "Gloo does not support reduce")
     def test_reduce_sum(self):
         group, group_id, rank = self._init_global_test()
         self._test_reduce_helper(
             group, group_id, rank, dist.reduce_op.SUM, 2, 10, 2 + (10 * (len(group) - 1))
         )
 
+    @unittest.skipIf(BACKEND == 'gloo', "Gloo does not support reduce")
     def test_reduce_product(self):
         group, group_id, rank = self._init_global_test()
         self._test_reduce_helper(
@@ -242,24 +258,28 @@ class _DistTestBase(object):
             2, 10, reduce((lambda x, y: x * y), [10] * (len(group) - 1), 2)
         )
 
+    @unittest.skipIf(BACKEND == 'gloo', "Gloo does not support reduce")
     def test_reduce_min(self):
         group, group_id, rank = self._init_global_test()
         self._test_reduce_helper(
             group, group_id, rank, dist.reduce_op.MIN, 1010, 1, 1
         )
 
+    @unittest.skipIf(BACKEND == 'gloo', "Gloo does not support reduce")
     def test_reduce_max(self):
         group, group_id, rank = self._init_global_test()
         self._test_reduce_helper(
             group, group_id, rank, dist.reduce_op.MAX, -1, 10, 10
         )
 
+    @unittest.skipIf(BACKEND == 'gloo', "Gloo does not support reduce")
     def test_reduce_group_sum(self):
         group, group_id, rank = self._init_group_test()
         self._test_reduce_helper(
             group, group_id, rank, dist.reduce_op.SUM, 2, 10, 2 + (10 * (len(group) - 1))
         )
 
+    @unittest.skipIf(BACKEND == 'gloo', "Gloo does not support reduce")
     def test_reduce_group_product(self):
         group, group_id, rank = self._init_group_test()
         self._test_reduce_helper(
@@ -267,12 +287,14 @@ class _DistTestBase(object):
             2, 10, reduce((lambda x, y: x * y), [10] * (len(group) - 1), 2)
         )
 
+    @unittest.skipIf(BACKEND == 'gloo', "Gloo does not support reduce")
     def test_reduce_group_min(self):
         group, group_id, rank = self._init_group_test()
         self._test_reduce_helper(
             group, group_id, rank, dist.reduce_op.MIN, 1010, 1, 1
         )
 
+    @unittest.skipIf(BACKEND == 'gloo', "Gloo does not support reduce")
     def test_reduce_group_max(self):
         group, group_id, rank = self._init_group_test()
         self._test_reduce_helper(
@@ -280,14 +302,19 @@ class _DistTestBase(object):
         )
 
     # ALL REDUCE
-    def _test_all_reduce_helper(self, group, group_id, rank, op, master_value, worker_value, expected_value):
+    def _test_all_reduce_helper(self, group, group_id, rank, op, master_value,
+                                worker_value, expected_value, cuda=False):
         for src in group:
             if rank == src:
                 tensor = _build_tensor(src + 1).fill_(master_value)
+                if cuda:
+                    tensor = tensor.cuda()
                 dist.all_reduce(tensor, op, group_id)
                 self.assertEqual(tensor, _build_tensor(src + 1, expected_value))
             else:
                 tensor = _build_tensor(src + 1).fill_(worker_value)
+                if cuda:
+                    tensor = tensor.cuda()
                 dist.all_reduce(tensor, op, group_id)
                 self.assertEqual(tensor, _build_tensor(src + 1, expected_value))
 
@@ -297,6 +324,13 @@ class _DistTestBase(object):
         group, group_id, rank = self._init_global_test()
         self._test_all_reduce_helper(
             group, group_id, rank, dist.reduce_op.SUM, 2, 10, 2 + (10 * (len(group) - 1))
+        )
+
+    @unittest.skipIf(BACKEND != 'gloo', "Only Gloo backend supports CUDA allReduce")
+    def test_all_reduce_sum_cuda(self):
+        group, group_id, rank = self._init_global_test()
+        self._test_all_reduce_helper(
+            group, group_id, rank, dist.reduce_op.SUM, 2, 10, 2 + (10 * (len(group) - 1)), True
         )
 
     def test_all_reduce_product(self):
@@ -358,10 +392,12 @@ class _DistTestBase(object):
 
         self._barrier()
 
+    @unittest.skipIf(BACKEND == 'gloo', "Gloo does not support scatter")
     def test_scatter(self):
         group, group_id, rank = self._init_global_test()
         self._test_scatter_helper(group, group_id, rank)
 
+    @unittest.skipIf(BACKEND == 'gloo', "Gloo does not support scatter")
     def test_scatter_group(self):
         group, group_id, rank = self._init_group_test()
         self._test_scatter_helper(group, group_id, rank)
@@ -382,10 +418,12 @@ class _DistTestBase(object):
 
         self._barrier()
 
+    @unittest.skipIf(BACKEND == 'gloo', "Gloo does not support gather")
     def test_gather(self):
         group, group_id, rank = self._init_global_test()
         self._test_gather_helper(group, group_id, rank)
 
+    @unittest.skipIf(BACKEND == 'gloo', "Gloo does not support gather")
     def test_gather_group(self):
         group, group_id, rank = self._init_group_test()
         self._test_gather_helper(group, group_id, rank)
@@ -437,10 +475,10 @@ class _DistTestBase(object):
         group, group_id, rank = self._init_group_test()
         self._test_barrier_helper(group, group_id, rank)
 
-if BACKEND == 'tcp':
+if BACKEND == 'tcp' or BACKEND == 'gloo':
     WORLD_SIZE = os.environ['WORLD_SIZE']
 
-    class TestTCP(TestCase, _DistTestBase):
+    class TestTCPOrGloo(TestCase, _DistTestBase):
 
         MANAGER_PROCESS_RANK = -1
         JOIN_TIMEOUT = 5

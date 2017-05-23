@@ -1,6 +1,8 @@
 #include "convolution.h"
 
 #include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/autograd/functions/utils.h"
+#include "torch/csrc/autograd/functions/basic_ops.h"
 #include "torch/csrc/nn/THNN_generic.h"
 #include "torch/csrc/utils/auto_gpu.h"
 
@@ -51,6 +53,21 @@ auto ConvParams::view1d_as_2d() -> void {
     dilation.insert(dilation.begin(), 1);
     output_padding.insert(output_padding.begin(), 0);
   }
+}
+
+auto ConvParams::use_cudnn(const Tensor& input) const -> bool {
+#ifdef WITH_CUDNN
+  if (!input.isCuda() || !cudnn_enabled) {
+    return false;
+  }
+  if (is_dilated()) {
+    cudaDeviceProp* prop = THCState_getCurrentDeviceProperties(state);
+    // NOTE: extra parenthesis around numbers disable clang warnings about dead code
+    return ((CUDNN_VERSION >= (6021)) || (CUDNN_VERSION >= (6000) && prop->major >= 5)) && !transposed;
+  }
+  return true;
+#endif
+  return false;
 }
 
 auto ConvForward::output_size(Tensor& input, Tensor& weight) -> std::vector<long> {
@@ -104,7 +121,7 @@ static auto view3d(const Tensor& tensor) -> std::unique_ptr<Tensor> {
 }
 
 auto ConvForward::apply(const variable_list& inputs) -> variable_list {
-  if (inputs.size() != 3) throw std::runtime_error("expected three inputs");
+  check_input_variables("ConvNd", inputs, 3, 2);
   if (is_padding_neg()) throw std::runtime_error("negative padding is not supported");
   if (is_output_padding_neg()) throw std::runtime_error("negative output_padding is not supported");
 
@@ -123,17 +140,12 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
   auto weight_size = weight->sizes();
   std::vector<long> kernel_size(weight_size.begin() + 2, weight_size.end());
 
-  bool use_cudnn = false;
-#ifdef WITH_CUDNN
-  use_cudnn = (input->isCuda() && (!is_dilated() || CUDNN_VERSION >= 6000)) && cudnn_enabled;
-#endif
-
   std::unique_ptr<Tensor> output;
   tensor_list columns(groups);
   tensor_list ones(groups);
   std::unique_ptr<Convolution> convolution;
 
-  if (use_cudnn) {
+  if (use_cudnn(*input)) {
 #ifdef WITH_CUDNN
     output = input->newTensor();
     output->resize(output_size(*input, *weight));
@@ -178,26 +190,25 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
     output = view3d(*output);
   }
 
-  auto creator = std::make_shared<ConvBackward>(
-      flags(inputs), *this,
-      inputs[0]->save(), inputs[1]->save(), Variable::save_opt(inputs[2].get()),
-      std::move(columns), std::move(ones), std::move(convolution));
-
-  variable_list results(1);
-  results[0] = std::make_shared<Variable>(std::move(output), creator);
-  return results;
+  auto outputs = as_tensor_list(std::move(output));
+  return wrap_outputs(inputs, std::move(outputs), [&](FunctionFlags f) {
+    return std::make_shared<ConvBackward>(
+        f, *this,
+        inputs[0]->save(this), inputs[1]->save(this), Variable::save_opt(inputs[2].get(), this),
+        std::move(columns), std::move(ones), std::move(convolution));
+  });
 };
 
 auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
-  if (grad_outputs.size() != 1) throw std::runtime_error("expected one grad_output");
+  check_input_variables("ConvNdBackward", grad_outputs, 1);
   if (is_padding_neg()) throw std::runtime_error("negative padding is not supported");
   if (is_output_padding_neg()) throw std::runtime_error("negative output_padding is not supported");
 
   AutoGPU guard(input_.data->getDevice());
 
-  auto input = input_.unpack()->contiguous();
-  std::unique_ptr<Tensor> weight(weight_.unpack()->clone_shallow());
-  std::unique_ptr<Tensor> bias(bias_.unpack() ? bias_.unpack()->clone_shallow() : nullptr);
+  auto input = input_.unpack_data()->contiguous();
+  std::unique_ptr<Tensor> weight(weight_.unpack_data()->clone_shallow());
+  auto bias = bias_.unpack_data();
   auto grad_output = grad_outputs[0]->data->contiguous();
 
   int k = input->nDim();
@@ -210,16 +221,13 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
   auto weight_size = weight->sizes();
   std::vector<long> kernel_size(weight_size.begin() + 2, weight_size.end());
 
-  bool use_cudnn = false;
-#ifdef WITH_CUDNN
-  use_cudnn = (input->isCuda() && (!is_dilated() || CUDNN_VERSION >= 6000)) && cudnn_enabled;
-#endif
+  bool use_cudnn = this->use_cudnn(*input);
 
   std::unique_ptr<Tensor> grad_input;
   std::unique_ptr<Tensor> grad_weight;
   std::unique_ptr<Tensor> grad_bias;
 
-  if (needs_input_grad(0)) {
+  if (should_compute_output(0)) {
     if (use_cudnn) {
 #ifdef WITH_CUDNN
       grad_input = input->newTensor();
@@ -256,7 +264,7 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
     }
   }
 
-  if (needs_input_grad(1) || needs_input_grad(2)) {
+  if (should_compute_output(1) || should_compute_output(2)) {
     if (use_cudnn) {
 #ifdef WITH_CUDNN
       grad_weight = weight->newTensor();
@@ -266,7 +274,7 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
           (THVoidTensor*)grad_output->cdata(), (THVoidTensor*)input->cdata(), (THVoidTensor*)grad_weight->cdata(),
           convolution.get(), benchmark);
 
-      if (bias && needs_input_grad(2)) {
+      if (bias && should_compute_output(2)) {
         grad_bias = bias->newTensor();
         grad_bias->resizeAs(*bias);
         cudnn_convolution_backward_bias(
@@ -292,22 +300,25 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
             columns[g].get(), ones[g].get(), kernel_size, *this);
       }
       grad_weight = cat(grad_weights, 0);
-      grad_bias = cat(grad_biases, 0);
+      if (bias && should_compute_output(2)) {
+        grad_bias = cat(grad_biases, 0);
+      }
     }
   }
 
   if (k == 3) {
-    if (needs_input_grad(0)) {
+    if (should_compute_output(0)) {
         grad_input = view3d(*grad_input);
     }
     grad_weight = view3d(*grad_weight);
   }
 
-  variable_list results(3);
-  results[0] = Variable::of(std::move(grad_input));
-  results[1] = Variable::of(std::move(grad_weight));
-  results[2] = Variable::of(std::move(grad_bias));
-  return results;
+  auto outputs =  as_tensor_list(std::move(grad_input),
+                                 std::move(grad_weight),
+                                 std::move(grad_bias));
+  return wrap_outputs(grad_outputs, std::move(outputs), [&](FunctionFlags f) {
+    return std::make_shared<Error>("ConvBackward is not differentiable", std::move(f));
+  });
 };
 
 auto ConvBackward::releaseVariables() -> void {
@@ -326,51 +337,70 @@ static std::unique_ptr<Tensor> compute_output(
   auto dim = input->nDim();
   auto dilated = params.is_dilated();
 
-  if (params.transposed && dim == 4) {
-    SpatialFullConvolution_updateOutput(
-        input, output.get(), weight, bias, columns, ones,
-        kernel_size[1], kernel_size[0],
-        params.stride[1], params.stride[0],
-        params.padding[1], params.padding[0],
-        params.output_padding[1], params.output_padding[0]);
-  } else if (params.transposed && dim == 5) {
-    VolumetricFullConvolution_updateOutput(
-        input, output.get(), weight, bias, columns, ones,
-        params.stride[0], params.stride[2], params.stride[1],
-        params.padding[0], params.padding[2], params.padding[1],
-        params.output_padding[0], params.output_padding[2], params.output_padding[1]);
-  } else if (dilated && dim == 4) {
-    SpatialDilatedConvolution_updateOutput(
-        input, output.get(), weight, bias, columns, ones,
-        kernel_size[1], kernel_size[0],
-        params.stride[1], params.stride[0],
-        params.padding[1], params.padding[0],
-        params.dilation[1], params.dilation[0]);
-  } else if (dilated && dim == 5) {
-    VolumetricDilatedConvolution_updateOutput(
-        input, output.get(), weight, bias, columns, ones,
-        kernel_size[0], kernel_size[2], kernel_size[1],
-        params.stride[0], params.stride[2], params.stride[1],
-        params.padding[0], params.padding[2], params.padding[1],
-        params.dilation[0], params.dilation[2], params.dilation[1]);
-  } else if (dim == 4) {
-    SpatialConvolutionMM_updateOutput(
-        input, output.get(), weight, bias, columns, ones,
-        kernel_size[1], kernel_size[0],
-        params.stride[1], params.stride[0],
-        params.padding[1], params.padding[0]);
-  } else if (dim == 5 && input->isCuda()) {
-    VolumetricConvolution_updateOutput(
-        input, output.get(), weight, bias, columns, ones,
-        params.stride[0], params.stride[2], params.stride[1],
-        params.padding[0], params.padding[2], params.padding[1]);
-  } else if (dim == 5) {
-    VolumetricConvolutionMM_updateOutput(
-        input, output.get(), weight, bias, columns,
-        kernel_size[0], kernel_size[2], kernel_size[1],
-        params.stride[0], params.stride[2], params.stride[1],
-        params.padding[0], params.padding[2], params.padding[1]);
+  if (dilated) {
+    if (params.transposed) {
+      /* dilated && transposed */
+      /* NOT IMPLEMENTED */
+    } else /* !transposed */ {
+      /* dilated && !transposed */
+      if (dim == 4) {
+        SpatialDilatedConvolution_updateOutput(
+            input, output.get(), weight, bias, columns, ones,
+            kernel_size[1], kernel_size[0],
+            params.stride[1], params.stride[0],
+            params.padding[1], params.padding[0],
+            params.dilation[1], params.dilation[0]); goto done;
+      } else if (dim == 5) {
+        VolumetricDilatedConvolution_updateOutput(
+            input, output.get(), weight, bias, columns, ones,
+            kernel_size[0], kernel_size[2], kernel_size[1],
+            params.stride[0], params.stride[2], params.stride[1],
+            params.padding[0], params.padding[2], params.padding[1],
+            params.dilation[0], params.dilation[2], params.dilation[1]); goto done;
+      }
+    }
+  } else /* !dilated */ {
+    if (params.transposed) {
+      /* !dilated && transposed */
+      if (dim == 4) {
+        SpatialFullConvolution_updateOutput(
+            input, output.get(), weight, bias, columns, ones,
+            kernel_size[1], kernel_size[0],
+            params.stride[1], params.stride[0],
+            params.padding[1], params.padding[0],
+            params.output_padding[1], params.output_padding[0]); goto done;
+      } else if (dim == 5) {
+        VolumetricFullConvolution_updateOutput(
+            input, output.get(), weight, bias, columns, ones,
+            params.stride[0], params.stride[2], params.stride[1],
+            params.padding[0], params.padding[2], params.padding[1],
+            params.output_padding[0], params.output_padding[2], params.output_padding[1]); goto done;
+      }
+    } else /* !transposed */ {
+      /* !dilated && !transposed */
+      if (dim == 4) {
+        SpatialConvolutionMM_updateOutput(
+            input, output.get(), weight, bias, columns, ones,
+            kernel_size[1], kernel_size[0],
+            params.stride[1], params.stride[0],
+            params.padding[1], params.padding[0]); goto done;
+      } else if (dim == 5 && input->isCuda()) {
+        VolumetricConvolution_updateOutput(
+            input, output.get(), weight, bias, columns, ones,
+            params.stride[0], params.stride[2], params.stride[1],
+            params.padding[0], params.padding[2], params.padding[1]); goto done;
+      } else if (dim == 5) {
+        VolumetricConvolutionMM_updateOutput(
+            input, output.get(), weight, bias, columns,
+            kernel_size[0], kernel_size[2], kernel_size[1],
+            params.stride[0], params.stride[2], params.stride[1],
+            params.padding[0], params.padding[2], params.padding[1]); goto done;
+      }
+    }
   }
+  throw std::runtime_error("unsupported ConvNd parameters");
+
+done:
   return output;
 }
 
@@ -383,51 +413,70 @@ static std::unique_ptr<Tensor> compute_grad_input(
   auto dim = input->nDim();
   auto dilated = params.is_dilated();
 
-  if (params.transposed && dim == 4) {
-    SpatialFullConvolution_updateGradInput(
-        input, grad_output, grad_input.get(), weight, columns,
-        kernel_size[1], kernel_size[0],
-        params.stride[1], params.stride[0],
-        params.padding[1], params.padding[0],
-        params.output_padding[1], params.output_padding[0]);
-  } else if (params.transposed && dim == 5) {
-    VolumetricFullConvolution_updateGradInput(
-        input, grad_output, grad_input.get(), weight, columns, ones,
-        params.stride[0], params.stride[2], params.stride[1],
-        params.padding[0], params.padding[2], params.padding[1],
-        params.output_padding[0], params.output_padding[2], params.output_padding[1]);
-  } else if (dilated && dim == 4) {
-    SpatialDilatedConvolution_updateGradInput(
-        input, grad_output, grad_input.get(), weight, columns,
-        kernel_size[1], kernel_size[0],
-        params.stride[1], params.stride[0],
-        params.padding[1], params.padding[0],
-        params.dilation[1], params.dilation[0]);
-  } else if (dilated && dim == 5) {
-    VolumetricDilatedConvolution_updateGradInput(
-        input, grad_output, grad_input.get(), weight, columns,
-        kernel_size[0], kernel_size[2], kernel_size[1],
-        params.stride[0], params.stride[2], params.stride[1],
-        params.padding[0], params.padding[2], params.padding[1],
-        params.dilation[0], params.dilation[2], params.dilation[1]);
-  } else if (dim == 4) {
-    SpatialConvolutionMM_updateGradInput(
-        input, grad_output, grad_input.get(), weight, columns, ones,
-        kernel_size[1], kernel_size[0],
-        params.stride[1], params.stride[0],
-        params.padding[1], params.padding[0]);
-  } else if (dim == 5 && input->isCuda()) {
-    VolumetricConvolution_updateGradInput(
-        input, grad_output, grad_input.get(), weight, columns,
-        params.stride[0], params.stride[2], params.stride[1],
-        params.padding[0], params.padding[2], params.padding[1]);
-  } else if (dim == 5) {
-    VolumetricConvolutionMM_updateGradInput(
-        input, grad_output, grad_input.get(), weight, columns, ones,
-        kernel_size[0], kernel_size[2], kernel_size[1],
-        params.stride[0], params.stride[2], params.stride[1],
-        params.padding[0], params.padding[2], params.padding[1]);
+  if (dilated) {
+    if (params.transposed) {
+      /* dilated && transposed */
+      /* NOT IMPLEMENTED */
+    } else /* !transposed */ {
+      /* dilated && !transposed */
+      if (dim == 4) {
+        SpatialDilatedConvolution_updateGradInput(
+            input, grad_output, grad_input.get(), weight, columns,
+            kernel_size[1], kernel_size[0],
+            params.stride[1], params.stride[0],
+            params.padding[1], params.padding[0],
+            params.dilation[1], params.dilation[0]); goto done;
+      } else if (dim == 5) {
+        VolumetricDilatedConvolution_updateGradInput(
+            input, grad_output, grad_input.get(), weight, columns,
+            kernel_size[0], kernel_size[2], kernel_size[1],
+            params.stride[0], params.stride[2], params.stride[1],
+            params.padding[0], params.padding[2], params.padding[1],
+            params.dilation[0], params.dilation[2], params.dilation[1]); goto done;
+      }
+    }
+  } else /* !dilated */ {
+    if (params.transposed) {
+      /* !dilated && transposed */
+      if (dim == 4) {
+        SpatialFullConvolution_updateGradInput(
+            input, grad_output, grad_input.get(), weight, columns,
+            kernel_size[1], kernel_size[0],
+            params.stride[1], params.stride[0],
+            params.padding[1], params.padding[0],
+            params.output_padding[1], params.output_padding[0]); goto done;
+      } else if (dim == 5) {
+        VolumetricFullConvolution_updateGradInput(
+            input, grad_output, grad_input.get(), weight, columns, ones,
+            params.stride[0], params.stride[2], params.stride[1],
+            params.padding[0], params.padding[2], params.padding[1],
+            params.output_padding[0], params.output_padding[2], params.output_padding[1]); goto done;
+      }
+    } else /* !transposed */ {
+      /* !dilated && !transposed */
+      if (dim == 4) {
+        SpatialConvolutionMM_updateGradInput(
+            input, grad_output, grad_input.get(), weight, columns, ones,
+            kernel_size[1], kernel_size[0],
+            params.stride[1], params.stride[0],
+            params.padding[1], params.padding[0]); goto done;
+      } else if (dim == 5 && input->isCuda()) {
+        VolumetricConvolution_updateGradInput(
+            input, grad_output, grad_input.get(), weight, columns,
+            params.stride[0], params.stride[2], params.stride[1],
+            params.padding[0], params.padding[2], params.padding[1]); goto done;
+      } else if (dim == 5) {
+        VolumetricConvolutionMM_updateGradInput(
+            input, grad_output, grad_input.get(), weight, columns, ones,
+            kernel_size[0], kernel_size[2], kernel_size[1],
+            params.stride[0], params.stride[2], params.stride[1],
+            params.padding[0], params.padding[2], params.padding[1]); goto done;
+      }
+    }
   }
+  throw std::runtime_error("unsupported ConvNdBackward parameters");
+
+done:
   return grad_input;
 }
 
@@ -440,7 +489,7 @@ static tensor_pair compute_grad_params(
   grad_weight->resizeAs(*weight).zero();
 
   std::unique_ptr<Tensor> grad_bias;
-  if (bias && params.needs_input_grad(2)) {
+  if (bias && params.should_compute_output(2)) {
     grad_bias = bias->newTensor();
     grad_bias->resizeAs(*bias).zero();
   }
@@ -448,51 +497,70 @@ static tensor_pair compute_grad_params(
   auto dim = input->nDim();
   auto dilated = params.is_dilated();
 
-  if (params.transposed && dim == 4) {
-    SpatialFullConvolution_accGradParameters(
-        input, grad_output, grad_weight.get(), grad_bias.get(), columns, ones,
-        kernel_size[1], kernel_size[0],
-        params.stride[1], params.stride[0],
-        params.padding[1], params.padding[0],
-        params.output_padding[1], params.output_padding[0], 1.0);
-  } else if (params.transposed && dim == 5) {
-    VolumetricFullConvolution_accGradParameters(
-        input, grad_output, grad_weight.get(), grad_bias.get(), columns, ones,
-        params.stride[0], params.stride[2], params.stride[1],
-        params.padding[0], params.padding[2], params.padding[1],
-        params.output_padding[0], params.output_padding[2], params.output_padding[1], 1.0);
-  } else if (dilated && dim == 4) {
-    SpatialDilatedConvolution_accGradParameters(
-        input, grad_output, grad_weight.get(), grad_bias.get(), columns, ones,
-        kernel_size[1], kernel_size[0],
-        params.stride[1], params.stride[0],
-        params.padding[1], params.padding[0],
-        params.dilation[1], params.dilation[0], 1.0);
-  } else if (dilated && dim == 5) {
-    VolumetricDilatedConvolution_accGradParameters(
-        input, grad_output, grad_weight.get(), grad_bias.get(), columns, ones,
-        kernel_size[0], kernel_size[2], kernel_size[1],
-        params.stride[0], params.stride[2], params.stride[1],
-        params.padding[0], params.padding[2], params.padding[1],
-        params.dilation[0], params.dilation[2], params.dilation[1], 1.0);
-  } else if (dim == 4) {
-    SpatialConvolutionMM_accGradParameters(
-        input, grad_output, grad_weight.get(), grad_bias.get(), columns, ones,
-        kernel_size[1], kernel_size[0],
-        params.stride[1], params.stride[0],
-        params.padding[1], params.padding[0], 1.0);
-  } else if (dim == 5 && input->isCuda()) {
-    VolumetricConvolution_accGradParameters(
-        input, grad_output, grad_weight.get(), grad_bias.get(), columns, ones,
-        params.stride[0], params.stride[2], params.stride[1],
-        params.padding[0], params.padding[2], params.padding[1], 1.0);
-  } else if (dim == 5) {
-    VolumetricConvolutionMM_accGradParameters(
-        input, grad_output, grad_weight.get(), grad_bias.get(), columns,
-        kernel_size[0], kernel_size[2], kernel_size[1],
-        params.stride[0], params.stride[2], params.stride[1],
-        params.padding[0], params.padding[2], params.padding[1], 1.0);
+  if (dilated) {
+    if (params.transposed) {
+      /* dilated && transposed */
+      /* NOT IMPLEMENTED */
+    } else /* !transposed */ {
+      /* dilated && !transposed */
+      if (dim == 4) {
+        SpatialDilatedConvolution_accGradParameters(
+            input, grad_output, grad_weight.get(), grad_bias.get(), columns, ones,
+            kernel_size[1], kernel_size[0],
+            params.stride[1], params.stride[0],
+            params.padding[1], params.padding[0],
+            params.dilation[1], params.dilation[0], 1.0); goto done;
+      } else if (dim == 5) {
+        VolumetricDilatedConvolution_accGradParameters(
+            input, grad_output, grad_weight.get(), grad_bias.get(), columns, ones,
+            kernel_size[0], kernel_size[2], kernel_size[1],
+            params.stride[0], params.stride[2], params.stride[1],
+            params.padding[0], params.padding[2], params.padding[1],
+            params.dilation[0], params.dilation[2], params.dilation[1], 1.0); goto done;
+      }
+    }
+  } else /* !dilated */ {
+    if (params.transposed) {
+      /* !dilated && transposed */
+      if (dim == 4) {
+        SpatialFullConvolution_accGradParameters(
+            input, grad_output, grad_weight.get(), grad_bias.get(), columns, ones,
+            kernel_size[1], kernel_size[0],
+            params.stride[1], params.stride[0],
+            params.padding[1], params.padding[0],
+            params.output_padding[1], params.output_padding[0], 1.0); goto done;
+      } else if (dim == 5) {
+        VolumetricFullConvolution_accGradParameters(
+            input, grad_output, grad_weight.get(), grad_bias.get(), columns, ones,
+            params.stride[0], params.stride[2], params.stride[1],
+            params.padding[0], params.padding[2], params.padding[1],
+            params.output_padding[0], params.output_padding[2], params.output_padding[1], 1.0); goto done;
+      }
+    } else /* !transposed */ {
+      /* !dilated && !transposed */
+      if (dim == 4) {
+        SpatialConvolutionMM_accGradParameters(
+            input, grad_output, grad_weight.get(), grad_bias.get(), columns, ones,
+            kernel_size[1], kernel_size[0],
+            params.stride[1], params.stride[0],
+            params.padding[1], params.padding[0], 1.0); goto done;
+      } else if (dim == 5 && input->isCuda()) {
+        VolumetricConvolution_accGradParameters(
+            input, grad_output, grad_weight.get(), grad_bias.get(), columns, ones,
+            params.stride[0], params.stride[2], params.stride[1],
+            params.padding[0], params.padding[2], params.padding[1], 1.0); goto done;
+      } else if (dim == 5) {
+        VolumetricConvolutionMM_accGradParameters(
+            input, grad_output, grad_weight.get(), grad_bias.get(), columns,
+            kernel_size[0], kernel_size[2], kernel_size[1],
+            params.stride[0], params.stride[2], params.stride[1],
+            params.padding[0], params.padding[2], params.padding[1], 1.0); goto done;
+      }
+    }
   }
+  throw std::runtime_error("unsupported ConvNdBackward parameters");
+
+done:
   return std::make_pair<>(std::move(grad_weight), std::move(grad_bias));
 }
 

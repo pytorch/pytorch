@@ -3,7 +3,6 @@
 #include "THCHalfAutoNumerics.cuh"
 
 #include <cusparse.h>
-#include <thrust/device_vector.h>
 
 static cusparseHandle_t cusparse_handle = 0;
 

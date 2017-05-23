@@ -24,6 +24,12 @@ TH_API void THTensor_(spaddcmul)(THTensor *r_, THTensor *t, real value, THSTenso
 TH_API void THSTensor_(spaddmm)(THTensor *r_, real beta, THTensor *t, real alpha, THSTensor *sparse, THTensor *dense);
 // sparse = beta * sparse + alpha * sparse * dense
 TH_API void THSTensor_(sspaddmm)(THSTensor *r_, real beta, THSTensor *t, real alpha, THSTensor *sparse, THTensor *dense);
+// hybrid = alpha * sparse * dense
+TH_API void THSTensor_(hspmm)(THSTensor *r_, real alpha, THSTensor *sparse, THTensor *dense);
 TH_API void THSTensor_(spcadd)(THTensor *r_, THTensor *dense, real value, THSTensor *sparse);
+
+#if defined(THS_REAL_IS_FLOAT) || defined(THS_REAL_IS_DOUBLE)
+TH_API void THSTensor_(pow)(THSTensor *r_, THSTensor *t, real value);
+#endif
 
 #endif
