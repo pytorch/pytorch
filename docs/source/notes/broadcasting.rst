@@ -80,3 +80,29 @@ For Example::
     >>> y=torch.FloatTensor(3,1,7)
     >>> (x.add_(y)).size()
     RuntimeError: The expanded size of the tensor (1) must match the existing size (7) at non-singleton dimension 2.
+
+Backwards compatibility
+----------------------
+Prior versions of PyTorch allowed certain pointwise functions to execute on tensors with different shapes,
+as long as the number of elements in each tensor was equal.  The pointwise operation would then be carried
+out by viewing each tensor as 1-dimensional.  PyTorch now supports broadcasting and the "1-dimensional"
+pointwise behavior is considered deprecated and will generate a Python warning in cases where tensors are
+not broadcastable, but have the same number of elements.
+
+Note that the introduction of broadcasting can cause backwards incompatible changes in the case where
+two tensors do not have the same shape, but are broadcastable and have the same number of elements.
+For Example::
+
+    >>> torch.add(torch.ones(4,1), torch.randn(4))
+    
+would previously produce a Tensor with size: torch.Size([4,1]), but now produces a Tensor with size: torch.Size([4,4]).
+In order to help identify cases in your code where backwards incompatibilities introduced by broadcasting may exist,
+you may set `torch.utils.backcompat.broadcast.warning.enabled` to `True`, which will generate a python warning
+in such cases.
+
+For Example::
+
+    >>> torch.utils.backcompat.broadcast.warning.enabled=True
+    >>> torch.add(torch.ones(4,1), torch.ones(4))
+    __main__:1: UserWarning: self and other do not have the same shape, but are broadcastable, and have the same number of elements.
+    Changing behavior in a backwards incompatible manner to broadcasting rather than viewing as 1-dimensional.
