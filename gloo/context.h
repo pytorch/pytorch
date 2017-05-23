@@ -15,12 +15,6 @@
 #include "gloo/transport/pair.h"
 
 namespace gloo {
-namespace rendezvous {
-class ContextFactory;
-}
-}
-
-namespace gloo {
 
 class Context {
  public:

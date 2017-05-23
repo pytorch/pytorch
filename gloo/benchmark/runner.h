@@ -17,6 +17,7 @@
 #include "gloo/benchmark/benchmark.h"
 #include "gloo/benchmark/options.h"
 #include "gloo/benchmark/timer.h"
+#include "gloo/rendezvous/context.h"
 #include "gloo/transport/device.h"
 
 namespace gloo {
@@ -46,9 +47,8 @@ class Runner {
   void printDistribution(int elements);
 
   options options_;
-  std::shared_ptr<::gloo::rendezvous::ContextFactory> contextFactory_;
-
   std::shared_ptr<transport::Device> device_;
+  std::shared_ptr<rendezvous::ContextFactory> contextFactory_;
 
   long broadcastValue_;
   std::unique_ptr<Algorithm> broadcast_;
