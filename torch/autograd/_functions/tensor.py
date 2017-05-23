@@ -727,6 +727,7 @@ class Cumprod(Function):
 
         return grad_input
 
+
 class Unfold(Function):
 
     @staticmethod
