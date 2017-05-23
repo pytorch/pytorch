@@ -466,6 +466,31 @@ void THTensor_(scatter)(THTensor *tensor, int dim, THLongTensor *index, THTensor
                        })
 }
 
+void THTensor_(scatterAdd)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src)
+{
+  long elems_per_row, i, idx;
+
+  THArgCheck(dim < THTensor_(nDimension)(tensor), 2, "Index dimension is out of bounds");
+  THArgCheck(THLongTensor_nDimension(index) == THTensor_(nDimension)(tensor), 3,
+             "Index tensor must have same dimensions as output tensor");
+  THArgCheck(THTensor_(nDimension)(src) == THTensor_(nDimension)(tensor), 4,
+             "Input tensor must have same dimensions as output tensor");
+
+  elems_per_row = THLongTensor_size(index, dim);
+
+  TH_TENSOR_DIM_APPLY3(real, tensor, real, src, long, index, dim,
+                       for (i = 0; i < elems_per_row; ++i)
+                       {
+                         idx = *(index_data + i*index_stride);
+                         if (idx < TH_INDEX_BASE || idx >= tensor_size + TH_INDEX_BASE)
+                         {
+                           THFree(TH_TENSOR_DIM_APPLY_counter);
+                           THError("Invalid index in scatterAdd");
+                         }
+                         tensor_data[(idx - TH_INDEX_BASE) * tensor_stride] += *(src_data + i*src_stride);
+                       })
+}
+
 void THTensor_(scatterFill)(THTensor *tensor, int dim, THLongTensor *index, real val)
 {
   long elems_per_row, i, idx;
