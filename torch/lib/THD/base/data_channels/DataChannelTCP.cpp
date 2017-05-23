@@ -60,24 +60,24 @@ void DataChannelTCP::RequestTCP::wait() {
 }
 
 
-DataChannelTCP::DataChannelTCP()
-  : DataChannelTCP(-1)
+DataChannelTCP::DataChannelTCP(InitMethod::Config config)
+  : DataChannelTCP(config, -1)
 {}
 
 
-DataChannelTCP::DataChannelTCP(int timeout)
+DataChannelTCP::DataChannelTCP(InitMethod::Config config, int timeout)
   : _socket(-1)
   , _port(0)
   , _timeout(timeout)
   , _poll_events(nullptr)
 {
-  _rank = load_rank_env();
+  _rank = config.rank;
 
   if (_rank == MASTER_RANK) { // MASTER
-    rank_type processes_number;
-    std::tie(_port, processes_number) = load_master_env();
+    _socket = config.master.listen_socket;
+    _port = config.master.listen_port;
 
-    _processes.resize(processes_number);
+    _processes.resize(config.master.world_size);
     _processes[_rank] = {
       .rank = _rank,
       .address = "",
@@ -85,9 +85,8 @@ DataChannelTCP::DataChannelTCP(int timeout)
       .socket = -1,
     };
   } else { // WORKER
-    std::string address;
-    port_type port;
-    std::tie(address, port) = load_worker_env();
+    std::string address = config.worker.address;
+    port_type port = config.worker.listen_port;
 
     // add master
     _processes.resize(1);
@@ -118,7 +117,7 @@ bool DataChannelTCP::initWorker() {
   master.socket = connect(master.address, master.port);
   int master_socket = master.socket;
 
-  std::tie(_socket, _port) = listen();
+  std::tie(_socket, std::ignore, _port) = listen();
 
   send_bytes<rank_type>(master_socket, &_rank, 1, true);
   send_bytes<port_type>(master_socket, &_port, 1); // send listening port to master
@@ -189,8 +188,6 @@ bool DataChannelTCP::initWorker() {
 
 
 bool DataChannelTCP::initMaster() {
-  std::tie(_socket, std::ignore) = listen(_port);
-
   // wait for all workers to connect
   std::size_t workers = _processes.size() - 1;
   while (workers > 0) {

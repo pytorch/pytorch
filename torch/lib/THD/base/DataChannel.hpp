@@ -4,6 +4,7 @@
 #include "ChannelUtils.hpp"
 #include "DataChannel.h"
 #include "Scalar.hpp"
+#include "init_methods/InitMethod.hpp"
 
 #include <THPP/Tensor.hpp>
 
@@ -99,7 +100,8 @@ struct DataChannel {
 
   virtual THDGroup newGroup(const std::vector<rank_type>& ranks) = 0;
 
-  static DataChannel* newChannel(THDChannelType type);
+  static DataChannel* newChannel(THDChannelType type, std::string init_method,
+                                 int world_size, std::string group_name);
 };
 
 } // namespace thd

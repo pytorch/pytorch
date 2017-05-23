@@ -15,7 +15,7 @@ struct Store : public ::gloo::rendezvous::Store {
 private:
   struct StoreDeamon {
     StoreDeamon() = delete;
-    StoreDeamon(port_type port, rank_type world_size);
+    StoreDeamon(int listen_socket, rank_type world_size);
     ~StoreDeamon();
 
     void join();
@@ -27,7 +27,7 @@ private:
     void query(rank_type rank);
     bool checkAndUpdate(std::vector<std::string>& keys) const;
 
-    port_type _port;
+    int _listen_socket;
 
     std::thread _deamon;
     store_type _store;
@@ -37,16 +37,17 @@ private:
   };
 
 public:
-  Store(rank_type rank, const std::string& addr,
+  Store(rank_type rank, int listen_socket, const std::string& addr,
         port_type port, rank_type world_size);
   ~Store();
 
   void set(const std::string& key, const std::vector<char>& data) override;
-  std::vector<char> get(const std::string& key) override; 
+  std::vector<char> get(const std::string& key) override;
   void wait(const std::vector<std::string>& keys) override;
 
 private:
   rank_type _rank;
+  int _listen_socket;
   int _socket;
   std::string _store_addr;
   port_type _store_port;
