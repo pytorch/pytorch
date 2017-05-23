@@ -16,7 +16,7 @@ class TestTile(hu.HypothesisTestCase):
     @given(M=st.integers(min_value=1, max_value=10),
            K=st.integers(min_value=1, max_value=10),
            N=st.integers(min_value=1, max_value=10),
-           tiles=st.integers(min_value=1, max_value=3),
+           tiles=st.integers(min_value=1, max_value=100),
            axis=st.integers(min_value=0, max_value=2),
            **hu.gcs)
     def test_tile(self, M, K, N, tiles, axis, gc, dc):
@@ -41,6 +41,41 @@ class TestTile(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [X], [0])
         # Gradient check wrt X
         self.assertGradientChecks(gc, op, [X], 0, [0])
+
+    @given(M=st.integers(min_value=1, max_value=200),
+           N=st.integers(min_value=1, max_value=200),
+           tiles=st.integers(min_value=50, max_value=100),
+           **hu.gcs)
+    def test_tile_grad(self, M, N, tiles, gc, dc):
+        X = np.random.rand(M, N).astype(np.float32)
+        axis = 1
+
+        op = core.CreateOperator(
+            'Tile', ['X'], 'out',
+            tiles=tiles,
+            axis=axis,
+        )
+
+        def tile_ref(X, tiles, axis):
+            dims = [1, 1]
+            dims[axis] = tiles
+            tiled_data = np.tile(X, tuple(dims))
+            return (tiled_data,)
+
+        # Check against numpy reference
+        self.assertReferenceChecks(gc, op, [X, tiles, axis],
+                                   tile_ref)
+        # Check over multiple devices
+        self.assertDeviceChecks(dc, op, [X], [0])
+
+        # Gradient check wrt X
+        grad_op = core.CreateOperator(
+            'Tile', ['dOut'], 'dX',
+            tiles=tiles,
+            axis=axis,
+        )
+        dX = X * 0.1
+        self.assertDeviceChecks(dc, grad_op, [dX], [0])
 
     @given(M=st.integers(min_value=1, max_value=10),
            K=st.integers(min_value=1, max_value=10),
