@@ -67,13 +67,14 @@ void DataChannelGloo::RequestGloo::wait() {
 }
 
 
-DataChannelGloo::DataChannelGloo()
-  : _rank(load_rank_env())
+DataChannelGloo::DataChannelGloo(InitMethod::Config config)
+  : _rank(config.rank)
+  , _listen_socket(-1)
   , _store(nullptr)
   , _cache(nullptr)
 {
   if (_rank == 0) {
-    _num_processes = load_world_size_env();
+    _num_processes = config.master.world_size;
   }
 
   // Default options listen on this host's name.
@@ -83,10 +84,12 @@ DataChannelGloo::DataChannelGloo()
   _device = ::gloo::transport::tcp::CreateDevice(attr);
 
   if (_rank == 0) {
-    std::tie(_port, std::ignore) = load_master_env();
     _addr = "localhost";
+    _port = config.master.listen_port;
+    _listen_socket = config.master.listen_socket;
   } else {
-    std::tie(_addr, _port) = load_worker_env();
+    _addr = config.worker.address;
+    _port = config.worker.listen_port;
   }
 }
 
@@ -96,7 +99,7 @@ DataChannelGloo::~DataChannelGloo() {}
 
 bool DataChannelGloo::init() {
   _store = std::unique_ptr<::gloo::rendezvous::Store>(
-    new thd::Store(_rank, _addr, _port, _num_processes)
+    new Store(_rank, _listen_socket, _addr, _port, _num_processes)
   );
   _cache = std::unique_ptr<GlooCache>(new GlooCache(_rank, _device, _store));
 

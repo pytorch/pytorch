@@ -19,11 +19,11 @@ def extend_scope(module):
     _scope.update({k: getattr(module, k) for k in dir(module) if not k.startswith('_')})
 
 
-def init_process_group(backend):
+def init_process_group(backend, init_method='env://', world_size=-1, group_name=''):
     global _initialized
     if _initialized:
         raise RuntimeError("trying to initialize torch.distributed twice!")
-    torch._C._dist_init_process_group(backend)
+    torch._C._dist_init_process_group(backend, init_method, world_size, group_name)
     _initialized = True
     import torch.distributed.collectives as collectives
     extend_scope(collectives)

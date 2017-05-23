@@ -79,7 +79,7 @@ MasterCommandChannel::~MasterCommandChannel() {
 }
 
 bool MasterCommandChannel::init() {
-  std::tie(_sockets[0], std::ignore) = listen(_port);
+  std::tie(_sockets[0], std::ignore, std::ignore) = listen(_port);
 
   int socket;
   rank_type rank;

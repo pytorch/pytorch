@@ -141,7 +141,7 @@ inline rank_type convertToRank(long rank, long min = 0) {
   return static_cast<rank_type>(rank);
 }
 
-std::tuple<int, port_type> listen(port_type port = 0);
+std::tuple<int, std::string, port_type> listen(port_type port = 0);
 int connect(const std::string& address, port_type port, bool wait = true);
 std::tuple<int, std::string> accept(int listen_socket, int timeout = -1);
 

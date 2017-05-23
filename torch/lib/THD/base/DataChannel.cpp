@@ -13,10 +13,12 @@
 
 namespace thd {
 
-DataChannel* DataChannel::newChannel(THDChannelType type) {
+DataChannel* DataChannel::newChannel(THDChannelType type, std::string init_method,
+                                     int world_size, std::string group_name) {
+  InitMethod::Config config = getInitConfig(init_method, world_size, group_name);
   switch (type) {
     case THDChannelTCP:
-      return new DataChannelTCP();
+      return new DataChannelTCP(config);
 
     case THDChannelMPI:
 #ifdef WITH_MPI
@@ -29,7 +31,7 @@ DataChannel* DataChannel::newChannel(THDChannelType type) {
 
     case THDChannelGloo:
 #ifdef WITH_GLOO
-      return new DataChannelGloo();
+      return new DataChannelGloo(config);
 #endif // WITH_GLOO
       throw std::runtime_error(
         "the Gloo backend is not available; "

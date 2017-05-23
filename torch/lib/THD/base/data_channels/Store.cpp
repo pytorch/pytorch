@@ -18,8 +18,8 @@ enum class QueryType : std::uint8_t {
 
 } // anonymous namespace
 
-Store::StoreDeamon::StoreDeamon(port_type port, rank_type world_size)
- : _port(port)
+Store::StoreDeamon::StoreDeamon(int listen_socket, rank_type world_size)
+ : _listen_socket(listen_socket)
  , _keys_awaited(world_size, 0)
  , _sockets(world_size, -1)
 {
@@ -29,7 +29,7 @@ Store::StoreDeamon::StoreDeamon(port_type port, rank_type world_size)
 Store::StoreDeamon::~StoreDeamon()
 {
   for (auto socket : _sockets) {
-    if (socket != -1) 
+    if (socket != -1)
       ::close(socket);
   }
 }
@@ -39,14 +39,11 @@ void Store::StoreDeamon::join() {
 }
 
 void Store::StoreDeamon::deamon() {
-  int socket;
-
-  std::tie(socket, std::ignore) = listen(_port);
   for (auto& p_socket : _sockets) {
-    std::tie(p_socket, std::ignore) = accept(socket);
+    std::tie(p_socket, std::ignore) = accept(_listen_socket);
   }
 
-  SYSCHECK(::close(socket));
+  SYSCHECK(::close(_listen_socket));
 
   // listen for requests
   struct pollfd fds[_sockets.size()];
@@ -66,10 +63,10 @@ void Store::StoreDeamon::deamon() {
     for (std::size_t rank = 0; rank < _sockets.size(); rank++) {
       if (fds[rank].revents == 0)
         continue;
-      
+
       if (fds[rank].revents ^ POLLIN)
         throw std::system_error(ECONNABORTED, std::system_category());
-      
+
       try {
         query(rank);
       } catch (...) {
@@ -85,7 +82,7 @@ void Store::StoreDeamon::deamon() {
   }
 }
 
-/* 
+/*
  * query communicates with the worker. The format
  * of the query is as follows:
  * type of query | size of arg1 | arg1 | size of arg2 | arg2 | ...
@@ -148,9 +145,10 @@ bool Store::StoreDeamon::checkAndUpdate(std::vector<std::string>& keys) const {
 
 
 
-Store::Store(rank_type rank, const std::string& addr,
+Store::Store(rank_type rank, int listen_socket, const std::string& addr,
              port_type port, rank_type world_size)
  : _rank(rank)
+ , _listen_socket(listen_socket)
  , _store_addr(addr)
  , _store_port(port)
  , _socket(-1)
@@ -159,7 +157,7 @@ Store::Store(rank_type rank, const std::string& addr,
   // Only one process (rank 0) starts a store
   if (_rank == 0) {
     _store_thread = std::unique_ptr<StoreDeamon>(
-      new StoreDeamon(port, world_size)
+      new StoreDeamon(listen_socket, world_size)
     );
   }
 

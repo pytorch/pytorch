@@ -35,18 +35,18 @@ const char* must_getenv(const char* env) {
   return value;
 }
 
-std::tuple<int, port_type> listen(port_type port) {
+std::tuple<int, std::string, port_type> listen(port_type port) {
   struct addrinfo hints, *res = NULL;
 
   std::memset(&hints, 0x00, sizeof(hints));
-  hints.ai_flags = AI_PASSIVE;
+  hints.ai_flags = AI_PASSIVE | AI_ADDRCONFIG;
   hints.ai_family = AF_UNSPEC; // either IPv4 or IPv6
   hints.ai_socktype = SOCK_STREAM; // TCP
 
   // `getaddrinfo` will sort addresses according to RFC 3484 and can be tweeked
   // by editing `/etc/gai.conf`. so there is no need to manual sorting
   // or protocol preference.
-  int err = getaddrinfo(NULL, std::to_string(port).data(), &hints, &res);
+  int err = ::getaddrinfo(NULL, std::to_string(port).data(), &hints, &res);
   if (err != 0 || !res) {
     throw std::invalid_argument("cannot find host to listen on: " + std::string(gai_strerror(err)));
   }
@@ -77,13 +77,20 @@ std::tuple<int, port_type> listen(port_type port) {
     }
   }
 
-  // get listen port
-  struct sockaddr_in addr;
-  socklen_t addr_len = sizeof(addr);
-  SYSCHECK(::getsockname(socket, reinterpret_cast<struct sockaddr*>(&addr), &addr_len))
-  port_type listen_port = ntohs(addr.sin_port);
+  // get listen port and address
+  char address[INET6_ADDRSTRLEN];
+  port_type listen_port;
+  if (next_addr->ai_family == AF_INET) {
+    struct sockaddr_in *addr = reinterpret_cast<struct sockaddr_in*>(next_addr->ai_addr);
+    SYSCHECK(::inet_ntop(next_addr->ai_family, &(addr->sin_addr), address, sizeof(address)));
+    listen_port = ntohs(addr->sin_port);
+  } else { // AF_INET6
+    struct sockaddr_in6 *addr = reinterpret_cast<struct sockaddr_in6*>(next_addr->ai_addr);
+    SYSCHECK(::inet_ntop(next_addr->ai_family, &(addr->sin6_addr), address, sizeof(address)));
+    listen_port = ntohs(addr->sin6_port);
+  }
 
-  return std::make_tuple(socket, listen_port);
+  return std::make_tuple(socket, std::string(address), listen_port);
 }
 
 

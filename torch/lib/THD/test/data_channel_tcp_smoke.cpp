@@ -21,7 +21,7 @@ void master()
   setenv(thd::WORLD_SIZE_ENV, std::to_string((WORKERS_NUM + 1)).data(), 1);
   setenv(thd::RANK_ENV, "0", 1);
   setenv(thd::MASTER_PORT_ENV, std::to_string(MASTER_PORT).data(), 1);
-  auto masterChannel = std::make_shared<thd::DataChannelTCP>(); // reads all env variable
+  auto masterChannel = std::make_shared<thd::DataChannelTCP>(thd::getInitConfig("env://")); // reads all env variable
   g_mutex.unlock();
 
   assert(masterChannel->init());
@@ -39,7 +39,7 @@ void worker(int id)
   g_mutex.lock();
   setenv(thd::RANK_ENV, std::to_string(id).data(), 1);
   setenv(thd::MASTER_ADDR_ENV, std::string("127.0.0.1:" + std::to_string(MASTER_PORT)).data(), 1);
-  auto workerChannel = std::make_shared<thd::DataChannelTCP>(); // reads all env variable
+  auto workerChannel = std::make_shared<thd::DataChannelTCP>(thd::getInitConfig("env://")); // reads all env variable
   g_mutex.unlock();
 
   assert(workerChannel->init());
