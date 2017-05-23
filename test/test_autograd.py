@@ -1236,7 +1236,7 @@ def index_variable(shape, max_indices):
     return Variable(index, requires_grad=False)
 
 
-def gather_variable(shape, index_dim, max_indices):
+def gather_variable(shape, index_dim, max_indices, duplicate=False):
     assert len(shape) == 2
     assert index_dim < 2
     batch_dim = 1 - index_dim
@@ -1244,6 +1244,8 @@ def gather_variable(shape, index_dim, max_indices):
     for i in range(shape[index_dim]):
         index.select(index_dim, i).copy_(
             torch.randperm(max_indices)[:shape[batch_dim]])
+    if duplicate:
+        index.select(batch_dim, 0).copy_(index.select(batch_dim, 1))
     return Variable(index, requires_grad=False)
 
 
@@ -1393,9 +1395,9 @@ function_tests = [
     # (IndexCopy,     (0,),               ((S, S), index_variable(2, S), (2, S))      ),
     (IndexFill, (), ((S, S), 0, index_variable(2, S), 2)),
     (IndexSelect, (), ((S, S), 0, index_variable(2, S))),
-    (Gather, (), ((M, S), 0, gather_variable((S, S), 1, M))),
+    (Gather, (), ((M, S), 0, gather_variable((S, S), 1, M, True))),
     # TODO: enable neg dim checks
-    (Gather, (), ((M, S), 1, gather_variable((M, S // 2), 0, S)), 'dim1'),
+    (Gather, (), ((M, S), 1, gather_variable((M, S // 2), 0, S, True)), 'dim1'),
     (Scatter, (), ((M, S), 0, gather_variable((S, S), 1, M), (S, S))),
     (Scatter, (), ((M, S), 1, gather_variable((M, S // 2), 0, S), (M, S // 2)), 'dim1'),
     (Concat, (), (0, (1, S, S), (2, S, S), (3, S, S))),

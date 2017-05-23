@@ -689,6 +689,19 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 ]]
 
 [[
+  name: scatter_add_
+  return: argument 0
+  options:
+    - cname: scatterAdd
+      arguments:
+        - THTensor* self
+        - arg: long dim
+          wrap_dim: self
+        - THIndexTensor* index
+        - THTensor* src
+]]
+
+[[
   name: gather
   with_stateless: True
   return: argument 0

@@ -2255,67 +2255,50 @@ class TestTorch(TestCase):
         self._test_gather(self, lambda t: t)
 
     @staticmethod
-    def _test_scatter(self, cast, test_bounds=True):
+    def _test_scatter_base(self, cast, method, is_scalar=False, test_bounds=True):
         m, n, o = random.randint(10, 20), random.randint(10, 20), random.randint(10, 20)
         elems_per_row = random.randint(1, 10)
         dim = random.randrange(3)
 
         idx_size = [m, n, o]
         idx_size[dim] = elems_per_row
-        idx = torch.LongTensor().resize_(*idx_size)
+        idx = cast(torch.LongTensor().resize_(*idx_size))
         TestTorch._fill_indices(self, idx, dim, ([m, n, o])[dim], elems_per_row, m, n, o)
-        src = torch.Tensor().resize_(*idx_size).normal_()
 
-        src = cast(src)
-        idx = cast(idx)
+        if is_scalar:
+            src = random.random()
+        else:
+            src = cast(torch.Tensor(*idx_size).normal_())
 
-        actual = cast(torch.zeros(m, n, o)).scatter_(dim, idx, src)
-        expected = cast(torch.zeros(m, n, o))
+        base = cast(torch.randn(m, n, o))
+        actual = getattr(base.clone(), method)(dim, idx, src)
+        expected = base.clone()
         for i in range(idx_size[0]):
             for j in range(idx_size[1]):
                 for k in range(idx_size[2]):
                     ii = [i, j, k]
                     ii[dim] = idx[i, j, k]
-                    expected[tuple(ii)] = src[i, j, k]
+                    if method == 'scatter_' and not is_scalar:
+                        expected[tuple(ii)] = src[i, j, k]
+                    elif method == 'scatter_add_':
+                        expected[tuple(ii)] += src[i, j, k]
+                    else:
+                        expected[tuple(ii)] = src
         self.assertEqual(actual, expected, 0)
 
         if test_bounds:
             idx[0][0][0] = 34
-            self.assertRaises(RuntimeError, lambda: torch.zeros(m, n, o).scatter_(dim, idx, src))
+            with self.assertRaises(RuntimeError):
+                getattr(base.clone(), method)(dim, idx, src)
 
     def test_scatter(self):
-        self._test_scatter(self, lambda t: t)
+        self._test_scatter_base(self, lambda t: t, 'scatter_')
 
-    @staticmethod
-    def _test_scatterFill(self, cast, test_bounds=True):
-        m, n, o = random.randint(10, 20), random.randint(10, 20), random.randint(10, 20)
-        elems_per_row = random.randint(1, 10)
-        dim = random.randrange(3)
-
-        val = random.random()
-        idx_size = [m, n, o]
-        idx_size[dim] = elems_per_row
-        idx = torch.LongTensor().resize_(*idx_size)
-        TestTorch._fill_indices(self, idx, dim, ([m, n, o])[dim], elems_per_row, m, n, o)
-
-        idx = cast(idx)
-
-        actual = cast(torch.zeros(m, n, o)).scatter_(dim, idx, val)
-        expected = cast(torch.zeros(m, n, o))
-        for i in range(idx_size[0]):
-            for j in range(idx_size[1]):
-                for k in range(idx_size[2]):
-                    ii = [i, j, k]
-                    ii[dim] = idx[i, j, k]
-                    expected[tuple(ii)] = val
-        self.assertEqual(actual, expected, 0)
-
-        if test_bounds:
-            idx[0][0][0] = 28
-            self.assertRaises(RuntimeError, lambda: torch.zeros(m, n, o).scatter_(dim, idx, val))
+    def test_scatterAdd(self):
+        self._test_scatter_base(self, lambda t: t, 'scatter_add_')
 
     def test_scatterFill(self):
-        self._test_scatterFill(self, lambda t: t)
+        self._test_scatter_base(self, lambda t: t, 'scatter_', True)
 
     def test_masked_copy(self):
         num_copy, num_dest = 3, 10
