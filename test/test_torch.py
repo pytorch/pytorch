@@ -2500,11 +2500,11 @@ class TestTorch(TestCase):
         # Tests for Integer Array Indexing, Part I - Purely integer array
         # indexing
 
-        # TODO: add test for empty indexer
         # TODO: add test for transposed (i.e. non-contig) tensor
 
         # Case 1: Purely Integer Array Indexing
         reference = self._consecutive((10,))
+        self.assertEqual(reference[[], ], torch.Tensor())
         self.assertEqual(reference[[0], ], self._consecutive((1,)))
         self.assertEqual(reference[[3], ], self._consecutive((1,), 4))
         self.assertEqual(reference[[2, 3, 4], ], self._consecutive((3,), 3))

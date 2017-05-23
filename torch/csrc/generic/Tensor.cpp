@@ -574,6 +574,7 @@ static bool THPTensor_(_advancedIndex)(
   THIndexTensor *linearIndices = NULL;
   THLongStorage *indexerSize = NULL, *sizeAsStorage = NULL;
   THTensor *viewed = NULL, *result = NULL;
+  ptrdiff_t indexingElements = 0;
   bool success = false;
 
   // We take ownership of the THTensor input locally
@@ -616,11 +617,21 @@ static bool THPTensor_(_advancedIndex)(
   // the linear indices for each tuple of indexing elements, and then call
   // indexSelect using those linear indices
 
+  indexingElements = THIndexTensor_(nElement)(LIBRARY_STATE first->cdata);
+
+  // In the case that there are 0 indexing elements, then shortcircuit to return an empty
+  // Tensor
+  if (!indexingElements) {
+    tresult = THTensor_(new)(LIBRARY_STATE_NOARGS);
+    success = true;
+    goto teardown;
+  }
+
   linearIndices = THIndexTensor_(newWithSize1d)(LIBRARY_STATE THIndexTensor_(nElement)(LIBRARY_STATE first->cdata));
   indexerSize = THLongStorage_newWithSize(1);
-  THLongStorage_set(indexerSize, 0, THIndexTensor_(nElement)(LIBRARY_STATE linearIndices));
+  THLongStorage_set(indexerSize, 0, indexingElements);
 
-  for (ptrdiff_t i = 0; i < THIndexTensor_(nElement)(LIBRARY_STATE linearIndices); ++i) {
+  for (ptrdiff_t i = 0; i < indexingElements; ++i) {
     long linearIdx = 0;
     for (Py_ssize_t j = PySequence_Fast_GET_SIZE(fast) - 1; j >= 0; --j) {
       THIndexTensor *indexer = indexers[j]->cdata;
