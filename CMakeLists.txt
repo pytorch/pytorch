@@ -66,11 +66,8 @@ include(cmake/Summary.cmake)
 # options that do not affect the main binaries, but affects testing binaries
 option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" ON)
 
-# options that takes in strings instead of on and off statemens.
-option(CAFFE2_CPU_FLAGS "Flags to specify CPU features." "")
-option(CAFFE2_WHITELIST
-       "A whitelist file of files that one should build."
-       "")
+set(CAFFE2_CPU_FLAGS "" CACHE STRING "Flags to specify CPU features.")
+set(CAFFE2_WHITELIST "" CACHE STRING "A whitelist file of files that one should build.")
 
 # Set default build type
 if(NOT CMAKE_BUILD_TYPE)

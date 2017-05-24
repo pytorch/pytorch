@@ -62,6 +62,7 @@ build
 build_host_protoc
 build_android
 build_ios
+build_*
 .build_debug/*
 .build_release/*
 distribute/*
