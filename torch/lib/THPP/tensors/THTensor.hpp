@@ -54,6 +54,8 @@ public:
   virtual THTensor* newNarrow(int dimension, long firstIndex, long size) const override;
   virtual THTensor* newTranspose(int dimension1, int dimension2) const override;
   virtual THTensor* newUnfold(int dimension, long size, long step) const override;
+  virtual THTensor* newExpand(const long_range& size) const override;
+  virtual THTensor* newView(const long_range& size) const override;
 
   virtual int nDim() const override;
   virtual long_range sizes() const override;
