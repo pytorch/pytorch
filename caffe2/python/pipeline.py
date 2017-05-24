@@ -9,7 +9,7 @@ from caffe2.python import core, queue_util
 from caffe2.python.dataio import Reader, Writer
 from caffe2.python.net_builder import NetBuilder, ops
 from caffe2.python.schema import as_record, Field
-from caffe2.python.task import Task, TaskGroup
+from caffe2.python.task import Node, Task, TaskGroup
 
 
 class Output(object):
@@ -198,6 +198,14 @@ def _pipe_step(
     if name is None:
         name = 'pipe_from:%s' % processor_name(input)
 
+    node_name = str(Node.current())
+    profiler_name = "{0}/{1}/{2}/{3}/{4}".format(
+        node_name,
+        "pipe",
+        name,
+        processor_name(input) if input else "NoInput",
+        processor_name(output) if output else "NoOutput")
+
     with Task(name=name, group=group, outputs=final_outputs) as task:
         global_exit_net = core.Net('exit')
         global_init_net = core.Net('init')
@@ -226,10 +234,19 @@ def _pipe_step(
                         rec, init_net, exit_net, status)
                 else:
                     write_nets = []
+
+                timer_start_net = core.Net('timer_start')
+                timer = timer_start_net.TimerBegin([], counter_name=profiler_name)
+                timer_end_net = core.Net('timer_end')
+                timer_end_net.TimerEnd(timer, [])
+
                 ops.net(init_net)
-                ops.net(core.execution_step('body',
-                    list(read_nets) + list(write_nets),
+                ops.net(core.execution_step(
+                    'body',
+                    [timer_start_net] + list(read_nets) + list(write_nets) +
+                    [timer_end_net],
                     should_stop_blob=status))
+                ops.net(timer_end_net)
                 ops.net(exit_net)
             steps.append(core.to_execution_step(nb))
         ops.net(global_init_net)
