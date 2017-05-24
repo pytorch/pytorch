@@ -37,7 +37,6 @@ static PythonEngine engine;
 PyObject *THPEngineClass = NULL;
 
 struct CallbackContext {
-  std::mutex mutex;
   std::string error;
   THPObjectPtr outputs;
   // Used to determine which callback arguments should be used to
