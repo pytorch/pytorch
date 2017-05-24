@@ -41,6 +41,16 @@ constexpr bool IsUsingGoogleLogging() {
 #endif
 }
 
+/**
+ * A utility to allow one to show log info to stderr after the program starts.
+ *
+ * This is similar to calling GLOG's --logtostderr, or setting caffe2_log_level
+ * to smaller than INFO. You are recommended to only use this in a few sparse
+ * cases, such as when you want to write a tutorial or something. Normally, use
+ * the commandline flags to set the log level.
+ */
+void ShowLogInfoToStderr();
+
 inline void MakeStringInternal(std::stringstream& ss) {}
 
 template <typename T>

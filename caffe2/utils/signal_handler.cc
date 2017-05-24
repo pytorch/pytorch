@@ -1,30 +1,9 @@
 #include "caffe2/utils/signal_handler.h"
 #include "caffe2/core/logging.h"
 
-#if defined(_MSC_VER)
-
-// TODO: Currently we do not support signal handling in Windows yet - below is
-// a minimal implementation that makes things compile.
-namespace caffe2 {
-SignalHandler::SignalHandler(
-    SignalHandler::Action SIGINT_action,
-    SignalHandler::Action SIGHUP_action) {}
-SignalHandler::~SignalHandler() {}
-bool SignalHandler::GotSIGINT() {
-  return false;
-}
-bool SignalHandler::GotSIGHUP() {
-  return false;
-}
-SignalHandler::Action SignalHandler::CheckForSignals() {
-  return SignalHandler::Action::NONE;
-}
-} // namespace caffe2
-
-#else // defined(_MSC_VER)
+#if defined(CAFFE2_SUPPORTS_SIGNAL_HANDLER)
 
 // Normal signal handler implementation.
-
 #include <cxxabi.h>
 #include <dirent.h>
 #include <dlfcn.h>
@@ -109,7 +88,6 @@ void unhookHandler() {
   }
 }
 
-#if defined(__linux__)
 // We need to hold a reference to call the previous SIGUSR2 handler in case
 // we didn't signal it
 struct sigaction previousSigusr2;
@@ -288,8 +266,6 @@ void stacktraceSignalHandler(int signum, siginfo_t* info, void* ctx) {
   }
 }
 
-#endif // defined(__linux__)
-
 } // namespace
 
 namespace caffe2 {
@@ -337,8 +313,6 @@ SignalHandler::Action SignalHandler::CheckForSignals() {
   return SignalHandler::Action::NONE;
 }
 
-#if defined(__linux__)
-
 namespace internal {
 
 // Installs SIGABRT signal handler so that we get stack traces
@@ -377,9 +351,26 @@ REGISTER_CAFFE2_EARLY_INIT_FUNCTION(
     " went wrong");
 
 } // namepsace internal
-
-#endif // defined(__linux__)
-
 }  // namespace caffe2
 
-#endif // !defined(_MSC_VER)
+#else // defined(CAFFE2_SUPPORTS_SIGNAL_HANDLER)
+
+// TODO: Currently we do not support signal handling in non-Linux yet - below is
+// a minimal implementation that makes things compile.
+namespace caffe2 {
+SignalHandler::SignalHandler(
+    SignalHandler::Action SIGINT_action,
+    SignalHandler::Action SIGHUP_action) {}
+SignalHandler::~SignalHandler() {}
+bool SignalHandler::GotSIGINT() {
+  return false;
+}
+bool SignalHandler::GotSIGHUP() {
+  return false;
+}
+SignalHandler::Action SignalHandler::CheckForSignals() {
+  return SignalHandler::Action::NONE;
+}
+} // namespace caffe2
+
+#endif // defined(CAFFE2_SUPPORTS_SIGNAL_HANDLER)
