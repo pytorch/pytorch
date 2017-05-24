@@ -70,10 +70,14 @@ namespace gflags = google;
     using ::FLAGS_##name;                                                      \
   }
 
-#define CAFFE2_DEFINE_int(...) CAFFE2_GFLAGS_DEF_WRAPPER(int32, __VA_ARGS__)
-#define CAFFE2_DEFINE_int64(...) CAFFE2_GFLAGS_DEF_WRAPPER(int64, __VA_ARGS__)
-#define CAFFE2_DEFINE_double(...) CAFFE2_GFLAGS_DEF_WRAPPER(double, __VA_ARGS__)
-#define CAFFE2_DEFINE_bool(...) CAFFE2_GFLAGS_DEF_WRAPPER(bool, __VA_ARGS__)
+#define CAFFE2_DEFINE_int(name, default_value, help_str)                       \
+  CAFFE2_GFLAGS_DEF_WRAPPER(int32, name, default_value, help_str)
+#define CAFFE2_DEFINE_int64(name, default_value, help_str)                     \
+  CAFFE2_GFLAGS_DEF_WRAPPER(int64, name, default_value, help_str)              
+#define CAFFE2_DEFINE_double(name, default_value, help_str)                    \
+  CAFFE2_GFLAGS_DEF_WRAPPER(double, name, default_value, help_str)
+#define CAFFE2_DEFINE_bool(name, default_value, help_str)                      \
+  CAFFE2_GFLAGS_DEF_WRAPPER(bool, name, default_value, help_str)
 #define CAFFE2_DEFINE_string(name, default_value, help_str) \
   CAFFE2_GFLAGS_DEF_WRAPPER(string, name, default_value, help_str)
 

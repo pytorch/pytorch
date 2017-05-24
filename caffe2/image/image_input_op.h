@@ -249,7 +249,7 @@ template <class Context>
 bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
     const string& value,
     cv::Mat* img,
-    ImageInputOp<Context>::PerImageArg& info,
+    PerImageArg& info,
     int item_id) {
   //
   // recommend using --caffe2_use_fatal_for_enforce=1 when using ImageInputOp
