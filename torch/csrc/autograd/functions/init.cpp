@@ -186,6 +186,23 @@ static struct PyGetSetDef conv_backward_properties[] = {
   {NULL}
 };
 
+static struct PyGetSetDef conv_backward_backward_properties[] = {
+  THP_FUNCTION_DEFAULT_PROPERTIES,
+  {(char*)"stride", (getter)getTupleAttr<ConvBackwardBackward, std::vector<int>, ConvParams,
+                                         &ConvParams::stride, long, PyInt_FromLong>, NULL, NULL, NULL},
+  {(char*)"padding", (getter)getTupleAttr<ConvBackwardBackward, std::vector<int>, ConvParams,
+                                         &ConvParams::padding, long, PyInt_FromLong>, NULL, NULL, NULL},
+  {(char*)"dilation", (getter)getTupleAttr<ConvBackwardBackward, std::vector<int>, ConvParams,
+                                         &ConvParams::dilation, long, PyInt_FromLong>, NULL, NULL, NULL},
+  {(char*)"transposed", (getter)getValueAttr<ConvBackwardBackward, bool, ConvParams,
+                                         &ConvParams::transposed, long, PyBool_FromLong>, NULL, NULL, NULL},
+  {(char*)"output_padding", (getter)getTupleAttr<ConvBackwardBackward, std::vector<int>, ConvParams,
+                                         &ConvParams::output_padding, long, PyInt_FromLong>, NULL, NULL, NULL},
+  {(char*)"groups", (getter)getValueAttr<ConvBackwardBackward, int, ConvParams,
+                                         &ConvParams::groups, long, PyInt_FromLong>, NULL, NULL, NULL},
+  {NULL}
+};
+
 static PyObject* accumulateGradVar(PyObject *_self, void* _unused)
 {
   THPCppFunction* self = (THPCppFunction*)_self;
@@ -210,9 +227,10 @@ bool THPAutograd_initFunctions(PyObject* _unused)
   addClass<BatchNormForward, BatchNormCtor>(module, BatchNormClass, "BatchNorm", batch_norm_forward_properties);
   addClass<BatchNormBackward, NoCtor>(module, BatchNormBackwardClass, "BatchNormBackward", batch_norm_backward_properties);
 
-  static PyTypeObject ConvClass, ConvBackwardClass;
+  static PyTypeObject ConvClass, ConvBackwardClass, ConvBackwardBackwardClass;
   addClass<ConvForward, ConvCtor>(module, ConvClass, "ConvNd", conv_forward_properties);
   addClass<ConvBackward, NoCtor>(module, ConvBackwardClass, "ConvNdBackward", conv_backward_properties);
+  addClass<ConvBackwardBackward, NoCtor>(module, ConvBackwardBackwardClass, "ConvNdBackwardBackward", conv_backward_backward_properties);
 
   static PyTypeObject AccumulateGradClass;
   addClass<AccumulateGrad, NoCtor>(module, AccumulateGradClass, "AccumulateGrad", accumulate_grad_properties);
