@@ -22,6 +22,35 @@ struct Clone : public Function {
   virtual variable_list apply(const variable_list& inputs) override;
 };
 
+struct Transpose : public Function {
+  Transpose(long dim1, long dim2)
+    : dim1(dim1)
+    , dim2(dim2) {}
+
+  virtual variable_list apply(const variable_list& inputs) override;
+
+  long dim1;
+  long dim2;
+};
+
+struct View : public Function {
+  View(std::vector<long> size)
+    : size(size) {}
+
+  virtual variable_list apply(const variable_list& inputs) override;
+
+  std::vector<long> size;
+};
+
+struct Expand : public Function {
+  Expand(std::vector<long> size)
+    : size(size) {}
+
+  virtual variable_list apply(const variable_list& inputs) override;
+
+  std::vector<long> size;
+};
+
 }}
 
 
