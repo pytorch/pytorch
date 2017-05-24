@@ -5,34 +5,59 @@
 #include <gloo/cuda_allreduce_halving_doubling.h>
 #include <gloo/cuda_allreduce_ring.h>
 #include <gloo/cuda_allreduce_ring_chunked.h>
+#include <gloo/types.h>
 
 namespace caffe2 {
 namespace gloo {
 
-template <typename T, class Context>
-void AllreduceOp<T, Context>::initializeHalvingDoubling() {
-  algorithm_.reset(new ::gloo::CudaAllreduceHalvingDoubling<T>(
-      init_.context, init_.outputs, init_.size));
+template <class Context>
+void AllreduceOp<Context>::initializeHalvingDoubling() {
+  if (init_.template IsType<float>()) {
+    algorithm_.reset(new ::gloo::CudaAllreduceHalvingDoubling<float>(
+        init_.context, init_.template getOutputs<float>(), init_.size));
+  } else if (init_.template IsType<float16>()) {
+    algorithm_.reset(new ::gloo::CudaAllreduceHalvingDoubling<::gloo::float16>(
+        init_.context,
+        init_.template getOutputs<::gloo::float16>(),
+        init_.size));
+  } else {
+    CAFFE_ENFORCE(false, "Unhandled type: ", init_.meta.name());
+  }
 }
 
-template <typename T, class Context>
-void AllreduceOp<T, Context>::initializeRingFull() {
-  algorithm_.reset(new ::gloo::CudaAllreduceRing<T>(
-      init_.context, init_.outputs, init_.size));
+template <class Context>
+void AllreduceOp<Context>::initializeRingFull() {
+  if (init_.template IsType<float>()) {
+    algorithm_.reset(new ::gloo::CudaAllreduceRing<float>(
+        init_.context, init_.template getOutputs<float>(), init_.size));
+  } else if (init_.template IsType<float16>()) {
+    algorithm_.reset(new ::gloo::CudaAllreduceRing<::gloo::float16>(
+        init_.context,
+        init_.template getOutputs<::gloo::float16>(),
+        init_.size));
+  } else {
+    CAFFE_ENFORCE(false, "Unhandled type: ", init_.meta.name());
+  }
 }
 
-template <typename T, class Context>
-void AllreduceOp<T, Context>::initializeRingChunked() {
-  algorithm_.reset(new ::gloo::CudaAllreduceRingChunked<T>(
-      init_.context, init_.outputs, init_.size));
+template <class Context>
+void AllreduceOp<Context>::initializeRingChunked() {
+  if (init_.template IsType<float>()) {
+    algorithm_.reset(new ::gloo::CudaAllreduceRingChunked<float>(
+        init_.context, init_.template getOutputs<float>(), init_.size));
+  } else if (init_.template IsType<float16>()) {
+    algorithm_.reset(new ::gloo::CudaAllreduceRingChunked<::gloo::float16>(
+        init_.context,
+        init_.template getOutputs<::gloo::float16>(),
+        init_.size));
+  } else {
+    CAFFE_ENFORCE(false, "Unhandled type: ", init_.meta.name());
+  }
 }
 
 namespace {
 
-REGISTER_CUDA_OPERATOR_WITH_ENGINE(
-    Allreduce,
-    GLOO,
-    AllreduceOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR_WITH_ENGINE(Allreduce, GLOO, AllreduceOp<CUDAContext>);
 
 } // namespace
 } // namespace gloo

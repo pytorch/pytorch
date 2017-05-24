@@ -12,6 +12,12 @@ void BroadcastOp<Context>::initializeAlgorithm() {
   if (init_.template IsType<float>()) {
     algorithm_.reset(new ::gloo::CudaBroadcastOneToAll<float>(
         init_.context, init_.template getOutputs<float>(), init_.size, root_));
+  } else if (init_.template IsType<float16>()) {
+    algorithm_.reset(new ::gloo::CudaBroadcastOneToAll<::gloo::float16>(
+        init_.context,
+        init_.template getOutputs<::gloo::float16>(),
+        init_.size,
+        root_));
   } else {
     CAFFE_ENFORCE(false, "Unhandled type: ", init_.meta.name());
   }

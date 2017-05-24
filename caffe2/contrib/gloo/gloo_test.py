@@ -146,6 +146,7 @@ class TestCase(hu.HypothesisTestCase):
                         blob_size=None,
                         num_blobs=None,
                         tmpdir=None,
+                        use_float16=False,
                         ):
         store_handler, common_world = self.create_common_world(
             comm_rank=comm_rank,
@@ -167,7 +168,8 @@ class TestCase(hu.HypothesisTestCase):
             for j in range(num_blobs):
                 blob = "blob_{}".format(j)
                 offset = (comm_rank * num_blobs) + j
-                value = np.full(blob_size, offset, np.float32)
+                value = np.full(blob_size, offset,
+                                np.float16 if use_float16 else np.float32)
                 workspace.FeedBlob(blob, value)
                 blobs.append(blob)
 
@@ -194,14 +196,17 @@ class TestCase(hu.HypothesisTestCase):
     @given(comm_size=st.integers(min_value=2, max_value=8),
            blob_size=st.integers(min_value=1e3, max_value=1e6),
            num_blobs=st.integers(min_value=1, max_value=4),
-           device_option=st.sampled_from([hu.cpu_do]))
-    def test_broadcast(self, comm_size, blob_size, num_blobs, device_option):
+           device_option=st.sampled_from([hu.cpu_do]),
+           use_float16=st.booleans())
+    def test_broadcast(self, comm_size, blob_size, num_blobs, device_option,
+                       use_float16):
         TestCase.test_counter += 1
         if os.getenv('COMM_RANK') is not None:
             self.run_test_distributed(
                 self._test_broadcast,
                 blob_size=blob_size,
                 num_blobs=num_blobs,
+                use_float16=use_float16,
                 device_option=device_option)
         else:
             with TemporaryDirectory() as tmpdir:
@@ -211,7 +216,8 @@ class TestCase(hu.HypothesisTestCase):
                     blob_size=blob_size,
                     num_blobs=num_blobs,
                     device_option=device_option,
-                    tmpdir=tmpdir)
+                    tmpdir=tmpdir,
+                    use_float16=use_float16)
 
     def _test_allreduce(self,
                         comm_rank=None,
@@ -219,6 +225,7 @@ class TestCase(hu.HypothesisTestCase):
                         blob_size=None,
                         num_blobs=None,
                         tmpdir=None,
+                        use_float16=False
                         ):
         store_handler, common_world = self.create_common_world(
             comm_rank=comm_rank,
@@ -238,7 +245,8 @@ class TestCase(hu.HypothesisTestCase):
         blobs = []
         for i in range(num_blobs):
             blob = "blob_{}".format(i)
-            value = np.full(blob_size, (comm_rank * num_blobs) + i, np.float32)
+            value = np.full(blob_size, (comm_rank * num_blobs) + i,
+                            np.float16 if use_float16 else np.float32)
             workspace.FeedBlob(blob, value)
             blobs.append(blob)
 
@@ -264,14 +272,17 @@ class TestCase(hu.HypothesisTestCase):
     @given(comm_size=st.integers(min_value=2, max_value=8),
            blob_size=st.integers(min_value=1e3, max_value=1e6),
            num_blobs=st.integers(min_value=1, max_value=4),
-           device_option=st.sampled_from([hu.cpu_do]))
-    def test_allreduce(self, comm_size, blob_size, num_blobs, device_option):
+           device_option=st.sampled_from([hu.cpu_do]),
+           use_float16=st.booleans())
+    def test_allreduce(self, comm_size, blob_size, num_blobs, device_option,
+                       use_float16):
         TestCase.test_counter += 1
         if os.getenv('COMM_RANK') is not None:
             self.run_test_distributed(
                 self._test_allreduce,
                 blob_size=blob_size,
                 num_blobs=num_blobs,
+                use_float16=use_float16,
                 device_option=device_option)
         else:
             with TemporaryDirectory() as tmpdir:
@@ -281,8 +292,8 @@ class TestCase(hu.HypothesisTestCase):
                     blob_size=blob_size,
                     num_blobs=num_blobs,
                     device_option=device_option,
-                    tmpdir=tmpdir)
-
+                    tmpdir=tmpdir,
+                    use_float16=use_float16)
 
 if __name__ == "__main__":
     import unittest

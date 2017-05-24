@@ -13,7 +13,7 @@
 namespace caffe2 {
 namespace gloo {
 
-template <typename T, class Context>
+template <class Context>
 class AllreduceOp final : public Operator<Context> {
   enum Mode { RING_FULL, RING_CHUNKED, HALVING_DOUBLING };
 
@@ -79,6 +79,12 @@ class AllreduceOp final : public Operator<Context> {
       CAFFE_ENFORCE_EQ(Input(i).size(), size);
     }
 
+    // Verify tensors all have same type
+    TypeMeta meta = Input(1).meta();
+    for (auto i = 2; i < InputSize(); i++) {
+      CAFFE_ENFORCE(Input(i).meta() == meta);
+    }
+
     switch (mode) {
       case RING_FULL:
         initializeRingFull();
@@ -107,9 +113,35 @@ class AllreduceOp final : public Operator<Context> {
   // changed from run to run, the initialized algorithm is invalid.
   struct GlooParameters {
     std::shared_ptr<::gloo::Context> context;
-    std::vector<const T*> inputs;
-    std::vector<T*> outputs;
+    std::vector<const void*> inputs;
+    std::vector<void*> outputs;
     size_t size;
+    TypeMeta meta;
+
+    template <typename T>
+    std::vector<const T*> getInputs() {
+      std::vector<const T*> result;
+      result.reserve(inputs.size());
+      for (auto& input : inputs) {
+        result.push_back(reinterpret_cast<T*>(input));
+      }
+      return result;
+    }
+
+    template <typename T>
+    std::vector<T*> getOutputs() {
+      std::vector<T*> result;
+      result.reserve(outputs.size());
+      for (auto& output : outputs) {
+        result.push_back(reinterpret_cast<T*>(output));
+      }
+      return result;
+    }
+
+    template <typename T>
+    bool IsType() const {
+      return meta.Match<T>();
+    }
 
     bool operator==(GlooParameters const& other) const {
       return context == other.context && inputs == other.inputs &&
@@ -122,10 +154,11 @@ class AllreduceOp final : public Operator<Context> {
     params.inputs.resize(InputSize() - 1);
     params.outputs.resize(OutputSize());
     for (auto i = 0; i < params.inputs.size(); i++) {
-      params.inputs[i] = Input(i + 1).template data<T>();
-      params.outputs[i] = Output(i)->template mutable_data<T>();
+      params.inputs[i] = Input(i + 1).template raw_data();
+      params.outputs[i] = Output(i)->template raw_mutable_data();
     }
     params.size = Output(0)->size();
+    params.meta = Output(0)->meta();
   }
 
   GlooParameters init_;
