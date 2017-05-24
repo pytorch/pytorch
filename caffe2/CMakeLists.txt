@@ -17,7 +17,6 @@ set(Caffe2_GPU_TEST_SRCS)
 
 add_subdirectory(proto)
 
-add_subdirectory(binaries)
 add_subdirectory(contrib)
 add_subdirectory(core)
 add_subdirectory(cuda_rtc)
@@ -223,20 +222,41 @@ if (BUILD_PYTHON)
           ${CMAKE_BINARY_DIR}/caffe2/python)
     endif()
   endif()
-endif()
 
-# ---[ Binaries.
-if (BUILD_BINARY)
-  set(Caffe2_ALL_BINARY_SRCS ${Caffe2_CPU_BINARY_SRCS})
-  if (USE_CUDA)
-    list(APPEND Caffe2_ALL_BINARY_SRCS ${Caffe2_GPU_BINARY_SRCS})
-  endif()
+  # Finally, Copy all python files to build directory
+  # Generate and create all needed __init__.py files, if they aren't already
+  # present in the current source tree.
+  message(STATUS "Automatically generating missing __init__.py files.")
+  caffe_autogen_init_py_files()
 
-  foreach(binary_src ${Caffe2_ALL_BINARY_SRCS})
-    get_filename_component(bin_name ${binary_src} NAME_WE)
-    add_executable(${bin_name} ${binary_src})
-    add_dependencies(${bin_name} ${Caffe2_MAIN_LIBS_ORDER})
-    target_link_libraries(${bin_name} ${Caffe2_MAIN_LIBS} ${Caffe2_DEPENDENCY_LIBS})
-    install(TARGETS ${bin_name} DESTINATION ${CMAKE_INSTALL_PREFIX}/binaries)
+  # Create a custom target that copies all python files.
+  file(GLOB_RECURSE PYTHON_SRCS RELATIVE ${PROJECT_SOURCE_DIR}
+       "${PROJECT_SOURCE_DIR}/caffe2/*.py")
+  add_custom_target(python_copy_files ALL)
+  foreach(python_src ${PYTHON_SRCS})
+    get_filename_component(dir ${python_src} DIRECTORY)
+    add_custom_command(
+        TARGET python_copy_files PRE_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy
+        ${PROJECT_SOURCE_DIR}/${python_src} ${CMAKE_BINARY_DIR}/${dir})
   endforeach()
+
+  # Install commands
+  # Pick up static python files
+  install(DIRECTORY ${CMAKE_BINARY_DIR}/caffe2 DESTINATION ${CMAKE_INSTALL_PREFIX}
+          FILES_MATCHING PATTERN "*.py")
+  # Caffe proto files
+  install(DIRECTORY ${CMAKE_BINARY_DIR}/caffe DESTINATION ${CMAKE_INSTALL_PREFIX}
+          FILES_MATCHING PATTERN "*.py")
+  # Caffe2 proto files
+  install(DIRECTORY ${CMAKE_BINARY_DIR}/caffe2 DESTINATION ${CMAKE_INSTALL_PREFIX}
+          FILES_MATCHING PATTERN "*.py")
 endif()
+
+
+# ---[ Any builds that should happen after the main targets should be added here.
+# Binaries
+if (BUILD_BINARY)
+  add_subdirectory(binaries)
+endif()
+

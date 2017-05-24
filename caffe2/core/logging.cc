@@ -151,6 +151,11 @@ bool InitCaffeLogging(int* argc, char** argv) {
   }
   return true;
 }
+
+void ShowLogInfoToStderr() {
+  FLAGS_logtostderr = 1;
+  FLAGS_minloglevel = std::min(FLAGS_minloglevel, google::INFO);
+}
 }  // namespace caffe2
 
 #else  // !CAFFE2_USE_GOOGLE_GLOG
@@ -179,6 +184,10 @@ bool InitCaffeLogging(int* argc, char** argv) {
     FLAGS_caffe2_log_level = FATAL;
   }
   return true;
+}
+
+void ShowLogInfoToStderr() {
+  FLAGS_caffe2_log_level = INFO;
 }
 
 MessageLogger::MessageLogger(const char *file, int line, int severity)

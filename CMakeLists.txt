@@ -130,35 +130,4 @@ add_subdirectory(caffe/proto)
 # ---[ Main build
 add_subdirectory(caffe2)
 
-# ---[ Copy all python files to build directory
-if (BUILD_PYTHON)
-  # Generate and create all needed __init__.py files, if they aren't already
-  # present in the current source tree.
-  message(STATUS "Automatically generating missing __init__.py files.")
-  caffe_autogen_init_py_files()
-
-  # Create a custom target that copies all python files.
-  file(GLOB_RECURSE PYTHON_SRCS RELATIVE ${PROJECT_SOURCE_DIR}
-       "${PROJECT_SOURCE_DIR}/caffe2/*.py")
-  add_custom_target(python_copy_files ALL)
-  foreach(python_src ${PYTHON_SRCS})
-    get_filename_component(dir ${python_src} DIRECTORY)
-    add_custom_command(
-        TARGET python_copy_files PRE_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy
-        ${PROJECT_SOURCE_DIR}/${python_src} ${CMAKE_BINARY_DIR}/${dir})
-  endforeach()
-
-  # Install commands
-  # Pick up static python files
-  install(DIRECTORY ${CMAKE_BINARY_DIR}/caffe2 DESTINATION ${CMAKE_INSTALL_PREFIX}
-          FILES_MATCHING PATTERN "*.py")
-  # Caffe proto files
-  install(DIRECTORY ${CMAKE_BINARY_DIR}/caffe DESTINATION ${CMAKE_INSTALL_PREFIX}
-          FILES_MATCHING PATTERN "*.py")
-  # Caffe2 proto files
-  install(DIRECTORY ${CMAKE_BINARY_DIR}/caffe2 DESTINATION ${CMAKE_INSTALL_PREFIX}
-          FILES_MATCHING PATTERN "*.py")
-endif()
-
 Caffe2_print_configuration_summary()
