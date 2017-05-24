@@ -1,4 +1,5 @@
 #include "torch/csrc/autograd/engine.h"
+#include "torch/csrc/autograd/functions/basic_ops.h"
 
 #include <atomic>
 #include <condition_variable>
@@ -226,9 +227,9 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
 }
 
 /** Finds all stochastic functions and appends them to the queue */
-auto Engine::find_stochastic_functions(function_queue& queue, GraphTask& task) -> void {
-  std::unordered_set<Function*> seen;
-  function_queue search_queue(queue);
+auto Engine::find_stochastic_functions(function_queue& queue, Function* graph_root, GraphTask& task) -> void {
+  std::unordered_set<Function*> seen {graph_root};
+  function_queue search_queue {graph_root};
   while (search_queue.size() > 0) {
     auto fn = search_queue.back(); search_queue.pop_back();
     for (auto& next_fn_pair : fn->next_functions) {
@@ -258,8 +259,6 @@ auto Engine::compute_dependencies(function_queue queue, GraphTask& task) -> void
   auto& dependencies = task.dependencies;
   while (queue.size() > 0) {
     auto fn = std::move(queue.back()); queue.pop_back();
-    // This is needed only to filter out roots that aren't executable
-    if (!fn->is_executable) continue;
     for (auto& next_fn_pair : fn->next_functions) {
       Function* next_ptr = next_fn_pair.first.get();
       if (!next_ptr) continue;
@@ -274,38 +273,6 @@ auto Engine::compute_dependencies(function_queue queue, GraphTask& task) -> void
   }
 }
 
-auto Engine::find_roots(const function_list& input_roots,
-                        variable_list& inputs,
-                        GraphTask& task) -> function_queue {
-  std::unordered_map<std::shared_ptr<Function>, std::unique_ptr<InputBuffer>> root_value;
-  int num_inputs = input_roots.size();
-  for (int i = 0; i < num_inputs; ++i) {
-    auto& input = inputs[i];
-    auto& root_info = input_roots[i];
-    auto root = root_info.first;
-    int input_nr = root_info.second;
-    auto& buf = root_value[root];
-    if (root->is_executable) {
-      if (!buf) buf.reset(new InputBuffer(root->num_inputs));
-      buf->add(input_nr, std::shared_ptr<Variable>(input));
-    }
-  }
-
-  function_queue roots;
-  for (auto& entry: root_value) {
-    const auto& root = entry.first;
-    roots.push_back(root.get());
-    // no need to enqueue tasks for non-executable functions
-    if (!root->is_executable) continue;
-    auto& input_buf = entry.second;
-    auto& queue = ready_queue(input_buf->device());
-    queue.push_front(FunctionTask(&task, root, std::move(*input_buf)));
-    task.has_any_work = true;
-  }
-
-  return roots;
-}
-
 auto Engine::execute(const function_list& input_roots,
                      variable_list& inputs,
                      bool keep_graph,
@@ -315,11 +282,19 @@ auto Engine::execute(const function_list& input_roots,
   GraphTask graph_task(keep_graph, callbacks);
   std::unique_lock<std::mutex> lock(graph_task.mutex);
 
-  // Find the unique roots and backprop into variables.
-  function_queue roots = find_roots(input_roots, inputs, graph_task);
+  auto graph_root = std::make_shared<GraphRoot>(input_roots, inputs);
+  function_queue roots;
+  for (auto entry : input_roots) {
+    if (entry.first->is_executable) {
+      graph_task.has_any_work = true;
+      roots.push_back(graph_root.get());
+      ready_queue(-1).push_front(FunctionTask(&graph_task, graph_root, InputBuffer(0)));
+      break;
+    }
+  }
 
   // Search the graph and find all stochastic functions. Append them to the queue.
-  find_stochastic_functions(roots, graph_task);
+  find_stochastic_functions(roots, graph_root.get(), graph_task);
 
   if (!graph_task.has_any_work) {
     throw std::runtime_error(
