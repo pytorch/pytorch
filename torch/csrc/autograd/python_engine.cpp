@@ -47,7 +47,7 @@ struct CallbackContext {
     std::pair<std::vector<std::pair<int, int>>, bool>> output_map;
 };
 
-bool compute_partial_exec_callbacks(const function_list& roots,
+void compute_partial_exec_callbacks(const function_list& roots,
                                     const CallbackContext& ctx,
                                     Engine::callback_map& map) {
   static Engine::callback_type abort_callback(
@@ -84,7 +84,7 @@ bool compute_partial_exec_callbacks(const function_list& roots,
   for (auto input_info: ctx.output_map) {
     auto input = input_info.first.get();
     auto& rev_edges = rev_graph[input];
-    THPUtils_assert(rev_edges.size() > 0, "differentiated input is unreachable");
+    if (rev_edges.size() == 0) throw std::runtime_error("differentiated input is unreachable");
     queue.emplace_back(input);
     needed.insert(input);
   }
@@ -102,11 +102,11 @@ bool compute_partial_exec_callbacks(const function_list& roots,
     if (needed.count(fn) > 0) continue;
     map.emplace(fn, abort_callback);
   }
-  return true;
 }
 
 PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwargs)
 {
+  HANDLE_TH_ERRORS
   PyObject *variables = NULL;
   PyObject *grad_variables = NULL;
   unsigned char keep_graph = 0;
@@ -193,9 +193,7 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     }
     // Disable execution for all unneeded functions
     if (only_inputs) {
-      if (!compute_partial_exec_callbacks(roots, ctx, callbacks)) {
-        return NULL;
-      }
+      compute_partial_exec_callbacks(roots, ctx, callbacks);
     }
   }
 
@@ -205,9 +203,6 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
   } catch (python_error &e) {
     e.restore();
     return nullptr;
-  } catch (const std::exception &e) {
-    PyErr_SetString(PyExc_RuntimeError, e.what());
-    return nullptr;
   }
 
   if (ctx.outputs) {
@@ -215,6 +210,7 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
   } else {
     Py_RETURN_NONE;
   }
+  END_HANDLE_TH_ERRORS
 }
 
 PyObject *THPEngine_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
