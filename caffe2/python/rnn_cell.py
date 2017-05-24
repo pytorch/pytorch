@@ -367,13 +367,12 @@ class MILSTMCell(LSTMCell):
             [alpha_by_input_t_plus_beta_h_by_prev_t, beta_i_by_input_t_plus_b],
             self.scope('gates_t')
         )
-        hidden_t_intermediate, cell_t = model.net.LSTMUnit(
+        hidden_t, cell_t = model.net.LSTMUnit(
             [hidden_t_prev, cell_t_prev, gates_t, seq_lengths, timestep],
             [self.scope('hidden_t_intermediate'), self.scope('cell_t')],
             forget_bias=self.forget_bias,
             drop_states=self.drop_states,
         )
-        hidden_t = model.Copy(hidden_t_intermediate, self.scope('hidden_t'))
         model.net.AddExternalOutputs(
             cell_t,
             hidden_t,
