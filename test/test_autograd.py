@@ -117,16 +117,12 @@ class TestAutograd(TestCase):
                         grad_output * ctx.scalar + grad_output * t1)
 
         x, y = self._function_test(MyFunction)
-        x_grad_desc = graph_desc(x.grad.grad_fn)
-        y_grad_desc = graph_desc(y.grad.grad_fn)
         self.assertEqual(graph_desc(x.grad.grad_fn),
                          'Identity(Error(AccumulateGrad(), None, AccumulateGrad()))')
         self.assertEqual(graph_desc(y.grad.grad_fn),
                          'Identity(Error(AccumulateGrad(), None, AccumulateGrad()))')
 
     def test_accumulate_grad(self):
-        import sys
-
         grad_output = Variable(torch.ones(5, 5))
         for start_volatile, end_volatile in product((True, False), repeat=2):
             go1 = grad_output.data if start_volatile else grad_output
@@ -247,6 +243,20 @@ class TestAutograd(TestCase):
         self.assertEqual(grad_b.data, go * 2)
         self.assertFalse(hook_called[0])
         self.assertIsNone(x.grad)
+
+    def test_grad_badcalls(self):
+        x = Variable(torch.ones(1))
+        y = x ** 2
+        with self.assertRaisesRegex(RuntimeError, 'does not require grad'):
+            torch.autograd.grad(x, y)
+        with self.assertRaisesRegex(RuntimeError, 'not have been used in the graph'):
+            torch.autograd.grad(y, x)
+
+        x = Variable(torch.ones(1), requires_grad=True)
+        y = x ** 2
+        torch.autograd.grad(y, x)  # this should succeed now
+        with self.assertRaisesRegex(RuntimeError, 'unreachable'):
+            torch.autograd.grad(x, y)
 
     def test_hooks(self):
         x = Variable(torch.ones(5, 5), requires_grad=True)
