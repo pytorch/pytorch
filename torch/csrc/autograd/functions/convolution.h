@@ -4,6 +4,7 @@
 #include <THPP/THPP.h>
 #include <memory>
 #include <vector>
+#include <iostream>
 
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/variable.h"
@@ -77,4 +78,32 @@ struct ConvBackward : public Function, public ConvParams {
   std::unique_ptr<torch::cudnn::Convolution> convolution;
 };
 
-}}
+struct ConvBackwardBackward : public Function, public ConvParams {
+  ConvBackwardBackward(
+      FunctionFlags flags,
+      ConvParams params,
+      SavedVariable input,
+      SavedVariable weight,
+      SavedVariable bias,
+      SavedVariable grad_output)
+    : Function(std::move(flags))
+    , ConvParams(std::move(params)) {
+      if (is_executable) {
+        this->input_ = std::move(input);
+        this->weight_ = std::move(weight);
+        this->bias_ = std::move(bias);
+        this->grad_output_ = std::move(grad_output);
+      }
+    }
+
+  virtual variable_list apply(const variable_list& grad_grad_inputs) override;
+
+  virtual void releaseVariables() override;
+
+  SavedVariable input_;
+  SavedVariable weight_;
+  SavedVariable bias_;
+  SavedVariable grad_output_;
+};
+
+}} // namespace torch::autograd
