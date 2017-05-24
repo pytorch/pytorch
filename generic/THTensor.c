@@ -325,6 +325,7 @@ int THTensor_(expand2)(THTensor *ra, THTensor *rb, THTensor *opa, THTensor *opb,
                                      opb->size, THTensor_(nDimension)(opb),
                                      raiseErrors);
   if(ret != 0) {
+    THLongStorage_free(sizes);
     return ret;
   }
 
@@ -361,6 +362,9 @@ TH_API int THTensor_(expand3)(THTensor *ra, THTensor *rb, THTensor *rc, THTensor
                                      raiseErrors);
 
   if(ret != 0) {
+    THLongStorage_free(sizes);
+    THFree(op_dims);
+    THFree(op_sizes);
     return ret;
   }
 
@@ -372,6 +376,8 @@ TH_API int THTensor_(expand3)(THTensor *ra, THTensor *rb, THTensor *rc, THTensor
   THAssert(ret == 0); // since we inferred this already, it must be valid
 
   THLongStorage_free(sizes);
+  THFree(op_dims);
+  THFree(op_sizes);
   return 0;
 }
 
