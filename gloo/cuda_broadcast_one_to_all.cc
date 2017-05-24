@@ -55,18 +55,26 @@ CudaBroadcastOneToAll<T, W>::CudaBroadcastOneToAll(
   if (contextSize_ > 1) {
     auto slot = context_->nextSlot();
     if (contextRank_ == rootRank_) {
-      for (int i = 0; i < contextSize_; i++) {
+      sender_.resize(contextSize_);
+      for (auto i = 0; i < contextSize_; i++) {
         if (i == contextRank_) {
           continue;
         }
 
+        sender_[i] = make_unique<forSender>();
         auto& pair = context_->getPair(i);
-        sendDataBuffers_.push_back(
-          pair->createSendBuffer(slot, *scratch_, bytes_));
+        sender_[i]->clearToSendBuffer = pair->createRecvBuffer(
+            slot, &sender_[i]->dummy, sizeof(sender_[i]->dummy));
+        sender_[i]->sendBuffer = pair->createSendBuffer(
+            slot, *scratch_, bytes_);
       }
     } else {
+      receiver_ = make_unique<forReceiver>();
       auto& rootPair = context_->getPair(rootRank_);
-      recvDataBuffer_ = rootPair->createRecvBuffer(slot, *scratch_, bytes_);
+      receiver_->clearToSendBuffer = rootPair->createSendBuffer(
+          slot, &receiver_->dummy, sizeof(receiver_->dummy));
+      receiver_->recvBuffer = rootPair->createRecvBuffer(
+          slot, *scratch_, bytes_);
     }
   }
 
@@ -96,9 +104,13 @@ void CudaBroadcastOneToAll<T, W>::run() {
     stream.copyAsync(scratch_, devicePtrs_[rootPointerRank_]);
     stream.wait();
 
-    // Fire off all send operations concurrently
-    for (auto& buf : sendDataBuffers_) {
-      buf->send();
+    // Fire off send operations after receiving clear to send
+    for (auto i = 0; i < contextSize_; i++) {
+      if (i == contextRank_) {
+        continue;
+      }
+      sender_[i]->clearToSendBuffer->waitRecv();
+      sender_[i]->sendBuffer->send();
     }
 
     // Broadcast locally while sends are happening
@@ -110,14 +122,16 @@ void CudaBroadcastOneToAll<T, W>::run() {
     }
 
     // Wait for all send operations to complete
-    for (auto& buf : sendDataBuffers_) {
-      buf->waitSend();
+    for (auto i = 0; i < contextSize_; i++) {
+      if (i == contextRank_) {
+        continue;
+      }
+      sender_[i]->sendBuffer->waitSend();
     }
   } else {
     CudaStream& stream = streams_[rootPointerRank_];
-
-    // Wait on buffer
-    recvDataBuffer_->waitRecv();
+    receiver_->clearToSendBuffer->send();
+    receiver_->recvBuffer->waitRecv();
 
     // Copy host buffer to device
     stream.copyAsync(devicePtrs_[rootPointerRank_], scratch_);

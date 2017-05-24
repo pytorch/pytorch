@@ -48,10 +48,22 @@ class CudaBroadcastOneToAll : public Algorithm {
   const bool synchronizeDeviceOutputs_;
 
   // For the sender (root)
-  std::vector<std::unique_ptr<transport::Buffer>> sendDataBuffers_;
+  using forSender = struct {
+    int dummy;
+    std::unique_ptr<transport::Buffer> clearToSendBuffer;
+    std::unique_ptr<transport::Buffer> sendBuffer;
+  };
+
+  std::vector<std::unique_ptr<forSender>> sender_;
 
   // For all receivers
-  std::unique_ptr<transport::Buffer> recvDataBuffer_;
+  using forReceiver = struct {
+    int dummy;
+    std::unique_ptr<transport::Buffer> clearToSendBuffer;
+    std::unique_ptr<transport::Buffer> recvBuffer;
+  };
+
+  std::unique_ptr<forReceiver> receiver_;
 
   // For local broadcast
   std::unique_ptr<LocalOp<T> > localBroadcastOp_;
