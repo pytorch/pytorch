@@ -173,6 +173,7 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3):
 
     return True
 
+
 def gradgradcheck(func, inputs, grad_outputs, eps=1e-6, atol=1e-5, rtol=1e-3):
     def new_func(*inputs):
         outputs = func(*inputs)
