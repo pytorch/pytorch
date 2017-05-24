@@ -27,7 +27,6 @@ CAFFE2_DECLARE_bool(caffe2_print_blob_sizes_at_exit);
 namespace caffe2 {
 
 class NetBase;
-struct CompiledExecutionStep;
 
 struct StopOnSignal {
   StopOnSignal()
@@ -208,9 +207,6 @@ class Workspace {
   // generators repeat the same thing over multiple calls.
   bool RunOperatorOnce(const OperatorDef& op_def);
   bool RunNetOnce(const NetDef& net_def);
-
- protected:
-  bool ExecuteStepRecursive(CompiledExecutionStep& execution);
 
  private:
   BlobMap blob_map_;
