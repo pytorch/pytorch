@@ -21,6 +21,8 @@ sudo apt-get install \
   libgoogle-glog-dev \
   libprotobuf-dev \
   libpython-dev \
+  python-pip \
+  python-numpy \
   protobuf-compiler \
   python-protobuf
 # python dependencies
