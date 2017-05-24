@@ -77,6 +77,30 @@ auto THCTensor<real>::newUnfold(int dimension, long size, long step) const -> TH
 }
 
 template<>
+auto THCTensor<real>::newExpand(const long_range& size) const -> THCTensor* {
+  THLongStorage *size_storage = THLongStorage_newWithSize(size.size());
+  long *size_storage_d = size_storage->data;
+  for (auto it = size.begin(); it != size.end(); ++it)
+    *size_storage_d++ = *it;
+  // TODO this might leak on error
+  auto expanded = new THCTensor(state, THCTensor_(newExpand)(state, tensor, size_storage));
+  THLongStorage_free(size_storage);
+  return expanded;
+}
+
+template<>
+auto THCTensor<real>::newView(const long_range& size) const -> THCTensor* {
+  THLongStorage *size_storage = THLongStorage_newWithSize(size.size());
+  long *size_storage_d = size_storage->data;
+  for (auto it = size.begin(); it != size.end(); ++it)
+    *size_storage_d++ = *it;
+  // TODO this might leak on error
+  auto viewed = new THCTensor(state, THCTensor_(newView)(state, tensor, size_storage));
+  THLongStorage_free(size_storage);
+  return viewed;
+}
+
+template<>
 int THCTensor<real>::nDim() const {
   return tensor->nDimension;
 }

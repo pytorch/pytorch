@@ -65,6 +65,16 @@ auto THCSTensor<real>::newUnfold(int dimension, long size, long step) const -> T
 }
 
 template<>
+auto THCSTensor<real>::newExpand(const long_range& size) const -> THCSTensor* {
+  throw std::runtime_error("newExpand is not yet available for sparse tensors");
+}
+
+template<>
+auto THCSTensor<real>::newView(const long_range& size) const -> THCSTensor* {
+  throw std::runtime_error("newView is not yet available for sparse tensors");
+}
+
+template<>
 int THCSTensor<real>::nDim() const {
   return tensor->nDimensionI;
 }

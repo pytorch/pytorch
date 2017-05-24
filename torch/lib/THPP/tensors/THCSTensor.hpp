@@ -44,6 +44,8 @@ public:
   virtual THCSTensor* newNarrow(int dimension, long firstIndex, long size) const override;
   virtual THCSTensor* newTranspose(int dimension1, int dimension2) const override;
   virtual THCSTensor* newUnfold(int dimension, long size, long step) const override;
+  virtual THCSTensor* newExpand(const long_range& size) const override;
+  virtual THCSTensor* newView(const long_range& size) const override;
 
   virtual int nDim() const override;
   virtual long_range sizes() const override;
