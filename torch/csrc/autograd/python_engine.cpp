@@ -37,7 +37,6 @@ static PythonEngine engine;
 PyObject *THPEngineClass = NULL;
 
 struct CallbackContext {
-  std::mutex mutex;
   std::string error;
   THPObjectPtr outputs;
   // Used to determine which callback arguments should be used to
@@ -182,7 +181,7 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
       callbacks.emplace(entry.first.get(), [&ctx, &fn_info](Function* _unused, variable_list& grads) {
         auto& saved_outputs = fn_info.first;
         bool is_leaf = fn_info.second;
-        std::lock_guard<std::mutex> guard(ctx.mutex);
+        AutoGIL gil;
         for (auto& saved_out : saved_outputs) {
           PyTuple_SET_ITEM(ctx.outputs.get(), saved_out.second,
             THPVariable_Wrap(grads[saved_out.first]));
