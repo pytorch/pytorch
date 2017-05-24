@@ -248,6 +248,10 @@ class TestCase(unittest.TestCase):
                 return
         raise AssertionError("object not found in iterable")
 
+    if sys.version_info < (3, 2):
+        # assertRaisesRegexp renamed assertRaisesRegex in 3.2
+        assertRaisesRegex = unittest.TestCase.assertRaisesRegexp
+
 
 def download_file(url, path, binary=True):
     if sys.version_info < (3,):
