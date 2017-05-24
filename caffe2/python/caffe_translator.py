@@ -23,7 +23,7 @@ def _StateMeetsRule(state, rule):
         return False
     if rule.HasField('min_level') and state.level < rule.min_level:
         return False
-    if rule.HasField('max_level') and state.level > rule.max_lavel:
+    if rule.HasField('max_level') and state.level > rule.max_level:
         return False
     curr_stages = set(list(state.stage))
     # all stages in rule.stages should be in, otherwise it's not a match.
