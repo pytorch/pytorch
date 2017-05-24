@@ -94,7 +94,7 @@ inline void CheckCuDNNVersions() {
   // Major, minor and patch versions must all match
   bool version_match = cudnnCompiledVersion() == cudnnRuntimeVersion();
   CAFFE_ENFORCE(version_match,
-                "cuDNN compiled (", cudnnCompiledVersion(), ") and"
+                "cuDNN compiled (", cudnnCompiledVersion(), ") and "
                 "runtime (", cudnnRuntimeVersion(), ") versions mismatch");
 }
 
