@@ -164,7 +164,7 @@ std::shared_ptr<::gloo::Context> ContextFactory::makeContext(
 
     recvBuffers_[i]->waitRecv();
     auto& data = recvData_[i];
-    auto address = std::vector<char>(&data[0], &data[addressSize]);
+    auto address = std::vector<char>(data.begin(), data.begin() + addressSize);
     pairs[i]->connect(address);
 
     // Notify peer that we've consumed the payload
