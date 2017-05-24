@@ -63,6 +63,8 @@ struct DefaultCPUAllocator final : CPUAllocator {
 #endif
 };
 
+typedef std::mt19937 rand_gen_type;
+
 // Get the CPU Alloctor.
 CPUAllocator* GetCPUAllocator();
 // Sets the CPU allocator to the given allocator: the caller gives away the
@@ -121,9 +123,9 @@ class CPUContext final {
 
   inline bool FinishDeviceComputation() { return true; }
 
-  inline std::mt19937& RandGenerator() {
+  inline rand_gen_type& RandGenerator() {
     if (!random_generator_.get()) {
-      random_generator_.reset(new std::mt19937(random_seed_));
+      random_generator_.reset(new rand_gen_type(random_seed_));
     }
     return *random_generator_.get();
   }
@@ -173,7 +175,7 @@ class CPUContext final {
  protected:
   // TODO(jiayq): instead of hard-coding a generator, make it more flexible.
   int random_seed_{1701};
-  std::unique_ptr<std::mt19937> random_generator_;
+  std::unique_ptr<rand_gen_type> random_generator_;
   static MemoryAllocationReporter reporter_;
 };
 
