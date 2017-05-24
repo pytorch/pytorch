@@ -315,6 +315,45 @@ void THTensor_(expand)(THTensor *r, THTensor *tensor, THLongStorage *sizes) {
   THFree(expandedStrides);
 }
 
+
+TH_API int THTensor_(expandNd)(THTensor **rets, THTensor **ops, int count, int raiseErrors) {
+  for (int i = 0; i < count; ++i) {
+    THArgCheck(THTensor_(nDimension)(ops[i]) > 0, i, "can't expand empty tensor %d", i);
+  }
+
+  long **op_sizes = THAlloc(sizeof(long**)*count);
+  long *op_dims = THAlloc(sizeof(long*)*count);
+
+  for (int i = 0; i < count; ++i) {
+    op_sizes[i] = ops[i]->size;
+    op_dims[i] = ops[i]->nDimension;
+  }
+
+  THLongStorage *sizes = THLongStorage_new();
+  int ret = THLongStorage_inferSizeN(sizes,
+                                     count,
+                                     op_sizes,
+                                     op_dims,
+                                     raiseErrors);
+
+  if(ret != 0) {
+    THFree(op_sizes);
+    THFree(op_dims);
+    return ret;
+  }
+
+  for (int i = 0; i < count; ++i) {
+    ret = THTensor_(expand)(rets[i], ops[i], sizes, raiseErrors);
+    THAssert(ret == 0);
+  }
+
+  THFree(op_sizes);
+  THFree(op_dims);
+  THLongStorage_free(sizes);
+  return 0;
+}
+
+>>>>>>> hacky commit broadcast semantics
 void THTensor_(set)(THTensor *self, THTensor *src)
 {
   if(self != src)
