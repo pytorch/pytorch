@@ -247,9 +247,14 @@ bool THPAutograd_initFunctions(PyObject* _unused)
 
   static PyTypeObject CloneClass;
   addClass<Clone, NoCtor>(module, CloneClass, "Clone");
-
   static PyTypeObject IdentityClass;
   addClass<Identity, NoCtor>(module, IdentityClass, "Identity");
+  static PyTypeObject TransposeClass;
+  addClass<Transpose, NoCtor>(module, TransposeClass, "CTranspose");
+  static PyTypeObject ViewClass;
+  addClass<View, NoCtor>(module, ViewClass, "CView");
+  static PyTypeObject ExpandClass;
+  addClass<Expand, NoCtor>(module, ExpandClass, "CExpand");
 
   THPObjectPtr parent(PyImport_ImportModule("torch._C"));
   if (!parent) return false;
