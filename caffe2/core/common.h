@@ -63,7 +63,11 @@ using std::vector;
 #define CAFFE_NOT_IMPLEMENTED CAFFE_THROW("Not Implemented.")
 
 // suppress an unused variable.
+#ifndef _MSC_VER
 #define UNUSED_VARIABLE __attribute__((unused))
+#else
+#define UNUSED_VARIABLE 
+#endif //_MSC_VER
 
 // Disable the copy and assignment operator for a class. Note that this will
 // disable the usage of the class in std containers.
