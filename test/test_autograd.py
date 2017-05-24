@@ -8,7 +8,8 @@ import warnings
 from copy import deepcopy
 from collections import OrderedDict
 from itertools import product
-from torch.autograd import gradcheck
+import torch.nn.functional as F
+from torch.autograd import gradcheck, gradgradcheck
 from torch.autograd.function import once_differentiable
 
 from common import TestCase, run_tests, skipIfNoLapack
@@ -1261,6 +1262,87 @@ class TestAutograd(TestCase):
         c = F2()(a, b)
         c.backward(torch.ones(c.size()))
         self.assertEqual(x.grad.data, torch.ones(x.size()))
+
+    def run_conv_double_back_test(self, kern, stride, padding, chan_in, chan_out, batch_size, inp_size, dilation, no_weight):
+        x = Variable(torch.randn(batch_size, chan_in, inp_size, inp_size), requires_grad=True)
+        weight = Variable(torch.randn(chan_out, chan_in, kern, kern), requires_grad=True)
+        bias = Variable(torch.randn(chan_out), requires_grad=True)
+
+        if no_weight:
+            # Special case because transpose dilated convolution is not implemented
+            def func(x, bias):
+                return F.conv2d(x, weight, bias, stride, padding, dilation)
+            inputs = (x, bias,)
+        else:
+            def func(x, weight, bias):
+                return F.conv2d(x, weight, bias, stride, padding, dilation)
+            inputs = (x, weight, bias,)
+
+        dummy_out = func(*inputs)
+        grad_y = Variable(torch.randn(dummy_out.size()), requires_grad=True)
+
+        # print("Conv double backward testing with parameters:" +
+        #     "\nkern: " + str(kern) +
+        #     "\nstride: " + str(stride) +
+        #     "\npadding: " + str(padding) +
+        #     "\nchan_in: " + str(chan_in) +
+        #     "\nchan_out: " + str(chan_out) +
+        #     "\nbatch_size: " + str(batch_size) +
+        #     "\ninp_size: " + str(inp_size) +
+        #     "\ndilation: " + str(dilation))
+
+        return gradgradcheck(func, inputs, (grad_y,))
+
+    def test_conv_double_backward(self):
+        batch_size = 2
+        for kern, inp_size, dilations in [(3, 5, [1, 2]), (3, 7, [1, 2]), (4, 9, [2]), (4, 10, [1])]:
+            for stride in [1, 2]:
+                for padding in [0, 1, 2]:
+                    for chan_in in [1, 3]:
+                        for chan_out in [1, 3]:
+                            for dilation in dilations:
+                                no_weight = stride==2
+                                result = self.run_conv_double_back_test(kern, stride,
+                                    padding, chan_in, chan_out,
+                                    batch_size, inp_size, dilation, no_weight)
+                                self.assertTrue(result,
+                                    "Conv double backward test failed with parameters:" +
+                                    "\nkern: " + str(kern) +
+                                    "\nstride: " + str(stride) +
+                                    "\npadding: " + str(padding) +
+                                    "\nchan_in: " + str(chan_in) +
+                                    "\nchan_out: " + str(chan_out) +
+                                    "\nbatch_size: " + str(batch_size) +
+                                    "\ninp_size: " + str(inp_size) +
+                                    "\ndilation: " + str(dilation))
+
+    def test_error_conv_double_backward(self):
+        # Invalid kernel and input size for stride of 2
+        batch_size = 2
+        for kern, inp_size, dilations in [(3, 6, [1, 2]), (3, 8, [1, 2]), (4, 9, [1]), (4, 10, [2])]:
+            for stride in [2]:
+                for padding in [0, 1, 2]:
+                    for chan_in in [1, 3]:
+                        for chan_out in [1, 3]:
+                            for dilation in dilations:
+                                no_weight = stride==2
+                                with self.assertRaises(RuntimeError):
+                                    self.run_conv_double_back_test(kern, stride,
+                                        padding, chan_in, chan_out,
+                                        batch_size, inp_size, dilation, no_weight)
+
+        # Cannot provide ggW when stride is > 1
+        for kern, inp_size, dilations in [(3, 5, [1, 2]), (3, 7, [1, 2]), (4, 6, [1]), (4, 7, [2])]:
+            for stride in [2]:
+                for padding in [0, 1, 2]:
+                    for chan_in in [1, 3]:
+                        for chan_out in [1, 3]:
+                            for dilation in dilations:
+                                no_weight = False
+                                with self.assertRaises(RuntimeError):
+                                    self.run_conv_double_back_test(kern, stride,
+                                        padding, chan_in, chan_out,
+                                        batch_size, inp_size, dilation, no_weight)
 
 
 def index_variable(shape, max_indices):
