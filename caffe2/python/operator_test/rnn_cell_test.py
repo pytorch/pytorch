@@ -844,5 +844,5 @@ class RNNCellTest(hu.HypothesisTestCase):
                 input_to_check=str(param),
                 print_net=False,
                 step_size=0.0001,
-                threshold=0.1,
+                threshold=0.05,
             )

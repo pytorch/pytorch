@@ -9,7 +9,6 @@ from caffe2.python import core
 from caffe2.python.scope import CurrentNameScope
 
 
-
 def recurrent_net(
         net, cell_net, inputs, initial_cell_inputs,
         links, timestep=None, scope=None, outputs_with_grads=(0,),
@@ -227,6 +226,27 @@ def recurrent_net(
                 str, recompute_blobs_on_backward),
             'param_grads': param_grads,
         }
+
+    # Make sure that recurrent gradients accumulate with internal gradients
+    # (if a blob in the backward_cell_net receives gradient from both an
+    # external connection as well as from within the backward_cell_net,
+    # those gradients need to be added together, rather than one overwriting
+    # the other)
+    if backward_cell_net is not None:
+        proto = backward_cell_net.Proto()
+        operators = []
+        while len(proto.op) > 0:
+            operators.append(proto.op.pop())
+        for op in operators[::-1]:
+            proto.op.extend([op])
+            for j, output_blob in enumerate(op.output):
+                if output_blob in proto.external_input:
+                    accum_blob = '{}_accum'.format(output_blob)
+                    proto.op[-1].output[j] = accum_blob
+                    backward_cell_net.Sum(
+                        [output_blob, accum_blob],
+                        [output_blob],
+                    )
 
     results = net.RecurrentNetwork(
         all_inputs,
