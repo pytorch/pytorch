@@ -67,6 +67,7 @@ class PredictorExporterTest(unittest.TestCase):
             outputs=self.predictor_export_meta.outputs,
             shapes=self.predictor_export_meta.shapes,
             extra_init_net=extra_init_net,
+            net_type='dag',
         )
 
         db_type = 'minidb'
@@ -110,6 +111,7 @@ class PredictorExporterTest(unittest.TestCase):
         # producing good numbers (with our custom implementation)
         workspace.FeedBlob("data", np.random.randn(2, 5).astype(np.float32))
         predict_net = pred_utils.GetNet(meta_net_def, pc.PREDICT_NET_TYPE)
+        self.assertEqual(predict_net.type, 'dag')
         workspace.RunNetOnce(predict_net)
         np.testing.assert_array_almost_equal(
             workspace.FetchBlob("y"),
