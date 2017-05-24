@@ -5,6 +5,7 @@
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/functions/utils.h"
 #include "torch/csrc/autograd/functions/basic_ops.h"
+#include "torch/csrc/autograd/functions/tensor.h"
 #include "torch/csrc/nn/THNN_generic.h"
 #include "torch/csrc/utils/auto_gpu.h"
 
@@ -24,6 +25,20 @@ using torch::cudnn::Convolution;
 using tensor_pair = std::pair<std::unique_ptr<Tensor>, std::unique_ptr<Tensor>>;
 
 namespace torch { namespace autograd {
+
+// Forward function definition and utility functions
+
+static std::unique_ptr<Tensor> compute_output(
+  Tensor* input, Tensor* weight, Tensor* bias, Tensor* columns, Tensor* ones,
+  const std::vector<long>& kernel_size, const ConvParams& params);
+
+static std::unique_ptr<Tensor> compute_grad_input(
+  Tensor* input, Tensor* grad_output, Tensor* weight, Tensor* columns, Tensor* ones,
+  const std::vector<long>& kernel_size, const ConvParams& params);
+
+static tensor_pair compute_grad_params(
+  Tensor* input, Tensor* grad_output, Tensor* weight, Tensor* bias, Tensor* columns, Tensor* ones,
+  const std::vector<long>& kernel_size, const ConvBackward& params);
 
 auto ConvParams::is_dilated() const -> bool {
   bool is_dilated = false;
@@ -94,22 +109,6 @@ auto ConvForward::output_size(Tensor& input, Tensor& weight) -> std::vector<long
   return output_size;
 }
 
-static std::unique_ptr<Tensor> subtensor(Tensor* tensor, int dim, int groups, int g);
-
-static std::unique_ptr<Tensor> compute_output(
-  Tensor* input, Tensor* weight, Tensor* bias, Tensor* columns, Tensor* ones,
-  const std::vector<long>& kernel_size, const ConvParams& params);
-
-static std::unique_ptr<Tensor> compute_grad_input(
-  Tensor* input, Tensor* grad_output, Tensor* weight, Tensor* columns, Tensor* ones,
-  const std::vector<long>& kernel_size, const ConvParams& params);
-
-static tensor_pair compute_grad_params(
-  Tensor* input, Tensor* grad_output, Tensor* weight, Tensor* bias, Tensor* columns, Tensor* ones,
-  const std::vector<long>& kernel_size, const ConvBackward& params);
-
-static std::unique_ptr<Tensor> cat(const tensor_list& tensors, int dim);
-
 static auto view4d(const Tensor& tensor) -> std::unique_ptr<Tensor> {
   if (tensor.nDim() != 3) throw std::runtime_error("expected 3D tensor");
   auto result = tensor.newTensor();
@@ -124,6 +123,33 @@ static auto view3d(const Tensor& tensor) -> std::unique_ptr<Tensor> {
   return result;
 }
 
+static std::unique_ptr<Tensor> subtensor(Tensor* tensor, int dim, int groups, int g) {
+  if (!tensor) {
+    return std::unique_ptr<Tensor>();
+  }
+  long n = tensor->sizes()[dim] / groups;
+  auto result = tensor->newTensor();
+  result->narrow(*tensor, dim, n * g, n);
+  return result->contiguous();
+}
+
+static std::unique_ptr<Tensor> cat(const tensor_list& tensors, int dim) {
+  int num_inputs = tensors.size();
+  if (num_inputs == 0) {
+    return std::unique_ptr<Tensor>();
+  }
+
+  std::vector<Tensor*> ptrs(num_inputs);
+  for (int i = 0; i < num_inputs; ++i) {
+    ptrs[i] = tensors[i].get();
+  }
+  auto output = tensors[0]->newTensor();
+  output->cat(ptrs, dim);
+  return output;
+}
+
+
+// ConvForward implementation
 
 auto ConvForward::apply(const variable_list& inputs) -> variable_list {
   check_input_variables("ConvNd", inputs, 3, 2);
@@ -212,6 +238,9 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
         std::move(columns), std::move(ones), std::move(convolution));
   });
 };
+
+
+// ConvBackward implementation
 
 auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
   check_input_variables("ConvNdBackward", grad_outputs, 1);
@@ -328,11 +357,19 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
     }
   }
 
+  // Add saved variables used out of the pure autograd to inputs
+  variable_list all_grad_outputs(grad_outputs);
+  all_grad_outputs.push_back(input_.unpack());
+  all_grad_outputs.push_back(weight_.unpack());
+
   auto outputs =  as_tensor_list(std::move(grad_input),
                                  std::move(grad_weight),
                                  std::move(grad_bias));
-  return wrap_outputs(grad_outputs, std::move(outputs), [&](FunctionFlags f) {
-    return std::make_shared<Error>("ConvBackward is not differentiable", std::move(f));
+  return wrap_outputs(all_grad_outputs, std::move(outputs), [&](FunctionFlags f) {
+    return std::make_shared<ConvBackwardBackward>(
+      f, *this,
+      input_.unpack()->save(this), weight_.unpack()->save(this),
+      Variable::save_opt(bias_.unpack().get(), this), grad_outputs[0]->save(this));
   });
 };
 
@@ -341,6 +378,126 @@ auto ConvBackward::releaseVariables() -> void {
   weight_.data.reset();
   bias_.data.reset();
 }
+
+
+// ConvBackwardBackward implementation
+
+auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> variable_list {
+  if (grad_grad_inputs.size() != 3) throw std::runtime_error("expected three grad_grad_inputs");
+  if (transposed) throw std::runtime_error("ConvBackwardBackward does not support transposed convolution");
+
+  auto ggI = grad_grad_inputs[0];
+  auto ggW = grad_grad_inputs[1];
+  auto ggb = grad_grad_inputs[2];
+
+  auto gO = grad_output_.unpack();
+  auto weight = weight_.unpack();
+
+  // Compute ggO = conv(w, ggI) + conv(ggW, i) + ggb
+  std::shared_ptr<Variable> ggO = nullptr;
+  if (ggI) {
+    ggO = std::make_shared<ConvForward>(*this)->apply({ggI, weight, nullptr})[0];
+  }
+
+  if (ggW) {
+    auto ggW_term = std::make_shared<ConvForward>(*this)->apply({input_.unpack(), ggW, nullptr})[0];
+    if (ggO) {
+      ggO = std::make_shared<Add>()->apply({ggO, ggW_term})[0];
+    } else {
+      ggO = ggW_term;
+    }
+  }
+
+  if (ggb) {
+    // View as (1, ggb.size(0), 1, 1...)
+    std::vector<long> new_size(gO->data->sizes().size(), 1);
+    new_size[1] = ggb->data->sizes()[0];
+    auto ggb_contiguous = std::make_shared<Clone>()->apply({ggb})[0];
+    auto ggb_view = std::make_shared<View>(new_size)->apply({ggb_contiguous})[0];
+
+    // Expand 
+    auto ggb_expanded = std::make_shared<Expand>(gO->data->sizes())->apply({ggb_view})[0];
+
+    if (ggO) {
+      ggO = std::make_shared<Add>()->apply({ggO, ggb_expanded})[0];
+    } else {
+      ggO = ggb_expanded;
+    }
+  }
+
+  // Compute gW = conv(gO, ggI)
+  std::shared_ptr<Variable> gW = nullptr;
+  if (ggI) {
+    // Modified params with correct padding
+    ConvParams gw_conv_params(*this);
+    auto weight_size = weight->data->sizes();
+    std::vector<long> kernel_size(weight_size.begin() + 2, weight_size.end());
+    auto input_size = ggI->data->sizes();
+    std::vector<long> input_shape(input_size.begin() + 2, input_size.end());
+    for(size_t i=0; i<gw_conv_params.padding.size(); ++i) {
+      // Formula for conv output size before the floor operation
+      auto out_size = float(input_shape[i] + 2 * gw_conv_params.padding[i] +
+                      gw_conv_params.dilation[i] * (kernel_size[i] - 1) - 1) /
+                      gw_conv_params.stride[i] + 1;
+      if (floorf(out_size) != out_size) {
+        // TODO: narrow ggI here to ignore these elements?
+        throw std::runtime_error("Some input elements have been lost during ConvForward"
+        " (see documentation for the Conv layer) so ConvBackwardBackward cannot be used."
+        " Resize the input so that no element is lost to be able to use ConvBackwardBackward.");
+      }
+      auto tmp = gw_conv_params.dilation[i];
+      gw_conv_params.dilation[i] = gw_conv_params.stride[i];
+      gw_conv_params.stride[i] = tmp;
+    }
+
+    // Transpose gO and ggI to accumulate over batch
+    auto gOt = std::make_shared<Transpose>(0, 1)->apply({gO})[0];
+    auto ggIt = std::make_shared<Transpose>(0, 1)->apply({ggI})[0];
+
+    // Compute conv
+    auto gWt = std::make_shared<ConvForward>(gw_conv_params)->apply({ggIt, gOt, nullptr})[0];
+
+    // Transpose gW to match chan_in and chan_out
+    gW = std::make_shared<Transpose>(0, 1)->apply({gWt})[0];
+  }
+
+  // Compute gI = convT(gO, ggW)
+  std::shared_ptr<Variable> gI = nullptr;
+  if (ggW) {
+    // select conv tranpose and swap stride and dilation
+    ConvParams gi_conv_params(*this);
+    gi_conv_params.transposed = true;
+    for(size_t i=0; i<gi_conv_params.padding.size(); ++i) {
+      if (gi_conv_params.stride[i] != 1) {
+        // TODO: Remove this when transpose dilated is fixed
+        throw std::runtime_error("Setting non-zero ggW for ConvBackwardBackward would require"
+        " using a dilated transpose convolution which is not supported.");
+      }
+      auto tmp = gi_conv_params.dilation[i];
+      gi_conv_params.dilation[i] = gi_conv_params.stride[i];
+      gi_conv_params.stride[i] = tmp;
+    }
+
+    auto ggWt = std::make_shared<Transpose>(0, 1)->apply({ggW})[0];
+    // Weight for conv transpose are (chan_in, chan_out, kern, kern)
+    auto gOt = std::make_shared<Transpose>(0, 1)->apply({gO})[0];
+
+    auto gIt = std::make_shared<ConvForward>(gi_conv_params)->apply({ggWt, gOt, nullptr})[0];
+    
+    gI = std::make_shared<Transpose>(0, 1)->apply({gIt})[0];
+  }
+
+  return {ggO, gI, gW};
+}
+
+auto ConvBackwardBackward::releaseVariables() -> void {
+  input_.data.reset();
+  weight_.data.reset();
+  bias_.data.reset();
+  grad_output_.data.reset();
+}
+
+// Forward and backward functions for Tensor
 
 static std::unique_ptr<Tensor> compute_output(
     Tensor* input, Tensor* weight, Tensor* bias,
@@ -579,29 +736,6 @@ done:
   return std::make_pair<>(std::move(grad_weight), std::move(grad_bias));
 }
 
-static std::unique_ptr<Tensor> subtensor(Tensor* tensor, int dim, int groups, int g) {
-  if (!tensor) {
-    return std::unique_ptr<Tensor>();
-  }
-  long n = tensor->sizes()[dim] / groups;
-  auto result = tensor->newTensor();
-  result->narrow(*tensor, dim, n * g, n);
-  return result->contiguous();
-}
 
-static std::unique_ptr<Tensor> cat(const tensor_list& tensors, int dim) {
-  int num_inputs = tensors.size();
-  if (num_inputs == 0) {
-    return std::unique_ptr<Tensor>();
-  }
-
-  std::vector<Tensor*> ptrs(num_inputs);
-  for (int i = 0; i < num_inputs; ++i) {
-    ptrs[i] = tensors[i].get();
-  }
-  auto output = tensors[0]->newTensor();
-  output->cat(ptrs, dim);
-  return output;
-}
-
+// Utils functions
 }} // namespace torch::autograd
