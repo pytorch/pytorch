@@ -1263,7 +1263,8 @@ class TestAutograd(TestCase):
         c.backward(torch.ones(c.size()))
         self.assertEqual(x.grad.data, torch.ones(x.size()))
 
-    def run_conv_double_back_test(self, kern, stride, padding, chan_in, chan_out, batch_size, inp_size, dilation, no_weight):
+    def run_conv_double_back_test(self, kern, stride, padding, chan_in, chan_out,
+                                  batch_size, inp_size, dilation, no_weight):
         x = Variable(torch.randn(batch_size, chan_in, inp_size, inp_size), requires_grad=True)
         weight = Variable(torch.randn(chan_out, chan_in, kern, kern), requires_grad=True)
         bias = Variable(torch.randn(chan_out), requires_grad=True)
@@ -1301,20 +1302,21 @@ class TestAutograd(TestCase):
                     for chan_in in [1, 3]:
                         for chan_out in [1, 3]:
                             for dilation in dilations:
-                                no_weight = stride==2
+                                no_weight = stride == 2
                                 result = self.run_conv_double_back_test(kern, stride,
-                                    padding, chan_in, chan_out,
-                                    batch_size, inp_size, dilation, no_weight)
+                                                                        padding, chan_in, chan_out,
+                                                                        batch_size, inp_size, dilation,
+                                                                        no_weight)
                                 self.assertTrue(result,
-                                    "Conv double backward test failed with parameters:" +
-                                    "\nkern: " + str(kern) +
-                                    "\nstride: " + str(stride) +
-                                    "\npadding: " + str(padding) +
-                                    "\nchan_in: " + str(chan_in) +
-                                    "\nchan_out: " + str(chan_out) +
-                                    "\nbatch_size: " + str(batch_size) +
-                                    "\ninp_size: " + str(inp_size) +
-                                    "\ndilation: " + str(dilation))
+                                                "Conv double backward test failed with parameters:" +
+                                                "\nkern: " + str(kern) +
+                                                "\nstride: " + str(stride) +
+                                                "\npadding: " + str(padding) +
+                                                "\nchan_in: " + str(chan_in) +
+                                                "\nchan_out: " + str(chan_out) +
+                                                "\nbatch_size: " + str(batch_size) +
+                                                "\ninp_size: " + str(inp_size) +
+                                                "\ndilation: " + str(dilation))
 
     def test_error_conv_double_backward(self):
         # Invalid kernel and input size for stride of 2
@@ -1325,11 +1327,12 @@ class TestAutograd(TestCase):
                     for chan_in in [1, 3]:
                         for chan_out in [1, 3]:
                             for dilation in dilations:
-                                no_weight = stride==2
+                                no_weight = stride == 2
                                 with self.assertRaises(RuntimeError):
                                     self.run_conv_double_back_test(kern, stride,
-                                        padding, chan_in, chan_out,
-                                        batch_size, inp_size, dilation, no_weight)
+                                                                   padding, chan_in, chan_out,
+                                                                   batch_size, inp_size, dilation,
+                                                                   no_weight)
 
         # Cannot provide ggW when stride is > 1
         for kern, inp_size, dilations in [(3, 5, [1, 2]), (3, 7, [1, 2]), (4, 6, [1]), (4, 7, [2])]:
@@ -1341,8 +1344,9 @@ class TestAutograd(TestCase):
                                 no_weight = False
                                 with self.assertRaises(RuntimeError):
                                     self.run_conv_double_back_test(kern, stride,
-                                        padding, chan_in, chan_out,
-                                        batch_size, inp_size, dilation, no_weight)
+                                                                   padding, chan_in, chan_out,
+                                                                   batch_size, inp_size, dilation,
+                                                                   no_weight)
 
 
 def index_variable(shape, max_indices):

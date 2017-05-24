@@ -68,7 +68,7 @@ auto THCTensor<real>::newNarrow(int dimension, long firstIndex, long size) const
 
 template<>
 auto THCTensor<real>::newTranspose(int dimension1, int dimension2) const -> THCTensor* {
-  throw std::runtime_error("newTranspose is not yet available for CUDA tensors");
+  return new THCTensor(state, THCTensor_(newTranspose)(state, tensor, dimension1, dimension2));
 }
 
 template<>
