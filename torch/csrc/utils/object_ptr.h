@@ -5,9 +5,9 @@
 template<class T>
 class THPPointer {
 public:
-  explicit THPPointer(): ptr(nullptr) {};
+  THPPointer(): ptr(nullptr) {};
   explicit THPPointer(T *ptr): ptr(ptr) {};
-  explicit THPPointer(THPPointer &&p) { free(); ptr = p.ptr; p.ptr = nullptr; };
+  THPPointer(THPPointer &&p) { free(); ptr = p.ptr; p.ptr = nullptr; };
 
   ~THPPointer() { free(); };
   T * get() { return ptr; }

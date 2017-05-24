@@ -21,7 +21,7 @@ int THPUtils_getCallable(PyObject *arg, PyObject **result) {
   return 1;
 }
 
-THLongStorage* THPUtils_unpackSize(PyObject *arg) {
+THLongStoragePtr THPUtils_unpackSize(PyObject *arg) {
   THLongStoragePtr result;
   if (!THPUtils_tryUnpackLongs(arg, result)) {
     std::string msg = "THPUtils_unpackSize() expects a torch.Size (got '";
@@ -29,7 +29,7 @@ THLongStorage* THPUtils_unpackSize(PyObject *arg) {
     msg += "')";
     throw std::runtime_error(msg);
   }
-  return result.release();
+  return result;
 }
 
 bool THPUtils_tryUnpackLongs(PyObject *arg, THLongStoragePtr& result) {
