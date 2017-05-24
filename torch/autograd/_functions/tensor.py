@@ -113,7 +113,7 @@ class Expand(Function):
         for i in range(ctx.num_unsqueezed):
             grad_input = grad_input.sum(0).squeeze(0)
         for dim in ctx.expanded_dims:
-            grad_input = grad_input.sum(dim)
+            grad_input = grad_input.sum(dim, True)
         return grad_input, None
 
 
@@ -135,7 +135,7 @@ class CudaTransfer(Function):
     def forward(ctx, i, device_id=None, async=False):
         ctx.source_device = -1 if not i.is_cuda else i.get_device()
         ctx.source_was_cuda = i.is_cuda
-        if device_id:
+        if device_id is not None:
             return i.cuda(device_id, async=async)
         else:
             return i.cuda(async=async)
@@ -482,21 +482,14 @@ class Chunk(Function):
 
     @staticmethod
     def forward(ctx, i, num_chunks, dim=0):
-        ctx.input_size = i.size()
         ctx.dim = dim
         result = i.chunk(num_chunks, dim)
         ctx.mark_shared_storage(*((i, chunk) for chunk in result))
         return result
 
     @staticmethod
-    @once_differentiable
     def backward(ctx, *grad_output):
-        grad_input = grad_output[0].new(ctx.input_size)
-        offset = 0
-        for grad in grad_output:
-            grad_size = grad.size(ctx.dim)
-            grad_input.narrow(ctx.dim, offset, grad_size).copy_(grad)
-            offset += grad_size
+        grad_input = torch.cat(grad_output, ctx.dim)
         return grad_input, None, None
 
 
@@ -581,4 +574,28 @@ class Cumsum(Function):
         return grad_input
 
 
-# TODO: unfold
+class Unfold(Function):
+
+    @staticmethod
+    def forward(ctx, input, dim, size, step):
+        ctx.input_size = input.size()
+        ctx.input_numel = input.numel()
+        ctx.dim = dim
+        ctx.size = size
+        ctx.step = step
+        result = input.unfold(dim, size, step)
+        ctx.mark_shared_storage((input, result))
+        return result
+
+    @staticmethod
+    @once_differentiable
+    def backward(ctx, grad_output):
+        idx = grad_output.new().long()
+        torch.arange(0, ctx.input_numel, out=idx)
+        idx = idx.view(ctx.input_size)
+        idx_unfolded = idx.unfold(ctx.dim, ctx.size, ctx.step)
+        idx_unfolded = idx_unfolded.contiguous().view(-1)
+        grad_input = grad_output.new(ctx.input_numel).zero_()
+        grad_output = grad_output.contiguous().view(-1)
+        grad_input.index_add_(0, idx_unfolded, grad_output)
+        return grad_input.view(ctx.input_size), None, None, None

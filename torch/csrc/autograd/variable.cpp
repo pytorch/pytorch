@@ -44,22 +44,14 @@ Variable::Variable(
 }
 
 auto Variable::get_grad_accumulator() -> std::shared_ptr<Function> {
-  using weak_type = std::weak_ptr<Function>;
-
-  static std::shared_ptr<Function> null_shared_ptr;
-  static weak_type null_weak_ptr;
-
-  if (grad_fn) return nullptr;
+  if (grad_fn) {
+    throw std::logic_error("get_grad_accumulator() should be only called on leaf Variables");
+  }
   if (!requires_grad) return nullptr;
 
-  auto result = grad_accumulator.lock();
-  if (result) return result;
-
-  // That didn't work, we need to allocate it, but taking into account that other
-  // threads might be doing the same thing.
   std::lock_guard<std::mutex> lock(grad_accumulator_lock);
 
-  result = grad_accumulator.lock();
+  auto result = grad_accumulator.lock();
   if (result) return result;
 
   result = std::make_shared<AccumulateGrad>(shared_from_this());
@@ -93,7 +85,7 @@ auto SavedVariable::unpack() -> std::shared_ptr<Variable> {
   // should have saved the grad accumulator. Even if the Variable no longer
   // alive, the accumulator should be kept alive by the references in the graph).
   if (requires_grad && !grad_fn && weak_grad_fn.expired() && grad_accumulator.expired())
-      throw std::logic_error("No grad accumulator for a saved leaf!");
+    throw std::logic_error("No grad accumulator for a saved leaf!");
   new_var->grad_accumulator = grad_accumulator;
 
   return new_var;

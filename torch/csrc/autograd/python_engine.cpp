@@ -135,6 +135,8 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     THPUtils_assert(THPVariable_Check(_variable), "element %d of variables "
         "tuple is not a Variable", i);
     auto& variable = ((THPVariable*)_variable)->cdata;
+    THPUtils_assert(!variable->is_volatile,
+        "element %d of variables tuple is volatile", i);
     auto grad_fn = variable->grad_fn ? variable->grad_fn : variable->get_grad_accumulator();
     int output_nr = variable->grad_fn ? variable->output_nr : 0;
     roots[i] = std::make_pair<>(std::move(grad_fn), output_nr);

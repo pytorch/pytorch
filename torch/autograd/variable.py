@@ -1,4 +1,5 @@
 import sys
+import torch
 import torch._C as _C
 from collections import OrderedDict
 import torch.sparse as sparse
@@ -62,8 +63,14 @@ class Variable(_C._VariableBase):
         raise AttributeError(name)
 
     def __getitem__(self, key):
-        if isinstance(key, Variable) and type(key.data).__name__ == 'ByteTensor':
-            return MaskedSelect.apply(self, key)
+        if torch.is_tensor(key):
+            key = Variable(key)  # auto-wrap tensors
+        if isinstance(key, Variable):
+            if type(key.data).__name__ == 'ByteTensor':
+                return MaskedSelect.apply(self, key)
+            elif type(key.data).__name__ == 'LongTensor':
+                return IndexSelect.apply(self, 0, key)
+            # else fall through and raise an error in Index
         return Index.apply(self, key)
 
     def __setitem__(self, key, value):
@@ -107,7 +114,15 @@ class Variable(_C._VariableBase):
     def __repr__(self):
         return 'Variable containing:' + self.data.__repr__()
 
-    def backward(self, gradient=None, retain_variables=False):
+    def __bool__(self):
+        if self.data.numel() == 0:
+            return False
+        raise RuntimeError("bool value of Variable objects containing non-empty " +
+                           torch.typename(self.data) + " is ambiguous")
+
+    __nonzero__ = __bool__
+
+    def backward(self, gradient=None, retain_graph=None, create_graph=None, retain_variables=None):
         """Computes the gradient of current variable w.r.t. graph leaves.
 
         The graph is differentiated using the chain rule. If the variable is
@@ -120,28 +135,20 @@ class Variable(_C._VariableBase):
         them before calling it.
 
         Arguments:
-            gradient (Tensor): Gradient of the differentiated function
-                w.r.t. the data. Required only if the data has more than one
-                element. Type and location should match these of ``self.data``.
-            retain_variables (bool): If ``True``, buffers necessary for computing
-                gradients won't be freed after use. It is only necessary to
-                specify ``True`` if you want to differentiate some subgraph multiple
-                times (in some cases it will be much more efficient to use
-                `autograd.backward`).
+        grad_variables (Tensor, Variable or None): Gradient w.r.t. the variable.
+            If it is a tensor, it will be automatically converted to a Variable
+            that is volatile unless ``create_graph`` is True. None values can be
+            specified for scalar Variables or ones that don't require grad. If a
+            None value would be acceptable then this argument is optional.
+        retain_graph (bool, optional): If False, the graph used to compute the grads
+            will be freed. Note that in nearly all cases setting this option to True
+            is not needed and often can be worked around in a much more efficient
+            way. Defaults to the value of ``create_graph``.
+        create_graph (bool, optional): If true, graph of the derivative will
+            be constructed, allowing to compute higher order derivative products.
+            Defaults to False, unless ``gradient`` is a volatile Variable.
         """
-        if self.volatile:
-            raise RuntimeError('calling backward on a volatile variable')
-        if gradient is None and self.requires_grad:
-            if self.data.numel() != 1:
-                raise RuntimeError(
-                    'backward should be called only on a scalar (i.e. 1-element tensor) '
-                    'or with gradient w.r.t. the variable')
-            gradient = self.data.new().resize_as_(self.data).fill_(1)
-        if not isinstance(gradient, Variable):
-            if gradient is not None and not torch.is_tensor(gradient):
-                raise TypeError("gradient has to be a Tensor, Variable or None")
-            gradient = Variable(gradient, volatile=True)
-        self._execution_engine.run_backward((self,), (gradient,), retain_variables)
+        torch.autograd.backward(self, gradient, retain_graph, create_graph, retain_variables)
 
     def register_hook(self, hook):
         """Registers a backward hook.
@@ -231,7 +238,9 @@ class Variable(_C._VariableBase):
         return self
 
     def type_as(self, t):
-        return self.type(type(t.data))
+        if isinstance(t, Variable):
+            t = t.data
+        return self.type(type(t))
 
     def _get_type(self, name):
         module = torch._import_dotted_name(self.data.__module__)
@@ -327,16 +336,16 @@ class Variable(_C._VariableBase):
             return PowConstant.apply(self, other)
 
     def exp(self):
-        return Exp()(self)
+        return Exp.apply(self)
 
     def exp_(self):
-        return Exp(inplace=True)(self)
+        return Exp.apply(self, True)
 
     def log(self):
-        return Log()(self)
+        return Log.apply(self)
 
     def log1p(self):
-        return Log1p()(self)
+        return Log1p.apply(self)
 
     def neg(self):
         return Negate.apply(self)
@@ -345,118 +354,118 @@ class Variable(_C._VariableBase):
         return Negate.apply(self, True)
 
     def tanh(self):
-        return Tanh()(self)
+        return Tanh.apply(self)
 
     def tanh_(self):
-        return Tanh(True)(self)
+        return Tanh.apply(self, True)
 
     def sigmoid(self):
-        return Sigmoid()(self)
+        return Sigmoid.apply(self)
 
     def sigmoid_(self):
-        return Sigmoid(True)(self)
+        return Sigmoid.apply(self, True)
 
     def sin(self):
-        return Sin()(self)
+        return Sin.apply(self)
 
     def cos(self):
-        return Cos()(self)
+        return Cos.apply(self)
 
     def tan(self):
-        return Tan()(self)
+        return Tan.apply(self)
 
     def asin(self):
-        return Asin()(self)
+        return Asin.apply(self)
 
     def acos(self):
-        return Acos()(self)
+        return Acos.apply(self)
 
     def atan(self):
-        return Atan()(self)
+        return Atan.apply(self)
 
     def sinh(self):
-        return Sinh()(self)
+        return Sinh.apply(self)
 
     def cosh(self):
-        return Cosh()(self)
+        return Cosh.apply(self)
 
     def abs(self):
-        return Abs()(self)
+        return Abs.apply(self)
 
     def clamp(self, min=None, max=None):
         if min is None and max is None:
             raise ValueError("clamp requires specifying at least one of "
                              "min and max arguments")
         elif min is None and max is not None:
-            return CminConstant(max)(self)
+            return CminConstant.apply(self, max)
         elif min is not None and max is None:
-            return CmaxConstant(min)(self)
+            return CmaxConstant.apply(self, min)
         else:
-            return Clamp(min, max)(self)
+            return Clamp.apply(self, min, max)
 
     def reciprocal(self):
-        return Reciprocal()(self)
+        return Reciprocal.apply(self)
 
     def floor(self):
-        return Floor()(self)
+        return Floor.apply(self)
 
     def ceil(self):
-        return Ceil()(self)
+        return Ceil.apply(self)
 
     def frac(self):
-        return Frac()(self)
+        return Frac.apply(self)
 
     def sqrt(self):
-        return Sqrt()(self)
+        return Sqrt.apply(self)
 
     def round(self):
-        return Round()(self)
+        return Round.apply(self)
 
     def sign(self):
-        return Sign()(self)
+        return Sign.apply(self)
 
     def trunc(self):
-        return Trunc()(self)
+        return Trunc.apply(self)
 
     def fmod(self, value):
-        return Fmod(value)(self)
+        return Fmod.apply(self, value)
 
     def remainder(self, value):
-        return Remainder(value)(self)
+        return Remainder.apply(self, value)
 
     def lerp(self, tensor, weight):
-        return Lerp(weight)(self, tensor)
+        return Lerp.apply(self, tensor, weight)
 
     def rsqrt(self):
-        return Rsqrt()(self)
+        return Rsqrt.apply(self)
 
-    def sum(self, dim=None):
-        return Sum(dim)(self)
+    def sum(self, dim=None, keepdim=True):
+        return Sum.apply(self, dim, keepdim)
 
-    def prod(self, dim=None):
-        return Prod(dim)(self)
+    def prod(self, dim=None, keepdim=True):
+        return Prod.apply(self, dim, keepdim)
 
-    def mean(self, dim=None):
-        return Mean(dim)(self)
+    def mean(self, dim=None, keepdim=True):
+        return Mean.apply(self, dim, keepdim)
 
-    def max(self, dim=None):
+    def max(self, dim=None, keepdim=True):
         if isinstance(dim, Variable):
-            return Cmax()(self, dim)
-        return Max(dim)(self)
+            return Cmax.apply(self, dim)
+        return Max(dim, keepdim)(self)
 
-    def min(self, dim=None):
+    def min(self, dim=None, keepdim=True):
         if isinstance(dim, Variable):
-            return Cmin()(self, dim)
-        return Min(dim)(self)
+            return Cmin.apply(self, dim)
+        return Min(dim, keepdim)(self)
 
-    def mode(self, dim):
-        return Mode(dim)(self)
+    def mode(self, dim, keepdim=True):
+        return Mode(dim, keepdim)(self)
 
-    def median(self, dim):
-        return Median(dim)(self)
+    def median(self, dim, keepdim=True):
+        return Median(dim, keepdim)(self)
 
-    def kthvalue(self, dim):
-        return Kthvalue(dim)(self)
+    def kthvalue(self, dim, keepdim=True):
+        return Kthvalue(dim, keepdim)(self)
 
     def sort(self, dim=None, descending=False):
         return Sort.apply(self, dim, descending, True)
@@ -483,23 +492,29 @@ class Variable(_C._VariableBase):
     def cumsum(self, dim):
         return Cumsum(dim)(self)
 
-    def var(self, dim=None, unbiased=True):
-        mean = self.mean(dim)
+    def unfold(self, dim, size, step):
+        return Unfold.apply(self, dim, size, step)
+
+    def var(self, dim=None, keepdim=True, unbiased=True):
+        mean = self.mean(dim, keepdim)
         if dim is None:
             mean = mean.view(*(1 for s in self.size()))
+        # we could just set keepdim to True, but this preserves some fidelity
+        elif keepdim is False:
+            mean = mean.unsqueeze(dim)
         mean_expanded = mean.expand_as(self)
         zero_centered = self.sub(mean_expanded)
-        var = zero_centered.mul(zero_centered).sum(dim)
+        var = zero_centered.mul(zero_centered).sum(dim, keepdim)
         numel = self.numel() if dim is None else self.size(dim)
         return var.div(numel - int(unbiased))
 
-    def std(self, dim=None, unbiased=True):
-        return self.var(dim, unbiased).sqrt()
+    def std(self, dim=None, keepdim=True):
+        return self.var(dim, keepdim).sqrt()
 
     def renorm(self, p, dim, maxnorm):
         t = self.transpose(dim, 0)
         flat = t.contiguous().view(self.size(0), -1)
-        norms = flat.norm(p, 1)
+        norms = flat.norm(p, 1, True)
         norms = norms.clamp(max=maxnorm).div(norms.add(1e-7))
         flat_out = flat.mul(norms.expand_as(flat))
         return flat_out.view(t.size()).transpose(dim, 0)
@@ -514,7 +529,7 @@ class Variable(_C._VariableBase):
             alpha, beta = args[1:3]
         if num_args == 4:
             alpha = args[1]
-        return cls(alpha, beta, inplace)(*(args[:1] + args[-2:]))
+        return cls.apply(*(args[:1] + args[-2:] + (alpha, beta, inplace)))
 
     def _blas(self, cls, args, inplace):
         return self._static_blas(cls, (self,) + args, inplace)
@@ -573,27 +588,33 @@ class Variable(_C._VariableBase):
         return self._blas(Addr, args, True)
 
     def dot(self, other):
-        return Dot()(self, other)
+        return Dot.apply(self, other)
 
-    def _addcop(self, op, args):
+    def _addcop(self, op, args, inplace):
         if len(args) == 3:
-            # scale, tensor1, tensor2
-            return op(args[0])(self, *args[1:])
+            # args == [scale, tensor1, tensor2]
+            return op.apply(self, args[1], args[2], args[0], inplace)
         else:
-            # tensor1, tensor2
-            return op()(self, *args)
+            # args == [tensor1, tensor2]
+            return op.apply(self, args[0], args[1], 1.0, inplace)
 
     def addcmul(self, *args):
-        return self._addcop(Addcmul, args)
+        return self._addcop(Addcmul, args, False)
 
     def addcdiv(self, *args):
-        return self._addcop(Addcdiv, args)
+        return self._addcop(Addcdiv, args, False)
 
-    def norm(self, p=2, dim=None):
-        return Norm(p, dim)(self)
+    def addcmul_(self, *args):
+        return self._addcop(Addcmul, args, True)
+
+    def addcdiv_(self, *args):
+        return self._addcop(Addcdiv, args, True)
+
+    def norm(self, p=2, dim=None, keepdim=True):
+        return Norm.apply(self, p, dim, keepdim)
 
     def dist(self, tensor, p=2):
-        return Norm(p)(self - tensor)
+        return Norm.apply(self - tensor, p)
 
     def index_add(self, dim, index, tensor):
         return IndexAdd.apply(self, dim, index, tensor)
@@ -702,40 +723,28 @@ class Variable(_C._VariableBase):
         return Bernoulli()(self)
 
     def eq(self, other):
-        if isinstance(other, Variable):
-            return Eq()(self, other)
         assert not torch.is_tensor(other), "can't compare Variable and tensor"
-        return Eq(other)(self)
+        return Eq.apply(self, other)
 
     def ne(self, other):
-        if isinstance(other, Variable):
-            return Ne()(self, other)
         assert not torch.is_tensor(other), "can't compare Variable and tensor"
-        return Ne(other)(self)
+        return Ne.apply(self, other)
 
     def gt(self, other):
-        if isinstance(other, Variable):
-            return Gt()(self, other)
         assert not torch.is_tensor(other), "can't compare Variable and tensor"
-        return Gt(other)(self)
+        return Gt.apply(self, other)
 
     def ge(self, other):
-        if isinstance(other, Variable):
-            return Ge()(self, other)
         assert not torch.is_tensor(other), "can't compare Variable and tensor"
-        return Ge(other)(self)
+        return Ge.apply(self, other)
 
     def lt(self, other):
-        if isinstance(other, Variable):
-            return Lt()(self, other)
         assert not torch.is_tensor(other), "can't compare Variable and tensor"
-        return Lt(other)(self)
+        return Lt.apply(self, other)
 
     def le(self, other):
-        if isinstance(other, Variable):
-            return Le()(self, other)
         assert not torch.is_tensor(other), "can't compare Variable and tensor"
-        return Le(other)(self)
+        return Le.apply(self, other)
 
     def __add__(self, other):
         return self.add(other)
@@ -857,7 +866,7 @@ class Variable(_C._VariableBase):
                 tensors = args[1:]
             else:
                 tensors = args
-            return cls(alpha, beta, inplace)(*tensors)
+            return cls.apply(*(tensors + (alpha, beta, inplace)))
 
         @classmethod
         def addmm(cls, *args):

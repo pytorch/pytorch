@@ -2,290 +2,330 @@ from itertools import repeat
 
 from ..._thnn import type2backend
 from ..function import Function, InplaceFunction
+from ..variable import Variable
 
 
 class Exp(InplaceFunction):
 
-    def forward(self, i):
-        if self.inplace:
-            self.mark_dirty(i)
+    @staticmethod
+    def forward(ctx, i, inplace=False):
+        if inplace:
+            ctx.mark_dirty(i)
             result = i.exp_()
         else:
             result = i.exp()
-        self.save_for_backward(result)
+        ctx.save_for_backward(result)
         return result
 
-    def backward(self, grad_output):
-        return self.saved_tensors[0] * grad_output
+    @staticmethod
+    def backward(ctx, grad_output):
+        result, = ctx.saved_variables
+        return grad_output * result, None
 
 
 class Log(Function):
 
-    def forward(self, i):
-        self.save_for_backward(i)
+    @staticmethod
+    def forward(ctx, i):
+        ctx.save_for_backward(i)
         return i.log()
 
-    def backward(self, grad_output):
-        return grad_output.div(self.saved_tensors[0])
+    @staticmethod
+    def backward(ctx, grad_output):
+        i, = ctx.saved_variables
+        return grad_output.div(i)
 
 
 class Log1p(Function):
 
-    def forward(self, i):
-        self.save_for_backward(i)
+    @staticmethod
+    def forward(ctx, i):
+        ctx.save_for_backward(i)
         return i.log1p()
 
-    def backward(self, grad_output):
-        return grad_output.div(self.saved_tensors[0].add(1))
+    @staticmethod
+    def backward(ctx, grad_output):
+        i, = ctx.saved_variables
+        return grad_output.div(i.add(1))
 
 
 class Tanh(InplaceFunction):
 
-    def forward(self, i):
-        if self.inplace:
-            self.mark_dirty(i)
+    @staticmethod
+    def forward(ctx, i, inplace=False):
+        if inplace:
+            ctx.mark_dirty(i)
             result = i.tanh_()
         else:
             result = i.tanh()
-        self.save_for_backward(result)
+        ctx.save_for_backward(result)
         return result
 
-    def backward(self, grad_output):
-        result, = self.saved_tensors
-        grad_input = grad_output.new()
-        backend = type2backend[type(result)]
-        backend.Tanh_updateGradInput(backend.library_state, None, grad_output,
-                                     grad_input, result)
-        return grad_input
+    @staticmethod
+    def backward(ctx, grad_output):
+        result, = ctx.saved_variables
+        if grad_output.volatile:
+            grad_input = Variable(grad_output.data.new(grad_output.size()), volatile=True)
+            backend = type2backend[type(result.data)]
+            backend.Tanh_updateGradInput(backend.library_state, None, grad_output.data,
+                                         grad_input.data, result.data)
+        else:
+            grad_input = grad_output * (1 - result * result)
+        return grad_input, None
 
 
 class Sigmoid(InplaceFunction):
 
-    def forward(self, i):
-        if self.inplace:
-            self.mark_dirty(i)
+    @staticmethod
+    def forward(ctx, i, inplace=False):
+        if inplace:
+            ctx.mark_dirty(i)
             result = i.sigmoid_()
         else:
             result = i.sigmoid()
-        self.save_for_backward(result)
+        ctx.save_for_backward(result)
         return result
 
-    def backward(self, grad_output):
-        result, = self.saved_tensors
-        grad_input = grad_output.new()
-        backend = type2backend[type(result)]
-        backend.Sigmoid_updateGradInput(backend.library_state, None, grad_output,
-                                        grad_input, result)
-        return grad_input
+    @staticmethod
+    def backward(ctx, grad_output):
+        result, = ctx.saved_variables
+        if grad_output.volatile:
+            grad_input = Variable(grad_output.data.new(grad_output.size()), volatile=True)
+            backend = type2backend[type(result.data)]
+            backend.Sigmoid_updateGradInput(backend.library_state, None, grad_output.data,
+                                            grad_input.data, result.data)
+        else:
+            grad_input = grad_output * ((1 - result) * result)
+        return grad_input, None
 
 
 class Sinh(Function):
 
-    def forward(self, i):
-        self.save_for_backward(i)
+    @staticmethod
+    def forward(ctx, i):
+        ctx.save_for_backward(i)
         return i.sinh()
 
-    def backward(self, grad_output):
-        i, = self.saved_tensors
+    @staticmethod
+    def backward(ctx, grad_output):
+        i, = ctx.saved_variables
         return grad_output * i.cosh()
 
 
 class Cosh(Function):
 
-    def forward(self, i):
-        self.save_for_backward(i)
+    @staticmethod
+    def forward(ctx, i):
+        ctx.save_for_backward(i)
         return i.cosh()
 
-    def backward(self, grad_output):
-        i, = self.saved_tensors
+    @staticmethod
+    def backward(ctx, grad_output):
+        i, = ctx.saved_variables
         return grad_output * i.sinh()
 
 
 class Abs(Function):
 
-    def forward(self, i):
-        self.save_for_backward(i)
+    @staticmethod
+    def forward(ctx, i):
+        ctx.save_for_backward(i)
         return i.abs()
 
-    def backward(self, grad_output):
-        i, = self.saved_tensors
+    @staticmethod
+    def backward(ctx, grad_output):
+        i, = ctx.saved_variables
         return grad_output * i.sign()
 
 
 class Clamp(Function):
 
-    def __init__(self, min_val, max_val):
-        super(Clamp, self).__init__()
-        self.min_val = min_val
-        self.max_val = max_val
+    @staticmethod
+    def forward(ctx, i, min_val, max_val):
+        ctx._mask = (i.ge(min_val) * i.le(max_val))
+        return i.clamp(min_val, max_val)
 
-    def forward(self, i):
-        self.save_for_backward(i)
-        return i.clamp(self.min_val, self.max_val)
-
-    def backward(self, grad_output):
-        i, = self.saved_tensors
-        mask = i.ge(self.min_val) * i.le(self.max_val)
-        return grad_output * mask.type_as(grad_output)
+    @staticmethod
+    def backward(ctx, grad_output):
+        mask = Variable(ctx._mask.type_as(grad_output.data))
+        return grad_output * mask, None, None
 
 
 class Sqrt(Function):
 
-    def forward(self, i):
-        self.save_for_backward(i)
+    @staticmethod
+    def forward(ctx, i):
+        ctx.save_for_backward(i)
         return i.sqrt()
 
-    def backward(self, grad_output):
-        i, = self.saved_tensors
-        return grad_output.mul(i.pow(-0.5)).div(2)
+    @staticmethod
+    def backward(ctx, grad_output):
+        i, = ctx.saved_variables
+        return grad_output.mul(i.pow(-0.5)).div_(2)
 
 
 class Sin(Function):
 
-    def forward(self, i):
-        self.save_for_backward(i)
+    @staticmethod
+    def forward(ctx, i):
+        ctx.save_for_backward(i)
         return i.sin()
 
-    def backward(self, grad_output):
-        i, = self.saved_tensors
+    @staticmethod
+    def backward(ctx, grad_output):
+        i, = ctx.saved_variables
         return grad_output * i.cos()
 
 
 class Cos(Function):
 
-    def forward(self, i):
-        self.save_for_backward(i)
+    @staticmethod
+    def forward(ctx, i):
+        ctx.save_for_backward(i)
         return i.cos()
 
-    def backward(self, grad_output):
-        i, = self.saved_tensors
+    @staticmethod
+    def backward(ctx, grad_output):
+        i, = ctx.saved_variables
         return grad_output.mul(i.sin()).neg_()
 
 
 class Tan(Function):
 
-    def forward(self, i):
-        self.save_for_backward(i)
+    @staticmethod
+    def forward(ctx, i):
+        ctx.save_for_backward(i)
         return i.tan()
 
-    def backward(self, grad_output):
-        i, = self.saved_tensors
+    @staticmethod
+    def backward(ctx, grad_output):
+        i, = ctx.saved_variables
         return grad_output.div(i.cos().pow(2))
 
 
 class Asin(Function):
 
-    def forward(self, i):
-        self.save_for_backward(i)
+    @staticmethod
+    def forward(ctx, i):
+        ctx.save_for_backward(i)
         return i.asin()
 
-    def backward(self, grad_output):
-        i, = self.saved_tensors
-        return grad_output * (1 - i.mul(i)).sqrt_().reciprocal_()
+    @staticmethod
+    def backward(ctx, grad_output):
+        i, = ctx.saved_variables
+        return grad_output * (1 - i.mul(i)).sqrt().reciprocal()
 
 
 class Acos(Function):
 
-    def forward(self, i):
-        self.save_for_backward(i)
+    @staticmethod
+    def forward(ctx, i):
+        ctx.save_for_backward(i)
         return i.acos()
 
-    def backward(self, grad_output):
-        i, = self.saved_tensors
-        return grad_output.mul((1 - i.mul(i)).sqrt_().reciprocal_()).neg_()
+    @staticmethod
+    def backward(ctx, grad_output):
+        i, = ctx.saved_variables
+        return grad_output.mul((1 - i.mul(i)).sqrt().reciprocal()).neg_()
 
 
 class Atan(Function):
 
-    def forward(self, i):
-        self.save_for_backward(i)
+    @staticmethod
+    def forward(ctx, i):
+        ctx.save_for_backward(i)
         return i.atan()
 
-    def backward(self, grad_output):
-        i, = self.saved_tensors
-        return grad_output * i.mul(i).add_(1).reciprocal_()
+    @staticmethod
+    def backward(ctx, grad_output):
+        i, = ctx.saved_variables
+        return grad_output * i.mul(i).add_(1).reciprocal()
 
 
+# TODO: make inplace and update grad formulas
 class Reciprocal(Function):
 
-    def forward(self, i):
+    @staticmethod
+    def forward(ctx, i):
         result = i.reciprocal()
-        self.save_for_backward(result)
+        ctx.save_for_backward(result)
         return result
 
-    def backward(self, grad_output):
-        result, = self.saved_tensors
+    @staticmethod
+    def backward(ctx, grad_output):
+        result, = ctx.saved_variables
         return grad_output * result.mul(result).neg_()
 
 
 class Cmax(Function):
 
-    def forward(self, a, b):
-        self._max_buffer = a.gt(b).type_as(a)
+    @staticmethod
+    def forward(ctx, a, b):
+        ctx._mask = a.gt(b)
         return a.max(b)
 
-    def backward(self, grad_output):
+    @staticmethod
+    def backward(ctx, grad_output):
+        mask = Variable(ctx._mask.type_as(grad_output.data))
         return (
-            grad_output * self._max_buffer,
-            grad_output * self._max_buffer.eq(0).type_as(grad_output)
+            grad_output * mask,
+            grad_output * Variable(ctx._mask.eq(0).type_as(grad_output.data))
         )
 
 
 class CmaxConstant(Function):
 
-    def __init__(self, constant):
-        super(CmaxConstant, self).__init__()
-        self.constant = constant
+    @staticmethod
+    def forward(ctx, i, constant):
+        ctx._mask = i.gt(constant)
+        return i.clamp(min=constant)
 
-    def forward(self, i):
-        self._max_buffer = i.gt(self.constant).type_as(i)
-        return i.clamp(min=self.constant)
-
-    def backward(self, grad_output):
-        return grad_output * self._max_buffer
+    @staticmethod
+    def backward(ctx, grad_output):
+        mask = Variable(ctx._mask.type_as(grad_output.data))
+        return grad_output * mask, None
 
 
 class Cmin(Function):
 
-    def forward(self, a, b):
-        self._min_buffer = a.lt(b).type_as(a)
+    @staticmethod
+    def forward(ctx, a, b):
+        ctx._mask = a.lt(b).type_as(a)
         return a.min(b)
 
-    def backward(self, grad_output):
+    @staticmethod
+    def backward(ctx, grad_output):
+        mask = Variable(ctx._mask.type_as(grad_output.data))
         return (
-            grad_output * self._min_buffer,
-            grad_output * self._min_buffer.eq(0).type_as(grad_output)
+            grad_output * mask,
+            grad_output * Variable(ctx._mask.eq(0).type_as(grad_output.data))
         )
 
 
 class CminConstant(Function):
 
-    def __init__(self, constant):
-        super(CminConstant, self).__init__()
-        self.constant = constant
+    @staticmethod
+    def forward(ctx, i, constant):
+        ctx._mask = i.lt(constant)
+        return i.clamp(max=constant)
 
-    def forward(self, i):
-        self._min_buffer = i.lt(self.constant).type_as(i)
-        return i.clamp(max=self.constant)
-
-    def backward(self, grad_output):
-        return grad_output * self._min_buffer
+    @staticmethod
+    def backward(ctx, grad_output):
+        mask = Variable(ctx._mask.type_as(grad_output.data))
+        return grad_output * mask, None
 
 
 class _ConstantGrad(Function):
     grad_value = 0
 
-    def __init__(self, *args):
-        super(_ConstantGrad, self).__init__()
-        self.args = args
+    @classmethod
+    def forward(cls, ctx, *args):
+        ctx._num_args = len(args)
+        return getattr(args[0], cls.__name__.lower())(*args[1:])
 
-    def forward(self, i):
-        return getattr(i, type(self).__name__.lower())(*self.args)
-
-    def backward(self, grad_output):
-        grad_input = grad_output.new(*repeat(1, grad_output.dim()))
-        grad_input = grad_input.fill_(self.grad_value).expand_as(grad_output)
-        return grad_input.mul(grad_output)
+    @classmethod
+    def backward(cls, ctx, grad_output):
+        return (grad_output.mul(cls.grad_value),) + (ctx._num_args - 1) * (None,)
 
 
 class Floor(_ConstantGrad):
@@ -322,91 +362,90 @@ class Remainder(_ConstantGrad):
 
 class Lerp(Function):
 
-    def __init__(self, weight):
-        super(Lerp, self).__init__()
-        self.weight = float(weight)
+    @staticmethod
+    def forward(ctx, a, b, weight):
+        ctx._weight = float(weight)
+        return a.lerp(b, ctx._weight)
 
-    def forward(self, a, b):
-        return a.lerp(b, self.weight)
-
-    def backward(self, grad_output):
-        return grad_output.mul(1 - self.weight), grad_output.mul(self.weight)
+    @staticmethod
+    def backward(ctx, grad_output):
+        return grad_output.mul(1 - ctx._weight), grad_output.mul(ctx._weight), None
 
 
 class Rsqrt(InplaceFunction):
 
-    def forward(self, input):
-        if self.inplace:
-            self.mark_dirty(input)
-            result = input.rsqrt_()
+    @staticmethod
+    def forward(ctx, i, inplace=False):
+        if inplace:
+            ctx.mark_dirty(i)
+            result = i.rsqrt_()
         else:
-            result = input.rsqrt()
-        self.save_for_backward(result)
+            result = i.rsqrt()
+        ctx.save_for_backward(result)
         return result
 
-    def backward(self, grad_output):
-        result, = self.saved_tensors
-        return result.pow(3).div_(-2).mul_(grad_output)
+    @staticmethod
+    def backward(ctx, grad_output):
+        result, = ctx.saved_variables
+        return result.pow(3).div_(-2).mul(grad_output), None
 
 
 class Addcmul(InplaceFunction):
 
-    def __init__(self, scale=1, inplace=False):
-        super(Addcmul, self).__init__(inplace)
-        self.scale = scale
-
-    def forward(self, add_tensor, mul_tensor1, mul_tensor2):
-        self.save_for_backward(mul_tensor1, mul_tensor2)
-        if self.inplace:
-            return add_tensor.addcmul_(self.scale, mul_tensor1, mul_tensor2)
+    @staticmethod
+    def forward(ctx, add_tensor, mul_tensor1, mul_tensor2, scale=1.0, inplace=False):
+        ctx._scale = scale
+        ctx.save_for_backward(mul_tensor1, mul_tensor2)
+        if inplace:
+            ctx.mark_dirty(add_tensor)
+            return add_tensor.addcmul_(scale, mul_tensor1, mul_tensor2)
         else:
-            return add_tensor.addcmul(self.scale, mul_tensor1, mul_tensor2)
+            return add_tensor.addcmul(scale, mul_tensor1, mul_tensor2)
 
-    def backward(self, grad_output):
+    @staticmethod
+    def backward(ctx, grad_output):
         grad_add = grad_mul1 = grad_mul2 = None
-        mul_tensor1, mul_tensor2 = self.saved_tensors
+        mul_tensor1, mul_tensor2 = ctx.saved_variables
 
-        if self.needs_input_grad[0]:
+        if ctx.needs_input_grad[0]:
             grad_add = grad_output
 
-        if self.needs_input_grad[1]:
-            grad_mul1 = grad_output.mul(mul_tensor2).mul(self.scale)
+        if ctx.needs_input_grad[1]:
+            grad_mul1 = grad_output.mul(mul_tensor2).mul_(ctx._scale)
 
-        if self.needs_input_grad[2]:
-            grad_mul2 = grad_output.mul(mul_tensor1).mul(self.scale)
+        if ctx.needs_input_grad[2]:
+            grad_mul2 = grad_output.mul(mul_tensor1).mul_(ctx._scale)
 
-        return grad_add, grad_mul1, grad_mul2
+        return grad_add, grad_mul1, grad_mul2, None, None
 
 
 class Addcdiv(InplaceFunction):
 
-    def __init__(self, scale=1, inplace=False):
-        super(Addcdiv, self).__init__(inplace)
-        self.scale = scale
-
-    def forward(self, add_tensor, div_tensor1, div_tensor2):
-        self.save_for_backward(div_tensor1, div_tensor2)
-        if self.inplace:
-            return add_tensor.addcdiv_(self.scale, div_tensor1, div_tensor2)
+    @staticmethod
+    def forward(ctx, add_tensor, div_tensor1, div_tensor2, scale=1.0, inplace=False):
+        ctx._scale = scale
+        ctx.save_for_backward(div_tensor1, div_tensor2)
+        if inplace:
+            ctx.mark_dirty(add_tensor)
+            return add_tensor.addcdiv_(ctx._scale, div_tensor1, div_tensor2)
         else:
-            return add_tensor.addcdiv(self.scale, div_tensor1, div_tensor2)
+            return add_tensor.addcdiv(ctx._scale, div_tensor1, div_tensor2)
 
-    def backward(self, grad_output):
+    @staticmethod
+    def backward(ctx, grad_output):
         grad_add = grad_div1 = grad_div2 = None
-        div_tensor1, div_tensor2 = self.saved_tensors
+        div_tensor1, div_tensor2 = ctx.saved_variables
 
-        if self.needs_input_grad[0]:
+        if ctx.needs_input_grad[0]:
             grad_add = grad_output
 
-        if self.needs_input_grad[1]:
-            grad_div1 = grad_output.div(div_tensor2).mul(self.scale)
+        if ctx.needs_input_grad[1]:
+            grad_div1 = grad_output.div(div_tensor2).mul_(ctx._scale)
 
-        if self.needs_input_grad[2]:
+        if ctx.needs_input_grad[2]:
             div_tensor2_sq = div_tensor2.mul(div_tensor2)
-            grad_div2 = grad_output.mul(div_tensor1).div_(div_tensor2_sq)
-            grad_div2.neg_().mul_(self.scale)
+            grad_div2 = grad_output.mul(div_tensor1).div(div_tensor2_sq).mul(-ctx._scale)
 
-        return grad_add, grad_div1, grad_div2
-
+        return grad_add, grad_div1, grad_div2, None, None
 
 # TODO: atan2 + inplace

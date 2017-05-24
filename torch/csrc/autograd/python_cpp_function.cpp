@@ -88,23 +88,7 @@ void THPCppFunction_dealloc(PyObject* self)
   Py_TYPE(self)->tp_free(self);
 }
 
-PyObject* THPCppFunction_register_hook_dict(PyObject* self, PyObject* _var)
-{
-  if (!THPVariable_Check(_var)) {
-    return PyErr_Format(PyExc_TypeError, "_register_hook_dict expected a variable");
-  }
-  auto var = (THPVariable*)_var;
-  auto& fn = *((THPCppFunction*)self)->cdata;
-  fn.pre_hooks.push_back(std::make_shared<PyFunctionPreHook>(
-      var->backward_hooks, var->cdata->output_nr));
-  Py_RETURN_NONE;
-}
-
-PyObject* THPCppFunction_register_hook(PyObject* self, PyObject* hook)
-{
-  auto& fn = *((THPCppFunction*)self)->cdata;
-  return registerFunctionHook(fn, hook);
-}
+} // namespace
 
 PyObject* THPCppFunction_next_functions(THPCppFunction* self, PyObject* hook)
 {
@@ -127,28 +111,44 @@ PyObject* THPCppFunction_next_functions(THPCppFunction* self, PyObject* hook)
   return py_functions.release();
 }
 
+PyObject* THPCppFunction_register_hook_dict(PyObject* self, PyObject* _var)
+{
+  if (!THPVariable_Check(_var)) {
+    return PyErr_Format(PyExc_TypeError, "_register_hook_dict expected a variable");
+  }
+  auto var = (THPVariable*)_var;
+  auto& fn = *((THPCppFunction*)self)->cdata;
+  fn.pre_hooks.push_back(std::make_shared<PyFunctionPreHook>(
+      var->backward_hooks, var->cdata->output_nr));
+  Py_RETURN_NONE;
+}
 
-} // namespace
+PyObject* THPCppFunction_register_hook(PyObject* self, PyObject* hook)
+{
+  auto& fn = *((THPCppFunction*)self)->cdata;
+  return registerFunctionHook(fn, hook);
+}
 
-static struct PyMethodDef THPCppFunction_methods[] = {
-  {(char*)"_register_hook_dict", (PyCFunction)THPCppFunction_register_hook_dict, METH_O, NULL},
-  {(char*)"register_hook", (PyCFunction)THPCppFunction_register_hook, METH_O, NULL},
+
+static struct PyMethodDef default_methods[] = {
+  THP_FUNCTION_DEFAULT_METHODS,
   {NULL}
 };
 
-static struct PyGetSetDef THPCppFunction_properties[] = {
-  {(char*)"next_functions", (getter)THPCppFunction_next_functions, NULL, NULL, NULL},
+static struct PyGetSetDef default_properties[] = {
+  THP_FUNCTION_DEFAULT_PROPERTIES,
   {NULL}
 };
 
-PyTypeObject* _initFunctionPyTypeObject(PyTypeObject& type, const char* name)
+PyTypeObject* _initFunctionPyTypeObject(PyTypeObject& type, const char* name,
+  PyGetSetDef* function_properties, PyMethodDef* function_methods)
 {
   type.tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC;
   type.tp_name = name;
   type.tp_basicsize = sizeof(THPCppFunction);
   type.tp_call = THPCppFunction_call;
-  type.tp_methods = THPCppFunction_methods;
-  type.tp_getset = THPCppFunction_properties;
+  type.tp_methods = function_methods ? function_methods : default_methods;
+  type.tp_getset = function_properties ? function_properties : default_properties;
   type.tp_dealloc = THPCppFunction_dealloc;
   type.tp_traverse = THPCppFunction_traverse;
   type.tp_clear = THPCppFunction_clear;
@@ -173,10 +173,11 @@ PyObject* functionToPyObject(std::shared_ptr<Function> cdata)
     return obj;
   }
 
-  auto it = cpp_function_types.find(std::type_index(typeid(*cdata)));
+  auto& fn = *cdata;
+  auto it = cpp_function_types.find(std::type_index(typeid(fn)));
   if (it == cpp_function_types.end()) {
     return PyErr_Format(PyExc_TypeError,
-        "Don't know how to create Python object for %s", typeid(*cdata).name());
+        "Don't know how to create Python object for %s", typeid(fn).name());
   }
 
   PyTypeObject* type = (PyTypeObject*)it->second.get();

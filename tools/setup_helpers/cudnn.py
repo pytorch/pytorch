@@ -19,6 +19,7 @@ if WITH_CUDA and not check_env_flag('NO_CUDNN'):
         os.path.join(CUDA_HOME, 'lib'),
         os.path.join(CUDA_HOME, 'lib64'),
         '/usr/lib/x86_64-linux-gnu/',
+        '/usr/lib/powerpc64le-linux-gnu/',
     ] + gather_paths([
         'LIBRARY_PATH',
     ])))

@@ -31,7 +31,7 @@ struct Engine {
   using callback_map = std::unordered_map<Function*, callback_type>;
 
 
-  // Given a list of (Function, int) pairs computes the value of the graph
+  // Given a list of (Function, input number) pairs computes the value of the graph
   // by following next_function references.
   void execute(
       const function_list& roots,

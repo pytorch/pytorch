@@ -204,6 +204,10 @@ THC_API void __THCusparseCheck(cusparseStatus_t status, const char *file, const 
 
 THC_API cudaError_t THCudaMalloc(THCState *state, void **ptr, size_t size);
 THC_API cudaError_t THCudaFree(THCState *state, void *ptr);
+THC_API void* THCudaHostAlloc(THCState *state, size_t size);
+THC_API void THCudaHostFree(THCState *state, void *ptr);
+THC_API void THCudaHostRecord(THCState *state, void *ptr);
+
 THC_API cudaError_t THCudaMemGetInfo(THCState *state, size_t* freeBytes, size_t* totalBytes);
 THC_API void THCSetGCHandler(THCState *state,
                              void (*torchGCHandlerFunction)(void *data),

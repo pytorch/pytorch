@@ -168,7 +168,7 @@ def wrap_generic():
     defs = OrderedDict()
 
     def should_wrap_function(name):
-        if name.startswith('LookupTable'):
+        if name.startswith('LookupTable_'):
             return False
         return (name.endswith('updateOutput') or
                 name.endswith('updateGradInput') or

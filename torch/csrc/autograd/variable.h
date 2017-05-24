@@ -22,7 +22,7 @@ struct Variable : std::enable_shared_from_this<Variable> {
     SavedVariable(const Variable& variable, Function* saved_for)
       : data(variable.data->clone_shallow())
       , grad_accumulator(variable.grad_accumulator)
-      , version(std::move(variable.version_counter->new_saved_ref()))
+      , version(variable.version_counter->new_saved_ref())
       , requires_grad(variable.requires_grad)
       , is_volatile(false)
       , expected_version(**variable.version_counter) {

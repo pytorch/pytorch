@@ -11,7 +11,9 @@ from numbers import Number
 
 def cpu_only(inner):
     def outer(self, *args, **kwargs):
-        unittest.skipIf(self.is_cuda, "Test is CPU-only")(inner)(self, *args, **kwargs)
+        if self.is_cuda:
+            raise unittest.SkipTest("Test is CPU-only")
+        inner(self, *args, **kwargs)
     return outer
 
 
@@ -22,6 +24,7 @@ class TestSparse(TestCase):
         # We will subclass and override this method to implement CUDA
         # tests
         self.is_cuda = False
+        self.is_uncoalesced = False
         self.IndexTensor = torch.LongTensor
         self.ValueTensor = torch.DoubleTensor
         self.SparseTensor = torch.sparse.DoubleTensor
@@ -32,11 +35,25 @@ class TestSparse(TestCase):
         # use torch.rand/torch.randn in this case because they are
         # CPU-only.  If you do this, you can remove the is_cuda branch
         # at the end.
+        #
+        # If you do this, be sure to update assert_uncoalesced too
 
         if isinstance(with_size, Number):
-            v = torch.randn(nnz)
-            i = (torch.rand(d, nnz) * with_size).type(torch.LongTensor)
-            x = torch.sparse.DoubleTensor(i, v)
+            with_size = [with_size] * d
+
+        if self.is_uncoalesced:
+            # We want to generate a tensor with a lot of uncoalesced
+            # entries to stress test whether or not we handle this
+            # (subtle) case correctly
+            v_size = [nnz * 2] + list(with_size[d:])
+            v = torch.randn(*v_size)
+            r = torch.rand(d, nnz)
+            # Repeat the indexes, so every position shows up twice
+            i = torch.cat([r, r], dim=1) * \
+                torch.Tensor(with_size[:d]).repeat(nnz * 2, 1).transpose(0, 1)
+            i = i.type(torch.LongTensor)
+            x = torch.sparse.DoubleTensor(i, v, torch.Size(with_size))
+            self.assert_uncoalesced(x)
         else:
             # Generate a sparse tensor with d sparse dimensions; the
             # rest the dimensions with_size[d:] are dense.
@@ -52,31 +69,47 @@ class TestSparse(TestCase):
         else:
             return x, i.clone(), v.clone()
 
+    def assert_uncoalesced(self, x):
+        """
+        Test if a CPU tensor is uncoalesced.  This is used to ensure
+        correctness of the uncoalesced tensor generation algorithm.
+        """
+        assert not x.is_coalesced()
+        # Strategy: construct a new sparse tensor with the raw value
+        # field overwritten to a tensor of ones, coalesce it, and then
+        # check if any value entries are > 1 (which indicates that the
+        # original was uncoalesced.)
+        i = x._indices().clone()
+        v = x._values().clone().fill_(1)
+        y = torch.sparse.DoubleTensor(i, v, x.size())
+        z = self.safeCoalesce(y)
+        assert (z._values() > 1).sum() > 0
+
     def randn(self, *args, **kwargs):
-        # TODO: Maybe do this directly on GPU
-        x = torch.randn(*args, **kwargs)
-        if self.is_cuda:
-            x = x.cuda()
-        return x
+        """
+        Variant of torch.randn that also works in the TEST_CUDA case.
+        """
+        # TODO: Put this in torch.cuda.randn
+        return self.ValueTensor(*args, **kwargs).normal_()
 
     def test_basic(self):
         x, i, v = self._gen_sparse(3, 10, 100)
 
-        self.assertEqual(i, x.indices())
-        self.assertEqual(v, x.values())
+        self.assertEqual(i, x._indices())
+        self.assertEqual(v, x._values())
 
         x, i, v = self._gen_sparse(3, 10, [100, 100, 100])
-        self.assertEqual(i, x.indices())
-        self.assertEqual(v, x.values())
+        self.assertEqual(i, x._indices())
+        self.assertEqual(v, x._values())
         self.assertEqual(x.ndimension(), 3)
-        self.assertEqual(x.nnz(), 10)
+        self.assertEqual(x.coalesce()._nnz(), 10)
         for i in range(3):
             self.assertEqual(x.size(i), 100)
 
         # Make sure we can access empty indices / values
         x = self.SparseTensor()
-        self.assertEqual(x.indices().numel(), 0)
-        self.assertEqual(x.values().numel(), 0)
+        self.assertEqual(x._indices().numel(), 0)
+        self.assertEqual(x._values().numel(), 0)
 
     def test_to_dense(self):
         i = self.IndexTensor([
@@ -146,8 +179,8 @@ class TestSparse(TestCase):
         ])
         exp_v = self.ValueTensor([2, 1, 6, 4, 10, 3, 5, 9, 8, 7])
         x = self.safeCoalesce(x)
-        self.assertEqual(exp_i, x.indices())
-        self.assertEqual(exp_v, x.values())
+        self.assertEqual(exp_i, x._indices())
+        self.assertEqual(exp_v, x._values())
 
         i = self.IndexTensor([
             [2, 0, 2, 1],
@@ -164,8 +197,8 @@ class TestSparse(TestCase):
         exp_v = self.ValueTensor([2, 1, 3, 4])
 
         x = self.safeCoalesce(x)
-        self.assertEqual(exp_i, x.indices())
-        self.assertEqual(exp_v, x.values())
+        self.assertEqual(exp_i, x._indices())
+        self.assertEqual(exp_v, x._values())
 
         # Duplicate indices
         i = self.IndexTensor([
@@ -183,8 +216,8 @@ class TestSparse(TestCase):
         exp_v = self.ValueTensor([6, 4])
 
         x = self.safeCoalesce(x)
-        self.assertEqual(exp_i, x.indices())
-        self.assertEqual(exp_v, x.values())
+        self.assertEqual(exp_i, x._indices())
+        self.assertEqual(exp_v, x._values())
 
     def test_contig_hybrid(self):
         i = self.IndexTensor([
@@ -205,8 +238,8 @@ class TestSparse(TestCase):
             [3, 4], [5, 6], [9, 10], [8, 9], [7, 8],
         ])
         x = self.safeCoalesce(x)
-        self.assertEqual(exp_i, x.indices())
-        self.assertEqual(exp_v, x.values())
+        self.assertEqual(exp_i, x._indices())
+        self.assertEqual(exp_v, x._values())
 
         i = self.IndexTensor([
             [2, 0, 2, 1],
@@ -223,8 +256,8 @@ class TestSparse(TestCase):
         exp_v = self.ValueTensor([[2, 2, 2], [1, 1, 1], [3, 3, 3], [4, 4, 4]])
 
         x = self.safeCoalesce(x)
-        self.assertEqual(exp_i, x.indices())
-        self.assertEqual(exp_v, x.values())
+        self.assertEqual(exp_i, x._indices())
+        self.assertEqual(exp_v, x._values())
 
         # Duplicate indices
         i = self.IndexTensor([
@@ -242,8 +275,8 @@ class TestSparse(TestCase):
         exp_v = self.ValueTensor([[6, 4, 5], [4, 3, 4]])
 
         x = self.safeCoalesce(x)
-        self.assertEqual(exp_i, x.indices())
-        self.assertEqual(exp_v, x.values())
+        self.assertEqual(exp_i, x._indices())
+        self.assertEqual(exp_v, x._values())
 
     def test_transpose(self):
         x = self._gen_sparse(4, 20, 5)[0]
@@ -430,8 +463,8 @@ class TestSparse(TestCase):
         self.assertTrue(y.is_coalesced())
         self.assertEqual(x1, y)
         # check that coalesce is out of place
-        y.values().add_(1)
-        self.assertEqual(z.values() + 1, y.values())
+        y._values().add_(1)
+        self.assertEqual(z._values() + 1, y._values())
 
     def test_basic_ops(self):
         self._test_basic_ops_shape([5, 6])
@@ -459,11 +492,11 @@ class TestSparse(TestCase):
 
     def _test_sparse_mask_fixed(self):
         i = self.IndexTensor([
-            [1, 3, 3, 0, 4],
-            [2, 1, 1, 2, 3],
+            [1, 3, 0, 4],
+            [2, 1, 2, 3],
         ])
-        v = self.ValueTensor([1, 2, 3, 4, 5])
-        x = self.SparseTensor(i, v, torch.Size([5, 4]))
+        v = self.ValueTensor([1, 2, 3, 4])
+        x = self.SparseTensor(i, v, torch.Size([5, 4])).coalesce()
         dense = self.ValueTensor([
             [1, 2, 3, 4],
             [5, 6, 7, 8],
@@ -471,8 +504,8 @@ class TestSparse(TestCase):
             [13, 14, 15, 16],
             [17, 18, 19, 20],
         ])
-        exp_v = self.ValueTensor([7, 14, 14, 3, 20])
-        res = dense.sparse_mask(x)
+        exp_v = self.ValueTensor([7, 14, 3, 20])
+        res = dense._sparse_mask(x)
         expected = self.SparseTensor(i, exp_v, torch.Size([5, 4]))
         self.assertEqual(res, expected)
 
@@ -486,11 +519,14 @@ class TestSparse(TestCase):
 
     def _test_sparse_mask_hybrid_fixed(self):
         i = self.IndexTensor([
-            [1, 3, 3, 0, 4],
-            [2, 1, 1, 2, 3],
+            [1, 3, 0, 4],
+            [2, 1, 2, 3],
         ])
-        v = self.ValueTensor([[1, 2], [2, 3], [3, 4], [4, 5], [5, 6]])
-        x = self.SparseTensor(i, v, torch.Size([5, 4, 2]))
+        v = self.ValueTensor([[1, 2], [2, 3], [3, 4], [4, 5]])
+        # TODO: This is also testing that, if coalesce is a no-op,
+        # the indices don't get permuted. I don't know if we actually
+        # want to give this invariant.
+        x = self.SparseTensor(i, v, torch.Size([5, 4, 2])).coalesce()
         dense = self.ValueTensor([
             [[1, 3], [2, 2], [3, 3], [4, 2]],
             [[5, 7], [6, 7], [7, 9], [8, 9]],
@@ -498,8 +534,8 @@ class TestSparse(TestCase):
             [[13, 5], [14, 1], [15, 1], [16, 6]],
             [[17, 7], [18, 2], [19, 7], [20, 1]],
         ])
-        res = dense.sparse_mask(x)
-        exp_v = self.ValueTensor([[7, 9], [14, 1], [14, 1], [3, 3], [20, 1]])
+        res = dense._sparse_mask(x)
+        exp_v = self.ValueTensor([[7, 9], [14, 1], [3, 3], [20, 1]])
         expected = self.SparseTensor(i, exp_v, torch.Size([5, 4, 2]))
         self.assertEqual(res, expected)
 
@@ -512,13 +548,27 @@ class TestSparse(TestCase):
         self._test_sparse_mask_shape([5, 5, 5, 5, 5, 5], [2])
 
 
+class TestUncoalescedSparse(TestSparse):
+    def setUp(self):
+        super(TestUncoalescedSparse, self).setUp()
+        self.is_uncoalesced = True
+
+
 @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
 class TestCudaSparse(TestSparse):
     def setUp(self):
+        super(TestCudaSparse, self).setUp()
         self.is_cuda = True
         self.IndexTensor = torch.cuda.LongTensor
         self.ValueTensor = torch.cuda.DoubleTensor
         self.SparseTensor = torch.cuda.sparse.DoubleTensor
+
+
+@unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+class TestCudaUncoalescedSparse(TestCudaSparse):
+    def setUp(self):
+        super(TestCudaUncoalescedSparse, self).setUp()
+        self.is_uncoalesced = True
 
 if __name__ == '__main__':
     run_tests()

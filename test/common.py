@@ -15,11 +15,14 @@ from torch.autograd import Variable
 
 torch.set_default_tensor_type('torch.DoubleTensor')
 
+SEED = 0
+
 
 def run_tests():
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument('--seed', type=int, default=123)
     args, remaining = parser.parse_known_args()
+    SEED = args.seed
     torch.manual_seed(args.seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed)
@@ -118,6 +121,11 @@ def is_iterable(obj):
 class TestCase(unittest.TestCase):
     precision = 1e-5
 
+    def setUp(self):
+        torch.manual_seed(SEED)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(SEED)
+
     def assertTensorsSlowEqual(self, x, y, prec=None, message=''):
         max_err = 0
         self.assertEqual(x.size(), y.size())
@@ -129,7 +137,7 @@ class TestCase(unittest.TestCase):
         tc = t.coalesce()
 
         value_map = {}
-        for idx, val in zip(t.indices().t(), t.values()):
+        for idx, val in zip(t._indices().t(), t._values()):
             idx_tup = tuple(idx)
             if idx_tup in value_map:
                 value_map[idx_tup] += val
@@ -138,26 +146,31 @@ class TestCase(unittest.TestCase):
 
         new_indices = sorted(list(value_map.keys()))
         new_values = [value_map[idx] for idx in new_indices]
-        if t.values().ndimension() < 2:
-            new_values = t.values().new(new_values)
+        if t._values().ndimension() < 2:
+            new_values = t._values().new(new_values)
         else:
             new_values = torch.stack(new_values)
 
-        new_indices = t.indices().new(new_indices).t()
+        new_indices = t._indices().new(new_indices).t()
         tg = t.new(new_indices, new_values, t.size())
 
-        self.assertEqual(tc.indices(), tg.indices())
-        self.assertEqual(tc.values(), tg.values())
+        self.assertEqual(tc._indices(), tg._indices())
+        self.assertEqual(tc._values(), tg._values())
 
         return tg
+
+    def unwrapVariables(self, x, y):
+        if isinstance(x, Variable) and isinstance(y, Variable):
+            return x.data, y.data
+        elif isinstance(x, Variable) or isinstance(y, Variable):
+            raise AssertionError("cannot compare {} and {}".format(type(x), type(y)))
+        return x, y
 
     def assertEqual(self, x, y, prec=None, message=''):
         if prec is None:
             prec = self.precision
 
-        if isinstance(x, Variable) and isinstance(y, Variable):
-            x = x.data
-            y = y.data
+        x, y = self.unwrapVariables(x, y)
 
         if torch.is_tensor(x) and torch.is_tensor(y):
             def assertTensorsEqual(a, b):
@@ -178,11 +191,13 @@ class TestCase(unittest.TestCase):
             if x.is_sparse:
                 x = self.safeCoalesce(x)
                 y = self.safeCoalesce(y)
-                assertTensorsEqual(x.indices(), y.indices())
-                assertTensorsEqual(x.values(), y.values())
+                assertTensorsEqual(x._indices(), y._indices())
+                assertTensorsEqual(x._values(), y._values())
             else:
                 assertTensorsEqual(x, y)
         elif type(x) == str and type(y) == str:
+            super(TestCase, self).assertEqual(x, y)
+        elif type(x) == set and type(y) == set:
             super(TestCase, self).assertEqual(x, y)
         elif is_iterable(x) and is_iterable(y):
             for x_, y_ in zip(x, y):
@@ -199,9 +214,7 @@ class TestCase(unittest.TestCase):
         if prec is None:
             prec = self.precision
 
-        if isinstance(x, Variable) and isinstance(y, Variable):
-            x = x.data
-            y = y.data
+        x, y = self.unwrapVariables(x, y)
 
         if torch.is_tensor(x) and torch.is_tensor(y):
             if x.size() != y.size():

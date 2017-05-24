@@ -5,6 +5,7 @@ import torch
 import torch.optim as optim
 import torch.legacy.optim as old_optim
 from torch.autograd import Variable
+from torch import sparse
 
 from common import TestCase, run_tests
 
@@ -55,6 +56,49 @@ class TestOptim(TestCase):
             old_fn(lambda _: (rosenbrock(params_t), drosenbrock(params_t)),
                    params_t, state)
             self.assertEqual(params.data, params_t)
+
+        self.assertLessEqual(params.data.dist(solution), initial_dist)
+
+    def _test_rosenbrock_sparse(self, constructor):
+        params_t = torch.Tensor([1.5, 1.5])
+
+        params = Variable(torch.Tensor([1.5, 1.5]), requires_grad=True)
+        params_c = Variable(torch.Tensor([1.5, 1.5]), requires_grad=True)
+        optimizer = constructor([params])
+        optimizer_c = constructor([params_c])
+
+        solution = torch.Tensor([1, 1])
+        initial_dist = params.data.dist(solution)
+
+        def eval(params, sparse_grad, w):
+            # Depending on w, provide only the x or y gradient
+            optimizer.zero_grad()
+            loss = rosenbrock(params)
+            loss.backward()
+            grad = drosenbrock(params.data)
+            # NB: We torture test the optimizer by returning an
+            # uncoalesced sparse tensor
+            if w:
+                i = torch.LongTensor([[0, 0]])
+                x = grad[0]
+                v = torch.DoubleTensor([x / 4., x - x / 4.])
+            else:
+                i = torch.LongTensor([[1, 1]])
+                y = grad[1]
+                v = torch.DoubleTensor([y - y / 4., y / 4.])
+            x = sparse.DoubleTensor(i, v, torch.Size([2]))
+            if sparse_grad:
+                params.grad.data = x
+            else:
+                params.grad.data = x.to_dense()
+            return loss
+
+        for i in range(2000):
+            # Do cyclic coordinate descent
+            w = i % 2
+            optimizer.step(functools.partial(eval, params, True, w))
+            optimizer_c.step(functools.partial(eval, params_c, False, w))
+            self.assertEqual(params.data, params_c.data)
 
         self.assertLessEqual(params.data.dist(solution), initial_dist)
 
@@ -234,6 +278,11 @@ class TestOptim(TestCase):
             lambda weight, bias: optim.Adagrad(
                 self._build_params_dict(weight, bias, lr=1e-2),
                 lr=1e-1)
+        )
+
+    def test_adagrad_sparse(self):
+        self._test_rosenbrock_sparse(
+            lambda params: optim.Adagrad(params, lr=1e-1)
         )
 
     def test_adamax(self):

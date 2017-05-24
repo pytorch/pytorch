@@ -1,5 +1,7 @@
 """Functional interface"""
 
+from numbers import Integral
+
 import torch
 from . import _functions
 from .modules import utils
@@ -367,11 +369,11 @@ def dropout(input, p=0.5, training=False, inplace=False):
 
 
 def threshold(input, threshold, value, inplace=False):
-    return _functions.thnn.auto.Threshold(threshold, value, inplace)(input)
+    return _functions.thnn.Threshold.apply(input, threshold, value, inplace)
 
 
 def relu(input, inplace=False):
-    return _functions.thnn.auto.Threshold(0, 0, inplace)(input)
+    return _functions.thnn.Threshold.apply(input, 0, 0, inplace)
 
 
 def hardtanh(input, min_val=-1., max_val=1., inplace=False):
@@ -407,7 +409,7 @@ def hardshrink(input, lambd=0.5):
 
 
 def tanhshrink(input):
-    return input - _autograd_functions.Tanh()(input)
+    return input - _autograd_functions.Tanh.apply(input)
 
 
 def softsign(input):
@@ -435,18 +437,20 @@ def log_softmax(input):
 
 
 def tanh(input):
-    return _autograd_functions.Tanh()(input)
+    return _autograd_functions.Tanh.apply(input)
 
 
 def sigmoid(input):
-    return _autograd_functions.Sigmoid()(input)
+    return _autograd_functions.Sigmoid.apply(input)
 
 
 # etc.
 
 def linear(input, weight, bias=None):
-    state = _functions.linear.Linear()
-    return state(input, weight) if bias is None else state(input, weight, bias)
+    if bias is None:
+        return _functions.linear.Linear.apply(input, weight)
+    else:
+        return _functions.linear.Linear.apply(input, weight, bias)
 
 
 def bilinear(input1, input2, weight, bias=None):
@@ -610,9 +614,21 @@ def upsample_bilinear(input, size=None, scale_factor=None):
     Args:
         input (Variable): input
         size (int or Tuple[int, int]): output spatial size.
-        scale_factor (int): multiplier for spatial size. Has to be an integer.
+        scale_factor (int or Tuple[int, int]): multiplier for spatial size
     """
     return _functions.thnn.UpsamplingBilinear2d(size, scale_factor)(input)
+
+
+def _check_bilinear_2d_scale_factor(scale_factor):
+    scale_factor = _pair(scale_factor)
+    try:
+        assert len(scale_factor) == 2
+        assert all(isinstance(s, Integral) and s >= 1 for s in scale_factor)
+    except AssertionError as e:
+        raise ValueError('scale_factor must be a non-negative integer, '
+                         'or a tuple of non-negative integers for bilinear upsamplings, but got: '
+                         '{}'.format(scale_factor))
+    return scale_factor
 
 
 def pad(input, pad, mode='constant', value=0):
@@ -674,8 +690,27 @@ def pairwise_distance(x1, x2, p=2, eps=1e-6):
     assert x1.size() == x2.size(), "Input sizes must be equal."
     assert x1.dim() == 2, "Input must be a 2D matrix."
     diff = torch.abs(x1 - x2)
-    out = torch.pow(diff + eps, p).sum(dim=1)
+    out = torch.pow(diff + eps, p).sum(dim=1, keepdim=True)
     return torch.pow(out, 1. / p)
+
+
+def cosine_similarity(x1, x2, dim=1, eps=1e-8):
+    r"""Returns cosine similarity between x1 and x2, computed along dim.
+
+    Args:
+        x1 (Variable): First input.
+        x2 (Variable): Second input (of size matching x1).
+        dim (int, optional): Dimension of vectors. Default: 1
+        eps (float, optional): Small value to avoid division by zero. Default: 1e-8
+
+    Shape:
+        - Input: :math:`(\ast_1, D, \ast_2)` where D is at position `dim`.
+        - Output: :math:`(\ast_1, \ast_2)` where 1 is at position `dim`.
+    """
+    w12 = torch.sum(x1 * x2, dim)
+    w1 = torch.norm(x1, 2, dim)
+    w2 = torch.norm(x2, 2, dim)
+    return (w12 / (w1 * w2).clamp(min=eps)).squeeze()
 
 
 def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, swap=False):
@@ -728,3 +763,25 @@ def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, s
     dist_hinge = torch.clamp(margin + d_p - d_n, min=0.0)
     loss = torch.mean(dist_hinge)
     return loss
+
+
+def normalize(input, p=2, dim=1, eps=1e-12):
+    r"""Performs :math:`L_p` normalization of inputs over specified dimension.
+
+    Does:
+
+    .. math::
+        v = \frac{v}{\max(\lVert v \rVert_p, \epsilon)}
+
+    for each subtensor v over dimension dim of input. Each subtensor is flattened into a vector,
+    i.e. :math:`\lVert v \rVert_p` is not a matrix norm.
+
+    With default arguments normalizes over the second dimension with Euclidean norm.
+
+    Args:
+        input: input tensor of any shape
+        p (float): the exponent value in the norm formulation
+        dim (int): the dimension to reduce
+        eps (float): small value to avoid division by zero
+    """
+    return input / input.norm(p, dim, True).clamp(min=eps).expand_as(input)

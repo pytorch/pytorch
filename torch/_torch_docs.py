@@ -343,8 +343,8 @@ Args:
 
 Example::
 
-    >>> vec1 = torch.arange(1, 4)
-    >>> vec2 = torch.arange(1, 3)
+    >>> vec1 = torch.arange(1, 3)
+    >>> vec2 = torch.arange(1, 2)
     >>> M = torch.zeros(3, 2)
     >>> torch.addr(M, vec1, vec2)
      1  2
@@ -559,7 +559,7 @@ Example::
 
 add_docstr(torch._C.cat,
            """
-cat(seq, dim=0) -> Tensor
+cat(seq, dim=0, out=None) -> Tensor
 
 Concatenates the given sequence of :attr:`seq` Tensors in the given dimension.
 
@@ -570,6 +570,7 @@ Concatenates the given sequence of :attr:`seq` Tensors in the given dimension.
 Args:
     seq (sequence of Tensors): Can be any python sequence of `Tensor` of the same type.
     dim (int, optional): The dimension over which the tensors are concatenated
+    out (Tensor, optional): Output argument
 
 Example::
 
@@ -1755,21 +1756,26 @@ Example::
 
 add_docstr(torch._C.kthvalue,
            """
-kthvalue(input, k, dim=None, out=None) -> (Tensor, LongTensor)
+kthvalue(input, k, dim=None, keepdim=True, out=None) -> (Tensor, LongTensor)
 
 Returns the :attr:`k` th smallest element of the given :attr:`input` Tensor along a given dimension.
 
 If :attr:`dim` is not given, the last dimension of the `input` is chosen.
 
 A tuple of `(values, indices)` is returned, where the `indices` is the indices of
-the kth-smallest element in the original `input` Tensor in dimention `dim`.  Both the
-:attr:`values` and :attr:`indices` tensors are the same size as :attr:`input` except in
-the dimension :attr:`dim` where they are of size 1.
+the kth-smallest element in the original `input` Tensor in dimention `dim`.
+
+If :attr:`keepdim` is true, both the :attr:`values` and :attr:`indices` Tensors are the
+same size as :attr:`input`, except in the dimension :attr:`dim` where they are of size 1.
+Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in both the
+:attr:`values` and :attr:`indices` Tensors having 1 fewer dimension than the :attr:`input`
+Tensor.
 
 Args:
     input (Tensor): the input `Tensor`
     k (int): k for the k-th smallest element
-    dim (int, optional): The dimension to sort along
+    dim (int, optional): The dimension to find the kth value along
+    keepdim (bool): whether the output Tensors have :attr:`dim` retained or not
     out (tuple, optional): The output tuple of (Tensor, LongTensor)
                            can be optionally given to be used as output buffers
 
@@ -1801,7 +1807,7 @@ Example::
     4  5  6
     [torch.FloatTensor of size 2x3]
 
-    >>> torch.kthvalue(x,2,0)
+    >>> torch.kthvalue(x,2,0,True)
     (
     4  5  6
     [torch.FloatTensor of size 1x3]
@@ -2128,16 +2134,20 @@ Example::
     0.4729
 
 
-.. function:: max(input, dim, max=None, max_indices=None) -> (Tensor, LongTensor)
+.. function:: max(input, dim, keepdim=True, max=None, max_indices=None) -> (Tensor, LongTensor)
 
 Returns the maximum value of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
-Also returns the index location of each maximum value found.
+The second return value is the index location of each maximum value found (argmax).
 
-The output Tensors are of the same size as :attr:`input` except in the dimension :attr:`dim` where they are of size 1.
+If :attr:`keepdim` is true, the output Tensors are of the same size as :attr:`input`
+except in the dimension :attr:`dim` where they are of size 1.  Otherwise, :attr:`dim`
+is squeezed (see :func:`torch.squeeze`), resulting in the output Tensors having 1 fewer
+dimension than :attr:`input`.
 
 Args:
     input (Tensor): the input `Tensor`
     dim (int): the dimension to reduce
+    keepdim (bool): whether the output Tensors have :attr:`dim` retained or not
     max (Tensor, optional): the result Tensor with maximum values in dimension :attr:`dim`
     max_indices (LongTensor, optional): the result Tensor with the index locations of the
                                         maximum values in dimension :attr:`dim`
@@ -2236,16 +2246,20 @@ Example::
     0.32398951053619385
 
 
-.. function:: mean(input, dim, out=None) -> Tensor
+.. function:: mean(input, dim, keepdim=True, out=None) -> Tensor
 
 Returns the mean value of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
 
-The output Tensor is of the same size as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
+If :attr:`keepdim` is true, the output Tensor is of the same size as :attr:`input`
+except in the dimension :attr:`dim` where it is of size 1.  Otherwise, :attr:`dim`
+is squeezed (see :func:`torch.squeeze`), resulting in the output Tensor having 1 fewer
+dimension.
 
 Args:
     input (Tensor): the input `Tensor`
     dim (int): the dimension to reduce
-    out (Tensor, optional): the result Tensor
+    keepdim (bool, optional): whether the output tensor has :attr:`dim` retained or not
+    out (Tensor): the result Tensor
 
 Example::
 
@@ -2266,24 +2280,36 @@ Example::
     -0.2157
     [torch.FloatTensor of size 4x1]
 
+    >>> torch.mean(a, 1, True)
+
+    -0.8545
+     0.0997
+     0.2464
+    -0.2157
+    [torch.FloatTensor of size 4x1]
+
 """)
 
 add_docstr(torch._C.median,
            """
-median(input, dim=-1, values=None, indices=None) -> (Tensor, LongTensor)
+median(input, dim=-1, keepdim=True, values=None, indices=None) -> (Tensor, LongTensor)
 
 Returns the median value of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
 Also returns the index location of the median value as a `LongTensor`.
 
 By default, :attr:`dim` is the last dimension of the :attr:`input` Tensor.
 
-The output Tensors are of the same size as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
+If :attr:`keepdim` is true, the output Tensors are of the same size as :attr:`input`
+except in the dimension :attr:`dim` where they are of size 1.  Otherwise, :attr:`dim`
+is squeezed (see :func:`torch.squeeze`), resulting in the outputs Tensor having 1 fewer
+dimension than :attr:`input`.
 
 .. note:: This function is not defined for ``torch.cuda.Tensor`` yet.
 
 Args:
     input (Tensor): the input `Tensor`
     dim (int): the dimension to reduce
+    keepdim (bool): whether the output Tensors have :attr:`dim` retained or not
     values (Tensor, optional): the result Tensor
     indices (Tensor, optional): the result index Tensor
 
@@ -2344,16 +2370,20 @@ Example::
     -0.22663167119026184
 
 
-.. function:: min(input, dim, min=None, min_indices=None) -> (Tensor, LongTensor)
+.. function:: min(input, dim, keepdim=True, min=None, min_indices=None) -> (Tensor, LongTensor)
 
 Returns the minimum value of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
-Also returns the index location of each minimum value found.
+The second return value is the index location of each minimum value found (argmin).
 
-The output Tensors are of the same size as :attr:`input` except in the dimension :attr:`dim` where they are of size 1.
+If :attr:`keepdim` is true, the output Tensors are of the same size as :attr:`input`
+except in the dimension :attr:`dim` where they are of size 1.  Otherwise, :attr:`dim`
+is squeezed (see :func:`torch.squeeze`), resulting in the output Tensors having 1 fewer
+dimension than :attr:`input`.
 
 Args:
     input (Tensor): the input `Tensor`
     dim (int): the dimension to reduce
+    keepdim (bool): whether the output tensors have :attr:`dim` retained or not
     min (Tensor, optional): the result Tensor with minimum values in dimension :attr:`dim`
     min_indices (LongTensor, optional): the result Tensor with the index locations of the
                                         minimum values in dimension :attr:`dim`
@@ -2455,20 +2485,24 @@ Example::
 
 add_docstr(torch._C.mode,
            """
-mode(input, dim=-1, values=None, indices=None) -> (Tensor, LongTensor)
+mode(input, dim=-1, keepdim=True, values=None, indices=None) -> (Tensor, LongTensor)
 
 Returns the mode value of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
 Also returns the index location of the mode value as a `LongTensor`.
 
 By default, :attr:`dim` is the last dimension of the :attr:`input` Tensor.
 
-The output Tensors are of the same size as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
+If :attr:`keepdim` is true, the output Tensors are of the same size as :attr:`input`
+except in the dimension :attr:`dim` where they are of size 1.  Otherwise, :attr:`dim`
+is squeezed (see :func:`torch.squeeze`), resulting in the output Tensors having 1 fewer
+dimension than :attr:`input`.
 
 .. note:: This function is not defined for ``torch.cuda.Tensor`` yet.
 
 Args:
     input (Tensor): the input `Tensor`
     dim (int): the dimension to reduce
+    keepdim (bool): whether the output tensors have :attr:`dim` retained or not
     values (Tensor, optional): the result Tensor
     indices (Tensor, optional): the result index Tensor
 
@@ -2781,16 +2815,20 @@ Example::
     1.0338925067372466
 
 
-.. function:: norm(input, p, dim, out=None) -> Tensor
+.. function:: norm(input, p, dim, keepdim=True, out=None) -> Tensor
 
 Returns the p-norm of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
 
-The output Tensor is of the same size as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
+If :attr:`keepdim` is true, the output Tensor is of the same size as :attr:`input`
+except in the dimension :attr:`dim` where it is of size 1.  Otherwise, :attr:`dim`
+is squeezed (see :func:`torch.squeeze`), resulting in the output Tensor having 1 fewer
+dimension than :attr:`input`.
 
 Args:
     input (Tensor): the input `Tensor`
     p (float):  the exponent value in the norm formulation
     dim (int): the dimension to reduce
+    keepdim (bool): whether the output Tensor has :attr:`dim` retained or not
     out (Tensor, optional): the result Tensor
 
 Example::
@@ -2812,7 +2850,7 @@ Example::
      0.6026
     [torch.FloatTensor of size 4x1]
 
-    >>> torch.norm(a, 0, 1)
+    >>> torch.norm(a, 0, 1, True)
 
      2
      2
@@ -3092,15 +3130,19 @@ Example::
     0.005537458061418483
 
 
-.. function:: prod(input, dim, out=None) -> Tensor
+.. function:: prod(input, dim, keepdim=True, out=None) -> Tensor
 
 Returns the product of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
 
-The output Tensor is of the same size as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
+If :attr:`keepdim` is true, the output Tensor is of the same size as :attr:`input`
+except in the dimension :attr:`dim` where it is of size 1.  Otherwise, :attr:`dim`
+is squeezed (see :func:`torch.squeeze`), resulting in the output Tensor having 1 fewer
+dimension than :attr:`input`.
 
 Args:
     input (Tensor): the input `Tensor`
     dim (int): the dimension to reduce
+    keepdim (bool): whether the output Tensor has :attr:`dim` retained or not
     out (Tensor, optional): the result Tensor
 
 Example::
@@ -3272,7 +3314,7 @@ add_docstr(torch._C.range,
            """
 range(start, end, step=1, out=None) -> Tensor
 
-returns a 1D Tensor of size :math:`floor((end - start) / step) + 1` with values
+Returns a 1D Tensor of size :math:`floor((end - start) / step) + 1` with values
 from :attr:`start` to :attr:`end` with step :attr:`step`. Step is the gap between two values in the tensor.
 :math:`x_{i+1} = x_i + step`
 
@@ -3312,7 +3354,7 @@ add_docstr(torch._C.arange,
            """
 arange(start, end, step=1, out=None) -> Tensor
 
-Teturns a 1D Tensor of size :math:`floor((end - start) / step)` with values
+Returns a 1D Tensor of size :math:`floor((end - start) / step)` with values
 from the interval ``[start, end)`` taken with step :attr:`step` starting from `start`.
 
 Args:
@@ -3690,6 +3732,9 @@ When :attr:`dim` is given, a squeeze operation is done only in the given dimensi
 If `input` is of shape: :math:`(A x 1 x B)`, `squeeze(input, 0)` leaves the Tensor unchanged,
 but `squeeze(input, 1)` will squeeze the tensor to the shape :math:`(A x B)`.
 
+.. note:: As an exception to the above, a 1-dimensional tensor of size 1 will not
+          have its dimensions changed.
+
 .. note:: The returned Tensor shares the storage with the input Tensor,
           so changing the contents of one will change the contents of the other.
 
@@ -3735,15 +3780,19 @@ Example::
     1.3782334731508061
 
 
-.. function:: std(input, dim, out=None) -> Tensor
+.. function:: std(input, dim, keepdim=True, out=None) -> Tensor
 
 Returns the standard-deviation of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
 
-The output Tensor is of the same size as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
+If :attr:`keepdim` is true, the output Tensor is of the same size as :attr:`input`
+except in the dimension :attr:`dim` where it is of size 1.  Otherwise, :attr:`dim`
+is squeezed (see :func:`torch.squeeze`), resulting in the output Tensor having 1 fewer
+dimension than :attr:`input`.
 
 Args:
     input (Tensor): the input `Tensor`
     dim (int): the dimension to reduce
+    keepdim (bool): whether the output Tensor has :attr:`dim` retained or not
     out (Tensor, optional): the result Tensor
 
 Example::
@@ -3788,15 +3837,19 @@ Example::
     0.9969287421554327
 
 
-.. function:: sum(input, dim, out=None) -> Tensor
+.. function:: sum(input, dim, keepdim=True, out=None) -> Tensor
 
 Returns the sum of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
 
-The output Tensor is of the same size as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
+If :attr:`keepdim` is true, the output Tensor is of the same size as :attr:`input`
+except in the dimension :attr:`dim` where it is of size 1.  Otherwise, :attr:`dim`
+is squeezed (see :func:`torch.squeeze`), resulting in the output Tensor having 1 fewer
+dimension than :attr:`input`.
 
 Args:
     input (Tensor): the input `Tensor`
     dim (int): the dimension to reduce
+    keepdim (bool): whether the output Tensor has :attr:`dim` retained or not
     out (Tensor, optional): the result Tensor
 
 Example::
@@ -4354,15 +4407,19 @@ Example::
     1.899527506513334
 
 
-.. function:: var(input, dim, out=None) -> Tensor
+.. function:: var(input, dim, keepdim=True, out=None) -> Tensor
 
 Returns the variance of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
 
-The output Tensor is of the same size as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
+If :attr:`keepdim` is true, the output Tensors are of the same size as :attr:`input`
+except in the dimension :attr:`dim` where they are of size 1.  Otherwise, :attr:`dim`
+is squeezed (see :func:`torch.squeeze`), resulting in the outputs Tensor having 1 fewer
+dimension than :attr:`input`.
 
 Args:
     input (Tensor): the input `Tensor`
     dim (int): the dimension to reduce
+    keepdim (bool): whether the output Tensor has :attr:`dim` retained or not
     out (Tensor, optional): the result Tensor
 
 Example::

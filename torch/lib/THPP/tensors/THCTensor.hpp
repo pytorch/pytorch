@@ -173,10 +173,10 @@ public:
   virtual THCTensor& trunc(const Tensor& src) override;
   virtual THCTensor& frac(const Tensor& src) override;
   virtual THCTensor& lerp(const Tensor& a, const Tensor& b, scalar_type weight) override;
-  virtual THCTensor& mean(const Tensor& src, int dimension) override;
-  virtual THCTensor& std(const Tensor& src, int dimension, int flag) override;
-  virtual THCTensor& var(const Tensor& src, int dimension, int flag) override;
-  virtual THCTensor& norm(const Tensor& src, scalar_type value, int dimension) override;
+  virtual THCTensor& mean(const Tensor& src, int dimension, int keepdim) override;
+  virtual THCTensor& std(const Tensor& src, int dimension, int flag, int keepdim) override;
+  virtual THCTensor& var(const Tensor& src, int dimension, int flag, int keepdim) override;
+  virtual THCTensor& norm(const Tensor& src, scalar_type value, int dimension, int keepdim) override;
   virtual THCTensor& renorm(const Tensor& src, scalar_type value, int dimension, scalar_type maxnorm) override;
   virtual THCTensor& histc(const Tensor& src, long nbins, scalar_type minvalue, scalar_type maxvalue) override;
   virtual THCTensor& bhistc(const Tensor& src, long nbins, scalar_type minvalue, scalar_type maxvalue) override;
@@ -292,17 +292,17 @@ public:
   virtual THCTensor& match(const Tensor& m1, const Tensor& m2,
                           scalar_type gain) override;
   virtual THCTensor& max(const Tensor& indices_, const Tensor& src,
-                        int dimension) override;
+                        int dimension, int keepdim) override;
   virtual THCTensor& min(const Tensor& indices_, const Tensor& src,
-                        int dimension) override;
+                        int dimension, int keepdim) override;
   virtual THCTensor& kthvalue(const Tensor& indices_, const Tensor& src,
-                             long k, int dimension) override;
+                             long k, int dimension, int keepdim) override;
   virtual THCTensor& mode(const Tensor& indices_, const Tensor& src,
-                         int dimension) override;
+                         int dimension, int keepdim) override;
   virtual THCTensor& median(const Tensor& indices_, const Tensor& src,
-                           int dimension) override;
-  virtual THCTensor& sum(const Tensor& src, int dimension) override;
-  virtual THCTensor& prod(const Tensor& src, int dimension) override;
+                           int dimension, int keepdim) override;
+  virtual THCTensor& sum(const Tensor& src, int dimension, int keepdim) override;
+  virtual THCTensor& prod(const Tensor& src, int dimension, int keepdim) override;
   virtual THCTensor& cumsum(const Tensor& src, int dimension) override;
   virtual THCTensor& cumprod(const Tensor& src, int dimension) override;
   virtual THCTensor& sign(const Tensor& source) override;

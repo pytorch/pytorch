@@ -28,7 +28,7 @@ BASIC_C_FLAGS=" -DTH_INDEX_BASE=0 -I$INSTALL_DIR/include \
 LDFLAGS="-L$INSTALL_DIR/lib "
 LD_POSTFIX=".so.1"
 LD_POSTFIX_UNVERSIONED=".so"
-if [[ $(uname) == 'Darwin' ]]; then    
+if [[ $(uname) == 'Darwin' ]]; then
     LDFLAGS="$LDFLAGS -Qunused-arguments -Wl,-rpath,@loader_path"
     LD_POSTFIX=".1.dylib"
     LD_POSTFIX_UNVERSIONED=".dylib"
@@ -93,7 +93,9 @@ function build_nccl() {
                -DCMAKE_CXX_FLAGS="$C_FLAGS $CPP_FLAGS"
    make install
    cp "lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so.1"
-   ln -s "${INSTALL_DIR}/lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so"
+   if [ ! -f "${INSTALL_DIR}/lib/libnccl.so" ]; then
+     ln -s "${INSTALL_DIR}/lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so"
+   fi
    cd ../..
 }
 

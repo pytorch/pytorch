@@ -207,12 +207,12 @@ THNN_(GRUBackward)(TensorInfo<T, IndexType> input,
 
     T* gi = &DEVICE_LINEAR_GET(gradinput, linearIndex);
 
-    T* go = &DEVICE_LINEAR_GET(gradoutput, linearIndex);
+    T go = DEVICE_LINEAR_GET(gradoutput, linearIndex);
 
 #ifndef THC_REAL_IS_HALF
-    T gig = (*go)*(*hx-*ng)*( 1-(*ig) )*(*ig);
-    T ghx = (*go)*(*ig);
-    T gin = (*go)*(1-*ig)*( 1-(*ng)*(*ng) );
+    T gig = (go)*(*hx-*ng)*( 1-(*ig) )*(*ig);
+    T ghx = (go)*(*ig);
+    T gin = (go)*(1-*ig)*( 1-(*ng)*(*ng) );
     T ghn = (gin) * (*rg);
     T grg = (gin)*(*hn)*( 1-(*rg) )*(*rg);
 
@@ -226,9 +226,9 @@ THNN_(GRUBackward)(TensorInfo<T, IndexType> input,
     *hn = gig;
     *oghn = ghn;
 #else
-    float gig = H2F(*go)*( H2F(*hx)-H2F(*ng) )*( 1-H2F(*ig) )*H2F(*ig);
-    float ghx = H2F(*go)*H2F(*ig);
-    float gin = H2F(*go)*( 1-H2F(*ig) )*( 1-H2F(*ng)*H2F(*ng) );
+    float gig = H2F(go)*( H2F(*hx)-H2F(*ng) )*( 1-H2F(*ig) )*H2F(*ig);
+    float ghx = H2F(go)*H2F(*ig);
+    float gin = H2F(go)*( 1-H2F(*ig) )*( 1-H2F(*ng)*H2F(*ng) );
     float ghn = H2F(gin) * H2F(*rg);
     float grg = H2F(gin)*H2F(*hn)*( 1-H2F(*rg) )*H2F(*rg);
 
