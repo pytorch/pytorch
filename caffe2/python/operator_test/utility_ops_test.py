@@ -157,3 +157,23 @@ class TestUtilityOps(hu.HypothesisTestCase):
             inputs=[items, lengths, indices],
             reference=lengths_gather_op,
         )
+
+    @given(**hu.gcs)
+    def test_size_op(self, gc, dc):
+        X = np.array([[1, 2], [3, 4]]).astype(np.float32)
+
+        def size_op(tensor):
+            return [np.prod(tensor.shape)]
+
+        op = core.CreateOperator(
+            "Size",
+            ["X"],
+            ["output"]
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[X],
+            reference=size_op,
+        )

@@ -1046,4 +1046,20 @@ OPERATOR_SCHEMA(NanCheck)
         "output",
         "Tensor to copy input into if no NaNs or inf."
         " Can be in-place");
+
+OPERATOR_SCHEMA(Size)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .SetDoc(
+        "Return a 1D tensor of type int64 that contains the number "
+        "of elements of the input tensor")
+    .Input(0, "tensor", "Tensor to calculate number of elements")
+    .Output(
+        0,
+        "output",
+        "1D tensor of type int64 that contains the number of "
+        "elements in the input tensor.");
+
+REGISTER_CPU_OPERATOR(Size, SizeOp<CPUContext>);
+NO_GRADIENT(Size);
 } // namespace caffe2
