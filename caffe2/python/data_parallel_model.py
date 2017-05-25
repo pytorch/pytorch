@@ -30,6 +30,7 @@ def Parallelize_GPU(
     broadcast_computed_params=True,
     optimize_gradient_memory=False,
     use_nccl=False,
+    max_concurrent_distributed_ops=4,
 ):
     '''
     Function to create a model that can run on many GPUs.
@@ -62,7 +63,10 @@ def Parallelize_GPU(
     '''
     log.info("Parallelizing model for devices: {}".format(devices))
     extra_workers = 8 if rendezvous is not None else 0  # best-guess
-    model_helper_obj.net.Proto().num_workers = len(devices) * 4 + extra_workers
+    num_workers = len(devices) * 4 + extra_workers
+    max_concurrent_distributed_ops =\
+        min(max_concurrent_distributed_ops, num_workers - 1)
+    model_helper_obj.net.Proto().num_workers = num_workers
     model_helper_obj.net.Proto().type = net_type
 
     # Store some information in the model -- a bit ugly
@@ -146,7 +150,13 @@ def Parallelize_GPU(
         _BroadcastComputedParams(devices, model_helper_obj, rendezvous)
 
     if len(model_helper_obj._grad_names) > 0:
-        _AllReduceGradients(devices, model_helper_obj, rendezvous, use_nccl)
+        _AllReduceGradients(
+            devices,
+            model_helper_obj,
+            rendezvous,
+            use_nccl,
+            max_concurrent_distributed_ops,
+        )
     else:
         log.info("NOTE: Param builder function did not create any parameters.")
 
@@ -594,17 +604,24 @@ def _AddDistributedParameterSync(
                 net.CopyCPUToGPU(param_cpu, param)
 
 
-def _AllReduceGradients(devices, model, rendezvous, use_nccl):
+def _AllReduceGradients(devices, model, rendezvous, use_nccl,
+                        max_concurrent_distributed_ops):
     if rendezvous is None:
         _AllReduceGradientsSingleHost(devices, model, use_nccl)
     else:
-        _AllReduceGradientsDistributed(devices, model, rendezvous)
+        _AllReduceGradientsDistributed(
+            devices,
+            model,
+            rendezvous,
+            max_concurrent_distributed_ops,
+        )
 
 
 def _AllReduceGradientsDistributed(
     devices,
     model,
     rendezvous,
+    max_concurrent_distributed_ops,
 ):
     num_workers = model.net.Proto().num_workers
     assert num_workers > 1, "Please specify more than 1 worker"
@@ -618,7 +635,7 @@ def _AllReduceGradientsDistributed(
 
     # We need to specify a partial order using control_input to ensure
     # progress (all machines need to do same allreduce in parallel)
-    num_controls = min(4, num_workers - 1)
+    num_controls = max_concurrent_distributed_ops
     cyclical_controls = []
 
     # Since num_controls determines the partial ordering of
