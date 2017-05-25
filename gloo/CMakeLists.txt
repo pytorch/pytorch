@@ -62,7 +62,8 @@ configure_file(config.h.in config.h)
 
 # Prepend include path so that generated config.h is picked up.
 # Note that it is included as "gloo/config.h" to add parent directory.
-include_directories(BEFORE ${CMAKE_CURRENT_BINARY_DIR}/..)
+get_filename_component(PARENT_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR} DIRECTORY)
+include_directories(BEFORE ${PARENT_BINARY_DIR})
 
 add_library(gloo ${GLOO_STATIC_OR_SHARED} ${GLOO_SRCS})
 target_link_libraries(gloo ${gloo_DEPENDENCY_LIBS})
@@ -78,8 +79,11 @@ if(USE_CUDA)
   endif()
 endif()
 
-get_filename_component(PARENT_DIR ${CMAKE_CURRENT_SOURCE_DIR} DIRECTORY)
-include_directories(${PARENT_DIR})
+# Add path to gloo/config.h so it is picked up by parent projects.
+target_include_directories(gloo BEFORE PUBLIC ${PARENT_BINARY_DIR})
+if(USE_CUDA)
+  target_include_directories(gloo_cuda BEFORE PUBLIC ${PARENT_BINARY_DIR})
+endif()
 
 # Install if necessary.
 # If the Gloo build is included from another project's build, it may
