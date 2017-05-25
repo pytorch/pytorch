@@ -26,7 +26,7 @@ static PyObject * THPTensor_(storage)(THPTensor *self, PyObject *args)
   if (result == NULL)
     Py_RETURN_NONE;
   THStorage_(retain)(LIBRARY_STATE result);
-  THStoragePtr _tmp = result;
+  THStoragePtr _tmp(result);
   PyObject *ret = THPStorage_(New)(result);
   _tmp.release();
   return ret;
@@ -152,7 +152,7 @@ PyObject * THPTensor_(setIndex)(THPTensor *self, PyObject *args)
         - THTensor* self
         - CONSTANT NULL, 0, NULL, NULL
     - cname: setStorage
-      before_call: THLongStoragePtr __storage_size = THLongStorage_newWithSize1(THStorage_(size)(LIBRARY_STATE arg_storage));
+      before_call: THLongStoragePtr __storage_size(THLongStorage_newWithSize1(THStorage_(size)(LIBRARY_STATE arg_storage)));
       arguments:
         - THTensor* self
         - THStorage* storage
@@ -191,7 +191,7 @@ static PyObject * THPTensor_(select)(THPTensor *self, PyObject *args)
   if (dim<0) dim += ndim;
 
   if(ndim > 1) {
-    THTensorPtr selected = THTensor_(newWithTensor)(LIBRARY_STATE self->cdata);
+    THTensorPtr selected(THTensor_(newWithTensor)(LIBRARY_STATE self->cdata));
     THTensor_(select)(LIBRARY_STATE selected.get(), NULL, dim, idx);
     return THPTensor_(New)(selected.release());
   }
@@ -693,7 +693,7 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
   with_stateless: True
   return: argument 0
   before_call: |
-    THLongStoragePtr _size = THIndexTensor_(newSizeOf)(LIBRARY_STATE arg_index);
+    THLongStoragePtr _size(THIndexTensor_(newSizeOf)(LIBRARY_STATE arg_index));
     THTensor_(resize)(LIBRARY_STATE arg_result, _size, NULL);
   arguments:
     - arg: THTensor* result

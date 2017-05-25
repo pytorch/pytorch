@@ -59,11 +59,11 @@ static PyObject* _allocate_grad_output(output_info_type& info, AutoGPU& gpu_guar
   gpu_guard.setDevice(std::get<1>(info));
   std::vector<long> &sizes = std::get<2>(info);
 
-  THPObjectPtr grad_size = THPSize_New(sizes.size(), sizes.data());
+  THPObjectPtr grad_size(THPSize_New(sizes.size(), sizes.data()));
   if (!grad_size) throw python_error();
-  THPObjectPtr new_grad = PyObject_CallFunctionObjArgs(tensor_cls, grad_size.get(), NULL);
+  THPObjectPtr new_grad(PyObject_CallFunctionObjArgs(tensor_cls, grad_size.get(), NULL));
   if (!new_grad) throw python_error();
-  THPObjectPtr result = PyObject_CallMethod(new_grad.get(), "zero_", "");
+  THPObjectPtr result(PyObject_CallMethod(new_grad.get(), "zero_", ""));
   if (!result) throw python_error();
   return new_grad.release();
 }
@@ -73,7 +73,7 @@ namespace torch { namespace autograd {
 auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
   AutoGIL gil;
 
-  THPObjectPtr pyInputs = PyTuple_New(inputs.size());
+  THPObjectPtr pyInputs(PyTuple_New(inputs.size()));
   if (!pyInputs) throw python_error();
 
   for (size_t i = 0; i != inputs.size(); ++i) {
@@ -88,8 +88,8 @@ auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
     PyTuple_SET_ITEM(pyInputs.get(), i, input);
   }
 
-  THPObjectPtr r = PyObject_CallMethod(
-      obj, "_do_backward", "OO", pyInputs.get(), Py_True);
+  THPObjectPtr r(PyObject_CallMethod(
+      obj, "_do_backward", "OO", pyInputs.get(), Py_True));
   if (!r) throw python_error();
 
   auto num_outputs = PyTuple_GET_SIZE(r.get());
@@ -126,14 +126,14 @@ auto PyFunction::apply(const variable_list& inputs) -> variable_list {
   AutoGPU _gpu_guard(-1);
   THPFunction* py_fn = (THPFunction*)obj;
 
-  THPObjectPtr _legacy = PyObject_GetAttrString(obj, "_is_legacy");
+  THPObjectPtr _legacy(PyObject_GetAttrString(obj, "_is_legacy"));
   if (_legacy == Py_True) {
     return legacy_apply(inputs);
   }
 
   // Massage a C++ variable_list into a Python arguments tuple
   auto num_inputs = inputs.size();
-  THPObjectPtr pyInputs = PyTuple_New(num_inputs);
+  THPObjectPtr pyInputs(PyTuple_New(num_inputs));
   if (!pyInputs) throw python_error();
   auto& output_info = *py_fn->output_info;
   for (size_t i = 0; i < num_inputs; ++i) {
@@ -141,7 +141,7 @@ auto PyFunction::apply(const variable_list& inputs) -> variable_list {
     if (inputs[i]) {
       input = THPVariable_Wrap(inputs[i]);
     } else {
-      THPObjectPtr tensor = _allocate_grad_output(output_info[i], _gpu_guard);
+      THPObjectPtr tensor(_allocate_grad_output(output_info[i], _gpu_guard));
       input = THPVariable_NewLeaf(tensor);
     }
     if (!input) throw python_error();
@@ -149,9 +149,9 @@ auto PyFunction::apply(const variable_list& inputs) -> variable_list {
   }
 
   // TODO: theoretically we could take a shortcut here and call apply directly
-  THPObjectPtr apply_fn = PyObject_GetAttrString(obj, "apply");
+  THPObjectPtr apply_fn(PyObject_GetAttrString(obj, "apply"));
   if (!apply_fn) throw python_error();
-  THPObjectPtr r = PyObject_CallObject(apply_fn, pyInputs.get());
+  THPObjectPtr r(PyObject_CallObject(apply_fn, pyInputs.get()));
   if (!r) throw python_error();
   _ensure_tuple(r);
 
@@ -625,12 +625,12 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject *args) {
   return std::make_pair(std::move(unpacked), std::move(flags));
 }
 
-PyObject* process_outputs(THPFunction* grad_fn, const UnpackedInput& unpacked, THPObjectPtr raw_output, bool is_volatile) {
+PyObject* process_outputs(THPFunction* grad_fn, const UnpackedInput& unpacked, THPObjectPtr&& raw_output, bool is_volatile) {
   bool unpack_output = _ensure_tuple(raw_output);
 
   auto num_outputs = PyTuple_GET_SIZE(raw_output.get());
 
-  THPObjectPtr outputs = PyTuple_New(num_outputs);
+  THPObjectPtr outputs(PyTuple_New(num_outputs));
   if (!outputs) throw python_error();
 
   grad_fn->cdata.num_inputs = num_outputs;
@@ -678,9 +678,9 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *_inputs)
   self->needs_input_grad = input_info.needs_input_grad.release();
 
   // Now we're ready to call a forward (implemented in Python)
-  THPObjectPtr forward_fn = PyObject_GetAttrString((PyObject*)self, "forward");
+  THPObjectPtr forward_fn(PyObject_GetAttrString((PyObject*)self, "forward"));
   if (!forward_fn) return NULL;
-  THPObjectPtr raw_output = PyObject_CallObject(forward_fn, unpacked_input.tensor_input);
+  THPObjectPtr raw_output(PyObject_CallObject(forward_fn, unpacked_input.tensor_input));
   if (!raw_output) return NULL;
 
   return process_outputs(self, unpacked_input, std::move(raw_output), is_volatile);
@@ -691,9 +691,9 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *_inputs)
 {
   HANDLE_TH_ERRORS
 
-  THPObjectPtr backward_cls = PyObject_GetAttrString(cls, "_backward_cls");
+  THPObjectPtr backward_cls(PyObject_GetAttrString(cls, "_backward_cls"));
   if (!backward_cls) return NULL;
-  THPObjectPtr ctx_obj = PyObject_CallFunctionObjArgs(backward_cls, NULL);
+  THPObjectPtr ctx_obj(PyObject_CallFunctionObjArgs(backward_cls, NULL));
   if (!ctx_obj) return NULL;
   THPFunction* ctx = (THPFunction*)ctx_obj.get();
 
@@ -708,7 +708,7 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *_inputs)
 
   // Prepend ctx to tensor_input, in preparation for static method call
   auto num_args = PyTuple_GET_SIZE(_inputs);
-  THPObjectPtr ctx_tensor_input = PyTuple_New(num_args + 1);
+  THPObjectPtr ctx_tensor_input(PyTuple_New(num_args + 1));
   PyTuple_SET_ITEM(ctx_tensor_input.get(), 0, ctx_obj.release());
   for (int i = 0; i < num_args; ++i) {
     PyObject *arg = PyTuple_GET_ITEM(unpacked_input.tensor_input.get(), i);
@@ -717,9 +717,9 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *_inputs)
   }
 
   // Call forward
-  THPObjectPtr forward_fn = PyObject_GetAttrString(cls, "forward");
+  THPObjectPtr forward_fn(PyObject_GetAttrString(cls, "forward"));
   if (!forward_fn) return NULL;
-  THPObjectPtr tensor_outputs = PyObject_CallObject(forward_fn, ctx_tensor_input);
+  THPObjectPtr tensor_outputs(PyObject_CallObject(forward_fn, ctx_tensor_input));
   if (!tensor_outputs) return NULL;
 
   return process_outputs(ctx, unpacked_input, std::move(tensor_outputs), is_volatile);
@@ -800,14 +800,14 @@ PyObject * THPFunction_do_backward(THPFunction *self, PyObject *args)
     // Some of the output might have been unused, so we have to allocate
     // zero-filled buffers instead
     Py_INCREF(raw_grad_output);
-    THPObjectPtr grad_output = raw_grad_output;
+    THPObjectPtr grad_output(raw_grad_output);
     _prepare_grad_output(self, grad_output);
 
     // self.backward(*grad_output)
-    THPObjectPtr backward_fn = PyObject_GetAttrString((PyObject*)self, "backward");
+    THPObjectPtr backward_fn(PyObject_GetAttrString((PyObject*)self, "backward"));
     THPUtils_assert(backward_fn.get(), "function %s doesn't implement a required "
         "'backward' method", THPUtils_typename((PyObject*)self));
-    THPObjectPtr grad_input = PyObject_CallObject(backward_fn, grad_output.get());
+    THPObjectPtr grad_input(PyObject_CallObject(backward_fn, grad_output.get()));
     if (!grad_input) return NULL;
     _ensure_tuple(grad_input);
 
@@ -854,7 +854,7 @@ PyObject *THPFunction_saved_tensors(THPFunction *self, void *_unused)
     return PyTuple_New(0);
 
   int num_saved = self->saved_variables->size();
-  THPObjectPtr saved_tensors = PyTuple_New(num_saved);
+  THPObjectPtr saved_tensors(PyTuple_New(num_saved));
   if (!saved_tensors)
     return NULL;
   auto& saved_variables = *self->saved_variables;
@@ -879,7 +879,7 @@ PyObject *THPFunction_saved_variables(THPFunction *self, void *_unused)
     return PyTuple_New(0);
 
   int num_saved = self->saved_variables->size();
-  THPObjectPtr py_saved_variables = PyTuple_New(num_saved);
+  THPObjectPtr py_saved_variables(PyTuple_New(num_saved));
   if (!py_saved_variables) return NULL;
   auto& saved_variables = *self->saved_variables;
   for (int i = 0; i < num_saved; i++) {
@@ -901,11 +901,11 @@ PyObject *THPFunction_next_functions(THPFunction *self, void *_unused)
 {
   auto& next_fns = self->cdata.next_functions;
   int size = next_fns.size();
-  THPObjectPtr result = PyTuple_New(size);
+  THPObjectPtr result(PyTuple_New(size));
   if (!result)
     return NULL;
   for (int i = 0; i < size; i++) {
-    THPObjectPtr fn_tuple = PyTuple_New(2);
+    THPObjectPtr fn_tuple(PyTuple_New(2));
     if (!fn_tuple) return NULL;
     PyObject* fn = functionToPyObject(next_fns[i].first);
     if (!fn) return NULL;

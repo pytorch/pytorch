@@ -50,7 +50,7 @@ static PyObject * THPStorage_(elementSize)(THPStorage *self)
 static PyObject * THPStorage_(new)(THPStorage *self)
 {
   HANDLE_TH_ERRORS
-  THStoragePtr new_storage = THStorage_(new)(LIBRARY_STATE_NOARGS);
+  THStoragePtr new_storage(THStorage_(new)(LIBRARY_STATE_NOARGS));
   PyObject *_ret = THPStorage_(New)(new_storage);
   new_storage.release();
   return _ret;
@@ -257,7 +257,7 @@ PyObject * THPStorage_(_rootStorage)(THPStorage *self)
     root = root->view;
   size_t offset = self->cdata->data - root->data;
   THStorage_(retain)(LIBRARY_STATE root);
-  THPObjectPtr storage = THPStorage_(New)(root);
+  THPObjectPtr storage(THPStorage_(New)(root));
   PyObject *result = Py_BuildValue("(NN)", storage.get(), PyLong_FromLong(offset));
   storage.release();
   return result;

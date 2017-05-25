@@ -33,7 +33,7 @@ static PyObject * THPGenerator_pynew(PyTypeObject *type, PyObject *args, PyObjec
     THPUtils_setError("torch.Generator constructor doesn't accept any arguments");
     return NULL;
   }
-  THPGeneratorPtr self = (THPGenerator *)type->tp_alloc(type, 0);
+  THPGeneratorPtr self((THPGenerator *)type->tp_alloc(type, 0));
   self->cdata = THGenerator_new();
 
   return (PyObject*)self.release();
@@ -44,7 +44,7 @@ static PyObject * THPGenerator_getState(THPGenerator *self)
 {
   HANDLE_TH_ERRORS
   THGenerator *generator = self->cdata;
-  THPByteTensorPtr res = (THPByteTensor *)THPByteTensor_NewEmpty();
+  THPByteTensorPtr res((THPByteTensor *)THPByteTensor_NewEmpty());
   if (!res) return NULL;
   THByteTensor_getRNGState(generator, res->cdata);
   return (PyObject *)res.release();
