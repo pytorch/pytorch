@@ -88,9 +88,6 @@ static int THPVariable_traverse(THPVariable *self, visitproc visit, void *arg)
   Py_VISIT(self->data);
   Py_VISIT(self->backward_hooks);
   if (self->cdata) {
-    if (auto fn = dynamic_cast<PyFunction*>(self->cdata->grad_fn.get())) {
-      Py_VISIT(fn->obj);
-    }
     for (auto& hook : self->cdata->hooks) {
       if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
         Py_VISIT(pyhook->dict);
