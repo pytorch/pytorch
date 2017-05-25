@@ -573,8 +573,8 @@ static bool THPTensor_(_advancedIndex)(
   Py_ssize_t seqCount = 0;
   THIndexTensor **broadcasted = NULL, **candidates = NULL;
   int ret = -1;
-  THIndexTensor *linearIndices = NULL, *temp = NULL;
-  THLongStorage *indexerSize = NULL, *sizeAsStorage = NULL;
+  THIndexTensor *linearIndices = NULL;
+  THLongStorage *indexerSize = NULL;
   THTensor *viewed = NULL, *result = NULL;
   ptrdiff_t indexingElements = 0;
   bool success = false;
@@ -639,9 +639,11 @@ static bool THPTensor_(_advancedIndex)(
     THIndexTensor_(set1d)(LIBRARY_STATE linearIndices, i, linearIdx);
   }
 
-  sizeAsStorage = THLongStorage_newWithSize(1);
-  THLongStorage_set(sizeAsStorage, 0, THTensor_(nElement)(LIBRARY_STATE indexed));
-  viewed = THTensor_(newView)(LIBRARY_STATE indexed, sizeAsStorage);
+  viewed = THTensor_(newWithStorage1d)(LIBRARY_STATE
+                                       THTensor_(storage)(LIBRARY_STATE indexed),
+                                       THTensor_(storageOffset)(LIBRARY_STATE indexed),
+                                       THTensor_(nElement)(LIBRARY_STATE indexed),
+                                       1);
 
   result = THTensor_(new)(LIBRARY_STATE_NOARGS);
 
@@ -680,7 +682,6 @@ teardown:
   if (indexed != NULL) THTensor_(free)(LIBRARY_STATE indexed);
   if (linearIndices != NULL) THIndexTensor_(free)(LIBRARY_STATE linearIndices);
   if (indexerSize != NULL) THLongStorage_free(indexerSize);
-  if (sizeAsStorage != NULL) THLongStorage_free(sizeAsStorage);
   if (viewed != NULL) THTensor_(free)(LIBRARY_STATE viewed);
 
   return success;

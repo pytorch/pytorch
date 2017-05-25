@@ -2500,48 +2500,97 @@ class TestTorch(TestCase):
         # Tests for Integer Array Indexing, Part I - Purely integer array
         # indexing
 
-        # TODO: add test for transposed (i.e. non-contig) tensor
+        # pick a random valid indexer type
+        def ri(indices):
+            choice = random.randint(0, 2)
+            if choice == 0:
+                return torch.LongTensor(indices)
+            elif choice == 1:
+                return list(indices)
+            else:
+                return tuple(indices)
+
+        # First, we will test indexing to generate return values
 
         # Case 1: Purely Integer Array Indexing
         reference = self._consecutive((10,))
-        # self.assertEqual(reference[[], ], torch.Tensor())
-        self.assertEqual(reference[[0], ], self._consecutive((1,)))
-        self.assertEqual(reference[[3], ], self._consecutive((1,), 4))
-        self.assertEqual(reference[[2, 3, 4], ], self._consecutive((3,), 3))
+        self.assertEqual(reference[ri([0]), ], self._consecutive((1,)))
+        self.assertEqual(reference[ri([3]), ], self._consecutive((1,), 4))
+        self.assertEqual(reference[ri([2, 3, 4]), ], self._consecutive((3,), 3))
+        self.assertEqual(reference[ri([0, 2, 4]), ], torch.Tensor([1, 3, 5]))
 
         # reference is 1 2
         #              3 4
         #              5 6
         reference = self._consecutive((3, 2))
-        # self.assertEqual(reference[[0], ], self._consecutive((2,)))
-        # self.assertEqual(reference[[1], ], self._consecutive((2,), 2))
-        self.assertEqual(reference[[0, 1, 2], [0]], torch.Tensor([1, 3, 5]))
-        self.assertEqual(reference[[0, 1, 2], [1]], torch.Tensor([2, 4, 6]))
-        self.assertEqual(reference[[0], [0]], self._consecutive((1,)))
-        self.assertEqual(reference[[2], [1]], self._consecutive((1,), 6))
-        self.assertEqual(reference[[[0, 0], [0, 1]]], torch.Tensor([1, 2]))
-        self.assertEqual(reference[[[0, 1, 1, 0, 2], [1]]],
+        self.assertEqual(reference[ri([0, 1, 2]), ri([0])], torch.Tensor([1, 3, 5]))
+        self.assertEqual(reference[ri([0, 1, 2]), ri([1])], torch.Tensor([2, 4, 6]))
+        self.assertEqual(reference[ri([0]), ri([0])], self._consecutive((1,)))
+        self.assertEqual(reference[ri([2]), ri([1])], self._consecutive((1,), 6))
+        self.assertEqual(reference[[ri([0, 0]), ri([0, 1])]], torch.Tensor([1, 2]))
+        self.assertEqual(reference[[ri([0, 1, 1, 0, 2]), ri([1])]],
                          torch.Tensor([2, 4, 4, 2, 6]))
-        self.assertEqual(reference[[[0, 0, 1, 1], [0, 1, 0, 0]]],
+        self.assertEqual(reference[[ri([0, 0, 1, 1]), ri([0, 1, 0, 0])]],
                          torch.Tensor([1, 2, 3, 3]))
 
-        rows = [[0, 0],
-                [1, 2]]
+        rows = ri([[0, 0],
+                   [1, 2]])
         columns = [0],
         self.assertEqual(reference[rows, columns], torch.Tensor([[1, 1],
                                                                 [3, 5]]))
 
-        rows = [[0, 0],
-                [1, 2]]
-        columns = [1, 0]
+        rows = ri([[0, 0],
+                   [1, 2]])
+        columns = ri([1, 0])
         self.assertEqual(reference[rows, columns], torch.Tensor([[2, 1],
                                                                 [4, 5]]))
-        rows = [[0, 0],
-                [1, 2]]
-        columns = [[0, 1],
-                   [1, 0]]
+        rows = ri([[0, 0],
+                   [1, 2]])
+        columns = ri([[0, 1],
+                      [1, 0]])
         self.assertEqual(reference[rows, columns], torch.Tensor([[1, 2],
                                                                 [4, 5]]))
+
+        # Verify still works with Tranposed (i.e. non-contiguous) Tensors
+
+        reference = torch.Tensor([[0, 1, 2, 3],
+                                  [4, 5, 6, 7],
+                                  [8, 9, 10, 11]]).t_()
+
+        # Tranposed: [[0, 4, 8],
+        #             [1, 5, 9],
+        #             [2, 6, 10],
+        #             [3, 7, 11]]
+
+        self.assertEqual(reference[ri([0, 1, 2]), ri([0])], torch.Tensor([0, 1,
+                         2]))
+        self.assertEqual(reference[ri([0, 1, 2]), ri([1])], torch.Tensor([4, 5,
+                         6]))
+        self.assertEqual(reference[ri([0]), ri([0])], torch.Tensor([0]))
+        self.assertEqual(reference[ri([2]), ri([1])], torch.Tensor([6]))
+        self.assertEqual(reference[[ri([0, 0]), ri([0, 1])]], torch.Tensor([0, 4]))
+        self.assertEqual(reference[[ri([0, 1, 1, 0, 3]), ri([1])]],
+                         torch.Tensor([4, 5, 5, 4, 7]))
+        self.assertEqual(reference[[ri([0, 0, 1, 1]), ri([0, 1, 0, 0])]],
+                         torch.Tensor([0, 4, 1, 1]))
+
+        rows = ri([[0, 0],
+                   [1, 2]])
+        columns = [0],
+        self.assertEqual(reference[rows, columns], torch.Tensor([[0, 0],
+                                                                [1, 2]]))
+
+        rows = ri([[0, 0],
+                   [1, 2]])
+        columns = ri([1, 0])
+        self.assertEqual(reference[rows, columns], torch.Tensor([[4, 0],
+                                                                [5, 2]]))
+        rows = ri([[0, 0],
+                   [1, 3]])
+        columns = ri([[0, 1],
+                      [1, 2]])
+        self.assertEqual(reference[rows, columns], torch.Tensor([[0, 4],
+                                                                [5, 11]]))
 
         # reference is (0, ..., ...)
         #                   [[1, 2,   3, 4],
