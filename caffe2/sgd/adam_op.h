@@ -136,8 +136,8 @@ class SparseAdamOp final : public Operator<Context> {
     const auto correction =
         std::sqrt(T(1.) - std::pow(beta2_, t)) / (T(1.) - std::pow(beta1_, t));
 
-    auto n = Input(GRAD).dim(0);
-    auto block_size = Input(GRAD).size() / n;
+    auto block_size = Input(PARAM).size() / Input(PARAM).dim(0);
+    auto n = Input(GRAD).size() / block_size;
 
     const auto* paramIn = Input(PARAM).template data<T>();
     const auto* indices = Input(INDICES).template data<SIndex>();
