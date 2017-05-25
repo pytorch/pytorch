@@ -7,8 +7,9 @@ import numpy as np
 
 from hypothesis import given
 import hypothesis.strategies as st
+import unittest
 
-from caffe2.python import core
+from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
 
 
@@ -16,7 +17,7 @@ class TestTile(hu.HypothesisTestCase):
     @given(M=st.integers(min_value=1, max_value=10),
            K=st.integers(min_value=1, max_value=10),
            N=st.integers(min_value=1, max_value=10),
-           tiles=st.integers(min_value=1, max_value=100),
+           tiles=st.integers(min_value=1, max_value=3),
            axis=st.integers(min_value=0, max_value=2),
            **hu.gcs)
     def test_tile(self, M, K, N, tiles, axis, gc, dc):
@@ -42,6 +43,7 @@ class TestTile(hu.HypothesisTestCase):
         # Gradient check wrt X
         self.assertGradientChecks(gc, op, [X], 0, [0])
 
+    @unittest.skipIf(not workspace.has_gpu_support, "No gpu support")
     @given(M=st.integers(min_value=1, max_value=200),
            N=st.integers(min_value=1, max_value=200),
            tiles=st.integers(min_value=50, max_value=100),
@@ -70,11 +72,11 @@ class TestTile(hu.HypothesisTestCase):
 
         # Gradient check wrt X
         grad_op = core.CreateOperator(
-            'Tile', ['dOut'], 'dX',
+            'TileGradient', ['dOut'], 'dX',
             tiles=tiles,
             axis=axis,
         )
-        dX = X * 0.1
+        dX = np.random.rand(M, N * tiles).astype(np.float32)
         self.assertDeviceChecks(dc, grad_op, [dX], [0])
 
     @given(M=st.integers(min_value=1, max_value=10),
@@ -109,5 +111,4 @@ class TestTile(hu.HypothesisTestCase):
 
 
 if __name__ == "__main__":
-    import unittest
     unittest.main()
