@@ -249,7 +249,7 @@ TEST_F(CudaAllreduceTest, MultipleAlgorithms) {
 
 TEST_F(CudaAllreduceTestHP, HalfPrecisionTest) {
   auto size = 4;
-  auto count = 100;
+  auto count = 128;
   auto fns = {allreduceRingHP,
              allreduceRingChunkedHP,
              allreduceHalvingDoublingHP,

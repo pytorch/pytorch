@@ -9,12 +9,15 @@
 
 #pragma once
 
+#include <stdlib.h>
+
 #include <memory>
 #include <vector>
 
 #include "gloo/algorithm.h"
 #include "gloo/benchmark/options.h"
 #include "gloo/context.h"
+#include "gloo/common/common.h"
 
 namespace gloo {
 namespace benchmark {
@@ -45,7 +48,7 @@ class Benchmark {
     // Stride between successive values in any input.
     const auto stride = context_->size * inputs;
     for (int i = 0; i < inputs; i++) {
-      std::vector<T> memory(elements);
+      std::vector<T, aligned_allocator<T, kBufferAlignment>> memory(elements);
 
       // Value at memory[0]. Different for every input at every node.
       // This means all values across all inputs and all nodes are
@@ -63,7 +66,8 @@ class Benchmark {
   std::shared_ptr<::gloo::Context> context_;
   struct options options_;
   std::unique_ptr<::gloo::Algorithm> algorithm_;
-  std::vector<std::vector<T> > inputs_;
+  std::vector<std::vector<T, aligned_allocator<T, kBufferAlignment>>>
+      inputs_;
 };
 
 } // namespace benchmark

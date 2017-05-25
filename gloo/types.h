@@ -6,6 +6,8 @@
 #include <cuda_fp16.h>
 #endif
 
+#include "gloo/common/common.h"
+
 namespace gloo {
 
 struct float16;

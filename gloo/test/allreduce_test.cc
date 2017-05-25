@@ -7,6 +7,8 @@
  * of patent rights can be found in the PATENTS file in the same directory.
  */
 
+#include <stdlib.h>
+
 #include <functional>
 #include <thread>
 #include <vector>
@@ -19,6 +21,19 @@
 namespace gloo {
 namespace test {
 namespace {
+
+template <typename T>
+struct AlignedBufferReleaser {
+  void operator()(T* buffer) {
+    if (buffer != nullptr) {
+      free(buffer);
+    }
+  }
+};
+
+// RAII handle for aligned buffer
+template <typename T>
+using BufferHandle = std::unique_ptr<T, AlignedBufferReleaser<T>>;
 
 // Function to instantiate and run algorithm.
 using Func = void(
@@ -135,12 +150,15 @@ TEST_P(AllreduceTest, SinglePointer) {
       std::make_shared<::gloo::rendezvous::Context>(contextRank, contextSize);
     context->connectFullMesh(*store_, device_);
 
-    std::unique_ptr<float[]> ptr(new float[dataSize]);
+    BufferHandle<float> buffer{
+        (float*)aligned_alloc(kBufferAlignment, dataSize * sizeof(float))};
+
+    float* ptr = buffer.get();
     for (int i = 0; i < dataSize; i++) {
       ptr[i] = contextRank;
     }
 
-    fn(context, {ptr.get()}, dataSize);
+    fn(context, std::vector<float*>{ptr}, dataSize);
 
     auto expected = (contextSize * (contextSize - 1)) / 2;
     for (int i = 0; i < dataSize; i++) {
@@ -159,13 +177,16 @@ TEST_F(AllreduceTest, MultipleAlgorithms) {
         std::make_shared<::gloo::rendezvous::Context>(contextRank, contextSize);
     context->connectFullMesh(*store_, device_);
 
-    std::unique_ptr<float[]> ptr(new float[dataSize]);
+    BufferHandle<float> buffer{
+        (float*)aligned_alloc(kBufferAlignment, dataSize * sizeof(float))};
+
+    float* ptr = buffer.get();
     for (const auto& fn : fns) {
       for (int i = 0; i < dataSize; i++) {
         ptr[i] = contextRank;
       }
 
-      fn(context, {ptr.get()}, dataSize);
+      fn(context, std::vector<float*>{ptr}, dataSize);
 
       auto expected = (contextSize * (contextSize - 1)) / 2;
       for (int i = 0; i < dataSize; i++) {
@@ -176,7 +197,7 @@ TEST_F(AllreduceTest, MultipleAlgorithms) {
         ptr[i] = contextRank;
       }
 
-      fn(context, {ptr.get()}, dataSize);
+      fn(context, std::vector<float*>{ptr}, dataSize);
 
       expected = (contextSize * (contextSize - 1)) / 2;
       for (int i = 0; i < dataSize; i++) {
@@ -188,7 +209,7 @@ TEST_F(AllreduceTest, MultipleAlgorithms) {
 
 TEST_F(AllreduceTestHP, HalfPrecisionTest) {
   int contextSize = 4;
-  auto dataSize = 1000;
+  auto dataSize = 1024;
   auto fns = {
       allreduceRingHP, allreduceRingChunkedHP, allreduceHalvingDoublingHP};
 
@@ -197,13 +218,16 @@ TEST_F(AllreduceTestHP, HalfPrecisionTest) {
         std::make_shared<::gloo::rendezvous::Context>(contextRank, contextSize);
     context->connectFullMesh(*store_, device_);
 
-    std::unique_ptr<float16[]> ptr(new float16[dataSize]);
+    BufferHandle<float16> buffer{
+        (float16*)aligned_alloc(kBufferAlignment, dataSize * sizeof(float16))};
+
+    float16* ptr = buffer.get();
     for (const auto& fn : fns) {
       for (int i = 0; i < dataSize; i++) {
         ptr[i] = contextRank;
       }
 
-      fn(context, {ptr.get()}, dataSize);
+      fn(context, std::vector<float16*>{ptr}, dataSize);
 
       float16 expected(contextSize * (contextSize - 1) / 2);
       for (int i = 0; i < dataSize; i++) {
