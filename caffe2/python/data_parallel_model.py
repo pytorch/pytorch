@@ -726,6 +726,7 @@ def _AllReduceGradientsSingleHost(devices, model, use_nccl):
     # Pick GPU #0 as a master GPU.
     master_device_opt = core.DeviceOption(caffe2_pb2.CUDA, devices[0])
     last_out = None
+    concatenated_idx = set()
 
     for grad_name in reverse_ordered_grads:
         # Group by grads for reduce.
@@ -746,16 +747,29 @@ def _AllReduceGradientsSingleHost(devices, model, use_nccl):
                 else:
                     # Sparse gradients: all-gather for indices and values
                     master_ns = "gpu_{}".format(devices[0])
-                    grad_idx_concat, _ = model.net.Concat(
-                        [g.indices for g in grads_group],
-                        ["{}/{}_index_concat".format(master_ns, grad_name),
-                         "{}/{}_index_splitinfo".format(master_ns, grad_name)],
-                        axis=0,
-                        name="note:data_parallel_model")
-                    for gpu, g in model._device_grouped_blobs[grad_name].items():
-                        device_opt = core.DeviceOption(caffe2_pb2.CUDA, gpu)
-                        with core.DeviceScope(device_opt):
-                            model.Copy(grad_idx_concat, g.indices)
+                    '''
+                    Skip if we have already copied concatenated indices
+                    to the indices of GradientSlice. This happens when two
+                    or more grad blobs are gathered with the same indices
+                    blob
+                    '''
+                    skip_idx_concat = False
+                    for g in grads_group:
+                        if g.indices in concatenated_idx:
+                            skip_idx_concat = True
+
+                    if not skip_idx_concat:
+                        grad_idx_concat, _ = model.net.Concat(
+                            [g.indices for g in grads_group],
+                            ["{}/{}_index_concat".format(master_ns, grad_name),
+                             "{}/{}_index_splitinfo".format(master_ns, grad_name)],
+                            axis=0,
+                            name="note:data_parallel_model")
+                        for gpu, g in model._device_grouped_blobs[grad_name].items():
+                            device_opt = core.DeviceOption(caffe2_pb2.CUDA, gpu)
+                            with core.DeviceScope(device_opt):
+                                model.Copy(grad_idx_concat, g.indices)
+                                concatenated_idx.add(g.indices)
 
                     grad_val_concat, _ = model.net.Concat(
                         [g.values for g in grads_group],
@@ -768,7 +782,7 @@ def _AllReduceGradientsSingleHost(devices, model, use_nccl):
                             model.Copy(grad_val_concat, g.values)
 
         else:
-            assert isinstance(grads_group[0], core.GradientSlice), \
+            assert not isinstance(grads_group[0], core.GradientSlice), \
                 "Synchronizing gradient slices not supported"
             with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU)):
                 # Poor man's allreduce
