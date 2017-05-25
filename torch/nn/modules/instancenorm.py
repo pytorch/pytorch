@@ -71,7 +71,7 @@ class InstanceNorm1d(_InstanceNorm):
         >>> m = nn.InstanceNorm1d(100)
         >>> # With Learnable Parameters
         >>> m = nn.InstanceNorm1d(100, affine=True)
-        >>> input = autograd.Variable(torch.randn(20, 100))
+        >>> input = autograd.Variable(torch.randn(20, 100, 40))
         >>> output = m(input)
     """
 
