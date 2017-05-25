@@ -204,9 +204,9 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
   if (is_padding_neg()) throw std::runtime_error("negative padding is not supported");
   if (is_output_padding_neg()) throw std::runtime_error("negative output_padding is not supported");
 
-  AutoGPU guard(input_.data->getDevice());
-
-  auto input = input_.unpack_data()->contiguous();
+  auto input = input_.unpack_data();
+  AutoGPU guard(input->getDevice());
+  input = input->contiguous();
   std::unique_ptr<Tensor> weight(weight_.unpack_data()->clone_shallow());
   auto bias = bias_.unpack_data();
   auto grad_output = grad_outputs[0]->data->contiguous();
