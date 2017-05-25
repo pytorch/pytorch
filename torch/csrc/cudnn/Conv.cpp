@@ -278,8 +278,6 @@ void findAlgorithm(
     return;
   }
 
-  // findAlgorithm may call cudaFree()
-  std::lock_guard<std::mutex> lock(*THCCachingAllocator_getCudaFreeMutex());
   if (cache.find(conv.params, algo)) {
     // re-check cache since another thread may have benchmarked the algorithm
     return;
