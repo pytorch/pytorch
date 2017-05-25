@@ -560,8 +560,7 @@ static bool THPTensor_(checkAdvancedIndexing)(THPTensor *indexed, PyObject *arg)
   **/
 }
 
-static bool THPTensor_(_advancedIndex)(
-    PyObject *index, THTensorPtr &tresult, THStorage * &sresult, long &storage_offset)
+static bool THPTensor_(_advancedIndex)(PyObject *index, THTensorPtr &tresult)
 {
   // Precondition: index is an object that specifies advanced indexing.
   // For now, we only support the simple integer-array indexing strategy
@@ -698,12 +697,6 @@ static bool THPTensor_(_index)(THPTensor *self, PyObject *index,
   sresult = NULL;
   int indexed_dim = 0;
 
-  // Check and see if the indexing object triggers advanced indexing semantics
-#ifndef TH_REAL_IS_HALF
-  if (THPTensor_(checkAdvancedIndexing)(self, index)) {
-    return THPTensor_(_advancedIndex)(index, tresult, sresult, storage_offset);
-  }
-#endif // TH_REAL_IS_HALF
 
   if(PyTuple_Check(index)) {
     // num_index_dim is the number of indices in the tuple, num_effective_index
@@ -804,6 +797,19 @@ static PyObject * THPTensor_(getValue)(THPTensor *self, PyObject *index)
   THTensorPtr tresult;
   THStorage *sresult;
   long storage_offset;
+
+  // Check and see if the indexing object triggers advanced indexing semantics
+#ifndef TH_REAL_IS_HALF
+  if (THPTensor_(checkAdvancedIndexing)(self, index)) {
+    tresult = THTensor_(newWithTensor)(LIBRARY_STATE self->cdata);
+    if (!THPTensor_(_advancedIndex)(index, tresult)) {
+      return NULL;
+    }
+    // TODO: needed?
+    return THPTensor_(New)(tresult.release());
+  }
+#endif // TH_REAL_IS_HALF
+
   if (!THPTensor_(_index)(self, index, tresult, sresult, storage_offset))
     return NULL;
   if (tresult)
