@@ -58,7 +58,8 @@ class Broadcast(CWrapPlugin):
 
     OUT_PLACE_BACK_COMPAT_WARN_TEMPLATE = Template(
         """if (getBackCompatBroadcastWarn()) {
-             bool same_shape = THTensor_(isSameSizeAs)(LIBRARY_STATE ${arg_op_a}_save, ${arg_op_other}_save);
+             bool same_shape = THSize_isSameSizeAs(${arg_op_a}_save->size, ${arg_op_a}_save->nDimension,
+                 ${arg_op_other}_save->size, ${arg_op_other}_save->nDimension);
              if (!same_shape && ${arg_op_other}_err == 0 && (${arg_op_a}_nElem == ${arg_op_other}_nElem) && !${raise_errors}) {
                PyErr_WarnEx(PyExc_UserWarning, "${op_a} and ${op_other} do not have the same shape, but are broadcastable, and have the same number of "
                                                "elements.  Changing behavior in a backwards incompatible manner to broadcasting rather than viewing as 1-dimensional.", 1);
@@ -128,7 +129,8 @@ class Broadcast(CWrapPlugin):
 
     IN_PLACE_BACK_COMPAT_WARN_TEMPLATE = Template(
         """if (getBackCompatBroadcastWarn()) {
-             bool same_shape = THTensor_(isSameSizeAs)(LIBRARY_STATE ${arg_op_a}, ${arg_op_other}_save);
+             bool same_shape = THSize_isSameSizeAs(${arg_op_a}->size, ${arg_op_a}->nDimension,
+                 ${arg_op_other}_save->size, ${arg_op_other}_save->nDimension);
              if (!same_shape && ${arg_op_other}_err == 0 && (${arg_op_a}_nElem == ${arg_op_other}_nElem) && !${raise_errors}) {
                PyErr_WarnEx(PyExc_UserWarning, "${op_a} and ${op_other} do not have the same shape, but are broadcastable, and have the same number of "
                                                "elements.  Changing behavior in a backwards incompatible manner to broadcasting rather than viewing as 1-dimensional.", 1);
