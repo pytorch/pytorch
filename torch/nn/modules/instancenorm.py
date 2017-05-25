@@ -71,13 +71,13 @@ class InstanceNorm1d(_InstanceNorm):
         >>> m = nn.InstanceNorm1d(100)
         >>> # With Learnable Parameters
         >>> m = nn.InstanceNorm1d(100, affine=True)
-        >>> input = autograd.Variable(torch.randn(20, 100))
+        >>> input = autograd.Variable(torch.randn(20, 100, 40))
         >>> output = m(input)
     """
 
     def _check_input_dim(self, input):
         if input.dim() != 3:
-            raise ValueError('expected 2D or 3D input (got {}D input)'
+            raise ValueError('expected 3D input (got {}D input)'
                              .format(input.dim()))
         super(InstanceNorm1d, self)._check_input_dim(input)
 
