@@ -348,6 +348,7 @@ TYPED_TEST(TensorCPUTest, NoLongerSharesAfterResize) {
 
 TYPED_TEST(TensorCPUTest, KeepOnShrink) {
   FLAGS_caffe2_keep_on_shrink = true;
+  FLAGS_caffe2_max_keep_on_shrink_memory = LLONG_MAX;
   vector<int> dims{2, 3, 5};
   TensorCPU tensor(dims);
   TypeParam* ptr = tensor.mutable_data<TypeParam>();
@@ -373,7 +374,8 @@ TYPED_TEST(TensorCPUTest, KeepOnShrink) {
 
 TYPED_TEST(TensorCPUTest, MaxKeepOnShrink) {
   FLAGS_caffe2_keep_on_shrink = true;
-  FLAGS_caffe2_max_keep_on_shrink_memory = 50;
+  // Remember that this tests for int, float and char
+  FLAGS_caffe2_max_keep_on_shrink_memory = 40;
   vector<int> dims{1, 8, 8};
   TensorCPU tensor(dims);
   TypeParam* ptr = tensor.mutable_data<TypeParam>();
