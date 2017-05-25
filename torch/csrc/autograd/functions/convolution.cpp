@@ -307,10 +307,12 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
   }
 
   if (k == 3) {
-    if (should_compute_output(0)) {
-        grad_input = view3d(*grad_input);
+    if (grad_input) {
+      grad_input = view3d(*grad_input);
     }
-    grad_weight = view3d(*grad_weight);
+    if (grad_weight) {
+      grad_weight = view3d(*grad_weight);
+    }
   }
 
   auto outputs =  as_tensor_list(std::move(grad_input),
