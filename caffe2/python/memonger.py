@@ -142,10 +142,8 @@ def _compute_blob_recycling_for_dag(
         for inp in op.input:
             if is_shareable(inp) or inp in heads:
                 if inp in optim_op_outputs:
-                    # Ignore in-place transformation ops (self-cycles)
-                    if inp not in op.output:
-                        blobs_to_ops[inp].append(i)
-                        op_inputs[i] += 1
+                    blobs_to_ops[inp].append(i)
+                    op_inputs[i] += 1
                 else:
                     # For external blobs, we don't increase the op_inputs
                     # count.
@@ -176,7 +174,7 @@ def _compute_blob_recycling_for_dag(
         saved = 0
 
         for inp in cur_op.input:
-            if is_shareable(inp) and inp not in cur_op.output:
+            if is_shareable(inp):
                 blob_input_count[inp] += 1
                 if blob_input_count[inp] == len(blobs_to_ops[inp]):
                     actual_blob = inp if inp not in mapping else mapping[inp]
