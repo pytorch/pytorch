@@ -526,7 +526,9 @@ bool CudnnConvOp::RunOnDevice() {
                          float,      // Math
                          float16>();   // Y
   } else {
-    LOG(FATAL) << "Unsupported type inputs";
+    LOG(FATAL) << "Only float (32bit) and float16 are supported by "
+               << "cudnn convolution, but input " << def().input(0) << " has ["
+               << Input(0).meta().name() << "]";
   }
   return true;
 }
