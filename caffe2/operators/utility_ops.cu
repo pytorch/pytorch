@@ -396,4 +396,5 @@ REGISTER_CUDA_OPERATOR(Unique, UniqueOp<CUDAContext>);
 } // namespace
 #endif // THRUST_VERSION >= 100800
 
+REGISTER_CUDA_OPERATOR(Size, SizeOp<CUDAContext>);
 }  // namespace caffe2

@@ -1028,6 +1028,28 @@ class ShapeOp : public Operator<Context> {
   }
 };
 
+// Return the size of a tensor
+template <class Context>
+class SizeOp : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  USE_SIMPLE_CTOR_DTOR(SizeOp);
+
+  bool RunOnDevice() override {
+    auto& input = Input(0);
+    auto* output = Output(0);
+
+    output->Resize(vector<TIndex>());
+    auto* output_data = output->template mutable_data<int64_t>();
+
+    auto size = input.size();
+    math::Set<int64_t, Context>(
+        1, static_cast<int64_t>(size), output_data, &context_);
+
+    return true;
+  }
+};
+
 // returns a shape to be passed to Reshape
 template <class Context>
 class LengthsToShapeOp : public Operator<Context> {
