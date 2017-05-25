@@ -44,7 +44,9 @@ https://github.com/pytorch/pytorch#from-source
 
 The change you have to make is to replace
 
-`python setup.py install`
+```
+python setup.py install
+```
 
 with
 
@@ -61,11 +63,11 @@ Hence, if you modify a python file, you do not need to reinstall pytorch again a
 
 For example:
 - Install local pytorch in `build develop` mode
-- modify your python file torch/__init__.py (for example)
+- modify your python file `torch/__init__.py` (for example)
 - test functionality
-- modify your python file torch/__init__.py
+- modify your python file `torch/__init__.py`
 - test functionality
-- modify your python file torch/__init__.py
+- modify your python file `torch/__init__.py`
 - test functionality
 
 You do not need to repeatedly install after modifying python files.
@@ -79,6 +81,25 @@ If you are working on C files, you will need to build your changes:
 We recommend removing the `build` directory before rebuilding because
 setup.py's recompilation checking is not great, and it will often fail
 to rebuild C code after you modify code in a `generic` directory.
+
+#### Managing multiple build trees
+
+One downside to using `python setup.py develop` is that your development
+version of pytorch will be installed globally on your account (e.g., if
+you run `import torch` anywhere else, the development version will be
+used.
+
+If you want to manage multiple builds of PyTorch, you can make use of
+[conda environments](https://conda.io/docs/using/envs.html) to maintain
+separate Python package environments, each of which can be tied to a
+specific build of PyTorch.  To set one up:
+
+```
+conda create -n pytorch-myfeature
+source activate pytorch-myfeature
+# if you run python now, torch will NOT be installed
+python setup.py build develop
+```
 
 #### C++ Development tips
 
