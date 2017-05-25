@@ -61,7 +61,8 @@ set(GLOO_USE_IBVERBS ${USE_IBVERBS})
 configure_file(config.h.in config.h)
 
 # Prepend include path so that generated config.h is picked up.
-include_directories(BEFORE ${CMAKE_BINARY_DIR})
+# Note that it is included as "gloo/config.h" to add parent directory.
+include_directories(BEFORE ${CMAKE_CURRENT_BINARY_DIR}/..)
 
 add_library(gloo ${GLOO_STATIC_OR_SHARED} ${GLOO_SRCS})
 target_link_libraries(gloo ${gloo_DEPENDENCY_LIBS})
