@@ -1321,6 +1321,14 @@ class TestNN(NNTestCase):
         c = nn.Conv2d(3, 3, 3)
         self.assertRaises(RuntimeError, lambda: c(None))
 
+    def test_Conv2d_backward_twice(self):
+        input = Variable(torch.randn(2, 3, 5, 5))
+        c = nn.Conv2d(3, 3, 3)
+        o1 = c(input)
+        o1.sum().backward()
+        self.assertRaisesRegex(RuntimeError, 'Specify retain_variables=True',
+                               lambda: o1.sum().backward())
+
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_Conv2d_large_workspace(self):
         # These sizes require huge cuDNN workspaces. Make sure we choose a

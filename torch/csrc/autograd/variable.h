@@ -11,6 +11,8 @@
 
 namespace torch { namespace autograd {
 
+extern const char* ERR_BACKWARD_TWICE;
+
 struct Variable : std::enable_shared_from_this<Variable> {
 
   struct SavedVariable {

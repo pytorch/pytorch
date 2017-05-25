@@ -849,9 +849,7 @@ PyObject* THPFunction_register_hook(THPFunction *self, PyObject *hook)
 
 PyObject *THPFunction_saved_tensors(THPFunction *self, void *_unused)
 {
-  THPUtils_assert(!self->has_freed_buffers, "Trying to backward through the "
-      "graph second time, but the buffers have already been freed. Please "
-      "specify retain_variables=True when calling backward for the first time.");
+  THPUtils_assert(!self->has_freed_buffers, ERR_BACKWARD_TWICE);
   if (!self->saved_variables)
     return PyTuple_New(0);
 
@@ -876,9 +874,7 @@ PyObject *THPFunction_saved_tensors(THPFunction *self, void *_unused)
 
 PyObject *THPFunction_saved_variables(THPFunction *self, void *_unused)
 {
-  THPUtils_assert(!self->has_freed_buffers, "Trying to backward through the "
-      "graph second time, but the buffers have already been freed. Please "
-      "specify retain_variables=True when calling backward for the first time.");
+  THPUtils_assert(!self->has_freed_buffers, ERR_BACKWARD_TWICE);
   if (!self->saved_variables)
     return PyTuple_New(0);
 

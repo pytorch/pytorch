@@ -60,7 +60,12 @@ auto Variable::get_grad_accumulator() -> std::shared_ptr<Function> {
 }
 
 auto SavedVariable::unpack() -> std::shared_ptr<Variable> {
-  if (!data) return nullptr;
+  if (!data) {
+    if (version) {
+      throw std::runtime_error(ERR_BACKWARD_TWICE);
+    }
+    return nullptr;
+  }
 
   int current_version = **version;
   if (expected_version != current_version) {
@@ -90,5 +95,10 @@ auto SavedVariable::unpack() -> std::shared_ptr<Variable> {
 
   return new_var;
 }
+
+const char* ERR_BACKWARD_TWICE =
+    "Trying to backward through the graph a second time, but the buffers have "
+    "already been freed. Specify retain_variables=True when calling backward "
+    "the first time.";
 
 }} // namespace torch::autograd
