@@ -30,7 +30,7 @@ bool forkAndPipe(
       close(stderrPipe[0]);
       close(stderrPipe[1]);
       perror("dup2 STDERR");
-      exit(1);
+      exit(5);
     }
 
     // This is for the parent to work with.
@@ -42,10 +42,10 @@ bool forkAndPipe(
     char** argv = nullptr;
     if (!caffe2::internal::Caffe2InitFatalSignalHandler(&argc, &argv)) {
       write(STDERR_FILENO, "WAT\n", 4);
-      exit(1);
+      exit(6);
     }
     callback();
-    exit(1);
+    exit(7);
   } else if (child > 0) {
     const int bufferSize = 128;
     std::array<char, bufferSize> buffer;
@@ -62,22 +62,27 @@ bool forkAndPipe(
       return false;
     }
 
-    // The child should have exited due to signal.
-    if (!WIFSIGNALED(statloc)) {
-      fprintf(stderr, "Child didn't exit because it received a signal\n");
-      return false;
-    }
-
     ssize_t bytesRead;
     while ((bytesRead = read(stderrPipe[0], buffer.data(), bufferSize)) > 0) {
       const std::string tmp(buffer.data(), bytesRead);
       std::cout << tmp;
       stderrBuffer += tmp;
     }
+
+    // The child should have exited due to signal.
+    if (!WIFSIGNALED(statloc)) {
+      fprintf(stderr, "Child didn't exit because it received a signal\n");
+      if (WIFEXITED(statloc)) {
+        fprintf(stderr, "Exited with code: %d\n", WEXITSTATUS(statloc) & 0xff);
+      }
+      return false;
+    }
+
     if (bytesRead < 0) {
       perror("read");
       return false;
     }
+
     close(stderrPipe[0]);
     return true;
   } else {
