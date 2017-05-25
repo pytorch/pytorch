@@ -219,7 +219,6 @@ class MemongerTest(hu.HypothesisTestCase):
 
             fc3 = m.FC(fc2, "fc3", dim_in=output_dim, dim_out=output_dim)
             fc4 = m.FC(fc3, "fc4", dim_in=output_dim, dim_out=output_dim)
-            fc4 = m.Mul([fc3, fc4], fc4)  # add a in-place Mul
             fc5 = m.FC(fc4, "fc5", dim_in=output_dim, dim_out=output_dim)
 
             # Branch
