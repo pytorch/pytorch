@@ -6,50 +6,10 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import core, scope, workspace
-import numpy as np
+from caffe2.python.modeling import parameter_info
+
 
 import logging
-
-
-class ParameterType(object):
-    DENSE = 'dense'
-    SPARSE = 'sparse'
-
-
-class ParameterInfo(object):
-    def __init__(
-            self, param_id, param, key=None, shape=None, length=None):
-        assert isinstance(param, core.BlobReference)
-        self.param_id = param_id
-        self.name = str(param)
-        self.blob = param
-        self.key = key
-        self.shape = shape
-        self.size = None if shape is None else np.prod(shape)
-        self.length = max(1, length if length is not None else 1)
-        self.grad = None
-        self._cloned_init_net = None
-
-    def grad_type(self):
-        # self.grad could be None for model parallelism with parameter server
-        if self.grad is None:
-            return
-        return (
-            ParameterType.SPARSE if isinstance(self.grad, core.GradientSlice)
-            else ParameterType.DENSE)
-
-    def cloned_init_net(self):
-        if not self._cloned_init_net:
-            init_net, outputs = self.blob.Net().ClonePartial(
-                'param_%d_%s_init' % (self.param_id, self.name),
-                inputs=[],
-                outputs=[self.blob])
-            self._cloned_init_net = (init_net, outputs[0])
-        return self._cloned_init_net
-
-    def __str__(self):
-        return self.name
-
 
 # _known_working_ops are operators that do not need special care.
 _known_working_ops = [
@@ -130,7 +90,8 @@ class ModelHelper(object):
             self.params = []
             self.computed_params = []
 
-        self._param_info = []
+        self._param_info_deprecated = []
+        self._parameters_info = {}
         self._devices = []
         self.gradient_ops_added = False
         self.init_params = init_params
@@ -163,20 +124,36 @@ class ModelHelper(object):
                         return list(arg.ints)
         return None
 
-    def _update_param_info(self):
-        assert len(self._param_info) <= len(self.params)
-        for param in self.params[len(self._param_info):]:
+    def _update_param_info_deprecated(self):
+        assert len(self._param_info_deprecated) <= len(self.params)
+        for param in self.params[len(self._param_info_deprecated):]:
             if not isinstance(param, core.BlobReference):
                 raise ValueError("Param %s must be a BlobReference!" % str(param))
-            self._param_info.append(ParameterInfo(
-                param_id=len(self._param_info),
+            self._param_info_deprecated.append(parameter_info.ParameterInfo(
+                param_id=len(self._param_info_deprecated),
                 param=param,
                 shape=self._infer_param_shape(param)))
-        for info in self._param_info:
+        for info in self._param_info_deprecated:
             info.grad = self.param_to_grad.get(info.name)
 
-    def add_param(self, param, key=None, shape=None, length=None):
-        self._update_param_info()
+    def create_param(self, param_name, shape, initializer):
+        param_info = initializer.create_param(
+            param_name=param_name,
+            init_net=self.param_init_net,
+            shape=shape,
+        )
+        self._parameters_info[param_info.blob] = param_info
+        return param_info.blob
+
+    def get_param_info(self, param):
+        assert isinstance(param, core.BlobReference)
+        return self._parameters_info.get(param, None)
+
+    # This method is deprecated, use create_param method which
+    # also does parameter initialization when needed
+    def add_param_DEPRECATED(self, param, key=None, shape=None, length=None):
+        logging.warning("add_param method is DEPRECATED")
+        self._update_param_info_deprecated()
         if key is not None and self.net.input_record() is not None:
             idx = self.net.input_record().field_blobs().index(key)
             key = self.net.input_record().field_names()[idx]
@@ -184,28 +161,30 @@ class ModelHelper(object):
         self.params.append(param)
         if not isinstance(param, core.BlobReference):
             raise ValueError("Param %s must be a BlobReference!" % str(param))
-        self._param_info.append(ParameterInfo(
-            param_id=len(self._param_info),
+        self._param_info_deprecated.append(parameter_info.ParameterInfo(
+            param_id=len(self._param_info_deprecated),
             param=param,
             shape=shape,
             key=key,
             length=length,
         ))
-        return self._param_info[-1]
+        return self._param_info_deprecated[-1]
 
+    # This method is deprecated, use get_param_info method
     def param_info(self, grad_type=None, id=None):
-        self._update_param_info()
+        logging.info("param_info method is DEPRECATED")
+        self._update_param_info_deprecated()
         if id is not None:
             assert grad_type is None
-            info = self._param_info[id]
+            info = self._param_info_deprecated[id]
             assert info.param_id == id
             return info
         elif grad_type is not None:
             return [
-                info for info in self._param_info
+                info for info in self._param_info_deprecated
                 if info.grad_type() == grad_type]
         else:
-            return self._param_info
+            return self._param_info_deprecated
 
     def GetParams(self, namescope=None, top_scope=False):
         '''
@@ -249,6 +228,20 @@ class ModelHelper(object):
         self.gradient_ops_added = True
         self.grad_map = self.net.AddGradientOperators(*args, **kwargs)
         self.param_to_grad = self.get_param_to_grad(self.params)
+
+        # Populate ParameterInfo for all parameters if missing
+        # and add gradient blob information. So optimizers can use it
+        for param, grad in self.param_to_grad.items():
+            param_info = self.get_param_info(param)
+            if param_info:
+                param_info.grad = grad
+            else:
+                self._parameters_info[param] = parameter_info.ParameterInfo(
+                    param_id=None,
+                    param=param,
+                    grad=grad,
+                )
+
         return self.grad_map
 
     def get_param_to_grad(self, params):
@@ -267,7 +260,7 @@ class ModelHelper(object):
                 param_to_grad[p] = self.grad_map[str(p)]
         return param_to_grad
 
-    def GetOptimizationPairs(self, params=None):
+    def GetOptimizationParamInfo(self, params=None):
         '''
         Returns a map for param => grad.
         If params is not specified, all parameters will be considered.
@@ -279,11 +272,14 @@ class ModelHelper(object):
         if params:
             param_to_grad = self.get_param_to_grad(params)
 
-        if not self.skip_sparse_optim:
-            return param_to_grad
-        else:
-            return {param: grad for param, grad in param_to_grad.items()
-                    if not isinstance(grad, core.GradientSlice)}
+        return [
+            self.get_param_info(param) for param, grad in param_to_grad.items()
+            if (
+                not self.skip_sparse_optim or
+                not isinstance(grad, core.GradientSlice)
+            )
+        ]
+
 
     def GetComputedParams(self, namescope=None):
         '''

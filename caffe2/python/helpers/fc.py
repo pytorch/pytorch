@@ -6,28 +6,32 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import core
+from caffe2.python.modeling import initializers
 
 
 def _FC_or_packed_FC(
     model, op_call, blob_in, blob_out, dim_in, dim_out, weight_init=None,
-    bias_init=None, **kwargs
+        bias_init=None, weight_initializer=None, bias_initializer=None,
+        **kwargs
 ):
-    """FC"""
-    weight_init = weight_init or ('XavierFill', {})
-    bias_init = bias_init or ('ConstantFill', {})
+    weight_initializer = initializers.update_initializer(
+        weight_initializer, weight_init, ("XavierFill", {})
+    )
+    bias_initializer = initializers.update_initializer(
+        bias_initializer, bias_init, ("ConstantFill", {})
+    )
+
     blob_out = blob_out or model.net.NextName()
     if model.init_params:
-        weight = model.param_init_net.__getattr__(weight_init[0])(
-            [],
-            blob_out + '_w',
+        weight = model.create_param(
+            param_name=blob_out + '_w',
             shape=[dim_out, dim_in],
-            **weight_init[1]
+            initializer=weight_initializer,
         )
-        bias = model.param_init_net.__getattr__(bias_init[0])(
-            [],
-            blob_out + '_b',
+        bias = model.create_param(
+            param_name=blob_out + '_b',
             shape=[dim_out, ],
-            **bias_init[1]
+            initializer=bias_initializer,
         )
     else:
         weight = core.ScopedBlobReference(
