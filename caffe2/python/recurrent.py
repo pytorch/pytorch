@@ -236,7 +236,9 @@ def recurrent_net(
         proto = backward_cell_net.Proto()
         operators = []
         while len(proto.op) > 0:
-            operators.append(proto.op.pop())
+            op = proto.op[-1]
+            proto.op.remove(op)
+            operators.append(op)
         for op in operators[::-1]:
             proto.op.extend([op])
             for j, output_blob in enumerate(op.output):
