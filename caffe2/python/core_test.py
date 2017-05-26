@@ -217,7 +217,7 @@ class TestCreateOperator(test_util.TestCase):
         self.assertEqual(op.arg[1].name, "arg2")
         self.assertEqual(op.arg[2].name, "arg3")
         self.assertEqual(op.arg[0].i, 1)
-        self.assertEqual(op.arg[1].s, "2")
+        self.assertEqual(op.arg[1].s, b"2")
         self.assertEqual(list(op.arg[2].ints), [1, 2, 3])
 
     def testCreateWithNoneKwarg(self):

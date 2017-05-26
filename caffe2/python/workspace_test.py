@@ -1,3 +1,8 @@
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+from __future__ import unicode_literals
+
 import numpy as np
 import os
 import unittest
@@ -95,9 +100,9 @@ class TestWorkspace(unittest.TestCase):
             tensor.init([3, 4], core.DataType.STRING)
 
         """ feed (copy) data into tensor """
-        val = np.array([['abc', 'def'], ['ghi', 'jkl']], dtype=np.object)
+        val = np.array([[b'abc', b'def'], [b'ghi', b'jkl']], dtype=np.object)
         tensor.feed(val)
-        self.assertEquals(tensor.data[0, 0], 'abc')
+        self.assertEquals(tensor.data[0, 0], b'abc')
         np.testing.assert_array_equal(ws.blobs["tensor"].fetch(), val)
 
         val = np.array([1.1, 10.2])
@@ -175,10 +180,10 @@ class TestWorkspace(unittest.TestCase):
     def testFetchFeedLongStringTensor(self):
         # long strings trigger array of object creation
         strs = np.array([
-            ' '.join(10 * ['long string']),
-            ' '.join(128 * ['very long string']),
-            'small \0\1\2 string',
-            "Hello, world! I have special \0 symbols \1!"])
+            b' '.join(10 * [b'long string']),
+            b' '.join(128 * [b'very long string']),
+            b'small \0\1\2 string',
+            b"Hello, world! I have special \0 symbols \1!"])
         workspace.FeedBlob('my_str_tensor', strs)
         strs2 = workspace.FetchBlob('my_str_tensor')
         self.assertEqual(strs.shape, strs2.shape)
@@ -187,7 +192,7 @@ class TestWorkspace(unittest.TestCase):
 
     def testFetchFeedShortStringTensor(self):
         # small strings trigger NPY_STRING array
-        strs = np.array(['elem1', 'elem 2', 'element 3'])
+        strs = np.array([b'elem1', b'elem 2', b'element 3'])
         workspace.FeedBlob('my_str_tensor_2', strs)
         strs2 = workspace.FetchBlob('my_str_tensor_2')
         self.assertEqual(strs.shape, strs2.shape)
@@ -196,14 +201,14 @@ class TestWorkspace(unittest.TestCase):
 
     def testFetchFeedPlainString(self):
         # this is actual string, not a tensor of strings
-        s = "Hello, world! I have special \0 symbols \1!"
+        s = b"Hello, world! I have special \0 symbols \1!"
         workspace.FeedBlob('my_plain_string', s)
         s2 = workspace.FetchBlob('my_plain_string')
         self.assertEqual(s, s2)
 
     def testFetchBlobs(self):
-        s1 = "test1"
-        s2 = "test2"
+        s1 = b"test1"
+        s2 = b"test2"
         workspace.FeedBlob('s1', s1)
         workspace.FeedBlob('s2', s2)
         fetch1, fetch2 = workspace.FetchBlobs(['s1', 's2'])
@@ -370,8 +375,8 @@ class TestCWorkspace(htu.HypothesisTestCase):
         ws.create_net(net, overwrite=True)
         self.assertIn("testblob", ws.blobs)
         self.assertEqual(len(ws.nets), 1)
-        net_name = ws.nets.keys()[0]
-        self.assertIn("test-net", net_name)  # May have a suffix such as "_1"
+        net_name = net.Proto().name
+        self.assertIn("test-net", net_name)
         net = ws.nets[net_name].run()
         blob = ws.blobs["testblob"]
         np.testing.assert_array_equal(
@@ -380,7 +385,7 @@ class TestCWorkspace(htu.HypothesisTestCase):
 
     @given(name=st.text(), value=st.floats(min_value=-1, max_value=1.0))
     def test_operator_run(self, name, value):
-        name = name.encode("ascii", "ignore")
+        name = name.encode('ascii', 'ignore')
         ws = workspace.C.Workspace()
         op = core.CreateOperator(
             "ConstantFill", [], [name], shape=[1], value=value)
@@ -393,9 +398,7 @@ class TestCWorkspace(htu.HypothesisTestCase):
            net_name=st.text(),
            value=st.floats(min_value=-1, max_value=1.0))
     def test_net_run(self, blob_name, net_name, value):
-        blob_name = blob_name.encode("ascii", "ignore")
-        net_name = net_name.encode("ascii", "ignore")
-
+        blob_name = blob_name.encode('ascii', 'ignore')
         ws = workspace.C.Workspace()
         net = core.Net(net_name)
         net.ConstantFill([], [blob_name], shape=[1], value=value)
@@ -410,10 +413,7 @@ class TestCWorkspace(htu.HypothesisTestCase):
            plan_name=st.text(),
            value=st.floats(min_value=-1, max_value=1.0))
     def test_plan_run(self, blob_name, plan_name, net_name, value):
-        blob_name = blob_name.encode("ascii", "ignore")
-        net_name = net_name.encode("ascii", "ignore")
-        plan_name = plan_name.encode("ascii", "ignore")
-
+        blob_name = blob_name.encode('ascii', 'ignore')
         ws = workspace.C.Workspace()
         plan = core.Plan(plan_name)
         net = core.Net(net_name)
@@ -423,7 +423,7 @@ class TestCWorkspace(htu.HypothesisTestCase):
 
         ws.run(plan)
         self.assertIn(blob_name, ws.blobs)
-        self.assertIn(str(net), ws.nets)
+        self.assertIn(net.Name(), ws.nets)
         np.testing.assert_allclose(
             [value], ws.blobs[blob_name].fetch(), atol=1e-4, rtol=1e-4)
 
@@ -431,16 +431,13 @@ class TestCWorkspace(htu.HypothesisTestCase):
            net_name=st.text(),
            value=st.floats(min_value=-1, max_value=1.0))
     def test_net_create(self, blob_name, net_name, value):
-        blob_name = blob_name.encode("ascii", "ignore")
-        net_name = net_name.encode("ascii", "ignore")
-
+        blob_name = blob_name.encode('ascii', 'ignore')
         ws = workspace.C.Workspace()
         net = core.Net(net_name)
-        net_name = str(net)
         net.ConstantFill([], [blob_name], shape=[1], value=value)
         ws.create_net(net).run()
         self.assertIn(blob_name, ws.blobs)
-        self.assertIn(net_name, ws.nets)
+        self.assertIn(net.Name(), ws.nets)
         np.testing.assert_allclose(
             [value], ws.blobs[blob_name].fetch(), atol=1e-4, rtol=1e-4)
 
@@ -448,7 +445,6 @@ class TestCWorkspace(htu.HypothesisTestCase):
            value=htu.tensor(),
            device_option=st.sampled_from(htu.device_options))
     def test_array_serde(self, name, value, device_option):
-        name = name.encode("ascii", "ignore")
         ws = workspace.C.Workspace()
         ws.create_blob(name).feed(value, device_option=device_option)
         self.assertIn(name, ws.blobs)
@@ -460,8 +456,7 @@ class TestCWorkspace(htu.HypothesisTestCase):
 
     @given(name=st.text(), value=st.text())
     def test_string_serde(self, name, value):
-        name = name.encode("ascii", "ignore")
-        value = value.encode("ascii", "ignore")
+        value = value.encode('ascii', 'ignore')
         ws = workspace.C.Workspace()
         ws.create_blob(name).feed(value)
         self.assertIn(name, ws.blobs)
@@ -473,7 +468,8 @@ class TestCWorkspace(htu.HypothesisTestCase):
 
     def test_exception(self):
         ws = workspace.C.Workspace()
-        with self.assertRaises(RuntimeError):
+
+        with self.assertRaises(TypeError):
             ws.create_net("...")
 
 
@@ -481,10 +477,10 @@ class TestPredictor(unittest.TestCase):
     def _create_model(self):
         m = cnn.CNNModelHelper()
         y = m.FC("data", "y",
-             dim_in=4, dim_out=2,
-             weight_init=m.ConstantInit(1.0),
-             bias_init=m.ConstantInit(0.0),
-             axis=0)
+                 dim_in=4, dim_out=2,
+                 weight_init=m.ConstantInit(1.0),
+                 bias_init=m.ConstantInit(0.0),
+                 axis=0)
         m.net.AddExternalOutput(y)
         return m
 
@@ -506,7 +502,6 @@ class TestPredictor(unittest.TestCase):
     #     self.assertEqual(outputs[0].shape, (1, 1000, 1, 1))
     #     self.assertAlmostEqual(outputs[0][0][0][0][0], 5.19026289e-05)
 
-
     def test_predictor_memory_model(self):
         workspace.ResetWorkspace()
         m = self._create_model()
@@ -517,7 +512,8 @@ class TestPredictor(unittest.TestCase):
 
         inputs = np.array([1, 3, 256, 256], dtype='float32')
         outputs = self.predictor.run([inputs])
-        np.testing.assert_array_almost_equal(np.array([[516, 516]], dtype='float32'), outputs)
+        np.testing.assert_array_almost_equal(
+            np.array([[516, 516]], dtype='float32'), outputs)
 
 
 if __name__ == '__main__':

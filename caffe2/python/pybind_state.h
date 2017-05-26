@@ -181,12 +181,34 @@ class TensorFeeder : public BlobFeederBase {
         for (int i = 0; i < tensor->size(); ++i) {
           char* str;
           Py_ssize_t strSize;
+#if PY_MAJOR_VERSION > 2
+          if (PyBytes_Check(input[i])) {
+            CAFFE_ENFORCE(
+                PyBytes_AsStringAndSize(input[i], &str, &strSize) != -1,
+                "Had a PyBytes object but cannot convert it to a string.");
+          } else if (PyUnicode_Check(input[i])) { // string
+            str = PyUnicode_AsUTF8AndSize(input[i], &strSize);
+            CAFFE_ENFORCE(
+                str,
+                "Had a PyUnicode object but cannot convert it to a string.");
+          } else {
+            CAFFE_THROW("Unsupported python object type passed into ndarray.");
+          }
+#else
           CAFFE_ENFORCE(
               PyBytes_AsStringAndSize(input[i], &str, &strSize) != -1,
               "Unsupported python object type passed into ndarray.");
+#endif // PY_MAJOR_VERSION > 2
           outPtr[i] = std::string(str, strSize);
         }
-      } break;
+        break;
+      }
+      case NPY_UNICODE:
+        CAFFE_THROW(
+            "You are feeding in a numpy array of unicode. Caffe2 C++ does not "
+            "support unicode yet. Please ensure that you are passing in bytes "
+            "instead of unicode strings.");
+        break;
       default:
         context.template CopyBytes<CPUContext, Context>(
             tensor->size() * meta.itemsize(),
