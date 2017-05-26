@@ -24,6 +24,9 @@ class AllreduceOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws), ws_(ws) {
     status_blob_ =
         OperatorBase::GetSingleArgument<std::string>("status_blob", "");
+    if (status_blob_ != "") {
+      ws_->CreateBlob(status_blob_);
+    }
   }
 
   virtual ~AllreduceOp() {}
@@ -41,7 +44,7 @@ class AllreduceOp final : public Operator<Context> {
     } catch (::gloo::IoException& ioe) {
       LOG(ERROR) << "Caught gloo IO exception: " << ioe.what();
       if (status_blob_ != "") {
-        signalFailure(ws_->CreateBlob(status_blob_), ioe);
+        signalFailure(ws_->GetBlob(status_blob_), ioe);
         return false;
       } else {
         throw ioe;
