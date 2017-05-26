@@ -5,8 +5,8 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from collections import namedtuple
-from collections import OrderedDict
+from collections import namedtuple, OrderedDict
+from past.builtins import basestring
 
 from caffe2.proto import caffe2_pb2
 from collections import defaultdict
@@ -39,13 +39,6 @@ def _InitDataType():
 
 
 _InitDataType()
-
-# Python 2 and 3 compatibility: test if basestring exists
-try:
-    basestring = basestring  # NOQA
-except NameError:
-    # This is python3 so we define basestring.
-    basestring = str
 
 
 def _GetRegisteredOperators():
@@ -216,6 +209,8 @@ class BlobReference(object):
 
 def ScopedName(name):
     """prefix the name with the current scope."""
+    if isinstance(name, bytes):
+        name = name.decode('ascii')
     return scope.CurrentNameScope() + name
 
 

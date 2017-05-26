@@ -8,6 +8,7 @@ from __future__ import unicode_literals
 import sys
 import copy
 import inspect
+from past.builtins import basestring
 from caffe2.python.model_helper import ModelHelper
 
 # flake8: noqa

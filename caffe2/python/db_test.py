@@ -14,8 +14,13 @@ class TestDB(unittest.TestCase):
     def setUp(self):
         handle, self.file_name = tempfile.mkstemp()
         os.close(handle)
-        self.data = [("key{}".format(i), "value{}".format(i))
-                     for i in range(1, 10)]
+        self.data = [
+            (
+                "key{}".format(i).encode("ascii"),
+                "value{}".format(i).encode("ascii")
+            )
+            for i in range(1, 10)
+        ]
 
     def testSimple(self):
         db = workspace.C.create_db(
@@ -34,7 +39,7 @@ class TestDB(unittest.TestCase):
         data = []
         while cursor.valid():
             data.append((cursor.key(), cursor.value()))
-            cursor.next()
+            cursor.next()  # noqa: B305
         del cursor
 
         db.close()  # test explicit db closer

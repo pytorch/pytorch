@@ -3,16 +3,11 @@
 from caffe2.proto import caffe2_pb2
 from google.protobuf.message import DecodeError, Message
 from google.protobuf import text_format
+from past.builtins import basestring, long
 import collections
 import functools
 import numpy as np
 import sys
-
-
-if sys.version_info > (3,):
-    # This is python 3. We will define a few stuff that we used.
-    basestring = str
-    long = int
 
 
 def CaffeBlobToNumpyArray(blob):

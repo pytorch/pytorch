@@ -90,6 +90,8 @@ const TypeMeta& NumpyTypeToCaffe(int numpy_type) {
       {NPY_UINT8, TypeMeta::Make<uint8_t>()},
       {NPY_UINT16, TypeMeta::Make<uint16_t>()},
       {NPY_OBJECT, TypeMeta::Make<std::string>()},
+      {NPY_UNICODE, TypeMeta::Make<std::string>()},
+      {NPY_STRING, TypeMeta::Make<std::string>()},
       // Note: Add more types here.
   };
   static TypeMeta unknown_type;
@@ -158,7 +160,7 @@ py::object fetchBlob(Workspace* ws, const std::string& name) {
     std::stringstream ss;
     ss << caffe2::string(name) << ", a C++ native class of type "
        << blob.TypeName() << ".";
-    return py::str(ss.str());
+    return py::bytes(ss.str());
   }
 }
 }
@@ -198,10 +200,34 @@ bool PythonOpBase::RunOnDevice() {
       }
       for (int i = trace_vec.size() - 1; i >= 0; --i) {
         int line = trace_vec[i]->tb_lineno;
-        const char* filename =
-            PyString_AsString(trace_vec[i]->tb_frame->f_code->co_filename);
-        const char* funcname =
-            PyString_AsString(trace_vec[i]->tb_frame->f_code->co_name);
+        const char* filename;
+        const char* funcname;
+        if (PyUnicode_Check(trace_vec[i]->tb_frame->f_code->co_filename)) {
+          auto encoded = PyUnicode_AsEncodedString(
+              trace_vec[i]->tb_frame->f_code->co_filename, "ASCII", "replace");
+          if (encoded != nullptr) {
+            filename = strdup(PyBytes_AS_STRING(encoded));
+            Py_DECREF(encoded);
+          } else {
+            filename = "<unknown>";
+          }
+        } else {
+          filename =
+              PyBytes_AsString(trace_vec[i]->tb_frame->f_code->co_filename);
+        }
+        if (PyUnicode_Check(trace_vec[i]->tb_frame->f_code->co_name)) {
+          auto encoded = PyUnicode_AsEncodedString(
+              trace_vec[i]->tb_frame->f_code->co_name, "ASCII", "replace");
+          if (encoded != nullptr) {
+            funcname = strdup(PyBytes_AS_STRING(encoded));
+            Py_DECREF(encoded);
+          } else {
+            funcname = "<unknown>";
+          }
+        } else {
+          funcname = PyBytes_AsString(trace_vec[i]->tb_frame->f_code->co_name);
+        }
+
         LOG(ERROR) << "    # " << trace_vec.size() - i - 1 << "  " << filename
                    << " (" << line << "): " << funcname;
       }
@@ -279,7 +305,7 @@ void addObjectMethods(py::module& m) {
           })
       .def(
           "deserialize",
-          [](Blob* blob, py::bytes serialized) {
+          [](Blob* blob, const string& serialized) {
             blob->Deserialize(serialized);
           })
       .def(
@@ -319,7 +345,7 @@ void addObjectMethods(py::module& m) {
               return true;
             }
 
-            if (PyString_Check(arg.ptr())) { // string
+            if (PyBytes_Check(arg.ptr()) || PyUnicode_Check(arg.ptr())) {
               *blob->GetMutable<std::string>() = arg.cast<std::string>();
               return true;
             }
@@ -434,7 +460,7 @@ void addObjectMethods(py::module& m) {
           })
       .def(
           "_run_net",
-          [](Workspace* self, py::bytes def) {
+          [](Workspace* self, const string& def) {
             caffe2::NetDef proto;
             CAFFE_ENFORCE(ParseProtobufFromLargeString(def, &proto));
             py::gil_scoped_release g;
@@ -442,7 +468,7 @@ void addObjectMethods(py::module& m) {
           })
       .def(
           "_run_operator",
-          [](Workspace* self, py::bytes def) {
+          [](Workspace* self, const string& def) {
             caffe2::OperatorDef proto;
             CAFFE_ENFORCE(ParseProtobufFromLargeString(def, &proto));
             py::gil_scoped_release g;
@@ -450,7 +476,7 @@ void addObjectMethods(py::module& m) {
           })
       .def(
           "_run_plan",
-          [](Workspace* self, py::bytes def) {
+          [](Workspace* self, const string& def) {
             caffe2::PlanDef proto;
             CAFFE_ENFORCE(ParseProtobufFromLargeString(def, &proto));
             py::gil_scoped_release g;
@@ -475,8 +501,7 @@ void addObjectMethods(py::module& m) {
 
   m.def(
       "get_gradient_defs",
-      [](const py::bytes& op_def,
-         std::vector<GradientWrapper> output_gradients) {
+      [](const string& op_def, std::vector<GradientWrapper> output_gradients) {
         OperatorDef def;
         CAFFE_ENFORCE(ParseProtobufFromLargeString(op_def, &def));
         CAFFE_ENFORCE(caffe2::GradientRegistry()->Has(def.type()));
@@ -546,7 +571,9 @@ void addObjectMethods(py::module& m) {
   py::class_<Predictor>(m, "Predictor")
       .def(
           "__init__",
-          [](Predictor& instance, py::bytes init_net, py::bytes predict_net) {
+          [](Predictor& instance,
+             const string& init_net,
+             const string& predict_net) {
             CAFFE_ENFORCE(gWorkspace);
             NetDef init_net_, predict_net_;
             CAFFE_ENFORCE(ParseProtobufFromLargeString(init_net, &init_net_));
@@ -828,8 +855,7 @@ void addGlobalMethods(py::module& m) {
           feeder->Feed(option, array, blob);
           return true;
         }
-
-        if (PyString_Check(arg.ptr())) { // string
+        if (PyBytes_Check(arg.ptr()) || PyUnicode_Check(arg.ptr())) { // string
           *blob->GetMutable<std::string>() = arg.cast<std::string>();
           return true;
         }

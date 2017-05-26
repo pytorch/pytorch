@@ -64,12 +64,13 @@ class TestSparseToDenseMask(TestCase):
             np.array([2, 4, 6, 1, 2, 999999999, 2], dtype=np.int32))
         workspace.FeedBlob(
             'values',
-            np.array(['1', '2', '3', '4', '5', '6', '7'], dtype=np.str))
-        workspace.FeedBlob('default', np.array('-1', dtype=np.str))
+            np.array(['1', '2', '3', '4', '5', '6', '7'], dtype='S'))
+        workspace.FeedBlob('default', np.array('-1', dtype='S'))
         workspace.FeedBlob('lengths', np.array([3, 4], dtype=np.int32))
         workspace.RunOperatorOnce(op)
         output = workspace.FetchBlob('output')
-        expected = np.array([['-1', '1', '3'], ['6', '7', '-1']], dtype=np.str)
+        expected =\
+            np.array([['-1', '1', '3'], ['6', '7', '-1']], dtype='S')
         self.assertEqual(output.shape, expected.shape)
         np.testing.assert_array_equal(output, expected)
 

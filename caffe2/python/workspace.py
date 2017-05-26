@@ -4,12 +4,11 @@ import contextlib
 from google.protobuf.message import Message
 from multiprocessing import Process
 import os
+from past.builtins import basestring
 import shutil
 import socket
 import tempfile
 import logging
-
-from six import string_types
 
 import numpy as np
 from caffe2.proto import caffe2_pb2
@@ -49,14 +48,6 @@ else:
     GetDefaultGPUID = lambda: 0 # noqa
     GetCuDNNVersion = lambda: 0 # noqa
     GetCudaPeerAccessPattern = lambda: np.array([]) # noqa
-
-
-# Python 2 and 3 compatibility: test if basestring exists
-try:
-    basestring  # NOQA
-except NameError:
-    # This is python3 so we define basestring.
-    basestring = str
 
 
 def _GetFreeFlaskPort():
@@ -113,7 +104,7 @@ def StringifyProto(obj):
   Raises:
     AttributeError: if the passed in object does not have the right attribute.
   """
-    if isinstance(obj, string_types):
+    if isinstance(obj, basestring):
         return obj
     else:
         if isinstance(obj, Message):
@@ -240,7 +231,7 @@ def FeedBlob(name, arr, device_option=None):
     """
     if type(arr) is caffe2_pb2.TensorProto:
         arr = utils.Caffe2TensorToNumpyArray(arr)
-    if type(arr) is np.ndarray and arr.dtype.kind == 'S':
+    if type(arr) is np.ndarray and arr.dtype.kind in 'SU':
         # Plain NumPy strings are weird, let's use objects instead
         arr = arr.astype(np.object)
 
