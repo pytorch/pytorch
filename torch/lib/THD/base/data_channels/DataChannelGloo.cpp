@@ -89,7 +89,7 @@ DataChannelGloo::DataChannelGloo(InitMethod::Config config)
     _listen_socket = config.master.listen_socket;
   } else {
     _addr = config.worker.address;
-    _port = config.worker.listen_port;
+    _port = config.worker.port;
   }
 }
 

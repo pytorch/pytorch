@@ -86,7 +86,7 @@ DataChannelTCP::DataChannelTCP(InitMethod::Config config, int timeout)
     };
   } else { // WORKER
     std::string address = config.worker.address;
-    port_type port = config.worker.listen_port;
+    port_type port = config.worker.port;
 
     // add master
     _processes.resize(1);

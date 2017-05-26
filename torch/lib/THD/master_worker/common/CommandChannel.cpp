@@ -1,6 +1,5 @@
 #include "CommandChannel.hpp"
 #include "Functions.hpp"
-#include "../../base/ChannelEnvVars.hpp"
 #include "../../base/ChannelUtils.hpp"
 
 #include <unistd.h>
@@ -43,16 +42,14 @@ std::unique_ptr<rpc::RPCMessage> receiveMessage(int socket) {
 
 } // anonymous namespace
 
-MasterCommandChannel::MasterCommandChannel()
+MasterCommandChannel::MasterCommandChannel(InitMethod::Config config)
   : _rank(0)
   , _poll_events(nullptr)
   , _error_pipe(-1)
   , _error(nullptr)
+  , _sockets(config.master.world_size, -1)
 {
-  rank_type world_size;
-  std::tie(_port, world_size) = load_master_env();
-
-  _sockets.assign(world_size, -1);
+  _sockets[0] = config.master.listen_socket;
   _mutexes = std::vector<std::mutex>(world_size);
 }
 
@@ -79,8 +76,6 @@ MasterCommandChannel::~MasterCommandChannel() {
 }
 
 bool MasterCommandChannel::init() {
-  std::tie(_sockets[0], std::ignore) = listen(_port);
-
   int socket;
   rank_type rank;
   for (std::size_t i = 1; i < _sockets.size(); ++i) {
@@ -183,12 +178,12 @@ std::tuple<rank_type, std::string> MasterCommandChannel::recvError() {
 }
 
 
-WorkerCommandChannel::WorkerCommandChannel()
-  : _socket(-1)
-{
-  _rank = load_rank_env();
-  std::tie(_master_addr, _master_port) = load_worker_env();
-}
+WorkerCommandChannel::WorkerCommandChannel(InitMethod::Config config)
+  : _rank(config.rank)
+  , _socket(-1)
+  , _master_addr(config.worker.address)
+  , _master_port(config.worker.port)
+{}
 
 WorkerCommandChannel::~WorkerCommandChannel() {
   if (_socket != -1)

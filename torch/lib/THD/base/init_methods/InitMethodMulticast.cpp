@@ -1,4 +1,5 @@
 #include "InitMethodMulticast.hpp"
+#include "InitMethodUtils.hpp"
 
 #include <arpa/inet.h>
 #include <netdb.h>
@@ -13,6 +14,7 @@
 #include <cstring>
 
 #define UID_LENGTH 100
+#define MAX_MSG_LENGTH 1000
 
 namespace thd {
 namespace {
@@ -20,46 +22,58 @@ namespace {
 struct MulticastMessage {
   std::string uid;
   std::string group_name;
-  std::string address;
+  std::vector<std::string> addresses;
   port_type port;
 
   static std::string pack(const MulticastMessage& msg) {
-    return msg.uid + ";" + msg.group_name + ";" + msg.address + ";" + std::to_string(msg.port);
+    std::string packed_msg = msg.uid + ";" + msg.group_name + ";" + std::to_string(msg.port) + ";#";
+    for (const auto& address : msg.addresses) {
+      packed_msg += address + ";";
+    }
+
+    return packed_msg;
   }
 
   static MulticastMessage unpack(std::string msg) {
-    std::array<std::string, 4> arr;
+    std::array<std::string, 3> arr;
     std::size_t prev_pos = 0;
-    for (std::size_t i = 0; i < 4; ++i) {
-      auto pos = msg.find_first_of(';', prev_pos + 1);
-      arr[i] = msg.substr(prev_pos, pos);
-      prev_pos = pos;
+    for (std::size_t i = 0; i < 3; ++i) {
+      auto next_sep_pos = msg.find_first_of(';', prev_pos);
+      arr[i] = msg.substr(prev_pos, next_sep_pos - prev_pos);
+      prev_pos = next_sep_pos + 1;
+    }
+
+    auto sep_pos = msg.rfind('#');
+    if (sep_pos == std::string::npos)
+      throw std::runtime_error("corrupted multicast message");
+
+    std::vector<std::string> addresses;
+    while (true) {
+      auto next_sep_pos = msg.find(';', sep_pos + 1);
+      if (next_sep_pos == std::string::npos) break;
+      addresses.emplace_back(msg.substr(sep_pos + 1, next_sep_pos - sep_pos - 1));
+      sep_pos = next_sep_pos;
     }
 
     return {
       .uid = arr[0],
       .group_name = arr[1],
-      .address = arr[2],
-      .port = convertToPort(std::stoul(arr[3])),
+      .addresses = addresses,
+      .port = convertToPort(std::stoul(arr[2])),
     };
   }
 };
 
-struct attr {
-  int socket;
-  struct sockaddr ai_addr;
-  socklen_t ai_addrlen;
-};
-
 std::string getRandomString()
 {
+  std::srand(std::time(0));
   auto randchar = []() -> char {
     const char charset[] =
       "0123456789"
       "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
       "abcdefghijklmnopqrstuvwxyz";
     const size_t max_index = (sizeof(charset) - 1);
-    return charset[rand() % max_index];
+    return charset[std::rand() % max_index];
   };
 
   std::string str(UID_LENGTH, 0);
@@ -67,69 +81,72 @@ std::string getRandomString()
   return str;
 }
 
-std::tuple<int, struct sockaddr, socklen_t> connectUDP(const std::string& address, port_type port, int timeout_sec = 10, int ttl = 1) {
-  struct addrinfo hints, *res = NULL;
+static int getAddressIPVersion(const std::string& address) {
+  char buf[16];
+  if (inet_pton(AF_INET, address.c_str(), buf)) {
+    return AF_INET;
+  } else if (inet_pton(AF_INET6, address.c_str(), buf)) {
+    return AF_INET6;
+  } else {
+    throw std::invalid_argument("invalid ip address");
+  }
+  return -1;
+}
+
+std::tuple<int, struct sockaddr> connectUDP(const std::string& address, port_type port, int timeout_sec = 10, int ttl = 1) {
   struct timeval timeout = {.tv_sec = timeout_sec, .tv_usec = 0};
 
-  std::memset(&hints, 0x00, sizeof(hints));
-  hints.ai_flags = AI_NUMERICSERV; // specifies that port (service) is numeric
-  hints.ai_family = AF_UNSPEC; // either IPv4 or IPv6
-  hints.ai_socktype = SOCK_DGRAM; // UDP
-  hints.ai_protocol = IPPROTO_UDP;
+  struct sockaddr addr;
 
-  int err = ::getaddrinfo(address.data(), std::to_string(port).data(), &hints, &res);
-  if (err != 0 || !res) {
-    throw std::invalid_argument("host not found: " + std::string(::gai_strerror(err)));
-  }
+  int version = getAddressIPVersion(address);
 
-  std::shared_ptr<struct addrinfo> addresses(res, [](struct addrinfo* p) {
-    ::freeaddrinfo(p);
-  });
+  int socket, optval;
+  SYSCHECK(socket = ::socket(version, SOCK_DGRAM, 0))
+  optval = 1; SYSCHECK(::setsockopt(socket, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(int)))
+  optval = 1; SYSCHECK(::setsockopt(socket, SOL_SOCKET, SO_REUSEPORT, &optval, sizeof(int)))
 
-  struct addrinfo *next_addr = addresses.get();
-  int socket;
-  while (true) {
-    try {
-      int optval = 1;
-      SYSCHECK(socket = ::socket(next_addr->ai_family, next_addr->ai_socktype, next_addr->ai_protocol))
-      SYSCHECK(::setsockopt(socket, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(int)))
-      SYSCHECK(::bind(socket, next_addr->ai_addr, next_addr->ai_addrlen))
-      SYSCHECK(::setsockopt (socket, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout)))
-      if (next_addr->ai_family == AF_INET) {
-        struct ip_mreq mreq;
-        SYSCHECK(::inet_pton(AF_INET, address.data(), &mreq.imr_multiaddr));
-        SYSCHECK(::setsockopt(socket, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl)))
-        SYSCHECK(::setsockopt(socket, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)))
-      } else if (next_addr->ai_family == AF_INET6) {
-        struct ipv6_mreq mreq;
-        SYSCHECK(::inet_pton(AF_INET6, address.data(), &mreq.ipv6mr_multiaddr))
-        SYSCHECK(::setsockopt(socket, IPPROTO_IPV6, IPV6_MULTICAST_HOPS, &ttl, sizeof(ttl)))
-        SYSCHECK(::setsockopt(socket, IPPROTO_IPV6, IPV6_JOIN_GROUP, &mreq, sizeof(mreq)))
-      } else {
-        throw std::system_error(EAFNOSUPPORT, std::generic_category());
-      }
+  if (version == AF_INET) {
+    struct sockaddr_in addr_ipv4;
+    std::memset(&addr_ipv4, 0x00, sizeof(addr_ipv4));
+    addr_ipv4.sin_family = version;
+    addr_ipv4.sin_addr.s_addr = INADDR_ANY;
+    addr_ipv4.sin_port = htons(port);
 
+    SYSCHECK(::bind(socket, reinterpret_cast<struct sockaddr*>(&addr_ipv4), sizeof(addr_ipv4)))
+    SYSCHECK(::setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout)))
 
-      break;
-    } catch (const std::system_error& e) {
-      ::close(socket);
-      next_addr = next_addr->ai_next;
+    struct ip_mreq mreq;
+    SYSCHECK(::inet_pton(AF_INET, address.c_str(), &mreq.imr_multiaddr));
+    mreq.imr_interface.s_addr = htonl(INADDR_ANY);
+    SYSCHECK(::setsockopt(socket, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl)))
+    SYSCHECK(::setsockopt(socket, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)))
 
-      // we have tried all addresses but could not connect to any of them
-      if (!next_addr) {
-        throw e;
-      }
+    SYSCHECK(::inet_pton(AF_INET, address.c_str(), &addr_ipv4.sin_addr))
+    addr = *reinterpret_cast<struct sockaddr*>(&addr_ipv4);
+  } else if (version == AF_INET6) {
+    struct sockaddr_in6 addr_ipv6;
+    std::memset(&addr_ipv6, 0x00, sizeof(addr_ipv6));
+    addr_ipv6.sin6_family = version;
+    addr_ipv6.sin6_addr = in6addr_any;
+    addr_ipv6.sin6_port = htons(port);
 
-      std::this_thread::sleep_for(std::chrono::seconds(1));
-    }
+    SYSCHECK(::bind(socket, reinterpret_cast<struct sockaddr*>(&addr_ipv6), sizeof(addr_ipv6)))
+    SYSCHECK(::setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout)))
+
+    struct ipv6_mreq mreq;
+    SYSCHECK(::inet_pton(AF_INET6, address.c_str(), &mreq.ipv6mr_multiaddr))
+    mreq.ipv6mr_interface = 0;
+    SYSCHECK(::setsockopt(socket, IPPROTO_IPV6, IPV6_MULTICAST_HOPS, &ttl, sizeof(ttl)))
+    SYSCHECK(::setsockopt(socket, IPPROTO_IPV6, IPV6_JOIN_GROUP, &mreq, sizeof(mreq)))
+
+    SYSCHECK(::inet_pton(AF_INET6, address.c_str(), &addr_ipv6.sin6_addr))
+    addr = *reinterpret_cast<struct sockaddr*>(&addr_ipv6);
   }
 
   /* Reduce the chance that we use socket before joining the group */
   std::this_thread::sleep_for(std::chrono::seconds(1));
 
-  struct sockaddr ai_addr;
-  memcpy(&ai_addr, next_addr->ai_addr, next_addr->ai_addrlen);
-  return std::make_tuple(socket, ai_addr, next_addr->ai_addrlen);
+  return std::make_tuple(socket, addr);
 }
 
 } // anonymous namespace
@@ -148,26 +165,28 @@ InitMethod::Config InitMethodMulticast::getConfig() {
   InitMethod::Config config;
 
   int socket;
-  struct sockaddr addr;
-  socklen_t addr_len;
-  std::tie(socket, addr, addr_len) = connectUDP(_address, _port);
+  struct sockaddr send_addr;
+  std::tie(socket, send_addr) = connectUDP(_address, _port);
 
   int listen_socket;
   MulticastMessage msg;
   msg.uid = getRandomString();
   msg.group_name = _group_name;
-  std::tie(listen_socket, msg.address, msg.port) = listen();
+  msg.addresses = getInterfaceAddresses();
+  std::tie(listen_socket, msg.port) = listen();
 
   std::string send_message = MulticastMessage::pack(msg);
   std::set<std::string> processes;
   processes.insert(send_message);
 
-  char recv_message[UID_LENGTH + 100];
-  SYSCHECK(::sendto(socket, send_message.c_str(), send_message.size(), 0, &addr, addr_len))
+  // TODO: check if send_message is not to long
+
+  char recv_message[MAX_MSG_LENGTH];
+  SYSCHECK(::sendto(socket, send_message.c_str(), send_message.size(), 0, &send_addr, sizeof(send_addr)))
 
   while (processes.size() < _world_size) {
     try {
-      SYSCHECK(::recvfrom(socket, recv_message, sizeof(recv_message), 0, &addr, &addr_len))
+      SYSCHECK(::recvfrom(socket, recv_message, sizeof(recv_message), 0, nullptr, nullptr))
       std::string recv_message_str(recv_message);
 
       /* We should ignore messages comming from different group */
@@ -183,7 +202,16 @@ InitMethod::Config InitMethodMulticast::getConfig() {
     }
 
     /* Even timeout has occured we want to resend message (just to be sure). */
-    SYSCHECK(::sendto(socket, send_message.c_str(), send_message.size(), 0, &addr, addr_len))
+    SYSCHECK(::sendto(socket, send_message.c_str(), send_message.size(), 0, &send_addr, sizeof(send_addr)))
+  }
+
+  /*
+   * To ensure that all other processes have received our message,
+   * send it again few times.
+   */
+  for (std::size_t i = 0; i < 10; ++i) {
+    SYSCHECK(::sendto(socket, send_message.c_str(), send_message.size(), 0, &send_addr, sizeof(send_addr)))
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
   }
 
   MulticastMessage master_msg;
@@ -202,10 +230,13 @@ InitMethod::Config InitMethodMulticast::getConfig() {
           .listen_socket = listen_socket,
           .listen_port = master_msg.port,
         };
+
+        discoverWorkers(listen_socket, _world_size);
       } else {
+        std::string master_address = discoverMaster(master_msg.addresses, master_msg.port);
         config.worker = {
-          .address = master_msg.address,
-          .listen_port = master_msg.port,
+          .address = master_address,
+          .port = master_msg.port,
         };
       }
       break;

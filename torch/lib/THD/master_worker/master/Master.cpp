@@ -15,8 +15,9 @@ std::unique_ptr<MasterCommandChannel> masterCommandChannel;
 using namespace thd;
 using namespace thd::master;
 
-bool THDMasterWorkerInit(THDChannelType channel_type) {
-  if (!THDProcessGroupInit(channel_type)) return false;
+bool THDMasterWorkerInit(THDChannelType channel_type, std::string init_method,
+                         int world_size, std::string group_name) {
+  if (!THDProcessGroupInit(channel_type, init_method, world_size, group_name)) return false;
 
   if (dataChannel->getRank() > 0) {
     /*
@@ -24,13 +25,14 @@ bool THDMasterWorkerInit(THDChannelType channel_type) {
      * for commands from master. Returning from `THDWorkerMain` indicates
      * a failure so it will `return false`.
      */
-    THDWorkerMain();
+    THDWorkerMain(init_method, world_size, group_name);
     return false;
   }
 
   THDState::s_workers = std::vector<WorkerState>(dataChannel->getNumProcesses());
 
-  masterCommandChannel.reset(new MasterCommandChannel());
+  InitMethod::Config config = getInitConfig(init_method, world_size, group_name);
+  masterCommandChannel.reset(new MasterCommandChannel(config));
   if (!masterCommandChannel->init()) {
     return false;
   }
