@@ -1,4 +1,4 @@
-int THLongStorage_isSameSizeAs(const long *sizeA, long dimsA, const long *sizeB, long dimsB) {
+int THSize_isSameSizeAs(const long *sizeA, long dimsA, const long *sizeB, long dimsB) {
   int d;
   if (dimsA != dimsB)
     return 0;
