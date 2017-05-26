@@ -1,38 +1,32 @@
 #include "InitMethodFile.hpp"
 
 #include <fcntl.h>
+#include <unistd.h>
 
-#include <cstdio>
+#include <system_error>
+#include <fstream>
+#include <algorithm>
 
 namespace {
 
-void appendString(FILE *file, std::string msg) {
-  std::fseek(file, 0, SEEK_END);
-  for (auto c : msg) {
-    std::putc(c, file);
-  }
-}
-
-void lockFile(FILE *file) {
+void lockFile(int fd) {
   struct flock oflock;
   oflock.l_type = F_WRLCK; // write lock
   oflock.l_whence = SEEK_SET;
   oflock.l_start = 0;
   oflock.l_len = 0; // lock whole file
 
-  int fd = ::fileno(file);
+  // TODO: handle interrupts
   SYSCHECK(::fcntl(fd, F_SETLKW, &oflock));
 }
 
-void unlockFile(FILE *file) {
+void unlockFile(int fd) {
   struct flock oflock;
   oflock.l_type = F_UNLCK; // unlock
   oflock.l_whence = SEEK_SET;
   oflock.l_start = 0;
   oflock.l_len = 0; // unlock whole file
 
-  ::fflush(file);
-  int fd = ::fileno(file);
   SYSCHECK(::fcntl(fd, F_SETLKW, &oflock));
 }
 
@@ -45,14 +39,17 @@ InitMethodFile::InitMethodFile(std::string file_path, rank_type world_size)
  : _file_path(file_path)
  , _world_size(world_size)
 {
-  _file = std::fopen(_file_path.c_str(), "rb+");
-  if (!_file) {
-    throw std::runtime_error("cannot access '" + _file_path + "' file");
+  _file = ::open(_file_path.c_str(), O_RDWR | O_CREAT | O_EXCL, 0664);
+  if (_file == -1 && errno == EEXIST) {
+    _file = ::open(_file_path.c_str(), O_RDWR);
+  }
+  if (_file == -1) {
+    throw std::system_error(_file, std::generic_category(), "cannot access '" + _file_path + "' file");
   }
 }
 
 InitMethodFile::~InitMethodFile() {
-  std::fclose(_file);
+  ::close(_file);
 }
 
 
@@ -60,26 +57,27 @@ InitMethod::Config InitMethodFile::getConfig() {
   InitMethod::Config config;
   lockFile(_file);
 
-  std::string content;
-  int c; // NOTE: int, not char, required to handle EOF
-  while ((c = std::fgetc(_file)) != EOF) {
-    content += (char)c;
-  }
+  std::fstream file(_file_path);
+  std::string content{std::istreambuf_iterator<char>(file),
+                      std::istreambuf_iterator<char>()};
 
-  if (std::ferror(_file))
-    throw std::runtime_error("unexpected error occured when reading '" + _file_path + "' file");
-
-  size_t rank = std::count(content.begin(), content.end(), '\n'); // rank is equal to number of lines inserted
+  // rank is equal to number of lines inserted
+  size_t rank = std::count(content.begin(), content.end(), '\n');
   config.rank = rank;
   if (config.rank == 0) {
     int listen_socket;
     std::string address;
     port_type port;
-    std::tie(listen_socket, address, port) = listen();
+    std::tie(listen_socket, port) = listen();
 
     // pack message for other workers (we are first so we are master)
-    std::string full_address = address + ";" + std::to_string(port) + "\n";
-    appendString(_file, full_address);
+    file << port << '#';
+    for (auto addr_str : getInterfaceAddresses()) {
+        file << addr_str << ';';
+    }
+    file << std::endl;
+
+    // TODO: connect here and recover your own address
 
     config.master = {
       .world_size = _world_size,
@@ -87,29 +85,43 @@ InitMethod::Config InitMethodFile::getConfig() {
       .listen_port = port,
     };
   } else {
-    std::fseek(_file, 0, SEEK_SET);
+    auto addr_end_pos = content.find('\n');
+    if (addr_end_pos == std::string::npos)
+      throw std::runtime_error("corrupted distributed init file");
+    std::string master_info = content.substr(0, addr_end_pos);
 
-    std::string full_address;
-    while ((c = std::fgetc(_file)) != '\n') {
-      full_address += c;
+    auto port_sep_pos = full_address.rfind('#');
+    if (port_sep_pos == std::string::npos)
+      throw std::runtime_error("corrupted distributed init file");
+
+    std::string str_port = full_address.substr(0, port_sep_pos);
+    auto port = convertToPort(std::stoul(str_port));
+
+    std::vector<std::string> addresses;
+    auto sep_pos = port_sep_pos;
+    while (true) {
+      auto next_sep_pos = full_address.find(';', sep_pos);
+      if (next_sep_pos == std::string::npos) break;
+      addresses.emplace_back(full_address.substr(sep_pos + 1, next_sep_pos);
+      sep_pos = next_sep_pos;
     }
 
-    auto found_pos = full_address.rfind(";");
-    if (found_pos == std::string::npos)
-      throw std::runtime_error("something unexpected happened when reading a file, are you sure that the file was empty?");
+    // TODO: connect here and recover your own address
 
-    std::string str_port = full_address.substr(found_pos + 1);
-    auto port = convertToPort(std::stoul(str_port));
     config.worker = {
-      .address = full_address.substr(0, found_pos),
+      .address = std::string(), // TODO
       .listen_port = port,
     };
 
-    std::string rank_str = std::to_string(config.rank) + "\n";
-    appendString(_file, rank_str);
+    file << std::to_string(config.rank) << std::endl;
   }
 
+  file.close();
   unlockFile(_file);
+
+  if (config.rank == _world_size - 1) {
+    ::remove(_file_path.c_str());
+  }
   return config;
 }
 

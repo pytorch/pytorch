@@ -15,6 +15,7 @@ static std::unordered_map<std::string, THDChannelType> name2channel_type = {
 
 static bool THDPModule_loadClasses(PyObject *self)
 {
+#ifdef WITH_DISTRIBUTED_MW
 #define ASSERT_NOT_NULL(ptr) if (!(ptr)) { THPUtils_setError("couldn't load classes"); return false; }
   PyObject *torch_module = PyImport_ImportModule("torch.distributed");
   if (!torch_module) {
@@ -42,6 +43,7 @@ static bool THDPModule_loadClasses(PyObject *self)
 
   return true;
 #undef ASSERT_NOT_NULL
+#endif
 }
 
 static std::unordered_map<PyObject*, THDReduceOp> obj2reduceop;

@@ -13,7 +13,7 @@ struct InitMethodFile : InitMethod {
 private:
   std::string _file_path;
   rank_type _world_size;
-  FILE *_file;
+  int _file;
 };
 
 } // namespace thd
