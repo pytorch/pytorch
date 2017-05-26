@@ -15,6 +15,9 @@ from string import Template
 #        are comma-separated.  So, to specify that the tensor should be broadcast to 3-dimensions with
 #        sizes: tensor0->size[0] x tensor1->size[1] x tensor2->size[2], you would write:
 #        dims:tensor0.dim0,tensor1.dim1,tensor2.dim2
+# [types] if the tensors should be of different types than THTensor, specify as X where
+#         the actual type to use is THXTensor (i.e. Byte for THByteTensor).  If the type
+#         should be THTensor, use 'Real'
 
 # For out of place:
 # Two args: expand the two args together
@@ -48,12 +51,28 @@ class Broadcast(CWrapPlugin):
     POST_TEMPLATE = Template(
         """${arg_op_other} = ${arg_op_other}_save;\n""")
 
-    def getPreArgStringTemplate(self, includeElementCount=True):
-        ret = """THTensor *${arg_op_other}_save = ${arg_op_other};
-                 THTensorPtr ${arg_op_other}_guard = THTensor_(new)(LIBRARY_STATE_NOARGS);
-                 ${arg_op_other}=${arg_op_other}_guard.get();"""
-        if includeElementCount:
-            ret += "ptrdiff_t ${arg_op_other}_nElem = THTensor_(nElement)(LIBRARY_STATE ${arg_op_other}_save);"
+    def getPreArgStringTemplate(self, includeElementCount=True, type=None):
+        if type == None:
+            ret = """THTensor *${arg_op_other}_save = ${arg_op_other};
+                     THTensorPtr ${arg_op_other}_guard = THTensor_(new)(LIBRARY_STATE_NOARGS);
+                     ${arg_op_other}=${arg_op_other}_guard.get();"""
+            if includeElementCount:
+                ret += "ptrdiff_t ${arg_op_other}_nElem = THTensor_(nElement)(LIBRARY_STATE ${arg_op_other}_save);"
+        else:
+            ret = """#if !IS_CUDA
+                     #define THBroadcastTensor           TH_CONCAT_3(TH,""" + type + """,Tensor)
+                     #define THBroadcastTensor_(NAME)    TH_CONCAT_3(TH,""" + type + """Tensor_,NAME)
+                     #else
+                     #define THBroadcastTensor           TH_CONCAT_3(THCuda,""" + type + """,Tensor)
+                     #define THBroadcastTensor_(NAME)    TH_CONCAT_3(THCuda,""" + type + """Tensor_,NAME)
+                     #endif
+                     #define THBroadcastTensorPtr        THPPointer<THBroadcastTensor>
+                     THBroadcastTensor *${arg_op_other}_save = ${arg_op_other};
+                     THBroadcastTensorPtr ${arg_op_other}_guard = THBroadcastTensor_(new)(LIBRARY_STATE_NOARGS);
+                     ${arg_op_other}=${arg_op_other}_guard.get();
+                  """
+            if includeElementCount:
+                ret += "ptrdiff_t ${arg_op_other}_nElem = THBroadcastTensor_(nElement)(LIBRARY_STATE ${arg_op_other}_save);"
         return Template(ret)
 
     OUT_PLACE_BACK_COMPAT_WARN_TEMPLATE = Template(
@@ -138,33 +157,66 @@ class Broadcast(CWrapPlugin):
            }
         """)
 
-    IN_PLACE_PRE_EXPAND1_TEMPLATE = Template(
-        """bool ${arg_op_other}_raise = ${raise_errors} || (${arg_op_a}_nElem != ${arg_op_other}_nElem);
-           int ${arg_op_other}_err =
-             !skip_expand && THTensor_(expand)(LIBRARY_STATE ${arg_op_other}, ${arg_op_other}_save, ${arg_op_a}_size.get(), ${arg_op_other}_raise);
-           if (${arg_op_other}_err != 0 && !${arg_op_other}_raise) {
-             skip_expand = true; // don't do further expansions
-             ${post_code}"""
-            + IN_PLACE_DEPRECATED_WARNING + "\n" +
-        """}""")
+    UNDEF_CODE = """#undef THBroadcastTensor
+                    #undef THBroadcastTensorPtr
+                 """
 
-    IN_PLACE_PRE_EXPAND2_TEMPLATE = Template(
-        """bool ${arg_op_other1}_raise = ${raise_errors} || (${arg_op_a}_nElem != ${arg_op_other1}_nElem);
-           bool ${arg_op_other2}_raise = ${raise_errors} || (${arg_op_a}_nElem != ${arg_op_other2}_nElem);
-           int ${arg_op_other1}_err =
-             !skip_expand && THTensor_(expand)(LIBRARY_STATE ${arg_op_other1}, ${arg_op_other1}_save, ${arg_op_a}_size.get(), ${arg_op_other1}_raise || ${arg_op_other2}_raise);
-           if (${arg_op_other1}_err != 0 && !(${arg_op_other1}_raise || ${arg_op_other2}_raise)) {
-             skip_expand = true; // don't do further expansions
-             ${post_code}"""
-            + IN_PLACE_DEPRECATED_WARNING3 + "\n" +
-        """}
-          int ${arg_op_other2}_err =
-            !skip_expand && THTensor_(expand)(LIBRARY_STATE ${arg_op_other2}, ${arg_op_other2}_save, ${arg_op_a}_size.get(), ${arg_op_other1}_raise || ${arg_op_other2}_raise);
-           if (${arg_op_other2}_err != 0 && !(${arg_op_other1}_raise || ${arg_op_other2}_raise)) {
-             skip_expand = true; // don't do further expansions
-             ${post_code}"""
-           + IN_PLACE_DEPRECATED_WARNING3 + "\n" +
-        """}""")
+    def getInPlacePreExpand1Template(self, type=None):
+        ret = """bool ${arg_op_other}_raise = ${raise_errors} || (${arg_op_a}_nElem != ${arg_op_other}_nElem);
+                 int ${arg_op_other}_err ="""
+        if type == None:
+            ret += """!skip_expand && THTensor_(expand)(LIBRARY_STATE"""
+        else:
+            ret += """!skip_expand && THBroadcastTensor_(expand)(LIBRARY_STATE"""
+
+        ret += """                                               ${arg_op_other},
+                                                                 ${arg_op_other}_save,
+                                                                 ${arg_op_a}_size.get(),
+                                                                 ${arg_op_other}_raise);
+                  if (${arg_op_other}_err != 0 && !${arg_op_other}_raise) {
+                  skip_expand = true; // don't do further expansions
+                  ${post_code}"""
+        ret += self.IN_PLACE_DEPRECATED_WARNING + "\n"
+        ret += """}\n"""
+        if type != None:
+            ret += self.UNDEF_CODE
+        return Template(ret)
+
+    def getInPlacePreExpand2Template(self, type1=None, type2=None):
+        ret = """bool ${arg_op_other1}_raise = ${raise_errors} || (${arg_op_a}_nElem != ${arg_op_other1}_nElem);
+                 bool ${arg_op_other2}_raise = ${raise_errors} || (${arg_op_a}_nElem != ${arg_op_other2}_nElem);
+                 int ${arg_op_other1}_err ="""
+        if type1 is None:
+            ret += """!skip_expand && THTensor_(expand)(LIBRARY_STATE"""
+        else:
+            ret += """!skip_expand && THBroadcastTensor_(expand)(LIBRARY_STATE"""
+
+        ret += """                                              ${arg_op_other1},
+                                                                ${arg_op_other1}_save,
+                                                                ${arg_op_a}_size.get(),
+                                                                ${arg_op_other1}_raise || ${arg_op_other2}_raise);
+                  if (${arg_op_other1}_err != 0 && !(${arg_op_other1}_raise || ${arg_op_other2}_raise)) {
+                    skip_expand = true; // don't do further expansions
+                    ${post_code}"""
+        ret += self.IN_PLACE_DEPRECATED_WARNING3 + "\n"
+        ret += """}
+               int ${arg_op_other2}_err ="""
+        if type2 == None:
+            ret += """!skip_expand && THTensor_(expand)(LIBRARY_STATE"""
+        else:
+            ret += """!skip_expand && THBroadcastTensor_(expand)(LIBRARY_STATE"""
+        ret += """                                                ${arg_op_other2},
+                                                                  ${arg_op_other2}_save,
+                                                                  ${arg_op_a}_size.get(),
+                                                                  ${arg_op_other1}_raise || ${arg_op_other2}_raise);
+                  if (${arg_op_other2}_err != 0 && !(${arg_op_other1}_raise || ${arg_op_other2}_raise)) {
+                    skip_expand = true; // don't do further expansions
+                    ${post_code}"""
+        ret += self.IN_PLACE_DEPRECATED_WARNING3 + "\n"
+        ret += """}\n"""
+        if type1 is not None or type2 is not None:
+            ret += self.UNDEF_CODE
+        return Template(ret)
 
     IN_PLACE_PRE_TEMPLATE = Template(
         """THLongStoragePtr ${arg_op_a}_size = THTensor_(newSizeOf)(LIBRARY_STATE ${arg_op_a});
@@ -218,8 +270,20 @@ class Broadcast(CWrapPlugin):
 
             assert len(dims_kvs) <= 3
             for p in params[1:]:
-                if p != "inplace" and p != "fallback" and not p.startswith("dims:"):
+                if p != "inplace" and p != "fallback" and not p.startswith("dims:") and not p.startswith("types:"):
                     raise ValueError("invalid parameter {}".format(p))
+
+            type_op_b = None
+            type_op_c = None
+            for p in params:
+                if p.startswith("types:"):
+                    if not in_place:
+                        raise ValueError("type specification only support for in place functions")
+                    types = p[len("types:"):].split(",")
+                    assert(len(types) == (2 if op_c else 1))
+                    type_op_b = None if types[0] == "Real" else types[0]
+                    if op_c:
+                        type_op_c = None if types[1] == "Real" else types[1]
 
             op_b_mapping = {
                 "op_a":op_a,
@@ -237,16 +301,15 @@ class Broadcast(CWrapPlugin):
             }
 
             if in_place:
-                code_arg_op_other1 = self.getPreArgStringTemplate().substitute(op_b_mapping)
-                code_arg_op_other2 = self.getPreArgStringTemplate().substitute(op_c_mapping) if op_c else ""
-
+                code_arg_op_other1 = self.getPreArgStringTemplate(type=type_op_b).substitute(op_b_mapping)
+                code_arg_op_other2 = self.getPreArgStringTemplate(type=type_op_c).substitute(op_c_mapping) if op_c else ""
 
                 post_code = self.POST_TEMPLATE.substitute(op_b_mapping)
                 if op_c:
                     post_code += self.POST_TEMPLATE.substitute(op_c_mapping)
 
                 if op_c:
-                    expand_code = self.IN_PLACE_PRE_EXPAND2_TEMPLATE.substitute(
+                    expand_code = self.getInPlacePreExpand2Template(type_op_b, type_op_c).substitute(
                         op_b_mapping,
                         op_other1=op_b,
                         op_other2=op_c,
@@ -256,7 +319,7 @@ class Broadcast(CWrapPlugin):
                     expand_code += self.IN_PLACE_BACK_COMPAT_WARN_TEMPLATE.substitute(op_b_mapping)
                     expand_code += self.IN_PLACE_BACK_COMPAT_WARN_TEMPLATE.substitute(op_b_mapping)
                 else:
-                    expand_code = self.IN_PLACE_PRE_EXPAND1_TEMPLATE.substitute(op_b_mapping, post_code=post_code)
+                    expand_code = self.getInPlacePreExpand1Template(type=type_op_b).substitute(op_b_mapping, post_code=post_code)
                     expand_code += self.IN_PLACE_BACK_COMPAT_WARN_TEMPLATE.substitute(op_b_mapping)
 
                 new_code_pre.append(self.IN_PLACE_PRE_TEMPLATE.substitute(
