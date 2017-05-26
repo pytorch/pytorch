@@ -121,7 +121,7 @@ class TestSoftmaxOps(hu.HypothesisTestCase):
             ["X"],
             ["probs"],
             axis=axis,
-            engine=engine
+            engine=engine,
         )
 
         self.assertReferenceChecks(
@@ -339,8 +339,11 @@ class TestSoftmaxOps(hu.HypothesisTestCase):
         self.assertGradientChecks(
             gc, op, [X, label], 0, [1], stepsize=1e-4, threshold=1e-2)
 
-    @given(n=st.integers(2, 10), D=st.integers(4, 16),
-          only_loss=st.booleans(), **hu.gcs)
+    @given(
+        n=st.integers(2, 10),
+        D=st.integers(4, 16),
+        only_loss=st.booleans(),
+        **hu.gcs)
     def test_softmax_with_loss_weighted(self, n, D, only_loss, gc, dc):
         # n = number of examples, D = |labels|
         # Initialize X and add 1e-2 for numerical stability
@@ -428,7 +431,7 @@ class TestSoftmaxOps(hu.HypothesisTestCase):
             "SoftmaxWithLoss",
             ["X", "label", "weights"],
             ["probs", "avgloss"],
-            label_prob=1
+            label_prob=1,
         )
 
         self.assertReferenceChecks(
@@ -492,10 +495,9 @@ class TestSoftmaxOps(hu.HypothesisTestCase):
             return (probs, total_xent / total_weight)
 
         op = core.CreateOperator(
-            "SoftmaxWithLoss",
+            "SpatialSoftmaxWithLoss",
             ["X", "label"] + ([] if weights is None else ["weights"]),
             ["probs", "avgloss"],
-            spatial=1
         )
 
         inputs = [X, label] + ([] if weights is None else [weights])
@@ -548,10 +550,9 @@ class TestSoftmaxOps(hu.HypothesisTestCase):
             return (probs, 0.0)
 
         op = core.CreateOperator(
-            "SoftmaxWithLoss",
+            "SpatialSoftmaxWithLoss",
             ["X", "label"] + ([] if weights is None else ["weights"]),
             ["probs", "avgloss"],
-            spatial=1
         )
 
         inputs = [X, label] + ([] if weights is None else [weights])
@@ -612,18 +613,16 @@ class TestSoftmaxOps(hu.HypothesisTestCase):
 
         for _j in range(3):
             gpuop = core.CreateOperator(
-                "SoftmaxWithLoss",
+                "SpatialSoftmaxWithLoss",
                 ["X_gpu", "label_gpu"],
                 ["probs_gpu", "avgloss_gpu"],
-                spatial=1,
                 device_option=core.DeviceOption(caffe2_pb2.CUDA, 0)
             )
 
             cpuop = core.CreateOperator(
-                "SoftmaxWithLoss",
+                "SpatialSoftmaxWithLoss",
                 ["X_cpu", "label_cpu"],
                 ["probs_cpu", "avgloss_cpu"],
-                spatial=1,
                 device_option=core.DeviceOption(caffe2_pb2.CPU)
             )
 

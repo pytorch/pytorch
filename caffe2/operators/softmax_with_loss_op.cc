@@ -15,39 +15,23 @@ OPERATOR_SCHEMA(SoftmaxWithLoss)
     .TensorInferenceFunction(
         [](const OperatorDef& def, const vector<TensorShape>& in) {
           ArgumentHelper helper(def);
-          auto spatial_mode = helper.GetSingleArgument<int32_t>("spatial", 0);
           auto axis = helper.GetSingleArgument<int32_t>("axis", 1);
 
           vector<TensorShape> out(2);
 
           auto logits = in[0]; // Tensor with Shape [batch_size, num_classes]
           auto labels = in[1]; // Tensor with shape [batch_size, ]
+          const auto canonical_axis =
+              canonical_axis_index_(axis, logits.dims().size());
+          const int batch_size =
+              size_to_dim_(canonical_axis, GetDimsVector(logits));
+          const int num_classes =
+              size_from_dim_(canonical_axis, GetDimsVector(logits));
 
-          if (!spatial_mode) {
-            const auto canonical_axis =
-                canonical_axis_index_(axis, logits.dims().size());
-            const int batch_size =
-                size_to_dim_(canonical_axis, GetDimsVector(logits));
-            const int num_classes =
-                size_from_dim_(canonical_axis, GetDimsVector(logits));
+          out[0].set_data_type(logits.data_type());
+          out[0].add_dims(batch_size);
+          out[0].add_dims(num_classes);
 
-            out[0].set_data_type(logits.data_type());
-            out[0].add_dims(batch_size);
-            out[0].add_dims(num_classes);
-          } else {
-            auto batch_size = logits.dims().Get(0);
-            auto num_classes = logits.dims().Get(1);
-
-            DCHECK_EQ(logits.dims_size(), 4);
-            DCHECK_EQ(labels.dims_size(), 3);
-            out[0].set_data_type(logits.data_type());
-            out[0].add_dims(batch_size);
-            out[0].add_dims(num_classes);
-            out[0].add_dims(in[0].dims(2));
-            out[0].add_dims(in[0].dims(3));
-          }
-
-          // Output 2 is scalar shape, so no dims added
           return out;
         })
     .SetDoc(R"DOC(
@@ -58,21 +42,17 @@ numerically more stable than separate Softmax and CrossEntropy ops.
 The inputs are a 2-D tensor (Tensor<float>) of size
 (batch_size x input_feature_dimensions) and tensor of labels (ground truth).
 Output is tensor with the probability for each label for each example (N x D)
-and averaged loss (scalar). Use parameter spatial=1 to enable spatial softmax.
-Spatial softmax also supports special \"don't care\" label (-1) that is ignored
-when computing the loss.
+and averaged loss (scalar).
 Use parameter label_prob=1 to enable inputting labels as a probability
-distribution.  Currently does not handle spatial=1 case.
+distribution.
 Optional third input blob can be used to weight the samples for the loss.
-For the spatial version, weighting is by x,y position of the input.
 )DOC")
     .Input(0, "logits", "Unscaled log probabilities")
     .Input(1, "labels", "Ground truth")
     .Input(
         2,
         "weight_tensor",
-        "Optional blob to be used to weight the samples for the loss. With\
-        spatial set, weighting is by x,y of the input")
+        "Optional blob to be used to weight the samples for the loss.")
     .Output(0, "softmax", "Tensor with softmax cross entropy loss")
     .Output(1, "loss", "Average loss");
 
@@ -90,14 +70,8 @@ bool SoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
 
   const auto canonical_axis = X.canonical_axis_index(axis_);
   int N, D;
-  if (spatial_mode_) {
-    N = X.dim32(0);
-    D = X.dim32(1);
-  } else {
-    N = X.size_to_dim(canonical_axis); // batch size
-    D = X.size_from_dim(canonical_axis);
-  }
-
+  N = X.size_to_dim(canonical_axis); // batch size
+  D = X.size_from_dim(canonical_axis);
   P->ResizeLike(X);
 
   if (sum_multiplier_.size() != D) {
@@ -108,165 +82,89 @@ bool SoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
 
   float* Pdata = P->mutable_data<float>();
   const float* weights = (InputSize() > 2 ? Input(2).data<float>() : nullptr);
-  DCHECK(!(spatial_mode_ && label_prob_mode_));
 
-  if (!spatial_mode_) {
-    if (label_prob_mode_) {
-      DCHECK_GE(T.ndim(), 2);
-      DCHECK_EQ(T.size_to_dim(canonical_axis), N);
-      DCHECK_EQ(T.size_from_dim(canonical_axis), D);
-    } else {
-      if (T.ndim() == canonical_axis) {
-        DCHECK_EQ(T.size(), N);
-      } else {
-        DCHECK_EQ(T.size_to_dim(canonical_axis), N);
-        DCHECK_EQ(T.size_from_dim(canonical_axis), 1);
-      }
-    }
-
-    if (sum_multiplier_.size() != D) {
-      sum_multiplier_.Resize(D);
-      math::Set<float, CPUContext>(
-          D, 1.f, sum_multiplier_.mutable_data<float>(), &context_);
-    }
-
-    rowmax_.Resize(N);
-    losses_.Resize(N);
-
-    SoftmaxCPU(
-        context_,
-        N,
-        D,
-        X.data<float>(),
-        Pdata,
-        losses_.mutable_data<float>(),
-        sum_multiplier_.data<float>(),
-        !label_prob_mode_,
-        rowmax_.mutable_data<float>());
-
-    // Then compute cross entropy
-    float loss_sum = 0.0;
-    float weight_sum = 0.0;
-    if (!label_prob_mode_) {
-      const int* label_data = T.data<int>();
-      const float* Xdata = X.data<float>();
-
-      for (int i = 0; i < N; ++i) {
-        CAFFE_ENFORCE(
-            label_data[i] < D && label_data[i] >= 0,
-            "Label seems incorrect: label value larger than number of classes: ",
-            label_data[i],
-            " vs ",
-            D);
-        float weight = weights ? weights[i] : 1.0;
-        float l = -Pdata[i * D + label_data[i]] * weight;
-        loss_sum += l;
-        weight_sum += weight;
-      }
-      math::Exp(N * D, Pdata, Pdata, &context_);
-    } else {
-      const float* label_data = T.data<float>();
-
-      for (int i = 0; i < N; ++i) {
-        CAFFE_ENFORCE(
-            label_data[i] >= 0,
-            "Label prob seems incorrect: label prob value must be nonnegative: ",
-            label_data[i]);
-        float l = 0.0;
-        float total_prob = 0.0;
-        float weight = weights ? weights[i] : 1.0;
-        for (int j = 0; j < D; ++j) {
-          l += -log(std::max(Pdata[i * D + j], 1e-20f)) *
-              label_data[i * D + j] * weight;
-          total_prob += label_data[i * D + j];
-        }
-        loss_sum += l;
-        DCHECK(std::abs(total_prob - 1.) < 1e-5f);
-        weight_sum += weight;
-      }
-    }
-
-    avg_loss->Resize(vector<TIndex>());
-    float* avg_loss_data = avg_loss->mutable_data<float>();
-    if (weight_sum != 0.0) {
-      avg_loss_data[0] = loss_sum * scale_ / weight_sum;
-    } else {
-      avg_loss_data[0] = 0.0;
-    }
+  if (label_prob_mode_) {
+    DCHECK_GE(T.ndim(), 2);
+    DCHECK_EQ(T.size_to_dim(canonical_axis), N);
+    DCHECK_EQ(T.size_from_dim(canonical_axis), D);
   } else {
-    // Spatial mode, compute softmax for each x, y location
-    DCHECK_EQ(X.ndim(), 4);
-    DCHECK_EQ(T.ndim(), 3);
-    DCHECK_EQ(T.dim32(0), N);
+    if (T.ndim() == canonical_axis) {
+      DCHECK_EQ(T.size(), N);
+    } else {
+      DCHECK_EQ(T.size_to_dim(canonical_axis), N);
+      DCHECK_EQ(T.size_from_dim(canonical_axis), 1);
+    }
+  }
 
-    int H = X.dim32(2);
-    int W = X.dim32(3);
+  if (sum_multiplier_.size() != D) {
+    sum_multiplier_.Resize(D);
+    math::Set<float, CPUContext>(
+        D, 1.f, sum_multiplier_.mutable_data<float>(), &context_);
+  }
 
+  rowmax_.Resize(N);
+  losses_.Resize(N);
+
+  SoftmaxCPU(
+      context_,
+      N,
+      D,
+      X.data<float>(),
+      Pdata,
+      losses_.mutable_data<float>(),
+      sum_multiplier_.data<float>(),
+      !label_prob_mode_,
+      rowmax_.mutable_data<float>());
+
+  // Then compute cross entropy
+  float loss_sum = 0.0;
+  float weight_sum = 0.0;
+  if (!label_prob_mode_) {
+    const int* label_data = T.data<int>();
     const float* Xdata = X.data<float>();
 
     for (int i = 0; i < N; ++i) {
-      for (int y = 0; y < H; ++y) {
-        for (int x = 0; x < W; ++x) {
-          // Subtract max on each cell for numerical reasons
-          float max_val = (-1e20f);
-          for (int c = 0; c < D; ++c) {
-            // TODO optimize
-            int idx = i * (H * W * D) + c * (H * W) + y * W + x;
-            max_val = std::max(max_val, Xdata[idx]);
-          }
+      CAFFE_ENFORCE(
+          label_data[i] < D && label_data[i] >= 0,
+          "Label seems incorrect: label value larger than number of classes: ",
+          label_data[i],
+          " vs ",
+          D);
+      float weight = weights ? weights[i] : 1.0;
+      float l = -Pdata[i * D + label_data[i]] * weight;
+      loss_sum += l;
+      weight_sum += weight;
+    }
+    math::Exp(N * D, Pdata, Pdata, &context_);
+  } else {
+    const float* label_data = T.data<float>();
 
-          // Exponentiate
-          float expsum = 0.0f;
-          for (int c = 0; c < D; ++c) {
-            int idx = i * (H * W * D) + c * (H * W) + y * W + x;
-            float expx = exp(Xdata[idx] - max_val);
-            Pdata[idx] = expx;
-            expsum += expx;
-          }
-
-          // Normalize
-          for (int c = 0; c < D; ++c) {
-            int idx = i * (H * W * D) + c * (H * W) + y * W + x;
-            Pdata[idx] /= expsum;
-          }
-        }
+    for (int i = 0; i < N; ++i) {
+      CAFFE_ENFORCE(
+          label_data[i] >= 0,
+          "Label prob seems incorrect: label prob value must be nonnegative: ",
+          label_data[i]);
+      float l = 0.0;
+      float total_prob = 0.0;
+      float weight = weights ? weights[i] : 1.0;
+      for (int j = 0; j < D; ++j) {
+        l += -log(std::max(Pdata[i * D + j], 1e-20f)) * label_data[i * D + j] *
+            weight;
+        total_prob += label_data[i * D + j];
       }
+      loss_sum += l;
+      DCHECK(std::abs(total_prob - 1.) < 1e-5f);
+      weight_sum += weight;
     }
+  }
 
-    // Compute the avg cross-entropy loss
-    avg_loss->Resize(vector<TIndex>());
-    float* avg_loss_data = avg_loss->mutable_data<float>();
-    const int* label_data = T.data<int>();
-
-    float sum_label_xent = 0.0f;
-    float total_weight = 0.0;
-
-    for (int y = 0; y < H; y++) {
-      for (int x = 0; x < W; x++) {
-        for (int i = 0; i < N; i++) {
-          int label_idx = i * H * W + y * W + x;
-          int label = label_data[label_idx];
-          if (label != DONT_CARE) {
-            CAFFE_ENFORCE(
-                label < D && label >= 0,
-                "Label seems incorrect: label value larger than number of classes: ",
-                label_data[i],
-                " vs ",
-                D);
-            int idx = i * (H * W * D) + label * (H * W) + y * W + x;
-            float w = weights ? weights[label_idx] : 1.0;
-            total_weight += w;
-            sum_label_xent += -log(std::max(Pdata[idx], 1e-20f)) * w;
-          }
-        }
-      }
-    }
-    if (total_weight != 0.0) {
-      *avg_loss_data = sum_label_xent / total_weight;
-    } else {
-      *avg_loss_data = 0.0;
-    }
-  } // if spatial
+  avg_loss->Resize(vector<TIndex>());
+  float* avg_loss_data = avg_loss->mutable_data<float>();
+  if (weight_sum != 0.0) {
+    avg_loss_data[0] = loss_sum * scale_ / weight_sum;
+  } else {
+    avg_loss_data[0] = 0.0;
+  }
   return true;
 }
 
@@ -282,158 +180,85 @@ bool SoftmaxWithLossGradientOp<float, CPUContext>::RunOnDevice() {
 
   const auto canonical_axis = X.canonical_axis_index(axis_);
   int N, D;
-  if (spatial_mode_) {
-    N = X.dim32(0);
-    D = X.dim32(1);
-  } else {
-    N = X.size_to_dim(canonical_axis); // batch size
-    D = X.size_from_dim(canonical_axis);
-  }
+  N = X.size_to_dim(canonical_axis); // batch size
+  D = X.size_from_dim(canonical_axis);
   dX->ResizeLike(X);
 
-  if (!spatial_mode_) {
-    if (label_prob_mode_) {
-      DCHECK_GE(T.ndim(), 2);
-      DCHECK_EQ(T.size_to_dim(canonical_axis), N);
-      DCHECK_EQ(T.size_from_dim(canonical_axis), D);
-    } else {
-      if (T.ndim() == canonical_axis) {
-        DCHECK_EQ(T.size(), N);
-      } else {
-        DCHECK_EQ(T.size_to_dim(canonical_axis), N);
-        DCHECK_EQ(T.size_from_dim(canonical_axis), 1);
-      }
-    }
-
-    const float* Pdata = P.data<float>();
-    float* dX_data = dX->mutable_data<float>();
-
-    // Copy softmax probabilities into dX. All but the neuron
-    // corresponding to the correct label has gradient equaling e(x_j)
-    // which is the probability under softmax.
-    context_.Copy<float, CPUContext, CPUContext>(P.size(), Pdata, dX_data);
-
-    // Compute gradient for the matching labels.
-    float total_weight = 0.0f;
-    if (!label_prob_mode_) {
-      const int* label_data = T.data<int>();
-
-      if (weights) {
-        for (int i = 0; i < N; ++i) {
-          int idx = i * D + label_data[i];
-          float weight = weights[i];
-          dX_data[idx] = Pdata[idx] - 1.0;
-          for (int d = 0; d < D; d++) {
-            int k = i * D + d;
-            dX_data[k] *= weight;
-          }
-
-          total_weight += weight;
-        }
-      } else {
-        for (int i = 0; i < N; ++i) {
-          int idx = i * D + label_data[i];
-          dX_data[idx] = Pdata[idx] - 1.0f;
-        }
-        total_weight = N;
-      }
-    } else {
-      const float* label_data = T.data<float>();
-
-      if (weights) {
-        for (int i = 0; i < N; ++i) {
-          float weight = weights[i];
-          for (int j = 0; j < D; ++j) {
-            int idx = i * D + j;
-            dX_data[idx] = (Pdata[idx] - label_data[idx]) * weight;
-          }
-          total_weight += weight;
-        }
-      } else {
-        for (int i = 0; i < N; ++i) {
-          for (int j = 0; j < D; ++j) {
-            int idx = i * D + j;
-            dX_data[idx] = Pdata[idx] - label_data[idx];
-          }
-        }
-        total_weight = N;
-      }
-    }
-
-    // Scale by d_avg_loss / N
-    if (total_weight > 0) {
-      math::Scale<float, CPUContext>(
-          dX->size(),
-          scale_ / total_weight * d_avg_loss.data<float>()[0],
-          dX->data<float>(),
-          dX_data,
-          &context_);
-    }
+  if (label_prob_mode_) {
+    DCHECK_GE(T.ndim(), 2);
+    DCHECK_EQ(T.size_to_dim(canonical_axis), N);
+    DCHECK_EQ(T.size_from_dim(canonical_axis), D);
   } else {
-    DCHECK_EQ(T.dim32(0), N);
+    if (T.ndim() == canonical_axis) {
+      DCHECK_EQ(T.size(), N);
+    } else {
+      DCHECK_EQ(T.size_to_dim(canonical_axis), N);
+      DCHECK_EQ(T.size_from_dim(canonical_axis), 1);
+    }
+  }
 
-    // Spatial mode, compute softmax for each x, y location
-    DCHECK_EQ(X.ndim(), 4);
-    DCHECK_EQ(T.ndim(), 3);
+  const float* Pdata = P.data<float>();
+  float* dX_data = dX->mutable_data<float>();
 
-    int H = X.dim32(2);
-    int W = X.dim32(3);
+  // Copy softmax probabilities into dX. All but the neuron
+  // corresponding to the correct label has gradient equaling e(x_j)
+  // which is the probability under softmax.
+  context_.Copy<float, CPUContext, CPUContext>(P.size(), Pdata, dX_data);
 
-    const float* Pdata = P.data<float>();
-    float* dX_data = dX->mutable_data<float>();
+  // Compute gradient for the matching labels.
+  float total_weight = 0.0f;
+  if (!label_prob_mode_) {
     const int* label_data = T.data<int>();
 
-    // Copy softmax probabilities into dX. All but the neuron
-    // corresponding to the correct label has gradient equaling e(x_j)
-    // which is the probability under softmax.
-    context_.Copy<float, CPUContext, CPUContext>(P.size(), Pdata, dX_data);
+    if (weights) {
+      for (int i = 0; i < N; ++i) {
+        int idx = i * D + label_data[i];
+        float weight = weights[i];
+        dX_data[idx] = Pdata[idx] - 1.0;
+        for (int d = 0; d < D; d++) {
+          int k = i * D + d;
+          dX_data[k] *= weight;
+        }
 
-    float total_weight = 0.0f;
-    for (int y = 0; y < H; ++y) {
-      for (int x = 0; x < W; ++x) {
-        for (int i = 0; i < N; ++i) {
-          int label_idx = i * H * W + y * W + x;
-          int label = label_data[label_idx];
+        total_weight += weight;
+      }
+    } else {
+      for (int i = 0; i < N; ++i) {
+        int idx = i * D + label_data[i];
+        dX_data[idx] = Pdata[idx] - 1.0f;
+      }
+      total_weight = N;
+    }
+  } else {
+    const float* label_data = T.data<float>();
 
-          if (label != DONT_CARE) {
-            int idx = i * (H * W * D) + label * (H * W) + y * W + x;
-
-            dX_data[idx] = (dX_data[idx] - 1.0);
-
-            if (weights != nullptr) {
-              float weight = weights[label_idx];
-              for (int c = 0; c < D; ++c) {
-                int k = i * (H * W * D) + c * (H * W) + y * W + x;
-                dX_data[k] *= weight;
-              }
-              total_weight += weight;
-            } else {
-              total_weight += 1.0;
-            }
-          } else {
-            // Set gradient to zero for coordinates where we have dont care
-            for (int c = 0; c < D; ++c) {
-              int idx = i * (H * W * D) + c * (H * W) + y * W + x;
-              dX_data[idx] = 0;
-            }
-          }
+    if (weights) {
+      for (int i = 0; i < N; ++i) {
+        float weight = weights[i];
+        for (int j = 0; j < D; ++j) {
+          int idx = i * D + j;
+          dX_data[idx] = (Pdata[idx] - label_data[idx]) * weight;
+        }
+        total_weight += weight;
+      }
+    } else {
+      for (int i = 0; i < N; ++i) {
+        for (int j = 0; j < D; ++j) {
+          int idx = i * D + j;
+          dX_data[idx] = Pdata[idx] - label_data[idx];
         }
       }
+      total_weight = N;
     }
+  }
 
-    if (total_weight > 0) {
-      math::Scale<float, CPUContext>(
-          dX->size(),
-          scale_ / total_weight,
-          dX->data<float>(),
-          dX_data,
-          &context_);
-    }
+  // Scale by d_avg_loss / N
+  if (total_weight > 0) {
     math::Scale<float, CPUContext>(
         dX->size(),
-        d_avg_loss.data<float>(),
+        scale_ / total_weight * d_avg_loss.data<float>()[0],
         dX->data<float>(),
-        dX->mutable_data<float>(),
+        dX_data,
         &context_);
   }
   return true;
