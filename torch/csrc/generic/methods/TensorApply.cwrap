@@ -57,6 +57,36 @@ static PyObject * THPTensor_(map)(THPTensor *self, PyObject *args)
 
   THTensor *tensor = self->cdata;
   THTensor *src = src_object->cdata;
+
+  THLongStoragePtr tensor_size = THTensor_(newSizeOf)(LIBRARY_STATE tensor);
+  ptrdiff_t tensor_nElem = THTensor_(nElement)(LIBRARY_STATE tensor);
+  bool skip_expand = false;
+  THTensor *src_save = src;
+  THTensorPtr src_guard = THTensor_(new)(LIBRARY_STATE_NOARGS);
+  src=src_guard.get();
+  ptrdiff_t src_nElem = THTensor_(nElement)(LIBRARY_STATE src_save);
+
+  bool src_raise = false || (tensor_nElem != src_nElem);
+  int src_err =!skip_expand && THTensor_(expand)(LIBRARY_STATE
+        src,
+        src_save,
+        tensor_size.get(),
+        src_raise);
+  if (src_err != 0 && !src_raise) {
+    skip_expand = true; // don't do further expansions
+    src = src_save;
+    PyErr_WarnEx(PyExc_UserWarning, "src is not broadcastable to tensor, but they have the same number of "
+        "elements.  Falling back to deprecated pointwise behavior.", 1);
+  }
+  if (getBackCompatBroadcastWarn()) {
+    bool same_shape = THSize_isSameSizeAs(tensor->size, tensor->nDimension,
+        src_save->size, src_save->nDimension);
+    if (!same_shape && src_err == 0 && (tensor_nElem == src_nElem) && !false) {
+      PyErr_WarnEx(PyExc_UserWarning, "tensor and src do not have the same shape, but are broadcastable, and have the same number of "
+          "elements.  Changing behavior in a backwards incompatible manner to broadcasting rather than viewing as 1-dimensional.", 1);
+    }
+  }
+
   TH_TENSOR_APPLY2(real, tensor, real, src,
                   PyObject *ret =
                       PyObject_CallFunction(fn, (char*)(BUILD_REAL_FMT BUILD_REAL_FMT),
@@ -70,6 +100,8 @@ static PyObject * THPTensor_(map)(THPTensor *self, PyObject *args)
                   *tensor_data = THPUtils_(unpackReal)(ret);
                   Py_DECREF(ret);
                   );
+
+  src = src_save;
 
   Py_INCREF(self);
   return (PyObject*)self;
@@ -95,6 +127,62 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
   THTensor *tensor = self->cdata;
   THTensor *src1 = src1_object->cdata;
   THTensor *src2 = src2_object->cdata;
+
+
+  THLongStoragePtr tensor_size = THTensor_(newSizeOf)(LIBRARY_STATE tensor);
+  ptrdiff_t tensor_nElem = THTensor_(nElement)(LIBRARY_STATE tensor);
+  bool skip_expand = false;
+  THTensor *src1_save = src1;
+  THTensorPtr src1_guard = THTensor_(new)(LIBRARY_STATE_NOARGS);
+  src1=src1_guard.get();
+  ptrdiff_t src1_nElem = THTensor_(nElement)(LIBRARY_STATE src1_save);
+  THTensor *src2_save = src2;
+  THTensorPtr src2_guard = THTensor_(new)(LIBRARY_STATE_NOARGS);
+  src2=src2_guard.get();
+  ptrdiff_t src2_nElem = THTensor_(nElement)(LIBRARY_STATE src2_save);
+  bool src1_raise = false || (tensor_nElem != src1_nElem);
+  bool src2_raise = false || (tensor_nElem != src2_nElem);
+  int src1_err =!skip_expand && THTensor_(expand)(LIBRARY_STATE
+      src1,
+      src1_save,
+      tensor_size.get(),
+      src1_raise || src2_raise);
+  if (src1_err != 0 && !(src1_raise || src2_raise)) {
+    skip_expand = true; // don't do further expansions
+    src1 = src1_save;
+    src2 = src2_save;
+    PyErr_WarnEx(PyExc_UserWarning, "src1, src2 are not broadcastable to self, but they all have the same number of "
+        "elements.  Falling back to deprecated pointwise behavior.", 1);
+  }
+  int src2_err =!skip_expand && THTensor_(expand)(LIBRARY_STATE
+      src2,
+      src2_save,
+      tensor_size.get(),
+      src1_raise || src2_raise);
+  if (src2_err != 0 && !(src1_raise || src2_raise)) {
+    skip_expand = true; // don't do further expansions
+    src1 = src1_save;
+    src2 = src2_save;
+    PyErr_WarnEx(PyExc_UserWarning, "src1, src2 are not broadcastable to self, but they all have the same number of "
+        "elements.  Falling back to deprecated pointwise behavior.", 1);
+  }
+  if (getBackCompatBroadcastWarn()) {
+    bool same_shape = THSize_isSameSizeAs(tensor->size, tensor->nDimension,
+        src1_save->size, src1_save->nDimension);
+    if (!same_shape && src1_err == 0 && (tensor_nElem == src1_nElem) && !false) {
+      PyErr_WarnEx(PyExc_UserWarning, "tensor and src1 do not have the same shape, but are broadcastable, and have the same number of "
+          "elements.  Changing behavior in a backwards incompatible manner to broadcasting rather than viewing as 1-dimensional.", 1);
+    }
+  }
+  if (getBackCompatBroadcastWarn()) {
+    bool same_shape = THSize_isSameSizeAs(tensor->size, tensor->nDimension,
+        src1_save->size, src1_save->nDimension);
+    if (!same_shape && src1_err == 0 && (tensor_nElem == src1_nElem) && !false) {
+      PyErr_WarnEx(PyExc_UserWarning, "tensor and src2 do not have the same shape, but are broadcastable, and have the same number of "
+          "elements.  Changing behavior in a backwards incompatible manner to broadcasting rather than viewing as 1-dimensional.", 1);
+    }
+  }
+
   TH_TENSOR_APPLY3(real, tensor, real, src1, real, src2,
                   PyObject *ret =
                       PyObject_CallFunction(fn, (char*)(BUILD_REAL_FMT BUILD_REAL_FMT BUILD_REAL_FMT),
@@ -108,6 +196,9 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
                   *tensor_data = THPUtils_(unpackReal)(ret);
                   Py_DECREF(ret);
                   );
+
+  src1 = src1_save;
+  src2 = src2_save;
 
   Py_INCREF(self);
   return (PyObject*)self;

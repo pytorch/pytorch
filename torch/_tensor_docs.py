@@ -792,8 +792,10 @@ add_docstr(torch._C.FloatTensorBase.map_,
 map_(tensor, callable)
 
 Applies :attr:`callable` for each element in this tensor and the given tensor
-and stores the results in this tensor. The :attr:`callable` should have the
-signature::
+and stores the results in this tensor.  This tensor and the given tensor must be
+:ref:`broadcastable <broadcasting-semantics>`.
+
+The :attr:`callable` should have the signature::
 
     def callable(a, b) -> number
 """)
