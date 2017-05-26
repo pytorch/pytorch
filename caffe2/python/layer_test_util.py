@@ -14,11 +14,17 @@ from caffe2.python import (
     schema,
     test_util,
     workspace,
+    utils,
 )
+from caffe2.proto import caffe2_pb2
 import numpy as np
 
 
-OpSpec = namedtuple("OpSpec", "type input output")
+class OpSpec(namedtuple("OpSpec", "type input output arg")):
+
+    def __new__(cls, op_type, op_input, op_output, op_arg=None):
+        return super(OpSpec, cls).__new__(cls, op_type, op_input,
+                                          op_output, op_arg)
 
 
 class LayersTestCase(test_util.TestCase):
@@ -96,6 +102,18 @@ class LayersTestCase(test_util.TestCase):
                 continue
             self.assertEqual(spec_blob, op_blob)
 
+    def assertArgsEqual(self, spec_args, op_args):
+        self.assertEqual(len(spec_args), len(op_args))
+
+        def parse_args(args):
+            operator = caffe2_pb2.OperatorDef()
+            for k, v in args.items():
+                arg = utils.MakeArgument(k, v)
+                operator.arg.add().CopyFrom(arg)
+            return operator.arg
+
+        self.assertEqual(parse_args(spec_args), op_args)
+
     def assertNetContainOps(self, net, op_specs):
         """
         Given a net and a list of OpSpec's, check that the net match the spec
@@ -106,4 +124,6 @@ class LayersTestCase(test_util.TestCase):
             self.assertEqual(op_spec.type, op.type)
             self.assertBlobsEqual(op_spec.input, op.input)
             self.assertBlobsEqual(op_spec.output, op.output)
+            if op_spec.arg is not None:
+                self.assertArgsEqual(op_spec.arg, op.arg)
         return ops
