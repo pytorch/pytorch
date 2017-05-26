@@ -1,5 +1,4 @@
 #include "../base/data_channels/DataChannelTCP.hpp"
-#include "../base/ChannelEnvVars.hpp"
 #include "TestUtils.hpp"
 
 #include <cassert>
@@ -12,9 +11,9 @@ constexpr int MASTER_PORT = 45680;
 
 void master()
 {
-  setenv(thd::WORLD_SIZE_ENV, std::to_string((WORKERS_NUM + 1)).data(), 1);
-  setenv(thd::RANK_ENV, "0", 1);
-  setenv(thd::MASTER_PORT_ENV, std::to_string(MASTER_PORT).data(), 1);
+  setenv(WORLD_SIZE_ENV, std::to_string((WORKERS_NUM + 1)).data(), 1);
+  setenv(RANK_ENV, "0", 1);
+  setenv(MASTER_PORT_ENV, std::to_string(MASTER_PORT).data(), 1);
   auto masterChannel = std::make_shared<thd::DataChannelTCP>(thd::getInitConfig("env://"), 2000); // timeout after 2s
 
   ASSERT_THROWS(std::exception, masterChannel->init())

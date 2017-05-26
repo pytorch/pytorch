@@ -14,7 +14,7 @@
 namespace thd {
 
 struct MasterCommandChannel {
-  MasterCommandChannel();
+  MasterCommandChannel(InitMethod::Config config);
   ~MasterCommandChannel();
 
   bool init();
@@ -32,14 +32,11 @@ private:
   int _error_pipe; // informs error handler thread that we are exiting
   std::unique_ptr<std::string> _error;
   std::thread _error_thread;
-
-  port_type _port;
-
   std::vector<std::mutex> _mutexes;
 };
 
 struct WorkerCommandChannel {
-  WorkerCommandChannel();
+  WorkerCommandChannel(InitMethod::Config config);
   ~WorkerCommandChannel();
 
   bool init();

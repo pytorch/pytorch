@@ -1,11 +1,12 @@
 #include "InitMethodFile.hpp"
+#include "InitMethodUtils.hpp"
 
 #include <fcntl.h>
 #include <unistd.h>
-
-#include <system_error>
-#include <fstream>
 #include <algorithm>
+#include <fstream>
+#include <system_error>
+#include <thread>
 
 namespace {
 
@@ -77,7 +78,10 @@ InitMethod::Config InitMethodFile::getConfig() {
     }
     file << std::endl;
 
-    // TODO: connect here and recover your own address
+    file.close();
+    unlockFile(_file);
+
+    discoverWorkers(listen_socket, _world_size);
 
     config.master = {
       .world_size = _world_size,
@@ -90,34 +94,33 @@ InitMethod::Config InitMethodFile::getConfig() {
       throw std::runtime_error("corrupted distributed init file");
     std::string master_info = content.substr(0, addr_end_pos);
 
-    auto port_sep_pos = full_address.rfind('#');
+    auto port_sep_pos = content.rfind('#');
     if (port_sep_pos == std::string::npos)
       throw std::runtime_error("corrupted distributed init file");
 
-    std::string str_port = full_address.substr(0, port_sep_pos);
+    std::string str_port = content.substr(0, port_sep_pos);
     auto port = convertToPort(std::stoul(str_port));
 
     std::vector<std::string> addresses;
     auto sep_pos = port_sep_pos;
     while (true) {
-      auto next_sep_pos = full_address.find(';', sep_pos);
+      auto next_sep_pos = content.find(';', sep_pos + 1);
       if (next_sep_pos == std::string::npos) break;
-      addresses.emplace_back(full_address.substr(sep_pos + 1, next_sep_pos);
+      addresses.emplace_back(content.substr(sep_pos + 1, next_sep_pos - sep_pos - 1));
       sep_pos = next_sep_pos;
     }
 
-    // TODO: connect here and recover your own address
-
-    config.worker = {
-      .address = std::string(), // TODO
-      .listen_port = port,
-    };
-
     file << std::to_string(config.rank) << std::endl;
-  }
 
-  file.close();
-  unlockFile(_file);
+    file.close();
+    unlockFile(_file);
+
+    std::string master_address = discoverMaster(addresses, port);
+    config.worker = {
+      .address = master_address,
+      .port = port,
+    };
+  }
 
   if (config.rank == _world_size - 1) {
     ::remove(_file_path.c_str());

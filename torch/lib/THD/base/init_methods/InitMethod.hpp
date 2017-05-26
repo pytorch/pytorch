@@ -1,10 +1,10 @@
 #pragma once
 
+#include "../ChannelUtils.hpp"
+
 #include <string>
 #include <stdexcept>
 #include <tuple>
-
-#include "../ChannelUtils.hpp"
 
 namespace thd {
 
@@ -18,7 +18,7 @@ struct InitMethod {
 
     struct WorkerConfig {
       std::string address;
-      port_type listen_port;
+      port_type port;
     };
 
     rank_type rank;

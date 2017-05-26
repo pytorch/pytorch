@@ -22,9 +22,10 @@ std::unordered_map<object_id_type, std::unique_ptr<thpp::Generator>> workerGener
 using namespace thd::rpc;
 using namespace thd::worker;
 
-void THDWorkerMain() {
+void THDWorkerMain(std::string init_method, int world_size, std::string group_name) {
+  thd::InitMethod::Config config = thd::getInitConfig(init_method, world_size, group_name);
   std::unique_ptr<RPCMessage> command;
-  workerCommandChannel.reset(new thd::WorkerCommandChannel());
+  workerCommandChannel.reset(new thd::WorkerCommandChannel(config));
   if (!workerCommandChannel->init()) {
     return;
   }

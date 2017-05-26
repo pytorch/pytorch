@@ -1,5 +1,4 @@
 #include "ChannelUtils.hpp"
-#include "ChannelEnvVars.hpp"
 
 #include <arpa/inet.h>
 #include <netdb.h>
@@ -46,11 +45,13 @@ port_type getSocketPort(int fd) {
 std::string sockaddrToString(struct sockaddr *addr) {
   char address[INET6_ADDRSTRLEN + 1];
   if (addr->sa_family == AF_INET) {
-    struct sockaddr_in *s = reinterpret_cast<struct sockaddr_in*>(&addr);
+    struct sockaddr_in *s = reinterpret_cast<struct sockaddr_in*>(addr);
     SYSCHECK(::inet_ntop(AF_INET, &(s->sin_addr), address, INET_ADDRSTRLEN))
-  } else if (addr->sa_family == AF_INET) {
-    struct sockaddr_in6 *s = reinterpret_cast<struct sockaddr_in6*>(&addr);
+    address[INET_ADDRSTRLEN] = '\0';
+  } else if (addr->sa_family == AF_INET6) {
+    struct sockaddr_in6 *s = reinterpret_cast<struct sockaddr_in6*>(addr);
     SYSCHECK(::inet_ntop(AF_INET6, &(s->sin6_addr), address, INET6_ADDRSTRLEN))
+    address[INET6_ADDRSTRLEN] = '\0';
   } else {
     throw std::runtime_error("unsupported protocol");
   }
@@ -198,37 +199,6 @@ std::tuple<int, std::string> accept(int listen_socket, int timeout) {
   setSocketNoDelay(socket);
 
   return std::make_tuple(socket, sockaddrToString(reinterpret_cast<struct sockaddr*>(&addr)));
-}
-
-// TODO: move these to InitMethodEnv
-std::tuple<port_type, rank_type> load_master_env() {
-  auto port = convertToPort(std::stoul(must_getenv(MASTER_PORT_ENV)));
-
-  rank_type world_size = std::stoul(must_getenv(WORLD_SIZE_ENV));
-  if (world_size == 0)
-    throw std::domain_error(std::string(WORLD_SIZE_ENV) + " env variable cannot be 0");
-
-  return std::make_tuple(port, world_size);
-}
-
-
-std::tuple<std::string, port_type> load_worker_env() {
-  std::string full_address = std::string(must_getenv(MASTER_ADDR_ENV));
-  auto found_pos = full_address.rfind(":");
-  if (found_pos == std::string::npos)
-    throw std::domain_error("invalid master address, usage: IP:PORT | HOSTNAME:PORT");
-
-  std::string str_port = full_address.substr(found_pos + 1);
-  auto port = convertToPort(std::stoul(str_port));
-  return std::make_tuple(full_address.substr(0, found_pos), port);
-}
-
-rank_type load_rank_env() {
-  return convertToRank(std::stol(must_getenv(RANK_ENV)));
-}
-
-rank_type load_world_size_env() {
-  return convertToRank(std::stol(must_getenv(WORLD_SIZE_ENV)));
 }
 
 } // namespace thd

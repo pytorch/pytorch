@@ -62,7 +62,7 @@ std::vector<std::string> getInterfaceAddresses() {
 
   std::vector<std::string> addresses;
 
-  while (ifa != NULL) {
+  while (ifa != nullptr) {
     struct sockaddr *addr = ifa->ifa_addr;
     if (addr) {
       bool is_loopback = ifa->ifa_flags & IFF_LOOPBACK;

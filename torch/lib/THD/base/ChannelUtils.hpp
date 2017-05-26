@@ -147,11 +147,6 @@ std::tuple<int, std::string> accept(int listen_socket, int timeout = -1);
 
 std::string sockaddrToString(struct sockaddr *addr);
 
-std::tuple<port_type, rank_type> load_master_env();
-std::tuple<std::string, port_type> load_worker_env();
-rank_type load_rank_env();
-rank_type load_world_size_env();
-
 /* send a string's length and data */
 inline void send_string(int socket, const std::string& str,
                         bool more_data = false) {

@@ -10,6 +10,11 @@
 #include <mutex>
 #include <vector>
 
+constexpr char RANK_ENV[] = "RANK";
+constexpr char WORLD_SIZE_ENV[] = "WORLD_SIZE";
+constexpr char MASTER_PORT_ENV[] = "MASTER_PORT";
+constexpr char MASTER_ADDR_ENV[] = "MASTER_ADDR";
+
 struct Barrier {
   Barrier() : _count(0) {}
   Barrier(std::size_t count) : _count(count) {}

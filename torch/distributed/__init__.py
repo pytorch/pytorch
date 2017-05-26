@@ -30,11 +30,11 @@ def init_process_group(backend, init_method='env://', world_size=-1, group_name=
     assert torch._C._dist_init_extension(False, reduce_op, group)
 
 
-def init_master_worker(backend):
+def init_master_worker(backend, init_method='env://', world_size=-1, group_name=''):
     global _initialized
     if _initialized:
         raise RuntimeError("trying to initialize torch.distributed twice!")
-    torch._C._dist_init_master_worker(backend)
+    torch._C._dist_init_master_worker(backend, init_method, world_size, group_name)
     _initialized = True
     import torch.distributed.collectives as collectives
     import torch.distributed.remote_types as remote_types

@@ -63,7 +63,8 @@ PyObject* THDPModule_initProcessGroup(PyObject *_unused, PyObject *args)
   std::string backend_name = THPUtils_unpackString(PyTuple_GET_ITEM(args, 0));
   std::string init_method = THPUtils_unpackString(PyTuple_GET_ITEM(args, 1));
   int world_size = THPUtils_unpackLong(PyTuple_GET_ITEM(args, 2));
-  std::string group_name = THPUtils_unpackString(PyTuple_GET_ITEM(args, 1));
+  std::string group_name = THPUtils_unpackString(PyTuple_GET_ITEM(args, 3));
+
   THDChannelType channel_type = name2channel_type.at(backend_name);
   THPUtils_assert(
       THDProcessGroupInit(channel_type, init_method, world_size, group_name),
@@ -72,16 +73,26 @@ PyObject* THDPModule_initProcessGroup(PyObject *_unused, PyObject *args)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THDPModule_initMasterWorker(PyObject *_unused, PyObject *backend)
+PyObject* THDPModule_initMasterWorker(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
-  THPUtils_assert(THPUtils_checkString(backend),
-      "backend argument has to be a string/bytes object, but got %s",
-      THPUtils_typename(backend));
-  std::string backend_name = THPUtils_unpackString(backend);
+  if (PyTuple_GET_SIZE(args) != 4 || !THPUtils_checkString(PyTuple_GET_ITEM(args, 0)) ||
+        !THPUtils_checkString(PyTuple_GET_ITEM(args, 1)) ||
+        !THPUtils_checkLong(PyTuple_GET_ITEM(args, 2)) ||
+        !THPUtils_checkString(PyTuple_GET_ITEM(args, 3))) {
+    THPUtils_invalidArguments(args, NULL, "init_master_worker", 1, "(string backend, string init_method, int world_size, string world_size)");
+    return NULL;
+  }
+
+  std::string backend_name = THPUtils_unpackString(PyTuple_GET_ITEM(args, 0));
+  std::string init_method = THPUtils_unpackString(PyTuple_GET_ITEM(args, 1));
+  int world_size = THPUtils_unpackLong(PyTuple_GET_ITEM(args, 2));
+  std::string group_name = THPUtils_unpackString(PyTuple_GET_ITEM(args, 3));
+
   THDChannelType channel_type = name2channel_type.at(backend_name);
-  THPUtils_assert(THDMasterWorkerInit(channel_type), "failed to initialize "
-      "distributed library (THD)");
+  THPUtils_assert(
+      THDMasterWorkerInit(channel_type, init_method, world_size, group_name),
+      "failed to initialize distributed library (THD)");
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -577,7 +588,7 @@ PyObject* THDPModule_initExtension(PyObject *_unused, PyObject *args) {
 static struct PyMethodDef _THDPModule_methods[] = {
   {"_dist_init_extension", (PyCFunction)THDPModule_initExtension, METH_VARARGS, NULL},
   {"_dist_init_process_group", (PyCFunction)THDPModule_initProcessGroup, METH_VARARGS, NULL},
-  {"_dist_init_master_worker", (PyCFunction)THDPModule_initMasterWorker, METH_O, NULL},
+  {"_dist_init_master_worker", (PyCFunction)THDPModule_initMasterWorker, METH_VARARGS, NULL},
   {"_dist_get_rank", (PyCFunction)THDPModule_getRank, METH_NOARGS, NULL},
   {"_dist_get_num_processes", (PyCFunction)THDPModule_getNumProcesses, METH_NOARGS, NULL},
   {"_dist_isend", (PyCFunction)THDPModule_isend, METH_VARARGS, NULL},
