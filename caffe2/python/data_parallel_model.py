@@ -206,9 +206,7 @@ def Parallelize_GPU(
     )
 
     if optimize_gradient_memory:
-        _OptimizeGradientMemoryDEPRECATED(
-            model_helper_obj, losses_by_gpu, devices
-        )
+        _OptimizeGradientMemorySimple(model_helper_obj, losses_by_gpu, devices)
 
     model_helper_obj._data_parallel_model_init_nets = [
         model_helper_obj.param_init_net,
@@ -226,6 +224,7 @@ def Parallelize_GPU_BMUF(
     devices=range(0, workspace.NumCudaDevices()),
     net_type='dag',
     master_gpu=None,
+    optimize_gradient_memory=False
 ):
     '''
     Function to create model that run on many GPUs and creates a net for
@@ -284,6 +283,9 @@ def Parallelize_GPU_BMUF(
 
     model_helper_obj._device_grouped_blobs =\
         _GroupByDevice(devices, model_helper_obj.params, non_datapar_params)
+
+    model_helper_obj._param_names =\
+        model_helper_obj._device_grouped_blobs.keys()
 
     _AddGradientOperators(
         devices, model_helper_obj, model_helper_obj._losses_by_gpu
@@ -350,6 +352,11 @@ def Parallelize_GPU_BMUF(
                 model_helper_obj._global_model_param_updates_net,
                 param_name
             )
+
+    if optimize_gradient_memory:
+        _OptimizeGradientMemorySimple(
+            model_helper_obj, model_helper_obj._losses_by_gpu, devices
+        )
 
     model_helper_obj._data_parallel_model_init_nets = [
         model_helper_obj.param_init_net,
@@ -1007,7 +1014,7 @@ def _ComputeBlobsToSync(model):
     return (blobs_to_sync, sync_names)
 
 
-def _OptimizeGradientMemoryDEPRECATED(model, losses_by_gpu, devices):
+def _OptimizeGradientMemorySimple(model, losses_by_gpu, devices):
     log.warning("------- DEPRECATED API, please use " +
                    "data_parallel_model.OptimizeGradientMemory() ----- ")
     for device in devices:
