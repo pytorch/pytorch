@@ -80,7 +80,7 @@ def _calc_attention_logits_from_sum_match(
         s(scope, 'attention_v'),
         shape=[1, encoder_output_dim],
     )
-    model.add_param(attention_v)
+    model.params.append(attention_v)
 
     attention_zeros = model.param_init_net.ConstantFill(
         [],

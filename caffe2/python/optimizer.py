@@ -7,7 +7,9 @@ from __future__ import unicode_literals
 
 from collections import namedtuple
 from caffe2.python import core
+from caffe2.python.modeling import parameter_info
 from caffe2.proto import caffe2_pb2
+
 
 _OPTIMIZER_ITERATION_NAME = "optimizer_iteration"
 
@@ -18,8 +20,28 @@ class Optimizer(object):
     def __init__(self):
         self._aux_params = AuxOptimizerParams(local=[], shared=[])
 
-    def __call__(self, net, param_init_net, param, grad):
-        raise NotImplementedError()
+    '''
+    Adds optimization operators to the net for given parameter and its gradient
+    Parameter is specified by either 'param' being a ParameterInfo object.
+    In this case  param.grad has to be set
+
+    Or by 'param' being a BlobReference and 'grad' being a BlobReference for its
+    gradient.
+    '''
+    def __call__(self, net, param_init_net, param, grad=None):
+        if grad is None:
+            assert isinstance(param, parameter_info.ParameterInfo)
+            assert param.grad is not None
+        else:
+            if isinstance(param, str):
+                param = core.BlobReference(param)
+            param = parameter_info.ParameterInfo(
+                param_id=None, param=param, grad=grad)
+
+        self._run(net, param_init_net, param)
+
+    def _run(self, net, param_init_net, param_info):
+        raise Exception("Not Impelemented")
 
     @staticmethod
     def build_lr(net, param_init_net, base_learning_rate,
@@ -99,7 +121,9 @@ class SgdOptimizer(Optimizer):
         self.momentum = momentum
         self.init_kwargs = kwargs
 
-    def __call__(self, net, param_init_net, param, grad):
+    def _run(self, net, param_init_net, param_info):
+        param = param_info.blob
+        grad = param_info.grad
         if self.base_learning_rate <= 0:
             return
 
@@ -156,7 +180,10 @@ class AdagradOptimizer(Optimizer):
         self.engine = engine
         self.init_kwargs = kwargs
 
-    def __call__(self, net, param_init_net, param, grad):
+    def _run(self, net, param_init_net, param_info):
+        param = param_info.blob
+        grad = param_info.grad
+
         if self.alpha <= 0:
             return
 
@@ -207,7 +234,10 @@ class FtrlOptimizer(Optimizer):
         self.sparse_dedup_aggregator = sparse_dedup_aggregator
         self.engine = engine
 
-    def __call__(self, net, param_init_net, param, grad):
+    def _run(self, net, param_init_net, param_info):
+        param = param_info.blob
+        grad = param_info.grad
+
         if self.alpha <= 0:
             return
 
@@ -259,7 +289,10 @@ class AdamOptimizer(Optimizer):
         self.engine = engine
         self.init_kwargs = kwargs
 
-    def __call__(self, net, param_init_net, param, grad):
+    def _run(self, net, param_init_net, param_info):
+        param = param_info.blob
+        grad = param_info.grad
+
         if self.alpha <= 0:
             return
 
@@ -308,8 +341,8 @@ class AdamOptimizer(Optimizer):
 
 def build_sgd(model, base_learning_rate, **kwargs):
     sgd_optimizer = SgdOptimizer(base_learning_rate, **kwargs)
-    for param, grad in model.GetOptimizationPairs().items():
-        sgd_optimizer(model.net, model.param_init_net, param, grad)
+    for param_info in model.GetOptimizationParamInfo():
+        sgd_optimizer(model.net, model.param_init_net, param_info)
     return sgd_optimizer
 
 
@@ -318,22 +351,20 @@ def build_ftrl(model, engine="SIMD", **kwargs):
         assert core.IsOperator('Ftrl_ENGINE_SIMD')
         assert core.IsOperator('SparseFtrl_ENGINE_SIMD')
     ftrl_optimizer = FtrlOptimizer(engine=engine, **kwargs)
-    for param, grad in model.GetOptimizationPairs().items():
-        ftrl_optimizer(model.net, model.param_init_net, param, grad)
+    for param_info in model.GetOptimizationParamInfo():
+        ftrl_optimizer(model.net, model.param_init_net, param_info)
     return ftrl_optimizer
 
 
 def build_adagrad(model, base_learning_rate, parameters=None, **kwargs):
     adagrad_optimizer = AdagradOptimizer(alpha=base_learning_rate, **kwargs)
-    param_to_grad = model.GetOptimizationPairs(parameters)
-
-    for param, grad in param_to_grad.items():
-        adagrad_optimizer(model.net, model.param_init_net, param, grad)
+    for param_info in model.GetOptimizationParamInfo(parameters):
+        adagrad_optimizer(model.net, model.param_init_net, param_info)
     return adagrad_optimizer
 
 
 def build_adam(model, base_learning_rate, **kwargs):
     adam_optimizer = AdamOptimizer(alpha=base_learning_rate, **kwargs)
-    for param, grad in model.GetOptimizationPairs().items():
-        adam_optimizer(model.net, model.param_init_net, param, grad)
+    for param_info in model.GetOptimizationParamInfo():
+        adam_optimizer(model.net, model.param_init_net, param_info)
     return adam_optimizer
