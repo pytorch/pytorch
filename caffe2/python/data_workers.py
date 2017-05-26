@@ -59,7 +59,11 @@ for each GPU. Note that the 'coordinator' returned by the function is same
 each time.
 '''
 
-import Queue
+try:
+    import Queue
+except ImportError:
+    # Py3
+    import queue as Queue
 import logging
 import threading
 import atexit
