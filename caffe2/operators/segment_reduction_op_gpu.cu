@@ -3,6 +3,8 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
 
+#include <cub/block/block_reduce.cuh>
+
 namespace caffe2 {
 
 template <
@@ -518,6 +520,154 @@ class CUDASparseLengthsSumGradientOp : public Operator<CUDAContext> {
   Tensor<CPUContext> output_size_buffer_;
 };
 
+template <typename SIndex>
+__global__ void
+MaxSegmentKernel(int n, const SIndex* segment_ids, SIndex* max_segment) {
+  typedef cub::BlockReduce<SIndex, CAFFE_CUDA_NUM_THREADS> BlockReduce;
+  __shared__ typename BlockReduce::TempStorage temp_storage;
+  int mx = 0;
+
+  for (int j = threadIdx.x; j < n; j += blockDim.x) {
+    mx = segment_ids[j] > mx ? segment_ids[j] : mx;
+  }
+  SIndex max_seg = BlockReduce(temp_storage).Reduce(mx, cub::Max());
+  if (threadIdx.x == 0) {
+    *max_segment = max_seg;
+  }
+}
+
+template <typename SIndex, typename T>
+__global__ void UnsortedSegmentSumKernel(
+    int n,
+    int slize_sz,
+    const SIndex* segments,
+    const T* data,
+    T* out,
+    int* scales) {
+  CUDA_1D_KERNEL_LOOP(i, n) {
+    int slice_idx = i / slize_sz;
+    int j = i % slize_sz;
+    SIndex segment = segments[slice_idx];
+    atomicAdd(&out[segment * slize_sz + j], data[i]);
+    if (scales && j == 0) {
+      atomicAdd(&scales[segment], 1);
+    }
+  }
+}
+
+template <typename SIndex, typename T>
+__global__ void
+SegmentScalingKernel(int m, int slize_sz, const int* scales, T* out) {
+  CUDA_1D_KERNEL_LOOP(i, m) {
+    int scale = scales[i / slize_sz];
+    out[i] = scale > 0 ? out[i] / scale : 0.0; // avoid 0/0 division
+  }
+}
+
+template <typename T, typename SIndex, bool mean>
+class CUDAUnsortedSegmentSumOp : public Operator<CUDAContext> {
+ public:
+  USE_OPERATOR_FUNCTIONS(CUDAContext);
+  CUDAUnsortedSegmentSumOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CUDAContext>(operator_def, ws) {}
+
+  ~CUDAUnsortedSegmentSumOp() {}
+
+  bool RunOnDevice() override {
+    auto& data = Input(0);
+    auto& segment_ids = Input(1);
+    auto* output = Output(0);
+
+    if (segment_ids.size() == 0 || data.size() == 0) {
+      // Special handling for empty input
+      auto dims = data.dims();
+      if (dims.size() > 0) {
+        dims[0] = 0;
+      }
+      output->Resize(dims);
+      output->template mutable_data<T>();
+      return true;
+    }
+
+    CAFFE_ENFORCE_EQ(1, segment_ids.ndim(), "SEGMENT_IDS must be a vector");
+    TIndex slize_sz = data.size_from_dim(1);
+
+    K_tensor_.Resize(1);
+
+    // Get maximum segment id so we can size the output.
+    // This must be done synchronously with host.
+    MaxSegmentKernel<SIndex><<<
+        std::min((int)segment_ids.size(), CAFFE_MAXIMUM_NUM_BLOCKS),
+        CAFFE_CUDA_NUM_THREADS,
+        0,
+        context_.cuda_stream()>>>(
+        segment_ids.size(),
+        segment_ids.template data<SIndex>(),
+        K_tensor_.mutable_data<SIndex>());
+
+    SIndex K = 0;
+    context_.CopyBytes<CUDAContext, CPUContext>(
+        sizeof(SIndex), K_tensor_.data<SIndex>(), &K);
+    context_.FinishDeviceComputation();
+
+    auto dims = data.dims();
+    dims[0] = K + 1;
+    output->Resize(dims);
+
+    // Clear the output as we will be accumulating the values
+    math::Set<T, CUDAContext>(
+        output->size(), T(0), output->template mutable_data<T>(), &context_);
+
+    if (!mean) {
+      UnsortedSegmentSumKernel<SIndex, T><<<
+          CAFFE_GET_BLOCKS(data.size()),
+          CAFFE_CUDA_NUM_THREADS,
+          0,
+          context_.cuda_stream()>>>(
+          data.size(),
+          slize_sz,
+          segment_ids.template data<SIndex>(),
+          data.template data<T>(),
+          output->template mutable_data<T>(),
+          nullptr);
+    } else {
+      // For mean, we need to compute scaling factors
+      scaling_factors_.Resize(K + 1);
+      math::Set<int, CUDAContext>(
+          scaling_factors_.size(),
+          int(0),
+          scaling_factors_.template mutable_data<int>(),
+          &context_);
+      UnsortedSegmentSumKernel<SIndex, T><<<
+          CAFFE_GET_BLOCKS(data.size()),
+          CAFFE_CUDA_NUM_THREADS,
+          0,
+          context_.cuda_stream()>>>(
+          data.size(),
+          slize_sz,
+          segment_ids.template data<SIndex>(),
+          data.template data<T>(),
+          output->template mutable_data<T>(),
+          scaling_factors_.template mutable_data<int>());
+      // Divide by the scaling factors to get means
+      SegmentScalingKernel<SIndex, T><<<
+          CAFFE_GET_BLOCKS(output->size()),
+          CAFFE_CUDA_NUM_THREADS,
+          0,
+          context_.cuda_stream()>>>(
+          output->size(),
+          slize_sz,
+          scaling_factors_.template data<int>(),
+          output->template mutable_data<T>());
+    }
+    return true;
+  }
+
+ private:
+  Tensor<CUDAContext> K_tensor_;
+  Tensor<CUDAContext> scaling_factors_; // for mean
+};
+
 REGISTER_CUDA_OPERATOR(
     LengthsSum,
     CUDASparseLengthsSumOp<float, CUDAContext, false>);
@@ -530,5 +680,11 @@ REGISTER_CUDA_OPERATOR(
 REGISTER_CUDA_OPERATOR(
     SparseLengthsSumGradient,
     CUDASparseLengthsSumGradientOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(
+    UnsortedSegmentSum,
+    CUDAUnsortedSegmentSumOp<float, int, false>);
+REGISTER_CUDA_OPERATOR(
+    UnsortedSegmentMean,
+    CUDAUnsortedSegmentSumOp<float, int, true>);
 
 } // namespace caffe2
