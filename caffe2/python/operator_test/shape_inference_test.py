@@ -219,10 +219,9 @@ class TestShapeInference(test_util.TestCase):
             "img_labels",
             (np.random.rand(32, 33, 28) * 19).astype(np.int32)
         )
-        model.SoftmaxWithLoss(
+        model.SpatialSoftmaxWithLoss(
             ["img", "img_labels"],
             ["softmax_img", "loss"],
-            spatial=1
         )
         self.InferTensorRunAndCompare(model)
 
