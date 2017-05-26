@@ -728,7 +728,7 @@ void addGlobalMethods(py::module& m) {
          bool run_individual) {
         CAFFE_ENFORCE(gWorkspace);
         auto* net = gWorkspace->GetNet(name);
-        CAFFE_ENFORCE(net);
+        CAFFE_ENFORCE(net, "Didn't find net: ", name);
         py::gil_scoped_release g;
         vector<float> stat =
             net->TEST_Benchmark(warmup_runs, main_runs, run_individual);
