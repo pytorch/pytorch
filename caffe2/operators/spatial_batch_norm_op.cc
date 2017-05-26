@@ -158,32 +158,31 @@ OPERATOR_SCHEMA(SpatialBN)
     .NumOutputs({1, 5})
     .EnforceInplace({{3, 1}, {4, 2}})
     .TensorInferenceFunction(
-          [](const OperatorDef& def, const vector<TensorShape>& in) {
-              ArgumentHelper helper(def);
-              bool is_test = helper.GetSingleArgument<int>("is_test", 0);
+        [](const OperatorDef& def, const vector<TensorShape>& in) {
+          ArgumentHelper helper(def);
+          bool is_test = helper.GetSingleArgument<int>("is_test", 0);
 
-              if (!is_test) {
-                vector<TensorShape> out;
-                StorageOrder order = StringToStorageOrder(
-                    helper.GetSingleArgument<string>("order", "NCHW"));
-                const TensorShape &X = in[0];
-                const int N =  X.dims(0);
-                const int C =
-                    (order == StorageOrder::NCHW ? X.dims(1)
-                                                 : X.dims(X.dims_size() - 1));
+          if (!is_test) {
+            vector<TensorShape> out;
+            StorageOrder order = StringToStorageOrder(
+                helper.GetSingleArgument<string>("order", "NCHW"));
+            const TensorShape& X = in[0];
+            const int C =
+                (order == StorageOrder::NCHW ? X.dims(1)
+                                             : X.dims(X.dims_size() - 1));
 
-                out.push_back(in[0]);
-                TensorShape meanvar_tp =
-                  CreateTensorShape(vector<int> {C}, TensorProto::FLOAT);
-                out.push_back(meanvar_tp); // RUNNING_MEAN
-                out.push_back(meanvar_tp); // RUNNING_MEAN
-                out.push_back(meanvar_tp); // SAVED_MEAN
-                out.push_back(meanvar_tp); // SAVED_VAR
-                return out;
-              } else {
-                return vector<TensorShape> {in[0]};
-              }
-          })
+            out.push_back(in[0]);
+            TensorShape meanvar_tp =
+                CreateTensorShape(vector<int>{C}, TensorProto::FLOAT);
+            out.push_back(meanvar_tp); // RUNNING_MEAN
+            out.push_back(meanvar_tp); // RUNNING_MEAN
+            out.push_back(meanvar_tp); // SAVED_MEAN
+            out.push_back(meanvar_tp); // SAVED_VAR
+            return out;
+          } else {
+            return vector<TensorShape>{in[0]};
+          }
+        })
     .SetDoc(R"DOC(
 Carries out spatial batch normalization as described in the paper
 https://arxiv.org/abs/1502.03167. Depending on the mode it is being run,
@@ -198,6 +197,10 @@ Output case #2: Y (test mode)
         "If set to nonzero, run spatial batch normalization in test mode.")
     .Arg("epsilon", "The epsilon value to use to avoid division by zero.")
     .Arg("order", "A StorageOrder string.")
+    .Arg(
+        "momentum",
+        "Factor used in computing the running mean and variance."
+        "e.g., running_mean = running_mean * momentum + mean * (1 - momentum)")
     .Input(
         0,
         "X",
