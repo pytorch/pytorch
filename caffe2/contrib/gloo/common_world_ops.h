@@ -30,6 +30,9 @@ class CreateCommonWorld final : public Operator<Context> {
     device_ = createDevice();
     status_blob_ =
         OperatorBase::GetSingleArgument<std::string>("status_blob", "");
+    if (status_blob_ != "") {
+      ws_->CreateBlob(status_blob_);
+    }
   }
 
   virtual ~CreateCommonWorld() {}
@@ -72,7 +75,7 @@ class CreateCommonWorld final : public Operator<Context> {
  private:
   bool handleException(std::exception& ex) {
     if (status_blob_ != "") {
-      signalFailure(ws_->CreateBlob(status_blob_), ex);
+      signalFailure(ws_->GetBlob(status_blob_), ex);
       return false;
     } else {
       throw ex;
