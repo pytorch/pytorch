@@ -560,6 +560,59 @@ static bool THPTensor_(checkAdvancedIndexing)(THPTensor *indexed, PyObject *arg)
   **/
 }
 
+static bool THPTensor_(_convertToTensorIndexers)(PyObject *index, std::vector<THIndexTensor*>& broadcasted) {
+  // At the top-level, index must be a sequence. PySequence_Fast returns a new
+  // reference
+  PyObject *fast = PySequence_Fast(index, NULL);
+  Py_ssize_t seqCount = PySequence_Fast_GET_SIZE(fast);
+  std::vector<THPIndexTensor*> indexers;
+
+  for (Py_ssize_t i = 0; i < seqCount; ++i) {
+    THPIndexTensor *indexer = (THPIndexTensor *)PyObject_CallFunctionObjArgs(THPLongTensorClass, PySequence_Fast_GET_ITEM(fast, i), NULL);
+    if (!indexer) {
+      PyErr_Format(PyExc_IndexError,
+          "When performing advanced indexing the indexing objects must be LongTensors or convertible to such");
+      return false;
+    }
+    indexers.push_back(indexer);
+  }
+  Py_DECREF(fast);
+
+  THIndexTensor **maybeBroadcasted = (THIndexTensor **)THAlloc(seqCount * sizeof(THIndexTensor*));
+  THIndexTensor **candidates = (THIndexTensor **)THAlloc(seqCount * sizeof(THIndexTensor*));
+
+  for (Py_ssize_t i = 0; i < seqCount; ++i) {
+    maybeBroadcasted[i] = THIndexTensor_(new)(LIBRARY_STATE_NOARGS);
+    candidates[i] = THIndexTensor_(newWithTensor)(LIBRARY_STATE indexers[i]->cdata);
+  }
+
+  // Broadcast/Expand indexing Tensors as necessary
+  int ret = THIndexTensor_(expandNd)(LIBRARY_STATE maybeBroadcasted, candidates, seqCount, 0);
+
+  // No matter what, need to cleanup the candidates
+  for (Py_ssize_t i = 0; i < seqCount; ++i) {
+    THIndexTensor_(free)(LIBRARY_STATE candidates[i]);
+  }
+  THFree(candidates);
+
+  if (ret != 0) {
+    // Broadcasted failed, cleanup and return error
+    for (int i = 0; i < seqCount; ++i) {
+      THIndexTensor_(free)(LIBRARY_STATE maybeBroadcasted[i]);
+    }
+    THFree(maybeBroadcasted);
+    return false;
+  }
+
+  // Place Broadcasted Tensors into output vector, implicitly transferring
+  // ownership
+  for (Py_ssize_t i = 0; i < seqCount; ++i) {
+    broadcasted.push_back(maybeBroadcasted[i]);
+  }
+  THFree(maybeBroadcasted);
+  return true;
+}
+
 static bool THPTensor_(_advancedIndex)(PyObject *index, THTensorPtr &tresult)
 {
   // Precondition: index is an object that specifies advanced indexing.
@@ -569,63 +622,30 @@ static bool THPTensor_(_advancedIndex)(PyObject *index, THTensorPtr &tresult)
   // Precondition: tresult points to the Tensor we are indexing, and is also where
   // we will store the output Tensor
 
-  Py_ssize_t seqCount = 0;
-  THIndexTensor **broadcasted = NULL, **candidates = NULL;
-  int ret = -1;
-  THIndexTensor *linearIndices = NULL;
-  THLongStorage *indexerSize = NULL;
-  THTensor *viewed = NULL, *result = NULL;
-  ptrdiff_t indexingElements = 0;
-  bool success = false;
+  // First attempt to convert to Tensor indexers from the arbitrary
+  // python/tensor objects passed
+  std::vector<THIndexTensor*> broadcasted;
+  if (!THPTensor_(_convertToTensorIndexers)(index, broadcasted)) {
+    return false;
+  }
 
   // We take ownership of the THTensor input locally
   THTensor *indexed = tresult.release();
-
-  // Indexers stores borrowed references
-  std::vector<THPIndexTensor*> indexers;
-  PyObject *fast = PySequence_Fast(index, NULL);
-  if (fast == NULL) goto teardown;
-  seqCount = PySequence_Fast_GET_SIZE(fast);
-
-  // Convert all the input indexing objects into their THPIndexTensor
-  // equivalents
-  for (Py_ssize_t i = 0; i < seqCount; ++i) {
-    THPIndexTensor *indexer = (THPIndexTensor *)PyObject_CallFunctionObjArgs(THPLongTensorClass, PySequence_Fast_GET_ITEM(fast, i), NULL);
-    if (!indexer) {
-      PyErr_Format(PyExc_IndexError,
-          "When performing advanced indexing the indexing objects must be LongTensors or convertible to such");
-      goto teardown;
-    }
-    indexers.push_back(indexer);
-  }
-
-  broadcasted = (THIndexTensor **)THAlloc(seqCount * sizeof(THIndexTensor*));
-  candidates = (THIndexTensor **)THAlloc(seqCount * sizeof(THIndexTensor*));
-  for (Py_ssize_t i = 0; i < seqCount; ++i) {
-    broadcasted[i] = THIndexTensor_(new)(LIBRARY_STATE_NOARGS);
-    candidates[i] = THIndexTensor_(newWithTensor)(LIBRARY_STATE indexers[i]->cdata);
-  }
-
-  // Broadcast/Expand indexing Tensors as necessary
-  ret = THIndexTensor_(expandNd)(LIBRARY_STATE broadcasted, candidates, seqCount, 0);
-  if (ret != 0) {
-    goto teardown;
-  }
 
   // At this point broadcasted should store our indexing Tensors.
   // Our strategy is to view the indexed Tensor as a 1D Tensor, calculate
   // the linear indices for each tuple of indexing elements, and then call
   // indexSelect using those linear indices
 
-  indexingElements = THIndexTensor_(nElement)(LIBRARY_STATE broadcasted[0]);
-  linearIndices = THIndexTensor_(newWithSize1d)(LIBRARY_STATE indexingElements);
-  indexerSize = THLongStorage_newWithSize(1);
+  ptrdiff_t indexingElements = THIndexTensor_(nElement)(LIBRARY_STATE broadcasted.at(0));
+  THIndexTensor *linearIndices = THIndexTensor_(newWithSize1d)(LIBRARY_STATE indexingElements);
+  THLongStorage *indexerSize = THLongStorage_newWithSize(1);
   THLongStorage_set(indexerSize, 0, indexingElements);
 
   for (ptrdiff_t i = 0; i < indexingElements; ++i) {
     long linearIdx = 0;
-    for (Py_ssize_t j = PySequence_Fast_GET_SIZE(fast) - 1; j >= 0; --j) {
-      THIndexTensor *indexer = THIndexTensor_(newContiguous)(LIBRARY_STATE broadcasted[j]);
+    for (int j = broadcasted.size() - 1; j >= 0; --j) {
+      THIndexTensor *indexer = THIndexTensor_(newContiguous)(LIBRARY_STATE broadcasted.at(j));
 
       // The indexing tensor might not be one-dimensional, but we are generating a vector of
       // indices, so we need to view the indexer as 1D prior to getting the value for the
@@ -638,13 +658,13 @@ static bool THPTensor_(_advancedIndex)(PyObject *index, THTensorPtr &tresult)
     THIndexTensor_(set1d)(LIBRARY_STATE linearIndices, i, linearIdx);
   }
 
-  viewed = THTensor_(newWithStorage1d)(LIBRARY_STATE
-                                       THTensor_(storage)(LIBRARY_STATE indexed),
-                                       THTensor_(storageOffset)(LIBRARY_STATE indexed),
-                                       THTensor_(nElement)(LIBRARY_STATE indexed),
-                                       1);
+  THTensor *viewed = THTensor_(newWithStorage1d)(LIBRARY_STATE
+                                                 THTensor_(storage)(LIBRARY_STATE indexed),
+                                                 THTensor_(storageOffset)(LIBRARY_STATE indexed),
+                                                 THTensor_(nElement)(LIBRARY_STATE indexed),
+                                                 1);
 
-  result = THTensor_(new)(LIBRARY_STATE_NOARGS);
+  THTensor *result = THTensor_(new)(LIBRARY_STATE_NOARGS);
 
   // Index Select makes a copy of the storage, thus it is enforcing NumPy semantics, which says that the
   // array returned by advanced indexing is a copy, not a view
@@ -653,37 +673,23 @@ static bool THPTensor_(_advancedIndex)(PyObject *index, THTensorPtr &tresult)
   // In the event that the indexing Tensors are not vectors, we need to reshape
   // the result to be the appropriate shape
   THTensor_(resizeNd)(LIBRARY_STATE result,
-                      THIndexTensor_(nDimension)(LIBRARY_STATE broadcasted[0]),
-                      broadcasted[0]->size,
-                      broadcasted[0]->stride);
+                      THIndexTensor_(nDimension)(LIBRARY_STATE broadcasted.at(0)),
+                      broadcasted.at(0)->size,
+                      broadcasted.at(0)->stride);
 
   // result ptr takes ownership of result tensor
   tresult = result;
-  success = true;
 
-teardown:
-  Py_XDECREF(fast);
-
-  if (broadcasted != NULL) {
-    for (Py_ssize_t i = 0; i < seqCount; ++i) {
-      THIndexTensor_(free)(LIBRARY_STATE broadcasted[i]);
-    }
-    THFree(broadcasted);
+  // Cleanup all TH memory
+  for (const auto& bTensor : broadcasted) {
+    THIndexTensor_(free)(LIBRARY_STATE bTensor);
   }
-  if (candidates != NULL) {
-    for (Py_ssize_t i = 0; i < seqCount; ++i) {
-      THIndexTensor_(free)(LIBRARY_STATE candidates[i]);
-    }
-    THFree(candidates);
-  }
+  THTensor_(free)(LIBRARY_STATE indexed);
+  THIndexTensor_(free)(LIBRARY_STATE linearIndices);
+  THLongStorage_free(indexerSize);
+  THTensor_(free)(LIBRARY_STATE viewed);
 
-  // Cleanup all TH memory, if it has been initialized
-  if (indexed != NULL) THTensor_(free)(LIBRARY_STATE indexed);
-  if (linearIndices != NULL) THIndexTensor_(free)(LIBRARY_STATE linearIndices);
-  if (indexerSize != NULL) THLongStorage_free(indexerSize);
-  if (viewed != NULL) THTensor_(free)(LIBRARY_STATE viewed);
-
-  return success;
+  return true;
 }
 #endif // TH_REAL_IS_HALF
 
