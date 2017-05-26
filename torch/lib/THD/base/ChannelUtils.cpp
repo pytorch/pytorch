@@ -24,7 +24,38 @@ void setSocketNoDelay(int socket) {
   SYSCHECK(setsockopt(socket, IPPROTO_TCP, TCP_NODELAY, (char*)&flag, optlen));
 }
 
+port_type getSocketPort(int fd) {
+  port_type listen_port;
+  struct sockaddr_storage addr_storage;
+  socklen_t addr_len = sizeof(addr_storage);
+  SYSCHECK(getsockname(fd, reinterpret_cast<struct sockaddr*>(&addr_storage), &addr_len));
+  if (addr_storage.ss_family == AF_INET) {
+    struct sockaddr_in *addr = reinterpret_cast<struct sockaddr_in*>(&addr_storage);
+    listen_port = ntohs(addr->sin_port);
+  } else if (addr_storage.ss_family == AF_INET6) { // AF_INET6
+    struct sockaddr_in6 *addr = reinterpret_cast<struct sockaddr_in6*>(&addr_storage);
+    listen_port = ntohs(addr->sin6_port);
+  } else {
+    throw std::runtime_error("unsupported protocol");
+  }
+  return listen_port;
+}
+
 } // anonymous namespace
+
+std::string sockaddrToString(struct sockaddr *addr) {
+  char address[INET6_ADDRSTRLEN + 1];
+  if (addr->sa_family == AF_INET) {
+    struct sockaddr_in *s = reinterpret_cast<struct sockaddr_in*>(&addr);
+    SYSCHECK(::inet_ntop(AF_INET, &(s->sin_addr), address, INET_ADDRSTRLEN))
+  } else if (addr->sa_family == AF_INET) {
+    struct sockaddr_in6 *s = reinterpret_cast<struct sockaddr_in6*>(&addr);
+    SYSCHECK(::inet_ntop(AF_INET6, &(s->sin6_addr), address, INET6_ADDRSTRLEN))
+  } else {
+    throw std::runtime_error("unsupported protocol");
+  }
+  return address;
+}
 
 const char* must_getenv(const char* env) {
   const char* value = std::getenv(env);
@@ -35,7 +66,7 @@ const char* must_getenv(const char* env) {
   return value;
 }
 
-std::tuple<int, std::string, port_type> listen(port_type port) {
+std::pair<int, port_type> listen(port_type port) {
   struct addrinfo hints, *res = NULL;
 
   std::memset(&hints, 0x00, sizeof(hints));
@@ -46,7 +77,7 @@ std::tuple<int, std::string, port_type> listen(port_type port) {
   // `getaddrinfo` will sort addresses according to RFC 3484 and can be tweeked
   // by editing `/etc/gai.conf`. so there is no need to manual sorting
   // or protocol preference.
-  int err = ::getaddrinfo(NULL, std::to_string(port).data(), &hints, &res);
+  int err = ::getaddrinfo(nullptr, std::to_string(port).data(), &hints, &res);
   if (err != 0 || !res) {
     throw std::invalid_argument("cannot find host to listen on: " + std::string(gai_strerror(err)));
   }
@@ -70,7 +101,7 @@ std::tuple<int, std::string, port_type> listen(port_type port) {
       ::close(socket);
       next_addr = next_addr->ai_next;
 
-      // we have tried all addresses but could not establish listening on any of them
+      // we have tried all addresses but could not start listening on any of them
       if (!next_addr) {
         throw e;
       }
@@ -78,19 +109,7 @@ std::tuple<int, std::string, port_type> listen(port_type port) {
   }
 
   // get listen port and address
-  char address[INET6_ADDRSTRLEN];
-  port_type listen_port;
-  if (next_addr->ai_family == AF_INET) {
-    struct sockaddr_in *addr = reinterpret_cast<struct sockaddr_in*>(next_addr->ai_addr);
-    SYSCHECK(::inet_ntop(next_addr->ai_family, &(addr->sin_addr), address, sizeof(address)));
-    listen_port = ntohs(addr->sin_port);
-  } else { // AF_INET6
-    struct sockaddr_in6 *addr = reinterpret_cast<struct sockaddr_in6*>(next_addr->ai_addr);
-    SYSCHECK(::inet_ntop(next_addr->ai_family, &(addr->sin6_addr), address, sizeof(address)));
-    listen_port = ntohs(addr->sin6_port);
-  }
-
-  return std::make_tuple(socket, std::string(address), listen_port);
+  return {socket, getSocketPort(socket)};
 }
 
 
@@ -154,43 +173,38 @@ std::tuple<int, std::string> accept(int listen_socket, int timeout) {
   std::unique_ptr<struct pollfd[]> events(new struct pollfd[1]);
   events[0] = {.fd = listen_socket, .events = POLLIN};
 
-  int res;
-  SYSCHECK(res = ::poll(events.get(), 1, timeout))
-  if (res == 0) {
-    throw std::runtime_error("waiting for processes to connect has timed out");
-  } else {
-    if (!(events[0].revents & POLLIN))
-      throw std::system_error(ECONNABORTED, std::system_category());
+  while (true) {
+    int res = ::poll(events.get(), 1, timeout);
+    if (res == 0) {
+      throw std::runtime_error("waiting for processes to connect has timed out");
+    } else if (res == -1) {
+      if (errno == EINTR) continue;
+      throw std::system_error(errno, std::system_category());
+    } else {
+      if (!(events[0].revents & POLLIN))
+        throw std::system_error(ECONNABORTED, std::system_category());
+      break;
+    }
   }
 
   int socket;
   SYSCHECK(socket = ::accept(listen_socket, NULL, NULL))
 
+  // Get address of the connecting process
   struct sockaddr_storage addr;
   socklen_t addr_len = sizeof(addr);
-  char address[INET6_ADDRSTRLEN + 1];
-
   SYSCHECK(::getpeername(socket, reinterpret_cast<struct sockaddr*>(&addr), &addr_len))
-
-  if (addr.ss_family == AF_INET) {
-    struct sockaddr_in *s = reinterpret_cast<struct sockaddr_in*>(&addr);
-    SYSCHECK(::inet_ntop(AF_INET, &(s->sin_addr), address, INET_ADDRSTRLEN))
-    address[INET_ADDRSTRLEN] = '\0';
-  } else {
-    struct sockaddr_in6 *s = reinterpret_cast<struct sockaddr_in6*>(&addr);
-    SYSCHECK(::inet_ntop(AF_INET6, &(s->sin6_addr), address, INET6_ADDRSTRLEN))
-    address[INET6_ADDRSTRLEN] = '\0';
-  }
 
   setSocketNoDelay(socket);
 
-  return std::make_tuple(socket, std::string(address));
+  return std::make_tuple(socket, sockaddrToString(reinterpret_cast<struct sockaddr*>(&addr)));
 }
 
+// TODO: move these to InitMethodEnv
 std::tuple<port_type, rank_type> load_master_env() {
-  auto port = convertToPort(std::stoul(getenv(MASTER_PORT_ENV)));
+  auto port = convertToPort(std::stoul(must_getenv(MASTER_PORT_ENV)));
 
-  rank_type world_size = std::stoul(getenv(WORLD_SIZE_ENV));
+  rank_type world_size = std::stoul(must_getenv(WORLD_SIZE_ENV));
   if (world_size == 0)
     throw std::domain_error(std::string(WORLD_SIZE_ENV) + " env variable cannot be 0");
 
@@ -199,7 +213,7 @@ std::tuple<port_type, rank_type> load_master_env() {
 
 
 std::tuple<std::string, port_type> load_worker_env() {
-  std::string full_address = std::string(getenv(MASTER_ADDR_ENV));
+  std::string full_address = std::string(must_getenv(MASTER_ADDR_ENV));
   auto found_pos = full_address.rfind(":");
   if (found_pos == std::string::npos)
     throw std::domain_error("invalid master address, usage: IP:PORT | HOSTNAME:PORT");
@@ -210,11 +224,11 @@ std::tuple<std::string, port_type> load_worker_env() {
 }
 
 rank_type load_rank_env() {
-  return convertToRank(std::stol(getenv(RANK_ENV)));
+  return convertToRank(std::stol(must_getenv(RANK_ENV)));
 }
 
 rank_type load_world_size_env() {
-  return convertToRank(std::stol(getenv(WORLD_SIZE_ENV)));
+  return convertToRank(std::stol(must_getenv(WORLD_SIZE_ENV)));
 }
 
 } // namespace thd

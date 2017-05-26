@@ -32,4 +32,6 @@ struct InitMethod {
 InitMethod::Config getInitConfig(std::string argument, int world_size = -1,
                                  std::string group_name = "");
 
+std::vector<std::string> getInterfaceAddresses();
+
 } // namespace thd

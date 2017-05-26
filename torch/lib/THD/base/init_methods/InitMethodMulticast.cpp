@@ -5,10 +5,12 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <unistd.h>
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <set>
 #include <thread>
+#include <cstring>
 
 #define UID_LENGTH 100
 

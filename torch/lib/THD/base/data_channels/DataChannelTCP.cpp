@@ -117,7 +117,7 @@ bool DataChannelTCP::initWorker() {
   master.socket = connect(master.address, master.port);
   int master_socket = master.socket;
 
-  std::tie(_socket, std::ignore, _port) = listen();
+  std::tie(_socket, _port) = listen();
 
   send_bytes<rank_type>(master_socket, &_rank, 1, true);
   send_bytes<port_type>(master_socket, &_port, 1); // send listening port to master

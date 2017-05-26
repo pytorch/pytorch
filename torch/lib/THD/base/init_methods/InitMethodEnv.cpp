@@ -11,7 +11,7 @@ InitMethod::Config InitMethodEnv::getConfig() {
   if (config.rank == 0) {
     config.master.world_size = load_world_size_env();
     std::tie(config.master.listen_port, config.master.world_size) = load_master_env();
-    std::tie(config.master.listen_socket, std::ignore, std::ignore) = listen(config.master.listen_port);
+    std::tie(config.master.listen_socket, std::ignore) = listen(config.master.listen_port);
   } else {
     std::tie(config.worker.address, config.worker.listen_port) = load_worker_env();
   }
