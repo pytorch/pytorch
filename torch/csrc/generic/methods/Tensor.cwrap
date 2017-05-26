@@ -329,7 +329,8 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
   python_name: masked_fill_
   return: self
   arguments:
-    - THTensor* self
+    - arg: THTensor* self
+      broadcast: mask inplace fallback types:Byte
     - THBoolTensor* mask
     - real value
 ]]
@@ -340,7 +341,8 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
   python_name: masked_scatter_
   return: self
   arguments:
-    - THTensor* self
+    - arg: THTensor* self
+      broadcast: mask inplace fallback types:Byte
     - THBoolTensor* mask
     - THTensor* source
 ]]
