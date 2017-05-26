@@ -291,7 +291,7 @@ void findAlgorithm(
   cache.insert(conv.params, *algo);
   
   THCDeviceAllocator* allocator = THCCachingAllocator_get();
-  CUDA_CHECK(allocator->emptyCache())
+  CUDA_CHECK(allocator->emptyCache());
 }
 
 template<typename algo_t>
