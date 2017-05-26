@@ -7,11 +7,11 @@
 #include <cxxabi.h>
 #include <dirent.h>
 #include <dlfcn.h>
-#include <execinfo.h>
 #include <pthread.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <unwind.h>
 
 #include <atomic>
 #include <csignal>
@@ -137,13 +137,24 @@ const char* getSignalName(int signum) {
   return nullptr;
 }
 
+_Unwind_Reason_Code unwinder(struct _Unwind_Context* context, void* userInfo) {
+  auto& pcs = *reinterpret_cast<std::vector<uintptr_t>*>(userInfo);
+  pcs.push_back(_Unwind_GetIP(context));
+  return _URC_NO_REASON;
+}
+
+std::vector<uintptr_t> getBacktrace() {
+  std::vector<uintptr_t> pcs;
+  _Unwind_Backtrace(unwinder, &pcs);
+  return pcs;
+}
+
 void printStacktrace() {
-  constexpr const unsigned maxFrames = 256;
-  std::array<void*, maxFrames> frames;
+  std::vector<uintptr_t> pcs = getBacktrace();
   Dl_info info;
-  int numberOfFrames = backtrace(frames.data(), maxFrames);
-  for (int i = 0; i < numberOfFrames; i++) {
-    const void* pc = frames[i];
+  size_t i = 0;
+  for (uintptr_t pcAddr : pcs) {
+    const void* pc = reinterpret_cast<const void*>(pcAddr);
     const char* path = nullptr;
     const char* name = "???";
     char* demangled = nullptr;
@@ -174,6 +185,7 @@ void printStacktrace() {
     if (demangled) {
       free(demangled);
     }
+    i += 1;
   }
 }
 
