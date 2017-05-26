@@ -319,13 +319,14 @@ class DataInputCoordinator(object):
             "_scratch_" + self._input_source_name
         blob = core.BlobReference(scratch_name)
         status = core.BlobReference(scratch_name + "_status")
+        if blob not in self._scratch_blobs:
+            self._scratch_blobs.add(blob)
+            self._scratch_blobs.add(status)
         workspace.FeedBlob(
             blob,
             data_arr,
             device_option=self._device_option
         )
-        self._scratch_blobs.add(blob)
-        self._scratch_blobs.add(status)
 
         op = core.CreateOperator(
             "SafeEnqueueBlobs",
