@@ -613,6 +613,36 @@ static bool THPTensor_(_convertToTensorIndexers)(PyObject *index, std::vector<TH
   return true;
 }
 
+// Caller takes ownership of the returned IndexTensor
+static THIndexTensor* THPTensor_(_calculateLinearIndices)(
+    THTensor *indexed, std::vector<THIndexTensor *>& broadcasted) {
+
+  // Get the number of indices to generate - this will be equal to the number
+  // of elements in each broadcasted Tensor
+  ptrdiff_t indexingElements = THIndexTensor_(nElement)(LIBRARY_STATE broadcasted.at(0));
+  THIndexTensor *linearIndices = THIndexTensor_(newWithSize1d)(LIBRARY_STATE indexingElements);
+  THLongStorage *indexerSize = THLongStorage_newWithSize(1);
+  THLongStorage_set(indexerSize, 0, indexingElements);
+
+  for (ptrdiff_t i = 0; i < indexingElements; ++i) {
+    long linearIdx = 0;
+    for (int j = broadcasted.size() - 1; j >= 0; --j) {
+      THIndexTensor *indexer = THIndexTensor_(newContiguous)(LIBRARY_STATE broadcasted.at(j));
+
+      // The indexing tensor might not be one-dimensional, but we are generating a vector of
+      // indices, so we need to view the indexer as 1D prior to getting the value for the
+      // particular dimension
+      THIndexTensor *oned = THIndexTensor_(newView)(LIBRARY_STATE indexer, indexerSize);
+      linearIdx += THTensor_(stride)(LIBRARY_STATE indexed, j) * THIndexTensor_(get1d)(LIBRARY_STATE oned, i);
+      THIndexTensor_(free)(LIBRARY_STATE oned);
+      THIndexTensor_(free)(LIBRARY_STATE indexer);
+    }
+    THIndexTensor_(set1d)(LIBRARY_STATE linearIndices, i, linearIdx);
+  }
+  THLongStorage_free(indexerSize);
+  return linearIndices;
+}
+
 static bool THPTensor_(_advancedIndex)(PyObject *index, THTensorPtr &tresult)
 {
   // Precondition: index is an object that specifies advanced indexing.
@@ -636,27 +666,7 @@ static bool THPTensor_(_advancedIndex)(PyObject *index, THTensorPtr &tresult)
   // Our strategy is to view the indexed Tensor as a 1D Tensor, calculate
   // the linear indices for each tuple of indexing elements, and then call
   // indexSelect using those linear indices
-
-  ptrdiff_t indexingElements = THIndexTensor_(nElement)(LIBRARY_STATE broadcasted.at(0));
-  THIndexTensor *linearIndices = THIndexTensor_(newWithSize1d)(LIBRARY_STATE indexingElements);
-  THLongStorage *indexerSize = THLongStorage_newWithSize(1);
-  THLongStorage_set(indexerSize, 0, indexingElements);
-
-  for (ptrdiff_t i = 0; i < indexingElements; ++i) {
-    long linearIdx = 0;
-    for (int j = broadcasted.size() - 1; j >= 0; --j) {
-      THIndexTensor *indexer = THIndexTensor_(newContiguous)(LIBRARY_STATE broadcasted.at(j));
-
-      // The indexing tensor might not be one-dimensional, but we are generating a vector of
-      // indices, so we need to view the indexer as 1D prior to getting the value for the
-      // particular dimension
-      THIndexTensor *oned = THIndexTensor_(newView)(LIBRARY_STATE indexer, indexerSize);
-      linearIdx += THTensor_(stride)(LIBRARY_STATE indexed, j) * THIndexTensor_(get1d)(LIBRARY_STATE oned, i);
-      THIndexTensor_(free)(LIBRARY_STATE oned);
-      THIndexTensor_(free)(LIBRARY_STATE indexer);
-    }
-    THIndexTensor_(set1d)(LIBRARY_STATE linearIndices, i, linearIdx);
-  }
+  THIndexTensor *linearIndices = THPTensor_(_calculateLinearIndices)(indexed, broadcasted);
 
   THTensor *viewed = THTensor_(newWithStorage1d)(LIBRARY_STATE
                                                  THTensor_(storage)(LIBRARY_STATE indexed),
@@ -686,7 +696,6 @@ static bool THPTensor_(_advancedIndex)(PyObject *index, THTensorPtr &tresult)
   }
   THTensor_(free)(LIBRARY_STATE indexed);
   THIndexTensor_(free)(LIBRARY_STATE linearIndices);
-  THLongStorage_free(indexerSize);
   THTensor_(free)(LIBRARY_STATE viewed);
 
   return true;
