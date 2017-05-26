@@ -44,6 +44,10 @@ class PredictorExportMeta(collections.namedtuple(
     ):
         inputs = map(str, inputs)
         outputs = map(str, outputs)
+        assert len(set(inputs)) == len(inputs), (
+            "All inputs to the predictor should be unique")
+        assert len(set(outputs)) == len(outputs), (
+            "All outputs of the predictor should be unique")
         parameters = map(str, parameters)
         shapes = shapes or {}
 

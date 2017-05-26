@@ -1,4 +1,4 @@
-## @package sparse_to_dense
+# @package sparse_to_dense
 # Module caffe2.python.layers.sparse_to_dense
 from __future__ import absolute_import
 from __future__ import division
@@ -53,7 +53,12 @@ class SparseToDense(ModelLayer):
                                     name + '_' + field + '_ranges')
                             ),
                          ),
-                        ('values', input_record[field].values.items),
+                        ('values',
+                         schema.Scalar(np.int64,
+                                       model.net.NextScopedBlob(
+                                           name + '_' + field + '_values')
+                                       ),
+                         )
                     )
                 ))
             elif feature_specs.feature_type == 'ID_SCORE_LIST':
@@ -70,8 +75,18 @@ class SparseToDense(ModelLayer):
                                     name + '_' + field + '_ranges')
                             ),
                          ),
-                        ('ids', input_record[field].values.keys),
-                        ('scores', input_record[field].values.values),
+                        ('ids',
+                         schema.Scalar(np.int64,
+                                       model.net.NextScopedBlob(
+                                           name + '_' + field + '_ids')
+                                       ),
+                         ),
+                        ('scores',
+                         schema.Scalar(np.float32,
+                                       model.net.NextScopedBlob(
+                                           name + '_' + field + '_scores')
+                                       ),
+                         )
                     )
                 ))
             else:
@@ -131,6 +146,13 @@ class SparseToDense(ModelLayer):
                     self.output_schema[field].ranges(),
                     mask=feature_specs.feature_ids,
                 )
+                # Alias helps to enforce the fact that all SparseToDense calls
+                # produce new blobs.
+                # Reusing blob names might result in some weird consequences
+                # during the delivery time, when content of the blobs is
+                # generated based on the inputSpecs.
+                net.Alias(record[field].values.items(),
+                          self.output_schema[field].values())
             elif feature_specs.feature_type == 'ID_SCORE_LIST':
                 # TODO: merge this to the case above?
                 id_list_ranges = net.LengthsToRanges(
@@ -145,6 +167,15 @@ class SparseToDense(ModelLayer):
                     self.output_schema[field].ranges(),
                     mask=feature_specs.feature_ids,
                 )
+                # Alias helps to enforce the fact that all SparseToDense calls
+                # produce new blobs.
+                # Reusing blob names might result in some weird consequences
+                # during the delivery time, when content of the blobs is
+                # generated based on the inputSpecs.
+                net.Alias(record[field].values.keys(),
+                          self.output_schema[field].ids())
+                net.Alias(record[field].values.values(),
+                          self.output_schema[field].scores())
 
     def get_metadata(self):
         metadata = []
