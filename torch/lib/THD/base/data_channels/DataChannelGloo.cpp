@@ -80,7 +80,7 @@ DataChannelGloo::DataChannelGloo(InitMethod::Config config)
   // Default options listen on this host's name.
   // NOTE: when hostname has bad configuration in `/etc/hosts` processes
   // will not connect to each other.
-  ::gloo::transport::tcp::attr attr;
+  ::gloo::transport::tcp::attr attr(config.public_address.c_str());
   _device = ::gloo::transport::tcp::CreateDevice(attr);
 
   if (_rank == 0) {

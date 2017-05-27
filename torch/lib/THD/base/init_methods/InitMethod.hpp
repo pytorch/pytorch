@@ -22,6 +22,7 @@ struct InitMethod {
     };
 
     rank_type rank;
+    std::string public_address;
     MasterConfig master;
     WorkerConfig worker;
   };
@@ -31,7 +32,5 @@ struct InitMethod {
 
 InitMethod::Config getInitConfig(std::string argument, int world_size = -1,
                                  std::string group_name = "");
-
-std::vector<std::string> getInterfaceAddresses();
 
 } // namespace thd

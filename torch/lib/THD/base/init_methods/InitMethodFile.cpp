@@ -62,6 +62,8 @@ InitMethod::Config InitMethodFile::getConfig() {
   std::string content{std::istreambuf_iterator<char>(file),
                       std::istreambuf_iterator<char>()};
 
+  // TODO: handle group_name!!
+
   // rank is equal to number of lines inserted
   size_t rank = std::count(content.begin(), content.end(), '\n');
   config.rank = rank;
@@ -81,7 +83,7 @@ InitMethod::Config InitMethodFile::getConfig() {
     file.close();
     unlockFile(_file);
 
-    discoverWorkers(listen_socket, _world_size);
+    config.public_address = discoverWorkers(listen_socket, _world_size);
 
     config.master = {
       .world_size = _world_size,
@@ -115,7 +117,8 @@ InitMethod::Config InitMethodFile::getConfig() {
     file.close();
     unlockFile(_file);
 
-    std::string master_address = discoverMaster(addresses, port);
+    std::string master_address;
+    std::tie(master_address, config.public_address) = discoverMaster(addresses, port);
     config.worker = {
       .address = master_address,
       .port = port,
@@ -125,6 +128,7 @@ InitMethod::Config InitMethodFile::getConfig() {
   if (config.rank == _world_size - 1) {
     ::remove(_file_path.c_str());
   }
+
   return config;
 }
 
