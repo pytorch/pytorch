@@ -10,7 +10,8 @@ class RNNBase(Module):
 
     def __init__(self, mode, input_size, hidden_size,
                  num_layers=1, bias=True, batch_first=False,
-                 dropout=0, bidirectional=False):
+                 dropout=0, bidirectional=False, peepholes=False):
+        # [DV] add peepholes param
         super(RNNBase, self).__init__()
         self.mode = mode
         self.input_size = input_size
@@ -21,6 +22,7 @@ class RNNBase(Module):
         self.dropout = dropout
         self.dropout_state = {}
         self.bidirectional = bidirectional
+        self.peepholes = peepholes                        # [DV]
         num_directions = 2 if bidirectional else 1
 
         self._all_weights = []
@@ -39,17 +41,27 @@ class RNNBase(Module):
                 b_ih = Parameter(torch.Tensor(gate_size))
                 b_hh = Parameter(torch.Tensor(gate_size))
 
+                if peepholes:
+                    w_ci = Parameter(torch.Tensor(hidden_size))
+                    w_cf = Parameter(torch.Tensor(hidden_size))
+                    w_co = Parameter(torch.Tensor(hidden_size))
+
                 suffix = '_reverse' if direction == 1 else ''
-                weights = ['weight_ih_l{}{}', 'weight_hh_l{}{}', 'bias_ih_l{}{}', 'bias_hh_l{}{}']
+
+                weights = ['weight_ih_l{}{}', 'weight_hh_l{}{}', 'bias_ih_l{}{}', 'bias_hh_l{}{}', 'w_ci_l{}{}', 'w_cf_l{}{}', 'w_co_l{}{}'] # [DV] add peepholes
                 weights = [x.format(layer, suffix) for x in weights]
                 setattr(self, weights[0], w_ih)
                 setattr(self, weights[1], w_hh)
+                self._all_weights += [weights[:2]]
                 if bias:
                     setattr(self, weights[2], b_ih)
                     setattr(self, weights[3], b_hh)
-                    self._all_weights += [weights]
-                else:
-                    self._all_weights += [weights[:2]]
+                    self._all_weights[-1] += weights[2:4]
+                if peepholes:
+                    setattr(self, weights[4], w_ci)
+                    setattr(self, weights[5], w_cf)
+                    setattr(self, weights[6], w_co)
+                    self._all_weights[-1] += weights[4:7]
 
         self.reset_parameters()
 
@@ -86,7 +98,8 @@ class RNNBase(Module):
             train=self.training,
             bidirectional=self.bidirectional,
             batch_sizes=batch_sizes,
-            dropout_state=self.dropout_state
+            dropout_state=self.dropout_state,
+            peepholes=self.peepholes
         )
         output, hidden = func(input, self.all_weights, hx)
         if is_packed:
@@ -472,11 +485,12 @@ class LSTMCell(RNNCellBase):
         ...     output.append(hx)
     """
 
-    def __init__(self, input_size, hidden_size, bias=True):
+    def __init__(self, input_size, hidden_size, bias=True, peepholes=False):  # [DV] add peephole
         super(LSTMCell, self).__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.bias = bias
+        self.peepholes = peepholes
         self.weight_ih = Parameter(torch.Tensor(4 * hidden_size, input_size))
         self.weight_hh = Parameter(torch.Tensor(4 * hidden_size, hidden_size))
         if bias:
@@ -485,6 +499,15 @@ class LSTMCell(RNNCellBase):
         else:
             self.register_parameter('bias_ih', None)
             self.register_parameter('bias_hh', None)
+        if peepholes:
+            self.w_ci = Parameter(torch.Tensor(hidden_size))
+            self.w_cf = Parameter(torch.Tensor(hidden_size))
+            self.w_co = Parameter(torch.Tensor(hidden_size))
+        else:
+            self.register_parameter('w_ci', None)
+            self.register_parameter('w_cf', None)
+            self.register_parameter('w_co', None)
+
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -497,6 +520,7 @@ class LSTMCell(RNNCellBase):
             input, hx,
             self.weight_ih, self.weight_hh,
             self.bias_ih, self.bias_hh,
+            self.w_ci, self.w_cf, self.w_co    # [DV] add peepholes
         )
 
 
