@@ -3,11 +3,6 @@
 #include "InitMethodFile.hpp"
 #include "InitMethodMulticast.hpp"
 
-#include <sys/types.h>
-#include <sys/ioctl.h>
-#include <net/if.h>
-#include <ifaddrs.h>
-
 namespace thd {
 
 InitMethod::Config getInitConfig(std::string argument, int world_size,
@@ -51,30 +46,6 @@ InitMethod::Config getInitConfig(std::string argument, int world_size,
   }
 
   throw std::invalid_argument("unsupported initialization method");
-}
-
-std::vector<std::string> getInterfaceAddresses() {
-  struct ifaddrs *ifa;
-  SYSCHECK(getifaddrs(&ifa));
-  std::shared_ptr<struct ifaddrs> ifaddr_list(ifa, [](struct ifaddrs* ptr) {
-      freeifaddrs(ptr);
-  });
-
-  std::vector<std::string> addresses;
-
-  while (ifa != nullptr) {
-    struct sockaddr *addr = ifa->ifa_addr;
-    if (addr) {
-      bool is_loopback = ifa->ifa_flags & IFF_LOOPBACK;
-      bool is_ip = addr->sa_family == AF_INET || addr->sa_family == AF_INET6;
-      if (is_ip && !is_loopback) {
-        addresses.push_back(sockaddrToString(addr));
-      }
-    }
-    ifa = ifa->ifa_next;
-  }
-
-  return addresses;
 }
 
 } // namespace thd

@@ -6,6 +6,8 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <unistd.h>
+#include <sys/types.h>
+#include <fcntl.h>
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -13,8 +15,8 @@
 #include <thread>
 #include <cstring>
 
-#define UID_LENGTH 100
-#define MAX_MSG_LENGTH 1000
+#define UID_LENGTH 60
+#define MAX_MSG_LENGTH 4000
 
 namespace thd {
 namespace {
@@ -66,7 +68,13 @@ struct MulticastMessage {
 
 std::string getRandomString()
 {
-  std::srand(std::time(0));
+  int fd;
+  unsigned int seed;
+  SYSCHECK(fd = open("/dev/urandom", O_RDONLY));
+  SYSCHECK(read(fd, &seed, sizeof(seed)));
+  SYSCHECK(::close(fd));
+  std::srand(seed);
+
   auto randchar = []() -> char {
     const char charset[] =
       "0123456789"
@@ -81,7 +89,7 @@ std::string getRandomString()
   return str;
 }
 
-static int getAddressIPVersion(const std::string& address) {
+static int getProtocol(const std::string& address) {
   char buf[16];
   if (inet_pton(AF_INET, address.c_str(), buf)) {
     return AF_INET;
@@ -93,22 +101,20 @@ static int getAddressIPVersion(const std::string& address) {
   return -1;
 }
 
-std::tuple<int, struct sockaddr> connectUDP(const std::string& address, port_type port, int timeout_sec = 10, int ttl = 1) {
+std::tuple<int, struct sockaddr_storage> bindMulticastSock(const std::string& address, port_type port, int timeout_sec = 10, int ttl = 1) {
   struct timeval timeout = {.tv_sec = timeout_sec, .tv_usec = 0};
 
-  struct sockaddr addr;
-
-  int version = getAddressIPVersion(address);
+  struct sockaddr_storage addr = {0};
+  int protocol = getProtocol(address);
 
   int socket, optval;
-  SYSCHECK(socket = ::socket(version, SOCK_DGRAM, 0))
+  SYSCHECK(socket = ::socket(protocol, SOCK_DGRAM, 0))
   optval = 1; SYSCHECK(::setsockopt(socket, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(int)))
   optval = 1; SYSCHECK(::setsockopt(socket, SOL_SOCKET, SO_REUSEPORT, &optval, sizeof(int)))
 
-  if (version == AF_INET) {
-    struct sockaddr_in addr_ipv4;
-    std::memset(&addr_ipv4, 0x00, sizeof(addr_ipv4));
-    addr_ipv4.sin_family = version;
+  if (protocol == AF_INET) {
+    struct sockaddr_in addr_ipv4 = {0};
+    addr_ipv4.sin_family = protocol;
     addr_ipv4.sin_addr.s_addr = INADDR_ANY;
     addr_ipv4.sin_port = htons(port);
 
@@ -122,11 +128,10 @@ std::tuple<int, struct sockaddr> connectUDP(const std::string& address, port_typ
     SYSCHECK(::setsockopt(socket, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)))
 
     SYSCHECK(::inet_pton(AF_INET, address.c_str(), &addr_ipv4.sin_addr))
-    addr = *reinterpret_cast<struct sockaddr*>(&addr_ipv4);
-  } else if (version == AF_INET6) {
-    struct sockaddr_in6 addr_ipv6;
-    std::memset(&addr_ipv6, 0x00, sizeof(addr_ipv6));
-    addr_ipv6.sin6_family = version;
+    memcpy(&addr, &addr_ipv4, sizeof(addr_ipv4));
+  } else if (protocol == AF_INET6) {
+    struct sockaddr_in6 addr_ipv6 = {0};
+    addr_ipv6.sin6_family = protocol;
     addr_ipv6.sin6_addr = in6addr_any;
     addr_ipv6.sin6_port = htons(port);
 
@@ -140,7 +145,7 @@ std::tuple<int, struct sockaddr> connectUDP(const std::string& address, port_typ
     SYSCHECK(::setsockopt(socket, IPPROTO_IPV6, IPV6_JOIN_GROUP, &mreq, sizeof(mreq)))
 
     SYSCHECK(::inet_pton(AF_INET6, address.c_str(), &addr_ipv6.sin6_addr))
-    addr = *reinterpret_cast<struct sockaddr*>(&addr_ipv6);
+    memcpy(&addr, &addr_ipv6, sizeof(addr_ipv6));
   }
 
   /* Reduce the chance that we use socket before joining the group */
@@ -165,8 +170,8 @@ InitMethod::Config InitMethodMulticast::getConfig() {
   InitMethod::Config config;
 
   int socket;
-  struct sockaddr send_addr;
-  std::tie(socket, send_addr) = connectUDP(_address, _port);
+  struct sockaddr_storage send_addr_storage;
+  std::tie(socket, send_addr_storage) = bindMulticastSock(_address, _port);
 
   int listen_socket;
   MulticastMessage msg;
@@ -175,54 +180,58 @@ InitMethod::Config InitMethodMulticast::getConfig() {
   msg.addresses = getInterfaceAddresses();
   std::tie(listen_socket, msg.port) = listen();
 
-  std::string send_message = MulticastMessage::pack(msg);
+  std::string packed_msg = MulticastMessage::pack(msg);
   std::set<std::string> processes;
-  processes.insert(send_message);
-
-  // TODO: check if send_message is not to long
+  processes.insert(packed_msg);
 
   char recv_message[MAX_MSG_LENGTH];
-  SYSCHECK(::sendto(socket, send_message.c_str(), send_message.size(), 0, &send_addr, sizeof(send_addr)))
+  if (packed_msg.length() + 1 > MAX_MSG_LENGTH) {
+    throw std::logic_error("message too long for multicast init");
+  }
+
+  auto broadcast = [socket, &packed_msg, &send_addr_storage]() {
+    SYSCHECK(::sendto(socket, packed_msg.c_str(), packed_msg.size() + 1, 0,
+                reinterpret_cast<struct sockaddr*>(&send_addr_storage),
+                sizeof(send_addr_storage)));
+  };
+
+  broadcast();
 
   while (processes.size() < _world_size) {
     try {
-      SYSCHECK(::recvfrom(socket, recv_message, sizeof(recv_message), 0, nullptr, nullptr))
+      SYSCHECK(::recv(socket, recv_message, sizeof(recv_message), 0));
       std::string recv_message_str(recv_message);
 
       /* We should ignore messages comming from different group */
       auto recv_msg = MulticastMessage::unpack(recv_message_str);
-      if (recv_msg.group_name != _group_name)
+      if (recv_msg.group_name != _group_name) {
         continue;
+      }
 
-      processes.insert(recv_message_str); // set will automatically delete duplicates
+      processes.insert(recv_message_str); // set will automatically deduplicate messages
     } catch (const std::system_error& e) {
-      /* Check if this was really a timeout from `recvfrom` or some different error. */
+      /* Check if this was really a timeout from `recvfrom` or a different error. */
       if (errno != EAGAIN && errno != EWOULDBLOCK)
         throw e;
     }
 
-    /* Even timeout has occured we want to resend message (just to be sure). */
-    SYSCHECK(::sendto(socket, send_message.c_str(), send_message.size(), 0, &send_addr, sizeof(send_addr)))
+    broadcast();
   }
 
-  /*
-   * To ensure that all other processes have received our message,
-   * send it again few times.
-   */
-  for (std::size_t i = 0; i < 10; ++i) {
-    SYSCHECK(::sendto(socket, send_message.c_str(), send_message.size(), 0, &send_addr, sizeof(send_addr)))
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-  }
+  // Just to make decrease the probability of packet loss deadlocking the system
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  broadcast();
 
   MulticastMessage master_msg;
   std::size_t rank = 0;
   for (auto it = processes.begin(); it != processes.end(); ++it, ++rank) {
-    MulticastMessage process_msg = MulticastMessage::unpack(*it);
-    if (rank == 0) { // remember master message
-      master_msg = process_msg;
+    auto packed_recv_msg = *it;
+    MulticastMessage recv_msg = MulticastMessage::unpack(packed_recv_msg);
+    if (rank == 0) {
+      master_msg = recv_msg;
     }
 
-    if (msg.uid == process_msg.uid) {
+    if (packed_msg == packed_recv_msg) {
       config.rank = rank;
       if (config.rank == 0) {
         config.master = {
@@ -231,9 +240,10 @@ InitMethod::Config InitMethodMulticast::getConfig() {
           .listen_port = master_msg.port,
         };
 
-        discoverWorkers(listen_socket, _world_size);
+        config.public_address = discoverWorkers(listen_socket, _world_size);
       } else {
-        std::string master_address = discoverMaster(master_msg.addresses, master_msg.port);
+        std::string master_address;
+        std::tie(master_address, config.public_address) = discoverMaster(master_msg.addresses, master_msg.port);
         config.worker = {
           .address = master_address,
           .port = master_msg.port,
@@ -243,7 +253,7 @@ InitMethod::Config InitMethodMulticast::getConfig() {
     }
   }
 
-  /* On close multicast membership is dropped, so no need to do it manually */
+  /* Multicast membership is dropped on close */
   ::close(socket);
 
   return config;
