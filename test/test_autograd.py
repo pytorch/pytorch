@@ -1415,6 +1415,7 @@ function_tests = [
     (Trace, (), ((S, S),)),
     (Cross, (), ((S, 3), (S, 3))),
     (Cross, (1,), ((S, 3, S), (S, 3, S)), 'dim'),
+    (Inverse, (), ((S, S),)),
     (Clone, (), ((S, M, S),)),
     (Squeeze, (), ((S, 1, M, 1),)),
     # TODO: enable neg dim checks
@@ -1542,6 +1543,7 @@ method_tests = [
     ('trace', (M, M), ()),
     ('cross', (S, 3), ((S, 3),)),
     ('cross', (S, 3, S), ((S, 3, S), 1), 'dim'),
+    ('inverse', (S, S), ()),
     ('clone', (S, M, S), ()),
     ('eq', (S, S, S), ((S, S, S),)),
     ('ne', (S, S, S), ((S, S, S),)),

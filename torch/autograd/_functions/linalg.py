@@ -69,3 +69,17 @@ class Cross(Function):
         grad_input = torch.cross(other, grad_output, self.dim)
         grad_other = torch.cross(grad_output, input, self.dim)
         return grad_input, grad_other
+
+
+class Inverse(Function):
+
+    @staticmethod
+    def forward(ctx, input):
+        inverse = torch.inverse(input)
+        ctx.save_for_backward(inverse)
+        return inverse
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        inverse, = ctx.saved_variables
+        return -torch.mm(inverse.t(), torch.mm(grad_output, inverse.t()))
