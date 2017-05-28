@@ -343,8 +343,8 @@ Args:
 
 Example::
 
-    >>> vec1 = torch.arange(1, 3)
-    >>> vec2 = torch.arange(1, 2)
+    >>> vec1 = torch.arange(1, 4)
+    >>> vec2 = torch.arange(1, 3)
     >>> M = torch.zeros(3, 2)
     >>> torch.addr(M, vec1, vec2)
      1  2
