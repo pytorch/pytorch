@@ -147,7 +147,7 @@ THLongStorage* unpackTHLongStorage(RPCMessage& raw_message) {
     }
   } catch (std::exception& e) {
     THLongStorage_free(storage);
-    throw e;
+    throw;
   }
 
   return storage;

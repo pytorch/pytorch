@@ -66,9 +66,7 @@ PyObject* THDPModule_initProcessGroup(PyObject *_unused, PyObject *args)
   std::string group_name = THPUtils_unpackString(PyTuple_GET_ITEM(args, 3));
 
   THDChannelType channel_type = name2channel_type.at(backend_name);
-  THPUtils_assert(
-      THDProcessGroupInit(channel_type, init_method, world_size, group_name),
-      "failed to initialize distributed library (THD)");
+  THDProcessGroupInit(channel_type, init_method, world_size, group_name);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -90,9 +88,7 @@ PyObject* THDPModule_initMasterWorker(PyObject *_unused, PyObject *args)
   std::string group_name = THPUtils_unpackString(PyTuple_GET_ITEM(args, 3));
 
   THDChannelType channel_type = name2channel_type.at(backend_name);
-  THPUtils_assert(
-      THDMasterWorkerInit(channel_type, init_method, world_size, group_name),
-      "failed to initialize distributed library (THD)");
+  THDMasterWorkerInit(channel_type, init_method, world_size, group_name);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }

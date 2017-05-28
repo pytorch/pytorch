@@ -36,10 +36,14 @@ void unlockFile(int fd) {
 
 namespace thd {
 
-InitMethodFile::InitMethodFile(std::string file_path, rank_type world_size)
- : _file_path(file_path)
+InitMethodFile::InitMethodFile(std::string file_path, rank_type world_size, std::string group_name)
+ : _file_path(std::move(file_path))
  , _world_size(world_size)
+ , _group_name(std::move(group_name))
 {
+  if (_group_name != "")
+    throw std::runtime_error("group names not supported with file initialization yet");
+
   _file = ::open(_file_path.c_str(), O_RDWR | O_CREAT | O_EXCL, 0664);
   if (_file == -1 && errno == EEXIST) {
     _file = ::open(_file_path.c_str(), O_RDWR);
@@ -61,8 +65,6 @@ InitMethod::Config InitMethodFile::getConfig() {
   std::fstream file(_file_path);
   std::string content{std::istreambuf_iterator<char>(file),
                       std::istreambuf_iterator<char>()};
-
-  // TODO: handle group_name!!
 
   // rank is equal to number of lines inserted
   size_t rank = std::count(content.begin(), content.end(), '\n');
@@ -96,7 +98,7 @@ InitMethod::Config InitMethodFile::getConfig() {
       throw std::runtime_error("corrupted distributed init file");
     std::string master_info = content.substr(0, addr_end_pos);
 
-    auto port_sep_pos = content.rfind('#');
+    auto port_sep_pos = content.find('#');
     if (port_sep_pos == std::string::npos)
       throw std::runtime_error("corrupted distributed init file");
 
