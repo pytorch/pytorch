@@ -75,8 +75,6 @@ using size_type = std::uint64_t;
   if (errno != 0) throw std::system_error(errno, std::system_category()); \
 }
 
-const char* must_getenv(const char* env);
-
 template<typename T>
 void send_bytes(int socket, const T* buffer, std::size_t length, bool more_data = false)
 {
@@ -146,6 +144,7 @@ int connect(const std::string& address, port_type port, bool wait = true);
 std::tuple<int, std::string> accept(int listen_socket, int timeout = -1);
 
 std::string sockaddrToString(struct sockaddr *addr);
+std::pair<std::string, std::string> splitAddress(const std::string &addr);
 
 /* send a string's length and data */
 inline void send_string(int socket, const std::string& str,
@@ -188,5 +187,18 @@ template<typename T>
 void send_value(int socket, T&& value, bool more_data = false) {
   send_bytes<T>(socket, &value, 1, more_data);
 }
+
+template<typename T>
+class ResourceGuard {
+  std::function<void()> destructor;
+
+public:
+  ResourceGuard(std::function<void()> destructor)
+    : destructor(std::move(destructor)) {}
+
+  ~ResourceGuard() {
+    destructor();
+  }
+};
 
 } // namespace thd

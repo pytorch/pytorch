@@ -1,4 +1,5 @@
 #include "InitMethodEnv.hpp"
+#include "InitMethodUtils.hpp"
 
 namespace thd {
 
@@ -8,6 +9,15 @@ constexpr char RANK_ENV[] = "RANK";
 constexpr char WORLD_SIZE_ENV[] = "WORLD_SIZE";
 constexpr char MASTER_PORT_ENV[] = "MASTER_PORT";
 constexpr char MASTER_ADDR_ENV[] = "MASTER_ADDR";
+
+const char* must_getenv(const char* env) {
+  const char* value = std::getenv(env);
+  if (value == nullptr) {
+    throw std::logic_error(std::string("") + "failed to read the " + env +
+        " environmental variable; maybe you forgot to set it?");
+  }
+  return value;
+}
 
 std::tuple<port_type, rank_type> load_master_env() {
   auto port = convertToPort(std::stoul(must_getenv(MASTER_PORT_ENV)));
@@ -21,14 +31,9 @@ std::tuple<port_type, rank_type> load_master_env() {
 
 
 std::tuple<std::string, port_type> load_worker_env() {
-  std::string full_address = std::string(must_getenv(MASTER_ADDR_ENV));
-  auto found_pos = full_address.rfind(":");
-  if (found_pos == std::string::npos)
-    throw std::domain_error("invalid master address, usage: IP:PORT | HOSTNAME:PORT");
-
-  std::string str_port = full_address.substr(found_pos + 1);
+  std::string str_port = must_getenv(MASTER_PORT_ENV);
   auto port = convertToPort(std::stoul(str_port));
-  return std::make_tuple(full_address.substr(0, found_pos), port);
+  return std::make_tuple(must_getenv(MASTER_ADDR_ENV), port);
 }
 
 rank_type load_rank_env() {
@@ -51,8 +56,10 @@ InitMethod::Config InitMethodEnv::getConfig() {
     config.master.world_size = load_world_size_env();
     std::tie(config.master.listen_port, config.master.world_size) = load_master_env();
     std::tie(config.master.listen_socket, std::ignore) = listen(config.master.listen_port);
+    config.public_address = discoverWorkers(config.master.listen_socket, config.master.world_size);
   } else {
     std::tie(config.worker.address, config.worker.port) = load_worker_env();
+    std::tie(std::ignore, config.public_address) = discoverMaster({config.worker.address}, config.worker.port);
   }
   return config;
 }

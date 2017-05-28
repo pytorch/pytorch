@@ -12,6 +12,9 @@ struct InitMethodMulticast : InitMethod {
   InitMethod::Config getConfig() override;
 
 private:
+  InitMethod::Config getMasterConfig(struct sockaddr* addr);
+  InitMethod::Config getMulticastConfig(struct sockaddr* addr);
+
   std::string _address;
   port_type _port;
   rank_type _world_size;
