@@ -1,30 +1,94 @@
 from numbers import Integral
+import warnings
 
 from .module import Module
 from .. import functional as F
-from .utils import _pair
+from .utils import _pair, _triple
 
 
-class _UpsamplingBase(Module):
+class Upsample(Module):
+    """
+    Upsamples a given multi-channel 2D (spatial) or 3D (volumetric) data.
 
-    def __init__(self, size=None, scale_factor=None):
-        super(_UpsamplingBase, self).__init__()
-        if size is None and scale_factor is None:
-            raise ValueError('either size or scale_factor should be defined')
-        if scale_factor is not None and not isinstance(scale_factor, (Integral, tuple)):
-            raise ValueError('scale_factor must be of integer type or tuple of integer types')
+    The input data is assumed to be of the form `minibatch x channels x [depth] x height x width.
+    Hence, for spatial inputs, we expect a 4D Tensor and for volumetric inputs, we expect a 5D Tensor.
+
+    The algorithms available for upsampling are nearest neighbor, bilinear and trilinear upsampling,
+    with bilinear only available for 4D Tensor inputs and trilinear for 4D Tensor inputs.
+
+    One can either give a :attr:`scale_factor` or the target output :attr:`size` to
+    calculate the output size. (You cannot give both, as it is ambiguous)
+
+    Args:
+        size (tuple, optional): a tuple of ints ([D_out], H_out, W_out) output sizes
+        scale_factor (int / tuple of ints, optional): the multiplier for the image height / width / depth
+        mode (string, optional): the upsampling algorithm: nearest | bilinear | trilinear
+
+    Shape:
+        - Input: :math:`(N, C, H_{in}, W_{in})` or :math:`(N, C, D_{in}, H_{in}, W_{in})`
+        - Output: :math:`(N, C, H_{out}, W_{out})` or :math:`(N, C, D_{out}, H_{out}, W_{out})` where
+          :math:`D_{out} = floor(D_{in} * scale\_factor)` or `size[-3]`
+          :math:`H_{out} = floor(H_{in} * scale\_factor)` or `size[-2]`
+          :math:`W_{out} = floor(W_{in}  * scale\_factor)` or `size[-1]`
+
+    Examples::
+
+        >>> inp
+        Variable containing:
+        (0 ,0 ,.,.) =
+          1  2
+          3  4
+        [torch.FloatTensor of size 1x1x2x2]
+
+        >>> m = nn.Upsample(scale_factor=2, mode='bilinear')
+        >>> m(inp)
+        Variable containing:
+        (0 ,0 ,.,.) =
+          1.0000  1.3333  1.6667  2.0000
+          1.6667  2.0000  2.3333  2.6667
+          2.3333  2.6667  3.0000  3.3333
+          3.0000  3.3333  3.6667  4.0000
+        [torch.FloatTensor of size 1x1x4x4]
+
+        >>> inp
+        Variable containing:
+        (0 ,0 ,.,.) =
+          1  2
+          3  4
+        [torch.FloatTensor of size 1x1x2x2]
+
+        >>> m = nn.Upsample(scale_factor=2, mode='nearest')
+        >>> m(inp)
+        Variable containing:
+        (0 ,0 ,.,.) =
+          1  1  2  2
+          1  1  2  2
+          3  3  4  4
+          3  3  4  4
+        [torch.FloatTensor of size 1x1x4x4]
+
+
+    """
+
+    def __init__(self, size=None, scale_factor=None, mode='nearest'):
+        super(Upsample, self).__init__()
         self.size = size
         self.scale_factor = scale_factor
+        self.mode = mode
+
+    def forward(self, input):
+        return F.upsample(input, self.size, self.scale_factor, self.mode)
 
     def __repr__(self):
         if self.scale_factor is not None:
             info = 'scale_factor=' + str(self.scale_factor)
         else:
             info = 'size=' + str(self.size)
+        info += ', mode=' + self.mode
         return self.__class__.__name__ + '(' + info + ')'
 
 
-class UpsamplingNearest2d(_UpsamplingBase):
+class UpsamplingNearest2d(Upsample):
     """
     Applies a 2D nearest neighbor upsampling to an input signal composed of several input
     channels.
@@ -64,18 +128,15 @@ class UpsamplingNearest2d(_UpsamplingBase):
         [torch.FloatTensor of size 1x1x4x4]
 
     """
-
     def __init__(self, size=None, scale_factor=None):
-        super(UpsamplingNearest2d, self).__init__(size, scale_factor)
-        if self.scale_factor is not None and not isinstance(scale_factor, Integral):
-            raise ValueError('scale_factor must be of integer type for neighest neighbor sampling')
-        self.size = _pair(self.size) if self.size is not None else None
+        super(UpsamplingNearest2d, self).__init__(size, scale_factor, mode='nearest')
 
     def forward(self, input):
-        return F.upsample_nearest(input, self.size, self.scale_factor)
+        warnings.warn("nn.UpsamplingNearest2d is deprecated. Use nn.Upsample instead.")
+        return super(UpsamplingNearest2d, self).forward(input)
 
 
-class UpsamplingBilinear2d(_UpsamplingBase):
+class UpsamplingBilinear2d(Upsample):
     """
     Applies a 2D bilinear upsampling to an input signal composed of several input
     channels.
@@ -115,13 +176,9 @@ class UpsamplingBilinear2d(_UpsamplingBase):
         [torch.FloatTensor of size 1x1x4x4]
 
     """
-
     def __init__(self, size=None, scale_factor=None):
-        super(UpsamplingBilinear2d, self).__init__(size, scale_factor)
-
-        if self.scale_factor is not None:
-            self.scale_factor = F._check_bilinear_2d_scale_factor(self.scale_factor)
-        self.size = _pair(self.size) if self.size is not None else None
+        super(UpsamplingBilinear2d, self).__init__(size, scale_factor, mode='bilinear')
 
     def forward(self, input):
-        return F.upsample_bilinear(input, self.size, self.scale_factor)
+        warnings.warn("nn.UpsamplingBilinear2d is deprecated. Use nn.Upsample instead.")
+        return super(UpsamplingBilinear2d, self).forward(input)
