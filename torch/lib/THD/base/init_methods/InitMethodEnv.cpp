@@ -1,7 +1,8 @@
-#include "InitMethodEnv.hpp"
+#include "InitMethod.hpp"
 #include "InitMethodUtils.hpp"
 
 namespace thd {
+namespace init {
 
 namespace {
 
@@ -40,20 +41,21 @@ rank_type load_rank_env() {
   return convertToRank(std::stol(must_getenv(RANK_ENV)));
 }
 
-rank_type load_world_size_env() {
-  return convertToRank(std::stol(must_getenv(WORLD_SIZE_ENV)));
-}
-
 } // anonymous namespace
 
-InitMethodEnv::InitMethodEnv() {}
-InitMethodEnv::~InitMethodEnv() {}
-
-InitMethod::Config InitMethodEnv::getConfig() {
+InitMethod::Config initEnv(int world_size) {
   InitMethod::Config config;
   config.rank = load_rank_env();
   if (config.rank == 0) {
-    config.master.world_size = load_world_size_env();
+    const char *env_world_size_str = std::getenv(WORLD_SIZE_ENV);
+    int env_world_size = world_size;
+    if (env_world_size_str != nullptr)
+      env_world_size = convertToRank(std::stol(must_getenv(WORLD_SIZE_ENV)));
+    if (env_world_size != world_size)
+      throw std::runtime_error("world size specified both as an environmental variable"
+        "and to the initializer");
+    config.master.world_size = env_world_size;
+
     std::tie(config.master.listen_port, config.master.world_size) = load_master_env();
     std::tie(config.master.listen_socket, std::ignore) = listen(config.master.listen_port);
     config.public_address = discoverWorkers(config.master.listen_socket, config.master.world_size);
@@ -64,4 +66,5 @@ InitMethod::Config InitMethodEnv::getConfig() {
   return config;
 }
 
+} // namespace init
 } // namespace thd
