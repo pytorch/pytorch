@@ -3,6 +3,7 @@ from subprocess import Popen, PIPE
 
 from .env import check_env_flag
 
+
 def find_nvcc():
     proc = Popen(['which', 'nvcc'], stdout=PIPE, stderr=PIPE)
     out, err = proc.communicate()
@@ -11,6 +12,7 @@ def find_nvcc():
         return os.path.dirname(out)
     else:
         return None
+
 
 if check_env_flag('NO_CUDA'):
     WITH_CUDA = False
