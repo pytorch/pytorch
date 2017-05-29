@@ -525,6 +525,12 @@ Vision layers
 .. autoclass:: PixelShuffle
     :members:
 
+:hidden:`Upsample`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: UpsamplingNearest3d
+    :members:
+
 :hidden:`UpsamplingNearest2d`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -872,6 +878,23 @@ Vision functions
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: pad
+
+:hidden:`upsample`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: upsample
+
+:hidden:`upsample_nearest`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: upsample_nearest
+
+:hidden:`upsample_bilinear`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: upsample_bilinear
+
+
 
 torch.nn.init
 =============

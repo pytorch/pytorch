@@ -1,6 +1,7 @@
 """Functional interface"""
 
 from numbers import Integral
+import warnings
 
 import torch
 from . import _functions
@@ -628,44 +629,76 @@ def pixel_shuffle(input, upscale_factor):
     return shuffle_out.view(batch_size, channels, out_height, out_width)
 
 
-def upsample_nearest(input, size=None, scale_factor=None):
-    """Upsamples the input, using nearest neighbours' pixel values.
+def upsample(input, size=None, scale_factor=None, mode='nearest'):
+    """Upsamples the input to either the given :attr:`size` or the given :attr:`scale_factor`
 
-    Currently only spatial upsampling is supported (i.e. expected inputs
-    are 4 dimensional).
+    The algorithm used for upsampling is determined by :attr:`mode`.
+
+    Currently spatial and volumetric upsampling are supported, i.e.
+    expected inputs are 4-D or 5-D in shape.
+
+    The input dimensions are interpreted in the form: `mini-batch x channels x [depth] x height x width`
+
+    The modes available for upsampling are: `nearest`, `bilinear` (4D-only), `trilinear` (5D-only)
 
     Args:
         input (Variable): input
-        size (int or Tuple[int, int]): output spatial size.
+        size (int or Tuple[int, int] or Tuple[int, int, int]): output spatial size.
+        scale_factor (int): multiplier for spatial size. Has to be an integer.
+        mode (string): algorithm used for upsampling: 'nearest' | 'bilinear' | 'trilinear'
+    """
+    if input.dim() == 4 and mode == 'nearest':
+        return _functions.thnn.UpsamplingNearest2d(_pair(size), scale_factor)(input)
+    elif input.dim() == 5 and mode == 'nearest':
+        return _functions.thnn.UpsamplingNearest3d(_triple(size), scale_factor)(input)
+    elif input.dim() == 4 and mode == 'bilinear':
+        return _functions.thnn.UpsamplingBilinear2d(_pair(size), scale_factor)(input)
+    elif input.dim() == 4 and mode == 'trilinear':
+        raise NotImplementedError("Got 4D input, but trilinear mode needs 5D input")
+    elif input.dim() == 5 and mode == 'bilinear':
+        raise NotImplementedError("Got 5D input, but bilinear mode needs 4D input")
+    elif input.dim() == 5 and mode == 'trilinear':
+            return _functions.thnn.UpsamplingTrilinear3d(_triple(size), scale_factor)(input)
+    else:
+        raise NotImplementedError("Input Error: Only 4D and 5D input Tensors supported"
+                                  " (got {}D) for the modes: nearest | bilinear | trilinear"
+                                  " (got {})".format(input.dim(), mode))
+
+
+def upsample_nearest(input, size=None, scale_factor=None):
+    """Upsamples the input, using nearest neighbours' pixel values.
+
+    **Note:: This function is deprecated. Use nn.functional.upsample instead**
+
+    Currently spatial and volumetric upsampling are supported (i.e. expected inputs
+    are 4 or 5 dimensional).
+
+    Args:
+        input (Variable): input
+        size (int or Tuple[int, int] or Tuple[int, int, int]): output spatial size.
         scale_factor (int): multiplier for spatial size. Has to be an integer.
     """
-    return _functions.thnn.UpsamplingNearest2d(size, scale_factor)(input)
+    # DeprecationWarning is ignored by default
+    warnings.warn("nn.functional.upsample_nearest is deprecated. Use nn.functional.upsample instead.")
+    return upsample(input, size, scale_factor, mode='nearest')
 
 
 def upsample_bilinear(input, size=None, scale_factor=None):
-    """Upscales the input, using the bilinear upsampling.
+    """Upscales the input, using bilinear upsampling.
 
-    Currently only spatial upsampling is supported (i.e. expected inputs
-    are 4 dimensional).
+    **Note:: This function is deprecated. Use nn.functional.upsample instead**
+
+    Expected inputs are spatial (4 dimensional). Use upsample_trilinear for volumetric (5 dimensional)
+    inputs.
 
     Args:
         input (Variable): input
         size (int or Tuple[int, int]): output spatial size.
         scale_factor (int or Tuple[int, int]): multiplier for spatial size
     """
-    return _functions.thnn.UpsamplingBilinear2d(size, scale_factor)(input)
-
-
-def _check_bilinear_2d_scale_factor(scale_factor):
-    scale_factor = _pair(scale_factor)
-    try:
-        assert len(scale_factor) == 2
-        assert all(isinstance(s, Integral) and s >= 1 for s in scale_factor)
-    except AssertionError as e:
-        raise ValueError('scale_factor must be a non-negative integer, '
-                         'or a tuple of non-negative integers for bilinear upsamplings, but got: '
-                         '{}'.format(scale_factor))
-    return scale_factor
+    # DeprecationWarning is ignored by default
+    warnings.warn("nn.functional.upsample_bilinear is deprecated. Use nn.functional.upsample instead.")
+    return upsample(input, size, scale_factor, mode='bilinear')
 
 
 def pad(input, pad, mode='constant', value=0):
