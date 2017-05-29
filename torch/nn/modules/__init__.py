@@ -23,7 +23,7 @@ from .rnn import RNNBase, RNN, LSTM, GRU, \
     RNNCell, LSTMCell, GRUCell
 from .pixelshuffle import PixelShuffle
 from .upsampling import UpsamplingNearest2d, UpsamplingBilinear2d
-from .distance import PairwiseDistance
+from .distance import PairwiseDistance, CosineSimilarity
 
 
 __all__ = [
@@ -43,5 +43,5 @@ __all__ = [
     'Embedding', 'RNNBase', 'RNN', 'LSTM', 'GRU', 'RNNCell', 'LSTMCell', 'GRUCell',
     'PixelShuffle', 'UpsamplingNearest2d', 'UpsamplingBilinear2d', 'PairwiseDistance',
     'AdaptiveMaxPool1d', 'AdaptiveMaxPool2d', 'AdaptiveAvgPool1d', 'AdaptiveAvgPool2d',
-    'TripletMarginLoss', 'ZeroPad2d', 'ConstantPad2d', 'Bilinear',
+    'TripletMarginLoss', 'ZeroPad2d', 'ConstantPad2d', 'Bilinear', 'CosineSimilarity',
 ]
