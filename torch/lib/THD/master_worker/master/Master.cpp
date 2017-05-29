@@ -28,6 +28,8 @@ bool THDMasterWorkerInit(THDChannelType channel_type) {
     return false;
   }
 
+  THDState::s_workers = std::vector<WorkerState>(dataChannel->getNumProcesses());
+
   masterCommandChannel.reset(new MasterCommandChannel());
   if (!masterCommandChannel->init()) {
     return false;

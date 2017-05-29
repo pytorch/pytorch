@@ -8,6 +8,8 @@ void THDTensor_(copy)(THDTensor *tensor, THDTensor *src) {
 }
 
 void THDTensor_(copyFromMaster)(THDTensorDescriptor* from, THDTensor* to) {
+  std::lock_guard<std::mutex> guard(THDState::s_workers[THDState::s_current_worker].copy_mutex);
+
   masterCommandChannel->sendMessage(
     packMessage(Functions::tensorCopyFromMaster, to),
     THDState::s_current_worker
@@ -17,6 +19,8 @@ void THDTensor_(copyFromMaster)(THDTensorDescriptor* from, THDTensor* to) {
 }
 
 void THDTensor_(copyFromWorker)(THDTensor* from, THDTensorDescriptor* to) {
+  std::lock_guard<std::mutex> guard(THDState::s_workers[THDState::s_current_worker].copy_mutex);
+
   masterCommandChannel->sendMessage(
     packMessage(Functions::tensorCopyFromWorker, from),
     THDState::s_current_worker
