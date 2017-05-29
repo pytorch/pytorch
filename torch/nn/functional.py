@@ -594,29 +594,95 @@ def pixel_shuffle(input, upscale_factor):
 def upsample_nearest(input, size=None, scale_factor=None):
     """Upsamples the input, using nearest neighbours' pixel values.
 
-    Currently only spatial upsampling is supported (i.e. expected inputs
-    are 4 dimensional).
+    Currently spatial and volumetric upsampling are supported (i.e. expected inputs
+    are 4 or 5 dimensional).
 
     Args:
         input (Variable): input
-        size (int or Tuple[int, int]): output spatial size.
+        size (int or Tuple[int, int] or Tuple[int, int, int]): output spatial size.
         scale_factor (int): multiplier for spatial size. Has to be an integer.
     """
-    return _functions.thnn.UpsamplingNearest2d(size, scale_factor)(input)
+    if input.dim() == 4:
+        assert type(size) == int or len(size) == 2, '4D tensors expect size as int or Tuple[int, int]'
+        return _functions.thnn.UpsamplingNearest2d(_pair(size), scale_factor)(input)
+    elif input.dim() == 5:
+        assert type(size) == int or len(size) == 3, '5D tensors expect size as int or Tuple[int, int, int]'
+        return _functions.thnn.UpsamplingNearest3d(_triple(size), scale_factor)(input)
+    else:
+        raise NotImplementedError("Only 4D and 5D upsampling is supported for now")
 
 
 def upsample_bilinear(input, size=None, scale_factor=None):
-    """Upscales the input, using the bilinear upsampling.
+    """Upscales the input, using bilinear upsampling.
 
-    Currently only spatial upsampling is supported (i.e. expected inputs
-    are 4 dimensional).
+    Expected inputs are spatial (4 dimensional). Use upsample_trilinear for volumetric (5 dimensional)
+    inputs.
 
     Args:
         input (Variable): input
         size (int or Tuple[int, int]): output spatial size.
         scale_factor (int or Tuple[int, int]): multiplier for spatial size
     """
-    return _functions.thnn.UpsamplingBilinear2d(size, scale_factor)(input)
+    assert input.dim() == 4, "4D tensors expected in input"
+    assert type(size) == int or len(size) == 2, '4D tensors expect size as int or Tuple[int, int]'
+    return _functions.thnn.UpsamplingBilinear2d(_pair(size), scale_factor)(input)
+
+
+def upsample_trilinear(input, size=None, scale_factor=None):
+    """Upscales the input, using trilinear upsampling.
+
+    Expected inputs are volumetric (5 dimensional). Use upsample_bilinear for spatial (4 dimensional)
+    inputs.
+
+    Args:
+        input (Variable): input
+        size (int or Tuple[int, int, int]): output spatial size.
+        scale_factor (int): multiplier for spatial size. Has to be an integer.
+    """
+    assert input.dim() == 5, "5D tensors expected in input"
+    assert type(size) == int or len(size) == 3, '5D tensors expect size as int or Tuple[int, int, int]'
+    return _functions.thnn.UpsamplingTrilinear3d(_triple(size), scale_factor)(input)
+
+
+def subsample(input, weight, bias, size, stride=1):
+    """Subsamples the input by averaging over input neighborhoods of given size with given stride,
+    multiplying by weight and adding bias to the result.
+    The function preserves the number of channels (i.e. ``in_channels==out_channels``)
+    Weight and bias are learned 1D tensors of size (in_channels).
+
+    Currently only spatial and volumetric subsampling are supported (i.e. expected
+    inputs are 4 or 5 dimensional).
+
+    See :class:`~torch.nn.Subsample2d` and :class:`~torch.nn.Subsample3d` for details and output shape.
+
+    Args:
+        input (Variable): input tensor (minibatch x in_channels x iH x iW)
+          or (minibatch x in_channels x iD x iH x iW)
+        weight: weight tensor (in_channels)
+        bias: bias tensor (in_channels)
+        size (int or Tuple[int, int] or Tuple[int, int, int]): size of the neighborhood over which
+          input is averaged to produce the output
+        stride (int or Tuple[int, int] or Tuple[int, int, int]): the stride of the averaging operation.
+          Default: 1
+
+    Examples:
+        >>> weight = autograd.Variable(torch.randn(10))
+        >>> bias = autograd.Variable(torch.randn(10))
+        >>> inputs = autograd.Variable(torch.randn(1,10,4,4))
+        >>> F.subsample(inputs, weight, bias, 2, stride=2)
+    """
+    if input.dim() == 4:
+        assert weight.dim() == 1
+        assert bias.dim() == 1
+        f = _functions.thnn.Subsampling2d(_pair(size), _pair(stride))
+        return f(input, weight, bias)
+    elif input.dim() == 5:
+        assert weight.dim() == 1
+        assert bias.dim() == 1
+        f = _functions.thnn.Subsampling3d(_triple(size), _triple(stride))
+        return f(input, weight, bias)
+    else:
+        raise NotImplementedError("Only 4D and 5D subsampling is supported for now")
 
 
 def _check_bilinear_2d_scale_factor(scale_factor):

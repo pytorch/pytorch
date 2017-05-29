@@ -2085,6 +2085,68 @@ class TestNN(NNTestCase):
         self.assertTrue(gradcheck(lambda x, y: F.cosine_similarity(x, y, dim=0), (input1, input2)))
         self.assertTrue(gradcheck(lambda x, y: F.cosine_similarity(x, y, dim=-1), (input1, input2)))
 
+    def test_subsampling2d(self):
+        m = nn.Subsampling2d(1, 2, stride=2)
+        m.weight.data[:] = 1.0 / 4.0
+        m.bias.data[:] = 1.0
+        in_t = torch.ones(1, 1, 4, 4)
+        out_t = m(Variable(in_t))
+        self.assertEqual(2.0 * torch.ones(1, 1, 2, 2), out_t)
+
+        input = Variable(torch.randn(1, 1, 4, 4), requires_grad=True)
+        weight = Parameter(torch.randn(1))
+        bias = Parameter(torch.randn(1))
+        self.assertTrue(gradcheck(lambda x: F.subsample(x, weight, bias, 2), (input,)))
+
+    def test_subsampling3d(self):
+        m = nn.Subsampling3d(1, 2, stride=2)
+        m.weight.data[:] = 1.0 / 8.0
+        m.bias.data[:] = 1.0
+        in_t = torch.ones(1, 1, 4, 4, 4)
+        out_t = m(Variable(in_t))
+        self.assertEqual(2.0 * torch.ones(1, 1, 2, 2, 2), out_t)
+
+        input = Variable(torch.randn(1, 1, 4, 4, 4), requires_grad=True)
+        weight = Parameter(torch.randn(1))
+        bias = Parameter(torch.randn(1))
+        self.assertTrue(gradcheck(lambda x: F.subsample(x, weight, bias, 2), (input,)))
+
+    def test_upsamplingNearest2d(self):
+        m = nn.UpsamplingNearest2d(size=4)
+        in_t = torch.ones(1, 1, 2, 2)
+        out_t = m(Variable(in_t))
+        self.assertEqual(torch.ones(1, 1, 4, 4), out_t)
+
+        input = Variable(torch.randn(1, 1, 2, 2), requires_grad=True)
+        self.assertTrue(gradcheck(lambda x: F.upsample_nearest(x, 4), (input,)))
+
+    def test_upsamplingNearest3d(self):
+        m = nn.UpsamplingNearest3d(size=4)
+        in_t = torch.ones(1, 1, 2, 2, 2)
+        out_t = m(Variable(in_t))
+        self.assertEqual(torch.ones(1, 1, 4, 4, 4), out_t)
+
+        input = Variable(torch.randn(1, 1, 2, 2, 2), requires_grad=True)
+        self.assertTrue(gradcheck(lambda x: F.upsample_nearest(x, 4), (input,)))
+
+    def test_upsamplingBilinear2d(self):
+        m = nn.UpsamplingBilinear2d(size=4)
+        in_t = torch.ones(1, 1, 2, 2)
+        out_t = m(Variable(in_t))
+        self.assertEqual(torch.ones(1, 1, 4, 4), out_t)
+
+        input = Variable(torch.randn(1, 1, 2, 2), requires_grad=True)
+        self.assertTrue(gradcheck(lambda x: F.upsample_bilinear(x, 4), (input,)))
+
+    def test_upsamplingTrilinear3d(self):
+        m = nn.UpsamplingTrilinear3d(size=4)
+        in_t = torch.ones(1, 1, 2, 2, 2)
+        out_t = m(Variable(in_t))
+        self.assertEqual(torch.ones(1, 1, 4, 4, 4), out_t)
+
+        input = Variable(torch.randn(1, 1, 2, 2, 2), requires_grad=True)
+        self.assertTrue(gradcheck(lambda x: F.upsample_trilinear(x, 4), (input,)))
+
     def test_bilinear(self):
         module = nn.Bilinear(10, 10, 8)
         module2 = legacy.Bilinear(10, 10, 8)
@@ -2915,6 +2977,28 @@ new_module_tests = [
         input_size=(1, 9, 4, 4),
     ),
     dict(
+        module_name='Subsampling2d',
+        constructor_args=(2, 1),
+        input_size=(1, 2, 4, 4),
+    ),
+    dict(
+        module_name='Subsampling2d',
+        constructor_args=((2, 3), (1, 2)),
+        input_size=(1, 2, 8, 8),
+        desc='tuple'
+    ),
+    dict(
+        module_name='Subsampling3d',
+        constructor_args=(2, 1),
+        input_size=(1, 2, 4, 4, 4),
+    ),
+    dict(
+        module_name='Subsampling3d',
+        constructor_args=(2, (2, 3, 3), (1, 2, 2)),
+        input_size=(1, 2, 8, 8, 8),
+        desc='tuple'
+    ),
+    dict(
         module_name='UpsamplingNearest2d',
         constructor_args=(12,),
         input_size=(1, 2, 4, 4),
@@ -2929,6 +3013,23 @@ new_module_tests = [
         module_name='UpsamplingNearest2d',
         constructor_args=(None, 4),
         input_size=(1, 2, 4, 4),
+        desc='scale'
+    ),
+    dict(
+        module_name='UpsamplingNearest3d',
+        constructor_args=(12,),
+        input_size=(1, 2, 4, 4, 4),
+    ),
+    dict(
+        module_name='UpsamplingNearest3d',
+        constructor_args=((12, 16, 16),),
+        input_size=(1, 2, 3, 4, 4),
+        desc='tuple'
+    ),
+    dict(
+        module_name='UpsamplingNearest3d',
+        constructor_args=(None, 4),
+        input_size=(1, 2, 4, 4, 4),
         desc='scale'
     ),
     dict(
@@ -2959,6 +3060,23 @@ new_module_tests = [
         constructor_args=(None, (2, 1)),
         input_size=(1, 2, 4, 4),
         desc='scale_tuple_skewed'
+    ),
+    dict(
+        module_name='UpsamplingTrilinear3d',
+        constructor_args=(12,),
+        input_size=(1, 2, 4, 4, 4),
+    ),
+    dict(
+        module_name='UpsamplingTrilinear3d',
+        constructor_args=((4, 6, 6),),
+        input_size=(1, 2, 2, 3, 3),
+        desc='tuple'
+    ),
+    dict(
+        module_name='UpsamplingTrilinear3d',
+        constructor_args=(None, 4),
+        input_size=(1, 2, 4, 4, 4),
+        desc='scale'
     ),
     dict(
         module_name='AdaptiveMaxPool1d',
