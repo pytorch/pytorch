@@ -48,9 +48,9 @@ MasterCommandChannel::MasterCommandChannel(InitMethod::Config config)
   , _error_pipe(-1)
   , _error(nullptr)
   , _sockets(config.master.world_size, -1)
+  , _mutexes(config.master.world_size)
 {
   _sockets[0] = config.master.listen_socket;
-  _mutexes = std::vector<std::mutex>(world_size);
 }
 
 MasterCommandChannel::~MasterCommandChannel() {

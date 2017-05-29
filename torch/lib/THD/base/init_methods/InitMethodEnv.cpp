@@ -52,7 +52,7 @@ InitMethod::Config initEnv(int world_size) {
     if (env_world_size_str != nullptr)
       env_world_size = convertToRank(std::stol(must_getenv(WORLD_SIZE_ENV)));
     if (env_world_size != world_size)
-      throw std::runtime_error("world size specified both as an environmental variable"
+      throw std::runtime_error("world size specified both as an environmental variable "
         "and to the initializer");
     config.master.world_size = env_world_size;
 

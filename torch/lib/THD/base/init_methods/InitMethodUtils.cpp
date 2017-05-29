@@ -26,9 +26,7 @@ void sendPeerName(int socket) {
 std::vector<std::string> getInterfaceAddresses() {
   struct ifaddrs *ifa;
   SYSCHECK(getifaddrs(&ifa));
-  std::shared_ptr<struct ifaddrs> ifaddr_list(ifa, [](struct ifaddrs* ptr) {
-      freeifaddrs(ptr);
-  });
+  ResourceGuard ifaddrs_guard([ifa]() { ::freeifaddrs(ifa); });
 
   std::vector<std::string> addresses;
 
@@ -78,7 +76,7 @@ std::pair<std::string, std::string> discoverMaster(std::vector<std::string> addr
   if (master_address == "") {
     throw std::runtime_error("could not establish connection with other processes");
   }
-  std::shared_ptr<int> socket_guard(&socket, [](int *socket) { ::close(*socket); });
+  ResourceGuard socket_guard([socket]() { ::close(socket); });
   sendPeerName(socket);
   std::string my_address = recv_string(socket);
 

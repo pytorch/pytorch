@@ -168,12 +168,12 @@ int connect(const std::string& address, port_type port, bool wait, int timeout) 
       if (ret != 0 && errno != EINPROGRESS)
         throw std::system_error(errno, std::system_category());
 
-			struct pollfd pfd;
-			pfd.fd = socket;
-			pfd.events = POLLOUT;
+      struct pollfd pfd;
+      pfd.fd = socket;
+      pfd.events = POLLOUT;
 
-			int num_ready = poll(&pfd, 1, timeout);
-			if (num_ready < 0) {
+      int num_ready = poll(&pfd, 1, timeout);
+      if (num_ready < 0) {
         throw std::system_error(errno, std::system_category());
       } else if (num_ready == 0) {
         errno = 0;
@@ -186,8 +186,9 @@ int connect(const std::string& address, port_type port, bool wait, int timeout) 
         throw std::system_error(errno, std::system_category());
       }
 
-			// Disable non-blocking mode
-      int flags = fcntl(socket, F_GETFL);
+      // Disable non-blocking mode
+      int flags;
+      SYSCHECK(flags = fcntl(socket, F_GETFL));
       SYSCHECK(fcntl(socket, F_SETFL, flags & (~O_NONBLOCK)));
       socket_guard.release();
       break;
@@ -226,7 +227,9 @@ std::tuple<int, std::string> accept(int listen_socket, int timeout) {
     if (res == 0) {
       throw std::runtime_error("waiting for processes to connect has timed out");
     } else if (res == -1) {
-      if (errno == EINTR) continue;
+      if (errno == EINTR) {
+        continue;
+      }
       throw std::system_error(errno, std::system_category());
     } else {
       if (!(events[0].revents & POLLIN))

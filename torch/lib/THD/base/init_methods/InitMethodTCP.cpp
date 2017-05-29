@@ -16,6 +16,7 @@
 #include <cstring>
 #include <random>
 #include <sstream>
+#include <iterator>
 
 #define UID_LENGTH 60
 #define MAX_MSG_LENGTH 4000
@@ -258,8 +259,7 @@ InitMethod::Config initTCP(std::string argument, rank_type world_size, std::stri
         return initTCPMaster(head->ai_addr);
       }
     } catch (std::exception &e) {
-      if (head->ai_next) continue;
-      throw;
+      if (!head->ai_next) throw;
     }
   }
   throw std::runtime_error("failed to initialize THD using given address");
