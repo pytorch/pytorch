@@ -283,11 +283,13 @@ THDTensor *THDTensor_(newUnfold)(THDTensor *tensor, int dimension, long size, lo
 THDTensor *THDTensor_(newView)(THDTensor *tensor, THLongStorage *size) {
   // TODO
   THError("newView not implemented");
+  return nullptr;
 }
 
 THDTensor *THDTensor_(newExpand)(THDTensor *tensor, THLongStorage *size) {
   // TODO
   THError("newExpand not implemented");
+  return nullptr;
 }
 
 void THDTensor_(resize)(THDTensor *tensor, THLongStorage *size, THLongStorage *stride) {
@@ -396,6 +398,7 @@ real THDTensor_(get1d)(const THDTensor *tensor, long x0)
   //THArgCheck(tensor->nDimension == 1, 1, "tensor must have one dimension");
   //THArgCheck( (x0 >= 0) && (x0 < tensor->size[0]), 2, "out of range");
   //return THDStorage_(get)(tensor->storage, tensor->storageOffset+x0*tensor->stride[0]);
+  return 0;
 }
 
 void THDTensor_(set)(THDTensor *self, THDTensor *src) {
