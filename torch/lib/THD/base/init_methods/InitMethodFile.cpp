@@ -8,6 +8,7 @@
 #include <fstream>
 #include <system_error>
 #include <thread>
+#include <iterator>
 
 namespace thd {
 namespace init {
@@ -52,7 +53,6 @@ InitMethod::Config initFile(std::string file_path, rank_type world_size, std::st
   std::string content;
   struct stat fd_stat, path_stat;
 
-
   // Loop until the file is either empty, or filled with ours group_name
   while (true) {
     // Loop until we have an open, locked and valid file
@@ -95,11 +95,8 @@ InitMethod::Config initFile(std::string file_path, rank_type world_size, std::st
     std::tie(listen_socket, port) = listen();
 
     // pack message for other workers (we are first so we are master)
-    file << group_name << ' ';
-    file << port << ' ';
-
-    auto interface_addrs = getInterfaceAddresses();
-    for (auto addr_str : interface_addrs) {
+    file << group_name << ' ' << port << ' ';
+    for (auto addr_str : getInterfaceAddresses()) {
         file << addr_str << ' ';
     }
     file << std::endl;

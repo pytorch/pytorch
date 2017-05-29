@@ -188,20 +188,20 @@ void send_value(int socket, T&& value, bool more_data = false) {
 }
 
 class ResourceGuard {
-  std::function<void()> destructor;
-  bool released;
+  std::function<void()> _destructor;
+  bool _released;
 
 public:
   ResourceGuard(std::function<void()> destructor)
-    : destructor(std::move(destructor))
-    , released(false) {}
+    : _destructor(std::move(destructor))
+    , _released(false) {}
 
   ~ResourceGuard() {
-    if (!released) destructor();
+    if (!_released) _destructor();
   }
 
   void release() {
-    released = true;
+    _released = true;
   }
 };
 
