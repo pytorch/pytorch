@@ -67,7 +67,6 @@ namespace thd {
 
 using rank_type = std::uint32_t;
 using port_type = std::uint16_t;
-
 using size_type = std::uint64_t;
 
 #define SYSCHECK(expr) { \
@@ -140,7 +139,7 @@ inline rank_type convertToRank(long rank, long min = 0) {
 }
 
 std::pair<int, port_type> listen(port_type port = 0);
-int connect(const std::string& address, port_type port, bool wait = true);
+int connect(const std::string& address, port_type port, bool wait = true, int timeout = -1);
 std::tuple<int, std::string> accept(int listen_socket, int timeout = -1);
 
 std::string sockaddrToString(struct sockaddr *addr);
@@ -188,16 +187,21 @@ void send_value(int socket, T&& value, bool more_data = false) {
   send_bytes<T>(socket, &value, 1, more_data);
 }
 
-template<typename T>
 class ResourceGuard {
   std::function<void()> destructor;
+  bool released;
 
 public:
   ResourceGuard(std::function<void()> destructor)
-    : destructor(std::move(destructor)) {}
+    : destructor(std::move(destructor))
+    , released(false) {}
 
   ~ResourceGuard() {
-    destructor();
+    if (!released) destructor();
+  }
+
+  void release() {
+    released = true;
   }
 };
 

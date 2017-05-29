@@ -69,7 +69,7 @@ std::pair<std::string, std::string> discoverMaster(std::vector<std::string> addr
   int socket;
   for (const auto& address : addresses) {
     try {
-      socket = connect(address, port);
+      socket = connect(address, port, true, 2000);
       master_address = address;
       break;
     } catch (...) {} // when connection fails just try different address

@@ -1,14 +1,27 @@
-#include "InitMethodFile.hpp"
+#include "InitMethod.hpp"
 #include "InitMethodUtils.hpp"
 
 #include <fcntl.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include <algorithm>
 #include <fstream>
 #include <system_error>
 #include <thread>
 
+namespace thd {
+namespace init {
+
 namespace {
+
+void lockLoop(int fd, struct flock &oflock) {
+  while (true) {
+    int err = ::fcntl(fd, F_SETLKW, &oflock);
+    if (err == 0) break;
+    else if (err == EINTR) continue;
+    else throw std::system_error(errno, std::system_category());
+  }
+}
 
 void lockFile(int fd) {
   struct flock oflock;
@@ -16,9 +29,7 @@ void lockFile(int fd) {
   oflock.l_whence = SEEK_SET;
   oflock.l_start = 0;
   oflock.l_len = 0; // lock whole file
-
-  // TODO: handle interrupts
-  SYSCHECK(::fcntl(fd, F_SETLKW, &oflock));
+  lockLoop(fd, oflock);
 }
 
 void unlockFile(int fd) {
@@ -27,97 +38,100 @@ void unlockFile(int fd) {
   oflock.l_whence = SEEK_SET;
   oflock.l_start = 0;
   oflock.l_len = 0; // unlock whole file
-
-  SYSCHECK(::fcntl(fd, F_SETLKW, &oflock));
+  lockLoop(fd, oflock);
 }
 
 } // anonymous namespace
 
 
-namespace thd {
 
-InitMethodFile::InitMethodFile(std::string file_path, rank_type world_size, std::string group_name)
- : _file_path(std::move(file_path))
- , _world_size(world_size)
- , _group_name(std::move(group_name))
-{
-  if (_group_name != "")
-    throw std::runtime_error("group names not supported with file initialization yet");
-
-  _file = ::open(_file_path.c_str(), O_RDWR | O_CREAT | O_EXCL, 0664);
-  if (_file == -1 && errno == EEXIST) {
-    _file = ::open(_file_path.c_str(), O_RDWR);
-  }
-  if (_file == -1) {
-    throw std::system_error(_file, std::generic_category(), "cannot access '" + _file_path + "' file");
-  }
-}
-
-InitMethodFile::~InitMethodFile() {
-  ::close(_file);
-}
-
-
-InitMethod::Config InitMethodFile::getConfig() {
+InitMethod::Config initFile(std::string file_path, rank_type world_size, std::string group_name) {
   InitMethod::Config config;
-  lockFile(_file);
+  int fd;
+  std::fstream file;
+  std::string content;
+  struct stat fd_stat, path_stat;
 
-  std::fstream file(_file_path);
-  std::string content{std::istreambuf_iterator<char>(file),
-                      std::istreambuf_iterator<char>()};
 
-  // rank is equal to number of lines inserted
-  size_t rank = std::count(content.begin(), content.end(), '\n');
-  config.rank = rank;
+  // Loop until the file is either empty, or filled with ours group_name
+  while (true) {
+    // Loop until we have an open, locked and valid file
+    while (true) {
+      fd = ::open(file_path.c_str(), O_RDWR | O_CREAT, 0644);
+      if (fd == -1) {
+        throw std::system_error(fd, std::generic_category(),
+                                "cannot access '" + file_path + "' file");
+      }
+      lockFile(fd);
+
+      // This helps prevent a race when while we were waiting for the lock,
+      // the file has been removed from the fs
+      SYSCHECK(fstat(fd, &fd_stat));
+      int err = stat(file_path.c_str(), &path_stat);
+      if (err == 0 &&
+          fd_stat.st_dev == path_stat.st_dev &&
+          fd_stat.st_ino == path_stat.st_ino) {
+        break;
+      }
+      ::close(fd);
+    }
+
+    file = std::fstream(file_path);
+    content = {std::istreambuf_iterator<char>(file),
+               std::istreambuf_iterator<char>()};
+
+    if (content.length() == 0 || content.find(group_name) == 0) break;
+
+    unlockFile(fd);
+    ::close(fd);
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  }
+  // NOTE: the loop exits with a locked fd
+
+  config.rank = std::count(content.begin(), content.end(), '\n');
   if (config.rank == 0) {
     int listen_socket;
-    std::string address;
     port_type port;
     std::tie(listen_socket, port) = listen();
 
     // pack message for other workers (we are first so we are master)
-    file << port << '#';
-    for (auto addr_str : getInterfaceAddresses()) {
-        file << addr_str << ';';
+    file << group_name << ' ';
+    file << port << ' ';
+
+    auto interface_addrs = getInterfaceAddresses();
+    for (auto addr_str : interface_addrs) {
+        file << addr_str << ' ';
     }
     file << std::endl;
 
     file.close();
-    unlockFile(_file);
+    unlockFile(fd);
 
-    config.public_address = discoverWorkers(listen_socket, _world_size);
-
+    config.public_address = discoverWorkers(listen_socket, world_size);
     config.master = {
-      .world_size = _world_size,
+      .world_size = world_size,
       .listen_socket = listen_socket,
       .listen_port = port,
     };
   } else {
-    auto addr_end_pos = content.find('\n');
-    if (addr_end_pos == std::string::npos)
-      throw std::runtime_error("corrupted distributed init file");
-    std::string master_info = content.substr(0, addr_end_pos);
+    file << std::endl; // reserve our rank
+    file.seekp(0, std::ios_base::beg);
 
-    auto port_sep_pos = content.find('#');
-    if (port_sep_pos == std::string::npos)
-      throw std::runtime_error("corrupted distributed init file");
+    std::string file_group_name;
+    port_type port;
+    file >> file_group_name >> port;
+    std::vector<std::string> addresses =
+        {std::istream_iterator<std::string>(file),
+         std::istream_iterator<std::string>()};
 
-    std::string str_port = content.substr(0, port_sep_pos);
-    auto port = convertToPort(std::stoul(str_port));
-
-    std::vector<std::string> addresses;
-    auto sep_pos = port_sep_pos;
-    while (true) {
-      auto next_sep_pos = content.find(';', sep_pos + 1);
-      if (next_sep_pos == std::string::npos) break;
-      addresses.emplace_back(content.substr(sep_pos + 1, next_sep_pos - sep_pos - 1));
-      sep_pos = next_sep_pos;
+    // Last member to join removes the file
+    if (file_group_name != group_name) throw std::logic_error("file_group_name != group_name");
+    if (config.rank == world_size - 1) {
+      ::remove(file_path.c_str());
     }
 
-    file << std::to_string(config.rank) << std::endl;
-
     file.close();
-    unlockFile(_file);
+    unlockFile(fd);
 
     std::string master_address;
     std::tie(master_address, config.public_address) = discoverMaster(addresses, port);
@@ -127,11 +141,8 @@ InitMethod::Config InitMethodFile::getConfig() {
     };
   }
 
-  if (config.rank == _world_size - 1) {
-    ::remove(_file_path.c_str());
-  }
-
   return config;
 }
 
+} // namespace init
 } // namespace thd
