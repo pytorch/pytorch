@@ -160,7 +160,7 @@ def Parallelize_GPU(
 
     log.info("Add gradient all-reduces for SyncSGD")
     if broadcast_computed_params:
-        _BroadcastComputedParams(devices, model_helper_obj, rendezvous)
+        _BroadcastComputedParams(devices, model_helper_obj, rendezvous, use_nccl)
 
     if len(model_helper_obj._grad_names) > 0:
         _AllReduceGradients(
@@ -529,10 +529,23 @@ def FinalizeAfterCheckpoint(model, blobs=None):
     workspace.RunNet(model._checkpoint_net.Proto().name)
 
 
-def _Broadcast(devices, model, net, param):
+def _Broadcast(devices, model, net, param, use_nccl=False):
     # TODO(akyrola): replace with NCCLBroadcast when it's working
     # Copy params from gpu_0 to other
     master_gpu = devices[0]
+
+    if use_nccl:
+        if _IsGPUBlob(model, param):
+            master_device_opt = core.DeviceOption(caffe2_pb2.CUDA, master_gpu)
+            with core.DeviceScope(master_device_opt):
+
+                model.NCCLBroadcast(
+                    model._device_grouped_blobs[param].values(),
+                    model._device_grouped_blobs[param].values(),
+                    root=master_gpu
+                )
+                return
+
     for gpu_idx in devices[1:]:
         if _IsGPUBlob(model, param):
             device_opt = core.DeviceOption(caffe2_pb2.CUDA, gpu_idx)
@@ -855,23 +868,24 @@ def _AllReduceGradientsSingleHost(devices, model, use_nccl):
                 _Broadcast(devices, model, grad_name)
 
 
-def _BroadcastComputedParams(devices, model, rendezvous):
+def _BroadcastComputedParams(devices, model, rendezvous, use_nccl=False):
     if rendezvous is None:
-        _BroadcastComputedParamsSingleHost(devices, model)
+        _BroadcastComputedParamsSingleHost(devices, model, use_nccl)
     else:
-        _BroadcastComputedParamsDistributed(devices, model, rendezvous)
+        _BroadcastComputedParamsDistributed(devices, model, rendezvous, use_nccl)
 
 
 def _BroadcastComputedParamsDistributed(
     devices,
     model,
     rendezvous,
+    use_nccl=False
 ):
-    _BroadcastComputedParamsSingleHost(devices, model)
+    _BroadcastComputedParamsSingleHost(devices, model, use_nccl)
     log.warn("Distributed computed params all-reduce not implemented yet")
 
 
-def _BroadcastComputedParamsSingleHost(devices, model):
+def _BroadcastComputedParamsSingleHost(devices, model, use_nccl=False):
     '''
     Average computed params over all devices
     '''
@@ -881,7 +895,7 @@ def _BroadcastComputedParamsSingleHost(devices, model):
     for param_name in model._computed_param_names:
         # Copy from master to others -- averaging would be perhaps better,
         # but currently NCCLAllReduce is too prone to deadlock
-        _Broadcast(devices, model, model.net, param_name)
+        _Broadcast(devices, model, model.net, param_name, use_nccl)
 
 
 def _GetReverseOrderedGrads(model):
