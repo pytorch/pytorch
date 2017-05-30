@@ -265,6 +265,7 @@ main_sources = [
     "torch/csrc/DynamicTypes.cpp",
     "torch/csrc/byte_order.cpp",
     "torch/csrc/utils.cpp",
+    "torch/csrc/expand_utils.cpp",
     "torch/csrc/utils/object_ptr.cpp",
     "torch/csrc/utils/tuple_parser.cpp",
     "torch/csrc/allocators.cpp",
@@ -334,6 +335,7 @@ if WITH_CUDA:
         "torch/csrc/cuda/Stream.cpp",
         "torch/csrc/cuda/AutoGPU.cpp",
         "torch/csrc/cuda/utils.cpp",
+        "torch/csrc/cuda/expand_utils.cpp",
         "torch/csrc/cuda/serialization.cpp",
     ]
     main_sources += split_types("torch/csrc/cuda/Tensor.cpp")
