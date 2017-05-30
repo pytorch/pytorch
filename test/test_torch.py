@@ -2519,6 +2519,14 @@ class TestTorch(TestCase):
         self.assertEqual(reference[ri([2, 3, 4]), ], self._consecutive((3,), 3))
         self.assertEqual(reference[ri([0, 2, 4]), ], torch.Tensor([1, 3, 5]))
 
+        # setting values
+        reference[ri([0],), ] = -1
+        self.assertEqual(reference[ri([0]), ], torch.Tensor([-1]))
+        reference[ri([2, 3, 4]), ] = 3
+        self.assertEqual(reference[ri([2, 3, 4]), ], torch.Tensor([3, 3, 3]))
+        reference[ri([0, 2, 4]), ] = torch.Tensor([5, 4, 3])
+        self.assertEqual(reference[ri([0, 2, 4]), ], torch.Tensor([5, 4, 3]))
+
         # reference is 1 2
         #              3 4
         #              5 6
@@ -2550,6 +2558,16 @@ class TestTorch(TestCase):
                       [1, 0]])
         self.assertEqual(reference[rows, columns], torch.Tensor([[1, 2],
                                                                 [4, 5]]))
+
+        # setting values
+        reference[ri([0]), ri([1])] = -1
+        self.assertEqual(reference[ri([0]), ri([1])], torch.Tensor([-1]))
+        reference[ri([0, 1, 2]), ri([0])] = torch.Tensor([-1, 2, -4])
+        self.assertEqual(reference[ri([0, 1, 2]), ri([0])], torch.Tensor([-1,
+                         2, -4]))
+        reference[rows, columns] = torch.Tensor([[4, 6], [2, 3]])
+        self.assertEqual(reference[rows, columns],
+                         torch.Tensor([[4, 6], [2, 3]]))
 
         # Verify still works with Tranposed (i.e. non-contiguous) Tensors
 
@@ -2592,18 +2610,15 @@ class TestTorch(TestCase):
         self.assertEqual(reference[rows, columns], torch.Tensor([[0, 4],
                                                                 [5, 11]]))
 
-        # reference is (0, ..., ...)
-        #                   [[1, 2,   3, 4],
-        #                    [5, 6,   7, 8],
-        #                    [9, 10, 11, 12]]
-        #              (1, ..., ...)
-        #                   [[13, 14, 15, 16],
-        #                    [17, 18, 19, 20],
-        #                    [21, 22, 23, 24]]
-        reference = self._consecutive((2, 3, 4))
-        # TODO: 3D Tensor tests
-
-        pass
+        # setting values
+        reference[ri([0]), ri([1])] = -1
+        self.assertEqual(reference[ri([0]), ri([1])], torch.Tensor([-1]))
+        reference[ri([0, 1, 2]), ri([0])] = torch.Tensor([-1, 2, -4])
+        self.assertEqual(reference[ri([0, 1, 2]), ri([0])], torch.Tensor([-1,
+                         2, -4]))
+        reference[rows, columns] = torch.Tensor([[4, 6], [2, 3]])
+        self.assertEqual(reference[rows, columns],
+                         torch.Tensor([[4, 6], [2, 3]]))
 
     def test_newindex(self):
         reference = self._consecutive((3, 3, 3))
