@@ -8,7 +8,7 @@ import numpy as np
 from caffe2.python import workspace, cnn, memonger, core
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
-from hypothesis import given
+from hypothesis import given, settings
 
 
 def has_blob(proto, needle):
@@ -35,6 +35,7 @@ class MemongerTest(hu.HypothesisTestCase):
            batch_size=st.integers(min_value=1, max_value=10),
            do=st.sampled_from(hu.device_options),
            algo=st.sampled_from(memonger.AssignmentAlgorithm))
+    @settings(max_examples=5, timeout=120)
     def test_simple_memonger(self, input_dim, output_dim, batch_size, do, algo):
         m = cnn.CNNModelHelper()
         fc1 = m.FC("data", "fc1", dim_in=input_dim, dim_out=output_dim)
