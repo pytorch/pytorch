@@ -4,7 +4,7 @@
 #include <functional>
 #include <vector>
 #include "Types.h"
-
+#include "expand_utils.h"
 
 typedef std::function<void(PyObject*, PyObject*)> THPCopyFunction;
 struct THPCopyInfo {
@@ -58,15 +58,15 @@ inline PyObject * THPCopyMethod(const THPCopyList& v, PyObject *self, PyObject *
   return self;
 }
 
-template <typename TensorDst, typename TensorSrc>
-void THPInsertCopyFunction(
+template <typename StorageDst, typename StorageSrc>
+void THPInsertStorageCopyFunction(
   THPCopyList& copyList,
-  void (*copyFunc)(LIBRARY_STATE_TYPE TensorDst* x, TensorSrc* z),
+  void (*copyFunc)(LIBRARY_STATE_TYPE StorageDst* x, StorageSrc* z),
   bool async=false)
 {
   auto wrapper = [copyFunc](PyObject* dst_, PyObject* src_) {
-    TensorDst* dst = THPTypeInfo<TensorDst>::cdata(dst_);
-    TensorSrc* src = THPTypeInfo<TensorSrc>::cdata(src_);
+    StorageDst* dst = THPTypeInfo<StorageDst>::cdata(dst_);
+    StorageSrc* src = THPTypeInfo<StorageSrc>::cdata(src_);
 
     PyThreadState *_save = NULL;
     try {
@@ -79,6 +79,42 @@ void THPInsertCopyFunction(
       }
       throw;
     }
+  };
+
+  PyTypeObject* srcType = THPTypeInfo<StorageSrc>::pyType();
+  copyList.push_back({ srcType, wrapper, async });
+}
+
+template <typename TensorDst, typename TensorSrc>
+void THPInsertTensorCopyFunction(
+  THPCopyList& copyList,
+  void (*copyFunc)(LIBRARY_STATE_TYPE TensorDst* x, TensorSrc* z),
+  bool async=false)
+{
+  auto wrapper = [copyFunc](PyObject* dst_, PyObject* src_) {
+    TensorDst* dst = THPTypeInfo<TensorDst>::cdata(dst_);
+    TensorSrc* src = THPTypeInfo<TensorSrc>::cdata(src_);
+
+    TensorSrc *src_save = src;
+    THPPointer<TensorSrc> src_guard = newForExpand<TensorSrc>(LIBRARY_STATE_NOARGS);
+
+    int ret = expand_inplace1<TensorSrc, TensorDst>(LIBRARY_STATE src_guard.get(), src, dst, "src", "dst", true);
+    if (ret == 0) {
+      src = src_guard.get();
+    }
+
+    PyThreadState *_save = NULL;
+    try {
+      Py_UNBLOCK_THREADS;
+      copyFunc(LIBRARY_STATE dst, src);
+      Py_BLOCK_THREADS;
+    } catch (...) {
+      if (_save) {
+        Py_BLOCK_THREADS;
+      }
+      throw;
+    }
+    src = src_save;
   };
 
   PyTypeObject* srcType = THPTypeInfo<TensorSrc>::pyType();

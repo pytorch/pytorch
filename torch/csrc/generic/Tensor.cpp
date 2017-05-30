@@ -829,42 +829,42 @@ void THPTensor_(initCopyMethods)()
   // copy from same type
   THPInsertCopyFunction(h, &THTensor_(copy));
   // copy from CPU types
-  THPInsertCopyFunction(h, &THTensor_(copyByte));
-  THPInsertCopyFunction(h, &THTensor_(copyChar));
-  THPInsertCopyFunction(h, &THTensor_(copyShort));
-  THPInsertCopyFunction(h, &THTensor_(copyInt));
-  THPInsertCopyFunction(h, &THTensor_(copyLong));
-  THPInsertCopyFunction(h, &THTensor_(copyFloat));
-  THPInsertCopyFunction(h, &THTensor_(copyHalf));
-  THPInsertCopyFunction(h, &THTensor_(copyDouble));
+  THPInsertTensorCopyFunction(h, &THTensor_(copyByte));
+  THPInsertTensorCopyFunction(h, &THTensor_(copyChar));
+  THPInsertTensorCopyFunction(h, &THTensor_(copyShort));
+  THPInsertTensorCopyFunction(h, &THTensor_(copyInt));
+  THPInsertTensorCopyFunction(h, &THTensor_(copyLong));
+  THPInsertTensorCopyFunction(h, &THTensor_(copyFloat));
+  THPInsertTensorCopyFunction(h, &THTensor_(copyHalf));
+  THPInsertTensorCopyFunction(h, &THTensor_(copyDouble));
 #ifdef THC_GENERIC_FILE
   // copy from GPU types
-  THPInsertCopyFunction(h, &THTensor_(copyCudaByte));
-  THPInsertCopyFunction(h, &THTensor_(copyCudaChar));
-  THPInsertCopyFunction(h, &THTensor_(copyCudaShort));
-  THPInsertCopyFunction(h, &THTensor_(copyCudaInt));
-  THPInsertCopyFunction(h, &THTensor_(copyCudaLong));
-  THPInsertCopyFunction(h, &THTensor_(copyCudaFloat));
-  THPInsertCopyFunction(h, &THTensor_(copyCudaDouble));
+  THPInsertTensorCopyFunction(h, &THTensor_(copyCudaByte));
+  THPInsertTensorCopyFunction(h, &THTensor_(copyCudaChar));
+  THPInsertTensorCopyFunction(h, &THTensor_(copyCudaShort));
+  THPInsertTensorCopyFunction(h, &THTensor_(copyCudaInt));
+  THPInsertTensorCopyFunction(h, &THTensor_(copyCudaLong));
+  THPInsertTensorCopyFunction(h, &THTensor_(copyCudaFloat));
+  THPInsertTensorCopyFunction(h, &THTensor_(copyCudaDouble));
 #ifdef CUDA_HALF_TENSOR
-  THPInsertCopyFunction(h, &THTensor_(copyCudaHalf));
+  THPInsertTensorCopyFunction(h, &THTensor_(copyCudaHalf));
 #endif
-  THPInsertCopyFunction(h, &THCTensor_(copyAsyncCPU), true);
+  THPInsertTensorCopyFunction(h, &THCTensor_(copyAsyncCPU), true);
   // add CPU <- GPU copies to base type
   #define THCpuTensor_(name) TH_CONCAT_4(TH, Real, Tensor_, name)
   extern THPCopyList THCpuTensor_(copy_functions);
   auto& b = THCpuTensor_(copy_functions);
-  THPInsertCopyFunction(b, &THCpuTensor_(copyCudaByte));
-  THPInsertCopyFunction(b, &THCpuTensor_(copyCudaChar));
-  THPInsertCopyFunction(b, &THCpuTensor_(copyCudaShort));
-  THPInsertCopyFunction(b, &THCpuTensor_(copyCudaInt));
-  THPInsertCopyFunction(b, &THCpuTensor_(copyCudaLong));
-  THPInsertCopyFunction(b, &THCpuTensor_(copyCudaFloat));
-  THPInsertCopyFunction(b, &THCpuTensor_(copyCudaDouble));
+  THPInsertTensorCopyFunction(b, &THCpuTensor_(copyCudaByte));
+  THPInsertTensorCopyFunction(b, &THCpuTensor_(copyCudaChar));
+  THPInsertTensorCopyFunction(b, &THCpuTensor_(copyCudaShort));
+  THPInsertTensorCopyFunction(b, &THCpuTensor_(copyCudaInt));
+  THPInsertTensorCopyFunction(b, &THCpuTensor_(copyCudaLong));
+  THPInsertTensorCopyFunction(b, &THCpuTensor_(copyCudaFloat));
+  THPInsertTensorCopyFunction(b, &THCpuTensor_(copyCudaDouble));
 #ifdef CUDA_HALF_TENSOR
-  THPInsertCopyFunction(b, &THCpuTensor_(copyCudaHalf));
+  THPInsertTensorCopyFunction(b, &THCpuTensor_(copyCudaHalf));
 #endif
-  THPInsertCopyFunction(b, &THCpuTensor_(copyAsyncCuda), true);
+  THPInsertTensorCopyFunction(b, &THCpuTensor_(copyAsyncCuda), true);
   #undef THCpuTensor_
 #endif
 }

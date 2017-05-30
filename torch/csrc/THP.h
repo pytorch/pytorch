@@ -18,6 +18,7 @@
 #define LIBRARY_STATE
 #define LIBRARY_STATE_NOARGS
 #define LIBRARY_STATE_TYPE
+#define LIBRARY_STATE_TYPE_NOARGS
 
 #define THP_API extern "C"
 

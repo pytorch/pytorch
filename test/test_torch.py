@@ -986,19 +986,19 @@ class TestTorch(TestCase):
             "sub", "mul", "div", "fmod", "remainder",
             "eq", "ge", "gt", "le", "lt", "max", "min", "ne",
             "addcdiv", "addcmul", "masked_copy", "masked_fill",
-            "map", "map2"
+            "map", "map2", "copy"
         ]
         # functions with no torch. equivalent
-        fns_no_torch = ["sub", "masked_copy", "masked_fill", "map", "map2"]
+        fns_no_torch = ["sub", "masked_copy", "masked_fill", "map", "map2", "copy"]
         # functions with no inplace equivalent
         fns_no_inplace = ["dist", "max", "min"]
         # functions with no out-of-place tensor version
-        fns_no_out_place = ["masked_copy", "masked_fill", "map", "map2"]
+        fns_no_out_place = ["masked_copy", "masked_fill", "map", "map2", "copy"]
         # functions with fallback to equal nElem behavior
         fns_fallback = ["add", "sub", "div", "mul", "pow", "fmod", "remainder",
                         "eq", "ge", "gt", "le", "lt", "max", "min", "ne",
                         "addcdiv", "addcmul", "masked_copy", "masked_fill",
-                        "map", "map2"]
+                        "map", "map2", "copy"]
         # functions with three tensor arguments
         fns_3_args = ["addcdiv", "addcmul", "map2"]
 
@@ -1096,7 +1096,7 @@ class TestTorch(TestCase):
                     elif fn == "map":
                         return t0_fn(t1, lambda x, y: x + y)
                     elif fn == "map2":
-                        return t0_fn(t1, t2, lambda x, y,z : x + y + z)
+                        return t0_fn(t1, t2, lambda x, y, z : x + y + z)
                     elif fn in fns_3_args:
                         return t0_fn(1.0, t1, t2)
                     else:
@@ -1141,13 +1141,13 @@ class TestTorch(TestCase):
         fns_fallback = ["add", "sub", "div", "mul", "pow", "fmod", "remainder",
                         "eq", "ge", "gt", "le", "lt", "max", "min", "ne",
                         "addcdiv", "addcmul", "masked_copy", "masked_fill",
-                        "map", "map2"]
+                        "map", "map2", "copy"]
         # functions with three tensor arguments
         fns_3_args = ["addcdiv", "addcmul", "map2"]
         # functions with no inplace equivalent
         fns_no_inplace = ["max", "min"]
         # functions with no out-of-place tensor version
-        fns_no_out_place = ["masked_copy", "masked_fill", "map", "map2"]
+        fns_no_out_place = ["masked_copy", "masked_fill", "map", "map2", "copy"]
 
         for fn in fns_fallback:
             # case 1: both broadcastable and nElems equal -- verify that we broadcast
