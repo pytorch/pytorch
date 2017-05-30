@@ -29,38 +29,23 @@ class Initializer(object):
             shape=shape,
         )
 
-
-def create_xavier_fill_initializer():
-    return Initializer("XavierFill")
-
-
-def create_constant_fill_initializer(value=None):
-    if value is not None:
-        return Initializer("ConstantFill", value=value)
-    else:
-        return Initializer("ConstantFill")
-
-
-def update_initializer(initializer,
+def update_initializer(initializer_class,
                        operator_name_and_kwargs,
                        default_operator_name_and_kwargs):
     '''
     A helper function to convert from operator_name_and_kwargs to new
-    Initializer class. This function serves two purposed:
+    object of type initializer_class. This function serves two purposes:
 
     1. Support for custom initialization operators being passed in
     2. Allow user to specify a custom Initializer without overwriting
        default operators used for initialization
 
-    If initializer already has its operator name set, then
-    operator_name_and_kwargs has to be None
-
-    If initializer is None, creates a default initializer using
-    operator_name_and_kwargs provided
+    If initializer_class is None, creates a default initializer using
+    the Initializer class and operator_name_and_kwargs provided
 
     If operator_name_and_kwargs is None, uses default_operator_name_and_kwargs
 
-    returns an Initilizer object
+    returns an instantiated Initializer object
     '''
     def get_initializer_args():
         return (
@@ -68,15 +53,12 @@ def update_initializer(initializer,
             default_operator_name_and_kwargs
         )
 
-    if initializer is not None:
-        if initializer.operator_name is not None:
-            if operator_name_and_kwargs is not None:
-                raise Exception("initializer already has operator_name set")
-        else:
-            initializer.update(*get_initializer_args())
+    if initializer_class is not None:
+        init = initializer_class(get_initializer_args()[0],
+                                 **get_initializer_args()[1])
     else:
-        initializer = Initializer(
+        init = Initializer(
             get_initializer_args()[0],
             **get_initializer_args()[1]
         )
-    return initializer
+    return init
