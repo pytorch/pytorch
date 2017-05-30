@@ -303,8 +303,8 @@ THCTensor* THCTensor_(newExpand)(THCState *state, THCTensor *tensor, THLongStora
 
 int THCTensor_(expand)(THCState *state, THCTensor *r, THCTensor *tensor, THLongStorage *sizes, int raiseErrors) 
 {
-  THArgCheck(THCTensor_(nDimension)(state, tensor) > 0, 0, "can't expand an empty tensor");
   if (raiseErrors) {
+    THArgCheck(THCTensor_(nDimension)(state, tensor) > 0, 0, "can't expand an empty tensor");
     THArgCheck(THLongStorage_size(sizes) >= THCTensor_(nDimension)(state, tensor), 1,
                "the number of sizes provided must be greater or equal to the "
                "number of dimensions in the tensor");
