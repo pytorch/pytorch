@@ -525,31 +525,44 @@ def _AllReduce(devices, model, net, param, use_nccl=False, control_input=None):
         )
         return
 
-    def sum2(d1i, d2i):
-        d1 = model._devices[d1i]
-        d2 = model._devices[d2i]
-        device_opt = core.DeviceOption(caffe2_pb2.CUDA, d1)
+    p2p_access_pattern = workspace.GetCudaPeerAccessPattern()
+
+    def sumN(*gpu_indices):
+        """Create a Sum op for 2 or more blobs on different devices.
+        Saves the result on the first device.
+
+        Arguments:
+        gpu_indices -- a list of GPU indices, which can be translated into
+                       CUDA identifiers with model._devices
+        """
+        devices = [model._devices[idx] for idx in gpu_indices]
+        blobs = [blobs_group[idx] for idx in gpu_indices]
+        for i, peer in enumerate(devices):
+            if i == 0:
+                continue  # Skip the first device
+            if not p2p_access_pattern[devices[0], peer]:
+                # Copy from peer to d0
+                blobs[i] = model.Copy(
+                    blobs[i],
+                    'gpu_{}/{}_gpu{}_copy'.format(devices[0], param, peer))
+        device_opt = core.DeviceOption(caffe2_pb2.CUDA, devices[0])
         with core.DeviceScope(device_opt):
-            net.Sum(
-                [blobs_group[d1], blobs_group[d2]], [blobs_group[d1]],
-                name="dpm",
-            )
+            net.Sum(blobs, [blobs[0]], name='dpm')
+
     if len(devices) == 8:
         # Special tree reduction for 8 gpus, TODO generalize like in muji.py
         for j in range(4):
-            sum2(j * 2, j * 2 + 1)
+            sumN(j * 2, j * 2 + 1)
         for j in range(2):
-            sum2(j * 4, j * 4 + 2)
+            sumN(j * 4, j * 4 + 2)
         sum2(0, 4)
-        _Broadcast(devices, model, net, param)
     elif len(devices) == 4:
-        sum2(0, 1)
-        sum2(2, 3)
-        sum2(0, 2)
-        _Broadcast(devices, model, net, param)
+        sumN(0, 1)
+        sumN(2, 3)
+        sumN(0, 2)
     else:
-        net.Sum(blobs_group, blobs_group[0], name="dpm")
-        _Broadcast(devices, model, net, param)
+        sumN(*range(len(devices)))
+    _Broadcast(devices, model, net, param)
 
 
 def _SyncParams(devices, model, net, unique_param_names):
