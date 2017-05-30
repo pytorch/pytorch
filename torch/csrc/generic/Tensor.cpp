@@ -506,7 +506,7 @@ static bool THPTensor_(_indexOnce)(PyObject *index, int &indexed_dim,
 }
 
 #ifndef TH_REAL_IS_HALF
-static bool THPTensor_(checkAdvancedIndexing)(THPTensor *indexed, PyObject *arg) {
+static bool THPTensor_(_checkAdvancedIndexing)(THPTensor *indexed, PyObject *arg) {
   // Currently we only support the integer-array indexing strategy for advanced
   // indexing - where we have ndim sequence/LongTensor arguments
 
@@ -558,6 +558,13 @@ static bool THPTensor_(checkAdvancedIndexing)(THPTensor *indexed, PyObject *arg)
 
   return false;
   **/
+}
+
+static PyObject* THPTensor_(checkAdvancedIndexing)(THPTensor *self, PyObject *arg) {
+  if (THPTensor_(_checkAdvancedIndexing)(self, arg)) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
 }
 
 static bool THPTensor_(_convertToTensorIndexers)(PyObject *index, std::vector<THIndexTensor*>& broadcasted) {
@@ -890,7 +897,7 @@ static PyObject * THPTensor_(getValue)(THPTensor *self, PyObject *index)
 
   // Check and see if the indexing object triggers advanced indexing semantics
 #ifndef TH_REAL_IS_HALF
-  if (THPTensor_(checkAdvancedIndexing)(self, index)) {
+  if (THPTensor_(_checkAdvancedIndexing)(self, index)) {
     tresult = THTensor_(newWithTensor)(LIBRARY_STATE self->cdata);
     if (!THPTensor_(_advancedIndexGet)(index, tresult)) {
       return NULL;
@@ -967,7 +974,7 @@ static int THPTensor_(setValue)(THPTensor *self, PyObject *index, PyObject *valu
 
   // Check and see if the indexing object triggers advanced indexing semantics
 #ifndef TH_REAL_IS_HALF
-  if (THPTensor_(checkAdvancedIndexing)(self, index)) {
+  if (THPTensor_(_checkAdvancedIndexing)(self, index)) {
     tresult = THTensor_(newWithTensor)(LIBRARY_STATE self->cdata);
     if (!THPTensor_(_advancedIndexSet)(index, tresult, value)) {
       return -1;
