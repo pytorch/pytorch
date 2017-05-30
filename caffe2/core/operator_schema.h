@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "caffe2/core/common.h"
+#include "caffe2/core/logging.h"
 #include "caffe2/core/registry.h"
 #include "caffe2/proto/caffe2.pb.h"
 
@@ -159,6 +160,33 @@ class OpSchema {
     return tensor_inference_function_(def, input_type_shape);
   }
 
+  /*
+   * @brief A struct to store various cost information about
+   * an operator such as FLOPs and total memory use.
+   */
+  struct Cost {
+    size_t flops; // Floating point operations.
+    size_t bytes_moved; // Total memory used.
+  };
+  /**
+   * @brief Registers a function that takes in an OperatorDef
+   * and a series of input shapes and returns the total "cost"
+   * required to run the operator via struct by value.
+   */
+  typedef std::function<
+      struct Cost(const OperatorDef&, const vector<TensorShape>&)>
+      CostInferenceFunctionType;
+
+  /**
+   * @brief Register the Cost inference function.
+   */
+  OpSchema& CostInferenceFunction(CostInferenceFunctionType function);
+  inline struct Cost InferCost(
+      const OperatorDef& def,
+      const vector<TensorShape>& input_tensor_shape) const {
+    return cost_inference_function_(def, input_tensor_shape);
+  }
+
   // Functions to do documentation for the operator schema.
   OpSchema& SetDoc(const string& doc);
   OpSchema& Arg(const char* name, const char* description);
@@ -225,6 +253,11 @@ class OpSchema {
           out.push_back(ts);
         }
         return out;
+      };
+  CostInferenceFunctionType cost_inference_function_ =
+      [](const OperatorDef& def, const vector<TensorShape>&) {
+        CAFFE_THROW("No cost inference function registered.");
+        return Cost();
       };
 };
 

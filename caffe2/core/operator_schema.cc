@@ -212,6 +212,11 @@ OpSchema& OpSchema::ScalarType(::caffe2::TensorProto_DataType dt) {
      });
 }
 
+OpSchema& OpSchema::CostInferenceFunction(CostInferenceFunctionType function) {
+  cost_inference_function_ = function;
+  return *this;
+}
+
 OpSchema& OpSchema::SetDoc(const string& doc) {
   doc_ = doc;
   return *this;
