@@ -85,12 +85,13 @@ template <typename T, typename IndexType, int Dims>
 __launch_bounds__(32 * 16, 4)
 #endif
 __global__ void
-  THNN_(GRUForward)(TensorInfo<T, IndexType> Input,
+THNN_(GRUForward)(TensorInfo<T, IndexType> Input,
             TensorInfo<T, IndexType> Hidden,
             TensorInfo<T, IndexType> Bias1,
             TensorInfo<T, IndexType> Bias2,
             TensorInfo<T, IndexType> _hx,
             TensorInfo<T, IndexType> _hy,
+            TensorInfo<T, IndexType> storage,
             IndexType hsz,
             IndexType totalElements)
 {
@@ -101,16 +102,14 @@ __global__ void
 
       IndexType offset = (linearIndex/hsz)*3*hsz+linearIndex%hsz;
 
-      T* ir = &DEVICE_LINEAR_GET(Input, offset+0*hsz);
-      T* ii = &DEVICE_LINEAR_GET(Input, offset+1*hsz);
-      T* in = &DEVICE_LINEAR_GET(Input, offset+2*hsz);
-
-      T* hr = &DEVICE_LINEAR_GET(Hidden,offset+0*hsz);
-      T* hi = &DEVICE_LINEAR_GET(Hidden,offset+1*hsz);
+      T ir = DEVICE_LINEAR_GET(Input, offset+0*hsz);
+      T ii = DEVICE_LINEAR_GET(Input, offset+1*hsz);
+      T in = DEVICE_LINEAR_GET(Input, offset+2*hsz);
+      T hr = DEVICE_LINEAR_GET(Hidden,offset+0*hsz);
+      T hi = DEVICE_LINEAR_GET(Hidden,offset+1*hsz);
       T hn = DEVICE_LINEAR_GET(Hidden,  offset+2*hsz);
 
       T hx = DEVICE_LINEAR_GET(_hx, linearIndex);
-
       T* hy = &DEVICE_LINEAR_GET(_hy, linearIndex);
 
       bool has_bias = (Bias1.data != NULL);
@@ -136,45 +135,46 @@ __global__ void
       }
 
 
+      offset = (linearIndex/hsz)*5*hsz+linearIndex%hsz;
 #ifndef THC_REAL_IS_HALF
 
       T rg, ig, ng;
 
-      rg = *ir + *hr + b1r + b2r;
-      ig = *ii + *hi + b1i + b2i;
+      rg = ir + hr + b1r + b2r;
+      ig = ii + hi + b1i + b2i;
 
       TensorSigmoidOp<real>()(&rg, &rg);
       TensorSigmoidOp<real>()(&ig, &ig);
-      ng = *in + b1n + rg * (hn + b2n);
+      ng = in + b1n + rg * (hn + b2n);
       ng = THCNumerics<T>::tanh(ng);
       *hy = ng + ig * (hx - ng);
 
       //SAVE FOR BACKWARDS
-      *ir = rg;
-      *ii = ig;
-      *in = ng;
-      *hr = hx;
-      *hi = hn + b2n;
+      DEVICE_LINEAR_GET(storage, offset+0*hsz) = rg;
+      DEVICE_LINEAR_GET(storage, offset+1*hsz) = ig;
+      DEVICE_LINEAR_GET(storage, offset+2*hsz) = ng;
+      DEVICE_LINEAR_GET(storage, offset+3*hsz) = hx;
+      DEVICE_LINEAR_GET(storage, offset+4*hsz) = hn + b2n;
+
 #else
 
       float rg, ig, ng;
 
-      rg = H2F(*ir) + H2F(*hr) + H2F(b1r) + H2F(b2r);
-      ig = H2F(*ii) + H2F(*hi) + H2F(b1i) + H2F(b2i);
+      rg = H2F(ir) + H2F(hr) + H2F(b1r) + H2F(b2r);
+      ig = H2F(ii) + H2F(hi) + H2F(b1i) + H2F(b2i);
 
       TensorSigmoidOp<float>()(&rg, &rg);
       TensorSigmoidOp<float>()(&ig, &ig);
-      ng = H2F(*in) + H2F(b1n) + rg*( H2F(hn)+H2F(b2n) );
+      ng = H2F(in) + H2F(b1n) + rg*( H2F(hn)+H2F(b2n) );
       ng = THCNumerics<float>::tanh(ng);
       *hy = F2H( ng + ig * ( H2F(hx)-ng ) );
 
       //SAVE FOR BACKWARDS
-      *ir = F2H(rg);
-      *ii = F2H(ig);
-      *in = F2H(ng);
-      *hr = hx;
-      *hi = F2H( H2F(hn) + H2F(b2n) );
-
+      DEVICE_LINEAR_GET(storage, offset+0*hsz) = F2H(rg);
+      DEVICE_LINEAR_GET(storage, offset+1*hsz) = F2H(ig);
+      DEVICE_LINEAR_GET(storage, offset+2*hsz) = F2H(ng);
+      DEVICE_LINEAR_GET(storage, offset+3*hsz) = hx;
+      DEVICE_LINEAR_GET(storage, offset+4*hsz) = F2H(H2F(hn) + H2F(b2n));
 #endif
     }
 }
@@ -188,59 +188,58 @@ THNN_(GRUBackward)(TensorInfo<T, IndexType> input,
              TensorInfo<T, IndexType> hidden,
              TensorInfo<T, IndexType> gradoutput,
              TensorInfo<T, IndexType> gradinput,
+             TensorInfo<T, IndexType> storage,
              IndexType hsz,
              IndexType totalElements)
 {
   for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
        linearIndex < totalElements;
        linearIndex += gridDim.x * blockDim.x) {
-    IndexType offset = (linearIndex/hsz)*3*hsz+linearIndex%hsz;;
+    IndexType offset = (linearIndex/hsz)*5*hsz+linearIndex%hsz;
 
-    //will return input grads here
-    T* rg = &DEVICE_LINEAR_GET(input, offset+0*hsz);
-    T* ig = &DEVICE_LINEAR_GET(input, offset+1*hsz);
-    T* ng = &DEVICE_LINEAR_GET(input, offset+2*hsz);
-    //will return hidden grads here
-    T* hx = &DEVICE_LINEAR_GET(hidden, offset+0*hsz);
-    T* hn = &DEVICE_LINEAR_GET(hidden, offset+1*hsz);
-    T* oghn=&DEVICE_LINEAR_GET(hidden, offset+2*hsz);
+    T rg = DEVICE_LINEAR_GET(storage, offset+0*hsz);
+    T ig = DEVICE_LINEAR_GET(storage, offset+1*hsz);
+    T ng = DEVICE_LINEAR_GET(storage, offset+2*hsz);
+    T hx = DEVICE_LINEAR_GET(storage, offset+3*hsz);
+    T hn = DEVICE_LINEAR_GET(storage, offset+4*hsz);
 
     T* gi = &DEVICE_LINEAR_GET(gradinput, linearIndex);
-
     T go = DEVICE_LINEAR_GET(gradoutput, linearIndex);
 
+    offset = (linearIndex/hsz)*3*hsz+linearIndex%hsz;
+
 #ifndef THC_REAL_IS_HALF
-    T gig = (go)*(*hx-*ng)*( 1-(*ig) )*(*ig);
-    T ghx = (go)*(*ig);
-    T gin = (go)*(1-*ig)*( 1-(*ng)*(*ng) );
-    T ghn = (gin) * (*rg);
-    T grg = (gin)*(*hn)*( 1-(*rg) )*(*rg);
+    T gig = go*(hx-ng)*(1-ig)*(ig);
+    T ghx = go*(ig);
+    T gin = go*(1-ig)*(1-ng*ng);
+    T ghn = gin *rg;
+    T grg = gin*hn*(1-rg)*rg;
 
-    *gi = ghx;
+    DEVICE_LINEAR_GET(gradinput, linearIndex) = ghx;
 
-    *rg = grg;
-    *ig = gig;
-    *ng = gin;
+    DEVICE_LINEAR_GET(input, offset+0*hsz) = grg;
+    DEVICE_LINEAR_GET(input, offset+1*hsz) = gig;
+    DEVICE_LINEAR_GET(input, offset+2*hsz) = gin;
 
-    *hx = grg;
-    *hn = gig;
-    *oghn = ghn;
+    DEVICE_LINEAR_GET(hidden, offset+0*hsz) = grg;
+    DEVICE_LINEAR_GET(hidden, offset+1*hsz) = gig;
+    DEVICE_LINEAR_GET(hidden, offset+2*hsz) = ghn;
 #else
-    float gig = H2F(go)*( H2F(*hx)-H2F(*ng) )*( 1-H2F(*ig) )*H2F(*ig);
-    float ghx = H2F(go)*H2F(*ig);
-    float gin = H2F(go)*( 1-H2F(*ig) )*( 1-H2F(*ng)*H2F(*ng) );
-    float ghn = H2F(gin) * H2F(*rg);
-    float grg = H2F(gin)*H2F(*hn)*( 1-H2F(*rg) )*H2F(*rg);
+    float gig = H2F(go)*( H2F(hx)-H2F(ng) )*( 1-H2F(ig) )*H2F(ig);
+    float ghx = H2F(go)*H2F(ig);
+    float gin = H2F(go)*( 1-H2F(ig) )*( 1-H2F(ng)*H2F(ng) );
+    float ghn = H2F(gin) * H2F(rg);
+    float grg = H2F(gin)*H2F(hn)*( 1-H2F(rg) )*H2F(rg);
 
-    *gi = F2H(ghx);
+    DEVICE_LINEAR_GET(input, offset+0*hsz) = F2H(grg);
+    DEVICE_LINEAR_GET(input, offset+1*hsz) = F2H(gig);
+    DEVICE_LINEAR_GET(input, offset+2*hsz) = F2H(gin);
 
-    *rg = F2H(grg);
-    *ig = F2H(gig);
-    *ng = F2H(gin);
+    DEVICE_LINEAR_GET(hidden, offset+0*hsz) = F2H(grg);
+    DEVICE_LINEAR_GET(hidden, offset+1*hsz) = F2H(gig);
+    DEVICE_LINEAR_GET(hidden, offset+2*hsz) = F2H(ghn);
+    DEVICE_LINEAR_GET(gradinput, linearIndex) = F2H(ghx);
 
-    *hx = F2H(grg);
-    *hn = F2H(gig);
-    *oghn = F2H(ghn);
 #endif
   }
 }
@@ -480,13 +479,14 @@ __global__ void
 
 #define GRU_FORWARD(ITYPE, DIM) THNN_(GRUForward)<DATATYPE, ITYPE, DIM> \
   <<<grid, block, 0, THCState_getCurrentStream(state)>>>                \
-  (inputI, hiddenI, bias1I, bias2I, hxI, hyI,                           \
+  (inputI, hiddenI, bias1I, bias2I, hxI, hyI, storageI,                 \
    hid_size, totalElements);
 
 #define GRU_BACKWARD(ITYPE, DIM) THNN_(GRUBackward)                     \
   <DATATYPE, ITYPE, DIM>                                                \
   <<<grid, block, 0, THCState_getCurrentStream(state)>>>                \
-  (inputI, hiddenI, gradoutI, gradinI, hid_size, totalElements);
+  (inputI, hiddenI, gradoutI, gradinI, storageI,                        \
+   hid_size, totalElements);
 
 // ************ END Create actual function calls ************ //
 
@@ -691,21 +691,22 @@ void THNN_(GRU_forw_ind_wrap)(
    THCTensor *bias1,
    THCTensor *bias2,
    THCTensor *hx,
-   THCTensor *hy)
+   THCTensor *hy,
+   THCTensor *storage)
 {
   bool has_bias = (bias1!=NULL);
   int maxDim;
 
   if(has_bias){
     THCUNN_assertSameGPU
-      (state, 6, input, hidden, hx, hy, bias1, bias2);
+      (state, 7, input, hidden, hx, hy, bias1, bias2, storage);
     maxDim = THNN_(minIndexType)
-      (state, 6, input, hidden, hx, hy, bias1, bias2);
+      (state, 7, input, hidden, hx, hy, bias1, bias2, storage);
   }else{
     THCUNN_assertSameGPU
-      (state, 4, input, hidden, hx, hy);
+      (state, 5, input, hidden, hx, hy, storage);
     maxDim = THNN_(minIndexType)
-      (state, 4, input, hidden, hx, hy);
+      (state, 5, input, hidden, hx, hy, storage);
   }
 
   ptrdiff_t totalElements = TensorUtils<THCTensor>::getNumElements(state, hx);
@@ -723,6 +724,8 @@ void THNN_(GRU_forw_ind_wrap)(
     getTensorInfo<THCTensor, INDTYPE>(state, hx);
   TensorInfo<DATATYPE, INDTYPE> hyI =
     getTensorInfo<THCTensor, INDTYPE>(state, hy);
+  TensorInfo<DATATYPE, INDTYPE> storageI =
+    getTensorInfo<THCTensor, INDTYPE>(state, storage);
 
   INDTYPE hid_size = hxI.sizes[hxI.dims-1];
   if(has_bias){
@@ -736,7 +739,9 @@ void THNN_(GRU_forw_ind_wrap)(
     hiddenI.collapseDims();
     hyI.collapseDims();
     hxI.collapseDims();
+    storageI.collapseDims();
   }
+
   INDTYPE zero[1] = {0};
   TensorInfo<DATATYPE, INDTYPE> nullinfo =
     TensorInfo<DATATYPE, INDTYPE>(NULL, 1, zero, zero);
@@ -763,28 +768,33 @@ void THNN_(GRUFused_updateOutput)(
    THCTensor *bias1,
    THCTensor *bias2,
    THCTensor *hx,
-   THCTensor *hy)
+   THCTensor *hy,
+   THCTensor *storage)
 {
   THCTensor_(resizeAs)(state, hy, hx);
   THNN_(FusedRNNAssertSizes)(state, 3, 4, input, hidden, hx, hy);
+  THArgCheck(THCTensor_(nElement)(state, storage) ==
+             THCTensor_(nElement)(state, hx)*5,
+             3, "Storage tensor for fused kernel was not sized correctly.");
+
 
   bool has_bias = (bias1!=NULL);
   bool canUse32bi;
 
   if(has_bias){
     canUse32bi = THNN_(canUse32BitIndexMath)
-      (state, 6, input, hidden, hx, hy, bias1, bias2);
+      (state, 7, input, hidden, hx, hy, bias1, bias2, storage);
   }else{
     canUse32bi = THNN_(canUse32BitIndexMath)
-      (state, 4, input, hidden, hx, hy);
+      (state, 5, input, hidden, hx, hy, storage);
   }
 
   if(canUse32bi){
     THNN_(GRU_forw_ind_wrap)<unsigned int>
-      (state, input, hidden, bias1, bias2, hx, hy);
+      (state, input, hidden, bias1, bias2, hx, hy, storage);
   }else{
     THNN_(GRU_forw_ind_wrap)<unsigned long>
-      (state, input, hidden, bias1, bias2, hx, hy);
+      (state, input, hidden, bias1, bias2, hx, hy, storage);
   }
 
   THCudaCheck(cudaGetLastError());
@@ -796,9 +806,11 @@ void THNN_(GRU_back_ind_wrap)(
    THCTensor *input,
    THCTensor *hidden,
    THCTensor *gradOutput,
-   THCTensor *gradInput)
+   THCTensor *gradInput,
+   THCTensor *storage)
 {
-  int maxDim = THNN_(minIndexType)(state, 4, input, hidden, gradOutput, gradInput);
+
+  int maxDim = THNN_(minIndexType)(state, 5, input, hidden, gradOutput, gradInput, storage);
   ptrdiff_t totalElements = TensorUtils<THCTensor>::getNumElements(state, gradOutput);
 
   const dim3 block = getApplyBlock();
@@ -814,6 +826,8 @@ void THNN_(GRU_back_ind_wrap)(
     getTensorInfo<THCTensor, INDTYPE>(state, gradOutput);
   TensorInfo<DATATYPE, INDTYPE> gradinI =
     getTensorInfo<THCTensor, INDTYPE>(state, gradInput);
+  TensorInfo<DATATYPE, INDTYPE> storageI =
+    getTensorInfo<THCTensor, INDTYPE>(state, storage);
 
   INDTYPE hid_size = gradoutI.sizes[gradoutI.dims-1];
 
@@ -822,6 +836,7 @@ void THNN_(GRU_back_ind_wrap)(
     hiddenI.collapseDims();
     gradoutI.collapseDims();
     gradinI.collapseDims();
+    storageI.collapseDims();
   }
   FILL_DIM(INDTYPE, maxDim, GRU_BACKWARD);
 }
@@ -831,18 +846,19 @@ void THNN_(GRUFused_updateGradInput)(
    THCTensor *input,
    THCTensor *hidden,
    THCTensor *gradOutput,
-   THCTensor *gradInput)
+   THCTensor *gradInput,
+   THCTensor *storage)
 {
   THCTensor_(resizeAs)(state, gradInput, gradOutput);
-  THCUNN_assertSameGPU(state, 4, input, hidden, gradOutput, gradInput);
+  THCUNN_assertSameGPU(state, 5, input, hidden, gradOutput, gradInput, storage);
   THNN_(FusedRNNAssertSizes)(state, 3, 4, input, hidden, gradOutput, gradInput);
-  bool canUse32bi = THNN_(canUse32BitIndexMath)(state, 4, input, hidden, gradOutput, gradInput);
+  bool canUse32bi = THNN_(canUse32BitIndexMath)(state, 5, input, hidden, gradOutput, gradInput, storage);
   if(canUse32bi){
     THNN_(GRU_back_ind_wrap)<unsigned int>
-      (state, input, hidden, gradOutput, gradInput);
+      (state, input, hidden, gradOutput, gradInput, storage);
   }else{
     THNN_(GRU_back_ind_wrap)<unsigned long>
-      (state, input, hidden, gradOutput, gradInput);
+      (state, input, hidden, gradOutput, gradInput, storage);
   }
 
   THCudaCheck(cudaGetLastError());

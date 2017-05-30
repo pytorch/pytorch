@@ -173,14 +173,16 @@ TH_API void THNN_(GRUFused_updateOutput)(
                   THCTensor *bias1, // [OPTIONAL]
                   THCTensor *bias2, // [OPTIONAL]
                   THCTensor *hx,
-                  THCTensor *hy);
+                  THCTensor *hy,
+                  THCTensor *storage);
 
 TH_API void THNN_(GRUFused_updateGradInput)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *hidden,
                   THCTensor *gradOutput,
-                  THCTensor *gradInput);
+                  THCTensor *gradInput,
+                  THCTensor *storage);
 
 TH_API void THNN_(LSTMFused_updateOutput)(
                   THCState *state,

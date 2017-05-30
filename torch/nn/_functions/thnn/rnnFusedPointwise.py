@@ -16,10 +16,11 @@ class GRUFused(Function):
                 ibias.unsqueeze_(0)
             if hbias.dim() == 1:
                 hbias.unsqueeze_(0)
-
+        storage = input_gate.new().resize_(hx.numel()*5)
         self.backend.GRUFused_updateOutput(
             self.backend.library_state,
-            input_gate, hidden_gate, ibias, hbias, hx, hy)
+            input_gate, hidden_gate, ibias, hbias, hx, hy, storage)
+        self.buffer = storage
         self.save_for_backward(input_gate, hidden_gate, ibias)
         return hy
 
@@ -28,16 +29,15 @@ class GRUFused(Function):
             self.backend = type2backend[type(grad_output)]
         gradInput = gradOutput.new()
         input_gate, hidden_gate, bias = self.saved_tensors
-
-        igc = input_gate.clone()
-        hgc = hidden_gate.clone()
+        storage = self.buffer
+        igc = input_gate.new().resize_as_(input_gate)
+        hgc = hidden_gate.new().resize_as_(hidden_gate)
         self.backend.GRUFused_updateGradInput(
             self.backend.library_state,
-            igc, hgc, gradOutput, gradInput)
+            igc, hgc, gradOutput, gradInput, storage)
         if bias is not None:
             gb1 = igc.sum(0).squeeze()
             gb2 = hgc.sum(0).squeeze()
-
             return igc, hgc, gradInput, gb1, gb2
         else:
             return igc, hgc, gradInput
@@ -71,17 +71,17 @@ class LSTMFused(Function):
 
         gradInput = gradOutput[0].new()
         gradInputCell = gradOutput[0].new()
-        saved_tens, local_go, cx, cy, bias = self.saved_tensors
-        lgo_clone = local_go.clone()
+        saved_tens, hidden_gate, cx, cy, bias = self.saved_tensors
+        gate_gradin = hidden_gate.new().resize_as_(hidden_gate)
         self.backend.LSTMFused_updateGradInput(
             self.backend.library_state,
-            saved_tens, lgo_clone, cx, cy,
+            saved_tens, gate_gradin, cx, cy,
             gradOutput[0], gradOutput[1], gradInput)
 
         if bias is not None:
-            gb1 = lgo_clone.sum(0).squeeze()
-            gb2 = lgo_clone.sum(0).squeeze()
+            gb1 = gate_gradin.sum(0).squeeze()
+            gb2 = gate_gradin.sum(0).squeeze()
 
-            return lgo_clone, lgo_clone, gradInput, gb1, gb2
+            return gate_gradin, gate_gradin, gradInput, gb1, gb2
         else:
-            return lgo_clone, lgo_clone, gradInput
+            return gate_gradin, gate_gradin, gradInput

@@ -9,7 +9,8 @@ void THNN_(GRUFused_updateOutput)(
           THTensor *bias1,
           THTensor *bias2,
           THTensor *hx,
-          THTensor *hy)
+          THTensor *hy,
+          THTensor *storage)
 {
   THAssertMsg(false, "Not implemented for CPU");
 }
@@ -19,7 +20,8 @@ void THNN_(GRUFused_updateGradInput)(
           THTensor *input,
           THTensor *hidden,
           THTensor *gradOutput,
-          THTensor *gradInput)
+          THTensor *gradInput,
+          THTensor *storage)
 {
   THAssertMsg(false, "Not implemented for CPU");
 }

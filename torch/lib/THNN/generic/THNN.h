@@ -175,13 +175,15 @@ TH_API void THNN_(GRUFused_updateOutput)(
           THTensor *bias1, // [OPTIONAL]
           THTensor *bias2, // [OPTIONAL]
           THTensor *hx,
-          THTensor *output);
+          THTensor *output,
+          THTensor *storage);
 TH_API void THNN_(GRUFused_updateGradInput)(
           THNNState *state,
           THTensor *input,
           THTensor *hidden,
           THTensor *gradOutput,
-          THTensor *gradInput);
+          THTensor *gradInput,
+          THTensor *storage);
 
 TH_API void THNN_(LSTMFused_updateOutput)(
           THNNState *state,
