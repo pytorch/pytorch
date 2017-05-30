@@ -52,11 +52,12 @@ static std::unordered_map<PyObject*, THDGroup> obj2group;
 PyObject* THDPModule_initProcessGroup(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
-  if (PyTuple_GET_SIZE(args) != 4 || !THPUtils_checkString(PyTuple_GET_ITEM(args, 0)) ||
+  if (PyTuple_GET_SIZE(args) != 5 || !THPUtils_checkString(PyTuple_GET_ITEM(args, 0)) ||
         !THPUtils_checkString(PyTuple_GET_ITEM(args, 1)) ||
         !THPUtils_checkLong(PyTuple_GET_ITEM(args, 2)) ||
-        !THPUtils_checkString(PyTuple_GET_ITEM(args, 3))) {
-    THPUtils_invalidArguments(args, NULL, "init_process_group", 1, "(string backend, string init_method, int world_size, string world_size)");
+        !THPUtils_checkString(PyTuple_GET_ITEM(args, 3)) ||
+        !THPUtils_checkLong(PyTuple_GET_ITEM(args, 4))) {
+    THPUtils_invalidArguments(args, NULL, "init_process_group", 1, "(string backend, string init_method, int world_size, string group_name, int rank)");
     return NULL;
   }
 
@@ -64,9 +65,10 @@ PyObject* THDPModule_initProcessGroup(PyObject *_unused, PyObject *args)
   std::string init_method = THPUtils_unpackString(PyTuple_GET_ITEM(args, 1));
   int world_size = THPUtils_unpackLong(PyTuple_GET_ITEM(args, 2));
   std::string group_name = THPUtils_unpackString(PyTuple_GET_ITEM(args, 3));
+  int rank = THPUtils_unpackLong(PyTuple_GET_ITEM(args, 4));
 
   THDChannelType channel_type = name2channel_type.at(backend_name);
-  THDProcessGroupInit(channel_type, init_method, world_size, group_name);
+  THDProcessGroupInit(channel_type, init_method, world_size, group_name, rank);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -74,11 +76,12 @@ PyObject* THDPModule_initProcessGroup(PyObject *_unused, PyObject *args)
 PyObject* THDPModule_initMasterWorker(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
-  if (PyTuple_GET_SIZE(args) != 4 || !THPUtils_checkString(PyTuple_GET_ITEM(args, 0)) ||
+  if (PyTuple_GET_SIZE(args) != 5 || !THPUtils_checkString(PyTuple_GET_ITEM(args, 0)) ||
         !THPUtils_checkString(PyTuple_GET_ITEM(args, 1)) ||
         !THPUtils_checkLong(PyTuple_GET_ITEM(args, 2)) ||
-        !THPUtils_checkString(PyTuple_GET_ITEM(args, 3))) {
-    THPUtils_invalidArguments(args, NULL, "init_master_worker", 1, "(string backend, string init_method, int world_size, string world_size)");
+        !THPUtils_checkString(PyTuple_GET_ITEM(args, 3)) ||
+        !THPUtils_checkLong(PyTuple_GET_ITEM(args, 4))) {
+    THPUtils_invalidArguments(args, NULL, "init_master_worker", 1, "(string backend, string init_method, int world_size, string group_name, int rank)");
     return NULL;
   }
 
@@ -86,9 +89,10 @@ PyObject* THDPModule_initMasterWorker(PyObject *_unused, PyObject *args)
   std::string init_method = THPUtils_unpackString(PyTuple_GET_ITEM(args, 1));
   int world_size = THPUtils_unpackLong(PyTuple_GET_ITEM(args, 2));
   std::string group_name = THPUtils_unpackString(PyTuple_GET_ITEM(args, 3));
+  int rank = THPUtils_unpackLong(PyTuple_GET_ITEM(args, 4));
 
   THDChannelType channel_type = name2channel_type.at(backend_name);
-  THDMasterWorkerInit(channel_type, init_method, world_size, group_name);
+  THDMasterWorkerInit(channel_type, init_method, world_size, group_name, rank);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }

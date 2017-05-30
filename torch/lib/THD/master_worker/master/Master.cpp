@@ -16,10 +16,11 @@ std::unique_ptr<MasterCommandChannel> masterCommandChannel;
 using namespace thd;
 using namespace thd::master;
 
-void THDMasterWorkerInit(THDChannelType channel_type, std::string init_method,
-                         int world_size, std::string group_name) {
+void THDMasterWorkerInit(THDChannelType channel_type, std::string init_method = "env://",
+                         int world_size = -1, std::string group_name = "",
+                         int rank = -1) {
   HANDLE_EXCEPTIONS
-  THDProcessGroupInit(channel_type, init_method, world_size, group_name);
+  THDProcessGroupInit(channel_type, init_method, world_size, group_name, rank);
 
   if (dataChannel->getRank() > 0) {
     /*
@@ -27,13 +28,14 @@ void THDMasterWorkerInit(THDChannelType channel_type, std::string init_method,
      * for commands from master. Returning from `THDWorkerMain` indicates
      * a failure so it will `return false`.
      */
-    THDWorkerMain(init_method, world_size, group_name);
+    THDWorkerMain(init_method, world_size, group_name, dataChannel->getRank());
     THError("unexpected exit from worker main loop");
   }
 
   THDState::s_workers = std::vector<WorkerState>(dataChannel->getNumProcesses());
 
-  InitMethod::Config config = getInitConfig(init_method, world_size, group_name);
+  InitMethod::Config config = getInitConfig(init_method, world_size, group_name,
+                                            dataChannel->getRank());
   masterCommandChannel.reset(new MasterCommandChannel(config));
   masterCommandChannel->init();
 

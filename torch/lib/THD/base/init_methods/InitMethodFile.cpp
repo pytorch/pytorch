@@ -46,7 +46,8 @@ void unlockFile(int fd) {
 
 
 
-InitMethod::Config initFile(std::string file_path, rank_type world_size, std::string group_name) {
+InitMethod::Config initFile(std::string file_path, rank_type world_size,
+                            std::string group_name, int assigned_rank) {
   InitMethod::Config config;
   int fd;
   std::fstream file;
@@ -66,7 +67,7 @@ InitMethod::Config initFile(std::string file_path, rank_type world_size, std::st
 
       // This helps prevent a race when while we were waiting for the lock,
       // the file has been removed from the fs
-      SYSCHECK(fstat(fd, &fd_stat));
+      SYSCHECK(::fstat(fd, &fd_stat));
       int err = stat(file_path.c_str(), &path_stat);
       if (err == 0 &&
           fd_stat.st_dev == path_stat.st_dev &&
@@ -88,53 +89,107 @@ InitMethod::Config initFile(std::string file_path, rank_type world_size, std::st
   }
   // NOTE: the loop exits with a locked fd
 
-  config.rank = std::count(content.begin(), content.end(), '\n');
-  if (config.rank == 0) {
-    int listen_socket;
-    port_type port;
-    std::tie(listen_socket, port) = listen();
+  // Remember our order number.
+  std::size_t order = std::count(content.begin(), content.end(), '\n');
 
-    // pack message for other workers (we are first so we are master)
-    file << group_name << ' ' << port << ' ';
-    for (auto addr_str : getInterfaceAddresses()) {
-        file << addr_str << ' ';
-    }
-    file << std::endl;
+  int listen_socket;
+  port_type port;
+  std::tie(listen_socket, port) = listen();
 
-    file.close();
+  auto ifa_addresses = getInterfaceAddresses();
+  file << group_name << ' ' << assigned_rank << ' ' << port
+       << ' ' << ifa_addresses.size();
+  for (auto addr_str : ifa_addresses) {
+    file << ' ' << addr_str;
+  }
+  file << std::endl;
+
+  std::size_t lines = 0; // we have just added new line
+  while (lines < world_size) { // wait until all processes will write their info
     unlockFile(fd);
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    lockFile(fd);
 
+    file.sync();
+    file.seekp(0, std::ios_base::beg);
+    content = {std::istreambuf_iterator<char>(file),
+               std::istreambuf_iterator<char>()};
+    lines = std::count(content.begin(), content.end(), '\n');
+    file.seekp(0, std::ios_base::beg);
+  }
+  // NOTE: the loop exits with a locked fd
+
+  port_type master_port;
+  std::vector<std::string> master_addresses;
+  std::vector<int> ranks(world_size);
+  for (std::size_t i = 0; i < world_size; ++i) {
+    std::string file_group_name, tmp_address;
+    std::size_t addresses_count;
+    int rank;
+    port_type tmp_port;
+
+    file >> file_group_name >> rank >> tmp_port >> addresses_count;
+    if (file_group_name != group_name) {
+      throw std::logic_error("file_group_name != group_name");
+    }
+
+    std::vector<std::string> tmp_addresses(addresses_count);
+    for (std::size_t j = 0; j < addresses_count; ++j) {
+      file >> tmp_address;
+      tmp_addresses.emplace(tmp_addresses.begin() + j, tmp_address);
+    }
+
+    ranks[i] = rank;
+    // Whether there is already assigned rank 0, or we have to get addresses and port
+    // from first process which has unassigned rank (it will be rank 0).
+    if (rank == 0 || (rank < 0 && master_addresses.size() == 0)) {
+      master_port = tmp_port;
+      master_addresses = tmp_addresses;
+    }
+  }
+
+  if (assigned_rank >= 0) {
+    config.rank = assigned_rank;
+  } else {
+    // Calculate how many unassigned there was before us (including us).
+    std::size_t unassigned = 1 + std::count_if(ranks.begin(), ranks.begin() + order,
+                                               [](int rank) { return rank < 0; });
+
+    // Calculate actual rank by finding `unassigned` number of empty ranks.
+    for (std::size_t rank = 0; rank < world_size && unassigned > 0; ++rank) {
+      if (std::find(ranks.begin(), ranks.end(), rank) == ranks.end()) {
+        unassigned--;
+      }
+
+      if (unassigned == 0) config.rank = rank;
+    }
+  }
+
+  file << std::endl; // reserve our rank
+
+  // Member which is last to use the file has to remove it.
+  if (lines == 2 * world_size - 1) {
+    ::remove(file_path.c_str());
+  }
+
+  file.close();
+  unlockFile(fd);
+
+  if (config.rank == 0) {
     config.public_address = discoverWorkers(listen_socket, world_size);
     config.master = {
       .world_size = world_size,
       .listen_socket = listen_socket,
-      .listen_port = port,
+      .listen_port = master_port,
     };
   } else {
-    file << std::endl; // reserve our rank
-    file.seekp(0, std::ios_base::beg);
-
-    std::string file_group_name;
-    port_type port;
-    file >> file_group_name >> port;
-    std::vector<std::string> addresses =
-        {std::istream_iterator<std::string>(file),
-         std::istream_iterator<std::string>()};
-
-    // Last member to join removes the file
-    if (file_group_name != group_name) throw std::logic_error("file_group_name != group_name");
-    if (config.rank == world_size - 1) {
-      ::remove(file_path.c_str());
-    }
-
-    file.close();
-    unlockFile(fd);
+    ::close(listen_socket);
 
     std::string master_address;
-    std::tie(master_address, config.public_address) = discoverMaster(addresses, port);
+    std::tie(master_address, config.public_address) = discoverMaster(master_addresses, master_port);
     config.worker = {
       .address = master_address,
-      .port = port,
+      .port = master_port,
     };
   }
 
