@@ -52,25 +52,27 @@ struct MulticastMessage {
   std::string group_name;
   std::vector<std::string> addresses;
   port_type port;
+  int rank;
 
-  MulticastMessage(std::string group_name, port_type port)
+  MulticastMessage(std::string group_name, port_type port, int rank)
     : uid(getRandomString())
     , group_name(group_name)
     , addresses(getInterfaceAddresses())
-    , port(port) {}
+    , port(port)
+    , rank(rank) {}
 
   MulticastMessage(std::string msg) {
     std::istringstream ss {msg};
-    ss >> uid >> group_name >> port;
+    ss >> uid >> group_name >> port >> rank;
     addresses = {std::istream_iterator<std::string>(ss),
                  std::istream_iterator<std::string>()};
   }
 
   std::string pack() {
     std::ostringstream ss;
-    ss << uid << ' ' << group_name << ' ' << port << ' ';
+    ss << uid << ' ' << group_name << ' ' << port << ' ' << rank;
     for (const auto& address : addresses) {
-      ss << address << ' ';
+      ss << ' ' << address;
     }
     return ss.str();
   }
@@ -91,7 +93,8 @@ bool isMulticastAddress(struct sockaddr* address) {
   }
 }
 
-int bindMulticastSocket(struct sockaddr* address, struct sockaddr_storage *sock_addr, int timeout_sec = 1, int ttl = 1) {
+int bindMulticastSocket(struct sockaddr* address, struct sockaddr_storage *sock_addr,
+                        int timeout_sec = 1, int ttl = 1) {
   struct timeval timeout = {.tv_sec = timeout_sec, .tv_usec = 0};
 
   int socket, optval;
@@ -145,7 +148,8 @@ InitMethod::Config initTCPMaster(struct sockaddr* addr) {
   throw std::runtime_error("non-multicast tcp initialization not supported");
 }
 
-InitMethod::Config initTCPMulticast(std::string group_name, rank_type world_size, struct sockaddr* addr) {
+InitMethod::Config initTCPMulticast(std::string group_name, rank_type world_size,
+                                    int assigned_rank, struct sockaddr* addr) {
   InitMethod::Config config;
   struct sockaddr_storage sock_addr;
   int socket = bindMulticastSocket(addr, &sock_addr);
@@ -155,7 +159,7 @@ InitMethod::Config initTCPMulticast(std::string group_name, rank_type world_size
   int listen_socket;
   port_type listen_port;
   std::tie(listen_socket, listen_port) = listen();
-  MulticastMessage msg {group_name, listen_port};
+  MulticastMessage msg {group_name, listen_port, assigned_rank};
 
   std::string packed_msg = msg.pack();
   std::set<std::string> processes;
@@ -202,13 +206,37 @@ InitMethod::Config initTCPMulticast(std::string group_name, rank_type world_size
   std::this_thread::sleep_for(std::chrono::milliseconds(50));
   broadcast();
 
-  auto master_msg = MulticastMessage(*processes.begin());
-  std::size_t rank = 0;
-  for (auto it = processes.begin(); it != processes.end(); ++it, ++rank) {
-    auto packed_recv_msg = *it;
-    auto recv_msg = MulticastMessage(packed_recv_msg);
+  std::vector<std::string> tmp_processes(processes.begin(), processes.end());
+  std::vector<std::string> arranged_processes(processes.size());
 
-    if (packed_msg == packed_recv_msg) {
+  // Put already assigned ranks on their place
+  for (std::size_t i = 0; i < processes.size(); ++i) {
+    auto recv_msg = MulticastMessage(tmp_processes[i]);
+    if (recv_msg.rank >= 0) {
+      arranged_processes[recv_msg.rank] = tmp_processes[i];
+    }
+  }
+
+  // Put rest (not assigned) in sort order
+  std::size_t last_pos = 0;
+  for (std::size_t i = 0; i < processes.size(); ++i) {
+    if (arranged_processes[i].empty()) { // not assigned place
+      for (std::size_t j = last_pos; j < processes.size(); ++j) {
+        auto recv_msg = MulticastMessage(tmp_processes[j]);
+        if (recv_msg.rank < 0) {
+          last_pos = j;
+          break;
+        }
+      }
+
+      arranged_processes[i] = tmp_processes[last_pos];
+      last_pos++;
+    }
+  }
+
+  auto master_msg = MulticastMessage(arranged_processes[0]);
+  for (std::size_t rank = 0; rank < arranged_processes.size(); ++rank) {
+    if (packed_msg == arranged_processes[rank]) {
       config.rank = rank;
       if (config.rank == 0) {
         config.master = {
@@ -236,7 +264,8 @@ InitMethod::Config initTCPMulticast(std::string group_name, rank_type world_size
 
 } // anonymous namespace
 
-InitMethod::Config initTCP(std::string argument, rank_type world_size, std::string group_name) {
+InitMethod::Config initTCP(std::string argument, rank_type world_size,
+                           std::string group_name, int rank) {
   // Parse arguments
   std::string address, str_port;
   std::tie(address, str_port) = splitAddress(argument);
@@ -254,7 +283,7 @@ InitMethod::Config initTCP(std::string argument, rank_type world_size, std::stri
     if (head->ai_family != AF_INET && head->ai_family != AF_INET6) continue;
     try {
       if (isMulticastAddress(head->ai_addr)) {
-        return initTCPMulticast(group_name, world_size, head->ai_addr);
+        return initTCPMulticast(group_name, world_size, rank, head->ai_addr);
       } else {
         return initTCPMaster(head->ai_addr);
       }

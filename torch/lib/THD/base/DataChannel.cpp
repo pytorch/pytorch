@@ -13,9 +13,10 @@
 
 namespace thd {
 
-#define GET_CONFIG getInitConfig(init_method, world_size, group_name)
+#define GET_CONFIG getInitConfig(init_method, world_size, group_name, rank)
 DataChannel* DataChannel::newChannel(THDChannelType type, std::string init_method,
-                                     int world_size, std::string group_name) {
+                                     int world_size, std::string group_name,
+                                     int rank) {
   switch (type) {
     case THDChannelTCP:
       return new DataChannelTCP(GET_CONFIG);

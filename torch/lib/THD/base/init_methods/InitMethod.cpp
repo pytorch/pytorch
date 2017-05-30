@@ -3,14 +3,16 @@
 namespace thd {
 namespace init {
 
-InitMethod::Config initTCP(std::string argument, rank_type world_size, std::string group_name);
-InitMethod::Config initFile(std::string argument, rank_type world_size, std::string group_name);
+InitMethod::Config initTCP(std::string argument, rank_type world_size,
+                           std::string group_name, int rank);
+InitMethod::Config initFile(std::string argument, rank_type world_size,
+                            std::string group_name, int rank);
 InitMethod::Config initEnv(int world_size);
 
 }
 
 InitMethod::Config getInitConfig(std::string argument, int world_size,
-                                 std::string group_name) {
+                                 std::string group_name, int rank) {
   if (argument.find("env://") == 0) {
     return init::initEnv(world_size);
   } else {
@@ -25,10 +27,10 @@ InitMethod::Config getInitConfig(std::string argument, int world_size,
 
     if (argument.find("tcp://") == 0) {
       argument.erase(0, 6); // chop "tcp://"
-      return init::initTCP(argument, r_world_size, group_name);
+      return init::initTCP(argument, r_world_size, group_name, rank);
     } else if (argument.find("file://") == 0) {
       argument.erase(0, 7); // chop "file://"
-      return init::initFile(argument, r_world_size, group_name);
+      return init::initFile(argument, r_world_size, group_name, rank);
     }
   }
 
