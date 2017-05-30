@@ -1,5 +1,6 @@
-#include "caffe2/core/operator_schema.h"
 #include "caffe2/core/logging.h"
+#include "caffe2/core/operator.h"
+#include "caffe2/core/operator_schema.h"
 #include "caffe2/utils/proto_utils.h"
 
 #include <gtest/gtest.h>
@@ -206,6 +207,34 @@ TEST(OperatorSchemaTest, TestCastSchema) {
   EXPECT_EQ(out[0].data_type(), TensorProto::UINT8);
   // Dim should not be set (same as input);
   EXPECT_EQ(out[0].dims_size(), 0);
+}
+
+OPERATOR_SCHEMA(OpSchemaCostInference)
+    .NumInputs(2)
+    .NumOutputs(2)
+    .CostInferenceFunction(
+        [](const OperatorDef& def, const vector<TensorShape>& inputs) {
+          struct OpSchema::Cost c;
+          c.flops =
+              2 * inputs[0].dims(0) * inputs[0].dims(1) * inputs[1].dims(1);
+          return c;
+        });
+
+TEST(OperatorSchemaTest, TestCostInference) {
+  const OpSchema* schema = OpSchemaRegistry::Schema("OpSchemaCostInference");
+  if (!schema) {
+    return;
+  }
+  OperatorDef def = CreateOperatorDef(
+      "OpSchemaCostInference", "", vector<string>{"in"}, vector<string>{"out"});
+  vector<TensorShape> shapes(2);
+  shapes[0].set_data_type(TensorProto::FLOAT);
+  shapes[0].add_dims(10);
+  shapes[0].add_dims(10);
+  shapes[1].set_data_type(TensorProto::FLOAT);
+  shapes[1].add_dims(10);
+  shapes[1].add_dims(10);
+  EXPECT_EQ(2000, schema->InferCost(def, shapes).flops);
 }
 
 }  // namespace caffe2
