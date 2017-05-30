@@ -36,6 +36,8 @@ struct Variable : std::enable_shared_from_this<Variable> {
       }
 
     std::unique_ptr<thpp::Tensor> data;
+    // The gradient function associated with this node.  If this is
+    // NULL, then this node is a leaf node.
     std::shared_ptr<Function> grad_fn;
     // this field is only necessary in case when a grad_fn saves a reference to
     // one of the outputs of the forward fn. Saving the pointer in grad_fn
@@ -92,6 +94,10 @@ struct Variable : std::enable_shared_from_this<Variable> {
   std::mutex grad_accumulator_lock;
   bool requires_grad;
   bool is_volatile;
+  // The "output number" of this variable; e.g., if this variable
+  // was the second output of a function, then output_nr == 1.
+  // We use this to make sure we can setup the backwards trace
+  // correctly when this variable is passed to another function.
   int output_nr;
   PyObject *pyobj;  // weak reference
 };

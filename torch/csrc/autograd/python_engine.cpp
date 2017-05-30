@@ -97,13 +97,33 @@ void compute_partial_exec_callbacks(const function_list& roots,
     }
   }
 
-  // Prevent expantion for functions in {all_vertices} \ {needed}
+  // Prevent expansion for functions in {all_vertices} \ {needed}
   for (auto fn : all_functions) {
     if (needed.count(fn) > 0) continue;
     map.emplace(fn, abort_callback);
   }
 }
 
+// Implementation of torch._C._EngineBase.run_backward
+// Arguments:
+//  variables (tuple of Variable):
+//      Variables of which the derivative will be computed.
+//      These must not be volatile.
+//  grad_variables (tuple of Variable or None):
+//      Gradients with respect to each element of corresponding
+//      variables.  Has same length as variables.  See _make_grads
+//      how these are defaulted when the user doesn't specify them.
+//  keep_graph (boolean):
+//      If false, the graph used to compute the grad will be freed.
+//  inputs (tuple of Variable)
+//      Inputs w.r.t. which the gradient will be returned.  This
+//      function will return a tuple containing an entry for each
+//      input variable.  Non-mentioned leaf variables will have
+//      gradients accumulated to grad, unless only_inputs below
+//      is True.
+//  only_inputs (boolean)
+//      If false, any inputs not specified in inputs will have their
+//      gradients accumulated to grad.
 PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwargs)
 {
   HANDLE_TH_ERRORS
@@ -137,6 +157,11 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     auto& variable = ((THPVariable*)_variable)->cdata;
     THPUtils_assert(!variable->is_volatile,
         "element %d of variables tuple is volatile", i);
+    // If grad_fn is NULL (as is the case for a leaf node), we instead
+    // interpret the gradient function to be a grad accumulator,
+    // which will accumulate its inputs into the grad property of the
+    // variable.  If inputs/only_inputs is specified, a callback is
+    // used to suppress the operation of this node.
     auto grad_fn = variable->grad_fn ? variable->grad_fn : variable->get_grad_accumulator();
     THPUtils_assert(grad_fn, "element %d of variables tuple does not require grad", i);
     int output_nr = variable->grad_fn ? variable->output_nr : 0;
@@ -156,7 +181,7 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
   Engine::callback_map callbacks;
   CallbackContext ctx;
   if (inputs != NULL) {
-    THPUtils_assert(PyTuple_Check(inputs), "outputs argument has to be a tuple");
+    THPUtils_assert(PyTuple_Check(inputs), "inputs argument has to be a tuple");
     int num_inputs = PyTuple_GET_SIZE(inputs);
     ctx.outputs = PyTuple_New(num_inputs);
     // First, find all relevant functions and fill ctx.output_map

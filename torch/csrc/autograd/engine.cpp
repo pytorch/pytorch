@@ -34,6 +34,9 @@ namespace torch { namespace autograd {
 struct FunctionTask {
   GraphTask* base;
   std::shared_ptr<Function> fn;
+  // This buffer serves as an implicit "addition" node for all of the
+  // gradients flowing here.  Once all the dependencies are finished, we
+  // use the contents of this buffer to run the function.
   InputBuffer inputs;
 
   FunctionTask(GraphTask* base, std::shared_ptr<Function> fn, InputBuffer inputs)
