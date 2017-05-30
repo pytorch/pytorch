@@ -102,6 +102,7 @@ class GPUDataParallelModelTest(TestCase):
             result_8gpus = self.run_model(range(8))
             self.assertTrue(np.allclose(result_1gpus, result_8gpus))
 
+    @unittest.skipIf(workspace.NumCudaDevices() < 4, "Need at least 4 GPUs.")
     def test_checkpoint_params(self):
         def add_input_ops(model):
             pass
