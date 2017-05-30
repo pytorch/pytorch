@@ -61,15 +61,6 @@ class AllreduceOp final : public Operator<Context> {
     // Store which inputs/outputs this instance initialized with
     update(init_);
 
-    // Pretty arbitrary threshold but seems to work well.
-    // Logic for switching between algorithms in a topology
-    // dependent manner will eventually move to Gloo itself.
-    if (bytes < (4 * 1024 * 1024) || init_.context->size >= 16) {
-      mode = HALVING_DOUBLING;
-    } else {
-      mode = RING_CHUNKED;
-    }
-
     // Verify inputs == ouputs
     CAFFE_ENFORCE_EQ(init_.inputs.size(), init_.outputs.size());
     for (auto i = 0; i < init_.inputs.size(); i++) {
