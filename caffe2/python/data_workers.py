@@ -199,10 +199,6 @@ class DataInputCoordinator(object):
                 workspace.RunOperatorOnce(
                     core.CreateOperator("CloseBlobsQueue", [q], [])
                 )
-
-            # Release memory for the scratch blobs
-            if len(self._scratch_blobs) > 0:
-                utils.ResetBlobs(self._scratch_blobs)
             self._started = False
         finally:
             self._log_inputs_per_interval(0, force=True)
@@ -217,6 +213,10 @@ class DataInputCoordinator(object):
             if w.isAlive():
                 print("Worker {} failed to close while waiting".format(w))
                 success = False
+
+        # Release memory for the scratch blobs
+        if success and len(self._scratch_blobs) > 0:
+            utils.ResetBlobs(self._scratch_blobs)
 
         print("All workers terminated: {}".format(success))
         return success
