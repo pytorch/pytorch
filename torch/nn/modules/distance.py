@@ -63,6 +63,6 @@ class CosineSimilarity(Module):
         return F.cosine_similarity(x1, x2, self.dim, self.eps)
 
 
-# TODO: CosineDistance - make sure lua's CosineDistance isn't actually cosine similarity
+# TODO: Cosine
 # TODO: Euclidean
 # TODO: WeightedEuclidean
