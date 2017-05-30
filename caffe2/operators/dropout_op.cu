@@ -33,6 +33,7 @@ bool DropoutOp<float, CUDAContext>::RunOnDevice() {
     // boolean numbers, we will generate into dY and write the result to
     // mask.
     float* Ydata = Y->mutable_data<float>();
+    CAFFE_ENFORCE(X.data<float>() != Ydata, "In-place GPU dropout is broken");
     CURAND_ENFORCE(
         curandGenerateUniform(context_.curand_generator(), Ydata, X.size()));
     DropoutKernel<<<CAFFE_GET_BLOCKS(X.size()), CAFFE_CUDA_NUM_THREADS,
