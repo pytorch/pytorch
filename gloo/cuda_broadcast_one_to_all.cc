@@ -130,6 +130,10 @@ void CudaBroadcastOneToAll<T, W>::run() {
     }
   } else {
     CudaStream& stream = streams_[rootPointerRank_];
+    // Ensure previous H2D copy is complete before notifying the sender
+    // NOTE: this only waits for last copyAsync, not for the whole stream
+    stream.wait();
+
     receiver_->clearToSendBuffer->send();
     receiver_->recvBuffer->waitRecv();
 
