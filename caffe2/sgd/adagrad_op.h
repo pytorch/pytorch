@@ -75,8 +75,6 @@ class SparseAdagradOp final : public Operator<Context> {
   template <typename SIndex>
   bool DoRunWithType() {
     const auto* lr = Input(LR).template data<T>();
-    auto n = Input(GRAD).dim(0);
-
     const auto* indices = Input(INDICES).template data<SIndex>();
     const auto* gradIn = Input(GRAD).template data<T>();
     const auto* paramIn = Input(PARAM).template data<T>();
@@ -84,11 +82,12 @@ class SparseAdagradOp final : public Operator<Context> {
     auto* paramOut = Output(OUTPUT_PARAM)->template mutable_data<T>();
     auto* momentOut = Output(OUTPUT_MOMENT_1)->template mutable_data<T>();
 
+    auto n = Input(INDICES).size();
     if (n == 0) {
       return true;
     }
 
-    auto block_size = Input(GRAD).size_from_dim(1);
+    auto block_size = Input(GRAD).size() / n;
     for (auto i = 0; i < n; ++i) {
       auto idx = indices[i];
       if (block_size == 1) {

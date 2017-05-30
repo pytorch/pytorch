@@ -5,6 +5,7 @@ from __future__ import unicode_literals
 
 import functools
 
+import hypothesis
 from hypothesis import given
 import hypothesis.strategies as st
 import numpy as np
@@ -70,17 +71,28 @@ class TestAdam(hu.HypothesisTestCase):
                            allow_nan=False, allow_infinity=False),
            epsilon=st.floats(min_value=0.01, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
+           data_strategy=st.data(),
            **hu.gcs)
     def test_sparse_adam(self, inputs, ITER, LR, beta1, beta2, epsilon,
-                         gc, dc):
+                         data_strategy, gc, dc):
         param, mom1, mom2, grad = inputs
         mom1 = np.absolute(mom1)
         mom2 = np.absolute(mom2)
         ITER = np.array([ITER], dtype=np.int64)
         LR = np.array([LR], dtype=np.float32)
 
-        indices = np.arange(grad.shape[0])
-        indices = indices[indices % 2 == 0]
+        # Create an indexing array containing values which index into grad
+        indices = data_strategy.draw(
+            hu.tensor(dtype=np.int64,
+                      elements=st.sampled_from(np.arange(grad.shape[0]))),
+        )
+        hypothesis.note('indices.shape: %s' % str(indices.shape))
+
+        # For now, the indices must be unique
+        hypothesis.assume(np.array_equal(np.unique(indices.flatten()),
+                                         np.sort(indices.flatten())))
+
+        # Sparsify grad
         grad = grad[indices]
 
         op = core.CreateOperator(
