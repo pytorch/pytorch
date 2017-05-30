@@ -4,9 +4,9 @@
 
     git clone https://github.com/caffe2/caffe2.git
     cd caffe2
-    
+
 #### OS X
-    
+
     brew install openblas glog gtest automake protobuf leveled lmdb
     mkdir build && cd build
     cmake .. -DBLAS=OpenBLAS -DUSE_OPENCV=off
@@ -27,15 +27,18 @@
     sudo tar -xzf cudnn-8.0-linux-x64-v5.1.tgz -C /usr/local &&
     rm cudnn-8.0-linux-x64-v5.1.tgz &&
     sudo ldconfig
-    
+
     mkdir build && cd build
     cmake ..
     make
-    
+
 ## Python support
 
+To use caffe2 in Python, you need the two libraries, future and six,
+
+    pip install future six
+
 To run the tutorials you'll need ipython-notebooks and matplotlib, which can be installed on OS X with:
-    
+
     brew install matplotlib --with-python3
     pip install ipython notebook
-

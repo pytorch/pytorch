@@ -520,7 +520,7 @@ class Seq2SeqModelCaffe2:
         def create_net(net):
             workspace.CreateNet(
                 net,
-                input_blobs=map(str, net.external_inputs),
+                input_blobs=[str(i) for i in net.external_inputs],
             )
 
         create_net(self.model.net)

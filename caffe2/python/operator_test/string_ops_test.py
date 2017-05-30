@@ -25,11 +25,13 @@ class TestStringOps(hu.HypothesisTestCase):
         # an invalid utf-8 string. The goal here is just to avoid python
         # complaining about the unicode -> str conversion.
         strings = np.array(
-            map(lambda a: a.encode('utf-8'), strings), dtype=np.object)
+            [a.encode('utf-8') for a in strings], dtype=np.object
+        )
 
         def string_prefix_ref(strings):
             return (
-                np.array(map(lambda a: a[:length], strings), dtype=object), )
+                np.array([a[:length] for a in strings], dtype=object),
+            )
 
         op = core.CreateOperator(
             'StringPrefix',
@@ -46,11 +48,13 @@ class TestStringOps(hu.HypothesisTestCase):
     def test_string_suffix(self, strings):
         length = 3
         strings = np.array(
-            map(lambda a: a.encode('utf-8'), strings), dtype=np.object)
+            [a.encode('utf-8') for a in strings], dtype=np.object
+        )
 
         def string_suffix_ref(strings):
             return (
-                np.array(map(lambda a: a[-length:], strings), dtype=object), )
+                np.array([a[-length:] for a in strings], dtype=object),
+            )
 
         op = core.CreateOperator(
             'StringSuffix',
@@ -67,11 +71,13 @@ class TestStringOps(hu.HypothesisTestCase):
     def test_string_starts_with(self, strings):
         prefix = 'a'
         strings = np.array(
-            map(lambda a: str(strings), strings), dtype=np.object)
+            [str(a) for a in strings], dtype=np.object
+        )
 
         def string_starts_with_ref(strings):
-            return (np.array(
-                map(lambda a: a.startswith(prefix), strings), dtype=bool), )
+            return (
+                np.array([a.startswith(prefix) for a in strings], dtype=bool),
+            )
 
         op = core.CreateOperator(
             'StringStartsWith',
@@ -88,11 +94,13 @@ class TestStringOps(hu.HypothesisTestCase):
     def test_string_ends_with(self, strings):
         suffix = 'a'
         strings = np.array(
-            map(lambda a: str(strings), strings), dtype=np.object)
+            [str(a) for a in strings], dtype=np.object
+        )
 
         def string_ends_with_ref(strings):
-            return (np.array(
-                map(lambda a: a.endswith(suffix), strings), dtype=bool), )
+            return (
+                np.array([a.endswith(suffix) for a in strings], dtype=bool),
+            )
 
         op = core.CreateOperator(
             'StringEndsWith',

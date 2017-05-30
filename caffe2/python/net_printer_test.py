@@ -75,8 +75,9 @@ class TestNetPrinter(unittest.TestCase):
         with job:
             with Task():
                 ops.Add(['a', 'b'])
-        with self.assertRaises(AssertionError):
+        with self.assertRaises(AssertionError) as e:
             net_printer.analyze(job)
+        self.assertEqual("Blob undefined: a", str(e.exception))
 
     def test_multiple_definition(self):
         job = example_job()
