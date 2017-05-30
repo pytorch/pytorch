@@ -5,6 +5,7 @@ from __future__ import unicode_literals
 
 import functools
 
+import hypothesis
 from hypothesis import given, strategies as st
 import numpy as np
 
@@ -49,14 +50,27 @@ class TestAdagrad(hu.HypothesisTestCase):
                         allow_nan=False, allow_infinity=False),
            epsilon=st.floats(min_value=0.01, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
+           data_strategy=st.data(),
            **hu.gcs)
-    def test_sparse_adagrad(self, inputs, lr, epsilon, gc, dc):
+    def test_sparse_adagrad(self, inputs, lr, epsilon,
+                            data_strategy, gc, dc):
         param, momentum, grad = inputs
-        indices = np.arange(grad.shape[0])
-        indices = indices[indices % 2 == 0]
-        grad = grad[indices]
         momentum = np.abs(momentum)
         lr = np.array([lr], dtype=np.float32)
+
+        # Create an indexing array containing values which index into grad
+        indices = data_strategy.draw(
+            hu.tensor(dtype=np.int64,
+                      elements=st.sampled_from(np.arange(grad.shape[0]))),
+        )
+        hypothesis.note('indices.shape: %s' % str(indices.shape))
+
+        # For now, the indices must be unique
+        hypothesis.assume(np.array_equal(np.unique(indices.flatten()),
+                                         np.sort(indices.flatten())))
+
+        # Sparsify grad
+        grad = grad[indices]
 
         op = core.CreateOperator(
             "SparseAdagrad",
