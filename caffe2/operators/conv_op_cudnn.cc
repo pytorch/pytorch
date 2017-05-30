@@ -31,6 +31,14 @@ inline void LogCuDNNPerfStats(
             << stat.memory;
   }
 }
+
+// Easier indexing into force_algo_ vector
+enum {
+  ALGO_FWD = 0,
+  ALGO_WGRAD = 1,
+  ALGO_DGRAD = 2
+} algoIndex_t;
+
 }  // namespace
 
 class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
@@ -45,7 +53,9 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
             OperatorBase::GetSingleArgument<int>("exhaustive_search", 0)),
         deterministic_(
             OperatorBase::GetSingleArgument<int>("deterministic", 0)),
-        cudnn_state_(OperatorBase::GetSingleArgument<int>("cudnn_state", 0)) {
+        cudnn_state_(OperatorBase::GetSingleArgument<int>("cudnn_state", 0)),
+        force_algo_(OperatorBase::GetRepeatedArgument<int>("force_algo", vector<int>{-1,-1,-1})) {
+    CHECK(!deterministic_ || !exhaustive_search_);
     CAFFE_ENFORCE(group_ > 0);
     CAFFE_ENFORCE(!deterministic_ || !exhaustive_search_);
     OPERATOR_NEEDS_FEATURE(
@@ -62,6 +72,23 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
         dilation_h() == 1 && dilation_w() == 1,
         "The cudnn convolution does not support dilation yet.");
 #endif
+
+    bool individual_force_algo = OperatorBase::HasArgument("force_algo_fwd") ||
+                                 OperatorBase::HasArgument("force_algo_dgrad") ||
+                                 OperatorBase::HasArgument("force_algo_wgrad");
+    if (OperatorBase::HasArgument("force_algo")) {
+      CAFFE_ENFORCE(!individual_force_algo,
+                   "Cannot specify both force_algo and any of",
+                   "force_algo_fwd, force_algo_dgrad, force_algo_wgrad");
+    } else {
+      force_algo_ = std::vector<int>{-1,-1,-1};
+      force_algo_[ALGO_FWD] =
+          OperatorBase::GetSingleArgument<int>("force_algo_fwd", -1);
+      force_algo_[ALGO_DGRAD] =
+          OperatorBase::GetSingleArgument<int>("force_algo_dgrad", -1);
+      force_algo_[ALGO_WGRAD] =
+          OperatorBase::GetSingleArgument<int>("force_algo_wgrad", -1);
+    }
 
     CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&bottom_desc_));
     CUDNN_ENFORCE(cudnnCreateFilterDescriptor(&filter_desc_));
@@ -164,6 +191,7 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
   bool exhaustive_search_;
   bool deterministic_;
   size_t cudnn_state_;
+  vector<int> force_algo_; // stored as FWD, dFILTER, dDATA
 };
 
 
@@ -414,7 +442,9 @@ bool CudnnConvOp::DoRunWithType() {
           cudnnTypeWrapper<MATH>::type));
     }
 #endif
-    if (deterministic_) {
+    if (force_algo_[ALGO_FWD] >= 0) {
+      algo_ = (cudnnConvolutionFwdAlgo_t)force_algo_[ALGO_FWD];
+    } else if (deterministic_) {
       algo_ = CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM;
     } else if (exhaustive_search_) {
       algo_ = algo_cache_.getAlgorithm(X.dims(), filter.dims(), [&]() {
@@ -740,8 +770,10 @@ bool CudnnConvGradientOp::DoRunWithType() {
 
     size_t bwd_filter_ws_size, bwd_data_ws_size;
 
-    if (deterministic_) {
-      bwd_data_algo_ = CUDNN_CONVOLUTION_BWD_DATA_ALGO_1;
+    // Choose dW algorithm
+    if (force_algo_[ALGO_WGRAD] >= 0) {
+      bwd_filter_algo_ = (cudnnConvolutionBwdFilterAlgo_t)force_algo_[ALGO_WGRAD];
+    } else if (deterministic_) {
       bwd_filter_algo_ = CUDNN_CONVOLUTION_BWD_FILTER_ALGO_1;
     } else if (exhaustive_search_) {
       bwd_filter_algo_ =
@@ -781,8 +813,25 @@ bool CudnnConvGradientOp::DoRunWithType() {
             LogCuDNNPerfStats(filter_perf_stat, returned_algo_count);
             return filter_perf_stat[0].algo;
           });
-
-      if (OutputSize() == 3 || (no_bias_ && (OutputSize() == 2))) {
+    } else {
+      // choose backward algorithm for filter
+      CUDNN_ENFORCE(cudnnGetConvolutionBackwardFilterAlgorithm(
+          cudnn_wrapper_.inline_cudnn_handle(),
+          bottom_desc_,
+          top_desc_,
+          conv_desc_,
+          filter_desc_,
+          CUDNN_CONVOLUTION_BWD_FILTER_SPECIFY_WORKSPACE_LIMIT,
+          cudnn_ws_nbytes_limit_,
+          &bwd_filter_algo_));
+    }
+    // Pick dX algo if needed
+    if (OutputSize() == 3 || (no_bias_ && (OutputSize() == 2))) {
+      if (force_algo_[ALGO_DGRAD] >= 0) {
+        bwd_data_algo_ = (cudnnConvolutionBwdDataAlgo_t)force_algo_[ALGO_DGRAD];
+      } else if (deterministic_) {
+        bwd_data_algo_ = CUDNN_CONVOLUTION_BWD_DATA_ALGO_1;
+      } else if (exhaustive_search_) {
         bwd_data_algo_ =
             data_algo_cache_.getAlgorithm(X.dims(), filter.dims(), [&]() {
               VLOG(1) << "CUDNN Convolution bwd: doing data exhaustive search.";
@@ -819,20 +868,7 @@ bool CudnnConvGradientOp::DoRunWithType() {
               LogCuDNNPerfStats(data_perf_stat, returned_algo_count);
               return data_perf_stat[0].algo;
             });
-      }
-    } else {
-      // choose backward algorithm for filter
-      CUDNN_ENFORCE(cudnnGetConvolutionBackwardFilterAlgorithm(
-          cudnn_wrapper_.inline_cudnn_handle(),
-          bottom_desc_,
-          top_desc_,
-          conv_desc_,
-          filter_desc_,
-          CUDNN_CONVOLUTION_BWD_FILTER_SPECIFY_WORKSPACE_LIMIT,
-          cudnn_ws_nbytes_limit_,
-          &bwd_filter_algo_));
-      // choose backward algo for data
-      if (OutputSize() == 3 || (no_bias_ && (OutputSize() == 2))) {
+      } else {
         CUDNN_ENFORCE(cudnnGetConvolutionBackwardDataAlgorithm(
             cudnn_wrapper_.inline_cudnn_handle(),
             filter_desc_,
@@ -844,6 +880,7 @@ bool CudnnConvGradientOp::DoRunWithType() {
             &bwd_data_algo_));
       }
     }
+
     // get workspace for backwards filter algorithm
     CUDNN_ENFORCE(cudnnGetConvolutionBackwardFilterWorkspaceSize(
         cudnn_wrapper_.inline_cudnn_handle(),
