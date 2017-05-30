@@ -398,11 +398,11 @@ class Seq2SeqModelCaffe2EnsembleDecoder(object):
 
         workspace.CreateNet(
             self.model.net,
-            input_blobs=map(str, [
-                self.encoder_inputs,
-                self.encoder_lengths,
-                self.max_output_seq_len,
-            ]),
+            input_blobs=[
+                str(self.encoder_inputs),
+                str(self.encoder_lengths),
+                str(self.max_output_seq_len),
+            ],
         )
 
         logger.info('Params created: ')

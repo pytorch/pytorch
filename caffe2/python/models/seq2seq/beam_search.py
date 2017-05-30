@@ -236,7 +236,7 @@ class BeamSearchForwardOnly(object):
                     window=state_config.state_link.window,
                 )
             )
-        state_configs = map(choose_state_per_hypo, state_configs)
+        state_configs = [choose_state_per_hypo(c) for c in state_configs]
         initial_scores = self.model.param_init_net.ConstantFill(
             [],
             'initial_scores',
@@ -324,32 +324,32 @@ class BeamSearchForwardOnly(object):
         link_internal, link_external, link_offset, link_window = (
             zip(*forward_links)
         )
-        all_outputs = map(
-            lambda s: str(s) + '_all',
-            [scores_t, tokens_t, hypo_t, attention_t],
-        )
+        all_outputs = [
+            str(s) + '_all'
+            for s in [scores_t, tokens_t, hypo_t, attention_t]
+        ]
         results = self.model.net.RecurrentNetwork(
             all_inputs,
             all_outputs + ['step_workspaces'],
-            param=map(all_inputs.index, self.step_model.params),
-            alias_src=map(
-                lambda s: str(s) + '_states',
-                [
+            param=[all_inputs.index(p) for p in self.step_model.params],
+            alias_src=[
+                str(s) + '_states'
+                for s in [
                     self.scores_t_prev,
                     self.tokens_t_prev,
                     self.hypo_t_prev,
                     self.attention_t_prev,
-                ],
-            ),
+                ]
+            ],
             alias_dst=all_outputs,
             alias_offset=[0] * 4,
             recurrent_states=recurrent_states,
-            initial_recurrent_state_ids=map(
-                all_inputs.index,
-                [state_config.initial_value for state_config in state_configs],
-            ),
-            link_internal=map(str, link_internal),
-            link_external=map(str, link_external),
+            initial_recurrent_state_ids=[
+                all_inputs.index(state_config.initial_value)
+                for state_config in state_configs
+            ],
+            link_internal=[str(l) for l in link_internal],
+            link_external=[str(l) for l in link_external],
             link_offset=link_offset,
             link_window=link_window,
             backward_link_internal=[],

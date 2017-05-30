@@ -644,7 +644,7 @@ class IR(object):
 
         sum_ops = [CreateOperator(
             "Sum",
-            map(BlobReference, sum_op_input),
+            [BlobReference(x) for x in sum_op_input],
             BlobReference(out_base_name))]
         return sum_ops, out_base_name
 
@@ -681,15 +681,16 @@ class IR(object):
         sum_ops = [
             CreateOperator(
                 "Concat",
-                map(BlobReference, indices_concat_input),
-                map(BlobReference,
-                    [indices_concat_output, indices_concat_split]),
+                [BlobReference(x) for x in indices_concat_input],
+                [BlobReference(x) for x in
+                    [indices_concat_output, indices_concat_split]],
                 axis=0
             ),
             CreateOperator(
                 "Concat",
-                map(BlobReference, values_concat_input),
-                map(BlobReference, [values_concat_output, values_concat_split]),
+                [BlobReference(x) for x in values_concat_input],
+                [BlobReference(x) for x in
+                    [values_concat_output, values_concat_split]],
                 axis=0
             ),
         ]
@@ -1164,8 +1165,9 @@ class Net(object):
 
     @staticmethod
     def _get_next_net_name(basename):
-        name = basename = '/'.join(filter(
-            lambda x: x, (Net.current_prefix(), basename)))
+        name = basename = '/'.join(
+            x for x in [Net.current_prefix(), basename] if x
+        )
         next_idx = 1
         while name in Net._net_names_used:
             name = basename + '_' + str(next_idx)
@@ -1651,11 +1653,11 @@ class Net(object):
 
     @property
     def external_inputs(self):
-        return map(_get_blob_ref, self._net.external_input)
+        return [_get_blob_ref(x) for x in self._net.external_input]
 
     @property
     def external_outputs(self):
-        return map(_get_blob_ref, self._net.external_output)
+        return [_get_blob_ref(x) for x in self._net.external_output]
 
     def set_input_record(self, input_record):
         from caffe2.python import schema
@@ -2123,9 +2125,11 @@ def execution_step(default_name,
         step.AddNet(steps_or_nets)
     elif isinstance(steps_or_nets, list):
         if all(isinstance(x, Net) for x in steps_or_nets):
-            map(step.AddNet, steps_or_nets)
+            for x in steps_or_nets:
+                step.AddNet(x)
         else:
-            map(step.AddSubstep, map(to_execution_step, steps_or_nets))
+            for x in steps_or_nets:
+                step.AddSubstep(to_execution_step(x))
     elif steps_or_nets:
         raise ValueError(
             'steps_or_nets must be a step, a net, or a list of nets or steps.')

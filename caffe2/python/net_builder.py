@@ -31,8 +31,9 @@ class NetBuilder(object):
                  _stop_blob=None, _fullname=None):
         nb = NetBuilder.current(required=False)
         assert not _fullname or not name, 'Cannot set both _fullname and name'
-        self.name = _fullname or '/'.join(filter(lambda x: x, (
-            nb.name if nb else None, name)))
+        self.name = _fullname or '/'.join(
+            n for n in (nb.name if nb else None, name) if n
+        )
         self._frozen = False
         self._current_net = None
         self._children = []

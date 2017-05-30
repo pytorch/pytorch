@@ -14,7 +14,7 @@ def _filter_layers(layers, include_tags):
     if include_tags is None:
         return layers
     include_tags = set(include_tags)
-    return filter(lambda l: not include_tags.isdisjoint(l.tags), layers)
+    return [l for l in layers if not include_tags.isdisjoint(l.tags)]
 
 
 def shrink_output_schema(net, out_schema):

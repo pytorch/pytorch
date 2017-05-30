@@ -12,6 +12,7 @@ from caffe2.python.task import Task, TaskGroup, WorkspaceType, TaskOutput
 from collections import defaultdict
 from contextlib import contextmanager
 from copy import copy
+from itertools import chain
 
 
 class Visitor(object):
@@ -72,13 +73,16 @@ class Analyzer(Visitor):
 
 @Analyzer.register(OperatorDef)
 def analyze_op(analyzer, op):
-    map(analyzer.need_blob, op.input)
-    map(analyzer.define_blob, op.output)
+    for x in op.input:
+        analyzer.need_blob(x)
+    for x in op.output:
+        analyzer.define_blob(x)
 
 
 @Analyzer.register(Net)
 def analyze_net(analyzer, net):
-    map(analyzer, net.Proto().op)
+    for x in net.Proto().op:
+        analyzer(x)
 
 
 @Analyzer.register(ExecutionStep)
@@ -100,7 +104,8 @@ def analyze_step(analyzer, step):
                 'Error: Blobs created by multiple parallel steps: %s' % (
                     ', '.join(all_new_blobs & new_blobs)))
             all_new_blobs |= new_blobs
-    map(analyzer.define_blob, all_new_blobs)
+    for x in all_new_blobs:
+        analyzer.define_blob(x)
 
 
 @Analyzer.register(Task)
@@ -209,7 +214,7 @@ def commonprefix(m):
 
 
 def factor_prefix(vals, do_it):
-    vals = map(str, vals)
+    vals = [str(v) for v in vals]
     prefix = commonprefix(vals) if len(vals) > 1 and do_it else ''
     joined = ', '.join(v[len(prefix):] for v in vals)
     return '%s[%s]' % (prefix, joined) if prefix else joined
@@ -221,10 +226,14 @@ def call(op, inputs=None, outputs=None, factor_prefixes=False):
     else:
         inputs_v = [a for a in inputs if not isinstance(a, tuple)]
         inputs_kv = [a for a in inputs if isinstance(a, tuple)]
-        inputs = ', '.join(filter(
-            bool,
-            [factor_prefix(inputs_v, factor_prefixes)] +
-            ['%s=%s' % kv for kv in inputs_kv]))
+        inputs = ', '.join(
+            x
+            for x in chain(
+                [factor_prefix(inputs_v, factor_prefixes)],
+                ('%s=%s' % kv for kv in inputs_kv),
+            )
+            if x
+        )
     call = '%s(%s)' % (op, inputs)
     return call if not outputs else '%s = %s' % (
         factor_prefix(outputs, factor_prefixes), call)
@@ -287,12 +296,12 @@ def print_step(text, step):
 
 def _print_task_output(x):
     assert isinstance(x, TaskOutput)
-    return 'Output[' + ', '.join(map(str, x.names)) + ']'
+    return 'Output[' + ', '.join(str(x) for x in x.names) + ']'
 
 
 @Printer.register(Task)
 def print_task(text, task):
-    outs = ', '.join(map(_print_task_output, task.outputs()))
+    outs = ', '.join(_print_task_output(o) for o in task.outputs())
     context = [('node', task.node), ('name', task.name), ('outputs', outs)]
     with text.context(call('Task', context)):
         text(task.get_step())

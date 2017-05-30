@@ -117,7 +117,10 @@ class TestNetBuilder(unittest.TestCase):
                 with c.Else():
                     ops.Add([total_tiny, val], [total_tiny])
                 ops.Add([total, val], total)
-        return map(final_output, (total, total_large, total_small, total_tiny))
+        return [
+            final_output(x)
+            for x in [total, total_large, total_small, total_tiny]
+        ]
 
     def test_loops(self):
         with Task() as task:
