@@ -74,6 +74,8 @@ class VideoInputOpTest(unittest.TestCase):
     def test_read_from_db(self):
         random_label = np.random.randint(0, 100)
         VIDEO = "/mnt/vol/gfsdataswarm-oregon/users/trandu/sample.avi"
+        if not os.path.exists(VIDEO):
+            raise unittest.SkipTest('Missing data')
         temp_list = tempfile.NamedTemporaryFile(delete=False).name
         line_str = '{} 0 {}\n'.format(VIDEO, random_label)
         self.create_a_list(

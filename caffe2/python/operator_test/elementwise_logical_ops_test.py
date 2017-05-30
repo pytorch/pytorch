@@ -37,7 +37,7 @@ class TestWhere(hu.HypothesisTestCase):
 
     @given(N=st.integers(min_value=1, max_value=10),
            engine=st.sampled_from(["", "CUDNN"]),
-           **hu.gcs)
+           **hu.gcs_cpu_only)
     def test_where(self, N, gc, dc, engine):
         C = np.random.rand(N).astype(bool)
         X = np.random.rand(N).astype(np.float32)
@@ -48,7 +48,7 @@ class TestWhere(hu.HypothesisTestCase):
 
     @given(N=st.integers(min_value=1, max_value=10),
            engine=st.sampled_from(["", "CUDNN"]),
-           **hu.gcs)
+           **hu.gcs_cpu_only)
     def test_where_dim2(self, N, gc, dc, engine):
         C = np.random.rand(N, N).astype(bool)
         X = np.random.rand(N, N).astype(np.float32)
@@ -74,7 +74,7 @@ class TestRowWhere(hu.HypothesisTestCase):
 
     @given(N=st.integers(min_value=1, max_value=10),
            engine=st.sampled_from(["", "CUDNN"]),
-           **hu.gcs)
+           **hu.gcs_cpu_only)
     def test_rowwhere(self, N, gc, dc, engine):
         C = np.random.rand(N).astype(bool)
         X = np.random.rand(N).astype(np.float32)
@@ -91,7 +91,7 @@ class TestRowWhere(hu.HypothesisTestCase):
 
     @given(N=st.integers(min_value=1, max_value=10),
            engine=st.sampled_from(["", "CUDNN"]),
-           **hu.gcs)
+           **hu.gcs_cpu_only)
     def test_rowwhere_dim2(self, N, gc, dc, engine):
         C = np.random.rand(N).astype(bool)
         X = np.random.rand(N, N).astype(np.float32)
@@ -111,7 +111,7 @@ class TestIsMemberOf(hu.HypothesisTestCase):
 
     @given(N=st.integers(min_value=1, max_value=10),
            engine=st.sampled_from(["", "CUDNN"]),
-           **hu.gcs)
+           **hu.gcs_cpu_only)
     def test_is_member_of(self, N, gc, dc, engine):
         X = np.random.randint(10, size=N).astype(np.int64)
         values = [0, 3, 4, 6, 8]
