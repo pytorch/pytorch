@@ -6,7 +6,9 @@ import numpy as np
 import unittest
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace, data_parallel_model, cnn, rnn_cell
+from caffe2.python import optimizer
 from caffe2.python.test_util import TestCase
+
 
 @unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
 @unittest.skipIf(workspace.NumCudaDevices() < 2, "Need at least 2 GPUs.")
@@ -29,20 +31,8 @@ class GPUDataParallelModelTest(TestCase):
             loss = model.Scale(loss, scale=loss_scale)
             return [loss]
 
-        def param_update_fun(model):
-            ITER = model.Iter("ITER")
-            LR = model.net.LearningRate(
-                [ITER],
-                "LR",
-                base_lr=(-0.1),
-                policy="fixed",
-            )
-            ONE = model.param_init_net.ConstantFill(
-                [], "ONE", shape=[1], value=1.0,
-            )
-            for param in model.GetParams():
-                grad = model.param_to_grad[param]
-                model.WeightedSum([param, ONE, grad, LR], param)
+        def add_optimizer(model):
+            optimizer.build_sgd(model, 0.1, policy="fixed")
 
         workspace.ResetWorkspace()
         model = cnn.CNNModelHelper(
@@ -53,7 +43,7 @@ class GPUDataParallelModelTest(TestCase):
             model,
             input_builder_fun=input_builder_fun,
             forward_pass_builder_fun=model_build_fun,
-            param_update_builder_fun=param_update_fun,
+            optimizer_builder_fun=add_optimizer,
             devices=gpu_devices,
         )
 
@@ -127,20 +117,8 @@ class GPUDataParallelModelTest(TestCase):
             )
             return [loss]
 
-        def add_parameter_update_ops(model):
-            model.Iter("ITER")
-            LR = model.param_init_net.ConstantFill(
-                [], 'LR', shape=[1], value=0.1
-            )
-            for param in model.GetParams():
-                param_grad = model.param_to_grad[param]
-                param_momentum = model.param_init_net.ConstantFill(
-                    [param], param + '_momentum', value=0.0
-                )
-                model.net.MomentumSGDUpdate(
-                    [param_grad, param_momentum, LR, param],
-                    [param_grad, param_momentum, param],
-                )
+        def add_optimizer(model):
+            optimizer.build_sgd(model, 0.1, policy="fixed", momentum=0.9)
 
         model = cnn.CNNModelHelper(
             order="NHWC",
@@ -150,7 +128,7 @@ class GPUDataParallelModelTest(TestCase):
             model,
             input_builder_fun=add_input_ops,
             forward_pass_builder_fun=add_model_ops,
-            param_update_builder_fun=add_parameter_update_ops,
+            optimizer_builder_fun=add_optimizer,
             devices=[1, 2, 3],
         )
 
@@ -161,13 +139,14 @@ class GPUDataParallelModelTest(TestCase):
             self.assertTrue(p + "_momentum" in checkpoint_params)
         for p in model.GetParams("gpu_2/"):
             self.assertFalse(p in checkpoint_params)
+        self.assertTrue(
+            core.BlobReference("gpu_1/fc_w_momentum") in checkpoint_params)
         for c in model.GetComputedParams("gpu_1/"):
             self.assertTrue(c in checkpoint_params)
         for c in model.GetComputedParams("gpu_2/"):
             self.assertFalse(c in checkpoint_params)
         self.assertFalse(core.BlobReference("gpu_1/data") in checkpoint_params)
-        self.assertTrue(core.BlobReference("gpu_1/ITER") in checkpoint_params)
-
+        self.assertTrue(core.BlobReference("optimizer_iteration") in checkpoint_params)
 
 
 @unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")

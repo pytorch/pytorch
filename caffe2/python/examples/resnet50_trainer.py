@@ -11,7 +11,8 @@ import numpy as np
 import time
 import os
 
-from caffe2.python import core, workspace, experiment_util, data_parallel_model, dyndep
+from caffe2.python import core, workspace, experiment_util, data_parallel_model
+from caffe2.python import dyndep, optimizer
 from caffe2.python import timeout_guard, model_helper, brew
 
 import caffe2.python.models.resnet as resnet
@@ -62,28 +63,6 @@ def AddImageInput(model, reader, batch_size, img_size):
     )
 
     data = model.StopGradient(data, data)
-
-
-def AddMomentumParameterUpdate(train_model, LR):
-    '''
-    Add the momentum-SGD update.
-    '''
-    params = train_model.GetParams()
-    assert (len(params) > 0)
-
-    for param in params:
-        param_grad = train_model.param_to_grad[param]
-        param_momentum = train_model.param_init_net.ConstantFill(
-            [param], param + '_momentum', value=0.0
-        )
-
-        # Update param_grad and param_momentum in place
-        train_model.net.MomentumSGDUpdate(
-            [param_grad, param_momentum, LR, param],
-            [param_grad, param_momentum, param],
-            momentum=0.9,
-            nesterov=1,
-        )
 
 
 def SaveModel(args, train_model, epoch):
@@ -286,20 +265,17 @@ def Train(args):
         brew.accuracy(model, [softmax, "label"], "accuracy")
         return [loss]
 
-    # SGD
-    def add_parameter_update_ops(model):
-        brew.add_weight_decay(model, args.weight_decay)
-        ITER = brew.iter(model, "ITER")
+    def add_optimizer(model):
         stepsz = int(30 * args.epoch_size / total_batch_size / num_shards)
-        LR = model.net.LearningRate(
-            [ITER],
-            "LR",
-            base_lr=args.base_learning_rate,
+        optimizer.build_sgd(
+            model,
+            args.base_learning_rate,
+            momentum=0.9,
+            nesterov=1,
             policy="step",
             stepsize=stepsz,
-            gamma=0.1,
+            gamma=0.1
         )
-        AddMomentumParameterUpdate(model, LR)
 
     # Input. Note that the reader must be shared with all GPUS.
     reader = train_model.CreateDB(
@@ -323,7 +299,7 @@ def Train(args):
         train_model,
         input_builder_fun=add_image_input,
         forward_pass_builder_fun=create_resnet50_model_ops,
-        param_update_builder_fun=add_parameter_update_ops,
+        optimizer_builder_fun=add_optimizer,
         devices=gpus,
         rendezvous=rendezvous,
         optimize_gradient_memory=True,

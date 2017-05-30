@@ -114,22 +114,27 @@ class Optimizer(object):
 
 class SgdOptimizer(Optimizer):
     def __init__(self, base_learning_rate=0.01, policy='fixed',
-                 momentum=0.0, **kwargs):
+                 momentum=0.0, nesterov=1, **kwargs):
         super(SgdOptimizer, self).__init__()
         self.base_learning_rate = base_learning_rate
         self.policy = policy
         self.momentum = momentum
+        self.nesterov = nesterov
         self.init_kwargs = kwargs
 
     def _run(self, net, param_init_net, param_info):
         param = param_info.blob
         grad = param_info.grad
-        if self.base_learning_rate <= 0:
+        if self.base_learning_rate == 0:
             return
+        assert self.base_learning_rate > 0
 
+        # We need negative sign for LR when used directly with WeightedSum
+        # below.
+        lr_sign = -1 if self.momentum else 1
         lr, _ = self.build_lr(
             net, param_init_net,
-            base_learning_rate=self.base_learning_rate,
+            base_learning_rate=self.base_learning_rate * lr_sign,
             learning_rate_blob=str(param) + "_lr",
             policy=self.policy,
             **(self.init_kwargs)
@@ -139,12 +144,15 @@ class SgdOptimizer(Optimizer):
         if dev is None:
             dev = core.DeviceOption(caffe2_pb2.CPU)
 
+        # Each GPU/CPU must have its own ONE blob, thus modify the name
+        # to include device information.
         ONE = param_init_net.ConstantFill(
             [],
             "ONE_{}_{}".format(dev.device_type, dev.cuda_gpu_id),
             shape=[1],
             value=1.0
         )
+
         self._aux_params.shared.append(ONE)
 
         if self.momentum > 0:
@@ -160,18 +168,18 @@ class SgdOptimizer(Optimizer):
             )
         else:
             if self.momentum > 0.:
-                net.MomentumSGD(
-                    [grad, momentum_data, lr], [grad, momentum_data],
+                net.MomentumSGDUpdate(
+                    [grad, momentum_data, lr, param],
+                    [grad, momentum_data, param],
                     momentum=self.momentum,
-                    nesterov=1)
-                coeff = ONE
+                    nesterov=self.nesterov)
             else:
                 coeff = lr
 
-            net.WeightedSum(
-                [param, ONE, grad, coeff],
-                param
-            )
+                net.WeightedSum(
+                    [param, ONE, grad, coeff],
+                    param
+                )
 
     def scale_learning_rate(self, scale):
         self.base_learning_rate *= scale

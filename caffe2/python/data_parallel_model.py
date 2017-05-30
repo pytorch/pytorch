@@ -23,7 +23,8 @@ def Parallelize_GPU(
     model_helper_obj,
     input_builder_fun,
     forward_pass_builder_fun,
-    param_update_builder_fun,
+    param_update_builder_fun=None,
+    optimizer_builder_fun=None,
     devices=range(0, workspace.NumCudaDevices()),
     rendezvous=None,
     net_type='dag',
@@ -50,8 +51,13 @@ def Parallelize_GPU(
       param_update_builder_fun:
                         Function that adds operators that are run after
                         gradient update, such as updating the weights and
-                        weight decaying.
+                        weight decaying. This is called for each GPU separately.
                         Signature: param_update_builder_fun(model)
+      optimizer_builder_fun:
+                        Alternative to param_update_builder_fun, allows one
+                        to add an optimizer for the whole model. Called only
+                        once, without name or devicescope.
+
       devices:          List of GPU ids, such as [0, 1, 2, 3],
       rendezvous:       used for rendezvous in distributed computation, if None
                         then only one node is used. To create rendezvous,
@@ -87,6 +93,13 @@ def Parallelize_GPU(
     num_shards = 1 if rendezvous is None else rendezvous['num_shards']
     loss_scale = 1.0 / (len(devices) * num_shards)
 
+    has_parameter_updates = param_update_builder_fun is not None or \
+        optimizer_builder_fun is not None
+    assert not (
+        param_update_builder_fun is not None and
+        optimizer_builder_fun is not None
+    ), 'Can only specify one of param_update_builder_fun, optimizer_builder_fun'
+
     for device in devices:
         device_opt = core.DeviceOption(caffe2_pb2.CUDA, device)
         with core.DeviceScope(device_opt):
@@ -95,7 +108,7 @@ def Parallelize_GPU(
                 input_builder_fun(model_helper_obj)
                 losses = forward_pass_builder_fun(model_helper_obj, loss_scale)
                 # Losses are not needed for test net
-                if param_update_builder_fun is not None:
+                if has_parameter_updates:
                     assert isinstance(losses, list), \
                         'Model builder function must return list of loss blobs'
                     for loss in losses:
@@ -118,7 +131,7 @@ def Parallelize_GPU(
         model_helper_obj._device_grouped_blobs.keys()
     model_helper_obj._computed_param_names = computed_params_grouped.keys()
 
-    if (param_update_builder_fun is None):
+    if not has_parameter_updates:
         log.info("Parameter update function not defined --> only forward")
         _InferBlobDevice(model_helper_obj)
         return
@@ -166,11 +179,16 @@ def Parallelize_GPU(
     if rendezvous is not None:
         assert num_shards > 1, \
             "Please use more than one shard for distributed training"
-    for device in devices:
-        device_opt = core.DeviceOption(caffe2_pb2.CUDA, device)
-        with core.DeviceScope(device_opt):
-            with core.NameScope("gpu_{}".format(device)):
-                param_update_builder_fun(model_helper_obj)
+
+    if param_update_builder_fun is not None:
+        for device in devices:
+            device_opt = core.DeviceOption(caffe2_pb2.CUDA, device)
+            with core.DeviceScope(device_opt):
+                with core.NameScope("gpu_{}".format(device)):
+                    param_update_builder_fun(model_helper_obj)
+    else:
+        log.info("Calling optimizer builder function")
+        optimizer_builder_fun(model_helper_obj)
 
     (sync_blobs, sync_names) = _ComputeBlobsToSync(model_helper_obj)
     sync_blobs_grouped = _GroupByDevice(
@@ -443,9 +461,19 @@ def GetCheckpointParams(model):
     They are blobs for the first gpu and iteration blobs.
     '''
     (all_blobs, _) = _ComputeBlobsToSync(model)
-    return {
+    first_gpu_blobs = {
         b for b in all_blobs
         if str(b).startswith("gpu_{}/".format(model._devices[0]))}
+
+    # Add iteration blobs that do not have namescope separately, since
+    # it is important to checkpoint iteration counter
+    iteration_blobs = set()
+    for op in model.net.Proto().op:
+        if op.type == 'Iter' or op.type == 'AtomicIter':
+            if not op.output[0].startswith("gpu_"):
+                iteration_blobs.add(op.output[0])
+
+    return first_gpu_blobs.union(iteration_blobs)
 
 
 def FinalizeAfterCheckpoint(model, blobs=None):
@@ -555,7 +583,7 @@ def _AllReduce(devices, model, net, param, use_nccl=False, control_input=None):
             sumN(j * 2, j * 2 + 1)
         for j in range(2):
             sumN(j * 4, j * 4 + 2)
-        sum2(0, 4)
+        sumN(0, 4)
     elif len(devices) == 4:
         sumN(0, 1)
         sumN(2, 3)
