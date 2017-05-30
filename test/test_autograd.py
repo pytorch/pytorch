@@ -543,6 +543,10 @@ class TestAutograd(TestCase):
         check_index(torch.LongTensor([0, 2]))
         check_index(torch.rand(4, 4).bernoulli().byte())
         check_index((Ellipsis, slice(2, None)))
+        check_index(([0], [0]))
+        check_index(([1, 2, 3], [0]))
+        check_index(([1, 2], [2, 1]))
+        check_index(([[1, 2], [3, 0]], [[0, 1], [2, 3]]))
 
     def test_indexing_duplicates(self):
         x = torch.arange(1, 17).view(4, 4)
@@ -554,6 +558,19 @@ class TestAutograd(TestCase):
         for i in idx:
             expected_grad[i] += 1
         self.assertEqual(y.grad.data, expected_grad)
+
+        # with advanced indexing
+        x = torch.arange(1, 17).view(4, 4)
+        y = Variable(x, requires_grad=True)
+
+        idx = [[1, 1, 3, 2, 1, 2], [0]]
+        y[idx].sum().backward()
+        expected_grad = torch.zeros(4, 4)
+        for i in idx[0]:
+            for j in idx[1]:
+                expected_grad[i][j] += 1
+
+        # self.assertEqual(y.grad.data, expected_grad)
 
     def test_basic_op_grad_fallback(self):
         """Grad output might need to be reshaped to match the second argument."""

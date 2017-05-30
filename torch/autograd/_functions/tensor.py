@@ -14,7 +14,8 @@ class Index(Function):
         ctx.input_size = i.size()
         ctx.index = index
         result = i.index(ctx.index)
-        ctx.mark_shared_storage((i, result))
+        if not i._check_advanced_indexing(index):
+            ctx.mark_shared_storage((i, result))
         return result
 
     @staticmethod
