@@ -713,6 +713,32 @@ def cosine_similarity(x1, x2, dim=1, eps=1e-8):
     return (w12 / (w1 * w2).clamp(min=eps)).squeeze()
 
 
+def euclidean_distance(x1, x2, dim=1, eps=1e-8):
+    r"""Computes the euclidean distance between x1, x2, computed along dim.
+
+    .. math ::
+        \text{distance}(x_1, x_2) = \sqrt{(x_{1,1} - x_{2,1})^2 + (x_{1,2} - x_{2,2})^2 + ... + (x_{1,N} - x_{2,N})^2}
+
+    Args:
+        x1 (Variable): first input tensor
+        x2 (Variable): second input tensor
+        dim (int, optional): Dimension of vectors. Default: 1
+        eps (float, optional): Small value to avoid sqrt of zero. Default: 1e-8
+
+    Shape:
+        - Input: :math:`(\ast_1, D, \ast_2)` where D is at position `dim`.
+        - Output: :math:`(\ast_1, \ast_2)` where 1 is at position `dim`.
+
+    >>> input1 = autograd.Variable(torch.randn(100, 128))
+    >>> input2 = autograd.Variable(torch.randn(100, 128))
+    >>> output = F.euclidean_distance(input1, input2)
+    >>> output.backward()
+    """
+    assert x1.size() == x2.size(), "Input sizes must be equal."
+    diff = x1 - x2
+    return torch.norm(diff, p=2, dim=dim).squeeze()
+
+
 def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, swap=False):
     r"""Creates a criterion that measures the triplet loss given an input tensors x1, x2, x3
     and a margin with a value greater than 0.
