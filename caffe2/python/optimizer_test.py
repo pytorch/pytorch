@@ -10,6 +10,7 @@ import numpy as np
 
 class TestSgd(OptimizerTestBase, TestCase):
     def build_optimizer(self, model):
+        self._skip_gpu = False
         return build_sgd(model, base_learning_rate=0.1)
 
     def check_optimizer(self, optimizer):
@@ -22,6 +23,7 @@ class TestSgd(OptimizerTestBase, TestCase):
 
 class TestFtrl(OptimizerTestBase, TestCase):
     def build_optimizer(self, model):
+        self._skip_gpu = True
         return build_ftrl(
             model, engine=None, alpha=1.0, beta=0.1, lambda1=0.0, lambda2=0.0)
 
@@ -34,6 +36,7 @@ class TestFtrl(OptimizerTestBase, TestCase):
 
 class TestAdagrad(OptimizerTestBase, TestCase):
     def build_optimizer(self, model):
+        self._skip_gpu = False
         return build_adagrad(model, base_learning_rate=1.0)
 
     def check_optimizer(self, optimizer):
@@ -45,6 +48,7 @@ class TestAdagrad(OptimizerTestBase, TestCase):
 
 class TestAdam(OptimizerTestBase, TestCase):
     def build_optimizer(self, model):
+        self._skip_gpu = False
         return build_adam(model, base_learning_rate=0.1)
 
     def check_optimizer(self, optimizer):
