@@ -6,7 +6,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from collections import namedtuple
-from caffe2.python import core
+from caffe2.python import core, scope
 from caffe2.python.modeling import parameter_info
 from caffe2.proto import caffe2_pb2
 
@@ -135,7 +135,16 @@ class SgdOptimizer(Optimizer):
             **(self.init_kwargs)
         )
 
-        ONE = param_init_net.ConstantFill([], "ONE", shape=[1], value=1.0)
+        dev = scope.CurrentDeviceScope()
+        if dev is None:
+            dev = core.DeviceOption(caffe2_pb2.CPU)
+
+        ONE = param_init_net.ConstantFill(
+            [],
+            "ONE_{}_{}".format(dev.device_type, dev.cuda_gpu_id),
+            shape=[1],
+            value=1.0
+        )
         self._aux_params.shared.append(ONE)
 
         if self.momentum > 0:
@@ -339,11 +348,36 @@ class AdamOptimizer(Optimizer):
         self.alpha *= scale
         return
 
+
+def _build(model, optimizer):
+    # Infer blob devices by going through the net and param_init_net
+    # ops and observing the device used to create or use the blob.
+    param_to_device = core.InferBlobDevices(model.net)
+    param_to_device.update(core.InferBlobDevices(model.param_init_net))
+
+    for param_info in model.GetOptimizationParamInfo():
+        param_name = str(param_info.blob)
+        param_grad = str(param_info.grad)
+
+        # We first check if parameter's device has been inferred. If not,
+        # we check the gradient. This can happen if parameter is not output
+        # by any blob but created by a FetchBlob.
+        if param_name in param_to_device:
+            device = param_to_device[param_name]
+        elif param_grad in param_to_device:
+            device = param_to_device[param_grad]
+        else:
+            assert param_grad in param_to_device,\
+                "Cannot infer device for {}: no op creates it".format(param_name)
+
+        with core.DeviceScope(device):
+            optimizer(model.net, model.param_init_net, param_info)
+    return optimizer
+
+
 def build_sgd(model, base_learning_rate, **kwargs):
     sgd_optimizer = SgdOptimizer(base_learning_rate, **kwargs)
-    for param_info in model.GetOptimizationParamInfo():
-        sgd_optimizer(model.net, model.param_init_net, param_info)
-    return sgd_optimizer
+    return _build(model, sgd_optimizer)
 
 
 def build_ftrl(model, engine="SIMD", **kwargs):
@@ -351,20 +385,14 @@ def build_ftrl(model, engine="SIMD", **kwargs):
         assert core.IsOperator('Ftrl_ENGINE_SIMD')
         assert core.IsOperator('SparseFtrl_ENGINE_SIMD')
     ftrl_optimizer = FtrlOptimizer(engine=engine, **kwargs)
-    for param_info in model.GetOptimizationParamInfo():
-        ftrl_optimizer(model.net, model.param_init_net, param_info)
-    return ftrl_optimizer
+    return _build(model, ftrl_optimizer)
 
 
 def build_adagrad(model, base_learning_rate, parameters=None, **kwargs):
     adagrad_optimizer = AdagradOptimizer(alpha=base_learning_rate, **kwargs)
-    for param_info in model.GetOptimizationParamInfo(parameters):
-        adagrad_optimizer(model.net, model.param_init_net, param_info)
-    return adagrad_optimizer
+    return _build(model, adagrad_optimizer)
 
 
 def build_adam(model, base_learning_rate, **kwargs):
     adam_optimizer = AdamOptimizer(alpha=base_learning_rate, **kwargs)
-    for param_info in model.GetOptimizationParamInfo():
-        adam_optimizer(model.net, model.param_init_net, param_info)
-    return adam_optimizer
+    return _build(model, adam_optimizer)
