@@ -21,21 +21,23 @@ class GRUFused(Function):
             self.backend.library_state,
             input_gate, hidden_gate, ibias, hbias, hx, hy, storage)
         self.buffer = storage
-        self.save_for_backward(input_gate, hidden_gate, ibias)
+        self.igate_size = input_gate.size()
+        self.hgate_size = hidden_gate.size()
+        self.save_for_backward(ibias,)
         return hy
 
     def backward(self, gradOutput):
         if self.backend is None:
             self.backend = type2backend[type(grad_output)]
         gradInput = gradOutput.new()
-        input_gate, hidden_gate, bias = self.saved_tensors
+        ibias, = self.saved_tensors
         storage = self.buffer
-        igc = input_gate.new().resize_as_(input_gate)
-        hgc = hidden_gate.new().resize_as_(hidden_gate)
+        igc = gradInput.new().resize_(*self.igate_size)
+        hgc = gradInput.new().resize_(*self.hgate_size)
         self.backend.GRUFused_updateGradInput(
             self.backend.library_state,
             igc, hgc, gradOutput, gradInput, storage)
-        if bias is not None:
+        if ibias is not None:
             gb1 = igc.sum(0).squeeze()
             gb2 = hgc.sum(0).squeeze()
             return igc, hgc, gradInput, gb1, gb2
@@ -62,7 +64,8 @@ class LSTMFused(Function):
             input_gate, hidden_gate,
             ibias, hbias,
             cx, hy, cy)
-        self.save_for_backward(input_gate, hidden_gate, cx, cy, ibias)
+        self.hgate_size = hidden_gate.size()
+        self.save_for_backward(input_gate, cx, cy, ibias)
         return hy, cy
 
     def backward(self, *gradOutput):
@@ -71,8 +74,8 @@ class LSTMFused(Function):
 
         gradInput = gradOutput[0].new()
         gradInputCell = gradOutput[0].new()
-        saved_tens, hidden_gate, cx, cy, bias = self.saved_tensors
-        gate_gradin = hidden_gate.new().resize_as_(hidden_gate)
+        saved_tens,  cx, cy, bias = self.saved_tensors
+        gate_gradin = gradInput.new().resize_(*self.hgate_size)
         self.backend.LSTMFused_updateGradInput(
             self.backend.library_state,
             saved_tens, gate_gradin, cx, cy,
