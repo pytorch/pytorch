@@ -732,6 +732,7 @@ static bool THPTensor_(_advancedIndexSet)(PyObject *index, THTensorPtr &dest, Py
                                                  THTensor_(nElement)(LIBRARY_STATE indexed),
                                                  1);
 
+  bool success = true;
   if (THPUtils_(checkReal)(src)) {
     real v = THPUtils_(unpackReal)(src);
     THTensor_(indexFill)(LIBRARY_STATE viewed, 0, linearIndices, v);
@@ -761,8 +762,7 @@ static bool THPTensor_(_advancedIndexSet)(PyObject *index, THTensorPtr &dest, Py
     THPUtils_setError("can't assign %s to a " THPTensorStr " using a LongTensor "
         "(only " THPTensorStr " or %s are supported)",
         THPUtils_typename(src), THPUtils_typeTraits<real>::python_type_str);
-    // TODO: fix mem leak here
-    return false;
+    success = false;
   }
 
   // Cleanup all TH memory
@@ -773,7 +773,7 @@ static bool THPTensor_(_advancedIndexSet)(PyObject *index, THTensorPtr &dest, Py
   THIndexTensor_(free)(LIBRARY_STATE linearIndices);
   THTensor_(free)(LIBRARY_STATE viewed);
 
-  return true;
+  return success;
 }
 #endif // TH_REAL_IS_HALF
 
