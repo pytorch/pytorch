@@ -11,14 +11,14 @@ from caffe2.python.modeling import initializers
 
 def _FC_or_packed_FC(
     model, op_call, blob_in, blob_out, dim_in, dim_out, weight_init=None,
-        bias_init=None, weight_initializer=None, bias_initializer=None,
+        bias_init=None, WeightInitializer=None, BiasInitializer=None,
         **kwargs
 ):
-    weight_initializer = initializers.update_initializer(
-        weight_initializer, weight_init, ("XavierFill", {})
+    WeightInitializer = initializers.update_initializer(
+        WeightInitializer, weight_init, ("XavierFill", {})
     )
-    bias_initializer = initializers.update_initializer(
-        bias_initializer, bias_init, ("ConstantFill", {})
+    BiasInitializer = initializers.update_initializer(
+        BiasInitializer, bias_init, ("ConstantFill", {})
     )
 
     blob_out = blob_out or model.net.NextName()
@@ -26,12 +26,12 @@ def _FC_or_packed_FC(
         weight = model.create_param(
             param_name=blob_out + '_w',
             shape=[dim_out, dim_in],
-            initializer=weight_initializer,
+            initializer=WeightInitializer,
         )
         bias = model.create_param(
             param_name=blob_out + '_b',
             shape=[dim_out, ],
-            initializer=bias_initializer,
+            initializer=BiasInitializer,
         )
     else:
         weight = core.ScopedBlobReference(
