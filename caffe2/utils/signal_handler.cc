@@ -17,6 +17,7 @@
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
+#include <mutex>
 #include <unordered_set>
 
 #include "caffe2/core/init.h"
@@ -88,6 +89,10 @@ void unhookHandler() {
   }
 }
 
+#if defined(CAFFE2_SUPPORTS_FATAL_SIGNAL_HANDLERS)
+// The mutex protects the bool.
+std::mutex fatalSignalHandlersInstallationMutex;
+bool fatalSignalHandlersInstalled;
 // We need to hold a reference to call the previous SIGUSR2 handler in case
 // we didn't signal it
 struct sigaction previousSigusr2;
@@ -117,7 +122,6 @@ struct {
   { "SIGSEGV",  SIGSEGV,  {} },
   { nullptr,    0,        {} }
 };
-
 
 struct sigaction* getPreviousSigaction(int signum) {
   for (auto handler = kSignalHandlers; handler->name != nullptr; handler++) {
@@ -278,7 +282,69 @@ void stacktraceSignalHandler(int signum, siginfo_t* info, void* ctx) {
   }
 }
 
+// Installs SIGABRT signal handler so that we get stack traces
+// from every thread on SIGABRT caused exit. Also installs SIGUSR2 handler
+// so that threads can communicate with each other (be sure if you use SIGUSR2)
+// to install your handler before initing caffe2 (we properly fall back to
+// the previous handler if we didn't initiate the SIGUSR2).
+void installFatalSignalHandlers() {
+  std::lock_guard<std::mutex> locker(fatalSignalHandlersInstallationMutex);
+  if (fatalSignalHandlersInstalled) {
+    return;
+  }
+  fatalSignalHandlersInstalled = true;
+  struct sigaction sa;
+  sigemptyset(&sa.sa_mask);
+  // Since we'll be in an exiting situation it's possible there's memory
+  // corruption, so make our own stack just in case.
+  sa.sa_flags = SA_ONSTACK | SA_SIGINFO;
+  sa.sa_handler = ::fatalSignalHandler;
+  for (auto* handler = kSignalHandlers; handler->name != nullptr; handler++) {
+    if (sigaction(handler->signum, &sa, &handler->previous)) {
+      std::string str("Failed to add ");
+      str += handler->name;
+      str += " handler!";
+      perror(str.c_str());
+    }
+  }
+  sa.sa_sigaction = ::stacktraceSignalHandler;
+  if (sigaction(SIGUSR2, &sa, &::previousSigusr2)) {
+    perror("Failed to add SIGUSR2 handler!");
+  }
+}
+
+void uninstallFatalSignalHandlers() {
+  std::lock_guard<std::mutex> locker(fatalSignalHandlersInstallationMutex);
+  if (!fatalSignalHandlersInstalled) {
+    return;
+  }
+  fatalSignalHandlersInstalled = false;
+  for (auto* handler = kSignalHandlers; handler->name != nullptr; handler++) {
+    if (sigaction(handler->signum, &handler->previous, nullptr)) {
+      std::string str("Failed to remove ");
+      str += handler->name;
+      str += " handler!";
+      perror(str.c_str());
+    } else {
+      handler->previous = {};
+    }
+  }
+  if (sigaction(SIGUSR2, &::previousSigusr2, nullptr)) {
+    perror("Failed to add SIGUSR2 handler!");
+  } else {
+    ::previousSigusr2 = {};
+  }
+}
+#endif // defined(CAFFE2_SUPPORTS_FATAL_SIGNAL_HANDLERS)
+
 } // namespace
+
+#if defined(CAFFE2_SUPPORTS_FATAL_SIGNAL_HANDLERS)
+CAFFE2_DEFINE_bool(
+    caffe2_print_stacktraces,
+    false,
+    "If set, prints stacktraces when a fatal signal is raised.");
+#endif
 
 namespace caffe2 {
 
@@ -314,7 +380,6 @@ bool SignalHandler::GotSIGHUP() {
   return result;
 }
 
-
 SignalHandler::Action SignalHandler::CheckForSignals() {
   if (GotSIGHUP()) {
     return SIGHUP_action_;
@@ -325,45 +390,36 @@ SignalHandler::Action SignalHandler::CheckForSignals() {
   return SignalHandler::Action::NONE;
 }
 
-namespace internal {
-
-// Installs SIGABRT signal handler so that we get stack traces
-// from every thread on SIGABRT caused exit. Also installs SIGUSR2 handler
-// so that threads can communicate with each other (be sure if you use SIGUSR2)
-// to install your handler before initing caffe2 (we properly fall back to
-// the previous handler if we didn't initiate the SIGUSR2).
-bool Caffe2InitFatalSignalHandler(int*, char***) {
-  struct sigaction sa;
-  sigemptyset(&sa.sa_mask);
-  // Since we'll be in an exiting situation it's possible there's memory
-  // corruption, so make our own stack just in case.
-  sa.sa_flags = SA_ONSTACK | SA_SIGINFO;
-  sa.sa_handler = ::fatalSignalHandler;
-  for (auto* handler = kSignalHandlers; handler->name != nullptr; handler++) {
-    if (sigaction(handler->signum, &sa, &handler->previous)) {
-      std::string str("Failed to add ");
-      str += handler->name;
-      str += " handler!";
-      perror(str.c_str());
-      return false;
-    }
+#if defined(CAFFE2_SUPPORTS_FATAL_SIGNAL_HANDLERS)
+void setPrintStackTracesOnFatalSignal(bool print) {
+  if (print) {
+    installFatalSignalHandlers();
+  } else {
+    uninstallFatalSignalHandlers();
   }
-  sa.sa_sigaction = ::stacktraceSignalHandler;
-  if (sigaction(SIGUSR2, &sa, &::previousSigusr2)) {
-    perror("Failed to add SIGUSR2 handler");
-    return false;
+}
+bool printStackTracesOnFatalSignal() {
+  std::lock_guard<std::mutex> locker(fatalSignalHandlersInstallationMutex);
+  return fatalSignalHandlersInstalled;
+}
+
+namespace internal {
+bool Caffe2InitFatalSignalHandler(int*, char***) {
+  if (caffe2::FLAGS_caffe2_print_stacktraces) {
+    setPrintStackTracesOnFatalSignal(true);
   }
   return true;
 }
 
-REGISTER_CAFFE2_EARLY_INIT_FUNCTION(
+REGISTER_CAFFE2_INIT_FUNCTION(
     Caffe2InitFatalSignalHandler,
     &Caffe2InitFatalSignalHandler,
-    "Inits signal handlers for fatal signals so we can see what"
-    " went wrong");
+    "Inits signal handlers for fatal signals so we can see what if"
+    " caffe2_print_stacktraces is set.");
 
 } // namepsace internal
-}  // namespace caffe2
+#endif // defined(CAFFE2_SUPPORTS_FATAL_SIGNAL_HANDLERS)
+} // namespace caffe2
 
 #else // defined(CAFFE2_SUPPORTS_SIGNAL_HANDLER)
 
