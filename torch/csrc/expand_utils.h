@@ -59,7 +59,7 @@ int expand_inplace1(LIBRARY_STATE_TYPE ExpandType *r, ExpandType *to_expand, Ten
   ptrdiff_t to_expand_nElem = THSize_nElement(to_expand->nDimension, to_expand->size);
   ptrdiff_t tensor_nElem = THSize_nElement(tensor->nDimension, tensor->size);
   bool to_expand_raise = !fallback || (to_expand_nElem != tensor_nElem);
-  THLongStoragePtr tensor_size = THLongStorage_newWithSize(tensor->nDimension);
+  THLongStoragePtr tensor_size(THLongStorage_newWithSize(tensor->nDimension));
   THLongStorage_rawCopy(tensor_size.get(), tensor->size);
 
   int ret = expand_inplace(LIBRARY_STATE r, to_expand, tensor, to_expand_name, tensor_name, fallback,
@@ -80,7 +80,7 @@ int expand_inplace2(LIBRARY_STATE_TYPE TensorType *r1, TensorType *r2,
   ptrdiff_t to_expand2_nElem = THSize_nElement(to_expand2->nDimension, to_expand2->size);
   bool to_expand1_raise = !fallback || (tensor_nElem != to_expand1_nElem);
   bool to_expand2_raise = !fallback || (tensor_nElem != to_expand2_nElem);
-  THLongStoragePtr tensor_size = THLongStorage_newWithSize(tensor->nDimension);
+  THLongStoragePtr tensor_size(THLongStorage_newWithSize(tensor->nDimension));
   THLongStorage_rawCopy(tensor_size.get(), tensor->size);
 
   int ret = expand_inplace(LIBRARY_STATE r1, to_expand1, tensor, to_expand1_name, tensor_name, fallback,
