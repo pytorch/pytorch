@@ -11,10 +11,12 @@ environment:
     #- USE_CUDA: ON
     #  CMAKE_BUILD_TYPE: Release
     #  APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2017
-
-    - USE_CUDA: ON
-      CMAKE_BUILD_TYPE: Release
-      APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2015
+    
+    # Building CUDA currently causes a timeout in appveyor. In the interest
+    # of properly monitoring the rest, we will disable cuda contbuild for now.
+    #- USE_CUDA: ON
+    #  CMAKE_BUILD_TYPE: Release
+    #  APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2015
 
     - USE_CUDA: OFF
       CMAKE_BUILD_TYPE: Release
