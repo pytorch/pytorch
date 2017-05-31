@@ -1,4 +1,5 @@
-#if defined(__linux__)
+#include "caffe2/utils/signal_handler.h"
+#if defined(CAFFE2_SUPPORTS_FATAL_SIGNAL_HANDLERS)
 #include <gtest/gtest.h>
 #include <pthread.h>
 #include <unistd.h>
@@ -7,7 +8,6 @@
 #include <iostream>
 
 #include "caffe2/core/common.h"
-#include "caffe2/utils/signal_handler.h"
 
 namespace {
 void* dummy_thread(void*) {
@@ -37,13 +37,6 @@ bool forkAndPipe(
     close(stderrPipe[0]);
     close(stderrPipe[1]);
 
-    // Install our handlers because gtest installs their own it seems.
-    int argc = 0;
-    char** argv = nullptr;
-    if (!caffe2::internal::Caffe2InitFatalSignalHandler(&argc, &argv)) {
-      write(STDERR_FILENO, "WAT\n", 4);
-      exit(6);
-    }
     callback();
     exit(7);
   } else if (child > 0) {
@@ -90,11 +83,13 @@ bool forkAndPipe(
     return false;
   }
 }
+} // namespace
 
-#define TEST_FATAL_SIGNAL(signum, name, threadCount)                         \
+#define _TEST_FATAL_SIGNAL(signum, name, threadCount, print, expected)       \
   do {                                                                       \
     std::string stderrBuffer;                                                \
     ASSERT_TRUE(forkAndPipe(stderrBuffer, [=]() {                            \
+      caffe2::setPrintStackTracesOnFatalSignal(print);                       \
       pthread_t pt;                                                          \
       for (int i = 0; i < threadCount; i++) {                                \
         if (pthread_create(&pt, nullptr, ::dummy_thread, nullptr)) {         \
@@ -111,9 +106,14 @@ bool forkAndPipe(
       keyPhraseCount += 1;                                                   \
       loc += 1;                                                              \
     }                                                                        \
-    EXPECT_EQ(keyPhraseCount, threadCount + 1);                              \
+    EXPECT_EQ(keyPhraseCount, expected);                                     \
   } while (0)
-}
+
+#define TEST_FATAL_SIGNAL(signum, name, threadCount) \
+  _TEST_FATAL_SIGNAL(signum, name, threadCount, true, threadCount + 1)
+
+#define TEST_FATAL_SIGNAL_NO_PRINT(signum, name, threadCount) \
+  _TEST_FATAL_SIGNAL(signum, name, threadCount, false, 0)
 
 TEST(fatalSignalTest, SIGABRT8) {
   TEST_FATAL_SIGNAL(SIGABRT, "SIGABRT", 8);
@@ -138,4 +138,9 @@ TEST(fatalSignalTest, SIGBUS8) {
 TEST(fatalSignalTest, SIGSEGV8) {
   TEST_FATAL_SIGNAL(SIGSEGV, "SIGSEGV", 8);
 }
-#endif // defined(__linux__)
+
+// Test that if we don't enable printing stack traces then we don't get any.
+TEST(fatalSignalTest, SIGABRT8_NOPRINT) {
+  TEST_FATAL_SIGNAL_NO_PRINT(SIGABRT, "SIGABRT", 8);
+}
+#endif // defined(CAFFE2_SUPPORTS_FATAL_SIGNAL_HANDLERS)
