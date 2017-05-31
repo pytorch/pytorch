@@ -242,7 +242,8 @@ def Parallelize_GPU_BMUF(
     devices=range(0, workspace.NumCudaDevices()),
     net_type='dag',
     master_gpu=None,
-    optimize_gradient_memory=False
+    optimize_gradient_memory=False,
+    reset_momentum_sgd=False
 ):
     '''
     Function to create model that run on many GPUs and creates a net for
@@ -371,6 +372,17 @@ def Parallelize_GPU_BMUF(
                 param_name
             )
 
+    # Reset momentum-SGD parameters
+    if reset_momentum_sgd:
+        momentum_ops = [op for op in model_helper_obj.net.Proto().op
+                        if op.type == 'MomentumSGDUpdate']
+        for op in momentum_ops:
+            momentum_blob = op.input[1]
+            with core.DeviceScope(op.device_option):
+                model_helper_obj._global_model_param_updates_net.ConstantFill(
+                    [momentum_blob], momentum_blob, value=0.0
+                )
+
     if optimize_gradient_memory:
         _OptimizeGradientMemorySimple(
             model_helper_obj, model_helper_obj._losses_by_gpu, devices
@@ -401,7 +413,7 @@ def RunNet(model, num_iterations):
         if isinstance(net_iter, tuple):
             workspace.RunNet(net_iter[0].Proto().name, net_iter[1])
         else:
-            workspace.RunNet(model.net.Proto().name, num_iterations)
+            workspace.RunNet(net_iter, num_iterations)
 
 
 def _ForEachGPU(gpu_ids, f, scoped=False, *args, **kwargs):
