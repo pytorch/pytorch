@@ -365,18 +365,27 @@ def _build(model, optimizer):
 
     for param_info in model.GetOptimizationParamInfo():
         param_name = str(param_info.blob)
-        param_grad = str(param_info.grad)
 
         # We first check if parameter's device has been inferred. If not,
         # we check the gradient. This can happen if parameter is not output
         # by any blob but created by a FetchBlob.
+        device = None
         if param_name in param_to_device:
             device = param_to_device[param_name]
-        elif param_grad in param_to_device:
-            device = param_to_device[param_grad]
         else:
-            assert param_grad in param_to_device,\
-                "Cannot infer device for {}: no op creates it".format(param_name)
+            if isinstance(param_info.grad, core.GradientSlice):
+                grad = param_info.grad
+                if str(grad.values) in param_to_device:
+                    device = param_to_device[str(grad.values)]
+                elif str(grad.indices) in param_to_device:
+                    device = param_to_device[str(grad.indices)]
+            else:
+                grad_name = str(param_info.grad)
+                if grad_name in param_to_device:
+                    device = param_to_device[grad_name]
+
+        assert device is not None,\
+            "Cannot infer device for {}: no op creates it".format(param_name)
 
         with core.DeviceScope(device):
             optimizer(model.net, model.param_init_net, param_info)
