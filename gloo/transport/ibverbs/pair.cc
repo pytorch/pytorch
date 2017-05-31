@@ -25,6 +25,7 @@ Pair::Pair(const std::shared_ptr<Device>& dev)
     : dev_(dev),
       sync_(false),
       busyPoll_(false),
+      timeout_(dev->getTimeout()),
       completionEventsHandled_(0),
       ex_(nullptr) {
   int rv;
@@ -254,19 +255,39 @@ void Pair::sendMemoryRegion(struct ibv_mr* src, int slot) {
 
 const struct ibv_mr* Pair::getMemoryRegion(int slot) {
   std::unique_lock<std::mutex> lock(m_);
-  for (;;) {
+  if (sync_) {
     auto it = peerMemoryRegions_.find(slot);
-    if (it != peerMemoryRegions_.end()) {
-      return &it->second;
-    }
-
-    if (sync_) {
+    auto start = std::chrono::steady_clock::now();
+    while (it == peerMemoryRegions_.end()) {
       lock.unlock();
       pollCompletions();
       lock.lock();
-    } else {
-      cv_.wait(lock);
+      if (timeout_ != kNoTimeout &&
+          (std::chrono::steady_clock::now() - start) >= timeout_) {
+        lock.unlock();
+        signalIoFailure(GLOO_ERROR_MSG("GetMemRegion timeout ", peer_.str()));
+        GLOO_ENFORCE(false, "Unexpected code path");
+      }
+      it = peerMemoryRegions_.find(slot);
     }
+    return &it->second;
+  } else {
+    auto pred = [&]{
+      return peerMemoryRegions_.find(slot) != peerMemoryRegions_.end();
+    };
+    if (timeout_ == kNoTimeout) {
+      // No timeout set. Wait for read to complete.
+      cv_.wait(lock, pred);
+    } else {
+      auto done = cv_.wait_for(lock, timeout_, pred);
+      if (!done) {
+        signalIoFailure(GLOO_ERROR_MSG("GetMemRegion timeout ", peer_.str()));
+        GLOO_ENFORCE(false, "Unexpected code path");
+      }
+    }
+    auto it = peerMemoryRegions_.find(slot);
+    GLOO_ENFORCE(it != peerMemoryRegions_.end());
+    return &it->second;
   }
 }
 

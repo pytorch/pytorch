@@ -23,6 +23,8 @@ namespace gloo {
 namespace transport {
 namespace ibverbs {
 
+static const std::chrono::seconds kTimeoutDefault = std::chrono::seconds(30);
+
 // Scope guard for ibverbs device list.
 class ibv_devices {
  public:
@@ -85,7 +87,8 @@ Device::Device(const struct attr& attr, ibv_context* context)
     : attr_(attr),
       pciBusID_(infinibandToBusID(attr.name)),
       hasNvPeerMem_(kernelModules().count("nv_peer_mem") > 0),
-      context_(context) {
+      context_(context),
+      timeout_(kTimeoutDefault) {
   int rv;
 
   pd_ = ibv_alloc_pd(context_);
@@ -137,13 +140,21 @@ const std::string& Device::getPCIBusID() const {
   return pciBusID_;
 }
 
-void Device::setTimeout(const std::chrono::milliseconds& /* timeout */) {
-  GLOO_ENFORCE(false, "The ibverbs transport does not support setting timeout");
+void Device::setTimeout(const std::chrono::milliseconds& timeout) {
+  if (timeout < std::chrono::milliseconds::zero()) {
+    GLOO_THROW_INVALID_OPERATION_EXCEPTION("Invalid timeout", timeout.count());
+  }
+
+  timeout_ = timeout;
 }
 
 std::unique_ptr<transport::Pair> Device::createPair() {
   auto pair = new Pair(shared_from_this());
   return std::unique_ptr<transport::Pair>(pair);
+}
+
+std::chrono::milliseconds Device::getTimeout() const {
+  return timeout_;
 }
 
 void Device::loop() {

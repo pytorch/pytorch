@@ -83,7 +83,7 @@ class Pair : public ::gloo::transport::Pair {
   std::shared_ptr<Device> dev_;
   state state_;
   std::atomic<bool> sync_;
-  std::chrono::milliseconds timeout_;
+  const std::chrono::milliseconds timeout_;
   // When set, instructs pair to use busy-polling on receive.
   // Can only be used with sync receive mode.
   bool busyPoll_;
@@ -107,16 +107,15 @@ class Pair : public ::gloo::transport::Pair {
   void send(Op& op);
   void recv();
 
-  const Address& peer() {
+  const Address& peer() const {
     return peer_;
   }
 
-  bool isSync() {
+  bool isSync() const {
     return sync_;
   }
 
-  std::chrono::milliseconds getTimeout() {
-    std::unique_lock<std::mutex> lock(m_);
+  std::chrono::milliseconds getTimeout() const {
     return timeout_;
   }
 

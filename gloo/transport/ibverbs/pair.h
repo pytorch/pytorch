@@ -105,6 +105,8 @@ class Pair : public ::gloo::transport::Pair {
   // Whether or not this pair is busy polling in sync mode.
   std::atomic<bool> busyPoll_;
 
+  const std::chrono::milliseconds timeout_;
+
   // Number of completion events handled by this pair's completion
   // queue (also see ibv_get_cq_event(3)). This many events need to be
   // acknowledged prior to destructing the completion queue.
@@ -148,6 +150,14 @@ class Pair : public ::gloo::transport::Pair {
   const struct ibv_mr* getMemoryRegion(int slot);
 
   void postReceive();
+
+  std::chrono::milliseconds getTimeout() const {
+    return timeout_;
+  }
+
+  const Address& peer() const {
+    return peer_;
+  }
 
  private:
   std::exception_ptr ex_;

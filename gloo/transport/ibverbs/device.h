@@ -66,11 +66,16 @@ class Device : public ::gloo::transport::Device,
 
   void loop();
 
+  std::chrono::milliseconds getTimeout() const;
+
   std::atomic<bool> done_;
   std::unique_ptr<std::thread> loop_;
 
   friend class Pair;
   friend class Buffer;
+
+ private:
+  std::atomic<std::chrono::milliseconds> timeout_;
 };
 
 } // namespace ibverbs

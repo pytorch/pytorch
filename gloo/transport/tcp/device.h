@@ -65,7 +65,7 @@ class Device : public ::gloo::transport::Device,
  protected:
   void loop();
 
-  std::chrono::milliseconds getTimeout();
+  std::chrono::milliseconds getTimeout() const;
   void registerDescriptor(int fd, int events, Pair* p);
   void unregisterDescriptor(int fd);
 
@@ -80,7 +80,7 @@ class Device : public ::gloo::transport::Device,
   static constexpr auto capacity_ = 64;
 
   int fd_;
-  std::chrono::milliseconds timeout_;
+  std::atomic<std::chrono::milliseconds> timeout_;
   std::string interfaceName_;
   int interfaceSpeedMbps_;
   std::string pciBusID_;

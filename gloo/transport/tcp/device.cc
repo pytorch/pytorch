@@ -154,13 +154,11 @@ void Device::setTimeout(const std::chrono::milliseconds& timeout) {
     GLOO_THROW_INVALID_OPERATION_EXCEPTION("Invalid timeout", timeout.count());
   }
 
-  std::unique_lock<std::mutex> lock(m_);
   timeout_ = timeout;
 }
 
-std::chrono::milliseconds Device::getTimeout() {
-  std::unique_lock<std::mutex> lock(m_);
-  return timeout_;
+std::chrono::milliseconds Device::getTimeout() const {
+  return timeout_.load();
 }
 
 std::unique_ptr<transport::Pair> Device::createPair() {
