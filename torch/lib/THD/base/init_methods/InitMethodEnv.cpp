@@ -43,9 +43,18 @@ rank_type load_rank_env() {
 
 } // anonymous namespace
 
-InitMethod::Config initEnv(int world_size) {
+InitMethod::Config initEnv(int world_size, std::string group_name, int rank) {
   InitMethod::Config config;
   config.rank = load_rank_env();
+  if (rank != -1 && config.rank != rank) {
+    throw std::runtime_error("rank specified both as an environmental variable "
+      "and to the initializer");
+  }
+
+  if (group_name != "") {
+    throw std::runtime_error("group_name is not supported in Env initialization method");
+  }
+
   if (config.rank == 0) {
     const char *env_world_size_str = std::getenv(WORLD_SIZE_ENV);
     int env_world_size = world_size;

@@ -143,27 +143,15 @@ int bindMulticastSocket(struct sockaddr* address, struct sockaddr_storage *sock_
   return socket;
 }
 
-InitMethod::Config initTCPMaster(struct sockaddr* addr) {
-  // TODO
-  throw std::runtime_error("non-multicast tcp initialization not supported");
-}
-
-InitMethod::Config initTCPMulticast(std::string group_name, rank_type world_size,
-                                    int assigned_rank, struct sockaddr* addr) {
-  InitMethod::Config config;
+// messages
+std::vector<MulticastMessage> getMessages(struct sockaddr* addr, rank_type world_size,
+                                          std::string group_name, std::string packed_msg) {
   struct sockaddr_storage sock_addr;
   int socket = bindMulticastSocket(addr, &sock_addr);
   // NOTE: Multicast membership is dropped on close
   ResourceGuard socket_guard([socket]() { ::close(socket); });
 
-  int listen_socket;
-  port_type listen_port;
-  std::tie(listen_socket, listen_port) = listen();
-  MulticastMessage msg {group_name, listen_port, assigned_rank};
-
-  std::string packed_msg = msg.pack();
-  std::set<std::string> processes;
-  processes.insert(packed_msg);
+  std::set<std::string> msgs = {packed_msg};
 
   char recv_message[MAX_MSG_LENGTH];
   if (packed_msg.length() + 1 > MAX_MSG_LENGTH) {
@@ -181,7 +169,7 @@ InitMethod::Config initTCPMulticast(std::string group_name, rank_type world_size
   broadcast();
 
   // Wait for messages from all processes
-  while (processes.size() < world_size) {
+  while (msgs.size() < world_size) {
     try {
       SYSCHECK(::recv(socket, recv_message, sizeof(recv_message), 0));
       std::string recv_message_str(recv_message);
@@ -192,7 +180,7 @@ InitMethod::Config initTCPMulticast(std::string group_name, rank_type world_size
         continue;
       }
 
-      processes.insert(recv_message_str); // set will automatically deduplicate messages
+      msgs.insert(recv_message_str); // set will automatically deduplicate messages
     } catch (const std::system_error& e) {
       // Check if this was really a timeout from `recvfrom` or a different error.
       if (errno != EAGAIN && errno != EWOULDBLOCK)
@@ -206,39 +194,60 @@ InitMethod::Config initTCPMulticast(std::string group_name, rank_type world_size
   std::this_thread::sleep_for(std::chrono::milliseconds(50));
   broadcast();
 
-  std::vector<std::string> tmp_processes(processes.begin(), processes.end());
-  std::vector<std::string> arranged_processes(processes.size());
+  std::vector<MulticastMessage> unpacked_msgs;
+  for (auto& msg : msgs) {
+    unpacked_msgs.emplace_back(msg);
+  }
 
-  // Put already assigned ranks on their place
-  for (std::size_t i = 0; i < processes.size(); ++i) {
-    auto recv_msg = MulticastMessage(tmp_processes[i]);
-    if (recv_msg.rank >= 0) {
-      arranged_processes[recv_msg.rank] = tmp_processes[i];
+  return unpacked_msgs;
+}
+
+InitMethod::Config initTCPMaster(struct sockaddr* addr) {
+  // TODO
+  throw std::runtime_error("non-multicast tcp initialization not supported");
+}
+
+InitMethod::Config initTCPMulticast(std::string group_name, rank_type world_size,
+                                    int assigned_rank, struct sockaddr* addr) {
+  InitMethod::Config config;
+
+  int listen_socket;
+  port_type listen_port;
+  std::tie(listen_socket, listen_port) = listen();
+  ResourceGuard listen_socket_guard([listen_socket]() { ::close(listen_socket); });
+
+  MulticastMessage msg {group_name, listen_port, assigned_rank};
+  std::string packed_msg = msg.pack();
+
+  std::vector<MulticastMessage> msgs = getMessages(addr, world_size, group_name,
+                                                   packed_msg);
+
+  std::vector<MulticastMessage*> sorted_msgs(msgs.size());
+
+  // Pre-fill sorted_msgs with processes that had their ranks assigned manually
+  for (auto& msg : msgs) {
+    if (msg.rank >= 0) {
+      if (sorted_msgs[msg.rank] != nullptr)
+        throw std::logic_error("more than one node have assigned same rank");
+      sorted_msgs[msg.rank] = &msg;
     }
   }
 
-  // Put rest (not assigned) in sort order
-  std::size_t last_pos = 0;
-  for (std::size_t i = 0; i < processes.size(); ++i) {
-    if (arranged_processes[i].empty()) { // not assigned place
-      for (std::size_t j = last_pos; j < processes.size(); ++j) {
-        auto recv_msg = MulticastMessage(tmp_processes[j]);
-        if (recv_msg.rank < 0) {
-          last_pos = j;
-          break;
-        }
-      }
-
-      arranged_processes[i] = tmp_processes[last_pos];
-      last_pos++;
-    }
+  // NOTE: msgs are already sorted lexicographically, so we can greedily
+  // insert them into free slots
+  std::size_t free_pos = 0;
+  for (auto& msg : msgs) {
+    if (msg.rank >= 0) continue; // These were sorted in the previous loop
+    while (sorted_msgs[free_pos] != nullptr) free_pos++;
+    sorted_msgs[free_pos] = &msg;
   }
 
-  auto master_msg = MulticastMessage(arranged_processes[0]);
-  for (std::size_t rank = 0; rank < arranged_processes.size(); ++rank) {
-    if (packed_msg == arranged_processes[rank]) {
+  auto& master_msg = *sorted_msgs[0];
+  for (std::size_t rank = 0; rank < sorted_msgs.size(); ++rank) {
+    if (packed_msg == sorted_msgs[rank]->pack()) {
       config.rank = rank;
       if (config.rank == 0) {
+        listen_socket_guard.release();
         config.master = {
           .world_size = world_size,
           .listen_socket = listen_socket,
@@ -274,7 +283,7 @@ InitMethod::Config initTCP(std::string argument, rank_type world_size,
   struct addrinfo hints = {0};
   hints.ai_family = AF_UNSPEC;
   struct addrinfo *res;
-  if (getaddrinfo(address.c_str(), str_port.c_str(), &hints, &res)) {
+  if (::getaddrinfo(address.c_str(), str_port.c_str(), &hints, &res)) {
     throw std::invalid_argument("invalid init address");
   }
   ResourceGuard res_guard([res]() { ::freeaddrinfo(res); });

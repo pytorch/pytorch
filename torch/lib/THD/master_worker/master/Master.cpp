@@ -34,8 +34,7 @@ void THDMasterWorkerInit(THDChannelType channel_type, std::string init_method = 
 
   THDState::s_workers = std::vector<WorkerState>(dataChannel->getNumProcesses());
 
-  InitMethod::Config config = getInitConfig(init_method, world_size, group_name,
-                                            dataChannel->getRank());
+  auto config = getInitConfig(init_method, world_size, group_name, dataChannel->getRank());
   masterCommandChannel.reset(new MasterCommandChannel(config));
   masterCommandChannel->init();
 

@@ -42,18 +42,12 @@ void unlockFile(int fd) {
   lockLoop(fd, oflock);
 }
 
-} // anonymous namespace
-
-
-
-InitMethod::Config initFile(std::string file_path, rank_type world_size,
-                            std::string group_name, int assigned_rank) {
-  InitMethod::Config config;
+// file_descriptor, number_of_lines_in_file
+std::pair<int, std::size_t> waitForGroup(std::string file_path, std::string group_name,
+                                         std::fstream& file) {
   int fd;
-  std::fstream file;
   std::string content;
   struct stat fd_stat, path_stat;
-
   // Loop until the file is either empty, or filled with ours group_name
   while (true) {
     // Loop until we have an open, locked and valid file
@@ -87,88 +81,137 @@ InitMethod::Config initFile(std::string file_path, rank_type world_size,
     ::close(fd);
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
   }
-  // NOTE: the loop exits with a locked fd
 
-  // Remember our order number.
-  std::size_t order = std::count(content.begin(), content.end(), '\n');
+  return {fd, std::count(content.begin(), content.end(), '\n')};
+}
 
-  int listen_socket;
-  port_type port;
-  std::tie(listen_socket, port) = listen();
-
-  auto ifa_addresses = getInterfaceAddresses();
-  file << group_name << ' ' << assigned_rank << ' ' << port
-       << ' ' << ifa_addresses.size();
-  for (auto addr_str : ifa_addresses) {
-    file << ' ' << addr_str;
-  }
-  file << std::endl;
-
-  std::size_t lines = 0; // we have just added new line
-  while (lines < world_size) { // wait until all processes will write their info
+std::size_t waitForData(int fd, std::fstream& file, rank_type world_size) {
+  std::size_t lines = 0;
+  // Wait until all processes will write their info
+  while (lines < world_size) {
     unlockFile(fd);
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
     lockFile(fd);
 
     file.sync();
     file.seekp(0, std::ios_base::beg);
-    content = {std::istreambuf_iterator<char>(file),
-               std::istreambuf_iterator<char>()};
+    std::string content = {std::istreambuf_iterator<char>(file),
+                           std::istreambuf_iterator<char>()};
     lines = std::count(content.begin(), content.end(), '\n');
-    file.seekp(0, std::ios_base::beg);
   }
-  // NOTE: the loop exits with a locked fd
+
+  file.seekp(0, std::ios_base::beg);
+  return lines;
+}
+
+// master_port, master_addrs, ranks
+std::tuple<port_type, std::vector<std::string>, std::vector<int>>
+parseFile(std::fstream& file, rank_type world_size, std::string group_name) {
+  port_type master_port;
+  std::vector<std::string> master_addrs;
+  std::vector<int> ranks(world_size);
+  // Parse the file
+  for (std::size_t i = 0; i < world_size; ++i) {
+    std::string proc_group_name;
+    std::size_t proc_addrs_count;
+    int proc_rank;
+    port_type proc_port;
+
+    file >> proc_group_name >> proc_rank >> proc_port >> proc_addrs_count;
+    if (proc_group_name != group_name) {
+      throw std::logic_error("proc_group_name != group_name");
+    }
+
+    std::vector<std::string> proc_addrs(proc_addrs_count);
+    for (auto& str : proc_addrs) {
+      file >> str;
+    }
+
+    ranks[i] = proc_rank;
+    /*
+     * Master data is found only when:
+     *  1. proc_rank has been manually assigned as 0 (first condition)
+     *  2. process has no assigned rank, and it hasn't been initialized yet.
+     */
+    if (proc_rank == 0 || (proc_rank == -1 && master_addrs.size() == 0)) {
+      master_port = proc_port;
+      master_addrs = std::move(proc_addrs);
+    }
+  }
+
+  // Ensure there are no duplicates
+  for (std::size_t i = 0; i < ranks.size(); ++i) {
+    for (std::size_t j = i + 1; j < ranks.size(); ++j) {
+      if (ranks[i] >= 0 && (ranks[i] == ranks[j]))
+        throw std::logic_error("more than one node have assigned same rank");
+    }
+  }
+
+  return {master_port, master_addrs, ranks};
+}
+
+rank_type getRank(const std::vector<int>& ranks, int assigned_rank,
+                  std::size_t order) {
+  if (assigned_rank >= 0) {
+    return assigned_rank;
+  } else {
+    std::vector<bool> taken_ranks(ranks.size());
+    for (auto rank : ranks) {
+      if (rank >= 0)
+        taken_ranks[rank] = true;
+    }
+
+    auto unassigned = std::count(ranks.begin(), ranks.begin() + order, -1) + 1;
+    rank_type rank = 0;
+    while (true) {
+      if (!taken_ranks[rank]) unassigned--;
+      if (unassigned == 0) break;
+      rank++;
+    }
+
+    return rank;
+  }
+}
+
+} // anonymous namespace
+
+
+
+InitMethod::Config initFile(std::string file_path, rank_type world_size,
+                            std::string group_name, int assigned_rank) {
+  InitMethod::Config config;
+  int fd;
+  std::size_t order;
+  std::fstream file;
+
+  std::tie(fd, order) = waitForGroup(file_path, group_name, file);
+  // NOTE: the function returns a locked fd
+
+  int listen_socket;
+  port_type port;
+  std::tie(listen_socket, port) = listen();
+
+  // Append our information
+  auto if_addrs = getInterfaceAddresses();
+  file << group_name << ' ' << assigned_rank << ' ' << port
+       << ' ' << if_addrs.size();
+  for (auto addr_str : if_addrs) {
+    file << ' ' << addr_str;
+  }
+  file << std::endl;
+
+  std::size_t lines = waitForData(fd, file, world_size);
 
   port_type master_port;
-  std::vector<std::string> master_addresses;
-  std::vector<int> ranks(world_size);
-  for (std::size_t i = 0; i < world_size; ++i) {
-    std::string file_group_name, tmp_address;
-    std::size_t addresses_count;
-    int rank;
-    port_type tmp_port;
+  std::vector<std::string> master_addrs;
+  std::vector<int> ranks;
+  std::tie(master_port, master_addrs, ranks) = parseFile(file, world_size, group_name);
 
-    file >> file_group_name >> rank >> tmp_port >> addresses_count;
-    if (file_group_name != group_name) {
-      throw std::logic_error("file_group_name != group_name");
-    }
+  config.rank = getRank(ranks, assigned_rank, order);
 
-    std::vector<std::string> tmp_addresses(addresses_count);
-    for (std::size_t j = 0; j < addresses_count; ++j) {
-      file >> tmp_address;
-      tmp_addresses.emplace(tmp_addresses.begin() + j, tmp_address);
-    }
-
-    ranks[i] = rank;
-    // Whether there is already assigned rank 0, or we have to get addresses and port
-    // from first process which has unassigned rank (it will be rank 0).
-    if (rank == 0 || (rank < 0 && master_addresses.size() == 0)) {
-      master_port = tmp_port;
-      master_addresses = tmp_addresses;
-    }
-  }
-
-  if (assigned_rank >= 0) {
-    config.rank = assigned_rank;
-  } else {
-    // Calculate how many unassigned there was before us (including us).
-    std::size_t unassigned = 1 + std::count_if(ranks.begin(), ranks.begin() + order,
-                                               [](int rank) { return rank < 0; });
-
-    // Calculate actual rank by finding `unassigned` number of empty ranks.
-    for (std::size_t rank = 0; rank < world_size && unassigned > 0; ++rank) {
-      if (std::find(ranks.begin(), ranks.end(), rank) == ranks.end()) {
-        unassigned--;
-      }
-
-      if (unassigned == 0) config.rank = rank;
-    }
-  }
-
-  file << std::endl; // reserve our rank
-
-  // Member which is last to use the file has to remove it.
-  if (lines == 2 * world_size - 1) {
+  // Last process removes the file.
+  file << std::endl; lines++;
+  if (lines == 2 * world_size) {
     ::remove(file_path.c_str());
   }
 
@@ -186,7 +229,7 @@ InitMethod::Config initFile(std::string file_path, rank_type world_size,
     ::close(listen_socket);
 
     std::string master_address;
-    std::tie(master_address, config.public_address) = discoverMaster(master_addresses, master_port);
+    std::tie(master_address, config.public_address) = discoverMaster(master_addrs, master_port);
     config.worker = {
       .address = master_address,
       .port = master_port,
