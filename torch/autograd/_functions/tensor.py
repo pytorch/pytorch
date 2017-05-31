@@ -14,15 +14,21 @@ class Index(Function):
         ctx.input_size = i.size()
         ctx.index = index
         result = i.index(ctx.index)
-        if not i._check_advanced_indexing(index):
+        ctx.advanced_indexing = i._check_advanced_indexing(index)
+        if not ctx.advanced_indexing:
             ctx.mark_shared_storage((i, result))
         return result
 
     @staticmethod
     def backward(ctx, grad_output):
-        grad_input = Variable(grad_output.data.new(ctx.input_size).zero_())
-        grad_input[ctx.index] = grad_output
-        return grad_input, None
+        grad_input = grad_output.data.new(ctx.input_size).zero_()
+        if ctx.advanced_indexing:
+            grad_input._advanced_index_add(ctx.index, grad_output.data)
+            return Variable(grad_input), None
+        else:
+            grad_input = Variable(grad_input)
+            grad_input[ctx.index] = grad_output
+            return grad_input, None
 
 
 class SetItem(InplaceFunction):

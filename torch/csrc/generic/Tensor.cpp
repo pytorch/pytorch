@@ -782,6 +782,76 @@ static bool THPTensor_(_advancedIndexSet)(PyObject *index, THTensorPtr &dest, Py
 
   return success;
 }
+
+static bool THPTensor_(_advancedIndexAdd)(PyObject *index, THTensorPtr &dest, THTensorPtr &src) {
+  std::vector<THIndexTensor*> broadcasted;
+  if (!THPTensor_(_convertToTensorIndexers)(index, broadcasted)) {
+    return false;
+  }
+
+  THIndexTensor *linearIndices = THPTensor_(_calculateLinearIndices)(dest, broadcasted);
+
+  // We take ownership of the THTensor input locally
+  THTensor *indexed = dest.release();
+  THTensor *viewed = THTensor_(newWithStorage1d)(LIBRARY_STATE
+                                                 THTensor_(storage)(LIBRARY_STATE indexed),
+                                                 THTensor_(storageOffset)(LIBRARY_STATE indexed),
+                                                 THTensor_(nElement)(LIBRARY_STATE indexed),
+                                                 1);
+
+  THTensor *contiguous;
+  if (THTensor_(isContiguous(LIBRARY_STATE src))) {
+    contiguous = THTensor_(newWithTensor)(LIBRARY_STATE src);
+  } else {
+    contiguous = THTensor_(newContiguous)(LIBRARY_STATE src);
+  }
+
+  THTensor *cviewed = THTensor_(newWithStorage1d)(LIBRARY_STATE
+                                                  THTensor_(storage)(LIBRARY_STATE contiguous),
+                                                  THTensor_(storageOffset)(LIBRARY_STATE contiguous),
+                                                  THTensor_(nElement)(LIBRARY_STATE contiguous),
+                                                  1);
+
+
+  THTensor_(indexAdd)(LIBRARY_STATE viewed, 0, linearIndices, cviewed);
+
+  for (const auto& bTensor : broadcasted) {
+    THIndexTensor_(free)(LIBRARY_STATE bTensor);
+  }
+  THTensor_(free)(LIBRARY_STATE indexed);
+  THIndexTensor_(free)(LIBRARY_STATE linearIndices);
+  THTensor_(free)(LIBRARY_STATE viewed);
+  THTensor_(free)(LIBRARY_STATE contiguous);
+  THTensor_(free)(LIBRARY_STATE cviewed);
+
+  return true;
+}
+
+// Needed for autograd to support backwards passes when there are overlapping
+// indices
+static PyObject* THPTensor_(advancedIndexAdd)(THPTensor *self, PyObject *args) {
+  HANDLE_TH_ERRORS
+
+  THPUtils_assert(PyTuple_GET_SIZE(args) == 2, "advancedIndexAdd takes exactly two "
+      "arguments (%d given)", (int) PyTuple_GET_SIZE(args));
+
+  THPUtils_assert(THPTensor_(_checkAdvancedIndexing)(self, PyTuple_GET_ITEM(args, 0)),
+      "advancedIndexAdd must use an indexer that triggers advanced indexing");
+
+  THPUtils_assert(THPTensor_(Check)(PyTuple_GET_ITEM(args, 1)), "Second argument to "
+      "advancedIndexAdd must be a Tensor containing the grad output");
+
+  // TODO: assert same shape?
+
+  THTensorPtr gradOutput = THTensor_(newWithTensor)(
+    LIBRARY_STATE ((THPTensor *)PyTuple_GET_ITEM(args, 1))->cdata);
+  THTensorPtr dest = THTensor_(newWithTensor)(LIBRARY_STATE self->cdata);
+
+  THPTensor_(_advancedIndexAdd)(PyTuple_GET_ITEM(args, 0), dest, gradOutput);
+
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
 #endif // TH_REAL_IS_HALF
 
 // Handles indexing into a Tensor given a tuple, ellipses, sequence, etc. index

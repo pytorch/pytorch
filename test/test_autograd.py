@@ -570,7 +570,17 @@ class TestAutograd(TestCase):
             for j in idx[1]:
                 expected_grad[i][j] += 1
 
-        # self.assertEqual(y.grad.data, expected_grad)
+        self.assertEqual(y.grad.data, expected_grad)
+
+        x = torch.arange(1, 17).view(4, 4)
+        y = Variable(x, requires_grad=True)
+        idx = [[[1, 2], [0, 0]], [[0, 1], [1, 1]]]
+        y[idx].sum().backward()
+        expected_grad = torch.Tensor([[0, 2, 0, 0],
+                                      [1, 0, 0, 0],
+                                      [0, 1, 0, 0],
+                                      [0, 0, 0, 0]])
+        self.assertEqual(y.grad.data, expected_grad)
 
     def test_basic_op_grad_fallback(self):
         """Grad output might need to be reshaped to match the second argument."""
