@@ -560,6 +560,7 @@ static bool THPTensor_(_checkAdvancedIndexing)(THPTensor *indexed, PyObject *arg
   **/
 }
 
+// Exposed at the interpreter level
 static PyObject* THPTensor_(checkAdvancedIndexing)(THPTensor *self, PyObject *arg) {
   if (THPTensor_(_checkAdvancedIndexing)(self, arg)) {
     Py_RETURN_TRUE;
@@ -650,8 +651,13 @@ static THIndexTensor* THPTensor_(_calculateLinearIndices)(
   return linearIndices;
 }
 
-static bool THPTensor_(_advancedIndexGet)(PyObject *index, THTensorPtr &tresult)
-{
+static bool THPTensor_(_advancedIndexCommonInit)(
+    PyObject *index,
+    THTensorPtr &indexed,
+    std::vector<THIndexTensor*>& broadcasted,
+    THIndexTensor **linearIndices,
+    THTensor **flattened) {
+
   // Precondition: index is an object that specifies advanced indexing.
   // For now, we only support the simple integer-array indexing strategy
   // where there are ndim(self) indexing sequences/LongTensors that can be
@@ -661,7 +667,6 @@ static bool THPTensor_(_advancedIndexGet)(PyObject *index, THTensorPtr &tresult)
 
   // First attempt to convert to Tensor indexers from the arbitrary
   // python/tensor objects passed
-  std::vector<THIndexTensor*> broadcasted;
   if (!THPTensor_(_convertToTensorIndexers)(index, broadcasted)) {
     return false;
   }
@@ -670,90 +675,123 @@ static bool THPTensor_(_advancedIndexGet)(PyObject *index, THTensorPtr &tresult)
   // Our strategy is to view the indexed Tensor as a 1D Tensor, calculate
   // the linear indices for each tuple of indexing elements, and then call
   // indexSelect using those linear indices
-  THIndexTensor *linearIndices = THPTensor_(_calculateLinearIndices)(tresult, broadcasted);
+  *linearIndices = THPTensor_(_calculateLinearIndices)(indexed, broadcasted);
 
-  // We take ownership of the THTensor input locally
-  THTensor *indexed = tresult.release();
+  *flattened = THTensor_(newWithStorage1d)(LIBRARY_STATE
+                                           THTensor_(storage)(LIBRARY_STATE indexed.get()),
+                                           THTensor_(storageOffset)(LIBRARY_STATE indexed.get()),
+                                           THTensor_(nElement)(LIBRARY_STATE indexed.get()),
+                                           1);
 
-  THTensor *viewed = THTensor_(newWithStorage1d)(LIBRARY_STATE
-                                                 THTensor_(storage)(LIBRARY_STATE indexed),
-                                                 THTensor_(storageOffset)(LIBRARY_STATE indexed),
-                                                 THTensor_(nElement)(LIBRARY_STATE indexed),
-                                                 1);
+  return true;
+}
 
-  THTensor *result = THTensor_(new)(LIBRARY_STATE_NOARGS);
-
-  // Index Select makes a copy of the storage, thus it is enforcing NumPy semantics, which says that the
-  // array returned by advanced indexing is a copy, not a view
-  THTensor_(indexSelect)(LIBRARY_STATE result, viewed, 0, linearIndices);
-
-  // In the event that the indexing Tensors are not vectors, we need to reshape
-  // the result to be the appropriate shape
-  THTensor_(resizeNd)(LIBRARY_STATE result,
-                      THIndexTensor_(nDimension)(LIBRARY_STATE broadcasted.at(0)),
-                      broadcasted.at(0)->size,
-                      broadcasted.at(0)->stride);
-
-  // result ptr takes ownership of result tensor
-  tresult = result;
+// Should called, written in such a way that if any of the parameters are not
+// initialized we still don't crash
+static void THPTensor_(_advancedIndexCommonCleanup)(
+    std::vector<THIndexTensor*>& broadcasted,
+    THIndexTensor *linearIndices,
+    THTensor *flattened) {
 
   // Cleanup all TH memory
   for (const auto& bTensor : broadcasted) {
     THIndexTensor_(free)(LIBRARY_STATE bTensor);
   }
-  THTensor_(free)(LIBRARY_STATE indexed);
-  THIndexTensor_(free)(LIBRARY_STATE linearIndices);
-  THTensor_(free)(LIBRARY_STATE viewed);
+  if (linearIndices) THIndexTensor_(free)(LIBRARY_STATE linearIndices);
+  if (flattened) THTensor_(free)(LIBRARY_STATE flattened);
+}
 
-  return true;
+static bool THPTensor_(_advancedIndexGet)(PyObject *index, THTensorPtr &tresult)
+{
+  std::vector<THIndexTensor*> broadcasted;
+  THIndexTensor *linearIndices = NULL;
+  THTensor *flattened = NULL;
+  bool success = THPTensor_(_advancedIndexCommonInit)(
+      index, tresult, broadcasted, &linearIndices, &flattened);
+
+  if (success) {
+    THTensor *result = THTensor_(new)(LIBRARY_STATE_NOARGS);
+
+    // Index Select makes a copy of the storage, thus it is enforcing NumPy semantics, which says that the
+    // array returned by advanced indexing is a copy, not a view
+    THTensor_(indexSelect)(LIBRARY_STATE result, flattened, 0, linearIndices);
+
+    // In the event that the indexing Tensors are not vectors, we need to reshape
+    // the result to be the appropriate shape
+    THTensor_(resizeNd)(LIBRARY_STATE result,
+                        THIndexTensor_(nDimension)(LIBRARY_STATE broadcasted.at(0)),
+                        broadcasted.at(0)->size,
+                        broadcasted.at(0)->stride);
+
+    // result ptr takes ownership of result tensor, and implicitly frees the
+    // indexed one
+    tresult = result;
+  }
+
+  THPTensor_(_advancedIndexCommonCleanup)(broadcasted, linearIndices, flattened);
+  return success;
 }
 
 static bool THPTensor_(_advancedIndexSet)(PyObject *index, THTensorPtr &dest, PyObject *src)
 {
-  // Precondition: index is an object that specifies advanced indexing.
-  // For now, we only support the simple integer-array indexing strategy
-  // where there are ndim(self) indexing sequences/LongTensors that can be
-  // broadcasted and iterated as one
-  // Precondition: tresult points to the Tensor we are indexing, and is also where
-  // we will store the output Tensor
 
-  // First attempt to convert to Tensor indexers from the arbitrary
-  // python/tensor objects passed
   std::vector<THIndexTensor*> broadcasted;
-  if (!THPTensor_(_convertToTensorIndexers)(index, broadcasted)) {
-    return false;
+  THIndexTensor *linearIndices = NULL;
+  THTensor *flattened = NULL;
+  bool success = THPTensor_(_advancedIndexCommonInit)(
+      index, dest, broadcasted, &linearIndices, &flattened);
+
+  if (success) {
+    if (THPUtils_(checkReal)(src)) {
+      real v = THPUtils_(unpackReal)(src);
+      THTensor_(indexFill)(LIBRARY_STATE flattened, 0, linearIndices, v);
+    } else if (THPTensor_(Check)(src)) {
+      // Because we are doing an index copy, we need to make sure of two things:
+      // 1. the src Tensor is 1D and
+      // 2. the src is made contiguous before being flattened into a 1D view, if
+      // necessary
+
+      THTensor *contiguous;
+      if (THTensor_(isContiguous(LIBRARY_STATE ((THPTensor*)src)->cdata))) {
+        contiguous = THTensor_(newWithTensor)(LIBRARY_STATE ((THPTensor*)src)->cdata);
+      } else {
+        contiguous = THTensor_(newContiguous)(LIBRARY_STATE ((THPTensor*)src)->cdata);
+      }
+
+      THTensor *cviewed = THTensor_(newWithStorage1d)(LIBRARY_STATE
+                                                      THTensor_(storage)(LIBRARY_STATE contiguous),
+                                                      THTensor_(storageOffset)(LIBRARY_STATE contiguous),
+                                                      THTensor_(nElement)(LIBRARY_STATE contiguous),
+                                                      1);
+
+      THTensor_(indexCopy)(LIBRARY_STATE flattened, 0, linearIndices, cviewed);
+      THTensor_(free)(LIBRARY_STATE contiguous);
+      THTensor_(free)(LIBRARY_STATE cviewed);
+    } else {
+      THPUtils_setError("can't assign %s to a " THPTensorStr " using a LongTensor "
+          "(only " THPTensorStr " or %s are supported)",
+          THPUtils_typename(src), THPUtils_typeTraits<real>::python_type_str);
+      success = false;
+    }
   }
 
-  // At this point broadcasted should store our indexing Tensors.
-  // Our strategy is to view the indexed Tensor as a 1D Tensor, calculate
-  // the linear indices for each tuple of indexing elements, and then call
-  // indexSelect using those linear indices
-  THIndexTensor *linearIndices = THPTensor_(_calculateLinearIndices)(dest, broadcasted);
+  THPTensor_(_advancedIndexCommonCleanup)(broadcasted, linearIndices, flattened);
+  return success;
+}
 
-  // We take ownership of the THTensor input locally
-  THTensor *indexed = dest.release();
+static bool THPTensor_(_advancedIndexAdd)(PyObject *index, THTensorPtr &dest, THTensorPtr &src) {
+  std::vector<THIndexTensor*> broadcasted;
+  THIndexTensor *linearIndices = NULL;
+  THTensor *flattened = NULL;
+  bool success = THPTensor_(_advancedIndexCommonInit)(
+      index, dest, broadcasted, &linearIndices, &flattened);
 
-  THTensor *viewed = THTensor_(newWithStorage1d)(LIBRARY_STATE
-                                                 THTensor_(storage)(LIBRARY_STATE indexed),
-                                                 THTensor_(storageOffset)(LIBRARY_STATE indexed),
-                                                 THTensor_(nElement)(LIBRARY_STATE indexed),
-                                                 1);
-
-  bool success = true;
-  if (THPUtils_(checkReal)(src)) {
-    real v = THPUtils_(unpackReal)(src);
-    THTensor_(indexFill)(LIBRARY_STATE viewed, 0, linearIndices, v);
-  } else if (THPTensor_(Check)(src)) {
-    // Because we are doing an index copy, we need to make sure of two things:
-    // 1. the src Tensor is 1D and
-    // 2. the src is made contiguous before being flattened into a 1D view, if
-    // necessary
-
+  if (success) {
     THTensor *contiguous;
-    if (THTensor_(isContiguous(LIBRARY_STATE ((THPTensor*)src)->cdata))) {
-      contiguous = THTensor_(newWithTensor)(LIBRARY_STATE ((THPTensor*)src)->cdata);
+    if (THTensor_(isContiguous(LIBRARY_STATE src))) {
+      contiguous = THTensor_(newWithTensor)(LIBRARY_STATE src);
     } else {
-      contiguous = THTensor_(newContiguous)(LIBRARY_STATE ((THPTensor*)src)->cdata);
+      contiguous = THTensor_(newContiguous)(LIBRARY_STATE src);
     }
 
     THTensor *cviewed = THTensor_(newWithStorage1d)(LIBRARY_STATE
@@ -762,68 +800,12 @@ static bool THPTensor_(_advancedIndexSet)(PyObject *index, THTensorPtr &dest, Py
                                                     THTensor_(nElement)(LIBRARY_STATE contiguous),
                                                     1);
 
-    THTensor_(indexCopy)(LIBRARY_STATE viewed, 0, linearIndices, cviewed);
+    THTensor_(indexAdd)(LIBRARY_STATE flattened, 0, linearIndices, cviewed);
     THTensor_(free)(LIBRARY_STATE contiguous);
     THTensor_(free)(LIBRARY_STATE cviewed);
-  } else {
-    THPUtils_setError("can't assign %s to a " THPTensorStr " using a LongTensor "
-        "(only " THPTensorStr " or %s are supported)",
-        THPUtils_typename(src), THPUtils_typeTraits<real>::python_type_str);
-    success = false;
   }
 
-  // Cleanup all TH memory
-  for (const auto& bTensor : broadcasted) {
-    THIndexTensor_(free)(LIBRARY_STATE bTensor);
-  }
-  THTensor_(free)(LIBRARY_STATE indexed);
-  THIndexTensor_(free)(LIBRARY_STATE linearIndices);
-  THTensor_(free)(LIBRARY_STATE viewed);
-
-  return success;
-}
-
-static bool THPTensor_(_advancedIndexAdd)(PyObject *index, THTensorPtr &dest, THTensorPtr &src) {
-  std::vector<THIndexTensor*> broadcasted;
-  if (!THPTensor_(_convertToTensorIndexers)(index, broadcasted)) {
-    return false;
-  }
-
-  THIndexTensor *linearIndices = THPTensor_(_calculateLinearIndices)(dest, broadcasted);
-
-  // We take ownership of the THTensor input locally
-  THTensor *indexed = dest.release();
-  THTensor *viewed = THTensor_(newWithStorage1d)(LIBRARY_STATE
-                                                 THTensor_(storage)(LIBRARY_STATE indexed),
-                                                 THTensor_(storageOffset)(LIBRARY_STATE indexed),
-                                                 THTensor_(nElement)(LIBRARY_STATE indexed),
-                                                 1);
-
-  THTensor *contiguous;
-  if (THTensor_(isContiguous(LIBRARY_STATE src))) {
-    contiguous = THTensor_(newWithTensor)(LIBRARY_STATE src);
-  } else {
-    contiguous = THTensor_(newContiguous)(LIBRARY_STATE src);
-  }
-
-  THTensor *cviewed = THTensor_(newWithStorage1d)(LIBRARY_STATE
-                                                  THTensor_(storage)(LIBRARY_STATE contiguous),
-                                                  THTensor_(storageOffset)(LIBRARY_STATE contiguous),
-                                                  THTensor_(nElement)(LIBRARY_STATE contiguous),
-                                                  1);
-
-
-  THTensor_(indexAdd)(LIBRARY_STATE viewed, 0, linearIndices, cviewed);
-
-  for (const auto& bTensor : broadcasted) {
-    THIndexTensor_(free)(LIBRARY_STATE bTensor);
-  }
-  THTensor_(free)(LIBRARY_STATE indexed);
-  THIndexTensor_(free)(LIBRARY_STATE linearIndices);
-  THTensor_(free)(LIBRARY_STATE viewed);
-  THTensor_(free)(LIBRARY_STATE contiguous);
-  THTensor_(free)(LIBRARY_STATE cviewed);
-
+  THPTensor_(_advancedIndexCommonCleanup)(broadcasted, linearIndices, flattened);
   return true;
 }
 
