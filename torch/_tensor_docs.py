@@ -276,11 +276,12 @@ tensor is contiguous, this function returns the original tensor.
 
 add_docstr(torch._C.FloatTensorBase.copy_,
            """
-copy_(src, async=False) -> Tensor
+copy_(src, async=False, broadcast=True) -> Tensor
 
 Copies the elements from :attr:`src` into this tensor and returns this tensor.
 
-The source tensor must be :ref:`broadcastable <broadcasting-semantics>` with this tensor. It
+If :attr:`broadcast` is True, the source tensor must be :ref:`broadcastable <broadcasting-semantics>`
+with this tensor. Otherwise, source tensor should have the same number of elements as this tensor.  It
 may be of a different data type or reside on a different device.
 
 Args:
@@ -288,6 +289,8 @@ Args:
     async (bool): If True and this copy is between CPU and GPU, then the copy
                   may occur asynchronously with respect to the host. For other
                   copies, this argument has no effect.
+    broadcast (bool): If True, :attr:`src` will be broadcast to the shape of the underlying
+                      tensor.
 """)
 
 add_docstr(torch._C.FloatTensorBase.cos,

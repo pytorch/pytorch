@@ -60,8 +60,8 @@ class SpatialSubtractiveNormalization(Module):
             self.meanestimator.modules[1].bias.zero_()
         else:
             for i in range(self.nInputPlane):
-                self.meanestimator.modules[1].weight[i].copy_(self.kernel)
-                self.meanestimator.modules[2].weight[0][i].copy_(self.kernel)
+                self.meanestimator.modules[1].weight[i].copy_(self.kernel, broadcast=False)
+                self.meanestimator.modules[2].weight[0][i].copy_(self.kernel, broadcast=False)
 
             self.meanestimator.modules[1].bias.zero_()
             self.meanestimator.modules[2].bias.zero_()

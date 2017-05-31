@@ -94,7 +94,7 @@ def small_3d_positive(t):
 
 
 def small_3d_unique(t):
-    return t(S, S, S).copy_(torch.arange(1, S * S * S + 1))
+    return t(S, S, S).copy_(torch.arange(1, S * S * S + 1).view(S, S, S))
 
 
 def small_1d_lapack(t):

@@ -555,7 +555,7 @@ template class THPPointer<THPGenerator>;
 static bool backCompatBroadcastWarn = false;
 
 void setBackCompatBroadcastWarn(bool warn) {
-  backCompatBroadcastWarn = true;
+  backCompatBroadcastWarn = warn;
 }
 
 bool getBackCompatBroadcastWarn() {
@@ -565,7 +565,7 @@ bool getBackCompatBroadcastWarn() {
 static bool backCompatKeepdimWarn = false;
 
 void setBackCompatKeepdimWarn(bool warn) {
-  backCompatKeepdimWarn = true;
+  backCompatKeepdimWarn = warn;
 }
 
 bool getBackCompatKeepdimWarn() {

@@ -687,7 +687,7 @@ static int THPTensor_(setValue)(THPTensor *self, PyObject *index, PyObject *valu
       THPTensorPtr tmp((THPTensor*)THPTensor_(New)(tresult.release()));
       if (!tmp)
         return -1;
-      if (!THPCopy(THTensor_(copy_functions), (PyObject*)tmp.get(), value, false)) {
+      if (!THPCopy(THTensor_(copy_functions), (PyObject*)tmp.get(), value, false, false)) {
         return -1;
       }
     }
