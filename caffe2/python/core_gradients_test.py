@@ -10,6 +10,9 @@ import unittest
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, test_util
 from caffe2.python.core import CreateOperator, GradientRegistry
+from caffe2.python import workspace
+
+import numpy as np
 
 
 # First, we will set up a few gradient registry entries so that we can manually
@@ -508,6 +511,24 @@ class TestGradientCalculation(test_util.TestCase):
             grad_map, {'out': 'out_grad', 'hidden2': 'hidden2_grad',
                        'hidden3': 'hidden3_grad', 'hidden': 'hidden_grad',
                        'in': 'in_grad'})
+
+    def test_two_grads(self):
+        net = core.Net("test_two_grads")
+        input, two, three = net.AddExternalInput("input", "two", "three")
+
+        m1 = net.Mul([input, two], "mul_1")
+        m2 = net.Mul([m1, three], "mul_2")
+        grad_map = net.AddGradientOperators([m2, m1])
+        workspace.ResetWorkspace()
+        workspace.blobs[input] = np.array([1]).astype(np.float32)
+        workspace.blobs[two] = np.array([2]).astype(np.float32)
+        workspace.blobs[three] = np.array([3]).astype(np.float32)
+        workspace.RunNetOnce(net)
+        print(net.Proto())
+        for blob in workspace.blobs:
+            print(blob, workspace.blobs[blob])
+        print("Input grad: ", workspace.blobs[grad_map[str(input)]])
+        assert workspace.blobs[grad_map[str(input)]] == 8.0
 
 # Skip if sparse operators are not available
 @unittest.skipIf(not core.IsOperator('SparseFunHash'),
