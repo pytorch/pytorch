@@ -100,6 +100,14 @@ class TimerInstance {
     running_ = false;
   }
 
+  int64_t get_ns() {
+    CAFFE_ENFORCE(running_, "Called TimerGet on a stopped timer.");
+    using namespace std::chrono;
+    auto duration = high_resolution_clock::now() - start_;
+    auto nanos = duration_cast<nanoseconds>(duration).count();
+    return nanos;
+  }
+
  private:
   bool running_;
   std::chrono::high_resolution_clock::time_point start_;
@@ -137,12 +145,27 @@ struct TimerEndOp : public Operator<CPUContext> {
   }
 };
 
+struct TimerGetAndEndOp : public Operator<CPUContext> {
+  TimerGetAndEndOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator(operator_def, ws) {}
+
+  bool RunOnDevice() override {
+    int64_t nanos = OperatorBase::Input<TimerInstance*>(0)->get_ns();
+    OperatorBase::Input<TimerInstance*>(0)->end();
+    auto* res = OperatorBase::Output<TensorCPU>(0);
+    res->Resize(1);
+    res->template mutable_data<int64_t>()[0] = nanos;
+    return true;
+  }
+};
+
 REGISTER_CPU_OPERATOR(StatRegistryCreate, StatRegistryCreateOp);
 REGISTER_CPU_OPERATOR(StatRegistryUpdate, StatRegistryUpdateOp);
 REGISTER_CPU_OPERATOR(StatRegistryExport, StatRegistryExportOp);
 
 REGISTER_CPU_OPERATOR(TimerBegin, TimerBeginOp);
 REGISTER_CPU_OPERATOR(TimerEnd, TimerEndOp);
+REGISTER_CPU_OPERATOR(TimerGetAndEnd, TimerGetAndEndOp);
 
 OPERATOR_SCHEMA(StatRegistryCreate)
     .NumInputs(0)
@@ -199,6 +222,14 @@ OPERATOR_SCHEMA(TimerEnd)
     .NumOutputs(0)
     .SetDoc("Stop a timer started with TimerBegin, publishing a CAFFE_EVENT")
     .Input(0, "timer", "Pointer to timer, obtained from TimerBegin.");
+
+OPERATOR_SCHEMA(TimerGetAndEnd)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .SetDoc(R"DOC(Queries the current time of a timer in nanos, stops the timer
+            publishing a CAFFE_EVENT)DOC")
+    .Input(0, "timer", "Pointer to timer, obtained from TimerBegin.")
+    .Output(0, "nanos", "nanoseconds in int64");
 
 CAFFE_KNOWN_TYPE(TimerInstance*);
 CAFFE_KNOWN_TYPE(std::unique_ptr<caffe2::StatRegistry>);
