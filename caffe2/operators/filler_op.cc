@@ -24,7 +24,6 @@ REGISTER_CPU_OPERATOR(MSRAFill, MSRAFillOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(RangeFill, RangeFillOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(LengthsRangeFill, LengthsRangeFillOp<CPUContext>);
 
-
 OPERATOR_SCHEMA(ConstantFill)
     .NumInputs(0, 1)
     .NumOutputs(1)
@@ -64,7 +63,9 @@ NOTE: Currently, it supports data type of float, int32, int64, and bool.
         "The additional dimensions appended at the end of the shape indicated"
         "by the input blob."
         "Cannot set the extra_shape argument when there is no input blob.")
-    .Arg("input_as_shape", "1D tensor containing the desired output shape")
+    .Arg(
+        "input_as_shape",
+        "1D tensor containing the desired output shape.  First input must be in CPU context.")
     .Input(0, "input", "Input tensor (optional) to provide shape information.")
     .Output(
         0,
@@ -92,7 +93,9 @@ The shape of the output can be given as argument or input.
     .Arg("min", "minimum value, inclusive")
     .Arg("max", "maximum value, inclusive")
     .Arg("shape", "shape of the output, do not set when input_as_shape=1")
-    .Arg("input_as_shape", "set to 1 to use the first input as shape")
+    .Arg(
+        "input_as_shape",
+        "set to 1 to use the first input as shape. First input must be in CPU context.")
     .Input(
         0,
         "SHAPE",
@@ -136,7 +139,9 @@ input.
         "The additional dimensions appended at the end of the shape indicated"
         "by the input blob. "
         "Cannot set the extra_shape argument when there is no input blob.")
-    .Arg("input_as_shape", "1D tensor containing the desired output shape")
+    .Arg(
+        "input_as_shape",
+        "1D tensor containing the desired output shape. First input must be in CPU context.")
     .Input(0, "input", "Input tensor to provide shape information")
     .Input(
         1,
