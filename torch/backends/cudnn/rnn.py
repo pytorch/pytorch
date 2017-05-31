@@ -177,11 +177,48 @@ def get_parameters(fn, handle, weight_buf):
     return params
 
 
-def _copyParams(params_from, params_to):
+def same_storage(s1, s2):
+    return s1.data_ptr() == s2.data_ptr() and s1.size() == s2.size()
+
+
+def get_weight_buf_from_shared_storage(weights, num_weights):
+    if len(weights) == 0:
+        return
+    shared_storage = weights[0][0].storage()
+    if shared_storage.size() != num_weights:
+        return
+    if not all(same_storage(w.storage(), shared_storage)
+               for layer in weights for w in layer):
+        return
+    return weights[0][0].new().set_(
+        shared_storage, 0, torch.Size((num_weights, )), (1,))
+
+
+def check_coalesced(params_from, params_to):
+    coalesced = True
+    for layer_params_from, layer_params_to in zip(params_from, params_to):
+        for param_from, param_to in zip(layer_params_from, layer_params_to):
+            if not (same_storage(param_from.storage(), param_to.storage()) and
+                    param_from.storage_offset() == param_to.storage_offset()):
+                coalesced = False
+    return coalesced
+
+
+def coalesce_to(params_from, params_to):
+    for layer_params_from, layer_params_to in zip(params_from, params_to):
+        for param_from, param_to in zip(layer_params_from, layer_params_to):
+            assert param_from.type() == param_to.type()
+            param_to.set_(param_from.storage(), param_from.storage_offset(),
+                          param_to.size())
+
+
+def copy_and_coalesce(params_from, params_to):
     for layer_params_from, layer_params_to in zip(params_from, params_to):
         for param_from, param_to in zip(layer_params_from, layer_params_to):
             assert param_from.type() == param_to.type()
             param_to.copy_(param_from)
+            param_from.set_(param_to.storage(), param_to.storage_offset(),
+                            param_from.size())
 
 
 def forward(fn, input, hx, weight, output, hy):
@@ -244,15 +281,22 @@ def forward(fn, input, hx, weight, output, hy):
         # create the weight buffer and copy the weights into it
         num_weights = get_num_weights(
             handle, fn.rnn_desc, fn.x_descs[0], fn.datatype)
-        fn.weight_buf = x.new(num_weights)
-        fn.w_desc = init_weight_descriptor(fn, fn.weight_buf)
-        w = fn.weight_buf
-        # this zero might not seem necessary, but it is in the case
-        # where biases are disabled; then they won't be copied and must be zero'd.
-        # Alternatively, _copyParams could be written more carefully.
-        w.zero_()
-        params = get_parameters(fn, handle, w)
-        _copyParams(weight, params)
+        fn.weight_buf = get_weight_buf_from_shared_storage(weight, num_weights)
+        if fn.weight_buf is not None:
+            fn.w_desc = init_weight_descriptor(fn, fn.weight_buf)
+            w = fn.weight_buf
+            params = get_parameters(fn, handle, w)
+            coalesced = check_coalesced(weight, params)
+        if fn.weight_buf is None or not coalesced:
+            fn.weight_buf = x.new(num_weights)
+            fn.w_desc = init_weight_descriptor(fn, fn.weight_buf)
+            w = fn.weight_buf
+            # this zero might not seem necessary, but it is in the case
+            # where biases are disabled; then they won't be copied and must be zero'd.
+            # Alternatively, copy_and_coalesce could be written more carefully.
+            w.zero_()
+            params = get_parameters(fn, handle, w)
+            copy_and_coalesce(weight, params)
 
         if tuple(hx.size()) != hidden_size:
             raise RuntimeError('Expected hidden size {}, got {}'.format(
@@ -437,7 +481,17 @@ def backward_weight(fn, input, hx, output, weight, grad_weight):
         assert cx is None or cx.is_contiguous()
         x = input.contiguous()
         y = output
-        dw = fn.weight_buf.new().resize_as_(fn.weight_buf).zero_()
+
+        num_weights = get_num_weights(
+            handle, fn.rnn_desc, fn.x_descs[0], fn.datatype)
+        dw = get_weight_buf_from_shared_storage(grad_weight, num_weights)
+        coalesced = False
+        if dw is not None:
+            grad_params = get_parameters(fn, handle, dw)
+            coalesced = check_coalesced(grad_weight, grad_params)
+        if not coalesced:
+            dw = fn.weight_buf.new().resize_as_(fn.weight_buf).zero_()
+            grad_params = get_parameters(fn, handle, dw)
 
         check_error(cudnn.lib.cudnnRNNBackwardWeights(
             handle,
@@ -451,7 +505,8 @@ def backward_weight(fn, input, hx, output, weight, grad_weight):
             ctypes.c_void_p(fn.reserve.data_ptr()), fn.reserve.size(0)
         ))
 
-        # copy the weights from the weight_buf into grad_weight
-        grad_params = get_parameters(fn, handle, dw)
-        _copyParams(grad_params, grad_weight)
+        # coalesce the grads from grad_params into grad_weight
+        if not coalesced:
+            coalesce_to(grad_params, grad_weight)
+
         return grad_weight
