@@ -63,7 +63,18 @@ matrix:
           packages:
           - g++-5
       env: COMPILER=g++-5
+    # 10
+    - os: linux
+      compiler: gcc
+      env: QUICKTEST
+      install:
+        - ./.travis/quicktest-install.sh
+        - ./.travis/quicktest-build.sh
+      script:
+        - ./.travis/quicktest-test.sh
   allow_failures:
+    - env: COMPILER=g++
+    - env: COMPILER=clang++
     - env: COMPILER=g++-5
     - env: COMPILER=g++-4.9
     - env: COMPILER=g++-4.8
@@ -73,6 +84,8 @@ matrix:
 
 cache:
   apt: true
+  directories:
+    - $HOME/.ccache
 
 install:
   - ./.travis/install.sh
