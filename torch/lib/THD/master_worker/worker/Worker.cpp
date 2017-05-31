@@ -24,8 +24,7 @@ using namespace thd::worker;
 
 void THDWorkerMain(std::string init_method, int world_size,
                    std::string group_name, int rank) {
-  thd::InitMethod::Config config = thd::getInitConfig(init_method, world_size,
-                                                      group_name, rank);
+  auto config = thd::getInitConfig(init_method, world_size, group_name, rank);
   std::unique_ptr<RPCMessage> command;
   workerCommandChannel.reset(new thd::WorkerCommandChannel(config));
   if (!workerCommandChannel->init()) {

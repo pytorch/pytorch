@@ -7,19 +7,22 @@ InitMethod::Config initTCP(std::string argument, rank_type world_size,
                            std::string group_name, int rank);
 InitMethod::Config initFile(std::string argument, rank_type world_size,
                             std::string group_name, int rank);
-InitMethod::Config initEnv(int world_size);
+InitMethod::Config initEnv(int world_size, std::string group_name, int rank);
 
 }
 
 InitMethod::Config getInitConfig(std::string argument, int world_size,
                                  std::string group_name, int rank) {
   if (argument.find("env://") == 0) {
-    return init::initEnv(world_size);
+    return init::initEnv(world_size, group_name, rank);
   } else {
     rank_type r_world_size;
     try {
       r_world_size = convertToRank(world_size);
     } catch(std::exception& e) {
+      if (rank == -1)
+        throw std::invalid_argument("world_size is not set - it is required for "
+                                    "`tcp://` and `file://` init methods");
       throw std::invalid_argument("invalid world_size");
     }
 
