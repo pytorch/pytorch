@@ -787,6 +787,7 @@ static bool THPTensor_(_advancedIndexAdd)(PyObject *index, THTensorPtr &dest, TH
       index, dest, broadcasted, &linearIndices, &flattened);
 
   if (success) {
+    // Verify src tensor is contiguous before flattening
     THTensor *contiguous;
     if (THTensor_(isContiguous(LIBRARY_STATE src))) {
       contiguous = THTensor_(newWithTensor)(LIBRARY_STATE src);
@@ -806,7 +807,7 @@ static bool THPTensor_(_advancedIndexAdd)(PyObject *index, THTensorPtr &dest, TH
   }
 
   THPTensor_(_advancedIndexCommonCleanup)(broadcasted, linearIndices, flattened);
-  return true;
+  return success;
 }
 
 // Needed for autograd to support backwards passes when there are overlapping
@@ -818,12 +819,10 @@ static PyObject* THPTensor_(advancedIndexAdd)(THPTensor *self, PyObject *args) {
       "arguments (%d given)", (int) PyTuple_GET_SIZE(args));
 
   THPUtils_assert(THPTensor_(_checkAdvancedIndexing)(self, PyTuple_GET_ITEM(args, 0)),
-      "advancedIndexAdd must use an indexer that triggers advanced indexing");
+      "first argument must be an indexer that triggers advanced indexing");
 
-  THPUtils_assert(THPTensor_(Check)(PyTuple_GET_ITEM(args, 1)), "Second argument to "
-      "advancedIndexAdd must be a Tensor containing the grad output");
-
-  // TODO: assert same shape?
+  THPUtils_assert(THPTensor_(Check)(PyTuple_GET_ITEM(args, 1)), "Second argument "
+      "must be a Tensor");
 
   THTensorPtr gradOutput = THTensor_(newWithTensor)(
     LIBRARY_STATE ((THPTensor *)PyTuple_GET_ITEM(args, 1))->cdata);
