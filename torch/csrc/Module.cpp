@@ -482,7 +482,7 @@ PyObject *THPModule_inferSize(PyObject *_unused, PyObject *args)
   THLongStorage *size1 = size1_guard.get();
   THLongStoragePtr size2_guard = THPUtils_unpackSize(arg2);
   THLongStorage *size2 = size2_guard.get();
-  THLongStoragePtr sizes_guard = THLongStorage_new();
+  THLongStoragePtr sizes_guard(THLongStorage_new());
   THLongStorage *sizes = sizes_guard.get();
 
   THLongStorage_inferSize2(sizes, size1->data, size1->size, size2->data, size2->size, 1);

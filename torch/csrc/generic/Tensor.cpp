@@ -827,7 +827,7 @@ void THPTensor_(initCopyMethods)()
 {
   auto& h = THTensor_(copy_functions);
   // copy from same type
-  THPInsertCopyFunction(h, &THTensor_(copy));
+  THPInsertTensorCopyFunction(h, &THTensor_(copy));
   // copy from CPU types
   THPInsertTensorCopyFunction(h, &THTensor_(copyByte));
   THPInsertTensorCopyFunction(h, &THTensor_(copyChar));

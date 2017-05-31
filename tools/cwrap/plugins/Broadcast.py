@@ -47,16 +47,16 @@ class Broadcast(CWrapPlugin):
     def getPreArgStringTemplate(self, type=None):
         if type == None:
             ret = """THTensor *${arg_op_other}_save = ${arg_op_other};
-                     THTensorPtr ${arg_op_other}_guard = THTensor_(new)(LIBRARY_STATE_NOARGS);\n"""
+                     THTensorPtr ${arg_op_other}_guard(THTensor_(new)(LIBRARY_STATE_NOARGS));\n"""
         else:
             tensor_type = "TH" + type + "Tensor"
             cuda_tensor_type = "THCuda" + type + "Tensor"
             ret = ("#if !IS_CUDA\n" +
                   tensor_type + " *${arg_op_other}_save = ${arg_op_other};\n" +
-                  tensor_type + "Ptr ${arg_op_other}_guard = " + tensor_type + "_new(LIBRARY_STATE_NOARGS);\n" +
+                  tensor_type + "Ptr ${arg_op_other}_guard(" + tensor_type + "_new(LIBRARY_STATE_NOARGS));\n" +
                   "#else\n" +
                   cuda_tensor_type + " *${arg_op_other}_save = ${arg_op_other};\n" +
-                  "THPPointer<"  + cuda_tensor_type + "> ${arg_op_other}_guard = " + cuda_tensor_type + "_new(LIBRARY_STATE_NOARGS);\n" +
+                  "THPPointer<"  + cuda_tensor_type + "> ${arg_op_other}_guard (" + cuda_tensor_type + "_new(LIBRARY_STATE_NOARGS));\n" +
                   "#endif\n")
         return Template(ret)
 
@@ -85,13 +85,13 @@ class Broadcast(CWrapPlugin):
            long ${arg_op_a}_dim${idx}_size = THTensor_(size)(LIBRARY_STATE ${arg_op_dim}, ${arg_op_dim_value});\n""")
 
     OUT_PLACE_PRE_EXPAND1_DIM_TEMPLATE = Template(
-        """THLongStoragePtr ${arg_op_a}_storage = THLongStorage_newWithSize1(${arg_op_a}_dim0_size);\n""")
+        """THLongStoragePtr ${arg_op_a}_storage(THLongStorage_newWithSize1(${arg_op_a}_dim0_size));\n""")
 
     OUT_PLACE_PRE_EXPAND2_DIM_TEMPLATE = Template(
-        """THLongStoragePtr ${arg_op_a}_storage = THLongStorage_newWithSize2(${arg_op_a}_dim0_size, ${arg_op_a}_dim1_size);\n""")
+        """THLongStoragePtr ${arg_op_a}_storage(THLongStorage_newWithSize2(${arg_op_a}_dim0_size, ${arg_op_a}_dim1_size));\n""")
 
     OUT_PLACE_PRE_EXPAND3_DIM_TEMPLATE = Template(
-        """THLongStoragePtr ${arg_op_a}_storage = THLongStorage_newWithSize3(${arg_op_a}_dim0_size, ${arg_op_a}_dim1_size, ${arg_op_a}_dim2_size);\n""")
+        """THLongStoragePtr ${arg_op_a}_storage(THLongStorage_newWithSize3(${arg_op_a}_dim0_size, ${arg_op_a}_dim1_size, ${arg_op_a}_dim2_size));\n""")
 
     OUT_PLACE_PRE_EXPAND_POST_DIM_TEMPLATE = Template(
         """if (!THTensor_(expand)(LIBRARY_STATE ${arg_op_a}_guard.get(), ${arg_op_a}, ${arg_op_a}_storage, ${raise_errors})) {
