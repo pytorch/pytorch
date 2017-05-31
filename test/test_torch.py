@@ -1201,12 +1201,15 @@ class TestTorch(TestCase):
                         self.assertTrue(issubclass(w[0].category, UserWarning))
                         self.assertTrue("Falling back" in str(w[0].message))
                     with warnings.catch_warnings(record=True) as w:
+                        warnings.simplefilter('always', UserWarning)
                         r0 = tensorfn(t0_fn, t1, t2)
                         verifyFallbackWarnings(w)
                     with warnings.catch_warnings(record=True) as w:
+                        warnings.simplefilter('always', UserWarning)
                         r1 = tensorfn(t1_fn, t0, t2)
                         verifyFallbackWarnings(w)
                     with warnings.catch_warnings(record=True) as w:
+                        warnings.simplefilter('always', UserWarning)
                         r2 = tensorfn(t2_fn, t0, t1)
                         verifyFallbackWarnings(w)
                     self.assertEqual(t0.size(), r0.size())
