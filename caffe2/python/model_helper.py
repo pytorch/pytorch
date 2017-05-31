@@ -146,7 +146,8 @@ class ModelHelper(object):
         return param_info.blob
 
     def get_param_info(self, param):
-        assert isinstance(param, core.BlobReference)
+        assert isinstance(param, core.BlobReference), \
+            "Param {} is not a BlobReference".format(param)
         return self._parameters_info.get(param, None)
 
     # This method is deprecated, use create_param method which
