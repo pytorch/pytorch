@@ -53,9 +53,10 @@ class FillerOp : public Operator<Context> {
   bool RunOnDevice() override {
     auto* output = Operator<Context>::Output(0);
     if (InputSize()) {
-      auto& input = Input(0);
       auto shape = vector<TIndex>{};
       if (input_as_shape_) {
+        // Shape input must be in CPU context
+        auto& input = OperatorBase::Input<Tensor<CPUContext>>(0);
         CAFFE_ENFORCE_EQ(
             input.ndim(),
             1,
@@ -64,6 +65,7 @@ class FillerOp : public Operator<Context> {
         auto* shape_data = input.template data<TIndex>();
         shape.insert(shape.end(), shape_data, shape_data + input.dim32(0));
       } else {
+        auto& input = Input(0);
         shape.insert(shape.end(), input.dims().begin(), input.dims().end());
       }
       shape.insert(shape.end(), extra_shape_.begin(), extra_shape_.end());

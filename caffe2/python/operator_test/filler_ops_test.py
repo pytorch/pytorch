@@ -6,6 +6,7 @@ from __future__ import unicode_literals
 import hypothesis.strategies as st
 
 from caffe2.python import core, workspace
+from caffe2.proto import caffe2_pb2
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
 
@@ -51,29 +52,29 @@ class TestFillerOperator(hu.HypothesisTestCase):
         ),
         a=st.integers(min_value=0, max_value=100),
         b=st.integers(min_value=0, max_value=100),
-        **hu.gcs_cpu_only
+        **hu.gcs
     )
     def test_uniform_int_fill_op_blob_input(self, shape, a, b, gc, dc):
         net = core.Net('test_net')
-        shape_blob = net.Const(shape, dtype=np.int64)
+
+        with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU)):
+            shape_blob = net.Const(shape, dtype=np.int64)
         a_blob = net.Const(a, dtype=np.int32)
         b_blob = net.Const(b, dtype=np.int32)
         uniform_fill = net.UniformIntFill([shape_blob, a_blob, b_blob],
                                           1, input_as_shape=1)
 
-        for device_option in dc:
-            net._net.device_option.CopyFrom(device_option)
-            workspace.RunNetOnce(net)
+        workspace.RunNetOnce(net)
 
-            blob_out = workspace.FetchBlob(uniform_fill)
-            if b < a:
-                new_shape = shape[:]
-                new_shape[0] = 0
-                np.testing.assert_array_equal(new_shape, blob_out.shape)
-            else:
-                np.testing.assert_array_equal(shape, blob_out.shape)
-                self.assertTrue((blob_out >= a).all())
-                self.assertTrue((blob_out <= b).all())
+        blob_out = workspace.FetchBlob(uniform_fill)
+        if b < a:
+            new_shape = shape[:]
+            new_shape[0] = 0
+            np.testing.assert_array_equal(new_shape, blob_out.shape)
+        else:
+            np.testing.assert_array_equal(shape, blob_out.shape)
+            self.assertTrue((blob_out >= a).all())
+            self.assertTrue((blob_out <= b).all())
 
     @given(**hu.gcs)
     def test_gaussian_fill_op(self, gc, dc):
