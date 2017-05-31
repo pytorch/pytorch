@@ -71,7 +71,7 @@ std::pair<int, std::size_t> waitForGroup(std::string file_path, std::string grou
       ::close(fd);
     }
 
-    file = std::fstream(file_path);
+    file.close(); file.open(file_path);
     content = {std::istreambuf_iterator<char>(file),
                std::istreambuf_iterator<char>()};
 
@@ -147,7 +147,7 @@ parseFile(std::fstream& file, rank_type world_size, std::string group_name) {
     }
   }
 
-  return {master_port, master_addrs, ranks};
+  return std::make_tuple(master_port, master_addrs, ranks);
 }
 
 rank_type getRank(const std::vector<int>& ranks, int assigned_rank,
