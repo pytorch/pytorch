@@ -992,6 +992,8 @@ class TestTorch(TestCase):
         fns_no_torch = ["sub", "masked_copy", "masked_fill", "map", "map2", "copy"]
         # functions with no inplace equivalent
         fns_no_inplace = ["dist", "max", "min"]
+        # functions with no inplace cuda implementation
+        fns_no_inplace_cuda = ["map", "map2"]
         # functions with no out-of-place tensor version
         fns_no_out_place = ["masked_copy", "masked_fill", "map", "map2", "copy"]
         # functions with fallback to equal nElem behavior
@@ -1078,7 +1080,7 @@ class TestTorch(TestCase):
                     self.assertEqual(r1, r2)
 
             # now for in place functions
-            if fn not in fns_no_inplace:
+            if fn not in fns_no_inplace and (fn not in fns_no_inplace_cuda or not largeExpanded.is_cuda):
                 # in-place tensor is not broadcastable; test only guaranteed
                 # to work by broadcasting other argument(s)
 
