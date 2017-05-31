@@ -38,6 +38,7 @@ from string import Template
 #             = i_{f(s_0), ..., f(s_n)} * j_{f(s_0), ..., f(s_n)} by definition of pointwise operator
 #             = e(i,a) * e(j,a)
 
+
 class Broadcast(CWrapPlugin):
 
     # Save and restore passed in arguments in case later plugins use
@@ -45,33 +46,34 @@ class Broadcast(CWrapPlugin):
         """${arg_op_other} = ${arg_op_other}_save;\n""")
 
     def getPreArgStringTemplate(self, type=None):
-        if type == None:
+        if type is None:
             ret = """THTensor *${arg_op_other}_save = ${arg_op_other};
                      THTensorPtr ${arg_op_other}_guard(THTensor_(new)(LIBRARY_STATE_NOARGS));\n"""
         else:
-            tensor_type = "TH" + type + "Tensor"
-            cuda_tensor_type = "THCuda" + type + "Tensor"
+            cpu_t = "TH" + type + "Tensor"
+            gpu_t = "THCuda" + type + "Tensor"
             ret = ("#if !IS_CUDA\n" +
-                  tensor_type + " *${arg_op_other}_save = ${arg_op_other};\n" +
-                  tensor_type + "Ptr ${arg_op_other}_guard(" + tensor_type + "_new(LIBRARY_STATE_NOARGS));\n" +
-                  "#else\n" +
-                  cuda_tensor_type + " *${arg_op_other}_save = ${arg_op_other};\n" +
-                  "THPPointer<"  + cuda_tensor_type + "> ${arg_op_other}_guard (" + cuda_tensor_type + "_new(LIBRARY_STATE_NOARGS));\n" +
-                  "#endif\n")
+                   cpu_t + " *${arg_op_other}_save = ${arg_op_other};\n" +
+                   cpu_t + "Ptr ${arg_op_other}_guard(" + cpu_t + "_new(LIBRARY_STATE_NOARGS));\n" +
+                   "#else\n" +
+                   gpu_t + " *${arg_op_other}_save = ${arg_op_other};\n" +
+                   "THPPointer<" + gpu_t + "> ${arg_op_other}_guard(\n" + gpu_t + "_new(LIBRARY_STATE_NOARGS));\n" +
+                   "#endif\n")
         return Template(ret)
 
     OUT_PLACE_PRE_EXPAND2_TEMPLATE = Template(
         """if (!expand_outplace2(LIBRARY_STATE ${arg_op_a}_guard.get(), ${arg_op_other}_guard.get(),
-                                     ${arg_op_a}, ${arg_op_other},
-                                     \"${op_a}\", \"${op_other}\", !${raise_errors})) {
+                                 ${arg_op_a}, ${arg_op_other},
+                                 \"${op_a}\", \"${op_other}\", !${raise_errors})) {
              ${arg_op_a} = ${arg_op_a}_guard.get();
              ${arg_op_other} = ${arg_op_other}_guard.get();
            }""")
 
     OUT_PLACE_PRE_EXPAND3_TEMPLATE = Template(
-        """if (!expand_outplace3(LIBRARY_STATE ${arg_op_a}_guard.get(), ${arg_op_other1}_guard.get(), ${arg_op_other2}_guard.get(),
-                                     ${arg_op_a}, ${arg_op_other1}, ${arg_op_other2},
-                                     \"${op_a}\", \"${op_other1}\", \"${op_other2}\", !${raise_errors})) {
+        """if (!expand_outplace3(LIBRARY_STATE
+                                 ${arg_op_a}_guard.get(), ${arg_op_other1}_guard.get(), ${arg_op_other2}_guard.get(),
+                                 ${arg_op_a}, ${arg_op_other1}, ${arg_op_other2},
+                                 \"${op_a}\", \"${op_other1}\", \"${op_other2}\", !${raise_errors})) {
              ${arg_op_a} = ${arg_op_a}_guard.get();
              ${arg_op_other1} = ${arg_op_other1}_guard.get();
              ${arg_op_other2} = ${arg_op_other2}_guard.get();
@@ -88,10 +90,12 @@ class Broadcast(CWrapPlugin):
         """THLongStoragePtr ${arg_op_a}_storage(THLongStorage_newWithSize1(${arg_op_a}_dim0_size));\n""")
 
     OUT_PLACE_PRE_EXPAND2_DIM_TEMPLATE = Template(
-        """THLongStoragePtr ${arg_op_a}_storage(THLongStorage_newWithSize2(${arg_op_a}_dim0_size, ${arg_op_a}_dim1_size));\n""")
+        """THLongStoragePtr ${arg_op_a}_storage(
+               THLongStorage_newWithSize2(${arg_op_a}_dim0_size, ${arg_op_a}_dim1_size));\n""")
 
     OUT_PLACE_PRE_EXPAND3_DIM_TEMPLATE = Template(
-        """THLongStoragePtr ${arg_op_a}_storage(THLongStorage_newWithSize3(${arg_op_a}_dim0_size, ${arg_op_a}_dim1_size, ${arg_op_a}_dim2_size));\n""")
+        """THLongStoragePtr ${arg_op_a}_storage(
+               THLongStorage_newWithSize3(${arg_op_a}_dim0_size, ${arg_op_a}_dim1_size, ${arg_op_a}_dim2_size));\n""")
 
     OUT_PLACE_PRE_EXPAND_POST_DIM_TEMPLATE = Template(
         """if (!THTensor_(expand)(LIBRARY_STATE ${arg_op_a}_guard.get(), ${arg_op_a}, ${arg_op_a}_storage, ${raise_errors})) {
@@ -110,8 +114,8 @@ class Broadcast(CWrapPlugin):
 
     IN_PLACE_PRE_EXPAND2_TEMPLATE = Template(
         """if (!expand_inplace2(LIBRARY_STATE ${arg_op_other1}_guard.get(), ${arg_op_other2}_guard.get(),
-                                           ${arg_op_other1}, ${arg_op_other2}, ${arg_op_a},
-                                           \"${op_other1}\", \"${op_other2}\", \"${op_a}\", !${raise_errors})) {
+                                ${arg_op_other1}, ${arg_op_other2}, ${arg_op_a},
+                                \"${op_other1}\", \"${op_other2}\", \"${op_a}\", !${raise_errors})) {
              ${arg_op_other1} = ${arg_op_other1}_guard.get();
              ${arg_op_other2} = ${arg_op_other2}_guard.get();
            }""")
@@ -135,7 +139,7 @@ class Broadcast(CWrapPlugin):
                 continue
 
             params = arg.get('broadcast').split(" ")
-            op_a =  arg.get('assign_name', arg['name'])
+            op_a = arg.get('assign_name', arg['name'])
             in_place = "inplace" in params
             raise_errors = "false" if "fallback" in params else "true"
 
@@ -159,7 +163,7 @@ class Broadcast(CWrapPlugin):
                         assert len(batchdim) == 2
                         assert batchdim[1].startswith("dim")
                         dim_val = batchdim[1][len("dim"):]
-                        dims_kvs.append( {"op":batchdim[0], "arg_op":"arg_" + batchdim[0], "val":dim_val} )
+                        dims_kvs.append({"op": batchdim[0], "arg_op": "arg_" + batchdim[0], "val": dim_val})
 
             assert len(dims_kvs) <= 3
             for p in params[1:]:
@@ -179,23 +183,24 @@ class Broadcast(CWrapPlugin):
                         type_op_c = None if types[1] == "Real" else types[1]
 
             op_b_mapping = {
-                "op_a":op_a,
-                "op_other":op_b,
-                "arg_op_a":arg_op_a,
-                "arg_op_other":arg_op_b,
-                "raise_errors":raise_errors
+                "op_a": op_a,
+                "op_other": op_b,
+                "arg_op_a": arg_op_a,
+                "arg_op_other": arg_op_b,
+                "raise_errors": raise_errors
             }
             op_c_mapping = {
-                "op_a":op_a,
-                "op_other":op_c,
-                "arg_op_a":arg_op_a,
-                "arg_op_other":arg_op_c,
-                "raise_errors":raise_errors
+                "op_a": op_a,
+                "op_other": op_c,
+                "arg_op_a": arg_op_a,
+                "arg_op_other": arg_op_c,
+                "raise_errors": raise_errors
             }
 
             if in_place:
                 code_arg_op_other1 = self.getPreArgStringTemplate(type=type_op_b).substitute(op_b_mapping)
-                code_arg_op_other2 = self.getPreArgStringTemplate(type=type_op_c).substitute(op_c_mapping) if op_c else ""
+                code_arg_op_other2 = (
+                    self.getPreArgStringTemplate(type=type_op_c).substitute(op_c_mapping) if op_c else "")
 
                 if op_c:
                     expand_code = self.IN_PLACE_PRE_EXPAND2_TEMPLATE.substitute(
@@ -227,7 +232,7 @@ class Broadcast(CWrapPlugin):
                     code_arg_op_other1 = ""
                     code_arg_op_other2 = ""
                     expand_code = ""
-                    for idx,kv in enumerate(dims_kvs):
+                    for idx, kv in enumerate(dims_kvs):
                         expand_code += self.OUT_PLACE_PRE_EXPAND_PRE_DIM_TEMPLATE.substitute(
                             arg_op_a=arg_op_a,
                             op_dim=kv["op"],

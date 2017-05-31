@@ -948,7 +948,7 @@ class TestTorch(TestCase):
     def _select_broadcastable_dims(self, dims_full=None):
         # select full dimensionality
         if dims_full is None:
-            dims_full=[]
+            dims_full = []
             ndims = random.randint(1, 4)
             for _ in range(ndims):
                 dims_full = dims_full + [random.randint(1, 8)]
@@ -1098,7 +1098,7 @@ class TestTorch(TestCase):
                     elif fn == "map":
                         return t0_fn(t1, lambda x, y: x + y)
                     elif fn == "map2":
-                        return t0_fn(t1, t2, lambda x, y, z : x + y + z)
+                        return t0_fn(t1, t2, lambda x, y, z: x + y + z)
                     elif fn in fns_3_args:
                         return t0_fn(1.0, t1, t2)
                     else:
@@ -1168,13 +1168,13 @@ class TestTorch(TestCase):
                     if fn == "lerp":
                         return myfn(t1, 0.5)
                     elif fn == "masked_copy":
-                        return myfn(t1 < 0.5, torch.randn(4*4).float())
+                        return myfn(t1 < 0.5, torch.randn(4 * 4).float())
                     elif fn == "masked_fill":
                         return myfn(t1 < 0.5, 1.0)
                     elif fn == "map":
                         return myfn(t1, lambda x, y: x + y)
                     elif fn == "map2":
-                         return myfn(t1, t2, lambda x, y, z: x + y + z)
+                        return myfn(t1, t2, lambda x, y, z: x + y + z)
                     elif fn in fns_3_args:
                         return myfn(1.0, t1, t2)
                     else:
@@ -1271,7 +1271,7 @@ class TestTorch(TestCase):
         n_dim = random.randint(1, 8)
         m_dim = random.randint(1, 8)
         p_dim = random.randint(1, 8)
-        full_batch_dims = [random.randint(1,3) for i in range(random.randint(1,3))]
+        full_batch_dims = [random.randint(1, 3) for i in range(random.randint(1, 3))]
         (batch_dims_small, _, _) = TestTorch._select_broadcastable_dims(self, full_batch_dims)
 
         def verifyBatchedMatmul(fullLHS):
@@ -1300,7 +1300,8 @@ class TestTorch(TestCase):
                             result = l_matmul_fn(r)
                             self.assertEqual(truth, result)
                 # compare to bmm
-                bmm_result = torch.bmm(lhs_expanded.contiguous().view(-1, n_dim,  m_dim), rhs_expanded.contiguous().view(-1, m_dim, p_dim))
+                bmm_result = (torch.bmm(lhs_expanded.contiguous().view(-1, n_dim, m_dim),
+                                        rhs_expanded.contiguous().view(-1, m_dim, p_dim)))
                 self.assertEqual(truth.view(-1, n_dim, p_dim), bmm_result)
 
         verifyBatchedMatmul(False)
@@ -1310,7 +1311,7 @@ class TestTorch(TestCase):
         self._test_broadcast_batched_matmul(self, lambda t: t)
 
     def test_broadcast_copy_fn(self):
-        torch.zeros(5,6).copy_(torch.zeros(6))
+        torch.zeros(5, 6).copy_(torch.zeros(6))
 
         def verifyFallbackWarnings(w):
             self.assertEqual(len(w), 1)
@@ -1319,7 +1320,7 @@ class TestTorch(TestCase):
 
         # suppress broadcastable warning
         with warnings.catch_warnings(record=True) as w:
-            torch.zeros(5,6).copy_(torch.zeros(30), broadcast=True)
+            torch.zeros(5, 6).copy_(torch.zeros(30), broadcast=True)
             verifyFallbackWarnings(w)
 
     def test_randperm(self):
