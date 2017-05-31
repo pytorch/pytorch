@@ -81,9 +81,9 @@ def get_numerical_jacobian(fn, input, target, eps=1e-3):
         for i in range(flat_tensor.nelement()):
             orig = flat_tensor[i]
             flat_tensor[i] = orig - eps
-            outa.copy_(fn(input))
+            outa.copy_(fn(input), broadcast=False)
             flat_tensor[i] = orig + eps
-            outb.copy_(fn(input))
+            outb.copy_(fn(input), broadcast=False)
             flat_tensor[i] = orig
 
             outb.add_(-1, outa).div_(2 * eps)

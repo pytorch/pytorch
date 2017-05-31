@@ -1306,6 +1306,19 @@ class TestTorch(TestCase):
     def test_broadcast_batched_matmul(self):
         self._test_broadcast_batched_matmul(self, lambda t: t)
 
+    def test_broadcast_copy_fn(self):
+        torch.zeros(5,6).copy_(torch.zeros(6))
+
+        def verifyFallbackWarnings(w):
+            self.assertEqual(len(w), 1)
+            self.assertTrue(issubclass(w[0].category, UserWarning))
+            self.assertTrue("Falling back" in str(w[0].message))
+
+        # suppress broadcastable warning
+        with warnings.catch_warnings(record=True) as w:
+            torch.zeros(5,6).copy_(torch.zeros(30), broadcast=True)
+            verifyFallbackWarnings(w)
+
     def test_randperm(self):
         _RNGState = torch.get_rng_state()
         res1 = torch.randperm(100)

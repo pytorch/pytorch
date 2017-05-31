@@ -831,7 +831,7 @@ invalid_arguments:
 PyObject * THPTensor_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
 {
   HANDLE_TH_ERRORS
-  return THPCopyMethod(THTensor_(copy_functions), self, args, kwargs);
+  return THPTensorCopyMethod(THTensor_(copy_functions), self, args, kwargs);
   END_HANDLE_TH_ERRORS
 }
 
