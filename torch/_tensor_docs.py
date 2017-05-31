@@ -280,7 +280,7 @@ copy_(src, async=False) -> Tensor
 
 Copies the elements from :attr:`src` into this tensor and returns this tensor.
 
-The source tensor should have the same number of elements as this tensor. It
+The source tensor must be :ref:`broadcastable <broadcasting-semantics>` with this tensor. It
 may be of a different data type or reside on a different device.
 
 Args:
