@@ -1347,7 +1347,7 @@ class TestNN(NNTestCase):
         nn.functional.conv2d(inputs.float(), weights.float(), bias.float())
 
 
-def test_Conv2d_missing_argument(self):
+    def test_Conv2d_missing_argument(self):
         c = nn.Conv2d(3, 3, 3)
         self.assertRaises(RuntimeError, lambda: c(None))
 
