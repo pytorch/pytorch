@@ -169,7 +169,7 @@ void Runner::run(BenchmarkFn<T>& fn, int n) {
       // Broadcast duration of fastest iteration during warmup,
       // so all nodes agree on the number of iterations to run for.
       auto nanos = broadcast(warmup.min());
-      iterations = options_.iterationTimeNanos / nanos;
+      iterations = std::max(1L, options_.iterationTimeNanos / nanos);
     }
 
     // Main benchmark loop
@@ -236,6 +236,7 @@ void Runner::printDistribution(int elements) {
     div = 1;
   }
 
+  GLOO_ENFORCE_GE(samples_.size(), 1, "No samples found");
   std::cout << std::setw(11) << elements;
   std::cout << std::setw(11) << samples_.percentile(0.00) / div;
   std::cout << std::setw(11) << samples_.percentile(0.50) / div;
