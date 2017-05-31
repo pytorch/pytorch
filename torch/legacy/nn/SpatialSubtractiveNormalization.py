@@ -96,7 +96,8 @@ class SpatialSubtractiveNormalization(Module):
 
         # compute mean
         self.localsums = self.meanestimator.updateOutput(input)
-        self.adjustedsums = self.divider.updateOutput([self.localsums, self.coef.contiguous().view_as(self.localsums)])
+        self.adjustedsums = (self.divider.updateOutput(
+            [self.localsums, self.coef.contiguous().view_as(self.localsums)]))
         self.output = self.subtractor.updateOutput([input, self.adjustedsums.contiguous().view_as(input)])
 
         return self.output
@@ -107,7 +108,8 @@ class SpatialSubtractiveNormalization(Module):
 
         # backprop through all modules
         gradsub = self.subtractor.updateGradInput([input, self.adjustedsums.contiguous().view_as(input)], gradOutput)
-        graddiv = self.divider.updateGradInput([self.localsums, self.coef.contiguous().view_as(self.localsums)], gradsub[1])
+        graddiv = (self.divider.updateGradInput(
+            [self.localsums, self.coef.contiguous().view_as(self.localsums)], gradsub[1]))
         size = self.meanestimator.updateGradInput(input, graddiv[0]).size()
         self.gradInput.add_(self.meanestimator.updateGradInput(input, graddiv[0]))
         self.gradInput.add_(gradsub[0])

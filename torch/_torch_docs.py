@@ -1149,7 +1149,8 @@ Example::
 .. function:: div(input, other, out=None)
 
 Each element of the Tensor :attr:`input` is divided by each element of the Tensor :attr:`other`.
-The resulting Tensor is returned. The shapes of :attr:`input` and :attr:`other` must be :ref:`broadcastable <broadcasting-semantics>`.
+The resulting Tensor is returned. The shapes of :attr:`input` and :attr:`other` must be
+:ref:`broadcastable <broadcasting-semantics>`.
 
 :math:`out_i = input_i / other_i`
 
@@ -2201,7 +2202,8 @@ and an element-wise `max` is taken.
 The shapes of :attr:`input` and :attr:`other` don't need to match,
 but they must be :ref:`broadcastable <broadcasting-semantics>`.
 
-.. note:: When the shapes do not match, the shape of the returned output tensor follows the :ref:`broadcasting rules <broadcasting-semantics>`.
+.. note:: When the shapes do not match, the shape of the returned output tensor follows the
+:ref:`broadcasting rules <broadcasting-semantics>`.
 
 :math:`out_i = max(tensor_i, other_i)`
 
@@ -2436,7 +2438,8 @@ and an element-wise `min` is taken. The resulting Tensor is returned.
 The shapes of :attr:`input` and :attr:`other` don't need to match,
 but they must be :ref:`broadcastable <broadcasting-semantics>`.
 
-.. note:: When the shapes do not match, the shape of the returned output tensor follows the :ref:`broadcasting rules <broadcasting-semantics>`.
+.. note:: When the shapes do not match, the shape of the returned output tensor follows the
+:ref:`broadcasting rules <broadcasting-semantics>`.
 
 :math:`out_i = min(tensor_i, other_i)`
 
