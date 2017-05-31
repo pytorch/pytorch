@@ -175,10 +175,6 @@ def Parallelize_GPU(
 
     log.info("Post-iteration operators for updating params")
     num_shards = 1 if rendezvous is None else rendezvous['num_shards']
-    # The following check is necessary for ring reduce to work
-    if rendezvous is not None:
-        assert num_shards > 1, \
-            "Please use more than one shard for distributed training"
 
     if param_update_builder_fun is not None:
         for device in devices:
@@ -209,7 +205,7 @@ def Parallelize_GPU(
 
     # Add initial parameter syncs
     log.info("Add initial parameter sync")
-    if (rendezvous is not None):
+    if (rendezvous is not None and num_shards > 1):
         _AddDistributedParameterSync(
             devices,
             model_helper_obj,
@@ -518,7 +514,7 @@ def FinalizeAfterCheckpoint(model, blobs=None):
         model._checkpoint_net = core.Net("checkpoint_sync_net")
         model._checkpoint_net.RunAllOnGPU()
 
-        if (model._rendezvous is not None):
+        if (model._rendezvous is not None and model._rendezvous['num_shards'] > 1):
             checkpoint_init_net = core.Net("checkpoint_init_net")
             checkpoint_init_net.RunAllOnGPU()
             _AddDistributedParameterSync(
@@ -542,7 +538,6 @@ def FinalizeAfterCheckpoint(model, blobs=None):
 
 
 def _Broadcast(devices, model, net, param, use_nccl=False):
-    # TODO(akyrola): replace with NCCLBroadcast when it's working
     # Copy params from gpu_0 to other
     master_gpu = devices[0]
 
@@ -631,9 +626,10 @@ def _AddDistributedParameterSync(
     rendezvous,
     uniq_param_names,
 ):
+    assert rendezvous['num_shards'] > 1
+
     gpu_device_opt = core.DeviceOption(caffe2_pb2.CUDA, devices[0])
     cpu_device_opt = core.DeviceOption(caffe2_pb2.CPU)
-
 
     # Create a single common world for all broadcast operations.
     # This is not a problem since they are executed sequentially.
@@ -679,7 +675,7 @@ def _AddDistributedParameterSync(
 
 def _AllReduceGradients(devices, model, rendezvous, use_nccl,
                         max_concurrent_distributed_ops):
-    if rendezvous is None:
+    if rendezvous is None or rendezvous['num_shards'] <= 1:
         _AllReduceGradientsSingleHost(devices, model, use_nccl)
     else:
         _AllReduceGradientsDistributed(
