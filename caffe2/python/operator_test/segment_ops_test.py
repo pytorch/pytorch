@@ -312,7 +312,7 @@ class TestSegmentOps(hu.HypothesisTestCase):
             hu.lengths_tensor(
                 dtype=np.float32,
                 min_value=1,
-                max_value=10,
+                max_value=5,
                 allow_empty=True
             ),
             REFERENCES_ALL
@@ -324,7 +324,7 @@ class TestSegmentOps(hu.HypothesisTestCase):
             hu.sparse_lengths_tensor(
                 dtype=np.float32,
                 min_value=1,
-                max_value=10,
+                max_value=5,
                 allow_empty=True
             ),
             REFERENCES_ALL
