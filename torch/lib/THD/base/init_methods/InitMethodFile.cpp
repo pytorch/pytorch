@@ -19,7 +19,7 @@ void lockLoop(int fd, struct flock &oflock) {
   while (true) {
     int err = ::fcntl(fd, F_SETLKW, &oflock);
     if (err == 0) break;
-    else if (err == EINTR) continue;
+    else if (errno == EINTR) continue;
     else throw std::system_error(errno, std::system_category());
   }
 }
@@ -93,8 +93,8 @@ std::size_t waitForData(int fd, std::fstream& file, rank_type world_size) {
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
     lockFile(fd);
 
-    file.sync();
     file.seekp(0, std::ios_base::beg);
+    file.sync();
     std::string content = {std::istreambuf_iterator<char>(file),
                            std::istreambuf_iterator<char>()};
     lines = std::count(content.begin(), content.end(), '\n');
@@ -210,6 +210,7 @@ InitMethod::Config initFile(std::string file_path, rank_type world_size,
   config.rank = getRank(ranks, assigned_rank, order);
 
   // Last process removes the file.
+  file.seekp(0, std::ios_base::end);
   file << std::endl; lines++;
   if (lines == 2 * world_size) {
     ::remove(file_path.c_str());
