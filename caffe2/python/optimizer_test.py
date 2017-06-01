@@ -1,11 +1,15 @@
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
-from caffe2.python.optimizer import build_sgd, build_ftrl, build_adagrad, build_adam
+from caffe2.python.optimizer import (
+        build_sgd, build_multi_precision_sgd,
+        build_ftrl, build_adagrad, build_adam)
 from caffe2.python.optimizer_test_util import OptimizerTestBase
 from caffe2.python.test_util import TestCase
 from caffe2.python import workspace
+from caffe2.python.core import DataType
 import numpy as np
+import unittest
 
 
 class TestSgd(OptimizerTestBase, TestCase):
@@ -19,6 +23,23 @@ class TestSgd(OptimizerTestBase, TestCase):
         for param in optimizer.get_auxiliary_parameters().shared:
             tensor = workspace.FetchBlob(param)
             np.testing.assert_allclose(np.array([1.0]), tensor, atol=1e-5)
+
+
+class TestMultiPrecisionSgd(OptimizerTestBase, TestCase):
+    def build_optimizer(self, model):
+        self._skip_gpu = False
+        return build_multi_precision_sgd(model, base_learning_rate=0.1)
+
+    def check_optimizer(self, optimizer):
+        self.assertTrue(optimizer.get_auxiliary_parameters().shared)
+        self.assertFalse(optimizer.get_auxiliary_parameters().local)
+        for param in optimizer.get_auxiliary_parameters().shared:
+            tensor = workspace.FetchBlob(param)
+            np.testing.assert_allclose(np.array([1.0]), tensor, atol=1e-5)
+
+    @unittest.skipIf(not workspace.has_gpu_support, "No GPU support")
+    def testGPUDense(self):
+        super(TestMultiPrecisionSgd, self).testGPUDense(DataType.FLOAT16)
 
 
 class TestFtrl(OptimizerTestBase, TestCase):

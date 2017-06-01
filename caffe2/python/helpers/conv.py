@@ -6,7 +6,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import core
-
+from caffe2.python.modeling import initializers
 
 def _ConvBase(
     model,
@@ -18,6 +18,8 @@ def _ConvBase(
     kernel,
     weight_init=None,
     bias_init=None,
+    WeightInitializer=None,
+    BiasInitializer=None,
     group=1,
     transform_inputs=None,
     use_cudnn=False,
@@ -43,8 +45,6 @@ def _ConvBase(
 
     use_bias =\
             False if ("no_bias" in kwargs and kwargs["no_bias"]) else True
-    weight_init = weight_init if weight_init else ('XavierFill', {})
-    bias_init = bias_init if bias_init else ('ConstantFill', {})
     blob_out = blob_out or model.net.NextName()
     weight_shape = [dim_out]
     if order == "NCHW":
@@ -54,20 +54,23 @@ def _ConvBase(
         weight_shape.extend(kernels)
         weight_shape.append(int(dim_in / group))
 
+    weight_initializer = initializers.update_initializer(
+        WeightInitializer, weight_init, ("XavierFill", {})
+    )
+    bias_initializer = initializers.update_initializer(
+        BiasInitializer, bias_init, ("ConstantFill", {})
+    )
+
     if model.init_params:
-        weight = model.param_init_net.__getattr__(weight_init[0])(
-            [],
-            blob_out + '_w',
+        weight = model.create_param(
+            param_name=blob_out + '_w',
             shape=weight_shape,
-            **weight_init[1]
-        )
+            initializer=weight_initializer)
         if use_bias:
-            bias = model.param_init_net.__getattr__(bias_init[0])(
-                [],
-                blob_out + '_b',
+            bias = model.create_param(
+                param_name=blob_out + '_b',
                 shape=[dim_out, ],
-                **bias_init[1]
-            )
+                initializer=bias_initializer)
     else:
         weight = core.ScopedBlobReference(
             blob_out + '_w', model.param_init_net)
@@ -146,6 +149,8 @@ def conv(
     kernel,
     weight_init=None,
     bias_init=None,
+    WeightInitializer=None,
+    BiasInitializer=None,
     group=1,
     transform_inputs=None,
     **kwargs
@@ -153,7 +158,7 @@ def conv(
     """2-dimensional convolution.
     """
     return _ConvBase(model, False, blob_in, blob_out, dim_in, dim_out, kernel,
-                     weight_init, bias_init, group, transform_inputs, **kwargs)
+                     weight_init, bias_init, WeightInitializer, BiasInitializer, group, transform_inputs, **kwargs)
 
 
 def conv_transpose(

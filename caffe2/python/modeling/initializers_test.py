@@ -5,7 +5,8 @@ from __future__ import unicode_literals
 
 import unittest
 from caffe2.python import brew, model_helper
-from caffe2.python.modeling.initializers import Initializer
+from caffe2.python.modeling.initializers import (
+        Initializer, pFP16Initializer)
 
 
 class InitializerTest(unittest.TestCase):
@@ -29,4 +30,16 @@ class InitializerTest(unittest.TestCase):
                       WeightInitializer=None,
                       weight_init=("ConstantFill", {})
         )
+
+        # default operator, pFP16Initializer
+        fc5 = brew.fc(model, fc4, "fc5", dim_in=1, dim_out=1,
+                      WeightInitializer=pFP16Initializer
+        )
+
+        # specified operator, pFP16Initializer
+        fc6 = brew.fc(model, fc4, "fc5", dim_in=1, dim_out=1,
+                      weight_init=("ConstantFill", {}),
+                      WeightInitializer=pFP16Initializer
+        )
+
 
