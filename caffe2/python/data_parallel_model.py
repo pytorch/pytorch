@@ -129,7 +129,7 @@ def Parallelize_GPU(
 
     # computed params
     computed_params_grouped =\
-        _GroupByDevice(devices, model_helper_obj.GetComputedParams(''), [])
+        _GroupByDevice(devices, model_helper_obj.computed_params, [])
     model_helper_obj._device_grouped_blobs.update(computed_params_grouped)
 
     model_helper_obj._param_names =\
