@@ -246,10 +246,10 @@ InitMethod::Config initTCPMulticast(std::string group_name, rank_type world_size
   for (std::size_t rank = 0; rank < sorted_msgs.size(); ++rank) {
     if (packed_msg == sorted_msgs[rank]->pack()) {
       config.rank = rank;
+      config.world_size = world_size;
       if (config.rank == 0) {
         listen_socket_guard.release();
         config.master = {
-          .world_size = world_size,
           .listen_socket = listen_socket,
           .listen_port = master_msg.port,
         };
@@ -257,10 +257,11 @@ InitMethod::Config initTCPMulticast(std::string group_name, rank_type world_size
         config.public_address = discoverWorkers(listen_socket, world_size);
       } else {
         std::string master_address;
-        std::tie(master_address, config.public_address) = discoverMaster(master_msg.addresses, master_msg.port);
+        std::tie(master_address, config.public_address) =
+          discoverMaster(master_msg.addresses, master_msg.port);
         config.worker = {
-          .address = master_address,
-          .port = master_msg.port,
+          .master_addr = master_address,
+          .master_port = master_msg.port,
         };
       }
       break;

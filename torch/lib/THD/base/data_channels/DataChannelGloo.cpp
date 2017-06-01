@@ -73,9 +73,7 @@ DataChannelGloo::DataChannelGloo(InitMethod::Config config)
   , _store(nullptr)
   , _cache(nullptr)
 {
-  if (_rank == 0) {
-    _num_processes = config.master.world_size;
-  }
+  _num_processes = config.world_size;
 
   // Default options listen on this host's name.
   // NOTE: when hostname has bad configuration in `/etc/hosts` processes
@@ -88,8 +86,8 @@ DataChannelGloo::DataChannelGloo(InitMethod::Config config)
     _port = config.master.listen_port;
     _listen_socket = config.master.listen_socket;
   } else {
-    _addr = config.worker.address;
-    _port = config.worker.port;
+    _addr = config.worker.master_addr;
+    _port = config.worker.master_port;
   }
 }
 
@@ -102,16 +100,6 @@ bool DataChannelGloo::init() {
     new Store(_rank, _listen_socket, _addr, _port, _num_processes)
   );
   _cache = std::unique_ptr<GlooCache>(new GlooCache(_rank, _device, _store));
-
-  if (_rank == 0) {
-    auto num_proc_str = std::to_string(_num_processes);
-    _store->set("world_size",
-            std::vector<char>(num_proc_str.begin(), num_proc_str.end()));
-  } else {
-    auto world_size = _store->get("world_size");
-    _num_processes = std::atoll(
-            std::string(world_size.begin(), world_size.end()).c_str());
-  }
 
   std::vector<rank_type> ranks;
   ranks.reserve(_num_processes);
