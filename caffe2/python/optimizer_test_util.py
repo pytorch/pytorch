@@ -7,12 +7,8 @@ from __future__ import unicode_literals
 
 import unittest
 import numpy as np
-from caffe2.python import brew, core, workspace, cnn
+from caffe2.python import core, workspace, cnn
 from caffe2.proto import caffe2_pb2
-from caffe2.python.modeling.initializers import (
-        Initializer, pFP16Initializer)
-
-from caffe2.python.model_helper import ModelHelper
 
 
 class OptimizerTestBase(object):
@@ -22,25 +18,19 @@ class OptimizerTestBase(object):
     Do, however, do these things in classes which inherit from this.
     """
 
-    def _createDense(self, dtype=core.DataType.FLOAT):
+    def _createDense(self):
         perfect_model = np.array([2, 6, 5, 0, 1]).astype(np.float32)
         np.random.seed(123)  # make test deterministic
-        numpy_dtype = np.float32 if dtype == core.DataType.FLOAT else np.float16
-        initializer = Initializer if dtype == core.DataType.FLOAT else pFP16Initializer
         data = np.random.randint(
             2,
-            size=(20, perfect_model.size)).astype(numpy_dtype)
+            size=(20, perfect_model.size)).astype(np.float32)
         label = np.dot(data, perfect_model)[:, np.newaxis]
 
-        model = ModelHelper(name="test", arg_scope={'order':'NCHW'})
-        out = brew.fc(
-            model,
+        model = cnn.CNNModelHelper("NCHW", name="test")
+        out = model.FC(
             'data', 'fc', perfect_model.size, 1, ('ConstantFill', {}),
-            ('ConstantFill', {}), axis=0,
-            WeightInitializer=initializer, BiasInitializer=initializer
+            ('ConstantFill', {}), axis=0
         )
-        if dtype == core.DataType.FLOAT16:
-            out = model.HalfToFloat(out, out + "_fp32")
         sq = model.SquaredL2Distance([out, 'label'])
         loss = model.AveragedLoss(sq, "avg_loss")
         grad_map = model.AddGradientOperators([loss])
@@ -69,20 +59,16 @@ class OptimizerTestBase(object):
         self.check_optimizer(optimizer)
 
     @unittest.skipIf(not workspace.has_gpu_support, "No gpu support")
-    def testGPUDense(self, dtype=core.DataType.FLOAT):
+    def testGPUDense(self):
         device_opt = core.DeviceOption(caffe2_pb2.CUDA, 0)
         with core.DeviceScope(device_opt):
-            model, _perfect_model, data, label = self._createDense(dtype)
-            if dtype == core.DataType.FLOAT16:
-                fc_fp32_for_host = model.HalfToFloat('fc', 'fc_fp32_for_host')
-                model.CopyGPUToCPU(fc_fp32_for_host, 'fc_cpu')
-            else:
-                model.CopyGPUToCPU('fc', 'fc_cpu')
+            model, _perfect_model, data, label = self._createDense()
+            model.CopyGPUToCPU('fc', 'fc_cpu')
             workspace.FeedBlob('data', data[0])
             workspace.FeedBlob('label', label[0])
 
         # Add some CPU ops
-        brew.fc(model, 'fc_cpu', 'fc2', dim_in=1, dim_out=10, axis=0)
+        model.FC('fc_cpu', 'fc2', dim_in=1, dim_out=10, axis=0)
 
         # Create optimizer in default device scope
         self.build_optimizer(model)
