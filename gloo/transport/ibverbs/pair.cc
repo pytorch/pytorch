@@ -265,7 +265,10 @@ const struct ibv_mr* Pair::getMemoryRegion(int slot) {
       if (timeout_ != kNoTimeout &&
           (std::chrono::steady_clock::now() - start) >= timeout_) {
         lock.unlock();
-        signalIoFailure(GLOO_ERROR_MSG("GetMemRegion timeout ", peer_.str()));
+        signalIoFailure(
+            GLOO_ERROR_MSG(
+                "Timeout waiting for memory region from ",
+                peer_.str()));
         GLOO_ENFORCE(false, "Unexpected code path");
       }
       it = peerMemoryRegions_.find(slot);
@@ -281,7 +284,10 @@ const struct ibv_mr* Pair::getMemoryRegion(int slot) {
     } else {
       auto done = cv_.wait_for(lock, timeout_, pred);
       if (!done) {
-        signalIoFailure(GLOO_ERROR_MSG("GetMemRegion timeout ", peer_.str()));
+        signalIoFailure(
+            GLOO_ERROR_MSG(
+                "Timeout waiting for memory region from ",
+                peer_.str()));
         GLOO_ENFORCE(false, "Unexpected code path");
       }
     }
