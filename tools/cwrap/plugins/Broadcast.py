@@ -10,10 +10,13 @@ from string import Template
 #           argument to be broadcast
 # [fallback] if tensors aren't broadcastable, preserves "element number" pointwise behavior,
 #            where only number of elements need to match, and tensors are viewed as 1-dimensional.
-# [dims] if the tensors shouldn't be broadcast to specific tensor or tensors, but a combination
-#        of their individual dimensions.  Each dimension is specified as [arg].dim[#] and dimensions
-#        are comma-separated.  So, to specify that the tensor should be broadcast to 3-dimensions with
-#        sizes: tensor0->size[0] x tensor1->size[1] x tensor2->size[2], you would write:
+# [dims] specify if the tensors shouldn't be broadcast to a specific tensor or tensors, but a combination
+#        of individual dimension sizes of a set of tensors.  For example: addbmm(C,A,B) a.k.a. [C + A @ B]
+#        broadcasts C to the first dimension of A and the second dimension of B.  Each dimension is specified as
+#        [arg].dim[#] and dimensions are comma-separated.  So, to specify that the tensor should be
+#        broadcast to 3-dimensions with sizes:
+#        tensor0->size[0] x tensor1->size[1] x tensor2->size[2]
+#        you would write:
 #        dims:tensor0.dim0,tensor1.dim1,tensor2.dim2
 # [types] if the tensors should be of different types than THTensor, specify as X where
 #         the actual type to use is THXTensor (i.e. Byte for THByteTensor).  If the type
