@@ -24,7 +24,7 @@ def prelu(model, blob_in, blob_out, num_channels=1, slope_init=None,
         slope = core.ScopedBlobReference(
             blob_out + '_slope', model.param_init_net)
 
-    model.AddParameter(slope)
+    model.params.extend([slope])
 
     return model.net.PRelu([blob_in, slope], [blob_out])
 
