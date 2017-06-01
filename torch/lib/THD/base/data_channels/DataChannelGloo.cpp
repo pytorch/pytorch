@@ -66,11 +66,15 @@ void DataChannelGloo::RequestGloo::wait() {
   _request.wait();
 }
 
+DataChannelGloo::Group::Group(const std::string& addr, port_type port,
+                                      std::vector<rank_type> ranks, rank_type max_rank,
+                                      int store_socket)
+  : DataChannel::Group(std::move(ranks), max_rank)
+  , _store(new Store(addr, port, store_socket)) {}
 
 DataChannelGloo::DataChannelGloo(InitMethod::Config config)
   : _rank(config.rank)
   , _listen_socket(-1)
-  , _store(nullptr)
   , _cache(nullptr)
 {
   _num_processes = config.world_size;
@@ -96,10 +100,7 @@ DataChannelGloo::~DataChannelGloo() {}
 
 
 bool DataChannelGloo::init() {
-  _store = std::unique_ptr<::gloo::rendezvous::Store>(
-    new Store(_rank, _listen_socket, _addr, _port, _num_processes)
-  );
-  _cache = std::unique_ptr<GlooCache>(new GlooCache(_rank, _device, _store));
+  _cache = std::unique_ptr<GlooCache>(new GlooCache(_rank, _device));
 
   std::vector<rank_type> ranks;
   ranks.reserve(_num_processes);
@@ -108,7 +109,7 @@ bool DataChannelGloo::init() {
 
   _groups.insert({
     THDGroupWORLD,
-    DataChannel::Group(ranks, _num_processes - 1)
+    Group(_addr, _port, ranks, _num_processes - 1, _rank == 0 ? _listen_socket : Store::CLIENT_ONLY)
   });
   return true;
 }
@@ -289,7 +290,7 @@ void DataChannelGloo::barrier(THDGroup group_id) {
 
 
 THDGroup DataChannelGloo::newGroup(const std::vector<rank_type>& ranks) {
-  auto new_group = DataChannel::Group(ranks, _num_processes - 1);
+  auto new_group = DataChannelGloo::Group(_addr, _port, ranks, _num_processes - 1, Store::CLIENT_ONLY);
   THDGroup new_group_id = static_cast<THDGroup>(_groups.size());
 
   _groups.insert({new_group_id, new_group});

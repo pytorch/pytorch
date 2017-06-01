@@ -79,11 +79,9 @@ struct GlooCache {
     std::shared_ptr<std::mutex>      // mutex to protect same algorithm from running concurrently
   >;
 
-  GlooCache(rank_type rank, std::shared_ptr<::gloo::transport::Device> device,
-            std::shared_ptr<store_type> store)
+  GlooCache(rank_type rank, std::shared_ptr<::gloo::transport::Device> device)
    : _rank(rank)
    , _device(device)
-   , _store(store)
   {}
 
   GlooCache(GlooCache const&)      = delete;
@@ -108,15 +106,19 @@ struct GlooCache {
   }
 
 
+  // NOTE: this function needs to be thread safe
   std::shared_ptr<context_type> createContext(
-    const DataChannel::Group& group,
-    prefix_store_type& store
+    const DataChannelGloo::Group& group,
+    const std::string& prefix
   ) {
-    auto context = std::make_shared<context_type>(group.mustGetGroupRank(_rank), group.size());
-    context->connectFullMesh(store, _device);
+    auto context = std::make_shared<context_type>(
+        group.mustGetGroupRank(_rank), group.size());
+    prefix_store_type prefix_store(prefix, *group._store);
+    context->connectFullMesh(prefix_store, _device);
     return context;
   }
 
+  // NOTE: this function needs to be thread safe
   std::shared_ptr<buffer_type> createBuffer(std::size_t bytes, DeviceType device) const {
     if (device == DeviceType::CPU) {
       return std::shared_ptr<buffer_type>(new char[bytes],
@@ -133,21 +135,25 @@ struct GlooCache {
   }
 
   template<CollectiveType D, typename T, typename... Args>
-  value_type getAlgorithm(THDGroup group_id, const DataChannel::Group& group,
+  value_type getAlgorithm(THDGroup group_id, const DataChannelGloo::Group& group,
                           Args... args) {
-    // We need to protect from race when two (or more) threads are trying to
-    // create same algorithm simultaneously.
-    std::lock_guard<std::mutex> lock(_mutex);
-
     auto key = gloo_cache::algorithm_spec<D, T>::key(group_id, args...);
+
+    std::unique_lock<std::mutex> lock(_mutex);
     auto it = _algorithms.find(key);
     if (it == _algorithms.end()) {
-      // create prefix store with unique prefix
-      prefix_store_type prefix_store(print_key(key), *_store);
-      std::tie(it, std::ignore) = _algorithms.emplace(std::make_pair(
-        key,
-        gloo_cache::algorithm_spec<D, T>::create(*this, group, prefix_store, std::forward<Args>(args)...)
-      ));
+      lock.unlock();
+
+      auto algorithm = gloo_cache::algorithm_spec<D, T>::create(*this, group,
+              print_key(key), std::forward<Args>(args)...);
+
+      lock.lock();
+
+      bool inserted;
+      std::tie(it, inserted) = _algorithms.emplace(
+        std::move(key), std::move(algorithm));
+      if (!inserted)
+          throw std::runtime_error("detected a race when creating Gloo algorithm");
     }
 
     return it->second;
@@ -238,10 +244,10 @@ struct algorithm_spec<CollectiveType::ALL_GATHER, T> {
   }
 
   static GlooCache::value_type create(GlooCache& cache,
-    const DataChannel::Group& group, GlooCache::prefix_store_type& store,
+    const DataChannelGloo::Group& group, const std::string& store_prefix,
     DeviceType device, std::size_t input_bytes, std::size_t output_bytes, std::size_t count
   ) {
-    auto context = cache.createContext(group, store);
+    auto context = cache.createContext(group, store_prefix);
     auto input_buffer = cache.createBuffer(input_bytes, device);
     auto output_buffer = cache.createBuffer(output_bytes, device);
 
@@ -281,10 +287,10 @@ struct algorithm_spec<CollectiveType::ALL_REDUCE, T> {
   }
 
   static GlooCache::value_type create(GlooCache& cache,
-    const DataChannel::Group& group, GlooCache::prefix_store_type& store,
+    const DataChannelGloo::Group& group, const std::string& store_prefix,
     DeviceType device, std::size_t input_bytes, std::size_t count, THDReduceOp op
   ) {
-    auto context = cache.createContext(group, store);
+    auto context = cache.createContext(group, store_prefix);
     auto input_buffer = cache.createBuffer(input_bytes, device);
 
     std::shared_ptr<GlooCache::algorithm_type> algo;
@@ -335,10 +341,10 @@ struct algorithm_spec<CollectiveType::BROADCAST, T> {
   }
 
   static GlooCache::value_type create(GlooCache& cache,
-    const DataChannel::Group& group, GlooCache::prefix_store_type& store,
+    const DataChannelGloo::Group& group, const std::string& store_prefix,
     DeviceType device, std::size_t input_bytes, std::size_t count, rank_type src_rank
   ) {
-    auto context = cache.createContext(group, store);
+    auto context = cache.createContext(group, store_prefix);
     auto input_buffer = cache.createBuffer(input_bytes, device);
 
     std::shared_ptr<GlooCache::algorithm_type> algo;
@@ -380,9 +386,9 @@ struct algorithm_spec<CollectiveType::BARRIER, T> {
   }
 
   static GlooCache::value_type create(GlooCache& cache,
-    const DataChannel::Group& group, GlooCache::prefix_store_type& store
+    const DataChannelGloo::Group& group, const std::string& store_prefix
   ) {
-    auto context = cache.createContext(group, store);
+    auto context = cache.createContext(group, store_prefix);
     return std::make_tuple(
       std::make_shared<::gloo::BarrierAllToAll>(context),
       nullptr,
