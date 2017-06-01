@@ -363,6 +363,10 @@ def _build(model, optimizer):
     param_to_device = core.InferBlobDevices(model.net)
     param_to_device.update(core.InferBlobDevices(model.param_init_net))
 
+    # Validate there are no duplicate params
+    model.Validate()
+
+    # Call optimizer for each param
     for param_info in model.GetOptimizationParamInfo():
         param_name = str(param_info.blob)
 

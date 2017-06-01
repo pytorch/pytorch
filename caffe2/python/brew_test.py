@@ -46,9 +46,19 @@ class BrewTest(unittest.TestCase):
         workspace.FeedBlob("x", X)
         model = ModelHelper(name="test_model")
         brew.fc(model, "x", "out_1", k, n)
-
+        model.Validate()
         workspace.RunNetOnce(model.param_init_net)
         workspace.RunNetOnce(model.net)
+
+    def test_validate(self):
+        model = ModelHelper(name="test_model")
+        model.params.append("aaa")
+        model.params.append("bbb")
+        self.assertEqual(model._Validate(), [])
+
+        model.params.append("xxx")
+        model.params.append("bbb")
+        self.assertEqual(model._Validate(), ["bbb"])
 
     def test_arg_scope(self):
         myhelper = self.myhelper
@@ -83,7 +93,7 @@ class BrewTest(unittest.TestCase):
                 dim_out=64,
                 kernel=3,
             )
-
+        model.Validate()
         workspace.RunNetOnce(model.param_init_net)
         workspace.RunNetOnce(model.net)
         out = workspace.FetchBlob("out")
@@ -101,6 +111,7 @@ class BrewTest(unittest.TestCase):
             self.assertEqual(res, -2)
 
         res = brew.myhelper(self.model, val=15)
+        self.model.Validate()
         self.assertEqual(res, 15)
 
     def test_double_register(self):
@@ -138,7 +149,7 @@ class BrewTest(unittest.TestCase):
                 dim_out=64,
                 kernel=3,
             )
-
+        model.Validate()
         workspace.RunNetOnce(model.param_init_net)
         workspace.RunNetOnce(model.net)
         out = workspace.FetchBlob("out")
