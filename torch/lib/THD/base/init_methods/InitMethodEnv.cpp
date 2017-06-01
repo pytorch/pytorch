@@ -11,7 +11,7 @@ constexpr char WORLD_SIZE_ENV[] = "WORLD_SIZE";
 constexpr char MASTER_PORT_ENV[] = "MASTER_PORT";
 constexpr char MASTER_ADDR_ENV[] = "MASTER_ADDR";
 
-const char* must_getenv(const char* env) {
+const char* mustGetEnv(const char* env) {
   const char* value = std::getenv(env);
   if (value == nullptr) {
     throw std::logic_error(std::string("") + "failed to read the " + env +
@@ -20,57 +20,48 @@ const char* must_getenv(const char* env) {
   return value;
 }
 
-std::tuple<port_type, rank_type> load_master_env() {
-  auto port = convertToPort(std::stoul(must_getenv(MASTER_PORT_ENV)));
-
-  rank_type world_size = std::stoul(must_getenv(WORLD_SIZE_ENV));
-  if (world_size == 0)
-    throw std::domain_error(std::string(WORLD_SIZE_ENV) + " env variable cannot be 0");
-
-  return std::make_tuple(port, world_size);
-}
-
-
-std::tuple<std::string, port_type> load_worker_env() {
-  std::string str_port = must_getenv(MASTER_PORT_ENV);
+std::tuple<std::string, port_type> loadWorkerEnv() {
+  std::string str_port = mustGetEnv(MASTER_PORT_ENV);
   auto port = convertToPort(std::stoul(str_port));
-  return std::make_tuple(must_getenv(MASTER_ADDR_ENV), port);
+  return std::make_tuple(mustGetEnv(MASTER_ADDR_ENV), port);
 }
 
-rank_type load_rank_env() {
-  return convertToRank(std::stol(must_getenv(RANK_ENV)));
+rank_type maybeLoadEnv(const char* env_name, int value, std::string parameter_name) {
+  const char *env_value_str = std::getenv(env_name);
+  int env_value = value;
+  if (env_value_str != nullptr)
+    env_value = std::stol(env_value_str);
+  if (value != -1 && env_value != value)
+    throw std::runtime_error(parameter_name + " specified both as an "
+                             "environmental variable and to the initializer");
+  if (env_value == -1)
+    throw std::runtime_error(parameter_name + " is not set but it is required for "
+                             "env:// init method");
+
+  return convertToRank(env_value);
 }
 
 } // anonymous namespace
 
 InitMethod::Config initEnv(int world_size, std::string group_name, int rank) {
   InitMethod::Config config;
-  config.rank = load_rank_env();
-  if (rank != -1 && config.rank != rank) {
-    throw std::runtime_error("rank specified both as an environmental variable "
-      "and to the initializer");
-  }
+
+  config.rank = maybeLoadEnv(RANK_ENV, rank, "rank");
+  config.world_size = maybeLoadEnv(WORLD_SIZE_ENV, world_size, "world_size");
 
   if (group_name != "") {
-    throw std::runtime_error("group_name is not supported in Env initialization method");
+    throw std::runtime_error("group_name is not supported in env:// init method");
   }
 
   if (config.rank == 0) {
-    const char *env_world_size_str = std::getenv(WORLD_SIZE_ENV);
-    int env_world_size = world_size;
-    if (env_world_size_str != nullptr)
-      env_world_size = convertToRank(std::stol(must_getenv(WORLD_SIZE_ENV)));
-    if (env_world_size != world_size)
-      throw std::runtime_error("world size specified both as an environmental variable "
-        "and to the initializer");
-    config.master.world_size = env_world_size;
-
-    std::tie(config.master.listen_port, config.master.world_size) = load_master_env();
+    config.master.listen_port = convertToPort(std::stoul(mustGetEnv(MASTER_PORT_ENV)));
     std::tie(config.master.listen_socket, std::ignore) = listen(config.master.listen_port);
-    config.public_address = discoverWorkers(config.master.listen_socket, config.master.world_size);
+    config.public_address = discoverWorkers(config.master.listen_socket,
+                                            config.world_size);
   } else {
-    std::tie(config.worker.address, config.worker.port) = load_worker_env();
-    std::tie(std::ignore, config.public_address) = discoverMaster({config.worker.address}, config.worker.port);
+    std::tie(config.worker.master_addr, config.worker.master_port) = loadWorkerEnv();
+    std::tie(std::ignore, config.public_address) =
+      discoverMaster({config.worker.master_addr}, config.worker.master_port);
   }
   return config;
 }

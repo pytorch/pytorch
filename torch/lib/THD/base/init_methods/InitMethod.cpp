@@ -13,8 +13,9 @@ InitMethod::Config initEnv(int world_size, std::string group_name, int rank);
 
 InitMethod::Config getInitConfig(std::string argument, int world_size,
                                  std::string group_name, int rank) {
+  InitMethod::Config config;
   if (argument.find("env://") == 0) {
-    return init::initEnv(world_size, group_name, rank);
+    config = init::initEnv(world_size, group_name, rank);
   } else {
     rank_type r_world_size;
     try {
@@ -30,14 +31,15 @@ InitMethod::Config getInitConfig(std::string argument, int world_size,
 
     if (argument.find("tcp://") == 0) {
       argument.erase(0, 6); // chop "tcp://"
-      return init::initTCP(argument, r_world_size, group_name, rank);
+      config = init::initTCP(argument, r_world_size, group_name, rank);
     } else if (argument.find("file://") == 0) {
       argument.erase(0, 7); // chop "file://"
-      return init::initFile(argument, r_world_size, group_name, rank);
+      config = init::initFile(argument, r_world_size, group_name, rank);
     }
   }
 
-  throw std::invalid_argument("unsupported initialization method");
+  config.validate();
+  return config;
 }
 
 } // namespace thd

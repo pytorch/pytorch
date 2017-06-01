@@ -47,8 +47,8 @@ MasterCommandChannel::MasterCommandChannel(InitMethod::Config config)
   , _poll_events(nullptr)
   , _error_pipe(-1)
   , _error(nullptr)
-  , _sockets(config.master.world_size, -1)
-  , _mutexes(config.master.world_size)
+  , _sockets(config.world_size, -1)
+  , _mutexes(config.world_size)
 {
   _sockets[0] = config.master.listen_socket;
 }
@@ -181,8 +181,8 @@ std::tuple<rank_type, std::string> MasterCommandChannel::recvError() {
 WorkerCommandChannel::WorkerCommandChannel(InitMethod::Config config)
   : _rank(config.rank)
   , _socket(-1)
-  , _master_addr(config.worker.address)
-  , _master_port(config.worker.port)
+  , _master_addr(config.worker.master_addr)
+  , _master_port(config.worker.master_port)
 {}
 
 WorkerCommandChannel::~WorkerCommandChannel() {

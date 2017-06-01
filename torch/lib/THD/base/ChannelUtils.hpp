@@ -183,8 +183,15 @@ std::vector<T> recv_vector(int socket) {
 
 /* this is only for convenience when sending rvalues */
 template<typename T>
-void send_value(int socket, T&& value, bool more_data = false) {
+void send_value(int socket, const T& value, bool more_data = false) {
   send_bytes<T>(socket, &value, 1, more_data);
+}
+
+template<typename T>
+T recv_value(int socket) {
+  T value;
+  recv_bytes<T>(socket, &value, 1);
+  return value;
 }
 
 class ResourceGuard {
