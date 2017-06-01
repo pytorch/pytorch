@@ -2722,6 +2722,12 @@ class TestTorch(TestCase):
 
         # TODO: error raising tests
 
+    def test_advancedindex_big(self):
+        reference = torch.arange(0, 2147483649).long()
+
+        self.assertEqual(reference[[0, 123, 44488, 1232123, 2147483648], ],
+                         torch.LongTensor([0, 123, 44488, 1232123, 2147483648]))
+
     def test_newindex(self):
         reference = self._consecutive((3, 3, 3))
         # This relies on __index__() being correct - but we have separate tests for that
