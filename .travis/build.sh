@@ -12,6 +12,7 @@ if [[ $BUILD_TARGET == 'android' ]]; then
 #***************#
 # Android build #
 #***************#
+  export ANDROID_NDK=/opt/android_ndk
   sh ../scripts/build_android.sh
 elif [[ $BUILD_TARGET == 'ios' ]]; then
 #***************#
