@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 from caffe2.python.modeling.parameter_info import ParameterInfo
+from caffe2.python.core import DataType
 
 
 class Initializer(object):
@@ -27,6 +28,29 @@ class Initializer(object):
             param_id=None,
             param=param,
             shape=shape,
+        )
+
+class pFP16Initializer(Initializer):
+    def update(self, operator_name, kwargs):
+        if self.operator_name is not None:
+            raise Exception("Operator name overwrites are not allowed")
+        self.operator_name = operator_name
+        self.operator_kwargs = kwargs
+
+    def create_param(self, param_name, init_net, shape):
+        # create master fp32 copy
+        param_fp32 = init_net.__getattr__(self.operator_name)(
+            [], param_name + "_fp32", shape=shape,
+            **self.operator_kwargs)
+        # cast to fp16 copy
+        param = init_net.FloatToHalf(
+            param_fp32, param_name)
+
+        return ParameterInfo(
+            param_id=None,
+            param=param,
+            shape=shape,
+            blob_copy={DataType.FLOAT : param_fp32}
         )
 
 def update_initializer(initializer_class,
