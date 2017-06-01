@@ -18,7 +18,7 @@ const char kBcastNet[] = R"NET(
   }
   op {
     output: "X"
-    type: "MPIConstantFill"
+    type: "ConstantFill"
     arg {
       name: "shape"
       ints: 10
@@ -76,7 +76,7 @@ const char kReduceNet[] = R"NET(
   }
   op {
     output: "X"
-    type: "MPIConstantFill"
+    type: "ConstantFill"
     arg {
       name: "shape"
       ints: 10
@@ -141,7 +141,7 @@ const char kMPIAllgatherNet[] = R"NET(
   }
   op {
     output: "X"
-    type: "MPIConstantFill"
+    type: "ConstantFill"
     arg {
       name: "shape"
       ints: 2
@@ -200,7 +200,7 @@ const char kMPIAllreduceNet[] = R"NET(
   }
   op {
     output: "X"
-    type: "MPIConstantFill"
+    type: "ConstantFill"
     arg {
       name: "shape"
       ints: 10
@@ -257,7 +257,7 @@ const char kInPlaceMPIAllreduceNet[] = R"NET(
   }
   op {
     output: "X"
-    type: "MPIConstantFill"
+    type: "ConstantFill"
     arg {
       name: "shape"
       ints: 10
