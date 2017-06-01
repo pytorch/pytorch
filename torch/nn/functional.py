@@ -38,6 +38,9 @@ def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1,
         >>> inputs = autograd.Variable(torch.randn(1,4,5,5))
         >>> F.conv2d(inputs, filters, padding=1)
     """
+    if input.dim() != 4:
+        raise ValueError("Expected 4D tensor as input, got {}D tensor instead.".format(input.dim()))
+
     f = ConvNd(_pair(stride), _pair(padding), _pair(dilation), False,
                _pair(0), groups, torch.backends.cudnn.benchmark, torch.backends.cudnn.enabled)
     return f(input, weight, bias)
