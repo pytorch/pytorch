@@ -226,6 +226,8 @@ class ModelHelper(object):
     def AddGradientOperators(self, *args, **kwargs):
         if self.gradient_ops_added:
             raise RuntimeError("You cannot run AddGradientOperators twice.")
+        self.Validate()
+
         self.gradient_ops_added = True
         self.grad_map = self.net.AddGradientOperators(*args, **kwargs)
         self.param_to_grad = self.get_param_to_grad(self.params)
@@ -281,6 +283,26 @@ class ModelHelper(object):
             )
         ]
 
+    def _Validate(self):
+        '''
+        Check for duplicate params
+        '''
+        params_list = [str(p) for p in self.params]
+        params_set = set(params_list)
+
+        dupes = []
+        if len(params_set) != len(params_list):
+            params_list = sorted(params_list)
+            for j, p in enumerate(params_list):
+                if j > 0 and params_list[j - 1] == p:
+                    if p not in dupes:
+                        dupes.append(p)
+
+        return dupes
+
+    def Validate(self):
+        dupes = self._Validate()
+        assert dupes == [], "Duplicate params: {}".format(dupes)
 
     def GetComputedParams(self, namescope=None):
         '''
