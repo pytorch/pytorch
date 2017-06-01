@@ -1317,6 +1317,35 @@ class TestNN(NNTestCase):
         # but it should work with the same type
         nn.functional.conv2d(inputs.float(), weights.float())
 
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_Conv2d_inconsistent_types_on_GPU_without_cudnn(self):
+        inputs = Variable(torch.randn(4, 1, 7, 7).float().cuda())
+        weights = Variable(torch.randn(1, 1, 3, 3).double().cuda())
+        bias = Variable(torch.randn(1).double().cuda())
+
+        torch.backends.cudnn.enabled = False
+        # inconsistent types should raise an exception
+        self.assertRaises(RuntimeError, lambda: nn.functional.conv2d(inputs, weights))
+        self.assertRaises(RuntimeError, lambda: nn.functional.conv2d(inputs, weights.float(), bias))
+
+        # but it should work with the same type
+        nn.functional.conv2d(inputs.float(), weights.float(), bias.float())
+
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    def test_Conv2d_inconsistent_types_on_GPU_with_cudnn(self):
+        inputs = Variable(torch.randn(4, 1, 7, 7).float().cuda())
+        weights = Variable(torch.randn(1, 1, 3, 3).double().cuda())
+        bias = Variable(torch.randn(1).double().cuda())
+
+        torch.backends.cudnn.enabled = True
+        # inconsistent types should raise an exception
+        self.assertRaises(RuntimeError, lambda: nn.functional.conv2d(inputs, weights))
+        self.assertRaises(RuntimeError, lambda: nn.functional.conv2d(inputs, weights.float(), bias))
+
+        # but it should work with the same type
+        nn.functional.conv2d(inputs.float(), weights.float(), bias.float())
+
     def test_Conv2d_missing_argument(self):
         c = nn.Conv2d(3, 3, 3)
         self.assertRaises(RuntimeError, lambda: c(None))

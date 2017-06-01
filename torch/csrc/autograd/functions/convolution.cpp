@@ -1,3 +1,5 @@
+#include <sstream>
+
 #include "convolution.h"
 
 #include "torch/csrc/autograd/variable.h"
@@ -5,6 +7,8 @@
 #include "torch/csrc/autograd/functions/basic_ops.h"
 #include "torch/csrc/nn/THNN_generic.h"
 #include "torch/csrc/utils/auto_gpu.h"
+
+#include "THPP/Type.hpp"
 
 #ifdef WITH_CUDNN
 #include "torch/csrc/cudnn/Conv.h"
@@ -120,11 +124,11 @@ static auto view3d(const Tensor& tensor) -> std::unique_ptr<Tensor> {
   return result;
 }
 
+
 auto ConvForward::apply(const variable_list& inputs) -> variable_list {
   check_input_variables("ConvNd", inputs, 3, 2);
   if (is_padding_neg()) throw std::runtime_error("negative padding is not supported");
   if (is_output_padding_neg()) throw std::runtime_error("negative output_padding is not supported");
-
   AutoGPU guard(inputs[0]->data->getDevice());
   auto input = inputs[0]->data->contiguous();
   std::unique_ptr<Tensor> weight(inputs[1]->data->clone_shallow());
@@ -147,6 +151,16 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
 
   if (use_cudnn(*input)) {
 #ifdef WITH_CUDNN
+    if (input->type() != weight->type()){
+      std::stringstream ss;
+      ss << "Input type (" << thpp::toString(input->type()) << ") and weight type (" << thpp::toString(weight->type()) << ") should be the same";
+      throw std::runtime_error(ss.str());
+    }
+    if (bias.get() != NULL && input->type() != bias->type()){
+      std::stringstream ss;
+      ss << "Input type (" << thpp::toString(input->type()) << ") and bias type (" << thpp::toString(bias->type()) << ") should be the same";
+      throw std::runtime_error(ss.str());
+    }
     output = input->newTensor();
     output->resize(output_size(*input, *weight));
     if (transposed) {
@@ -203,7 +217,6 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
   check_input_variables("ConvNdBackward", grad_outputs, 1);
   if (is_padding_neg()) throw std::runtime_error("negative padding is not supported");
   if (is_output_padding_neg()) throw std::runtime_error("negative output_padding is not supported");
-
   auto input = input_.unpack_data();
   AutoGPU guard(input->getDevice());
   input = input->contiguous();
