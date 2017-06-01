@@ -132,12 +132,12 @@ extern THCState* state;
     - cudnnDataType_t dataType
     - THTensor* input
     - THTensor* output
-    - THTensor* weight
-    - THTensor* bias
-    - THTensor* running_mean
-    - THTensor* running_var
-    - THTensor* save_mean
-    - THTensor* save_var
+    - THAccumTensor* weight
+    - THAccumTensor* bias
+    - THAccumTensor* running_mean
+    - THAccumTensor* running_var
+    - THAccumTensor* save_mean
+    - THAccumTensor* save_var
     - bool training
     - double exponential_average_factor
     - double epsilon
@@ -152,13 +152,13 @@ extern THCState* state;
     - THTensor* input
     - THTensor* grad_output
     - THTensor* grad_input
-    - THTensor* grad_weight
-    - THTensor* grad_bias
-    - THTensor* weight
-    - THTensor* running_mean
-    - THTensor* running_var
-    - THTensor* save_mean
-    - THTensor* save_var
+    - THAccumTensor* grad_weight
+    - THAccumTensor* grad_bias
+    - THAccumTensor* weight
+    - THAccumTensor* running_mean
+    - THAccumTensor* running_var
+    - THAccumTensor* save_mean
+    - THAccumTensor* save_var
     - bool training
     - double epsilon
 ]]

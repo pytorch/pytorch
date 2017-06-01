@@ -81,7 +81,8 @@ void cudnn_batch_norm_forward(
   TensorDescriptor wdesc;  // descriptor for weight, bias, running_mean, etc.
   setInputDescriptor(idesc, dataType, input);
   setInputDescriptor(odesc, dataType, output);
-  setScaleDescriptor(wdesc, scaleDataType(dataType), running_mean, input->nDimension);
+  cudnnDataType_t accumType = scaleDataType(dataType);
+  setScaleDescriptor(wdesc, accumType, running_mean, input->nDimension);
 
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
@@ -96,14 +97,14 @@ void cudnn_batch_norm_forward(
       handle, mode, &one, &zero,
       idesc.desc, tensorPointer(dataType, input),
       odesc.desc, tensorPointer(dataType, output),
-      wdesc.desc, tensorPointer(dataType, weight),
-      tensorPointer(dataType, bias),
+      wdesc.desc, tensorPointer(accumType, weight),
+      tensorPointer(accumType, bias),
       exponential_average_factor,
-      tensorPointer(dataType, running_mean),
-      tensorPointer(dataType, running_var),
+      tensorPointer(accumType, running_mean),
+      tensorPointer(accumType, running_var),
       epsilon,
-      tensorPointer(dataType, save_mean),
-      tensorPointer(dataType, save_var)));
+      tensorPointer(accumType, save_mean),
+      tensorPointer(accumType, save_var)));
   } else {
     THVoidTensor_assertContiguous(input);
     THVoidTensor_assertContiguous(bias);
@@ -113,10 +114,10 @@ void cudnn_batch_norm_forward(
       handle, mode, &one, &zero,
       idesc.desc, tensorPointer(dataType, input),
       odesc.desc, tensorPointer(dataType, output),
-      wdesc.desc, tensorPointer(dataType, weight),
-      tensorPointer(dataType, bias),
-      tensorPointer(dataType, running_mean),
-      tensorPointer(dataType, running_var),
+      wdesc.desc, tensorPointer(accumType, weight),
+      tensorPointer(accumType, bias),
+      tensorPointer(accumType, running_mean),
+      tensorPointer(accumType, running_var),
       epsilon));
   }
 }
@@ -158,7 +159,8 @@ void cudnn_batch_norm_backward(
   setInputDescriptor(idesc, dataType, input);
   setInputDescriptor(odesc, dataType, grad_output);
   setInputDescriptor(gdesc, dataType, grad_input);
-  setScaleDescriptor(wdesc, scaleDataType(dataType), weight, input->nDimension);
+  cudnnDataType_t accumType = scaleDataType(dataType);
+  setScaleDescriptor(wdesc, accumType, weight, input->nDimension);
 
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
@@ -168,12 +170,12 @@ void cudnn_batch_norm_backward(
     idesc.desc, tensorPointer(dataType, input),
     odesc.desc, tensorPointer(dataType, grad_output),
     gdesc.desc, tensorPointer(dataType, grad_input),
-    wdesc.desc, tensorPointer(dataType, weight),
-    tensorPointer(dataType, grad_weight),
-    tensorPointer(dataType, grad_bias),
+    wdesc.desc, tensorPointer(accumType, weight),
+    tensorPointer(accumType, grad_weight),
+    tensorPointer(accumType, grad_bias),
     epsilon,
-    tensorPointer(dataType, save_mean),
-    tensorPointer(dataType, save_var)));
+    tensorPointer(accumType, save_mean),
+    tensorPointer(accumType, save_var)));
 }
 
 }}  // namespace torch::cudnn
