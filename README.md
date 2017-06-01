@@ -2,11 +2,21 @@
 
 Caffe2 is a lightweight, modular, and scalable deep learning framework. Building on the original [Caffe](http://caffe.berkeleyvision.org), Caffe2 is designed with expression, speed, and modularity in mind.
 
+## Events
+
+Caffe2 Bay Area Meetup at NVIDIA, May 31 6-8:30, Santa Clara, CA:
+[https://www.meetup.com/Caffe2-Bay-Area/events/239836290/](https://www.meetup.com/Caffe2-Bay-Area/events/239836290/)
+
+## User Groups
+
+[Caffe2 Community Facebook Group](https://www.facebook.com/groups/caffe2ai/): join to ask questions, talk to other users, and keep informed of important Caffe2 updates.
+
 ## Questions and Feedback
 
 Please use Github issues (https://github.com/caffe2/caffe2/issues) to ask questions, report bugs, and request new features.
 
 Please participate in our survey (https://www.surveymonkey.com/r/caffe2). We will send you information about new releases and special developer events/webinars.
+
 
 ## License and Citation
 
@@ -15,18 +25,13 @@ Caffe2 is released under the [BSD 2-Clause license](https://github.com/Yangqing/
 ### Build Status
 
 [![Travis Build Status](https://travis-ci.org/caffe2/caffe2.svg?branch=master)](https://travis-ci.org/caffe2/caffe2)
-[![Windows Build status](https://ci.appveyor.com/api/projects/status/kec4ta779stuyb83?svg=true)](https://ci.appveyor.com/project/Yangqing/caffe2)
-
-Detailed build matrix (hit refresh if you see icons not showing up due to heroku):
 
 | Target      | Status |
 |-------------|----|
 | Linux       | [![Build Linux](https://travis-matrix-badges.herokuapp.com/repos/caffe2/caffe2/branches/master/1)](https://travis-ci.org/caffe2/caffe2) |
-| Mac (CPU)   | [![Build Mac](https://travis-matrix-badges.herokuapp.com/repos/caffe2/caffe2/branches/master/2)](https://travis-ci.org/caffe2/caffe2) |
 | Android     | [![Build Android](https://travis-matrix-badges.herokuapp.com/repos/caffe2/caffe2/branches/master/3)](https://travis-ci.org/caffe2/caffe2) |
 | iOS         | [![Build iOS](https://travis-matrix-badges.herokuapp.com/repos/caffe2/caffe2/branches/master/5)](https://travis-ci.org/caffe2/caffe2) |
 | Linux + MKL | [![Build LinuxMKL](https://travis-matrix-badges.herokuapp.com/repos/caffe2/caffe2/branches/master/6)](https://travis-ci.org/caffe2/caffe2) |
-| Windows     | [![Build status](https://ci.appveyor.com/api/projects/status/kec4ta779stuyb83?svg=true)](https://ci.appveyor.com/project/Yangqing/caffe2) |
 
 ### Further Resources on [Caffe2.ai](http://caffe2.ai)
 
