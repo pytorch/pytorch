@@ -202,9 +202,29 @@ std::vector<MulticastMessage> getMessages(struct sockaddr* addr, rank_type world
   return unpacked_msgs;
 }
 
-InitMethod::Config initTCPMaster(struct sockaddr* addr) {
-  // TODO
-  throw std::runtime_error("non-multicast tcp initialization not supported");
+
+InitMethod::Config initTCPMaster(std::string address, std::string str_port,
+                                 rank_type world_size, int assigned_rank) {
+  InitMethod::Config config;
+  if (assigned_rank == -1) {
+    throw std::invalid_argument("tcp:// method with non-multicast addresses "
+                                "requires manual rank assignment");
+  }
+
+  config.rank = convertToRank(assigned_rank);
+  config.world_size = world_size;
+  auto port = convertToPort(std::stoul(str_port));
+  if (config.rank == 0) {
+    config.master.listen_port = port;
+    std::tie(config.master.listen_socket, std::ignore) = listen(port);
+    config.public_address = discoverWorkers(config.master.listen_socket, world_size);
+  } else {
+    config.worker.master_addr = address;
+    config.worker.master_port = port;
+    std::tie(std::ignore, config.public_address) = discoverMaster({address}, port);
+  }
+
+  return config;
 }
 
 InitMethod::Config initTCPMulticast(std::string group_name, rank_type world_size,
@@ -295,7 +315,7 @@ InitMethod::Config initTCP(std::string argument, rank_type world_size,
       if (isMulticastAddress(head->ai_addr)) {
         return initTCPMulticast(group_name, world_size, rank, head->ai_addr);
       } else {
-        return initTCPMaster(head->ai_addr);
+        return initTCPMaster(address, str_port, world_size, rank);
       }
     } catch (std::exception &e) {
       if (!head->ai_next) throw;
