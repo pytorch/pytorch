@@ -97,7 +97,7 @@ class TestTile(hu.HypothesisTestCase):
 
         def tile_ref(X, tiles, axis):
             dims = [1, 1, 1]
-            dims[axis] = tiles
+            dims[axis[0]] = tiles
             tiled_data = np.tile(X, tuple(dims))
             return (tiled_data,)
 
