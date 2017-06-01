@@ -133,6 +133,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
             print('-- NumPy not found')
         if WITH_CUDNN:
             print('-- Detected cuDNN at ' + CUDNN_LIB_DIR + ', ' + CUDNN_INCLUDE_DIR)
+            print('-- Linking against ' + CUDNN_LIB)
         else:
             print('-- Not using cuDNN')
         if WITH_CUDA:
@@ -344,7 +345,13 @@ if WITH_NCCL:
     extra_compile_args += ['-DWITH_NCCL']
 
 if WITH_CUDNN:
-    main_libraries += ['cudnn']
+    CUDNN_LIB_NAME = 'libcudnn.so'
+    if platform.system() == 'Darwin':
+        CUDNN_LIB_NAME = 'libcudnn.dylib'
+    CUDNN_LIB = os.path.join(CUDNN_LIB_DIR, CUDNN_LIB_NAME)
+    CUDNN_LIB = os.path.realpath(CUDNN_LIB)
+
+    main_link_args += [ CUDNN_LIB ]
     include_dirs.append(CUDNN_INCLUDE_DIR)
     library_dirs.append(CUDNN_LIB_DIR)
     main_sources += [
