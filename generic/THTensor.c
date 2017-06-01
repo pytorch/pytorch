@@ -338,7 +338,7 @@ int THTensor_(expand2)(THTensor *ra, THTensor *rb, THTensor *opa, THTensor *opb,
   return 0;
 }
 
-TH_API int THTensor_(expand3)(THTensor *ra, THTensor *rb, THTensor *rc, THTensor *opa, THTensor *opb, THTensor *opc, int raiseErrors) {
+int THTensor_(expand3)(THTensor *ra, THTensor *rb, THTensor *rc, THTensor *opa, THTensor *opb, THTensor *opc, int raiseErrors) {
   THArgCheck(THTensor_(nDimension)(opa) > 0, 0, "can't expand empty tensor opa");
   THArgCheck(THTensor_(nDimension)(opb) > 0, 0, "can't expand empty tensor opb");
   THArgCheck(THTensor_(nDimension)(opc) > 0, 0, "can't expand empty tensor opc");
