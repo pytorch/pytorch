@@ -77,8 +77,8 @@ no intermediate states are saved.
 
 .. code::
 
-    >>> regular_input = Variable(torch.randn(5, 5))
-    >>> volatile_input = Variable(torch.randn(5, 5), volatile=True)
+    >>> regular_input = Variable(torch.randn(1, 3, 227, 227))
+    >>> volatile_input = Variable(torch.randn(1, 3, 227, 227), volatile=True)
     >>> model = torchvision.models.resnet18(pretrained=True)
     >>> model(regular_input).requires_grad
     True
