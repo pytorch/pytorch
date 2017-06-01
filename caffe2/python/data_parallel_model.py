@@ -25,6 +25,7 @@ def Parallelize_GPU(
     forward_pass_builder_fun,
     param_update_builder_fun=None,
     optimizer_builder_fun=None,
+    post_sync_builder_fun=None,
     devices=range(0, workspace.NumCudaDevices()),
     rendezvous=None,
     net_type='dag',
@@ -57,7 +58,11 @@ def Parallelize_GPU(
                         Alternative to param_update_builder_fun, allows one
                         to add an optimizer for the whole model. Called only
                         once, without name or devicescope.
-
+      post_sync_builder_fun:
+                        Function applied after initial parameter sync has been
+                        completed, such as keeping multi-precision parameters
+                        in sync.
+                        Signature: post_sync_builder_fun(model)
       devices:          List of GPU ids, such as [0, 1, 2, 3],
       rendezvous:       used for rendezvous in distributed computation, if None
                         then only one node is used. To create rendezvous,
@@ -218,6 +223,15 @@ def Parallelize_GPU(
     _SyncParams(
         devices, model_helper_obj, model_helper_obj.param_init_net, sync_names
     )
+
+    # Handle any operations that need to be done after parameter sync
+    # i.e. making sure multi-precision copies of parameters are up-to-date
+    if post_sync_builder_fun is not None:
+        for device in devices:
+            device_opt = core.DeviceOption(caffe2_pb2.CUDA, device)
+            with core.DeviceScope(device_opt):
+                with core.NameScope("gpu_{}".format(device)):
+                    post_sync_builder_fun(model_helper_obj)
 
     if optimize_gradient_memory:
         _OptimizeGradientMemorySimple(model_helper_obj, losses_by_gpu, devices)
