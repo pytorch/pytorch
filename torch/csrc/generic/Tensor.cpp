@@ -634,7 +634,7 @@ static THIndexTensor* THPTensor_(_calculateLinearIndices)(
   THLongStorage_set(indexerSize, 0, indexingElements);
 
   for (ptrdiff_t i = 0; i < indexingElements; ++i) {
-    long linearIdx = 0;
+    long linearIdx = THTensor_(storageOffset)(LIBRARY_STATE indexed);
     for (int j = broadcasted.size() - 1; j >= 0; --j) {
       THIndexTensor *indexer = THIndexTensor_(newContiguous)(LIBRARY_STATE broadcasted.at(j));
 
@@ -680,8 +680,9 @@ static bool THPTensor_(_advancedIndexCommonInit)(
 
   *flattened = THTensor_(newWithStorage1d)(LIBRARY_STATE
                                            THTensor_(storage)(LIBRARY_STATE indexed.get()),
-                                           THTensor_(storageOffset)(LIBRARY_STATE indexed.get()),
-                                           THTensor_(nElement)(LIBRARY_STATE indexed.get()),
+                                           0,
+                                           THStorage_(size)(LIBRARY_STATE
+                                               THTensor_(storage)(LIBRARY_STATE indexed.get())),
                                            1);
 
   return true;
@@ -718,11 +719,13 @@ static bool THPTensor_(_advancedIndexGet)(PyObject *index, THTensorPtr &tresult)
     THTensor_(indexSelect)(LIBRARY_STATE result, flattened, 0, linearIndices);
 
     // In the event that the indexing Tensors are not vectors, we need to reshape
-    // the result to be the appropriate shape
+    // the result to be the appropriate shape. Note that we do not use the strides
+    // of a broadcast Tensor, as they may have been mucked with to support the
+    // broadcast semantics
     THTensor_(resizeNd)(LIBRARY_STATE result,
                         THIndexTensor_(nDimension)(LIBRARY_STATE broadcasted.at(0)),
                         broadcasted.at(0)->size,
-                        broadcasted.at(0)->stride);
+                        NULL);
 
     // result ptr takes ownership of result tensor, and implicitly frees the
     // indexed one

@@ -2527,6 +2527,30 @@ class TestTorch(TestCase):
         reference[ri([0, 2, 4]), ] = torch.Tensor([5, 4, 3])
         self.assertEqual(reference[ri([0, 2, 4]), ], torch.Tensor([5, 4, 3]))
 
+        # Tensor with stride != 1
+
+        # strided is [1, 3, 5, 7]
+        reference = self._consecutive((10,))
+        strided = torch.Tensor()
+        strided.set_(reference.storage(), storage_offset=0,
+                     size=torch.Size([4]), stride=[2])
+
+        self.assertEqual(strided[ri([0]), ], torch.Tensor([1]))
+        self.assertEqual(strided[ri([3]), ], torch.Tensor([7]))
+        self.assertEqual(strided[ri([1, 2]), ], torch.Tensor([3, 5]))
+        self.assertEqual(strided[ri([[2, 1], [0, 3]]), ],
+                         torch.Tensor([[5, 3], [1, 7]]))
+
+        # stride is [4, 8]
+        strided = torch.Tensor()
+        strided.set_(reference.storage(), storage_offset=4,
+                     size=torch.Size([2]), stride=[4])
+        self.assertEqual(strided[ri([0]), ], torch.Tensor([5]))
+        self.assertEqual(strided[ri([1]), ], torch.Tensor([9]))
+        self.assertEqual(strided[ri([0, 1]), ], torch.Tensor([5, 9]))
+        self.assertEqual(strided[ri([[0, 1], [1, 0]]), ],
+                         torch.Tensor([[5, 9], [9, 5]]))
+
         # reference is 1 2
         #              3 4
         #              5 6
@@ -2619,6 +2643,84 @@ class TestTorch(TestCase):
         reference[rows, columns] = torch.Tensor([[4, 6], [2, 3]])
         self.assertEqual(reference[rows, columns],
                          torch.Tensor([[4, 6], [2, 3]]))
+
+        # stride != 1
+
+        # strided is [[1 3 5 7],
+        #             [9 11 13 15]]
+
+        reference = torch.arange(0, 24).view(3, 8)
+        strided = torch.Tensor()
+        strided.set_(reference.storage(), 1, size=torch.Size([2, 4]),
+                     stride=[8, 2])
+
+        self.assertEqual(strided[ri([0, 1]), ri([0])], torch.Tensor([1, 9]))
+        self.assertEqual(strided[ri([0, 1]), ri([1])], torch.Tensor([3, 11]))
+        self.assertEqual(strided[ri([0]), ri([0])], torch.Tensor([1]))
+        self.assertEqual(strided[ri([1]), ri([3])], torch.Tensor([15]))
+        self.assertEqual(strided[[ri([0, 0]), ri([0, 3])]], torch.Tensor([1, 7]))
+        self.assertEqual(strided[[ri([1]), ri([0, 1, 1, 0, 3])]],
+                         torch.Tensor([9, 11, 11, 9, 15]))
+        self.assertEqual(strided[[ri([0, 0, 1, 1]), ri([0, 1, 0, 0])]],
+                         torch.Tensor([1, 3, 9, 9]))
+
+        rows = ri([[0, 0],
+                   [1, 1]])
+        columns = [0],
+        self.assertEqual(strided[rows, columns], torch.Tensor([[1, 1],
+                                                              [9, 9]]))
+
+        rows = ri([[0, 1],
+                   [1, 0]])
+        columns = ri([1, 2])
+        self.assertEqual(strided[rows, columns], torch.Tensor([[3, 13],
+                                                              [11, 5]]))
+        rows = ri([[0, 0],
+                   [1, 1]])
+        columns = ri([[0, 1],
+                      [1, 2]])
+        self.assertEqual(strided[rows, columns], torch.Tensor([[1, 3],
+                                                              [11, 13]]))
+
+        # setting values
+
+        # strided is [[10, 11],
+        #             [17, 18]]
+
+        reference = torch.arange(0, 24).view(3, 8)
+        strided = torch.Tensor()
+        strided.set_(reference.storage(), 10, size=torch.Size([2, 2]),
+                     stride=[7, 1])
+        self.assertEqual(strided[ri([0]), ri([1])], torch.Tensor([11]))
+        strided[ri([0]), ri([1])] = -1
+        self.assertEqual(strided[ri([0]), ri([1])], torch.Tensor([-1]))
+
+        reference = torch.arange(0, 24).view(3, 8)
+        strided = torch.Tensor()
+        strided.set_(reference.storage(), 10, size=torch.Size([2, 2]),
+                     stride=[7, 1])
+        self.assertEqual(strided[ri([0, 1]), ri([1, 0])], torch.Tensor([11,
+                         17]))
+        strided[ri([0, 1]), ri([1, 0])] = torch.Tensor([-1, 2])
+        self.assertEqual(strided[ri([0, 1]), ri([1, 0])], torch.Tensor([-1,
+                         2]))
+
+        reference = torch.arange(0, 24).view(3, 8)
+        strided = torch.Tensor()
+        strided.set_(reference.storage(), 10, size=torch.Size([2, 2]),
+                     stride=[7, 1])
+
+        rows = ri([[0],
+                   [1]])
+        columns = ri([[0, 1],
+                      [0, 1]])
+        self.assertEqual(strided[rows, columns],
+                         torch.Tensor([[10, 11], [17, 18]]))
+        strided[rows, columns] = torch.Tensor([[4, 6], [2, 3]])
+        self.assertEqual(strided[rows, columns],
+                         torch.Tensor([[4, 6], [2, 3]]))
+
+        # TODO: error raising tests
 
     def test_newindex(self):
         reference = self._consecutive((3, 3, 3))
