@@ -15,6 +15,7 @@ _OPTIMIZER_ITERATION_NAME = "optimizer_iteration"
 
 AuxOptimizerParams = namedtuple("AuxOptimizerParams", ["local", "shared"])
 
+
 class Optimizer(object):
     def __init__(self):
         self._aux_params = AuxOptimizerParams(local=[], shared=[])
@@ -184,57 +185,6 @@ class SgdOptimizer(Optimizer):
         self.base_learning_rate *= scale
         return
 
-class MultiPrecisionSgdOptimizer(SgdOptimizer):
-    def __init__(self, base_learning_rate=0.1, momentum=0.0,
-                 policy="fixed", nesterov=1, **kwargs):
-        super(SgdOptimizer, self).__init__()
-        self.base_learning_rate = base_learning_rate
-        self.momentum = momentum
-        self.policy = policy
-        self.nesterov = nesterov
-        self.init_kwargs = kwargs
-
-    def _run(self, net, param_init_net, param_info):
-        param = param_info.blob
-        param_fp32 = param_info.blob_copy[core.DataType.FLOAT] \
-                if param_info.blob_copy is not None else None
-
-        # If we have a straight fp32 parameter, run the base class
-        if param_fp32 == None:
-            return SgdOptimizer._run(self, net, param_init_net, param_info)
-
-        grad = param_info.grad
-        if self.base_learning_rate == 0:
-            return
-        assert self.base_learning_rate > 0
-
-        lr, _ = self.build_lr(
-            net, param_init_net,
-            base_learning_rate=-self.base_learning_rate,
-            learning_rate_blob=param + "_lr",
-            policy=self.policy,
-            **(self.init_kwargs)
-        )
-
-        momentum_data = param_init_net.ConstantFill(
-            param_fp32, str(param) + "_momentum", value=0.)
-        self._aux_params.local.append(momentum_data)
-
-        assert not isinstance(grad, core.GradientSlice), \
-                "Doesn't support sparse gradients"
-
-        # Copy gradient to fp32
-        grad_fp32 = net.HalfToFloat(grad, grad + "_fp32")
-
-        # update (fused) in fp32
-        net.MomentumSGDUpdate(
-            [grad_fp32, momentum_data, lr, param_fp32],
-            [grad, momentum_data, param_fp32],
-            momentum=self.momentum,
-            nesterov=self.nesterov)
-
-        # Copy updated param back to fp16
-        net.FloatToHalf(param_fp32, param)
 
 class AdagradOptimizer(Optimizer):
     def __init__(self, alpha=0.01, epsilon=1e-4, policy="fixed",
@@ -445,12 +395,6 @@ def _build(model, optimizer):
 def build_sgd(model, base_learning_rate, **kwargs):
     sgd_optimizer = SgdOptimizer(base_learning_rate, **kwargs)
     return _build(model, sgd_optimizer)
-
-def build_multi_precision_sgd(model, base_learning_rate, **kwargs):
-    multi_prec_sgd_optimizer = MultiPrecisionSgdOptimizer(
-            base_learning_rate, **kwargs
-    )
-    return _build(model, multi_prec_sgd_optimizer)
 
 
 def build_ftrl(model, engine="SIMD", **kwargs):
