@@ -24,14 +24,20 @@ Transforms on torch.\*Tensor
 ----------------------------
 
 .. autoclass:: Normalize
+	:members: __call__
+	:special-members:
 
 
 Conversion Transforms
 ---------------------
 
 .. autoclass:: ToTensor
+	:members: __call__
+	:special-members:
 
 .. autoclass:: ToPILImage
+	:members: __call__
+	:special-members:
 
 Generic Transforms
 ------------------
