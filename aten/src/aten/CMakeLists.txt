@@ -74,6 +74,39 @@ EXCLUDE_DIR(base_cpp ".*/templates/.*$")
 SET(generated_cpp
   CPUGenerator.h
   CUDAGenerator.h
+  CPUByteStorage.h
+  CPUCharStorage.h
+  CPUDoubleStorage.h
+  CPUFloatStorage.h
+  CPUIntStorage.h
+  CPULongStorage.h
+  CPUShortStorage.h
+  CPUHalfStorage.h
+  CUDAByteStorage.h
+  CUDACharStorage.h
+  CUDADoubleStorage.h
+  CUDAFloatStorage.h
+  CUDAIntStorage.h
+  CUDALongStorage.h
+  CUDAShortStorage.h
+  CUDAHalfStorage.h
+  
+  CPUByteStorage.cpp
+  CPUCharStorage.cpp
+  CPUDoubleStorage.cpp
+  CPUFloatStorage.cpp
+  CPUIntStorage.cpp
+  CPULongStorage.cpp
+  CPUShortStorage.cpp
+  CPUHalfStorage.cpp
+  CUDAByteStorage.cpp
+  CUDACharStorage.cpp
+  CUDADoubleStorage.cpp
+  CUDAFloatStorage.cpp
+  CUDAIntStorage.cpp
+  CUDALongStorage.cpp
+  CUDAShortStorage.cpp
+  CUDAHalfStorage.cpp
 )
 
 FILE(GLOB_RECURSE all_templates "templates/*")
