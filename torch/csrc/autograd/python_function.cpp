@@ -283,7 +283,6 @@ static void THPFunction_dealloc(THPFunction* self)
 {
   PyObject_GC_UnTrack(self);
   THPFunction_clear(self);
-  self->cdata_ptr.~weak_ptr();
   self->cdata.~PyFunction();
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
@@ -296,7 +295,6 @@ PyObject *THPFunction_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
   // most fields
   THPFunction* self = (THPFunction*)obj;
   new (&self->cdata) torch::autograd::PyFunction(obj);
-  new (&self->cdata_ptr) std::weak_ptr<torch::autograd::PyFunction>();
   self->cdata.num_inputs = -1;
   self->cdata.is_stochastic = PyObject_IsInstance(obj, THPStochasticFunctionClass);
   return obj;
@@ -847,55 +845,47 @@ PyObject* THPFunction_register_hook(THPFunction *self, PyObject *hook)
   return torch::autograd::registerFunctionHook(self->cdata, hook);
 }
 
-PyObject *THPFunction_saved_tensors(THPFunction *self, void *_unused)
+static PyObject *unpack_saved_variables(
+    THPFunction *self,
+    std::function<PyObject*(std::shared_ptr<Variable>)> unpack_fn)
 {
   THPUtils_assert(!self->has_freed_buffers, ERR_BACKWARD_TWICE);
   if (!self->saved_variables)
     return PyTuple_New(0);
 
   int num_saved = self->saved_variables->size();
-  THPObjectPtr saved_tensors(PyTuple_New(num_saved));
-  if (!saved_tensors)
+  THPObjectPtr saved(PyTuple_New(num_saved));
+  if (!saved)
     return NULL;
+  auto saved_for = THPFunction_asFunction(self);
   auto& saved_variables = *self->saved_variables;
   for (int i = 0; i < num_saved; i++) {
-    auto unpacked_var = saved_variables[i].unpack();
-    THPObjectPtr tensor;
+    auto unpacked_var = saved_variables[i].unpack(saved_for);
+    THPObjectPtr value;
     if (!unpacked_var) {
       Py_INCREF(Py_None);
-      tensor = Py_None;
+      value = Py_None;
     } else {
-      tensor = createPyObject(*unpacked_var->data);
+      value = unpack_fn(unpacked_var);
     }
-    PyTuple_SET_ITEM(saved_tensors.get(), i, tensor.release());
+    PyTuple_SET_ITEM(saved.get(), i, value.release());
   }
-  return saved_tensors.release();
+  return saved.release();
+}
+
+PyObject *THPFunction_saved_tensors(THPFunction *self, void *_unused)
+{
+  return unpack_saved_variables(self, [](std::shared_ptr<Variable> var) {
+    return createPyObject(*var->data);
+  });
 }
 
 PyObject *THPFunction_saved_variables(THPFunction *self, void *_unused)
 {
-  THPUtils_assert(!self->has_freed_buffers, ERR_BACKWARD_TWICE);
-  if (!self->saved_variables)
-    return PyTuple_New(0);
-
-  int num_saved = self->saved_variables->size();
-  THPObjectPtr py_saved_variables(PyTuple_New(num_saved));
-  if (!py_saved_variables) return NULL;
-  auto& saved_variables = *self->saved_variables;
-  for (int i = 0; i < num_saved; i++) {
-    auto unpacked_var = saved_variables[i].unpack();
-    THPObjectPtr py_var;
-    if (!unpacked_var) {
-      Py_INCREF(Py_None);
-      py_var = Py_None;
-    } else {
-      py_var = THPVariable_Wrap(unpacked_var);
-    }
-    PyTuple_SET_ITEM(py_saved_variables.get(), i, py_var.release());
-  }
-  return py_saved_variables.release();
+  return unpack_saved_variables(self, [](std::shared_ptr<Variable> var) {
+    return THPVariable_Wrap(var);
+  });
 }
-
 
 PyObject *THPFunction_next_functions(THPFunction *self, void *_unused)
 {
@@ -1051,26 +1041,17 @@ struct Decref {
 // Similar to shared_from_this. There's a problem that the Python object
 // and its cdata depend on each other being alive, so we can't keep
 // shared_ptrs as members, but we'd like to be able to manage the lifetime of
-// the objects using shared_ptrs in the C++ graph. The only way to get a new
-// shared_ptr that references them is through THPFunction_asFunction. When
-// called for the first time it will allocate a new shared_ptr and save a
-// weak_ptr in cdata_ptr attr. Later, when we try to take another reference,
-// we'll try to lock cdata_ptr and return its value if successful. Otherwise it
-// means that all shared_ptrs returned previously have been freed, so we can
-// create a new one. This ensures that this object is managed by at most one
-// shared_ptr control block at any time - a guarantee we depend on in other places
-// (e.g. we use weak_ptrs in SavedVariable because we know it won't go out of scope).
+// the objects using shared_ptrs in the C++ graph. This returns a new
+// shared_ptr, which will decrement the Python reference count when it's
+// destructed. WARNING: it's generally not safe to create weak_ptrs from
+// these shared_ptrs since multiple shared_ptrs may control the same underlying
+// object.
 std::shared_ptr<PyFunction> THPFunction_asFunction(THPFunction* self)
 {
   if (!self) {
     return std::shared_ptr<PyFunction>();
   }
 
-  auto ptr = self->cdata_ptr.lock();
-  if (ptr) return ptr;
-
   Py_INCREF((PyObject*)self);
-  ptr = std::shared_ptr<PyFunction>(&self->cdata, Decref());
-  self->cdata_ptr = ptr;
-  return ptr;
+  return std::shared_ptr<PyFunction>(&self->cdata, Decref());
 }
