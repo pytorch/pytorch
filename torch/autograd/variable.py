@@ -458,10 +458,10 @@ class Variable(_C._VariableBase):
             return Cmin.apply(self, dim)
         return Min(dim, keepdim)(self)
 
-    def mode(self, dim, keepdim=True):
+    def mode(self, dim=None, keepdim=True):
         return Mode(dim, keepdim)(self)
 
-    def median(self, dim, keepdim=True):
+    def median(self, dim=None, keepdim=True):
         return Median(dim, keepdim)(self)
 
     def kthvalue(self, dim, keepdim=True):

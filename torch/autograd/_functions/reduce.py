@@ -163,7 +163,7 @@ class _SelectionFunction(Function):
             grad_input[self.indices] = grad_output[0]
         else:
             if self.dim is None:
-                dim = input.dim() - 1
+                dim = len(self.input_size) - 1
             else:
                 dim = self.dim
 
