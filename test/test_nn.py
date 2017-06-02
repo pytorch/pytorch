@@ -1366,7 +1366,7 @@ class TestNN(NNTestCase):
 
         for invalid_dims, module in zip(invalid_input_dims, modules):
             for dims in invalid_dims:
-                input = Variable(torch.Tensor(torch.Size((3, )*dims)))
+                input = Variable(torch.Tensor(torch.Size((3, ) * dims)))
                 self.assertRaises(ValueError, lambda: module(input))
 
     def test_ConvTranspose2d_output_size(self):
