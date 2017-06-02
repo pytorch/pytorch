@@ -5,7 +5,7 @@ import re
 # block subsitution by identing to that depth and replacing
 
 class CodeTemplate(object):
-    subtitution = re.compile('(^[^\n\S]*)?\$([^\d\W]\w*|\{[^\d\W]\w*\})',re.MULTILINE)
+    subtitution = re.compile('(^[^\n\S]*)?\$([^\d\W]\w*|\{,?[^\d\W]\w*\,?})',re.MULTILINE)
     def from_file(filename):
         with open(filename,'r') as f:
             return CodeTemplate(f.read())
@@ -19,13 +19,24 @@ class CodeTemplate(object):
         def replace(match):
             indent = match.group(1)
             key = match.group(2)
+            comma_before=''
+            comma_after=''
             if key[0] == "{":
                 key = key[1:-1]
+                if key[0] == ",":
+                    comma_before = ', '
+                    key = key[1:]
+                if key[-1] == ',':
+                    comma_after = ', '
+                    key = key[:-1]
             v = lookup(key)
             if indent is not None and isinstance(v,list):
                 return indent_lines(indent,v)
             elif isinstance(v,list):
-                return ', '.join([str(x) for x in v])
+                middle = ', '.join([str(x) for x in v])
+                if len(v) == 0:
+                    return middle
+                return comma_before+middle+comma_after
             else:
                 return (indent or '') + str(v)
         return self.subtitution.sub(replace,self.pattern)
@@ -38,5 +49,7 @@ if __name__ == "__main__":
             $bar
         $a+$b
     }
+    int commatest(int a${,stuff})
+    int notest(int a${,empty,})
     """)
-    print(c.substitute(args=["hi",8],bar=["what",7],a=3,b=4))
+    print(c.substitute(args=["hi",8],bar=["what",7],a=3,b=4,stuff=["things...","others"],empty=[]))
