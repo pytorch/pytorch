@@ -1,5 +1,9 @@
 #include "lmdb.h"  // NOLINT
 
+#if defined(_MSC_VER)
+#include <direct.h>
+#endif
+
 #include <sys/stat.h>
 
 #include <string>
@@ -138,8 +142,12 @@ LMDB::LMDB(const string& source, Mode mode) : DB(source, mode) {
   MDB_CHECK(mdb_env_create(&mdb_env_));
   MDB_CHECK(mdb_env_set_mapsize(mdb_env_, LMDB_MAP_SIZE));
   if (mode == NEW) {
+#if defined(_MSC_VER)
+    CAFFE_ENFORCE_EQ(_mkdir(source.c_str()), 0, "mkdir ", source, " failed");
+#else
     CAFFE_ENFORCE_EQ(
         mkdir(source.c_str(), 0744), 0, "mkdir ", source, " failed");
+#endif
   }
   int flags = 0;
   if (mode == READ) {
