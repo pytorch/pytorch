@@ -536,7 +536,7 @@ class MultiRNNCell(RNNCell):
                 if i > 0 and i in self.residual_output_layers:
                     layer_input = model.net.Sum(
                         [layer_output, layer_input],
-                        [layer_output],
+                        self.scope('residual_output_{}'.format(i)),
                     )
                 else:
                     layer_input = layer_output
