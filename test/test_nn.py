@@ -1309,14 +1309,6 @@ class TestNN(NNTestCase):
         self.assertIn('buf', l.state_dict())
         self.assertIs(l.state_dict()['buf'], buf)
 
-    def test_Conv2d_raises_error_on_incorrect_input_size(self):
-        conv = nn.Conv2d(in_channels=3, out_channels=8, kernel_size=3)
-        input = Variable(torch.randn(3, 10, 20))
-        self.assertRaises(ValueError, lambda: conv(input))
-
-        input = Variable(torch.randn(3, 1, 1, 10, 20))
-        self.assertRaises(ValueError, lambda: conv(input))
-
     def test_Conv2d_inconsistent_types(self):
         inputs = Variable(torch.randn(4, 1, 7, 7).float())
         weights = Variable(torch.randn(1, 1, 3, 3).double())
@@ -1362,6 +1354,20 @@ class TestNN(NNTestCase):
             run_test(benchmark=True)
         finally:
             torch.backends.cudnn.benchmark = b
+
+    def test_conv_modules_raise_error_on_incorrect_input_size(self):
+        modules = [nn.Conv1d(3, 8, 3), nn.ConvTranspose1d(3, 8, 3),
+                   nn.Conv2d(3, 8, 3), nn.ConvTranspose2d(3, 8, 3),
+                   nn.Conv3d(3, 8, 3), nn.ConvTranspose3d(3, 8, 3)]
+
+        invalid_input_dims = [(2, 4), (2, 4),
+                              (3, 5), (3, 5),
+                              (4, 6), (4, 6)]
+
+        for invalid_dims, module in zip(invalid_input_dims, modules):
+            for dims in invalid_dims:
+                input = Variable(torch.Tensor(torch.Size((3, )*dims)))
+                self.assertRaises(ValueError, lambda: module(input))
 
     def test_ConvTranspose2d_output_size(self):
         m = nn.ConvTranspose2d(3, 4, 3, 3, 0, 2)
