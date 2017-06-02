@@ -464,8 +464,8 @@ class Variable(_C._VariableBase):
     def median(self, dim=None, keepdim=True):
         return Median(dim, keepdim)(self)
 
-    def kthvalue(self, dim, keepdim=True):
-        return Kthvalue(dim, keepdim)(self)
+    def kthvalue(self, k, dim=None, keepdim=True):
+        return Kthvalue(k, dim, keepdim)(self)
 
     def sort(self, dim=None, descending=False):
         return Sort.apply(self, dim, descending, True)
