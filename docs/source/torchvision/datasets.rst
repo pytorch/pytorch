@@ -1,10 +1,11 @@
 torchvision.datasets
 ====================
 
-All the datasets are subclasses of :class:`torch.utils.data.Dataset`
+All datasets are subclasses of :class:`torch.utils.data.Dataset`
 i.e, they have ``__getitem__`` and ``__len__`` methods implemented.
-Hence, they can all be multi-threaded (python multiprocessing) using
-:class:`torch.utils.data.DataLoader`. For example ::
+Hence, they can all be passed to a :class:`torch.utils.data.DataLoader`
+which can load multiple samples parallelly using ``torch.multiprocessing`` workers. 
+For example: ::
     
     imagenet_data = torchvision.datasets.ImageFolder('path/to/imagenet_root/')
     data_loader = torch.utils.data.DataLoader(imagenet_data, 
