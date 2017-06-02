@@ -58,14 +58,12 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
     CHECK(!deterministic_ || !exhaustive_search_);
     CAFFE_ENFORCE(group_ > 0);
     CAFFE_ENFORCE(!deterministic_ || !exhaustive_search_);
-    OPERATOR_NEEDS_FEATURE(
-        pad_t() == pad_b(),
-        "The current padding scheme leads to unequal padding on the top and "
-        "bottom, which is not supported by cudnn.");
-    OPERATOR_NEEDS_FEATURE(
-        pad_l() == pad_r(),
-        "The current padding scheme leads to unequal padding on the left "
-        "and right, which is not supported by cudnn.");
+    for (int i = 0; i < kernel_.size(); ++i) {
+      OPERATOR_NEEDS_FEATURE(
+          pads_[i] == pads_[kernel_.size() + i],
+          "The current padding scheme leads to unequal padding on the left "
+          "and right, which is not supported by cudnn.");
+    }
     // dilated convolution supported by some algorithms in cuDNN v6
 #if !(CUDNN_VERSION_MIN(6,0,0))
     OPERATOR_NEEDS_FEATURE(
