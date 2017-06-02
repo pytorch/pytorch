@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Scalar.h"
+#include "Type.h"
 
 namespace tlib {
 
@@ -22,7 +23,7 @@ struct Storage {
   virtual Type & type() const = 0;
   virtual int getDevice() const = 0;
 
-  virtual Scalar fill(Scalar value) = 0;
+  virtual Storage& fill(Scalar value) = 0;
   virtual Storage& set(std::size_t ind, Scalar value) = 0;
   virtual Storage& fast_set(std::size_t ind, Scalar value) = 0;
   virtual Scalar get(std::size_t ind) = 0;
