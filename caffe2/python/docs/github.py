@@ -29,8 +29,18 @@ class GHMarkdown(Markdown):
         self.addLine("layout: docs")
         self.addLine("permalink: /docs/operators-catalogue.html")
         self.addLine("---")
+        self.addLine("* TOC")
+        self.addLine("{:toc}")
 
     def addTable(self, table, noTitle=False):
+        self.addLinebreak()
+        assert(len(table) > 1)
+        self.addLine(' | '.join(['----------' for i in range(len(table[0]))]))
+        self.addLine(' | '.join(table[0]))
+        for row in table[1:]:
+            self.addLine(' | '.join(row))
+
+    def addTableHTML(self, table, noTitle=False):
         self.addRaw("<table>")
         for row in table:
             self.addRaw("<tr>")
@@ -72,6 +82,16 @@ class GHOperatorDoc(OperatorDoc):
             formatter.addRaw(' ')
             formatter.addCode('{impl}'.format(impl=impl), True)
         return formatter.dump()
+
+    def generateSchema(self, formatter):
+        formatter.addHeader(self.name, 2)
+        if self.schema:
+            self.generateDoc(formatter)
+            self.generateInterface(formatter)
+            self.generateCodeLink(formatter)
+            formatter.addBreak()
+        else:
+            formatter.addLine("No schema documented yet.")
 
 
 class GHOpDocGenerator(OpDocGenerator):
