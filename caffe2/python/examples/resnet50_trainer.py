@@ -267,6 +267,7 @@ def Train(args):
 
     def add_optimizer(model):
         stepsz = int(30 * args.epoch_size / total_batch_size / num_shards)
+        optimizer.add_weight_decay(model, args.weight_decay)
         optimizer.build_sgd(
             model,
             args.base_learning_rate,

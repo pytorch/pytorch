@@ -184,6 +184,7 @@ class SgdOptimizer(Optimizer):
         self.base_learning_rate *= scale
         return
 
+
 class MultiPrecisionSgdOptimizer(SgdOptimizer):
     def __init__(self, base_learning_rate=0.1, momentum=0.0,
                  policy="fixed", nesterov=1, **kwargs):
@@ -235,6 +236,36 @@ class MultiPrecisionSgdOptimizer(SgdOptimizer):
 
         # Copy updated param back to fp16
         net.FloatToHalf(param_fp32, param)
+
+
+class WeightDecayBuilder(Optimizer):
+    def __init__(self, weight_decay):
+        self.weight_decay = weight_decay
+
+    def _run(self, net, param_init_net, param_info):
+        dev = scope.CurrentDeviceScope()
+        if dev is None:
+            dev = core.DeviceOption(caffe2_pb2.CPU)
+
+        ONE = param_init_net.ConstantFill(
+            [],
+            "ONE_{}_{}".format(dev.device_type, dev.cuda_gpu_id),
+            shape=[1],
+            value=1.0
+        )
+        WD = param_init_net.ConstantFill(
+            [], "wd_{}_{}".format(dev.device_type, dev.cuda_gpu_id),
+            shape=[1], value=self.weight_decay
+        )
+
+        if isinstance(param_info.grad, core.GradientSlice):
+            assert "Weight decay does not yet support sparse gradients"
+        else:
+            net.WeightedSum(
+                [param_info.grad, ONE, param_info.blob, WD],
+                param_info.grad,
+            )
+
 
 class AdagradOptimizer(Optimizer):
     def __init__(self, alpha=0.01, epsilon=1e-4, policy="fixed",
@@ -407,17 +438,25 @@ class AdamOptimizer(Optimizer):
         return
 
 
-def _build(model, optimizer):
+def _get_param_to_device(model):
     # Infer blob devices by going through the net and param_init_net
     # ops and observing the device used to create or use the blob.
     param_to_device = core.InferBlobDevices(model.net)
     param_to_device.update(core.InferBlobDevices(model.param_init_net))
+    return param_to_device
+
+
+def _build(model, optimizer, weights_only=False):
+    param_to_device = _get_param_to_device(model)
 
     # Validate there are no duplicate params
     model.Validate()
 
     # Call optimizer for each param
     for param_info in model.GetOptimizationParamInfo():
+        if weights_only:
+            if param_info.blob not in model.weights:
+                continue
         param_name = str(param_info.blob)
 
         # We first check if parameter's device has been inferred. If not,
@@ -446,13 +485,29 @@ def _build(model, optimizer):
     return optimizer
 
 
+def add_weight_decay(model, weight_decay):
+    """Adds a decay to weights in the model.
+
+    This is a form of L2 regularization.
+
+    Args:
+        weight_decay: strength of the regularization
+    """
+    _build(
+        model,
+        WeightDecayBuilder(weight_decay=weight_decay),
+        weights_only=True,
+    )
+
+
 def build_sgd(model, base_learning_rate, **kwargs):
     sgd_optimizer = SgdOptimizer(base_learning_rate, **kwargs)
     return _build(model, sgd_optimizer)
 
+
 def build_multi_precision_sgd(model, base_learning_rate, **kwargs):
     multi_prec_sgd_optimizer = MultiPrecisionSgdOptimizer(
-            base_learning_rate, **kwargs
+        base_learning_rate, **kwargs
     )
     return _build(model, multi_prec_sgd_optimizer)
 
