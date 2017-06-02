@@ -122,9 +122,9 @@ size_t getMaxWorkspaceSize(cudnnHandle_t handle, const Convolution& conv, algo_t
     size_t max_block_size = 0;
     size_t total_gpu_mem = 0;
     size_t free_gpu_mem = 0;
-    
+
     THCudaCheck(THCudaMemGetInfoCached(state,&free_gpu_mem,&total_gpu_mem,&max_block_size));
-    
+
     for(int i=0; i<n_algo; i++) {
         cudnnStatus_t err;
         size_t sz;
@@ -154,15 +154,15 @@ struct algorithm_search<cudnnConvolutionFwdAlgo_t> {
          CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM,
          CUDNN_CONVOLUTION_FWD_ALGO_DIRECT,
          CUDNN_CONVOLUTION_FWD_ALGO_WINOGRAD,
-         CUDNN_CONVOLUTION_FWD_ALGO_WINOGRAD_NONFUSED
+         CUDNN_CONVOLUTION_FWD_ALGO_WINOGRAD_NONFUSED,
     };
     size_t max_ws_size = getMaxWorkspaceSize<cudnnConvolutionFwdAlgo_t>(handle,conv,algo,sizeof(algo)/sizeof(algo[0]),state);
     Workspace ws(state, max_ws_size);
 
     CHECK(cudnnFindConvolutionForwardAlgorithmEx(handle, conv.idesc.desc, in,
-        conv.wdesc.desc, wght, conv.cdesc.desc, conv.odesc.desc, out, 1, &algoCount, 
+        conv.wdesc.desc, wght, conv.cdesc.desc, conv.odesc.desc, out, 1, &algoCount,
         &perfResults, ws.data, ws.size));
-    
+
     return perfResults;
   }
 
@@ -199,11 +199,11 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgo_t> {
     };
     size_t max_ws_size = getMaxWorkspaceSize<cudnnConvolutionBwdDataAlgo_t>(handle,conv,algo,sizeof(algo)/sizeof(algo[0]),state);
     Workspace ws(state, max_ws_size);
-    
+
     CHECK(cudnnFindConvolutionBackwardDataAlgorithmEx(handle, conv.wdesc.desc, wght,
-        conv.odesc.desc, out, conv.cdesc.desc, conv.idesc.desc, in, 1, &algoCount, 
+        conv.odesc.desc, out, conv.cdesc.desc, conv.idesc.desc, in, 1, &algoCount,
         &perfResults, ws.data, ws.size));
-    
+
     return perfResults;
   }
 
@@ -235,17 +235,19 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgo_t> {
          CUDNN_CONVOLUTION_BWD_FILTER_ALGO_0,
          CUDNN_CONVOLUTION_BWD_FILTER_ALGO_1,
          CUDNN_CONVOLUTION_BWD_FILTER_ALGO_FFT,
+#if CUDNN_VERSION >= 6000
          CUDNN_CONVOLUTION_BWD_FILTER_ALGO_FFT_TILING,
+#endif
          CUDNN_CONVOLUTION_BWD_FILTER_ALGO_3,
-         CUDNN_CONVOLUTION_BWD_FILTER_ALGO_WINOGRAD_NONFUSED
+         CUDNN_CONVOLUTION_BWD_FILTER_ALGO_WINOGRAD_NONFUSED,
     };
     size_t max_ws_size = getMaxWorkspaceSize<cudnnConvolutionBwdFilterAlgo_t>(handle,conv,algo,sizeof(algo)/sizeof(algo[0]),state);
     Workspace ws(state, max_ws_size);
 
     CHECK(cudnnFindConvolutionBackwardFilterAlgorithmEx(handle, conv.idesc.desc, in,
-        conv.odesc.desc, out, conv.cdesc.desc, conv.wdesc.desc, wght, 1, &algoCount, 
+        conv.odesc.desc, out, conv.cdesc.desc, conv.wdesc.desc, wght, 1, &algoCount,
         &perfResults, ws.data, ws.size));
-    
+
     return perfResults;
   }
 
@@ -289,7 +291,7 @@ void findAlgorithm(
     *algo = search::DEFAULT_ALGO;
   }
   cache.insert(conv.params, *algo);
-  
+
   THCDeviceAllocator* allocator = THCCachingAllocator_get();
   CUDA_CHECK(allocator->emptyCache(allocator->state));
 }
