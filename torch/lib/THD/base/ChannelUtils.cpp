@@ -162,7 +162,7 @@ int connect(const std::string& address, port_type port, bool wait, int timeout) 
       ResourceGuard socket_guard([socket]() { ::close(socket); });
 
       // We need to connect in non-blocking mode, so we can use a timeout
-      SYSCHECK(fcntl(socket, F_SETFL, O_NONBLOCK));
+      SYSCHECK(::fcntl(socket, F_SETFL, O_NONBLOCK));
 
       int ret = ::connect(socket, next_addr->ai_addr, next_addr->ai_addrlen);
       if (ret != 0 && errno != EINPROGRESS)
@@ -172,7 +172,7 @@ int connect(const std::string& address, port_type port, bool wait, int timeout) 
       pfd.fd = socket;
       pfd.events = POLLOUT;
 
-      int num_ready = poll(&pfd, 1, timeout);
+      int num_ready = ::poll(&pfd, 1, timeout);
       if (num_ready < 0) {
         throw std::system_error(errno, std::system_category());
       } else if (num_ready == 0) {
@@ -181,28 +181,30 @@ int connect(const std::string& address, port_type port, bool wait, int timeout) 
       }
 
       socklen_t err_len = sizeof(errno);
-      SYSCHECK(getsockopt(socket, SOL_SOCKET, SO_ERROR, &errno, &err_len));
+      errno = 0;
+      ::getsockopt(socket, SOL_SOCKET, SO_ERROR, &errno, &err_len);
+      /* `errno` is set when:
+       *   1. `getsockopt` has failed
+       *   2. there is awaiting error in the socket (the error is saved to the `errno` variable)
+       */
       if (errno != 0) {
         throw std::system_error(errno, std::system_category());
       }
 
       // Disable non-blocking mode
       int flags;
-      SYSCHECK(flags = fcntl(socket, F_GETFL));
-      SYSCHECK(fcntl(socket, F_SETFL, flags & (~O_NONBLOCK)));
+      SYSCHECK(flags = ::fcntl(socket, F_GETFL));
+      SYSCHECK(::fcntl(socket, F_SETFL, flags & (~O_NONBLOCK)));
       socket_guard.release();
       break;
     } catch (std::exception& e) {
-      // if `connect` fails, the state of the socket is unspecified.
-      // we should close the socket and create a new one before attempting to reconnect.
-      ::close(socket);
       if (errno == ECONNREFUSED) any_refused = true;
 
-      // we need to move to next address because this was not available
-      // to connect or to create socket
+      // We need to move to the next address because this was not available
+      // to connect or to create a socket.
       next_addr = next_addr->ai_next;
 
-      // we have tried all addresses but could not connect to any of them
+      // We have tried all addresses but could not connect to any of them.
       if (!next_addr) {
         if (!wait || !any_refused) throw;
         std::this_thread::sleep_for(std::chrono::seconds(1));
