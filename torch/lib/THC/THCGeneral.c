@@ -871,6 +871,12 @@ void THCudaHostRecord(THCState *state, void *ptr)
 
 cudaError_t THCudaMemGetInfo(THCState *state,  size_t* freeBytes, size_t* totalBytes)
 {
+  size_t large = 0;
+  return THCudaMemGetInfo1(state, freeBytes, totalBytes, &large);
+}
+
+cudaError_t THCudaMemGetInfo1(THCState *state,  size_t* freeBytes, size_t* totalBytes, size_t* large)
+{
   size_t cachedBytes = 0;
   size_t largestBlock = 0;
   THCDeviceAllocator* allocator = state->cudaDeviceAllocator;
@@ -890,6 +896,8 @@ cudaError_t THCudaMemGetInfo(THCState *state,  size_t* freeBytes, size_t* totalB
 
   if (allocator->cacheInfo != NULL)
     allocator->cacheInfo(allocator->state, device, &cachedBytes, &largestBlock);
+  
+  *large = largestBlock;
 
   /* Adjust resulting free bytes number. largesBlock unused for now */
   *freeBytes += cachedBytes;
