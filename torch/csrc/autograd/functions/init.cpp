@@ -17,12 +17,12 @@ struct BatchNormCtor {
     BatchNormParams params;
 
     TupleParser parser(args, 6);
-    parser.parse(params.running_mean);
-    parser.parse(params.running_var);
-    parser.parse(params.training);
-    parser.parse(params.momentum);
-    parser.parse(params.eps);
-    parser.parse(params.cudnn_enabled);
+    parser.parse(params.running_mean, "running_mean");
+    parser.parse(params.running_var, "running_var");
+    parser.parse(params.training, "training");
+    parser.parse(params.momentum, "momentum");
+    parser.parse(params.eps, "eps");
+    parser.parse(params.cudnn_enabled, "cudnn_enabled");
 
     return new BatchNormForward(std::move(params));
   }
@@ -33,14 +33,14 @@ struct ConvCtor {
     ConvParams params;
 
     TupleParser parser(args, 8);
-    parser.parse(params.stride);
-    parser.parse(params.padding);
-    parser.parse(params.dilation);
-    parser.parse(params.transposed);
-    parser.parse(params.output_padding);
-    parser.parse(params.groups);
-    parser.parse(params.benchmark);
-    parser.parse(params.cudnn_enabled);
+    parser.parse(params.stride, "stride");
+    parser.parse(params.padding, "padding");
+    parser.parse(params.dilation, "dilation");
+    parser.parse(params.transposed, "transposed");
+    parser.parse(params.output_padding, "output_padding");
+    parser.parse(params.groups, "groups");
+    parser.parse(params.benchmark, "benchmark");
+    parser.parse(params.cudnn_enabled, "cudnn_enabled");
 
     return new ConvForward(std::move(params));
   }
@@ -51,7 +51,7 @@ struct DelayedErrorCtor {
     std::string msg;
 
     TupleParser parser(args, 1);
-    parser.parse(msg);
+    parser.parse(msg, "msg");
 
     return new DelayedError(msg);
   }
