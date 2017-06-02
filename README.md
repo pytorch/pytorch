@@ -34,19 +34,19 @@ At a granular level, PyTorch is a library that consists of the following compone
 <table>
 <tr>
     <td><b> torch </b></td>
-    <td> a Tensor library like NumPy, with strong GPU support </td>
+    <td> A Tensor library like NumPy, with strong GPU support </td>
 </tr>
 <tr>
     <td><b> torch.autograd </b></td>
-    <td> a tape based automatic differentiation library that supports all differentiable Tensor operations in torch </td>
+    <td> A tape based automatic differentiation library that supports all differentiable Tensor operations in torch </td>
 </tr>
 <tr>
     <td><b> torch.nn </b></td>
-    <td> a neural networks library deeply integrated with autograd designed for maximum flexibility </td>
+    <td> A neural networks library deeply integrated with autograd designed for maximum flexibility </td>
 </tr>
 <tr>
     <td><b> torch.multiprocessing  </b></td>
-    <td> python multiprocessing, but with magical memory sharing of torch Tensors across processes. Useful for data loading and hogwild training. </td>
+    <td> Python multiprocessing, but with magical memory sharing of torch Tensors across processes. Useful for data loading and hogwild training. </td>
 </tr>
 <tr>
     <td><b> torch.utils </b></td>
@@ -54,7 +54,7 @@ At a granular level, PyTorch is a library that consists of the following compone
 </tr>
 <tr>
     <td><b> torch.legacy(.nn/.optim) </b></td>
-    <td> legacy code that has been ported over from torch for backward compatibility reasons </td>
+    <td> Legacy code that has been ported over from torch for backward compatibility reasons </td>
 </tr>
 </table>
 
@@ -245,4 +245,4 @@ PyTorch is a community driven project with several skillful engineers and resear
 
 PyTorch is currently maintained by [Adam Paszke](https://apaszke.github.io/), [Sam Gross](https://github.com/colesbury) and [Soumith Chintala](http://soumith.ch) with major contributions coming from 10s of talented individuals in various forms and means. A non-exhaustive but growing list needs to mention: Sergey Zagoruyko, Adam Lerer, Francisco Massa, Andreas Kopf, James Bradbury, Zeming Lin, Yuandong Tian, Guillaume Lample, Marat Dukhan, Natalia Gimelshein.
 
-Note: this project is unrelated to [hughperkins/pytorch](https://github.com/hughperkins/pytorch) with the same name. Hugh is a valuable contributor in the Torch community and has helped with many things Torch and PyTorch.
+Note: This project is unrelated to [hughperkins/pytorch](https://github.com/hughperkins/pytorch) with the same name. Hugh is a valuable contributor in the Torch community and has helped with many things Torch and PyTorch.
