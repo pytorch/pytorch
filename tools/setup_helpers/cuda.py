@@ -27,7 +27,11 @@ else:
         if osname == 'Linux':
             cuda_path = find_nvcc()
         else:
-            cuda_path = os.path.dirname(ctypes.util.find_library('cudart'))
+            cudart_path = ctypes.util.find_library('cudart')
+            if cudart_path is not None:
+                cuda_path = os.path.dirname(cudart_path)
+            else:
+                cuda_path = None
         if cuda_path is not None:
             CUDA_HOME = os.path.dirname(cuda_path)
         else:
