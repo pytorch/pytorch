@@ -52,11 +52,11 @@ class ImageInputOp final
   bool GetImageAndLabelAndInfoFromDBValue(
       const string& value, cv::Mat* img, PerImageArg& info, int item_id);
   void DecodeAndTransform(
-      const std::string value, float *image_data, int item_id,
+      const std::string& value, float *image_data, int item_id,
       const int channels, std::mt19937 *randgen,
       std::bernoulli_distribution *mirror_this_image);
   void DecodeAndTransposeOnly(
-      const std::string value, uint8_t *image_data, int item_id,
+      const std::string& value, uint8_t *image_data, int item_id,
       const int channels, std::mt19937 *randgen,
       std::bernoulli_distribution *mirror_this_image);
 
@@ -115,7 +115,7 @@ ImageInputOp<Context>::ImageInputOp(
               "use_gpu_transform", 0)),
         num_decode_threads_(OperatorBase::template GetSingleArgument<int>(
               "decode_threads", 4)),
-        thread_pool_(new TaskThreadPool(num_decode_threads_)),
+        thread_pool_(std::make_shared<TaskThreadPool>(num_decode_threads_)),
         // output type only supported with CUDA and use_gpu_transform for now
         output_type_(cast::GetCastDataType(this->arg_helper(), "output_type"))
 {
@@ -553,7 +553,7 @@ void CropTransposeImage(const cv::Mat& scaled_img, const int channels,
 // Intended as entry point for binding to thread pool
 template <class Context>
 void ImageInputOp<Context>::DecodeAndTransform(
-      const std::string value, float *image_data, int item_id,
+      const std::string& value, float *image_data, int item_id,
       const int channels, std::mt19937 *randgen,
       std::bernoulli_distribution *mirror_this_image) {
   cv::Mat img;
@@ -568,7 +568,7 @@ void ImageInputOp<Context>::DecodeAndTransform(
 
 template <class Context>
 void ImageInputOp<Context>::DecodeAndTransposeOnly(
-    const std::string value, uint8_t *image_data, int item_id,
+    const std::string& value, uint8_t *image_data, int item_id,
     const int channels, std::mt19937 *randgen,
       std::bernoulli_distribution *mirror_this_image) {
 

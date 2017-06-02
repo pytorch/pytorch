@@ -8,7 +8,7 @@ OPERATOR_SCHEMA(ImageInput)
     .NumInputs(0, 1)
     .NumOutputs(2)
     .TensorInferenceFunction(
-        [](const OperatorDef& def, const vector<TensorShape>& /* unused */ in) {
+        [](const OperatorDef& def, const vector<TensorShape>& /* unused */ ) {
           vector<TensorShape> out(2);
           ArgumentHelper helper(def);
           int batch_size = helper.GetSingleArgument<int>("batch_size", 0);
