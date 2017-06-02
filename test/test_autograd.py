@@ -10,7 +10,7 @@ from itertools import product
 from torch.autograd import gradcheck
 from torch.autograd.function import once_differentiable
 
-from common import TestCase, run_tests
+from common import TestCase, run_tests, skipIfNoLapack
 from torch.autograd._functions import *
 from torch.autograd import Variable, Function
 
@@ -1415,6 +1415,7 @@ function_tests = [
     (Trace, (), ((S, S),)),
     (Cross, (), ((S, 3), (S, 3))),
     (Cross, (1,), ((S, 3, S), (S, 3, S)), 'dim'),
+    (Inverse, (), ((S, S),), '', (), [skipIfNoLapack]),
     (Clone, (), ((S, M, S),)),
     (Squeeze, (), ((S, 1, M, 1),)),
     # TODO: enable neg dim checks
@@ -1542,6 +1543,7 @@ method_tests = [
     ('trace', (M, M), ()),
     ('cross', (S, 3), ((S, 3),)),
     ('cross', (S, 3, S), ((S, 3, S), 1), 'dim'),
+    ('inverse', (S, S), (), '', (), [skipIfNoLapack]),
     ('clone', (S, M, S), ()),
     ('eq', (S, S, S), ((S, S, S),)),
     ('ne', (S, S, S), ((S, S, S),)),
@@ -1617,6 +1619,8 @@ for test in function_tests:
 
     dim_args_idx = test[4] if len(test) == 5 else []
 
+    skipTestIf = test[5] if len(test) == 6 else []
+
     for dim_perm in product([-1, 1], repeat=len(dim_args_idx)):
         test_name = basic_test_name
         new_constructor_args = [arg * dim_perm[dim_args_idx.index(i)] if i in dim_args_idx else arg
@@ -1671,6 +1675,10 @@ for test in function_tests:
                     self.assertEqual(inp_i.grad, i.grad)
 
         assert not hasattr(TestAutograd, test_name), 'Two tests have the same name: ' + test_name
+
+        for skip in skipTestIf:
+            do_test = skip(do_test)
+
         setattr(TestAutograd, test_name, do_test)
 
 
@@ -1686,6 +1694,8 @@ for test in method_tests:
     basic_test_name = 'test_' + name + ('_' + test[3] if len(test) >= 4 else '')
 
     dim_args_idx = test[4] if len(test) == 5 else []
+
+    skipTestIf = test[5] if len(test) == 6 else []
 
     for dim_perm in product([-1, 1], repeat=len(dim_args_idx)):
         test_name = basic_test_name
@@ -1726,6 +1736,10 @@ for test in method_tests:
                         raise
 
         assert not hasattr(TestAutograd, test_name), 'Two tests have the same name: ' + test_name
+
+        for skip in skipTestIf:
+            do_test = skip(do_test)
+
         setattr(TestAutograd, test_name, do_test)
 
 
