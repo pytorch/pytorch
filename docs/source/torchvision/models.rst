@@ -1,8 +1,8 @@
 torchvision.models
 ===================
 
-.. currentmodule:: torchvision.models
 
+.. currentmodule:: torchvision.models
 
 .. automodule:: torchvision.models
    :members: alexnet, resnet18, resnet34, resnet50, resnet101, resnet152,

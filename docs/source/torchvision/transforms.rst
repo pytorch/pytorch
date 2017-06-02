@@ -3,6 +3,8 @@ torchvision.transforms
 
 .. currentmodule:: torchvision.transforms
 
+Transforms are common image transforms. They can be chained together using :class:`Compose`
+
 .. autoclass:: Compose
 
 Transforms on PIL.Image

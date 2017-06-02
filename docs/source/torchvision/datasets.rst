@@ -93,3 +93,19 @@ STL10
   :members: __getitem__
   :special-members:
 
+SVHN
+~~~~~
+
+
+.. autoclass:: SVHN
+  :members: __getitem__
+  :special-members:
+
+PhotoTour
+~~~~~~~~~
+
+
+.. autoclass:: PhotoTour
+  :members: __getitem__
+  :special-members:
+
