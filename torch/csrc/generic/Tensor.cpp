@@ -506,23 +506,80 @@ static bool THPTensor_(_indexOnce)(PyObject *index, int &indexed_dim,
 }
 
 #ifndef TH_REAL_IS_HALF
-static bool THPTensor_(_checkAdvancedIndexing)(THPTensor *indexed, PyObject *arg) {
-  // Currently we only support the integer-array indexing strategy for advanced
-  // indexing - where we have ndim sequence/LongTensor arguments
 
+static bool THPTensor_(_checkBasicIntegerArrayIndexing)(THPTensor *indexed, PyObject *arg) {
   long ndim = THTensor_(nDimension)(LIBRARY_STATE indexed->cdata);
 
-  // Verify that all of the inputs are either Tensors or Sequences.
   if (PySequence_Check(arg) && PySequence_Size(arg) == ndim) {
+    THPObjectPtr fast = THPObjectPtr(PySequence_Fast(arg, NULL));
     for (Py_ssize_t i = 0; i < ndim; ++i) {
-      PyObject *item = PySequence_GetItem(arg, i);
+      PyObject *item = PySequence_Fast_GET_ITEM(fast.get(), i);
       if (!THPLongTensor_Check(item) && !PySequence_Check(item)) {
-        Py_DECREF(item);
         return false;
       }
-      Py_DECREF(item);
     }
     return true;
+  }
+  return false;
+}
+
+static bool THPTensor_(_checkAdvancedIndexing)(THPTensor *indexed, PyObject *arg) {
+  // Currently we only support two forms of advanced indexing:
+  //
+  // 1. "Basic Integer Array Indexing" the integer-array indexing strategy
+  // where we have ndim sequence/LongTensor arguments
+  // 2. Combining Advanced Indexing with ":", with the limitation that
+  // the advanced indexing dimensions must be adjacent, i.e.:
+  //
+  // x[:, :, [1,2], [3,4], :] --> valid
+  // x[:, [1,2], :, [3,4], :] --> not valid
+
+  // Verification, Step #1 -- ndim sequencers
+  if (THPTensor_(_checkBasicIntegerArrayIndexing)(indexed, arg)) return true;
+
+  // Verification, Step #2 -- at least one sequencer, all the rest are
+  // ':', can be less than ndim indexers, all sequencers adjacent
+
+  long ndim = THTensor_(nDimension)(LIBRARY_STATE indexed->cdata);
+  // TODO: should this be == ndim?
+  if (PySequence_Check(arg) && PySequence_Size(arg) <= ndim) {
+    THPObjectPtr fast = THPObjectPtr(PySequence_Fast(arg, NULL));
+
+    bool sequenceFound = false;
+    bool nonColonFound = false;
+    Py_ssize_t lastSeqDim = -1;
+
+    for (Py_ssize_t i = 0; i < ndim; ++i) {
+      PyObject *item = PySequence_Fast_GET_ITEM(fast.get(), i);
+      if (THPIndexTensor_Check(item) || PySequence_Check(item)) {
+        sequenceFound = true;
+
+        // non-adjacent sequencers not yet supported
+        if (i - 1 != lastSeqDim && lastSeqDim != -1) {
+          return false;
+        }
+        lastSeqDim = i;
+
+        continue;
+      }
+      if (PySlice_Check(item)) {
+        long dimSize = THTensor_(size)(LIBRARY_STATE indexed->cdata, i);
+        // Basically verify that the Slice is ':' and did not specify
+        // a specific start, end or step
+        Py_ssize_t start, end, length, step;
+        if (THPUtils_parseSlice(item, dimSize, &start, &end, &step, &length)) {
+          if (start != 0 || end != dimSize || step != 1 || length != dimSize) {
+            nonColonFound = true;
+            break;
+          }
+        }
+        continue;
+      }
+      nonColonFound = true;
+      break;
+    }
+
+    return sequenceFound && (!nonColonFound);
   }
   return false;
 
