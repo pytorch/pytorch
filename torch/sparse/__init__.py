@@ -126,6 +126,12 @@ class _SparseBase(object):
     def __ixor__(self, other):
         raise NotImplementedError
 
+    def norm(self, p=2):
+        return self.coalesce()._values().norm(p)
+
+    def sum(self):
+        return self._values().sum()  # linear!
+
     def __str__(self):
         # NB: modest duplication with _tensor_str
         size_str = 'x'.join(str(size) for size in self.size())

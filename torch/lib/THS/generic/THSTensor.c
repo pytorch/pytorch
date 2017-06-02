@@ -233,6 +233,7 @@ THSTensor *THSTensor_(newClone)(THSTensor *self) {
 
   THSTensor_(_set)(other, self->indices, self->values);
 
+  other->coalesced = self->coalesced;
   other->nnz = self->nnz;
   return other;
 }
@@ -464,23 +465,36 @@ THSTensor *THSTensor_(newCoalesce)(THSTensor *self) {
   return dst;
 }
 
-void THTensor_(sparseMask)(THSTensor *r_, THTensor *t, THSTensor *mask) {
-  THArgCheck(mask->coalesced, 2, "mask is uncoalesced");
-  THSTensor_(resizeAs)(r_, mask);
-  if (mask->nnz == 0) {
+// Given an index tensor indices into a dense tensor t, select just the
+// values index and create a corresponding sparse tensor.
+// Precondition: indices is coalesced
+void THTensor_(sparseSelect)(THSTensor *r_, THTensor *t, THLongTensor *indices)
+{
+  THArgCheck(THLongTensor_nDimension(indices) == 2, 2, "indices must be nDim x nnz");
+  long nDim = THTensor_(nDimension)(t);
+  long nDimI = THLongTensor_size(indices, 0);
+  long nDimV = nDim - nDimI;
+  long nnz = THLongTensor_size(indices, 1);
+  THArgCheck(nDimI <= nDim, 2, "nDim of indices must be <= nDim of tensor");
+  // NB: In principle, we should check if resizing is necessary, but
+  // since this operator is not currently used inplace, that test will
+  // always return false.  So don't bother.
+  THSTensor_(rawResize)(r_, nDimI, nDimV, t->size);
+  if (nnz == 0) {
     THSTensor_(zero)(r_);
     return;
   }
-  long nDim = THTensor_(nDimension)(t);
-  long nDimI = THSTensor_(nDimensionI)(mask);
-  long nDimV = THSTensor_(nDimensionV)(mask);
-  THLongTensor *mask_indices_ = THSTensor_(newIndices)(mask);
-  THTensor *mask_values_ = THSTensor_(newValues)(mask);
   THTensor *r_values_ = THTensor_(new)();
-  THTensor_(resizeAs)(r_values_, mask_values_);
-  THSTensor_(_move)(r_, THLongTensor_newClone(mask_indices_), r_values_);
-  r_->coalesced = mask->coalesced;
-  r_->nnz = mask->nnz;
+  long *size = THAlloc(sizeof(long) * (nDimV + 1));
+  size[0] = nnz;
+  for (int i = 0; i < nDimV; i++) {
+    size[i+1] = t->size[nDimI + i];
+  }
+  THTensor_(resizeNd)(r_values_, nDimV + 1, size, NULL);
+  THFree(size);
+  THLongTensor *r_indices_ = THLongTensor_newClone(indices);
+  THSTensor_(_move)(r_, r_indices_, r_values_);
+  r_->coalesced = 1; // OK due to pre-condition!
 
   if (nDim > nDimI) {
     THTensor *srcBuffer = THTensor_(new)();
@@ -488,7 +502,7 @@ void THTensor_(sparseMask)(THSTensor *r_, THTensor *t, THSTensor *mask) {
     for (long i = 0; i < r_->nnz; i++) {
       THTensor_(set)(srcBuffer, t);
       for (long d = 0; d < nDimI; d++) {
-        THTensor_(select)(srcBuffer, srcBuffer, 0, THTensor_fastGet2d(mask_indices_, d, i));
+        THTensor_(select)(srcBuffer, srcBuffer, 0, THTensor_fastGet2d(indices, d, i));
       }
       THTensor_(select)(dstBuffer, r_values_, 0, i);
       THTensor_(copy)(dstBuffer, srcBuffer);
@@ -499,15 +513,60 @@ void THTensor_(sparseMask)(THSTensor *r_, THTensor *t, THSTensor *mask) {
     for (long i = 0; i < r_->nnz; i++) {
       long idx = 0;
       for (long d = 0; d < nDimI; d++) {
-        idx += THTensor_fastGet2d(mask_indices_, d, i) * t->stride[d];
+        long j = THTensor_fastGet2d(indices, d, i);
+        if (j < TH_INDEX_BASE || j >= TH_INDEX_BASE + t->size[d]) {
+          THError("index out of range");
+        }
+        idx += j * t->stride[d];
       }
       real val = (t->storage->data + t->storageOffset)[idx];
       THTensor_fastSet1d(r_values_, i, val);
     }
   }
+}
 
-  THLongTensor_free(mask_indices_);
-  THTensor_(free)(mask_values_);
+void THTensor_(sparseCopy)(THTensor *r_, THTensor *dense, THSTensor *sparse_)
+{
+  THTensor_(resizeAs)(r_, dense);
+  THSTensor *sparse = THSTensor_(newCoalesce)(sparse_);
+
+  long k;
+  THLongTensor  *indices = THSTensor_(newIndices)(sparse);
+  THTensor      *values = THSTensor_(newValues)(sparse);
+  THLongStorage *storage = THSTensor_(newSizeOf)(sparse);
+  long          *sizes = storage->data;
+  long          nDim = THTensor_(nDimension)(dense);
+  long          nDimI = THSTensor_(nDimensionI)(sparse);
+
+  if (r_ != dense) THTensor_(copy)(r_, dense);
+
+  if (nDim > nDimI) {
+    THTensor *srcBuffer = THTensor_(new)();
+    THTensor *dstBuffer = THTensor_(new)();
+    for (k = 0; k < sparse->nnz; k++) {
+      THTensor_(set)(dstBuffer, r_);
+      for (long d = 0; d < sparse->nDimensionI; d++) {
+        THTensor_(select)(dstBuffer, dstBuffer, 0, THTensor_fastGet2d(indices, d, k));
+      }
+      THTensor_(select)(srcBuffer, values, 0, k);
+      THTensor_(copy)(dstBuffer, srcBuffer);
+    }
+    THTensor_(free)(srcBuffer);
+    THTensor_(free)(dstBuffer);
+  } else {
+    for (k = 0; k < sparse->nnz; k++) {
+      long index = r_->storageOffset;
+      for (long d = 0; d < sparse->nDimensionI; d++) {
+        index += r_->stride[d] * THTensor_fastGet2d(indices, d, k);
+      }
+      r_->storage->data[index] = THTensor_fastGet1d(values, k);
+    }
+  }
+
+  THLongTensor_free(indices);
+  THTensor_(free)(values);
+  THLongStorage_free(storage);
+  THSTensor_(free)(sparse);
 }
 
 void THSTensor_(free)(THSTensor *self)

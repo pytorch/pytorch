@@ -12,6 +12,9 @@ typedef struct THCSTensor
     // 2-D tensor of nDim x nnz of indices. May have nnz dim bigger than nnz
     // as buffer, so we keep track of both
     THCIndexTensor *indices;
+    // (nDimensionV + 1)-D tensor of nnz x (size of values) of values.
+    // Note that this tensor has one more dimension than nDimensionV,
+    // since we need a dimension for the sparse entries!
     THCTensor *values;
     // Some math operations can only be performed on ordered sparse tensors
     int coalesced;
@@ -60,7 +63,8 @@ TH_API void THCSTensor_(transpose)(THCState *state, THCSTensor *self, int dimens
 TH_API int THCSTensor_(isCoalesced)(THCState *state, const THCSTensor *self);
 TH_API THCSTensor *THCSTensor_(newCoalesce)(THCState *state, THCSTensor *self);
 
-TH_API void THCTensor_(sparseMask)(THCState *state, THCSTensor *r_, THCTensor *t, THCSTensor *mask);
+TH_API void THCTensor_(sparseSelect)(THCState *state, THCSTensor *r_, THCTensor *t, THCIndexTensor *indices);
+TH_API void THCTensor_(sparseCopy)(THCState *state, THCTensor *r_, THCTensor *dense, THCSTensor *sparse);
 
 TH_API void THCSTensor_(free)(THCState *state, THCSTensor *self);
 TH_API void THCSTensor_(retain)(THCState *state, THCSTensor *self);
