@@ -451,21 +451,21 @@ class Variable(_C._VariableBase):
     def max(self, dim=None, keepdim=True):
         if isinstance(dim, Variable):
             return Cmax.apply(self, dim)
-        return Max(dim, keepdim)(self)
+        return Max.apply(self, dim, keepdim)
 
     def min(self, dim=None, keepdim=True):
         if isinstance(dim, Variable):
             return Cmin.apply(self, dim)
-        return Min(dim, keepdim)(self)
+        return Min.apply(self, dim, keepdim)
 
-    def mode(self, dim, keepdim=True):
-        return Mode(dim, keepdim)(self)
+    def mode(self, dim=None, keepdim=True):
+        return Mode.apply(self, dim, keepdim)
 
-    def median(self, dim, keepdim=True):
-        return Median(dim, keepdim)(self)
+    def median(self, dim=None, keepdim=True):
+        return Median.apply(self, dim, keepdim)
 
-    def kthvalue(self, dim, keepdim=True):
-        return Kthvalue(dim, keepdim)(self)
+    def kthvalue(self, k, dim=None, keepdim=True):
+        return Kthvalue.apply(self, k, dim, keepdim)
 
     def sort(self, dim=None, descending=False):
         return Sort.apply(self, dim, descending, True)
