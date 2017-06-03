@@ -24,6 +24,11 @@ static PyObject* THPVariable_NewWithVar(PyTypeObject* type, std::shared_ptr<Vari
   if (obj) {
     auto v = (THPVariable*) obj;
     new (&v->cdata) std::shared_ptr<Variable>(std::move(var));
+    if (auto fn = dynamic_cast<PyFunction*>(v->cdata->grad_fn.get())) {
+      // Create a new reference to the THPFunction. This ensures that ref count
+      // of the THPFunction is at least the number of referring THPVariables.
+      v->cdata->grad_fn = THPFunction_asFunction((THPFunction*)fn->obj);
+    }
   }
   return obj;
 }
@@ -47,12 +52,12 @@ PyObject * THPVariable_NewWithFunction(PyObject *data, const std::shared_ptr<tor
 {
   THPUtils_assert(THPModule_isTensor(data), "data must be a Tensor");
   auto v = std::make_shared<Variable>(torch::createTensor(data), grad_fn->is_executable, false);
+  v->grad_fn = grad_fn;
   PyObject* obj = THPVariable_NewWithVar((PyTypeObject*)THPVariableClass, v);
   if (obj) {
     v->pyobj = obj;
-    v->grad_fn = grad_fn;
-    ((THPVariable*)obj)->data = data;
     Py_INCREF(data);
+    ((THPVariable*)obj)->data = data;
   }
   return obj;
 }
