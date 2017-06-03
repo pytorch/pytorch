@@ -7,9 +7,8 @@ from __future__ import unicode_literals
 
 from caffe2.python import core, scope, workspace
 from caffe2.python.modeling import parameter_info
-
-
 import logging
+
 
 # _known_working_ops are operators that do not need special care.
 _known_working_ops = [
@@ -83,12 +82,12 @@ class ModelHelper(object):
             self.param_init_net = param_model.param_init_net
             self.param_to_grad = param_model.param_to_grad
             self.params = param_model.params
-            self.computed_params = param_model.computed_params
+            self._computed_params = param_model._computed_params
         else:
             self.param_init_net = core.Net(name + '_init')
             self.param_to_grad = {}
             self.params = []
-            self.computed_params = []
+            self._computed_params = []
 
         self._param_info_deprecated = []
         self._parameters_info = {}
@@ -128,7 +127,8 @@ class ModelHelper(object):
         assert len(self._param_info_deprecated) <= len(self.params)
         for param in self.params[len(self._param_info_deprecated):]:
             if not isinstance(param, core.BlobReference):
-                raise ValueError("Param %s must be a BlobReference!" % str(param))
+                raise ValueError(
+                    "Param %s must be a BlobReference!" % str(param))
             self._param_info_deprecated.append(parameter_info.ParameterInfo(
                 param_id=len(self._param_info_deprecated),
                 param=param,
@@ -136,13 +136,16 @@ class ModelHelper(object):
         for info in self._param_info_deprecated:
             info.grad = self.param_to_grad.get(info.name)
 
-    def create_param(self, param_name, shape, initializer):
+    def create_param(self, param_name, shape, initializer, tags=None):
         param_info = initializer.create_param(
             param_name=param_name,
             init_net=self.param_init_net,
             shape=shape,
         )
         self._parameters_info[param_info.blob] = param_info
+        # Add param to legacy structs as well, so all other functions for
+        # parameters are still working.
+        self.AddParameter(param_info.blob, tags)
         return param_info.blob
 
     def get_param_info(self, param):
@@ -155,11 +158,11 @@ class ModelHelper(object):
     def add_param_DEPRECATED(self, param, key=None, shape=None, length=None):
         logging.warning("add_param method is DEPRECATED")
         self._update_param_info_deprecated()
+        self.AddParameter(param)
         if key is not None and self.net.input_record() is not None:
             idx = self.net.input_record().field_blobs().index(key)
             key = self.net.input_record().field_names()[idx]
         shape = shape if shape is not None else self._infer_param_shape(param)
-        self.params.append(param)
         if not isinstance(param, core.BlobReference):
             raise ValueError("Param %s must be a BlobReference!" % str(param))
         self._param_info_deprecated.append(parameter_info.ParameterInfo(
@@ -186,6 +189,22 @@ class ModelHelper(object):
                 if info.grad_type() == grad_type]
         else:
             return self._param_info_deprecated
+
+    def AddParameter(self, param, tags=None):
+        tags = tags or []
+        if isinstance(tags, list):
+            tags = set(tags)
+        else:
+            tags = set([tags])
+        if parameter_info.ParameterTags.COMPUTED_PARAM in tags:
+            self._computed_params.append(param)
+        else:
+            self.params.append(param)
+
+        if parameter_info.ParameterTags.WEIGHT in tags:
+            self.weights.append(param)
+        if parameter_info.ParameterTags.BIAS in tags:
+            self.biases.append(param)
 
     def GetParams(self, namescope=None, top_scope=False):
         '''
@@ -318,9 +337,9 @@ class ModelHelper(object):
                 namescope += scope._NAMESCOPE_SEPARATOR
 
         if namescope == '':
-            return self.computed_params[:]
+            return self._computed_params[:]
         else:
-            return [p for p in self.computed_params
+            return [p for p in self._computed_params
                     if p.GetNameScope() == namescope]
 
     def GetAllParams(self, namescope=None):

@@ -7,6 +7,7 @@ from __future__ import unicode_literals
 
 from caffe2.python import core
 from caffe2.python.modeling import initializers
+from caffe2.python.modeling.parameter_info import ParameterTags
 
 def _ConvBase(
     model,
@@ -65,27 +66,24 @@ def _ConvBase(
         weight = model.create_param(
             param_name=blob_out + '_w',
             shape=weight_shape,
-            initializer=weight_initializer)
+            initializer=weight_initializer,
+            tags=ParameterTags.WEIGHT
+        )
         if use_bias:
             bias = model.create_param(
                 param_name=blob_out + '_b',
                 shape=[dim_out, ],
-                initializer=bias_initializer)
+                initializer=bias_initializer,
+                tags=ParameterTags.BIAS
+            )
     else:
         weight = core.ScopedBlobReference(
             blob_out + '_w', model.param_init_net)
+        model.AddParameter(weight)
         if use_bias:
             bias = core.ScopedBlobReference(
                 blob_out + '_b', model.param_init_net)
-    if use_bias:
-        model.params.extend([weight, bias])
-    else:
-        model.params.extend([weight])
-
-    model.weights.append(weight)
-
-    if use_bias:
-        model.biases.append(bias)
+            model.AddParameter(bias, ParameterTags.BIAS)
 
     if use_bias:
         inputs = [blob_in, weight, bias]
@@ -206,9 +204,8 @@ def conv_transpose(
             blob_out + '_w', model.param_init_net)
         bias = core.ScopedBlobReference(
             blob_out + '_b', model.param_init_net)
-    model.params.extend([weight, bias])
-    model.weights.append(weight)
-    model.biases.append(bias)
+    model.AddParameter(weight, ParameterTags.WEIGHT)
+    model.AddParameter(bias, ParameterTags.BIAS)
     if use_cudnn:
         kwargs['engine'] = 'CUDNN'
         kwargs['exhaustive_search'] = cudnn_exhaustive_search
@@ -314,13 +311,9 @@ def group_conv_deprecated(
             if use_bias:
                 bias = core.ScopedBlobReference(
                     blob_out + '_gconv_%d_b' % i, model.param_init_net)
+        model.AddParameter(weight, ParameterTags.WEIGHT)
         if use_bias:
-            model.params.extend([weight, bias])
-        else:
-            model.params.extend([weight])
-        model.weights.append(weight)
-        if use_bias:
-            model.biases.append(bias)
+            model.AddParameter(bias, ParameterTags.BIAS)
         if use_bias:
             inputs = [weight, bias]
         else:

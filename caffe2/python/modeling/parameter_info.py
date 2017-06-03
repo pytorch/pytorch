@@ -7,12 +7,19 @@ from caffe2.python import core
 import numpy as np
 
 
+class ParameterTags(object):
+    BIAS = 'BIAS'
+    WEIGHT = 'WEIGHT'
+    COMPUTED_PARAM = 'COMPUTED_PARAM'
+
+
 class ParameterType(object):
     DENSE = 'dense'
     SPARSE = 'sparse'
 
 
 class ParameterInfo(object):
+
     def __init__(
             self, param_id, param, key=None, shape=None, length=None,
             grad=None, blob_copy=None):
