@@ -187,6 +187,10 @@ On Linux
 ```bash
 python setup.py install
 ```
+Alternatively, for a bleeding edge install/upgrade:
+```
+pip install --upgrade https://github.com/pytorch/pytorch/archive/master.zip
+```
 
 On OSX
 ```bash
