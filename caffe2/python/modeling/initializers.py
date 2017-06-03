@@ -2,15 +2,17 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+
+from caffe2.python.core import DataType, ScopedBlobReference
 from caffe2.python.modeling.parameter_info import ParameterInfo
-from caffe2.python.core import DataType
 
 
 class Initializer(object):
     '''
-    This class abstracts out parameter creation. One can  come up with a new
+    This class abstracts out parameter creation. One cancome up with a new
     Initializer in order to implement more complex parameter initializaion logic
     '''
+
     def __init__(self, operator_name=None, **kwargs):
         self.operator_name = operator_name
         self.operator_kwargs = kwargs
@@ -30,7 +32,28 @@ class Initializer(object):
             shape=shape,
         )
 
+
+class ExternalInitializer(object):
+    '''
+    This class is used in cases when the parameter should not be initialized by
+    the initializer, but rather provided in the workspace when param_init_net is
+    executed.
+
+    Current version is not doing any real sanity checks to the parameter.
+    '''
+
+    def create_param(self, param_name, init_net, shape):
+        # TODO(amalevich): Add operator that will check param in the workspace
+        param = ScopedBlobReference(param_name, init_net)
+        return ParameterInfo(
+            param_id=None,
+            param=param,
+            shape=shape,
+        )
+
+
 class pFP16Initializer(Initializer):
+
     def update(self, operator_name, kwargs):
         if self.operator_name is not None:
             raise Exception("Operator name overwrites are not allowed")
@@ -50,8 +73,9 @@ class pFP16Initializer(Initializer):
             param_id=None,
             param=param,
             shape=shape,
-            blob_copy={DataType.FLOAT : param_fp32}
+            blob_copy={DataType.FLOAT: param_fp32}
         )
+
 
 def update_initializer(initializer_class,
                        operator_name_and_kwargs,

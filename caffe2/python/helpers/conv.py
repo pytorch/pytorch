@@ -61,29 +61,23 @@ def _ConvBase(
     bias_initializer = initializers.update_initializer(
         BiasInitializer, bias_init, ("ConstantFill", {})
     )
+    if not model.init_params:
+        WeightInitializer = initializers.ExternalInitializer()
+        BiasInitializer = initializers.ExternalInitializer()
 
-    if model.init_params:
-        weight = model.create_param(
-            param_name=blob_out + '_w',
-            shape=weight_shape,
-            initializer=weight_initializer,
-            tags=ParameterTags.WEIGHT
+    weight = model.create_param(
+        param_name=blob_out + '_w',
+        shape=weight_shape,
+        initializer=weight_initializer,
+        tags=ParameterTags.WEIGHT
+    )
+    if use_bias:
+        bias = model.create_param(
+            param_name=blob_out + '_b',
+            shape=[dim_out, ],
+            initializer=bias_initializer,
+            tags=ParameterTags.BIAS
         )
-        if use_bias:
-            bias = model.create_param(
-                param_name=blob_out + '_b',
-                shape=[dim_out, ],
-                initializer=bias_initializer,
-                tags=ParameterTags.BIAS
-            )
-    else:
-        weight = core.ScopedBlobReference(
-            blob_out + '_w', model.param_init_net)
-        model.AddParameter(weight)
-        if use_bias:
-            bias = core.ScopedBlobReference(
-                blob_out + '_b', model.param_init_net)
-            model.AddParameter(bias, ParameterTags.BIAS)
 
     if use_bias:
         inputs = [blob_in, weight, bias]
