@@ -69,7 +69,7 @@ class Prod(Function):
 
             zero_mask = input == 0
             slice_zero_count = zero_mask.sum(dim, True)
-            total_zeros = slice_zero_count.sum()
+            total_zeros = slice_zero_count.data.sum()
             grad_input = grad_output.mul(output).expand_as(input).div(input)
             if total_zeros == 0:
                 return grad_input, None, None
@@ -77,7 +77,7 @@ class Prod(Function):
             some_zeros = slice_zero_count.gt(0).expand_as(grad_input)
             grad_input[some_zeros] = 0
 
-            single_zero_idx = slice_zero_count.eq(1).nonzero()
+            single_zero_idx = slice_zero_count.data.eq(1).nonzero()
 
             if len(single_zero_idx) == 0:
                 return grad_input, None, None
@@ -89,7 +89,7 @@ class Prod(Function):
                 # slice_mask and input_copy are 1D
                 slice_mask = zero_mask[input_idx_tuple]
                 input_copy = input[input_idx_tuple].clone()
-                zero_idx = slice_mask.nonzero()[0, 0]
+                zero_idx = slice_mask.data.nonzero()[0, 0]
                 input_copy[zero_idx] = 1.
 
                 grad_idx_tuple = idx_tuple[:dim] + (zero_idx,) + idx_tuple[dim + 1:]
