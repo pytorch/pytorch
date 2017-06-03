@@ -76,7 +76,7 @@ int ${Storage}::getDevice() const {
 }
 
 Type& ${Storage}::type() const {
-  throw std::runtime_error("NYI - Storage::type()");
+  return context->getType(Processor::${Processor},ScalarType::${ScalarName});
 }
 
 }
