@@ -71,43 +71,14 @@ FILE(GLOB_RECURSE base_cpp "*.cpp")
 
 EXCLUDE_DIR(base_cpp ".*/templates/.*$")
 
-SET(generated_cpp
-  CPUGenerator.h
-  CUDAGenerator.h
-  CPUByteStorage.h
-  CPUCharStorage.h
-  CPUDoubleStorage.h
-  CPUFloatStorage.h
-  CPUIntStorage.h
-  CPULongStorage.h
-  CPUShortStorage.h
-  CPUHalfStorage.h
-  CUDAByteStorage.h
-  CUDACharStorage.h
-  CUDADoubleStorage.h
-  CUDAFloatStorage.h
-  CUDAIntStorage.h
-  CUDALongStorage.h
-  CUDAShortStorage.h
-  CUDAHalfStorage.h
-  
-  CPUByteStorage.cpp
-  CPUCharStorage.cpp
-  CPUDoubleStorage.cpp
-  CPUFloatStorage.cpp
-  CPUIntStorage.cpp
-  CPULongStorage.cpp
-  CPUShortStorage.cpp
-  CPUHalfStorage.cpp
-  CUDAByteStorage.cpp
-  CUDACharStorage.cpp
-  CUDADoubleStorage.cpp
-  CUDAFloatStorage.cpp
-  CUDAIntStorage.cpp
-  CUDALongStorage.cpp
-  CUDAShortStorage.cpp
-  CUDAHalfStorage.cpp
+EXECUTE_PROCESS(
+    COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/gen.py -s ${CMAKE_CURRENT_SOURCE_DIR} --print-dependencies
+    OUTPUT_VARIABLE generated_cpp
+    RESULT_VARIABLE RETURN_VALUE
 )
+if (NOT RETURN_VALUE EQUAL 0)
+    message(FATAL_ERROR "Failed to get generated_cpp list")
+endif()
 
 FILE(GLOB_RECURSE all_templates "templates/*")
 
