@@ -11,6 +11,7 @@ Context::Context() {
   THCudaInit(thc_state);
   cuda_gen.reset(new CUDAGenerator(this));
   cpu_gen.reset(new CPUGenerator(this));
+  Type::registerAll(this);
 }
 
 Context::~Context() {

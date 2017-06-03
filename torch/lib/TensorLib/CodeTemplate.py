@@ -1,8 +1,13 @@
 import re
 
-# match $idenifier or ${identifier}, if the first group matches, then
-# this identifier is at the beginning of whitespace on a line and should be treated as
-# block subsitution by identing to that depth and replacing
+# match $idenifier or ${identifier} and replace with value in env
+# If this identifier is at the beginning of whitespace on a line
+# and its value is a list then it is treated as
+# block subsitution by indenting to that depth and putting each element
+# of the list on its own line
+# if the identifier is on a line starting with non-whitespace and a list
+# then it is comma separated ${,foo} will insert a comma before the list
+# if this list is not empty and ${foo,} will insert one after.
 
 class CodeTemplate(object):
     subtitution = re.compile('(^[^\n\S]*)?\$([^\d\W]\w*|\{,?[^\d\W]\w*\,?})',re.MULTILINE)
