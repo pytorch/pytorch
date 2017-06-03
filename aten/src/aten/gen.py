@@ -13,6 +13,10 @@ TEMPLATE_PATH =  options.source_path+"/templates"
 GENERATOR_DERIVED = CodeTemplate.from_file(TEMPLATE_PATH+"/GeneratorDerived.h")
 STORAGE_DERIVED_CPP = CodeTemplate.from_file(TEMPLATE_PATH+"/StorageDerived.cpp")
 STORAGE_DERIVED_H = CodeTemplate.from_file(TEMPLATE_PATH+"/StorageDerived.h")
+TYPE_DERIVED_CPP = CodeTemplate.from_file(TEMPLATE_PATH+"/TypeDerived.cpp")
+TYPE_DERIVED_H = CodeTemplate.from_file(TEMPLATE_PATH+"/TypeDerived.h")
+TYPE_H = CodeTemplate.from_file(TEMPLATE_PATH+"/Type.h")
+TYPE_CPP = CodeTemplate.from_file(TEMPLATE_PATH+"/Type.cpp")
 
 generators = {
     'CPUGenerator.h' : {
@@ -39,6 +43,10 @@ scalar_types = [
     ('Half','Half'),
 ]
 
+type_env = {
+    'type_registrations' : [],
+    'type_headers' : []
+}
 
 def write(filename,s):
     if options.print_dependencies:
@@ -47,12 +55,15 @@ def write(filename,s):
     with open(filename,"w") as f:
         f.write(s)
 
-def generate_storage(processor, scalar_type):
+def generate_storage_and_type(processor, scalar_type):
     scalar_name, c_type = scalar_type
     env = {}
     env['ScalarName'] = scalar_name
     env['ScalarType'] = c_type
     env['Storage'] = "{}{}Storage".format(processor,scalar_name)
+    env['Type'] = "{}{}Type".format(processor,scalar_name)
+    env['Processor'] = processor
+
     if processor == 'CUDA':
         env['th_header'] = "THC/THC.h"
         sname = '' if scalar_name == "Float" else scalar_name
@@ -81,10 +92,19 @@ def generate_storage(processor, scalar_type):
 
     write(env['Storage']+".cpp",STORAGE_DERIVED_CPP.substitute(env))
     write(env['Storage']+".h",STORAGE_DERIVED_H.substitute(env))
+    write(env['Type']+".cpp",TYPE_DERIVED_CPP.substitute(env))
+    write(env['Type']+".h",TYPE_DERIVED_H.substitute(env))
+    type_register = ('context->type_registry[static_cast<int>(Processor::{})][static_cast<int>(ScalarType::{})].reset(new {}(context));'
+        .format(processor,scalar_name,env['Type']))
+    type_env['type_registrations'].append(type_register)
+    type_env['type_headers'].append('#include "{}.h"'.format(env['Type']))
 
 for fname,env in generators.items():
     write(fname,GENERATOR_DERIVED.substitute(env))
 
 for processor in processors:
     for scalar_type in scalar_types:
-        generate_storage(processor,scalar_type)
+        generate_storage_and_type(processor,scalar_type)
+
+write("Type.h",TYPE_H.substitute(type_env))
+write("Type.cpp",TYPE_CPP.substitute(type_env))
