@@ -508,7 +508,7 @@ class Gather(Function):
     def backward(ctx, grad_output):
         index, = ctx.saved_tensors
         grad_input = grad_output.new(ctx.input_size).zero_()
-        return grad_input.scatter_(ctx.dim, index, grad_output), None, None
+        return grad_input.scatter_add_(ctx.dim, index, grad_output), None, None
 
 
 class Scatter(InplaceFunction):

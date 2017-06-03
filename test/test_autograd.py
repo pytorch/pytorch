@@ -10,7 +10,7 @@ from itertools import product
 from torch.autograd import gradcheck
 from torch.autograd.function import once_differentiable
 
-from common import TestCase, run_tests
+from common import TestCase, run_tests, skipIfNoLapack
 from torch.autograd._functions import *
 from torch.autograd import Variable, Function
 
@@ -117,16 +117,12 @@ class TestAutograd(TestCase):
                         grad_output * ctx.scalar + grad_output * t1)
 
         x, y = self._function_test(MyFunction)
-        x_grad_desc = graph_desc(x.grad.grad_fn)
-        y_grad_desc = graph_desc(y.grad.grad_fn)
         self.assertEqual(graph_desc(x.grad.grad_fn),
                          'Identity(Error(AccumulateGrad(), None, AccumulateGrad()))')
         self.assertEqual(graph_desc(y.grad.grad_fn),
                          'Identity(Error(AccumulateGrad(), None, AccumulateGrad()))')
 
     def test_accumulate_grad(self):
-        import sys
-
         grad_output = Variable(torch.ones(5, 5))
         for start_volatile, end_volatile in product((True, False), repeat=2):
             go1 = grad_output.data if start_volatile else grad_output
@@ -248,6 +244,20 @@ class TestAutograd(TestCase):
         self.assertFalse(hook_called[0])
         self.assertIsNone(x.grad)
 
+    def test_grad_badcalls(self):
+        x = Variable(torch.ones(1))
+        y = x ** 2
+        with self.assertRaisesRegex(RuntimeError, 'does not require grad'):
+            torch.autograd.grad(x, y)
+        with self.assertRaisesRegex(RuntimeError, 'not have been used in the graph'):
+            torch.autograd.grad(y, x)
+
+        x = Variable(torch.ones(1), requires_grad=True)
+        y = x ** 2
+        torch.autograd.grad(y, x)  # this should succeed now
+        with self.assertRaisesRegex(RuntimeError, 'unreachable'):
+            torch.autograd.grad(x, y)
+
     def test_hooks(self):
         x = Variable(torch.ones(5, 5), requires_grad=True)
         y = Variable(torch.ones(5, 5) * 4, requires_grad=True)
@@ -362,7 +372,7 @@ class TestAutograd(TestCase):
         sum(fn(x, y)).sum().backward()
         self.assertTrue(was_called[0])
 
-    def _test_backward(self):
+    def test_backward(self):
         v_t = torch.randn(5, 5)
         x_t = torch.randn(5, 5)
         y_t = torch.rand(5, 5) + 0.1
@@ -384,9 +394,6 @@ class TestAutograd(TestCase):
         self.assertEqual(x.grad.data, x_grad * grad_output)
         self.assertEqual(y.grad.data, y_grad * grad_output)
         self.assertEqual(z.grad.data, z_grad * grad_output)
-
-    def test_backward(self):
-        self._test_backward()
 
     def test_sparse_backward(self):
         class FixedGradientFunction(Function):
@@ -431,11 +438,6 @@ class TestAutograd(TestCase):
         (sparse_fn1(x) + sparse_fn2(x)).sum().backward()
         self.assertEqual(x.grad.data, sparse_grad1 + sparse_grad2)
 
-    @unittest.skip("BasicEngine is out of date")
-    def test_backward_basic_engine(self):
-        with backward_engine(torch.autograd.engine.BasicEngine):
-            self._test_backward()
-
     def test_multi_backward(self):
         x = Variable(torch.randn(5, 5), requires_grad=True)
         y = Variable(torch.randn(5, 5), requires_grad=True)
@@ -477,6 +479,18 @@ class TestAutograd(TestCase):
 
         torch.autograd.backward([z, q], [torch.ones(5, 5), torch.ones(5, 5)])
         self.assertEqual(x.grad.data, torch.ones(5, 5))
+
+    def test_dependent_backward(self):
+        x = Variable(torch.randn(10), requires_grad=True)
+        y = x ** 2
+        z = y ** 3
+
+        go_y = torch.randn(10)
+        go_z = torch.randn(10)
+        torch.autograd.backward([y, z], [go_y, go_z])
+
+        xd = x.data
+        self.assertEqual(x.grad.data, 2 * xd * go_y + 6 * xd.pow(5) * go_z)
 
     def test_volatile(self):
         x = Variable(torch.ones(5, 5), requires_grad=True)
@@ -1222,7 +1236,7 @@ def index_variable(shape, max_indices):
     return Variable(index, requires_grad=False)
 
 
-def gather_variable(shape, index_dim, max_indices):
+def gather_variable(shape, index_dim, max_indices, duplicate=False):
     assert len(shape) == 2
     assert index_dim < 2
     batch_dim = 1 - index_dim
@@ -1230,6 +1244,8 @@ def gather_variable(shape, index_dim, max_indices):
     for i in range(shape[index_dim]):
         index.select(index_dim, i).copy_(
             torch.randperm(max_indices)[:shape[batch_dim]])
+    if duplicate:
+        index.select(batch_dim, 0).copy_(index.select(batch_dim, 1))
     return Variable(index, requires_grad=False)
 
 
@@ -1352,16 +1368,19 @@ function_tests = [
     (Unfold, (), ((S, S, S), 1, 3, 1)),
     (Unfold, (), ((S, S, S), 2, 3, 2), 'lastdim'),
     (Min, (), ((S, S, S),),),
-    (Max, (1,), ((S, S, S),), 'dim', [0]),
-    (Min, (1,), ((S, S, S),), 'dim', [0]),
-    (Max, (1, False), ((S, S, S),), 'keepdim_false_dim', [0]),
-    (Min, (1, False), ((S, S, S),), 'keepdim_false_dim', [0]),
-    (Mode, (1,), ((S, S, S),), 'dim', [0]),
-    (Mode, (1, False,), ((S, S, S),), 'keepdim_false_dim', [0]),
-    (Kthvalue, (2, 0), ((S, S, S),),),
-    (Kthvalue, (2, 0, False), ((S, S, S),), "keepdim_false"),
-    (Median, (0,), ((S, S, S),),),
-    (Median, (0, False, ), ((S, S, S),), "keepdim_false"),
+    (Max, (), ((S, S, S), 1), 'dim', [0]),
+    (Min, (), ((S, S, S), 1), 'dim', [0]),
+    (Max, (), ((S, S, S), 1, False), 'keepdim_false_dim', [0]),
+    (Min, (), ((S, S, S), 1, False), 'keepdim_false_dim', [0]),
+    (Mode, (), ((S, S, S),),),
+    (Mode, (), ((S, S, S), 1), 'dim', [0]),
+    (Mode, (), ((S, S, S), 1, False), 'keepdim_false_dim', [0]),
+    (Kthvalue, (), ((S, S, S), 2),),
+    (Kthvalue, (), ((S, S, S), 2, 0), 'dim0'),
+    (Kthvalue, (), ((S, S, S), 2, 0, False), "keepdim_false"),
+    (Median, (), ((S, S, S),),),
+    (Median, (), ((S, S, S), 0), 'dim0'),
+    (Median, (), ((S, S, S), 0, False), "keepdim_false"),
     (Norm, (1.5,), (torch.rand(S, S, S),), '1_5'),
     (Norm, (), ((S, S, S),), '2'),
     (Norm, (3,), ((S, S, S),), '3'),
@@ -1379,9 +1398,9 @@ function_tests = [
     # (IndexCopy,     (0,),               ((S, S), index_variable(2, S), (2, S))      ),
     (IndexFill, (), ((S, S), 0, index_variable(2, S), 2)),
     (IndexSelect, (), ((S, S), 0, index_variable(2, S))),
-    (Gather, (), ((M, S), 0, gather_variable((S, S), 1, M))),
+    (Gather, (), ((M, S), 0, gather_variable((S, S), 1, M, True))),
     # TODO: enable neg dim checks
-    (Gather, (), ((M, S), 1, gather_variable((M, S // 2), 0, S)), 'dim1'),
+    (Gather, (), ((M, S), 1, gather_variable((M, S // 2), 0, S, True)), 'dim1'),
     (Scatter, (), ((M, S), 0, gather_variable((S, S), 1, M), (S, S))),
     (Scatter, (), ((M, S), 1, gather_variable((M, S // 2), 0, S), (M, S // 2)), 'dim1'),
     (Concat, (), (0, (1, S, S), (2, S, S), (3, S, S))),
@@ -1399,6 +1418,7 @@ function_tests = [
     (Trace, (), ((S, S),)),
     (Cross, (), ((S, 3), (S, 3))),
     (Cross, (1,), ((S, 3, S), (S, 3, S)), 'dim'),
+    (Inverse, (), ((S, S),), '', (), [skipIfNoLapack]),
     (Clone, (), ((S, M, S),)),
     (Squeeze, (), ((S, 1, M, 1),)),
     # TODO: enable neg dim checks
@@ -1475,8 +1495,13 @@ method_tests = [
     ('mean', (S, S, S), ()),
     ('mean', (S, S, S), (1,), 'dim', [0]),
     ('mean', (S, S, S), (1, False,), 'keepdim_false_dim', [0]),
+    ('kthvalue', (S, S, S), (2,)),
+    ('kthvalue', (S, S, S), (2, 1,), 'dim', [1]),
+    ('kthvalue', (S, S, S), (2, 1, False,), 'keepdim_false_dim', [1]),
+    ('median', (S, S, S), ()),
     ('median', (S, S, S), (1,), 'dim', [0]),
     ('median', (S, S, S), (1, False,), 'keepdim_false_dim', [0]),
+    ('mode', (S, S, S), ()),
     ('mode', (S, S, S), (1,), 'dim', [0]),
     ('mode', (S, S, S), (1, False,), 'keepdim_false_dim', [0]),
     ('sum', (S, S, S), ()),
@@ -1526,6 +1551,7 @@ method_tests = [
     ('trace', (M, M), ()),
     ('cross', (S, 3), ((S, 3),)),
     ('cross', (S, 3, S), ((S, 3, S), 1), 'dim'),
+    ('inverse', (S, S), (), '', (), [skipIfNoLapack]),
     ('clone', (S, M, S), ()),
     ('eq', (S, S, S), ((S, S, S),)),
     ('ne', (S, S, S), ((S, S, S),)),
@@ -1601,6 +1627,8 @@ for test in function_tests:
 
     dim_args_idx = test[4] if len(test) == 5 else []
 
+    skipTestIf = test[5] if len(test) == 6 else []
+
     for dim_perm in product([-1, 1], repeat=len(dim_args_idx)):
         test_name = basic_test_name
         new_constructor_args = [arg * dim_perm[dim_args_idx.index(i)] if i in dim_args_idx else arg
@@ -1655,6 +1683,10 @@ for test in function_tests:
                     self.assertEqual(inp_i.grad, i.grad)
 
         assert not hasattr(TestAutograd, test_name), 'Two tests have the same name: ' + test_name
+
+        for skip in skipTestIf:
+            do_test = skip(do_test)
+
         setattr(TestAutograd, test_name, do_test)
 
 
@@ -1670,6 +1702,8 @@ for test in method_tests:
     basic_test_name = 'test_' + name + ('_' + test[3] if len(test) >= 4 else '')
 
     dim_args_idx = test[4] if len(test) == 5 else []
+
+    skipTestIf = test[5] if len(test) == 6 else []
 
     for dim_perm in product([-1, 1], repeat=len(dim_args_idx)):
         test_name = basic_test_name
@@ -1710,6 +1744,10 @@ for test in method_tests:
                         raise
 
         assert not hasattr(TestAutograd, test_name), 'Two tests have the same name: ' + test_name
+
+        for skip in skipTestIf:
+            do_test = skip(do_test)
+
         setattr(TestAutograd, test_name, do_test)
 
 

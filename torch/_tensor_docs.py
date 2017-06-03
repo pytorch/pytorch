@@ -827,7 +827,7 @@ the shape may differ.
 
 Args:
     mask (ByteTensor): The binary mask
-    value (Tensor): The value to fill
+    value (float): The value to fill
 """)
 
 add_docstr(torch._C.FloatTensorBase.masked_select,

@@ -839,10 +839,13 @@ class TestCuda(TestCase):
         TestTorch._test_gather(self, lambda t: t.cuda(), False)
 
     def test_tensor_scatter(self):
-        TestTorch._test_scatter(self, lambda t: t.cuda(), False)
+        TestTorch._test_scatter_base(self, lambda t: t.cuda(), 'scatter_', test_bounds=False)
+
+    def test_tensor_scatterAdd(self):
+        TestTorch._test_scatter_base(self, lambda t: t.cuda(), 'scatter_add_', test_bounds=False)
 
     def test_tensor_scatterFill(self):
-        TestTorch._test_scatterFill(self, lambda t: t.cuda(), False)
+        TestTorch._test_scatter_base(self, lambda t: t.cuda(), 'scatter_', True, test_bounds=False)
 
 
 if HAS_CUDA:

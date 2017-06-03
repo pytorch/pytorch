@@ -20,6 +20,10 @@ ptrdiff_t THDStorage_(size)(const THDStorage* storage) {
   return storage->size;
 }
 
+size_t THDStorage_(elementSize)(void) {
+  return sizeof(real);
+}
+
 THDStorage* THDStorage_(new)() {
   THDStorage* storage = THDStorage_(_alloc)();
   thpp::Type type = thpp::type_traits<real>::type;

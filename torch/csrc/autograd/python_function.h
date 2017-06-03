@@ -61,8 +61,6 @@ struct THPFunction {
 
     // The C++ wrapper for this Python function.
     // See a comment in THPFunction_asFunction for details about this field.
-    // You can use cdata directly if you don't actually need a shared_ptr.
-    std::weak_ptr<torch::autograd::PyFunction> cdata_ptr;
     torch::autograd::PyFunction cdata;
 };
 

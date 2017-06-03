@@ -130,51 +130,50 @@ class _SelectionFunction(Function):
     # additional_args is prepended before dim when calling the tensor
     # function. It's a no-op for subclasses other than kthvalue.
     # kthvalue not only requires us to pass a dim, but also preceed it with k.
-    additional_args = tuple()
 
-    def __init__(self, dim=None, keepdim=True):
-        super(_SelectionFunction, self).__init__()
-        self.dim = dim
-        self.keepdim = keepdim
-
-    def forward(self, input):
-        fn = getattr(input, type(self).__name__.lower())
-        self.input_size = input.size()
-        if self.dim is None and self.has_all_reduce:
-            value = fn(*self.additional_args)
-            self.indices = tuple(input.eq(value).nonzero()[0])
+    @classmethod
+    def forward(cls, ctx, input, dim=None, keepdim=True, additional_args=tuple()):
+        fn = getattr(input, cls.__name__.lower())
+        ctx.dim = dim
+        ctx.keepdim = keepdim
+        ctx.additional_args = additional_args
+        ctx.input_size = input.size()
+        if ctx.dim is None and cls.has_all_reduce:
+            value = fn(*additional_args)
+            ctx.indices_tuple = tuple(input.eq(value).nonzero()[0])
             return input.new((value,))
         else:
-            if self.dim is None:
+            if ctx.dim is None:
                 dim = input.dim() - 1
             else:
-                dim = self.dim
-            args = (dim, self.keepdim)
-            if self.additional_args:
-                args = self.additional_args + args
+                dim = ctx.dim
+            args = (dim, keepdim)
+            if additional_args:
+                args = additional_args + args
             output, indices = fn(*args)
-            self.save_for_backward(indices)
-            self.mark_non_differentiable(indices)
+            ctx.save_for_backward(indices)
+            ctx.mark_non_differentiable(indices)
             return output, indices
 
-    def backward(self, grad_output, grad_indices=None):
-        grad_input = grad_output.new(*self.input_size).zero_()
-        if self.dim is None and self.has_all_reduce:
-            grad_input[self.indices] = grad_output[0]
+    @classmethod
+    def backward(cls, ctx, grad_output, grad_indices=None):
+        grad_input = Variable(grad_output.data.new(*ctx.input_size).zero_())
+        if ctx.dim is None and cls.has_all_reduce:
+            grad_input[ctx.indices_tuple] = grad_output.data[0]
         else:
-            if self.dim is None:
-                dim = input.dim() - 1
+            if ctx.dim is None:
+                dim = len(ctx.input_size) - 1
             else:
-                dim = self.dim
+                dim = ctx.dim
 
-            indices, = self.saved_tensors
-            if self.keepdim is False:
+            indices, = ctx.saved_variables
+            if ctx.keepdim is False:
                 grad_output = grad_output.unsqueeze(dim)
                 grad_indices = grad_indices.unsqueeze(dim)
                 indices = indices.unsqueeze(dim)
 
             grad_input.scatter_(dim, indices, grad_output)
-        return grad_input
+        return grad_input, None, None, None
 
 
 class Max(_SelectionFunction):
@@ -196,9 +195,9 @@ class Median(_SelectionFunction):
 class Kthvalue(_SelectionFunction):
     has_all_reduce = False
 
-    def __init__(self, k, dim=None, keepdim=True):
-        super(Kthvalue, self).__init__(dim, keepdim)
-        self.additional_args = (k,)
+    @classmethod
+    def forward(cls, ctx, input, k, dim=None, keepdim=True):
+        return super(Kthvalue, cls).forward(ctx, input, dim, keepdim, (k,))
 
 
 class Norm(Function):

@@ -44,7 +44,7 @@ protected:
       const function_list& roots,
       variable_list& inputs,
       GraphTask& task);
-  void find_stochastic_functions(function_queue& queue, GraphTask& task);
+  void find_stochastic_functions(function_queue& queue, Function* graph_root, GraphTask& task);
   void compute_dependencies(function_queue queue, GraphTask& task);
   void evaluate_function(FunctionTask& task);
   ReadyQueue& ready_queue(int device);

@@ -38,6 +38,9 @@ def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1,
         >>> inputs = autograd.Variable(torch.randn(1,4,5,5))
         >>> F.conv2d(inputs, filters, padding=1)
     """
+    if input is not None and input.dim() != 4:
+        raise ValueError("Expected 4D tensor as input, got {}D tensor instead.".format(input.dim()))
+
     f = ConvNd(_pair(stride), _pair(padding), _pair(dilation), False,
                _pair(0), groups, torch.backends.cudnn.benchmark, torch.backends.cudnn.enabled)
     return f(input, weight, bias)
@@ -66,6 +69,9 @@ def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1,
         >>> inputs = autograd.Variable(torch.randn(20, 16, 50))
         >>> F.conv1d(inputs, filters)
     """
+    if input is not None and input.dim() != 3:
+        raise ValueError("Expected 3D tensor as input, got {}D tensor instead.".format(input.dim()))
+
     f = ConvNd(_single(stride), _single(padding), _single(dilation), False,
                _single(0), groups, torch.backends.cudnn.benchmark, torch.backends.cudnn.enabled)
     return f(input, weight, bias)
@@ -95,6 +101,10 @@ def conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1,
         >>> inputs = autograd.Variable(torch.randn(20, 16, 50, 10, 20))
         >>> F.conv3d(inputs, filters)
     """
+
+    if input is not None and input.dim() != 5:
+        raise ValueError("Expected 5D tensor as input, got {}D tensor instead.".format(input.dim()))
+
     f = ConvNd(_triple(stride), _triple(padding), _triple(dilation), False,
                _triple(0), groups, torch.backends.cudnn.benchmark, torch.backends.cudnn.enabled)
     return f(input, weight, bias)
@@ -102,6 +112,26 @@ def conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1,
 
 def conv_transpose1d(input, weight, bias=None, stride=1, padding=0,
                      output_padding=0, groups=1, dilation=1):
+    """Applies a 1D transposed convolution operator over an input signal
+    composed of several input planes, sometimes also called "deconvolution".
+
+    See :class:`~torch.nn.ConvTranspose1d` for details and output shape.
+
+    Args:
+        input: input tensor of shape (minibatch x in_channels x iW)
+        weight: filters of shape (in_channels x out_channels x kW)
+        bias: optional bias of shape (out_channels)
+        stride: the stride of the convolving kernel. Default: 1
+        padding: implicit zero padding on the input. Default: 0
+        groups: split input into groups, in_channels should be divisible by
+          the number of groups
+        output_padding: A zero-padding of 0 <= padding < stride that should be
+          added to the output. Default: 0
+        dilation: the spacing between kernel elements. Default: 1
+    """
+    if input is not None and input.dim() != 3:
+        raise ValueError("Expected 3D tensor as input, got {}D tensor instead.".format(input.dim()))
+
     f = ConvNd(_single(stride), _single(padding), _single(dilation), True,
                _single(output_padding),
                groups, torch.backends.cudnn.benchmark, torch.backends.cudnn.enabled)
@@ -129,6 +159,10 @@ def conv_transpose2d(input, weight, bias=None, stride=1, padding=0,
           added to the output. Can be a single number or a tuple. Default: 0
         dilation: the spacing between kernel elements. Default: 1
     """
+
+    if input is not None and input.dim() != 4:
+        raise ValueError("Expected 4D tensor as input, got {}D tensor instead.".format(input.dim()))
+
     f = ConvNd(_pair(stride), _pair(padding), _pair(dilation), True,
                _pair(output_padding), groups, torch.backends.cudnn.benchmark, torch.backends.cudnn.enabled)
     return f(input, weight, bias)
@@ -155,6 +189,9 @@ def conv_transpose3d(input, weight, bias=None, stride=1, padding=0,
           the number of groups
         dilation: the spacing between kernel elements. Default: 1
     """
+    if input is not None and input.dim() != 5:
+        raise ValueError("Expected 5D tensor as input, got {}D tensor instead.".format(input.dim()))
+
     f = ConvNd(_triple(stride), _triple(padding), _triple(dilation), True,
                _triple(output_padding), groups, torch.backends.cudnn.benchmark, torch.backends.cudnn.enabled)
     return f(input, weight, bias)

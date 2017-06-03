@@ -67,26 +67,27 @@ void DataChannelGloo::RequestGloo::wait() {
 }
 
 
-DataChannelGloo::DataChannelGloo()
-  : _rank(load_rank_env())
+DataChannelGloo::DataChannelGloo(InitMethod::Config config)
+  : _rank(config.rank)
+  , _listen_socket(-1)
   , _store(nullptr)
   , _cache(nullptr)
 {
-  if (_rank == 0) {
-    _num_processes = load_world_size_env();
-  }
+  _num_processes = config.world_size;
 
   // Default options listen on this host's name.
   // NOTE: when hostname has bad configuration in `/etc/hosts` processes
   // will not connect to each other.
-  ::gloo::transport::tcp::attr attr;
+  ::gloo::transport::tcp::attr attr(config.public_address.c_str());
   _device = ::gloo::transport::tcp::CreateDevice(attr);
 
   if (_rank == 0) {
-    std::tie(_port, std::ignore) = load_master_env();
     _addr = "localhost";
+    _port = config.master.listen_port;
+    _listen_socket = config.master.listen_socket;
   } else {
-    std::tie(_addr, _port) = load_worker_env();
+    _addr = config.worker.master_addr;
+    _port = config.worker.master_port;
   }
 }
 
@@ -96,19 +97,9 @@ DataChannelGloo::~DataChannelGloo() {}
 
 bool DataChannelGloo::init() {
   _store = std::unique_ptr<::gloo::rendezvous::Store>(
-    new thd::Store(_rank, _addr, _port, _num_processes)
+    new Store(_rank, _listen_socket, _addr, _port, _num_processes)
   );
   _cache = std::unique_ptr<GlooCache>(new GlooCache(_rank, _device, _store));
-
-  if (_rank == 0) {
-    auto num_proc_str = std::to_string(_num_processes);
-    _store->set("world_size",
-            std::vector<char>(num_proc_str.begin(), num_proc_str.end()));
-  } else {
-    auto world_size = _store->get("world_size");
-    _num_processes = std::atoll(
-            std::string(world_size.begin(), world_size.end()).c_str());
-  }
 
   std::vector<rank_type> ranks;
   ranks.reserve(_num_processes);

@@ -37,7 +37,6 @@ static PythonEngine engine;
 PyObject *THPEngineClass = NULL;
 
 struct CallbackContext {
-  std::mutex mutex;
   std::string error;
   THPObjectPtr outputs;
   // Used to determine which callback arguments should be used to
@@ -51,6 +50,8 @@ struct CallbackContext {
 void compute_partial_exec_callbacks(const function_list& roots,
                                     const CallbackContext& ctx,
                                     Engine::callback_map& map) {
+  // This callback is used to suppress the computation of a node
+  // if it is not necessary.
   static Engine::callback_type abort_callback(
       [](Function* fn, variable_list &vars) { return false; });
 
@@ -98,15 +99,17 @@ void compute_partial_exec_callbacks(const function_list& roots,
     }
   }
 
-  // Prevent expantion for functions in {all_vertices} \ {needed}
+  // Prevent expansion for functions in {all_vertices} \ {needed}
   for (auto fn : all_functions) {
     if (needed.count(fn) > 0) continue;
     map.emplace(fn, abort_callback);
   }
 }
 
+// Implementation of torch._C._EngineBase.run_backward
 PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwargs)
 {
+  HANDLE_TH_ERRORS
   PyObject *variables = NULL;
   PyObject *grad_variables = NULL;
   unsigned char keep_graph = 0;
@@ -137,7 +140,13 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     auto& variable = ((THPVariable*)_variable)->cdata;
     THPUtils_assert(!variable->is_volatile,
         "element %d of variables tuple is volatile", i);
+    // If grad_fn is NULL (as is the case for a leaf node), we instead
+    // interpret the gradient function to be a grad accumulator,
+    // which will accumulate its inputs into the grad property of the
+    // variable.  These nodes get suppressed in some situations,
+    // see "suppress grad accumulation" below.
     auto grad_fn = variable->grad_fn ? variable->grad_fn : variable->get_grad_accumulator();
+    THPUtils_assert(grad_fn, "element %d of variables tuple does not require grad", i);
     int output_nr = variable->grad_fn ? variable->output_nr : 0;
     roots[i] = std::make_pair<>(std::move(grad_fn), output_nr);
 
@@ -155,7 +164,7 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
   Engine::callback_map callbacks;
   CallbackContext ctx;
   if (inputs != NULL) {
-    THPUtils_assert(PyTuple_Check(inputs), "outputs argument has to be a tuple");
+    THPUtils_assert(PyTuple_Check(inputs), "inputs argument has to be a tuple");
     int num_inputs = PyTuple_GET_SIZE(inputs);
     ctx.outputs = PyTuple_New(num_inputs);
     // First, find all relevant functions and fill ctx.output_map
@@ -182,12 +191,16 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
       callbacks.emplace(entry.first.get(), [&ctx, &fn_info](Function* _unused, variable_list& grads) {
         auto& saved_outputs = fn_info.first;
         bool is_leaf = fn_info.second;
-        std::lock_guard<std::mutex> guard(ctx.mutex);
+        AutoGIL gil;
         for (auto& saved_out : saved_outputs) {
           PyTuple_SET_ITEM(ctx.outputs.get(), saved_out.second,
             THPVariable_Wrap(grads[saved_out.first]));
         }
-        return !is_leaf; // suppress grad accumulation
+        // Suppress grad accumulation.
+        // If the variable is a leaf, the next function to execute
+        // is a grad_accumulator.  But when inputs != NULL, we should
+        // NOT accumulate, so terminate execution.
+        return !is_leaf;
       });
     }
     // Disable execution for all unneeded functions
@@ -202,9 +215,6 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
   } catch (python_error &e) {
     e.restore();
     return nullptr;
-  } catch (const std::exception &e) {
-    PyErr_SetString(PyExc_RuntimeError, e.what());
-    return nullptr;
   }
 
   if (ctx.outputs) {
@@ -212,6 +222,7 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
   } else {
     Py_RETURN_NONE;
   }
+  END_HANDLE_TH_ERRORS
 }
 
 PyObject *THPEngine_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)

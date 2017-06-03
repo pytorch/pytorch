@@ -91,6 +91,14 @@ class BackwardCFunction(_C._FunctionBase, _ContextMethodMixin, _HookMixin):
 
 
 class FunctionMeta(type):
+    """Function metaclass.
+
+    This metaclass sets up the following properties:
+        _is_legacy: True if forward is not defined as a static method.
+        _backward_cls: The Function class corresponding to the differentiated
+            version of this function (which is generated on the fly by this
+            metaclass).
+    """
 
     def __init__(cls, name, bases, attrs):
         for super_cls in cls.mro():

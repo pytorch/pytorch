@@ -1317,9 +1317,46 @@ class TestNN(NNTestCase):
         # but it should work with the same type
         nn.functional.conv2d(inputs.float(), weights.float())
 
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_Conv2d_inconsistent_types_on_GPU_without_cudnn(self):
+        inputs = Variable(torch.randn(4, 1, 7, 7).float().cuda())
+        weights = Variable(torch.randn(1, 1, 3, 3).double().cuda())
+        bias = Variable(torch.randn(1).double().cuda())
+
+        torch.backends.cudnn.enabled = False
+        # inconsistent types should raise an exception
+        self.assertRaises(RuntimeError, lambda: nn.functional.conv2d(inputs, weights))
+        self.assertRaises(RuntimeError, lambda: nn.functional.conv2d(inputs, weights.float(), bias))
+
+        # but it should work with the same type
+        nn.functional.conv2d(inputs.float(), weights.float(), bias.float())
+
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    def test_Conv2d_inconsistent_types_on_GPU_with_cudnn(self):
+        inputs = Variable(torch.randn(4, 1, 7, 7).float().cuda())
+        weights = Variable(torch.randn(1, 1, 3, 3).double().cuda())
+        bias = Variable(torch.randn(1).double().cuda())
+
+        torch.backends.cudnn.enabled = True
+        # inconsistent types should raise an exception
+        self.assertRaises(RuntimeError, lambda: nn.functional.conv2d(inputs, weights))
+        self.assertRaises(RuntimeError, lambda: nn.functional.conv2d(inputs, weights.float(), bias))
+
+        # but it should work with the same type
+        nn.functional.conv2d(inputs.float(), weights.float(), bias.float())
+
     def test_Conv2d_missing_argument(self):
         c = nn.Conv2d(3, 3, 3)
         self.assertRaises(RuntimeError, lambda: c(None))
+
+    def test_Conv2d_backward_twice(self):
+        input = Variable(torch.randn(2, 3, 5, 5))
+        c = nn.Conv2d(3, 3, 3)
+        o1 = c(input)
+        o1.sum().backward()
+        self.assertRaisesRegex(RuntimeError, 'Specify retain_variables=True',
+                               lambda: o1.sum().backward())
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_Conv2d_large_workspace(self):
@@ -1346,6 +1383,20 @@ class TestNN(NNTestCase):
             run_test(benchmark=True)
         finally:
             torch.backends.cudnn.benchmark = b
+
+    def test_conv_modules_raise_error_on_incorrect_input_size(self):
+        modules = [nn.Conv1d(3, 8, 3), nn.ConvTranspose1d(3, 8, 3),
+                   nn.Conv2d(3, 8, 3), nn.ConvTranspose2d(3, 8, 3),
+                   nn.Conv3d(3, 8, 3), nn.ConvTranspose3d(3, 8, 3)]
+
+        invalid_input_dims = [(2, 4), (2, 4),
+                              (3, 5), (3, 5),
+                              (4, 6), (4, 6)]
+
+        for invalid_dims, module in zip(invalid_input_dims, modules):
+            for dims in invalid_dims:
+                input = Variable(torch.Tensor(torch.Size((3, ) * dims)))
+                self.assertRaises(ValueError, lambda: module(input))
 
     def test_ConvTranspose2d_output_size(self):
         m = nn.ConvTranspose2d(3, 4, 3, 3, 0, 2)

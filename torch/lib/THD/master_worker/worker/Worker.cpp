@@ -5,6 +5,7 @@
 #include "Worker.h"
 #include "Worker.hpp"
 
+#include <iostream>
 #include <stdexcept>
 
 namespace thd {
@@ -21,9 +22,11 @@ std::unordered_map<object_id_type, std::unique_ptr<thpp::Generator>> workerGener
 using namespace thd::rpc;
 using namespace thd::worker;
 
-void THDWorkerMain() {
+void THDWorkerMain(std::string init_method, int world_size,
+                   std::string group_name, int rank) {
+  auto config = thd::getInitConfig(init_method, world_size, group_name, rank);
   std::unique_ptr<RPCMessage> command;
-  workerCommandChannel.reset(new thd::WorkerCommandChannel());
+  workerCommandChannel.reset(new thd::WorkerCommandChannel(config));
   if (!workerCommandChannel->init()) {
     return;
   }
@@ -33,8 +36,9 @@ void THDWorkerMain() {
     try {
       execute(std::move(command));
     } catch (std::exception& e) {
+      std::cerr << "WORKER ERROR: " << e.what() << std::endl;
       workerCommandChannel->sendError(e.what());
-      throw e;
+      ::exit(1);
     }
   }
 }

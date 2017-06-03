@@ -300,7 +300,7 @@ static void tensorSqueeze1d(rpc::RPCMessage& raw_message) {
 }
 
 static void tensorFree(rpc::RPCMessage& raw_message) {
-  object_id_type tensor_id = unpackInteger(raw_message);
+  object_id_type tensor_id = unpackTensor(raw_message);
   (void)workerTensors.erase(tensor_id);
 }
 

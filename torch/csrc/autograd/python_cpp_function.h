@@ -18,7 +18,7 @@ struct THPCppFunction {
 template<typename Ctor>
 PyObject* CppFunction_pynew(PyTypeObject *type, PyObject *args, PyObject *kwds)
 {
-  THPObjectPtr obj = type->tp_alloc(type, 0);
+  THPObjectPtr obj(type->tp_alloc(type, 0));
   if (!obj) return NULL;
   THPCppFunction* f = (THPCppFunction*)obj.get();
   HANDLE_TH_ERRORS

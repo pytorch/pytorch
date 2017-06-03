@@ -49,12 +49,18 @@ static void finalize(rpc::RPCMessage& raw_message) {
 #include "dispatch/Generator.cpp"
 #include "dispatch/Storage.cpp"
 #include "dispatch/Tensor.cpp"
+#include "dispatch/TensorCopy.cpp"
 #include "dispatch/TensorMath.cpp"
 #include "dispatch/TensorRandom.cpp"
 #include "dispatch/TensorLapack.cpp"
 
 using dispatch_fn = void (*)(rpc::RPCMessage&);
 using Functions = thd::Functions;
+
+void exitWorker(rpc::RPCMessage& msg) {
+  finalize(msg);
+  ::exit(0);
+}
 
 
 static const std::unordered_map<rpc::function_id_type, dispatch_fn> functions {
@@ -64,6 +70,9 @@ static const std::unordered_map<rpc::function_id_type, dispatch_fn> functions {
     {Functions::generatorSeed, generatorSeed},
     {Functions::generatorManualSeed, generatorManualSeed},
 
+    {Functions::tensorCopyFromMaster, tensorCopyFromMaster},
+    {Functions::tensorCopyFromWorker, tensorCopyFromWorker},
+    
     {Functions::tensorNew, tensorNew},
     {Functions::tensorNewWithSize, tensorNewWithSize},
     {Functions::tensorNewWithStorage, tensorNewWithStorage},
@@ -138,6 +147,7 @@ static const std::unordered_map<rpc::function_id_type, dispatch_fn> functions {
     {Functions::tensorCmaxValue, tensorCmaxValue},
     {Functions::tensorCminValue, tensorCminValue},
 
+    {Functions::tensorFill, tensorFill},
     {Functions::tensorMaskedFill, tensorMaskedFill},
     {Functions::tensorMaskedCopy, tensorMaskedCopy},
     {Functions::tensorMaskedSelect, tensorMaskedSelect},
@@ -262,6 +272,8 @@ static const std::unordered_map<rpc::function_id_type, dispatch_fn> functions {
 
     {Functions::sendTensor, sendTensor},
     {Functions::sendStorage, sendStorage},
+
+    {Functions::exit, exitWorker}
 };
 
 } // namespace detail

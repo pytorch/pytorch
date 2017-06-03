@@ -418,6 +418,7 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: _sparse_mask
+  defined_if: "!IS_DISTRIBUTED"
   cname: sparseMask
   return: argument 0
   arguments:

@@ -24,7 +24,7 @@ inline std::string THPUtils_unpackString(PyObject* obj) {
   }
   if (PyUnicode_Check(obj)) {
 #if PY_MAJOR_VERSION == 2
-    THPObjectPtr bytes = PyUnicode_AsUTF8String(obj);
+    THPObjectPtr bytes(PyUnicode_AsUTF8String(obj));
     if (!bytes) {
       throw std::runtime_error("error unpacking string as utf-8");
     }

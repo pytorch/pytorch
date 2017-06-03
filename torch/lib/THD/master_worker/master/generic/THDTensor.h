@@ -80,6 +80,8 @@ THD_API THDTensor *THDTensor_(newTranspose)(THDTensor *tensor, int dimension1_,
                                             int dimension2_);
 THD_API THDTensor *THDTensor_(newUnfold)(THDTensor *tensor, int dimension_,
                                          long size_, long step_);
+THD_API THDTensor *THDTensor_(newView)(THDTensor *tensor, THLongStorage *size);
+THD_API THDTensor *THDTensor_(newExpand)(THDTensor *tensor, THLongStorage *size);
 
 THD_API void THDTensor_(resize)(THDTensor *tensor, THLongStorage *size,
                                 THLongStorage *stride);
@@ -129,6 +131,7 @@ THD_API void THDTensor_(unfold)(THDTensor *self, THDTensor *src, int dimension_,
 THD_API void THDTensor_(squeeze)(THDTensor *self, THDTensor *src);
 THD_API void THDTensor_(squeeze1d)(THDTensor *self, THDTensor *src,
                                    int dimension_);
+TH_API void THDTensor_(unsqueeze1d)(THDTensor *self, THDTensor *src, int dimension_);
 
 THD_API int THDTensor_(isContiguous)(const THDTensor *self);
 THD_API int THDTensor_(isSameSizeAs)(const THDTensor *self, const THDTensor *src);
@@ -154,12 +157,6 @@ THD_API real THDTensor_(get3d)(const THDTensor *tensor, long x0, long x1, long x
 THD_API real THDTensor_(get4d)(const THDTensor *tensor, long x0, long x1,
                                long x2, long x3);
 
-THD_API void THDTensor_(gather)(THDTensor *self, THDTensor *src, int dim,
-                                THLongTensor *index);
-THD_API void THDTensor_(scatter)(THDTensor *self, int dim, THLongTensor *index,
-                                 THDTensor *src);
-THD_API void THDTensor_(scatterFill)(THDTensor *self, int dim,
-                                     THLongTensor *index, real val);
 THD_API accreal THDTensor_(dot)(THDTensor *self, THDTensor *src);
 THD_API real THDTensor_(minall)(THDTensor *self);
 THD_API real THDTensor_(maxall)(THDTensor *self);
@@ -201,16 +198,6 @@ THD_API void THDTensor_(baddbmm)(THDTensor *self, real beta, THDTensor *src,
                                  real alpha, THDTensor *batch1, THDTensor *batch2);
 THD_API void THDTensor_(match)(THDTensor *self, THDTensor *m1,
                                THDTensor *m2, real gain);
-THD_API void THDTensor_(max)(THDTensor *self, THLongTensor *indices_,
-                             THDTensor *src, int dimension);
-THD_API void THDTensor_(min)(THDTensor *self, THLongTensor *indices_,
-                             THDTensor *src, int dimension);
-THD_API void THDTensor_(kthvalue)(THDTensor *self, THLongTensor *indices_,
-                                  THDTensor *src, long k, int dimension);
-THD_API void THDTensor_(mode)(THDTensor *self, THLongTensor *indices_,
-                              THDTensor *src, int dimension);
-THD_API void THDTensor_(median)(THDTensor *self, THLongTensor *indices_,
-                                THDTensor *src, int dimension);
 THD_API void THDTensor_(sum)(THDTensor *self, THDTensor *src, int dimension);
 THD_API void THDTensor_(prod)(THDTensor *self, THDTensor *src, int dimension);
 THD_API void THDTensor_(cumsum)(THDTensor *self, THDTensor *src, int dimension);

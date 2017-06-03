@@ -1,8 +1,12 @@
 #include <Python.h>
 #include <structmember.h>
 
-#include <stdbool.h>
+#define THP_HOST_HALF
+
+#include <TH/TH.h>
+#include <libshm.h>
 #include "THDP.h"
+#include "torch/csrc/copy_utils.h"
 
 #include "override_macros.h"
 
