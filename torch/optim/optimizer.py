@@ -34,7 +34,7 @@ class Optimizer(object):
         param_set = set()
         for group in self.param_groups:
             if isinstance(group['params'], torch.nn.paramter.Parameter):
-                group['params'] = [group['params']
+                group['params'] = [group['params']]
             else:
                 group['params'] = list(group['params'])
             group_set = set(group['params'])
