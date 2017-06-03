@@ -182,7 +182,12 @@ bool VideoInputOp<Context>::GetClipAndLabelFromDBValue(
   CAFFE_ENFORCE(protos.ParseFromString(value));
   const TensorProto& video_proto = protos.protos(0);
   const TensorProto& label_proto = protos.protos(1);
-  const TensorProto& start_frm_proto = protos.protos(2);
+
+  int start_frm = -1;
+  if (!temporal_jitter_) {
+    const TensorProto& start_frm_proto = protos.protos(2);
+    start_frm = start_frm_proto.int32_data(0);
+  }
 
   // assign labels
   if (!multiple_label_) {
@@ -210,7 +215,7 @@ bool VideoInputOp<Context>::GetClipAndLabelFromDBValue(
       DecodeClipFromMemoryBuffer(
           const_cast<char*>(encoded_video_str.data()),
           encoded_size,
-          temporal_jitter_ ? -1 : protos.protos(2).int32_data(0),
+          start_frm,
           length_,
           scale_h_,
           scale_w_,
@@ -221,9 +226,13 @@ bool VideoInputOp<Context>::GetClipAndLabelFromDBValue(
       // encoded string contains an absolute path to a local file or folder
       std::string filename = encoded_video_str;
       if (use_image_) {
+        CAFFE_ENFORCE(
+          !temporal_jitter_,
+          "Temporal jittering is not suported for image sequence input"
+        );
         CHECK(ReadClipFromFrames(
             filename,
-            start_frm_proto.int32_data(0),
+            start_frm,
             im_extension_,
             length_,
             scale_h_,
@@ -233,7 +242,7 @@ bool VideoInputOp<Context>::GetClipAndLabelFromDBValue(
       } else {
         if (temporal_jitter_) {
           int num_of_frames = GetNumberOfFrames(filename);
-          int start_frm = std::uniform_int_distribution<>(
+          start_frm = std::uniform_int_distribution<>(
               0, num_of_frames - length_ * sampling_rate_ + 1)(*randgen);
           CHECK(DecodeClipFromVideoFile(
               filename,
@@ -246,7 +255,7 @@ bool VideoInputOp<Context>::GetClipAndLabelFromDBValue(
         } else {
           CHECK(DecodeClipFromVideoFile(
               filename,
-              start_frm_proto.int32_data(0),
+              start_frm,
               length_,
               scale_h_,
               scale_w_,
@@ -259,7 +268,7 @@ bool VideoInputOp<Context>::GetClipAndLabelFromDBValue(
     DecodeClipFromMemoryBuffer(
         video_proto.byte_data().data(),
         video_proto.byte_data().size(),
-        temporal_jitter_ ? -1 : protos.protos(2).int32_data(0),
+        start_frm,
         length_,
         scale_h_,
         scale_w_,
