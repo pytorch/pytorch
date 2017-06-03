@@ -1,4 +1,5 @@
-
+#include "${Tensor}.h"
+#include "HalfConvert.h"
 
 //sketch:
 
@@ -34,3 +35,18 @@ Tensor add(Tensor a, Tensor b) {
 }
 
 */
+
+namespace tlib {
+
+${Tensor}::${Tensor}(Context* context):
+    tensor(${THTensor}_new(${state})), context(context) {}
+
+${Tensor}::~${Tensor}() {
+  ${THTensor}_free(${state,} tensor);
+}
+
+Type& ${Tensor}::type() const {
+  return context->getType(Processor::${Processor},ScalarType::${ScalarName});
+}
+
+}
