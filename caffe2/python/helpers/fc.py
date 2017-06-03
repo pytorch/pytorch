@@ -21,33 +21,27 @@ def _FC_or_packed_FC(
     BiasInitializer = initializers.update_initializer(
         BiasInitializer, bias_init, ("ConstantFill", {})
     )
+    if not model.init_params:
+        WeightInitializer = initializers.ExternalInitializer()
+        BiasInitializer = initializers.ExternalInitializer()
 
     blob_out = blob_out or model.net.NextName()
     bias_tags = [ParameterTags.BIAS]
     if 'freeze_bias' in kwargs:
         bias_tags.append(ParameterTags.COMPUTED_PARAM)
 
-    if model.init_params:
-        weight = model.create_param(
-            param_name=blob_out + '_w',
-            shape=[dim_out, dim_in],
-            initializer=WeightInitializer,
-            tags=ParameterTags.WEIGHT
-        )
-        bias = model.create_param(
-            param_name=blob_out + '_b',
-            shape=[dim_out, ],
-            initializer=BiasInitializer,
-            tags=bias_tags
-        )
-    else:
-        weight = core.ScopedBlobReference(
-            blob_out + '_w', model.param_init_net)
-        bias = core.ScopedBlobReference(
-            blob_out + '_b', model.param_init_net)
-
-        model.AddParameter(weight, ParameterTags.WEIGHT)
-        model.AddParameter(bias, bias_tags)
+    weight = model.create_param(
+        param_name=blob_out + '_w',
+        shape=[dim_out, dim_in],
+        initializer=WeightInitializer,
+        tags=ParameterTags.WEIGHT
+    )
+    bias = model.create_param(
+        param_name=blob_out + '_b',
+        shape=[dim_out, ],
+        initializer=BiasInitializer,
+        tags=bias_tags
+    )
 
     return op_call([blob_in, weight, bias], blob_out, **kwargs)
 

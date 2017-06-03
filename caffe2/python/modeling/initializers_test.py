@@ -42,4 +42,9 @@ class InitializerTest(unittest.TestCase):
                       WeightInitializer=pFP16Initializer
         )
 
-
+    def test_fc_external_initializer(self):
+        model = model_helper.ModelHelper(name="test", init_params=False)
+        data = model.net.AddExternalInput("data")
+        fc1 = brew.fc(model, data, "fc1", dim_in=1, dim_out=1)  # noqa
+        self.assertEqual(len(model.net.Proto().op), 1)
+        self.assertEqual(len(model.param_init_net.Proto().op), 0)
