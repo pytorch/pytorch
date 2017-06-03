@@ -5,6 +5,8 @@ import sys
 parser = OptionParser()
 parser.add_option('-s', '--source-path', help='path to source director for tensorlib',
     action='store', default='.')
+parser.add_option('-p', '--print-dependencies',
+    help='only output a list of dependencies', action='store_true')
 options,args = parser.parse_args()
 
 TEMPLATE_PATH =  options.source_path+"/templates"
@@ -39,6 +41,9 @@ scalar_types = [
 
 
 def write(filename,s):
+    if options.print_dependencies:
+        sys.stdout.write(filename+";")
+        return
     with open(filename,"w") as f:
         f.write(s)
 
@@ -76,8 +81,6 @@ def generate_storage(processor, scalar_type):
 
     write(env['Storage']+".cpp",STORAGE_DERIVED_CPP.substitute(env))
     write(env['Storage']+".h",STORAGE_DERIVED_H.substitute(env))
-
-    print("#include '{}.h'".format(env['Storage']))
 
 for fname,env in generators.items():
     write(fname,GENERATOR_DERIVED.substitute(env))
