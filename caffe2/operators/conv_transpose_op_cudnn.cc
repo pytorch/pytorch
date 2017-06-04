@@ -345,7 +345,6 @@ bool CudnnConvTransposeGradientOp<T>::RunOnDevice() {
   auto* dbias = Output(BIAS_GRAD);
   DCHECK_EQ(X.ndim(), 4);
   DCHECK_EQ(filter.ndim(), 4);
-  auto* Y = Output(0);
   int C = 0;
   switch (order_) {
     case StorageOrder::NHWC:
@@ -357,7 +356,6 @@ bool CudnnConvTransposeGradientOp<T>::RunOnDevice() {
     default:
       LOG(FATAL) << "Unknown storage order: " << order_;
   }
-  ConvTransposeUnpoolBase<CUDAContext>::SetOutputSize(X, Y, C);
 
   int N = 0, M = 0, H = 0, W = 0, H_out = 0, W_out = 0;
   switch (order_) {
