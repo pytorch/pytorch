@@ -13,7 +13,7 @@ For example: ::
                                               shuffle=True,
                                               num_workers=args.nThreads)
 
-The following dataset loaders are available:
+The following datasets are available:
 
 .. contents:: Datasets
     :local:
