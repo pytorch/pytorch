@@ -1,6 +1,8 @@
 #include "${Type}.h"
 #include "${Storage}.h"
 
+#include <iostream>
+
 namespace tlib {
 
 ${Type}::${Type}(Context* context)
@@ -19,6 +21,12 @@ Storage * ${Type}::newStorage() {
 }
 Storage * ${Type}::newStorage(size_t size) {
   return new ${Storage}(context,size);
+}
+
+// example
+Tensor * ${Type}::add(Tensor & a, Tensor & b) {
+  std::cout << "add ${Tensor}\n";
+  return &a;
 }
 
 }
