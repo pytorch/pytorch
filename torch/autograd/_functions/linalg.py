@@ -1,74 +1,75 @@
 import torch
 
 from ..function import Function
+from ..variable import Variable
 
 
 class Diag(Function):
 
-    def __init__(self, diagonal_idx=0):
-        super(Diag, self).__init__()
-        self.diagonal_idx = diagonal_idx
+    @staticmethod
+    def forward(ctx, input, diagonal_idx=0):
+        ctx.diagonal_idx = diagonal_idx
+        return input.diag(ctx.diagonal_idx)
 
-    def forward(self, input):
-        return input.diag(self.diagonal_idx)
-
-    def backward(self, grad_output):
-        return grad_output.diag(self.diagonal_idx)
+    @staticmethod
+    def backward(ctx, grad_output):
+        return grad_output.diag(ctx.diagonal_idx), None
 
 
 class Tril(Function):
 
-    def __init__(self, diagonal_idx=0):
-        super(Tril, self).__init__()
-        self.diagonal_idx = diagonal_idx
+    @staticmethod
+    def forward(ctx, input, diagonal_idx=0):
+        ctx.diagonal_idx = diagonal_idx
+        return input.tril(ctx.diagonal_idx)
 
-    def forward(self, input):
-        return input.tril(self.diagonal_idx)
-
-    def backward(self, grad_output):
-        return grad_output.tril(self.diagonal_idx)
+    @staticmethod
+    def backward(ctx, grad_output):
+        return grad_output.tril(ctx.diagonal_idx), None
 
 
 class Triu(Function):
 
-    def __init__(self, diagonal_idx=0):
-        super(Triu, self).__init__()
-        self.diagonal_idx = diagonal_idx
+    @staticmethod
+    def forward(ctx, input, diagnoal_idx=0):
+        ctx.diagonal_idx = diagnoal_idx
+        return input.triu(ctx.diagonal_idx)
 
-    def forward(self, input):
-        return input.triu(self.diagonal_idx)
-
-    def backward(self, grad_output):
-        return grad_output.triu(self.diagonal_idx)
+    @staticmethod
+    def backward(ctx, grad_output):
+        return grad_output.triu(ctx.diagonal_idx), None
 
 
 class Trace(Function):
 
-    def forward(self, input):
-        self.isize = input.size()
-        return input.new((input.trace(),))
+    @staticmethod
+    def forward(ctx, input):
+        ctx.isize = input.size()
+        return input.new((input.trace(), ))
 
-    def backward(self, grad_output):
-        isize = self.isize
-        grad_input = grad_output.new(isize).zero_()
-        grad_input.view(-1)[::(isize[1] + 1)] = grad_output[0]
-        return grad_input
+    @staticmethod
+    def backward(ctx, grad_output):
+        isize = ctx.isize
+        min_size = min(isize)
+        grad_input = Variable(grad_output.data.new(isize).zero_()).view(-1)
+        grad_input[::(isize[1] + 1)] = grad_output.expand(min_size)
+        return grad_input.view(isize)
 
 
 class Cross(Function):
 
-    def __init__(self, dim=-1):
-        self.dim = dim
+    @staticmethod
+    def forward(ctx, input, other, dim=-1):
+        ctx.dim = dim
+        ctx.save_for_backward(input, other)
+        return torch.cross(input, other, ctx.dim)
 
-    def forward(self, input, other):
-        self.save_for_backward(input, other)
-        return torch.cross(input, other, self.dim)
-
-    def backward(self, grad_output):
-        input, other = self.saved_tensors
-        grad_input = torch.cross(other, grad_output, self.dim)
-        grad_other = torch.cross(grad_output, input, self.dim)
-        return grad_input, grad_other
+    @staticmethod
+    def backward(ctx, grad_output):
+        input, other = ctx.saved_variables
+        grad_input = other.cross(grad_output, ctx.dim)
+        grad_other = grad_output.cross(input, ctx.dim)
+        return grad_input, grad_other, None
 
 
 class Inverse(Function):
