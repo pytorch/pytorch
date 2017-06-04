@@ -127,3 +127,10 @@ write('Type.cpp',TYPE_CPP.substitute(top_env))
 
 write('Tensor.h',TENSOR_H.substitute(top_env))
 write('Tensor.cpp',TENSOR_CPP.substitute(top_env))
+
+# what has to be done to add a Operation ...
+# 1. add virtual dispatch declaration to Type.h
+# 2. add virtual override to TypeDerived.h
+# 3. add override definition to TypeDerived.cpp
+# 4. add non-virtual declaration to Type.h
+# 5. add non-virtual declaration to Type.cpp
