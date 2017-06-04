@@ -6,6 +6,7 @@ namespace tlib {
 
 class Context;
 class Storage;
+class Tensor;
 
 enum class ScalarType {
 #define DEFINE_ENUM(_1,n,_2) \
@@ -29,6 +30,10 @@ struct Type {
   static void registerAll(Context * context);
   virtual Storage * newStorage() = 0;
   virtual Storage * newStorage(size_t size) = 0;
+
+  // example
+  virtual Tensor * add(Tensor & a, Tensor & b) = 0;
+
 };
 
 }
