@@ -327,10 +327,10 @@ class _TensorBase(object):
         return self.neg()
 
     def __eq__(self, other):
-        return self.eq(other)
+        return torch.is_tensor(other) and self.eq(other)
 
     def __ne__(self, other):
-        return self.ne(other)
+        return not self.__eq__(other)
 
     def __lt__(self, other):
         return self.lt(other)
