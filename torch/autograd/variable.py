@@ -702,19 +702,19 @@ class Variable(_C._VariableBase):
         return Permute.apply(self, permutation)
 
     def diag(self, diagonal_idx=0):
-        return Diag(diagonal_idx)(self)
+        return Diag.apply(self, diagonal_idx)
 
     def tril(self, diagonal_idx=0):
-        return Tril(diagonal_idx)(self)
+        return Tril.apply(self, diagonal_idx)
 
     def triu(self, diagonal_idx=0):
-        return Triu(diagonal_idx)(self)
+        return Triu.apply(self, diagonal_idx)
 
     def trace(self):
-        return Trace()(self)
+        return Trace.apply(self)
 
     def cross(self, other, dim=-1):
-        return Cross(dim)(self, other)
+        return Cross.apply(self, other)
 
     def inverse(self):
         return Inverse.apply(self)
