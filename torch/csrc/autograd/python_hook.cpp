@@ -146,6 +146,12 @@ static void check_result(PyObject* prev, PyObject* result, PyObject* hook) {
 }
 
 static void check_single_result(PyObject* _original, PyObject* _result, PyObject* hook) {
+  if (_result == Py_None) return;
+
+  if (_original == Py_None) {
+    throw std::runtime_error("can't replace a None gradient with a non-None value");
+  }
+
   if (!PyObject_IsInstance(_result, THPVariableClass)) {
     PyErr_Format(PyExc_TypeError, "expected Variable, but hook returned '%s'",
         THPUtils_typename(_result));
