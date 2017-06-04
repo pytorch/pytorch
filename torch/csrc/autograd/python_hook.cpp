@@ -146,8 +146,12 @@ static void check_result(PyObject* prev, PyObject* result, PyObject* hook) {
 }
 
 static void check_single_result(PyObject* _original, PyObject* _result, PyObject* hook) {
+  if (_result == Py_None) {
+    return;
+  }
+
   if (!PyObject_IsInstance(_result, THPVariableClass)) {
-    PyErr_Format(PyExc_TypeError, "expected Variable, but hook returned '%s'",
+    PyErr_Format(PyExc_TypeError, "expected Variable or None, but hook returned '%s'",
         THPUtils_typename(_result));
     throw python_error();
   }
