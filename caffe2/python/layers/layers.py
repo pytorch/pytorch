@@ -19,7 +19,7 @@ IdScoreList = schema.Map(np.int64, np.float32)
 def get_categorical_limit(record):
     if schema.equal_schemas(record, IdList):
         key = 'items'
-    elif schema.equal_schemas(record, IdScoreList):
+    elif schema.equal_schemas(record, IdScoreList, check_field_types=False):
         key = 'keys'
     else:
         raise NotImplementedError()

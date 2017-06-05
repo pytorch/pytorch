@@ -27,7 +27,11 @@ class SparseLookup(ModelLayer):
     def __init__(self, model, input_record, inner_shape, reducer,
                  weight_init=None, weight_optim=None,
                  name='sparse_lookup', **kwargs):
+
         super(SparseLookup, self).__init__(model, name, input_record, **kwargs)
+
+        if reducer == "PositionWeighted":
+            self.external_weights = input_record.values()
 
         if isinstance(inner_shape, int):
             inner_shape = [inner_shape]
@@ -57,7 +61,10 @@ class SparseLookup(ModelLayer):
         self.w = model.net.NextScopedBlob(name + "_w")
         if schema.equal_schemas(self.input_record, IdList):
             sparse_key = self.input_record.items()
-        elif schema.equal_schemas(self.input_record, IdScoreList):
+        elif schema.equal_schemas(
+                self.input_record,
+                IdScoreList,
+                check_field_types=False):
             sparse_key = self.input_record.keys()
         else:
             raise NotImplementedError()
@@ -82,20 +89,6 @@ class SparseLookup(ModelLayer):
                 )
             ))
 
-        if reducer == 'PositionWeighted':
-            self.pos_w = model.net.NextScopedBlob(name + "_pos_w")
-            self.params.append(
-                LayerParameter(
-                    parameter=self.pos_w,
-                    initializer=core.CreateOperator('ConstantFill',
-                                                    [],
-                                                    self.pos_w,
-                                                    shape=[input_dim, ],
-                                                    value=1.0
-                                                    ),
-                    optimizer=weight_optim
-                ))
-
     def get_memory_usage(self):
         return functools.reduce(operator.mul, self.shape) * 4
 
@@ -112,25 +105,6 @@ class SparseLookup(ModelLayer):
                         self.input_record.lengths()
                     ],
                     self.output_schema.field_blobs(),
-                    engine='fp16'
-                )
-            elif self.reducer == 'PositionWeighted':
-                inc_seq = net.LengthsRangeFill(
-                    [self.input_record.lengths()],
-                    self.input_record.lengths() + '_seq'
-                )
-                gather_pos_w = net.Gather(
-                    [self.pos_w, inc_seq], self.pos_w + '_gather')
-
-                net.SparseLengthsWeightedSum(
-                    [
-                        self.w,
-                        gather_pos_w,
-                        self.input_record.items(),
-                        self.input_record.lengths()
-                    ],
-                    self.output_schema.field_blobs(),
-                    grad_on_weights=1,
                     engine='fp16'
                 )
             elif self.reducer == 'Sqrt':
@@ -159,7 +133,10 @@ class SparseLookup(ModelLayer):
                     self.output_schema.field_blobs(),
                     engine='fp16'
                 )
-        elif schema.equal_schemas(self.input_record, IdScoreList):
+        elif schema.equal_schemas(
+                self.input_record,
+                IdScoreList,
+                check_field_types=False):
             if self.reducer in ['Sum', 'Mean']:
                 net.__getattr__('SparseLengthsWeighted' + self.reducer)(
                     [
@@ -169,6 +146,18 @@ class SparseLookup(ModelLayer):
                         self.input_record.lengths()
                     ],
                     self.output_schema.field_blobs(),
+                    engine='fp16'
+                )
+            elif self.reducer == 'PositionWeighted':
+                net.SparseLengthsWeightedSum(
+                    [
+                        self.w,
+                        self.external_weights,
+                        self.input_record.keys(),
+                        self.input_record.lengths()
+                    ],
+                    self.output_schema.field_blobs(),
+                    grad_on_weights=1,
                     engine='fp16'
                 )
             else:
