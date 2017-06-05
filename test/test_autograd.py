@@ -1578,7 +1578,7 @@ method_tests = [
     ('unsqueeze', (S, S, S), (3,), 'last', [0]),
     ('masked_select', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False),)),
     ('masked_fill_', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False), 10)),
-    ('masked_copy_', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False), (M, M))),
+    ('masked_scatter_', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False), (M, M))),
 ]
 # TODO: mm, bmm, mv, ger
 # TODO: max, min with dim (problem with indices)
@@ -1633,6 +1633,7 @@ for test in function_tests:
 
     for dim_perm in product([-1, 1], repeat=len(dim_args_idx)):
         test_name = basic_test_name + ''.join('_neg' + str(i) for i, idx in enumerate(dim_perm) if idx < 0)
+
         def make_neg_dims(args):
             for i in dim_args_idx:
                 assert isinstance(args[i], int), test_name

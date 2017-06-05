@@ -76,7 +76,7 @@ class Variable(_C._VariableBase):
     def __setitem__(self, key, value):
         if isinstance(key, Variable) and type(key.data).__name__ == 'ByteTensor':
             if isinstance(value, Variable):
-                return MaskedCopy.apply(self, key, value, True)
+                return MaskedScatter.apply(self, key, value, True)
             else:
                 return MaskedFill.apply(self, key, value, True)
         else:
@@ -647,10 +647,18 @@ class Variable(_C._VariableBase):
         return Scatter.apply(self, dim, index, source, True)
 
     def masked_copy(self, mask, variable):
-        return MaskedCopy.apply(self, mask, variable)
+        warnings.warn("masked_copy is deprecated and renamed to masked_scatter, and will be removed in v0.3")
+        return MaskedScatter.apply(self, mask, variable)
 
     def masked_copy_(self, mask, variable):
-        return MaskedCopy.apply(self, mask, variable, True)
+        warnings.warn("masked_copy_ is deprecated and renamed to masked_scatter_, and will be removed in v0.3")
+        return MaskedScatter.apply(self, mask, variable, True)
+
+    def masked_scatter(self, mask, variable):
+        return MaskedScatter.apply(self, mask, variable)
+
+    def masked_scatter_(self, mask, variable):
+        return MaskedScatter.apply(self, mask, variable, True)
 
     def masked_fill(self, mask, value):
         return MaskedFill.apply(self, mask, value)

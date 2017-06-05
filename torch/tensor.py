@@ -1,4 +1,5 @@
 import torch
+import warnings
 from . import _tensor_str
 from ._utils import _type, _cuda, _range, _rebuild_tensor
 import sys
@@ -261,6 +262,10 @@ class _TensorBase(object):
         xxtensor = xtensor.expand_as(urtensor)
         urtensor.copy_(xxtensor)
         return result
+
+    def masked_copy_(self, *args, **kwargs):
+        warnings.warn("masked_copy_ is deprecated and renamed to masked_scatter_, and will be removed in v0.3")
+        return self.masked_scatter_(self, *args, **kwargs)
 
     # TODO: add tests for operators
     def __add__(self, other):
