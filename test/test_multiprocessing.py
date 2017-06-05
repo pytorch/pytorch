@@ -297,7 +297,8 @@ class TestMultiprocessing(TestCase):
         ctx = mp.get_context('spawn')
         tensors = []
         for i in range(5):
-            tensors += [torch.arange(i * 5, (i + 1) * 5).cuda()]
+            device = i % 2
+            tensors += [torch.arange(i * 5, (i + 1) * 5).cuda(device)]
 
         inq = ctx.Queue()
         outq = ctx.Queue()
@@ -313,7 +314,7 @@ class TestMultiprocessing(TestCase):
         for i, tensor in enumerate(tensors):
             v, device, tensor_size, storage_size = results[i]
             self.assertEqual(v, torch.arange(i * 5, (i + 1) * 5).sum())
-            self.assertEqual(device, 0)
+            self.assertEqual(device, i % 2)
             self.assertEqual(tensor_size, 5)
             self.assertEqual(storage_size, 5)
 
