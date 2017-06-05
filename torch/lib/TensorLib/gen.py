@@ -1,13 +1,18 @@
 import os
-from optparse import OptionParser
-from CodeTemplate import CodeTemplate
 import sys
+import yaml
+from optparse import OptionParser
+
+import cwrap_parser
+from code_template import CodeTemplate
+
+
 parser = OptionParser()
 parser.add_option('-s', '--source-path', help='path to source director for tensorlib',
     action='store', default='.')
 parser.add_option('-p', '--print-dependencies',
     help='only output a list of dependencies', action='store_true')
-options,args = parser.parse_args()
+options,cwrap_files = parser.parse_args()
 
 TEMPLATE_PATH =  options.source_path+"/templates"
 GENERATOR_DERIVED = CodeTemplate.from_file(TEMPLATE_PATH+"/GeneratorDerived.h")
@@ -58,7 +63,7 @@ top_env = {
 def write(filename,s):
     filename = "TensorLib/"+filename
     if options.print_dependencies:
-        sys.stdout.write(filename+";")
+        sys.stderr.write(filename+";")
         return
     with open(filename,"w") as f:
         f.write(s)
@@ -115,6 +120,14 @@ def generate_storage_type_and_tensor(processor, scalar_type):
         .format(processor,scalar_name,env['Type']))
     top_env['type_registrations'].append(type_register)
     top_env['type_headers'].append('#include "TensorLib/{}.h"'.format(env['Type']))
+
+
+
+declarations = [ d
+    for file in cwrap_files
+        for d in cwrap_parser.parse(file) ]
+
+print(yaml.dump(declarations))
 
 for fname,env in generators.items():
     write(fname,GENERATOR_DERIVED.substitute(env))

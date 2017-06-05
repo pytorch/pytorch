@@ -83,7 +83,8 @@ FILE(GLOB base_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "*.cpp")
 
 EXECUTE_PROCESS(
     COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/gen.py -s ${CMAKE_CURRENT_SOURCE_DIR} --print-dependencies
-    OUTPUT_VARIABLE generated_cpp
+    # user stderr rather than stdout so we can still debug the script with print
+    ERROR_VARIABLE generated_cpp
     RESULT_VARIABLE RETURN_VALUE
 )
 if (NOT RETURN_VALUE EQUAL 0)
@@ -94,9 +95,27 @@ FILE(GLOB_RECURSE all_templates "templates/*")
 
 FILE(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/TensorLib)
 
+SET(CWRAP_FILES_BASE ${CMAKE_CURRENT_SOURCE_DIR}/../../csrc  )
+SET(cwrap_files
+# ${CWRAP_FILES_BASE}/cudnn/cuDNN.cwrap
+  ${CWRAP_FILES_BASE}/generic/TensorMethods.cwrap
+# ${CWRAP_FILES_BASE}/generic/methods/SparseTensor.cwrap
+  ${CWRAP_FILES_BASE}/generic/methods/Tensor.cwrap
+  ${CWRAP_FILES_BASE}/generic/methods/TensorApply.cwrap
+  ${CWRAP_FILES_BASE}/generic/methods/TensorCompare.cwrap
+  ${CWRAP_FILES_BASE}/generic/methods/TensorCuda.cwrap
+  ${CWRAP_FILES_BASE}/generic/methods/TensorMath.cwrap
+  ${CWRAP_FILES_BASE}/generic/methods/TensorRandom.cwrap
+#  ${CWRAP_FILES_BASE}/generic/methods/TensorSerialization.cwrap
+#  ${CWRAP_FILES_BASE}/nn/THNN.cwrap
+#  ${CWRAP_FILES_BASE}/nn/THCUNN.cwrap
+#  ${CWRAP_FILES_BASE}/nn/THNN_generic.cwrap
+)
+
+
 ADD_CUSTOM_COMMAND(OUTPUT ${generated_cpp}
-COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/gen.py -s ${CMAKE_CURRENT_SOURCE_DIR}
-DEPENDS gen.py ${all_templates})
+COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/gen.py -s ${CMAKE_CURRENT_SOURCE_DIR} ${cwrap_files}
+DEPENDS gen.py cwrap_parser.py code_template.py ${all_templates} ${cwrap_files})
 
 SET(all_cpp ${base_cpp} ${generated_cpp})
 filter_list(generated_h generated_cpp "\\.h$")
