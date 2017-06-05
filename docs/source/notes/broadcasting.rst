@@ -27,17 +27,18 @@ For Example::
     >>> y=torch.FloatTensor(2,2)
     # x and y are not broadcastable, because x does not have at least 1 dimension
     
-    >>> x=torch.FloatTensor(5,1,4,1)
-    >>> y=torch.FloatTensor(3,1,1)
+    # can line up trailing dimensions
+    >>> x=torch.FloatTensor(5,3,4,1)
+    >>> y=torch.FloatTensor(  3,1,1)
     # x and y are broadcastable.
     # 1st trailing dimension: both have size 1
     # 2nd trailing dimension: y has size 1
-    # 3rd trailing dimension: x has size 1
+    # 3rd trailing dimension: x size == y size
     # 4th trailing dimension: y dimension doesn't exist
     
     # but:
     >>> x=torch.FloatTensor(5,2,4,1)
-    >>> y=torch.FloatTensor(3,1,1)
+    >>> y=torch.FloatTensor(  3,1,1)
     # x and y are not broadcastable, because in the 3rd trailing dimension 2 != 3
 
 If two tensors :attr:`x`, :attr:`y` are "broadcastable", the resulting tensor size
