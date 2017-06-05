@@ -43,9 +43,8 @@ static cudaError_t THCIpcAllocator_free(void* ctx, void* devPtr)
   if (err != cudaSuccess) { return err; }
 
   err = cudaIpcCloseMemHandle(devPtr);
-  if (err != cudaSuccess) { return err; }
 
-  err = cudaSetDevice(prev_device);
+  cudaSetDevice(prev_device);
   return err;
 }
 
