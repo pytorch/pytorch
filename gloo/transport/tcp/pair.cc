@@ -647,7 +647,8 @@ void Pair::waitUntilConnected(
   };
   auto timeoutSet = timeout_ != kNoTimeout;
   if (useTimeout && timeoutSet) {
-    auto done = cv_.wait_for(lock, timeout_, pred);
+    // Use a longer timeout when waiting for initial connect
+    auto done = cv_.wait_for(lock, timeout_ * 5, pred);
     if (!done) {
       signalIoFailure(GLOO_ERROR_MSG("Connect timeout ", peer_.str()));
     }
