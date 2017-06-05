@@ -255,6 +255,11 @@ const python_detail::Func& PythonGradientOp::getFunc() {
 struct GetPythonGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   std::vector<OperatorDef> GetGradientDefs() override {
+    ArgumentHelper helper(Def());
+    auto gradOutputIndices =
+        helper.GetRepeatedArgument<int>("grad_output_indices");
+    auto gradInputIndices =
+        helper.GetRepeatedArgument<int>("grad_input_indices");
     std::vector<std::string> gradientInputs;
     for (int i = 0; i < def_.input_size(); ++i) {
       gradientInputs.push_back(I(i));
@@ -262,12 +267,26 @@ struct GetPythonGradient : public GradientMakerBase {
     for (int i = 0; i < def_.output_size(); ++i) {
       gradientInputs.push_back(O(i));
     }
-    for (int i = 0; i < def_.output_size(); ++i) {
-      gradientInputs.push_back(GO(i));
+    if (gradOutputIndices.size() > 0) {
+      for (int i = 0; i < gradOutputIndices.size(); ++i) {
+        int GO_i = gradOutputIndices[i];
+        gradientInputs.push_back(GO(GO_i));
+      }
+    } else {
+      for (int i = 0; i < def_.output_size(); ++i) {
+        gradientInputs.push_back(GO(i));
+      }
     }
     std::vector<std::string> gradientOutputs;
-    for (int i = 0; i < def_.input_size(); ++i) {
-      gradientOutputs.push_back(GI(i));
+    if (gradInputIndices.size() > 0) {
+      for (int i = 0; i < gradInputIndices.size(); ++i) {
+        int GI_i = gradInputIndices[i];
+        gradientOutputs.push_back(GI(GI_i));
+      }
+    } else {
+      for (int i = 0; i < def_.input_size(); ++i) {
+        gradientOutputs.push_back(GI(i));
+      }
     }
 
     return SingleGradientDef(

@@ -165,3 +165,33 @@ class PythonOpTest(hu.HypothesisTestCase):
         for idx in [0, 1]:
             self.assertGradientChecks(gc, op, [x1, x2], idx, [0, 1])
         self.assertDeviceChecks(dc, op, [x1, x2], [0, 1])
+
+    @given(inputs=hu.tensors(n=3), **hu.gcs)
+    def test_gradient_multiple_with_indicies(self, inputs, gc, dc):
+        (x1, x2, x3) = inputs
+
+        def f(inputs, outputs):
+            for idx in [0, 1, 2]:
+                self.assertEqual(type(inputs[idx].shape), tuple)
+                outputs[idx].reshape(inputs[idx].shape)
+                outputs[idx].data[...] = inputs[idx].data * 2
+
+        def grad_f(inputs, outputs):
+            # Ordering is [inputs, outputs, grad_outputs]
+            self.assertEqual(len(inputs), 8)
+            self.assertEqual(len(outputs), 1)
+            for (grad_output_idx, grad_input_idx) in [(6, 0)]:
+                grad_output = inputs[grad_output_idx]
+                grad_input = outputs[grad_input_idx]
+                grad_input.reshape(grad_output.shape)
+                grad_input.data[...] = grad_output.data * 2
+
+        op = CreatePythonOperator(
+            f, ["x1", "x2", "x3"], ["y1", "y2", "y3"],
+            grad_f=grad_f,
+            grad_output_indices=[0, 2],  # Receive grad outputs for y1 and y3
+            grad_input_indices=[0]       # Produce grad inputs for x1
+        )
+
+        self.assertGradientChecks(gc, op, [x1, x2, x3], 0, [0, 2])
+        self.assertDeviceChecks(dc, op, [x1, x2, x3], [0, 1, 2])
