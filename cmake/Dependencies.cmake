@@ -198,7 +198,7 @@ endif()
 
 # ---[ EIGEN
 add_definitions(-DEIGEN_MPL2_ONLY)
-find_package(Eigen3)
+find_package(Eigen3 QUIET)
 if(EIGEN3_FOUND)
   include_directories(SYSTEM ${EIGEN3_INCLUDE_DIRS})
 else()
