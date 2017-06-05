@@ -93,7 +93,7 @@ module_tests = [
     dict(
         module_name='Softmax2d',
         input_size=(1, 3, 10, 20),
-        reference_fn=reference_fn=lambda i, _: torch.exp(i).div(torch.exp(i).sum(1, False))
+        reference_fn=lambda i, _: torch.exp(i).div(torch.exp(i).sum(1, False))
     ),
     dict(
         module_name='LogSoftmax',
