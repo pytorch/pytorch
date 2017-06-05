@@ -4,6 +4,7 @@ import yaml
 from optparse import OptionParser
 
 import cwrap_parser
+import preprocess_declarations
 from code_template import CodeTemplate
 
 
@@ -126,7 +127,7 @@ def generate_storage_type_and_tensor(processor, scalar_type):
 declarations = [ d
     for file in cwrap_files
         for d in cwrap_parser.parse(file) ]
-
+declarations = preprocess_declarations.run(declarations)
 print(yaml.dump(declarations))
 
 for fname,env in generators.items():
