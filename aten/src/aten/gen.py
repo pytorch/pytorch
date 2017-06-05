@@ -123,7 +123,6 @@ def generate_storage_type_and_tensor(processor, scalar_type):
     top_env['type_headers'].append('#include "TensorLib/{}.h"'.format(env['Type']))
 
 
-
 declarations = [ d
     for file in cwrap_files
         for d in cwrap_parser.parse(file) ]
