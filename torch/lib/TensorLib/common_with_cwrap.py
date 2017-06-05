@@ -90,3 +90,8 @@ def enumerate_options_due_to_default(declaration):
                     arg['name'] = 'NULL' if arg['default'] is None else arg['default']
             new_options.append(option_copy)
     declaration['options'] = new_options #filter_unique_options(new_options)
+
+def sort_by_number_of_options(declaration):
+    def num_checked_args(option):
+        return sum(map(lambda a: not a.get('ignore_check', False), option['arguments']))
+    declaration['options'].sort(key=num_checked_args, reverse=True)
