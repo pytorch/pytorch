@@ -225,8 +225,27 @@ class ModelLayer(object):
     def get_memory_usage(self):
         return 0
 
+    def add_init_params(self, init_net):
+        '''
+        Adds layer initialization operators to passed net.
+        '''
+        for param in self.params:
+            # TODO(amalevich): Either return back to lambdas, that add
+            # all params (looks a bit safer and breaking less
+            # abstractions) or extend Net interface to this type of
+            # operations better
+            # TODO(xlwang) init_net._net.op has type google.protobuf.\
+            # internal.containers.RepeatedCompositeFieldContainer, but
+            # the version of protobuf in fbcode does not support append
+            # so extend is used
+            init_net._net.op.extend([param.initializer])
+
     def add_operators(self, net, init_net=None,
                       context=InstantiationContext.TRAINING):
+        '''
+        Adds layer trainig or initialization operators to the passed in net.
+        init_net can be None and can be called independently from add_init_params
+        '''
         # Namescope below should warranty that all intermediate blobs will be
         # assiciated with the layer that produces them
         with scope.NameScope(self.name):
@@ -236,16 +255,7 @@ class ModelLayer(object):
                 assert init_net, (
                     "Only prediction and eval context don't need init_net")
             if init_net:
-                for param in self.params:
-                    # TODO(amalevich): Either return back to lambdas, that add
-                    # all params (looks a bit safer and breaking less
-                    # abstractions) or extend Net interface to this type of
-                    # operations better
-                    # TODO(xlwang) init_net._net.op has type google.protobuf.\
-                    # internal.containers.RepeatedCompositeFieldContainer, but
-                    # the version of protobuf in fbcode does not support append
-                    # so extend is used
-                    init_net._net.op.extend([param.initializer])
+                self.add_init_params(init_net)
             if context == InstantiationContext.TRAINING:
                 self.add_train_ops(net)
             elif context == InstantiationContext.EVAL:

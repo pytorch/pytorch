@@ -35,6 +35,7 @@ class Tags(object):
     EXCLUDE_FROM_ACCUMULATE_PRED = 'exclude_from_accumulate_pred'
     PREPROCESSING = 'preprocessing'
     HANDLE_AS_SPARSE_LAYER = 'handle_as_sparse_layer'
+    GRADIENT_FROM_PS = 'gradient_from_ps'
 
     # In certain cases we want to have different schema for training and
     # prediction, as an example in prediction we might need to have only

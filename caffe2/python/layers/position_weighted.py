@@ -7,7 +7,6 @@ from __future__ import unicode_literals
 
 from caffe2.python import core, schema
 from caffe2.python.layers.layers import (
-    get_categorical_limit,
     LayerParameter,
     ModelLayer,
 )
@@ -21,7 +20,9 @@ class PositionWeighted(ModelLayer):
                  name="position_weights"):
         super(PositionWeighted, self).__init__(model, name, input_record)
 
-        self.shape = get_categorical_limit(input_record)
+        # TODO: Replace this with correct estimation after we compute
+        # cardinality from run_meta
+        self.shape = 1000
 
         self.pos_w = model.net.NextScopedBlob(name + "_pos_w")
         self.params.append(
@@ -43,6 +44,7 @@ class PositionWeighted(ModelLayer):
         )
 
         self.tags.update({Tags.HANDLE_AS_SPARSE_LAYER})
+        self.tags.update({Tags.GRADIENT_FROM_PS})
 
     def get_memory_usage(self):
         return self.shape
