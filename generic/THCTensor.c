@@ -294,10 +294,10 @@ void THCTensor_(resize5d)(THCState *state, THCTensor *self, long size0, long siz
   THCTensor_(resizeNd)(state, self, 5, size, NULL);
 }
 
-THCTensor* THCTensor_(newExpand)(THCState *state, THCTensor *tensor, THLongStorage *sizes, int raiseErrors)
+THCTensor* THCTensor_(newExpand)(THCState *state, THCTensor *tensor, THLongStorage *sizes)
 {
   THCTensor *result = THCTensor_(new)(state);
-  THCTensor_(expand)(state, result, tensor, sizes, raiseErrors);
+  THCTensor_(expand)(state, result, tensor, sizes, 1);
   return result;
 }
 
