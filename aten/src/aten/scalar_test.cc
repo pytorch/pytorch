@@ -1,5 +1,5 @@
 #include <iostream>
-#include "TensorLib.h"
+#include "TensorLib/TensorLib.h"
 
 using std::cout;
 using namespace tlib;

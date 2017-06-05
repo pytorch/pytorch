@@ -1,5 +1,5 @@
-#include "CUDAGenerator.h"
-#include "Context.h"
+#include "TensorLib/CUDAGenerator.h"
+#include "TensorLib/Context.h"
 #include <stdexcept>
 
 #define const_generator_cast(generator) \
