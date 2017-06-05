@@ -503,7 +503,13 @@ void THCSTensor_(cmul)(THCState *state, THCSTensor *r_, THCSTensor *t_, THCSTens
    THAssert(cusparse_status == CUSPARSE_STATUS_SUCCESS);
 
    cusparseSetMatType(descrA, CUSPARSE_MATRIX_TYPE_GENERAL);
+#if TH_INDEX_BASE == 0
    cusparseSetMatIndexBase(descrA, CUSPARSE_INDEX_BASE_ZERO);
+#elif TH_INDEX_BASE ==1
+   cusparseSetMatIndexBase(descrA, CUSPARSE_INDEX_BASE_ONE);
+#else
+     THError("Unknown TH_INDEX_BASE.");
+#endif
 
    cusolver_status = cusolverSpCreateCsrqrInfo(&info);
    THAssert(cusolver_status == CUSOLVER_STATUS_SUCCESS);
