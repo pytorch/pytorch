@@ -555,6 +555,11 @@ void THCSTensor_(cmul)(THCState *state, THCSTensor *r_, THCSTensor *t_, THCSTens
 
    cusolverSpDestroyCsrqrInfo(info);
    cudaFree(buffer_qr);
+
+   THCudaIntTensor_free(state, colIndicesInt);
+   THCudaIntTensor_free(state, csr);
+   THCIndexTensor_(free)(state, rowIndices);
+   THCIndexTensor_(free)(state, colIndices);
 #else
      THError("unimplemented data type");
 #endif
