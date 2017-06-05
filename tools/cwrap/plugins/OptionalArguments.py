@@ -6,7 +6,7 @@ from itertools import product
 class OptionalArguments(CWrapPlugin):
 
     def process_declarations(self, declarations):
-        new_options = []
+        new_options = [] #TODO(zach): should this move under the for loop
         for declaration in declarations:
             for option in declaration['options']:
                 optional_args = []
