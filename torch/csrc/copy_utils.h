@@ -41,17 +41,14 @@ inline bool THPCopy(const THPCopyList& v, PyObject* dst, PyObject* src, bool asy
 inline PyObject * THPStorageCopyMethod(const THPCopyList& v, PyObject *self, PyObject *args, PyObject *kwargs)
 {
   PyObject *src;
-  PyObject *async = Py_False;
+  int async = 0;
   static char *kwlist[] = {"source", "async", NULL};
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|O:copy_", kwlist, &src, &async)) {
+  // use int as parse type because bool not available in python2.
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|i:copy_", kwlist, &src, &async)) {
     return NULL;
   }
-  if (!PyBool_Check(async)) {
-    return PyErr_Format(PyExc_TypeError, "copy_() expected bool for argument async (got '%s')",
-        Py_TYPE(async)->tp_name);
-  }
 
-  if (!THPCopy(v, self, src, async == Py_True, false)) {
+  if (!THPCopy(v, self, src, async, false)) {
     return NULL;
   }
 
@@ -62,22 +59,15 @@ inline PyObject * THPStorageCopyMethod(const THPCopyList& v, PyObject *self, PyO
 inline PyObject * THPTensorCopyMethod(const THPCopyList& v, PyObject *self, PyObject *args, PyObject *kwargs)
 {
   PyObject *src;
-  PyObject *async = Py_False;
-  PyObject *broadcast = Py_True;
+  int async = 0;
+  int broadcast = 1;
   static char *kwlist[] = {"source", "async", "broadcast", NULL};
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|OO:copy_", kwlist, &src, &async, &broadcast)) {
+  // use int as parse type because bool not available in python2.
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|ii:copy_", kwlist, &src, &async, &broadcast)) {
     return NULL;
   }
-  if (!PyBool_Check(async)) {
-    return PyErr_Format(PyExc_TypeError, "copy_() expected bool for argument async (got '%s')",
-        Py_TYPE(async)->tp_name);
-  }
-  if (!PyBool_Check(broadcast)) {
-    return PyErr_Format(PyExc_TypeError, "copy_() expected bool for argument broadcast (got '%s')",
-        Py_TYPE(broadcast)->tp_name);
-  }
 
-  if (!THPCopy(v, self, src, async == Py_True, broadcast == Py_True)) {
+  if (!THPCopy(v, self, src, async, broadcast)) {
     return NULL;
   }
 
