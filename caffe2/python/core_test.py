@@ -318,5 +318,57 @@ class TestAppendNet(test_util.TestCase):
         self.assertTrue("in1" in netA.external_inputs)
 
 
+class TestExtractPredictorNet(test_util.TestCase):
+
+    def test_extract_simple(self):
+        from caffe2.python import brew
+        from caffe2.python.model_helper import ModelHelper, ExtractPredictorNet
+
+        model = ModelHelper(name="test", arg_scope={'order': 'NCHW'})
+        [data, label] = brew.image_input(
+            model,
+            "reader", ["xx/data", "label"],
+        )
+        cnv = brew.conv(model, data, 'cnv', 32, 32, 4)
+        a = brew.fc(model, cnv, 'a', 100, 200)
+        pred = brew.fc(model, a, 'pred', 200, 5)
+        brew.softmax(model, [pred, label], "softmax")
+
+        (predict_net, export_blobs) = ExtractPredictorNet(
+            net_proto=model.net.Proto(),
+            input_blobs=["xx/data"],
+            output_blobs=["pred"],
+            renames={"xx/data": "image"},
+        )
+        export_blobs = set(export_blobs)
+
+        ops = list(predict_net.Proto().op)
+        for op in ops:
+            self.assertFalse(op.type == "Softmax")
+            self.assertFalse("xx/data" in op.input)
+
+        # Note: image input should not be included
+        self.assertEquals(ops[0].type, "Conv")
+        self.assertEquals(ops[1].type, "FC")
+        self.assertEquals(ops[2].type, "FC")
+        self.assertEquals(len(ops), 3)
+
+        # test rename happened
+        self.assertEquals(ops[0].input[0], "image")
+
+        # Check export blobs
+        self.assertTrue("image" not in export_blobs)
+        self.assertTrue("xx/data" not in export_blobs)
+        self.assertEqual(set([str(p) for p in model.params]), export_blobs)
+
+        # Check external inputs/outputs
+        self.assertTrue("image" in predict_net.Proto().external_input)
+        self.assertEquals(set(["pred"]), set(predict_net.Proto().external_output))
+        self.assertEqual(
+            set(predict_net.Proto().external_input) -
+            set([str(p) for p in model.params]), set(["image"])
+        )
+
+
 if __name__ == '__main__':
     unittest.main()

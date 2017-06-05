@@ -464,7 +464,7 @@ def ExtractPredictorNet(model, inputs, outputs, device):
     prefix = "gpu_{}/".format(master_device)
     prefix_inputs = [prefix + str(b) for b in inputs]
     prefix_outputs = [prefix + str(b) for b in outputs]
-    predictor_net = model_helper.ExtractPredictorNet(
+    (predictor_net, export_blobs) = model_helper.ExtractPredictorNet(
         net_proto=model.net.Proto(),
         input_blobs=prefix_inputs,
         output_blobs=prefix_outputs,
@@ -472,11 +472,10 @@ def ExtractPredictorNet(model, inputs, outputs, device):
         renames={
             a: b
             for (a, b) in zip(prefix_inputs + prefix_outputs, inputs + outputs)
-        }
+        },
     )
 
-    params = set(predictor_net.Proto().external_input) - set(inputs)
-    return (predictor_net, params)
+    return (predictor_net, export_blobs)
 
 
 def GetCheckpointParams(model):
