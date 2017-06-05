@@ -405,6 +405,12 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: pow
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
+  types:
+    - float
+    - double
+  processors:
+    - cpu
+    - cuda
   sparse: yes
   cname: pow
   with_stateless: True
@@ -433,6 +439,8 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
   sparse: yes
   python_name: get_device
   defined_if: IS_CUDA
+  processors:
+    - cuda
   return: long
   arguments:
     - THSTensor* self

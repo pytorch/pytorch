@@ -2,6 +2,8 @@
   name: getDevice
   python_name: get_device
   defined_if: IS_CUDA
+  processors:
+    - cuda
   return: long
   arguments:
     - THTensor* self
@@ -12,6 +14,8 @@
   python_name: new
   method_flags: METH_KEYWORDS
   defined_if: IS_CUDA
+  processors:
+    - cuda
   only_register: True
 ]]
 #if IS_CUDA
@@ -28,6 +32,8 @@ PyObject * THPTensor_(new)(THPTensor *self, PyObject *args, PyObject *kwargs)
   python_name: record_stream
   override_method_flags: METH_O
   defined_if: IS_CUDA
+  processors:
+    - cuda
   only_register: True
 ]]
 #if IS_CUDA

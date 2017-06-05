@@ -627,6 +627,8 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
   name: range
   only_stateless: True
   defined_if: "!IS_CUDA"
+  processors:
+    - cpu
   return: argument 0
   before_arg_assign: |
     PyErr_WarnEx(PyExc_UserWarning, "torch.range is deprecated in favor of torch.arange "
@@ -646,6 +648,8 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
   cname: range
   only_stateless: True
   defined_if: "!IS_CUDA"
+  processors:
+    - cpu
   return: argument 0
   options:
     - before_call: |

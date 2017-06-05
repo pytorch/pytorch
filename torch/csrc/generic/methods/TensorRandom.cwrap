@@ -1,6 +1,8 @@
 [[
   name: randperm
   defined_if: "!IS_CUDA && !IS_DISTRIBUTED"
+  processors:
+    - cpu
   only_stateless: True
   return: argument 0
   arguments:
@@ -29,6 +31,8 @@ static void THTensor_(random1__)(THTensor *self, THGenerator *gen, long b)
 [[
   name: random_
   defined_if: "!IS_CUDA && !IS_DISTRIBUTED"
+  processors:
+    - cpu
   return: self
   options:
     - cname: random
@@ -57,6 +61,11 @@ static void THTensor_(random1__)(THTensor *self, THGenerator *gen, long b)
 [[
   name: multinomial
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  types:
+    - float
+    - double
+  processors:
+    - cpu
   with_stateless: True
   return: argument 0
   arguments:
@@ -74,6 +83,11 @@ static void THTensor_(random1__)(THTensor *self, THGenerator *gen, long b)
 [[
   name: uniform_
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  types:
+    - float
+    - double
+  processors:
+    - cpu
   cname: uniform
   return: self
   arguments:
@@ -115,6 +129,11 @@ static void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, TH
 [[
   name: normal
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  types:
+    - float
+    - double
+  processors:
+    - cpu
   return: argument 0
   only_stateless: True
   options:
@@ -152,6 +171,11 @@ static void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, TH
 [[
   name: normal_
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  types:
+    - float
+    - double
+  processors:
+    - cpu
   cname: normal
   return: self
   arguments:
@@ -168,6 +192,11 @@ static void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, TH
 [[
   name: cauchy_
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  types:
+    - float
+    - double
+  processors:
+    - cpu
   cname: cauchy
   return: self
   arguments:
@@ -186,6 +215,11 @@ static void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, TH
   cname: logNormal
   python_name: log_normal_
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  types:
+    - float
+    - double
+  processors:
+    - cpu
   return: self
   arguments:
     - THTensor* self
@@ -201,6 +235,11 @@ static void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, TH
 [[
   name: exponential_
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  types:
+    - float
+    - double
+  processors:
+    - cpu
   cname: exponential
   return: self
   arguments:
@@ -215,6 +254,11 @@ static void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, TH
 [[
   name: rand
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  types:
+    - float
+    - double
+  processors:
+    - cpu
   only_stateless: True
   return: argument 0
   arguments:
@@ -230,6 +274,11 @@ static void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, TH
 [[
   name: randn
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  types:
+    - float
+    - double
+  processors:
+    - cpu
   only_stateless: True
   return: argument 0
   arguments:
@@ -245,6 +294,10 @@ static void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, TH
 [[
   name: multinomial
   defined_if: CUDA_FLOAT || CUDA_DOUBLE || CUDA_HALF
+  types:
+    - floating_point
+  processors:
+    - cuda
   with_stateless: True
   return: argument 0
   arguments:
@@ -259,6 +312,10 @@ static void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, TH
 [[
   name: uniform_
   defined_if: CUDA_FLOAT || CUDA_DOUBLE || CUDA_HALF
+  types:
+    - floating_point
+  processors:
+    - cuda
   cname: uniform
   return: self
   arguments:
@@ -297,6 +354,10 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
 [[
   name: normal
   defined_if: CUDA_FLOAT || CUDA_DOUBLE || CUDA_HALF
+  types:
+    - floating_point
+  processors:
+    - cuda
   return: argument 0
   only_stateless: True
   options:
@@ -333,6 +394,10 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
 [[
   name: normal_
   defined_if: CUDA_FLOAT || CUDA_DOUBLE || CUDA_HALF
+  types:
+    - floating_point
+  processors:
+    - cuda
   cname: normal
   return: self
   arguments:
@@ -346,6 +411,10 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
 [[
   name: cauchy_
   defined_if: CUDA_FLOAT || CUDA_DOUBLE || CUDA_HALF
+  types:
+    - floating_point
+  processors:
+    - cuda
   cname: cauchy
   return: self
   arguments:
@@ -361,6 +430,10 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
   cname: logNormal
   python_name: log_normal_
   defined_if: CUDA_FLOAT || CUDA_DOUBLE || CUDA_HALF
+  types:
+    - floating_point
+  processors:
+    - cuda
   return: self
   arguments:
     - THTensor* self
@@ -373,6 +446,10 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
 [[
   name: exponential_
   defined_if: CUDA_FLOAT || CUDA_DOUBLE || CUDA_HALF
+  types:
+    - floating_point
+  processors:
+    - cuda
   cname: exponential
   return: self
   arguments:
@@ -384,6 +461,10 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
 [[
   name: rand
   defined_if: CUDA_FLOAT || CUDA_DOUBLE || CUDA_HALF
+  types:
+    - floating_point
+  processors:
+    - cuda
   only_stateless: True
   return: argument 0
   arguments:
@@ -396,6 +477,10 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
 [[
   name: randn
   defined_if: CUDA_FLOAT || CUDA_DOUBLE || CUDA_HALF
+  types:
+    - floating_point
+  processors:
+    - cuda
   only_stateless: True
   return: argument 0
   arguments:
@@ -408,6 +493,8 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
 [[
   name: geometric_
   defined_if: "!IS_CUDA && !IS_DISTRIBUTED"
+  processors:
+    - cpu
   cname: geometric
   return: self
   arguments:
@@ -424,6 +511,11 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
 [[
   name: bernoulli
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  types:
+    - float
+    - double
+  processors:
+    - cpu
   return: argument 0
   with_stateless: True
   before_call:
@@ -444,6 +536,8 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
 [[
   name: bernoulli_
   defined_if: "!IS_CUDA && !IS_DISTRIBUTED"
+  processors:
+    - cpu
   return: self
   options:
     - cname: bernoulli
@@ -474,6 +568,10 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
   name: geometric_
   cname: geometric
   defined_if: CUDA_FLOAT || CUDA_DOUBLE || CUDA_HALF
+  types:
+    - floating_point
+  processors:
+    - cuda
   return: self
   arguments:
     - THTensor* self
@@ -486,6 +584,11 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
 [[
   name: bernoulli
   defined_if: CUDA_FLOAT || CUDA_DOUBLE
+  types:
+    - float
+    - double
+  processors:
+    - cuda
   return: argument 0
   with_stateless: True
   cname: BERNOULLI_TENSOR
@@ -503,6 +606,10 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
 [[
   name: bernoulli_
   defined_if: CUDA_FLOAT || CUDA_DOUBLE || CUDA_HALF
+  types:
+    - floating_point
+  processors:
+    - cuda
   return: self
   options:
     - cname: bernoulli
