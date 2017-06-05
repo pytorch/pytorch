@@ -1,10 +1,21 @@
 ## @package workspace
 # Module caffe2.python.workspace
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+from __future__ import unicode_literals
 import contextlib
 from google.protobuf.message import Message
 from multiprocessing import Process
 import os
-from past.builtins import basestring
+try:
+    from past.builtins import basestring
+except ImportError:
+    print("You don't have the past package installed. ",
+          "This is necessary for python 2/3 compatibility. ",
+          "To do this, do 'pip install future'.")
+    import sys
+    sys.exit(1)
 import shutil
 import socket
 import tempfile

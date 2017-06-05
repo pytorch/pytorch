@@ -24,7 +24,14 @@ from caffe2.python import core
 from caffe2.python import workspace
 from caffe2.python.core import BlobReference
 from collections import OrderedDict, namedtuple
-from past.builtins import basestring
+try:
+    from past.builtins import basestring
+except ImportError:
+    print("You don't have the past package installed. ",
+          "This is necessary for python 2/3 compatibility. ",
+          "To do this, do 'pip install future'.")
+    import sys
+    sys.exit(1)
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
