@@ -1805,12 +1805,18 @@ class Net(object):
             additional_methods))
 
     def Python(
-        self, f, grad_f=None, python_func_type=None, pass_workspace=False,
+        self,
+        f,
+        grad_f=None,
+        python_func_type=None,
+        pass_workspace=False,
+        grad_output_indices=None,
+        grad_input_indices=None
     ):
         """
         Registers and returns a python operator.
 
-        `f` and `f_grad` can be one of the following:
+        `f` and `grad_f` can be one of the following:
             - a function with signature (inputs, outputs), where inputs and
               outputs are a list of CPUTensor objects. This function will be
               called from C++ everytime the operator is executed.
@@ -1833,6 +1839,15 @@ class Net(object):
         (inputs, outputs, workspace) where `workspace` is the workspace the op
         is going to run on. This is potentially dangerous (as the op can
         manipulate the workspace directly), use on your own risk.
+
+        If a gradient function is specified (`grad_f`), by default its inputs
+        will be: (1) all inputs to `f`, (2) followed by all outputs of `f`, (3)
+        and then all gradient outputs of `f`. The outputs of `grad_f` will be
+        (by default) all gradient inputs to `f`. If a subset of the gradient
+        outputs or gradient inputs is desired instead, then the subsets can be
+        specified by providing `grad_output_indices` and/or `grad_input_indices`
+        which identify the indices of `f`'s inputs and outputs which have
+        gradients.
         """
         assert(IsOperator('Python'))
         if isinstance(f, tuple) or isinstance(grad_f, tuple):
@@ -1847,8 +1862,16 @@ class Net(object):
             f, grad_f, python_func_type, pass_workspace=pass_workspace,
             name='%s:%d' % (str(self), len(self.Proto().op))
         )
+        grad_output_indices = grad_output_indices or []
+        grad_input_indices = grad_input_indices or []
         return lambda *args, **kwargs: self._CreateAndAddToSelf(
-            'Python', token=token, *args, **kwargs)
+            'Python',
+            token=token,
+            grad_output_indices=grad_output_indices,
+            grad_input_indices=grad_input_indices,
+            *args,
+            **kwargs
+        )
 
 
 def get_net_name(netlike):
