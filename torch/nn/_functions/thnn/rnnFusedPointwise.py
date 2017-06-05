@@ -10,39 +10,48 @@ class GRUFused(Function):
     def forward(self, input_gate, hidden_gate, hx, ibias=None, hbias=None):
         if self.backend is None:
             self.backend = type2backend[type(input_gate)]
+
         hy = input_gate.new()
+        storage = input_gate.new().resize_(hx.numel() * 5)
+
+        self.hasBias = False
         if ibias is not None:
+            self.hasBias=True
             if ibias.dim() == 1:
-                ibias.unsqueeze_(0)
+                ibias = ibias.view(1, -1)
             if hbias.dim() == 1:
-                hbias.unsqueeze_(0)
-        storage = input_gate.new().resize_(hx.numel()*5)
+                hbias = hbias.view(1, -1)
+
         self.backend.GRUFused_updateOutput(
             self.backend.library_state,
             input_gate, hidden_gate, ibias, hbias, hx, hy, storage)
+
         self.buffer = storage
         self.igate_size = input_gate.size()
         self.hgate_size = hidden_gate.size()
-        self.save_for_backward(ibias,)
+
         return hy
 
     def backward(self, gradOutput):
         if self.backend is None:
             self.backend = type2backend[type(grad_output)]
-        gradInput = gradOutput.new()
-        ibias, = self.saved_tensors
+
+        gradInputHx = gradOutput.new()
+        gradInInput = gradOutput.new().resize_(*self.igate_size)
+        gradInHidden = gradOutput.new().resize_(*self.hgate_size)
+
         storage = self.buffer
-        igc = gradInput.new().resize_(*self.igate_size)
-        hgc = gradInput.new().resize_(*self.hgate_size)
+
         self.backend.GRUFused_updateGradInput(
             self.backend.library_state,
-            igc, hgc, gradOutput, gradInput, storage)
-        if ibias is not None:
-            gb1 = igc.sum(0).squeeze()
-            gb2 = hgc.sum(0).squeeze()
-            return igc, hgc, gradInput, gb1, gb2
+            gradInInput, gradInHidden, gradOutput, gradInputHx, storage)
+
+        if self.hasBias:
+            gb1 = gradInInput.sum(0).squeeze()
+            gb2 = gradInHidden.sum(0).squeeze()
+            return gradInInput, gradInHidden, gradInputHx, gb1, gb2
         else:
-            return igc, hgc, gradInput
+            return gradInInput, gradInHidden, gradInputHx
 
 
 class LSTMFused(Function):
@@ -54,37 +63,45 @@ class LSTMFused(Function):
             self.backend = type2backend[type(input_gate)]
         hy = input_gate.new()
         cy = input_gate.new()
+
+        self.hasBias = False
         if ibias is not None:
+            self.hasBias = True
             if ibias.dim() == 1:
-                ibias.unsqueeze_(0)
+                ibias = ibias.view(1, -1)
             if hbias.dim() == 1:
-                hbias.unsqueeze_(0)
+                hbias = hbias.view(1, -1)
+
+        #input_gate gets overwritten with some intermediate values to use
+        #in backwards
         self.backend.LSTMFused_updateOutput(
             self.backend.library_state,
             input_gate, hidden_gate,
             ibias, hbias,
             cx, hy, cy)
+
         self.hgate_size = hidden_gate.size()
-        self.save_for_backward(input_gate, cx, cy, ibias)
+        self.save_for_backward(input_gate, cx, cy)
+
         return hy, cy
 
     def backward(self, *gradOutput):
         if self.backend is None:
             self.backend = type2backend[type(gradOutput[0])]
 
-        gradInput = gradOutput[0].new()
-        gradInputCell = gradOutput[0].new()
-        saved_tens,  cx, cy, bias = self.saved_tensors
-        gate_gradin = gradInput.new().resize_(*self.hgate_size)
+        gradInputCx = gradOutput[0].new()
+        gradInGates = gradOutput[0].new().resize_(*self.hgate_size)
+
+        saved_tens, cx, cy = self.saved_tensors
         self.backend.LSTMFused_updateGradInput(
             self.backend.library_state,
-            saved_tens, gate_gradin, cx, cy,
-            gradOutput[0], gradOutput[1], gradInput)
+            saved_tens, gradInGates, cx, cy,
+            gradOutput[0], gradOutput[1], gradInputCx)
 
-        if bias is not None:
-            gb1 = gate_gradin.sum(0).squeeze()
-            gb2 = gate_gradin.sum(0).squeeze()
+        if self.hasBias:
+            gb1 = gradInGates.sum(0).squeeze()
+            gb2 = gradInGates.sum(0).squeeze()
 
-            return gate_gradin, gate_gradin, gradInput, gb1, gb2
+            return gradInGates, gradInGates, gradInputCx, gb1, gb2
         else:
-            return gate_gradin, gate_gradin, gradInput
+            return gradInGates, gradInGates, gradInputCx
