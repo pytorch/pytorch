@@ -547,6 +547,7 @@ class TestSparse(TestCase):
         self._test_sparse_mask_shape([50, 30, 20], [2])
         self._test_sparse_mask_shape([5, 5, 5, 5, 5, 5], [2])
 
+
 class TestUncoalescedSparse(TestSparse):
     def setUp(self):
         super(TestUncoalescedSparse, self).setUp()
@@ -561,7 +562,6 @@ class TestCudaSparse(TestSparse):
         self.IndexTensor = torch.cuda.LongTensor
         self.ValueTensor = torch.cuda.DoubleTensor
         self.SparseTensor = torch.cuda.sparse.DoubleTensor
-
 
     def test_spbqrfactsolve(self):
         nBatch, nx = 3, 5
