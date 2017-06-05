@@ -2,7 +2,7 @@
 
 #include <$header>
 
-#include "Generator.h"
+#include "TensorLib/Generator.h"
 
 namespace tlib {
 

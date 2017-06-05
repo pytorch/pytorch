@@ -2,8 +2,8 @@
 
 #include <$th_header>
 
-#include "Tensor.h"
-#include "Context.h"
+#include "TensorLib/Tensor.h"
+#include "TensorLib/Context.h"
 
 namespace tlib {
 

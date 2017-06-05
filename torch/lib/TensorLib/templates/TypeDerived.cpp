@@ -1,5 +1,5 @@
-#include "${Type}.h"
-#include "${Storage}.h"
+#include "TensorLib/${Type}.h"
+#include "TensorLib/${Storage}.h"
 
 #include <iostream>
 

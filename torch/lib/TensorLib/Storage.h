@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Scalar.h"
-#include "Type.h"
+#include "TensorLib/Scalar.h"
+#include "TensorLib/Type.h"
 
 namespace tlib {
 

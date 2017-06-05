@@ -56,6 +56,7 @@ top_env = {
 }
 
 def write(filename,s):
+    filename = "TensorLib/"+filename
     if options.print_dependencies:
         sys.stdout.write(filename+";")
         return
@@ -113,7 +114,7 @@ def generate_storage_type_and_tensor(processor, scalar_type):
     type_register = ('context->type_registry[static_cast<int>(Processor::{})][static_cast<int>(ScalarType::{})].reset(new {}(context));'
         .format(processor,scalar_name,env['Type']))
     top_env['type_registrations'].append(type_register)
-    top_env['type_headers'].append('#include "{}.h"'.format(env['Type']))
+    top_env['type_headers'].append('#include "TensorLib/{}.h"'.format(env['Type']))
 
 for fname,env in generators.items():
     write(fname,GENERATOR_DERIVED.substitute(env))

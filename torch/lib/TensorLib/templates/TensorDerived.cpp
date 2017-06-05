@@ -1,5 +1,5 @@
-#include "${Tensor}.h"
-#include "HalfConvert.h"
+#include "TensorLib/${Tensor}.h"
+#include "TensorLib/HalfConvert.h"
 
 //sketch:
 

@@ -1,9 +1,9 @@
 #pragma once
 
-#include "CPUGenerator.h"
-#include "CUDAGenerator.h"
 #include <memory>
-#include "Type.h"
+#include "TensorLib/CPUGenerator.h"
+#include "TensorLib/CUDAGenerator.h"
+#include "TensorLib/Type.h"
 
 namespace tlib {
 

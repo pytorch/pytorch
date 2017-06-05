@@ -1,4 +1,4 @@
-#include "CPUGenerator.h"
+#include "TensorLib/CPUGenerator.h"
 
 #define const_generator_cast(generator) \
   dynamic_cast<const CPUGenerator&>(generator)

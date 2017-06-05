@@ -1,5 +1,5 @@
-#include "${Storage}.h"
-#include "HalfConvert.h"
+#include "TensorLib/${Storage}.h"
+#include "TensorLib/HalfConvert.h"
 
 namespace tlib {
 
