@@ -347,8 +347,10 @@ TYPED_TEST(TensorCPUTest, NoLongerSharesAfterResize) {
 }
 
 TYPED_TEST(TensorCPUTest, KeepOnShrink) {
+  // Set flags (defaults)
   FLAGS_caffe2_keep_on_shrink = true;
   FLAGS_caffe2_max_keep_on_shrink_memory = LLONG_MAX;
+
   vector<int> dims{2, 3, 5};
   TensorCPU tensor(dims);
   TypeParam* ptr = tensor.mutable_data<TypeParam>();
@@ -373,9 +375,10 @@ TYPED_TEST(TensorCPUTest, KeepOnShrink) {
 }
 
 TYPED_TEST(TensorCPUTest, MaxKeepOnShrink) {
+  // Set flags
   FLAGS_caffe2_keep_on_shrink = true;
-  // Remember that this tests for int, float and char
-  FLAGS_caffe2_max_keep_on_shrink_memory = 40;
+  FLAGS_caffe2_max_keep_on_shrink_memory = 8 * 4 * sizeof(TypeParam);
+
   vector<int> dims{1, 8, 8};
   TensorCPU tensor(dims);
   TypeParam* ptr = tensor.mutable_data<TypeParam>();
@@ -389,7 +392,12 @@ TYPED_TEST(TensorCPUTest, MaxKeepOnShrink) {
   tensor.Resize(1, 1, 8);
   TypeParam* new_ptr = tensor.mutable_data<TypeParam>();
   EXPECT_TRUE(new_ptr != nullptr);
-  EXPECT_NE(ptr, new_ptr);
+
+  // This check can fail when malloc() returns the same recently freed address
+  //EXPECT_NE(ptr, new_ptr);
+
+  // Restore default flags
+  FLAGS_caffe2_max_keep_on_shrink_memory = LLONG_MAX;
 }
 
 TYPED_TEST(TensorCPUDeathTest, CannotAccessRawDataWhenEmpty) {
