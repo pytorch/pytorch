@@ -26,6 +26,18 @@ FUNCTION(EXCLUDE_DIR list_name dir_name)
   SET(${list_name} ${local_list} PARENT_SCOPE)
 ENDFUNCTION()
 
+function(filter_list output input)
+    unset(result)
+    foreach(filename ${${input}})
+        foreach(pattern ${ARGN})
+            if("${filename}" MATCHES "${pattern}")
+                list(APPEND result "${filename}")
+            endif()
+        endforeach()
+    endforeach()
+    set(${output} ${result} PARENT_SCOPE)
+endfunction()
+
 IF(NOT Torch_FOUND)
   FIND_PACKAGE(Torch REQUIRED)
 ENDIF()
@@ -66,10 +78,8 @@ IF(NOT TENSOR_LIB_INSTALL_BIN_DIR OR NOT TENSOR_LIB_INSTALL_LIB_DIR OR NOT TENSO
   SET(TENSOR_LIB_INSTALL_INCLUDE_DIR "include" CACHE PATH "TENSOR_LIB install include subdirectory")
 ENDIF()
 
-FILE(GLOB_RECURSE base_h RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "*.h" "*.hpp")
-FILE(GLOB_RECURSE base_cpp "*.cpp")
-
-EXCLUDE_DIR(base_cpp ".*/templates/.*$")
+FILE(GLOB base_h RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "*.h")
+FILE(GLOB base_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "*.cpp")
 
 EXECUTE_PROCESS(
     COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/gen.py -s ${CMAKE_CURRENT_SOURCE_DIR} --print-dependencies
@@ -82,14 +92,17 @@ endif()
 
 FILE(GLOB_RECURSE all_templates "templates/*")
 
+FILE(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/TensorLib)
+
 ADD_CUSTOM_COMMAND(OUTPUT ${generated_cpp}
 COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/gen.py -s ${CMAKE_CURRENT_SOURCE_DIR}
 DEPENDS gen.py ${all_templates})
 
 SET(all_cpp ${base_cpp} ${generated_cpp})
-SET(all_h ${base_h})
+filter_list(generated_h generated_cpp "\\.h$")
 
-INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR})
+
+INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR}/..)
 # so the build can find the generated header files
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_BINARY_DIR})
 ADD_LIBRARY(TensorLib SHARED ${all_cpp})
@@ -115,7 +128,11 @@ INSTALL(TARGETS TensorLib
   LIBRARY DESTINATION "${TENSOR_LIB_INSTALL_LIB_DIR}"
   ARCHIVE DESTINATION "${TENSOR_LIB_INSTALL_LIB_DIR}")
 
-FOREACH(HEADER ${all_h})
-  STRING(REGEX MATCH "(.*)[/\\]" DIR ${HEADER})
-  INSTALL(FILES ${HEADER} DESTINATION ${TENSOR_LIB_INSTALL_INCLUDE_DIR}/TensorLib/${DIR})
+
+FOREACH(HEADER ${base_h})
+  INSTALL(FILES ${HEADER} DESTINATION ${TENSOR_LIB_INSTALL_INCLUDE_DIR}/TensorLib)
+ENDFOREACH()
+FOREACH(HEADER ${generated_h})
+  INSTALL(FILES ${CMAKE_CURRENT_BINARY_DIR}/${HEADER}
+  DESTINATION ${TENSOR_LIB_INSTALL_INCLUDE_DIR}/TensorLib)
 ENDFOREACH()
