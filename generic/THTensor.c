@@ -285,9 +285,9 @@ void THTensor_(resize5d)(THTensor *self, long size0, long size1, long size2, lon
   THTensor_(resizeNd)(self, 5, size, NULL);
 }
 
-THTensor* THTensor_(newExpand)(THTensor *tensor, THLongStorage *sizes, int raiseErrors) {
+THTensor* THTensor_(newExpand)(THTensor *tensor, THLongStorage *sizes) {
   THTensor *result = THTensor_(new)();
-  THTensor_(expand)(result, tensor, sizes, raiseErrors);
+  THTensor_(expand)(result, tensor, sizes, 1);
   return result;
 }
 
