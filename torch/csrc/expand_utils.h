@@ -19,13 +19,13 @@ int expand3(LIBRARY_STATE_TYPE TensorType *r1, TensorType *r2, TensorType *r3,
             TensorType *e1, TensorType *e2, TensorType *e3, int raiseErrors);
 
 template <typename ExpandType, typename TensorType>
-void check_fallback(ExpandType *to_expand, TensorType *tensor,
-                    char *to_expand_name, char *tensor_name, bool fallback,
-                    ptrdiff_t to_expand_nElem, ptrdiff_t tensor_nElem, int to_expand_err) {
+void check_backincompat_expand_warn(ExpandType *to_expand, TensorType *tensor,
+                                    char *to_expand_name, char *tensor_name, bool fallback,
+                                    ptrdiff_t to_expand_nElem, ptrdiff_t tensor_nElem, int to_expand_err) {
   if (fallback && getBackCompatBroadcastWarn()) {
     bool same_shape = THSize_isSameSizeAs(tensor->size, tensor->nDimension,
         to_expand->size, to_expand->nDimension);
-    if (!same_shape && to_expand_err == 0 && (tensor_nElem == to_expand_nElem) && fallback) {
+    if (!same_shape && to_expand_err == 0 && (tensor_nElem == to_expand_nElem)) {
       std::ostringstream warn;
       warn << tensor_name << " and " << to_expand_name << " do not have the same shape, but are "
            << "broadcastable, and have the same number of elements.  Changing behavior in a backwards incompatible "
@@ -65,8 +65,8 @@ int expand_inplace1(LIBRARY_STATE_TYPE ExpandType *r, ExpandType *to_expand, Ten
   int ret = expand_inplace(LIBRARY_STATE r, to_expand, tensor, to_expand_name, tensor_name, fallback,
                            tensor_size, to_expand_nElem, tensor_nElem, to_expand_raise);
 
-  check_fallback<ExpandType, TensorType>(to_expand, tensor, to_expand_name, tensor_name, fallback,
-                                         to_expand_nElem, tensor_nElem, ret);
+  check_backincompat_expand_warn<ExpandType, TensorType>(to_expand, tensor, to_expand_name, tensor_name, fallback,
+                                                         to_expand_nElem, tensor_nElem, ret);
 
   return ret;
 }
@@ -92,10 +92,10 @@ int expand_inplace2(LIBRARY_STATE_TYPE TensorType *r1, TensorType *r2,
                          tensor_size, to_expand2_nElem, tensor_nElem, to_expand1_raise || to_expand2_raise);
   }
 
-  check_fallback<TensorType, TensorType>(to_expand1, tensor, to_expand1_name, tensor_name, fallback,
-                                         to_expand1_nElem, tensor_nElem, ret);
-  check_fallback<TensorType, TensorType>(to_expand2, tensor, to_expand2_name, tensor_name, fallback,
-                                         to_expand2_nElem, tensor_nElem, ret2);
+  check_backincompat_expand_warn<TensorType, TensorType>(to_expand1, tensor, to_expand1_name, tensor_name, fallback,
+                                                         to_expand1_nElem, tensor_nElem, ret);
+  check_backincompat_expand_warn<TensorType, TensorType>(to_expand2, tensor, to_expand2_name, tensor_name, fallback,
+                                                         to_expand2_nElem, tensor_nElem, ret2);
 
   return ret == 0 && ret2 == 0 ? 0 : -1;
 }
@@ -117,8 +117,8 @@ int expand_outplace2(LIBRARY_STATE_TYPE TensorType *r1, TensorType *r2,
         "elements.  Falling back to deprecated pointwise behavior.";
     PyErr_WarnEx(PyExc_UserWarning, warn.str().c_str(), 1);
   }
-  check_fallback<TensorType, TensorType>(to_expand1, to_expand2, to_expand1_name, to_expand2_name, fallback,
-                                         to_expand1_nElem, to_expand2_nElem, ret);
+  check_backincompat_expand_warn<TensorType, TensorType>(to_expand1, to_expand2, to_expand1_name, to_expand2_name,
+                                                         fallback, to_expand1_nElem, to_expand2_nElem, ret);
   return ret;
 }
 
@@ -145,10 +145,10 @@ int expand_outplace3(LIBRARY_STATE_TYPE TensorType *r1, TensorType *r2, TensorTy
     PyErr_WarnEx(PyExc_UserWarning, warn.str().c_str(), 1);
   }
 
-  check_fallback<TensorType, TensorType>(to_expand1, to_expand2, to_expand1_name, to_expand2_name, fallback,
-                                         to_expand1_nElem, to_expand2_nElem, ret);
-  check_fallback<TensorType, TensorType>(to_expand1, to_expand3, to_expand1_name, to_expand3_name, fallback,
-                                         to_expand1_nElem, to_expand3_nElem, ret);
+  check_backincompat_expand_warn<TensorType, TensorType>(to_expand1, to_expand2, to_expand1_name, to_expand2_name,
+                                                         fallback, to_expand1_nElem, to_expand2_nElem, ret);
+  check_backincompat_expand_warn<TensorType, TensorType>(to_expand1, to_expand3, to_expand1_name, to_expand3_name,
+                                                         fallback, to_expand1_nElem, to_expand3_nElem, ret);
   return ret;
 }
 
