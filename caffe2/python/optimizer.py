@@ -6,6 +6,8 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from collections import namedtuple
+from past.builtins import basestring
+
 from caffe2.python import core, scope
 from caffe2.python.modeling import parameter_info
 from caffe2.proto import caffe2_pb2
@@ -32,7 +34,7 @@ class Optimizer(object):
             assert isinstance(param, parameter_info.ParameterInfo)
             assert param.grad is not None
         else:
-            if isinstance(param, str):
+            if isinstance(param, basestring):
                 param = core.BlobReference(param)
             param = parameter_info.ParameterInfo(
                 param_id=None, param=param, grad=grad)
