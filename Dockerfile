@@ -30,7 +30,7 @@ COPY . .
 
 RUN TORCH_CUDA_ARCH_LIST="3.5 5.2 6.0 6.1+PTX" TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
     CMAKE_PREFIX_PATH="$(dirname $(which conda))/../" \
-    python setup.py install
+    pip install -v .
 
 WORKDIR /workspace
 RUN chmod -R a+w /workspace
