@@ -21,6 +21,11 @@ class GRUFused(Function):
             self.backend.library_state,
             input_gate, hidden_gate, ibias, hbias, hx, hy)
         self.save_for_backward(input_gate, hidden_gate, ibias)
+        if ibias is not None:
+            if ibias.dim() == 2:
+                ibias.squeeze_(0)
+            if hbias.dim() == 2:
+                hbias.squeeze_(0)
         return hy
 
     def backward(self, gradOutput):
@@ -63,6 +68,11 @@ class LSTMFused(Function):
             ibias, hbias,
             cx, hy, cy)
         self.save_for_backward(input_gate, hidden_gate, cx, cy, ibias)
+        if ibias is not None:
+            if ibias.dim() == 2:
+                ibias.squeeze_(0)
+            if hbias.dim() == 2:
+                hbias.squeeze_(0)
         return hy, cy
 
     def backward(self, *gradOutput):
