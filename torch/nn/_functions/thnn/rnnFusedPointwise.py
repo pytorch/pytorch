@@ -72,7 +72,7 @@ class LSTMFused(Function):
             if hbias.dim() == 1:
                 hbias = hbias.view(1, -1)
 
-        #input_gate gets overwritten with some intermediate values to use in backwards
+        # input_gate gets overwritten with some intermediate values to use in backwards
         self.backend.LSTMFused_updateOutput(
             self.backend.library_state,
             input_gate, hidden_gate,
