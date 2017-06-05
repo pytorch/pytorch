@@ -2,8 +2,8 @@
 
 #include <$th_header>
 
-#include "Storage.h"
-#include "Context.h"
+#include "TensorLib/Storage.h"
+#include "TensorLib/Context.h"
 
 namespace tlib {
 

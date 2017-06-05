@@ -1,5 +1,5 @@
-#include "Tensor.h"
-#include "Type.h"
+#include "TensorLib/Tensor.h"
+#include "TensorLib/Type.h"
 
 namespace tlib {
 
