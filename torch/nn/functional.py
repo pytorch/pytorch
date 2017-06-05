@@ -426,7 +426,7 @@ def elu(input, alpha=1., inplace=False):
 
 
 def leaky_relu(input, negative_slope=1e-2, inplace=False):
-    return _functions.thnn.auto.LeakyReLU(negative_slope, inplace)(input)
+    return _functions.thnn.LeakyReLU.apply(input, negative_slope, inplace)
 
 
 def prelu(input, weight):

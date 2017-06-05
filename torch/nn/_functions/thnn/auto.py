@@ -223,6 +223,7 @@ def _generate_function_classes(scope_dict):
         'PReLU',
         'RReLU',
         'Threshold',
+        'LeakyReLU',
         'GRUFused',
         'LSTMFused',
         'unfolded',
