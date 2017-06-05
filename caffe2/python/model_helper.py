@@ -449,7 +449,7 @@ def ExtractPredictorNet(
     output_blobs,
     device=None,
     renames=None,
-    disabled_inputs=None
+    disabled_inputs=None,
 ):
     '''
     Takes a model net for training and returns a net which can be
@@ -473,6 +473,9 @@ def ExtractPredictorNet(
     output_blobs = {str(b) for b in output_blobs}
     external_inputs = set(input_blobs)
     external_outputs = set(output_blobs)
+
+    if renames is None:
+        renames = {}
 
     if disabled_inputs is not None:
         known_blobs = known_blobs - set(disabled_inputs)
@@ -535,9 +538,6 @@ def ExtractPredictorNet(
             )
 
     def rename_list(proto_list):
-        if renames is None:
-            return
-
         # proto lists don't support assignments
         new_list = proto_list[:]
         for j, b in enumerate(new_list):
@@ -555,8 +555,17 @@ def ExtractPredictorNet(
     rename_list(predict_proto.external_input)
     rename_list(predict_proto.external_output)
 
+    renamed_input_blobs = []
+    for b in input_blobs:
+        if b in renames:
+            renamed_input_blobs.append(renames[b])
+        else:
+            renamed_input_blobs.append(b)
+
     for op in predict_proto.op:
         rename_list(op.input)
         rename_list(op.output)
 
-    return predict_net
+    return predict_net, list(
+        set(predict_proto.external_input) - set(renamed_input_blobs)
+    )
