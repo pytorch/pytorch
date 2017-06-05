@@ -4,7 +4,7 @@ from torch._C import _set_backcompat_keepdim_warn
 from torch._C import _get_backcompat_keepdim_warn
 
 
-class Warning:
+class Warning(object):
     def __init__(self):
         pass
 

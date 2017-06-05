@@ -67,7 +67,7 @@ def set_printoptions(
 
 def _number_format(tensor, min_sz=-1):
     min_sz = max(min_sz, 2)
-    tensor = torch.DoubleTensor(tensor.size()).copy_(tensor).abs_().resize_(tensor.nelement())
+    tensor = torch.DoubleTensor(tensor.size()).copy_(tensor).abs_().view(tensor.nelement())
 
     pos_inf_mask = tensor.eq(float('inf'))
     neg_inf_mask = tensor.eq(float('-inf'))
