@@ -31,6 +31,7 @@ _known_working_ops = [
     "CopyCPUToGPU",
     "DequeueBlobs",
     "EnsureCPUOutput",
+    "ExpandDims",
     "Flatten",
     "FlattenToVec",
     "LabelCrossEntropy",
