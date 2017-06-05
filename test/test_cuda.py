@@ -840,6 +840,10 @@ class TestCuda(TestCase):
         self.assertEqual(gpu_tensor1[0], 1)
         self.assertEqual(gpu_tensor0[0], 2)
 
+    @staticmethod
+    def _select_broadcastable_dims(dims_full=None):
+        return TestTorch._select_broadcastable_dims(dims_full)
+
     def test_broadcast(self):
         TestTorch._test_broadcast(self, lambda t: t.cuda())
 
