@@ -3,8 +3,10 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python.core import DataType, ScopedBlobReference
+from caffe2.python.core import DataType, BlobReference, ScopedBlobReference
 from caffe2.python.modeling.parameter_info import ParameterInfo
+
+import six
 
 
 class Initializer(object):
@@ -43,8 +45,13 @@ class ExternalInitializer(object):
     '''
 
     def create_param(self, param_name, init_net, shape):
+        if isinstance(param_name, BlobReference):
+            param = BlobReference(str(param_name), init_net)
+        elif isinstance(param_name, six.string_types):
+            param = ScopedBlobReference(param_name, init_net)
+        else:
+            raise "Unsupported type for param_name"
         # TODO(amalevich): Add operator that will check param in the workspace
-        param = ScopedBlobReference(param_name, init_net)
         return ParameterInfo(
             param_id=None,
             param=param,

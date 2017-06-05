@@ -7,8 +7,13 @@ from __future__ import unicode_literals
 
 from caffe2.python import core, scope, workspace
 from caffe2.python.modeling import parameter_info
-import logging
+from caffe2.python.modeling.parameter_sharing import (
+    parameter_sharing_context,
+)
 
+
+import logging
+import six
 
 # _known_working_ops are operators that do not need special care.
 _known_working_ops = [
@@ -137,12 +142,62 @@ class ModelHelper(object):
             info.grad = self.param_to_grad.get(info.name)
 
     def create_param(self, param_name, shape, initializer, tags=None):
+        """
+        Creates parameter with a given name and initializer.
+
+        If param_name is instance of BlobRefernce - then this blob will be used
+        to store parameter (no any logic will affect it's location).
+
+        If param_name is instance of a string type, then the final blob will
+        be created in the CurrentNameScope with the respect of all parameter
+        sharing logic, i.e. 'resolved_name_scope/param_name'.
+
+        Parameter sharing logic is going to override CurrentNameScope accoring
+        to the rules that are specified through ParameterSharing contexts,
+        all ParameterSharing contexts are applied recursively until there are no
+        extra overrides present, where on each step the best match will be
+        applied first.
+
+        The following examples should clarify the way ParameterSharing logic
+        works:
+
+        As an example if this function is called with parameter 'w':
+        a. Call from some scope 'global_scope' with no Parameter sharing:
+          'global_scope/w'
+        b. Call from scope 'scope_b', with override {'scope_b': 'scope_a'}:
+          'scope_a/w'
+        c. Call from scope 'scope_a', with override {'scope_a': ''}:
+          'scope_a/w'
+        d. Call from scope 'scope_b/shared', with overrides
+          {'scope_b/shared': 'scope_b', 'scope_b': 'scope_a'}:
+          'scope_a/w'
+        d. Call from scope 'scope_b/unshared', with overrides
+          {'scope_b/shared': 'scope_b', 'scope_b': 'scope_a'}:
+          'scope_a/unshared/w'
+        """
+        # ParameterSharing works only for case when param_name is instance of
+        # a string type. If param_name is a BlobReference - no attempt for
+        # ParameterSharing will be applied.
+        if isinstance(param_name, core.BlobReference):
+            param_name = str(param_name)
+        elif isinstance(param_name, six.string_types):
+            # Parameter name will be equal to current Namescope that got
+            # resolved with the respect of parameter sharing of the scopes.
+            param_name = parameter_sharing_context.get_parameter_name(
+                param_name)
+        else:
+            raise "Unsupported type for param_name"
+
+        if param_name in self._parameters_info:
+            assert self._parameters_info[param_name].shape == shape
+            return self._parameters_info[param_name].blob
+
         param_info = initializer.create_param(
-            param_name=param_name,
+            param_name=core.BlobReference(param_name),
             init_net=self.param_init_net,
             shape=shape,
         )
-        self._parameters_info[param_info.blob] = param_info
+        self._parameters_info[param_name] = param_info
         # Add param to legacy structs as well, so all other functions for
         # parameters are still working.
         self.AddParameter(param_info.blob, tags)
