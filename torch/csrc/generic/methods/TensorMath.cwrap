@@ -993,7 +993,7 @@
   processors:
     - cpu
   type_processor_pairs:
-    - float: cuda
+    float: cuda
   with_stateless: True
   cname: atan2
   return: argument 0
@@ -1014,7 +1014,7 @@
   processors:
     - cpu
   type_processor_pairs:
-    - float: cuda
+    float: cuda
   cname: atan2
   return: argument 0
   arguments:
@@ -1632,7 +1632,7 @@
     - cpu
     - cuda
   type_processor_pairs:
-    - integral: cpu
+    integral: cpu
   with_stateless: True
   return: accreal
   arguments:
