@@ -10,6 +10,8 @@
 #pragma once
 
 #include <algorithm>
+#include <cassert>
+
 #ifdef __AVX2__
 #include <immintrin.h>
 #endif
@@ -83,17 +85,18 @@ void min(T* x, const T* y, size_t n) {
     x[i] = std::min(x[i], y[i]);
   }
 }
+
 #endif
 
 #ifdef __AVX2__
 #define is_aligned(POINTER, BYTE_COUNT) \
   (((uintptr_t)(const void *)(POINTER)) % (BYTE_COUNT) == 0)
 
-// assumes x and y are either both aligned to 32 bytes or unaligned by the same
+// Assumes x and y are either both aligned to 32 bytes or unaligned by the same
 // offset, as would happen when reducing at an offset within an aligned buffer
 template <>
 inline void sum<float16>(float16* x, const float16* y, size_t n) {
-  // handle unaligned data at the beginning of the buffer
+  // Handle unaligned data at the beginning of the buffer
   while (!is_aligned(x, 32)) {
     *x += *y;
     x++;
@@ -108,17 +111,17 @@ inline void sum<float16>(float16* x, const float16* y, size_t n) {
     __m128i vc16 = _mm256_cvtps_ph(_mm256_add_ps(va32, vb32), 0);
     _mm_store_si128((__m128i*)(&x[i]), vc16);
   }
-  // leftovers
+  // Leftovers
   for (; i < n; i++) {
     x[i] += y[i];
   }
 }
 
-// assumes x and y are either both aligned to 32 bytes or unaligned by the same
+// Assumes x and y are either both aligned to 32 bytes or unaligned by the same
 // offset, as would happen when reducing at an offset within an aligned buffer
 template <>
 inline void product<float16>(float16* x, const float16* y, size_t n) {
-  // handle unaligned data at the beginning of the buffer
+  // Handle unaligned data at the beginning of the buffer
   while (!is_aligned(x, 32)) {
     *x *= *y;
     x++;
@@ -133,17 +136,17 @@ inline void product<float16>(float16* x, const float16* y, size_t n) {
     __m128i vc16 = _mm256_cvtps_ph(_mm256_mul_ps(va32, vb32), 0);
     _mm_store_si128((__m128i*)(&x[i]), vc16);
   }
-  // leftovers
+  // Leftovers
   for (; i < n; i++) {
     x[i] *= y[i];
   }
 }
 
-// assumes x and y are either both aligned to 32 bytes or unaligned by the same
+// Assumes x and y are either both aligned to 32 bytes or unaligned by the same
 // offset, as would happen when reducing at an offset within an aligned buffer
 template <>
 inline void max<float16>(float16* x, const float16* y, size_t n) {
-  // handle unaligned data at the beginning of the buffer
+  // Handle unaligned data at the beginning of the buffer
   while (!is_aligned(x, 32)) {
     *x = std::max(*x, *y);
     x++;
@@ -158,17 +161,17 @@ inline void max<float16>(float16* x, const float16* y, size_t n) {
     __m128i vc16 = _mm256_cvtps_ph(_mm256_max_ps(va32, vb32), 0);
     _mm_store_si128((__m128i*)(&x[i]), vc16);
   }
-  // leftovers
+  // Leftovers
   for (; i < n; i++) {
     x[i] = std::max(x[i], y[i]);
   }
 }
 
-// assumes x and y are either both aligned to 32 bytes or unaligned by the same
+// Assumes x and y are either both aligned to 32 bytes or unaligned by the same
 // offset, as would happen when reducing at an offset within an aligned buffer
 template <>
 inline void min<float16>(float16* x, const float16* y, size_t n) {
-  // handle unaligned data at the beginning of the buffer
+  // Handle unaligned data at the beginning of the buffer
   while (!is_aligned(x, 32)) {
     *x = std::min(*x, *y);
     x++;
@@ -183,10 +186,11 @@ inline void min<float16>(float16* x, const float16* y, size_t n) {
     __m128i vc16 = _mm256_cvtps_ph(_mm256_min_ps(va32, vb32), 0);
     _mm_store_si128((__m128i*)(&x[i]), vc16);
   }
-  // leftovers
+  // Leftovers
   for (; i < n; i++) {
     x[i] = std::min(x[i], y[i]);
   }
 }
 #endif
+
 } // namespace gloo

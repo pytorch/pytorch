@@ -9,9 +9,12 @@
 
 #pragma once
 
+#include <cstdlib>
+#include <memory>
+
 namespace gloo {
 
-// align buffers to 32 bytes to support vectorized code
+// Align buffers to 32 bytes to support vectorized code
 const size_t kBufferAlignment = 32;
 
 template <typename T, int ALIGNMENT = kBufferAlignment>
