@@ -36,7 +36,7 @@ class BatchDistillLRLoss(ModelLayer):
             ),
             input_record
         )
-        self.tags.update(Tags.TRAIN_ONLY)
+        self.tags.update([Tags.EXCLUDE_FROM_PREDICTION])
 
         self.output_schema = schema.Scalar(
             np.float32,
