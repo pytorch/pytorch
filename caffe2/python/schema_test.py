@@ -8,6 +8,7 @@ import numpy as np
 
 import unittest
 import pickle
+import random
 
 
 class TestDB(unittest.TestCase):
@@ -293,3 +294,20 @@ class TestDB(unittest.TestCase):
         self.assertFalse('x' in st)
         self.assertFalse('b:c:x' in st)
         self.assertFalse('b:c:d:x' in st)
+
+    def testFromColumnList(self):
+        st = schema.Struct(
+            ('a', schema.Scalar()),
+            ('b', schema.List(schema.Scalar())),
+            ('c', schema.Map(schema.Scalar(), schema.Scalar()))
+        )
+        columns = st.field_names()
+        # test that recovery works for arbitrary order
+        for _ in range(10):
+            some_blobs = [core.BlobReference('blob:' + x) for x in columns]
+            rec = schema.from_column_list(columns, col_blobs=some_blobs)
+            self.assertTrue(rec.has_blobs())
+            self.assertEqual(sorted(st.field_names()), sorted(rec.field_names()))
+            self.assertEqual([str(blob) for blob in rec.field_blobs()],
+                             [str('blob:' + name) for name in rec.field_names()])
+            random.shuffle(columns)
