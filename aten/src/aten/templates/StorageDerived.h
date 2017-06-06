@@ -30,6 +30,7 @@ public:
 
   virtual Type& type() const override;
   virtual int getDevice() const override;
+  virtual const char * toString() const override;
 
 
 protected:

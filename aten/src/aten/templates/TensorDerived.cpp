@@ -49,4 +49,8 @@ Type& ${Tensor}::type() const {
   return context->getType(Processor::${Processor},ScalarType::${ScalarName});
 }
 
+const char * ${Tensor}::toString() const {
+  return "${Tensor}";
+}
+
 }
