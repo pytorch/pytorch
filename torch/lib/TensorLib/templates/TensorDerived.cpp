@@ -38,9 +38,11 @@ Tensor add(Tensor a, Tensor b) {
 
 namespace tlib {
 
-${Tensor}::${Tensor}(Context* context):
-    tensor(${THTensor}_new(${state})), context(context) {}
+${Tensor}::${Tensor}(Context* context)
+: ${Tensor}(context,${THTensor}_new(${state})) {}
 
+${Tensor}::${Tensor}(Context* context, ${THTensor} * tensor)
+: tensor(tensor), context(context) {}
 ${Tensor}::~${Tensor}() {
   ${THTensor}_free(${state,} tensor);
 }

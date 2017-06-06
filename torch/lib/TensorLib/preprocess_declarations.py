@@ -82,8 +82,9 @@ def sanitize_return(option):
                 option['return']['arguments'].append(i)
                 break
     else:
-        #TODO: handle other return possibilities...
-        pass
+        if option['return'] == 'THTensor*':
+            print(option['cname'])
+        option['return'] = { 'kind': 'type', 'type' : option['return'] }
 
 def run(declarations):
     declarations = [d for d in declarations if not exclude(d)]
