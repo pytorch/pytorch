@@ -5,7 +5,6 @@
 #include <unordered_set>
 
 #include "caffe2/core/operator.h"
-#include "caffe2/core/static_tracepoint.h"
 #include "caffe2/core/timer.h"
 #include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/utils/proto_utils.h"
@@ -94,6 +93,9 @@ SimpleNet::SimpleNet(const NetDef& net_def, Workspace* ws)
 }
 
 bool SimpleNet::Run() {
+  if (observer_) {
+    observer_->Start();
+  }
   VLOG(1) << "Running net " << name_;
   for (auto& op : operators_) {
     VLOG(1) << "Running operator " << op->def().name()
@@ -103,6 +105,9 @@ bool SimpleNet::Run() {
                       << ProtoDebugString(op->def());
       return false;
     }
+  }
+  if (observer_) {
+    observer_->Stop();
   }
   return true;
 }

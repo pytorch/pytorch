@@ -11,13 +11,14 @@
 #include "caffe2/core/blob.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/net.h"
+#include "caffe2/core/observer.h"
 #include "caffe2/core/operator_gradient.h"
 #include "caffe2/core/operator_schema.h"
 #include "caffe2/core/registry.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/core/workspace.h"
-#include "caffe2/utils/proto_utils.h"
 #include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/utils/proto_utils.h"
 
 namespace caffe2 {
 
@@ -128,6 +129,17 @@ class OperatorBase {
     return arg_helper_;
   }
 
+  void SetObserver(ObserverBase<OperatorBase>* observer) {
+    observer_ = observer;
+  }
+
+  void RemoveObserver() {
+    observer_ = nullptr;
+  }
+
+ protected:
+  ObserverBase<OperatorBase>* observer_ = nullptr;
+
  private:
   OperatorDef operator_def_;
   ArgumentHelper arg_helper_;
@@ -191,6 +203,9 @@ class Operator : public OperatorBase {
   // instead of Run().
   bool Run(int stream_id = 0) final {
     try {
+      if (observer_) {
+        observer_->Start();
+      }
       context_.SwitchToDevice(stream_id);
       bool started = RunOnDevice();
       bool finished = context_.FinishDeviceComputation();
@@ -200,6 +215,9 @@ class Operator : public OperatorBase {
         // recovered, so we should log FATAL.
         LOG(FATAL) << "Computation on device returned error in operator\n"
                    << ProtoDebugString(this->def());
+      }
+      if (observer_) {
+        observer_->Stop();
       }
       return (started && finished);
     } catch (EnforceNotMet& err) {
