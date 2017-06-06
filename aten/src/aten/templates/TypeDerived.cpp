@@ -1,6 +1,7 @@
 #include "TensorLib/${Type}.h"
 #include "TensorLib/${Storage}.h"
 #include "TensorLib/${Processor}Generator.h"
+#include "TensorLib/Utils.h"
 #include <iostream>
 
 namespace tlib {
@@ -30,6 +31,9 @@ const char * ${Type}::toString() const {
   return "${Type}";
 }
 
+const char * ${Type}::typeString() {
+  return "${Type}";
+}
 
 // example
 Tensor * ${Type}::add(Tensor & a, Tensor & b) {
