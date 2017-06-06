@@ -79,4 +79,8 @@ Type& ${Storage}::type() const {
   return context->getType(Processor::${Processor},ScalarType::${ScalarName});
 }
 
+const char * ${Storage}::toString() const {
+  return "${Storage}";
+}
+
 }

@@ -12,6 +12,7 @@ public:
   ${Tensor}(Context* context);
   virtual ~${Tensor}();
   virtual Type& type() const override;
+  virtual const char * toString() const override;
 
 protected:
   ${THTensor} * tensor;
