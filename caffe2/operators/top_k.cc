@@ -6,6 +6,7 @@ namespace caffe2 {
 namespace {
 
 REGISTER_CPU_OPERATOR(TopK, TopKOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(TopKGradient, TopKGradientOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(TopK)
     .NumInputs(1)
@@ -45,5 +46,21 @@ first.
         "Tensor of shape [a_1, a_2, ..., a_n, k] containing"
         " the corresponding input tensor indices for the top K values.")
     .Arg("k", "Number of top elements to retrieve");
-}
-}
+
+OPERATOR_SCHEMA(TopKGradient).NumInputs(3).NumOutputs(1);
+
+class GetTopKGradient : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  vector<OperatorDef> GetGradientDefs() override {
+    return SingleGradientDef(
+        "TopKGradient",
+        "",
+        vector<string>{GO(0), O(1), I(0)},
+        vector<string>{GI(0)});
+  }
+};
+
+REGISTER_GRADIENT(TopK, GetTopKGradient);
+
+} // namespace
+} // namespace caffe2
