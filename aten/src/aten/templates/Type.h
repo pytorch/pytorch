@@ -34,7 +34,7 @@ struct Type {
   virtual Generator * newGenerator() = 0;
   // example
   virtual Tensor * add(Tensor & a, Tensor & b) = 0;
-
+  virtual const char * toString() const = 0;
   ${type_method_declarations}
 
 };
