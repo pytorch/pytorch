@@ -22,6 +22,7 @@ struct Storage {
 
   virtual Type & type() const = 0;
   virtual int getDevice() const = 0;
+  virtual const char * toString() const = 0;
 
   virtual Storage& fill(Scalar value) = 0;
   virtual Storage& set(std::size_t ind, Scalar value) = 0;
