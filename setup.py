@@ -325,7 +325,7 @@ if WITH_CUDA:
     extra_link_args.append('-Wl,-rpath,' + cuda_lib_path)
     extra_compile_args += ['-DWITH_CUDA']
     extra_compile_args += ['-DCUDA_LIB_PATH=' + cuda_lib_path]
-    main_libraries += ['cudart']
+    main_libraries += ['cudart', 'nvToolsExt']
     main_link_args += [THC_LIB, THCS_LIB, THCUNN_LIB]
     main_sources += [
         "torch/csrc/cuda/Module.cpp",
