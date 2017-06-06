@@ -223,7 +223,7 @@ class ReaderBuilder(object):
     def splits(self, net):
         raise NotImplementedError()
 
-    def new_reader(self, split_queue):
+    def new_reader(self, split_reader=None):
         raise NotImplementedError()
 
 
@@ -254,8 +254,8 @@ class PipedReaderBuilder(ReaderBuilder):
     def splits(self, net):
         return self._builder.splits(net)
 
-    def new_reader(self, split_queue):
-        output = self._piper(self._builder.new_reader(split_queue))
+    def new_reader(self, split_reader=None):
+        output = self._piper(self._builder.new_reader(split_reader))
         return output if isinstance(output, Reader) else output.reader()
 
 
