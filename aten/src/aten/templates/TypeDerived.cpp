@@ -1,8 +1,14 @@
 #include "TensorLib/${Type}.h"
 #include "TensorLib/${Storage}.h"
+#include "TensorLib/${Tensor}.h"
 #include "TensorLib/${Processor}Generator.h"
 #include "TensorLib/Utils.h"
 #include <iostream>
+
+template<typename Derived, typename Base>
+static inline Derived* checked_cast(Base* b) {
+  return dynamic_cast<Derived*>(b);
+}
 
 namespace tlib {
 
