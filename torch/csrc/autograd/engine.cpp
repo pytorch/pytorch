@@ -107,6 +107,7 @@ Engine::Engine() : ready_queues() {
 Engine::~Engine() = default;
 
 auto Engine::thread_main(std::shared_ptr<ReadyQueue> queue) -> void {
+  THInferNumThreads();
   while (1) {
     FunctionTask task = queue->pop_back();
     if (!task.base->has_error.load()) {
