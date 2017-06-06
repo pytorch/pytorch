@@ -80,7 +80,7 @@ Type& ${Storage}::type() const {
 }
 
 const char * ${Storage}::toString() const {
-  return "${Storage}";
+  return ${Storage}::typeString();
 }
 
 const char * ${Storage}::typeString() {
