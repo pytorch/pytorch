@@ -8,6 +8,8 @@ struct Tensor {
 
 
   Tensor * add(Tensor & b);
+  ${tensor_method_declarations}
+  
   virtual ~Tensor() {}
 };
 

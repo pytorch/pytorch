@@ -35,6 +35,8 @@ struct Type {
   // example
   virtual Tensor * add(Tensor & a, Tensor & b) = 0;
 
+  ${type_method_declarations}
+
 };
 
 }

@@ -17,6 +17,8 @@ struct ${Type} : public Type {
   // example
   virtual Tensor * add(Tensor & a, Tensor & b) override;
 
+  ${type_derived_method_declarations}
+
 private:
   Context* context;
 };

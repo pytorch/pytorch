@@ -33,4 +33,6 @@ Tensor * ${Type}::add(Tensor & a, Tensor & b) {
   return &a;
 }
 
+${type_derived_method_definitions}
+
 }
