@@ -324,8 +324,7 @@ class HingeEmbeddingLoss(_Loss):
         self.size_average = size_average
 
     def forward(self, input, target):
-        return self._backend.HingeEmbeddingLoss(self.margin,
-                                                self.size_average)(input, target)
+        return F.hinge_embedding_loss(input, target, self.margin, self.size_average)
 
 
 class MultiLabelMarginLoss(_Loss):
@@ -447,8 +446,7 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
     """
 
     def forward(self, input, target):
-        return F.binary_cross_entropy(torch.sigmoid(input), target,
-                                      self.weight, self.size_average)
+        return F.multilabel_soft_margin_loss(input, target, self.weight, self.size_average)
 
 
 class CosineEmbeddingLoss(Module):
@@ -479,8 +477,7 @@ class CosineEmbeddingLoss(Module):
         self.size_average = size_average
 
     def forward(self, input1, input2, target):
-        return self._backend.CosineEmbeddingLoss(self.margin,
-                                                 self.size_average)(input1, input2, target)
+        return F.cosine_embedding_loss(input1, input2, target, self.margin, self.size_average)
 
 
 class MarginRankingLoss(Module):
@@ -508,8 +505,7 @@ class MarginRankingLoss(Module):
         self.size_average = size_average
 
     def forward(self, input1, input2, target):
-        return self._backend.MarginRankingLoss(self.margin,
-                                               self.size_average)(input1, input2, target)
+        return F.margin_ranking_loss(input1, input2, target, self.margin, self.size_average)
 
 
 class MultiMarginLoss(Module):
@@ -546,8 +542,8 @@ class MultiMarginLoss(Module):
         self.weight = weight
 
     def forward(self, input, target):
-        return self._backend.MultiMarginLoss(self.size_average, self.p,
-                                             self.margin, weight=self.weight)(input, target)
+        return F.multi_margin_loss(input, target, self.p, self.margin,
+                                   self.weight, self.size_average)
 
 
 class TripletMarginLoss(Module):

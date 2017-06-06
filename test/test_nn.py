@@ -18,6 +18,7 @@ import torch.nn.parallel as dp
 import torch.nn.init as init
 import torch.nn.utils.rnn as rnn_utils
 import torch.legacy.nn as legacy
+from torch.nn.modules.loss import _Loss
 from torch.nn.utils import clip_grad_norm
 from torch.autograd import Variable, gradcheck
 from torch.autograd.gradcheck import gradgradcheck
@@ -3085,6 +3086,61 @@ class TestNNInit(TestCase):
                                          torch.eye(rows) * gain ** 2, prec=1e-6)
 
 
+# functional loss wrappers
+
+
+class _SmoothL1LossFunctional(_Loss):
+
+    def __init__(self, *args, **kwargs):
+        super(_SmoothL1LossFunctional, self).__init__(*args, **kwargs)
+
+    def forward(self, *args, **kwargs):
+        return F.smooth_l1_loss(*args, **kwargs)
+
+
+class _L1LossFunctional(_Loss):
+
+    def __init__(self, *args, **kwargs):
+        super(_L1LossFunctional, self).__init__(*args, **kwargs)
+
+    def forward(self, *args, **kwargs):
+        return F.l1_loss(*args, **kwargs)
+
+
+class _MSELossFunctional(_Loss):
+
+    def __init__(self, *args, **kwargs):
+        super(_MSELossFunctional, self).__init__(*args, **kwargs)
+
+    def forward(self, *args, **kwargs):
+        return F.mse_loss(*args, **kwargs)
+
+
+class _MultiLabelMarginLossFunctional(_Loss):
+
+    def __init__(self, *args, **kwargs):
+        super(_MultiLabelMarginLossFunctional, self).__init__(*args, **kwargs)
+
+    def forward(self, *args, **kwargs):
+        return F.multilabel_margin_loss(*args, **kwargs)
+
+
+class _SoftMarginLossFunctional(_Loss):
+
+    def __init__(self, *args, **kwargs):
+        super(_SoftMarginLossFunctional, self).__init__(*args, **kwargs)
+
+    def forward(self, *args, **kwargs):
+        return F.soft_margin_loss(*args, **kwargs)
+
+
+nn.SmoothL1LossFunctional = _SmoothL1LossFunctional
+nn.L1LossFunctional = _L1LossFunctional
+nn.MSELossFunctional = _MSELossFunctional
+nn.MultiLabelMarginLossFunctional = _MultiLabelMarginLossFunctional
+nn.SoftMarginLossFunctional = _SoftMarginLossFunctional
+
+
 def add_test(test):
     test_name = test.get_name()
     cuda_test_name = test_name + '_cuda'
@@ -3662,6 +3718,37 @@ new_criterion_tests = [
 ]
 
 
+functional_criterion_tests = [
+    dict(module_name='L1LossFunctional',
+         input_size=(2, 3, 4),
+         target=torch.randn(2, 3, 4),
+         reference_fn=lambda i, t, _: 1. / i.numel() *
+         sum((a - b).abs().sum() for a, b in zip(i, t))
+         ),
+    dict(
+        module_name='MSELossFunctional',
+        input=torch.randn(2, 3, 4, 5),
+        target=torch.randn(2, 3, 4, 5),
+        reference_fn=lambda i, t, _: (i - t).abs().pow(2).sum() / i.numel()
+    ),
+    dict(
+        module_name='MultiLabelMarginLossFunctional',
+        input_size=(5, 10),
+        target=torch.rand(5, 10).mul(10).floor().long()
+    ),
+    dict(
+        module_name='SmoothL1LossFunctional',
+        input_size=(5, 10),
+        target=torch.randn(5, 10)
+    ),
+    dict(
+        module_name='SoftMarginLossFunctional',
+        input_size=(5, 5),
+        target=torch.randn(5, 5).sign()
+    ),
+]
+
+
 for test_params in module_tests + new_module_tests:
     # TODO: CUDA is not implemented yet
     if 'constructor' not in test_params:
@@ -3669,7 +3756,8 @@ for test_params in module_tests + new_module_tests:
         test_params['constructor'] = getattr(nn, name)
     test = NewModuleTest(**test_params)
     add_test(test)
-for test_params in criterion_tests + new_criterion_tests:
+
+for test_params in criterion_tests + new_criterion_tests + functional_criterion_tests:
     name = test_params.pop('module_name')
     test_params['constructor'] = getattr(nn, name)
     test = NewCriterionTest(**test_params)

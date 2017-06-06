@@ -447,6 +447,14 @@ def alpha_dropout(input, p=0.5, training=False):
     return output.mul_(a).add_(b)
 
 
+def dropout2d(input, p=0.5, training=False, inplace=False):
+    return _functions.dropout.FeatureDropout.apply(input, p, training, inplace)
+
+
+def dropout3d(input, p=0.5, training=False, inplace=False):
+    return _functions.dropout.FeatureDropout.apply(input, p, training, inplace)
+
+
 def threshold(input, threshold, value, inplace=False):
     return _functions.thnn.Threshold.apply(input, threshold, value, inplace)
 
@@ -728,6 +736,49 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=Tr
 
 def smooth_l1_loss(input, target, size_average=True):
     return _functions.thnn.SmoothL1Loss(size_average)(input, target)
+
+
+def l1_loss(input, target, size_average=True):
+    return _functions.thnn.L1Loss(size_average)(input, target)
+
+
+def mse_loss(input, target, size_average=True):
+    return _functions.thnn.MSELoss(size_average)(input, target)
+
+
+def margin_ranking_loss(input1, input2, target, margin=0, size_average=True):
+    return _functions.loss.MarginRankingLoss(margin, size_average)(input1, input2, target)
+
+
+def hinge_embedding_loss(input, target, margin=1.0, size_average=True):
+    return _functions.loss.HingeEmbeddingLoss(margin, size_average)(input, target)
+
+
+def multilabel_margin_loss(input, target, size_average=True):
+    return _functions.thnn.MultiLabelMarginLoss(size_average)(input, target)
+
+
+def soft_margin_loss(input, target, size_average=True):
+    return _functions.thnn.SoftMarginLoss(size_average)(input, target)
+
+
+def multilabel_soft_margin_loss(input, target, weight=None, size_average=True):
+    input = torch.sigmoid(input)
+    return binary_cross_entropy(input, target, weight, size_average)
+
+
+def cosine_embedding_loss(input1, input2, target, margin=0, size_average=True):
+    return _functions.loss.CosineEmbeddingLoss(margin, size_average)(input1, input2, target)
+
+
+def multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=True):
+    if p != 1 and p != 2:
+        raise ValueError('only p == 1 and p == 2 supported')
+    if weight is not None and weight.dim() != 1:
+        raise ValueError('weight must be one-dimensional')
+
+    return _functions.thnn.MultiMarginLoss(size_average, p, margin,
+                                           weight=weight)(input, target)
 
 
 def pixel_shuffle(input, upscale_factor):
