@@ -83,4 +83,8 @@ const char * ${Storage}::toString() const {
   return "${Storage}";
 }
 
+const char * ${Storage}::typeString() {
+  return "${Storage}";
+}
+
 }

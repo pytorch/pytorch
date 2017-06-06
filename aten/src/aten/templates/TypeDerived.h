@@ -14,6 +14,9 @@ struct ${Type} : public Type {
   virtual Storage * newStorage(size_t size) override;
   virtual Generator * newGenerator() override;
   virtual const char * toString() const override;
+
+  static const char * typeString();
+
   // example
   virtual Tensor * add(Tensor & a, Tensor & b) override;
 

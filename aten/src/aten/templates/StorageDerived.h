@@ -32,6 +32,8 @@ public:
   virtual int getDevice() const override;
   virtual const char * toString() const override;
 
+  const char * typeString();
+
 
 protected:
   ${THStorage} *storage;
