@@ -17,14 +17,4 @@ void runtime_error(const char *format, ...) {
   throw std::runtime_error(error_buf);
 }
 
-template <typename T, typename Base>
-T checked_cast(Base expr) {
-  try {
-    return dynamic_cast<T>(expr);
-  } catch (const std::bad_cast& exception) {
-    runtime_error("Dynamic cast failed. Tried to cast to type %s from expr of type %s\n",
-                  T::typeString(), expr.type().toString());
-  }
-}
-
 } // tlib

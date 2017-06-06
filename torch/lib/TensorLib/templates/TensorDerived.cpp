@@ -50,7 +50,7 @@ Type& ${Tensor}::type() const {
 }
 
 const char * ${Tensor}::toString() const {
-  return "${Tensor}";
+  return ${Tensor}::typeString();
 }
 
 const char * ${Tensor}::typeString() {

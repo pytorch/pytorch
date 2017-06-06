@@ -5,11 +5,6 @@
 #include "TensorLib/Utils.h"
 #include <iostream>
 
-template<typename Derived, typename Base>
-static inline Derived* checked_cast(Base* b) {
-  return dynamic_cast<Derived*>(b);
-}
-
 namespace tlib {
 
 ${Type}::${Type}(Context* context)
@@ -34,7 +29,7 @@ Generator * ${Type}::newGenerator() {
 }
 
 const char * ${Type}::toString() const {
-  return "${Type}";
+  return ${Type}::typeString();
 }
 
 const char * ${Type}::typeString() {
