@@ -359,6 +359,16 @@ OPERATOR_SCHEMA(CopyGPUToCPU)
     .NumInputs(1)
     .NumOutputs(1)
     .IdenticalTypeAndShape()
+    .DeviceInferenceFunction([](const OperatorDef& def) {
+      CAFFE_ENFORCE(
+          def.has_device_option(),
+          "CopyGPUToCPU op should have cuda device option.");
+      auto& cuda_option = def.device_option();
+      auto cpu_option = DeviceOption();
+      vector<DeviceOption> in_dev(def.input_size(), cuda_option);
+      vector<DeviceOption> out_dev(def.output_size(), cpu_option);
+      return std::make_pair(in_dev, out_dev);
+    })
     .SetDoc(R"DOC(
 Copy tensor for GPU to CPU context. Must be run under GPU device option.
 )DOC")
@@ -369,6 +379,16 @@ OPERATOR_SCHEMA(CopyCPUToGPU)
     .NumInputs(1)
     .NumOutputs(1)
     .IdenticalTypeAndShape()
+    .DeviceInferenceFunction([](const OperatorDef& def) {
+      CAFFE_ENFORCE(
+          def.has_device_option(),
+          "CopyCPUToGPU op should have cuda device option.");
+      auto& cuda_option = def.device_option();
+      auto cpu_option = DeviceOption();
+      vector<DeviceOption> in_dev(def.input_size(), cpu_option);
+      vector<DeviceOption> out_dev(def.output_size(), cuda_option);
+      return std::make_pair(in_dev, out_dev);
+    })
     .SetDoc(R"DOC(
 Copy tensor for CPU to GPU context. Must be run under GPU device option.
 )DOC")
@@ -379,6 +399,14 @@ OPERATOR_SCHEMA(EnsureCPUOutput)
     .NumInputs(1)
     .NumOutputs(1)
     .IdenticalTypeAndShape()
+    .DeviceInferenceFunction([](const OperatorDef& def) {
+      auto op_device =
+          def.has_device_option() ? def.device_option() : DeviceOption();
+      auto cpu_option = DeviceOption();
+      vector<DeviceOption> in_dev(def.input_size(), op_device);
+      vector<DeviceOption> out_dev(def.output_size(), cpu_option);
+      return std::make_pair(in_dev, out_dev);
+    })
     .SetDoc(R"DOC(
 Take an input tensor in the current Context (GPU or CPU) and create an output
 which is always a TensorCPU. This may involves cross-device MemCpy.
@@ -390,6 +418,14 @@ OPERATOR_SCHEMA(CopyFromCPUInput)
     .NumInputs(1)
     .NumOutputs(1)
     .IdenticalTypeAndShape()
+    .DeviceInferenceFunction([](const OperatorDef& def) {
+      auto op_device =
+          def.has_device_option() ? def.device_option() : DeviceOption();
+      auto cpu_option = DeviceOption();
+      vector<DeviceOption> in_dev(def.input_size(), cpu_option);
+      vector<DeviceOption> out_dev(def.output_size(), op_device);
+      return std::make_pair(in_dev, out_dev);
+    })
     .SetDoc(R"DOC(
 Take a CPU input tensor and copy it to an output in the current
 Context (GPU or CPU). This may involves cross-device MemCpy.

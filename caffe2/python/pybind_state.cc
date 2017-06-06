@@ -929,6 +929,27 @@ void addGlobalMethods(py::module& m) {
         // For global sanity gradient ops shouldn't access workspace
         gRegistery()[token + "_gradient"] = Func{func, false};
       });
+  m.def("infer_op_input_output_device", [](const py::bytes& op) {
+    std::unique_ptr<caffe2::OperatorDef> def(new caffe2::OperatorDef());
+    CAFFE_ENFORCE(def.get()->ParseFromString(op));
+    // device_info is a pair of vector of DeviceOption.
+    // `first` is for inputs, `second` is for outputs.
+    auto device_info = InferOpInputOutputDevice(*def);
+
+    std::vector<py::bytes> in_res;
+    std::vector<py::bytes> out_res;
+    for (auto& in_dev : device_info.first) {
+      std::string protob;
+      CAFFE_ENFORCE(in_dev.SerializeToString(&protob));
+      in_res.push_back(py::bytes(protob));
+    }
+    for (auto& out_dev : device_info.second) {
+      std::string protob;
+      CAFFE_ENFORCE(out_dev.SerializeToString(&protob));
+      out_res.push_back(py::bytes(protob));
+    }
+    return std::make_pair(in_res, out_res);
+  });
 
 #define CAFFE2_CPU_FEATURE_SUPPORT(feature)      \
   m.def("builtin_cpu_supports_" #feature, []() { \

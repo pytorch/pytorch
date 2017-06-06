@@ -370,5 +370,63 @@ class TestExtractPredictorNet(test_util.TestCase):
         )
 
 
+class TestInferDevice(test_util.TestCase):
+
+    def setUp(self):
+        device_option = caffe2_pb2.DeviceOption()
+        device_option.device_type = caffe2_pb2.CUDA
+        device_option.cuda_gpu_id = 1
+        self.cuda_option = device_option
+        self.cpu_option = caffe2_pb2.DeviceOption()
+
+    def _test_op(
+        self,
+        op_name,
+        in_option,
+        out_option,
+        op_option=None,
+        inputs=None,
+        outputs=None
+    ):
+        op_option = self.cuda_option if not op_option else op_option
+        inputs = ["blob_1"] if not inputs else inputs
+        outputs = ["blob_2"] if not outputs else outputs
+        with core.DeviceScope(op_option):
+            op = core.CreateOperator(op_name, inputs, outputs)
+        input_dev, output_dev = core.InferOpBlobDevices(op)
+        for in_dev in input_dev:
+            self.assertEqual(in_dev, in_option)
+        for out_dev in output_dev:
+            self.assertEqual(out_dev, out_option)
+
+    def test_infer_device(self):
+        self._test_op(
+            "FC",
+            self.cuda_option,
+            self.cuda_option,
+            op_option=self.cuda_option,
+            inputs=["data", "fc_w", "fc_b"],
+            outputs=["fc_1"]
+        )
+
+    def test_infer_device_cross_device(self):
+        self._test_op("CopyGPUToCPU", self.cuda_option, self.cpu_option)
+        self._test_op("CopyCPUToGPU", self.cpu_option, self.cuda_option)
+        self._test_op("EnsureCPUOutput", self.cuda_option, self.cpu_option)
+        self._test_op("CopyFromCPUInput", self.cpu_option, self.cuda_option)
+        self._test_op(
+            "EnsureCPUOutput",
+            self.cpu_option,
+            self.cpu_option,
+            op_option=self.cpu_option
+        )
+        self._test_op(
+            "CopyFromCPUInput",
+            self.cpu_option,
+            self.cpu_option,
+            op_option=self.cpu_option
+        )
+
+
 if __name__ == '__main__':
     unittest.main()
