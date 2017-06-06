@@ -53,4 +53,8 @@ const char * ${Tensor}::toString() const {
   return "${Tensor}";
 }
 
+const char * ${Tensor}::typeString() {
+  return "${Tensor}";
+}
+
 }
