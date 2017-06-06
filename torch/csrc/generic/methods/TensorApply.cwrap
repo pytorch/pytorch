@@ -61,8 +61,12 @@ static PyObject * THPTensor_(map)(THPTensor *self, PyObject *args)
   THTensor *src_save = src;
   THTensorPtr src_guard(THTensor_(new)(LIBRARY_STATE_NOARGS));
 
-  int ret = expand_inplace1<THTensor, THTensor>(src_guard.get(), src, tensor, "src", "tensor", true);
-  if (ret == 0) {
+  bool expand_success = false;
+  try {
+    expand_inplace1<THTensor, THTensor>(src_guard.get(), src, tensor, "src", "tensor", true);
+    expand_success = true;
+  } catch (std::exception &e) {}
+  if (expand_success) {
     src = src_guard.get();
   }
 
@@ -112,8 +116,12 @@ static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)
   THTensor *src2_save = src2;
   THTensorPtr src2_guard(THTensor_(new)(LIBRARY_STATE_NOARGS));
 
-  int ret = expand_inplace2<THTensor>(src1_guard.get(), src2_guard.get(), src1, src2, tensor, "src1", "src2", "tensor", true);
-  if (ret == 0) {
+  bool expand_success = false;
+  try {
+    expand_inplace2<THTensor>(src1_guard.get(), src2_guard.get(), src1, src2, tensor, "src1", "src2", "tensor", true);
+    expand_success = true;
+  } catch (std::exception &e) {}
+  if (expand_success) {
     src1 = src1_guard.get();
     src2 = src2_guard.get();
   }

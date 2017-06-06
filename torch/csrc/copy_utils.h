@@ -118,8 +118,12 @@ void THPInsertTensorCopyFunction(
 
     // support for "broadcast" parameter to copy_.
     if (broadcast) {
-      int ret = expand_inplace1<TensorSrc, TensorDst>(LIBRARY_STATE src_guard.get(), src, dst, "src", "dst", true);
-      if (ret == 0) {
+      bool expand_success = false;
+      try {
+        expand_inplace1<TensorSrc, TensorDst>(LIBRARY_STATE src_guard.get(), src, dst, "src", "dst", true);
+        expand_success = true;
+      } catch (std::exception &e) {}
+      if (expand_success) {
         src = src_guard.get();
       }
     }

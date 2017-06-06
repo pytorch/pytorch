@@ -65,21 +65,31 @@ class Broadcast(CWrapPlugin):
         return Template(ret)
 
     OUT_PLACE_PRE_EXPAND2_TEMPLATE = Template(
-        """if (!expand_outplace2(LIBRARY_STATE ${arg_op_a}_guard.get(), ${arg_op_other}_guard.get(),
-                                 ${arg_op_a}, ${arg_op_other},
-                                 \"${op_a}\", \"${op_other}\", !${raise_errors})) {
+        """bool expand_success = false;
+           try {
+             expand_outplace2(LIBRARY_STATE ${arg_op_a}_guard.get(), ${arg_op_other}_guard.get(),
+                              ${arg_op_a}, ${arg_op_other},
+                              \"${op_a}\", \"${op_other}\", !${raise_errors});
+             expand_success = true;
+           } catch (std::exception &e) {}
+           if(expand_success) {
              ${arg_op_a} = ${arg_op_a}_guard.get();
              ${arg_op_other} = ${arg_op_other}_guard.get();
            }""")
 
     OUT_PLACE_PRE_EXPAND3_TEMPLATE = Template(
-        """if (!expand_outplace3(LIBRARY_STATE
-                                 ${arg_op_a}_guard.get(), ${arg_op_other1}_guard.get(), ${arg_op_other2}_guard.get(),
-                                 ${arg_op_a}, ${arg_op_other1}, ${arg_op_other2},
-                                 \"${op_a}\", \"${op_other1}\", \"${op_other2}\", !${raise_errors})) {
-             ${arg_op_a} = ${arg_op_a}_guard.get();
-             ${arg_op_other1} = ${arg_op_other1}_guard.get();
-             ${arg_op_other2} = ${arg_op_other2}_guard.get();
+        """bool expand_success = false;
+           try {
+             expand_outplace3(LIBRARY_STATE
+                              ${arg_op_a}_guard.get(), ${arg_op_other1}_guard.get(), ${arg_op_other2}_guard.get(),
+                              ${arg_op_a}, ${arg_op_other1}, ${arg_op_other2},
+                              \"${op_a}\", \"${op_other1}\", \"${op_other2}\", !${raise_errors});
+             expand_success = true;
+            } catch (std::exception &e) {}
+            if (expand_success) {
+              ${arg_op_a} = ${arg_op_a}_guard.get();
+              ${arg_op_other1} = ${arg_op_other1}_guard.get();
+              ${arg_op_other2} = ${arg_op_other2}_guard.get();
            }""")
 
     OUT_PLACE_PRE_EXPAND_PRE_DIM_TEMPLATE = Template(
@@ -101,7 +111,12 @@ class Broadcast(CWrapPlugin):
                THLongStorage_newWithSize3(${arg_op_a}_dim0_size, ${arg_op_a}_dim1_size, ${arg_op_a}_dim2_size));\n""")
 
     OUT_PLACE_PRE_EXPAND_POST_DIM_TEMPLATE = Template(
-        """if (!THTensor_(expand)(LIBRARY_STATE ${arg_op_a}_guard.get(), ${arg_op_a}, ${arg_op_a}_storage, ${raise_errors})) {
+        """bool expand_success = false;
+           try {
+             expand(LIBRARY_STATE ${arg_op_a}_guard.get(), ${arg_op_a}, ${arg_op_a}_storage);
+             expand_success = true;
+           } catch (std::exception &e) {}
+           if (expand_success) {
              ${arg_op_a} = ${arg_op_a}_guard.get();
            }""")
 
@@ -110,15 +125,25 @@ class Broadcast(CWrapPlugin):
            ${expand_code}""")
 
     IN_PLACE_PRE_EXPAND1_TEMPLATE = Template(
-        """if (!expand_inplace1(LIBRARY_STATE ${arg_op_other}_guard.get(), ${arg_op_other}, ${arg_op_a},
-                                     \"${op_other}\", \"${op_a}\", !${raise_errors})) {
-              ${arg_op_other} = ${arg_op_other}_guard.get();
-            }""")
+        """bool expand_success = false;
+           try {
+             expand_inplace1(LIBRARY_STATE ${arg_op_other}_guard.get(), ${arg_op_other}, ${arg_op_a},
+                             \"${op_other}\", \"${op_a}\", !${raise_errors});
+             expand_success = true;
+           } catch (std::exception &e) {}
+           if (expand_success) {
+             ${arg_op_other} = ${arg_op_other}_guard.get();
+           }""")
 
     IN_PLACE_PRE_EXPAND2_TEMPLATE = Template(
-        """if (!expand_inplace2(LIBRARY_STATE ${arg_op_other1}_guard.get(), ${arg_op_other2}_guard.get(),
-                                ${arg_op_other1}, ${arg_op_other2}, ${arg_op_a},
-                                \"${op_other1}\", \"${op_other2}\", \"${op_a}\", !${raise_errors})) {
+        """bool expand_success = false;
+           try {
+             expand_inplace2(LIBRARY_STATE ${arg_op_other1}_guard.get(), ${arg_op_other2}_guard.get(),
+                             ${arg_op_other1}, ${arg_op_other2}, ${arg_op_a},
+                             \"${op_other1}\", \"${op_other2}\", \"${op_a}\", !${raise_errors});
+             expand_success = true;
+           } catch (std::exception &e) {}
+           if (expand_success) {
              ${arg_op_other1} = ${arg_op_other1}_guard.get();
              ${arg_op_other2} = ${arg_op_other2}_guard.get();
            }""")
@@ -158,6 +183,7 @@ class Broadcast(CWrapPlugin):
             dims_kvs = []
             for p in params:
                 if p.startswith("dims:"):
+                    assert(raise_errors == "true")
                     if len(dims_kvs) != 0:
                         raise ValueError("multiple specifications of dims")
                     dims = p[len("dims:"):].split(",")

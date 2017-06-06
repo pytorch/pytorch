@@ -36,9 +36,9 @@ IMPLEMENT_NEWFOREXPAND(CudaHalf, LIBRARY_STATE_NOARGS)
 
 #define IMPLEMENT_EXPAND(TYPEC, THC_STATE)                                         \
   template<>                                                                       \
-  int expand(LIBRARY_STATE_TYPE TH##TYPEC##Tensor *r, TH##TYPEC##Tensor *tensor,   \
-             THLongStorage *sizes, int raiseErrors) {                              \
-    return TH##TYPEC##Tensor_expand(THC_STATE r, tensor, sizes, raiseErrors);  \
+  void expand(LIBRARY_STATE_TYPE TH##TYPEC##Tensor *r, TH##TYPEC##Tensor *tensor,  \
+              THLongStorage *sizes) {                                              \
+    TH##TYPEC##Tensor_expand(THC_STATE r, tensor, sizes);                          \
   }
 
 IMPLEMENT_EXPAND(Byte,)
@@ -67,9 +67,9 @@ IMPLEMENT_EXPAND(CudaHalf, LIBRARY_STATE)
 
 #define IMPLEMENT_EXPAND2(TYPEC, THC_STATE)                                       \
   template <>                                                                     \
-  int expand2(LIBRARY_STATE_TYPE TH##TYPEC##Tensor *r1, TH##TYPEC##Tensor *r2,    \
-              TH##TYPEC##Tensor *e1, TH##TYPEC##Tensor *e2, int raiseErrors) {    \
-    return TH##TYPEC##Tensor_expand2(THC_STATE r1, r2, e1, e2, raiseErrors);      \
+  void expand2(LIBRARY_STATE_TYPE TH##TYPEC##Tensor *r1, TH##TYPEC##Tensor *r2,   \
+               TH##TYPEC##Tensor *e1, TH##TYPEC##Tensor *e2) {                    \
+    TH##TYPEC##Tensor_expand2(THC_STATE r1, r2, e1, e2);                          \
 }
 
 IMPLEMENT_EXPAND2(Byte,)
@@ -96,11 +96,11 @@ IMPLEMENT_EXPAND2(CudaHalf, LIBRARY_STATE)
 
 #undef IMPLEMENT_EXPAND2
 
-#define IMPLEMENT_EXPAND3(TYPEC, THC_STATE)                                                            \
-  template <>                                                                                          \
-  int expand3(LIBRARY_STATE_TYPE TH##TYPEC##Tensor *r1, TH##TYPEC##Tensor *r2, TH##TYPEC##Tensor *r3,  \
-              TH##TYPEC##Tensor *e1, TH##TYPEC##Tensor *e2, TH##TYPEC##Tensor *e3, int raiseErrors) {  \
-  return TH##TYPEC##Tensor_expand3(THC_STATE r1, r2, r3, e1, e2, e3, raiseErrors);                     \
+#define IMPLEMENT_EXPAND3(TYPEC, THC_STATE)                                                             \
+  template <>                                                                                           \
+  void expand3(LIBRARY_STATE_TYPE TH##TYPEC##Tensor *r1, TH##TYPEC##Tensor *r2, TH##TYPEC##Tensor *r3,  \
+               TH##TYPEC##Tensor *e1, TH##TYPEC##Tensor *e2, TH##TYPEC##Tensor *e3) {                   \
+    TH##TYPEC##Tensor_expand3(THC_STATE r1, r2, r3, e1, e2, e3);                                        \
 }
 
 IMPLEMENT_EXPAND3(Byte,)

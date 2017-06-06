@@ -485,7 +485,11 @@ PyObject *THPModule_inferSize(PyObject *_unused, PyObject *args)
   THLongStoragePtr sizes_guard(THLongStorage_new());
   THLongStorage *sizes = sizes_guard.get();
 
-  THLongStorage_inferSize2(sizes, size1->data, size1->size, size2->data, size2->size, 1);
+  char error_buffer[1024];
+  int ret = THLongStorage_inferSize2(sizes, size1->data, size1->size, size2->data, size2->size, error_buffer, 1024);
+  if (ret != 0) {
+    THError(error_buffer);
+  }
   return THPSize_New(sizes->size, sizes->data);
   END_HANDLE_TH_ERRORS
 }
