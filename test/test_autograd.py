@@ -1665,6 +1665,14 @@ for test in function_tests:
                     return cls.apply(*args)
             self.assertTrue(gradcheck(apply_fn, input, eps=1e-6, atol=PRECISION))
 
+            # check for correct type of input.data and input.grad.data
+            output = apply_fn(*input)
+            if isinstance(output, torch.autograd.Variable):
+                output.backward(torch.randn(*output.size()).type_as(output.data))
+                for inp in input:
+                    if isinstance(inp, torch.autograd.Variable) and inp.grad is not None:
+                        self.assertTrue(type(inp.data) == type(inp.grad.data))
+
             if test_name not in ignore_inplace and issubclass(cls, InplaceFunction):
                 output = apply_fn(*input)
                 if not isinstance(output, tuple):
@@ -1744,6 +1752,15 @@ for test in method_tests:
                     if not torch.is_tensor(output_tensor) and not isinstance(output_tensor, tuple):
                         output_tensor = torch.DoubleTensor((output_tensor,))
                     self.assertEqual(unpack_variables(output_variable), output_tensor)
+
+                # check for correct type of input.data and input.grad.data
+                if name[-1] != '_':
+                    self_variable = create_input((self_size,), requires_grad=True)[0]
+                    args_variable = create_input(args, requires_grad=False)
+                    output_variable = getattr(self_variable, name)(*args_variable)
+                    if isinstance(output_variable, torch.autograd.Variable):
+                        output_variable.backward(torch.randn(*output_variable.size()).type_as(output_variable.data))
+                        self.assertTrue(type(self_variable.data) == type(self_variable.grad.data))
 
             check(name)
             inplace_name = name + '_'
