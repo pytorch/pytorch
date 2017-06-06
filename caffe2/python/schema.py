@@ -754,7 +754,6 @@ class _SchemaNode(object):
         self.children = []
         self.type_str = type_str
         self.field = None
-        self.col_blob = None
 
     def add_child(self, name, type_str=''):
         for child in self.children:
@@ -780,22 +779,27 @@ class _SchemaNode(object):
         if (set(child_names) == set(list_names)):
             for child in self.children:
                 if child.name == 'values':
-                    self.field = List(
-                        child.get_field(),
-                        lengths_blob=self.children[0].col_blob
-                    )
-                    self.type_str = "List"
-                    return self.field
+                    values_field = child.get_field()
+                else:
+                    lengths_field = child.get_field()
+            self.field = List(
+                values_field,
+                lengths_blob=lengths_field
+            )
+            self.type_str = "List"
+            return self.field
         elif (set(child_names) == set(map_names)):
             for child in self.children:
                 if child.name == 'keys':
                     key_field = child.get_field()
                 elif child.name == 'values':
                     values_field = child.get_field()
+                else:
+                    lengths_field = child.get_field()
             self.field = Map(
                 key_field,
                 values_field,
-                lengths_blob=self.children[0].col_blob
+                lengths_blob=lengths_field
             )
             self.type_str = "Map"
             return self.field
@@ -803,10 +807,7 @@ class _SchemaNode(object):
         else:
             struct_fields = []
             for child in self.children:
-                if child.field is not None:
-                    struct_fields.append((child.name, child.field))
-                else:
-                    struct_fields.append((child.name, child.get_field()))
+                struct_fields.append((child.name, child.get_field()))
 
             self.field = Struct(*struct_fields)
             self.type_str = "Struct"
@@ -862,7 +863,6 @@ def from_column_list(
             next = current.add_child(name, type_str)
             if field is not None:
                 next.field = field
-                next.col_blob = col_blob
             current = next
 
     return root.get_field()
