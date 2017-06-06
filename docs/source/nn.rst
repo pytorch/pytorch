@@ -519,6 +519,18 @@ Vision layers
 .. autoclass:: PixelShuffle
     :members:
 
+:hidden:`Subsampling2d`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: Subsampling2d
+    :members:
+
+:hidden:`Subsampling3d`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: Subsampling3d
+    :members:
+
 :hidden:`UpsamplingNearest2d`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -529,6 +541,18 @@ Vision layers
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: UpsamplingBilinear2d
+    :members:
+
+:hidden:`UpsamplingNearest3d`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: UpsamplingNearest3d
+    :members:
+
+:hidden:`UpsamplingTrilinear3d`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: UpsamplingTrilinear3d
     :members:
 
 
@@ -866,6 +890,27 @@ Vision functions
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: pad
+
+:hidden:`subsample`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: subsample
+
+:hidden:`upsample_nearest`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: upsample_nearest
+
+:hidden:`upsample_bilinear`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: upsample_bilinear
+
+:hidden:`upsample_trilinear`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: upsample_trilinear
+
 
 torch.nn.init
 =============

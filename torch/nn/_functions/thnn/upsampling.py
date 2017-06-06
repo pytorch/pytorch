@@ -126,5 +126,95 @@ class UpsamplingBilinear2d(_UpsamplingBase):
         self.__dict__.update(state)
         self.scale_factor = _tuple(self.scale_factor)
 
+class UpsamplingNearest3d(_UpsamplingBase):
+
+    def forward(self, input):
+        assert input.dim() == 5
+
+        if self.scale_factor is None:
+            if (self.size[0] % input.size(2) != 0 or self.size[1] % input.size(3) != 0 or
+               self.size[2] % input.size(4) != 0):
+                raise RuntimeError("output size specified in UpSamplingNearest "
+                                   "({}) has to be divisible by the input size, but got: "
+                                   "{}".format('x'.join(map(str, self.size)),
+                                               'x'.join(map(str, input.size()))))
+            self.scale_factor = self.size[0] // input.size(2)
+            if (self.scale_factor != self.size[1] // input.size(3) or
+               self.scale_factor != self.size[2] // input.size(4)):
+                raise RuntimeError("input aspect ratio doesn't match the "
+                                   "output ratio")
+
+        output = input.new()
+        backend = type2backend[type(input)]
+        self.save_for_backward(input)
+        backend.VolumetricUpSamplingNearest_updateOutput(backend.library_state,
+                                                         input,
+                                                         output,
+                                                         self.scale_factor)
+        return output
+
+    def backward(self, grad_output):
+        input, = self.saved_tensors
+        grad_input = grad_output.new()
+        backend = type2backend[type(input)]
+        backend.VolumetricUpSamplingNearest_updateGradInput(backend.library_state,
+                                                            input,
+                                                            grad_output,
+                                                            grad_input,
+                                                            self.scale_factor)
+        return grad_input
+
+
+class UpsamplingTrilinear3d(_UpsamplingBase):
+
+    def forward(self, input):
+        assert input.dim() == 5
+
+        if self.scale_factor:
+            self.output_size = (
+                input.size(2) * self.scale_factor,
+                input.size(3) * self.scale_factor,
+                input.size(4) * self.scale_factor,
+            )
+        else:
+            self.output_size = self.size
+
+        self.input_size = input.size()
+        output = input.new()
+        backend = type2backend[type(input)]
+        backend.VolumetricUpSamplingTrilinear_updateOutput(
+            backend.library_state,
+            input,
+            output,
+            self.output_size[0],
+            self.output_size[1],
+            self.output_size[2]
+        )
+        return output
+
+    def backward(self, grad_output):
+        assert grad_output.dim() == 5
+
+        grad_output = grad_output.contiguous()
+        grad_input = grad_output.new()
+        backend = type2backend[type(grad_output)]
+        backend.VolumetricUpSamplingTrilinear_updateGradInput(
+            backend.library_state,
+            grad_output,
+            grad_input,
+            self.input_size[0],
+            self.input_size[1],
+            self.input_size[2],
+            self.input_size[3],
+            self.input_size[4],
+            self.output_size[0],
+            self.output_size[1],
+            self.output_size[2]
+        )
+        return grad_input
+
+
 _all_functions.append(UpsamplingNearest2d)
 _all_functions.append(UpsamplingBilinear2d)
+_all_functions.append(UpsamplingNearest3d)
+_all_functions.append(UpsamplingTrilinear3d)

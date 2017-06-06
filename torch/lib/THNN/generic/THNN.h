@@ -1426,4 +1426,63 @@ TH_API void THNN_(VolumetricReplicationPadding_updateGradInput)(
           int pleft, int pright,
           int ptop, int pbottom,
           int pfront, int pback);
+
+TH_API void THNN_(VolumetricSubSampling_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          THTensor *weight,
+          THTensor *bias,
+          int kT, int kW, int kH,
+          int dT, int dW, int dH);
+TH_API void THNN_(VolumetricSubSampling_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          THTensor *weight,
+          int kT, int kW, int kH,
+          int dT, int dW, int dH);
+TH_API void THNN_(VolumetricSubSampling_accGradParameters)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradWeight,
+          THTensor *gradBias,
+          int kT, int kW, int kH,
+          int dT, int dW, int dH,
+          accreal scale);
+
+TH_API void THNN_(VolumetricUpSamplingNearest_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          int scale_factor);
+TH_API void THNN_(VolumetricUpSamplingNearest_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          int scale_factor);
+
+TH_API void THNN_(VolumetricUpSamplingTrilinear_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+	  int outputDepth,
+          int outputHeight,
+          int outputWidth);
+TH_API void THNN_(VolumetricUpSamplingTrilinear_updateGradInput)(
+          THNNState *state,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          int nbatch,
+          int nchannels,
+          int inputDepth,
+          int inputHeight,
+          int inputWidth,
+          int outputDepth,
+          int outputHeight,
+          int outputWidth);
+
 #endif
