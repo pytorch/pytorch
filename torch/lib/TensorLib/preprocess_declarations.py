@@ -1,108 +1,63 @@
 import common_with_cwrap
 
-cpu_floating_point = set([
-    'float',
-    'double',
-])
-
-cpu_integral = set([
-    'byte',
-    'char',
-    'short',
-    'int',
-    'long'
-])
-
-cpu_types = cpu_floating_point | cpu_integral
-cpu_type_map = {
-    'floating_point': cpu_floating_point,
-    'integral': cpu_integral,
-    'all': cpu_types
+type_map = {
+    'floating_point' : [
+        'Float',
+        'Double',
+        'Half',
+    ],
+    'integral' : [
+        'Byte',
+        'Char',
+        'Short',
+        'Int',
+        'Long'
+    ],
 }
 
-cuda_floating_point = cpu_floating_point | set(['half'])
-cuda_integral = cpu_integral
-cuda_types = cuda_floating_point | cuda_integral
-cuda_type_map = {
-    'floating_point': cuda_floating_point,
-    'integral': cuda_integral,
-    'all': cuda_types
-}
+all_types = type_map['floating_point'] + type_map['integral']
+type_map['all'] = all_types
 
-all_types = cpu_types | cuda_types
-
-processor_types = set([
-    'cpu',
-    'cuda',
-])
-
-processor_type_map = {
-    'cpu': cpu_type_map,
-    'cuda': cuda_type_map,
-}
-
+all_processors = ['CPU','CUDA']
 
 def process_types_and_processors(option):
-    # First, check if there are no types, processors, specifed. If so we assume
-    # that the method/function operates on all types and processors
-    if ('types' not in option and 'processors' not in option and
-            'type_processor_pairs' not in option):
-        return option
+    # if specific pairs were not listed, then enumerate them
+    # based on the processor and type attributes
+    # if processor or type is not defined, it is assumed to be all of them
+    if 'type_processor_pairs' not in option:
+        processors = option.get('processors', all_processors)
+        types = option.get('types', all_types)
+        pairs = [ [p,t] for p in processors for t in types ]
+    else:
+        pairs = option['type_processor_pairs']
 
-    # First, get the full set of types. If there are no  types specified, but a
-    # processor is specified, assume  we meant all types for that processor
-    processors = option['processors']
-    types = option['types'] if 'types' in option else []
+    # expand type alias (integral, floating_point, all)
+    def expand(pair):
+        p,t = pair
+        assert(p in all_processors)
+        if t in type_map:
+            return [ (p,tt) for tt in type_map[t] ]
+        assert(t in all_types)
+        return [ (p,t) ]
+    pairs = set(p for pair in pairs for p in expand(pair))
 
-    if len(types) == 0:
-        assert(len(processors) == 1)
-        if processors[0] == 'cpu':
-            types = list(cpu_types)
-        elif processors[0] == 'cuda':
-            types = list(cuda_types)
-        else:
-            assert(False)
+    # special case remove Half for cpu unless it is explicitly enabled
+    if not option.get('cpu_half',False):
+        pairs.discard(('CPU','Half'))
 
-    pairs = {}
-
-    # generate pairs for all processors
-    for processor in processors:
-        assert(processor in processor_types)
-        type_map = processor_type_map[processor]
-        for tstr in types:
-            # handle possible expansion
-            type_list = type_map[tstr] if tstr in type_map else [tstr]
-            for t in type_list:
-                assert(t in type_map['all'])
-                pairs[t] = processor
-
-    # if there are any prespecified tuples, handle them now
-    predefined_pairs = (option['type_processor_pairs'] if 'type_processor_pairs'
-                        in option else {})
-    for tstr in predefined_pairs:
-        pr = predefined_pairs[tstr]
-        assert(pr in processor_types)
-        type_map = processor_type_map[processor]
-        # handle possible expansion
-        type_list = type_map[tstr] if tstr in type_map else [tstr]
-        for t in type_list:
-            assert(t in type_map['all'])
-            pairs[t] = pr
-
-    option['processor_type_pairs'] = pairs
-    return option
-
+    # sort the result for easy reading
+    option['type_processor_pairs'] = sorted([p for p in pairs])
 
 def exclude(declaration):
     return 'only_register' in declaration
 
-def add_variants(declaration):
-    only_stateless = declaration.get('only_stateless',False)
-    with_stateless = declaration.get('with_stateless',False)
+def add_variants(option):
+    only_stateless = option.get('only_stateless', False)
+    with_stateless = option.get('with_stateless', False)
     # should we generate tensor.foo(...)
-    declaration['as_method'] = not only_stateless
+    option['as_method'] = not only_stateless
     # should we generate tlib::foo(tensor,...)
-    declaration['as_function'] = with_stateless
+    option['as_function'] = with_stateless
     # regardless we always generate type().foo(...) because the above will
     # call it
 
@@ -112,10 +67,8 @@ def run(declarations):
         common_with_cwrap.set_declaration_defaults(declaration)
         common_with_cwrap.enumerate_options_due_to_default(declaration)
         common_with_cwrap.sort_by_number_of_options(declaration)
-
-    declarations = [d for d in declarations if not exclude(d)]
-    declarations = [process_types_and_processors(d) for d in declarations]
-
-    add_variants(declaration)
+        for option in declaration['options']:
+            process_types_and_processors(option)
+            add_variants(option)
 
     return declarations

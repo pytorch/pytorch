@@ -503,7 +503,7 @@
   name: kthvalue
   defined_if: "!IS_CUDA"
   processors:
-    - cpu
+    - CPU
   with_stateless: True
   return: argument 0,1
   options:
@@ -602,7 +602,7 @@
   name: median
   defined_if: "!IS_CUDA"
   processors:
-    - cpu
+    - CPU
   with_stateless: True
   return: argument 0,1
   options:
@@ -716,10 +716,10 @@
   name: all
   defined_if: defined(TH_REAL_IS_BYTE) || defined(THC_REAL_IS_BYTE)
   types:
-    - byte
+    - Byte
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   cname: logicalall
   return: bool
   arguments:
@@ -730,10 +730,10 @@
   name: any
   defined_if: defined(TH_REAL_IS_BYTE) || defined(THC_REAL_IS_BYTE)
   types:
-    - byte
+    - Byte
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   cname: logicalany
   return: bool
   arguments:

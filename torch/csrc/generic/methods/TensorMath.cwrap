@@ -4,12 +4,12 @@
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_LONG) || defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_SHORT) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE || CUDA_SHORT || CUDA_INT || CUDA_LONG
   types:
     - floating_point
-    - long
-    - int
-    - short
+    - Long
+    - Int
+    - Short
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   with_stateless: True
   arguments:
     - arg: THTensor* destination
@@ -24,12 +24,12 @@
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_LONG) || defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_SHORT) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE || CUDA_SHORT || CUDA_INT || CUDA_LONG
   types:
     - floating_point
-    - long
-    - int
-    - short
+    - Long
+    - Int
+    - Short
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   arguments:
     - THTensor* self
     - THTensor* self
@@ -42,8 +42,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   cname: sigmoid
   return: self
   arguments:
@@ -57,8 +57,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   cname: sigmoid
   with_stateless: True
   return: argument 0
@@ -75,8 +75,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   cname: log
   return: self
   arguments:
@@ -90,8 +90,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   with_stateless: True
   return: argument 0
   arguments:
@@ -107,8 +107,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   cname: log1p
   return: self
   arguments:
@@ -122,8 +122,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   with_stateless: True
   return: argument 0
   arguments:
@@ -138,8 +138,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   with_stateless: True
   return: argument 0
   arguments:
@@ -154,8 +154,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   cname: lgamma
   return: self
   arguments:
@@ -169,8 +169,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   cname: exp
   return: self
   arguments:
@@ -184,8 +184,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   with_stateless: True
   return: argument 0
   arguments:
@@ -201,8 +201,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   cname: cos
   return: self
   arguments:
@@ -216,8 +216,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   with_stateless: True
   return: argument 0
   arguments:
@@ -233,8 +233,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   cname: acos
   return: self
   arguments:
@@ -248,8 +248,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   with_stateless: True
   return: argument 0
   arguments:
@@ -265,8 +265,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   cname: cosh
   return: self
   arguments:
@@ -280,8 +280,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   with_stateless: True
   return: argument 0
   arguments:
@@ -297,8 +297,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   cname: sin
   return: self
   arguments:
@@ -312,8 +312,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   with_stateless: True
   return: argument 0
   arguments:
@@ -329,8 +329,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   cname: asin
   return: self
   arguments:
@@ -344,8 +344,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   with_stateless: True
   return: argument 0
   arguments:
@@ -361,8 +361,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   cname: sinh
   return: self
   arguments:
@@ -376,8 +376,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   with_stateless: True
   return: argument 0
   arguments:
@@ -393,8 +393,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   cname: tan
   return: self
   arguments:
@@ -408,8 +408,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   with_stateless: True
   return: argument 0
   arguments:
@@ -425,8 +425,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   cname: atan
   return: self
   arguments:
@@ -440,8 +440,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   with_stateless: True
   return: argument 0
   arguments:
@@ -457,8 +457,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   cname: tanh
   return: self
   arguments:
@@ -472,8 +472,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   with_stateless: True
   return: argument 0
   arguments:
@@ -489,8 +489,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   cname: sqrt
   return: self
   arguments:
@@ -504,8 +504,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   with_stateless: True
   return: argument 0
   arguments:
@@ -521,8 +521,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   cname: rsqrt
   return: self
   arguments:
@@ -536,8 +536,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   with_stateless: True
   return: argument 0
   arguments:
@@ -553,8 +553,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   cname: ceil
   return: self
   arguments:
@@ -568,8 +568,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   with_stateless: True
   return: argument 0
   arguments:
@@ -585,8 +585,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   cname: floor
   return: self
   arguments:
@@ -600,8 +600,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   with_stateless: True
   return: argument 0
   arguments:
@@ -617,8 +617,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   cname: round
   return: self
   arguments:
@@ -632,8 +632,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   with_stateless: True
   return: argument 0
   arguments:
@@ -649,8 +649,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   cname: trunc
   return: self
   arguments:
@@ -664,8 +664,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   with_stateless: True
   return: argument 0
   arguments:
@@ -681,8 +681,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   cname: frac
   return: self
   arguments:
@@ -696,8 +696,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   with_stateless: True
   return: argument 0
   arguments:
@@ -712,8 +712,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   with_stateless: True
   options:
     - cname: meanall
@@ -747,8 +747,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   with_stateless: True
   options:
     - cname: varall
@@ -784,8 +784,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   with_stateless: True
   options:
     - cname: stdall
@@ -821,8 +821,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   with_stateless: True
   options:
     - cname: normall
@@ -860,8 +860,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   with_stateless: True
   options:
     - cname: renorm
@@ -882,8 +882,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   options:
     - cname: renorm
       return: self
@@ -902,8 +902,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   with_stateless: True
   options:
     - cname: dist
@@ -922,8 +922,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   with_stateless: True
   options:
     - cname: cinv
@@ -940,8 +940,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   options:
     - cname: cinv
       return: self
@@ -956,8 +956,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   with_stateless: True
   options:
     - cname: neg
@@ -974,8 +974,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   options:
     - cname: neg
       return: self
@@ -988,12 +988,12 @@
   name: atan2
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
   types:
-    - float
-    - double
+    - Float
+    - Double
   processors:
-    - cpu
-  type_processor_pairs:
-    float: cuda
+    - CPU
+  type_processor_pairs: [[CPU,Float],[CPU,Double],[CUDA,Float]]
+
   with_stateless: True
   cname: atan2
   return: argument 0
@@ -1008,13 +1008,7 @@
 [[
   name: atan2_
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
-  types:
-    - float
-    - double
-  processors:
-    - cpu
-  type_processor_pairs:
-    float: cuda
+  type_processor_pairs: [[CPU,Float],[CPU,Double],[CUDA,Float]]
   cname: atan2
   return: argument 0
   arguments:
@@ -1034,8 +1028,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   with_stateless: True
   return: argument 0
   options:
@@ -1066,8 +1060,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   return: argument 0
   cname: pow
   options:
@@ -1090,8 +1084,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   with_stateless: True
   return: argument 0
   cname: lerp
@@ -1110,8 +1104,8 @@
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   return: self
   cname: lerp
   arguments:
@@ -1126,10 +1120,10 @@
   name: linspace
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
   types:
-    - float
-    - double
+    - Float
+    - Double
   processors:
-    - cpu
+    - CPU
   only_stateless: True
   return: argument 0
   arguments:
@@ -1145,10 +1139,10 @@
   name: logspace
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
   types:
-    - float
-    - double
+    - Float
+    - Double
   processors:
-    - cpu
+    - CPU
   only_stateless: True
   return: argument 0
   arguments:
@@ -1164,10 +1158,10 @@
   name: histc
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
   types:
-    - float
-    - double
+    - Float
+    - Double
   processors:
-    - cpu
+    - CPU
   with_stateless: True
   return: argument 0
   options:
@@ -1626,13 +1620,8 @@
 [[
   name: dot
   defined_if: CUDA_FLOAT || CUDA_DOUBLE || CUDA_HALF || !IS_CUDA
-  types:
-    - floating_point
-  processors:
-    - cpu
-    - cuda
-  type_processor_pairs:
-    integral: cpu
+  type_processor_pairs: [[CUDA,floating_point], [CPU,all]]
+
   with_stateless: True
   return: accreal
   arguments:
@@ -1705,7 +1694,7 @@
   name: eye
   defined_if: "!IS_CUDA"
   processors:
-    - cpu
+    - CPU
   only_stateless: True
   return: argument 0
   options:
@@ -2112,11 +2101,11 @@ static const char *R = &__R;
   name: gesv
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
   types:
-    - float
-    - double
+    - Float
+    - Double
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   with_stateless: True
   return: argument 0,1
   arguments:
@@ -2132,11 +2121,11 @@ static const char *R = &__R;
   name: gels
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
   types:
-    - float
-    - double
+    - Float
+    - Double
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   with_stateless: True
   return: argument 0,1
   arguments:
@@ -2152,10 +2141,10 @@ static const char *R = &__R;
   name: trtrs
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
   types:
-    - float
-    - double
+    - Float
+    - Double
   processors:
-    - cpu
+    - CPU
   with_stateless: True
   return: argument 0,1
   arguments:
@@ -2184,11 +2173,11 @@ static const char *R = &__R;
   cname: syev
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
   types:
-    - float
-    - double
+    - Float
+    - Double
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   with_stateless: True
   return: argument 0,1
   arguments:
@@ -2212,11 +2201,11 @@ static const char *R = &__R;
   cname: geev
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
   types:
-    - float
-    - double
+    - Float
+    - Double
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   with_stateless: True
   return: argument 0,1
   arguments:
@@ -2236,11 +2225,11 @@ static const char *R = &__R;
   cname: gesvd
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
   types:
-    - float
-    - double
+    - Float
+    - Double
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   with_stateless: True
   return: argument 0,1,2
   arguments:
@@ -2262,11 +2251,11 @@ static const char *R = &__R;
   cname: getri
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
   types:
-    - float
-    - double
+    - Float
+    - Double
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   with_stateless: True
   return: argument 0
   arguments:
@@ -2279,11 +2268,11 @@ static const char *R = &__R;
   name: potrf
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
   types:
-    - float
-    - double
+    - Float
+    - Double
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   with_stateless: True
   return: argument 0
   arguments:
@@ -2300,11 +2289,11 @@ static const char *R = &__R;
   name: potrs
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
   types:
-    - float
-    - double
+    - Float
+    - Double
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   with_stateless: True
   return: argument 0
   arguments:
@@ -2322,11 +2311,11 @@ static const char *R = &__R;
   name: potri
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
   types:
-    - float
-    - double
+    - Float
+    - Double
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   with_stateless: True
   return: argument 0
   arguments:
@@ -2343,10 +2332,10 @@ static const char *R = &__R;
   name: pstrf
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
   types:
-    - float
-    - double
+    - Float
+    - Double
   processors:
-    - cpu
+    - CPU
   with_stateless: True
   return: argument 0,1
   after_call:
@@ -2369,11 +2358,11 @@ static const char *R = &__R;
   name: qr
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
   types:
-    - float
-    - double
+    - Float
+    - Double
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   with_stateless: True
   return: argument 0,1
   arguments:
@@ -2388,10 +2377,10 @@ static const char *R = &__R;
   name: geqrf
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
   types:
-    - float
-    - double
+    - Float
+    - Double
   processors:
-    - cpu
+    - CPU
   with_stateless: True
   return: argument 0,1
   arguments:
@@ -2406,10 +2395,10 @@ static const char *R = &__R;
   name: orgqr
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
   types:
-    - float
-    - double
+    - Float
+    - Double
   processors:
-    - cpu
+    - CPU
   with_stateless: True
   return: argument 0,1
   arguments:
@@ -2423,10 +2412,10 @@ static const char *R = &__R;
   name: ormqr
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
   types:
-    - float
-    - double
+    - Float
+    - Double
   processors:
-    - cpu
+    - CPU
   with_stateless: True
   return: argument 0,1
   arguments:
@@ -2452,8 +2441,8 @@ static const char *R = &__R;
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   with_stateless: true
   return: argument 0,1
   arguments:
@@ -2474,8 +2463,8 @@ static const char *R = &__R;
   types:
     - floating_point
   processors:
-    - cpu
-    - cuda
+    - CPU
+    - CUDA
   with_stateless: true
   return: argument 0
   arguments:
