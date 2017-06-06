@@ -96,6 +96,8 @@ PyObject * THPTensor_(setIndex)(THPTensor *self, PyObject *args)
 [[
   name: zeros
   only_stateless: True
+  variants:
+    - function
   auto_gpu: False
   return: argument 0
   arguments:
@@ -108,6 +110,8 @@ PyObject * THPTensor_(setIndex)(THPTensor *self, PyObject *args)
 [[
   name: ones
   only_stateless: True
+  variants:
+    - function
   auto_gpu: False
   return: argument 0
   arguments:
@@ -124,6 +128,9 @@ PyObject * THPTensor_(setIndex)(THPTensor *self, PyObject *args)
   cpu_half: True
   auto_gpu: False
   with_stateless: True
+  variants:
+    - method
+    - function
   arguments:
     - THTensor* self
 ]]
@@ -351,6 +358,9 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
   name: maskedSelect
   python_name: masked_select
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -362,6 +372,9 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: transpose
   with_stateless: True
+  variants:
+    - method
+    - function
   cname: newTranspose
   cpu_half: True
   auto_gpu: False
@@ -392,6 +405,9 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: t
   with_stateless: True
+  variants:
+    - method
+    - function
   auto_gpu: False
   cname: newTranspose
   return: THTensor*
@@ -423,6 +439,9 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
   name: squeeze
   cpu_half: True
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   options:
     - arguments:
@@ -458,6 +477,9 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: unsqueeze
   with_stateless: True
+  variants:
+    - method
+    - function
   cpu_half: True
   auto_gpu: False
   return: argument 0
@@ -486,6 +508,9 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: nonzero
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THIndexTensor* result
@@ -544,6 +569,9 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
   name: indexSelect
   python_name: index_select
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -626,6 +654,8 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: range
   only_stateless: True
+  variants:
+    - function
   defined_if: "!IS_CUDA"
   processors:
     - CPU
@@ -647,6 +677,8 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
   name: arange
   cname: range
   only_stateless: True
+  variants:
+    - function
   defined_if: "!IS_CUDA"
   processors:
     - CPU
@@ -710,6 +742,9 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: gather
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   before_call: |
     THLongStoragePtr _size(THIndexTensor_(newSizeOf)(LIBRARY_STATE arg_index));
@@ -729,6 +764,8 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
   method_flags: METH_KEYWORDS
   only_register: True
   only_stateless: True
+  variants:
+    - function
 ]]
 #ifndef TH_REAL_IS_HALF
 static PyObject * THPTensor_stateless_(cat)(THPTensor *_unused, PyObject *args, PyObject *kwargs)
@@ -818,6 +855,9 @@ invalid_arguments:
 [[
   name: equal
   with_stateless: True
+  variants:
+    - method
+    - function
   return: bool
   arguments:
     - THTensor* self
@@ -841,6 +881,9 @@ PyObject * THPTensor_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: __and__
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   options:
     - cname: bitand
@@ -860,6 +903,9 @@ PyObject * THPTensor_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: __iand__
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   options:
     - cname: bitand
@@ -877,6 +923,9 @@ PyObject * THPTensor_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: __or__
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   options:
     - cname: bitor
@@ -896,6 +945,9 @@ PyObject * THPTensor_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: __ior__
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   options:
     - cname: bitor
@@ -913,6 +965,9 @@ PyObject * THPTensor_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: __xor__
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   options:
     - cname: bitxor
@@ -932,6 +987,9 @@ PyObject * THPTensor_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: __ixor__
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   options:
     - cname: bitxor
@@ -949,6 +1007,9 @@ PyObject * THPTensor_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: __lshift__
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   options:
     - cname: lshift
@@ -968,6 +1029,9 @@ PyObject * THPTensor_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: __ilshift__
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   options:
     - cname: lshift
@@ -985,6 +1049,9 @@ PyObject * THPTensor_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: __rshift__
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   options:
     - cname: rshift
@@ -1004,6 +1071,9 @@ PyObject * THPTensor_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: __irshift__
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   options:
     - cname: rshift

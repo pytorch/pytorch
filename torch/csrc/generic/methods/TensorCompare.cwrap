@@ -37,6 +37,8 @@
 [[
   name: lt
   only_stateless: True
+  variants:
+    - function
   return: argument 0
   options:
     - cname: ltValue
@@ -107,6 +109,8 @@
 [[
   name: gt
   only_stateless: True
+  variants:
+    - function
   return: argument 0
   options:
     - cname: gtValue
@@ -177,6 +181,8 @@
 [[
   name: le
   only_stateless: True
+  variants:
+    - function
   return: argument 0
   options:
     - cname: leValue
@@ -247,6 +253,8 @@
 [[
   name: ge
   only_stateless: True
+  variants:
+    - function
   return: argument 0
   options:
     - cname: geValue
@@ -317,6 +325,8 @@
 [[
   name: eq
   only_stateless: True
+  variants:
+    - function
   return: argument 0
   options:
     - cname: eqValue
@@ -387,6 +397,8 @@
 [[
   name: ne
   only_stateless: True
+  variants:
+    - function
   return: argument 0
   options:
     - cname: neValue
@@ -420,6 +432,9 @@
 [[
   name: min
   with_stateless: True
+  variants:
+    - method
+    - function
   options:
     - cname: minall
       return: real
@@ -461,6 +476,9 @@
 [[
   name: max
   with_stateless: True
+  variants:
+    - method
+    - function
   options:
     - cname: maxall
       return: real
@@ -505,6 +523,9 @@
   processors:
     - CPU
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0,1
   options:
     - before_call: long __last_dim = THTensor_(nDimension)(LIBRARY_STATE ((THPTensor*)$arg2)->cdata)-1;
@@ -555,6 +576,9 @@
 [[
   name: mode
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0,1
   options:
     - before_call: long __last_dim = THTensor_(nDimension)(LIBRARY_STATE ((THPTensor*)$arg2)->cdata)-1;
@@ -604,6 +628,9 @@
   processors:
     - CPU
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0,1
   options:
     - before_call: long __last_dim = THTensor_(nDimension)(LIBRARY_STATE ((THPTensor*)$arg2)->cdata)-1;
@@ -650,6 +677,9 @@
 [[
   name: sort
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0,1
   options:
     - before_call: long __last_dim = THTensor_(nDimension)(LIBRARY_STATE ((THPTensor*)$arg2)->cdata)-1;
@@ -684,6 +714,9 @@
 [[
   name: topk
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0,1
   options:
     - before_call: long __last_dim = THTensor_(nDimension)(LIBRARY_STATE ((THPTensor*)$arg2)->cdata)-1;

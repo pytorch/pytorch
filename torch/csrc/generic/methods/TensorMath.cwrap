@@ -11,6 +11,9 @@
     - CPU
     - CUDA
   with_stateless: True
+  variants:
+    - method
+    - function
   arguments:
     - arg: THTensor* destination
       output: True
@@ -61,6 +64,9 @@
     - CUDA
   cname: sigmoid
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -93,6 +99,9 @@
     - CPU
     - CUDA
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -125,6 +134,9 @@
     - CPU
     - CUDA
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -141,6 +153,9 @@
     - CPU
     - CUDA
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -187,6 +202,9 @@
     - CPU
     - CUDA
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -219,6 +237,9 @@
     - CPU
     - CUDA
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -251,6 +272,9 @@
     - CPU
     - CUDA
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -283,6 +307,9 @@
     - CPU
     - CUDA
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -315,6 +342,9 @@
     - CPU
     - CUDA
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -347,6 +377,9 @@
     - CPU
     - CUDA
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -379,6 +412,9 @@
     - CPU
     - CUDA
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -411,6 +447,9 @@
     - CPU
     - CUDA
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -443,6 +482,9 @@
     - CPU
     - CUDA
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -475,6 +517,9 @@
     - CPU
     - CUDA
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -507,6 +552,9 @@
     - CPU
     - CUDA
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -539,6 +587,9 @@
     - CPU
     - CUDA
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -571,6 +622,9 @@
     - CPU
     - CUDA
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -603,6 +657,9 @@
     - CPU
     - CUDA
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -635,6 +692,9 @@
     - CPU
     - CUDA
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -667,6 +727,9 @@
     - CPU
     - CUDA
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -699,6 +762,9 @@
     - CPU
     - CUDA
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -715,6 +781,9 @@
     - CPU
     - CUDA
   with_stateless: True
+  variants:
+    - method
+    - function
   options:
     - cname: meanall
       return: accreal
@@ -750,6 +819,9 @@
     - CPU
     - CUDA
   with_stateless: True
+  variants:
+    - method
+    - function
   options:
     - cname: varall
       return: accreal
@@ -787,6 +859,9 @@
     - CPU
     - CUDA
   with_stateless: True
+  variants:
+    - method
+    - function
   options:
     - cname: stdall
       return: accreal
@@ -824,6 +899,9 @@
     - CPU
     - CUDA
   with_stateless: True
+  variants:
+    - method
+    - function
   options:
     - cname: normall
       return: accreal
@@ -863,6 +941,9 @@
     - CPU
     - CUDA
   with_stateless: True
+  variants:
+    - method
+    - function
   options:
     - cname: renorm
       return: argument 0
@@ -905,6 +986,9 @@
     - CPU
     - CUDA
   with_stateless: True
+  variants:
+    - method
+    - function
   options:
     - cname: dist
       return: accreal
@@ -925,6 +1009,9 @@
     - CPU
     - CUDA
   with_stateless: True
+  variants:
+    - method
+    - function
   options:
     - cname: cinv
       return: argument 0
@@ -959,6 +1046,9 @@
     - CPU
     - CUDA
   with_stateless: True
+  variants:
+    - method
+    - function
   options:
     - cname: neg
       return: argument 0
@@ -995,6 +1085,9 @@
   type_processor_pairs: [[CPU,Float],[CPU,Double],[CUDA,Float]]
 
   with_stateless: True
+  variants:
+    - method
+    - function
   cname: atan2
   return: argument 0
   arguments:
@@ -1031,6 +1124,9 @@
     - CPU
     - CUDA
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   options:
     - cname: pow
@@ -1087,6 +1183,9 @@
     - CPU
     - CUDA
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   cname: lerp
   arguments:
@@ -1125,6 +1224,8 @@
   processors:
     - CPU
   only_stateless: True
+  variants:
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1144,6 +1245,8 @@
   processors:
     - CPU
   only_stateless: True
+  variants:
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1163,6 +1266,9 @@
   processors:
     - CPU
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   options:
     - arguments:
@@ -1206,6 +1312,9 @@
 [[
   name: sum
   with_stateless: True
+  variants:
+    - method
+    - function
   options:
     - cname: sumall
       return: accreal
@@ -1235,6 +1344,9 @@
 [[
   name: prod
   with_stateless: True
+  variants:
+    - method
+    - function
   options:
     - cname: prodall
       return: accreal
@@ -1264,6 +1376,9 @@
 [[
   name: cumsum
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1276,6 +1391,9 @@
 [[
   name: cumprod
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1288,6 +1406,9 @@
 [[
   name: sign
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1307,6 +1428,9 @@
 [[
   name: trace
   with_stateless: True
+  variants:
+    - method
+    - function
   return: accreal
   arguments:
     - THTensor* self
@@ -1315,6 +1439,9 @@
 [[
   name: add
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   options:
     - cname: add
@@ -1374,6 +1501,9 @@
 [[
   name: sub
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   options:
     - cname: sub
@@ -1416,6 +1546,9 @@
 [[
   name: mul
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   options:
     - cname: mul
@@ -1454,6 +1587,9 @@
 [[
   name: div
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   options:
     - cname: div
@@ -1493,6 +1629,9 @@
   name: fmod
   return: argument 0
   with_stateless: True
+  variants:
+    - method
+    - function
   options:
     - cname: fmod
       arguments:
@@ -1531,6 +1670,9 @@
   name: remainder
   return: argument 0
   with_stateless: True
+  variants:
+    - method
+    - function
   options:
     - cname: remainder
       arguments:
@@ -1567,6 +1709,9 @@
 [[
   name: clamp
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   options:
     - cname: clamp
@@ -1623,6 +1768,9 @@
   type_processor_pairs: [[CUDA,floating_point], [CPU,all]]
 
   with_stateless: True
+  variants:
+    - method
+    - function
   return: accreal
   arguments:
     - arg: THTensor* self
@@ -1634,6 +1782,9 @@
 [[
   name: tril
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* destination
@@ -1657,6 +1808,9 @@
 [[
   name: triu
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* destination
@@ -1680,6 +1834,9 @@
 [[
   name: cross
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* destination
@@ -1696,6 +1853,8 @@
   processors:
     - CPU
   only_stateless: True
+  variants:
+    - function
   return: argument 0
   options:
     - arguments:
@@ -1713,6 +1872,9 @@
 [[
   name: diag
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   options:
     - arguments:
@@ -1726,6 +1888,9 @@
 [[
   name: addmm
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   options:
     - arguments:
@@ -1783,6 +1948,9 @@
 [[
   name: addmv
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1815,6 +1983,9 @@
 [[
   name: addr
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1848,6 +2019,9 @@
   name: ger
   cname: addr
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   before_call: |
     long s1 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg4)->cdata, 0);
@@ -1867,6 +2041,9 @@
   name: mv
   cname: addmv
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   before_call: |
     long s = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg4)->cdata, 0);
@@ -1887,6 +2064,9 @@
 [[
   name: mm
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   options:
     - cname: addmm
@@ -1921,6 +2101,9 @@
   name: bmm
   cname: baddbmm
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   before_call: |
     long s1 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg4)->cdata, 0);
@@ -1943,6 +2126,9 @@
 [[
   name: addbmm
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1975,6 +2161,9 @@
 [[
   name: baddbmm
   with_stateless: true
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -2007,6 +2196,9 @@
 [[
   name: addcmul
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -2047,6 +2239,9 @@
 [[
   name: addcdiv
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -2107,6 +2302,9 @@ static const char *R = &__R;
     - CPU
     - CUDA
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0,1
   arguments:
     - arg: THTensor* solution
@@ -2127,6 +2325,9 @@ static const char *R = &__R;
     - CPU
     - CUDA
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0,1
   arguments:
     - arg: THTensor* res1
@@ -2146,6 +2347,9 @@ static const char *R = &__R;
   processors:
     - CPU
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0,1
   arguments:
     - arg: THTensor* res1
@@ -2179,6 +2383,9 @@ static const char *R = &__R;
     - CPU
     - CUDA
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0,1
   arguments:
     - arg: THTensor* res1
@@ -2207,6 +2414,9 @@ static const char *R = &__R;
     - CPU
     - CUDA
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0,1
   arguments:
     - arg: THTensor* res1
@@ -2231,6 +2441,9 @@ static const char *R = &__R;
     - CPU
     - CUDA
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0,1,2
   arguments:
     - arg: THTensor* res1
@@ -2257,6 +2470,9 @@ static const char *R = &__R;
     - CPU
     - CUDA
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* output
@@ -2274,6 +2490,9 @@ static const char *R = &__R;
     - CPU
     - CUDA
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* output
@@ -2295,6 +2514,9 @@ static const char *R = &__R;
     - CPU
     - CUDA
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -2317,6 +2539,9 @@ static const char *R = &__R;
     - CPU
     - CUDA
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* output
@@ -2337,6 +2562,9 @@ static const char *R = &__R;
   processors:
     - CPU
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0,1
   after_call:
     THIntTensor_sub(((THPIntTensor*)$arg1)->cdata, ((THPIntTensor*)$arg1)->cdata, 1);
@@ -2364,6 +2592,9 @@ static const char *R = &__R;
     - CPU
     - CUDA
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0,1
   arguments:
     - arg: THTensor* res1
@@ -2382,6 +2613,9 @@ static const char *R = &__R;
   processors:
     - CPU
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0,1
   arguments:
     - arg: THTensor* res1
@@ -2400,6 +2634,9 @@ static const char *R = &__R;
   processors:
     - CPU
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0,1
   arguments:
     - arg: THTensor* result
@@ -2417,6 +2654,9 @@ static const char *R = &__R;
   processors:
     - CPU
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0,1
   arguments:
     - arg: THTensor* result
@@ -2444,6 +2684,9 @@ static const char *R = &__R;
     - CPU
     - CUDA
   with_stateless: true
+  variants:
+    - method
+    - function
   return: argument 0,1
   arguments:
     - arg: THTensor* result
@@ -2466,6 +2709,9 @@ static const char *R = &__R;
     - CPU
     - CUDA
   with_stateless: true
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result

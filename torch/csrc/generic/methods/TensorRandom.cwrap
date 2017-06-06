@@ -4,6 +4,8 @@
   processors:
     - CPU
   only_stateless: True
+  variants:
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -67,6 +69,9 @@ static void THTensor_(random1__)(THTensor *self, THGenerator *gen, long b)
   processors:
     - CPU
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THLongTensor* result
@@ -136,6 +141,8 @@ static void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, TH
     - CPU
   return: argument 0
   only_stateless: True
+  variants:
+    - function
   options:
     - cname: normal_means
       arguments:
@@ -260,6 +267,8 @@ static void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, TH
   processors:
     - CPU
   only_stateless: True
+  variants:
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -280,6 +289,8 @@ static void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, TH
   processors:
     - CPU
   only_stateless: True
+  variants:
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -299,6 +310,9 @@ static void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, TH
   processors:
     - CUDA
   with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THIndexTensor* result
@@ -360,6 +374,8 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
     - CUDA
   return: argument 0
   only_stateless: True
+  variants:
+    - function
   options:
     - cname: normal
       arguments:
@@ -466,6 +482,8 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
   processors:
     - CUDA
   only_stateless: True
+  variants:
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -482,6 +500,8 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
   processors:
     - CUDA
   only_stateless: True
+  variants:
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -518,6 +538,9 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
     - CPU
   return: argument 0
   with_stateless: True
+  variants:
+    - method
+    - function
   before_call:
     THTensor_(resizeAs)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata, ((THPTensor*)$arg2)->cdata);
   cname: BERNOULLI_TENSOR
@@ -591,6 +614,9 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
     - CUDA
   return: argument 0
   with_stateless: True
+  variants:
+    - method
+    - function
   cname: BERNOULLI_TENSOR
   before_call:
     THTensor_(resizeAs)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata, ((THPTensor*)$arg1)->cdata);
