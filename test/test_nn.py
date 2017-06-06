@@ -3144,6 +3144,10 @@ new_module_tests = [
         input_size=(3, 2, 5),
         check_inplace=True
     ),
+    dict(
+        module_name='GLU',
+        input_size=(5, 6),
+    ),
 ]
 
 for test_params in module_tests + new_module_tests:

@@ -437,6 +437,12 @@ def relu(input, inplace=False):
     return _functions.thnn.Threshold.apply(input, 0, 0, inplace)
 
 
+def glu(input, dim=-1):
+    if dim < 0:
+        dim += input.dim()
+    return _functions.thnn.GatedLinear(dim)(input)
+
+
 def hardtanh(input, min_val=-1., max_val=1., inplace=False):
     return _functions.thnn.auto.Hardtanh(min_val, max_val, inplace)(input)
 
