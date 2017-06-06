@@ -468,18 +468,8 @@ Convolution::Convolution(
     params.pad[i] = pad[i];
     params.stride[i] = stride[i];
     params.dilation[i] = dilation[i];
-    CHECK_ARG(stride[i] > 0);
-    CHECK_ARG(dilation[i] > 0);
   }
   params.groups = groups;
-
-  for (int i = 2; i != input->nDimension; ++i) {
-    int kernel_size = params.weight_size[i];
-    CHECK_ARG(kernel_size > 0);
-  }
-
-  int num_input_planes = params.weight_size[1];
-  CHECK_ARG(num_input_planes == params.input_size[1]/groups);
 
   setTensorDescriptor(idesc, dataType, input, groups);
   setTensorDescriptor(odesc, dataType, output, groups);
