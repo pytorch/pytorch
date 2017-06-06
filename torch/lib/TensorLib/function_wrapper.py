@@ -3,18 +3,23 @@ import yaml
 from code_template import CodeTemplate
 
 # what has to be done to add a Operation ...
-# 1. add virtual dispatch declaration to Type.h
+# 1. add virtual dispatch declaration to Type.h and default impl to Type.cpp
 TYPE_METHOD_DECLARATION = CodeTemplate("""\
-virtual ${return_type} ${api_name}(${formals}) = 0;
+virtual ${return_type} ${api_name}(${formals});
+""")
+TYPE_METHOD_DEFINITION = CodeTemplate("""\
+${return_type} Type::${api_name}(${formals}) {
+    throw std::runtime_error(std::string("${api_name} is not implemented for type ") + toString());
+}
 """)
 # 2. add virtual override to TypeDerived.h
-TYPE_VIRTUAL_OVERRIDE = CodeTemplate("""\
+TYPE_DERIVED_DECLARATION = CodeTemplate("""\
 virtual ${return_type} ${api_name}(${formals}) override;
 """)
 # 3. add override definition to TypeDerived.cpp
-TYPE_GENERIC_DEFINITION = CodeTemplate("""\
+TYPE_DERIVED_DEFINITION = CodeTemplate("""\
 ${return_type} ${Type}::${api_name}(${formals}) {
-    //TODO: ...
+    ${type_definition_body}
 }
 """)
 # 4. add non-virtual declaration to Tensor.h
@@ -24,7 +29,7 @@ ${return_type} ${api_name}(${method_formals});
 # 5. add non-virtual declaration to Tensor.cpp
 TENSOR_METHOD_DEFINITION = CodeTemplate("""\
 ${return_type} Tensor::${api_name}(${method_formals}) {
-    return type().${api_name}(${method_actuals})
+    return type().${api_name}(${method_actuals});
 }
 """)
 # 6. add a method declaration in Functions.h
@@ -34,7 +39,7 @@ ${return_type} ${api_name}(${formals});
 # 7. add a method definition in Functions.cpp
 FUNCTION_DEFINITION = CodeTemplate("""\
 ${return_type} ${api_name}(${formals}) {
-    return ${first_tensor}.type().${api_name}(${formals});
+    return ${first_tensor}.type().${api_name}(${actuals});
 }
 """)
 
@@ -50,7 +55,6 @@ TYPE_FORMAL_GENERIC = {
 TYPE_RETURN = {
     'THTensor*' : 'Tensor *'
 }
-
 
 class nested_dict(object):
     def __init__(self,base,parent):
@@ -96,9 +100,10 @@ def create_generic(top_env, declarations):
     def process_option(option):
         if option['cname'] != 'neg':
             raise NYIError("all not implemented")
-        print(yaml.dump(option))
+
         formals = get_formals(option)
         option['formals'] = [format_formal(f) for f in formals]
+        option['actuals'] = [ f['name'] for f in formals ]
         option['method_formals'] = [format_formal(f) for f in formals
              if f['name'] != 'self']
         option['method_actuals'] = [
@@ -109,6 +114,8 @@ def create_generic(top_env, declarations):
         env = nested_dict(option,top_env)
         top_env['type_method_declarations'].append(
             TYPE_METHOD_DECLARATION.substitute(env))
+        top_env['type_method_definitions'].append(
+            TYPE_METHOD_DEFINITION.substitute(env))
         top_env['tensor_method_declarations'].append(
             TENSOR_METHOD_DECLARATION.substitute(env))
         top_env['tensor_method_definitions'].append(
@@ -127,17 +134,28 @@ def create_generic(top_env, declarations):
             except NYIError as e:
                 option['skip'] = True
 
-def create_derived(env,declarations):
-    declarations = []
-    definitions = []
+def create_derived(processor_type_env,declarations):
+    type_object_declarations = []
+    type_object_definitions = []
+    def emit_body(option):
+        return []
     def process_option(option):
-        pass
+        pair = (processor_type_env['Processor'],processor_type_env['ScalarName'])
+        if pair in option['type_processor_pairs']:
+            body = emit_body(option)
+            option['type_definition_body'] = body
+            env = nested_dict(option, processor_type_env)
+            type_object_declarations.append(
+                TYPE_DERIVED_DECLARATION.substitute(env))
+            type_object_definitions.append(
+                TYPE_DERIVED_DEFINITION.substitute(env))
+
 
     for declaration in declarations:
         for option in declaration['options']:
-            if option.get('skip',False):
+            if not option.get('skip',False):
                 try:
                     process_option(option)
                 except NYIError as e:
                     pass
-    return declarations,definitions
+    return type_object_declarations,type_object_definitions

@@ -26,6 +26,10 @@ Generator * ${Type}::newGenerator() {
   return new ${Processor}Generator(context);
 }
 
+const char * ${Type}::toString() const {
+  return "${Type}";
+}
+
 
 // example
 Tensor * ${Type}::add(Tensor & a, Tensor & b) {
