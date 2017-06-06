@@ -1,6 +1,6 @@
 #include "TensorLib/${Type}.h"
 #include "TensorLib/${Storage}.h"
-
+#include "TensorLib/${Processor}Generator.h"
 #include <iostream>
 
 namespace tlib {
@@ -22,6 +22,10 @@ Storage * ${Type}::newStorage() {
 Storage * ${Type}::newStorage(size_t size) {
   return new ${Storage}(context,size);
 }
+Generator * ${Type}::newGenerator() {
+  return new ${Processor}Generator(context);
+}
+
 
 // example
 Tensor * ${Type}::add(Tensor & a, Tensor & b) {

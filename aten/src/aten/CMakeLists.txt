@@ -53,7 +53,9 @@ ENDIF()
 
 IF(NO_CUDA)
   MESSAGE(STATUS "ignoring CUDA")
+  SET(CUDA_FLAG -n)
 ELSE()
+  ADD_DEFINITIONS(-DTENSORLIB_CUDA_ENABLED)
   FIND_PACKAGE(CUDA 5.5)
   IF(CUDA_FOUND)
     INCLUDE_DIRECTORIES(${CUDA_INCLUDE_DIRS})
@@ -82,13 +84,15 @@ FILE(GLOB base_h RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "*.h")
 FILE(GLOB base_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "*.cpp")
 
 EXECUTE_PROCESS(
-    COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/gen.py -s ${CMAKE_CURRENT_SOURCE_DIR} --print-dependencies
+    COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/gen.py ${CUDA_FLAG} -s ${CMAKE_CURRENT_SOURCE_DIR} --print-dependencies
     # user stderr rather than stdout so we can still debug the script with print
     ERROR_VARIABLE generated_cpp
     RESULT_VARIABLE RETURN_VALUE
 )
 if (NOT RETURN_VALUE EQUAL 0)
+    message(STATUS ${generated_cpp})
     message(FATAL_ERROR "Failed to get generated_cpp list")
+
 endif()
 
 FILE(GLOB_RECURSE all_templates "templates/*")
@@ -112,14 +116,12 @@ SET(cwrap_files
 #  ${CWRAP_FILES_BASE}/nn/THNN_generic.cwrap
 )
 
-
 ADD_CUSTOM_COMMAND(OUTPUT ${generated_cpp}
-COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/gen.py -s ${CMAKE_CURRENT_SOURCE_DIR} ${cwrap_files}
+COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/gen.py ${CUDA_FLAG} -s ${CMAKE_CURRENT_SOURCE_DIR} ${cwrap_files}
 DEPENDS gen.py cwrap_parser.py code_template.py ${all_templates} ${cwrap_files})
 
 SET(all_cpp ${base_cpp} ${generated_cpp})
 filter_list(generated_h generated_cpp "\\.h$")
-
 
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR}/..)
 # so the build can find the generated header files

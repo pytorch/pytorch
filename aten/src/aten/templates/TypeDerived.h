@@ -12,6 +12,7 @@ struct ${Type} : public Type {
   virtual bool isDistributed() override;
   virtual Storage * newStorage() override;
   virtual Storage * newStorage(size_t size) override;
+  virtual Generator * newGenerator() override;
 
   // example
   virtual Tensor * add(Tensor & a, Tensor & b) override;
