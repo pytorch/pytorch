@@ -12,6 +12,8 @@ struct Tensor {
   ${tensor_method_declarations}
 
   virtual ~Tensor() {}
+
+  friend class Type;
 };
 
 }

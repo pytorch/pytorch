@@ -55,6 +55,9 @@ TYPE_FORMAL_GENERIC = {
 TYPE_RETURN = {
     'THTensor*' : 'Tensor *'
 }
+TYPE_ARGUMENT = {
+    'THTensor*': CodeTemplate('checked_cast<${THTensor}>(${arg_name})'),
+}
 
 class nested_dict(object):
     def __init__(self,base,parent):
@@ -78,7 +81,7 @@ def create_generic(top_env, declarations):
             if not argument.get('output',False):
                 insert(argument)
         for argument in option['arguments']:
-            if argument.get('allocate',False):
+            if not argument.get('allocate',False):
                 insert(argument)
         return result
     def format_formal(argument):
@@ -86,11 +89,10 @@ def create_generic(top_env, declarations):
 
     def format_return_type(option):
         ret = option['return']
-        m = re.match('argument (\d+)',ret)
-        if m is not None:
-            argument = option['arguments'][int(m.group(1))]
-        elif ret == 'self':
-            argument = [x for x in option['arguments'] if x['name'] == 'self'][0]
+        if ret['kind'] == 'arguments':
+            #TODO multiple returns
+            index = ret['arguments'][0]
+            return TYPE_RETURN[option['arguments'][index]['type']]
         else:
             raise Exception("format_return_type")
         return TYPE_RETURN[argument['type']]
@@ -105,6 +107,7 @@ def create_generic(top_env, declarations):
             raise NYIError("all not implemented")
 
         formals = get_formals(option)
+        option['formals_list'] = formals
         option['formals'] = [format_formal(f) for f in formals]
         option['actuals'] = [ f['name'] for f in formals ]
         option['method_formals'] = [format_formal(f) for f in formals
@@ -144,15 +147,47 @@ def create_generic(top_env, declarations):
 def create_derived(processor_type_env,declarations):
     type_object_declarations = []
     type_object_definitions = []
-    def emit_body(option):
-        print(yaml.dump(option))
-        return []
+    def requires_checked_cast(argument):
+        return argument['type'] == 'THTensor*'
+    def get_argument(argument):
+        if requires_checked_cast(argument):
+            return "{}_->tensor".format(argument['name'])
+        else:
+            return argument['name']
+
+    def get_arguments(option):
+        return [get_argument(argument) for argument in option['arguments']]
+
+    def emit_body(env,option):
+        body = []
+        for arg in option['formals_list']:
+            if requires_checked_cast(arg):
+                body.append(
+                    CodeTemplate("auto ${arg_name}_ = checked_cast<${Tensor}>(&${arg_name});").substitute(
+                    env,arg_name=arg['name']))
+        for arg in option['arguments']:
+            if arg.get('allocate',False):
+                body.append(
+                    CodeTemplate('auto ${arg_name}_ = new ${Tensor}(context);').substitute(
+                    env,arg_name=arg['name']))
+
+        option['actuals'] = processor_type_env['state'] + get_arguments(option)
+        call = CodeTemplate("${THTensor}_${cname}(${actuals});").substitute(env)
+        body.append(call)
+        ret = option['return']
+        if ret['kind'] == 'arguments':
+            arg = option['arguments'][ret['arguments'][0]]
+            body.append("return {}_;".format(arg['name']))
+        else:
+            assert(False and "NYI - return handling")
+        return body
+
     def process_option(option):
         pair = (processor_type_env['Processor'],processor_type_env['ScalarName'])
         if pair in option['type_processor_pairs']:
-            body = emit_body(option)
-            option['type_definition_body'] = body
             env = nested_dict(option, processor_type_env)
+            body = emit_body(env,option)
+            option['type_definition_body'] = body
             type_object_declarations.append(
                 TYPE_DERIVED_DECLARATION.substitute(env))
             type_object_definitions.append(

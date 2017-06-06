@@ -1,6 +1,7 @@
-import common_with_cwrap
-
+import re
 from copy import deepcopy
+
+import common_with_cwrap
 
 type_map = {
     'floating_point' : [
@@ -68,6 +69,21 @@ def handle_outputs_taken_as_arguments(options,option):
             if 'output' in arg:
                 arg['allocate'] = True
         options.append(new_option)
+def sanitize_return(option):
+    ret = option['return']
+    m = re.match('argument (\d+(,\d+)*)',ret)
+    if m is not None:
+        arguments = [ int(x) for x in m.group(1).split(',') ]
+        option['return'] = { 'kind': 'arguments', 'arguments' : arguments }
+    elif ret == 'self':
+        option['return'] = { 'kind': 'arguments', 'arguments': []}
+        for i,x in enumerate(option['arguments']):
+            if x['name'] == 'self':
+                option['return']['arguments'].append(i)
+                break
+    else:
+        #TODO: handle other return possibilities...
+        pass
 
 def run(declarations):
     declarations = [d for d in declarations if not exclude(d)]
@@ -77,6 +93,7 @@ def run(declarations):
         common_with_cwrap.sort_by_number_of_options(declaration)
         new_options = []
         for option in declaration['options']:
+            sanitize_return(option)
             process_types_and_processors(option)
             add_variants(option)
             handle_outputs_taken_as_arguments(new_options,option)

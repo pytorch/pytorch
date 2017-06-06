@@ -19,6 +19,7 @@ public:
 protected:
   ${THTensor} * tensor;
   Context* context;
+  friend class ${Type};
 };
 
 } // namespace thpp
