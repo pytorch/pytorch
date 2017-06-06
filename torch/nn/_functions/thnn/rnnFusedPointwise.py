@@ -12,21 +12,21 @@ class GRUFused(Function):
             self.backend = type2backend[type(input_gate)]
 
         hy = input_gate.new()
-        storage = input_gate.new().resize_(hx.numel() * 5)
+        workspace = input_gate.new(hx.numel() * 5)
 
-        self.hasBias = False
+        self.has_bias = False
         if ibias is not None:
-            self.hasBias = True
+            self.has_bias = True
             if ibias.dim() == 1:
-                ibias = ibias.view(1, -1)
+                ibias = ibias.unsqueeze(0)
             if hbias.dim() == 1:
-                hbias = hbias.view(1, -1)
+                hbias = hbias.unsqueeze(0)
 
         self.backend.GRUFused_updateOutput(
             self.backend.library_state,
-            input_gate, hidden_gate, ibias, hbias, hx, hy, storage)
+            input_gate, hidden_gate, ibias, hbias, hx, hy, workspace)
 
-        self.buffer = storage
+        self.workspace = workspace
         self.igate_size = input_gate.size()
         self.hgate_size = hidden_gate.size()
 
@@ -37,18 +37,16 @@ class GRUFused(Function):
             self.backend = type2backend[type(grad_output)]
 
         gradInputHx = gradOutput.new()
-        gradInInput = gradOutput.new().resize_(*self.igate_size)
-        gradInHidden = gradOutput.new().resize_(*self.hgate_size)
-
-        storage = self.buffer
+        gradInInput = gradOutput.new(*self.igate_size)
+        gradInHidden = gradOutput.new(*self.hgate_size)
 
         self.backend.GRUFused_updateGradInput(
             self.backend.library_state,
-            gradInInput, gradInHidden, gradOutput, gradInputHx, storage)
+            gradInInput, gradInHidden, gradOutput, gradInputHx, self.workspace)
 
-        if self.hasBias:
-            gb1 = gradInInput.sum(0).squeeze()
-            gb2 = gradInHidden.sum(0).squeeze()
+        if self.has_bias:
+            gb1 = gradInInput.sum(0, keepdim=False)
+            gb2 = gradInHidden.sum(0, keepdim=False)
             return gradInInput, gradInHidden, gradInputHx, gb1, gb2
         else:
             return gradInInput, gradInHidden, gradInputHx
@@ -64,13 +62,13 @@ class LSTMFused(Function):
         hy = input_gate.new()
         cy = input_gate.new()
 
-        self.hasBias = False
+        self.has_bias = False
         if ibias is not None:
-            self.hasBias = True
+            self.has_bias = True
             if ibias.dim() == 1:
-                ibias = ibias.view(1, -1)
+                ibias = ibias.unsqueeze(0)
             if hbias.dim() == 1:
-                hbias = hbias.view(1, -1)
+                hbias = hbias.unsqueeze(0)
 
         # input_gate gets overwritten with some intermediate values to use in backwards
         self.backend.LSTMFused_updateOutput(
@@ -89,7 +87,7 @@ class LSTMFused(Function):
             self.backend = type2backend[type(gradOutput[0])]
 
         gradInputCx = gradOutput[0].new()
-        gradInGates = gradOutput[0].new().resize_(*self.hgate_size)
+        gradInGates = gradOutput[0].new(*self.hgate_size)
 
         saved_tens, cx, cy = self.saved_tensors
         self.backend.LSTMFused_updateGradInput(
@@ -97,7 +95,7 @@ class LSTMFused(Function):
             saved_tens, gradInGates, cx, cy,
             gradOutput[0], gradOutput[1], gradInputCx)
 
-        if self.hasBias:
+        if self.has_bias:
             gb1 = gradInGates.sum(0).squeeze()
             gb2 = gradInGates.sum(0).squeeze()
 
