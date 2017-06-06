@@ -95,7 +95,6 @@ PyObject * THPTensor_(setIndex)(THPTensor *self, PyObject *args)
 
 [[
   name: zeros
-  only_stateless: True
   variants:
     - function
   auto_gpu: False
@@ -109,7 +108,6 @@ PyObject * THPTensor_(setIndex)(THPTensor *self, PyObject *args)
 
 [[
   name: ones
-  only_stateless: True
   variants:
     - function
   auto_gpu: False
@@ -127,7 +125,6 @@ PyObject * THPTensor_(setIndex)(THPTensor *self, PyObject *args)
   cname: nElement
   cpu_half: True
   auto_gpu: False
-  with_stateless: True
   variants:
     - method
     - function
@@ -357,7 +354,6 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: maskedSelect
   python_name: masked_select
-  with_stateless: True
   variants:
     - method
     - function
@@ -371,7 +367,6 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: transpose
-  with_stateless: True
   variants:
     - method
     - function
@@ -404,7 +399,6 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: t
-  with_stateless: True
   variants:
     - method
     - function
@@ -438,7 +432,6 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: squeeze
   cpu_half: True
-  with_stateless: True
   variants:
     - method
     - function
@@ -476,7 +469,6 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: unsqueeze
-  with_stateless: True
   variants:
     - method
     - function
@@ -507,7 +499,6 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: nonzero
-  with_stateless: True
   variants:
     - method
     - function
@@ -568,7 +559,6 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: indexSelect
   python_name: index_select
-  with_stateless: True
   variants:
     - method
     - function
@@ -653,7 +643,6 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: range
-  only_stateless: True
   variants:
     - function
   defined_if: "!IS_CUDA"
@@ -676,7 +665,6 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: arange
   cname: range
-  only_stateless: True
   variants:
     - function
   defined_if: "!IS_CUDA"
@@ -741,7 +729,6 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: gather
-  with_stateless: True
   variants:
     - method
     - function
@@ -763,7 +750,6 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
   python_name: cat
   method_flags: METH_KEYWORDS
   only_register: True
-  only_stateless: True
   variants:
     - function
 ]]
@@ -854,7 +840,6 @@ invalid_arguments:
 
 [[
   name: equal
-  with_stateless: True
   variants:
     - method
     - function
@@ -880,7 +865,6 @@ PyObject * THPTensor_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: __and__
-  with_stateless: True
   variants:
     - method
     - function
@@ -902,7 +886,6 @@ PyObject * THPTensor_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: __iand__
-  with_stateless: True
   variants:
     - method
     - function
@@ -922,7 +905,6 @@ PyObject * THPTensor_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: __or__
-  with_stateless: True
   variants:
     - method
     - function
@@ -944,7 +926,6 @@ PyObject * THPTensor_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: __ior__
-  with_stateless: True
   variants:
     - method
     - function
@@ -964,7 +945,6 @@ PyObject * THPTensor_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: __xor__
-  with_stateless: True
   variants:
     - method
     - function
@@ -986,7 +966,6 @@ PyObject * THPTensor_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: __ixor__
-  with_stateless: True
   variants:
     - method
     - function
@@ -1006,7 +985,6 @@ PyObject * THPTensor_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: __lshift__
-  with_stateless: True
   variants:
     - method
     - function
@@ -1028,7 +1006,6 @@ PyObject * THPTensor_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: __ilshift__
-  with_stateless: True
   variants:
     - method
     - function
@@ -1048,7 +1025,6 @@ PyObject * THPTensor_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: __rshift__
-  with_stateless: True
   variants:
     - method
     - function
@@ -1070,7 +1046,6 @@ PyObject * THPTensor_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: __irshift__
-  with_stateless: True
   variants:
     - method
     - function

@@ -154,7 +154,6 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: t
   sparse: yes
-  with_stateless: True
   variants:
     - method
     - function
@@ -188,7 +187,6 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: mm
   sparse: yes
-  only_stateless: True
   variants:
     - function
   cname: spaddmm
@@ -205,7 +203,6 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: spmm
-  only_stateless: True
   variants:
     - function
   sparse: yes
@@ -223,7 +220,6 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: hspmm
-  only_stateless: True
   variants:
     - function
   sparse: yes
@@ -239,7 +235,6 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: sspmm
-  only_stateless: True
   variants:
     - function
   sparse: yes
@@ -258,7 +253,6 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: sspaddmm
   sparse: yes
-  with_stateless: True
   variants:
     - method
     - function
@@ -279,7 +273,6 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
   name: spadd
   sparse: yes
   cname: spcadd
-  with_stateless: True
   variants:
     - method
     - function
@@ -305,7 +298,6 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: add
   sparse: yes
-  with_stateless: True
   variants:
     - method
     - function
@@ -336,7 +328,6 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: sub
   sparse: yes
-  with_stateless: True
   variants:
     - method
     - function
@@ -368,7 +359,6 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
   name: mul
   sparse: yes
   return: argument 0
-  with_stateless: True
   variants:
     - method
     - function
@@ -408,7 +398,6 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
   name: div
   sparse: yes
   cname: div
-  with_stateless: True
   variants:
     - method
     - function
@@ -442,7 +431,6 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
     - CUDA
   sparse: yes
   cname: pow
-  with_stateless: True
   variants:
     - method
     - function

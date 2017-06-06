@@ -3,7 +3,6 @@
   defined_if: "!IS_CUDA && !IS_DISTRIBUTED"
   processors:
     - CPU
-  only_stateless: True
   variants:
     - function
   return: argument 0
@@ -68,7 +67,6 @@ static void THTensor_(random1__)(THTensor *self, THGenerator *gen, long b)
     - Double
   processors:
     - CPU
-  with_stateless: True
   variants:
     - method
     - function
@@ -140,7 +138,6 @@ static void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, TH
   processors:
     - CPU
   return: argument 0
-  only_stateless: True
   variants:
     - function
   options:
@@ -266,7 +263,6 @@ static void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, TH
     - Double
   processors:
     - CPU
-  only_stateless: True
   variants:
     - function
   return: argument 0
@@ -288,7 +284,6 @@ static void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, TH
     - Double
   processors:
     - CPU
-  only_stateless: True
   variants:
     - function
   return: argument 0
@@ -309,7 +304,6 @@ static void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, TH
     - floating_point
   processors:
     - CUDA
-  with_stateless: True
   variants:
     - method
     - function
@@ -373,7 +367,6 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
   processors:
     - CUDA
   return: argument 0
-  only_stateless: True
   variants:
     - function
   options:
@@ -481,7 +474,6 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
     - floating_point
   processors:
     - CUDA
-  only_stateless: True
   variants:
     - function
   return: argument 0
@@ -499,7 +491,6 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
     - floating_point
   processors:
     - CUDA
-  only_stateless: True
   variants:
     - function
   return: argument 0
@@ -537,7 +528,6 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
   processors:
     - CPU
   return: argument 0
-  with_stateless: True
   variants:
     - method
     - function
@@ -613,7 +603,6 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
   processors:
     - CUDA
   return: argument 0
-  with_stateless: True
   variants:
     - method
     - function

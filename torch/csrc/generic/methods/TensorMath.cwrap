@@ -10,7 +10,6 @@
   processors:
     - CPU
     - CUDA
-  with_stateless: True
   variants:
     - method
     - function
@@ -63,7 +62,6 @@
     - CPU
     - CUDA
   cname: sigmoid
-  with_stateless: True
   variants:
     - method
     - function
@@ -98,7 +96,6 @@
   processors:
     - CPU
     - CUDA
-  with_stateless: True
   variants:
     - method
     - function
@@ -133,7 +130,6 @@
   processors:
     - CPU
     - CUDA
-  with_stateless: True
   variants:
     - method
     - function
@@ -152,7 +148,6 @@
   processors:
     - CPU
     - CUDA
-  with_stateless: True
   variants:
     - method
     - function
@@ -201,7 +196,6 @@
   processors:
     - CPU
     - CUDA
-  with_stateless: True
   variants:
     - method
     - function
@@ -236,7 +230,6 @@
   processors:
     - CPU
     - CUDA
-  with_stateless: True
   variants:
     - method
     - function
@@ -271,7 +264,6 @@
   processors:
     - CPU
     - CUDA
-  with_stateless: True
   variants:
     - method
     - function
@@ -306,7 +298,6 @@
   processors:
     - CPU
     - CUDA
-  with_stateless: True
   variants:
     - method
     - function
@@ -341,7 +332,6 @@
   processors:
     - CPU
     - CUDA
-  with_stateless: True
   variants:
     - method
     - function
@@ -376,7 +366,6 @@
   processors:
     - CPU
     - CUDA
-  with_stateless: True
   variants:
     - method
     - function
@@ -411,7 +400,6 @@
   processors:
     - CPU
     - CUDA
-  with_stateless: True
   variants:
     - method
     - function
@@ -446,7 +434,6 @@
   processors:
     - CPU
     - CUDA
-  with_stateless: True
   variants:
     - method
     - function
@@ -481,7 +468,6 @@
   processors:
     - CPU
     - CUDA
-  with_stateless: True
   variants:
     - method
     - function
@@ -516,7 +502,6 @@
   processors:
     - CPU
     - CUDA
-  with_stateless: True
   variants:
     - method
     - function
@@ -551,7 +536,6 @@
   processors:
     - CPU
     - CUDA
-  with_stateless: True
   variants:
     - method
     - function
@@ -586,7 +570,6 @@
   processors:
     - CPU
     - CUDA
-  with_stateless: True
   variants:
     - method
     - function
@@ -621,7 +604,6 @@
   processors:
     - CPU
     - CUDA
-  with_stateless: True
   variants:
     - method
     - function
@@ -656,7 +638,6 @@
   processors:
     - CPU
     - CUDA
-  with_stateless: True
   variants:
     - method
     - function
@@ -691,7 +672,6 @@
   processors:
     - CPU
     - CUDA
-  with_stateless: True
   variants:
     - method
     - function
@@ -726,7 +706,6 @@
   processors:
     - CPU
     - CUDA
-  with_stateless: True
   variants:
     - method
     - function
@@ -761,7 +740,6 @@
   processors:
     - CPU
     - CUDA
-  with_stateless: True
   variants:
     - method
     - function
@@ -780,7 +758,6 @@
   processors:
     - CPU
     - CUDA
-  with_stateless: True
   variants:
     - method
     - function
@@ -818,7 +795,6 @@
   processors:
     - CPU
     - CUDA
-  with_stateless: True
   variants:
     - method
     - function
@@ -858,7 +834,6 @@
   processors:
     - CPU
     - CUDA
-  with_stateless: True
   variants:
     - method
     - function
@@ -898,7 +873,6 @@
   processors:
     - CPU
     - CUDA
-  with_stateless: True
   variants:
     - method
     - function
@@ -940,7 +914,6 @@
   processors:
     - CPU
     - CUDA
-  with_stateless: True
   variants:
     - method
     - function
@@ -985,7 +958,6 @@
   processors:
     - CPU
     - CUDA
-  with_stateless: True
   variants:
     - method
     - function
@@ -1008,7 +980,6 @@
   processors:
     - CPU
     - CUDA
-  with_stateless: True
   variants:
     - method
     - function
@@ -1045,7 +1016,6 @@
   processors:
     - CPU
     - CUDA
-  with_stateless: True
   variants:
     - method
     - function
@@ -1084,7 +1054,6 @@
     - CPU
   type_processor_pairs: [[CPU,Float],[CPU,Double],[CUDA,Float]]
 
-  with_stateless: True
   variants:
     - method
     - function
@@ -1123,7 +1092,6 @@
   processors:
     - CPU
     - CUDA
-  with_stateless: True
   variants:
     - method
     - function
@@ -1182,7 +1150,6 @@
   processors:
     - CPU
     - CUDA
-  with_stateless: True
   variants:
     - method
     - function
@@ -1223,7 +1190,6 @@
     - Double
   processors:
     - CPU
-  only_stateless: True
   variants:
     - function
   return: argument 0
@@ -1244,7 +1210,6 @@
     - Double
   processors:
     - CPU
-  only_stateless: True
   variants:
     - function
   return: argument 0
@@ -1265,7 +1230,6 @@
     - Double
   processors:
     - CPU
-  with_stateless: True
   variants:
     - method
     - function
@@ -1311,7 +1275,6 @@
 
 [[
   name: sum
-  with_stateless: True
   variants:
     - method
     - function
@@ -1343,7 +1306,6 @@
 
 [[
   name: prod
-  with_stateless: True
   variants:
     - method
     - function
@@ -1375,7 +1337,6 @@
 
 [[
   name: cumsum
-  with_stateless: True
   variants:
     - method
     - function
@@ -1390,7 +1351,6 @@
 
 [[
   name: cumprod
-  with_stateless: True
   variants:
     - method
     - function
@@ -1405,7 +1365,6 @@
 
 [[
   name: sign
-  with_stateless: True
   variants:
     - method
     - function
@@ -1427,7 +1386,6 @@
 
 [[
   name: trace
-  with_stateless: True
   variants:
     - method
     - function
@@ -1438,7 +1396,6 @@
 
 [[
   name: add
-  with_stateless: True
   variants:
     - method
     - function
@@ -1500,7 +1457,6 @@
 
 [[
   name: sub
-  with_stateless: True
   variants:
     - method
     - function
@@ -1545,7 +1501,6 @@
 
 [[
   name: mul
-  with_stateless: True
   variants:
     - method
     - function
@@ -1586,7 +1541,6 @@
 
 [[
   name: div
-  with_stateless: True
   variants:
     - method
     - function
@@ -1628,7 +1582,6 @@
 [[
   name: fmod
   return: argument 0
-  with_stateless: True
   variants:
     - method
     - function
@@ -1669,7 +1622,6 @@
 [[
   name: remainder
   return: argument 0
-  with_stateless: True
   variants:
     - method
     - function
@@ -1708,7 +1660,6 @@
 
 [[
   name: clamp
-  with_stateless: True
   variants:
     - method
     - function
@@ -1767,7 +1718,6 @@
   defined_if: CUDA_FLOAT || CUDA_DOUBLE || CUDA_HALF || !IS_CUDA
   type_processor_pairs: [[CUDA,floating_point], [CPU,all]]
 
-  with_stateless: True
   variants:
     - method
     - function
@@ -1781,7 +1731,6 @@
 
 [[
   name: tril
-  with_stateless: True
   variants:
     - method
     - function
@@ -1807,7 +1756,6 @@
 
 [[
   name: triu
-  with_stateless: True
   variants:
     - method
     - function
@@ -1833,7 +1781,6 @@
 
 [[
   name: cross
-  with_stateless: True
   variants:
     - method
     - function
@@ -1852,7 +1799,6 @@
   defined_if: "!IS_CUDA"
   processors:
     - CPU
-  only_stateless: True
   variants:
     - function
   return: argument 0
@@ -1871,7 +1817,6 @@
 
 [[
   name: diag
-  with_stateless: True
   variants:
     - method
     - function
@@ -1887,7 +1832,6 @@
 
 [[
   name: addmm
-  with_stateless: True
   variants:
     - method
     - function
@@ -1947,7 +1891,6 @@
 
 [[
   name: addmv
-  with_stateless: True
   variants:
     - method
     - function
@@ -1982,7 +1925,6 @@
 
 [[
   name: addr
-  with_stateless: True
   variants:
     - method
     - function
@@ -2018,7 +1960,6 @@
 [[
   name: ger
   cname: addr
-  with_stateless: True
   variants:
     - method
     - function
@@ -2040,7 +1981,6 @@
 [[
   name: mv
   cname: addmv
-  with_stateless: True
   variants:
     - method
     - function
@@ -2063,7 +2003,6 @@
 
 [[
   name: mm
-  with_stateless: True
   variants:
     - method
     - function
@@ -2100,7 +2039,6 @@
 [[
   name: bmm
   cname: baddbmm
-  with_stateless: True
   variants:
     - method
     - function
@@ -2125,7 +2063,6 @@
 
 [[
   name: addbmm
-  with_stateless: True
   variants:
     - method
     - function
@@ -2160,7 +2097,6 @@
 
 [[
   name: baddbmm
-  with_stateless: true
   variants:
     - method
     - function
@@ -2195,7 +2131,6 @@
 
 [[
   name: addcmul
-  with_stateless: True
   variants:
     - method
     - function
@@ -2238,7 +2173,6 @@
 
 [[
   name: addcdiv
-  with_stateless: True
   variants:
     - method
     - function
@@ -2301,7 +2235,6 @@ static const char *R = &__R;
   processors:
     - CPU
     - CUDA
-  with_stateless: True
   variants:
     - method
     - function
@@ -2324,7 +2257,6 @@ static const char *R = &__R;
   processors:
     - CPU
     - CUDA
-  with_stateless: True
   variants:
     - method
     - function
@@ -2346,7 +2278,6 @@ static const char *R = &__R;
     - Double
   processors:
     - CPU
-  with_stateless: True
   variants:
     - method
     - function
@@ -2382,7 +2313,6 @@ static const char *R = &__R;
   processors:
     - CPU
     - CUDA
-  with_stateless: True
   variants:
     - method
     - function
@@ -2413,7 +2343,6 @@ static const char *R = &__R;
   processors:
     - CPU
     - CUDA
-  with_stateless: True
   variants:
     - method
     - function
@@ -2440,7 +2369,6 @@ static const char *R = &__R;
   processors:
     - CPU
     - CUDA
-  with_stateless: True
   variants:
     - method
     - function
@@ -2469,7 +2397,6 @@ static const char *R = &__R;
   processors:
     - CPU
     - CUDA
-  with_stateless: True
   variants:
     - method
     - function
@@ -2489,7 +2416,6 @@ static const char *R = &__R;
   processors:
     - CPU
     - CUDA
-  with_stateless: True
   variants:
     - method
     - function
@@ -2513,7 +2439,6 @@ static const char *R = &__R;
   processors:
     - CPU
     - CUDA
-  with_stateless: True
   variants:
     - method
     - function
@@ -2538,7 +2463,6 @@ static const char *R = &__R;
   processors:
     - CPU
     - CUDA
-  with_stateless: True
   variants:
     - method
     - function
@@ -2561,7 +2485,6 @@ static const char *R = &__R;
     - Double
   processors:
     - CPU
-  with_stateless: True
   variants:
     - method
     - function
@@ -2591,7 +2514,6 @@ static const char *R = &__R;
   processors:
     - CPU
     - CUDA
-  with_stateless: True
   variants:
     - method
     - function
@@ -2612,7 +2534,6 @@ static const char *R = &__R;
     - Double
   processors:
     - CPU
-  with_stateless: True
   variants:
     - method
     - function
@@ -2633,7 +2554,6 @@ static const char *R = &__R;
     - Double
   processors:
     - CPU
-  with_stateless: True
   variants:
     - method
     - function
@@ -2653,7 +2573,6 @@ static const char *R = &__R;
     - Double
   processors:
     - CPU
-  with_stateless: True
   variants:
     - method
     - function
@@ -2683,7 +2602,6 @@ static const char *R = &__R;
   processors:
     - CPU
     - CUDA
-  with_stateless: true
   variants:
     - method
     - function
@@ -2708,7 +2626,6 @@ static const char *R = &__R;
   processors:
     - CPU
     - CUDA
-  with_stateless: true
   variants:
     - method
     - function

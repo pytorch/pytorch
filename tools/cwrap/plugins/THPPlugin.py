@@ -362,11 +362,13 @@ ${cpu}
                 if option.get('sparse', False):
                     defined_if = option.get('defined_if', '')
                     option['defined_if'] = '!IS_DISTRIBUTED' + (' && ' if defined_if else '') + defined_if
-            if declaration.get('with_stateless', False) or declaration.get('only_stateless', False):
+
+            variants = declaration.get('variants', ['method'])
+            if 'function' in variants:
                 stateless_declaration = self.make_stateless(declaration)
                 new_declarations.append(stateless_declaration)
                 self.stateless_declarations.append(stateless_declaration)
-            if declaration.get('only_stateless', False):
+            if 'method' not in variants:
                 continue
 
             self.declarations.append(declaration)
@@ -379,9 +381,13 @@ ${cpu}
 
         register_only = [d for d in declarations if d.get('only_register', False)]
         declarations = [d for d in declarations
-                        if (not d.get('only_stateless', False)) and (not d.get('only_register', False))]
-        self.declarations.extend(filter(lambda x: not x.get('only_stateless', False), register_only))
-        self.stateless_declarations.extend(filter(lambda x: x.get('only_stateless', False), register_only))
+                        if (('method' in d.get('variants', ['method'])) and
+                            (not d.get('only_register', False)))]
+        self.declarations.extend(filter(lambda x: 'method' in x.get('variants',
+                                 ['method']), register_only))
+        self.stateless_declarations.extend(filter(lambda x: 'method' not in
+                                           x.get('variants', ['method']),
+                                           register_only))
 
         self.process_docstrings()
 

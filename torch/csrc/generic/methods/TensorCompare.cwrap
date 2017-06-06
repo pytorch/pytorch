@@ -36,7 +36,6 @@
 
 [[
   name: lt
-  only_stateless: True
   variants:
     - function
   return: argument 0
@@ -108,7 +107,6 @@
 
 [[
   name: gt
-  only_stateless: True
   variants:
     - function
   return: argument 0
@@ -180,7 +178,6 @@
 
 [[
   name: le
-  only_stateless: True
   variants:
     - function
   return: argument 0
@@ -252,7 +249,6 @@
 
 [[
   name: ge
-  only_stateless: True
   variants:
     - function
   return: argument 0
@@ -324,7 +320,6 @@
 
 [[
   name: eq
-  only_stateless: True
   variants:
     - function
   return: argument 0
@@ -396,7 +391,6 @@
 
 [[
   name: ne
-  only_stateless: True
   variants:
     - function
   return: argument 0
@@ -431,7 +425,6 @@
 
 [[
   name: min
-  with_stateless: True
   variants:
     - method
     - function
@@ -475,7 +468,6 @@
 
 [[
   name: max
-  with_stateless: True
   variants:
     - method
     - function
@@ -522,7 +514,6 @@
   defined_if: "!IS_CUDA"
   processors:
     - CPU
-  with_stateless: True
   variants:
     - method
     - function
@@ -575,7 +566,6 @@
 
 [[
   name: mode
-  with_stateless: True
   variants:
     - method
     - function
@@ -627,7 +617,6 @@
   defined_if: "!IS_CUDA"
   processors:
     - CPU
-  with_stateless: True
   variants:
     - method
     - function
@@ -676,7 +665,6 @@
 
 [[
   name: sort
-  with_stateless: True
   variants:
     - method
     - function
@@ -713,7 +701,6 @@
 
 [[
   name: topk
-  with_stateless: True
   variants:
     - method
     - function
