@@ -25,6 +25,8 @@ def set_declaration_defaults(declaration):
     declaration.setdefault('return', 'void')
     if 'cname' not in declaration:
         declaration['cname'] = declaration['name']
+    if 'python_name' not in declaration:
+        declaration['python_name'] = declaration['name']
     # Simulate multiple dispatch, even if it's not necessary
     if 'options' not in declaration:
         declaration['options'] = [{'arguments': declaration['arguments']}]

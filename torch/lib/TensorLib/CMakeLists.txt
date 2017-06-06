@@ -83,6 +83,8 @@ ENDIF()
 FILE(GLOB base_h RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "*.h")
 FILE(GLOB base_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "*.cpp")
 
+FILE(GLOB all_python RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "*.py")
+
 EXECUTE_PROCESS(
     COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/gen.py ${CUDA_FLAG} -s ${CMAKE_CURRENT_SOURCE_DIR} --print-dependencies
     # user stderr rather than stdout so we can still debug the script with print
@@ -116,9 +118,10 @@ SET(cwrap_files
 #  ${CWRAP_FILES_BASE}/nn/THNN_generic.cwrap
 )
 
+
 ADD_CUSTOM_COMMAND(OUTPUT ${generated_cpp}
 COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/gen.py ${CUDA_FLAG} -s ${CMAKE_CURRENT_SOURCE_DIR} ${cwrap_files}
-DEPENDS gen.py cwrap_parser.py code_template.py ${all_templates} ${cwrap_files})
+DEPENDS ${all_python} ${all_templates} ${cwrap_files})
 
 SET(all_cpp ${base_cpp} ${generated_cpp})
 filter_list(generated_h generated_cpp "\\.h$")

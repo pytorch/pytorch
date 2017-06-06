@@ -5,6 +5,7 @@ from optparse import OptionParser
 
 import cwrap_parser
 import preprocess_declarations
+import function_wrapper
 from code_template import CodeTemplate
 
 
@@ -77,7 +78,7 @@ def write(filename,s):
     with open(filename,"w") as f:
         f.write(s)
 
-def generate_storage_type_and_tensor(processor, scalar_type):
+def generate_storage_type_and_tensor(processor, scalar_type, declarations):
     scalar_name, c_type = scalar_type
     env = {}
     env['ScalarName'] = scalar_name
@@ -114,8 +115,9 @@ def generate_storage_type_and_tensor(processor, scalar_type):
         env['to_th_half'] = ''
         env['to_tlib_half'] = ''
 
-    env['type_derived_method_declarations'] = []
-    env['type_derived_method_definitions'] = []
+    declarations,definitions = function_wrapper.create_derived(env,declarations)
+    env['type_derived_method_declarations'] = declarations
+    env['type_derived_method_definitions'] = definitions
 
     write(env['Storage']+".cpp",STORAGE_DERIVED_CPP.substitute(env))
     write(env['Storage']+".h",STORAGE_DERIVED_H.substitute(env))
@@ -142,19 +144,18 @@ declarations = preprocess_declarations.run(declarations)
 for fname,env in generators.items():
     write(fname,GENERATOR_DERIVED.substitute(env))
 
+
+# note: this will fill in top_env['type/tensor_method_declarations/definitions']
+# and modify the declarations to include any information that will all_processors
+# be used by function_wrapper.create_derived
+function_wrapper.create_generic(top_env,declarations)
+
 for processor in processors:
     for scalar_type in scalar_types:
-        generate_storage_type_and_tensor(processor,scalar_type)
+        generate_storage_type_and_tensor(processor,scalar_type, declarations)
 
 write('Type.h',TYPE_H.substitute(top_env))
 write('Type.cpp',TYPE_CPP.substitute(top_env))
 
 write('Tensor.h',TENSOR_H.substitute(top_env))
 write('Tensor.cpp',TENSOR_CPP.substitute(top_env))
-
-# what has to be done to add a Operation ...
-# 1. add virtual dispatch declaration to Type.h
-# 2. add virtual override to TypeDerived.h
-# 3. add override definition to TypeDerived.cpp
-# 4. add non-virtual declaration to Type.h
-# 5. add non-virtual declaration to Type.cpp
