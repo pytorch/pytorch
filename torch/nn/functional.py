@@ -437,6 +437,16 @@ def relu(input, inplace=False):
     return _functions.thnn.Threshold.apply(input, 0, 0, inplace)
 
 
+def glu(input, dim=-1):
+    ndim = input.dim()
+    if dim < -ndim or dim >= ndim:
+        raise IndexError("dim {} is out of range for tensor of dimension {}"
+                         .format(dim, ndim))
+    if dim < 0:
+        dim += ndim
+    return _functions.thnn.GatedLinear(dim)(input)
+
+
 def hardtanh(input, min_val=-1., max_val=1., inplace=False):
     return _functions.thnn.auto.Hardtanh(min_val, max_val, inplace)(input)
 
