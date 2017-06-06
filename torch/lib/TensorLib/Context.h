@@ -4,9 +4,9 @@
 #include "TensorLib/Generator.h"
 #include "TensorLib/Type.h"
 
-namespace tlib {
-
 class THCState;
+
+namespace tlib {
 
 class Context {
 public:
