@@ -11,10 +11,10 @@ int main() {
   Scalar h2 = h;
 
   cout << "H2: " << h2.toDouble() << " " << what.toFloat() << " " << bar.toDouble() << " " << what.isIntegral() <<  "\n";
-  CUDAGenerator gen(tlib::globalContext());
+  Generator & gen = tlib::globalContext()->defaultGenerator(Processor::CPU);
   cout << gen.seed() << "\n";
   auto C = tlib::globalContext();
-  auto & CUDAFloat = C->getType(Processor::CUDA,ScalarType::Float);
+  auto & CUDAFloat = C->getType(Processor::CPU,ScalarType::Float);
   cout << "AFTER GET TYPE " << &CUDAFloat << "\n";
   cout << "STORAGE: " << CUDAFloat.newStorage(4) << "\n";
   std::unique_ptr<Storage> s(CUDAFloat.newStorage(4));
