@@ -25,8 +25,9 @@ def set_declaration_defaults(declaration):
     declaration.setdefault('return', 'void')
     if 'cname' not in declaration:
         declaration['cname'] = declaration['name']
-    if 'python_name' not in declaration:
-        declaration['python_name'] = declaration['name']
+    if 'api_name' not in declaration:
+        declaration['api_name'] = (declaration['python_name']
+            if 'python_name' in declaration else declaration['name'])
     # Simulate multiple dispatch, even if it's not necessary
     if 'options' not in declaration:
         declaration['options'] = [{'arguments': declaration['arguments']}]
@@ -37,7 +38,8 @@ def set_declaration_defaults(declaration):
     # Propagate defaults from declaration to options
     for option in declaration['options']:
         for k, v in declaration.items():
-            if k != 'name' and k != 'options':
+            #TODO(zach): why does cwrap not propagate 'name'? I need it propagaged for TensorLib
+            if k != 'options':
                 option.setdefault(k, v)
 
 #TODO(zach): do we need this or is  _only_ handling key word stuff for python

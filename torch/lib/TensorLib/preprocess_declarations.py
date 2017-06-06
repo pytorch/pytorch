@@ -1,5 +1,7 @@
 import common_with_cwrap
 
+from copy import deepcopy
+
 type_map = {
     'floating_point' : [
         'Float',
@@ -52,14 +54,20 @@ def exclude(declaration):
     return 'only_register' in declaration
 
 def add_variants(option):
-    only_stateless = option.get('only_stateless', False)
-    with_stateless = option.get('with_stateless', False)
-    # should we generate tensor.foo(...)
-    option['as_method'] = not only_stateless
-    # should we generate tlib::foo(tensor,...)
-    option['as_function'] = with_stateless
-    # regardless we always generate type().foo(...) because the above will
-    # call it
+    option.setdefault('variants',['method'])
+
+# if we have 'output' arguments, generate a variant where
+# we mark oututs as allocate = True, and where the method variant
+# is disabled...
+def handle_outputs_taken_as_arguments(options,option):
+    if any('output' in arg for arg in option['arguments']):
+        new_option = deepcopy(option)
+        if 'method' in new_option['variants']:
+            new_option['variants'].remove('method')
+        for arg in new_option['arguments']:
+            if 'output' in arg:
+                arg['allocate'] = True
+        options.append(new_option)
 
 def run(declarations):
     declarations = [d for d in declarations if not exclude(d)]
@@ -67,8 +75,10 @@ def run(declarations):
         common_with_cwrap.set_declaration_defaults(declaration)
         common_with_cwrap.enumerate_options_due_to_default(declaration)
         common_with_cwrap.sort_by_number_of_options(declaration)
+        new_options = []
         for option in declaration['options']:
             process_types_and_processors(option)
             add_variants(option)
-
+            handle_outputs_taken_as_arguments(new_options,option)
+        declaration['options'] += new_options
     return declarations

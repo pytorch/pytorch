@@ -1,4 +1,7 @@
 #pragma once
 
+namespace tlib {
 
-${function_definitions}
+${function_declarations}
+
+}

@@ -32,6 +32,10 @@ TENSOR_DERIVED_H = CodeTemplate.from_file(TEMPLATE_PATH+"/TensorDerived.h")
 TENSOR_H = CodeTemplate.from_file(TEMPLATE_PATH+"/Tensor.h")
 TENSOR_CPP = CodeTemplate.from_file(TEMPLATE_PATH+"/Tensor.cpp")
 
+FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH+"/Functions.h")
+FUNCTIONS_CPP = CodeTemplate.from_file(TEMPLATE_PATH+"/Functions.cpp")
+
+
 generators = {
     'CPUGenerator.h' : {
         'name' : 'CPU',
@@ -67,7 +71,9 @@ top_env = {
     'type_method_declarations' : [],
     'type_method_definitions' : [],
     'tensor_method_declarations' : [],
-    'tensor_method_definitions' : []
+    'tensor_method_definitions' : [],
+    'function_declarations' : [],
+    'function_definitions' : [],
 }
 
 def write(filename,s):
@@ -159,3 +165,6 @@ write('Type.cpp',TYPE_CPP.substitute(top_env))
 
 write('Tensor.h',TENSOR_H.substitute(top_env))
 write('Tensor.cpp',TENSOR_CPP.substitute(top_env))
+
+write('Functions.h',FUNCTIONS_H.substitute(top_env))
+write('Functions.cpp',FUNCTIONS_CPP.substitute(top_env))
