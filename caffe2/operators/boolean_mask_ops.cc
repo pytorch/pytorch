@@ -83,6 +83,12 @@ class BooleanMaskOp final : public Operator<Context> {
     TIndex lastStart = -1;
     const auto* inPtr = (char*)data.raw_data();
     TIndex outStart = 0;
+    int64_t* out_vec;
+    if (OutputSize() == 2) {
+      auto* indicesOut = Output(1);
+      indicesOut->Resize(numOutputs);
+      out_vec = indicesOut->template mutable_data<int64_t>();
+    }
     for (TIndex i = 0;; ++i) {
       // mask was true and either a) became false, or b) sequence finished
       if (lastStart != -1 && ((i >= outerSize) || !maskPtr[i])) {
@@ -101,6 +107,9 @@ class BooleanMaskOp final : public Operator<Context> {
       if (lastStart == -1 && maskPtr[i]) {
         lastStart = i;
       }
+      if (maskPtr[i] && OutputSize() == 2) {
+        *(out_vec++) = i;
+      }
     }
     return true;
   }
@@ -111,14 +120,15 @@ REGISTER_CPU_OPERATOR(BooleanMaskLengths, BooleanMaskLengthsOp<CPUContext>);
 
 OPERATOR_SCHEMA(BooleanMask)
     .NumInputs(2)
-    .NumOutputs(1)
+    .NumOutputs(1, 2)
     .SetDoc(R"DOC(
 Given a data tensor and a 1D boolean mask tensor, returns a tensor containing
 only the elements corresponding to positions where the mask is true.
 )DOC")
     .Input(0, "data", "The 1D, original data tensor.")
     .Input(1, "mask", "A tensor of bools of same shape as `data`.")
-    .Output(0, "masked_data", "A tensor of same type as `data`.");
+    .Output(0, "masked_data", "A tensor of same type as `data`.")
+    .Output(1, "masked_indices", "A tensor for indices.");
 
 OPERATOR_SCHEMA(BooleanMaskLengths)
     .NumInputs(2)
