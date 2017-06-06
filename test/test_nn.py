@@ -2128,6 +2128,16 @@ class TestNN(NNTestCase):
         self.assertTrue(gradcheck(lambda x, y: F.cosine_similarity(x, y, dim=0), (input1, input2)))
         self.assertTrue(gradcheck(lambda x, y: F.cosine_similarity(x, y, dim=-1), (input1, input2)))
 
+    def test_euclidean_distance(self):
+        input1 = Variable(torch.randn(4, 4), requires_grad=True)
+        input2 = Variable(torch.randn(4, 4), requires_grad=True)
+        self.assertTrue(gradcheck(lambda x, y: F.euclidean_distance(x, y), (input1, input2)))
+
+        input1 = Variable(torch.randn(4, 5, 6), requires_grad=True)
+        input2 = Variable(torch.randn(4, 5, 6), requires_grad=True)
+        self.assertTrue(gradcheck(lambda x, y: F.euclidean_distance(x, y, dim=0), (input1, input2)))
+        self.assertTrue(gradcheck(lambda x, y: F.euclidean_distance(x, y, dim=-1), (input1, input2)))
+
     def test_bilinear(self):
         module = nn.Bilinear(10, 10, 8)
         module_legacy = legacy.Bilinear(10, 10, 8)

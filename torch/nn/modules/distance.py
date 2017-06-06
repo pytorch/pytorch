@@ -31,7 +31,37 @@ class PairwiseDistance(Module):
     def forward(self, x1, x2):
         return F.pairwise_distance(x1, x2, self.norm, self.eps)
 
+
+class EuclideanDistance(Module):
+    r"""Computes the euclidean distance between x1, x2, computed along dim.
+
+    .. math ::
+        \text{distance}(x_1, x_2) = \sqrt{(x_{1,1} - x_{2,1})^2 + (x_{1,2} - x_{2,2})^2 + ... + (x_{1,N} - x_{2,N})^2}
+
+    Args:
+        x1 (Variable): first input tensor
+        x2 (Variable): second input tensor
+        dim (int, optional): Dimension of vectors. Default: 1
+        eps (float, optional): Small value to avoid sqrt of zero. Default: 1e-8
+
+    Shape:
+        - Input: :math:`(\ast_1, D, \ast_2)` where D is at position `dim`.
+        - Output: :math:`(\ast_1, \ast_2)` where 1 is at position `dim`.
+
+    >>> input1 = autograd.Variable(torch.randn(100, 128))
+    >>> input2 = autograd.Variable(torch.randn(100, 128))
+    >>> euclidean = nn.EuclideanDistance(dim=0)
+    >>> output = euclidean(input1, input2)
+    >>> print(output)
+    """
+    def __init__(self, dim=1, eps=1e-8):
+        super(EuclideanDistance, self).__init__()
+        self.dim = dim
+        self.eps = eps
+
+    def forward(self, x1, x2):
+        return F.euclidean_distance(x1, x2, dim=self.dim, eps=self.eps)
+
 # TODO: Cosine
 # TODO: CosineDistance - make sure lua's CosineDistance isn't actually cosine similarity
-# TODO: Euclidean
 # TODO: WeightedEuclidean

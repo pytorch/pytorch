@@ -403,6 +403,12 @@ Sparse layers
 Distance functions
 ----------------------------------
 
+:hidden:`EuclideanDistance`
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: EuclideanDistance
+    :members:
+
 :hidden:`PairwiseDistance`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -819,6 +825,10 @@ Distance functions
 
 .. autofunction:: cosine_similarity
 
+:hidden:`euclidean_distance`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: euclidean_distance
 
 Loss functions
 --------------
