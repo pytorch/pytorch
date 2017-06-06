@@ -13,6 +13,7 @@ parser.add_option('-s', '--source-path', help='path to source director for tenso
     action='store', default='.')
 parser.add_option('-p', '--print-dependencies',
     help='only output a list of dependencies', action='store_true')
+parser.add_option('-n', '--no-cuda', action='store_true')
 options,cwrap_files = parser.parse_args()
 
 TEMPLATE_PATH =  options.source_path+"/templates"
@@ -43,7 +44,10 @@ generators = {
     },
 }
 
-processors = [ 'CPU', 'CUDA']
+processors = [ 'CPU' ]
+if not options.no_cuda:
+    processors.append('CUDA')
+
 scalar_types = [
     ('Byte','uint8_t'),
     ('Char','int8_t'),
@@ -127,7 +131,7 @@ declarations = [ d
     for file in cwrap_files
         for d in cwrap_parser.parse(file) ]
 declarations = preprocess_declarations.run(declarations)
-print(yaml.dump(declarations))
+#print(yaml.dump(declarations))
 
 for fname,env in generators.items():
     write(fname,GENERATOR_DERIVED.substitute(env))

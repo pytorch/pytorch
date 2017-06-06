@@ -2,20 +2,34 @@
 #include <thread>
 #include <mutex>
 
+#ifdef TENSORLIB_HAS_CUDA
+#include "THC/THC.h"
+#include "TensorLib/CUDAGenerator.h"
+#endif
+#include "TensorLib/CPUGenerator.h"
+
 namespace tlib {
 
 Context::Context() {
+
+#ifdef TENSORLIB_HAS_CUDA
   thc_state = THCState_alloc();
   THCState_setDeviceAllocator(thc_state, THCCachingAllocator_get());
   thc_state->cudaHostAllocator = &THCCachingHostAllocator;
   THCudaInit(thc_state);
-  cuda_gen.reset(new CUDAGenerator(this));
-  cpu_gen.reset(new CPUGenerator(this));
+  generator_registry[static_cast<int>(Processor::CUDA)]
+    .reset(new CUDAGenerator(this));
+#endif
+
+  generator_registry[static_cast<int>(Processor::CPU)]
+    .reset(new CPUGenerator(this));
   Type::registerAll(this);
 }
 
 Context::~Context() {
+#ifdef TENSORLIB_HAS_CUDA
   THCState_free(thc_state);
+#endif
 }
 
 static std::mutex context_lock;

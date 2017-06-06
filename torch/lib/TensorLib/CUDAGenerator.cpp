@@ -1,3 +1,5 @@
+#ifdef TENSORLIB_HAS_CUDA
+
 #include "TensorLib/CUDAGenerator.h"
 #include "TensorLib/Context.h"
 #include <stdexcept>
@@ -39,3 +41,4 @@ CUDAGenerator& CUDAGenerator::manualSeed(unsigned long seed) {
 }
 
 } // namespace thpp
+#endif //TENSORLIB_HAS_CUDA
