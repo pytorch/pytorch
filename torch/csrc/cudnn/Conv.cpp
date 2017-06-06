@@ -6,6 +6,9 @@
 
 #include <cudnn.h>
 #include <functional>
+#include <iterator>
+#include <sstream>
+#include <algorithm>
 #include <memory>
 #include <mutex>
 #include <stdint.h>
@@ -338,6 +341,112 @@ void* tensorPointer(cudnnDataType_t dataType, THVoidTensor* tensor, int groupIdx
 
 }
 
+static void check_args(const std::vector<int>& args, size_t expected_size, const std::string& arg_name)
+{
+    if (args.size() > expected_size){
+      std::stringstream ss;
+      ss << "Too many " << arg_name << " values (" << args.size() << ") supplied, expecting " << expected_size;
+      throw std::runtime_error(ss.str());
+    }
+    else if (args.size() < expected_size){
+      std::stringstream ss;
+      ss << "Not enough " << arg_name << " values (" << args.size() << ") supplied, expecting " << expected_size;
+      throw std::runtime_error(ss.str());
+    }
+
+    auto num_negative_values = std::count_if(args.begin(), args.end(), [](int x){return x < 0;});
+    if (num_negative_values > 0){
+      std::stringstream ss;
+      ss << arg_name << " should be greater than zero but got (";
+      std::copy(args.begin(), args.end() - 1, std::ostream_iterator<int>(ss,", "));
+      ss << args.back() <<  ")";
+      throw std::runtime_error(ss.str());
+    }
+}
+
+static void check_input_size(THVoidTensor* input, THVoidTensor* weight, int groups)
+{
+  if (input->nDimension > 5){
+    throw std::runtime_error("input has more than 5 dimensions");
+  }
+
+  if (input->size[1]/groups != weight->size[1]){
+    std::stringstream ss;
+    ss << "Need input.size[1] == " << weight->size[1] * groups << " but got " << input->size[1] << " instead.";
+    throw std::runtime_error(ss.str());
+  }
+}
+
+static void check_bias_size(THVoidTensor* bias, THVoidTensor* weight, int groups, bool transposed)
+{
+  if (bias != nullptr){
+    if (transposed){
+      if (bias->size[0]/groups != weight->size[1]){
+        std::stringstream ss;
+        ss << "Need bias.size[0] == " << weight->size[1]*groups << " but instead it is " << bias->size[0];
+        throw std::runtime_error(ss.str());
+      }
+    }
+    else if (bias->size[0] != weight->size[0]){
+      std::stringstream ss;
+      ss << "Need bias.size[0] == " << weight->size[0] << " but instead it is " << bias->size[0];
+      throw std::runtime_error(ss.str());
+    }
+  }
+}
+
+static void check_expected_output_size_is_valid(THVoidTensor* input, THVoidTensor* output, THVoidTensor* weight,
+                                                const std::vector<int>& pad, const std::vector<int>& stride,
+                                                const std::vector<int>& dilation)
+{
+  std::vector<long> output_sizes(input->nDimension - 2);
+  bool invalid_dim_size = false;
+  int dim_idx = 0;
+
+  for (int i = 2; i != input->nDimension; ++i, ++dim_idx){
+    long output = (input->size[i] + 2*pad[dim_idx] - (dilation[dim_idx] * (weight->size[i] - 1) + 1)) / stride[dim_idx] + 1;
+    output_sizes[dim_idx] = output;
+    if (output < 1){
+      invalid_dim_size = true;
+    }
+  }
+
+  if (invalid_dim_size){
+    std::stringstream ss;
+    ss <<  "Given input size: (";
+    for (int i = 1; i != input->nDimension - 1; ++i){
+      ss << input->size[i] << ", ";
+    }
+    ss << input->size[input->nDimension - 1] << "). Calculated output size: (" << input->size[0] << ", ";
+    for (size_t i = 0; i != output_sizes.size() - 1; ++i){
+      ss << output_sizes[i] << ", ";
+    }
+    ss << output_sizes.back() << "). Output size is too small.";
+    throw std::runtime_error(ss.str());
+  }
+
+  if (input->nDimension != output->nDimension){
+    std::stringstream ss;
+    ss << "input (" << input->nDimension <<"D) and output ("<< output->nDimension;
+    ss << "D) do not have the same number of dimensions";
+    throw std::runtime_error(ss.str());
+  }
+}
+
+static void convolution_shape_check(THVoidTensor* input, THVoidTensor* weight, THVoidTensor* bias,
+                                    THVoidTensor* output, const std::vector<int>& pad, const std::vector<int>& stride,
+                                    const std::vector<int>& dilation, int groups, bool transposed){
+
+  check_args(pad, input->nDimension - 2, "padding");
+  check_args(stride, pad.size(), "stride");
+  check_args(dilation, pad.size(), "dilation");
+
+  check_input_size(input, weight, groups);
+  check_bias_size(bias, weight, groups, transposed);
+  check_expected_output_size_is_valid(input, output, weight, pad, stride, dilation);
+}
+
+
 static_assert(std::is_pod<ConvolutionParams>::value, "ConvolutionParams not POD");
 
 Convolution::Convolution(
@@ -347,10 +456,7 @@ Convolution::Convolution(
   : idesc(), odesc(), odesc_bias(), bdesc(), wdesc(), cdesc(), groups(groups)
   , transposed(transposed)
 {
-  CHECK_ARG(input->nDimension <= 5);
-  CHECK_ARG(input->nDimension == output->nDimension);
-  CHECK_ARG((long)pad.size() == input->nDimension - 2);
-  CHECK_ARG(pad.size() == stride.size());
+  convolution_shape_check(input, weight, bias, output, pad, stride, dilation, groups, transposed);
   memset(&params, 0, sizeof(ConvolutionParams));
   params.dataType = dataType;
   for (int i = 0; i != input->nDimension; ++i) {
@@ -364,6 +470,7 @@ Convolution::Convolution(
     params.dilation[i] = dilation[i];
   }
   params.groups = groups;
+
   setTensorDescriptor(idesc, dataType, input, groups);
   setTensorDescriptor(odesc, dataType, output, groups);
   if (!transposed)
