@@ -8,6 +8,7 @@ from __future__ import unicode_literals
 from caffe2.python import core, workspace, model_helper, utils, brew
 from caffe2.python.rnn_cell import LSTM
 from caffe2.proto import caffe2_pb2
+from caffe2.python.optimizer import build_sgd
 
 
 import argparse
@@ -94,19 +95,14 @@ class CharRNN(object):
         loss = model.net.AveragedLoss(xent, 'loss')
         model.AddGradientOperators([loss])
 
-        # Hand made SGD update. Normally one can use helper functions
-        # to build an optimizer
-        ITER = brew.iter(model, "iter")
-        LR = model.LearningRate(
-            ITER, "LR",
-            base_lr=-0.1 * self.seq_length,
-            policy="step", stepsize=1, gamma=0.9999)
-        ONE = model.param_init_net.ConstantFill([], "ONE", shape=[1], value=1.0)
-
-        # Update weights for each of the model parameters
-        for param in model.params:
-            param_grad = model.param_to_grad[param]
-            model.net.WeightedSum([param, ONE, param_grad, LR], param)
+        # use build_sdg function to build an optimizer
+        build_sgd(
+            model,
+            base_learning_rate=0.1 * self.seq_length,
+            policy="step",
+            stepsize=1,
+            gamma=0.9999
+        )
 
         self.model = model
         self.predictions = softmax
