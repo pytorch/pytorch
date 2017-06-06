@@ -73,6 +73,16 @@ class DataParallel(Module):
     def gather(self, outputs, output_device):
         return gather(outputs, output_device, dim=self.dim)
 
+    def __getattr__(self, item):
+        try:
+            return super(DataParallel, self).__getattr__(item)
+        except AttributeError:
+            # Using the simpler `self.modules` goes infinitely recursive
+            if '_modules' in self.__dict__:
+                return getattr(self.__dict__['_modules']['module'], item)
+            else:
+                raise
+
 
 def data_parallel(module, inputs, device_ids=None, output_device=None, dim=0, module_kwargs=None):
     """Evaluates module(input) in parallel across the GPUs given in device_ids.
