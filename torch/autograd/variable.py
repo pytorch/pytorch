@@ -719,6 +719,9 @@ class Variable(_C._VariableBase):
     def inverse(self):
         return Inverse.apply(self)
 
+    def gesv(self, a):
+        return Gesv.apply(self, a)
+
     def multinomial(self, num_samples=1, with_replacement=False):
         return Multinomial(num_samples, with_replacement)(self)
 
