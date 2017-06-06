@@ -53,10 +53,16 @@ TYPE_FORMAL_GENERIC = {
 }
 
 TYPE_RETURN = {
-    'THTensor*' : 'Tensor *'
+    'THTensor*' : 'Tensor *',
+    'real': 'Scalar',
+    'accreal': 'Scalar'
 }
 TYPE_ARGUMENT = {
     'THTensor*': CodeTemplate('checked_cast<${THTensor}>(${arg_name})'),
+}
+
+RETURN_WRAP = {
+'THTensor*': 'new ${Tensor}(context,${returned})'
 }
 
 class nested_dict(object):
@@ -85,17 +91,20 @@ def create_generic(top_env, declarations):
                 insert(argument)
         return result
     def format_formal(argument):
-        return '{} {}'.format(TYPE_FORMAL_GENERIC[argument['type']],argument['name'])
+        type_str = TYPE_FORMAL_GENERIC.get(argument['type'],"NYIType")
+        return '{} {}'.format(type_str,argument['name'])
 
     def format_return_type(option):
         ret = option['return']
         if ret['kind'] == 'arguments':
             #TODO multiple returns
             index = ret['arguments'][0]
-            return TYPE_RETURN[option['arguments'][index]['type']]
+            the_type = option['arguments'][index]['type']
+        elif ret['kind'] == 'type':
+            the_type = ret['type']
         else:
             raise Exception("format_return_type")
-        return TYPE_RETURN[argument['type']]
+        return TYPE_RETURN.get(the_type,the_type)
 
     def first_tensor(option):
         for argument in option['arguments']:
@@ -172,13 +181,17 @@ def create_derived(processor_type_env,declarations):
                     env,arg_name=arg['name']))
 
         option['actuals'] = processor_type_env['state'] + get_arguments(option)
-        call = CodeTemplate("${THTensor}_${cname}(${actuals});").substitute(env)
-        body.append(call)
+        call = CodeTemplate("${THTensor}_${cname}(${actuals})").substitute(env)
         ret = option['return']
         if ret['kind'] == 'arguments':
             arg = option['arguments'][ret['arguments'][0]]
+            body.append(call+";")
             body.append("return {}_;".format(arg['name']))
-        else:
+        elif ret['kind'] == 'type':
+            if ret['type'] == 'THTensor*':
+                body.append(CodeTemplate("return new ${Tensor}(context,${arg_name});").substitute(env,arg_name=call))
+            else:
+                body.append("return {};").format(call)
             assert(False and "NYI - return handling")
         return body
 
