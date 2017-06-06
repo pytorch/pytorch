@@ -72,7 +72,7 @@ def create_generic(top_env, declarations):
         result = []
         def insert(argument):
             if argument['name'] not in seen:
-                seen.update(argument['name'])
+                seen.add(argument['name'])
                 result.append(argument)
         for argument in option['arguments']:
             if not argument.get('output',False):
@@ -80,7 +80,6 @@ def create_generic(top_env, declarations):
         for argument in option['arguments']:
             if argument.get('allocate',False):
                 insert(argument)
-
         return result
     def format_formal(argument):
         return '{} {}'.format(TYPE_FORMAL_GENERIC[argument['type']],argument['name'])
@@ -90,8 +89,12 @@ def create_generic(top_env, declarations):
         m = re.match('argument (\d+)',ret)
         if m is not None:
             argument = option['arguments'][int(m.group(1))]
-            return TYPE_RETURN[argument['type']]
-        raise NYIError("argument handling....")
+        elif ret == 'self':
+            argument = [x for x in option['arguments'] if x['name'] == 'self'][0]
+        else:
+            raise Exception("format_return_type")
+        return TYPE_RETURN[argument['type']]
+
     def first_tensor(option):
         for argument in option['arguments']:
             if not argument.get('output',False) and argument['type'] == "THTensor*":
@@ -116,11 +119,15 @@ def create_generic(top_env, declarations):
             TYPE_METHOD_DECLARATION.substitute(env))
         top_env['type_method_definitions'].append(
             TYPE_METHOD_DEFINITION.substitute(env))
-        top_env['tensor_method_declarations'].append(
-            TENSOR_METHOD_DECLARATION.substitute(env))
-        top_env['tensor_method_definitions'].append(
-            TENSOR_METHOD_DEFINITION.substitute(env))
-        if option['first_tensor'] is not None:
+
+        if 'method' in option['variants']:
+            top_env['tensor_method_declarations'].append(
+                TENSOR_METHOD_DECLARATION.substitute(env))
+            top_env['tensor_method_definitions'].append(
+                TENSOR_METHOD_DEFINITION.substitute(env))
+
+        if ('function' in option['variants'] and
+            option['first_tensor'] is not None):
             top_env['function_declarations'].append(
             FUNCTION_DECLARATION.substitute(env))
             top_env['function_definitions'].append(
@@ -138,6 +145,7 @@ def create_derived(processor_type_env,declarations):
     type_object_declarations = []
     type_object_definitions = []
     def emit_body(option):
+        print(yaml.dump(option))
         return []
     def process_option(option):
         pair = (processor_type_env['Processor'],processor_type_env['ScalarName'])
