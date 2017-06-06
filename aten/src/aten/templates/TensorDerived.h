@@ -14,7 +14,7 @@ public:
   virtual Type& type() const override;
   virtual const char * toString() const override;
 
-  const char * typeString();
+  static const char * typeString();
 
 protected:
   ${THTensor} * tensor;
