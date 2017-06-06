@@ -2130,29 +2130,36 @@ class TestNN(NNTestCase):
 
     def test_bilinear(self):
         module = nn.Bilinear(10, 10, 8)
-        module2 = legacy.Bilinear(10, 10, 8)
+        module_legacy = legacy.Bilinear(10, 10, 8)
 
-        module2.weight.copy_(module.weight.data)
-        module2.bias.copy_(module.bias.data)
+        module_legacy.weight.copy_(module.weight.data)
+        module_legacy.bias.copy_(module.bias.data)
 
         input1 = torch.randn(4, 10)
         input2 = torch.randn(4, 10)
 
         output = module(Variable(input1), Variable(input2))
-        output2 = module2.forward([input1, input2])
+        output_legacy = module_legacy.forward([input1, input2])
+
+        self.assertEqual(output.data, output_legacy)
 
         input1_1 = Variable(input1, requires_grad=True)
         input2_1 = Variable(input2, requires_grad=True)
 
-        output3 = module(input1_1, input2_1)
-        grad = torch.randn(*output3.size())
-        output3.backward(grad)
+        module.zero_grad()
+        module_legacy.zeroGradParameters()
+
+        output = module(input1_1, input2_1)
+        grad_output = torch.randn(*output.size())
+        gi1_legacy, gi2_legacy = module_legacy.backward([input1, input2], grad_output)
+        output.backward(grad_output)
         gi1 = input1_1.grad.data.clone()
         gi2 = input2_1.grad.data.clone()
 
-        self.assertEqual(output.data, output2)
-        # TODO: this assertion is incorrect, fix needed
-        # self.assertEqual([gi1, gi2], output3)
+        self.assertEqual(gi1, gi1_legacy)
+        self.assertEqual(gi2, gi2_legacy)
+        self.assertEqual(module.weight.grad.data, module_legacy.gradWeight)
+        self.assertEqual(module.bias.grad.data, module_legacy.gradBias)
 
         self.assertTrue(gradcheck(lambda x1, x2: F.bilinear(x1, x2, module.weight, module.bias), (input1_1, input2_1)))
 
