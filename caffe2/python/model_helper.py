@@ -247,6 +247,7 @@ class ModelHelper(object):
             return self._param_info_deprecated
 
     def AddParameter(self, param, tags=None):
+        assert isinstance(param, core.BlobReference)
         tags = tags or []
         if isinstance(tags, list):
             tags = set(tags)
@@ -262,15 +263,20 @@ class ModelHelper(object):
         if parameter_info.ParameterTags.BIAS in tags:
             self.biases.append(param)
 
+    @staticmethod
+    def _NormalizeNamescope(namescope):
+        if namescope is None:
+            return scope.CurrentNameScope()
+        elif namescope == '' or namescope.endswith(scope._NAMESCOPE_SEPARATOR):
+            return namescope
+        else:
+            return namescope + scope._NAMESCOPE_SEPARATOR
+
     def GetParams(self, namescope=None, top_scope=False):
         '''
         Returns the params in current namescope
         '''
-        if namescope is None:
-            namescope = scope.CurrentNameScope()
-        else:
-            if not namescope.endswith(scope._NAMESCOPE_SEPARATOR):
-                namescope += scope._NAMESCOPE_SEPARATOR
+        namescope = ModelHelper._NormalizeNamescope(namescope)
 
         if namescope == '':
             return self.params[:]
@@ -386,11 +392,7 @@ class ModelHelper(object):
         directly computed from data, such as the running mean and variance
         of Spatial Batch Normalization.
         '''
-        if namescope is None:
-            namescope = scope.CurrentNameScope()
-        else:
-            if not namescope.endswith(scope._NAMESCOPE_SEPARATOR):
-                namescope += scope._NAMESCOPE_SEPARATOR
+        namescope = ModelHelper._NormalizeNamescope(namescope)
 
         if namescope == '':
             return self._computed_params[:]
