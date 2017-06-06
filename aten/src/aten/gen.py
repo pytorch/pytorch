@@ -62,7 +62,11 @@ scalar_types = [
 # shared environment for non-derived base classes Type.h Tensor.h Storage.h
 top_env = {
     'type_registrations' : [],
-    'type_headers' : []
+    'type_headers' : [],
+    'type_method_declarations' : [],
+    'type_method_definitions' : [],
+    'tensor_method_declarations' : [],
+    'tensor_method_definitions' : []
 }
 
 def write(filename,s):
@@ -110,6 +114,8 @@ def generate_storage_type_and_tensor(processor, scalar_type):
         env['to_th_half'] = ''
         env['to_tlib_half'] = ''
 
+    env['type_derived_method_declarations'] = []
+    env['type_derived_method_definitions'] = []
 
     write(env['Storage']+".cpp",STORAGE_DERIVED_CPP.substitute(env))
     write(env['Storage']+".h",STORAGE_DERIVED_H.substitute(env))
