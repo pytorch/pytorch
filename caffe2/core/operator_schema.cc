@@ -217,6 +217,12 @@ OpSchema& OpSchema::CostInferenceFunction(CostInferenceFunctionType function) {
   return *this;
 }
 
+OpSchema& OpSchema::DeviceInferenceFunction(
+    DeviceInferenceFunctionType function) {
+  device_inference_function_ = function;
+  return *this;
+}
+
 OpSchema& OpSchema::SetDoc(const string& doc) {
   doc_ = doc;
   return *this;
