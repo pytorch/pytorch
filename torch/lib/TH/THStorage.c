@@ -36,7 +36,7 @@ THDescBuff THLongStorage_sizeDesc(const THLongStorage *size) {
   return buf;
 }
 
-TH_API THLongStorage *THLongStorage_newInferSize(THLongStorage *size, ptrdiff_t nElement)
+THLongStorage *THLongStorage_newInferSize(THLongStorage *size, ptrdiff_t nElement)
 {
   ptrdiff_t total_size = (size->size > 0 ? 1 : 0);
   ptrdiff_t dim_infer = -1;
@@ -66,7 +66,8 @@ TH_API THLongStorage *THLongStorage_newInferSize(THLongStorage *size, ptrdiff_t 
   return copy;
 }
 
-TH_API int THLongStorage_inferSize2(THLongStorage *output, long *sizesA, long dimsA, long *sizesB, long dimsB, int raiseErrors) {
+int THLongStorage_inferSize2(THLongStorage *output, long *sizesA, long dimsA, long *sizesB, long dimsB,
+                             char *error_buffer, int buffer_len) {
   THArgCheck(sizesA != NULL, 1, "sizesA must not be null");
   THArgCheck(sizesB != NULL, 2, "sizesB must not be null");
   THArgCheck(dimsA, 1, "Can't expand empty tensor a");
@@ -85,10 +86,8 @@ TH_API int THLongStorage_inferSize2(THLongStorage *output, long *sizesA, long di
       expandedSizes[i] = THMax(sizeA, sizeB);
     } else {
       THFree(expandedSizes);
-      if (raiseErrors) {
-        THError("The size of tensor a (%ld) must match the size of tensor b (%ld) at "
-                "non-singleton dimension %ld.", sizeA, sizeB, i);
-      }
+      snprintf(error_buffer, buffer_len, "The size of tensor a (%ld) must match the size of tensor b (%ld) at "
+               "non-singleton dimension %ld.", sizeA, sizeB, i);
       return -1;
     }
   }
@@ -98,7 +97,8 @@ TH_API int THLongStorage_inferSize2(THLongStorage *output, long *sizesA, long di
   return 0;
 }
 
-TH_API int THLongStorage_inferSizeN(THLongStorage *output, int n, long **sizes, long *dims, int raiseErrors) {
+int THLongStorage_inferSizeN(THLongStorage *output, int n, long **sizes, long *dims,
+                             char *error_buffer, int buffer_len) {
   THArgCheck(n > 0, 2, "n must be greater than 0");
   THArgCheck(sizes != NULL, 1, "sizes must not be null");
   THArgCheck(dims != NULL, 1, "dims must not be null");
@@ -122,10 +122,8 @@ TH_API int THLongStorage_inferSizeN(THLongStorage *output, int n, long **sizes, 
         expandedSizes[ i ] =  THMax(expandedSizes[ i ], size);
       } else {
         THFree(expandedSizes);
-        if (raiseErrors) {
-          THError("The size of tensor %i (%ld) must match the expanded size of tensor (%ld) at "
-                  "non-singleton dimension %ld.", j, size, expandedSizes[ i ], i);
-        }
+        snprintf(error_buffer, buffer_len, "The size of tensor %i (%ld) must match the expanded size"
+                 "of tensor (%ld) at non-singleton dimension %ld.", j, size, expandedSizes[ i ], i);
         return -1;
       }
     }
@@ -136,9 +134,9 @@ TH_API int THLongStorage_inferSizeN(THLongStorage *output, int n, long **sizes, 
   return 0;
 }
 
-TH_API int THLongStorage_inferExpandGeometry(long *tensorSizes, long *tensorStrides, long tensorDim,
-                                             THLongStorage *sizes, long **expandedSizes, long **expandedStrides,
-                                             int raiseErrors) {
+int THLongStorage_inferExpandGeometry(long *tensorSizes, long *tensorStrides, long tensorDim,
+                                        THLongStorage *sizes, long **expandedSizes, long **expandedStrides,
+                                        char *error_buffer, int buffer_len) {
   ptrdiff_t ndim = THLongStorage_size(sizes);
 
   long *expandedSizesCalc = THAlloc(sizeof(long)*ndim);
@@ -159,10 +157,8 @@ TH_API int THLongStorage_inferExpandGeometry(long *tensorSizes, long *tensorStri
       } else {
         THFree(expandedSizesCalc);
         THFree(expandedStridesCalc);
-        if (raiseErrors) {
-          THError("The expanded size of the tensor (%d) must match the existing size (%d) at "
-                  "non-singleton dimension %ld.", targetSize, size, i);
-        }
+        snprintf(error_buffer, buffer_len, "The expanded size of the tensor (%d) must match the existing size (%d) at "
+                 "non-singleton dimension %ld.", targetSize, size, i);
         return -1;
       }
     }
