@@ -8,4 +8,6 @@ void Type::registerAll(Context * context) {
   ${type_registrations}
 }
 
+${type_method_definitions}
+
 }
