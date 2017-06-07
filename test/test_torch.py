@@ -987,11 +987,6 @@ class TestTorch(TestCase):
             "addcdiv", "addcmul", "masked_scatter", "masked_fill",
             "map", "map2", "copy"
         }
-        # functions with fallback to equal nElem behavior
-        fns_fallback = {"add", "sub", "div", "mul", "pow", "fmod", "remainder",
-                        "eq", "ge", "gt", "le", "lt", "max", "min", "ne",
-                        "addcdiv", "addcmul", "masked_scatter", "masked_fill",
-                        "map", "map2", "copy"}
         # functions with three tensor arguments
         fns_3_args = {"addcdiv", "addcmul", "map2"}
 
@@ -1099,7 +1094,7 @@ class TestTorch(TestCase):
             def _test_in_place_broadcastable(t0, t1, t2=None):
                 if not broadcastable(t0, t1, t2):
                     same_size = t0.numel() == t1.numel() and (t0.numel() == t2.numel() if t2 is not None else True)
-                    if (fn not in fns_fallback) or (fn in fns_fallback and not same_size):
+                    if not same_size:
                         self.assertRaises(RuntimeError, lambda: tensorfn_inplace(t0, t1, t2))
                 else:
                     tensorfn_inplace(t0, t1, t2)
@@ -1120,7 +1115,7 @@ class TestTorch(TestCase):
         fns_fallback = {"add", "sub", "div", "mul", "pow", "fmod", "remainder",
                         "eq", "ge", "gt", "le", "lt", "max", "min", "ne",
                         "addcdiv", "addcmul", "masked_scatter", "masked_fill",
-                        "map", "map2", "copy"}
+                        "map", "map2", "copy", "dist", "atan2", "lerp"}
         # functions with three tensor arguments
         fns_3_args = {"addcdiv", "addcmul", "map2"}
 
@@ -1131,7 +1126,7 @@ class TestTorch(TestCase):
             t2 = cast(torch.randn(4).float())
             broadcast_size = torch.Size([4, 4])
             if not hasattr(t0, fn):
-                break
+                continue
             t0_fn = getattr(t0, fn)
             t1_fn = getattr(t1, fn)
 
@@ -1152,8 +1147,9 @@ class TestTorch(TestCase):
                     return myfn(t1)
             r0 = tensorfn(t0_fn, t1, t2)
             r1 = tensorfn(t1_fn, t0, t2)
-            self.assertEqual(broadcast_size, r0.size())
-            self.assertEqual(broadcast_size, r1.size())
+            if torch.is_tensor(r0):
+                self.assertEqual(broadcast_size, r0.size())
+                self.assertEqual(broadcast_size, r1.size())
 
             # case 2: broadcastable and not nElemes equal -- tested by test_fallback
 
@@ -1163,7 +1159,7 @@ class TestTorch(TestCase):
                 t1 = cast(torch.randn(2, 3).float())
                 t2 = cast(torch.randn(3, 2).float())
                 if not hasattr(t0, fn if not inplace else fn + "_"):
-                    break
+                    continue
                 t0_fn = getattr(t0, fn if not inplace else fn + "_")
                 t1_fn = getattr(t1, fn if not inplace else fn + "_")
                 t2_fn = getattr(t2, fn if not inplace else fn + "_")
@@ -1184,9 +1180,10 @@ class TestTorch(TestCase):
                     warnings.simplefilter('always', UserWarning)
                     r2 = tensorfn(t2_fn, t0, t1)
                     verify_fallback_warnings(w)
-                self.assertEqual(t0.size(), r0.size())
-                self.assertEqual(t1.size(), r1.size())
-                self.assertEqual(t2.size(), r2.size())
+                if torch.is_tensor(r0):
+                    self.assertEqual(t0.size(), r0.size())
+                    self.assertEqual(t1.size(), r1.size())
+                    self.assertEqual(t2.size(), r2.size())
 
             # case 4: not broadcastable and not nEleme equal -- tested by test_fallback
 

@@ -649,7 +649,7 @@
       return: accreal
       arguments:
         - arg: THTensor* self
-          broadcast: other
+          broadcast: other fallback
         - THTensor* other
         - arg: real p
           default: AS_REAL(2)
@@ -713,7 +713,7 @@
     - arg: THTensor* destination
       output: True
     - arg: THTensor* self
-      broadcast: other
+      broadcast: other fallback
     - THTensor* other
 ]]
 
@@ -725,7 +725,7 @@
   arguments:
     - THTensor* self
     - arg: THTensor* self
-      broadcast: other inplace
+      broadcast: other fallback inplace
     - THTensor* other
 ]]
 
@@ -789,7 +789,7 @@
     - arg: THTensor* destination
       output: True
     - arg: THTensor* self
-      broadcast: end
+      broadcast: end fallback
     - THTensor* end
     - real weight
 ]]
@@ -802,7 +802,7 @@
   arguments:
     - THTensor* self
     - arg: THTensor* self
-      broadcast: end inplace
+      broadcast: end fallback inplace
     - THTensor* end
     - real weight
 ]]
