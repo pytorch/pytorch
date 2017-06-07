@@ -96,8 +96,8 @@ class LSTMFused(Function):
             gradOutput[0], gradOutput[1], gradInputCx)
 
         if self.has_bias:
-            gb1 = gradInGates.sum(0).squeeze()
-            gb2 = gradInGates.sum(0).squeeze()
+            gb1 = gradInGates.sum(0, keepdim=False)
+            gb2 = gradInGates.sum(0, keepdim=False)
 
             return gradInGates, gradInGates, gradInputCx, gb1, gb2
         else:
