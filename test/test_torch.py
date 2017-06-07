@@ -984,13 +984,13 @@ class TestTorch(TestCase):
             "dist", "atan2", "pow", "lerp", "add",
             "sub", "mul", "div", "fmod", "remainder",
             "eq", "ge", "gt", "le", "lt", "max", "min", "ne",
-            "addcdiv", "addcmul", "masked_copy", "masked_fill",
+            "addcdiv", "addcmul", "masked_scatter", "masked_fill",
             "map", "map2", "copy"
         }
         # functions with fallback to equal nElem behavior
         fns_fallback = {"add", "sub", "div", "mul", "pow", "fmod", "remainder",
                         "eq", "ge", "gt", "le", "lt", "max", "min", "ne",
-                        "addcdiv", "addcmul", "masked_copy", "masked_fill",
+                        "addcdiv", "addcmul", "masked_scatter", "masked_fill",
                         "map", "map2", "copy"}
         # functions with three tensor arguments
         fns_3_args = {"addcdiv", "addcmul", "map2"}
@@ -1059,7 +1059,7 @@ class TestTorch(TestCase):
             # in-place tensor is not broadcastable; test only guaranteed
             # to work by broadcasting other argument(s)
             if not hasattr(large_expanded, fn + "_"):
-                break
+                continue
 
             # need to clone largeExpanded so we can reuse, since functions are in-place
             large_expanded_clone = large_expanded.clone()
@@ -1068,7 +1068,7 @@ class TestTorch(TestCase):
                 t0_fn = getattr(t0, fn + "_")
                 if fn == "lerp":
                     return t0_fn(t1, 0.5)
-                elif fn == "masked_copy":
+                elif fn == "masked_scatter":
                     return t0_fn(t1 < 0.5, cast(torch.arange(1, t0.nelement() + 1).float()))
                 elif fn == "masked_fill":
                     return t0_fn(t1 < 0.5, 1.0)
@@ -1119,7 +1119,7 @@ class TestTorch(TestCase):
         # functions that should fallback to pointwise behavior
         fns_fallback = {"add", "sub", "div", "mul", "pow", "fmod", "remainder",
                         "eq", "ge", "gt", "le", "lt", "max", "min", "ne",
-                        "addcdiv", "addcmul", "masked_copy", "masked_fill",
+                        "addcdiv", "addcmul", "masked_scatter", "masked_fill",
                         "map", "map2", "copy"}
         # functions with three tensor arguments
         fns_3_args = {"addcdiv", "addcmul", "map2"}
@@ -1138,7 +1138,7 @@ class TestTorch(TestCase):
             def tensorfn(myfn, t1, t2):
                 if fn == "lerp":
                     return myfn(t1, 0.5)
-                elif fn == "masked_copy":
+                elif fn == "masked_scatter":
                     return myfn(t1 < 0.5, cast(torch.randn(4 * 4).float()))
                 elif fn == "masked_fill":
                     return myfn(t1 < 0.5, 1.0)
