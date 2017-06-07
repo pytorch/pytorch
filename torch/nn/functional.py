@@ -534,7 +534,7 @@ def nll_loss(input, target, weight=None, size_average=True):
     """
     dim = input.dim()
     if dim == 2:
-        f = _functions.thnn.NLLLoss(size_average, weight=weight)
+        f = _functions.thnn.NLLLoss(size_average, -100, weight=weight)
     elif dim == 4:
         f = _functions.thnn.NLLLoss2d(size_average, weight=weight)
     else:
