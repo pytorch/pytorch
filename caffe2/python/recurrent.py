@@ -205,6 +205,32 @@ def recurrent_net(
 
     recurrent_inputs = [str(x[1]) for x in initial_cell_inputs]
 
+    # Make sure that recurrent gradients accumulate with internal gradients
+    # (if a blob in the backward_cell_net receives gradient from both an
+    # external connection as well as from within the backward_cell_net,
+    # those gradients need to be added together, rather than one overwriting
+    # the other)
+    if backward_cell_net is not None:
+        proto = backward_cell_net.Proto()
+        operators = []
+        while len(proto.op) > 0:
+            op = proto.op[-1]
+            proto.op.remove(op)
+            operators.append(op)
+        for op in operators[::-1]:
+            proto.op.extend([op])
+            for j, output_blob in enumerate(op.output):
+                if output_blob in proto.external_input:
+                    # blob cannot be internal by virtue of in-place operation.
+                    if output_blob in op.input:
+                        continue
+                    accum_blob = '{}_accum'.format(output_blob)
+                    proto.op[-1].output[j] = accum_blob
+                    backward_cell_net.Sum(
+                        [output_blob, accum_blob],
+                        [output_blob],
+                    )
+
     backward_args = {}
     if backward_cell_net is not None:
         backward_link_internal, backward_link_external, backward_link_offset = \
@@ -229,29 +255,6 @@ def recurrent_net(
             ],
             'param_grads': param_grads,
         }
-
-    # Make sure that recurrent gradients accumulate with internal gradients
-    # (if a blob in the backward_cell_net receives gradient from both an
-    # external connection as well as from within the backward_cell_net,
-    # those gradients need to be added together, rather than one overwriting
-    # the other)
-    if backward_cell_net is not None:
-        proto = backward_cell_net.Proto()
-        operators = []
-        while len(proto.op) > 0:
-            op = proto.op[-1]
-            proto.op.remove(op)
-            operators.append(op)
-        for op in operators[::-1]:
-            proto.op.extend([op])
-            for j, output_blob in enumerate(op.output):
-                if output_blob in proto.external_input:
-                    accum_blob = '{}_accum'.format(output_blob)
-                    proto.op[-1].output[j] = accum_blob
-                    backward_cell_net.Sum(
-                        [output_blob, accum_blob],
-                        [output_blob],
-                    )
 
     results = net.RecurrentNetwork(
         all_inputs,
