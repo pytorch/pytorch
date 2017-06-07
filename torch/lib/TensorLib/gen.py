@@ -54,14 +54,14 @@ if not options.no_cuda:
     processors.append('CUDA')
 
 scalar_types = [
-    ('Byte','uint8_t'),
-    ('Char','int8_t'),
-    ('Double','double'),
-    ('Float','float'),
-    ('Int','int'),
-    ('Long','int64_t'),
-    ('Short','int16_t'),
-    ('Half','Half'),
+    ('Byte','uint8_t','Long'),
+    ('Char','int8_t','Long'),
+    ('Double','double','Double'),
+    ('Float','float','Double'),
+    ('Int','int','Long'),
+    ('Long','int64_t','Long'),
+    ('Short','int16_t','Long'),
+    ('Half','Half','Double'),
 ]
 
 # shared environment for non-derived base classes Type.h Tensor.h Storage.h
@@ -85,10 +85,11 @@ def write(filename,s):
         f.write(s)
 
 def generate_storage_type_and_tensor(processor, scalar_type, declarations):
-    scalar_name, c_type = scalar_type
+    scalar_name, c_type, accreal = scalar_type
     env = {}
     env['ScalarName'] = scalar_name
     env['ScalarType'] = c_type
+    env['AccScalarName'] = accreal
     env['Storage'] = "{}{}Storage".format(processor,scalar_name)
     env['Type'] = "{}{}Type".format(processor,scalar_name)
     env['Tensor'] = "{}{}Tensor".format(processor,scalar_name)

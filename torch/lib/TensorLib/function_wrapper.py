@@ -51,8 +51,8 @@ class NYIError(Exception):
 TYPE_FORMAL_GENERIC = {
     'THTensor*' : 'Tensor &',
     'THBoolTensor*': 'Tensor &',
-    'THStorage*' : 'Storage &',
     'THIndexTensor*' : 'Tensor &',
+    'THStorage*' : 'Storage &',
     'THGenerator*': 'Generator &',
     'THSize*': 'IntList',
     'THStride*': 'IntList',
@@ -69,19 +69,23 @@ TYPE_RETURN = {
 }
 CHECKED_CAST = {
     'THTensor*': CodeTemplate('checked_cast<${Tensor}>(&${arg_name})'),
+    'THBoolTensor*': CodeTemplate('checked_cast<${Processor}ByteTensor>(&${arg_name})'),
     'THIndexTensor*' : CodeTemplate('checked_cast<${THIndexTensor}>(&${arg_name})'),
     'THSize*' : CodeTemplate('THStorageView::make(${arg_name})'),
     'THStride*' : CodeTemplate('THStorageView::make(${arg_name})'),
+    'real': CodeTemplate('${arg_name}.to${ScalarName}()'),
+    'accreal': CodeTemplate('${arg_name}.to${AccScalarName}()'),
+
 }
 CHECKED_USE = {
     'THTensor*': '{}_->tensor',
     'THIndexTensor*' : '{}_->tensor',
-    'THSize*' : '{}_',
-    'THStride*' : '{}_',
+    'THBoolTensor*' : '{}_->tensor',
 }
 
-RETURN_WRAP = {
-'THTensor*': 'new ${Tensor}(context,${returned})'
+ALLOC_WRAP = {
+'THTensor*': 'new ${Tensor}(context)',
+'THBoolTensor*': 'new ${Processor}ByteTensor(context)',
 }
 
 CONSTANT_REPLACEMENTS = [
@@ -140,9 +144,9 @@ def create_generic(top_env, declarations):
                 return argument['name']
         return None
     def process_option(option):
-        if option['name'] != 'zeros':
+        if option['name'] != 'lt':
             raise NYIError("NYI")
-
+        print(yaml.dump(option))
         formals = get_formals(option)
         option['formals_list'] = formals
         option['formals'] = [format_formal(f) for f in formals]
@@ -188,7 +192,7 @@ def create_derived(processor_type_env,declarations):
         return argument['type'] in CHECKED_CAST
     def get_argument(argument,option):
         if requires_checked_cast(argument):
-            return CHECKED_USE[argument['type']].format(argument['name'])
+            return CHECKED_USE.get(argument['type'],'{}_').format(argument['name'])
         elif argument['type'] == "CONSTANT":
             v = str(argument['name'])
             for pattern,replacement in CONSTANT_REPLACEMENTS:
@@ -211,9 +215,8 @@ def create_derived(processor_type_env,declarations):
         for arg in option['arguments']:
             if requires_checked_cast(arg):
                 if arg.get('allocate',False):
-                    body.append(
-                        CodeTemplate('auto ${arg_name}_ = new ${Tensor}(context);').substitute(
-                        env,arg_name=arg['name']))
+                    allocation = CodeTemplate(ALLOC_WRAP[arg['type']]).substitute(env)
+                    body.append('auto {}_ = {};'.format(arg['name'],allocation))
                 else:
                     check_cast = CHECKED_CAST[arg['type']].substitute(env,arg_name=arg['name'])
                     body.append("auto {}_ = {};".format(arg['name'],check_cast))

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "TensorLib/Scalar.h"
+
 namespace tlib {
 
 class Type;
