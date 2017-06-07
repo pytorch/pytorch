@@ -31,7 +31,7 @@ class TestScatterOps(hu.HypothesisTestCase):
             r = d.copy()
             for i in ind:
                 r[i] *= w0
-            for i in xrange(0, len(args), 2):
+            for i in range(0, len(args), 2):
                 x = args[i]
                 w = args[i+1]
                 for i, j in enumerate(ind):
@@ -46,7 +46,7 @@ class TestScatterOps(hu.HypothesisTestCase):
         else:
             w0 = rand_array()
         inputs = [d, w0, ind]
-        for inp in range(1, num_args + 1):
+        for _ in range(1, num_args + 1):
             x = rand_array(index_dim, *extra_dims)
             w = rand_array()
             inputs.extend([x,w])

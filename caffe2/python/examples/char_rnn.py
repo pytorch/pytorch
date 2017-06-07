@@ -131,7 +131,7 @@ class CharRNN(object):
         # by a corresponding batch during the training process
         text_block_positions = np.zeros(self.batch_size, dtype=np.int32)
         text_block_size = N // self.batch_size
-        text_block_starts = range(0, N, text_block_size)
+        text_block_starts = list(range(0, N, text_block_size))
         text_block_sizes = [text_block_size] * self.batch_size
         text_block_sizes[self.batch_size - 1] += N % self.batch_size
         assert sum(text_block_sizes) == N

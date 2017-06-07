@@ -127,7 +127,7 @@ class Seq2SeqModelCaffe2:
                 input_builder_fun=lambda m: None,
                 forward_pass_builder_fun=self.forward_model_build_fun,
                 param_update_builder_fun=None,
-                devices=range(self.num_gpus),
+                devices=list(range(self.num_gpus)),
             )
 
             def clipped_grad_update_bound(model):
@@ -141,7 +141,7 @@ class Seq2SeqModelCaffe2:
                 input_builder_fun=lambda m: None,
                 forward_pass_builder_fun=self.model_build_fun,
                 param_update_builder_fun=clipped_grad_update_bound,
-                devices=range(self.num_gpus),
+                devices=list(range(self.num_gpus)),
             )
         self.norm_clipped_sparse_grad_update(
             model,

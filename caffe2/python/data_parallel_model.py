@@ -26,7 +26,7 @@ def Parallelize_GPU(
     param_update_builder_fun=None,
     optimizer_builder_fun=None,
     post_sync_builder_fun=None,
-    devices=range(0, workspace.NumCudaDevices()),
+    devices=None,
     rendezvous=None,
     net_type='dag',
     broadcast_computed_params=True,
@@ -72,6 +72,8 @@ def Parallelize_GPU(
                         in gradient computation to reduce memory footprint
 
     '''
+    if devices is None:
+        devices = list(range(0, workspace.NumCudaDevices())),
     log.info("Parallelizing model for devices: {}".format(devices))
     extra_workers = 8 if rendezvous is not None else 0  # best-guess
     num_workers = len(devices) * 4 + extra_workers
@@ -249,7 +251,7 @@ def Parallelize_GPU_BMUF(
     param_update_builder_fun,
     block_learning_rate=1.0,
     block_momentum=None,
-    devices=range(0, workspace.NumCudaDevices()),
+    devices=None,
     net_type='dag',
     master_gpu=None,
     optimize_gradient_memory=False,
@@ -266,6 +268,8 @@ def Parallelize_GPU_BMUF(
     '''
     assert isinstance(model_helper_obj, model_helper.ModelHelper)
 
+    if devices is None:
+        devices = list(range(0, workspace.NumCudaDevices()))
     if master_gpu is None:
         master_gpu = devices[0]
 

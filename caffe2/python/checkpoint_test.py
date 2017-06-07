@@ -22,7 +22,7 @@ import shutil
 def build_pipeline(node_id):
     with Node('reader:%d' % node_id):
         with Job.current().init_group, Task():
-            data_arr = Struct(('val', np.array(range(10))))
+            data_arr = Struct(('val', np.array(list(range(10)))))
             data = ConstRecord(ops, data_arr)
             ds = Dataset(data, name='dataset:%d' % node_id)
             full_reader = ds.reader(ops)

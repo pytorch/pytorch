@@ -38,7 +38,7 @@ class TestMuji(test_util.TestCase):
 
     def testAllreduceFallback(self):
         self.RunningAllreduceWithGPUs(
-            range(workspace.NumCudaDevices()), muji.AllreduceFallback
+            list(range(workspace.NumCudaDevices())), muji.AllreduceFallback
         )
 
     def testAllreduceSingleGPU(self):
@@ -65,6 +65,7 @@ class TestMuji(test_util.TestCase):
             pattern.shape[0] >= 8 and np.all(pattern[:4, :4]) and
             np.all(pattern[4:, 4:])
         ):
-            self.RunningAllreduceWithGPUs(range(8), muji.Allreduce8)
+            self.RunningAllreduceWithGPUs(
+                list(range(8)), muji.Allreduce8)
         else:
             print('Skipping allreduce with 8 gpus. Not peer access ready.')

@@ -190,7 +190,7 @@ def Train(args):
         gpus = [int(x) for x in args.gpus.split(',')]
         num_gpus = len(gpus)
     else:
-        gpus = range(args.num_gpus)
+        gpus = list(range(args.num_gpus))
         num_gpus = args.num_gpus
 
     log.info("Running on GPUs: {}".format(gpus))

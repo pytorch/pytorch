@@ -22,7 +22,7 @@ class TestReaderWithLimit(TestCase):
         """ 1. feed full dataset """
         src_init = core.Net('src_init')
         with core.NameScope('src'):
-            src_values = Struct(('label', np.array(range(100))))
+            src_values = Struct(('label', np.array(list(range(100)))))
             src_blobs = NewRecord(src_init, src_values)
             src_ds = Dataset(src_blobs)
             FeedRecord(src_blobs, src_values, ws)
@@ -42,7 +42,9 @@ class TestReaderWithLimit(TestCase):
 
         self.assertFalse(ws.blobs[str(reader.data_finished())].fetch())
         self.assertEquals(
-            sorted(ws.blobs[str(dst_ds.content().label())].fetch()), range(10))
+            sorted(ws.blobs[str(dst_ds.content().label())].fetch()),
+            list(range(10))
+        )
 
         """ 3. Read with limit larger than size of dataset """
         ws.run(dst_init)
@@ -51,7 +53,9 @@ class TestReaderWithLimit(TestCase):
             pipe(reader, dst_ds.writer(), num_threads=8)
         session.run(tg)
         self.assertEquals(
-            sorted(ws.blobs[str(dst_ds.content().label())].fetch()), range(100))
+            sorted(ws.blobs[str(dst_ds.content().label())].fetch()),
+            list(range(100))
+        )
         self.assertTrue(ws.blobs[str(reader.data_finished())].fetch())
 
         """ 3. Read without counter """
@@ -61,5 +65,7 @@ class TestReaderWithLimit(TestCase):
             pipe(reader, dst_ds.writer(), num_threads=8)
         session.run(tg)
         self.assertEquals(
-            sorted(ws.blobs[str(dst_ds.content().label())].fetch()), range(100))
+            sorted(ws.blobs[str(dst_ds.content().label())].fetch()),
+            list(range(100))
+        )
         self.assertTrue(ws.blobs[str(reader.data_finished())].fetch())

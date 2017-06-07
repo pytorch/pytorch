@@ -526,7 +526,7 @@ class HypothesisTestCase(test_util.TestCase):
                     "proper one should return a tuple/list of numpy arrays.")
             if not outputs_to_check:
                 self.assertEqual(len(reference_outputs), len(op.output))
-                outputs_to_check = range(len(op.output))
+                outputs_to_check = list(range(len(op.output)))
             outs = []
             for (output_index, ref) in zip(outputs_to_check, reference_outputs):
                 output_blob_name = op.output[output_index]

@@ -85,11 +85,11 @@ class GPUDataParallelModelTest(TestCase):
         self.assertTrue(np.allclose(result_1gpus, result_2gpus))
 
         if workspace.NumCudaDevices() >= 4:
-            result_4gpus = self.run_model(range(4))
+            result_4gpus = self.run_model(list(range(4)))
             self.assertTrue(np.allclose(result_1gpus, result_4gpus))
 
         if workspace.NumCudaDevices() >= 8:
-            result_8gpus = self.run_model(range(8))
+            result_8gpus = self.run_model(list(range(8)))
             self.assertTrue(np.allclose(result_1gpus, result_8gpus))
 
     @unittest.skipIf(workspace.NumCudaDevices() < 4, "Need at least 4 GPUs.")
@@ -279,11 +279,11 @@ class RecurrentNetworkParallelTest(TestCase):
         self.assertTrue(np.allclose(result_1gpus, result_2gpus))
 
         if workspace.NumCudaDevices() >= 4:
-            result_4gpus = self.run_model(range(4))
+            result_4gpus = self.run_model(list(range(4)))
             self.assertTrue(np.allclose(result_1gpus, result_4gpus))
 
         if workspace.NumCudaDevices() >= 8:
-            result_8gpus = self.run_model(range(8))
+            result_8gpus = self.run_model(list(range(8)))
             self.assertTrue(np.allclose(result_1gpus, result_8gpus))
 
 
@@ -472,12 +472,12 @@ class SparseDataParallelModelTest(TestCase):
         self.assertTrue(np.allclose(result_1gpus[1], result_2gpus[1]))
 
         if workspace.NumCudaDevices() >= 4:
-            result_4gpus = self.run_model(V, range(4), cpu_indices)
+            result_4gpus = self.run_model(V, list(range(4)), cpu_indices)
             self.assertTrue(np.allclose(result_1gpus[0], result_4gpus[0]))
             self.assertTrue(np.allclose(result_1gpus[1], result_4gpus[1]))
 
         if workspace.NumCudaDevices() >= 8:
-            result_8gpus = self.run_model(V, range(8), cpu_indices)
+            result_8gpus = self.run_model(V, list(range(8)), cpu_indices)
             self.assertTrue(np.allclose(result_1gpus[0], result_8gpus[0]))
             self.assertTrue(np.allclose(result_1gpus[1], result_8gpus[1]))
 
@@ -810,7 +810,7 @@ class SparseDataParallelModelTestWithSharedIndices(TestCase):
         self.run_model(V, [0])
 
         if workspace.NumCudaDevices() >= 4:
-            self.run_model(V, range(4))
+            self.run_model(V, list(range(4)))
 
         if workspace.NumCudaDevices() >= 8:
-            self.run_model(V, range(8))
+            self.run_model(V, list(range(8)))

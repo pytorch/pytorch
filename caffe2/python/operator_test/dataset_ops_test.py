@@ -510,7 +510,8 @@ class TestDatasetOps(TestCase):
             shape=[3, 2],
             values=[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
         )
-        input_array = np.array(range(1, 7), dtype=np.float32).reshape(3, 2)
+        input_array =\
+            np.array(list(range(1, 7)), dtype=np.float32).reshape(3, 2)
 
         workspace.CreateBlob('output')
         workspace.FeedBlob('next', np.array(0, dtype=np.int32))

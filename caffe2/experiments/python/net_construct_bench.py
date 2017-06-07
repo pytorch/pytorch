@@ -60,7 +60,7 @@ def AddMomentumParameterUpdate(train_model, LR):
 
 
 def Create(args):
-    gpus = range(args.num_gpus)
+    gpus = list(range(args.num_gpus))
     log.info("Running on gpus: {}".format(gpus))
 
     # Create CNNModeLhelper object

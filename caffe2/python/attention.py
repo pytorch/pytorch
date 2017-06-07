@@ -9,7 +9,7 @@ from caffe2.python import brew
 
 
 class AttentionType:
-    Regular, Recurrent = range(2)
+    Regular, Recurrent = tuple(range(2))
 
 
 def s(scope, name):

@@ -121,10 +121,10 @@ class TestIndexOps(TestCase):
         ], str, 'StringIndexCreate')
 
     def test_int_index_ops(self):
-        self._test_index_ops(range(8), np.int32, 'IntIndexCreate')
+        self._test_index_ops(list(range(8)), np.int32, 'IntIndexCreate')
 
     def test_long_index_ops(self):
-        self._test_index_ops(range(8), np.int64, 'LongIndexCreate')
+        self._test_index_ops(list(range(8)), np.int64, 'LongIndexCreate')
 
 if __name__ == "__main__":
     import unittest

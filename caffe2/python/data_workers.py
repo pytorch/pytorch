@@ -80,7 +80,7 @@ LOG_INT_SECS = 60
 
 
 def get_worker_ids(num_workers):
-    return range(0, num_workers)
+    return list(range(0, num_workers))
 
 
 def init_data_input_workers(
