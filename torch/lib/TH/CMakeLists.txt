@@ -20,6 +20,27 @@ IF(NOT TH_INSTALL_BIN_SUBDIR
   SET(TH_INSTALL_CMAKE_SUBDIR "share/cmake/TH" CACHE PATH "TH install cmake subdirectory")
 ENDIF()
 
+######################################################################
+###### macros section
+#####################################################################
+IF(NOT ADD_TORCH_LIBRARY)
+MACRO(ADD_TORCH_LIBRARY package type src)
+  IF ("${type}" STREQUAL "STATIC")
+    if ("${src}" MATCHES "cu$" OR "${src}" MATCHES "cu;")
+      CUDA_ADD_LIBRARY(${package} STATIC ${src})
+    else()
+      ADD_LIBRARY(${package} STATIC ${src})
+    endif()
+  ELSE()
+    if ("${src}" MATCHES "cu$" OR "${src}" MATCHES "cu;")
+      CUDA_ADD_LIBRARY(${package} ${type} ${src})
+    else()
+      ADD_LIBRARY(${package} ${type} ${src})
+    endif()
+  ENDIF()
+ENDMACRO()
+ENDIF()
+
 #######################################################################
 ##### flags section
 ######################################################################
