@@ -3,6 +3,7 @@
 #include "TensorLib/${Tensor}.h"
 #include "TensorLib/${Processor}Generator.h"
 #include "TensorLib/Utils.h"
+#include "TensorLib/THStorageView.h"
 #include <iostream>
 
 namespace tlib {
