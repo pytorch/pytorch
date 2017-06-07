@@ -47,7 +47,8 @@ TH_API void THNN_(ClassNLLCriterion_updateOutput)(
           THTensor *output,            // [OUT] a one-element tensor with loss
           bool sizeAverage,            // if true, the loss will be normalized by batch size and class weights
           THTensor *weights,           // [OPTIONAL] class weights
-          THTensor *total_weight);     // [BUFFER]
+          THTensor *total_weight,      // [BUFFER]
+          long ignore_index);          // target index to ignore (loss = 0, gradInput = 0)
 TH_API void THNN_(ClassNLLCriterion_updateGradInput)(
           THNNState *state,            // library's state
           THTensor *input,             // input tensor (1D/2D)
@@ -55,7 +56,8 @@ TH_API void THNN_(ClassNLLCriterion_updateGradInput)(
           THTensor *gradInput,         // [OUT] gradient w.r.t. input
           bool sizeAverage,            // if true, the loss will be normalized by batch size and class weights
           THTensor *weights,           // [OPTIONAL] class weights
-          THTensor *total_weight);     // [BUFFER]
+          THTensor *total_weight,      // [BUFFER]
+          long ignore_index);          // target index to ignore (loss = 0, gradInput = 0)
 
 TH_API void THNN_(SpatialClassNLLCriterion_updateOutput)(
           THNNState *state,            // library's state
@@ -175,13 +177,15 @@ TH_API void THNN_(GRUFused_updateOutput)(
           THTensor *bias1, // [OPTIONAL]
           THTensor *bias2, // [OPTIONAL]
           THTensor *hx,
-          THTensor *output);
+          THTensor *output,
+          THTensor *storage);
 TH_API void THNN_(GRUFused_updateGradInput)(
           THNNState *state,
-          THTensor *input,
-          THTensor *hidden,
+          THTensor *gradInInput,
+          THTensor *gradInHidden,
           THTensor *gradOutput,
-          THTensor *gradInput);
+          THTensor *gradInputHx,
+          THTensor *storage);
 
 TH_API void THNN_(LSTMFused_updateOutput)(
           THNNState *state,
@@ -194,13 +198,13 @@ TH_API void THNN_(LSTMFused_updateOutput)(
           THTensor *outputCell);
 TH_API void THNN_(LSTMFused_updateGradInput)(
           THNNState *state,
-          THTensor *input,
-          THTensor *hidden,
+          THTensor *storage,
+          THTensor *gradInGates,
           THTensor *cx,
           THTensor *cy,
           THTensor *gradOutput,
           THTensor *gradOutputCell,
-          THTensor *gradInput);
+          THTensor *gradInputCx);
 
 TH_API void THNN_(LogSigmoid_updateOutput)(
           THNNState *state,            // library's state
@@ -798,6 +802,41 @@ TH_API void THNN_(SpatialConvolutionMM_updateGradInput)(
           int dW, int dH,
           int padW, int padH);
 TH_API void THNN_(SpatialConvolutionMM_accGradParameters)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradWeight,
+          THTensor *gradBias,     // [OPTIONAL]
+          THTensor *finput,
+          THTensor *fgradInput,
+          int kW, int kH,
+          int dW, int dH,
+          int padW, int padH,
+          accreal scale);
+
+TH_API void THNN_(SpatialDepthWiseConvolution_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          THTensor *weight,
+          THTensor *bias,         // [OPTIONAL]
+          THTensor *finput,
+          THTensor *fgradInput,
+          int kW, int kH,
+          int dW, int dH,
+          int padW, int padH);
+TH_API void THNN_(SpatialDepthWiseConvolution_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          THTensor *weight,
+          THTensor *finput,
+          THTensor *fgradInput,
+          int kW, int kH,
+          int dW, int dH,
+          int padW, int padH);
+TH_API void THNN_(SpatialDepthWiseConvolution_accGradParameters)(
           THNNState *state,
           THTensor *input,
           THTensor *gradOutput,
