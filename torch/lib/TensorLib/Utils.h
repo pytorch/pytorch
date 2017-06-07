@@ -1,5 +1,7 @@
 #pragma once
 
+#include "TensorLib/CPUGenerator.h"
+
 namespace tlib {
 
 #define TensorLib_assert(cond, ...) if (!cond) { tlib::runtime_error(__VA_ARGS__); }
@@ -12,6 +14,14 @@ static inline T* checked_cast(Base* expr) {
   if(auto result = dynamic_cast<T*>(expr))
     return result;
   runtime_error("Expected a '%s' but found '%s'",T::typeString(),expr->type().toString());
+}
+
+class CPUGenerator;
+class Generator;
+static inline CPUGenerator * check_generator(Generator* expr) {
+  if(auto result = dynamic_cast<CPUGenerator*>(expr))
+    return result;
+  runtime_error("Expected a 'CPUGenerator' but found 'GPUGenerator'");
 }
 
 } // tlib

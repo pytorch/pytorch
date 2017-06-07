@@ -2,6 +2,8 @@ import re
 import yaml
 from code_template import CodeTemplate
 
+# temporary things we cannot handle
+EXCLUDE_PATTERN = "bernoulli.*|normal.*|exponential.*|random.*"
 # what has to be done to add a Operation ...
 # 1. add virtual dispatch declaration to Type.h and default impl to Type.cpp
 TYPE_METHOD_DECLARATION = CodeTemplate("""\
@@ -52,6 +54,7 @@ TYPE_FORMAL_GENERIC = {
     'THTensor*' : 'Tensor &',
     'THBoolTensor*': 'Tensor &',
     'THIndexTensor*' : 'Tensor &',
+    'THIntegerTensor*' : 'Tensor &',
     'THStorage*' : 'Storage &',
     'THGenerator*': 'Generator &',
     'THSize*': 'IntList',
@@ -64,6 +67,7 @@ TYPE_RETURN = {
     'THTensor*' : 'Tensor *',
     'THIndexTensor*' : 'Tensor *',
     'THBoolTensor*' : 'Tensor *',
+    'THIntegerTensor*' : 'Tensor *',
     'real': 'Scalar',
     'accreal': 'Scalar',
 }
@@ -71,6 +75,9 @@ CHECKED_CAST = {
     'THTensor*': CodeTemplate('checked_cast<${Tensor}>(&${arg_name})'),
     'THBoolTensor*': CodeTemplate('checked_cast<${Processor}ByteTensor>(&${arg_name})'),
     'THIndexTensor*' : CodeTemplate('checked_cast<${Processor}LongTensor>(&${arg_name})'),
+    'THIntegerTensor*' : CodeTemplate('checked_cast<${Processor}IntTensor>(&${arg_name})'),
+    'THStorage*' : CodeTemplate('checked_cast<${Storage}>(&${arg_name})'),
+    'THGenerator*': CodeTemplate('check_generator(&${arg_name})'),
     'THSize*' : CodeTemplate('THStorageView::make(${arg_name})'),
     'THStride*' : CodeTemplate('THStorageView::make(${arg_name})'),
     'real': CodeTemplate('${arg_name}.to${ScalarName}()'),
@@ -81,17 +88,24 @@ CHECKED_USE = {
     'THTensor*': '{}_->tensor',
     'THIndexTensor*' : '{}_->tensor',
     'THBoolTensor*' : '{}_->tensor',
+    'THIntegerTensor*' : '{}_->tensor',
+    'THStorage*' : '{}_->storage',
+    'THGenerator*' : '{}_->generator',
 }
 
 ALLOC_WRAP = {
 'THTensor*': 'new ${Tensor}(context)',
 'THBoolTensor*': 'new ${Processor}ByteTensor(context)',
 'THIndexTensor*' : 'new ${Processor}LongTensor(context)',
+'THIntegerTensor*' : 'new ${Processor}LongTensor(context)',
 }
 
 CONSTANT_REPLACEMENTS = [
     ('AS_REAL','${ScalarType}'),
-    ('THPDefaultGenerator->cdata','dynamic_cast<${Processor}Generator*>(context->defaultGenerator(processor())->generator'),
+
+    ('THPDefaultGenerator->cdata','dynamic_cast<${Processor}Generator&>(context->defaultGenerator(processor())).generator'),
+    ('__storage_size.get\\(\\)', 'THStorageView::make(static_cast<int64_t>(storage.size()))'),
+    ('__last_dim', 'self_->ndimension()-1')
 ]
 
 class nested_dict(object):
@@ -147,8 +161,9 @@ def create_generic(top_env, declarations):
                 return argument['name']
         return None
     def process_option(option):
-        #if option['name'] != 'lt':
-        #    raise NYIError("NYI")
+        if re.match(EXCLUDE_PATTERN,option['name']):
+            print("Excluding {}".format(option['name']))
+            raise NYIError("NYI")
         # print(yaml.dump(option))
         formals = get_formals(option)
         option['formals_list'] = formals
@@ -215,14 +230,18 @@ def create_derived(processor_type_env,declarations):
 
     def emit_body(env,option):
         body = []
+        seen_names = set() # arguments are potentially duplicated because of one argument referencing another
+                           # only generated checked casts the first time we see it
         for arg in option['arguments']:
-            if requires_checked_cast(arg):
+            if not arg['name'] in seen_names and requires_checked_cast(arg):
+                seen_names.add(arg['name'])
                 if arg.get('allocate',False):
                     allocation = CodeTemplate(ALLOC_WRAP[arg['type']]).substitute(env)
                     body.append('auto {}_ = {};'.format(arg['name'],allocation))
                 else:
                     check_cast = CHECKED_CAST[arg['type']].substitute(env,arg_name=arg['name'])
                     body.append("auto {}_ = {};".format(arg['name'],check_cast))
+
 
         option['actuals'] = processor_type_env['state'] + get_arguments(option)
         call = CodeTemplate("${THTensor}_${cname}(${actuals})").substitute(env)

@@ -2494,7 +2494,7 @@ static const char *R = &__R;
   arguments:
     - arg: THTensor* res1
       output: True
-    - arg: THIntTensor* res2
+    - arg: THIntegerTensor* res2
       output: True
     - THTensor* self
     - arg: bool upper

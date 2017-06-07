@@ -3,6 +3,8 @@
 #include "TensorLib/${Tensor}.h"
 #include "TensorLib/${Processor}Generator.h"
 #include "TensorLib/${Processor}ByteTensor.h"
+#include "TensorLib/${Processor}IntTensor.h"
+#include "TensorLib/${Processor}LongTensor.h"
 #include "TensorLib/Utils.h"
 #include "TensorLib/THStorageView.h"
 #include <iostream>
