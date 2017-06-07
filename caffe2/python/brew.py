@@ -29,6 +29,7 @@ from caffe2.python.helpers.algebra import *
 from caffe2.python.helpers.train import *
 from caffe2.python.helpers.conv import *
 from caffe2.python.helpers.tools import *
+from caffe2.python.helpers.elementwise_linear import *
 
 
 class HelperWrapper(object):
@@ -63,6 +64,7 @@ class HelperWrapper(object):
         'image_input': image_input,
         'video_input': video_input,
         'add_weight_decay': add_weight_decay,
+        'elementwise_linear': elementwise_linear,
     }
 
     def __init__(self, wrapped):
