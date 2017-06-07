@@ -91,6 +91,54 @@ class SumSqrElementsOp : public Operator<Context> {
   }
 };
 
+template <typename T, class Context, bool ROWWISE>
+class MaxReductionOp : public Operator<Context> {
+ public:
+  USE_SIMPLE_CTOR_DTOR(MaxReductionOp)
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+
+  bool RunOnDevice() override {
+    auto& X = Input(0);
+    CAFFE_ENFORCE_EQ(X.ndim(), 3);
+
+    const int batch_size = X.dim32(0);
+    const int M = X.dim32(1);
+    const int N = X.dim32(2);
+
+    auto* Y = Output(0);
+    ROWWISE ? Y->Resize(batch_size, M) : Y->Resize(batch_size, N);
+
+    if (ROWWISE) {
+      math::RowwiseMax<T, Context>(
+          batch_size * M,
+          N,
+          X.template data<T>(),
+          Y->template mutable_data<T>(),
+          &context_);
+    } else {
+      const int input_size = N * M;
+      for (int i = 0; i < batch_size; ++i) {
+        math::ColwiseMax<T, Context>(
+            M,
+            N,
+            X.template data<T>() + i * input_size,
+            Y->template mutable_data<T>() + i * N,
+            &context_);
+      }
+    }
+    return true;
+  }
+};
+
+template <typename T, class Context, bool ROWWISE>
+class MaxReductionGradientOp : public Operator<Context> {
+ public:
+  USE_SIMPLE_CTOR_DTOR(MaxReductionGradientOp)
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+
+  bool RunOnDevice() override;
+};
+
 } // namespace caffe2
 
 #endif
