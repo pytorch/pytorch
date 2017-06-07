@@ -1,6 +1,7 @@
 #pragma once
 
 #include "TensorLib/Scalar.h"
+#include "TensorLib/ArrayRef.h"
 
 namespace tlib {
 
@@ -22,6 +23,8 @@ enum class Processor {
   CUDA,
   NumOptions
 };
+
+typedef ArrayRef<int64_t> IntList;
 
 struct Type {
   virtual ScalarType scalarType() = 0;

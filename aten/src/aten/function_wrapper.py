@@ -54,6 +54,8 @@ TYPE_FORMAL_GENERIC = {
     'THStorage*' : 'Storage &',
     'THIndexTensor*' : 'Tensor &',
     'THGenerator*': 'Generator &',
+    'THSize*': 'IntList',
+    'THStride*': 'IntList',
     'accreal' : 'Scalar',
     'real' : 'Scalar',
 }
@@ -67,7 +69,15 @@ TYPE_RETURN = {
 }
 CHECKED_CAST = {
     'THTensor*': CodeTemplate('checked_cast<${Tensor}>(&${arg_name})'),
-    'THIndexTensor*' : CodeTemplate('checked_cast<${THIndexTensor}>(&${arg_name})')
+    'THIndexTensor*' : CodeTemplate('checked_cast<${THIndexTensor}>(&${arg_name})'),
+    'THSize*' : CodeTemplate('THStorageView::make(${arg_name})'),
+    'THStride*' : CodeTemplate('THStorageView::make(${arg_name})'),
+}
+CHECKED_USE = {
+    'THTensor*': '{}_->tensor',
+    'THIndexTensor*' : '{}_->tensor',
+    'THSize*' : '{}_',
+    'THStride*' : '{}_',
 }
 
 RETURN_WRAP = {
@@ -124,14 +134,14 @@ def create_generic(top_env, declarations):
             raise Exception("format_return_type")
         return TYPE_RETURN.get(the_type,the_type)
 
-    def first_tensor(option):
-        for argument in option['arguments']:
-            if not argument.get('output',False) and argument['type'] == "THTensor*":
+    def first_tensor(formals):
+        for argument in formals:
+            if argument['type'] == "THTensor*":
                 return argument['name']
         return None
     def process_option(option):
-        #if option['name'] != 'lt':
-        #    raise NYIError("NYI")
+        if option['name'] != 'zeros':
+            raise NYIError("NYI")
 
         formals = get_formals(option)
         option['formals_list'] = formals
@@ -143,7 +153,7 @@ def create_generic(top_env, declarations):
             f['name'] if f['name'] != 'self' else '*this' for f in formals ]
         option['return_type'] = format_return_type(option)
 
-        option['first_tensor'] = first_tensor(option)
+        option['first_tensor'] = first_tensor(formals)
         env = nested_dict(option,top_env)
         top_env['type_method_declarations'].append(
             TYPE_METHOD_DECLARATION.substitute(env))
@@ -178,7 +188,7 @@ def create_derived(processor_type_env,declarations):
         return argument['type'] in CHECKED_CAST
     def get_argument(argument,option):
         if requires_checked_cast(argument):
-            return "{}_->tensor".format(argument['name'])
+            return CHECKED_USE[argument['type']].format(argument['name'])
         elif argument['type'] == "CONSTANT":
             v = str(argument['name'])
             for pattern,replacement in CONSTANT_REPLACEMENTS:
