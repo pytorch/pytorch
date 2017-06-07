@@ -14,8 +14,6 @@ import random
 import time
 import sys
 
-from itertools import izip
-
 import caffe2.proto.caffe2_pb2 as caffe2_pb2
 from caffe2.python import core, workspace, rnn_cell, data_parallel_model
 import caffe2.python.models.seq2seq.seq2seq_util as seq2seq_util
@@ -582,7 +580,7 @@ class Seq2SeqModelCaffe2:
     ):
         if self.num_gpus < 1:
             batch_obj = prepare_batch(batch)
-            for batch_obj_name, batch_obj_value in izip(
+            for batch_obj_name, batch_obj_value in zip(
                 Batch._fields,
                 batch_obj,
             ):
@@ -591,7 +589,7 @@ class Seq2SeqModelCaffe2:
             for i in range(self.num_gpus):
                 gpu_batch = batch[i::self.num_gpus]
                 batch_obj = prepare_batch(gpu_batch)
-                for batch_obj_name, batch_obj_value in izip(
+                for batch_obj_name, batch_obj_value in zip(
                     Batch._fields,
                     batch_obj,
                 ):
