@@ -17,7 +17,9 @@ public:
 
   static const char * typeString();
 
-protected:
+//TODO(zach): sort of friend permissions later so this
+// can be protected
+public:
   ${THTensor} * tensor;
   Context* context;
   friend class ${Type};
