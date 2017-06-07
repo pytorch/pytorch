@@ -17,7 +17,7 @@ from tools.setup_helpers.cuda import WITH_CUDA, CUDA_HOME
 from tools.setup_helpers.cudnn import WITH_CUDNN, CUDNN_LIB_DIR, CUDNN_INCLUDE_DIR
 from tools.setup_helpers.split_types import split_types
 DEBUG = check_env_flag('DEBUG')
-WITH_DISTRIBUTED = check_env_flag('WITH_DISTRIBUTED')
+WITH_DISTRIBUTED = not check_env_flag('NO_DISTRIBUTED')
 WITH_DISTRIBUTED_MW = WITH_DISTRIBUTED and check_env_flag('WITH_DISTRIBUTED_MW')
 WITH_NCCL = WITH_CUDA and platform.system() != 'Darwin'
 SYSTEM_NCCL = False
@@ -145,6 +145,10 @@ class build_ext(setuptools.command.build_ext.build_ext):
             print('-- Building NCCL library')
         else:
             print('-- Not using NCCL')
+        if WITH_DISTRIBUTED:
+            print('-- Building with distributed package ')
+        else:
+            print('-- Building without distributed package')
 
         # cwrap depends on pyyaml, so we can't import it earlier
         from tools.cwrap import cwrap

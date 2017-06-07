@@ -14,7 +14,7 @@ from common import TestCase
 BACKEND = os.environ['BACKEND']
 TEMP_DIR = os.environ['TEMP_DIR']
 MASTER_PORT = '29500'
-MASTER_ADDR = '127.0.0.1:' + MASTER_PORT
+MASTER_ADDR = '127.0.0.1'
 
 
 @contextmanager
@@ -524,7 +524,11 @@ if BACKEND == 'tcp' or BACKEND == 'gloo':
 
         def _run(self, rank):
             self.rank = rank
-            dist.init_process_group(backend=BACKEND)
+            try:
+                dist.init_process_group(backend=BACKEND)
+            except RuntimeError as e:
+                if 'recompile' in e.args[0]:
+                    sys.exit(0)
             # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
             # We're retreiving a corresponding test and executing it.
             getattr(self, self.id().split(".")[2])()

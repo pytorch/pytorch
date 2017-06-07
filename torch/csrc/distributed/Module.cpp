@@ -45,9 +45,9 @@ static bool THDPModule_loadClasses(PyObject *self)
   ASSERT_NOT_NULL(THDPCharStorageClass   = PyObject_GetAttrString(torch_module,(char*)"CharStorage"));
   ASSERT_NOT_NULL(THDPByteStorageClass   = PyObject_GetAttrString(torch_module,(char*)"ByteStorage"));
 
-  return true;
 #undef ASSERT_NOT_NULL
 #endif
+  return true;
 }
 
 static bool THDPModule_assignStateless(PyObject *self)

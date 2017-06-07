@@ -467,7 +467,6 @@ PyObject *THPModule_addDocStr(PyObject *_unused, PyObject *args)
 }
 
 
-
 PyObject *THPModule_inferSize(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
@@ -516,6 +515,15 @@ static PyObject *THPModule_getBackcompatKeepdimWarn(PyObject *module)
   return getBackCompatKeepdimWarn() ? Py_True : Py_False;
 }
 
+PyObject *THPModule_hasDistributed(PyObject *_unused)
+{
+#ifdef WITH_DISTRIBUTED
+  Py_RETURN_TRUE;
+#else
+  Py_RETURN_FALSE;
+#endif
+}
+
 #ifdef WITH_CUDA
 extern PyObject * THCPModule_initExtension(PyObject *self);
 extern PyObject * THCPModule_setDevice_wrap(PyObject *self, PyObject *arg);
@@ -548,6 +556,7 @@ static PyMethodDef TorchMethods[] = {
   {"_add_docstr",     (PyCFunction)THPModule_addDocStr,       METH_VARARGS, NULL},
   {"_sparse_init",    (PyCFunction)THSPModule_initExtension,  METH_NOARGS,  NULL},
   {"_init_names",     (PyCFunction)THPModule_initNames,       METH_O,       NULL},
+  {"_has_distributed",(PyCFunction)THPModule_hasDistributed,  METH_NOARGS,  NULL},
 #ifdef WITH_CUDA
   {"_cuda_init",        (PyCFunction)THCPModule_initExtension,    METH_NOARGS,  NULL},
   {"_cuda_setDevice",   (PyCFunction)THCPModule_setDevice_wrap,   METH_O,       NULL},
