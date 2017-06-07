@@ -2,6 +2,7 @@
 #include "TensorLib/${Storage}.h"
 #include "TensorLib/${Tensor}.h"
 #include "TensorLib/${Processor}Generator.h"
+#include "TensorLib/${Processor}ByteTensor.h"
 #include "TensorLib/Utils.h"
 #include "TensorLib/THStorageView.h"
 #include <iostream>
