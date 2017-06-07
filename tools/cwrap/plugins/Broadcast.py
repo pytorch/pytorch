@@ -295,7 +295,8 @@ class Broadcast(CWrapPlugin):
                             arg_op_other2=arg_op_c)
 
                     else:
-                        expand_code = self.getOutPlacePreExpand2Template(raise_errors == "true").substitute(op_b_mapping)
+                        expand_code = self.getOutPlacePreExpand2Template(
+                            raise_errors == "true").substitute(op_b_mapping)
 
                     post_code = self.POST_TEMPLATE.substitute(arg_op_other=arg_op_a)
                     post_code += self.POST_TEMPLATE.substitute(op_b_mapping)
