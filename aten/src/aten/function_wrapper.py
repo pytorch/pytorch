@@ -70,7 +70,7 @@ TYPE_RETURN = {
 CHECKED_CAST = {
     'THTensor*': CodeTemplate('checked_cast<${Tensor}>(&${arg_name})'),
     'THBoolTensor*': CodeTemplate('checked_cast<${Processor}ByteTensor>(&${arg_name})'),
-    'THIndexTensor*' : CodeTemplate('checked_cast<${THIndexTensor}>(&${arg_name})'),
+    'THIndexTensor*' : CodeTemplate('checked_cast<${Processor}LongTensor>(&${arg_name})'),
     'THSize*' : CodeTemplate('THStorageView::make(${arg_name})'),
     'THStride*' : CodeTemplate('THStorageView::make(${arg_name})'),
     'real': CodeTemplate('${arg_name}.to${ScalarName}()'),
@@ -86,6 +86,7 @@ CHECKED_USE = {
 ALLOC_WRAP = {
 'THTensor*': 'new ${Tensor}(context)',
 'THBoolTensor*': 'new ${Processor}ByteTensor(context)',
+'THIndexTensor*' : 'new ${Processor}LongTensor(context)',
 }
 
 CONSTANT_REPLACEMENTS = [
@@ -116,6 +117,8 @@ def create_generic(top_env, declarations):
                 seen.add(argument['name'])
                 result.append(argument)
         for argument in option['arguments']:
+            if argument['type'] == 'THSTensor*':
+                raise NYIError("Sparse Tensor")
             if is_real_argument_to_wrapper(argument):
                 insert(argument)
         for argument in option['arguments']:
@@ -144,9 +147,9 @@ def create_generic(top_env, declarations):
                 return argument['name']
         return None
     def process_option(option):
-        if option['name'] != 'lt':
-            raise NYIError("NYI")
-        print(yaml.dump(option))
+        #if option['name'] != 'lt':
+        #    raise NYIError("NYI")
+        # print(yaml.dump(option))
         formals = get_formals(option)
         option['formals_list'] = formals
         option['formals'] = [format_formal(f) for f in formals]

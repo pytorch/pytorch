@@ -42,8 +42,8 @@ def set_declaration_defaults(declaration):
             if k != 'options':
                 option.setdefault(k, v)
 
-#TODO(zach): do we need this or is  _only_ handling key word stuff for python
-def filter_unique_options(options):
+#TODO(zach): added option to remove keyword handling for C++ which cannot support it.
+def filter_unique_options(options,allow_kwarg):
     def signature(option, kwarg_only_count):
         if kwarg_only_count == 0:
             kwarg_only_count = None
@@ -52,7 +52,7 @@ def filter_unique_options(options):
         arg_signature = '#'.join(
             arg['type']
             for arg in option['arguments'][:kwarg_only_count]
-            if not arg.get('ignore_check'))
+            if not arg.get('ignore_check') and not arg['name'] == 'self')
         if kwarg_only_count is None:
             return arg_signature
         kwarg_only_signature = '#'.join(
@@ -63,7 +63,9 @@ def filter_unique_options(options):
     seen_signatures = set()
     unique = []
     for option in options:
-        for num_kwarg_only in range(0, len(option['arguments']) + 1):
+        # if only check num_kwarg_only == 0 if allow_kwarg == False
+        limit = len(option['arguments']) if allow_kwarg else 0
+        for num_kwarg_only in range(0, limit + 1):
             sig = signature(option, num_kwarg_only)
             if sig not in seen_signatures:
                 if num_kwarg_only > 0:
@@ -74,7 +76,7 @@ def filter_unique_options(options):
                 break
     return unique
 
-def enumerate_options_due_to_default(declaration):
+def enumerate_options_due_to_default(declaration,allow_kwarg=True):
     # TODO(zach): in cwrap this is shared among all declarations
     # but seems to assume that all declarations will have the same
     new_options = []
@@ -93,7 +95,7 @@ def enumerate_options_due_to_default(declaration):
                     # PyYAML interprets NULL as None...
                     arg['name'] = 'NULL' if arg['default'] is None else arg['default']
             new_options.append(option_copy)
-    declaration['options'] = new_options #filter_unique_options(new_options)
+    declaration['options'] = filter_unique_options(new_options,allow_kwarg)
 
 def sort_by_number_of_options(declaration):
     def num_checked_args(option):
