@@ -211,6 +211,10 @@ if os.getenv('PYTORCH_BINARY_BUILD') and platform.system() == 'Linux':
     print('PYTORCH_BINARY_BUILD found. Static linking libstdc++ on Linux')
     extra_compile_args += ['-static-libstdc++']
     extra_link_args += ['-static-libstdc++']
+if os.getenv('PYTORCH_BINARY_BUILD') and platform.system() == 'Darwin':
+    print('PYTORCH_BINARY_BUILD found. Static linking libc++ on Darwin')
+    extra_compile_args += ['-stdlib=libc++']
+    extra_link_args += ['-stdlib=libc++']
 
 cwd = os.path.dirname(os.path.abspath(__file__))
 lib_path = os.path.join(cwd, "torch", "lib")
