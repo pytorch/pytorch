@@ -97,7 +97,7 @@ ALLOC_WRAP = {
 'THTensor*': 'new ${Tensor}(context)',
 'THBoolTensor*': 'new ${Processor}ByteTensor(context)',
 'THIndexTensor*' : 'new ${Processor}LongTensor(context)',
-'THIntegerTensor*' : 'new ${Processor}LongTensor(context)',
+'THIntegerTensor*' : 'new ${Processor}IntTensor(context)',
 }
 
 CONSTANT_REPLACEMENTS = [
@@ -105,7 +105,7 @@ CONSTANT_REPLACEMENTS = [
 
     ('THPDefaultGenerator->cdata','dynamic_cast<${Processor}Generator&>(context->defaultGenerator(processor())).generator'),
     ('__storage_size.get\\(\\)', 'THStorageView::make(static_cast<int64_t>(storage.size()))'),
-    ('__last_dim', 'self_->ndimension()-1')
+    ('__last_dim', 'self_->ndimension()-1'),
 ]
 
 class nested_dict(object):
@@ -211,7 +211,12 @@ def create_derived(processor_type_env,declarations):
     def get_argument(argument,option):
         if requires_checked_cast(argument):
             return CHECKED_USE.get(argument['type'],'{}_').format(argument['name'])
+        elif argument['type'] == 'bool' and 'if_true' in argument:
+            return '({}) ? "{}" : "{}"'.format(argument['name'],
+                argument['if_true'],argument['if_false'])
         elif argument['type'] == "CONSTANT":
+            if 'if_true' in argument: #this was a bool that is actually a string...
+                return '"{}"'.format(argument['name'])
             v = str(argument['name'])
             for pattern,replacement in CONSTANT_REPLACEMENTS:
                 v = re.sub(pattern, replacement, v)
