@@ -99,6 +99,7 @@ def generate_storage_type_and_tensor(processor, scalar_type, declarations):
         sname = '' if scalar_name == "Float" else scalar_name
         env['THStorage'] = 'THCuda{}Storage'.format(sname)
         env['THTensor'] = 'THCuda{}Tensor'.format(sname)
+        env['THIndexTensor'] = 'THCudaLongTensor'.format(scalar_name)
         env['state'] = ['context->thc_state']
         env['isCUDA'] = 'true'
         env['storage_device'] = 'return storage->device;'
@@ -106,6 +107,7 @@ def generate_storage_type_and_tensor(processor, scalar_type, declarations):
         env['th_header'] = "TH/TH.h"
         env['THStorage'] = "TH{}Storage".format(scalar_name)
         env['THTensor'] = 'TH{}Tensor'.format(scalar_name)
+        env['THIndexTensor'] = 'THLongTensor'.format(scalar_name)
         env['state'] = []
         env['isCUDA'] = 'false'
         env['storage_device'] = 'throw std::runtime_error("CPU storage has no device");'
