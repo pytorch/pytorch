@@ -87,10 +87,10 @@ static void THTensor_(random1__)(THTensor *self, THGenerator *gen, long b)
   name: uniform_
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
   types:
-    - Float
-    - Double
+    - floating_point
   processors:
     - CPU
+    - CUDA
   cname: uniform
   return: self
   arguments:
@@ -197,10 +197,10 @@ static void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, TH
   name: cauchy_
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
   types:
-    - Float
-    - Double
+    - floating_point
   processors:
     - CPU
+    - CUDA
   cname: cauchy
   return: self
   arguments:
@@ -220,10 +220,10 @@ static void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, TH
   python_name: log_normal_
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
   types:
-    - Float
-    - Double
+    - floating_point
   processors:
     - CPU
+    - CUDA
   return: self
   arguments:
     - THTensor* self
@@ -259,10 +259,10 @@ static void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, TH
   name: rand
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
   types:
-    - Float
-    - Double
+    - floating_point
   processors:
     - CPU
+    - CUDA
   variants:
     - function
   return: argument 0
@@ -280,10 +280,10 @@ static void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, TH
   name: randn
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
   types:
-    - Float
-    - Double
+    - floating_point
   processors:
     - CPU
+    - CUDA
   variants:
     - function
   return: argument 0
@@ -295,23 +295,6 @@ static void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, TH
       kwarg_only: True
     - arg: THSize* size
       long_args: True
-]]
-
-[[
-  name: uniform_
-  defined_if: CUDA_FLOAT || CUDA_DOUBLE || CUDA_HALF
-  types:
-    - floating_point
-  processors:
-    - CUDA
-  cname: uniform
-  return: self
-  arguments:
-    - THTensor* self
-    - arg: double from
-      default: 0
-    - arg: double to
-      default: 1
 ]]
 
 #if CUDA_FLOAT || CUDA_DOUBLE || CUDA_HALF
@@ -398,41 +381,6 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
 ]]
 
 [[
-  name: cauchy_
-  defined_if: CUDA_FLOAT || CUDA_DOUBLE || CUDA_HALF
-  types:
-    - floating_point
-  processors:
-    - CUDA
-  cname: cauchy
-  return: self
-  arguments:
-    - THTensor* self
-    - arg: double median
-      default: 0
-    - arg: double sigma
-      default: 1
-]]
-
-[[
-  name: logNormal_
-  cname: logNormal
-  python_name: log_normal_
-  defined_if: CUDA_FLOAT || CUDA_DOUBLE || CUDA_HALF
-  types:
-    - floating_point
-  processors:
-    - CUDA
-  return: self
-  arguments:
-    - THTensor* self
-    - arg: double mean
-      default: 1
-    - arg: double std
-      default: 2
-]]
-
-[[
   name: exponential_
   defined_if: CUDA_FLOAT || CUDA_DOUBLE || CUDA_HALF
   types:
@@ -448,44 +396,11 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
 ]]
 
 [[
-  name: rand
-  defined_if: CUDA_FLOAT || CUDA_DOUBLE || CUDA_HALF
-  types:
-    - floating_point
-  processors:
-    - CUDA
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - arg: THSize* size
-      long_args: True
-]]
-
-[[
-  name: randn
-  defined_if: CUDA_FLOAT || CUDA_DOUBLE || CUDA_HALF
-  types:
-    - floating_point
-  processors:
-    - CUDA
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - arg: THSize* size
-      long_args: True
-]]
-
-[[
   name: geometric_
-  defined_if: "!IS_CUDA && !IS_DISTRIBUTED"
+  defined_if: "!IS_DISTRIBUTED"
   processors:
     - CPU
+    - CUDA
   cname: geometric
   return: self
   arguments:
@@ -555,20 +470,6 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
           default: THPDefaultGenerator->cdata
           kwarg_only: True
         - THDoubleTensor* float_p
-]]
-
-[[
-  name: geometric_
-  cname: geometric
-  defined_if: CUDA_FLOAT || CUDA_DOUBLE || CUDA_HALF
-  types:
-    - floating_point
-  processors:
-    - CUDA
-  return: self
-  arguments:
-    - THTensor* self
-    - double p
 ]]
 
 #define THCudaDoubleTensor_BERNOULLI_TENSOR THCudaDoubleTensor_bernoulli_DoubleTensor
