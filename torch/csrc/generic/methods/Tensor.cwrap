@@ -553,7 +553,7 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
   return: self
   arguments:
     - THTensor* self
-    - THTensor* template
+    - THTensor* the_template
 ]]
 
 [[

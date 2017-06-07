@@ -126,7 +126,7 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
   return: self
   arguments:
     - THSTensor* self
-    - THSTensor* template
+    - THSTensor* the_template
 ]]
 
 [[
