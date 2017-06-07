@@ -853,9 +853,16 @@ Statistics = collections.namedtuple(
     'Statistics', ['baseline_nbytes', 'optimized_nbytes'])
 
 
+def blob_nbytes(blob):
+    sz = 0
+    try:
+        sz = workspace.FetchBlob(blob).nbytes
+    except Exception:
+        log.warning('Error when fetching blob {}'.format(blob))
+    return sz
+
+
 def compute_statistics(assignments):
-    def blob_nbytes(blob):
-        return workspace.FetchBlob(blob).nbytes
     blob_bytes = {
         blob: blob_nbytes(blob) for assignment in assignments
         for (blob, _) in assignment}
@@ -869,10 +876,6 @@ def compute_statistics(assignments):
 
 
 def collect_blob_sizes(net):
-    ''' Collect blob sizes from workspace '''
-    def blob_nbytes(blob):
-        return workspace.FetchBlob(blob).nbytes
-
     blobs = {}
     for op in net.op:
         for blob in op.input:
