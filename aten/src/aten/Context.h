@@ -34,4 +34,18 @@ public:
 
 Context * globalContext();
 
+
+static inline Type& getType(Processor p, ScalarType s) {
+  return globalContext()->getType(p,s);
+}
+
+static inline Type& CPU(ScalarType s) {
+  return getType(Processor::CPU, s);
+}
+
+static inline Type& CUDA(ScalarType s) {
+  return getType(Processor::CUDA, s);
+}
+
+
 }
