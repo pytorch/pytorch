@@ -207,7 +207,7 @@ docker build -t pytorch . -f tools/docker/Dockerfile_runtime
 ```
 and run with nvidia-docker:
 ```
-nvidia-docker run --rm -ti --ipc=host pytorch-cudnnv6
+nvidia-docker run --rm -ti --ipc=host pytorch
 ```
 Please note that PyTorch uses shared memory to share data between processes, so if torch multiprocessing is used (e.g.
 for multithreaded data loaders) the default shared memory segment size that container runs with is not enough, and you
