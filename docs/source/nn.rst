@@ -528,7 +528,7 @@ Vision layers
 :hidden:`Upsample`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. autoclass:: UpsamplingNearest3d
+.. autoclass:: Upsample
     :members:
 
 :hidden:`UpsamplingNearest2d`

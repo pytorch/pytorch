@@ -10,7 +10,7 @@ class Upsample(Module):
     """
     Upsamples a given multi-channel 2D (spatial) or 3D (volumetric) data.
 
-    The input data is assumed to be of the form `minibatch x channels x [depth] x height x width.
+    The input data is assumed to be of the form `minibatch x channels x [depth] x height x width`.
     Hence, for spatial inputs, we expect a 4D Tensor and for volumetric inputs, we expect a 5D Tensor.
 
     The algorithms available for upsampling are nearest neighbor, bilinear and trilinear upsampling,
