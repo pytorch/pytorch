@@ -18,7 +18,7 @@ struct ${Type} : public Type {
   static const char * typeString();
 
   // example
-  virtual Tensor * add(Tensor & a, Tensor & b) override;
+  // virtual Tensor * add(Tensor & a, Tensor & b) override;
 
   ${type_derived_method_declarations}
 

@@ -62,13 +62,18 @@ def add_variants(option):
 # is disabled...
 def handle_outputs_taken_as_arguments(options,option):
     if any('output' in arg for arg in option['arguments']):
-        new_option = deepcopy(option)
-        if 'method' in new_option['variants']:
-            new_option['variants'].remove('method')
-        for arg in new_option['arguments']:
+        allocate_option = deepcopy(option)
+        # the original option, which takes arguments for the results,
+        # is not longer a method, and has _out added to indicte it takes
+        # output arguments
+        if 'method' in option['variants']:
+            option['variants'].remove('method')
+        option['api_name'] += '_out'
+        # the allocating option needs to be marked
+        for arg in allocate_option['arguments']:
             if 'output' in arg:
                 arg['allocate'] = True
-        options.append(new_option)
+        options.append(allocate_option)
 def sanitize_return(option):
     ret = option['return']
     m = re.match('argument (\d+(,\d+)*)',ret)
@@ -82,15 +87,13 @@ def sanitize_return(option):
                 option['return']['arguments'].append(i)
                 break
     else:
-        if option['return'] == 'THTensor*':
-            print(option['cname'])
         option['return'] = { 'kind': 'type', 'type' : option['return'] }
 
 def run(declarations):
     declarations = [d for d in declarations if not exclude(d)]
     for declaration in declarations:
         common_with_cwrap.set_declaration_defaults(declaration)
-        common_with_cwrap.enumerate_options_due_to_default(declaration)
+        common_with_cwrap.enumerate_options_due_to_default(declaration,allow_kwarg=False)
         common_with_cwrap.sort_by_number_of_options(declaration)
         new_options = []
         for option in declaration['options']:
