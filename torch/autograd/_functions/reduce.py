@@ -66,6 +66,7 @@ class Prod(Function):
             dim = ctx.dim if ctx.dim >= 0 else ctx.dim + input.dim()
             if ctx.keepdim is False:
                 grad_output = grad_output.unsqueeze(dim)
+                output = output.unsqueeze(dim)
 
             zero_mask = input == 0
             slice_zero_count = zero_mask.sum(dim, True)
