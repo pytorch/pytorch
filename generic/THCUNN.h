@@ -183,7 +183,8 @@ TH_API void THNN_(GRUFused_updateGradInput)(
                   THCTensor *gradInInput,
                   THCTensor *gradInHidden,
                   THCTensor *gradOutput,
-                  THCTensor *gradInput);
+                  THCTensor *gradInputHx,
+                  THCTensor *storage);
 
 TH_API void THNN_(LSTMFused_updateOutput)(
                   THCState *state,
