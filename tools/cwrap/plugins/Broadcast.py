@@ -64,33 +64,40 @@ class Broadcast(CWrapPlugin):
                    "#endif\n")
         return Template(ret)
 
-    OUT_PLACE_PRE_EXPAND2_TEMPLATE = Template(
-        """bool expand_success = false;
-           try {
-             expand_outplace2(LIBRARY_STATE ${arg_op_a}_guard.get(), ${arg_op_other}_guard.get(),
-                              ${arg_op_a}, ${arg_op_other},
-                              \"${op_a}\", \"${op_other}\", !${raise_errors});
-             expand_success = true;
-           } catch (std::exception &e) {}
-           if(expand_success) {
-             ${arg_op_a} = ${arg_op_a}_guard.get();
-             ${arg_op_other} = ${arg_op_other}_guard.get();
-           }""")
+    def getExpandTemplate(self, expand_call, success_code, raise_errors):
+        if not raise_errors:
+            return Template(
+                "bool expand_success = false;\n" +
+                "try {\n" +
+                expand_call +
+                "\nexpand_success = true;\n" +
+                "}\n"
+                "catch (std::exception &e) {}\n" +
+                "if(expand_success) {\n" +
+                success_code +
+                "\n}\n")
+        else:
+            return Template(
+                expand_call + "\n" +
+                success_code + "\n")
 
-    OUT_PLACE_PRE_EXPAND3_TEMPLATE = Template(
-        """bool expand_success = false;
-           try {
-             expand_outplace3(LIBRARY_STATE
-                              ${arg_op_a}_guard.get(), ${arg_op_other1}_guard.get(), ${arg_op_other2}_guard.get(),
-                              ${arg_op_a}, ${arg_op_other1}, ${arg_op_other2},
-                              \"${op_a}\", \"${op_other1}\", \"${op_other2}\", !${raise_errors});
-             expand_success = true;
-            } catch (std::exception &e) {}
-            if (expand_success) {
-              ${arg_op_a} = ${arg_op_a}_guard.get();
-              ${arg_op_other1} = ${arg_op_other1}_guard.get();
-              ${arg_op_other2} = ${arg_op_other2}_guard.get();
-           }""")
+    def getOutPlacePreExpand2Template(self, raise_errors):
+        expand_code = """expand_outplace2(LIBRARY_STATE ${arg_op_a}_guard.get(), ${arg_op_other}_guard.get(),
+                                          ${arg_op_a}, ${arg_op_other},
+                                          \"${op_a}\", \"${op_other}\", !${raise_errors});"""
+        success_code = """${arg_op_a} = ${arg_op_a}_guard.get();
+                          ${arg_op_other} = ${arg_op_other}_guard.get();"""
+        return self.getExpandTemplate(expand_code, success_code, raise_errors)
+
+    def getOutPlacePreExpand3Template(self, raise_errors):
+        expand_code = """expand_outplace3(LIBRARY_STATE ${arg_op_a}_guard.get(),
+                                          ${arg_op_other1}_guard.get(), ${arg_op_other2}_guard.get(),
+                                          ${arg_op_a}, ${arg_op_other1}, ${arg_op_other2},
+                                          \"${op_a}\", \"${op_other1}\", \"${op_other2}\", !${raise_errors});"""
+        success_code = """${arg_op_a} = ${arg_op_a}_guard.get();
+                          ${arg_op_other1} = ${arg_op_other1}_guard.get();
+                          ${arg_op_other2} = ${arg_op_other2}_guard.get();"""
+        return self.getExpandTemplate(expand_code, success_code, raise_errors)
 
     OUT_PLACE_PRE_EXPAND_PRE_DIM_TEMPLATE = Template(
         """if(THTensor_(nDimension)(LIBRARY_STATE ${arg_op_dim}) <= ${arg_op_dim_value}) {
@@ -110,43 +117,28 @@ class Broadcast(CWrapPlugin):
         """THLongStoragePtr ${arg_op_a}_storage(
                THLongStorage_newWithSize3(${arg_op_a}_dim0_size, ${arg_op_a}_dim1_size, ${arg_op_a}_dim2_size));\n""")
 
-    OUT_PLACE_PRE_EXPAND_POST_DIM_TEMPLATE = Template(
-        """bool expand_success = false;
-           try {
-             expand(LIBRARY_STATE ${arg_op_a}_guard.get(), ${arg_op_a}, ${arg_op_a}_storage);
-             expand_success = true;
-           } catch (std::exception &e) {}
-           if (expand_success) {
-             ${arg_op_a} = ${arg_op_a}_guard.get();
-           }""")
+    def getOutPlacePreExpandPostDimTemplate(self, raise_errors):
+        expand_code = """expand(LIBRARY_STATE ${arg_op_a}_guard.get(), ${arg_op_a}, ${arg_op_a}_storage);"""
+        success_code = """${arg_op_a} = ${arg_op_a}_guard.get();"""
+        return self.getExpandTemplate(expand_code, success_code, raise_errors)
 
     OUT_PLACE_PRE_TEMPLATE = Template(
         """${code_arg_op_a}${code_arg_op_other1}${code_arg_op_other2}
            ${expand_code}""")
 
-    IN_PLACE_PRE_EXPAND1_TEMPLATE = Template(
-        """bool expand_success = false;
-           try {
-             expand_inplace1(LIBRARY_STATE ${arg_op_other}_guard.get(), ${arg_op_other}, ${arg_op_a},
-                             \"${op_other}\", \"${op_a}\", !${raise_errors});
-             expand_success = true;
-           } catch (std::exception &e) {}
-           if (expand_success) {
-             ${arg_op_other} = ${arg_op_other}_guard.get();
-           }""")
+    def getInPlacePreExpand1Template(self, raise_errors):
+        expand_code = """expand_inplace1(LIBRARY_STATE ${arg_op_other}_guard.get(), ${arg_op_other}, ${arg_op_a},
+                                         \"${op_other}\", \"${op_a}\", !${raise_errors});"""
+        success_code = """${arg_op_other} = ${arg_op_other}_guard.get();"""
+        return self.getExpandTemplate(expand_code, success_code, raise_errors)
 
-    IN_PLACE_PRE_EXPAND2_TEMPLATE = Template(
-        """bool expand_success = false;
-           try {
-             expand_inplace2(LIBRARY_STATE ${arg_op_other1}_guard.get(), ${arg_op_other2}_guard.get(),
-                             ${arg_op_other1}, ${arg_op_other2}, ${arg_op_a},
-                             \"${op_other1}\", \"${op_other2}\", \"${op_a}\", !${raise_errors});
-             expand_success = true;
-           } catch (std::exception &e) {}
-           if (expand_success) {
-             ${arg_op_other1} = ${arg_op_other1}_guard.get();
-             ${arg_op_other2} = ${arg_op_other2}_guard.get();
-           }""")
+    def getInPlacePreExpand2Template(self, raise_errors):
+        expand_code = """expand_inplace2(LIBRARY_STATE ${arg_op_other1}_guard.get(), ${arg_op_other2}_guard.get(),
+                                         ${arg_op_other1}, ${arg_op_other2}, ${arg_op_a},
+                                         \"${op_other1}\", \"${op_other2}\", \"${op_a}\", !${raise_errors});"""
+        success_code = """${arg_op_other1} = ${arg_op_other1}_guard.get();
+                          ${arg_op_other2} = ${arg_op_other2}_guard.get();"""
+        return self.getExpandTemplate(expand_code, success_code, raise_errors)
 
     IN_PLACE_PRE_TEMPLATE = Template(
         """${code_arg_op_other1}${code_arg_op_other2}
@@ -232,14 +224,14 @@ class Broadcast(CWrapPlugin):
                     self.getPreArgStringTemplate(type=type_op_c).substitute(op_c_mapping) if op_c else "")
 
                 if op_c:
-                    expand_code = self.IN_PLACE_PRE_EXPAND2_TEMPLATE.substitute(
+                    expand_code = self.getInPlacePreExpand2Template(raise_errors == "true").substitute(
                         op_b_mapping,
                         op_other1=op_b,
                         op_other2=op_c,
                         arg_op_other1=arg_op_b,
                         arg_op_other2=arg_op_c)
                 else:
-                    expand_code = self.IN_PLACE_PRE_EXPAND1_TEMPLATE.substitute(op_b_mapping)
+                    expand_code = self.getInPlacePreExpand1Template(raise_errors == "true").substitute(op_b_mapping)
 
                 new_code_pre.append(self.IN_PLACE_PRE_TEMPLATE.substitute(
                     arg_op_a=arg_op_a,
@@ -284,7 +276,7 @@ class Broadcast(CWrapPlugin):
                             arg_op_dim0=dims_kvs[0]["arg_op"],
                             arg_op_dim1=dims_kvs[1]["arg_op"],
                             arg_op_dim2=dims_kvs[2]["arg_op"])
-                    expand_code += self.OUT_PLACE_PRE_EXPAND_POST_DIM_TEMPLATE.substitute(
+                    expand_code += self.getOutPlacePreExpandPostDimTemplate(raise_errors == "true").substitute(
                         arg_op_a=arg_op_a,
                         raise_errors=raise_errors)
                     post_code = self.POST_TEMPLATE.substitute(arg_op_other=arg_op_a)
@@ -295,7 +287,7 @@ class Broadcast(CWrapPlugin):
                     code_arg_op_other2 = self.getPreArgStringTemplate().substitute(op_c_mapping) if op_c else ""
 
                     if op_c:
-                        expand_code = self.OUT_PLACE_PRE_EXPAND3_TEMPLATE.substitute(
+                        expand_code = self.getOutPlacePreExpand3Template(raise_errors == "true").substitute(
                             op_b_mapping,
                             op_other1=op_b,
                             op_other2=op_c,
@@ -303,7 +295,7 @@ class Broadcast(CWrapPlugin):
                             arg_op_other2=arg_op_c)
 
                     else:
-                        expand_code = self.OUT_PLACE_PRE_EXPAND2_TEMPLATE.substitute(op_b_mapping)
+                        expand_code = self.getOutPlacePreExpand2Template(raise_errors == "true").substitute(op_b_mapping)
 
                     post_code = self.POST_TEMPLATE.substitute(arg_op_other=arg_op_a)
                     post_code += self.POST_TEMPLATE.substitute(op_b_mapping)
