@@ -63,10 +63,10 @@ static void THTensor_(random1__)(THTensor *self, THGenerator *gen, long b)
   name: multinomial
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
   types:
-    - Float
-    - Double
+    - floating_point
   processors:
     - CPU
+    - CUDA
   variants:
     - method
     - function
@@ -295,26 +295,6 @@ static void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, TH
       kwarg_only: True
     - arg: THSize* size
       long_args: True
-]]
-
-[[
-  name: multinomial
-  defined_if: CUDA_FLOAT || CUDA_DOUBLE || CUDA_HALF
-  types:
-    - floating_point
-  processors:
-    - CUDA
-  variants:
-    - method
-    - function
-  return: argument 0
-  arguments:
-    - arg: THIndexTensor* result
-      output: True
-    - THTensor* self
-    - long num_samples
-    - arg: bool replacement
-      default: "false"
 ]]
 
 [[
