@@ -2327,8 +2327,6 @@ except in the dimension :attr:`dim` where they are of size 1.  Otherwise, :attr:
 is squeezed (see :func:`torch.squeeze`), resulting in the outputs Tensor having 1 fewer
 dimension than :attr:`input`.
 
-.. note:: This function is not defined for ``torch.cuda.Tensor`` yet.
-
 Args:
     input (Tensor): the input `Tensor`
     dim (int): the dimension to reduce

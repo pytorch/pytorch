@@ -628,12 +628,18 @@
   name: median
   backends:
     - CPU
+    - CUDA
   variants:
     - method
     - function
   return: argument 0,1
   options:
-    - before_call: long __last_dim = THTensor_(nDimension)(LIBRARY_STATE ((THPTensor*)$arg2)->cdata)-1;
+    - cname: medianall
+      return: real
+      arguments:
+        - THTensor* self
+    - cname: median
+      before_call: long __last_dim = THTensor_(nDimension)(LIBRARY_STATE ((THPTensor*)$arg2)->cdata)-1;
       arguments:
         - arg: THTensor* values
           output: True

@@ -1539,7 +1539,14 @@ class TestTorch(TestCase):
             x = torch.rand(size, size)
             x0 = x.clone()
 
-            res1val, res1ind = torch.median(x, keepdim=False)
+            nelem = x.nelement()
+            res1val = torch.median(x)
+            res2val, _ = torch.sort(x.view(nelem))
+            ind = int(math.floor((nelem + 1) / 2) - 1)
+
+            self.assertEqual(res2val[ind], res1val, 0)
+
+            res1val, res1ind = torch.median(x, dim=1, keepdim=False)
             res2val, res2ind = torch.sort(x)
             ind = int(math.floor((size + 1) / 2) - 1)
 

@@ -225,6 +225,7 @@ struct TensorScalarInterface : public Tensor {
   virtual scalar_type dot(const Tensor& source) = 0;
   virtual scalar_type minall() = 0;
   virtual scalar_type maxall() = 0;
+  virtual scalar_type medianall() = 0;
   virtual scalar_type sumall() = 0;
   virtual scalar_type prodall() = 0;
   virtual TensorScalarInterface& add(const Tensor& src, scalar_type value) = 0;

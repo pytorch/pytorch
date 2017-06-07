@@ -250,6 +250,7 @@ public:
   virtual scalar_type dot(const Tensor& source) override;
   virtual scalar_type minall() override;
   virtual scalar_type maxall() override;
+  virtual scalar_type medianall() override;
   virtual scalar_type sumall() override;
   virtual scalar_type prodall() override;
   virtual THCTensor& neg(const Tensor& src) override;

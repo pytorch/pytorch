@@ -1374,6 +1374,11 @@ auto THTensor<real>::maxall() -> scalar_type {
 }
 
 template<>
+auto THTensor<real>::medianall() -> scalar_type {
+  return THTensor_(medianall)(tensor);
+}
+
+template<>
 auto THTensor<real>::sumall() -> scalar_type {
   return THTensor_(sumall)(tensor);
 }
