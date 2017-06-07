@@ -208,15 +208,15 @@ def create_derived(processor_type_env,declarations):
 
     def emit_body(env,option):
         body = []
-        for arg in option['formals_list']:
-            if requires_checked_cast(arg):
-                check_cast = CHECKED_CAST[arg['type']].substitute(env,arg_name=arg['name'])
-                body.append("auto {}_ = {};".format(arg['name'],check_cast))
         for arg in option['arguments']:
-            if arg.get('allocate',False):
-                body.append(
-                    CodeTemplate('auto ${arg_name}_ = new ${Tensor}(context);').substitute(
-                    env,arg_name=arg['name']))
+            if requires_checked_cast(arg):
+                if arg.get('allocate',False):
+                    body.append(
+                        CodeTemplate('auto ${arg_name}_ = new ${Tensor}(context);').substitute(
+                        env,arg_name=arg['name']))
+                else:
+                    check_cast = CHECKED_CAST[arg['type']].substitute(env,arg_name=arg['name'])
+                    body.append("auto {}_ = {};".format(arg['name'],check_cast))
 
         option['actuals'] = processor_type_env['state'] + get_arguments(option)
         call = CodeTemplate("${THTensor}_${cname}(${actuals})").substitute(env)
