@@ -35,9 +35,11 @@ struct Type {
   virtual Storage * newStorage() = 0;
   virtual Storage * newStorage(size_t size) = 0;
   virtual Generator * newGenerator() = 0;
-  // example
-  virtual Tensor * add(Tensor & a, Tensor & b) = 0;
   virtual const char * toString() const = 0;
+
+  // example
+  // virtual Tensor * add(Tensor & a, Tensor & b) = 0;
+
   ${type_method_declarations}
 
 };
