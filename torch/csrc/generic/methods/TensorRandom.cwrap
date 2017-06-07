@@ -240,10 +240,10 @@ static void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, TH
   name: exponential_
   defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
   types:
-    - Float
-    - Double
+    - floating_point
   processors:
     - CPU
+    - CUDA
   cname: exponential
   return: self
   arguments:
@@ -377,21 +377,6 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
     - arg: double mean
       default: 0
     - arg: double std
-      default: 1
-]]
-
-[[
-  name: exponential_
-  defined_if: CUDA_FLOAT || CUDA_DOUBLE || CUDA_HALF
-  types:
-    - floating_point
-  processors:
-    - CUDA
-  cname: exponential
-  return: self
-  arguments:
-    - THTensor* self
-    - arg: double lambd
       default: 1
 ]]
 
