@@ -196,7 +196,7 @@ void THNN_(SpatialDepthWiseConvolution_updateOutput)(
   THTensor_(free)(bias);
   THTensor_(free)(_bias);
 
-  THTensor_(resize4d)(output, T, nInputPlane * nOutputPlane, outputWidth, outputHeight);
+  THTensor_(resize4d)(output, T, nInputPlane * nOutputPlane, outputHeight, outputWidth);
 
   if (batch == 0) {
     THTensor_(select)(output, NULL, 0, 0);
