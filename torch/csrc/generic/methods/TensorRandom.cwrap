@@ -72,7 +72,7 @@ static void THTensor_(random1__)(THTensor *self, THGenerator *gen, long b)
     - function
   return: argument 0
   arguments:
-    - arg: THLongTensor* result
+    - arg: THIndexTensor* result
       output: True
     - arg: THGenerator* generator
       default: THPDefaultGenerator->cdata
