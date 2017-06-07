@@ -403,6 +403,12 @@ Sparse layers
 Distance functions
 ----------------------------------
 
+:hidden:`CosineSimilarity`
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: CosineSimilarity
+    :members:
+
 :hidden:`PairwiseDistance`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 

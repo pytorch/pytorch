@@ -734,6 +734,9 @@ def pairwise_distance(x1, x2, p=2, eps=1e-6):
 def cosine_similarity(x1, x2, dim=1, eps=1e-8):
     r"""Returns cosine similarity between x1 and x2, computed along dim.
 
+    .. math ::
+        \text{similarity} = \dfrac{x_1 \cdot x_2}{\max(\Vert x_1 \Vert _2 \cdot \Vert x_2 \Vert _2, \epsilon)}
+
     Args:
         x1 (Variable): First input.
         x2 (Variable): Second input (of size matching x1).
@@ -743,6 +746,11 @@ def cosine_similarity(x1, x2, dim=1, eps=1e-8):
     Shape:
         - Input: :math:`(\ast_1, D, \ast_2)` where D is at position `dim`.
         - Output: :math:`(\ast_1, \ast_2)` where 1 is at position `dim`.
+
+    >>> input1 = autograd.Variable(torch.randn(100, 128))
+    >>> input2 = autograd.Variable(torch.randn(100, 128))
+    >>> output = F.cosine_similarity(input1, input2)
+    >>> print(output)
     """
     w12 = torch.sum(x1 * x2, dim)
     w1 = torch.norm(x1, 2, dim)
