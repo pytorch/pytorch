@@ -586,6 +586,34 @@ real THTensor_(maxall)(THTensor *tensor)
   return theMax;
 }
 
+static void THTensor_(quickselectnoidx)(real *arr, long k, long elements, long stride);
+
+real THTensor_(medianall)(THTensor *tensor)
+{
+  THArgCheck(tensor->nDimension > 0, 1, "tensor must have one dimension");
+  THArgCheck(THTensor_(isContiguous)(tensor), 1, "input is not contiguous");
+
+  real theMedian;
+  ptrdiff_t numel;
+  long k;
+  THTensor *temp_;
+  real *temp__data;
+
+  numel = THTensor_(nElement)(tensor);
+  k = (numel-1) >> 1;
+
+  temp_ = THTensor_(newClone)(tensor);
+  temp__data = THTensor_(data)(temp_);
+
+  THTensor_(quickselectnoidx)(temp__data, k, numel, 1);
+
+  theMedian = temp__data[k];
+
+  THTensor_(free)(temp_);
+
+  return theMedian;
+}
+
 accreal THTensor_(sumall)(THTensor *tensor)
 {
   accreal sum = 0;
@@ -2044,6 +2072,9 @@ void THTensor_(reshape)(THTensor *r_, THTensor *t, THLongStorage *size)
 #define LONG_SWAP(AAA, BBB) swap = AAA; AAA = BBB; BBB = swap
 #define REAL_SWAP(AAA, BBB) rswap = AAA; AAA = BBB; BBB = rswap
 
+#define ARR_SWAP(III, JJJ) \
+  REAL_SWAP(ARR(III), ARR(JJJ));
+
 #define BOTH_SWAP(III, JJJ) \
   REAL_SWAP(ARR(III), ARR(JJJ)); \
   LONG_SWAP(IDX(III), IDX(JJJ))
@@ -2259,6 +2290,53 @@ void THTensor_(sort)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int dimensio
                            ri__data[i*ri__stride] = i;
                          THTensor_(quicksortascend)(rt__data, ri__data, rt__size, rt__stride);)
       }
+}
+
+/* Implementation of the Quickselect algorithm, based on Nicolas Devillard's
+public domain implementation at http://ndevilla.free.fr/median/median/
+Adapted similarly to the above Quicksort algorithm.
+This version does not produce indices along with values. */
+static void THTensor_(quickselectnoidx)(real *arr, long k, long elements, long stride)
+{
+  long P, L, R, i, j, swap;
+  real rswap, piv;
+  L = 0;
+  R = elements-1;
+
+  do {
+    if (R <= L) /* One element only */
+      return;
+
+    if (R == L+1) {  /* Two elements only */
+      if (ARR(L) > ARR(R)) {
+        ARR_SWAP(L, R);
+      }
+      return;
+    }
+
+    /* Use median of three for pivot choice */
+    P=(L+R)>>1;
+    ARR_SWAP(P, L+1);
+    if (ARR(L+1) > ARR(R)) { ARR_SWAP(L+1, R); }
+    if (ARR(L) > ARR(R)) { ARR_SWAP(L, R); }
+    if (ARR(L+1) > ARR(L)) { ARR_SWAP(L+1, L); }
+
+    i = L+1;
+    j = R;
+    piv = ARR(L);
+    do {
+      do i++; while(ARR(i) < piv);
+      do j--; while(ARR(j) > piv);
+      if (j < i)
+        break;
+      ARR_SWAP(i, j);
+    } while(1);
+    ARR_SWAP(L, j);
+
+    /* Re-set active partition */
+    if (j <= k) L=i;
+    if (j >= k) R=j-1;
+  } while(1);
 }
 
 /* Implementation of the Quickselect algorithm, based on Nicolas Devillard's
