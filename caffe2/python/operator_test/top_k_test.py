@@ -44,8 +44,9 @@ class TestTopK(hu.HypothesisTestCase):
             indices_ref = np.reshape(indices_ref, X.shape)
             values_ref = np.reshape(values_ref, X.shape)
 
-            indices_ref = indices_ref.take(range(k), axis=-1)
-            values_ref = values_ref.take(range(k), axis=-1)
+            indices_ref = indices_ref.take(list(range(k)), axis=-1)
+            values_ref = values_ref.take(list(range(k)), axis=-1)
+
             return (values_ref, indices_ref)
 
         self.assertReferenceChecks(hu.cpu_do, op, [X], top_k_ref)

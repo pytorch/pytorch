@@ -6,7 +6,6 @@ from __future__ import unicode_literals
 import hypothesis.strategies as st
 import numpy as np
 import numpy.testing as npt
-
 from hypothesis import given
 
 import caffe2.python.hypothesis_test_util as hu
@@ -312,11 +311,11 @@ class TestLayers(LayersTestCase):
 
     def testGatherRecord(self):
         indices = np.array([1, 3, 4], dtype=np.int32)
-        dense = np.array(range(20), dtype=np.float32).reshape(10, 2)
-        lengths = np.array(range(10), dtype=np.int32)
-        items = np.array(range(lengths.sum()), dtype=np.int64)
-        items_lengths = np.array(range(lengths.sum()), dtype=np.int32)
-        items_items = np.array(range(items_lengths.sum()), dtype=np.int64)
+        dense = np.array(list(range(20)), dtype=np.float32).reshape(10, 2)
+        lengths = np.array(list(range(10)), dtype=np.int32)
+        items = np.array(list(range(lengths.sum())), dtype=np.int64)
+        items_lengths = np.array(list(range(lengths.sum())), dtype=np.int32)
+        items_items = np.array(list(range(items_lengths.sum())), dtype=np.int64)
         record = self.new_record(schema.Struct(
             ('dense', schema.Scalar(np.float32)),
             ('sparse', schema.Struct(

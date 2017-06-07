@@ -1424,7 +1424,7 @@ class Net(object):
         if blob_remap is None:
             blob_remap = {}
         if op_id_mask is None:
-            op_id_mask = range(0, len(proto.op))
+            op_id_mask = list(range(0, len(proto.op)))
 
         def get_remapped_str(blob):
             blob_str = str(blob)

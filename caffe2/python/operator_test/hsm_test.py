@@ -207,7 +207,7 @@ class TestHsm(hu.HypothesisTestCase):
 
     def test_huffman_tree_hierarchy(self):
         workspace.GlobalInit(['caffe2'])
-        labelSet = range(0, 6)
+        labelSet = list(range(0, 6))
         counts = [1, 2, 3, 4, 5, 6]
         labels = sum([[l] * c for (l, c) in zip(labelSet, counts)], [])
         Y = np.array(labels).astype(np.int64)

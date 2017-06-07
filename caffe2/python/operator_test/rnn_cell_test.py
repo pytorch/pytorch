@@ -483,7 +483,7 @@ class RNNCellTest(hu.HypothesisTestCase):
             op,
             inputs,
             ref,
-            outputs_to_check=range(4),
+            outputs_to_check=list(range(4)),
         )
 
         # Checking for input, gates_t_w and gates_t_b gradients
@@ -659,7 +659,7 @@ class RNNCellTest(hu.HypothesisTestCase):
             reference=ref,
             grad_reference=None,
             output_to_grad=None,
-            outputs_to_check=range(6),
+            outputs_to_check=list(range(6)),
         )
         gradients_to_check = [
             index for (index, input_name) in enumerate(op.input)

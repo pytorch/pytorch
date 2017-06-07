@@ -30,7 +30,7 @@ class TestUnmaskOp(hu.HypothesisTestCase):
         M = np.random.randint(1, N)
         all_value = np.random.rand(N).astype(dtype)
         split = sorted(np.random.randint(1, N, size=(M,)))
-        indices = np.array(range(N))
+        indices = np.array(list(range(N)))
         random.shuffle(indices)
         pieces = np.split(indices, split)
         masks_and_values_name = []
