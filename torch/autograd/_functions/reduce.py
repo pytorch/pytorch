@@ -190,7 +190,7 @@ class Mode(_SelectionFunction):
 
 
 class Median(_SelectionFunction):
-    has_all_reduce = False
+    pass
 
 
 class Kthvalue(_SelectionFunction):
