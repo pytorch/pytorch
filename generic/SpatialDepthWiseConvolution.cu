@@ -232,7 +232,7 @@ void THNN_(SpatialDepthWiseConvolution_updateOutput)(
   THCTensor_(free)(state, _bias);
 
   // Transpose output
-  THCTensor_(resize4d)(state, output, batchSize, nInputPlane * nOutputPlane, outputWidth, outputHeight);
+  THCTensor_(resize4d)(state, output, batchSize, nInputPlane * nOutputPlane, outputHeight, outputWidth);
 
   // Make a contiguous copy of output (OPTIONAL)
   // THCTensor *_output = THCTensor_(newContiguous)(state, output);
