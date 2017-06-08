@@ -4,7 +4,7 @@
 
 #include "TensorLib/Scalar.h"
 #include "TensorLib/Type.h"
-
+#include <iostream>
 namespace tlib {
 
 class Type;

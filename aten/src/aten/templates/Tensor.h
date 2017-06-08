@@ -6,6 +6,21 @@
 
 namespace tlib {
 class Type;
+class Tensor;
+
+class TensorRef {
+public:
+  TensorRef(Tensor && t)
+  : tensor(t) {}
+  TensorRef(Tensor & t)
+  : tensor(t) {}
+  Tensor & operator*() { return tensor; }
+  Tensor * operator->() { return &tensor; }
+  operator Tensor& () { return tensor; }
+private:
+  Tensor & tensor;
+};
+
 struct Tensor {
 
   Tensor()
@@ -73,7 +88,7 @@ struct Tensor {
   IntList stride() {
     return pImpl->stride();
   }
-  Type & type() {
+  Type & type() const {
     return pImpl->type();
   }
 
