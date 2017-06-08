@@ -335,6 +335,13 @@ class Variable(_C._VariableBase):
             assert not torch.is_tensor(other)
             return PowConstant.apply(self, other)
 
+    def pow_(self, other):
+        if isinstance(other, Variable):
+            return Pow.apply(self, other, True)
+        else:
+            assert not torch.is_tensor(other)
+            return PowConstant.apply(self, other, True)
+
     def exp(self):
         return Exp.apply(self)
 
