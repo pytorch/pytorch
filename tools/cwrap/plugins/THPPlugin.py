@@ -334,8 +334,98 @@ ${cpu}
                        for option in declaration['options']
                        for arg in option['arguments'])
 
+        def processors_types_to_defined_if_string(declaration):
+            # A declaration has two fields: 'processor', which stores a list of
+            # processors (currently 'cpu' and 'cuda') the declaration applies
+            # to, and 'types', which stores a list of real types the
+            # declaration applies to. In PyTorch, when a function is only
+            # supported by a subset of types, we wrap it in macro definition
+            # checks.
+            #
+            # Previously, we manually required the cwrap declaration to
+            # specify for which processor/type combinations a function was
+            # defined for. Now, we explicitly list the types and processors for
+            # a declaration, if it should only be supported for a specific
+            # subset of types, processors, or type-processor pairs.
+
+            types = declaration.get('types', [])
+            processors = declaration['processors']
+            all_processors = ['CPU', 'CUDA']
+
+            def get_defined_string(processor, real):
+                if processor == 'CUDA':
+                    if real == 'all':
+                        return "IS_CUDA"
+                    else:
+                        return 'CUDA_{0}'.format(real.upper())
+                else:
+                    if real == 'all':
+                        return "!IS_CUDA"
+                    else:
+                        return 'defined(TH_REAL_IS_{0})'.format(real.upper())
+
+            def expand_composite_type(p, t):
+                if t == 'floating_point':
+                    result = ['double', 'float']
+                    if p == 'CUDA':
+                        result.append('half')
+                elif t == 'integral':
+                    result = ['byte', 'char', 'short', 'int', 'long']
+                else:
+                    result = [t]
+                return result
+
+            defineds = []
+
+            # The logic below does not handle corner cases well. We allow the
+            # declaration to have a field 'type_processor_pairs' that stores a
+            # dictionary from type --> processor representing allowed
+            # combinations. Let's use these first.
+            for pair in declaration.get('type_processor_pairs', []):
+                p, t = pair
+                defineds.extend([get_defined_string(p, et) for et in
+                                expand_composite_type(p, t)])
+
+            # In the base case, types is empty and processors contains both
+            # 'CPU' and 'CUDA' --> this means we support all types, and our
+            # string should be empty, or simply the list of explict type
+            # processor pairs
+            if (len(types) == 0 and all([proc in processors for proc in
+                                         all_processors])):
+                return " || ".join(defineds)
+
+            # Case 2: types is empty, but only one processor type is specified
+            if len(types) == 0 and len(processors) == 1:
+                defineds.append('IS_CUDA' if processors[0] == 'CUDA' else
+                                "!IS_CUDA")
+                return " || ".join(defineds)
+
+            # Else, we loop overall all of the processor, type pairs and add
+            # them
+            for p in processors:
+                for t in types:
+                    defineds.extend([get_defined_string(p, et) for et in
+                                    expand_composite_type(p, t)])
+
+            return " || ".join(defineds)
+
         for declaration in declarations:
             # Disable all methods for THHalfTensor, unless cpu_half is True
+
+            compare = processors_types_to_defined_if_string(declaration)
+
+            def cmp(compare, declaration):
+                declstr = declaration.get('defined_if', "")
+                c = set(compare.split(' || '))
+                d = set(declstr.split(' || '))
+                if len(c ^ d) != 0:
+                    print(c, d)
+                    print('failure:', declaration['name'])
+                else:
+                    print(c, d)
+                    print('success')
+            cmp(compare, declaration)
+
             if not declaration.get('cpu_half', False):
                 defined_if = '!defined(TH_REAL_IS_HALF)'
                 if 'defined_if' in declaration:
