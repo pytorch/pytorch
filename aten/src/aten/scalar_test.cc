@@ -18,7 +18,7 @@ int main() {
   cout << gen.seed() << "\n";
   auto C = tlib::globalContext();
   auto & CUDAFloat = C->getType(Processor::CPU,ScalarType::Float);
-  auto & t2 = CUDAFloat.zeros({4,4});
+  auto t2 = CUDAFloat.zeros({4,4});
   cout << &t2 << "\n";
   cout << "AFTER GET TYPE " << &CUDAFloat << "\n";
   cout << "STORAGE: " << CUDAFloat.newStorage(4).get() << "\n";
@@ -27,7 +27,7 @@ int main() {
 
   cout << "GET " << s->get(3).toFloat() << "\n";
 
-  auto & t = CPU(Float).ones({4,4});
+  auto t = CPU(Float).ones({4,4});
 
 
   auto wha2 = zeros({4,4}).add(t).sum();

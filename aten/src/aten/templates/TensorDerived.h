@@ -3,11 +3,12 @@
 #include <$th_header>
 
 #include "TensorLib/Tensor.h"
+#include "TensorLib/TensorImpl.h"
 #include "TensorLib/Context.h"
 
 namespace tlib {
 
-struct ${Tensor} : public Tensor {
+struct ${Tensor} : public TensorImpl {
 public:
   ${Tensor}(Context* context);
   ${Tensor}(Context* context, ${THTensor} * tensor);
