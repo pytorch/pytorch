@@ -1,5 +1,5 @@
 #pragma once
-
+#include "TensorLib/Type.h"
 #include "TensorLib/Context.h"
 
 namespace tlib {
@@ -10,9 +10,9 @@ struct ${Type} : public Type {
   virtual Processor processor() override;
   virtual bool isSparse() override;
   virtual bool isDistributed() override;
-  virtual Storage * newStorage() override;
-  virtual Storage * newStorage(size_t size) override;
-  virtual Generator * newGenerator() override;
+  virtual std::unique_ptr<Storage> newStorage() override;
+  virtual std::unique_ptr<Storage> newStorage(size_t size) override;
+  virtual std::unique_ptr<Generator> newGenerator() override;
   virtual const char * toString() const override;
 
   static const char * typeString();
