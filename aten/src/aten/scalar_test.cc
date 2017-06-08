@@ -21,8 +21,8 @@ int main() {
   auto & t2 = CUDAFloat.zeros({4,4});
   cout << &t2 << "\n";
   cout << "AFTER GET TYPE " << &CUDAFloat << "\n";
-  cout << "STORAGE: " << CUDAFloat.newStorage(4) << "\n";
-  std::unique_ptr<Storage> s(CUDAFloat.newStorage(4));
+  cout << "STORAGE: " << CUDAFloat.newStorage(4).get() << "\n";
+  auto s = CUDAFloat.newStorage(4);
   s->fill(7);
 
   cout << "GET " << s->get(3).toFloat() << "\n";

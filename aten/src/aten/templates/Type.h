@@ -1,5 +1,7 @@
 #pragma once
 
+#include <memory>
+
 #include "TensorLib/Scalar.h"
 #include "TensorLib/ArrayRef.h"
 
@@ -32,9 +34,9 @@ struct Type {
   virtual bool isSparse() = 0;
   virtual bool isDistributed() = 0;
   static void registerAll(Context * context);
-  virtual Storage * newStorage() = 0;
-  virtual Storage * newStorage(size_t size) = 0;
-  virtual Generator * newGenerator() = 0;
+  virtual std::unique_ptr<Storage> newStorage() = 0;
+  virtual std::unique_ptr<Storage> newStorage(size_t size) = 0;
+  virtual std::unique_ptr<Generator> newGenerator() = 0;
   virtual const char * toString() const = 0;
 
   // example

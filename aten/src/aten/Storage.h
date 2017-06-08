@@ -6,11 +6,11 @@
 namespace tlib {
 
 struct Storage {
-  Storage() {};
+  Storage() {}
   Storage(const Storage& other) = delete;
-  Storage(Storage&& other) = delete;
-  virtual ~Storage() {};
+  void operator=(const Storage&) = delete;
 
+  virtual ~Storage() {};
   virtual std::size_t elementSize() const = 0;
   virtual std::size_t size() const = 0;
   virtual void* data() = 0;
