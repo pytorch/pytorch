@@ -27,6 +27,10 @@ int main() {
 
   cout << "GET " << s->get(3).toFloat() << "\n";
 
-  auto t = CPU(Float).zeros({4,4});
+  auto t = CPU(Float).ones({4,4});
+
+
+  auto wha2 = zeros({4,4})->add(*t)->sum();
+  cout << wha2.toDouble() << " <-ndim\n";
 
 }
