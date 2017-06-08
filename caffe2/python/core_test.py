@@ -427,6 +427,232 @@ class TestInferDevice(test_util.TestCase):
             op_option=self.cpu_option
         )
 
+    def test_inject_copy(self):
+        net = core.Net("test")
+        init_net = core.Net("init")
+        device_option = caffe2_pb2.DeviceOption()
+        device_option.device_type = caffe2_pb2.CUDA
+        device_option.cuda_gpu_id = 1
+        weight = init_net.XavierFill([], 'fc_w', shape=[10, 100])
+        bias = init_net.ConstantFill([], 'fc_b', shape=[10, ])
+
+        with core.DeviceScope(device_option):
+            net.FC(["data", weight, bias], "fc1")
+
+        _, blob_to_device = core.InjectCrossDeviceCopies(init_net)
+        new_net, blob_to_device = core.InjectCrossDeviceCopies(
+            net, blob_to_device
+        )
+        op = new_net._net.op[-1]
+        ref_str = """
+input: "data_cuda_1"
+input: "fc_w_cuda_1"
+input: "fc_b_cuda_1"
+output: "fc1"
+name: ""
+type: "FC"
+device_option {
+  device_type: 1
+  cuda_gpu_id: 1
+}
+"""
+        self.assertEqual(str(op).strip(), ref_str.strip())
+        self.assertEqual(new_net._net.op[-2].type, "CopyCPUToGPU")
+        self.assertEqual(new_net._net.op[0].type, "CopyCPUToGPU")
+        self.assertNotEqual(blob_to_device["fc_w"], device_option)
+
+    def test_cross_nets(self):
+        net = core.Net("test")
+        init_net = core.Net("init")
+        device_option = caffe2_pb2.DeviceOption()
+        device_option.device_type = caffe2_pb2.CUDA
+        device_option.cuda_gpu_id = 1
+        weight = init_net.XavierFill([], 'fc_w', shape=[10, 100])
+        bias = init_net.ConstantFill([], 'fc_b', shape=[10, ])
+
+        with core.DeviceScope(device_option):
+            net.FC(["data", weight, bias], "fc1")
+
+        data_remap = {'data': device_option}
+        nets, _ = core.InjectDeviceCopiesAmongNets(
+            [init_net, net], blob_to_device_init=data_remap
+        )
+        print(nets[1].Proto())
+        ref_str = """
+name: "test_cross_device"
+op {
+  input: "fc_w"
+  output: "fc_w_cuda_1"
+  name: ""
+  type: "CopyCPUToGPU"
+  device_option {
+    device_type: 1
+    cuda_gpu_id: 1
+  }
+}
+op {
+  input: "fc_b"
+  output: "fc_b_cuda_1"
+  name: ""
+  type: "CopyCPUToGPU"
+  device_option {
+    device_type: 1
+    cuda_gpu_id: 1
+  }
+}
+op {
+  input: "data"
+  input: "fc_w_cuda_1"
+  input: "fc_b_cuda_1"
+  output: "fc1"
+  name: ""
+  type: "FC"
+  device_option {
+    device_type: 1
+    cuda_gpu_id: 1
+  }
+}
+external_input: "data"
+external_input: "fc_w"
+external_input: "fc_b"
+"""
+        self.assertEqual(str(nets[1].Proto()).strip(), ref_str.strip())
+
+    def test_cross_nets_no_change(self):
+        net = core.Net("test")
+        init_net = core.Net("init")
+        device_option = caffe2_pb2.DeviceOption()
+        device_option.device_type = caffe2_pb2.CUDA
+        device_option.cuda_gpu_id = 1
+
+        with core.DeviceScope(device_option):
+            weight = init_net.XavierFill([], 'fc_w', shape=[10, 100])
+            bias = init_net.ConstantFill([], 'fc_b', shape=[10, ])
+            net.FC(["data", weight, bias], "fc1")
+
+        data_remap = {'data': device_option}
+        nets = core.InjectDeviceCopiesAmongNetsWithoutB2D(
+            [init_net, net], blob_to_device_init=data_remap
+        )
+        ref_str = """
+name: "test_cross_device"
+op {
+  input: "data"
+  input: "fc_w"
+  input: "fc_b"
+  output: "fc1"
+  name: ""
+  type: "FC"
+  device_option {
+    device_type: 1
+    cuda_gpu_id: 1
+  }
+}
+external_input: "data"
+external_input: "fc_w"
+external_input: "fc_b"
+"""
+        self.assertEqual(str(nets[1].Proto()).strip(), ref_str.strip())
+
+    def test_inject_copy_multi_use(self):
+        net = core.Net("test")
+        device_option = caffe2_pb2.DeviceOption()
+        device_option.device_type = caffe2_pb2.CUDA
+        device_option.cuda_gpu_id = 1
+
+        with core.DeviceScope(device_option):
+            net.Relu("data", "relu1")
+        net.Relu("data", "relu2")
+        with core.DeviceScope(device_option):
+            net.Relu("data", "relu3")
+        net.Relu("data", "relu4")
+        device_option.cuda_gpu_id = 0
+        with core.DeviceScope(device_option):
+            net.Relu("data", "relu5")
+        device_option.cuda_gpu_id = 1
+        with core.DeviceScope(device_option):
+            net.Relu("data", "relu6")
+
+        new_net, _ = core.InjectCrossDeviceCopies(net)
+        ref_str = """
+name: "test_cross_device"
+op {
+  input: "data"
+  output: "data_cuda_1"
+  name: ""
+  type: "CopyCPUToGPU"
+  device_option {
+    device_type: 1
+    cuda_gpu_id: 1
+  }
+}
+op {
+  input: "data_cuda_1"
+  output: "relu1"
+  name: ""
+  type: "Relu"
+  device_option {
+    device_type: 1
+    cuda_gpu_id: 1
+  }
+}
+op {
+  input: "data"
+  output: "relu2"
+  name: ""
+  type: "Relu"
+}
+op {
+  input: "data_cuda_1"
+  output: "relu3"
+  name: ""
+  type: "Relu"
+  device_option {
+    device_type: 1
+    cuda_gpu_id: 1
+  }
+}
+op {
+  input: "data"
+  output: "relu4"
+  name: ""
+  type: "Relu"
+}
+op {
+  input: "data"
+  output: "data_cuda_0"
+  name: ""
+  type: "CopyCPUToGPU"
+  device_option {
+    device_type: 1
+    cuda_gpu_id: 0
+  }
+}
+op {
+  input: "data_cuda_0"
+  output: "relu5"
+  name: ""
+  type: "Relu"
+  device_option {
+    device_type: 1
+    cuda_gpu_id: 0
+  }
+}
+op {
+  input: "data_cuda_1"
+  output: "relu6"
+  name: ""
+  type: "Relu"
+  device_option {
+    device_type: 1
+    cuda_gpu_id: 1
+  }
+}
+external_input: "data"
+"""
+        print(new_net.Proto())
+        self.assertEqual(str(new_net.Proto()).strip(), ref_str.strip())
+
 
 if __name__ == '__main__':
     unittest.main()
