@@ -53,6 +53,13 @@ const char * ${Tensor}::toString() const {
   return ${Tensor}::typeString();
 }
 
+IntList ${Tensor}::size() {
+  return IntList(reinterpret_cast<int64_t*>(tensor->size),tensor->nDimension);
+}
+IntList ${Tensor}::stride() {
+  return IntList(reinterpret_cast<int64_t*>(tensor->stride),tensor->nDimension);
+}
+
 const char * ${Tensor}::typeString() {
   return "${Tensor}";
 }
