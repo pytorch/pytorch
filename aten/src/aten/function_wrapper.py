@@ -30,17 +30,17 @@ ${return_type} ${api_name}(${method_formals});
 """)
 # 5. add non-virtual declaration to Tensor.cpp
 TENSOR_METHOD_DEFINITION = CodeTemplate("""\
-${return_type} Tensor::${api_name}(${method_formals}) {
+inline ${return_type} Tensor::${api_name}(${method_formals}) {
     return type().${api_name}(${method_actuals});
 }
 """)
 # 6. add a method declaration in Functions.h
 FUNCTION_DECLARATION = CodeTemplate("""\
-${return_type} ${api_name}(${formals});
+static inline ${return_type} ${api_name}(${formals});
 """)
 # 7. add a method definition in Functions.cpp
 FUNCTION_DEFINITION = CodeTemplate("""\
-${return_type} ${api_name}(${formals}) {
+static inline ${return_type} ${api_name}(${formals}) {
     return ${inferred_type}.${api_name}(${actuals});
 }
 """)
