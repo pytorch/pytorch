@@ -3,11 +3,15 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+import unittest
+try:
+    import lmdb
+except ImportError:
+    raise unittest.SkipTest('python-lmdb is not installed')
+
 import sys
 import os
 import shutil
-import lmdb
-import unittest
 import tempfile
 
 from caffe2.proto import caffe2_pb2
