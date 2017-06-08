@@ -151,7 +151,7 @@ def RunEpoch(
     prefix = "gpu_{}".format(train_model._devices[0])
     accuracy = workspace.FetchBlob(prefix + '/accuracy')
     loss = workspace.FetchBlob(prefix + '/loss')
-    learning_rate = workspace.FetchBlob(prefix + '/LR')
+    learning_rate = workspace.FetchBlob(prefix + '/conv1_w_lr')
     test_accuracy = 0
     if (test_model is not None):
         # Run 100 iters of testing
