@@ -49,10 +49,14 @@ class NNPackOpsTest(hu.HypothesisTestCase):
            size=st.integers(5, 10),
            input_channels=st.integers(1, 8),
            output_channels=st.integers(1, 8),
-           batch_size=st.integers(1, 5))
+           batch_size=st.integers(1, 5),
+           groups=st.integers(1, 2))
     def test_convolution_correctness(self, stride, pad, kernel, size,
                                      input_channels, output_channels,
-                                     batch_size):
+                                     batch_size, groups):
+        assume(input_channels % groups == 0)
+        assume(output_channels % groups == 0)
+        assume(output_channels == input_channels / groups)
         assume(stride <= kernel)
         if stride != 1:
             assume(batch_size == 1)
@@ -76,6 +80,7 @@ class NNPackOpsTest(hu.HypothesisTestCase):
                 order=order,
                 kts="TUPLE",
                 engine=engine,
+                group=groups,
             )
             self.ws.create_blob("X").feed(X)
             self.ws.create_blob("w").feed(w)

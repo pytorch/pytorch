@@ -117,15 +117,22 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
   auto& filter = Input(1);
   auto& bias = Input(2);
   auto* Y = Output(0);
-  CAFFE_ENFORCE(X.ndim() == 4, "Input dim should be 4");
-  const int N = X.dim32(0), C = X.dim32(1);
-  CAFFE_ENFORCE(filter.ndim(), 4);
+
+  const int N = X.dim32(0), C = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
   const int M = filter.dim32(0);
-  CAFFE_ENFORCE(filter.dim32(1) == C, "");
+
+  CAFFE_ENFORCE(X.ndim() == 4, "Input dim should be 4");
+  CAFFE_ENFORCE(filter.ndim(), 4);
+  CAFFE_ENFORCE(C % this->group_ == 0, "");
+  CAFFE_ENFORCE(M % this->group_ == 0, "");
+  CAFFE_ENFORCE(filter.dim32(1) == C / this->group_, "");
   CAFFE_ENFORCE(filter.dim32(2) == this->kernel_h(), "");
   CAFFE_ENFORCE(filter.dim32(3) == this->kernel_w(), "");
   CAFFE_ENFORCE(bias.size() == M, "");
+
   ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, filter.dim32(0));
+  const int oH = Y->dim32(2), oW = Y->dim32(3);
+
   if (N > 1) {
     // NNPack only supports stride = 1 when doing batch feedforward
     CAFFE_ENFORCE(this->stride_h() == 1, "");
@@ -135,7 +142,6 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
       {this->pad_t(), this->pad_b(), this->pad_l(), this->pad_r()});
   std::vector<int> stride({this->stride_h(), this->stride_w()});
 
-  const size_t batch_size = X.dim32(0);
   const size_t input_channels = X.dim32(1);
   const size_t output_channels = Y->dim32(1);
   const nnp_size input_size = {.width = static_cast<size_t>(X.dim32(3)),
@@ -151,41 +157,45 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
 
   const nnp_size output_subsample = {.width = static_cast<size_t>(stride[1]),
                                      .height = static_cast<size_t>(stride[0])};
-  if (batch_size == 1) {
+  if (N == 1) {
     VLOG(1) << "Running inference mode";
-    const auto status = nnp_convolution_inference(
-        algo_,
-        kts_,
-        input_channels,
-        output_channels,
-        input_size,
-        padding,
-        kernel_size,
-        output_subsample,
-        X.template data<float>(),
-        filter.template data<float>(),
-        bias.template data<float>(),
-        Y->template mutable_data<float>(),
-        nnpack_threadpool(),
-        nullptr);
-    CAFFE_ENFORCE(nnp_status_success == status, "");
+    for (auto g = 0; g < group_; ++g) {
+      const auto status = nnp_convolution_inference(
+          algo_,
+          kts_,
+          C / group_,
+          M / group_,
+          input_size,
+          padding,
+          kernel_size,
+          output_subsample,
+          X.template data<float>() + g * H * W * (C / group_),
+          filter.template data<float>() + filter.size() / group_ * g,
+          bias.template data<float>() + bias.size() / group_ * g,
+          Y->template mutable_data<float>() + g * oH * oW * (M / group_),
+          nnpack_threadpool(),
+          nullptr);
+      CAFFE_ENFORCE(nnp_status_success == status, "");
+    }
   } else {
     VLOG(1) << "Running batched mode";
-    const auto status = nnp_convolution_output(
-        algo_,
-        batch_size,
-        input_channels,
-        output_channels,
-        input_size,
-        padding,
-        kernel_size,
-        X.template data<float>(),
-        filter.template data<float>(),
-        bias.template data<float>(),
-        Y->template mutable_data<float>(),
-        nnpack_threadpool(),
-        nullptr);
-    CAFFE_ENFORCE(nnp_status_success == status, "");
+    for (auto g = 0; g < group_; ++g) {
+      const auto status = nnp_convolution_output(
+          algo_,
+          N,
+          C / group_,
+          M / group_,
+          input_size,
+          padding,
+          kernel_size,
+          X.template data<float>() + g * H * W * (C / group_),
+          filter.template data<float>() + filter.size() / group_ * g,
+          bias.template data<float>() + bias.size() / group_ * g,
+          Y->template mutable_data<float>() + g * oH * oW * (M / group_),
+          nnpack_threadpool(),
+          nullptr);
+      CAFFE_ENFORCE(nnp_status_success == status, "");
+    }
   }
   return true;
 }
