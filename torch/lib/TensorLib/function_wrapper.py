@@ -41,7 +41,7 @@ ${return_type} ${api_name}(${formals});
 # 7. add a method definition in Functions.cpp
 FUNCTION_DEFINITION = CodeTemplate("""\
 ${return_type} ${api_name}(${formals}) {
-    return ${first_tensor}.type().${api_name}(${actuals});
+    return ${inferred_type}.${api_name}(${actuals});
 }
 """)
 
@@ -102,7 +102,6 @@ ALLOC_WRAP = {
 
 CONSTANT_REPLACEMENTS = [
     ('AS_REAL','${ScalarType}'),
-
     ('THPDefaultGenerator->cdata','dynamic_cast<${Processor}Generator&>(context->defaultGenerator(processor())).generator'),
     ('__storage_size.get\\(\\)', 'THStorageView::make(static_cast<int64_t>(storage.size()))'),
     ('__last_dim', 'self_->ndimension()-1'),
@@ -155,7 +154,7 @@ def create_generic(top_env, declarations):
             raise Exception("format_return_type")
         return TYPE_RETURN.get(the_type,the_type)
 
-    def first_tensor(formals):
+    def find_first_tensor(formals):
         for argument in formals:
             if argument['type'] == "THTensor*":
                 return argument['name']
@@ -175,7 +174,6 @@ def create_generic(top_env, declarations):
             f['name'] if f['name'] != 'self' else '*this' for f in formals ]
         option['return_type'] = format_return_type(option)
 
-        option['first_tensor'] = first_tensor(formals)
         env = nested_dict(option,top_env)
         top_env['type_method_declarations'].append(
             TYPE_METHOD_DECLARATION.substitute(env))
@@ -188,8 +186,12 @@ def create_generic(top_env, declarations):
             top_env['tensor_method_definitions'].append(
                 TENSOR_METHOD_DEFINITION.substitute(env))
 
-        if ('function' in option['variants'] and
-            option['first_tensor'] is not None):
+        if 'function' in option['variants']:
+            first_tensor = find_first_tensor(formals)
+            if first_tensor is not None:
+                option['inferred_type'] = '{}.type()'.format(first_tensor)
+            else:
+                option['inferred_type'] = 'globalContext()->defaultType()'
             top_env['function_declarations'].append(
             FUNCTION_DECLARATION.substitute(env))
             top_env['function_definitions'].append(
