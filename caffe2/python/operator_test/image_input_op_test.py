@@ -3,8 +3,13 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+import unittest
+try:
+    import cv2
+except ImportError:
+    raise unittest.SkipTest('python-opencv is not installed')
+
 from PIL import Image
-import cv2
 import numpy as np
 import lmdb
 import shutil
