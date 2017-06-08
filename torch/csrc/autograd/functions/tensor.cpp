@@ -23,6 +23,18 @@ auto Clone::apply(const variable_list& inputs) -> variable_list {
   });
 };
 
+auto Contiguous::apply(const variable_list& inputs) -> variable_list {
+  check_input_variables("Contiguous", inputs, 1);
+  auto& input = inputs[0]->data;
+  AutoGPU guard(input->getDevice());
+
+  std::unique_ptr<thpp::Tensor> output {input->contiguous()};
+
+  return wrap_outputs(inputs, as_tensor_list(std::move(output)), [&](FunctionFlags f) {
+    return std::make_shared<Identity>(std::move(f));
+  });
+};
+
 auto Transpose::apply(const variable_list& inputs) -> variable_list {
   check_input_variables("Transpose", inputs, 1);
 
