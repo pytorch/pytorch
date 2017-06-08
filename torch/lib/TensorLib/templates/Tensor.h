@@ -7,7 +7,11 @@ namespace tlib {
 
 class Type;
 struct Tensor {
-  virtual Type & type() const = 0;
+  Tensor(Type * type)
+  : type_(type) {}
+  Type & type() const {
+    return *type_;
+  }
   virtual const char * toString() const = 0;
 
   //example
@@ -17,6 +21,8 @@ struct Tensor {
   virtual ~Tensor() {}
 
   friend class Type;
+private:
+  Type * type_;
 };
 
 }

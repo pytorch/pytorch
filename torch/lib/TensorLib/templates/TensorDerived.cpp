@@ -42,13 +42,11 @@ ${Tensor}::${Tensor}(Context* context)
 : ${Tensor}(context,${THTensor}_new(${state})) {}
 
 ${Tensor}::${Tensor}(Context* context, ${THTensor} * tensor)
-: tensor(tensor), context(context) {}
+: Tensor(&context->getType(Processor::${Processor},ScalarType::${ScalarName})),
+  tensor(tensor),
+  context(context) {}
 ${Tensor}::~${Tensor}() {
   ${THTensor}_free(${state,} tensor);
-}
-
-Type& ${Tensor}::type() const {
-  return context->getType(Processor::${Processor},ScalarType::${ScalarName});
 }
 
 const char * ${Tensor}::toString() const {
