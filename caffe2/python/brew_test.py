@@ -171,7 +171,7 @@ class BrewTest(unittest.TestCase):
             return core.ScopedBlobReference(x)
 
         def to_str_list(x):
-            return [str(p) for p in sorted(x)]
+            return sorted([str(p) for p in x])
 
         model = ModelHelper(name="test_model")
         model.AddParameter(param("a"))

@@ -34,7 +34,7 @@ class TestAPMeterOps(hu.HypothesisTestCase):
                             dtype=np.int32,
                             elements=st.integers(min_value=0,
                                                  max_value=1)),
-           **hu.gcs)
+           **hu.gcs_cpu_only)
     def test_average_precision(self, predictions, labels, gc, dc):
         op = core.CreateOperator(
             "APMeter",
@@ -62,7 +62,7 @@ class TestAPMeterOps(hu.HypothesisTestCase):
                             dtype=np.int32,
                             elements=st.integers(min_value=0,
                                                  max_value=1)),
-           **hu.gcs)
+           **hu.gcs_cpu_only)
     def test_average_precision_small_buffer(self, predictions, labels, gc, dc):
         op_small_buffer = core.CreateOperator(
             "APMeter",

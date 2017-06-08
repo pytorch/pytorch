@@ -51,7 +51,7 @@ class TestTopK(hu.HypothesisTestCase):
 
         self.assertReferenceChecks(hu.cpu_do, op, [X], top_k_ref)
 
-    @given(X=hu.tensor(min_dim=2), **hu.gcs)
+    @given(X=hu.tensor(min_dim=2), **hu.gcs_cpu_only)
     def test_top_k_grad(self, X, gc, dc):
         X = X.astype(np.float32)
         k = random.randint(1, X.shape[-1])
