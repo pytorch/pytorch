@@ -61,6 +61,7 @@ TYPE_FORMAL_GENERIC = {
     'THStride*': 'IntList',
     'accreal' : 'Scalar',
     'real' : 'Scalar',
+    'long': 'int64_t',
 }
 
 TYPE_RETURN = {
@@ -70,6 +71,7 @@ TYPE_RETURN = {
     'THIntegerTensor*' : 'Tensor',
     'real': 'Scalar',
     'accreal': 'Scalar',
+    'long': 'int64_t',
 }
 CHECKED_CAST = {
     'THTensor*': CodeTemplate('checked_cast<${Tensor}>(${arg_name}.pImpl)'),
@@ -234,7 +236,9 @@ def create_derived(processor_type_env,declarations):
     def get_arguments(option):
         return [get_argument(argument,option)
             for argument in option['arguments'] if not drop_argument(argument)]
-
+    def is_actual_return_long(ret):
+        return ret['type'] == 'long' or (processor_type_env['ScalarName'] == 'Long'
+            and ret['type'] == 'real' or ret['type'] == 'accreal')
     def emit_body(env,option):
         body = []
         seen_names = set() # arguments are potentially duplicated because of one argument referencing another
@@ -262,6 +266,8 @@ def create_derived(processor_type_env,declarations):
             if ret['type'] == 'THTensor*':
                 body.append(CodeTemplate("return Tensor(new ${Tensor}(context,${arg_name}),false);").substitute(env,arg_name=call))
             else:
+                if is_actual_return_long(ret): # we using int64_t for long in the API, so correct it here...
+                    call = "static_cast<int64_t>({})".format(call)
                 body.append("return {};".format(call))
         else:
             raise Exception("NYI - return handling")

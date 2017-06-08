@@ -62,13 +62,14 @@ auto ${Storage}::fast_set(std::size_t ind, Scalar value) -> ${Storage}& {
 }
 
 auto ${Storage}::get(std::size_t ind) -> Scalar {
-  return ${to_tlib_half}(${THStorage}_get(${state,} storage, ind));
+  // static cast to fix  long -> int64_t issues
+  return static_cast<${ScalarType}>(${to_tlib_half}(${THStorage}_get(${state,} storage, ind)));
 }
 
 auto ${Storage}::fast_get(std::size_t ind) -> Scalar {
   if(${isCUDA})
     throw std::runtime_error("unsupported operation 'fast_get'");
-  return ${to_tlib_half}(storage->data[ind]);
+  return static_cast<${ScalarType}>(${to_tlib_half}(storage->data[ind]));
 }
 
 int ${Storage}::getDevice() const {
