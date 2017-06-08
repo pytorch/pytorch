@@ -479,7 +479,7 @@ device_option {
         )
         print(nets[1].Proto())
         ref_str = """
-name: "test_cross_device"
+name: ""
 op {
   input: "fc_w"
   output: "fc_w_cuda_1"
@@ -516,6 +516,7 @@ external_input: "data"
 external_input: "fc_w"
 external_input: "fc_b"
 """
+        nets[1].Proto().name = ''  # Ignore the name
         self.assertEqual(str(nets[1].Proto()).strip(), ref_str.strip())
 
     def test_cross_nets_no_change(self):
@@ -535,7 +536,7 @@ external_input: "fc_b"
             [init_net, net], blob_to_device_init=data_remap
         )
         ref_str = """
-name: "test_cross_device"
+name: ""
 op {
   input: "data"
   input: "fc_w"
@@ -552,6 +553,7 @@ external_input: "data"
 external_input: "fc_w"
 external_input: "fc_b"
 """
+        nets[1].Proto().name = ''  # Ignore the name
         self.assertEqual(str(nets[1].Proto()).strip(), ref_str.strip())
 
     def test_inject_copy_multi_use(self):
@@ -575,7 +577,7 @@ external_input: "fc_b"
 
         new_net, _ = core.InjectCrossDeviceCopies(net)
         ref_str = """
-name: "test_cross_device"
+name: ""
 op {
   input: "data"
   output: "data_cuda_1"
@@ -650,7 +652,7 @@ op {
 }
 external_input: "data"
 """
-        print(new_net.Proto())
+        new_net.Proto().name = ''  # Ignore the name
         self.assertEqual(str(new_net.Proto()).strip(), ref_str.strip())
 
 
