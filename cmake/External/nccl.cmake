@@ -22,7 +22,7 @@ if (NOT __NCCL_INCLUDED)
       )
 
     set(NCCL_FOUND TRUE)
-    set(nccl_INCLUDE_DIRS ${nccl_PREFIX}/build/include)
+    set(nccl_INCLUDE_DIR ${nccl_PREFIX}/build/include)
     set(nccl_LIBRARIES ${nccl_PREFIX}/build/lib/libnccl_static.a)
     set(nccl_LIBRARY_DIRS ${nccl_PREFIX}/build/lib)
     set(NCCL_EXTERNAL TRUE)
