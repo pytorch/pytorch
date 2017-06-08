@@ -114,7 +114,6 @@ if (ANDROID OR IOS)
       ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/include
       ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK_deps/pthreadpool/include)
   set(NNPACK_LIBRARIES $<TARGET_FILE:CAFFE2_NNPACK> $<TARGET_FILE:CAFFE2_PTHREADPOOL>)
-  set(NNPACK_LIBRARY_DIRS $<TARGET_FILE_DIR:CAFFE2_NNPACK> $<TARGET_FILE_DIR:CAFFE2_PTHREADPOOL>)
   if (ANDROID)
     set(NNPACK_LIBRARIES ${NNPACK_LIBRARIES} cpufeatures)
   endif()
@@ -150,9 +149,7 @@ if (${CMAKE_SYSTEM_NAME} STREQUAL "Linux" OR ${CMAKE_SYSTEM_NAME} MATCHES "Darwi
         ${NNPACK_PREFIX}/include
         ${NNPACK_PREFIX}/deps/pthreadpool/include)
     set(NNPACK_LIBRARIES ${NNPACK_PREFIX}/lib/libnnpack.a ${NNPACK_PREFIX}/lib/libpthreadpool.a)
-    set(NNPACK_LIBRARY_DIRS ${NNPACK_PREFIX}/lib)
-  
-    list(APPEND external_project_dependencies nnpack_external)
+    list(APPEND Caffe2_EXTERNAL_DEPENDENCIES nnpack_external)
   else()
     message(WARNING "NNPACK is chosen to be installed, but confu and ninja "
                     "that are needed by it are not installed. As a result "
