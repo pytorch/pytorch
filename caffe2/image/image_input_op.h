@@ -53,12 +53,10 @@ class ImageInputOp final
       const string& value, cv::Mat* img, PerImageArg& info, int item_id);
   void DecodeAndTransform(
       const std::string& value, float *image_data, int item_id,
-      const int channels, std::mt19937 *randgen,
-      std::bernoulli_distribution *mirror_this_image);
+      const int channels, std::size_t thread_index);
   void DecodeAndTransposeOnly(
       const std::string& value, uint8_t *image_data, int item_id,
-      const int channels, std::mt19937 *randgen,
-      std::bernoulli_distribution *mirror_this_image);
+      const int channels, std::size_t thread_index);
 
   unique_ptr<db::DBReader> owned_reader_;
   const db::DBReader* reader_;
@@ -93,6 +91,9 @@ class ImageInputOp final
 
   // Output type for GPU transform path
   TensorProto_DataType output_type_;
+
+  // Working variables
+  std::vector<std::mt19937> randgen_per_thread_;
 };
 
 template <class Context>
@@ -237,6 +238,10 @@ ImageInputOp<Context>::ImageInputOp(
     }
   }
 
+  std::mt19937 meta_randgen(time(nullptr));
+  for (int i = 0; i < num_decode_threads_; ++i) {
+    randgen_per_thread_.emplace_back(meta_randgen());
+  }
   prefetched_image_.Resize(
       TIndex(batch_size_),
       TIndex(crop_),
@@ -554,8 +559,13 @@ void CropTransposeImage(const cv::Mat& scaled_img, const int channels,
 template <class Context>
 void ImageInputOp<Context>::DecodeAndTransform(
       const std::string& value, float *image_data, int item_id,
-      const int channels, std::mt19937 *randgen,
-      std::bernoulli_distribution *mirror_this_image) {
+      const int channels, std::size_t thread_index) {
+
+  CAFFE_ENFORCE((int)thread_index < num_decode_threads_);
+
+  std::bernoulli_distribution mirror_this_image(0.5f);
+  std::mt19937* randgen = &(randgen_per_thread_[thread_index]);
+
   cv::Mat img;
   // Decode the image
   PerImageArg info;
@@ -563,14 +573,18 @@ void ImageInputOp<Context>::DecodeAndTransform(
 
   // Factor out the image transformation
   TransformImage<Context>(img, channels, image_data, crop_, mirror_,
-                          mean_, std_, randgen, mirror_this_image, is_test_);
+                          mean_, std_, randgen, &mirror_this_image, is_test_);
 }
 
 template <class Context>
 void ImageInputOp<Context>::DecodeAndTransposeOnly(
     const std::string& value, uint8_t *image_data, int item_id,
-    const int channels, std::mt19937 *randgen,
-      std::bernoulli_distribution *mirror_this_image) {
+    const int channels, std::size_t thread_index) {
+
+  CAFFE_ENFORCE((int)thread_index < num_decode_threads_);
+
+  std::bernoulli_distribution mirror_this_image(0.5f);
+  std::mt19937* randgen = &(randgen_per_thread_[thread_index]);
 
   cv::Mat img;
   // Decode the image
@@ -579,7 +593,7 @@ void ImageInputOp<Context>::DecodeAndTransposeOnly(
 
   // Factor out the image transformation
   CropTransposeImage<Context>(img, channels, image_data, crop_, mirror_,
-                              randgen, mirror_this_image, is_test_);
+                              randgen, &mirror_this_image, is_test_);
 }
 
 
@@ -602,15 +616,8 @@ bool ImageInputOp<Context>::Prefetch() {
 
   prefetched_label_.mutable_data<int>();
   // Prefetching handled with a thread pool of "decode_threads" threads.
-  std::mt19937 meta_randgen(time(nullptr));
-  std::vector<std::mt19937> randgen_per_thread;
-  for (int i = 0; i < num_decode_threads_; ++i) {
-    randgen_per_thread.emplace_back(meta_randgen());
-  }
 
-  std::bernoulli_distribution mirror_this_image(0.5);
   for (int item_id = 0; item_id < batch_size_; ++item_id) {
-    std::mt19937* randgen = &randgen_per_thread[item_id % num_decode_threads_];
     std::string key, value;
     cv::Mat img;
 
@@ -640,27 +647,25 @@ bool ImageInputOp<Context>::Prefetch() {
       // output of decode will still be int8
       uint8_t* image_data = prefetched_image_.mutable_data<uint8_t>() +
           crop_ * crop_ * channels * item_id;
-      thread_pool_->runTask(std::bind(
+      thread_pool_->runTaskWithID(std::bind(
           &ImageInputOp<Context>::DecodeAndTransposeOnly,
           this,
           std::string(value),
           image_data,
           item_id,
           channels,
-          randgen,
-          &mirror_this_image));
+          std::placeholders::_1));
     } else {
       float* image_data = prefetched_image_.mutable_data<float>() +
           crop_ * crop_ * channels * item_id;
-      thread_pool_->runTask(std::bind(
+      thread_pool_->runTaskWithID(std::bind(
           &ImageInputOp<Context>::DecodeAndTransform,
           this,
           std::string(value),
           image_data,
           item_id,
           channels,
-          randgen,
-          &mirror_this_image));
+          std::placeholders::_1));
     }
   }
   thread_pool_->waitWorkComplete();
