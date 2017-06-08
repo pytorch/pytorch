@@ -30,11 +30,8 @@ TYPE_CPP = CodeTemplate.from_file(TEMPLATE_PATH+"/Type.cpp")
 TENSOR_DERIVED_CPP = CodeTemplate.from_file(TEMPLATE_PATH+"/TensorDerived.cpp")
 TENSOR_DERIVED_H = CodeTemplate.from_file(TEMPLATE_PATH+"/TensorDerived.h")
 TENSOR_H = CodeTemplate.from_file(TEMPLATE_PATH+"/Tensor.h")
-TENSOR_CPP = CodeTemplate.from_file(TEMPLATE_PATH+"/Tensor.cpp")
 
 FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH+"/Functions.h")
-FUNCTIONS_CPP = CodeTemplate.from_file(TEMPLATE_PATH+"/Functions.cpp")
-
 
 generators = {
     'CPUGenerator.h' : {
@@ -167,7 +164,4 @@ write('Type.h',TYPE_H.substitute(top_env))
 write('Type.cpp',TYPE_CPP.substitute(top_env))
 
 write('Tensor.h',TENSOR_H.substitute(top_env))
-write('Tensor.cpp',TENSOR_CPP.substitute(top_env))
-
 write('Functions.h',FUNCTIONS_H.substitute(top_env))
-write('Functions.cpp',FUNCTIONS_CPP.substitute(top_env))
