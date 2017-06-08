@@ -44,17 +44,44 @@ def _make_grads(outputs, grads, user_create_graph):
 
 
 def backward(variables, grad_variables=None, retain_graph=None, create_graph=None, retain_variables=None):
-    """Computes the sum of gradients of given variables w.r.t. graph leaves.
+    """
+    Computes the sum of gradients of given variables w.r.t. graph leaves.
 
-    The graph is differentiated using the chain rule. If any of ``variables``
-    are non-scalar (i.e. their data has more than one element) and require
-    gradient, the function additionaly requires specifying ``grad_variables``.
-    It should be a sequence of matching length, that contains gradient of
-    the differentiated function w.r.t. corresponding variables (``None`` is an
-    acceptable value for all variables that don't need gradient tensors).
+    Given a sequence of ``variables`` which are the outputs of a
+    differentiable function whose derivative is recorded in ``grad_fn``,
+    compute the gradients, accumulating them to the ``grad`` parameters
+    of the leaves.  In deep learning, ``variables`` is usually the loss
+    and the graph leaves are the parameters.
 
-    This function accumulates gradients in the leaves - you might need to zero
-    them before calling it.
+    Ordinarily, you will invoke this function because you want to
+    compute a gradient vector;  technically, the derivative of a
+    function is only a gradient if the output is scalar (it is a
+    Jacobian matrix otherwise).  If you provide multiple scalar
+    variables, we assume that you wanted to compute the sums of the
+    gradients.  Put differently, these two invocations of ``backward``
+    are equivalent::
+
+    >>> torch.autograd.backwards(variables)
+    >>> torch.autograd.backwards([sum(variables)])
+
+    We don't make this assumption for non-scalar variables; instead, if
+    these variables are involved in the computation of the gradient, you
+    must explicitly provide the gradient. Assuming that ``f`` is a
+    function which outputs a scalar, and ``df_out`` is the gradient
+    of ``f`` with respect to ``out``, then the following invocations
+    of ``backwards`` are equivalent::
+
+    >>> torch.autograd.backwards([out], [df_out])
+    >>> torch.autograd.backwards([f(out)])
+
+    However, specifying the gradient directly may be more efficient than
+    explicitly materializing ``f``.  In general, ``grad_variables``
+    should be a sequence of matching length to ``variables``, which for
+    each variable records the gradient, or ``None`` if the gradient is
+    not needed.
+
+    This function accumulates gradients in the leaves - you might need
+    to zero them before calling it.
 
     Arguments:
         variables (sequence of Variable): Variables of which the derivative will be
