@@ -28,8 +28,7 @@ _(float,Float,d) \
 _(int,Int,i) \
 _(int64_t,Long,i) \
 _(int16_t,Short,i) \
-_(Half,Half,d) \
-_(long,CNativeLong,i)
+_(Half,Half,d)
 
 template<typename To, typename From> To convert(From f) {
   return static_cast<To>(f);
