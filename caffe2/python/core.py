@@ -874,7 +874,7 @@ class IR(object):
                 if grad is not None or \
                     name not in input_to_grad or \
                         name in list(forward_op.output):
-                        new_input_to_grad[name] = grad
+                    new_input_to_grad[name] = grad
 
         return new_input_to_grad, gradient_ops
 
@@ -1887,6 +1887,186 @@ class Net(object):
             *args,
             **kwargs
         )
+
+    def is_external_input(self, blob):
+        name = str(blob)
+        return name in self._external_input_map
+
+    def extend_ops(self, new_ops):
+        return self._ExtendOps(new_ops)
+
+
+def copy_func_between_devices(src, dst):
+    CPU = caffe2_pb2.CPU
+    CUDA = caffe2_pb2.CUDA
+
+    if src.device_type == CPU and dst.device_type == CPU:
+        return None
+
+    if src.device_type == CUDA and dst.device_type == CUDA:
+        if src.cuda_gpu_id == dst.cuda_gpu_id:
+            return None
+        else:
+            def fun(net, *args, **kw):
+                with DeviceScope(dst):
+                    return net.CopyGPUToGPU(*args, **kw)
+            return fun
+
+    if src.device_type == CUDA and dst.device_type == CPU:
+        def fun(net, *args, **kw):
+            with DeviceScope(src):
+                return net.CopyGPUToCPU(*args, **kw)
+        return fun
+
+    if src.device_type == CPU and dst.device_type == CUDA:
+        def fun(net, *args, **kw):
+            with DeviceScope(dst):
+                return net.CopyCPUToGPU(*args, **kw)
+        return fun
+
+    raise ValueError('Non-supported devices: %s and %s' % (src, dst))
+
+
+class RemapEntry:
+    def __init__(self, blob, device):
+        self.blob = blob
+        self.device = device
+
+    def __eq__(self, other):
+        return self.blob == other.blob and self.device == other.device
+
+    def __hash__(self):
+        return hash(self.blob + str(self.device))
+
+
+def InjectCrossDeviceCopies(net, blob_to_device=None):
+    '''
+    Injecting Copy functions between device within a net. Users can provide
+    a net with part of operators using different device_options. This method
+    will automatically create a new net with Copy ops inserted in it.
+
+    Inputs:
+      blob_to_device: If not None, it is a map of blobs and their device locations.
+    Outputs:
+      new_net: A new net with CopyCPUToGPU inserted with correct device option
+
+      required_external_to_device:
+               A mapping between unresolved external inputs and their
+               required device options.
+    Assumptions:
+      1. every external inputs of this net is already in blob_to_device!
+      2. if not, this function will use net device option
+    '''
+    new_net = net.Clone(net._net.name + '_cross_device', keep_schema=True)
+    del new_net._net.op[:]
+    blob_to_device = blob_to_device or {}
+    # remapping of input blobs for each op.
+    blob_remap = {}
+    temp_remap = {}
+    net_option = net._net.device_option or caffe2_pb2.DeviceOption()
+
+    for op in net._net.op:
+        temp_remap.clear()
+        # Get where inputs and outputs should be
+        input_dev, output_dev = InferOpBlobDevices(op)
+
+        for dev, input in zip(input_dev, op.input):
+            assert net.BlobIsDefined(input), \
+                "input {} should be defined in the net.".format(input)
+            if input not in blob_to_device:
+                if net.is_external_input(input):
+                    blob_to_device[input] = net_option
+                else:
+                    raise AttributeError(
+                        "No device information found for blob {}.".
+                        format(input)
+                    )
+
+            if not blob_to_device[input] == dev:
+                # reuse already moved input
+                if (RemapEntry(input, dev) in blob_remap and
+                        blob_to_device[blob_remap[RemapEntry(input, dev)]] == dev):
+                    temp_remap[input] = blob_remap[RemapEntry(input, dev)]
+                else:
+                    # need to make input on correct device.
+                    copy_func = copy_func_between_devices(
+                        blob_to_device[input], dev
+                    )
+
+                    def _gen_new_name(blob, device_option):
+                        CPU = caffe2_pb2.CPU
+                        CUDA = caffe2_pb2.CUDA
+                        if device_option.device_type == CPU:
+                            suffix = '_cpu'
+                        elif device_option.device_type == CUDA:
+                            suffix = '_cuda_' + str(device_option.cuda_gpu_id)
+                        else:
+                            raise RuntimeError(
+                                "Unknown device type: {}".
+                                format(device_option.device_type)
+                            )
+                        return blob + suffix
+
+                    new_name = _gen_new_name(input, dev)
+                    copy_func(new_net, input, new_name)
+                    blob_remap[RemapEntry(input, dev)] = new_name
+                    temp_remap[input] = new_name
+                    blob_to_device[new_name] = dev
+
+        # Enforcing no in-place blob usage
+        for out_blob in op.output:
+            if out_blob in blob_to_device:
+                raise RuntimeError(
+                    "In-place blob: {} is not supported for inject device copy "
+                    "yet. Consider implementing it.".
+                    format(out_blob)
+                )
+        blob_to_device.update({o: d for d, o in zip(output_dev, op.output)})
+        new_op = caffe2_pb2.OperatorDef()
+        new_op.CopyFrom(op)
+
+        new_list = [temp_remap.get(b, b) for b in new_op.input]
+        del new_op.input[:]
+        new_op.input.extend(new_list)
+        new_net.extend_ops([new_op])
+
+    return new_net, blob_to_device
+
+
+def InjectDeviceCopiesAmongNets(nets, blob_to_device_init=None):
+    """
+    Takes in a list of nets. They usually represent your whole execution graph.
+    This function will insert cross device copy functions to all nets, and resolve
+    inter-net external inputs dependencies. This method will insert Copy funcitons if
+    external inputs of a net is produced on different device than it is required.
+    Inputs:
+      nets: a list of nets
+    Outputs:
+      new_nets: a list of new nets with device difference solved.
+
+    Some notes from wyiming:
+      1. You MUST pass nets in execution order. e.g. [train_init, train]
+    """
+    assert isinstance(nets, list), \
+        "nets {} should be a list of nets.".format(str(nets))
+    assert all(isinstance(net, Net) for net in nets), \
+        "nets {} should be a list of nets.".format(str(nets))
+    # A holistic blob to device mapping.
+    blob_to_device = blob_to_device_init or {}
+    new_nets = []
+
+    for net in nets:
+        new_net, blob_to_device = InjectCrossDeviceCopies(
+            net, blob_to_device=blob_to_device
+        )
+        new_nets.append(new_net)
+
+    return new_nets, blob_to_device
+
+
+def InjectDeviceCopiesAmongNetsWithoutB2D(nets, blob_to_device_init=None):
+    new_nets, _ = InjectDeviceCopiesAmongNets(nets, blob_to_device_init)
+    return new_nets
 
 
 def get_net_name(netlike):
