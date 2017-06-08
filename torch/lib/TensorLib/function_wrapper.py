@@ -51,10 +51,10 @@ class NYIError(Exception):
         self.reason = reason
 
 TYPE_FORMAL_GENERIC = {
-    'THTensor*' : 'Tensor &',
-    'THBoolTensor*': 'Tensor &',
-    'THIndexTensor*' : 'Tensor &',
-    'THIntegerTensor*' : 'Tensor &',
+    'THTensor*' : 'Tensor',
+    'THBoolTensor*': 'Tensor',
+    'THIndexTensor*' : 'Tensor',
+    'THIntegerTensor*' : 'Tensor',
     'THStorage*' : 'Storage &',
     'THGenerator*': 'Generator &',
     'THSize*': 'IntList',

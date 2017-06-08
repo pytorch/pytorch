@@ -35,4 +35,14 @@ int main() {
 
   cout << t.size() << " " << t.stride() << "\n";
 
+
+  Tensor x = tlib::randn({1,10});
+  Tensor prev_h = tlib::randn({1,20});
+  Tensor W_h = tlib::randn({20,20});
+  Tensor W_x = tlib::randn({20,10});
+  Tensor i2h = tlib::mm(W_x, x.t());
+  Tensor h2h = tlib::mm(W_h, prev_h.t());
+  Tensor next_h = i2h.add(h2h);
+  next_h = next_h.tanh();
+
 }
