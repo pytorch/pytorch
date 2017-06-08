@@ -51,10 +51,10 @@ class NYIError(Exception):
         self.reason = reason
 
 TYPE_FORMAL_GENERIC = {
-    'THTensor*' : 'Tensor',
-    'THBoolTensor*': 'Tensor',
-    'THIndexTensor*' : 'Tensor',
-    'THIntegerTensor*' : 'Tensor',
+    'THTensor*' : 'TensorRef',
+    'THBoolTensor*': 'TensorRef',
+    'THIndexTensor*' : 'TensorRef',
+    'THIntegerTensor*' : 'TensorRef',
     'THStorage*' : 'Storage &',
     'THGenerator*': 'Generator &',
     'THSize*': 'IntList',
@@ -74,10 +74,10 @@ TYPE_RETURN = {
     'long': 'int64_t',
 }
 CHECKED_CAST = {
-    'THTensor*': CodeTemplate('checked_cast<${Tensor}>(${arg_name}.pImpl)'),
-    'THBoolTensor*': CodeTemplate('checked_cast<${Processor}ByteTensor>(${arg_name}.pImpl)'),
-    'THIndexTensor*' : CodeTemplate('checked_cast<${Processor}LongTensor>(${arg_name}.pImpl)'),
-    'THIntegerTensor*' : CodeTemplate('checked_cast<${Processor}IntTensor>(${arg_name}.pImpl)'),
+    'THTensor*': CodeTemplate('checked_cast<${Tensor}>(${arg_name}->pImpl)'),
+    'THBoolTensor*': CodeTemplate('checked_cast<${Processor}ByteTensor>(${arg_name}->pImpl)'),
+    'THIndexTensor*' : CodeTemplate('checked_cast<${Processor}LongTensor>(${arg_name}->pImpl)'),
+    'THIntegerTensor*' : CodeTemplate('checked_cast<${Processor}IntTensor>(${arg_name}->pImpl)'),
     'THStorage*' : CodeTemplate('checked_cast<${Storage}>(&${arg_name})'),
     'THGenerator*': CodeTemplate('check_generator(&${arg_name})'),
     'THSize*' : CodeTemplate('THStorageView::make(${arg_name})'),
@@ -106,7 +106,7 @@ CONSTANT_REPLACEMENTS = [
     ('AS_REAL','${ScalarType}'),
     ('THPDefaultGenerator->cdata','dynamic_cast<${Processor}Generator&>(context->defaultGenerator(processor())).generator'),
     ('__storage_size.get\\(\\)', 'THStorageView::make(static_cast<int64_t>(storage.size()))'),
-    ('__last_dim', 'self.ndimension()-1'),
+    ('__last_dim', 'self->ndimension()-1'),
 ]
 
 class nested_dict(object):
@@ -191,7 +191,7 @@ def create_generic(top_env, declarations):
         if 'function' in option['variants']:
             first_tensor = find_first_tensor(formals)
             if first_tensor is not None:
-                option['inferred_type'] = '{}.type()'.format(first_tensor)
+                option['inferred_type'] = '{}->type()'.format(first_tensor)
             else:
                 option['inferred_type'] = 'globalContext()->defaultType()'
             top_env['function_declarations'].append(

@@ -10,6 +10,7 @@ namespace tlib {
 class Context;
 class Storage;
 class Tensor;
+class TensorRef;
 class Generator;
 
 enum class ScalarType {
