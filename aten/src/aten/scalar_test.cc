@@ -33,4 +33,6 @@ int main() {
   auto wha2 = zeros({4,4}).add(t).sum();
   cout << wha2.toDouble() << " <-ndim\n";
 
+  cout << t.size() << " " << t.stride() << "\n";
+
 }
