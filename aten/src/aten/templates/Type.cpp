@@ -1,4 +1,5 @@
 #include "TensorLib/Type.h"
+#include "TensorLib/Tensor.h"
 
 ${type_headers}
 
