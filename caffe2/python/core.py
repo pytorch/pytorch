@@ -858,7 +858,9 @@ class IR(object):
         forward_op, in_versions, out_versions = self.ssa[forward_op_idx]
         g_output = list(
             input_to_grad.get(name, None) for name in forward_op.output)
-        if not all(g is None for g in g_output):
+
+        if not all(g is None for g in g_output) or (
+                forward_op.type == "ZeroGradient"):
             gradient_ops, g_input = GradientRegistry.GetGradientForOp(
                 forward_op, g_output)
             # Check if the gradient operators are legal, and update
