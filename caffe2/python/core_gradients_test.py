@@ -512,6 +512,19 @@ class TestGradientCalculation(test_util.TestCase):
                        'hidden3': 'hidden3_grad', 'hidden': 'hidden_grad',
                        'in': 'in_grad'})
 
+    def test_zero_gradient(self):
+        net = core.Net("zero_grad_test")
+
+        hidden_prev, cell, gates, seq_lengths, timestep =\
+            net.AddExternalInput("h", "c", "g", "s", "t")
+        hidden, cell = net.LSTMUnit(
+            [hidden_prev, cell, gates, seq_lengths, timestep],
+            ["hidden_t", "cell_t"])
+        with self.assertRaises(Exception):
+            net.AddGradientOperators([hidden])
+        net.ZeroGradient(cell, [])
+        net.AddGradientOperators([hidden])
+
     def test_two_grads(self):
         net = core.Net("test_two_grads")
         input, two, three = net.AddExternalInput("input", "two", "three")
