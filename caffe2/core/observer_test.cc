@@ -105,6 +105,7 @@ unique_ptr<NetBase> CreateNetTestHelper(
 }
 
 TEST(ObserverTest, TestNotify) {
+  auto count_before = counter.load();
   Workspace ws;
   ws.CreateBlob("in");
   NetDef net_def;
@@ -114,10 +115,12 @@ TEST(ObserverTest, TestNotify) {
       make_unique<DummyObserver<SimpleNet>>(
           *(caffe2::dynamic_cast_if_rtti<SimpleNet*>(net.get())));
   net.get()->Run();
-  EXPECT_EQ(1212, counter.load());
+  auto count_after = counter.load();
+  EXPECT_EQ(1212, count_after - count_before);
 }
 
 TEST(ObserverTest, TestNotifyAfterDetach) {
+  auto count_before = counter.load();
   Workspace ws;
   ws.CreateBlob("in");
   NetDef net_def;
@@ -126,8 +129,8 @@ TEST(ObserverTest, TestNotifyAfterDetach) {
       make_unique<DummyObserver<SimpleNet>>(
           *(caffe2::dynamic_cast_if_rtti<SimpleNet*>(net.get())));
   net_ob.get()->Deactivate();
-  counter = 0;
   net.get()->Run();
-  EXPECT_EQ(0, counter.load());
+  auto count_after = counter.load();
+  EXPECT_EQ(0, count_after - count_before);
 }
 }
