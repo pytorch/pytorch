@@ -23,6 +23,12 @@ public:
       throw std::runtime_error("processor type not enabled (TODO encode name as string)");
     return *generator;
   }
+  Type & defaultType() {
+    return *current_default_type;
+  }
+  void setDefaultType(Type & t) {
+    current_default_type = &t;
+  }
   ~Context();
   std::unique_ptr<Generator>
     generator_registry[static_cast<int>(Processor::NumOptions)];
@@ -30,6 +36,7 @@ public:
     [static_cast<int>(Processor::NumOptions)]
     [static_cast<int>(ScalarType::NumOptions)];
   THCState * thc_state;
+  Type * current_default_type;
 };
 
 Context * globalContext();
