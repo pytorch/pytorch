@@ -64,10 +64,10 @@ TYPE_FORMAL_GENERIC = {
 }
 
 TYPE_RETURN = {
-    'THTensor*' : 'Tensor *',
-    'THIndexTensor*' : 'Tensor *',
-    'THBoolTensor*' : 'Tensor *',
-    'THIntegerTensor*' : 'Tensor *',
+    'THTensor*' : 'Tensor &',
+    'THIndexTensor*' : 'Tensor &',
+    'THBoolTensor*' : 'Tensor &',
+    'THIntegerTensor*' : 'Tensor &',
     'real': 'Scalar',
     'accreal': 'Scalar',
 }
@@ -256,10 +256,10 @@ def create_derived(processor_type_env,declarations):
         if ret['kind'] == 'arguments':
             arg = option['arguments'][ret['arguments'][0]]
             body.append(call+";")
-            body.append("return {}_;".format(arg['name']))
+            body.append("return *{}_;".format(arg['name']))
         elif ret['kind'] == 'type':
             if ret['type'] == 'THTensor*':
-                body.append(CodeTemplate("return new ${Tensor}(context,${arg_name});").substitute(env,arg_name=call))
+                body.append(CodeTemplate("return *new ${Tensor}(context,${arg_name});").substitute(env,arg_name=call))
             else:
                 body.append("return {};".format(call))
         else:
