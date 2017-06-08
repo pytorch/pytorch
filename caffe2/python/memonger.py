@@ -27,7 +27,7 @@ def share_grad_blobs(
     param_grads,
     namescope,
     dont_share_blobs=None,
-    share_activations=True,
+    share_activations=False,
     blob_shapes=None,
 ):
     '''
@@ -120,6 +120,8 @@ def _compute_blob_recycling_for_dag(
     model can be executed safely on a DAGNet.
     '''
     start_time = time.time()
+    if dont_share_blobs is not None:
+        dont_share_blobs = set([str(b) for b in dont_share_blobs])
 
     # Create mapping from blobs to ops
     blobs_to_ops = collections.defaultdict(lambda: [])
@@ -127,6 +129,8 @@ def _compute_blob_recycling_for_dag(
     op_inputs = collections.defaultdict(lambda: 0)
     op_visit_count = collections.defaultdict(lambda: 0)
     share_counts = collections.defaultdict(lambda: 0)
+    req_tokens = collections.defaultdict(lambda: set())
+    op_token_deposit = [set() for _ in ops]
 
     blob_sizes = {} if blob_shapes is not None else None
 
@@ -165,13 +169,34 @@ def _compute_blob_recycling_for_dag(
             unknown_shapes.add(b)
         return 0
 
+    global token_seq
+    token_seq = 0
+
+    def next_token():
+        global token_seq
+        token_seq += 1
+        return token_seq
+
+    def compatible(blob, cur_tokens):
+        # Do we have all tokens?
+        return len(req_tokens[blob] - cur_tokens) == 0
+
     saved_count = 0
 
-    def descend(op_idx, free_blobs):
+    def descend(op_idx, free_blobs, tokens):
+        # Take tokens left here
+        tokens = tokens.union(op_token_deposit[op_idx])
+        op_token_deposit[op_idx] = None
         cur_op = ops[op_idx]
         new_free_blobs = set()
         unused_free_blobs = set(free_blobs)
         saved = 0
+
+        for b in list(cur_op.input) + list(cur_op.output):
+            actual_blob = b if b not in mapping else mapping[b]
+            req_tokens[b] = req_tokens[b].union(tokens)
+            if actual_blob != b:
+                req_tokens[actual_blob] = req_tokens[actual_blob].union(tokens)
 
         for inp in cur_op.input:
             if is_shareable(inp):
@@ -182,33 +207,46 @@ def _compute_blob_recycling_for_dag(
                         new_free_blobs.add(
                             (-share_counts[actual_blob], actual_blob),
                         )
+                        assert actual_blob not in free_blobs
 
         for outp in cur_op.output:
             if is_shareable(outp):
                 if outp not in output_blobs:
                     # First seen this blob as output, can assign to a free blob
-                    if len(free_blobs) > 0:
-                        if blob_sizes is None:
-                            (negcnt, freeb) = heapq.heappop(free_blobs)
-                        else:
-                            bsize = infer_blob_size(outp)
-                            best_blob = None
-                            best_size = -1
+                    freeb = None
+                    if blob_sizes is None:
+                        put_back = []
+                        while len(free_blobs) > 0:
+                            (negcnt, cand_freeb) = heapq.heappop(free_blobs)
+                            if compatible(cand_freeb, tokens):
+                                freeb = cand_freeb
+                                break
+                            else:
+                                put_back.append((negcnt, cand_freeb))
+                        for cnt, b in put_back:
+                            heapq.heappush(free_blobs, (cnt, b))
+                    else:
+                        bsize = infer_blob_size(outp)
+                        best_blob = None
+                        best_size = -1
 
-                            # Heuristic to choose the most suitably sized blob
-                            for b in free_blobs:
+                        # Heuristic to choose the most suitably sized blob
+                        for b in free_blobs:
+                            if compatible(b, tokens):
                                 sz = blob_sizes[b]
                                 if sz >= best_size:
                                     if best_size < bsize or best_size >= sz:
                                         best_size = sz
                                         best_blob = b
 
-                            assert best_blob is not None
-                            freeb = best_blob
-                            # blob_sizes[freeb] = max(best_size, bsize)
+                        freeb = best_blob
+
+                        if freeb is not None:
                             free_blobs.remove(freeb)
                             saved += bsize
 
+                    if freeb is not None:
+                        req_tokens[freeb] = req_tokens[freeb].union(tokens)
                         mapping[outp] = freeb
                         if freeb in unused_free_blobs:
                             unused_free_blobs.remove(freeb)
@@ -218,6 +256,8 @@ def _compute_blob_recycling_for_dag(
 
         for (cnt, nf) in new_free_blobs:
             if blob_sizes is None:
+                for _c, b in free_blobs:
+                    assert b != nf, "Double inserting a free blob: {}".format(b)
                 heapq.heappush(free_blobs, (cnt, nf))
             else:
                 if nf not in blob_sizes:
@@ -227,27 +267,53 @@ def _compute_blob_recycling_for_dag(
                 free_blobs.append(nf)
 
         free_blobs_fwd = free_blobs
+
+        num_branches = 0
+        # Count branches
+        for outp in cur_op.output:
+            for _ in blobs_to_ops[outp]:
+                num_branches += 1
+
         for outp in cur_op.output:
             for inp_op_idx in blobs_to_ops[outp]:
                 op_visit_count[inp_op_idx] += 1
 
                 # Descend only if we have satisfied all inputs
                 if op_visit_count[inp_op_idx] == op_inputs[inp_op_idx]:
-                    (unused, saved_desc) = descend(inp_op_idx, free_blobs_fwd)
+                    assert inp_op_idx != op_idx
+                    new_tokens = tokens
+                    if num_branches > 1:
+                        # Optimization
+                        new_tokens = tokens.union(set([next_token()]))
+                    (unused, saved_desc) = descend(
+                        inp_op_idx,
+                        free_blobs_fwd,
+                        new_tokens,
+                    )
                     saved += saved_desc
                     unused_free_blobs = unused.intersection(unused_free_blobs)
 
                     # We can pass unused free blobs to other branch
-                    free_blobs_fwd = list(
-                        unused.intersection(set(free_blobs_fwd))
-                    )
+                    if blob_sizes is None:
+                        free_blobs_fwd = [
+                            (c, b) for (c, b) in free_blobs_fwd if b in unused
+                        ]
+                    else:
+                        free_blobs_fwd = list(
+                            unused.intersection(set(free_blobs_fwd))
+                        )
+                else:
+                    # Leave my tokens here
+                    if op_token_deposit[inp_op_idx] is not None:
+                        op_token_deposit[inp_op_idx] = \
+                            op_token_deposit[inp_op_idx].union(tokens)
 
         return (unused_free_blobs, saved)
 
     # Start DFS from the heads' (losses or inputs)
     for head_blob in heads:
         for op_idx in blobs_to_ops[head_blob]:
-            (_, saved) = descend(op_idx, [])
+            (_, saved) = descend(op_idx, [], set([next_token()]))
             saved_count += saved
 
     # Rename the shared blobs
@@ -259,17 +325,27 @@ def _compute_blob_recycling_for_dag(
         else:
             renamed[b] = b
 
-    # Add the originators
+    # Update the mapping recursively
     mapping.update(renamed)
+    had_changes = True
+    while had_changes:
+        had_changes = False
+        for k, v in mapping.items():
+            if v in renamed and renamed[v] != v:
+                renamed[k] = renamed[v]
+                mapping[k] = renamed[k]
+                had_changes = True
+
+    shared_blobs = set(mapping.values())
 
     if saved_count > 0:
         log.info("Remapping {} blobs, using {} shared; saved apprx {} MB".format(
-            len(mapping), len(renamed), int(saved_count * 4 / 1024 / 1024),
+            len(mapping), len(shared_blobs), int(saved_count * 4 / 1024 / 1024),
         ))
         log.info("Could not infer sizes for: {}".format(unknown_shapes))
     else:
         log.info("Remapping {} blobs, using {} shared".format(
-            len(mapping), len(renamed),
+            len(mapping), len(shared_blobs),
         ))
 
     apply_assignments(netproto, mapping)
