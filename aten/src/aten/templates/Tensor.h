@@ -82,4 +82,7 @@ public:
   TensorImpl * pImpl;
 };
 
+// all static inline to allow for inlining of the non-dynamic part of dispatch
+${tensor_method_definitions}
+
 }
