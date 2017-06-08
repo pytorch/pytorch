@@ -1,6 +1,7 @@
 # This list is required for static linking and exported to Caffe2Config.cmake
 set(Caffe2_DEPENDENCY_LIBS "")
 set(Caffe2_PYTHON_DEPENDENCY_LIBS "")
+set(Caffe2_EXTERNAL_DEPENDENCIES "")
 
 # ---[ Custom Protobuf
 include("cmake/ProtoBuf.cmake")
