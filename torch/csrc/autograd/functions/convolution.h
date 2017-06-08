@@ -76,4 +76,38 @@ struct ConvBackward : public Function, public ConvParams {
   std::unique_ptr<torch::cudnn::Convolution> convolution;
 };
 
+struct ConvBackwardBackward : public Function, public ConvParams {
+  ConvBackwardBackward(
+      FunctionFlags flags,
+      ConvParams params,
+      SavedVariable input,
+      SavedVariable weight,
+      SavedVariable bias,
+      tensor_list columns,
+      tensor_list ones,
+      std::unique_ptr<torch::cudnn::Convolution> convolution)
+    : Function(std::move(flags))
+    , ConvParams(std::move(params))
+    , convolution(std::move(convolution)) {
+      if (is_executable) {
+        this->input_ = std::move(input);
+        this->weight_ = std::move(weight);
+        this->bias_ = std::move(bias);
+        this->columns = std::move(columns);
+        this->ones = std::move(ones);
+      }
+    }
+
+  virtual variable_list apply(const variable_list& gradOutputs) override;
+
+  virtual void releaseVariables() override;
+
+  SavedVariable input_;
+  SavedVariable weight_;
+  SavedVariable bias_;
+  tensor_list columns;
+  tensor_list ones;
+  std::unique_ptr<torch::cudnn::Convolution> convolution;
+};
+
 }}

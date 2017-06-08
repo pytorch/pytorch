@@ -331,12 +331,84 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
   auto outputs =  as_tensor_list(std::move(grad_input),
                                  std::move(grad_weight),
                                  std::move(grad_bias));
-  return wrap_outputs(grad_outputs, std::move(outputs), [&](FunctionFlags f) {
-    return std::make_shared<Error>("ConvBackward is not differentiable", std::move(f));
-  });
+  if (use_cudnn) {
+    return wrap_outputs(grad_outputs, std::move(outputs), [&](FunctionFlags f) {
+        return std::make_shared<ConvBackwardBackward>(
+            f, *this,
+            grad_outputs[0]->save(this), weight_.unpack()->save(this), bias_.unpack()->save(this),
+            std::move(columns), std::move(ones), std::move(convolution));
+    });
+  } else {
+    return wrap_outputs(grad_outputs, std::move(outputs), [&](FunctionFlags f) {
+        return std::make_shared<Error>("ConvBackward is not differentiable", std::move(f));
+    });
+  }
 };
 
 auto ConvBackward::releaseVariables() -> void {
+  input_.data.reset();
+  weight_.data.reset();
+  bias_.data.reset();
+}
+
+auto ConvBackwardBackward::apply(const variable_list& grad_outputs) -> variable_list {
+  if (grad_outputs.size() != 3) throw std::runtime_error("expected three grad_output");
+  if (is_padding_neg()) throw std::runtime_error("negative padding is not supported");
+  if (is_output_padding_neg()) throw std::runtime_error("negative output_padding is not supported");
+
+  AutoGPU guard(input_.data->getDevice());
+
+  auto input = input_.unpack_data()->contiguous();
+  std::unique_ptr<Tensor> weight(weight_.unpack_data()->clone_shallow());
+  auto bias = bias_.unpack_data();
+  auto grad_output = grad_outputs[0]->data->contiguous();
+
+  int k = input->nDim();
+  if (k == 3) {
+    input = view4d(*input);
+    weight = view4d(*weight);
+    grad_output = view4d(*grad_output);
+  }
+
+  auto weight_size = weight->sizes();
+  std::vector<long> kernel_size(weight_size.begin() + 2, weight_size.end());
+
+  bool use_cudnn = this->use_cudnn(*input);
+
+  std::unique_ptr<Tensor> grad_input;
+  std::unique_ptr<Tensor> grad_weight;
+  std::unique_ptr<Tensor> grad_bias;
+
+  if (should_compute_output(0)) {
+    if (use_cudnn) {
+#ifdef WITH_CUDNN
+      grad_input = input->newTensor();
+      grad_input->resizeAs(*input);
+      if (transposed) {
+        cudnn_convolution_backward_data(
+            state, torch::cudnn::getCudnnHandle(), torch::cudnn::getCudnnDataType(*input),
+            (THVoidTensor*)grad_output->cdata(), (THVoidTensor*)grad_input->cdata(), (THVoidTensor*)weight->cdata(),
+            convolution.get(), benchmark);
+      } else {
+        cudnn_convolution_forward(
+            state, torch::cudnn::getCudnnHandle(), torch::cudnn::getCudnnDataType(*input),
+            (THVoidTensor*)grad_output->cdata(), (THVoidTensor*)weight->cdata(), (THVoidTensor*)grad_input->cdata(),
+            convolution.get(), benchmark);
+      }
+#endif
+    } else {
+        // TODO: fixed it in the future using THNN
+        throw std::runtime_error("No support for ConvBackwardBackward without cudnn");
+    }
+  }
+
+  auto outputs =  as_tensor_list(std::move(grad_input));
+  return wrap_outputs(grad_outputs, std::move(outputs), [&](FunctionFlags f) {
+    return std::make_shared<Error>("ConvBackwardBackward is not differentiable", std::move(f));
+  });
+};
+
+auto ConvBackwardBackward::releaseVariables() -> void {
   input_.data.reset();
   weight_.data.reset();
   bias_.data.reset();
