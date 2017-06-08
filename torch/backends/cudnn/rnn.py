@@ -180,6 +180,11 @@ def get_parameters(fn, handle, weight_buf):
 def _copyParams(params_from, params_to):
     for layer_params_from, layer_params_to in zip(params_from, params_to):
         for param_from, param_to in zip(layer_params_from, layer_params_to):
+            has_from = param_from is None or param_from.dim() == 0
+            has_to = param_to is None or param_to.dim() == 0
+            assert not (has_from ^ has_to)
+            if has_from:  # NOTE: has_from == has_to because of the assert
+                continue
             assert param_from.type() == param_to.type()
             param_to.copy_(param_from)
 
@@ -252,6 +257,10 @@ def forward(fn, input, hx, weight, output, hy):
         # Alternatively, _copyParams could be written more carefully.
         w.zero_()
         params = get_parameters(fn, handle, w)
+        if fn.skip_input:
+            for layer_index in range(fn.num_directions):
+                params[layer_index][0] = None  # params[0] == wi
+                params[layer_index][2] = None  # params[2] == bi
         _copyParams(weight, params)
 
         if tuple(hx.size()) != hidden_size:
@@ -453,5 +462,9 @@ def backward_weight(fn, input, hx, output, weight, grad_weight):
 
         # copy the weights from the weight_buf into grad_weight
         grad_params = get_parameters(fn, handle, dw)
+        if fn.skip_input:
+            for layer_index in range(fn.num_directions):
+                grad_params[layer_index][0] = None  # params[0] == wi
+                grad_params[layer_index][2] = None  # params[2] == bi
         _copyParams(grad_params, grad_weight)
         return grad_weight
