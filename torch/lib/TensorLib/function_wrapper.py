@@ -64,18 +64,18 @@ TYPE_FORMAL_GENERIC = {
 }
 
 TYPE_RETURN = {
-    'THTensor*' : 'Tensor &',
-    'THIndexTensor*' : 'Tensor &',
-    'THBoolTensor*' : 'Tensor &',
-    'THIntegerTensor*' : 'Tensor &',
+    'THTensor*' : 'Tensor',
+    'THIndexTensor*' : 'Tensor',
+    'THBoolTensor*' : 'Tensor',
+    'THIntegerTensor*' : 'Tensor',
     'real': 'Scalar',
     'accreal': 'Scalar',
 }
 CHECKED_CAST = {
-    'THTensor*': CodeTemplate('checked_cast<${Tensor}>(&${arg_name})'),
-    'THBoolTensor*': CodeTemplate('checked_cast<${Processor}ByteTensor>(&${arg_name})'),
-    'THIndexTensor*' : CodeTemplate('checked_cast<${Processor}LongTensor>(&${arg_name})'),
-    'THIntegerTensor*' : CodeTemplate('checked_cast<${Processor}IntTensor>(&${arg_name})'),
+    'THTensor*': CodeTemplate('checked_cast<${Tensor}>(${arg_name}.pImpl)'),
+    'THBoolTensor*': CodeTemplate('checked_cast<${Processor}ByteTensor>(${arg_name}.pImpl)'),
+    'THIndexTensor*' : CodeTemplate('checked_cast<${Processor}LongTensor>(${arg_name}.pImpl)'),
+    'THIntegerTensor*' : CodeTemplate('checked_cast<${Processor}IntTensor>(${arg_name}.pImpl)'),
     'THStorage*' : CodeTemplate('checked_cast<${Storage}>(&${arg_name})'),
     'THGenerator*': CodeTemplate('check_generator(&${arg_name})'),
     'THSize*' : CodeTemplate('THStorageView::make(${arg_name})'),
@@ -104,7 +104,7 @@ CONSTANT_REPLACEMENTS = [
     ('AS_REAL','${ScalarType}'),
     ('THPDefaultGenerator->cdata','dynamic_cast<${Processor}Generator&>(context->defaultGenerator(processor())).generator'),
     ('__storage_size.get\\(\\)', 'THStorageView::make(static_cast<int64_t>(storage.size()))'),
-    ('__last_dim', 'self_->ndimension()-1'),
+    ('__last_dim', 'self.ndimension()-1'),
 ]
 
 class nested_dict(object):
@@ -245,6 +245,7 @@ def create_derived(processor_type_env,declarations):
                 if arg.get('allocate',False):
                     allocation = CodeTemplate(ALLOC_WRAP[arg['type']]).substitute(env)
                     body.append('auto {}_ = {};'.format(arg['name'],allocation))
+                    body.append('auto {} = Tensor({}_,false);'.format(arg['name'],arg['name']))
                 else:
                     check_cast = CHECKED_CAST[arg['type']].substitute(env,arg_name=arg['name'])
                     body.append("auto {}_ = {};".format(arg['name'],check_cast))
@@ -256,10 +257,10 @@ def create_derived(processor_type_env,declarations):
         if ret['kind'] == 'arguments':
             arg = option['arguments'][ret['arguments'][0]]
             body.append(call+";")
-            body.append("return *{}_;".format(arg['name']))
+            body.append("return {};".format(arg['name']))
         elif ret['kind'] == 'type':
             if ret['type'] == 'THTensor*':
-                body.append(CodeTemplate("return *new ${Tensor}(context,${arg_name});").substitute(env,arg_name=call))
+                body.append(CodeTemplate("return Tensor(new ${Tensor}(context,${arg_name}),false);").substitute(env,arg_name=call))
             else:
                 body.append("return {};".format(call))
         else:
