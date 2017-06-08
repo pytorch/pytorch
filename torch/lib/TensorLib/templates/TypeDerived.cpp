@@ -22,14 +22,14 @@ Processor ${Type}::processor() {
 bool ${Type}::isSparse() { return false; }
 bool ${Type}::isDistributed() { return false; }
 
-Storage * ${Type}::newStorage() {
-  return new ${Storage}(context);
+std::unique_ptr<Storage> ${Type}::newStorage() {
+  return std::unique_ptr<Storage>(new ${Storage}(context));
 }
-Storage * ${Type}::newStorage(size_t size) {
-  return new ${Storage}(context,size);
+std::unique_ptr<Storage> ${Type}::newStorage(size_t size) {
+  return std::unique_ptr<Storage>(new ${Storage}(context,size));
 }
-Generator * ${Type}::newGenerator() {
-  return new ${Processor}Generator(context);
+std::unique_ptr<Generator> ${Type}::newGenerator() {
+  return std::unique_ptr<Generator>(new ${Processor}Generator(context));
 }
 
 const char * ${Type}::toString() const {
