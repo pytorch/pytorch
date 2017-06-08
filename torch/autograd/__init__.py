@@ -10,7 +10,7 @@ import warnings
 from .variable import Variable
 from .function import Function, NestedIOFunction
 from .stochastic_function import StochasticFunction
-from .gradcheck import gradcheck, gradgradcheck
+from .gradcheck import gradcheck
 
 __all__ = ['Variable', 'Function', 'StochasticFunction', 'backward']
 
