@@ -37,7 +37,7 @@ class CTCOp final : public Operator<Context> {
   CTCOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws) {}
 
-  bool RunOnDevice() {
+  bool RunOnDevice() override {
     // inputs
     const auto& inputs = Input(INPUTS);
     const auto minibatchSize = inputs.dim(1);

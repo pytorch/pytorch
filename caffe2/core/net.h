@@ -147,7 +147,7 @@ class DAGNetBase : public NetBase {
  public:
   using ExecutionChains = std::unordered_map<int, std::vector<int>>;
   DAGNetBase(const NetDef& net_def, Workspace* ws);
-  ~DAGNetBase();
+  ~DAGNetBase() override;
   bool Run() override;
   // WorkerFunction() is a function wrapper to allow us to run worker threads.
   // It checks out one ready-to-run operator from the job queue, runs it,
