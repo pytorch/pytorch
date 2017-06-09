@@ -152,30 +152,6 @@ static std::unique_ptr<Tensor> cat(const tensor_list& tensors, int dim) {
 // ConvForward implementation
 
 auto ConvForward::apply(const variable_list& inputs) -> variable_list {
-  // std::cout<<"Applying conv with:"<<std::endl;
-  // std::cout<<"stride ";
-  // for(auto val: this->stride) {
-  //   std::cout<<val<<" ";
-  // }
-  // std::cout<<std::endl;
-  // std::cout<<"padding ";
-  // for(auto val: this->padding) {
-  //   std::cout<<val<<" ";
-  // }
-  // std::cout<<std::endl;
-  // std::cout<<"dilation ";
-  // for(auto val: this->dilation) {
-  //   std::cout<<val<<" ";
-  // }
-  // std::cout<<std::endl;
-  // std::cout<<"output_padding ";
-  // for(auto val: this->output_padding) {
-  //   std::cout<<val<<" ";
-  // }
-  // std::cout<<std::endl;
-  // std::cout<<"transposed "<<this->transposed<<std::endl;
-  // std::cout<<"groups "<<this->groups<<std::endl;
-
   check_input_variables("ConvNd", inputs, 3, 2);
   if (is_padding_neg()) throw std::runtime_error("negative padding is not supported");
   if (is_output_padding_neg()) throw std::runtime_error("negative output_padding is not supported");
@@ -382,14 +358,14 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
   }
 
   // Add saved variables used out of the pure autograd to inputs
-  variable_list all_grad_outputs(grad_outputs);
-  all_grad_outputs.push_back(input_.unpack());
-  all_grad_outputs.push_back(weight_.unpack());
+  variable_list all_inputs(grad_outputs);
+  all_inputs.push_back(input_.unpack());
+  all_inputs.push_back(weight_.unpack());
 
   auto outputs =  as_tensor_list(std::move(grad_input),
                                  std::move(grad_weight),
                                  std::move(grad_bias));
-  return wrap_outputs(all_grad_outputs, std::move(outputs), [&](FunctionFlags f) {
+  return wrap_outputs(all_inputs, std::move(outputs), [&](FunctionFlags f) {
     return std::make_shared<ConvBackwardBackward>(
       f, *this,
       input_.unpack()->save(this), weight_.unpack()->save(this),
@@ -466,14 +442,15 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
     std::vector<long> input_shape(input_size.begin() + 2, input_size.end());
     for(size_t i=0; i<gw_conv_params.padding.size(); ++i) {
       // Formula for conv output size before the floor operation
-      auto out_size = float(input_shape[i] + 2 * gw_conv_params.padding[i] +
+      auto out_size = float(input_shape[i] + 2 * gw_conv_params.padding[i] -
                       gw_conv_params.dilation[i] * (kernel_size[i] - 1) - 1) /
                       gw_conv_params.stride[i] + 1;
-      if (floorf(out_size) != out_size) {
-        // TODO: narrow ggI here to ignore these elements?
-        throw std::runtime_error("Some input elements have been lost during ConvForward"
-        " (see documentation for the Conv layer) so ConvBackwardBackward cannot be used."
-        " Resize the input so that no element is lost to be able to use ConvBackwardBackward.");
+      auto exact_out_size = floorf(out_size);
+      if (exact_out_size != out_size) {
+        auto used_input_size = (exact_out_size - 1) * gw_conv_params.stride[i] + 1 +
+                      gw_conv_params.dilation[i] * (kernel_size[i] - 1) -
+                      2 * gw_conv_params.padding[i];
+        ggI = std::make_shared<Narrow>(i+2, 0, used_input_size)->apply({ggI})[0];
       }
     }
     std::swap(gw_conv_params.dilation, gw_conv_params.stride);
@@ -502,8 +479,8 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
     for(size_t i=0; i<gi_conv_params.padding.size(); ++i) {
       if (gi_conv_params.stride[i] != 1) {
         // TODO: Remove this when transpose dilated is fixed
-        throw std::runtime_error("Setting non-zero ggW for ConvBackwardBackward would require"
-        " using a dilated transpose convolution which is not supported.");
+        throw std::runtime_error("Second argument of ConvNdBackwardBackward is not zero."
+        "This is not supported at the moment.");
       }
     }
     std::swap(gi_conv_params.dilation, gi_conv_params.stride);
@@ -769,6 +746,4 @@ done:
   return std::make_pair<>(std::move(grad_weight), std::move(grad_bias));
 }
 
-
-// Utils functions
 }} // namespace torch::autograd

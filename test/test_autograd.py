@@ -1304,7 +1304,7 @@ class TestAutograd(TestCase):
 
     def test_conv_double_backward(self):
         batch_size = 2
-        for kern, inp_size, dilations in [(3, 5, [1, 2]), (3, 7, [1, 2]), (4, 9, [2]), (4, 10, [1])]:
+        for kern, inp_size, dilations in [(3, 6, [1, 2]), (3, 7, [1, 2]), (4, 9, [1, 2]), (4, 10, [1, 2])]:
             for stride, padding, chan_in, chan_out, dilation in product([1, 2], [0, 2], [1], [2, 3], dilations):
                 no_weight = stride == 2
                 result = self.run_conv_double_back_test(kern, stride,
@@ -1323,16 +1323,7 @@ class TestAutograd(TestCase):
                                 "\ndilation: " + str(dilation))
 
     def test_error_conv_double_backward(self):
-        # Invalid kernel and input size for stride of 2
         batch_size = 2
-        for kern, inp_size, dilations in [(3, 6, [1, 2]), (3, 8, [1, 2]), (4, 9, [1]), (4, 10, [2])]:
-            for stride, padding, chan_in, chan_out, dilation in product([2], [0, 1, 2], [1, 3], [1, 3], dilations):
-                no_weight = stride == 2
-                with self.assertRaises(RuntimeError):
-                    self.run_conv_double_back_test(kern, stride,
-                                                   padding, chan_in, chan_out,
-                                                   batch_size, inp_size, dilation,
-                                                   no_weight)
 
         # Cannot provide ggW when stride is > 1
         for kern, inp_size, dilations in [(3, 5, [1, 2]), (3, 7, [1, 2]), (4, 6, [1]), (4, 7, [2])]:

@@ -57,6 +57,19 @@ struct Expand : public Function {
   std::vector<long> size;
 };
 
+struct Narrow : public Function {
+  Narrow(long dim, long start, long size)
+    : dim(dim)
+    , start(start)
+    , size(size) {}
+
+  virtual variable_list apply(const variable_list& inputs) override;
+
+  long dim;
+  long start;
+  long size;
+};
+
 }}
 
 
