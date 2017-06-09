@@ -14,7 +14,7 @@
 // remove a bunch of slice variants for simplicity...
 
 #pragma once
-
+#include <assert.h>
 #include <array>
 #include <vector>
 
