@@ -4,6 +4,7 @@
 from copy import deepcopy
 from itertools import product
 
+
 def parse_arguments(args):
     new_args = []
     for arg in args:
@@ -20,6 +21,7 @@ def parse_arguments(args):
             assert False
     return new_args
 
+
 def set_declaration_defaults(declaration):
     declaration.setdefault('arguments', [])
     declaration.setdefault('return', 'void')
@@ -27,7 +29,7 @@ def set_declaration_defaults(declaration):
         declaration['cname'] = declaration['name']
     if 'api_name' not in declaration:
         declaration['api_name'] = (declaration['python_name']
-            if 'python_name' in declaration else declaration['name'])
+                                   if 'python_name' in declaration else declaration['name'])
     # Simulate multiple dispatch, even if it's not necessary
     if 'options' not in declaration:
         declaration['options'] = [{'arguments': declaration['arguments']}]
@@ -38,12 +40,16 @@ def set_declaration_defaults(declaration):
     # Propagate defaults from declaration to options
     for option in declaration['options']:
         for k, v in declaration.items():
-            #TODO(zach): why does cwrap not propagate 'name'? I need it propagaged for TensorLib
+            # TODO(zach): why does cwrap not propagate 'name'? I need it
+            # propagaged for TensorLib
             if k != 'options':
                 option.setdefault(k, v)
 
-#TODO(zach): added option to remove keyword handling for C++ which cannot support it.
-def filter_unique_options(options,allow_kwarg):
+# TODO(zach): added option to remove keyword handling for C++ which cannot
+# support it.
+
+
+def filter_unique_options(options, allow_kwarg):
     def signature(option, kwarg_only_count):
         if kwarg_only_count == 0:
             kwarg_only_count = None
@@ -76,7 +82,8 @@ def filter_unique_options(options,allow_kwarg):
                 break
     return unique
 
-def enumerate_options_due_to_default(declaration,allow_kwarg=True):
+
+def enumerate_options_due_to_default(declaration, allow_kwarg=True):
     # TODO(zach): in cwrap this is shared among all declarations
     # but seems to assume that all declarations will have the same
     new_options = []
@@ -95,7 +102,8 @@ def enumerate_options_due_to_default(declaration,allow_kwarg=True):
                     # PyYAML interprets NULL as None...
                     arg['name'] = 'NULL' if arg['default'] is None else arg['default']
             new_options.append(option_copy)
-    declaration['options'] = filter_unique_options(new_options,allow_kwarg)
+    declaration['options'] = filter_unique_options(new_options, allow_kwarg)
+
 
 def sort_by_number_of_options(declaration):
     def num_checked_args(option):

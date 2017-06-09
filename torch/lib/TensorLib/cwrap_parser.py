@@ -1,8 +1,10 @@
 import yaml
 
 # follows similar logic to cwrap, ignores !inc, and just looks for [[]]
+
+
 def parse(filename):
-    with open(filename,'r') as file:
+    with open(filename, 'r') as file:
         declaration_lines = []
         declarations = []
         in_declaration = False

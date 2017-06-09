@@ -13,7 +13,8 @@ MACRO_TEMPLATE = CodeTemplate("""\
     }
 """)
 
-def create_dispatch(all_types,include_type,include_processor):
+
+def create_dispatch(all_types, include_type, include_processor):
     cases = []
     macro_name = "TLIB_DISPATCH"
     if include_type:
@@ -26,12 +27,14 @@ def create_dispatch(all_types,include_type,include_processor):
             specializations.append(typ['ScalarType'])
         if include_processor:
             specializations.append('tlib::{}Tag'.format(typ['Processor']))
-        cases.append(CASE_TEMPLATE.substitute(typ,specializations=specializations))
-    the_macro = MACRO_TEMPLATE.substitute(macro_name=macro_name,cases=cases)
+        cases.append(CASE_TEMPLATE.substitute(
+            typ, specializations=specializations))
+    the_macro = MACRO_TEMPLATE.substitute(macro_name=macro_name, cases=cases)
     # end lines in backslashes to make defines
-    return '\\\n'.join(the_macro.split('\n'))+'\n'
+    return '\\\n'.join(the_macro.split('\n')) + '\n'
+
 
 def create(all_types):
     return "#pragma once\n\n" + (create_dispatch(all_types, True, False) +
-        create_dispatch(all_types, False, True) +
-        create_dispatch(all_types, True, True))
+                                 create_dispatch(all_types, False, True) +
+                                 create_dispatch(all_types, True, True))
