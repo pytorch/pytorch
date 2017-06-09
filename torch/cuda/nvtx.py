@@ -4,12 +4,14 @@ lib = None
 
 __all__ = ['range_push', 'range_pop', 'mark']
 
+
 def _libnvToolsExt():
     global lib
     if lib is None:
         lib = ctypes.cdll.LoadLibrary(None)
         lib.nvtxMarkA.restype = None
     return lib
+
 
 def range_push(msg):
     """
@@ -23,6 +25,7 @@ def range_push(msg):
         raise RuntimeError('Unable to load nvToolsExt library')
     return lib.nvtxRangePushA(ctypes.c_char_p(msg))
 
+
 def range_pop():
     """
     Pops a range off of a stack of nested range spans.  Returns the
@@ -31,6 +34,7 @@ def range_pop():
     if _libnvToolsExt() is None:
         raise RuntimeError('Unable to load nvToolsExt library')
     return lib.nvtxRangePop()
+
 
 def mark(msg):
     """
