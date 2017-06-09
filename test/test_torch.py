@@ -1252,15 +1252,19 @@ class TestTorch(TestCase):
 
             for lhs in lhsTensors:
                 lhs_expanded = lhs.expand(*(torch.Size(full_batch_dims) + torch.Size(lhs_dims)))
-                lhs_expanded_matmul_fn = getattr(lhs_expanded, "__matmul__")
+                lhs_expanded_matmul_fn = getattr(lhs_expanded, "matmul")
                 for rhs in rhsTensors:
                     rhs_expanded = rhs.expand(*(torch.Size(full_batch_dims) + torch.Size(rhs_dims)))
                     truth = lhs_expanded_matmul_fn(rhs_expanded)
                     for l in (lhs, lhs_expanded):
                         for r in (rhs, rhs_expanded):
-                            l_matmul_fn = getattr(l, "__matmul__")
+                            l_matmul_fn = getattr(l, "matmul")
                             result = l_matmul_fn(r)
                             self.assertEqual(truth, result)
+                            # test torch.matmul function as well
+                            torch_result = torch.matmul(l, r)
+                            self.assertEqual(truth, torch_result)
+
                 # compare to bmm
                 bmm_result = (torch.bmm(lhs_expanded.contiguous().view(-1, n_dim, m_dim),
                                         rhs_expanded.contiguous().view(-1, m_dim, p_dim)))

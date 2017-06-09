@@ -1027,7 +1027,14 @@ class TestAutograd(TestCase):
         def compare(fn, *args):
             unpacked_args = tuple(arg.data if isinstance(arg, Variable) else arg
                                   for arg in args)
-            self.assertEqual(fn(*args).data, fn(*unpacked_args))
+            unpacked_result = fn(*unpacked_args)
+            packed_result = fn(*args).data
+            # if non-Variable torch function returns a scalar, compare to scalar
+            if not torch.is_tensor(unpacked_result):
+                assert(packed_result.dim() == 1)
+                assert(packed_result.nelement() == 1)
+                packed_result = packed_result[0]
+            self.assertEqual(packed_result, unpacked_result)
 
         def test_blas_add(fn, x, y, z):
             # Checks all signatures
@@ -1056,6 +1063,12 @@ class TestAutograd(TestCase):
                   Variable(torch.randn(6)))
         test_blas_add(torch.addr, Variable(torch.randn(5, 6)),
                       Variable(torch.randn(5)), Variable(torch.randn(6)))
+        test_blas(torch.matmul, Variable(torch.randn(6)), Variable(torch.randn(6)))
+        test_blas(torch.matmul, Variable(torch.randn(10,4)), Variable(torch.randn(4)))
+        test_blas(torch.matmul, Variable(torch.randn(5)), Variable(torch.randn(5,6)))
+        test_blas(torch.matmul, Variable(torch.randn(2,10)), Variable(torch.randn(10,4)))
+        test_blas(torch.matmul, Variable(torch.randn(5,2,10)), Variable(torch.randn(5,10,4)))
+        test_blas(torch.matmul, Variable(torch.randn(3,5,2,10)), Variable(torch.randn(3,5,10,4)))
 
     def test_save_none_for_backward(self):
         test_case = self
@@ -1538,6 +1551,15 @@ method_tests = [
     ('addr', (S, M), ((S,), (M,)),),
     ('addr', (S, M), (0.2, 0.6, (S,), (M,)), 'coef'),
     ('dot', (L,), ((L,),),),
+    ('mm', (S, M), ((M, S),)),
+    ('bmm', (M, S, M), ((M, M, S),)),
+    ('mv', (S, M), ((M,),)),
+    ('ger', (S,), ((M,),)),
+    ('matmul', (L,), ((L,),),),
+    ('matmul', (S, M), ((M,),), "2d_1d"),
+    ('matmul', (M, ), ((M, S),), "1d_2d"),
+    ('matmul', (S, M), ((M, S),), "2d_2d"),
+    ('matmul', (S, S, M, M), ((S, S, M, S),), "4d_4d"),
     ('addcmul', (S, S), ((S, S), (S, S))),
     ('addcmul', (S, S), (0.5, (S, S), (S, S)), 'scale'),
     ('addcdiv', (S, S), ((S, S), (S, S))),
@@ -1584,8 +1606,7 @@ method_tests = [
     ('masked_scatter_', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False), (M, M))),
 ]
 # TODO: mm, bmm, mv, ger
-# TODO: max, min with dim (problem with indices)
-# TODO: mode, median, sort, kthvalue, topk (problem with indices)
+# TODO: sort, topk (problem with indices)
 # TODO: indexAdd, indexCopy, indexFill
 # TODO: resize, resize_as (tensors only have resize_ and resize_as_)
 # TODO: clamp with min/max
