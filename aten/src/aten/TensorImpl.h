@@ -16,8 +16,8 @@ struct TensorImpl {
   }
 
   virtual const char * toString() const = 0;
-  virtual IntList size() = 0;
-  virtual IntList stride() = 0;
+  virtual IntList sizes() = 0;
+  virtual IntList strides() = 0;
   void retain() {
     ++refcount;
   }

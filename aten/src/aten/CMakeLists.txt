@@ -116,6 +116,7 @@ SET(cwrap_files
 #  ${CWRAP_FILES_BASE}/nn/THNN.cwrap
 #  ${CWRAP_FILES_BASE}/nn/THCUNN.cwrap
 #  ${CWRAP_FILES_BASE}/nn/THNN_generic.cwrap
+  ${CMAKE_CURRENT_SOURCE_DIR}/Local.cwrap
 )
 
 
