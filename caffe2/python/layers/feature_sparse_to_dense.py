@@ -12,17 +12,17 @@ from caffe2.python.layers.layers import (
 import numpy as np
 
 
-class SparseToDense(ModelLayer):
+class FeatureSparseToDense(ModelLayer):
     _known_types = ['FLOAT', 'ID_LIST']
 
     def __init__(self, model, input_record, input_specs,
-                 name='sparse_to_dense', **kwargs):
+                 name='feature_sparse_to_dense', **kwargs):
         """
         `input_specs` follows the format of FeatureSpec from schema. To be more
         precise it's a namedtuple that should have:
             'feature_type', 'feature_names', 'feature_ids'
         """
-        super(SparseToDense, self).__init__(model, name,
+        super(FeatureSparseToDense, self).__init__(model, name,
                                             input_record, **kwargs)
 
         self.input_specs = input_specs
