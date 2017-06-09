@@ -173,10 +173,12 @@ class build_ext(setuptools.command.build_ext.build_ext):
         from tools.cwrap.plugins.WrapDim import WrapDim
         from tools.cwrap.plugins.AssertNDim import AssertNDim
         from tools.cwrap.plugins.Broadcast import Broadcast
+        from tools.cwrap.plugins.ProcessorSpecificPlugin import ProcessorSpecificPlugin
         thp_plugin = THPPlugin()
         cwrap('torch/csrc/generic/TensorMethods.cwrap', plugins=[
-            BoolOption(), thp_plugin, AutoGPU(condition='IS_CUDA'),
-            ArgcountSortPlugin(), KwargsPlugin(), AssertNDim(), WrapDim(), Broadcast()
+            ProcessorSpecificPlugin(), BoolOption(), thp_plugin,
+            AutoGPU(condition='IS_CUDA'), ArgcountSortPlugin(), KwargsPlugin(),
+            AssertNDim(), WrapDim(), Broadcast()
         ])
         cwrap('torch/csrc/cudnn/cuDNN.cwrap', plugins=[
             CuDNNPlugin(), NullableArguments()

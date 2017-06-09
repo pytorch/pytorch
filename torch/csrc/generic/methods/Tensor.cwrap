@@ -645,7 +645,6 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
   name: range
   variants:
     - function
-  defined_if: "!IS_CUDA"
   processors:
     - CPU
   return: argument 0
@@ -666,7 +665,6 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
   name: arange
   variants:
     - function
-  defined_if: "!IS_CUDA"
   processors:
     - CPU
   return: argument 0

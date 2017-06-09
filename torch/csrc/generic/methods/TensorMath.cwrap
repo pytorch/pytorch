@@ -1,7 +1,6 @@
 [[
   name: abs
   return: argument 0
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_LONG) || defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_SHORT) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE || CUDA_SHORT || CUDA_INT || CUDA_LONG
   types:
     - floating_point
     - Long
@@ -23,7 +22,6 @@
   name: abs_
   cname: abs
   return: self
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_LONG) || defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_SHORT) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE || CUDA_SHORT || CUDA_INT || CUDA_LONG
   types:
     - floating_point
     - Long
@@ -40,7 +38,6 @@
 
 [[
   name: sigmoid_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -55,7 +52,6 @@
 
 [[
   name: sigmoid
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -75,7 +71,6 @@
 
 [[
   name: log_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -90,7 +85,6 @@
 
 [[
   name: log
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -109,7 +103,6 @@
 
 [[
   name: log1p_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -124,7 +117,6 @@
 
 [[
   name: log1p
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -142,7 +134,6 @@
 
 [[
   name: lgamma
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -160,7 +151,6 @@
 
 [[
   name: lgamma_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -175,7 +165,6 @@
 
 [[
   name: exp_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -190,7 +179,6 @@
 
 [[
   name: exp
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -209,7 +197,6 @@
 
 [[
   name: cos_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -224,7 +211,6 @@
 
 [[
   name: cos
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -243,7 +229,6 @@
 
 [[
   name: acos_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -258,7 +243,6 @@
 
 [[
   name: acos
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -277,7 +261,6 @@
 
 [[
   name: cosh_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -292,7 +275,6 @@
 
 [[
   name: cosh
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -311,7 +293,6 @@
 
 [[
   name: sin_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -326,7 +307,6 @@
 
 [[
   name: sin
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -345,7 +325,6 @@
 
 [[
   name: asin_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -360,7 +339,6 @@
 
 [[
   name: asin
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -379,7 +357,6 @@
 
 [[
   name: sinh_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -394,7 +371,6 @@
 
 [[
   name: sinh
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -413,7 +389,6 @@
 
 [[
   name: tan_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -428,7 +403,6 @@
 
 [[
   name: tan
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -447,7 +421,6 @@
 
 [[
   name: atan_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -462,7 +435,6 @@
 
 [[
   name: atan
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -481,7 +453,6 @@
 
 [[
   name: tanh_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -496,7 +467,6 @@
 
 [[
   name: tanh
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -515,7 +485,6 @@
 
 [[
   name: sqrt_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -530,7 +499,6 @@
 
 [[
   name: sqrt
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -549,7 +517,6 @@
 
 [[
   name: rsqrt_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -564,7 +531,6 @@
 
 [[
   name: rsqrt
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -583,7 +549,6 @@
 
 [[
   name: ceil_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -598,7 +563,6 @@
 
 [[
   name: ceil
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -617,7 +581,6 @@
 
 [[
   name: floor_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -632,7 +595,6 @@
 
 [[
   name: floor
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -651,7 +613,6 @@
 
 [[
   name: round_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -666,7 +627,6 @@
 
 [[
   name: round
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -685,7 +645,6 @@
 
 [[
   name: trunc_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -700,7 +659,6 @@
 
 [[
   name: trunc
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -719,7 +677,6 @@
 
 [[
   name: frac_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -734,7 +691,6 @@
 
 [[
   name: frac
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -752,7 +708,6 @@
 
 [[
   name: mean
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -789,7 +744,6 @@
 
 [[
   name: var
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -828,7 +782,6 @@
 
 [[
   name: std
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -867,7 +820,6 @@
 
 [[
   name: norm
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -908,7 +860,6 @@
 
 [[
   name: renorm
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -932,7 +883,6 @@
 
 [[
   name: renorm_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -952,7 +902,6 @@
 
 [[
   name: dist
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -974,7 +923,6 @@
 
 [[
   name: reciprocal
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -994,7 +942,6 @@
 
 [[
   name: reciprocal_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -1010,7 +957,6 @@
 
 [[
   name: neg
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -1030,7 +976,6 @@
 
 [[
   name: neg_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -1046,7 +991,6 @@
 
 [[
   name: atan2
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
   types:
     - Float
     - Double
@@ -1069,7 +1013,6 @@
 
 [[
   name: atan2_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
   type_processor_pairs: [[CPU,Float],[CPU,Double],[CUDA,Float]]
   cname: atan2
   return: argument 0
@@ -1086,7 +1029,6 @@
 // be available. Still, they differ in torch.pow.
 [[
   name: pow
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -1120,7 +1062,6 @@
 
 [[
   name: pow_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -1144,7 +1085,6 @@
 
 [[
   name: lerp
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -1166,7 +1106,6 @@
 
 [[
   name: lerp_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -1184,7 +1123,6 @@
 
 [[
   name: linspace
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
   types:
     - Float
     - Double
@@ -1204,7 +1142,6 @@
 
 [[
   name: logspace
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
   types:
     - Float
     - Double
@@ -1224,7 +1161,6 @@
 
 [[
   name: histc
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
   types:
     - Float
     - Double
@@ -1715,7 +1651,6 @@
 
 [[
   name: dot
-  defined_if: CUDA_FLOAT || CUDA_DOUBLE || CUDA_HALF || !IS_CUDA
   type_processor_pairs: [[CUDA,floating_point], [CPU,all]]
 
   variants:
@@ -1796,7 +1731,6 @@
 
 [[
   name: eye
-  defined_if: "!IS_CUDA"
   processors:
     - CPU
   variants:
@@ -2235,7 +2169,6 @@ static const char *R = &__R;
 
 [[
   name: gesv
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
   types:
     - Float
     - Double
@@ -2257,7 +2190,6 @@ static const char *R = &__R;
 
 [[
   name: gels
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
   types:
     - Float
     - Double
@@ -2279,7 +2211,6 @@ static const char *R = &__R;
 
 [[
   name: trtrs
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
   types:
     - Float
     - Double
@@ -2313,7 +2244,6 @@ static const char *R = &__R;
 [[
   name: symeig
   cname: syev
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
   types:
     - Float
     - Double
@@ -2343,7 +2273,6 @@ static const char *R = &__R;
 [[
   name: eig
   cname: geev
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
   types:
     - Float
     - Double
@@ -2369,7 +2298,6 @@ static const char *R = &__R;
 [[
   name: svd
   cname: gesvd
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
   types:
     - Float
     - Double
@@ -2397,7 +2325,6 @@ static const char *R = &__R;
 [[
   name: inverse
   cname: getri
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
   types:
     - Float
     - Double
@@ -2416,7 +2343,6 @@ static const char *R = &__R;
 
 [[
   name: potrf
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
   types:
     - Float
     - Double
@@ -2439,7 +2365,6 @@ static const char *R = &__R;
 
 [[
   name: potrs
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
   types:
     - Float
     - Double
@@ -2463,7 +2388,6 @@ static const char *R = &__R;
 
 [[
   name: potri
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
   types:
     - Float
     - Double
@@ -2486,7 +2410,6 @@ static const char *R = &__R;
 
 [[
   name: pstrf
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
   types:
     - Float
     - Double
@@ -2514,7 +2437,6 @@ static const char *R = &__R;
 
 [[
   name: qr
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
   types:
     - Float
     - Double
@@ -2535,7 +2457,6 @@ static const char *R = &__R;
 
 [[
   name: geqrf
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
   types:
     - Float
     - Double
@@ -2555,7 +2476,6 @@ static const char *R = &__R;
 
 [[
   name: orgqr
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
   types:
     - Float
     - Double
@@ -2574,7 +2494,6 @@ static const char *R = &__R;
 
 [[
   name: ormqr
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
   types:
     - Float
     - Double
@@ -2603,7 +2522,6 @@ static const char *R = &__R;
 [[
   name: btrifact
   cname: btrifact
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:
@@ -2627,7 +2545,6 @@ static const char *R = &__R;
 [[
   name: btrisolve
   cname: btrisolve
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
   types:
     - floating_point
   processors:

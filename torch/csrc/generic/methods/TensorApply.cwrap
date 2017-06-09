@@ -8,7 +8,7 @@
 [[
   name: THPTensor_(apply)
   python_name: apply_
-  defined_if: "!IS_CUDA && !IS_DISTRIBUTED"
+  defined_if: "!IS_DISTRIBUTED"
   processors:
     - CPU
   cpu_half: True
@@ -45,7 +45,7 @@ static PyObject * THPTensor_(apply)(THPTensor *self, PyObject *arg)
 [[
   name: THPTensor_(map)
   python_name: map_
-  defined_if: "!IS_CUDA && !IS_DISTRIBUTED"
+  defined_if: "!IS_DISTRIBUTED"
   processors:
     - CPU
   cpu_half: True
@@ -98,7 +98,7 @@ static PyObject * THPTensor_(map)(THPTensor *self, PyObject *args)
 [[
   name: THPTensor_(map2)
   python_name: map2_
-  defined_if: "!IS_CUDA && !IS_DISTRIBUTED"
+  defined_if: "!IS_DISTRIBUTED"
   processors:
     - CPU
   cpu_half: True

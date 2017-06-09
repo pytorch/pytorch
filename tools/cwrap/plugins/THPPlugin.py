@@ -412,19 +412,13 @@ ${cpu}
         for declaration in declarations:
             # Disable all methods for THHalfTensor, unless cpu_half is True
 
-            compare = processors_types_to_defined_if_string(declaration)
-
-            def cmp(compare, declaration):
-                declstr = declaration.get('defined_if', "")
-                c = set(compare.split(' || '))
-                d = set(declstr.split(' || '))
-                if len(c ^ d) != 0:
-                    print(c, d)
-                    print('failure:', declaration['name'])
+            dfstr = processors_types_to_defined_if_string(declaration)
+            if len(dfstr) > 0:
+                # for now, need to check for distributed defined if as well
+                if 'defined_if' in declaration:
+                    declaration['defined_if'] += ' && (' + dfstr + ')'
                 else:
-                    print(c, d)
-                    print('success')
-            cmp(compare, declaration)
+                    declaration['defined_if'] = dfstr
 
             if not declaration.get('cpu_half', False):
                 defined_if = '!defined(TH_REAL_IS_HALF)'

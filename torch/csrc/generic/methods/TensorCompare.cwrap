@@ -451,7 +451,6 @@
 
 [[
   name: kthvalue
-  defined_if: "!IS_CUDA"
   processors:
     - CPU
   variants:
@@ -554,7 +553,6 @@
 
 [[
   name: median
-  defined_if: "!IS_CUDA"
   processors:
     - CPU
   variants:
@@ -674,7 +672,6 @@
 
 [[
   name: all
-  defined_if: defined(TH_REAL_IS_BYTE) || defined(THC_REAL_IS_BYTE)
   types:
     - Byte
   processors:
@@ -688,7 +685,6 @@
 
 [[
   name: any
-  defined_if: defined(TH_REAL_IS_BYTE) || defined(THC_REAL_IS_BYTE)
   types:
     - Byte
   processors:
