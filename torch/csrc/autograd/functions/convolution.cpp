@@ -127,7 +127,7 @@ static std::unique_ptr<Tensor> subtensor(Tensor* tensor, int dim, int groups, in
   if (!tensor) {
     return nullptr;
   }
-  long n = tensor->sizes()[dim] / groups;
+  long n = tensor->rawSizes()[dim] / groups;
   auto result = tensor->newTensor();
   result->narrow(*tensor, dim, n * g, n);
   return result->contiguous();
@@ -246,11 +246,18 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
   check_input_variables("ConvNdBackward", grad_outputs, 1);
   if (is_padding_neg()) throw std::runtime_error("negative padding is not supported");
   if (is_output_padding_neg()) throw std::runtime_error("negative output_padding is not supported");
-  auto input = input_.unpack_data();
+
+  auto input_var = input_.unpack();
+  auto weight_var = weight_.unpack();
+  auto bias_var = bias_.unpack();
+
+  std::unique_ptr<thpp::Tensor> input {input_var->data->clone_shallow()};
+  std::unique_ptr<thpp::Tensor> weight {weight_var->data->clone_shallow()};
+  std::unique_ptr<thpp::Tensor> bias {bias_var ? bias_var->data->clone_shallow() : nullptr};
+
   AutoGPU guard(input->getDevice());
+
   input = input->contiguous();
-  std::unique_ptr<Tensor> weight(weight_.unpack_data()->clone_shallow());
-  auto bias = bias_.unpack_data();
   auto grad_output = grad_outputs[0]->data->contiguous();
 
   int k = input->nDim();
@@ -359,8 +366,8 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
 
   // Add saved variables used out of the pure autograd to inputs
   variable_list all_inputs(grad_outputs);
-  all_inputs.push_back(input_.unpack());
-  all_inputs.push_back(weight_.unpack());
+  all_inputs.push_back(input_var);
+  all_inputs.push_back(weight_var);
 
   auto outputs =  as_tensor_list(std::move(grad_input),
                                  std::move(grad_weight),
@@ -368,8 +375,8 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
   return wrap_outputs(all_inputs, std::move(outputs), [&](FunctionFlags f) {
     return std::make_shared<ConvBackwardBackward>(
       f, *this,
-      input_.unpack()->save(this), weight_.unpack()->save(this),
-      Variable::save_opt(bias_.unpack().get(), this), grad_outputs[0]->save(this));
+      input_var->save(this), weight_var->save(this),
+      Variable::save_opt(bias_var.get(), this), grad_outputs[0]->save(this));
   });
 };
 
@@ -397,14 +404,14 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
   std::shared_ptr<Variable> ggO = nullptr;
   if (ggI) {
     if (weight->data->isCuda()) {
-      weight = std::make_shared<CudnnContiguous>()->apply({weight})[0];
+      weight = std::make_shared<Contiguous>()->apply({weight})[0];
     }
     ggO = std::make_shared<ConvForward>(*this)->apply({ggI, weight, nullptr})[0];
   }
 
   if (ggW) {
     if (ggW->data->isCuda()) {
-      ggW = std::make_shared<CudnnContiguous>()->apply({ggW})[0];
+      ggW = std::make_shared<Contiguous>()->apply({ggW})[0];
     }
     auto ggW_term = std::make_shared<ConvForward>(*this)->apply({input_.unpack(), ggW, nullptr})[0];
     if (ggO) {
@@ -417,7 +424,7 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
   if (ggb) {
     // View as (1, ggb.size(0), 1, 1...)
     std::vector<long> new_size(gO->data->nDim(), 1);
-    new_size[1] = ggb->data->sizes()[0];
+    new_size[1] = ggb->data->rawSizes()[0];
     auto ggb_contiguous = std::make_shared<Contiguous>()->apply({ggb})[0];
     auto ggb_view = std::make_shared<View>(new_size)->apply({ggb_contiguous})[0];
 
@@ -460,7 +467,7 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
     auto ggIt = std::make_shared<Transpose>(0, 1)->apply({ggI})[0];
 
     if (gOt->data->isCuda()) {
-      gOt = std::make_shared<CudnnContiguous>()->apply({gOt})[0];
+      gOt = std::make_shared<Contiguous>()->apply({gOt})[0];
     }
 
     // Compute conv
@@ -489,7 +496,7 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
     auto gOt = std::make_shared<Transpose>(0, 1)->apply({gO})[0];
 
     if (gOt->data->isCuda()) {
-      gOt = std::make_shared<CudnnContiguous>()->apply({gOt})[0];
+      gOt = std::make_shared<Contiguous>()->apply({gOt})[0];
     }
 
     auto gIt = std::make_shared<ConvForward>(gi_conv_params)->apply({ggWt, gOt, nullptr})[0];
