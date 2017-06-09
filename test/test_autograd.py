@@ -1324,6 +1324,7 @@ class TestAutograd(TestCase):
                                                         batch_size, inp_size, dilation,
                                                         no_weight, use_cuda=True)
 
+
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
         shape = (shape,)
