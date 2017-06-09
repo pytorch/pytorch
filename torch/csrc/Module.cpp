@@ -319,6 +319,12 @@ IMPLEMENT_STATELESS(orgqr)
 IMPLEMENT_STATELESS(ormqr)
 IMPLEMENT_STATELESS(btrifact)
 IMPLEMENT_STATELESS(btrisolve)
+IMPLEMENT_STATELESS(lt_t)
+IMPLEMENT_STATELESS(gt_t)
+IMPLEMENT_STATELESS(le_t)
+IMPLEMENT_STATELESS(ge_t)
+IMPLEMENT_STATELESS(eq_t)
+IMPLEMENT_STATELESS(ne_t)
 
 #undef IMPLEMENT_STATELESS
 
@@ -643,11 +649,17 @@ static PyMethodDef TorchMethods[] = {
   {"triu",            (PyCFunction)THPModule_triu,              METH_VARARGS | METH_KEYWORDS, NULL},
   {"zero",            (PyCFunction)THPModule_zero,              METH_VARARGS | METH_KEYWORDS, NULL},
   {"gt",              (PyCFunction)THPModule_gt,                METH_VARARGS | METH_KEYWORDS, NULL},
+  {"gt_t",            (PyCFunction)THPModule_gt_t,              METH_VARARGS | METH_KEYWORDS, NULL},
   {"lt",              (PyCFunction)THPModule_lt,                METH_VARARGS | METH_KEYWORDS, NULL},
+  {"lt_t",            (PyCFunction)THPModule_lt_t,              METH_VARARGS | METH_KEYWORDS, NULL},
   {"ge",              (PyCFunction)THPModule_ge,                METH_VARARGS | METH_KEYWORDS, NULL},
+  {"ge_t",            (PyCFunction)THPModule_ge_t,              METH_VARARGS | METH_KEYWORDS, NULL},
   {"le",              (PyCFunction)THPModule_le,                METH_VARARGS | METH_KEYWORDS, NULL},
+  {"le_t",            (PyCFunction)THPModule_le_t,              METH_VARARGS | METH_KEYWORDS, NULL},
   {"eq",              (PyCFunction)THPModule_eq,                METH_VARARGS | METH_KEYWORDS, NULL},
+  {"eq_t",            (PyCFunction)THPModule_eq_t,              METH_VARARGS | METH_KEYWORDS, NULL},
   {"ne",              (PyCFunction)THPModule_ne,                METH_VARARGS | METH_KEYWORDS, NULL},
+  {"ne_t",            (PyCFunction)THPModule_ne_t,              METH_VARARGS | METH_KEYWORDS, NULL},
   {"kthvalue",        (PyCFunction)THPModule_kthvalue,          METH_VARARGS | METH_KEYWORDS, NULL},
   {"mode",            (PyCFunction)THPModule_mode,              METH_VARARGS | METH_KEYWORDS, NULL},
   {"median",          (PyCFunction)THPModule_median,            METH_VARARGS | METH_KEYWORDS, NULL},

@@ -38,7 +38,7 @@
 ]]
 
 [[
-  name: ltT
+  name: lt_t
   variants:
     - function
   return: argument 0
@@ -99,7 +99,7 @@
 ]]
 
 [[
-  name: gtT
+  name: gt_t
   variants:
     - function
   return: argument 0
@@ -160,7 +160,7 @@
 ]]
 
 [[
-  name: leT
+  name: le_t
   variants:
     - function
   return: argument 0
@@ -221,7 +221,7 @@
 ]]
 
 [[
-  name: geT
+  name: ge_t
   variants:
     - function
   return: argument 0
@@ -282,7 +282,7 @@
 ]]
 
 [[
-  name: eqT
+  name: eq_t
   variants:
     - function
   return: argument 0
@@ -343,7 +343,7 @@
 ]]
 
 [[
-  name: neT
+  name: ne_t
   variants:
     - function
   return: argument 0
