@@ -466,14 +466,15 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
     std::vector<long> input_shape(input_size.begin() + 2, input_size.end());
     for(size_t i=0; i<gw_conv_params.padding.size(); ++i) {
       // Formula for conv output size before the floor operation
-      auto out_size = float(input_shape[i] + 2 * gw_conv_params.padding[i] +
+      auto out_size = float(input_shape[i] + 2 * gw_conv_params.padding[i] -
                       gw_conv_params.dilation[i] * (kernel_size[i] - 1) - 1) /
                       gw_conv_params.stride[i] + 1;
-      if (floorf(out_size) != out_size) {
-        // TODO: narrow ggI here to ignore these elements?
-        throw std::runtime_error("Some input elements have been lost during ConvForward"
-        " (see documentation for the Conv layer) so ConvBackwardBackward cannot be used."
-        " Resize the input so that no element is lost to be able to use ConvBackwardBackward.");
+      auto exact_out_size = floorf(out_size);
+      if (exact_out_size != out_size) {
+        auto used_input_size = (exact_out_size - 1) * gw_conv_params.stride[i] + 1 +
+                      gw_conv_params.dilation[i] * (kernel_size[i] - 1) -
+                      2 * gw_conv_params.padding[i];
+        ggI = std::make_shared<Narrow>(i+2, 0, used_input_size)->apply({ggI})[0];
       }
     }
     std::swap(gw_conv_params.dilation, gw_conv_params.stride);
@@ -502,8 +503,8 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
     for(size_t i=0; i<gi_conv_params.padding.size(); ++i) {
       if (gi_conv_params.stride[i] != 1) {
         // TODO: Remove this when transpose dilated is fixed
-        throw std::runtime_error("Setting non-zero ggW for ConvBackwardBackward would require"
-        " using a dilated transpose convolution which is not supported.");
+        throw std::runtime_error("Second argument of ConvNdBackwardBackward is not zero."
+        "This is not supported at the moment.");
       }
     }
     std::swap(gi_conv_params.dilation, gi_conv_params.stride);
