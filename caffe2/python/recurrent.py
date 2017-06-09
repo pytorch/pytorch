@@ -221,11 +221,13 @@ def recurrent_net(
             proto.op.extend([op])
             for j, output_blob in enumerate(op.output):
                 if output_blob in proto.external_input:
-                    # blob cannot be internal by virtue of in-place operation.
+                    # In place operation won't cause issues because it takes
+                    # existing value of a blob into account
                     if output_blob in op.input:
                         continue
-                    accum_blob = '{}_accum'.format(output_blob)
-                    proto.op[-1].output[j] = accum_blob
+                    output_blob = core.BlobReference(output_blob)
+                    accum_blob = output_blob + "_accum"
+                    proto.op[-1].output[j] = str(accum_blob)
                     backward_cell_net.Sum(
                         [output_blob, accum_blob],
                         [output_blob],

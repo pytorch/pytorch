@@ -3,7 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import core, gradient_checker, rnn_cell, workspace
+from caffe2.python import core, gradient_checker, rnn_cell, workspace, scope, utils
 from caffe2.python.attention import AttentionType
 from caffe2.python.model_helper import ModelHelper
 import caffe2.python.hypothesis_test_util as hu
@@ -376,47 +376,163 @@ def lstm_input():
     return dims_.flatmap(create_input)
 
 
-def _prepare_lstm(t, n, d, create_lstm, outputs_with_grads,
-                  memory_optim, forget_bias, forward_only, drop_states):
-    print("Dims: ", t, n, d)
+def _prepare_lstm(t, n, dim_in, create_lstm, outputs_with_grads,
+                  forget_bias, memory_optim=False,
+                  forward_only=False, drop_states=False, T=None,
+                  two_d_initial_states=None, dim_out=None):
+    if dim_out is None:
+        dim_out = [dim_in]
+    print("Dims: ", t, n, dim_in, dim_out)
 
     model = ModelHelper(name='external')
-    input_blob, seq_lengths, hidden_init, cell_init = (
-        model.net.AddExternalInputs(
-            'input_blob', 'seq_lengths', 'hidden_init', 'cell_init'))
 
-    create_lstm(
-        model, input_blob, seq_lengths, (hidden_init, cell_init),
-        d, d, scope="external/recurrent",
-        outputs_with_grads=outputs_with_grads,
-        memory_optimization=memory_optim,
-        forget_bias=forget_bias,
-        forward_only=forward_only,
-        drop_states=drop_states,
-    )
+    if two_d_initial_states is None:
+        two_d_initial_states = np.random.randint(2)
+
+    def generate_input_state(n, d):
+        if two_d_initial_states:
+            return np.random.randn(n, d).astype(np.float32)
+        return np.random.randn(1, n, d).astype(np.float32)
+
+    states = []
+    for layer_id, d in enumerate(dim_out):
+        h, c = model.net.AddExternalInputs(
+            "hidden_init_{}".format(layer_id),
+            "cell_init_{}".format(layer_id),
+        )
+        states.extend([h, c])
+        workspace.FeedBlob(h, generate_input_state(n, d).astype(np.float32))
+        workspace.FeedBlob(c, generate_input_state(n, d).astype(np.float32))
+
+    # Due to convoluted RNN scoping logic we make sure that things
+    # work from a namescope
+    with scope.NameScope("test_name_scope"):
+        input_blob, seq_lengths = model.net.AddScopedExternalInputs(
+            'input_blob', 'seq_lengths')
+
+        outputs = create_lstm(
+            model, input_blob, seq_lengths, states,
+            dim_in=dim_in, dim_out=dim_out, scope="external/recurrent",
+            outputs_with_grads=outputs_with_grads,
+            memory_optimization=memory_optim,
+            forget_bias=forget_bias,
+            forward_only=forward_only,
+            drop_states=drop_states,
+            static_rnn_unroll_size=T,
+        )
 
     workspace.RunNetOnce(model.param_init_net)
 
-    def generate_random_state(n, d):
-        ndim = int(np.random.choice(3, 1)) + 1
-        if ndim == 1:
-            return np.random.randn(1, n, d).astype(np.float32)
-        random_state = np.random.randn(n, d).astype(np.float32)
-        if ndim == 3:
-            random_state = random_state.reshape([1, n, d])
-        return random_state
-
-    workspace.FeedBlob("hidden_init", generate_random_state(n, d))
-    workspace.FeedBlob("cell_init", generate_random_state(n, d))
     workspace.FeedBlob(
-        "seq_lengths",
+        seq_lengths,
         np.random.randint(1, t + 1, size=(n,)).astype(np.int32)
     )
+    return outputs, model.net, states + [input_blob]
 
-    return model.net
+
+class MulCell(rnn_cell.RNNCell):
+    def _apply(self, model, input_t,
+               seq_lengths, states, timestep, extra_inputs):
+        assert len(states) == 1
+        result = model.net.Mul([input_t, states[0]])
+        model.net.AddExternalOutput(result)
+        return [result]
+
+    def get_state_names(self):
+        return [self.scope("state")]
+
+
+def prepare_mul_rnn(model, input_blob, shape, T, outputs_with_grad, num_layers):
+    print("Shape: ", shape)
+    t, n, d = shape
+    cells = [MulCell(name="layer_{}".format(i)) for i in range(num_layers)]
+    cell = rnn_cell.MultiRNNCell(name="multi_mul_rnn", cells=cells)
+    if T is not None:
+        cell = rnn_cell.UnrolledCell(cell, T=T)
+    states = [
+        model.param_init_net.ConstantFill(
+            [], "initial_state_{}".format(i), value=1.0, shape=[1, n, d])
+        for i in range(num_layers)]
+    _, results = cell.apply_over_sequence(
+        model=model,
+        inputs=input_blob,
+        initial_states=states,
+        outputs_with_grads=map(
+            lambda x: x + 2 * (num_layers - 1),
+            outputs_with_grad
+        ),
+        seq_lengths=None,
+    )
+    return results[-2:]
 
 
 class RNNCellTest(hu.HypothesisTestCase):
+
+    @given(
+        input_tensor=hu.tensor(min_dim=3, max_dim=3, max_value=3),
+        num_layers=st.integers(1, 4),
+        outputs_with_grad=st.sampled_from(
+            [[0], [1], [0, 1]]
+        ),
+    )
+    @ht_settings(max_examples=10)
+    def test_unroll_mul(self, input_tensor, num_layers, outputs_with_grad):
+        outputs = []
+        nets = []
+        input_blob = None
+        for T in [input_tensor.shape[0], None]:
+            model = ModelHelper("rnn_mul_{}".format(
+                "unroll" if T else "dynamic"))
+            input_blob = model.net.AddExternalInputs("input_blob")
+            outputs.append(
+                prepare_mul_rnn(model, input_blob, input_tensor.shape, T,
+                                outputs_with_grad, num_layers))
+            workspace.RunNetOnce(model.param_init_net)
+            nets.append(model.net)
+
+            workspace.blobs[input_blob] = input_tensor
+            gradient_checker.NetGradientChecker.CompareNets(
+                nets, outputs, outputs_with_grad_ids=outputs_with_grad,
+                inputs_with_grads=[input_blob],
+                print_net_images=True,
+            )
+
+    @given(
+        input_tensor=hu.tensor(min_dim=3, max_dim=3, max_value=3),
+        forget_bias=st.floats(-10.0, 10.0),
+        drop_states=st.booleans(),
+        dim_out=st.lists(
+            elements=st.integers(min_value=1, max_value=3),
+            min_size=1, max_size=3,
+        ),
+        outputs_with_grads=st.sampled_from(
+            [[0], [1], [0, 1], [0, 2], [0, 1, 2, 3]]
+        )
+    )
+    @ht_settings(max_examples=10)
+    @utils.debug
+    def test_unroll_lstm(self, input_tensor, dim_out, outputs_with_grads,
+                         **kwargs):
+        lstms = [
+            _prepare_lstm(
+                *input_tensor.shape,
+                create_lstm=rnn_cell.LSTM,
+                outputs_with_grads=outputs_with_grads,
+                T=T,
+                two_d_initial_states=False,
+                dim_out=dim_out,
+                **kwargs
+            ) for T in [input_tensor.shape[0], None]
+        ]
+        outputs, nets, inputs = zip(*lstms)
+        workspace.FeedBlob(inputs[0][-1], input_tensor)
+
+        assert inputs[0] == inputs[1]
+        gradient_checker.NetGradientChecker.CompareNets(
+            nets, outputs, outputs_with_grads,
+            inputs_with_grads=inputs[0],
+            print_net_images=True,
+        )
 
     @given(
         input_tensor=hu.tensor(min_dim=3, max_dim=3),
@@ -424,20 +540,21 @@ class RNNCellTest(hu.HypothesisTestCase):
         forward_only=st.booleans(),
         drop_states=st.booleans(),
     )
-    @ht_settings(max_examples=5)
+    @ht_settings(max_examples=10)
     def test_layered_lstm(self, input_tensor, **kwargs):
         for outputs_with_grads in [[0], [1], [0, 1, 2, 3]]:
             for memory_optim in [False, True]:
-                net = _prepare_lstm(
+                _, net, inputs = _prepare_lstm(
                     *input_tensor.shape,
-                    create_lstm=rnn_cell.layered_LSTM,
+                    create_lstm=rnn_cell.LSTM,
                     outputs_with_grads=outputs_with_grads,
                     memory_optim=memory_optim,
                     **kwargs
                 )
-                workspace.FeedBlob("input_blob", input_tensor)
+                workspace.FeedBlob(inputs[-1], input_tensor)
                 workspace.RunNetOnce(net)
                 workspace.ResetWorkspace()
+
 
     @given(
         input_tensor=lstm_input(),
@@ -446,6 +563,7 @@ class RNNCellTest(hu.HypothesisTestCase):
         drop_states=st.booleans(),
     )
     @ht_settings(max_examples=15)
+    @utils.debug
     def test_lstm_main(self, **kwargs):
         for lstm_type in [(rnn_cell.LSTM, lstm_reference),
                           (rnn_cell.MILSTM, milstm_reference)]:
@@ -472,9 +590,11 @@ class RNNCellTest(hu.HypothesisTestCase):
                             memory_optim=memory_optim,
                             forget_bias=forget_bias,
                             forward_only=fwd_only,
-                            drop_states=drop_states,
-        )
-        workspace.FeedBlob("external/recurrent/i2h", input_tensor)
+                            drop_states=drop_states)[1]
+        # here we don't provide a real input for the net but just for one of
+        # its ops (RecurrentNetworkOp). So have to hardcode this name
+        workspace.FeedBlob("test_name_scope/external/recurrent/i2h",
+                           input_tensor)
         op = net._net.op[-1]
         inputs = [workspace.FetchBlob(name) for name in op.input]
 

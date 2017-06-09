@@ -5,16 +5,20 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+import functools
+import itertools
+import logging
 import numpy as np
 import random
-import functools
+import six
 
 from caffe2.python.attention import (
     AttentionType,
     apply_regular_attention,
     apply_recurrent_attention,
 )
-from caffe2.python import core, recurrent, workspace, brew
+from caffe2.python import core, recurrent, workspace, brew, scope
+from caffe2.python.modeling.parameter_sharing import ParameterSharing
 from caffe2.python.model_helper import ModelHelper
 
 
@@ -861,6 +865,7 @@ def _LSTM(
     forward_only=False,
     drop_states=False,
     return_last_layer_only=True,
+    static_rnn_unroll_size=None,
 ):
     '''
     Adds a standard LSTM recurrent network operator to a model.
@@ -902,6 +907,10 @@ def _LSTM(
 
     return_last_layer_only: only return outputs from final layer
             (so that length of results does depend on number of layers)
+
+    static_rnn_unroll_size: if not None, we will use static RNN which is
+    unrolled into Caffe2 graph. The size of the unroll is the value of
+    this parameter.
     '''
     if type(dim_out) is not list and type(dim_out) is not tuple:
         dim_out = [dim_out]
@@ -921,14 +930,15 @@ def _LSTM(
         )
         cells.append(cell)
 
-    if num_layers > 1:
-        multicell = MultiRNNCell(
-            cells,
-            name=scope,
-            forward_only=forward_only,
-        )
-    else:
-        multicell = cells[0]
+    cell = MultiRNNCell(
+        cells,
+        name=scope,
+        forward_only=forward_only,
+    ) if num_layers > 1 else cells[0]
+
+    cell = (
+        cell if static_rnn_unroll_size is None
+        else UnrolledCell(cell, static_rnn_unroll_size))
 
     if initial_states is None:
         initial_states = []
@@ -956,8 +966,7 @@ def _LSTM(
 
     # outputs_with_grads argument indexes into final layer
     outputs_with_grads = [4 * (num_layers - 1) + i for i in outputs_with_grads]
-
-    _, result = multicell.apply_over_sequence(
+    _, result = cell.apply_over_sequence(
         model=model,
         inputs=input_blob,
         seq_lengths=seq_lengths,
@@ -976,8 +985,75 @@ def _LSTM(
 
 
 LSTM = functools.partial(_LSTM, LSTMCell)
-
 MILSTM = functools.partial(_LSTM, MILSTMCell)
+
+
+class UnrolledCell(RNNCell):
+    def __init__(self, cell, T):
+        self.T = T
+        self.cell = cell
+
+    def apply_over_sequence(
+        self,
+        model,
+        inputs,
+        seq_lengths,
+        initial_states,
+        outputs_with_grads=None,
+    ):
+        inputs = self.cell.prepare_input(model, inputs)
+
+        # Now they are blob references - outputs of splitting the input sequence
+        split_inputs = model.net.Split(
+            inputs,
+            [str(inputs) + "_timestep_{}".format(i)
+             for i in range(self.T)],
+            axis=0)
+        if self.T == 1:
+            split_inputs = [split_inputs]
+
+        states = initial_states
+        all_states = []
+        for t in range(0, self.T):
+            scope_name = "timestep_{}".format(t)
+            # Parameters of all timesteps are shared
+            with ParameterSharing({scope_name: ''}),\
+                 scope.NameScope(scope_name):
+                timestep = model.param_init_net.ConstantFill(
+                    [], "timestep", value=t, shape=[1],
+                    dtype=core.DataType.INT32)
+                states = self.cell._apply(
+                    model=model,
+                    input_t=split_inputs[t],
+                    seq_lengths=seq_lengths,
+                    states=states,
+                    timestep=timestep,
+                )
+            all_states.append(states)
+
+        all_states = zip(*all_states)
+        all_states = [
+            model.net.Concat(
+                list(full_output),
+                [
+                    str(full_output[0])[len("timestep_0/"):] + "_concat",
+                    str(full_output[0])[len("timestep_0/"):] + "_concat_info"
+
+                ],
+                axis=0)[0]
+            for full_output in all_states
+        ]
+        outputs = tuple(
+            six.next(it) for it in
+            itertools.cycle([iter(all_states), iter(states)])
+        )
+        outputs_without_grad = set(range(len(outputs))) - set(
+            outputs_with_grads)
+        for i in outputs_without_grad:
+            model.net.ZeroGradient(outputs[i], [])
+        logging.debug("Added 0 gradients for blobs:",
+                      [outputs[i] for i in outputs_without_grad])
+        return None, outputs
 
 
 def GetLSTMParamNames():
