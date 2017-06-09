@@ -40,7 +40,7 @@ template<> double convert(Half f);
 template<> Half convert(int64_t f);
 template<> int64_t convert(Half f);
 
-Half::operator double() {
+inline Half::operator double() {
   return convert<double,Half>(*this);
 }
 #ifdef TENSORLIB_CUDA_ENABLED
