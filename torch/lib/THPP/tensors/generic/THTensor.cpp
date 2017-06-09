@@ -91,9 +91,7 @@ auto THTensor<real>::newUnfold(int dimension, long size, long step) const -> THT
 template<>
 auto THTensor<real>::newExpand(const long_range& size) const -> THTensor* {
   THLongStorage *size_storage = THLongStorage_newWithSize(size.size());
-  long *size_storage_d = size_storage->data;
-  for (auto it = size.begin(); it != size.end(); ++it)
-    *size_storage_d++ = *it;
+  std::memcpy(size_storage->data, size.data(), sizeof(long) * size.size());
   // TODO this might leak on error
   auto expanded = new THTensor(THTensor_(newExpand)(tensor, size_storage));
   THLongStorage_free(size_storage);
@@ -103,9 +101,7 @@ auto THTensor<real>::newExpand(const long_range& size) const -> THTensor* {
 template<>
 auto THTensor<real>::newView(const long_range& size) const -> THTensor* {
   THLongStorage *size_storage = THLongStorage_newWithSize(size.size());
-  long *size_storage_d = size_storage->data;
-  for (auto it = size.begin(); it != size.end(); ++it)
-    *size_storage_d++ = *it;
+  std::memcpy(size_storage->data, size.data(), sizeof(long) * size.size());
   // TODO this might leak on error
   auto viewed = new THTensor(THTensor_(newView)(tensor, size_storage));
   THLongStorage_free(size_storage);

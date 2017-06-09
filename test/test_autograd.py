@@ -35,6 +35,16 @@ def backward_engine(engine):
         Variable._execution_engine = _prev_engine
 
 
+@contextlib.contextmanager
+def use_cudnn(should_use):
+    orig = torch.backends.cudnn.enabled
+    torch.backends.cudnn.enabled = should_use
+    try:
+        yield
+    finally:
+        torch.backends.cudnn.enabled = orig
+
+
 def graph_desc(fn):
     if fn is None:
         return 'None'
@@ -1279,19 +1289,15 @@ class TestAutograd(TestCase):
             # Special case because transpose dilated convolution is not implemented
             def func(x, bias):
                 # We disable cudnn during forward to avoid finite difference imprecision issues
-                prev_cudnn = torch.backends.cudnn.enabled
-                torch.backends.cudnn.enabled = False
-                out = F.conv2d(x, weight, bias, stride, padding, dilation)
-                torch.backends.cudnn.enabled = prev_cudnn
+                with use_cudnn(False):
+                    out = F.conv2d(x, weight, bias, stride, padding, dilation)
                 return out
             inputs = (x, bias,)
         else:
             def func(x, weight, bias):
                 # We disable cudnn during forward to avoid finite difference imprecision issues
-                prev_cudnn = torch.backends.cudnn.enabled
-                torch.backends.cudnn.enabled = False
-                out = F.conv2d(x, weight, bias, stride, padding, dilation)
-                torch.backends.cudnn.enabled = prev_cudnn
+                with use_cudnn(False):
+                    out = F.conv2d(x, weight, bias, stride, padding, dilation)
                 return out
             inputs = (x, weight, bias,)
 
