@@ -6,6 +6,7 @@ from optparse import OptionParser
 import cwrap_parser
 import preprocess_declarations
 import function_wrapper
+import dispatch_macros
 from code_template import CodeTemplate
 
 
@@ -81,7 +82,7 @@ def write(filename,s):
     with open(filename,"w") as f:
         f.write(s)
 
-def generate_storage_type_and_tensor(processor, scalar_type, declarations):
+def generate_storage_type_and_tensor(processor, scalar_type, declarations,all_types):
     scalar_name, c_type, accreal = scalar_type
     env = {}
     env['ScalarName'] = scalar_name
@@ -91,6 +92,16 @@ def generate_storage_type_and_tensor(processor, scalar_type, declarations):
     env['Type'] = "{}{}Type".format(processor,scalar_name)
     env['Tensor'] = "{}{}Tensor".format(processor,scalar_name)
     env['Processor'] = processor
+
+    # used for generating switch logic for external functions
+    env['TypeID'] = len(all_types)
+    all_types.append({
+        'ScalarType' : c_type,
+        'ScalarName' : scalar_name,
+        'Processor' : processor,
+        'Type': env['Type'],
+        'TypeID' : env['TypeID'],
+    })
 
     if processor == 'CUDA':
         env['th_header'] = "THC/THC.h"
@@ -157,12 +168,16 @@ for fname,env in generators.items():
 # be used by function_wrapper.create_derived
 function_wrapper.create_generic(top_env,declarations)
 
+# populated by generate_storage_type_and_tensor
+all_types = []
+
 for processor in processors:
     for scalar_type in scalar_types:
-        generate_storage_type_and_tensor(processor,scalar_type, declarations)
+        generate_storage_type_and_tensor(processor,scalar_type, declarations, all_types)
 
 write('Type.h',TYPE_H.substitute(top_env))
 write('Type.cpp',TYPE_CPP.substitute(top_env))
 
 write('Tensor.h',TENSOR_H.substitute(top_env))
 write('Functions.h',FUNCTIONS_H.substitute(top_env))
+write('Dispatch.h',dispatch_macros.create(all_types))

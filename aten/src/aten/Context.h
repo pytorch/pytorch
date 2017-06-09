@@ -14,7 +14,7 @@ public:
   Type & getType(Processor p, ScalarType s) {
     auto & type = type_registry[static_cast<int>(p)][static_cast<int>(s)];
     if(!type)
-      throw std::runtime_error("type is not enabled (TODO encode type as string)");
+      throw std::runtime_error("Type %s is not enabled (TODO encode type as string)");
     return *type;
   }
   Generator & defaultGenerator(Processor p) {
