@@ -195,7 +195,7 @@ class Operator : public OperatorBase {
   inline const Tensor<Context>& Input(int idx) {
     return OperatorBase::template Input<Tensor<Context> >(idx); }
   inline Tensor<Context>* Output(int idx) {
-    return OperatorBase::template Output<Tensor<Context> >(idx);
+    return OperatorBase::template Output<Tensor<Context>>(idx);
   }
 
   // The run function of Operator switches to the device, and then carries out
@@ -258,7 +258,7 @@ class Operator : public OperatorBase {
   USE_OPERATOR_BASE_FUNCTIONS;                            \
   /* using override */ using Operator<context>::context_; \
   /* using override */ using Operator<context>::Input;    \
-  /* using override */ using Operator<context>::Output
+  /* using override */ using Operator<context>::Output;
 
 #define USE_OPERATOR_CONTEXT_FUNCTIONS USE_OPERATOR_FUNCTIONS(Context)
 
@@ -359,6 +359,10 @@ struct DispatchHelper<FixedValues<>, ExtraArgs...> {
     static bool call(Op* op, const Tensor<Context>& tensor) {                  \
       return call<Op>(op, tensor.meta());                                      \
     }                                                                          \
+    template <typename Op>                                                     \
+    static bool call(Op* op, const Blob& blob) {                               \
+      return call<Op>(op, blob.meta());                                        \
+    }                                                                          \
   };                                                                           \
                                                                                \
   template <typename... ExtraArgs>                                             \
@@ -370,6 +374,10 @@ struct DispatchHelper<FixedValues<>, ExtraArgs...> {
     template <typename Op, typename Context>                                   \
     static bool call(Op* op, const Tensor<Context>& tensor) {                  \
       return call<Op>(op, tensor.meta());                                      \
+    }                                                                          \
+    template <typename Op>                                                     \
+    static bool call(Op* op, const Blob& blob) {                               \
+      return call<Op>(op, blob.meta());                                        \
     }                                                                          \
   };                                                                           \
                                                                                \
@@ -384,6 +392,10 @@ struct DispatchHelper<FixedValues<>, ExtraArgs...> {
     template <typename Op, typename Context>                                   \
     static bool call(Op* op, const Tensor<Context>& tensor) {                  \
       return call<Op>(op, tensor.meta());                                      \
+    }                                                                          \
+    template <typename Op>                                                     \
+    static bool call(Op* op, const Blob& blob) {                               \
+      return call<Op>(op, blob.meta());                                        \
     }                                                                          \
   };
 CAFFE2_DEFINE_TENSOR_TYPES_DISPATCHER(
