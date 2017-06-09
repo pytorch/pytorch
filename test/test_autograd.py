@@ -1265,38 +1265,47 @@ class TestAutograd(TestCase):
         self.assertEqual(x.grad.data, torch.ones(x.size()))
 
     def run_conv_double_back_test(self, kern, stride, padding, chan_in, chan_out,
-                                  batch_size, inp_size, dilation, no_weight):
-        # When using cudnn
-        # Works for eps = 1e-3
-        # Give wrong values for eps = 1e-6
-        # Give only zeros for eps = 1e-8
-        # Without cudnn
-        # works for all eps
-        torch.backends.cudnn.enabled = True
-        epsilon = 1e-3
-        x = Variable(torch.randn(batch_size, chan_in, inp_size, inp_size).cuda(), requires_grad=True)
-        weight = Variable(torch.randn(chan_out, chan_in, kern, kern).cuda(), requires_grad=True)
-        bias = Variable(torch.randn(chan_out).cuda(), requires_grad=True)
+                                  batch_size, inp_size, dilation, no_weight, use_cuda=False):
+        x = Variable(torch.randn(batch_size, chan_in, inp_size, inp_size), requires_grad=True)
+        weight = Variable(torch.randn(chan_out, chan_in, kern, kern), requires_grad=True)
+        bias = Variable(torch.randn(chan_out), requires_grad=True)
+
+        if use_cuda:
+            x = x.cuda()
+            weight = weight.cuda()
+            bias = bias.cuda()
 
         if no_weight:
             # Special case because transpose dilated convolution is not implemented
             def func(x, bias):
-                return F.conv2d(x, weight, bias, stride, padding, dilation)
+                # We disable cudnn during forward to avoid finite difference imprecision issues
+                prev_cudnn = torch.backends.cudnn.enabled
+                torch.backends.cudnn.enabled = False
+                out = F.conv2d(x, weight, bias, stride, padding, dilation)
+                torch.backends.cudnn.enabled = prev_cudnn
+                return out
             inputs = (x, bias,)
         else:
             def func(x, weight, bias):
-                return F.conv2d(x, weight, bias, stride, padding, dilation)
+                # We disable cudnn during forward to avoid finite difference imprecision issues
+                prev_cudnn = torch.backends.cudnn.enabled
+                torch.backends.cudnn.enabled = False
+                out = F.conv2d(x, weight, bias, stride, padding, dilation)
+                torch.backends.cudnn.enabled = prev_cudnn
+                return out
             inputs = (x, weight, bias,)
 
         dummy_out = func(*inputs)
-        grad_y = Variable(torch.randn(dummy_out.size()).cuda(), requires_grad=True)
+        grad_y = Variable(torch.randn(dummy_out.size()), requires_grad=True)
+        if use_cuda:
+            grad_y = grad_y.cuda()
 
-        return gradgradcheck(func, inputs, (grad_y,), eps=epsilon)
+        return gradgradcheck(func, inputs, (grad_y,))
 
     def test_conv_double_backward(self):
         batch_size = 2
         for kern, inp_size, dilations in [(3, 5, [1, 2]), (3, 7, [1, 2]), (4, 9, [2]), (4, 10, [1])]:
-            for stride, padding, chan_in, chan_out, dilation in product([1, 2], [0, 1, 2], [1, 3], [1, 3], dilations):
+            for stride, padding, chan_in, chan_out, dilation in product([1, 2], [0, 2], [1], [2, 3], dilations):
                 no_weight = stride == 2
                 result = self.run_conv_double_back_test(kern, stride,
                                                         padding, chan_in, chan_out,
@@ -1334,6 +1343,17 @@ class TestAutograd(TestCase):
                                                    padding, chan_in, chan_out,
                                                    batch_size, inp_size, dilation,
                                                    no_weight)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
+    def test_conv_double_backward_cuda(self):
+        batch_size = 1
+        for kern, inp_size, dilations in [(3, 5, [1, 2]), (4, 10, [1])]:
+            for stride, padding, chan_in, chan_out, dilation in product([1], [2], [2], [3], dilations):
+                no_weight = stride == 2
+                result = self.run_conv_double_back_test(kern, stride,
+                                                        padding, chan_in, chan_out,
+                                                        batch_size, inp_size, dilation,
+                                                        no_weight, use_cuda=True)
 
 
 def index_variable(shape, max_indices):
