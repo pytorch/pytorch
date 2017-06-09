@@ -23,7 +23,7 @@ def range_push(msg):
     """
     if _libnvToolsExt() is None:
         raise RuntimeError('Unable to load nvToolsExt library')
-    return lib.nvtxRangePushA(ctypes.c_char_p(msg))
+    return lib.nvtxRangePushA(ctypes.c_char_p(msg.encode("ascii")))
 
 
 def range_pop():
@@ -45,4 +45,4 @@ def mark(msg):
     """
     if _libnvToolsExt() is None:
         raise RuntimeError('Unable to load nvToolsExt library')
-    return lib.nvtxMarkA(ctypes.c_char_p(msg))
+    return lib.nvtxMarkA(ctypes.c_char_p(msg.encode("ascii")))
