@@ -42,7 +42,7 @@ class MemoryAllocationReporter {
 
 struct DefaultCPUAllocator final : CPUAllocator {
   DefaultCPUAllocator() {}
-  ~DefaultCPUAllocator() {}
+  ~DefaultCPUAllocator() override {}
   void* New(size_t nbytes) override {
     void* data = nullptr;
 #ifdef __ANDROID__

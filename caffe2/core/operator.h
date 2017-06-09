@@ -190,7 +190,7 @@ class Operator : public OperatorBase {
     // constructors will run on that device.
     context_.SwitchToDevice(0);
   }
-  virtual ~Operator() noexcept {}
+  ~Operator() noexcept override {}
 
   inline const Tensor<Context>& Input(int idx) {
     return OperatorBase::template Input<Tensor<Context> >(idx); }
