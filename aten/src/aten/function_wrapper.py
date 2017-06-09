@@ -255,10 +255,21 @@ def create_derived(processor_type_env,declarations):
                     allocation = CodeTemplate(ALLOC_WRAP[arg['type']]).substitute(env)
                     body.append('auto {}_ = {};'.format(arg['name'],allocation))
                     body.append('auto {} = Tensor({}_,false);'.format(arg['name'],arg['name']))
+                    sel = '.'
                 else:
                     check_cast = CHECKED_CAST[arg['type']].substitute(env,arg_name=arg['name'],arg_pos=count)
                     body.append("auto {}_ = {};".format(arg['name'],check_cast))
-            
+                    sel = '->'
+                if 'resize' in arg:
+                    resize = arg['resize']
+                    if type(resize) == str:
+                        body.append("{}{}resize_as_({});".format(arg['name'],sel,resize))
+                    else:
+                        dims = [ '{}->size({})'.format(name,dim) for name,dim in resize ]
+                        body.append("{}{}resize_({{ {} }});".format(arg['name'],sel,','.join(dims)))
+                if arg.get('cpu_zero',False):
+                    body.append("{}{}zero_();".format(arg['name'],sel))
+
         option['actuals'] = processor_type_env['state'] + get_arguments(option)
         call = CodeTemplate("${THTensor}_${cname}(${actuals})").substitute(env)
         ret = option['return']
