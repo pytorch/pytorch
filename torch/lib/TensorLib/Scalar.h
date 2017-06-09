@@ -31,8 +31,8 @@ typedef struct  TLIB_ALIGN(2) {
   unsigned short x;
 #ifdef TENSORLIB_CUDA_ENABLED
   operator half() { return half { x }; }
-  operator double();
 #endif
+  operator double();
 } Half;
 
 template<> Half convert(double f);

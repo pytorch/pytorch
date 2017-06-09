@@ -33,7 +33,7 @@ int main() {
   auto wha2 = CUDA(Float).zeros({4,4}).add(t).sum();
   cout << wha2.toDouble() << " <-ndim\n";
 
-  cout << t.size() << " " << t.stride() << "\n";
+  cout << t.sizes() << " " << t.strides() << "\n";
 
 /*
   Tensor x = tlib::randn({1,10});

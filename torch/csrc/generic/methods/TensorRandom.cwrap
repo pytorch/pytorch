@@ -417,6 +417,7 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
   arguments:
     - arg: THTensor* output
       output: True
+      resize: self
     - arg: THGenerator* generator
       default: THPDefaultGenerator->cdata
       kwarg_only: True
@@ -478,6 +479,7 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
   arguments:
     - arg: THTensor* output
       output: True
+      resize: self
     - THTensor* self
 ]]
 

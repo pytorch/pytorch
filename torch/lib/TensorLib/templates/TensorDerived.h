@@ -14,8 +14,8 @@ public:
   ${Tensor}(Context* context, ${THTensor} * tensor);
   virtual ~${Tensor}();
   virtual const char * toString() const override;
-  virtual IntList size() override;
-  virtual IntList stride() override;
+  virtual IntList sizes() override;
+  virtual IntList strides() override;
   static const char * typeString();
 
 //TODO(zach): sort of friend permissions later so this

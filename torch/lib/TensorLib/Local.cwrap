@@ -1,0 +1,17 @@
+[[
+  name: size
+  return: long
+  cpu_half: True
+  arguments:
+    - THTensor* self
+    - long dim
+]]
+
+[[
+  name: stride
+  return: long
+  cpu_half: True
+  arguments:
+    - THTensor* self
+    - long dim
+]]

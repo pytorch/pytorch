@@ -664,7 +664,6 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: arange
-  cname: range
   variants:
     - function
   defined_if: "!IS_CUDA"
@@ -672,21 +671,13 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
     - CPU
   return: argument 0
   options:
-    - before_call: |
-        if (mod_traits<accreal>::mod(arg_end - arg_start, arg_step) == 0) {
-          arg_end -= arg_step;
-        }
-      arguments:
+      - arguments:
         - arg: THTensor* result
           output: True
         - accreal start
         - accreal end
         - accreal step
-    - before_call: |
-        if (mod_traits<accreal>::mod(arg_end - arg_start, 1) == 0) {
-          arg_end -= 1;
-        }
-      arguments:
+      - arguments:
         - arg: THTensor* result
           output: True
         - accreal start
@@ -739,6 +730,7 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
   arguments:
     - arg: THTensor* result
       output: True
+      resize: index
     - THTensor* self
     - arg: long dim
       wrap_dim: self

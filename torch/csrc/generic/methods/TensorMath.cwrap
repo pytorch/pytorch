@@ -1971,6 +1971,7 @@
   arguments:
     - arg: THTensor* result
       output: True
+      resize: [ [self,0], [vec2,0] ]
     - CONSTANT AS_REAL(0)
     - argument 0
     - CONSTANT AS_REAL(1)
@@ -1994,6 +1995,8 @@
   arguments:
     - arg: THTensor* result
       output: True
+      resize: [self, 0]
+      cpu_zero: True
     - CONSTANT AS_REAL(0)
     - argument 0
     - CONSTANT AS_REAL(1)
@@ -2019,6 +2022,8 @@
       arguments:
         - arg: THTensor* result
           output: True
+          resize: [ [self, 0], [mat2,1] ]
+          cpu_zero: True
         - CONSTANT AS_REAL(0)
         - argument 0
         - CONSTANT AS_REAL(1)
@@ -2054,6 +2059,8 @@
   arguments:
     - arg: THTensor* result
       output: True
+      resize: [ [self,0], [self,1], [mat2,2] ]
+      cpu_zero: True
     - CONSTANT AS_REAL(0)
     - argument 0
     - CONSTANT AS_REAL(1)
