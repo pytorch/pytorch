@@ -44,7 +44,7 @@ template <class Context>
 class TensorSerializer : public BlobSerializerBase {
  public:
   TensorSerializer() : context_() {}
-  ~TensorSerializer() {}
+  ~TensorSerializer() override {}
   /**
    * Serializes a Blob. Note that this blob has to contain Tensor<Context>,
    * otherwise this function produces a fatal error.

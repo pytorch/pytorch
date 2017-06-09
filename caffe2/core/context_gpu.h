@@ -240,7 +240,7 @@ inline void CPUContext::CopyBytes<CPUContext, CUDAContext>(
  */
 struct PinnedCPUAllocator final : CPUAllocator {
   PinnedCPUAllocator() {}
-  ~PinnedCPUAllocator() {}
+  ~PinnedCPUAllocator() override {}
   void* New(size_t nbytes) override {
     void* data;
     std::lock_guard<std::mutex> lock(CUDAContext::mutex());
