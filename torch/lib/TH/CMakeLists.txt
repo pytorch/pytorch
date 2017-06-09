@@ -20,6 +20,27 @@ IF(NOT TH_INSTALL_BIN_SUBDIR
   SET(TH_INSTALL_CMAKE_SUBDIR "share/cmake/TH" CACHE PATH "TH install cmake subdirectory")
 ENDIF()
 
+######################################################################
+###### macros section
+#####################################################################
+IF(NOT ADD_TORCH_LIBRARY)
+MACRO(ADD_TORCH_LIBRARY package type src)
+  IF ("${type}" STREQUAL "STATIC")
+    if ("${src}" MATCHES "cu$" OR "${src}" MATCHES "cu;")
+      CUDA_ADD_LIBRARY(${package} STATIC ${src})
+    else()
+      ADD_LIBRARY(${package} STATIC ${src})
+    endif()
+  ELSE()
+    if ("${src}" MATCHES "cu$" OR "${src}" MATCHES "cu;")
+      CUDA_ADD_LIBRARY(${package} ${type} ${src})
+    else()
+      ADD_LIBRARY(${package} ${type} ${src})
+    endif()
+  ENDIF()
+ENDMACRO()
+ENDIF()
+
 #######################################################################
 ##### flags section
 ######################################################################
@@ -145,7 +166,6 @@ IF(C_AVX2_FOUND)
   SET(CMAKE_C_FLAGS "-DUSE_AVX2 ${CMAKE_C_FLAGS}")
 ENDIF(C_AVX2_FOUND)
 
-
 CHECK_C_SOURCE_RUNS("
 #include <stdatomic.h>
 int main()
@@ -243,10 +263,15 @@ SET(src ${src} ${hdr} ${simd})
 ##### build section
 ######################################################################
 
-ADD_LIBRARY(TH SHARED ${src})
-if(BUILD_STATIC)
-  ADD_LIBRARY(TH_static STATIC ${src})
-endif()
+ADD_TORCH_LIBRARY(TH SHARED "${src}")
+
+IF (BUILD_STATIC OR "$ENV{STATIC_TH}" STREQUAL "YES")
+  ADD_TORCH_LIBRARY(TH_static STATIC "${src}")
+  SET_TARGET_PROPERTIES(TH_static PROPERTIES
+    COMPILE_FLAGS "-fPIC")
+  SET_TARGET_PROPERTIES(TH_static PROPERTIES
+    PREFIX "lib" IMPORT_PREFIX "lib" OUTPUT_NAME "TH")
+ENDIF()
 
 IF(NOT TH_SO_VERSION)
   SET(TH_SO_VERSION 0)
@@ -279,6 +304,9 @@ FIND_PACKAGE(BLAS)
 IF(BLAS_FOUND)
   SET(USE_BLAS 1)
   TARGET_LINK_LIBRARIES(TH ${BLAS_LIBRARIES})
+  IF(BLAS_INFO STREQUAL "mkl")
+    ADD_DEFINITIONS(-DTH_BLAS_MKL)
+  ENDIF()
 ENDIF(BLAS_FOUND)
 
 FIND_PACKAGE(LAPACK)

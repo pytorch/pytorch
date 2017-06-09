@@ -84,3 +84,21 @@ class Inverse(Function):
     def backward(ctx, grad_output):
         inverse, = ctx.saved_variables
         return -torch.mm(inverse.t(), torch.mm(grad_output, inverse.t()))
+
+
+class Gesv(Function):
+
+    @staticmethod
+    def forward(ctx, b, a):
+        # TODO see if one can backprop through LU
+        X, LU = torch.gesv(b, a)
+        ctx.save_for_backward(X, a)
+        ctx.mark_non_differentiable(LU)
+        return X, LU
+
+    @staticmethod
+    def backward(ctx, grad_output, grad_LU=None):
+        X, a = ctx.saved_variables
+        grad_b, _ = torch.gesv(grad_output, a.t())
+        grad_a = -torch.mm(grad_b, X.t())
+        return grad_b, grad_a

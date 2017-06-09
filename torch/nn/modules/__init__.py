@@ -22,8 +22,8 @@ from .sparse import Embedding
 from .rnn import RNNBase, RNN, LSTM, GRU, \
     RNNCell, LSTMCell, GRUCell
 from .pixelshuffle import PixelShuffle
-from .upsampling import UpsamplingNearest2d, UpsamplingBilinear2d
-from .distance import PairwiseDistance
+from .upsampling import UpsamplingNearest2d, UpsamplingBilinear2d, Upsample
+from .distance import PairwiseDistance, CosineSimilarity
 
 
 __all__ = [
@@ -41,7 +41,7 @@ __all__ = [
     'InstanceNorm3d', 'Dropout', 'Dropout2d', 'Dropout3d', 'ReflectionPad2d',
     'ReplicationPad2d', 'ReplicationPad3d', 'CrossMapLRN2d',
     'Embedding', 'RNNBase', 'RNN', 'LSTM', 'GRU', 'RNNCell', 'LSTMCell', 'GRUCell',
-    'PixelShuffle', 'UpsamplingNearest2d', 'UpsamplingBilinear2d', 'PairwiseDistance',
+    'PixelShuffle', 'Upsample', 'UpsamplingNearest2d', 'UpsamplingBilinear2d', 'PairwiseDistance',
     'AdaptiveMaxPool1d', 'AdaptiveMaxPool2d', 'AdaptiveAvgPool1d', 'AdaptiveAvgPool2d',
-    'TripletMarginLoss', 'ZeroPad2d', 'ConstantPad2d', 'Bilinear',
+    'TripletMarginLoss', 'ZeroPad2d', 'ConstantPad2d', 'Bilinear', 'CosineSimilarity',
 ]

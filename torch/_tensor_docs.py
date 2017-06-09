@@ -798,9 +798,9 @@ signature::
     def callable(a, b) -> number
 """)
 
-add_docstr(torch._C.FloatTensorBase.masked_copy_,
+add_docstr(torch._C.FloatTensorBase.masked_scatter_,
            """
-masked_copy_(mask, source)
+masked_scatter_(mask, source)
 
 Copies elements from :attr:`source` into this tensor at positions where the
 :attr:`mask` is one. The :attr:`mask` should have the same number of elements

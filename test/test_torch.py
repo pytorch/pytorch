@@ -2300,13 +2300,13 @@ class TestTorch(TestCase):
     def test_scatterFill(self):
         self._test_scatter_base(self, lambda t: t, 'scatter_', True)
 
-    def test_masked_copy(self):
+    def test_masked_scatter(self):
         num_copy, num_dest = 3, 10
         dest = torch.randn(num_dest)
         src = torch.randn(num_copy)
         mask = torch.ByteTensor((0, 0, 0, 0, 1, 0, 1, 0, 1, 0))
         dest2 = dest.clone()
-        dest.masked_copy_(mask, src)
+        dest.masked_scatter_(mask, src)
         j = 0
         for i in range(num_dest):
             if mask[i]:
@@ -2316,12 +2316,12 @@ class TestTorch(TestCase):
 
         # make source bigger than number of 1s in mask
         src = torch.randn(num_dest)
-        dest.masked_copy_(mask, src)
+        dest.masked_scatter_(mask, src)
 
         # make src smaller. this should fail
         src = torch.randn(num_copy - 1)
         with self.assertRaises(RuntimeError):
-            dest.masked_copy_(mask, src)
+            dest.masked_scatter_(mask, src)
 
     def test_masked_select(self):
         num_src = 10

@@ -33,7 +33,10 @@ class Optimizer(object):
 
         param_set = set()
         for group in self.param_groups:
-            group['params'] = list(group['params'])
+            if isinstance(group['params'], torch.autograd.Variable):
+                group['params'] = [group['params']]
+            else:
+                group['params'] = list(group['params'])
             group_set = set(group['params'])
             if not param_set.isdisjoint(group_set):
                 raise ValueError("some parameters appear in more than one "

@@ -24,7 +24,8 @@ class ClassNLLCriterion(Criterion):
             self.output_tensor,
             self.sizeAverage,
             self.weights,
-            self.total_weight_tensor
+            self.total_weight_tensor,
+            -100
         )
         self.output = self.output_tensor[0]
         return self.output
@@ -40,7 +41,8 @@ class ClassNLLCriterion(Criterion):
             self.gradInput,
             self.sizeAverage,
             self.weights,
-            self.total_weight_tensor
+            self.total_weight_tensor,
+            -100
         )
 
         return self.gradInput

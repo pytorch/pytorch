@@ -337,7 +337,7 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: maskedCopy_
   cname: maskedCopy
-  python_name: masked_copy_
+  python_name: masked_scatter_
   return: self
   arguments:
     - THTensor* self

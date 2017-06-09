@@ -178,7 +178,54 @@ class Threshold(Function):
         return grad_input, None, None, None
 
 
+# TODO: This class should be removed once THNN function support Variable backward
+class LeakyReLU(Function):
+
+    @staticmethod
+    def forward(ctx, input, negative_slope, inplace):
+        ctx.negative_slope = negative_slope
+        ctx.inplace = inplace
+
+        if inplace:
+            ctx.mark_dirty(input)
+            output = input
+        else:
+            output = input.new(input.size())
+        ctx.save_for_backward(input)
+
+        backend = type2backend[type(input)]
+        backend.LeakyReLU_updateOutput(
+            backend.library_state,
+            input,
+            output,
+            negative_slope,
+            inplace
+        )
+        return output
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        input, = ctx.saved_variables
+        if grad_output.volatile:
+            grad_input = Variable(input.data.new(input.size()), volatile=True)
+            backend = type2backend[type(input.data)]
+            backend.LeakyReLU_updateGradInput(
+                backend.library_state,
+                input.data,
+                grad_output.data,
+                grad_input.data,
+                ctx.negative_slope,
+                False
+            )
+        else:
+            positive_mask = input > 0
+            negative_mask = input <= 0
+            mask = positive_mask.type_as(grad_output) + negative_mask.type_as(grad_output) * ctx.negative_slope
+            grad_input = mask * grad_output
+        return grad_input, None, None
+
 _all_functions.append(PReLU)
 _all_functions.append(RReLU)
 _all_functions.append(Softmin)
 _all_functions.append(Threshold)
+_all_functions.append(LeakyReLU)

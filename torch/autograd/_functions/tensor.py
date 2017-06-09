@@ -363,17 +363,17 @@ class Unsqueeze(Function):
         return grad_output.squeeze(ctx.dim), None
 
 
-class MaskedCopy(InplaceFunction):
+class MaskedScatter(InplaceFunction):
 
     @staticmethod
     def forward(ctx, tensor1, mask, tensor2, inplace=False):
-        assert not ctx.needs_input_grad[1], "MaskedCopy can't differentiate the mask"
+        assert not ctx.needs_input_grad[1], "MaskedScatter can't differentiate the mask"
         if not inplace:
             tensor1 = tensor1.clone()
         else:
             ctx.mark_dirty(tensor1)
         ctx.save_for_backward(mask)
-        return tensor1.masked_copy_(mask, tensor2)
+        return tensor1.masked_scatter_(mask, tensor2)
 
     @staticmethod
     @once_differentiable
@@ -425,7 +425,7 @@ class MaskedSelect(Function):
         grad_tensor = None
         if ctx.needs_input_grad[0]:
             grad_tensor = grad_output.new(ctx.input_size).zero_()
-            grad_tensor.masked_copy_(mask, grad_output)
+            grad_tensor.masked_scatter_(mask, grad_output)
         return grad_tensor, None
 
 

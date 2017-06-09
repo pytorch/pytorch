@@ -201,6 +201,9 @@ class TestOptim(TestCase):
     def _build_params_dict(self, weight, bias, **kwargs):
         return [dict(params=[weight]), dict(params=[bias], **kwargs)]
 
+    def _build_params_dict_single(self, weight, bias, **kwargs):
+        return [dict(params=bias, **kwargs)]
+
     def test_sgd(self):
         self._test_rosenbrock(
             lambda params: optim.SGD(params, lr=1e-3),
@@ -218,6 +221,11 @@ class TestOptim(TestCase):
         self._test_basic_cases(
             lambda weight, bias: optim.SGD(
                 self._build_params_dict(weight, bias, lr=1e-2),
+                lr=1e-3)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.SGD(
+                self._build_params_dict_single(weight, bias, lr=1e-2),
                 lr=1e-3)
         )
 
