@@ -121,7 +121,8 @@ def is_real_argument_to_wrapper(argument):
     return not argument.get('output',False) and\
         argument['type'] != 'CONSTANT' and\
         argument['type'] != 'argument'
-
+def to_return_type(t):
+    return TYPE_RETURN.get(t,t)
 def create_generic(top_env, declarations):
 
     def get_formals(option):
@@ -144,17 +145,22 @@ def create_generic(top_env, declarations):
         type_str = TYPE_FORMAL_GENERIC.get(argument['type'],argument['type'])
         return '{} {}'.format(type_str,argument['name'])
 
+
     def format_return_type(option):
         ret = option['return']
         if ret['kind'] == 'arguments':
-            #TODO multiple returns
-            index = ret['arguments'][0]
-            the_type = option['arguments'][index]['type']
+            argument_indices = ret['arguments']
+            if len(argument_indices) == 1:
+                the_type = option['arguments'][argument_indices[0]]['type']
+                return to_return_type(the_type)
+            else:
+                types = [to_return_type(option['arguments'][idx]['type']) for idx in argument_indices]
+                return "std::tuple<{}>".format(','.join(types))
+
         elif ret['kind'] == 'type':
-            the_type = ret['type']
+            return to_return_type(ret['type'])
         else:
             raise Exception("format_return_type")
-        return TYPE_RETURN.get(the_type,the_type)
 
     def find_first_tensor(formals):
         for argument in formals:
@@ -274,9 +280,21 @@ def create_derived(processor_type_env,declarations):
         call = CodeTemplate("${THTensor}_${cname}(${actuals})").substitute(env)
         ret = option['return']
         if ret['kind'] == 'arguments':
-            arg = option['arguments'][ret['arguments'][0]]
             body.append(call+";")
-            body.append("return {};".format(arg['name']))
+            arguments_indices = ret['arguments']
+            if len(arguments_indices) == 1:
+                arg = option['arguments'][arguments_indices[0]]
+                body.append("return {};".format(arg['name']))
+            else:
+                arguments = [ option['arguments'][argi]
+                    for argi in arguments_indices ]
+                types = [ TYPE_RETURN[arg['type']] for arg in arguments ]
+                #TODO: check for move semantics...
+                names = [ arg['name'] for arg in arguments]
+                body.append(CodeTemplate("return std::tuple<${types}>(${names});").substitute(types=types,names=names))
+            #else:
+            #    print(yaml.dump(option))
+            #    raise Exception("NYI - 3 argument return?")
         elif ret['kind'] == 'type':
             if ret['type'] == 'THTensor*':
                 body.append(CodeTemplate("return Tensor(new ${Tensor}(context,${arg_name}),false);").substitute(env,arg_name=call))
