@@ -567,7 +567,8 @@ class Cumsum(Function):
 
         end_idx = grad_input.size(ctx.dim) - 1
         grad_sum = grad_input.narrow(ctx.dim, end_idx, 1)
-        grad_input = (grad_input - grad_sum.expand_as(grad_input)) + grad_output
+        grad_input = (grad_input - grad_sum.expand_as(grad_input))
+        grad_input += grad_output
         return grad_input, None
 
 
