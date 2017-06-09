@@ -2,7 +2,7 @@
 #include <thread>
 #include <mutex>
 
-#ifdef TENSORLIB_HAS_CUDA
+#ifdef TENSORLIB_CUDA_ENABLED
 #include "THC/THC.h"
 #include "TensorLib/CUDAGenerator.h"
 #endif
@@ -12,7 +12,7 @@ namespace tlib {
 
 Context::Context() {
 
-#ifdef TENSORLIB_HAS_CUDA
+#ifdef TENSORLIB_CUDA_ENABLED
   thc_state = THCState_alloc();
   THCState_setDeviceAllocator(thc_state, THCCachingAllocator_get());
   thc_state->cudaHostAllocator = &THCCachingHostAllocator;
@@ -28,7 +28,7 @@ Context::Context() {
 }
 
 Context::~Context() {
-#ifdef TENSORLIB_HAS_CUDA
+#ifdef TENSORLIB_CUDA_ENABLED
   THCState_free(thc_state);
 #endif
 }

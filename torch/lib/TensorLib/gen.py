@@ -109,11 +109,12 @@ def generate_storage_type_and_tensor(processor, scalar_type, declarations):
         env['state'] = []
         env['isCUDA'] = 'false'
         env['storage_device'] = 'throw std::runtime_error("CPU storage has no device");'
-
+    env['AS_REAL'] = env['ScalarType']
     if scalar_name == "Half":
         if processor == "CUDA":
             env['to_th_half'] = 'HalfFix<__half,Half>'
             env['to_tlib_half'] = 'HalfFix<Half,__half>'
+            env['AS_REAL'] = 'convert<half,double>'
         else:
             env['to_th_half'] = 'HalfFix<THHalf,Half>'
             env['to_tlib_half'] = 'HalfFix<Half,THHalf>'

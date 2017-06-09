@@ -21,4 +21,11 @@ template<> int64_t convert(Half f) {
   return static_cast<int64_t>(convert<double,Half>(f));
 }
 
+
+#ifdef TENSORLIB_CUDA_ENABLED
+template<> half convert(double d) {
+  return half { convert<Half,double>(d).x };
+}
+#endif
+
 }

@@ -50,7 +50,7 @@ ${Tensor}::~${Tensor}() {
 }
 
 const char * ${Tensor}::toString() const {
-  return ${Tensor}::typeString();
+  return "${Tensor}";
 }
 
 IntList ${Tensor}::size() {
@@ -61,7 +61,7 @@ IntList ${Tensor}::stride() {
 }
 
 const char * ${Tensor}::typeString() {
-  return "${Tensor}";
+  return "${Type}";
 }
 
 }

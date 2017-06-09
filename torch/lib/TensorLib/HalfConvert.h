@@ -1,8 +1,5 @@
 #pragma once
 
-#include "TensorLib/Scalar.h"
-#include "TH/TH.h"
-
 namespace tlib {
 
   template<typename To, typename From>
