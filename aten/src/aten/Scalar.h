@@ -3,6 +3,12 @@
 #include<stdint.h>
 #include <stdexcept>
 #include <string>
+#include "TensorLib/HalfConvert.h"
+
+#ifdef TENSORLIB_CUDA_ENABLED
+#include <cuda_runtime.h>
+#include <cuda_fp16.h>
+#endif
 
 #if defined(__GNUC__)
 #define TLIB_ALIGN(n) __attribute__((aligned(n)))
@@ -16,9 +22,30 @@
 
 namespace tlib {
 
-typedef struct TLIB_ALIGN(2){
+
+template<typename To, typename From> To convert(From f) {
+  return static_cast<To>(f);
+}
+
+typedef struct  TLIB_ALIGN(2) {
   unsigned short x;
+#ifdef TENSORLIB_CUDA_ENABLED
+  operator half() { return half { x }; }
+  operator double();
+#endif
 } Half;
+
+template<> Half convert(double f);
+template<> double convert(Half f);
+template<> Half convert(int64_t f);
+template<> int64_t convert(Half f);
+
+Half::operator double() {
+  return convert<double,Half>(*this);
+}
+#ifdef TENSORLIB_CUDA_ENABLED
+template<> half convert(double d);
+#endif
 
 #define TLIB_SCALAR_TYPES(_) \
 _(uint8_t,Byte,i) \
@@ -30,23 +57,23 @@ _(int64_t,Long,i) \
 _(int16_t,Short,i) \
 _(Half,Half,d)
 
-template<typename To, typename From> To convert(From f) {
-  return static_cast<To>(f);
-}
-template<> Half convert(double f);
-template<> double convert(Half f);
-template<> Half convert(int64_t f);
-template<> int64_t convert(Half f);
-
 class Scalar {
 public:
 #define DEFINE_IMPLICIT_CTOR(type,name,member) \
   Scalar(type v) \
   : tag(Tag::HAS_##member) { \
     member = convert<decltype(member),type>(v); \
-  } \
+  }
 
   TLIB_SCALAR_TYPES(DEFINE_IMPLICIT_CTOR)
+
+#ifdef TENSORLIB_CUDA_ENABLED
+  Scalar(half v)
+  : tag(Tag::HAS_d) {
+    d = convert<double,Half>(Half{v.x});
+  }
+#endif
+
 #undef DEFINE_IMPLICIT_CTOR
 
 #define DEFINE_ACCESSOR(type,name,member) \

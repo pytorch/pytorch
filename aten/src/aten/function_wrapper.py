@@ -74,11 +74,11 @@ TYPE_RETURN = {
     'long': 'int64_t',
 }
 CHECKED_CAST = {
-    'THTensor*': CodeTemplate('checked_cast<${Tensor}>(${arg_name}->pImpl)'),
-    'THBoolTensor*': CodeTemplate('checked_cast<${Processor}ByteTensor>(${arg_name}->pImpl)'),
-    'THIndexTensor*' : CodeTemplate('checked_cast<${Processor}LongTensor>(${arg_name}->pImpl)'),
-    'THIntegerTensor*' : CodeTemplate('checked_cast<${Processor}IntTensor>(${arg_name}->pImpl)'),
-    'THStorage*' : CodeTemplate('checked_cast<${Storage}>(&${arg_name})'),
+    'THTensor*': CodeTemplate('checked_cast<${Tensor}>(${arg_name}->pImpl,"${arg_name}",${arg_pos})'),
+    'THBoolTensor*': CodeTemplate('checked_cast<${Processor}ByteTensor>(${arg_name}->pImpl,"${arg_name}",${arg_pos})'),
+    'THIndexTensor*' : CodeTemplate('checked_cast<${Processor}LongTensor>(${arg_name}->pImpl,"${arg_name}",${arg_pos})'),
+    'THIntegerTensor*' : CodeTemplate('checked_cast<${Processor}IntTensor>(${arg_name}->pImpl,"${arg_name}",${arg_pos})'),
+    'THStorage*' : CodeTemplate('checked_cast<${Storage}>(&${arg_name},"${arg_name}",${arg_pos})'),
     'THGenerator*': CodeTemplate('check_generator(&${arg_name})'),
     'THSize*' : CodeTemplate('THStorageView::make(${arg_name})'),
     'THStride*' : CodeTemplate('THStorageView::make(${arg_name})'),
@@ -103,7 +103,7 @@ ALLOC_WRAP = {
 }
 
 CONSTANT_REPLACEMENTS = [
-    ('AS_REAL','${ScalarType}'),
+    ('AS_REAL','${AS_REAL}'),
     ('THPDefaultGenerator->cdata','dynamic_cast<${Processor}Generator&>(context->defaultGenerator(processor())).generator'),
     ('__storage_size.get\\(\\)', 'THStorageView::make(static_cast<int64_t>(storage.size()))'),
     ('__last_dim', 'self->ndimension()-1'),
@@ -117,13 +117,13 @@ class nested_dict(object):
         if r is not None:
             return r
         return self.parent[x]
+def is_real_argument_to_wrapper(argument):
+    return not argument.get('output',False) and\
+        argument['type'] != 'CONSTANT' and\
+        argument['type'] != 'argument'
 
 def create_generic(top_env, declarations):
 
-    def is_real_argument_to_wrapper(argument):
-        return not argument.get('output',False) and\
-            argument['type'] != 'CONSTANT' and\
-            argument['type'] != 'argument'
     def get_formals(option):
         seen = set()
         result = []
@@ -232,7 +232,9 @@ def create_derived(processor_type_env,declarations):
         else:
             return argument['name']
     def drop_argument(argument):
-        return argument['type'] == 'THGenerator*' and processor_type_env['Processor'] == 'CUDA'
+        return processor_type_env['Processor'] == 'CUDA' and (
+            argument['type'] == 'THGenerator*' or
+            argument['name'] == 'THPDefaultGenerator->cdata')
     def get_arguments(option):
         return [get_argument(argument,option)
             for argument in option['arguments'] if not drop_argument(argument)]
@@ -243,7 +245,10 @@ def create_derived(processor_type_env,declarations):
         body = []
         seen_names = set() # arguments are potentially duplicated because of one argument referencing another
                            # only generated checked casts the first time we see it
+        count = 0
         for arg in option['arguments']:
+            if is_real_argument_to_wrapper(arg):
+                count += 1
             if not arg['name'] in seen_names and requires_checked_cast(arg):
                 seen_names.add(arg['name'])
                 if arg.get('allocate',False):
@@ -251,10 +256,9 @@ def create_derived(processor_type_env,declarations):
                     body.append('auto {}_ = {};'.format(arg['name'],allocation))
                     body.append('auto {} = Tensor({}_,false);'.format(arg['name'],arg['name']))
                 else:
-                    check_cast = CHECKED_CAST[arg['type']].substitute(env,arg_name=arg['name'])
+                    check_cast = CHECKED_CAST[arg['type']].substitute(env,arg_name=arg['name'],arg_pos=count)
                     body.append("auto {}_ = {};".format(arg['name'],check_cast))
-
-
+            
         option['actuals'] = processor_type_env['state'] + get_arguments(option)
         call = CodeTemplate("${THTensor}_${cname}(${actuals})").substitute(env)
         ret = option['return']

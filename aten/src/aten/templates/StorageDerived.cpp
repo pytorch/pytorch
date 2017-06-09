@@ -81,11 +81,11 @@ Type& ${Storage}::type() const {
 }
 
 const char * ${Storage}::toString() const {
-  return ${Storage}::typeString();
+  return "${Storage}";
 }
 
 const char * ${Storage}::typeString() {
-  return "${Storage}";
+  return "${Type}";
 }
 
 }
