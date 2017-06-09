@@ -47,6 +47,14 @@ output[j, ...] = 0 if j not in indices
         "len(mask)] + shape(default_value)` (if `lengths` is not provided the "
         "first dimension is omitted)");
 
-NO_GRADIENT(SparseToDense);
+class GetSparseToDenseGradient : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  vector<OperatorDef> GetGradientDefs() override {
+    return SingleGradientDef(
+        "Gather", "", vector<string>{GO(0), I(0)}, vector<string>{GI(1)});
+  }
+};
+
+REGISTER_GRADIENT(SparseToDense, GetSparseToDenseGradient);
 } // namespace
 } // namespace caffe2

@@ -2166,6 +2166,9 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertReferenceChecks(gc, op, [I, X, D], sparse_to_dense)
         self.assertDeviceChecks(dc, op, [I, X, D], [0])
 
+        X = X.astype(np.float32)
+        self.assertGradientChecks(gc, op, [I, X, D], 1, [0])
+
     @given(inputs=hu.tensors(n=2, min_dim=2, max_dim=2), **hu.gcs_cpu_only)
     def test_dot_product(self, inputs, gc, dc):
         X, Y = inputs
