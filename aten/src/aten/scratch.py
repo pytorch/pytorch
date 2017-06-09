@@ -40,6 +40,7 @@ def to_environment_type(env, arg_string):
     # for now, just return None, up to you what the failure case is
     return None
 
+
 cpu_env = {
     'Processor': 'CPU',
     'ScalarName': 'Float',
