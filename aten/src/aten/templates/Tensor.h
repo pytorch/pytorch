@@ -82,11 +82,11 @@ struct Tensor {
   const char * toString() const {
     return pImpl->toString();
   }
-  IntList size() {
-    return pImpl->size();
+  IntList sizes() {
+    return pImpl->sizes();
   }
-  IntList stride() {
-    return pImpl->stride();
+  IntList strides() {
+    return pImpl->strides();
   }
   Type & type() const {
     return pImpl->type();
