@@ -74,4 +74,17 @@ auto Expand::apply(const variable_list& inputs) -> variable_list {
   });
 }
 
+auto Narrow::apply(const variable_list& inputs) -> variable_list {
+  check_input_variables("Narrow", inputs, 1);
+
+  auto& input = inputs[0]->data;
+  AutoGPU guard(input->getDevice());
+
+  std::unique_ptr<thpp::Tensor> output(input->newNarrow(dim, start, size));
+
+  return wrap_outputs(inputs, as_tensor_list(std::move(output)), [&](FunctionFlags f) {
+    return std::make_shared<Error>("Narrow is not differentiable", std::move(f));
+  });
+}
+
 }} // namespace torch::autograd
