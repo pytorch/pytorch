@@ -28,6 +28,12 @@ struct Contiguous : public Function {
   virtual variable_list apply(const variable_list& inputs) override;
 };
 
+struct CudnnContiguous : public Function {
+  CudnnContiguous() {}
+
+  virtual variable_list apply(const variable_list& inputs) override;
+};
+
 struct Transpose : public Function {
   Transpose(long dim1, long dim2)
     : dim1(dim1)
