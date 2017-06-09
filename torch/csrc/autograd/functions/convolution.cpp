@@ -421,14 +421,14 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
   std::shared_ptr<Variable> ggO = nullptr;
   if (ggI) {
     if (weight->data->isCuda()) {
-      weight = std::make_shared<Contiguous>()->apply({weight})[0];
+      weight = std::make_shared<CudnnContiguous>()->apply({weight})[0];
     }
     ggO = std::make_shared<ConvForward>(*this)->apply({ggI, weight, nullptr})[0];
   }
 
   if (ggW) {
     if (ggW->data->isCuda()) {
-      ggW = std::make_shared<Contiguous>()->apply({ggW})[0];
+      ggW = std::make_shared<CudnnContiguous>()->apply({ggW})[0];
     }
     auto ggW_term = std::make_shared<ConvForward>(*this)->apply({input_.unpack(), ggW, nullptr})[0];
     if (ggO) {
@@ -483,7 +483,7 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
     auto ggIt = std::make_shared<Transpose>(0, 1)->apply({ggI})[0];
 
     if (gOt->data->isCuda()) {
-      gOt = std::make_shared<Contiguous>()->apply({gOt})[0];
+      gOt = std::make_shared<CudnnContiguous>()->apply({gOt})[0];
     }
 
     // Compute conv
@@ -512,7 +512,7 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
     auto gOt = std::make_shared<Transpose>(0, 1)->apply({gO})[0];
 
     if (gOt->data->isCuda()) {
-      gOt = std::make_shared<Contiguous>()->apply({gOt})[0];
+      gOt = std::make_shared<CudnnContiguous>()->apply({gOt})[0];
     }
 
     auto gIt = std::make_shared<ConvForward>(gi_conv_params)->apply({ggWt, gOt, nullptr})[0];
