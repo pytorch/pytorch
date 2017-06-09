@@ -1216,7 +1216,10 @@ class GatherOp : public Operator<Context> {
       auto idx = idxs[i];
       CAFFE_ENFORCE(
           0 <= idx && idx < data.dim(0),
-          "INDICES element is out of DATA bounds");
+          "INDICES element is out of DATA bounds, id=",
+          idx,
+          " data_dim=",
+          data.dim(0));
       auto src = src_base + idx * block_bytesize;
       context_.template CopyItems<Context, Context>(
           data.meta(), block_size, src, out + block_bytesize * i);
