@@ -55,10 +55,6 @@ void _THVoidTensor_assertContiguous(THVoidTensor *tensor, const std::string& nam
       if (tensor->stride[i] != expectedStride)
         throw std::invalid_argument(error_str + name);
       expectedStride *= tensor->size[i];
-    } else {
-      // Stride can be arbitrary for 1-sized dimension
-      // but cudnn expect a stride of 1
-      tensor->stride[i] = 1;
     }
   }
 }
