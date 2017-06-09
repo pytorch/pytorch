@@ -247,8 +247,6 @@ bool THPAutograd_initFunctions(PyObject* _unused)
 
   static PyTypeObject CloneClass;
   addClass<Clone, NoCtor>(module, CloneClass, "Clone");
-  static PyTypeObject CudnnContiguousClass;
-  addClass<CudnnContiguous, NoCtor>(module, CudnnContiguousClass, "CudnnContiguous");
   static PyTypeObject ContiguousClass;
   addClass<Contiguous, NoCtor>(module, ContiguousClass, "Contiguous");
   static PyTypeObject IdentityClass;

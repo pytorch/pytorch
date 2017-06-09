@@ -35,37 +35,6 @@ auto Contiguous::apply(const variable_list& inputs) -> variable_list {
   });
 };
 
-auto CudnnContiguous::apply(const variable_list& inputs) -> variable_list {
-  check_input_variables("CudnnContiguous", inputs, 1);
-  auto& input = inputs[0]->data;
-  AutoGPU guard(input->getDevice());
-
-  auto size = input->sizes();
-  auto stride = input->strides();
-
-  // cudnn contiguity check
-  bool contiguous = true;
-  long long expectedStride = 1;
-  for (int i = input->nDim()-1; i >= 0; --i) {
-    if (stride[i] != expectedStride) {
-      contiguous = false;
-      break;
-    }
-    expectedStride *= size[i];
-  }
-
-  if (!contiguous) {
-    std::unique_ptr<thpp::Tensor> output {input->clone()};
-
-    return wrap_outputs(inputs, as_tensor_list(std::move(output)), [&](FunctionFlags f) {
-      return std::make_shared<Identity>(std::move(f));
-    });
-  } else {
-    return {inputs[0]};
-  }
-
-};
-
 auto Transpose::apply(const variable_list& inputs) -> variable_list {
   check_input_variables("Transpose", inputs, 1);
 
