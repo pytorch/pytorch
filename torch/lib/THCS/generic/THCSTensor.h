@@ -27,6 +27,8 @@ TH_API long THCSTensor_(size)(THCState *state, const THCSTensor *self, int dim);
 TH_API ptrdiff_t THCSTensor_(nnz)(THCState *state, const THCSTensor *self);
 TH_API THLongStorage *THCSTensor_(newSizeOf)(THCState *state, THCSTensor *self);
 TH_API THCIndexTensor *THCSTensor_(newIndices)(THCState *state, const THCSTensor *self);
+TH_API THCIndexTensor* THCSTensor_(newLinearIndices)(THCState *state, const THCSTensor *self);
+TH_API THCIndexTensor* THCSTensor_(newFlattenedIndices)(THCState *state, const THCSTensor *self);
 TH_API THCTensor *THCSTensor_(newValues)(THCState *state, const THCSTensor *self);
 
 /**** creation methods ****/
@@ -76,6 +78,5 @@ TH_API void THCSTensor_(rawResize)(THCState *state, THCSTensor *self, int nDimI,
 TH_API THCTensor *THCSTensor_(newValuesWithSizeOf)(THCState *state, THCTensor *values, long nnz);
 TH_API THCSTensor* THCSTensor_(_move)(THCState *state, THCSTensor *self, THCIndexTensor *indices, THCTensor *values);
 TH_API THCSTensor* THCSTensor_(_set)(THCState *state, THCSTensor *self, THCIndexTensor *indices, THCTensor *values);
-TH_API THCIndexTensor* THCSTensor_(newFlattenedIndices)(THCState *state, THCSTensor *self);
 
 #endif

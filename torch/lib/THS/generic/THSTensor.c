@@ -531,4 +531,37 @@ void THSTensor_(retain)(THSTensor *self)
   THAtomicIncrementRef(&self->refcount);
 }
 
+THLongTensor* THSTensor_(newLinearIndices)(const THSTensor *self) {
+    THLongTensor* indices1D = THSTensor_(newFlattenedIndices)(self);
+    THLongTensor_squeeze1d(indices1D, indices1D, 0);
+    return indices1D;
+}
+
+// Keep this synchronized with the copy in torch/lib/THCS/generic/THCSTensor.cu
+THLongTensor* THSTensor_(newFlattenedIndices)(const THSTensor *self) {
+  THLongTensor *indices = THSTensor_(newIndices)(self);
+  int nDimI = self->nDimensionI;
+  if (nDimI == 1) {
+    return indices;
+  } else {
+    // FIXME TH_INDEX_BASE
+    long factor = 1;
+    THLongTensor *indices1D = THLongTensor_newWithSize2d(1, self->nnz);
+    THLongTensor_fill(indices1D, TH_INDEX_BASE);
+    THLongTensor *indicesSlice = THLongTensor_new();
+    for (long d = nDimI - 1; d >= 0; d--) {
+      THLongTensor_select(indicesSlice, indices, 0, d);
+      THLongTensor_cadd(indices1D, indices1D, factor, indicesSlice);
+      if (TH_INDEX_BASE != 0) {
+        THLongTensor_add(indices1D, indices1D, -TH_INDEX_BASE);
+      }
+      factor *= self->size[d];
+    }
+    THLongTensor_free(indices);
+    THLongTensor_free(indicesSlice);
+    return indices1D;
+  }
+}
+
+
 #endif

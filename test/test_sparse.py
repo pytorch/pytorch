@@ -598,6 +598,13 @@ class TestSparse(TestCase):
         v = self.ValueTensor([5]).cuda(0)
         self.assertRaises(RuntimeError, lambda: self.SparseTensor(i, v, torch.Size([3])))
 
+    def test_linear_indices(self):
+        i = self.IndexTensor([[1, 2],
+                              [2, 1]])
+        x = self.ValueTensor([1, 2])
+        s = self.SparseTensor(i, x, torch.Size([2, 4]))
+        self.assertEqual(s._linear_indices(), self.IndexTensor([6, 9]))
+
 
 class TestUncoalescedSparse(TestSparse):
     def setUp(self):

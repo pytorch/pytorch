@@ -82,6 +82,16 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 ]]
 
 [[
+  name: linear_indices
+  python_name: _linear_indices
+  sparse: yes
+  cname: newLinearIndices
+  return: THIndexTensor*
+  arguments:
+  - THSTensor* self
+]]
+
+[[
   name: values
   python_name: _values
   sparse: yes

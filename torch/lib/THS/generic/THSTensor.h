@@ -27,6 +27,8 @@ TH_API long THSTensor_(size)(const THSTensor *self, int dim);
 TH_API ptrdiff_t THSTensor_(nnz)(const THSTensor *self);
 TH_API THLongStorage *THSTensor_(newSizeOf)(THSTensor *self);
 TH_API THLongTensor *THSTensor_(newIndices)(const THSTensor *self);
+TH_API THLongTensor *THSTensor_(newLinearIndices)(const THSTensor *self);
+TH_API THLongTensor *THSTensor_(newFlattenedIndices)(const THSTensor *self);
 TH_API THTensor *THSTensor_(newValues)(const THSTensor *self);
 
 /**** creation methods ****/

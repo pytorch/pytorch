@@ -263,8 +263,7 @@ void THCSTensor_(spcadd)(THCState *state, THCTensor *r_, THCTensor *dense, real 
           (unsigned long) nnz);
     }
   } else {
-    THCIndexTensor *indices1D = THCSTensor_(newFlattenedIndices)(state, sparse);
-    THCIndexTensor_(resize1d)(state, indices1D, nnz);
+    THCIndexTensor *indices1D = THCSTensor_(newLinearIndices)(state, sparse);
 
     if (value != ScalarConvert<int, real>::to(1)) {
       // FIXME: at some point we can wrap the scale into indexAdd

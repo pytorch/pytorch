@@ -179,3 +179,7 @@ _sparse_tensor_classes.add(ByteTensor)
 torch._tensor_classes.update(_sparse_tensor_classes)
 
 _C._sparse_init()
+
+# attach docstrings to tensor functions
+from . import _tensor_docs
+del _tensor_docs

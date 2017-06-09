@@ -110,5 +110,6 @@ An empty sparse tensor can be constructed by specifying its size:
     .. method:: coalesce
     .. method:: is_coalesced
     .. method:: _indices
+    .. method:: _linear_indices
     .. method:: _values
     .. method:: _nnz

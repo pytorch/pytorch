@@ -173,7 +173,14 @@ THCSTensor *THCSTensor_(newCoalesce)(THCState *state, THCSTensor *self) {
 #undef THRUST_EXEC
 }
 
-THCIndexTensor* THCSTensor_(newFlattenedIndices)(THCState *state, THCSTensor *self) {
+THCIndexTensor* THCSTensor_(newLinearIndices)(THCState *state, const THCSTensor *self) {
+    THCIndexTensor* indices = THCSTensor_(newFlattenedIndices)(state, self);
+    THCIndexTensor_(squeeze1d)(state, indices, indices, 0);
+    return indices;
+}
+
+// Keep this synchronized with the copy in torch/lib/THS/generic/THSTensor.c
+THCIndexTensor* THCSTensor_(newFlattenedIndices)(THCState *state, const THCSTensor *self) {
   THCIndexTensor *indices = THCSTensor_(newIndices)(state, self);
   int nDimI = self->nDimensionI;
   if (nDimI == 1) {
