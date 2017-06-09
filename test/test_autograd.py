@@ -1266,8 +1266,14 @@ class TestAutograd(TestCase):
 
     def run_conv_double_back_test(self, kern, stride, padding, chan_in, chan_out,
                                   batch_size, inp_size, dilation, no_weight):
-        # Tests fail when using cudnn
-        torch.backends.cudnn.enabled = False
+        # When using cudnn
+        # Works for eps = 1e-3
+        # Give wrong values for eps = 1e-6
+        # Give only zeros for eps = 1e-8
+        # Without cudnn
+        # works for all eps
+        torch.backends.cudnn.enabled = True
+        epsilon = 1e-3
         x = Variable(torch.randn(batch_size, chan_in, inp_size, inp_size).cuda(), requires_grad=True)
         weight = Variable(torch.randn(chan_out, chan_in, kern, kern).cuda(), requires_grad=True)
         bias = Variable(torch.randn(chan_out).cuda(), requires_grad=True)
@@ -1285,7 +1291,7 @@ class TestAutograd(TestCase):
         dummy_out = func(*inputs)
         grad_y = Variable(torch.randn(dummy_out.size()).cuda(), requires_grad=True)
 
-        return gradgradcheck(func, inputs, (grad_y,))
+        return gradgradcheck(func, inputs, (grad_y,), eps=epsilon)
 
     def test_conv_double_backward(self):
         batch_size = 2
