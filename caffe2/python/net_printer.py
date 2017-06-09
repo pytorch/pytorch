@@ -181,7 +181,7 @@ class Printer(Visitor, Text):
 
 
 def _sanitize_str(s):
-    s = str(s)
+    s = str(s).decode('ascii', errors='ignore')
     return s if len(s) < 64 else (s[:64] + '...<+len=%d>' % (len(s) - 64))
 
 
