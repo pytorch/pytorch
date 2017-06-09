@@ -27,15 +27,14 @@ int main() {
 
   cout << "GET " << s->get(3).toFloat() << "\n";
 
-  auto t = CPU(Float).ones({4,4});
-
+  auto t = CUDA(Float).ones({4,4});
 
   auto wha2 = CUDA(Float).zeros({4,4}).add(t).sum();
   cout << wha2.toDouble() << " <-ndim\n";
 
   cout << t.sizes() << " " << t.strides() << "\n";
 
-/*
+
   Tensor x = tlib::randn({1,10});
   Tensor prev_h = tlib::randn({1,20});
   Tensor W_h = tlib::randn({20,20});
@@ -43,6 +42,6 @@ int main() {
   Tensor i2h = tlib::mm(W_x, x.t());
   Tensor h2h = tlib::mm(W_h, prev_h.t());
   Tensor next_h = i2h.add(h2h);
-  next_h = next_h.tanh();*/
+  next_h = next_h.tanh();
 
 }
