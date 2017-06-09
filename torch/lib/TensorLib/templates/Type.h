@@ -27,6 +27,14 @@ enum class Processor {
   NumOptions
 };
 
+struct CPUTag {
+  static constexpr Processor value = Processor::CPU;
+};
+struct CUDATag {
+  static constexpr Processor value = Processor::CUDA;
+};
+
+
 typedef ArrayRef<int64_t> IntList;
 
 struct Type {
@@ -39,6 +47,10 @@ struct Type {
   virtual std::unique_ptr<Storage> newStorage(size_t size) = 0;
   virtual std::unique_ptr<Generator> newGenerator() = 0;
   virtual const char * toString() const = 0;
+
+  // contingious IDs for all types in the system
+  // for external dispatch
+  virtual int ID() const = 0;
 
   // example
   // virtual Tensor * add(Tensor & a, Tensor & b) = 0;

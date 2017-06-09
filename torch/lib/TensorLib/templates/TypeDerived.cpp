@@ -35,6 +35,9 @@ std::unique_ptr<Generator> ${Type}::newGenerator() {
 const char * ${Type}::toString() const {
   return ${Type}::typeString();
 }
+int ${Type}::ID() const {
+  return ${TypeID};
+}
 
 const char * ${Type}::typeString() {
   return "${Type}";

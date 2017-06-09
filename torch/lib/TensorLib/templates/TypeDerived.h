@@ -14,7 +14,7 @@ struct ${Type} : public Type {
   virtual std::unique_ptr<Storage> newStorage(size_t size) override;
   virtual std::unique_ptr<Generator> newGenerator() override;
   virtual const char * toString() const override;
-
+  virtual int ID() const override;
   static const char * typeString();
 
   // example

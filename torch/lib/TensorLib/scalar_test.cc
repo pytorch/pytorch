@@ -1,11 +1,20 @@
 #include <iostream>
 #include "TensorLib/TensorLib.h"
+#include "TensorLib/Dispatch.h"
 
 using std::cout;
 using namespace tlib;
 
 constexpr auto Float = ScalarType::Float;
 constexpr auto Double = ScalarType::Float;
+
+template<typename scalar_type>
+void foo(const Type & t, Tensor a, Tensor b) {
+  scalar_type s = 1;
+  cout << "hello, dispatch: " << t.toString() << s << "\n";
+}
+template<>
+void foo<Half>(const Type & t, Tensor a, Tensor b) {}
 
 int main() {
   Scalar what = 257;
@@ -27,9 +36,9 @@ int main() {
 
   cout << "GET " << s->get(3).toFloat() << "\n";
 
-  auto t = CUDA(Float).ones({4,4});
+  auto t = CPU(Float).ones({4,4});
 
-  auto wha2 = CUDA(Float).zeros({4,4}).add(t).sum();
+  auto wha2 = CPU(Float).zeros({4,4}).add(t).sum();
   cout << wha2.toDouble() << " <-ndim\n";
 
   cout << t.sizes() << " " << t.strides() << "\n";
@@ -43,5 +52,7 @@ int main() {
   Tensor h2h = tlib::mm(W_h, prev_h.t());
   Tensor next_h = i2h.add(h2h);
   next_h = next_h.tanh();
+
+  TLIB_DISPATCH_TYPE(x.type(),foo,x,prev_h);
 
 }
