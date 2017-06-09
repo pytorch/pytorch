@@ -22,7 +22,7 @@ class PositionWeighted(ModelLayer):
 
         # TODO: Replace this with correct estimation after we compute
         # cardinality from run_meta
-        self.shape = 1000
+        self.shape = 2000
 
         self.pos_w = model.net.NextScopedBlob(name + "_pos_w")
         self.params.append(
