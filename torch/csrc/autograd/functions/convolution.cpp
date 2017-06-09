@@ -152,30 +152,6 @@ static std::unique_ptr<Tensor> cat(const tensor_list& tensors, int dim) {
 // ConvForward implementation
 
 auto ConvForward::apply(const variable_list& inputs) -> variable_list {
-  // std::cout<<"Applying conv with:"<<std::endl;
-  // std::cout<<"stride ";
-  // for(auto val: this->stride) {
-  //   std::cout<<val<<" ";
-  // }
-  // std::cout<<std::endl;
-  // std::cout<<"padding ";
-  // for(auto val: this->padding) {
-  //   std::cout<<val<<" ";
-  // }
-  // std::cout<<std::endl;
-  // std::cout<<"dilation ";
-  // for(auto val: this->dilation) {
-  //   std::cout<<val<<" ";
-  // }
-  // std::cout<<std::endl;
-  // std::cout<<"output_padding ";
-  // for(auto val: this->output_padding) {
-  //   std::cout<<val<<" ";
-  // }
-  // std::cout<<std::endl;
-  // std::cout<<"transposed "<<this->transposed<<std::endl;
-  // std::cout<<"groups "<<this->groups<<std::endl;
-
   check_input_variables("ConvNd", inputs, 3, 2);
   if (is_padding_neg()) throw std::runtime_error("negative padding is not supported");
   if (is_output_padding_neg()) throw std::runtime_error("negative output_padding is not supported");
@@ -382,14 +358,14 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
   }
 
   // Add saved variables used out of the pure autograd to inputs
-  variable_list all_grad_outputs(grad_outputs);
-  all_grad_outputs.push_back(input_.unpack());
-  all_grad_outputs.push_back(weight_.unpack());
+  variable_list all_inputs(grad_outputs);
+  all_inputs.push_back(input_.unpack());
+  all_inputs.push_back(weight_.unpack());
 
   auto outputs =  as_tensor_list(std::move(grad_input),
                                  std::move(grad_weight),
                                  std::move(grad_bias));
-  return wrap_outputs(all_grad_outputs, std::move(outputs), [&](FunctionFlags f) {
+  return wrap_outputs(all_inputs, std::move(outputs), [&](FunctionFlags f) {
     return std::make_shared<ConvBackwardBackward>(
       f, *this,
       input_.unpack()->save(this), weight_.unpack()->save(this),
@@ -770,6 +746,4 @@ done:
   return std::make_pair<>(std::move(grad_weight), std::move(grad_bias));
 }
 
-
-// Utils functions
 }} // namespace torch::autograd
