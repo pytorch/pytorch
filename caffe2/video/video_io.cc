@@ -457,8 +457,12 @@ bool DecodeClipFromMemoryBuffer(
 
   int use_start_frm = start_frm;
   if (start_frm < 0) { // perform temporal jittering
-    use_start_frm = std::uniform_int_distribution<>(
-        0, sampledFrames.size() - length * sampling_rate)(*randgen);
+    if ((int)(sampledFrames.size() - length * sampling_rate) > 0) {
+      use_start_frm = std::uniform_int_distribution<>(
+          0, (int)(sampledFrames.size() - length * sampling_rate))(*randgen);
+    } else {
+      use_start_frm = 0;
+    }
   }
 
   CAFFE_ENFORCE_LT(
