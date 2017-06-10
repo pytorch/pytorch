@@ -305,7 +305,7 @@ class DistributedDataParallel(Module):
             reduce_stream = reduction_streams[0]
             with torch.cuda.stream(reduce_stream):
                 reduce_stream.wait_stream(nccl_streams[0])
-                coalesced /= dist.get_num_processes()
+                coalesced /= dist.get_world_size()
                 dist.all_reduce(coalesced, group=group_id)
                 for grad, reduced in zip(grad_batch, _unflatten_tensors(coalesced, grad_batch)):
                     grad.copy_(reduced)

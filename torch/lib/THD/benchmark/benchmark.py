@@ -134,7 +134,7 @@ if rank == 0:
     print_header("scatter")
     for bytes in [2**n for n in range(MIN_BYTES, MAX_BYTES)]:
         tensor = torch.ByteTensor(bytes).fill_(42)
-        tensors = [tensor for n in range(0, dist.get_num_processes())]
+        tensors = [tensor for n in range(0, dist.get_world_size())]
         for num_tensors in [10**n for n in range(MIN_NUM_TENSORS, MAX_NUM_TENSORS)]:
             start = timer()
             for i in range(0, num_tensors):
@@ -154,7 +154,7 @@ if rank == 0:
     print_header("gather")
     for bytes in [2**n for n in range(MIN_BYTES, MAX_BYTES)]:
         tensor = torch.ByteTensor(bytes).fill_(42)
-        tensors = [tensor for n in range(0, dist.get_num_processes())]
+        tensors = [tensor for n in range(0, dist.get_world_size())]
         for num_tensors in [10**n for n in range(MIN_NUM_TENSORS, MAX_NUM_TENSORS)]:
             start = timer()
             for i in range(0, num_tensors):
@@ -174,7 +174,7 @@ if rank == 0:
     print_header("all gather")
     for bytes in [2**n for n in range(MIN_BYTES, MAX_BYTES)]:
         tensor = torch.ByteTensor(bytes).fill_(42)
-        tensors = [tensor for n in range(0, dist.get_num_processes())]
+        tensors = [tensor for n in range(0, dist.get_world_size())]
         for num_tensors in [10**n for n in range(MIN_NUM_TENSORS, MAX_NUM_TENSORS)]:
             start = timer()
             for i in range(0, num_tensors):
@@ -185,7 +185,7 @@ if rank == 0:
 else:
     for bytes in [2**n for n in range(MIN_BYTES, MAX_BYTES)]:
         tensor = torch.ByteTensor(bytes).fill_(42)
-        tensors = [tensor for n in range(0, dist.get_num_processes())]
+        tensors = [tensor for n in range(0, dist.get_world_size())]
         for num_tensors in [10**n for n in range(MIN_NUM_TENSORS, MAX_NUM_TENSORS)]:
             for i in range(0, num_tensors):
                 dist.all_gather(tensors, tensor)

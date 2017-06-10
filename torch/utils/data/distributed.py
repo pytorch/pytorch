@@ -1,7 +1,7 @@
 import math
 import torch
 from .sampler import Sampler
-from torch.distributed.collectives import get_num_processes, get_rank
+from torch.distributed.collectives import get_world_size, get_rank
 
 
 class DistributedSampler(Sampler):
@@ -24,7 +24,7 @@ class DistributedSampler(Sampler):
 
     def __init__(self, dataset, num_replicas=None, rank=None):
         if num_replicas is None:
-            num_replicas = get_num_processes()
+            num_replicas = get_world_size()
         if rank is None:
             rank = get_rank()
         self.dataset = dataset
