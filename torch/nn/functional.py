@@ -427,10 +427,7 @@ def elu(input, alpha=1., inplace=False):
 
 
 def selu(input, inplace=False):
-    alpha = 1.6732632423543772848170429916717
-    scale = 1.0507009873554804934193349852946
-    res = elu(x, alpha, inplace=inplace)
-    return res.mul_(scale)
+    return _functions.thnn.SELU(inplace)(input)
 
 
 def leaky_relu(input, negative_slope=1e-2, inplace=False):

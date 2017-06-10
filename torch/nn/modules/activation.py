@@ -276,9 +276,8 @@ class SELU(Module):
         return F.selu(input, self.inplace)
 
     def __repr__(self):
-        inplace_str = ', inplace' if self.inplace else ''
-        return self.__class__.__name__ + ' (' \
-            + inplace_str + ')'
+        inplace_str = ' (inplace)' if self.inplace else ''
+        return self.__class__.__name__ + inplace_str
 
 
 class Hardshrink(Module):

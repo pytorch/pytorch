@@ -66,7 +66,11 @@ class RReLU(InplaceFunction):
 
     def forward(self, input):
         self._backend = type2backend[type(input)]
-        output = input.new()
+        if self.inplace:
+            self.mark_dirty(input)
+            output = input
+        else:
+            output = input.new(input.size())
         self.noise = input.new()
         self._backend.RReLU_updateOutput(
             self._backend.library_state,
@@ -84,7 +88,6 @@ class RReLU(InplaceFunction):
 
     def backward(self, grad_output):
         input, = self.saved_tensors
-        # TODO: check if requires grad
         grad_input = input.new()
         self._backend.RReLU_updateGradInput(
             self._backend.library_state,
@@ -95,7 +98,47 @@ class RReLU(InplaceFunction):
             self.lower,
             self.upper,
             self.train,
-            self.inplace
+            False
+        )
+        return grad_input
+
+
+class SELU(InplaceFunction):
+
+    def __init__(self, inplace=False):
+        super(SELU, self).__init__(inplace)
+        self.alpha = 1.6732632423543772848170429916717
+        self.scale = 1.0507009873554804934193349852946
+
+    def forward(self, input):
+        self._backend = type2backend[type(input)]
+        if self.inplace:
+            self.mark_dirty(input)
+            output = input
+        else:
+            output = input.new(input.size())
+        self._backend.ELU_updateOutput(
+            self._backend.library_state,
+            input,
+            output,
+            self.alpha,
+            self.inplace,
+        )
+        output.mul_(self.scale)
+        self.save_for_backward(input, output)
+        return output
+
+    def backward(self, grad_output):
+        input, output = self.saved_tensors
+        grad_input = input.new()
+        self._backend.ELU_updateGradInput(
+            self._backend.library_state,
+            input,
+            grad_output.mul(self.scale),
+            grad_input,
+            output.div(self.scale),
+            self.alpha,
+            False
         )
         return grad_input
 
@@ -226,6 +269,7 @@ class LeakyReLU(Function):
 
 _all_functions.append(PReLU)
 _all_functions.append(RReLU)
+_all_functions.append(SELU)
 _all_functions.append(Softmin)
 _all_functions.append(Threshold)
 _all_functions.append(LeakyReLU)

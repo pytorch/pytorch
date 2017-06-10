@@ -63,14 +63,16 @@ module_tests = [
     dict(
         module_name='RReLU',
         input_size=(1, 2, 2),
-        test_cuda=False
+        test_cuda=False,
+        check_inplace=True
     ),
     dict(
         module_name='RReLU',
         constructor_args=(0.1, 0.9),
         input_size=(4, 4, 5),
         desc='with_up_down',
-        test_cuda=False
+        test_cuda=False,
+        check_inplace=True
     ),
     dict(
         module_name='Hardtanh',
@@ -109,6 +111,11 @@ module_tests = [
     dict(
         module_name='ELU',
         constructor_args=(2.,),
+        input_size=(3, 2, 5),
+        check_inplace=True
+    ),
+    dict(
+        module_name='SELU',
         input_size=(3, 2, 5),
         check_inplace=True
     ),
