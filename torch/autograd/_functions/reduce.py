@@ -159,7 +159,7 @@ class _SelectionFunction(Function):
     def backward(cls, ctx, grad_output, grad_indices=None):
         grad_input = Variable(grad_output.data.new(*ctx.input_size).zero_())
         if ctx.dim is None and cls.has_all_reduce:
-            grad_input[ctx.indices_tuple] = grad_output.data[0]
+            grad_input[ctx.indices_tuple] = grad_output
         else:
             if ctx.dim is None:
                 dim = len(ctx.input_size) - 1

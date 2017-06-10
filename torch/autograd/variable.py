@@ -490,7 +490,7 @@ class Variable(_C._VariableBase):
         return Repeat.apply(self, repeats)
 
     def cumsum(self, dim):
-        return Cumsum(dim)(self)
+        return Cumsum.apply(self, dim)
 
     def unfold(self, dim, size, step):
         return Unfold.apply(self, dim, size, step)
