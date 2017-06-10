@@ -325,9 +325,6 @@ def create_derived(processor_type_env, declarations):
                 names = [arg['name'] for arg in arguments]
                 body.append(CodeTemplate("return std::tuple<${types}>(${names});").substitute(
                     types=types, names=names))
-            # else:
-            #    print(yaml.dump(option))
-            #    raise Exception("NYI - 3 argument return?")
         elif ret['kind'] == 'type':
             if ret['type'] == 'THTensor*':
                 body.append(CodeTemplate(
