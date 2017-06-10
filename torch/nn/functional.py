@@ -427,7 +427,7 @@ def elu(input, alpha=1., inplace=False):
 
 
 def selu(input, inplace=False):
-    return _functions.thnn.SELU(inplace)(input)
+    return _functions.thnn.SELU.apply(input, inplace)
 
 
 def leaky_relu(input, negative_slope=1e-2, inplace=False):
