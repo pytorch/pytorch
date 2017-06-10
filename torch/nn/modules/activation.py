@@ -251,7 +251,7 @@ class SELU(Module):
     More details can be found in the paper `Self-Normalizing Neural Networks`_ .
 
     Args:
-        inplace: can optionally do the operation in-place
+        inplace (bool, optional): can optionally do the operation in-place
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional dimensions

@@ -77,14 +77,14 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
             module_ip = self.constructor(*self.constructor_args, inplace=True)
 
             input_version = input._version
-            gen = torch.get_rng_state()
-            output = module(input)
+            with freeze_rng_state():
+                output = module(input)
             test_case.assertEqual(input._version, input_version)
 
             input_ip = deepcopy(input)
             input_ip_clone = input_ip.clone()
-            torch.set_rng_state(gen)
-            output_ip = module_ip(input_ip_clone)
+            with freeze_rng_state():
+                output_ip = module_ip(input_ip_clone)
             test_case.assertNotEqual(input_ip_clone._version, input_version)
             test_case.assertEqual(output, output_ip)
             grad = output.data.clone().normal_()
@@ -3121,6 +3121,11 @@ new_module_tests = [
         constructor_args=((3, 4),),
         input=torch.rand(1, 3, 5, 6),
         desc='tuple'
+    ),
+    dict(
+        module_name='SELU',
+        input_size=(3, 2, 5),
+        check_inplace=True
     ),
 ]
 
