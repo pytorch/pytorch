@@ -8,10 +8,10 @@
 //===----------------------------------------------------------------------===//
 
 // TensorLib: modified from llvm::ArrayRef.
-// remove llvm-specific functionality
-// remove some implicit const -> non-const conversions that rely on
+// removed llvm-specific functionality
+// removed some implicit const -> non-const conversions that rely on
 // complicated std::enable_if meta-programming
-// remove a bunch of slice variants for simplicity...
+// removed a bunch of slice variants for simplicity...
 
 #pragma once
 #include <assert.h>

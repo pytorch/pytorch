@@ -42,7 +42,7 @@ ${Tensor}::${Tensor}(Context* context)
 : ${Tensor}(context,${THTensor}_new(${state})) {}
 
 ${Tensor}::${Tensor}(Context* context, ${THTensor} * tensor)
-: TensorImpl(&context->getType(Processor::${Processor},ScalarType::${ScalarName})),
+: TensorImpl(&context->getType(Backend::${Backend},ScalarType::${ScalarName})),
   tensor(tensor),
   context(context) {}
 ${Tensor}::~${Tensor}() {

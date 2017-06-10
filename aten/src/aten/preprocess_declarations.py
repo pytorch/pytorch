@@ -21,24 +21,24 @@ type_map = {
 all_types = type_map['floating_point'] + type_map['integral']
 type_map['all'] = all_types
 
-all_processors = ['CPU', 'CUDA']
+all_backends = ['CPU', 'CUDA']
 
 
-def process_types_and_processors(option):
+def process_types_and_backends(option):
     # if specific pairs were not listed, then enumerate them
-    # based on the processor and type attributes
-    # if processor or type is not defined, it is assumed to be all of them
-    if 'type_processor_pairs' not in option:
-        processors = option.get('processors', all_processors)
+    # based on the backend and type attributes
+    # if backend or type is not defined, it is assumed to be all of them
+    if 'backend_type_pairs' not in option:
+        backends = option.get('backends', all_backends)
         types = option.get('types', all_types)
-        pairs = [[p, t] for p in processors for t in types]
+        pairs = [[p, t] for p in backends for t in types]
     else:
-        pairs = option['type_processor_pairs']
+        pairs = option['backend_type_pairs']
 
     # expand type alias (integral, floating_point, all)
     def expand(pair):
         p, t = pair
-        assert(p in all_processors)
+        assert(p in all_backends)
         if t in type_map:
             return [(p, tt) for tt in type_map[t]]
         assert(t in all_types)
@@ -50,7 +50,7 @@ def process_types_and_processors(option):
         pairs.discard(('CPU', 'Half'))
 
     # sort the result for easy reading
-    option['type_processor_pairs'] = sorted([p for p in pairs])
+    option['backend_type_pairs'] = sorted([p for p in pairs])
 
 
 def exclude(declaration):
@@ -107,7 +107,7 @@ def run(declarations):
         new_options = []
         for option in declaration['options']:
             sanitize_return(option)
-            process_types_and_processors(option)
+            process_types_and_backends(option)
             add_variants(option)
             handle_outputs_taken_as_arguments(new_options, option)
         declaration['options'] += new_options

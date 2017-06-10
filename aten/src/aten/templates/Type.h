@@ -21,17 +21,17 @@ enum class ScalarType {
   NumOptions
 };
 
-enum class Processor {
+enum class Backend {
   CPU,
   CUDA,
   NumOptions
 };
 
 struct CPUTag {
-  static constexpr Processor value = Processor::CPU;
+  static constexpr Backend value = Backend::CPU;
 };
 struct CUDATag {
-  static constexpr Processor value = Processor::CUDA;
+  static constexpr Backend value = Backend::CUDA;
 };
 
 
@@ -39,7 +39,7 @@ typedef ArrayRef<int64_t> IntList;
 
 struct Type {
   virtual ScalarType scalarType() = 0;
-  virtual Processor processor() = 0;
+  virtual Backend backend() = 0;
   virtual bool isSparse() = 0;
   virtual bool isDistributed() = 0;
   static void registerAll(Context * context);
