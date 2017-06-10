@@ -60,17 +60,17 @@ _(Half,Half,d)
 class Scalar {
 public:
 #define DEFINE_IMPLICIT_CTOR(type,name,member) \
-  Scalar(type v) \
+  Scalar(type vv) \
   : tag(Tag::HAS_##member) { \
-    member = convert<decltype(member),type>(v); \
+    v . member = convert<decltype(v.member),type>(vv); \
   }
 
   TLIB_SCALAR_TYPES(DEFINE_IMPLICIT_CTOR)
 
 #ifdef TENSORLIB_CUDA_ENABLED
-  Scalar(half v)
+  Scalar(half vv)
   : tag(Tag::HAS_d) {
-    d = convert<double,Half>(Half{v.x});
+    v.d = convert<double,Half>(Half{vv.x});
   }
 #endif
 
@@ -79,15 +79,15 @@ public:
 #define DEFINE_ACCESSOR(type,name,member) \
   type to##name () { \
     if (Tag::HAS_d == tag) { \
-      auto casted = convert<type,double>(d); \
-      if(convert<double,type>(casted) != d) { \
-        throw std::domain_error(std::string("value cannot be losslessly represented in type " #name ": ") + std::to_string(d) ); \
+      auto casted = convert<type,double>(v.d); \
+      if(convert<double,type>(casted) != v.d) { \
+        throw std::domain_error(std::string("value cannot be losslessly represented in type " #name ": ") + std::to_string(v.d) ); \
       } \
       return casted; \
     } else { \
-      auto casted = convert<type,int64_t>(i); \
-      if(convert<int64_t,type>(casted) != i) { \
-        throw std::domain_error(std::string("value cannot be losslessly represented in type " #name ": ") + std::to_string(i)); \
+      auto casted = convert<type,int64_t>(v.i); \
+      if(convert<int64_t,type>(casted) != v.i) { \
+        throw std::domain_error(std::string("value cannot be losslessly represented in type " #name ": ") + std::to_string(v.i)); \
       } \
       return casted; \
     } \
@@ -108,7 +108,7 @@ private:
   union {
     double d;
     int64_t i;
-  };
+  } v;
 };
 
 }

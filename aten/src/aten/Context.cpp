@@ -17,14 +17,14 @@ Context::Context() {
   THCState_setDeviceAllocator(thc_state, THCCachingAllocator_get());
   thc_state->cudaHostAllocator = &THCCachingHostAllocator;
   THCudaInit(thc_state);
-  generator_registry[static_cast<int>(Processor::CUDA)]
+  generator_registry[static_cast<int>(Backend::CUDA)]
     .reset(new CUDAGenerator(this));
 #endif
 
-  generator_registry[static_cast<int>(Processor::CPU)]
+  generator_registry[static_cast<int>(Backend::CPU)]
     .reset(new CPUGenerator(this));
   Type::registerAll(this);
-  current_default_type = &getType(Processor::CPU, ScalarType::Float);
+  current_default_type = &getType(Backend::CPU, ScalarType::Float);
 }
 
 Context::~Context() {

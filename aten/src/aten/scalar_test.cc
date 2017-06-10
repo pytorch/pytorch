@@ -23,10 +23,10 @@ int main() {
   Half h = bar.toHalf();
   Scalar h2 = h;
   cout << "H2: " << h2.toDouble() << " " << what.toFloat() << " " << bar.toDouble() << " " << what.isIntegral() <<  "\n";
-  Generator & gen = tlib::globalContext()->defaultGenerator(Processor::CPU);
+  Generator & gen = tlib::globalContext()->defaultGenerator(Backend::CPU);
   cout << gen.seed() << "\n";
   auto C = tlib::globalContext();
-  auto & CUDAFloat = C->getType(Processor::CPU,ScalarType::Float);
+  auto & CUDAFloat = C->getType(Backend::CPU,ScalarType::Float);
   auto t2 = CUDAFloat.zeros({4,4});
   cout << &t2 << "\n";
   cout << "AFTER GET TYPE " << &CUDAFloat << "\n";

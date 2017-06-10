@@ -77,7 +77,7 @@ int ${Storage}::getDevice() const {
 }
 
 Type& ${Storage}::type() const {
-  return context->getType(Processor::${Processor},ScalarType::${ScalarName});
+  return context->getType(Backend::${Backend},ScalarType::${ScalarName});
 }
 
 const char * ${Storage}::toString() const {
