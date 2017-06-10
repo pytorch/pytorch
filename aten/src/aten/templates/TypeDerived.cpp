@@ -1,12 +1,12 @@
 #include "TensorLib/${Type}.h"
 #include "TensorLib/${Storage}.h"
 #include "TensorLib/${Tensor}.h"
-#include "TensorLib/${Processor}Generator.h"
-#include "TensorLib/${Processor}ByteTensor.h"
-#include "TensorLib/${Processor}IntTensor.h"
-#include "TensorLib/${Processor}LongTensor.h"
+#include "TensorLib/${Backend}Generator.h"
+#include "TensorLib/${Backend}ByteTensor.h"
+#include "TensorLib/${Backend}IntTensor.h"
+#include "TensorLib/${Backend}LongTensor.h"
 #include "TensorLib/Utils.h"
-#include "TensorLib/THStorageView.h"
+#include "TensorLib/THLongStorageView.h"
 #include <iostream>
 
 namespace tlib {
@@ -16,8 +16,8 @@ ${Type}::${Type}(Context* context)
 ScalarType ${Type}::scalarType() {
   return ScalarType::${ScalarName};
 }
-Processor ${Type}::processor() {
-  return Processor::${Processor};
+Backend ${Type}::backend() {
+  return Backend::${Backend};
 }
 bool ${Type}::isSparse() { return false; }
 bool ${Type}::isDistributed() { return false; }
@@ -29,7 +29,7 @@ std::unique_ptr<Storage> ${Type}::newStorage(size_t size) {
   return std::unique_ptr<Storage>(new ${Storage}(context,size));
 }
 std::unique_ptr<Generator> ${Type}::newGenerator() {
-  return std::unique_ptr<Generator>(new ${Processor}Generator(context));
+  return std::unique_ptr<Generator>(new ${Backend}Generator(context));
 }
 
 const char * ${Type}::toString() const {

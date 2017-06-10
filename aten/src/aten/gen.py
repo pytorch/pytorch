@@ -50,9 +50,9 @@ generators = {
     },
 }
 
-processors = ['CPU']
+backends = ['CPU']
 if not options.no_cuda:
-    processors.append('CUDA')
+    backends.append('CUDA')
 
 scalar_types = [
     ('Byte', 'uint8_t', 'Long'),
@@ -87,28 +87,28 @@ def write(filename, s):
         f.write(s)
 
 
-def generate_storage_type_and_tensor(processor, scalar_type, declarations, all_types):
+def generate_storage_type_and_tensor(backend, scalar_type, declarations, all_types):
     scalar_name, c_type, accreal = scalar_type
     env = {}
     env['ScalarName'] = scalar_name
     env['ScalarType'] = c_type
     env['AccScalarName'] = accreal
-    env['Storage'] = "{}{}Storage".format(processor, scalar_name)
-    env['Type'] = "{}{}Type".format(processor, scalar_name)
-    env['Tensor'] = "{}{}Tensor".format(processor, scalar_name)
-    env['Processor'] = processor
+    env['Storage'] = "{}{}Storage".format(backend, scalar_name)
+    env['Type'] = "{}{}Type".format(backend, scalar_name)
+    env['Tensor'] = "{}{}Tensor".format(backend, scalar_name)
+    env['Backend'] = backend
 
     # used for generating switch logic for external functions
     env['TypeID'] = len(all_types)
     all_types.append({
         'ScalarType': c_type,
         'ScalarName': scalar_name,
-        'Processor': processor,
+        'Backend': backend,
         'Type': env['Type'],
         'TypeID': env['TypeID'],
     })
 
-    if processor == 'CUDA':
+    if backend == 'CUDA':
         env['th_header'] = "THC/THC.h"
         sname = '' if scalar_name == "Float" else scalar_name
         env['THStorage'] = 'THCuda{}Storage'.format(sname)
@@ -127,7 +127,7 @@ def generate_storage_type_and_tensor(processor, scalar_type, declarations, all_t
         env['storage_device'] = 'throw std::runtime_error("CPU storage has no device");'
     env['AS_REAL'] = env['ScalarType']
     if scalar_name == "Half":
-        if processor == "CUDA":
+        if backend == "CUDA":
             env['to_th_half'] = 'HalfFix<__half,Half>'
             env['to_tlib_half'] = 'HalfFix<Half,__half>'
             env['AS_REAL'] = 'convert<half,double>'
@@ -152,8 +152,8 @@ def generate_storage_type_and_tensor(processor, scalar_type, declarations, all_t
     write(env['Tensor'] + ".cpp", TENSOR_DERIVED_CPP.substitute(env))
     write(env['Tensor'] + ".h", TENSOR_DERIVED_H.substitute(env))
 
-    type_register = ('context->type_registry[static_cast<int>(Processor::{})][static_cast<int>(ScalarType::{})].reset(new {}(context));'
-                     .format(processor, scalar_name, env['Type']))
+    type_register = ('context->type_registry[static_cast<int>(Backend::{})][static_cast<int>(ScalarType::{})].reset(new {}(context));'
+                     .format(backend, scalar_name, env['Type']))
     top_env['type_registrations'].append(type_register)
     top_env['type_headers'].append(
         '#include "TensorLib/{}.h"'.format(env['Type']))
@@ -170,17 +170,17 @@ for fname, env in generators.items():
 
 
 # note: this will fill in top_env['type/tensor_method_declarations/definitions']
-# and modify the declarations to include any information that will all_processors
+# and modify the declarations to include any information that will all_backends
 # be used by function_wrapper.create_derived
 function_wrapper.create_generic(top_env, declarations)
 
 # populated by generate_storage_type_and_tensor
 all_types = []
 
-for processor in processors:
+for backend in backends:
     for scalar_type in scalar_types:
         generate_storage_type_and_tensor(
-            processor, scalar_type, declarations, all_types)
+            backend, scalar_type, declarations, all_types)
 
 write('Type.h', TYPE_H.substitute(top_env))
 write('Type.cpp', TYPE_CPP.substitute(top_env))
