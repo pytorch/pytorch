@@ -264,7 +264,6 @@ class SELU(Module):
         >>> print(input)
         >>> print(m(input))
 
-
     .. _Self-Normalizing Neural Networks: https://arxiv.org/abs/1706.02515
     """
 
