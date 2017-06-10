@@ -142,10 +142,10 @@ class SELU(InplaceFunction):
                 False
             )
         else:
-            positive_mask = (output >  0).type_as(grad_output)
+            positive_mask = (output > 0).type_as(grad_output)
             negative_mask = (output <= 0).type_as(grad_output)
             grad_input = grad_output * SELU.scale * (positive_mask +
-                         negative_mask * (output / SELU.scale + SELU.alpha))
+                                                     negative_mask * (output / SELU.scale + SELU.alpha))
         return grad_input, None
 
 
