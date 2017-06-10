@@ -4,7 +4,7 @@
 
 /* Support for copy between different Storage types */
 
-THC_API void THCStorage_(rawCopy)(THCState *state, THCStorage *storage, real *src);
+THC_API void THCStorage_(rawCopy)(THCState *state, THCStorage *storage, const real *src);
 THC_API void THCStorage_(copy)(THCState *state, THCStorage *storage, THCStorage *src);
 THC_API void THCStorage_(copyByte)(THCState *state, THCStorage *storage, struct THByteStorage *src);
 THC_API void THCStorage_(copyChar)(THCState *state, THCStorage *storage, struct THCharStorage *src);

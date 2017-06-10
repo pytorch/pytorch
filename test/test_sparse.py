@@ -605,6 +605,11 @@ class TestSparse(TestCase):
         s = self.SparseTensor(i, x, torch.Size([2, 4]))
         self.assertEqual(s._linear_indices(), self.IndexTensor([6, 9]))
 
+    def test_numelIV(self):
+        x, i, v = self._gen_sparse(2, 4, [2, 3, 5, 7])
+        self.assertEqual(x.numelI(), 6)
+        self.assertEqual(x.numelV(), 35)
+
 
 class TestUncoalescedSparse(TestSparse):
     def setUp(self):

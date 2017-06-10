@@ -29,11 +29,31 @@ long THSTensor_(size)(const THSTensor *self, int dim)
   return self->size[dim];
 }
 
+long THSTensor_(numelI)(const THSTensor *self)
+{
+    long r = 1;
+    THLongStorage *size = THSTensor_(newSizeOf)(self);
+    for (int i = 0; i < self->nDimensionI; i++)
+      r *= size->data[i];
+    THLongStorage_free(size);
+    return r;
+}
+
+long THSTensor_(numelV)(const THSTensor *self)
+{
+    long r = 1;
+    THLongStorage *size = THSTensor_(newSizeOf)(self);
+    for (int i = self->nDimensionI; i < self->nDimensionI + self->nDimensionV; i++)
+      r *= size->data[i];
+    THLongStorage_free(size);
+    return r;
+}
+
 ptrdiff_t THSTensor_(nnz)(const THSTensor *self) {
   return self->nnz;
 }
 
-THLongStorage *THSTensor_(newSizeOf)(THSTensor *self)
+THLongStorage *THSTensor_(newSizeOf)(const THSTensor *self)
 {
   THLongStorage *size = THLongStorage_newWithSize(self->nDimensionI + self->nDimensionV);
   THLongStorage_rawCopy(size, self->size);

@@ -355,6 +355,10 @@ class _TensorBase(object):
     def __hash__(self):
         return id(self)
 
+    def _sparse_mask(self, s):
+        v = self.view(s.numelI(), *s._values().size()[1:]).index_select(0, s._linear_indices())
+        return type(s)(s._indices(), v, s.size())
+
 
 _TensorBase.type = _type
 _TensorBase.cuda = _cuda

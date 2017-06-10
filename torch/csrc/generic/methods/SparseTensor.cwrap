@@ -38,6 +38,22 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 #endif
 
 [[
+  name: numelI
+  sparse: yes
+  return: long
+  arguments:
+  - THSTensor* self
+]]
+
+[[
+  name: numelV
+  sparse: yes
+  return: long
+  arguments:
+  - THSTensor* self
+]]
+
+[[
   name: nDimension
   sparse: yes
   python_name: ndimension

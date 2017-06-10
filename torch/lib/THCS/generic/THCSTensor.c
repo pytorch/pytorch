@@ -21,6 +21,26 @@ int THCSTensor_(nDimensionV)(THCState *state, const THCSTensor *self)
   return self->nDimensionV;
 }
 
+long THCSTensor_(numelI)(THCState *state, const THCSTensor *self)
+{
+    long r = 1;
+    THLongStorage *size = THCSTensor_(newSizeOf)(state, self);
+    for (int i = 0; i < self->nDimensionI; i++)
+      r *= size->data[i];
+    THLongStorage_free(size);
+    return r;
+}
+
+long THCSTensor_(numelV)(THCState *state, const THCSTensor *self)
+{
+    long r = 1;
+    THLongStorage *size = THCSTensor_(newSizeOf)(state, self);
+    for (int i = self->nDimensionI; i < self->nDimensionI + self->nDimensionV; i++)
+      r *= size->data[i];
+    THLongStorage_free(size);
+    return r;
+}
+
 long THCSTensor_(size)(THCState *state, const THCSTensor *self, int dim)
 {
   THArgCheck((dim >= 0) && (dim < self->nDimensionI + self->nDimensionV),
@@ -33,7 +53,7 @@ ptrdiff_t THCSTensor_(nnz)(THCState *state, const THCSTensor *self) {
   return self->nnz;
 }
 
-THLongStorage *THCSTensor_(newSizeOf)(THCState *state, THCSTensor *self)
+THLongStorage *THCSTensor_(newSizeOf)(THCState *state, const THCSTensor *self)
 {
   THLongStorage *size = THLongStorage_newWithSize(self->nDimensionI + self->nDimensionV);
   THLongStorage_rawCopy(size, self->size);
