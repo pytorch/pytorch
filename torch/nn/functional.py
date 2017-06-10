@@ -426,6 +426,15 @@ def elu(input, alpha=1., inplace=False):
     return _functions.thnn.auto.ELU(alpha, inplace)(input)
 
 
+def selu(input, inplace=False):
+    alpha = 1.6732632423543772848170429916717
+    scale = 1.0507009873554804934193349852946
+    res = elu(x, alpha, inplace=inplace)
+    if inplace:
+        return res.mul_(scale)
+    return scale * res
+
+
 def leaky_relu(input, negative_slope=1e-2, inplace=False):
     return _functions.thnn.LeakyReLU.apply(input, negative_slope, inplace)
 
