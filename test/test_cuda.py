@@ -858,6 +858,12 @@ class TestCuda(TestCase):
     def test_tensor_scatterFill(self):
         TestTorch._test_scatter_base(self, lambda t: t.cuda(), 'scatter_', True, test_bounds=False)
 
+    def test_nvtx(self):
+        # Just making sure we can see the symbols
+        torch.cuda.nvtx.range_push("foo")
+        torch.cuda.nvtx.mark("bar")
+        torch.cuda.nvtx.range_pop()
+
 
 if HAS_CUDA:
     for decl in tests:
