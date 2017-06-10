@@ -129,6 +129,9 @@ def manual_seed(seed):
     Args:
         seed (int or long): The desired seed.
     """
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
     return default_generator.manual_seed(seed)
 
 

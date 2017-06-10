@@ -601,6 +601,17 @@ class TestCuda(TestCase):
             cuda_type = get_gpu_type(t)
             self.assertEqual(cuda_type(seq), reference)
 
+    def test_torch_manual_seed_seeds_cuda_devices(self):
+        with freeze_rng_state():
+            x = torch.zeros(4, 4).float().cuda()
+            torch.manual_seed(2)
+            self.assertEqual(torch.cuda.initial_seed(), 2)
+            x.uniform_()
+            torch.manual_seed(2)
+            y = x.clone().uniform_()
+            self.assertEqual(x, y)
+            self.assertEqual(torch.cuda.initial_seed(), 2)
+
     def test_manual_seed(self):
         with freeze_rng_state():
             x = torch.zeros(4, 4).float().cuda()
