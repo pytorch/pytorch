@@ -87,6 +87,7 @@ enum Functions: std::uint16_t {
   tensorDot,
   tensorMinall,
   tensorMaxall,
+  tensorMedianall,
   tensorSumall,
   tensorProdall,
   tensorNeg,

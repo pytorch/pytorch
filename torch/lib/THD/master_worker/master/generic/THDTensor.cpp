@@ -876,6 +876,15 @@ real THDTensor_(maxall)(THDTensor *self) {
   return receiveValueFromWorker<real>(THDState::s_current_worker);
 }
 
+real THDTensor_(medianall)(THDTensor *self) {
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorMedianall, self),
+    THDState::s_current_worker
+  );
+
+  return receiveValueFromWorker<real>(THDState::s_current_worker);
+}
+
 accreal THDTensor_(sumall)(THDTensor *self) {
   masterCommandChannel->sendMessage(
     packMessage(Functions::tensorSumall, self),
