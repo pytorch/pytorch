@@ -12,6 +12,7 @@ template<typename scalar_type>
 void foo(const Type & t, Tensor a, Tensor b) {
   scalar_type s = 1;
   cout << "hello, dispatch: " << t.toString() << s << "\n";
+  auto data = (scalar_type*)a.data_ptr();
 }
 template<>
 void foo<Half>(const Type & t, Tensor a, Tensor b) {}
@@ -21,7 +22,6 @@ int main() {
   Scalar bar = 3.0;
   Half h = bar.toHalf();
   Scalar h2 = h;
-
   cout << "H2: " << h2.toDouble() << " " << what.toFloat() << " " << bar.toDouble() << " " << what.isIntegral() <<  "\n";
   Generator & gen = tlib::globalContext()->defaultGenerator(Processor::CPU);
   cout << gen.seed() << "\n";

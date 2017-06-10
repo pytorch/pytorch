@@ -33,17 +33,9 @@ Context::~Context() {
 #endif
 }
 
-static std::mutex context_lock;
-static Context * globalContext_ = nullptr;
-
 Context * globalContext() {
-  if(!globalContext_) {
-    std::lock_guard<std::mutex> lock(context_lock);
-    if (!globalContext_) {
-      globalContext_ = new Context();
-    }
-  }
-  return globalContext_;
+  static Context globalContext_;
+  return &globalContext_;
 }
 
 
