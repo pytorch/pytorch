@@ -109,8 +109,8 @@ class cwrap(object):
         declaration.setdefault('return', 'void')
         if 'cname' not in declaration:
             declaration['cname'] = declaration['name']
-        if 'processors' not in declaration:
-            declaration['processors'] = ['CPU', 'CUDA']
+        if 'backends' not in declaration:
+            declaration['backends'] = ['CPU', 'CUDA']
         # Simulate multiple dispatch, even if it's not necessary
         if 'options' not in declaration:
             declaration['options'] = [{'arguments': declaration['arguments']}]

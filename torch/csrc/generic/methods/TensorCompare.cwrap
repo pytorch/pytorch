@@ -451,7 +451,7 @@
 
 [[
   name: kthvalue
-  processors:
+  backends:
     - CPU
   variants:
     - method
@@ -553,7 +553,7 @@
 
 [[
   name: median
-  processors:
+  backends:
     - CPU
   variants:
     - method
@@ -674,7 +674,7 @@
   name: all
   types:
     - Byte
-  processors:
+  backends:
     - CPU
     - CUDA
   cname: logicalall
@@ -687,7 +687,7 @@
   name: any
   types:
     - Byte
-  processors:
+  backends:
     - CPU
     - CUDA
   cname: logicalany

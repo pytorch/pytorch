@@ -78,13 +78,13 @@ TYPE_RETURN = {
 }
 CHECKED_CAST = {
     'THTensor*': CodeTemplate('checked_cast<${Tensor}>(${arg_name}->pImpl,"${arg_name}",${arg_pos})'),
-    'THBoolTensor*': CodeTemplate('checked_cast<${Processor}ByteTensor>(${arg_name}->pImpl,"${arg_name}",${arg_pos})'),
-    'THIndexTensor*': CodeTemplate('checked_cast<${Processor}LongTensor>(${arg_name}->pImpl,"${arg_name}",${arg_pos})'),
-    'THIntegerTensor*': CodeTemplate('checked_cast<${Processor}IntTensor>(${arg_name}->pImpl,"${arg_name}",${arg_pos})'),
+    'THBoolTensor*': CodeTemplate('checked_cast<${Backend}ByteTensor>(${arg_name}->pImpl,"${arg_name}",${arg_pos})'),
+    'THIndexTensor*': CodeTemplate('checked_cast<${Backend}LongTensor>(${arg_name}->pImpl,"${arg_name}",${arg_pos})'),
+    'THIntegerTensor*': CodeTemplate('checked_cast<${Backend}IntTensor>(${arg_name}->pImpl,"${arg_name}",${arg_pos})'),
     'THStorage*': CodeTemplate('checked_cast<${Storage}>(&${arg_name},"${arg_name}",${arg_pos})'),
     'THGenerator*': CodeTemplate('check_generator(&${arg_name})'),
-    'THSize*': CodeTemplate('THStorageView::make(${arg_name})'),
-    'THStride*': CodeTemplate('THStorageView::make(${arg_name})'),
+    'THSize*': CodeTemplate('THLongStorageView::make(${arg_name})'),
+    'THStride*': CodeTemplate('THLongStorageView::make(${arg_name})'),
     'real': CodeTemplate('${arg_name}.to${ScalarName}()'),
     'accreal': CodeTemplate('${arg_name}.to${AccScalarName}()'),
 
@@ -100,17 +100,17 @@ CHECKED_USE = {
 
 ALLOC_WRAP = {
     'THTensor*': 'new ${Tensor}(context)',
-    'THBoolTensor*': 'new ${Processor}ByteTensor(context)',
-    'THIndexTensor*': 'new ${Processor}LongTensor(context)',
-    'THIntegerTensor*': 'new ${Processor}IntTensor(context)',
+    'THBoolTensor*': 'new ${Backend}ByteTensor(context)',
+    'THIndexTensor*': 'new ${Backend}LongTensor(context)',
+    'THIntegerTensor*': 'new ${Backend}IntTensor(context)',
 }
 
 CONSTANT_REPLACEMENTS = [
     ('AS_REAL', '${AS_REAL}'),
     ('THPDefaultGenerator->cdata',
-     'dynamic_cast<${Processor}Generator&>(context->defaultGenerator(processor())).generator'),
+     'dynamic_cast<${Backend}Generator&>(context->defaultGenerator(backend())).generator'),
     ('__storage_size.get\\(\\)',
-     'THStorageView::make(static_cast<int64_t>(storage.size()))'),
+     'THLongStorageView::make(static_cast<int64_t>(storage.size()))'),
     ('__last_dim', 'self->ndimension()-1'),
 ]
 
@@ -229,7 +229,7 @@ def create_generic(top_env, declarations):
                 option['skip'] = True
 
 
-def create_derived(processor_type_env, declarations):
+def create_derived(backend_type_env, declarations):
     type_object_declarations = []
     type_object_definitions = []
 
@@ -248,7 +248,7 @@ def create_derived(processor_type_env, declarations):
             v = str(argument['name'])
             for pattern, replacement in CONSTANT_REPLACEMENTS:
                 v = re.sub(pattern, replacement, v)
-            return CodeTemplate(v).substitute(processor_type_env)
+            return CodeTemplate(v).substitute(backend_type_env)
         # e.g. argument 0, i.e. repeat the 0th argument in this position...
         elif argument['type'] == 'argument':
             index = int(argument['name'])
@@ -257,7 +257,7 @@ def create_derived(processor_type_env, declarations):
             return argument['name']
 
     def drop_argument(argument):
-        return processor_type_env['Processor'] == 'CUDA' and (
+        return backend_type_env['Backend'] == 'CUDA' and (
             argument['type'] == 'THGenerator*' or
             argument['name'] == 'THPDefaultGenerator->cdata')
 
@@ -266,7 +266,7 @@ def create_derived(processor_type_env, declarations):
                 for argument in option['arguments'] if not drop_argument(argument)]
 
     def is_actual_return_long(ret):
-        return ret['type'] == 'long' or (processor_type_env['ScalarName'] == 'Long'
+        return ret['type'] == 'long' or (backend_type_env['ScalarName'] == 'Long'
                                          and ret['type'] == 'real' or ret['type'] == 'accreal')
 
     def emit_body(env, option):
@@ -308,7 +308,7 @@ def create_derived(processor_type_env, declarations):
                 if arg.get('cpu_zero', False):
                     body.append("{}{}zero_();".format(arg['name'], sel))
 
-        option['actuals'] = processor_type_env['state'] + get_arguments(option)
+        option['actuals'] = backend_type_env['state'] + get_arguments(option)
         call = CodeTemplate("${THTensor}_${cname}(${actuals})").substitute(env)
         ret = option['return']
         if ret['kind'] == 'arguments':
@@ -339,10 +339,10 @@ def create_derived(processor_type_env, declarations):
         return body
 
     def process_option(option):
-        pair = (processor_type_env['Processor'],
-                processor_type_env['ScalarName'])
-        if pair in option['type_processor_pairs']:
-            env = nested_dict(option, processor_type_env)
+        pair = (backend_type_env['Backend'],
+                backend_type_env['ScalarName'])
+        if pair in option['backend_type_pairs']:
+            env = nested_dict(option, backend_type_env)
             body = emit_body(env, option)
             option['type_definition_body'] = body
             type_object_declarations.append(

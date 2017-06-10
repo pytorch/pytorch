@@ -1,7 +1,7 @@
 [[
   name: getDevice
   python_name: get_device
-  processors:
+  backends:
     - CUDA
   return: long
   arguments:
@@ -12,7 +12,7 @@
   name: THPTensor_(new)
   python_name: new
   method_flags: METH_KEYWORDS
-  processors:
+  backends:
     - CUDA
   only_register: True
 ]]
@@ -29,7 +29,7 @@ PyObject * THPTensor_(new)(THPTensor *self, PyObject *args, PyObject *kwargs)
   name: THPTensor_(recordStream)
   python_name: record_stream
   override_method_flags: METH_O
-  processors:
+  backends:
     - CUDA
   only_register: True
 ]]

@@ -425,7 +425,7 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
   types:
     - float
     - double
-  processors:
+  backends:
     - CPU
     - CUDA
   sparse: yes
@@ -457,7 +457,7 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
   name: getDevice
   sparse: yes
   python_name: get_device
-  processors:
+  backends:
     - CUDA
   return: long
   arguments:

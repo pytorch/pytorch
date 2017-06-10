@@ -7,7 +7,7 @@ namespace tlib {
 struct ${Type} : public Type {
   ${Type}(Context* context);
   virtual ScalarType scalarType() override;
-  virtual Processor processor() override;
+  virtual Backend backend() override;
   virtual bool isSparse() override;
   virtual bool isDistributed() override;
   virtual std::unique_ptr<Storage> newStorage() override;

@@ -5,16 +5,16 @@
 namespace tlib {
 
 // make a fake storage out of a size, pointer pair...
-class THStorageView {
+class THLongStorageView {
 public:
-  static THStorageView make(ArrayRef<int64_t> ref) {
-    return THStorageView(ref);
+  static THLongStorageView make(ArrayRef<int64_t> ref) {
+    return THLongStorageView(ref);
   }
   operator THLongStorage*() {
     return &storage;
   }
 private:
-  THStorageView(ArrayRef<int64_t> ref) {
+  THLongStorageView(ArrayRef<int64_t> ref) {
     storage.data = (long*)(ref.data());
     storage.size = ref.size();
     storage.refcount = 0;

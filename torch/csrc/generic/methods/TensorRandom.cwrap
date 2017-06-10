@@ -1,7 +1,7 @@
 [[
   name: randperm
   defined_if: "!IS_DISTRIBUTED"
-  processors:
+  backends:
     - CPU
   variants:
     - function
@@ -32,7 +32,7 @@ static void THTensor_(random1__)(THTensor *self, THGenerator *gen, long b)
 [[
   name: random_
   defined_if: "!IS_DISTRIBUTED"
-  processors:
+  backends:
     - CPU
   return: self
   options:
@@ -63,7 +63,7 @@ static void THTensor_(random1__)(THTensor *self, THGenerator *gen, long b)
   name: multinomial
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:
@@ -86,7 +86,7 @@ static void THTensor_(random1__)(THTensor *self, THGenerator *gen, long b)
   name: uniform_
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   cname: uniform
@@ -156,7 +156,7 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
   name: normal
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   return: argument 0
@@ -198,7 +198,7 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
   name: normal_
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   cname: normal
@@ -218,7 +218,7 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
   name: cauchy_
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   cname: cauchy
@@ -240,7 +240,7 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
   python_name: log_normal_
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   return: self
@@ -259,7 +259,7 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
   name: exponential_
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   cname: exponential
@@ -277,7 +277,7 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
   name: rand
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:
@@ -297,7 +297,7 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
   name: randn
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:
@@ -316,7 +316,7 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
 [[
   name: geometric_
   defined_if: "!IS_DISTRIBUTED"
-  processors:
+  backends:
     - CPU
     - CUDA
   cname: geometric
@@ -337,7 +337,7 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
   types:
     - Float
     - Double
-  processors:
+  backends:
     - CPU
   return: argument 0
   variants:
@@ -362,7 +362,7 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
 [[
   name: bernoulli_
   defined_if: "!IS_DISTRIBUTED"
-  processors:
+  backends:
     - CPU
   return: self
   options:
@@ -398,7 +398,7 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
   types:
     - Float
     - Double
-  processors:
+  backends:
     - CUDA
   return: argument 0
   variants:
@@ -421,7 +421,7 @@ static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTenso
   name: bernoulli_
   types:
     - floating_point
-  processors:
+  backends:
     - CUDA
   return: self
   options:

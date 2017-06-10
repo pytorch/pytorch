@@ -14,19 +14,19 @@ MACRO_TEMPLATE = CodeTemplate("""\
 """)
 
 
-def create_dispatch(all_types, include_type, include_processor):
+def create_dispatch(all_types, include_type, include_backend):
     cases = []
     macro_name = "TLIB_DISPATCH"
     if include_type:
         macro_name += "_TYPE"
-    if include_processor:
+    if include_backend:
         macro_name += "_PROCESSOR"
     for typ in all_types:
         specializations = []
         if include_type:
             specializations.append(typ['ScalarType'])
-        if include_processor:
-            specializations.append('tlib::{}Tag'.format(typ['Processor']))
+        if include_backend:
+            specializations.append('tlib::{}Tag'.format(typ['Backend']))
         cases.append(CASE_TEMPLATE.substitute(
             typ, specializations=specializations))
     the_macro = MACRO_TEMPLATE.substitute(macro_name=macro_name, cases=cases)

@@ -6,7 +6,7 @@
     - Long
     - Int
     - Short
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:
@@ -27,7 +27,7 @@
     - Long
     - Int
     - Short
-  processors:
+  backends:
     - CPU
     - CUDA
   arguments:
@@ -40,7 +40,7 @@
   name: sigmoid_
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   cname: sigmoid
@@ -54,7 +54,7 @@
   name: sigmoid
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   cname: sigmoid
@@ -73,7 +73,7 @@
   name: log_
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   cname: log
@@ -87,7 +87,7 @@
   name: log
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:
@@ -105,7 +105,7 @@
   name: log1p_
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   cname: log1p
@@ -119,7 +119,7 @@
   name: log1p
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:
@@ -136,7 +136,7 @@
   name: lgamma
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:
@@ -153,7 +153,7 @@
   name: lgamma_
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   cname: lgamma
@@ -167,7 +167,7 @@
   name: exp_
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   cname: exp
@@ -181,7 +181,7 @@
   name: exp
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:
@@ -199,7 +199,7 @@
   name: cos_
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   cname: cos
@@ -213,7 +213,7 @@
   name: cos
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:
@@ -231,7 +231,7 @@
   name: acos_
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   cname: acos
@@ -245,7 +245,7 @@
   name: acos
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:
@@ -263,7 +263,7 @@
   name: cosh_
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   cname: cosh
@@ -277,7 +277,7 @@
   name: cosh
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:
@@ -295,7 +295,7 @@
   name: sin_
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   cname: sin
@@ -309,7 +309,7 @@
   name: sin
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:
@@ -327,7 +327,7 @@
   name: asin_
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   cname: asin
@@ -341,7 +341,7 @@
   name: asin
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:
@@ -359,7 +359,7 @@
   name: sinh_
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   cname: sinh
@@ -373,7 +373,7 @@
   name: sinh
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:
@@ -391,7 +391,7 @@
   name: tan_
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   cname: tan
@@ -405,7 +405,7 @@
   name: tan
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:
@@ -423,7 +423,7 @@
   name: atan_
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   cname: atan
@@ -437,7 +437,7 @@
   name: atan
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:
@@ -455,7 +455,7 @@
   name: tanh_
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   cname: tanh
@@ -469,7 +469,7 @@
   name: tanh
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:
@@ -487,7 +487,7 @@
   name: sqrt_
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   cname: sqrt
@@ -501,7 +501,7 @@
   name: sqrt
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:
@@ -519,7 +519,7 @@
   name: rsqrt_
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   cname: rsqrt
@@ -533,7 +533,7 @@
   name: rsqrt
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:
@@ -551,7 +551,7 @@
   name: ceil_
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   cname: ceil
@@ -565,7 +565,7 @@
   name: ceil
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:
@@ -583,7 +583,7 @@
   name: floor_
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   cname: floor
@@ -597,7 +597,7 @@
   name: floor
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:
@@ -615,7 +615,7 @@
   name: round_
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   cname: round
@@ -629,7 +629,7 @@
   name: round
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:
@@ -647,7 +647,7 @@
   name: trunc_
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   cname: trunc
@@ -661,7 +661,7 @@
   name: trunc
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:
@@ -679,7 +679,7 @@
   name: frac_
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   cname: frac
@@ -693,7 +693,7 @@
   name: frac
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:
@@ -710,7 +710,7 @@
   name: mean
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:
@@ -746,7 +746,7 @@
   name: var
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:
@@ -784,7 +784,7 @@
   name: std
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:
@@ -822,7 +822,7 @@
   name: norm
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:
@@ -862,7 +862,7 @@
   name: renorm
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:
@@ -885,7 +885,7 @@
   name: renorm_
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   options:
@@ -904,7 +904,7 @@
   name: dist
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:
@@ -925,7 +925,7 @@
   name: reciprocal
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:
@@ -944,7 +944,7 @@
   name: reciprocal_
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   options:
@@ -959,7 +959,7 @@
   name: neg
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:
@@ -978,7 +978,7 @@
   name: neg_
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   options:
@@ -994,9 +994,9 @@
   types:
     - Float
     - Double
-  processors:
+  backends:
     - CPU
-  type_processor_pairs: [[CPU,Float],[CPU,Double],[CUDA,Float]]
+  backend_type_pairs: [[CPU,Float],[CPU,Double],[CUDA,Float]]
 
   variants:
     - method
@@ -1013,7 +1013,7 @@
 
 [[
   name: atan2_
-  type_processor_pairs: [[CPU,Float],[CPU,Double],[CUDA,Float]]
+  backend_type_pairs: [[CPU,Float],[CPU,Double],[CUDA,Float]]
   cname: atan2
   return: argument 0
   arguments:
@@ -1031,7 +1031,7 @@
   name: pow
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:
@@ -1064,7 +1064,7 @@
   name: pow_
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   return: argument 0
@@ -1087,7 +1087,7 @@
   name: lerp
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:
@@ -1108,7 +1108,7 @@
   name: lerp_
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   return: self
@@ -1126,7 +1126,7 @@
   types:
     - Float
     - Double
-  processors:
+  backends:
     - CPU
   variants:
     - function
@@ -1145,7 +1145,7 @@
   types:
     - Float
     - Double
-  processors:
+  backends:
     - CPU
   variants:
     - function
@@ -1164,7 +1164,7 @@
   types:
     - Float
     - Double
-  processors:
+  backends:
     - CPU
   variants:
     - method
@@ -1651,7 +1651,7 @@
 
 [[
   name: dot
-  type_processor_pairs: [[CUDA,floating_point], [CPU,all]]
+  backend_type_pairs: [[CUDA,floating_point], [CPU,all]]
 
   variants:
     - method
@@ -1731,7 +1731,7 @@
 
 [[
   name: eye
-  processors:
+  backends:
     - CPU
   variants:
     - function
@@ -2172,7 +2172,7 @@ static const char *R = &__R;
   types:
     - Float
     - Double
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:
@@ -2193,7 +2193,7 @@ static const char *R = &__R;
   types:
     - Float
     - Double
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:
@@ -2214,7 +2214,7 @@ static const char *R = &__R;
   types:
     - Float
     - Double
-  processors:
+  backends:
     - CPU
   variants:
     - method
@@ -2247,7 +2247,7 @@ static const char *R = &__R;
   types:
     - Float
     - Double
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:
@@ -2276,7 +2276,7 @@ static const char *R = &__R;
   types:
     - Float
     - Double
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:
@@ -2301,7 +2301,7 @@ static const char *R = &__R;
   types:
     - Float
     - Double
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:
@@ -2328,7 +2328,7 @@ static const char *R = &__R;
   types:
     - Float
     - Double
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:
@@ -2346,7 +2346,7 @@ static const char *R = &__R;
   types:
     - Float
     - Double
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:
@@ -2368,7 +2368,7 @@ static const char *R = &__R;
   types:
     - Float
     - Double
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:
@@ -2391,7 +2391,7 @@ static const char *R = &__R;
   types:
     - Float
     - Double
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:
@@ -2413,7 +2413,7 @@ static const char *R = &__R;
   types:
     - Float
     - Double
-  processors:
+  backends:
     - CPU
   variants:
     - method
@@ -2440,7 +2440,7 @@ static const char *R = &__R;
   types:
     - Float
     - Double
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:
@@ -2460,7 +2460,7 @@ static const char *R = &__R;
   types:
     - Float
     - Double
-  processors:
+  backends:
     - CPU
   variants:
     - method
@@ -2479,7 +2479,7 @@ static const char *R = &__R;
   types:
     - Float
     - Double
-  processors:
+  backends:
     - CPU
   variants:
     - method
@@ -2497,7 +2497,7 @@ static const char *R = &__R;
   types:
     - Float
     - Double
-  processors:
+  backends:
     - CPU
   variants:
     - method
@@ -2524,7 +2524,7 @@ static const char *R = &__R;
   cname: btrifact
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:
@@ -2547,7 +2547,7 @@ static const char *R = &__R;
   cname: btrisolve
   types:
     - floating_point
-  processors:
+  backends:
     - CPU
     - CUDA
   variants:

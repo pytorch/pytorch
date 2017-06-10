@@ -1,6 +1,6 @@
 import re
 
-# match $idenifier or ${identifier} and replace with value in env
+# match $identifier or ${identifier} and replace with value in env
 # If this identifier is at the beginning of whitespace on a line
 # and its value is a list then it is treated as
 # block subsitution by indenting to that depth and putting each element
@@ -14,6 +14,7 @@ class CodeTemplate(object):
     subtitution = re.compile(
         '(^[^\n\S]*)?\$([^\d\W]\w*|\{,?[^\d\W]\w*\,?})', re.MULTILINE)
 
+    @staticmethod
     def from_file(filename):
         with open(filename, 'r') as f:
             return CodeTemplate(f.read())

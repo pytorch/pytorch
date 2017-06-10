@@ -334,26 +334,26 @@ ${cpu}
                        for option in declaration['options']
                        for arg in option['arguments'])
 
-        def processors_types_to_defined_if_string(declaration):
-            # A declaration has two fields: 'processor', which stores a list of
-            # processors (currently 'cpu' and 'cuda') the declaration applies
+        def backends_types_to_defined_if_string(declaration):
+            # A declaration has two fields: 'backend', which stores a list of
+            # backends (currently 'cpu' and 'cuda') the declaration applies
             # to, and 'types', which stores a list of real types the
             # declaration applies to. In PyTorch, when a function is only
             # supported by a subset of types, we wrap it in macro definition
             # checks.
             #
             # Previously, we manually required the cwrap declaration to
-            # specify for which processor/type combinations a function was
-            # defined for. Now, we explicitly list the types and processors for
+            # specify for which backend/type combinations a function was
+            # defined for. Now, we explicitly list the types and backends for
             # a declaration, if it should only be supported for a specific
-            # subset of types, processors, or type-processor pairs.
+            # subset of types, backends, or type-backend pairs.
 
             types = declaration.get('types', [])
-            processors = declaration['processors']
-            all_processors = ['CPU', 'CUDA']
+            backends = declaration['backends']
+            all_backends = ['CPU', 'CUDA']
 
-            def get_defined_string(processor, real):
-                if processor == 'CUDA':
+            def get_defined_string(backend, real):
+                if backend == 'CUDA':
                     if real == 'all':
                         return "IS_CUDA"
                     else:
@@ -378,31 +378,31 @@ ${cpu}
             defineds = []
 
             # The logic below does not handle corner cases well. We allow the
-            # declaration to have a field 'type_processor_pairs' that stores a
-            # dictionary from type --> processor representing allowed
+            # declaration to have a field 'backend_type_pairs' that stores a
+            # dictionary from type --> backend representing allowed
             # combinations. Let's use these first.
-            for pair in declaration.get('type_processor_pairs', []):
+            for pair in declaration.get('backend_type_pairs', []):
                 p, t = pair
                 defineds.extend([get_defined_string(p, et) for et in
                                 expand_composite_type(p, t)])
 
-            # In the base case, types is empty and processors contains both
+            # In the base case, types is empty and backends contains both
             # 'CPU' and 'CUDA' --> this means we support all types, and our
             # string should be empty, or simply the list of explict type
-            # processor pairs
-            if (len(types) == 0 and all([proc in processors for proc in
-                                         all_processors])):
+            # backend pairs
+            if (len(types) == 0 and all([proc in backends for proc in
+                                         all_backends])):
                 return " || ".join(defineds)
 
-            # Case 2: types is empty, but only one processor type is specified
-            if len(types) == 0 and len(processors) == 1:
-                defineds.append('IS_CUDA' if processors[0] == 'CUDA' else
+            # Case 2: types is empty, but only one backend type is specified
+            if len(types) == 0 and len(backends) == 1:
+                defineds.append('IS_CUDA' if backends[0] == 'CUDA' else
                                 "!IS_CUDA")
                 return " || ".join(defineds)
 
-            # Else, we loop overall all of the processor, type pairs and add
+            # Else, we loop overall all of the backend, type pairs and add
             # them
-            for p in processors:
+            for p in backends:
                 for t in types:
                     defineds.extend([get_defined_string(p, et) for et in
                                     expand_composite_type(p, t)])
@@ -412,7 +412,7 @@ ${cpu}
         for declaration in declarations:
             # Disable all methods for THHalfTensor, unless cpu_half is True
 
-            dfstr = processors_types_to_defined_if_string(declaration)
+            dfstr = backends_types_to_defined_if_string(declaration)
             if len(dfstr) > 0:
                 # for now, need to check for distributed defined if as well
                 if 'defined_if' in declaration:

@@ -645,7 +645,7 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
   name: range
   variants:
     - function
-  processors:
+  backends:
     - CPU
   return: argument 0
   before_arg_assign: |
@@ -665,7 +665,7 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
   name: arange
   variants:
     - function
-  processors:
+  backends:
     - CPU
   return: argument 0
   options:

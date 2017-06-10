@@ -20,7 +20,7 @@ class ProcessorSpecificPlugin(CWrapPlugin):
 
         def split_candidate(declaration):
             # First, check and see if it is a declaration for both CPU/GPU
-            if all([proc in declaration['processors'] for
+            if all([proc in declaration['backends'] for
                     proc in ['CPU', 'CUDA']]):
                 for option in declaration['options']:
                     for argument in option['arguments']:
@@ -35,30 +35,30 @@ class ProcessorSpecificPlugin(CWrapPlugin):
 
         def generator_split(declaration):
             # the split must make two changes: 1. remove the generator argument
-            # for the GPU, and 2. assign the correct processors/types to the
+            # for the GPU, and 2. assign the correct backends/types to the
             # split declaration
             dec_cpu = declaration
             dec_gpu = deepcopy(declaration)
 
-            # Remove GPU processor and types from dec_cpu
-            dec_cpu['processors'].remove('CUDA')
-            if dec_cpu.get('type_processor_pairs', False):
-                dec_cpu['type_processor_pairs'] = (
-                    [pair for pair in dec_cpu['type_processor_pairs'] if
+            # Remove GPU backend and types from dec_cpu
+            dec_cpu['backends'].remove('CUDA')
+            if dec_cpu.get('backend_type_pairs', False):
+                dec_cpu['backend_type_pairs'] = (
+                    [pair for pair in dec_cpu['backend_type_pairs'] if
                      pair[1] == 'CPU'])
             # also need to reach into options
             for option in dec_cpu['options']:
-                option['processors'].remove('CUDA')
+                option['backends'].remove('CUDA')
 
-            # Remove CPU processor and types from dec_gpu
-            dec_gpu['processors'].remove('CPU')
-            if dec_gpu.get('type_processor_pairs', False):
-                dec_gpu['type_processor_pairs'] = (
-                    [pair for pair in dec_gpu['type_processor_pairs'] if
+            # Remove CPU backend and types from dec_gpu
+            dec_gpu['backends'].remove('CPU')
+            if dec_gpu.get('backend_type_pairs', False):
+                dec_gpu['backend_type_pairs'] = (
+                    [pair for pair in dec_gpu['backend_type_pairs'] if
                      pair[1] == 'CUDA'])
             # also need to reach into options
             for option in dec_gpu['options']:
-                option['processors'].remove('CPU')
+                option['backends'].remove('CPU')
 
             # Remove generator arguments from dec_gpu options
             for option in dec_gpu['options']:
