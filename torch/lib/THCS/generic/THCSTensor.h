@@ -64,8 +64,6 @@ TH_API void THCSTensor_(transpose)(THCState *state, THCSTensor *self, int dimens
 TH_API int THCSTensor_(isCoalesced)(THCState *state, const THCSTensor *self);
 TH_API THCSTensor *THCSTensor_(newCoalesce)(THCState *state, THCSTensor *self);
 
-TH_API void THCTensor_(sparseMask)(THCState *state, THCSTensor *r_, THCTensor *t, THCSTensor *mask);
-
 TH_API void THCSTensor_(free)(THCState *state, THCSTensor *self);
 TH_API void THCSTensor_(retain)(THCState *state, THCSTensor *self);
 

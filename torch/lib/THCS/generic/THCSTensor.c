@@ -441,48 +441,4 @@ int THCSTensor_(checkGPU)(THCState *state, unsigned int nSparseTensors, unsigned
 #endif // DISABLE_CHECK_GPU
 }
 
-void THCTensor_(sparseMask)(THCState *state, THCSTensor *r_, THCTensor *t, THCSTensor *mask) {
-  THArgCheck(mask->coalesced, 2, "mask is uncoalesced");
-  THCAssertSameGPU(THCSTensor_(checkGPU)(state, 2, 3, r_, mask, t));
-  if(!THCSTensor_(isSameSizeAsDense)(state, mask, t)) {
-    THError("sparseMask operands have incompatible sizes");
-  }
-  THCSTensor_(resizeAs)(state, r_, mask);
-  if (mask->nnz == 0) {
-    THCSTensor_(zero)(state, r_);
-    return;
-  }
-  THCIndexTensor *maskIndices = THCSTensor_(newIndices)(state, mask);
-  THCTensor *maskValues = THCSTensor_(newValues)(state, mask);
-  THCTensor *rValues = THCTensor_(new)(state);
-  THCTensor_(resizeAs)(state, rValues, maskValues);
-  THCSTensor_(_move)(state, r_, THCIndexTensor_(newClone)(state, maskIndices), rValues);
-  r_->coalesced = mask->coalesced;
-  r_->nnz = mask->nnz;
-
-  THCudaLongTensor *indices = THCudaLongTensor_newWithSize1d(state, mask->nnz);
-  THCudaLongTensor *indicesBuffer = THCudaLongTensor_new(state);
-
-  THCudaLongTensor_zero(state, indices);
-  for (long d = 0; d < mask->nDimensionI; d++) {
-    THCudaLongTensor_mul(state, indices, indices, mask->size[d]);
-    THCudaLongTensor_select(state, indicesBuffer, maskIndices, 0, d);
-    THCudaLongTensor_cadd(state, indices, indices, 1, indicesBuffer);
-  }
-  THLongStorage *viewSize = THLongStorage_newWithSize(1 + mask->nDimensionV);
-  viewSize->data[0] = -1;
-  for (long d = 0; d < mask->nDimensionV; d++) {
-    viewSize->data[1 + d] = mask->size[mask->nDimensionI + d];
-  }
-  THCTensor *t_view = THCTensor_(newView)(state, t, viewSize);
-  THCTensor_(indexSelect)(state, rValues, t_view, 0, indices);
-
-  THCudaLongTensor_free(state, indices);
-  THCudaLongTensor_free(state, indicesBuffer);
-  THLongStorage_free(viewSize);
-  THCTensor_(free)(state, t_view);
-  THCIndexTensor_(free)(state, maskIndices);
-  THCTensor_(free)(state, maskValues);
-}
-
 #endif

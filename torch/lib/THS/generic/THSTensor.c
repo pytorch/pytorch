@@ -487,52 +487,6 @@ THSTensor *THSTensor_(newCoalesce)(THSTensor *self) {
   return dst;
 }
 
-void THTensor_(sparseMask)(THSTensor *r_, THTensor *t, THSTensor *mask) {
-  THArgCheck(mask->coalesced, 2, "mask is uncoalesced");
-  THSTensor_(resizeAs)(r_, mask);
-  if (mask->nnz == 0) {
-    THSTensor_(zero)(r_);
-    return;
-  }
-  long nDim = THTensor_(nDimension)(t);
-  long nDimI = THSTensor_(nDimensionI)(mask);
-  long nDimV = THSTensor_(nDimensionV)(mask);
-  THLongTensor *mask_indices_ = THSTensor_(newIndices)(mask);
-  THTensor *mask_values_ = THSTensor_(newValues)(mask);
-  THTensor *r_values_ = THTensor_(new)();
-  THTensor_(resizeAs)(r_values_, mask_values_);
-  THSTensor_(_move)(r_, THLongTensor_newClone(mask_indices_), r_values_);
-  r_->coalesced = mask->coalesced;
-  r_->nnz = mask->nnz;
-
-  if (nDim > nDimI) {
-    THTensor *srcBuffer = THTensor_(new)();
-    THTensor *dstBuffer = THTensor_(new)();
-    for (long i = 0; i < r_->nnz; i++) {
-      THTensor_(set)(srcBuffer, t);
-      for (long d = 0; d < nDimI; d++) {
-        THTensor_(select)(srcBuffer, srcBuffer, 0, THTensor_fastGet2d(mask_indices_, d, i));
-      }
-      THTensor_(select)(dstBuffer, r_values_, 0, i);
-      THTensor_(copy)(dstBuffer, srcBuffer);
-    }
-    THTensor_(free)(srcBuffer);
-    THTensor_(free)(dstBuffer);
-  } else {
-    for (long i = 0; i < r_->nnz; i++) {
-      long idx = 0;
-      for (long d = 0; d < nDimI; d++) {
-        idx += THTensor_fastGet2d(mask_indices_, d, i) * t->stride[d];
-      }
-      real val = (t->storage->data + t->storageOffset)[idx];
-      THTensor_fastSet1d(r_values_, i, val);
-    }
-  }
-
-  THLongTensor_free(mask_indices_);
-  THTensor_(free)(mask_values_);
-}
-
 void THSTensor_(free)(THSTensor *self)
 {
   if(!self)
