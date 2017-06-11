@@ -417,11 +417,11 @@ def alpha_dropout(input, p=0.5, training=False):
 
     alpha = -1.7580993408473766
     keep_prob = 1 - p
-    noise = input.data.new(input.size())
-    noise.bernoulli_(keep_prob)
+    noise = input.data.new().byte().resize_(input.size())
+    noise.bernoulli_(p)
     noise = Variable(noise)
 
-    output = (input * noise).add_(noise.neg().add_(1).mul_(alpha))
+    output = input.masked_fill(noise, alpha)
 
     a = (keep_prob + alpha ** 2 * keep_prob * (1 - keep_prob)) ** (-0.5)
     b = -a * alpha * (1 - keep_prob)
