@@ -103,8 +103,8 @@ def constant(tensor, val):
 
 
 def eye(tensor):
-    """Fills the 2-dimensional input Tensor or Variable with the identity matrix. Preserves the identity of the inputs in
-    Linear layers, where as many inputs are preserved as possible.
+    """Fills the 2-dimensional input Tensor or Variable with the identity matrix. Preserves the identity of the inputs
+    in Linear layers, where as many inputs are preserved as possible.
 
     Args:
         tensor: a 2-dimensional torch.Tensor or autograd.Variable

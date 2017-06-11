@@ -8,6 +8,7 @@ from . import _functions
 from .modules import utils
 from ._functions.padding import ConstantPad2d
 from ..autograd import _functions as _autograd_functions
+from torch.autograd import Variable
 from .modules.utils import _single, _pair, _triple
 
 # Convolutions
@@ -404,6 +405,28 @@ def adaptive_avg_pool2d(input, output_size):
 
 def dropout(input, p=0.5, training=False, inplace=False):
     return _functions.dropout.Dropout(p, training, inplace)(input)
+
+
+def alpha_dropout(input, p=0.5, training=False):
+    if not 0 < p <= 1:
+        raise ValueError("dropout probability has to be between 0 and 1, "
+                         "but got {}".format(p))
+
+    if p > 0 and training:
+        alpha = -1.7580993408473766
+        keep_prob = 1 - p
+        noise = input.data.new(input.size())
+        noise.bernoulli_(keep_prob)
+        noise = Variable(noise)
+
+        output = (input * noise).add_(noise.neg().add_(1).mul_(alpha))
+
+        a = (keep_prob + alpha ** 2 * keep_prob * (1 - keep_prob)) ** (-0.5)
+        b = -a * alpha * (1 - keep_prob)
+
+        return output.mul_(a).add_(b)
+
+    return input.clone()
 
 
 def threshold(input, threshold, value, inplace=False):
