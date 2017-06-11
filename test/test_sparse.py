@@ -182,6 +182,7 @@ class TestSparse(TestCase):
         x.to_dense()
         x.to_dense()
         self.assertEqual(res, x.to_dense())
+        self.assertEqual(x.ndimension(), res.ndimension())
 
     def test_contig(self):
         i = self.IndexTensor([

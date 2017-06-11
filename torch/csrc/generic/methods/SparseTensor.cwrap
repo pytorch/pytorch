@@ -62,7 +62,7 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
   - THSTensor* self
 ]]
 [[
-  name: THPTensor_(nDimension)
+  name: THSPTensor_(nDimension)
   python_name: dim
   only_register: True
   method_flags: METH_KEYWORDS
