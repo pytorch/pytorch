@@ -19,6 +19,9 @@ class Dropout(Module):
     Args:
         p: probability of an element to be zeroed. Default: 0.5
         inplace: If set to True, will do this operation in-place. Default: false
+        scale_train: If set to False, no scaling done in train mode, but do scaling in test mode.
+                     If True, scaling done in train mode itself, nothing done during test mode.
+                     Default: true
 
     Shape:
         - Input: `Any`. Input can be of any shape
@@ -33,22 +36,29 @@ class Dropout(Module):
     .. _Improving neural networks by preventing co-adaptation of feature detectors: https://arxiv.org/abs/1207.0580
     """
 
-    def __init__(self, p=0.5, inplace=False):
+    def __init__(self, p=0.5, inplace=False, scale_train=True):
         super(Dropout, self).__init__()
         if p < 0 or p > 1:
             raise ValueError("dropout probability has to be between 0 and 1, "
                              "but got {}".format(p))
         self.p = p
         self.inplace = inplace
+        self.scale_train = scale_train
+
+    def __setstate__(self, state):
+        state.setdefault('scale_train', True)
+        self.__dict__ = state
 
     def forward(self, input):
-        return F.dropout(input, self.p, self.training, self.inplace)
+        return F.dropout(input, self.p, self.training, self.inplace, self.scale_train)
 
     def __repr__(self):
         inplace_str = ', inplace' if self.inplace else ''
+        scale_train_str = ', scale_train' if self.scale_train else ''
         return self.__class__.__name__ + ' (' \
             + 'p = ' + str(self.p) \
-            + inplace_str + ')'
+            + inplace_str \
+            + scale_train_str + ')'
 
 
 class Dropout2d(Module):
@@ -70,6 +80,9 @@ class Dropout2d(Module):
     Args:
         p (float, optional): probability of an element to be zeroed.
         inplace (bool, optional): If set to True, will do this operation in-place
+        scale_train (bool, optional) : If set to False, no scaling done in train mode, but do scaling in test mode.
+                                       If True, scaling done in train mode itself, nothing done during test mode.
+                                       Default: true
 
     Shape:
         - Input: :math:`(N, C, H, W)`
@@ -85,22 +98,25 @@ class Dropout2d(Module):
        http://arxiv.org/abs/1411.4280
     """
 
-    def __init__(self, p=0.5, inplace=False):
+    def __init__(self, p=0.5, inplace=False, scale_train=True):
         super(Dropout2d, self).__init__()
         if p < 0 or p > 1:
             raise ValueError("dropout probability has to be between 0 and 1, "
                              "but got {}".format(p))
         self.p = p
         self.inplace = inplace
+        self.scale_train = scale_train
 
     def forward(self, input):
-        return self._backend.Dropout2d(self.p, self.training, self.inplace)(input)
+        return self._backend.Dropout2d(self.p, self.training, self.inplace, self.scale_train)(input)
 
     def __repr__(self):
         inplace_str = ', inplace' if self.inplace else ''
+        scale_train_str = ', scale_train' if self.scale_train else ''
         return self.__class__.__name__ + ' (' \
             + 'p=' + str(self.p) \
-            + inplace_str + ')'
+            + inplace_str \
+            + scale_train_str + ')'
 
 
 class Dropout3d(Module):
@@ -122,6 +138,9 @@ class Dropout3d(Module):
     Args:
         p (float, optional): probability of an element to be zeroed.
         inplace (bool, optional): If set to True, will do this operation in-place
+        scale_train (bool, optional) : If set to False, no scaling done in train mode, but do scaling in test mode.
+                                       If True, scaling done in train mode itself, nothing done during test mode.
+                                       Default: true
 
     Shape:
         - Input: :math:`(N, C, D, H, W)`
@@ -137,19 +156,22 @@ class Dropout3d(Module):
        http://arxiv.org/abs/1411.4280
     """
 
-    def __init__(self, p=0.5, inplace=False):
+    def __init__(self, p=0.5, inplace=False, scale_train=True):
         super(Dropout3d, self).__init__()
         if p < 0 or p > 1:
             raise ValueError("dropout probability has to be between 0 and 1, "
                              "but got {}".format(p))
         self.p = p
         self.inplace = inplace
+        self.scale_train = scale_train
 
     def forward(self, input):
-        return self._backend.Dropout3d(self.p, self.training, self.inplace)(input)
+        return self._backend.Dropout3d(self.p, self.training, self.inplace, self.scale_train)(input)
 
     def __repr__(self):
         inplace_str = ', inplace' if self.inplace else ''
+        scale_train_str = ', scale_train' if self.scale_train else ''
         return self.__class__.__name__ + ' (' \
             + 'p=' + str(self.p) \
-            + inplace_str + ')'
+            + inplace_str \
+            + scale_train_str + ')'
