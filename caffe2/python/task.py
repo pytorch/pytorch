@@ -567,11 +567,11 @@ class SetupNets(object):
     In order to have `init_net` run once before `net` runs for the
     first time, you can do one of the following:
 
-        net.add_object(Task.TASK_SETUP, SetupNets([init_net]))
+        net.add_attribute(Task.TASK_SETUP, SetupNets([init_net]))
 
     or
 
-        net.add_object(TaskGroup.LOCAL_SETUP, SetupNets([init_net]))
+        net.add_attribute(TaskGroup.LOCAL_SETUP, SetupNets([init_net]))
 
     - With Task.TASK_SETUP, init_net will run once at my_task startup.
     - With TaskGroup.LOCAL_SETUP, init_net will run once on node 'trainer',
