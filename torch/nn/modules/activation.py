@@ -245,6 +245,40 @@ class ELU(Module):
             + inplace_str + ')'
 
 
+class SELU(Module):
+    """Applies element-wise, :math:`f(x) = scale * (max(0,x) + min(0, alpha * (exp(x) - 1)))`,
+    with alpha=1.6732632423543772848170429916717 and scale=1.0507009873554804934193349852946.
+    More details can be found in the paper `Self-Normalizing Neural Networks`_ .
+
+    Args:
+        inplace (bool, optional): can optionally do the operation in-place
+
+    Shape:
+        - Input: :math:`(N, *)` where `*` means, any number of additional dimensions
+        - Output: :math:`(N, *)`, same shape as the input
+
+    Examples::
+
+        >>> m = nn.SELU()
+        >>> input = autograd.Variable(torch.randn(2))
+        >>> print(input)
+        >>> print(m(input))
+
+    .. _Self-Normalizing Neural Networks: https://arxiv.org/abs/1706.02515
+    """
+
+    def __init__(self, inplace=False):
+        super(SELU, self).__init__()
+        self.inplace = inplace
+
+    def forward(self, input):
+        return F.selu(input, self.inplace)
+
+    def __repr__(self):
+        inplace_str = ' (inplace)' if self.inplace else ''
+        return self.__class__.__name__ + inplace_str
+
+
 class Hardshrink(Module):
     """Applies the hard shrinkage function element-wise
     Hardshrink is defined as::

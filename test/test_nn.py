@@ -77,12 +77,14 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
             module_ip = self.constructor(*self.constructor_args, inplace=True)
 
             input_version = input._version
-            output = module(input)
+            with freeze_rng_state():
+                output = module(input)
             test_case.assertEqual(input._version, input_version)
 
             input_ip = deepcopy(input)
             input_ip_clone = input_ip.clone()
-            output_ip = module_ip(input_ip_clone)
+            with freeze_rng_state():
+                output_ip = module_ip(input_ip_clone)
             test_case.assertNotEqual(input_ip_clone._version, input_version)
             test_case.assertEqual(output, output_ip)
             grad = output.data.clone().normal_()
@@ -2034,13 +2036,15 @@ class TestNN(NNTestCase):
                     self.assertEqual(output[:, c, h, w], input[:, channel_idx, height_idx, weight_idx])
 
     def test_inplace_thnn(self):
-        r = nn.ReLU(True)
-        input = Variable(torch.randn(5, 5), requires_grad=True)
-        output = r(input + 0)
-        grad_output = torch.randn(5, 5)
-        grad_output_clone = grad_output.clone()
-        output.backward(grad_output)
-        self.assertEqual(grad_output, grad_output_clone)
+        modules = [nn.ReLU, nn.ELU, nn.SELU, nn.RReLU]
+        for mod in modules:
+            r = mod(inplace=True)
+            input = Variable(torch.randn(5, 5), requires_grad=True)
+            output = r(input + 0)
+            grad_output = torch.randn(5, 5)
+            grad_output_clone = grad_output.clone()
+            output.backward(grad_output)
+            self.assertEqual(grad_output, grad_output_clone)
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_noncontig_conv_grad(self):
@@ -3117,6 +3121,11 @@ new_module_tests = [
         constructor_args=((3, 4),),
         input=torch.rand(1, 3, 5, 6),
         desc='tuple'
+    ),
+    dict(
+        module_name='SELU',
+        input_size=(3, 2, 5),
+        check_inplace=True
     ),
 ]
 
