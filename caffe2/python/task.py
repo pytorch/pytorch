@@ -524,7 +524,7 @@ class Task(object):
                 exit_nets.append(output_net)
 
             body = self._step if not report_steps else core.execution_step(
-                '%s:body', report_steps + [self._step])
+                '%s:body' % self.name, report_steps + [self._step])
             self._step_with_setup = core.execution_step(
                 self.name,
                 [
