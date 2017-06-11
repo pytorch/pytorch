@@ -408,25 +408,25 @@ def dropout(input, p=0.5, training=False, inplace=False):
 
 
 def alpha_dropout(input, p=0.5, training=False):
-    if not 0 < p <= 1:
+    if p < 0 or p > 1:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
 
-    if p > 0 and training:
-        alpha = -1.7580993408473766
-        keep_prob = 1 - p
-        noise = input.data.new(input.size())
-        noise.bernoulli_(keep_prob)
-        noise = Variable(noise)
+    if p == 0 or not training:
+        return input
 
-        output = (input * noise).add_(noise.neg().add_(1).mul_(alpha))
+    alpha = -1.7580993408473766
+    keep_prob = 1 - p
+    noise = input.data.new(input.size())
+    noise.bernoulli_(keep_prob)
+    noise = Variable(noise)
 
-        a = (keep_prob + alpha ** 2 * keep_prob * (1 - keep_prob)) ** (-0.5)
-        b = -a * alpha * (1 - keep_prob)
+    output = (input * noise).add_(noise.neg().add_(1).mul_(alpha))
 
-        return output.mul_(a).add_(b)
+    a = (keep_prob + alpha ** 2 * keep_prob * (1 - keep_prob)) ** (-0.5)
+    b = -a * alpha * (1 - keep_prob)
 
-    return input.clone()
+    return output.mul_(a).add_(b)
 
 
 def threshold(input, threshold, value, inplace=False):
