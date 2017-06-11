@@ -68,6 +68,36 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
   method_flags: METH_KEYWORDS
   sparse: yes
 ]]
+[[
+  name: nDimensionI
+  sparse: yes
+  python_name: ndimensionI
+  return: long
+  arguments:
+  - THSTensor* self
+]]
+[[
+  name: THSPTensor_(nDimensionI)
+  python_name: dimI
+  only_register: True
+  method_flags: METH_KEYWORDS
+  sparse: yes
+]]
+[[
+  name: nDimensionV
+  sparse: yes
+  python_name: ndimensionV
+  return: long
+  arguments:
+  - THSTensor* self
+]]
+[[
+  name: THSPTensor_(nDimensionV)
+  python_name: dimV
+  only_register: True
+  method_flags: METH_KEYWORDS
+  sparse: yes
+]]
 
 [[
   name: nnz

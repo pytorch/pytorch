@@ -356,7 +356,7 @@ class _TensorBase(object):
         return id(self)
 
     def _sparse_mask(self, s):
-        v = self.view(s.numelI(), *s._values().size()[1:]).index_select(0, s._linear_indices())
+        v = self.view(s.numelI(), *s.sizeV()).index_select(0, s._linear_indices())
         return type(s)(s._indices(), v, s.size())
 
 

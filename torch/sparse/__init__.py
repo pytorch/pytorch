@@ -132,6 +132,12 @@ class _SparseBase(object):
         return '{} of size {} with indices:\n{}and values:\n{}'.format(
             self.__class__.__name__, size_str, self._indices(), self._values())
 
+    def sizeI(self):
+        return self.size()[:self.dimI()]
+
+    def sizeV(self):
+        return self.size()[self.dimI():]
+
 
 class DoubleTensor(_SparseBase, _C.SparseDoubleTensorBase, _TensorBase):
     def is_signed(self):
