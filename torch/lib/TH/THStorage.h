@@ -30,6 +30,15 @@ typedef struct {
 
 TH_API THDescBuff THLongStorage_sizeDesc(const THLongStorage *size);
 TH_API THLongStorage *THLongStorage_newInferSize(THLongStorage *size, ptrdiff_t nElement);
-TH_API void THLongStorage_calculateExpandGeometry(long *tensorSizes, long *tensorStrides, long tensorDim, THLongStorage *sizes, long **esz, long **est);
+
+// Given the sizes of {2,N} tensors, write out the size when the tensors are expanded together.
+TH_API int THLongStorage_inferSize2(THLongStorage *output, long *sizesA, long dimsA,
+                                    long *sizesB, long dimsB, char *error_buffer, int buffer_len);
+TH_API int THLongStorage_inferSizeN(THLongStorage *output, int n, long **sizes, long *dims,
+                                    char *error_buffer, int buffer_len);
+
+TH_API int THLongStorage_inferExpandGeometry(long *tensorSizes, long *tensorStrides, long tensorDim,
+                                             THLongStorage *sizes, long **expandedSizes, long **expandedStrides,
+                                             char *error_buffer, int buffer_len);
 
 #endif

@@ -71,6 +71,10 @@ TH_API THTensor *THTensor_(newUnfold)(THTensor *tensor, int dimension_, long siz
 TH_API THTensor *THTensor_(newView)(THTensor *tensor, THLongStorage *size);
 TH_API THTensor *THTensor_(newExpand)(THTensor *tensor, THLongStorage *size);
 
+TH_API void THTensor_(expand)(THTensor *r, THTensor *tensor, THLongStorage *size);
+TH_API void THTensor_(expand2)(THTensor *ra, THTensor *rb, THTensor *opa, THTensor *opb);
+TH_API void THTensor_(expand3)(THTensor *ra, THTensor *rb, THTensor *rc, THTensor *opa, THTensor *opb, THTensor *opc);
+
 TH_API void THTensor_(resize)(THTensor *tensor, THLongStorage *size, THLongStorage *stride);
 TH_API void THTensor_(resizeAs)(THTensor *tensor, THTensor *src);
 TH_API void THTensor_(resizeNd)(THTensor *tensor, int nDimension, long *size, long *stride);
