@@ -221,6 +221,12 @@ def _pipe_step(
                 exit_net = core.Net('exit')
                 read_nets, status, rec = reader.read_record_ex(
                     init_net, exit_net)
+                init_net.ConstantFill(
+                    [], [status],
+                    shape=[],
+                    value=False,
+                    dtype=core.DataType.BOOL
+                )
 
                 if rec is not None:
                     if writer is None:

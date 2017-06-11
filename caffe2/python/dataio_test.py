@@ -58,7 +58,7 @@ class TestReaderWithLimit(TestCase):
         )
         self.assertTrue(ws.blobs[str(reader.data_finished())].fetch())
 
-        """ 3. Read without counter """
+        """ 4. Read without counter """
         ws.run(dst_init)
         with TaskGroup() as tg:
             reader = ReaderWithLimit(src_ds.reader(), num_iter=None)
@@ -69,3 +69,10 @@ class TestReaderWithLimit(TestCase):
             list(range(100))
         )
         self.assertTrue(ws.blobs[str(reader.data_finished())].fetch())
+
+        """ 5. Read using the same reader without resetting workspace """
+        session.run(tg)
+        self.assertEquals(
+            sorted(ws.blobs[str(dst_ds.content().label())].fetch()),
+            sorted(list(range(100)) * 2)
+        )
