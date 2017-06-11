@@ -329,7 +329,8 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
   python_name: masked_fill_
   return: self
   arguments:
-    - THTensor* self
+    - arg: THTensor* self
+      broadcast: mask inplace fallback types:Byte
     - THBoolTensor* mask
     - real value
 ]]
@@ -340,7 +341,8 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
   python_name: masked_scatter_
   return: self
   arguments:
-    - THTensor* self
+    - arg: THTensor* self
+      broadcast: mask inplace fallback types:Byte
     - THBoolTensor* mask
     - THTensor* source
 ]]
@@ -828,7 +830,7 @@ invalid_arguments:
 PyObject * THPTensor_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
 {
   HANDLE_TH_ERRORS
-  return THPCopyMethod(THTensor_(copy_functions), self, args, kwargs);
+  return THPTensorCopyMethod(THTensor_(copy_functions), self, args, kwargs);
   END_HANDLE_TH_ERRORS
 }
 

@@ -156,10 +156,11 @@ class build_ext(setuptools.command.build_ext.build_ext):
         from tools.cwrap.plugins.NullableArguments import NullableArguments
         from tools.cwrap.plugins.CuDNNPlugin import CuDNNPlugin
         from tools.cwrap.plugins.WrapDim import WrapDim
+        from tools.cwrap.plugins.Broadcast import Broadcast
         thp_plugin = THPPlugin()
         cwrap('torch/csrc/generic/TensorMethods.cwrap', plugins=[
             BoolOption(), thp_plugin, AutoGPU(condition='IS_CUDA'),
-            ArgcountSortPlugin(), KwargsPlugin(), WrapDim()
+            ArgcountSortPlugin(), KwargsPlugin(), WrapDim(), Broadcast()
         ])
         cwrap('torch/csrc/cudnn/cuDNN.cwrap', plugins=[
             CuDNNPlugin(), NullableArguments()
@@ -264,6 +265,7 @@ main_sources = [
     "torch/csrc/DynamicTypes.cpp",
     "torch/csrc/byte_order.cpp",
     "torch/csrc/utils.cpp",
+    "torch/csrc/expand_utils.cpp",
     "torch/csrc/utils/object_ptr.cpp",
     "torch/csrc/utils/tuple_parser.cpp",
     "torch/csrc/allocators.cpp",
@@ -333,6 +335,7 @@ if WITH_CUDA:
         "torch/csrc/cuda/Stream.cpp",
         "torch/csrc/cuda/AutoGPU.cpp",
         "torch/csrc/cuda/utils.cpp",
+        "torch/csrc/cuda/expand_utils.cpp",
         "torch/csrc/cuda/serialization.cpp",
     ]
     main_sources += split_types("torch/csrc/cuda/Tensor.cpp")

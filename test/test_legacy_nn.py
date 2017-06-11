@@ -184,16 +184,16 @@ tests = [
     OldModuleTest(nn.Sum,
                   (1,),
                   input_size=(2, 4, 5),
-                  reference_fn=lambda i, _: i.sum(1).squeeze(1)),
+                  reference_fn=lambda i, _: i.sum(1, keepdim=False)),
     OldModuleTest(nn.Sum,
                   (1, True),
                   input_size=(2, 4, 5),
-                  reference_fn=lambda i, _: i.sum(1).div(i.size(1)).squeeze(1),
+                  reference_fn=lambda i, _: i.sum(1, keepdim=False).div(i.size(1)),
                   desc='sizeAverage'),
     OldModuleTest(nn.Mean,
                   (1,),
                   input_size=(2, 4, 5),
-                  reference_fn=lambda i, _: torch.mean(i, 1).squeeze(1)),
+                  reference_fn=lambda i, _: torch.mean(i, 1, keepdim=False)),
     OldModuleTest(lambda: nn.Sequential().add(nn.GradientReversal()).add(nn.GradientReversal()),
                   input_size=(4, 3, 2, 2),
                   fullname='GradientReversal'),
@@ -814,7 +814,7 @@ class TestNN(NNTestCase):
         gradInput2 = torch.ones(4, 2).fill_(num_modules * 5)
         self.assertEqual(gradInput, gradInput2)
 
-        gradWeight = input.sum(0).expand(5, 2)
+        gradWeight = input.sum(0, keepdim=True).expand(5, 2)
         for l in linears:
             self.assertEqual(gradWeight, l.gradWeight)
 
@@ -884,8 +884,8 @@ class TestNN(NNTestCase):
         output2 = [input, input, input]
         self.assertEqual(output2, output)
         gradInput = module.backward(input, gradOutput)
-        gradInput2 = [_gradOutput[0].sum(0).squeeze(0), _gradOutput[1].sum(
-            0).squeeze(0), [_gradOutput[2].sum(0).squeeze(0)]]
+        gradInput2 = [_gradOutput[0].sum(0, keepdim=False), _gradOutput[1].sum(
+            0, keepdim=False), [_gradOutput[2].sum(0, keepdim=False)]]
         self.assertTrue(isinstance(gradInput, list))
         self.assertFalse(isinstance(gradInput[0], list))
         self.assertFalse(isinstance(gradInput[1], list))

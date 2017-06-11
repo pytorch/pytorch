@@ -497,8 +497,17 @@
         - THTensor* self
         - arg: long dim
           wrap_dim: self
-        - arg: bool keepdim
-          default: "true"
+        - bool keepdim
+    - cname: mean
+      return: argument 0
+      before_call: maybeThrowBackCompatKeepdimWarn("mean");
+      arguments:
+        - arg: THTensor* destination
+          output: True
+        - THTensor* self
+        - arg: long dim
+          wrap_dim: self
+        - CONSTANT false
 ]]
 
 [[
@@ -519,8 +528,18 @@
         - arg: long dim
           wrap_dim: self
         - CONSTANT false
-        - arg: bool keepdim
-          default: "true"
+        - bool keepdim
+    - cname: var
+      return: argument 0
+      before_call: maybeThrowBackCompatKeepdimWarn("var");
+      arguments:
+        - arg: THTensor* destination
+          output: True
+        - THTensor* self
+        - arg: long dim
+          wrap_dim: self
+        - CONSTANT false
+        - CONSTANT false
 ]]
 
 [[
@@ -541,8 +560,18 @@
         - arg: long dim
           wrap_dim: self
         - CONSTANT false
-        - arg: bool keepdim
-          default: "true"
+        - bool keepdim
+    - cname: std
+      return: argument 0
+      before_call: maybeThrowBackCompatKeepdimWarn("std");
+      arguments:
+        - arg: THTensor* destination
+          output: True
+        - THTensor* self
+        - arg: long dim
+          wrap_dim: self
+        - CONSTANT false
+        - CONSTANT false
 ]]
 
 [[
@@ -565,8 +594,18 @@
         - real p
         - arg: long dim
           wrap_dim: self
-        - arg: bool keepdim
-          default: "true"
+        - bool keepdim
+    - cname: norm
+      return: argument 0
+      before_call: maybeThrowBackCompatKeepdimWarn("norm");
+      arguments:
+        - arg: THTensor* destination
+          output: True
+        - THTensor* self
+        - real p
+        - arg: long dim
+          wrap_dim: self
+        - CONSTANT false
 ]]
 
 [[
@@ -609,7 +648,8 @@
     - cname: dist
       return: accreal
       arguments:
-        - THTensor* self
+        - arg: THTensor* self
+          broadcast: other fallback
         - THTensor* other
         - arg: real p
           default: AS_REAL(2)
@@ -672,7 +712,8 @@
   arguments:
     - arg: THTensor* destination
       output: True
-    - THTensor* self
+    - arg: THTensor* self
+      broadcast: other fallback
     - THTensor* other
 ]]
 
@@ -683,7 +724,8 @@
   return: argument 0
   arguments:
     - THTensor* self
-    - THTensor* self
+    - arg: THTensor* self
+      broadcast: other fallback inplace
     - THTensor* other
 ]]
 
@@ -707,7 +749,8 @@
       arguments:
         - arg: THTensor* destination
           output: True
-        - THTensor* self
+        - arg: THTensor* self
+          broadcast: exponent fallback
         - THTensor* exponent
     - cname: tpow
       arguments:
@@ -731,7 +774,8 @@
     - cname: cpow
       arguments:
         - THTensor* self
-        - THTensor* self
+        - arg: THTensor* self
+          broadcast: exponent inplace fallback
         - THTensor* exponent
 ]]
 
@@ -744,7 +788,8 @@
   arguments:
     - arg: THTensor* destination
       output: True
-    - THTensor* self
+    - arg: THTensor* self
+      broadcast: end fallback
     - THTensor* end
     - real weight
 ]]
@@ -756,7 +801,8 @@
   cname: lerp
   arguments:
     - THTensor* self
-    - THTensor* self
+    - arg: THTensor* self
+      broadcast: end fallback inplace
     - THTensor* end
     - real weight
 ]]
@@ -849,8 +895,17 @@
         - THTensor* self
         - arg: long dim
           wrap_dim: self
-        - arg: bool keepdim
-          default: "true"
+        - bool keepdim
+    - cname: sum
+      return: argument 0
+      before_call: maybeThrowBackCompatKeepdimWarn("sum");
+      arguments:
+        - arg: THTensor* result
+          output: True
+        - THTensor* self
+        - arg: long dim
+          wrap_dim: self
+        - CONSTANT false
 ]]
 
 [[
@@ -869,8 +924,17 @@
         - THTensor* self
         - arg: long dim
           wrap_dim: self
-        - arg: bool keepdim
-          default: "true"
+        - bool keepdim
+    - cname: prod
+      return: argument 0
+      before_call: maybeThrowBackCompatKeepdimWarn("prod");
+      arguments:
+        - arg: THTensor* result
+          output: True
+        - THTensor* self
+        - arg: long dim
+          wrap_dim: self
+        - CONSTANT false
 ]]
 
 [[
@@ -939,7 +1003,8 @@
       arguments:
         - arg: THTensor* result
           output: True
-        - THTensor* self
+        - arg: THTensor* self
+          broadcast: other fallback
         - arg: real value
           default: AS_REAL(1)
         - THTensor* other
@@ -966,7 +1031,8 @@
     - cname: cadd
       arguments:
         - THTensor* self
-        - THTensor* self
+        - arg: THTensor* self
+          broadcast: other inplace fallback
         - arg: real value
           default: AS_REAL(1)
         - THTensor* other
@@ -996,7 +1062,8 @@
       arguments:
         - arg: THTensor* result
           output: True
-        - THTensor* self
+        - arg: THTensor* self
+          broadcast: other fallback
         - arg: real value
           default: AS_REAL(1)
         - THTensor* other
@@ -1014,7 +1081,8 @@
     - cname: csub
       arguments:
         - THTensor* self
-        - THTensor* self
+        - arg: THTensor* self
+          broadcast: other inplace fallback
         - arg: real value
           default: AS_REAL(1)
         - THTensor* other
@@ -1036,8 +1104,9 @@
       arguments:
         - arg: THTensor* result
           output: True
-        - THTensor* self
-        - THTensor* other
+        - arg: THTensor* self
+          broadcast: other fallback
+        - arg: THTensor* other
 ]]
 
 [[
@@ -1052,7 +1121,8 @@
     - cname: cmul
       arguments:
         - THTensor* self
-        - THTensor* self
+        - arg: THTensor* self
+          broadcast: other inplace fallback
         - THTensor* other
 ]]
 
@@ -1072,7 +1142,8 @@
       arguments:
         - arg: THTensor* result
           output: True
-        - THTensor* self
+        - arg: THTensor* self
+          broadcast: other fallback
         - THTensor* other
 ]]
 
@@ -1088,7 +1159,8 @@
     - cname: cdiv
       arguments:
         - THTensor* self
-        - THTensor* self
+        - arg: THTensor* self
+          broadcast: other inplace fallback
         - THTensor* other
 ]]
 
@@ -1108,7 +1180,8 @@
       arguments:
         - arg: THTensor* result
           output: True
-        - THTensor* self
+        - arg: THTensor* self
+          broadcast: other fallback
         - THTensor* other
 ]]
 
@@ -1124,7 +1197,8 @@
     - cname: cfmod
       arguments:
         - THTensor* self
-        - THTensor* self
+        - arg: THTensor* self
+          broadcast: other inplace fallback
         - THTensor* other
 ]]
 
@@ -1144,8 +1218,9 @@
       arguments:
         - arg: THTensor* result
           output: True
-        - THTensor* self
-        - THTensor* other
+        - arg: THTensor* self
+          broadcast: other fallback
+        - arg: THTensor* other
 ]]
 
 [[
@@ -1160,7 +1235,8 @@
     - cname: cremainder
       arguments:
         - THTensor* self
-        - THTensor* self
+        - arg: THTensor* self
+          broadcast: other inplace fallback
         - THTensor* other
 ]]
 
@@ -1327,7 +1403,8 @@
         output: True
       - arg: real beta
         default: AS_REAL(1)
-      - THTensor* self
+      - arg: THTensor* self
+        broadcast: mat1,mat2 dims:mat1.dim0,mat2.dim1
       - arg: real alpha
         default: AS_REAL(1)
       - THTensor* mat1
@@ -1382,7 +1459,8 @@
       output: True
     - arg: real beta
       default: AS_REAL(1)
-    - THTensor* self
+    - arg: THTensor* self
+      broadcast: mat,vec dims:mat.dim0
     - arg: real alpha
       default: AS_REAL(1)
     - THTensor* mat
@@ -1413,7 +1491,8 @@
       output: True
     - arg: real beta
       default: AS_REAL(1)
-    - THTensor* self
+    - arg: THTensor* self
+      broadcast: vec1,vec2 dims:vec1.dim0,vec2.dim0
     - arg: real alpha
       default: AS_REAL(1)
     - THTensor* vec1
@@ -1540,7 +1619,8 @@
       output: True
     - arg: real beta
       default: AS_REAL(1)
-    - THTensor* self
+    - arg: THTensor* self
+      broadcast: batch1,batch2 dims:batch1.dim1,batch2.dim2
     - arg: real alpha
       default: AS_REAL(1)
     - THTensor* batch1
@@ -1571,7 +1651,8 @@
       output: True
     - arg: real beta
       default: AS_REAL(1)
-    - THTensor* self
+    - arg: THTensor* self
+      broadcast: batch1,batch2 dims:batch1.dim0,batch1.dim1,batch2.dim2
     - arg: real alpha
       default: AS_REAL(1)
     - THTensor* batch1
@@ -1600,7 +1681,8 @@
   arguments:
     - arg: THTensor* result
       output: True
-    - THTensor* self
+    - arg: THTensor* self
+      broadcast: tensor1,tensor2 fallback
     - arg: real value
       default: AS_REAL(1)
     - THTensor* tensor1
@@ -1614,7 +1696,8 @@
       return: argument 0
       arguments:
         - THTensor* self
-        - THTensor* self
+        - arg: THTensor* self
+          broadcast: tensor1,tensor2 inplace fallback
         - arg: real value
           default: AS_REAL(1)
         - THTensor* tensor1
@@ -1638,7 +1721,8 @@
   arguments:
     - arg: THTensor* result
       output: True
-    - THTensor* self
+    - arg: THTensor* self
+      broadcast: tensor1,tensor2 fallback
     - arg: real value
       default: AS_REAL(1)
     - THTensor* tensor1
@@ -1651,7 +1735,8 @@
   return: argument 0
   arguments:
     - THTensor* self
-    - THTensor* self
+    - arg: THTensor* self
+      broadcast: tensor1,tensor2 inplace fallback
     - arg: real value
       default: AS_REAL(1)
     - THTensor* tensor1

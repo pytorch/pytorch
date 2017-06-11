@@ -276,11 +276,12 @@ tensor is contiguous, this function returns the original tensor.
 
 add_docstr(torch._C.FloatTensorBase.copy_,
            """
-copy_(src, async=False) -> Tensor
+copy_(src, async=False, broadcast=True) -> Tensor
 
 Copies the elements from :attr:`src` into this tensor and returns this tensor.
 
-The source tensor should have the same number of elements as this tensor. It
+If :attr:`broadcast` is True, the source tensor must be :ref:`broadcastable <broadcasting-semantics>`
+with this tensor. Otherwise, source tensor should have the same number of elements as this tensor.  It
 may be of a different data type or reside on a different device.
 
 Args:
@@ -288,6 +289,8 @@ Args:
     async (bool): If True and this copy is between CPU and GPU, then the copy
                   may occur asynchronously with respect to the host. For other
                   copies, this argument has no effect.
+    broadcast (bool): If True, :attr:`src` will be broadcast to the shape of the underlying
+                      tensor.
 """)
 
 add_docstr(torch._C.FloatTensorBase.cos,
@@ -792,8 +795,10 @@ add_docstr(torch._C.FloatTensorBase.map_,
 map_(tensor, callable)
 
 Applies :attr:`callable` for each element in this tensor and the given tensor
-and stores the results in this tensor. The :attr:`callable` should have the
-signature::
+and stores the results in this tensor.  This tensor and the given tensor must be
+:ref:`broadcastable <broadcasting-semantics>`.
+
+The :attr:`callable` should have the signature::
 
     def callable(a, b) -> number
 """)
@@ -803,8 +808,9 @@ add_docstr(torch._C.FloatTensorBase.masked_scatter_,
 masked_scatter_(mask, source)
 
 Copies elements from :attr:`source` into this tensor at positions where the
-:attr:`mask` is one. The :attr:`mask` should have the same number of elements
-as this tensor. The :attr:`source` should have at least as many elements as the
+:attr:`mask` is one.
+The shape of :attr:`mask` must be :ref:`broadcastable <broadcasting-semantics>`
+with the shape of the underlying tensor. The :attr:`source` should have at least as many elements as the
 number of ones in :attr:`mask`
 
 Args:
@@ -822,8 +828,8 @@ add_docstr(torch._C.FloatTensorBase.masked_fill_,
 masked_fill_(mask, value)
 
 Fills elements of this tensor with :attr:`value` where :attr:`mask` is one.
-The :attr:`mask` should have the same number of elements as this tensor, but
-the shape may differ.
+The shape of :attr:`mask` must be :ref:`broadcastable <broadcasting-semantics>`
+with the shape of the underlying tensor.
 
 Args:
     mask (ByteTensor): The binary mask
@@ -1420,6 +1426,10 @@ sub(value, other) -> Tensor
 Subtracts a scalar or tensor from this tensor. If both :attr:`value` and
 :attr:`other` are specified, each element of :attr:`other` is scaled by
 :attr:`value` before being used.
+
+When :attr:`other` is a tensor, the shape of :attr:`other` must be :ref:`broadcastable <broadcasting-semantics>`
+with the shape of the underlying tensor.
+
 """)
 
 add_docstr(torch._C.FloatTensorBase.sub_,

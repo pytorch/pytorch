@@ -4,6 +4,7 @@ import sys
 import math
 import torch
 import unittest
+import warnings
 from copy import deepcopy
 from collections import OrderedDict
 from itertools import product
@@ -552,7 +553,7 @@ class TestAutograd(TestCase):
             expected_grad[i] += 1
         self.assertEqual(y.grad.data, expected_grad)
 
-    def test_basic_op_grad(self):
+    def test_basic_op_grad_fallback(self):
         """Grad output might need to be reshaped to match the second argument."""
         x = Variable(torch.randn(4, 6), requires_grad=True)
         b = Variable(torch.rand(12, 1) + 1e-2, requires_grad=True)
@@ -561,11 +562,13 @@ class TestAutograd(TestCase):
             # .mm() depends on the grad_output being of correct size
             return b.mm(Variable(torch.rand(1, 2) + 1e-2))
 
-        (x + y()).sum().backward()
-        (x - y()).sum().backward()
-        (x * y()).sum().backward()
-        (x / y()).sum().backward()
-        (x.abs() ** y()).sum().backward()
+        # suppress broadcastable warning
+        with warnings.catch_warnings(record=True):
+            (x + y()).sum().backward()
+            (x - y()).sum().backward()
+            (x * y()).sum().backward()
+            (x / y()).sum().backward()
+            (x.abs() ** y()).sum().backward()
 
     def test_requires_grad(self):
         x = Variable(torch.randn(5, 5))
@@ -903,7 +906,7 @@ class TestAutograd(TestCase):
         y = Variable(torch.randn(5, 5), requires_grad=True)
 
         a = x + y
-        b = torch.max(a, 1)[1].repeat(1, 5).double()
+        b = torch.max(a, 1, True)[1].repeat(1, 5).double()
         o = (b + a).sum()
         o.backward()
 
@@ -1332,10 +1335,10 @@ function_tests = [
     (CminConstant, (), ((S, S, S), 0.5)),
     (Mean, (), ((S, S, S),)),
     (Mean, (), ((S, S, S), 1), 'dim', [1]),
-    (Mean, (), ((S, S, S), 1, False), 'keepdim_false_dim', [1]),
+    (Mean, (), ((S, S, S), 1, True), 'keepdim_dim', [1]),
     (Sum, (), ((S, S, S),)),
     (Sum, (), ((S, S, S), 1), 'dim', [1]),
-    (Sum, (), ((S, S, S), 1, False), 'keepdim_false_dim', [1]),
+    (Sum, (), ((S, S, S), 1, True), 'keepdim_dim', [1]),
     (Prod, (), ((S, S, S),)),
     (Prod, (), (prod_zeros(S, [0, 1]),), 'zerosdim2'),
     (Prod, (), (prod_zeros(S, [0, 2]),), 'zerosdim1'),
@@ -1345,10 +1348,10 @@ function_tests = [
     (Prod, (), (prod_zeros(S, [0, 1]), 1), 'zeros_dim2', [1]),
     (Prod, (), (prod_zeros(S, [0, 2]), 1), 'zeros_dim1', [1]),
     (Prod, (), (prod_zeros(S, [1, 2]), 1), 'zeros_dim0', [1]),
-    (Prod, (), ((S, S, S), 1, False), 'keepdim_false_dim', [1]),
-    (Prod, (), (prod_zeros(S, [0, 1]), 1, False), 'keepdim_false_zeros_dim2', [1]),
-    (Prod, (), (prod_zeros(S, [0, 2]), 1, False), 'keepdim_false_zeros_dim1', [1]),
-    (Prod, (), (prod_zeros(S, [1, 2]), 1, False), 'keepdim_false_zeros_dim0', [1]),
+    (Prod, (), ((S, S, S), 1, True), 'keepdim_dim', [1]),
+    (Prod, (), (prod_zeros(S, [0, 1]), 1, True), 'keepdim_zeros_dim2', [1]),
+    (Prod, (), (prod_zeros(S, [0, 2]), 1, True), 'keepdim_zeros_dim1', [1]),
+    (Prod, (), (prod_zeros(S, [1, 2]), 1, True), 'keepdim_zeros_dim0', [1]),
     (Addmm, (), ((S, M), (S, S), (S, M)),),
     (Addmm, (), ((S, M), (S, S), (S, M), 0.1, 1), 'coef'),
     (Addbmm, (), ((S, M), (S, S, S), (S, S, M)),),
@@ -1370,26 +1373,26 @@ function_tests = [
     (Min, (), ((S, S, S),),),
     (Max, (), ((S, S, S), 1), 'dim', [1]),
     (Min, (), ((S, S, S), 1), 'dim', [1]),
-    (Max, (), ((S, S, S), 1, False), 'keepdim_false_dim', [1]),
-    (Min, (), ((S, S, S), 1, False), 'keepdim_false_dim', [1]),
+    (Max, (), ((S, S, S), 1, True), 'keepdim_dim', [1]),
+    (Min, (), ((S, S, S), 1, True), 'keepdim_dim', [1]),
     (Mode, (), ((S, S, S),),),
     (Mode, (), ((S, S, S), 1), 'dim', [1]),
-    (Mode, (), ((S, S, S), 1, False), 'keepdim_false_dim', [1]),
+    (Mode, (), ((S, S, S), 1, True), 'keepdim_dim', [1]),
     (Kthvalue, (), ((S, S, S), 2),),
     (Kthvalue, (), ((S, S, S), 2, 0), 'dim0'),
-    (Kthvalue, (), ((S, S, S), 2, 0, False), "keepdim_false"),
+    (Kthvalue, (), ((S, S, S), 2, 0, True), "keepdim"),
     (Median, (), ((S, S, S),),),
     (Median, (), ((S, S, S), 0), 'dim0'),
-    (Median, (), ((S, S, S), 0, False), "keepdim_false"),
+    (Median, (), ((S, S, S), 0, True), "keepdim"),
     (Norm, (), (torch.rand(S, S, S), 1.5), '1_5'),
     (Norm, (), ((S, S, S),), '2'),
     (Norm, (), ((S, S, S), 3), '3'),
     (Norm, (), (torch.rand(S, S, S), 1.5, 1), '1_5_dim', [2]),
     (Norm, (), ((S, S, S), 2, 1), '2_dim', [2]),
     (Norm, (), ((S, S, S), 3, 1), '3_dim', [2]),
-    (Norm, (), (torch.rand(S, S, S), 1.5, 1, False), 'keepdim_false_1_5_dim', [2]),
-    (Norm, (), ((S, S, S), 2, 1, False), 'keepdim_false_2_dim', [2]),
-    (Norm, (), ((S, S, S), 3, 1, False), 'keepdim_false_3_dim', [2]),
+    (Norm, (), (torch.rand(S, S, S), 1.5, 1, True), 'keepdim_1_5_dim', [2]),
+    (Norm, (), ((S, S, S), 2, 1, True), 'keepdim_2_dim', [2]),
+    (Norm, (), ((S, S, S), 3, 1, True), 'keepdim_3_dim', [2]),
     (Addcmul, (), ((S, S), (S, S), (S, S))),
     (Addcmul, (), ((S, S), (S, S), (S, S), 0.6), 'scale'),
     (Addcdiv, (), ((S, S), (S, S), torch.rand(S, S) + 5e-2)),
@@ -1487,36 +1490,36 @@ method_tests = [
     ('lerp', (S, S, S), ((S, S, S), 0.4)),
     ('max', (S, S, S), ()),
     ('max', (S, S, S), (1,), 'dim', [0]),
-    ('max', (S, S, S), (1, False,), 'keepdim_false_dim', [0]),
+    ('max', (S, S, S), (1, True,), 'keepdim_dim', [0]),
     ('max', (S, S, S), ((S, S, S),), 'elementwise'),
     ('min', (S, S, S), ()),
     ('min', (S, S, S), (1,), 'dim', [0]),
-    ('min', (S, S, S), (1, False,), 'keepdim_false_dim', [0]),
+    ('min', (S, S, S), (1, True,), 'keepdim_dim', [0]),
     ('min', (S, S, S), ((S, S, S),), 'elementwise'),
     ('mean', (S, S, S), ()),
     ('mean', (S, S, S), (1,), 'dim', [0]),
-    ('mean', (S, S, S), (1, False,), 'keepdim_false_dim', [0]),
+    ('mean', (S, S, S), (1, True,), 'keepdim_dim', [0]),
     ('kthvalue', (S, S, S), (2,)),
     ('kthvalue', (S, S, S), (2, 1,), 'dim', [1]),
-    ('kthvalue', (S, S, S), (2, 1, False,), 'keepdim_false_dim', [1]),
+    ('kthvalue', (S, S, S), (2, 1, True,), 'keepdim_dim', [1]),
     ('median', (S, S, S), ()),
     ('median', (S, S, S), (1,), 'dim', [0]),
-    ('median', (S, S, S), (1, False,), 'keepdim_false_dim', [0]),
+    ('median', (S, S, S), (1, True,), 'keepdim_dim', [0]),
     ('mode', (S, S, S), ()),
     ('mode', (S, S, S), (1,), 'dim', [0]),
-    ('mode', (S, S, S), (1, False,), 'keepdim_false_dim', [0]),
+    ('mode', (S, S, S), (1, True,), 'keepdim_dim', [0]),
     ('sum', (S, S, S), ()),
     ('sum', (S, S, S), (1,), 'dim', [0]),
-    ('sum', (S, S, S), (1, False,), 'keepdim_false_dim', [0]),
+    ('sum', (S, S, S), (1, True,), 'keepdim_dim', [0]),
     ('prod', (S, S, S), ()),
     ('prod', (S, S, S), (1,), 'dim', [0]),
-    ('prod', (S, S, S), (1, False,), 'keepdim_false_dim', [0]),
+    ('prod', (S, S, S), (1, True,), 'keepdim_dim', [0]),
     ('var', (S, S, S), ()),
     ('var', (S, S, S), (1,), 'dim', [0]),
-    ('var', (S, S, S), (1, False), 'keepdim_false_dim', [0]),
+    ('var', (S, S, S), (1, True), 'keepdim_dim', [0]),
     ('std', (S, S, S), ()),
     ('std', (S, S, S), (1,), 'dim', [0]),
-    ('std', (S, S, S), (1, False), 'keepdim_false__dim', [0]),
+    ('std', (S, S, S), (1, True), 'keepdim_dim', [0]),
     ('renorm', (S, S, S), (2, 1, 0.5), 'dim', [1]),
     ('renorm', (S, S, S), (1, 2, 3), 'norm_1'),
     ('repeat', (S, S, S, S), (2, 3, 1, 4)),
@@ -1541,7 +1544,7 @@ method_tests = [
     ('addcdiv', (S, S), (0.5, (S, S), (S, S)), 'scale'),
     ('norm', (S, S, S), (2,)),
     ('norm', (S, S, S), (2, 1), 'dim', [1]),
-    ('norm', (S, S, S), (2, 1, False), 'keepdim_false_dim', [0]),
+    ('norm', (S, S, S), (2, 1, True), 'keepdim_dim', [0]),
     ('dist', (S, S, S), ((S, S, S),)),
     ('dist', (S, S, S), ((S, S, S), 4), '4'),
     ('index_select', (S, S, S), (0, index_variable(2, S)), 'dim', [0]),
