@@ -3,25 +3,12 @@ import sys
 from string import Template, ascii_lowercase
 from ..cwrap import cwrap
 from ..cwrap.plugins import StandaloneExtension, GenericNN, NullableArguments, AutoGPU
+from ..shared import import_module
 
 BASE_PATH = os.path.realpath(os.path.join(__file__, '..', '..', '..'))
 WRAPPER_PATH = os.path.join(BASE_PATH, 'torch', 'csrc', 'nn')
 THNN_UTILS_PATH = os.path.join(BASE_PATH, 'torch', '_thnn', 'utils.py')
 
-
-def import_module(name, path):
-    if sys.version_info >= (3, 5):
-        import importlib.util
-        spec = importlib.util.spec_from_file_location(name, path)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        return module
-    elif sys.version_info >= (3, 0):
-        from importlib.machinery import SourceFileLoader
-        return SourceFileLoader(name, path).load_module()
-    else:
-        import imp
-        return imp.load_source(name, path)
 
 thnn_utils = import_module('torch._thnn.utils', THNN_UTILS_PATH)
 

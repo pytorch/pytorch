@@ -4,6 +4,13 @@ from string import Template
 from copy import deepcopy
 from .plugins import ArgcountChecker, OptionalArguments, ArgumentReferences, \
     BeforeAfterCall, ConstantArguments, ReturnArguments, GILRelease
+from ..shared import import_module
+
+BASE_PATH = os.path.realpath(os.path.join(__file__, '..', '..', '..'))
+TENSORLIB_PATH = os.path.join(BASE_PATH, 'torch', 'lib', 'TensorLib',
+                              'common_with_cwrap.py')
+
+tensorlib_common = import_module('torch.lib.TensorLib.common_with_cwrap', TENSORLIB_PATH)
 
 
 class cwrap(object):
@@ -117,7 +124,7 @@ class cwrap(object):
             del declaration['arguments']
         # Parse arguments (some of them can be strings)
         for option in declaration['options']:
-            option['arguments'] = self.parse_arguments(option['arguments'])
+            option['arguments'] = tensorlib_common.parse_arguments(option['arguments'])
         # Propagate defaults from declaration to options
         for option in declaration['options']:
             for k, v in declaration.items():
