@@ -202,6 +202,30 @@ class BCELoss(_WeightedLoss):
     pass
 
 
+class BCEWithLogitsLoss(_WeightedLoss):
+    r"""This loss combines a `Sigmoid` layer and the `BCELoss` in one single class.
+    This version is more numerically stable than using a plain `Sigmoid` followed by a `BCELoss` as, by combining the
+    operations into one layer, we take advantage of the log-sum-exp trick for numerical stability.
+
+    This Binary Cross Entropy between the target and the output logits (no sigmoid applied) is:
+
+    .. math:: loss(o, t) = - 1/n \sum_i (t[i] * log(sigmoid(o[i])) + (1 - t[i]) * log(1 - sigmoid(o[i])))
+
+    or in the case of the weights argument being specified:
+
+    .. math:: loss(o, t) = - 1/n \sum_i weights[i] * (t[i] * log(sigmoid(o[i])) + (1 - t[i]) * log(1 - sigmoid(o[i])))
+
+    This is used for measuring the error of a reconstruction in for example
+    an auto-encoder. Note that the targets `t[i]` should be numbers between 0 and 1.
+
+    By default, the losses are averaged for each minibatch over observations
+    *as well as* over dimensions. However, if the field `size_average` is set
+    to `False`, the losses are instead summed.
+
+    """
+    pass
+
+
 class HingeEmbeddingLoss(_Loss):
     r"""Measures the loss given an input `x` which is a 2D mini-batch tensor
     and a labels `y`, a 1D tensor containg values (`1` or `-1`).
