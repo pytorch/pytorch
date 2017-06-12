@@ -329,13 +329,13 @@ void THCTensor_(expand)(THCState *state, THCTensor *r, THCTensor *tensor, THLong
   THFree(expandedStrides);
 }
 
-THC_API int THCTensor_(expandNd)(THCState *state, THCTensor **rets, THCTensor **ops, int count, int raiseErrors) {
+void THCTensor_(expandNd)(THCState *state, THCTensor **rets, THCTensor **ops, int count) {
   for (int i = 0; i < count; ++i) {
     THArgCheck(THCTensor_(nDimension)(state, ops[i]) > 0, i, "can't expand empty tensor %d", i);
   }
 
-  long **op_sizes = THAlloc(sizeof(long**)*count);
-  long *op_dims = THAlloc(sizeof(long*)*count);
+  long *op_sizes[count];
+  long op_dims[count];
 
   for (int i = 0; i < count; ++i) {
     op_sizes[i] = ops[i]->size;
@@ -343,27 +343,25 @@ THC_API int THCTensor_(expandNd)(THCState *state, THCTensor **rets, THCTensor **
   }
 
   THLongStorage *sizes = THLongStorage_new();
+  char error_buffer[1024];
   int ret = THLongStorage_inferSizeN(sizes,
                                      count,
                                      op_sizes,
                                      op_dims,
-                                     raiseErrors);
+                                     error_buffer,
+                                     1024);
 
   if(ret != 0) {
-    THFree(op_sizes);
-    THFree(op_dims);
-    return ret;
+    THLongStorage_free(sizes);
+    THError(error_buffer);
+    return;
   }
 
   for (int i = 0; i < count; ++i) {
-    ret = THCTensor_(expand)(state, rets[i], ops[i], sizes, raiseErrors);
-    THAssert(ret == 0);
+    THCTensor_(expand)(state, rets[i], ops[i], sizes);
   }
 
-  THFree(op_sizes);
-  THFree(op_dims);
   THLongStorage_free(sizes);
-  return 0;
 }
 
 void THCTensor_(set)(THCState *state, THCTensor *self, THCTensor *src)

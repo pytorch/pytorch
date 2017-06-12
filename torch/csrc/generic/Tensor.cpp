@@ -595,30 +595,31 @@ static bool THPTensor_(_convertToTensorIndexers)(PyObject *index, std::vector<TH
   }
 
   // Broadcast/Expand indexing Tensors as necessary
-  int ret = THIndexTensor_(expandNd)(LIBRARY_STATE maybeBroadcasted, candidates, seqCount, 0);
+  bool broadcastSuccess = true;
+  try {
+    THIndexTensor_(expandNd)(LIBRARY_STATE maybeBroadcasted, candidates, seqCount);
+    // Place Broadcasted Tensors into output vector, implicitly transferring
+    // ownership
+    for (Py_ssize_t i = 0; i < seqCount; ++i) {
+      broadcasted.push_back(maybeBroadcasted[i]);
+    }
+  } catch (std::exception& e) {
+    // Broadcasted failed, cleanup and set error
+    for (int i = 0; i < seqCount; ++i) {
+      THIndexTensor_(free)(LIBRARY_STATE maybeBroadcasted[i]);
+    }
+    broadcastSuccess = false;
+    PyErr_Format(PyExc_IndexError, "The advanced indexing objects could not be broadcast");
+  }
 
   // No matter what, need to cleanup the candidates
   for (Py_ssize_t i = 0; i < seqCount; ++i) {
     THIndexTensor_(free)(LIBRARY_STATE candidates[i]);
   }
   THFree(candidates);
-
-  if (ret != 0) {
-    // Broadcasted failed, cleanup and return error
-    for (int i = 0; i < seqCount; ++i) {
-      THIndexTensor_(free)(LIBRARY_STATE maybeBroadcasted[i]);
-    }
-    THFree(maybeBroadcasted);
-    return false;
-  }
-
-  // Place Broadcasted Tensors into output vector, implicitly transferring
-  // ownership
-  for (Py_ssize_t i = 0; i < seqCount; ++i) {
-    broadcasted.push_back(maybeBroadcasted[i]);
-  }
   THFree(maybeBroadcasted);
-  return true;
+
+  return broadcastSuccess;
 }
 
 // Caller takes ownership of the returned IndexTensor
@@ -824,9 +825,9 @@ static PyObject* THPTensor_(advancedIndexAdd)(THPTensor *self, PyObject *args) {
   THPUtils_assert(THPTensor_(Check)(PyTuple_GET_ITEM(args, 1)), "Second argument "
       "must be a Tensor");
 
-  THTensorPtr gradOutput = THTensor_(newWithTensor)(
-    LIBRARY_STATE ((THPTensor *)PyTuple_GET_ITEM(args, 1))->cdata);
-  THTensorPtr dest = THTensor_(newWithTensor)(LIBRARY_STATE self->cdata);
+  THTensorPtr gradOutput(THTensor_(newWithTensor)(
+    LIBRARY_STATE ((THPTensor *)PyTuple_GET_ITEM(args, 1))->cdata));
+  THTensorPtr dest(THTensor_(newWithTensor)(LIBRARY_STATE self->cdata));
 
   THPTensor_(_advancedIndexAdd)(PyTuple_GET_ITEM(args, 0), dest, gradOutput);
 
