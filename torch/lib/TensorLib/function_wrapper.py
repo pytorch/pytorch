@@ -7,7 +7,7 @@ EXCLUDE_PATTERN = "bernoulli.*|normal.*|exponential.*|random.*"
 # what has to be done to add a Operation ...
 # 1. add virtual dispatch declaration to Type.h and default impl to Type.cpp
 TYPE_METHOD_DECLARATION = CodeTemplate("""\
-virtual ${return_type} ${api_name}(${formals});
+virtual ${return_type} ${api_name}(${formals}) ;
 """)
 TYPE_METHOD_DEFINITION = CodeTemplate("""\
 ${return_type} Type::${api_name}(${formals}) {
@@ -26,11 +26,11 @@ ${return_type} ${Type}::${api_name}(${formals}) {
 """)
 # 4. add non-virtual declaration to Tensor.h
 TENSOR_METHOD_DECLARATION = CodeTemplate("""\
-${return_type} ${api_name}(${method_formals});
+${return_type} ${api_name}(${method_formals}) ${const_mark};
 """)
 # 5. add non-virtual declaration to Tensor.cpp
 TENSOR_METHOD_DEFINITION = CodeTemplate("""\
-inline ${return_type} Tensor::${api_name}(${method_formals}) {
+inline ${return_type} Tensor::${api_name}(${method_formals}) ${const_mark} {
     return type().${api_name}(${method_actuals});
 }
 """)
@@ -54,10 +54,10 @@ class NYIError(Exception):
 
 
 TYPE_FORMAL_GENERIC = {
-    'THTensor*': 'TensorRef',
-    'THBoolTensor*': 'TensorRef',
-    'THIndexTensor*': 'TensorRef',
-    'THIntegerTensor*': 'TensorRef',
+    'THTensor*': 'Tensor &',
+    'THBoolTensor*': 'Tensor &',
+    'THIndexTensor*': 'Tensor &',
+    'THIntegerTensor*': 'Tensor &',
     'THStorage*': 'Storage &',
     'THGenerator*': 'Generator &',
     'THSize*': 'IntList',
@@ -77,10 +77,10 @@ TYPE_RETURN = {
     'long': 'int64_t',
 }
 CHECKED_CAST = {
-    'THTensor*': CodeTemplate('checked_cast<${Tensor}>(${arg_name}->pImpl,"${arg_name}",${arg_pos})'),
-    'THBoolTensor*': CodeTemplate('checked_cast<${Backend}ByteTensor>(${arg_name}->pImpl,"${arg_name}",${arg_pos})'),
-    'THIndexTensor*': CodeTemplate('checked_cast<${Backend}LongTensor>(${arg_name}->pImpl,"${arg_name}",${arg_pos})'),
-    'THIntegerTensor*': CodeTemplate('checked_cast<${Backend}IntTensor>(${arg_name}->pImpl,"${arg_name}",${arg_pos})'),
+    'THTensor*': CodeTemplate('checked_cast<${Tensor}>(${arg_name}.pImpl,"${arg_name}",${arg_pos})'),
+    'THBoolTensor*': CodeTemplate('checked_cast<${Backend}ByteTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos})'),
+    'THIndexTensor*': CodeTemplate('checked_cast<${Backend}LongTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos})'),
+    'THIntegerTensor*': CodeTemplate('checked_cast<${Backend}IntTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos})'),
     'THStorage*': CodeTemplate('checked_cast<${Storage}>(&${arg_name},"${arg_name}",${arg_pos})'),
     'THGenerator*': CodeTemplate('check_generator(&${arg_name})'),
     'THSize*': CodeTemplate('THLongStorageView::make(${arg_name})'),
@@ -111,7 +111,7 @@ CONSTANT_REPLACEMENTS = [
      'dynamic_cast<${Backend}Generator&>(context->defaultGenerator(backend())).generator'),
     ('__storage_size.get\\(\\)',
      'THLongStorageView::make(static_cast<int64_t>(storage.size()))'),
-    ('__last_dim', 'self->ndimension()-1'),
+    ('__last_dim', 'self.ndimension()-1'),
 ]
 
 
@@ -158,6 +158,8 @@ def create_generic(top_env, declarations):
 
     def format_formal(argument):
         type_str = TYPE_FORMAL_GENERIC.get(argument['type'], argument['type'])
+        if type_str == 'Tensor &' and not argument.get('output'):
+            type_str = 'const ' + type_str
         return '{} {}'.format(type_str, argument['name'])
 
     def format_return_type(option):
@@ -197,7 +199,7 @@ def create_generic(top_env, declarations):
         option['method_actuals'] = [
             f['name'] if f['name'] != 'self' else '*this' for f in formals]
         option['return_type'] = format_return_type(option)
-
+        option['const_mark'] = 'const' if option.get('const') else ''
         env = nested_dict(option, top_env)
         top_env['type_method_declarations'].append(
             TYPE_METHOD_DECLARATION.substitute(env))
@@ -213,7 +215,7 @@ def create_generic(top_env, declarations):
         if 'function' in option['variants']:
             first_tensor = find_first_tensor(formals)
             if first_tensor is not None:
-                option['inferred_type'] = '{}->type()'.format(first_tensor)
+                option['inferred_type'] = '{}.type()'.format(first_tensor)
             else:
                 option['inferred_type'] = 'globalContext()->defaultType()'
             top_env['function_declarations'].append(
@@ -288,25 +290,23 @@ def create_derived(backend_type_env, declarations):
                         arg['name'], allocation))
                     body.append('auto {} = Tensor({}_,false);'.format(
                         arg['name'], arg['name']))
-                    sel = '.'
                 else:
                     check_cast = CHECKED_CAST[arg['type']].substitute(
                         env, arg_name=arg['name'], arg_pos=count)
                     body.append("auto {}_ = {};".format(
                         arg['name'], check_cast))
-                    sel = '->'
                 if 'resize' in arg:
                     resize = arg['resize']
                     if type(resize) == str:
-                        body.append("{}{}resize_as_({});".format(
-                            arg['name'], sel, resize))
+                        body.append("{}.resize_as_({});".format(
+                            arg['name'], resize))
                     else:
-                        dims = ['{}->size({})'.format(name, dim)
+                        dims = ['{}.size({})'.format(name, dim)
                                 for name, dim in resize]
-                        body.append("{}{}resize_({{ {} }});".format(
-                            arg['name'], sel, ','.join(dims)))
+                        body.append("{}.resize_({{ {} }});".format(
+                            arg['name'], ','.join(dims)))
                 if arg.get('cpu_zero', False):
-                    body.append("{}{}zero_();".format(arg['name'], sel))
+                    body.append("{}.zero_();".format(arg['name']))
 
         option['actuals'] = backend_type_env['state'] + get_arguments(option)
         call = CodeTemplate("${THTensor}_${cname}(${actuals})").substitute(env)
