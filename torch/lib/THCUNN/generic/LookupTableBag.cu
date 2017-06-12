@@ -1,9 +1,9 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/LookupTableSum.cu"
+#define THC_GENERIC_FILE "generic/LookupTableBag.cu"
 #else
 
 
-void THNN_(LookupTableSum_updateOutput)(
+void THNN_(LookupTableBag_updateOutput)(
            THCState *state,
            THCIndexTensor *input,
            THCIndexTensor *offsets,
@@ -37,7 +37,7 @@ void THNN_(LookupTableSum_updateOutput)(
 
   dim3 block = dim3(32, 8);
   int grid = 1024;
-  cunn_LookupTableSum_updateOutputKernel<real, accreal><<<grid, block, 0, stream>>>(
+  cunn_LookupTableBag_updateOutputKernel<real, accreal><<<grid, block, 0, stream>>>(
     THCIndexTensor_(data)(state, input),
     THCIndexTensor_(data)(state, offsets),
     THCTensor_(data)(state, weight),
@@ -52,7 +52,7 @@ void THNN_(LookupTableSum_updateOutput)(
 }
 
 
-void THNN_(LookupTableSum_accGradParameters)(
+void THNN_(LookupTableBag_accGradParameters)(
            THCState *state,
            THCIndexTensor *input,
            THCTensor *gradOutput,
@@ -164,7 +164,7 @@ void THNN_(LookupTableSum_accGradParameters)(
 
   dim3 grid(THCCeilDiv(numel, (ptrdiff_t) 4), THCCeilDiv(stride, (long) 128));
   dim3 block(32, 4);
-  cunn_LookupTableSum_accGradParametersKernel<real, accreal><<<grid, block, 0, stream>>>(
+  cunn_LookupTableBag_accGradParametersKernel<real, accreal><<<grid, block, 0, stream>>>(
     sortedIndices_data,
     origIndices_data,
     THCTensor_(data)(state, gradOutput),

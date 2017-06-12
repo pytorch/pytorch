@@ -17,7 +17,7 @@
 const int WARP_SIZE = 32;
 
 template <typename Dtype, typename Acctype>
-__global__ void cunn_LookupTableSum_updateOutputKernel(
+__global__ void cunn_LookupTableBag_updateOutputKernel(
   long *input, long *offsets, Dtype *weight, Dtype *output,
   long *offset2bag, long numIndices, long numBags, long stride) {
 
@@ -51,11 +51,11 @@ __global__ void cunn_LookupTableSum_updateOutputKernel(
 
 // FIXME: removed the accGradParametersKernelByFeature case present in
 // LookupTable. That kernel is faster at small sizes (<768 indices), which
-// does not need LookupTableSum (LookupTable + Sum works fine), but would
+// does not need LookupTableBag (LookupTable + Sum works fine), but would
 // still be nice to not be slow in that case.
 
 template <typename Dtype, typename Acctype>
-__global__ void cunn_LookupTableSum_accGradParametersKernel(
+__global__ void cunn_LookupTableBag_accGradParametersKernel(
   long *input, long *indices, Dtype *gradOutput, Dtype *gradWeight, long *offset2bag,
   long *count, Dtype defaultScale, ptrdiff_t numel, long stride) {
 
@@ -123,5 +123,5 @@ __global__ void cunn_LookupTableSum_accGradParametersKernel(
 }
 
 
-#include "generic/LookupTableSum.cu"
+#include "generic/LookupTableBag.cu"
 #include "THCGenerateFloatTypes.h"

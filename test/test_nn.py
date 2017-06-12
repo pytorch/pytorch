@@ -742,10 +742,10 @@ class TestNN(NNTestCase):
         self.assertEqual(output[0][0].sum().data[0], 0)
         self.assertEqual(output[1][2].sum().data[0], 0)
 
-    def _test_EmbeddingSum(self, cuda):
+    def _test_EmbeddingBag(self, cuda):
         ## check a known test example
 
-        es = nn.EmbeddingSum(5, 2)
+        es = nn.EmbeddingBag(5, 2)
         # es.weight.data.zero_()
         es.weight.data.copy_(torch.range(1, 10))
         input = Variable(torch.LongTensor([3, 1, 1, 1, 4]))
@@ -777,12 +777,12 @@ class TestNN(NNTestCase):
         self.assertEqual(output.data, expected_output)
         self.assertEqual(es.weight.grad.data, expected_grad_weight)
 
-        ## now compare EmbeddingSum vs Embedding + Sum, for constant bag length
+        ## now compare EmbeddingBag vs Embedding + Sum, for constant bag length
 
         N = random.randint(1, 100)
         D = random.randint(1, 100)
 
-        es = nn.EmbeddingSum(N, D)
+        es = nn.EmbeddingBag(N, D)
         e = nn.Embedding(N, D)
         e.weight.data.copy_(es.weight.data)
 
@@ -809,12 +809,12 @@ class TestNN(NNTestCase):
         ref_output.backward(grad_output)
         self.assertEqual(es.weight.grad, e.weight.grad)
 
-    def test_EmbeddingSum(self):
-        self._test_EmbeddingSum(False)
+    def test_EmbeddingBag(self):
+        self._test_EmbeddingBag(False)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    def test_EmbeddingSum_cuda(self):
-        self._test_EmbeddingSum(True)
+    def test_EmbeddingBag_cuda(self):
+        self._test_EmbeddingBag(True)
 
     # FIXME: I don't know how to add this to the gradcheck NewModuleTest
     # framework since this module has 2 inputs. But maybe not necessary

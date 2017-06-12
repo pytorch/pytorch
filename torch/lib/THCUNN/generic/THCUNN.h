@@ -250,7 +250,7 @@ TH_API void THNN_(LookupTable_renorm)(
                   accreal maxNorm,
                   accreal normType);
 
-TH_API void THNN_(LookupTableSum_updateOutput)(
+TH_API void THNN_(LookupTableBag_updateOutput)(
            THCState *state,
            THCIndexTensor *input,
            THCIndexTensor *offsets,
@@ -258,7 +258,7 @@ TH_API void THNN_(LookupTableSum_updateOutput)(
            THCTensor *output,
            THCIndexTensor *offset2bag);
 
-TH_API void THNN_(LookupTableSum_accGradParameters)(
+TH_API void THNN_(LookupTableBag_accGradParameters)(
            THCState *state,
            THCIndexTensor *input,
            THCTensor *gradOutput,

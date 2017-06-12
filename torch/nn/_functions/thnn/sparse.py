@@ -104,10 +104,10 @@ class Embedding(Function):
 
 _all_functions.append(Embedding)
 
-class EmbeddingSum(Function):
+class EmbeddingBag(Function):
 
     def __init__(self, max_norm, norm_type, scale_grad_by_freq):
-        super(EmbeddingSum, self).__init__()
+        super(EmbeddingBag, self).__init__()
         self.max_norm = max_norm
         self.norm_type = norm_type
         self.scale_grad_by_freq = scale_grad_by_freq
@@ -124,10 +124,10 @@ class EmbeddingSum(Function):
 
     def forward(self, indices, offsets, weight):
         assert indices.dim() <= 2
-        assert not self.needs_input_grad[0], "EmbeddingSum doesn't " \
+        assert not self.needs_input_grad[0], "EmbeddingBag doesn't " \
             "compute the gradient w.r.t. the indices"
 
-        assert not self.needs_input_grad[1], "EmbeddingSum doesn't " \
+        assert not self.needs_input_grad[1], "EmbeddingBag doesn't " \
             "compute the gradient w.r.t. the offsets"
 
         self._backend = type2backend[type(weight)]
@@ -150,7 +150,7 @@ class EmbeddingSum(Function):
         assert offsets[-1] < indices.size(0)
 
         if weight.is_cuda:
-            self._backend.LookupTableSum_updateOutput(
+            self._backend.LookupTableBag_updateOutput(
                 self._backend.library_state,
                 indices,
                 offsets,
@@ -192,7 +192,7 @@ class EmbeddingSum(Function):
         grad_weight = grad_output.new(self._weight_size).zero_()
 
         if grad_output.is_cuda:
-            self._backend.LookupTableSum_accGradParameters(
+            self._backend.LookupTableBag_accGradParameters(
                 self._backend.library_state,
                 indices,
                 grad_output,
@@ -223,4 +223,4 @@ class EmbeddingSum(Function):
         return None, None, grad_weight
 
 
-_all_functions.append(EmbeddingSum)
+_all_functions.append(EmbeddingBag)

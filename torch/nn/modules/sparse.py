@@ -108,11 +108,11 @@ class Embedding(Module):
         s += ')'
         return s.format(name=self.__class__.__name__, **self.__dict__)
 
-class EmbeddingSum(Module):
+class EmbeddingBag(Module):
     r"""Computes sums of 'bags' of embeddings, without instantiating the
     intermediate embeddings.
 
-    For bags of constant length, nn.EmbeddingSum is equivalent to nn.Embedding
+    For bags of constant length, nn.EmbeddingBag is equivalent to nn.Embedding
     followed by Sum(1), but it is more time- and memory-efficient on GPU.
 
     Args:
@@ -135,7 +135,7 @@ class EmbeddingSum(Module):
     Examples:
 
     >>> # an Embedding module containing 10 tensors of size 3
-    >>> embedding_sum = nn.EmbeddingSum(10, 3)
+    >>> embedding_sum = nn.EmbeddingBag(10, 3)
     >>> # a batch of 2 samples of 4 indices each
     >>> input = Variable(torch.LongTensor([1,2,4,5,4,3,2,9]))
     >>> offsets = Variable(torch.LongTensor([0,4]))
@@ -149,7 +149,7 @@ class EmbeddingSum(Module):
 
     def __init__(self, num_embeddings, embedding_dim,
                  max_norm=None, norm_type=2, scale_grad_by_freq=False):
-        super(EmbeddingSum, self).__init__()
+        super(EmbeddingBag, self).__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
         self.max_norm = max_norm
@@ -163,7 +163,7 @@ class EmbeddingSum(Module):
         self.weight.data.normal_(0, 1)
 
     def forward(self, input, offsets):
-        return self._backend.EmbeddingSum(
+        return self._backend.EmbeddingBag(
             self.max_norm, self.norm_type,
             self.scale_grad_by_freq
         )(input, offsets, self.weight)
