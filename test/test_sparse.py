@@ -17,6 +17,14 @@ def cpu_only(inner):
     return outer
 
 
+def cuda_only(inner):
+    def outer(self, *args, **kwargs):
+        if not self.is_cuda:
+            raise unittest.SkipTest("Test is GPU-only")
+        inner(self, *args, **kwargs)
+    return outer
+
+
 class TestSparse(TestCase):
 
     def setUp(self):
@@ -566,6 +574,11 @@ class TestSparse(TestCase):
         self._test_sparse_mask_shape([10, 10, 10], [3])
         self._test_sparse_mask_shape([50, 30, 20], [2])
         self._test_sparse_mask_shape([5, 5, 5, 5, 5, 5], [2])
+
+    @cuda_only
+    def test_storage_not_null(self):
+        x = torch.cuda.sparse.FloatTensor(2)
+        self.assertNotEqual(x.get_device(), -1)
 
 
 class TestUncoalescedSparse(TestSparse):

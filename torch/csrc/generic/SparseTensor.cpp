@@ -1,8 +1,26 @@
 PyObject *THSPTensorClass = NULL;
 
+static void THSPTensor_(initStorage)(THSTensor* tensor)
+{
+  // Ensure that PyTorch's "storage is not NULL" invariant is upheld.
+  // See Note [Storage is not NULL]
+  if (!tensor->indices->storage) {
+#ifdef THC_GENERIC_FILE
+    tensor->indices->storage = THCudaLongStorage_new(LIBRARY_STATE_NOARGS);
+#else
+    tensor->indices->storage = THLongStorage_new(LIBRARY_STATE_NOARGS);
+#endif
+  }
+  if (!tensor->values->storage) {
+    tensor->values->storage = THStorage_(new)(LIBRARY_STATE_NOARGS);
+  }
+}
+
 PyObject * THSPTensor_(NewEmpty)()
 {
-  return THSPTensor_(New)(THSTensor_(new)(LIBRARY_STATE_NOARGS));
+  auto r = THSTensor_(new)(LIBRARY_STATE_NOARGS);
+  THSPTensor_(initStorage)(r);
+  return THSPTensor_(New)(r);
 }
 
 PyObject * THSPTensor_(New)(THSTensor *tensor)
@@ -104,6 +122,8 @@ static PyObject * THSPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
     self->cdata = THSTensor_(newWithSize)(LIBRARY_STATE sizes.get());
   }
   else goto invalid_arguments; // All other cases
+
+  THSPTensor_(initStorage)(self->cdata);
 
   return (PyObject*)self.release();
 
