@@ -571,18 +571,9 @@ class Cumsum(Function):
         ctx.dim = dim
         return torch.cumsum(input, dim=ctx.dim)
 
-#    def backward(self, grad_output):
-#        return sum_scan_exclusive(grad_output, dim=self.dim)
-    
     @staticmethod
     def backward(ctx, grad_output):
-        grad_input = torch.cumsum(-grad_output, dim=ctx.dim)
-
-        end_idx = grad_input.size(ctx.dim) - 1
-        grad_sum = grad_input.narrow(ctx.dim, end_idx, 1)
-        grad_input = (grad_input - grad_sum.expand_as(grad_input))
-        grad_input += grad_output
-        return grad_input, None
+        return sum_scan_exclusive(grad_output, dim=ctx.dim), None
 
 
 class Cumprod(Function):
@@ -672,7 +663,7 @@ class Cumprod(Function):
         input, = self.saved_tensors
         dim_size = input.size(self.dim)
         if dim_size == 1:
-            return grad_output.clone()
+            return grad_output
 
         #  Simple case with nonzero elements in the input
         if (input != 0).all():
@@ -701,7 +692,8 @@ class Cumprod(Function):
             elif k == dim_size - 1:
                 prods_until_k = torch.prod(
                     input[dim_padding + (slice(None, k),)],
-                    dim=self.dim
+                    dim=self.dim,
+                    keepdim=True
                 )
 
                 omitted_products = prods_until_k
@@ -709,7 +701,8 @@ class Cumprod(Function):
             else:
                 prods_until_k = torch.prod(
                     input[dim_padding + (slice(None, k),)],
-                    dim=self.dim
+                    dim=self.dim,
+                    keepdim=True
                 )
 
                 prods_from_k_plus_1 = torch.cumprod(
@@ -730,9 +723,10 @@ class Cumprod(Function):
 
             grad_input.select(self.dim, k).copy_(torch.sum(
                 grad_output[dim_padding + (slice(k, None),)] * omitted_products,
-                dim=self.dim).squeeze())
+                dim=self.dim))
 
         return grad_input
+
 
 class Unfold(Function):
 
