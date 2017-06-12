@@ -7,7 +7,7 @@ from ..variable import Variable
 class Sum(Function):
 
     @staticmethod
-    def forward(ctx, input, dim=None, keepdim=True):
+    def forward(ctx, input, dim=None, keepdim=False):
         ctx.dim = dim
         ctx.keepdim = keepdim
         ctx.input_size = input.size()
@@ -32,7 +32,7 @@ class Sum(Function):
 class Prod(Function):
 
     @staticmethod
-    def forward(ctx, input, dim=None, keepdim=True):
+    def forward(ctx, input, dim=None, keepdim=False):
         ctx.dim = dim
         ctx.keepdim = keepdim
         ctx.input_size = input.size()
@@ -66,6 +66,7 @@ class Prod(Function):
             dim = ctx.dim if ctx.dim >= 0 else ctx.dim + input.dim()
             if ctx.keepdim is False:
                 grad_output = grad_output.unsqueeze(dim)
+                output = output.unsqueeze(dim)
 
             zero_mask = input == 0
             slice_zero_count = zero_mask.sum(dim, True)
@@ -101,7 +102,7 @@ class Prod(Function):
 class Mean(Function):
 
     @staticmethod
-    def forward(ctx, input, dim=None, keepdim=True):
+    def forward(ctx, input, dim=None, keepdim=False):
         ctx.dim = dim
         ctx.keepdim = keepdim
         ctx.input_size = input.size()
@@ -132,7 +133,7 @@ class _SelectionFunction(Function):
     # kthvalue not only requires us to pass a dim, but also preceed it with k.
 
     @classmethod
-    def forward(cls, ctx, input, dim=None, keepdim=True, additional_args=tuple()):
+    def forward(cls, ctx, input, dim=None, keepdim=False, additional_args=tuple()):
         fn = getattr(input, cls.__name__.lower())
         ctx.dim = dim
         ctx.keepdim = keepdim
@@ -159,7 +160,7 @@ class _SelectionFunction(Function):
     def backward(cls, ctx, grad_output, grad_indices=None):
         grad_input = Variable(grad_output.data.new(*ctx.input_size).zero_())
         if ctx.dim is None and cls.has_all_reduce:
-            grad_input[ctx.indices_tuple] = grad_output.data[0]
+            grad_input[ctx.indices_tuple] = grad_output
         else:
             if ctx.dim is None:
                 dim = len(ctx.input_size) - 1
@@ -196,14 +197,14 @@ class Kthvalue(_SelectionFunction):
     has_all_reduce = False
 
     @classmethod
-    def forward(cls, ctx, input, k, dim=None, keepdim=True):
+    def forward(cls, ctx, input, k, dim=None, keepdim=False):
         return super(Kthvalue, cls).forward(ctx, input, dim, keepdim, (k,))
 
 
 class Norm(Function):
 
     @staticmethod
-    def forward(ctx, input, p=2, dim=None, keepdim=True):
+    def forward(ctx, input, p=2, dim=None, keepdim=False):
         ctx.p = p
         ctx.dim = dim
         ctx.keepdim = keepdim

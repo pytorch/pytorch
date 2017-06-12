@@ -545,7 +545,6 @@ class Repeat(Function):
         return input.repeat(repeats)
 
     @staticmethod
-    @once_differentiable
     def backward(ctx, grad_output):
         grad_input = grad_output
         for dim, repeat in enumerate(ctx.repeats):
@@ -557,21 +556,20 @@ class Repeat(Function):
 
 class Cumsum(Function):
 
-    def __init__(self, dim):
-        super(Cumsum, self).__init__()
-        self.dim = dim
+    @staticmethod
+    def forward(ctx, input, dim):
+        ctx.dim = dim
+        return torch.cumsum(input, dim=ctx.dim)
 
-    def forward(self, input):
-        return torch.cumsum(input, dim=self.dim)
+    @staticmethod
+    def backward(ctx, grad_output):
+        grad_input = torch.cumsum(-grad_output, dim=ctx.dim)
 
-    def backward(self, grad_output):
-        grad_input = torch.cumsum(-grad_output, dim=self.dim)
-
-        end_idx = grad_input.size(self.dim) - 1
-        grad_sum = grad_input.narrow(self.dim, end_idx, 1)
-        grad_input -= grad_sum.expand_as(grad_input)
+        end_idx = grad_input.size(ctx.dim) - 1
+        grad_sum = grad_input.narrow(ctx.dim, end_idx, 1)
+        grad_input = (grad_input - grad_sum.expand_as(grad_input))
         grad_input += grad_output
-        return grad_input
+        return grad_input, None
 
 
 class Unfold(Function):

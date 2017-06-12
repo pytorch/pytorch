@@ -21,7 +21,7 @@ static PyObject * THPStorage_(dataPtr)(THPStorage *self)
 static PyObject * THPStorage_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
 {
   HANDLE_TH_ERRORS
-  return THPCopyMethod(THStorage_(copy_functions), self, args, kwargs);
+  return THPStorageCopyMethod(THStorage_(copy_functions), self, args, kwargs);
   END_HANDLE_TH_ERRORS
 }
 

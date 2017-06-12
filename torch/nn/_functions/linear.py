@@ -45,7 +45,7 @@ class Bilinear(Function):
         for k, w in enumerate(weight):
             torch.mm(input1, w, out=buff)
             buff.mul_(input2)
-            torch.sum(buff, 1, out=output.narrow(1, k, 1))
+            torch.sum(buff, 1, keepdim=True, out=output.narrow(1, k, 1))
 
         if bias is not None:
             output.add_(bias.expand_as(output))

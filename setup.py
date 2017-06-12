@@ -156,10 +156,11 @@ class build_ext(setuptools.command.build_ext.build_ext):
         from tools.cwrap.plugins.NullableArguments import NullableArguments
         from tools.cwrap.plugins.CuDNNPlugin import CuDNNPlugin
         from tools.cwrap.plugins.WrapDim import WrapDim
+        from tools.cwrap.plugins.Broadcast import Broadcast
         thp_plugin = THPPlugin()
         cwrap('torch/csrc/generic/TensorMethods.cwrap', plugins=[
             BoolOption(), thp_plugin, AutoGPU(condition='IS_CUDA'),
-            ArgcountSortPlugin(), KwargsPlugin(), WrapDim()
+            ArgcountSortPlugin(), KwargsPlugin(), WrapDim(), Broadcast()
         ])
         cwrap('torch/csrc/cudnn/cuDNN.cwrap', plugins=[
             CuDNNPlugin(), NullableArguments()
@@ -264,6 +265,7 @@ main_sources = [
     "torch/csrc/DynamicTypes.cpp",
     "torch/csrc/byte_order.cpp",
     "torch/csrc/utils.cpp",
+    "torch/csrc/expand_utils.cpp",
     "torch/csrc/utils/object_ptr.cpp",
     "torch/csrc/utils/tuple_parser.cpp",
     "torch/csrc/allocators.cpp",
@@ -325,7 +327,7 @@ if WITH_CUDA:
     extra_link_args.append('-Wl,-rpath,' + cuda_lib_path)
     extra_compile_args += ['-DWITH_CUDA']
     extra_compile_args += ['-DCUDA_LIB_PATH=' + cuda_lib_path]
-    main_libraries += ['cudart']
+    main_libraries += ['cudart', 'nvToolsExt']
     main_link_args += [THC_LIB, THCS_LIB, THCUNN_LIB]
     main_sources += [
         "torch/csrc/cuda/Module.cpp",
@@ -333,6 +335,7 @@ if WITH_CUDA:
         "torch/csrc/cuda/Stream.cpp",
         "torch/csrc/cuda/AutoGPU.cpp",
         "torch/csrc/cuda/utils.cpp",
+        "torch/csrc/cuda/expand_utils.cpp",
         "torch/csrc/cuda/serialization.cpp",
     ]
     main_sources += split_types("torch/csrc/cuda/Tensor.cpp")
