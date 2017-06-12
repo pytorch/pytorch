@@ -37,7 +37,7 @@ __global__ void initializeMemory<float16>(
   int i = blockIdx.x * blockDim.x + threadIdx.x;
   half* ptrAsHalf = (half*) ptr;
   for (; i < count; i += blockDim.x) {
-    ptrAsHalf[i] = __int2half_rn((i * stride) + val);
+    ptrAsHalf[i] = __float2half(static_cast<float>((i * stride) + val));
   }
 }
 
