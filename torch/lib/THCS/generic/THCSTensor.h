@@ -67,6 +67,8 @@ TH_API void THCSTensor_(retain)(THCState *state, THCSTensor *self);
 
 /* CUDA-specific functions */
 TH_API int THCSTensor_(getDevice)(THCState *state, const THCSTensor *self);
+// NB: nTensors is the number of TOTAL tensors, not the number of dense tensors.
+// That is to say, nSparseTensors + nDenseTensors == nTensors
 TH_API int THCSTensor_(checkGPU)(THCState *state, unsigned int nSparseTensors, unsigned int nTensors, ...);
 
 /* internal methods */
