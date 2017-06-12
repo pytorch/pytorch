@@ -363,17 +363,17 @@ class Unsqueeze(Function):
         return grad_output.squeeze(ctx.dim), None
 
 
-class MaskedCopy(InplaceFunction):
+class MaskedScatter(InplaceFunction):
 
     @staticmethod
     def forward(ctx, tensor1, mask, tensor2, inplace=False):
-        assert not ctx.needs_input_grad[1], "MaskedCopy can't differentiate the mask"
+        assert not ctx.needs_input_grad[1], "MaskedScatter can't differentiate the mask"
         if not inplace:
             tensor1 = tensor1.clone()
         else:
             ctx.mark_dirty(tensor1)
         ctx.save_for_backward(mask)
-        return tensor1.masked_copy_(mask, tensor2)
+        return tensor1.masked_scatter_(mask, tensor2)
 
     @staticmethod
     @once_differentiable
@@ -425,7 +425,7 @@ class MaskedSelect(Function):
         grad_tensor = None
         if ctx.needs_input_grad[0]:
             grad_tensor = grad_output.new(ctx.input_size).zero_()
-            grad_tensor.masked_copy_(mask, grad_output)
+            grad_tensor.masked_scatter_(mask, grad_output)
         return grad_tensor, None
 
 
@@ -508,7 +508,7 @@ class Gather(Function):
     def backward(ctx, grad_output):
         index, = ctx.saved_tensors
         grad_input = grad_output.new(ctx.input_size).zero_()
-        return grad_input.scatter_(ctx.dim, index, grad_output), None, None
+        return grad_input.scatter_add_(ctx.dim, index, grad_output), None, None
 
 
 class Scatter(InplaceFunction):
@@ -545,7 +545,6 @@ class Repeat(Function):
         return input.repeat(repeats)
 
     @staticmethod
-    @once_differentiable
     def backward(ctx, grad_output):
         grad_input = grad_output
         for dim, repeat in enumerate(ctx.repeats):
@@ -567,15 +566,23 @@ def sum_scan_exclusive(x, dim):
 
 class Cumsum(Function):
 
-    def __init__(self, dim):
-        super(Cumsum, self).__init__()
-        self.dim = dim
+    @staticmethod
+    def forward(ctx, input, dim):
+        ctx.dim = dim
+        return torch.cumsum(input, dim=ctx.dim)
 
-    def forward(self, input):
-        return torch.cumsum(input, dim=self.dim)
+#    def backward(self, grad_output):
+#        return sum_scan_exclusive(grad_output, dim=self.dim)
+    
+    @staticmethod
+    def backward(ctx, grad_output):
+        grad_input = torch.cumsum(-grad_output, dim=ctx.dim)
 
-    def backward(self, grad_output):
-        return sum_scan_exclusive(grad_output, dim=self.dim)
+        end_idx = grad_input.size(ctx.dim) - 1
+        grad_sum = grad_input.narrow(ctx.dim, end_idx, 1)
+        grad_input = (grad_input - grad_sum.expand_as(grad_input))
+        grad_input += grad_output
+        return grad_input, None
 
 
 class Cumprod(Function):
@@ -726,7 +733,6 @@ class Cumprod(Function):
                 dim=self.dim).squeeze())
 
         return grad_input
-
 
 class Unfold(Function):
 

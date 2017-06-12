@@ -1,5 +1,4 @@
 #include "../master_worker/common/CommandChannel.hpp"
-#include "../base/ChannelEnvVars.hpp"
 #include "TestUtils.hpp"
 
 #include <cassert>
@@ -21,7 +20,7 @@ void init_worker(const int& rank, const std::string& master_addr) {
   g_mutex.lock();
   setenv(RANK_ENV, std::to_string(rank).data(), 1);
   setenv(MASTER_ADDR_ENV, master_addr.data(), 1);
-  auto channel = std::make_shared<thd::WorkerCommandChannel>(); // reads all env variable
+  auto channel = std::make_shared<thd::WorkerCommandChannel>(thd::getInitConfig("env://")); // reads all env variable
   g_mutex.unlock();
 
   assert(channel->init());
@@ -46,7 +45,7 @@ void init_master(int world_size, const std::string& master_port) {
   setenv(WORLD_SIZE_ENV, std::to_string(world_size).data(), 1);
   setenv(RANK_ENV, "0", 1);
   setenv(MASTER_PORT_ENV, master_port.data(), 1);
-  auto channel = std::make_shared<thd::MasterCommandChannel>(); // reads all env variable
+  auto channel = std::make_shared<thd::MasterCommandChannel>(thd::getInitConfig("env://")); // reads all env variable
   g_mutex.unlock();
 
   assert(channel->init());

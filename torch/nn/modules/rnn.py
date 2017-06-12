@@ -259,7 +259,7 @@ class LSTM(RNNBase):
                          `(hidden_size x 4*hidden_size)`
         bias_ih_l[k] : the learnable input-hidden bias of the k-th layer `(b_ii|b_if|b_ig|b_io)`, of shape
                          `(4*hidden_size)`
-        bias_hh_l[k] : the learnable hidden-hidden bias of the k-th layer `(W_hi|W_hf|W_hg|b_ho)`, of shape
+        bias_hh_l[k] : the learnable hidden-hidden bias of the k-th layer `(b_hi|b_hf|b_hg|b_ho)`, of shape
                          `(4*hidden_size)`
 
     Examples::

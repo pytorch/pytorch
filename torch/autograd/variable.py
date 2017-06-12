@@ -76,7 +76,7 @@ class Variable(_C._VariableBase):
     def __setitem__(self, key, value):
         if isinstance(key, Variable) and type(key.data).__name__ == 'ByteTensor':
             if isinstance(value, Variable):
-                return MaskedCopy.apply(self, key, value, True)
+                return MaskedScatter.apply(self, key, value, True)
             else:
                 return MaskedFill.apply(self, key, value, True)
         else:
@@ -439,33 +439,33 @@ class Variable(_C._VariableBase):
     def rsqrt(self):
         return Rsqrt.apply(self)
 
-    def sum(self, dim=None, keepdim=True):
+    def sum(self, dim=None, keepdim=False):
         return Sum.apply(self, dim, keepdim)
 
-    def prod(self, dim=None, keepdim=True):
+    def prod(self, dim=None, keepdim=False):
         return Prod.apply(self, dim, keepdim)
 
-    def mean(self, dim=None, keepdim=True):
+    def mean(self, dim=None, keepdim=False):
         return Mean.apply(self, dim, keepdim)
 
-    def max(self, dim=None, keepdim=True):
+    def max(self, dim=None, keepdim=False):
         if isinstance(dim, Variable):
             return Cmax.apply(self, dim)
-        return Max(dim, keepdim)(self)
+        return Max.apply(self, dim, keepdim)
 
-    def min(self, dim=None, keepdim=True):
+    def min(self, dim=None, keepdim=False):
         if isinstance(dim, Variable):
             return Cmin.apply(self, dim)
-        return Min(dim, keepdim)(self)
+        return Min.apply(self, dim, keepdim)
 
-    def mode(self, dim, keepdim=True):
-        return Mode(dim, keepdim)(self)
+    def mode(self, dim=None, keepdim=False):
+        return Mode.apply(self, dim, keepdim)
 
-    def median(self, dim, keepdim=True):
-        return Median(dim, keepdim)(self)
+    def median(self, dim=None, keepdim=False):
+        return Median.apply(self, dim, keepdim)
 
-    def kthvalue(self, dim, keepdim=True):
-        return Kthvalue(dim, keepdim)(self)
+    def kthvalue(self, k, dim=None, keepdim=False):
+        return Kthvalue.apply(self, k, dim, keepdim)
 
     def sort(self, dim=None, descending=False):
         return Sort.apply(self, dim, descending, True)
@@ -490,7 +490,7 @@ class Variable(_C._VariableBase):
         return Repeat.apply(self, repeats)
 
     def cumsum(self, dim):
-        return Cumsum(dim)(self)
+        return Cumsum.apply(self, dim)
 
     def cumprod(self, dim):
         return Cumprod(dim)(self)
@@ -498,7 +498,7 @@ class Variable(_C._VariableBase):
     def unfold(self, dim, size, step):
         return Unfold.apply(self, dim, size, step)
 
-    def var(self, dim=None, keepdim=True, unbiased=True):
+    def var(self, dim=None, keepdim=False, unbiased=True):
         mean = self.mean(dim, keepdim)
         if dim is None:
             mean = mean.view(*(1 for s in self.size()))
@@ -511,7 +511,7 @@ class Variable(_C._VariableBase):
         numel = self.numel() if dim is None else self.size(dim)
         return var.div(numel - int(unbiased))
 
-    def std(self, dim=None, keepdim=True):
+    def std(self, dim=None, keepdim=False):
         return self.var(dim, keepdim).sqrt()
 
     def renorm(self, p, dim, maxnorm):
@@ -613,7 +613,7 @@ class Variable(_C._VariableBase):
     def addcdiv_(self, *args):
         return self._addcop(Addcdiv, args, True)
 
-    def norm(self, p=2, dim=None, keepdim=True):
+    def norm(self, p=2, dim=None, keepdim=False):
         return Norm.apply(self, p, dim, keepdim)
 
     def dist(self, tensor, p=2):
@@ -650,10 +650,18 @@ class Variable(_C._VariableBase):
         return Scatter.apply(self, dim, index, source, True)
 
     def masked_copy(self, mask, variable):
-        return MaskedCopy.apply(self, mask, variable)
+        warnings.warn("masked_copy is deprecated and renamed to masked_scatter, and will be removed in v0.3")
+        return MaskedScatter.apply(self, mask, variable)
 
     def masked_copy_(self, mask, variable):
-        return MaskedCopy.apply(self, mask, variable, True)
+        warnings.warn("masked_copy_ is deprecated and renamed to masked_scatter_, and will be removed in v0.3")
+        return MaskedScatter.apply(self, mask, variable, True)
+
+    def masked_scatter(self, mask, variable):
+        return MaskedScatter.apply(self, mask, variable)
+
+    def masked_scatter_(self, mask, variable):
+        return MaskedScatter.apply(self, mask, variable, True)
 
     def masked_fill(self, mask, value):
         return MaskedFill.apply(self, mask, value)
@@ -705,19 +713,25 @@ class Variable(_C._VariableBase):
         return Permute.apply(self, permutation)
 
     def diag(self, diagonal_idx=0):
-        return Diag(diagonal_idx)(self)
+        return Diag.apply(self, diagonal_idx)
 
     def tril(self, diagonal_idx=0):
-        return Tril(diagonal_idx)(self)
+        return Tril.apply(self, diagonal_idx)
 
     def triu(self, diagonal_idx=0):
-        return Triu(diagonal_idx)(self)
+        return Triu.apply(self, diagonal_idx)
 
     def trace(self):
-        return Trace()(self)
+        return Trace.apply(self)
 
     def cross(self, other, dim=-1):
-        return Cross(dim)(self, other)
+        return Cross.apply(self, other)
+
+    def inverse(self):
+        return Inverse.apply(self)
+
+    def gesv(self, a):
+        return Gesv.apply(self, a)
 
     def multinomial(self, num_samples=1, with_replacement=False):
         return Multinomial(num_samples, with_replacement)(self)

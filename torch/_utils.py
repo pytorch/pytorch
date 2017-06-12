@@ -3,7 +3,7 @@ import importlib
 
 
 def _type(self, new_type=None, async=False):
-    """Casts this object to the specified type.
+    """Returns the type if `new_type` is not provided, else casts this object to the specified type.
 
     If this is already of the correct type, no copy is performed and the
     original object is returned.

@@ -209,6 +209,7 @@ THC_API void THCudaHostFree(THCState *state, void *ptr);
 THC_API void THCudaHostRecord(THCState *state, void *ptr);
 
 THC_API cudaError_t THCudaMemGetInfo(THCState *state, size_t* freeBytes, size_t* totalBytes);
+THC_API cudaError_t THCudaMemGetInfoCached(THCState *state, size_t* freeBytes, size_t* totalBytes, size_t* largestBlock);
 THC_API void THCSetGCHandler(THCState *state,
                              void (*torchGCHandlerFunction)(void *data),
                              void *data );

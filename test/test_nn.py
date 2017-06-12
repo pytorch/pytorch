@@ -77,12 +77,14 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
             module_ip = self.constructor(*self.constructor_args, inplace=True)
 
             input_version = input._version
-            output = module(input)
+            with freeze_rng_state():
+                output = module(input)
             test_case.assertEqual(input._version, input_version)
 
             input_ip = deepcopy(input)
             input_ip_clone = input_ip.clone()
-            output_ip = module_ip(input_ip_clone)
+            with freeze_rng_state():
+                output_ip = module_ip(input_ip_clone)
             test_case.assertNotEqual(input_ip_clone._version, input_version)
             test_case.assertEqual(output, output_ip)
             grad = output.data.clone().normal_()
@@ -707,7 +709,7 @@ class TestNN(NNTestCase):
             self.assertEqual(scale.std(), 0)
             return scale[0]
 
-        grads = torch.arange(1, 101), torch.ones(10).div(1000)
+        grads = torch.arange(1, 101).view(10, 10), torch.ones(10).div(1000)
         for norm_type in [0.5, 1.5, 2, 4, 'inf']:
             for p, g in zip(l.parameters(), grads):
                 p._grad = Variable(g.clone().view_as(p.data))
@@ -1317,9 +1319,46 @@ class TestNN(NNTestCase):
         # but it should work with the same type
         nn.functional.conv2d(inputs.float(), weights.float())
 
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_Conv2d_inconsistent_types_on_GPU_without_cudnn(self):
+        inputs = Variable(torch.randn(4, 1, 7, 7).float().cuda())
+        weights = Variable(torch.randn(1, 1, 3, 3).double().cuda())
+        bias = Variable(torch.randn(1).double().cuda())
+
+        torch.backends.cudnn.enabled = False
+        # inconsistent types should raise an exception
+        self.assertRaises(RuntimeError, lambda: nn.functional.conv2d(inputs, weights))
+        self.assertRaises(RuntimeError, lambda: nn.functional.conv2d(inputs, weights.float(), bias))
+
+        # but it should work with the same type
+        nn.functional.conv2d(inputs.float(), weights.float(), bias.float())
+
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    def test_Conv2d_inconsistent_types_on_GPU_with_cudnn(self):
+        inputs = Variable(torch.randn(4, 1, 7, 7).float().cuda())
+        weights = Variable(torch.randn(1, 1, 3, 3).double().cuda())
+        bias = Variable(torch.randn(1).double().cuda())
+
+        torch.backends.cudnn.enabled = True
+        # inconsistent types should raise an exception
+        self.assertRaises(RuntimeError, lambda: nn.functional.conv2d(inputs, weights))
+        self.assertRaises(RuntimeError, lambda: nn.functional.conv2d(inputs, weights.float(), bias))
+
+        # but it should work with the same type
+        nn.functional.conv2d(inputs.float(), weights.float(), bias.float())
+
     def test_Conv2d_missing_argument(self):
         c = nn.Conv2d(3, 3, 3)
         self.assertRaises(RuntimeError, lambda: c(None))
+
+    def test_Conv2d_backward_twice(self):
+        input = Variable(torch.randn(2, 3, 5, 5))
+        c = nn.Conv2d(3, 3, 3)
+        o1 = c(input)
+        o1.sum().backward()
+        self.assertRaisesRegex(RuntimeError, 'Specify retain_variables=True',
+                               lambda: o1.sum().backward())
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_Conv2d_large_workspace(self):
@@ -1346,6 +1385,20 @@ class TestNN(NNTestCase):
             run_test(benchmark=True)
         finally:
             torch.backends.cudnn.benchmark = b
+
+    def test_conv_modules_raise_error_on_incorrect_input_size(self):
+        modules = [nn.Conv1d(3, 8, 3), nn.ConvTranspose1d(3, 8, 3),
+                   nn.Conv2d(3, 8, 3), nn.ConvTranspose2d(3, 8, 3),
+                   nn.Conv3d(3, 8, 3), nn.ConvTranspose3d(3, 8, 3)]
+
+        invalid_input_dims = [(2, 4), (2, 4),
+                              (3, 5), (3, 5),
+                              (4, 6), (4, 6)]
+
+        for invalid_dims, module in zip(invalid_input_dims, modules):
+            for dims in invalid_dims:
+                input = Variable(torch.Tensor(torch.Size((3, ) * dims)))
+                self.assertRaises(ValueError, lambda: module(input))
 
     def test_ConvTranspose2d_output_size(self):
         m = nn.ConvTranspose2d(3, 4, 3, 3, 0, 2)
@@ -1983,13 +2036,15 @@ class TestNN(NNTestCase):
                     self.assertEqual(output[:, c, h, w], input[:, channel_idx, height_idx, weight_idx])
 
     def test_inplace_thnn(self):
-        r = nn.ReLU(True)
-        input = Variable(torch.randn(5, 5), requires_grad=True)
-        output = r(input + 0)
-        grad_output = torch.randn(5, 5)
-        grad_output_clone = grad_output.clone()
-        output.backward(grad_output)
-        self.assertEqual(grad_output, grad_output_clone)
+        modules = [nn.ReLU, nn.ELU, nn.SELU, nn.RReLU]
+        for mod in modules:
+            r = mod(inplace=True)
+            input = Variable(torch.randn(5, 5), requires_grad=True)
+            output = r(input + 0)
+            grad_output = torch.randn(5, 5)
+            grad_output_clone = grad_output.clone()
+            output.backward(grad_output)
+            self.assertEqual(grad_output, grad_output_clone)
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_noncontig_conv_grad(self):
@@ -2077,31 +2132,74 @@ class TestNN(NNTestCase):
         self.assertTrue(gradcheck(lambda x, y: F.cosine_similarity(x, y, dim=0), (input1, input2)))
         self.assertTrue(gradcheck(lambda x, y: F.cosine_similarity(x, y, dim=-1), (input1, input2)))
 
+    def test_upsamplingNearest2d(self):
+        m = nn.Upsample(size=4, mode='nearest')
+        in_t = torch.ones(1, 1, 2, 2)
+        out_t = m(Variable(in_t))
+        self.assertEqual(torch.ones(1, 1, 4, 4), out_t.data)
+
+        input = Variable(torch.randn(1, 1, 2, 2), requires_grad=True)
+        self.assertTrue(gradcheck(lambda x: F.upsample(x, 4, mode='nearest'), (input,)))
+
+    def test_upsamplingBilinear2d(self):
+        m = nn.Upsample(size=4, mode='bilinear')
+        in_t = torch.ones(1, 1, 2, 2)
+        out_t = m(Variable(in_t))
+        self.assertEqual(torch.ones(1, 1, 4, 4), out_t.data)
+
+        input = Variable(torch.randn(1, 1, 2, 2), requires_grad=True)
+        self.assertTrue(gradcheck(lambda x: F.upsample(x, 4, mode='bilinear'), (input,)))
+
+    def test_upsamplingNearest3d(self):
+        m = nn.Upsample(size=4, mode='nearest')
+        in_t = torch.ones(1, 1, 2, 2, 2)
+        out_t = m(Variable(in_t))
+        self.assertEqual(torch.ones(1, 1, 4, 4, 4), out_t.data)
+
+        input = Variable(torch.randn(1, 1, 2, 2, 2), requires_grad=True)
+        self.assertTrue(gradcheck(lambda x: F.upsample(x, 4, mode='nearest'), (input,)))
+
+    def test_upsamplingTrilinear3d(self):
+        m = nn.Upsample(size=4, mode='trilinear')
+        in_t = torch.ones(1, 1, 2, 2, 2)
+        out_t = m(Variable(in_t))
+        self.assertEqual(torch.ones(1, 1, 4, 4, 4), out_t.data)
+
+        input = Variable(torch.randn(1, 1, 2, 2, 2), requires_grad=True)
+        self.assertTrue(gradcheck(lambda x: F.upsample(x, 4, mode='trilinear'), (input,)))
+
     def test_bilinear(self):
         module = nn.Bilinear(10, 10, 8)
-        module2 = legacy.Bilinear(10, 10, 8)
+        module_legacy = legacy.Bilinear(10, 10, 8)
 
-        module2.weight.copy_(module.weight.data)
-        module2.bias.copy_(module.bias.data)
+        module_legacy.weight.copy_(module.weight.data)
+        module_legacy.bias.copy_(module.bias.data)
 
         input1 = torch.randn(4, 10)
         input2 = torch.randn(4, 10)
 
         output = module(Variable(input1), Variable(input2))
-        output2 = module2.forward([input1, input2])
+        output_legacy = module_legacy.forward([input1, input2])
+
+        self.assertEqual(output.data, output_legacy)
 
         input1_1 = Variable(input1, requires_grad=True)
         input2_1 = Variable(input2, requires_grad=True)
 
-        output3 = module(input1_1, input2_1)
-        grad = torch.randn(*output3.size())
-        output3.backward(grad)
+        module.zero_grad()
+        module_legacy.zeroGradParameters()
+
+        output = module(input1_1, input2_1)
+        grad_output = torch.randn(*output.size())
+        gi1_legacy, gi2_legacy = module_legacy.backward([input1, input2], grad_output)
+        output.backward(grad_output)
         gi1 = input1_1.grad.data.clone()
         gi2 = input2_1.grad.data.clone()
 
-        self.assertEqual(output.data, output2)
-        # TODO: this assertion is incorrect, fix needed
-        # self.assertEqual([gi1, gi2], output3)
+        self.assertEqual(gi1, gi1_legacy)
+        self.assertEqual(gi2, gi2_legacy)
+        self.assertEqual(module.weight.grad.data, module_legacy.gradWeight)
+        self.assertEqual(module.bias.grad.data, module_legacy.gradBias)
 
         self.assertTrue(gradcheck(lambda x1, x2: F.bilinear(x1, x2, module.weight, module.bias), (input1_1, input2_1)))
 
@@ -2907,50 +3005,88 @@ new_module_tests = [
         input_size=(1, 9, 4, 4),
     ),
     dict(
-        module_name='UpsamplingNearest2d',
-        constructor_args=(12,),
+        module_name='Upsample',
+        constructor_args=(12, None, 'nearest'),
         input_size=(1, 2, 4, 4),
+        desc='nearest_2d'
     ),
     dict(
-        module_name='UpsamplingNearest2d',
-        constructor_args=((12, 16)),
+        module_name='Upsample',
+        constructor_args=((12, 16), None, 'nearest'),
         input_size=(1, 2, 3, 4),
-        desc='tuple'
+        desc='nearest_tuple_2d'
     ),
     dict(
-        module_name='UpsamplingNearest2d',
-        constructor_args=(None, 4),
+        module_name='Upsample',
+        constructor_args=(None, 4, 'nearest'),
         input_size=(1, 2, 4, 4),
-        desc='scale'
+        desc='nearest_scale_2d'
     ),
     dict(
-        module_name='UpsamplingBilinear2d',
-        constructor_args=(12,),
+        module_name='Upsample',
+        constructor_args=(12, None, 'bilinear'),
         input_size=(1, 2, 4, 4),
+        desc='bilinear_2d'
     ),
     dict(
-        module_name='UpsamplingBilinear2d',
-        constructor_args=((4, 6)),
+        module_name='Upsample',
+        constructor_args=((4, 6), None, 'bilinear'),
         input_size=(1, 2, 2, 3),
-        desc='tuple'
+        desc='bilinear_tuple_2d'
     ),
     dict(
-        module_name='UpsamplingBilinear2d',
-        constructor_args=(None, 4),
+        module_name='Upsample',
+        constructor_args=(None, 4, 'bilinear'),
         input_size=(1, 2, 4, 4),
-        desc='scale'
+        desc='bilinear_scale_2d'
     ),
     dict(
-        module_name='UpsamplingBilinear2d',
-        constructor_args=(None, (2, 2)),
+        module_name='Upsample',
+        constructor_args=(None, (2, 2), 'bilinear'),
         input_size=(1, 2, 4, 4),
-        desc='scale_tuple_shared'
+        desc='bilinear_scale_tuple_shared_2d'
     ),
     dict(
-        module_name='UpsamplingBilinear2d',
-        constructor_args=(None, (2, 1)),
+        module_name='Upsample',
+        constructor_args=(None, (2, 1), 'bilinear'),
         input_size=(1, 2, 4, 4),
-        desc='scale_tuple_skewed'
+        desc='bilinear_scale_tuple_skewed_2d'
+    ),
+    dict(
+        module_name='Upsample',
+        constructor_args=(12, None, 'nearest'),
+        input_size=(1, 2, 4, 4, 4),
+        desc='nearest_3d'
+    ),
+    dict(
+        module_name='Upsample',
+        constructor_args=((12, 16, 16), None, 'nearest'),
+        input_size=(1, 2, 3, 4, 4),
+        desc='nearest_tuple_3d'
+    ),
+    dict(
+        module_name='Upsample',
+        constructor_args=(None, 4, 'nearest'),
+        input_size=(1, 2, 4, 4, 4),
+        desc='nearest_scale_3d'
+    ),
+    dict(
+        module_name='Upsample',
+        constructor_args=(12, None, 'trilinear'),
+        input_size=(1, 2, 4, 4, 4),
+        desc='trilinear_3d'
+    ),
+    dict(
+        module_name='Upsample',
+        constructor_args=((4, 6, 6), None, 'trilinear'),
+        input_size=(1, 2, 2, 3, 3),
+        desc='trilinear_tuple_3d'
+    ),
+    dict(
+        module_name='Upsample',
+        constructor_args=(None, 4, 'trilinear'),
+        input_size=(1, 2, 4, 4, 4),
+        desc='trilinear_scale_3d'
     ),
     dict(
         module_name='AdaptiveMaxPool1d',
@@ -2985,6 +3121,11 @@ new_module_tests = [
         constructor_args=((3, 4),),
         input=torch.rand(1, 3, 5, 6),
         desc='tuple'
+    ),
+    dict(
+        module_name='SELU',
+        input_size=(3, 2, 5),
+        check_inplace=True
     ),
 ]
 

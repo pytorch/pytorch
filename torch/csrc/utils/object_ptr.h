@@ -6,7 +6,7 @@ template<class T>
 class THPPointer {
 public:
   THPPointer(): ptr(nullptr) {};
-  THPPointer(T *ptr): ptr(ptr) {};
+  explicit THPPointer(T *ptr): ptr(ptr) {};
   THPPointer(THPPointer &&p) { free(); ptr = p.ptr; p.ptr = nullptr; };
 
   ~THPPointer() { free(); };

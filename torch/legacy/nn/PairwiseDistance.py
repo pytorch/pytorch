@@ -27,7 +27,7 @@ class PairwiseDistance(Module):
 
         self.output.resize_(input[0].size(0))
         self.output.zero_()
-        self.output.add_(self.diff.pow_(self.norm).sum(1, True))
+        self.output.add_(self.diff.pow_(self.norm).sum(1, keepdim=False))
         self.output.pow_(1. / self.norm)
 
         return self.output
@@ -58,7 +58,7 @@ class PairwiseDistance(Module):
             if self.outExpand is None:
                 self.outExpand = self.output.new()
             self.outExpand.resize_(self.output.size(0), 1)
-            self.outExpand.copy_(self.output)
+            self.outExpand.copy_(self.output.view(self.output.size(0), 1))
             self.outExpand.add_(1e-6)  # Prevent divide by zero errors
             self.outExpand.pow_(-(self.norm - 1))
             self.gradInput[0].mul_(self.outExpand.expand(self.gradInput[0].size(0),

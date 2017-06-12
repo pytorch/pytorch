@@ -217,7 +217,7 @@ def _flatten_tensors(tensors):
     offset = 0
     flat = tensors[0].new(size)
     for tensor in tensors:
-        flat.narrow(0, offset, tensor.numel()).copy_(tensor)
+        flat.narrow(0, offset, tensor.numel()).copy_(tensor, broadcast=False)
         offset += tensor.numel()
     return flat
 

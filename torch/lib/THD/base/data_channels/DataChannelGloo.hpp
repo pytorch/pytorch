@@ -26,8 +26,8 @@ struct DataChannelGloo : DataChannel {
     QueueWorker::Request _request;
   };
 
-  DataChannelGloo();
-  DataChannelGloo(int timeout);
+  DataChannelGloo(InitMethod::Config config);
+  DataChannelGloo(InitMethod::Config config, int timeout);
   virtual ~DataChannelGloo();
 
   bool init() override;
@@ -81,6 +81,7 @@ private:
   std::shared_ptr<store_type> _store;
   std::shared_ptr<::gloo::transport::Device> _device;
   std::unordered_map<THDGroup, DataChannel::Group> _groups;
+  int _listen_socket;
 
   std::unique_ptr<GlooCache> _cache;
 

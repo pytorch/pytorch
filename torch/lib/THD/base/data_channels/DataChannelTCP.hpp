@@ -26,8 +26,8 @@ struct DataChannelTCP : DataChannel {
     QueueWorker::Request _request;
   };
 
-  DataChannelTCP();
-  DataChannelTCP(int timeout);
+  DataChannelTCP(InitMethod::Config config);
+  DataChannelTCP(InitMethod::Config config, int timeout);
   virtual ~DataChannelTCP();
 
   bool init() override;

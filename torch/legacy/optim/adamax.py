@@ -57,7 +57,7 @@ def adamax(opfunc, x, config, state=None):
     # Update the exponentially weighted infinity norm.
     state['max'][0].copy_(state['u']).mul_(beta2)
     state['max'][1].copy_(dfdx).abs_().add_(epsilon)
-    torch.max(state['max'], 0, out=(state['u'], state['u'].new().long()))
+    torch.max(state['max'], 0, keepdim=False, out=(state['u'], state['u'].new().long()))
 
     biasCorrection1 = 1 - beta1 ** state['t']
     stepSize = lr / biasCorrection1

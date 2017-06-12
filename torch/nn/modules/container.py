@@ -140,7 +140,7 @@ class ModuleList(Module):
 
 
 class ParameterList(Module):
-    """Holds submodules in a list.
+    """Holds parameters in a list.
 
     ParameterList can be indexed like a regular Python list, but parameters it contains
     are properly registered, and will be visible by all Module methods.

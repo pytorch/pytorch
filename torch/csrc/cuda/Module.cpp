@@ -161,7 +161,7 @@ PyObject * THCPModule_getDriverVersion(PyObject *self)
 PyObject * THCPModule_getRNGState(PyObject *_unused)
 {
   HANDLE_TH_ERRORS
-  THPByteTensorPtr res = (THPByteTensor *)THPByteTensor_NewEmpty();
+  THPByteTensorPtr res((THPByteTensor *)THPByteTensor_NewEmpty());
   if (!res) return NULL;
   THCRandom_getRNGState(state, res->cdata);
   return (PyObject *)res.release();

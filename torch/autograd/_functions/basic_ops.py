@@ -187,7 +187,7 @@ class DivConstant(InplaceFunction):
                 return None, grad_output.mul(v).mul(v).div_(-ctx.constant), None
             else:
                 v_rep = v.reciprocal()
-                return None, grad_output.mul_(-ctx.constant).mul(v_rep).mul(v_rep), None
+                return None, grad_output.mul(v_rep).mul(v_rep).mul_(-ctx.constant), None
 
 
 class PowConstant(Function):

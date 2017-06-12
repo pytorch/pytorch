@@ -2,6 +2,24 @@
 #define TH_GENERIC_FILE "master_worker/master/generic/THDTensorMath.h"
 #else
 
+THD_API void THDTensor_(gather)(THDTensor *self, THDTensor *src, int dim,
+                                THDLongTensor *index);
+THD_API void THDTensor_(scatter)(THDTensor *self, int dim, THDLongTensor *index,
+                                 THDTensor *src);
+THD_API void THDTensor_(scatterFill)(THDTensor *self, int dim,
+                                     THDLongTensor *index, real val);
+
+THD_API void THDTensor_(max)(THDTensor *self, THDLongTensor *indices_,
+                             THDTensor *src, int dimension);
+THD_API void THDTensor_(min)(THDTensor *self, THDLongTensor *indices_,
+                             THDTensor *src, int dimension);
+THD_API void THDTensor_(kthvalue)(THDTensor *self, THDLongTensor *indices_,
+                                  THDTensor *src, long k, int dimension);
+THD_API void THDTensor_(mode)(THDTensor *self, THDLongTensor *indices_,
+                              THDTensor *src, int dimension);
+THD_API void THDTensor_(median)(THDTensor *self, THDLongTensor *indices_,
+                                THDTensor *src, int dimension);
+
 THD_API void THDTensor_(fill)(THDTensor *r_, real value);
 THD_API void THDTensor_(zero)(THDTensor *r);
 THD_API void THDTensor_(maskedFill)(THDTensor *tensor, THDByteTensor *mask, real value);

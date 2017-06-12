@@ -37,7 +37,7 @@ bool THPUtils_tryUnpackLongs(PyObject *arg, THLongStoragePtr& result) {
   bool list = PyList_Check(arg);
   if (tuple || list) {
     int nDim = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
-    THLongStoragePtr storage = THLongStorage_newWithSize(nDim);
+    THLongStoragePtr storage(THLongStorage_newWithSize(nDim));
     for (int i = 0; i != nDim; ++i) {
       PyObject* item = tuple ? PyTuple_GET_ITEM(arg, i) : PyList_GET_ITEM(arg, i);
       if (!THPUtils_checkLong(item)) {
@@ -45,7 +45,7 @@ bool THPUtils_tryUnpackLongs(PyObject *arg, THLongStoragePtr& result) {
       }
       storage->data[i] = THPUtils_unpackLong(item);
     }
-    result = storage.release();
+    result  = std::move(storage);
     return true;
   }
   return false;
@@ -136,14 +136,14 @@ static const char* classOrTypename(PyObject* obj) {
 PyObject * THPUtils_dispatchStateless(
     PyObject *tensor, const char *name, PyObject *args, PyObject *kwargs)
 {
-  THPObjectPtr methods = PyObject_GetAttrString(tensor, THP_STATELESS_ATTRIBUTE_NAME);
+  THPObjectPtr methods(PyObject_GetAttrString(tensor, THP_STATELESS_ATTRIBUTE_NAME));
   if (!methods) {
     return PyErr_Format(
         PyExc_TypeError,
         "Type %s doesn't implement stateless methods",
         classOrTypename(tensor));
   }
-  THPObjectPtr method = PyObject_GetAttrString(methods, name);
+  THPObjectPtr method(PyObject_GetAttrString(methods, name));
   if (!method) {
     return PyErr_Format(
         PyExc_TypeError,
@@ -551,3 +551,33 @@ void THPPointer<THPGenerator>::free() {
 }
 
 template class THPPointer<THPGenerator>;
+
+static bool backCompatBroadcastWarn = false;
+
+void setBackCompatBroadcastWarn(bool warn) {
+  backCompatBroadcastWarn = warn;
+}
+
+bool getBackCompatBroadcastWarn() {
+  return backCompatBroadcastWarn;
+}
+
+static bool backCompatKeepdimWarn = false;
+
+void setBackCompatKeepdimWarn(bool warn) {
+  backCompatKeepdimWarn = warn;
+}
+
+bool getBackCompatKeepdimWarn() {
+  return backCompatKeepdimWarn;
+}
+
+bool maybeThrowBackCompatKeepdimWarn(char *func) {
+  if(getBackCompatKeepdimWarn()) {
+     std::ostringstream ss;
+     ss << "backwards compatibility: call to \"" << func
+        << "\" uses default value for keepdim which has changed default to False.  Consider passing as kwarg.",
+    PyErr_WarnEx(PyExc_UserWarning, ss.str().c_str(), 1);
+  }
+  return true;
+}

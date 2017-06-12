@@ -86,11 +86,7 @@ Each element of the Tensor :attr:`other` is multiplied by the scalar
 :attr:`value` and added to each element of the Tensor :attr:`input`.
 The resulting Tensor is returned.
 
-The shapes of :attr:`input` and :attr:`other` don't need to match.
-The total number of elements in each Tensor need to be the same.
-
-.. note:: When the shapes do not match, the shape of :attr:`input`
-          is used as the shape for the returned output Tensor
+The shapes of :attr:`input` and :attr:`other` must be :ref:`broadcastable <broadcasting-semantics>`.
 
 :math:`out = input + (other * value)`
 
@@ -146,7 +142,8 @@ along the first dimension).
 same number of matrices.
 
 If :attr:`batch1` is a `b x n x m` Tensor, :attr:`batch2` is a `b x m x p`
-Tensor, :attr:`out` and :attr:`mat` will be `n x p` Tensors.
+Tensor, ::attr:`mat` must be :ref:`broadcastable <broadcasting-semantics>` with a `n x p` Tensor
+and attr:`out` will be a `n x p` Tensor.
 
 In other words,
 :math:`res = (beta * M) + (alpha * sum(batch1_i @ batch2_i, i = 0, b))`
@@ -182,7 +179,8 @@ addcdiv(tensor, value=1, tensor1, tensor2, out=None) -> Tensor
 Performs the element-wise division of :attr:`tensor1` by :attr:`tensor2`,
 multiply the result by the scalar :attr:`value` and add it to :attr:`tensor`.
 
-The number of elements must match, but sizes do not matter.
+The shapes of :attr:`tensor`, :attr:`tensor1`, and :attr:`tensor2` must be
+:ref:`broadcastable <broadcasting-semantics>`.
 
 For inputs of type `FloatTensor` or `DoubleTensor`, :attr:`value` must be a real number, otherwise an integer
 
@@ -213,7 +211,8 @@ Performs the element-wise multiplication of :attr:`tensor1`
 by :attr:`tensor2`, multiply the result by the scalar :attr:`value`
 and add it to :attr:`tensor`.
 
-The number of elements must match, but sizes do not matter.
+The shapes of :attr:`tensor`, :attr:`tensor1`, and :attr:`tensor2` must be
+:ref:`broadcastable <broadcasting-semantics>`.
 
 For inputs of type `FloatTensor` or `DoubleTensor`, :attr:`value` must be a real number, otherwise an integer
 
@@ -244,7 +243,8 @@ Performs a matrix multiplication of the matrices :attr:`mat1` and :attr:`mat2`.
 The matrix :attr:`mat` is added to the final result.
 
 If :attr:`mat1` is a `n x m` Tensor, :attr:`mat2` is a `m x p` Tensor,
-:attr:`out` and :attr:`mat` will be `n x p` Tensors.
+then :attr:`mat` must be :ref:`broadcastable <broadcasting-semantics>` with a `n x p` Tensor and
+:attr:`out` will be a `n x p` Tensor.
 
 `alpha` and `beta` are scaling factors on `mat1 @ mat2` and `mat` respectively.
 
@@ -283,7 +283,8 @@ the vector :attr:`vec`.
 The vector :attr:`tensor` is added to the final result.
 
 If :attr:`mat` is a `n x m` Tensor, :attr:`vec` is a 1D Tensor of size `m`,
-:attr:`out` and :attr:`tensor` will be 1D of size `n`.
+then :attr:`tensor` must be :ref:`broadcastable <broadcasting-semantics>`
+with a 1D tensor of size `n` and :attr:`out` will be 1D tensor of size `n`.
 
 `alpha` and `beta` are scaling factors on `mat * vec` and `tensor` respectively.
 
@@ -328,7 +329,8 @@ In other words,
 :math:`out = (beta * mat) + (alpha * vec1 \otimes vec2)`
 
 If :attr:`vec1` is a vector of size `n` and :attr:`vec2` is a vector of size `m`,
-then :attr:`mat` must be a matrix of size `n x m`
+then :attr:`mat` must be :ref:`broadcastable <broadcasting-semantics>` with a matrix of size `n x m`
+and :attr:`out` will be a matrix of size `n x m`.
 
 For inputs of type `FloatTensor` or `DoubleTensor`, args :attr:`beta` and :attr:`alpha` must be real numbers, otherwise
 they should be integers
@@ -343,8 +345,8 @@ Args:
 
 Example::
 
-    >>> vec1 = torch.arange(1, 3)
-    >>> vec2 = torch.arange(1, 2)
+    >>> vec1 = torch.arange(1, 4)
+    >>> vec2 = torch.arange(1, 3)
     >>> M = torch.zeros(3, 2)
     >>> torch.addr(M, vec1, vec2)
      1  2
@@ -416,6 +418,8 @@ atan2(input1, input2, out=None) -> Tensor
 Returns a new `Tensor` with the arctangent of the elements of :attr:`input1`
 and :attr:`input2`.
 
+The shapes of :attr:`input1` and :attr:`input2` must be :ref:`broadcastable <broadcasting-semantics>`.
+
 Args:
     input1 (Tensor): the first input `Tensor`
     input2 (Tensor): the second input `Tensor`
@@ -451,7 +455,8 @@ and :attr:`batch2`.
 number of matrices.
 
 If :attr:`batch1` is a `b x n x m` Tensor, :attr:`batch2` is a `b x m x p`
-Tensor, :attr:`out` and :attr:`mat` will be `b x n x p` Tensors.
+Tensor, then :attr:`mat` must be :ref:`broadcastable <broadcasting-semantics>` with a
+`b x n x p` Tensor and :attr:`out` will be a `b x n x p` Tensor.
 
 In other words,
 :math:`res_i = (beta * M_i) + (alpha * batch1_i \times batch2_i)`
@@ -1064,6 +1069,8 @@ dist(input, other, p=2) -> float
 
 Returns the p-norm of (:attr:`input` - :attr:`other`)
 
+The shapes of :attr:`input` and :attr:`other` must be :ref:`broadcastable <broadcasting-semantics>`.
+
 Args:
     input (Tensor): the input `Tensor`
     other (Tensor): the Right-hand-side input `Tensor`
@@ -1142,10 +1149,8 @@ Example::
 .. function:: div(input, other, out=None)
 
 Each element of the Tensor :attr:`input` is divided by each element of the Tensor :attr:`other`.
-The resulting Tensor is returned. The shapes of :attr:`input` and :attr:`other` don't need to match.
-The total number of elements in each Tensor need to be the same.
-
-.. note:: When the shapes do not match, the shape of :attr:`input` is used as the shape for the returned output Tensor
+The resulting Tensor is returned. The shapes of :attr:`input` and :attr:`other` must be
+:ref:`broadcastable <broadcasting-semantics>`.
 
 :math:`out_i = input_i / other_i`
 
@@ -1228,8 +1233,8 @@ eq(input, other, out=None) -> Tensor
 
 Computes element-wise equality
 
-The second argument can be a number or a tensor of the same shape and
-type as the first argument.
+The second argument can be a number or a tensor whose shape is
+:ref:`broadcastable <broadcasting-semantics>` with the first argument.
 
 Args:
     input (Tensor): Tensor to compare
@@ -1337,6 +1342,9 @@ Computes the element-wise remainder of division.
 The dividend and divisor may contain both for integer and floating point
 numbers. The remainder has the same sign as the dividend `tensor`.
 
+When :attr:`divisor` is a Tensor, the shapes of :attr:`input` and :attr:`divisor`
+must be :ref:`broadcastable <broadcasting-semantics>`.
+
 Args:
     input (Tensor): The dividend
     divisor (Tensor or float): The divisor. This may be either a number or a
@@ -1397,9 +1405,15 @@ Gathers values along an axis specified by `dim`.
 
 For a 3-D tensor the output is specified by::
 
-    out[i][j][k] = input[index[i][j][k]][j][k]  # dim=0
-    out[i][j][k] = input[i][index[i][j][k]][k]  # dim=1
-    out[i][j][k] = input[i][j][index[i][j][k]]  # dim=2
+    out[i][j][k] = input[index[i][j][k]][j][k]  # if dim == 0
+    out[i][j][k] = input[i][index[i][j][k]][k]  # if dim == 1
+    out[i][j][k] = input[i][j][index[i][j][k]]  # if dim == 2
+
+If :attr:`input` is an n-dimensional tensor with size
+:math:`(x_0, x_1..., x_{i-1}, x_i, x_{i+1}, ..., x_{n-1})`
+and :attr:`dim` = i, then :attr:`index` must be an n-dimensional tensor with size
+:math:`(x_0, x_1, ..., x_{i-1}, y, x_{i+1}, ..., x_{n-1})` where y >= 1 and
+:attr:`out` will have the same size as :attr:`index`.
 
 Args:
     input (Tensor): The source tensor
@@ -1422,8 +1436,8 @@ ge(input, other, out=None) -> Tensor
 
 Computes `tensor >= other` element-wise.
 
-The second argument can be a number or a tensor of the same shape and
-type as the first argument.
+The second argument can be a number or a tensor whose shape is
+:ref:`broadcastable <broadcasting-semantics>` with the first argument.
 
 Args:
     input (Tensor): Tensor to compare
@@ -1612,8 +1626,8 @@ gt(input, other, out=None) -> Tensor
 
 Computes `tensor > other` element-wise.
 
-The second argument can be a number or a tensor of the same shape and
-type as the first argument.
+The second argument can be a number or a tensor whose shape is
+:ref:`broadcastable <broadcasting-semantics>` with the first argument.
 
 Args:
     input (Tensor): Tensor to compare
@@ -1756,7 +1770,7 @@ Example::
 
 add_docstr(torch._C.kthvalue,
            """
-kthvalue(input, k, dim=None, keepdim=True, out=None) -> (Tensor, LongTensor)
+kthvalue(input, k, dim=None, keepdim=False, out=None) -> (Tensor, LongTensor)
 
 Returns the :attr:`k` th smallest element of the given :attr:`input` Tensor along a given dimension.
 
@@ -1823,8 +1837,8 @@ le(input, other, out=None) -> Tensor
 
 Computes `tensor <= other` element-wise.
 
-The second argument can be a number or a tensor of the same shape and
-type as the first argument.
+The second argument can be a number or a tensor whose shape is
+:ref:`broadcastable <broadcasting-semantics>` with the first argument.
 
 Args:
     input (Tensor): Tensor to compare
@@ -1850,6 +1864,8 @@ Does a linear interpolation of two tensors :attr:`start` and :attr:`end` based
 on a scalar :attr:`weight`: and returns the resulting :attr:`out` Tensor.
 
 :math:`out_i = start_i + weight * (end_i - start_i)`
+
+The shapes of :attr:`start` and :attr:`end` must be :ref:`broadcastable <broadcasting-semantics>`.
 
 Args:
     start (Tensor): the `Tensor` with the starting points
@@ -2046,8 +2062,8 @@ lt(input, other, out=None) -> Tensor
 
 Computes `tensor < other` element-wise.
 
-The second argument can be a number or a tensor of the same shape and
-type as the first argument.
+The second argument can be a number or a tensor whose shape is
+:ref:`broadcastable <broadcasting-semantics>` with the first argument.
 
 Args:
     input (Tensor): Tensor to compare
@@ -2134,7 +2150,7 @@ Example::
     0.4729
 
 
-.. function:: max(input, dim, keepdim=True, max=None, max_indices=None) -> (Tensor, LongTensor)
+.. function:: max(input, dim, keepdim=False, max=None, max_indices=None) -> (Tensor, LongTensor)
 
 Returns the maximum value of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
 The second return value is the index location of each maximum value found (argmax).
@@ -2169,13 +2185,13 @@ Example::
      0.9288
      1.0695
      0.7426
-    [torch.FloatTensor of size 4x1]
+    [torch.FloatTensor of size 4]
     ,
      2
      0
      0
      0
-    [torch.LongTensor of size 4x1]
+    [torch.LongTensor of size 4]
     )
 
 .. function:: max(input, other, out=None) -> Tensor
@@ -2183,10 +2199,11 @@ Example::
 Each element of the Tensor :attr:`input` is compared with the corresponding element of the Tensor :attr:`other`
 and an element-wise `max` is taken.
 
-The shapes of :attr:`input` and :attr:`other` don't need to match.
-The total number of elements in each Tensor need to be the same.
+The shapes of :attr:`input` and :attr:`other` don't need to match,
+but they must be :ref:`broadcastable <broadcasting-semantics>`.
 
-.. note:: When the shapes do not match, the shape of :attr:`input` is used as the shape for the returned output Tensor
+.. note:: When the shapes do not match, the shape of the returned output tensor follows the
+:ref:`broadcasting rules <broadcasting-semantics>`.
 
 :math:`out_i = max(tensor_i, other_i)`
 
@@ -2246,7 +2263,7 @@ Example::
     0.32398951053619385
 
 
-.. function:: mean(input, dim, keepdim=True, out=None) -> Tensor
+.. function:: mean(input, dim, keepdim=False, out=None) -> Tensor
 
 Returns the mean value of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
 
@@ -2278,7 +2295,7 @@ Example::
      0.0997
      0.2464
     -0.2157
-    [torch.FloatTensor of size 4x1]
+    [torch.FloatTensor of size 4]
 
     >>> torch.mean(a, 1, True)
 
@@ -2292,7 +2309,7 @@ Example::
 
 add_docstr(torch._C.median,
            """
-median(input, dim=-1, keepdim=True, values=None, indices=None) -> (Tensor, LongTensor)
+median(input, dim=-1, keepdim=False, values=None, indices=None) -> (Tensor, LongTensor)
 
 Returns the median value of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
 Also returns the index location of the median value as a `LongTensor`.
@@ -2338,13 +2355,13 @@ Example::
      0.1404
      0.0212
     -0.7257
-    [torch.FloatTensor of size 4x1]
+    [torch.FloatTensor of size 4]
     ,
      0
      2
      4
      1
-    [torch.LongTensor of size 4x1]
+    [torch.LongTensor of size 4]
     )
 
 """)
@@ -2370,7 +2387,7 @@ Example::
     -0.22663167119026184
 
 
-.. function:: min(input, dim, keepdim=True, min=None, min_indices=None) -> (Tensor, LongTensor)
+.. function:: min(input, dim, keepdim=False, min=None, min_indices=None) -> (Tensor, LongTensor)
 
 Returns the minimum value of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
 The second return value is the index location of each minimum value found (argmin).
@@ -2405,23 +2422,24 @@ Example::
     0.2073
     2.4507
     0.7666
-    torch.FloatTensor of size 4x1]
+    torch.FloatTensor of size 4]
 
     3
     2
     2
     1
-    torch.LongTensor of size 4x1]
+    torch.LongTensor of size 4]
 
 .. function:: min(input, other, out=None) -> Tensor
 
 Each element of the Tensor :attr:`input` is compared with the corresponding element of the Tensor :attr:`other`
 and an element-wise `min` is taken. The resulting Tensor is returned.
 
-The shapes of :attr:`input` and :attr:`other` don't need to match.
-The total number of elements in each Tensor need to be the same.
+The shapes of :attr:`input` and :attr:`other` don't need to match,
+but they must be :ref:`broadcastable <broadcasting-semantics>`.
 
-.. note:: When the shapes do not match, the shape of :attr:`input` is used as the shape for the returned output Tensor
+.. note:: When the shapes do not match, the shape of the returned output tensor follows the
+:ref:`broadcasting rules <broadcasting-semantics>`.
 
 :math:`out_i = min(tensor_i, other_i)`
 
@@ -2485,7 +2503,7 @@ Example::
 
 add_docstr(torch._C.mode,
            """
-mode(input, dim=-1, keepdim=True, values=None, indices=None) -> (Tensor, LongTensor)
+mode(input, dim=-1, keepdim=False, values=None, indices=None) -> (Tensor, LongTensor)
 
 Returns the mode value of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
 Also returns the index location of the mode value as a `LongTensor`.
@@ -2531,13 +2549,13 @@ Example::
     -0.7646
     -2.0068
     -1.5371
-    [torch.FloatTensor of size 4x1]
+    [torch.FloatTensor of size 4]
     ,
      3
      4
      2
      0
-    [torch.LongTensor of size 4x1]
+    [torch.LongTensor of size 4]
     )
 
 """)
@@ -2579,10 +2597,9 @@ Example::
 .. function:: mul(input, other, out=None)
 
 Each element of the Tensor :attr:`input` is multiplied by each element of the Tensor :attr:`other`.
-The resulting Tensor is returned. The shapes of :attr:`input` and :attr:`other` don't need to match.
-The total number of elements in each Tensor need to be the same.
+The resulting Tensor is returned.
 
-.. note:: When the shapes do not match, the shape of :attr:`input` is used as the shape for the returned output Tensor
+The shapes of :attr:`input` and :attr:`other` must be :ref:`broadcastable <broadcasting-semantics>`.
 
 :math:`out_i = input_i * other_i`
 
@@ -2702,8 +2719,8 @@ ne(input, other, out=None) -> Tensor
 
 Computes `tensor != other` element-wise.
 
-The second argument can be a number or a tensor of the same shape and
-type as the first argument.
+The second argument can be a number or a tensor whose shape is
+:ref:`broadcastable <broadcasting-semantics>` with the first argument.
 
 Args:
     input (Tensor): Tensor to compare
@@ -2815,7 +2832,7 @@ Example::
     1.0338925067372466
 
 
-.. function:: norm(input, p, dim, keepdim=True, out=None) -> Tensor
+.. function:: norm(input, p, dim, keepdim=False, out=None) -> Tensor
 
 Returns the p-norm of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
 
@@ -2848,7 +2865,7 @@ Example::
      0.7888
      0.9077
      0.6026
-    [torch.FloatTensor of size 4x1]
+    [torch.FloatTensor of size 4]
 
     >>> torch.norm(a, 0, 1, True)
 
@@ -3030,6 +3047,9 @@ When :attr:`exponent` is a Tensor, the operation applied is:
 
 :math:`out_i = x_i ^ {exponent_i}`
 
+When :attr:`exponent` is a Tensor, the shapes of :attr:`input`
+and :attr:`exponent` must be :ref:`broadcastable <broadcasting-semantics>`.
+
 Args:
     input (Tensor): the input `Tensor`
     exponent (float or Tensor): the exponent value
@@ -3130,7 +3150,7 @@ Example::
     0.005537458061418483
 
 
-.. function:: prod(input, dim, keepdim=True, out=None) -> Tensor
+.. function:: prod(input, dim, keepdim=False, out=None) -> Tensor
 
 Returns the product of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
 
@@ -3162,7 +3182,7 @@ Example::
      0.0808
      0.6197
      0.1952
-    [torch.FloatTensor of size 4x1]
+    [torch.FloatTensor of size 4]
 
 """)
 
@@ -3390,6 +3410,9 @@ Computes the element-wise remainder of division.
 
 The divisor and dividend may contain both for integer and floating point
 numbers. The remainder has the same sign as the divisor.
+
+When :attr:`divisor` is a Tensor, the shapes of :attr:`input` and :attr:`divisor`
+must be :ref:`broadcastable <broadcasting-semantics>`.
 
 Args:
     input (Tensor): The dividend
@@ -3780,7 +3803,7 @@ Example::
     1.3782334731508061
 
 
-.. function:: std(input, dim, keepdim=True, out=None) -> Tensor
+.. function:: std(input, dim, keepdim=False, out=None) -> Tensor
 
 Returns the standard-deviation of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
 
@@ -3812,7 +3835,7 @@ Example::
      1.1025
      1.0045
      0.6725
-    [torch.FloatTensor of size 4x1]
+    [torch.FloatTensor of size 4]
 
 """)
 
@@ -3837,7 +3860,7 @@ Example::
     0.9969287421554327
 
 
-.. function:: sum(input, dim, keepdim=True, out=None) -> Tensor
+.. function:: sum(input, dim, keepdim=False, out=None) -> Tensor
 
 Returns the sum of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
 
@@ -3869,7 +3892,7 @@ Example::
      0.0698
     -2.4767
      2.2440
-    [torch.FloatTensor of size 4x1]
+    [torch.FloatTensor of size 4]
 
 """)
 
@@ -4407,7 +4430,7 @@ Example::
     1.899527506513334
 
 
-.. function:: var(input, dim, keepdim=True, out=None) -> Tensor
+.. function:: var(input, dim, keepdim=False, out=None) -> Tensor
 
 Returns the variance of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
 
@@ -4439,7 +4462,7 @@ Example::
      0.9509
      0.7548
      0.6949
-    [torch.FloatTensor of size 4x1]
+    [torch.FloatTensor of size 4]
 
 """)
 

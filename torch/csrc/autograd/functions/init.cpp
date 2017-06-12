@@ -17,12 +17,12 @@ struct BatchNormCtor {
     BatchNormParams params;
 
     TupleParser parser(args, 6);
-    parser.parse(params.running_mean);
-    parser.parse(params.running_var);
-    parser.parse(params.training);
-    parser.parse(params.momentum);
-    parser.parse(params.eps);
-    parser.parse(params.cudnn_enabled);
+    parser.parse(params.running_mean, "running_mean");
+    parser.parse(params.running_var, "running_var");
+    parser.parse(params.training, "training");
+    parser.parse(params.momentum, "momentum");
+    parser.parse(params.eps, "eps");
+    parser.parse(params.cudnn_enabled, "cudnn_enabled");
 
     return new BatchNormForward(std::move(params));
   }
@@ -33,14 +33,14 @@ struct ConvCtor {
     ConvParams params;
 
     TupleParser parser(args, 8);
-    parser.parse(params.stride);
-    parser.parse(params.padding);
-    parser.parse(params.dilation);
-    parser.parse(params.transposed);
-    parser.parse(params.output_padding);
-    parser.parse(params.groups);
-    parser.parse(params.benchmark);
-    parser.parse(params.cudnn_enabled);
+    parser.parse(params.stride, "stride");
+    parser.parse(params.padding, "padding");
+    parser.parse(params.dilation, "dilation");
+    parser.parse(params.transposed, "transposed");
+    parser.parse(params.output_padding, "output_padding");
+    parser.parse(params.groups, "groups");
+    parser.parse(params.benchmark, "benchmark");
+    parser.parse(params.cudnn_enabled, "cudnn_enabled");
 
     return new ConvForward(std::move(params));
   }
@@ -51,7 +51,7 @@ struct DelayedErrorCtor {
     std::string msg;
 
     TupleParser parser(args, 1);
-    parser.parse(msg);
+    parser.parse(msg, "msg");
 
     return new DelayedError(msg);
   }
@@ -81,7 +81,7 @@ PyObject* getTupleAttr(PyObject* obj, void* _unused)
   THPCppFunction* self = (THPCppFunction*)obj;
   auto& arr = ((T*)(self->cdata.get()))->*ptr;
   auto num_elems = arr.size();
-  THPObjectPtr py_tuple = PyTuple_New(num_elems);
+  THPObjectPtr py_tuple(PyTuple_New(num_elems));
   if (!py_tuple) return NULL;
   for (size_t i = 0; i < num_elems; ++i) {
     PyTuple_SET_ITEM(py_tuple.get(), i, Convert(arr[i]));
@@ -203,7 +203,7 @@ static struct PyGetSetDef accumulate_grad_properties[] = {
 
 bool THPAutograd_initFunctions(PyObject* _unused)
 {
-  THPObjectPtr module = PyModule_New("torch._C._functions");
+  THPObjectPtr module(PyModule_New("torch._C._functions"));
   if (!module) return false;
 
   static PyTypeObject BatchNormClass, BatchNormBackwardClass;
@@ -233,7 +233,7 @@ bool THPAutograd_initFunctions(PyObject* _unused)
   static PyTypeObject IdentityClass;
   addClass<Identity, NoCtor>(module, IdentityClass, "Identity");
 
-  THPObjectPtr parent = PyImport_ImportModule("torch._C");
+  THPObjectPtr parent(PyImport_ImportModule("torch._C"));
   if (!parent) return false;
   PyModule_AddObject(parent.get(), "_functions", module.release());
   return true;

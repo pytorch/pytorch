@@ -1,5 +1,4 @@
 #include "../base/data_channels/DataChannelGloo.hpp"
-#include "../base/ChannelEnvVars.hpp"
 #include "TestUtils.hpp"
 
 #include <THPP/tensors/THTensor.hpp>
@@ -44,10 +43,10 @@ void run_all_tests(std::shared_ptr<thd::DataChannel> data_channel, int workers) 
 
 void init_gloo_master(int workers) {
   g_mutex.lock();
-  setenv(thd::WORLD_SIZE_ENV, std::to_string((workers + 1)).data(), 1);
-  setenv(thd::RANK_ENV, "0", 1);
-  setenv(thd::MASTER_PORT_ENV, std::to_string(MASTER_PORT).data(), 1);
-  auto masterChannel = std::make_shared<thd::DataChannelGloo>(); // reads all env variable
+  setenv(WORLD_SIZE_ENV, std::to_string((workers + 1)).data(), 1);
+  setenv(RANK_ENV, "0", 1);
+  setenv(MASTER_PORT_ENV, std::to_string(MASTER_PORT).data(), 1);
+  auto masterChannel = std::make_shared<thd::DataChannelGloo>(getInitConfig("env://")); // reads all env variable
   g_mutex.unlock();
 
   assert(masterChannel->init());
@@ -56,9 +55,9 @@ void init_gloo_master(int workers) {
 
 void init_gloo_worker(unsigned int id, int workers) {
   g_mutex.lock();
-  setenv(thd::RANK_ENV, std::to_string(id).data(), 1);
-  setenv(thd::MASTER_ADDR_ENV, std::string("127.0.0.1:" + std::to_string(MASTER_PORT)).data(), 1);
-  auto worker_channel = std::make_shared<thd::DataChannelGloo>(); // reads all env variable
+  setenv(RANK_ENV, std::to_string(id).data(), 1);
+  setenv(MASTER_ADDR_ENV, std::string("127.0.0.1:" + std::to_string(MASTER_PORT)).data(), 1);
+  auto worker_channel = std::make_shared<thd::DataChannelGloo>(getInitConfig("env://")); // reads all env variable
   g_mutex.unlock();
 
   assert(worker_channel->init());
@@ -67,7 +66,7 @@ void init_gloo_worker(unsigned int id, int workers) {
 
 
 int main(void)
-{ 
+{
   for (auto workers : WORKERS_NUM) {
     std::cout << "Gloo (workers: " << workers << "):" << std::endl;
     // start gloo master
@@ -82,7 +81,7 @@ int main(void)
     for (auto& worker : g_all_workers) {
       worker.join();
     }
-    
+
     gloo_master_thread.join();
     g_all_workers.clear();
 

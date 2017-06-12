@@ -13,19 +13,37 @@
 
 namespace thd {
 
-DataChannel* DataChannel::newChannel(THDChannelType type) {
-  if (type == THDChannelTCP)
-    return new DataChannelTCP();
+#define GET_CONFIG getInitConfig(init_method, world_size, group_name, rank)
+DataChannel* DataChannel::newChannel(THDChannelType type, std::string init_method,
+                                     int world_size, std::string group_name,
+                                     int rank) {
+  switch (type) {
+    case THDChannelTCP:
+      return new DataChannelTCP(GET_CONFIG);
+
+    case THDChannelMPI:
 #ifdef WITH_MPI
-  else if (type == THDChannelMPI)
-    return new DataChannelMPI();
+      return new DataChannelMPI();
 #endif // WITH_MPI
+      throw std::runtime_error(
+        "the MPI backend is not available; "
+        "try to recompile the THD package with MPI support"
+      );
+
+    case THDChannelGloo:
 #ifdef WITH_GLOO
-  else if (type == THDChannelGloo)
-    return new DataChannelGloo();
+      return new DataChannelGloo(GET_CONFIG);
 #endif // WITH_GLOO
-  throw std::runtime_error("unsupported data channel type");
+      throw std::runtime_error(
+        "the Gloo backend is not available; "
+        "try to recompile the THD package with Gloo support"
+      );
+
+    default:
+      throw std::runtime_error("unsupported data channel type");
+  }
 }
+#undef GET_CONFIG
 
 
 DataChannel::Group::Group()

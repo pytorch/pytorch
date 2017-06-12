@@ -94,7 +94,7 @@ def small_3d_positive(t):
 
 
 def small_3d_unique(t):
-    return t(S, S, S).copy_(torch.arange(1, S * S * S + 1))
+    return t(S, S, S).copy_(torch.arange(1, S * S * S + 1).view(S, S, S))
 
 
 def small_1d_lapack(t):
@@ -601,6 +601,17 @@ class TestCuda(TestCase):
             cuda_type = get_gpu_type(t)
             self.assertEqual(cuda_type(seq), reference)
 
+    def test_torch_manual_seed_seeds_cuda_devices(self):
+        with freeze_rng_state():
+            x = torch.zeros(4, 4).float().cuda()
+            torch.manual_seed(2)
+            self.assertEqual(torch.cuda.initial_seed(), 2)
+            x.uniform_()
+            torch.manual_seed(2)
+            y = x.clone().uniform_()
+            self.assertEqual(x, y)
+            self.assertEqual(torch.cuda.initial_seed(), 2)
+
     def test_manual_seed(self):
         with freeze_rng_state():
             x = torch.zeros(4, 4).float().cuda()
@@ -829,6 +840,22 @@ class TestCuda(TestCase):
         self.assertEqual(gpu_tensor1[0], 1)
         self.assertEqual(gpu_tensor0[0], 2)
 
+    @staticmethod
+    def _select_broadcastable_dims(dims_full=None):
+        return TestTorch._select_broadcastable_dims(dims_full)
+
+    def test_broadcast(self):
+        TestTorch._test_broadcast(self, lambda t: t.cuda())
+
+    def test_broadcast_fallback(self):
+        TestTorch._test_broadcast_fallback(self, lambda t: t.cuda())
+
+    def test_broadcast_fused_matmul(self):
+        TestTorch._test_broadcast_fused_matmul(self, lambda t: t.cuda())
+
+    def test_broadcast_batched_matmul(self):
+        TestTorch._test_broadcast_batched_matmul(self, lambda t: t.cuda())
+
     def test_btrifact(self):
         TestTorch._test_btrifact(self, lambda t: t.cuda())
 
@@ -839,10 +866,19 @@ class TestCuda(TestCase):
         TestTorch._test_gather(self, lambda t: t.cuda(), False)
 
     def test_tensor_scatter(self):
-        TestTorch._test_scatter(self, lambda t: t.cuda(), False)
+        TestTorch._test_scatter_base(self, lambda t: t.cuda(), 'scatter_', test_bounds=False)
+
+    def test_tensor_scatterAdd(self):
+        TestTorch._test_scatter_base(self, lambda t: t.cuda(), 'scatter_add_', test_bounds=False)
 
     def test_tensor_scatterFill(self):
-        TestTorch._test_scatterFill(self, lambda t: t.cuda(), False)
+        TestTorch._test_scatter_base(self, lambda t: t.cuda(), 'scatter_', True, test_bounds=False)
+
+    def test_nvtx(self):
+        # Just making sure we can see the symbols
+        torch.cuda.nvtx.range_push("foo")
+        torch.cuda.nvtx.mark("bar")
+        torch.cuda.nvtx.range_pop()
 
 
 if HAS_CUDA:

@@ -103,7 +103,10 @@ class NLLLoss(_WeightedLoss):
         >>> output = loss(m(input), target)
         >>> output.backward()
     """
-    pass
+    def forward(self, input, target):
+        _assert_no_grad(target)
+        return F.nll_loss(input, target,
+                          self.weight, self.size_average)
 
 
 class NLLLoss2d(_WeightedLoss):
