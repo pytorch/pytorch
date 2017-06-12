@@ -45,7 +45,6 @@ static PyObject * THPTensor_(storage)(THPTensor *self, PyObject *args)
 [[
   name: nDimension
   python_name: ndimension
-  const: True
   cpu_half: True
   auto_gpu: False
   return: long
