@@ -654,16 +654,30 @@ class IR(object):
         sum_op_input = []
         cnt = 0
 
+        assert len(generators) > 1
+
+        first_grad_op = True
         for generator in generators:
             grad_op, idx, g = generator
             assert(type(g) is not GradientSlice)
             if grad_op:
-                out, cnt = self._DisambiguateGradOpOutput(grad_op, idx, cnt)
+                if first_grad_op:
+                    first_grad_op = False
+                    out = grad_op.output[idx]
+                else:
+                    out, cnt = self._DisambiguateGradOpOutput(grad_op, idx, cnt)
                 sum_op_input.append(out)
             else:
                 self._CheckSumOpsConflict(out_base_name, g)
                 sum_op_input.append(str(g))
 
+        if out_base_name in sum_op_input:
+            # Sum inplace mode works only for the first input
+            # So we do a swap
+            idx = sum_op_input.index(out_base_name)
+            sum_op_input[0], sum_op_input[idx] = (
+                sum_op_input[idx], sum_op_input[0]
+            )
         sum_ops = [CreateOperator(
             "Sum",
             [BlobReference(x) for x in sum_op_input],
