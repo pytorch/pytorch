@@ -169,7 +169,9 @@ THSTensor *THSTensor_(newWithTensorAndSize)(THLongTensor *indices, THTensor *val
         "number of dimensions must be nDimI + nDimV");
     THSTensor_(rawResize)(self, nDimI, nDimV, THLongStorage_data(sizes));
   }
-  THSTensor_(_set)(self, indices, values);
+  // NB: by default, we do NOT clone indices/values into the sparse tensor.
+  // Efficient API by default!
+  THSTensor_(_move)(self, THLongTensor_newWithTensor(indices), THTensor_(newWithTensor)(values));
 
   return self;
 }
