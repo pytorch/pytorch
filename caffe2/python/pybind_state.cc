@@ -324,7 +324,7 @@ void addObjectMethods(py::module& m) {
           })
       .def(
           "deserialize",
-          [](Blob* blob, const string& serialized) {
+          [](Blob* blob, py::bytes serialized) {
             blob->Deserialize(serialized);
           })
       .def(
@@ -479,7 +479,7 @@ void addObjectMethods(py::module& m) {
           })
       .def(
           "_run_net",
-          [](Workspace* self, const string& def) {
+          [](Workspace* self, py::bytes def) {
             caffe2::NetDef proto;
             CAFFE_ENFORCE(ParseProtobufFromLargeString(def, &proto));
             py::gil_scoped_release g;
@@ -487,7 +487,7 @@ void addObjectMethods(py::module& m) {
           })
       .def(
           "_run_operator",
-          [](Workspace* self, const string& def) {
+          [](Workspace* self, py::bytes def) {
             caffe2::OperatorDef proto;
             CAFFE_ENFORCE(ParseProtobufFromLargeString(def, &proto));
             py::gil_scoped_release g;
@@ -495,7 +495,7 @@ void addObjectMethods(py::module& m) {
           })
       .def(
           "_run_plan",
-          [](Workspace* self, const string& def) {
+          [](Workspace* self, py::bytes def) {
             caffe2::PlanDef proto;
             CAFFE_ENFORCE(ParseProtobufFromLargeString(def, &proto));
             py::gil_scoped_release g;
@@ -520,7 +520,7 @@ void addObjectMethods(py::module& m) {
 
   m.def(
       "get_gradient_defs",
-      [](const string& op_def, std::vector<GradientWrapper> output_gradients) {
+      [](py::bytes op_def, std::vector<GradientWrapper> output_gradients) {
         OperatorDef def;
         CAFFE_ENFORCE(ParseProtobufFromLargeString(op_def, &def));
         CAFFE_ENFORCE(caffe2::GradientRegistry()->Has(def.type()));
@@ -590,9 +590,7 @@ void addObjectMethods(py::module& m) {
   py::class_<Predictor>(m, "Predictor")
       .def(
           "__init__",
-          [](Predictor& instance,
-             const string& init_net,
-             const string& predict_net) {
+          [](Predictor& instance, py::bytes init_net, py::bytes predict_net) {
             CAFFE_ENFORCE(gWorkspace);
             NetDef init_net_, predict_net_;
             CAFFE_ENFORCE(ParseProtobufFromLargeString(init_net, &init_net_));
