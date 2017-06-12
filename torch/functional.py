@@ -4,7 +4,7 @@ from operator import mul
 from functools import reduce
 
 __all__ = [
-    'split', 'chunk', 'stack', 'btriunpack', 'matmul',
+    'split', 'chunk', 'stack', 'unbind', 'btriunpack', 'matmul',
 ]
 
 def split(tensor, split_size, dim=0):
