@@ -18,7 +18,7 @@ from .instancenorm import InstanceNorm1d, InstanceNorm2d, InstanceNorm3d
 from .dropout import Dropout, Dropout2d, Dropout3d, AlphaDropout
 from .padding import ReflectionPad2d, ReplicationPad2d, ReplicationPad3d, ZeroPad2d, ConstantPad2d
 from .normalization import CrossMapLRN2d
-from .sparse import Embedding
+from .sparse import Embedding, EmbeddingSum
 from .rnn import RNNBase, RNN, LSTM, GRU, \
     RNNCell, LSTMCell, GRUCell
 from .pixelshuffle import PixelShuffle
@@ -40,7 +40,7 @@ __all__ = [
     'LPPool2d', 'BatchNorm1d', 'BatchNorm2d', 'BatchNorm3d', 'InstanceNorm1d', 'InstanceNorm2d',
     'InstanceNorm3d', 'Dropout', 'Dropout2d', 'Dropout3d', 'AlphaDropout', 'ReflectionPad2d',
     'ReplicationPad2d', 'ReplicationPad3d', 'CrossMapLRN2d',
-    'Embedding', 'RNNBase', 'RNN', 'LSTM', 'GRU', 'RNNCell', 'LSTMCell', 'GRUCell',
+    'Embedding', 'EmbeddingSum', 'RNNBase', 'RNN', 'LSTM', 'GRU', 'RNNCell', 'LSTMCell', 'GRUCell',
     'PixelShuffle', 'Upsample', 'UpsamplingNearest2d', 'UpsamplingBilinear2d', 'PairwiseDistance',
     'AdaptiveMaxPool1d', 'AdaptiveMaxPool2d', 'AdaptiveAvgPool1d', 'AdaptiveAvgPool2d',
     'TripletMarginLoss', 'ZeroPad2d', 'ConstantPad2d', 'Bilinear', 'CosineSimilarity',

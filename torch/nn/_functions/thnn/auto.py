@@ -220,6 +220,7 @@ def _generate_function_classes(scope_dict):
         'TemporalMaxPooling',
         'BatchNormalization',
         'LookupTable',
+        'LookupTableSum',
         'PReLU',
         'RReLU',
         'Threshold',

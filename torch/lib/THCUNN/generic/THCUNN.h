@@ -250,6 +250,26 @@ TH_API void THNN_(LookupTable_renorm)(
                   accreal maxNorm,
                   accreal normType);
 
+TH_API void THNN_(LookupTableSum_updateOutput)(
+           THCState *state,
+           THCIndexTensor *input,
+           THCIndexTensor *offsets,
+           THCTensor *weight,
+           THCTensor *output,
+           THCIndexTensor *offset2bag);
+
+TH_API void THNN_(LookupTableSum_accGradParameters)(
+           THCState *state,
+           THCIndexTensor *input,
+           THCTensor *gradOutput,
+           THCTensor *gradWeight,
+           THCIndexTensor *offset2bag,
+           THCIndexTensor *count,
+           THCIndexTensor *sortedIndices,
+           THCIndexTensor *origIndices,
+           bool scaleGradByFreq,
+           accreal scale_);
+
 TH_API void THNN_(L1Cost_updateOutput)(
                   THCState *state,
                   THCTensor *input,

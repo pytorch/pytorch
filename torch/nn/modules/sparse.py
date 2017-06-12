@@ -108,5 +108,75 @@ class Embedding(Module):
         s += ')'
         return s.format(name=self.__class__.__name__, **self.__dict__)
 
+class EmbeddingSum(Module):
+    r"""Computes sums of 'bags' of embeddings, without instantiating the
+    intermediate embeddings.
+
+    For bags of constant length, nn.EmbeddingSum is equivalent to nn.Embedding
+    followed by Sum(1), but it is more time- and memory-efficient on GPU.
+
+    Args:
+        num_embeddings (int): size of the dictionary of embeddings
+        embedding_dim (int): the size of each embedding vector
+        padding_idx (int, optional): If given, pads the output with zeros whenever it encounters the index.
+        max_norm (float, optional): If given, will renormalize the embeddings to always have a norm lesser than this
+        norm_type (float, optional): The p of the p-norm to compute for the max_norm option
+        scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the frequency of
+                                                the words in the dictionary.
+
+    Attributes:
+        weight (Tensor): the learnable weights of the module of shape (num_embeddings, embedding_dim)
+
+    Shape:
+        - Input: LongTensor `N`, N = number of embeddings to extract
+        - Offsets: LongTensor `B`, B = number of bags. The values are the offsets in `input` for each bag, i.e. the cumsum of lengths.
+        - Output: `(B, embedding_dim)`
+
+    Examples:
+
+    >>> # an Embedding module containing 10 tensors of size 3
+    >>> embedding_sum = nn.EmbeddingSum(10, 3)
+    >>> # a batch of 2 samples of 4 indices each
+    >>> input = Variable(torch.LongTensor([1,2,4,5,4,3,2,9]))
+    >>> offsets = Variable(torch.LongTensor([0,4]))
+    >>> embedding_sum(input, offsets)
+
+    Variable containing:
+    -0.7296 -4.6926  0.3295
+    -0.5186 -0.5631 -0.2792
+    [torch.FloatTensor of size 2x3]
+    """
+
+    def __init__(self, num_embeddings, embedding_dim,
+                 max_norm=None, norm_type=2, scale_grad_by_freq=False):
+        super(EmbeddingSum, self).__init__()
+        self.num_embeddings = num_embeddings
+        self.embedding_dim = embedding_dim
+        self.max_norm = max_norm
+        self.norm_type = norm_type
+        self.scale_grad_by_freq = scale_grad_by_freq
+        self.weight = Parameter(torch.Tensor(num_embeddings, embedding_dim))
+
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        self.weight.data.normal_(0, 1)
+
+    def forward(self, input, offsets):
+        return self._backend.EmbeddingSum(
+            self.max_norm, self.norm_type,
+            self.scale_grad_by_freq
+        )(input, offsets, self.weight)
+
+    def __repr__(self):
+        s = '{name}({num_embeddings}, {embedding_dim}'
+        if self.max_norm is not None:
+            s += ', max_norm={max_norm}'
+        if self.norm_type != 2:
+            s += ', norm_type={norm_type}'
+        if self.scale_grad_by_freq is not False:
+            s += ', scale_grad_by_freq={scale_grad_by_freq}'
+        s += ')'
+        return s.format(name=self.__class__.__name__, **self.__dict__)
 
 # TODO: SparseLinear
