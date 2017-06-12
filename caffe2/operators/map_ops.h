@@ -39,6 +39,11 @@ struct MapTypeTraits {
   }
 };
 
+using MapType64To64 = MapTypeTraits<int64_t, int64_t>::MapType;
+using MapType64To32 = MapTypeTraits<int64_t, int32_t>::MapType;
+using MapType32To32 = MapTypeTraits<int32_t, int32_t>::MapType;
+using MapType32To64 = MapTypeTraits<int32_t, int64_t>::MapType;
+
 template <class Context>
 class KeyValueToMapOp final : public Operator<Context> {
  public:
@@ -79,13 +84,6 @@ class KeyValueToMapOp final : public Operator<Context> {
     return true;
   }
 
-  bool DoRunWithOtherType() {
-    CAFFE_THROW(
-        "KeyValueToMap is not implemented on key tensor of type ",
-        Input(KEYS).meta().name(),
-        "Consider adding it a type in the list DispatchHelper");
-  }
-
   template <typename KEY_T>
   bool DoRunWithOtherType2() {
     CAFFE_THROW(
@@ -101,11 +99,6 @@ class KeyValueToMapOp final : public Operator<Context> {
 template <class Context>
 class MapToKeyValueOp final : public Operator<Context> {
  public:
-  using MapType64To64 = MapTypeTraits<int64_t, int64_t>::MapType;
-  using MapType64To32 = MapTypeTraits<int64_t, int32_t>::MapType;
-  using MapType32To32 = MapTypeTraits<int32_t, int32_t>::MapType;
-  using MapType32To64 = MapTypeTraits<int32_t, int64_t>::MapType;
-
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   MapToKeyValueOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws) {}
