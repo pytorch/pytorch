@@ -139,6 +139,15 @@ class TestSparse(TestCase):
         x.to_dense()
         self.assertEqual(res, x.to_dense())
 
+    def test_shared(self):
+        i = self.IndexTensor([[2]])
+        v = self.ValueTensor([5])
+        x = self.SparseTensor(i, v, torch.Size([3]))
+        v[0] = 6
+        self.assertEqual(self.ValueTensor([0, 0, 6]), x.to_dense())
+        i[0][0] = 0
+        self.assertEqual(self.ValueTensor([6, 0, 0]), x.to_dense())
+
     def test_to_dense_hybrid(self):
         i = self.IndexTensor([
             [0, 1, 2, 2],
