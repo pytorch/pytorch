@@ -26,11 +26,11 @@ ${return_type} ${Type}::${api_name}(${formals}) {
 """)
 # 4. add non-virtual declaration to Tensor.h
 TENSOR_METHOD_DECLARATION = CodeTemplate("""\
-${return_type} ${api_name}(${method_formals}) ${const_mark};
+${return_type} ${api_name}(${method_formals})${const_mark};
 """)
 # 5. add non-virtual declaration to Tensor.cpp
 TENSOR_METHOD_DEFINITION = CodeTemplate("""\
-inline ${return_type} Tensor::${api_name}(${method_formals}) ${const_mark} {
+inline ${return_type} Tensor::${api_name}(${method_formals})${const_mark} {
     return type().${api_name}(${method_actuals});
 }
 """)
@@ -199,7 +199,10 @@ def create_generic(top_env, declarations):
         option['method_actuals'] = [
             f['name'] if f['name'] != 'self' else '*this' for f in formals]
         option['return_type'] = format_return_type(option)
-        option['const_mark'] = 'const' if option.get('const') else ''
+
+        is_in_place = re.search('[^_]_$', option['api_name'])
+        option['const_mark'] = '' if is_in_place else ' const'
+
         env = nested_dict(option, top_env)
         top_env['type_method_declarations'].append(
             TYPE_METHOD_DECLARATION.substitute(env))
