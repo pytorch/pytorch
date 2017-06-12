@@ -3,6 +3,9 @@ from ._utils import _range
 from operator import mul
 from functools import reduce
 
+__all__ = [
+    'split', 'chunk', 'stack', 'btriunpack', 'matmul',
+]
 
 def split(tensor, split_size, dim=0):
     """Splits the tensor into equally sized chunks (if possible).
