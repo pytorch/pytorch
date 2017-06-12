@@ -273,7 +273,7 @@ class OpSchema {
       };
   CostInferenceFunctionType cost_inference_function_ =
       [](const OperatorDef& def, const vector<TensorShape>&) {
-        LOG(FATAL) << "No cost inference function registered.";
+        CAFFE_THROW("No cost inference function registered.");
         return Cost();
       };
   DeviceInferenceFunctionType device_inference_function_ =
