@@ -59,6 +59,8 @@ static THTensor* THPTensor_(_new)()
 static THTensor* THPTensor_(_newWithSize)(THLongStorage *size)
 {
   THTensorPtr tensor(THTensor_(newWithSize)(LIBRARY_STATE size, NULL));
+  // Ensure that PyTorch's "storage is not NULL" invariant is upheld
+  // See Note [Storage is not NULL]
   if (!tensor->storage) {
     tensor->storage = THStorage_(new)(LIBRARY_STATE_NOARGS);
   }

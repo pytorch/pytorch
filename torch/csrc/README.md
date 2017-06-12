@@ -1,4 +1,4 @@
-## csrc
+# csrc
 
 The csrc directory contains all of the code concerned with integration
 with Python.  This is in contrast to lib, which contains the Torch
@@ -11,6 +11,21 @@ important gotchas:
 
 * DO NOT forget to take out the GIL with `AutoGil` before calling Python
   API or bringing a `THPObjectPtr` into scope.
+
+## Notes
+
+### Note [Storage is not NULL]
+
+Historically, Torch supported NULL storage, as a minor optimization to
+avoid having to allocate a storage object when it would be empty.
+However, this is actually a confusing special case to deal with, so
+by-in-large, PyTorch assumes that, in fact, storage is never NULL.
+
+One important case where this assumption is important is when tracking
+the CUDA device a tensor is stored in: this information is stored
+solely in the storage, so if a storage is NULL, we lose this information.
+
+## Files
 
 ### `Exceptions.h`
 
