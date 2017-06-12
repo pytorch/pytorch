@@ -444,19 +444,12 @@ class TestInferDevice(test_util.TestCase):
             net, blob_to_device
         )
         op = new_net._net.op[-1]
-        ref_str = """
-input: "data_cuda_1"
-input: "fc_w_cuda_1"
-input: "fc_b_cuda_1"
-output: "fc1"
-name: ""
-type: "FC"
-device_option {
-  device_type: 1
-  cuda_gpu_id: 1
-}
-"""
-        self.assertEqual(str(op).strip(), ref_str.strip())
+        self.assertEqual(op.type, "FC")
+        self.assertEqual(op.input[0], "data_cuda_1")
+        self.assertEqual(op.input[1], "fc_w_cuda_1")
+        self.assertEqual(op.input[2], "fc_b_cuda_1")
+        self.assertEqual(op.device_option.device_type, 1)
+        self.assertEqual(op.device_option.cuda_gpu_id, 1)
         self.assertEqual(new_net._net.op[-2].type, "CopyCPUToGPU")
         self.assertEqual(new_net._net.op[0].type, "CopyCPUToGPU")
         self.assertNotEqual(blob_to_device["fc_w"], device_option)
@@ -477,8 +470,25 @@ device_option {
         nets, _ = core.InjectDeviceCopiesAmongNets(
             [init_net, net], blob_to_device_init=data_remap
         )
-        print(nets[1].Proto())
-        ref_str = """
+        op = nets[1]._net.op[0]
+        self.assertEqual(op.type, "CopyCPUToGPU")
+        self.assertEqual(op.device_option.device_type, 1)
+        self.assertEqual(op.device_option.cuda_gpu_id, 1)
+        self.assertEqual(op.output[0], "fc_w_cuda_1")
+        op = nets[1]._net.op[1]
+        self.assertEqual(op.type, "CopyCPUToGPU")
+        self.assertEqual(op.device_option.device_type, 1)
+        self.assertEqual(op.device_option.cuda_gpu_id, 1)
+        self.assertEqual(op.output[0], "fc_b_cuda_1")
+        op = nets[1]._net.op[2]
+        self.assertEqual(op.type, "FC")
+        self.assertEqual(op.input[0], "data")
+        self.assertEqual(op.input[1], "fc_w_cuda_1")
+        self.assertEqual(op.input[2], "fc_b_cuda_1")
+        self.assertEqual(op.device_option.device_type, 1)
+        self.assertEqual(op.device_option.cuda_gpu_id, 1)
+        """
+For reference, net.Proto() should be like:
 name: ""
 op {
   input: "fc_w"
@@ -516,8 +526,6 @@ external_input: "data"
 external_input: "fc_w"
 external_input: "fc_b"
 """
-        nets[1].Proto().name = ''  # Ignore the name
-        self.assertEqual(str(nets[1].Proto()).strip(), ref_str.strip())
 
     def test_cross_nets_no_change(self):
         net = core.Net("test")
@@ -535,7 +543,15 @@ external_input: "fc_b"
         nets = core.InjectDeviceCopiesAmongNetsWithoutB2D(
             [init_net, net], blob_to_device_init=data_remap
         )
-        ref_str = """
+        op = nets[1]._net.op[0]
+        self.assertEqual(op.type, "FC")
+        self.assertEqual(op.input[0], "data")
+        self.assertEqual(op.input[1], "fc_w")
+        self.assertEqual(op.input[2], "fc_b")
+        self.assertEqual(op.device_option.device_type, 1)
+        self.assertEqual(op.device_option.cuda_gpu_id, 1)
+        """
+For reference, net.Proto() should be like:
 name: ""
 op {
   input: "data"
@@ -553,8 +569,6 @@ external_input: "data"
 external_input: "fc_w"
 external_input: "fc_b"
 """
-        nets[1].Proto().name = ''  # Ignore the name
-        self.assertEqual(str(nets[1].Proto()).strip(), ref_str.strip())
 
     def test_inject_copy_multi_use(self):
         net = core.Net("test")
@@ -576,7 +590,49 @@ external_input: "fc_b"
             net.Relu("data", "relu6")
 
         new_net, _ = core.InjectCrossDeviceCopies(net)
-        ref_str = """
+        op = new_net._net.op[0]
+        self.assertEqual(op.type, "CopyCPUToGPU")
+        self.assertEqual(op.device_option.device_type, 1)
+        self.assertEqual(op.device_option.cuda_gpu_id, 1)
+        self.assertEqual(op.output[0], "data_cuda_1")
+        op = new_net._net.op[1]
+        self.assertEqual(op.type, "Relu")
+        self.assertEqual(op.device_option.device_type, 1)
+        self.assertEqual(op.device_option.cuda_gpu_id, 1)
+        self.assertEqual(op.output[0], "relu1")
+        op = new_net._net.op[2]
+        self.assertEqual(op.type, "Relu")
+        self.assertEqual(op.device_option.device_type, 0)
+        self.assertEqual(op.output[0], "relu2")
+        op = new_net._net.op[3]
+        self.assertEqual(op.type, "Relu")
+        self.assertEqual(op.device_option.device_type, 1)
+        self.assertEqual(op.device_option.cuda_gpu_id, 1)
+        self.assertEqual(op.input[0], "data_cuda_1")
+        self.assertEqual(op.output[0], "relu3")
+        op = new_net._net.op[4]
+        self.assertEqual(op.type, "Relu")
+        self.assertEqual(op.device_option.device_type, 0)
+        self.assertEqual(op.output[0], "relu4")
+        op = new_net._net.op[5]
+        self.assertEqual(op.type, "CopyCPUToGPU")
+        self.assertEqual(op.device_option.device_type, 1)
+        self.assertEqual(op.device_option.cuda_gpu_id, 0)
+        self.assertEqual(op.output[0], "data_cuda_0")
+        op = new_net._net.op[6]
+        self.assertEqual(op.type, "Relu")
+        self.assertEqual(op.device_option.device_type, 1)
+        self.assertEqual(op.device_option.cuda_gpu_id, 0)
+        self.assertEqual(op.input[0], "data_cuda_0")
+        self.assertEqual(op.output[0], "relu5")
+        op = new_net._net.op[7]
+        self.assertEqual(op.type, "Relu")
+        self.assertEqual(op.device_option.device_type, 1)
+        self.assertEqual(op.device_option.cuda_gpu_id, 1)
+        self.assertEqual(op.input[0], "data_cuda_1")
+        self.assertEqual(op.output[0], "relu6")
+        """
+For reference, net.Proto() should be like:
 name: ""
 op {
   input: "data"
@@ -652,8 +708,6 @@ op {
 }
 external_input: "data"
 """
-        new_net.Proto().name = ''  # Ignore the name
-        self.assertEqual(str(new_net.Proto()).strip(), ref_str.strip())
 
 
 if __name__ == '__main__':
