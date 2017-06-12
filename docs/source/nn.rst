@@ -434,6 +434,12 @@ Sparse layers
 .. autoclass:: Embedding
     :members:
 
+:hidden:`EmbeddingBag`
+~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: EmbeddingBag
+    :members:
+
 Distance functions
 ----------------------------------
 
