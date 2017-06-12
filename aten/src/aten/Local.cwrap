@@ -2,6 +2,7 @@
   name: size
   return: long
   cpu_half: True
+  const: True
   arguments:
     - THTensor* self
     - long dim
@@ -11,6 +12,7 @@
   name: stride
   return: long
   cpu_half: True
+  const: True
   arguments:
     - THTensor* self
     - long dim

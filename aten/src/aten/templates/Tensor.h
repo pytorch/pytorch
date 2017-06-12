@@ -6,25 +6,6 @@
 
 namespace tlib {
 class Type;
-class Tensor;
-
-// This allows non-const l-value and r-value references to be passed to tensor arguments:
-// void foo(TensorRef t) {} <-- pass a tensor by reference.
-// because this is a pass by reference it avoids ref-counting costs for arguments
-// which we know will not be destroyed.
-// This is equivalent to const Tensor &, except that it allows non-const Tensors as well
-class TensorRef {
-public:
-  TensorRef(Tensor && t)
-  : tensor(t) {}
-  TensorRef(Tensor & t)
-  : tensor(t) {}
-  Tensor & operator*() { return tensor; }
-  Tensor * operator->() { return &tensor; }
-  operator Tensor& () { return tensor; }
-private:
-  Tensor & tensor;
-};
 
 struct Tensor {
 
