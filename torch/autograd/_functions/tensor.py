@@ -674,7 +674,7 @@ class Cumprod(Function):
 
         ones_size = list(input.size())
         ones_size[self.dim] = 1
-        ones = input.new().resize_(ones_size).fill_(1)
+        ones = input.new([1]).expand(ones_size)
         grad_input = grad_output.new(input.size()).zero_()
         for k in range(dim_size):
             if k == 0:
