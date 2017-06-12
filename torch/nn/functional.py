@@ -547,6 +547,22 @@ def nll_loss(input, target, weight=None, size_average=True):
     return f(input, target)
 
 
+def poisson_nll_loss(log_input, target, size_average=True):
+    r"""Poisson negative log likelihood loss.
+
+    Drops :math:`log(target!)` term. See :class:`~torch.nn.PoissonNLLLoss` for details.
+
+    Args:
+        log_input: :math:`log(input)`
+        target: :math:`target \sim Pois(input)`
+    """
+    loss = torch.exp(log_input) - target * log_input
+    if size_average:
+        return torch.mean(loss)
+    else:
+        return torch.sum(loss)
+
+
 def kl_div(input, target, size_average=True):
     r"""The `Kullback-Leibler divergence`_ Loss.
 

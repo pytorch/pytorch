@@ -136,6 +136,37 @@ class NLLLoss2d(_WeightedLoss):
     pass
 
 
+class PoissonNLLLoss(_Loss):
+    r"""Negative log likelihood loss with Poisson distribution of target.
+
+    The loss can be described as::
+
+        target ~ Pois(input)
+        loss_(input, target) = input - target * log(input) + log(target!)
+
+    The last term does not influence optimisation, so it can be omitted. Also
+    the loss accepts log input to avoid cases of application log to
+    non-positive numbers. The actual loss is::
+
+        loss(log_input) = exp(log_input) - target * log_input
+
+    Args:
+        size_average (bool, optional): By default, the losses are averaged over observations for each minibatch.
+                                       However, if the field size_average is set to False,
+                                       the losses are instead summed for each minibatch.
+
+    Examples::
+        >>> loss = nn.PoissonNLLLoss()
+        >>> log_input = autograd.Variable(torch.randn(5, 2), requires_grad=True)
+        >>> target = autograd.Variable(torch.randn(5, 2))
+        >>> output = loss(log_input, target)
+        >>> output.backward()
+    """
+    def forward(self, log_input, target):
+        _assert_no_grad(target)
+        return F.poisson_nll_loss(log_input, target, self.size_average)
+
+
 class KLDivLoss(_WeightedLoss):
     r"""The `Kullback-Leibler divergence`_ Loss
 
