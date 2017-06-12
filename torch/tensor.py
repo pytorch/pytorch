@@ -12,6 +12,9 @@ class _TensorBase(object):
     is_cuda = False
     is_sparse = False
 
+    # NB: This implementation is CPU only; see THPTensor_(new) for the
+    # CUDA case, which handles constructing the tensor on the same GPU
+    # as this tensor.
     def new(self, *args, **kwargs):
         """Constructs a new tensor of the same data type."""
         return self.__class__(*args, **kwargs)
