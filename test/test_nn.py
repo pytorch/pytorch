@@ -763,6 +763,23 @@ class TestNN(NNTestCase):
         input = torch.Tensor(num_features, b, d, w, h)
         self._test_dropout(nn.Dropout3d, input)
 
+    def test_AlphaDropout(self):
+        # generate random tensor with zero mean and unit std
+        input = torch.randn(5000)
+
+        mean = input.mean()
+        std = input.std()
+
+        for p in [0.2, 0.5, 0.8]:
+            module = nn.AlphaDropout(p)
+            input_var = Variable(input, requires_grad=True)
+            output = module(input_var)
+            # output mean should be close to input mean
+            self.assertLess(abs(output.data.mean() - mean), 0.1)
+            # output std should be close to input std
+            self.assertLess(abs(output.data.std() - std), 0.1)
+            output.backward(input)
+
     def _test_InstanceNorm(self, cls, input):
         b, c = input.size(0), input.size(1)
         input_var = Variable(input)
