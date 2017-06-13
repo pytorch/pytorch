@@ -662,13 +662,13 @@ THC_API void THCTensor_(btrifact)(THCState *state, THCTensor *ra_, THCudaIntTens
     THCudaIntTensor *t = THCudaIntTensor_new(state);
     THCudaIntTensor_range(state, t, 1, n, 1);
     THCudaIntTensor_unsqueeze1d(state, t, t, 0);
-    THCudaIntTensor** ptrs = (THCudaIntTensor**) malloc(sizeof(THCudaIntTensor*)*num_batches);
+    THCudaIntTensor** ptrs = (THCudaIntTensor**) THAlloc(sizeof(THCudaIntTensor*)*num_batches);
     for (long i=0; i<num_batches; i++) {
       ptrs[i] = t;
     }
     THCudaIntTensor_catArray(state, rpivots_, ptrs, num_batches, 0);
     THCudaIntTensor_free(state, t);
-    free(ptrs);
+    THFree(ptrs);
   } else {
     THCudaIntTensor_resize2d(state, rpivots_, num_batches, n);
   }
