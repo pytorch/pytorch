@@ -1,6 +1,6 @@
 #pragma once
 
-#include <$th_header>
+$th_headers
 
 #include "TensorLib/Storage.h"
 #include "TensorLib/Context.h"

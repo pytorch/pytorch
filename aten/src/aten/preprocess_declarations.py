@@ -1,6 +1,6 @@
 import re
 from copy import deepcopy
-
+from function_wrapper import TYPE_FORMAL_GENERIC
 import common_with_cwrap
 
 type_map = {
@@ -97,15 +97,20 @@ def sanitize_return(option):
         option['return'] = {'kind': 'type', 'type': option['return']}
 
 
+def set_mode(option):
+    option['mode'] = option.get('mode','TH')
+
+
 def run(declarations):
     declarations = [d for d in declarations if not exclude(d)]
     for declaration in declarations:
         common_with_cwrap.set_declaration_defaults(declaration)
         common_with_cwrap.enumerate_options_due_to_default(
-            declaration, allow_kwarg=False)
+            declaration, allow_kwarg=False,type_to_signature=TYPE_FORMAL_GENERIC)
         common_with_cwrap.sort_by_number_of_options(declaration)
         new_options = []
         for option in declaration['options']:
+            set_mode(option)
             sanitize_return(option)
             process_types_and_backends(option)
             add_variants(option)
