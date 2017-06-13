@@ -23,7 +23,7 @@ THDescBuff THLongStorage_sizeDesc(const THLongStorage *size) {
   int i;
   for(i = 0; i < size->size; i++) {
     if(n >= L) break;
-    n += snprintf(str+n, L-n, "%ld", size->data[i]);
+    n += snprintf(str+n, L-n, "%lld", size->data[i]);
     if(i < size->size-1) {
       n += snprintf(str+n, L-n, " x ");
     }
@@ -66,27 +66,27 @@ TH_API THLongStorage *THLongStorage_newInferSize(THLongStorage *size, ptrdiff_t 
   return copy;
 }
 
-TH_API void THLongStorage_calculateExpandGeometry(long *tensorSizes, long *tensorStrides, long tensorDim, THLongStorage *sizes, long **esz, long **est) {
+TH_API void THLongStorage_calculateExpandGeometry(int64_t *tensorSizes, int64_t *tensorStrides, int64_t tensorDim, THLongStorage *sizes, int64_t **esz, int64_t **est) {
   ptrdiff_t ndim = THLongStorage_size(sizes);
-  long numUnsqueezed = ndim - tensorDim;
+  int64_t numUnsqueezed = ndim - tensorDim;
 
-  long *expandedSizes = THAlloc(sizeof(long)*ndim);
-  long *expandedStrides = THAlloc(sizeof(long)*ndim);
+  int64_t *expandedSizes = THAlloc(sizeof(int64_t)*ndim);
+  int64_t *expandedStrides = THAlloc(sizeof(int64_t)*ndim);
 
-  for (long i = numUnsqueezed; i < ndim; ++i) {
+  for (int64_t i = numUnsqueezed; i < ndim; ++i) {
     expandedSizes[i] = tensorSizes[i - numUnsqueezed];
     expandedStrides[i] = tensorStrides[i - numUnsqueezed];
   }
 
-  for (long i = numUnsqueezed - 1; i > -1; --i) {
+  for (int64_t i = numUnsqueezed - 1; i > -1; --i) {
     expandedSizes[i] = 1;
     expandedStrides[i] = expandedSizes[i+1] * expandedStrides[i+1];
   }
 
   // create a new geometry for the tensor
-  for (long i = 0; i < ndim; ++i) {
-    long size = expandedSizes[i];
-    long targetSize = THLongStorage_data(sizes)[i];
+  for (int64_t i = 0; i < ndim; ++i) {
+    int64_t size = expandedSizes[i];
+    int64_t targetSize = THLongStorage_data(sizes)[i];
     if (size == 1) {
       if (targetSize != 1) {
         expandedSizes[i] = targetSize;

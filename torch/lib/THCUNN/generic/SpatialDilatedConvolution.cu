@@ -42,12 +42,12 @@ static inline void THNN_(SpatialDilatedConvolution_shapeCheck)(
    THCUNN_argCheck(state, ndim == 3 || ndim == 4, 2, input,
                    "3D or 4D input tensor expected but got: %s");
 
-   long nInputPlane  = weight->size[1];
-   long inputHeight  = input->size[dimh];
-   long inputWidth   = input->size[dimw];
-   long nOutputPlane = weight->size[0];
-   long outputHeight = (inputHeight + 2*padH - (dilationH * (kH - 1) + 1)) / dH + 1;
-   long outputWidth  = (inputWidth + 2*padW - (dilationW * (kW - 1) + 1)) / dW + 1;
+   int64_t nInputPlane  = weight->size[1];
+   int64_t inputHeight  = input->size[dimh];
+   int64_t inputWidth   = input->size[dimw];
+   int64_t nOutputPlane = weight->size[0];
+   int64_t outputHeight = (inputHeight + 2*padH - (dilationH * (kH - 1) + 1)) / dH + 1;
+   int64_t outputWidth  = (inputWidth + 2*padW - (dilationW * (kW - 1) + 1)) / dW + 1;
 
    if (outputWidth < 1 || outputHeight < 1)
      THError("Given input size: (%ld x %ld x %ld). "
@@ -99,13 +99,13 @@ void THNN_(SpatialDilatedConvolution_updateOutput)(
     THCTensor_(resize4d)(state, input, 1, input->size[0], input->size[1], input->size[2]);
   }
 
-  long inputWidth   = input->size[3];
-  long inputHeight  = input->size[2];
-  long outputWidth  = (inputWidth + 2*padW - (dilationW * (kW - 1) + 1)) / dW + 1;
-  long outputHeight = (inputHeight + 2*padH - (dilationH * (kH - 1) + 1)) / dH + 1;
+  int64_t inputWidth   = input->size[3];
+  int64_t inputHeight  = input->size[2];
+  int64_t outputWidth  = (inputWidth + 2*padW - (dilationW * (kW - 1) + 1)) / dW + 1;
+  int64_t outputHeight = (inputHeight + 2*padH - (dilationH * (kH - 1) + 1)) / dH + 1;
 
   // Batch size + input planes
-  long batchSize = input->size[0];
+  int64_t batchSize = input->size[0];
 
   // Resize output
   THCTensor_(resize4d)(state, output, batchSize, nOutputPlane, outputHeight, outputWidth);
@@ -135,9 +135,9 @@ void THNN_(SpatialDilatedConvolution_updateOutput)(
     // Do Bias first:
     // M,N,K are dims of matrix A and B
     // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
-    long m_ = nOutputPlane;
-    long n_ = outputHeight * outputWidth;
-    long k_ = 1;
+    int64_t m_ = nOutputPlane;
+    int64_t n_ = outputHeight * outputWidth;
+    int64_t k_ = 1;
 
     // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
     if (bias) {
@@ -172,9 +172,9 @@ void THNN_(SpatialDilatedConvolution_updateOutput)(
 
     // M,N,K are dims of matrix A and B
     // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
-    long m = nOutputPlane;
-    long n = columns->size[1];
-    long k = nInputPlane*kH*kW;
+    int64_t m = nOutputPlane;
+    int64_t n = columns->size[1];
+    int64_t k = nInputPlane*kH*kW;
 
     // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
     #ifdef THC_REAL_IS_FLOAT
@@ -244,13 +244,13 @@ void THNN_(SpatialDilatedConvolution_updateGradInput)(
     THCTensor_(resize4d)(state, gradOutput, 1, gradOutput->size[0], gradOutput->size[1], gradOutput->size[2]);
   }
 
-  long inputWidth   = input->size[3];
-  long inputHeight  = input->size[2];
-  long outputWidth  = (inputWidth + 2*padW - (dilationW * (kW - 1) + 1)) / dW + 1;
-  long outputHeight = (inputHeight + 2*padH - (dilationH * (kH - 1) + 1)) / dH + 1;
+  int64_t inputWidth   = input->size[3];
+  int64_t inputHeight  = input->size[2];
+  int64_t outputWidth  = (inputWidth + 2*padW - (dilationW * (kW - 1) + 1)) / dW + 1;
+  int64_t outputHeight = (inputHeight + 2*padH - (dilationH * (kH - 1) + 1)) / dH + 1;
 
   // Batch size + input planes
-  long batchSize = input->size[0];
+  int64_t batchSize = input->size[0];
 
   // Resize output
   THCTensor_(resize4d)(state, gradInput, batchSize, nInputPlane, inputHeight, inputWidth);
@@ -270,9 +270,9 @@ void THNN_(SpatialDilatedConvolution_updateGradInput)(
 
     // M,N,K are dims of matrix A and B
     // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
-    long m = nInputPlane*kW*kH;
-    long n = gradColumns->size[1];
-    long k = nOutputPlane;
+    int64_t m = nInputPlane*kW*kH;
+    int64_t n = gradColumns->size[1];
+    int64_t k = nOutputPlane;
 
     // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
     #ifdef THC_REAL_IS_FLOAT
@@ -359,13 +359,13 @@ void THNN_(SpatialDilatedConvolution_accGradParameters)(
     THCTensor_(resize4d)(state, gradOutput, 1, gradOutput->size[0], gradOutput->size[1], gradOutput->size[2]);
   }
 
-  long inputWidth   = input->size[3];
-  long inputHeight  = input->size[2];
-  long outputWidth  = (inputWidth + 2*padW - (dilationW * (kW - 1) + 1)) / dW + 1;
-  long outputHeight = (inputHeight + 2*padH - (dilationH * (kH - 1) + 1)) / dH + 1;
+  int64_t inputWidth   = input->size[3];
+  int64_t inputHeight  = input->size[2];
+  int64_t outputWidth  = (inputWidth + 2*padW - (dilationW * (kW - 1) + 1)) / dW + 1;
+  int64_t outputHeight = (inputHeight + 2*padH - (dilationH * (kH - 1) + 1)) / dH + 1;
 
   // Batch size + input planes
-  long batchSize = input->size[0];
+  int64_t batchSize = input->size[0];
 
   // Define a buffer of ones, for bias accumulation
   if (ones->nDimension != 2 || ones->size[0]*ones->size[1] < outputHeight*outputWidth) {
@@ -398,9 +398,9 @@ void THNN_(SpatialDilatedConvolution_accGradParameters)(
 
     // M,N,K are dims of matrix A and B
     // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
-    long m = nOutputPlane;
-    long n = nInputPlane*kW*kH;
-    long k = columns->size[1];
+    int64_t m = nOutputPlane;
+    int64_t n = nInputPlane*kW*kH;
+    int64_t k = columns->size[1];
 
     // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
     #ifdef THC_REAL_IS_FLOAT
@@ -423,8 +423,8 @@ void THNN_(SpatialDilatedConvolution_accGradParameters)(
     // Do Bias:
     // M,N,K are dims of matrix A and B
     // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
-    long m_ = nOutputPlane;
-    long k_ = outputHeight * outputWidth;
+    int64_t m_ = nOutputPlane;
+    int64_t k_ = outputHeight * outputWidth;
 
     // Do GEMV (note: this is a bit confusing because gemv assumes column-major matrices)
     if (gradBias) {

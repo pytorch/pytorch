@@ -77,8 +77,8 @@ void THNN_(SpatialUpSamplingNearest_updateOutput)(
   }
 
   // get strides
-  long *is = input->stride;
-  long *os = output->stride;
+  int64_t *is = input->stride;
+  int64_t *os = output->stride;
 
   // get raw pointers
   real *pin = THTensor_(data)(input);
@@ -146,8 +146,8 @@ void THNN_(SpatialUpSamplingNearest_updateGradInput)(
   }
 
   // get strides
-  long *is = gradInput->stride;
-  long *os = gradOutput->stride;
+  int64_t *is = gradInput->stride;
+  int64_t *os = gradOutput->stride;
 
   // get raw pointers
   real *pin = THTensor_(data)(gradInput);

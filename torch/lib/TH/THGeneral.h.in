@@ -10,6 +10,7 @@
 #include <time.h>
 #include <string.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #cmakedefine USE_BLAS
 #cmakedefine USE_LAPACK
@@ -112,7 +113,11 @@ do {                                                                  \
 #define THMax(X, Y)  ((X) > (Y) ? (X) : (Y))
 
 #if (defined(_MSC_VER) || defined(__MINGW32__))
-# define log1p(x) THLog1p(x)
+#if defined(_MSC_VER)
+__inline double log1p(double x) { return THLog1p(x); }
+#else
+inline double log1p(double x) { return THLog1p(x); }
+#endif
 #define snprintf _snprintf
 #define popen _popen
 #define pclose _pclose

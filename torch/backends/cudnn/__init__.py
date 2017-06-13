@@ -13,12 +13,15 @@ __cudnn_version = None
 def _libcudnn():
     global lib, __cudnn_version
     if lib is None:
-        lib = ctypes.cdll.LoadLibrary(None)
-        if hasattr(lib, 'cudnnGetErrorString'):
-            lib.cudnnGetErrorString.restype = ctypes.c_char_p
-            __cudnn_version = lib.cudnnGetVersion()
+        if sys.platform == "win32":
+            lib = ctypes.cdll.LoadLibrary('cudnn64_6')
         else:
-            lib = None
+            lib = ctypes.cdll.LoadLibrary(None)
+            if hasattr(lib, 'cudnnGetErrorString'):
+                lib.cudnnGetErrorString.restype = ctypes.c_char_p
+                __cudnn_version = lib.cudnnGetVersion()
+            else:
+                lib = None
     return lib
 
 

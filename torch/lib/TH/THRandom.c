@@ -50,10 +50,10 @@ int THGenerator_isValid(THGenerator *_generator)
 }
 
 #ifndef _WIN32
-static unsigned long readURandomLong()
+static uint64_t readURandomLong()
 {
   int randDev = open("/dev/urandom", O_RDONLY);
-  unsigned long randValue;
+  uint64_t randValue;
   if (randDev < 0) {
     THError("Unable to open /dev/urandom");
   }
@@ -66,12 +66,12 @@ static unsigned long readURandomLong()
 }
 #endif // _WIN32
 
-unsigned long THRandom_seed(THGenerator *_generator)
+uint64_t THRandom_seed(THGenerator *_generator)
 {
 #ifdef _WIN32
-  unsigned long s = (unsigned long)time(0);
+  uint64_t s = (uint64_t)time(0);
 #else
-  unsigned long s = readURandomLong();
+  uint64_t s = readURandomLong();
 #endif
   THRandom_manualSeed(_generator, s);
   return s;
@@ -137,7 +137,7 @@ unsigned long THRandom_seed(THGenerator *_generator)
 #define TWIST(u,v) ((MIXBITS(u,v) >> 1) ^ ((v)&1UL ? MATRIX_A : 0UL))
 /*********************************************************** That's it. */
 
-void THRandom_manualSeed(THGenerator *_generator, unsigned long the_seed_)
+void THRandom_manualSeed(THGenerator *_generator, uint64_t the_seed_)
 {
   int j;
 
@@ -161,14 +161,14 @@ void THRandom_manualSeed(THGenerator *_generator, unsigned long the_seed_)
   _generator->seeded = 1;
 }
 
-unsigned long THRandom_initialSeed(THGenerator *_generator)
+uint64_t THRandom_initialSeed(THGenerator *_generator)
 {
   return _generator->the_initial_seed;
 }
 
 void THRandom_nextState(THGenerator *_generator)
 {
-  unsigned long *p = _generator->state;
+  uint64_t *p = _generator->state;
   int j;
 
   _generator->left = n;
@@ -183,9 +183,9 @@ void THRandom_nextState(THGenerator *_generator)
   *p = p[m-n] ^ TWIST(p[0], _generator->state[0]);
 }
 
-unsigned long THRandom_random(THGenerator *_generator)
+uint64_t THRandom_random(THGenerator *_generator)
 {
-  unsigned long y;
+  uint64_t y;
 
   if (--(_generator->left) == 0)
     THRandom_nextState(_generator);

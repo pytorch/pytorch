@@ -3,17 +3,17 @@
 #else
 
 /* Level 1 */
-TH_API void THBlas_(swap)(long n, real *x, long incx, real *y, long incy);
-TH_API void THBlas_(scal)(long n, real a, real *x, long incx);
-TH_API void THBlas_(copy)(long n, real *x, long incx, real *y, long incy);
-TH_API void THBlas_(axpy)(long n, real a, real *x, long incx, real *y, long incy);
-TH_API real THBlas_(dot)(long n, real *x, long incx, real *y, long incy);
+TH_API void THBlas_(swap)(int64_t n, real *x, int64_t incx, real *y, int64_t incy);
+TH_API void THBlas_(scal)(int64_t n, real a, real *x, int64_t incx);
+TH_API void THBlas_(copy)(int64_t n, real *x, int64_t incx, real *y, int64_t incy);
+TH_API void THBlas_(axpy)(int64_t n, real a, real *x, int64_t incx, real *y, int64_t incy);
+TH_API real THBlas_(dot)(int64_t n, real *x, int64_t incx, real *y, int64_t incy);
 
 /* Level 2 */
-TH_API void THBlas_(gemv)(char trans, long m, long n, real alpha, real *a, long lda, real *x, long incx, real beta, real *y, long incy);
-TH_API void THBlas_(ger)(long m, long n, real alpha, real *x, long incx, real *y, long incy, real *a, long lda);
+TH_API void THBlas_(gemv)(char trans, int64_t m, int64_t n, real alpha, real *a, int64_t lda, real *x, int64_t incx, real beta, real *y, int64_t incy);
+TH_API void THBlas_(ger)(int64_t m, int64_t n, real alpha, real *x, int64_t incx, real *y, int64_t incy, real *a, int64_t lda);
 
 /* Level 3 */
-TH_API void THBlas_(gemm)(char transa, char transb, long m, long n, long k, real alpha, real *a, long lda, real *b, long ldb, real beta, real *c, long ldc);
+TH_API void THBlas_(gemm)(char transa, char transb, int64_t m, int64_t n, int64_t k, real alpha, real *a, int64_t lda, real *b, int64_t ldb, real beta, real *c, int64_t ldc);
 
 #endif

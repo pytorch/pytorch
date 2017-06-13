@@ -77,7 +77,7 @@ def to_gpu(obj, type_map={}):
     elif torch.is_storage(obj):
         return obj.new().resize_(obj.size()).copy_(obj)
     elif isinstance(obj, Variable):
-        assert obj.creator is None
+        assert obj.is_leaf
         t = type_map.get(type(obj.data), get_gpu_type(type(obj.data)))
         return Variable(obj.data.clone().type(t), requires_grad=obj.requires_grad)
     elif isinstance(obj, list):
@@ -129,7 +129,7 @@ class TestCase(unittest.TestCase):
         tc = t.coalesce()
 
         value_map = {}
-        for idx, val in zip(t.indices().t(), t.values()):
+        for idx, val in zip(t._indices().t(), t._values()):
             idx_tup = tuple(idx)
             if idx_tup in value_map:
                 value_map[idx_tup] += val
@@ -138,16 +138,16 @@ class TestCase(unittest.TestCase):
 
         new_indices = sorted(list(value_map.keys()))
         new_values = [value_map[idx] for idx in new_indices]
-        if t.values().ndimension() < 2:
-            new_values = t.values().new(new_values)
+        if t._values().ndimension() < 2:
+            new_values = t._values().new(new_values)
         else:
             new_values = torch.stack(new_values)
 
-        new_indices = t.indices().new(new_indices).t()
+        new_indices = t._indices().new(new_indices).t()
         tg = t.new(new_indices, new_values, t.size())
 
-        self.assertEqual(tc.indices(), tg.indices())
-        self.assertEqual(tc.values(), tg.values())
+        self.assertEqual(tc._indices(), tg._indices())
+        self.assertEqual(tc._values(), tg._values())
 
         return tg
 
@@ -178,8 +178,8 @@ class TestCase(unittest.TestCase):
             if x.is_sparse:
                 x = self.safeCoalesce(x)
                 y = self.safeCoalesce(y)
-                assertTensorsEqual(x.indices(), y.indices())
-                assertTensorsEqual(x.values(), y.values())
+                assertTensorsEqual(x._indices(), y._indices())
+                assertTensorsEqual(x._values(), y._values())
             else:
                 assertTensorsEqual(x, y)
         elif type(x) == str and type(y) == str:

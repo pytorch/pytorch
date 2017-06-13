@@ -1,5 +1,6 @@
 from itertools import repeat
 
+from ..._thnn import type2backend
 from ..function import Function, InplaceFunction
 
 
@@ -51,7 +52,11 @@ class Tanh(InplaceFunction):
 
     def backward(self, grad_output):
         result, = self.saved_tensors
-        return grad_output * (1 - result * result)
+        grad_input = grad_output.new()
+        backend = type2backend[type(result)]
+        backend.Tanh_updateGradInput(backend.library_state, None, grad_output,
+                                     grad_input, result)
+        return grad_input
 
 
 class Sigmoid(InplaceFunction):
@@ -67,7 +72,11 @@ class Sigmoid(InplaceFunction):
 
     def backward(self, grad_output):
         result, = self.saved_tensors
-        return grad_output * ((1 - result) * result)
+        grad_input = grad_output.new()
+        backend = type2backend[type(result)]
+        backend.Sigmoid_updateGradInput(backend.library_state, None, grad_output,
+                                        grad_input, result)
+        return grad_input
 
 
 class Sinh(Function):
@@ -94,12 +103,14 @@ class Cosh(Function):
 
 class Abs(Function):
 
-    def forward(self, i):
-        self.save_for_backward(i)
+    @staticmethod
+    def forward(ctx, i):
+        ctx.save_for_backward(i)
         return i.abs()
 
-    def backward(self, grad_output):
-        i, = self.saved_tensors
+    @staticmethod
+    def backward(ctx, grad_output):
+        i, = ctx.saved_variables
         return grad_output * i.sign()
 
 

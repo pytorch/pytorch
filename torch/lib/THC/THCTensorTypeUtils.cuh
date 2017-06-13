@@ -51,8 +51,8 @@ struct TensorUtils {
                          TENSOR_TYPE* src);                             \
     static DATA_TYPE* getData(THCState* state, TENSOR_TYPE* t);         \
     static ptrdiff_t getNumElements(THCState* state, TENSOR_TYPE* t);        \
-    static long getSize(THCState* state, TENSOR_TYPE* t, int dim);      \
-    static long getStride(THCState* state, TENSOR_TYPE* t, int dim);    \
+    static int64_t getSize(THCState* state, TENSOR_TYPE* t, int dim);      \
+    static int64_t getStride(THCState* state, TENSOR_TYPE* t, int dim);    \
     static int getDims(THCState* state, TENSOR_TYPE* t);                \
     static bool isContiguous(THCState* state, TENSOR_TYPE* t);          \
     static bool allContiguous(THCState* state, TENSOR_TYPE** inputs, int numInputs); \
@@ -70,11 +70,11 @@ struct TensorUtils {
     static bool all32BitIndexable(THCState* state, TENSOR_TYPE** inputs, int numInputs); \
   }
 
-TENSOR_UTILS(THCudaByteTensor, unsigned char, long);
-TENSOR_UTILS(THCudaCharTensor, char, long);
-TENSOR_UTILS(THCudaShortTensor, short, long);
-TENSOR_UTILS(THCudaIntTensor, int, long);
-TENSOR_UTILS(THCudaLongTensor, long, long);
+TENSOR_UTILS(THCudaByteTensor, uint8_t, int64_t);
+TENSOR_UTILS(THCudaCharTensor, int8_t, int64_t);
+TENSOR_UTILS(THCudaShortTensor, int16_t, int64_t);
+TENSOR_UTILS(THCudaIntTensor, int32_t, int64_t);
+TENSOR_UTILS(THCudaLongTensor, int64_t, int64_t);
 TENSOR_UTILS(THCudaTensor, float, float);
 TENSOR_UTILS(THCudaDoubleTensor, double, double);
 

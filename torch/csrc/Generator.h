@@ -13,7 +13,7 @@ struct THPGenerator {
   ((THPGenerator*)obj)->cdata
 
 THP_API PyObject * THPGenerator_New();
-extern PyObject *THPGeneratorClass;
+THP_API PyObject *THPGeneratorClass;
 
 #ifdef _THP_CORE
 bool THPGenerator_init(PyObject *module);

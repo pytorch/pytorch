@@ -475,7 +475,7 @@
         - arg: THTensor* destination
           output: True
         - THTensor* self
-        - arg: long dim
+        - arg: int64_t dim
           wrap_dim: self
 ]]
 
@@ -494,7 +494,7 @@
         - arg: THTensor* destination
           output: True
         - THTensor* self
-        - arg: long dim
+        - arg: int64_t dim
           wrap_dim: self
         - CONSTANT false
 ]]
@@ -514,7 +514,7 @@
         - arg: THTensor* destination
           output: True
         - THTensor* self
-        - arg: long dim
+        - arg: int64_t dim
           wrap_dim: self
         - CONSTANT false
 ]]
@@ -537,7 +537,7 @@
           output: True
         - THTensor* self
         - real p
-        - arg: long dim
+        - arg: int64_t dim
           wrap_dim: self
 ]]
 
@@ -553,7 +553,7 @@
           output: True
         - THTensor* self
         - real p
-        - arg: long dim
+        - arg: int64_t dim
           wrap_dim: self
         - real maxnorm
 ]]
@@ -568,7 +568,7 @@
         - THTensor* self
         - THTensor* self
         - real p
-        - arg: long dim
+        - arg: int64_t dim
           wrap_dim: self
         - real maxnorm
 ]]
@@ -743,7 +743,7 @@
       output: True
     - real start
     - real end
-    - arg: long steps
+    - arg: int64_t steps
       default: 100
 ]]
 
@@ -757,7 +757,7 @@
       output: True
     - real start
     - real end
-    - arg: long steps
+    - arg: int64_t steps
       default: 100
 ]]
 
@@ -778,21 +778,21 @@
       - arg: THTensor* destination
         output: True
       - THTensor* self
-      - long bins
+      - int64_t bins
       - CONSTANT 0
       - CONSTANT 0
     - arguments:
       - arg: THTensor* destination
         output: True
       - THTensor* self
-      - long bins
+      - int64_t bins
       - real min
       - CONSTANT 0
     - arguments:
       - arg: THTensor* destination
         output: True
       - THTensor* self
-      - long bins
+      - int64_t bins
       - real min
       - real max
 ]]
@@ -819,7 +819,7 @@
         - arg: THTensor* result
           output: True
         - THTensor* self
-        - arg: long dim
+        - arg: int64_t dim
           wrap_dim: self
 ]]
 
@@ -837,7 +837,7 @@
         - arg: THTensor* result
           output: True
         - THTensor* self
-        - arg: long dim
+        - arg: int64_t dim
           wrap_dim: self
 ]]
 
@@ -849,7 +849,7 @@
     - arg: THTensor* result
       output: True
     - THTensor* self
-    - arg: long dim
+    - arg: int64_t dim
       wrap_dim: self
 ]]
 
@@ -861,7 +861,7 @@
     - arg: THTensor* result
       output: True
     - THTensor* self
-    - arg: long dim
+    - arg: int64_t dim
       wrap_dim: self
 ]]
 
@@ -1203,7 +1203,7 @@
     - arg: THTensor* destination
       output: True
     - THTensor* self
-    - arg: long k
+    - arg: int64_t k
       default: 0
 ]]
 
@@ -1214,7 +1214,7 @@
   arguments:
     - THTensor* self
     - THTensor* self
-    - arg: long k
+    - arg: int64_t k
       default: 0
 ]]
 
@@ -1226,7 +1226,7 @@
     - arg: THTensor* destination
       output: True
     - THTensor* self
-    - arg: long k
+    - arg: int64_t k
       default: 0
 ]]
 
@@ -1237,7 +1237,7 @@
   arguments:
     - THTensor* self
     - THTensor* self
-    - arg: long k
+    - arg: int64_t k
       default: 0
 ]]
 
@@ -1250,7 +1250,7 @@
       output: True
     - THTensor* self
     - THTensor* other
-    - arg: long dim
+    - arg: int dim
       default: -1
 ]]
 
@@ -1263,13 +1263,13 @@
     - arguments:
       - arg: THTensor* result
         output: True
-      - long n
+      - int64_t n
       - argument 1
     - arguments:
       - arg: THTensor* result
         output: True
-      - long n
-      - long m
+      - int64_t n
+      - int64_t m
 ]]
 
 [[
@@ -1281,7 +1281,7 @@
         - arg: THTensor* result
           output: True
         - THTensor* self
-        - arg: long diagonal
+        - arg: int diagonal
           default: 0
 ]]
 
@@ -1409,8 +1409,8 @@
   with_stateless: True
   return: argument 0
   before_call: |
-    long s1 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg4)->cdata, 0);
-    long s2 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg5)->cdata, 0);
+    int64_t s1 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg4)->cdata, 0);
+    int64_t s2 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg5)->cdata, 0);
     THTensor_(resize2d)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata, s1, s2);
   arguments:
     - arg: THTensor* result
@@ -1428,7 +1428,7 @@
   with_stateless: True
   return: argument 0
   before_call: |
-    long s = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg4)->cdata, 0);
+    int64_t s = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg4)->cdata, 0);
     THTensor_(resize1d)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata, s);
     #if !IS_CUDA
     THTensor_(zero)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata);
@@ -1450,8 +1450,8 @@
   options:
     - cname: addmm
       before_call: |
-        long s1 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg4)->cdata, 0);
-        long s2 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg5)->cdata, 1);
+        int64_t s1 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg4)->cdata, 0);
+        int64_t s2 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg5)->cdata, 1);
         THTensor_(resize2d)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata, s1, s2);
         #if !IS_CUDA
         THTensor_(zero)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata);
@@ -1482,9 +1482,9 @@
   with_stateless: True
   return: argument 0
   before_call: |
-    long s1 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg4)->cdata, 0);
-    long s2 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg4)->cdata, 1);
-    long s3 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg5)->cdata, 2);
+    int64_t s1 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg4)->cdata, 0);
+    int64_t s2 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg4)->cdata, 1);
+    int64_t s3 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg5)->cdata, 2);
     THTensor_(resize3d)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata, s1, s2, s3);
     #if !IS_CUDA
     THTensor_(zero)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata);
@@ -1625,8 +1625,7 @@
     - THTensor* tensor2
 ]]
 
-#ifndef THP_LAPACK_CONSTANTS
-#define THP_LAPACK_CONSTANTS
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
 // We need to pass pointers to chars to tensor lapack functions...
 static const char __U = 'U';
 static const char __L = 'L';

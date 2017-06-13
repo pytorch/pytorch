@@ -89,8 +89,8 @@ template <typename T, unsigned int Power2Size>
 __global__ void computeMode(
     T *input,
     TensorInfo<T, unsigned int> values,
-    TensorInfo<long, unsigned int> indices,
-    long sliceSize)
+    TensorInfo<int64_t, unsigned int> indices,
+    int64_t sliceSize)
 {
   int tidx = threadIdx.x;
   int stidx = blockDim.x + threadIdx.x; // Second index this thread responsible for
@@ -271,7 +271,7 @@ __global__ void computeMode(
   // Finally, we have the mode, and an index where it occurs. We use a single thread
   // to place this in the appropriate output position
   if (tidx == 0) {
-    long index = TH_INDEX_BASE + match.val;
+    int64_t index = TH_INDEX_BASE + match.val;
 
     unsigned int outputOffset = IndexToOffset<T, unsigned int, -1>::get(blockId, values);
     values.data[outputOffset] = mode;

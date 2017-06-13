@@ -59,7 +59,11 @@ static PyObject * THPStorage_(newTHView)(THStorage *base, ptrdiff_t offset, size
 // TODO: move this somewhere - we only need one version
 static std::string THPStorage_(__newHandle)() {
   std::string handle = "/torch_";
+#ifdef _MSC_VER
+  handle += std::to_string(GetCurrentProcessId());
+#else
   handle += std::to_string(getpid());
+#endif
   handle += "_";
   handle += std::to_string(THRandom_random(THPDefaultGenerator->cdata));
   return handle;
@@ -76,8 +80,8 @@ static THStorage* THPStorage_(newFilenameStorage)(ptrdiff_t size)
 static PyObject * THPStorage_(pyNewFilenameStorage)(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
-  long size;
-  if (!PyArg_ParseTuple(args, "l", &size)) {
+  int64_t size;
+  if (!PyArg_ParseTuple(args, "L", &size)) {
     return NULL;
   }
   return THPStorage_(New)(THPStorage_(newFilenameStorage)(size));
@@ -109,7 +113,7 @@ static PyObject * THPStorage_(shareFilename)(THPStorage *self)
   THPObjectPtr storage_handle =
     PyBytes_FromString(THMapAllocatorContext_filename(ctx->th_context));
   if (!storage_handle) return NULL;
-  THPObjectPtr size = PyLong_FromLong(storage->size);
+  THPObjectPtr size = PyLong_FromLongLong(storage->size);
   if (!size) return NULL;
 
   THPObjectPtr tuple = PyTuple_New(3);
@@ -135,7 +139,7 @@ static PyObject * THPStorage_(newSharedFilename)(PyObject *_unused, PyObject *ar
   }
   const char *manager_handle = PyBytes_AS_STRING(_manager_handle);
   const char *object_handle = PyBytes_AS_STRING(_object_handle);
-  long size = THPUtils_unpackLong(_size);
+  int64_t size = THPUtils_unpackLong(_size);
   int flags = TH_ALLOCATOR_MAPPED_SHAREDMEM |
               TH_ALLOCATOR_MAPPED_NOCREATE;
   libshm_context *ctx = libshm_context_new(manager_handle, object_handle, flags);
@@ -158,8 +162,8 @@ static THStorage* THPStorage_(newFdStorage)(ptrdiff_t size)
 static PyObject * THPStorage_(pyNewFdStorage)(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
-  long size;
-  if (!PyArg_ParseTuple(args, "l", &size)) {
+  int64_t size;
+  if (!PyArg_ParseTuple(args, "L", &size)) {
     return NULL;
   }
   return THPStorage_(New)(THPStorage_(newFdStorage)(size));
@@ -186,7 +190,7 @@ static PyObject * THPStorage_(shareFd)(THPStorage *self)
 
   THPObjectPtr storage_handle = PyLong_FromLong(THMapAllocatorContext_fd(ctx));
   if (!storage_handle) return NULL;
-  THPObjectPtr size = PyLong_FromLong(storage->size);
+  THPObjectPtr size = PyLong_FromLongLong(storage->size);
   if (!size) return NULL;
 
   THPObjectPtr tuple = PyTuple_New(2);
@@ -209,8 +213,8 @@ static PyObject * THPStorage_(newSharedFd)(PyObject *_unused, PyObject *args)
     return NULL;
   }
   int fd;
-  long tmp_fd = THPUtils_unpackLong(_tmp_fd);
-  long size = THPUtils_unpackLong(_size);
+  int tmp_fd = (int) THPUtils_unpackLong(_tmp_fd);
+  int64_t size = THPUtils_unpackLong(_size);
   if ((fd = dup(tmp_fd)) == -1) {
     THPUtils_setError("could not duplicate a shared memory file descriptor");
     return NULL;
@@ -236,9 +240,9 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self)
   THPObjectPtr device = PyLong_FromLong(storage->device);
   THPObjectPtr _handle = Py_None;
   Py_INCREF(Py_None);
-  THPObjectPtr size = PyLong_FromLong(storage->size);
+  THPObjectPtr size = PyLong_FromLongLong(storage->size);
   THPObjectPtr _offset = PyLong_FromLong(0);
-  THPObjectPtr view_size = PyLong_FromLong(storage->size);
+  THPObjectPtr view_size = PyLong_FromLongLong(storage->size);
   if (storage->data) {
     size_t base_size;
     void *base_ptr = THCCachingAllocator_getBaseAllocation(storage->data, &base_size);
@@ -402,8 +406,8 @@ static PyObject * THPStorage_(newView)(THPStorage *self, PyObject *args)
     THPUtils_invalidArguments(args, NULL, "_new_view", 1, "(int offset, int size)");
     return NULL;
   }
-  long offset = THPUtils_unpackLong(PyTuple_GET_ITEM(args, 0));
-  long size = THPUtils_unpackLong(PyTuple_GET_ITEM(args, 1));
+  int64_t offset = THPUtils_unpackLong(PyTuple_GET_ITEM(args, 0));
+  int64_t size = THPUtils_unpackLong(PyTuple_GET_ITEM(args, 1));
   return THPStorage_(newTHView)(self->cdata, offset, size);
   END_HANDLE_TH_ERRORS
 }

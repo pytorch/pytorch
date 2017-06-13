@@ -22,7 +22,7 @@ struct th_storage_traits {};
 template<typename real>
 struct THStorage : public interface_traits<real>::storage_interface_type {
   template<typename U>
-  friend class THTensor;
+  friend struct THTensor;
 
 private:
   using interface_type = typename interface_traits<real>::storage_interface_type;
@@ -42,7 +42,7 @@ public:
   virtual THStorage& retain() override;
   virtual THStorage& free() override;
 
-  virtual THStorage& resize(long new_size) override;
+  virtual THStorage& resize(int64_t new_size) override;
   virtual THStorage& fill(scalar_type value) override;
   virtual THStorage& set(std::size_t ind, scalar_type value) override;
   // Doesn't do bound checking

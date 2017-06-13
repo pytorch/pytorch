@@ -1,6 +1,8 @@
 #include <Python.h>
 #include <sys/types.h>
+#ifndef _MSC_VER
 #include <sys/socket.h>
+#endif
 
 #include <stdbool.h>
 #include <unordered_map>
@@ -329,7 +331,7 @@ static PyObject * TH_CONCAT_2(THPModule_, name)(PyObject *_unused, PyObject *arg
   PyObject *tensor = THPDefaultTensorClass;                                    \
   PyObject *key, *value;                                                       \
   Py_ssize_t pos = 0;                                                          \
-  for (int i = PyTuple_Size(args)-1; i >= 0; i--) {                            \
+  for (int i = (int) PyTuple_Size(args)-1; i >= 0; i--) {                            \
     PyObject *item = PyTuple_GET_ITEM(args, i);                                \
     if (THPModule_isTensor(item) || THPVariable_Check(item)) {                 \
       tensor = item;                                                           \

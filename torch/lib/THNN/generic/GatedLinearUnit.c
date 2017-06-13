@@ -10,10 +10,10 @@ void THNN_(GatedLinear_updateOutput)(
 {
   // size output to half of input
   dim = dim - 1;
-  const long nIn = THTensor_(size)(input, dim);
+  const int64_t nIn = THTensor_(size)(input, dim);
   THArgCheck(nIn % 2 == 0, 2, "Halving dimension must be even. Dim %d is size %ld", dim+1, nIn);
 
-  const long inputSize = THTensor_(size)(input, dim) / 2;
+  const int64_t inputSize = THTensor_(size)(input, dim) / 2;
   THLongStorage *newSizes = THTensor_(newSizeOf)(input);
   THLongStorage_set(newSizes, dim, inputSize);
   THTensor_(resize)(output, newSizes, NULL);
@@ -40,11 +40,11 @@ void THNN_(GatedLinear_updateGradInput)(
 {
   // set up tensors
   dim = dim - 1;
-  const long nIn = THTensor_(size)(input, dim);
+  const int64_t nIn = THTensor_(size)(input, dim);
   THArgCheck(nIn % 2 == 0, 2, "Halving dimension must be even. Dim %d is size %ld", dim+1, nIn);
 
   THTensor_(resizeAs)(gradInput, input);
-  const long inputSize = THTensor_(size)(input, dim) / 2;
+  const int64_t inputSize = THTensor_(size)(input, dim) / 2;
   THTensor *firstHalf = THTensor_(newNarrow)(input, dim, 0, inputSize);
   THTensor *secondHalf = THTensor_(newNarrow)(input, dim, inputSize, inputSize);
   THTensor *gradInputfirstHalf = THTensor_(newNarrow)(gradInput, dim, 0, inputSize);

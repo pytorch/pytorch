@@ -10,9 +10,7 @@
 #include "../common/Functions.hpp"
 #include "../common/RPC.hpp"
 #include "../master/Master.hpp"
-#include "THPP/Storage.hpp"
-#include "THPP/Tensor.hpp"
-#include "THPP/Traits.hpp"
+#include "THPP/THPP.h"
 #include "THPP/storages/THStorage.hpp"
 #include "THPP/tensors/THTensor.hpp"
 #include "Worker.hpp"
@@ -38,23 +36,37 @@ thpp::Storage* unpackRetrieveStorage(rpc::RPCMessage& message) {
   return workerStorages.at(unpackStorage(message)).get();
 }
 
+thpp::Generator* unpackRetrieveGenerator(rpc::RPCMessage& message) {
+  return workerGenerators.at(unpackGenerator(message)).get();
+}
+
 static void finalize(rpc::RPCMessage& raw_message) {
   if (raw_message.remaining() > 0)
     throw std::invalid_argument("message is too long");
 }
 
+#include "dispatch/Communication.cpp"
+#include "dispatch/Generator.cpp"
 #include "dispatch/Storage.cpp"
 #include "dispatch/Tensor.cpp"
 #include "dispatch/TensorMath.cpp"
-#include "dispatch/Communication.cpp"
+#include "dispatch/TensorRandom.cpp"
+#include "dispatch/TensorLapack.cpp"
 
 using dispatch_fn = void (*)(rpc::RPCMessage&);
 using Functions = thd::Functions;
 
 
-static const std::unordered_map<std::uint16_t, dispatch_fn> functions {
-    {Functions::tensorConstruct, tensorConstruct},
-    {Functions::tensorConstructWithSize, tensorConstructWithSize},
+static const std::unordered_map<rpc::function_id_type, dispatch_fn> functions {
+    {Functions::generatorNew, generatorNew},
+    {Functions::generatorFree, generatorFree},
+    {Functions::generatorCopy, generatorCopy},
+    {Functions::generatorSeed, generatorSeed},
+    {Functions::generatorManualSeed, generatorManualSeed},
+
+    {Functions::tensorNew, tensorNew},
+    {Functions::tensorNewWithSize, tensorNewWithSize},
+    {Functions::tensorNewWithStorage, tensorNewWithStorage},
     {Functions::tensorResize, tensorResize},
     {Functions::tensorResizeAs, tensorResizeAs},
     {Functions::tensorResize1d, tensorResize1d},
@@ -71,6 +83,8 @@ static const std::unordered_map<std::uint16_t, dispatch_fn> functions {
     {Functions::tensorSelect, tensorSelect},
     {Functions::tensorTranspose, tensorTranspose},
     {Functions::tensorUnfold, tensorUnfold},
+    {Functions::tensorSqueeze, tensorSqueeze},
+    {Functions::tensorSqueeze, tensorSqueeze1d},
 
     {Functions::tensorFree, tensorFree},
     {Functions::tensorAdd, tensorAdd},
@@ -124,7 +138,14 @@ static const std::unordered_map<std::uint16_t, dispatch_fn> functions {
     {Functions::tensorCmaxValue, tensorCmaxValue},
     {Functions::tensorCminValue, tensorCminValue},
 
-    // Functions from the 3rd set
+    {Functions::tensorMaskedFill, tensorMaskedFill},
+    {Functions::tensorMaskedCopy, tensorMaskedCopy},
+    {Functions::tensorMaskedSelect, tensorMaskedSelect},
+    {Functions::tensorNonzero, tensorNonzero},
+    {Functions::tensorIndexSelect, tensorIndexSelect},
+    {Functions::tensorIndexCopy, tensorIndexCopy},
+    {Functions::tensorIndexAdd, tensorIndexAdd},
+    {Functions::tensorIndexFill, tensorIndexFill},
     {Functions::tensorDiag, tensorDiag},
     {Functions::tensorEye, tensorEye},
     {Functions::tensorRange, tensorRange},
@@ -169,13 +190,72 @@ static const std::unordered_map<std::uint16_t, dispatch_fn> functions {
     {Functions::tensorSin, tensorSin},
     {Functions::tensorAsin, tensorAsin},
     {Functions::tensorSinh, tensorSinh},
+    {Functions::tensorTan, tensorTan},
+    {Functions::tensorAtan, tensorAtan},
+    {Functions::tensorAtan2, tensorAtan2},
+    {Functions::tensorTanh, tensorTanh},
+    {Functions::tensorPow, tensorPow},
+    {Functions::tensorTpow, tensorTpow},
+    {Functions::tensorSqrt, tensorSqrt},
+    {Functions::tensorRsqrt, tensorRsqrt},
+    {Functions::tensorCeil, tensorCeil},
+    {Functions::tensorFloor, tensorFloor},
+    {Functions::tensorRound, tensorRound},
+    {Functions::tensorTrunc, tensorTrunc},
+    {Functions::tensorFrac, tensorFrac},
+    {Functions::tensorLerp, tensorLerp},
+    {Functions::tensorMean, tensorMean},
+    {Functions::tensorStd, tensorStd},
+    {Functions::tensorVar, tensorVar},
+    {Functions::tensorNorm, tensorNorm},
+    {Functions::tensorRenorm, tensorRenorm},
+    {Functions::tensorDist, tensorDist},
+    {Functions::tensorHistc, tensorHistc},
+    {Functions::tensorBhistc, tensorBhistc},
+    {Functions::tensorMeanall, tensorMeanall},
+    {Functions::tensorVarall, tensorVarall},
+    {Functions::tensorStdall, tensorStdall},
+    {Functions::tensorNormall, tensorNormall},
+    {Functions::tensorLinspace, tensorLinspace},
+    {Functions::tensorLogspace, tensorLogspace},
+    {Functions::tensorRand, tensorRand},
+    {Functions::tensorRandn, tensorRandn},
+    {Functions::tensorLogicalall, tensorLogicalall},
+    {Functions::tensorLogicalany, tensorLogicalany},
+    {Functions::tensorRandom, tensorRandom},
+    {Functions::tensorGeometric, tensorGeometric},
+    {Functions::tensorBernoulli, tensorBernoulli},
+    {Functions::tensorBernoulli_FloatTensor, tensorBernoulli_FloatTensor},
+    {Functions::tensorBernoulli_DoubleTensor, tensorBernoulli_DoubleTensor},
+    {Functions::tensorUniform, tensorUniform},
+    {Functions::tensorNormal, tensorNormal},
+    {Functions::tensorExponential, tensorExponential},
+    {Functions::tensorCauchy, tensorCauchy},
+    {Functions::tensorLogNormal, tensorLogNormal},
+    {Functions::tensorMultinomial, tensorMultinomial},
 
-    {Functions::storageConstruct, storageConstruct},
-    {Functions::storageConstructWithSize, storageConstructWithSize},
-    {Functions::storageConstructWithSize1, storageConstructWithSize1},
-    {Functions::storageConstructWithSize2, storageConstructWithSize2},
-    {Functions::storageConstructWithSize3, storageConstructWithSize3},
-    {Functions::storageConstructWithSize4, storageConstructWithSize4},
+    {Functions::tensorGesv, tensorGesv},
+    {Functions::tensorTrtrs, tensorTrtrs},
+    {Functions::tensorGels, tensorGels},
+    {Functions::tensorSyev, tensorSyev},
+    {Functions::tensorGeev, tensorGeev},
+    {Functions::tensorGesvd2, tensorGesvd2},
+    {Functions::tensorGetri, tensorGetri},
+    {Functions::tensorPotrf, tensorPotrf},
+    {Functions::tensorPotrs, tensorPotrs},
+    {Functions::tensorPotri, tensorPotri},
+    {Functions::tensorQr, tensorQr},
+    {Functions::tensorGeqrf, tensorGeqrf},
+    {Functions::tensorOrgqr, tensorOrgqr},
+    {Functions::tensorOrmqr, tensorOrmqr},
+    {Functions::tensorPstrf, tensorPstrf},
+
+    {Functions::storageNew, storageNew},
+    {Functions::storageNewWithSize, storageNewWithSize},
+    {Functions::storageNewWithSize1, storageNewWithSize1},
+    {Functions::storageNewWithSize2, storageNewWithSize2},
+    {Functions::storageNewWithSize3, storageNewWithSize3},
+    {Functions::storageNewWithSize4, storageNewWithSize4},
     {Functions::storageFree, storageFree},
     {Functions::storageResize, storageResize},
     {Functions::storageFill, storageFill},
@@ -186,19 +266,17 @@ static const std::unordered_map<std::uint16_t, dispatch_fn> functions {
 
 } // namespace detail
 
-std::string execute(std::unique_ptr<rpc::RPCMessage> raw_message_ptr) {
-  try {
-    // TODO: unify the function id type (it's in rpc:: now)
-    auto &raw_message = *raw_message_ptr;
-    uint16_t fid = rpc::unpackFunctionId(raw_message);
-    auto iter = detail::functions.find(fid);
-    if (iter != detail::functions.end())
-      (*iter->second)(raw_message);
-    else
-      throw std::invalid_argument(std::string("invalid function id: ") + std::to_string(fid));
-    return std::string();
-  } catch(std::exception& e) {
-    return std::string(e.what());
+/* On fail throws exceptions which should be caught in worker's loop and reported
+ * to master.
+ */
+void execute(std::unique_ptr<rpc::RPCMessage> raw_message_ptr) {
+  auto &raw_message = *raw_message_ptr;
+  rpc::function_id_type fid = rpc::unpackFunctionId(raw_message);
+  auto iter = detail::functions.find(fid);
+  if (iter != detail::functions.end()) {
+    (*iter->second)(raw_message);
+  } else {
+    throw std::invalid_argument("invalid function id: " + std::to_string(fid));
   }
 }
 

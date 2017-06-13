@@ -106,11 +106,38 @@ PyObject* THPCppFunction_register_hook(PyObject* self, PyObject* hook)
   return registerFunctionHook(fn, hook);
 }
 
+PyObject* THPCppFunction_next_functions(THPCppFunction* self, PyObject* hook)
+{
+  auto& next_functions = self->cdata->next_functions;
+  auto num_next = next_functions.size();
+  THPObjectPtr py_functions = PyTuple_New(num_next);
+  if (!py_functions) return NULL;
+  for (size_t i = 0; i < num_next; ++i) {
+    auto& c_tuple = next_functions[i];
+    THPObjectPtr tuple = PyTuple_New(2);
+    if (!tuple) return NULL;
+    PyObject *py_fn = functionToPyObject(c_tuple.first);
+    if (!py_fn) return NULL;
+    PyTuple_SET_ITEM(tuple.get(), 0, py_fn);
+    PyObject *py_idx = PyLong_FromLong(c_tuple.second);
+    if (!py_idx) return NULL;
+    PyTuple_SET_ITEM(tuple.get(), 1, py_idx);
+    PyTuple_SET_ITEM(py_functions.get(), i, tuple.release());
+  }
+  return py_functions.release();
+}
+
+
 } // namespace
 
 static struct PyMethodDef THPCppFunction_methods[] = {
   {(char*)"_register_hook_dict", (PyCFunction)THPCppFunction_register_hook_dict, METH_O, NULL},
   {(char*)"register_hook", (PyCFunction)THPCppFunction_register_hook, METH_O, NULL},
+  {NULL}
+};
+
+static struct PyGetSetDef THPCppFunction_properties[] = {
+  {(char*)"next_functions", (getter)THPCppFunction_next_functions, NULL, NULL, NULL},
   {NULL}
 };
 
@@ -121,6 +148,7 @@ PyTypeObject* _initFunctionPyTypeObject(PyTypeObject& type, const char* name)
   type.tp_basicsize = sizeof(THPCppFunction);
   type.tp_call = THPCppFunction_call;
   type.tp_methods = THPCppFunction_methods;
+  type.tp_getset = THPCppFunction_properties;
   type.tp_dealloc = THPCppFunction_dealloc;
   type.tp_traverse = THPCppFunction_traverse;
   type.tp_clear = THPCppFunction_clear;
@@ -135,14 +163,14 @@ static std::unordered_map<std::type_index, THPObjectPtr> cpp_function_types;
 
 PyObject* functionToPyObject(std::shared_ptr<Function> cdata)
 {
+  if (!cdata) {
+    Py_RETURN_NONE;
+  }
+
   if (auto pfw = dynamic_cast<PyFunction*>(cdata.get())) {
     PyObject* obj = pfw->obj;
     Py_INCREF(obj);
     return obj;
-  }
-
-  if (auto var = std::dynamic_pointer_cast<Variable>(cdata)) {
-    return THPVariable_Wrap(var);
   }
 
   auto it = cpp_function_types.find(std::type_index(typeid(*cdata)));

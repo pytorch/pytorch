@@ -1059,7 +1059,7 @@ Get the k-th diagonal of a given matrix::
 
 add_docstr(torch._C.dist,
            """
-dist(input, other, p=2, out=None) -> Tensor
+dist(input, other, p=2) -> float
 
 Returns the p-norm of (:attr:`input` - :attr:`other`)
 
@@ -1067,7 +1067,6 @@ Args:
     input (Tensor): the input `Tensor`
     other (Tensor): the Right-hand-side input `Tensor`
     p (float, optional): The norm to be computed.
-    out (Tensor, optional): The result `Tensor`
 
 Example::
 
@@ -1758,12 +1757,14 @@ add_docstr(torch._C.kthvalue,
            """
 kthvalue(input, k, dim=None, out=None) -> (Tensor, LongTensor)
 
-Returns the :attr:`k`th smallest element of the given :attr:`input` Tensor along a given dimension.
+Returns the :attr:`k` th smallest element of the given :attr:`input` Tensor along a given dimension.
 
 If :attr:`dim` is not given, the last dimension of the `input` is chosen.
 
 A tuple of `(values, indices)` is returned, where the `indices` is the indices of
-the kth-smallest element in the original `input` Tensor in dimention `dim`.
+the kth-smallest element in the original `input` Tensor in dimention `dim`.  Both the
+:attr:`values` and :attr:`indices` tensors are the same size as :attr:`input` except in
+the dimension :attr:`dim` where they are of size 1.
 
 Args:
     input (Tensor): the input `Tensor`
@@ -1793,6 +1794,21 @@ Example::
     [torch.LongTensor of size 1]
     )
 
+    >>> x=torch.arange(1,7).resize_(2,3)
+    >>> x
+
+    1  2  3
+    4  5  6
+    [torch.FloatTensor of size 2x3]
+
+    >>> torch.kthvalue(x,2,0)
+    (
+    4  5  6
+    [torch.FloatTensor of size 1x3]
+           ,
+    1  1  1
+    [torch.LongTensor of size 1x3]
+    )
 """)
 
 add_docstr(torch._C.le,
@@ -3673,6 +3689,9 @@ will be of shape: :math:`(A x B x C x D)`
 When :attr:`dim` is given, a squeeze operation is done only in the given dimension.
 If `input` is of shape: :math:`(A x 1 x B)`, `squeeze(input, 0)` leaves the Tensor unchanged,
 but `squeeze(input, 1)` will squeeze the tensor to the shape :math:`(A x B)`.
+
+.. note:: As an exception to the above, a 1-dimensional tensor of size 1 will not
+          have its dimensions changed.
 
 .. note:: The returned Tensor shares the storage with the input Tensor,
           so changing the contents of one will change the contents of the other.

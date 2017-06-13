@@ -3,8 +3,7 @@
 #include "../common/CommandChannel.hpp"
 #include "../../base/DataChannel.hpp"
 
-#include <THPP/Storage.hpp>
-#include <THPP/Tensor.hpp>
+#include <THPP/THPP.h>
 
 #include <memory>
 
@@ -14,4 +13,6 @@ extern std::unordered_map<object_id_type, std::unique_ptr<thpp::Tensor>>
   workerTensors;
 extern std::unordered_map<object_id_type, std::unique_ptr<thpp::Storage>>
   workerStorages;
+extern std::unordered_map<object_id_type, std::unique_ptr<thpp::Generator>>
+  workerGenerators;
 }} // namespace worker, thd

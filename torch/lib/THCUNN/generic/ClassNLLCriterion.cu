@@ -32,8 +32,8 @@ void THNN_(ClassNLLCriterion_updateOutput)(
 
   THArgCheck(n_dims <= 2 && n_dims > 0, 2, "vector or matrix expected");
 
-  long batch_size = n_dims == 1 ? 1 : THCTensor_(size)(state, input, 0);
-  long num_targets = THCudaLongTensor_size(state, target, 0);
+  int64_t batch_size = n_dims == 1 ? 1 : THCTensor_(size)(state, input, 0);
+  int64_t num_targets = THCudaLongTensor_size(state, target, 0);
   THArgCheck(batch_size == num_targets,
       2, "mismatch between the batch size of input (%ld) and that of target (%ld)",
       batch_size, num_targets);
@@ -119,8 +119,8 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
 
   THArgCheck(n_dims <= 2 && n_dims > 0, 2, "vector or matrix expected");
 
-  long batch_size = n_dims == 1 ? 1 : THCTensor_(size)(state, input, 0);
-  long num_targets = THCudaLongTensor_size(state, target, 0);
+  int64_t batch_size = n_dims == 1 ? 1 : THCTensor_(size)(state, input, 0);
+  int64_t num_targets = THCudaLongTensor_size(state, target, 0);
   THArgCheck(batch_size == num_targets,
       2, "mismatch between the batch size of input (%ld) and that of target (%ld)",
       batch_size, num_targets);

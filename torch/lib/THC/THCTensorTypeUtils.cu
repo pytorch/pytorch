@@ -7,8 +7,8 @@
 namespace {
 
 struct SizeAndStride {
-  long size;
-  long stride;
+  int64_t size;
+  int64_t stride;
 };
 
 int compareSizeAndStride(const void* a, const void* b) {
@@ -86,14 +86,14 @@ TensorUtils<TENSOR_TYPE>::getNumElements(THCState* state,               \
   return TENSOR_TYPE##_nElement(state, t);                              \
 }                                                                       \
                                                                         \
-long                                                                    \
+int64_t                                                                    \
 TensorUtils<TENSOR_TYPE>::getSize(THCState* state,                      \
                                   TENSOR_TYPE* t,                       \
                                   int dim) {                            \
   return TENSOR_TYPE##_size(state, t, dim);                             \
 }                                                                       \
                                                                         \
-long                                                                    \
+int64_t                                                                    \
 TensorUtils<TENSOR_TYPE>::getStride(THCState* state,                    \
                                     TENSOR_TYPE* t,                     \
                                     int dim) {                          \
@@ -175,7 +175,7 @@ TensorUtils<TENSOR_TYPE>::overlappingIndices(THCState* state,           \
   int dims = TensorUtils<TENSOR_TYPE>::getDims(state, t);               \
   int nonSize1Dims = 0;                                                 \
   for (int i = 0; i < dims; ++i) {                                      \
-    long size = TensorUtils<TENSOR_TYPE>::getSize(state, t, i);         \
+    int64_t size = TensorUtils<TENSOR_TYPE>::getSize(state, t, i);         \
     if (size > 1) {                                                     \
       info[nonSize1Dims].size = size;                                   \
       info[nonSize1Dims].stride =                                       \
@@ -248,11 +248,11 @@ TensorUtils<TENSOR_TYPE>::all32BitIndexable(THCState* state,            \
   return true;                                                          \
 }
 
-IMPL_TENSOR_UTILS(THCudaByteTensor, unsigned char)
-IMPL_TENSOR_UTILS(THCudaCharTensor, char)
-IMPL_TENSOR_UTILS(THCudaShortTensor, short)
-IMPL_TENSOR_UTILS(THCudaIntTensor, int)
-IMPL_TENSOR_UTILS(THCudaLongTensor, long)
+IMPL_TENSOR_UTILS(THCudaByteTensor, uint8_t)
+IMPL_TENSOR_UTILS(THCudaCharTensor, int8_t)
+IMPL_TENSOR_UTILS(THCudaShortTensor, int16_t)
+IMPL_TENSOR_UTILS(THCudaIntTensor, int32_t)
+IMPL_TENSOR_UTILS(THCudaLongTensor, int64_t)
 IMPL_TENSOR_UTILS(THCudaTensor, float)
 IMPL_TENSOR_UTILS(THCudaDoubleTensor, double)
 
