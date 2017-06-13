@@ -232,7 +232,7 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
   }
 
   THLongStorage *indicesSize = THLongStorage_newWithSize(4);
-  long indicesSizeRaw[4] = { batchSize * inputSlices,
+  int64_t indicesSizeRaw[4] = { batchSize * inputSlices,
                             outputTime, outputHeight, outputWidth };
   THLongStorage_rawCopy(indicesSize, indicesSizeRaw);
 
@@ -350,7 +350,7 @@ void THNN_(VolumetricDilatedMaxPooling_updateGradInput)(
   }
 
   THLongStorage *indicesSize = THLongStorage_newWithSize(4);
-  long indicesSizeRaw[4] = { batchSize * inputSlices,
+  int64_t indicesSizeRaw[4] = { batchSize * inputSlices,
                            outputTime, outputHeight, outputWidth };
   THLongStorage_rawCopy(indicesSize, indicesSizeRaw);
   THCIndexTensor *indices1 = THCIndexTensor_(newWithStorage)(

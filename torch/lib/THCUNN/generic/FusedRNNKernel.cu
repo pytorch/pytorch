@@ -590,10 +590,10 @@ void THNN_(LSTMFused_updateOutput)(
   }
 
   if(canUse32bi){
-    THNN_(LSTM_forw_ind_wrap)<unsigned int>
+    THNN_(LSTM_forw_ind_wrap)<uint32_t>
       (state, input, hidden, bias1, bias2, cx, hy, cy);
   }else{
-    THNN_(LSTM_forw_ind_wrap)<unsigned long>
+    THNN_(LSTM_forw_ind_wrap)<uint64_t>
       (state, input, hidden, bias1, bias2, cx, hy, cy);
   }
     THCudaCheck(cudaGetLastError());
@@ -672,11 +672,11 @@ void THNN_(LSTMFused_updateGradInput)(
      gradOutput, gradOutputCell, gradInput);
 
   if(canUse32bi){
-    THNN_(LSTM_back_ind_wrap)<unsigned int>
+    THNN_(LSTM_back_ind_wrap)<uint32_t>
       (state, input, hidden, cx, cy,
        gradOutput, gradOutputCell, gradInput);
   }else{
-    THNN_(LSTM_back_ind_wrap)<unsigned long>
+    THNN_(LSTM_back_ind_wrap)<uint64_t>
       (state, input, hidden, cx, cy,
        gradOutput, gradOutputCell, gradInput);
   }
@@ -780,10 +780,10 @@ void THNN_(GRUFused_updateOutput)(
   }
 
   if(canUse32bi){
-    THNN_(GRU_forw_ind_wrap)<unsigned int>
+    THNN_(GRU_forw_ind_wrap)<uint32_t>
       (state, input, hidden, bias1, bias2, hx, hy);
   }else{
-    THNN_(GRU_forw_ind_wrap)<unsigned long>
+    THNN_(GRU_forw_ind_wrap)<uint64_t>
       (state, input, hidden, bias1, bias2, hx, hy);
   }
 
@@ -838,10 +838,10 @@ void THNN_(GRUFused_updateGradInput)(
   THNN_(FusedRNNAssertSizes)(state, 3, 4, input, hidden, gradOutput, gradInput);
   bool canUse32bi = THNN_(canUse32BitIndexMath)(state, 4, input, hidden, gradOutput, gradInput);
   if(canUse32bi){
-    THNN_(GRU_back_ind_wrap)<unsigned int>
+    THNN_(GRU_back_ind_wrap)<uint32_t>
       (state, input, hidden, gradOutput, gradInput);
   }else{
-    THNN_(GRU_back_ind_wrap)<unsigned long>
+    THNN_(GRU_back_ind_wrap)<uint64_t>
       (state, input, hidden, gradOutput, gradInput);
   }
 

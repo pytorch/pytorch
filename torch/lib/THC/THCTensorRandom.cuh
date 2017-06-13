@@ -42,13 +42,13 @@ __global__ void generateLogNormal<double>(curandStateMtgp32 *state, int size, do
 
 // Normalizes the L1 norm of every row to 1; used by multinomial
 template <typename T>
-__global__ void renormRowsL1(T* dist, long rows, long cols) {
+__global__ void renormRowsL1(T* dist, int64_t rows, int64_t cols) {
   extern __shared__ __align__(sizeof(T)) unsigned char my_smem[];
   T *smem = reinterpret_cast<T *>(my_smem);
 
-  for (long row = blockIdx.x; row < rows; row += gridDim.x) {
+  for (int64_t row = blockIdx.x; row < rows; row += gridDim.x) {
     T sum = ScalarConvert<int, T>::to(0);
-    for (long col = threadIdx.x; col < cols; col += blockDim.x) {
+    for (int64_t col = threadIdx.x; col < cols; col += blockDim.x) {
       sum = THCNumerics<T>::add(sum, dist[row * cols + col]);
     }
 
@@ -60,7 +60,7 @@ __global__ void renormRowsL1(T* dist, long rows, long cols) {
 
     sum = smem[0];
     if (THCNumerics<T>::gt(sum, ScalarConvert<int, T>::to(0))) {
-      for (long col = threadIdx.x; col < cols; col += blockDim.x) {
+      for (int64_t col = threadIdx.x; col < cols; col += blockDim.x) {
         dist[row * cols + col] = THCNumerics<T>::div(dist[row * cols + col], sum);
       }
     }
@@ -99,8 +99,8 @@ __device__ int binarySearchForMultinomial(T* dist,
 
 template <typename T, typename AccT>
 __global__ void
-sampleMultinomialOnce(long* dest,
-                      long distributions,
+sampleMultinomialOnce(int64_t* dest,
+                      int64_t distributions,
                       int categories,
                       T* sampled,
                       T* dist) {
@@ -115,7 +115,7 @@ sampleMultinomialOnce(long* dest,
   AccT accZero = ScalarConvert<int, AccT>::to(0);
   T zero = ScalarConvert<int, T>::to(0);
 
-  for (long curDist = blockIdx.x;
+  for (int64_t curDist = blockIdx.x;
        curDist < distributions; curDist += gridDim.x) {
     // Each block handles one distribution
     // First pass, find the total sum of the distribution
@@ -230,8 +230,8 @@ template <typename T>
 __global__ void
 sampleMultinomialWithReplacement(curandStateMtgp32* state,
                                  int totalSamples,
-                                 long* dest,
-                                 long distributions,
+                                 int64_t* dest,
+                                 int64_t distributions,
                                  int categories,
                                  T* normDistPrefixSum) {
   // At the moment, each warp computes one sample value in the binary
@@ -241,7 +241,7 @@ sampleMultinomialWithReplacement(curandStateMtgp32* state,
   // call to update the generator state.
 
   // The block determines the distribution for which we generate a point
-  for (long curDist = blockIdx.x;
+  for (int64_t curDist = blockIdx.x;
        curDist < distributions;
        curDist += gridDim.x) {
     for (int sampleBase = 0;
@@ -271,8 +271,8 @@ __global__ void
 sampleMultinomialWithoutReplacement(curandStateMtgp32* state,
                                     int totalSamples,
                                     int sample,
-                                    long* dest,
-                                    long distributions,
+                                    int64_t* dest,
+                                    int64_t distributions,
                                     int categories,
                                     T* origDist,
                                     T* normDistPrefixSum) {
@@ -284,11 +284,11 @@ sampleMultinomialWithoutReplacement(curandStateMtgp32* state,
 
   // The block and warp determines the distribution for which we
   // generate a point
-  for (long curDistBase = blockIdx.x * blockDim.y;
+  for (int64_t curDistBase = blockIdx.x * blockDim.y;
        curDistBase < distributions;
        curDistBase += gridDim.x * blockDim.y) {
     // The warp determines the distribution
-    long curDist = curDistBase + threadIdx.y;
+    int64_t curDist = curDistBase + threadIdx.y;
 
     // All threads must participate in this
     T r = ScalarConvert<float, T>::to(curand_uniform(&state[blockIdx.x]));

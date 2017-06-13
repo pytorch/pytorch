@@ -3,6 +3,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
+#include <functional>
 #include <iostream>
 #include <mutex>
 #include <set>
@@ -22,15 +23,22 @@ using thpp::Tensor;
 
 namespace torch { namespace autograd {
 
-struct FunctionTask {
-  BackwardTask* base;
-  std::shared_ptr<Function> fn;
-  GradBuffer grad;
+// XXX: Changes to the way multithreading works in execute should be done with
+// great care. Right now the implementation guarantees that a single function's
+// apply will never be entered concurrently (even if multiple graphs are
+// executed at the same time). Adding multiple threads per-device or removing
+// engine thread affinity to the device can break this invariant, and we depend
+// on it in a few places (e.g. AccumulateGrad function).
 
-  FunctionTask(BackwardTask* base, std::shared_ptr<Function> fn, GradBuffer grad)
+struct FunctionTask {
+  GraphTask* base;
+  std::shared_ptr<Function> fn;
+  InputBuffer inputs;
+
+  FunctionTask(GraphTask* base, std::shared_ptr<Function> fn, InputBuffer inputs)
     : base(base)
     , fn(fn)
-    , grad(std::move(grad)) {}
+    , inputs(std::move(inputs)) {}
 };
 
 struct ReadyQueue {
@@ -42,26 +50,28 @@ struct ReadyQueue {
   FunctionTask pop_back();
 };
 
-struct BackwardTask {
+struct GraphTask {
   std::exception_ptr exception;
   std::atomic_bool has_error;
   std::atomic<uint64_t> outstanding_tasks;
-  bool retain_variables;
-  bool node_requires_grad;
+  bool keep_graph;
+  bool has_any_work;
 
   std::mutex mutex;
   std::condition_variable not_done;
-  std::unordered_map<Function*, GradBuffer> not_ready;
+  const Engine::callback_map& function_callbacks;
+  std::unordered_map<Function*, InputBuffer> not_ready;
   std::unordered_map<Function*, int> dependencies;
 
-  BackwardTask(bool retain_variables)
+  GraphTask(bool keep_graph, const Engine::callback_map& function_callbacks)
     : exception()
     , has_error(false)
     , outstanding_tasks(0)
-    , retain_variables(retain_variables)
-    , node_requires_grad(false)
+    , keep_graph(keep_graph)
+    , has_any_work(false)
     , mutex()
     , not_done()
+    , function_callbacks(function_callbacks)
     , not_ready()
     , dependencies() {}
 };
@@ -113,78 +123,73 @@ auto Engine::thread_on_exception(FunctionTask& task, std::exception& e) -> void 
   }
 }
 
-static variable_list call_pre_hooks(Function& fn, variable_list grad_output) {
+static variable_list call_pre_hooks(Function& fn, variable_list inputs) {
   for (auto& hook : fn.pre_hooks) {
-    grad_output = (*hook)(grad_output);
+    inputs = (*hook)(inputs);
   }
-  return grad_output;
+  return inputs;
 }
 
-static variable_list call_post_hooks(Function& fn, variable_list grad_input, variable_list grad_output) {
+static variable_list call_post_hooks(Function& fn, variable_list outputs, variable_list inputs) {
   for (auto& hook : fn.post_hooks) {
-    grad_input = (*hook)(grad_input, grad_output);
+    outputs = (*hook)(outputs, inputs);
   }
-  return grad_input;
+  return outputs;
 }
 
 static variable_list call_function(FunctionTask& task) {
-  auto grad_output = call_pre_hooks(*task.fn, GradBuffer::variables(std::move(task.grad)));
-  auto grad_input = task.fn->apply(grad_output);
-  return call_post_hooks(*task.fn, std::move(grad_input), std::move(grad_output));
+  auto& fn = *task.fn;
+  auto inputs = call_pre_hooks(fn, InputBuffer::variables(std::move(task.inputs)));
+
+  auto& function_callbacks = task.base->function_callbacks;
+  auto callback_it = function_callbacks.find(&fn);
+  if (callback_it != function_callbacks.end()) {
+    auto& callback = callback_it->second;
+    if (!callback(&fn, inputs)) return variable_list(fn.next_functions.size());
+  }
+
+  auto fn_outputs = fn.apply(inputs);
+  return call_post_hooks(fn, std::move(fn_outputs), std::move(inputs));
 }
 
 auto Engine::evaluate_function(FunctionTask& task) -> void {
-  auto grad_inputs = call_function(task);
+  auto outputs = call_function(task);
 
   auto& fn = *task.fn;
-  if (!task.base->retain_variables) {
+  if (!task.base->keep_graph) {
     fn.releaseVariables();
   }
 
-  if (grad_inputs.size() != fn.previous_functions.size()) {
+  if (outputs.size() != fn.next_functions.size()) {
     std::stringstream ss;
-    ss << "Function '" << fn.name() << "' returned an invalid number of gradients - expected ";
-    ss << fn.previous_functions.size() << ", but got " << grad_inputs.size();
+    ss << "Function '" << fn.name() << "' returned an invalid number of outputs - expected ";
+    ss << fn.next_functions.size() << ", but got " << outputs.size();
     throw std::runtime_error(ss.str());
   }
 
-  int size = grad_inputs.size();
-  for (int i = 0; i < size; ++i) {
-    auto& grad_input = grad_inputs[i];
-    auto& prev_fn = fn.previous_functions[i].first;
-    int output_nr = fn.previous_functions[i].second;
+  int num_outputs = outputs.size();
+  for (int i = 0; i < num_outputs; ++i) {
+    auto& output = outputs[i];
+    auto& next_fn = fn.next_functions[i].first;
+    int input_nr = fn.next_functions[i].second;
 
-    // null inputs have no previous_function and we skip them here
-    if (!prev_fn) {
+    if (!next_fn) {
       continue;
     }
 
     // Stochastic functions are placed in the ready queue by
-    // compute_dependencies, so we can skip them here.
-    if (prev_fn->is_stochastic || !prev_fn->requires_grad) {
+    // compute_dependencies, so we have to skip them here.
+    if (next_fn->is_stochastic || !next_fn->is_executable) {
       continue;
     }
 
     std::lock_guard<std::mutex> lock(task.base->mutex);
-    if (auto var = dynamic_cast<Variable*>(prev_fn.get())) {
-      if (!grad_input) {
-        // NOTE: grad_input can be NULL if the function returns None for a
-        // non_differentiable input. We may need to track additional information
-        // at the function level to determine if a NULL grad_input is an error.
-        std::stringstream ss;
-        ss << "Function '" << fn.name() << "' missing gradient at " << i;
-        throw std::runtime_error(ss.str());
-      }
-      var->backward(grad_input);
-      continue;
-    }
-
-    // Check if the function is ready for backward
+    // Check if the next function is ready to be computed
     bool is_ready = false;
     auto& dependencies = task.base->dependencies;
-    auto it = dependencies.find(prev_fn.get());
+    auto it = dependencies.find(next_fn.get());
     if (it == dependencies.end()) {
-      auto name = prev_fn->name();
+      auto name = next_fn->name();
       throw std::runtime_error(std::string("dependency not found for ") + name);
     } else if (--it->second == 0) {
       dependencies.erase(it);
@@ -192,24 +197,24 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
     }
 
     auto& not_ready = task.base->not_ready;
-    auto not_ready_it = not_ready.find(prev_fn.get());
+    auto not_ready_it = not_ready.find(next_fn.get());
     if (not_ready_it == not_ready.end()) {
       // No buffers have been allocated for the function
-      GradBuffer prev_buffer(prev_fn->num_outputs);
-      prev_buffer.addGrad(output_nr, std::move(grad_input));
+      InputBuffer input_buffer(next_fn->num_inputs);
+      input_buffer.add(input_nr, std::move(output));
       if (is_ready) {
-        auto& queue = ready_queue(prev_buffer.device());
-        queue.push_front(FunctionTask(task.base, prev_fn, std::move(prev_buffer)));
+        auto& queue = ready_queue(input_buffer.device());
+        queue.push_front(FunctionTask(task.base, next_fn, std::move(input_buffer)));
       } else {
-        not_ready.emplace(prev_fn.get(), std::move(prev_buffer));
+        not_ready.emplace(next_fn.get(), std::move(input_buffer));
       }
     } else {
       // The function already has a buffer
-      auto &prev_buffer = not_ready_it->second;
-      prev_buffer.addGrad(output_nr, std::move(grad_input));
+      auto &input_buffer = not_ready_it->second;
+      input_buffer.add(input_nr, std::move(output));
       if (is_ready) {
-        auto& queue = ready_queue(prev_buffer.device());
-        queue.push_front(FunctionTask(task.base, prev_fn, std::move(prev_buffer)));
+        auto& queue = ready_queue(input_buffer.device());
+        queue.push_front(FunctionTask(task.base, next_fn, std::move(input_buffer)));
         not_ready.erase(not_ready_it);
       }
     }
@@ -217,30 +222,30 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
 }
 
 /** Finds all stochastic functions and appends them to the queue */
-auto Engine::find_stochastic_functions(function_queue& queue, BackwardTask& task) -> void {
+auto Engine::find_stochastic_functions(function_queue& queue, GraphTask& task) -> void {
   std::unordered_set<Function*> seen;
   function_queue search_queue(queue);
   while (search_queue.size() > 0) {
     auto fn = search_queue.back(); search_queue.pop_back();
-    for (auto& prev_fn_pair : fn->previous_functions) {
-      auto& prev_fn = prev_fn_pair.first;
-      Function* prev_ptr = prev_fn.get();
-      if (!prev_ptr) continue;
-      if (prev_ptr->is_stochastic && prev_ptr->requires_grad && seen.count(prev_ptr) == 0) {
-        ready_queue(-1).push_front(FunctionTask(&task, prev_fn, GradBuffer(0)));
-        queue.push_back(prev_ptr);
-        task.node_requires_grad = true;
+    for (auto& next_fn_pair : fn->next_functions) {
+      auto& next_fn = next_fn_pair.first;
+      Function* next_ptr = next_fn.get();
+      if (!next_ptr) continue;
+      if (next_ptr->is_stochastic && next_ptr->is_executable && seen.count(next_ptr) == 0) {
+        ready_queue(-1).push_front(FunctionTask(&task, next_fn, InputBuffer(0)));
+        queue.push_back(next_ptr);
+        task.has_any_work = true;
       }
-      if (seen.count(prev_ptr) == 0) {
-        seen.insert(prev_ptr);
-        search_queue.push_back(prev_ptr);
+      if (seen.count(next_ptr) == 0) {
+        seen.insert(next_ptr);
+        search_queue.push_back(next_ptr);
       }
     }
   }
 }
 
 /** Computes the number of dependencies for each function which requires grad */
-auto Engine::compute_dependencies(function_queue queue, BackwardTask& task) -> void {
+auto Engine::compute_dependencies(function_queue queue, GraphTask& task) -> void {
   // Just to make sure that they will never be added to the queue again
   std::unordered_set<Function*> seen(queue.begin(), queue.end());
 
@@ -249,97 +254,88 @@ auto Engine::compute_dependencies(function_queue queue, BackwardTask& task) -> v
   auto& dependencies = task.dependencies;
   while (queue.size() > 0) {
     auto fn = std::move(queue.back()); queue.pop_back();
-    // This is needed only to filter out backward roots that don't require grad
-    if (!fn->requires_grad) continue;
-    for (auto& prev_fn_pair : fn->previous_functions) {
-      Function* prev_ptr = prev_fn_pair.first.get();
-      if (!prev_ptr) continue;
-      if (dynamic_cast<Variable*>(prev_ptr)) continue;
-      if (!prev_ptr->requires_grad) continue;
-      if (prev_ptr->is_stochastic) continue; // Stochastic nodes were in the queue already
-      dependencies[prev_ptr] += 1;
-      if (seen.count(prev_ptr) == 0) {
-        seen.insert(prev_ptr);
-        queue.push_back(prev_ptr);
+    // This is needed only to filter out roots that aren't executable
+    if (!fn->is_executable) continue;
+    for (auto& next_fn_pair : fn->next_functions) {
+      Function* next_ptr = next_fn_pair.first.get();
+      if (!next_ptr) continue;
+      if (!next_ptr->is_executable) continue;
+      if (next_ptr->is_stochastic) continue; // Stochastic nodes were in the queue already
+      dependencies[next_ptr] += 1;
+      if (seen.count(next_ptr) == 0) {
+        seen.insert(next_ptr);
+        queue.push_back(next_ptr);
       }
     }
   }
 }
 
-auto Engine::find_creators(const variable_list& variables,
-                           tensor_list& grad_variables,
-                           BackwardTask& task) -> function_queue {
-  function_queue creators;
-  std::unordered_map<std::shared_ptr<Function>, std::unique_ptr<GradBuffer>> creator_grad;
-  int size = variables.size();
-  for (int i = 0; i < size; ++i) {
-    auto& var = variables[i];
-    auto& grad = grad_variables[i];
-    if (!var->creator) {
-      // If someone calls .backward() on a leaf, it's simple...
-      if (var->requires_grad) {
-        var->backward(std::make_shared<Variable>(std::move(grad), false, true));
-        task.node_requires_grad = true;
-      }
-    } else {
-      auto& creator = var->creator;
-      auto& buf = creator_grad[creator];
-      if (creator->requires_grad) {
-        if (!buf) buf.reset(new GradBuffer(creator->num_outputs));
-        buf->addGrad(var->output_nr, Variable::of(std::move(grad)));
-      }
+auto Engine::find_roots(const function_list& input_roots,
+                        variable_list& inputs,
+                        GraphTask& task) -> function_queue {
+  std::unordered_map<std::shared_ptr<Function>, std::unique_ptr<InputBuffer>> root_value;
+  int num_inputs = input_roots.size();
+  for (int i = 0; i < num_inputs; ++i) {
+    auto& input = inputs[i];
+    auto& root_info = input_roots[i];
+    auto root = root_info.first;
+    int input_nr = root_info.second;
+    auto& buf = root_value[root];
+    if (root->is_executable) {
+      if (!buf) buf.reset(new InputBuffer(root->num_inputs));
+      buf->add(input_nr, std::shared_ptr<Variable>(input));
     }
   }
 
-  for (auto& entry: creator_grad) {
-    const auto& creator = entry.first;
-    creators.push_back(creator.get());
-    if (creator->requires_grad) {
-      // NOTE: buf is null if creator doesn't require gradient
-      auto& buf = entry.second;
-      auto& queue = ready_queue(buf->device());
-      queue.push_front(FunctionTask(&task, creator, std::move(*buf)));
-      task.node_requires_grad = true;
-    }
+  function_queue roots;
+  for (auto& entry: root_value) {
+    const auto& root = entry.first;
+    roots.push_back(root.get());
+    // no need to enqueue tasks for non-executable functions
+    if (!root->is_executable) continue;
+    auto& input_buf = entry.second;
+    auto& queue = ready_queue(input_buf->device());
+    queue.push_front(FunctionTask(&task, root, std::move(*input_buf)));
+    task.has_any_work = true;
   }
 
-  return creators;
+  return roots;
 }
 
-auto Engine::backward(const variable_list& variables,
-                      tensor_list& grad_variables,
-                      bool retain_variables) -> void {
-  static std::once_flag once_flag;
-  std::call_once(once_flag, &Engine::start_threads, this);
+auto Engine::execute(const function_list& input_roots,
+                     variable_list& inputs,
+                     bool keep_graph,
+                     const callback_map& callbacks) -> void {
+  std::call_once(start_threads_flag, &Engine::start_threads, this);
 
-  BackwardTask backward_task(retain_variables);
-  std::unique_lock<std::mutex> lock(backward_task.mutex);
+  GraphTask graph_task(keep_graph, callbacks);
+  std::unique_lock<std::mutex> lock(graph_task.mutex);
 
-  // Find the unique creators and backprop into variables which don't have creators.
-  auto creators = find_creators(variables, grad_variables, backward_task);
+  // Find the unique roots and backprop into variables.
+  function_queue roots = find_roots(input_roots, inputs, graph_task);
 
   // Search the graph and find all stochastic functions. Append them to the queue.
-  find_stochastic_functions(creators, backward_task);
+  find_stochastic_functions(roots, graph_task);
 
-  if (!backward_task.node_requires_grad) {
+  if (!graph_task.has_any_work) {
     throw std::runtime_error(
       "there are no graph nodes that require computing gradients");
   }
 
-  // Now compute the dependencies for each function which requires grad
-  compute_dependencies(std::move(creators), backward_task);
+  // Now compute the dependencies for all executable functions
+  compute_dependencies(std::move(roots), graph_task);
 
-  // wait for all tasks to complete
-  backward_task.not_done.wait(lock, [&backward_task]{
-    return backward_task.outstanding_tasks.load() == 0;
+  // Wait for all tasks to complete
+  graph_task.not_done.wait(lock, [&graph_task]{
+    return graph_task.outstanding_tasks.load() == 0;
   });
 
-  // check for an exception while running backwards
-  if (backward_task.has_error.load()) {
-    std::rethrow_exception(backward_task.exception);
+  // Check for an exception while running backwards
+  if (graph_task.has_error.load()) {
+    std::rethrow_exception(graph_task.exception);
   }
 
-  if (!backward_task.not_ready.empty()) {
+  if (!graph_task.not_ready.empty()) {
     throw std::runtime_error("could not compute gradients for some functions");
   }
 }

@@ -11,7 +11,8 @@ class cwrap(object):
 
     RETURN_WRAPPERS = {
         'void': Template('Py_RETURN_NONE;'),
-        'long': Template('return PyLong_FromLong($result);'),
+        'long': Template('return PyLong_FromLongLong($result);'),
+        'int64_t': Template('return PyLong_FromLongLong($result);'),
         'bool': Template('return PyBool_FromLong($result);'),
         'void*': Template('return PyLong_FromVoidPtr($result);'),
     }
@@ -35,11 +36,11 @@ class cwrap(object):
     DEFAULT_PLUGIN_CLASSES = [ArgcountChecker, ConstantArguments, OptionalArguments,
                               ArgumentReferences, BeforeAfterCall, ReturnArguments, GILRelease]
 
-    def __init__(self, source, destination=None, plugins=[], default_plugins=True):
+    def __init__(self, source, destination=None, plugins=None, default_plugins=True):
         if destination is None:
             destination = source.replace('.cwrap', '.cpp')
 
-        self.plugins = plugins
+        self.plugins = [] if plugins is None else plugins
         if default_plugins:
             defaults = [cls() for cls in self.DEFAULT_PLUGIN_CLASSES]
             self.plugins = defaults + self.plugins
@@ -51,7 +52,10 @@ class cwrap(object):
         with open(source, 'r') as f:
             declarations = f.read()
 
+        # wrap all the declarations in the source .cwrap file
         wrapper = self.wrap_declarations(declarations)
+
+        # let each plugin do any post-processing of the wrapped file
         for plugin in self.plugins:
             wrapper = plugin.process_full_file(wrapper)
 
@@ -136,6 +140,10 @@ class cwrap(object):
         return new_args
 
     def search_plugins(self, fnname, args, fallback):
+        """Search plugins for the given function to call with args.
+
+        If not found, call fallback with args.
+        """
         for plugin in self.plugins:
             wrapper = getattr(plugin, fnname)(*args)
             if wrapper is not None:

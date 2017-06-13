@@ -39,7 +39,7 @@ struct ConvForward : public Function, public ConvParams {
 
   virtual variable_list apply(const variable_list& inputs) override;
 
-  std::vector<long> output_size(thpp::Tensor& input, thpp::Tensor& weight);
+  std::vector<int64_t> output_size(thpp::Tensor& input, thpp::Tensor& weight);
 };
 
 struct ConvBackward : public Function, public ConvParams {
@@ -54,12 +54,15 @@ struct ConvBackward : public Function, public ConvParams {
       std::unique_ptr<torch::cudnn::Convolution> convolution)
     : Function(std::move(flags))
     , ConvParams(std::move(params))
-    , input_(std::move(input))
-    , weight_(std::move(weight))
-    , bias_(std::move(bias))
-    , columns(std::move(columns))
-    , ones(std::move(ones))
-    , convolution(std::move(convolution)) {}
+    , convolution(std::move(convolution)) {
+      if (is_executable) {
+        this->input_ = std::move(input);
+        this->weight_ = std::move(weight);
+        this->bias_ = std::move(bias);
+        this->columns = std::move(columns);
+        this->ones = std::move(ones);
+      }
+    }
 
   virtual variable_list apply(const variable_list& gradOutputs) override;
 

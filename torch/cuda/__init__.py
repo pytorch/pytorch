@@ -12,6 +12,7 @@ import contextlib
 import platform
 import ctypes
 import os
+import sys
 import torch
 from multiprocessing.util import register_after_fork as _register_after_fork
 
@@ -35,7 +36,10 @@ def _sleep(cycles):
 
 def _load_cudart():
     # First check the main program for CUDA symbols
-    lib = ctypes.cdll.LoadLibrary(None)
+    if sys.platform == "win32":
+        lib = ctypes.cdll.LoadLibrary('cudart64_80')
+    else:
+        lib = ctypes.cdll.LoadLibrary(None)
     if hasattr(lib, 'cudaGetErrorName'):
         return lib
 

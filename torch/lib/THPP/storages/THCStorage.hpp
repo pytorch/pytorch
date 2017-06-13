@@ -22,7 +22,8 @@ struct thc_storage_traits {};
 template<typename real>
 struct THCStorage : public interface_traits<real>::storage_interface_type {
   template<typename U>
-  friend class THCTensor;
+  friend struct THCTensor;
+
 private:
   using interface_type = typename interface_traits<real>::storage_interface_type;
 public:
@@ -41,7 +42,7 @@ public:
   virtual THCStorage& retain() override;
   virtual THCStorage& free() override;
 
-  virtual THCStorage& resize(long new_size) override;
+  virtual THCStorage& resize(int64_t new_size) override;
   virtual THCStorage& fill(scalar_type value) override;
   virtual THCStorage& set(std::size_t ind, scalar_type value) override;
   virtual THCStorage& fast_set(std::size_t ind, scalar_type value) override;

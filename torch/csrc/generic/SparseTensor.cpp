@@ -67,7 +67,7 @@ static PyObject * THSPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
 
   // torch.SparseTensor(size)
   if (num_args == 1 && THPUtils_checkLong(first_arg)) {
-    long size = THPUtils_unpackLong(first_arg);
+    int64_t size = THPUtils_unpackLong(first_arg);
     self->cdata = THSTensor_(newWithSize1d)(LIBRARY_STATE size);
   }
   // torch.SparseTensor(torch.Size sizes)

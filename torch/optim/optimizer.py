@@ -57,7 +57,7 @@ class Optimizer(object):
                 if not param.requires_grad:
                     raise ValueError("optimizing a parameter that doesn't "
                                      "require gradients")
-                if param.creator is not None:
+                if not param.is_leaf:
                     raise ValueError("can't optimize a non-leaf Variable")
 
     def __getstate__(self):
@@ -134,6 +134,7 @@ class Optimizer(object):
             for param in group['params']:
                 if param.grad is not None:
                     param.grad.data.zero_()
+                    param.grad.detach_()
 
     def step(self, closure):
         """Performs a single optimization step (parameter update).

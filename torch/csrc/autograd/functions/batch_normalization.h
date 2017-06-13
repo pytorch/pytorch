@@ -34,12 +34,15 @@ struct BatchNormBackward : public Function, public BatchNormParams {
       SavedVariable weight,
       SavedVariable bias)
     : Function(std::move(flags))
-    , BatchNormParams(std::move(params))
-    , save_mean(std::move(save_mean))
-    , save_std(std::move(save_std))
-    , input(std::move(input))
-    , weight(std::move(weight))
-    , bias(std::move(bias)) {}
+    , BatchNormParams(std::move(params)) {
+      if (is_executable) {
+        this->save_mean = std::move(save_mean);
+        this->save_std = std::move(save_std);
+        this->input = std::move(input);
+        this->weight = std::move(weight);
+        this->bias = std::move(bias);
+      }
+    }
 
   virtual variable_list apply(const variable_list& gradOutputs) override;
 

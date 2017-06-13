@@ -56,7 +56,7 @@ static std::unordered_map<std::string, Type> type_names = {
   {"Char", Type::CHAR},
   {"Short", Type::SHORT},
   {"Int", Type::INT},
-  {"Long", Type::LONG},
+  {"Long", Type::LONG_LONG},
 };
 static std::unordered_map<PyTypeObject*, TensorType> pytype_to_tensortype;
 static std::unordered_map<TensorType, PyTypeObject*, TensorTypeHasher> tensortype_to_pytype;
@@ -88,15 +88,15 @@ static std::unique_ptr<Tensor> createTensor(void *tensor, Type type, bool is_cud
 #ifdef WITH_CUDA
     if (is_sparse) {
       if (type == Type::UCHAR) {
-        return std::unique_ptr<Tensor>(new THCSTensor<unsigned char>(state, (THCSByteTensor*)tensor));
+        return std::unique_ptr<Tensor>(new THCSTensor<uint8_t>(state, (THCSByteTensor*)tensor));
       } else if (type == Type::CHAR) {
-        return std::unique_ptr<Tensor>(new THCSTensor<char>(state, (THCSCharTensor*)tensor));
+        return std::unique_ptr<Tensor>(new THCSTensor<int8_t>(state, (THCSCharTensor*)tensor));
       } else if (type == Type::SHORT) {
-        return std::unique_ptr<Tensor>(new THCSTensor<short>(state, (THCSShortTensor*)tensor));
+        return std::unique_ptr<Tensor>(new THCSTensor<int16_t>(state, (THCSShortTensor*)tensor));
       } else if (type == Type::INT) {
-        return std::unique_ptr<Tensor>(new THCSTensor<int>(state, (THCSIntTensor*)tensor));
+        return std::unique_ptr<Tensor>(new THCSTensor<int32_t>(state, (THCSIntTensor*)tensor));
       } else if (type == Type::LONG) {
-        return std::unique_ptr<Tensor>(new THCSTensor<long>(state, (THCSLongTensor*)tensor));
+        return std::unique_ptr<Tensor>(new THCSTensor<int64_t>(state, (THCSLongTensor*)tensor));
       } else if (type == Type::FLOAT) {
         return std::unique_ptr<Tensor>(new THCSTensor<float>(state, (THCSFloatTensor*)tensor));
       } else if (type == Type::DOUBLE) {
@@ -105,15 +105,15 @@ static std::unique_ptr<Tensor> createTensor(void *tensor, Type type, bool is_cud
         return std::unique_ptr<Tensor>(new THCSTensor<half>(state, (THCSHalfTensor*)tensor));
       }
     } else if (type == Type::UCHAR) {
-      return std::unique_ptr<Tensor>(new THCTensor<unsigned char>(state, (THCudaByteTensor*)tensor));
+      return std::unique_ptr<Tensor>(new THCTensor<uint8_t>(state, (THCudaByteTensor*)tensor));
     } else if (type == Type::CHAR) {
-      return std::unique_ptr<Tensor>(new THCTensor<char>(state, (THCudaCharTensor*)tensor));
+      return std::unique_ptr<Tensor>(new THCTensor<int8_t>(state, (THCudaCharTensor*)tensor));
     } else if (type == Type::SHORT) {
-      return std::unique_ptr<Tensor>(new THCTensor<short>(state, (THCudaShortTensor*)tensor));
+      return std::unique_ptr<Tensor>(new THCTensor<int16_t>(state, (THCudaShortTensor*)tensor));
     } else if (type == Type::INT) {
-      return std::unique_ptr<Tensor>(new THCTensor<int>(state, (THCudaIntTensor*)tensor));
-    } else if (type == Type::LONG) {
-      return std::unique_ptr<Tensor>(new THCTensor<long>(state, (THCudaLongTensor*)tensor));
+      return std::unique_ptr<Tensor>(new THCTensor<int32_t>(state, (THCudaIntTensor*)tensor));
+    } else if (type == Type::LONG_LONG) {
+      return std::unique_ptr<Tensor>(new THCTensor<int64_t>(state, (THCudaLongTensor*)tensor));
     } else if (type == Type::FLOAT) {
       return std::unique_ptr<Tensor>(new THCTensor<float>(state, (THCudaTensor*)tensor));
     } else if (type == Type::DOUBLE) {
@@ -126,30 +126,30 @@ static std::unique_ptr<Tensor> createTensor(void *tensor, Type type, bool is_cud
 #endif
   } else if (is_sparse) {
     if (type == Type::UCHAR) {
-      return std::unique_ptr<Tensor>(new THSTensor<unsigned char>((THSByteTensor*)tensor));
+      return std::unique_ptr<Tensor>(new THSTensor<uint8_t>((THSByteTensor*)tensor));
     } else if (type == Type::CHAR) {
-      return std::unique_ptr<Tensor>(new THSTensor<char>((THSCharTensor*)tensor));
+      return std::unique_ptr<Tensor>(new THSTensor<int8_t>((THSCharTensor*)tensor));
     } else if (type == Type::SHORT) {
-      return std::unique_ptr<Tensor>(new THSTensor<short>((THSShortTensor*)tensor));
+      return std::unique_ptr<Tensor>(new THSTensor<int16_t>((THSShortTensor*)tensor));
     } else if (type == Type::INT) {
-      return std::unique_ptr<Tensor>(new THSTensor<int>((THSIntTensor*)tensor));
-    } else if (type == Type::LONG) {
-      return std::unique_ptr<Tensor>(new THSTensor<long>((THSLongTensor*)tensor));
+      return std::unique_ptr<Tensor>(new THSTensor<int32_t>((THSIntTensor*)tensor));
+    } else if (type == Type::LONG_LONG) {
+      return std::unique_ptr<Tensor>(new THSTensor<int64_t>((THSLongTensor*)tensor));
     } else if (type == Type::FLOAT) {
       return std::unique_ptr<Tensor>(new THSTensor<float>((THSFloatTensor*)tensor));
     } else if (type == Type::DOUBLE) {
       return std::unique_ptr<Tensor>(new THSTensor<double>((THSDoubleTensor*)tensor));
     }
   } else if (type == Type::UCHAR) {
-    return std::unique_ptr<Tensor>(new THTensor<unsigned char>((THByteTensor*)tensor));
+    return std::unique_ptr<Tensor>(new THTensor<uint8_t>((THByteTensor*)tensor));
   } else if (type == Type::CHAR) {
-    return std::unique_ptr<Tensor>(new THTensor<char>((THCharTensor*)tensor));
+    return std::unique_ptr<Tensor>(new THTensor<int8_t>((THCharTensor*)tensor));
   } else if (type == Type::SHORT) {
-    return std::unique_ptr<Tensor>(new THTensor<short>((THShortTensor*)tensor));
+    return std::unique_ptr<Tensor>(new THTensor<int16_t>((THShortTensor*)tensor));
   } else if (type == Type::INT) {
-    return std::unique_ptr<Tensor>(new THTensor<int>((THIntTensor*)tensor));
-  } else if (type == Type::LONG) {
-    return std::unique_ptr<Tensor>(new THTensor<long>((THLongTensor*)tensor));
+    return std::unique_ptr<Tensor>(new THTensor<int32_t>((THIntTensor*)tensor));
+  } else if (type == Type::LONG_LONG) {
+    return std::unique_ptr<Tensor>(new THTensor<int64_t>((THLongTensor*)tensor));
   } else if (type == Type::FLOAT) {
     return std::unique_ptr<Tensor>(new THTensor<float>((THFloatTensor*)tensor));
   } else if (type == Type::DOUBLE) {

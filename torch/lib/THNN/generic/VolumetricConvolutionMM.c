@@ -38,14 +38,14 @@ static void inline THNN_(VolumetricConvolutionMM_shapeCheck)(
     dimw++;
   }
 
-  long nInputPlane;
-  long inputDepth;
-  long inputHeight;
-  long inputWidth;
-  long nOutputPlane;
-  long outputDepth;
-  long outputHeight;
-  long outputWidth;
+  int64_t nInputPlane;
+  int64_t inputDepth;
+  int64_t inputHeight;
+  int64_t inputWidth;
+  int64_t nOutputPlane;
+  int64_t outputDepth;
+  int64_t outputHeight;
+  int64_t outputWidth;
 
   nInputPlane = input->size[dimf];
   inputDepth = input->size[dimt];
@@ -86,8 +86,8 @@ static int THNN_(view_weight)(THTensor **_weight)
 {
   THTensor *weight = *_weight;
   if (weight->nDimension == 5) {
-    long s1 = weight->size[0];
-    long s2 = weight->size[1] * weight->size[2] * weight->size[3] * weight->size[4];
+    int64_t s1 = weight->size[0];
+    int64_t s2 = weight->size[1] * weight->size[2] * weight->size[3] * weight->size[4];
     *_weight = THTensor_(newWithStorage2d)(weight->storage, weight->storageOffset, s1, -1, s2, -1);
     return 1;
   }
@@ -202,7 +202,7 @@ static void THNN_(unfolded_copy_vol)(
           int outputWidth,
           int outputHeight)
 {
-  long k;
+  int64_t k;
   real *input_data = THTensor_(data)(input);
   real *finput_data = THTensor_(data)(finput);
 // #pragma omp parallel for private(k)
@@ -275,16 +275,16 @@ static void THNN_(VolumetricConvolutionMM_updateOutput_frame)(
           int pT,
           int pW,
           int pH,
-          long nInputPlane,
-          long inputDepth,
-          long inputWidth,
-          long inputHeight,
-          long nOutputPlane,
-          long outputDepth,
-          long outputWidth,
-          long outputHeight)
+          int64_t nInputPlane,
+          int64_t inputDepth,
+          int64_t inputWidth,
+          int64_t inputHeight,
+          int64_t nOutputPlane,
+          int64_t outputDepth,
+          int64_t outputWidth,
+          int64_t outputHeight)
 {
-  long i;
+  int64_t i;
   THTensor *output2d;
 
   THNN_(unfolded_copy_vol)(
@@ -343,14 +343,14 @@ void THNN_(VolumetricConvolutionMM_updateOutput)(
   int dimw = 3;
   int freeWeight = 0;
 
-  long nInputPlane;
-  long inputDepth;
-  long inputHeight;
-  long inputWidth;
-  long nOutputPlane;
-  long outputDepth;
-  long outputHeight;
-  long outputWidth;
+  int64_t nInputPlane;
+  int64_t inputDepth;
+  int64_t inputHeight;
+  int64_t inputWidth;
+  int64_t nOutputPlane;
+  int64_t outputDepth;
+  int64_t outputHeight;
+  int64_t outputWidth;
 
   THNN_(VolumetricConvolutionMM_shapeCheck)(
         state, input, NULL, weight, bias,
@@ -392,8 +392,8 @@ void THNN_(VolumetricConvolutionMM_updateOutput)(
   }
   else
   {
-    long T = input->size[0];
-    long t;
+    int64_t T = input->size[0];
+    int64_t t;
 
     THTensor_(resize3d)(finput, T, kT*kW*kH*nInputPlane, outputDepth*outputHeight*outputWidth);
     THTensor_(resize5d)(output, T, nOutputPlane, outputDepth, outputHeight, outputWidth);
@@ -509,8 +509,8 @@ void THNN_(VolumetricConvolutionMM_updateGradInput)(
   }
   else
   {
-    long T = input->size[0];
-    long t;
+    int64_t T = input->size[0];
+    int64_t t;
 
 //#pragma omp parallel for private(t)
     for (t = 0; t < T; t++)
@@ -546,7 +546,7 @@ static void THNN_(VolumetricConvolutionMM_accGradParameters_frame)(
           THTensor *finput,
           real scale)
 {
-  long i;
+  int64_t i;
   THTensor *gradOutput2d = THTensor_(newWithStorage2d)(
     gradOutput->storage, gradOutput->storageOffset,
     gradOutput->size[0], -1,
@@ -561,7 +561,7 @@ static void THNN_(VolumetricConvolutionMM_accGradParameters_frame)(
   if (gradBias) {
     for (i = 0; i < gradBias->size[0]; i++)
     {
-      long k;
+      int64_t k;
       real sum = 0;
       real *data = gradOutput2d->storage->data + gradOutput2d->storageOffset + i*gradOutput2d->stride[0];
       for (k = 0; k < gradOutput2d->size[1]; k++)
@@ -604,8 +604,8 @@ void THNN_(VolumetricConvolutionMM_accGradParameters)(
   }
   else  // batch mode
   {
-    long T = input->size[0];
-    long t;
+    int64_t T = input->size[0];
+    int64_t t;
 
     for (t = 0; t < T; t++)
     {

@@ -2,7 +2,7 @@
   name: getDevice
   python_name: get_device
   defined_if: IS_CUDA
-  return: long
+  return: int
   arguments:
     - THTensor* self
 ]]

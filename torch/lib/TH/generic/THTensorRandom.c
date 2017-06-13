@@ -5,15 +5,15 @@
 void THTensor_(random)(THTensor *self, THGenerator *_generator)
 {
 #if defined(TH_REAL_IS_BYTE)
-  TH_TENSOR_APPLY(real, self, *self_data = (unsigned char)(THRandom_random(_generator) % (UCHAR_MAX+1)););
+  TH_TENSOR_APPLY(real, self, *self_data = (uint8_t)(THRandom_random(_generator) % (UINT8_MAX+1)););
 #elif defined(TH_REAL_IS_CHAR)
-  TH_TENSOR_APPLY(real, self, *self_data = (char)(THRandom_random(_generator) % (CHAR_MAX+1)););
+  TH_TENSOR_APPLY(real, self, *self_data = (int8_t)(THRandom_random(_generator) % (INT8_MAX+1)););
 #elif defined(TH_REAL_IS_SHORT)
-  TH_TENSOR_APPLY(real, self, *self_data = (short)(THRandom_random(_generator) % (SHRT_MAX+1)););
+  TH_TENSOR_APPLY(real, self, *self_data = (int16_t)(THRandom_random(_generator) % (INT16_MAX+1)););
 #elif defined(TH_REAL_IS_INT)
-  TH_TENSOR_APPLY(real, self, *self_data = (int)(THRandom_random(_generator) % (INT_MAX+1UL)););
+  TH_TENSOR_APPLY(real, self, *self_data = (int32_t)(THRandom_random(_generator) % (INT32_MAX+1UL)););
 #elif defined(TH_REAL_IS_LONG)
-  TH_TENSOR_APPLY(real, self, *self_data = (long)(THRandom_random(_generator) % (LONG_MAX+1UL)););
+  TH_TENSOR_APPLY(real, self, *self_data = (int64_t)THRandom_random(_generator););
 #elif defined(TH_REAL_IS_FLOAT)
   TH_TENSOR_APPLY(real, self, *self_data = (float)(THRandom_random(_generator) % ((1UL << FLT_MANT_DIG)+1)););
 #elif defined(TH_REAL_IS_DOUBLE)
@@ -73,8 +73,8 @@ void THTensor_(logNormal)(THTensor *self, THGenerator *_generator, double mean, 
 void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTensor *prob_dist, int n_sample, int with_replacement)
 {
   int start_dim = THTensor_(nDimension)(prob_dist);
-  long n_dist;
-  long n_categories;
+  int n_dist;
+  int n_categories;
   THDoubleTensor* cum_dist;
   int i,j,k;
 
@@ -83,8 +83,8 @@ void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTenso
     THTensor_(resize2d)(prob_dist, 1, THTensor_(size)(prob_dist, 0));
   }
 
-  n_dist = THTensor_(size)(prob_dist, 0);
-  n_categories = THTensor_(size)(prob_dist, 1);
+  n_dist = (int) THTensor_(size)(prob_dist, 0);
+  n_categories = (int) THTensor_(size)(prob_dist, 1);
 
   THArgCheck(n_sample > 0, 2, "cannot sample n_sample < 0 samples");
 

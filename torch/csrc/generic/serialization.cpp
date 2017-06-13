@@ -2,25 +2,25 @@
 #define TH_GENERIC_FILE "generic/serialization.cpp"
 #else
 
-#define SYSCHECK(call) { ssize_t __result = call; if (__result < 0) throw std::system_error(__result, std::system_category()); }
+#define SYSCHECK(call) { ssize_t __result = call; if (__result < 0) throw std::system_error((int) __result, std::system_category()); }
 
 void THPTensor_(writeMetadataRaw)(THTensor *self, int fd)
 {
-  SYSCHECK(write(fd, &self->nDimension, sizeof(long)));
-  SYSCHECK(write(fd, self->size, sizeof(long) * self->nDimension));
-  SYSCHECK(write(fd, self->stride, sizeof(long) * self->nDimension));
-  SYSCHECK(write(fd, &self->storageOffset, sizeof(long)));
+  SYSCHECK(write(fd, &self->nDimension, sizeof(int64_t)));
+  SYSCHECK(write(fd, self->size, sizeof(int64_t) * self->nDimension));
+  SYSCHECK(write(fd, self->stride, sizeof(int64_t) * self->nDimension));
+  SYSCHECK(write(fd, &self->storageOffset, sizeof(int64_t)));
 }
 
 THTensor * THPTensor_(newWithMetadataFileRaw)(int fd, THStorage *storage)
 {
   THTensorPtr tensor = THTensor_(new)(LIBRARY_STATE_NOARGS);
-  SYSCHECK(read(fd, &tensor->nDimension, sizeof(long)));
-  tensor->size = (long*)THAlloc(tensor->nDimension * sizeof(long));
-  tensor->stride = (long*)THAlloc(tensor->nDimension * sizeof(long));
-  SYSCHECK(read(fd, tensor->size, sizeof(long) * tensor->nDimension));
-  SYSCHECK(read(fd, tensor->stride, sizeof(long) * tensor->nDimension));
-  SYSCHECK(read(fd, &tensor->storageOffset, sizeof(long)));
+  SYSCHECK(read(fd, &tensor->nDimension, sizeof(int64_t)));
+  tensor->size = (int64_t*)THAlloc(tensor->nDimension * sizeof(int64_t));
+  tensor->stride = (int64_t*)THAlloc(tensor->nDimension * sizeof(int64_t));
+  SYSCHECK(read(fd, tensor->size, sizeof(int64_t) * tensor->nDimension));
+  SYSCHECK(read(fd, tensor->stride, sizeof(int64_t) * tensor->nDimension));
+  SYSCHECK(read(fd, &tensor->storageOffset, sizeof(int64_t)));
   THStorage_(retain)(LIBRARY_STATE storage);
   tensor->storage = storage;
   return tensor.release();
