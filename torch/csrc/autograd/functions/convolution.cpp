@@ -127,7 +127,7 @@ static std::unique_ptr<Tensor> subtensor(Tensor* tensor, int dim, int groups, in
   if (!tensor) {
     return nullptr;
   }
-  long n = tensor->sizes()[dim] / groups;
+  long n = tensor->rawSizes()[dim] / groups;
   auto result = tensor->newTensor();
   result->narrow(*tensor, dim, n * g, n);
   return result->contiguous();
@@ -417,7 +417,7 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
   if (ggb) {
     // View as (1, ggb.size(0), 1, 1...)
     std::vector<long> new_size(gO->data->nDim(), 1);
-    new_size[1] = ggb->data->sizes()[0];
+    new_size[1] = ggb->data->rawSizes()[0];
     auto ggb_contiguous = std::make_shared<Contiguous>()->apply({ggb})[0];
     auto ggb_view = std::make_shared<View>(new_size)->apply({ggb_contiguous})[0];
 
