@@ -636,12 +636,30 @@ static THIndexTensor* THPTensor_(_calculateLinearIndices)(
   for (ptrdiff_t i = 0; i < indexingElements; ++i) {
     long linearIdx = THTensor_(storageOffset)(LIBRARY_STATE indexed);
     for (int j = broadcasted.size() - 1; j >= 0; --j) {
+      // Given a series of broadcasted Tensors, we take the jth tensor from the sequence (representing
+      // the indices at dim j) and grab the ith value (used in generating the ith output value)
       THIndexTensor *indexer = THIndexTensor_(newContiguous)(LIBRARY_STATE broadcasted.at(j));
 
       // The indexing tensor might not be one-dimensional, but we are generating a vector of
       // indices, so we need to view the indexer as 1D prior to getting the value for the
       // particular dimension
       THIndexTensor *oned = THIndexTensor_(newView)(LIBRARY_STATE indexer, indexerSize);
+
+      // Actually laod the value, and verify it is not out-of-bounds
+      long indexAtDim = THIndexTensor_(get1d)(LIBRARY_STATE oned, i);
+      long dimSize = THTensor_(size)(LIBRARY_STATE indexed, j);
+      if (indexAtDim >= dimSize) {
+        PyErr_Format(PyExc_IndexError, "index %lld from broadcast indexer is out of range "
+            "for dimension %lld (of size %lld)",
+            (long long)indexAtDim, (long long)j, (long long)dimSize);
+
+        THIndexTensor_(free)(LIBRARY_STATE oned);
+        THIndexTensor_(free)(LIBRARY_STATE indexer);
+        THLongStorage_free(indexerSize);
+        THIndexTensor_(free)(LIBRARY_STATE linearIndices);
+        return NULL;
+      }
+
       linearIdx += THTensor_(stride)(LIBRARY_STATE indexed, j) * THIndexTensor_(get1d)(LIBRARY_STATE oned, i);
       THIndexTensor_(free)(LIBRARY_STATE oned);
       THIndexTensor_(free)(LIBRARY_STATE indexer);
@@ -677,6 +695,9 @@ static bool THPTensor_(_advancedIndexCommonInit)(
   // the linear indices for each tuple of indexing elements, and then call
   // indexSelect using those linear indices
   *linearIndices = THPTensor_(_calculateLinearIndices)(indexed, broadcasted);
+  if (*linearIndices == NULL) {
+    return false;
+  }
 
   *flattened = THTensor_(newWithStorage1d)(LIBRARY_STATE
                                            THTensor_(storage)(LIBRARY_STATE indexed.get()),
