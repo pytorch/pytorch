@@ -165,6 +165,93 @@ py::object fetchBlob(Workspace* ws, const std::string& name) {
 }
 }
 
+void printPythonStackTrace() {
+  PyObject *type = nullptr, *value = nullptr, *trace = nullptr;
+  PyErr_Fetch(&type, &value, &trace);
+  PyTracebackObject* traceback = reinterpret_cast<PyTracebackObject*>(trace);
+  vector<PyTracebackObject*> trace_vec;
+  while (traceback) {
+    trace_vec.push_back(traceback);
+    traceback = traceback->tb_next;
+  }
+  for (int i = trace_vec.size() - 1; i >= 0; --i) {
+    int line = trace_vec[i]->tb_lineno;
+    const char* filename;
+    const char* funcname;
+    if (PyUnicode_Check(trace_vec[i]->tb_frame->f_code->co_filename)) {
+      auto encoded = PyUnicode_AsEncodedString(
+          trace_vec[i]->tb_frame->f_code->co_filename, "ASCII", "replace");
+      if (encoded != nullptr) {
+        filename = strdup(PyBytes_AS_STRING(encoded));
+        Py_DECREF(encoded);
+      } else {
+        filename = "<unknown>";
+      }
+    } else {
+      filename = PyBytes_AsString(trace_vec[i]->tb_frame->f_code->co_filename);
+    }
+    if (PyUnicode_Check(trace_vec[i]->tb_frame->f_code->co_name)) {
+      auto encoded = PyUnicode_AsEncodedString(
+          trace_vec[i]->tb_frame->f_code->co_name, "ASCII", "replace");
+      if (encoded != nullptr) {
+        funcname = strdup(PyBytes_AS_STRING(encoded));
+        Py_DECREF(encoded);
+      } else {
+        funcname = "<unknown>";
+      }
+    } else {
+      funcname = PyBytes_AsString(trace_vec[i]->tb_frame->f_code->co_name);
+    }
+
+    LOG(ERROR) << "    # " << trace_vec.size() - i - 1 << "  " << filename
+               << " (" << line << "): " << funcname;
+  }
+  Py_XDECREF(type);
+  Py_XDECREF(value);
+  Py_XDECREF(trace);
+}
+
+PythonOpBase::PythonOpBase(
+    const OperatorDef& operator_def,
+    Workspace* ws,
+    const std::string& pickled_builder_arg_name)
+    : Operator(operator_def, ws),
+      ws_(ws),
+      token_(OperatorBase::GetSingleArgument<std::string>("token", "")) {
+  using namespace python_detail;
+  auto pickled = GetSingleArgument<string>(pickled_builder_arg_name, "");
+  CAFFE_ENFORCE(
+      !pickled.empty() || !token_.empty(),
+      "PythonOp requires either pickled_builder or token arg.");
+  if (!pickled.empty()) {
+    py::gil_scoped_acquire g;
+    try {
+      auto pickle =
+          py::object(PyImport_ImportModule("pickle"), /* borrowed */ false);
+      CAFFE_ENFORCE(pickle);
+      auto loads = pickle.attr("loads").cast<py::object>();
+      CAFFE_ENFORCE(loads);
+      auto builder_call = loads(pickled).cast<py::tuple>();
+      CAFFE_ENFORCE(builder_call);
+      CAFFE_ENFORCE_EQ(py::len(builder_call), 3);
+      auto func = builder_call[0].cast<py::object>();
+      auto args = builder_call[1].cast<py::tuple>();
+      auto kwargs = builder_call[2].cast<py::dict>();
+      auto built_func = func(*args, **kwargs);
+      CAFFE_ENFORCE(built_func);
+      built_func_.reset(new Func{
+          built_func, GetSingleArgument<bool>("pass_workspace", false)});
+    } catch (const py::error_already_set& e) {
+      LOG(ERROR) << "Python exception encountered while creating PythonOp: "
+                 << e.what() << "\nTraceback: ";
+      printPythonStackTrace();
+      CAFFE_THROW("Python exception encountered while creating PythonOp.");
+    }
+  }
+}
+
+PythonOpBase::~PythonOpBase() {}
+
 bool PythonOpBase::RunOnDevice() {
   std::vector<TensorCPU*> inputs;
   inputs.reserve(InputSize());
@@ -176,79 +263,32 @@ bool PythonOpBase::RunOnDevice() {
   for (auto i = 0; i < OutputSize(); ++i) {
     outputs.push_back(Output(i));
   }
-  auto& pyFunc = getFunc();
+  auto* pyFunc = built_func_ ? built_func_.get() : &getFunc(token_);
+  CAFFE_ENFORCE(pyFunc);
   {
     // Acquire GIL for call to Python runtime.
     py::gil_scoped_acquire g;
     try {
-      if (pyFunc.needs_workspace) {
-        pyFunc.py_func(inputs, outputs, ws_);
+      if (pyFunc->needs_workspace) {
+        pyFunc->py_func(inputs, outputs, ws_);
       } else {
-        pyFunc.py_func(inputs, outputs);
+        pyFunc->py_func(inputs, outputs);
       }
     } catch (const py::error_already_set& e) {
       LOG(ERROR) << "Exception encountered running PythonOp function: "
                  << e.what() << "\nTraceback: ";
-      PyObject *type = nullptr, *value = nullptr, *trace = nullptr;
-      PyErr_Fetch(&type, &value, &trace);
-      PyTracebackObject* traceback =
-          reinterpret_cast<PyTracebackObject*>(trace);
-      vector<PyTracebackObject*> trace_vec;
-      while (traceback) {
-        trace_vec.push_back(traceback);
-        traceback = traceback->tb_next;
-      }
-      for (int i = trace_vec.size() - 1; i >= 0; --i) {
-        int line = trace_vec[i]->tb_lineno;
-        const char* filename;
-        const char* funcname;
-        if (PyUnicode_Check(trace_vec[i]->tb_frame->f_code->co_filename)) {
-          auto encoded = PyUnicode_AsEncodedString(
-              trace_vec[i]->tb_frame->f_code->co_filename, "ASCII", "replace");
-          if (encoded != nullptr) {
-            filename = strdup(PyBytes_AS_STRING(encoded));
-            Py_DECREF(encoded);
-          } else {
-            filename = "<unknown>";
-          }
-        } else {
-          filename =
-              PyBytes_AsString(trace_vec[i]->tb_frame->f_code->co_filename);
-        }
-        if (PyUnicode_Check(trace_vec[i]->tb_frame->f_code->co_name)) {
-          auto encoded = PyUnicode_AsEncodedString(
-              trace_vec[i]->tb_frame->f_code->co_name, "ASCII", "replace");
-          if (encoded != nullptr) {
-            funcname = strdup(PyBytes_AS_STRING(encoded));
-            Py_DECREF(encoded);
-          } else {
-            funcname = "<unknown>";
-          }
-        } else {
-          funcname = PyBytes_AsString(trace_vec[i]->tb_frame->f_code->co_name);
-        }
-
-        LOG(ERROR) << "    # " << trace_vec.size() - i - 1 << "  " << filename
-                   << " (" << line << "): " << funcname;
-      }
-      Py_XDECREF(type);
-      Py_XDECREF(value);
-      Py_XDECREF(trace);
+      printPythonStackTrace();
       return false;
     }
   }
   return true;
 }
 
-const python_detail::Func& PythonOp::getFunc() {
-  const std::string& token =
-      OperatorBase::GetSingleArgument<std::string>("token", "");
+const python_detail::Func& PythonOp::getFunc(const std::string& token) {
   return python_detail::getOpFunc(token);
 }
 
-const python_detail::Func& PythonGradientOp::getFunc() {
-  const std::string& token =
-      OperatorBase::GetSingleArgument<std::string>("token", "");
+const python_detail::Func& PythonGradientOp::getFunc(const std::string& token) {
   return python_detail::getGradientFunc(token);
 }
 
