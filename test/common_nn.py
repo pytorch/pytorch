@@ -260,6 +260,18 @@ criterion_tests = [
         desc='weights'
     ),
     dict(
+        module_name='BCEWithLogitsLoss',
+        input=torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2),
+        target=torch.randn(15, 10).gt(0).double()
+    ),
+    dict(
+        module_name='BCEWithLogitsLoss',
+        constructor_args=(torch.rand(10),),
+        input=torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2),
+        target=torch.randn(15, 10).gt(0).double(),
+        desc='weights'
+    ),
+    dict(
         module_name='CrossEntropyLoss',
         input=torch.randn(15, 10),
         target=torch.Tensor(15).uniform_().mul(10).floor().long()
