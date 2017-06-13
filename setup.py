@@ -85,8 +85,8 @@ class build_deps(Command):
             build_all_cmd += ['--with-nccl']
         if WITH_DISTRIBUTED:
             build_all_cmd += ['--with-distributed']
-        # if subprocess.call(build_all_cmd) != 0:
-        #     sys.exit(1)
+        if subprocess.call(build_all_cmd) != 0:
+            sys.exit(1)
         generate_nn_wrappers()
 
 
