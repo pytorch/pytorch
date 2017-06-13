@@ -461,6 +461,12 @@ Loss functions
 .. autoclass:: BCELoss
     :members:
 
+:hidden:`BCEWithLogitsLoss`
+~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: BCEWithLogitsLoss
+    :members:
+
 :hidden:`MarginRankingLoss`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -861,6 +867,11 @@ Loss functions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: binary_cross_entropy
+
+:hidden:`binary_cross_entropy_with_logits`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: binary_cross_entropy_with_logits
 
 :hidden:`smooth_l1_loss`
 ~~~~~~~~~~~~~~~~~~~~~~~~
