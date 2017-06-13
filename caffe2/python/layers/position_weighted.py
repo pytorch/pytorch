@@ -5,14 +5,19 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+import logging
+import numpy as np
+
 from caffe2.python import core, schema
 from caffe2.python.layers.layers import (
+    get_categorical_limit,
     LayerParameter,
     ModelLayer,
 )
 
 from caffe2.python.layers.tags import Tags
-import numpy as np
+
+logger = logging.getLogger(__name__)
 
 
 class PositionWeighted(ModelLayer):
@@ -20,9 +25,18 @@ class PositionWeighted(ModelLayer):
                  name="position_weights"):
         super(PositionWeighted, self).__init__(model, name, input_record)
 
-        # TODO: Replace this with correct estimation after we compute
-        # cardinality from run_meta
-        self.shape = 2000
+        assert isinstance(input_record, schema.List), "Incorrect input type"
+        length_metadata = input_record.lengths.metadata
+        max_length = (length_metadata.categorical_limit if length_metadata is
+                      not None else None)
+        if max_length is not None:
+            self.shape = max_length
+        else:
+            self.shape = get_categorical_limit(input_record)
+            logger.warning(
+                '{}: categorical_limit of lengths is not available, using '
+                'categorical_limit of the keys: {}'.format(
+                    str(input_record.lengths()), self.shape))
 
         self.pos_w = model.net.NextScopedBlob(name + "_pos_w")
         self.params.append(
