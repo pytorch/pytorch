@@ -4692,7 +4692,7 @@ Example::
 
 add_docstr(torch._C.btrifact,
            """
-btrifact(A, info=None) -> Tensor, IntTensor
+btrifact(A, info=None, pivot=True) -> Tensor, IntTensor
 
 Batch LU factorization.
 
@@ -4701,6 +4701,7 @@ The optional argument `info` provides information if the
 factorization succeeded for each minibatch example.
 The info values are from dgetrf and a non-zero value indicates an error occurred.
 The specific values are from cublas if cuda is being used, otherwise LAPACK.
+Pivoting is done if pivot is set.
 
 Arguments:
     A (Tensor): tensor to factor.
