@@ -7,6 +7,7 @@ __all__ = [
     'split', 'chunk', 'stack', 'unbind', 'btriunpack', 'matmul',
 ]
 
+
 def split(tensor, split_size, dim=0):
     """Splits the tensor into equally sized chunks (if possible).
 
@@ -119,6 +120,7 @@ def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
 
     return P, L, U
 
+
 def matmul(tensor1, tensor2, out=None):
     """Matrix product of two tensors.
 
@@ -163,7 +165,7 @@ def matmul(tensor1, tensor2, out=None):
             return torch.mv(tensor1, tensor2, out=out)
     elif dim_tensor1 == 1 and dim_tensor2 == 2:
         if out is None:
-            return torch.mm(tensor1.unsqueeze(0), tensor2).squeeze(0)
+            return torch.mm(tensor1.unsqueeze(0), tensor2).squeeze_(0)
         else:
             return torch.mm(tensor1.unsqueeze(0), tensor2, out=out).squeeze_(0)
     elif dim_tensor1 == 2 and dim_tensor2 == 2:
@@ -193,9 +195,9 @@ def matmul(tensor1, tensor2, out=None):
 
         def maybeSqueeze(tensor):
             if dim_tensor1 == 1:
-                return tensor.squeeze(-2)
+                return tensor.squeeze_(-2)
             elif dim_tensor2 == 1:
-                return tensor.squeeze(-1)
+                return tensor.squeeze_(-1)
             else:
                 return tensor
 
@@ -211,6 +213,7 @@ def matmul(tensor1, tensor2, out=None):
             # Even though 1) is inconsistent with other functions (e.g. torch.bmm) that will maintain
             # output non-contiguity if the size is correct, we'll do it here for simplicity.
             out = out.contiguous()
-            return torch.bmm(tensor1_expanded, tensor2_expanded, out=out).set_(maybeSqueeze(out.view(*(total_expansion))))
+            return (torch.bmm(tensor1_expanded, tensor2_expanded, out=out).
+                    set_(maybeSqueeze(out.view(*(total_expansion)))))
     raise ValueError("both arguments to __matmul__ need to be at least 1D, "
                      "but they are {}D and {}D".format(dim_tensor1, dim_tensor2))

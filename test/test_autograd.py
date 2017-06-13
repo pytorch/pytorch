@@ -1064,14 +1064,13 @@ class TestAutograd(TestCase):
         test_blas_add(torch.addr, Variable(torch.randn(5, 6)),
                       Variable(torch.randn(5)), Variable(torch.randn(6)))
         test_blas(torch.matmul, Variable(torch.randn(6)), Variable(torch.randn(6)))
-        test_blas(torch.matmul, Variable(torch.randn(10,4)), Variable(torch.randn(4)))
-        test_blas(torch.matmul, Variable(torch.randn(5)), Variable(torch.randn(5,6)))
-        test_blas(torch.matmul, Variable(torch.randn(2,10)), Variable(torch.randn(10,4)))
-        test_blas(torch.matmul, Variable(torch.randn(5,2,10)), Variable(torch.randn(5,10,4)))
-        test_blas(torch.matmul, Variable(torch.randn(3,5,2,10)), Variable(torch.randn(3,5,10,4)))
-        test_blas(torch.matmul, Variable(torch.randn(3,5,2,10)), Variable(torch.randn(10)))
-        test_blas(torch.matmul, Variable(torch.randn(10)), Variable(torch.randn(3,5,10,4)))
-
+        test_blas(torch.matmul, Variable(torch.randn(10, 4)), Variable(torch.randn(4)))
+        test_blas(torch.matmul, Variable(torch.randn(5)), Variable(torch.randn(5, 6)))
+        test_blas(torch.matmul, Variable(torch.randn(2, 10)), Variable(torch.randn(10, 4)))
+        test_blas(torch.matmul, Variable(torch.randn(5, 2, 10)), Variable(torch.randn(5, 10, 4)))
+        test_blas(torch.matmul, Variable(torch.randn(3, 5, 2, 10)), Variable(torch.randn(3, 5, 10, 4)))
+        test_blas(torch.matmul, Variable(torch.randn(3, 5, 2, 10)), Variable(torch.randn(10)))
+        test_blas(torch.matmul, Variable(torch.randn(10)), Variable(torch.randn(3, 5, 10, 4)))
 
     def test_save_none_for_backward(self):
         test_case = self
