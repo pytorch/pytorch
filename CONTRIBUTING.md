@@ -72,17 +72,7 @@ For example:
 
 You do not need to repeatedly install after modifying python files.
 
-If you are working on C files, you will need to build your changes:
-
-```
-(rm -rf build; python setup.py develop)
-```
-
-We recommend removing the `build` directory before rebuilding because
-setup.py's recompilation checking is not great, and it will often fail
-to rebuild C code after you modify code in a `generic` directory.
-
-#### Managing multiple build trees
+## Managing multiple build trees
 
 One downside to using `python setup.py develop` is that your development
 version of pytorch will be installed globally on your account (e.g., if
@@ -101,9 +91,36 @@ source activate pytorch-myfeature
 python setup.py build develop
 ```
 
-#### C++ Development tips
+## C++ Development tips
 
-When you are developing on the C++ side of things, the environment variables `DEBUG` and `NO_CUDA` are helpful.
+If you are working on the C++ code, there are a few important things that you
+will want to keep in mind:
+
+1. How to rebuild only the code you are working on, and
+2. How to make rebuilds in the absence of changes go faster.
+
+### Build only what you need.
+
+`python setup.py build` will build everything, but since our build system is
+not very optimized for incremental rebuilds, this will actually be very slow.
+Far better is to only request rebuilds of the parts of the project you are
+working on:
+
+- Working on `torch/csrc`?  Run `python setup.py build_ext` to rebuild.
+
+- Working on `torch/lib/TH`, did not make any cmake changes, and just want to
+  see if it compiles?  Run `(cd torch/lib/build/TH && make install -j40)`.  This
+  applies for any other subdirectory of `torch/lib`.  **Warning: Changes you
+  make here will not be visible from Python.**  See below.
+
+- Working on `torch/lib` and want to run your changes / rerun cmake?  Run
+  `python setup.py build_deps`.  Note that this will rerun cmake for
+  every subdirectory in TH; if you are only working on one project,
+  consider editing `torch/lib/build_all.sh` and commenting out the
+  `build` lines of libraries you are not working on.
+
+On the initial build, you can also speed things up with the environment
+variables `DEBUG` and `NO_CUDA`.
 
 - `DEBUG=1` will enable debug builds (-g -O0)
 - `NO_CUDA=1` will disable compiling CUDA (in case you are developing on something not CUDA related), to save compile time.
@@ -113,7 +130,15 @@ For example:
 NO_CUDA=1 DEBUG=1 python setup.py build develop
 ```
 
-Also, if you are developing a lot, using ccache is a real time-saver. By default, ccache does not properly support CUDA stuff, so here are the instructions for installing a custom `ccache` fork that has CUDA support:
+Make sure you continue to pass these flags on subsequent builds.
+
+### Make no-op build fast.
+
+Python `setuptools` is pretty dumb, and always rebuilds every C file in a
+project. Using ccache in a situation like this is a real time-saver. However, by
+default, ccache does not properly support CUDA stuff, so here are the
+instructions for installing a custom `ccache` fork that has CUDA support:
+
 ```
 # install and export ccache
 if ! ls ~/ccache/bin/ccache
