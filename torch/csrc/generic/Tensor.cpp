@@ -755,13 +755,7 @@ static bool THPTensor_(_advancedIndexSet)(PyObject *index, THTensorPtr &dest, Py
       // 2. the src is made contiguous before being flattened into a 1D view, if
       // necessary
 
-      THTensor *contiguous;
-      if (THTensor_(isContiguous(LIBRARY_STATE ((THPTensor*)src)->cdata))) {
-        contiguous = THTensor_(newWithTensor)(LIBRARY_STATE ((THPTensor*)src)->cdata);
-      } else {
-        contiguous = THTensor_(newContiguous)(LIBRARY_STATE ((THPTensor*)src)->cdata);
-      }
-
+      THTensor *contiguous = THTensor_(newContiguous)(LIBRARY_STATE ((THPTensor*)src)->cdata);
       THTensor *cviewed = THTensor_(newWithStorage1d)(LIBRARY_STATE
                                                       THTensor_(storage)(LIBRARY_STATE contiguous),
                                                       THTensor_(storageOffset)(LIBRARY_STATE contiguous),
@@ -792,13 +786,7 @@ static bool THPTensor_(_advancedIndexAdd)(PyObject *index, THTensorPtr &dest, TH
 
   if (success) {
     // Verify src tensor is contiguous before flattening
-    THTensor *contiguous;
-    if (THTensor_(isContiguous(LIBRARY_STATE src))) {
-      contiguous = THTensor_(newWithTensor)(LIBRARY_STATE src);
-    } else {
-      contiguous = THTensor_(newContiguous)(LIBRARY_STATE src);
-    }
-
+    THTensor *contiguous = THTensor_(newContiguous)(LIBRARY_STATE src);
     THTensor *cviewed = THTensor_(newWithStorage1d)(LIBRARY_STATE
                                                     THTensor_(storage)(LIBRARY_STATE contiguous),
                                                     THTensor_(storageOffset)(LIBRARY_STATE contiguous),
