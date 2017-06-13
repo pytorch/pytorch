@@ -4,6 +4,7 @@
 
 THC_API void
 THCTensor_(copy)(THCState* state, THCTensor* dst, THCTensor* src) {
+  if (dst == src) return;
   THC_copyTensor<THCTensor, THCTensor>(state, dst, src);
 }
 
