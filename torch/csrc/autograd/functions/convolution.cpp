@@ -246,11 +246,18 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
   check_input_variables("ConvNdBackward", grad_outputs, 1);
   if (is_padding_neg()) throw std::runtime_error("negative padding is not supported");
   if (is_output_padding_neg()) throw std::runtime_error("negative output_padding is not supported");
-  auto input = input_.unpack_data();
+
+  auto input_var = input_.unpack();
+  auto weight_var = weight_.unpack();
+  auto bias_var = bias_.unpack();
+
+  std::unique_ptr<thpp::Tensor> input {input_var->data->clone_shallow()};
+  std::unique_ptr<thpp::Tensor> weight {weight_var->data->clone_shallow()};
+  std::unique_ptr<thpp::Tensor> bias {bias_var ? bias_var->data->clone_shallow() : nullptr};
+
   AutoGPU guard(input->getDevice());
+
   input = input->contiguous();
-  std::unique_ptr<Tensor> weight(weight_.unpack_data()->clone_shallow());
-  auto bias = bias_.unpack_data();
   auto grad_output = grad_outputs[0]->data->contiguous();
 
   int k = input->nDim();
@@ -359,8 +366,8 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
 
   // Add saved variables used out of the pure autograd to inputs
   variable_list all_inputs(grad_outputs);
-  all_inputs.push_back(input_.unpack());
-  all_inputs.push_back(weight_.unpack());
+  all_inputs.push_back(input_var);
+  all_inputs.push_back(weight_var);
 
   auto outputs =  as_tensor_list(std::move(grad_input),
                                  std::move(grad_weight),
@@ -368,8 +375,8 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
   return wrap_outputs(all_inputs, std::move(outputs), [&](FunctionFlags f) {
     return std::make_shared<ConvBackwardBackward>(
       f, *this,
-      input_.unpack()->save(this), weight_.unpack()->save(this),
-      Variable::save_opt(bias_.unpack().get(), this), grad_outputs[0]->save(this));
+      input_var->save(this), weight_var->save(this),
+      Variable::save_opt(bias_var.get(), this), grad_outputs[0]->save(this));
   });
 };
 
