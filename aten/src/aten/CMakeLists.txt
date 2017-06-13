@@ -70,6 +70,18 @@ ELSE()
       SET(THCS_LIBRARIES "THCS")
     ENDIF(NOT THCS_LIBRARIES)
     MESSAGE(STATUS "THCS_LIBRARIES: ${THCS_LIBRARIES}")
+
+    IF(NOT THNN_LIBRARIES)
+      SET(THNN_LIBRARIES "THNN")
+    ENDIF(NOT THNN_LIBRARIES)
+    MESSAGE(STATUS "THNN_LIBRARIES: ${THNN_LIBRARIES}")
+
+    IF(NOT THCUNN_LIBRARIES)
+      SET(THCUNN_LIBRARIES "THCUNN")
+    ENDIF(NOT THCUNN_LIBRARIES)
+    MESSAGE(STATUS "THCUNN_LIBRARIES: ${THCUNN_LIBRARIES}")
+
+
   ENDIF()
 ENDIF()
 
@@ -85,8 +97,25 @@ FILE(GLOB base_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "*.cpp")
 
 FILE(GLOB all_python RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "*.py")
 
+SET(CWRAP_FILES_BASE ${CMAKE_CURRENT_SOURCE_DIR}/../../csrc  )
+SET(cwrap_files
+# ${CWRAP_FILES_BASE}/cudnn/cuDNN.cwrap
+  ${CWRAP_FILES_BASE}/generic/TensorMethods.cwrap
+# ${CWRAP_FILES_BASE}/generic/methods/SparseTensor.cwrap
+  ${CWRAP_FILES_BASE}/generic/methods/Tensor.cwrap
+  ${CWRAP_FILES_BASE}/generic/methods/TensorApply.cwrap
+  ${CWRAP_FILES_BASE}/generic/methods/TensorCompare.cwrap
+  ${CWRAP_FILES_BASE}/generic/methods/TensorCuda.cwrap
+  ${CWRAP_FILES_BASE}/generic/methods/TensorMath.cwrap
+  ${CWRAP_FILES_BASE}/generic/methods/TensorRandom.cwrap
+#  ${CWRAP_FILES_BASE}/generic/methods/TensorSerialization.cwrap
+  ${CMAKE_CURRENT_SOURCE_DIR}/Local.cwrap
+  ${CMAKE_CURRENT_SOURCE_DIR}/../THNN.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/../THCUNN.h
+)
+
 EXECUTE_PROCESS(
-    COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/gen.py ${CUDA_FLAG} -s ${CMAKE_CURRENT_SOURCE_DIR} --print-dependencies
+    COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/gen.py ${CUDA_FLAG} -s ${CMAKE_CURRENT_SOURCE_DIR} --print-dependencies ${cwrap_files}
     # user stderr rather than stdout so we can still debug the script with print
     ERROR_VARIABLE generated_cpp
     RESULT_VARIABLE RETURN_VALUE
@@ -101,25 +130,6 @@ FILE(GLOB_RECURSE all_templates "templates/*")
 
 FILE(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/TensorLib)
 
-SET(CWRAP_FILES_BASE ${CMAKE_CURRENT_SOURCE_DIR}/../../csrc  )
-SET(cwrap_files
-# ${CWRAP_FILES_BASE}/cudnn/cuDNN.cwrap
-  ${CWRAP_FILES_BASE}/generic/TensorMethods.cwrap
-# ${CWRAP_FILES_BASE}/generic/methods/SparseTensor.cwrap
-  ${CWRAP_FILES_BASE}/generic/methods/Tensor.cwrap
-  ${CWRAP_FILES_BASE}/generic/methods/TensorApply.cwrap
-  ${CWRAP_FILES_BASE}/generic/methods/TensorCompare.cwrap
-  ${CWRAP_FILES_BASE}/generic/methods/TensorCuda.cwrap
-  ${CWRAP_FILES_BASE}/generic/methods/TensorMath.cwrap
-  ${CWRAP_FILES_BASE}/generic/methods/TensorRandom.cwrap
-#  ${CWRAP_FILES_BASE}/generic/methods/TensorSerialization.cwrap
-#  ${CWRAP_FILES_BASE}/nn/THNN.cwrap
-#  ${CWRAP_FILES_BASE}/nn/THCUNN.cwrap
-#  ${CWRAP_FILES_BASE}/nn/THNN_generic.cwrap
-  ${CMAKE_CURRENT_SOURCE_DIR}/Local.cwrap
-)
-
-
 ADD_CUSTOM_COMMAND(OUTPUT ${generated_cpp}
 COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/gen.py ${CUDA_FLAG} -s ${CMAKE_CURRENT_SOURCE_DIR} ${cwrap_files}
 DEPENDS ${all_python} ${all_templates} ${cwrap_files})
@@ -133,20 +143,19 @@ INCLUDE_DIRECTORIES(${CMAKE_CURRENT_BINARY_DIR})
 ADD_LIBRARY(TensorLib SHARED ${all_cpp})
 SET_TARGET_PROPERTIES(TensorLib PROPERTIES VERSION 1 SOVERSION 1)
 
-ADD_EXECUTABLE(scalar_test scalar_test.cc)
-
-TARGET_LINK_LIBRARIES(scalar_test TensorLib)
-TARGET_LINK_LIBRARIES(scalar_test ${CUDA_LIBRARIES})
-
 if(NOT ${CMAKE_VERSION} VERSION_LESS "3.1")
     SET_PROPERTY(TARGET TensorLib PROPERTY CXX_STANDARD 11)
 endif(NOT ${CMAKE_VERSION} VERSION_LESS "3.1")
 
-TARGET_LINK_LIBRARIES(TensorLib LINK_PRIVATE ${TH_LIBRARIES} ${THS_LIBRARIES})
+TARGET_LINK_LIBRARIES(TensorLib PUBLIC ${TH_LIBRARIES} ${THS_LIBRARIES} ${THNN_LIBRARIES})
 IF(CUDA_FOUND)
-  TARGET_LINK_LIBRARIES(TensorLib LINK_PRIVATE ${THC_LIBRARIES} ${THCS_LIBRARIES})
+  TARGET_LINK_LIBRARIES(TensorLib PUBLIC ${THC_LIBRARIES} ${THCS_LIBRARIES} ${THCUNN_LIBRARIES})
   TARGET_LINK_LIBRARIES(TensorLib ${CUDA_LIBRARIES})
 ENDIF()
+
+ADD_EXECUTABLE(scalar_test scalar_test.cc)
+TARGET_LINK_LIBRARIES(scalar_test TensorLib)
+TARGET_LINK_LIBRARIES(scalar_test ${CUDA_LIBRARIES})
 
 INSTALL(TARGETS TensorLib
   RUNTIME DESTINATION "${TENSOR_LIB_INSTALL_BIN_DIR}"

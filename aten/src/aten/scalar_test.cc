@@ -35,7 +35,6 @@ int main() {
   s->fill(7);
 
   cout << "GET " << s->get(3).toFloat() << "\n";
-
   auto t = CPU(Float).ones({4,4});
 
   auto wha2 = CPU(Float).zeros({4,4}).add(t).sum();
@@ -43,6 +42,8 @@ int main() {
 
   cout << t.sizes() << " " << t.strides() << "\n";
 
+  auto output = CPU(Float).ones(3);
+  tlib::Abs_updateOutput(t,output);
 
   Tensor x = tlib::randn({1,10});
   Tensor prev_h = tlib::randn({1,20});
