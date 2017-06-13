@@ -1440,7 +1440,7 @@ function_tests = [
     (Inverse, (), ((S, S),), '', (), [skipIfNoLapack]),
     (Gesv, (), ((S, S), (S, S)), '', (), [skipIfNoLapack]),
     (Clone, (), ((S, M, S),)),
-    (Squeeze, (), ((S, 1, M, 1),)),
+    (Squeeze, (), ((S, 1, M, 1), None)),
     # TODO: enable neg dim checks
     (Squeeze, (), ((S, 1, M, 1), 1), 'dim'),
     (Unsqueeze, (), ((S, M, S), 0), '0'),
@@ -1707,7 +1707,7 @@ for test in function_tests:
                 if not isinstance(output, tuple):
                     output = (output,)
                 inplace_input = deepcopy(input)
-                inplace_input_copy = tuple(i + 0 for i in inplace_input)
+                inplace_input_copy = tuple(i + 0 if i is not None else None for i in inplace_input)
                 inplace_output = apply_inplace_fn(*inplace_input_copy)
                 if not isinstance(inplace_output, tuple):
                     inplace_output = (inplace_output,)

@@ -706,6 +706,9 @@ class Variable(_C._VariableBase):
     def squeeze(self, dim=None):
         return Squeeze.apply(self, dim)
 
+    def squeeze_(self, dim=None):
+        return Squeeze.apply(self, dim, True)
+
     def unsqueeze(self, dim):
         return Unsqueeze.apply(self, dim)
 
