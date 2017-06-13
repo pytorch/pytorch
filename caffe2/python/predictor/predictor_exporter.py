@@ -11,8 +11,8 @@ from caffe2.python import workspace, core
 from caffe2.python.predictor_constants import predictor_constants
 import caffe2.python.predictor.serde as serde
 import caffe2.python.predictor.predictor_py_utils as utils
+from builtins import bytes
 import collections
-
 
 def get_predictor_exporter_helper(submodelNetName):
     """ constracting stub for the PredictorExportMeta
@@ -205,7 +205,9 @@ def load_from_db(filename, db_type):
         [core.BlobReference(predictor_constants.META_NET_DEF)])
     assert workspace.RunOperatorOnce(load_meta_net_def)
 
+    blob = workspace.FetchBlob(predictor_constants.META_NET_DEF)
     meta_net_def = serde.deserialize_protobuf_struct(
-        str(workspace.FetchBlob(predictor_constants.META_NET_DEF)),
+        blob if isinstance(blob, bytes)
+        else str(blob).encode('utf-8'),
         metanet_pb2.MetaNetDef)
     return meta_net_def
