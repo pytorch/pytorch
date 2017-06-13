@@ -238,7 +238,7 @@ criterion_tests = [
     ),
     dict(
         module_name='PoissonNLLLoss',
-        log_input=torch.randn(2, 3, 4, 5),
+        input=torch.randn(2, 3, 4, 5),
         target=torch.randn(2, 3, 4, 5).floor_().abs_(),
     ),
     dict(
