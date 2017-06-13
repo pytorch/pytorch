@@ -1949,7 +1949,7 @@ static const char *R = &__R;
       default: NULL
     - arg: bool pivot
       kwarg_only: True
-      default: "false"
+      default: "true"
     - THTensor* self
 ]]
 
