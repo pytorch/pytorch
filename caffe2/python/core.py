@@ -19,6 +19,7 @@ from caffe2.proto import caffe2_pb2
 from collections import defaultdict
 from caffe2.python import scope, utils, workspace
 import caffe2.python._import_c_extension as C
+import pickle
 import numpy as np
 import sys
 
@@ -344,7 +345,7 @@ def CreateOperator(
 
 
 def _RegisterPythonImpl(
-    f, grad_f=None, python_func_type=None, pass_workspace=False, name=None,
+    f, grad_f=None, python_func_type=None, pass_workspace=False
 ):
     if python_func_type:
         func = python_func_type(f)
@@ -356,7 +357,7 @@ def _RegisterPythonImpl(
         if isinstance(grad_f, tuple):
             grad_f = grad_f[0](*grad_f[1], **grad_f[2])
 
-    token = C.register_python_op(f, pass_workspace, name or '')
+    token = C.register_python_op(f, pass_workspace, '')
     if grad_f:
         C.register_python_gradient_op(token, grad_f)
     return token
@@ -368,7 +369,6 @@ def CreatePythonOperator(
     grad_f=None,
     pass_workspace=False,
     python_func_type=None,
-    name=None,
     *args,
     **kwargs
 ):
@@ -381,7 +381,7 @@ def CreatePythonOperator(
     the workspace directly), use on your own risk.
     """
     kwargs["token"] = _RegisterPythonImpl(
-        f, grad_f, python_func_type, pass_workspace=pass_workspace, name=name
+        f, grad_f, python_func_type, pass_workspace=pass_workspace
     )
     return CreateOperator("Python", inputs, outputs, *args, **kwargs)
 
@@ -1913,28 +1913,38 @@ class Net(object):
         gradients.
         """
         assert(IsOperator('Python'))
-        if isinstance(f, tuple) or isinstance(grad_f, tuple):
-            # if we got a tuple, we will make sure this tuple will be
-            # registered to run at startup on each of the workers in a
-            # distributed run.
-            registry = worker_init_func(_RegisterPythonImpl)
-        else:
-            registry = _RegisterPythonImpl
 
-        token = registry(
-            f, grad_f, python_func_type, pass_workspace=pass_workspace,
-            name='%s:%d' % (str(self), len(self.Proto().op))
-        )
+        def make_builder(t):
+            if not isinstance(t, tuple):
+                return ''
+            assert len(t) == 3, 'Expected builder tuple (func, args, kwargs)'
+            func, args, kwargs = t
+            normalized = (func, tuple(args), dict(kwargs))
+            return pickle.dumps(normalized)
+
+        f_builder = make_builder(f)
+        grad_f_builder = make_builder(grad_f)
+
+        assert (not grad_f) or ((not f_builder) == (not grad_f_builder)), (
+            'A tuple has to be passed to both f and grad_f or neither.')
+
+        core_kwargs = {}
+        if f_builder:
+            core_kwargs['pickled_builder'] = f_builder
+            core_kwargs['pickled_grad_builder'] = grad_f_builder
+            core_kwargs['pass_workspace'] = pass_workspace
+        else:
+            core_kwargs['token'] = _RegisterPythonImpl(
+                f, grad_f, python_func_type, pass_workspace=pass_workspace)
+
         grad_output_indices = grad_output_indices or []
         grad_input_indices = grad_input_indices or []
         return lambda *args, **kwargs: self._CreateAndAddToSelf(
             'Python',
-            token=token,
             grad_output_indices=grad_output_indices,
             grad_input_indices=grad_input_indices,
             *args,
-            **kwargs
-        )
+            **dict(kwargs.items() + core_kwargs.items()))
 
     def is_external_input(self, blob):
         name = str(blob)

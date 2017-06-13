@@ -230,30 +230,39 @@ struct Func;
 
 class PythonOpBase : public Operator<CPUContext> {
  public:
-  PythonOpBase(const OperatorDef& operator_def, Workspace* ws)
-      : Operator(operator_def, ws), ws_(ws) {}
+  PythonOpBase(
+      const OperatorDef& operator_def,
+      Workspace* ws,
+      const std::string& pickled_builder_arg_name);
 
   bool RunOnDevice() override final;
+  virtual ~PythonOpBase();
 
  protected:
-  virtual const python_detail::Func& getFunc() = 0;
+  virtual const python_detail::Func& getFunc(const std::string& token) = 0;
   Workspace* ws_;
+
+ private:
+  const std::string token_;
+  std::unique_ptr<python_detail::Func> built_func_;
 };
 
 class PythonOp final : public PythonOpBase {
  public:
-  using PythonOpBase::PythonOpBase;
+  PythonOp(const OperatorDef& operator_def, Workspace* ws)
+      : PythonOpBase(operator_def, ws, "pickled_builder") {}
 
  protected:
-  const python_detail::Func& getFunc() override;
+  const python_detail::Func& getFunc(const std::string& token) override;
 };
 
 class PythonGradientOp final : public PythonOpBase {
  public:
-  using PythonOpBase::PythonOpBase;
+  PythonGradientOp(const OperatorDef& operator_def, Workspace* ws)
+      : PythonOpBase(operator_def, ws, "pickled_grad_builder") {}
 
  protected:
-  const python_detail::Func& getFunc() override;
+  const python_detail::Func& getFunc(const std::string& token) override;
 };
 
 } // namespace python

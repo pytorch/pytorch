@@ -18,6 +18,22 @@ def MainOpFunctionThatThrowsRuntimeError(inputs, _):
     return SubFunctionThatThrowsRuntimeError()
 
 
+def op_builder(name, index, extra):
+    iterations = [0]
+    assert name == 'name'
+    assert index == 5
+    assert extra - 4.2 < 0.0001
+
+    def my_op(inputs, outputs):
+        assert inputs[0].data[0] == iterations[0]
+        assert name == 'name'
+        assert index == 5
+        assert extra - 4.2 < 0.0001
+        iterations[0] += 1
+
+    return my_op
+
+
 class PythonOpTest(hu.HypothesisTestCase):
     @given(x=hu.tensor())
     def test_feed(self, x):
@@ -46,6 +62,23 @@ class PythonOpTest(hu.HypothesisTestCase):
         net.Python(f)(["x"], [])
         workspace.FeedBlob("x", x)
         workspace.RunNetOnce(net)
+
+    def test_builder_tuple(self):
+        net = core.Net("builder_template")
+        iter_blob = 'iter'
+        net.Python((op_builder, ['name', 5], {'extra': 4.2}))([iter_blob], [])
+        net.Python((op_builder, ['name', 5], {'extra': 4.2}))([iter_blob], [])
+        for repeat in range(2):
+            # check that the builder will be called exactly once for each
+            # PythonOp constructor. Cloning the net will also trigger a call
+            # to the builder when the net is created.
+            cloned_net = net.Clone('builder_%d' % repeat)
+            workspace.FeedBlob(iter_blob, np.array([0]))
+            # Builder gets called once per python op in the line below
+            workspace.CreateNet(cloned_net)
+            for i in range(10):
+                workspace.FeedBlob(iter_blob, np.array([i]))
+                workspace.RunNet(cloned_net)
 
     @given(x=hu.tensor())
     def test_feed_with_gc(self, x):
