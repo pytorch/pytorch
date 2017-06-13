@@ -942,7 +942,7 @@ void THTensor_(btrifact)(THTensor *ra_, THIntTensor *rpivots_, THIntTensor *rinf
 {
   THArgCheck(THTensor_(nDimension)(a) == 3, 1, "expected 3D tensor, got %dD", THTensor_(nDimension)(a));
   if (!pivot) {
-    THError("btrifact is only implemented with pivoting on the CPU.");
+    THError("btrifact without pivoting is not implemented on the CPU");
   }
 
   if (ra_ != a) {
