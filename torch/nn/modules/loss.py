@@ -13,7 +13,6 @@ def _assert_no_grad(variable):
 
 
 class _Loss(Module):
-
     def __init__(self, size_average=True):
         super(_Loss, self).__init__()
         self.size_average = size_average
@@ -25,7 +24,6 @@ class _Loss(Module):
 
 
 class _WeightedLoss(_Loss):
-
     def __init__(self, weight=None, size_average=True):
         super(_WeightedLoss, self).__init__(size_average)
         self.register_buffer('weight', weight)
@@ -103,6 +101,7 @@ class NLLLoss(_WeightedLoss):
         >>> output = loss(m(input), target)
         >>> output.backward()
     """
+
     def forward(self, input, target):
         _assert_no_grad(target)
         return F.nll_loss(input, target,
@@ -202,7 +201,7 @@ class BCELoss(_WeightedLoss):
     pass
 
 
-class BCEWithLogitsLoss(_WeightedLoss):
+class BCEWithLogitsLoss(Module):
     r"""This loss combines a `Sigmoid` layer and the `BCELoss` in one single class.
     This version is more numerically stable than using a plain `Sigmoid` followed by a `BCELoss` as, by combining the
     operations into one layer, we take advantage of the log-sum-exp trick for numerical stability.
@@ -223,7 +222,13 @@ class BCEWithLogitsLoss(_WeightedLoss):
     to `False`, the losses are instead summed.
 
     """
-    pass
+    def __init__(self, weight=None, size_average=True):
+        super(BCEWithLogitsLoss, self).__init__()
+        self.size_average = size_average
+        self.register_buffer('weight', weight)
+
+    def forward(self, input, target):
+        return F.binary_cross_entropy_with_logits(input, target, Variable(self.weight), self.size_average)
 
 
 class HingeEmbeddingLoss(_Loss):

@@ -169,16 +169,3 @@ class MarginRankingLoss(Function):
             grad_input2.div_(y.size(0))
 
         return grad_input1, grad_input2, None
-
-
-class BCEWithLogitsLoss(Function):
-    def __init__(self, size_average, weight):
-        super(BCEWithLogitsLoss, self).__init__()
-        self.size_average = size_average
-        self.weight = weight
-
-    def forward(self, inputs, target):
-        pass
-
-    def backward(self, grad_output):
-        pass
