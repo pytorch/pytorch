@@ -228,7 +228,10 @@ class BCEWithLogitsLoss(Module):
         self.register_buffer('weight', weight)
 
     def forward(self, input, target):
-        return F.binary_cross_entropy_with_logits(input, target, Variable(self.weight), self.size_average)
+        if self.weight is not None:
+            return F.binary_cross_entropy_with_logits(input, target, Variable(self.weight), self.size_average)
+        else:
+            return F.binary_cross_entropy_with_logits(input, target, size_average=self.size_average)
 
 
 class HingeEmbeddingLoss(_Loss):
