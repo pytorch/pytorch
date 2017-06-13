@@ -8,16 +8,10 @@ from caffe2.proto import caffe2_pb2
 from google.protobuf.message import DecodeError, Message
 from google.protobuf import text_format
 import sys
-try:
-    from past.builtins import basestring, long
-except ImportError:
-    print("You don't have the past package installed. ",
-          "This is necessary for python 2/3 compatibility. ",
-          "To do this, do 'pip install future'.")
-    sys.exit(1)
 import collections
 import functools
 import numpy as np
+from six import integer_types, string_types, text_type
 
 
 def CaffeBlobToNumpyArray(blob):
@@ -82,24 +76,32 @@ def MakeArgument(key, value):
 
     if type(value) is float:
         argument.f = value
-    elif type(value) is int or type(value) is bool or type(value) is long:
+    elif type(value) in integer_types or type(value) is bool:
         # We make a relaxation that a boolean variable will also be stored as
         # int.
         argument.i = value
-    elif isinstance(value, basestring):
-        argument.s = (value if type(value) is bytes
-                      else value.encode('utf-8'))
+    elif isinstance(value, string_types):
+        argument.s = (value.encode('utf-8') if isinstance(value, text_type)
+                      else value)
     elif isinstance(value, Message):
         argument.s = value.SerializeToString()
     elif iterable and all(type(v) in [float, np.float_] for v in value):
-        argument.floats.extend(value)
-    elif iterable and all(type(v) in [int, bool, long, np.int_] for v in value):
-        argument.ints.extend(value)
-    elif iterable and all(isinstance(v, basestring) for v in value):
-        argument.strings.extend([
-            (v if type(v) is bytes else v.encode('utf-8')) for v in value])
+        argument.floats.extend(
+            v.item() if type(v) is np.float_ else v for v in value
+        )
+    elif iterable and all(
+        type(v) in integer_types or type(v) in [bool, np.int_] for v in value
+    ):
+        argument.ints.extend(
+            v.item() if type(v) is np.int_ else v for v in value
+        )
+    elif iterable and all(isinstance(v, string_types) for v in value):
+        argument.strings.extend(
+            v.encode('utf-8') if isinstance(v, text_type) else v
+            for v in value
+        )
     elif iterable and all(isinstance(v, Message) for v in value):
-        argument.strings.extend([v.SerializeToString() for v in value])
+        argument.strings.extend(v.SerializeToString() for v in value)
     else:
         raise ValueError(
             "Unknown argument type: key=%s value=%s, value type=%s" %
