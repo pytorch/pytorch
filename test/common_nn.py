@@ -237,6 +237,11 @@ criterion_tests = [
         desc='weights',
     ),
     dict(
+        module_name='PoissonNLLLoss',
+        log_input=torch.randn(2, 3, 4, 5),
+        target=torch.randn(2, 3, 4, 5).floor_().abs_(),
+    ),
+    dict(
         module_name='KLDivLoss',
         input=torch.rand(10, 10).log(),
         target=torch.rand(10, 10)
