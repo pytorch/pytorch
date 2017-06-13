@@ -361,8 +361,8 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
     loss based on max-entropy, between input `x`  (a 2D mini-batch `Tensor`) and
     target `y` (a binary 2D `Tensor`). For each sample in the minibatch::
 
-       loss(x, y) = - sum_i (y[i] log( exp(x[i]) / (1 + exp(x[i])))
-                             + (1-y[i]) log(1/(1+exp(x[i])))) / x:nElement()
+       loss(x, y) = - sum_i (y[i] * log( 1 / (1 + exp(-x[i])) )
+                             + ( (1-y[i]) * log(exp(-x[i]) / (1 + exp(-x[i])) ) )
 
     where `i == 0` to `x.nElement()-1`, `y[i]  in {0,1}`.
     `y` and `x` must have the same size.
