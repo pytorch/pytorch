@@ -1,12 +1,14 @@
 #ifndef THP_H
 #define THP_H
 
+#include <Python.h>
 #include <stdbool.h>
 #include <TH/TH.h>
 #include <THS/THS.h>
 
 // Back-compatibility macros, Thanks to http://cx-oracle.sourceforge.net/
-// define PyInt_* macros for Python 3.x
+// define PyInt_* macros for Python 3.x.  NB: We must include Python.h first,
+// otherwise we'll incorrectly conclude PyInt_Check isn't defined!
 #ifndef PyInt_Check
 #define PyInt_Check             PyLong_Check
 #define PyInt_FromLong          PyLong_FromLong
