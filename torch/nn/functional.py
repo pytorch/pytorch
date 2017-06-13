@@ -438,8 +438,12 @@ def relu(input, inplace=False):
 
 
 def glu(input, dim=-1):
+    ndim = input.dim()
+    if dim < -ndim or dim >= ndim:
+        raise IndexError("dim {} is out of range for tensor of dimension {}"
+                         .format(dim, ndim))
     if dim < 0:
-        dim += input.dim()
+        dim += ndim
     return _functions.thnn.GatedLinear(dim)(input)
 
 
