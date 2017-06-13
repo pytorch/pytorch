@@ -742,25 +742,35 @@ class TestNN(NNTestCase):
         self.assertEqual(output[0][0].sum().data[0], 0)
         self.assertEqual(output[1][2].sum().data[0], 0)
 
-    def _test_EmbeddingBag(self, cuda):
+    def _test_EmbeddingBag(self, cuda, mode):
         ## check a known test example
 
-        es = nn.EmbeddingBag(5, 2)
-        # es.weight.data.zero_()
-        es.weight.data.copy_(torch.range(1, 10))
+        es = nn.EmbeddingBag(5, 2, mode=mode)
+        es.weight.data.copy_(torch.arange(1, 11).resize_as_(es.weight.data))
         input = Variable(torch.LongTensor([3, 1, 1, 1, 4]))
         offsets = Variable(torch.LongTensor([0, 2]))
-        grad_output = torch.range(1, 4).view(2, 2).type(torch.Tensor)
+        grad_output = torch.arange(1, 5).view(2, 2).type(torch.Tensor)
 
-        expected_output = torch.Tensor(
-            [[10, 12],
-             [15, 18]])
-        expected_grad_weight = torch.Tensor(
-            [[0, 0],
-             [7, 10],
-             [0, 0],
-             [1, 2],
-             [3, 4]])
+        if mode == 'sum':
+            expected_output = torch.Tensor(
+                [[10, 12],
+                 [15, 18]])
+            expected_grad_weight = torch.Tensor(
+                [[0, 0],
+                 [7, 10],
+                 [0, 0],
+                 [1, 2],
+                 [3, 4]])
+        else:
+            expected_output = torch.Tensor(
+                [[10. / 2, 12. / 2],
+                 [15. / 3, 18. / 3]])
+            expected_grad_weight = torch.Tensor(
+                [[0.    , 0.    ],
+                 [1. / 2 + 3. / 3 + 3. / 3, 2. / 2 + 4. / 3 + 4. / 3],
+                 [0.    , 0.    ],
+                 [1. / 2, 2. / 2],
+                 [3. / 3, 4. / 3]])
 
         if cuda:
             es = es.cuda()
@@ -771,18 +781,17 @@ class TestNN(NNTestCase):
             expected_grad_weight = expected_grad_weight.cuda()
 
         output = es(input, offsets)
-
         output.backward(grad_output)
 
         self.assertEqual(output.data, expected_output)
         self.assertEqual(es.weight.grad.data, expected_grad_weight)
 
-        ## now compare EmbeddingBag vs Embedding + Sum, for constant bag length
+        ## now compare EmbeddingBag vs Embedding + Sum/Mean, for constant bag length
 
         N = random.randint(1, 100)
         D = random.randint(1, 100)
 
-        es = nn.EmbeddingBag(N, D)
+        es = nn.EmbeddingBag(N, D, mode=mode)
         e = nn.Embedding(N, D)
         e.weight.data.copy_(es.weight.data)
 
@@ -790,7 +799,7 @@ class TestNN(NNTestCase):
         L = random.randint(1, 50)
 
         input = Variable(torch.rand(B, L).mul(N).long())
-        offsets = Variable(torch.range(0, B - 1).mul(L).long())
+        offsets = Variable(torch.arange(0, B).mul(L).long())
         grad_output = torch.rand(B, D).type(torch.Tensor)
 
         if cuda:
@@ -801,7 +810,10 @@ class TestNN(NNTestCase):
             grad_output = grad_output.cuda()
 
         output = es(input.view(-1), offsets)
-        ref_output = e(input).sum(1).squeeze(1)
+        if mode == 'sum':
+            ref_output = e(input).sum(1).squeeze(1)
+        else:
+            ref_output = e(input).mean(1).squeeze(1)
 
         self.assertEqual(output, ref_output)
 
@@ -810,16 +822,13 @@ class TestNN(NNTestCase):
         self.assertEqual(es.weight.grad, e.weight.grad)
 
     def test_EmbeddingBag(self):
-        self._test_EmbeddingBag(False)
+        self._test_EmbeddingBag(False, 'sum')
+        self._test_EmbeddingBag(False, 'mean')
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_EmbeddingBag_cuda(self):
-        self._test_EmbeddingBag(True)
-
-    # FIXME: I don't know how to add this to the gradcheck NewModuleTest
-    # framework since this module has 2 inputs. But maybe not necessary
-    # since I'm comparing directly with LookupTable + Sum, which are checked
-
+        self._test_EmbeddingBag(True, 'sum')
+        self._test_EmbeddingBag(True, 'mean')
 
     def test_Dropout(self):
         input = torch.Tensor(1000)

@@ -109,12 +109,16 @@ class Embedding(Module):
         return s.format(name=self.__class__.__name__, **self.__dict__)
 
 class EmbeddingBag(Module):
-    r"""Computes sums of 'bags' of embeddings, without instantiating the
+    r"""Computes sums or means of 'bags' of embeddings, without instantiating the
     intermediate embeddings.
 
-    For bags of constant length, nn.EmbeddingBag is equivalent to nn.Embedding
-    followed by Sum(1), but it is more time- and memory-efficient on GPU.
+    For bags of constant length,
+        * nn.EmbeddingBag with `mode=sum` is equivalent to nn.Embedding followed by `torch.sum(dim=1)`
+        * with `mode=mean` is equivalent to nn.Embedding followed by `torch.mean(dim=1)`
 
+    However, nn.EmbeddingBag is much more time and memory efficient than using a chain of these
+    operations.
+    
     Args:
         num_embeddings (int): size of the dictionary of embeddings
         embedding_dim (int): the size of each embedding vector
@@ -123,6 +127,7 @@ class EmbeddingBag(Module):
         norm_type (float, optional): The p of the p-norm to compute for the max_norm option
         scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the frequency of
                                                 the words in the dictionary.
+        mode (string, optional): 'sum' | 'mean'. Specifies the way to reduce the bag. Default: 'sum'
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape (num_embeddings, embedding_dim)
@@ -135,7 +140,7 @@ class EmbeddingBag(Module):
     Examples:
 
     >>> # an Embedding module containing 10 tensors of size 3
-    >>> embedding_sum = nn.EmbeddingBag(10, 3)
+    >>> embedding_sum = nn.EmbeddingBag(10, 3, mode='sum')
     >>> # a batch of 2 samples of 4 indices each
     >>> input = Variable(torch.LongTensor([1,2,4,5,4,3,2,9]))
     >>> offsets = Variable(torch.LongTensor([0,4]))
@@ -148,7 +153,8 @@ class EmbeddingBag(Module):
     """
 
     def __init__(self, num_embeddings, embedding_dim,
-                 max_norm=None, norm_type=2, scale_grad_by_freq=False):
+                 max_norm=None, norm_type=2, scale_grad_by_freq=False,
+                 mode='sum'):
         super(EmbeddingBag, self).__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
@@ -156,6 +162,7 @@ class EmbeddingBag(Module):
         self.norm_type = norm_type
         self.scale_grad_by_freq = scale_grad_by_freq
         self.weight = Parameter(torch.Tensor(num_embeddings, embedding_dim))
+        self.mode = mode
 
         self.reset_parameters()
 
@@ -165,7 +172,7 @@ class EmbeddingBag(Module):
     def forward(self, input, offsets):
         return self._backend.EmbeddingBag(
             self.max_norm, self.norm_type,
-            self.scale_grad_by_freq
+            self.scale_grad_by_freq, mode=self.mode
         )(input, offsets, self.weight)
 
     def __repr__(self):
@@ -176,6 +183,7 @@ class EmbeddingBag(Module):
             s += ', norm_type={norm_type}'
         if self.scale_grad_by_freq is not False:
             s += ', scale_grad_by_freq={scale_grad_by_freq}'
+        s += ', mode={mode}'
         s += ')'
         return s.format(name=self.__class__.__name__, **self.__dict__)
 
