@@ -149,7 +149,6 @@ def wrap_generic_function(name, backends):
     declaration += ']]\n\n\n'
     return declaration
 
-
 def wrap_generic():
     from collections import OrderedDict
     defs = OrderedDict()

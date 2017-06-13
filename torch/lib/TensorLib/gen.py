@@ -4,6 +4,7 @@ import yaml
 from optparse import OptionParser
 
 import cwrap_parser
+import nn_parse
 import preprocess_declarations
 import function_wrapper
 import dispatch_macros
@@ -16,7 +17,8 @@ parser.add_option('-s', '--source-path', help='path to source director for tenso
 parser.add_option('-p', '--print-dependencies',
                   help='only output a list of dependencies', action='store_true')
 parser.add_option('-n', '--no-cuda', action='store_true')
-options, cwrap_files = parser.parse_args()
+
+options, files = parser.parse_args()
 
 TEMPLATE_PATH = options.source_path + "/templates"
 GENERATOR_DERIVED = CodeTemplate.from_file(
@@ -109,19 +111,21 @@ def generate_storage_type_and_tensor(backend, scalar_type, declarations, all_typ
     })
 
     if backend == 'CUDA':
-        env['th_header'] = "THC/THC.h"
+        env['th_headers'] = ['#include <THC/THC.h>', '#include <THCUNN/THCUNN.h>']
         sname = '' if scalar_name == "Float" else scalar_name
+        env['THType'] = 'Cuda{}'.format(sname)
         env['THStorage'] = 'THCuda{}Storage'.format(sname)
         env['THTensor'] = 'THCuda{}Tensor'.format(sname)
-        env['THIndexTensor'] = 'THCudaLongTensor'.format(scalar_name)
+        env['THIndexTensor'] = 'THCudaLongTensor'
         env['state'] = ['context->thc_state']
         env['isCUDA'] = 'true'
         env['storage_device'] = 'return storage->device;'
     else:
-        env['th_header'] = "TH/TH.h"
+        env['th_headers'] = ['#include <TH/TH.h>', '#include <THNN/THNN.h>']
+        env['THType'] = scalar_name
         env['THStorage'] = "TH{}Storage".format(scalar_name)
         env['THTensor'] = 'TH{}Tensor'.format(scalar_name)
-        env['THIndexTensor'] = 'THLongTensor'.format(scalar_name)
+        env['THIndexTensor'] = 'THLongTensor'
         env['state'] = []
         env['isCUDA'] = 'false'
         env['storage_device'] = 'throw std::runtime_error("CPU storage has no device");'
@@ -158,10 +162,13 @@ def generate_storage_type_and_tensor(backend, scalar_type, declarations, all_typ
     top_env['type_headers'].append(
         '#include "TensorLib/{}.h"'.format(env['Type']))
 
+cwrap_files = [f for f in files if f.endswith('.cwrap') ]
+nn_files = [f for f in files if f.endswith('.h') ]
 
 declarations = [d
                 for file in cwrap_files
                 for d in cwrap_parser.parse(file)]
+declarations += nn_parse.run(nn_files)
 declarations = preprocess_declarations.run(declarations)
 # print(yaml.dump(declarations))
 

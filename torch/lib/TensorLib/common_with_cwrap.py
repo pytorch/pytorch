@@ -49,16 +49,16 @@ def set_declaration_defaults(declaration):
 # support it.
 
 
-def filter_unique_options(options, allow_kwarg):
+def filter_unique_options(options, allow_kwarg, type_to_signature):
     def signature(option, kwarg_only_count):
         if kwarg_only_count == 0:
             kwarg_only_count = None
         else:
             kwarg_only_count = -kwarg_only_count
         arg_signature = '#'.join(
-            arg['type']
+            type_to_signature.get(arg['type'], arg['type'])
             for arg in option['arguments'][:kwarg_only_count]
-            if not arg.get('ignore_check') and not arg['name'] == 'self')
+            if not arg.get('ignore_check') and arg['name'] != 'self')
         if kwarg_only_count is None:
             return arg_signature
         kwarg_only_signature = '#'.join(
@@ -83,7 +83,7 @@ def filter_unique_options(options, allow_kwarg):
     return unique
 
 
-def enumerate_options_due_to_default(declaration, allow_kwarg=True):
+def enumerate_options_due_to_default(declaration, allow_kwarg=True,type_to_signature=[]):
     # TODO(zach): in cwrap this is shared among all declarations
     # but seems to assume that all declarations will have the same
     new_options = []
@@ -102,10 +102,76 @@ def enumerate_options_due_to_default(declaration, allow_kwarg=True):
                     # PyYAML interprets NULL as None...
                     arg['name'] = 'NULL' if arg['default'] is None else arg['default']
             new_options.append(option_copy)
-    declaration['options'] = filter_unique_options(new_options, allow_kwarg)
+    declaration['options'] = filter_unique_options(new_options, allow_kwarg,type_to_signature)
 
 
 def sort_by_number_of_options(declaration):
     def num_checked_args(option):
         return sum(map(lambda a: not a.get('ignore_check', False), option['arguments']))
     declaration['options'].sort(key=num_checked_args, reverse=True)
+
+class Function(object):
+
+    def __init__(self, name):
+        self.name = name
+        self.arguments = []
+
+    def add_argument(self, arg):
+        assert isinstance(arg, Argument)
+        self.arguments.append(arg)
+
+    def __repr__(self):
+        return self.name + '(' + ', '.join(map(lambda a: a.__repr__(), self.arguments)) + ')'
+
+
+class Argument(object):
+
+    def __init__(self, _type, name, is_optional):
+        self.type = _type
+        self.name = name
+        self.is_optional = is_optional
+
+    def __repr__(self):
+        return self.type + ' ' + self.name
+
+def parse_header(path):
+    with open(path, 'r') as f:
+        lines = f.read().split('\n')
+
+    # Remove empty lines and prebackend directives
+    lines = filter(lambda l: l and not l.startswith('#'), lines)
+    # Remove line comments
+    lines = map(lambda l: l.partition('//'), lines)
+    # Select line and comment part
+    lines = map(lambda l: (l[0].strip(), l[2].strip()), lines)
+    # Remove trailing special signs
+    lines = map(lambda l: (l[0].rstrip(');').rstrip(','), l[1]), lines)
+    # Split arguments
+    lines = map(lambda l: (l[0].split(','), l[1]), lines)
+    # Flatten lines
+    new_lines = []
+    for l, c in lines:
+        for split in l:
+            new_lines.append((split, c))
+    lines = new_lines
+    del new_lines
+    # Remove unnecessary whitespace
+    lines = map(lambda l: (l[0].strip(), l[1]), lines)
+    # Remove empty lines
+    lines = filter(lambda l: l[0], lines)
+    generic_functions = []
+    for l, c in lines:
+        if l.startswith('TH_API void THNN_'):
+            fn_name = l.lstrip('TH_API void THNN_')
+            if fn_name[0] == '(' and fn_name[-2] == ')':
+                fn_name = fn_name[1:-2]
+            else:
+                fn_name = fn_name[:-1]
+            generic_functions.append(Function(fn_name))
+        elif l:
+            t, name = l.split()
+            if '*' in name:
+                t = t + '*'
+                name = name[1:]
+            generic_functions[-1].add_argument(Argument(t, name, '[OPTIONAL]' in c))
+    return generic_functions

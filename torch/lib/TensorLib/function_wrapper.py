@@ -271,14 +271,14 @@ def create_derived(backend_type_env, declarations):
         else:
             return argument['name']
 
-    def drop_argument(argument):
+    def drop_argument(argument,option):
         return backend_type_env['Backend'] == 'CUDA' and (
-            argument['type'] == 'THGenerator*' or
+            (option['mode'] == 'TH' and argument['type'] == 'THGenerator*') or
             argument['name'] == 'THPDefaultGenerator->cdata')
 
     def get_arguments(option):
         return [get_argument(argument, option)
-                for argument in option['arguments'] if not drop_argument(argument)]
+                for argument in option['arguments'] if not drop_argument(argument,option)]
 
     def is_actual_return_long(ret):
         return ret['type'] == 'long' or (backend_type_env['ScalarName'] == 'Long'
@@ -321,8 +321,18 @@ def create_derived(backend_type_env, declarations):
                 if arg.get('cpu_zero', False):
                     body.append("{}.zero_();".format(arg['name']))
 
-        option['actuals'] = backend_type_env['state'] + get_arguments(option)
-        call = CodeTemplate("${THTensor}_${cname}(${actuals})").substitute(env)
+        option['actuals'] = get_arguments(option)
+        is_cuda = backend_type_env['Backend'] == 'CUDA'
+        is_nn = option['mode'] == 'NN'
+        if is_cuda or is_nn:
+            option['actuals'] = ['context->thc_state'] + option['actuals']
+
+        if is_nn:
+            prefix = 'THNN_{}'.format(env['THType'])
+        else:
+            prefix = env['THTensor'] + '_'
+
+        call = prefix + CodeTemplate("${cname}(${actuals})").substitute(env)
         ret = option['return']
         if ret['kind'] == 'arguments':
             body.append(call + ";")
