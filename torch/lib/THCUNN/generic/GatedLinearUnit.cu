@@ -12,9 +12,9 @@ void THNN_(GatedLinear_updateOutput)(
 
   // size output to half of input
   dim = dim - 1;
-  const long nIn = THCTensor_(size)(state, input, dim);
+  const int64_t nIn = THCTensor_(size)(state, input, dim);
   THArgCheck(nIn % 2 == 0, 2, "Halving dimension must be even. Dim %d is size %ld", dim+1, nIn);
-  const long inputSize = THCTensor_(size)(state, input, dim) / 2;
+  const int64_t inputSize = THCTensor_(size)(state, input, dim) / 2;
   THLongStorage *newSizes = THCTensor_(newSizeOf)(state, input);
   THLongStorage_set(newSizes, dim, inputSize);
   THCTensor_(resize)(state, output, newSizes, NULL);
@@ -40,11 +40,11 @@ void THNN_(GatedLinear_updateGradInput)(
 {
   THCUNN_assertSameGPU(state, 2, gradOutput, gradInput);
   dim = dim - 1;
-  const long nIn = THCTensor_(size)(state, input, dim);
+  const int64_t nIn = THCTensor_(size)(state, input, dim);
   THArgCheck(nIn % 2 == 0, 2, "Halving dimension must be even. Dim %d is size %ld", dim+1, nIn);
 
   THCTensor_(resizeAs)(state, gradInput, input);
-  const long inputSize = THCTensor_(size)(state, input, dim) / 2;
+  const int64_t inputSize = THCTensor_(size)(state, input, dim) / 2;
   THCTensor *firstHalf = THCTensor_(newNarrow)(state, input, dim, 0, inputSize);
   THCTensor *secondHalf = THCTensor_(newNarrow)(state, input, dim, inputSize, inputSize);
   THCTensor *gradInputfirstHalf = THCTensor_(newNarrow)(state, gradInput, dim, 0, inputSize);

@@ -92,7 +92,7 @@ class Module(object):
             raise TypeError("cannot assign '{}' object to parameter '{}' "
                             "(torch.nn.Parameter or None required)"
                             .format(torch.typename(param), name))
-        elif param.creator:
+        elif param.grad_fn:
             raise ValueError(
                 "Cannot assign non-leaf Variable to parameter '{0}'. Model "
                 "parameters must be created explicitly. To express '{0}' "
@@ -213,12 +213,12 @@ class Module(object):
         var = result
         while not isinstance(var, Variable):
             var = var[0]
-        creator = var.creator
-        if creator is not None and len(self._backward_hooks) > 0:
+        grad_fn = var.grad_fn
+        if grad_fn is not None and len(self._backward_hooks) > 0:
             for hook in self._backward_hooks.values():
                 wrapper = functools.partial(hook, self)
                 functools.update_wrapper(wrapper, hook)
-                creator.register_hook(wrapper)
+                grad_fn.register_hook(wrapper)
         return result
 
     def __getattr__(self, name):
@@ -463,6 +463,7 @@ class Module(object):
         for p in self.parameters():
             if p.grad is not None:
                 p.grad.data.zero_()
+                p.grad.detach_()
 
     def share_memory(self):
         return self._apply(lambda t: t.share_memory_())

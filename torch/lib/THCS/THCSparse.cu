@@ -1,6 +1,6 @@
 #include "THCSparse.h"
 
-void THCudaSparse_Xcoo2csr(THCState *state, const int *coorowind, long nnz, long m, int *csrrowptr) {
+void THCudaSparse_Xcoo2csr(THCState *state, const int *coorowind, int64_t nnz, int64_t m, int *csrrowptr) {
   THAssertMsg((m <= INT_MAX) && (nnz <= INT_MAX),
     "cusparseXcoo2csr only supports m, nnz with the bound [val] <= %d",
     INT_MAX);
@@ -21,7 +21,7 @@ cusparseOperation_t convertTransToCusparseOperation(char trans) {
   }
 }
 
-void adjustLd(char transb, long m, long n, long k, long *ldb, long *ldc)
+void adjustLd(char transb, int64_t m, int64_t n, int64_t k, int64_t *ldb, int64_t *ldc)
 {
   int transb_ = ((transb == 't') || (transb == 'T'));
 
@@ -41,7 +41,7 @@ void adjustLd(char transb, long m, long n, long k, long *ldb, long *ldc)
 }
 
 /* Level 3 */
-void THCudaSparse_Scsrmm2(THCState *state, char transa, char transb, long m, long n, long k, long nnz, float alpha, float *csrvala, int *csrrowptra, int *csrcolinda, float *b, long ldb, float beta, float *c, long ldc)
+void THCudaSparse_Scsrmm2(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t nnz, float alpha, float *csrvala, int *csrrowptra, int *csrcolinda, float *b, int64_t ldb, float beta, float *c, int64_t ldc)
 {
   adjustLd(transb, m, n, k, &ldb, &ldc);
   cusparseOperation_t opa = convertTransToCusparseOperation(transa);
@@ -67,7 +67,7 @@ void THCudaSparse_Scsrmm2(THCState *state, char transa, char transb, long m, lon
   THCusparseCheck(cusparseScsrmm2(handle, opa, opb, i_m, i_n, i_k, i_nnz, &alpha, desc, csrvala, csrrowptra, csrcolinda, b, i_ldb, &beta, c, i_ldc));
 }
 
-void THCudaSparse_Dcsrmm2(THCState *state, char transa, char transb, long m, long n, long k, long nnz, double alpha, double *csrvala, int *csrrowptra, int *csrcolinda, double *b, long ldb, double beta, double *c, long ldc)
+void THCudaSparse_Dcsrmm2(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t nnz, double alpha, double *csrvala, int *csrrowptra, int *csrcolinda, double *b, int64_t ldb, double beta, double *c, int64_t ldc)
 {
   adjustLd(transb, m, n, k, &ldb, &ldc);
   cusparseOperation_t opa = convertTransToCusparseOperation(transa);
@@ -94,7 +94,7 @@ void THCudaSparse_Dcsrmm2(THCState *state, char transa, char transb, long m, lon
 }
 
 /* format conversion */
-void THCudaSparse_CreateIdentityPermutation(THCState *state, long nnz, int *P) {
+void THCudaSparse_CreateIdentityPermutation(THCState *state, int64_t nnz, int *P) {
   THAssertMsg((nnz <= INT_MAX),
     "Xcsrsort_bufferSizeExt only supports m, n, nnz with the bound [val] <= %d",
     INT_MAX);
@@ -105,7 +105,7 @@ void THCudaSparse_CreateIdentityPermutation(THCState *state, long nnz, int *P) {
   cusparseCreateIdentityPermutation(handle, i_nnz, P);
 }
 
-void THCudaSparse_Xcsrsort_bufferSizeExt(THCState *state, long m, long n, long nnz, const int *csrRowPtr, const int *csrColInd, size_t *pBufferSizeInBytes)
+void THCudaSparse_Xcsrsort_bufferSizeExt(THCState *state, int64_t m, int64_t n, int64_t nnz, const int *csrRowPtr, const int *csrColInd, size_t *pBufferSizeInBytes)
 {
   THAssertMsg((m <= INT_MAX) && (n <= INT_MAX) && (nnz <= INT_MAX),
     "Xcsrsort_bufferSizeExt only supports m, n, nnz with the bound [val] <= %d",
@@ -119,7 +119,7 @@ void THCudaSparse_Xcsrsort_bufferSizeExt(THCState *state, long m, long n, long n
   THCusparseCheck(cusparseXcsrsort_bufferSizeExt(handle, i_m, i_n, i_nnz, csrRowPtr, csrColInd, pBufferSizeInBytes));
 }
 
-void THCudaSparse_Xcsrsort(THCState *state, long m, long n, long nnz, const int *csrRowPtr, int *csrColInd, int *P, void *pBuffer)
+void THCudaSparse_Xcsrsort(THCState *state, int64_t m, int64_t n, int64_t nnz, const int *csrRowPtr, int *csrColInd, int *P, void *pBuffer)
 {
   THAssertMsg((m <= INT_MAX) && (n <= INT_MAX) && (nnz <= INT_MAX),
     "Xcsrsort only supports m, n, nnz with the bound [val] <= %d",
@@ -138,7 +138,7 @@ void THCudaSparse_Xcsrsort(THCState *state, long m, long n, long nnz, const int 
   THCusparseCheck(cusparseXcsrsort(handle, i_m, i_n, i_nnz, desc, csrRowPtr, csrColInd, P, pBuffer));
 }
 
-void THCudaSparse_Xcoosort_bufferSizeExt(THCState *state, long m, long n, long nnz, const int *cooRows, const int *cooCols, size_t *pBufferSizeInBytes)
+void THCudaSparse_Xcoosort_bufferSizeExt(THCState *state, int64_t m, int64_t n, int64_t nnz, const int *cooRows, const int *cooCols, size_t *pBufferSizeInBytes)
 {
   THAssertMsg((m <= INT_MAX) && (n <= INT_MAX) && (nnz <= INT_MAX),
     "Xcoosort_bufferSizeExt only supports m, n, nnz with the bound [val] <= %d",
@@ -152,7 +152,7 @@ void THCudaSparse_Xcoosort_bufferSizeExt(THCState *state, long m, long n, long n
   THCusparseCheck(cusparseXcoosort_bufferSizeExt(handle, i_m, i_n, i_nnz, cooRows, cooCols, pBufferSizeInBytes));
 }
 
-THC_API void THCudaSparse_XcoosortByRow(THCState *state, long m, long n, long nnz, int *cooRows, int *cooCols, int *P, void *pBuffer)
+void THCudaSparse_XcoosortByRow(THCState *state, int64_t m, int64_t n, int64_t nnz, int *cooRows, int *cooCols, int *P, void *pBuffer)
 {
   THAssertMsg((m <= INT_MAX) && (n <= INT_MAX) && (nnz <= INT_MAX),
     "XcoosortByRow only supports m, n, nnz with the bound [val] <= %d",

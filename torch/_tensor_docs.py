@@ -362,7 +362,7 @@ Returns the number of dimensions of this tensor.
 
 add_docstr(torch._C.FloatTensorBase.dist,
            """
-dist(other, p=2) -> Tensor
+dist(other, p=2) -> float
 
 See :func:`torch.dist`
 """)
@@ -1196,7 +1196,7 @@ In-place version of :meth:`~Tensor.rsqrt`
 
 add_docstr(torch._C.FloatTensorBase.scatter_,
            """
-scatter_(input, dim, index, src) -> Tensor
+scatter_(dim, index, src) -> Tensor
 
 Writes all values from the Tensor :attr:`src` into self at the indices specified
 in the :attr:`index` Tensor. The indices are specified with respect to the

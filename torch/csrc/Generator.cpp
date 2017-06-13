@@ -79,14 +79,14 @@ static PyObject * THPGenerator_manualSeed(THPGenerator *self, PyObject *seed)
 static PyObject * THPGenerator_seed(THPGenerator *self)
 {
   HANDLE_TH_ERRORS
-  return PyLong_FromUnsignedLong(THRandom_seed(self->cdata));
+  return PyLong_FromUnsignedLongLong(THRandom_seed(self->cdata));
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject * THPGenerator_initialSeed(THPGenerator *self)
 {
   HANDLE_TH_ERRORS
-  return PyLong_FromUnsignedLong(THRandom_initialSeed(self->cdata));
+  return PyLong_FromUnsignedLongLong(THRandom_initialSeed(self->cdata));
   END_HANDLE_TH_ERRORS
 }
 

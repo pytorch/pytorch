@@ -294,12 +294,12 @@ __global__ void conv2genericrev(float *input, float *kernel, float *output,
  * matrix vector product like: y <- Ax + beta*y
  */
 THC_API void THCudaTensor_conv2Dmv(THCState *state, THCudaTensor *output, float beta, THCudaTensor *input,
-                                   THCudaTensor *kernel, long srow, long scol, const char *type)
+                                   THCudaTensor *kernel, int64_t srow, int64_t scol, const char *type)
 {
   THCAssertSameGPU(THCudaTensor_checkGPU(state, 3, output, input, kernel));
-  long nInputPlane, nInputRows, nInputCols;
-  long nKernelRows, nKernelCols;
-  long nOutputPlane, nOutputRows, nOutputCols;
+  int64_t nInputPlane, nInputRows, nInputCols;
+  int64_t nKernelRows, nKernelCols;
+  int64_t nOutputPlane, nOutputRows, nOutputCols;
 
   THArgCheck(kernel->nDimension == 4 , 4, "kernel: 4D Tensor expected");
   THArgCheck(srow >= 1, 5, "Stride should be a positive integer");
@@ -331,8 +331,8 @@ THC_API void THCudaTensor_conv2Dmv(THCState *state, THCudaTensor *output, float 
     THCudaTensor *inputP = THCudaTensor_new(state);
 
     // create a zero-padded input
-    long nInputRowsPadded = (nOutputRows - 1) * srow + nKernelRows;
-    long nInputColsPadded = (nOutputCols - 1) * scol + nKernelCols;
+    int64_t nInputRowsPadded = (nOutputRows - 1) * srow + nKernelRows;
+    int64_t nInputColsPadded = (nOutputCols - 1) * scol + nKernelCols;
     THCudaTensor_resize3d(state, inputP, nInputPlane, nInputRowsPadded, nInputColsPadded);
     THCudaTensor_zero(state, inputP);
 
@@ -414,12 +414,12 @@ THC_API void THCudaTensor_conv2Dmv(THCState *state, THCudaTensor *output, float 
  * matrix vector product like: y <- Ax + beta*y
  */
 THC_API void THCudaTensor_conv2Dmm(THCState *state, THCudaTensor *output, float beta, THCudaTensor *input,
-                                   THCudaTensor *kernel, long srow, long scol, const char *type)
+                                   THCudaTensor *kernel, int64_t srow, int64_t scol, const char *type)
 {
   THCAssertSameGPU(THCudaTensor_checkGPU(state, 3, output, input, kernel));
-  long nbatch, nInputPlane, nInputRows, nInputCols;
-  long nKernelRows, nKernelCols;
-  long nOutputPlane, nOutputRows, nOutputCols;
+  int64_t nbatch, nInputPlane, nInputRows, nInputCols;
+  int64_t nKernelRows, nKernelCols;
+  int64_t nOutputPlane, nOutputRows, nOutputCols;
 
   THArgCheck(kernel->nDimension == 4 , 4, "kernel: 4D Tensor expected");
   THArgCheck(srow >= 1, 5, "Stride should be a positive integer");
@@ -452,8 +452,8 @@ THC_API void THCudaTensor_conv2Dmm(THCState *state, THCudaTensor *output, float 
     THCudaTensor *inputP = THCudaTensor_new(state);
 
     // create a zero-padded input
-    long nInputRowsPadded = (nOutputRows - 1) * srow + nKernelRows;
-    long nInputColsPadded = (nOutputCols - 1) * scol + nKernelCols;
+    int64_t nInputRowsPadded = (nOutputRows - 1) * srow + nKernelRows;
+    int64_t nInputColsPadded = (nOutputCols - 1) * scol + nKernelCols;
     THCudaTensor_resize4d(state, inputP, nbatch, nInputPlane, nInputRowsPadded, nInputColsPadded);
     THCudaTensor_zero(state, inputP);
 
@@ -547,12 +547,12 @@ THC_API void THCudaTensor_conv2Dmm(THCState *state, THCudaTensor *output, float 
  */
 THC_API void THCudaTensor_conv2DRevger(THCState *state, THCudaTensor *output, float beta, float alpha,
                                        THCudaTensor *input, THCudaTensor *kernel,
-                                       long srow, long scol)
+                                       int64_t srow, int64_t scol)
 {
   THCAssertSameGPU(THCudaTensor_checkGPU(state, 3, output, input, kernel));
-  long nInputPlane, nInputRows, nInputCols;
-  long nKernelPlane, nKernelRows, nKernelCols;
-  long nOutputRows, nOutputCols;
+  int64_t nInputPlane, nInputRows, nInputCols;
+  int64_t nKernelPlane, nKernelRows, nKernelCols;
+  int64_t nOutputRows, nOutputCols;
 
   THArgCheck(input->nDimension == 3 , 3, "input: 3D Tensor expected");
   THArgCheck(kernel->nDimension == 3 , 4, "kernel: 3D Tensor expected");
@@ -619,12 +619,12 @@ THC_API void THCudaTensor_conv2DRevger(THCState *state, THCudaTensor *output, fl
  */
 THC_API void THCudaTensor_conv2DRevgerm(THCState *state, THCudaTensor *output, float beta, float alpha,
                                         THCudaTensor *input, THCudaTensor *kernel,
-                                        long srow, long scol)
+                                        int64_t srow, int64_t scol)
 {
-  long nInputPlane, nInputRows, nInputCols;
-  long nKernelPlane, nKernelRows, nKernelCols;
-  long nOutputRows, nOutputCols;
-  long nbatch;
+  int64_t nInputPlane, nInputRows, nInputCols;
+  int64_t nKernelPlane, nKernelRows, nKernelCols;
+  int64_t nOutputRows, nOutputCols;
+  int64_t nbatch;
 
   THArgCheck(input->nDimension == 4 , 3, "input: 3D Tensor expected");
   THArgCheck(kernel->nDimension == 4 , 4, "kernel: 3D Tensor expected");
@@ -767,11 +767,11 @@ template <bool swapkernel, int T_kernel_h, int T_kernel_w>
           for(yy = yy_start; yy < yy_end; yy+=yy_step) {
             for(xx = xx_start; xx < xx_end; xx+=xx_step) {
               // Dot product in two dimensions... (between input image and the mask)
-              float *input_p = input + ((long)table[ii]-1)*input_h*input_w
+              float *input_p = input + ((int64_t)table[ii]-1)*input_h*input_w
                 + yy*stride_h*input_w + xx*stride_w;
               float *output_p = output + oo*output_h*output_w + yy*output_w + xx;
               float *kernel_p = shared_kernel
-                + ((long)table[ii + 1]-1) *kernel_w*kernel_h + koffset;
+                + ((int64_t)table[ii + 1]-1) *kernel_w*kernel_h + koffset;
               float sum = 0;
               if (swapkernel) {
 #pragma unroll
@@ -804,12 +804,12 @@ template <bool swapkernel, int T_kernel_h, int T_kernel_w>
           for(yy = yy_start; yy < yy_end; yy+=yy_step) {
             for(xx = xx_start; xx < xx_end; xx+=xx_step) {
               // Dot product in two dims (between input image and the mask)
-              float *input_p = input + ((long)table[ii]-1)*input_h*input_w
+              float *input_p = input + ((int64_t)table[ii]-1)*input_h*input_w
                 + yy*stride_h*input_w + xx*stride_w;
               float *output_p = output + oo*output_h*output_w + yy*output_w
                 + xx;
               float *kernel_p = shared_kernel
-                + ((long)table[ii + 1]-1) *kernel_w*kernel_h + koffset;
+                + ((int64_t)table[ii + 1]-1) *kernel_w*kernel_h + koffset;
               float sum = 0;
               if (swapkernel) {
                 for(ky = 0; ky < kernel_h; ky++) {
@@ -843,10 +843,10 @@ template <bool swapkernel, int T_kernel_h, int T_kernel_w>
         for(yy = yy_start; yy < yy_end; yy+=yy_step) {
           for(xx = xx_start; xx < xx_end; xx+=xx_step) {
             // Dot product in two dimensions... (between input image and the mask)
-            float *input_p = input + ((long)table[ii]-1)*input_h*input_w
+            float *input_p = input + ((int64_t)table[ii]-1)*input_h*input_w
               + yy*stride_h*input_w + xx*stride_w;
             float *output_p = output + oo*output_h*output_w + yy*output_w + xx;
-            float *kernel_p = kernel + ((long)table[ii + 1]-1) *kernel_w*kernel_h + koffset;
+            float *kernel_p = kernel + ((int64_t)table[ii + 1]-1) *kernel_w*kernel_h + koffset;
             float sum = 0;
             if (swapkernel) {
               for(ky = 0; ky < kernel_h; ky++) {
@@ -880,13 +880,13 @@ template <bool swapkernel, int T_kernel_h, int T_kernel_w>
  * matrix vector product like: y <- Ax + beta*y
  */
 THC_API void THCudaTensor_conv2Dmap(THCState *state, THCudaTensor *output, THCudaTensor *input,
-                                    THCudaTensor *kernel, long stride_x, long stride_y,
-                                    THCudaTensor *table, long fanin)
+                                    THCudaTensor *kernel, int64_t stride_x, int64_t stride_y,
+                                    THCudaTensor *table, int64_t fanin)
 {
   THCAssertSameGPU(THCudaTensor_checkGPU(state, 4, output, input, kernel, table));
-  long nInputPlane, nInputRows, nInputCols;
-  long nKernelRows, nKernelCols;
-  long nOutputPlane, nOutputRows, nOutputCols;
+  int64_t nInputPlane, nInputRows, nInputCols;
+  int64_t nKernelRows, nKernelCols;
+  int64_t nOutputPlane, nOutputRows, nOutputCols;
 
   THArgCheck(kernel->nDimension == 3 , 4, "kernel: 3D Tensor expected");
   THArgCheck(stride_x >= 1, 5, "Stride should be a positive integer");

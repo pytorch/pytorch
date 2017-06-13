@@ -22,9 +22,9 @@ void THNN_(PReLU_updateOutput)(
   else
   {
     input = THTensor_(newContiguous)(input);
-    long bs = 1, ks = 1;
+    int64_t bs = 1, ks = 1;
     {
-      long input_ndim = THTensor_(nDimension)(input);
+      int64_t input_ndim = THTensor_(nDimension)(input);
       if (input->size[input_ndim > 1] != nOutputPlane)
         THError("Wrong number of input planes. Expected %d but got %d.", nOutputPlane, input->size[input_ndim > 1]);
 
@@ -88,9 +88,9 @@ void THNN_(PReLU_updateGradInput)(
     const real *weight_data = THTensor_(data)(weight);
     real *gradInput_data = THTensor_(data)(gradInput);
 
-    long bs = 1, ks = 1;
+    int64_t bs = 1, ks = 1;
     {
-      long input_ndim = THTensor_(nDimension)(input);
+      int64_t input_ndim = THTensor_(nDimension)(input);
       if (input->size[input_ndim > 1] != nOutputPlane)
         THError("Wrong number of input planes. Expected %d but got %d.", nOutputPlane, input->size[input_ndim > 1]);
 
@@ -162,9 +162,9 @@ void THNN_(PReLU_accGradParameters)(
     input = THTensor_(newContiguous)(input);
     gradOutput = THTensor_(newContiguous)(gradOutput);
     weight = THTensor_(newContiguous)(weight);
-    long bs = 1, ks = 1;
+    int64_t bs = 1, ks = 1;
     {
-      long input_ndim = THTensor_(nDimension)(input);
+      int64_t input_ndim = THTensor_(nDimension)(input);
       if (input->size[input_ndim > 1] != nOutputPlane)
         THError("Wrong number of input planes. Expected %d but got %d.", nOutputPlane, input->size[input_ndim > 1]);
 

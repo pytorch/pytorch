@@ -10,7 +10,7 @@ struct THPSize {
   PyTupleObject tuple;
 };
 
-PyObject * THPSize_New(int dim, long *sizes)
+PyObject * THPSize_New(int dim, int64_t *sizes)
 {
   PyTypeObject* type = (PyTypeObject*)THPSizeClass;
   PyObject* self = type->tp_alloc(type, dim);
@@ -18,7 +18,7 @@ PyObject * THPSize_New(int dim, long *sizes)
     return NULL;
   }
   for (int i = 0; i < dim; ++i) {
-    PyTuple_SET_ITEM(self, i, PyLong_FromLong(sizes[i]));
+    PyTuple_SET_ITEM(self, i, PyLong_FromLongLong(sizes[i]));
   }
   return self;
 }
@@ -45,7 +45,7 @@ static PyObject * THPSize_repr(THPSize *self)
     if (i != 0) {
       repr += ", ";
     }
-    repr += std::to_string(PyLong_AsLong(PyTuple_GET_ITEM(self, i)));
+    repr += std::to_string(PyLong_AsLongLong(PyTuple_GET_ITEM(self, i)));
   }
   repr += "])";
   return THPUtils_packString(repr);
@@ -65,13 +65,16 @@ static PyObject* wrap_tuple_fn(Args ... args)
   return result;
 }
 
-static auto sq_concat = PyTuple_Type.tp_as_sequence->sq_concat;
-static auto sq_repeat = PyTuple_Type.tp_as_sequence->sq_repeat;
+// We use an anonymous namespace instead of static to work around
+// (what I think is) a bug in Visual Studio
+namespace {
+auto sq_concat = PyTuple_Type.tp_as_sequence->sq_concat;
+auto sq_repeat = PyTuple_Type.tp_as_sequence->sq_repeat;
 #if PY_MAJOR_VERSION == 2
-static auto sq_slice = PyTuple_Type.tp_as_sequence->sq_slice;
+auto sq_slice = PyTuple_Type.tp_as_sequence->sq_slice;
 #endif
-static auto mp_subscript = PyTuple_Type.tp_as_mapping->mp_subscript;
-
+binaryfunc mp_subscript = PyTuple_Type.tp_as_mapping->mp_subscript;
+}
 
 static PySequenceMethods THPSize_as_sequence = {
   PyTuple_Type.tp_as_sequence->sq_length,
@@ -85,7 +88,7 @@ static PySequenceMethods THPSize_as_sequence = {
 #endif
   0,                                          /* sq_ass_item */
   0,                                          /* sq_ass_slice */
-  PyTuple_Type.tp_as_sequence->sq_contains
+  PyTuple_Type.tp_as_sequence->sq_contains,
 };
 
 static PyMappingMethods THPSize_as_mapping = {

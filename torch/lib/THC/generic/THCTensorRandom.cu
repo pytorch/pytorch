@@ -83,8 +83,8 @@ THC_API void THCTensor_(cauchy)(THCState* state, THCTensor *self_, double median
 void THCTensor_(renormRows)(struct THCState* state,
                              THCTensor* t) {
   THAssert(THCTensor_(nDimension)(state, t) == 2);
-  long rows = THCTensor_(size)(state, t, 0);
-  long cols = THCTensor_(size)(state, t, 1);
+  int64_t rows = THCTensor_(size)(state, t, 0);
+  int64_t cols = THCTensor_(size)(state, t, 1);
 
   cudaDeviceProp* props = THCState_getCurrentDeviceProperties(state);
   THAssert(props != NULL);
@@ -115,9 +115,9 @@ THC_API void THCTensor_(multinomial)(struct THCState *state,
              "prob_dist must be 1 or 2 dim");
 
   // Categories are in the innermost dimension
-  long numDist =
+  int64_t numDist =
     inputSize == 1 ? 1 : THCTensor_(size)(state, prob_dist, 0);
-  long numCategoriesLong =
+  int64_t numCategoriesLong =
     inputSize == 1 ? THCTensor_(size)(state, prob_dist, 0) :
     THCTensor_(size)(state, prob_dist, 1);
 
@@ -219,7 +219,7 @@ THC_API void THCTensor_(multinomial)(struct THCState *state,
 
       // Each warp in a block will generate a sample from a different
       // distribution concurrently.
-      ptrdiff_t numBlocks = THCCeilDiv(numDist, 4L);
+      ptrdiff_t numBlocks = THCCeilDiv(numDist, (int64_t) 4);
       dim3 grid(numBlocks < MAX_NUM_BLOCKS ? numBlocks : MAX_NUM_BLOCKS);
 
       for (int sample = 0; sample < n_sample; ++sample) {

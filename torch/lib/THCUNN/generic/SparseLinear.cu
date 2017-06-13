@@ -7,12 +7,12 @@ static bool checkInput(THCTensor* t)
   return t->nDimension == 2 && t->size[1] == 3;
 }
 
-static bool checkSize2D(THCTensor* t, long size0, long size1)
+static bool checkSize2D(THCTensor* t, int64_t size0, int64_t size1)
 {
   return t->nDimension == 2 && t->size[0] == size0 && t->size[1] == size1;
 }
 
-static bool checkSize1D(THCTensor* t, long size0)
+static bool checkSize1D(THCTensor* t, int64_t size0)
 {
   return t->nDimension == 1 && t->size[0] == size0;
 }
@@ -36,9 +36,9 @@ void THNN_(SparseLinear_updateOutput)(
 {
   THAssert(THCTensor_(checkGPU)(state, 4, input, output, weight, bias));
 
-  long h;
-  long outDim = THCTensor_(size)(state, weight, 0);
-  long inDim = THCTensor_(size)(state, weight, 1);
+  int64_t h;
+  int64_t outDim = THCTensor_(size)(state, weight, 0);
+  int64_t inDim = THCTensor_(size)(state, weight, 1);
 
   THArgCheck(checkInput(input), 2, "input size must be nnz x 3");
   THArgCheck(THCTensor_(nDimension)(state, output) == 2, 3, "output must be batchsize x outputsize");
@@ -46,8 +46,8 @@ void THNN_(SparseLinear_updateOutput)(
 
   weight = THCTensor_(newContiguous)(state, weight);
   
-  long batchnum = THCTensor_(size)(state, output, 0);
-  long nnz = THCTensor_(size)(state, input, 0);
+  int64_t batchnum = THCTensor_(size)(state, output, 0);
+  int64_t nnz = THCTensor_(size)(state, input, 0);
 
   THCTensor *buffer = THCTensor_(new)(state);
   THCTensor *sel = THCTensor_(new)(state);
@@ -133,16 +133,16 @@ void THNN_(SparseLinear_accGradParameters)(
            accreal weightDecay,
            accreal scale)
 {
-  long outDim = THCTensor_(size)(state, weight, 0);
-  long inDim = THCTensor_(size)(state, weight, 1);
+  int64_t outDim = THCTensor_(size)(state, weight, 0);
+  int64_t inDim = THCTensor_(size)(state, weight, 1);
 
   THArgCheck(checkInput(input), 2, "input size must be batchsize x nnz x 2");
   THArgCheck(checkSize2D(gradWeight, outDim, inDim), 4, "gradWeight size wrong");
   THArgCheck(checkSize1D(gradBias, outDim), 5, "gradBias size wrong");
 
   weight = THCTensor_(newContiguous)(state, weight);
-  long nnz = THCTensor_(size)(state, input, 0);
-  long batchnum = THCTensor_(size)(state, gradOutput, 0);
+  int64_t nnz = THCTensor_(size)(state, input, 0);
+  int64_t batchnum = THCTensor_(size)(state, gradOutput, 0);
 
   THCTensor *buf = THCTensor_(new)(state);
   THCTensor *cols = THCTensor_(new)(state);

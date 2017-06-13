@@ -381,6 +381,11 @@ class _TensorBase(object):
             raise RuntimeError('logical operations are supported on ByteTensors only')
         return self.copy_((self + other).eq(1))
 
+    def __invert__(self):
+        if type(self).__name__ != 'ByteTensor':
+            raise RuntimeError('logical operations are supported on ByteTensors only')
+        return (1 - self)
+
     def __hash__(self):
         return id(self)
 

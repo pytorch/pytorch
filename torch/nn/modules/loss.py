@@ -448,7 +448,7 @@ class TripletMarginLoss(Module):
     .. math::
         L(a, p, n) = \frac{1}{N} \left( \sum_{i=1}^N \max \{d(a_i, p_i) - d(a_i, n_i) + {\rm margin}, 0\} \right)
 
-    where :math: `d(x_i, y_i) = \| {\bf x}_i - {\bf y}_i \|_2^2`.
+    where :math:`d(x_i, y_i) = \| {\bf x}_i - {\bf y}_i \|_2^2`.
 
     Args:
         anchor: anchor input tensor

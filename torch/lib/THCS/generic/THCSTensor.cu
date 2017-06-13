@@ -16,8 +16,8 @@
 #include <thrust/system/cuda/execution_policy.h>
 #endif
 
-#define I_INFO(tensor) getTensorInfo<THCIndexTensor, unsigned long>(state, tensor)
-#define V_INFO(tensor) getTensorInfo<THCTensor, unsigned long>(state, tensor)
+#define I_INFO(tensor) getTensorInfo<THCIndexTensor, uint64_t>(state, tensor)
+#define V_INFO(tensor) getTensorInfo<THCTensor, uint64_t>(state, tensor)
 
 THCTensor *THCSTensor_(toDense)(THCState *state, THCSTensor *self) {
   THLongStorage *size;
@@ -63,7 +63,7 @@ THCSTensor *THCSTensor_(newCoalesce)(THCState *state, THCSTensor *self) {
   THCTensor_(free)(state, values_);
 
   int nDimI = self->nDimensionI;
-  long stride = values->stride[0];
+  int64_t stride = values->stride[0];
 
   cudaStream_t stream = THCState_getCurrentStream(state);
 
@@ -72,22 +72,22 @@ THCSTensor *THCSTensor_(newCoalesce)(THCState *state, THCSTensor *self) {
   THCIndexTensor *origIndices = THCIndexTensor_(newWithSize1d)(state, nnz);
   THCIndexTensor *uniqueOffsets = THCIndexTensor_(newWithSize1d)(state, nnz);
 
-  typedef thrust::device_ptr<long> thrust_ptr;
+  typedef thrust::device_ptr<int64_t> thrust_ptr;
   thrust_ptr indicesIter(THCIndexTensor_(data)(state, indices1D));
   thrust_ptr origIndicesIter(THCIndexTensor_(data)(state, origIndices));
   thrust_ptr uniqueOffsetsIter(THCIndexTensor_(data)(state, uniqueOffsets));
 
 
   // Fill sortedOrigIndices with sequential indices
-  thrust::counting_iterator<long> countIterI(TH_INDEX_BASE);
-  thrust::counting_iterator<long> countIterO(TH_INDEX_BASE);
+  thrust::counting_iterator<int64_t> countIterI(TH_INDEX_BASE);
+  thrust::counting_iterator<int64_t> countIterO(TH_INDEX_BASE);
 
   THRUST_EXEC(thrust::copy, countIterI, countIterI + nnz, origIndicesIter);
   THRUST_EXEC(thrust::copy, countIterO, countIterO + nnz, uniqueOffsetsIter);
 
   THRUST_EXEC(thrust::sort_by_key,
     indicesIter, indicesIter + nnz,
-    origIndicesIter, ThrustLTOp<long>()
+    origIndicesIter, ThrustLTOp<int64_t>()
   );
 
   // this forces device-host synchronization!
@@ -96,7 +96,7 @@ THCSTensor *THCSTensor_(newCoalesce)(THCState *state, THCSTensor *self) {
     indicesIter, indicesIter + nnz,
     uniqueOffsetsIter
   );
-  long newNnz = newEnd.first - indicesIter;
+  int64_t newNnz = newEnd.first - indicesIter;
 
   THCIndexTensor_(resize2d)(state, indices1D, 1, newNnz);
   THCTensor *newValues = THCTensor_(new)(state);
@@ -104,7 +104,7 @@ THCSTensor *THCSTensor_(newCoalesce)(THCState *state, THCSTensor *self) {
   newValues->size[0] = newNnz;
 
 
-  dim3 grid(THCCeilDiv(newNnz, (long) 4), THCCeilDiv(stride, (long) 128));
+  dim3 grid(THCCeilDiv(newNnz, (int64_t) 4), THCCeilDiv(stride, (int64_t) 128));
   dim3 block(32, 4);
   THCSTensor_coalesceValuesKernel<real, accreal><<<grid, block, 0, stream>>>(
     THCIndexTensor_(data)(state, uniqueOffsets),
@@ -145,7 +145,7 @@ THCSTensor *THCSTensor_(newCoalesce)(THCState *state, THCSTensor *self) {
     if (TH_INDEX_BASE != 0) {
       THCIndexTensor_(add)(state, indices1D, indices1D, -1);
     }
-    for (long d = nDimI - 1; d >= 0; d--) {
+    for (int64_t d = nDimI - 1; d >= 0; d--) {
       THCIndexTensor_(select)(state, indicesSlice, newIndices, 0, d);
       THCIndexTensor_(copy)(state, indicesSlice, indices1D);
       THCIndexTensor_(div)(state, indices1D, indices1D, self->size[d]);
@@ -164,6 +164,8 @@ THCSTensor *THCSTensor_(newCoalesce)(THCState *state, THCSTensor *self) {
 
   THCIndexTensor_(free)(state, indices);
   THCTensor_(free)(state, values);
+  THCIndexTensor_(free)(state, newIndices);
+  THCTensor_(free)(state, newValues);
 
   dst->coalesced = 1;
   THCudaCheck(cudaGetLastError());
@@ -178,11 +180,11 @@ THCIndexTensor* THCSTensor_(newFlattenedIndices)(THCState *state, THCSTensor *se
     return indices;
   } else {
     // FIXME TH_INDEX_BASE
-    long factor = 1;
+    int64_t factor = 1;
     THCIndexTensor *indices1D = THCIndexTensor_(newWithSize2d)(state, 1, self->nnz);
     THCIndexTensor_(fill)(state, indices1D, TH_INDEX_BASE);
     THCIndexTensor *indicesSlice = THCIndexTensor_(new)(state);
-    for (long d = nDimI - 1; d >= 0; d--) {
+    for (int64_t d = nDimI - 1; d >= 0; d--) {
       THCIndexTensor_(select)(state, indicesSlice, indices, 0, d);
       THCIndexTensor_(cadd)(state, indices1D, indices1D, factor, indicesSlice);
       if (TH_INDEX_BASE != 0) {
@@ -198,18 +200,18 @@ THCIndexTensor* THCSTensor_(newFlattenedIndices)(THCState *state, THCSTensor *se
 
 // In place transpose
 void THCSTensor_(transpose)(THCState *state, THCSTensor *self, int d1, int d2) {
-  long nDimI = THCSTensor_(nDimensionI)(state, self);
-  long nDimV = THCSTensor_(nDimensionV)(state, self);
+  int64_t nDimI = THCSTensor_(nDimensionI)(state, self);
+  int64_t nDimV = THCSTensor_(nDimensionV)(state, self);
   THArgCheck(d1 < nDimI && d2 < nDimI, 1, "Transposed dimensions should be sparse. Got nDimI: %ld, d1: %ld, d2: %ld", nDimI, d1, d2);
   THCIndexTensor *indices = THCSTensor_(newIndices)(state, self);
-  long nnz = THCSTensor_(nnz)(state, self);
+  int64_t nnz = THCSTensor_(nnz)(state, self);
   THCIndexTensor *buffer = THCIndexTensor_(newWithSize1d)(state, nnz);
   THCIndexTensor *slice1 = THCIndexTensor_(newSelect)(state, indices, 0, d1);
   THCIndexTensor *slice2 = THCIndexTensor_(newSelect)(state, indices, 0, d2);
   THCIndexTensor_(copy)(state, buffer, slice1);
   THCIndexTensor_(copy)(state, slice1, slice2);
   THCIndexTensor_(copy)(state, slice2, buffer);
-  long i = self->size[d1];
+  int64_t i = self->size[d1];
   self->size[d1] = self->size[d2];
   self->size[d2] = i;
   self->coalesced = 0;

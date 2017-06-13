@@ -22,7 +22,7 @@ static void THPStorage_(dealloc)(THPStorage* self)
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
-static THStorage* THPStorage_(newWithAllocator)(long size, THAllocator* allocator)
+static THStorage* THPStorage_(newWithAllocator)(int64_t size, THAllocator* allocator)
 {
 #ifdef THC_GENERIC_FILE
   THPUtils_setError(THPStorageStr " does not support custom allocators");
@@ -76,7 +76,7 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
 
   // torch.Storage(size)
   if (num_args == 1 && THPUtils_checkLong(first_arg)) {
-    long size = THPUtils_unpackLong(first_arg);
+    int64_t size = THPUtils_unpackLong(first_arg);
     if (allocator) {
       self->cdata = THPStorage_(newWithAllocator)(size, allocator);
     } else {
@@ -88,8 +88,8 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
   // torch.Storage(view_source, [offset, [size]])
   if (num_args < 4 && THPStorage_(Check)(first_arg)) {
     THPStorage *storage_arg = (THPStorage *)first_arg;
-    long numel = storage_arg->cdata->size;
-    long offset = 0;
+    int64_t numel = storage_arg->cdata->size;
+    int64_t offset = 0;
 
     if (num_args >= 2) {
       PyObject *second_arg = PyTuple_GET_ITEM(args, 1);
@@ -98,7 +98,7 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
       offset = THPUtils_unpackLong(second_arg);
     }
 
-    long size = numel - offset;
+    int64_t size = numel - offset;
     if (num_args >= 3) {
       PyObject *third_arg = PyTuple_GET_ITEM(args, 2);
       if (!THPUtils_checkLong(third_arg))
@@ -174,7 +174,7 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
   HANDLE_TH_ERRORS
   /* Integer index */
   if (THPUtils_checkLong(index)) {
-    long nindex = THPUtils_unpackLong(index);
+    int64_t nindex = THPUtils_unpackLong(index);
     if (nindex < 0)
       nindex += THStorage_(size)(LIBRARY_STATE self->cdata);
     if (nindex < 0 || nindex >= self->cdata->size) {
@@ -187,12 +187,12 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
   /* Slice index */
   } else if (PySlice_Check(index)) {
     Py_ssize_t start, stop, slicelength, step;
-    long len = THStorage_(size)(LIBRARY_STATE self->cdata);
+    int64_t len = THStorage_(size)(LIBRARY_STATE self->cdata);
     if (!THPUtils_parseSlice(index, len, &start, &stop, &step, &slicelength))
       return NULL;
     if (step != 1) {
       THPUtils_setError("Trying to slice with a step of %ld, but only a step of "
-          "1 is supported", (long)step);
+          "1 is supported", (int64_t)step);
       return NULL;
     }
 
@@ -224,17 +224,17 @@ static int THPStorage_(set)(THPStorage *self, PyObject *index, PyObject *value)
 
   real rvalue = THPUtils_(unpackReal)(value);
   if (THPUtils_checkLong(index)) {
-    long nindex = THPUtils_unpackLong(index);
+    int64_t nindex = THPUtils_unpackLong(index);
     THStorage_(set)(LIBRARY_STATE self->cdata, nindex, rvalue);
     return 0;
   } else if (PySlice_Check(index)) {
     Py_ssize_t start, stop, slicelength, step;
-    long len = THStorage_(size)(LIBRARY_STATE self->cdata);
+    int64_t len = THStorage_(size)(LIBRARY_STATE self->cdata);
     if (!THPUtils_parseSlice(index, len, &start, &stop, &step, &slicelength))
       return -1;
     if (step != 1) {
       THPUtils_setError("Trying to slice with a step of %ld, but only a step of "
-          "1 is supported", (long)step);
+          "1 is supported", (int64_t)step);
       return 0;
     }
     // TODO: check the bounds only once

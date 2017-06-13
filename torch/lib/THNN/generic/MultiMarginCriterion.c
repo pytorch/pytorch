@@ -16,8 +16,8 @@ void THNN_(MultiMarginCriterion_updateOutput)(
   real margin = TH_CONVERT_ACCREAL_TO_REAL(margin_);
   real *input_data, *weights_data;
   THIndex_t *target_data;
-  long nframe, dim;
-  long t, d;
+  int64_t nframe, dim;
+  int64_t t, d;
   real sum;
 
   THArgCheck((input->nDimension == 1) || (input->nDimension == 2), 2,
@@ -98,8 +98,8 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
   real *gradInput_data;
   THIndex_t *target_data;
   real *weights_data;
-  long nframe, dim;
-  long t, d;
+  int64_t nframe, dim;
+  int64_t t, d;
   real g;
 
   THArgCheck((input->nDimension == 1) || (input->nDimension == 2), 2,

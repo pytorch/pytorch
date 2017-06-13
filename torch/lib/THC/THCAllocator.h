@@ -5,6 +5,6 @@
 
 extern THAllocator THCudaHostAllocator;
 extern THAllocator THCUVAAllocator;
-extern THCDeviceAllocator THCIpcAllocator;
+THC_API THCDeviceAllocator THCIpcAllocator;
 
 #endif

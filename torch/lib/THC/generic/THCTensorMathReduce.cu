@@ -3,7 +3,7 @@
 #else
 
 THC_API void
-THCTensor_(sum)(THCState* state, THCTensor *self, THCTensor *src, long dimension) {
+THCTensor_(sum)(THCState* state, THCTensor *self, THCTensor *src, int dimension) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, src));
   if (!THC_reduceDim(state, self, src,
                      thrust::identity<real>(),
@@ -17,7 +17,7 @@ THCTensor_(sum)(THCState* state, THCTensor *self, THCTensor *src, long dimension
 }
 
 THC_API void
-THCTensor_(prod)(THCState* state, THCTensor *self, THCTensor *src, long dimension) {
+THCTensor_(prod)(THCState* state, THCTensor *self, THCTensor *src, int dimension) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, src));
   if (!THC_reduceDim(state, self, src,
                      thrust::identity<real>(),
@@ -31,17 +31,17 @@ THCTensor_(prod)(THCState* state, THCTensor *self, THCTensor *src, long dimensio
 }
 
 THC_API void
-THCTensor_(mean)(THCState *state, THCTensor *self, THCTensor *src, long dim)
+THCTensor_(mean)(THCState *state, THCTensor *self, THCTensor *src, int dim)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, src));
   THCTensor_(sum)(state, self, src, dim);
-  THCTensor_(div)(state, self, self, ScalarConvert<long, real>::to(THCTensor_(size)(state, src, dim)));
+  THCTensor_(div)(state, self, self, ScalarConvert<int64_t, real>::to(THCTensor_(size)(state, src, dim)));
 }
 
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
 
 THC_API void
-THCTensor_(renorm)(THCState *state, THCTensor* self, THCTensor* src, real value, long dimension, real maxnorm)
+THCTensor_(renorm)(THCState *state, THCTensor* self, THCTensor* src, real value, int dimension, real maxnorm)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, src));
   THCTensor *self_;
@@ -70,7 +70,7 @@ THCTensor_(renorm)(THCState *state, THCTensor* self, THCTensor* src, real value,
 }
 
 THC_API void
-THCTensor_(std)(THCState *state, THCTensor *self_, THCTensor *src, long dimension, int flag)
+THCTensor_(std)(THCState *state, THCTensor *self_, THCTensor *src, int dimension, int flag)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
   THLongStorage *dim = THCTensor_(newSizeOf)(state, src);
@@ -92,7 +92,7 @@ THCTensor_(std)(THCState *state, THCTensor *self_, THCTensor *src, long dimensio
 }
 
 THC_API void
-THCTensor_(var)(THCState *state, THCTensor *self_, THCTensor *src, long dimension, int flag)
+THCTensor_(var)(THCState *state, THCTensor *self_, THCTensor *src, int dimension, int flag)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
   THLongStorage *dim = THCTensor_(newSizeOf)(state, src);
@@ -146,7 +146,7 @@ THCTensor_(varall)(THCState *state, THCTensor *self)
 }
 
 THC_API void
-THCTensor_(norm)(THCState *state, THCTensor* self, THCTensor* src, real value, long dimension)
+THCTensor_(norm)(THCState *state, THCTensor* self, THCTensor* src, real value, int dimension)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, src));
   if (THCNumerics<real>::eq(value, ScalarConvert<float, real>::to(0.0))) {
@@ -325,17 +325,17 @@ THCTensor_(max)(THCState *state,
                 THCTensor *values,
                 THCudaLongTensor *indices,
                 THCTensor *src,
-                long dimension) {
+                int dimension) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, values, indices, src));
 
-  thrust::pair<typename TensorUtils<THCTensor>::DataType, long>
+  thrust::pair<typename TensorUtils<THCTensor>::DataType, int64_t>
     init =
-    thrust::make_pair<typename TensorUtils<THCTensor>::DataType, long>(
+    thrust::make_pair<typename TensorUtils<THCTensor>::DataType, int64_t>(
       THCNumerics<typename TensorUtils<THCTensor>::DataType>::min(), 1);
 
   return THC_reduceDimIndex(
     state, values, indices, src, dimension, init,
-    MaxValuePair<typename TensorUtils<THCTensor>::DataType, long>());
+    MaxValuePair<typename TensorUtils<THCTensor>::DataType, int64_t>());
 }
 
 THC_API void
@@ -343,17 +343,17 @@ THCTensor_(min)(THCState *state,
                 THCTensor *values,
                 THCudaLongTensor *indices,
                 THCTensor *src,
-                long dimension) {
+                int dimension) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, values, indices, src));
 
-  thrust::pair<typename TensorUtils<THCTensor>::DataType, long>
+  thrust::pair<typename TensorUtils<THCTensor>::DataType, int64_t>
     init =
-    thrust::make_pair<typename TensorUtils<THCTensor>::DataType, long>(
+    thrust::make_pair<typename TensorUtils<THCTensor>::DataType, int64_t>(
       THCNumerics<typename TensorUtils<THCTensor>::DataType>::max(), 1);
 
   return THC_reduceDimIndex(
     state, values, indices, src, dimension, init,
-    MinValuePair<typename TensorUtils<THCTensor>::DataType, long>());
+    MinValuePair<typename TensorUtils<THCTensor>::DataType, int64_t>());
 }
 
 #endif

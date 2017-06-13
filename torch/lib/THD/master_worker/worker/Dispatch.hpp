@@ -7,7 +7,7 @@
 namespace thd {
 namespace worker {
 
-std::string execute(std::unique_ptr<rpc::RPCMessage> raw_message_ptr);
+void execute(std::unique_ptr<rpc::RPCMessage> raw_message_ptr);
 
 } // namespace worker
 } // namespace thd

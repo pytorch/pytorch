@@ -2,8 +2,8 @@
 #error "You must define THCS_GENERIC_FILE before including THGenerateIntType.h"
 #endif
 
-#define real int
-#define accreal long
+#define real int32_t
+#define accreal int64_t
 #define Real Int
 #define CReal CudaInt
 #define THCS_REAL_IS_INT

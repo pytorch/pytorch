@@ -2,8 +2,8 @@
 #error "You must define THCS_GENERIC_FILE before including THGenerateLongType.h"
 #endif
 
-#define real long
-#define accreal long
+#define real int64_t
+#define accreal int64_t
 #define Real Long
 #define CReal CudaLong
 #define THCS_REAL_IS_LONG
