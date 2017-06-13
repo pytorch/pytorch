@@ -1300,9 +1300,9 @@
   return: accreal
   arguments:
     - arg: THTensor* self
-      checkdim: 1
+      assert_ndim: 1
     - arg: THTensor* tensor
-      checkdim: 1
+      assert_ndim: 1
 ]]
 
 [[

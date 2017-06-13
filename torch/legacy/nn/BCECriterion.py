@@ -37,7 +37,10 @@ class BCECriterion(Criterion):
         if weights is not None:
             buffer.mul_(weights)
 
-        output = torch.dot(target, buffer)
+        target_1d = target.contiguous().view(-1)
+        # don't save a 1-d view of buffer: it should already be contiguous, and it's
+        # used as non-1d tensor later.
+        output = torch.dot(target_1d, buffer.contiguous().view(-1))
 
         # log(1 - input) * (1 - target)
         torch.mul(input, -1, out=buffer).add_(1 + self.eps).log_()
@@ -45,7 +48,7 @@ class BCECriterion(Criterion):
             buffer.mul_(weights)
 
         output = output + torch.sum(buffer)
-        output = output - torch.dot(target, buffer)
+        output = output - torch.dot(target_1d, buffer.contiguous().view(-1))
 
         if self.sizeAverage:
             output = output / input.nelement()
