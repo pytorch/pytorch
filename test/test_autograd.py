@@ -1031,8 +1031,8 @@ class TestAutograd(TestCase):
             packed_result = fn(*args).data
             # if non-Variable torch function returns a scalar, compare to scalar
             if not torch.is_tensor(unpacked_result):
-                assert(packed_result.dim() == 1)
-                assert(packed_result.nelement() == 1)
+                assert packed_result.dim() == 1
+                assert packed_result.nelement() == 1
                 packed_result = packed_result[0]
             self.assertEqual(packed_result, unpacked_result)
 
@@ -1069,6 +1069,9 @@ class TestAutograd(TestCase):
         test_blas(torch.matmul, Variable(torch.randn(2,10)), Variable(torch.randn(10,4)))
         test_blas(torch.matmul, Variable(torch.randn(5,2,10)), Variable(torch.randn(5,10,4)))
         test_blas(torch.matmul, Variable(torch.randn(3,5,2,10)), Variable(torch.randn(3,5,10,4)))
+        test_blas(torch.matmul, Variable(torch.randn(3,5,2,10)), Variable(torch.randn(10)))
+        test_blas(torch.matmul, Variable(torch.randn(10)), Variable(torch.randn(3,5,10,4)))
+
 
     def test_save_none_for_backward(self):
         test_case = self
@@ -1560,6 +1563,8 @@ method_tests = [
     ('matmul', (M, ), ((M, S),), "1d_2d"),
     ('matmul', (S, M), ((M, S),), "2d_2d"),
     ('matmul', (S, S, M, M), ((S, S, M, S),), "4d_4d"),
+    ('matmul', (S, S, M, M), ((M,),), "4d_1d"),
+    ('matmul', (M,), ((S, S, M, S),), "1d_4d"),
     ('addcmul', (S, S), ((S, S), (S, S))),
     ('addcmul', (S, S), (0.5, (S, S), (S, S)), 'scale'),
     ('addcdiv', (S, S), ((S, S), (S, S))),

@@ -787,6 +787,8 @@ class Variable(_C._VariableBase):
         return self.mul_(other)
 
     def __matmul__(self, other):
+        if not isinstance(other, Variable):
+            return NotImplemented
         return self.matmul(other)
 
     def __div__(self, other):

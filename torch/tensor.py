@@ -298,6 +298,8 @@ class _TensorBase(object):
         return self.mul_(other)
 
     def __matmul__(self, other):
+        if not torch.is_tensor(other):
+            return NotImplemented
         return self.matmul(other)
 
     def __pow__(self, other):

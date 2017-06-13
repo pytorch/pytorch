@@ -125,15 +125,18 @@ def matmul(tensor1, tensor2, out=None):
     The behavior depends on the dimensionality of the tensors as follows:
 
     - If both tensors are 1-dimensional, the dot product (scalar) is returned.
+    - If both arguments are 2-dimensional, the matrix-matrix product is returned.
     - If the first argument is 1-dimensional and the second argument is 2-dimensional,
       a 1 is prepended to its dimension for the purpose of the matrix multiply.
       After the matrix multiply, the prepended dimension is removed.
     - If the first argument is 2-dimensional and the second argument is 1-dimensional,
-      the matrix-vector product is returned
-    - If both arguments are 2-dimensional, the matrix-matrix product is returned
-    - If both arguments are at least 2-dimensional and at least one argument is
-      N-dimensional (where N > 2), then a batched-matrix multiply is returned.  The
-      non-matrix dimensions are :ref:`broadcasted <broadcasting-semantics>` (and thus
+      the matrix-vector product is returned.
+    - If both arguments are at least 1-dimensional and at least one argument is
+      N-dimensional (where N > 2), then a batched matrix multiply is returned.  If the first
+      argument is 1-dimensional, a 1 is prepended to its dimension for the purpose of the
+      batched matrix multiply and removed after.  If the second argument is 1-dimensional, a
+      1 is appended to its dimension for the purpose of the batched matrix multiple and removed after.
+      The non-matrix (i.e. batch) dimensions are :ref:`broadcasted <broadcasting-semantics>` (and thus
       must be broadcastable).  For example, if :attr:`tensor1` is a `j x 1 x n x m` Tensor
       and :attr:`tensor2` is a `k x m x p` Tensor, :attr:`out` will be an `j x k x n x p` Tensor.
 
@@ -146,12 +149,8 @@ def matmul(tensor1, tensor2, out=None):
         tensor2 (Tensor): Second tensor to be multiplied
         out (Tensor, optional): Output tensor
     """
-
     dim_tensor1 = tensor1.dim()
-    try:
-        dim_tensor2 = tensor2.dim()
-    except AttributeError:  # not a tensor
-        return NotImplemented
+    dim_tensor2 = tensor2.dim()
     if dim_tensor1 == 1 and dim_tensor2 == 1:
         if out is None:
             return torch.dot(tensor1, tensor2)
@@ -162,7 +161,7 @@ def matmul(tensor1, tensor2, out=None):
             return torch.mv(tensor1, tensor2)
         else:
             return torch.mv(tensor1, tensor2, out=out)
-    if dim_tensor1 == 1 and dim_tensor2 == 2:
+    elif dim_tensor1 == 1 and dim_tensor2 == 2:
         if out is None:
             return torch.mm(tensor1.unsqueeze(0), tensor2).squeeze(0)
         else:
@@ -172,9 +171,12 @@ def matmul(tensor1, tensor2, out=None):
             return torch.mm(tensor1, tensor2)
         else:
             return torch.mm(tensor1, tensor2, out=out)
-    elif dim_tensor1 >= 2 and dim_tensor2 >= 2:
-        # ensure each tensor is at least 3-dimensional
+    elif (dim_tensor1 >= 1 and dim_tensor2 >= 1) and (dim_tensor1 >= 3 or dim_tensor2 >= 3):
+        # ensure each tensor size is at least 3-dimensional
         tensor1_exp_size = torch.Size((1,) * max(3 - tensor1.dim(), 0) + tensor1.size())
+        # rhs needs to be a separate case since we can't freely expand 1s on the rhs, but can on lhs
+        if dim_tensor2 == 1:
+            tensor2 = tensor2.unsqueeze(1)
         tensor2_exp_size = torch.Size((1,) * max(3 - tensor2.dim(), 0) + tensor2.size())
 
         # expand the batch portion (i.e. cut off matrix dimensions and expand rest)
@@ -188,8 +190,17 @@ def matmul(tensor1, tensor2, out=None):
 
         # reshape batches back into result
         total_expansion = expand_batch_portion + (tensor1_exp_size[-2], tensor2_exp_size[-1])
+
+        def maybeSqueeze(tensor):
+            if dim_tensor1 == 1:
+                return tensor.squeeze(-2)
+            elif dim_tensor2 == 1:
+                return tensor.squeeze(-1)
+            else:
+                return tensor
+
         if out is None:
-            return torch.bmm(tensor1_expanded, tensor2_expanded).view(*(total_expansion))
+            return maybeSqueeze(torch.bmm(tensor1_expanded, tensor2_expanded).view(*(total_expansion)))
         else:
             # We can only safely reshape the output if the output (after the torch.bmm call)
             # is contiguous.  This will happen only if:
@@ -197,12 +208,9 @@ def matmul(tensor1, tensor2, out=None):
             # 2) The output came in as contiguous
             # 3) The output came in as the wrong size (so was resized in the torch.bmm call).
             #
-            # But 1) is inconsistent with other functions (e.g. torch.bmm) that will maintain
-            # output non-contiguity if the size is correct (perhaps we should change this globally?)
-            # And 3) is a surprising output to accept if we aren't accepting 1).
-            # So let's just force accepting contiguous tensors.
-            if not out.is_contiguous():
-                raise ValueError("out must be contiguous for batched matmul")
-            return torch.bmm(tensor1_expanded, tensor2_expanded, out=out).set_(out.view(*(total_expansion)))
+            # Even though 1) is inconsistent with other functions (e.g. torch.bmm) that will maintain
+            # output non-contiguity if the size is correct, we'll do it here for simplicity.
+            out = out.contiguous()
+            return torch.bmm(tensor1_expanded, tensor2_expanded, out=out).set_(maybeSqueeze(out.view(*(total_expansion))))
     raise ValueError("both arguments to __matmul__ need to be at least 1D, "
                      "but they are {}D and {}D".format(dim_tensor1, dim_tensor2))
