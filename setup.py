@@ -393,6 +393,10 @@ def make_relative_rpath(path):
 # Declare extensions and package
 ################################################################################
 
+# nvcc does not support '-fexceptions'
+nvcc_extra_compile_args = extra_compile_args
+extra_compile_args += ['-fexceptions']
+
 extensions = []
 packages = find_packages(exclude=('tools.*',))
 
@@ -430,7 +434,7 @@ if WITH_CUDA:
     THCUNN = Extension("torch._thnn._THCUNN",
                        sources=['torch/csrc/nn/THCUNN.cpp'],
                        language='c++',
-                       extra_compile_args=extra_compile_args,
+                       extra_compile_args=nvcc_extra_compile_args,
                        include_dirs=include_dirs,
                        extra_link_args=extra_link_args + [
                            TH_LIB,
