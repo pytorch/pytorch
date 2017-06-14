@@ -2,8 +2,6 @@ import torch
 import warnings
 from . import _tensor_str
 from ._utils import _type, _cuda, _range, _rebuild_tensor
-from functools import reduce
-from operator import mul
 import sys
 
 
@@ -164,6 +162,12 @@ class _TensorBase(object):
         """
         return torch.chunk(self, n_chunks, dim)
 
+    def matmul(self, other):
+        """Matrix product of two tensors.
+
+        See :func:`torch.matmul`."""
+        return torch.matmul(self, other)
+
     def tolist(self):
         """Returns a nested list represenation of this tensor."""
         dim = self.dim()
@@ -297,38 +301,9 @@ class _TensorBase(object):
         return self.mul_(other)
 
     def __matmul__(self, other):
-        dim_self = self.dim()
-        try:
-            dim_other = other.dim()
-        except AttributeError:  # not a tensor
+        if not torch.is_tensor(other):
             return NotImplemented
-        if dim_self == 1 and dim_other == 1:
-            return self.dot(other)
-        if dim_self == 2 and dim_other == 1:
-            return self.mv(other)
-        if dim_self == 1 and dim_other == 2:
-            return self.unsqueeze(0).mm(other).squeeze(0)
-        elif dim_self == 2 and dim_other == 2:
-            return self.mm(other)
-        elif dim_self >= 2 and dim_other >= 2:
-            # ensure each tensor is at least 3-dimensional
-            self_exp_size = torch.Size((1,) * max(3 - self.dim(), 0) + self.size())
-            other_exp_size = torch.Size((1,) * max(3 - other.dim(), 0) + other.size())
-
-            # expand the batch portion (i.e. cut off matrix dimensions and expand rest)
-            expand_batch_portion = torch._C._infer_size(self_exp_size[:-2], other_exp_size[:-2])
-
-            # flatten expanded batches
-            self_expanded = self.expand(*(expand_batch_portion + self_exp_size[-2:])) \
-                .contiguous().view(reduce(mul, expand_batch_portion), *self_exp_size[-2:])
-            other_expanded = other.expand(*(expand_batch_portion + other_exp_size[-2:])) \
-                .contiguous().view(reduce(mul, expand_batch_portion), *other_exp_size[-2:])
-
-            # reshape batches back into result
-            total_expansion = expand_batch_portion + (self_exp_size[-2], other_exp_size[-1])
-            return self_expanded.bmm(other_expanded).view(*(total_expansion))
-        raise ValueError("both arguments to __matmul__ need to be at least 1D, "
-                         "but they are {}D and {}D".format(dim_self, dim_other))
+        return self.matmul(other)
 
     def __pow__(self, other):
         return self.pow(other)

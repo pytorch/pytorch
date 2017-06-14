@@ -331,22 +331,30 @@ class Clone(Function):
         return grad_output
 
 
-class Squeeze(Function):
+class Squeeze(InplaceFunction):
 
     @staticmethod
-    def forward(ctx, input, dim=None):
+    def forward(ctx, input, dim=None, inplace=False):
         ctx.dim = dim
         ctx.input_size = input.size()
-        if dim is not None:
-            result = input.squeeze(dim)
+        if inplace:
+            ctx.mark_dirty(input)
+            if dim is not None:
+                return input.squeeze_(dim)
+            else:
+                return input.squeeze_()
         else:
-            result = input.squeeze()
-        ctx.mark_shared_storage((input, result))
-        return result
+            if dim is not None:
+                result = input.squeeze(dim)
+            else:
+                result = input.squeeze()
+
+            ctx.mark_shared_storage((input, result))
+            return result
 
     @staticmethod
     def backward(ctx, grad_output):
-        return grad_output.contiguous().view(ctx.input_size), None
+        return grad_output.contiguous().view(ctx.input_size), None, None
 
 
 class Unsqueeze(Function):

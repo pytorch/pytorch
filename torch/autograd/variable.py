@@ -522,6 +522,9 @@ class Variable(_C._VariableBase):
         flat_out = flat.mul(norms.expand_as(flat))
         return flat_out.view(t.size()).transpose(dim, 0)
 
+    def matmul(self, other):
+        return torch.matmul(self, other)
+
     @staticmethod
     def _static_blas(cls, args, inplace):
         num_args = len(args)
@@ -706,6 +709,9 @@ class Variable(_C._VariableBase):
     def squeeze(self, dim=None):
         return Squeeze.apply(self, dim)
 
+    def squeeze_(self, dim=None):
+        return Squeeze.apply(self, dim, True)
+
     def unsqueeze(self, dim):
         return Unsqueeze.apply(self, dim)
 
@@ -787,21 +793,9 @@ class Variable(_C._VariableBase):
         return self.mul_(other)
 
     def __matmul__(self, other):
-        dim_self = self.dim()
-        try:
-            dim_other = other.dim()
-        except AttributeError:  # not a Variable
+        if not isinstance(other, Variable):
             return NotImplemented
-        if dim_self == 1 and dim_other == 1:
-            return self.dot(other)
-        if dim_self == 2 and dim_other == 1:
-            return self.mv(other)
-        if dim_self == 1 and dim_other == 2:
-            return self.unsqueeze(0).mm(other).squeeze(0)
-        elif dim_self == 2 and dim_other == 2:
-            return self.mm(other)
-        raise ValueError("both arguments to __matmul__ need to be 1D or 2D, "
-                         "but they are {}D and {}D".format(dim_self, dim_other))
+        return self.matmul(other)
 
     def __div__(self, other):
         return self.div(other)
