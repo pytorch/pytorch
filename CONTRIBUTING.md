@@ -110,7 +110,7 @@ working on:
   (NB: no `build` here!)
 
 - Working on `torch/lib/TH`, did not make any cmake changes, and just want to
-  see if it compiles?  Run `(cd torch/lib/build/TH && make install -j$(nproc))`.  This
+  see if it compiles?  Run `(cd torch/lib/build/TH && make install -j$(getconf _NPROCESSORS_ONLN))`.  This
   applies for any other subdirectory of `torch/lib`.  **Warning: Changes you
   make here will not be visible from Python.**  See below.
 
