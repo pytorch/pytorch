@@ -4,8 +4,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
-from caffe2.python import core, recurrent
-from caffe2.python.cnn import CNNModelHelper
+from caffe2.python import core, recurrent, model_helper, brew
 import numpy as np
 
 '''
@@ -232,7 +231,8 @@ class CRFWithLoss(object):
             '''
             Adds the crf_net recurrent operator to the model.
 
-            model: CNNModelHelper object new operators would be added to
+            model: model_helper.ModelHelper object new operators would be added
+            to
 
             input_blob: the input sequence in a format T x N x D
             where T is sequence size, N - batch size and D - input dimention
@@ -249,7 +249,8 @@ class CRFWithLoss(object):
                 # relationships.
                 return "{}/{}".format(str(scope), str(name))
 
-            step_model = CNNModelHelper(name='crf_step', param_model=self.model)
+            step_model = model_helper.ModelHelper(name='crf_step',
+                                                  param_model=self.model)
             input_t, cell_t_prev, _ = (
                 step_model.net.AddExternalInputs(
                     'input_t', 'cell_t_prev', transitions
@@ -267,7 +268,8 @@ class CRFWithLoss(object):
             step_model.param_init_net.AddExternalOutput(zero_segment_id)
             """ the CRF step """
             # Do tile
-            prev_transpose = step_model.Transpose(
+            prev_transpose = brew.transpose(
+                step_model,
                 cell_t_prev,
                 [s('prev_transpose')],
                 axes=(0, 2, 1),
