@@ -9,6 +9,21 @@ void Type::registerAll(Context * context) {
   ${type_registrations}
 }
 
+Tensor Type::copy(const Tensor & src) {
+  Tensor r = this->tensor();
+  r.resize_(src.sizes());
+  copy(r,src);
+  return r;
+}
+
+Type & Type::toBackend(Backend b) {
+  return context->getType(b,scalarType());
+}
+Type & Type::toScalarType(ScalarType s) {
+  return context->getType(backend(),s);
+}
+
+
 ${type_method_definitions}
 
 }

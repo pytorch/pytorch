@@ -3,6 +3,7 @@
 #include "TensorLib/Scalar.h"
 #include "TensorLib/Type.h"
 #include "TensorLib/TensorImpl.h"
+#include "TensorLib/Utils.h"
 
 namespace tlib {
 class Type;
@@ -68,15 +69,28 @@ struct Tensor {
   const char * toString() const {
     return pImpl->toString();
   }
-  IntList sizes() {
+  IntList sizes() const {
     return pImpl->sizes();
   }
-  IntList strides() {
+  IntList strides() const {
     return pImpl->strides();
   }
   Type & type() const {
     return pImpl->type();
   }
+  Tensor toType(Type & t) const {
+    if(type().ID() ==t.ID())
+      return *this;
+    return t.copy(*this);
+  }
+  Tensor toType(ScalarType t) {
+    return toType(type().toScalarType(t));
+  }
+  Tensor toBackend(Backend b) {
+    return toType(type().toBackend(b));
+  }
+  template<typename T>
+  T * data() const;
 
   //example
   //Tensor * add(Tensor & b);
@@ -92,4 +106,20 @@ public:
 // all static inline to allow for inlining of the non-dynamic part of dispatch
 ${tensor_method_definitions}
 
+template<typename T>
+inline T* Tensor::data() const {
+  runtime_error("data() cast to unexpected type.");
 }
+#define DEFINE_CAST(T,name,_) \
+template<> \
+inline T* Tensor::data() const { \
+  TLIB_ASSERT(type().scalarType() == ScalarType::name, \
+    "expected scalar type % s but found %s", #name, \
+    tlib::toString(type().scalarType())); \
+  return static_cast<T*>(this->data_ptr()); \
+}
+
+TLIB_FORALL_SCALAR_TYPES(DEFINE_CAST)
+#undef DEFINE_CAST
+
+} //namespace tlib
