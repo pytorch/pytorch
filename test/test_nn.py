@@ -3129,6 +3129,16 @@ new_module_tests = [
     ),
 ]
 
+
+new_criterion_tests = [
+    dict(
+        module_name='PoissonNLLLoss',
+        input=torch.randn(2, 3, 4, 5),
+        target=torch.randn(2, 3, 4, 5).floor_().abs_(),
+    ),
+]
+
+
 for test_params in module_tests + new_module_tests:
     # TODO: CUDA is not implemented yet
     if 'constructor' not in test_params:
@@ -3136,7 +3146,7 @@ for test_params in module_tests + new_module_tests:
         test_params['constructor'] = getattr(nn, name)
     test = NewModuleTest(**test_params)
     add_test(test)
-for test_params in criterion_tests:
+for test_params in criterion_tests + new_criterion_tests:
     name = test_params.pop('module_name')
     test_params['constructor'] = getattr(nn, name)
     test = NewCriterionTest(**test_params)
