@@ -891,12 +891,12 @@ Vision functions
 .. autofunction:: upsample
 
 :hidden:`upsample_nearest`
-~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: upsample_nearest
 
 :hidden:`upsample_bilinear`
-~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: upsample_bilinear
 

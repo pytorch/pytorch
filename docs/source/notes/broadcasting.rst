@@ -1,7 +1,7 @@
 .. _broadcasting-semantics:
 
 Broadcasting semantics
-==============
+======================
 
 Many PyTorch operations support :any:`NumPy Broadcasting Semantics <numpy.doc.broadcasting>`.
 
@@ -26,7 +26,7 @@ For Example::
     >>> x=torch.FloatTensor()
     >>> y=torch.FloatTensor(2,2)
     # x and y are not broadcastable, because x does not have at least 1 dimension
-    
+
     # can line up trailing dimensions
     >>> x=torch.FloatTensor(5,3,4,1)
     >>> y=torch.FloatTensor(  3,1,1)
@@ -35,7 +35,7 @@ For Example::
     # 2nd trailing dimension: y has size 1
     # 3rd trailing dimension: x size == y size
     # 4th trailing dimension: y dimension doesn't exist
-    
+
     # but:
     >>> x=torch.FloatTensor(5,2,4,1)
     >>> y=torch.FloatTensor(  3,1,1)
@@ -69,7 +69,7 @@ For Example::
     RuntimeError: The size of tensor a (2) must match the size of tensor b (3) at non-singleton dimension 1
 
 In-place semantics
------------------
+------------------
 One complication is that in-place operations do not allow the in-place tensor to change shape
 as a result of the broadcast.
 
@@ -87,7 +87,7 @@ For Example::
     RuntimeError: The expanded size of the tensor (1) must match the existing size (7) at non-singleton dimension 2.
 
 Backwards compatibility
-----------------------
+-----------------------
 Prior versions of PyTorch allowed certain pointwise functions to execute on tensors with different shapes,
 as long as the number of elements in each tensor was equal.  The pointwise operation would then be carried
 out by viewing each tensor as 1-dimensional.  PyTorch now supports broadcasting and the "1-dimensional"
@@ -99,7 +99,7 @@ two tensors do not have the same shape, but are broadcastable and have the same 
 For Example::
 
     >>> torch.add(torch.ones(4,1), torch.randn(4))
-    
+
 would previously produce a Tensor with size: torch.Size([4,1]), but now produces a Tensor with size: torch.Size([4,4]).
 In order to help identify cases in your code where backwards incompatibilities introduced by broadcasting may exist,
 you may set `torch.utils.backcompat.broadcast.warning.enabled` to `True`, which will generate a python warning
