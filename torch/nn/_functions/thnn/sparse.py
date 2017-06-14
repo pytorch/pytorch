@@ -157,6 +157,11 @@ class EmbeddingBag(Function):
         assert offsets[-1] < indices.size(0)
 
         if weight.is_cuda:
+            if self.mode == 1:
+                self.sequence_length = offsets.new().resize_(offsets.size())
+            else:
+                self.sequence_length = None
+
             self._backend.LookupTableBag_updateOutput(
                 self._backend.library_state,
                 indices,
@@ -164,7 +169,8 @@ class EmbeddingBag(Function):
                 weight,
                 output,
                 self._offset2bag,
-                self.mode
+                self.mode,
+                self.sequence_length
             )
         else:
             # slow CPU implementation
@@ -217,8 +223,9 @@ class EmbeddingBag(Function):
                 _sorted,
                 _indices,
                 self.scale_grad_by_freq,
-                1,
-                self.mode
+                self.mode,
+                self.sequence_length,
+                1
             )
         else:
             # slow CPU implementation

@@ -9,7 +9,9 @@ void THNN_(LookupTableBag_updateOutput)(
            THCIndexTensor *offsets,
            THCTensor *weight,
            THCTensor *output,
-           THCIndexTensor *offset2bag)
+           THCIndexTensor *offset2bag,
+	   int mode,
+           THCIndexTensor *seq_length)
 {
   THCUNN_assertSameGPU(state, 5, input, offsets, weight, output, offset2bag);
 
@@ -22,6 +24,10 @@ void THNN_(LookupTableBag_updateOutput)(
   ptrdiff_t numIndices = THCIndexTensor_(size)(state, input, 0);
   ptrdiff_t numBags = THCIndexTensor_(size)(state, offsets, 0);
   ptrdiff_t stride = THCTensor_(size)(state, weight, 1);
+  long *seq_length_data = NULL;
+  if (seq_length != NULL) {
+    seq_length_data = THCIndexTensor_(data)(state, seq_length);
+  }
 
   cudaStream_t stream = THCState_getCurrentStream(state);
 
@@ -45,7 +51,9 @@ void THNN_(LookupTableBag_updateOutput)(
     THCIndexTensor_(data)(state, offset2bag),
     numIndices,
     numBags,
-    stride
+    stride,
+    mode,
+    seq_length_data
   );
 
   THCudaCheck(cudaGetLastError());
@@ -62,6 +70,8 @@ void THNN_(LookupTableBag_accGradParameters)(
            THCIndexTensor *sortedIndices,
            THCIndexTensor *origIndices,
            bool scaleGradByFreq,
+	   int mode,
+	   THCIndexTensor *seq_length,
            accreal scale_)
 {
   real scale = ScalarConvert<accreal, real>::to(scale_);
@@ -71,6 +81,11 @@ void THNN_(LookupTableBag_accGradParameters)(
         THCTensor_(isContiguous)(state, gradWeight) &&
         THCIndexTensor_(isContiguous)(state, offset2bag))) {
     THError("Tensors must be contiguous");
+  }
+
+  long *seq_length_data = NULL;
+  if (seq_length != NULL) {
+    seq_length_data = THCIndexTensor_(data)(state, seq_length);
   }
 
   int nDim = THCIndexTensor_(nDimension)(state, input);
@@ -173,7 +188,9 @@ void THNN_(LookupTableBag_accGradParameters)(
     count_data,
     scale,
     numel,
-    stride
+    stride,
+    mode,
+    seq_length_data
   );
 
   THCTensor_(free)(state, gradOutput);
