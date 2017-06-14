@@ -111,7 +111,7 @@ class Expand(Function):
     def backward(ctx, grad_output):
         grad_input = grad_output
         for i in range(ctx.num_unsqueezed):
-            grad_input = grad_input.sum(0).squeeze(0)
+            grad_input = grad_input.sum(0)
         for dim in ctx.expanded_dims:
             grad_input = grad_input.sum(dim, True)
         return grad_input, None

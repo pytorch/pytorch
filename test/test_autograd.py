@@ -1320,6 +1320,7 @@ function_tests = [
     (Expand, (), ((1, S, 1, S, 1), torch.Size([5, S, 5, S, 5]))),
     (Expand, (), ((S, 1), torch.Size([S, S, S])), 'new_dim'),
     (Expand, (), ((1, S), torch.Size([S, S, S])), 'new_dim_front'),
+    (Expand, (), ((1, S), torch.Size([1, 1, S])), 'new_dim_front_old_front_1'),
     (Expand, (), ((1,), torch.Size([S, S, S])), 'scalar'),
     (Exp, (), (torch.rand(S, S, S),)),
     (Log, (), (torch.rand(S, S, S) + 1e-2,)),
@@ -1484,6 +1485,7 @@ method_tests = [
     ('expand', (torch.Size([S, 1, S]),), (S, S, S), 'size'),
     ('expand', (S, 1), (S, S, S), 'new_dim'),
     ('expand', (1,), (S, S, S), 'scalar'),
+    ('expand', (1, S), (1, 1, S), 'new_dim_front_old_front_1'),
     ('exp', (S, S, S), ()),
     ('log', (S, S, S), ()),
     ('log1p', (S, S, S), ()),
@@ -1709,6 +1711,7 @@ for test in function_tests:
                 for inp in input:
                     if isinstance(inp, torch.autograd.Variable) and inp.grad is not None:
                         self.assertTrue(type(inp.data) == type(inp.grad.data))
+                        self.assertTrue(inp.size() == inp.grad.size())
 
             if test_name not in ignore_inplace and issubclass(cls, InplaceFunction):
                 output = apply_fn(*input)
