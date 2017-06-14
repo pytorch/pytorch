@@ -2,6 +2,7 @@ import math
 
 import torch
 from torch.nn.parameter import Parameter
+from torch.nn import init
 from .. import functional as F
 from .module import Module
 
@@ -13,6 +14,7 @@ class Linear(Module):
         in_features: size of each input sample
         out_features: size of each output sample
         bias: If set to False, the layer will not learn an additive bias. Default: True
+        initializer: initializer of weights and bias. Default: None
 
     Shape:
         - Input: :math:`(N, in\_features)`
@@ -24,13 +26,13 @@ class Linear(Module):
 
     Examples::
 
-        >>> m = nn.Linear(20, 30)
+        >>> m = nn.Linear(20, 30, initializer=lambda x: init.xavier_normal(x, 1))
         >>> input = autograd.Variable(torch.randn(128, 20))
         >>> output = m(input)
         >>> print(output.size())
     """
 
-    def __init__(self, in_features, out_features, bias=True):
+    def __init__(self, in_features, out_features, bias=True, initializer=None):
         super(Linear, self).__init__()
         self.in_features = in_features
         self.out_features = out_features
@@ -39,13 +41,19 @@ class Linear(Module):
             self.bias = Parameter(torch.Tensor(out_features))
         else:
             self.register_parameter('bias', None)
+        self.initializer = initializer
         self.reset_parameters()
 
     def reset_parameters(self):
-        stdv = 1. / math.sqrt(self.weight.size(1))
-        self.weight.data.uniform_(-stdv, stdv)
-        if self.bias is not None:
-            self.bias.data.uniform_(-stdv, stdv)
+        if self.initializer is None:
+            stdv = 1. / math.sqrt(self.weight.size(1))
+            self.weight.data.uniform_(-stdv, stdv)
+            if self.bias is not None:
+                self.bias.data.uniform_(-stdv, stdv)
+        else:
+            self.initializer(self.weight)
+            if self.bias is not None:
+                self.initializer(self.bias)
 
     def forward(self, input):
         if self.bias is None:
