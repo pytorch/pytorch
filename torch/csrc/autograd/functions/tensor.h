@@ -1,7 +1,8 @@
 #pragma once
 
-#include <memory>
+#include <Python.h>
 #include <THPP/THPP.h>
+#include <memory>
 
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/variable.h"

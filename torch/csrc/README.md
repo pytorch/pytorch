@@ -12,6 +12,11 @@ important gotchas:
 * DO NOT forget to take out the GIL with `AutoGil` before calling Python
   API or bringing a `THPObjectPtr` into scope.
 
+* Make sure you include `Python.h` first in your header files, before
+  any system headers; otherwise, you will get `error: "_XOPEN_SOURCE" redefined`
+  error.  If you pay attention to warnings, you will see where you need to
+  do this.
+
 ## Notes
 
 ### Note [Storage is not NULL]

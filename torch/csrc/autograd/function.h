@@ -6,11 +6,13 @@
 // Subclasses may represent "forward" or "backward" operations (i.e functions
 // and their derivatives). Some functions may be used as both.
 
-#include <memory>
-#include <THPP/THPP.h>
-#include <vector>
-
+#include <Python.h>
 #include "torch/csrc/autograd/function_hook.h"
+
+#include <THPP/THPP.h>
+
+#include <memory>
+#include <vector>
 
 namespace torch { namespace autograd {
 

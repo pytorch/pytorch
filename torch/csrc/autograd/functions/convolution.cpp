@@ -1,6 +1,6 @@
-#include <sstream>
-
 #include "convolution.h"
+
+#include <sstream>
 
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/functions/utils.h"

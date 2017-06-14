@@ -1,6 +1,7 @@
 #ifndef THCP_H
 #define THCP_H
 
+#include <Python.h>
 #include <TH/TH.h>
 #include <THC/THC.h>
 #include <THC/THCHalf.h>

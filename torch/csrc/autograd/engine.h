@@ -3,6 +3,7 @@
 // Engine implements backpropagation from output variables and their gradients
 // to "root" variables (variables created by the user with requires_grad=True).
 
+#include <Python.h>
 #include <deque>
 #include <memory>
 #include <unordered_map>
