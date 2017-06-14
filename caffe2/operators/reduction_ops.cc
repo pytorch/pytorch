@@ -14,6 +14,9 @@ REGISTER_CPU_OPERATOR(RowwiseMax, MaxReductionOp<float, CPUContext, true>);
 REGISTER_CPU_OPERATOR(
     RowwiseMaxGradient,
     MaxReductionGradientOp<float, CPUContext, true>);
+REGISTER_CPU_OPERATOR(
+    ColwiseMaxGradient,
+    MaxReductionGradientOp<float, CPUContext, false>);
 REGISTER_CPU_OPERATOR(ColwiseMax, MaxReductionOp<float, CPUContext, false>);
 
 OPERATOR_SCHEMA(SumElements)
@@ -86,7 +89,7 @@ class GetColwiseMaxGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
     return SingleGradientDef(
-        "RowwiseMaxGradient",
+        "ColwiseMaxGradient",
         "",
         vector<string>{I(0), O(0), GO(0)},
         vector<string>{GI(0)});
