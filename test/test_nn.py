@@ -2330,14 +2330,16 @@ class TestNN(NNTestCase):
 
     def run_conv_double_back_test(self, kern, stride, padding, chan_in, chan_out,
                                   batch_size, inp_size, dilation, no_weight, use_cuda=False):
-        x = Variable(torch.randn(batch_size, chan_in, inp_size, inp_size), requires_grad=True)
-        weight = Variable(torch.randn(chan_out, chan_in, kern, kern), requires_grad=True)
-        bias = Variable(torch.randn(chan_out), requires_grad=True)
-
+        x = torch.randn(batch_size, chan_in, inp_size, inp_size)
+        weight = torch.randn(chan_out, chan_in, kern, kern)
+        bias = torch.randn(chan_out)
         if use_cuda:
             x = x.cuda()
             weight = weight.cuda()
             bias = bias.cuda()
+        x = Variable(x, requires_grad=True)
+        weight = Variable(weight, requires_grad=True)
+        bias = Variable(bias, requires_grad=True)
 
         if no_weight:
             # Special case because transpose dilated convolution is not implemented
@@ -2356,9 +2358,10 @@ class TestNN(NNTestCase):
             inputs = (x, weight, bias,)
 
         dummy_out = func(*inputs)
-        grad_y = Variable(torch.randn(dummy_out.size()), requires_grad=True)
+        grad_y = torch.randn(dummy_out.size())
         if use_cuda:
             grad_y = grad_y.cuda()
+        grad_y = Variable(grad_y, requires_grad=True)
 
         return gradgradcheck(func, inputs, (grad_y,))
 
@@ -2405,6 +2408,16 @@ class TestNN(NNTestCase):
                                                         padding, chan_in, chan_out,
                                                         batch_size, inp_size, dilation,
                                                         no_weight, use_cuda=True)
+                self.assertTrue(result,
+                                "Conv double backward test failed with parameters:" +
+                                "\nkern: " + str(kern) +
+                                "\nstride: " + str(stride) +
+                                "\npadding: " + str(padding) +
+                                "\nchan_in: " + str(chan_in) +
+                                "\nchan_out: " + str(chan_out) +
+                                "\nbatch_size: " + str(batch_size) +
+                                "\ninp_size: " + str(inp_size) +
+                                "\ndilation: " + str(dilation))
 
 
 class TestNNInit(TestCase):
