@@ -106,10 +106,11 @@ not very optimized for incremental rebuilds, this will actually be very slow.
 Far better is to only request rebuilds of the parts of the project you are
 working on:
 
-- Working on `torch/csrc`?  Run `python setup.py build_ext` to rebuild.
+- Working on `torch/csrc`?  Run `python setup.py develop` to rebuild
+  (NB: no `build` here!)
 
 - Working on `torch/lib/TH`, did not make any cmake changes, and just want to
-  see if it compiles?  Run `(cd torch/lib/build/TH && make install -j40)`.  This
+  see if it compiles?  Run `(cd torch/lib/build/TH && make install -j$(getconf _NPROCESSORS_ONLN))`.  This
   applies for any other subdirectory of `torch/lib`.  **Warning: Changes you
   make here will not be visible from Python.**  See below.
 
