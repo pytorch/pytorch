@@ -66,7 +66,8 @@ def add_variants(option):
 
 
 def handle_outputs_taken_as_arguments(options, option):
-    if any('output' in arg for arg in option['arguments']):
+    if any('output' in arg for arg in option['arguments']) and \
+       'function' in option['variants']:
         allocate_option = deepcopy(option)
         # the original option, which takes arguments for the results,
         # is not longer a method, and has _out added to indicte it takes
@@ -106,7 +107,10 @@ def run(declarations):
     for declaration in declarations:
         common_with_cwrap.set_declaration_defaults(declaration)
         common_with_cwrap.enumerate_options_due_to_default(
-            declaration, allow_kwarg=False,type_to_signature=TYPE_FORMAL_GENERIC)
+            declaration,
+            allow_kwarg=False,
+            type_to_signature=TYPE_FORMAL_GENERIC,
+            ignore_self=True)
         common_with_cwrap.sort_by_number_of_options(declaration)
         new_options = []
         for option in declaration['options']:
