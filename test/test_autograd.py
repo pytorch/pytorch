@@ -557,10 +557,14 @@ class TestAutograd(TestCase):
         """Grad output might need to be reshaped to match the second argument."""
         x = Variable(torch.randn(4, 6), requires_grad=True)
         b = Variable(torch.rand(12, 1) + 1e-2, requires_grad=True)
+        c = Variable(torch.rand(8, 1) + 1e-2, requires_grad=True)
 
         def y():
             # .mm() depends on the grad_output being of correct size
             return b.mm(Variable(torch.rand(1, 2) + 1e-2))
+
+        def z():
+            return c.mm(Variable(torch.rand(1, 3) + 1e-2))
 
         # suppress broadcastable warning
         with warnings.catch_warnings(record=True):
@@ -568,6 +572,8 @@ class TestAutograd(TestCase):
             (x - y()).sum().backward()
             (x * y()).sum().backward()
             (x / y()).sum().backward()
+            (x.addcmul(1, y(), z())).sum().backward()
+            (x.addcdiv(1, y(), z())).sum().backward()
             (x.abs() ** y()).sum().backward()
 
     def test_requires_grad(self):

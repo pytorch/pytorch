@@ -3,6 +3,7 @@ from itertools import repeat
 from ..._thnn import type2backend
 from ..function import Function, InplaceFunction
 from ..variable import Variable
+from .utils import maybe_view, maybe_unexpand, maybe_unexpand_or_view
 
 
 class Exp(InplaceFunction):
@@ -411,10 +412,10 @@ class Addcmul(InplaceFunction):
             grad_add = grad_output
 
         if ctx.needs_input_grad[1]:
-            grad_mul1 = grad_output.mul(mul_tensor2).mul_(ctx._scale)
+            grad_mul1 = maybe_view(grad_output.mul(mul_tensor2).mul_(ctx._scale), mul_tensor1.size())
 
         if ctx.needs_input_grad[2]:
-            grad_mul2 = grad_output.mul(mul_tensor1).mul_(ctx._scale)
+            grad_mul2 = maybe_view(grad_output.mul(mul_tensor1).mul_(ctx._scale), mul_tensor2.size())
 
         return grad_add, grad_mul1, grad_mul2, None, None
 
@@ -440,11 +441,12 @@ class Addcdiv(InplaceFunction):
             grad_add = grad_output
 
         if ctx.needs_input_grad[1]:
-            grad_div1 = grad_output.div(div_tensor2).mul_(ctx._scale)
+            grad_div1 = maybe_view(grad_output.div(div_tensor2).mul_(ctx._scale), div_tensor1.size())
 
         if ctx.needs_input_grad[2]:
             div_tensor2_sq = div_tensor2.mul(div_tensor2)
-            grad_div2 = grad_output.mul(div_tensor1).div(div_tensor2_sq).mul(-ctx._scale)
+            grad_div2 = maybe_view(grad_output.mul(div_tensor1).div(div_tensor2_sq).mul(-ctx._scale),
+                                   div_tensor2.size())
 
         return grad_add, grad_div1, grad_div2, None, None
 
