@@ -396,6 +396,7 @@ class Addcmul(InplaceFunction):
     @staticmethod
     def forward(ctx, add_tensor, mul_tensor1, mul_tensor2, scale=1.0, inplace=False):
         ctx._scale = scale
+        ctx._add_tensor_size = add_tensor.size()
         ctx.save_for_backward(mul_tensor1, mul_tensor2)
         if inplace:
             ctx.mark_dirty(add_tensor)
@@ -409,13 +410,13 @@ class Addcmul(InplaceFunction):
         mul_tensor1, mul_tensor2 = ctx.saved_variables
 
         if ctx.needs_input_grad[0]:
-            grad_add = grad_output
+            grad_add = maybe_unexpand(grad_output, ctx._add_tensor_size)
 
         if ctx.needs_input_grad[1]:
-            grad_mul1 = maybe_view(grad_output.mul(mul_tensor2).mul_(ctx._scale), mul_tensor1.size())
+            grad_mul1 = maybe_unexpand_or_view(grad_output.mul(mul_tensor2).mul_(ctx._scale), mul_tensor1.size())
 
         if ctx.needs_input_grad[2]:
-            grad_mul2 = maybe_view(grad_output.mul(mul_tensor1).mul_(ctx._scale), mul_tensor2.size())
+            grad_mul2 = maybe_unexpand_or_view(grad_output.mul(mul_tensor1).mul_(ctx._scale), mul_tensor2.size())
 
         return grad_add, grad_mul1, grad_mul2, None, None
 
@@ -425,6 +426,7 @@ class Addcdiv(InplaceFunction):
     @staticmethod
     def forward(ctx, add_tensor, div_tensor1, div_tensor2, scale=1.0, inplace=False):
         ctx._scale = scale
+        ctx._add_tensor_size = add_tensor.size()
         ctx.save_for_backward(div_tensor1, div_tensor2)
         if inplace:
             ctx.mark_dirty(add_tensor)
@@ -438,14 +440,14 @@ class Addcdiv(InplaceFunction):
         div_tensor1, div_tensor2 = ctx.saved_variables
 
         if ctx.needs_input_grad[0]:
-            grad_add = grad_output
+            grad_add = maybe_unexpand(grad_output, ctx._add_tensor_size)
 
         if ctx.needs_input_grad[1]:
-            grad_div1 = maybe_view(grad_output.div(div_tensor2).mul_(ctx._scale), div_tensor1.size())
+            grad_div1 = maybe_unexpand_or_view(grad_output.div(div_tensor2).mul_(ctx._scale), div_tensor1.size())
 
         if ctx.needs_input_grad[2]:
             div_tensor2_sq = div_tensor2.mul(div_tensor2)
-            grad_div2 = maybe_view(grad_output.mul(div_tensor1).div(div_tensor2_sq).mul(-ctx._scale),
+            grad_div2 = maybe_unexpand_or_view(grad_output.mul(div_tensor1).div(div_tensor2_sq).mul(-ctx._scale),
                                    div_tensor2.size())
 
         return grad_add, grad_div1, grad_div2, None, None

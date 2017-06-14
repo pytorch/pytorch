@@ -1301,21 +1301,21 @@ M = 10
 S = 5
 function_tests = [
     (Add, (), ((M, M), (M, M))),
-    (Add, (), ((M, M), (M, )), "add_broadcast_rhs"),
-    (Add, (), ((M, ), (M, M)), "add_broadcast_lhs"),
-    (Add, (), ((M, 1, M), (S, M)), "add_broadcast_both"),
+    (Add, (), ((M, M), (M, )), 'broadcast_rhs'),
+    (Add, (), ((M, ), (M, M)), 'broadcast_lhs'),
+    (Add, (), ((M, 1, M), (S, M)), 'broadcast_both'),
     (Sub, (), ((M, M), (M, M))),
-    (Sub, (), ((M, M), (M, )), "sub_broadcast_rhs"),
-    (Sub, (), ((M, ), (M, M)), "sub_broadcast_lhs"),
-    (Sub, (), ((M, 1, M), (S, M)), "sub_broadcast_both"),
+    (Sub, (), ((M, M), (M, )), 'broadcast_rhs'),
+    (Sub, (), ((M, ), (M, M)), 'broadcast_lhs'),
+    (Sub, (), ((M, 1, M), (S, M)), 'broadcast_both'),
     (Mul, (), ((M, M), (M, M))),
-    (Mul, (), ((M, M), (M, )), "mul_broadcast_rhs"),
-    (Mul, (), ((M, ), (M, M)), "mul_broadcast_lhs"),
-    (Mul, (), ((M, 1, M), (S, M)), "mul_broadcast_both"),
+    (Mul, (), ((M, M), (M, )), 'broadcast_rhs'),
+    (Mul, (), ((M, ), (M, M)), 'broadcast_lhs'),
+    (Mul, (), ((M, 1, M), (S, M)), 'broadcast_both'),
     (Div, (), ((M, M), torch.rand(M, M) + 5e-2)),
-    (Div, (), ((M, M), torch.rand(M, ) + 5e-2), "div_broadcast_rhs"),
-    (Div, (), ((M, ), torch.rand(M, M) + 5e-2), "div_broadcast_lhs"),
-    (Div, (), ((M, 1, M), torch.rand(S, M) + 5e-2), "div_broadcast_both"),
+    (Div, (), ((M, M), torch.rand(M, ) + 5e-2), 'broadcast_rhs'),
+    (Div, (), ((M, ), torch.rand(M, M) + 5e-2), 'broadcast_lhs'),
+    (Div, (), ((M, 1, M), torch.rand(S, M) + 5e-2), 'broadcast_both'),
     (Pow, (), (torch.rand(M, M) + 1e-3, torch.rand(M, M) + 0.1)),
     (AddConstant, (), ((2, 2), 3.14)),
     (AddConstant, (), (3.14, (2, 2)), 'add_tensor'),
@@ -1435,9 +1435,17 @@ function_tests = [
     (Norm, (), ((S, S, S), 2, 1, True), 'keepdim_2_dim', [2]),
     (Norm, (), ((S, S, S), 3, 1, True), 'keepdim_3_dim', [2]),
     (Addcmul, (), ((S, S), (S, S), (S, S))),
+    (Addcmul, (), ((S, S), (S, 1), (1, S)), 'broadcast_rhs'),
+    (Addcmul, (), ((1,), (S, S, 1), (1, S)), 'broadcast_all'),
     (Addcmul, (), ((S, S), (S, S), (S, S), 0.6), 'scale'),
+    (Addcmul, (), ((S, S), (S, 1), (1, S), 0.6), 'broadcast_rhs_scale'),
+    (Addcmul, (), ((1,), (S, S, 1), (1, S), 0.6), 'broadcast_all_scale'),
     (Addcdiv, (), ((S, S), (S, S), torch.rand(S, S) + 5e-2)),
+    (Addcdiv, (), ((S, S), (S, 1), torch.rand(1, S) + 5e-2), 'broadcast_rhs'),
+    (Addcdiv, (), ((1,), (S, S, 1), torch.rand(1, S) + 5e-2), 'broadcast_all'),
     (Addcdiv, (), ((S, S), (S, S), torch.rand(S, S) + 5e-2, 0.6), 'scale'),
+    (Addcdiv, (), ((S, S), (S, 1), torch.rand(1, S) + 5e-2, 0.6), 'broadcast_rhs_scale'),
+    (Addcdiv, (), ((1,), (S, S, 1), torch.rand(1, S) + 5e-2, 0.6), 'broadcast_all_scale'),
     (IndexAdd, (), ((S, S), 0, index_variable(2, S), (2, S))),
     # (IndexCopy,     (0,),               ((S, S), index_variable(2, S), (2, S))      ),
     (IndexFill, (), ((S, S), 0, index_variable(2, S), 2)),
@@ -1486,12 +1494,24 @@ function_tests = [
 # (name, size, args...)
 method_tests = [
     ('add', (S, S, S), ((S, S, S),)),
+    ('add', (S, S, S), ((S, S),), 'broadcast_rhs'),
+    ('add', (S, S), ((S, S, S),), 'broadcast_lhs'),
+    ('add', (S, 1, S), ((M, S),), 'broadcast_both'),
     ('add', (S, S, S), (3.14,), 'constant'),
     ('sub', (S, S, S), ((S, S, S),)),
+    ('sub', (S, S, S), ((S, S),), 'broadcast_rhs'),
+    ('sub', (S, S), ((S, S, S),), 'broadcast_lhs'),
+    ('sub', (S, 1, S), ((M, S),), 'broadcast_both'),
     ('sub', (S, S, S), (3.14,), 'constant'),
     ('mul', (S, S, S), ((S, S, S),)),
+    ('mul', (S, S, S), ((S, S),), 'broadcast_rhs'),
+    ('mul', (S, S), ((S, S, S),), 'broadcast_lhs'),
+    ('mul', (S, 1, S), ((M, S),), 'broadcast_both'),
     ('mul', (S, S, S), (3.14,), 'constant'),
     ('div', (S, S, S), ((S, S, S),)),
+    ('div', (S, S, S), ((S, S),), 'broadcast_rhs'),
+    ('div', (S, S), ((S, S, S),), 'broadcast_lhs'),
+    ('div', (S, 1, S), ((M, S),), 'broadcast_both'),
     ('div', (S, S, S), (3.14,), 'constant'),
     ('pow', (S, S, S), ((S, S, S),)),
     ('pow', (S, S, S), (3.14,), 'constant'),
@@ -1594,9 +1614,17 @@ method_tests = [
     ('matmul', (S, S, M, M), ((M,),), "4d_1d"),
     ('matmul', (M,), ((S, S, M, S),), "1d_4d"),
     ('addcmul', (S, S), ((S, S), (S, S))),
+    ('addcmul', (S, S), ((S, 1), (1, S)), 'broadcast_rhs'),
+    ('addcmul', (1,), ((S, S, 1), (1, S)), 'broadcast_all'),
     ('addcmul', (S, S), (0.5, (S, S), (S, S)), 'scale'),
+    ('addcmul', (S, S), (0.5, (S, 1), (1, S)), 'broadcast_rhs_scale'),
+    ('addcmul', (1,), (0.5, (S, S, 1), (1, S)), 'broadcast_all_scale'),
     ('addcdiv', (S, S), ((S, S), (S, S))),
+    ('addcdiv', (S, S), ((S, 1), (1, S)), 'broadcast_rhs'),
+    ('addcdiv', (1,), ((S, S, 1), (1, S)), 'broadcast_all'),
     ('addcdiv', (S, S), (0.5, (S, S), (S, S)), 'scale'),
+    ('addcdiv', (S, S), (0.5, (S, 1), (1, S)), 'broadcast_rhs_scale'),
+    ('addcdiv', (1,), (0.5, (S, S, 1), (1, S)), 'broadcast_all_scale'),
     ('norm', (S, S, S), (2,)),
     ('norm', (S, S, S), (2, 1), 'dim', [1]),
     ('norm', (S, S, S), (2, 1, True), 'keepdim_dim', [0]),
@@ -1676,10 +1704,14 @@ def unpack_variables(args):
 ignore_inplace = set((
     'test_DivConstantFunction_by_tensor',
     # can't broadcast lhs for inplace functions
-    'test_AddFunction_add_broadcast_lhs',
-    'test_AddFunction_add_broadcast_both',
-    'test_SubFunction_sub_broadcast_lhs',
-    'test_SubFunction_sub_broadcast_both',
+    'test_AddFunction_broadcast_lhs',
+    'test_AddFunction_broadcast_both',
+    'test_SubFunction_broadcast_lhs',
+    'test_SubFunction_broadcast_both',
+    'test_AddcmulFunction_broadcast_all',
+    'test_AddcmulFunction_broadcast_all_scale',
+    'test_AddcdivFunction_broadcast_all',
+    'test_AddcdivFunction_broadcast_all_scale',
 ))
 
 
@@ -1772,6 +1804,17 @@ for test in function_tests:
         setattr(TestAutograd, test_name, do_test)
 
 
+ignore_method_inplace = set((
+    'test_add_broadcast_lhs',
+    'test_add_broadcast_both',
+    'test_sub_broadcast_lhs',
+    'test_sub_broadcast_both',
+    'test_addcdiv_broadcast_all',
+    'test_addcdiv_broadcast_all_scale',
+    'test_addcmul_broadcast_all',
+    'test_addcmul_broadcast_all_scale',
+))
+
 EXCLUDE_FUNCTIONAL = {
     'addmm',
     'addbmm',
@@ -1827,7 +1870,7 @@ for test in method_tests:
 
             check(name)
             inplace_name = name + '_'
-            if hasattr(Variable(torch.ones(1)), inplace_name):
+            if hasattr(Variable(torch.ones(1)), inplace_name) and test_name not in ignore_method_inplace:
                 try:
                     check(inplace_name)
                 except Exception as e:
