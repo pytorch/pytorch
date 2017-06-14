@@ -12,7 +12,7 @@ class DistributedSampler(Sampler):
     process can pass a DistributedSampler instance as a DataLoader sampler,
     and load a subset of the original dataset that is exclusive to it.
 
-    ..note::
+    .. note::
         Dataset is assumed to be of constant size.
 
     Arguments:
