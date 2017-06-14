@@ -74,26 +74,6 @@ def GetGlobalInitArgs():
     return _GLOBAL_INIT_ARGS[:]
 
 
-_WORKER_INIT_CALLS = []
-
-
-def worker_init_func(func):
-    """
-    By decorating a function with this, each call to the function will be
-    recorded at workflow time and replayed in each of the works at startup.
-    Used for example for registering caffe python operators.
-    """
-    def call(*args, **kwargs):
-        _WORKER_INIT_CALLS.append((func, args, kwargs))
-        return func(*args, **kwargs)
-
-    return call
-
-
-def GetWorkerInitCalls():
-    return _WORKER_INIT_CALLS[:]
-
-
 def IsOperator(op_type):
     return (op_type in _REGISTERED_OPERATORS)
 
