@@ -104,6 +104,7 @@ class Embedding(Function):
 
 _all_functions.append(Embedding)
 
+
 class EmbeddingBag(Function):
 
     def __init__(self, max_norm, norm_type, scale_grad_by_freq, mode):
@@ -179,7 +180,7 @@ class EmbeddingBag(Function):
             self._offset2bag.resize_(indices.size(0)).zero_()  # offset2bag = [0 0 0 0 0]
             self._offset2bag.index_fill_(0, offsets, 1)  # offset2bag = [1 0 1 0 1]
             self._offset2bag[0] = 0  # offset2bag = [0 0 1 0 1]
-            self._offset2bag = self._offset2bag.cumsum(0) # offset2bag = [0 0 1 1 2]
+            self._offset2bag = self._offset2bag.cumsum(0)  # offset2bag = [0 0 1 1 2]
             output.resize_(offsets.size(0), weight.size(1)).zero_()
             output.index_add_(0, self._offset2bag, index_output)
             if self.mode == 1:

@@ -108,6 +108,7 @@ class Embedding(Module):
         s += ')'
         return s.format(name=self.__class__.__name__, **self.__dict__)
 
+
 class EmbeddingBag(Module):
     r"""Computes sums or means of 'bags' of embeddings, without instantiating the
     intermediate embeddings.
@@ -118,7 +119,7 @@ class EmbeddingBag(Module):
 
     However, nn.EmbeddingBag is much more time and memory efficient than using a chain of these
     operations.
-    
+
     Args:
         num_embeddings (int): size of the dictionary of embeddings
         embedding_dim (int): the size of each embedding vector
@@ -134,7 +135,8 @@ class EmbeddingBag(Module):
 
     Shape:
         - Input: LongTensor `N`, N = number of embeddings to extract
-        - Offsets: LongTensor `B`, B = number of bags. The values are the offsets in `input` for each bag, i.e. the cumsum of lengths.
+        - Offsets: LongTensor `B`, B = number of bags. The values are the
+                   offsets in `input` for each bag, i.e. the cumsum of lengths.
         - Output: `(B, embedding_dim)`
 
     Examples:

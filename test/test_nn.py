@@ -743,7 +743,7 @@ class TestNN(NNTestCase):
         self.assertEqual(output[1][2].sum().data[0], 0)
 
     def _test_EmbeddingBag(self, cuda, mode):
-        ## check a known test example
+        # check a known test example
 
         es = nn.EmbeddingBag(5, 2, mode=mode)
         es.weight.data.copy_(torch.arange(1, 11).resize_as_(es.weight.data))
@@ -766,9 +766,9 @@ class TestNN(NNTestCase):
                 [[10. / 2, 12. / 2],
                  [15. / 3, 18. / 3]])
             expected_grad_weight = torch.Tensor(
-                [[0.    , 0.    ],
+                [[0., 0.],
                  [1. / 2 + 3. / 3 + 3. / 3, 2. / 2 + 4. / 3 + 4. / 3],
-                 [0.    , 0.    ],
+                 [0., 0.],
                  [1. / 2, 2. / 2],
                  [3. / 3, 4. / 3]])
 
@@ -786,7 +786,7 @@ class TestNN(NNTestCase):
         self.assertEqual(output.data, expected_output)
         self.assertEqual(es.weight.grad.data, expected_grad_weight)
 
-        ## now compare EmbeddingBag vs Embedding + Sum/Mean, for constant bag length
+        # now compare EmbeddingBag vs Embedding + Sum/Mean, for constant bag length
 
         N = random.randint(1, 100)
         D = random.randint(1, 100)
