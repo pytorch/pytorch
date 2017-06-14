@@ -39,11 +39,11 @@ public:
   Type * current_default_type;
 };
 
-Context * globalContext();
+Context & globalContext();
 
 
 static inline Type& getType(Backend p, ScalarType s) {
-  return globalContext()->getType(p,s);
+  return globalContext().getType(p,s);
 }
 
 static inline Type& CPU(ScalarType s) {

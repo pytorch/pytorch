@@ -19,7 +19,7 @@ CUDAGenerator::CUDAGenerator(Context * context_)
 }
 
 CUDAGenerator::~CUDAGenerator() {
-  THCRandom_shutdown(context->thc_state);
+  // no-op Generator state is global to the program
 }
 
 CUDAGenerator& CUDAGenerator::copy(const Generator& from) {

@@ -23,10 +23,10 @@ int main() {
   Half h = bar.toHalf();
   Scalar h2 = h;
   cout << "H2: " << h2.toDouble() << " " << what.toFloat() << " " << bar.toDouble() << " " << what.isIntegral() <<  "\n";
-  Generator & gen = tlib::globalContext()->defaultGenerator(Backend::CPU);
+  Generator & gen = tlib::globalContext().defaultGenerator(Backend::CPU);
   cout << gen.seed() << "\n";
-  auto C = tlib::globalContext();
-  auto & CUDAFloat = C->getType(Backend::CPU,ScalarType::Float);
+  auto && C = tlib::globalContext();
+  auto & CUDAFloat = C.getType(Backend::CPU,ScalarType::Float);
   auto t2 = CUDAFloat.zeros({4,4});
   cout << &t2 << "\n";
   cout << "AFTER GET TYPE " << &CUDAFloat << "\n";
@@ -56,8 +56,11 @@ int main() {
 
   auto r = CUDA(Float).copy(next_h);
 
+  cout << r << "\n";
   cout << T.randn({10,10,2}) << "\n";
 
   TLIB_DISPATCH_TYPE(x.type(),foo,x,prev_h);
+
+  return 0;
 
 }
