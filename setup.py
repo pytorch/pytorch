@@ -22,6 +22,17 @@ WITH_DISTRIBUTED_MW = WITH_DISTRIBUTED and check_env_flag('WITH_DISTRIBUTED_MW')
 WITH_NCCL = WITH_CUDA and platform.system() != 'Darwin'
 SYSTEM_NCCL = False
 
+
+################################################################################
+# Workaround setuptools -Wstrict-prototypes warnings
+# I lifted this code from https://stackoverflow.com/a/29634231/23845
+################################################################################
+import distutils.sysconfig
+cfg_vars = distutils.sysconfig.get_config_vars()
+for key, value in cfg_vars.items():
+    if type(value) == str:
+            cfg_vars[key] = value.replace("-Wstrict-prototypes", "")
+
 ################################################################################
 # Monkey-patch setuptools to compile in parallel
 ################################################################################
@@ -211,7 +222,10 @@ class clean(distutils.command.clean.clean):
 include_dirs = []
 library_dirs = []
 extra_link_args = []
-extra_compile_args = ['-std=c++11', '-Wno-write-strings']
+extra_compile_args = ['-std=c++11', '-Wno-write-strings',
+                      # Python 2.6 requires -fno-strict-aliasing, see
+                      # http://legacy.python.org/dev/peps/pep-3123/
+                      '-fno-strict-aliasing']
 if os.getenv('PYTORCH_BINARY_BUILD') and platform.system() == 'Linux':
     print('PYTORCH_BINARY_BUILD found. Static linking libstdc++ on Linux')
     extra_compile_args += ['-static-libstdc++']

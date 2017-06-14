@@ -279,6 +279,36 @@ class SELU(Module):
         return self.__class__.__name__ + inplace_str
 
 
+class GLU(Module):
+    """Applies the gated linear unit function :math:`{GLU}(a, b)= a \otimes \sigma(b)`
+    where `a` is the first half of the input vector and `b` is the second half.
+
+    Args:
+        dim (int): the dimension on which to split the input
+
+    Shape:
+        - Input: :math:`(*, N, *)` where `*` means, any number of additional dimensions
+        - Output: :math:`(*, N / 2, *)`
+
+    Examples::
+
+        >>> m = nn.GLU()
+        >>> input = autograd.Variable(torch.randn(4, 2))
+        >>> print(input)
+        >>> print(m(input))
+    """
+
+    def __init__(self, dim=-1):
+        super(GLU, self).__init__()
+        self.dim = dim
+
+    def forward(self, input):
+        return F.glu(input, self.dim)
+
+    def __repr__(self):
+        return '{} (dim={})'.format(self.__class__.__name__, self.dim)
+
+
 class Hardshrink(Module):
     """Applies the hard shrinkage function element-wise
     Hardshrink is defined as::
