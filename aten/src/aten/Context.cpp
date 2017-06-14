@@ -10,7 +10,13 @@
 
 namespace tlib {
 
+static inline void errorHandler(const char * msg, void * data) {
+  throw std::runtime_error(msg);
+}
+
 Context::Context() {
+
+  THSetDefaultErrorHandler(errorHandler,nullptr);
 
 #ifdef TENSORLIB_CUDA_ENABLED
   thc_state = THCState_alloc();
@@ -33,9 +39,9 @@ Context::~Context() {
 #endif
 }
 
-Context * globalContext() {
+Context & globalContext() {
   static Context globalContext_;
-  return &globalContext_;
+  return globalContext_;
 }
 
 
