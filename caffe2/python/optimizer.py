@@ -232,7 +232,7 @@ class MultiPrecisionSgdOptimizer(SgdOptimizer):
         # update (fused) in fp32
         net.MomentumSGDUpdate(
             [grad_fp32, momentum_data, lr, param_fp32],
-            [grad, momentum_data, param_fp32],
+            [grad_fp32, momentum_data, param_fp32],
             momentum=self.momentum,
             nesterov=self.nesterov)
 
