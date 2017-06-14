@@ -7,20 +7,20 @@ EXCLUDE_PATTERN = "bernoulli.*|normal.*|exponential.*|random.*"
 # what has to be done to add a Operation ...
 # 1. add virtual dispatch declaration to Type.h and default impl to Type.cpp
 TYPE_METHOD_DECLARATION = CodeTemplate("""\
-virtual ${return_type} ${api_name}(${formals}) ;
+virtual ${return_type} ${method_prefix}${api_name}(${formals}) ;
 """)
 TYPE_METHOD_DEFINITION = CodeTemplate("""\
-${return_type} Type::${api_name}(${formals}) {
+${return_type} Type::${method_prefix}${api_name}(${formals}) {
     throw std::runtime_error(std::string("${api_name} is not implemented for type ") + toString());
 }
 """)
 # 2. add virtual override to TypeDerived.h
 TYPE_DERIVED_DECLARATION = CodeTemplate("""\
-virtual ${return_type} ${api_name}(${formals}) override;
+virtual ${return_type} ${method_prefix}${api_name}(${formals}) override;
 """)
 # 3. add override definition to TypeDerived.cpp
 TYPE_DERIVED_DEFINITION = CodeTemplate("""\
-${return_type} ${Type}::${api_name}(${formals}) {
+${return_type} ${Type}::${method_prefix}${api_name}(${formals}) {
     ${type_definition_body}
 }
 """)
@@ -31,7 +31,7 @@ ${return_type} ${api_name}(${method_formals})${const_mark};
 # 5. add non-virtual declaration to Tensor.cpp
 TENSOR_METHOD_DEFINITION = CodeTemplate("""\
 inline ${return_type} Tensor::${api_name}(${method_formals})${const_mark} {
-    return type().${api_name}(${method_actuals});
+    return type().${method_prefix}${api_name}(${method_actuals});
 }
 """)
 # 6. add a method declaration in Functions.h
@@ -213,19 +213,25 @@ def create_generic(top_env, declarations):
 
         option['const_mark'] = '' if option['inplace'] else ' const'
 
+        is_method = 'method' in option['variants']
+        is_function = 'function' in option['variants']
+
+        # method-only things are prefixed with m_ in Type so that
+        # another function-only variant can exist without the name colliding
+        option['method_prefix'] = 'm_' if is_method and not is_function else ''
         env = nested_dict(option, top_env)
         top_env['type_method_declarations'].append(
             TYPE_METHOD_DECLARATION.substitute(env))
         top_env['type_method_definitions'].append(
             TYPE_METHOD_DEFINITION.substitute(env))
 
-        if 'method' in option['variants']:
+        if is_method:
             top_env['tensor_method_declarations'].append(
                 TENSOR_METHOD_DECLARATION.substitute(env))
             top_env['tensor_method_definitions'].append(
                 TENSOR_METHOD_DEFINITION.substitute(env))
 
-        if 'function' in option['variants']:
+        if is_function:
             first_tensor = find_first_tensor(formals)
             if first_tensor is not None:
                 option['inferred_type'] = '{}.type()'.format(first_tensor)

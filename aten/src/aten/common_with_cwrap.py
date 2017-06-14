@@ -49,7 +49,7 @@ def set_declaration_defaults(declaration):
 # support it.
 
 
-def filter_unique_options(options, allow_kwarg, type_to_signature):
+def filter_unique_options(options, allow_kwarg, type_to_signature, ignore_self):
     def signature(option, kwarg_only_count):
         if kwarg_only_count == 0:
             kwarg_only_count = None
@@ -58,7 +58,7 @@ def filter_unique_options(options, allow_kwarg, type_to_signature):
         arg_signature = '#'.join(
             type_to_signature.get(arg['type'], arg['type'])
             for arg in option['arguments'][:kwarg_only_count]
-            if not arg.get('ignore_check') and arg['name'] != 'self')
+            if not arg.get('ignore_check') and (ignore_self and arg['name'] != 'self'))
         if kwarg_only_count is None:
             return arg_signature
         kwarg_only_signature = '#'.join(
@@ -83,7 +83,7 @@ def filter_unique_options(options, allow_kwarg, type_to_signature):
     return unique
 
 
-def enumerate_options_due_to_default(declaration, allow_kwarg=True,type_to_signature=[]):
+def enumerate_options_due_to_default(declaration, allow_kwarg=True,type_to_signature=[],ignore_self=False):
     # TODO(zach): in cwrap this is shared among all declarations
     # but seems to assume that all declarations will have the same
     new_options = []
@@ -102,7 +102,7 @@ def enumerate_options_due_to_default(declaration, allow_kwarg=True,type_to_signa
                     # PyYAML interprets NULL as None...
                     arg['name'] = 'NULL' if arg['default'] is None else arg['default']
             new_options.append(option_copy)
-    declaration['options'] = filter_unique_options(new_options, allow_kwarg,type_to_signature)
+    declaration['options'] = filter_unique_options(new_options, allow_kwarg,type_to_signature,ignore_self)
 
 
 def sort_by_number_of_options(declaration):
