@@ -9,10 +9,38 @@ def maybe_view(variable, size):
     return variable.contiguous().view(size)
 
 
+def maybe_unexpand(variable, old_size):
+    num_unsqueezed = variable.dim() - len(old_size)
+    expanded_dims = [dim for dim, (expanded, original)
+                     in enumerate(zip(variable.size()[num_unsqueezed:], old_size))
+                     if expanded != original]
+
+    for _ in range(num_unsqueezed):
+        variable = variable.sum(0)
+    for dim in expanded_dims:
+        variable = variable.sum(dim, True)
+    return variable
+
+
+def maybe_unexpand_or_view(variable, old_size):
+    var_expanded = True
+    if maybe_view:
+        try:
+            torch._C._infer_size(variable.size(), old_size)
+        except RuntimeError:
+            var_expanded = False
+
+    if var_expanded:
+        return maybe_unexpand(variable, old_size)
+    else:
+        return maybe_view(variable, old_size)
+
+
 class Add(InplaceFunction):
 
     @staticmethod
     def forward(ctx, a, b, inplace=False):
+        ctx.a_size = a.size()
         ctx.b_size = b.size()
         if inplace:
             ctx.mark_dirty(a)
@@ -22,13 +50,14 @@ class Add(InplaceFunction):
 
     @staticmethod
     def backward(ctx, grad_output):
-        return grad_output, maybe_view(grad_output, ctx.b_size), None
+        return maybe_unexpand(grad_output, ctx.a_size), maybe_unexpand_or_view(grad_output, ctx.b_size), None
 
 
 class Sub(InplaceFunction):
 
     @staticmethod
     def forward(ctx, a, b, inplace=False):
+        ctx.a_size = a.size()
         ctx.b_size = b.size()
         if inplace:
             ctx.mark_dirty(a)
@@ -38,13 +67,14 @@ class Sub(InplaceFunction):
 
     @staticmethod
     def backward(ctx, grad_output):
-        return grad_output, maybe_view(grad_output.neg(), ctx.b_size), None
+        return maybe_unexpand(grad_output, ctx.a_size), maybe_unexpand_or_view(grad_output.neg(), ctx.b_size), None
 
 
 class Mul(Function):
 
     @staticmethod
     def forward(ctx, a, b):
+        ctx.a_size = a.size()
         ctx.b_size = b.size()
         ctx.save_for_backward(a, b)
         return a.mul(b)
@@ -52,13 +82,14 @@ class Mul(Function):
     @staticmethod
     def backward(ctx, grad_output):
         a, b = ctx.saved_variables
-        return grad_output.mul(b), maybe_view(grad_output.mul(a), ctx.b_size)
+        return maybe_unexpand(grad_output.mul(b), ctx.a_size), maybe_unexpand_or_view(grad_output.mul(a), ctx.b_size)
 
 
 class Div(Function):
 
     @staticmethod
     def forward(ctx, a, b):
+        ctx.a_size = a.size()
         ctx.b_size = b.size()
         ctx.save_for_backward(a, b)
         return a.div(b)
@@ -69,7 +100,7 @@ class Div(Function):
         b_rec = b.reciprocal()
         grad_a = grad_output.mul(b_rec)
         grad_b = grad_output.neg().mul(a).mul(b_rec).mul(b_rec)
-        return grad_a, maybe_view(grad_b, ctx.b_size)
+        return maybe_unexpand(grad_a, ctx.a_size), maybe_unexpand_or_view(grad_b, ctx.b_size)
 
 
 class Pow(Function):
