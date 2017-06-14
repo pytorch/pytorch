@@ -102,29 +102,6 @@ __global__ void ProbCrossEntropyGradientKernel(
   }
 }
 
-__global__ void
-RowMaxKernel(const int rows, const int cols, const float* data, float* out) {
-  typedef cub::BlockReduce<float, CAFFE_CUDA_NUM_THREADS> BlockReduce;
-  __shared__ typename BlockReduce::TempStorage temp_storage;
-  for (int rowIndex = blockIdx.x; rowIndex < rows; rowIndex += gridDim.x) {
-    float maxval = -FLT_MAX;
-    // NB: The memory accesses here are sequentialized; without unrolling
-    // the loop, there will not be any ILP.  However, because we are running
-    // this kernel with a lot of threads, this should not be a big problem.
-    // However, if we reduce the number of threads to take advantage of
-    // warp-wide
-    // synchronization, this may become a problem again.
-    for (int colIndex = threadIdx.x; colIndex < cols; colIndex += blockDim.x) {
-      maxval = max(data[rowIndex * cols + colIndex], maxval);
-    }
-    maxval = BlockReduce(temp_storage).Reduce(maxval, cub::Max());
-    if (threadIdx.x == 0) {
-      out[rowIndex] = maxval;
-    }
-    __syncthreads();
-  }
-}
-
 __global__ void SpatialSoftmaxKernel(
     const int num,
     const int D,
@@ -264,11 +241,7 @@ void Softmax(
     CUDAContext* context) {
   const int size = N * D;
 
-  RowMaxKernel<<<
-      std::min(N, CAFFE_MAXIMUM_NUM_BLOCKS),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context->cuda_stream()>>>(N, D, logits, rowmax);
+  math::RowwiseMax<float, CUDAContext>(N, D, logits, rowmax, context);
   // Put the intermediate result X - max(X) into Y
   context->Copy<float, CUDAContext, CUDAContext>(size, logits, probs);
   // Subtract the scale

@@ -92,7 +92,7 @@ class TestReductionOps(hu.HypothesisTestCase):
     @given(batch_size=st.integers(1, 3),
            m=st.integers(1, 3),
            n=st.integers(1, 4),
-           **hu.gcs_cpu_only)
+           **hu.gcs)
     def test_rowwise_max(self, batch_size, m, n, gc, dc):
         X = np.random.rand(batch_size, m, n).astype(np.float32)
 
@@ -115,7 +115,7 @@ class TestReductionOps(hu.HypothesisTestCase):
     @given(batch_size=st.integers(1, 3),
            m=st.integers(1, 3),
            n=st.integers(1, 4),
-           **hu.gcs_cpu_only)
+           **hu.gcs)
     def test_columnwise_max(self, batch_size, m, n, gc, dc):
         X = np.random.rand(batch_size, m, n).astype(np.float32)
 

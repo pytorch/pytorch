@@ -4,6 +4,7 @@
 #include <thrust/reduce.h>
 #include <thrust/system/cuda/detail/par.h>
 #include <thrust/version.h>
+#include <cub/block/block_reduce.cuh>
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/utils/conversions.h"
@@ -1386,6 +1387,82 @@ void CopyMatrix<CUDAContext>(
     CUDAContext* context) {
   cudaMemcpy2DAsync(B, ldb * itemsize, A, lda * itemsize, N * itemsize, M,
                     cudaMemcpyDeviceToDevice, context->cuda_stream());
+}
+
+namespace {
+__global__ void rowwise_max_kernel(
+    const int rows,
+    const int cols,
+    const float* data,
+    float* out) {
+  typedef cub::BlockReduce<float, CAFFE_CUDA_NUM_THREADS> BlockReduce;
+  __shared__ typename BlockReduce::TempStorage temp_storage;
+  for (int rowIndex = blockIdx.x; rowIndex < rows; rowIndex += gridDim.x) {
+    float maxval = -FLT_MAX;
+    // NB: The memory accesses here are sequentialized; without unrolling
+    // the loop, there will not be any ILP.  However, because we are running
+    // this kernel with a lot of threads, this should not be a big problem.
+    // However, if we reduce the number of threads to take advantage of
+    // warp-wide synchronization, this may become a problem again.
+    for (int colIndex = threadIdx.x; colIndex < cols; colIndex += blockDim.x) {
+      maxval = max(data[rowIndex * cols + colIndex], maxval);
+    }
+    maxval = BlockReduce(temp_storage).Reduce(maxval, cub::Max());
+    if (threadIdx.x == 0) {
+      out[rowIndex] = maxval;
+    }
+    __syncthreads();
+  }
+}
+
+__global__ void colwise_max_kernel(
+    const int rows,
+    const int cols,
+    const float* data,
+    float* out) {
+  typedef cub::BlockReduce<float, CAFFE_CUDA_NUM_THREADS> BlockReduce;
+  __shared__ typename BlockReduce::TempStorage temp_storage;
+  for (int colIndex = blockIdx.x; colIndex < cols; colIndex += gridDim.x) {
+    float maxval = -FLT_MAX;
+    for (int rowIndex = threadIdx.x; rowIndex < rows; rowIndex += blockDim.x) {
+      maxval = max(data[rowIndex * cols + colIndex], maxval);
+    }
+    maxval = BlockReduce(temp_storage).Reduce(maxval, cub::Max());
+    if (threadIdx.x == 0) {
+      out[colIndex] = maxval;
+    }
+    __syncthreads();
+  }
+}
+
+} // namespace
+
+template <>
+void RowwiseMax(
+    const int N,
+    const int D,
+    const float* x,
+    float* y,
+    CUDAContext* context) {
+  rowwise_max_kernel<<<
+      std::min(N, CAFFE_MAXIMUM_NUM_BLOCKS),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context->cuda_stream()>>>(N, D, x, y);
+}
+
+template <>
+void ColwiseMax(
+    const int N,
+    const int D,
+    const float* x,
+    float* y,
+    CUDAContext* context) {
+  colwise_max_kernel<<<
+      std::min(D, CAFFE_MAXIMUM_NUM_BLOCKS),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context->cuda_stream()>>>(N, D, x, y);
 }
 
 }  // namespace math
