@@ -11,7 +11,7 @@ from caffe2.python import cnn, workspace, core
 from caffe2.python.predictor_constants import predictor_constants as pc
 import caffe2.python.predictor.predictor_exporter as pe
 import caffe2.python.predictor.predictor_py_utils as pred_utils
-
+from caffe2.proto import caffe2_pb2
 
 class PredictorExporterTest(unittest.TestCase):
     def _create_model(self):
@@ -117,6 +117,44 @@ class PredictorExporterTest(unittest.TestCase):
             workspace.FetchBlob("y"),
             workspace.FetchBlob("data").dot(self.params["y_w"].T) +
             self.params["y_b"])
+
+    def test_load_device_scope(self):
+        for param, value in self.params.items():
+            workspace.FeedBlob(param, value)
+
+        pem = pe.PredictorExportMeta(
+            predict_net=self.predictor_export_meta.predict_net,
+            parameters=self.predictor_export_meta.parameters,
+            inputs=self.predictor_export_meta.inputs,
+            outputs=self.predictor_export_meta.outputs,
+            shapes=self.predictor_export_meta.shapes,
+            net_type='dag',
+        )
+
+        db_type = 'minidb'
+        db_file = tempfile.NamedTemporaryFile(
+            delete=False, suffix=".{}".format(db_type))
+        pe.save_to_db(
+            db_type=db_type,
+            db_destination=db_file.name,
+            predictor_export_meta=pem)
+
+        workspace.ResetWorkspace()
+        with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU, 1)):
+            meta_net_def = pe.load_from_db(
+                db_type=db_type,
+                filename=db_file.name,
+            )
+
+        init_net = core.Net(pred_utils.GetNet(meta_net_def,
+                            pc.GLOBAL_INIT_NET_TYPE))
+        predict_init_net = core.Net(pred_utils.GetNet(
+            meta_net_def, pc.PREDICT_INIT_NET_TYPE))
+
+        # check device options
+        for op in list(init_net.Proto().op) + list(predict_init_net.Proto().op):
+            self.assertEqual(1, op.device_option.cuda_gpu_id)
+            self.assertEqual(caffe2_pb2.CPU, op.device_option.device_type)
 
     def test_db_fails_without_params(self):
         with self.assertRaises(Exception):
