@@ -8,6 +8,7 @@ import nn_parse
 import preprocess_declarations
 import function_wrapper
 import dispatch_macros
+import copy_wrapper
 from code_template import CodeTemplate
 
 
@@ -77,6 +78,7 @@ top_env = {
     'tensor_method_definitions': [],
     'function_declarations': [],
     'function_definitions': [],
+    'type_ids': [],
 }
 
 
@@ -88,8 +90,7 @@ def write(filename, s):
     with open(filename, "w") as f:
         f.write(s)
 
-
-def generate_storage_type_and_tensor(backend, scalar_type, declarations, all_types):
+def generate_storage_type_and_tensor(backend, scalar_type, declarations):
     scalar_name, c_type, accreal = scalar_type
     env = {}
     env['ScalarName'] = scalar_name
@@ -101,17 +102,12 @@ def generate_storage_type_and_tensor(backend, scalar_type, declarations, all_typ
     env['Backend'] = backend
 
     # used for generating switch logic for external functions
-    env['TypeID'] = len(all_types)
-    all_types.append({
-        'ScalarType': c_type,
-        'ScalarName': scalar_name,
-        'Backend': backend,
-        'Type': env['Type'],
-        'TypeID': env['TypeID'],
-    })
+    tag = backend+scalar_name
+    env['TypeID'] = 'TypeID::'+tag
+    top_env['type_ids'].append(tag + ',')
 
     if backend == 'CUDA':
-        env['th_headers'] = ['#include <THC/THC.h>', '#include <THCUNN/THCUNN.h>']
+        env['th_headers'] = ['#include <THC/THC.h>', '#include <THCUNN/THCUNN.h>\n#undef THNN_']
         sname = '' if scalar_name == "Float" else scalar_name
         env['THType'] = 'Cuda{}'.format(sname)
         env['THStorage'] = 'THCuda{}Storage'.format(sname)
@@ -121,7 +117,7 @@ def generate_storage_type_and_tensor(backend, scalar_type, declarations, all_typ
         env['isCUDA'] = 'true'
         env['storage_device'] = 'return storage->device;'
     else:
-        env['th_headers'] = ['#include <TH/TH.h>', '#include <THNN/THNN.h>']
+        env['th_headers'] = ['#include <TH/TH.h>', '#include <THNN/THNN.h>\n#undef THNN_']
         env['THType'] = scalar_name
         env['THStorage'] = "TH{}Storage".format(scalar_name)
         env['THTensor'] = 'TH{}Tensor'.format(scalar_name)
@@ -161,6 +157,7 @@ def generate_storage_type_and_tensor(backend, scalar_type, declarations, all_typ
     top_env['type_registrations'].append(type_register)
     top_env['type_headers'].append(
         '#include "TensorLib/{}.h"'.format(env['Type']))
+    return env
 
 cwrap_files = [f for f in files if f.endswith('.cwrap') ]
 nn_files = [f for f in files if f.endswith('.h') ]
@@ -186,8 +183,8 @@ all_types = []
 
 for backend in backends:
     for scalar_type in scalar_types:
-        generate_storage_type_and_tensor(
-            backend, scalar_type, declarations, all_types)
+        all_types.append(generate_storage_type_and_tensor(
+            backend, scalar_type, declarations))
 
 write('Type.h', TYPE_H.substitute(top_env))
 write('Type.cpp', TYPE_CPP.substitute(top_env))
@@ -195,3 +192,4 @@ write('Type.cpp', TYPE_CPP.substitute(top_env))
 write('Tensor.h', TENSOR_H.substitute(top_env))
 write('Functions.h', FUNCTIONS_H.substitute(top_env))
 write('Dispatch.h', dispatch_macros.create(all_types))
+write('Copy.cpp', copy_wrapper.create(all_types))

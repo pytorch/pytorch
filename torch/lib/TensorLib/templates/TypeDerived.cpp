@@ -12,7 +12,7 @@
 namespace tlib {
 
 ${Type}::${Type}(Context* context)
-: context(context) {}
+: Type(context) {}
 ScalarType ${Type}::scalarType() {
   return ScalarType::${ScalarName};
 }
@@ -22,20 +22,20 @@ Backend ${Type}::backend() {
 bool ${Type}::isSparse() { return false; }
 bool ${Type}::isDistributed() { return false; }
 
-std::unique_ptr<Storage> ${Type}::newStorage() {
+std::unique_ptr<Storage> ${Type}::storage() {
   return std::unique_ptr<Storage>(new ${Storage}(context));
 }
-std::unique_ptr<Storage> ${Type}::newStorage(size_t size) {
+std::unique_ptr<Storage> ${Type}::storage(size_t size) {
   return std::unique_ptr<Storage>(new ${Storage}(context,size));
 }
-std::unique_ptr<Generator> ${Type}::newGenerator() {
+std::unique_ptr<Generator> ${Type}::generator() {
   return std::unique_ptr<Generator>(new ${Backend}Generator(context));
 }
 
 const char * ${Type}::toString() const {
   return ${Type}::typeString();
 }
-int ${Type}::ID() const {
+TypeID ${Type}::ID() const {
   return ${TypeID};
 }
 

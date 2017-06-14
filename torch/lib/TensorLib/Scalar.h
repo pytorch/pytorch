@@ -47,7 +47,7 @@ inline Half::operator double() {
 template<> half convert(double d);
 #endif
 
-#define TLIB_SCALAR_TYPES(_) \
+#define TLIB_FORALL_SCALAR_TYPES(_) \
 _(uint8_t,Byte,i) \
 _(int8_t,Char,i) \
 _(double,Double,d) \
@@ -65,7 +65,7 @@ public:
     v . member = convert<decltype(v.member),type>(vv); \
   }
 
-  TLIB_SCALAR_TYPES(DEFINE_IMPLICIT_CTOR)
+  TLIB_FORALL_SCALAR_TYPES(DEFINE_IMPLICIT_CTOR)
 
 #ifdef TENSORLIB_CUDA_ENABLED
   Scalar(half vv)
@@ -93,7 +93,7 @@ public:
     } \
   }
 
-  TLIB_SCALAR_TYPES(DEFINE_ACCESSOR)
+  TLIB_FORALL_SCALAR_TYPES(DEFINE_ACCESSOR)
 
 #undef DEFINE_ACCESSOR
   bool isFloatingPoint() {
