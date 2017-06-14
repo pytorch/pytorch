@@ -17,6 +17,14 @@ def cpu_only(inner):
     return outer
 
 
+def cuda_only(inner):
+    def outer(self, *args, **kwargs):
+        if not self.is_cuda:
+            raise unittest.SkipTest("Test is GPU-only")
+        inner(self, *args, **kwargs)
+    return outer
+
+
 class TestSparse(TestCase):
 
     def setUp(self):
@@ -138,6 +146,15 @@ class TestSparse(TestCase):
         x.to_dense()
         x.to_dense()
         self.assertEqual(res, x.to_dense())
+
+    def test_shared(self):
+        i = self.IndexTensor([[2]])
+        v = self.ValueTensor([5])
+        x = self.SparseTensor(i, v, torch.Size([3]))
+        v[0] = 6
+        self.assertEqual(self.ValueTensor([0, 0, 6]), x.to_dense())
+        i[0][0] = 0
+        self.assertEqual(self.ValueTensor([6, 0, 0]), x.to_dense())
 
     def test_to_dense_hybrid(self):
         i = self.IndexTensor([
@@ -277,6 +294,17 @@ class TestSparse(TestCase):
         x = self.safeCoalesce(x)
         self.assertEqual(exp_i, x._indices())
         self.assertEqual(exp_v, x._values())
+
+    def test_clone(self):
+        x, _, _ = self._gen_sparse(4, 20, 5)
+        if self.is_uncoalesced:
+            self.assertFalse(x.is_coalesced())
+            y = x.clone()
+            self.assertFalse(y.is_coalesced())
+        x = x.coalesce()
+        self.assertTrue(x.is_coalesced())
+        y = x.clone()
+        self.assertTrue(y.is_coalesced())
 
     def test_transpose(self):
         x = self._gen_sparse(4, 20, 5)[0]
@@ -546,6 +574,29 @@ class TestSparse(TestCase):
         self._test_sparse_mask_shape([10, 10, 10], [3])
         self._test_sparse_mask_shape([50, 30, 20], [2])
         self._test_sparse_mask_shape([5, 5, 5, 5, 5, 5], [2])
+
+    @cuda_only
+    def test_storage_not_null(self):
+        x = torch.cuda.sparse.FloatTensor(2)
+        self.assertNotEqual(x.get_device(), -1)
+
+    @cuda_only
+    @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
+    def test_same_gpu(self):
+        i = self.IndexTensor([[2]]).cuda(1)
+        v = self.ValueTensor([5]).cuda(1)
+        x = self.SparseTensor(i, v, torch.Size([3]), device=1)
+        self.assertEqual(x.get_device(), 1)
+        self.assertEqual(x._values().get_device(), 1)
+        self.assertEqual(x._indices().get_device(), 1)
+
+        x = self.SparseTensor(3, device=1)
+        self.assertEqual(x.get_device(), 1)
+        self.assertEqual(x._values().get_device(), 1)
+        self.assertEqual(x._indices().get_device(), 1)
+
+        v = self.ValueTensor([5]).cuda(0)
+        self.assertRaises(RuntimeError, lambda: self.SparseTensor(i, v, torch.Size([3])))
 
 
 class TestUncoalescedSparse(TestSparse):
