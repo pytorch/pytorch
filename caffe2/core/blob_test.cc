@@ -359,7 +359,10 @@ TYPED_TEST(TensorCPUTest, KeepOnShrink) {
   tensor.Resize(3, 4, 6);
   TypeParam* larger_ptr = tensor.mutable_data<TypeParam>();
   EXPECT_TRUE(larger_ptr != nullptr);
-  EXPECT_NE(ptr, larger_ptr);
+
+  // This check can fail when malloc() returns the same recently freed address
+  //EXPECT_NE(ptr, larger_ptr);
+
   // Shrinking - will not reallocate
   tensor.Resize(1, 2, 4);
   TypeParam* smaller_ptr = tensor.mutable_data<TypeParam>();
