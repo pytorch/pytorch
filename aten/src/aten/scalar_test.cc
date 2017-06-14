@@ -30,8 +30,8 @@ int main() {
   auto t2 = CUDAFloat.zeros({4,4});
   cout << &t2 << "\n";
   cout << "AFTER GET TYPE " << &CUDAFloat << "\n";
-  cout << "STORAGE: " << CUDAFloat.newStorage(4).get() << "\n";
-  auto s = CUDAFloat.newStorage(4);
+  cout << "STORAGE: " << CUDAFloat.storage(4).get() << "\n";
+  auto s = CUDAFloat.storage(4);
   s->fill(7);
 
   cout << "GET " << s->get(3).toFloat() << "\n";
@@ -44,15 +44,19 @@ int main() {
 
   auto output = CPU(Float).ones(3);
   tlib::Abs_updateOutput(t,output);
-
-  Tensor x = tlib::randn({1,10});
-  Tensor prev_h = tlib::randn({1,20});
-  Tensor W_h = tlib::randn({20,20});
-  Tensor W_x = tlib::randn({20,10});
+  Type & T = CPU(Float);
+  Tensor x = T.randn({1,10});
+  Tensor prev_h = T.randn({1,20});
+  Tensor W_h = T.randn({20,20});
+  Tensor W_x = T.randn({20,10});
   Tensor i2h = tlib::mm(W_x, x.t());
   Tensor h2h = tlib::mm(W_h, prev_h.t());
   Tensor next_h = i2h.add(h2h);
   next_h = next_h.tanh();
+
+  auto r = CUDA(Float).copy(next_h);
+
+  cout << T.randn({10,10,2}) << "\n";
 
   TLIB_DISPATCH_TYPE(x.type(),foo,x,prev_h);
 

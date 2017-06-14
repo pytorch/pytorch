@@ -10,20 +10,18 @@ struct ${Type} : public Type {
   virtual Backend backend() override;
   virtual bool isSparse() override;
   virtual bool isDistributed() override;
-  virtual std::unique_ptr<Storage> newStorage() override;
-  virtual std::unique_ptr<Storage> newStorage(size_t size) override;
-  virtual std::unique_ptr<Generator> newGenerator() override;
+  virtual std::unique_ptr<Storage> storage() override;
+  virtual std::unique_ptr<Storage> storage(size_t size) override;
+  virtual std::unique_ptr<Generator> generator() override;
   virtual const char * toString() const override;
-  virtual int ID() const override;
+  virtual TypeID ID() const override;
   static const char * typeString();
 
   // example
   // virtual Tensor * add(Tensor & a, Tensor & b) override;
 
+  virtual void copy(Tensor & dst, const Tensor & src) override;
   ${type_derived_method_declarations}
-
-private:
-  Context* context;
 };
 
 } // namespace tlib

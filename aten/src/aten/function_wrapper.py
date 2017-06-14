@@ -229,12 +229,10 @@ def create_generic(top_env, declarations):
             first_tensor = find_first_tensor(formals)
             if first_tensor is not None:
                 option['inferred_type'] = '{}.type()'.format(first_tensor)
-            else:
-                option['inferred_type'] = 'globalContext()->defaultType()'
-            top_env['function_declarations'].append(
-                FUNCTION_DECLARATION.substitute(env))
-            top_env['function_definitions'].append(
-                FUNCTION_DEFINITION.substitute(env))
+                top_env['function_declarations'].append(
+                    FUNCTION_DECLARATION.substitute(env))
+                top_env['function_definitions'].append(
+                    FUNCTION_DEFINITION.substitute(env))
 
     for declaration in declarations:
         for option in declaration['options']:
