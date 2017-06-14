@@ -1295,9 +1295,21 @@ M = 10
 S = 5
 function_tests = [
     (Add, (), ((M, M), (M, M))),
+    (Add, (), ((M, M), (M, )), "add_broadcast_rhs"),
+    (Add, (), ((M, ), (M, M)), "add_broadcast_lhs"),
+    (Add, (), ((M, 1, M), (S, M)), "add_broadcast_both"),
     (Sub, (), ((M, M), (M, M))),
+    (Sub, (), ((M, M), (M, )), "sub_broadcast_rhs"),
+    (Sub, (), ((M, ), (M, M)), "sub_broadcast_lhs"),
+    (Sub, (), ((M, 1, M), (S, M)), "sub_broadcast_both"),
     (Mul, (), ((M, M), (M, M))),
+    (Mul, (), ((M, M), (M, )), "mul_broadcast_rhs"),
+    (Mul, (), ((M, ), (M, M)), "mul_broadcast_lhs"),
+    (Mul, (), ((M, 1, M), (S, M)), "mul_broadcast_both"),
     (Div, (), ((M, M), torch.rand(M, M) + 5e-2)),
+    (Div, (), ((M, M), torch.rand(M, ) + 5e-2), "div_broadcast_rhs"),
+    (Div, (), ((M, ), torch.rand(M, M) + 5e-2), "div_broadcast_lhs"),
+    (Div, (), ((M, 1, M), torch.rand(S, M) + 5e-2), "div_broadcast_both"),
     (Pow, (), (torch.rand(M, M) + 1e-3, torch.rand(M, M) + 0.1)),
     (AddConstant, (), ((2, 2), 3.14)),
     (AddConstant, (), (3.14, (2, 2)), 'add_tensor'),
@@ -1657,6 +1669,11 @@ def unpack_variables(args):
 
 ignore_inplace = set((
     'test_DivConstantFunction_by_tensor',
+    # can't broadcast lhs for inplace functions
+    'test_AddFunction_add_broadcast_lhs',
+    'test_AddFunction_add_broadcast_both',
+    'test_SubFunction_sub_broadcast_lhs',
+    'test_SubFunction_sub_broadcast_both',
 ))
 
 
