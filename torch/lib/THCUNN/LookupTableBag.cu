@@ -91,7 +91,8 @@ __global__ void cunn_LookupTableBag_accGradParametersKernel(
 
       // Note: only this line changes from LookupTable_accgradParametersKernel
       const int origRow = ((int) indices[idx] - TH_INDEX_BASE);
-      const int gradOutputRow = ((int) offset2bag[origRow] - TH_INDEX_BASE) * stride;
+      const int seq_number = offset2bag[origRow] - TH_INDEX_BASE;
+      const int gradOutputRow = ((int) seq_number) * stride;
 
       const Acctype scale = count ? ScalarConvert<Dtype, Acctype>::to(defaultScale) / count[idx] : ScalarConvert<Dtype, Acctype>::to(defaultScale);
 
@@ -106,7 +107,7 @@ __global__ void cunn_LookupTableBag_accGradParametersKernel(
         {
           gradient[ii] = ScalarConvert<Dtype, Acctype>::to(gradOutput[gradOutputRow + featureDim]);
 	  if (mode == 1) {
-	    gradient[ii] /= seq_length[offset2bag[origRow] - TH_INDEX_BASE];
+	    gradient[ii] /= seq_length[seq_number];
 	  }
           weight[ii] = ScalarConvert<Dtype, Acctype>::to(gradWeight[weightRow + featureDim]);
         }
