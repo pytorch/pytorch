@@ -160,6 +160,8 @@ message OperatorDef {
   // is_gradient_op argument is only used as a hint in shape inference
   // and has no runtime significance
   optional bool is_gradient_op = 9 [default = false];
+  // a random uuid used for joining with extra meta info
+  optional uint64 uuid = 10 [default = 0];
 }
 
 // Network definition.

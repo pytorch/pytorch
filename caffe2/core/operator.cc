@@ -15,7 +15,9 @@
 namespace caffe2 {
 
 OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
-    : operator_def_(operator_def), arg_helper_(operator_def_) {
+    : operator_ws_(ws),
+      operator_def_(operator_def),
+      arg_helper_(operator_def_) {
   for (const string& input_str : operator_def_.input()) {
     auto* blob = ws->GetBlob(input_str);
     CAFFE_ENFORCE(
@@ -55,10 +57,9 @@ unique_ptr<OperatorBase> TryCreateOperator(
   }
 }
 
-}  // namespace
-
-unique_ptr<OperatorBase> CreateOperator(
-    const OperatorDef& operator_def, Workspace* ws) {
+unique_ptr<OperatorBase> _CreateOperator(
+    const OperatorDef& operator_def,
+    Workspace* ws) {
   static StaticLinkingProtector g_protector;
   // first, check with OpSchema if the operator is legal.
   auto* schema = OpSchemaRegistry::Schema(operator_def.type());
@@ -109,6 +110,26 @@ unique_ptr<OperatorBase> CreateOperator(
       "dyndep.InitOpsLibrary call is missing. Operator def: ",
       ProtoDebugString(operator_def));
   return op;
+}
+
+} // namespace
+
+unique_ptr<OperatorBase> CreateOperator(
+    const OperatorDef& operator_def,
+    Workspace* ws) {
+  try {
+    auto op = _CreateOperator(operator_def, ws);
+    return op;
+  } catch (...) {
+    if (operator_def.has_uuid()) {
+      auto uuid = operator_def.uuid();
+      VLOG(1) << "Operator constructor with uuid " << uuid << " failed";
+      ws->last_failed_op_uuid = uuid;
+    } else {
+      VLOG(1) << "Failed operator constructor doesn't have uuid set";
+    }
+    throw;
+  }
 }
 
 std::map<int32_t, OperatorRegistry*>* gDeviceTypeRegistry() {

@@ -1,9 +1,18 @@
-import unittest
-
-import numpy as np
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace, test_util
 
+import unittest
+import numpy as np
+from inspect import currentframe, getframeinfo
+
+
+def _remove_uuid(proto):
+    if isinstance(proto, caffe2_pb2.NetDef):
+        for op in proto.op:
+            op.ClearField('uuid')
+    elif isinstance(proto, caffe2_pb2.OperatorDef):
+        proto.ClearField('uuid')
+    return proto
 
 class TestScopes(test_util.TestCase):
     def testBlobReferenceIsIndependentFromNameScope(self):
@@ -242,7 +251,8 @@ class TestAutoNaming(test_util.TestCase):
         net_a = create_net()
         net_b = create_net()
         # created net proto is predicatable.
-        self.assertEqual(net_a.Proto().op, net_b.Proto().op)
+        self.assertEqual(_remove_uuid(net_a.Proto()).op,
+                         _remove_uuid(net_b.Proto()).op)
         self.assertEqual(net_a.Proto().op[0].output[0], 'foo/ab')
         self.assertEqual(net_a.Proto().op[1].output[0], 'cd')
 
@@ -370,6 +380,63 @@ class TestExtractPredictorNet(test_util.TestCase):
         )
 
 
+class TestOperatorTraceback(test_util.TestCase):
+    def test_operator_constructor_traceback(self):
+        net = core.Net("test")
+        a, b = net.AddExternalInput("a", "b")
+        net.Mul([a, b], "c")
+        with self.assertRaises(Exception):
+            workspace.RunNetOnce(net)
+        with self.assertRaises(Exception):
+            workspace.CreateNet(net)
+
+    def test_operator_runtime_traceback(self):
+        net = core.Net("test")
+        a = net.AddExternalInput("a")
+        workspace.blobs[a] = np.array([1, 2, 3], dtype=np.float32)
+        net.Split(a, ["b", "c"], axis=0)
+        with self.assertRaises(Exception):
+            workspace.RunNetOnce(net)
+        workspace.CreateNet(net)
+        with self.assertRaises(Exception):
+            workspace.RunNet(net)
+
+    def test_name_population(self):
+        net = core.Net("test")
+        # capture line number on which operator is added
+        net.Mul(["a", "b"], "c"); cf = currentframe(); line = cf.f_lineno
+        net.PopulateProtoWithFileName()
+        print(net.Proto())
+        filename = getframeinfo(cf).filename
+        self.assertEqual(net.Proto().op[0].name, '{}:{}'.format(filename, line))
+
+    def test_c_workspace_constructor(self):
+        net = core.Net("test")
+        a, b = net.AddExternalInput("a", "b")
+        net.Mul([a, b], "c"); cf = currentframe(); line = cf.f_lineno
+        ws = workspace.C.Workspace()
+        with self.assertRaises(Exception):
+            ws.run(net)
+        with self.assertRaises(Exception):
+            ws.create_net(net)
+        net.PopulateProtoWithFileName()
+        filename = getframeinfo(cf).filename
+        self.assertEqual(net.Proto().op[0].name, '{}:{}'.format(filename, line))
+
+    def test_c_workspace_runtime(self):
+        net = core.Net("test")
+        a = net.AddExternalInput("a")
+        net.Split(a, ["b", "c"], axis=0); cf = currentframe(); line = cf.f_lineno
+        ws = workspace.C.Workspace()
+        ws.create_blob(str(a)).feed(np.array([1, 2, 3], dtype=np.float32))
+        ws.create_net(net)
+        with self.assertRaises(Exception):
+            ws.run(net)
+        net.PopulateProtoWithFileName()
+        filename = getframeinfo(cf).filename
+        self.assertEqual(net.Proto().op[0].name, '{}:{}'.format(filename, line))
+
+
 class TestInferDevice(test_util.TestCase):
 
     def setUp(self):
@@ -487,45 +554,6 @@ class TestInferDevice(test_util.TestCase):
         self.assertEqual(op.input[2], "fc_b_cuda_1")
         self.assertEqual(op.device_option.device_type, 1)
         self.assertEqual(op.device_option.cuda_gpu_id, 1)
-        """
-For reference, net.Proto() should be like:
-name: ""
-op {
-  input: "fc_w"
-  output: "fc_w_cuda_1"
-  name: ""
-  type: "CopyCPUToGPU"
-  device_option {
-    device_type: 1
-    cuda_gpu_id: 1
-  }
-}
-op {
-  input: "fc_b"
-  output: "fc_b_cuda_1"
-  name: ""
-  type: "CopyCPUToGPU"
-  device_option {
-    device_type: 1
-    cuda_gpu_id: 1
-  }
-}
-op {
-  input: "data"
-  input: "fc_w_cuda_1"
-  input: "fc_b_cuda_1"
-  output: "fc1"
-  name: ""
-  type: "FC"
-  device_option {
-    device_type: 1
-    cuda_gpu_id: 1
-  }
-}
-external_input: "data"
-external_input: "fc_w"
-external_input: "fc_b"
-"""
 
     def test_cross_nets_no_change(self):
         net = core.Net("test")
@@ -550,25 +578,6 @@ external_input: "fc_b"
         self.assertEqual(op.input[2], "fc_b")
         self.assertEqual(op.device_option.device_type, 1)
         self.assertEqual(op.device_option.cuda_gpu_id, 1)
-        """
-For reference, net.Proto() should be like:
-name: ""
-op {
-  input: "data"
-  input: "fc_w"
-  input: "fc_b"
-  output: "fc1"
-  name: ""
-  type: "FC"
-  device_option {
-    device_type: 1
-    cuda_gpu_id: 1
-  }
-}
-external_input: "data"
-external_input: "fc_w"
-external_input: "fc_b"
-"""
 
     def test_inject_copy_multi_use(self):
         net = core.Net("test")
@@ -631,83 +640,6 @@ external_input: "fc_b"
         self.assertEqual(op.device_option.cuda_gpu_id, 1)
         self.assertEqual(op.input[0], "data_cuda_1")
         self.assertEqual(op.output[0], "relu6")
-        """
-For reference, net.Proto() should be like:
-name: ""
-op {
-  input: "data"
-  output: "data_cuda_1"
-  name: ""
-  type: "CopyCPUToGPU"
-  device_option {
-    device_type: 1
-    cuda_gpu_id: 1
-  }
-}
-op {
-  input: "data_cuda_1"
-  output: "relu1"
-  name: ""
-  type: "Relu"
-  device_option {
-    device_type: 1
-    cuda_gpu_id: 1
-  }
-}
-op {
-  input: "data"
-  output: "relu2"
-  name: ""
-  type: "Relu"
-}
-op {
-  input: "data_cuda_1"
-  output: "relu3"
-  name: ""
-  type: "Relu"
-  device_option {
-    device_type: 1
-    cuda_gpu_id: 1
-  }
-}
-op {
-  input: "data"
-  output: "relu4"
-  name: ""
-  type: "Relu"
-}
-op {
-  input: "data"
-  output: "data_cuda_0"
-  name: ""
-  type: "CopyCPUToGPU"
-  device_option {
-    device_type: 1
-    cuda_gpu_id: 0
-  }
-}
-op {
-  input: "data_cuda_0"
-  output: "relu5"
-  name: ""
-  type: "Relu"
-  device_option {
-    device_type: 1
-    cuda_gpu_id: 0
-  }
-}
-op {
-  input: "data_cuda_1"
-  output: "relu6"
-  name: ""
-  type: "Relu"
-  device_option {
-    device_type: 1
-    cuda_gpu_id: 1
-  }
-}
-external_input: "data"
-"""
 
 
 if __name__ == '__main__':
