@@ -18,6 +18,7 @@ import torch.nn.utils.rnn as rnn_utils
 import torch.legacy.nn as legacy
 from torch.nn.utils import clip_grad_norm
 from torch.autograd import Variable, gradcheck
+from torch.autograd.gradcheck import gradgradcheck
 from torch.nn import Parameter
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     module_tests, criterion_tests, TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
@@ -26,6 +27,16 @@ from common import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, TEST_S
 
 if TEST_SCIPY:
     from scipy import stats
+
+
+@contextlib.contextmanager
+def use_cudnn(should_use):
+    orig = torch.backends.cudnn.enabled
+    torch.backends.cudnn.enabled = should_use
+    try:
+        yield
+    finally:
+        torch.backends.cudnn.enabled = orig
 
 
 def default_tensor_type(type):
@@ -2316,6 +2327,84 @@ class TestNN(NNTestCase):
         self.assertEqual(module.bias.grad.data, module_legacy.gradBias)
 
         self.assertTrue(gradcheck(lambda x1, x2: F.bilinear(x1, x2, module.weight, module.bias), (input1_1, input2_1)))
+
+    def run_conv_double_back_test(self, kern, stride, padding, chan_in, chan_out,
+                                  batch_size, inp_size, dilation, no_weight, use_cuda=False):
+        x = Variable(torch.randn(batch_size, chan_in, inp_size, inp_size), requires_grad=True)
+        weight = Variable(torch.randn(chan_out, chan_in, kern, kern), requires_grad=True)
+        bias = Variable(torch.randn(chan_out), requires_grad=True)
+
+        if use_cuda:
+            x = x.cuda()
+            weight = weight.cuda()
+            bias = bias.cuda()
+
+        if no_weight:
+            # Special case because transpose dilated convolution is not implemented
+            def func(x, bias):
+                # We disable cudnn during forward to avoid finite difference imprecision issues
+                with use_cudnn(False):
+                    out = F.conv2d(x, weight, bias, stride, padding, dilation)
+                return out
+            inputs = (x, bias,)
+        else:
+            def func(x, weight, bias):
+                # We disable cudnn during forward to avoid finite difference imprecision issues
+                with use_cudnn(False):
+                    out = F.conv2d(x, weight, bias, stride, padding, dilation)
+                return out
+            inputs = (x, weight, bias,)
+
+        dummy_out = func(*inputs)
+        grad_y = Variable(torch.randn(dummy_out.size()), requires_grad=True)
+        if use_cuda:
+            grad_y = grad_y.cuda()
+
+        return gradgradcheck(func, inputs, (grad_y,))
+
+    def test_conv_double_backward(self):
+        batch_size = 2
+        for kern, inp_size, dilations in [(3, 6, [1, 2]), (3, 7, [1, 2]), (4, 9, [1, 2]), (4, 10, [1, 2])]:
+            for stride, padding, chan_in, chan_out, dilation in product([1, 2], [0, 2], [1], [2, 3], dilations):
+                no_weight = stride == 2
+                result = self.run_conv_double_back_test(kern, stride,
+                                                        padding, chan_in, chan_out,
+                                                        batch_size, inp_size, dilation,
+                                                        no_weight)
+                self.assertTrue(result,
+                                "Conv double backward test failed with parameters:" +
+                                "\nkern: " + str(kern) +
+                                "\nstride: " + str(stride) +
+                                "\npadding: " + str(padding) +
+                                "\nchan_in: " + str(chan_in) +
+                                "\nchan_out: " + str(chan_out) +
+                                "\nbatch_size: " + str(batch_size) +
+                                "\ninp_size: " + str(inp_size) +
+                                "\ndilation: " + str(dilation))
+
+    def test_error_conv_double_backward(self):
+        batch_size = 2
+
+        # Cannot provide ggW when stride is > 1
+        for kern, inp_size, dilations in [(3, 5, [1, 2]), (3, 7, [1, 2]), (4, 6, [1]), (4, 7, [2])]:
+            for stride, padding, chan_in, chan_out, dilation in product([2], [0, 1, 2], [1, 3], [1, 3], dilations):
+                no_weight = False
+                with self.assertRaises(RuntimeError):
+                    self.run_conv_double_back_test(kern, stride,
+                                                   padding, chan_in, chan_out,
+                                                   batch_size, inp_size, dilation,
+                                                   no_weight)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_conv_double_backward_cuda(self):
+        batch_size = 1
+        for kern, inp_size, dilations in [(3, 5, [1, 2]), (4, 10, [1])]:
+            for stride, padding, chan_in, chan_out, dilation in product([1], [2], [2], [3], dilations):
+                no_weight = stride == 2
+                result = self.run_conv_double_back_test(kern, stride,
+                                                        padding, chan_in, chan_out,
+                                                        batch_size, inp_size, dilation,
+                                                        no_weight, use_cuda=True)
 
 
 class TestNNInit(TestCase):
