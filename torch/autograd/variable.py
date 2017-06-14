@@ -325,8 +325,9 @@ class Variable(_C._VariableBase):
             return DivConstant.apply(self, other)
 
     def div_(self, other):
-        assert not torch.is_tensor(other)
-        return DivConstant.apply(self, other, True)
+        if not isinstance(other, Variable) and not torch.is_tensor(other):
+            return DivConstant.apply(self, other, True)
+        raise RuntimeError("div_ only supports scalar multiplication")
 
     def pow(self, other):
         if isinstance(other, Variable):
