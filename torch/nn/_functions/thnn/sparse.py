@@ -167,9 +167,9 @@ class EmbeddingBag(Function):
 
         if weight.is_cuda:
             if self.mode == MODE_MEAN:
-                self.sequence_length = offsets.new().resize_(offsets.size())
+                self.bag_size = offsets.new().resize_(offsets.size())
             else:
-                self.sequence_length = None
+                self.bag_size = None
 
             self._backend.LookupTableBag_updateOutput(
                 self._backend.library_state,
@@ -179,7 +179,7 @@ class EmbeddingBag(Function):
                 output,
                 self._offset2bag,
                 self.mode,
-                self.sequence_length
+                self.bag_size
             )
         else:
             # slow CPU implementation
@@ -192,11 +192,14 @@ class EmbeddingBag(Function):
             output.resize_(offsets.size(0), weight.size(1)).zero_()
             output.index_add_(0, self._offset2bag, index_output)
             if self.mode == MODE_MEAN:
-                self.sequence_length = weight.new().resize_(offsets.size())
-                self.sequence_length[:-1] = offsets[1:] - offsets[:-1]
-                self.sequence_length[-1] = indices.size(0) - offsets[-1]
-                self.sequence_length = self.sequence_length[:, None].expand_as(output)
-                output /= self.sequence_length
+                if offsets.size(0) == 1:
+                    self.bag_size = indices.size(0)
+                else:
+                    self.bag_size = weight.new().resize_(offsets.size())
+                    self.bag_size[:-1] = offsets[1:] - offsets[:-1]
+                    self.bag_size[-1] = indices.size(0) - offsets[-1]
+                    self.bag_size = self.bag_size[:, None].expand_as(output)
+                output /= self.bag_size
 
         return output
 
@@ -228,14 +231,14 @@ class EmbeddingBag(Function):
                 _indices,
                 self.scale_grad_by_freq,
                 self.mode,
-                self.sequence_length,
+                self.bag_size,
                 1
             )
         else:
             # slow CPU implementation
             if self.mode == MODE_MEAN:
                 # divide by average count
-                grad_output = grad_output / self.sequence_length
+                grad_output = grad_output / self.bag_size
 
             index_grad_output = grad_output.index_select(0, self._offset2bag)
             self._backend.LookupTable_accGradParameters(

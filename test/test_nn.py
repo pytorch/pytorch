@@ -744,7 +744,6 @@ class TestNN(NNTestCase):
 
     def _test_EmbeddingBag(self, cuda, mode):
         # check a known test example
-
         es = nn.EmbeddingBag(5, 2, mode=mode)
         es.weight.data.copy_(torch.arange(1, 11).resize_as_(es.weight.data))
         input = Variable(torch.LongTensor([3, 1, 1, 1, 4]))
@@ -787,41 +786,40 @@ class TestNN(NNTestCase):
         self.assertEqual(es.weight.grad.data, expected_grad_weight)
 
         # now compare EmbeddingBag vs Embedding + Sum/Mean, for constant bag length
+        def _test_vs_Embedding(N, D, B, L):
+            es = nn.EmbeddingBag(N, D, mode=mode)
+            e = nn.Embedding(N, D)
+            e.weight.data.copy_(es.weight.data)
+            input = Variable(torch.rand(B, L).mul(N).long())
+            offsets = Variable(torch.arange(0, B).mul(L).long())
+            grad_output = torch.rand(B, D).type(torch.Tensor)
 
-        N = random.randint(1, 100)
-        D = random.randint(1, 100)
+            if cuda:
+                es = es.cuda()
+                e = e.cuda()
+                input = input.cuda()
+                offsets = offsets.cuda()
+                grad_output = grad_output.cuda()
 
-        es = nn.EmbeddingBag(N, D, mode=mode)
-        e = nn.Embedding(N, D)
-        e.weight.data.copy_(es.weight.data)
+            output = es(input.view(-1), offsets)
+            if mode == 'sum':
+                ref_output = e(input).sum(1)
+            else:
+                ref_output = e(input).mean(1)
 
-        B = random.randint(1, 50)
-        L = random.randint(1, 50)
+            self.assertEqual(output, ref_output)
 
-        input = Variable(torch.rand(B, L).mul(N).long())
-        offsets = Variable(torch.arange(0, B).mul(L).long())
-        grad_output = torch.rand(B, D).type(torch.Tensor)
+            output.backward(grad_output)
+            ref_output.backward(grad_output)
+            self.assertEqual(es.weight.grad, e.weight.grad)
 
-        if cuda:
-            es = es.cuda()
-            e = e.cuda()
-            input = input.cuda()
-            offsets = offsets.cuda()
-            grad_output = grad_output.cuda()
-
-        output = es(input.view(-1), offsets)
-        if mode == 'sum':
-            ref_output = e(input).sum(1).squeeze(1)
-        else:
-            ref_output = e(input).mean(1).squeeze(1)
-
-        self.assertEqual(output, ref_output)
-
-        output.backward(grad_output)
-        ref_output.backward(grad_output)
-        self.assertEqual(es.weight.grad, e.weight.grad)
+        N, D, B, L = random.randint(1, 100), random.randint(1, 100), random.randint(1, 50), random.randint(1, 50)
+        _test_vs_Embedding(N, D, B, L)
+        for p in itertools.product([1, 2], repeat=4):
+            _test_vs_Embedding(*p)
 
         # check that giving illegal input combos raises error
+        es = nn.EmbeddingBag(10, 20, mode=mode)
         input = Variable(torch.ones(3, 4))
         offset = Variable(torch.arange(0, 3))
         self.assertRaises(ValueError, lambda: es(input, offset))

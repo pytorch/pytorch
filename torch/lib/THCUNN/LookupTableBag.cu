@@ -22,7 +22,7 @@ template <typename Dtype, typename Acctype>
 __global__ void cunn_LookupTableBag_updateOutputKernel(
   long *input, long *offsets, Dtype *weight, Dtype *output,
   long *offset2bag, long numIndices, long numBags, long stride, int mode,
-  long *seq_length) {
+  long *bag_size) {
 
   // the strategy here is that each bag x feature is handled by a single thread
 
@@ -40,18 +40,18 @@ __global__ void cunn_LookupTableBag_updateOutputKernel(
       long end = (bag < numBags - 1) ? (offsets[bag + 1] - TH_INDEX_BASE) : numIndices;
       assert(end >= begin);
       Acctype weightFeatSum = ScalarConvert<float, Acctype>::to(0);
-      long seq_length_ = 0;
+      long bag_size_ = 0;
       for (long emb = begin; emb < end; emb++) {
         const int weightRow = ((int) input[emb] - TH_INDEX_BASE) * stride;
         weightFeatSum += ScalarConvert<Dtype, Acctype>::to(weightFeat[weightRow]);
-	seq_length_ ++;
+	bag_size_ ++;
         if (featureDim == 0) {
           offset2bag[emb] = bag + TH_INDEX_BASE;
         }
       }
       if (mode == MODE_MEAN) {
-	weightFeatSum = weightFeatSum / ScalarConvert<long, Acctype>::to(seq_length_);
-	seq_length[bag] = seq_length_;
+	weightFeatSum = weightFeatSum / ScalarConvert<long, Acctype>::to(bag_size_);
+	bag_size[bag] = bag_size_;
       }
       output[bag * stride + featureDim] = ScalarConvert<Acctype, Dtype>::to(weightFeatSum);
     }
@@ -67,7 +67,7 @@ template <typename Dtype, typename Acctype>
 __global__ void cunn_LookupTableBag_accGradParametersKernel(
   long *input, long *indices, Dtype *gradOutput, Dtype *gradWeight, long *offset2bag,
   long *count, Dtype defaultScale, ptrdiff_t numel, long stride,
-  int mode, long *seq_length) {
+  int mode, long *bag_size) {
 
   int idx = blockIdx.x * 4 + threadIdx.y;
 
@@ -109,7 +109,7 @@ __global__ void cunn_LookupTableBag_accGradParametersKernel(
         {
           gradient[ii] = ScalarConvert<Dtype, Acctype>::to(gradOutput[gradOutputRow + featureDim]);
 	  if (mode == MODE_MEAN) {
-	    gradient[ii] /= seq_length[seq_number];
+	    gradient[ii] /= bag_size[seq_number];
 	  }
           weight[ii] = ScalarConvert<Dtype, Acctype>::to(gradWeight[weightRow + featureDim]);
         }
