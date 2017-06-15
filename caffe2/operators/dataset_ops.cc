@@ -765,7 +765,8 @@ class ReadRandomBatchOp : public Operator<CPUContext> {
  public:
   ReadRandomBatchOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator(operator_def, ws),
-        batchSize_(OperatorBase::GetSingleArgument<int>("batch_size", 1)) {}
+        batchSize_(OperatorBase::GetSingleArgument<int>("batch_size", 1)),
+        loopOver_(OperatorBase::GetSingleArgument<bool>("loop_over", false)) {}
   bool RunOnDevice() override {
     auto& cursor = OperatorBase::Input<std::unique_ptr<TreeCursor>>(0);
     auto& idxblob = Input(1);
@@ -780,6 +781,10 @@ class ReadRandomBatchOp : public Operator<CPUContext> {
       std::lock_guard<std::mutex> lock(cursor->mutex_);
       cursor->offsets.resize(1);
       idx = cursor->offsets.at(0);
+      if (loopOver_ && idx >= idxblob.size()) {
+        cursor->offsets.at(0) = 0;
+        idx = 0;
+      }
       cursor->offsets.at(0) += batchSize_;
     }
 
@@ -837,6 +842,7 @@ class ReadRandomBatchOp : public Operator<CPUContext> {
     return true;
   }
   int batchSize_;
+  bool loopOver_;
 };
 
 template <class Context>
@@ -1260,7 +1266,8 @@ ReadRandomBatch is thread safe.
     .Input(2, "offsetsmat", "offset matrix containing length offset info.")
     .Input(3, "dataset_field_0", "First dataset field")
     .Output(0, "field_0", "Tensor containing the next batch for field 0.")
-    .Arg("batch_size", "Number of top-level entries to read.");
+    .Arg("batch_size", "Number of top-level entries to read.")
+    .Arg("loop_over", "(bool) Repeat the dataset indefinitely");
 
 OPERATOR_SCHEMA(CheckDatasetConsistency)
     .NumInputs(1, INT_MAX)
