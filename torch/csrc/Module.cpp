@@ -820,6 +820,7 @@ PyMODINIT_FUNC PyInit__C()
   ASSERT_TRUE(THPSize_init(module));
   ASSERT_TRUE(THPVariable_initModule(module));
   ASSERT_TRUE(THPFunction_initModule(module));
+  ASSERT_TRUE(THPNode_initModule(module));
   ASSERT_TRUE(THPEngine_initModule(module));
 
   ASSERT_TRUE(THPDoubleStorage_init(module));

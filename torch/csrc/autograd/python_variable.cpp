@@ -1,4 +1,5 @@
 #include "torch/csrc/autograd/python_variable.h"
+#include "torch/csrc/autograd/python_ir.h"
 
 #include <structmember.h>
 
@@ -217,6 +218,15 @@ int THPVariable_set_grad_fn(THPVariable *self, PyObject *obj)
   return 0;
 }
 
+PyObject *THPVariable_get_trace_fn(THPVariable *self)
+{
+  auto& var = *self->cdata;
+  if (!var.trace_fn) {
+    Py_RETURN_NONE;
+  }
+  return THPNode_Wrap(var.trace_fn);
+}
+
 PyObject *THPVariable_is_leaf(THPVariable *self)
 {
   return PyBool_FromLong(!self->cdata->grad_fn);
@@ -364,6 +374,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"_version", (getter)THPVariable_get_version, NULL, NULL, NULL},
   {"grad_fn", (getter)THPVariable_get_grad_fn, NULL, NULL, NULL},
   {"_grad_fn", (getter)THPVariable_get_grad_fn, (setter)THPVariable_set_grad_fn, NULL, NULL},
+  {"_trace_fn", (getter)THPVariable_get_trace_fn, NULL, NULL, NULL},
   {"is_leaf", (getter)THPVariable_is_leaf, NULL, NULL, NULL},
   {"data", (getter)THPVariable_get_data, (setter)THPVariable_set_data, NULL, NULL},
   {"_grad", (getter)THPVariable_get_grad, (setter)THPVariable_set_grad, NULL, NULL}, // only for legacy reasons

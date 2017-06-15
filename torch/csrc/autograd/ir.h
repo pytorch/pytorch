@@ -34,17 +34,19 @@ struct Node {
   Node(const Node& other) = delete;
   Node(Node&& other) = delete;
 
-  virtual std::string name();
+  virtual std::string name() const = 0;
 };
 
 struct PyNode : public Node {
-  PyNode(THPObjectPtr* obj, std::vector<Output> inputs)
+  PyNode(PyObject* pyobj, std::vector<Output> inputs)
     : Node(inputs)
-    , obj(obj)
+    , pyobj(pyobj)
     {}
 
-  virtual std::string name() override;
-  THPObjectPtr* obj;
+  virtual std::string name() const override;
+  THPObjectPtr pyobj;
 };
+
+void printGraph(const Node*, int);
 
 }}
