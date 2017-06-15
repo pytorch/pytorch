@@ -373,7 +373,8 @@ class Lerp(Function):
 
     @staticmethod
     def backward(ctx, grad_output):
-        return maybe_unexpand(grad_output.mul(1 - ctx._weight), ctx._a_size), maybe_unexpand_or_view(grad_output.mul(ctx._weight), ctx._b_size), None
+        return (maybe_unexpand(grad_output.mul(1 - ctx._weight), ctx._a_size),
+                maybe_unexpand_or_view(grad_output.mul(ctx._weight), ctx._b_size), None)
 
 
 class Rsqrt(InplaceFunction):
@@ -451,7 +452,7 @@ class Addcdiv(InplaceFunction):
         if ctx.needs_input_grad[2]:
             div_tensor2_sq = div_tensor2.mul(div_tensor2)
             grad_div2 = maybe_unexpand_or_view(grad_output.mul(div_tensor1).div(div_tensor2_sq).mul(-ctx._scale),
-                                   div_tensor2.size())
+                                               div_tensor2.size())
 
         return grad_add, grad_div1, grad_div2, None, None
 
