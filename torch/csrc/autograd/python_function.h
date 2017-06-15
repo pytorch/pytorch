@@ -29,6 +29,10 @@ struct PyFunction : public Function {
   PyObject* obj;
 };
 
+using input_map = std::unordered_map<InputNode*, std::shared_ptr<Variable>>;
+using output_list = std::vector<Output>;
+variable_list interpret(output_list, input_map&);
+
 }} // namespace torch::autograd
 
 struct THPFunction {
