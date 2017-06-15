@@ -105,6 +105,9 @@ class Embedding(Function):
 _all_functions.append(Embedding)
 
 
+MODE_SUM = 0
+MODE_MEAN = 1
+
 class EmbeddingBag(Function):
 
     def __init__(self, max_norm, norm_type, scale_grad_by_freq, mode):
@@ -115,11 +118,12 @@ class EmbeddingBag(Function):
         self._indices = None
         assert mode is not None
         if mode == 'sum':
-            self.mode = 0
+            self.mode = MODE_SUM
         elif mode == 'mean':
-            self.mode = 1
+            self.mode = MODE_MEAN
         else:
-            raise InputError("mode needs to be 'sum' or 'mean', but got {}" % mode)
+            raise ValueError("mode needs to be 'sum' or 'mean', but got {}"
+                             .format( mode))
 
     def _renorm(self, indices, weight):
         self._backend.LookupTable_renorm(
@@ -130,35 +134,39 @@ class EmbeddingBag(Function):
             self.norm_type
         )
 
-    def forward(self, indices, offsets, weight):
-        assert indices.dim() <= 2
-        assert not self.needs_input_grad[0], "EmbeddingBag doesn't " \
+    def forward(self, weight, indices, offsets):
+        assert not self.needs_input_grad[1], "EmbeddingBag doesn't " \
             "compute the gradient w.r.t. the indices"
 
-        assert not self.needs_input_grad[1], "EmbeddingBag doesn't " \
+        assert not self.needs_input_grad[2], "EmbeddingBag doesn't " \
             "compute the gradient w.r.t. the offsets"
+
+        assert indices.dim() == 1
+        if offsets.dim() != 1:
+            raise ValueError("offsets has to be a 1D Tensor")
+
+        if offsets[0] != 0:
+            raise ValueError("offsets[0] has to be 0, i.e. the first sequence"
+                             " in the mini-batch has to start from position 0."
+                             "However, got {}".format(offsets[0]))
+        if offsets[-1] > indices.size(0):
+            raise ValueError("offsets[-1] has to be smaller than indices's length"
+                             " ({}), but got offsets[-1] of {}"
+                             .format(indices.size(0), offsets[-1]))
 
         self._backend = type2backend[type(weight)]
         self._weight_size = weight.size()
         self._offset2bag = offsets.new()
 
-        if not indices.is_contiguous():
-            self._indices = indices.contiguous()
-            indices = self._indices
-        else:
-            self.save_for_backward(indices)
+        self.save_for_backward(indices)
 
+        indices = indices.contiguous().view(-1)
         output = weight.new()
         if self.max_norm is not None:
             self._renorm(indices, weight)
 
-        assert indices.dim() == 1
-        assert offsets.dim() == 1
-        assert offsets[0] == 0
-        assert offsets[-1] < indices.size(0)
-
         if weight.is_cuda:
-            if self.mode == 1:
+            if self.mode == MODE_MEAN:
                 self.sequence_length = offsets.new().resize_(offsets.size())
             else:
                 self.sequence_length = None
@@ -183,7 +191,7 @@ class EmbeddingBag(Function):
             self._offset2bag = self._offset2bag.cumsum(0)  # offset2bag = [0 0 1 1 2]
             output.resize_(offsets.size(0), weight.size(1)).zero_()
             output.index_add_(0, self._offset2bag, index_output)
-            if self.mode == 1:
+            if self.mode == MODE_MEAN:
                 self.sequence_length = weight.new().resize_(offsets.size())
                 self.sequence_length[:-1] = offsets[1:] - offsets[:-1]
                 self.sequence_length[-1] = indices.size(0) - offsets[-1]
@@ -193,14 +201,9 @@ class EmbeddingBag(Function):
         return output
 
     def backward(self, grad_output):
-        if self._indices is not None:
-            indices = self._indices
-        else:
-            indices, = self.saved_tensors
-
+        indices, = self.saved_tensors
+        indices = indices.contiguous().view(-1)
         grad_output = grad_output.contiguous()
-        if indices.dim() == 2:
-            indices = indices.view(-1)
 
         with torch.cuda.device_of(grad_output):
             if grad_output.is_cuda:
@@ -230,7 +233,7 @@ class EmbeddingBag(Function):
             )
         else:
             # slow CPU implementation
-            if self.mode == 1:  # mode = mean
+            if self.mode == MODE_MEAN:
                 # divide by average count
                 grad_output = grad_output / self.sequence_length
 
@@ -248,7 +251,7 @@ class EmbeddingBag(Function):
                 1
             )
 
-        return None, None, grad_weight
+        return grad_weight, None, None
 
 
 _all_functions.append(EmbeddingBag)

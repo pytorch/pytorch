@@ -128,15 +128,33 @@ class EmbeddingBag(Module):
         norm_type (float, optional): The p of the p-norm to compute for the max_norm option
         scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the frequency of
                                                 the words in the dictionary.
-        mode (string, optional): 'sum' | 'mean'. Specifies the way to reduce the bag. Default: 'sum'
+        mode (string, optional): 'sum' | 'mean'. Specifies the way to reduce the bag. Default: 'mean'
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape (num_embeddings, embedding_dim)
 
+    Inputs: input, offsets
+        - **input** (N or BxN): LongTensor containing the indices of the embeddings
+                                to extract. When `input` is 1D Tensor of shape `N`,
+                                an `offsets` Tensor is given, that contains the
+                                starting position of each new sequence in the
+                                mini-batch.
+        - **offsets** (B or None): LongTensor containing the starting positions of
+                                   each sample in a mini-batch of variable length
+                                   sequences. If `input` is 2D (BxN), then offsets
+                                   does not need to be given, as the `input` is
+                                   treated as a mini-batch of fixed length sequences
+                                   of length `N` each.
+
+
     Shape:
         - Input: LongTensor `N`, N = number of embeddings to extract
+                 (or) LongTensor `BxN`, B = number of sequences in mini-batch,
+                                        N = number of embeddings per sequence
         - Offsets: LongTensor `B`, B = number of bags. The values are the
                    offsets in `input` for each bag, i.e. the cumsum of lengths.
+                   Offsets is not given if Input is 2D `BxN` Tensor,
+                   the input is considered to be of fixed-length sequences
         - Output: `(B, embedding_dim)`
 
     Examples:
@@ -156,7 +174,7 @@ class EmbeddingBag(Module):
 
     def __init__(self, num_embeddings, embedding_dim,
                  max_norm=None, norm_type=2, scale_grad_by_freq=False,
-                 mode='sum'):
+                 mode='mean'):
         super(EmbeddingBag, self).__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
@@ -171,11 +189,25 @@ class EmbeddingBag(Module):
     def reset_parameters(self):
         self.weight.data.normal_(0, 1)
 
-    def forward(self, input, offsets):
+    def forward(self, input, offsets=None):
+        if input.dim() == 2:
+            if offsets is not None:
+                raise ValueError("if input is 2D, then offsets has to be None"
+                                 ", as input is treated is a mini-batch of"
+                                 " fixed length sequences. However, found "
+                                 "offsets of type {}".format(type(offsets)))
+            else:
+                offsets = input.new(input.size(0)).fill_(input.size(1))
+        elif input.dim() != 1:
+            raise ValueError("input has to be 1D or 2D Tensor,"
+                             " but got Tensor of dimension {}".format(input.dim()))
+        if offsets is None:
+            raise ValueError("offsets has to be a 1D Tensor but got None")
+
         return self._backend.EmbeddingBag(
             self.max_norm, self.norm_type,
             self.scale_grad_by_freq, mode=self.mode
-        )(input, offsets, self.weight)
+        )(self.weight, input, offsets)
 
     def __repr__(self):
         s = '{name}({num_embeddings}, {embedding_dim}'

@@ -15,6 +15,8 @@
 #include "THCTensorSort.cuh"
 
 const int WARP_SIZE = 32;
+const int MODE_SUM = 0;
+const int MODE_MEAN = 1;
 
 template <typename Dtype, typename Acctype>
 __global__ void cunn_LookupTableBag_updateOutputKernel(
@@ -47,7 +49,7 @@ __global__ void cunn_LookupTableBag_updateOutputKernel(
           offset2bag[emb] = bag + TH_INDEX_BASE;
         }
       }
-      if (mode == 1) { // mode=0 is sum-reduction, mode=1 is mean-reduction
+      if (mode == MODE_MEAN) {
 	weightFeatSum = weightFeatSum / ScalarConvert<long, Acctype>::to(seq_length_);
 	seq_length[bag] = seq_length_;
       }
@@ -106,7 +108,7 @@ __global__ void cunn_LookupTableBag_accGradParametersKernel(
         if (featureDim < stride)
         {
           gradient[ii] = ScalarConvert<Dtype, Acctype>::to(gradOutput[gradOutputRow + featureDim]);
-	  if (mode == 1) {
+	  if (mode == MODE_MEAN) {
 	    gradient[ii] /= seq_length[seq_number];
 	  }
           weight[ii] = ScalarConvert<Dtype, Acctype>::to(gradWeight[weightRow + featureDim]);

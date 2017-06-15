@@ -821,6 +821,17 @@ class TestNN(NNTestCase):
         ref_output.backward(grad_output)
         self.assertEqual(es.weight.grad, e.weight.grad)
 
+        # check that giving illegal input combos raises error
+        input = Variable(torch.ones(3, 4))
+        offset = Variable(torch.arange(0, 3))
+        self.assertRaises(ValueError, lambda: es(input, offset))
+        self.assertRaises(ValueError, lambda: es(input.view(-1)))
+        offset[0] = 1
+        self.assertRaises(ValueError, lambda: es(input.view(-1), offset))
+        offset[0] = 0
+        offset[-1] = 100
+        self.assertRaises(ValueError, lambda: es(input.view(-1), offset))
+
     def test_EmbeddingBag(self):
         self._test_EmbeddingBag(False, 'sum')
         self._test_EmbeddingBag(False, 'mean')
