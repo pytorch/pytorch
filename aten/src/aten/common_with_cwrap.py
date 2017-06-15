@@ -107,10 +107,10 @@ def enumerate_options_due_to_default(declaration, allow_kwarg=True,type_to_signa
     declaration['options'] = filter_unique_options(new_options, allow_kwarg,type_to_signature,ignore_self)
 
 
-def sort_by_number_of_options(declaration):
+def sort_by_number_of_options(declaration, reverse=True):
     def num_checked_args(option):
         return sum(map(lambda a: not a.get('ignore_check', False), option['arguments']))
-    declaration['options'].sort(key=num_checked_args, reverse=True)
+    declaration['options'].sort(key=num_checked_args, reverse=reverse)
 
 class Function(object):
 
