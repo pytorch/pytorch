@@ -104,9 +104,9 @@ class Embedding(Function):
 
 _all_functions.append(Embedding)
 
-
 MODE_SUM = 0
 MODE_MEAN = 1
+
 
 class EmbeddingBag(Function):
 
@@ -123,7 +123,7 @@ class EmbeddingBag(Function):
             self.mode = MODE_MEAN
         else:
             raise ValueError("mode needs to be 'sum' or 'mean', but got {}"
-                             .format( mode))
+                             .format(mode))
 
     def _renorm(self, indices, weight):
         self._backend.LookupTable_renorm(
