@@ -75,6 +75,7 @@ class Pow(Function):
 
     @staticmethod
     def forward(ctx, a, b):
+        ctx.a_size = a.size()
         ctx.b_size = b.size()
         ctx.save_for_backward(a, b)
         return a.pow(b)
@@ -84,7 +85,7 @@ class Pow(Function):
         a, b = ctx.saved_variables
         grad_a = grad_output.mul(b).mul(a.pow(b - 1))
         grad_b = grad_output.mul(a.pow(b)).mul(a.log())
-        return grad_a, maybe_view(grad_b, ctx.b_size)
+        return maybe_unexpand(grad_a, ctx.a_size), maybe_unexpand_or_view(grad_b, ctx.b_size)
 
 
 def sort_args(a, b):
