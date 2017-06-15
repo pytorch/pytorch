@@ -106,7 +106,7 @@ def pipe(
                      until a stop is signaled either by the reader or the
                      writer.
         output:      either a Writer, a Queue or a DataStream that will be
-                     writen to as long as neither reader or writer signal
+                     writen to as long as neither reader nor writer signal
                      a stop condition. If output is not provided or is None,
                      a Queue is created with given `capacity` and writen to.
         num_threads: number of concurrent threads used for processing and
@@ -263,7 +263,7 @@ def _pipe_step(
 
 class ProcessingReader(Reader):
     """
-    Reader that reads from a upstream reader, calls the processor, and returns
+    Reader that reads from an upstream reader, calls the processor, and returns
     the processed record.
     """
     def __init__(self, reader, processor):

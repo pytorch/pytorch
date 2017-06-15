@@ -637,7 +637,7 @@ def compute_assignments_dp(ranges_sorted, init_assignment, counter=None):
         blob b[k - 1] (b[k - 1] is compatible with all assignments in
         f(b, j, init)), and find_best(b1, init1) gives the best assignment
         for blobs in 'b1' based on the initial assignment 'init1', and blobs
-        b1[0:-1] should be incompatible with with b1[-1]. f(b, len(b), []) gives
+        b1[0:-1] should be incompatible with b1[-1]. f(b, len(b), []) gives
         the best assignment for blobs 'b'.
 
         For find_best(b, init), since b[0:-1] are not compatible with b[-1], we

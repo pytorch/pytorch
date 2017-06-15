@@ -9,7 +9,7 @@ This defines a columnar storage format for such datasets on top of caffe2
 tensors. In terms of capacity of representation, it can represent most of
 the data types supported by Parquet, ORC, DWRF file formats.
 
-See comments in operator_test/dataset_ops_test.py for a example and
+See comments in operator_test/dataset_ops_test.py for an example and
 walkthrough on how to use schema to store and iterate through a structured
 in-memory dataset.
 """
@@ -82,7 +82,7 @@ class Metadata(
     Usually makes sense for length fields of lists.
 
     `feature_specs` - information about the features that contained in this
-    field. For example if field have more then 1 feature it can have list of
+    field. For example if field have more than 1 feature it can have list of
     feature names contained in this field."""
     __slots__ = ()
 
@@ -624,7 +624,7 @@ class Scalar(Field):
         if dtype is not None:
             dtype = np.dtype(dtype)
         # If blob is not None and it is not a BlobReference, we assume that
-        # it is actual tensor data, so we will try to cast it to an numpy array.
+        # it is actual tensor data, so we will try to cast it to a numpy array.
         if blob is not None and not isinstance(blob, BlobReference):
             preserve_shape = isinstance(blob, np.ndarray)
             if dtype is not None and dtype != np.void:

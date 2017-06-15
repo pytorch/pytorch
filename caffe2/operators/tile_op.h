@@ -204,7 +204,7 @@ class TileGradientOp : public Operator<Context> {
      * This is equivalent to multiplying by a vector of 1s transposed.
      * The gradient of this is all 1s in the shape of the input matrix
      * (call it X).
-     * So the the output gradient should be the matrix multipication result
+     * So the output gradient should be the matrix multipication result
      * of input gradient (gradient of tiled tensor output) and X.
      */
     const char* input_data = static_cast<const char*>(input.raw_data());

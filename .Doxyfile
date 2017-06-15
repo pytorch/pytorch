@@ -46,7 +46,7 @@ PROJECT_NUMBER         =
 
 PROJECT_BRIEF          =
 
-# With the PROJECT_LOGO tag one can specify an logo or icon that is included in
+# With the PROJECT_LOGO tag one can specify a logo or icon that is included in
 # the documentation. The maximum height of the logo should not exceed 55 pixels
 # and the maximum width should not exceed 200 pixels. Doxygen will copy the logo
 # to the output directory.
@@ -295,7 +295,7 @@ MARKDOWN_SUPPORT       = YES
 
 # When enabled doxygen tries to link words that correspond to documented
 # classes, or namespaces to their corresponding documentation. Such a link can
-# be prevented in individual cases by by putting a % sign in front of the word
+# be prevented in individual cases by putting a % sign in front of the word
 # or globally by setting AUTOLINK_SUPPORT to NO.
 # The default value is: YES.
 

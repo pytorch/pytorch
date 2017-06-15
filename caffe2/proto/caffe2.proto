@@ -54,7 +54,7 @@ message TensorProto {
   // workspace in a multi-GPU environment.
   optional DeviceOption device_detail = 8;
   // When loading from chunks this is going to indicate where to put data in the
-  // full array. When not used full data must to be present
+  // full array. When not used full data have to be present
   message Segment {
     required int64 begin = 1;
     required int64 end = 2;

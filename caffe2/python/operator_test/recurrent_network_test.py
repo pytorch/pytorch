@@ -204,7 +204,7 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
         the current one - input_state_t. We specify that using `link_window`
         argument of RecurrentNetwork. We need that many elements to
         compute a single convolution step. Also, note that `link_window`
-        specifies how many element to link starting at
+        specifies how many elements to link starting at
         `timestep` + `link_offset` position.
 
         2. First few steps might require additional zero padding from the left,

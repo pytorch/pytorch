@@ -48,7 +48,7 @@ class PackedFCOp final : public Operator<CPUContext> {
     CAFFE_ENFORCE(
         __builtin_cpu_supports("avx2"),
         "Do not run PackedFC on a machine that does not have avx2 "
-        "right now, as there is an known issue with MKL 2017.0.098 "
+        "right now, as there is a known issue with MKL 2017.0.098 "
         "that produces wrong results on non-avx2 machines.");
 #endif
   }

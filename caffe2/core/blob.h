@@ -89,7 +89,7 @@ class Blob {
    *
    * If the current object is not of the right type, a new object is created
    * and the old object is freed. Note that type T should have a default
-   * constructor. Otherwise, create the object yourself first, and and use
+   * constructor. Otherwise, create the object yourself first, and use
    * Reset().
    */
   template <class T>
