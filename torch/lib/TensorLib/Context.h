@@ -3,6 +3,7 @@
 #include <memory>
 #include "TensorLib/Generator.h"
 #include "TensorLib/Type.h"
+#include "TensorLib/Utils.h"
 
 class THCState;
 
@@ -14,13 +15,13 @@ public:
   Type & getType(Backend p, ScalarType s) {
     auto & type = type_registry[static_cast<int>(p)][static_cast<int>(s)];
     if(!type)
-      throw std::runtime_error("Type %s is not enabled (TODO encode type as string)");
+      runtime_error("%s%sType is not enabled.",toString(p),toString(s));
     return *type;
   }
   Generator & defaultGenerator(Backend p) {
     auto & generator = generator_registry[static_cast<int>(p)];
     if(!generator)
-      throw std::runtime_error("backend type not enabled (TODO encode name as string)");
+      runtime_error("%s backend type not enabled.",toString(p));
     return *generator;
   }
   Type & defaultType() {
