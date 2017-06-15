@@ -2330,56 +2330,50 @@ class TestNN(NNTestCase):
 
     def run_conv_double_back_test(self, kern, stride, padding, chan_in, chan_out, batch_size,
                                   inp_size, dilation, no_weight, use_cuda=False, use_bias=True):
-        x = torch.randn(batch_size, chan_in, inp_size, inp_size)
-        weight = torch.randn(chan_out, chan_in, kern, kern)
+        tensor = torch.Tensor(1)
+        if use_cuda:
+            tensor = tensor.cuda()
+
+        x = Variable(tensor.new(batch_size, chan_in, inp_size, inp_size), requires_grad=True)
+        x.data.normal_()
+        weight = Variable(tensor.new(chan_out, chan_in, kern, kern), requires_grad=True)
+        weight.data.normal_()
         if use_bias:
-            bias = torch.randn(chan_out)
+            bias = Variable(tensor.new(chan_out), requires_grad=True)
+            bias.data.normal_()
         else:
             bias = None
-        if use_cuda:
-            x = x.cuda()
-            weight = weight.cuda()
-            if use_bias:
-                bias = bias.cuda()
-        x = Variable(x, requires_grad=True)
-        weight = Variable(weight, requires_grad=True)
-        if use_bias:
-            bias = Variable(bias, requires_grad=True)
+
+        def func(*inputs):
+            if no_weight:
+                lweight = weight
+                if use_bias:
+                    lx, lbias = inputs
+                else:
+                    lx, = inputs
+                    lbias = None
+            else:
+                if use_bias:
+                    lx, lweight, lbias = inputs
+                else:
+                    lx, lweight = inputs
+                    lbias = None
+            # We disable cudnn during forward to avoid finite difference imprecision issues
+            with use_cudnn(False):
+                out = F.conv2d(lx, lweight, lbias, stride, padding, dilation)
+            return out
 
         if no_weight:
-            # Special case because transpose dilated convolution is not implemented
-            def func(*inputs):
-                if use_bias:
-                    x, bias = inputs
-                else:
-                    x, = inputs
-                    bias = None
-                # We disable cudnn during forward to avoid finite difference imprecision issues
-                with use_cudnn(False):
-                    out = F.conv2d(x, weight, bias, stride, padding, dilation)
-                return out
-            inputs = (x, bias,)
+            inputs = (x, bias)
         else:
-            def func(*inputs):
-                if use_bias:
-                    x, weight, bias = inputs
-                else:
-                    x, weight = inputs
-                    bias = None
-                # We disable cudnn during forward to avoid finite difference imprecision issues
-                with use_cudnn(False):
-                    out = F.conv2d(x, weight, bias, stride, padding, dilation)
-                return out
-            inputs = (x, weight, bias,)
+            inputs = (x, weight, bias)
 
         if not use_bias:
             inputs = inputs[:-1]
 
         dummy_out = func(*inputs)
-        grad_y = torch.randn(dummy_out.size())
-        if use_cuda:
-            grad_y = grad_y.cuda()
-        grad_y = Variable(grad_y, requires_grad=True)
+        grad_y = Variable(tensor.new(dummy_out.size()), requires_grad=True)
+        grad_y.data.normal_()
 
         return gradgradcheck(func, inputs, (grad_y,))
 
