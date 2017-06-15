@@ -68,6 +68,7 @@ struct Variable : std::enable_shared_from_this<Variable> {
       bool is_volatile);
 
   std::shared_ptr<Function> get_grad_accumulator();
+  std::shared_ptr<InputNode> get_input_node();
 
   inline SavedVariable save(Function* saved_for) {
     return SavedVariable(*this, saved_for);
@@ -92,7 +93,9 @@ struct Variable : std::enable_shared_from_this<Variable> {
   std::unique_ptr<VariableVersion> version_counter;
   std::vector<std::shared_ptr<FunctionPreHook>> hooks;
   std::weak_ptr<Function> grad_accumulator;
+  std::weak_ptr<InputNode> input_node;
   std::mutex grad_accumulator_lock;
+  std::mutex input_node_lock;
   bool requires_grad;
   bool is_volatile;
   // The "output number" of this variable; e.g., if this variable
