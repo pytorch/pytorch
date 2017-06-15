@@ -572,6 +572,7 @@ class TestAutograd(TestCase):
             (x - y()).sum().backward()
             (x * y()).sum().backward()
             (x / y()).sum().backward()
+            (x.dist(y())).sum().backward()
             (x.lerp(y(), 0.5)).sum().backward()
             (x.max(y())).sum().backward()
             (x.min(y())).sum().backward()
@@ -1678,19 +1679,25 @@ method_tests = [
     ('addcmul', (S, S), ((S, 1), (1, S)), 'broadcast_rhs'),
     ('addcmul', (1,), ((S, S, 1), (1, S)), 'broadcast_all'),
     ('addcmul', (S, S), (0.5, (S, S), (S, S)), 'scale'),
-    ('addcmul', (S, S), (0.5, (S, 1), (1, S)), 'broadcast_rhs_scale'),
-    ('addcmul', (1,), (0.5, (S, S, 1), (1, S)), 'broadcast_all_scale'),
+    ('addcmul', (S, S), (0.5, (S, 1), (1, S)), 'scale_broadcast_rhs'),
+    ('addcmul', (1,), (0.5, (S, S, 1), (1, S)), 'scale_broadcast_all'),
     ('addcdiv', (S, S), ((S, S), (S, S))),
     ('addcdiv', (S, S), ((S, 1), (1, S)), 'broadcast_rhs'),
     ('addcdiv', (1,), ((S, S, 1), (1, S)), 'broadcast_all'),
     ('addcdiv', (S, S), (0.5, (S, S), (S, S)), 'scale'),
-    ('addcdiv', (S, S), (0.5, (S, 1), (1, S)), 'broadcast_rhs_scale'),
-    ('addcdiv', (1,), (0.5, (S, S, 1), (1, S)), 'broadcast_all_scale'),
+    ('addcdiv', (S, S), (0.5, (S, 1), (1, S)), 'scale_broadcast_rhs'),
+    ('addcdiv', (1,), (0.5, (S, S, 1), (1, S)), 'scale_broadcast_all'),
     ('norm', (S, S, S), (2,)),
     ('norm', (S, S, S), (2, 1), 'dim', [1]),
     ('norm', (S, S, S), (2, 1, True), 'keepdim_dim', [0]),
     ('dist', (S, S, S), ((S, S, S),)),
+    ('dist', (S, S, S), ((S,),), 'broadcast_rhs'),
+    ('dist', (S,), ((S, S, S),), 'broadcast_lhs'),
+    ('dist', (S, 1, S), ((S, S),), 'broadcast_all'),
     ('dist', (S, S, S), ((S, S, S), 4), '4'),
+    ('dist', (S, S, S), ((S,), 4), '4_broadcast_rhs'),
+    ('dist', (S,), ((S, S, S), 4), '4_broadcast_lhs'),
+    ('dist', (S, 1, S), ((S, S), 4), '4_broadcast_all'),
     ('index_select', (S, S, S), (0, index_variable(2, S)), 'dim', [0]),
     ('diag', (M, M), (), '2d'),
     ('diag', (M,), (), '1d'),
