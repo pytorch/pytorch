@@ -122,6 +122,10 @@ if [[ $WITH_CUDA -eq 1 ]]; then
    build THCS
    build THCUNN
 fi
+
+cp THNN/generic/THNN.h .
+cp THCUNN/generic/THCUNN.h .
+
 if [[ $WITH_NCCL -eq 1 ]]; then
    build_nccl
 fi
@@ -150,8 +154,6 @@ fi
 # If all the builds succeed we copy the libraries, headers,
 # binaries to torch/lib
 cp $INSTALL_DIR/lib/* .
-cp THNN/generic/THNN.h .
-cp THCUNN/generic/THCUNN.h .
 cp -r $INSTALL_DIR/include .
 cp $INSTALL_DIR/bin/* .
 
