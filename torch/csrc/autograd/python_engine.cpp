@@ -1,6 +1,7 @@
 #include "torch/csrc/autograd/python_engine.h"
 
 #include "torch/csrc/autograd/engine.h"
+#include "torch/csrc/autograd/python_function.h"
 #include "torch/csrc/THP.h"
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/utils/auto_gil.h"
@@ -225,6 +226,55 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
   END_HANDLE_TH_ERRORS
 }
 
+PyObject *THPEngine_run_forward(THPEngine *self, PyObject *args, PyObject *kwargs)
+{
+  HANDLE_TH_ERRORS;
+  PyObject* input_objs;
+  PyObject* output_objs;
+  const char *accepted_kwargs[] = {"inputs", "outputs", NULL};
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OO", (char**)accepted_kwargs,
+        &input_objs, &output_objs))
+    return NULL;
+
+  THPUtils_assert(PyTuple_Check(input_objs), "inputs argument is expected to "
+      "be a tuple, but got %s", THPUtils_typename(input_objs));
+  THPUtils_assert(PyTuple_Check(output_objs), "outputs argument is "
+      "expected to be a tuple, but got %s", THPUtils_typename(output_objs));
+
+  Py_ssize_t num_inputs = PyTuple_GET_SIZE(input_objs);
+  Py_ssize_t num_outputs = PyTuple_GET_SIZE(output_objs);
+
+  variable_list input_vars(num_inputs);
+  input_map inputs;
+  for (int i = 0; i < num_inputs; i++) {
+    PyObject* input_obj = PyTuple_GET_ITEM(input_objs, i);
+    THPUtils_assert(THPVariable_Check(input_obj), "element %d of inputs "
+        "tuple is not a Variable", i);
+    auto& input_var = ((THPVariable*)input_obj)->cdata;
+    inputs[input_var->get_input_node().get()] = input_var;
+  }
+
+  output_list outputs;
+  outputs.reserve(num_outputs);
+  for (int i = 0; i < num_outputs; i++) {
+    PyObject* output_obj = PyTuple_GET_ITEM(output_objs, i);
+    THPUtils_assert(THPVariable_Check(output_obj), "element %d of outputs "
+        "tuple is not a Variable", i);
+    auto& output_var = ((THPVariable*)output_obj)->cdata;
+    outputs.emplace_back(output_var->trace_fn, output_var->output_nr);
+  }
+
+  variable_list results = interpret(outputs, inputs);
+
+  PyObject *result = PyTuple_New(num_outputs);
+  for (int i = 0; i < num_outputs; i++) {
+    PyTuple_SET_ITEM(result, i, THPVariable_Wrap(results.at(i)));
+  }
+
+  return result;
+  END_HANDLE_TH_ERRORS;
+}
+
 PyObject* THPEngine_queue_callback(PyObject *self, PyObject *_callback) {
   std::shared_ptr<PyObject> callback(_callback, [](PyObject *obj) { AutoGIL gil; Py_DECREF(obj); });
   Py_INCREF(_callback);
@@ -243,6 +293,7 @@ PyObject *THPEngine_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 
 static struct PyMethodDef THPEngine_methods[] = {
   {(char*)"run_backward", (PyCFunction)THPEngine_run_backward, METH_VARARGS | METH_KEYWORDS, NULL},
+  {(char*)"run_forward", (PyCFunction)THPEngine_run_forward, METH_VARARGS | METH_KEYWORDS, NULL},
   {(char*)"queue_callback", (PyCFunction)THPEngine_queue_callback, METH_O, NULL},
   {NULL}
 };

@@ -723,6 +723,7 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *_inputs)
   // Create trace
   std::vector<Output> inputs;
   for (auto v : unpacked_input.input_vars) {
+    // TODO: don't assume variables are always defined
     if (v->trace_fn) {
       inputs.emplace_back(v->trace_fn, v->output_nr);
     } else {
@@ -731,7 +732,6 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *_inputs)
   }
   Py_INCREF(cls);
   auto node = std::make_shared<PyNode>(cls, inputs);
-  printGraph(node.get(), 0);
 
   return process_outputs(ctx, unpacked_input, std::move(tensor_outputs), std::move(node), is_volatile);
   END_HANDLE_TH_ERRORS
@@ -1068,3 +1068,67 @@ std::shared_ptr<PyFunction> THPFunction_asFunction(THPFunction* self)
   Py_INCREF((PyObject*)self);
   return std::shared_ptr<PyFunction>(&self->cdata, Decref());
 }
+
+namespace torch { namespace autograd {
+
+using memo_map = std::unordered_map<Node*, variable_list>;
+
+variable_list interpret_node(std::shared_ptr<Node>, input_map&, memo_map&);
+
+std::shared_ptr<Variable> interpret_output(Output output, input_map& inputs, memo_map& memo) {
+    auto vs = interpret_node(output.node, inputs, memo);
+    return vs.at(output.output_nr);
+}
+
+variable_list interpret_node(std::shared_ptr<Node> node, input_map& inputs, memo_map& memo) {
+    variable_list input_vars;
+    auto num_args = node->inputs.size();
+    input_vars.reserve(num_args);
+    for (auto input : node->inputs) {
+        input_vars.emplace_back(interpret_output(input, inputs, memo));
+    }
+    if (auto n = dynamic_cast<InputNode*>(node.get())) {
+        return {inputs.at(n)};
+    } else if (auto n = dynamic_cast<PyNode*>(node.get())) {
+        auto& cls = n->pyobj;
+        // Massage variables into form where we can THPFunction_apply it.
+        // While in principle we can avoid putting things into Python
+        // and then taking them out again, doing so seems to require an excess
+        // of faffing about to optimize a codepath that is already going to
+        // fundamentally be slow (since it calls into Python.) NOT. WORTH. IT.
+
+        PyObject* input_objs = PyTuple_New(num_args);
+        for (size_t i = 0; i < num_args; i++) {
+          PyTuple_SET_ITEM(input_objs, i, THPVariable_Wrap(input_vars.at(i)));
+        }
+        THPObjectPtr output_objs{ THPFunction_apply(cls, input_objs) };
+        _ensure_tuple(output_objs);
+        auto num_outputs = PyTuple_GET_SIZE(output_objs.get());
+        variable_list output_vars;
+        output_vars.reserve(num_outputs);
+        for (Py_ssize_t i = 0; i < num_outputs; i++) {
+          PyObject *output_obj = PyTuple_GET_ITEM(output_objs.get(), i);
+          if (!THPVariable_Check(output_obj)) {
+            throw std::logic_error("Unwrapped variable from THPFunction_apply");
+          }
+          THPVariable* output_var = (THPVariable*)output_obj;
+          output_vars.emplace_back(output_var->cdata);
+        }
+        return output_vars;
+    } else {
+        throw std::logic_error("Unrecognized node type");
+    }
+}
+
+// TODO: Hella inefficient
+variable_list interpret(output_list outputs, input_map& inputs) {
+    memo_map memo;
+    variable_list output_vars;
+    output_vars.reserve(outputs.size());
+    for (auto output : outputs) {
+        output_vars.emplace_back(interpret_output(output, inputs, memo));
+    }
+    return output_vars;
+}
+
+}} // namespace torch::autograd
