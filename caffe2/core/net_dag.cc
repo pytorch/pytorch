@@ -271,7 +271,7 @@ DAGNetBase::ExecutionChains computeChains(
 }
 
 DAGNetBase::DAGNetBase(const NetDef& net_def, Workspace* ws)
-    : NetBase(net_def, ws), operator_nodes_(net_def.op_size()) {
+    : NetBase(net_def, ws), operator_nodes_(net_def.op_size()), iter_(0) {
   // Blob creator allows us to track which operator created which blob.
   VLOG(1) << "Constructing DAGNet " << net_def.name();
   std::map<string, int> blob_creator;
@@ -393,56 +393,82 @@ DAGNetBase::DAGNetBase(const NetDef& net_def, Workspace* ws)
                  << "num_workers in the NetDef?";
   }
   num_workers_ = num_workers;
+  num_workers_first_iteration_ = num_workers_;
 
-  int num_workers_to_start = num_workers_;
-
-  // Option to start only one thread for first iteration. This hack is
-  // needed to prevent deadlocks happening with CUDA and concurrent allocations
-  // that operators do when run the first time.
+  // Option to start only one thread for first iteration.
+  // This hack is needed to prevent deadlocks happening with CUDA and
+  // concurrent allocations that operators do when run the first time.
   ArgumentHelper arg_helper(net_def);
   if (arg_helper.HasArgument("first_iter_only_one_worker")) {
     if (arg_helper.GetSingleArgument<int64_t>(
             "first_iter_only_one_worker", 0)) {
-      num_workers_to_start = 1;
+      num_workers_first_iteration_ = 1;
     }
-  }
-
-  for (int i = 0; i < num_workers_to_start; ++i) {
-    VLOG(1) << "Start worker #" << i;
-    workers_.push_back(std::thread(&DAGNetBase::WorkerFunction, this));
   }
 }
 
 DAGNetBase::~DAGNetBase() {
-  // Safely join all the workers before exiting.
-  job_queue_.NoMoreJobs();
-  VLOG(1) << "Joining workers.";
-  for (auto& worker : workers_) {
-    worker.join();
+  if (job_queue_) {
+    job_queue_->NoMoreJobs();
+    VLOG(1) << "Joining workers.";
+    for (auto& worker : workers_) {
+      worker.join();
+    }
   }
 }
 
 bool DAGNetBase::Run() {
-  // Lock the run_in_progress_ lock so that we do not accidentally call Run()
-  // in parallel.
+  // Lock run_in_progress_ to prevent concurrent Run()s.
   std::unique_lock<std::mutex> run_lock(run_in_progress_);
   VLOG(1) << "Running parallel net.";
   // First, set up job queue.
   remaining_ops_ = operator_nodes_.size();
   success_ = true;
-  // TODO(jiayq): Start all worker threads.
+  iter_++;
+  if (!job_queue_) {
+    job_queue_ = caffe2::make_unique<SimpleQueue<int>>();
+  }
+  // Figure out number of workers to start.
+  auto num_workers_to_start = num_workers_ - workers_.size();
+  if (iter_ == 1) {
+    num_workers_to_start = num_workers_first_iteration_;
+  }
+  // Ensure the number of workers matches the defined in case
+  // any of the previously started threads terminated.
+  for (auto i = 0; i < num_workers_to_start; i++) {
+    VLOG(1) << "Start worker #" << workers_.size();
+    workers_.push_back(std::thread(&DAGNetBase::WorkerFunction, this));
+  }
   // Initialize the runtime parent count.
   for (auto& node : operator_nodes_) {
     node.runtime_parent_count_ = node.parents_.size();
   }
   // Kickstart the job queue.
   for (auto& value : initial_frontier_) {
-    job_queue_.Push(value);
+    job_queue_->Push(value);
   }
-  std::unique_lock<std::mutex> mutex_lock(remaining_ops_mutex_);
-  while (remaining_ops_ > 0) {
-    VLOG(2) << "Remaining ops to run: " << remaining_ops_;
-    cv_.wait(mutex_lock);
+  // Wait for failure or completed execution.
+  {
+    std::unique_lock<std::mutex> mutex_lock(remaining_ops_mutex_);
+    for (;;) {
+      if (remaining_ops_ == 0 || !success_) {
+        break;
+      }
+      cv_.wait(mutex_lock);
+    }
+  }
+  // Wait for all workers to terminate after failure.
+  // If there is a failure, it is unlikely that the net is executed
+  // again without modifications. Therefore it's easier to let the
+  // workers terminate here, versus adding a drain state to make the
+  // sure the job queue is cleared.
+  if (!success_) {
+    for (auto& worker : workers_) {
+      worker.join();
+    }
+    workers_.clear();
+    job_queue_.reset(nullptr);
+    return success_;
   }
   VLOG(2) << "All ops finished running.";
   for (const auto& op : operator_nodes_) {
@@ -454,13 +480,6 @@ bool DAGNetBase::Run() {
         op.operator_->def().type(),
         ") has some runtime parents left.");
   }
-
-  // Ensure the number of workers matches the defined
-  for (auto i = workers_.size(); i < num_workers_; ++i) {
-    VLOG(1) << "Start worker #" << i;
-    workers_.push_back(std::thread(&DAGNetBase::WorkerFunction, this));
-  }
-
   // If the above while loop finished, we know that the current run finished.
   return success_;
 }
@@ -469,11 +488,14 @@ void DAGNetBase::WorkerFunction() {
   // WorkerFunctions() is an infinite loop until there are no more jobs to run.
   while (true) {
     int idx = 0;
-    // If there is no more jobs - meaning that the DAGNetBase is destructing -
-    // we will exit safely.
-    if (!job_queue_.Pop(&idx)) {
+
+    // Return if there are no more operators to run (e.g. the
+    // DAGNetBase is destructing, or there was an error on another
+    // worker and we're cleaning up).
+    if (!job_queue_->Pop(&idx)) {
       return;
     }
+
     VLOG(1) << "Running operator #" << idx << " "
             << operator_nodes_[idx].operator_->def().name() << "("
             << operator_nodes_[idx].operator_->def().type() << ").";
@@ -490,6 +512,7 @@ void DAGNetBase::WorkerFunction() {
     }
 
     // Do book-keeping
+    std::vector<int> chains_to_queue;
     for (const auto idx : chain) {
       for (const auto child : operator_nodes_[idx].children_) {
         const int count = --operator_nodes_[child].runtime_parent_count_;
@@ -508,23 +531,33 @@ void DAGNetBase::WorkerFunction() {
 
         if (operator_nodes_[child].is_chain_start_) {
           VLOG(2) << "Pushing chain #" << child << " to queue.";
-          job_queue_.Push(child);
+          chains_to_queue.push_back(child);
         }
       }
     }
 
-    // Notify that the processed op is incremented by one.
+    // Notify the caller of Run
     {
       std::unique_lock<std::mutex> mutex_lock(remaining_ops_mutex_);
       remaining_ops_ -= chain.size();
+      CAFFE_ENFORCE(remaining_ops_ >= 0);
       success_ &= this_success;
-      CAFFE_ENFORCE(
-          remaining_ops_ >= 0,
-          "All the operations should be finished by now, still have ",
-          remaining_ops_,
-          " remaining.");
+      cv_.notify_one();
+
+      // Terminate thread if this or any other operator chain failed.
+      if (!success_) {
+        job_queue_->NoMoreJobs();
+        return;
+      }
+
+      // Queue follow up operator chains.
+      // Can't do this inline because it can race with another thread
+      // calling NoMoreJobs(). So the lock needs to be held on push.
+      for (const auto idx : chains_to_queue) {
+        job_queue_->Push(idx);
+      }
     }
-    cv_.notify_one();
+
     VLOG(2) << "Finished executing operator #" << idx;
   }
 }
@@ -572,17 +605,19 @@ class DAGNet : public DAGNetBase {
 
  protected:
   bool RunAt(const std::vector<int>& chain) override {
-    bool success = true;
     const auto& net_name = name_.c_str();
     for (const auto i : chain) {
       const auto& op = operator_nodes_[i].operator_.get();
       const auto& op_name = op->def().name().c_str();
       const auto& op_type = op->def().type().c_str();
       CAFFE_SDT(operator_start, net_name, op_name, op_type, op);
-      success &= operator_nodes_[i].operator_->Run();
+      const auto success = operator_nodes_[i].operator_->Run();
       CAFFE_SDT(operator_done, net_name, op_name, op_type, op);
+      if (!success) {
+        return false;
+      }
     }
-    return success;
+    return true;
   }
 };
 
