@@ -63,7 +63,7 @@ auto THCTensor<real>::newSelect(int dimension, long sliceIndex) const -> THCTens
 
 template<>
 auto THCTensor<real>::newNarrow(int dimension, long firstIndex, long size) const -> THCTensor* {
-  return new THCTensor(state, THCTensor_(neNarrow)(state, tensor, dimension, firstIndex, size));
+  return new THCTensor(state, THCTensor_(newNarrow)(state, tensor, dimension, firstIndex, size));
 }
 
 template<>
