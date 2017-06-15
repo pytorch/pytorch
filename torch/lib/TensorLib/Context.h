@@ -26,6 +26,7 @@ public:
   Type & defaultType() {
     return *current_default_type;
   }
+  bool hasCUDA() const;
   void setDefaultType(Type & t) {
     current_default_type = &t;
   }

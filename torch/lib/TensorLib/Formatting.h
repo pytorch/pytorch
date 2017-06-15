@@ -17,4 +17,8 @@ static inline void print(const Tensor & t, int64_t linesize=80) {
   print(std::cout,t,linesize);
 }
 
+std::ostream& operator<<(std::ostream & out, Scalar s) {
+  return out << (s.isFloatingPoint() ? s.toDouble() : s.toLong());
+}
+
 }

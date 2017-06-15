@@ -1,112 +1,111 @@
-#if 0
-#include "Tensor.h"
-#include "TensorTH.h"
+
+#include "TensorLib/TensorLib.h"
+
 #include <iostream>
 #include <chrono>
 
-using namespace xt;
+using namespace tlib;
 
-static void test(TensorDevice device)
-{
+static void test(Type & type) {
   {
     std::cout << "resize:" << std::endl;
-    Tensor a(kFloat, device);
-    a.resize({3,4});
-    std::cout << numel(a) << std::endl;
-    a.resize({5, 7});
-    std::cout << numel(a) << std::endl;
+    auto a = type.tensor();
+    a.resize_({3,4});
+    std::cout << a.numel() << std::endl;
+    a.resize_({5, 7});
+    std::cout << a.numel() << std::endl;
   }
 
   {
     std::cout << "ones and dot:" << std::endl;
-    Tensor b = ones({3, 4}, kFloat, device);
+    Tensor b = type.ones({3, 4});
     std::cout << b << std::endl;
-    std::cout << numel(b) << std::endl;
-    std::cout << dot(b, b) << std::endl;
+    std::cout << b.numel() << std::endl;
+    std::cout << b.dot(b) << std::endl;
   }
 
   {
     std::cout << "rand:" << std::endl;
     for(auto i = 0; i < 10; i++) {
-      Tensor a = rand({3,4}, i % 2 == 0 ? kFloat : kDouble, device);
+      Tensor a = type.toScalarType(i % 2 == 0 ? kFloat : kDouble).rand({3,4});
       std::cout << a << std::endl;
     }
   }
 
   {
     std::cout << "sort:" << std::endl;
-    Tensor b = rand({3, 4}, kFloat, device);
+    Tensor b = type.rand({3, 4});
     std::cout << b << std::endl;
-    auto z = sort(b, 1);
+    auto z = b.sort(1);
     std::cout << std::get<0>(z) << std::endl;
     std::cout << std::get<1>(z) << std::endl;
   }
-
-  if(device != kGPU)
+  if(type.backend() != kCUDA)
   {
     std::cout << "randperm:" << std::endl;
-    Tensor b = randperm(15, kFloat, device);
+    Tensor b = type.randperm(15);
     std::cout << b << std::endl;
     Tensor rv, ri;
-    std::tie(rv, ri) = sort(b, (int64_t)0);
+    std::tie(rv, ri) = sort(b, 0);
     std::cout << rv << std::endl;
     std::cout << ri << std::endl;
   }
 
   {
-    std::cout << "context: " << std::hex << (int64_t)&defaultContext << std::endl;
+    std::cout << "context: " << std::hex << (int64_t)&globalContext() << std::endl;
   }
 
   {
     std::cout << "add:" << std::endl;
-    Tensor a = rand({3, 4}, kFloat, device);
-    Tensor b = rand({3, 4}, kFloat, device);
+    Tensor a = type.rand({3, 4});
+    Tensor b = type.rand({3, 4});
     std::cout << a << std::endl;
     std::cout << b << std::endl;
     Tensor c = add(a, add(a, b));
     std::cout << c << std::endl;
-    Tensor d(3.f);
+    //TODO:0-dim Tensor d(3.f);
+    Scalar d = 3.f;
     std::cout << d << std::endl;
     std::cout << add(c, d) << std::endl;
   }
 
+
   {
     std::cout << "loads of adds:" << std::endl;
     auto begin = std::chrono::high_resolution_clock::now();
-    Tensor d = ones({3, 4}, kFloat, device);
-    Tensor r = zeros({3,4}, kFloat, device);
+    Tensor d = type.ones({3, 4});
+    Tensor r = type.zeros({3,4});
     for(auto i = 0; i < 100000; i++) {
-      add_(r, r, d);
+      add_out(r, r, d);
     }
     auto end = std::chrono::high_resolution_clock::now();
     std::cout << std::dec << "   " << std::chrono::duration_cast<std::chrono::milliseconds>(end-begin).count() << " ms" << std::endl;
-    std::cout << "   norm: " << norm(r).value<double>() << std::endl;
+    std::cout << "   norm: " << norm(r).toDouble() << std::endl;
   }
 
   {
     std::cout << "loads of adds (with copy):" << std::endl;
     auto begin = std::chrono::high_resolution_clock::now();
-    Tensor d = ones({3, 4}, kFloat, device);
-    Tensor r = zeros({3,4}, kFloat, device);
+    Tensor d = type.ones({3, 4});
+    Tensor r = type.zeros({3, 4});
     for(auto i = 0; i < 100000; i++) {
       r = add(r, d);
     }
     auto end = std::chrono::high_resolution_clock::now();
     std::cout << std::dec << "   " << std::chrono::duration_cast<std::chrono::milliseconds>(end-begin).count() << " ms" << std::endl;
-    std::cout << "   norm: " << norm(r).value<double>() << std::endl;
+    std::cout << "   norm: " << norm(r).toDouble() << std::endl;
   }
-
 
   {
     std::cout << "isContiguous:" << std::endl;
-    Tensor a = rand({3, 4}, kFloat, device);
-    std::cout << isContiguous(a) << std::endl;
+    Tensor a = type.rand({3, 4});
+    std::cout << a.is_contiguous() << std::endl;
   }
 
   {
     std::cout << "mm:" << std::endl;
-    Tensor a = rand({3, 4}, kFloat, device);
-    Tensor b = rand({4}, kFloat, device);
+    Tensor a = type.rand({3, 4});
+    Tensor b = type.rand({4});
     Tensor c = mv(a, b);
     std::cout << a << std::endl;
     std::cout << b << std::endl;
@@ -115,11 +114,11 @@ static void test(TensorDevice device)
 
   {
     std::cout << "squeeze:" << std::endl;
-    Tensor a = rand({2, 1}, kFloat, device);
+    Tensor a = type.rand({2, 1});
     std::cout << a << std::endl;
     Tensor b = squeeze(a);
     std::cout << b << std::endl;
-    a = rand({1}, kFloat, device);
+    a = type.rand({1});
     std::cout << a << std::endl;
     b = squeeze(a);
     std::cout << b << std::endl;
@@ -127,19 +126,23 @@ static void test(TensorDevice device)
 
   {
     std::cout << "copy:" << std::endl;
-    Tensor a = zeros({4, 3}, kFloat, device);
+    Tensor a = type.zeros({4, 3});
     std::cout << a << std::endl;
-    Tensor e = rand({3, 4}, kDouble, device);
+    Tensor e = type.rand({3, 4});
     std::cout << e << std::endl;
-    copy_(a, e);
+    //copy_(a, e);
+    copy(a,e);
     std::cout << a << std::endl;
   }
 
   {
-    std::cout << "abs(value):" << std::endl;
-    std::cout << xt::abs(-3);
+    //TODO(zach): 0-dim
+    //std::cout << "abs(value):" << std::endl;
+    //std::cout << tlib::abs(-3);
   }
 
+//TODO(zach): operator overloads
+#if 0
   {
     std::cout << "eq (value):" << std::endl;
     Tensor a = Tensor(10.f);
@@ -147,33 +150,33 @@ static void test(TensorDevice device)
     std::cout << (a == 10_i64) << " -- should be 1" << std::endl;
     std::cout << (a == 10.) << " -- should be 1" << std::endl;
   }
+#endif
 
   {
     std::cout << "adding a value with different type:" << std::endl;
-    Tensor a = rand({4, 3}, kFloat, device);
+    Tensor a = type.rand({4, 3});
     std::cout << a << std::endl;
     std::cout << add(a, 1) << std::endl;
   }
 
   {
     std::cout << "select:" << std::endl;
-    Tensor a = rand({3, 7}, kFloat, device);
+    Tensor a = type.rand({3, 7});
     std::cout << a << std::endl;
     std::cout << select(a, 1, 3) << std::endl;
-    std::cout << select(select(a, 1, 3), 0, 2) << std::endl;
+    //TODO: 0-dim
+    //std::cout << select(select(a, 1, 3), 0, 2) << std::endl;
   }
+
 }
 
 int main()
 {
   std::cout << "=========================== CPU ===========================" << std::endl;
-  test(kCPU);
-  if(defaultContext.hasGPU()) {
+  test(CPU(kFloat));
+  if(globalContext().hasCUDA()) {
     std::cout << "=========================== GPU ===========================" << std::endl;
-    test(kGPU);
+    test(CUDA(kFloat));
   }
   return 0;
 }
-#endif
-
-int main() {}

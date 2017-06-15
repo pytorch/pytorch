@@ -244,13 +244,13 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
       for(int64_t i = 0; i < tensor.size(0); i++) {
         stream << std::setw(sz) << tensor_p[i]/scale << std::endl;
       }
-      stream << "[" << tensor.pImpl->toString() << " of size " << tensor.size(0) << "]";
+      stream << "[" << tensor_.pImpl->toString() << " of size " << tensor.size(0) << "]";
     } else if(tensor.ndimension() == 2) {
       __printMatrix(stream, tensor, linesize, 0);
-      stream << "[" << tensor.pImpl->toString() <<" of size " << tensor.size(0) << "x" <<  tensor.size(1) << "]";
+      stream << "[" << tensor_.pImpl->toString() <<" of size " << tensor.size(0) << "x" <<  tensor.size(1) << "]";
     } else {
         __printTensor(stream, tensor, linesize);
-        stream << "[" << tensor.pImpl->toString() << " of size " << tensor.size(0);
+        stream << "[" << tensor_.pImpl->toString() << " of size " << tensor.size(0);
         for(int64_t i = 1; i < tensor.ndimension(); i++) {
           stream << "x" << tensor.size(i);
         }
