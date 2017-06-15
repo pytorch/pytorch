@@ -63,7 +63,7 @@ auto THCTensor<real>::newSelect(int dimension, long sliceIndex) const -> THCTens
 
 template<>
 auto THCTensor<real>::newNarrow(int dimension, long firstIndex, long size) const -> THCTensor* {
-  throw std::runtime_error("newNarrow is not yet available for CUDA tensors");
+  return new THCTensor(state, THCTensor_(neNarrow)(state, tensor, dimension, firstIndex, size));
 }
 
 template<>
