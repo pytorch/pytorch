@@ -51,7 +51,13 @@ def set_declaration_defaults(declaration):
 # support it.
 
 
-def filter_unique_options(options, allow_kwarg, type_to_signature, ignore_self):
+def filter_unique_options(options, allow_kwarg, type_to_signature, remove_self):
+    def exclude_arg(arg):
+        return arg.get('ignore_check')
+
+    def exclude_arg_with_self_check(arg):
+        return exclude_arg(arg) or (remove_self and arg['name'] == 'self')
+
     def signature(option, kwarg_only_count):
         if kwarg_only_count == 0:
             kwarg_only_count = None
@@ -60,13 +66,13 @@ def filter_unique_options(options, allow_kwarg, type_to_signature, ignore_self):
         arg_signature = '#'.join(
             type_to_signature.get(arg['type'], arg['type'])
             for arg in option['arguments'][:kwarg_only_count]
-            if not arg.get('ignore_check') and (ignore_self and arg['name'] != 'self'))
+            if not exclude_arg_with_self_check(arg))
         if kwarg_only_count is None:
             return arg_signature
         kwarg_only_signature = '#'.join(
             arg['name'] + '#' + arg['type']
             for arg in option['arguments'][kwarg_only_count:]
-            if not arg.get('ignore_check'))
+            if not exclude_arg(arg))
         return arg_signature + "#-#" + kwarg_only_signature
     seen_signatures = set()
     unique = []
@@ -85,7 +91,8 @@ def filter_unique_options(options, allow_kwarg, type_to_signature, ignore_self):
     return unique
 
 
-def enumerate_options_due_to_default(declaration, allow_kwarg=True,type_to_signature=[],ignore_self=False):
+def enumerate_options_due_to_default(declaration,
+        allow_kwarg=True,type_to_signature=[],remove_self=True):
     # TODO(zach): in cwrap this is shared among all declarations
     # but seems to assume that all declarations will have the same
     new_options = []
@@ -104,7 +111,8 @@ def enumerate_options_due_to_default(declaration, allow_kwarg=True,type_to_signa
                     # PyYAML interprets NULL as None...
                     arg['name'] = 'NULL' if arg['default'] is None else arg['default']
             new_options.append(option_copy)
-    declaration['options'] = filter_unique_options(new_options, allow_kwarg,type_to_signature,ignore_self)
+    declaration['options'] = filter_unique_options(new_options,
+            allow_kwarg,type_to_signature,remove_self)
 
 
 def sort_by_number_of_options(declaration, reverse=True):
