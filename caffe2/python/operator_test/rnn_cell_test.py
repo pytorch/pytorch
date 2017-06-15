@@ -5,7 +5,8 @@ from __future__ import unicode_literals
 
 from caffe2.python import core, gradient_checker, rnn_cell, workspace, scope, utils
 from caffe2.python.attention import AttentionType
-from caffe2.python.model_helper import ModelHelper
+from caffe2.python.model_helper import ModelHelper, ExtractPredictorNet
+from caffe2.proto import caffe2_pb2
 import caffe2.python.hypothesis_test_util as hu
 
 from functools import partial
@@ -618,6 +619,78 @@ class RNNCellTest(hu.HypothesisTestCase):
                     threshold=0.01,
                     stepsize=0.005,
                 )
+
+    def test_lstm_extract_predictor_net(self):
+        model = ModelHelper(name="lstm_extract_test")
+
+        with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU, 0)):
+            output, _, _, _ = rnn_cell.LSTM(
+                model=model,
+                input_blob="input",
+                seq_lengths="seqlengths",
+                initial_states=("hidden_init", "cell_init"),
+                dim_in=20,
+                dim_out=40,
+                scope="test",
+                drop_states=True,
+                return_last_layer_only=True,
+            )
+        # Run param init net to get the shapes for all inputs
+        shapes = {}
+        workspace.RunNetOnce(model.param_init_net)
+        for b in workspace.Blobs():
+            shapes[b] = workspace.FetchBlob(b).shape
+
+        # But export in CPU
+        (predict_net, export_blobs) = ExtractPredictorNet(
+            net_proto=model.net.Proto(),
+            input_blobs=["input"],
+            output_blobs=[output],
+            device=core.DeviceOption(caffe2_pb2.CPU, 1),
+        )
+
+        # Create the net and run once to see it is valid
+        # Populate external inputs with correctly shaped random input
+        # and also ensure that the export_blobs was constructed correctly.
+        workspace.ResetWorkspace()
+        shapes['input'] = [10, 4, 20]
+        shapes['cell_init'] = [1, 4, 40]
+        shapes['hidden_init'] = [1, 4, 40]
+
+        print(predict_net.Proto().external_input)
+        self.assertTrue('seqlengths' in predict_net.Proto().external_input)
+        for einp in predict_net.Proto().external_input:
+            if einp == 'seqlengths':
+                    workspace.FeedBlob(
+                        "seqlengths",
+                        np.array([10] * 4, dtype=np.int32)
+                    )
+            else:
+                workspace.FeedBlob(
+                    einp,
+                    np.zeros(shapes[einp]).astype(np.float32),
+                )
+                if einp != 'input':
+                    self.assertTrue(einp in export_blobs)
+
+        print(str(predict_net.Proto()))
+        self.assertTrue(workspace.CreateNet(predict_net.Proto()))
+        self.assertTrue(workspace.RunNet(predict_net.Proto().name))
+
+        # Validate device options set correctly for the RNNs
+        import google.protobuf.text_format as protobuftx
+        for op in predict_net.Proto().op:
+            if op.type == 'RecurrentNetwork':
+                for arg in op.arg:
+                    if arg.name == "step_net":
+                        step_proto = caffe2_pb2.NetDef()
+                        protobuftx.Merge(arg.s, step_proto)
+                        for step_op in step_proto.op:
+                            self.assertEqual(0, step_op.device_option.device_type)
+                            self.assertEqual(1, step_op.device_option.cuda_gpu_id)
+                    elif arg.name == 'backward_step_net':
+                        self.assertEqual("", arg.s)
+
 
     @given(encoder_output_length=st.integers(1, 3),
            encoder_output_dim=st.integers(1, 3),

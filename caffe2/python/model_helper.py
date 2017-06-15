@@ -10,6 +10,7 @@ from caffe2.python.modeling import parameter_info
 from caffe2.python.modeling.parameter_sharing import (
     parameter_sharing_context,
 )
+from caffe2.proto import caffe2_pb2
 
 
 import logging
@@ -521,6 +522,31 @@ def ExtractPredictorNet(
     # we can satisfy.
     for op in ops[first_op_with_input:(last_op_with_output + 1)]:
         if known_blobs.issuperset(op.input):
+
+            # Special handling for recurrent nets
+            # TODO: when standard argument type for "nets" is introduced,
+            # this can be more general
+            if op.type == 'RecurrentNetwork':
+                import google.protobuf.text_format as protobuftx
+                for arg in op.arg:
+                    if arg.name == 'backward_step_net':
+                        arg.s = str("")
+                    elif arg.name == 'step_net':
+                        step_proto = caffe2_pb2.NetDef()
+                        protobuftx.Merge(arg.s, step_proto)
+                        for step_op in step_proto.op:
+                            if device is not None:
+                                step_op.device_option.device_type = device.device_type
+                                step_op.device_option.cuda_gpu_id = device.cuda_gpu_id
+
+                        # Add additional external inputs
+                        external_inputs.update(
+                            set(step_proto.external_input).intersection(
+                                orig_external_inputs
+                            )
+                        )
+                        arg.s = str(step_proto)
+
             if device is not None:
                 op.device_option.device_type = device.device_type
                 op.device_option.cuda_gpu_id = device.cuda_gpu_id
@@ -533,6 +559,8 @@ def ExtractPredictorNet(
             external_outputs.update(
                 set(op.output).intersection(orig_external_outputs)
             )
+
+
         else:
             logging.debug(
                 "Op {} had unknown inputs: {}".format(
