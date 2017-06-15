@@ -5,7 +5,7 @@ from __future__ import unicode_literals
 
 import numpy as np
 
-from caffe2.python import workspace, cnn, memonger, core
+from caffe2.python import workspace, memonger, core, model_helper, brew
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 from hypothesis import given, settings
@@ -37,10 +37,10 @@ class MemongerTest(hu.HypothesisTestCase):
            algo=st.sampled_from(memonger.AssignmentAlgorithm))
     @settings(max_examples=5, timeout=120)
     def test_simple_memonger(self, input_dim, output_dim, batch_size, do, algo):
-        m = cnn.CNNModelHelper()
-        fc1 = m.FC("data", "fc1", dim_in=input_dim, dim_out=output_dim)
-        fc2 = m.FC(fc1, "fc2", dim_in=output_dim, dim_out=output_dim)
-        fc3 = m.FC(fc2, "fc3", dim_in=output_dim, dim_out=output_dim)
+        m = model_helper.ModelHelper()
+        fc1 = brew.fc(m, "data", "fc1", dim_in=input_dim, dim_out=output_dim)
+        fc2 = brew.fc(m, fc1, "fc2", dim_in=output_dim, dim_out=output_dim)
+        fc3 = brew.fc(m, fc2, "fc3", dim_in=output_dim, dim_out=output_dim)
 
         fc3.Relu([], fc3)\
            .Softmax([], "pred") \
@@ -88,13 +88,13 @@ class MemongerTest(hu.HypothesisTestCase):
            output_dim=st.integers(min_value=1, max_value=4),
            batch_size=st.integers(min_value=1, max_value=4))
     def test_gradient_optim(self, input_dim, output_dim, batch_size):
-        m = cnn.CNNModelHelper()
+        m = model_helper.ModelHelper()
         with core.NameScope("name_x"):
-            fc1 = m.FC("data", "fc1", dim_in=input_dim, dim_out=output_dim)
-            fc2 = m.FC(fc1, "fc2", dim_in=output_dim, dim_out=output_dim)
-            fc3 = m.FC(fc2, "fc3", dim_in=output_dim, dim_out=output_dim)
-            fc4 = m.FC(fc3, "fc4", dim_in=output_dim, dim_out=output_dim)
-            fc5 = m.FC(fc4, "fc5", dim_in=output_dim, dim_out=output_dim)
+            fc1 = brew.fc(m, "data", "fc1", dim_in=input_dim, dim_out=output_dim)
+            fc2 = brew.fc(m, fc1, "fc2", dim_in=output_dim, dim_out=output_dim)
+            fc3 = brew.fc(m, fc2, "fc3", dim_in=output_dim, dim_out=output_dim)
+            fc4 = brew.fc(m, fc3, "fc4", dim_in=output_dim, dim_out=output_dim)
+            fc5 = brew.fc(m, fc4, "fc5", dim_in=output_dim, dim_out=output_dim)
             fc5.Relu([], fc5)\
                .Softmax([], "pred") \
                .LabelCrossEntropy(["label"], ["xent"]) \
@@ -159,18 +159,18 @@ class MemongerTest(hu.HypothesisTestCase):
            output_dim=st.integers(min_value=4, max_value=4),
            batch_size=st.integers(min_value=4, max_value=4))
     def test_gradient_optim_tree(self, input_dim, output_dim, batch_size):
-        m = cnn.CNNModelHelper()
+        m = model_helper.ModelHelper()
         with core.NameScope("name_x"):
-            fc1 = m.FC("data", "fc1", dim_in=input_dim, dim_out=output_dim)
-            fc2 = m.FC(fc1, "fc2", dim_in=output_dim, dim_out=output_dim)
-            fc3 = m.FC(fc2, "fc3", dim_in=output_dim, dim_out=output_dim)
-            fc4 = m.FC(fc3, "fc4", dim_in=output_dim, dim_out=output_dim)
-            fc5 = m.FC(fc4, "fc5", dim_in=output_dim, dim_out=output_dim)
+            fc1 = brew.fc(m, "data", "fc1", dim_in=input_dim, dim_out=output_dim)
+            fc2 = brew.fc(m, fc1, "fc2", dim_in=output_dim, dim_out=output_dim)
+            fc3 = brew.fc(m, fc2, "fc3", dim_in=output_dim, dim_out=output_dim)
+            fc4 = brew.fc(m, fc3, "fc4", dim_in=output_dim, dim_out=output_dim)
+            fc5 = brew.fc(m, fc4, "fc5", dim_in=output_dim, dim_out=output_dim)
             fc5.Relu([], fc5) \
                .Softmax([], "pred1") \
                .LabelCrossEntropy(["label"], ["xent1"]) \
                .AveragedLoss([], "loss1")
-            fc6 = m.FC(fc5, "fc6", dim_in=output_dim, dim_out=output_dim)
+            fc6 = brew.fc(m, fc5, "fc6", dim_in=output_dim, dim_out=output_dim)
             fc6.Relu([], fc6) \
                .Softmax([], "pred2") \
                .LabelCrossEntropy(["label"], ["xent2"]) \
@@ -216,30 +216,30 @@ class MemongerTest(hu.HypothesisTestCase):
            output_dim=st.integers(min_value=4, max_value=4),
            batch_size=st.integers(min_value=4, max_value=4))
     def test_forward_optim_tree_daggy(self, input_dim, output_dim, batch_size):
-        m = cnn.CNNModelHelper()
+        m = model_helper.ModelHelper()
         m.Proto().type = "dag"
         m.Proto().num_workers = 4
 
         with core.NameScope("name_x"):
-            fc1 = m.FC("data", "fc1", dim_in=input_dim, dim_out=output_dim)
-            fc2 = m.FC(fc1, "fc2", dim_in=output_dim, dim_out=output_dim)
+            fc1 = brew.fc(m, "data", "fc1", dim_in=input_dim, dim_out=output_dim)
+            fc2 = brew.fc(m, fc1, "fc2", dim_in=output_dim, dim_out=output_dim)
 
-            fc3 = m.FC(fc2, "fc3", dim_in=output_dim, dim_out=output_dim)
-            fc4 = m.FC(fc3, "fc4", dim_in=output_dim, dim_out=output_dim)
-            fc5 = m.FC(fc4, "fc5", dim_in=output_dim, dim_out=output_dim)
+            fc3 = brew.fc(m, fc2, "fc3", dim_in=output_dim, dim_out=output_dim)
+            fc4 = brew.fc(m, fc3, "fc4", dim_in=output_dim, dim_out=output_dim)
+            fc5 = brew.fc(m, fc4, "fc5", dim_in=output_dim, dim_out=output_dim)
 
             # Branch
-            fc3b = m.FC(fc2, "fc3b", dim_in=output_dim, dim_out=output_dim)
-            fc4b = m.FC(fc3b, "fc4b", dim_in=output_dim, dim_out=output_dim)
-            fc5b = m.FC(fc4b, "fc5b", dim_in=output_dim, dim_out=output_dim)
+            fc3b = brew.fc(m, fc2, "fc3b", dim_in=output_dim, dim_out=output_dim)
+            fc4b = brew.fc(m, fc3b, "fc4b", dim_in=output_dim, dim_out=output_dim)
+            fc5b = brew.fc(m, fc4b, "fc5b", dim_in=output_dim, dim_out=output_dim)
 
-            fc5sum = m.Sum([fc5, fc5b], "fc5sum")
+            fc5sum = brew.sum(m, [fc5, fc5b], "fc5sum")
 
             fc5.Relu([], fc5sum) \
                .Softmax([], "pred1") \
                .LabelCrossEntropy(["label"], ["xent1"]) \
                .AveragedLoss([], "loss1")
-            fc6 = m.FC(fc5, "fc6", dim_in=output_dim, dim_out=output_dim)
+            fc6 = brew.fc(m, fc5, "fc6", dim_in=output_dim, dim_out=output_dim)
             fc6.Relu([], fc6) \
                .Softmax([], "pred2") \
                .LabelCrossEntropy(["label"], ["xent2"]) \
@@ -272,31 +272,31 @@ class MemongerTest(hu.HypothesisTestCase):
            output_dim=st.integers(min_value=4, max_value=4),
            batch_size=st.integers(min_value=4, max_value=4))
     def test_forward_optim_tree_harder(self, input_dim, output_dim, batch_size):
-        m = cnn.CNNModelHelper()
+        m = model_helper.ModelHelper()
         m.net.Proto().type = "dag"
         m.net.Proto().num_workers = 4
         m.net.AddExternalInput("label")
         m.net.AddExternalInput("data")
 
         with core.NameScope("name_x"):
-            fc1 = m.FC("data", "fc1", dim_in=input_dim, dim_out=output_dim)
-            fc2 = m.FC(fc1, "fc2", dim_in=output_dim, dim_out=output_dim)
+            fc1 = brew.fc(m, "data", "fc1", dim_in=input_dim, dim_out=output_dim)
+            fc2 = brew.fc(m, fc1, "fc2", dim_in=output_dim, dim_out=output_dim)
 
-            fc3 = m.FC(fc2, "fc3", dim_in=output_dim, dim_out=output_dim)
-            fc4 = m.FC(fc3, "fc4", dim_in=output_dim, dim_out=output_dim)
-            fc5 = m.FC(fc4, "fc5", dim_in=output_dim, dim_out=output_dim)
+            fc3 = brew.fc(m, fc2, "fc3", dim_in=output_dim, dim_out=output_dim)
+            fc4 = brew.fc(m, fc3, "fc4", dim_in=output_dim, dim_out=output_dim)
+            fc5 = brew.fc(m, fc4, "fc5", dim_in=output_dim, dim_out=output_dim)
 
             # Branch
-            fc3b = m.FC(fc2, "fc3b", dim_in=output_dim, dim_out=output_dim)
-            fc4b = m.FC(fc3b, "fc4b", dim_in=output_dim, dim_out=output_dim)
-            fc5b = m.FC(fc4b, "fc5b", dim_in=output_dim, dim_out=output_dim)
+            fc3b = brew.fc(m, fc2, "fc3b", dim_in=output_dim, dim_out=output_dim)
+            fc4b = brew.fc(m, fc3b, "fc4b", dim_in=output_dim, dim_out=output_dim)
+            fc5b = brew.fc(m, fc4b, "fc5b", dim_in=output_dim, dim_out=output_dim)
 
-            fc5sum = m.Sum([fc5, fc5b], "fc5sum")
+            fc5sum = brew.sum(m, [fc5, fc5b], "fc5sum")
             fc5sum.Relu([], "relu1") \
                .Softmax([], "pred1") \
                .LabelCrossEntropy(["label"], ["xent1"]) \
                .AveragedLoss([], "loss1")
-            fc6 = m.FC(fc5, "fc6", dim_in=output_dim, dim_out=output_dim)
+            fc6 = brew.fc(m, fc5, "fc6", dim_in=output_dim, dim_out=output_dim)
             fc6.Relu([], fc6) \
                .Softmax([], "pred2") \
                .LabelCrossEntropy(["label"], ["xent2"]) \
@@ -327,15 +327,15 @@ class MemongerTest(hu.HypothesisTestCase):
         np.testing.assert_almost_equal(loss2, optimized_loss2)
 
     def test_topological_sort_longest_path(self):
-        m = cnn.CNNModelHelper()
+        m = model_helper.ModelHelper()
         # 0
         m.Copy("conv0_w_comp", "conv0_w")
         # 1
-        conv0 = m.Conv("data", "conv0", 32, 32, 4)
+        conv0 = brew.conv(m, "data", "conv0", 32, 32, 4)
         # 2
         m.Copy("conv2_w", "conv2_w")
         # 3
-        m.Conv(conv0, "conv2", 16, 32, 4)
+        brew.conv(m, conv0, "conv2", 16, 32, 4)
 
         g = memonger.compute_interference_graph(m.net.Proto().op)
 
@@ -350,15 +350,15 @@ class MemongerTest(hu.HypothesisTestCase):
 
     def test_topological_sort_longest_path_multi_target(self):
         # two outputs: conv2 and data4
-        m = cnn.CNNModelHelper()
+        m = model_helper.ModelHelper()
         # 0
         m.Copy("conv0_w_comp", "conv0_w")
         # 1
-        conv0 = m.Conv("data", "conv0", 32, 32, 4)
+        conv0 = brew.conv(m, "data", "conv0", 32, 32, 4)
         # 2
         m.Copy("conv2_w", "conv2_w")
         # 3
-        m.Conv(conv0, "conv2", 16, 32, 4)
+        brew.conv(m, conv0, "conv2", 16, 32, 4)
         # 4
         m.Copy("data1", "data2")
         # 5
@@ -377,7 +377,7 @@ class MemongerTest(hu.HypothesisTestCase):
 
     def test_topological_sort_longest_path_single_node(self):
         # single node
-        m = cnn.CNNModelHelper()
+        m = model_helper.ModelHelper()
         # 0
         m.Copy("conv0_w_comp", "conv0_w")
 
