@@ -322,11 +322,12 @@ class _ConstantGrad(Function):
     @classmethod
     def forward(cls, ctx, *args):
         ctx._num_args = len(args)
+        ctx._args0_size = args[0].size()
         return getattr(args[0], cls.__name__.lower())(*args[1:])
 
     @classmethod
     def backward(cls, ctx, grad_output):
-        return (grad_output.mul(cls.grad_value),) + (ctx._num_args - 1) * (None,)
+        return (maybe_unexpand(grad_output.mul(cls.grad_value), ctx._args0_size),) + (ctx._num_args - 1) * (None,)
 
 
 class Floor(_ConstantGrad):
