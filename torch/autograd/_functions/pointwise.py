@@ -3,7 +3,7 @@ from itertools import repeat
 from ..._thnn import type2backend
 from ..function import Function, InplaceFunction
 from ..variable import Variable
-from .utils import maybe_unexpand, maybe_unexpand_or_view
+from .utils import maybe_view, maybe_unexpand, maybe_unexpand_or_view
 
 
 class Exp(InplaceFunction):
@@ -262,6 +262,7 @@ class Cmax(Function):
 
     @staticmethod
     def forward(ctx, a, b):
+        ctx._b_size = b.size()
         ctx._mask = a.gt(b)
         return a.max(b)
 
@@ -270,7 +271,7 @@ class Cmax(Function):
         mask = Variable(ctx._mask.type_as(grad_output.data))
         return (
             grad_output * mask,
-            grad_output * Variable(ctx._mask.eq(0).type_as(grad_output.data))
+            maybe_view(grad_output * Variable(ctx._mask.eq(0).type_as(grad_output.data)), ctx._b_size)
         )
 
 
@@ -291,6 +292,7 @@ class Cmin(Function):
 
     @staticmethod
     def forward(ctx, a, b):
+        ctx._b_size = b.size()
         ctx._mask = a.lt(b).type_as(a)
         return a.min(b)
 
@@ -299,7 +301,7 @@ class Cmin(Function):
         mask = Variable(ctx._mask.type_as(grad_output.data))
         return (
             grad_output * mask,
-            grad_output * Variable(ctx._mask.eq(0).type_as(grad_output.data))
+            maybe_view(grad_output * Variable(ctx._mask.eq(0).type_as(grad_output.data)), ctx._b_size)
         )
 
 
