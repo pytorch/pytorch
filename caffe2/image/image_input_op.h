@@ -84,6 +84,7 @@ class ImageInputOp final
   bool is_test_;
   bool use_caffe_datum_;
   bool gpu_transform_;
+  bool mean_std_copied_ = false;
 
   // thread pool for parse + decode
   int num_decode_threads_;
@@ -223,20 +224,6 @@ ImageInputOp<Context>::ImageInputOp(
   }
   LOG(INFO) << "    Outputting images as "
             << OperatorBase::template GetSingleArgument<string>("output_type", "unknown") << ".";
-
-  if (gpu_transform_) {
-    if (!std::is_same<Context, CUDAContext>::value) {
-      throw std::runtime_error("use_gpu_transform only for GPUs");
-    } else {
-      mean_gpu_.Resize(mean_.size());
-      std_gpu_.Resize(std_.size());
-
-      context_.template Copy<float, CPUContext, Context>(
-        mean_.size(), mean_.data(), mean_gpu_.template mutable_data<float>());
-      context_.template Copy<float, CPUContext, Context>(
-        std_.size(), std_.data(), std_gpu_.template mutable_data<float>());
-    }
-  }
 
   std::mt19937 meta_randgen(time(nullptr));
   for (int i = 0; i < num_decode_threads_; ++i) {
@@ -690,6 +677,16 @@ bool ImageInputOp<Context>::CopyPrefetched() {
     label_output->CopyFrom(prefetched_label_, &context_);
   } else {
     if (gpu_transform_) {
+      if (!mean_std_copied_) {
+        mean_gpu_.Resize(mean_.size());
+        std_gpu_.Resize(std_.size());
+
+        context_.template Copy<float, CPUContext, Context>(
+          mean_.size(), mean_.data(), mean_gpu_.template mutable_data<float>());
+        context_.template Copy<float, CPUContext, Context>(
+          std_.size(), std_.data(), std_gpu_.template mutable_data<float>());
+        mean_std_copied_ = true;
+      }
       // GPU transform kernel allows explicitly setting output type
       if (output_type_ == TensorProto_DataType_FLOAT) {
         TransformOnGPU<uint8_t,float,Context>(prefetched_image_on_device_,
