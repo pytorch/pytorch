@@ -1907,8 +1907,8 @@ class TestOperators(hu.HypothesisTestCase):
         X = np.random.randn(
             n * block_size * block_size,
             c,
-            (h + 2 * pad) / block_size,
-            (w + 2 * pad) / block_size).astype(np.float32)
+            (h + 2 * pad) // block_size,
+            (w + 2 * pad) // block_size).astype(np.float32)
         op = core.CreateOperator("BatchToSpace", ["X"], ["Y"],
                                  pad=pad, block_size=block_size)
         self.assertDeviceChecks(dc, op, [X], [0])
