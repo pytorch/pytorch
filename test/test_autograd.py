@@ -573,6 +573,8 @@ class TestAutograd(TestCase):
             (x * y()).sum().backward()
             (x / y()).sum().backward()
             (x.lerp(y(), 0.5)).sum().backward()
+            (x.max(y())).sum().backward()
+            (x.min(y())).sum().backward()
             (x.addcmul(1, y(), z())).sum().backward()
             (x.addcdiv(1, y(), z())).sum().backward()
             (x.abs() ** y()).sum().backward()
