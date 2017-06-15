@@ -722,8 +722,12 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *_inputs)
 
   // Create trace
   std::vector<Output> inputs;
-  for (auto i : unpacked_input.input_vars) {
-    inputs.push_back({i->trace_fn, i->output_nr});
+  for (auto v : unpacked_input.input_vars) {
+    if (v->trace_fn) {
+      inputs.emplace_back(v->trace_fn, v->output_nr);
+    } else {
+      inputs.emplace_back(v->get_input_node(), 0);
+    }
   }
   Py_INCREF(cls);
   auto node = std::make_shared<PyNode>(cls, inputs);
