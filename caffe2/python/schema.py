@@ -87,7 +87,7 @@ class Metadata(
     __slots__ = ()
 
 
-Metadata.__new__.__defaults__ = (None, None, None, None)
+Metadata.__new__.__defaults__ = (None, None, None)
 
 
 class Field(object):
