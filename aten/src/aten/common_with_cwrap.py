@@ -27,6 +27,8 @@ def set_declaration_defaults(declaration):
     declaration.setdefault('return', 'void')
     if 'cname' not in declaration:
         declaration['cname'] = declaration['name']
+    if 'backends' not in declaration:
+        declaration['backends'] = ['CPU', 'CUDA']
     if 'api_name' not in declaration:
         declaration['api_name'] = (declaration['python_name']
                                    if 'python_name' in declaration else declaration['name'])
