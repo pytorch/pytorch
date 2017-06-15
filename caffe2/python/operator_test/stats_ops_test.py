@@ -11,13 +11,23 @@ import numpy as np
 class TestCounterOps(TestCase):
 
     def test_stats_ops(self):
-        workspace.FeedBlob('k', np.array(['k0', 'k1'], dtype=str))
-        workspace.FeedBlob('v', np.array([34, 45], dtype=np.int64))
+        # The global StatRegistry isn't reset when the workspace is reset,
+        #   so there may be existing stats from a previous test
+        workspace.RunOperatorOnce(core.CreateOperator(
+            'StatRegistryExport', [], ['prev_k', 'prev_v', 'prev_ts']))
+        previous_keys = workspace.FetchBlob('prev_k')
+        existing = len(previous_keys)
+
+        prefix = '/'.join([__name__, 'TestCounterOps', 'test_stats_ops'])
+        keys = [prefix + '/key1', prefix + '/key2']
+        values = [34, 45]
+        workspace.FeedBlob('k', np.array(keys, dtype=str))
+        workspace.FeedBlob('v', np.array(values, dtype=np.int64))
         for _ in range(2):
             workspace.RunOperatorOnce(core.CreateOperator(
                 'StatRegistryUpdate', ['k', 'v'], []))
         workspace.RunOperatorOnce(core.CreateOperator(
-            'StatRegistryExport', [], ['k2', 'v2', 'ts']))
+            'StatRegistryExport', [], ['k2', 'v2', 't2']))
 
         workspace.RunOperatorOnce(core.CreateOperator(
             'StatRegistryCreate', [], ['reg']))
@@ -25,6 +35,14 @@ class TestCounterOps(TestCase):
             'StatRegistryUpdate', ['k2', 'v2', 'reg'], []))
 
         workspace.RunOperatorOnce(core.CreateOperator(
-            'StatRegistryExport', ['reg'], ['k3', 'v3', 'ts']))
-        self.assertTrue(len(workspace.FetchBlob('k3')) == 2)
-        self.assertTrue(len(workspace.FetchBlob('v3')) == 2)
+            'StatRegistryExport', ['reg'], ['k3', 'v3', 't3']))
+
+        k3 = workspace.FetchBlob('k3')
+        v3 = workspace.FetchBlob('v3')
+        t3 = workspace.FetchBlob('t3')
+
+        self.assertEqual(len(k3) - existing, 2)
+        self.assertEqual(len(v3), len(k3))
+        self.assertEqual(len(t3), len(k3))
+        for key in keys:
+            self.assertIn(key, k3)
