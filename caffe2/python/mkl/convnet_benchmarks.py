@@ -64,11 +64,12 @@ pass.
 
 import argparse
 
-from caffe2.python import cnn, workspace
+from caffe2.python import brew, cnn, workspace
+from caffe2.python.model_helper import ModelHelper
 import numpy as np
 
 def MLP(order, cudnn_ws, mkl):
-    model = cnn.CNNModelHelper()
+    model = ModelHelper(name="benchmark")
     d = 256
     depth = 20
     width = 3
@@ -76,16 +77,18 @@ def MLP(order, cudnn_ws, mkl):
         for j in range(width):
             current = "fc_{}_{}".format(i, j) if i > 0 else "data"
             next_ = "fc_{}_{}".format(i + 1, j)
-            model.FC(
+            brew.fc(
+                model,
                 current, next_,
                 dim_in=d, dim_out=d,
-                weight_init=model.XavierInit,
-                bias_init=model.XavierInit)
-    model.Sum(["fc_{}_{}".format(depth, j) for j in range(width)], ["sum"])
-    model.FC("sum", "last",
+                weight_init=('XavierFill', {}),
+                bias_init=('XavierFill', {}))
+
+    brew.sum(model, ["fc_{}_{}".format(depth, j) for j in range(width)], ["sum"])
+    brew.fc(model, "sum", "last",
              dim_in=d, dim_out=1000,
-             weight_init=model.XavierInit,
-             bias_init=model.XavierInit)
+             weight_init=('XavierFill', {}),
+             bias_init=('XavierFill', {}))
     xent = model.LabelCrossEntropy(["last", "label"], "xent")
     if not mkl:
         model.AveragedLoss(xent, "loss")
@@ -509,7 +512,7 @@ def Inception(order, cudnn_ws, mkl):
 
 def AddParameterUpdate(model):
     """ Simple plain SGD update -- not tuned to actually train the models """
-    ITER = model.Iter("iter")
+    ITER = brew.iter(model, "iter")
     LR = model.LearningRate(
         ITER, "LR", base_lr=-1e-8, policy="step", stepsize=10000, gamma=0.999)
     ONE = model.param_init_net.ConstantFill([], "ONE", shape=[1], value=1.0)
