@@ -377,7 +377,7 @@ static void _transplant_var(Variable& var, const std::shared_ptr<Function>& fn, 
 // do in this case.
 static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
     std::unordered_set<PyObject *> &dirty_inputs, PyObject *raw_output,
-    PyObject *outputs, bool is_volatile)
+    PyObject *outputs, std::shared_ptr<Node>& node, bool is_volatile)
 {
   // Wrap outputs in Variables
   auto cdata = is_volatile ? nullptr : THPFunction_asFunction(self);
@@ -460,6 +460,7 @@ static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
       );
     }
     t2var[output] = output_var;
+    output_var->cdata->trace_fn = node;
     output_var->cdata->output_nr = i;
     PyTuple_SET_ITEM(outputs, i, (PyObject*)output_var);
   }
@@ -622,7 +623,7 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject *args) {
   return std::make_pair(std::move(unpacked), std::move(flags));
 }
 
-PyObject* process_outputs(THPFunction* grad_fn, const UnpackedInput& unpacked, THPObjectPtr&& raw_output, bool is_volatile) {
+PyObject* process_outputs(THPFunction* grad_fn, const UnpackedInput& unpacked, THPObjectPtr&& raw_output, std::shared_ptr<Node>&& node, bool is_volatile) {
   bool unpack_output = _ensure_tuple(raw_output);
 
   auto num_outputs = PyTuple_GET_SIZE(raw_output.get());
@@ -641,7 +642,7 @@ PyObject* process_outputs(THPFunction* grad_fn, const UnpackedInput& unpacked, T
 
   std::unordered_set<PyObject *> dirty_inputs;
   _mark_dirty(grad_fn, t2var, dirty_inputs);
-  _wrap_outputs(grad_fn, t2var, dirty_inputs, raw_output, outputs, is_volatile);
+  _wrap_outputs(grad_fn, t2var, dirty_inputs, raw_output, outputs, node, is_volatile);
   _join_version_counters(grad_fn, t2var);
   if (grad_fn->cdata.is_executable) {
     _mark_non_differentiable(grad_fn, t2var);
@@ -680,7 +681,7 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *_inputs)
   THPObjectPtr raw_output(PyObject_CallObject(forward_fn, unpacked_input.tensor_input));
   if (!raw_output) return NULL;
 
-  return process_outputs(self, unpacked_input, std::move(raw_output), is_volatile);
+  return process_outputs(self, unpacked_input, std::move(raw_output), std::move(nullptr), is_volatile);
   END_HANDLE_TH_ERRORS
 }
 
@@ -696,8 +697,8 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *_inputs)
 
   // Prepare inputs and allocate context (grad fn)
   auto info_pair = unpack_input<false>(_inputs);
-  auto& unpacked_input = info_pair.first;
-  auto& input_info = info_pair.second;
+  UnpackedInput& unpacked_input = info_pair.first;
+  InputFlags& input_info = info_pair.second;
   bool is_volatile = input_info.flags.is_volatile;
   ctx->cdata.set_flags(std::move(input_info.flags));
   ctx->needs_input_grad = input_info.needs_input_grad.release();
@@ -719,7 +720,16 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *_inputs)
   THPObjectPtr tensor_outputs(PyObject_CallObject(forward_fn, ctx_tensor_input));
   if (!tensor_outputs) return NULL;
 
-  return process_outputs(ctx, unpacked_input, std::move(tensor_outputs), is_volatile);
+  // Create trace
+  std::vector<Output> inputs;
+  for (auto i : unpacked_input.input_vars) {
+    inputs.push_back({i->trace_fn, i->output_nr});
+  }
+  Py_INCREF(cls);
+  auto node = std::make_shared<PyNode>(cls, inputs);
+  printGraph(node.get(), 0);
+
+  return process_outputs(ctx, unpacked_input, std::move(tensor_outputs), std::move(node), is_volatile);
   END_HANDLE_TH_ERRORS
 }
 
