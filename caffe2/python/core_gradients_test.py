@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from future.utils import bytes_to_native_str
 from hypothesis import given
 import hypothesis.strategies as st
 import unittest
@@ -88,7 +89,7 @@ class TestGradientCalculation(test_util.TestCase):
         if isinstance(op_list1, list) and isinstance(op_list2, list):
             for op in op_list1 + op_list2:
                 if isinstance(op, caffe2_pb2.OperatorDef):
-                    op.ClearField('uuid')
+                    op.ClearField(bytes_to_native_str(b'uuid'))
         return super(TestGradientCalculation, self).assertEqual(
             op_list1, op_list2)
 
