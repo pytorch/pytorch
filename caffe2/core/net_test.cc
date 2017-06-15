@@ -18,10 +18,21 @@ static std::atomic<int> counter;
 class NetTestDummyOp final : public OperatorBase {
  public:
   using OperatorBase::OperatorBase;
+
+  NetTestDummyOp(const OperatorDef& operator_def, Workspace* ws)
+      : OperatorBase(operator_def, ws),
+        fail_(OperatorBase::GetSingleArgument<bool>("fail", false)) {}
+
   bool Run(int /* unused */ stream_id) override {
+    if (fail_) {
+      return false;
+    }
     counter.fetch_add(1);
     return true;
   }
+
+ protected:
+  const bool fail_;
 };
 
 REGISTER_CPU_OPERATOR(NetTestDummy, NetTestDummyOp);
@@ -557,6 +568,48 @@ TEST(NetTest, ChainingForHogwildModel) {
         }
 )DOC";
   checkNumChainsAndRun(spec, 2);
+}
+
+TEST(NetTest, FailingOperator) {
+  const auto spec = R"DOC(
+        name: "example"
+        type: "dag"
+        external_input: "in"
+        op {
+          input: "in"
+          output: "hidden"
+          type: "NetTestDummy"
+        }
+        op {
+          input: "hidden"
+          output: "out"
+          type: "NetTestDummy"
+          arg {
+            name: "fail"
+            i: 1
+          }
+        }
+)DOC";
+
+  Workspace ws;
+  ws.CreateBlob("in");
+
+  NetDef net_def;
+  CAFFE_ENFORCE(google::protobuf::TextFormat::ParseFromString(spec, &net_def));
+
+  {
+    net_def.set_num_workers(4);
+    auto old = FLAGS_caffe2_disable_chaining;
+    auto g = MakeGuard([&]() { FLAGS_caffe2_disable_chaining = old; });
+    FLAGS_caffe2_disable_chaining = false;
+
+    std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
+    for (int i = 0; i < 10; i++) {
+      counter.exchange(0);
+      ASSERT_EQ(false, net.get()->Run());
+      ASSERT_EQ(1, counter.load());
+    }
+  }
 }
 
 } // namespace caffe2

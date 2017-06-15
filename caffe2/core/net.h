@@ -169,12 +169,14 @@ class DAGNetBase : public NetBase {
   vector<internal::OperatorNode> operator_nodes_;
   ExecutionChains execution_chains_;
   vector<int> initial_frontier_;
-  SimpleQueue<int> job_queue_;
+  std::unique_ptr<SimpleQueue<int>> job_queue_;
   std::vector<std::thread> workers_;
   int num_workers_;
+  int num_workers_first_iteration_;
   int remaining_ops_;
 
   bool success_;
+  int iter_;
   std::mutex remaining_ops_mutex_;
   std::condition_variable cv_;
   std::mutex run_in_progress_;
