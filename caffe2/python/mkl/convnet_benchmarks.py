@@ -263,11 +263,12 @@ def OverFeat(order, cudnn_ws, mkl):
 
 
 def VGGA(order, cudnn_ws, mkl):
-    model = cnn.CNNModelHelper(
-        order, name='vgg-a',
-        use_cudnn=True, cudnn_exhaustive_search=True,
-        ws_nbytes_limit=cudnn_ws)
-    conv1 = model.Conv(
+    my_arg_scope = {'order': order, 'use_cudnn': True,
+                    'cudnn_exhaustive_search': True,
+                    'ws_nbytes_limit': str(cudnn_ws)}
+    model = ModelHelper(name='vgg-a', arg_scope=my_arg_scope)
+    conv1 = brew.conv(
+        model,
         "data",
         "conv1",
         3,
@@ -277,9 +278,10 @@ def VGGA(order, cudnn_ws, mkl):
         ('ConstantFill', {}),
         pad=1
     )
-    relu1 = model.Relu(conv1, "conv1")
-    pool1 = model.MaxPool(relu1, "pool1", kernel=2, stride=2)
-    conv2 = model.Conv(
+    relu1 = brew.relu(model, conv1, "conv1")
+    pool1 = brew.max_pool(model, relu1, "pool1", kernel=2, stride=2)
+    conv2 = brew.conv(
+        model,
         pool1,
         "conv2",
         64,
@@ -289,9 +291,10 @@ def VGGA(order, cudnn_ws, mkl):
         ('ConstantFill', {}),
         pad=1
     )
-    relu2 = model.Relu(conv2, "conv2")
-    pool2 = model.MaxPool(relu2, "pool2", kernel=2, stride=2)
-    conv3 = model.Conv(
+    relu2 = brew.relu(model, conv2, "conv2")
+    pool2 = brew.max_pool(model, relu2, "pool2", kernel=2, stride=2)
+    conv3 = brew.conv(
+        model,
         pool2,
         "conv3",
         128,
@@ -301,8 +304,9 @@ def VGGA(order, cudnn_ws, mkl):
         ('ConstantFill', {}),
         pad=1
     )
-    relu3 = model.Relu(conv3, "conv3")
-    conv4 = model.Conv(
+    relu3 = brew.relu(model, conv3, "conv3")
+    conv4 = brew.conv(
+        model,
         relu3,
         "conv4",
         256,
@@ -312,9 +316,10 @@ def VGGA(order, cudnn_ws, mkl):
         ('ConstantFill', {}),
         pad=1
     )
-    relu4 = model.Relu(conv4, "conv4")
-    pool4 = model.MaxPool(relu4, "pool4", kernel=2, stride=2)
-    conv5 = model.Conv(
+    relu4 = brew.relu(model, conv4, "conv4")
+    pool4 = brew.max_pool(model, relu4, "pool4", kernel=2, stride=2)
+    conv5 = brew.conv(
+        model,
         pool4,
         "conv5",
         256,
@@ -324,8 +329,9 @@ def VGGA(order, cudnn_ws, mkl):
         ('ConstantFill', {}),
         pad=1
     )
-    relu5 = model.Relu(conv5, "conv5")
-    conv6 = model.Conv(
+    relu5 = brew.relu(model, conv5, "conv5")
+    conv6 = brew.conv(
+        model,
         relu5,
         "conv6",
         512,
@@ -335,9 +341,10 @@ def VGGA(order, cudnn_ws, mkl):
         ('ConstantFill', {}),
         pad=1
     )
-    relu6 = model.Relu(conv6, "conv6")
-    pool6 = model.MaxPool(relu6, "pool6", kernel=2, stride=2)
-    conv7 = model.Conv(
+    relu6 = brew.relu(model, conv6, "conv6")
+    pool6 = brew.max_pool(model, relu6, "pool6", kernel=2, stride=2)
+    conv7 = brew.conv(
+        model,
         pool6,
         "conv7",
         512,
@@ -347,8 +354,9 @@ def VGGA(order, cudnn_ws, mkl):
         ('ConstantFill', {}),
         pad=1
     )
-    relu7 = model.Relu(conv7, "conv7")
-    conv8 = model.Conv(
+    relu7 = brew.relu(model, conv7, "conv7")
+    conv8 = brew.conv(
+        model,
         relu7,
         "conv8",
         512,
@@ -358,22 +366,22 @@ def VGGA(order, cudnn_ws, mkl):
         ('ConstantFill', {}),
         pad=1
     )
-    relu8 = model.Relu(conv8, "conv8")
-    pool8 = model.MaxPool(relu8, "pool8", kernel=2, stride=2)
+    relu8 = brew.relu(model, conv8, "conv8")
+    pool8 = brew.max_pool(model, relu8, "pool8", kernel=2, stride=2)
 
-    fcix = model.FC(
-        pool8, "fcix", 512 * 7 * 7, 4096, ('XavierFill', {}),
+    fcix = brew.fc(
+        model, pool8, "fcix", 512 * 7 * 7, 4096, ('XavierFill', {}),
         ('ConstantFill', {})
     )
-    reluix = model.Relu(fcix, "fcix")
-    fcx = model.FC(
-        reluix, "fcx", 4096, 4096, ('XavierFill', {}), ('ConstantFill', {})
+    reluix = brew.relu(model, fcix, "fcix")
+    fcx = brew.fc(
+        model, reluix, "fcx", 4096, 4096, ('XavierFill', {}), ('ConstantFill', {})
     )
-    relux = model.Relu(fcx, "fcx")
-    fcxi = model.FC(
-        relux, "fcxi", 4096, 1000, ('XavierFill', {}), ('ConstantFill', {})
+    relux = brew.relu(model, fcx, "fcx")
+    fcxi = brew.fc(
+        model, relux, "fcxi", 4096, 1000, ('XavierFill', {}), ('ConstantFill', {})
     )
-    pred = model.Softmax(fcxi, "pred")
+    pred = brew.softmax(model, fcxi, "pred")
     xent = model.LabelCrossEntropy([pred, "label"], "xent")
     if not mkl:
         loss = model.AveragedLoss(xent, "loss")
