@@ -10,6 +10,11 @@
 
 namespace tlib {
 
+Tensor & copy(Tensor & dst, const Tensor & src) {
+  dst.resize_(src.sizes());
+  dst.type().copy(dst,src);
+}
+
 ${function_declarations}
 
 // function definitions are all static inline because

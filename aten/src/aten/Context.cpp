@@ -44,5 +44,13 @@ Context & globalContext() {
   return globalContext_;
 }
 
+bool Context::hasCUDA() const {
+#ifdef TENSORLIB_CUDA_ENABLED
+  return true;
+#else
+  return false;
+#endif
+}
+
 
 }
