@@ -3035,7 +3035,8 @@ Args:
     upper (bool, optional): Return upper (default) or lower triangular matrix
     out (Tensor, optional): A Tensor for u
 
-Example:
+Example::
+
     >>> a = torch.randn(3,3)
     >>> a = torch.mm(a, a.t()) # make symmetric positive definite
     >>> u = torch.potrf(a)
@@ -3059,6 +3060,7 @@ Example:
      3.2318  4.9557 -2.1618
     -0.9406 -2.1618  2.2443
     [torch.FloatTensor of size 3x3]
+
 """)
 
 add_docstr(torch._C.potri,
@@ -3078,7 +3080,8 @@ Args:
     upper (bool, optional): Flag if upper (default) or lower triangular matrix
     out (Tensor, optional): A Tensor for inv
 
-Example:
+Example::
+
     >>> a = torch.randn(3,3)
     >>> a = torch.mm(a, a.t()) # make symmetric positive definite
     >>> u = torch.potrf(a)
@@ -3102,6 +3105,7 @@ Example:
     -10.1765   8.5852   4.0047
      -4.5333   4.0047   2.4031
     [torch.FloatTensor of size 3x3]
+
 """)
 
 add_docstr(torch._C.potrs,
@@ -3125,7 +3129,8 @@ Args:
     upper (bool, optional): Return upper (default) or lower triangular matrix
     out (Tensor, optional): A Tensor for c
 
-Example:
+Example::
+
     >>> a = torch.randn(3,3)
     >>> a = torch.mm(a, a.t()) # make symmetric positive definite
     >>> u = torch.potrf(a)
@@ -3157,6 +3162,7 @@ Example:
     -0.7234  27.0702
     -0.6039  13.1717
     [torch.FloatTensor of size 3x2]
+
 """)
 
 add_docstr(torch._C.pow,
@@ -3332,7 +3338,8 @@ Args:
     upper (bool, optional): Return upper (default) or lower triangular matrix
     out (tuple, optional): A tuple of u and piv Tensors
 
-Example:
+Example::
+
     >>> a = torch.randn(3,3)
     >>> a = torch.mm(a, a.t()) # make symmetric positive definite
     >>> a
@@ -3364,6 +3371,7 @@ Example:
      1.3643  4.6116 -2.1368
     -2.5280 -2.1368  2.9689
     [torch.FloatTensor of size 3x3]
+
 """)
 
 add_docstr(torch._C.qr,
