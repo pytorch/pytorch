@@ -8,7 +8,7 @@ import os
 import unittest
 
 from caffe2.proto import caffe2_pb2
-from caffe2.python import core, test_util, workspace, cnn
+from caffe2.python import core, test_util, workspace, model_helper, brew
 
 import caffe2.python.hypothesis_test_util as htu
 import hypothesis.strategies as st
@@ -475,12 +475,12 @@ class TestCWorkspace(htu.HypothesisTestCase):
 
 class TestPredictor(unittest.TestCase):
     def _create_model(self):
-        m = cnn.CNNModelHelper()
-        y = m.FC("data", "y",
-                 dim_in=4, dim_out=2,
-                 weight_init=m.ConstantInit(1.0),
-                 bias_init=m.ConstantInit(0.0),
-                 axis=0)
+        m = model_helper.ModelHelper()
+        y = brew.fc(m, "data", "y",
+                    dim_in=4, dim_out=2,
+                    weight_init=('ConstantFill', dict(value=1.0)),
+                    bias_init=('ConstantFill', dict(value=0.0)),
+                    axis=0)
         m.net.AddExternalOutput(y)
         return m
 
