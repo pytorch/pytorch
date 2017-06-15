@@ -91,7 +91,7 @@ class ModelHelper(object):
             self.params = param_model.params
             self._computed_params = param_model._computed_params
         else:
-            self.param_init_net = core.Net(name + '_init')
+            self.param_init_net = core.Net(self.name + '_init')
             self.param_to_grad = {}
             self.params = []
             self._computed_params = []
