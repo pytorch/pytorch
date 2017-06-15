@@ -2401,7 +2401,7 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_conv_double_backward_cuda(self):
         batch_size = 1
-        for kern, inp_size, dilations in [(3, 5, [1, 2]), (4, 10, [1])]:
+        for kern, inp_size, dilations in [(3, 5, [1, 2]), (4, 9, [1])]:
             for stride, padding, chan_in, chan_out, dilation in product([1], [2], [2], [3], dilations):
                 no_weight = stride == 2
                 result = self.run_conv_double_back_test(kern, stride,
