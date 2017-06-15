@@ -573,7 +573,6 @@ static void _mark_non_differentiable(THPFunction *self, t2var_type &t2var)
 }
 
 struct UnpackedInput {
-  PyObject *raw_input;
   THPObjectPtr tensor_input;
   variable_list input_vars;
 };
