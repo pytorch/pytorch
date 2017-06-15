@@ -55,7 +55,7 @@ class _DatasetReader(Reader):
 
 
 class _DatasetRandomReader(Reader):
-    def __init__(self, dataset, name, indices, batch_size=1):
+    def __init__(self, dataset, name, indices, batch_size=1, loop_over=False):
         """Don't call this directly. Instead, use dataset.random_reader()"""
         Reader.__init__(self, dataset.content())
         self.dataset = dataset
@@ -63,6 +63,7 @@ class _DatasetRandomReader(Reader):
         self.name = name or (dataset.name + '_cursor')
         self.indices = indices
         self.batch_size = batch_size
+        self.loop_over = loop_over
 
     def setup_ex(self, init_net, exit_net):
         if self.cursor is None:
@@ -106,7 +107,8 @@ class _DatasetRandomReader(Reader):
                 [self.cursor, self.indices, self.offsets] + (
                     self.dataset.content().field_blobs()),
                 self.dataset.content().field_names(),
-                batch_size=self.batch_size)
+                batch_size=self.batch_size,
+                loop_over=self.loop_over)
             return (read_net.IsEmpty([fields[0]]), fields)
 
 
@@ -276,7 +278,7 @@ class Dataset(object):
         return reader
 
     def random_reader(self, init_net=None, indices=None, cursor_name=None,
-                      batch_size=1):
+                      batch_size=1, loop_over=False):
         """Create a Reader object that is used to iterate through the dataset.
 
         NOTE: The reader order depends on the order in indices.
@@ -287,13 +289,15 @@ class Dataset(object):
             cursor_name: optional name for the blob containing a pointer
                          to the cursor.
             batch_size: how many samples to read per iteration.
+            loop_over: repeat the dataset indefinitely (in the same order)
 
         Returns:
             A DatasetReader that can be used to create operators that will
             iterate through the dataset according to indices.
         """
         assert self.field_blobs, 'Dataset not initialized.'
-        reader = _DatasetRandomReader(self, cursor_name, indices, batch_size)
+        reader = _DatasetRandomReader(
+            self, cursor_name, indices, batch_size, loop_over)
         if init_net is not None:
             reader.setup_ex(init_net, None)
         return reader

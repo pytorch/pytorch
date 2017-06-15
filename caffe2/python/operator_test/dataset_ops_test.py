@@ -459,7 +459,7 @@ class TestDatasetOps(TestCase):
         reader = ds.random_reader(read_init_net, indices_blob)
         reader.computeoffset(read_init_net)
 
-        should_continue, batch = reader.read_record(read_next_net)
+        should_stop, batch = reader.read_record(read_next_net)
 
         workspace.CreateNet(read_init_net, True)
         workspace.RunNetOnce(read_init_net)
@@ -472,8 +472,32 @@ class TestDatasetOps(TestCase):
             workspace.RunNet(str(read_next_net))
             actual = FetchRecord(batch)
             _assert_records_equal(actual, entry)
+        workspace.RunNet(str(read_next_net))
+        self.assertEquals(True, workspace.FetchBlob(should_stop))
         """
-        8. Sort and shuffle a dataset
+        8. Random Access a dataset with loop_over = true
+
+        """
+        read_init_net = core.Net('read_init')
+        read_next_net = core.Net('read_next')
+
+        idx = np.array([2, 1, 0])
+        indices_blob = Const(read_init_net, idx, name='indices')
+        reader = ds.random_reader(read_init_net, indices_blob, loop_over=True)
+        reader.computeoffset(read_init_net)
+
+        should_stop, batch = reader.read_record(read_next_net)
+
+        workspace.CreateNet(read_init_net, True)
+        workspace.RunNetOnce(read_init_net)
+
+        workspace.CreateNet(read_next_net, True)
+
+        for _ in range(len(entries) * 3):
+            workspace.RunNet(str(read_next_net))
+            self.assertEquals(False, workspace.FetchBlob(should_stop))
+        """
+        9. Sort and shuffle a dataset
 
         This sort the dataset using the score of a certain column,
         and then shuffle within each chunk of size batch_size * shuffle_size
