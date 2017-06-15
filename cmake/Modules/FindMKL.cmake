@@ -93,7 +93,7 @@ if(NOT MKL_USE_SINGLE_DYNAMIC_LIBRARY)
   find_library(MKL_RTL_LIBRARY ${__iomp5_libs}
      PATHS ${INTEL_RTL_ROOT} ${INTEL_ROOT}/compiler ${MKL_ROOT}/.. ${MKL_ROOT}/../compiler
      PATH_SUFFIXES ${__path_suffixes}
-     DOC "Path to Path to OpenMP runtime library")
+     DOC "Path to OpenMP runtime library")
 
   list(APPEND __looked_for MKL_RTL_LIBRARY)
   list(APPEND MKL_LIBRARIES ${MKL_RTL_LIBRARY})

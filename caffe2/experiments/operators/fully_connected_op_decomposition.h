@@ -10,7 +10,7 @@ namespace caffe2 {
  * Although a FC_decomp is just like 2 small FC,
  * it is better to have it as one op for future analysis.
  * And if we have 2 FC with bias, it is not right.
- * TODO(wyiming): decompose the layer into 2 matrix
+ * TODO(wyiming): decompose the layer into 2 matrices
  * W(N * K) = U(N * middle) * trans(V(K * middle))
  * */
 // This is Caffe's InnerProductOp, with a name that fits its purpose better.

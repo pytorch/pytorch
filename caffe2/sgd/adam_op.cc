@@ -48,7 +48,7 @@ OPERATOR_SCHEMA(SparseAdam)
 
 Computes the Adam Update for the sparse case.
 Given inputs (param, moment1, moment2, indices, grad, lr, iter), runs the dense
-Adam on on (param, moment1[indices], momemnt2[indices], lr, iter) and returns
+Adam on (param, moment1[indices], momemnt2[indices], lr, iter) and returns
 (new_param, new_moment1, new_moment2) as in dense case
 
 )DOC")

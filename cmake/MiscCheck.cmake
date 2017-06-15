@@ -53,7 +53,7 @@ if(NOT CAFFE2_NEED_TO_TURN_OFF_DEPRECATION_WARNING AND NOT MSVC)
 endif()
 
 # ---[ If we are using msvc, set no warning flags
-# Note(jiayq): if you are going to add an warning flag, check if this is
+# Note(jiayq): if you are going to add a warning flag, check if this is
 # totally necessary, and only add when you see fit. If it is needed due to
 # a third party library (like Protobuf), mention it in the comment as
 # "THIRD_PARTY_NAME related"

@@ -512,7 +512,7 @@ def ExtractPredictorNet(
         for arg in op.arg:
             if arg.name == "is_test" and arg.i == 0:
                 raise Exception(
-                    "A operator had is_test=0, did you try to extract a " +
+                    "An operator had is_test=0, did you try to extract a " +
                     "predictor from a train model (instead of test model)?" +
                     " Op was: {}".format(str(op))
                 )

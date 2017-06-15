@@ -1,7 +1,7 @@
 ## @package record_queue
 # Module caffe2.python.record_queue
 """
-Implementation of an queue wrapper.
+Implementation of a queue wrapper.
 """
 from __future__ import absolute_import
 from __future__ import division

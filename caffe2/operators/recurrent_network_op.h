@@ -618,7 +618,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
           &context_);
     }
 
-    // This code assumes that there are several input
+    // This code assumes that there are several inputs
     // sequences. Actually it is not supported by the rest of the code,
     // and numSequences_ is a constant, equal to 1.
     for (int i = 0; i < numSequences_; ++i) {

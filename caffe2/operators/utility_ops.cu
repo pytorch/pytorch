@@ -335,7 +335,7 @@ void UniqueOp<CUDAContext>::DoRun() {
   context_.template CopyItems<CUDAContext, CUDAContext>(
       inputTensor.meta(), N, input, buffer);
 
-  // Create two vector of {0, 1, ..., N-1} on CUDA device
+  // Create two vectors of {0, 1, ..., N-1} on CUDA device
   thrust::device_vector<int> order1(N), order2(N);
   thrust::sequence(
       thrust::cuda::par.on(context_.cuda_stream()),

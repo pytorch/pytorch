@@ -69,7 +69,7 @@ class InstantiationContext(object):
     """
     List of contexts where layer could be instantitated
     """
-    # The layers support this context will accumulates predictions, labels,
+    # The layers support this context will accumulate predictions, labels,
     # weights. The accumulated data can later be used to compute
     # calibration or for other
     # purpose.

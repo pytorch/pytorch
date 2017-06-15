@@ -618,7 +618,7 @@ class AbstractSortedSegmentOp : public Operator<Context> {
           aux_in.dim(0),
           "Input ",
           i,
-          " must have have the same first dim as SEGMENT_IDS");
+          " must have the same first dim as SEGMENT_IDS");
       ctx.observeInput(i, aux_in, 1);
     }
 
@@ -721,7 +721,7 @@ class AbstractSortedSegmentGradientOp : public Operator<Context> {
           aux_in.dim(0),
           "Input ",
           i,
-          " must have have the same first dim as SEGMENT_IDS");
+          " must have the same first dim as SEGMENT_IDS");
       ctx.observeOriginalInput(
           ReducerGradient::originalInputs()[i], aux_in, nullptr /*no grad*/, 1);
     }
@@ -1011,7 +1011,7 @@ class AbstractUnsortedSegmentOp : public Operator<Context> {
           aux_in.dim(0),
           "Input ",
           i,
-          " must have have the same first dim as SEGMENT_IDS");
+          " must have the same first dim as SEGMENT_IDS");
       ctx.observeInput(i, aux_in, 1);
     }
 
@@ -1126,7 +1126,7 @@ class AbstractUnsortedSegmentGradientOp : public Operator<Context> {
           aux_in.dim(0),
           "Input ",
           i,
-          " must have have the same first dim as SEGMENT_IDS");
+          " must have the same first dim as SEGMENT_IDS");
       ctx.observeOriginalInput(
           ReducerGradient::originalInputs()[i], aux_in, nullptr /*no grad*/, 1);
     }
@@ -1388,7 +1388,7 @@ class AbstractLengthsOp : public Operator<Context> {
           dataToReduceSize == aux_in.dim(0),
           "Input ",
           i,
-          " must have have the same first dim as SEGMENT_IDS");
+          " must have the same first dim as SEGMENT_IDS");
       ctx.observeInput(i, aux_in, 1);
     }
 
@@ -1496,7 +1496,7 @@ class AbstractLengthsGradientOp : public Operator<Context> {
           aux_in.dim(0),
           "Input ",
           i,
-          " must have have the same first dim as SEGMENT_IDS");
+          " must have the same first dim as SEGMENT_IDS");
       ctx.observeOriginalInput(
           ReducerGradient::originalInputs()[i], aux_in, nullptr /*no grad*/, 1);
     }

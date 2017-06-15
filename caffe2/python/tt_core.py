@@ -22,7 +22,7 @@ def init_tt_cores(inp_sizes, out_sizes, tt_ranks, seed=1234):
     """
     Initialize randomized orthogonalized TT-cores.
 
-    This method should be used when a TT-layer will trained from scratch. The
+    This method should be used when a TT-layer is trained from scratch. The
     sizes of each of the cores are specified by the inp_sizes and out_sizes, and
     the respective tt_ranks will dictate the ranks of each of the cores. Note
     that a larger set of tt_ranks will result in slower computation but will
@@ -101,7 +101,7 @@ def matrix_to_tt(W, inp_sizes, out_sizes, tt_ranks):
     """
     Convert a matrix into the TT-format.
 
-    This method will consume an a 2D weight matrix such as those used in fully
+    This method will consume a 2D weight matrix such as those used in fully
     connected layers in a neural network and will compute the TT-decomposition
     of the weight matrix and return the TT-cores of the resulting computation.
     This method should be used when converting a trained, fully connected layer,

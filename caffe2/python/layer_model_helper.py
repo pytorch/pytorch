@@ -140,7 +140,7 @@ class LayerModelHelper(model_helper.ModelHelper):
 
         # The primary value of adding everything to self.net - generation of the
         # operators right away, i.e. if error happens it'll be detected
-        # immediately. Other then this - create_x_net should be called.
+        # immediately. Other than this - create_x_net should be called.
         layer.add_operators(self.net, self.param_init_net)
         return layer.output_schema
 
@@ -238,7 +238,7 @@ class LayerModelHelper(model_helper.ModelHelper):
             assert optimizer is not None, \
                 "default optimizer must have been set in add_layer"
             # note that not all params has gradient and thus we sent None if
-            # gradient does not exists
+            # gradient does not exist
             optimizer(
                 train_net, train_init_net, param, grad_map.get(str(param)))
 

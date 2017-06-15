@@ -150,7 +150,7 @@ class GradientChecker:
     """A gradient checker in Python.
 
     This is not the most efficient way to check gradients, as the Python
-    interface will involve a lot of copy back and forth operations. Use at your
+    interface will involve a lot of copies back and forth operations. Use at your
     own risk.
     """
 

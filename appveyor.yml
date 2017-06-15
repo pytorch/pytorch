@@ -28,7 +28,7 @@ environment:
     #  CMAKE_BUILD_TYPE: Debug
     #  APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2017
 
-    # Currently, CUDA + Debug does not work due to a error of using
+    # Currently, CUDA + Debug does not work due to an error of using
     # std::_Debug_lt in device code. Not sure where this comes from yet,
     # but it is probably safe to assume that very few are going to build
     # debug mode with CUDA and Windows.

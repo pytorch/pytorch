@@ -9,7 +9,7 @@ class DeviceChecker(object):
     """A device checker in Python to check consistency across multiple devices.
 
     This is not the most efficient way to check devices, as the Python interface
-    will involve a lot of copy back and forth operations. Use at your own risk.
+    will involve a lot of copies back and forth operations. Use at your own risk.
     """
 
     def __init__(self, threshold, device_options):

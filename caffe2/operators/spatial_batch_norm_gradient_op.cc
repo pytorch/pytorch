@@ -121,7 +121,7 @@ class GetSpatialBNGradient : public GradientMakerBase {
     vector<string> grad_outputs{GI(0), GI(1), GI(2)};
     vector<string> grad_inputs;
     if (is_test) {
-      // This is in testing mode. The operator should have five input:
+      // This is in testing mode. The operator should have five inputs:
       //     X, scale, bias, estimated_mean, estimated_variance
       // The gradient inputs are:
       //     X, scale, dY, estimated_mean, estimated_variance

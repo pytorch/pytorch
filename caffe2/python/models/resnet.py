@@ -110,7 +110,7 @@ class ResNetBuilder():
 
         # Summation with input signal (shortcut)
         # If we need to increase dimensions (feature maps), need to
-        # do do a projection for the short cut
+        # do a projection for the short cut
         if (output_filters > input_filters):
             shortcut_blob = brew.conv(
                 self.model,
