@@ -285,7 +285,7 @@ class Operator : public OperatorBase {
   USE_OPERATOR_BASE_FUNCTIONS;                            \
   /* using override */ using Operator<context>::context_; \
   /* using override */ using Operator<context>::Input;    \
-  /* using override */ using Operator<context>::Output;
+  /* using override */ using Operator<context>::Output
 
 #define USE_OPERATOR_CONTEXT_FUNCTIONS USE_OPERATOR_FUNCTIONS(Context)
 
