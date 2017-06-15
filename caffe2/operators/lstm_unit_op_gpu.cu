@@ -116,7 +116,7 @@ void LSTMUnit<float, CUDAContext>(
     bool drop_states,
     float* C,
     float* H,
-    const float& forget_bias,
+    const float forget_bias,
     CUDAContext* context) {
   LSTMUnitKernel<float><<<
       CAFFE_GET_BLOCKS(N * D),
