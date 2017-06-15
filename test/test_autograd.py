@@ -1372,7 +1372,7 @@ function_tests = [
     (Fmod, (), ((S, S, S), 1.5)),
     (Fmod, (), ((S, S, S), Variable(torch.randn(S, S, S), requires_grad=False)), 'tensor'),
     (Fmod, (), ((S, S, S), Variable(torch.randn(S), requires_grad=False)), 'tensor_broadcast_rhs'),
-    (Fmod, (), ((S,), Variable(torch.randn(S,S,S), requires_grad=False)), 'tensor_broadcast_lhs'),
+    (Fmod, (), ((S,), Variable(torch.randn(S, S, S), requires_grad=False)), 'tensor_broadcast_lhs'),
     (Fmod, (), ((S, 1, S), Variable(torch.randn(S, S), requires_grad=False)), 'tensor_broadcast_all'),
     (Lerp, (), ((S, S, S), (S, S, S), 0.2)),
     (Lerp, (), ((S, S, S), (S,), 0.2), 'broadcast_rhs'),
@@ -1382,7 +1382,7 @@ function_tests = [
     (Remainder, (), ((S, S, S), 1.5)),
     (Remainder, (), ((S, S, S), Variable(torch.randn(S, S, S), requires_grad=False)), 'tensor'),
     (Remainder, (), ((S, S, S), Variable(torch.randn(S), requires_grad=False)), 'tensor_broadcast_rhs'),
-    (Remainder, (), ((S,), Variable(torch.randn(S,S,S), requires_grad=False)), 'tensor_broadcast_lhs'),
+    (Remainder, (), ((S,), Variable(torch.randn(S, S, S), requires_grad=False)), 'tensor_broadcast_lhs'),
     (Remainder, (), ((S, 1, S), Variable(torch.randn(S, S), requires_grad=False)), 'tensor_broadcast_all'),
     (CmaxConstant, (), ((S, S, S), 0.5)),
     (CminConstant, (), ((S, S, S), 0.5)),
@@ -1576,13 +1576,13 @@ method_tests = [
     ('ceil', (S, S, S), ()),
     ('rsqrt', (S, S, S), ()),
     ('fmod', (S, S, S), (1.5,)),
-    ('fmod', (S, S, S), (Variable(torch.randn(S, S, S), requires_grad = False),), 'tensor'),
-    ('fmod', (S,), (Variable(torch.randn(S, S, S), requires_grad = False),), 'tensor_broadcast_lhs'),
-    ('fmod', (S, 1, S), (Variable(torch.randn(S, S), requires_grad = False),), 'tensor_broacast_all'),
+    ('fmod', (S, S, S), (Variable(torch.randn(S, S, S), requires_grad=False),), 'tensor'),
+    ('fmod', (S,), (Variable(torch.randn(S, S, S), requires_grad=False),), 'tensor_broadcast_lhs'),
+    ('fmod', (S, 1, S), (Variable(torch.randn(S, S), requires_grad=False),), 'tensor_broacast_all'),
     ('remainder', (S, S, S), (1.5,)),
-    ('remainder', (S, S, S), (Variable(torch.randn(S, S, S), requires_grad = False),), 'tensor'),
-    ('remainder', (S,), (Variable(torch.randn(S, S, S), requires_grad = False),), 'tensor_broadcast_lhs'),
-    ('remainder', (S, 1, S), (Variable(torch.randn(S, S), requires_grad = False),), 'tensor_broacast_all'),
+    ('remainder', (S, S, S), (Variable(torch.randn(S, S, S), requires_grad=False),), 'tensor'),
+    ('remainder', (S,), (Variable(torch.randn(S, S, S), requires_grad=False),), 'tensor_broadcast_lhs'),
+    ('remainder', (S, 1, S), (Variable(torch.randn(S, S), requires_grad=False),), 'tensor_broacast_all'),
     ('lerp', (S, S, S), ((S, S, S), 0.4)),
     ('lerp', (S, S, S), ((S,), 0.4), 'broadcast_rhs'),
     ('lerp', (S,), ((S, S, S), 0.4), 'broadcast_lhs'),
@@ -1768,75 +1768,7 @@ def unpack_variables(args):
 
 ignore_inplace = set((
     'test_DivConstantFunction_by_tensor',
-    # can't broadcast lhs for inplace functions
-    'test_AddFunction_broadcast_lhs',
-    'test_AddFunction_broadcast_all',
-    'test_SubFunction_broadcast_lhs',
-    'test_SubFunction_broadcast_all',
-    'test_PowFunction_broadcast_lhs',
-    'test_PowFunction_broadcast_all',
-    'test_LerpFunction_broadcast_lhs',
-    'test_LerpFunction_broadcast_all',
-    'test_FmodFunction_tensor_broadcast_lhs',
-    'test_FmodFunction_tensor_broadcast_all',
-    'test_RemainderFunction_tensor_broadcast_lhs',
-    'test_RemainderFunction_tensor_broadcast_all',
-    'test_AddcmulFunction_broadcast_all',
-    'test_AddcmulFunction_broadcast_all_scale',
-    'test_AddcdivFunction_broadcast_all',
-    'test_AddcdivFunction_broadcast_all_scale',
-    'test_AddmmFunction_broadcast_lhs',
-    'test_AddmmFunction_broadcast_lhs_coef',
-    'test_AddbmmFunction_broadcast_lhs',
-    'test_AddbmmFunction_broadcast_lhs_coef',
-    'test_BaddbmmFunction_broadcast_lhs',
-    'test_BaddbmmFunction_broadcast_lhs_coef',
-    'test_AddmvFunction_broadcast_lhs',
-    'test_AddmvFunction_broadcast_lhs_coef',
-    'test_AddrFunction_broadcast_lhs',
-    'test_AddrFunction_broadcast_lhs_coef',
 
-))
-
-ignore_method_inplace = set((
-    'test_add_broadcast_lhs',
-    'test_add_broadcast_all',
-    'test_sub_broadcast_lhs',
-    'test_sub_broadcast_all',
-    'test_pow_broadcast_lhs',
-    'test_pow_broadcast_all',
-    'test_lerp_broadcast_lhs',
-    'test_lerp_broadcast_all',
-    'test_fmod_tensor_broadcast_lhs',
-    'test_fmod_tensor_broadcast_all',
-    'test_remainder_tensor_broadcast_lhs',
-    'test_remainder_tensor_broadcast_all',
-    'test_eq_broadcast_lhs',
-    'test_eq_broadcast_all',
-    'test_ne_broadcast_lhs',
-    'test_ne_broadcast_all',
-    'test_gt_broadcast_lhs',
-    'test_gt_broadcast_all',
-    'test_ge_broadcast_lhs',
-    'test_ge_broadcast_all',
-    'test_lt_broadcast_lhs',
-    'test_lt_broadcast_all',
-    'test_le_broadcast_lhs',
-    'test_le_broadcast_all',
-    'test_addcdiv_broadcast_all',
-    'test_addcdiv_broadcast_all_scale',
-    'test_addcmul_broadcast_all',
-    'test_addcmul_broadcast_all_scale',
-    'test_addmm_broadcast_lhs',
-    'test_addmm_broadcast_lhs_coef',
-    'test_addbmm_broadcast_lhs',
-    'test_addbmm_broadcast_lhs_coef',
-    'test_baddbmm_broadcast_lhs',
-    'test_baddbmm_broadcast_lhs_coef',
-    'test_addmv_broadcast_lhs',
-    'test_addmv_broadcast_lhs_coef',
-    'test_addr_broadcast_lhs',
-    'test_addr_broadcast_lhs_coef',
 ))
 
 
@@ -1893,7 +1825,9 @@ for test in function_tests:
                         self.assertTrue(type(inp.data) == type(inp.grad.data))
                         self.assertTrue(inp.size() == inp.grad.size())
 
-            if test_name not in ignore_inplace and issubclass(cls, InplaceFunction):
+            # can't broadcast inplace to left hand side
+            broadcast_skip_inplace = 'broadcast_lhs' in test_name or 'broadcast_all' in test_name
+            if test_name not in ignore_inplace and not broadcast_skip_inplace and issubclass(cls, InplaceFunction):
                 output = apply_fn(*input)
                 if not isinstance(output, tuple):
                     output = (output,)
@@ -1985,7 +1919,9 @@ for test in method_tests:
 
             check(name)
             inplace_name = name + '_'
-            if hasattr(Variable(torch.ones(1)), inplace_name) and test_name not in ignore_method_inplace:
+            # can't broadcast inplace to left hand side
+            broadcast_skip_inplace = 'broadcast_lhs' in test_name or 'broadcast_all' in test_name
+            if hasattr(Variable(torch.ones(1)), inplace_name) and not broadcast_skip_inplace:
                 try:
                     check(inplace_name)
                 except Exception as e:

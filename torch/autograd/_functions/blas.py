@@ -3,6 +3,7 @@ import torch
 from ..function import Function, InplaceFunction
 from .utils import maybe_unexpand
 
+
 # TODO: no need to save all args if the grad w.r.t. some of them is not needed
 def _get_output(ctx, arg, inplace=False):
     if inplace:
