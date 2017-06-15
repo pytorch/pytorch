@@ -3,10 +3,18 @@
 
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
-#include "caffe2/utils/math.h"
 
 namespace caffe2 {
 namespace detail {
+template <typename T>
+inline T sigmoid(T x) {
+  return 1. / (1. + exp(-x));
+}
+
+template <typename T>
+inline T host_tanh(T x) {
+  return 2. * sigmoid(2. * x) - 1.;
+}
 
 template <typename T, typename Context>
 void LSTMUnit(
@@ -20,8 +28,39 @@ void LSTMUnit(
     bool drop_states,
     T* C,
     T* H,
-    const T& forget_bias,
-    Context* context);
+    const T forget_bias,
+    Context* context) {
+  for (int n = 0; n < N; ++n) {
+    const bool valid = t < seqLengths[n];
+
+    for (int d = 0; d < D; ++d) {
+      if (!valid) {
+        if (drop_states) {
+          H[d] = 0;
+          C[d] = 0;
+        } else {
+          H[d] = H_prev[d];
+          C[d] = C_prev[d];
+        }
+      } else {
+        const T i = sigmoid(X[d]);
+        const T f = sigmoid(X[1 * D + d] + forget_bias);
+        const T o = sigmoid(X[2 * D + d]);
+        const T g = host_tanh(X[3 * D + d]);
+        const T c_prev = C_prev[d];
+        const T c = f * c_prev + i * g;
+        C[d] = c;
+        const T host_tanh_c = host_tanh(c);
+        H[d] = o * host_tanh_c;
+      }
+    }
+    H_prev += D;
+    C_prev += D;
+    X += 4 * D;
+    C += D;
+    H += D;
+  }
+}
 
 template <typename T, typename Context>
 void LSTMUnitGradient(
@@ -40,8 +79,59 @@ void LSTMUnitGradient(
     T* C_prev_diff,
     T* X_diff,
     const T forget_bias,
-    Context* context);
-}; // namespace detail
+    Context* context) {
+  for (int n = 0; n < N; ++n) {
+    const bool valid = t < seqLengths[n];
+
+    for (int d = 0; d < D; ++d) {
+      T* c_prev_diff = C_prev_diff + d;
+      T* h_prev_diff = H_prev_diff + d;
+      T* i_diff = X_diff + d;
+      T* f_diff = X_diff + 1 * D + d;
+      T* o_diff = X_diff + 2 * D + d;
+      T* g_diff = X_diff + 3 * D + d;
+
+      if (!valid) {
+        if (drop_states) {
+          *h_prev_diff = 0;
+          *c_prev_diff = 0;
+        } else {
+          *h_prev_diff = H_diff[d];
+          *c_prev_diff = C_diff[d];
+        }
+        *i_diff = 0;
+        *f_diff = 0;
+        *o_diff = 0;
+        *g_diff = 0;
+      } else {
+        const T i = sigmoid(X[d]);
+        const T f = sigmoid(X[1 * D + d] + forget_bias);
+        const T o = sigmoid(X[2 * D + d]);
+        const T g = host_tanh(X[3 * D + d]);
+        const T c_prev = C_prev[d];
+        const T c = C[d];
+        const T host_tanh_c = host_tanh(c);
+        const T c_term_diff = C_diff[d] + H_diff[d] * o * (1 - host_tanh_c * host_tanh_c);
+        *c_prev_diff = c_term_diff * f;
+        *h_prev_diff = 0; // not used in 'valid' case
+        *i_diff = c_term_diff * g * i * (1 - i);
+        *f_diff = c_term_diff * c_prev * f * (1 - f);
+        *o_diff = H_diff[d] * host_tanh_c * o * (1 - o);
+        *g_diff = c_term_diff * i * (1 - g * g);
+      }
+    }
+    C_prev += D;
+    X += 4 * D;
+    C += D;
+    H += D;
+    C_diff += D;
+    H_diff += D;
+    X_diff += 4 * D;
+    H_prev_diff += D;
+    C_prev_diff += D;
+  }
+}
+} // namespace detail
 
 template <typename T, typename Context>
 class LSTMUnitOp : public Operator<Context> {
