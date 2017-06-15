@@ -175,6 +175,40 @@ Pooling Layers
     :members:
 
 
+Padding Layers
+--------------
+
+:hidden:`ReflectionPad2d`
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: ReflectionPad2d
+    :members:
+
+:hidden:`ReplicationPad2d`
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: ReplicationPad2d
+    :members:
+
+:hidden:`ReplicationPad3d`
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: ReplicationPad3d
+    :members:
+
+:hidden:`ZeroPad2d`
+~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: ZeroPad2d
+    :members:
+
+:hidden:`ConstantPad2d`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: ConstantPad2d
+    :members:
+
+
 Non-linear Activations
 ----------------------------------
 
