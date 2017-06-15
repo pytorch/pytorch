@@ -46,6 +46,7 @@ class TopKOp : public Operator<Context> {
     auto& input = Input(0);
     auto* values = Output(0);
     auto* indices = Output(1);
+    auto* flatten_indices = OutputSize() > 2 ? Output(2) : nullptr;
 
     vector<TIndex> in_dims = input.dims();
     // Linearize input tensor except for last dimension
@@ -66,13 +67,20 @@ class TopKOp : public Operator<Context> {
     vector<TIndex> output_linear_shape = {linear_shape[0], k_};
     values->Resize(output_linear_shape);
     indices->Resize(output_linear_shape);
+    if (flatten_indices) {
+      flatten_indices->Resize(linear_shape[0] * k_);
+    }
 
     // Use Eigen maps to allow indexing into the 2d tensors like values_map(i,j)
     auto values_map = EigenMatrixMapRowMajor<T>(
         values->template mutable_data<T>(), linear_shape[0], k_);
     auto indices_map = EigenMatrixMapRowMajor<TIndex>(
         indices->template mutable_data<TIndex>(), linear_shape[0], k_);
+    auto* flatten_indices_data = flatten_indices
+        ? flatten_indices->template mutable_data<TIndex>()
+        : nullptr;
 
+    TIndex flatten_offset = 0;
     // Sort preserving indices
     for (TIndex i = 0; i < linear_shape[0]; ++i) {
       // Build a min-heap, the heap element is pair of (value, idx)
@@ -98,8 +106,15 @@ class TopKOp : public Operator<Context> {
         auto& pqElem = PQ.top();
         values_map(i, k_ - j - 1) = pqElem.first;
         indices_map(i, k_ - j - 1) = pqElem.second;
+        if (flatten_indices_data) {
+          flatten_indices_data[k_ - j - 1] = pqElem.second + flatten_offset;
+        }
         PQ.pop();
       }
+      if (flatten_indices_data) {
+        flatten_indices_data += k_;
+      }
+      flatten_offset += linear_shape[1];
     }
 
     // Reshape output tensors to [a_1, a_2, ..., a_n, k]
