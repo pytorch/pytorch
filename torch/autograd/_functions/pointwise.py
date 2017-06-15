@@ -365,13 +365,14 @@ class Lerp(Function):
 
     @staticmethod
     def forward(ctx, a, b, weight):
+        ctx._a_size = a.size()
         ctx._b_size = b.size()
         ctx._weight = float(weight)
         return a.lerp(b, ctx._weight)
 
     @staticmethod
     def backward(ctx, grad_output):
-        return grad_output.mul(1 - ctx._weight), maybe_view(grad_output.mul(ctx._weight), ctx._b_size), None
+        return maybe_unexpand(grad_output.mul(1 - ctx._weight), ctx._a_size), maybe_unexpand_or_view(grad_output.mul(ctx._weight), ctx._b_size), None
 
 
 class Rsqrt(InplaceFunction):
