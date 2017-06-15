@@ -1,17 +1,21 @@
+from __future__ import unicode_literals
+
+from inspect import currentframe, getframeinfo
+import unittest
+
+from future.utils import bytes_to_native_str
+import numpy as np
+
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace, test_util
-
-import unittest
-import numpy as np
-from inspect import currentframe, getframeinfo
 
 
 def _remove_uuid(proto):
     if isinstance(proto, caffe2_pb2.NetDef):
         for op in proto.op:
-            op.ClearField('uuid')
+            op.ClearField(bytes_to_native_str(b'uuid'))
     elif isinstance(proto, caffe2_pb2.OperatorDef):
-        proto.ClearField('uuid')
+        proto.ClearField(bytes_to_native_str(b'uuid'))
     return proto
 
 class TestScopes(test_util.TestCase):
