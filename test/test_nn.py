@@ -2328,34 +2328,52 @@ class TestNN(NNTestCase):
 
         self.assertTrue(gradcheck(lambda x1, x2: F.bilinear(x1, x2, module.weight, module.bias), (input1_1, input2_1)))
 
-    def run_conv_double_back_test(self, kern, stride, padding, chan_in, chan_out,
-                                  batch_size, inp_size, dilation, no_weight, use_cuda=False):
+    def run_conv_double_back_test(self, kern, stride, padding, chan_in, chan_out, batch_size,
+                                  inp_size, dilation, no_weight, use_cuda=False, use_bias=True):
         x = torch.randn(batch_size, chan_in, inp_size, inp_size)
         weight = torch.randn(chan_out, chan_in, kern, kern)
-        bias = torch.randn(chan_out)
+        if use_bias:
+            bias = torch.randn(chan_out)
+        else:
+            bias = None
         if use_cuda:
             x = x.cuda()
             weight = weight.cuda()
-            bias = bias.cuda()
+            if use_bias:
+                bias = bias.cuda()
         x = Variable(x, requires_grad=True)
         weight = Variable(weight, requires_grad=True)
-        bias = Variable(bias, requires_grad=True)
+        if use_bias:
+            bias = Variable(bias, requires_grad=True)
 
         if no_weight:
             # Special case because transpose dilated convolution is not implemented
-            def func(x, bias):
+            def func(*inputs):
+                if use_bias:
+                    x, bias = inputs
+                else:
+                    x, = inputs
+                    bias = None
                 # We disable cudnn during forward to avoid finite difference imprecision issues
                 with use_cudnn(False):
                     out = F.conv2d(x, weight, bias, stride, padding, dilation)
                 return out
             inputs = (x, bias,)
         else:
-            def func(x, weight, bias):
+            def func(*inputs):
+                if use_bias:
+                    x, weight, bias = inputs
+                else:
+                    x, weight = inputs
+                    bias = None
                 # We disable cudnn during forward to avoid finite difference imprecision issues
                 with use_cudnn(False):
                     out = F.conv2d(x, weight, bias, stride, padding, dilation)
                 return out
             inputs = (x, weight, bias,)
+
+        if not use_bias:
+            inputs = inputs[:-1]
 
         dummy_out = func(*inputs)
         grad_y = torch.randn(dummy_out.size())
@@ -2384,6 +2402,31 @@ class TestNN(NNTestCase):
                                 "\nbatch_size: " + str(batch_size) +
                                 "\ninp_size: " + str(inp_size) +
                                 "\ndilation: " + str(dilation))
+
+    def test_conv_double_backward_no_bias(self):
+        kern = 3
+        stride = 1
+        padding = 2
+        chan_in, chan_out = 2, 4
+        batch_size = 2
+        inp_size = 6
+        dilation = 1
+        no_weight = False
+        use_bias = True
+        result = self.run_conv_double_back_test(kern, stride,
+                                                padding, chan_in, chan_out,
+                                                batch_size, inp_size, dilation,
+                                                no_weight, use_bias=use_bias)
+        self.assertTrue(result,
+                        "Conv double backward test failed with parameters:" +
+                        "\nkern: " + str(kern) +
+                        "\nstride: " + str(stride) +
+                        "\npadding: " + str(padding) +
+                        "\nchan_in: " + str(chan_in) +
+                        "\nchan_out: " + str(chan_out) +
+                        "\nbatch_size: " + str(batch_size) +
+                        "\ninp_size: " + str(inp_size) +
+                        "\ndilation: " + str(dilation))
 
     def test_error_conv_double_backward(self):
         batch_size = 2
