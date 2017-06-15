@@ -37,6 +37,13 @@ struct Node {
   virtual std::string name() const = 0;
 };
 
+struct InputNode : public Node {
+  InputNode()
+    : Node({})
+    {}
+  virtual std::string name() const override;
+};
+
 struct PyNode : public Node {
   PyNode(PyObject* pyobj, std::vector<Output> inputs)
     : Node(inputs)
