@@ -110,7 +110,7 @@ def run(declarations):
             declaration,
             allow_kwarg=False,
             type_to_signature=TYPE_FORMAL_GENERIC,
-            ignore_self=True)
+            remove_self=True)
         common_with_cwrap.sort_by_number_of_options(declaration)
         new_options = []
         for option in declaration['options']:
