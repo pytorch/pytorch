@@ -8,9 +8,34 @@ from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
+import random
 
 
 class TestUtilityOps(hu.HypothesisTestCase):
+
+    @given(X=hu.tensor(), neg=st.booleans(), **hu.gcs)
+    def test_slice(self, X, neg, gc, dc):
+        X = X.astype(dtype=np.float32)
+        dim = random.randint(0, X.ndim - 1)
+        slice_start = random.randint(0, X.shape[dim] - 1)
+        slice_end = random.randint(slice_start, X.shape[dim] - 1)
+        starts = np.array([0] * X.ndim).astype(np.int32)
+        ends = np.array([-1] * X.ndim).astype(np.int32)
+        starts[dim] = slice_start
+        ends[dim] = slice_end
+
+        op = core.CreateOperator(
+            "Slice", ["X", "starts", "ends"], ["Y"], device_option=gc
+        )
+
+        def slice_ref(X, starts, ends):
+            slc = [slice(None)] * X.ndim
+            slc[dim] = slice(slice_start, slice_end)
+            return [X[slc]]
+
+        self.assertReferenceChecks(gc, op, [X, starts, ends], slice_ref)
+
+        self.assertDeviceChecks(dc, op, [X, starts, ends], [0])
 
     @given(dtype=st.sampled_from([np.float32, np.int32, np.int64]),
            ndims=st.integers(min_value=1, max_value=5),
