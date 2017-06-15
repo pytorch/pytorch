@@ -393,18 +393,19 @@ def _InceptionModule(
     conv5_depths, pool_depth
 ):
     # path 1: 1x1 conv
-    conv1 = model.Conv(
-        input_blob, output_name + ":conv1", input_depth, conv1_depth, 1,
+    conv1 = brew.conv(
+        model, input_blob, output_name + ":conv1", input_depth, conv1_depth, 1,
         ('XavierFill', {}), ('ConstantFill', {})
     )
-    conv1 = model.Relu(conv1, conv1)
+    conv1 = brew.relu(model, conv1, conv1)
     # path 2: 1x1 conv + 3x3 conv
-    conv3_reduce = model.Conv(
-        input_blob, output_name + ":conv3_reduce", input_depth, conv3_depths[0],
-        1, ('XavierFill', {}), ('ConstantFill', {})
+    conv3_reduce = brew.conv(
+        model, input_blob, output_name + ":conv3_reduce", input_depth,
+        conv3_depths[0], 1, ('XavierFill', {}), ('ConstantFill', {})
     )
-    conv3_reduce = model.Relu(conv3_reduce, conv3_reduce)
-    conv3 = model.Conv(
+    conv3_reduce = brew.relu(model, conv3_reduce, conv3_reduce)
+    conv3 = brew.conv(
+        model,
         conv3_reduce,
         output_name + ":conv3",
         conv3_depths[0],
@@ -414,14 +415,15 @@ def _InceptionModule(
         ('ConstantFill', {}),
         pad=1
     )
-    conv3 = model.Relu(conv3, conv3)
+    conv3 = brew.relu(model, conv3, conv3)
     # path 3: 1x1 conv + 5x5 conv
-    conv5_reduce = model.Conv(
-        input_blob, output_name + ":conv5_reduce", input_depth, conv5_depths[0],
-        1, ('XavierFill', {}), ('ConstantFill', {})
+    conv5_reduce = brew.conv(
+        model, input_blob, output_name + ":conv5_reduce", input_depth,
+        conv5_depths[0], 1, ('XavierFill', {}), ('ConstantFill', {})
     )
-    conv5_reduce = model.Relu(conv5_reduce, conv5_reduce)
-    conv5 = model.Conv(
+    conv5_reduce = brew.relu(model, conv5_reduce, conv5_reduce)
+    conv5 = brew.conv(
+        model,
         conv5_reduce,
         output_name + ":conv5",
         conv5_depths[0],
@@ -431,30 +433,32 @@ def _InceptionModule(
         ('ConstantFill', {}),
         pad=2
     )
-    conv5 = model.Relu(conv5, conv5)
+    conv5 = brew.relu(model, conv5, conv5)
     # path 4: pool + 1x1 conv
-    pool = model.MaxPool(
+    pool = brew.max_pool(
+        model,
         input_blob,
         output_name + ":pool",
         kernel=3,
         stride=1,
         pad=1
     )
-    pool_proj = model.Conv(
-        pool, output_name + ":pool_proj", input_depth, pool_depth, 1,
+    pool_proj = brew.conv(
+        model, pool, output_name + ":pool_proj", input_depth, pool_depth, 1,
         ('XavierFill', {}), ('ConstantFill', {})
     )
-    pool_proj = model.Relu(pool_proj, pool_proj)
-    output = model.Concat([conv1, conv3, conv5, pool_proj], output_name)
+    pool_proj = brew.relu(model, pool_proj, pool_proj)
+    output = brew.concat(model, [conv1, conv3, conv5, pool_proj], output_name)
     return output
 
 
 def Inception(order, cudnn_ws, mkl):
-    model = cnn.CNNModelHelper(
-        order, name="inception",
-        use_cudnn=True, cudnn_exhaustive_search=True,
-        ws_nbytes_limit=cudnn_ws)
-    conv1 = model.Conv(
+    my_arg_scope = {'order': order, 'use_cudnn': True,
+                    'cudnn_exhaustive_search': True,
+                    'ws_nbytes_limit': str(cudnn_ws)}
+    model = ModelHelper(name="inception", arg_scope=my_arg_scope)
+    conv1 = brew.conv(
+        model,
         "data",
         "conv1",
         3,
@@ -465,13 +469,15 @@ def Inception(order, cudnn_ws, mkl):
         stride=2,
         pad=3
     )
-    relu1 = model.Relu(conv1, "conv1")
-    pool1 = model.MaxPool(relu1, "pool1", kernel=3, stride=2, pad=1)
-    conv2a = model.Conv(
-        pool1, "conv2a", 64, 64, 1, ('XavierFill', {}), ('ConstantFill', {})
+    relu1 = brew.relu(model, conv1, "conv1")
+    pool1 = brew.max_pool(model, relu1, "pool1", kernel=3, stride=2, pad=1)
+    conv2a = brew.conv(
+        model, pool1, "conv2a", 64, 64, 1,
+        ('XavierFill', {}), ('ConstantFill', {})
     )
-    conv2a = model.Relu(conv2a, conv2a)
-    conv2 = model.Conv(
+    conv2a = brew.relu(model, conv2a, conv2a)
+    conv2 = brew.conv(
+        model,
         conv2a,
         "conv2",
         64,
@@ -481,8 +487,8 @@ def Inception(order, cudnn_ws, mkl):
         ('ConstantFill', {}),
         pad=1
     )
-    relu2 = model.Relu(conv2, "conv2")
-    pool2 = model.MaxPool(relu2, "pool2", kernel=3, stride=2, pad=1)
+    relu2 = brew.relu(model, conv2, "conv2")
+    pool2 = brew.max_pool(model, relu2, "pool2", kernel=3, stride=2, pad=1)
     # Inception modules
     inc3 = _InceptionModule(
         model, pool2, 192, "inc3", 64, [96, 128], [16, 32], 32
@@ -490,7 +496,7 @@ def Inception(order, cudnn_ws, mkl):
     inc4 = _InceptionModule(
         model, inc3, 256, "inc4", 128, [128, 192], [32, 96], 64
     )
-    pool5 = model.MaxPool(inc4, "pool5", kernel=3, stride=2, pad=1)
+    pool5 = brew.max_pool(model, inc4, "pool5", kernel=3, stride=2, pad=1)
     inc5 = _InceptionModule(
         model, pool5, 480, "inc5", 192, [96, 208], [16, 48], 64
     )
@@ -506,21 +512,22 @@ def Inception(order, cudnn_ws, mkl):
     inc9 = _InceptionModule(
         model, inc8, 528, "inc9", 256, [160, 320], [32, 128], 128
     )
-    pool9 = model.MaxPool(inc9, "pool9", kernel=3, stride=2, pad=1)
+    pool9 = brew.max_pool(model, inc9, "pool9", kernel=3, stride=2, pad=1)
     inc10 = _InceptionModule(
         model, pool9, 832, "inc10", 256, [160, 320], [32, 128], 128
     )
     inc11 = _InceptionModule(
         model, inc10, 832, "inc11", 384, [192, 384], [48, 128], 128
     )
-    pool11 = model.AveragePool(inc11, "pool11", kernel=7, stride=1)
-    fc = model.FC(
-        pool11, "fc", 1024, 1000, ('XavierFill', {}), ('ConstantFill', {})
+    pool11 = brew.average_pool(model, inc11, "pool11", kernel=7, stride=1)
+    fc = brew.fc(
+        model, pool11, "fc", 1024, 1000,
+        ('XavierFill', {}), ('ConstantFill', {})
     )
     # It seems that Soumith's benchmark does not have softmax on top
     # for Inception. We will add it anyway so we can have a proper
     # backward pass.
-    pred = model.Softmax(fc, "pred")
+    pred = brew.softmax(model, fc, "pred")
     xent = model.LabelCrossEntropy([pred, "label"], "xent")
     if not mkl:
         loss = model.AveragedLoss(xent, "loss")
