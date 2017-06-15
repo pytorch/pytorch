@@ -60,6 +60,20 @@ auto Variable::get_grad_accumulator() -> std::shared_ptr<Function> {
   return result;
 }
 
+auto Variable::get_input_node() -> std::shared_ptr<InputNode> {
+  if (trace_fn) {
+    throw std::logic_error("get_input_node() should be only called on leaf Variables");
+  }
+  std::lock_guard<std::mutex> lock(input_node_lock);
+
+  auto result = input_node.lock();
+  if (result) return result;
+
+  result = std::make_shared<InputNode>();
+  input_node = result;
+  return result;
+}
+
 auto SavedVariable::unpack(std::shared_ptr<Function> saved_for) -> std::shared_ptr<Variable> {
   if (!data.defined()) {
     if (version) {

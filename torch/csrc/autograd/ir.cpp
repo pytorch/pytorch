@@ -6,6 +6,10 @@
 
 namespace torch { namespace autograd {
 
+std::string InputNode::name() const {
+  return std::string("Variable");
+}
+
 std::string PyNode::name() const {
   AutoGIL gil;
   // NB: hypothetically __name__ could mutate the Python
