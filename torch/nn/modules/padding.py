@@ -1,6 +1,6 @@
 from .module import Module
 from .utils import _quadruple, _ntuple
-from .._functions.padding import ConstantPad2d as F_ConstantPad2d
+from .. import functional as F
 
 # TODO: grad_output size asserts in THNN
 
@@ -34,7 +34,7 @@ class ReflectionPad2d(Module):
         self.padding = _quadruple(padding)
 
     def forward(self, input):
-        return self._backend.ReflectionPad2d(*self.padding)(input)
+        return F.pad(input, self.padding, 'reflect')
 
     def __repr__(self):
         return self.__class__.__name__ + ' ' + str(self.padding)
@@ -69,7 +69,7 @@ class ReplicationPad2d(Module):
         self.padding = _quadruple(padding)
 
     def forward(self, input):
-        return self._backend.ReplicationPad2d(*self.padding)(input)
+        return F.pad(input, self.padding, 'replicate')
 
     def __repr__(self):
         return self.__class__.__name__ + ' ' + str(self.padding)
@@ -106,7 +106,7 @@ class ReplicationPad3d(Module):
         self.padding = _ntuple(6)(padding)
 
     def forward(self, input):
-        return self._backend.ReplicationPad3d(*self.padding)(input)
+        return F.pad(input, self.padding, 'replicate')
 
     def __repr__(self):
         return self.__class__.__name__ + ' ' + str(self.padding)
@@ -141,7 +141,7 @@ class ZeroPad2d(Module):
         self.padding = _quadruple(padding)
 
     def forward(self, input):
-        return F_ConstantPad2d(pad=self.padding, value=0)(input)
+        return F.pad(input, self.padding, 'constant', 0)
 
     def __repr__(self):
         return self.__class__.__name__ + ' ' + str(self.padding)
@@ -177,7 +177,7 @@ class ConstantPad2d(Module):
         self.value = value
 
     def forward(self, input):
-        return F_ConstantPad2d(pad=self.padding, value=self.value)(input)
+        return F.pad(input, self.padding, 'constant', self.value)
 
     def __repr__(self):
         return self.__class__.__name__ + ' ' + str(self.padding)
