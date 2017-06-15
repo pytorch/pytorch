@@ -10,18 +10,30 @@ REGISTER_CPU_OPERATOR(TopKGradient, TopKGradientOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(TopK)
     .NumInputs(1)
-    .NumOutputs(2)
-    .TensorInferenceFunction(
-        [](const OperatorDef& def, const vector<TensorShape>& in) {
-          vector<TensorShape> out = {in[0], in[0]};
-          ArgumentHelper helper(def);
-          auto k = helper.GetSingleArgument("k", -1);
-          auto dims_size = in[0].dims_size();
-          out[0].set_dims(dims_size - 1, k);
-          out[1].set_dims(dims_size - 1, k);
-          out[1].set_data_type(TensorProto_DataType_INT32);
-          return out;
-        })
+    .NumOutputs(2, 3)
+    .TensorInferenceFunction([](const OperatorDef& def,
+                                const vector<TensorShape>& in) {
+      vector<TensorShape> out = {in[0], in[0]};
+      ArgumentHelper helper(def);
+      auto k = helper.GetSingleArgument("k", -1);
+      auto dims_size = in[0].dims_size();
+      out[0].set_dims(dims_size - 1, k);
+      out[1].set_dims(dims_size - 1, k);
+      out[1].set_data_type(TensorProto_DataType_INT32);
+      if (def.output_size() > 2) {
+        TensorShape flatten_indices_shape;
+        flatten_indices_shape.set_data_type(TensorProto_DataType_INT32);
+        flatten_indices_shape.add_dims(
+            std::accumulate(
+                in[0].dims().begin(),
+                in[0].dims().end() - 1,
+                1,
+                std::multiplies<long>()) *
+            k);
+        out.push_back(flatten_indices_shape);
+      }
+      return out;
+    })
     .SetDoc(R"DOC(
 Retrieve the top-K elements for the last dimension. Given an input tensor of
 shape [a_1, a_2, ..., a_n, r] and integer argument k, return two outputs:
@@ -45,6 +57,11 @@ first.
         "Indices",
         "Tensor of shape [a_1, a_2, ..., a_n, k] containing"
         " the corresponding input tensor indices for the top K values.")
+    .Output(
+        2,
+        "Flatten indices",
+        "Tensor of shape [a_1 * a_2 * ... * a_n * k] containing the indices "
+        "into the flatten input")
     .Arg("k", "Number of top elements to retrieve");
 
 OPERATOR_SCHEMA(TopKGradient).NumInputs(3).NumOutputs(1);
