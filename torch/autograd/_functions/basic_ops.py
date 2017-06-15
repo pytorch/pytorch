@@ -1,6 +1,6 @@
 import torch
 from ..function import Function, InplaceFunction, once_differentiable
-from .utils import maybe_view, maybe_unexpand, maybe_unexpand_or_view
+from .utils import  maybe_unexpand, maybe_unexpand_or_view
 import math
 
 

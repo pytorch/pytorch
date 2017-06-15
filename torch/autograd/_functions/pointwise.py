@@ -3,7 +3,7 @@ from itertools import repeat
 from ..._thnn import type2backend
 from ..function import Function, InplaceFunction
 from ..variable import Variable
-from .utils import maybe_view, maybe_unexpand, maybe_unexpand_or_view
+from .utils import maybe_unexpand, maybe_unexpand_or_view
 
 
 class Exp(InplaceFunction):
