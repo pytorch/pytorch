@@ -1005,14 +1005,15 @@ class GradientRegistry(object):
             gradient_ops, g_input = cls._GetGradientForOpCC(op, g_output)
         except Exception as e:
             # Not supported in C++; will try python registration next.
-
-            try:
+            if op.type in cls.gradient_registry_:
                 gradient_ops, g_input = cls.gradient_registry_[op.type](
-                    op, g_output)
-            except KeyError:
+                    op, g_output
+                )
+            else:
                 raise Exception(
-                    "No gradient registered for {}. ".format(op.type) +
-                    "Exception from creating the gradient op: {}.".format(e))
+                    "Exception when creating the gradient for [{}]: {}.".
+                    format(op.type, e)
+                )
 
         if gradient_ops is None:
             return [], g_input
@@ -1198,16 +1199,16 @@ def _get_blob_ref(blob_name_or_ref):
 
 
 def _recover_record_by_prefix(names, prefix=''):
-        """
+    """
         Tries to recover record by taking a subset of blob names with
         a given prefix name and interpreting them as schema column names
         """
-        from caffe2.python import schema
-        column_names = [name[len(prefix):] for name in names
-                        if name.startswith(prefix)]
-        return schema.from_column_list(
-            column_names,
-            col_blobs=[_get_blob_ref(prefix + name) for name in column_names])
+    from caffe2.python import schema
+    column_names = [name[len(prefix):] for name in names
+                    if name.startswith(prefix)]
+    return schema.from_column_list(
+        column_names,
+        col_blobs=[_get_blob_ref(prefix + name) for name in column_names])
 
 
 class Net(object):

@@ -871,6 +871,16 @@ class TestGradientsAccumulationWithPassThroughGradients(test_util.TestCase):
         print("Input grad: ", workspace.blobs[grad_map[str(input)]])
         assert workspace.blobs[grad_map[str(input)]] == 5.0
 
+    def testIncorrectOperator(self):
+        net = core.Net("test_net")
+        a, b, one = net.AddExternalInput("a", "b", "one")
+        m1 = net.Mul(a, b)  # does not have second output
+        sub = net.Sub([m1, one])
+        try:
+            net.AddGradientOperators([sub])
+            self.assertFalse(True, "Did not throw exception")
+        except Exception as e:
+            self.assertTrue("schema" in str(e))
 
 
 if __name__ == '__main__':
