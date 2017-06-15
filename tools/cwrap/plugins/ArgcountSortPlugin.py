@@ -1,4 +1,12 @@
+import os
 from . import CWrapPlugin
+from ...shared import import_module
+
+BASE_PATH = os.path.realpath(os.path.join(__file__, '..', '..', '..', '..'))
+TENSORLIB_PATH = os.path.join(BASE_PATH, 'torch', 'lib', 'TensorLib',
+                              'common_with_cwrap.py')
+
+tensorlib_common = import_module('torch.lib.TensorLib.common_with_cwrap', TENSORLIB_PATH)
 
 
 class ArgcountSortPlugin(CWrapPlugin):
@@ -7,8 +15,7 @@ class ArgcountSortPlugin(CWrapPlugin):
         self.descending = descending
 
     def process_declarations(self, declarations):
-        def num_checked_args(option):
-            return sum(map(lambda a: not a.get('ignore_check', False), option['arguments']))
         for declaration in declarations:
-            declaration['options'].sort(key=num_checked_args, reverse=self.descending)
+            tensorlib_common.sort_by_number_of_options(declaration,
+                                                       self.descending)
         return declarations
