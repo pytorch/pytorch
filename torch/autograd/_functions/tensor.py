@@ -4,6 +4,7 @@ from torch._utils import _accumulate
 
 from ..function import Function, InplaceFunction, once_differentiable
 from ..variable import Variable
+from .utils import maybe_unexpand
 
 
 class Index(Function):
@@ -400,6 +401,7 @@ class MaskedFill(InplaceFunction):
     @staticmethod
     def forward(ctx, tensor, mask, value, inplace=False):
         assert not ctx.needs_input_grad[1], "MaskedFill can't differentiate the mask"
+        ctx.tensor_size = tensor.size()
         if not inplace:
             tensor = tensor.clone()
         else:
@@ -413,7 +415,7 @@ class MaskedFill(InplaceFunction):
         mask, = ctx.saved_tensors
         grad_tensor = None
         if ctx.needs_input_grad[0]:
-            grad_tensor = grad_output.clone().masked_fill_(mask, 0)
+            grad_tensor = maybe_unexpand(grad_output.clone().masked_fill_(mask, 0), ctx.tensor_size)
         return grad_tensor, None, None, None
 
 

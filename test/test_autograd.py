@@ -576,6 +576,7 @@ class TestAutograd(TestCase):
             (x.lerp(y(), 0.5)).sum().backward()
             (x.max(y())).sum().backward()
             (x.min(y())).sum().backward()
+            (x.masked_fill(y() < 0, 0.5)).sum().backward()
             (x.addcmul(1, y(), z())).sum().backward()
             (x.addcdiv(1, y(), z())).sum().backward()
             (x.abs() ** y()).sum().backward()
@@ -1514,6 +1515,8 @@ function_tests = [
     (Unsqueeze, (), ((S, M, S), 1), '1'),
     # (MaskedCopy,    (),                 ((S, S), Variable(torch.randn(S, S).gt(0), requires_grad=False), (S, S),)),
     (MaskedFill, (), ((S, S), Variable(torch.randn(S, S).gt(0), requires_grad=False), 10)),
+    # no lhs or all broadcast on masked_fill because it's always inplace
+    (MaskedFill, (), ((S, S), Variable(torch.randn(S,).gt(0), requires_grad=False), 10), 'broadcast_rhs'),
     (MaskedSelect, (), ((S, S), Variable(torch.randn(S, S).gt(0), requires_grad=False))),
     (Sort, (), ((S, M, S),)),
     (Sort, (), ((S, M, S), 1), 'dim'),
@@ -1750,6 +1753,8 @@ method_tests = [
     ('unsqueeze', (S, S, S), (3,), 'last', [0]),
     ('masked_select', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False),)),
     ('masked_fill_', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False), 10)),
+    # no lhs or all broadcast on masked_fill because it's always inplace
+    ('masked_fill_', (M, M), (Variable(torch.ByteTensor(M,).bernoulli_(), requires_grad=False), 10), 'broadcast_rhs'),
     ('masked_scatter_', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False), (M, M))),
 ]
 # TODO: mm, bmm, mv, ger
