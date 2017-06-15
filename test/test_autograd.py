@@ -1317,6 +1317,9 @@ function_tests = [
     (Div, (), ((M, ), torch.rand(M, M) + 5e-2), 'broadcast_lhs'),
     (Div, (), ((M, 1, M), torch.rand(S, M) + 5e-2), 'broadcast_both'),
     (Pow, (), (torch.rand(M, M) + 1e-3, torch.rand(M, M) + 0.1)),
+    (Pow, (), (torch.rand(M, M) + 1e-3, torch.rand(M,) + 0.1), 'broadcast_rhs'),
+    (Pow, (), (torch.rand(M, ) + 1e-3, torch.rand(M, M) + 0.1), 'broadcast_lhs'),
+    (Pow, (), (torch.rand(M, 1) + 1e-3, torch.rand(1, M) + 0.1), 'broadcast_both'),
     (AddConstant, (), ((2, 2), 3.14)),
     (AddConstant, (), (3.14, (2, 2)), 'add_tensor'),
     (SubConstant, (), ((L, L), 3.14)),
@@ -1524,6 +1527,9 @@ method_tests = [
     ('div', (S, 1, S), ((M, S),), 'broadcast_both'),
     ('div', (S, S, S), (3.14,), 'constant'),
     ('pow', (S, S, S), ((S, S, S),)),
+    ('pow', (S, S, S), ((1,),), 'broadcast_rhs'),
+    ('pow', (1,), ((S, S, S),), 'broadcast_lhs'),
+    ('pow', (S, 1, S), ((1, S, 1),), 'broadcast_both'),
     ('pow', (S, S, S), (3.14,), 'constant'),
     ('transpose', (1, 2, 3), (1, 2), 'dim', [0, 1]),
     ('t', (1, 2), ()),
@@ -1728,6 +1734,8 @@ ignore_inplace = set((
     'test_AddFunction_broadcast_both',
     'test_SubFunction_broadcast_lhs',
     'test_SubFunction_broadcast_both',
+    'test_PowFunction_broadcast_lhs',
+    'test_PowFunction_broadcast_all',
     'test_AddcmulFunction_broadcast_all',
     'test_AddcmulFunction_broadcast_all_scale',
     'test_AddcdivFunction_broadcast_all',
@@ -1742,6 +1750,7 @@ ignore_inplace = set((
     'test_AddmvFunction_broadcast_lhs_coef',
     'test_AddrFunction_broadcast_lhs',
     'test_AddrFunction_broadcast_lhs_coef',
+
 ))
 
 ignore_method_inplace = set((
@@ -1749,6 +1758,8 @@ ignore_method_inplace = set((
     'test_add_broadcast_both',
     'test_sub_broadcast_lhs',
     'test_sub_broadcast_both',
+    'test_pow_broadcast_lhs',
+    'test_pow_broadcast_both',
     'test_addcdiv_broadcast_all',
     'test_addcdiv_broadcast_all_scale',
     'test_addcmul_broadcast_all',
