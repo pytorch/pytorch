@@ -19,6 +19,7 @@ variable_list wrap_outputs(const variable_list& inputs, tensor_list&& outputs,
       if (output) {
         result.emplace_back(std::make_shared<Variable>(std::move(output), grad_fn));
       } else {
+        ++grad_fn->num_inputs;
         result.emplace_back(nullptr);
       }
     }
