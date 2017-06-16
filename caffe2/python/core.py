@@ -1200,12 +1200,14 @@ def _get_blob_ref(blob_name_or_ref):
 
 def _recover_record_by_prefix(names, prefix=''):
     """
-        Tries to recover record by taking a subset of blob names with
-        a given prefix name and interpreting them as schema column names
-        """
+    Tries to recover record by taking a subset of blob names with
+    a given prefix name and interpreting them as schema column names
+    """
     from caffe2.python import schema
     column_names = [name[len(prefix):] for name in names
                     if name.startswith(prefix)]
+    if not column_names:
+        return None
     return schema.from_column_list(
         column_names,
         col_blobs=[_get_blob_ref(prefix + name) for name in column_names])
@@ -1745,8 +1747,9 @@ class Net(object):
         Tries to recover input record by taking a subset of external_inputs with
         a given prefix name and interpreting them as schema column names
         """
-        self.set_input_record(_recover_record_by_prefix(
-            self._net.external_input, prefix))
+        record = _recover_record_by_prefix(self._net.external_input, prefix)
+        if record:
+            self.set_input_record(record)
 
     def set_output_record(self, record):
         assert self._output_record is None, (
@@ -1762,8 +1765,9 @@ class Net(object):
         Tries to recover out record by taking a subset of external_outputs with
         a given prefix name and interpreting them as schema column names
         """
-        self.set_output_record(_recover_record_by_prefix(
-            self._net.external_output, prefix))
+        record = _recover_record_by_prefix(self._net.external_output, prefix)
+        if record:
+            self.set_output_record(record)
 
     def AppendOutputRecordField(self, field_name, record):
         from caffe2.python import schema

@@ -18,7 +18,7 @@ from __future__ import unicode_literals
 from caffe2.python import core, workspace
 from caffe2.python.dataio import Reader, Writer
 from caffe2.python.schema import (
-    Struct, from_blob_list, Field, from_column_list, InitEmptyRecord)
+    Struct, from_blob_list, from_column_list, InitEmptyRecord)
 import numpy as np
 
 
