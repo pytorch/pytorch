@@ -30,7 +30,9 @@ class PrefetchOperator : public OperatorBase {
         context_(operator_def.device_option()),
         prefetched_(false),
         prefetch_success_(true),
-        finalize_(false) {}
+        finalize_(false) {
+    context_.SwitchToDevice(0);
+  }
 
   virtual ~PrefetchOperator() noexcept {
     CHECK(finalize_ || !prefetch_thread_.get()) <<
