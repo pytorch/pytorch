@@ -74,6 +74,13 @@ def Parallelize_GPU(
     '''
     if devices is None:
         devices = list(range(0, workspace.NumCudaDevices())),
+
+    for gpu in devices:
+        if gpu >= workspace.NumCudaDevices():
+            log.warning("** Only {} GPUs available, GPUs {} requested".format(
+                workspace.NumCudaDevices(), devices))
+            break
+
     log.info("Parallelizing model for devices: {}".format(devices))
     extra_workers = 8 if rendezvous is not None else 0  # best-guess
     num_workers = len(devices) * 4 + extra_workers
