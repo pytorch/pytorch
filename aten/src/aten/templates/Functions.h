@@ -10,7 +10,7 @@
 
 namespace tlib {
 
-Tensor & copy_out(const Tensor & src, Tensor & dst) {
+static inline Tensor & copy_out(const Tensor & src, Tensor & dst) {
   dst.resize_(src.sizes());
   dst.type().copy(src,dst);
 }
