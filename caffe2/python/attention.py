@@ -96,7 +96,8 @@ def _calc_attention_logits_from_sum_match(
         axis=2,
     )
     # [batch_size, encoder_length, 1]
-    attention_logits_transposed = model.Transpose(
+    attention_logits_transposed = brew.transpose(
+        model,
         attention_logits,
         s(scope, 'attention_logits_transposed'),
         axes=[1, 0, 2],

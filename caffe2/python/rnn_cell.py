@@ -707,7 +707,8 @@ class AttentionCell(RNNCell):
 
     def prepare_input(self, model, input_blob):
         if self.encoder_outputs_transposed is None:
-            self.encoder_outputs_transposed = model.Transpose(
+            self.encoder_outputs_transposed = brew.transpose(
+                model,
                 self.encoder_outputs,
                 self.scope('encoder_outputs_transposed'),
                 axes=[1, 2, 0],

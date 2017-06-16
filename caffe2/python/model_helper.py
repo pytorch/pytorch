@@ -56,6 +56,7 @@ _known_working_ops = [
     "StopGradient",
     "Summarize",
     "Tanh",
+    "Transpose",
     "UnpackSegments",
     "WeightedSum",
     "ReduceFrontSum",
