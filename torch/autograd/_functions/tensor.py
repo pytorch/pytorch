@@ -4,7 +4,7 @@ from torch._utils import _accumulate
 
 from ..function import Function, InplaceFunction, once_differentiable
 from ..variable import Variable
-from .utils import maybe_unexpand
+from .utils import maybe_unexpand, variable_expandable
 
 
 class Index(Function):
@@ -377,6 +377,7 @@ class MaskedScatter(InplaceFunction):
     @staticmethod
     def forward(ctx, tensor1, mask, tensor2, inplace=False):
         assert not ctx.needs_input_grad[1], "MaskedScatter can't differentiate the mask"
+        ctx.tensor1_size = tensor1.size()
         ctx.tensor2_size = tensor2.size()
         if not inplace:
             tensor1 = tensor1.clone()
@@ -391,10 +392,13 @@ class MaskedScatter(InplaceFunction):
         mask, = ctx.saved_tensors
         grad_tensor1 = grad_tensor2 = None
         if ctx.needs_input_grad[0]:
-            grad_tensor1 = grad_output.clone().masked_fill_(mask, 0)
+            grad_tensor1 = maybe_unexpand(grad_output.clone().masked_fill_(mask, 0), ctx.tensor1_size)
         if ctx.needs_input_grad[2]:
             grad_tensor2 = grad_output.new(ctx.tensor2_size).zero_()
-            grad_output.masked_select(mask, out=grad_tensor2.view(-1))
+            # mask is potentially expanded against tensor1
+            mask_expanded = mask.expand(ctx.tensor1_size) if variable_expandable(mask, ctx.tensor1_size) else mask
+            grad_output.masked_select(mask_expanded, out=grad_tensor2.view(-1))
+            grad_tensor2 = maybe_unexpand(grad_tensor2, ctx.tensor2_size)
         return grad_tensor1, None, grad_tensor2, None
 
 
