@@ -65,21 +65,30 @@ def add_variants(option):
 # is disabled...
 
 
-def handle_outputs_taken_as_arguments(options, option):
-    if any('output' in arg for arg in option['arguments']) and \
-       'function' in option['variants']:
-        allocate_option = deepcopy(option)
-        # the original option, which takes arguments for the results,
-        # is not longer a method, and has _out added to indicte it takes
-        # output arguments
-        if 'method' in option['variants']:
-            option['variants'].remove('method')
-        option['api_name'] += '_out'
-        # the allocating option needs to be marked
-        for arg in allocate_option['arguments']:
-            if 'output' in arg:
-                arg['allocate'] = True
-        options.append(allocate_option)
+def handle_outputs_taken_as_arguments(options):
+    new_options = []
+    for option in options:
+        if any('output' in arg for arg in option['arguments']):
+            allocate_option = deepcopy(option)
+            # the allocating option needs to be marked
+            for arg in allocate_option['arguments']:
+                if 'output' in arg:
+                    arg['allocate'] = True
+
+            # the original option, which takes arguments for the results,
+            # is no longer a method, and has _out added to indicte it takes
+            # output arguments
+            if 'function' in option['variants']:
+                if 'method' in option['variants']:
+                    option['variants'].remove('method')
+                option['api_name'] += '_out'
+                new_options.append(option)
+
+            new_options.append(allocate_option)
+        else:
+            new_options.append(option)
+    return new_options
+
 
 
 def sanitize_return(option):
@@ -118,6 +127,5 @@ def run(declarations):
             sanitize_return(option)
             process_types_and_backends(option)
             add_variants(option)
-            handle_outputs_taken_as_arguments(new_options, option)
-        declaration['options'] += new_options
+        declaration['options'] = handle_outputs_taken_as_arguments(declaration['options'])
     return declarations
