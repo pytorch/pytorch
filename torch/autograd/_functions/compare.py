@@ -12,8 +12,7 @@ class _CompareOp(Function):
     def forward(cls, ctx, a, b):
         ctx.a_size = a.size()
         ctx.b_tensor = torch.is_tensor(b)
-        if ctx.b_tensor:
-            ctx.b_size = b.size()
+        ctx.b_size = b.size() if ctx.b_tensor else None
         ctx.input_type = type(a)
         mask = getattr(a, cls.fn_name)(b)
         ctx.mark_non_differentiable(mask)
@@ -24,11 +23,10 @@ class _CompareOp(Function):
         grad_input = (grad_output * 0).type(ctx.input_type)
 
         def maybe_unexpand_or_view_if_tensor(tensor, size):
-            return tensor if tensor is None or size is None else maybe_unexpand_or_view(tensor, size)
+            return tensor if (tensor is None or size is None) else maybe_unexpand_or_view(tensor, size)
 
         return (maybe_unexpand(grad_input, ctx.a_size),
-                maybe_unexpand_or_view_if_tensor(grad_input if ctx.b_tensor else None,
-                                                 ctx.b_size if ctx.b_tensor else None))
+                maybe_unexpand_or_view_if_tensor(grad_input if ctx.b_tensor else None, ctx.b_size))
 
 
 class Eq(_CompareOp):
