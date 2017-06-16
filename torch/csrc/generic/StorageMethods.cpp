@@ -179,6 +179,24 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
 }
 #endif
 
+static PyObject * THPStorage_(fromFile)(PyObject *_unused, PyObject *args, PyObject *keywds)
+{
+  HANDLE_TH_ERRORS
+  const char *filename;
+  Py_ssize_t size = 0;
+  int shared = 0;
+  static char *kwlist[] = {"filename", "shared", "size", NULL};
+  if (!PyArg_ParseTupleAndKeywords(args, keywds, "s|in", kwlist,
+              &filename, &shared, &size)) {
+    return NULL;
+  }
+  if (shared)
+    shared = TH_ALLOCATOR_MAPPED_SHARED;
+  THStorage *storage = THStorage_(newWithMapping)(filename, size, shared);
+  return (PyObject*)THPStorage_(New)(storage);
+  END_HANDLE_TH_ERRORS
+}
+
 #ifndef THD_GENERIC_FILE
 PyObject * THPStorage_(writeFile)(THPStorage *self, PyObject *file)
 {
@@ -289,6 +307,7 @@ static PyMethodDef THPStorage_(methods)[] = {
 #if !defined(THC_GENERIC_FILE) && !defined(THD_GENERIC_FILE)
   {"from_buffer", (PyCFunction)THPStorage_(fromBuffer), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
 #endif
+  {"from_file", (PyCFunction)THPStorage_(fromFile), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
 #ifdef THC_GENERIC_FILE
   {"get_device", (PyCFunction)THPStorage_(getDevice), METH_NOARGS, NULL},
 #endif

@@ -3305,6 +3305,31 @@ class TestTorch(TestCase):
         self.assertEqual(floats.size(), 1)
         self.assertEqual(floats[0], 2.25)
 
+    def test_from_file(self):
+        size = 10000
+        filename = 'testPytorchStorageFromFile'
+        try:
+            s1 = torch.FloatStorage.from_file(filename, True, size)
+            t1 = torch.FloatTensor(s1).copy_(torch.randn(size))
+
+            # check mapping
+            s2 = torch.FloatStorage.from_file(filename, True, size)
+            t2 = torch.FloatTensor(s2)
+            self.assertEqual(t1, t2, 0)
+
+            # check changes to t1 from t2
+            rnum = random.uniform(-1, 1)
+            t1.fill_(rnum)
+            self.assertEqual(t1, t2, 0)
+
+            # check changes to t2 from t1
+            rnum = random.uniform(-1, 1)
+            t2.fill_(rnum)
+            self.assertEqual(t1, t2, 0)
+        finally:
+            if os.path.exists(filename):
+                os.remove(filename)
+
     def test_print(self):
         for t in torch._tensor_classes:
             if t in torch.sparse._sparse_tensor_classes:

@@ -343,5 +343,5 @@ import torch.utils.backcompat
 _C._init_names(list(torch._tensor_classes) + list(torch._storage_classes))
 
 # attach docstrings to torch and tensor functions
-from . import _torch_docs, _tensor_docs
-del _torch_docs, _tensor_docs
+from . import _torch_docs, _tensor_docs, _storage_docs
+del _torch_docs, _tensor_docs, _storage_docs
