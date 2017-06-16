@@ -21,9 +21,7 @@ def add_docstr_all(classes, method, docstr):
         add_docstr(getattr(cls, method),
                    docstr.format(
                        cls_name.replace('Base', ''),
-                       cls_name.replace('StorageBase', ''),
-                   )
-        ) 
+                       cls_name.replace('StorageBase', '')))
 
 
 add_docstr_all(storage_classes, 'from_file',
@@ -43,4 +41,3 @@ Args:
     shared (bool): whether to share memory
     size (int): number of elements in the storage
 """)
-
