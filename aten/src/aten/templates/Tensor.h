@@ -83,6 +83,11 @@ struct Tensor {
       return *this;
     return t.copy(*this);
   }
+  Tensor & copy_(const Tensor & src) {
+    resize_(src.sizes());
+    type().copy(src,*this);
+    return *this;
+  }
   Tensor toType(ScalarType t) {
     return toType(type().toScalarType(t));
   }
