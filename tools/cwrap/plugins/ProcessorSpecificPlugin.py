@@ -6,12 +6,22 @@ import yaml
 class ProcessorSpecificPlugin(CWrapPlugin):
 
     def process_declarations(self, declarations):
-        # In order to move certain random functions into the same cwrap
+        # In order to move Torch's random functions into the same cwrap
         # declaration, we need to be able to handle the fact that on the CPU
         # these functions take a generator argument, while on the GPU, they
         # do not. As such, we would like to split those declarations at cwrap
         # runtime into two separate declarations, one for the CPU (unchanged),
         # and one for the GPU (with the generator argument removed).
+        #
+        # For example, the declaration arguments:
+        # arguments:
+        #   - THTensor* self
+        #   - arg: THGenerator* generator
+        #     default: THPDefaultGenerator->cdata
+        #     kwarg_only: True
+        #
+        # Would have the generator argument removed when generating for the GPU
+        # backend.
 
         def arg_contains_generator(arg):
             return (arg['type'] == 'THGenerator*' or (arg.get('default', None)
@@ -73,8 +83,6 @@ class ProcessorSpecificPlugin(CWrapPlugin):
             if split_candidate(declaration):
                 assert(can_we_handle_the_split(declaration))
                 newdecs = generator_split(declaration)
-                if 'geometric' in declaration['name']:
-                    print(yaml.dump(newdecs))
                 decs.extend(newdecs)
             else:
                 decs.append(declaration)
