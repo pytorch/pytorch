@@ -1,7 +1,68 @@
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/reduction_ops.h"
+#include "caffe2/utils/conversions.h"
+
+#include <cub/cub.cuh>
 
 namespace caffe2 {
+
+template <typename T>
+struct SquareTransform {
+  inline __host__ __device__ T operator()(const T v) const {
+    return v * v;
+  }
+};
+
+template <>
+class SumSqrElementsOp<float, CUDAContext> : public Operator<CUDAContext> {
+ public:
+  SumSqrElementsOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CUDAContext>(operator_def, ws) {}
+
+  bool RunOnDevice() override {
+    bool average = OperatorBase::GetSingleArgument<bool>("average", false);
+    auto& X = Input(0);
+    auto* sum = Output(0);
+    sum->Resize(vector<TIndex>());
+    int N = X.size();
+
+    SquareTransform<float> transform;
+    cub::TransformInputIterator<float, SquareTransform<float>, const float*>
+    inputIt(X.template data<float>(), transform);
+
+    size_t memRequired = 0;
+    cub::DeviceReduce::Sum(
+        nullptr,
+        memRequired,
+        inputIt,
+        sum->template mutable_data<float>(),
+        N,
+        context_.cuda_stream());
+
+    scratch_.Resize(std::vector<TIndex>{static_cast<TIndex>(memRequired)});
+    cub::DeviceReduce::Sum(
+        scratch_.template mutable_data<char>(),
+        memRequired,
+        inputIt,
+        sum->template mutable_data<float>(),
+        N,
+        context_.cuda_stream());
+
+    if (average) {
+      math::Scale<float, CUDAContext>(
+          1,
+          static_cast<float>(1.) / X.size(),
+          sum->template data<float>(),
+          sum->template mutable_data<float>(),
+          &context_);
+    }
+    return true;
+  }
+
+ private:
+  Tensor<CUDAContext> scratch_;
+};
+
 namespace {
 
 REGISTER_CUDA_OPERATOR(SumElements, SumElementsOp<float, CUDAContext>);
