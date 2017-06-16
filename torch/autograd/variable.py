@@ -504,7 +504,7 @@ class Variable(_C._VariableBase):
         if dim is None:
             mean = mean.view(*(1 for s in self.size()))
         # we could just set keepdim to True, but this preserves some fidelity
-        elif keepdim is False:
+        elif keepdim is False and self.dim() != 1:
             mean = mean.unsqueeze(dim)
         mean_expanded = mean.expand_as(self)
         zero_centered = self.sub(mean_expanded)
