@@ -64,5 +64,13 @@ cmake .. \
     -DUSE_OPENMP=OFF \
     -DBUILD_SHARED_LIBS=OFF \
     -DCMAKE_CXX_FLAGS_RELEASE=-s \
+    -DUSE_OPENCV=OFF \
+    $@ \
     || exit 1
-make
+
+# Cross-platform parallel build
+if [ "$(uname)" = 'Darwin' ]; then
+    cmake --build . -- "-j$(sysctl -n hw.ncpu)"
+else
+    cmake --build . -- "-j$(nproc)"
+fi

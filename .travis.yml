@@ -1,94 +1,44 @@
+os: linux
 dist: trusty
 sudo: required
 language: cpp
+compiler: gcc
+
+env:
+  global:
+    - BUILD_CCACHE_DIR=~/build/ccache
+    - BUILD_NINJA_DIR=~/build/ninja
+  matrix:
+    - BUILD=linux
+    - BUILD=linux-gcc5
+    - BUILD=linux-cuda
+    - BUILD=linux-mkl
+    - BUILD=linux-android
 
 matrix:
-  fast_finish: true
-  # Note: the indices of the build below is used to generate detailed build 
-  # status in the README.md file. If you find yourself changing the indices,
-  # make sure you change the build status lines in README.md accordingly too.
   include:
-    # 1
-    - os: linux
-      compiler: gcc
-      env: COMPILER=g++
-    # 2
-    - os: osx
+    - env: BUILD=osx
+      os: osx
       compiler: clang
-      env: COMPILER=clang++
-    # 3
-    - os: linux
-      compiler: gcc
-      env: BUILD_TARGET=android
-    # 4
-    - os: osx
+    - env: BUILD=osx-ios
+      os: osx
       compiler: clang
-      env: BUILD_TARGET=android
-    # 5
-    - os: osx
+    - env: BUILD=osx-android
+      os: osx
       compiler: clang
-      env: BUILD_TARGET=ios
-    # 6
-    - os: linux
-      compiler: gcc
-      env: COMPILER=g++
-      env: BLAS=MKL
-    # 7
-    - os: linux
-      compiler: gcc
-      addons:
-        apt:
-          sources:
-          - ubuntu-toolchain-r-test
-          packages:
-          - g++-4.8
-      env: COMPILER=g++-4.8
-    # 8
-    - os: linux
-      compiler: gcc
-      addons:
-        apt:
-          sources:
-          - ubuntu-toolchain-r-test
-          packages:
-          - g++-4.9
-      env: COMPILER=g++-4.9
-    # 9
-    - os: linux
-      compiler: gcc
-      addons:
-        apt:
-          sources:
-          - ubuntu-toolchain-r-test
-          packages:
-          - g++-5
-      env: COMPILER=g++-5
-    # 10
-    - os: linux
-      compiler: gcc
-      env: QUICKTEST
-      install:
-        - ./.travis/quicktest-install.sh
-        - ./.travis/quicktest-build.sh
-      script:
-        - ./.travis/quicktest-test.sh
-  allow_failures:
-    - env: COMPILER=g++
-    - env: COMPILER=clang++
-    - env: COMPILER=g++-5
-    - env: COMPILER=g++-4.9
-    - env: COMPILER=g++-4.8
-    - env: BUILD_TARGET=android
-    - env: BUILD_TARGET=ios
-    - env: BLAS=MKL
 
 cache:
-  apt: true
   directories:
+    - $BUILD_CCACHE_DIR
+    - $BUILD_NINJA_DIR
     - $HOME/.ccache
+
+before_install:
+  - source .travis/setup.sh
 
 install:
   - ./.travis/install.sh
+  - ./.travis/build.sh
 
 script:
-  - ./.travis/build.sh
+  - ./.travis/test.sh
