@@ -377,6 +377,7 @@ class MaskedScatter(InplaceFunction):
     @staticmethod
     def forward(ctx, tensor1, mask, tensor2, inplace=False):
         assert not ctx.needs_input_grad[1], "MaskedScatter can't differentiate the mask"
+        ctx.tensor2_size = tensor2.size()
         if not inplace:
             tensor1 = tensor1.clone()
         else:
@@ -392,7 +393,8 @@ class MaskedScatter(InplaceFunction):
         if ctx.needs_input_grad[0]:
             grad_tensor1 = grad_output.clone().masked_fill_(mask, 0)
         if ctx.needs_input_grad[2]:
-            grad_tensor2 = grad_output.masked_select(mask)
+            grad_tensor2 = grad_output.new(ctx.tensor2_size).zero_()
+            grad_output.masked_select(mask, out=grad_tensor2.view(-1))
         return grad_tensor1, None, grad_tensor2, None
 
 

@@ -577,6 +577,7 @@ class TestAutograd(TestCase):
             (x.max(y())).sum().backward()
             (x.min(y())).sum().backward()
             (x.masked_fill(y() < 0, 0.5)).sum().backward()
+            (x.masked_scatter(Variable(y().data < 0.25), z())).sum().backward()
             (x.addcmul(1, y(), z())).sum().backward()
             (x.addcdiv(1, y(), z())).sum().backward()
             (x.abs() ** y()).sum().backward()
@@ -1513,7 +1514,7 @@ function_tests = [
     (Squeeze, (), ((S, 1, M, 1), 1), 'dim'),
     (Unsqueeze, (), ((S, M, S), 0), '0'),
     (Unsqueeze, (), ((S, M, S), 1), '1'),
-    # (MaskedCopy,    (),                 ((S, S), Variable(torch.randn(S, S).gt(0), requires_grad=False), (S, S),)),
+    (MaskedScatter, (), ((S, S), Variable(torch.randn(S, S).gt(0), requires_grad=False), (S, S),)),
     (MaskedFill, (), ((S, S), Variable(torch.randn(S, S).gt(0), requires_grad=False), 10)),
     # no lhs or all broadcast on masked_fill because it's always inplace
     (MaskedFill, (), ((S, S), Variable(torch.randn(S,).gt(0), requires_grad=False), 10), 'broadcast_rhs'),
