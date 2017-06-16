@@ -1,5 +1,6 @@
 import sys
 import os
+import platform
 import math
 import random
 import copy
@@ -3304,6 +3305,44 @@ class TestTorch(TestCase):
         floats = torch.FloatStorage.from_buffer(f, 'big')
         self.assertEqual(floats.size(), 1)
         self.assertEqual(floats[0], 2.25)
+
+    def test_from_file(self):
+        size = 10000
+        filename = 'testPytorchStorageFromFile'
+        sys = platform.system()
+
+        def check(filename, share_mem):
+            s1 = torch.FloatStorage.from_file(filename, True, size, share_mem)
+            t1 = torch.FloatTensor(s1).copy_(torch.randn(size))
+            t1_copy = t1.new().resize_as_(t1).copy_(t1)
+            if share_mem and sys == 'Linux':
+                filename = os.path.join('/dev/shm', filename)
+
+            # check mapping
+            s2 = torch.FloatStorage.from_file(filename, True, size)
+            t2 = torch.FloatTensor(s2)
+            t2_copy = t2.new().resize_as_(t2).copy_(t2)
+            self.assertEqual(t1_copy, t2_copy, 0)
+
+            # check changes to t1 from t2
+            rnum = random.uniform(-1, 1)
+            t1.fill_(rnum)
+            self.assertEqual(t1, t2, 0)
+
+            # check changes to t2 from t1
+            rnum = random.uniform(-1, 1)
+            t2.fill_(rnum)
+            self.assertEqual(t1, t2, 0)
+
+            if sys.startswith('win'):
+                os.remove(filename)
+
+        # check open + open
+        check(filename, False)
+
+        # check shm_open + open
+        if sys != 'Darwin':  # OS X has no /dev/shm
+            check(filename, True)
 
     def test_print(self):
         for t in torch._tensor_classes:
