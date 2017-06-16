@@ -52,7 +52,7 @@
       arguments:
         - arg: THBoolTensor* result
           output: True
-        - THTensor* tensor
+        - arg: THTensor* tensor
           broadcast: other fallback
         - THTensor* other
     - cname: ltValueT
@@ -125,7 +125,7 @@
       arguments:
         - arg: THBoolTensor* result
           output: True
-        - THTensor* tensor
+        - arg: THTensor* tensor
           broadcast: other fallback
         - THTensor* other
     - cname: gtValueT
@@ -199,7 +199,7 @@
       arguments:
         - arg: THBoolTensor* result
           output: True
-        - THTensor* tensor
+        - arg: THTensor* tensor
           broadcast: other fallback
         - THTensor* other
     - cname: leValueT
@@ -272,7 +272,7 @@
       arguments:
         - arg: THBoolTensor* result
           output: True
-        - THTensor* tensor
+        - arg: THTensor* tensor
           broadcast: other fallback
         - THTensor* other
     - cname: geValueT
@@ -345,7 +345,7 @@
       arguments:
         - arg: THBoolTensor* result
           output: True
-        - THTensor* tensor
+        - arg: THTensor* tensor
           broadcast: other fallback
         - THTensor* other
     - cname: eqValueT
@@ -418,7 +418,7 @@
       arguments:
         - arg: THBoolTensor* result
           output: True
-        - THTensor* tensor
+        - arg: THTensor* tensor
           broadcast: other fallback
         - THTensor* other
     - cname: neValueT
