@@ -40,7 +40,7 @@ class TestReductionOps(hu.HypothesisTestCase):
             outputs_with_grads=[0],
         )
 
-    @given(n=st.integers(5, 8), **hu.gcs)
+    @given(n=st.integers(1, 65536), **hu.gcs)
     def test_elementwise_sqrsum(self, n, gc, dc):
         X = np.random.rand(n).astype(np.float32)
 
