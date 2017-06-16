@@ -688,7 +688,7 @@ class Variable(_C._VariableBase):
 
     def t(self):
         if self.dim() != 2:
-            raise RuntimeError("t() expects a 2D tensor, but self is {}D".format(self.dim()))
+            raise RuntimeError("t() expects a 2D Variable, but self is {}D".format(self.dim()))
         return Transpose.apply(self, 0, 1)
 
     def transpose(self, dim1, dim2):
