@@ -92,7 +92,7 @@ struct Type {
 
   // example
   // virtual Tensor * add(Tensor & a, Tensor & b) = 0;
-  virtual void copy(Tensor & dst, const Tensor & src) = 0;
+  virtual void copy(const Tensor & src, Tensor & dst) = 0;
   Tensor copy(const Tensor & src);
   ${type_method_declarations}
 protected:

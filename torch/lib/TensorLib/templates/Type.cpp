@@ -11,8 +11,7 @@ void Type::registerAll(Context * context) {
 
 Tensor Type::copy(const Tensor & src) {
   Tensor r = this->tensor();
-  r.resize_(src.sizes());
-  copy(r,src);
+  r.copy_(src);
   return r;
 }
 

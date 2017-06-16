@@ -10,9 +10,9 @@
 
 namespace tlib {
 
-Tensor & copy(Tensor & dst, const Tensor & src) {
+Tensor & copy_out(const Tensor & src, Tensor & dst) {
   dst.resize_(src.sizes());
-  dst.type().copy(dst,src);
+  dst.type().copy(src,dst);
 }
 
 ${function_declarations}

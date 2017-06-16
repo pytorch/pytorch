@@ -130,8 +130,7 @@ static void test(Type & type) {
     std::cout << a << std::endl;
     Tensor e = type.rand({3, 4});
     std::cout << e << std::endl;
-    //copy_(a, e);
-    copy(a,e);
+    a.copy_(e);
     std::cout << a << std::endl;
   }
 
