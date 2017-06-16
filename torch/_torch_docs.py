@@ -548,6 +548,9 @@ Performs a batch matrix-matrix product of matrices stored in :attr:`batch1` and 
 If :attr:`batch1` is a `b x n x m` Tensor, :attr:`batch2` is a `b x m x p` Tensor,
 :attr:`out` will be a `b x n x p` Tensor.
 
+.. note:: This function does not :ref:`broadcast <broadcasting-semantics>`.  For broadcasting matrix products,
+          see :func:`torch.matmul`.
+
 Args:
     batch1 (Tensor): First batch of matrices to be multiplied
     batch2 (Tensor): Second batch of matrices to be multiplied
@@ -1198,8 +1201,9 @@ add_docstr(torch._C.dot,
            """
 dot(tensor1, tensor2) -> float
 
-Computes the dot product (inner product) of two tensors. Both tensors are
-treated as 1-D vectors.
+Computes the dot product (inner product) of two tensors.
+
+.. note:: This function does not :ref:`broadcast <broadcasting-semantics>`.
 
 Example::
 
@@ -1552,6 +1556,8 @@ ger(vec1, vec2, out=None) -> Tensor
 Outer product of :attr:`vec1` and :attr:`vec2`.
 If :attr:`vec1` is a vector of size `n` and :attr:`vec2` is a vector of size `m`,
 then :attr:`out` must be a matrix of size `n x m`.
+
+.. note:: This function does not :ref:`broadcast <broadcasting-semantics>`.
 
 Args:
     vec1 (Tensor): 1D input vector
@@ -2486,6 +2492,9 @@ Performs a matrix multiplication of the matrices :attr:`mat1` and :attr:`mat2`.
 
 If :attr:`mat1` is a `n x m` Tensor, :attr:`mat2` is a `m x p` Tensor, :attr:`out` will be a `n x p` Tensor.
 
+.. note:: This function does not :ref:`broadcast <broadcasting-semantics>`.  For broadcasting matrix products,
+          see :func:`torch.matmul`.
+
 Args:
     mat1 (Tensor): First matrix to be multiplied
     mat2 (Tensor): Second matrix to be multiplied
@@ -2697,6 +2706,8 @@ mv(mat, vec, out=None) -> Tensor
 Performs a matrix-vector product of the matrix :attr:`mat` and the vector :attr:`vec`.
 
 If :attr:`mat` is a `n x m` Tensor, :attr:`vec` is a 1D Tensor of size `m`, :attr:`out` will be 1D of size `n`.
+
+.. note:: This function does not :ref:`broadcast <broadcasting-semantics>`.
 
 Args:
     mat (Tensor): matrix to be multiplied
