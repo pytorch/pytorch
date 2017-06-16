@@ -51,4 +51,4 @@ cmake .. \
     -DCMAKE_USE_PTHREADS_INIT=1 \
     $@ \
     || exit 1
-make
+cmake --build . -- "-j$(sysctl -n hw.ncpu)"

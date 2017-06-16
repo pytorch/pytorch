@@ -1,48 +1,47 @@
 #!/bin/bash
+set -e
+set -x
 
-export CXX=$COMPILER
-
-# just to make sure
-git submodule update --init --recursive
+LOCAL_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
+ROOT_DIR=$(dirname "$LOCAL_DIR")
+cd "$ROOT_DIR"
 
 mkdir build
 cd build
 
-if [[ $BUILD_TARGET == 'android' ]]; then
-#***************#
-# Android build #
-#***************#
-  export ANDROID_NDK=/opt/android_ndk
-  sh ../scripts/build_android.sh
-elif [[ $BUILD_TARGET == 'ios' ]]; then
-#***************#
-# iOS build     #
-#***************#
-  # Note: we will only build arm64 in the travis case for faster compilation.
-  # You might want to build a fat binary containng armv7, armv7s and arm64.
-  # This can be done by simply not passing in the CMAKE_OSX_ARCHITECTURES flag.
-  sh ../scripts/build_ios.sh -DCMAKE_OSX_ARCHITECTURES=arm64
-elif [[ $TRAVIS_OS_NAME == 'osx' ]]; then
-#************#
-# OS X build #
-#************#
-  cmake .. \
-      -DCMAKE_VERBOSE_MAKEFILE=ON \
-      -DUSE_OPENCV=OFF \
-  && make
+# Special cases - run script and exit
+if [ "$BUILD_ANDROID" = 'true' ]; then
+    export ANDROID_NDK=/opt/android_ndk
+    sh "${ROOT_DIR}/scripts/build_android.sh"
+    exit 0
+fi
+if [ "$BUILD_IOS" = 'true' ]; then
+    sh "${ROOT_DIR}/scripts/build_ios.sh" -DCMAKE_OSX_ARCHITECTURES=arm64
+    exit 0
+fi
+
+# Configure
+CMAKE_ARGS=('-DCMAKE_VERBOSE_MAKEFILE=ON')
+if [ "$BUILD_CUDA" = 'true' ]; then
+    CMAKE_ARGS+=('-DUSE_CUDA=ON')
+    CMAKE_ARGS+=('-DCUDA_ARCH_NAME=Pascal')
+    CMAKE_ARGS+=('-DCUDA_NVCC_EXECUTABLE=/usr/local/bin/nvcc')
+    export PATH="/usr/local/cuda/bin:${PATH}"
+    CMAKE_ARGS+=('-DUSE_NNPACK=OFF')
 else
-#*************#
-# Linux build #
-#*************#
-  if [[ $BLAS == 'MKL' ]]; then
-    cmake .. \
-        -DCMAKE_VERBOSE_MAKEFILE=ON \
-        -DBLAS=MKL \
-        -DUSE_CUDA=OFF \
-    && make
-  else
-    cmake .. \
-        -DCMAKE_VERBOSE_MAKEFILE=ON \
-    && make
-  fi
+    CMAKE_ARGS+=('-DUSE_CUDA=OFF')
+fi
+if [ "$BUILD_MKL" = 'true' ]; then
+    CMAKE_ARGS+=('-DBLAS=MKL')
+fi
+if [ "$BUILD_TESTS" = 'false' ]; then
+    CMAKE_ARGS+=('-DBUILD_TEST=OFF')
+fi
+cmake .. ${CMAKE_ARGS[*]}
+
+# Build
+if [ "$TRAVIS_OS_NAME" = 'linux' ]; then
+    cmake --build . -- "-j$(nproc)"
+elif [ "$TRAVIS_OS_NAME" = 'osx' ]; then
+    cmake --build . -- "-j$(sysctl -n hw.ncpu)"
 fi
