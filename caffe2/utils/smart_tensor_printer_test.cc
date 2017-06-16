@@ -37,9 +37,13 @@ void printTensorAndCheck(const std::vector<T>& values) {
   expect_stderr_contains(values);
 }
 
+#if !(__APPLE__) // TODO(janusz): thread_local does not work under mac.
+
 TEST(SmartTensorPrinterTest, SimpleTest) {
   printTensorAndCheck(std::vector<int>{1, 2, 3, 4, 5});
   printTensorAndCheck(std::vector<std::string>{"bob", "alice", "facebook"});
 }
+
+#endif // !(__APPLE__)
 
 } // namespace caffe2
