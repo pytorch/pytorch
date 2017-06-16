@@ -20,7 +20,7 @@ struct ${Type} : public Type {
   // example
   // virtual Tensor * add(Tensor & a, Tensor & b) override;
 
-  virtual void copy(Tensor & dst, const Tensor & src) override;
+  virtual void copy(const Tensor & src, Tensor & dst) override;
   ${type_derived_method_declarations}
 };
 
