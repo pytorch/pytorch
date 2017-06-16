@@ -21,12 +21,8 @@ class _CompareOp(Function):
     @staticmethod
     def backward(ctx, grad_output):
         grad_input = (grad_output * 0).type(ctx.input_type)
-
-        def maybe_unexpand_or_view_if_tensor(tensor, size):
-            return tensor if (tensor is None or size is None) else maybe_unexpand_or_view(tensor, size)
-
         return (maybe_unexpand(grad_input, ctx.a_size),
-                maybe_unexpand_or_view_if_tensor(grad_input if ctx.b_tensor else None, ctx.b_size))
+                maybe_unexpand_or_view(grad_input, ctx.b_size) if ctx.b_tensor else None)
 
 
 class Eq(_CompareOp):
