@@ -46,7 +46,7 @@ def generate_data(T, shape, num_labels):
         # Randomize the seqlength
         random_shape = (
             [np.random.randint(1, shape[0])] + shape[1:]
-            if t > 0 else shape
+            if t > 0 and not args.fixed_shape else shape
         )
         X = np.random.rand(*random_shape).astype(np.float32)
         batch_size = random_shape[1]
@@ -73,11 +73,20 @@ def create_model(args, queue, label_queue, input_shape):
     labels = model.DequeueBlobs(label_queue, "label")
 
     init_blobs = []
-    if args.implementation == "own":
+    if args.implementation in ["own", "static", "static_dag"]:
+        T = None
+        if "static" in args.implementation:
+            assert args.fixed_shape, \
+                "Random input length is not static RNN compatible"
+            T = args.seq_length
+            print("Using static RNN of size {}".format(T))
+
         for i in range(args.num_layers):
-            init_blobs.append("hidden_init_{}".format(i))
-            init_blobs.append("cell_init_{}".format(i))
-        model.net.AddExternalInputs(init_blobs)
+            hidden_init, cell_init = model.net.AddExternalInputs(
+                "hidden_init_{}".format(i),
+                "cell_init_{}".format(i)
+            )
+            init_blobs.extend([hidden_init, cell_init])
 
         output, last_hidden, _, last_state = rnn_cell.LSTM(
             model=model,
@@ -91,7 +100,13 @@ def create_model(args, queue, label_queue, input_shape):
             forward_only=args.forward_only,
             drop_states=True,
             return_last_layer_only=True,
+            static_rnn_unroll_size=T,
         )
+
+        if "dag" in args.implementation:
+            print("Using DAG net type")
+            model.net.Proto().type = 'dag'
+            model.net.Proto().num_workers = 4
     elif args.implementation == "cudnn":
         # We need to feed a placeholder input so that RecurrentInitOp
         # can infer the dimensions.
@@ -177,12 +192,12 @@ def Caffe2LSTM(args):
         log.info("Iter: {} / {}. Entries Per Second: {}k.". format(
             iteration,
             num_iters,
-            entries_per_iter * iters_once / (new_time - last_time) // 1000,
+            entries_per_iter * iters_once / (new_time - last_time) // 100 / 10,
         ))
         last_time = new_time
 
     log.info("Done. Total EPS excluding 1st iteration: {}k".format(
-        total_iters * entries_per_iter / (time.time() - start_time) // 1000,
+        total_iters * entries_per_iter / (time.time() - start_time) // 100 / 10,
     ))
 
     if (args.gpu):
@@ -199,6 +214,7 @@ def Caffe2LSTM(args):
     return time.time() - start_time
 
 
+@utils.debug
 def Benchmark(args):
     return Caffe2LSTM(args)
 
@@ -221,7 +237,7 @@ def GetArgumentParser():
     parser.add_argument(
         "--batch_size",
         type=int,
-        default=256,
+        default=128,
         help="The batch size."
     )
     parser.add_argument(
@@ -233,13 +249,13 @@ def GetArgumentParser():
     parser.add_argument(
         "--data_size",
         type=int,
-        default=10000000,
+        default=1000000,
         help="Number of data points to generate"
     )
     parser.add_argument(
         "--iters_to_report",
         type=int,
-        default=100,
+        default=20,
         help="Number of iteration to report progress"
     )
     parser.add_argument(
@@ -251,7 +267,13 @@ def GetArgumentParser():
         "--implementation",
         type=str,
         default="own",
-        help="'cudnn' or 'own'",
+        help="'cudnn', 'own', 'static' or 'static_dag'",
+    )
+    parser.add_argument(
+        "--fixed_shape",
+        action="store_true",
+        help=("Whether to randomize shape of input batches. "
+              "Static RNN requires fixed shape"),
     )
     parser.add_argument(
         "--memory_optimization",
