@@ -188,6 +188,9 @@ void NCCLOp<T>::runNCCL(F&& f) {
   // Synchronize memory allocation with NCCL operations
   std::lock_guard<std::mutex> lock(CudaShared::getMutex());
 
+#if NCCL_VERSION_MIN(2,0,0)
+  NCCL_CHECK(ncclGroupStart());
+#endif
   // Kick off the NCCL operation on each device
   for (auto i = 0; i < elements.size(); i++) {
     const auto& element = elements[i];
@@ -209,6 +212,17 @@ void NCCLOp<T>::runNCCL(F&& f) {
     }
     // Run the operation
     f(element, comms[i], ncclStream);
+  }
+#if NCCL_VERSION_MIN(2,0,0)
+  NCCL_CHECK(ncclGroupEnd());
+#endif
+  for (auto i = 0; i < elements.size(); ++i) {
+    const auto& element = elements[i];
+    const auto& ncclStream = getNcclStreams()[element.device];
+    const auto& dstStream = element.dstStream.getStream();
+    const auto& dstEvent = element.dstStream.getEvent();
+
+    CudaDeviceScope scope(element.device);
     // Record an event in the NCCL stream signaling the operation is complete.
     // Synchronize with the destination stream.
     CUDA_CHECK(cudaEventRecord(ncclEvents[i], ncclStream));
@@ -286,6 +300,15 @@ template <typename T>
 void AllgatherOp<T>::runAsync() {
   this->runNCCL([](
       const NCCLElement<T>& element, ncclComm_t comm, cudaStream_t stream) {
+#if NCCL_VERSION_MIN(2,0,0)
+    NCCL_CHECK(ncclAllGather(
+        *element.src,
+        *element.dst,
+        element.src.getCount(),
+        ncclTypeWrapper<T>::type,
+        comm,
+        stream));
+#else
     NCCL_CHECK(ncclAllGather(
         *element.src,
         element.src.getCount(),
@@ -293,6 +316,7 @@ void AllgatherOp<T>::runAsync() {
         *element.dst,
         comm,
         stream));
+#endif
   });
 }
 

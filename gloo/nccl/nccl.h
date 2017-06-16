@@ -35,6 +35,11 @@ namespace nccl {
         ncclGetErrorString(status));   \
   } while (0)
 
+#define NCCL_VERSION_MIN(major, minor, patch) \
+  ((NCCL_MAJOR > major) || \
+    ((NCCL_MAJOR == major) && ((NCCL_MINOR > minor) || \
+      ((NCCL_MINOR == minor) && (NCCL_PATCH >= patch)) )))
+
 template <typename T>
 struct NCCLElement {
   NCCLElement(
