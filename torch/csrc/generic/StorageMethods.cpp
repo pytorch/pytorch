@@ -184,21 +184,14 @@ static PyObject * THPStorage_(fromFile)(PyObject *_unused, PyObject *args, PyObj
   HANDLE_TH_ERRORS
   const char *filename;
   Py_ssize_t size = 0;
-  int shared = 0, shared_mem = 0;
-  static char *kwlist[] = {"filename", "shared", "size", "shared_mem", NULL};
-  if (!PyArg_ParseTupleAndKeywords(args, keywds, "s|pnp", kwlist,
-              &filename, &shared, &size, &shared_mem)) {
+  int shared = 0;
+  static char *kwlist[] = {"filename", "shared", "size", NULL};
+  if (!PyArg_ParseTupleAndKeywords(args, keywds, "s|in", kwlist,
+              &filename, &shared, &size)) {
     return NULL;
   }
-#if defined(__APPLE__)
-  shared_mem = 0;
-#endif
-  if (shared) {
-    if (shared_mem)
-      shared = TH_ALLOCATOR_MAPPED_SHAREDMEM;
-    else
-      shared = TH_ALLOCATOR_MAPPED_SHARED;
-  }
+  if (shared)
+    shared = TH_ALLOCATOR_MAPPED_SHARED;
   THStorage *storage = THStorage_(newWithMapping)(filename, size, shared);
   return (PyObject*)THPStorage_(New)(storage);
   END_HANDLE_TH_ERRORS
