@@ -363,7 +363,7 @@ inline bool is_a_ge_zero_and_a_lt_b(int a, int b) {
 // Calculates ceil(a / b). User must be careful to ensure that there
 // is no overflow or underflow in the calculation.
 template <typename T>
-inline T divUp(T a, T b) {
+constexpr T divUp(T a, T b) {
   return (a + b - (T) 1) / b;
 }
 
@@ -371,10 +371,27 @@ inline T divUp(T a, T b) {
 // to ensure that there is no overflow or underflow in the calculation
 // of divUp.
 template <typename T>
-inline T roundUp(T a, T b) {
+constexpr T roundUp(T a, T b) {
   return divUp<T>(a, b) * b;
 }
 
+// Returns true if the given integer type is a power-of-2 (positive only)
+template <typename T>
+constexpr bool integerIsPowerOf2(T v) {
+  return (v && !(v & (v - 1)));
+}
+
+// Returns log2(n) for a positive integer type
+template <typename T>
+constexpr int integerLog2(T n, int p = 0) {
+  return (n <= 1) ? p : integerLog2(n / 2, p + 1);
+}
+
+// Returns the next highest power-of-2 for an integer type
+template <typename T>
+constexpr T integerNextHighestPowerOf2(T v) {
+  return (integerIsPowerOf2(v) ? (T)2 * v : ((T)1 << (integerLog2(v) + 1)));
+}
 
 }  // namespace math
 }  // namespace caffe2
