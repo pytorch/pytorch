@@ -123,12 +123,11 @@ class ReduceDimsGradientOp : public Operator<CUDAContext> {
     const auto& grad_in = Input(0);
     const auto& in_shape = Input(1);
 
-    Tensor<CPUContext> shape;
-    shape.CopyFrom(in_shape);
+    shape_.CopyFrom(in_shape);
     // Copy first dims
     vector<TIndex> output_shape(
-        shape.template data<TIndex>(),
-        shape.template data<TIndex>() + shape.size());
+        shape_.template data<TIndex>(),
+        shape_.template data<TIndex>() + shape_.size());
 
     auto* out_grad = Output(0);
     out_grad->Resize(output_shape);
@@ -183,6 +182,7 @@ class ReduceDimsGradientOp : public Operator<CUDAContext> {
 
  private:
   int num_reduce_dims_;
+  Tensor<CPUContext> shape_;
 };
 
 REGISTER_CUDA_OPERATOR(ReduceFrontSum, ReduceDimsOp<float, CUDAContext>);
