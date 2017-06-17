@@ -728,6 +728,10 @@ class TestAutograd(TestCase):
         y = x.masked_fill(mask, 0)
         y.sum().backward()
 
+    def test_resize(self):
+        x = Variable(torch.ones(2, 3))
+        self.assertTrue(x.resize(3, 2).size() == (3, 2))
+
     def test_shared_storage(self):
         x = Variable(torch.ones(5, 5))
         y = x.t()

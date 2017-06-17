@@ -558,7 +558,7 @@ class Variable(_C._VariableBase):
         return self._static_blas(Addr, (output, 0, 1, self, vector), False)
 
     def resize(self, *sizes):
-        return Resize.apply()(self, sizes)
+        return Resize.apply(self, sizes)
 
     def resize_as(self, variable):
         return Resize.apply(self, variable.size())
