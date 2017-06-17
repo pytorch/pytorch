@@ -115,12 +115,14 @@ class CuDNNPoolOp : public ConvPoolOpBase<CUDAContext> {
       setTensorDescriptor<T>(X.ndim(), order_, N, C, H, W, D, bottom_desc_);
       setTensorDescriptor<T>(
           Y->ndim(), order_, N, C, H_out, W_out, D_out, top_desc_);
-      if (pad_t() != pad_l() || pad_l() != pad_r()) {
-        CAFFE_ENFORCE(
-            legacy_pad_ == LegacyPadding::CAFFE_LEGACY_POOLING,
-            "Cudnn pooling only supports even padding on both sides, with "
-            "the only exception of the caffe legacy pooling case where we "
-            "try to preserve backward compatibility with Caffe.");
+      for (int i = 0; i < kernel_.size(); ++i) {
+        if (pads_[i] != pads_[kernel_.size() + i]) {
+          CAFFE_ENFORCE(
+              legacy_pad_ == LegacyPadding::CAFFE_LEGACY_POOLING,
+              "Cudnn pooling only supports even padding on both sides, with "
+              "the only exception of the caffe legacy pooling case where we "
+              "try to preserve backward compatibility with Caffe.");
+        }
       }
       if (kernel_.size() == 2) {
         CUDNN_ENFORCE(cudnnSetPooling2dDescriptor(
