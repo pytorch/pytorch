@@ -26,9 +26,10 @@ class Dropout(InplaceFunction):
 
         if self.p > 0 and self.train:
             self.noise = self._make_noise(input)
-            self.noise.bernoulli_(1 - self.p).div_(1 - self.p)
             if self.p == 1:
                 self.noise.fill_(0)
+            else:
+                self.noise.bernoulli_(1 - self.p).div_(1 - self.p)
             self.noise = self.noise.expand_as(input)
             output.mul_(self.noise)
 
