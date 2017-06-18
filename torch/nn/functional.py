@@ -2,6 +2,7 @@
 
 from numbers import Integral
 import warnings
+import math
 
 import torch
 from . import _functions
@@ -580,16 +581,34 @@ def nll_loss(input, target, weight=None, size_average=True):
     return f(input, target)
 
 
-def poisson_nll_loss(log_input, target, size_average=True):
+def poisson_nll_loss(input, target, log_input=True, full=False, size_average=True):
     r"""Poisson negative log likelihood loss.
 
-    Drops :math:`log(target!)` term. See :class:`~torch.nn.PoissonNLLLoss` for details.
+    See :class:`~torch.nn.PoissonNLLLoss` for details.
 
     Args:
-        log_input: :math:`log(input)`
-        target: :math:`target \sim Pois(input)`
+        input: expectation of underlying Poisson distribution
+        target: random sample :math:`target \sim Pois(input)`
+        log_input: if True the loss is computed as `exp(input) - target * input`,
+                   if False then loss is `input - target * log(input)`
+        full: whether to compute full loss, i. e. to add the Stirling
+              approximation term `target * log(target) - target + 0.5 * log(2 * pi * target)`
+        size_average: By default, the losses are averaged
+                over observations for each minibatch. However, if the field
+                sizeAverage is set to False, the losses are instead summed
+                for each minibatch.
     """
-    loss = torch.exp(log_input) - target * log_input
+    if log_input:
+        loss = torch.exp(input) - target * input
+    else:
+        loss = input - target * torch.log(input)
+    if full:
+        mask = target <= 1
+        approx = target.clone()
+        approx[mask] = 0
+        mask.mul_(-1).add_(1)  # inplace version of ~mask
+        approx[mask] = (target * torch.log(target) - target + 0.5 * torch.log(2 * math.pi * target))[mask]
+        loss.add_(approx)
     if size_average:
         return torch.mean(loss)
     else:
