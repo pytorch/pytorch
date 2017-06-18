@@ -603,12 +603,8 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Tru
     else:
         loss = input - target * torch.log(input)
     if full:
-        mask = target <= 1
-        approx = target.clone()
-        approx[mask] = 0
-        mask.mul_(-1).add_(1)  # inplace version of ~mask
-        approx[mask] = (target * torch.log(target) - target + 0.5 * torch.log(2 * math.pi * target))[mask]
-        loss.add_(approx)
+        mask = target > 1
+        loss[mask] += (target * torch.log(target) - target + 0.5 * torch.log(2 * math.pi * target))[mask]
     if size_average:
         return torch.mean(loss)
     else:
