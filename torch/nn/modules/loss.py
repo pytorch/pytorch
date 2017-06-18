@@ -144,7 +144,9 @@ class PoissonNLLLoss(_Loss):
         target ~ Pois(input)
         loss(input, target) = input - target * log(input) + log(target!)
 
-    The last term can be omitted or approximised with Stirling formula.
+    The last term can be omitted or approximised with Stirling formula. The
+    approximation is used for target values more than 1. For targets less or
+    equal to 1 zeros are added to the loss.
 
     Args:
         log_input (bool, optional): if True the loss is computed as `exp(input) - target * input`,
