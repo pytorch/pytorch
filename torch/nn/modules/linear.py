@@ -14,7 +14,7 @@ class Linear(Module):
         in_features: size of each input sample
         out_features: size of each output sample
         bias: If set to False, the layer will not learn an additive bias. Default: True
-        initializer: initializer of weights and bias. Default: None
+        initializer: dictionary of initializer of weights and bias. Default: dict()
 
     Shape:
         - Input: :math:`(N, in\_features)`
@@ -27,12 +27,13 @@ class Linear(Module):
     Examples::
 
         >>> m = nn.Linear(20, 30, initializer=lambda x: init.xavier_normal(x, 1))
+        >>> m = nn.Linear(20, 30, initializer={"weight": lambda x: init.xavier_normal(x, 1)})
         >>> input = autograd.Variable(torch.randn(128, 20))
         >>> output = m(input)
         >>> print(output.size())
     """
 
-    def __init__(self, in_features, out_features, bias=True, initializer=None):
+    def __init__(self, in_features, out_features, bias=True, initializer=dict()):
         super(Linear, self).__init__()
         self.in_features = in_features
         self.out_features = out_features
@@ -45,15 +46,23 @@ class Linear(Module):
         self.reset_parameters()
 
     def reset_parameters(self):
-        if self.initializer is None:
-            stdv = 1. / math.sqrt(self.weight.size(1))
-            self.weight.data.uniform_(-stdv, stdv)
-            if self.bias is not None:
-                self.bias.data.uniform_(-stdv, stdv)
+        stdv = 1. / math.sqrt(self.weight.size(1))
+
+        if isinstance(self.initializer, function):
+            weight_initializer = self.initializer
+            bias_initializer = None
         else:
-            self.initializer(self.weight)
-            if self.bias is not None:
-                self.initializer(self.bias)
+            weight_initializer = self.initializer.get("weight")
+            bias_initializer = self.initializer.get("bias")
+
+        if weight_initializer is None:
+            self.weight.data.uniform_(-stdv, stdv)
+        else:
+            weight_initializer(self.weight)
+        if bias_initializer is None:
+            self.bias.data.uniform_(-stdv, stdv)
+        else:
+            bias_initializer(self.bias)
 
     def forward(self, input):
         if self.bias is None:
