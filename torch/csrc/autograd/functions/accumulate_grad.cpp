@@ -33,10 +33,12 @@ auto AccumulateGrad::acc_inplace(std::shared_ptr<Variable>& grad,
 
 auto AccumulateGrad::apply(const variable_list& grads) -> variable_list {
   // XXX: this method is not thread-safe!
-  check_input_variables("AccumulateGrad", grads, 1);
-  auto var = variable.lock();
+  check_input_variables("AccumulateGrad", grads, 1, 0);
   auto new_grad = grads[0];
 
+  if (!new_grad) return {};
+
+  auto var = variable.lock();
   // It's possible that the Variable went out of scope and was freed.
   // We still need to handle the unlikely case of someohe holding to its grad.
   if (!var) {

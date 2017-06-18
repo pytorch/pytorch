@@ -68,6 +68,7 @@ void THTensor_(copyTranspose)(THTensor *tensor, THTensor *src) {
 
 void THTensor_(copy)(THTensor *tensor, THTensor *src)
 {
+  if (tensor == src) return;
   if (THTensor_(isContiguous)(tensor) && THTensor_(isContiguous)(src) && THTensor_(nElement)(tensor) == THTensor_(nElement)(src)) {
     real *sp = THTensor_(data)(src);
     real *rp = THTensor_(data)(tensor);

@@ -18,6 +18,7 @@ import torch.nn.utils.rnn as rnn_utils
 import torch.legacy.nn as legacy
 from torch.nn.utils import clip_grad_norm
 from torch.autograd import Variable, gradcheck
+from torch.autograd.gradcheck import gradgradcheck
 from torch.nn import Parameter
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     module_tests, criterion_tests, TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
@@ -26,6 +27,16 @@ from common import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, TEST_S
 
 if TEST_SCIPY:
     from scipy import stats
+
+
+@contextlib.contextmanager
+def use_cudnn(should_use):
+    orig = torch.backends.cudnn.enabled
+    torch.backends.cudnn.enabled = should_use
+    try:
+        yield
+    finally:
+        torch.backends.cudnn.enabled = orig
 
 
 def default_tensor_type(type):
@@ -742,6 +753,103 @@ class TestNN(NNTestCase):
         self.assertEqual(output[0][0].sum().data[0], 0)
         self.assertEqual(output[1][2].sum().data[0], 0)
 
+    def _test_EmbeddingBag(self, cuda, mode):
+        # check a known test example
+        es = nn.EmbeddingBag(5, 2, mode=mode)
+        es.weight.data.copy_(torch.arange(1, 11).resize_as_(es.weight.data))
+        input = Variable(torch.LongTensor([3, 1, 1, 1, 4]))
+        offsets = Variable(torch.LongTensor([0, 2]))
+        grad_output = torch.arange(1, 5).view(2, 2).type(torch.Tensor)
+
+        if mode == 'sum':
+            expected_output = torch.Tensor(
+                [[10, 12],
+                 [15, 18]])
+            expected_grad_weight = torch.Tensor(
+                [[0, 0],
+                 [7, 10],
+                 [0, 0],
+                 [1, 2],
+                 [3, 4]])
+        else:
+            expected_output = torch.Tensor(
+                [[10. / 2, 12. / 2],
+                 [15. / 3, 18. / 3]])
+            expected_grad_weight = torch.Tensor(
+                [[0., 0.],
+                 [1. / 2 + 3. / 3 + 3. / 3, 2. / 2 + 4. / 3 + 4. / 3],
+                 [0., 0.],
+                 [1. / 2, 2. / 2],
+                 [3. / 3, 4. / 3]])
+
+        if cuda:
+            es = es.cuda()
+            input = input.cuda()
+            offsets = offsets.cuda()
+            grad_output = grad_output.cuda()
+            expected_output = expected_output.cuda()
+            expected_grad_weight = expected_grad_weight.cuda()
+
+        output = es(input, offsets)
+        output.backward(grad_output)
+
+        self.assertEqual(output.data, expected_output)
+        self.assertEqual(es.weight.grad.data, expected_grad_weight)
+
+        # now compare EmbeddingBag vs Embedding + Sum/Mean, for constant bag length
+        def _test_vs_Embedding(N, D, B, L):
+            es = nn.EmbeddingBag(N, D, mode=mode)
+            e = nn.Embedding(N, D)
+            e.weight.data.copy_(es.weight.data)
+            input = Variable(torch.rand(B, L).mul(N).long())
+            offsets = Variable(torch.arange(0, B).mul(L).long())
+            grad_output = torch.rand(B, D).type(torch.Tensor)
+
+            if cuda:
+                es = es.cuda()
+                e = e.cuda()
+                input = input.cuda()
+                offsets = offsets.cuda()
+                grad_output = grad_output.cuda()
+
+            output = es(input.view(-1), offsets)
+            if mode == 'sum':
+                ref_output = e(input).sum(1)
+            else:
+                ref_output = e(input).mean(1)
+
+            self.assertEqual(output, ref_output)
+
+            output.backward(grad_output)
+            ref_output.backward(grad_output)
+            self.assertEqual(es.weight.grad, e.weight.grad)
+
+        N, D, B, L = random.randint(1, 100), random.randint(1, 100), random.randint(1, 50), random.randint(1, 50)
+        _test_vs_Embedding(N, D, B, L)
+        for p in itertools.product([1, 2], repeat=4):
+            _test_vs_Embedding(*p)
+
+        # check that giving illegal input combos raises error
+        es = nn.EmbeddingBag(10, 20, mode=mode)
+        input = Variable(torch.ones(3, 4))
+        offset = Variable(torch.arange(0, 3))
+        self.assertRaises(ValueError, lambda: es(input, offset))
+        self.assertRaises(ValueError, lambda: es(input.view(-1)))
+        offset[0] = 1
+        self.assertRaises(ValueError, lambda: es(input.view(-1), offset))
+        offset[0] = 0
+        offset[-1] = 100
+        self.assertRaises(ValueError, lambda: es(input.view(-1), offset))
+
+    def test_EmbeddingBag(self):
+        self._test_EmbeddingBag(False, 'sum')
+        self._test_EmbeddingBag(False, 'mean')
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_EmbeddingBag_cuda(self):
+        self._test_EmbeddingBag(True, 'sum')
+        self._test_EmbeddingBag(True, 'mean')
+
     def test_Dropout(self):
         input = torch.Tensor(1000)
         self._test_dropout(nn.Dropout, input)
@@ -762,6 +870,23 @@ class TestNN(NNTestCase):
         num_features = 1000
         input = torch.Tensor(num_features, b, d, w, h)
         self._test_dropout(nn.Dropout3d, input)
+
+    def test_AlphaDropout(self):
+        # generate random tensor with zero mean and unit std
+        input = torch.randn(5000)
+
+        mean = input.mean()
+        std = input.std()
+
+        for p in [0.2, 0.5, 0.8]:
+            module = nn.AlphaDropout(p)
+            input_var = Variable(input, requires_grad=True)
+            output = module(input_var)
+            # output mean should be close to input mean
+            self.assertLess(abs(output.data.mean() - mean), 0.1)
+            # output std should be close to input std
+            self.assertLess(abs(output.data.std() - std), 0.1)
+            output.backward(input)
 
     def _test_InstanceNorm(self, cls, input):
         b, c = input.size(0), input.size(1)
@@ -2203,6 +2328,134 @@ class TestNN(NNTestCase):
 
         self.assertTrue(gradcheck(lambda x1, x2: F.bilinear(x1, x2, module.weight, module.bias), (input1_1, input2_1)))
 
+    def run_conv_double_back_test(self, kern, stride, padding, chan_in, chan_out, batch_size,
+                                  inp_size, dilation, no_weight, use_cuda=False, use_bias=True):
+        tensor = torch.Tensor(1)
+        if use_cuda:
+            tensor = tensor.cuda()
+
+        x = Variable(tensor.new(batch_size, chan_in, inp_size, inp_size), requires_grad=True)
+        x.data.normal_()
+        weight = Variable(tensor.new(chan_out, chan_in, kern, kern), requires_grad=True)
+        weight.data.normal_()
+        if use_bias:
+            bias = Variable(tensor.new(chan_out), requires_grad=True)
+            bias.data.normal_()
+        else:
+            bias = None
+
+        def func(*inputs):
+            if no_weight:
+                lweight = weight
+                if use_bias:
+                    lx, lbias = inputs
+                else:
+                    lx, = inputs
+                    lbias = None
+            else:
+                if use_bias:
+                    lx, lweight, lbias = inputs
+                else:
+                    lx, lweight = inputs
+                    lbias = None
+            # We disable cudnn during forward to avoid finite difference imprecision issues
+            with use_cudnn(False):
+                out = F.conv2d(lx, lweight, lbias, stride, padding, dilation)
+            return out
+
+        if no_weight:
+            inputs = (x, bias)
+        else:
+            inputs = (x, weight, bias)
+
+        if not use_bias:
+            inputs = inputs[:-1]
+
+        dummy_out = func(*inputs)
+        grad_y = Variable(tensor.new(dummy_out.size()), requires_grad=True)
+        grad_y.data.normal_()
+
+        return gradgradcheck(func, inputs, (grad_y,))
+
+    def test_conv_double_backward(self):
+        batch_size = 2
+        for kern, inp_size, dilations in [(3, 6, [1, 2]), (3, 7, [1, 2]), (4, 9, [1, 2]), (4, 10, [1, 2])]:
+            for stride, padding, chan_in, chan_out, dilation in product([1, 2], [0, 2], [1], [2, 3], dilations):
+                no_weight = stride == 2
+                result = self.run_conv_double_back_test(kern, stride,
+                                                        padding, chan_in, chan_out,
+                                                        batch_size, inp_size, dilation,
+                                                        no_weight)
+                self.assertTrue(result,
+                                "Conv double backward test failed with parameters:" +
+                                "\nkern: " + str(kern) +
+                                "\nstride: " + str(stride) +
+                                "\npadding: " + str(padding) +
+                                "\nchan_in: " + str(chan_in) +
+                                "\nchan_out: " + str(chan_out) +
+                                "\nbatch_size: " + str(batch_size) +
+                                "\ninp_size: " + str(inp_size) +
+                                "\ndilation: " + str(dilation))
+
+    def test_conv_double_backward_no_bias(self):
+        kern = 3
+        stride = 1
+        padding = 2
+        chan_in, chan_out = 2, 4
+        batch_size = 2
+        inp_size = 6
+        dilation = 1
+        no_weight = False
+        use_bias = True
+        result = self.run_conv_double_back_test(kern, stride,
+                                                padding, chan_in, chan_out,
+                                                batch_size, inp_size, dilation,
+                                                no_weight, use_bias=use_bias)
+        self.assertTrue(result,
+                        "Conv double backward test failed with parameters:" +
+                        "\nkern: " + str(kern) +
+                        "\nstride: " + str(stride) +
+                        "\npadding: " + str(padding) +
+                        "\nchan_in: " + str(chan_in) +
+                        "\nchan_out: " + str(chan_out) +
+                        "\nbatch_size: " + str(batch_size) +
+                        "\ninp_size: " + str(inp_size) +
+                        "\ndilation: " + str(dilation))
+
+    def test_error_conv_double_backward(self):
+        batch_size = 2
+
+        # Cannot provide ggW when stride is > 1
+        for kern, inp_size, dilations in [(3, 5, [1, 2]), (3, 7, [1, 2]), (4, 6, [1]), (4, 7, [2])]:
+            for stride, padding, chan_in, chan_out, dilation in product([2], [0, 1, 2], [1, 3], [1, 3], dilations):
+                no_weight = False
+                with self.assertRaises(RuntimeError):
+                    self.run_conv_double_back_test(kern, stride,
+                                                   padding, chan_in, chan_out,
+                                                   batch_size, inp_size, dilation,
+                                                   no_weight)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_conv_double_backward_cuda(self):
+        batch_size = 1
+        for kern, inp_size, dilations in [(3, 5, [1, 2]), (4, 9, [1])]:
+            for stride, padding, chan_in, chan_out, dilation in product([1], [2], [2], [3], dilations):
+                no_weight = stride == 2
+                result = self.run_conv_double_back_test(kern, stride,
+                                                        padding, chan_in, chan_out,
+                                                        batch_size, inp_size, dilation,
+                                                        no_weight, use_cuda=True)
+                self.assertTrue(result,
+                                "Conv double backward test failed with parameters:" +
+                                "\nkern: " + str(kern) +
+                                "\nstride: " + str(stride) +
+                                "\npadding: " + str(padding) +
+                                "\nchan_in: " + str(chan_in) +
+                                "\nchan_out: " + str(chan_out) +
+                                "\nbatch_size: " + str(batch_size) +
+                                "\ninp_size: " + str(inp_size) +
+                                "\ndilation: " + str(dilation))
+
 
 class TestNNInit(TestCase):
     def setUp(self):
@@ -3126,6 +3379,10 @@ new_module_tests = [
         module_name='SELU',
         input_size=(3, 2, 5),
         check_inplace=True
+    ),
+    dict(
+        module_name='GLU',
+        input_size=(5, 6),
     ),
 ]
 

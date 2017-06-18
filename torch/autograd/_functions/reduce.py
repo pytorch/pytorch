@@ -21,7 +21,7 @@ class Sum(Function):
         if ctx.dim is None:
             return grad_output.expand(ctx.input_size), None, None
         else:
-            if ctx.keepdim is False:
+            if ctx.keepdim is False and len(ctx.input_size) != 1:
                 grad_output = grad_output.unsqueeze(ctx.dim)
 
             repeats = [1 for _ in ctx.input_size]
@@ -64,7 +64,7 @@ class Prod(Function):
         else:
             input, output = ctx.saved_variables
             dim = ctx.dim if ctx.dim >= 0 else ctx.dim + input.dim()
-            if ctx.keepdim is False:
+            if ctx.keepdim is False and len(ctx.input_size) != 1:
                 grad_output = grad_output.unsqueeze(dim)
                 output = output.unsqueeze(dim)
 
@@ -117,7 +117,7 @@ class Mean(Function):
             grad_input_val = grad_output / reduce(lambda x, y: x * y, ctx.input_size, 1)
             return grad_input_val.expand(ctx.input_size), None, None
         else:
-            if ctx.keepdim is False:
+            if ctx.keepdim is False and len(ctx.input_size) != 1:
                 grad_output = grad_output.unsqueeze(ctx.dim)
 
             repeats = [1 for _ in ctx.input_size]
@@ -168,7 +168,7 @@ class _SelectionFunction(Function):
                 dim = ctx.dim
 
             indices, = ctx.saved_variables
-            if ctx.keepdim is False:
+            if ctx.keepdim is False and len(ctx.input_size) != 1:
                 grad_output = grad_output.unsqueeze(dim)
                 grad_indices = grad_indices.unsqueeze(dim)
                 indices = indices.unsqueeze(dim)
@@ -232,7 +232,7 @@ class Norm(Function):
         else:
             input, output = ctx.saved_variables
 
-            if ctx.keepdim is False:
+            if ctx.keepdim is False and input.dim() != 1:
                 grad_output = grad_output.unsqueeze(ctx.dim)
                 output = output.unsqueeze(ctx.dim)
 

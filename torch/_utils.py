@@ -98,3 +98,47 @@ def _accumulate(iterable, fn=lambda x, y: x + y):
     for element in it:
         total = fn(total, element)
         yield total
+
+
+def _flatten_tensors(tensors):
+    """Flatten tensors into a single contiguous 1D buffer"""
+    if len(tensors) == 1:
+        return tensors[0].contiguous().view(-1)
+    numels = [tensor.numel() for tensor in tensors]
+    size = sum(numels)
+    offset = 0
+    flat = tensors[0].new(size)
+    for tensor, numel in zip(tensors, numels):
+        flat.narrow(0, offset, numel).copy_(tensor)
+        offset += numel
+    return flat
+
+
+def _unflatten_tensors(flat, tensors):
+    """View a flat buffer using the sizes of tensors"""
+    outputs = []
+    offset = 0
+    for tensor in tensors:
+        numel = tensor.numel()
+        outputs.append(flat.narrow(0, offset, numel).view_as(tensor))
+        offset += numel
+    return tuple(outputs)
+
+
+def _take_tensors(tensors, size_limit):
+    """Groups tensors into lists of up to size_limit bytes"""
+    buf = []
+    size = 0
+    last_type = type(tensors[0]) if len(tensors) > 0 else None
+    for tensor in tensors:
+        t = type(tensor)
+        param_size = tensor.numel() * tensor.element_size()
+        if t is not last_type or (size + param_size > size_limit and size > 0):
+            yield buf
+            last_type = t
+            size = 0
+            buf = []
+        buf.append(tensor)
+        size += param_size
+    if len(buf) > 0:
+        yield buf

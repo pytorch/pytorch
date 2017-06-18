@@ -248,7 +248,10 @@ PyObject * THCPModule_cudaSleep(PyObject *_unused, PyObject *cycles)
 PyObject * THCPModule_cudaLockMutex(PyObject *module)
 {
   auto mutex = THCCachingAllocator_getCudaFreeMutex();
-  mutex->lock();
+  {
+    AutoNoGIL no_gil;
+    mutex->lock();
+  }
   Py_RETURN_NONE;
 }
 

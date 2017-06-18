@@ -170,6 +170,7 @@ BLAS and LAPACK Operations
 .. autofunction:: ger
 .. autofunction:: gesv
 .. autofunction:: inverse
+.. autofunction:: matmul
 .. autofunction:: mm
 .. autofunction:: mv
 .. autofunction:: orgqr

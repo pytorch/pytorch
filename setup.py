@@ -17,10 +17,21 @@ from tools.setup_helpers.cuda import WITH_CUDA, CUDA_HOME
 from tools.setup_helpers.cudnn import WITH_CUDNN, CUDNN_LIB_DIR, CUDNN_INCLUDE_DIR
 from tools.setup_helpers.split_types import split_types
 DEBUG = check_env_flag('DEBUG')
-WITH_DISTRIBUTED = check_env_flag('WITH_DISTRIBUTED')
+WITH_DISTRIBUTED = not check_env_flag('NO_DISTRIBUTED')
 WITH_DISTRIBUTED_MW = WITH_DISTRIBUTED and check_env_flag('WITH_DISTRIBUTED_MW')
 WITH_NCCL = WITH_CUDA and platform.system() != 'Darwin'
 SYSTEM_NCCL = False
+
+
+################################################################################
+# Workaround setuptools -Wstrict-prototypes warnings
+# I lifted this code from https://stackoverflow.com/a/29634231/23845
+################################################################################
+import distutils.sysconfig
+cfg_vars = distutils.sysconfig.get_config_vars()
+for key, value in cfg_vars.items():
+    if type(value) == str:
+            cfg_vars[key] = value.replace("-Wstrict-prototypes", "")
 
 ################################################################################
 # Monkey-patch setuptools to compile in parallel
@@ -145,6 +156,10 @@ class build_ext(setuptools.command.build_ext.build_ext):
             print('-- Building NCCL library')
         else:
             print('-- Not using NCCL')
+        if WITH_DISTRIBUTED:
+            print('-- Building with distributed package ')
+        else:
+            print('-- Building without distributed package')
 
         # cwrap depends on pyyaml, so we can't import it earlier
         from tools.cwrap import cwrap
@@ -156,11 +171,12 @@ class build_ext(setuptools.command.build_ext.build_ext):
         from tools.cwrap.plugins.NullableArguments import NullableArguments
         from tools.cwrap.plugins.CuDNNPlugin import CuDNNPlugin
         from tools.cwrap.plugins.WrapDim import WrapDim
+        from tools.cwrap.plugins.AssertNDim import AssertNDim
         from tools.cwrap.plugins.Broadcast import Broadcast
         thp_plugin = THPPlugin()
         cwrap('torch/csrc/generic/TensorMethods.cwrap', plugins=[
             BoolOption(), thp_plugin, AutoGPU(condition='IS_CUDA'),
-            ArgcountSortPlugin(), KwargsPlugin(), WrapDim(), Broadcast()
+            ArgcountSortPlugin(), KwargsPlugin(), AssertNDim(), WrapDim(), Broadcast()
         ])
         cwrap('torch/csrc/cudnn/cuDNN.cwrap', plugins=[
             CuDNNPlugin(), NullableArguments()
@@ -207,7 +223,10 @@ class clean(distutils.command.clean.clean):
 include_dirs = []
 library_dirs = []
 extra_link_args = []
-extra_compile_args = ['-std=c++11', '-Wno-write-strings']
+extra_compile_args = ['-std=c++11', '-Wno-write-strings',
+                      # Python 2.6 requires -fno-strict-aliasing, see
+                      # http://legacy.python.org/dev/peps/pep-3123/
+                      '-fno-strict-aliasing']
 if os.getenv('PYTORCH_BINARY_BUILD') and platform.system() == 'Linux':
     print('PYTORCH_BINARY_BUILD found. Static linking libstdc++ on Linux')
     extra_compile_args += ['-static-libstdc++']

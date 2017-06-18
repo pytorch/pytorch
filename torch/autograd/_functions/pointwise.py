@@ -3,6 +3,7 @@ from itertools import repeat
 from ..._thnn import type2backend
 from ..function import Function, InplaceFunction
 from ..variable import Variable
+from .utils import maybe_unexpand, maybe_unexpand_or_view
 
 
 class Exp(InplaceFunction):
@@ -261,6 +262,8 @@ class Cmax(Function):
 
     @staticmethod
     def forward(ctx, a, b):
+        ctx._a_size = a.size()
+        ctx._b_size = b.size()
         ctx._mask = a.gt(b)
         return a.max(b)
 
@@ -268,8 +271,8 @@ class Cmax(Function):
     def backward(ctx, grad_output):
         mask = Variable(ctx._mask.type_as(grad_output.data))
         return (
-            grad_output * mask,
-            grad_output * Variable(ctx._mask.eq(0).type_as(grad_output.data))
+            maybe_unexpand(grad_output * mask, ctx._a_size),
+            maybe_unexpand_or_view(grad_output * Variable(ctx._mask.eq(0).type_as(grad_output.data)), ctx._b_size)
         )
 
 
@@ -290,6 +293,8 @@ class Cmin(Function):
 
     @staticmethod
     def forward(ctx, a, b):
+        ctx._a_size = a.size()
+        ctx._b_size = b.size()
         ctx._mask = a.lt(b).type_as(a)
         return a.min(b)
 
@@ -297,8 +302,8 @@ class Cmin(Function):
     def backward(ctx, grad_output):
         mask = Variable(ctx._mask.type_as(grad_output.data))
         return (
-            grad_output * mask,
-            grad_output * Variable(ctx._mask.eq(0).type_as(grad_output.data))
+            maybe_unexpand(grad_output * mask, ctx._a_size),
+            maybe_unexpand_or_view(grad_output * Variable(ctx._mask.eq(0).type_as(grad_output.data)), ctx._b_size)
         )
 
 
@@ -321,11 +326,12 @@ class _ConstantGrad(Function):
     @classmethod
     def forward(cls, ctx, *args):
         ctx._num_args = len(args)
+        ctx._args0_size = args[0].size()
         return getattr(args[0], cls.__name__.lower())(*args[1:])
 
     @classmethod
     def backward(cls, ctx, grad_output):
-        return (grad_output.mul(cls.grad_value),) + (ctx._num_args - 1) * (None,)
+        return (maybe_unexpand(grad_output.mul(cls.grad_value), ctx._args0_size),) + (ctx._num_args - 1) * (None,)
 
 
 class Floor(_ConstantGrad):
@@ -364,12 +370,15 @@ class Lerp(Function):
 
     @staticmethod
     def forward(ctx, a, b, weight):
+        ctx._a_size = a.size()
+        ctx._b_size = b.size()
         ctx._weight = float(weight)
         return a.lerp(b, ctx._weight)
 
     @staticmethod
     def backward(ctx, grad_output):
-        return grad_output.mul(1 - ctx._weight), grad_output.mul(ctx._weight), None
+        return (maybe_unexpand(grad_output.mul(1 - ctx._weight), ctx._a_size),
+                maybe_unexpand_or_view(grad_output.mul(ctx._weight), ctx._b_size), None)
 
 
 class Rsqrt(InplaceFunction):
@@ -395,6 +404,7 @@ class Addcmul(InplaceFunction):
     @staticmethod
     def forward(ctx, add_tensor, mul_tensor1, mul_tensor2, scale=1.0, inplace=False):
         ctx._scale = scale
+        ctx._add_tensor_size = add_tensor.size()
         ctx.save_for_backward(mul_tensor1, mul_tensor2)
         if inplace:
             ctx.mark_dirty(add_tensor)
@@ -408,13 +418,13 @@ class Addcmul(InplaceFunction):
         mul_tensor1, mul_tensor2 = ctx.saved_variables
 
         if ctx.needs_input_grad[0]:
-            grad_add = grad_output
+            grad_add = maybe_unexpand(grad_output, ctx._add_tensor_size)
 
         if ctx.needs_input_grad[1]:
-            grad_mul1 = grad_output.mul(mul_tensor2).mul_(ctx._scale)
+            grad_mul1 = maybe_unexpand_or_view(grad_output.mul(mul_tensor2).mul_(ctx._scale), mul_tensor1.size())
 
         if ctx.needs_input_grad[2]:
-            grad_mul2 = grad_output.mul(mul_tensor1).mul_(ctx._scale)
+            grad_mul2 = maybe_unexpand_or_view(grad_output.mul(mul_tensor1).mul_(ctx._scale), mul_tensor2.size())
 
         return grad_add, grad_mul1, grad_mul2, None, None
 
@@ -424,6 +434,7 @@ class Addcdiv(InplaceFunction):
     @staticmethod
     def forward(ctx, add_tensor, div_tensor1, div_tensor2, scale=1.0, inplace=False):
         ctx._scale = scale
+        ctx._add_tensor_size = add_tensor.size()
         ctx.save_for_backward(div_tensor1, div_tensor2)
         if inplace:
             ctx.mark_dirty(add_tensor)
@@ -437,14 +448,15 @@ class Addcdiv(InplaceFunction):
         div_tensor1, div_tensor2 = ctx.saved_variables
 
         if ctx.needs_input_grad[0]:
-            grad_add = grad_output
+            grad_add = maybe_unexpand(grad_output, ctx._add_tensor_size)
 
         if ctx.needs_input_grad[1]:
-            grad_div1 = grad_output.div(div_tensor2).mul_(ctx._scale)
+            grad_div1 = maybe_unexpand_or_view(grad_output.div(div_tensor2).mul_(ctx._scale), div_tensor1.size())
 
         if ctx.needs_input_grad[2]:
             div_tensor2_sq = div_tensor2.mul(div_tensor2)
-            grad_div2 = grad_output.mul(div_tensor1).div(div_tensor2_sq).mul(-ctx._scale)
+            grad_div2 = maybe_unexpand_or_view(grad_output.mul(div_tensor1).div(div_tensor2_sq).mul(-ctx._scale),
+                                               div_tensor2.size())
 
         return grad_add, grad_div1, grad_div2, None, None
 

@@ -1299,8 +1299,10 @@
   with_stateless: True
   return: accreal
   arguments:
-    - THTensor* self
-    - THTensor* tensor
+    - arg: THTensor* self
+      assert_ndim: 1
+    - arg: THTensor* tensor
+      assert_ndim: 1
 ]]
 
 [[

@@ -217,19 +217,23 @@ void THCSTensor_(hspmm)(THCState *state, THCSTensor *r_, real alpha, THCSTensor 
 void THCSTensor_(spcadd)(THCState *state, THCTensor *r_, THCTensor *dense, real value, THCSTensor *sparse) {
   THCAssertSameGPU(THCSTensor_(checkGPU)(state, 1, 3, sparse, r_, dense));
 
+  const ptrdiff_t nnz = THCSTensor_(nnz)(state, sparse);
+  if (nnz == 0) {
+    THCTensor_(resizeAs)(state, r_, dense);
+    THCTensor_(copy)(state, r_, dense);
+    return;
+  }
+
   THCTensor *r = r_;
   if (r != dense) {
     THCTensor_(retain)(state, r);
     THCTensor_(resizeAs)(state, r, dense);
     THCTensor_(copy)(state, r, dense);
   } else {
+    if (!THCTensor_(isContiguous)(state, r_)) {
+      THError("CUDA sparse spcadd: known bug");
+    }
     r = THCTensor_(newContiguous)(state, r_);
-  }
-
-  const ptrdiff_t nnz = THCSTensor_(nnz)(state, sparse);
-  if (nnz == 0) {
-    THCTensor_(freeCopyTo)(state, r, r_);
-    return;
   }
 
   THCIndexTensor *indices = THCSTensor_(newIndices)(state, sparse);

@@ -175,6 +175,40 @@ Pooling Layers
     :members:
 
 
+Padding Layers
+--------------
+
+:hidden:`ReflectionPad2d`
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: ReflectionPad2d
+    :members:
+
+:hidden:`ReplicationPad2d`
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: ReplicationPad2d
+    :members:
+
+:hidden:`ReplicationPad3d`
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: ReplicationPad3d
+    :members:
+
+:hidden:`ZeroPad2d`
+~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: ZeroPad2d
+    :members:
+
+:hidden:`ConstantPad2d`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: ConstantPad2d
+    :members:
+
+
 Non-linear Activations
 ----------------------------------
 
@@ -400,6 +434,12 @@ Sparse layers
 .. autoclass:: Embedding
     :members:
 
+:hidden:`EmbeddingBag`
+~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: EmbeddingBag
+    :members:
+
 Distance functions
 ----------------------------------
 
@@ -544,13 +584,19 @@ Vision layers
     :members:
 
 
-Multi-GPU layers
-----------------
+DataParallel layers (multi-GPU, distributed)
+--------------------------------------------
 
 :hidden:`DataParallel`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: DataParallel
+    :members:
+
+:hidden:`DistributedDataParallel`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: torch.nn.parallel.DataParallel
     :members:
 
 
@@ -885,12 +931,12 @@ Vision functions
 .. autofunction:: upsample
 
 :hidden:`upsample_nearest`
-~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: upsample_nearest
 
 :hidden:`upsample_bilinear`
-~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: upsample_bilinear
 

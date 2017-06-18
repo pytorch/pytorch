@@ -373,6 +373,17 @@ class Module(object):
             for name, p in module.named_parameters(memo, submodule_prefix):
                 yield name, p
 
+    def _all_buffers(self, memo=None):
+        if memo is None:
+            memo = set()
+        for name, b in self._buffers.items():
+            if b is not None and b not in memo:
+                memo.add(b)
+                yield b
+        for module in self.children():
+            for b in module._all_buffers(memo):
+                yield b
+
     def children(self):
         """Returns an iterator over immediate children modules."""
         for name, module in self.named_children():

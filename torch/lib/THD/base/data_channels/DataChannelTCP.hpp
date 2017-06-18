@@ -47,7 +47,7 @@ struct DataChannelTCP : DataChannel {
               THDGroup group_id = THDGroupWORLD) override;
   void broadcast(thpp::Tensor& data, rank_type src_id,
                  THDGroup group_id = THDGroupWORLD) override;
-  void send(const Scalar& data, rank_type dst_id) override;
+  void send(Scalar& data, rank_type dst_id) override;
   void send(thpp::Tensor& data, rank_type dst_id) override;
   void receive(Scalar& data, rank_type src_id) override;
   void receive(thpp::Tensor& data) override;

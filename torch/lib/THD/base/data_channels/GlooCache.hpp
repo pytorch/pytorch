@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../Cuda.hpp"
 #include "../ChannelUtils.hpp"
 #include "../DataChannel.hpp"
 
@@ -24,12 +25,7 @@
 #include <memory>
 #include <tuple>
 #include <vector>
-
-#ifdef WITH_CUDA
-// TODO: it should be possible to set this using the library API...
-extern THCState *state;
-#endif
-
+#include <type_traits>
 
 namespace thd {
 namespace gloo_cache {
@@ -38,11 +34,22 @@ using key_type = std::tuple<
   CollectiveType, // operation
   THDGroup,       // group
   DeviceType,     // tensors device type
+  int,            // CUDA stream id used in the algorithm
   std::size_t,    // input buffer bytes
   std::size_t,    // output buffer bytes
   THDReduceOp,    // reduce op
   rank_type       // src/dest rank
 >;
+
+const DeviceType UNUSED_DEVICE = DeviceType::LAST;
+const THDReduceOp UNUSED_OP = THDReduceMIN;
+const int UNUSED_STREAM = -1;
+const rank_type UNUSED_RANK = -1;
+const std::size_t UNUSED_BYTES = 0;
+
+// Forward declaration
+template<CollectiveType D, typename T>
+struct algorithm_spec;
 
 } // namespace gloo_cache
 } // namespace thd
@@ -51,15 +58,11 @@ using key_type = std::tuple<
 MAKE_HASHABLE(
   thd::gloo_cache::key_type,
   std::get<0>(t), std::get<1>(t), std::get<2>(t), std::get<3>(t),
-  std::get<4>(t), std::get<5>(t), std::get<6>(t)
+  std::get<4>(t), std::get<5>(t), std::get<6>(t), std::get<7>(t)
 );
 
 
 namespace thd {
-
-// Forward declaration
-template<CollectiveType D, typename T>
-struct algorithm_spec;
 
 struct GlooCache {
   using buffer_type = char;
@@ -76,11 +79,9 @@ struct GlooCache {
     std::shared_ptr<std::mutex>      // mutex to protect same algorithm from running concurrently
   >;
 
-  GlooCache(rank_type rank, std::shared_ptr<::gloo::transport::Device> device,
-            std::shared_ptr<store_type> store)
+  GlooCache(rank_type rank, std::shared_ptr<::gloo::transport::Device> device)
    : _rank(rank)
    , _device(device)
-   , _store(store)
   {}
 
   GlooCache(GlooCache const&)      = delete;
@@ -105,15 +106,19 @@ struct GlooCache {
   }
 
 
+  // NOTE: this function needs to be thread safe
   std::shared_ptr<context_type> createContext(
-    const DataChannel::Group& group,
-    prefix_store_type& store
+    const DataChannelGloo::Group& group,
+    const std::string& prefix
   ) {
-    auto context = std::make_shared<context_type>(group.mustGetGroupRank(_rank), group.size());
-    context->connectFullMesh(store, _device);
+    auto context = std::make_shared<context_type>(
+        group.mustGetGroupRank(_rank), group.size());
+    prefix_store_type prefix_store(prefix, *group._store);
+    context->connectFullMesh(prefix_store, _device);
     return context;
   }
 
+  // NOTE: this function needs to be thread safe
   std::shared_ptr<buffer_type> createBuffer(std::size_t bytes, DeviceType device) const {
     if (device == DeviceType::CPU) {
       return std::shared_ptr<buffer_type>(new char[bytes],
@@ -121,8 +126,8 @@ struct GlooCache {
 #ifdef WITH_CUDA
     } else if (device == DeviceType::CUDA) {
       buffer_type *buf;
-      THCudaCheck(THCudaMalloc(state, (void**)&buf, bytes));
-      return std::shared_ptr<buffer_type>(buf, [](char* ptr) { THCudaFree(state, ptr); });
+      THCudaCheck(THCudaMalloc(THDGetCudaState(), (void**)&buf, bytes));
+      return std::shared_ptr<buffer_type>(buf, [](char* ptr) { THCudaFree(THDGetCudaState(), ptr); });
 #endif
     } else {
       throw std::runtime_error("unsupported device in GlooCache::createBuffer");
@@ -130,21 +135,25 @@ struct GlooCache {
   }
 
   template<CollectiveType D, typename T, typename... Args>
-  value_type getAlgorithm(THDGroup group_id, const DataChannel::Group& group,
+  value_type getAlgorithm(THDGroup group_id, const DataChannelGloo::Group& group,
                           Args... args) {
-    // We need to protect from race when two (or more) threads are trying to
-    // create same algorithm simultaneously.
-    std::lock_guard<std::mutex> lock(_mutex);
+    auto key = gloo_cache::algorithm_spec<D, T>::key(group_id, args...);
 
-    auto key = algorithm_spec<D, T>::key(group_id, args...);
+    std::unique_lock<std::mutex> lock(_mutex);
     auto it = _algorithms.find(key);
     if (it == _algorithms.end()) {
-      // create prefix store with unique prefix
-      prefix_store_type prefix_store(print_key(key), *_store);
-      std::tie(it, std::ignore) = _algorithms.emplace(std::make_pair(
-        key,
-        algorithm_spec<D, T>::create(*this, group, prefix_store, std::forward<Args>(args)...)
-      ));
+      lock.unlock();
+
+      auto algorithm = gloo_cache::algorithm_spec<D, T>::create(*this, group,
+              print_key(key), std::forward<Args>(args)...);
+
+      lock.lock();
+
+      bool inserted;
+      std::tie(it, inserted) = _algorithms.emplace(
+        std::move(key), std::move(algorithm));
+      if (!inserted)
+          throw std::runtime_error("detected a race when creating Gloo algorithm");
     }
 
     return it->second;
@@ -159,8 +168,9 @@ struct GlooCache {
       std::memcpy(input_buffer, t.data(), tensor_bytes);
 #ifdef WITH_CUDA
     } else if (t_dev == DeviceType::CUDA) {
-      THCudaCheck(cudaMemcpy(input_buffer, t.data(), tensor_bytes, cudaMemcpyDeviceToDevice));
-      THCudaCheck(cudaDeviceSynchronize()); // TODO: we probably want to have a more fine-grained sync
+      auto stream = THCState_getCurrentStream(THDGetCudaState());
+      THCudaCheck(cudaMemcpyAsync(input_buffer, t.data(), tensor_bytes,
+                                  cudaMemcpyDeviceToDevice, stream));
 #endif
     } else {
       throw std::runtime_error("unsupported device in memcpy_input");
@@ -176,14 +186,14 @@ struct GlooCache {
       std::memcpy(t.data(), output_buffer, tensor_bytes);
 #ifdef WITH_CUDA
     } else if (t_dev == DeviceType::CUDA) {
-      THCudaCheck(cudaMemcpy(t.data(), output_buffer, tensor_bytes, cudaMemcpyDeviceToDevice));
+      auto stream = THCState_getCurrentStream(THDGetCudaState());
+      THCudaCheck(cudaMemcpyAsync(t.data(), output_buffer, tensor_bytes,
+                                  cudaMemcpyDeviceToDevice, stream));
 #endif
     } else {
       throw std::runtime_error("unsupported device in memcpy_input");
     }
   }
-
-
 
 private:
   std::string print_key(const key_type& k) {
@@ -193,7 +203,8 @@ private:
       + std::to_string(std::get<3>(k)) + "-"
       + std::to_string(std::get<4>(k)) + "-"
       + std::to_string(std::get<5>(k)) + "-"
-      + std::to_string(std::get<6>(k));
+      + std::to_string(std::get<6>(k)) + "-"
+      + std::to_string(std::get<7>(k));
   }
 
   rank_type _rank;
@@ -204,6 +215,8 @@ private:
 
   std::unordered_map<key_type, value_type> _algorithms;
 };
+
+namespace gloo_cache {
 
 template<typename T>
 const ::gloo::ReductionFunction<T>* THDToGlooReduceOp(THDReduceOp op) {
@@ -221,25 +234,20 @@ const ::gloo::ReductionFunction<T>* THDToGlooReduceOp(THDReduceOp op) {
   }
 }
 
-const DeviceType UNUSED_DEVICE = DeviceType::LAST;
-const THDReduceOp UNUSED_OP = THDReduceMIN;
-const rank_type UNUSED_RANK = -1;
-const std::size_t UNUSED_BYTES = 0;
-
 template<typename T>
 struct algorithm_spec<CollectiveType::ALL_GATHER, T> {
   static GlooCache::key_type key(
     THDGroup group_id, DeviceType device, std::size_t input_bytes, std::size_t output_bytes, std::size_t unused_count
   ) {
-    return std::make_tuple(CollectiveType::ALL_GATHER, group_id, device,
+    return std::make_tuple(CollectiveType::ALL_GATHER, group_id, device, UNUSED_STREAM,
                            input_bytes, output_bytes, UNUSED_OP, UNUSED_RANK);
   }
 
   static GlooCache::value_type create(GlooCache& cache,
-    const DataChannel::Group& group, GlooCache::prefix_store_type& store,
+    const DataChannelGloo::Group& group, const std::string& store_prefix,
     DeviceType device, std::size_t input_bytes, std::size_t output_bytes, std::size_t count
   ) {
-    auto context = cache.createContext(group, store);
+    auto context = cache.createContext(group, store_prefix);
     auto input_buffer = cache.createBuffer(input_bytes, device);
     auto output_buffer = cache.createBuffer(output_bytes, device);
 
@@ -269,15 +277,20 @@ struct algorithm_spec<CollectiveType::ALL_REDUCE, T> {
     THDGroup group_id, DeviceType device, std::size_t input_bytes,
     std::size_t unused_count, THDReduceOp op
   ) {
-    return std::make_tuple(CollectiveType::ALL_REDUCE, group_id, device,
+    int stream = UNUSED_STREAM;
+    if (device == DeviceType::CUDA) {
+      auto cuda_stream = THCState_getCurrentStream(THDGetCudaState());
+      stream = THDGetStreamId(cuda_stream);
+    }
+    return std::make_tuple(CollectiveType::ALL_REDUCE, group_id, device, stream,
                            input_bytes, input_bytes, op, UNUSED_RANK);
   }
 
   static GlooCache::value_type create(GlooCache& cache,
-    const DataChannel::Group& group, GlooCache::prefix_store_type& store,
+    const DataChannelGloo::Group& group, const std::string& store_prefix,
     DeviceType device, std::size_t input_bytes, std::size_t count, THDReduceOp op
   ) {
-    auto context = cache.createContext(group, store);
+    auto context = cache.createContext(group, store_prefix);
     auto input_buffer = cache.createBuffer(input_bytes, device);
 
     std::shared_ptr<GlooCache::algorithm_type> algo;
@@ -292,10 +305,12 @@ struct algorithm_spec<CollectiveType::ALL_REDUCE, T> {
       if (op != THDReduceSUM) {
         throw std::runtime_error("Gloo backend only supports sum op for CUDA all reduce");
       }
+      auto stream = THCState_getCurrentStream(THDGetCudaState());
       algo = std::make_shared<::gloo::CudaAllreduceRing<T>>(
         context,
         std::initializer_list<T*>{reinterpret_cast<T*>(input_buffer.get())},
-        count); // TODO: figure out what to do with streams
+        count,
+        std::vector<cudaStream_t>{stream});
 #endif
     } else {
       throw std::runtime_error("unsupported tensor device in Gloo allReduce");
@@ -316,15 +331,20 @@ struct algorithm_spec<CollectiveType::BROADCAST, T> {
     THDGroup group_id, DeviceType device, std::size_t input_bytes,
     std::size_t unused_count, rank_type src_rank
   ) {
-    return std::make_tuple(CollectiveType::BROADCAST, group_id, device,
+    int stream = UNUSED_STREAM;
+    if (device == DeviceType::CUDA) {
+      auto cuda_stream = THCState_getCurrentStream(THDGetCudaState());
+      stream = THDGetStreamId(cuda_stream);
+    }
+    return std::make_tuple(CollectiveType::BROADCAST, group_id, device, stream,
                            input_bytes, input_bytes, UNUSED_OP, src_rank);
   }
 
   static GlooCache::value_type create(GlooCache& cache,
-    const DataChannel::Group& group, GlooCache::prefix_store_type& store,
+    const DataChannelGloo::Group& group, const std::string& store_prefix,
     DeviceType device, std::size_t input_bytes, std::size_t count, rank_type src_rank
   ) {
-    auto context = cache.createContext(group, store);
+    auto context = cache.createContext(group, store_prefix);
     auto input_buffer = cache.createBuffer(input_bytes, device);
 
     std::shared_ptr<GlooCache::algorithm_type> algo;
@@ -336,11 +356,14 @@ struct algorithm_spec<CollectiveType::BROADCAST, T> {
         src_rank);
 #ifdef WITH_CUDA
     } else if (device == DeviceType::CUDA) {
+      auto stream = THCState_getCurrentStream(THDGetCudaState());
       algo = std::make_shared<::gloo::CudaBroadcastOneToAll<T>>(
         context,
         std::initializer_list<T*>{reinterpret_cast<T*>(input_buffer.get())},
         count,
-        src_rank); // TODO: figure out what to do with streams
+        src_rank,
+        0,
+        std::vector<cudaStream_t>{stream});
 #endif
     } else {
       throw std::runtime_error("unsupported tensor device in Gloo broadcast");
@@ -358,14 +381,14 @@ struct algorithm_spec<CollectiveType::BROADCAST, T> {
 template<typename T> // unused
 struct algorithm_spec<CollectiveType::BARRIER, T> {
   static GlooCache::key_type key(THDGroup group_id) {
-    return std::make_tuple(CollectiveType::BARRIER, group_id, UNUSED_DEVICE,
+    return std::make_tuple(CollectiveType::BARRIER, group_id, UNUSED_DEVICE, UNUSED_STREAM,
                            UNUSED_BYTES, UNUSED_BYTES, UNUSED_OP, UNUSED_RANK);
   }
 
   static GlooCache::value_type create(GlooCache& cache,
-    const DataChannel::Group& group, GlooCache::prefix_store_type& store
+    const DataChannelGloo::Group& group, const std::string& store_prefix
   ) {
-    auto context = cache.createContext(group, store);
+    auto context = cache.createContext(group, store_prefix);
     return std::make_tuple(
       std::make_shared<::gloo::BarrierAllToAll>(context),
       nullptr,
@@ -374,5 +397,7 @@ struct algorithm_spec<CollectiveType::BARRIER, T> {
     );
   }
 };
+
+} // namespace gloo_cache
 
 } // namespace thd

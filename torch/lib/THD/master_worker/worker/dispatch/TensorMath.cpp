@@ -357,8 +357,9 @@ static void tensorMean(rpc::RPCMessage& raw_message) {
   thpp::Tensor *r = unpackRetrieveTensor(raw_message);
   thpp::Tensor *t = unpackRetrieveTensor(raw_message);
   int dimension = unpackInteger(raw_message);
+  int keepdim = unpackInteger(raw_message);
   finalize(raw_message);
-  r->mean(*t, dimension);
+  r->mean(*t, dimension, keepdim);
 }
 
 static void tensorStd(rpc::RPCMessage& raw_message) {
@@ -366,8 +367,9 @@ static void tensorStd(rpc::RPCMessage& raw_message) {
   thpp::Tensor *t = unpackRetrieveTensor(raw_message);
   int dimension = unpackInteger(raw_message);
   int flag = unpackInteger(raw_message);
+  int keepdim = unpackInteger(raw_message);
   finalize(raw_message);
-  r->std(*t, dimension, flag);
+  r->std(*t, dimension, flag, keepdim);
 }
 
 static void tensorVar(rpc::RPCMessage& raw_message) {
@@ -375,22 +377,24 @@ static void tensorVar(rpc::RPCMessage& raw_message) {
   thpp::Tensor *t = unpackRetrieveTensor(raw_message);
   int dimension = unpackInteger(raw_message);
   int flag = unpackInteger(raw_message);
+  int keepdim = unpackInteger(raw_message);
   finalize(raw_message);
-  r->var(*t, dimension, flag);
+  r->var(*t, dimension, flag, keepdim);
 }
 
 static void tensorNorm(rpc::RPCMessage& raw_message) {
   thpp::Tensor *r = unpackRetrieveTensor(raw_message);
   thpp::Tensor *t = unpackRetrieveTensor(raw_message);
   int dimension = unpackInteger(raw_message);
+  int keepdim = unpackInteger(raw_message);
   if (thpp::isInteger(r->type())) {
     long long value = unpackInteger(raw_message);
     finalize(raw_message);
-    dynamic_cast<thpp::IntTensor*>(r)->norm(*t, value, dimension);
+    dynamic_cast<thpp::IntTensor*>(r)->norm(*t, value, dimension, keepdim);
   } else if (thpp::isFloat(r->type())) {
     double value = unpackFloat(raw_message);
     finalize(raw_message);
-    dynamic_cast<thpp::FloatTensor*>(r)->norm(*t, value, dimension);
+    dynamic_cast<thpp::FloatTensor*>(r)->norm(*t, value, dimension, keepdim);
   } else {
     throw std::runtime_error("expected scalar type");
   }

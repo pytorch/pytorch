@@ -14,7 +14,7 @@ def replicate(network, devices):
         param_copies = [param_copies[i:i + len(params)]
                         for i in range(0, len(param_copies), len(params))]
 
-    buffers = _buffers(network)
+    buffers = list(network._all_buffers())
     buffer_indices = {buf: idx for idx, buf in enumerate(buffers)}
     buffer_copies = comm.broadcast_coalesced(buffers, devices)
 
@@ -60,14 +60,3 @@ def replicate(network, devices):
                     replica._buffers[key] = buffer_copies[j][buffer_idx]
 
     return [module_copies[j][0] for j in range(num_replicas)]
-
-
-def _buffers(network):
-    buffers = []
-    seen = set()
-    for module in network.modules():
-        for buf in module._buffers.values():
-            if buf not in seen and buf is not None:
-                seen.add(buf)
-                buffers.append(buf)
-    return buffers

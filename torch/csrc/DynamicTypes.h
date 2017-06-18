@@ -2,8 +2,8 @@
 
 // Provides conversions between Python tensor objects and thpp::Tensors.
 
-#include <memory>
 #include <Python.h>
+#include <memory>
 #include <THPP/THPP.h>
 
 namespace torch {

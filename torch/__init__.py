@@ -15,7 +15,7 @@ from .version import __version__
 __all__ = [
     'typename', 'is_tensor', 'is_storage', 'set_default_tensor_type',
     'set_rng_state', 'get_rng_state', 'manual_seed', 'initial_seed',
-    'save', 'load', 'set_printoptions', 'chunk', 'split', 'stack',
+    'save', 'load', 'set_printoptions', 'chunk', 'split', 'stack', 'matmul',
     'DoubleStorage', 'FloatStorage', 'LongStorage', 'IntStorage',
     'ShortStorage', 'CharStorage', 'ByteStorage',
     'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
@@ -343,5 +343,5 @@ import torch.utils.backcompat
 _C._init_names(list(torch._tensor_classes) + list(torch._storage_classes))
 
 # attach docstrings to torch and tensor functions
-from . import _torch_docs, _tensor_docs
-del _torch_docs, _tensor_docs
+from . import _torch_docs, _tensor_docs, _storage_docs
+del _torch_docs, _tensor_docs, _storage_docs

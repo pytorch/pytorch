@@ -48,6 +48,7 @@ struct python_error : public std::exception {
 
   /** Sets the current Python error from this exception */
   inline void restore() {
+    if (!type) return;
     // PyErr_Restore steals references
     AutoGIL gil;
     Py_XINCREF(type);

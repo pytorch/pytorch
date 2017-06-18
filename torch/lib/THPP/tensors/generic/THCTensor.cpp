@@ -63,17 +63,37 @@ auto THCTensor<real>::newSelect(int dimension, long sliceIndex) const -> THCTens
 
 template<>
 auto THCTensor<real>::newNarrow(int dimension, long firstIndex, long size) const -> THCTensor* {
-  throw std::runtime_error("newNarrow is not yet available for CUDA tensors");
+  return new THCTensor(state, THCTensor_(newNarrow)(state, tensor, dimension, firstIndex, size));
 }
 
 template<>
 auto THCTensor<real>::newTranspose(int dimension1, int dimension2) const -> THCTensor* {
-  throw std::runtime_error("newTranspose is not yet available for CUDA tensors");
+  return new THCTensor(state, THCTensor_(newTranspose)(state, tensor, dimension1, dimension2));
 }
 
 template<>
 auto THCTensor<real>::newUnfold(int dimension, long size, long step) const -> THCTensor* {
   throw std::runtime_error("newUnfold is not yet available for CUDA tensors");
+}
+
+template<>
+auto THCTensor<real>::newExpand(const long_range& size) const -> THCTensor* {
+  THLongStorage *size_storage = THLongStorage_newWithSize(size.size());
+  std::memcpy(size_storage->data, size.data(), sizeof(long) * size.size());
+  // TODO this might leak on error
+  auto expanded = new THCTensor(state, THCTensor_(newExpand)(state, tensor, size_storage));
+  THLongStorage_free(size_storage);
+  return expanded;
+}
+
+template<>
+auto THCTensor<real>::newView(const long_range& size) const -> THCTensor* {
+  THLongStorage *size_storage = THLongStorage_newWithSize(size.size());
+  std::memcpy(size_storage->data, size.data(), sizeof(long) * size.size());
+  // TODO this might leak on error
+  auto viewed = new THCTensor(state, THCTensor_(newView)(state, tensor, size_storage));
+  THLongStorage_free(size_storage);
+  return viewed;
 }
 
 template<>

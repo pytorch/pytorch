@@ -523,7 +523,7 @@ void DataChannelTCP::broadcast(thpp::Tensor& data, rank_type src_rank,
 }
 
 
-void DataChannelTCP::send(const Scalar& data, rank_type dst_rank) {
+void DataChannelTCP::send(Scalar& data, rank_type dst_rank) {
   auto request = _send_worker.push([this, &data, dst_rank]{
     this->_send(data, dst_rank);
   });

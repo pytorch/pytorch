@@ -1,8 +1,26 @@
 PyObject *THSPTensorClass = NULL;
 
+static void THSPTensor_(initStorage)(THSTensor* tensor)
+{
+  // Ensure that PyTorch's "storage is not NULL" invariant is upheld.
+  // See Note [Storage is not NULL]
+  if (!tensor->indices->storage) {
+#ifdef THC_GENERIC_FILE
+    tensor->indices->storage = THCudaLongStorage_new(LIBRARY_STATE_NOARGS);
+#else
+    tensor->indices->storage = THLongStorage_new(LIBRARY_STATE_NOARGS);
+#endif
+  }
+  if (!tensor->values->storage) {
+    tensor->values->storage = THStorage_(new)(LIBRARY_STATE_NOARGS);
+  }
+}
+
 PyObject * THSPTensor_(NewEmpty)()
 {
-  return THSPTensor_(New)(THSTensor_(new)(LIBRARY_STATE_NOARGS));
+  auto r = THSTensor_(new)(LIBRARY_STATE_NOARGS);
+  THSPTensor_(initStorage)(r);
+  return THSPTensor_(New)(r);
 }
 
 PyObject * THSPTensor_(New)(THSTensor *tensor)
@@ -35,7 +53,12 @@ static PyObject * THSPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
 #define THIndexTensor THLongTensor
 #endif
   HANDLE_TH_ERRORS
-    Py_ssize_t num_args = args ? PyTuple_Size(args) : 0;
+
+#ifdef THC_GENERIC_FILE
+  THCPAutoGPU gpu_guard;
+#endif
+
+  Py_ssize_t num_args = args ? PyTuple_Size(args) : 0;
 
   THSPTensorPtr self((THSPTensor *)type->tp_alloc(type, 0));
   THPUtils_assert(self, "failed to allocate a " THSPTensorStr " object");
@@ -45,6 +68,7 @@ static PyObject * THSPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
   if (kwargs != NULL) {
     Py_ssize_t num_kwargs = PyDict_Size(kwargs);
     if (num_args == 0) {
+      // NB: This is an internal option, so we don't want to advertise it.
       PyObject *cdata_ptr = PyDict_GetItemString(kwargs, "cdata");
       if (num_kwargs == 1 && cdata_ptr && THPUtils_checkLong(cdata_ptr)) {
         THSTensor *ptr = (THSTensor*)PyLong_AsVoidPtr(cdata_ptr);
@@ -52,12 +76,28 @@ static PyObject * THSPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
         return (PyObject*)self.release();
       }
     }
-    // This is an internal option, so we don't want to advertise it.
-    THPUtils_assert(num_kwargs == 0, THSPTensorStr " constructor doesn't "
+#ifdef THC_GENERIC_FILE
+    PyObject *device_id = PyDict_GetItemString(kwargs, "device");
+    if (device_id == Py_None) {
+      num_kwargs--;
+    } else if (device_id) {
+      THPUtils_assert(THPUtils_checkLong(device_id), "device argument "
+          " has to be an int, but got %s", THPUtils_typename(device_id));
+      gpu_guard.setDevice(THPUtils_unpackLong(device_id));
+      // simulate pop() and pretend this key was never there
+      num_kwargs--;
+    }
+#endif
+#ifdef THC_GENERIC_FILE
+    THPUtils_assert(num_kwargs == 0, THSPTensorStr " constructor only "
+        "accepts a 'device' keyword argument");
+#else
+    THPUtils_assert(num_kwargs == 0, THPTensorStr " constructor doesn't "
         "accept any keyword arguments");
+#endif
   }
 
-  // torch.Tensor()
+  // torch.SparseTensor()
   if (num_args == 0) {
     self->cdata = THSTensor_(new)(LIBRARY_STATE_NOARGS);
     return (PyObject*)self.release();
@@ -82,6 +122,11 @@ static PyObject * THSPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
 
     THIndexTensor *indices = ((THPIndexTensor*)first_arg)->cdata;
     THTensor *values = ((THPTensor*)second_arg)->cdata;
+
+#ifdef THC_GENERIC_FILE
+    THCAssertSameGPU(THSTensor_(checkGPU)(LIBRARY_STATE 0, 2, indices, values));
+#endif
+
     self->cdata = THSTensor_(newWithTensor)(LIBRARY_STATE indices, values);
   }
   // torch.SparseTensor(torch.LongTensor indices,
@@ -96,6 +141,11 @@ static PyObject * THSPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
     THIndexTensor *indices = ((THPIndexTensor*)first_arg)->cdata;
     THTensor *values = ((THPTensor*)second_arg)->cdata;
     THLongStoragePtr sizes(THPUtils_unpackSize(third_arg));
+
+#ifdef THC_GENERIC_FILE
+    THCAssertSameGPU(THSTensor_(checkGPU)(LIBRARY_STATE 0, 2, indices, values));
+#endif
+
     self->cdata = THSTensor_(newWithTensorAndSize)(
         LIBRARY_STATE indices, values, sizes);
   }
@@ -104,6 +154,8 @@ static PyObject * THSPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
     self->cdata = THSTensor_(newWithSize)(LIBRARY_STATE sizes.get());
   }
   else goto invalid_arguments; // All other cases
+
+  THSPTensor_(initStorage)(self->cdata);
 
   return (PyObject*)self.release();
 

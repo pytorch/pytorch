@@ -15,7 +15,7 @@ struct Store : public ::gloo::rendezvous::Store {
 private:
   struct StoreDeamon {
     StoreDeamon() = delete;
-    StoreDeamon(int listen_socket, rank_type world_size);
+    StoreDeamon(int listen_socket);
     ~StoreDeamon();
 
     void join();
@@ -37,8 +37,10 @@ private:
   };
 
 public:
-  Store(rank_type rank, int listen_socket, const std::string& addr,
-        port_type port, rank_type world_size);
+  // A special value for listen_socket which doesn't launch the deamon
+  static constexpr int CLIENT_ONLY = -1;
+
+  Store(const std::string& addr, port_type port, int listen_socket = CLIENT_ONLY);
   ~Store();
 
   void set(const std::string& key, const std::vector<char>& data) override;
@@ -46,7 +48,6 @@ public:
   void wait(const std::vector<std::string>& keys) override;
 
 private:
-  rank_type _rank;
   int _listen_socket;
   int _socket;
   std::string _store_addr;

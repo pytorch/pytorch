@@ -135,18 +135,18 @@ class Variable(_C._VariableBase):
         them before calling it.
 
         Arguments:
-        grad_variables (Tensor, Variable or None): Gradient w.r.t. the variable.
-            If it is a tensor, it will be automatically converted to a Variable
-            that is volatile unless ``create_graph`` is True. None values can be
-            specified for scalar Variables or ones that don't require grad. If a
-            None value would be acceptable then this argument is optional.
-        retain_graph (bool, optional): If False, the graph used to compute the grads
-            will be freed. Note that in nearly all cases setting this option to True
-            is not needed and often can be worked around in a much more efficient
-            way. Defaults to the value of ``create_graph``.
-        create_graph (bool, optional): If true, graph of the derivative will
-            be constructed, allowing to compute higher order derivative products.
-            Defaults to False, unless ``gradient`` is a volatile Variable.
+            grad_variables (Tensor, Variable or None): Gradient w.r.t. the variable.
+                If it is a tensor, it will be automatically converted to a Variable
+                that is volatile unless ``create_graph`` is True. None values can be
+                specified for scalar Variables or ones that don't require grad. If a
+                None value would be acceptable then this argument is optional.
+            retain_graph (bool, optional): If False, the graph used to compute the grads
+                will be freed. Note that in nearly all cases setting this option to True
+                is not needed and often can be worked around in a much more efficient
+                way. Defaults to the value of ``create_graph``.
+            create_graph (bool, optional): If true, graph of the derivative will
+                be constructed, allowing to compute higher order derivative products.
+                Defaults to False, unless ``gradient`` is a volatile Variable.
         """
         torch.autograd.backward(self, gradient, retain_graph, create_graph, retain_variables)
 
@@ -325,8 +325,9 @@ class Variable(_C._VariableBase):
             return DivConstant.apply(self, other)
 
     def div_(self, other):
-        assert not torch.is_tensor(other)
-        return DivConstant.apply(self, other, True)
+        if not isinstance(other, Variable) and not torch.is_tensor(other):
+            return DivConstant.apply(self, other, True)
+        raise RuntimeError("div_ only supports scalar multiplication")
 
     def pow(self, other):
         if isinstance(other, Variable):
@@ -492,6 +493,9 @@ class Variable(_C._VariableBase):
     def cumsum(self, dim):
         return Cumsum.apply(self, dim)
 
+    def cumprod(self, dim):
+        return Cumprod(dim)(self)
+
     def unfold(self, dim, size, step):
         return Unfold.apply(self, dim, size, step)
 
@@ -500,7 +504,7 @@ class Variable(_C._VariableBase):
         if dim is None:
             mean = mean.view(*(1 for s in self.size()))
         # we could just set keepdim to True, but this preserves some fidelity
-        elif keepdim is False:
+        elif keepdim is False and self.dim() != 1:
             mean = mean.unsqueeze(dim)
         mean_expanded = mean.expand_as(self)
         zero_centered = self.sub(mean_expanded)
@@ -518,6 +522,9 @@ class Variable(_C._VariableBase):
         norms = norms.clamp(max=maxnorm).div(norms.add(1e-7))
         flat_out = flat.mul(norms.expand_as(flat))
         return flat_out.view(t.size()).transpose(dim, 0)
+
+    def matmul(self, other):
+        return torch.matmul(self, other)
 
     @staticmethod
     def _static_blas(cls, args, inplace):
@@ -552,7 +559,7 @@ class Variable(_C._VariableBase):
         return self._static_blas(Addr, (output, 0, 1, self, vector), False)
 
     def resize(self, *sizes):
-        return Resize.apply()(self, sizes)
+        return Resize.apply(self, sizes)
 
     def resize_as(self, variable):
         return Resize.apply(self, variable.size())
@@ -681,6 +688,8 @@ class Variable(_C._VariableBase):
         return Expand.apply(self, tensor.size())
 
     def t(self):
+        if self.dim() != 2:
+            raise RuntimeError("t() expects a 2D Variable, but self is {}D".format(self.dim()))
         return Transpose.apply(self, 0, 1)
 
     def transpose(self, dim1, dim2):
@@ -702,6 +711,9 @@ class Variable(_C._VariableBase):
 
     def squeeze(self, dim=None):
         return Squeeze.apply(self, dim)
+
+    def squeeze_(self, dim=None):
+        return Squeeze.apply(self, dim, True)
 
     def unsqueeze(self, dim):
         return Unsqueeze.apply(self, dim)
@@ -784,21 +796,9 @@ class Variable(_C._VariableBase):
         return self.mul_(other)
 
     def __matmul__(self, other):
-        dim_self = self.dim()
-        try:
-            dim_other = other.dim()
-        except AttributeError:  # not a Variable
+        if not isinstance(other, Variable):
             return NotImplemented
-        if dim_self == 1 and dim_other == 1:
-            return self.dot(other)
-        if dim_self == 2 and dim_other == 1:
-            return self.mv(other)
-        if dim_self == 1 and dim_other == 2:
-            return self.unsqueeze(0).mm(other).squeeze(0)
-        elif dim_self == 2 and dim_other == 2:
-            return self.mm(other)
-        raise ValueError("both arguments to __matmul__ need to be 1D or 2D, "
-                         "but they are {}D and {}D".format(dim_self, dim_other))
+        return self.matmul(other)
 
     def __div__(self, other):
         return self.div(other)

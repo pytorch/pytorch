@@ -51,9 +51,11 @@ void _THVoidTensor_assertContiguous(THVoidTensor *tensor, const std::string& nam
   // Contiguity check
   long long expectedStride = 1;
   for (int i = tensor->nDimension-1; i >= 0; --i) {
-    if (tensor->stride[i] != expectedStride)
-      throw std::invalid_argument(error_str + name);
-    expectedStride *= tensor->size[i];
+    if (tensor->size[i] != 1) {
+      if (tensor->stride[i] != expectedStride)
+        throw std::invalid_argument(error_str + name);
+      expectedStride *= tensor->size[i];
+    }
   }
 }
 

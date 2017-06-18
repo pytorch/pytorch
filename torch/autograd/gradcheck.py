@@ -172,3 +172,36 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3):
             return False
 
     return True
+
+
+def gradgradcheck(func, inputs, grad_outputs, eps=1e-6, atol=1e-5, rtol=1e-3):
+    """Check gradients of gradients computed via small finite differences
+       against analytical gradients
+    This function checks that backpropagating through the gradients computed
+    to the given grad_outputs are correct.
+
+    The check between numerical and analytical has the same behaviour as
+    numpy.allclose https://docs.scipy.org/doc/numpy/reference/generated/numpy.allclose.html
+    meaning it check that
+        absolute(a - n) <= (atol + rtol * absolute(n))
+    is true for all elements of analytical gradient a and numerical gradient n.
+
+    Args:
+        func: Python function that takes Variable inputs and returns
+            a tuple of Variables
+        inputs: tuple of Variables
+        grad_outputs: tuple of Variables
+        eps: perturbation for finite differences
+        atol: absolute tolerance
+        rtol: relative tolerance
+
+    Returns:
+        True if all differences satisfy allclose condition
+    """
+    def new_func(*inputs):
+        outputs = func(*inputs)
+        outputs = _as_tuple(outputs)
+        grad_inputs = torch.autograd.grad(outputs, inputs, grad_outputs, only_inputs=True)
+        return grad_inputs
+
+    return gradcheck(new_func, inputs, eps, atol, rtol)

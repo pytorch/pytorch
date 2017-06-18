@@ -53,7 +53,7 @@ class BatchNorm1d(_BatchNorm):
 
     .. math::
 
-        y = \frac{x - mean[x]}{ \sqrt{Var[x]} + \epsilon} * gamma + beta
+        y = \frac{x - mean[x]}{ \sqrt{Var[x] + \epsilon}} * gamma + beta
 
     The mean and standard-deviation are calculated per-dimension over
     the mini-batches and gamma and beta are learnable parameter vectors
@@ -95,7 +95,7 @@ class BatchNorm2d(_BatchNorm):
 
     .. math::
 
-        y = \frac{x - mean[x]}{ \sqrt{Var[x]} + \epsilon} * gamma + beta
+        y = \frac{x - mean[x]}{ \sqrt{Var[x] + \epsilon}} * gamma + beta
 
     The mean and standard-deviation are calculated per-dimension over
     the mini-batches and gamma and beta are learnable parameter vectors
@@ -137,7 +137,7 @@ class BatchNorm3d(_BatchNorm):
 
     .. math::
 
-        y = \frac{x - mean[x]}{ \sqrt{Var[x]} + \epsilon} * gamma + beta
+        y = \frac{x - mean[x]}{ \sqrt{Var[x] + \epsilon}} * gamma + beta
 
     The mean and standard-deviation are calculated per-dimension over
     the mini-batches and gamma and beta are learnable parameter vectors
