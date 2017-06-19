@@ -132,10 +132,11 @@ def is_real_argument_to_wrapper(argument):
         argument['type'] != 'argument'
 
 
-def is_mutable_formal_argument(argument,option):
+def is_mutable_formal_argument(argument, option):
     return argument.get('output') or option['inplace'] and argument['name'] == 'self'
 
-def to_return_type(arg,option):
+
+def to_return_type(arg, option):
     t = arg['type']
     rt = TYPE_RETURN.get(t, t)
     if rt == 'Tensor' and not arg.get('allocate'):
@@ -143,6 +144,7 @@ def to_return_type(arg,option):
         if not is_mutable_formal_argument(arg, option):
             rt = 'const ' + rt
     return rt
+
 
 def create_generic(top_env, declarations):
 
@@ -164,9 +166,9 @@ def create_generic(top_env, declarations):
                 insert(argument)
         return result
 
-    def format_formal(argument,option):
+    def format_formal(argument, option):
         type_str = TYPE_FORMAL_GENERIC.get(argument['type'], argument['type'])
-        if type_str == 'Tensor &' and not is_mutable_formal_argument(argument,option):
+        if type_str == 'Tensor &' and not is_mutable_formal_argument(argument, option):
             type_str = 'const ' + type_str
         return '{} {}'.format(type_str, argument['name'])
 
@@ -176,14 +178,14 @@ def create_generic(top_env, declarations):
             argument_indices = ret['arguments']
             if len(argument_indices) == 1:
                 the_arg = option['arguments'][argument_indices[0]]
-                return to_return_type(the_arg,option)
+                return to_return_type(the_arg, option)
             else:
-                types = [to_return_type(option['arguments'][idx],option)
+                types = [to_return_type(option['arguments'][idx], option)
                          for idx in argument_indices]
                 return "std::tuple<{}>".format(','.join(types))
 
         elif ret['kind'] == 'type':
-            return TYPE_RETURN.get(ret['type'],ret['type'])
+            return TYPE_RETURN.get(ret['type'], ret['type'])
         else:
             raise Exception("format_return_type")
 
@@ -194,8 +196,8 @@ def create_generic(top_env, declarations):
         return None
 
     def process_option(option):
-        option['inplace'] = re.search('(^__i|[^_]_$)', option['api_name']) is not None
-
+        option['inplace'] = re.search(
+            '(^__i|[^_]_$)', option['api_name']) is not None
 
         if re.match(EXCLUDE_PATTERN, option['name']):
             print("Excluding {}".format(option['name']))
@@ -203,9 +205,9 @@ def create_generic(top_env, declarations):
         # print(yaml.dump(option))
         formals = get_formals(option)
         option['formals_list'] = formals
-        option['formals'] = [format_formal(f,option) for f in formals]
+        option['formals'] = [format_formal(f, option) for f in formals]
         option['actuals'] = [f['name'] for f in formals]
-        option['method_formals'] = [format_formal(f,option) for f in formals
+        option['method_formals'] = [format_formal(f, option) for f in formals
                                     if f['name'] != 'self']
         option['method_actuals'] = [
             f['name'] if f['name'] != 'self' else '*this' for f in formals]
@@ -275,14 +277,14 @@ def create_derived(backend_type_env, declarations):
         else:
             return argument['name']
 
-    def drop_argument(argument,option):
+    def drop_argument(argument, option):
         return backend_type_env['Backend'] == 'CUDA' and (
             (option['mode'] == 'TH' and argument['type'] == 'THGenerator*') or
             argument['name'] == 'THPDefaultGenerator->cdata')
 
     def get_arguments(option):
         return [get_argument(argument, option)
-                for argument in option['arguments'] if not drop_argument(argument,option)]
+                for argument in option['arguments'] if not drop_argument(argument, option)]
 
     def is_actual_return_long(ret):
         return ret['type'] == 'long' or (backend_type_env['ScalarName'] == 'Long'
@@ -347,7 +349,7 @@ def create_derived(backend_type_env, declarations):
             else:
                 arguments = [option['arguments'][argi]
                              for argi in arguments_indices]
-                types = [to_return_type(arg,option) for arg in arguments]
+                types = [to_return_type(arg, option) for arg in arguments]
                 # TODO: check for move semantics...
                 names = [arg['name'] for arg in arguments]
                 body.append(CodeTemplate("return std::tuple<${types}>(${names});").substitute(

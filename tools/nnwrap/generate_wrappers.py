@@ -75,14 +75,17 @@ def wrap_function(name, type, arguments):
     cname = 'THNN_' + type + name
     declaration = ''
     declaration += 'extern "C" void ' + cname + \
-        '(' + ', '.join(TYPE_TRANSFORMS[type].get(arg.type, arg.type) for arg in arguments) + ');\n'
+        '(' + ', '.join(TYPE_TRANSFORMS[type].get(arg.type, arg.type)
+                        for arg in arguments) + ');\n'
     declaration += FUNCTION_TEMPLATE.substitute(name=type + name, cname=cname)
     indent = ' ' * 4
     dict_indent = ' ' * 6
     prefix = indent + '- '
     for arg in arguments:
         if not arg.is_optional:
-            declaration += prefix + TYPE_TRANSFORMS[type].get(arg.type, arg.type) + ' ' + arg.name + '\n'
+            declaration += prefix + \
+                TYPE_TRANSFORMS[type].get(
+                    arg.type, arg.type) + ' ' + arg.name + '\n'
         else:
             t = TYPE_TRANSFORMS[type].get(arg.type, arg.type)
             declaration += prefix + 'type: ' + t + '\n' + \
@@ -127,6 +130,7 @@ def wrap_cunn():
         AutoGPU(has_self=False),
     ])
 
+
 GENERIC_FUNCTION_TEMPLATE = Template("""\
 [[
   name: $name
@@ -148,6 +152,7 @@ def wrap_generic_function(name, backends):
                 declaration += '         optional: True\n'
     declaration += ']]\n\n\n'
     return declaration
+
 
 def wrap_generic():
     from collections import OrderedDict

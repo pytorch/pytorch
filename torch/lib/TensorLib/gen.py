@@ -90,6 +90,7 @@ def write(filename, s):
     with open(filename, "w") as f:
         f.write(s)
 
+
 def generate_storage_type_and_tensor(backend, scalar_type, declarations):
     scalar_name, c_type, accreal = scalar_type
     env = {}
@@ -102,12 +103,13 @@ def generate_storage_type_and_tensor(backend, scalar_type, declarations):
     env['Backend'] = backend
 
     # used for generating switch logic for external functions
-    tag = backend+scalar_name
-    env['TypeID'] = 'TypeID::'+tag
+    tag = backend + scalar_name
+    env['TypeID'] = 'TypeID::' + tag
     top_env['type_ids'].append(tag + ',')
 
     if backend == 'CUDA':
-        env['th_headers'] = ['#include <THC/THC.h>', '#include <THCUNN/THCUNN.h>\n#undef THNN_']
+        env['th_headers'] = ['#include <THC/THC.h>',
+                             '#include <THCUNN/THCUNN.h>\n#undef THNN_']
         sname = '' if scalar_name == "Float" else scalar_name
         env['THType'] = 'Cuda{}'.format(sname)
         env['THStorage'] = 'THCuda{}Storage'.format(sname)
@@ -117,7 +119,8 @@ def generate_storage_type_and_tensor(backend, scalar_type, declarations):
         env['isCUDA'] = 'true'
         env['storage_device'] = 'return storage->device;'
     else:
-        env['th_headers'] = ['#include <TH/TH.h>', '#include <THNN/THNN.h>\n#undef THNN_']
+        env['th_headers'] = ['#include <TH/TH.h>',
+                             '#include <THNN/THNN.h>\n#undef THNN_']
         env['THType'] = scalar_name
         env['THStorage'] = "TH{}Storage".format(scalar_name)
         env['THTensor'] = 'TH{}Tensor'.format(scalar_name)
@@ -159,8 +162,9 @@ def generate_storage_type_and_tensor(backend, scalar_type, declarations):
         '#include "TensorLib/{}.h"'.format(env['Type']))
     return env
 
-cwrap_files = [f for f in files if f.endswith('.cwrap') ]
-nn_files = [f for f in files if f.endswith('.h') ]
+
+cwrap_files = [f for f in files if f.endswith('.cwrap')]
+nn_files = [f for f in files if f.endswith('.h')]
 
 declarations = [d
                 for file in cwrap_files

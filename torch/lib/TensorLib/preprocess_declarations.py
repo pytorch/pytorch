@@ -90,7 +90,6 @@ def handle_outputs_taken_as_arguments(options):
     return new_options
 
 
-
 def sanitize_return(option):
     ret = option['return']
     m = re.match('argument (\d+(,\d+)*)', ret)
@@ -108,7 +107,7 @@ def sanitize_return(option):
 
 
 def set_mode(option):
-    option['mode'] = option.get('mode','TH')
+    option['mode'] = option.get('mode', 'TH')
 
 
 def run(declarations):
@@ -127,5 +126,6 @@ def run(declarations):
             sanitize_return(option)
             process_types_and_backends(option)
             add_variants(option)
-        declaration['options'] = handle_outputs_taken_as_arguments(declaration['options'])
+        declaration['options'] = handle_outputs_taken_as_arguments(
+            declaration['options'])
     return declarations

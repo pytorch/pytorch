@@ -92,7 +92,7 @@ def filter_unique_options(options, allow_kwarg, type_to_signature, remove_self):
 
 
 def enumerate_options_due_to_default(declaration,
-        allow_kwarg=True,type_to_signature=[],remove_self=True):
+                                     allow_kwarg=True, type_to_signature=[], remove_self=True):
     # TODO(zach): in cwrap this is shared among all declarations
     # but seems to assume that all declarations will have the same
     new_options = []
@@ -112,13 +112,14 @@ def enumerate_options_due_to_default(declaration,
                     arg['name'] = 'NULL' if arg['default'] is None else arg['default']
             new_options.append(option_copy)
     declaration['options'] = filter_unique_options(new_options,
-            allow_kwarg,type_to_signature,remove_self)
+                                                   allow_kwarg, type_to_signature, remove_self)
 
 
 def sort_by_number_of_options(declaration, reverse=True):
     def num_checked_args(option):
         return sum(map(lambda a: not a.get('ignore_check', False), option['arguments']))
     declaration['options'].sort(key=num_checked_args, reverse=reverse)
+
 
 class Function(object):
 
@@ -143,6 +144,7 @@ class Argument(object):
 
     def __repr__(self):
         return self.type + ' ' + self.name
+
 
 def parse_header(path):
     with open(path, 'r') as f:
@@ -183,5 +185,6 @@ def parse_header(path):
             if '*' in name:
                 t = t + '*'
                 name = name[1:]
-            generic_functions[-1].add_argument(Argument(t, name, '[OPTIONAL]' in c))
+            generic_functions[-1].add_argument(
+                Argument(t, name, '[OPTIONAL]' in c))
     return generic_functions
