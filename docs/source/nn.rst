@@ -230,6 +230,12 @@ Non-linear Activations
 .. autoclass:: ELU
     :members:
 
+:hidden:`SELU`
+~~~~~~~~~~~~~
+
+.. autoclass:: SELU
+    :members:
+
 :hidden:`PReLU`
 ~~~~~~~~~~~~~~~
 
@@ -422,6 +428,12 @@ Dropout layers
 ~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: Dropout3d
+    :members:
+
+:hidden:`AlphaDropout`
+~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: AlphaDropout
     :members:
 
 
@@ -770,6 +782,11 @@ Non-linear activation functions
 
 .. autofunction:: elu
 
+:hidden:`selu`
+~~~~~~~~~~~~~
+
+.. autofunction:: selu
+
 :hidden:`leaky_relu`
 ~~~~~~~~~~~~~~~~~~~~
 
@@ -863,6 +880,11 @@ Dropout functions
 ~~~~~~~~~~~~~~~~~
 
 .. autofunction:: dropout
+
+:hidden:`alpha_dropout`
+~~~~~~~~~~~~~~~~~
+
+.. autofunction:: alpha_dropout
 
 Distance functions
 ----------------------------------
