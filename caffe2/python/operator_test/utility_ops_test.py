@@ -143,7 +143,7 @@ class TestUtilityOps(hu.HypothesisTestCase):
         )
 
     @given(
-        inputs=hu.lengths_tensor(max_value=30).flatmap(
+        inputs=hu.lengths_tensor().flatmap(
             lambda pair: st.tuples(
                 st.just(pair[0]),
                 st.just(pair[1]),
