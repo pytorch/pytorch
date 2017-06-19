@@ -563,7 +563,7 @@ class RNNCellTest(hu.HypothesisTestCase):
         fwd_only=st.booleans(),
         drop_states=st.booleans(),
     )
-    @ht_settings(max_examples=15)
+    @ht_settings(max_examples=3, timeout=100)
     @utils.debug
     def test_lstm_main(self, **kwargs):
         for lstm_type in [(rnn_cell.LSTM, lstm_reference),
