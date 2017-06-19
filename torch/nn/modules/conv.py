@@ -56,7 +56,7 @@ class _ConvNd(Module):
             self.weight.data.uniform_(-stdv, stdv)
         else:
             weight_initializer(self.weight)
-        if self.bias is None:
+        if self.bias is not None:
             if bias_initializer is None:
                 self.bias.data.uniform_(-stdv, stdv)
             else:
