@@ -11,7 +11,7 @@ class _ConvNd(Module):
 
     def __init__(self, in_channels, out_channels, kernel_size, stride,
                  padding, dilation, transposed, output_padding, groups, bias,
-                 initializer=dict()):
+                 initializer=None):
         super(_ConvNd, self).__init__()
         if in_channels % groups != 0:
             raise ValueError('in_channels must be divisible by groups')
@@ -36,7 +36,7 @@ class _ConvNd(Module):
             self.bias = Parameter(torch.Tensor(out_channels))
         else:
             self.register_parameter('bias', None)
-        self.initializer = initializer
+        self.initializer = {} if initializer is None else initializer
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -45,7 +45,7 @@ class _ConvNd(Module):
             n *= k
         stdv = 1. / math.sqrt(n)
 
-        if isinstance(self.initializer, function):
+        if callable(self.initializer):
             weight_initializer = self.initializer
             bias_initializer = None
         else:

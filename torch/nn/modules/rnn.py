@@ -10,7 +10,7 @@ class RNNBase(Module):
 
     def __init__(self, mode, input_size, hidden_size,
                  num_layers=1, bias=True, batch_first=False,
-                 dropout=0, bidirectional=False, initializer=dict()):
+                 dropout=0, bidirectional=False, initializer=None):
         super(RNNBase, self).__init__()
         self.mode = mode
         self.input_size = input_size
@@ -51,13 +51,13 @@ class RNNBase(Module):
                 else:
                     self._all_weights += [weights[:2]]
 
-        self.initializer = initializer
+        self.initializer = {} if initializer is None else initializer
         self.reset_parameters()
 
     def reset_parameters(self):
         stdv = 1.0 / math.sqrt(self.hidden_size)
 
-        if isinstance(self.initializer, function):
+        if callable(self.initializer):
             weight_initializer = self.initializer
             bias_initializer = None
         else:

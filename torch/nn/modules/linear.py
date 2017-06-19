@@ -33,7 +33,7 @@ class Linear(Module):
         >>> print(output.size())
     """
 
-    def __init__(self, in_features, out_features, bias=True, initializer=dict()):
+    def __init__(self, in_features, out_features, bias=True, initializer=None):
         super(Linear, self).__init__()
         self.in_features = in_features
         self.out_features = out_features
@@ -42,13 +42,13 @@ class Linear(Module):
             self.bias = Parameter(torch.Tensor(out_features))
         else:
             self.register_parameter('bias', None)
-        self.initializer = initializer
+        self.initializer = {} if initializer is None else initializer
         self.reset_parameters()
 
     def reset_parameters(self):
         stdv = 1. / math.sqrt(self.weight.size(1))
 
-        if isinstance(self.initializer, function):
+        if callable(self.initializer):
             weight_initializer = self.initializer
             bias_initializer = None
         else:
