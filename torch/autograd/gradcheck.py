@@ -201,7 +201,7 @@ def gradgradcheck(func, inputs, grad_outputs, eps=1e-6, atol=1e-5, rtol=1e-3):
     def new_func(*inputs):
         outputs = func(*inputs)
         outputs = _as_tuple(outputs)
-        inputs = tuple(x for x in inputs if isinstance(x, Variable))
+        inputs = tuple(x for x in inputs if isinstance(x, Variable) if x.requires_grad)
         grad_inputs = torch.autograd.grad(outputs, inputs, grad_outputs, only_inputs=True)
         return grad_inputs
 
