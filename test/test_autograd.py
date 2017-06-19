@@ -10,6 +10,7 @@ from collections import OrderedDict
 from itertools import product
 import torch.nn.functional as F
 from torch.autograd import gradcheck
+from torch.autograd.gradcheck import gradgradcheck
 from torch.autograd.function import once_differentiable
 
 from common import TestCase, run_tests, skipIfNoLapack
@@ -1845,6 +1846,24 @@ ignore_inplace = set((
 
 ))
 
+gradgradcheck_exclude_classes = set((
+    'Cumprod',
+    'Fmod',
+    'Gather',
+    'IndexAdd',
+    'IndexFill',
+    'IndexSelect',
+    'Kthvalue',
+    'MaskedFill',
+    'MaskedScatter',
+    'MaskedSelect',
+    'Remainder',
+    'Scatter',
+    'Sort',
+    'Topk',
+    'Norm',
+    'Prod',
+))
 
 for test in function_tests:
     cls, constructor_args, call_args = test[:3]
@@ -1898,6 +1917,16 @@ for test in function_tests:
                     if isinstance(inp, torch.autograd.Variable) and inp.grad is not None:
                         self.assertTrue(type(inp.data) == type(inp.grad.data))
                         self.assertTrue(inp.size() == inp.grad.size())
+
+            if cls.__name__ not in gradgradcheck_exclude_classes:
+                dummy_out = apply_fn(*input)
+                if isinstance(dummy_out, tuple):
+                    grad_y = tuple(Variable(torch.randn(x.size()), requires_grad=x.requires_grad)
+                                   for x in dummy_out if isinstance(x, Variable))
+                else:
+                    grad_y = (Variable(torch.randn(dummy_out.size()), requires_grad=dummy_out.requires_grad),)
+
+                self.assertTrue(gradgradcheck(apply_fn, input, grad_y,))
 
             # can't broadcast inplace to left hand side
             broadcast_skip_inplace = 'broadcast_lhs' in test_name or 'broadcast_all' in test_name

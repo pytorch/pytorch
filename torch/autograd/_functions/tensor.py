@@ -267,14 +267,13 @@ class IndexSelect(Function):
         return tensor.index_select(dim, index)
 
     @staticmethod
-    @once_differentiable
     def backward(ctx, grad_output):
         grad_tensor = None
 
         if ctx.needs_input_grad[0]:
             index, = ctx.saved_tensors
-            grad_tensor = grad_output.new(*ctx.input_size).zero_()
-            grad_tensor.index_add_(ctx.dim, index, grad_output)
+            grad_tensor = Variable(grad_output.data.new(*ctx.input_size).zero_(), requires_grad=True)
+            grad_tensor = grad_tensor.index_add(ctx.dim, index, grad_output)
 
         return grad_tensor, None, None
 
@@ -757,14 +756,13 @@ class Unfold(Function):
         return result
 
     @staticmethod
-    @once_differentiable
     def backward(ctx, grad_output):
-        idx = grad_output.new().long()
+        idx = grad_output.data.new().long()
         torch.arange(0, ctx.input_numel, out=idx)
         idx = idx.view(ctx.input_size)
         idx_unfolded = idx.unfold(ctx.dim, ctx.size, ctx.step)
         idx_unfolded = idx_unfolded.contiguous().view(-1)
-        grad_input = grad_output.new(ctx.input_numel).zero_()
+        grad_input = Variable(grad_output.data.new(ctx.input_numel).zero_(), requires_grad=True)
         grad_output = grad_output.contiguous().view(-1)
-        grad_input.index_add_(0, idx_unfolded, grad_output)
+        grad_input = grad_input.index_add(0, Variable(idx_unfolded, requires_grad=False), grad_output)
         return grad_input.view(ctx.input_size), None, None, None
