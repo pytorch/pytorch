@@ -649,3 +649,60 @@ class TestLayers(LayersTestCase):
             input_record.metadata.feature_specs.feature_ids,
             [1, 100, 1001]
         )
+
+    @given(
+        X=hu.arrays(dims=[5, 5]),  # Shape of X is irrelevant
+    )
+    def testDropout(self, X):
+        input_record = self.new_record(schema.Scalar((np.float32, (1,))))
+        schema.FeedRecord(input_record, [X])
+        d_output = self.model.Dropout(input_record)
+        self.assertEqual(schema.Scalar((np.float32, (1,))), d_output)
+        self.model.output_schema = schema.Struct()
+
+        train_init_net, train_net = self.get_training_nets()
+
+        input_blob = input_record.field_blobs()[0]
+        output_blob = d_output.field_blobs()[0]
+
+        train_d_spec = OpSpec(
+            "Dropout",
+            [input_blob],
+            [output_blob, None],
+            {'is_test': 0, 'ratio': 0.5}
+        )
+
+        test_d_spec = OpSpec(
+            "Dropout",
+            [input_blob],
+            [output_blob, None],
+            {'is_test': 1, 'ratio': 0.5}
+        )
+
+        self.assertNetContainOps(
+            train_net,
+            [train_d_spec]
+        )
+
+        eval_net = self.get_eval_net()
+
+        self.assertNetContainOps(
+            eval_net,
+            [test_d_spec]
+        )
+
+        predict_net = self.get_predict_net()
+
+        self.assertNetContainOps(
+            predict_net,
+            [test_d_spec]
+        )
+
+        workspace.RunNetOnce(train_init_net)
+        workspace.RunNetOnce(train_net)
+
+        schema.FeedRecord(input_record, [X])
+        workspace.RunNetOnce(eval_net)
+
+        schema.FeedRecord(input_record, [X])
+        workspace.RunNetOnce(predict_net)
