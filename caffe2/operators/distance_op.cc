@@ -279,7 +279,8 @@ OPERATOR_SCHEMA(SquaredL2Distance)
   of the L2 difference between X and Y that is computed as ||(X - Y)^2 / 2||.
   )DOC")
     .Input(0, "X", "1D input tensor")
-    .Output(0, "Y", "1D input tensor");
+    .Input(1, "Y", "1D input tensor")
+    .Output(0, "Z", "1D output tensor");
 
 OPERATOR_SCHEMA(SquaredL2DistanceGradient).NumInputs(3).NumOutputs(2);
 
@@ -309,7 +310,8 @@ OPERATOR_SCHEMA(L1Distance)
   of the L1 difference between X and Y, computed as L1(x,y) = sum over |x-y|
   )DOC")
     .Input(0, "X", "1D input tensor")
-    .Output(0, "Y", "1D input tensor");
+    .Input(1, "Y", "1D input tensor")
+    .Output(0, "Z", "1D output tensor");
 
 OPERATOR_SCHEMA(L1DistanceGradient).NumInputs(3).NumOutputs(2);
 
@@ -341,7 +343,8 @@ OPERATOR_SCHEMA(DotProduct)
   of the dot product between X and Y.
   )DOC")
     .Input(0, "X", "1D input tensor")
-    .Output(0, "Y", "1D input tensor");
+    .Input(1, "Y", "1D input tensor")
+    .Output(0, "Z", "1D output tensor");
 
 OPERATOR_SCHEMA(DotProductGradient).NumInputs(3).NumOutputs(2);
 
@@ -372,7 +375,8 @@ OPERATOR_SCHEMA(CosineSimilarity)
   of the cosine similarity between X and Y.
   )DOC")
     .Input(0, "X", "1D input tensor")
-    .Output(0, "Y", "1D input tensor");
+    .Input(1, "Y", "1D input tensor")
+    .Output(0, "Z", "1D output tensor");
 
 OPERATOR_SCHEMA(CosineSimilarityGradient).NumInputs(3).NumOutputs(2);
 
@@ -407,7 +411,8 @@ OPERATOR_SCHEMA(DotProductWithPadding)
   2) replicate the smaller tensor to the same shape as the other one.
   )DOC")
     .Input(0, "X", "1D input tensor")
-    .Output(0, "Y", "1D input tensor")
+    .Input(1, "Y", "1D input tensor")
+    .Output(0, "Z", "1D output tensor")
     .Arg("pad_value", "the padding value for tensors with smaller dimension")
     .Arg("replicate", "wehther to replicate the smaller tensor or not");
 
