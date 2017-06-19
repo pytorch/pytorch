@@ -11,32 +11,9 @@
 
 #include "gloo/common/common.h"
 #include "gloo/common/logging.h"
-#include "gloo/cuda.h"
 #include "gloo/nccl/nccl.h"
 
 namespace gloo {
-
-template <typename T, typename Src, typename Dst>
-class CudaLocalMemcpy : public LocalOp<T> {
- public:
-  CudaLocalMemcpy(CudaStream& stream, Src& src, Dst& dst)
-      : stream_(stream),
-        src_(src),
-        dst_(dst) {}
-
-  virtual void runAsync() {
-    stream_.copyAsync(dst_, src_);
-  }
-
-  virtual void wait() {
-    stream_.wait();
-  }
-
- protected:
-  CudaStream& stream_;
-  Src& src_;
-  Dst& dst_;
-};
 
 template <typename T>
 std::vector<nccl::NCCLElement<T> > toDeviceElements(
@@ -59,13 +36,13 @@ std::vector<nccl::NCCLElement<T> > toDeviceElements(
 
 // Forward declaration
 template <typename T, typename Dst>
-class CudaLocalDeviceReduce;
+class CudaLocalNCCLReduce;
 
 // Partial specialization for device pointer target
 template <typename T>
-class CudaLocalDeviceReduce<T, CudaDevicePointer<T> > : public LocalOp<T> {
+class CudaLocalNCCLReduce<T, CudaDevicePointer<T> > : public LocalOp<T> {
  public:
-  CudaLocalDeviceReduce(
+  CudaLocalNCCLReduce(
       std::vector<CudaStream>& streams,
       std::vector<CudaDevicePointer<T> >& devicePtrs,
       CudaDevicePointer<T>& targetPtr,
@@ -92,7 +69,7 @@ class CudaLocalDeviceReduce<T, CudaDevicePointer<T> > : public LocalOp<T> {
     }
   }
 
-  virtual ~CudaLocalDeviceReduce() {}
+  virtual ~CudaLocalNCCLReduce() {}
 
   virtual void runAsync() {
     if (reduceOp_) {
@@ -112,9 +89,9 @@ class CudaLocalDeviceReduce<T, CudaDevicePointer<T> > : public LocalOp<T> {
 
 // Partial specialization for host pointer target
 template <typename T>
-class CudaLocalDeviceReduce<T, CudaHostPointer<T> > : public LocalOp<T> {
+class CudaLocalNCCLReduce<T, CudaHostPointer<T> > : public LocalOp<T> {
  public:
-  CudaLocalDeviceReduce(
+  CudaLocalNCCLReduce(
       std::vector<CudaStream>& streams,
       std::vector<CudaDevicePointer<T> >& devicePtrs,
       CudaHostPointer<T>& targetPtr,
@@ -133,7 +110,7 @@ class CudaLocalDeviceReduce<T, CudaHostPointer<T> > : public LocalOp<T> {
     }
   }
 
-  virtual ~CudaLocalDeviceReduce() {}
+  virtual ~CudaLocalNCCLReduce() {}
 
   virtual void runAsync() {
     if (reduceOp_) {
@@ -162,13 +139,13 @@ class CudaLocalDeviceReduce<T, CudaHostPointer<T> > : public LocalOp<T> {
 
 // Forward declaration
 template <typename T, typename Src>
-class CudaLocalDeviceBroadcast;
+class CudaLocalNCCLBroadcast;
 
-// Specialization for device pointer target
+// Specialization for device pointer source
 template <typename T>
-class CudaLocalDeviceBroadcast<T, CudaDevicePointer<T> > : public LocalOp<T> {
+class CudaLocalNCCLBroadcast<T, CudaDevicePointer<T> > : public LocalOp<T> {
  public:
-  CudaLocalDeviceBroadcast(
+  CudaLocalNCCLBroadcast(
       std::vector<CudaStream>& streams,
       std::vector<CudaDevicePointer<T> >& devicePtrs,
       CudaDevicePointer<T>& sourcePtr,
@@ -193,7 +170,7 @@ class CudaLocalDeviceBroadcast<T, CudaDevicePointer<T> > : public LocalOp<T> {
     }
   }
 
-  virtual ~CudaLocalDeviceBroadcast() {}
+  virtual ~CudaLocalNCCLBroadcast() {}
 
   virtual void runAsync() {
     if (broadcastOp_) {
@@ -211,11 +188,11 @@ class CudaLocalDeviceBroadcast<T, CudaDevicePointer<T> > : public LocalOp<T> {
   std::unique_ptr<nccl::BroadcastOp<T> > broadcastOp_;
 };
 
-// Specialization for host pointer target
+// Specialization for host pointer source
 template <typename T>
-class CudaLocalDeviceBroadcast<T, CudaHostPointer<T> > : public LocalOp<T> {
+class CudaLocalNCCLBroadcast<T, CudaHostPointer<T> > : public LocalOp<T> {
  public:
-  CudaLocalDeviceBroadcast(
+  CudaLocalNCCLBroadcast(
       std::vector<CudaStream>& streams,
       std::vector<CudaDevicePointer<T> >& devicePtrs,
       CudaHostPointer<T>& sourcePtr,
@@ -224,7 +201,7 @@ class CudaLocalDeviceBroadcast<T, CudaHostPointer<T> > : public LocalOp<T> {
       : root_(0),
         stream_(streams[root_]),
         devicePtr_(devicePtrs[root_].range(offset, count)),
-        hostPtr_(sourcePtr.range(offset, count)) {
+        sourcePtr_(sourcePtr.range(offset, count)) {
     if (devicePtrs.size() > 1) {
       broadcastOp_ = make_unique<nccl::BroadcastOp<T> >(
           toDeviceElements(streams, devicePtrs, offset, count),
@@ -232,13 +209,13 @@ class CudaLocalDeviceBroadcast<T, CudaHostPointer<T> > : public LocalOp<T> {
     }
   }
 
-  virtual ~CudaLocalDeviceBroadcast() {}
+  virtual ~CudaLocalNCCLBroadcast() {}
 
   virtual void runAsync() {
     // Since we run an asynchronous memcpy to devicePtr_ which is
     // executed on the stream associated with that device pointer, the
     // broadcast operation will only start after the memcpy completes.
-    stream_.copyAsync(devicePtr_, hostPtr_);
+    stream_.copyAsync(devicePtr_, sourcePtr_);
     if (broadcastOp_) {
       broadcastOp_->runAsync();
     }
@@ -255,12 +232,12 @@ class CudaLocalDeviceBroadcast<T, CudaHostPointer<T> > : public LocalOp<T> {
   const int root_;
   CudaStream& stream_;
   CudaDevicePointer<T> devicePtr_;
-  CudaHostPointer<T> hostPtr_;
+  CudaHostPointer<T> sourcePtr_;
   std::unique_ptr<nccl::BroadcastOp<T> > broadcastOp_;
 };
 
 template <typename T, typename Dst>
-std::unique_ptr<LocalOp<T> > cudaDeviceReduce(
+std::unique_ptr<LocalOp<T> > cudaNCCLReduce(
     std::vector<CudaStream>& streams,
     std::vector<CudaDevicePointer<T> >& devicePtrs,
     Dst& targetPtr,
@@ -268,142 +245,20 @@ std::unique_ptr<LocalOp<T> > cudaDeviceReduce(
     size_t offset,
     size_t count) {
   GLOO_ENFORCE_EQ(streams.size(), devicePtrs.size());
-  return make_unique<CudaLocalDeviceReduce<T, Dst> >(
+  return make_unique<CudaLocalNCCLReduce<T, Dst> >(
       streams, devicePtrs, targetPtr, fn, offset, count);
 }
 
 template <typename T, typename Src>
-std::unique_ptr<LocalOp<T> > cudaDeviceBroadcast(
+std::unique_ptr<LocalOp<T> > cudaNCCLBroadcast(
     std::vector<CudaStream>& streams,
     std::vector<CudaDevicePointer<T> >& devicePtrs,
     Src& sourcePtr,
     size_t offset,
     size_t count) {
   GLOO_ENFORCE_EQ(streams.size(), devicePtrs.size());
-  return make_unique<CudaLocalDeviceBroadcast<T, Src> >(
+  return make_unique<CudaLocalNCCLBroadcast<T, Src> >(
       streams, devicePtrs, sourcePtr, offset, count);
-}
-
-template <typename T>
-class CudaLocalHostReduce : public LocalOp<T> {
- public:
-  CudaLocalHostReduce(
-      std::vector<CudaStream>& streams,
-      std::vector<CudaDevicePointer<T> >& devicePtrs,
-      CudaHostPointer<T>& hostPtr,
-      const CudaReductionFunction<T>* fn)
-      : streams_(streams),
-        devicePtrs_(devicePtrs),
-        hostPtr_(hostPtr),
-        count_(hostPtr_.getCount()),
-        fn_(fn) {
-    // Allocate N-1 temporary buffers to asynchronously
-    // copy device memory into.
-    for (auto i = 1; i < devicePtrs_.size(); i++) {
-      tmpPtrs_.push_back(CudaHostPointer<T>::alloc(count_));
-    }
-  }
-
-  virtual void runAsync() {
-    // Asynchronously copy device memory to host
-    streams_[0].copyAsync(hostPtr_, devicePtrs_[0]);
-    for (auto i = 1; i < devicePtrs_.size(); i++) {
-      streams_[i].copyAsync(tmpPtrs_[i-1], devicePtrs_[i]);
-    }
-    // Reduce specified pointers into hostPtr_
-    streams_[0].wait();
-    for (auto i = 1; i < devicePtrs_.size(); i++) {
-      streams_[i].wait();
-      fn_->call(hostPtr_, tmpPtrs_[i-1], count_, streams_[i]);
-    }
-  }
-
-  virtual void wait() {
-    // Because reduction happens on CPU, this op is synchronous.
-  }
-
- protected:
-  std::vector<CudaStream>& streams_;
-  std::vector<CudaDevicePointer<T> >& devicePtrs_;
-  CudaHostPointer<T>& hostPtr_;
-  const size_t count_;
-  const CudaReductionFunction<T>* fn_;
-
-  // Temporary buffers used for async memory copies
-  std::vector<CudaHostPointer<T> > tmpPtrs_;
-};
-
-template <typename T>
-std::unique_ptr<LocalOp<T> > cudaHostReduce(
-    std::vector<CudaStream>& streams,
-    std::vector<CudaDevicePointer<T> >& devicePtrs,
-    CudaHostPointer<T>& hostPtr,
-    const CudaReductionFunction<T>* fn) {
-  GLOO_ENFORCE_EQ(streams.size(), devicePtrs.size());
-  // Simple copy operation if there is only a single device pointer.
-  if (devicePtrs.size() == 1) {
-    return make_unique<
-      CudaLocalMemcpy<T, CudaDevicePointer<T>, CudaHostPointer<T> > >(
-          streams[0],
-          devicePtrs[0],
-          hostPtr);
-  }
-
-  return make_unique<CudaLocalHostReduce<T> >(
-      streams,
-      devicePtrs,
-      hostPtr,
-      fn);
-}
-
-template <typename T>
-class CudaLocalHostBroadcast : public LocalOp<T> {
- public:
-  CudaLocalHostBroadcast(
-      std::vector<CudaStream>& streams,
-      std::vector<CudaDevicePointer<T> >& devicePtrs,
-      CudaHostPointer<T>& hostPtr)
-      : streams_(streams),
-        devicePtrs_(devicePtrs),
-        hostPtr_(hostPtr) {}
-
-  virtual void runAsync() {
-    // Asynchronously copy host memory to device
-    for (auto i = 0; i < devicePtrs_.size(); i++) {
-      streams_[i].copyAsync(devicePtrs_[i], hostPtr_);
-    }
-  }
-
-  virtual void wait() {
-    for (auto i = 0; i < devicePtrs_.size(); i++) {
-      streams_[i].wait();
-    }
-  }
-
- protected:
-  std::vector<CudaStream>& streams_;
-  std::vector<CudaDevicePointer<T> >& devicePtrs_;
-  CudaHostPointer<T>& hostPtr_;
-};
-
-template <typename T>
-std::unique_ptr<LocalOp<T> > cudaHostBroadcast(
-    std::vector<CudaStream>& streams,
-    std::vector<CudaDevicePointer<T> >& devicePtrs,
-    CudaHostPointer<T>& hostPtr) {
-  GLOO_ENFORCE_EQ(streams.size(), devicePtrs.size());
-  // Simple copy operation if there is only a single device pointer.
-  if (devicePtrs.size() == 1) {
-    return make_unique<
-      CudaLocalMemcpy<T, CudaHostPointer<T>, CudaDevicePointer<T> > >(
-          streams[0],
-          hostPtr,
-          devicePtrs[0]);
-  }
-  return make_unique<CudaLocalHostBroadcast<T> >(
-      streams,
-      devicePtrs,
-      hostPtr);
 }
 
 } // namespace gloo

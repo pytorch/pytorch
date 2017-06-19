@@ -9,9 +9,9 @@
 
 #include "gloo/cuda_allreduce_ring_chunked.h"
 
-#include "gloo/cuda_collectives.h"
+#include "gloo/cuda_collectives_host.h"
+#include "gloo/cuda_collectives_nccl.h"
 #include "gloo/cuda_private.h"
-#include "gloo/nccl/nccl.h"
 
 namespace gloo {
 
@@ -92,9 +92,9 @@ CudaAllreduceRingChunked<T, W>::CudaAllreduceRingChunked(
     chunkContext_.push_back(
         ChunkContext(
             scratch_.range(offset, length),
-            cudaDeviceReduce(
+            cudaNCCLReduce(
               streams_, devicePtrs_, scratch_, fn_, offset, length),
-            cudaDeviceBroadcast(
+            cudaNCCLBroadcast(
               streams_, devicePtrs_, scratch_, offset, length)));
   }
 

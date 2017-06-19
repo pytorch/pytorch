@@ -10,7 +10,6 @@
 #pragma once
 
 #include "gloo/cuda.h"
-#include "gloo/cuda_collectives.h"
 
 namespace gloo {
 

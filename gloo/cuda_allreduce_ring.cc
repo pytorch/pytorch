@@ -9,8 +9,9 @@
 
 #include "gloo/cuda_allreduce_ring.h"
 
+#include "gloo/cuda_collectives_host.h"
+#include "gloo/cuda_collectives_nccl.h"
 #include "gloo/cuda_private.h"
-#include "gloo/cuda_workspace.h"
 
 namespace gloo {
 
@@ -128,8 +129,10 @@ void CudaAllreduceRing<T, W>::init(
   // Execute local reduction and broadcast from host.
   // If devicePtrs_.size() == 1 these functions construct an op that
   // executes a memcpy such that scratch_ always holds the result.
-  localReduceOp_ = cudaHostReduce(streams_, devicePtrs_, scratch_, fn_);
-  localBroadcastOp_ = cudaHostBroadcast(streams_, devicePtrs_, scratch_);
+  localReduceOp_ =
+    cudaHostReduce(streams_, devicePtrs_, scratch_, fn_, 0, count_);
+  localBroadcastOp_ =
+    cudaHostBroadcast(streams_, devicePtrs_, scratch_, 0, count_);
 
   inbox_ = W::Pointer::alloc(count_);
   outbox_ = W::Pointer::alloc(count_);
@@ -150,9 +153,9 @@ void CudaAllreduceRing<T, W>::init(
   // When running with a device workspace we intend to never leave the device.
   if (devicePtrs_.size() > 1) {
     localReduceOp_ =
-      cudaDeviceReduce(streams_, devicePtrs_, scratch_, fn_, 0, count_);
+      cudaNCCLReduce(streams_, devicePtrs_, scratch_, fn_, 0, count_);
     localBroadcastOp_ =
-      cudaDeviceBroadcast(streams_, devicePtrs_, scratch_, 0, count_);
+      cudaNCCLBroadcast(streams_, devicePtrs_, scratch_, 0, count_);
   }
 
   // Inbox/outbox must be colocated with scratch buffer to avoid

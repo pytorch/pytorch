@@ -236,6 +236,33 @@ class CudaHostPointer {
   bool owner_ = false;
 };
 
+template <typename T, typename Src, typename Dst>
+class CudaLocalMemcpy : public LocalOp<T> {
+ public:
+  CudaLocalMemcpy(
+    CudaStream& stream,
+    Src& src,
+    Dst& dst,
+    size_t offset,
+    size_t count)
+      : stream_(stream),
+        src_(src.range(offset, count)),
+        dst_(dst.range(offset, count)) {}
+
+  virtual void runAsync() {
+    stream_.copyAsync(dst_, src_);
+  }
+
+  virtual void wait() {
+    stream_.wait();
+  }
+
+ protected:
+  CudaStream& stream_;
+  Src src_;
+  Dst dst_;
+};
+
 template <typename T>
 void cudaSum(T* x, const T* y, size_t n, const cudaStream_t stream);
 
