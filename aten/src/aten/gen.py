@@ -155,7 +155,8 @@ def generate_storage_type_and_tensor(backend, scalar_type, declarations):
     write(env['Tensor'] + ".cpp", TENSOR_DERIVED_CPP.substitute(env))
     write(env['Tensor'] + ".h", TENSOR_DERIVED_H.substitute(env))
 
-    type_register = ('context->type_registry[static_cast<int>(Backend::{})][static_cast<int>(ScalarType::{})].reset(new {}(context));'
+    type_register = (('context->type_registry[static_cast<int>(Backend::{})]' +
+                     '[static_cast<int>(ScalarType::{})].reset(new {}(context));')
                      .format(backend, scalar_name, env['Type']))
     top_env['type_registrations'].append(type_register)
     top_env['type_headers'].append(
