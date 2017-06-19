@@ -21,9 +21,8 @@ from caffe2.python import scope, utils, workspace
 import caffe2.python._import_c_extension as C
 import pickle
 import numpy as np
-import uuid
-import traceback
 import sys
+
 
 # Mac os specific message
 if (sys.platform == 'darwin' and 'leveldb' in C.registered_dbs()):
@@ -319,18 +318,7 @@ def CreateOperator(
     # Add all other arguments
     for key, value in kwargs.items():
         operator.arg.add().CopyFrom(utils.MakeArgument(key, value))
-    operator.uuid = uuid.uuid4().int >> 64
-    stack = traceback.extract_stack()
 
-    # string part of the stack that belongs to this file
-
-    for i, line in reversed(list(enumerate(stack))):
-        # get path of the core.py file
-        name = __name__.replace('.', '/') + ".py"
-        if name not in ' '.join(map(str, line)):
-            break
-
-    workspace.operator_tracebacks[operator.uuid] = stack[:i + 1]
     if workspace.IsImmediate():
         workspace.RunOperatorImmediate(operator)
     return operator
@@ -1563,12 +1551,6 @@ class Net(object):
     def Proto(self):
         self._InvalidateLookupTables()
         return self._net
-
-    def PopulateProtoWithFileName(self):
-        for op in self.Proto().op:
-            if op.uuid in workspace.operator_tracebacks:
-                tb = workspace.operator_tracebacks[op.uuid]
-                op.name = ':'.join(map(str, tb[-1][:2]))
 
     def NextScopedBlob(self, prefix='unnamed'):
         """Return the blob that has not been defined or registered in the

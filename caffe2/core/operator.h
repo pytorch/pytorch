@@ -137,19 +137,8 @@ class OperatorBase {
     observer_ = nullptr;
   }
 
-  void RecordLastFailedUuid() {
-    if (this->def().has_uuid()) {
-      auto uuid = this->def().uuid();
-      VLOG(1) << "Operator with uuid " << uuid << " failed";
-      operator_ws_->last_failed_op_uuid = uuid;
-    } else {
-      VLOG(1) << "Failed operator doesn't have uuid set";
-    }
-  }
-
  protected:
   ObserverBase<OperatorBase>* observer_ = nullptr;
-  Workspace* operator_ws_;
 
  private:
   OperatorDef operator_def_;
@@ -220,10 +209,6 @@ class Operator : public OperatorBase {
       context_.SwitchToDevice(stream_id);
       bool started = RunOnDevice();
       bool finished = context_.FinishDeviceComputation();
-      auto result = started && finished;
-      if (!result) {
-        this->RecordLastFailedUuid();
-      }
       if (!finished) {
         // FinishDeviceComputation() returning error basically means that there
         // is something wrong with the device (like CUDA) that usually cannot be
@@ -234,14 +219,10 @@ class Operator : public OperatorBase {
       if (observer_) {
         observer_->Stop();
       }
-      return result;
+      return (started && finished);
     } catch (EnforceNotMet& err) {
       err.AppendMessage("Error from operator: \n" + ProtoDebugString(def()));
       AddRelatedBlobInfo(&err);
-      this->RecordLastFailedUuid();
-      throw;
-    } catch (...) {
-      this->RecordLastFailedUuid();
       throw;
     }
   }
@@ -249,18 +230,10 @@ class Operator : public OperatorBase {
   bool RunAsync(int stream_id = 0) final {
     try {
       context_.SwitchToDevice(stream_id);
-      auto result = RunOnDevice();
-      if (!result) {
-        this->RecordLastFailedUuid();
-      }
-      return result;
+      return RunOnDevice();
     } catch (EnforceNotMet& err) {
       err.AppendMessage("Error from operator: \n" + ProtoDebugString(def()));
       AddRelatedBlobInfo(&err);
-      this->RecordLastFailedUuid();
-      throw;
-    } catch (...) {
-      this->RecordLastFailedUuid();
       throw;
     }
   }
