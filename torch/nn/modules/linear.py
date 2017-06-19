@@ -59,10 +59,11 @@ class Linear(Module):
             self.weight.data.uniform_(-stdv, stdv)
         else:
             weight_initializer(self.weight)
-        if bias_initializer is None:
-            self.bias.data.uniform_(-stdv, stdv)
-        else:
-            bias_initializer(self.bias)
+        if self.bias is None:
+            if bias_initializer is None:
+                self.bias.data.uniform_(-stdv, stdv)
+            else:
+                bias_initializer(self.bias)
 
     def forward(self, input):
         if self.bias is None:
