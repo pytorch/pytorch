@@ -287,8 +287,8 @@ def create_derived(backend_type_env, declarations):
                 for argument in option['arguments'] if not drop_argument(argument, option)]
 
     def is_actual_return_long(ret):
-        return ret['type'] == 'long' or (backend_type_env['ScalarName'] == 'Long'
-                                         and ret['type'] == 'real' or ret['type'] == 'accreal')
+        return ret['type'] == 'long' or (backend_type_env['ScalarName'] == 'Long' and
+                                         ret['type'] == 'real' or ret['type'] == 'accreal')
 
     def emit_body(env, option):
         body = []
