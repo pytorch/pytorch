@@ -126,6 +126,55 @@ class NNPackOpsTest(hu.HypothesisTestCase):
             atol=1e-4,
             rtol=1e-4)
 
+    @given(size=st.sampled_from([6, 8]),
+           input_channels=st.integers(1, 8),
+           batch_size=st.integers(1, 5))
+    def test_relu_correctness(self, size, input_channels, batch_size):
+        X = np.random.rand(
+            batch_size, input_channels, size, size).astype(np.float32) - 0.5
+        outputs = {}
+        for engine in ["", "NNPACK"]:
+            op = core.CreateOperator(
+                "Relu",
+                ["X"],
+                ["Y"],
+                engine=engine,
+            )
+            self.ws.create_blob("X").feed(X)
+            self.ws.run(op)
+            outputs[engine] = self.ws.blobs["Y"].fetch()
+        np.testing.assert_allclose(
+            outputs[""],
+            outputs["NNPACK"],
+            atol=1e-4,
+            rtol=1e-4)
+
+    @given(size=st.sampled_from([6, 8]),
+           input_channels=st.integers(1, 8),
+           batch_size=st.integers(1, 5),
+           alpha=st.floats(0, 1))
+    def test_leaky_relu_correctness(self, size, input_channels, batch_size,
+                                    alpha):
+        X = np.random.rand(
+            batch_size, input_channels, size, size).astype(np.float32) - 0.5
+        outputs = {}
+        for engine in ["", "NNPACK"]:
+            op = core.CreateOperator(
+                "LeakyRelu",
+                ["X"],
+                ["Y"],
+                alpha=alpha,
+                engine=engine,
+            )
+            self.ws.create_blob("X").feed(X)
+            self.ws.run(op)
+            outputs[engine] = self.ws.blobs["Y"].fetch()
+        np.testing.assert_allclose(
+            outputs[""],
+            outputs["NNPACK"],
+            atol=1e-4,
+            rtol=1e-4)
+
     @settings(timeout=3600)
     @unittest.skipIf(not os.environ.get("CAFFE2_BENCHMARK"), "Benchmark")
     @given(stride=st.integers(1, 1),
@@ -159,6 +208,28 @@ class NNPackOpsTest(hu.HypothesisTestCase):
             self.ws.create_blob("X").feed(X)
             self.ws.create_blob("W").feed(w)
             self.ws.create_blob("b").feed(b)
+            self.ws.run(net)
+            times[engine] = benchmark(self.ws, net)
+        print("Speedup for NNPACK: {:.2f}".format(
+            times[""] / times["NNPACK"]))
+
+    @settings(timeout=3600)
+    @unittest.skipIf(not os.environ.get("CAFFE2_BENCHMARK"), "Benchmark")
+    @given(size=st.integers(30, 90),
+           input_channels=st.sampled_from([3, 64, 256]),
+           batch_size=st.sampled_from([32, 64, 96, 128]))
+    def test_relu_timings(self, size, input_channels, batch_size):
+        X = np.random.rand(
+            batch_size, input_channels, size, size).astype(np.float32) - 0.5
+        times = {}
+        for engine in ["", "NNPACK"]:
+            net = core.Net(engine + "_test")
+            net.Relu(
+                ["X"],
+                ["Y"],
+                engine=engine,
+            )
+            self.ws.create_blob("X").feed(X)
             self.ws.run(net)
             times[engine] = benchmark(self.ws, net)
         print("Speedup for NNPACK: {:.2f}".format(

@@ -7,7 +7,7 @@
 namespace caffe2 {
 
 template <typename T, class Context>
-class LeakyReluOp final : public Operator<Context> {
+class LeakyReluOp : public Operator<Context> {
  public:
   LeakyReluOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws), alpha_(0) {
