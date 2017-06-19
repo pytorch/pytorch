@@ -9,13 +9,20 @@ constexpr auto Float = ScalarType::Float;
 constexpr auto Double = ScalarType::Float;
 
 template<typename scalar_type>
-void foo(const Type & t, Tensor a, Tensor b) {
-  scalar_type s = 1;
-  cout << "hello, dispatch: " << t.toString() << s << "\n";
-  auto data = (scalar_type*)a.data_ptr();
-}
+struct Foo {
+  static void CPU(const Type & t, Tensor a, Tensor b) {
+    scalar_type s = 1;
+    cout << "hello, dispatch: " << t.toString() << s << "\n";
+    auto data = (scalar_type*)a.data_ptr();
+  }
+  static void CUDA(const Type & t, Tensor a, Tensor b) {
+  }
+};
 template<>
-void foo<Half>(const Type & t, Tensor a, Tensor b) {}
+struct Foo<Half> {
+  static void CPU(const Type & t, Tensor a, Tensor b) {}
+  static void CUDA(const Type & t, Tensor a, Tensor b) {}
+};
 
 int main() {
   Scalar what = 257;
@@ -59,8 +66,7 @@ int main() {
   cout << r << "\n";
   cout << T.randn({10,10,2}) << "\n";
 
-  TLIB_DISPATCH_TYPE(x.type(),foo,x,prev_h);
-
+  dispatch<Foo>(x.type(),x,prev_h);
   return 0;
 
 }

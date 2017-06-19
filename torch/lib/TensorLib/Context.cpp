@@ -1,6 +1,7 @@
 #include "Context.h"
 #include <thread>
 #include <mutex>
+#include <sstream>
 
 #ifdef TENSORLIB_CUDA_ENABLED
 #include "THC/THC.h"
@@ -13,10 +14,16 @@ namespace tlib {
 static inline void errorHandler(const char * msg, void * data) {
   throw std::runtime_error(msg);
 }
+static inline void argErrorHandler(int arg, const char * msg, void * data) {
+  std::stringstream new_error;
+  new_error << "invalid argument " << arg << ": " << msg;
+  throw std::runtime_error(new_error.str());
+}
 
 Context::Context() {
 
   THSetDefaultErrorHandler(errorHandler,nullptr);
+  THSetDefaultArgErrorHandler(argErrorHandler,nullptr);
 
 #ifdef TENSORLIB_CUDA_ENABLED
   thc_state = THCState_alloc();

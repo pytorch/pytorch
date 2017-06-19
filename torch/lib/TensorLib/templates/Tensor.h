@@ -94,6 +94,9 @@ struct Tensor {
   Tensor toBackend(Backend b) {
     return toType(type().toBackend(b));
   }
+  int64_t dim() const {
+    return ndimension();
+  }
   template<typename T>
   T * data() const;
 

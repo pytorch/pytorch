@@ -59,7 +59,6 @@ ELSE()
   FIND_PACKAGE(CUDA 5.5)
   IF(CUDA_FOUND)
     INCLUDE_DIRECTORIES(${CUDA_INCLUDE_DIRS})
-    INCLUDE_DIRECTORIES("${CUDA_SDK_ROOT_DIR}/common/inc")
 
     IF(NOT THC_LIBRARIES)
       SET(THC_LIBRARIES "THC")
@@ -80,7 +79,6 @@ ELSE()
       SET(THCUNN_LIBRARIES "THCUNN")
     ENDIF(NOT THCUNN_LIBRARIES)
     MESSAGE(STATUS "THCUNN_LIBRARIES: ${THCUNN_LIBRARIES}")
-
 
   ENDIF()
 ENDIF()
@@ -142,7 +140,6 @@ EXECUTE_PROCESS(
 if (NOT RETURN_VALUE EQUAL 0)
     message(STATUS ${generated_cpp})
     message(FATAL_ERROR "Failed to get generated_cpp list")
-
 endif()
 
 FILE(GLOB_RECURSE all_templates "templates/*")
