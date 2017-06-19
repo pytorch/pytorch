@@ -441,6 +441,7 @@ class TestOperatorTraceback(test_util.TestCase):
         self.assertEqual(net.Proto().op[0].name, '{}:{}'.format(filename, line))
 
 
+@unittest.skipIf(not workspace.has_gpu_support, 'No GPU support')
 class TestInferDevice(test_util.TestCase):
 
     def setUp(self):
