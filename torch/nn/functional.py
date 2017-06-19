@@ -408,6 +408,14 @@ def dropout(input, p=0.5, training=False, inplace=False):
 
 
 def alpha_dropout(input, p=0.5, training=False):
+    r"""Applies alpha dropout to the input.
+
+    See :class:`~torch.nn.AlphaDropout` for details.
+
+    Args:
+        p (float, optional): the drop probability
+        training (bool, optional): switch between training and evaluation mode
+    """
     if p < 0 or p > 1:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
