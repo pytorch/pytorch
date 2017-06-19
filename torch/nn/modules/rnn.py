@@ -10,7 +10,7 @@ class RNNBase(Module):
 
     def __init__(self, mode, input_size, hidden_size,
                  num_layers=1, bias=True, batch_first=False,
-                 dropout=0, bidirectional=False):
+                 dropout=0, bidirectional=False, initializer=dict()):
         super(RNNBase, self).__init__()
         self.mode = mode
         self.input_size = input_size
@@ -51,12 +51,30 @@ class RNNBase(Module):
                 else:
                     self._all_weights += [weights[:2]]
 
+        self.initializer = initializer
         self.reset_parameters()
 
     def reset_parameters(self):
         stdv = 1.0 / math.sqrt(self.hidden_size)
-        for weight in self.parameters():
-            weight.data.uniform_(-stdv, stdv)
+
+        if isinstance(self.initializer, function):
+            weight_initializer = self.initializer
+            bias_initializer = None
+        else:
+            weight_initializer = self.initializer.get("weight")
+            bias_initializer = self.initializer.get("bias")
+
+        for p in self.parameters():
+            if weight_initializer is None and bias_initializer is None:
+                p.data.uniform_(-stdv, stdv)
+            elif p.dim() == 1:  # bias
+                if bias_initializer is None:
+                    p.data.uniform_(-stdv, stdv)
+                else:
+                    bias_initializer(p)
+            else:  # weight
+                if weight_initializer is None:
+                    weight_initializer(p)
 
     def forward(self, input, hx=None):
         is_packed = isinstance(input, PackedSequence)
