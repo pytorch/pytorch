@@ -10,7 +10,7 @@ import numpy as np
 
 import lmdb
 from caffe2.proto import caffe2_pb2
-from caffe2.python import workspace, cnn
+from caffe2.python import workspace, model_helper
 
 '''
 Simple example to create an lmdb database of random image data and labels.
@@ -64,8 +64,7 @@ def create_db(output_file):
 
 def read_db_with_caffe2(db_file, expected_checksum):
     print(">>> Read database...")
-    model = cnn.CNNModelHelper(
-        order="NCHW", name="lmdbtest")
+    model = model_helper.ModelHelper(name="lmdbtest")
     batch_size = 32
     data, label = model.TensorProtosDBInput(
         [], ["data", "label"], batch_size=batch_size,
@@ -76,7 +75,7 @@ def read_db_with_caffe2(db_file, expected_checksum):
     workspace.RunNetOnce(model.param_init_net)
     workspace.CreateNet(model.net)
 
-    for batch_idx in range(0, 4):
+    for _ in range(0, 4):
         workspace.RunNet(model.net.Proto().name)
 
         img_datas = workspace.FetchBlob("data")
