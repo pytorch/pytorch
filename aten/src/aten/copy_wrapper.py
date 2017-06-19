@@ -35,7 +35,8 @@ void ${Type}::copy(const Tensor & src, Tensor & dst) {
 }
 """)
 
-def create_one(env,all_types):
+
+def create_one(env, all_types):
     copy_body = []
     for src_type in all_types:
         state = []
@@ -45,13 +46,14 @@ def create_one(env,all_types):
         if env['Backend'] == 'CUDA' or src_type['Backend'] == 'CUDA':
             state.append('context->thc_state')
         copy_body.append(CASE.substitute(env,
-            src_scalar_name = src_type['ScalarName'],
-            src_id=src_type['TypeID'],
-            src_tensor=src_type['Tensor'],
-            cuda = cuda,
-            state = state,
-        ))
-    return FUNCTION.substitute(env,copy_body=copy_body)
+                                         src_scalar_name=src_type['ScalarName'],
+                                         src_id=src_type['TypeID'],
+                                         src_tensor=src_type['Tensor'],
+                                         cuda=cuda,
+                                         state=state,
+                                         ))
+    return FUNCTION.substitute(env, copy_body=copy_body)
+
 
 def create(all_types):
     top_env = {
@@ -63,5 +65,5 @@ def create(all_types):
             '#include "TensorLib/{}.h"'.format(dst_type['Type']))
         top_env['copy_includes'].append(
             '#include "TensorLib/{}.h"'.format(dst_type['Tensor']))
-        top_env['copy_functions'].append(create_one(dst_type,all_types))
+        top_env['copy_functions'].append(create_one(dst_type, all_types))
     return FILE.substitute(top_env)
