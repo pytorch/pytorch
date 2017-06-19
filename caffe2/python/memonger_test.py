@@ -109,6 +109,7 @@ class MemongerTest(hu.HypothesisTestCase):
             "name_x/",
             share_activations=False,
         )
+        self.assertTrue(memonger.verify_graph_equality(m.Proto(), optim_proto))
         blobs_after = count_blobs(optim_proto)
         self.assertLess(blobs_after, blobs_before)
 
@@ -120,6 +121,7 @@ class MemongerTest(hu.HypothesisTestCase):
             share_activations=True,
             dont_share_blobs=set([str(input_to_grad["name_x/fc1_w"])]),
         )
+        self.assertTrue(memonger.verify_graph_equality(m.Proto(), optim_proto_wacts))
         blobs_wact_optim = count_blobs(optim_proto_wacts)
         self.assertLessEqual(blobs_wact_optim, blobs_after)
 
@@ -187,6 +189,7 @@ class MemongerTest(hu.HypothesisTestCase):
             dont_share_blobs=set(['name_x/fc6', 'name_x/fc5',
                                    str(input_to_grad["name_x/fc1_w"])]),
         )
+        self.assertTrue(memonger.verify_graph_equality(m.net.Proto(), optim_proto))
         blobs_after = count_blobs(optim_proto)
         self.assertLess(blobs_after, blobs_before)
         self.assertTrue(has_blob(optim_proto, "name_x/fc6"))
@@ -249,6 +252,7 @@ class MemongerTest(hu.HypothesisTestCase):
         optim_proto = memonger.optimize_inference_for_dag(
             m.net, ["name_x/data"], "name_x"
         )
+        self.assertTrue(memonger.verify_graph_equality(m.net.Proto(), optim_proto))
         blobs_after = count_blobs(optim_proto)
         self.assertLess(blobs_after, blobs_before)
 
@@ -306,6 +310,7 @@ class MemongerTest(hu.HypothesisTestCase):
         optim_proto = memonger.optimize_inference_for_dag(
             m.net, ["name_x/data"], "name_x/"
         )
+        self.assertTrue(memonger.verify_graph_equality(m.net.Proto(), optim_proto))
         blobs_after = count_blobs(optim_proto)
         print(str(optim_proto))
         self.assertLess(blobs_after, blobs_before)
@@ -431,3 +436,107 @@ class MemongerTest(hu.HypothesisTestCase):
 
         best = memonger.compute_assignments_dp(ranges_sorted, [])
         self.assertEqual(memonger.get_memory_usage(best), 11)
+
+    @given(input_dim=st.integers(min_value=4, max_value=4),
+           output_dim=st.integers(min_value=4, max_value=4),
+           batch_size=st.integers(min_value=4, max_value=4))
+    def test_verify_graph_equality(self, input_dim, output_dim, batch_size):
+        m = model_helper.ModelHelper()
+        m.Proto().type = "dag"
+        m.Proto().num_workers = 4
+        with core.NameScope("name_x"):
+            fc1 = brew.fc(m, "data", "x", dim_in=input_dim, dim_out=output_dim)
+            fc2 = brew.fc(m, fc1, "y", dim_in=output_dim, dim_out=output_dim)
+            fc3 = brew.fc(m, fc1, "z", dim_in=output_dim, dim_out=output_dim)
+            brew.sum(m, [fc2, fc3], "out")
+
+        m2 = model_helper.ModelHelper()
+        m2.Proto().type = "dag"
+        m2.Proto().num_workers = 4
+        with core.NameScope("name_x"):
+            fc1 = brew.fc(m2, "data", "other_x", dim_in=input_dim, dim_out=output_dim)
+            fc2 = brew.fc(m2, fc1, "other_y", dim_in=output_dim, dim_out=output_dim)
+            fc3 = brew.fc(m2, fc1, "other_z", dim_in=output_dim, dim_out=output_dim)
+            brew.sum(m2, [fc2, fc3], "out")
+
+        self.assertTrue(memonger.verify_graph_equality(m.net.Proto(), m2.net.Proto()))
+
+    @given(input_dim=st.integers(min_value=4, max_value=4),
+           output_dim=st.integers(min_value=4, max_value=4),
+           batch_size=st.integers(min_value=4, max_value=4))
+    def test_verify_graph_equality_harder(self, input_dim, output_dim, batch_size):
+        m = model_helper.ModelHelper()
+        m.Proto().type = "dag"
+        m.Proto().num_workers = 4
+        with core.NameScope("name_x"):
+            fc1 = brew.fc(m, "data", "x", dim_in=input_dim, dim_out=output_dim)
+            fc2a = brew.fc(m, fc1, "y", dim_in=output_dim, dim_out=output_dim)
+            fc2b = brew.fc(m, fc1, "z", dim_in=output_dim, dim_out=output_dim)
+            fc3a = brew.fc(m, fc2a, "u", dim_in=output_dim, dim_out=output_dim)
+            fc3b = brew.fc(m, fc2b, "v", dim_in=output_dim, dim_out=output_dim)
+            brew.sum(m, [fc3a, fc3b], "out")
+
+        m2 = model_helper.ModelHelper()
+        m2.Proto().type = "dag"
+        m2.Proto().num_workers = 4
+        with core.NameScope("name_x"):
+            fc1 = brew.fc(m2, "data", "x", dim_in=input_dim, dim_out=output_dim)
+            fc2a = brew.fc(m2, fc1, "y", dim_in=output_dim, dim_out=output_dim)
+            fc2b = brew.fc(m2, fc1, "z", dim_in=output_dim, dim_out=output_dim)
+            fc3a = brew.fc(m2, fc2a, "y", dim_in=output_dim, dim_out=output_dim)
+            fc3b = brew.fc(m2, fc2b, "z", dim_in=output_dim, dim_out=output_dim)
+            brew.sum(m2, [fc3a, fc3b], "out")
+
+        self.assertTrue(memonger.verify_graph_equality(m.net.Proto(), m2.net.Proto()))
+
+    @given(input_dim=st.integers(min_value=4, max_value=4),
+           output_dim=st.integers(min_value=4, max_value=4),
+           batch_size=st.integers(min_value=4, max_value=4))
+    def test_verify_graph_inequality(self, input_dim, output_dim, batch_size):
+        m = model_helper.ModelHelper()
+        m.Proto().type = "dag"
+        m.Proto().num_workers = 4
+        with core.NameScope("name_x"):
+            fc1 = brew.fc(m, "data", "x", dim_in=input_dim, dim_out=output_dim)
+            fc2 = brew.fc(m, fc1, "y", dim_in=output_dim, dim_out=output_dim)
+            fc3 = brew.fc(m, fc1, "z", dim_in=output_dim, dim_out=output_dim)
+            brew.sum(m, [fc2, fc3], "out")
+
+        m2 = model_helper.ModelHelper()
+        m2.Proto().type = "dag"
+        m2.Proto().num_workers = 4
+        with core.NameScope("name_x"):
+            fc1 = brew.fc(m2, "data", "x", dim_in=input_dim, dim_out=output_dim)
+            fc2 = brew.fc(m2, fc1, "y", dim_in=output_dim, dim_out=output_dim)
+            fc3 = brew.fc(m2, fc1, "y", dim_in=output_dim, dim_out=output_dim)
+            brew.sum(m2, [fc2, fc3], "out")
+
+        self.assertFalse(memonger.verify_graph_equality(m.net.Proto(), m2.net.Proto()))
+
+    @given(input_dim=st.integers(min_value=4, max_value=4),
+           output_dim=st.integers(min_value=4, max_value=4),
+           batch_size=st.integers(min_value=4, max_value=4))
+    def test_verify_graph_inequality_harder(self, input_dim, output_dim, batch_size):
+        m = model_helper.ModelHelper()
+        m.Proto().type = "dag"
+        m.Proto().num_workers = 4
+        with core.NameScope("name_x"):
+            fc1 = brew.fc(m, "data", "x", dim_in=input_dim, dim_out=output_dim)
+            fc2a = brew.fc(m, fc1, "y", dim_in=output_dim, dim_out=output_dim)
+            fc2b = brew.fc(m, fc1, "z", dim_in=output_dim, dim_out=output_dim)
+            fc3a = brew.fc(m, fc2a, "u", dim_in=output_dim, dim_out=output_dim)
+            fc3b = brew.fc(m, fc2b, "v", dim_in=output_dim, dim_out=output_dim)
+            brew.sum(m, [fc3a, fc3b], "out")
+
+        m2 = model_helper.ModelHelper()
+        m2.Proto().type = "dag"
+        m2.Proto().num_workers = 4
+        with core.NameScope("name_x"):
+            fc1 = brew.fc(m2, "data", "x", dim_in=input_dim, dim_out=output_dim)
+            fc2a = brew.fc(m2, fc1, "y", dim_in=output_dim, dim_out=output_dim)
+            fc2b = brew.fc(m2, fc1, "y", dim_in=output_dim, dim_out=output_dim)
+            fc3a = brew.fc(m2, fc2a, "u", dim_in=output_dim, dim_out=output_dim)
+            fc3b = brew.fc(m2, fc2b, "v", dim_in=output_dim, dim_out=output_dim)
+            brew.sum(m2, [fc3a, fc3b], "out")
+
+        self.assertFalse(memonger.verify_graph_equality(m.net.Proto(), m2.net.Proto()))

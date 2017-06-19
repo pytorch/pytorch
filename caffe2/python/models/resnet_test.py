@@ -77,6 +77,7 @@ class ResnetMemongerTest(hu.HypothesisTestCase):
             dont_share_blobs=set([str(param_to_grad["gpu_0/conv1_w"])]),
             blob_shapes=shapes if with_shapes else None,
         )
+        self.assertTrue(memonger.verify_graph_equality(model.net.Proto(), optim_proto))
         count_after = count_blobs(optim_proto)
         self.assertTrue(count_after < count_before)
 
@@ -125,6 +126,7 @@ class ResnetMemongerTest(hu.HypothesisTestCase):
         optim_proto = memonger.optimize_inference_for_dag(
             model.net, ["gpu_0/data"], "gpu_0/"
         )
+        self.assertTrue(memonger.verify_graph_equality(model.net.Proto(), optim_proto))
         count_after = count_blobs(optim_proto)
         num_shared_blobs = count_shared_blobs(optim_proto)
 
