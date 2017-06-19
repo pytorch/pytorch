@@ -444,9 +444,8 @@ bool DAGNetBase::Run() {
     node.runtime_parent_count_ = node.parents_.size();
   }
   // Kickstart the job queue.
-  for (auto& value : initial_frontier_) {
-    job_queue_->Push(value);
-  }
+  job_queue_->PushBulk(initial_frontier_);
+
   // Wait for failure or completed execution.
   {
     std::unique_lock<std::mutex> mutex_lock(remaining_ops_mutex_);
@@ -542,7 +541,9 @@ void DAGNetBase::WorkerFunction() {
       remaining_ops_ -= chain.size();
       CAFFE_ENFORCE(remaining_ops_ >= 0);
       success_ &= this_success;
-      cv_.notify_one();
+      if (remaining_ops_ == 0 || !success_) {
+        cv_.notify_one();
+      }
 
       // Terminate thread if this or any other operator chain failed.
       if (!success_) {
@@ -553,9 +554,7 @@ void DAGNetBase::WorkerFunction() {
       // Queue follow up operator chains.
       // Can't do this inline because it can race with another thread
       // calling NoMoreJobs(). So the lock needs to be held on push.
-      for (const auto idx : chains_to_queue) {
-        job_queue_->Push(idx);
-      }
+      job_queue_->PushBulk(chains_to_queue);
     }
 
     VLOG(2) << "Finished executing operator #" << idx;
