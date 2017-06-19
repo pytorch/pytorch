@@ -149,7 +149,7 @@ class AliasOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& input = Input(0);
-    DCHECK_GT(input.size(), 0);
+    CAFFE_ENFORCE_GE(input.size(), 0, "Tensor is not initialized");
     Output(0)->ResizeLike(input);
     Output(0)->ShareData(input);
     return true;

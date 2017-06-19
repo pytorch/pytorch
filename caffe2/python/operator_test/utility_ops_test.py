@@ -3,7 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import core
+from caffe2.python import core, workspace
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
@@ -202,3 +202,18 @@ class TestUtilityOps(hu.HypothesisTestCase):
             inputs=[X],
             reference=size_op,
         )
+
+    def test_alias_op(self):
+        """ Don't use hypothesis because there are only 2 cases to check"""
+        for size in [0, 5]:
+            X = np.arange(size).astype(np.float32)
+            workspace.FeedBlob('X', X)
+
+            op = core.CreateOperator(
+                "Alias",
+                ["X"],
+                ["Y"]
+            )
+            workspace.RunOperatorOnce(op)
+            Y = workspace.FetchBlob('Y')
+            np.testing.assert_array_equal(X, Y)
