@@ -85,14 +85,6 @@ def AddNogradient(op, g_output):
 
 
 class TestGradientCalculation(test_util.TestCase):
-    def assertEqual(self, op_list1, op_list2):
-        if isinstance(op_list1, list) and isinstance(op_list2, list):
-            for op in op_list1 + op_list2:
-                if isinstance(op, caffe2_pb2.OperatorDef):
-                    op.ClearField(bytes_to_native_str(b'uuid'))
-        return super(TestGradientCalculation, self).assertEqual(
-            op_list1, op_list2)
-
     @given(device_option=st.sampled_from([
         None,
         core.DeviceOption(caffe2_pb2.CUDA, 1)]))

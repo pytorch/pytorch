@@ -43,8 +43,6 @@ Workspaces = C.workspaces
 BenchmarkNet = C.benchmark_net
 Predictor = C.Predictor
 
-operator_tracebacks = {}
-
 is_asan = C.is_asan
 has_gpu_support = C.has_gpu_support
 if has_gpu_support:
@@ -146,8 +144,7 @@ def CreateNet(net, overwrite=False, input_blobs=None):
         input_blobs = []
     for input_blob in input_blobs:
         C.create_blob(input_blob)
-    return CallWithExceptionIntercept(
-        C.create_net, C.last_failed_op_uuid, StringifyProto(net), overwrite)
+    return C.create_net(StringifyProto(net), overwrite)
 
 
 def RunOperatorOnce(operator):
@@ -162,20 +159,8 @@ def RunOperatorsOnce(operators):
     return True
 
 
-def CallWithExceptionIntercept(func, uuid_fetcher, *args, **kwargs):
-    try:
-        return func(*args, **kwargs)
-    except Exception as ex:
-        uuid = uuid_fetcher()
-        if uuid in operator_tracebacks:
-            for line in operator_tracebacks[uuid]:
-                print(':'.join(map(str, line)))
-        raise ex
-
-
 def RunNetOnce(net):
-    return CallWithExceptionIntercept(
-        C.run_net_once, C.last_failed_op_uuid, StringifyProto(net))
+    return C.run_net_once(StringifyProto(net))
 
 
 def RunNet(name, num_iter=1, allow_fail=False):
@@ -188,9 +173,7 @@ def RunNet(name, num_iter=1, allow_fail=False):
     Returns:
       True or an exception.
     """
-    return CallWithExceptionIntercept(
-        C.run_net, C.last_failed_op_uuid,
-        StringifyNetName(name), num_iter, allow_fail)
+    return C.run_net(StringifyNetName(name), num_iter, allow_fail)
 
 
 def RunPlan(plan_or_step):
@@ -454,12 +437,11 @@ def FeedImmediate(*args, **kwargs):
 
 # CWorkspace utilities
 
-def _Workspace_create_net_with_exception_intercept(ws, net, overwrite=False):
-    return CallWithExceptionIntercept(
-        ws._create_net, ws.last_failed_op_uuid, StringifyProto(net), overwrite)
+def _Workspace_create_net(ws, net, overwrite=False):
+    return ws._create_net(StringifyProto(net), overwrite)
 
 
-C.Workspace.create_net = _Workspace_create_net_with_exception_intercept
+C.Workspace.create_net = _Workspace_create_net
 
 
 def _Workspace_run(ws, obj):
@@ -475,12 +457,7 @@ def _Workspace_run(ws, obj):
         "Don't know how to do Workspace.run() on {}".format(type(obj)))
 
 
-def _Workspace_run_with_exception_intercept(ws, obj):
-    return CallWithExceptionIntercept(
-        _Workspace_run, ws.last_failed_op_uuid, ws, obj)
-
-
-C.Workspace.run = _Workspace_run_with_exception_intercept
+C.Workspace.run = _Workspace_run
 
 
 def _Blob_feed(blob, arg, device_option=None):
