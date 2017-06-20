@@ -458,15 +458,14 @@ class _MultiSelectionFunction(Function):
             return output
 
     @staticmethod
-    @once_differentiable
     def backward(ctx, grad_output, grad_indices=None):
-        grad_input = grad_output.new(ctx.input_size).zero_()
+        grad_input = Variable(grad_output.data.new(ctx.input_size).zero_(), requires_grad=True)
         if ctx.return_indices:
             indices, = ctx.saved_tensors
         else:
             indices = ctx.indices
         dim = ctx.dim if ctx.dim is not None else grad_output.dim() - 1
-        return (grad_input.scatter_(dim, indices, grad_output),) + (None,) * ctx.num_flags
+        return (grad_input.scatter(dim, Variable(indices), grad_output),) + (None,) * ctx.num_flags
 
 
 class Sort(_MultiSelectionFunction):
