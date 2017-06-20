@@ -4,6 +4,7 @@
 #include "TensorLib/Type.h"
 #include "TensorLib/TensorImpl.h"
 #include "TensorLib/Utils.h"
+#include "TensorLib/TensorAccessor.h"
 
 namespace tlib {
 class Type;
@@ -99,6 +100,13 @@ struct Tensor {
   }
   template<typename T>
   T * data() const;
+
+  template<typename T, size_t N>
+  TensorAccessor<T,N> accessor() {
+    static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data<T>()");
+    TLIB_ASSERT(dim() == N, "expected %d dims but tensor has %d",N,dim());
+    return TensorAccessor<T,N>(data<T>(),sizes().data(),strides().data());
+  }
 
   //example
   //Tensor * add(Tensor & b);
