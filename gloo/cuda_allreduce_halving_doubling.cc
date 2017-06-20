@@ -9,8 +9,8 @@
 
 #include "gloo/cuda_allreduce_halving_doubling.h"
 
+#include "gloo/cuda_collectives_device.h"
 #include "gloo/cuda_collectives_host.h"
-#include "gloo/cuda_collectives_nccl.h"
 #include "gloo/cuda_private.h"
 
 namespace gloo {
@@ -470,9 +470,9 @@ void CudaAllreduceHalvingDoubling<T, W>::init(
         cudaHostBroadcast(streams_, devicePtrs_, scratch_, 0, count_);
   } else {
     localReduceOp_ =
-        cudaNCCLReduce(streams_, devicePtrs_, scratch_, fn_, 0, count_);
+        cudaDeviceReduce(streams_, devicePtrs_, scratch_, fn_, 0, count_);
     localBroadcastOp_ =
-        cudaNCCLBroadcast(streams_, devicePtrs_, scratch_, 0, count_);
+        cudaDeviceBroadcast(streams_, devicePtrs_, scratch_, 0, count_);
   }
 }
 
@@ -506,9 +506,9 @@ void CudaAllreduceHalvingDoubling<T, W>::init(
   }
   if (devicePtrs_.size() > 1) {
     localReduceOp_ =
-        cudaNCCLReduce(streams_, devicePtrs_, scratch_, fn_, 0, count_);
+        cudaDeviceReduce(streams_, devicePtrs_, scratch_, fn_, 0, count_);
     localBroadcastOp_ =
-        cudaNCCLBroadcast(streams_, devicePtrs_, scratch_, 0, count_);
+        cudaDeviceBroadcast(streams_, devicePtrs_, scratch_, 0, count_);
   }
 }
 
@@ -542,7 +542,7 @@ void CudaAllreduceHalvingDoubling<T, W>::initReductionsAndBroadcasts(
     }
   } else {
     if (!devicePtrsForFirstSend_.empty()) {
-      reduceBeforeFirstSend_ = cudaNCCLReduce(
+      reduceBeforeFirstSend_ = cudaDeviceReduce(
           streams_,
           devicePtrsForFirstSend_,
           scratchPtrForFirstSend_,
@@ -551,7 +551,7 @@ void CudaAllreduceHalvingDoubling<T, W>::initReductionsAndBroadcasts(
           sendCounts_[0]);
     }
     if (!devicePtrsForFirstRecv_.empty()) {
-      reduceBeforeFirstRecv_ = cudaNCCLReduce(
+      reduceBeforeFirstRecv_ = cudaDeviceReduce(
           streams_,
           devicePtrsForFirstRecv_,
           scratchPtrForFirstRecv_,
@@ -576,7 +576,7 @@ void CudaAllreduceHalvingDoubling<T, W>::initReductionsAndBroadcasts(
           0,
           numElementsInBcast));
     } else {
-      broadcastOps_.push_back(cudaNCCLBroadcast(
+      broadcastOps_.push_back(cudaDeviceBroadcast(
           streams_,
           devicePtrsForBroadcast_[i],
           scratchPtrForBroadcast_[i],
@@ -596,7 +596,7 @@ void CudaAllreduceHalvingDoubling<T, W>::initReductionsAndBroadcasts(
     return;
   }
   if (!devicePtrsForFirstSend_.empty()) {
-    reduceBeforeFirstSend_ = cudaNCCLReduce(
+    reduceBeforeFirstSend_ = cudaDeviceReduce(
         streams_,
         devicePtrsForFirstSend_,
         scratchPtrForFirstSend_,
@@ -605,7 +605,7 @@ void CudaAllreduceHalvingDoubling<T, W>::initReductionsAndBroadcasts(
         sendCounts_[0]);
   }
   if (!devicePtrsForFirstRecv_.empty()) {
-    reduceBeforeFirstRecv_ = cudaNCCLReduce(
+    reduceBeforeFirstRecv_ = cudaDeviceReduce(
         streams_,
         devicePtrsForFirstRecv_,
         scratchPtrForFirstRecv_,
@@ -618,7 +618,7 @@ void CudaAllreduceHalvingDoubling<T, W>::initReductionsAndBroadcasts(
       broadcastOps_.push_back(nullptr);
       continue;
     }
-    broadcastOps_.push_back(cudaNCCLBroadcast(
+    broadcastOps_.push_back(cudaDeviceBroadcast(
         streams_,
         devicePtrsForBroadcast_[i],
         scratchPtrForBroadcast_[i],

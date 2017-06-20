@@ -9,8 +9,8 @@
 
 #include "gloo/cuda_broadcast_one_to_all.h"
 
+#include "gloo/cuda_collectives_device.h"
 #include "gloo/cuda_collectives_host.h"
-#include "gloo/cuda_collectives_nccl.h"
 #include "gloo/cuda_private.h"
 
 namespace gloo {
@@ -81,7 +81,7 @@ CudaBroadcastOneToAll<T, W>::CudaBroadcastOneToAll(
   // Setup local broadcast if needed
   if (devicePtrs_.size() > 1) {
     localBroadcastOp_ =
-      cudaNCCLBroadcast(streams_, devicePtrs_, devicePtrs_[0], 0, count_);
+      cudaDeviceBroadcast(streams_, devicePtrs_, devicePtrs_[0], 0, count_);
   }
 }
 
