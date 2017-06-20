@@ -38,32 +38,26 @@ class Linear(Module):
         self.in_features = in_features
         self.out_features = out_features
         self.weight = Parameter(torch.Tensor(out_features, in_features))
+
+        stdv = 1. / math.sqrt(self.weight.size(1))
+        self.initializer = {"weight": lambda x: init.uniform(x, -stdv, stdv)} \
+            if initializer is None else initializer
         if bias:
             self.bias = Parameter(torch.Tensor(out_features))
+            if self.initializer.get("bias") is None:
+                self.initializer["bias"] = lambda x: init.uniform(x, -stdv, stdv)
         else:
             self.register_parameter('bias', None)
-        self.initializer = {} if initializer is None else initializer
         self.reset_parameters()
 
     def reset_parameters(self):
-        stdv = 1. / math.sqrt(self.weight.size(1))
 
-        if callable(self.initializer):
-            weight_initializer = self.initializer
-            bias_initializer = None
-        else:
-            weight_initializer = self.initializer.get("weight")
-            bias_initializer = self.initializer.get("bias")
+        weight_initializer = self.initializer.get("weight")
+        bias_initializer = self.initializer.get("bias")
 
-        if weight_initializer is None:
-            self.weight.data.uniform_(-stdv, stdv)
-        else:
-            weight_initializer(self.weight)
-        if self.bias is not None:
-            if bias_initializer is None:
-                self.bias.data.uniform_(-stdv, stdv)
-            else:
-                bias_initializer(self.bias)
+        weight_initializer(self.weight)
+        if self.bias is None:
+            bias_initializer(self.bias)
 
     def forward(self, input):
         if self.bias is None:
