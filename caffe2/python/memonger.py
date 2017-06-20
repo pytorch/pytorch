@@ -207,7 +207,6 @@ def _compute_blob_recycling_for_dag(
                         new_free_blobs.add(
                             (-share_counts[actual_blob], actual_blob),
                         )
-                        assert actual_blob not in free_blobs
 
         for outp in cur_op.output:
             if is_shareable(outp):
@@ -255,18 +254,23 @@ def _compute_blob_recycling_for_dag(
                 output_blobs.add(outp)
 
         for (cnt, nf) in new_free_blobs:
+            already_inserted = False
+            # Note: we prevent double insertion, but it can
+            # happen because of parallel branches. Token management
+            # ensures free blobs are handled correctly.
             if blob_sizes is None:
                 for _c, b in free_blobs:
-                    assert b != nf, "Double inserting a free blob: {}".format(b)
-                heapq.heappush(free_blobs, (cnt, nf))
+                    if b == nf:
+                        already_inserted = True
+                if not already_inserted:
+                    heapq.heappush(free_blobs, (cnt, nf))
             else:
                 if nf not in blob_sizes:
                     blob_sizes[nf] = infer_blob_size(outp)
-                assert nf not in free_blobs, \
-                    "Blob {} double-inserted to free_blobs".format(nf)
-                free_blobs.append(nf)
-
-        free_blobs_fwd = free_blobs
+                if nf in free_blobs:
+                    already_inserted = True
+                if not already_inserted:
+                    free_blobs.append(nf)
 
         num_branches = 0
         # Count branches
@@ -285,35 +289,25 @@ def _compute_blob_recycling_for_dag(
                     if num_branches > 1:
                         # Optimization
                         new_tokens = tokens.union(set([next_token()]))
-                    (unused, saved_desc) = descend(
+                    saved_desc = descend(
                         inp_op_idx,
-                        free_blobs_fwd,
+                        free_blobs[:],
                         new_tokens,
                     )
                     saved += saved_desc
-                    unused_free_blobs = unused.intersection(unused_free_blobs)
 
-                    # We can pass unused free blobs to other branch
-                    if blob_sizes is None:
-                        free_blobs_fwd = [
-                            (c, b) for (c, b) in free_blobs_fwd if b in unused
-                        ]
-                    else:
-                        free_blobs_fwd = list(
-                            unused.intersection(set(free_blobs_fwd))
-                        )
                 else:
                     # Leave my tokens here
                     if op_token_deposit[inp_op_idx] is not None:
                         op_token_deposit[inp_op_idx] = \
                             op_token_deposit[inp_op_idx].union(tokens)
 
-        return (unused_free_blobs, saved)
+        return saved
 
     # Start DFS from the heads' (losses or inputs)
     for head_blob in heads:
         for op_idx in blobs_to_ops[head_blob]:
-            (_, saved) = descend(op_idx, [], set([next_token()]))
+            saved = descend(op_idx, [], set([next_token()]))
             saved_count += saved
 
     # Rename the shared blobs

@@ -310,7 +310,8 @@ class MemongerTest(hu.HypothesisTestCase):
         optim_proto = memonger.optimize_inference_for_dag(
             m.net, ["name_x/data"], "name_x/"
         )
-        self.assertTrue(memonger.verify_graph_equality(m.net.Proto(), optim_proto))
+        self.assertTrue(
+            memonger.verify_graph_equality(m.net.Proto(), optim_proto))
         blobs_after = count_blobs(optim_proto)
         print(str(optim_proto))
         self.assertLess(blobs_after, blobs_before)

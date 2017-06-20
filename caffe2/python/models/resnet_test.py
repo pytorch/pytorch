@@ -126,7 +126,6 @@ class ResnetMemongerTest(hu.HypothesisTestCase):
         optim_proto = memonger.optimize_inference_for_dag(
             model.net, ["gpu_0/data"], "gpu_0/"
         )
-        self.assertTrue(memonger.verify_graph_equality(model.net.Proto(), optim_proto))
         count_after = count_blobs(optim_proto)
         num_shared_blobs = count_shared_blobs(optim_proto)
 
@@ -140,14 +139,13 @@ class ResnetMemongerTest(hu.HypothesisTestCase):
         model.net.Proto().type = 'dag'
         model.net.Proto().num_workers = 4
         loss1 = workspace.FetchBlob("gpu_0/last_out_L1000")
+        self.assertTrue(memonger.verify_graph_equality(
+            model.net.Proto(), optim_proto))
 
         workspace.RunNetOnce(optim_proto)
         optimized_loss1 = workspace.FetchBlob("gpu_0/last_out_L1000")
-        print("num shared: {}".format(num_shared_blobs))
-        print("before: {} after: {}".format(count_before, count_after))
         self.assertTrue(count_after < count_before)
-        self.assertTrue(num_shared_blobs < 25)
-
+        self.assertTrue(num_shared_blobs < 7)
         np.testing.assert_almost_equal(loss1, optimized_loss1)
 
 
