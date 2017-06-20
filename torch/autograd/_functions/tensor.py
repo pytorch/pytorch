@@ -536,15 +536,15 @@ class Scatter(InplaceFunction):
         return input.scatter_(ctx.dim, index, source)
 
     @staticmethod
-    @once_differentiable
     def backward(ctx, grad_output):
         index, = ctx.saved_tensors
+        index_var = Variable(index)
         grad_input = grad_source = None
         if ctx.needs_input_grad[0]:
             grad_input = grad_output.clone()
-            grad_input.scatter_(ctx.dim, index, 0)
+            grad_input.scatter_(ctx.dim, index_var, 0)
         if ctx.needs_input_grad[3]:
-            grad_source = grad_output.gather(ctx.dim, index)
+            grad_source = grad_output.gather(ctx.dim, index_var)
         return grad_input, None, None, grad_source, None
 
 

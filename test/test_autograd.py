@@ -1850,7 +1850,6 @@ gradgradcheck_exclude_classes = set((
     'Cumprod',
     'Gather',
     'MaskedScatter',
-    'Scatter',
     'Sort',
     'Topk',
     'Norm',
