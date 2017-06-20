@@ -2,6 +2,7 @@
 import math
 import torch
 from torch.nn.parameter import Parameter
+from torch.nn import init
 from .. import functional as F
 from .module import Module
 from .utils import _single, _pair, _triple
@@ -32,34 +33,29 @@ class _ConvNd(Module):
         else:
             self.weight = Parameter(torch.Tensor(
                 out_channels, in_channels // groups, *kernel_size))
-        if bias:
-            self.bias = Parameter(torch.Tensor(out_channels))
-        else:
-            self.register_parameter('bias', None)
-        self.initializer = {} if initializer is None else initializer
-        self.reset_parameters()
 
-    def reset_parameters(self):
         n = self.in_channels
         for k in self.kernel_size:
             n *= k
         stdv = 1. / math.sqrt(n)
+        self.initializer = {"weight": lambda x: init.uniform(x, -stdv, stdv)} \
+            if initializer is None else initializer
 
-        if callable(self.initializer):
-            weight_initializer = self.initializer
-            bias_initializer = None
+        if bias:
+            self.bias = Parameter(torch.Tensor(out_channels))
+            if self.initializer.get("bias") is None:
+                self.initializer["bias"] = lambda x: init.uniform(x, -stdv, stdv)
         else:
-            weight_initializer = self.initializer.get("weight")
-            bias_initializer = self.initializer.get("bias")
+            self.register_parameter('bias', None)
+        self.reset_parameters()
 
-        if weight_initializer is None:
-            self.weight.data.uniform_(-stdv, stdv)
-        else:
-            weight_initializer(self.weight)
+    def reset_parameters(self):
+
+        weight_initializer = self.initializer.get("weight")
+        bias_initializer = self.initializer.get("bias")
+
+        weight_initializer(self.weight)
         if self.bias is not None:
-            if bias_initializer is None:
-                self.bias.data.uniform_(-stdv, stdv)
-            else:
                 bias_initializer(self.bias)
 
     def __repr__(self):

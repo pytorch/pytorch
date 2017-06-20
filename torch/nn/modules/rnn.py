@@ -2,6 +2,7 @@ import math
 import torch
 
 from .module import Module
+from torch.nn import init
 from ..parameter import Parameter
 from ..utils.rnn import PackedSequence
 
@@ -51,30 +52,24 @@ class RNNBase(Module):
                 else:
                     self._all_weights += [weights[:2]]
 
-        self.initializer = {} if initializer is None else initializer
+        stdv = 1.0 / math.sqrt(self.hidden_size)
+        self.initializer = {"weight": lambda x: init.uniform(x, -stdv, stdv)} \
+            if initializer is None else initializer
+        if bias and self.initializer.get("bias") is None:
+            self.initializer["bias"] = lambda x: init.uniform(x, -stdv, stdv)
+
         self.reset_parameters()
 
     def reset_parameters(self):
-        stdv = 1.0 / math.sqrt(self.hidden_size)
 
-        if callable(self.initializer):
-            weight_initializer = self.initializer
-            bias_initializer = None
-        else:
-            weight_initializer = self.initializer.get("weight")
-            bias_initializer = self.initializer.get("bias")
+        weight_initializer = self.initializer.get("weight")
+        bias_initializer = self.initializer.get("bias")
 
         for p in self.parameters():
-            if weight_initializer is None and bias_initializer is None:
-                p.data.uniform_(-stdv, stdv)
-            elif p.dim() == 1:  # bias
-                if bias_initializer is None:
-                    p.data.uniform_(-stdv, stdv)
-                else:
-                    bias_initializer(p)
+            if p.dim() == 1:  # bias
+                bias_initializer(p)
             else:  # weight
-                if weight_initializer is None:
-                    weight_initializer(p)
+                weight_initializer(p)
 
     def forward(self, input, hx=None):
         is_packed = isinstance(input, PackedSequence)
