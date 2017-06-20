@@ -8,3 +8,4 @@
 #include "TensorLib/Tensor.h"
 #include "TensorLib/Functions.h"
 #include "TensorLib/Formatting.h"
+#include "TensorLib/TensorOperators.h"
