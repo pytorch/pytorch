@@ -13,7 +13,7 @@ struct Tensor {
 
   Tensor()
   : pImpl(nullptr){}
-  Tensor(TensorImpl * self, bool retain = true)
+  explicit Tensor(TensorImpl * self, bool retain = true)
   : pImpl(self) {
     if(pImpl != nullptr && retain)
       pImpl->retain();
@@ -59,7 +59,7 @@ struct Tensor {
     pImpl = nullptr;
     return ret;
   }
-  operator bool() const {
+  bool defined() const {
     return pImpl != nullptr;
   }
   void swap(Tensor & rhs) {
@@ -106,6 +106,34 @@ struct Tensor {
     static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data<T>()");
     TLIB_ASSERT(dim() == N, "expected %d dims but tensor has %d",N,dim());
     return TensorAccessor<T,N>(data<T>(),sizes().data(),strides().data());
+  }
+
+  Tensor operator-() {
+    return neg();
+  }
+  Tensor& operator+=(const Tensor & other) {
+    add_(other);
+  }
+  Tensor& operator+=(Scalar other) {
+    add_(other);
+  }
+  Tensor& operator-=(const Tensor & other) {
+    sub_(other);
+  }
+  Tensor& operator-=(Scalar other) {
+    sub_(other);
+  }
+  Tensor& operator*=(const Tensor & other) {
+    mul_(other);
+  }
+  Tensor& operator*=(Scalar other) {
+    mul_(other);
+  }
+  Tensor& operator/=(const Tensor & other) {
+    div_(other);
+  }
+  Tensor& operator/=(Scalar other) {
+    div_(other);
   }
 
   //example
