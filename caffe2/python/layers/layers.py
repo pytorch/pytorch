@@ -106,12 +106,13 @@ class LayerParameter(object):
 
     def __init__(self, parameter=None, optimizer=None, initializer=None,
                  ps_param=None):
-        assert isinstance(parameter, core.BlobReference), \
-            "expect {0} to be a blob reference".format(str(parameter))
+        assert (not parameter) or isinstance(parameter, core.BlobReference), \
+            "expect {0} to be none or a blob reference".format(str(parameter))
         self.parameter = parameter
         self.optimizer = optimizer
         self.initializer = initializer
         self.ps_param = ps_param
+
 
 def is_request_only_scalar(scalar):
     if len(scalar.field_metadata()) == 0:
@@ -238,7 +239,8 @@ class ModelLayer(object):
             # internal.containers.RepeatedCompositeFieldContainer, but
             # the version of protobuf in fbcode does not support append
             # so extend is used
-            init_net._net.op.extend([param.initializer])
+            if param.initializer:
+                init_net._net.op.extend([param.initializer])
 
     def add_operators(self, net, init_net=None,
                       context=InstantiationContext.TRAINING):
