@@ -472,10 +472,10 @@ bool DecodeClipFromMemoryBuffer(
 
   int end_frm = use_start_frm + length * sampling_rate;
 
-  CAFFE_ENFORCE_LT(
-    end_frm,
-    sampledFrames.size(),
-    "Ending frame must less than total number of video frames");
+  CAFFE_ENFORCE_LE(
+      end_frm,
+      sampledFrames.size(),
+      "Ending frame must less than or equal total number of video frames");
 
   for (int i = use_start_frm; i < end_frm; i += sampling_rate) {
     if (i == use_start_frm) {
