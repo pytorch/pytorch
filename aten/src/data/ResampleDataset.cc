@@ -3,7 +3,7 @@
 #include <vector>
 #include <cassert>
 
-using namespace tlib;
+using namespace at;
 
 ResampleDataset::ResampleDataset(Dataset& dataset) {
    dataset_ = &dataset;
@@ -28,7 +28,7 @@ ResampleDataset::ResampleDataset(Dataset& dataset, std::function<uint64_t(uint64
    resample();
 }
 
-void ResampleDataset::getField(uint64_t idx, std::string& fieldkey, tlib::Tensor& field) {
+void ResampleDataset::getField(uint64_t idx, std::string& fieldkey, at::Tensor& field) {
    assert(idx < size());
    assert(hasField(fieldkey));
    dataset_->getField(perm_[idx], fieldkey, field);

@@ -23,7 +23,7 @@ set(src
 )
 
 add_library(xtdata SHARED ${src})
-target_link_libraries(xtdata TensorLib)
+target_link_libraries(xtdata ATen)
 
 include_directories(.)
 # add_executable(test-data test/basic.cc)

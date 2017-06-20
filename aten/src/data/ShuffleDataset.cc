@@ -2,7 +2,7 @@
 #include "Dataset.h"
 #include <algorithm>
 
-using namespace tlib;
+using namespace at;
 
 ShuffleDataset::ShuffleDataset(Dataset& dataset) : ResampleDataset(dataset) {
    resample();

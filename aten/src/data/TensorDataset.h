@@ -2,17 +2,17 @@
 #define XT_TENSOR_DATASET_H
 
 #include "Dataset.h"
-#include "TensorLib/TensorLib.h"
+#include "ATen/ATen.h"
 #include <string>
 
 class TensorDataset : public Dataset
 {
 public:
-   TensorDataset(tlib::Tensor& t, std::string& fieldkey);
-   virtual void getField(uint64_t idx, std::string& fieldkey, tlib::Tensor& field);
+   TensorDataset(at::Tensor& t, std::string& fieldkey);
+   virtual void getField(uint64_t idx, std::string& fieldkey, at::Tensor& field);
    virtual uint64_t size();
 private:
-   tlib::Tensor t_;
+   at::Tensor t_;
    std::string fieldkey_;
 };
 

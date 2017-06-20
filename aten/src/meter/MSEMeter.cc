@@ -2,7 +2,7 @@
 #include <cassert>
 #include <math.h>
 
-using namespace tlib;
+using namespace at;
 
 MSEMeter::MSEMeter() {
    reset();

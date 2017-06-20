@@ -1,9 +1,9 @@
 #include "TransformDataset.h"
-#include "TensorLib/TensorLib.h"
-#include "TensorLib/TensorLib.h"
+#include "ATen/ATen.h"
+#include "ATen/ATen.h"
 #include <cassert>
 
-using namespace tlib;
+using namespace at;
 
 TransformDataset::TransformDataset(Dataset& dataset, std::string& fieldkey, std::function<Tensor(Tensor)>& transform) {
    assert(hasField(fieldkey));

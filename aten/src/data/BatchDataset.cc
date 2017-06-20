@@ -1,11 +1,11 @@
 #include "BatchDataset.h"
 #include "Dataset.h"
-#include "TensorLib/TensorLib.h"
+#include "ATen/ATen.h"
 #include <vector>
 #include <cassert>
 #include <math.h>
 
-using namespace tlib;
+using namespace at;
 
 BatchDataset::BatchDataset(Dataset& dataset, uint64_t batchsize) {
    BatchDataset(dataset, batchsize, true);
@@ -18,7 +18,7 @@ BatchDataset::BatchDataset(Dataset& dataset, uint64_t batchsize, bool fullbatche
    fullbatches_ = fullbatches;
 }
 
-void BatchDataset::getField(uint64_t idx, std::string& fieldkey, tlib::Tensor& field) {
+void BatchDataset::getField(uint64_t idx, std::string& fieldkey, at::Tensor& field) {
 
    // assertions:
    assert(idx < size());

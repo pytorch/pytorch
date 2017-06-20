@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 #include <functional>
-#include "TensorLib/TensorLib.h"
+#include "ATen/ATen.h"
 #include "Dataset.h"
 
 class ResampleDataset : public Dataset
@@ -13,7 +13,7 @@ public:
    ResampleDataset(Dataset& dataset);
    ResampleDataset(Dataset& dataset, std::vector<uint64_t>& perm);
    ResampleDataset(Dataset& dataset, std::function<uint64_t(uint64_t)> perm);
-   virtual void getField(uint64_t idx, std::string& fieldkey, tlib::Tensor& field);
+   virtual void getField(uint64_t idx, std::string& fieldkey, at::Tensor& field);
    virtual uint64_t size();
    virtual void resample();
 protected:
@@ -22,7 +22,7 @@ protected:
 private:
    Dataset* dataset_;
    std::function<uint64_t(uint64_t)> permfunc_;
-   std::vector<tlib::Tensor> fields_;
+   std::vector<at::Tensor> fields_;
 };
 
 #endif
