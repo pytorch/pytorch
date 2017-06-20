@@ -55,10 +55,10 @@ def _ConvBase(
         weight_shape.extend(kernels)
         weight_shape.append(int(dim_in / group))
 
-    weight_initializer = initializers.update_initializer(
+    WeightInitializer = initializers.update_initializer(
         WeightInitializer, weight_init, ("XavierFill", {})
     )
-    bias_initializer = initializers.update_initializer(
+    BiasInitializer = initializers.update_initializer(
         BiasInitializer, bias_init, ("ConstantFill", {})
     )
     if not model.init_params:
@@ -68,14 +68,14 @@ def _ConvBase(
     weight = model.create_param(
         param_name=blob_out + '_w',
         shape=weight_shape,
-        initializer=weight_initializer,
+        initializer=WeightInitializer,
         tags=ParameterTags.WEIGHT
     )
     if use_bias:
         bias = model.create_param(
             param_name=blob_out + '_b',
             shape=[dim_out, ],
-            initializer=bias_initializer,
+            initializer=BiasInitializer,
             tags=ParameterTags.BIAS
         )
 
