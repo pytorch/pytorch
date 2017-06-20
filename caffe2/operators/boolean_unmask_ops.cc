@@ -21,7 +21,7 @@ class BooleanUnmaskOp final : public Operator<Context> {
     valuesOut->Resize(maskSize);
     auto* valuesOutPtr = (char*)valuesOut->raw_mutable_data(valueMeta);
 
-    std::vector<int> nextValueIndices(maskSize, 0);
+    std::vector<int> nextValueIndices(numMasks, 0);
     for (int maskOffset = 0; maskOffset < maskSize; ++maskOffset) {
       bool maskFound = false;
       for (int maskIndex = 0; maskIndex < numMasks; ++maskIndex) {
