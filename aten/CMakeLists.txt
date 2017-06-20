@@ -47,7 +47,8 @@ else()
 endif()
 
 set(cwrap_files
-  ${CMAKE_SOURCE_DIR}/src/cwrap/declarations.cwrap
+  ${CMAKE_SOURCE_DIR}/tools/Declarations.cwrap
+  ${CMAKE_SOURCE_DIR}/src/aten/Local.cwrap
   ${CMAKE_SOURCE_DIR}/lib/THNN/generic/THNN.h
   ${CMAKE_SOURCE_DIR}/lib/THCUNN/generic/THCUNN.h
 )
@@ -56,10 +57,10 @@ include_directories(
 ${CMAKE_SOURCE_DIR}/lib/THNN
 ${CMAKE_SOURCE_DIR}/lib/THCUNN)
 
-add_subdirectory(src/TensorLib)
+add_subdirectory(src/aten)
 include_directories(
 ${CMAKE_SOURCE_DIR}/src
-${CMAKE_BINARY_DIR}/src/TensorLib)
+${CMAKE_BINARY_DIR}/src/aten)
 
 add_subdirectory(src/data)
 add_subdirectory(src/meter)
