@@ -1852,7 +1852,6 @@ gradgradcheck_exclude_classes = set((
     'IndexAdd',
     'IndexFill',
     'IndexSelect',
-    'MaskedFill',
     'MaskedScatter',
     'MaskedSelect',
     'Scatter',
