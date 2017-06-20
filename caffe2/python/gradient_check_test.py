@@ -335,7 +335,6 @@ class TestNetGradientChecker(test_util.TestCase):
             [net1, net2], [[x], [y]], [0],
             inputs_with_grads=[a, b, c, d],
             input_values=input_values,
-            print_net_images=True,
         )
 
 if __name__ == '__main__':
