@@ -9,6 +9,9 @@
 
 #pragma once
 
+#include <algorithm>
+#include <cmath>
+
 #include "gloo/common/common.h"
 #include "gloo/common/logging.h"
 #include "gloo/cuda.h"
