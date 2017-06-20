@@ -415,12 +415,11 @@ class MaskedFill(InplaceFunction):
         return tensor.masked_fill_(mask, value)
 
     @staticmethod
-    @once_differentiable
     def backward(ctx, grad_output):
         mask, = ctx.saved_tensors
         grad_tensor = None
         if ctx.needs_input_grad[0]:
-            grad_tensor = maybe_unexpand(grad_output.clone().masked_fill_(mask, 0), ctx.tensor_size)
+            grad_tensor = maybe_unexpand(grad_output.clone().masked_fill_(Variable(mask), 0), ctx.tensor_size)
         return grad_tensor, None, None, None
 
 
