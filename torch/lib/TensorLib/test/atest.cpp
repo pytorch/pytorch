@@ -7,7 +7,14 @@ using namespace tlib;
 int main() {
   auto foo = CPU(kFloat).rand({12,6});
   cout << foo << "\n" << foo.size(0) << " " << foo.size(1) << endl;
-  auto foo_v = foo.accessor<float,2>();
+
+  foo = foo+foo*3;
+  foo -= 4;
+
+
+  foo = (foo*foo) == (foo.pow(3));
+  foo =  2 + (foo+1);
+  auto foo_v = foo.accessor<uint8_t,2>();
 
   cout << foo_v.size(0) << " " << foo_v.size(1) << endl;
   for(int i = 0; i < foo_v.size(0); i++) {

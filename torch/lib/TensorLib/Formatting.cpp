@@ -225,7 +225,7 @@ void __printTensor(std::ostream& stream, Tensor& self, int64_t linesize)
 }
 
 std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesize) {
-  if(!tensor_) {
+  if(!tensor_.defined()) {
     stream << "[ Tensor (empty) ]";
   } else {
     Tensor tensor = tensor_.toType(getType(kCPU,kDouble)).contiguous();
