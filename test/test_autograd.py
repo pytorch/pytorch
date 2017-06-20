@@ -1849,11 +1849,7 @@ ignore_inplace = set((
 gradgradcheck_exclude_classes = set((
     'Cumprod',
     'Gather',
-    'IndexAdd',
-    'IndexFill',
-    'IndexSelect',
     'MaskedScatter',
-    'MaskedSelect',
     'Scatter',
     'Sort',
     'Topk',
