@@ -16,7 +16,6 @@ files = [
     '../../csrc/generic/methods/TensorMath.cwrap',
     '../../csrc/generic/methods/TensorRandom.cwrap',
     #'../../csrc/generic/methods/TensorSerialization.cwrap',
-    'Local.cwrap',
 ]
 
 declaration_lines = []
