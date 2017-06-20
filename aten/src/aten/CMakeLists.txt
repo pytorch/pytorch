@@ -155,6 +155,7 @@ DEPENDS ${all_python} ${all_templates} ${cwrap_files})
 SET(all_cpp ${base_cpp} ${generated_cpp})
 filter_list(generated_h generated_cpp "\\.h$")
 
+INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR}/..)
 # so the build can find the generated header files
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_BINARY_DIR})
 ADD_LIBRARY(TensorLib SHARED ${all_cpp})
@@ -182,6 +183,10 @@ INSTALL(TARGETS TensorLib
 # ADD_EXECUTABLE(basic test/basic.cpp)
 # TARGET_LINK_LIBRARIES(basic TensorLib)
 # TARGET_LINK_LIBRARIES(basic ${CUDA_LIBRARIES})
+
+# add_executable(atest test/atest.cpp)
+# target_link_libraries(atest TensorLib)
+# target_link_libraries(atest ${CUDA_LIBRARIES})
 
 FOREACH(HEADER ${base_h})
   INSTALL(FILES ${HEADER} DESTINATION ${TENSOR_LIB_INSTALL_INCLUDE_DIR}/TensorLib)
