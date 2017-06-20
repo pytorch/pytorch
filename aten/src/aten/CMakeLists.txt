@@ -184,9 +184,9 @@ INSTALL(TARGETS TensorLib
 # TARGET_LINK_LIBRARIES(basic TensorLib)
 # TARGET_LINK_LIBRARIES(basic ${CUDA_LIBRARIES})
 
-# add_executable(atest test/atest.cpp)
-# target_link_libraries(atest TensorLib)
-# target_link_libraries(atest ${CUDA_LIBRARIES})
+add_executable(atest test/atest.cpp)
+target_link_libraries(atest TensorLib)
+target_link_libraries(atest ${CUDA_LIBRARIES})
 
 FOREACH(HEADER ${base_h})
   INSTALL(FILES ${HEADER} DESTINATION ${TENSOR_LIB_INSTALL_INCLUDE_DIR}/TensorLib)
