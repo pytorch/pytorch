@@ -89,6 +89,10 @@ const std::string sockaddrToInterfaceName(const struct attr& attr) {
   GLOO_ENFORCE_NE(rv, -1, strerror(errno));
   struct ifaddrs *ifa;
   for (ifa = ifap; ifa != nullptr; ifa = ifa->ifa_next) {
+    // Skip entry if ifa_addr is NULL (see getifaddrs(3))
+    if (ifa->ifa_addr == nullptr) {
+      continue;
+    }
     if (ifa->ifa_addr->sa_family == AF_INET) {
       auto sz = sizeof(struct sockaddr_in);
       if (memcmp(&attr.ai_addr, ifa->ifa_addr, sz) == 0) {
