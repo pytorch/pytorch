@@ -3,7 +3,7 @@
 #include "TensorDataset.h"
 #include <iostream>
 
-using namespace tlib;
+using namespace at;
 
 int main()
 {

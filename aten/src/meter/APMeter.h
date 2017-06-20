@@ -2,7 +2,7 @@
 #define XT_AP_METER_H
 
 #include "Meter.h"
-#include "TensorLib/TensorLib.h"
+#include "ATen/ATen.h"
 
 class APMeter : public Meter
 {

@@ -1,8 +1,8 @@
 #include "TensorDataset.h"
-#include "TensorLib/TensorLib.h"
+#include "ATen/ATen.h"
 #include <cassert>
 
-using namespace tlib;
+using namespace at;
 
 TensorDataset::TensorDataset(Tensor& t, std::string& fieldkey) {
    t_ = t;

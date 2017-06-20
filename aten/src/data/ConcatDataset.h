@@ -7,7 +7,7 @@ class ConcatDataset : public Dataset
 {
 public:
    ConcatDataset(std::vector<Dataset*>& datasets);
-   virtual void getField(uint64_t idx, std::string& fieldkey, tlib::Tensor &field);
+   virtual void getField(uint64_t idx, std::string& fieldkey, at::Tensor &field);
    virtual uint64_t size();
 private:
    uint64_t binarySearch(uint64_t idx);

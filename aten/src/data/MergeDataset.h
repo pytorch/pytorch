@@ -9,7 +9,7 @@ class MergeDataset : public Dataset
 {
 public:
    MergeDataset(std::vector<Dataset*>& datasets);
-   virtual void getField(uint64_t idx, std::string& fieldkey, tlib::Tensor& field);
+   virtual void getField(uint64_t idx, std::string& fieldkey, at::Tensor& field);
    virtual uint64_t size();
 private:
    std::vector<Dataset*>* datasets_;

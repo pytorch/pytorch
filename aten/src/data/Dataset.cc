@@ -1,7 +1,7 @@
 #include "Dataset.h"
 #include <cassert>
 
-typedef std::map<std::string, tlib::Tensor> Fields;
+typedef std::map<std::string, at::Tensor> Fields;
 
 void Dataset::get(int64_t idx, Fields& fields) {
    for(auto& field : fields) {

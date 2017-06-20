@@ -2,7 +2,7 @@
 #define XT_CLASS_ERROR_METER_H
 
 #include "Meter.h"
-#include "TensorLib/TensorLib.h"
+#include "ATen/ATen.h"
 
 class ClassErrorMeter : public Meter
 {

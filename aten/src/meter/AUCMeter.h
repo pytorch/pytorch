@@ -3,7 +3,7 @@
 
 #include "Meter.h"
 #include "APMeter.h"
-#include "TensorLib/TensorLib.h"
+#include "ATen/ATen.h"
 
 class AUCMeter : public Meter
 {

@@ -1,8 +1,8 @@
 #include "ClassErrorMeter.h"
-#include "TensorLib/TensorLib.h"
+#include "ATen/ATen.h"
 #include <cassert>
 
-using namespace tlib;
+using namespace at;
 
 ClassErrorMeter::ClassErrorMeter() {
    ClassErrorMeter(1);
