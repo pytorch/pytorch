@@ -14,6 +14,7 @@ int main() {
 
   foo = (foo*foo) == (foo.pow(3));
   foo =  2 + (foo+1);
+  //foo = foo[3];
   auto foo_v = foo.accessor<uint8_t,2>();
 
   cout << foo_v.size(0) << " " << foo_v.size(1) << endl;
@@ -24,6 +25,7 @@ int main() {
     }
     //cout << "\n";
   }
+
 
   cout << foo << "\n";
   return 0;
