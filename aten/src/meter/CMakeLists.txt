@@ -18,7 +18,7 @@ set(src
 )
 
 add_library(xtmeter SHARED ${src})
-target_link_libraries(xtmeter TensorLib)
+target_link_libraries(xtmeter ATen)
 
 add_executable(test-meter test/basic.cc ${BACKWARD_ENABLE})
 # add_backward(test-meter)

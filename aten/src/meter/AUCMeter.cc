@@ -2,7 +2,7 @@
 #include "APMeter.h"
 #include <cassert>
 
-using namespace tlib;
+using namespace at;
 
 AUCMeter::AUCMeter() {
    reset();
@@ -44,7 +44,7 @@ void AUCMeter::value(Tensor& val) {
       }
    }
    tpr.div_(sum(targets));
-   fpr.div_(sum(tlib::add(mul(targets, -1.), 1.)));
+   fpr.div_(sum(at::add(mul(targets, -1.), 1.)));
 
    /**
    local auc = torch.cmul(

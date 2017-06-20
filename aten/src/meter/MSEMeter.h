@@ -2,7 +2,7 @@
 #define XT_MSE_METER_H
 
 #include "Meter.h"
-#include "TensorLib/TensorLib.h"
+#include "ATen/ATen.h"
 
 class MSEMeter : public Meter
 {

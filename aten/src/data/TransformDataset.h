@@ -2,11 +2,11 @@
 #define XT_TRANSFORM_DATASET_H
 
 #include "Dataset.h"
-#include "TensorLib/TensorLib.h"
+#include "ATen/ATen.h"
 #include <functional>
 #include <string>
 
-using namespace tlib;
+using namespace at;
 
 class TransformDataset : public Dataset
 {

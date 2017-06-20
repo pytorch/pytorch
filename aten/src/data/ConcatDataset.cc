@@ -3,7 +3,7 @@
 #include <vector>
 #include <cassert>
 
-using namespace tlib;
+using namespace at;
 
 ConcatDataset::ConcatDataset(std::vector<Dataset*>& datasets) {
    datasets_ = &datasets;

@@ -1,9 +1,9 @@
 #ifndef XT_METER_H
 #define XT_METER_H
 
-#include "TensorLib/TensorLib.h"
+#include "ATen/ATen.h"
 
-using namespace tlib;
+using namespace at;
 
 class Meter
 {

@@ -1,7 +1,7 @@
 #include "MergeDataset.h"
 #include <cassert>
 
-using namespace tlib;
+using namespace at;
 
 MergeDataset::MergeDataset(std::vector<Dataset*>& datasets) {
    datasets_ = &datasets;

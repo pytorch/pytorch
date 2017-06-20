@@ -48,7 +48,7 @@ endif()
 
 set(cwrap_files
   ${CMAKE_SOURCE_DIR}/tools/Declarations.cwrap
-  ${CMAKE_SOURCE_DIR}/src/aten/Local.cwrap
+  ${CMAKE_SOURCE_DIR}/src/ATen/Local.cwrap
   ${CMAKE_SOURCE_DIR}/lib/THNN/generic/THNN.h
   ${CMAKE_SOURCE_DIR}/lib/THCUNN/generic/THCUNN.h
 )
@@ -57,10 +57,10 @@ include_directories(
 ${CMAKE_SOURCE_DIR}/lib/THNN
 ${CMAKE_SOURCE_DIR}/lib/THCUNN)
 
-add_subdirectory(src/aten)
+add_subdirectory(src/ATen)
 include_directories(
 ${CMAKE_SOURCE_DIR}/src
-${CMAKE_BINARY_DIR}/src/aten)
+${CMAKE_BINARY_DIR}/src/ATen)
 
 add_subdirectory(src/data)
 add_subdirectory(src/meter)
