@@ -274,6 +274,41 @@ bool MaxOp<float, CUDAContext>::Compute() {
 }
 
 REGISTER_CUDA_OPERATOR(Max, MaxOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(MaxGradient, MaxGradientOp<float, CUDAContext>);
+
+template <typename T>
+__global__ void
+MaxGradKernel(int N, const T* mx, const T* x, const T* go, T* gi) {
+  CUDA_1D_KERNEL_LOOP(i, N) {
+    gi[i] = go[i] * (mx[i] == x[i]);
+  }
+}
+
+template <>
+bool MaxGradientOp<float, CUDAContext>::RunOnDevice() {
+  auto& output = Input(0);
+  auto& grad_output = Input(1);
+  const int kInputStartOffset = 2;
+
+  const float* data = output.template data<float>();
+
+  for (int i = 0; i < OutputSize(); i++) {
+    auto& input = Input(i + kInputStartOffset);
+    auto* grad_input = Output(i);
+    grad_input->ResizeLike(input);
+    MaxGradKernel<<<
+        CAFFE_GET_BLOCKS(input.size()),
+        CAFFE_CUDA_NUM_THREADS,
+        0,
+        context_.cuda_stream()>>>(
+        input.size(),
+        output.data<float>(),
+        input.data<float>(),
+        grad_output.data<float>(),
+        grad_input->mutable_data<float>());
+  }
+  return true;
+}
 
 template<typename T_INDEX>
 __global__ void

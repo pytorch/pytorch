@@ -142,6 +142,34 @@ class TestUtilityOps(hu.HypothesisTestCase):
             reference=max_op,
         )
 
+    @given(n=st.integers(4, 5), m=st.integers(6, 7),
+           d=st.integers(2, 3), **hu.gcs)
+    def test_elementwise_max_grad(self, n, m, d, gc, dc):
+        go = np.random.rand(n, m, d).astype(np.float32)
+        X = np.random.rand(n, m, d).astype(np.float32)
+        Y = np.random.rand(n, m, d).astype(np.float32)
+        Z = np.random.rand(n, m, d).astype(np.float32)
+        mx = np.maximum(np.maximum(X, Y), Z)
+
+        def max_grad_op(mx, go, X, Y, Z):
+            def mx_grad(a):
+                return go * (mx == a)
+
+            return [mx_grad(a) for a in [X, Y, Z]]
+
+        op = core.CreateOperator(
+            "MaxGradient",
+            ["mx", "go", "X", "Y", "Z"],
+            ["gX", "gY", "gZ"]
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[mx, go, X, Y, Z],
+            reference=max_grad_op,
+        )
+
     @given(
         inputs=hu.lengths_tensor().flatmap(
             lambda pair: st.tuples(
