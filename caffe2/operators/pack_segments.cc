@@ -45,8 +45,7 @@ class GetPackSegmentsGradient : public GradientMakerBase {
         "UnpackSegments",
         "",
         vector<string>{I(0), GO(0)},
-        vector<string>{GI(1)},
-        Def().arg());
+        vector<string>{GI(1)});
   }
 };
 REGISTER_GRADIENT(PackSegments, GetPackSegmentsGradient);
@@ -55,11 +54,7 @@ class GetUnpackSegmentsGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
     return SingleGradientDef(
-        "PackSegments",
-        "",
-        vector<string>{I(0), GO(0)},
-        vector<string>{GI(1)},
-        Def().arg());
+        "PackSegments", "", vector<string>{I(0), GO(0)}, vector<string>{GI(1)});
   }
 };
 REGISTER_GRADIENT(UnpackSegments, GetUnpackSegmentsGradient);
