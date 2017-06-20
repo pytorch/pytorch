@@ -114,22 +114,24 @@ FILE(GLOB base_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "*.cpp")
 
 FILE(GLOB all_python RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "*.py")
 
-SET(CWRAP_FILES_BASE ${CMAKE_CURRENT_SOURCE_DIR}/../../csrc  )
-SET(cwrap_files
-# ${CWRAP_FILES_BASE}/cudnn/cuDNN.cwrap
-  ${CWRAP_FILES_BASE}/generic/TensorMethods.cwrap
-# ${CWRAP_FILES_BASE}/generic/methods/SparseTensor.cwrap
-  ${CWRAP_FILES_BASE}/generic/methods/Tensor.cwrap
-  ${CWRAP_FILES_BASE}/generic/methods/TensorApply.cwrap
-  ${CWRAP_FILES_BASE}/generic/methods/TensorCompare.cwrap
-  ${CWRAP_FILES_BASE}/generic/methods/TensorCuda.cwrap
-  ${CWRAP_FILES_BASE}/generic/methods/TensorMath.cwrap
-  ${CWRAP_FILES_BASE}/generic/methods/TensorRandom.cwrap
-#  ${CWRAP_FILES_BASE}/generic/methods/TensorSerialization.cwrap
-  ${CMAKE_CURRENT_SOURCE_DIR}/Local.cwrap
-  ${CMAKE_CURRENT_SOURCE_DIR}/../THNN.h
-  ${CMAKE_CURRENT_SOURCE_DIR}/../THCUNN.h
-)
+IF(NOT DEFINED cwrap_files)
+  SET(CWRAP_FILES_BASE ${CMAKE_CURRENT_SOURCE_DIR}/../../csrc  )
+  SET(cwrap_files
+  # ${CWRAP_FILES_BASE}/cudnn/cuDNN.cwrap
+    ${CWRAP_FILES_BASE}/generic/TensorMethods.cwrap
+  # ${CWRAP_FILES_BASE}/generic/methods/SparseTensor.cwrap
+    ${CWRAP_FILES_BASE}/generic/methods/Tensor.cwrap
+    ${CWRAP_FILES_BASE}/generic/methods/TensorApply.cwrap
+    ${CWRAP_FILES_BASE}/generic/methods/TensorCompare.cwrap
+    ${CWRAP_FILES_BASE}/generic/methods/TensorCuda.cwrap
+    ${CWRAP_FILES_BASE}/generic/methods/TensorMath.cwrap
+    ${CWRAP_FILES_BASE}/generic/methods/TensorRandom.cwrap
+  #  ${CWRAP_FILES_BASE}/generic/methods/TensorSerialization.cwrap
+    ${CMAKE_CURRENT_SOURCE_DIR}/Local.cwrap
+    ${CMAKE_CURRENT_SOURCE_DIR}/../THNN/generic/THNN.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../THCUNN/generic/THCUNN.h
+  )
+ENDIF()
 
 EXECUTE_PROCESS(
     COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/gen.py ${CUDA_FLAG} -s ${CMAKE_CURRENT_SOURCE_DIR} --print-dependencies ${cwrap_files}
@@ -153,7 +155,6 @@ DEPENDS ${all_python} ${all_templates} ${cwrap_files})
 SET(all_cpp ${base_cpp} ${generated_cpp})
 filter_list(generated_h generated_cpp "\\.h$")
 
-INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR}/..)
 # so the build can find the generated header files
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_BINARY_DIR})
 ADD_LIBRARY(TensorLib SHARED ${all_cpp})
@@ -163,9 +164,9 @@ if(NOT ${CMAKE_VERSION} VERSION_LESS "3.1")
     SET_PROPERTY(TARGET TensorLib PROPERTY CXX_STANDARD 11)
 endif(NOT ${CMAKE_VERSION} VERSION_LESS "3.1")
 
-TARGET_LINK_LIBRARIES(TensorLib ${TH_LIBRARIES} ${THS_LIBRARIES} ${THNN_LIBRARIES})
+TARGET_LINK_LIBRARIES(TensorLib ${TH_LIBRARIES} ${THNN_LIBRARIES})
 IF(CUDA_FOUND)
-  TARGET_LINK_LIBRARIES(TensorLib ${THC_LIBRARIES} ${THCS_LIBRARIES} ${THCUNN_LIBRARIES})
+  TARGET_LINK_LIBRARIES(TensorLib ${THC_LIBRARIES} ${THCUNN_LIBRARIES})
   TARGET_LINK_LIBRARIES(TensorLib ${CUDA_LIBRARIES})
 ENDIF()
 
