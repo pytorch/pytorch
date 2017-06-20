@@ -3,7 +3,6 @@ from torch.autograd import Function
 
 
 class CosineEmbeddingLoss(Function):
-
     def __init__(self, margin=0, size_average=True):
         super(CosineEmbeddingLoss, self).__init__()
         self.margin = margin
@@ -93,7 +92,6 @@ class CosineEmbeddingLoss(Function):
 
 
 class HingeEmbeddingLoss(Function):
-
     def __init__(self, margin=1, size_average=True):
         super(HingeEmbeddingLoss, self).__init__()
         self.margin = margin
@@ -131,7 +129,6 @@ class HingeEmbeddingLoss(Function):
 
 
 class MarginRankingLoss(Function):
-
     def __init__(self, margin=1, size_average=True):
         super(MarginRankingLoss, self).__init__()
         self.margin = margin

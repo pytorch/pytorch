@@ -13,7 +13,6 @@ def _assert_no_grad(variable):
 
 
 class _Loss(Module):
-
     def __init__(self, size_average=True):
         super(_Loss, self).__init__()
         self.size_average = size_average
@@ -25,7 +24,6 @@ class _Loss(Module):
 
 
 class _WeightedLoss(_Loss):
-
     def __init__(self, weight=None, size_average=True):
         super(_WeightedLoss, self).__init__(size_average)
         self.register_buffer('weight', weight)
@@ -103,6 +101,7 @@ class NLLLoss(_WeightedLoss):
         >>> output = loss(m(input), target)
         >>> output.backward()
     """
+
     def forward(self, input, target):
         _assert_no_grad(target)
         return F.nll_loss(input, target,
@@ -200,6 +199,39 @@ class BCELoss(_WeightedLoss):
 
     """
     pass
+
+
+class BCEWithLogitsLoss(Module):
+    r"""This loss combines a `Sigmoid` layer and the `BCELoss` in one single class.
+    This version is more numerically stable than using a plain `Sigmoid` followed by a `BCELoss` as, by combining the
+    operations into one layer, we take advantage of the log-sum-exp trick for numerical stability.
+
+    This Binary Cross Entropy between the target and the output logits (no sigmoid applied) is:
+
+    .. math:: loss(o, t) = - 1/n \sum_i (t[i] * log(sigmoid(o[i])) + (1 - t[i]) * log(1 - sigmoid(o[i])))
+
+    or in the case of the weights argument being specified:
+
+    .. math:: loss(o, t) = - 1/n \sum_i weights[i] * (t[i] * log(sigmoid(o[i])) + (1 - t[i]) * log(1 - sigmoid(o[i])))
+
+    This is used for measuring the error of a reconstruction in for example
+    an auto-encoder. Note that the targets `t[i]` should be numbers between 0 and 1.
+
+    By default, the losses are averaged for each minibatch over observations
+    *as well as* over dimensions. However, if the field `size_average` is set
+    to `False`, the losses are instead summed.
+
+    """
+    def __init__(self, weight=None, size_average=True):
+        super(BCEWithLogitsLoss, self).__init__()
+        self.size_average = size_average
+        self.register_buffer('weight', weight)
+
+    def forward(self, input, target):
+        if self.weight is not None:
+            return F.binary_cross_entropy_with_logits(input, target, Variable(self.weight), self.size_average)
+        else:
+            return F.binary_cross_entropy_with_logits(input, target, size_average=self.size_average)
 
 
 class HingeEmbeddingLoss(_Loss):

@@ -640,6 +640,35 @@ def binary_cross_entropy(input, target, weight=None, size_average=True):
     return _functions.thnn.BCELoss(size_average, weight=weight)(input, target)
 
 
+def binary_cross_entropy_with_logits(input, target, weight=None, size_average=True):
+    r"""Function that measures Binary Cross Entropy between target and output logits:
+
+    See :class:`~torch.nn.BCEWithLogitsLoss` for details.
+
+    Args:
+        input: Variable of arbitrary shape
+        target: Variable of the same shape as input
+        weight (Variable, optional): a manual rescaling weight
+                if provided it's repeated to match input tensor shape
+        size_average (bool, optional): By default, the losses are averaged
+                over observations for each minibatch. However, if the field
+                sizeAverage is set to False, the losses are instead summed
+                for each minibatch.
+    """
+    if weight is not None and target.dim() != 1:
+        weight = weight.view(1, target.size(1)).expand_as(target)
+    neg_abs = - input.abs()
+    loss = input.clamp(min=0) - input * target + (1 + neg_abs.exp()).log()
+
+    if weight is not None:
+        loss = loss * weight
+
+    if size_average:
+        return loss.mean()
+    else:
+        return loss.sum()
+
+
 def smooth_l1_loss(input, target, size_average=True):
     return _functions.thnn.SmoothL1Loss(size_average)(input, target)
 
