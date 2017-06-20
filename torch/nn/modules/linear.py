@@ -56,7 +56,7 @@ class Linear(Module):
         bias_initializer = self.initializer.get("bias")
 
         weight_initializer(self.weight)
-        if self.bias is None:
+        if self.bias is not None:
             bias_initializer(self.bias)
 
     def forward(self, input):
