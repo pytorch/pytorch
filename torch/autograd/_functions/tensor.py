@@ -182,7 +182,6 @@ class IndexAdd(InplaceFunction):
         return tensor1.index_add_(ctx.dim, index, tensor2)
 
     @staticmethod
-    @once_differentiable
     def backward(ctx, grad_output):
         grad_tensor1 = grad_tensor2 = None
 
@@ -191,7 +190,7 @@ class IndexAdd(InplaceFunction):
 
         if ctx.needs_input_grad[3]:
             index, = ctx.saved_tensors
-            grad_tensor2 = grad_output.index_select(ctx.dim, index)
+            grad_tensor2 = grad_output.index_select(ctx.dim, Variable(index))
 
         return grad_tensor1, None, None, grad_tensor2, None
 
@@ -242,13 +241,12 @@ class IndexFill(InplaceFunction):
         return tensor.index_fill_(dim, index, value)
 
     @staticmethod
-    @once_differentiable
     def backward(ctx, grad_output):
         grad_tensor = None
 
         if ctx.needs_input_grad[0]:
             index, = ctx.saved_tensors
-            grad_tensor = grad_output.clone().index_fill_(ctx.dim, index, 0)
+            grad_tensor = grad_output.clone().index_fill_(ctx.dim, Variable(index), 0)
 
         return grad_tensor, None, None, None, None
 
@@ -273,7 +271,7 @@ class IndexSelect(Function):
         if ctx.needs_input_grad[0]:
             index, = ctx.saved_tensors
             grad_tensor = Variable(grad_output.data.new(*ctx.input_size).zero_(), requires_grad=True)
-            grad_tensor = grad_tensor.index_add(ctx.dim, index, grad_output)
+            grad_tensor = grad_tensor.index_add(ctx.dim, Variable(index), grad_output)
 
         return grad_tensor, None, None
 
@@ -433,13 +431,12 @@ class MaskedSelect(Function):
         return tensor.masked_select(mask)
 
     @staticmethod
-    @once_differentiable
     def backward(ctx, grad_output):
         mask, = ctx.saved_tensors
         grad_tensor = None
         if ctx.needs_input_grad[0]:
-            grad_tensor = grad_output.new(ctx.input_size).zero_()
-            grad_tensor.masked_scatter_(mask, grad_output)
+            grad_tensor = Variable(grad_output.data.new(ctx.input_size).zero_(), requires_grad=True)
+            grad_tensor = grad_tensor.masked_scatter(Variable(mask), grad_output)
         return grad_tensor, None
 
 
