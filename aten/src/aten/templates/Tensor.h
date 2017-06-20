@@ -135,6 +135,9 @@ struct Tensor {
   Tensor& operator/=(Scalar other) {
     div_(other);
   }
+  Tensor operator[](int64_t idx) {
+    return select(0,idx);
+  }
 
   //example
   //Tensor * add(Tensor & b);
