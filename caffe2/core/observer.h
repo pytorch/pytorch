@@ -9,16 +9,8 @@ namespace caffe2 {
 template <class T>
 class ObserverBase {
  public:
-  explicit ObserverBase(T& subject) : subject(subject) {
-    Activate();
-  }
-
-  virtual void Activate() {
-    subject.SetObserver(this);
-  }
-
-  virtual void Deactivate() {
-    subject.RemoveObserver();
+  explicit ObserverBase(T* subject) : subject_(subject) {
+    subject_->SetObserver(this);
   }
 
   virtual bool Start() {
@@ -31,7 +23,7 @@ class ObserverBase {
   virtual ~ObserverBase() noexcept {};
 
  protected:
-  T& subject;
+  T* subject_;
 };
 
 } // namespace

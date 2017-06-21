@@ -4,10 +4,10 @@
 namespace caffe2 {
 
 template <>
-bool TimeObserver<SimpleNet>::Start() {
-  vector<OperatorBase*> operators = subject.getOperators();
+bool TimeObserver<NetBase>::Start() {
+  vector<OperatorBase*> operators = subject_->getOperators();
   for (auto& op : operators) {
-    children_.push_back(caffe2::make_unique<TimeObserver<OperatorBase>>(*op));
+    children_.push_back(caffe2::make_unique<TimeObserver<OperatorBase>>(op));
   }
   start_time_ = timer_.MilliSeconds();
   ++iterations_;
@@ -15,7 +15,7 @@ bool TimeObserver<SimpleNet>::Start() {
 }
 
 template <>
-bool TimeObserver<SimpleNet>::Stop() {
+bool TimeObserver<NetBase>::Stop() {
   double current_run = timer_.MilliSeconds() - start_time_;
   total_time_ += current_run;
   VLOG(1) << "This net iteration took " << current_run << " ms to complete.\n";

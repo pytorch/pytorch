@@ -62,10 +62,26 @@ class NetBase {
     return external_input_;
   }
 
+  /* Used to attach Observers to operators of a Net
+   *
+   * Returns pointers to objects owned with unique_ptrs.
+   * Use with caution.
+   */
+  virtual vector<OperatorBase*> getOperators() const = 0;
+
+  void SetObserver(ObserverBase<NetBase>* observer) {
+    observer_ = observer;
+  }
+
+  void RemoveObserver() {
+    observer_ = nullptr;
+  }
+
  protected:
   vector<string> external_input_;
   vector<string> external_output_;
   string name_;
+  ObserverBase<NetBase>* observer_ = nullptr;
   DISABLE_COPY_AND_ASSIGN(NetBase);
 };
 
@@ -98,12 +114,12 @@ class SimpleNet : public NetBase {
       const bool run_individual) override;
 
   /*
-   * This returns a list of pointers to objects stored in unique_ptrs. Used to
-   * init Observers.
+   * This returns a list of pointers to objects stored in unique_ptrs.
+   * Used by Observers.
    *
    * Think carefully before using.
    */
-  vector<OperatorBase*> getOperators() const {
+  vector<OperatorBase*> getOperators() const override {
     vector<OperatorBase*> op_list;
     for (auto& op : operators_) {
       op_list.push_back(op.get());
@@ -111,17 +127,8 @@ class SimpleNet : public NetBase {
     return op_list;
   }
 
-  void SetObserver(ObserverBase<SimpleNet>* observer) {
-    observer_ = observer;
-  }
-
-  void RemoveObserver() {
-    observer_ = nullptr;
-  }
-
  protected:
   vector<unique_ptr<OperatorBase> > operators_;
-  ObserverBase<SimpleNet>* observer_ = nullptr;
 
   DISABLE_COPY_AND_ASSIGN(SimpleNet);
 };
@@ -161,6 +168,14 @@ class DAGNetBase : public NetBase {
 
   const ExecutionChains& TEST_execution_chains() const {
     return execution_chains_;
+  }
+
+  vector<OperatorBase*> getOperators() const override {
+    vector<OperatorBase*> op_list;
+    for (auto& op_node : operator_nodes_) {
+      op_list.push_back(op_node.operator_.get());
+    }
+    return op_list;
   }
 
  protected:
