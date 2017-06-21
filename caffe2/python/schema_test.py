@@ -91,7 +91,7 @@ class TestDB(unittest.TestCase):
             ('field2', a)
         )
         self.assertEquals(s['field2:lengths'], a.lengths)
-        self.assertEquals(s['field2:items'], a.items)
+        self.assertEquals(s['field2:values'], a.items)
         with self.assertRaises(KeyError):
             s['fields2:items:non_existent']
         with self.assertRaises(KeyError):
@@ -106,8 +106,8 @@ class TestDB(unittest.TestCase):
             ('field1', schema.Scalar(dtype=np.int32)),
             ('field2', a)
         )
-        self.assertEquals(s['field2:keys'], a.keys)
-        self.assertEquals(s['field2:values'], a.values)
+        self.assertEquals(s['field2:values:keys'], a.keys)
+        self.assertEquals(s['field2:values:values'], a.values)
         with self.assertRaises(KeyError):
             s['fields2:keys:non_existent']
 

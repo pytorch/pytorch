@@ -234,7 +234,7 @@ class List(Field):
 
     def __getattr__(self, item):
         """If the value of this list is a struct,
-        allow to instrospect directly into its fields."""
+        allow to introspect directly into its fields."""
         if item.startswith('__'):
             raise AttributeError(item)
         if isinstance(self._items, Struct):
@@ -245,14 +245,17 @@ class List(Field):
             raise AttributeError('Field not found in list: %s.' % item)
 
     def __getitem__(self, item):
-        if isinstance(self._items, Struct):
-            return self._items[item]
-        elif item == 'lengths':
-            return self.lengths
-        elif item == 'value' or item == 'items':
-            return self._items
+        names = item.split(FIELD_SEPARATOR, 1)
+
+        if len(names) == 1:
+            if item == 'lengths':
+                return self.lengths
+            elif item == 'values':
+                return self._items
         else:
-            raise KeyError('Field not found in list: %s.' % item)
+            if names[0] == 'values':
+                return self._items[names[1]]
+        raise KeyError('Field not found in list: %s.' % item)
 
 
 class Struct(Field):
