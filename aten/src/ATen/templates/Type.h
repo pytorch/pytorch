@@ -10,7 +10,6 @@ namespace at {
 class Context;
 class Storage;
 class Tensor;
-class TensorRef;
 class Generator;
 
 enum class ScalarType {
@@ -90,10 +89,11 @@ struct Type {
   // for external dispatch
   virtual TypeID ID() const = 0;
 
-  // example
-  // virtual Tensor * add(Tensor & a, Tensor & b) = 0;
   virtual void copy(const Tensor & src, Tensor & dst) = 0;
   Tensor copy(const Tensor & src);
+
+  // example
+  // virtual Tensor * add(Tensor & a, Tensor & b) = 0;
   ${type_method_declarations}
 protected:
   Context* context;
