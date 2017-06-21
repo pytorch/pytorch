@@ -57,5 +57,19 @@ int main() {
 
   trace();
 
+  float data[] = { 1, 2, 3,
+                   4, 5, 6};
+
+  auto f = CPU(kFloat).tensorFromBlob(data, {1,2,3});
+
+  cout << f << endl;
+  cout << f.strides() << " " << f.sizes() << endl;
+  threw = false;
+  try {
+    f.resize_({3,4,5});
+  } catch(std::runtime_error&) {
+    threw = true;
+  }
+  assert(threw);
   return 0;
 }

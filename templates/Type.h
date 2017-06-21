@@ -80,6 +80,7 @@ struct Type {
   static void registerAll(Context * context);
   virtual std::unique_ptr<Storage> storage() = 0;
   virtual std::unique_ptr<Storage> storage(size_t size) = 0;
+  virtual std::unique_ptr<Storage> storageFromBlob(void * data, int64_t size) = 0;
   virtual std::unique_ptr<Generator> generator() = 0;
   virtual const char * toString() const = 0;
   Type & toBackend(Backend b);
@@ -91,6 +92,9 @@ struct Type {
 
   virtual void copy(const Tensor & src, Tensor & dst) = 0;
   Tensor copy(const Tensor & src);
+
+  Tensor tensorFromBlob(void * data, IntList sizes);
+  Tensor tensorFromBlob(void * data, IntList sizes, IntList strides);
 
   // example
   // virtual Tensor * add(Tensor & a, Tensor & b) = 0;

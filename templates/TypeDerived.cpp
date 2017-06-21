@@ -28,6 +28,10 @@ std::unique_ptr<Storage> ${Type}::storage() {
 std::unique_ptr<Storage> ${Type}::storage(size_t size) {
   return std::unique_ptr<Storage>(new ${Storage}(context,size));
 }
+std::unique_ptr<Storage> ${Type}::storageFromBlob(void * data, int64_t size) {
+    return std::unique_ptr<Storage>(
+      new ${Storage}(context,data,size));
+}
 std::unique_ptr<Generator> ${Type}::generator() {
   return std::unique_ptr<Generator>(new ${Backend}Generator(context));
 }

@@ -12,6 +12,14 @@ ${Storage}::${Storage}(Context* context, ${THStorage}* storage):
 ${Storage}::${Storage}(Context* context, std::size_t storage_size)
   : storage(${THStorage}_newWithSize(${state,} storage_size)), context(context) {}
 
+${Storage}::${Storage}(Context* context,
+  void * data, std::size_t size)
+  : context(context),
+    storage(${THStorage}_newWithData(${state,} static_cast<${THScalarType}*>(data), size)) {
+    ${THStorage}_clearFlag(${state,} storage, TH_STORAGE_RESIZABLE);
+    ${THStorage}_clearFlag(${state,} storage, TH_STORAGE_FREEMEM);
+}
+
 ${Storage}::~${Storage}() {
   ${THStorage}_free(${state,} storage);
 }

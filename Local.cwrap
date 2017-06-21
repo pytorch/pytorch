@@ -19,11 +19,24 @@
 
 [[
   name: tensor
-  cname: new
   return: THTensor*
   cpu_half: True
-  arguments: []
   variants: [function]
+  options:
+    - cname: new
+      arguments: []
+    - cname: newWithSize
+      arguments:
+        - THSize* size
+        - arg: THStride* stride
+          default: NULL
+    - cname: newWithStorage
+      arguments:
+        - THStorage* storage
+        - int64_t storageOffset
+        - THSize* size
+        - arg: THStride* stride
+          default: NULL
 ]]
 
 [[

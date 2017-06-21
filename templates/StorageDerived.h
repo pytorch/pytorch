@@ -12,6 +12,8 @@ public:
   ${Storage}(Context* context);
   ${Storage}(Context* context, ${THStorage} *wrapped);
   ${Storage}(Context* context, std::size_t size);
+  ${Storage}(Context* context,
+    void * data, std::size_t size);
   virtual ~${Storage}();
 
   virtual std::size_t elementSize() const override;
