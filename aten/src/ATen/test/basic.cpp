@@ -76,7 +76,7 @@ static void test(Type & type) {
     Tensor d = type.ones({3, 4});
     Tensor r = type.zeros({3,4});
     for(auto i = 0; i < 100000; i++) {
-      add_out(r, r, d);
+      add_out(r, d, r);
     }
     auto end = std::chrono::high_resolution_clock::now();
     std::cout << std::dec << "   " << std::chrono::duration_cast<std::chrono::milliseconds>(end-begin).count() << " ms" << std::endl;

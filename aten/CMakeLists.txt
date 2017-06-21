@@ -30,6 +30,7 @@ endif()
 
 # TH stuff
 set(Torch_FOUND 1)
+add_definitions(-DTH_INDEX_BASE=0)
 add_subdirectory(lib/TH)
 include_directories(
   ${CMAKE_SOURCE_DIR}/lib/TH
