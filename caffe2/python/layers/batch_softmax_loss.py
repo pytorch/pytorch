@@ -52,7 +52,20 @@ class BatchSoftmaxLoss(ModelLayer):
                          to=core.DataType.INT32)
             ]
 
+        softmax_input = self.input_record.prediction.field_blobs() + label
+
+        if 'weight' in self.input_record:
+            weight_blob = self.input_record.weight()
+            if self.input_record.weight.field_type().base != np.float32:
+                weight_blob = net.Cast(
+                    weight_blob,
+                    weight_blob + '_float32',
+                    to=core.DataType.FLOAT
+                )
+
+            softmax_input += [weight_blob]
+
         net.SoftmaxWithLoss(
-            self.input_record.prediction.field_blobs() + label,
+            softmax_input,
             self.output_schema.field_blobs()
         )
