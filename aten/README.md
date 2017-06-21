@@ -119,3 +119,27 @@ Tensor a = CPU(kFloat).rand({3, 7});
 std::cout << a << std::endl;
 std::cout << dispatch<sum_op>(a.type(),a) << " == " << a.sum() << std::endl;
 ```
+
+### Efficient access to template elements
+
+When using Tensor-wide operations, the cost of dynamic dispatch is very small.
+However, there are cases, especially in your own kernels, where efficient element-wise access is needed.
+ATen provides _accessors_ that are created with a single dynamic check that a Tensor is the type and number of
+dimensions. Accessors then expose an API for accessing the Tensor elements efficiently:
+
+```c++
+
+Tensor foo = CPU(kFloat).rand({12,12});
+
+// assert foo is 2-dimensional and holds floats.
+auto foo_a = foo.accessor<float,2>();
+float trace = 0;
+
+for(int i = 0; i < foo_a.size(0); i++) {
+  // use the accessor foo_a to get tensor data.
+  trace += foo_a[i][i];
+}
+```
+
+Accessors are temporary views of a Tensor. They are only valid for the lifetime of the tensor that they
+view and hence should only be used locally in a function, like iterators.
