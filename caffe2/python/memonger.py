@@ -823,7 +823,7 @@ def compute_interference_graph(ops):
         g.add_node(i, op=op)
     for i, parent_op in enumerate(ops):
         for j, child_op in enumerate(ops):
-            if i == j:
+            if i >= j:
                 continue
             if any(output in child_op.input for output in parent_op.output):
                 deps = set(child_op.input).intersection(parent_op.output)
