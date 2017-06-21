@@ -109,6 +109,7 @@ class MemongerTest(hu.HypothesisTestCase):
             "name_x/",
             share_activations=False,
         )
+        self.assertTrue(memonger.verify_graph_equality(m.Proto(), optim_proto))
         blobs_after = count_blobs(optim_proto)
         self.assertLess(blobs_after, blobs_before)
 
@@ -120,6 +121,7 @@ class MemongerTest(hu.HypothesisTestCase):
             share_activations=True,
             dont_share_blobs=set([str(input_to_grad["name_x/fc1_w"])]),
         )
+        self.assertTrue(memonger.verify_graph_equality(m.Proto(), optim_proto_wacts))
         blobs_wact_optim = count_blobs(optim_proto_wacts)
         self.assertLessEqual(blobs_wact_optim, blobs_after)
 
@@ -187,6 +189,7 @@ class MemongerTest(hu.HypothesisTestCase):
             dont_share_blobs=set(['name_x/fc6', 'name_x/fc5',
                                    str(input_to_grad["name_x/fc1_w"])]),
         )
+        self.assertTrue(memonger.verify_graph_equality(m.net.Proto(), optim_proto))
         blobs_after = count_blobs(optim_proto)
         self.assertLess(blobs_after, blobs_before)
         self.assertTrue(has_blob(optim_proto, "name_x/fc6"))
@@ -249,6 +252,7 @@ class MemongerTest(hu.HypothesisTestCase):
         optim_proto = memonger.optimize_inference_for_dag(
             m.net, ["name_x/data"], "name_x"
         )
+        self.assertTrue(memonger.verify_graph_equality(m.net.Proto(), optim_proto))
         blobs_after = count_blobs(optim_proto)
         self.assertLess(blobs_after, blobs_before)
 
@@ -306,6 +310,8 @@ class MemongerTest(hu.HypothesisTestCase):
         optim_proto = memonger.optimize_inference_for_dag(
             m.net, ["name_x/data"], "name_x/"
         )
+        self.assertTrue(
+            memonger.verify_graph_equality(m.net.Proto(), optim_proto))
         blobs_after = count_blobs(optim_proto)
         print(str(optim_proto))
         self.assertLess(blobs_after, blobs_before)
