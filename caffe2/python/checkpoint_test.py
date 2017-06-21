@@ -108,8 +108,9 @@ class TestCheckpoint(TestCase):
                 num_epochs = job_runner(session)
                 self.assertEquals(num_epochs, len(EXPECTED_TOTALS))
 
-                # There are 17 blobs after finishing up the job runner.
-                self.assertEquals(len(ws.blobs), 17)
+                # There are 12 global blobs after finishing up the job runner.
+                # (only blobs on init_group are checkpointed)
+                self.assertEquals(len(ws.blobs), 12)
 
             ws = workspace.C.Workspace()
             session = LocalSession(ws)

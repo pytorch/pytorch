@@ -68,8 +68,9 @@ class Session(object):
     Blob visibility:
         Tasks running in different nodes in parallel will always run under
         different workspaces, so it must be assumed that they won't be able to
-        access each other's blobs. On the other hand, tasks running on the same
-        node are guaranteed to run on the same workspace within a run.
+        access each other's blobs. Tasks running on the same node will follow
+        Workspace hierarchy rules: tasks running on separate private workspaces
+        will only be able to share blobs defined on a common parent Workspace.
     """
 
     _compiled_cache = {}

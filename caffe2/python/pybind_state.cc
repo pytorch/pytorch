@@ -250,7 +250,13 @@ PythonOpBase::PythonOpBase(
   }
 }
 
-PythonOpBase::~PythonOpBase() {}
+PythonOpBase::~PythonOpBase() {
+  if (built_func_) {
+    // since it may trigger python interpreter when refcount reaches zero
+    py::gil_scoped_acquire g;
+    built_func_.reset();
+  }
+}
 
 bool PythonOpBase::RunOnDevice() {
   std::vector<TensorCPU*> inputs;

@@ -2215,6 +2215,14 @@ class ExecutionStep(object):
         self._assert_can_mutate()
         self._step.num_iter = num_iter
 
+    def SetCreateWorkspace(self, create_workspace):
+        self._assert_can_mutate()
+        self._step.create_workspace = create_workspace
+
+    def SetNumConcurrentInstances(self, num_concurrent_instances):
+        self._assert_can_mutate()
+        self._step.num_concurrent_instances = num_concurrent_instances
+
     def SetOnlyOnce(self, only_once):
         self._assert_can_mutate()
         self._step.only_once = only_once
@@ -2368,7 +2376,9 @@ def execution_step(default_name,
                    report_interval=None,
                    concurrent_substeps=None,
                    should_stop_blob=None,
-                   only_once=None):
+                   only_once=None,
+                   num_concurrent_instances=None,
+                   create_workspace=False):
     """
     Helper for creating an ExecutionStep.
     - steps_or_nets can be:
@@ -2400,6 +2410,10 @@ def execution_step(default_name,
     if report_net is not None:
         assert report_interval is not None
         step.SetReportNet(report_net, report_interval)
+    if num_concurrent_instances is not None:
+        step.SetNumConcurrentInstances(num_concurrent_instances)
+    if create_workspace:
+        step.SetCreateWorkspace(True)
 
     if isinstance(steps_or_nets, ExecutionStep):
         step.AddSubstep(steps_or_nets)

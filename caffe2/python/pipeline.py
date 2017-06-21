@@ -93,7 +93,7 @@ def normalize_processor_output(output):
 
 def pipe(
         input, output=None, num_threads=1, processor=None, name=None,
-        capacity=None, group=None):
+        capacity=None, group=None, num_runtime_threads=1):
     """
     Given a Reader, Queue or DataStream in `input`, and optionally, a Writer,
     Queue or DataStream in `output`, creates a Task that, when run, will
@@ -113,6 +113,9 @@ def pipe(
                      piping. If set to 0, no Task is created, and a
                      reader is returned instead -- the reader returned will
                      read from the reader passed in and process it.
+                     ** DEPRECATED **. Use `num_runtime_threads` instead.
+                     This option will be removed once all readers/processors
+                     support `num_runtime_threads`.
         processor:   (optional) function that takes an input record and
                      optionally returns a record; this will be called
                      between read and write steps. If the processor does
@@ -125,19 +128,25 @@ def pipe(
                      is created and written to.
         group:       (optional) explicitly add the created Task to this
                      TaskGroup, instead of using the currently active one.
+        num_runtime_threads: Similar to `num_threads`, but instead of expanding
+                     the tasks with a `for` loop in python, does that at
+                     runtime. This is preferable to `num_threads`, but some
+                     processors/readers still require to be called multiple
+                     times in python.
 
     Returns:
         Output Queue, DataStream, Reader, or None, depending on the parameters
         passed.
     """
     result, _ = _pipe_step(
-        input, output, num_threads, processor, name, capacity, group)
+        input, output, num_threads, processor, name, capacity, group,
+        num_runtime_threads)
     return result
 
 
 def pipe_and_output(
         input, output=None, num_threads=1, processor=None, name=None,
-        capacity=None, group=None, final_outputs=None):
+        capacity=None, group=None, num_runtime_threads=1, final_outputs=None):
     """
     Similar to `pipe`, with the additional ability for the pipe Task to
     return output values to the `Session` once done.
@@ -151,7 +160,7 @@ def pipe_and_output(
     assert num_threads > 0
     result, task = _pipe_step(
         input, output, num_threads, processor, name, capacity, group,
-        final_outputs)
+        num_runtime_threads, final_outputs)
     output = None
     if final_outputs is not None:
         output = task.outputs()
@@ -172,32 +181,62 @@ def processor_name(processor):
     return processor.__class__.__name__
 
 
-def _pipe_step(
-        input, output=None, num_threads=1, processor=None, name=None,
-        capacity=None, group=None, final_outputs=None):
-    """
-    """
-    if isinstance(input, Reader):
-        reader = input
-    elif hasattr(input, 'reader'):
-        reader = input.reader()
-    else:
-        raise ValueError('in must be a reader, queue or streaam.')
+def _runtime_threads_task(name, group, final_outputs, reader, num_threads,
+                          output, capacity):
+    node_name = str(Node.current())
+    profiler_name = "{0}/{1}/{2}/{3}/{4}".format(
+        node_name,
+        "pipe",
+        name,
+        processor_name(input) if input else "NoInput",
+        processor_name(output) if output else "NoOutput")
 
-    if processor is not None:
-        reader = ProcessingReader(reader, processor)
+    with Task(name=name, group=group, outputs=final_outputs,
+              num_instances=num_threads) as task:
+        global_exit_net = core.Net('pipe:exit')
+        global_init_net = core.Net('pipe:init')
+        reader.setup_ex(global_init_net, global_exit_net)
 
-    if num_threads == 0:
-        assert output is None
-        return reader, None
+        init_net = core.Net('pipe:instance:init')
+        exit_net = core.Net('pipe:instance:exit')
+        read_nets, status, rec = reader.read_record_ex(init_net, exit_net)
 
-    if name is None and processor is not None:
-        name = processor_name(processor)
-    if name is None and output is not None:
-        name = 'pipe_into:%s' % processor_name(output)
-    if name is None:
-        name = 'pipe_from:%s' % processor_name(input)
+        if rec is not None:
+            out_queue, writer = _init_output(
+                output, capacity, global_init_net, global_exit_net)
+            write_nets, _ = writer.write_record_ex(
+                rec, init_net, exit_net, status)
+        else:
+            out_queue = None
+            write_nets = []
 
+        with ops.task_init():
+            ops.net(global_init_net)
+        with ops.task_instance_init():
+            ops.net(init_net)
+
+        timer_start_net = core.Net('timer_start')
+        timer = timer_start_net.TimerBegin([], counter_name=profiler_name)
+        timer_end_net = core.Net('timer_end')
+        timer_end_net.TimerEnd(timer, [])
+
+        ops.net(core.execution_step(
+            'body',
+            [timer_start_net] + list(read_nets) + list(write_nets) +
+            [timer_end_net],
+            should_stop_blob=status))
+        ops.net(timer_end_net)
+
+        with ops.task_instance_exit():
+            ops.net(exit_net)
+        with ops.task_exit():
+            ops.net(global_exit_net)
+
+    return out_queue, task
+
+
+def _static_threads_task(name, group, final_outputs, reader, num_threads,
+                         output, capacity):
     node_name = str(Node.current())
     profiler_name = "{0}/{1}/{2}/{3}/{4}".format(
         node_name,
@@ -259,6 +298,44 @@ def _pipe_step(
         ops.net(core.execution_step('body', steps, concurrent_substeps=True))
         ops.net(global_exit_net)
     return out_queue, task
+
+
+def _pipe_step(
+        input, output=None, num_threads=1, processor=None, name=None,
+        capacity=None, group=None, num_runtime_threads=None, final_outputs=None):
+    """
+    """
+    assert num_threads <= 1 or num_runtime_threads <= 1, (
+        'Only one of num_threads or num_runtime_threads must be set.')
+
+    if isinstance(input, Reader):
+        reader = input
+    elif hasattr(input, 'reader'):
+        reader = input.reader()
+    else:
+        raise ValueError('in must be a reader, queue or stream.')
+
+    if processor is not None:
+        reader = ProcessingReader(reader, processor)
+
+    if num_threads == 0 or num_runtime_threads == 0:
+        assert output is None
+        return reader, None
+
+    if name is None and processor is not None:
+        name = processor_name(processor)
+    if name is None and output is not None:
+        name = 'pipe_into:%s' % processor_name(output)
+    if name is None:
+        name = 'pipe_from:%s' % processor_name(input)
+
+    if num_threads > 1:
+        return _static_threads_task(
+            name, group, final_outputs, reader, num_threads, output, capacity)
+    else:
+        return _runtime_threads_task(
+            name, group, final_outputs, reader, num_runtime_threads, output,
+            capacity)
 
 
 class ProcessingReader(Reader):
