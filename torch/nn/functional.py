@@ -409,6 +409,14 @@ def dropout(input, p=0.5, training=False, inplace=False):
 
 
 def alpha_dropout(input, p=0.5, training=False):
+    r"""Applies alpha dropout to the input.
+
+    See :class:`~torch.nn.AlphaDropout` for details.
+
+    Args:
+        p (float, optional): the drop probability
+        training (bool, optional): switch between training and evaluation mode
+    """
     if p < 0 or p > 1:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
@@ -418,9 +426,10 @@ def alpha_dropout(input, p=0.5, training=False):
 
     alpha = -1.7580993408473766
     keep_prob = 1 - p
-    noise = input.data.new().byte().resize_(input.size())
+    # TODO avoid casting to byte after resize
+    noise = input.data.new().resize_(input.size())
     noise.bernoulli_(p)
-    noise = Variable(noise)
+    noise = Variable(noise.byte())
 
     output = input.masked_fill(noise, alpha)
 
@@ -660,6 +669,35 @@ def binary_cross_entropy(input, target, weight=None, size_average=True):
                 for each minibatch.
     """
     return _functions.thnn.BCELoss(size_average, weight=weight)(input, target)
+
+
+def binary_cross_entropy_with_logits(input, target, weight=None, size_average=True):
+    r"""Function that measures Binary Cross Entropy between target and output logits:
+
+    See :class:`~torch.nn.BCEWithLogitsLoss` for details.
+
+    Args:
+        input: Variable of arbitrary shape
+        target: Variable of the same shape as input
+        weight (Variable, optional): a manual rescaling weight
+                if provided it's repeated to match input tensor shape
+        size_average (bool, optional): By default, the losses are averaged
+                over observations for each minibatch. However, if the field
+                sizeAverage is set to False, the losses are instead summed
+                for each minibatch.
+    """
+    if weight is not None and target.dim() != 1:
+        weight = weight.view(1, target.size(1)).expand_as(target)
+    neg_abs = - input.abs()
+    loss = input.clamp(min=0) - input * target + (1 + neg_abs.exp()).log()
+
+    if weight is not None:
+        loss = loss * weight
+
+    if size_average:
+        return loss.mean()
+    else:
+        return loss.sum()
 
 
 def smooth_l1_loss(input, target, size_average=True):

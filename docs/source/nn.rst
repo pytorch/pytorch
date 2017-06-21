@@ -230,6 +230,12 @@ Non-linear Activations
 .. autoclass:: ELU
     :members:
 
+:hidden:`SELU`
+~~~~~~~~~~~~~
+
+.. autoclass:: SELU
+    :members:
+
 :hidden:`PReLU`
 ~~~~~~~~~~~~~~~
 
@@ -424,6 +430,12 @@ Dropout layers
 .. autoclass:: Dropout3d
     :members:
 
+:hidden:`AlphaDropout`
+~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: AlphaDropout
+    :members:
+
 
 Sparse layers
 ----------------------------------
@@ -499,6 +511,12 @@ Loss functions
 ~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: BCELoss
+    :members:
+
+:hidden:`BCEWithLogitsLoss`
+~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: BCEWithLogitsLoss
     :members:
 
 :hidden:`MarginRankingLoss`
@@ -770,6 +788,11 @@ Non-linear activation functions
 
 .. autofunction:: elu
 
+:hidden:`selu`
+~~~~~~~~~~~~~
+
+.. autofunction:: selu
+
 :hidden:`leaky_relu`
 ~~~~~~~~~~~~~~~~~~~~
 
@@ -864,6 +887,11 @@ Dropout functions
 
 .. autofunction:: dropout
 
+:hidden:`alpha_dropout`
+~~~~~~~~~~~~~~~~~
+
+.. autofunction:: alpha_dropout
+
 Distance functions
 ----------------------------------
 
@@ -901,6 +929,11 @@ Loss functions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: binary_cross_entropy
+
+:hidden:`binary_cross_entropy_with_logits`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: binary_cross_entropy_with_logits
 
 :hidden:`smooth_l1_loss`
 ~~~~~~~~~~~~~~~~~~~~~~~~

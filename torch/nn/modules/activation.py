@@ -246,8 +246,9 @@ class ELU(Module):
 
 
 class SELU(Module):
-    """Applies element-wise, :math:`f(x) = scale * (max(0,x) + min(0, alpha * (exp(x) - 1)))`,
-    with alpha=1.6732632423543772848170429916717 and scale=1.0507009873554804934193349852946.
+    """Applies element-wise, :math:`f(x) = scale * (\max(0,x) + \min(0, alpha * (\exp(x) - 1)))`,
+    with ``alpha=1.6732632423543772848170429916717`` and ``scale=1.0507009873554804934193349852946``.
+
     More details can be found in the paper `Self-Normalizing Neural Networks`_ .
 
     Args:

@@ -4,6 +4,7 @@ import torch._C as _C
 from collections import OrderedDict
 import torch.sparse as sparse
 import torch.utils.hooks as hooks
+import warnings
 
 
 class Variable(_C._VariableBase):
