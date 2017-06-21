@@ -1,5 +1,5 @@
-#ifndef XT_MAP_METER_H
-#define XT_MAP_METER_H
+#ifndef AT_MAP_METER_H
+#define AT_MAP_METER_H
 
 #include "Meter.h"
 #include "APMeter.h"

@@ -1,5 +1,5 @@
-#ifndef XT_SHUFFLE_DATASET_H
-#define XT_SHUFFLE_DATASET_H
+#ifndef AT_SHUFFLE_DATASET_H
+#define AT_SHUFFLE_DATASET_H
 
 #include "Dataset.h"
 #include "ResampleDataset.h"

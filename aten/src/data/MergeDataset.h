@@ -1,5 +1,5 @@
-#ifndef XT_MERGE_DATASET_H
-#define XT_MERGE_DATASET_H
+#ifndef AT_MERGE_DATASET_H
+#define AT_MERGE_DATASET_H
 
 #include "Dataset.h"
 #include <vector>

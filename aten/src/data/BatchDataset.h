@@ -1,5 +1,5 @@
-#ifndef XT_BATCH_DATASET_H
-#define XT_BATCH_DATASET_H
+#ifndef AT_BATCH_DATASET_H
+#define AT_BATCH_DATASET_H
 
 #include "Dataset.h"
 #include "ATen/ATen.h"
