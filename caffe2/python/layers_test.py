@@ -194,6 +194,18 @@ class TestLayers(LayersTestCase):
             ('loss', schema.Scalar(np.float32)),
         ), loss)
 
+    def testBatchSoftmaxLossWeight(self):
+        input_record = self.new_record(schema.Struct(
+            ('label', schema.Scalar((np.float32, tuple()))),
+            ('prediction', schema.Scalar((np.float32, (32,)))),
+            ('weight', schema.Scalar((np.float64, (1,))))
+        ))
+        loss = self.model.BatchSoftmaxLoss(input_record)
+        self.assertEqual(schema.Struct(
+            ('softmax', schema.Scalar((np.float32, (32,)))),
+            ('loss', schema.Scalar(np.float32)),
+        ), loss)
+
     @given(
         X=hu.arrays(dims=[2, 5]),
     )
