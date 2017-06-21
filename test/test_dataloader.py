@@ -137,11 +137,11 @@ class TestDataLoader(TestCase):
             if i % 2 == 0:
                 offset = i * 5 // 2
                 self.assertEqual(len(input), 2)
-                self.assertEqual(input, self.data[offset:offset+2])
+                self.assertEqual(input, self.data[offset:offset + 2])
             else:
                 offset = i * 5 // 2
                 self.assertEqual(len(input), 3)
-                self.assertEqual(input, self.data[offset:offset+3])
+                self.assertEqual(input, self.data[offset:offset + 3])
 
     def test_batch_sampler(self):
         self._test_batch_sampler()
