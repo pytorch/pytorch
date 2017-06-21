@@ -25,6 +25,14 @@ int main() {
   foo = foo+foo*3;
   foo -= 4;
 
+  bool threw = false;
+  try {
+    Tensor no;
+    add_out(foo,foo,no);
+  } catch (std::runtime_error&) {
+    threw = true;
+  }
+  assert(threw);
   Scalar a = 4;
 
   float b = a.to<float>();
