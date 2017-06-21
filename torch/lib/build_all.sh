@@ -31,7 +31,8 @@ INSTALL_DIR="$(pwd)/tmp_install"
 BASIC_C_FLAGS=" -DTH_INDEX_BASE=0 -I$INSTALL_DIR/include \
   -I$INSTALL_DIR/include/TH -I$INSTALL_DIR/include/THC \
   -I$INSTALL_DIR/include/THS -I$INSTALL_DIR/include/THCS \
-  -I$INSTALL_DIR/include/THPP "
+  -I$INSTALL_DIR/include/THPP -I$INSTALL_DIR/include/TensorLib \
+  -I$INSTALL_DIR/include/THNN -I$INSTALL_DIR/include/THCUNN"
 LDFLAGS="-L$INSTALL_DIR/lib "
 LD_POSTFIX=".so.1"
 LD_POSTFIX_UNVERSIONED=".so"
@@ -60,9 +61,12 @@ function build() {
               -DTH_LIB_PATH="$INSTALL_DIR/lib" \
               -DTH_LIBRARIES="$INSTALL_DIR/lib/libTH$LD_POSTFIX" \
               -DTHPP_LIBRARIES="$INSTALL_DIR/lib/libTHPP$LD_POSTFIX" \
+              -DTENSORLIB_LIBRARIES="$INSTALL_DIR/lib/libTensorLib$LD_POSTFIX" \
               -DTHS_LIBRARIES="$INSTALL_DIR/lib/libTHS$LD_POSTFIX" \
               -DTHC_LIBRARIES="$INSTALL_DIR/lib/libTHC$LD_POSTFIX" \
               -DTHCS_LIBRARIES="$INSTALL_DIR/lib/libTHCS$LD_POSTFIX" \
+              -DTHNN_LIBRARIES="$INSTALL_DIR/lib/libTHNN$LD_POSTFIX" \
+              -DTHCUNN_LIBRARIES="$INSTALL_DIR/lib/libTHCUNN$LD_POSTFIX" \
               -DTH_SO_VERSION=1 \
               -DTHC_SO_VERSION=1 \
               -DTHNN_SO_VERSION=1 \
@@ -114,12 +118,16 @@ build THS
 build THNN
 
 if [[ $WITH_CUDA -eq 1 ]]; then
-    build THC
-    build THCS
-    build THCUNN
+   build THC
+   build THCS
+   build THCUNN
 fi
+
+cp THNN/generic/THNN.h .
+cp THCUNN/generic/THCUNN.h .
+
 if [[ $WITH_NCCL -eq 1 ]]; then
-    build_nccl
+   build_nccl
 fi
 
 # THPP has dependencies on both CPU and CUDA, so build it
@@ -128,6 +136,7 @@ build THPP
 
 # The shared memory manager depends on TH
 CPP_FLAGS=" -std=c++11 "
+build TensorLib
 build libshm
 
 # THD, gloo have dependencies on Torch, CUDA, NCCL etc.
@@ -145,8 +154,6 @@ fi
 # If all the builds succeed we copy the libraries, headers,
 # binaries to torch/lib
 cp $INSTALL_DIR/lib/* .
-cp THNN/generic/THNN.h .
-cp THCUNN/generic/THCUNN.h .
 cp -r $INSTALL_DIR/include .
 cp $INSTALL_DIR/bin/* .
 

@@ -173,10 +173,12 @@ class build_ext(setuptools.command.build_ext.build_ext):
         from tools.cwrap.plugins.WrapDim import WrapDim
         from tools.cwrap.plugins.AssertNDim import AssertNDim
         from tools.cwrap.plugins.Broadcast import Broadcast
+        from tools.cwrap.plugins.ProcessorSpecificPlugin import ProcessorSpecificPlugin
         thp_plugin = THPPlugin()
         cwrap('torch/csrc/generic/TensorMethods.cwrap', plugins=[
-            BoolOption(), thp_plugin, AutoGPU(condition='IS_CUDA'),
-            ArgcountSortPlugin(), KwargsPlugin(), AssertNDim(), WrapDim(), Broadcast()
+            ProcessorSpecificPlugin(), BoolOption(), thp_plugin,
+            AutoGPU(condition='IS_CUDA'), ArgcountSortPlugin(), KwargsPlugin(),
+            AssertNDim(), WrapDim(), Broadcast()
         ])
         cwrap('torch/csrc/cudnn/cuDNN.cwrap', plugins=[
             CuDNNPlugin(), NullableArguments()
@@ -243,6 +245,7 @@ include_dirs += [
     tmp_install_path + "/include/TH",
     tmp_install_path + "/include/THPP",
     tmp_install_path + "/include/THNN",
+    tmp_install_path + "/include/TensorLib",
 ]
 
 library_dirs.append(lib_path)
@@ -255,6 +258,7 @@ THCS_LIB = os.path.join(lib_path, 'libTHCS.so.1')
 THNN_LIB = os.path.join(lib_path, 'libTHNN.so.1')
 THCUNN_LIB = os.path.join(lib_path, 'libTHCUNN.so.1')
 THPP_LIB = os.path.join(lib_path, 'libTHPP.so.1')
+TENSORLIB_LIB = os.path.join(lib_path, 'libTensorLib.so.1')
 THD_LIB = os.path.join(lib_path, 'libTHD.so.1')
 NCCL_LIB = os.path.join(lib_path, 'libnccl.so.1')
 if platform.system() == 'Darwin':
@@ -265,6 +269,7 @@ if platform.system() == 'Darwin':
     THNN_LIB = os.path.join(lib_path, 'libTHNN.1.dylib')
     THCUNN_LIB = os.path.join(lib_path, 'libTHCUNN.1.dylib')
     THPP_LIB = os.path.join(lib_path, 'libTHPP.1.dylib')
+    TENSORLIB_LIB = os.path.join(lib_path, 'libTensorLib.1.dylib')
     THD_LIB = os.path.join(lib_path, 'libTHD.1.dylib')
     NCCL_LIB = os.path.join(lib_path, 'libnccl.1.dylib')
 
@@ -273,7 +278,7 @@ if WITH_NCCL and subprocess.call('ldconfig -p | grep libnccl >/dev/null', shell=
 
 main_compile_args = ['-D_THP_CORE']
 main_libraries = ['shm']
-main_link_args = [TH_LIB, THS_LIB, THPP_LIB, THNN_LIB]
+main_link_args = [TH_LIB, THS_LIB, THPP_LIB, THNN_LIB, TENSORLIB_LIB]
 main_sources = [
     "torch/csrc/PtrWrapper.cpp",
     "torch/csrc/Module.cpp",

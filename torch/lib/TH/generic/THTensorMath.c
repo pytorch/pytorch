@@ -1979,6 +1979,17 @@ void THTensor_(range)(THTensor *r_, accreal xmin, accreal xmax, accreal step)
   TH_TENSOR_APPLY(real, r_, *r__data = xmin + (i++)*step;);
 }
 
+void THTensor_(arange)(THTensor *r_, accreal xmin, accreal xmax, accreal step) {
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+  int m = fmod(xmax - xmin,step) == 0;
+#else
+  int m = (xmax - xmin) % step == 0;
+#endif
+  if (m)
+    xmax -= step;
+  THTensor_(range)(r_,xmin,xmax,step);
+}
+
 void THTensor_(randperm)(THTensor *r_, THGenerator *_generator, long n)
 {
   real *r__data;

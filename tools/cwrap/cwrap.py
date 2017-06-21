@@ -4,6 +4,13 @@ from string import Template
 from copy import deepcopy
 from .plugins import ArgcountChecker, OptionalArguments, ArgumentReferences, \
     BeforeAfterCall, ConstantArguments, ReturnArguments, GILRelease
+from ..shared import import_module
+
+BASE_PATH = os.path.realpath(os.path.join(__file__, '..', '..', '..'))
+TENSORLIB_PATH = os.path.join(BASE_PATH, 'torch', 'lib', 'TensorLib',
+                              'common_with_cwrap.py')
+
+tensorlib_common = import_module('torch.lib.TensorLib.common_with_cwrap', TENSORLIB_PATH)
 
 
 class cwrap(object):
@@ -76,7 +83,7 @@ class cwrap(object):
             elif line == ']]':
                 in_declaration = False
                 declaration = yaml.load('\n'.join(declaration_lines))
-                self.set_declaration_defaults(declaration)
+                tensorlib_common.set_declaration_defaults(declaration)
 
                 # Pass declaration in a list - maybe some plugins want to add
                 # multiple wrappers
@@ -103,24 +110,6 @@ class cwrap(object):
             i += 1
 
         return '\n'.join(output)
-
-    def set_declaration_defaults(self, declaration):
-        declaration.setdefault('arguments', [])
-        declaration.setdefault('return', 'void')
-        if 'cname' not in declaration:
-            declaration['cname'] = declaration['name']
-        # Simulate multiple dispatch, even if it's not necessary
-        if 'options' not in declaration:
-            declaration['options'] = [{'arguments': declaration['arguments']}]
-            del declaration['arguments']
-        # Parse arguments (some of them can be strings)
-        for option in declaration['options']:
-            option['arguments'] = self.parse_arguments(option['arguments'])
-        # Propagate defaults from declaration to options
-        for option in declaration['options']:
-            for k, v in declaration.items():
-                if k != 'name' and k != 'options':
-                    option.setdefault(k, v)
 
     def parse_arguments(self, args):
         new_args = []
