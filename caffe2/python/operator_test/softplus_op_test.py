@@ -17,7 +17,7 @@ class TestSoftplus(hu.HypothesisTestCase):
     def test_softplus(self, X, gc, dc):
         op = core.CreateOperator("Softplus", ["X"], ["Y"])
         self.assertDeviceChecks(dc, op, [X], [0])
-        self.assertGradientChecks(gc, op, [X], 0, [0], stepsize=0.0005)
+        self.assertGradientChecks(gc, op, [X], 0, [0])
 
 
 if __name__ == "__main__":
