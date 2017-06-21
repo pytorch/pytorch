@@ -330,6 +330,71 @@ THCTensor_(maxall)(THCState *state, THCTensor *self) {
   return val;
 }
 
+THC_API real
+THCTensor_(medianall)(THCState *state, THCTensor *self) {
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self));
+
+  real val;
+  ptrdiff_t nelem, k;
+
+  nelem = THCTensor_(nElement)(state, self);
+  k = (nelem-1) >> 1;
+
+  THLongStorage *size = THLongStorage_newWithSize1(nelem);
+  THCTensor *view = THCTensor_(newView)(state, self, size);
+
+  THLongStorage_free(size);
+
+  THCTensor *sorted = THCTensor_(new)(state);
+  THCudaLongTensor *indices = THCudaLongTensor_new(state);
+
+  THCTensor_(sort)(state, sorted, indices, view, 0, 0);
+
+  val = THCTensor_(get1d)(state, sorted, k);
+
+  THCTensor_(free)(state, view);
+  THCTensor_(free)(state, sorted);
+  THCudaLongTensor_free(state, indices);
+
+  THCudaCheck(cudaGetLastError());
+
+  return val;
+}
+
+THC_API void
+THCTensor_(median)(THCState *state,
+                   THCTensor *values,
+                   THCudaLongTensor *indices,
+                   THCTensor *self,
+                   long dimension,
+                   int keepdim) {
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self));
+
+  long t_size_dim, k;
+
+  t_size_dim = THCTensor_(size)(state, self, dimension);
+
+  k = (t_size_dim-1) >> 1;
+
+  THCTensor *sorted = THCTensor_(new)(state);
+  THCudaLongTensor *sorted_indices = THCudaLongTensor_new(state);
+
+  THCTensor_(sort)(state, sorted, sorted_indices, self, dimension, 0);
+
+  THCTensor_(narrow)(state, values, sorted, dimension, k, 1);
+  THCudaLongTensor_narrow(state, indices, sorted_indices, dimension, k, 1);
+
+  THCTensor_(free)(state, sorted);
+  THCudaLongTensor_free(state, sorted_indices);
+
+  if (!keepdim) {
+    THCTensor_(squeeze1d)(state, values, values, dimension);
+    THCudaLongTensor_squeeze1d(state, indices, indices, dimension);
+  }
+
+  THCudaCheck(cudaGetLastError());
+}
+
 THC_API void
 THCTensor_(max)(THCState *state,
                 THCTensor *values,
