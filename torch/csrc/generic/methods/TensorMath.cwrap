@@ -1,8 +1,17 @@
 [[
   name: abs
   return: argument 0
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_LONG) || defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_SHORT) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE || CUDA_SHORT || CUDA_INT || CUDA_LONG
-  with_stateless: True
+  types:
+    - floating_point
+    - Long
+    - Int
+    - Short
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
   arguments:
     - arg: THTensor* destination
       output: True
@@ -13,7 +22,14 @@
   name: abs_
   cname: abs
   return: self
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_LONG) || defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_SHORT) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE || CUDA_SHORT || CUDA_INT || CUDA_LONG
+  types:
+    - floating_point
+    - Long
+    - Int
+    - Short
+  backends:
+    - CPU
+    - CUDA
   arguments:
     - THTensor* self
     - THTensor* self
@@ -22,7 +38,11 @@
 
 [[
   name: sigmoid_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
   cname: sigmoid
   return: self
   arguments:
@@ -32,9 +52,15 @@
 
 [[
   name: sigmoid
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
   cname: sigmoid
-  with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -45,7 +71,11 @@
 
 [[
   name: log_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
   cname: log
   return: self
   arguments:
@@ -55,8 +85,14 @@
 
 [[
   name: log
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
-  with_stateless: True
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -67,7 +103,11 @@
 
 [[
   name: log1p_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
   cname: log1p
   return: self
   arguments:
@@ -77,8 +117,14 @@
 
 [[
   name: log1p
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
-  with_stateless: True
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -88,8 +134,14 @@
 
 [[
   name: lgamma
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
-  with_stateless: True
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -99,7 +151,11 @@
 
 [[
   name: lgamma_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
   cname: lgamma
   return: self
   arguments:
@@ -109,7 +165,11 @@
 
 [[
   name: exp_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
   cname: exp
   return: self
   arguments:
@@ -119,8 +179,14 @@
 
 [[
   name: exp
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
-  with_stateless: True
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -131,7 +197,11 @@
 
 [[
   name: cos_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
   cname: cos
   return: self
   arguments:
@@ -141,8 +211,14 @@
 
 [[
   name: cos
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
-  with_stateless: True
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -153,7 +229,11 @@
 
 [[
   name: acos_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
   cname: acos
   return: self
   arguments:
@@ -163,8 +243,14 @@
 
 [[
   name: acos
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
-  with_stateless: True
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -175,7 +261,11 @@
 
 [[
   name: cosh_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
   cname: cosh
   return: self
   arguments:
@@ -185,8 +275,14 @@
 
 [[
   name: cosh
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
-  with_stateless: True
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -197,7 +293,11 @@
 
 [[
   name: sin_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
   cname: sin
   return: self
   arguments:
@@ -207,8 +307,14 @@
 
 [[
   name: sin
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
-  with_stateless: True
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -219,7 +325,11 @@
 
 [[
   name: asin_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
   cname: asin
   return: self
   arguments:
@@ -229,8 +339,14 @@
 
 [[
   name: asin
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
-  with_stateless: True
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -241,7 +357,11 @@
 
 [[
   name: sinh_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
   cname: sinh
   return: self
   arguments:
@@ -251,8 +371,14 @@
 
 [[
   name: sinh
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
-  with_stateless: True
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -263,7 +389,11 @@
 
 [[
   name: tan_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
   cname: tan
   return: self
   arguments:
@@ -273,8 +403,14 @@
 
 [[
   name: tan
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
-  with_stateless: True
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -285,7 +421,11 @@
 
 [[
   name: atan_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
   cname: atan
   return: self
   arguments:
@@ -295,8 +435,14 @@
 
 [[
   name: atan
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
-  with_stateless: True
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -307,7 +453,11 @@
 
 [[
   name: tanh_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
   cname: tanh
   return: self
   arguments:
@@ -317,8 +467,14 @@
 
 [[
   name: tanh
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
-  with_stateless: True
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -329,7 +485,11 @@
 
 [[
   name: sqrt_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
   cname: sqrt
   return: self
   arguments:
@@ -339,8 +499,14 @@
 
 [[
   name: sqrt
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
-  with_stateless: True
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -351,7 +517,11 @@
 
 [[
   name: rsqrt_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
   cname: rsqrt
   return: self
   arguments:
@@ -361,8 +531,14 @@
 
 [[
   name: rsqrt
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
-  with_stateless: True
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -373,7 +549,11 @@
 
 [[
   name: ceil_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
   cname: ceil
   return: self
   arguments:
@@ -383,8 +563,14 @@
 
 [[
   name: ceil
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
-  with_stateless: True
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -395,7 +581,11 @@
 
 [[
   name: floor_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
   cname: floor
   return: self
   arguments:
@@ -405,8 +595,14 @@
 
 [[
   name: floor
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
-  with_stateless: True
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -417,7 +613,11 @@
 
 [[
   name: round_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
   cname: round
   return: self
   arguments:
@@ -427,8 +627,14 @@
 
 [[
   name: round
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
-  with_stateless: True
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -439,7 +645,11 @@
 
 [[
   name: trunc_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
   cname: trunc
   return: self
   arguments:
@@ -449,8 +659,14 @@
 
 [[
   name: trunc
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
-  with_stateless: True
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -461,7 +677,11 @@
 
 [[
   name: frac_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
   cname: frac
   return: self
   arguments:
@@ -471,8 +691,14 @@
 
 [[
   name: frac
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
-  with_stateless: True
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -482,8 +708,14 @@
 
 [[
   name: mean
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
-  with_stateless: True
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
   options:
     - cname: meanall
       return: accreal
@@ -512,8 +744,14 @@
 
 [[
   name: var
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
-  with_stateless: True
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
   options:
     - cname: varall
       return: accreal
@@ -544,8 +782,14 @@
 
 [[
   name: std
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
-  with_stateless: True
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
   options:
     - cname: stdall
       return: accreal
@@ -576,8 +820,14 @@
 
 [[
   name: norm
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
-  with_stateless: True
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
   options:
     - cname: normall
       return: accreal
@@ -610,8 +860,14 @@
 
 [[
   name: renorm
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
-  with_stateless: True
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
   options:
     - cname: renorm
       return: argument 0
@@ -627,7 +883,11 @@
 
 [[
   name: renorm_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
   options:
     - cname: renorm
       return: self
@@ -642,8 +902,14 @@
 
 [[
   name: dist
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
-  with_stateless: True
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
   options:
     - cname: dist
       return: accreal
@@ -657,8 +923,14 @@
 
 [[
   name: reciprocal
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
-  with_stateless: True
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
   options:
     - cname: cinv
       return: argument 0
@@ -670,7 +942,11 @@
 
 [[
   name: reciprocal_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
   options:
     - cname: cinv
       return: self
@@ -681,8 +957,14 @@
 
 [[
   name: neg
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
-  with_stateless: True
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
   options:
     - cname: neg
       return: argument 0
@@ -694,7 +976,11 @@
 
 [[
   name: neg_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
   options:
     - cname: neg
       return: self
@@ -705,8 +991,16 @@
 
 [[
   name: atan2
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
-  with_stateless: True
+  types:
+    - Float
+    - Double
+  backends:
+    - CPU
+  backend_type_pairs: [[CPU,Float],[CPU,Double],[CUDA,Float]]
+
+  variants:
+    - method
+    - function
   cname: atan2
   return: argument 0
   arguments:
@@ -719,7 +1013,7 @@
 
 [[
   name: atan2_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT
+  backend_type_pairs: [[CPU,Float],[CPU,Double],[CUDA,Float]]
   cname: atan2
   return: argument 0
   arguments:
@@ -735,8 +1029,14 @@
 // be available. Still, they differ in torch.pow.
 [[
   name: pow
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
-  with_stateless: True
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
   return: argument 0
   options:
     - cname: pow
@@ -762,7 +1062,11 @@
 
 [[
   name: pow_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
   return: argument 0
   cname: pow
   options:
@@ -781,8 +1085,14 @@
 
 [[
   name: lerp
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
-  with_stateless: True
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
   return: argument 0
   cname: lerp
   arguments:
@@ -796,7 +1106,11 @@
 
 [[
   name: lerp_
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
   return: self
   cname: lerp
   arguments:
@@ -809,8 +1123,13 @@
 
 [[
   name: linspace
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-  only_stateless: True
+  types:
+    - Float
+    - Double
+  backends:
+    - CPU
+  variants:
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -823,8 +1142,13 @@
 
 [[
   name: logspace
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-  only_stateless: True
+  types:
+    - Float
+    - Double
+  backends:
+    - CPU
+  variants:
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -837,8 +1161,14 @@
 
 [[
   name: histc
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-  with_stateless: True
+  types:
+    - Float
+    - Double
+  backends:
+    - CPU
+  variants:
+    - method
+    - function
   return: argument 0
   options:
     - arguments:
@@ -881,7 +1211,9 @@
 
 [[
   name: sum
-  with_stateless: True
+  variants:
+    - method
+    - function
   options:
     - cname: sumall
       return: accreal
@@ -910,7 +1242,9 @@
 
 [[
   name: prod
-  with_stateless: True
+  variants:
+    - method
+    - function
   options:
     - cname: prodall
       return: accreal
@@ -939,7 +1273,9 @@
 
 [[
   name: cumsum
-  with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -951,7 +1287,9 @@
 
 [[
   name: cumprod
-  with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -963,7 +1301,9 @@
 
 [[
   name: sign
-  with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -982,7 +1322,9 @@
 
 [[
   name: trace
-  with_stateless: True
+  variants:
+    - method
+    - function
   return: accreal
   arguments:
     - THTensor* self
@@ -990,7 +1332,9 @@
 
 [[
   name: add
-  with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   options:
     - cname: add
@@ -1049,7 +1393,9 @@
 
 [[
   name: sub
-  with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   options:
     - cname: sub
@@ -1091,7 +1437,9 @@
 
 [[
   name: mul
-  with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   options:
     - cname: mul
@@ -1129,7 +1477,9 @@
 
 [[
   name: div
-  with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   options:
     - cname: div
@@ -1168,7 +1518,9 @@
 [[
   name: fmod
   return: argument 0
-  with_stateless: True
+  variants:
+    - method
+    - function
   options:
     - cname: fmod
       arguments:
@@ -1206,7 +1558,9 @@
 [[
   name: remainder
   return: argument 0
-  with_stateless: True
+  variants:
+    - method
+    - function
   options:
     - cname: remainder
       arguments:
@@ -1242,7 +1596,9 @@
 
 [[
   name: clamp
-  with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   options:
     - cname: clamp
@@ -1295,8 +1651,11 @@
 
 [[
   name: dot
-  defined_if: CUDA_FLOAT || CUDA_DOUBLE || CUDA_HALF || !IS_CUDA
-  with_stateless: True
+  backend_type_pairs: [[CUDA,floating_point], [CPU,all]]
+
+  variants:
+    - method
+    - function
   return: accreal
   arguments:
     - arg: THTensor* self
@@ -1307,7 +1666,9 @@
 
 [[
   name: tril
-  with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* destination
@@ -1330,7 +1691,9 @@
 
 [[
   name: triu
-  with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* destination
@@ -1353,7 +1716,9 @@
 
 [[
   name: cross
-  with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* destination
@@ -1366,8 +1731,10 @@
 
 [[
   name: eye
-  defined_if: "!IS_CUDA"
-  only_stateless: True
+  backends:
+    - CPU
+  variants:
+    - function
   return: argument 0
   options:
     - arguments:
@@ -1384,7 +1751,9 @@
 
 [[
   name: diag
-  with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   options:
     - arguments:
@@ -1397,7 +1766,9 @@
 
 [[
   name: addmm
-  with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   options:
     - arguments:
@@ -1454,7 +1825,9 @@
 
 [[
   name: addmv
-  with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1486,7 +1859,9 @@
 
 [[
   name: addr
-  with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1519,7 +1894,9 @@
 [[
   name: ger
   cname: addr
-  with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   before_call: |
     long s1 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg4)->cdata, 0);
@@ -1528,6 +1905,7 @@
   arguments:
     - arg: THTensor* result
       output: True
+      resize: [ [self,0], [vec2,0] ]
     - CONSTANT AS_REAL(0)
     - argument 0
     - CONSTANT AS_REAL(1)
@@ -1538,7 +1916,9 @@
 [[
   name: mv
   cname: addmv
-  with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   before_call: |
     long s = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg4)->cdata, 0);
@@ -1549,6 +1929,8 @@
   arguments:
     - arg: THTensor* result
       output: True
+      resize: [ [self, 0] ]
+      cpu_zero: True
     - CONSTANT AS_REAL(0)
     - argument 0
     - CONSTANT AS_REAL(1)
@@ -1558,7 +1940,9 @@
 
 [[
   name: mm
-  with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   options:
     - cname: addmm
@@ -1572,6 +1956,8 @@
       arguments:
         - arg: THTensor* result
           output: True
+          resize: [ [self, 0], [mat2,1] ]
+          cpu_zero: True
         - CONSTANT AS_REAL(0)
         - argument 0
         - CONSTANT AS_REAL(1)
@@ -1592,7 +1978,9 @@
 [[
   name: bmm
   cname: baddbmm
-  with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   before_call: |
     long s1 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg4)->cdata, 0);
@@ -1605,6 +1993,8 @@
   arguments:
     - arg: THTensor* result
       output: True
+      resize: [ [self,0], [self,1], [mat2,2] ]
+      cpu_zero: True
     - CONSTANT AS_REAL(0)
     - argument 0
     - CONSTANT AS_REAL(1)
@@ -1614,7 +2004,9 @@
 
 [[
   name: addbmm
-  with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1646,7 +2038,9 @@
 
 [[
   name: baddbmm
-  with_stateless: true
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1678,7 +2072,9 @@
 
 [[
   name: addcmul
-  with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1718,7 +2114,9 @@
 
 [[
   name: addcdiv
-  with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1771,8 +2169,15 @@ static const char *R = &__R;
 
 [[
   name: gesv
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
-  with_stateless: True
+  types:
+    - Float
+    - Double
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
   return: argument 0,1
   arguments:
     - arg: THTensor* solution
@@ -1785,8 +2190,15 @@ static const char *R = &__R;
 
 [[
   name: gels
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
-  with_stateless: True
+  types:
+    - Float
+    - Double
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
   return: argument 0,1
   arguments:
     - arg: THTensor* res1
@@ -1799,8 +2211,14 @@ static const char *R = &__R;
 
 [[
   name: trtrs
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-  with_stateless: True
+  types:
+    - Float
+    - Double
+  backends:
+    - CPU
+  variants:
+    - method
+    - function
   return: argument 0,1
   arguments:
     - arg: THTensor* res1
@@ -1826,8 +2244,15 @@ static const char *R = &__R;
 [[
   name: symeig
   cname: syev
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
-  with_stateless: True
+  types:
+    - Float
+    - Double
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
   return: argument 0,1
   arguments:
     - arg: THTensor* res1
@@ -1848,8 +2273,15 @@ static const char *R = &__R;
 [[
   name: eig
   cname: geev
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
-  with_stateless: True
+  types:
+    - Float
+    - Double
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
   return: argument 0,1
   arguments:
     - arg: THTensor* res1
@@ -1866,8 +2298,15 @@ static const char *R = &__R;
 [[
   name: svd
   cname: gesvd
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
-  with_stateless: True
+  types:
+    - Float
+    - Double
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
   return: argument 0,1,2
   arguments:
     - arg: THTensor* res1
@@ -1886,8 +2325,15 @@ static const char *R = &__R;
 [[
   name: inverse
   cname: getri
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
-  with_stateless: True
+  types:
+    - Float
+    - Double
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* output
@@ -1897,8 +2343,15 @@ static const char *R = &__R;
 
 [[
   name: potrf
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
-  with_stateless: True
+  types:
+    - Float
+    - Double
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* output
@@ -1912,8 +2365,15 @@ static const char *R = &__R;
 
 [[
   name: potrs
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
-  with_stateless: True
+  types:
+    - Float
+    - Double
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1928,8 +2388,15 @@ static const char *R = &__R;
 
 [[
   name: potri
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
-  with_stateless: True
+  types:
+    - Float
+    - Double
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* output
@@ -1943,15 +2410,21 @@ static const char *R = &__R;
 
 [[
   name: pstrf
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-  with_stateless: True
+  types:
+    - Float
+    - Double
+  backends:
+    - CPU
+  variants:
+    - method
+    - function
   return: argument 0,1
   after_call:
     THIntTensor_sub(((THPIntTensor*)$arg1)->cdata, ((THPIntTensor*)$arg1)->cdata, 1);
   arguments:
     - arg: THTensor* res1
       output: True
-    - arg: THIntTensor* res2
+    - arg: THIntegerTensor* res2
       output: True
     - THTensor* self
     - arg: bool upper
@@ -1964,8 +2437,15 @@ static const char *R = &__R;
 
 [[
   name: qr
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
-  with_stateless: True
+  types:
+    - Float
+    - Double
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
   return: argument 0,1
   arguments:
     - arg: THTensor* res1
@@ -1977,8 +2457,14 @@ static const char *R = &__R;
 
 [[
   name: geqrf
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-  with_stateless: True
+  types:
+    - Float
+    - Double
+  backends:
+    - CPU
+  variants:
+    - method
+    - function
   return: argument 0,1
   arguments:
     - arg: THTensor* res1
@@ -1990,8 +2476,14 @@ static const char *R = &__R;
 
 [[
   name: orgqr
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-  with_stateless: True
+  types:
+    - Float
+    - Double
+  backends:
+    - CPU
+  variants:
+    - method
+    - function
   return: argument 0,1
   arguments:
     - arg: THTensor* result
@@ -2002,8 +2494,14 @@ static const char *R = &__R;
 
 [[
   name: ormqr
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-  with_stateless: True
+  types:
+    - Float
+    - Double
+  backends:
+    - CPU
+  variants:
+    - method
+    - function
   return: argument 0,1
   arguments:
     - arg: THTensor* result
@@ -2024,8 +2522,14 @@ static const char *R = &__R;
 [[
   name: btrifact
   cname: btrifact
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
-  with_stateless: true
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
   return: argument 0,1
   arguments:
     - arg: THTensor* result
@@ -2044,8 +2548,14 @@ static const char *R = &__R;
 [[
   name: btrisolve
   cname: btrisolve
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_HALF || CUDA_DOUBLE
-  with_stateless: true
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
