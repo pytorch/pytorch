@@ -253,10 +253,10 @@ class DataLoader(object):
         shuffle (bool, optional): set to ``True`` to have the data reshuffled
             at every epoch (default: False).
         sampler (Sampler, optional): defines the strategy to draw samples from
-            the dataset. If specified, the ``shuffle`` argument is ignored.
+            the dataset. If specified, ``shuffle`` must be False.
         batch_sampler (Sampler, optional): like sampler, but returns a batch of
-            indices at a time. If specified, batch_size, shuffle, sampler, and
-            drop_last are ignored.
+            indices at a time. Mutually exclusive with batch_size, shuffle,
+            sampler, and drop_last.
         num_workers (int, optional): how many subprocesses to use for data
             loading. 0 means that the data will be loaded in the main process
             (default: 0)
@@ -279,16 +279,23 @@ class DataLoader(object):
         self.drop_last = drop_last
 
         if batch_sampler is not None:
-            self.batch_sampler = batch_sampler
-            self.sampler = None
-        else:
-            if sampler is not None:
-                self.sampler = sampler
-            elif shuffle:
-                self.sampler = RandomSampler(dataset)
-            elif not shuffle:
-                self.sampler = SequentialSampler(dataset)
-            self.batch_sampler = BatchSampler(self.sampler, batch_size, drop_last)
+            if batch_size > 1 or shuffle or sampler is not None or drop_last:
+                raise ValueError('batch_sampler is mutually exclusive with '
+                                 'batch_size, shuffle, sampler, and drop_last')
+
+        if sampler is not None and shuffle:
+            raise ValueError('sampler is mutually exclusive with shuffle')
+
+        if batch_sampler is None:
+            if sampler is None:
+                if shuffle:
+                    sampler = RandomSampler(dataset)
+                else:
+                    sampler = SequentialSampler(dataset)
+            batch_sampler = BatchSampler(sampler, batch_size, drop_last)
+
+        self.sampler = sampler
+        self.batch_sampler = batch_sampler
 
     def __iter__(self):
         return DataLoaderIter(self)
