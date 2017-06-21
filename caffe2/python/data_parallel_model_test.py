@@ -10,11 +10,9 @@ from caffe2.python import optimizer
 from caffe2.python.test_util import TestCase
 
 
-@unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
-@unittest.skipIf(workspace.NumCudaDevices() < 2, "Need at least 2 GPUs.")
-class GPUDataParallelModelTest(TestCase):
+class DataParallelModelTest(TestCase):
 
-    def run_model(self, gpu_devices):
+    def run_model(self, devices, gpu):
         '''
         Helper function for test_equiv
         '''
@@ -37,14 +35,15 @@ class GPUDataParallelModelTest(TestCase):
         workspace.ResetWorkspace()
         model = cnn.CNNModelHelper(
             order="NHWC",
-            name="test{}".format(gpu_devices),
+            name="test{}".format(devices),
         )
-        data_parallel_model.Parallelize_GPU(
+        data_parallel_model.Parallelize(
             model,
             input_builder_fun=input_builder_fun,
             forward_pass_builder_fun=model_build_fun,
             optimizer_builder_fun=add_optimizer,
-            devices=gpu_devices,
+            devices=devices,
+            cpu_device=not gpu,
         )
 
         np.random.seed(2603)
@@ -54,45 +53,49 @@ class GPUDataParallelModelTest(TestCase):
         for i in range(0, 10):
             full_data = np.random.rand(batch_size, 16)
             full_labels = np.round(full_data[:, 0])
-            batch_per_device = batch_size // len(gpu_devices)
+            batch_per_device = batch_size // len(devices)
 
-            for (j, g) in enumerate(gpu_devices):
+            for (j, g) in enumerate(devices):
                 st = j * batch_per_device
                 en = st + batch_per_device
                 data = full_data[st:en, :].astype(np.float32)
                 labels = full_labels[st:en].astype(np.float32)
-                with core.DeviceScope(core.DeviceOption(caffe2_pb2.CUDA, g)):
-                    workspace.FeedBlob("gpu_{}/data".format(g), data)
-                    workspace.FeedBlob("gpu_{}/label".format(g), labels)
+                with core.DeviceScope(core.DeviceOption(model._device_type, g)):
+                    workspace.FeedBlob(
+                        "{}_{}/data".format(model._device_prefix, g), data
+                    )
+                    workspace.FeedBlob(
+                        "{}_{}/label".format(model._device_prefix, g), labels
+                    )
 
             if i == 0:
                 workspace.RunNetOnce(model.param_init_net)
                 workspace.CreateNet(model.net)
 
-            print(i, workspace.FetchBlob("gpu_0/fc_w").flatten()[:5])
             workspace.RunNet(model.net.Proto().name)
-
-        return workspace.FetchBlob("gpu_0/fc_w")
+        return workspace.FetchBlob("{}_0/fc_w".format(model._device_prefix))
 
     def test_equiv(self):
         '''
         Test that the model produces exactly same results given
         total batchsize, independent of number of GPUs.
         '''
-        result_2gpus = self.run_model([0, 1])
-        result_1gpus = self.run_model([0])
+        for gpu in [True, False]:
+            if gpu and not workspace.has_gpu_support:
+                continue
+            result_2gpus = self.run_model([0, 1], gpu=gpu)
+            result_1gpus = self.run_model([0], gpu=gpu)
 
-        self.assertTrue(np.allclose(result_1gpus, result_2gpus))
+            self.assertTrue(np.allclose(result_1gpus, result_2gpus))
 
-        if workspace.NumCudaDevices() >= 4:
-            result_4gpus = self.run_model(list(range(4)))
-            self.assertTrue(np.allclose(result_1gpus, result_4gpus))
+            if not gpu or workspace.NumCudaDevices() >= 4:
+                result_4gpus = self.run_model(list(range(4)), gpu=gpu)
+                self.assertTrue(np.allclose(result_1gpus, result_4gpus))
 
-        if workspace.NumCudaDevices() >= 8:
-            result_8gpus = self.run_model(list(range(8)))
-            self.assertTrue(np.allclose(result_1gpus, result_8gpus))
+            if not gpu or workspace.NumCudaDevices() >= 8:
+                result_8gpus = self.run_model(list(range(8)), gpu=gpu)
+                self.assertTrue(np.allclose(result_1gpus, result_8gpus))
 
-    @unittest.skipIf(workspace.NumCudaDevices() < 4, "Need at least 4 GPUs.")
     def test_checkpoint_params(self):
         def add_input_ops(model):
             pass
@@ -124,7 +127,7 @@ class GPUDataParallelModelTest(TestCase):
             order="NHWC",
             name="test",
         )
-        data_parallel_model.Parallelize_GPU(
+        data_parallel_model.Parallelize_CPU(
             model,
             input_builder_fun=add_input_ops,
             forward_pass_builder_fun=add_model_ops,
@@ -134,18 +137,18 @@ class GPUDataParallelModelTest(TestCase):
 
         # Only gpu_1 params should be returned (gpu_1 is the first gpu)
         checkpoint_params = data_parallel_model.GetCheckpointParams(model)
-        for p in model.GetParams("gpu_1/"):
+        for p in model.GetParams("cpu_1/"):
             self.assertTrue(p in checkpoint_params)
             self.assertTrue(p + "_momentum" in checkpoint_params)
-        for p in model.GetParams("gpu_2/"):
+        for p in model.GetParams("cpu_2/"):
             self.assertFalse(p in checkpoint_params)
         self.assertTrue(
-            core.BlobReference("gpu_1/fc_w_momentum") in checkpoint_params)
-        for c in model.GetComputedParams("gpu_1/"):
+            core.BlobReference("cpu_1/fc_w_momentum") in checkpoint_params)
+        for c in model.GetComputedParams("cpu_1/"):
             self.assertTrue(c in checkpoint_params)
-        for c in model.GetComputedParams("gpu_2/"):
+        for c in model.GetComputedParams("cpu_2/"):
             self.assertFalse(c in checkpoint_params)
-        self.assertFalse(core.BlobReference("gpu_1/data") in checkpoint_params)
+        self.assertFalse(core.BlobReference("cpu_1/data") in checkpoint_params)
         self.assertTrue(core.BlobReference("optimizer_iteration") in checkpoint_params)
 
 
@@ -153,7 +156,7 @@ class GPUDataParallelModelTest(TestCase):
 @unittest.skipIf(workspace.NumCudaDevices() < 2, "Need at least 2 GPUs.")
 class RecurrentNetworkParallelTest(TestCase):
 
-    def run_model(self, gpu_devices):
+    def run_model(self, devices, gpu):
 
         '''
         Helper function for test_equiv
@@ -216,22 +219,23 @@ class RecurrentNetworkParallelTest(TestCase):
 
         workspace.ResetWorkspace()
         model = cnn.CNNModelHelper(
-            name="recurrent_test{}".format(gpu_devices),
+            name="recurrent_test{}".format(devices),
         )
 
         self.T = 8
         self.batch_size = 64
         self.input_dim = 8
         self.hidden_dim = 31
-        self.batch_per_device = self.batch_size // len(gpu_devices)
+        self.batch_per_device = self.batch_size // len(devices)
 
-        data_parallel_model.Parallelize_GPU(
+        data_parallel_model.Parallelize(
             model,
             input_builder_fun=input_builder_fun,
             forward_pass_builder_fun=model_build_fun,
             param_update_builder_fun=param_update_fun,
-            devices=gpu_devices,
+            devices=devices,
             optimize_gradient_memory=True,
+            cpu_device=not gpu,
         )
 
         # Change all initialization to be ConstantFills so that
@@ -248,14 +252,18 @@ class RecurrentNetworkParallelTest(TestCase):
                 self.T, self.batch_size, self.hidden_dim
             )
 
-            for (j, g) in enumerate(gpu_devices):
+            for (j, g) in enumerate(devices):
                 st = j * self.batch_per_device
                 en = st + self.batch_per_device
                 data = full_data[:, st:en, :].astype(np.float32)
                 targets = full_target[:, st:en, :].astype(np.float32)
-                with core.DeviceScope(core.DeviceOption(caffe2_pb2.CUDA, g)):
-                    workspace.FeedBlob("gpu_{}/data".format(g), data)
-                    workspace.FeedBlob("gpu_{}/target".format(g), targets)
+                with core.DeviceScope(core.DeviceOption(model._device_type, g)):
+                    workspace.FeedBlob(
+                        "{}_{}/data".format(model._device_prefix, g), data
+                    )
+                    workspace.FeedBlob(
+                        "{}_{}/target".format(model._device_prefix, g), targets
+                    )
 
             if i == 0:
                 workspace.RunNetOnce(model.param_init_net)
@@ -263,28 +271,28 @@ class RecurrentNetworkParallelTest(TestCase):
 
             workspace.RunNet(model.net.Proto().name)
 
-        return workspace.FetchBlob("gpu_0/partest/i2h_w")
+        return workspace.FetchBlob("{}_0/partest/i2h_w".format(model._device_prefix))
 
     def test_equiv_recurrent(self):
         '''
         Test that the model produces exactly same results given
-        total batchsize, independent of number of GPUs.
+        total batchsize, independent of number of GPUs/CPUs.
         '''
-        result_2gpus = self.run_model([0, 1])
-        result_1gpus = self.run_model([0])
+        for gpu in [True, False]:
+            if gpu and not workspace.has_gpu_support:
+                continue
+            result_2gpus = self.run_model([0, 1], gpu)
+            result_1gpus = self.run_model([0], gpu)
 
-        print("result 1", result_1gpus.flatten()[:5])
-        print("result 2", result_2gpus.flatten()[:5])
+            self.assertTrue(np.allclose(result_1gpus, result_2gpus))
 
-        self.assertTrue(np.allclose(result_1gpus, result_2gpus))
+            if not gpu or workspace.NumCudaDevices() >= 4:
+                result_4gpus = self.run_model(list(range(4)), gpu)
+                self.assertTrue(np.allclose(result_1gpus, result_4gpus))
 
-        if workspace.NumCudaDevices() >= 4:
-            result_4gpus = self.run_model(list(range(4)))
-            self.assertTrue(np.allclose(result_1gpus, result_4gpus))
-
-        if workspace.NumCudaDevices() >= 8:
-            result_8gpus = self.run_model(list(range(8)))
-            self.assertTrue(np.allclose(result_1gpus, result_8gpus))
+            if not gpu or workspace.NumCudaDevices() >= 8:
+                result_8gpus = self.run_model(list(range(8)), gpu)
+                self.assertTrue(np.allclose(result_1gpus, result_8gpus))
 
 
 @unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")

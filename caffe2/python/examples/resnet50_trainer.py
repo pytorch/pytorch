@@ -66,7 +66,7 @@ def AddImageInput(model, reader, batch_size, img_size):
 
 
 def SaveModel(args, train_model, epoch):
-    prefix = "gpu_{}".format(train_model._devices[0])
+    prefix = "[]_{}".format(train_model._device_prefix, train_model._devices[0])
     predictor_export_meta = pred_exp.PredictorExportMeta(
         predict_net=train_model.net.Proto(),
         parameters=data_parallel_model.GetCheckpointParams(train_model),
@@ -141,14 +141,16 @@ def RunEpoch(
 
         fmt = "Finished iteration {}/{} of epoch {} ({:.2f} images/sec)"
         log.info(fmt.format(i + 1, epoch_iters, epoch, total_batch_size / dt))
-        prefix = "gpu_{}".format(train_model._devices[0])
+        prefix = "{}_{}".format(
+            train_model._device_prefix,
+            train_model._devices[0])
         accuracy = workspace.FetchBlob(prefix + '/accuracy')
         loss = workspace.FetchBlob(prefix + '/loss')
         train_fmt = "Training loss: {}, accuracy: {}"
         log.info(train_fmt.format(loss, accuracy))
 
     num_images = epoch * epoch_iters * total_batch_size
-    prefix = "gpu_{}".format(train_model._devices[0])
+    prefix = "{}_{}".format(train_model._device_prefix, train_model._devices[0])
     accuracy = workspace.FetchBlob(prefix + '/accuracy')
     loss = workspace.FetchBlob(prefix + '/loss')
     learning_rate = workspace.FetchBlob(prefix + '/conv1_w_lr')
@@ -160,7 +162,7 @@ def RunEpoch(
             workspace.RunNet(test_model.net.Proto().name)
             for g in test_model._devices:
                 test_accuracy += np.asscalar(workspace.FetchBlob(
-                    "gpu_{}".format(g) + '/accuracy'
+                    "{}_{}".format(test_model._device_prefix, g) + '/accuracy'
                 ))
                 ntests += 1
         test_accuracy /= ntests
@@ -296,7 +298,7 @@ def Train(args):
         )
 
     # Create parallelized model
-    data_parallel_model.Parallelize_GPU(
+    data_parallel_model.Parallelize(
         train_model,
         input_builder_fun=add_image_input,
         forward_pass_builder_fun=create_resnet50_model_ops,
@@ -304,6 +306,7 @@ def Train(args):
         devices=gpus,
         rendezvous=rendezvous,
         optimize_gradient_memory=True,
+        cpu_device=args.use_cpu,
     )
 
     # Add test model, if specified
@@ -333,12 +336,13 @@ def Train(args):
                 img_size=args.image_size,
             )
 
-        data_parallel_model.Parallelize_GPU(
+        data_parallel_model.Parallelize(
             test_model,
             input_builder_fun=test_input_fn,
             forward_pass_builder_fun=create_resnet50_model_ops,
             param_update_builder_fun=None,
             devices=gpus,
+            cpu_device=args.use_cpu,
         )
         workspace.RunNetOnce(test_model.param_init_net)
         workspace.CreateNet(test_model.net)
@@ -446,6 +450,9 @@ def main():
                         help="Save the trained model to a given name")
     parser.add_argument("--load_model_path", type=str, default=None,
                         help="Load previously saved model to continue training")
+    parser.add_argument("--use_cpu", type=bool, default=False,
+                        help="Use CPU instead of GPU")
+
     args = parser.parse_args()
 
     Train(args)
