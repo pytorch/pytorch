@@ -1,4 +1,6 @@
+import os
 from . import CWrapPlugin
+from ...shared import cwrap_common
 
 
 class ArgcountSortPlugin(CWrapPlugin):
@@ -7,8 +9,7 @@ class ArgcountSortPlugin(CWrapPlugin):
         self.descending = descending
 
     def process_declarations(self, declarations):
-        def num_checked_args(option):
-            return sum(map(lambda a: not a.get('ignore_check', False), option['arguments']))
         for declaration in declarations:
-            declaration['options'].sort(key=num_checked_args, reverse=self.descending)
+            cwrap_common.sort_by_number_of_options(declaration,
+                                                   self.descending)
         return declarations

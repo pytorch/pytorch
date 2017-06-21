@@ -334,8 +334,92 @@ ${cpu}
                        for option in declaration['options']
                        for arg in option['arguments'])
 
+        def backends_types_to_defined_if_string(declaration):
+            # A declaration has two fields: 'backend', which stores a list of
+            # backends (currently 'cpu' and 'cuda') the declaration applies
+            # to, and 'types', which stores a list of real types the
+            # declaration applies to. In PyTorch, when a function is only
+            # supported by a subset of types, we wrap it in macro definition
+            # checks.
+            #
+            # Previously, we manually required the cwrap declaration to
+            # specify for which backend/type combinations a function was
+            # defined for. Now, we explicitly list the types and backends for
+            # a declaration, if it should only be supported for a specific
+            # subset of types, backends, or type-backend pairs.
+
+            types = declaration.get('types', [])
+            backends = declaration['backends']
+            all_backends = ['CPU', 'CUDA']
+
+            def get_defined_string(backend, real):
+                if backend == 'CUDA':
+                    if real == 'all':
+                        return "IS_CUDA"
+                    else:
+                        return 'CUDA_{0}'.format(real.upper())
+                else:
+                    if real == 'all':
+                        return "!IS_CUDA"
+                    else:
+                        return 'defined(TH_REAL_IS_{0})'.format(real.upper())
+
+            def expand_composite_type(p, t):
+                if t == 'floating_point':
+                    result = ['double', 'float']
+                    if p == 'CUDA':
+                        result.append('half')
+                elif t == 'integral':
+                    result = ['byte', 'char', 'short', 'int', 'long']
+                else:
+                    result = [t]
+                return result
+
+            defineds = []
+
+            # The logic below does not handle corner cases well. We allow the
+            # declaration to have a field 'backend_type_pairs' that stores a
+            # dictionary from type --> backend representing allowed
+            # combinations. Let's use these first.
+            for pair in declaration.get('backend_type_pairs', []):
+                p, t = pair
+                defineds.extend([get_defined_string(p, et) for et in
+                                expand_composite_type(p, t)])
+
+            # In the base case, types is empty and backends contains both
+            # 'CPU' and 'CUDA' --> this means we support all types, and our
+            # string should be empty, or simply the list of explict type
+            # backend pairs
+            if (len(types) == 0 and all([proc in backends for proc in
+                                         all_backends])):
+                return " || ".join(defineds)
+
+            # Case 2: types is empty, but only one backend type is specified
+            if len(types) == 0 and len(backends) == 1:
+                defineds.append('IS_CUDA' if backends[0] == 'CUDA' else
+                                "!IS_CUDA")
+                return " || ".join(defineds)
+
+            # Else, we loop overall all of the backend, type pairs and add
+            # them
+            for p in backends:
+                for t in types:
+                    defineds.extend([get_defined_string(p, et) for et in
+                                    expand_composite_type(p, t)])
+
+            return " || ".join(defineds)
+
         for declaration in declarations:
             # Disable all methods for THHalfTensor, unless cpu_half is True
+
+            dfstr = backends_types_to_defined_if_string(declaration)
+            if len(dfstr) > 0:
+                # for now, need to check for distributed defined if as well
+                if 'defined_if' in declaration:
+                    declaration['defined_if'] += ' && (' + dfstr + ')'
+                else:
+                    declaration['defined_if'] = dfstr
+
             if not declaration.get('cpu_half', False):
                 defined_if = '!defined(TH_REAL_IS_HALF)'
                 if 'defined_if' in declaration:
@@ -362,11 +446,13 @@ ${cpu}
                 if option.get('sparse', False):
                     defined_if = option.get('defined_if', '')
                     option['defined_if'] = '!IS_DISTRIBUTED' + (' && ' if defined_if else '') + defined_if
-            if declaration.get('with_stateless', False) or declaration.get('only_stateless', False):
+
+            variants = declaration.get('variants', ['method'])
+            if 'function' in variants:
                 stateless_declaration = self.make_stateless(declaration)
                 new_declarations.append(stateless_declaration)
                 self.stateless_declarations.append(stateless_declaration)
-            if declaration.get('only_stateless', False):
+            if 'method' not in variants:
                 continue
 
             self.declarations.append(declaration)
@@ -379,9 +465,13 @@ ${cpu}
 
         register_only = [d for d in declarations if d.get('only_register', False)]
         declarations = [d for d in declarations
-                        if (not d.get('only_stateless', False)) and (not d.get('only_register', False))]
-        self.declarations.extend(filter(lambda x: not x.get('only_stateless', False), register_only))
-        self.stateless_declarations.extend(filter(lambda x: x.get('only_stateless', False), register_only))
+                        if (('method' in d.get('variants', ['method'])) and
+                            (not d.get('only_register', False)))]
+        self.declarations.extend(filter(lambda x: 'method' in x.get('variants',
+                                 ['method']), register_only))
+        self.stateless_declarations.extend(filter(lambda x: 'method' not in
+                                           x.get('variants', ['method']),
+                                           register_only))
 
         self.process_docstrings()
 
