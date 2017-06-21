@@ -51,17 +51,6 @@ class SimpleQueue {
     cv_.notify_one();
   }
 
-  void PushBulk(const vector<T>& values) {
-    {
-      std::lock_guard<std::mutex> mutex_lock(mutex_);
-      CAFFE_ENFORCE(!no_more_jobs_, "Cannot push to a closed queue.");
-      for (const T& x : values) {
-        queue_.push(x);
-      }
-    }
-    cv_.notify_all();
-  }
-
   // NoMoreJobs() marks the close of this queue. It also notifies all waiting
   // Pop() calls so that they either check out remaining jobs, or return false.
   // After NoMoreJobs() is called, this queue is considered closed - no more
