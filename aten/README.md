@@ -143,3 +143,18 @@ for(int i = 0; i < foo_a.size(0); i++) {
 
 Accessors are temporary views of a Tensor. They are only valid for the lifetime of the tensor that they
 view and hence should only be used locally in a function, like iterators.
+
+### Using externally created data
+
+If you already have your tensor data allocated in memory (CPU or CUDA),
+you can view that memory as a Tensor in ATen:
+
+```c++
+float data[] = { 1, 2, 3,
+                 4, 5, 6};
+auto f = CPU(kFloat).tensorFromBlob(data, {2,3});
+cout << f << endl;
+```
+
+These tensors cannot be resized because ATen does not own the memory, but otherwise
+behave as normal tensors.
