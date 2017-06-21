@@ -1,5 +1,5 @@
-#ifndef XT_MSE_METER_H
-#define XT_MSE_METER_H
+#ifndef AT_MSE_METER_H
+#define AT_MSE_METER_H
 
 #include "Meter.h"
 #include "ATen/ATen.h"

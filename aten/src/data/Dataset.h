@@ -1,5 +1,5 @@
-#ifndef XT_DATASET_H
-#define XT_DATASET_H
+#ifndef AT_DATASET_H
+#define AT_DATASET_H
 
 #include "ATen/ATen.h"
 #include <string>

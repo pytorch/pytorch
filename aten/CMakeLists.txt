@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.0)
-project(XT)
+project(ATen)
 
 # RPATH stuff
 # see https://cmake.org/Wiki/CMake_RPATH_handling

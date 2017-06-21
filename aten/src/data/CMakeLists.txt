@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.0)
-project(XT)
+project(ATen)
 
 if(APPLE)
   set(CMAKE_MACOSX_RPATH ON)

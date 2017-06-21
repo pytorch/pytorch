@@ -1,5 +1,5 @@
-#ifndef XT_CLASS_ERROR_METER_H
-#define XT_CLASS_ERROR_METER_H
+#ifndef AT_CLASS_ERROR_METER_H
+#define AT_CLASS_ERROR_METER_H
 
 #include "Meter.h"
 #include "ATen/ATen.h"

@@ -1,5 +1,5 @@
-#ifndef XT_DATASET_ITERATOR_H
-#define XT_DATASET_ITERATOR_H
+#ifndef AT_DATASET_ITERATOR_H
+#define AT_DATASET_ITERATOR_H
 
 #include "Dataset.h"
 #include <iterator>

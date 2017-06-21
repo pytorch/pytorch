@@ -1,5 +1,5 @@
-#ifndef XT_CONCAT_DATASET_H
-#define XT_CONCAT_DATASET_H
+#ifndef AT_CONCAT_DATASET_H
+#define AT_CONCAT_DATASET_H
 
 #include "Dataset.h"
 

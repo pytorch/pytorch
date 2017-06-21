@@ -1,5 +1,5 @@
-#ifndef XT_THREADPOOL_H
-#define XT_THREADPOOL_H
+#ifndef AT_THREADPOOL_H
+#define AT_THREADPOOL_H
 
 // dependencies:
 #include <vector>

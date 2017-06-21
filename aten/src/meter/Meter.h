@@ -1,5 +1,5 @@
-#ifndef XT_METER_H
-#define XT_METER_H
+#ifndef AT_METER_H
+#define AT_METER_H
 
 #include "ATen/ATen.h"
 
