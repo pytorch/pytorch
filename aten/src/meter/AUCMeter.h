@@ -1,5 +1,5 @@
-#ifndef XT_AUC_METER_H
-#define XT_AUC_METER_H
+#ifndef AT_AUC_METER_H
+#define AT_AUC_METER_H
 
 #include "Meter.h"
 #include "APMeter.h"

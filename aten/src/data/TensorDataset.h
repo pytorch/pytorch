@@ -1,5 +1,5 @@
-#ifndef XT_TENSOR_DATASET_H
-#define XT_TENSOR_DATASET_H
+#ifndef AT_TENSOR_DATASET_H
+#define AT_TENSOR_DATASET_H
 
 #include "Dataset.h"
 #include "ATen/ATen.h"

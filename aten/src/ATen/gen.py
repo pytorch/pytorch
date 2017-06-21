@@ -58,14 +58,14 @@ if not options.no_cuda:
     backends.append('CUDA')
 
 scalar_types = [
-    ('Byte', 'uint8_t', 'Long'),
-    ('Char', 'int8_t', 'Long'),
-    ('Double', 'double', 'Double'),
-    ('Float', 'float', 'Double'),
-    ('Int', 'int', 'Long'),
-    ('Long', 'int64_t', 'Long'),
-    ('Short', 'int16_t', 'Long'),
-    ('Half', 'Half', 'Double'),
+    ('Byte', 'uint8_t', 'Long', 'unsigned char'),
+    ('Char', 'int8_t', 'Long', 'char'),
+    ('Double', 'double', 'Double', 'double'),
+    ('Float', 'float', 'Double', 'float'),
+    ('Int', 'int', 'Long', 'int'),
+    ('Long', 'int64_t', 'Long', 'long'),
+    ('Short', 'int16_t', 'Long', 'short'),
+    ('Half', 'Half', 'Double', 'THHalf'),
 ]
 
 # shared environment for non-derived base classes Type.h Tensor.h Storage.h
@@ -92,10 +92,11 @@ def write(filename, s):
 
 
 def generate_storage_type_and_tensor(backend, scalar_type, declarations):
-    scalar_name, c_type, accreal = scalar_type
+    scalar_name, c_type, accreal, th_scalar_type = scalar_type
     env = {}
     env['ScalarName'] = scalar_name
     env['ScalarType'] = c_type
+    env['THScalarType'] = th_scalar_type
     env['AccScalarName'] = accreal
     env['Storage'] = "{}{}Storage".format(backend, scalar_name)
     env['Type'] = "{}{}Type".format(backend, scalar_name)
@@ -134,6 +135,7 @@ def generate_storage_type_and_tensor(backend, scalar_type, declarations):
             env['to_th_half'] = 'HalfFix<__half,Half>'
             env['to_at_half'] = 'HalfFix<Half,__half>'
             env['AS_REAL'] = 'convert<half,double>'
+            env['THScalarType'] = 'half'
         else:
             env['to_th_half'] = 'HalfFix<THHalf,Half>'
             env['to_at_half'] = 'HalfFix<Half,THHalf>'

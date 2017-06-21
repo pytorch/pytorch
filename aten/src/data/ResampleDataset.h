@@ -1,5 +1,5 @@
-#ifndef XT_RESAMPLE_DATASET_H
-#define XT_RESAMPLE_DATASET_H
+#ifndef AT_RESAMPLE_DATASET_H
+#define AT_RESAMPLE_DATASET_H
 
 #include <string>
 #include <vector>
