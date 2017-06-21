@@ -101,6 +101,12 @@ struct Tensor {
   template<typename T>
   T * data() const;
 
+  //toLongData(), toFloatData() etc.
+  #define TO_TYPE_DATA(T,name,_) \
+  T * to##name##Data() const;
+  AT_FORALL_SCALAR_TYPES(TO_TYPE_DATA)
+  #undef TO_TYPE_DATA
+
   template<typename T, size_t N>
   TensorAccessor<T,N> accessor() {
     static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data<T>()");
@@ -164,7 +170,8 @@ inline T* Tensor::data() const { \
     "expected scalar type % s but found %s", #name, \
     at::toString(type().scalarType())); \
   return static_cast<T*>(this->data_ptr()); \
-}
+} \
+inline T* Tensor::to##name##Data() const { return data<T>(); }
 
 AT_FORALL_SCALAR_TYPES(DEFINE_CAST)
 #undef DEFINE_CAST

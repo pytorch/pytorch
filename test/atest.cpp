@@ -18,11 +18,17 @@ void trace() {
 }
 int main() {
   auto foo = CPU(kFloat).rand({12,6});
+  assert(foo.data<float>() == foo.toFloatData());
+
   cout << foo << "\n" << foo.size(0) << " " << foo.size(1) << endl;
 
   foo = foo+foo*3;
   foo -= 4;
 
+  Scalar a = 4;
+
+  float b = a.to<float>();
+  assert(b == 4);
 
   foo = (foo*foo) == (foo.pow(3));
   foo =  2 + (foo+1);
@@ -37,7 +43,6 @@ int main() {
     }
     //cout << "\n";
   }
-
 
 
   cout << foo << "\n";

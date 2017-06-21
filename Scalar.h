@@ -95,6 +95,10 @@ public:
 
   AT_FORALL_SCALAR_TYPES(DEFINE_ACCESSOR)
 
+  //also support scalar.to<int64_t>();
+  template<typename T>
+  T to();
+
 #undef DEFINE_ACCESSOR
   bool isFloatingPoint() {
     return Tag::HAS_d == tag;
@@ -102,6 +106,7 @@ public:
   bool isIntegral() {
     return Tag::HAS_i == tag;
   }
+
 private:
   enum class Tag { HAS_d, HAS_i };
   Tag tag;
@@ -110,5 +115,19 @@ private:
     int64_t i;
   } v;
 };
+
+// define the scalar.to<int64_t>() specializations
+template<typename T>
+inline T Scalar::to() {
+  throw std::runtime_error("to() cast to unexpected type.");
+}
+
+#define DEFINE_TO(T,name,_) \
+template<> \
+inline T Scalar::to<T>() { \
+  return to##name(); \
+}
+AT_FORALL_SCALAR_TYPES(DEFINE_TO)
+#undef DEFINE_TO
 
 }
