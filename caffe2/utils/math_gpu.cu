@@ -1,9 +1,4 @@
 // Implements the math functions for CPU.
-
-#include <thrust/device_ptr.h>
-#include <thrust/reduce.h>
-#include <thrust/system/cuda/detail/par.h>
-#include <thrust/version.h>
 #include <cub/block/block_reduce.cuh>
 
 #include "caffe2/core/context_gpu.h"
