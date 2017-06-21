@@ -593,11 +593,6 @@ class ParallelizeGPUBMUFTest(TestCase):
         b_1_ = workspace.FetchBlob('gpu_1/fc_b')
         w_1_ = workspace.FetchBlob('gpu_1/fc_w')
 
-        def getBlockAvg(param_name):
-            param_0 = workspace.FetchBlob("gpu_0/{}".format(param_name))
-            param_1 = workspace.FetchBlob("gpu_1/{}".format(param_name))
-            return (param_0 + param_1) / 2
-
         # Compute block gradients.
         b_g_ = workspace.FetchBlob('gpu_0/fc_b_g')
         w_g_ = workspace.FetchBlob('gpu_0/fc_w_g')
