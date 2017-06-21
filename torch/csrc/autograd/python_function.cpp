@@ -665,6 +665,7 @@ PyObject* process_outputs(THPFunction* grad_fn, const UnpackedInput& unpacked, T
   return outputs.release();
 }
 
+// Legacy codepath
 PyObject *THPFunction_do_forward(THPFunction *self, PyObject *_inputs)
 {
   HANDLE_TH_ERRORS
@@ -681,7 +682,20 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *_inputs)
   THPObjectPtr raw_output(PyObject_CallObject(forward_fn, unpacked_input.tensor_input));
   if (!raw_output) return NULL;
 
-  return process_outputs(self, unpacked_input, std::move(raw_output), std::move(nullptr), is_volatile);
+  // Create trace (TODO: deduplicate with THPFunction_apply)
+  std::vector<Output> inputs;
+  for (auto v : unpacked_input.input_vars) {
+    // TODO: don't assume variables are always defined
+    if (v->trace_fn) {
+      inputs.emplace_back(v->trace_fn, v->output_nr);
+    } else {
+      inputs.emplace_back(v->get_input_node(), 0);
+    }
+  }
+  Py_INCREF((PyObject*)self);
+  auto node = std::make_shared<PyNode>((PyObject*)self, inputs, true /* legacy */);
+
+  return process_outputs(self, unpacked_input, std::move(raw_output), std::move(node), is_volatile);
   END_HANDLE_TH_ERRORS
 }
 
@@ -1090,7 +1104,7 @@ variable_list interpret_node(std::shared_ptr<Node> node, input_map& inputs, memo
     if (auto n = dynamic_cast<InputNode*>(node.get())) {
         return {inputs.at(n)};
     } else if (auto n = dynamic_cast<PyNode*>(node.get())) {
-        auto& cls = n->pyobj;
+        auto& obj = n->pyobj;
         // Massage variables into form where we can THPFunction_apply it.
         // While in principle we can avoid putting things into Python
         // and then taking them out again, doing so seems to require an excess
@@ -1101,7 +1115,14 @@ variable_list interpret_node(std::shared_ptr<Node> node, input_map& inputs, memo
         for (size_t i = 0; i < num_args; i++) {
           PyTuple_SET_ITEM(input_objs, i, THPVariable_Wrap(input_vars.at(i)));
         }
-        THPObjectPtr output_objs{ THPFunction_apply(cls, input_objs) };
+        THPObjectPtr output_objs;
+        if (n->is_legacy) {
+          if (THPFunction_Check(obj)) throw std::logic_error("Not a function");
+          THPFunction *fn = (THPFunction*)obj.get();
+          THPObjectPtr{ THPFunction_do_forward(fn, input_objs) };
+        } else {
+          THPObjectPtr{ THPFunction_apply(obj, input_objs) };
+        }
         _ensure_tuple(output_objs);
         auto num_outputs = PyTuple_GET_SIZE(output_objs.get());
         variable_list output_vars;

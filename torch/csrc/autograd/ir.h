@@ -48,10 +48,20 @@ struct PyNode : public Node {
   PyNode(PyObject* pyobj, std::vector<Output> inputs)
     : Node(inputs)
     , pyobj(pyobj)
+    , is_legacy(false)
     {}
 
-  virtual std::string name() const override;
+  PyNode(PyObject* pyobj, std::vector<Output> inputs, bool is_legacy)
+    : Node(inputs)
+    , pyobj(pyobj)
+    , is_legacy(is_legacy)
+    {}
+
   THPObjectPtr pyobj;
+  virtual std::string name() const override;
+  // If is_legacy, then pyobj is an object with a member function named forward.
+  // If !is_legacy, then pyobj is a class with a static member function named forward.
+  bool is_legacy;
 };
 
 void printGraph(const Node*, int);
