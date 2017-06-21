@@ -73,7 +73,8 @@ def share_grad_blobs(
 
     # Gradient ops
     grad_ops = [op for op in netproto.op if is_grad_op(op)]
-    return _compute_blob_recycling_for_dag(
+
+    optim_proto = _compute_blob_recycling_for_dag(
         netproto,
         losses,
         grad_ops,
@@ -82,6 +83,9 @@ def share_grad_blobs(
         {} if dont_share_blobs is None else dont_share_blobs,
         blob_shapes
     )
+    assert verify_graph_equality(optim_proto, net.Proto()), \
+        "Memonger graph is not equal to original."
+    return optim_proto
 
 
 def optimize_inference_for_dag(net, input_blobs, namescope=""):
@@ -105,10 +109,13 @@ def optimize_inference_for_dag(net, input_blobs, namescope=""):
         assert not op.is_gradient_op, \
             "You can only pass inference-only nets to optimize_inference_for_dag"
 
-    return _compute_blob_recycling_for_dag(
+    optim_proto = _compute_blob_recycling_for_dag(
         netproto, input_blobs, ops, is_activation_blob,
         namescope, set(), None,
     )
+    assert verify_graph_equality(optim_proto, net.Proto()), \
+        "Memonger graph is not equal to original."
+    return optim_proto
 
 
 def _compute_blob_recycling_for_dag(
