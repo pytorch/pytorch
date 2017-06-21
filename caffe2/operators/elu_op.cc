@@ -8,6 +8,8 @@ template <>
 bool EluOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto* Y = Output(0);
+  // Otherwise inplace gradient and Elu dosen't make sense.
+  CAFFE_ENFORCE_GE(alpha_, 0);
   Y->ResizeLike(X);
   const auto* Xdata = X.template data<float>();
   auto* Ydata = Y->template mutable_data<float>();
