@@ -195,8 +195,9 @@ class Broadcast(CWrapPlugin):
             type_op_c = None
             for p in params:
                 if p.startswith("types:"):
-                    if not in_place:
-                        raise ValueError("type specification only support for in place functions")
+                    if not in_place and len(dims_kvs) > 0:
+                        raise ValueError("type specification not supported yet for out-of-place functions "
+                                         "that specify explicit dimensions")
                     types = p[len("types:"):].split(",")
                     assert(len(types) == (2 if op_c else 1))
                     type_op_b = None if types[0] == "Real" else types[0]
@@ -283,8 +284,9 @@ class Broadcast(CWrapPlugin):
 
                 else:
                     code_arg_op_a = self.getPreArgStringTemplate().substitute(arg_op_other=arg_op_a)
-                    code_arg_op_other1 = self.getPreArgStringTemplate().substitute(op_b_mapping)
-                    code_arg_op_other2 = self.getPreArgStringTemplate().substitute(op_c_mapping) if op_c else ""
+                    code_arg_op_other1 = self.getPreArgStringTemplate(type=type_op_b).substitute(op_b_mapping)
+                    code_arg_op_other2 = (self.getPreArgStringTemplate(type=type_op_c).substitute(op_c_mapping)
+                                          if op_c else "")
 
                     if op_c:
                         expand_code = self.getOutPlacePreExpand3Template(raise_errors == "true").substitute(
