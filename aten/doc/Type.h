@@ -10,7 +10,6 @@ namespace at {
 class Context;
 class Storage;
 class Tensor;
-class TensorRef;
 class Generator;
 
 enum class ScalarType {
@@ -96,6 +95,7 @@ struct Type {
   static void registerAll(Context * context);
   virtual std::unique_ptr<Storage> storage() = 0;
   virtual std::unique_ptr<Storage> storage(size_t size) = 0;
+  virtual std::unique_ptr<Storage> storageFromBlob(void * data, int64_t size) = 0;
   virtual std::unique_ptr<Generator> generator() = 0;
   virtual const char * toString() const = 0;
   Type & toBackend(Backend b);
@@ -105,10 +105,14 @@ struct Type {
   // for external dispatch
   virtual TypeID ID() const = 0;
 
-  // example
-  // virtual Tensor * add(Tensor & a, Tensor & b) = 0;
   virtual void copy(const Tensor & src, Tensor & dst) = 0;
   Tensor copy(const Tensor & src);
+
+  Tensor tensorFromBlob(void * data, IntList sizes);
+  Tensor tensorFromBlob(void * data, IntList sizes, IntList strides);
+
+  // example
+  // virtual Tensor * add(Tensor & a, Tensor & b) = 0;
   virtual int64_t m_storage_offset(const Tensor & self) ;
   virtual int64_t m_ndimension(const Tensor & self) ;
   virtual Tensor & m_resize_(Tensor & self, IntList size) ;
@@ -692,6 +696,10 @@ struct Type {
   virtual Tensor & m_geometric_(Tensor & self, double p) ;
   virtual int64_t m_size(const Tensor & self, int64_t dim) ;
   virtual int64_t m_stride(const Tensor & self, int64_t dim) ;
+  virtual Tensor tensor(Storage & storage, int64_t storageOffset, IntList size, IntList stride) ;
+  virtual Tensor tensor(Storage & storage, int64_t storageOffset, IntList size) ;
+  virtual Tensor tensor(IntList size, IntList stride) ;
+  virtual Tensor tensor(IntList size) ;
   virtual Tensor tensor() ;
   virtual Tensor & select_out(const Tensor & self, int dim, int64_t sliceIndex, Tensor & result) ;
   virtual Tensor select(const Tensor & self, int dim, int64_t sliceIndex) ;
