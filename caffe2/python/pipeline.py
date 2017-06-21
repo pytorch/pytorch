@@ -200,6 +200,12 @@ def _runtime_threads_task(name, group, final_outputs, reader, num_threads,
         init_net = core.Net('pipe:instance:init')
         exit_net = core.Net('pipe:instance:exit')
         read_nets, status, rec = reader.read_record_ex(init_net, exit_net)
+        init_net.ConstantFill(
+            [], [status],
+            shape=[],
+            value=False,
+            dtype=core.DataType.BOOL
+        )
 
         if rec is not None:
             out_queue, writer = _init_output(
