@@ -12,12 +12,16 @@ std::string InputNode::name() const {
 
 std::string PyNode::name() const {
   AutoGIL gil;
-  // NB: hypothetically __name__ could mutate the Python
-  // object in a externally visible way. Please don't!
   auto wobj = const_cast<PyObject*>(pyobj.get());
-  THPObjectPtr name{PyObject_GetAttrString(wobj, "__name__")};
-  // TODO: missing error check
-  return std::string(PyString_AsString(name));
+  if (is_legacy) {
+    return std::string(wobj->ob_type->tp_name);
+  } else {
+    // NB: hypothetically __name__ could mutate the Python
+    // object in a externally visible way. Please don't!
+    THPObjectPtr name{PyObject_GetAttrString(wobj, "__name__")};
+    // TODO: missing error check
+    return std::string(PyString_AsString(name));
+  }
 }
 
 // This printer is awful and I should be ashamed
