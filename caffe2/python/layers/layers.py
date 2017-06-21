@@ -106,8 +106,8 @@ class LayerParameter(object):
 
     def __init__(self, parameter=None, optimizer=None, initializer=None,
                  ps_param=None):
-        assert (not parameter) or isinstance(parameter, core.BlobReference), \
-            "expect {0} to be none or a blob reference".format(str(parameter))
+        assert isinstance(parameter, core.BlobReference), \
+            "expect {0} to be a blob reference".format(str(parameter))
         self.parameter = parameter
         self.optimizer = optimizer
         self.initializer = initializer
@@ -144,7 +144,7 @@ class ModelLayer(object):
         predict_input_record and predict_output_schema correspondingly (those
         records are expected to be a subset of input_record/output_schema).
 
-        Each layer is also have list of Tags associated with it, that depends on
+        Each layer has a list of Tags associated with it, that depends on
         current context and arguments. It's possible to use those tags during
         the instantiation time.
 
