@@ -19,7 +19,17 @@ log = logging.getLogger("data_parallel_model")
 log.setLevel(logging.INFO)
 
 
-def Parallelize_GPU(
+def Parallelize_GPU(*args, **kwargs):
+    kwargs['cpu_device'] = False
+    Parallelize(*args, **kwargs)
+
+
+def Parallelize_CPU(*args, **kwargs):
+    kwargs['cpu_device'] = True
+    Parallelize(*args, **kwargs)
+
+
+def Parallelize(
     model_helper_obj,
     input_builder_fun,
     forward_pass_builder_fun,
@@ -33,21 +43,22 @@ def Parallelize_GPU(
     optimize_gradient_memory=False,
     use_nccl=False,
     max_concurrent_distributed_ops=4,
+    cpu_device=False,
 ):
     '''
-    Function to create a model that can run on many GPUs.
-      model_helper_obj: an object of ModelHelper, such as CNNModelHelper
+    Function to create a model that can run on many GPUs or CPUs.
+      model_helper_obj: an object of ModelHelper
       input_builder_fun:
                          Function that adds the input operators
                          Note: Remember to instantiate reader outside of this
-                         function so all GPUs share same reader object.
+                         function so all devices share same reader object.
                          Signature:  input_builder_fun(model)
       forward_pass_builder_fun:
                         Function to add the operators to the model.
                         Must return list of loss-blob references that
                         are used to build the gradient. Loss scale parameter
                         is passed, as you should scale the loss of your model
-                        by 1.0 / the total number of gpus.
+                        by 1.0 / the total number of devices.
                         Signature: forward_pass_builder_fun(model, loss_scale)
       param_update_builder_fun:
                         Function that adds operators that are run after
@@ -70,16 +81,24 @@ def Parallelize_GPU(
       net_type:         Network type
       optimize_gradient_memory: whether to apply 'memonger' to share blobs
                         in gradient computation to reduce memory footprint
-
+      cpu_device        Use CPU instead of GPU
     '''
     if devices is None:
         devices = list(range(0, workspace.NumCudaDevices())),
 
-    for gpu in devices:
-        if gpu >= workspace.NumCudaDevices():
-            log.warning("** Only {} GPUs available, GPUs {} requested".format(
-                workspace.NumCudaDevices(), devices))
-            break
+    if not cpu_device:
+        for gpu in devices:
+            if gpu >= workspace.NumCudaDevices():
+                log.warning("** Only {} GPUs available, GPUs {} requested".format(
+                    workspace.NumCudaDevices(), devices))
+                break
+        model_helper_obj._device_type = caffe2_pb2.CUDA
+        model_helper_obj._device_prefix = "gpu"
+        device_name = "GPU"
+    else:
+        model_helper_obj._device_type = caffe2_pb2.CPU
+        model_helper_obj._device_prefix = "cpu"
+        device_name = "CPU"
 
     log.info("Parallelizing model for devices: {}".format(devices))
     extra_workers = 8 if rendezvous is not None else 0  # best-guess
@@ -115,10 +134,11 @@ def Parallelize_GPU(
     ), 'Can only specify one of param_update_builder_fun, optimizer_builder_fun'
 
     for device in devices:
-        device_opt = core.DeviceOption(caffe2_pb2.CUDA, device)
+        device_opt = core.DeviceOption(model_helper_obj._device_type, device)
         with core.DeviceScope(device_opt):
-            with core.NameScope("gpu_{}".format(device)):
-                log.info("Model for GPU: {}".format(device))
+            with core.NameScope("{}_{}".format(model_helper_obj._device_prefix,
+                                               device)):
+                log.info("Model for {} : {}".format(device_name, device))
                 input_builder_fun(model_helper_obj)
                 losses = forward_pass_builder_fun(model_helper_obj, loss_scale)
                 # Losses are not needed for test net
@@ -134,11 +154,13 @@ def Parallelize_GPU(
 
     # Create parameter map
     model_helper_obj._device_grouped_blobs =\
-        _GroupByDevice(devices, model_helper_obj.params, non_datapar_params)
+        _GroupByDevice(model_helper_obj, devices,
+                       model_helper_obj.params, non_datapar_params)
 
     # computed params
     computed_params_grouped =\
-        _GroupByDevice(devices, model_helper_obj.GetComputedParams(''), [])
+        _GroupByDevice(model_helper_obj, devices,
+                       model_helper_obj.GetComputedParams(''), [])
     model_helper_obj._device_grouped_blobs.update(computed_params_grouped)
 
     model_helper_obj._param_names =\
@@ -162,6 +184,7 @@ def Parallelize_GPU(
     non_datapar_grads = [param_to_grad[p] for p in non_datapar_params]
 
     gradients_grouped = _GroupByDevice(
+        model_helper_obj,
         devices,
         grads_ordered,
         non_datapar_grads
@@ -192,9 +215,11 @@ def Parallelize_GPU(
 
     if param_update_builder_fun is not None:
         for device in devices:
-            device_opt = core.DeviceOption(caffe2_pb2.CUDA, device)
+            device_opt = core.DeviceOption(model_helper_obj._device_type, device)
             with core.DeviceScope(device_opt):
-                with core.NameScope("gpu_{}".format(device)):
+                with core.NameScope(
+                    "{}_{}".format(model_helper_obj._device_prefix, device)
+                ):
                     param_update_builder_fun(model_helper_obj)
     else:
         log.info("Calling optimizer builder function")
@@ -202,6 +227,7 @@ def Parallelize_GPU(
 
     (sync_blobs, sync_names) = _ComputeBlobsToSync(model_helper_obj)
     sync_blobs_grouped = _GroupByDevice(
+        model_helper_obj,
         devices,
         sync_blobs,
         [],
@@ -237,9 +263,11 @@ def Parallelize_GPU(
     # i.e. making sure multi-precision copies of parameters are up-to-date
     if post_sync_builder_fun is not None:
         for device in devices:
-            device_opt = core.DeviceOption(caffe2_pb2.CUDA, device)
+            device_opt = core.DeviceOption(model_helper_obj._device_type, device)
             with core.DeviceScope(device_opt):
-                with core.NameScope("gpu_{}".format(device)):
+                with core.NameScope(
+                    "{}_{}".format(model_helper_obj._device_prefix, device)
+                ):
                     post_sync_builder_fun(model_helper_obj)
 
     if optimize_gradient_memory:
@@ -281,6 +309,8 @@ def Parallelize_GPU_BMUF(
         master_gpu = devices[0]
 
     model_helper_obj._devices = devices
+    model_helper_obj._device_type = caffe2_pb2.CUDA
+    model_helper_obj._device_prefix = 'gpu'
     master_gpu_opt = core.DeviceOption(caffe2_pb2.CUDA, master_gpu)
 
     num_workers = len(devices)
@@ -324,7 +354,8 @@ def Parallelize_GPU_BMUF(
     _ForEachGPU(devices, _InitializeModels, scoped=True)
 
     model_helper_obj._device_grouped_blobs =\
-        _GroupByDevice(devices, model_helper_obj.params, non_datapar_params)
+        _GroupByDevice(model_helper_obj, devices,
+                       model_helper_obj.params, non_datapar_params)
 
     model_helper_obj._param_names =\
         model_helper_obj._device_grouped_blobs.keys()
@@ -457,7 +488,7 @@ def _AddGradientOperators(devices, model, losses_by_gpu):
     loss_grad = {}
     # Explicitly need to create gradients on each GPU
     for gpu_id in devices:
-        device = core.DeviceOption(caffe2_pb2.CUDA, gpu_id)
+        device = core.DeviceOption(model._device_type, gpu_id)
         with core.DeviceScope(device):
             for l in losses_by_gpu[gpu_id]:
                 lg = create_grad(l)
@@ -472,7 +503,7 @@ def ExtractPredictorNet(model, inputs, outputs, device):
     net.
     '''
     master_device = model._devices[0]
-    prefix = "gpu_{}/".format(master_device)
+    prefix = "{}_{}/".format(model._device_prefix, master_device)
     prefix_inputs = [prefix + str(b) for b in inputs]
     prefix_outputs = [prefix + str(b) for b in outputs]
     (predictor_net, export_blobs) = model_helper.ExtractPredictorNet(
@@ -496,15 +527,18 @@ def GetCheckpointParams(model):
     '''
     (all_blobs, _) = _ComputeBlobsToSync(model)
     first_gpu_blobs = {
-        b for b in all_blobs
-        if str(b).startswith("gpu_{}/".format(model._devices[0]))}
+        b
+        for b in all_blobs
+        if str(b)
+        .startswith("{}_{}/".format(model._device_prefix, model._devices[0]))
+    }
 
     # Add iteration blobs that do not have namescope separately, since
     # it is important to checkpoint iteration counter
     iteration_blobs = set()
     for op in model.net.Proto().op:
         if op.type == 'Iter' or op.type == 'AtomicIter':
-            if not op.output[0].startswith("gpu_"):
+            if not op.output[0].startswith("{}_".format(model._device_prefix)):
                 iteration_blobs.add(op.output[0])
 
     return first_gpu_blobs.union(iteration_blobs)
@@ -530,7 +564,8 @@ def FinalizeAfterCheckpoint(model, blobs=None):
             if name not in model._device_grouped_blobs:
                 grouped = {
                     d:
-                    core.BlobReference("gpu_{}{}{}".format(
+                    core.BlobReference("{}_{}{}{}".format(
+                        model._device_prefix,
                         d,
                         scope._NAMESCOPE_SEPARATOR,
                         name)
@@ -565,61 +600,66 @@ def FinalizeAfterCheckpoint(model, blobs=None):
 
 def _Broadcast(devices, model, net, param, use_nccl=False):
     # Copy params from gpu_0 to other
-    master_gpu = devices[0]
+    master_dev = devices[0]
 
     if use_nccl:
         if _IsGPUBlob(model, param):
-            master_device_opt = core.DeviceOption(caffe2_pb2.CUDA, master_gpu)
+            master_device_opt = core.DeviceOption(model._device_type, master_dev)
             with core.DeviceScope(master_device_opt):
-
                 model.NCCLBroadcast(
                     model._device_grouped_blobs[param].values(),
                     model._device_grouped_blobs[param].values(),
-                    root=master_gpu
+                    root=master_dev
                 )
                 return
 
-    for gpu_idx in devices[1:]:
+    for dev_idx in devices[1:]:
         if _IsGPUBlob(model, param):
-            device_opt = core.DeviceOption(caffe2_pb2.CUDA, gpu_idx)
+            device_opt = core.DeviceOption(caffe2_pb2.CUDA, dev_idx)
         else:
             device_opt = core.DeviceOption(caffe2_pb2.CPU, 0)
         with core.DeviceScope(device_opt):
             net.Copy(
-                model._device_grouped_blobs[param][master_gpu],
-                model._device_grouped_blobs[param][gpu_idx]
+                model._device_grouped_blobs[param][master_dev],
+                model._device_grouped_blobs[param][dev_idx]
             )
 
 
 def _AllReduce(devices, model, net, param, use_nccl=False, control_input=None):
     blobs_group = model._device_grouped_blobs[param].values()
-    if use_nccl:
+    if model._device_type == caffe2_pb2.CUDA and use_nccl:
         model.NCCLAllreduce(
             blobs_group, blobs_group, control_input=control_input
         )
         return
 
-    p2p_access_pattern = workspace.GetCudaPeerAccessPattern()
+    if model._device_type == caffe2_pb2.CUDA:
+        p2p_access_pattern = workspace.GetCudaPeerAccessPattern()
+    else:
+        p2p_access_pattern = None
 
-    def sumN(*gpu_indices):
+    def sumN(*dev_indices):
         """Create a Sum op for 2 or more blobs on different devices.
         Saves the result on the first device.
 
         Arguments:
-        gpu_indices -- a list of GPU indices, which can be translated into
+        dev_indices -- a list of device indices, which can be translated into
                        CUDA identifiers with model._devices
         """
-        devices = [model._devices[idx] for idx in gpu_indices]
-        blobs = [blobs_group[idx] for idx in gpu_indices]
+        devices = [model._devices[idx] for idx in dev_indices]
+        blobs = [blobs_group[idx] for idx in dev_indices]
         for i, peer in enumerate(devices):
             if i == 0:
                 continue  # Skip the first device
-            if not p2p_access_pattern[devices[0], peer]:
+            if p2p_access_pattern is not None and not p2p_access_pattern[
+                devices[0], peer
+            ]:
                 # Copy from peer to d0
                 blobs[i] = model.Copy(
                     blobs[i],
-                    'gpu_{}/{}_gpu{}_copy'.format(devices[0], param, peer))
-        device_opt = core.DeviceOption(caffe2_pb2.CUDA, devices[0])
+                    'gpu_{}/{}_gpu{}_copy'.format(devices[0], param, peer)
+                )
+        device_opt = core.DeviceOption(model._device_type, devices[0])
         with core.DeviceScope(device_opt):
             net.Sum(blobs, [blobs[0]], name='dpm')
 
@@ -654,7 +694,7 @@ def _AddDistributedParameterSync(
 ):
     assert rendezvous['num_shards'] > 1
 
-    gpu_device_opt = core.DeviceOption(caffe2_pb2.CUDA, devices[0])
+    gpu_device_opt = core.DeviceOption(model._device_type, devices[0])
     cpu_device_opt = core.DeviceOption(caffe2_pb2.CPU)
 
     # Create a single common world for all broadcast operations.
@@ -725,7 +765,7 @@ def _AllReduceGradientsDistributed(
     # Make list of gradients in reverse order
     reverse_ordered_grads = _GetReverseOrderedGrads(model)
 
-    master_device_opt = core.DeviceOption(caffe2_pb2.CUDA, devices[0])
+    master_device_opt = core.DeviceOption(model._device_type, devices[0])
     reducing_device_opt = master_device_opt
 
     # We need to specify a partial order using control_input to ensure
@@ -836,7 +876,7 @@ def _AllReduceGradientsSingleHost(devices, model, use_nccl):
 
     # Now we need to Allreduce gradients on all the GPUs.
     # Pick GPU #0 as a master GPU.
-    master_device_opt = core.DeviceOption(caffe2_pb2.CUDA, devices[0])
+    master_device_opt = core.DeviceOption(model._device_type, devices[0])
     last_out = None
     concatenated_idx = set()
 
@@ -858,7 +898,7 @@ def _AllReduceGradientsSingleHost(devices, model, use_nccl):
 
                 else:
                     # Sparse gradients: all-gather for indices and values
-                    master_ns = "gpu_{}".format(devices[0])
+                    master_ns = "{}_{}".format(model._device_prefix, devices[0])
                     '''
                     Skip if we have already copied concatenated indices
                     to the indices of GradientSlice. This happens when two
@@ -878,7 +918,7 @@ def _AllReduceGradientsSingleHost(devices, model, use_nccl):
                             axis=0,
                             name="note:data_parallel_model")
                         for gpu, g in model._device_grouped_blobs[grad_name].items():
-                            device_opt = core.DeviceOption(caffe2_pb2.CUDA, gpu)
+                            device_opt = core.DeviceOption(model._device_type, gpu)
                             with core.DeviceScope(device_opt):
                                 model.Copy(grad_idx_concat, g.indices)
                                 concatenated_idx.add(g.indices)
@@ -889,7 +929,7 @@ def _AllReduceGradientsSingleHost(devices, model, use_nccl):
                          "{}/{}_val_splitinfo".format(master_ns, grad_name)],
                         axis=0, name="note:data_parallel_model")
                     for gpu, g in model._device_grouped_blobs[grad_name].items():
-                        device_opt = core.DeviceOption(caffe2_pb2.CUDA, gpu)
+                        device_opt = core.DeviceOption(model._device_type, gpu)
                         with core.DeviceScope(device_opt):
                             model.Copy(grad_val_concat, g.values)
 
@@ -898,8 +938,8 @@ def _AllReduceGradientsSingleHost(devices, model, use_nccl):
                 "Synchronizing gradient slices not supported"
             with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU)):
                 # Poor man's allreduce
-                model.Sum(grads_group, grads_group[0])
-                _Broadcast(devices, model, grad_name)
+                model.net.Sum(grads_group, [grads_group[0]])
+                _Broadcast(devices, model, model.net, grad_name)
 
 
 def _BroadcastComputedParams(devices, model, rendezvous, use_nccl=False):
@@ -966,16 +1006,21 @@ def _AnalyzeOperators(model):
         op_gpu = op_dev.cuda_gpu_id
 
         # This avoids failing on operators that are only for CPU
-        if op_dev.device_type == caffe2_pb2.CPU:
+        if op_dev.device_type != caffe2_pb2.CUDA:
             continue
 
-        namescope = "gpu_{}/".format(op_gpu)
+        namescope = "{}_{}/".format(model._device_prefix, op_gpu)
         for inp in list(op.input) + list(op.output):
-            if inp.startswith("gpu_") and not inp.startswith(namescope):
+            if inp.startswith("{}_".format(model._device_prefix)
+                             ) and not inp.startswith(namescope):
                 raise Exception(
                     "Blob {} of op {}, should have namescope {}. Op: {}".format(
-                        inp, op.type, "gpu_{}/".format(op_gpu), str(op),
-                    ))
+                        inp,
+                        op.type,
+                        "{}_{}/".format(model._device_prefix, op_gpu),
+                        str(op),
+                    )
+                )
 
 
 def _InferBlobDevice(model):
@@ -1009,13 +1054,15 @@ def _IsGPUBlob(model, blob_name):
     if blob_name in model._blob_to_device:
         return model._blob_to_device[blob_name].device_type == caffe2_pb2.CUDA
     else:
-        blob_name = "gpu_{}/{}".format(model._devices[0], blob_name)
+        blob_name = "{}_{}/{}".format(
+            model._device_prefix, model._devices[0], blob_name
+        )
         if blob_name not in model._blob_to_device:
-            return True
+            return model._device_type == caffe2_pb2.CUDA
         return model._blob_to_device[blob_name].device_type == caffe2_pb2.CUDA
 
 
-def _GroupByDevice(devices, params, non_data_params):
+def _GroupByDevice(model, devices, params, non_data_params):
     '''
     Groups blobs by device, returning a map of [blobname] = {0: BlobRef, 1: ..}.
     Returns ordered dictionary, ensuring the original order.
@@ -1037,13 +1084,13 @@ def _GroupByDevice(devices, params, non_data_params):
         gpuid = devices[i // num_params_per_device]
 
         if isinstance(p, core.BlobReference):
-            assert "gpu_{}/".format(gpuid) in p.GetNameScope(),\
-                "Param {} expected to have namescope 'gpu_{}'".format(str(p), gpuid)
+            assert "{}_{}/".format(model._device_prefix, gpuid) in p.GetNameScope(),\
+                "Param {} expected to have namescope '{}_{}'".format(str(p), model._device_prefix, gpuid)
         else:
-            assert "gpu_{}/".format(gpuid) in p.indices.GetNameScope(),\
-                "Indices {} expected to have namescope 'gpu_{}'".format(str(p), gpuid)
-            assert "gpu_{}/".format(gpuid) in p.values.GetNameScope(),\
-                "Values {} expected to have namescope 'gpu_{}'".format(str(p), gpuid)
+            assert "{}_{}/".format(model._device_prefix, gpuid) in p.indices.GetNameScope(),\
+                "Indices {} expected to have namescope '{}_{}'".format(str(p), model._device_prefix, gpuid)
+            assert "{}_{}/".format(model._device_prefix, gpuid) in p.values.GetNameScope(),\
+                "Values {} expected to have namescope '{}_{}'".format(str(p), model._device_prefix, gpuid)
 
         if name not in grouped:
             grouped[name] = {}
@@ -1087,7 +1134,10 @@ def _ComputeBlobsToSync(model):
     sync_names = set()
     blobs_to_sync = []
     for op in model.param_init_net.Proto().op:
-        dp_outputs = [o for o in op.output if o.startswith("gpu_")]
+        dp_outputs = [
+            o for o in op.output
+            if o.startswith("{}_".format(model._device_prefix))
+        ]
         sync_names.update([stripParamName(o) for o in dp_outputs])
         blobs_to_sync.extend(dp_outputs)
 
@@ -1107,7 +1157,7 @@ def _OptimizeGradientMemorySimple(model, losses_by_gpu, devices):
     log.warning("------- DEPRECATED API, please use " +
                    "data_parallel_model.OptimizeGradientMemory() ----- ")
     for device in devices:
-        namescope = "gpu_{}/".format(device)
+        namescope = "{}_{}/".format(model._device_prefix, device)
         model.net._net = memonger.share_grad_blobs(
             model.net,
             losses_by_gpu[device],
@@ -1133,7 +1183,8 @@ def OptimizeGradientMemory(model,
     input_shapes_all_devices = {}
     for b, shp in input_shapes.items():
         for d in model._devices:
-            input_shapes_all_devices["gpu_{}/{}".format(d, b)] = shp
+            input_shapes_all_devices["{}_{}/{}".
+                                     format(model._device_prefix, d, b)] = shp
 
     (shapes, types) = workspace.InferShapesAndTypes(
         [model.param_init_net, model.net],
@@ -1141,7 +1192,7 @@ def OptimizeGradientMemory(model,
     )
 
     for device in model._devices:
-        namescope = "gpu_{}/".format(device)
+        namescope = "{}_{}/".format(model._device_prefix, device)
         excluded_blobs_by_device = set([namescope + b for b in excluded_blobs])
         model.net._net = memonger.share_grad_blobs(
             model.net,
