@@ -4,11 +4,31 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import workspace
-from caffe2.python.core import Plan, to_execution_step
-from caffe2.python.task import Task, final_output
+from caffe2.python.core import Plan, to_execution_step, Net
+from caffe2.python.task import Task, TaskGroup, final_output
 from caffe2.python.net_builder import ops, NetBuilder
 from caffe2.python.session import LocalSession
 import unittest
+import threading
+
+
+class PythonOpStats(object):
+    lock = threading.Lock()
+    num_instances = 0
+    num_calls = 0
+
+
+def python_op_builder():
+    PythonOpStats.lock.acquire()
+    PythonOpStats.num_instances += 1
+    PythonOpStats.lock.release()
+
+    def my_op(inputs, outputs):
+        PythonOpStats.lock.acquire()
+        PythonOpStats.num_calls += 1
+        PythonOpStats.lock.release()
+
+    return my_op
 
 
 def _test_loop():
@@ -122,6 +142,18 @@ class TestNetBuilder(unittest.TestCase):
             for x in [total, total_large, total_small, total_tiny]
         ]
 
+    def test_net_multi_use(self):
+        with Task() as task:
+            total = ops.Const(0)
+            net = Net('my_net')
+            net.Add([total, net.Const(1)], [total])
+            ops.net(net)
+            ops.net(net)
+            result = final_output(total)
+        with LocalSession() as session:
+            session.run(task)
+            self.assertEquals(2, result.fetch())
+
     def test_loops(self):
         with Task() as task:
             out_actual = self._actual_loop()
@@ -155,3 +187,61 @@ class TestNetBuilder(unittest.TestCase):
             self.assertEquals(o6.fetch(), 6)
             self.assertEquals(o7_1.fetch(), 7)
             self.assertEquals(o7_2.fetch(), 7)
+
+    def test_multi_instance_python_op(self):
+        """
+        When task instances are created at runtime, C++ concurrently creates
+        multiple instances of operators in C++, and concurrently destroys them
+        once the task is finished. This means that the destructor of PythonOp
+        will be called concurrently, so the GIL must be acquired. This
+        test exercises this condition.
+        """
+        with Task(num_instances=64) as task:
+            with ops.loop(4):
+                ops.Python((python_op_builder, [], {}))([], [])
+        with LocalSession() as session:
+            PythonOpStats.num_instances = 0
+            PythonOpStats.num_calls = 0
+            session.run(task)
+            self.assertEquals(PythonOpStats.num_instances, 64)
+            self.assertEquals(PythonOpStats.num_calls, 256)
+
+    def test_multi_instance(self):
+        NUM_INSTANCES = 10
+        NUM_ITERS = 15
+        with TaskGroup() as tg:
+            with Task(num_instances=NUM_INSTANCES):
+                with ops.task_init():
+                    counter1 = ops.CreateCounter([], ['global_counter'])
+                    counter2 = ops.CreateCounter([], ['global_counter2'])
+                    counter3 = ops.CreateCounter([], ['global_counter3'])
+                # both task_counter and local_counter should be thread local
+                with ops.task_instance_init():
+                    task_counter = ops.CreateCounter([], ['task_counter'])
+                local_counter = ops.CreateCounter([], ['local_counter'])
+                with ops.loop(NUM_ITERS):
+                    ops.CountUp(counter1)
+                    ops.CountUp(task_counter)
+                    ops.CountUp(local_counter)
+                # gather sum of squares of local counters to make sure that
+                # each local counter counted exactly up to NUM_ITERS, and
+                # that there was no false sharing of counter instances.
+                with ops.task_instance_exit():
+                    count2 = ops.RetrieveCount(task_counter)
+                    with ops.loop(ops.Mul([count2, count2])):
+                        ops.CountUp(counter2)
+                # This should have the same effect as the above
+                count3 = ops.RetrieveCount(local_counter)
+                with ops.loop(ops.Mul([count3, count3])):
+                    ops.CountUp(counter3)
+                # The code below will only run once
+                with ops.task_exit():
+                    total1 = final_output(ops.RetrieveCount(counter1))
+                    total2 = final_output(ops.RetrieveCount(counter2))
+                    total3 = final_output(ops.RetrieveCount(counter3))
+
+        with LocalSession() as session:
+            session.run(tg)
+            self.assertEquals(total1.fetch(), NUM_INSTANCES * NUM_ITERS)
+            self.assertEquals(total2.fetch(), NUM_INSTANCES * (NUM_ITERS ** 2))
+            self.assertEquals(total3.fetch(), NUM_INSTANCES * (NUM_ITERS ** 2))
