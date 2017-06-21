@@ -4,6 +4,18 @@
 using namespace std;
 using namespace at;
 
+void trace() {
+  Tensor foo = CPU(kFloat).rand({12,12});
+
+  // assert foo is 2-dimensional and holds floats.
+  auto foo_a = foo.accessor<float,2>();
+  float trace = 0;
+
+  for(int i = 0; i < foo_a.size(0); i++) {
+    trace += foo_a[i][i];
+  }
+  cout << trace << "\n" << foo << "\n";
+}
 int main() {
   auto foo = CPU(kFloat).rand({12,6});
   cout << foo << "\n" << foo.size(0) << " " << foo.size(1) << endl;
@@ -27,6 +39,10 @@ int main() {
   }
 
 
+
   cout << foo << "\n";
+
+  trace();
+
   return 0;
 }
