@@ -16,7 +16,7 @@ class TestActivations(hu.HypothesisTestCase):
     @given(X=hu.tensor(),
            alpha=st.floats(min_value=0.1, max_value=2.0),
            inplace=st.booleans(),
-           **hu.gcs_cpu_only)
+           **hu.gcs)
     def test_elu(self, X, alpha, inplace, gc, dc):
         # go away from the origin point to avoid kink problems
         X += 0.04 * np.sign(X)
