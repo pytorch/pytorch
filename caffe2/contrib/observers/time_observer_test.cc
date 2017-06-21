@@ -71,9 +71,8 @@ TEST(TimeObserverTest, Test3Seconds) {
   ws.CreateBlob("in");
   NetDef net_def;
   unique_ptr<NetBase> net(CreateNetTestHelper(&ws, {"in"}, {"out"}));
-  unique_ptr<TimeObserver<SimpleNet>> net_ob =
-      make_unique<TimeObserver<SimpleNet>>(
-          *(caffe2::dynamic_cast_if_rtti<SimpleNet*>(net.get())));
+  unique_ptr<TimeObserver<NetBase>> net_ob =
+      make_unique<TimeObserver<NetBase>>(net.get());
   net.get()->Run();
   CAFFE_ENFORCE(net_ob.get()->average_time_children() > 3000);
   CAFFE_ENFORCE(net_ob.get()->average_time_children() < 3500);
