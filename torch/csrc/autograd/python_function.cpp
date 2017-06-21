@@ -736,6 +736,7 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *_inputs)
 
   // Create trace
   std::vector<Output> inputs;
+  // TODO: this is wrong
   for (auto v : unpacked_input.input_vars) {
     // TODO: don't assume variables are always defined
     if (v->trace_fn) {
@@ -1117,11 +1118,14 @@ variable_list interpret_node(std::shared_ptr<Node> node, input_map& inputs, memo
         }
         THPObjectPtr output_objs;
         if (n->is_legacy) {
-          if (THPFunction_Check(obj)) throw std::logic_error("Not a function");
+          if (!THPFunction_Check(obj)) throw std::logic_error("Not a function in THPFunction_do_forward");
           THPFunction *fn = (THPFunction*)obj.get();
-          THPObjectPtr{ THPFunction_do_forward(fn, input_objs) };
+          output_objs = THPFunction_do_forward(fn, input_objs);
         } else {
-          THPObjectPtr{ THPFunction_apply(obj, input_objs) };
+          output_objs = THPFunction_apply(obj, input_objs);
+        }
+        if (!output_objs) {
+          throw python_error();
         }
         _ensure_tuple(output_objs);
         auto num_outputs = PyTuple_GET_SIZE(output_objs.get());
