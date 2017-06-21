@@ -134,8 +134,6 @@ class LayerModelHelper(model_helper.ModelHelper):
     def add_layer(self, layer):
         self._layers.append(layer)
         for param in layer.get_parameters():
-            if not param.parameter:
-                continue
             assert isinstance(param.parameter, core.BlobReference)
 
             self.param_to_optim[str(param.parameter)] = \
