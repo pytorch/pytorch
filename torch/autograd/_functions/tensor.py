@@ -556,10 +556,9 @@ class Gather(Function):
         return input.gather(dim, index)
 
     @staticmethod
-    @once_differentiable
     def backward(ctx, grad_output):
-        index, = ctx.saved_tensors
-        grad_input = grad_output.new(ctx.input_size).zero_()
+        index, = ctx.saved_variables
+        grad_input = Variable(grad_output.data.new(ctx.input_size).zero_())
         return grad_input.scatter_add_(ctx.dim, index, grad_output), None, None
 
 
