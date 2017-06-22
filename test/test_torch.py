@@ -2504,7 +2504,7 @@ class TestTorch(TestCase):
         def consec(size, start=1):
             sequence = torch.ones(int(torch.Tensor(size).prod(0)[0])).cumsum(0)
             sequence.add_(start - 1)
-            return sequence.resize_(*size)
+            return sequence.view(*size)
 
         # pick a random valid indexer type
         def ri(indices):
