@@ -18,12 +18,18 @@ void THNN_(BCECriterion_updateOutput)(THNNState *state, THTensor *input,
       real x = *input_data;
       real y = *target_data;
       real w = *weights_data;
+      THAssertMsg(x >= 0. && x <= 1.,
+        "input value should be between 0~1, but got %f",
+		  (double) x);
       sum -= (log(x + EPS) * y + log(1. - x + EPS) * (1. - y)) * w;
     )
   else
     TH_TENSOR_APPLY2(real, input, real, target,
       real x = *input_data;
       real y = *target_data;
+      THAssertMsg(x >= 0. && x <= 1.,
+        "input value should be between 0~1, but got %f",
+		  (double) x);
       sum -= log(x + EPS) * y + log(1. - x + EPS) * (1. - y);
     );
 
