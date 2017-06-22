@@ -315,6 +315,42 @@ void THTensor_(expand)(THTensor *r, THTensor *tensor, THLongStorage *sizes) {
   THFree(expandedStrides);
 }
 
+
+void THTensor_(expandNd)(THTensor **rets, THTensor **ops, int count) {
+  for (int i = 0; i < count; ++i) {
+    THArgCheck(THTensor_(nDimension)(ops[i]) > 0, i, "can't expand empty tensor %d", i);
+  }
+
+  long *op_sizes[count];
+  long op_dims[count];
+
+  for (int i = 0; i < count; ++i) {
+    op_sizes[i] = ops[i]->size;
+    op_dims[i] = ops[i]->nDimension;
+  }
+
+  THLongStorage *sizes = THLongStorage_new();
+  char error_buffer[1024];
+  int ret = THLongStorage_inferSizeN(sizes,
+                                     count,
+                                     op_sizes,
+                                     op_dims,
+                                     error_buffer,
+                                     1024);
+
+  if(ret != 0) {
+    THLongStorage_free(sizes);
+    THError(error_buffer);
+    return;
+  }
+
+  for (int i = 0; i < count; ++i) {
+    THTensor_(expand)(rets[i], ops[i], sizes);
+  }
+
+  THLongStorage_free(sizes);
+}
+
 void THTensor_(set)(THTensor *self, THTensor *src)
 {
   if(self != src)

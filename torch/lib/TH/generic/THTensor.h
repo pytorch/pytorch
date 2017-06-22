@@ -74,6 +74,7 @@ TH_API THTensor *THTensor_(newView)(THTensor *tensor, THLongStorage *size);
 TH_API THTensor *THTensor_(newExpand)(THTensor *tensor, THLongStorage *size);
 
 TH_API void THTensor_(expand)(THTensor *r, THTensor *tensor, THLongStorage *size);
+TH_API void THTensor_(expandNd)(THTensor **rets, THTensor **ops, int count);
 
 TH_API void THTensor_(resize)(THTensor *tensor, THLongStorage *size, THLongStorage *stride);
 TH_API void THTensor_(resizeAs)(THTensor *tensor, THTensor *src);
