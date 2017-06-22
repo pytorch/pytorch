@@ -173,22 +173,28 @@ PyObject* functionToPyObject(std::shared_ptr<Function> cdata)
     return obj;
   }
 
-  auto& fn = *cdata;
-  auto it = cpp_function_types.find(std::type_index(typeid(fn)));
-  if (it == cpp_function_types.end()) {
-    return PyErr_Format(PyExc_TypeError,
-        "Don't know how to create Python object for %s", typeid(fn).name());
-  }
+  if (cdata->pyobj) {
+    Py_INCREF(cdata->pyobj);
+  } else {
+    auto& fn = *cdata;
+    auto it = cpp_function_types.find(std::type_index(typeid(fn)));
+    if (it == cpp_function_types.end()) {
+      return PyErr_Format(PyExc_TypeError,
+          "Don't know how to create Python object for %s", typeid(fn).name());
+    }
 
-  PyTypeObject* type = (PyTypeObject*)it->second.get();
-  THPObjectPtr obj(type->tp_alloc(type, 0));
-  if (!obj) return NULL;
-  THPCppFunction* f = (THPCppFunction*)obj.get();
-  new (&f->cdata) std::shared_ptr<Function>(cdata);
-  if (!f->cdata) {
-    return NULL;
+    PyTypeObject* type = (PyTypeObject*)it->second.get();
+    THPObjectPtr obj(type->tp_alloc(type, 0));
+    if (!obj) return NULL;
+    THPCppFunction* f = (THPCppFunction*)obj.get();
+    new (&f->cdata) std::shared_ptr<Function>(cdata);
+    if (!f->cdata) {
+      return NULL;
+    }
+    cdata->pyobj = obj.release();
+    Py_INCREF(cdata->pyobj);
   }
-  return obj.release();
+  return cdata->pyobj;
 }
 
 void registerCppFunction(const std::type_info& type, PyTypeObject* pytype)

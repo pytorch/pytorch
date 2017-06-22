@@ -27,6 +27,9 @@ PyObject* CppFunction_pynew(PyTypeObject *type, PyObject *args, PyObject *kwds)
   if (!f->cdata) {
     return NULL;
   }
+  f->cdata->pyobj = obj;
+  Py_INCREF(f->cdata->pyobj);
+
   return obj.release();
 }
 

@@ -8,6 +8,7 @@
 
 #include <Python.h>
 #include "torch/csrc/autograd/function_hook.h"
+#include "torch/csrc/utils/auto_gil.h"
 
 #include <THPP/THPP.h>
 
@@ -45,6 +46,7 @@ struct Function {
     , is_stochastic(false)
     , pre_hooks()
     , post_hooks()
+    , pyobj(nullptr)
     {}
 
   Function(FunctionFlags&& flags)
@@ -54,11 +56,17 @@ struct Function {
     , is_stochastic(false)
     , pre_hooks()
     , post_hooks()
+    , pyobj(nullptr)
     {}
 
   Function(const Function& other) = delete;
   Function(Function&& other) = delete;
-  virtual ~Function() {}
+  virtual ~Function() {
+    if (pyobj) {
+      AutoGIL gil;
+      Py_DECREF(pyobj);
+    }
+  }
 
   // Implements the operation
   virtual variable_list apply(const variable_list& inputs) = 0;
@@ -89,6 +97,7 @@ struct Function {
   bool is_stochastic;
   std::vector<std::shared_ptr<FunctionPreHook>> pre_hooks;
   std::vector<std::shared_ptr<FunctionPostHook>> post_hooks;
+  PyObject *pyobj;  // weak reference
 };
 
 
