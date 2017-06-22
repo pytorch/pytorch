@@ -2731,11 +2731,15 @@ class TestTorch(TestCase):
     def test_advancedindex(self):
         self._test_advancedindex(self, lambda x: x)
 
-    def test_advancedindex_big(self):
-        reference = torch.arange(0, 2147483649).long()
+    @staticmethod
+    def _test_advancedindex_big(self, conv_fn):
+        reference = conv_fn(torch.arange(0, 123344).int())
 
-        self.assertEqual(reference[[0, 123, 44488, 1232123, 2147483648], ],
-                         torch.LongTensor([0, 123, 44488, 1232123, 2147483648]))
+        self.assertEqual(reference[[0, 123, 44488, 68807, 123343], ],
+                         torch.LongTensor([0, 123, 44488, 68807, 123343]))
+
+    def test_advancedindex_big(self):
+        self._test_advancedindex_big(self, lambda x: x)
 
     def test_newindex(self):
         reference = self._consecutive((3, 3, 3))
