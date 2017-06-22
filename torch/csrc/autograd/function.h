@@ -97,7 +97,7 @@ struct Function {
   bool is_stochastic;
   std::vector<std::shared_ptr<FunctionPreHook>> pre_hooks;
   std::vector<std::shared_ptr<FunctionPostHook>> post_hooks;
-  PyObject *pyobj;  // weak reference
+  PyObject *pyobj;
 };
 
 
