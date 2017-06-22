@@ -15,9 +15,10 @@ class _ContextMethodMixin(object):
         :func:`forward` **method.**
 
         Later, saved tensors can be accessed through the :attr:`saved_tensors`
-        attribute. Before returning them to the user, a check is made, to
-        ensure they weren't used in any in-place operation that modified
-        their content.
+        attribute; or, if the corresponding Variable is needed (e.g. for double
+        backwards), those can be accessed through the :attr:`saved_variables`
+        attribute.  Before returning them to the user, a check is made, to ensure
+        they weren't used in any in-place operation that modified their content.
 
         Arguments can also be ``None``.
         """
@@ -143,6 +144,8 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixi
     Attributes:
         saved_tensors: Tuple of Tensors that were saved in the call to
             :func:`forward`.
+        saved_variables: Tuple of Variables that correspond to the tensors
+            saved in the call to :func:`forward`.
         needs_input_grad: Tuple of booleans of length :attr:`num_inputs`,
             indicating whether a given input requires gradient. This can be
             used to optimize buffers saved for backward, and ignoring gradient
