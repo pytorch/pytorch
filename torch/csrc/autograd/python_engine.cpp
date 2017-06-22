@@ -229,43 +229,34 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
 PyObject *THPEngine_run_forward(THPEngine *self, PyObject *args, PyObject *kwargs)
 {
   HANDLE_TH_ERRORS;
+  PyObject* expr_obj;
   PyObject* input_objs;
-  PyObject* output_objs;
-  const char *accepted_kwargs[] = {"inputs", "outputs", NULL};
+  const char *accepted_kwargs[] = {"expr", "inputs", NULL};
   if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OO", (char**)accepted_kwargs,
-        &input_objs, &output_objs))
+        &expr_obj, &input_objs))
     return NULL;
 
+  THPUtils_assert(THPExpr_Check(expr_obj), "expr argument is expected to be an "
+      "Expr, but got %s", THPUtils_typename(expr_obj));
   THPUtils_assert(PyTuple_Check(input_objs), "inputs argument is expected to "
       "be a tuple, but got %s", THPUtils_typename(input_objs));
-  THPUtils_assert(PyTuple_Check(output_objs), "outputs argument is "
-      "expected to be a tuple, but got %s", THPUtils_typename(output_objs));
 
   Py_ssize_t num_inputs = PyTuple_GET_SIZE(input_objs);
-  Py_ssize_t num_outputs = PyTuple_GET_SIZE(output_objs);
 
-  variable_list input_vars(num_inputs);
-  input_map inputs;
+  environment env;
+  // TODO: skeevy, requires on invariant that the tracing numbering
+  // has the first N parameters allocated to parameters
   for (int i = 0; i < num_inputs; i++) {
     PyObject* input_obj = PyTuple_GET_ITEM(input_objs, i);
     THPUtils_assert(THPVariable_Check(input_obj), "element %d of inputs "
         "tuple is not a Variable", i);
     auto& input_var = ((THPVariable*)input_obj)->cdata;
-    inputs[input_var->get_input_node().get()] = input_var;
+    env.insert({i, input_var});
   }
 
-  output_list outputs;
-  outputs.reserve(num_outputs);
-  for (int i = 0; i < num_outputs; i++) {
-    PyObject* output_obj = PyTuple_GET_ITEM(output_objs, i);
-    THPUtils_assert(THPVariable_Check(output_obj), "element %d of outputs "
-        "tuple is not a Variable", i);
-    auto& output_var = ((THPVariable*)output_obj)->cdata;
-    outputs.emplace_back(output_var->trace_fn, output_var->output_nr);
-  }
+  variable_list results = interpret(((THPExpr*)expr_obj)->cdata, env);
 
-  variable_list results = interpret(outputs, inputs);
-
+  int num_outputs = results.size();
   PyObject *result = PyTuple_New(num_outputs);
   for (int i = 0; i < num_outputs; i++) {
     PyTuple_SET_ITEM(result, i, THPVariable_Wrap(results.at(i)));
