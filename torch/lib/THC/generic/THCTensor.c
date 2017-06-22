@@ -329,6 +329,41 @@ void THCTensor_(expand)(THCState *state, THCTensor *r, THCTensor *tensor, THLong
   THFree(expandedStrides);
 }
 
+void THCTensor_(expandNd)(THCState *state, THCTensor **rets, THCTensor **ops, int count) {
+  for (int i = 0; i < count; ++i) {
+    THArgCheck(THCTensor_(nDimension)(state, ops[i]) > 0, i, "can't expand empty tensor %d", i);
+  }
+
+  long *op_sizes[count];
+  long op_dims[count];
+
+  for (int i = 0; i < count; ++i) {
+    op_sizes[i] = ops[i]->size;
+    op_dims[i] = ops[i]->nDimension;
+  }
+
+  THLongStorage *sizes = THLongStorage_new();
+  char error_buffer[1024];
+  int ret = THLongStorage_inferSizeN(sizes,
+                                     count,
+                                     op_sizes,
+                                     op_dims,
+                                     error_buffer,
+                                     1024);
+
+  if(ret != 0) {
+    THLongStorage_free(sizes);
+    THError(error_buffer);
+    return;
+  }
+
+  for (int i = 0; i < count; ++i) {
+    THCTensor_(expand)(state, rets[i], ops[i], sizes);
+  }
+
+  THLongStorage_free(sizes);
+}
+
 void THCTensor_(set)(THCState *state, THCTensor *self, THCTensor *src)
 {
   if(self != src)
