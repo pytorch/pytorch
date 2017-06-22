@@ -22,13 +22,12 @@ class Index(Function):
     @staticmethod
     def backward(ctx, grad_output):
         grad_input = grad_output.data.new(ctx.input_size).zero_()
+        grad_input = Variable(grad_input)
         if ctx.advanced_indexing:
-            grad_input._advanced_index_add(ctx.index, grad_output.data)
-            return Variable(grad_input), None
+            grad_input._advanced_index_add(ctx.index, grad_output)
         else:
-            grad_input = Variable(grad_input)
             grad_input[ctx.index] = grad_output
-            return grad_input, None
+        return grad_input, None
 
 
 class SetItem(InplaceFunction):
@@ -200,6 +199,29 @@ class IndexAdd(InplaceFunction):
             grad_tensor2 = grad_output.index_select(ctx.dim, index)
 
         return grad_tensor1, None, None, grad_tensor2, None
+
+
+class AdvancedIndexAdd(InplaceFunction):
+
+    @staticmethod
+    def forward(ctx, tensor1, adv_index, tensor2):
+        assert not ctx.needs_input_grad[1]
+        if ctx.needs_input_grad[2]:
+            ctx.adv_index = adv_index
+        ctx.mark_dirty(tensor1)
+        return tensor1._advanced_index_add(adv_index, tensor2)
+
+    @staticmethod
+    @once_differentiable
+    def backward(ctx, grad_output):
+        grad_tensor1 = grad_tensor2 = None
+
+        if ctx.needs_input_grad[0]:
+            grad_tensor1 = grad_output
+
+        if ctx.needs_input_grad[2]:
+            grad_tensor2 = grad_output._advanced_index_select(ctx.adv_index)
+        return grad_tensor1, None, grad_tensor2
 
 
 class IndexCopy(InplaceFunction):

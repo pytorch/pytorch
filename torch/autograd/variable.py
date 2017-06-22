@@ -627,6 +627,9 @@ class Variable(_C._VariableBase):
     def index_add(self, dim, index, tensor):
         return IndexAdd.apply(self, dim, index, tensor)
 
+    def _advanced_index_add(self, index, tensor):
+        return AdvancedIndexAdd.apply(self, index, tensor)
+
     def index_add_(self, dim, index, tensor):
         return IndexAdd.apply(self, dim, index, tensor, True)
 

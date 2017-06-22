@@ -820,8 +820,12 @@ class TestAutograd(TestCase):
         self._test_setitem((5, 5), 1)
         self._test_setitem((5,), 1)
         self._test_setitem((1,), 0)
+        self._test_setitem((10,), [[0, 4, 2]])
+        self._test_setitem((5, 5), [[0, 4], [2, 2]])
         self._test_setitem_tensor((5, 5), 3)
+        self._test_setitem_tensor((5, 5), [[0, 1], [1, 0]])
         self._test_setitem_tensor((5,), 3)
+        self._test_setitem_tensor((5,), [[0, 1, 2, 3]])
 
     def test_setitem_mask(self):
         mask = torch.ByteTensor(5, 5).bernoulli_()
@@ -1372,6 +1376,8 @@ function_tests = [
     (Index, (), (torch.rand(S, S, S), dont_convert([1, 2]))),
     (Index, (), (torch.rand(S, S, S), slice(0, 3)), 'slice'),
     (Index, (), (torch.rand(S, S, S), dont_convert([slice(0, 3), 1])), 'slice_index'),
+    (Index, (), (torch.rand(S, S, S), dont_convert([[0, 2, 3], [1, 3, 3], [0, 0, 2]])), 'adv_index'),
+    (Index, (), (torch.rand(S, S, S), dont_convert([[0, 0, 3], [1, 1, 3], [0, 0, 2]])), 'adv_index_dup'),
     (View, (), (torch.rand(S, S, S), torch.Size([S * S, S]))),
     (Expand, (), ((1, S, 1, S, 1), torch.Size([5, S, 5, S, 5]))),
     (Expand, (), ((S, 1), torch.Size([S, S, S])), 'new_dim'),

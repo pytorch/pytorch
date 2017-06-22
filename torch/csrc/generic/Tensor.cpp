@@ -836,8 +836,32 @@ static bool THPTensor_(_advancedIndexAdd)(PyObject *index, THTensorPtr &dest, TH
   return success;
 }
 
-// Needed for autograd to support backwards passes when there are overlapping
-// indices
+static bool THPTensor_(_advancedIndexSelect)(PyObject *index, THTensorPtr &dest, THTensorPtr &src) {
+  std::vector<THLongTensor*> broadcasted;
+  THIndexTensor *linearIndices = NULL;
+  THTensor *flattened = NULL;
+  bool success = THPTensor_(_advancedIndexCommonInit)(
+      index, src, broadcasted, &linearIndices, &flattened);
+
+  if (success) {
+    // Verify dest tensor is contiguous before flattening
+    THTensor *contiguous = THTensor_(newContiguous)(LIBRARY_STATE dest);
+    THTensor *cviewed = THTensor_(newWithStorage1d)(LIBRARY_STATE
+                                                    THTensor_(storage)(LIBRARY_STATE contiguous),
+                                                    THTensor_(storageOffset)(LIBRARY_STATE contiguous),
+                                                    THTensor_(nElement)(LIBRARY_STATE contiguous),
+                                                    1);
+
+    THTensor_(indexSelect)(LIBRARY_STATE cviewed, flattened, 0, linearIndices);
+    THTensor_(free)(LIBRARY_STATE contiguous);
+    THTensor_(free)(LIBRARY_STATE cviewed);
+  }
+
+  THPTensor_(_advancedIndexCommonCleanup)(broadcasted, linearIndices, flattened);
+  return success;
+}
+
+// Needed for autograd to support twice differentiable indexing
 static PyObject* THPTensor_(advancedIndexAdd)(THPTensor *self, PyObject *args) {
   HANDLE_TH_ERRORS
 
@@ -854,11 +878,38 @@ static PyObject* THPTensor_(advancedIndexAdd)(THPTensor *self, PyObject *args) {
     LIBRARY_STATE ((THPTensor *)PyTuple_GET_ITEM(args, 1))->cdata));
   THTensorPtr dest(THTensor_(newWithTensor)(LIBRARY_STATE self->cdata));
 
-  THPTensor_(_advancedIndexAdd)(PyTuple_GET_ITEM(args, 0), dest, gradOutput);
+  bool success = THPTensor_(_advancedIndexAdd)(PyTuple_GET_ITEM(args, 0), dest, gradOutput);
+  if (!success) {
+    return NULL;
+  }
 
-  Py_RETURN_NONE;
+  return (PyObject *)self;
   END_HANDLE_TH_ERRORS
 }
+
+// Needed for autograd to support backwards passes when there are overlapping
+// indices
+static PyObject* THPTensor_(advancedIndexSelect)(THPTensor *self, PyObject *args) {
+  HANDLE_TH_ERRORS
+
+  THPUtils_assert(PyTuple_GET_SIZE(args) == 1, "advancedIndexSelect takes exactly one "
+      "argument (%d given)", (int) PyTuple_GET_SIZE(args));
+
+  THPUtils_assert(THPTensor_(_checkAdvancedIndexing)(self, PyTuple_GET_ITEM(args, 0)),
+      "first argument must be an indexer that triggers advanced indexing");
+
+  THTensorPtr dest(THTensor_(newWithSize1d)(LIBRARY_STATE 0));
+  THTensorPtr src(THTensor_(newWithTensor)(LIBRARY_STATE self->cdata));
+
+  bool success = THPTensor_(_advancedIndexSelect)(PyTuple_GET_ITEM(args, 0), dest, src);
+  if (!success) {
+    return NULL;
+  }
+
+  return THPTensor_(New)(dest.release());
+  END_HANDLE_TH_ERRORS
+}
+
 #endif // TH_REAL_IS_HALF
 
 // Handles indexing into a Tensor given a tuple, ellipses, sequence, etc. index

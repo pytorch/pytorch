@@ -97,6 +97,13 @@ PyObject * THPTensor_(setIndex)(THPTensor *self, PyObject *args)
 ]]
 
 [[
+  python_name: _advanced_index_select
+  name: THPTensor_(advancedIndexSelect)
+  cpu_half: False
+  only_register: True
+]]
+
+[[
   name: resize_
   return: self
   cname: resize
