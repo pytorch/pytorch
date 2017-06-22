@@ -555,13 +555,14 @@ class HypothesisTestCase(test_util.TestCase):
             return outs
 
     def assertValidationChecks(
-        self,
-        device_option,
-        op,
-        inputs,
-        validator,
-        input_device_options=None,
-        as_kwargs=True
+            self,
+            device_option,
+            op,
+            inputs,
+            validator,
+            input_device_options=None,
+            as_kwargs=True,
+            init_net=None,
     ):
         if input_device_options is None:
             input_device_options = {}
@@ -579,6 +580,8 @@ class HypothesisTestCase(test_util.TestCase):
                     b,
                     device_option=input_device_options.get(n, device_option)
                 )
+            if init_net:
+                workspace.RunNetOnce(init_net)
             workspace.RunOperatorOnce(op)
             outputs = [workspace.FetchBlob(n) for n in op.output]
             if as_kwargs:
