@@ -588,6 +588,30 @@ class Scatter(InplaceFunction):
         return grad_input, None, None, grad_source, None
 
 
+class ScatterAdd(InplaceFunction):
+
+    @staticmethod
+    def forward(ctx, input, dim, index, source, inplace=False):
+        assert not ctx.needs_input_grad[2], "ScatterAdd can't differentiate the index"
+        ctx.dim = dim
+        if inplace:
+            ctx.mark_dirty(input)
+        else:
+            input = input.clone()
+        ctx.save_for_backward(index)
+        return input.scatter_add_(ctx.dim, index, source)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        index, = ctx.saved_variables
+        grad_input = grad_source = None
+        if ctx.needs_input_grad[0]:
+            grad_input = grad_output
+        if ctx.needs_input_grad[3]:
+            grad_source = grad_output.gather(ctx.dim, index)
+        return grad_input, None, None, grad_source, None
+
+
 class Repeat(Function):
 
     @staticmethod

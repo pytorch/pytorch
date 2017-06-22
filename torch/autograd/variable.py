@@ -657,6 +657,12 @@ class Variable(_C._VariableBase):
     def scatter_(self, dim, index, source):
         return Scatter.apply(self, dim, index, source, True)
 
+    def scatter_add(self, dim, index, source):
+        return ScatterAdd.apply(self, dim, index, source)
+
+    def scatter_add_(self, dim, index, source):
+        return ScatterAdd.apply(self, dim, index, source, True)
+
     def masked_copy(self, mask, variable):
         warnings.warn("masked_copy is deprecated and renamed to masked_scatter, and will be removed in v0.3")
         return MaskedScatter.apply(self, mask, variable)

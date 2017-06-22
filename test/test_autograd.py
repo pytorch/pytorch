@@ -1547,6 +1547,8 @@ function_tests = [
     (Gather, (), ((M, S), 1, gather_variable((M, S // 2), 0, S, True)), 'dim1'),
     (Scatter, (), ((M, S), 0, gather_variable((S, S), 1, M), (S, S))),
     (Scatter, (), ((M, S), 1, gather_variable((M, S // 2), 0, S), (M, S // 2)), 'dim1'),
+    (ScatterAdd, (), ((M, S), 0, gather_variable((S, S), 1, M), (S, S))),
+    (ScatterAdd, (), ((M, S), 1, gather_variable((M, S // 2), 0, S), (M, S // 2)), 'dim1'),
     (Concat, (), (0, (1, S, S), (2, S, S), (3, S, S))),
     (Concat, (), (-1, (S, S, 1), (S, S, 2), (S, S, 3)), 'negdim-1'),
     (Concat, (), (-2, (S, 1, S), (S, 2, S), (S, 3, S)), 'negdim-2'),
