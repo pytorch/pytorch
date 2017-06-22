@@ -1539,7 +1539,7 @@ function_tests = [
     (Addcdiv, (), ((S, S), (S, 1), torch.rand(1, S) + 5e-2, 0.6), 'broadcast_rhs_scale'),
     (Addcdiv, (), ((1,), (S, S, 1), torch.rand(1, S) + 5e-2, 0.6), 'broadcast_all_scale'),
     (IndexAdd, (), ((S, S), 0, index_variable(2, S), (2, S))),
-    # (IndexCopy,     (0,),               ((S, S), index_variable(2, S), (2, S))      ),
+    (IndexCopy, (), ((S, S), 0, index_variable(2, S), (2, S))),
     (IndexFill, (), ((S, S), 0, index_variable(2, S), 2)),
     (IndexSelect, (), ((S, S), 0, index_variable(2, S))),
     (Gather, (), ((M, S), 0, gather_variable((S, S), 1, M, True))),
@@ -1890,6 +1890,7 @@ ignore_inplace = set((
 gradgradcheck_exclude_classes = set((
     'Cumprod',
     'Gather',
+    'IndexCopy',
     'Norm',
     'Prod',
 ))

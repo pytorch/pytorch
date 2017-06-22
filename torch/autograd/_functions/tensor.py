@@ -236,7 +236,7 @@ class IndexCopy(InplaceFunction):
             tensor1 = tensor1.clone()
         else:
             ctx.mark_dirty(tensor1)
-        return tensor1.index_copy_(dim, index, tensor2)
+        return tensor1.index_copy_(ctx.dim, index, tensor2)
 
     @staticmethod
     @once_differentiable
@@ -249,7 +249,7 @@ class IndexCopy(InplaceFunction):
         if ctx.needs_input_grad[0]:
             grad_tensor1 = grad_output.clone().index_fill_(ctx.dim, index, 0)
 
-        if ctx.needs_input_grad[2]:
+        if ctx.needs_input_grad[3]:
             grad_tensor2 = grad_output.index_select(ctx.dim, index)
 
         return grad_tensor1, None, None, grad_tensor2, None
