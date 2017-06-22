@@ -7,6 +7,7 @@
 #include <exception>
 
 #include "THP.h"
+#include "torch/csrc/autograd/tracer.h"
 #include "torch/csrc/autograd/functions/accumulate_grad.h"
 #include "torch/csrc/autograd/functions/basic_ops.h"
 #include "torch/csrc/autograd/functions/utils.h"
@@ -27,7 +28,6 @@ using namespace torch::autograd;
 PyObject *THPFunctionClass = NULL;
 PyObject *THPStochasticFunctionClass = NULL;
 PyObject *THPBatchNormBackwardBackwardFunction = NULL;
-
 
 #define THPFunction_assert(condition, ...)                                     \
   if (!(condition)) { THPUtils_setError(__VA_ARGS__); throw python_error(); }
@@ -377,7 +377,7 @@ static void _transplant_var(Variable& var, const std::shared_ptr<Function>& fn, 
 // do in this case.
 static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
     std::unordered_set<PyObject *> &dirty_inputs, PyObject *raw_output,
-    PyObject *outputs, std::shared_ptr<Node>& node, bool is_volatile)
+    PyObject *outputs, std::shared_ptr<Expr>& this_expr, bool is_volatile)
 {
   // Wrap outputs in Variables
   auto cdata = is_volatile ? nullptr : THPFunction_asFunction(self);
@@ -386,6 +386,7 @@ static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
     self->output_info = new std::vector<output_info_type>();
     self->output_info->reserve(num_outputs);
   }
+  local_list new_locals;
   for (int i = 0; i < num_outputs; i++) {
     PyObject *output = PyTuple_GET_ITEM(raw_output, i);
     THPVariable *output_var;
@@ -460,9 +461,19 @@ static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
       );
     }
     t2var[output] = output_var;
-    output_var->cdata->trace_fn = node;
+    if (GlobalTracingState) {
+      auto local = GlobalTracingState->makeLocal();
+      new_locals.push_back(local);
+      output_var->cdata->trace_local = local;
+    }
     output_var->cdata->output_nr = i;
     PyTuple_SET_ITEM(outputs, i, (PyObject*)output_var);
+  }
+  if (GlobalTracingState) {
+    if (!this_expr) {
+      throw std::logic_error("trace not constructed even though tracing is on");
+    }
+    GlobalTracingState->addBinding(new_locals, this_expr);
   }
 }
 
@@ -623,7 +634,7 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject *args) {
   return std::make_pair(std::move(unpacked), std::move(flags));
 }
 
-PyObject* process_outputs(THPFunction* grad_fn, const UnpackedInput& unpacked, THPObjectPtr&& raw_output, std::shared_ptr<Node>&& node, bool is_volatile) {
+PyObject* process_outputs(THPFunction* grad_fn, const UnpackedInput& unpacked, THPObjectPtr&& raw_output, std::shared_ptr<Expr>&& this_expr, bool is_volatile) {
   bool unpack_output = _ensure_tuple(raw_output);
 
   auto num_outputs = PyTuple_GET_SIZE(raw_output.get());
@@ -642,7 +653,7 @@ PyObject* process_outputs(THPFunction* grad_fn, const UnpackedInput& unpacked, T
 
   std::unordered_set<PyObject *> dirty_inputs;
   _mark_dirty(grad_fn, t2var, dirty_inputs);
-  _wrap_outputs(grad_fn, t2var, dirty_inputs, raw_output, outputs, node, is_volatile);
+  _wrap_outputs(grad_fn, t2var, dirty_inputs, raw_output, outputs, this_expr, is_volatile);
   _join_version_counters(grad_fn, t2var);
   if (grad_fn->cdata.is_executable) {
     _mark_non_differentiable(grad_fn, t2var);
@@ -665,6 +676,35 @@ PyObject* process_outputs(THPFunction* grad_fn, const UnpackedInput& unpacked, T
   return outputs.release();
 }
 
+// This sort of reimplements unpack_input, but we have our own requirements
+static std::shared_ptr<Expr> make_trace(PyObject* pyobj, PyObject *arg_objects, bool is_legacy)
+{
+  std::shared_ptr<Expr> this_expr;
+  if (GlobalTracingState) {
+    auto num_args = PyTuple_GET_SIZE(arg_objects);
+    std::vector<std::shared_ptr<Arg>> args;
+    for (int i = 0; i < num_args; i++) {
+      PyObject *arg_object = PyTuple_GET_ITEM(arg_objects, i);
+      if (THPVariable_Check(arg_object)) {
+        auto arg_var = ((THPVariable*)arg_object)->cdata;
+        if (arg_var->trace_local) {
+          args.push_back(arg_var->trace_local);
+        } else {
+          throw std::logic_error("not implemented yet AAA");
+        }
+      } else {
+        Py_INCREF(arg_object);
+        args.push_back(std::make_shared<PyConst>(arg_object));
+      }
+    }
+    Py_INCREF(pyobj);
+    this_expr = std::make_shared<PyApply>(pyobj, args, is_legacy);
+  } else {
+    this_expr = nullptr;
+  }
+  return this_expr;
+}
+
 // Legacy codepath
 PyObject *THPFunction_do_forward(THPFunction *self, PyObject *_inputs)
 {
@@ -682,20 +722,9 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *_inputs)
   THPObjectPtr raw_output(PyObject_CallObject(forward_fn, unpacked_input.tensor_input));
   if (!raw_output) return NULL;
 
-  // Create trace (TODO: deduplicate with THPFunction_apply)
-  std::vector<Output> inputs;
-  for (auto v : unpacked_input.input_vars) {
-    // TODO: don't assume variables are always defined
-    if (v->trace_fn) {
-      inputs.emplace_back(v->trace_fn, v->output_nr);
-    } else {
-      inputs.emplace_back(v->get_input_node(), 0);
-    }
-  }
-  Py_INCREF((PyObject*)self);
-  auto node = std::make_shared<PyNode>((PyObject*)self, inputs, true /* legacy */);
+  auto this_expr = make_trace((PyObject*)self, _inputs, true); // legacy
 
-  return process_outputs(self, unpacked_input, std::move(raw_output), std::move(node), is_volatile);
+  return process_outputs(self, unpacked_input, std::move(raw_output), std::move(this_expr), is_volatile);
   END_HANDLE_TH_ERRORS
 }
 
@@ -734,21 +763,9 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *_inputs)
   THPObjectPtr tensor_outputs(PyObject_CallObject(forward_fn, ctx_tensor_input));
   if (!tensor_outputs) return NULL;
 
-  // Create trace
-  std::vector<Output> inputs;
-  // TODO: this is wrong
-  for (auto v : unpacked_input.input_vars) {
-    // TODO: don't assume variables are always defined
-    if (v->trace_fn) {
-      inputs.emplace_back(v->trace_fn, v->output_nr);
-    } else {
-      inputs.emplace_back(v->get_input_node(), 0);
-    }
-  }
-  Py_INCREF(cls);
-  auto node = std::make_shared<PyNode>(cls, inputs);
+  auto this_expr = make_trace(cls, _inputs, false);
 
-  return process_outputs(ctx, unpacked_input, std::move(tensor_outputs), std::move(node), is_volatile);
+  return process_outputs(ctx, unpacked_input, std::move(tensor_outputs), std::move(this_expr), is_volatile);
   END_HANDLE_TH_ERRORS
 }
 
@@ -1086,74 +1103,120 @@ std::shared_ptr<PyFunction> THPFunction_asFunction(THPFunction* self)
 
 namespace torch { namespace autograd {
 
-using memo_map = std::unordered_map<Node*, variable_list>;
-
-variable_list interpret_node(std::shared_ptr<Node>, input_map&, memo_map&);
-
-std::shared_ptr<Variable> interpret_output(Output output, input_map& inputs, memo_map& memo) {
-    auto vs = interpret_node(output.node, inputs, memo);
-    return vs.at(output.output_nr);
-}
-
-variable_list interpret_node(std::shared_ptr<Node> node, input_map& inputs, memo_map& memo) {
-    variable_list input_vars;
-    auto num_args = node->inputs.size();
-    input_vars.reserve(num_args);
-    for (auto input : node->inputs) {
-        input_vars.emplace_back(interpret_output(input, inputs, memo));
+struct Value {
+  enum class Id { Variable, PyObject };
+  Id _id;
+  // Currently implemented in this silly way because I didn't feel like
+  // writing out the destruction for the union version.
+  std::shared_ptr<Variable> var;
+  THPObjectPtr pyobj;
+  Value(std::shared_ptr<Variable> var) : _id(Id::Variable), var(var) {}
+  Value(PyObject* pyobj) : _id(Id::PyObject), pyobj(pyobj) {}
+  PyObject* toPyObject() {
+    switch (_id) {
+    case Id::Variable:
+      return THPVariable_Wrap(var);
+    case Id::PyObject:
+      Py_INCREF(pyobj.get());
+      return pyobj.get();
     }
-    if (auto n = dynamic_cast<InputNode*>(node.get())) {
-        return {inputs.at(n)};
-    } else if (auto n = dynamic_cast<PyNode*>(node.get())) {
-        auto& obj = n->pyobj;
-        // Massage variables into form where we can THPFunction_apply it.
-        // While in principle we can avoid putting things into Python
-        // and then taking them out again, doing so seems to require an excess
-        // of faffing about to optimize a codepath that is already going to
-        // fundamentally be slow (since it calls into Python.) NOT. WORTH. IT.
+    __builtin_unreachable();
+  }
+};
 
-        PyObject* input_objs = PyTuple_New(num_args);
-        for (size_t i = 0; i < num_args; i++) {
-          PyTuple_SET_ITEM(input_objs, i, THPVariable_Wrap(input_vars.at(i)));
-        }
-        THPObjectPtr output_objs;
-        if (n->is_legacy) {
-          if (!THPFunction_Check(obj)) throw std::logic_error("Not a function in THPFunction_do_forward");
-          THPFunction *fn = (THPFunction*)obj.get();
-          output_objs = THPFunction_do_forward(fn, input_objs);
-        } else {
-          output_objs = THPFunction_apply(obj, input_objs);
-        }
-        if (!output_objs) {
-          throw python_error();
-        }
-        _ensure_tuple(output_objs);
-        auto num_outputs = PyTuple_GET_SIZE(output_objs.get());
-        variable_list output_vars;
-        output_vars.reserve(num_outputs);
-        for (Py_ssize_t i = 0; i < num_outputs; i++) {
-          PyObject *output_obj = PyTuple_GET_ITEM(output_objs.get(), i);
-          if (!THPVariable_Check(output_obj)) {
-            throw std::logic_error("Unwrapped variable from THPFunction_apply");
-          }
-          THPVariable* output_var = (THPVariable*)output_obj;
-          output_vars.emplace_back(output_var->cdata);
-        }
-        return output_vars;
+using value_list = std::vector<Value>;
+
+// NB: The interpreter currently lives here because it needs to call some
+// private functions from python_function for Python interpreter
+
+// TODO: This doesn't deallocate tensors soon enough
+struct TraceInterpreter
+    : public ExprVisitor<TraceInterpreter, variable_list>
+    , public ArgVisitor<TraceInterpreter, Value>
+{
+  // TODO: Don't do a store! BAD BAD BAD
+  environment store;
+  TraceInterpreter(environment inputs) : store(inputs) {} // COPY!!!
+  Value visitLocal(std::shared_ptr<Local> a) {
+    auto it = store.find(a->unique);
+    if (it == store.end()) {
+      throw std::logic_error("we don't have this result yet");
     } else {
-        throw std::logic_error("Unrecognized node type");
+      return Value(it->second);
     }
-}
+  }
+  Value visitPyConst(std::shared_ptr<PyConst> a) {
+    return Value(a->pyobj);
+  }
+  variable_list visitPyApply(std::shared_ptr<PyApply> e) {
+    auto& obj = e->pyobj;
+    auto num_args = e->args.size();
+    variable_list input_vars;
+    input_vars.reserve(num_args);
+    // Massage variables into form where we can THPFunction_apply it.
+    // While in principle we can avoid putting things into Python
+    // and then taking them out again, doing so seems to require an excess
+    // of faffing about to optimize a codepath that is already going to
+    // fundamentally be slow (since it calls into Python.) NOT. WORTH. IT.
 
-// TODO: Hella inefficient
-variable_list interpret(output_list outputs, input_map& inputs) {
-    memo_map memo;
+    PyObject* input_objs = PyTuple_New(num_args);
+    for (size_t i = 0; i < num_args; i++) {
+      auto val = visitArg(e->args.at(i));
+      PyTuple_SET_ITEM(input_objs, i, val.toPyObject());
+    }
+    THPObjectPtr output_objs;
+    if (e->is_legacy) {
+      throw std::logic_error("Re-execution of legacy objects not supported");
+      if (!THPFunction_Check(obj)) throw std::logic_error("Not a function in THPFunction_do_forward");
+      THPFunction *fn = (THPFunction*)obj.get();
+      output_objs = THPFunction_do_forward(fn, input_objs);
+    } else {
+      output_objs = THPFunction_apply(obj, input_objs);
+    }
+    if (!output_objs) {
+      throw python_error();
+    }
+    _ensure_tuple(output_objs);
+    auto num_outputs = PyTuple_GET_SIZE(output_objs.get());
     variable_list output_vars;
-    output_vars.reserve(outputs.size());
-    for (auto output : outputs) {
-        output_vars.emplace_back(interpret_output(output, inputs, memo));
+    output_vars.reserve(num_outputs);
+    for (Py_ssize_t i = 0; i < num_outputs; i++) {
+      PyObject *output_obj = PyTuple_GET_ITEM(output_objs.get(), i);
+      if (!THPVariable_Check(output_obj)) {
+        throw std::logic_error("Unwrapped variable from THPFunction_apply");
+      }
+      THPVariable* output_var = (THPVariable*)output_obj;
+      output_vars.emplace_back(output_var->cdata);
     }
     return output_vars;
+  }
+  variable_list visitLet(std::shared_ptr<Let> e) {
+    auto vars_to_bind = visitExpr(e->bind.rval);
+    // TODO: assert this has same size
+    for (size_t i = 0; i < vars_to_bind.size(); i++) {
+      store.insert({e->bind.lvals[i]->unique, vars_to_bind[i]});
+    }
+    return visitExpr(e->expr);
+  }
+  variable_list visitLocals(std::shared_ptr<Locals> e) {
+    // similar to visitLocal, but does multiple lookups
+    variable_list output_vars;
+    auto num_locals = e->locals.size();
+    output_vars.reserve(num_locals);
+    for (auto l : e->locals) {
+      auto it = store.find(l->unique);
+      if (it == store.end()) {
+        throw std::logic_error("visitLocals: we don't have this result yet");
+      } else {
+        output_vars.push_back(it->second);
+      }
+    }
+    return output_vars;
+  }
+};
+
+variable_list interpret(std::shared_ptr<Expr> expr, environment env) {
+  return TraceInterpreter(env).visitExpr(expr);
 }
 
 }} // namespace torch::autograd

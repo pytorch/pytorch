@@ -9,6 +9,7 @@
 #include <ATen/ATen.h>
 
 #include "torch/csrc/utils/python_strings.h"
+#include "torch/csrc/autograd/python_tracer.h"
 
 #ifdef WITH_CUDNN
 #include "cudnn/Module.h"
@@ -559,6 +560,8 @@ extern PyObject * THCSPModule_initExtension(PyObject *self);
 static PyMethodDef TorchMethods[] = {
   {"_initExtension",  (PyCFunction)THPModule_initExtension,   METH_O,       NULL},
   {"_autograd_init",  (PyCFunction)THPAutograd_initExtension, METH_NOARGS,  NULL},
+  {"_tracer_enter",   (PyCFunction)THPTracer_enter,           METH_VARARGS, NULL},
+  {"_tracer_exit",    (PyCFunction)THPTracer_exit,            METH_VARARGS, NULL},
   {"_add_docstr",     (PyCFunction)THPModule_addDocStr,       METH_VARARGS, NULL},
   {"_sparse_init",    (PyCFunction)THSPModule_initExtension,  METH_NOARGS,  NULL},
   {"_init_names",     (PyCFunction)THPModule_initNames,       METH_O,       NULL},
@@ -820,7 +823,7 @@ PyMODINIT_FUNC PyInit__C()
   ASSERT_TRUE(THPSize_init(module));
   ASSERT_TRUE(THPVariable_initModule(module));
   ASSERT_TRUE(THPFunction_initModule(module));
-  ASSERT_TRUE(THPNode_initModule(module));
+  ASSERT_TRUE(THPIR_initModule(module));
   ASSERT_TRUE(THPEngine_initModule(module));
 
   ASSERT_TRUE(THPDoubleStorage_init(module));

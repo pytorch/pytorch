@@ -1,4 +1,7 @@
 import torch._C as _C
 
-class Node(_C._NodeBase):
+class Expr(_C._ExprBase):
+    pass
+
+class Arg(_C._ArgBase):
     pass
