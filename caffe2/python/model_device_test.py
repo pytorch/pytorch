@@ -1,17 +1,23 @@
 import numpy as np
 import unittest
-import sys
 
-from caffe2.proto import caffe2_pb2, caffe2_legacy_pb2
-from caffe2.python import core, cnn, workspace, device_checker, test_util
+from caffe2.proto import caffe2_pb2
+from caffe2.python import (
+    workspace,
+    device_checker,
+    test_util,
+    model_helper,
+    brew,
+)
 
 
 class TestMiniAlexNet(test_util.TestCase):
 
     def _MiniAlexNetNoDropout(self, order):
         # First, AlexNet using the cnn wrapper.
-        model = cnn.CNNModelHelper(order, name="alexnet")
-        conv1 = model.Conv(
+        model = model_helper.ModelHelper(name="alexnet")
+        conv1 = brew.conv(
+            model,
             "data",
             "conv1",
             3,
@@ -22,10 +28,11 @@ class TestMiniAlexNet(test_util.TestCase):
             stride=4,
             pad=0
         )
-        relu1 = model.Relu(conv1, "relu1")
-        norm1 = model.LRN(relu1, "norm1", size=5, alpha=0.0001, beta=0.75)
-        pool1 = model.MaxPool(norm1, "pool1", kernel=3, stride=2)
-        conv2 = model.GroupConv(
+        relu1 = brew.relu(model, conv1, "relu1")
+        norm1 = brew.lrn(model, relu1, "norm1", size=5, alpha=0.0001, beta=0.75)
+        pool1 = brew.max_pool(model, norm1, "pool1", kernel=3, stride=2)
+        conv2 = brew.group_conv(
+            model,
             pool1,
             "conv2",
             16,
@@ -37,10 +44,11 @@ class TestMiniAlexNet(test_util.TestCase):
             stride=1,
             pad=2
         )
-        relu2 = model.Relu(conv2, "relu2")
-        norm2 = model.LRN(relu2, "norm2", size=5, alpha=0.0001, beta=0.75)
-        pool2 = model.MaxPool(norm2, "pool2", kernel=3, stride=2)
-        conv3 = model.Conv(
+        relu2 = brew.relu(model, conv2, "relu2")
+        norm2 = brew.lrn(model, relu2, "norm2", size=5, alpha=0.0001, beta=0.75)
+        pool2 = brew.max_pool(model, norm2, "pool2", kernel=3, stride=2)
+        conv3 = brew.conv(
+            model,
             pool2,
             "conv3",
             32,
@@ -50,8 +58,9 @@ class TestMiniAlexNet(test_util.TestCase):
             ("ConstantFill", {}),
             pad=1
         )
-        relu3 = model.Relu(conv3, "relu3")
-        conv4 = model.GroupConv(
+        relu3 = brew.relu(model, conv3, "relu3")
+        conv4 = brew.group_conv(
+            model,
             relu3,
             "conv4",
             64,
@@ -62,8 +71,9 @@ class TestMiniAlexNet(test_util.TestCase):
             group=2,
             pad=1
         )
-        relu4 = model.Relu(conv4, "relu4")
-        conv5 = model.GroupConv(
+        relu4 = brew.relu(model, conv4, "relu4")
+        conv5 = brew.group_conv(
+            model,
             relu4,
             "conv5",
             64,
@@ -74,23 +84,23 @@ class TestMiniAlexNet(test_util.TestCase):
             group=2,
             pad=1
         )
-        relu5 = model.Relu(conv5, "relu5")
-        pool5 = model.MaxPool(relu5, "pool5", kernel=3, stride=2)
-        fc6 = model.FC(
-            pool5, "fc6", 1152, 1024, ("XavierFill", {}),
+        relu5 = brew.relu(model, conv5, "relu5")
+        pool5 = brew.max_pool(model, relu5, "pool5", kernel=3, stride=2)
+        fc6 = brew.fc(
+            model, pool5, "fc6", 1152, 1024, ("XavierFill", {}),
             ("ConstantFill", {"value": 0.1})
         )
-        relu6 = model.Relu(fc6, "relu6")
-        fc7 = model.FC(
-            relu6, "fc7", 1024, 1024, ("XavierFill", {}),
+        relu6 = brew.relu(model, fc6, "relu6")
+        fc7 = brew.fc(
+            model, relu6, "fc7", 1024, 1024, ("XavierFill", {}),
             ("ConstantFill", {"value": 0.1})
         )
-        relu7 = model.Relu(fc7, "relu7")
-        fc8 = model.FC(
-            relu7, "fc8", 1024, 5, ("XavierFill", {}),
+        relu7 = brew.relu(model, fc7, "relu7")
+        fc8 = brew.fc(
+            model, relu7, "fc8", 1024, 5, ("XavierFill", {}),
             ("ConstantFill", {"value": 0.0})
         )
-        pred = model.Softmax(fc8, "pred")
+        pred = brew.softmax(model, fc8, "pred")
         xent = model.LabelCrossEntropy([pred, "label"], "xent")
         loss = model.AveragedLoss([xent], ["loss"])
         model.AddGradientOperators([loss])
