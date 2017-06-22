@@ -19,6 +19,7 @@ def get_a_var(obj):
                 return result
     return None
 
+
 def parallel_apply(modules, inputs, kwargs_tup=None):
     assert len(modules) == len(inputs)
     if kwargs_tup:
