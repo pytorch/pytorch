@@ -2094,8 +2094,8 @@ masked_select(input, mask, out=None) -> Tensor
 Returns a new 1D `Tensor` which indexes the :attr:`input` `Tensor` according to
 the binary mask :attr:`mask` which is a `ByteTensor`.
 
-The :attr:`mask` tensor needs to have the same number of elements as
-:attr:`input`, but it's shape or dimensionality are irrelevant.
+The shapes of the :attr:`mask` tensor and the :attr:`input` tensor don't need to match,
+but they must be :ref:`broadcastable <broadcasting-semantics>`.
 
 .. note:: The returned `Tensor` does **not** use the same storage as the original `Tensor`
 

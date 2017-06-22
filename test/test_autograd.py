@@ -607,6 +607,7 @@ class TestAutograd(TestCase):
             (x.min(y())).sum().backward()
             (x.masked_fill(y() < 0, 0.5)).sum().backward()
             (x.masked_scatter(Variable(y().data < 0.25), z())).sum().backward()
+            (x.masked_select(Variable(y().data < 0.25))).sum().backward()
             (x.addcmul(1, y(), z())).sum().backward()
             (x.addcdiv(1, y(), z())).sum().backward()
             (x.abs() ** y()).sum().backward()
@@ -1576,6 +1577,9 @@ function_tests = [
     # no lhs or all broadcast on MaskedFill because it's always inplace
     (MaskedFill, (), ((S, S), Variable(torch.randn(S,).gt(0), requires_grad=False), 10), 'broadcast_rhs'),
     (MaskedSelect, (), ((S, S), Variable(torch.randn(S, S).gt(0), requires_grad=False))),
+    (MaskedSelect, (), ((S, S), Variable(torch.randn(S,).gt(0), requires_grad=False)), 'broadcast_rhs'),
+    (MaskedSelect, (), ((S,), Variable(torch.randn(S, S).gt(0), requires_grad=False)), 'broadcast_lhs'),
+    (MaskedSelect, (), ((S, 1, S), Variable(torch.randn(S, S).gt(0), requires_grad=False)), 'broadcast_all'),
     (Sort, (), ((S, M, S),)),
     (Sort, (), ((S, M, S), 1), 'dim'),
     (Sort, (), ((S, M, S), 1, True), 'dim_desc'),
@@ -1832,6 +1836,10 @@ method_tests = [
     ('unsqueeze', (S, S, S), (1,), 'middle', [0]),
     ('unsqueeze', (S, S, S), (3,), 'last', [0]),
     ('masked_select', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False),)),
+    ('masked_select', (M, M), (Variable(torch.ByteTensor(M,).bernoulli_(), requires_grad=False),), 'broadcast_rhs'),
+    ('masked_select', (M,), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False),), 'broadcast_lhs'),
+    ('masked_select', (M, 1, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False),),
+     'broadcast_all'),
     ('masked_fill_', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False), 10)),
     # no lhs or all broadcast on masked_fill or masked_scatter because it's always inplace
     ('masked_fill_', (M, M), (Variable(torch.ByteTensor(M,).bernoulli_(), requires_grad=False), 10), 'broadcast_rhs'),

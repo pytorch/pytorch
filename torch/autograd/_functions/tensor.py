@@ -4,7 +4,7 @@ from torch._utils import _accumulate
 
 from ..function import Function, InplaceFunction, once_differentiable
 from ..variable import Variable
-from .utils import maybe_unexpand, variable_expandable
+from .utils import maybe_unexpand
 
 
 class Index(Function):
@@ -421,9 +421,7 @@ class MaskedScatter(InplaceFunction):
             grad_tensor1 = maybe_unexpand(grad_output.clone().masked_fill_(mask, 0), ctx.tensor1_size)
         if ctx.needs_input_grad[2]:
             grad_tensor2 = grad_output.new(ctx.tensor2_size).zero_()
-            # mask is potentially expanded against tensor1
-            mask_expanded = mask.expand(ctx.tensor1_size) if variable_expandable(mask, ctx.tensor1_size) else mask
-            grad_output.masked_select(mask_expanded, out=grad_tensor2.view(-1))
+            grad_output.masked_select(mask, out=grad_tensor2.view(-1))
             grad_tensor2 = maybe_unexpand(grad_tensor2, ctx.tensor2_size)
         return grad_tensor1, None, grad_tensor2, None
 
@@ -464,8 +462,17 @@ class MaskedSelect(Function):
         mask, = ctx.saved_variables
         grad_tensor = None
         if ctx.needs_input_grad[0]:
-            grad_tensor = Variable(grad_output.data.new(ctx.input_size).zero_())
+            # determine the actual broadcasted sizes used
+            try:
+                new_size = torch._C._infer_size(ctx.input_size, mask.size())
+            except RuntimeError:
+                new_size = None
+
+            # we need to potentitally expand grad_tensor, since it is passed to Variable.masked_scatter, which
+            # eventually is in-place (so can't rely on automatically broadcasting)
+            grad_tensor = Variable(grad_output.data.new(new_size if new_size is not None else ctx.input_size).zero_())
             grad_tensor = grad_tensor.masked_scatter(mask, grad_output)
+            grad_tensor = maybe_unexpand(grad_tensor, ctx.input_size)
         return grad_tensor, None
 
 
