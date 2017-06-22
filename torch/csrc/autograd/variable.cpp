@@ -13,7 +13,7 @@ Variable::Variable(
   bool is_volatile)
     : data(data)
     , grad_fn(nullptr)
-    , trace_fn(nullptr)
+    , trace_local(nullptr)
     , grad(nullptr)
     , version_counter(new VariableVersion())
     , requires_grad(requires_grad)
@@ -31,7 +31,7 @@ Variable::Variable(
   std::shared_ptr<Function> grad_fn)
     : data(data)
     , grad_fn(grad_fn)
-    , trace_fn(nullptr)
+    , trace_local(nullptr)
     , grad(nullptr)
     , version_counter(new VariableVersion())
     , requires_grad(grad_fn->is_executable)
@@ -57,20 +57,6 @@ auto Variable::get_grad_accumulator() -> std::shared_ptr<Function> {
 
   result = std::make_shared<AccumulateGrad>(shared_from_this());
   grad_accumulator = result;
-  return result;
-}
-
-auto Variable::get_input_node() -> std::shared_ptr<InputNode> {
-  if (trace_fn) {
-    throw std::logic_error("get_input_node() should be only called on leaf Variables");
-  }
-  std::lock_guard<std::mutex> lock(input_node_lock);
-
-  auto result = input_node.lock();
-  if (result) return result;
-
-  result = std::make_shared<InputNode>();
-  input_node = result;
   return result;
 }
 
