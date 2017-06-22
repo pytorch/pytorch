@@ -1,8 +1,7 @@
 import torch
 import torch.multiprocessing as multiprocessing
-from .sampler import SequentialSampler, RandomSampler
+from .sampler import SequentialSampler, RandomSampler, BatchSampler
 import collections
-import math
 import sys
 import traceback
 import threading
@@ -131,16 +130,13 @@ class DataLoaderIter(object):
 
     def __init__(self, loader):
         self.dataset = loader.dataset
-        self.batch_size = loader.batch_size
         self.collate_fn = loader.collate_fn
-        self.sampler = loader.sampler
+        self.batch_sampler = loader.batch_sampler
         self.num_workers = loader.num_workers
         self.pin_memory = loader.pin_memory
-        self.drop_last = loader.drop_last
         self.done_event = threading.Event()
 
-        self.samples_remaining = len(self.sampler)
-        self.sample_iter = iter(self.sampler)
+        self.sample_iter = iter(self.batch_sampler)
 
         if self.num_workers > 0:
             self.index_queue = multiprocessing.SimpleQueue()
@@ -175,18 +171,11 @@ class DataLoaderIter(object):
                 self._put_indices()
 
     def __len__(self):
-        if self.drop_last:
-            return len(self.sampler) // self.batch_size
-        else:
-            return (len(self.sampler) + self.batch_size - 1) // self.batch_size
+        return len(self.batch_sampler)
 
     def __next__(self):
         if self.num_workers == 0:  # same-process loading
-            if self.drop_last and self.samples_remaining < self.batch_size:
-                raise StopIteration
-            if self.samples_remaining == 0:
-                raise StopIteration
-            indices = self._next_indices()
+            indices = next(self.sample_iter)  # may raise StopIteration
             batch = self.collate_fn([self.dataset[i] for i in indices])
             if self.pin_memory:
                 batch = pin_memory_batch(batch)
@@ -216,21 +205,14 @@ class DataLoaderIter(object):
     def __iter__(self):
         return self
 
-    def _next_indices(self):
-        batch_size = min(self.samples_remaining, self.batch_size)
-        batch = [next(self.sample_iter) for _ in range(batch_size)]
-        self.samples_remaining -= len(batch)
-        return batch
-
     def _put_indices(self):
         assert self.batches_outstanding < 2 * self.num_workers
-        if self.samples_remaining > 0:
-            if self.samples_remaining < self.batch_size and self.drop_last:
-                self._next_indices()
-            else:
-                self.index_queue.put((self.send_idx, self._next_indices()))
-                self.batches_outstanding += 1
-                self.send_idx += 1
+        indices = next(self.sample_iter, None)
+        if indices is None:
+            return
+        self.index_queue.put((self.send_idx, indices))
+        self.batches_outstanding += 1
+        self.send_idx += 1
 
     def _process_next_batch(self, batch):
         self.rcvd_idx += 1
@@ -271,20 +253,24 @@ class DataLoader(object):
         shuffle (bool, optional): set to ``True`` to have the data reshuffled
             at every epoch (default: False).
         sampler (Sampler, optional): defines the strategy to draw samples from
-            the dataset. If specified, the ``shuffle`` argument is ignored.
+            the dataset. If specified, ``shuffle`` must be False.
+        batch_sampler (Sampler, optional): like sampler, but returns a batch of
+            indices at a time. Mutually exclusive with batch_size, shuffle,
+            sampler, and drop_last.
         num_workers (int, optional): how many subprocesses to use for data
             loading. 0 means that the data will be loaded in the main process
             (default: 0)
-        collate_fn (callable, optional)
-        pin_memory (bool, optional)
+        collate_fn (callable, optional): merges a list of samples to form a mini-batch.
+        pin_memory (bool, optional): If ``True``, the data loader will copy tensors
+            into CUDA pinned memory before returning them.
         drop_last (bool, optional): set to ``True`` to drop the last incomplete batch,
             if the dataset size is not divisible by the batch size. If False and
             the size of dataset is not divisible by the batch size, then the last batch
             will be smaller. (default: False)
     """
 
-    def __init__(self, dataset, batch_size=1, shuffle=False, sampler=None, num_workers=0,
-                 collate_fn=default_collate, pin_memory=False, drop_last=False):
+    def __init__(self, dataset, batch_size=1, shuffle=False, sampler=None, batch_sampler=None,
+                 num_workers=0, collate_fn=default_collate, pin_memory=False, drop_last=False):
         self.dataset = dataset
         self.batch_size = batch_size
         self.num_workers = num_workers
@@ -292,18 +278,27 @@ class DataLoader(object):
         self.pin_memory = pin_memory
         self.drop_last = drop_last
 
-        if sampler is not None:
-            self.sampler = sampler
-        elif shuffle:
-            self.sampler = RandomSampler(dataset)
-        elif not shuffle:
-            self.sampler = SequentialSampler(dataset)
+        if batch_sampler is not None:
+            if batch_size > 1 or shuffle or sampler is not None or drop_last:
+                raise ValueError('batch_sampler is mutually exclusive with '
+                                 'batch_size, shuffle, sampler, and drop_last')
+
+        if sampler is not None and shuffle:
+            raise ValueError('sampler is mutually exclusive with shuffle')
+
+        if batch_sampler is None:
+            if sampler is None:
+                if shuffle:
+                    sampler = RandomSampler(dataset)
+                else:
+                    sampler = SequentialSampler(dataset)
+            batch_sampler = BatchSampler(sampler, batch_size, drop_last)
+
+        self.sampler = sampler
+        self.batch_sampler = batch_sampler
 
     def __iter__(self):
         return DataLoaderIter(self)
 
     def __len__(self):
-        if self.drop_last:
-            return len(self.sampler) // self.batch_size
-        else:
-            return (len(self.sampler) + self.batch_size - 1) // self.batch_size
+        return len(self.batch_sampler)
