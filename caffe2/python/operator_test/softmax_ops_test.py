@@ -139,6 +139,7 @@ class TestSoftmaxOps(hu.HypothesisTestCase):
     def test_softmax_with_loss(self, n, D, gc, only_loss, dc):
         # n = number of examples, D = |labels|
         # Initialize X and add 1e-2 for numerical stability
+        np.random.seed(2603)
         X = np.random.rand(n, D).astype(np.float32)
         X = X + 1e-2
 
@@ -190,6 +191,7 @@ class TestSoftmaxOps(hu.HypothesisTestCase):
         self, n, D, only_loss, label_prob,
         gc, dc
     ):
+        np.random.seed(2603)
         X = np.random.rand(n, n, D).astype(np.float32)
         X = X + 1e-2
 
@@ -248,8 +250,9 @@ class TestSoftmaxOps(hu.HypothesisTestCase):
     @unittest.skipIf(not workspace.has_gpu_support, "No gpu support")
     @given(**hu.gcs_gpu_only)
     def test_softmax_with_loss_large(self, gc, dc):
-        for n in [64, 512]:
-            for D in [1000, 5000, 50000]:
+        np.random.seed(2603)
+        for n in [32]:
+            for D in [1000, 2000, 20000]:
                 # n = number of examples, D = |labels|
                 # Initialize X and add 1e-2 for numerical stability
                 X = np.random.rand(n, D).astype(np.float32)
@@ -292,6 +295,7 @@ class TestSoftmaxOps(hu.HypothesisTestCase):
     def test_softmax_with_loss_label_prob(self, n, D, gc, dc):
         # n = number of examples, D = |labels|
         # Initialize X and add 1e-2 for numerical stability
+        np.random.seed(2603)
         X = np.random.rand(n, D).astype(np.float32)
         X = X + 1e-2
 
@@ -347,6 +351,7 @@ class TestSoftmaxOps(hu.HypothesisTestCase):
     def test_softmax_with_loss_weighted(self, n, D, only_loss, gc, dc):
         # n = number of examples, D = |labels|
         # Initialize X and add 1e-2 for numerical stability
+        np.random.seed(2603)
         X = np.random.rand(n, D).astype(np.float32)
         X = X + 1e-2
 
@@ -451,6 +456,7 @@ class TestSoftmaxOps(hu.HypothesisTestCase):
         # Initialize X and add 1e-2 for numerical stability
         W = 18
         H = 12
+        np.random.seed(2603)
         X = np.random.rand(n, D, H, W).astype(np.float32)
         X = X + 1e-2
 
@@ -518,6 +524,7 @@ class TestSoftmaxOps(hu.HypothesisTestCase):
         # Initialize X and add 1e-2 for numerical stability
         W = 18
         H = 12
+        np.random.seed(2603)
         X = np.random.rand(n, D, H, W).astype(np.float32)
         X = X + 1e-2
 
@@ -568,6 +575,7 @@ class TestSoftmaxOps(hu.HypothesisTestCase):
     def test_softmax_with_loss_zero_weight(self, n, D, weighted, gc, dc):
         # n = number of examples, D = |labels|
         # Initialize X and add 1e-2 for numerical stability
+        np.random.seed(2603)
         X = np.random.rand(n, D).astype(np.float32)
         X = X + 1e-2
 
