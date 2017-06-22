@@ -984,7 +984,7 @@ class TestTorch(TestCase):
             "dist", "atan2", "pow", "lerp", "add",
             "sub", "mul", "div", "fmod", "remainder",
             "eq", "ge", "gt", "le", "lt", "max", "min", "ne",
-            "addcdiv", "addcmul", "masked_scatter", "masked_fill",
+            "addcdiv", "addcmul", "masked_scatter", "masked_select", "masked_fill",
             "map", "map2", "copy"
         }
         # functions with three tensor arguments
@@ -1012,6 +1012,8 @@ class TestTorch(TestCase):
                 def tensorfn(myfn, t1, t2):
                     if fn == "lerp":
                         return myfn(t1, 0.5)
+                    elif fn == "masked_select":
+                        return myfn(t1 < 0)
                     elif fn in fns_3_args:
                         return myfn(1, t1, t2)
                     else:
@@ -1036,6 +1038,8 @@ class TestTorch(TestCase):
                 def torchfn(t1, t2, t3):
                     if fn == "lerp":
                         return fntorch(t1, t2, 0.5)
+                    elif fn == "masked_select":
+                        return fntorch(t1, t2 < 0)
                     elif fn in fns_3_args:
                         return fntorch(t1, 1.0, t2, t3)
                     else:
@@ -1114,10 +1118,13 @@ class TestTorch(TestCase):
         # functions that should fallback to pointwise behavior
         fns_fallback = {"add", "sub", "div", "mul", "pow", "fmod", "remainder",
                         "eq", "ge", "gt", "le", "lt", "max", "min", "ne",
-                        "addcdiv", "addcmul", "masked_scatter", "masked_fill",
+                        "addcdiv", "addcmul", "masked_scatter", "masked_select", "masked_fill",
                         "map", "map2", "copy", "dist", "atan2", "lerp"}
         # functions with three tensor arguments
         fns_3_args = {"addcdiv", "addcmul", "map2"}
+        # functions that don't broadcast result size_ -- don't check result shape but
+        # still run functions to verify that broadcastable arguments don't error out
+        fns_no_result_broadcast = {"masked_select"}
 
         for fn in fns_fallback:
             # case 1: both broadcastable and nElems equal -- verify that we broadcast
@@ -1137,6 +1144,8 @@ class TestTorch(TestCase):
                     return myfn(t1 < 0.5, cast(torch.randn(4 * 4).float()))
                 elif fn == "masked_fill":
                     return myfn(t1 < 0.5, 1.0)
+                elif fn == "masked_select":
+                    return myfn(t1 < 0.5)
                 elif fn == "map":
                     return myfn(t1, lambda x, y: x + y)
                 elif fn == "map2":
@@ -1147,7 +1156,7 @@ class TestTorch(TestCase):
                     return myfn(t1)
             r0 = tensorfn(t0_fn, t1, t2)
             r1 = tensorfn(t1_fn, t0, t2)
-            if torch.is_tensor(r0):
+            if torch.is_tensor(r0) and fn not in fns_no_result_broadcast:
                 self.assertEqual(broadcast_size, r0.size())
                 self.assertEqual(broadcast_size, r1.size())
 
@@ -1180,7 +1189,7 @@ class TestTorch(TestCase):
                     warnings.simplefilter('always', UserWarning)
                     r2 = tensorfn(t2_fn, t0, t1)
                     verify_fallback_warnings(w)
-                if torch.is_tensor(r0):
+                if torch.is_tensor(r0) and fn not in fns_no_result_broadcast:
                     self.assertEqual(t0.size(), r0.size())
                     self.assertEqual(t1.size(), r1.size())
                     self.assertEqual(t2.size(), r2.size())
