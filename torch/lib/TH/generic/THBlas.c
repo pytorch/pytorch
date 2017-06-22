@@ -22,7 +22,7 @@ TH_EXTERNC double ddot_(int *n, double *x, int *incx, double *y, int *incy);
 TH_EXTERNC ffloat cblas_sdot(const int n, const float *x, const int incx, const float *y, const int incy);
 #ifndef THBlas_ACCELERATE_sdot_
 #define THBlas_ACCELERATE_sdot_
-inline float sdot_(const int *n, const float *x, const int *incx, const float *y, const int *incy)
+inline ffloat sdot_(const int *n, const float *x, const int *incx, const float *y, const int *incy)
 {
   return cblas_sdot(*n, x, *incx, y, *incy);
 }
