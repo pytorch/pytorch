@@ -87,7 +87,8 @@ class _TensorBase(object):
         This is a no-op if the underlying storage is already in shared memory
         and for CUDA tensors. Tensors in shared memory cannot be resized.
         """
-        self.storage().share_memory_()
+        if self.nelement() > 0:
+            self.storage().share_memory_()
         return self
 
     def is_shared(self):
