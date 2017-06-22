@@ -1857,7 +1857,6 @@ ignore_inplace = set((
 gradgradcheck_exclude_classes = set((
     'Cumprod',
     'Gather',
-    'MaskedScatter',
     'Norm',
     'Prod',
 ))
