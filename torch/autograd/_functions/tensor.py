@@ -239,12 +239,11 @@ class IndexCopy(InplaceFunction):
         return tensor1.index_copy_(ctx.dim, index, tensor2)
 
     @staticmethod
-    @once_differentiable
     def backward(ctx, grad_output):
         grad_tensor1 = grad_tensor2 = None
 
         if any(ctx.needs_input_grad):
-            index, = ctx.saved_tensors
+            index, = ctx.saved_variables
 
         if ctx.needs_input_grad[0]:
             grad_tensor1 = grad_output.clone().index_fill_(ctx.dim, index, 0)
