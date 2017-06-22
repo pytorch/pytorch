@@ -92,6 +92,7 @@ TH_API void THTensor_(zeros)(THTensor *r_, THLongStorage *size);
 TH_API void THTensor_(ones)(THTensor *r_, THLongStorage *size);
 TH_API void THTensor_(diag)(THTensor *r_, THTensor *t, int k);
 TH_API void THTensor_(eye)(THTensor *r_, long n, long m);
+TH_API void THTensor_(arange)(THTensor *r_, accreal xmin, accreal xmax, accreal step);
 TH_API void THTensor_(range)(THTensor *r_, accreal xmin, accreal xmax, accreal step);
 TH_API void THTensor_(randperm)(THTensor *r_, THGenerator *_generator, long n);
 
