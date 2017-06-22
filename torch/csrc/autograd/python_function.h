@@ -29,9 +29,9 @@ struct PyFunction : public Function {
   PyObject* obj;
 };
 
-using input_map = std::unordered_map<InputNode*, std::shared_ptr<Variable>>;
-using output_list = std::vector<Output>;
-variable_list interpret(output_list, input_map&);
+using environment = std::unordered_map<int, std::shared_ptr<Variable>>;
+using output_list = std::vector<Local>;
+variable_list interpret(std::shared_ptr<Expr>, environment);
 
 }} // namespace torch::autograd
 

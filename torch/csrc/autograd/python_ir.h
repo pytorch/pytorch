@@ -5,12 +5,27 @@
 
 #include "torch/csrc/autograd/variable.h"
 
-struct THPNode {
+struct THPExpr {
     PyObject_HEAD
-    std::shared_ptr<torch::autograd::Node> cdata;
+    std::shared_ptr<torch::autograd::Expr> cdata;
 };
 
-extern PyObject *THPNodeClass;
+extern PyObject *THPExprClass;
 
-bool THPNode_initModule(PyObject *module);
-PyObject * THPNode_Wrap(const std::shared_ptr<torch::autograd::Node>& node);
+PyObject * THPExpr_Wrap(const std::shared_ptr<torch::autograd::Expr>& node);
+
+inline bool THPExpr_Check(PyObject *obj)
+{
+  return THPExprClass && PyObject_IsInstance(obj, THPExprClass);
+}
+
+struct THPArg {
+    PyObject_HEAD
+    std::shared_ptr<torch::autograd::Arg> cdata;
+};
+
+extern PyObject *THPArgClass;
+
+PyObject * THPArg_Wrap(const std::shared_ptr<torch::autograd::Arg>& node);
+
+bool THPIR_initModule(PyObject *module);
