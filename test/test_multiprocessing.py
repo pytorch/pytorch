@@ -399,6 +399,10 @@ class TestMultiprocessing(TestCase):
         t.share_memory_()
         self.assertTrue(t.is_shared())
 
+        # check that empty Tensors dont error out
+        t = torch.Tensor()
+        t.share_memory_()
+
     @unittest.skipIf(platform == 'darwin', "file descriptor strategy is not supported on OS X")
     def test_is_shared(self):
         self._test_is_shared()
