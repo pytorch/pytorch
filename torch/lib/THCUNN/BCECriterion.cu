@@ -27,6 +27,9 @@ struct bce_functor
   {
     Dtype o = thrust::get<0>(x);
     Dtype t = thrust::get<1>(x);
+    THAssertMsg(o >= 0. && o <= 1.,
+      "input value should be between 0~1, but got %s",
+      o);
     return - (t * THCNumerics<Acctype>::log(o + eps<Acctype>()) + (Acctype(1)- t) * THCNumerics<Acctype>::log(Acctype(1) - o + eps<Acctype>()));
   }
 };
@@ -41,6 +44,9 @@ struct bce_functor_weights
     Dtype o = thrust::get<0>(x);
     Dtype t = thrust::get<1>(x);
     Dtype w = thrust::get<2>(x);
+    THAssertMsg(o >= 0. && o <= 1.,
+      "input value should be between 0~1, but got %s",
+      o);
     return - w * (t * THCNumerics<Acctype>::log(o + eps<Acctype>()) + (Acctype(1) - t) * THCNumerics<Acctype>::log(Acctype(1) - o + eps<Acctype>()));
   }
 };
