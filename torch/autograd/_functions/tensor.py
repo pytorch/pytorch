@@ -413,16 +413,23 @@ class MaskedScatter(InplaceFunction):
         return tensor1.masked_scatter_(mask, tensor2)
 
     @staticmethod
-    @once_differentiable
     def backward(ctx, grad_output):
-        mask, = ctx.saved_tensors
+        mask, = ctx.saved_variables
         grad_tensor1 = grad_tensor2 = None
         if ctx.needs_input_grad[0]:
             grad_tensor1 = maybe_unexpand(grad_output.clone().masked_fill_(mask, 0), ctx.tensor1_size)
         if ctx.needs_input_grad[2]:
-            grad_tensor2 = grad_output.new(ctx.tensor2_size).zero_()
-            grad_output.masked_select(mask, out=grad_tensor2.view(-1))
-            grad_tensor2 = maybe_unexpand(grad_tensor2, ctx.tensor2_size)
+            grad_tensor2 = Variable(grad_output.data.new(ctx.tensor2_size).zero_())
+            mask_selected = grad_output.masked_select(mask)
+            diff_nelem = grad_tensor2.nelement() - mask_selected.nelement()
+            if diff_nelem > 0:
+                # because mask_selected returns a 1-d tensor with size of masked elements that are 1,
+                # we need to fill out the rest with zeros then reshape back to tensor2's size.
+                zeros_fillin = Variable(grad_output.data.new(diff_nelem).zero_())
+                mask_selected = torch.cat((mask_selected, zeros_fillin), 0)
+
+            mask_selected = mask_selected.view(ctx.tensor2_size)
+            grad_tensor2 = maybe_unexpand(mask_selected, ctx.tensor2_size)
         return grad_tensor1, None, grad_tensor2, None
 
 
@@ -468,7 +475,7 @@ class MaskedSelect(Function):
             except RuntimeError:
                 new_size = None
 
-            # we need to potentitally expand grad_tensor, since it is passed to Variable.masked_scatter, which
+            # we need to potentially expand grad_tensor, since it is passed to Variable.masked_scatter, which
             # eventually is in-place (so can't rely on automatically broadcasting)
             grad_tensor = Variable(grad_output.data.new(new_size if new_size is not None else ctx.input_size).zero_())
             grad_tensor = grad_tensor.masked_scatter(mask, grad_output)
