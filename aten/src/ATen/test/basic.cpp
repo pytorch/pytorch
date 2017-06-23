@@ -164,8 +164,7 @@ static void test(Type & type) {
     Tensor a = type.rand({3, 7});
     std::cout << a << std::endl;
     std::cout << select(a, 1, 3) << std::endl;
-    //TODO: 0-dim
-    //std::cout << select(select(a, 1, 3), 0, 2) << std::endl;
+    std::cout << select(select(a, 1, 3), 0, 2) << std::endl;
   }
 
   {
@@ -179,6 +178,13 @@ static void test(Type & type) {
       std::cout << a + b << std::endl;
       assert((a+a).dim() == 0);
       assert((1+a).dim() == 0);
+      auto c = type.rand({3,4});
+      std::cout << c[1][2] << std::endl;
+
+      auto f = type.rand({3,4});
+      f[2] = type.zeros({4});
+      f[1][0] = -1;
+      std:: cout << f << std::endl;
   }
 
 }

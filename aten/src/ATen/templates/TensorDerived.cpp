@@ -2,41 +2,6 @@
 #include "ATen/Scalar.h"
 #include "ATen/Half.h"
 
-//sketch:
-
-/*
-
-class Type {
-  // ctor is configurable as well
-  Tensor new(...) {}
-  // all  methods and pure functions, virtually dispatched
-  virtual Tensor add(Tensor a, Tensor b);
-
-  // no Tensor arguments but virtually dispatched on type
-  virtual Tensor linspace(int a, int b);
-  //
-}
-
-// base class of derived tensors
-class TensorImpl {
-  Type * type_; //non-virtual so that we don't double indirect unnecessarily ...
-
-  // not virtual - Type * handles the virtual dispatch
-  Tensor add(Tensor b) {
-    type_->add(self,b);
-  }
-}
-
-// non-method style dispatch
-Tensor add(Tensor a, Tensor b) {
-  return a->type_->add(a,b);
-}
-
-
-}
-
-*/
-
 namespace at {
 
 ${Tensor}::${Tensor}(Context* context)
@@ -72,6 +37,10 @@ int64_t ${Tensor}::dim() {
 Scalar ${Tensor}::localScalar() {
   AT_ASSERT(isScalar(),"localScalar() called on Tensor with %d dims",sizes().size());
   return Scalar(${to_at_half}(${THTensor}_get1d(${state,}tensor, 0)));
+}
+void ${Tensor}::assign_(Scalar s) {
+  AT_ASSERT(isScalar(),"assign_() called on Tensor with %d dims",sizes().size());
+  ${THTensor}_set1d(${state,}tensor, 0,${to_th_half}(s.to${ScalarName}()));
 }
 
 const char * ${Tensor}::typeString() {
