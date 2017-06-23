@@ -19,6 +19,7 @@ public:
   virtual IntList strides() override;
   virtual int64_t dim() override;
   virtual Scalar localScalar() override;
+  virtual void assign_(Scalar s) override;
   static const char * typeString();
 
 //TODO(zach): sort of friend permissions later so this
