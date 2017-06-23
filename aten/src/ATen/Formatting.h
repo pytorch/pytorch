@@ -2,6 +2,7 @@
 
 #include <iostream>
 #include "ATen/Type.h"
+#include "ATen/Scalar.h"
 
 namespace at {
 
@@ -18,6 +19,7 @@ static inline void print(const Tensor & t, int64_t linesize=80) {
 }
 
 static inline std::ostream& operator<<(std::ostream & out, Scalar s) {
+  s = s.local();
   return out << (s.isFloatingPoint() ? s.toDouble() : s.toLong());
 }
 

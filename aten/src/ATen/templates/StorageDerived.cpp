@@ -1,5 +1,5 @@
 #include "ATen/${Storage}.h"
-#include "ATen/HalfConvert.h"
+#include "ATen/Half.h"
 
 namespace at {
 
