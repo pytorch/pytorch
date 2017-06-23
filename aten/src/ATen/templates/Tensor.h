@@ -45,6 +45,7 @@ struct Tensor {
     return assign_(rhs);
   }
   Tensor & operator=(Scalar v) &&;
+  Tensor & assign_(Scalar v);
   void reset() {
     Tensor().swap(*this);
   }

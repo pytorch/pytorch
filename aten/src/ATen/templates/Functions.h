@@ -13,6 +13,7 @@ namespace at {
 static inline Tensor & copy_out(const Tensor & src, Tensor & dst) {
   dst.resize_(src.sizes());
   dst.type().copy(src,dst);
+  return dst;
 }
 
 ${function_declarations}

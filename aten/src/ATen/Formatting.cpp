@@ -191,7 +191,7 @@ void __printTensor(std::ostream& stream, Tensor& self, int64_t linesize)
   bool start = true;
   bool finished = false;
   counter[0] = -1;
-  for(int64_t i = 1; i < counter.size(); i++)
+  for(size_t i = 1; i < counter.size(); i++)
     counter[i] = 0;
   while(true) {
     for(int64_t i = 0; self.ndimension()-2; i++) {
