@@ -8,6 +8,8 @@ import warnings
 from copy import deepcopy
 from collections import OrderedDict
 from itertools import product
+from operator import mul
+from functools import reduce
 import torch.nn.functional as F
 from torch.autograd import gradcheck
 from torch.autograd.gradcheck import gradgradcheck
@@ -1303,6 +1305,12 @@ def index_variable(shape, max_indices):
     index = torch.rand(*shape).mul_(max_indices).floor_().long()
     return Variable(index, requires_grad=False)
 
+def index_perm_variable(shape, max_indices):
+    if not isinstance(shape, tuple):
+        shape = (shape,)
+
+    index = torch.randperm(max_indices).narrow(0, 0, reduce(mul, shape)).view(shape)
+    return Variable(index, requires_grad=False)
 
 def gather_variable(shape, index_dim, max_indices, duplicate=False):
     assert len(shape) == 2
@@ -1547,7 +1555,7 @@ function_tests = [
     (Addcdiv, (), ((S, S), (S, 1), torch.rand(1, S) + 5e-2, 0.6), 'broadcast_rhs_scale'),
     (Addcdiv, (), ((1,), (S, S, 1), torch.rand(1, S) + 5e-2, 0.6), 'broadcast_all_scale'),
     (IndexAdd, (), ((S, S), 0, index_variable(2, S), (2, S))),
-    (IndexCopy, (), ((S, S), 0, index_variable(2, S), (2, S))),
+    (IndexCopy, (), ((S, S), 0, index_perm_variable(2, S), (2, S))),
     (IndexFill, (), ((S, S), 0, index_variable(2, S), 2)),
     (IndexSelect, (), ((S, S), 0, index_variable(2, S))),
     (Gather, (), ((M, S), 0, gather_variable((S, S), 1, M, True))),
