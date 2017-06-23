@@ -1,6 +1,8 @@
 #include "ATen/Type.h"
 #include "ATen/Tensor.h"
 #include "ATen/Storage.h"
+#include "ATen/Scalar.h"
+
 #include <iostream>
 ${type_headers}
 
@@ -45,6 +47,11 @@ Tensor Type::tensorFromBlob(void * data, IntList sizes, IntList strides) {
   }
   auto storage = storageFromBlob(data,size);
   return tensor(*storage, 0, sizes, strides);
+}
+Tensor Type::scalarTensor(Scalar s) {
+  if(s.isBackedByTensor())
+    return s.t.toType(*this);
+  return tensor({}).fill_(s);
 }
 
 ${type_method_definitions}

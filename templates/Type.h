@@ -2,15 +2,26 @@
 
 #include <memory>
 
-#include "ATen/Scalar.h"
 #include "ATen/ArrayRef.h"
+#include "ATen/Half.h"
 
 namespace at {
 
 class Context;
 class Storage;
 class Tensor;
+class Scalar;
 class Generator;
+
+#define AT_FORALL_SCALAR_TYPES(_) \
+_(uint8_t,Byte,i) \
+_(int8_t,Char,i) \
+_(double,Double,d) \
+_(float,Float,d) \
+_(int,Int,i) \
+_(int64_t,Long,i) \
+_(int16_t,Short,i) \
+_(Half,Half,d)
 
 enum class ScalarType {
 #define DEFINE_ENUM(_1,n,_2) \
@@ -95,7 +106,7 @@ struct Type {
 
   Tensor tensorFromBlob(void * data, IntList sizes);
   Tensor tensorFromBlob(void * data, IntList sizes, IntList strides);
-
+  Tensor scalarTensor(Scalar s);
   // example
   // virtual Tensor * add(Tensor & a, Tensor & b) = 0;
   ${type_method_declarations}

@@ -5,6 +5,7 @@ $th_headers
 #include "ATen/Tensor.h"
 #include "ATen/TensorImpl.h"
 #include "ATen/Context.h"
+#include "ATen/TensorMethods.h"
 
 namespace at {
 

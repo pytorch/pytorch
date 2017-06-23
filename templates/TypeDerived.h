@@ -1,6 +1,7 @@
 #pragma once
 #include "ATen/Type.h"
 #include "ATen/Context.h"
+#include "ATen/TensorMethods.h"
 
 namespace at {
 

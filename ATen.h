@@ -9,3 +9,4 @@
 #include "ATen/Functions.h"
 #include "ATen/Formatting.h"
 #include "ATen/TensorOperators.h"
+#include "ATen/TensorMethods.h"

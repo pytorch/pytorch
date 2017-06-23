@@ -1,6 +1,5 @@
 #pragma once
 
-#include "ATen/Scalar.h"
 #include "ATen/Type.h"
 #include "ATen/TensorImpl.h"
 #include "ATen/Utils.h"
@@ -82,9 +81,6 @@ struct Tensor {
   int64_t ndimension() const {
     return dim();
   }
-  Scalar scalar() const {
-    return pImpl->localScalar();
-  }
   Type & type() const {
     return pImpl->type();
   }
@@ -104,7 +100,7 @@ struct Tensor {
   Tensor toBackend(Backend b) {
     return toType(type().toBackend(b));
   }
-  
+
   template<typename T>
   T * data() const;
 
@@ -121,36 +117,16 @@ struct Tensor {
     return TensorAccessor<T,N>(data<T>(),sizes().data(),strides().data());
   }
 
-  Tensor operator-() {
-    return neg();
-  }
-  Tensor& operator+=(const Tensor & other) {
-    add_(other);
-  }
-  Tensor& operator+=(Scalar other) {
-    add_(other);
-  }
-  Tensor& operator-=(const Tensor & other) {
-    sub_(other);
-  }
-  Tensor& operator-=(Scalar other) {
-    sub_(other);
-  }
-  Tensor& operator*=(const Tensor & other) {
-    mul_(other);
-  }
-  Tensor& operator*=(Scalar other) {
-    mul_(other);
-  }
-  Tensor& operator/=(const Tensor & other) {
-    div_(other);
-  }
-  Tensor& operator/=(Scalar other) {
-    div_(other);
-  }
-  Tensor operator[](int64_t idx) {
-    return select(0,idx);
-  }
+  Tensor operator-();
+  Tensor& operator+=(const Tensor & other);
+  Tensor& operator+=(Scalar other);
+  Tensor& operator-=(const Tensor & other);
+  Tensor& operator-=(Scalar other);
+  Tensor& operator*=(const Tensor & other);
+  Tensor& operator*=(Scalar other);
+  Tensor& operator/=(const Tensor & other);
+  Tensor& operator/=(Scalar other);
+  Tensor operator[](int64_t idx);
 
   //example
   //Tensor * add(Tensor & b);
@@ -162,25 +138,5 @@ struct Tensor {
 public:
   TensorImpl * pImpl;
 };
-
-// all static inline to allow for inlining of the non-dynamic part of dispatch
-${tensor_method_definitions}
-
-template<typename T>
-inline T* Tensor::data() const {
-  runtime_error("data() cast to unexpected type.");
-}
-#define DEFINE_CAST(T,name,_) \
-template<> \
-inline T* Tensor::data() const { \
-  AT_ASSERT(type().scalarType() == ScalarType::name, \
-    "expected scalar type % s but found %s", #name, \
-    at::toString(type().scalarType())); \
-  return static_cast<T*>(this->data_ptr()); \
-} \
-inline T* Tensor::to##name##Data() const { return data<T>(); }
-
-AT_FORALL_SCALAR_TYPES(DEFINE_CAST)
-#undef DEFINE_CAST
 
 } //namespace at

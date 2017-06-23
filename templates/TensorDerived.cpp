@@ -1,5 +1,6 @@
 #include "ATen/${Tensor}.h"
-#include "ATen/HalfConvert.h"
+#include "ATen/Scalar.h"
+#include "ATen/Half.h"
 
 //sketch:
 
