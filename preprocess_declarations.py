@@ -2,6 +2,7 @@ import re
 from copy import deepcopy
 from function_wrapper import TYPE_FORMAL_GENERIC
 import common_with_cwrap
+import yaml
 
 type_map = {
     'floating_point': [
@@ -54,7 +55,7 @@ def process_types_and_backends(option):
 
 
 def exclude(declaration):
-    return 'only_register' in declaration
+    return 'only_register' in declaration or declaration.get('python_name') == 'ndimension'
 
 
 def add_variants(option):
@@ -109,6 +110,43 @@ def sanitize_return(option):
 def set_mode(option):
     option['mode'] = option.get('mode', 'TH')
 
+# To enable 0-dim support in TH operations
+# we find all places where a single Scalar replaced with a Tensor
+# as an argument is still a valid function
+# we then mark the tensor variant with a key zero_dim_dispatch_when_scalar: name
+# where 'name' is the name of the argument that should be a scalar
+# during dispatch, if that argument is marked internally as holding a scalar
+# then the method will dispatch to that function.
+def discover_zero_dim_tensor_operations(declaration):
+    def exclude(arg):
+        return arg.get('ignore_check')
+
+    def signature(option,i=None,value=None):
+        elements = [TYPE_FORMAL_GENERIC.get(arg['type'],arg['type'])
+                    if i is None or j != i else value
+                    for j, arg in enumerate(option['arguments'])
+                    if not exclude(arg) ]
+        return '#'.join(elements)
+    signature_to_option = {signature(option): option
+                           for option in declaration['options']}
+
+    for option in declaration['options']:
+        for i,arg in enumerate(option['arguments']):
+            if arg['type'] == 'real':
+                signature_of_tensor_version = signature(option,i,'Tensor &')
+                if signature_of_tensor_version in signature_to_option:
+                    tensor_version = \
+                        signature_to_option[signature_of_tensor_version]
+                    names = [arg['name'] for arg in tensor_version['arguments']
+                             if not exclude(arg)]
+                    tensor_version['zero_dim_dispatch_when_scalar'] = names[i]
+                    print("FOUND "+str(i))
+                    print("Scalar Version ===== ")
+                    print(yaml.dump(option))
+                    print("Tensor Version ===== ")
+                    print(yaml.dump(tensor_version))
+                    print("SHARED "+names[i])
+
 
 def run(declarations):
     declarations = [d for d in declarations if not exclude(d)]
@@ -120,6 +158,8 @@ def run(declarations):
             type_to_signature=TYPE_FORMAL_GENERIC,
             remove_self=True)
         common_with_cwrap.sort_by_number_of_options(declaration)
+        discover_zero_dim_tensor_operations(declaration)
+
         new_options = []
         for option in declaration['options']:
             set_mode(option)

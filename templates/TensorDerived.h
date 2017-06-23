@@ -16,6 +16,8 @@ public:
   virtual const char * toString() const override;
   virtual IntList sizes() override;
   virtual IntList strides() override;
+  virtual int64_t dim() override;
+  virtual Scalar localScalar() override;
   static const char * typeString();
 
 //TODO(zach): sort of friend permissions later so this

@@ -45,6 +45,18 @@ static inline ${return_type} ${api_name}(${formals}) {
 }
 """)
 
+ZERO_DIM_CHECK = CodeTemplate("""\
+if(${check_name}.dim() == 0) {
+    return ${method_prefix}${api_name}(${zero_dim_actuals});
+}""")
+
+SCALAR_EXPAND = CodeTemplate("""\
+Tensor ${name}__;
+if(${name}_->isScalar()) {
+    ${name}__ = ${name}.expand(${other}.sizes());
+    ${name}_ = static_cast<${Tensor}*>(${name}__.pImpl);
+}
+""")
 
 class NYIError(Exception):
     """Indicates we don't support this declaration yet"""
@@ -83,8 +95,8 @@ CHECKED_CAST = {
     'THIntegerTensor*': CodeTemplate('checked_cast<${Backend}IntTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos})'),
     'THStorage*': CodeTemplate('checked_cast<${Storage}>(&${arg_name},"${arg_name}",${arg_pos})'),
     'THGenerator*': CodeTemplate('check_generator(&${arg_name})'),
-    'THSize*': CodeTemplate('THLongStorageView::make(${arg_name})'),
-    'THStride*': CodeTemplate('THLongStorageView::make(${arg_name})'),
+    'THSize*': CodeTemplate('THLongStorageView::make(${arg_name},true)'),
+    'THStride*': CodeTemplate('THLongStorageView::make(${arg_name},true)'),
     'real': CodeTemplate('${arg_name}.to${ScalarName}()'),
     'accreal': CodeTemplate('${arg_name}.to${AccScalarName}()'),
 
@@ -290,16 +302,27 @@ def create_derived(backend_type_env, declarations):
         return ret['type'] == 'long' or (backend_type_env['ScalarName'] == 'Long' and
                                          ret['type'] == 'real' or ret['type'] == 'accreal')
 
+    def handle_zero_dim(env,option):
+        if 'zero_dim_dispatch_when_scalar' not in option:
+            return []
+        check_name = option['zero_dim_dispatch_when_scalar']
+        zero_dim_actuals = [ arg['name']
+                             if arg['name'] != check_name else arg['name']+'.scalar()'
+                             for arg in option['formals_list'] ]
+        return [ ZERO_DIM_CHECK.substitute(env,check_name = check_name, zero_dim_actuals=zero_dim_actuals) ]
+
     def emit_body(env, option):
         body = []
+        body += handle_zero_dim(env,option)
         # arguments are potentially duplicated because of one argument
         # referencing another
         seen_names = set()
-        # only generated checked casts the first time we see it
         count = 0
         for arg in option['arguments']:
             if is_real_argument_to_wrapper(arg):
                 count += 1
+
+            # only generated checked casts the first time we see it
             if not arg['name'] in seen_names and requires_checked_cast(arg):
                 seen_names.add(arg['name'])
                 if arg.get('allocate', False):
@@ -326,19 +349,25 @@ def create_derived(backend_type_env, declarations):
                             arg['name'], ','.join(dims)))
                 if arg.get('cpu_zero', False):
                     body.append("{}.zero_();".format(arg['name']))
+                # handle scalars that occur on LHS of things like a - b
+                if 'broadcast' in arg and 'inplace' not in arg['broadcast']:
+                    other = arg['broadcast'].split(' ')[0].split(',')[0]
+                    body.append(SCALAR_EXPAND.substitute(env,
+                                                         name=arg['name'],
+                                                         other=other))
 
-        option['actuals'] = get_arguments(option)
+        option['derived_actuals'] = get_arguments(option)
         is_cuda = backend_type_env['Backend'] == 'CUDA'
         is_nn = option['mode'] == 'NN'
         if is_cuda or is_nn:
-            option['actuals'] = ['context->thc_state'] + option['actuals']
+            option['derived_actuals'] = ['context->thc_state'] + option['derived_actuals']
 
         if is_nn:
             prefix = 'THNN_{}'.format(env['THType'])
         else:
             prefix = env['THTensor'] + '_'
 
-        call = prefix + CodeTemplate("${cname}(${actuals})").substitute(env)
+        call = prefix + CodeTemplate("${cname}(${derived_actuals})").substitute(env)
         ret = option['return']
         if ret['kind'] == 'arguments':
             body.append(call + ";")

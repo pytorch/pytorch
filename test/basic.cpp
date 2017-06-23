@@ -35,6 +35,7 @@ static void test(Type & type) {
   {
     std::cout << "sort:" << std::endl;
     Tensor b = type.rand({3, 4});
+
     std::cout << b << std::endl;
     auto z = b.sort(1);
     std::cout << std::get<0>(z) << std::endl;
@@ -165,6 +166,18 @@ static void test(Type & type) {
     std::cout << select(a, 1, 3) << std::endl;
     //TODO: 0-dim
     //std::cout << select(select(a, 1, 3), 0, 2) << std::endl;
+  }
+
+  {
+      std::cout << "zero-dim: " << std::endl;
+      Tensor a = type.rand({1});
+      // TODO
+      a.pImpl->setScalar(true);
+      std::cout << a << "dims: " << a.dim() << std::endl;
+      std::cout << a.scalar() << std::endl;
+      Tensor b = type.rand({3,4});
+      std::cout << b + a << std::endl;
+      std::cout << a + b << std::endl;
   }
 
 }
