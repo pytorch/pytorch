@@ -148,13 +148,15 @@ class PoissonNLLLoss(_Loss):
     equal to 1 zeros are added to the loss.
 
     Args:
-        log_input (bool, optional): if True the loss is computed as `exp(input) - target * input`,
-                   if False the loss is `input - target * log(input)`
-        full (bool, optional): whether to compute full loss, i. e. to add the Stirling
-              approximation term `target * log(target) - target + 0.5 * log(2 * pi * target)`
-        size_average (bool, optional): By default, the losses are averaged over observations for each minibatch.
-                                       However, if the field size_average is set to False,
-                                       the losses are instead summed for each minibatch.
+        log_input (bool, optional): if True the loss is computed as
+            `exp(input) - target * input`, if False the loss is
+            `input - target * log(input)`.
+        full (bool, optional): whether to compute full loss, i. e. to add the
+            Stirling approximation term
+            `target * log(target) - target + 0.5 * log(2 * pi * target)`.
+        size_average (bool, optional): By default, the losses are averaged over
+            observations for each minibatch. However, if the field size_average
+            is set to False, the losses are instead summed for each minibatch.
 
     Examples::
         >>> loss = nn.PoissonNLLLoss()

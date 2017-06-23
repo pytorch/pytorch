@@ -596,16 +596,17 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Tru
     See :class:`~torch.nn.PoissonNLLLoss` for details.
 
     Args:
-        input: expectation of underlying Poisson distribution
-        target: random sample :math:`target \sim Pois(input)`
-        log_input: if True the loss is computed as `exp(input) - target * input`,
-                   if False then loss is `input - target * log(input)`
+        input: expectation of underlying Poisson distribution.
+        target: random sample :math:`target \sim Pois(input)`.
+        log_input: if True the loss is computed as
+            `exp(input) - target * input`, if False then loss is
+            `input - target * log(input)`.
         full: whether to compute full loss, i. e. to add the Stirling
-              approximation term `target * log(target) - target + 0.5 * log(2 * pi * target)`
-        size_average: By default, the losses are averaged
-                over observations for each minibatch. However, if the field
-                sizeAverage is set to False, the losses are instead summed
-                for each minibatch.
+            approximation term
+            `target * log(target) - target + 0.5 * log(2 * pi * target)`.
+        size_average: By default, the losses are averaged over observations for
+            each minibatch. However, if the field sizeAverage is set to False,
+            the losses are instead summed for each minibatch.
     """
     if log_input:
         loss = torch.exp(input) - target * input
