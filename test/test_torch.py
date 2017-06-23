@@ -2733,6 +2733,8 @@ class TestTorch(TestCase):
 
             def tensor_indices_to_np(tensor, indices):
                 # convert the Torch Tensor to a numpy array
+                if (tensor.is_cuda):
+                    tensor = tensor.cpu()
                 npt = tensor.numpy()
 
                 # convert indices
@@ -2749,6 +2751,8 @@ class TestTorch(TestCase):
 
             def set_numpy(tensor, indices, value):
                 if not isinstance(value, int):
+                    if value.is_cuda:
+                        value = value.cpu()
                     value = value.numpy()
 
                 npt, idxs = tensor_indices_to_np(tensor, indices)
@@ -2763,7 +2767,7 @@ class TestTorch(TestCase):
                 pyt = tensor.clone()
                 numt = tensor.clone()
                 pyt[indexer] = val
-                numt = conv_fn(set_numpy(numt, indexer, val))
+                numt = conv_fn(torch.Tensor(set_numpy(numt, indexer, val)))
                 self.assertEqual(pyt, numt)
 
             def get_set_tensor(indexed, indexer):
@@ -2809,19 +2813,19 @@ class TestTorch(TestCase):
                 [slice(None), [0, 2, 3], [1, 3, 4]],
                 [slice(None), [0], [1, 2, 4]],
                 [slice(None), [0, 1, 3], [4]],
-                [slice(None), [[0, 1], [1, 0]], [[2, 3], [3, 2]]],
+                [slice(None), [[0, 1], [1, 0]], [[2, 3], [3, 0]]],
                 [slice(None), [[0, 1], [1, 0]], [[2, 3]]],
-                [slice(None), [[0, 1], [1, 0]], [[0]]],
+                [slice(None), [[0, 1], [2, 3]], [[0]]],
                 [slice(None), [[5, 6]], [[0, 3], [4, 4]]],
                 [slice(None), [[2]], [[0, 3], [4, 4]]],
                 [[0, 2, 3], [1, 3, 4], slice(None)],
                 [[0], [1, 2, 4], slice(None)],
                 [[0, 1, 3], [4], slice(None)],
-                [[[0, 1], [1, 0]], [[2, 3], [3, 2]], slice(None)],
+                [[[0, 1], [1, 0]], [[2, 1], [3, 5]], slice(None)],
                 [[[0, 1], [1, 0]], [[2, 3]], slice(None)],
-                [[[0, 1], [1, 0]], [[0]], slice(None)],
-                [[[2, 2]], [[0, 3], [4, 4]], slice(None)],
-                [[[2]], [[0, 3], [4, 4]], slice(None)],
+                [[[0, 1], [2, 3]], [[0]], slice(None)],
+                [[[2, 1]], [[0, 3], [4, 4]], slice(None)],
+                [[[2]], [[0, 3], [4, 1]], slice(None)],
             ]
 
             for indexer in indices_to_test:
@@ -2841,43 +2845,42 @@ class TestTorch(TestCase):
                 [slice(None), slice(None), [0, 2, 3], [1, 3, 4]],
                 [slice(None), slice(None), [0], [1, 2, 4]],
                 [slice(None), slice(None), [0, 1, 3], [4]],
-                [slice(None), slice(None), [[0, 1], [1, 0]], [[2, 3], [3, 2]]],
+                [slice(None), slice(None), [[0, 1], [1, 0]], [[2, 3], [3, 0]]],
                 [slice(None), slice(None), [[0, 1], [1, 0]], [[2, 3]]],
-                [slice(None), slice(None), [[0, 1], [1, 0]], [[0]]],
+                [slice(None), slice(None), [[0, 1], [2, 3]], [[0]]],
                 [slice(None), slice(None), [[5, 6]], [[0, 3], [4, 4]]],
                 [slice(None), slice(None), [[2]], [[0, 3], [4, 4]]],
                 [slice(None), [0, 2, 3], [1, 3, 4], slice(None)],
                 [slice(None), [0], [1, 2, 4], slice(None)],
                 [slice(None), [0, 1, 3], [4], slice(None)],
-                [slice(None), [[0, 1], [1, 0]], [[2, 3], [3, 2]], slice(None)],
-                [slice(None), [[0, 1], [1, 0]], [[2, 3]], slice(None)],
-                [slice(None), [[0, 1], [1, 0]], [[0]], slice(None)],
-                [slice(None), [[2, 2]], [[0, 3], [4, 4]], slice(None)],
-                [slice(None), [[2]], [[0, 3], [4, 4]], slice(None)],
+                [slice(None), [[0, 1], [3, 4]], [[2, 3], [0, 1]], slice(None)],
+                [slice(None), [[0, 1], [3, 4]], [[2, 3]], slice(None)],
+                [slice(None), [[0, 1], [3, 2]], [[0]], slice(None)],
+                [slice(None), [[2, 1]], [[0, 3], [6, 4]], slice(None)],
+                [slice(None), [[2]], [[0, 3], [4, 2]], slice(None)],
                 [[0, 1, 2], [1, 3, 4], slice(None), slice(None)],
                 [[0], [1, 2, 4], slice(None), slice(None)],
                 [[0, 1, 2], [4], slice(None), slice(None)],
-                [[[0, 1], [1, 0]], [[2, 3], [3, 2]], slice(None), slice(None)],
-                [[[0, 1], [1, 0]], [[2, 3]], slice(None), slice(None)],
-                [[[0, 1], [1, 0]], [[0]], slice(None), slice(None)],
-                [[[2, 2]], [[0, 3], [4, 4]], slice(None), slice(None)],
-                [[[2]], [[0, 3], [4, 4]], slice(None), slice(None)],
+                [[[0, 1], [0, 2]], [[2, 4], [1, 5]], slice(None), slice(None)],
+                [[[0, 1], [1, 2]], [[2, 0]], slice(None), slice(None)],
+                [[[2, 2]], [[0, 3], [4, 5]], slice(None), slice(None)],
+                [[[2]], [[0, 3], [4, 5]], slice(None), slice(None)],
                 [slice(None), [3, 4, 6], [0, 2, 3], [1, 3, 4]],
-                [slice(None), [2, 3, 3], [1, 3, 3], [4]],
+                [slice(None), [2, 3, 4], [1, 3, 4], [4]],
                 [slice(None), [0, 1, 3], [4], [1, 3, 4]],
                 [slice(None), [6], [0, 2, 3], [1, 3, 4]],
-                [slice(None), [2, 3, 3], [3], [4]],
+                [slice(None), [2, 3, 5], [3], [4]],
                 [slice(None), [0], [4], [1, 3, 4]],
                 [slice(None), [6], [0, 2, 3], [1]],
-                [slice(None), [[0, 3], [3, 6]], [[0, 1], [1, 0]], [[2, 3], [3, 2]]],
+                [slice(None), [[0, 3], [3, 6]], [[0, 1], [1, 3]], [[5, 3], [1, 2]]],
                 [[2, 2, 1], [0, 2, 3], [1, 3, 4], slice(None)],
-                [[2, 0, 1], [1, 3, 3], [4], slice(None)],
+                [[2, 0, 1], [1, 2, 3], [4], slice(None)],
                 [[0, 1, 2], [4], [1, 3, 4], slice(None)],
                 [[0], [0, 2, 3], [1, 3, 4], slice(None)],
                 [[0, 2, 1], [3], [4], slice(None)],
                 [[0], [4], [1, 3, 4], slice(None)],
                 [[1], [0, 2, 3], [1], slice(None)],
-                [[[1, 2], [2, 1]], [[0, 1], [1, 0]], [[2, 3], [3, 2]], slice(None)],
+                [[[1, 2], [1, 2]], [[0, 1], [2, 3]], [[2, 3], [3, 5]], slice(None)],
             ]
 
             for indexer in indices_to_test:
@@ -2886,7 +2889,6 @@ class TestTorch(TestCase):
                 assert_set_eq(reference,
                               indexer,
                               get_set_tensor(reference, indexer))
-
 
     def test_advancedindex(self):
         self._test_advancedindex(self, lambda x: x)
