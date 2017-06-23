@@ -231,9 +231,8 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
     Tensor tensor = tensor_.toType(getType(kCPU,kDouble)).contiguous();
     if(tensor.ndimension() == 0) {
       stream << std::defaultfloat << tensor.data<double>()[0] << std::endl;
-//      stream << "[Tensor<" << typedesc() << "," << devicedesc() << "> (value)]";
-    }
-    else if(tensor.ndimension() == 1) {
+      stream << "[" << tensor_.pImpl->toString() << " of size {}]";
+    } else if(tensor.ndimension() == 1) {
       double scale;
       int64_t sz;
       std::tie(scale, sz) =  __printFormat(stream, tensor);
