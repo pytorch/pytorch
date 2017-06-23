@@ -127,7 +127,7 @@ class CharRNN(object):
         num_iter = 0
         N = len(self.text)
 
-        # We split text into batch_size peaces. Each peace will be used only
+        # We split text into batch_size pieces. Each piece will be used only
         # by a corresponding batch during the training process
         text_block_positions = np.zeros(self.batch_size, dtype=np.int32)
         text_block_size = N // self.batch_size
