@@ -76,6 +76,15 @@ struct Tensor {
   IntList strides() const {
     return pImpl->strides();
   }
+  int64_t dim() const {
+    return pImpl->dim();
+  }
+  int64_t ndimension() const {
+    return dim();
+  }
+  Scalar scalar() const {
+    return pImpl->localScalar();
+  }
   Type & type() const {
     return pImpl->type();
   }
@@ -95,9 +104,7 @@ struct Tensor {
   Tensor toBackend(Backend b) {
     return toType(type().toBackend(b));
   }
-  int64_t dim() const {
-    return ndimension();
-  }
+  
   template<typename T>
   T * data() const;
 
