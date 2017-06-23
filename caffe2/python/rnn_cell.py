@@ -398,6 +398,8 @@ class DropoutCell(RNNCell):
         self.get_state_names = internal_cell.get_state_names
         self.get_output_dim = internal_cell.get_output_dim
 
+        self.mask = 0
+
     def _apply(
         self,
         model,
@@ -435,11 +437,12 @@ class DropoutCell(RNNCell):
                 output, _ = model.net.Dropout(
                     output,
                     [
-                        str(output) + '_with_dropout',
-                        str(output) + '_dropout_mask',
+                        str(output) + '_with_dropout_mask{}'.format(self.mask),
+                        str(output) + '_dropout_mask{}'.format(self.mask),
                     ],
                     ratio=float(self.dropout_ratio),
                 )
+                self.mask += 1
         return output
 
 
@@ -477,6 +480,26 @@ class MultiRNNCell(RNNCell):
             self.residual_output_layers = []
         else:
             self.residual_output_layers = residual_output_layers
+
+        output_index_per_layer = []
+        base_index = 0
+        for cell in self.cells:
+            output_index_per_layer.append(
+                base_index + cell.get_output_state_index(),
+            )
+            base_index += len(cell.get_state_names())
+
+        self.output_connected_layers = []
+        self.output_indices = []
+        for i in range(len(self.cells) - 1):
+            if (i + 1) in self.residual_output_layers:
+                self.output_connected_layers.append(i)
+                self.output_indices.append(output_index_per_layer[i])
+            else:
+                self.output_connected_layers = []
+                self.output_indices = []
+        self.output_connected_layers.append(len(self.cells) - 1)
+        self.output_indices.append(output_index_per_layer[-1])
 
         self.state_names = []
         for cell in self.cells:
@@ -560,43 +583,43 @@ class MultiRNNCell(RNNCell):
         return index
 
     def _prepare_output(self, model, states):
+        connected_outputs = []
+        state_index = 0
+        for i, cell in enumerate(self.cells):
+            num_states = len(cell.get_state_names())
+            if i in self.output_connected_layers:
+                layer_states = states[state_index:state_index + num_states]
+                layer_output = cell._prepare_output(
+                    model,
+                    layer_states
+                )
+                connected_outputs.append(layer_output)
+            state_index += num_states
 
-        output = self.cells[-1]._prepare_output(
-            model,
-            states[-len(self.cells[-1].get_state_names()):],
+        output = model.net.Sum(
+            connected_outputs,
+            self.scope('residual_output'),
         )
-
-        if (len(self.cells) - 1) in self.residual_output_layers:
-            last_layer_input_index = 0
-            for cell in self.cells[:-2]:
-                last_layer_input_index += len(cell.get_state_names())
-            last_layer_input_index += self.cells[-2].get_output_state_index()
-            last_layer_input = states[last_layer_input_index]
-            output = model.net.Sum(
-                [output, last_layer_input],
-                [self.scope('residual_output')],
-            )
         return output
 
     def _prepare_output_sequence(self, model, states):
+        connected_outputs = []
+        state_index = 0
+        for i, cell in enumerate(self.cells):
+            num_states = 2 * len(cell.get_state_names())
+            if i in self.output_connected_layers:
+                layer_states = states[state_index:state_index + num_states]
+                layer_output = cell._prepare_output_sequence(
+                    model,
+                    layer_states
+                )
+                connected_outputs.append(layer_output)
+            state_index += num_states
 
-        output = self.cells[-1]._prepare_output_sequence(
-            model,
-            states[-(2 * len(self.cells[-1].get_state_names())):],
+        output = model.net.Sum(
+            connected_outputs,
+            self.scope('residual_output_sequence'),
         )
-
-        if (len(self.cells) - 1) in self.residual_output_layers:
-            last_layer_input_index = 0
-            for cell in self.cells[:-2]:
-                last_layer_input_index += 2 * len(cell.get_state_names())
-            last_layer_input_index += (
-                2 * self.cells[-2].get_output_state_index()
-            )
-            last_layer_input = states[last_layer_input_index]
-            output = model.net.Sum(
-                [output, last_layer_input],
-                [self.scope('residual_output_sequence')],
-            )
         return output
 
 
