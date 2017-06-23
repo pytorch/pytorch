@@ -6,6 +6,11 @@
 
 namespace at {
 
+
+inline Tensor & Tensor::operator=(Scalar v) && {
+  AT_ASSERT(dim() == 0, "attempting to assign a scalar to %d dim tensor",dim());
+  pImpl->assign_(v);
+}
 inline Tensor Tensor::operator-() {
   return neg();
 }

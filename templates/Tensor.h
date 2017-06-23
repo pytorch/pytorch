@@ -30,17 +30,21 @@ struct Tensor {
     if(pImpl != nullptr)
       pImpl->release();
   }
-  Tensor & operator=(Tensor && rhs) {
+  Tensor & operator=(Tensor && rhs) & {
     rhs.swap(*this);
     return *this;
   }
-  Tensor & operator=(Tensor const & rhs) {
+  Tensor & operator=(Tensor const & rhs) & {
       //Tensor ctor retains original rhs.pImpl
       //then rhs.pImpl is swapped with this->pImpl
       //finally Tensor dtor releases rhs.pImpl, which was originally this->pImpl
       Tensor(rhs).swap(*this);
       return *this;
   }
+  Tensor & operator=(Tensor const & rhs) && {
+    return assign_(rhs);
+  }
+  Tensor & operator=(Scalar v) &&;
   void reset() {
     Tensor().swap(*this);
   }
