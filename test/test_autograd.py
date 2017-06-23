@@ -1317,6 +1317,14 @@ def gather_variable(shape, index_dim, max_indices, duplicate=False):
     return Variable(index, requires_grad=False)
 
 
+def mask_not_all_zeros(shape):
+    assert len(shape) > 0
+    while True:
+        result = torch.randn(shape).gt(0)
+        if result.sum() > 0:
+            return result
+
+
 def prod_zeros(dim_size, dim_select):
     assert len(dim_select) == 2
     result = torch.randn(dim_size, dim_size, dim_size)
@@ -1578,10 +1586,11 @@ function_tests = [
     (MaskedFill, (), ((S, S), Variable(torch.randn(S, S).gt(0), requires_grad=False), 10)),
     # no lhs or all broadcast on MaskedFill because it's always inplace
     (MaskedFill, (), ((S, S), Variable(torch.randn(S,).gt(0), requires_grad=False), 10), 'broadcast_rhs'),
-    (MaskedSelect, (), ((S, S), Variable(torch.randn(S, S).gt(0), requires_grad=False))),
-    (MaskedSelect, (), ((S, S), Variable(torch.randn(S,).gt(0), requires_grad=False)), 'broadcast_rhs'),
-    (MaskedSelect, (), ((S,), Variable(torch.randn(S, S).gt(0), requires_grad=False)), 'broadcast_lhs'),
-    (MaskedSelect, (), ((S, 1, S), Variable(torch.randn(S, S).gt(0), requires_grad=False)), 'broadcast_all'),
+    # ensure the mask isn't all zeros or else we get a tensor with 0 dimensions
+    (MaskedSelect, (), ((S, S), Variable(mask_not_all_zeros((S, S)), requires_grad=False))),
+    (MaskedSelect, (), ((S, S), Variable(mask_not_all_zeros((S,)), requires_grad=False)), 'broadcast_rhs'),
+    (MaskedSelect, (), ((S,), Variable(mask_not_all_zeros((S, S,)), requires_grad=False)), 'broadcast_lhs'),
+    (MaskedSelect, (), ((S, 1, S), Variable(mask_not_all_zeros((S, S)), requires_grad=False)), 'broadcast_all'),
     (Sort, (), ((S, M, S),)),
     (Sort, (), ((S, M, S), 1), 'dim'),
     (Sort, (), ((S, M, S), 1, True), 'dim_desc'),
@@ -1837,10 +1846,10 @@ method_tests = [
     ('unsqueeze', (S, S, S), (0,), 'first', [0]),
     ('unsqueeze', (S, S, S), (1,), 'middle', [0]),
     ('unsqueeze', (S, S, S), (3,), 'last', [0]),
-    ('masked_select', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False),)),
-    ('masked_select', (M, M), (Variable(torch.ByteTensor(M,).bernoulli_(), requires_grad=False),), 'broadcast_rhs'),
-    ('masked_select', (M,), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False),), 'broadcast_lhs'),
-    ('masked_select', (M, 1, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False),),
+    ('masked_select', (M, M), (Variable(mask_not_all_zeros((M, M)), requires_grad=False),)),
+    ('masked_select', (M, M), (Variable(mask_not_all_zeros((M,)), requires_grad=False),), 'broadcast_rhs'),
+    ('masked_select', (M,), (Variable(mask_not_all_zeros((M, M)), requires_grad=False),), 'broadcast_lhs'),
+    ('masked_select', (M, 1, M), (Variable(mask_not_all_zeros((M, M)), requires_grad=False),),
      'broadcast_all'),
     ('masked_fill_', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False), 10)),
     # no lhs or all broadcast on masked_fill or masked_scatter because it's always inplace
