@@ -32,7 +32,7 @@ void ${Type}::copy(const Tensor & src, Tensor & dst) {
       throw std::runtime_error("unsupported type in copy");
       break;
   }
-  dst.pImpl->maybeScalar(src.pImpl->isScalar());
+  dst.pImpl->setScalar(src.pImpl->isScalar());
 }
 """)
 
