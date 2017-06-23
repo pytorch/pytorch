@@ -318,10 +318,12 @@ def create_derived(backend_type_env, declarations):
         # referencing another
         seen_names = set()
         count = 0
+        scalar_check = None
         for arg in option['arguments']:
             if is_real_argument_to_wrapper(arg):
                 count += 1
-
+            if arg['type'] == 'THSize*':
+                scalar_check = '{}.size() == 0'.format(arg['name'])
             # only generated checked casts the first time we see it
             if not arg['name'] in seen_names and requires_checked_cast(arg):
                 seen_names.add(arg['name'])
@@ -369,15 +371,20 @@ def create_derived(backend_type_env, declarations):
 
         call = prefix + CodeTemplate("${cname}(${derived_actuals})").substitute(env)
         ret = option['return']
+
         if ret['kind'] == 'arguments':
             body.append(call + ";")
             arguments_indices = ret['arguments']
+            arguments = [option['arguments'][argi]
+                         for argi in arguments_indices]
+            if scalar_check is not None:
+                for arg in arguments:
+                    body.append("bool maybe_scalar = {};".format(scalar_check))
+                    body.append("{}_->maybeScalar(maybe_scalar);".format(arg['name']))
             if len(arguments_indices) == 1:
-                arg = option['arguments'][arguments_indices[0]]
+                arg = arguments[0]
                 body.append("return {};".format(arg['name']))
             else:
-                arguments = [option['arguments'][argi]
-                             for argi in arguments_indices]
                 types = [to_return_type(arg, option) for arg in arguments]
                 # TODO: check for move semantics...
                 names = [arg['name'] for arg in arguments]
@@ -385,8 +392,11 @@ def create_derived(backend_type_env, declarations):
                     types=types, names=names))
         elif ret['kind'] == 'type':
             if ret['type'] == 'THTensor*':
+                maybe_scalar = "->maybeScalar({})".format(scalar_check) \
+                               if scalar_check is not None \
+                               else ""
                 body.append(CodeTemplate(
-                    "return Tensor(new ${Tensor}(context,${arg_name}),false);").substitute(env, arg_name=call))
+                    "return Tensor((new ${Tensor}(context,${arg_name}))${maybe_scalar},false);").substitute(env, arg_name=call,maybe_scalar=maybe_scalar))
             else:
                 # we using int64_t for long in the API, so correct it here...
                 if is_actual_return_long(ret):

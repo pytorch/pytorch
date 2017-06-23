@@ -230,9 +230,9 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
     stream << "[ Tensor (empty) ]";
   } else {
     Tensor tensor = tensor_.toType(getType(kCPU,kDouble)).contiguous();
-    if(tensor.ndimension() == 0) {
+    if(tensor_.ndimension() == 0) {
       stream << std::defaultfloat << tensor.data<double>()[0] << std::endl;
-      stream << "[" << tensor_.pImpl->toString() << " of size {}]";
+      stream << "[ " << tensor_.pImpl->toString() << "{} ]";
     } else if(tensor.ndimension() == 1) {
       double scale;
       int64_t sz;
@@ -244,17 +244,17 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
       for(int64_t i = 0; i < tensor.size(0); i++) {
         stream << std::setw(sz) << tensor_p[i]/scale << std::endl;
       }
-      stream << "[" << tensor_.pImpl->toString() << " of size " << tensor.size(0) << "]";
+      stream << "[ " << tensor_.pImpl->toString() << "{" << tensor.size(0) << "} ]";
     } else if(tensor.ndimension() == 2) {
       __printMatrix(stream, tensor, linesize, 0);
-      stream << "[" << tensor_.pImpl->toString() <<" of size " << tensor.size(0) << "x" <<  tensor.size(1) << "]";
+      stream << "[ " << tensor_.pImpl->toString() << "{" << tensor.size(0) << "," <<  tensor.size(1) << "} ]";
     } else {
         __printTensor(stream, tensor, linesize);
-        stream << "[" << tensor_.pImpl->toString() << " of size " << tensor.size(0);
+        stream << "[ " << tensor_.pImpl->toString() << "{" << tensor.size(0);
         for(int64_t i = 1; i < tensor.ndimension(); i++) {
-          stream << "x" << tensor.size(i);
+          stream << "," << tensor.size(i);
         }
-        stream << "]";
+        stream << "} ]";
     }
   }
   return stream;
