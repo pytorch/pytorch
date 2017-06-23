@@ -349,7 +349,8 @@ def create_derived(backend_type_env, declarations):
                         env, arg_name=arg['name'], arg_pos=count)
                     body.append("auto {}_ = {};".format(
                         arg['name'], check_cast))
-
+                if drop_argument(arg, option):
+                    body.append("(void) {}_; //silence unused warning".format(arg['name']))
                 # resize tensors for special ops that require it
                 if 'resize' in arg:
                     resize = arg['resize']

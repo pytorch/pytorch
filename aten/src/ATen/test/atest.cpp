@@ -4,6 +4,11 @@
 using namespace std;
 using namespace at;
 
+void check(bool c) {
+  if(!c)
+    throw std::runtime_error("check failed.");
+}
+
 void trace() {
   Tensor foo = CPU(kFloat).rand({12,12});
 
@@ -32,11 +37,11 @@ int main() {
   } catch (std::runtime_error&) {
     threw = true;
   }
-  assert(threw);
+  check(threw);
   Scalar a = 4;
 
   float b = a.to<float>();
-  assert(b == 4);
+  check(b == 4);
 
   foo = (foo*foo) == (foo.pow(3));
   foo =  2 + (foo+1);
@@ -70,6 +75,6 @@ int main() {
   } catch(std::runtime_error&) {
     threw = true;
   }
-  assert(threw);
+  check(threw);
   return 0;
 }

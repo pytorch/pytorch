@@ -10,6 +10,8 @@ else(${CMAKE_VERSION} VERSION_LESS "2.8.12")
   endif(${CMAKE_VERSION} VERSION_LESS "3.1")
 endif(${CMAKE_VERSION} VERSION_LESS "2.8.12")
 
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -pedantic -Wno-vla")
+
 ################################################################################
 # Helper functions
 ################################################################################
