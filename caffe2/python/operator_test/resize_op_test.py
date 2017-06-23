@@ -17,7 +17,7 @@ class TestResize(hu.HypothesisTestCase):
            size_h=st.integers(16, 128),
            input_channels=st.integers(1, 4),
            batch_size=st.integers(1, 4),
-           **hu.gcs_cpu_only)
+           **hu.gcs)
     def test_nearest(self, width_scale, height_scale, size_w, size_h,
                      input_channels, batch_size,
                      gc, dc):
