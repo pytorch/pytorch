@@ -9,9 +9,9 @@
 
 #pragma once
 
+#include "gloo/cuda_private.h"
 #include "gloo/test/base_test.h"
 
-#include "gloo/cuda_private.h"
 
 namespace gloo {
 namespace test {

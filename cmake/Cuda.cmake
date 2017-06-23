@@ -1,7 +1,8 @@
 # Known NVIDIA GPU achitectures Gloo can be compiled for.
 # This list will be used for CUDA_ARCH_NAME = All option
-set(gloo_known_gpu_archs "20 21(20) 30 35 50 52 60 61")
-set(gloo_known_gpu_archs7 "20 21(20) 30 35 50 52")
+set(gloo_known_gpu_archs "30 35 50 52 60 61 70")
+set(gloo_known_gpu_archs7 "30 35 50 52")
+set(gloo_known_gpu_archs8 "30 35 50 52 60 61")
 
 ################################################################################
 # Function for selecting GPU arch flags for nvcc based on CUDA_ARCH_NAME
@@ -9,7 +10,7 @@ set(gloo_known_gpu_archs7 "20 21(20) 30 35 50 52")
 #   gloo_select_nvcc_arch_flags(out_variable)
 function(gloo_select_nvcc_arch_flags out_variable)
   # List of arch names
-  set(__archs_names "Kepler" "Maxwell" "Pascal" "All")
+  set(__archs_names "Kepler" "Maxwell" "Pascal" "Volta" "All")
   set(__archs_name_default "All")
 
   # Set CUDA_ARCH_NAME strings (so it will be seen as dropbox in the CMake GUI)
@@ -29,6 +30,8 @@ function(gloo_select_nvcc_arch_flags out_variable)
     set(__cuda_arch_bin "50")
   elseif(${CUDA_ARCH_NAME} STREQUAL "Pascal")
     set(__cuda_arch_bin "60 61")
+  elseif(${CUDA_ARCH_NAME} STREQUAL "Volta")
+    set(__cuda_arch_bin "70")
   elseif(${CUDA_ARCH_NAME} STREQUAL "All")
     set(__cuda_arch_bin ${gloo_known_gpu_archs})
   else()
@@ -134,7 +137,11 @@ endif()
 
 set(HAVE_CUDA TRUE)
 message(STATUS "CUDA detected: " ${CUDA_VERSION})
-if (${CUDA_VERSION} LESS 8.0)
+if (${CUDA_VERSION} LESS 9.0)
+  set(gloo_known_gpu_archs ${gloo_known_gpu_archs8})
+  list(APPEND CUDA_NVCC_FLAGS "-D_MWAITXINTRIN_H_INCLUDED")
+  list(APPEND CUDA_NVCC_FLAGS "-D__STRICT_ANSI__")
+elseif (${CUDA_VERSION} LESS 8.0)
   set(gloo_known_gpu_archs ${gloo_known_gpu_archs7})
   list(APPEND CUDA_NVCC_FLAGS "-D_MWAITXINTRIN_H_INCLUDED")
   list(APPEND CUDA_NVCC_FLAGS "-D__STRICT_ANSI__")

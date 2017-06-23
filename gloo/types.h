@@ -57,16 +57,26 @@ struct __attribute__((__aligned__(2))) float16 {
   }
 #ifdef __CUDA_ARCH__
   float16(half h) {
+#if CUDA_VERSION >= 9000
+    x = reinterpret_cast<__half_raw*>(&h)->x;
+#else
     x = h.x;
+#endif // CUDA_VERSION
   }
 
   // half and float16 are supposed to have identical representation so implicit
   // conversion should be fine
   /* implicit */
   operator half() const {
+#if CUDA_VERSION >= 9000
+    __half_raw hr;
+    hr.x = this->x;
+    return half(hr);
+#else
     return (half) * this;
+#endif // CUDA_VERSION
   }
-#endif
+#endif // __CUDA_ARCH
 
   float16& operator+=(const float16& rhs) {
     float r = cpu_half2float(*this) + cpu_half2float(rhs);
