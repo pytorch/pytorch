@@ -1305,12 +1305,14 @@ def index_variable(shape, max_indices):
     index = torch.rand(*shape).mul_(max_indices).floor_().long()
     return Variable(index, requires_grad=False)
 
+
 def index_perm_variable(shape, max_indices):
     if not isinstance(shape, tuple):
         shape = (shape,)
 
     index = torch.randperm(max_indices).narrow(0, 0, reduce(mul, shape)).view(shape)
     return Variable(index, requires_grad=False)
+
 
 def gather_variable(shape, index_dim, max_indices, duplicate=False):
     assert len(shape) == 2
