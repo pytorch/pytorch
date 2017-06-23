@@ -48,9 +48,10 @@ unique_ptr<OperatorBase> TryCreateOperator(
   try {
     return registry->Create(key, operator_def, ws);
   } catch (const UnsupportedOperatorFeature& err) {
-    VLOG(1) << "Operator " << operator_def.type()
-            << " does not support the requested feature. Msg: " << err.what()
-            << ". Proto is: " << ProtoDebugString(operator_def);
+    LOG(WARNING) << "Operator " << operator_def.type()
+                 << " does not support the requested feature. Msg: "
+                 << err.what()
+                 << ". Proto is: " << ProtoDebugString(operator_def);
     return nullptr;
   }
 }
