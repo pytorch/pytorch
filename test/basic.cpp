@@ -6,6 +6,11 @@
 
 using namespace at;
 
+void check(bool c) {
+  if(!c)
+    throw std::runtime_error("check failed.");
+}
+
 static void test(Type & type) {
   {
     std::cout << "resize:" << std::endl;
@@ -176,8 +181,8 @@ static void test(Type & type) {
       Tensor b = type.rand({3,4});
       std::cout << b + a << std::endl;
       std::cout << a + b << std::endl;
-      assert((a+a).dim() == 0);
-      assert((1+a).dim() == 0);
+      check((a+a).dim() == 0);
+      check((1+a).dim() == 0);
       auto c = type.rand({3,4});
       std::cout << c[1][2] << std::endl;
 

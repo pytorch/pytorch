@@ -10,7 +10,7 @@ class Type;
 class Scalar;
 struct TensorImpl {
   TensorImpl(Type * type)
-  : type_(type), refcount(1), is_scalar(false) {}
+  :  refcount(1), is_scalar(false), type_(type) {}
   Type & type() const {
     return *type_;
   }
