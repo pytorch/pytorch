@@ -7,13 +7,17 @@ import unittest
 try:
     import cv2
 except ImportError:
-    raise unittest.SkipTest('python-opencv is not installed')
+    pass  # Handled below
 
 from PIL import Image
 import numpy as np
 import lmdb
 import shutil
-import StringIO
+try:
+    import StringIO
+except ImportError:
+    from io import StringIO
+import sys
 import tempfile
 
 # TODO: This test does not test scaling because
@@ -194,6 +198,7 @@ def create_test(output_dir, width, height, default_bound,
     return expected_results
 
 
+@unittest.skipIf('cv2' not in sys.modules, 'python-opencv is not installed')
 class TestImport(hu.HypothesisTestCase):
     @given(size_tuple=st.tuples(
         st.integers(min_value=8, max_value=4096),

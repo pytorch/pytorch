@@ -11,7 +11,7 @@ import sys
 import collections
 import functools
 import numpy as np
-from six import integer_types, string_types, text_type
+from six import integer_types, binary_type, text_type
 
 
 def CaffeBlobToNumpyArray(blob):
@@ -80,9 +80,10 @@ def MakeArgument(key, value):
         # We make a relaxation that a boolean variable will also be stored as
         # int.
         argument.i = value
-    elif isinstance(value, string_types):
-        argument.s = (value.encode('utf-8') if isinstance(value, text_type)
-                      else value)
+    elif isinstance(value, binary_type):
+        argument.s = value
+    elif isinstance(value, text_type):
+        argument.s = value.encode('utf-8')
     elif isinstance(value, Message):
         argument.s = value.SerializeToString()
     elif iterable and all(type(v) in [float, np.float_] for v in value):
@@ -95,7 +96,9 @@ def MakeArgument(key, value):
         argument.ints.extend(
             v.item() if type(v) is np.int_ else v for v in value
         )
-    elif iterable and all(isinstance(v, string_types) for v in value):
+    elif iterable and all(
+        isinstance(v, binary_type) or isinstance(v, text_type) for v in value
+    ):
         argument.strings.extend(
             v.encode('utf-8') if isinstance(v, text_type) else v
             for v in value
@@ -103,10 +106,19 @@ def MakeArgument(key, value):
     elif iterable and all(isinstance(v, Message) for v in value):
         argument.strings.extend(v.SerializeToString() for v in value)
     else:
-        raise ValueError(
-            "Unknown argument type: key=%s value=%s, value type=%s" %
-            (key, str(value), str(type(value)))
-        )
+        if iterable:
+            raise ValueError(
+                "Unknown iterable argument type: key={} value={}, value "
+                "type={}[{}]".format(
+                    key, value, type(value), set(type(v) for v in value)
+                )
+            )
+        else:
+            raise ValueError(
+                "Unknown argument type: key={} value={}, value type={}".format(
+                    key, value, type(value)
+                )
+            )
     return argument
 
 

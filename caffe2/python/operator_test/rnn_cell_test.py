@@ -458,10 +458,9 @@ def prepare_mul_rnn(model, input_blob, shape, T, outputs_with_grad, num_layers):
         model=model,
         inputs=input_blob,
         initial_states=states,
-        outputs_with_grads=map(
-            lambda x: x + 2 * (num_layers - 1),
-            outputs_with_grad
-        ),
+        outputs_with_grads=[
+            x + 2 * (num_layers - 1) for x in outputs_with_grad
+        ],
         seq_lengths=None,
     )
     return results[-2:]
@@ -682,12 +681,12 @@ class RNNCellTest(hu.HypothesisTestCase):
                 for arg in op.arg:
                     if arg.name == "step_net":
                         step_proto = caffe2_pb2.NetDef()
-                        protobuftx.Merge(arg.s, step_proto)
+                        protobuftx.Merge(arg.s.decode("ascii"), step_proto)
                         for step_op in step_proto.op:
                             self.assertEqual(0, step_op.device_option.device_type)
                             self.assertEqual(1, step_op.device_option.cuda_gpu_id)
                     elif arg.name == 'backward_step_net':
-                        self.assertEqual("", arg.s)
+                        self.assertEqual(b"", arg.s)
 
 
     @given(encoder_output_length=st.integers(1, 3),

@@ -453,7 +453,8 @@ class SparseDataParallelModelTest(TestCase):
 
             workspace.RunNet(model.net.Proto().name)
             if len(gpu_devices) == 2:
-                open("dump.txt", "w").write(str(model.net.Proto()))
+                with open("/tmp/dump.txt", "w") as f:
+                    f.write(str(model.net.Proto()))
                 if not cpu_indices:
                     idx = workspace.FetchBlob("gpu_0/indices")
                     idx = list(idx.flatten())
