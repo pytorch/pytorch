@@ -2,15 +2,26 @@
 
 #include <memory>
 
-#include "ATen/Scalar.h"
 #include "ATen/ArrayRef.h"
+#include "ATen/Half.h"
 
 namespace at {
 
 class Context;
 class Storage;
 class Tensor;
+class Scalar;
 class Generator;
+
+#define AT_FORALL_SCALAR_TYPES(_) \
+_(uint8_t,Byte,i) \
+_(int8_t,Char,i) \
+_(double,Double,d) \
+_(float,Float,d) \
+_(int,Int,i) \
+_(int64_t,Long,i) \
+_(int16_t,Short,i) \
+_(Half,Half,d)
 
 enum class ScalarType {
 #define DEFINE_ENUM(_1,n,_2) \
@@ -110,11 +121,10 @@ struct Type {
 
   Tensor tensorFromBlob(void * data, IntList sizes);
   Tensor tensorFromBlob(void * data, IntList sizes, IntList strides);
-
+  Tensor scalarTensor(Scalar s);
   // example
   // virtual Tensor * add(Tensor & a, Tensor & b) = 0;
   virtual int64_t m_storage_offset(const Tensor & self) ;
-  virtual int64_t m_ndimension(const Tensor & self) ;
   virtual Tensor & m_resize_(Tensor & self, IntList size) ;
   virtual Tensor & zeros_out(IntList size, Tensor & result) ;
   virtual Tensor zeros(IntList size) ;
@@ -703,6 +713,7 @@ struct Type {
   virtual Tensor tensor() ;
   virtual Tensor & select_out(const Tensor & self, int dim, int64_t sliceIndex, Tensor & result) ;
   virtual Tensor select(const Tensor & self, int dim, int64_t sliceIndex) ;
+  virtual Tensor & m_assign_(Tensor & self, const Tensor & src) ;
   virtual void Abs_updateOutput(const Tensor & input, const Tensor & output) ;
   virtual void Abs_updateGradInput(const Tensor & input, const Tensor & gradOutput, const Tensor & gradInput) ;
   virtual void AbsCriterion_updateOutput(const Tensor & input, const Tensor & target, const Tensor & output, bool sizeAverage) ;
