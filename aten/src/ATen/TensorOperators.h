@@ -8,35 +8,39 @@ namespace at {
 
 
 inline Tensor & Tensor::operator=(Scalar v) && {
+  return assign_(v);
+}
+inline Tensor & Tensor::assign_(Scalar v) {
   AT_ASSERT(dim() == 0, "attempting to assign a scalar to %d dim tensor",dim());
   pImpl->assign_(v);
+  return *this;
 }
 inline Tensor Tensor::operator-() {
   return neg();
 }
 inline Tensor& Tensor::operator+=(const Tensor & other) {
-  add_(other);
+  return add_(other);
 }
 inline Tensor& Tensor::operator+=(Scalar other) {
-  add_(other);
+  return add_(other);
 }
 inline Tensor& Tensor::operator-=(const Tensor & other) {
-  sub_(other);
+  return sub_(other);
 }
 inline Tensor& Tensor::operator-=(Scalar other) {
-  sub_(other);
+  return sub_(other);
 }
 inline Tensor& Tensor::operator*=(const Tensor & other) {
-  mul_(other);
+  return mul_(other);
 }
 inline Tensor& Tensor::operator*=(Scalar other) {
-  mul_(other);
+  return mul_(other);
 }
 inline Tensor& Tensor::operator/=(const Tensor & other) {
-  div_(other);
+  return div_(other);
 }
 inline Tensor& Tensor::operator/=(Scalar other) {
-  div_(other);
+  return div_(other);
 }
 inline Tensor Tensor::operator[](int64_t idx) {
   return select(0,idx);
