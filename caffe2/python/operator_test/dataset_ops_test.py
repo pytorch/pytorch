@@ -20,7 +20,7 @@ import hypothesis.strategies as st
 
 
 def _assert_arrays_equal(actual, ref, err_msg):
-    if ref.dtype.kind in ('S', 'O'):
+    if ref.dtype.kind in ('S', 'O', 'U'):
         np.testing.assert_array_equal(actual, ref, err_msg=err_msg)
     else:
         np.testing.assert_allclose(

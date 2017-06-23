@@ -385,7 +385,6 @@ class TestCWorkspace(htu.HypothesisTestCase):
 
     @given(name=st.text(), value=st.floats(min_value=-1, max_value=1.0))
     def test_operator_run(self, name, value):
-        name = name.encode('ascii', 'ignore')
         ws = workspace.C.Workspace()
         op = core.CreateOperator(
             "ConstantFill", [], [name], shape=[1], value=value)
@@ -398,7 +397,6 @@ class TestCWorkspace(htu.HypothesisTestCase):
            net_name=st.text(),
            value=st.floats(min_value=-1, max_value=1.0))
     def test_net_run(self, blob_name, net_name, value):
-        blob_name = blob_name.encode('ascii', 'ignore')
         ws = workspace.C.Workspace()
         net = core.Net(net_name)
         net.ConstantFill([], [blob_name], shape=[1], value=value)
@@ -413,7 +411,6 @@ class TestCWorkspace(htu.HypothesisTestCase):
            plan_name=st.text(),
            value=st.floats(min_value=-1, max_value=1.0))
     def test_plan_run(self, blob_name, plan_name, net_name, value):
-        blob_name = blob_name.encode('ascii', 'ignore')
         ws = workspace.C.Workspace()
         plan = core.Plan(plan_name)
         net = core.Net(net_name)
@@ -431,7 +428,6 @@ class TestCWorkspace(htu.HypothesisTestCase):
            net_name=st.text(),
            value=st.floats(min_value=-1, max_value=1.0))
     def test_net_create(self, blob_name, net_name, value):
-        blob_name = blob_name.encode('ascii', 'ignore')
         ws = workspace.C.Workspace()
         net = core.Net(net_name)
         net.ConstantFill([], [blob_name], shape=[1], value=value)

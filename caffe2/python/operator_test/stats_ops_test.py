@@ -19,7 +19,10 @@ class TestCounterOps(TestCase):
         existing = len(previous_keys)
 
         prefix = '/'.join([__name__, 'TestCounterOps', 'test_stats_ops'])
-        keys = [prefix + '/key1', prefix + '/key2']
+        keys = [
+            (prefix + '/key1').encode('ascii'),
+            (prefix + '/key2').encode('ascii')
+        ]
         values = [34, 45]
         workspace.FeedBlob('k', np.array(keys, dtype=str))
         workspace.FeedBlob('v', np.array(values, dtype=np.int64))

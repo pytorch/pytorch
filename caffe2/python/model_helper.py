@@ -531,10 +531,10 @@ def ExtractPredictorNet(
                 import google.protobuf.text_format as protobuftx
                 for arg in op.arg:
                     if arg.name == 'backward_step_net':
-                        arg.s = str("")
+                        arg.s = b""
                     elif arg.name == 'step_net':
                         step_proto = caffe2_pb2.NetDef()
-                        protobuftx.Merge(arg.s, step_proto)
+                        protobuftx.Merge(arg.s.decode("ascii"), step_proto)
                         for step_op in step_proto.op:
                             if device is not None:
                                 step_op.device_option.device_type = device.device_type
@@ -546,7 +546,7 @@ def ExtractPredictorNet(
                                 orig_external_inputs
                             )
                         )
-                        arg.s = str(step_proto)
+                        arg.s = str(step_proto).encode("ascii")
 
             if device is not None:
                 op.device_option.device_type = device.device_type

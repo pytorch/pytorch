@@ -812,10 +812,11 @@ class TestOperators(hu.HypothesisTestCase):
             N = prediction.shape[0]
             correct = 0
             for i in range(0, len(prediction)):
-                # we no longer have cmp function in python 3
-                pred_sorted = sorted([
-                    [item, j] for j, item in enumerate(prediction[i])],
-                    cmp=lambda x, y: int(y[0] > x[0]) - int(y[0] < x[0]))
+                pred_sorted = sorted(
+                    ([item, j] for j, item in enumerate(prediction[i])),
+                    key=lambda x: x[0],
+                    reverse=True
+                )
                 max_ids = [x[1] for x in pred_sorted[0:top_k]]
                 for m in max_ids:
                     if m == labels[i]:
@@ -889,7 +890,7 @@ class TestOperators(hu.HypothesisTestCase):
         def op_ref(lengths):
             sids = []
             for _, l in enumerate(lengths):
-                sids.extend(range(l))
+                sids.extend(list(range(l)))
             return (np.array(sids, dtype=np.int32), )
 
         self.assertReferenceChecks(
@@ -1122,7 +1123,11 @@ class TestOperators(hu.HypothesisTestCase):
           original matrices.
         """
         import threading
-        import Queue
+        try:
+            import queue
+        except ImportError:
+            # Py3
+            import Queue as queue
         op = core.CreateOperator(
             "CreateBlobsQueue",
             [],
@@ -1134,7 +1139,7 @@ class TestOperators(hu.HypothesisTestCase):
 
         xs = [np.random.randn(num_elements, 5).astype(np.float32)
               for _ in range(num_blobs)]
-        q = Queue.Queue()
+        q = queue.Queue()
         for i in range(num_elements):
             q.put([x[i] for x in xs])
 
@@ -1152,7 +1157,7 @@ class TestOperators(hu.HypothesisTestCase):
                         self.ws.create_blob(feed_blob).feed(
                             elem, device_option=do)
                     self.ws.run(op)
-                except Queue.Empty:
+                except queue.Empty:
                     return
 
         # Create all blobs before racing on multiple threads
@@ -1840,7 +1845,7 @@ class TestOperators(hu.HypothesisTestCase):
             backward_link_internal=backward_link_internal,
             backward_link_external=backward_link_external,
             backward_link_offset=backward_link_offset,
-            param=map(inputs.index, step_net.params),
+            param=[inputs.index(p) for p in step_net.params],
             step_net=str(step_net.Proto()),
             backward_step_net=str(backward_step_net.Proto()),
             outputs_with_grads=[0],

@@ -231,7 +231,7 @@ PythonOpBase::PythonOpBase(
       CAFFE_ENFORCE(pickle);
       auto loads = pickle.attr("loads").cast<py::object>();
       CAFFE_ENFORCE(loads);
-      auto builder_call = loads(pickled).cast<py::tuple>();
+      auto builder_call = loads(py::bytes(pickled)).cast<py::tuple>();
       CAFFE_ENFORCE(builder_call);
       CAFFE_ENFORCE_EQ(py::len(builder_call), 3);
       auto func = builder_call[0].cast<py::object>();
@@ -504,7 +504,8 @@ void addObjectMethods(py::module& m) {
           "_create_net",
           [](Workspace* self, py::bytes def, bool overwrite) -> py::object {
             caffe2::NetDef proto;
-            CAFFE_ENFORCE(ParseProtobufFromLargeString(def, &proto));
+            CAFFE_ENFORCE(
+                ParseProtobufFromLargeString(def.cast<std::string>(), &proto));
             auto* net = self->CreateNet(proto, overwrite);
             CAFFE_ENFORCE(net);
             return py::cast(net, py::return_value_policy::reference_internal);
@@ -527,7 +528,8 @@ void addObjectMethods(py::module& m) {
           "_run_net",
           [](Workspace* self, py::bytes def) {
             caffe2::NetDef proto;
-            CAFFE_ENFORCE(ParseProtobufFromLargeString(def, &proto));
+            CAFFE_ENFORCE(
+                ParseProtobufFromLargeString(def.cast<std::string>(), &proto));
             py::gil_scoped_release g;
             CAFFE_ENFORCE(self->RunNetOnce(proto));
           })
@@ -535,7 +537,8 @@ void addObjectMethods(py::module& m) {
           "_run_operator",
           [](Workspace* self, py::bytes def) {
             caffe2::OperatorDef proto;
-            CAFFE_ENFORCE(ParseProtobufFromLargeString(def, &proto));
+            CAFFE_ENFORCE(
+                ParseProtobufFromLargeString(def.cast<std::string>(), &proto));
             py::gil_scoped_release g;
             CAFFE_ENFORCE(self->RunOperatorOnce(proto));
           })
@@ -543,7 +546,8 @@ void addObjectMethods(py::module& m) {
           "_run_plan",
           [](Workspace* self, py::bytes def) {
             caffe2::PlanDef proto;
-            CAFFE_ENFORCE(ParseProtobufFromLargeString(def, &proto));
+            CAFFE_ENFORCE(
+                ParseProtobufFromLargeString(def.cast<std::string>(), &proto));
             py::gil_scoped_release g;
             CAFFE_ENFORCE(self->RunPlan(proto));
           })
@@ -568,7 +572,8 @@ void addObjectMethods(py::module& m) {
       "get_gradient_defs",
       [](py::bytes op_def, std::vector<GradientWrapper> output_gradients) {
         OperatorDef def;
-        CAFFE_ENFORCE(ParseProtobufFromLargeString(op_def, &def));
+        CAFFE_ENFORCE(
+            ParseProtobufFromLargeString(op_def.cast<std::string>(), &def));
         CAFFE_ENFORCE(caffe2::GradientRegistry()->Has(def.type()));
         const auto& meta = GetGradientForOp(def, output_gradients);
         std::vector<py::bytes> grad_ops;
@@ -639,9 +644,10 @@ void addObjectMethods(py::module& m) {
           [](Predictor& instance, py::bytes init_net, py::bytes predict_net) {
             CAFFE_ENFORCE(gWorkspace);
             NetDef init_net_, predict_net_;
-            CAFFE_ENFORCE(ParseProtobufFromLargeString(init_net, &init_net_));
-            CAFFE_ENFORCE(
-                ParseProtobufFromLargeString(predict_net, &predict_net_));
+            CAFFE_ENFORCE(ParseProtobufFromLargeString(
+                init_net.cast<std::string>(), &init_net_));
+            CAFFE_ENFORCE(ParseProtobufFromLargeString(
+                predict_net.cast<std::string>(), &predict_net_));
             new (&instance) Predictor(init_net_, predict_net_, gWorkspace);
           })
       .def(
@@ -781,15 +787,16 @@ void addGlobalMethods(py::module& m) {
   m.def(
       "create_net",
       [](py::bytes net_def, bool overwrite) {
+        CAFFE_ENFORCE(gWorkspace);
         caffe2::NetDef proto;
         CAFFE_ENFORCE(
-            ParseProtobufFromLargeString(net_def, &proto),
+            ParseProtobufFromLargeString(net_def.cast<std::string>(), &proto),
             "Can't parse net proto: ",
-            std::string(net_def));
+            net_def.cast<std::string>());
         CAFFE_ENFORCE(
             gWorkspace->CreateNet(proto, overwrite),
             "Error creating net with proto: ",
-            std::string(net_def));
+            net_def.cast<std::string>());
         return true;
       },
       py::arg("net_def"),
@@ -834,7 +841,8 @@ void addGlobalMethods(py::module& m) {
   m.def("run_operator_once", [](const py::bytes& op_def) {
     CAFFE_ENFORCE(gWorkspace);
     OperatorDef def;
-    CAFFE_ENFORCE(ParseProtobufFromLargeString(op_def, &def));
+    CAFFE_ENFORCE(
+        ParseProtobufFromLargeString(op_def.cast<std::string>(), &def));
     py::gil_scoped_release g;
     CAFFE_ENFORCE(gWorkspace->RunOperatorOnce(def));
     return true;
@@ -842,16 +850,17 @@ void addGlobalMethods(py::module& m) {
   m.def("run_net_once", [](const py::bytes& net_def) {
     CAFFE_ENFORCE(gWorkspace);
     NetDef def;
-    CAFFE_ENFORCE(ParseProtobufFromLargeString(net_def, &def));
+    CAFFE_ENFORCE(
+        ParseProtobufFromLargeString(net_def.cast<std::string>(), &def));
     py::gil_scoped_release g;
     CAFFE_ENFORCE(gWorkspace->RunNetOnce(def));
     return true;
   });
   m.def("run_plan", [](const py::bytes& plan_def) {
     CAFFE_ENFORCE(gWorkspace);
-    const std::string& msg = std::move(plan_def);
     PlanDef def;
-    CAFFE_ENFORCE(ParseProtobufFromLargeString(msg, &def));
+    CAFFE_ENFORCE(
+        ParseProtobufFromLargeString(plan_def.cast<std::string>(), &def));
     py::gil_scoped_release g;
     CAFFE_ENFORCE(gWorkspace->RunPlan(def));
     return true;

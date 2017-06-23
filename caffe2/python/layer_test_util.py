@@ -104,10 +104,13 @@ class LayersTestCase(test_util.TestCase):
 
     def assertArgsEqual(self, spec_args, op_args):
         self.assertEqual(len(spec_args), len(op_args))
+        keys = [a.name for a in op_args]
 
         def parse_args(args):
             operator = caffe2_pb2.OperatorDef()
-            for k, v in args.items():
+            # Generate the expected value in the same order
+            for k in keys:
+                v = args[k]
                 arg = utils.MakeArgument(k, v)
                 operator.arg.add().CopyFrom(arg)
             return operator.arg

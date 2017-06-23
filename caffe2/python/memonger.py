@@ -852,18 +852,18 @@ def apply_recurrent_blob_assignments(op, blob_assignments, canonical_name):
     step_args = [a for a in op.arg if a.name.endswith("step_net")]
     for step_arg in step_args:
         step_proto = caffe2_pb2.NetDef()
-        protobuftx.Merge(step_arg.s, step_proto)
+        protobuftx.Merge(step_arg.s.decode("ascii"), step_proto)
         apply_assignments(step_proto, blob_assignments)
         for i, einp in enumerate(step_proto.external_input):
             if einp in blob_assignments:
                 step_proto.external_input[i] = canonical_name(einp)
-        step_arg.s = str(step_proto)
+        step_arg.s = str(step_proto).encode("ascii")
     # Store renamings
     for blob, renamed in blob_assignments.items():
         if blob in list(op.input) + list(op.output):
             a = caffe2_pb2.Argument()
             a.name = blob + ".rename"
-            a.s = str(renamed)
+            a.s = str(renamed).encode("ascii")
             op.arg.extend([a])
 
 
