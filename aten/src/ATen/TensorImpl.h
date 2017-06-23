@@ -2,12 +2,12 @@
 
 #include <atomic>
 
-#include "ATen/Scalar.h"
 #include "ATen/Type.h"
 #include <iostream>
 namespace at {
 
 class Type;
+class Scalar;
 struct TensorImpl {
   TensorImpl(Type * type)
   : type_(type), refcount(1), is_scalar(false) {}

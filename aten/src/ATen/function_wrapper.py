@@ -307,7 +307,7 @@ def create_derived(backend_type_env, declarations):
             return []
         check_name = option['zero_dim_dispatch_when_scalar']
         zero_dim_actuals = [ arg['name']
-                             if arg['name'] != check_name else arg['name']+'.scalar()'
+                             if arg['name'] != check_name else "Scalar({})".format(arg['name'])
                              for arg in option['formals_list'] ]
         return [ ZERO_DIM_CHECK.substitute(env,check_name = check_name, zero_dim_actuals=zero_dim_actuals) ]
 

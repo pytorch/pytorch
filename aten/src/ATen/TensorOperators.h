@@ -6,6 +6,37 @@
 
 namespace at {
 
+inline Tensor Tensor::operator-() {
+  return neg();
+}
+inline Tensor& Tensor::operator+=(const Tensor & other) {
+  add_(other);
+}
+inline Tensor& Tensor::operator+=(Scalar other) {
+  add_(other);
+}
+inline Tensor& Tensor::operator-=(const Tensor & other) {
+  sub_(other);
+}
+inline Tensor& Tensor::operator-=(Scalar other) {
+  sub_(other);
+}
+inline Tensor& Tensor::operator*=(const Tensor & other) {
+  mul_(other);
+}
+inline Tensor& Tensor::operator*=(Scalar other) {
+  mul_(other);
+}
+inline Tensor& Tensor::operator/=(const Tensor & other) {
+  div_(other);
+}
+inline Tensor& Tensor::operator/=(Scalar other) {
+  div_(other);
+}
+inline Tensor Tensor::operator[](int64_t idx) {
+  return select(0,idx);
+}
+
 #define AT_FORALL_BINARY_OPS(_) \
 _(+,x.add(y), y.add(x)) \
 _(*,x.mul(y), y.mul(x)) \
