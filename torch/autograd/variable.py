@@ -495,7 +495,7 @@ class Variable(_C._VariableBase):
         return Cumsum.apply(self, dim)
 
     def cumprod(self, dim):
-        return Cumprod(dim)(self)
+        return Cumprod.apply(self, dim)
 
     def unfold(self, dim, size, step):
         return Unfold.apply(self, dim, size, step)

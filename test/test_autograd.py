@@ -1502,9 +1502,12 @@ function_tests = [
     (Cumsum, (), ((S, S, S), 0), 'dim0', [1]),
     (Cumsum, (), ((S, S, S), 1), 'dim1', [1]),
     (Cumsum, (), ((S,), 0), '1d', [1]),
-    (Cumprod, (0,), ((S, S, S),)),
-    (Cumprod, (1,), ((S, S, S),), 'dim1'),
-    (Cumprod, (0,), ((S,),), '1d'),
+    (Cumprod, (), ((S, S, S), 0),),
+    (Cumprod, (), ((S, S, S), 1), 'dim1'),
+    (Cumprod, (), ((S,), 0), '1d'),
+    (Cumprod, (), (prod_zeros(S, [0, 1]), 1), 'zeros_dim2', [1]),
+    (Cumprod, (), (prod_zeros(S, [0, 2]), 1), 'zeros_dim1', [1]),
+    (Cumprod, (), (prod_zeros(S, [1, 2]), 1), 'zeros_dim0', [1]),
     (Unfold, (), ((S, S, S), 1, 3, 1)),
     (Unfold, (), ((S, S, S), 2, 3, 2), 'lastdim'),
     (Min, (), ((S, S, S),),),
@@ -1745,8 +1748,8 @@ method_tests = [
     ('repeat', (S, S, S, S), (2, 3, 1, 4)),
     ('cumsum', (S, S, S), (1,)),
     ('cumsum', (S,), (0,), '1d'),
-    ('cumprod', (S, S, S), (1,)),
-    ('cumprod', (S,), (0,), '1d'),
+    ('cumprod', (S, S, S), (1,), 'dim1', [0]),
+    ('cumprod', prod_zeros(S, [0, 1]), (1,), 'zeros_dim', [0]),
     ('unfold', (S, S, S, S), (1, 3, 1)),
     ('unfold', (S, S, S), (2, 3, 2), 'lastdim'),
     ('addmm', (S, M), ((S, S), (S, M)),),
@@ -1909,7 +1912,6 @@ ignore_inplace = set((
 ))
 
 gradgradcheck_exclude_classes = set((
-    'Cumprod',
     'Norm',
     'Prod',
 ))
