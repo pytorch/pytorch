@@ -1,8 +1,8 @@
+#include <google/protobuf/text_format.h>
+#include <gtest/gtest.h>
 #include "caffe2/core/net.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/scope_guard.h"
-#include "google/protobuf/text_format.h"
-#include <gtest/gtest.h>
 
 CAFFE2_DECLARE_bool(caffe2_disable_chaining);
 
@@ -49,26 +49,24 @@ OPERATOR_SCHEMA(NetTestDummy2)
     .NumOutputs(0, INT_MAX)
     .AllowInplace({{1, 0}});
 
-const char kExampleNetDefString[] =
-"  name: \"example\""
-"  op {"
-"    input: \"in\""
-"    output: \"hidden\""
-"    type: \"NetTestDummy\""
-"  }"
-"  op {"
-"    input: \"hidden\""
-"    output: \"out\""
-"    type: \"NetTestDummy\""
-"  }";
-
 unique_ptr<NetBase> CreateNetTestHelper(
     Workspace* ws,
     const vector<string>& input,
     const vector<string>& output) {
   NetDef net_def;
-  CAFFE_ENFORCE(google::protobuf::TextFormat::ParseFromString(
-      kExampleNetDefString, &net_def));
+  {
+    auto& op = *(net_def.add_op());
+    op.set_type("NetTestDummy");
+    op.add_input("in");
+    op.add_output("hidden");
+  }
+  {
+    auto& op = *(net_def.add_op());
+    op.set_type("NetTestDummy");
+    op.add_input("hidden");
+    op.add_output("out");
+  }
+
   for (const auto& name : input) {
     net_def.add_external_input(name);
   }
