@@ -2726,7 +2726,80 @@ class TestTorch(TestCase):
         self.assertEqual(strided[rows, columns],
                          torch.Tensor([[4, 6], [2, 3]]))
 
-        # TODO: error raising tests
+        if TEST_NUMPY:
+            # we use numpy to compare against, to verify that our advanced
+            # indexing semantics are the same, and also for ease of test
+            # writing
+
+            def tensor_indices_to_np(tensor, indices):
+                # convert the Torch Tensor to a numpy array
+                npt = tensor.numpy()
+
+                # convert indices
+                idxs = tuple(i.tolist() if isinstance(i, torch.LongTensor) else
+                             i for i in indices)
+
+                return npt, idxs
+
+            def get_numpy(tensor, indices):
+                npt, idxs = tensor_indices_to_np(tensor, indices)
+
+                # index and return as a Torch Tensor
+                return torch.Tensor(npt[idxs])
+
+            def set_numpy(tensor, indices, value):
+                if not isinstance(value, int):
+                    value = value.numpy()
+
+                npt, idxs = tensor_indices_to_np(tensor, indices)
+                npt[idxs] = value
+                return npt
+
+            def assert_get_eq(tensor, indexer):
+                self.assertEqual(reference[indexer],
+                                 conv_fn(get_numpy(reference, indexer)))
+
+            def assert_set_eq(tensor, indexer, val):
+                pyt = tensor.clone()
+                numt = tensor.clone()
+                pyt[indexer] = val
+                numt = conv_fn(set_numpy(numt, indexer, val))
+                self.assertEqual(pyt, numt)
+
+            def get_set_tensor(indexed, indexer):
+                set_size = indexed[indexer].size()
+                set_count = indexed[indexer].numel()
+                set_tensor = conv_fn(torch.randperm(set_count).view(set_size).double())
+                return set_tensor
+
+            # Tensor is  0  1  2  3  4
+            #            5  6  7  8  9
+            #           10 11 12 13 14
+            #           15 16 17 18 19
+            reference = conv_fn(torch.arange(0, 20).view(4, 5))
+
+            indices_to_test = [
+                # grab the second, fourth columns
+                [slice(None), [1, 3]],
+
+                # first, third rows,
+                [[0, 2], slice(None)],
+
+                # dupes
+                [slice(None), [0, 1, 1, 2, 2]],
+
+                # weird shape
+                [slice(None), [[0, 1],
+                               [2, 3]]]
+            ]
+
+            for indexer in indices_to_test:
+                assert_get_eq(reference, indexer)
+                assert_set_eq(reference, indexer, 44)
+                assert_set_eq(reference,
+                              indexer,
+                              get_set_tensor(reference, indexer))
+
 
     def test_advancedindex(self):
         self._test_advancedindex(self, lambda x: x)
