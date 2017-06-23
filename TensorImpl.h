@@ -38,8 +38,14 @@ struct TensorImpl {
   bool isScalar() const {
     return is_scalar;
   }
-  void setScalar(bool s) {
-    is_scalar = s;
+  // this is called by the generated wrapper code when there are conditions
+  // when this output tensor should be a scalar. e.g. when all inputs
+  // to a function 'add' were scalars, then condition_when_scalar == true.
+  // we also prevent this from getting marked as a scalar if it is not
+  // the right shape afterall.
+  TensorImpl* maybeScalar(bool condition_when_scalar) {
+    is_scalar = condition_when_scalar && (dim() == 0 || dim() == 1 && sizes()[0] == 1);
+    return this;
   }
 
 private:

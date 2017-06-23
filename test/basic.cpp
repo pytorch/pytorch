@@ -172,9 +172,6 @@ static void test(Type & type) {
       std::cout << "zero-dim: " << std::endl;
       Tensor a =  type.scalarTensor(4); //type.rand({1});
 
-      // TODO: automate
-      a.pImpl->setScalar(true);
-
       std::cout << a << "dims: " << a.dim() << std::endl;
       std::cout << Scalar(a) << std::endl;
       Tensor b = type.rand({3,4});
