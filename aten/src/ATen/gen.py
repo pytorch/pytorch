@@ -37,6 +37,7 @@ TENSOR_DERIVED_CPP = CodeTemplate.from_file(
     TEMPLATE_PATH + "/TensorDerived.cpp")
 TENSOR_DERIVED_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorDerived.h")
 TENSOR_H = CodeTemplate.from_file(TEMPLATE_PATH + "/Tensor.h")
+TENSOR_METHODS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorMethods.h")
 
 FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/Functions.h")
 
@@ -197,6 +198,7 @@ write('Type.h', TYPE_H.substitute(top_env))
 write('Type.cpp', TYPE_CPP.substitute(top_env))
 
 write('Tensor.h', TENSOR_H.substitute(top_env))
+write('TensorMethods.h', TENSOR_METHODS_H.substitute(top_env))
 write('Functions.h', FUNCTIONS_H.substitute(top_env))
 write('Dispatch.h', dispatch_macros.create(all_types))
 write('Copy.cpp', copy_wrapper.create(all_types))

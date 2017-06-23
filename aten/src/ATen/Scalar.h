@@ -3,62 +3,19 @@
 #include<stdint.h>
 #include <stdexcept>
 #include <string>
-#include "ATen/HalfConvert.h"
-
-#ifdef AT_CUDA_ENABLED
-#include <cuda_runtime.h>
-#include <cuda_fp16.h>
-#endif
-
-#if defined(__GNUC__)
-#define AT_ALIGN(n) __attribute__((aligned(n)))
-#elif defined(_WIN32)
-#define AT_ALIGN(n) __declspec(align(n))
-#else
-#define AT_ALIGN(n)
-#endif
-
-
+#include "ATen/Half.h"
+#include "ATen/Type.h"
+#include "ATen/Utils.h"
+#include "ATen/Tensor.h"
 
 namespace at {
 
-
-template<typename To, typename From> To convert(From f) {
-  return static_cast<To>(f);
-}
-
-typedef struct  AT_ALIGN(2) {
-  unsigned short x;
-#ifdef AT_CUDA_ENABLED
-  operator half() { return half { x }; }
-#endif
-  operator double();
-} Half;
-
-template<> Half convert(double f);
-template<> double convert(Half f);
-template<> Half convert(int64_t f);
-template<> int64_t convert(Half f);
-
-inline Half::operator double() {
-  return convert<double,Half>(*this);
-}
-#ifdef AT_CUDA_ENABLED
-template<> half convert(double d);
-#endif
-
-#define AT_FORALL_SCALAR_TYPES(_) \
-_(uint8_t,Byte,i) \
-_(int8_t,Char,i) \
-_(double,Double,d) \
-_(float,Float,d) \
-_(int,Int,i) \
-_(int64_t,Long,i) \
-_(int16_t,Short,i) \
-_(Half,Half,d)
-
 class Scalar {
 public:
+  explicit Scalar(const Tensor & t)
+  : tag(Tag::HAS_t), t(t) {
+    AT_ASSERT(t.dim() == 0,"Attempting to create a Scalar from a %d dim tensor",t.dim());
+  }
 #define DEFINE_IMPLICIT_CTOR(type,name,member) \
   Scalar(type vv) \
   : tag(Tag::HAS_##member) { \
@@ -76,15 +33,26 @@ public:
 
 #undef DEFINE_IMPLICIT_CTOR
 
+  // return a new scalar that is guarenteed to be not backed by a tensor.
+  Scalar local() {
+    if (Tag::HAS_t != tag) {
+      return *this;
+    }
+    return t.pImpl->localScalar();
+  }
+
 #define DEFINE_ACCESSOR(type,name,member) \
   type to##name () { \
-    if (Tag::HAS_d == tag) { \
+    if (Tag::HAS_t == tag) { \
+      return local().to##name(); \
+    } else if (Tag::HAS_d == tag) { \
       auto casted = convert<type,double>(v.d); \
       if(convert<double,type>(casted) != v.d) { \
         throw std::domain_error(std::string("value cannot be losslessly represented in type " #name ": ") + std::to_string(v.d) ); \
       } \
       return casted; \
     } else { \
+      assert(Tag::HAS_i == tag); \
       auto casted = convert<type,int64_t>(v.i); \
       if(convert<int64_t,type>(casted) != v.i) { \
         throw std::domain_error(std::string("value cannot be losslessly represented in type " #name ": ") + std::to_string(v.i)); \
@@ -106,14 +74,21 @@ public:
   bool isIntegral() {
     return Tag::HAS_i == tag;
   }
+  bool isBackedByTensor() {
+    return Tag::HAS_t == tag;
+  }
 
 private:
-  enum class Tag { HAS_d, HAS_i };
+  enum class Tag { HAS_d, HAS_i, HAS_t };
   Tag tag;
   union {
     double d;
     int64_t i;
   } v;
+  Tensor t; //Note: cannot be in union be cause of copy/destruct behavior
+            //ideally we try to pack this structure tighter if it becomes
+            //a performance problem.
+  friend class Type;
 };
 
 // define the scalar.to<int64_t>() specializations
