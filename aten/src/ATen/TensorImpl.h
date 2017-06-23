@@ -19,6 +19,7 @@ struct TensorImpl {
   virtual IntList strides() = 0;
   virtual int64_t dim() = 0;
   virtual Scalar localScalar() = 0;
+  virtual void assign_(Scalar s) = 0;
   void retain() {
     ++refcount;
   }
@@ -44,8 +45,11 @@ struct TensorImpl {
   // we also prevent this from getting marked as a scalar if it is not
   // the right shape afterall.
   TensorImpl* maybeScalar(bool condition_when_scalar) {
-    is_scalar = condition_when_scalar && (dim() == 0 || dim() == 1 && sizes()[0] == 1);
+    is_scalar = isScalar() || condition_when_scalar && dim() == 1 && sizes()[0] == 1;
     return this;
+  }
+  void setScalar(bool s) {
+    is_scalar = s;
   }
 
 private:

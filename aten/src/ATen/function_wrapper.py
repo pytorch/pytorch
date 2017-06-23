@@ -393,7 +393,10 @@ def create_derived(backend_type_env, declarations):
         ret = option['return']
 
         if ret['kind'] == 'arguments':
-            body.append(call + ";")
+            if 'aten_custom_call' in option:
+                body.append(CodeTemplate(option['aten_custom_call']).substitute(env))
+            else:
+                body.append(call + ";")
             arguments_indices = ret['arguments']
             arguments = [option['arguments'][argi]
                          for argi in arguments_indices]
