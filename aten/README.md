@@ -120,10 +120,11 @@ std::cout << a << std::endl;
 std::cout << dispatch<sum_op>(a.type(),a) << " == " << a.sum() << std::endl;
 ```
 
-### Efficient access to template elements
+### Efficient access to tensor elements
 
-When using Tensor-wide operations, the cost of dynamic dispatch is very small.
-However, there are cases, especially in your own kernels, where efficient element-wise access is needed.
+When using Tensor-wide operations, the relative cost of dynamic dispatch is very small.
+However, there are cases, especially in your own kernels, where efficient element-wise access is needed,
+and the cost of dynamic dispatch inside the element-wise loop is very high.
 ATen provides _accessors_ that are created with a single dynamic check that a Tensor is the type and number of
 dimensions. Accessors then expose an API for accessing the Tensor elements efficiently:
 
@@ -158,3 +159,65 @@ cout << f << endl;
 
 These tensors cannot be resized because ATen does not own the memory, but otherwise
 behave as normal tensors.
+
+### Scalars and zero-dimensional tensors
+
+In addition to the `Tensor` objects, ATen also includes `Scalar`s that represent a single number.
+Like a Tensor, Scalars are dynamically typed and can hold any one of ATen's [number types](doc/Type.h).
+Scalars can be implicitly constructed from C++ number types. Scalars are needed because some functions like `addmm` take numbers along with Tensors and expect these
+numbers to be the same dynamic type as the tensor. They are also used in the API to indicate places where
+a function will _always_ return a Scalar value, like `sum`.
+
+```c++
+Tensor addmm(Scalar beta, const Tensor & self,
+             Scalar alpha, const Tensor & mat1,
+             const Tensor & mat2);
+Scalar sum(const Tensor & self);
+
+//usage
+Tensor a = ...
+Tensor b = ...
+Tensor c = ...
+Tensor r = addmm(1.0, a, .5, b, c);
+```
+
+In addition to Scalars, ATen also allows Tensor objects to be zero-dimensional. These Tensors hold
+a single value and they can be references to a single element in a larger Tensor. They can be used anywhere a Tensor is expected. They are normally created by operators like `select` which reduce the dimensions of
+a Tensor.
+
+```c++
+Tensor two = CPU(kFloat).rand({10,20});
+two[1][2] = 4;
+//~~~~~~~  zero-dimensional Tensor
+```
+
+It is possible to convert between Scalar and zero-dim Tensors:
+
+```c++
+Tensor zero_dim = CPU(kFloat).scalarTensor(4);
+Scalar from_tensor = Scalar(zero_dim); //only valid when zero_dim.dim() == 0;
+```
+
+### Avoiding unnecessary CUDA synchronization in your kernels when using Scalars
+
+Moving a single number from the GPU to the CPU introduces a synchronization point
+that can add latency to your program. In certain cases the result of a GPU operator like `sum` which
+returns a Scalar may be plugged into another GPU operator as an argument. If Scalars were always copied
+to the CPU, this would result in 2 copies. To avoid these synchronizations, Scalar objects can be
+optionally backed by a zero-dim Tensor, and are only copied to the CPU when requested.
+
+```c++
+auto a = CUDA(kFloat).rand({3,4})
+Scalar on_gpu = Scalar(a[1][1]); //backed by zero-dim Tensor
+assert(on_gpu.isBackedByTensor());
+
+double value = on_gpu.toDouble(); // copied to CPU, if it was backed by GPU Tensor.
+Scalar svalue = on_gpu.local(); // force the Scalar to become local to CPU.
+
+// get the scalar as a zero-dim tensor. If it was already backed
+// by a zero-dim Tensor then this op has no synchronization.
+// if the Scalar was local on CPU, it performs the copy
+Tensor same_tensor = CUDA(kFloat).scalarTensor(on_gpu);
+```
+
+Operators aware of the location of Scalars can arrange to do the minimal number of copies required.
