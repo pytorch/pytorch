@@ -177,6 +177,8 @@ static void test(Type & type) {
       Tensor b = type.rand({3,4});
       std::cout << b + a << std::endl;
       std::cout << a + b << std::endl;
+      assert((a+a).dim() == 0);
+      assert((1+a).dim() == 0);
   }
 
 }
