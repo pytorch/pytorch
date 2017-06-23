@@ -230,7 +230,7 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
     stream << "[ Tensor (empty) ]";
   } else {
     Tensor tensor = tensor_.toType(getType(kCPU,kDouble)).contiguous();
-    if(tensor_.ndimension() == 0) {
+    if(tensor.ndimension() == 0) {
       stream << std::defaultfloat << tensor.data<double>()[0] << std::endl;
       stream << "[ " << tensor_.pImpl->toString() << "{} ]";
     } else if(tensor.ndimension() == 1) {

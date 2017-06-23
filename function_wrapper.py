@@ -318,15 +318,24 @@ def create_derived(backend_type_env, declarations):
         # referencing another
         seen_names = set()
         count = 0
+        is_cuda = backend_type_env['Backend'] == 'CUDA'
+
+        # scalar_check is the heuristic conditions when a result may be a scalar_check
+        # if there is a THSize* argument, then its dimensions are used to determine scalar.
+        # otherwise, it is true if all the input tensors are scalars,
+        scalar_check_is_from_size = False
         scalar_check = None
         for arg in option['arguments']:
             if is_real_argument_to_wrapper(arg):
                 count += 1
             if arg['type'] == 'THSize*':
+                scalar_check_is_from_size = True
                 scalar_check = '{}.size() == 0'.format(arg['name'])
             # only generated checked casts the first time we see it
             if not arg['name'] in seen_names and requires_checked_cast(arg):
                 seen_names.add(arg['name'])
+
+                # make a new allocation of TensorImpl, then wrap a Tensor around it.
                 if arg.get('allocate', False):
                     allocation = CodeTemplate(
                         ALLOC_WRAP[arg['type']]).substitute(env)
@@ -334,23 +343,28 @@ def create_derived(backend_type_env, declarations):
                         arg['name'], allocation))
                     body.append('auto {} = Tensor({}_,false);'.format(
                         arg['name'], arg['name']))
+                # extract the TensorImpl from an existing tensor (or Storage, etc.)
                 else:
                     check_cast = CHECKED_CAST[arg['type']].substitute(
                         env, arg_name=arg['name'], arg_pos=count)
                     body.append("auto {}_ = {};".format(
                         arg['name'], check_cast))
+
+                # resize tensors for special ops that require it
                 if 'resize' in arg:
                     resize = arg['resize']
                     if type(resize) == str:
-                        body.append("{}.resize_as_({});".format(
+                        body.append("{}.resize_({}.sizes());".format(
                             arg['name'], resize))
                     else:
                         dims = ['{}.size({})'.format(name, dim)
                                 for name, dim in resize]
                         body.append("{}.resize_({{ {} }});".format(
                             arg['name'], ','.join(dims)))
-                if arg.get('cpu_zero', False):
+                # also special handling where we zero some outputs.
+                if arg.get('cpu_zero', False) and not is_cuda:
                     body.append("{}.zero_();".format(arg['name']))
+
                 # handle scalars that occur on LHS of things like a - b
                 if 'broadcast' in arg and 'inplace' not in arg['broadcast']:
                     other = arg['broadcast'].split(' ')[0].split(',')[0]
@@ -358,8 +372,14 @@ def create_derived(backend_type_env, declarations):
                                                          name=arg['name'],
                                                          other=other))
 
+                # dim() == 0 of all input tensors is and'd to form
+                # the test for whether the output is also a scalar
+                if not arg.get('output') and 'Tensor' in arg['type'] and not scalar_check_is_from_size:
+                    check = '{}.dim() == 0'.format(arg['name'])
+                    scalar_check = (check if scalar_check is None
+                                    else scalar_check + ' && ' + check)
+
         option['derived_actuals'] = get_arguments(option)
-        is_cuda = backend_type_env['Backend'] == 'CUDA'
         is_nn = option['mode'] == 'NN'
         if is_cuda or is_nn:
             option['derived_actuals'] = ['context->thc_state'] + option['derived_actuals']
@@ -378,9 +398,11 @@ def create_derived(backend_type_env, declarations):
             arguments = [option['arguments'][argi]
                          for argi in arguments_indices]
             if scalar_check is not None:
-                for arg in arguments:
+                if len(arguments) > 1:
                     body.append("bool maybe_scalar = {};".format(scalar_check))
-                    body.append("{}_->maybeScalar(maybe_scalar);".format(arg['name']))
+                    scalar_check = 'maybe_scalar'
+                for arg in arguments:
+                    body.append("{}_->maybeScalar({});".format(arg['name'],scalar_check))
             if len(arguments_indices) == 1:
                 arg = arguments[0]
                 body.append("return {};".format(arg['name']))
@@ -423,6 +445,6 @@ def create_derived(backend_type_env, declarations):
             if not option.get('skip', False):
                 try:
                     process_option(option)
-                except NYIError as e:
+                except NYIError:
                     pass
     return type_object_declarations, type_object_definitions
