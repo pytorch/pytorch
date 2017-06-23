@@ -137,7 +137,6 @@ elif [ "$TRAVIS_OS_NAME" = 'osx' ]; then
     pip uninstall -y numpy  # use brew version (opencv dependency)
     brew tap homebrew/science  # for OpenCV
     brew install \
-        automake \
         ccache \
         glog \
         leveldb \
@@ -169,7 +168,7 @@ if [ "$BUILD_ANDROID" = 'true' ]; then
         $APT_INSTALL_CMD autotools-dev autoconf
         wget -O "$_ndk_zip" https://dl.google.com/android/repository/android-ndk-r13b-linux-x86_64.zip
     elif [ "$TRAVIS_OS_NAME" = 'osx' ]; then
-        brew install automake libtool
+        brew install libtool
         wget -O "$_ndk_zip" https://dl.google.com/android/repository/android-ndk-r13b-darwin-x86_64.zip
     else
         echo "OS \"$TRAVIS_OS_NAME\" is unknown"
