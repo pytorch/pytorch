@@ -394,6 +394,7 @@ def create_derived(backend_type_env, declarations):
 
         if ret['kind'] == 'arguments':
             if 'aten_custom_call' in option:
+                scalar_check = None # all aten_custom_call bodies handle settings on their own.
                 body.append(CodeTemplate(option['aten_custom_call']).substitute(env))
             else:
                 body.append(call + ";")

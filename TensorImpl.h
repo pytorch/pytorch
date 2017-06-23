@@ -45,7 +45,8 @@ struct TensorImpl {
   // we also prevent this from getting marked as a scalar if it is not
   // the right shape afterall.
   TensorImpl* maybeScalar(bool condition_when_scalar) {
-    is_scalar = isScalar() || condition_when_scalar && dim() == 1 && sizes()[0] == 1;
+    is_scalar = false; //force dim() to tell the truth for TH
+    is_scalar = condition_when_scalar && dim() == 1 && sizes()[0] == 1;
     return this;
   }
   void setScalar(bool s) {
