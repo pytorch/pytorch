@@ -86,8 +86,12 @@ void THNN_(SpatialDepthWiseConvolution_updateOutput)(
   // Transpose weight & bias
   THCTensor *_weight = THCTensor_(newTranspose)(state, weight, 0, 1);
   weight = THCTensor_(newContiguous)(state, _weight);
-  THCTensor *_bias = THCTensor_(newTranspose)(state, bias, 0, 1);
-  bias = THCTensor_(newContiguous)(state, _bias);
+
+  THCTensor *_bias = NULL;
+  if(bias) {
+    _bias = THCTensor_(newTranspose)(state, bias, 0, 1);
+    bias = THCTensor_(newContiguous)(state, _bias);
+  }
 
   // resize weight
   long s1 = weight->size[0];
@@ -137,8 +141,11 @@ void THNN_(SpatialDepthWiseConvolution_updateOutput)(
   THCTensor *input_i = THCTensor_(new)(state);
   THCTensor *output_i = THCTensor_(new)(state);
   THCTensor *weight_i = THCTensor_(new)(state);
-  THCTensor *bias_i = THCTensor_(new)(state);
 
+  THCTensor *bias_i = NULL;
+  if(bias) {
+    bias_i = THCTensor_(new)(state);
+  }
   // For each elt in batch, do:
   for (int elt = 0; elt < batchSize; elt ++) {
     // Matrix mulitply per output:
@@ -152,8 +159,9 @@ void THNN_(SpatialDepthWiseConvolution_updateOutput)(
       THCTensor_(narrow)(state, input_i, input_n, 0, ipelt, 1);
       THCTensor_(select)(state, output_i, output_n, 0, ipelt);
       THCTensor_(select)(state, weight_i, weight, 0, ipelt);
-      THCTensor_(select)(state, bias_i, bias, 0, ipelt);
-
+      if (bias) {
+        THCTensor_(select)(state, bias_i, bias, 0, ipelt);
+      }
       // Do Bias first:
       // M,N,K are dims of matrix A and B
       // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
@@ -223,14 +231,15 @@ void THNN_(SpatialDepthWiseConvolution_updateOutput)(
 
   THCTensor_(free)(state, input_i);
   THCTensor_(free)(state, output_i);
-  THCTensor_(free)(state, bias_i);
+
   THCTensor_(free)(state, weight_i);
 
   THCTensor_(free)(state, weight);
   THCTensor_(free)(state, _weight);
+
+  THCTensor_(free)(state, bias_i);
   THCTensor_(free)(state, bias);
   THCTensor_(free)(state, _bias);
-
   // Transpose output
   THCTensor_(resize4d)(state, output, batchSize, nInputPlane * nOutputPlane, outputHeight, outputWidth);
 
@@ -452,15 +461,21 @@ void THNN_(SpatialDepthWiseConvolution_accGradParameters)(
 
   // Transpose gradWeight & gradBias
   THCTensor_(transpose)(state, gradWeight, NULL, 0, 1);
-  THCTensor_(transpose)(state, gradBias, NULL, 0, 1);
+
+
+  THCTensor *_gradBias = NULL;
+  if(gradBias) {
+    THCTensor_(transpose)(state, gradBias, NULL, 0, 1);
+    _gradBias = gradBias;
+    gradBias = THCTensor_(newContiguous)(state, gradBias);
+
+  }
 
   THCTensor *_gradWeight;
-  THCTensor *_gradBias;
-  _gradBias = gradBias;
+
   _gradWeight = gradWeight;
 
   gradWeight = THCTensor_(newContiguous)(state, gradWeight);
-  gradBias = THCTensor_(newContiguous)(state, gradBias);
 
 
   // resize gradWeight
@@ -506,7 +521,11 @@ void THNN_(SpatialDepthWiseConvolution_accGradParameters)(
   THCTensor *gradOutput_i = THCTensor_(new)(state);
   THCTensor *input_i = THCTensor_(new)(state);
   THCTensor *gradWeight_i = THCTensor_(new)(state);
-  THCTensor *gradBias_i = THCTensor_(new)(state);
+
+  THCTensor *gradBias_i = NULL;
+  if(gradBias) {
+    gradBias_i = THCTensor_(new)(state);
+  }
 
   // For each elt in batch, do:
   for (int elt = 0; elt < batchSize; elt ++) {
@@ -519,7 +538,9 @@ void THNN_(SpatialDepthWiseConvolution_accGradParameters)(
       THCTensor_(narrow)(state, input_i, input_n, 0, ipelt, 1);
       THCTensor_(select)(state, gradOutput_i, gradOutput_n, 0, ipelt);
       THCTensor_(select)(state, gradWeight_i, gradWeight, 0, ipelt);
-      THCTensor_(select)(state, gradBias_i, gradBias, 0, ipelt);
+      if (gradBias) {
+        THCTensor_(select)(state, gradBias_i, gradBias, 0, ipelt);
+      }
 
       // Extract columns:
       im2col(
@@ -596,28 +617,27 @@ void THNN_(SpatialDepthWiseConvolution_accGradParameters)(
 
   // Copy back and transpose back
   THCTensor_(transpose)(state, _gradWeight, NULL, 0, 1);
-  THCTensor_(transpose)(state, _gradBias, NULL, 0, 1);
   THCTensor_(resize4d)(state, _gradWeight, nInputPlane, nOutputPlane, kH, kW);
-  THCTensor_(resize2d)(state, _gradBias, nInputPlane, nOutputPlane);
-
   THCTensor_(copy)(state, _gradWeight, gradWeight);
-  THCTensor_(copy)(state, _gradBias, gradBias);
   THCTensor_(transpose)(state, _gradWeight, NULL, 0, 1);
-  THCTensor_(transpose)(state, _gradBias, NULL, 0, 1);
+
+  if(gradBias) {
+    THCTensor_(transpose)(state, _gradBias, NULL, 0, 1);
+    THCTensor_(resize2d)(state, _gradBias, nInputPlane, nOutputPlane);
+    THCTensor_(copy)(state, _gradBias, gradBias);
+    THCTensor_(transpose)(state, _gradBias, NULL, 0, 1);
+  }
 
 
   // Free
   THCTensor_(free)(state, input_n);
   THCTensor_(free)(state, gradOutput_n);
-
   THCTensor_(free)(state, input_i);
   THCTensor_(free)(state, gradOutput_i);
   THCTensor_(free)(state, gradWeight_i);
-  THCTensor_(free)(state, gradBias_i);
-
   THCTensor_(free)(state, gradWeight);
+  THCTensor_(free)(state, gradBias_i);
   THCTensor_(free)(state, gradBias);
-
 
   // Resize
   if (batch == 0) {
