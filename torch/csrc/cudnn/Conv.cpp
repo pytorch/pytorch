@@ -571,6 +571,9 @@ void cudnn_convolution_backward_filter(
   void* in = tensorPointer(dataType, input, 0, groups, 1);
   void* out = tensorPointer(dataType, gradOutput, 0, groups, 1);
   void* wght = tensorPointer(dataType, gradWeight, 0, groups, 0);
+  if (info->transposed) {
+     std::swap(in, out);
+  }
   Workspace workspace = chooseAlgorithm(state, handle, *info, benchmark, in, out, wght, &bwdFilterAlg);
 
   Constant one(dataType, 1);
