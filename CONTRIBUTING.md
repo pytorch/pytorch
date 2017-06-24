@@ -72,6 +72,14 @@ For example:
 
 You do not need to repeatedly install after modifying python files.
 
+
+## Writing documentation
+
+PyTorch uses [Google style](http://sphinxcontrib-napoleon.readthedocs.io/en/latest/example_google.html)
+for formatting docstrings. Length of line inside docstrings block must be limited to 80 characters to
+fit into Jupyter documentation popups.
+
+
 ## Managing multiple build trees
 
 One downside to using `python setup.py develop` is that your development
