@@ -318,6 +318,7 @@ def Parallelize_GPU_BMUF(
         master_gpu = devices[0]
 
     model_helper_obj._devices = devices
+    model_helper_obj._rendezvous = rendezvous
     model_helper_obj._device_type = caffe2_pb2.CUDA
     model_helper_obj._device_prefix = 'gpu'
     master_gpu_opt = core.DeviceOption(caffe2_pb2.CUDA, master_gpu)
