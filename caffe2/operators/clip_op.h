@@ -16,7 +16,7 @@ class ClipOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   ClipOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        min_(std::numeric_limits<T>::min()),
+        min_(std::numeric_limits<T>::lowest()),
         max_(std::numeric_limits<T>::max()) {
     if (HasArgument("min")) {
       min_ = static_cast<T>(OperatorBase::GetSingleArgument<float>("min", 0));
@@ -39,7 +39,7 @@ class ClipGradientOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   ClipGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        min_(std::numeric_limits<T>::min()),
+        min_(std::numeric_limits<T>::lowest()),
         max_(std::numeric_limits<T>::max()) {
     if (HasArgument("min")) {
       min_ = static_cast<T>(OperatorBase::GetSingleArgument<float>("min", 0));
