@@ -4054,7 +4054,7 @@ Example::
     0.9969287421554327
 
 
-.. function:: sum(input, dim, keepdim=False, out=None) -> Tensor
+.. function:: sum(input, dim, keepdim=True, out=None) -> Tensor
 
 Returns the sum of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
 
@@ -4086,7 +4086,7 @@ Example::
      0.0698
     -2.4767
      2.2440
-    [torch.FloatTensor of size 4]
+    [torch.FloatTensor of size 4x1]
 
 """)
 
