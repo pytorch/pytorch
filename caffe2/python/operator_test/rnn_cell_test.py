@@ -431,6 +431,119 @@ def _prepare_lstm(t, n, dim_in, create_lstm, outputs_with_grads,
     return outputs, model.net, states + [input_blob]
 
 
+def _prepare_attention(t, n, dim_in, encoder_dim,
+                          forward_only=False, T=None,
+                          dim_out=None, residual=False):
+    if dim_out is None:
+        dim_out = [dim_in]
+    print("Dims: t={} n={} dim_in={} dim_out={}".format(t, n, dim_in, dim_out))
+
+    model = ModelHelper(name='external')
+
+    def generate_input_state(shape):
+        return np.random.random(shape).astype(np.float32)
+
+    initial_states = []
+    for layer_id, d in enumerate(dim_out):
+        h, c = model.net.AddExternalInputs(
+            "hidden_init_{}".format(layer_id),
+            "cell_init_{}".format(layer_id),
+        )
+        initial_states.extend([h, c])
+        workspace.FeedBlob(h, generate_input_state((1, n, d)))
+        workspace.FeedBlob(c, generate_input_state((1, n, d)))
+
+    awec_init = model.net.AddExternalInputs([
+        'initial_attention_weighted_encoder_context',
+    ])
+    initial_states.append(awec_init)
+    workspace.FeedBlob(
+        awec_init,
+        generate_input_state((1, n, encoder_dim)),
+    )
+
+    # Due to convoluted RNN scoping logic we make sure that things
+    # work from a namescope
+    with scope.NameScope("test_name_scope"):
+        (
+            input_blob,
+            seq_lengths,
+            encoder_outputs,
+            weighted_encoder_outputs,
+        ) = model.net.AddScopedExternalInputs(
+            'input_blob',
+            'seq_lengths',
+            'encoder_outputs',
+            'weighted_encoder_outputs',
+        )
+
+        layer_input_dim = dim_in
+        cells = []
+        for layer_id, d in enumerate(dim_out):
+
+            cell = rnn_cell.MILSTMCell(
+                name='decoder_{}'.format(layer_id),
+                forward_only=forward_only,
+                input_size=layer_input_dim,
+                hidden_size=d,
+                forget_bias=0.0,
+                memory_optimization=False,
+            )
+            cells.append(cell)
+            layer_input_dim = d
+
+        decoder_cell = rnn_cell.MultiRNNCell(
+            cells,
+            name='decoder',
+            residual_output_layers=range(1, len(cells)) if residual else None,
+        )
+
+        attention_cell = rnn_cell.AttentionCell(
+            encoder_output_dim=encoder_dim,
+            encoder_outputs=encoder_outputs,
+            decoder_cell=decoder_cell,
+            decoder_state_dim=dim_out[-1],
+            name='attention_decoder',
+            attention_type=AttentionType.Recurrent,
+            weighted_encoder_outputs=weighted_encoder_outputs,
+            attention_memory_optimization=True,
+        )
+
+        attention_cell = (
+            attention_cell if T is None
+            else rnn_cell.UnrolledCell(attention_cell, T)
+        )
+
+        output_indices = decoder_cell.output_indices
+        output_indices.append(2 * len(cells))
+        outputs_with_grads = [2 * i for i in output_indices]
+
+        final_output, state_outputs = attention_cell.apply_over_sequence(
+            model=model,
+            inputs=input_blob,
+            seq_lengths=seq_lengths,
+            initial_states=initial_states,
+            outputs_with_grads=outputs_with_grads,
+        )
+
+    workspace.RunNetOnce(model.param_init_net)
+
+    workspace.FeedBlob(
+        seq_lengths,
+        np.random.randint(1, t + 1, size=(n,)).astype(np.int32)
+    )
+
+    return {
+        'final_output': final_output,
+        'net': model.net,
+        'initial_states': initial_states,
+        'input_blob': input_blob,
+        'encoder_outputs': encoder_outputs,
+        'weighted_encoder_outputs': weighted_encoder_outputs,
+        'outputs_with_grads': outputs_with_grads,
+    }
+
+
 class MulCell(rnn_cell.RNNCell):
     def _apply(self, model, input_t,
                seq_lengths, states, timestep, extra_inputs):
@@ -533,6 +646,75 @@ class RNNCellTest(hu.HypothesisTestCase):
         )
 
     @given(
+        input_tensor=hu.tensor(min_dim=3, max_dim=3, max_value=3),
+        encoder_length=st.integers(min_value=1, max_value=3),
+        encoder_dim=st.integers(min_value=1, max_value=3),
+        hidden_units=st.integers(min_value=1, max_value=3),
+        num_layers=st.integers(min_value=1, max_value=3),
+        residual=st.booleans(),
+    )
+    @ht_settings(max_examples=10)
+    @utils.debug
+    def test_unroll_attention(self, input_tensor, encoder_length,
+                                    encoder_dim, hidden_units,
+                                    num_layers, residual):
+
+        dim_out = [hidden_units] * num_layers
+        encoder_tensor = np.random.random(
+            (encoder_length, input_tensor.shape[1], encoder_dim),
+        ).astype('float32')
+
+        print('Decoder input shape: {}'.format(input_tensor.shape))
+        print('Encoder output shape: {}'.format(encoder_tensor.shape))
+
+        # Necessary because otherwise test fails for networks with fewer
+        # layers than previous test. TODO: investigate why.
+        workspace.ResetWorkspace()
+
+        net, unrolled = [
+            _prepare_attention(
+                t=input_tensor.shape[0],
+                n=input_tensor.shape[1],
+                dim_in=input_tensor.shape[2],
+                encoder_dim=encoder_dim,
+                T=T,
+                dim_out=dim_out,
+                residual=residual) for T in [input_tensor.shape[0], None]
+        ]
+
+        workspace.FeedBlob(net['input_blob'], input_tensor)
+        workspace.FeedBlob(net['encoder_outputs'], encoder_tensor)
+        workspace.FeedBlob(
+            net['weighted_encoder_outputs'],
+            np.random.random(encoder_tensor.shape).astype('float32'),
+        )
+
+        for input_name in [
+            'input_blob',
+            'encoder_outputs',
+            'weighted_encoder_outputs',
+        ]:
+            assert net[input_name] == unrolled[input_name]
+        for state_name, unrolled_state_name in zip(
+            net['initial_states'],
+            unrolled['initial_states'],
+        ):
+            assert state_name == unrolled_state_name
+
+        inputs_with_grads = net['initial_states'] + [
+            net['input_blob'],
+            net['encoder_outputs'],
+            net['weighted_encoder_outputs'],
+        ]
+
+        gradient_checker.NetGradientChecker.CompareNets(
+            [net['net'], unrolled['net']],
+            [[net['final_output']], [unrolled['final_output']]],
+            [0],
+            inputs_with_grads=inputs_with_grads,
+        )
+
+    @given(
         input_tensor=hu.tensor(min_dim=3, max_dim=3),
         forget_bias=st.floats(-10.0, 10.0),
         forward_only=st.booleans(),
@@ -552,7 +734,6 @@ class RNNCellTest(hu.HypothesisTestCase):
                 workspace.FeedBlob(inputs[-1], input_tensor)
                 workspace.RunNetOnce(net)
                 workspace.ResetWorkspace()
-
 
     @given(
         input_tensor=lstm_input(),
@@ -687,7 +868,6 @@ class RNNCellTest(hu.HypothesisTestCase):
                             self.assertEqual(1, step_op.device_option.cuda_gpu_id)
                     elif arg.name == 'backward_step_net':
                         self.assertEqual(b"", arg.s)
-
 
     @given(encoder_output_length=st.integers(1, 3),
            encoder_output_dim=st.integers(1, 3),
