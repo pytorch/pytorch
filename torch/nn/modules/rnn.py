@@ -133,7 +133,8 @@ class RNNBase(Module):
 
 
 class RNN(RNNBase):
-    r"""Applies a multi-layer Elman RNN with tanh or ReLU non-linearity to an input sequence.
+    r"""Applies a multi-layer Elman RNN with tanh or ReLU non-linearity to an
+    input sequence.
 
 
     For each element in the input sequence, each layer computes the following
@@ -143,40 +144,49 @@ class RNN(RNNBase):
 
         h_t = \tanh(w_{ih} * x_t + b_{ih}  +  w_{hh} * h_{(t-1)} + b_{hh})
 
-    where :math:`h_t` is the hidden state at time `t`, and :math:`x_t` is the hidden
-    state of the previous layer at time `t` or :math:`input_t` for the first layer.
-    If nonlinearity='relu', then `ReLU` is used instead of `tanh`.
+    where :math:`h_t` is the hidden state at time `t`, and :math:`x_t` is
+    the hidden state of the previous layer at time `t` or :math:`input_t`
+    for the first layer. If nonlinearity='relu', then `ReLU` is used instead
+    of `tanh`.
 
     Args:
         input_size: The number of expected features in the input x
         hidden_size: The number of features in the hidden state h
         num_layers: Number of recurrent layers.
         nonlinearity: The non-linearity to use ['tanh'|'relu']. Default: 'tanh'
-        bias: If False, then the layer does not use bias weights b_ih and b_hh. Default: True
-        batch_first: If True, then the input and output tensors are provided as (batch, seq, feature)
-        dropout: If non-zero, introduces a dropout layer on the outputs of each RNN layer except the last layer
+        bias: If False, then the layer does not use bias weights b_ih and b_hh.
+            Default: True
+        batch_first: If True, then the input and output tensors are provided
+            as (batch, seq, feature)
+        dropout: If non-zero, introduces a dropout layer on the outputs of each
+            RNN layer except the last layer
         bidirectional: If True, becomes a bidirectional RNN. Default: False
 
     Inputs: input, h_0
-        - **input** (seq_len, batch, input_size): tensor containing the features of the input sequence.
-          The input can also be a packed variable length sequence. See :func:`torch.nn.utils.rnn.pack_padded_sequence`
+        - **input** (seq_len, batch, input_size): tensor containing the features
+          of the input sequence. The input can also be a packed variable length
+          sequence. See :func:`torch.nn.utils.rnn.pack_padded_sequence`
           for details.
-        - **h_0** (num_layers * num_directions, batch, hidden_size): tensor containing the initial hidden state
-          for each element in the batch.
+        - **h_0** (num_layers * num_directions, batch, hidden_size): tensor
+          containing the initial hidden state for each element in the batch.
 
     Outputs: output, h_n
-        - **output** (seq_len, batch, hidden_size * num_directions): tensor containing the output features (h_k)
-          from the last layer of the RNN, for each k.  If a :class:`torch.nn.utils.rnn.PackedSequence` has been given
-          as the input, the output will also be a packed sequence.
-        - **h_n** (num_layers * num_directions, batch, hidden_size): tensor containing the hidden state for k=seq_len.
+        - **output** (seq_len, batch, hidden_size * num_directions): tensor
+          containing the output features (h_k) from the last layer of the RNN,
+          for each k.  If a :class:`torch.nn.utils.rnn.PackedSequence` has
+          been given as the input, the output will also be a packed sequence.
+        - **h_n** (num_layers * num_directions, batch, hidden_size): tensor
+          containing the hidden state for k=seq_len.
 
     Attributes:
         weight_ih_l[k]: the learnable input-hidden weights of the k-th layer,
-                        of shape `(input_size x hidden_size)`
+            of shape `(input_size x hidden_size)`
         weight_hh_l[k]: the learnable hidden-hidden weights of the k-th layer,
-                        of shape `(hidden_size x hidden_size)`
-        bias_ih_l[k]: the learnable input-hidden bias of the k-th layer, of shape `(hidden_size)`
-        bias_hh_l[k]: the learnable hidden-hidden bias of the k-th layer, of shape `(hidden_size)`
+            of shape `(hidden_size x hidden_size)`
+        bias_ih_l[k]: the learnable input-hidden bias of the k-th layer,
+            of shape `(hidden_size)`
+        bias_hh_l[k]: the learnable hidden-hidden bias of the k-th layer,
+            of shape `(hidden_size)`
 
     Examples::
 
@@ -203,7 +213,8 @@ class RNN(RNNBase):
 
 
 class LSTM(RNNBase):
-    r"""Applies a multi-layer long short-term memory (LSTM) RNN to an input sequence.
+    r"""Applies a multi-layer long short-term memory (LSTM) RNN to an input
+    sequence.
 
 
     For each element in the input sequence, each layer computes the following
@@ -220,47 +231,54 @@ class LSTM(RNNBase):
             h_t = o_t * \tanh(c_t)
             \end{array}
 
-    where :math:`h_t` is the hidden state at time `t`, :math:`c_t` is the cell state at time `t`,
-    :math:`x_t` is the hidden state of the previous layer at time `t` or :math:`input_t` for the first layer,
-    and :math:`i_t`, :math:`f_t`, :math:`g_t`, :math:`o_t` are the input, forget,
-    cell, and out gates, respectively.
+    where :math:`h_t` is the hidden state at time `t`, :math:`c_t` is the cell
+    state at time `t`, :math:`x_t` is the hidden state of the previous layer at
+    time `t` or :math:`input_t` for the first layer, and :math:`i_t`,
+    :math:`f_t`, :math:`g_t`, :math:`o_t` are the input, forget, cell,
+    and out gates, respectively.
 
     Args:
         input_size: The number of expected features in the input x
         hidden_size: The number of features in the hidden state h
         num_layers: Number of recurrent layers.
-        bias: If False, then the layer does not use bias weights b_ih and b_hh. Default: True
-        batch_first: If True, then the input and output tensors are provided as (batch, seq, feature)
-        dropout: If non-zero, introduces a dropout layer on the outputs of each RNN layer except the last layer
+        bias: If False, then the layer does not use bias weights b_ih and b_hh.
+            Default: True
+        batch_first: If True, then the input and output tensors are provided
+            as (batch, seq, feature)
+        dropout: If non-zero, introduces a dropout layer on the outputs of each
+            RNN layer except the last layer
         bidirectional: If True, becomes a bidirectional RNN. Default: False
 
     Inputs: input, (h_0, c_0)
-        - **input** (seq_len, batch, input_size): tensor containing the features of the input sequence.
-          The input can also be a packed variable length sequence. See :func:`torch.nn.utils.rnn.pack_padded_sequence`
-          for details.
-        - **h_0** (num_layers \* num_directions, batch, hidden_size): tensor containing
-          the initial hidden state for each element in the batch.
-        - **c_0** (num_layers \* num_directions, batch, hidden_size): tensor containing
-          the initial cell state for each element in the batch.
+        - **input** (seq_len, batch, input_size): tensor containing the features
+          of the input sequence.
+          The input can also be a packed variable length sequence.
+          See :func:`torch.nn.utils.rnn.pack_padded_sequence` for details.
+        - **h_0** (num_layers \* num_directions, batch, hidden_size): tensor
+          containing the initial hidden state for each element in the batch.
+        - **c_0** (num_layers \* num_directions, batch, hidden_size): tensor
+          containing the initial cell state for each element in the batch.
 
 
     Outputs: output, (h_n, c_n)
-        - **output** (seq_len, batch, hidden_size * num_directions): tensor containing
-          the output features `(h_t)` from the last layer of the RNN, for each t. If a
-          :class:`torch.nn.utils.rnn.PackedSequence` has been given as the input, the output will also be a
-          packed sequence.
-        - **h_n** (num_layers * num_directions, batch, hidden_size): tensor containing the hidden state for t=seq_len
-        - **c_n** (num_layers * num_directions, batch, hidden_size): tensor containing the cell state for t=seq_len
+        - **output** (seq_len, batch, hidden_size * num_directions): tensor
+          containing the output features `(h_t)` from the last layer of the RNN,
+          for each t. If a :class:`torch.nn.utils.rnn.PackedSequence` has been
+          given as the input, the output will also be a packed sequence.
+        - **h_n** (num_layers * num_directions, batch, hidden_size): tensor
+          containing the hidden state for t=seq_len
+        - **c_n** (num_layers * num_directions, batch, hidden_size): tensor
+          containing the cell state for t=seq_len
 
     Attributes:
-        weight_ih_l[k] : the learnable input-hidden weights of the k-th layer `(W_ii|W_if|W_ig|W_io)`, of shape
-                         `(input_size x 4*hidden_size)`
-        weight_hh_l[k] : the learnable hidden-hidden weights of the k-th layer `(W_hi|W_hf|W_hg|W_ho)`, of shape
-                         `(hidden_size x 4*hidden_size)`
-        bias_ih_l[k] : the learnable input-hidden bias of the k-th layer `(b_ii|b_if|b_ig|b_io)`, of shape
-                         `(4*hidden_size)`
-        bias_hh_l[k] : the learnable hidden-hidden bias of the k-th layer `(b_hi|b_hf|b_hg|b_ho)`, of shape
-                         `(4*hidden_size)`
+        weight_ih_l[k] : the learnable input-hidden weights of the k-th layer
+            `(W_ii|W_if|W_ig|W_io)`, of shape `(input_size x 4*hidden_size)`
+        weight_hh_l[k] : the learnable hidden-hidden weights of the k-th layer
+            `(W_hi|W_hf|W_hg|W_ho)`, of shape `(hidden_size x 4*hidden_size)`
+        bias_ih_l[k] : the learnable input-hidden bias of the k-th layer
+            `(b_ii|b_if|b_ig|b_io)`, of shape `(4*hidden_size)`
+        bias_hh_l[k] : the learnable hidden-hidden bias of the k-th layer
+            `(b_hi|b_hf|b_hg|b_ho)`, of shape `(4*hidden_size)`
 
     Examples::
 
@@ -292,30 +310,37 @@ class GRU(RNNBase):
             \end{array}
 
     where :math:`h_t` is the hidden state at time `t`, :math:`x_t` is the hidden
-    state of the previous layer at time `t` or :math:`input_t` for the first layer,
-    and :math:`r_t`, :math:`i_t`, :math:`n_t` are the reset, input, and new gates, respectively.
+    state of the previous layer at time `t` or :math:`input_t` for the first
+    layer, and :math:`r_t`, :math:`i_t`, :math:`n_t` are the reset, input,
+    and new gates, respectively.
 
     Args:
         input_size: The number of expected features in the input x
         hidden_size: The number of features in the hidden state h
         num_layers: Number of recurrent layers.
-        bias: If False, then the layer does not use bias weights b_ih and b_hh. Default: True
-        batch_first: If True, then the input and output tensors are provided as (batch, seq, feature)
-        dropout: If non-zero, introduces a dropout layer on the outputs of each RNN layer except the last layer
+        bias: If False, then the layer does not use bias weights b_ih and b_hh.
+            Default: True
+        batch_first: If True, then the input and output tensors are provided
+            as (batch, seq, feature)
+        dropout: If non-zero, introduces a dropout layer on the outputs of each
+            RNN layer except the last layer
         bidirectional: If True, becomes a bidirectional RNN. Default: False
 
     Inputs: input, h_0
-        - **input** (seq_len, batch, input_size): tensor containing the features of the input sequence.
-          The input can also be a packed variable length sequence. See :func:`torch.nn.utils.rnn.pack_padded_sequence`
+        - **input** (seq_len, batch, input_size): tensor containing the features
+          of the input sequence. The input can also be a packed variable length
+          sequence. See :func:`torch.nn.utils.rnn.pack_padded_sequence`
           for details.
-        - **h_0** (num_layers * num_directions, batch, hidden_size): tensor containing the initial
-          hidden state for each element in the batch.
+        - **h_0** (num_layers * num_directions, batch, hidden_size): tensor
+          containing the initial hidden state for each element in the batch.
 
     Outputs: output, h_n
-        - **output** (seq_len, batch, hidden_size * num_directions): tensor containing the output features h_t from
-          the last layer of the RNN, for each t. If a :class:`torch.nn.utils.rnn.PackedSequence` has been given as the
-          input, the output will also be a packed sequence.
-        - **h_n** (num_layers * num_directions, batch, hidden_size): tensor containing the hidden state for t=seq_len
+        - **output** (seq_len, batch, hidden_size * num_directions): tensor
+          containing the output features h_t from the last layer of the RNN,
+          for each t. If a :class:`torch.nn.utils.rnn.PackedSequence` has been
+          given as the input, the output will also be a packed sequence.
+        - **h_n** (num_layers * num_directions, batch, hidden_size): tensor
+          containing the hidden state for t=seq_len
 
     Attributes:
         weight_ih_l[k] : the learnable input-hidden weights of the k-th layer (W_ir|W_ii|W_in), of shape
