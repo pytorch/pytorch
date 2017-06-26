@@ -54,16 +54,16 @@ class ConcatDataset(Dataset):
         super(ConcatDataset, self).__init__()
         self.datasets = list(datasets)
         assert len(datasets) > 0, 'datasets should not be an empty iterable'
-        self.cum_sizes = list(itertools.accumulate(
-                              [len(s) for s in self.datasets]))
+        self.cummulative_sizes = list(itertools.accumulate(
+                                      [len(s) for s in self.datasets]))
 
     def __len__(self):
-        return self.cum_sizes[-1]
+        return self.cummulative_sizes[-1]
 
     def __getitem__(self, idx):
-        dataset_idx = bisect.bisect_right(self.cum_sizes, idx)
+        dataset_idx = bisect.bisect_right(self.cummulative_sizes, idx)
         if dataset_idx == 0:
             sample_idx = idx
         else:
-            sample_idx = idx - self.cum_sizes[dataset_idx - 1]
+            sample_idx = idx - self.cummulative_sizes[dataset_idx - 1]
         return self.datasets[dataset_idx][sample_idx]
