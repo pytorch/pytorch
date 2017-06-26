@@ -544,7 +544,7 @@ class Variable(_C._VariableBase):
 
     def mm(self, matrix):
         output = Variable(self.data.new(self.data.size(0), matrix.data.size(1)))
-        return self._static_blas(Addmm, (output, 0, 1, self, matrix), False)
+        return Addmm.apply(output, self, matrix, 0, 1, True)
 
     def bmm(self, batch):
         output = Variable(self.data.new(self.data.size(0), self.data.size(1),

@@ -7,6 +7,7 @@ import math
 import torch
 from . import _functions
 from .modules import utils
+from ._functions.linear import Bilinear
 from ._functions.padding import ConstantPad2d
 from ..autograd import _functions as _autograd_functions
 from torch.autograd import Variable
@@ -532,18 +533,21 @@ def sigmoid(input):
 # etc.
 
 def linear(input, weight, bias=None):
-    if bias is None:
-        return _functions.linear.Linear.apply(input, weight)
-    else:
-        return _functions.linear.Linear.apply(input, weight, bias)
+    if input.dim() == 2 and bias is not None:
+        # fused op is marginally faster
+        return torch.addmm(bias, input, weight.t())
+
+    output = input.matmul(weight.t())
+    if bias is not None:
+        output += bias
+    return output
 
 
 def bilinear(input1, input2, weight, bias=None):
-    state = _functions.linear.Bilinear()
     if bias is None:
-        return state(input1, input2, weight)
+        return Bilinear()(input1, input2, weight)
     else:
-        return state(input1, input2, weight, bias)
+        return Bilinear()(input1, input2, weight, bias)
 
 
 def batch_norm(input, running_mean, running_var, weight=None, bias=None,

@@ -1,35 +1,5 @@
 import torch
 from torch.autograd import Function
-from torch.autograd import Variable
-
-
-class Linear(Function):
-
-    @staticmethod
-    def forward(ctx, input, weight, bias=None):
-        ctx.save_for_backward(input, weight, bias)
-        output = input.new(input.size(0), weight.size(0))
-        output.addmm_(0, 1, input, weight.t())
-        if bias is not None:
-            output.add_(bias.expand_as(output))
-        return output
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        input, weight, bias = ctx.saved_variables
-
-        grad_input = grad_weight = grad_bias = None
-        if ctx.needs_input_grad[0]:
-            grad_input = torch.mm(grad_output, weight)
-        if ctx.needs_input_grad[1]:
-            grad_weight = torch.mm(grad_output.t(), input)
-        if bias is not None and ctx.needs_input_grad[2]:
-            grad_bias = grad_output.sum(0, False)
-
-        if bias is not None:
-            return grad_input, grad_weight, grad_bias
-        else:
-            return grad_input, grad_weight
 
 
 class Bilinear(Function):
