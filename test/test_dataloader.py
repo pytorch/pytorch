@@ -3,7 +3,7 @@ import sys
 import torch
 import traceback
 import unittest
-from torch.utils.data import Dataset, TensorDataset, DataLoader
+from torch.utils.data import Dataset, TensorDataset, DataLoader, ConcatDataset
 from common import TestCase, run_tests, TEST_NUMPY
 from common_nn import TEST_CUDA
 
@@ -29,6 +29,15 @@ class TestTensorDataset(TestCase):
         for i in range(15):
             self.assertEqual(t[i], source[i][0])
             self.assertEqual(l[i], source[i][1])
+
+
+class TestConcatDataset(TestCase):
+
+    def test_concat_two_singletons(self):
+        result = ConcatDataset([[0], [1]])
+        self.assertEqual(2, len(result))
+        self.assertEqual(0, result[0])
+        self.assertEqual(1, result[1])
 
 
 class ErrorDataset(Dataset):
