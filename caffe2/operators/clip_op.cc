@@ -6,13 +6,11 @@ template <>
 bool ClipOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto* Y = Output(0);
-  DCHECK_GT(X.size(), 0);
   Y->ResizeLike(X);
-  const float* Xdata = X.data<float>();
-  float* Ydata = Y->mutable_data<float>();
-  for (int i = 0; i < X.size(); ++i) {
-    Ydata[i] = std::min(std::max(Xdata[i], min_), max_);
-  }
+  EigenVectorMap<float>(Y->mutable_data<float>(), Y->size()) =
+      ConstEigenVectorMap<float>(X.data<float>(), X.size())
+          .cwiseMax(min_)
+          .cwiseMin(max_);
   return true;
 }
 
