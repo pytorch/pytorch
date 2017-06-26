@@ -1183,7 +1183,7 @@ struct TraceInterpreter
     for (Py_ssize_t i = 0; i < num_outputs; i++) {
       PyObject *output_obj = PyTuple_GET_ITEM(output_objs.get(), i);
       if (!THPVariable_Check(output_obj)) {
-        throw std::logic_error("Unwrapped variable from THPFunction_apply");
+        throw std::logic_error("THPFunction_apply returned a non-variable object");
       }
       THPVariable* output_var = (THPVariable*)output_obj;
       output_vars.emplace_back(output_var->cdata);
