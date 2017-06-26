@@ -58,12 +58,6 @@ class ConcatDataset(Dataset):
             s += l
         return r
 
-    @staticmethod
-    def searchsorted(idx, sequence):
-        for i in range(1, len(sequence)):
-            if sequence[i - 1] < idx <= sequence[i]:
-                return i
-
     def __init__(self, datasets):
         super(ConcatDataset, self).__init__()
         self.datasets = list(datasets)
