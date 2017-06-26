@@ -927,27 +927,21 @@ def verify_graph_equality(net_a, net_b):
 
     This is meant to check the output of memonger with the original graph.
     It assumes that the nets have same external input and output.
+
+    O(E) runtime + O(1) amortized cost to hash for python dict
     """
 
-    # Generates "true graph". That is, exactly which inputs will affect which outputs.
-    # Two nets are the same if their graphs are the same.
-    # For each op, if another op later in execution order overwrites an output blob,
-    # it can no longer be considered the parent of future ops through that blob.
     def parent_list(ops):
-        # Initialize to be empty for each operator
         parent_list = [[] for _ in ops]
-        for i, parent_op in enumerate(ops):
-            out_blobs = set(parent_op.output)
-            for j, child_op in enumerate(ops):
-                if len(out_blobs) == 0:
-                    break
-                if i >= j:
-                    continue
-                if any(blob in out_blobs for blob in child_op.input):
-                    parent_list[j].append(i)
-                for blob in child_op.output:
-                    if blob in out_blobs:
-                        out_blobs.remove(blob)
+        edge_owner = {}
+        for i, op in enumerate(ops):
+            for blob in op.input:
+                parent_id = edge_owner.get(blob)
+                if parent_id is not None:
+                    parent_list[i].append(parent_id)
+            for blob in op.output:
+                edge_owner[blob] = i
+
         return parent_list
 
     # Operator wise equality checks
@@ -961,6 +955,7 @@ def verify_graph_equality(net_a, net_b):
 
     # Net wise equality check
     return parent_list(net_a.op) == parent_list(net_b.op)
+
 
 Statistics = collections.namedtuple(
     'Statistics', ['baseline_nbytes', 'optimized_nbytes'])
