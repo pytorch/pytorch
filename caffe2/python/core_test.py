@@ -1,8 +1,16 @@
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+from __future__ import unicode_literals
+
+from inspect import currentframe, getframeinfo
 import unittest
 
 import numpy as np
+
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace, test_util
+
 
 class TestScopes(test_util.TestCase):
     def testBlobReferenceIsIndependentFromNameScope(self):
@@ -241,7 +249,8 @@ class TestAutoNaming(test_util.TestCase):
         net_a = create_net()
         net_b = create_net()
         # created net proto is predicatable.
-        self.assertEqual(net_a.Proto().op, net_b.Proto().op)
+        self.assertEqual(net_a.Proto().op,
+                         net_b.Proto().op)
         self.assertEqual(net_a.Proto().op[0].output[0], 'foo/ab')
         self.assertEqual(net_a.Proto().op[1].output[0], 'cd')
 
@@ -367,6 +376,57 @@ class TestExtractPredictorNet(test_util.TestCase):
             set(predict_net.Proto().external_input) -
             set([str(p) for p in model.params]), set(["image"])
         )
+
+
+class TestOperatorTraceback(test_util.TestCase):
+    def test_operator_constructor_traceback(self):
+        net = core.Net("test")
+        a, b = net.AddExternalInput("a", "b")
+        net.Mul([a, b], "c"); cf = currentframe(); line = cf.f_lineno
+        with self.assertRaises(Exception):
+            workspace.RunNetOnce(net)
+        with self.assertRaises(Exception):
+            workspace.CreateNet(net)
+        self.op_name_check(net, cf, line)
+
+    def op_name_check(self, net, cf, line):
+        net.PopulateProtoWithFileName()
+        filename = getframeinfo(cf).filename
+        self.assertEqual(net.Proto().op[0].name, '{}:{}'.format(filename, line))
+
+    def test_operator_runtime_traceback(self):
+        net = core.Net("test")
+        a = net.AddExternalInput("a")
+        workspace.blobs[a] = np.array([1, 2, 3], dtype=np.float32)
+        net.Split(a, ["b", "c"], axis=0); cf = currentframe(); line = cf.f_lineno
+        with self.assertRaises(Exception):
+            workspace.RunNetOnce(net)
+        workspace.CreateNet(net)
+        with self.assertRaises(Exception):
+            workspace.RunNet(net)
+        self.op_name_check(net, cf, line)
+
+    def test_c_workspace_constructor(self):
+        net = core.Net("test")
+        a, b = net.AddExternalInput("a", "b")
+        net.Mul([a, b], "c"); cf = currentframe(); line = cf.f_lineno
+        ws = workspace.C.Workspace()
+        with self.assertRaises(Exception):
+            ws.run(net)
+        with self.assertRaises(Exception):
+            ws.create_net(net)
+        self.op_name_check(net, cf, line)
+
+    def test_c_workspace_runtime(self):
+        net = core.Net("test")
+        a = net.AddExternalInput("a")
+        net.Split(a, ["b", "c"], axis=0); cf = currentframe(); line = cf.f_lineno
+        ws = workspace.C.Workspace()
+        ws.create_blob(str(a)).feed(np.array([1, 2, 3], dtype=np.float32))
+        ws.create_net(net)
+        with self.assertRaises(Exception):
+            ws.run(net)
+        self.op_name_check(net, cf, line)
 
 
 @unittest.skipIf(not workspace.has_gpu_support, 'No GPU support')

@@ -16,12 +16,14 @@ except ImportError:
           "To do this, do 'pip install future'.")
     import sys
     sys.exit(1)
+
+from collections import defaultdict
+import logging
+import numpy as np
 import shutil
 import socket
 import tempfile
-import logging
 
-import numpy as np
 from caffe2.proto import caffe2_pb2
 from caffe2.python import scope, utils
 
@@ -42,6 +44,8 @@ RootFolder = C.root_folder
 Workspaces = C.workspaces
 BenchmarkNet = C.benchmark_net
 Predictor = C.Predictor
+
+operator_tracebacks = defaultdict(dict)
 
 is_asan = C.is_asan
 has_gpu_support = C.has_gpu_support
@@ -144,7 +148,13 @@ def CreateNet(net, overwrite=False, input_blobs=None):
         input_blobs = []
     for input_blob in input_blobs:
         C.create_blob(input_blob)
-    return C.create_net(StringifyProto(net), overwrite)
+    return CallWithExceptionIntercept(
+        C.create_net,
+        C.Workspace.current._last_failed_op_net_position,
+        GetNetName(net),
+        StringifyProto(net), overwrite,
+    )
+
 
 
 def RunOperatorOnce(operator):
@@ -159,8 +169,27 @@ def RunOperatorsOnce(operators):
     return True
 
 
+def CallWithExceptionIntercept(func, op_id_fetcher, net_name, *args, **kwargs):
+    try:
+        return func(*args, **kwargs)
+    except Exception as ex:
+        op_id = op_id_fetcher()
+        net_tracebacks = operator_tracebacks.get(net_name, None)
+        print("Traceback for operator {} in network {}".format(op_id, net_name))
+        if net_tracebacks and op_id in net_tracebacks:
+            tb = net_tracebacks[op_id]
+            for line in tb:
+                print(':'.join(map(str, line)))
+        raise ex
+
+
 def RunNetOnce(net):
-    return C.run_net_once(StringifyProto(net))
+    return CallWithExceptionIntercept(
+        C.run_net_once,
+        C.Workspace.current._last_failed_op_net_position,
+        GetNetName(net),
+        StringifyProto(net),
+    )
 
 
 def RunNet(name, num_iter=1, allow_fail=False):
@@ -173,7 +202,12 @@ def RunNet(name, num_iter=1, allow_fail=False):
     Returns:
       True or an exception.
     """
-    return C.run_net(StringifyNetName(name), num_iter, allow_fail)
+    return CallWithExceptionIntercept(
+        C.run_net,
+        C.Workspace.current._last_failed_op_net_position,
+        GetNetName(name),
+        StringifyNetName(name), num_iter, allow_fail,
+    )
 
 
 def RunPlan(plan_or_step):
@@ -227,6 +261,16 @@ def StringifyBlobName(name):
 
 def StringifyNetName(name):
     return _StringifyName(name, "Net")
+
+
+def GetNetName(net):
+    if isinstance(net, basestring):
+        return net
+    if type(net).__name__ == "Net":
+        return net.Name()
+    if isinstance(net, caffe2_pb2.NetDef):
+        return net.name
+    raise Exception("Not a Net object: {}".format(str(net)))
 
 
 def FeedBlob(name, arr, device_option=None):
@@ -437,11 +481,16 @@ def FeedImmediate(*args, **kwargs):
 
 # CWorkspace utilities
 
-def _Workspace_create_net(ws, net, overwrite=False):
-    return ws._create_net(StringifyProto(net), overwrite)
+def _Workspace_create_net_with_exception_intercept(ws, net, overwrite=False):
+    return CallWithExceptionIntercept(
+        ws._create_net,
+        ws._last_failed_op_net_position,
+        GetNetName(net),
+        StringifyProto(net), overwrite,
+    )
 
 
-C.Workspace.create_net = _Workspace_create_net
+C.Workspace.create_net = _Workspace_create_net_with_exception_intercept
 
 
 def _Workspace_run(ws, obj):
@@ -450,7 +499,13 @@ def _Workspace_run(ws, obj):
     if isinstance(obj, caffe2_pb2.PlanDef):
         return ws._run_plan(obj.SerializeToString())
     if isinstance(obj, caffe2_pb2.NetDef):
-        return ws._run_net(obj.SerializeToString())
+        return CallWithExceptionIntercept(
+            ws._run_net,
+            ws._last_failed_op_net_position,
+            GetNetName(obj),
+            obj.SerializeToString(),
+        )
+        # return ws._run_net(obj.SerializeToString())
     if isinstance(obj, caffe2_pb2.OperatorDef):
         return ws._run_operator(obj.SerializeToString())
     raise ValueError(
