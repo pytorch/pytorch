@@ -61,7 +61,7 @@ class Variable(_C._VariableBase):
     def __getattr__(self, name):
         if name in self._fallthrough_methods:
             return getattr(self.data, name)
-        raise AttributeError(name)
+        return object.__getattribute__(self, name)
 
     def __getitem__(self, key):
         if torch.is_tensor(key):
