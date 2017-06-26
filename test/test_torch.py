@@ -3402,7 +3402,7 @@ class TestTorch(TestCase):
             self.assertEqual(c[4], torch.FloatStorage(25).fill_(10), 0)
             c[1].fill_(20)
             self.assertEqual(c[1], c[3], 0)
-            self.assertEqual(c[4], c[5][1:4], 0)
+            self.assertEqual(c[4][1:4], c[5], 0)
 
             # check that serializing the same storage view object unpickles
             # it as one object not two (and vice versa)
@@ -3485,7 +3485,7 @@ class TestTorch(TestCase):
         self.assertEqual(c[4], torch.FloatStorage(25).fill_(10), 0)
         c[1].fill_(20)
         self.assertEqual(c[1], c[3], 0)
-        self.assertEqual(c[4], c[5][1:4], 0)
+        self.assertEqual(c[4][1:4], c[5], 0)
 
     def test_serialization_container(self):
         def import_module(name, filename):
