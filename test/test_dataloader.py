@@ -46,6 +46,15 @@ class TestConcatDataset(TestCase):
         self.assertEqual(0, result[0])
         self.assertEqual(5, result[5])
 
+    def test_concat_two_non_singletons_with_empty(self):
+        # Adding an empty dataset somewhere is correctly handled
+        result = ConcatDataset([[0, 1, 2, 3, 4],
+                                [],
+                                [5, 6, 7, 8, 9]])
+        self.assertEqual(10, len(result))
+        self.assertEqual(0, result[0])
+        self.assertEqual(5, result[5])
+
     def test_concat_raises_index_error(self):
         result = ConcatDataset([[0, 1, 2, 3, 4],
                                 [5, 6, 7, 8, 9]])
