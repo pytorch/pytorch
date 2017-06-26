@@ -1,4 +1,3 @@
-import itertools
 import bisect
 
 
@@ -50,12 +49,20 @@ class ConcatDataset(Dataset):
         datasets (iterable): List of datasets to be concatenated
     """
 
+    @staticmethod
+    def cumsum(sequence):
+        r, s = [], 0
+        for e in sequence:
+            l = len(e)
+            r.append(l + s)
+            s += l
+        return r
+
     def __init__(self, datasets):
         super(ConcatDataset, self).__init__()
-        self.datasets = list(datasets)
         assert len(datasets) > 0, 'datasets should not be an empty iterable'
-        self.cummulative_sizes = list(itertools.accumulate(
-                                      [len(s) for s in self.datasets]))
+        self.datasets = list(datasets)
+        self.cummulative_sizes = self.cumsum(self.datasets)
 
     def __len__(self):
         return self.cummulative_sizes[-1]
