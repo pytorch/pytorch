@@ -19,7 +19,7 @@ auto Clone::apply(const variable_list& inputs) -> variable_list {
   std::unique_ptr<thpp::Tensor> output {input->clone()};
 
   return wrap_outputs(inputs, as_tensor_list(std::move(output)), [&](FunctionFlags f) {
-    return std::make_shared<Identity>(std::move(f));
+    return SharedFunctionMaker<Identity>()(std::move(f));
   });
 };
 
@@ -31,7 +31,7 @@ auto Contiguous::apply(const variable_list& inputs) -> variable_list {
   std::unique_ptr<thpp::Tensor> output {input->contiguous()};
 
   return wrap_outputs(inputs, as_tensor_list(std::move(output)), [&](FunctionFlags f) {
-    return std::make_shared<Identity>(std::move(f));
+    return SharedFunctionMaker<Identity>()(std::move(f));
   });
 };
 
@@ -44,7 +44,7 @@ auto Transpose::apply(const variable_list& inputs) -> variable_list {
   std::unique_ptr<thpp::Tensor> output(input->newTranspose(dim1, dim2));
 
   return wrap_outputs(inputs, as_tensor_list(std::move(output)), [&](FunctionFlags f) {
-    return std::make_shared<Transpose>(dim1, dim2);
+    return SharedFunctionMaker<Transpose>()(dim1, dim2);
   });
 }
 
@@ -57,7 +57,7 @@ auto View::apply(const variable_list& inputs) -> variable_list {
   std::unique_ptr<thpp::Tensor> output(input->newView(size));
 
   return wrap_outputs(inputs, as_tensor_list(std::move(output)), [&](FunctionFlags f) {
-    return std::make_shared<View>(input->sizes());
+    return SharedFunctionMaker<View>()(input->sizes());
   });
 }
 
@@ -70,7 +70,7 @@ auto Expand::apply(const variable_list& inputs) -> variable_list {
   std::unique_ptr<thpp::Tensor> output(input->newExpand(size));
 
   return wrap_outputs(inputs, as_tensor_list(std::move(output)), [&](FunctionFlags f) {
-    return std::make_shared<Error>("Expand is not differentiable", std::move(f));
+    return SharedFunctionMaker<Error>()("Expand is not differentiable", std::move(f));
   });
 }
 
@@ -83,7 +83,7 @@ auto Narrow::apply(const variable_list& inputs) -> variable_list {
   std::unique_ptr<thpp::Tensor> output(input->newNarrow(dim, start, size));
 
   return wrap_outputs(inputs, as_tensor_list(std::move(output)), [&](FunctionFlags f) {
-    return std::make_shared<Error>("Narrow is not differentiable", std::move(f));
+    return SharedFunctionMaker<Error>()("Narrow is not differentiable", std::move(f));
   });
 }
 

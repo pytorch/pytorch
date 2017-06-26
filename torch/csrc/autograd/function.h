@@ -106,7 +106,7 @@ struct Function {
   std::vector<std::shared_ptr<FunctionPreHook>> pre_hooks;
   std::vector<std::shared_ptr<FunctionPostHook>> post_hooks;
 
-  // strong reference, see FunctionDeleter
+  // strong reference, see FunctionDeleter implementation
   PyObject *pyobj;
 };
 

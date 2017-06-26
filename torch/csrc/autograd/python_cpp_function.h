@@ -12,7 +12,8 @@ namespace torch { namespace autograd {
 
 struct THPCppFunction {
   PyObject_HEAD
-  std::shared_ptr<Function> cdata;
+  // Has ownership of this object and should deallocate it with delete
+  Function* cdata;
 };
 
 template<typename Ctor>
@@ -22,7 +23,7 @@ PyObject* CppFunction_pynew(PyTypeObject *type, PyObject *args, PyObject *kwds)
   if (!obj) return NULL;
   THPCppFunction* f = (THPCppFunction*)obj.get();
   HANDLE_TH_ERRORS
-  new (&f->cdata) std::shared_ptr<Function>(Ctor()(args));
+  f->cdata = Ctor()(args);
   END_HANDLE_TH_ERRORS
   if (!f->cdata) {
     return NULL;
