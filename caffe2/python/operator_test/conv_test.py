@@ -7,8 +7,24 @@ from hypothesis import assume, given
 import hypothesis.strategies as st
 import collections
 
+from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
+
+
+def _cudnn_supports(
+        dilation=False,
+        nhwc=False,
+):
+    """Return True if cuDNN supports this configuration."""
+    v = workspace.GetCuDNNVersion()
+    if dilation and v < 6000:
+        # Dilation not supported until v6
+        return False
+    if dilation and nhwc:
+        # Dilation and NHWC not supported together
+        return False
+    return True
 
 
 class TestConvolution(hu.HypothesisTestCase):
@@ -153,9 +169,10 @@ class TestConvolution(hu.HypothesisTestCase):
                                    order, engine, use_bias, gc, dc):
         dkernel = dilation * (kernel - 1) + 1
 
-        # cuDNN v6+ supports dilated convolutions
-        if (workspace.GetCuDNNVersion() < 6000):
-            assume("" == engine or 1 == dilation)
+        if gc.device_type == caffe2_pb2.CUDA and engine == 'CUDNN':
+            assume(_cudnn_supports(dilation=(dilation > 1),
+                                   nhwc=(order == 'NHWC')))
+
         assume(engine != "MKLDNN" or use_bias is True)
 
         op = core.CreateOperator(
@@ -334,13 +351,10 @@ class TestConvolution(hu.HypothesisTestCase):
         outputs = []
 
         for order in ["NCHW", "NHWC"]:
-            cudnn_v6p = workspace.GetCuDNNVersion() >= 6000
-            dilated_conv = dilation > 1
-            dilated_conv_nchw = (dilated_conv and order == "NCHW")
-            # cuDNN v6+ supports dilated convolutions only for NCHW
-            engine_list = ["", "CUDNN"] \
-                if (not dilated_conv) or (cudnn_v6p and dilated_conv_nchw) \
-                else [""]
+            engine_list = ['']
+            if _cudnn_supports(dilation=(dilation > 1), nhwc=(order == 'NHWC')):
+                engine_list.append('CUDNN')
+
             for engine in engine_list:
                 op = core.CreateOperator(
                     "Conv",
