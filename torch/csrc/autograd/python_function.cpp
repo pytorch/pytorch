@@ -694,11 +694,11 @@ static std::shared_ptr<Expr> make_trace(PyObject* pyobj, PyObject *arg_objects, 
         }
       } else {
         Py_INCREF(arg_object);
-        args.push_back(std::make_shared<PyConst>(arg_object));
+        args.push_back(std::make_shared<PyConst>(THPObjectPtr(arg_object)));
       }
     }
     Py_INCREF(pyobj);
-    this_expr = std::make_shared<PyApply>(pyobj, args, is_legacy);
+    this_expr = std::make_shared<PyApply>(THPObjectPtr(pyobj), args, is_legacy);
   } else {
     this_expr = nullptr;
   }

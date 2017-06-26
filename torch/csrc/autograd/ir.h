@@ -107,9 +107,9 @@ using local_list = std::vector<std::shared_ptr<Local>>;
 struct PyConst : public Arg {
   const static Id SelfId = Id::PyConst;
   THPObjectPtr pyobj;
-  PyConst(PyObject* pyobj)
+  PyConst(THPObjectPtr&& pyobj)
     : Arg(SelfId)
-    , pyobj(pyobj)
+    , pyobj(std::move(pyobj))
     {}
 };
 
@@ -172,15 +172,15 @@ struct PyApply : public Expr {
   THPObjectPtr pyobj;
   arg_list args;
   bool is_legacy;
-  PyApply(PyObject* pyobj, arg_list args, bool is_legacy, Location loc)
+  PyApply(THPObjectPtr&& pyobj, arg_list args, bool is_legacy, Location loc)
     : Expr(SelfId, loc)
-    , pyobj(pyobj)
+    , pyobj(std::move(pyobj))
     , args(args)
     , is_legacy(is_legacy)
     {}
-  PyApply(PyObject* pyobj, arg_list args, bool is_legacy)
+  PyApply(THPObjectPtr&& pyobj, arg_list args, bool is_legacy)
     : Expr(SelfId)
-    , pyobj(pyobj)
+    , pyobj(std::move(pyobj))
     , args(args)
     , is_legacy(is_legacy)
     {}
