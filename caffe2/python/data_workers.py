@@ -148,7 +148,6 @@ class DataInputCoordinator(object):
         self._input_blob_names = input_blob_names
         self._batch_size = batch_size
         self._internal_queue = queue
-        self._scratch_blobs = set()
         self._queues = []
         self._device_option = device_option
         self._namescope = namescope
@@ -166,6 +165,8 @@ class DataInputCoordinator(object):
         self._metrics = collections.defaultdict(lambda: 0)
         self._external_loggers = external_loggers
         self._dont_rebatch = dont_rebatch
+        self._init_scratch()
+
         if batch_columns is None:
             batch_columns = [0 for _ in input_blob_names]
         self._batch_columns = batch_columns
@@ -215,8 +216,9 @@ class DataInputCoordinator(object):
                 success = False
 
         # Release memory for the scratch blobs
-        if success and len(self._scratch_blobs) > 0:
-            utils.ResetBlobs(self._scratch_blobs)
+        if success:
+            utils.ResetBlobs(self._scratch_blob.values())
+            utils.ResetBlobs(self._scratch_status.values())
 
         print("All workers terminated: {}".format(success))
         return success
@@ -315,27 +317,41 @@ class DataInputCoordinator(object):
         finally:
             self.put_metric('enqueue_time', time.time() - start_time)
 
+    def _init_scratch(self):
+        self._scratch_blob = {}
+        self._scratch_status = {}
+        for blob_name in self._input_blob_names:
+            scratch_name = self._namescope + blob_name + \
+                "_scratch_" + self._input_source_name
+            self._scratch_blob[blob_name] = core.BlobReference(scratch_name)
+            self._scratch_status[blob_name] = core.BlobReference(
+                scratch_name + "_status"
+            )
+
+        # Feed empty arrays to the scratch blobs here, so that there won't be
+        # race conditions when calling FeedBlob (which calls wworkspace
+        # CreateBlob()) from enqueue threads
+        for b in self._scratch_blob.values() + self._scratch_status.values():
+            workspace.FeedBlob(
+                b,
+                np.array([]).astype(np.float32),
+                device_option=self._device_option,
+            )
+
     def _enqueue(self, blob_name, queue, data_arr):
         '''
         Enqueue the correctly sized batch arrays to Caffe2's queue.
         '''
-        scratch_name = self._namescope + blob_name + \
-            "_scratch_" + self._input_source_name
-        blob = core.BlobReference(scratch_name)
-        status = core.BlobReference(scratch_name + "_status")
-        if blob not in self._scratch_blobs:
-            self._scratch_blobs.add(blob)
-            self._scratch_blobs.add(status)
         workspace.FeedBlob(
-            blob,
+            self._scratch_blob[blob_name],
             data_arr,
             device_option=self._device_option
         )
 
         op = core.CreateOperator(
             "SafeEnqueueBlobs",
-            [queue, blob],
-            [blob, status],
+            [queue, self._scratch_blob[blob_name]],
+            [self._scratch_blob[blob_name], self._scratch_status[blob_name]],
             device_option=self._device_option
         )
         workspace.RunOperatorOnce(op)
