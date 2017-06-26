@@ -149,7 +149,11 @@ struct ScalarNegate<half> {
     return __float2half(-__half2float(v));
 #endif
 #else
+#if CUDA_VERSION < 9000
     half out = v;
+#else
+    __half_raw out = __half_raw(v);
+#endif
     out.x ^= 0x8000; // toggle sign bit
     return out;
 #endif
@@ -170,11 +174,25 @@ struct ScalarInv<half> {
 };
 
 inline bool operator==(half a, half b) {
+#if CUDA_VERSION < 9000
   return a.x == b.x;
+#else
+  __half_raw araw, braw;
+  araw = __half_raw(a);
+  braw = __half_raw(b);
+  return araw.x == braw.x;
+#endif
 }
 
 inline bool operator!=(half a, half b) {
-  return a.x != b.x;
+#if CUDA_VERSION < 9000
+    return a.x != b.x;
+#else
+  __half_raw araw, braw;
+  araw = __half_raw(a);
+  braw = __half_raw(b);
+  return araw.x != braw.x;
+#endif
 }
 
 #endif // CUDA_HALF_TENSOR
