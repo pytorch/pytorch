@@ -76,7 +76,8 @@ SimpleNet::SimpleNet(const NetDef& net_def, Workspace* ws)
   VLOG(1) << "Constructing SimpleNet " << net_def.name();
   bool net_def_has_device_option = net_def.has_device_option();
   // Initialize the operators
-  for (const OperatorDef& operator_def : net_def.op()) {
+  for (int idx = 0; idx < net_def.op_size(); ++idx) {
+    const auto& operator_def = net_def.op(idx);
     VLOG(1) << "Creating operator " << operator_def.name()
             << ":" << operator_def.type();
     if (!operator_def.has_device_option() && net_def_has_device_option) {
@@ -85,9 +86,9 @@ SimpleNet::SimpleNet(const NetDef& net_def, Workspace* ws)
       // operator def.
       OperatorDef temp_def(operator_def);
       temp_def.mutable_device_option()->CopyFrom(net_def.device_option());
-      operators_.emplace_back(CreateOperator(temp_def, ws));
+      operators_.emplace_back(CreateOperator(temp_def, ws, idx));
     } else {
-      operators_.emplace_back(CreateOperator(operator_def, ws));
+      operators_.emplace_back(CreateOperator(operator_def, ws, idx));
     }
   }
 }

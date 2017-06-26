@@ -285,9 +285,9 @@ DAGNetBase::DAGNetBase(const NetDef& net_def, Workspace* ws)
     if (!op_def.has_device_option() && net_def_has_device_option) {
       OperatorDef temp_def(op_def);
       temp_def.mutable_device_option()->CopyFrom(net_def.device_option());
-      operator_nodes_[idx].operator_ = CreateOperator(temp_def, ws);
+      operator_nodes_[idx].operator_ = CreateOperator(temp_def, ws, idx);
     } else {
-      operator_nodes_[idx].operator_ = CreateOperator(op_def, ws);
+      operator_nodes_[idx].operator_ = CreateOperator(op_def, ws, idx);
     }
     // Check the inputs, and set up parents if necessary. This addressese the
     // read after write case.

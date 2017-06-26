@@ -137,14 +137,33 @@ class OperatorBase {
     observer_ = nullptr;
   }
 
+  void RecordLastFailedOpNetPosition() {
+    if (net_position_ != kNoNetPositionSet) {
+      VLOG(1) << "Operator with id " << net_position_ << " failed";
+      operator_ws_->last_failed_op_net_position = net_position_;
+    } else {
+      VLOG(1) << "Failed operator doesn't have id set";
+    }
+  }
+
+  void set_net_position(int idx) {
+    net_position_ = idx;
+  }
+
+ public:
+  static constexpr int kNoNetPositionSet = -1;
+
  protected:
   ObserverBase<OperatorBase>* observer_ = nullptr;
+  Workspace* operator_ws_;
 
  private:
   OperatorDef operator_def_;
   ArgumentHelper arg_helper_;
   vector<const Blob*> inputs_;
   vector<Blob*> outputs_;
+
+  int net_position_{kNoNetPositionSet};
 
   DISABLE_COPY_AND_ASSIGN(OperatorBase);
 };
@@ -209,6 +228,10 @@ class Operator : public OperatorBase {
       context_.SwitchToDevice(stream_id);
       bool started = RunOnDevice();
       bool finished = context_.FinishDeviceComputation();
+      auto result = started && finished;
+      if (!result) {
+        this->RecordLastFailedOpNetPosition();
+      }
       if (!finished) {
         // FinishDeviceComputation() returning error basically means that there
         // is something wrong with the device (like CUDA) that usually cannot be
@@ -219,10 +242,14 @@ class Operator : public OperatorBase {
       if (observer_) {
         observer_->Stop();
       }
-      return (started && finished);
+      return result;
     } catch (EnforceNotMet& err) {
       err.AppendMessage("Error from operator: \n" + ProtoDebugString(def()));
       AddRelatedBlobInfo(&err);
+      this->RecordLastFailedOpNetPosition();
+      throw;
+    } catch (...) {
+      this->RecordLastFailedOpNetPosition();
       throw;
     }
   }
@@ -230,10 +257,18 @@ class Operator : public OperatorBase {
   bool RunAsync(int stream_id = 0) final {
     try {
       context_.SwitchToDevice(stream_id);
-      return RunOnDevice();
+      auto result = RunOnDevice();
+      if (!result) {
+        this->RecordLastFailedOpNetPosition();
+      }
+      return result;
     } catch (EnforceNotMet& err) {
       err.AppendMessage("Error from operator: \n" + ProtoDebugString(def()));
       AddRelatedBlobInfo(&err);
+      this->RecordLastFailedOpNetPosition();
+      throw;
+    } catch (...) {
+      this->RecordLastFailedOpNetPosition();
       throw;
     }
   }
@@ -533,7 +568,9 @@ class UnsupportedOperatorFeature : public std::exception {
 // Creates an operator with the given operator definition.
 // Throws on error and never returns nullptr
 unique_ptr<OperatorBase> CreateOperator(
-    const OperatorDef& operator_def, Workspace* ws);
+    const OperatorDef& operator_def,
+    Workspace* ws,
+    int net_position = OperatorBase::kNoNetPositionSet);
 
 TensorShapes InferBlobShapesAndTypesFromWorkspace(
     Workspace* ws,

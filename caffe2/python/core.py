@@ -17,7 +17,6 @@ import pickle
 import numpy as np
 import sys
 
-
 # Mac os specific message
 if (sys.platform == 'darwin' and 'leveldb' in C.registered_dbs()):
     print('If you are using homebrew leveldb on a Mac OS, you might see an '
@@ -1557,6 +1556,13 @@ class Net(object):
         self._InvalidateLookupTables()
         return self._net
 
+    def PopulateProtoWithFileName(self):
+        net_tb = workspace.operator_tracebacks.get(self.Name(), None)
+        if net_tb is not None:
+            for idx, op in enumerate(self.Proto().op):
+                if idx in net_tb:
+                    op.name = ':'.join(map(str, net_tb[idx][0]))
+
     def NextScopedBlob(self, prefix='unnamed'):
         """Return the blob that has not been defined or registered in the
         current net. It returns `ScopedBlobReference(prefix)`, if it's valid,
@@ -1828,6 +1834,10 @@ class Net(object):
         outputs = _RectifyInputOutput(outputs, net=self)
         op = CreateOperator(op_type, inputs, outputs, **kwargs)
         self._ExtendOps([op])
+
+        workspace.operator_tracebacks[self.Name()][
+            len(self._net.op) - 1] = _extract_stacktrace()
+
         if len(op.output) == 0:
             return
         elif len(op.output) == 1:
@@ -2441,3 +2451,31 @@ def scoped_execution_step(name, *args, **kwargs):
     """Same as execution_step() except that the step name is scoped."""
     default_name = ScopedName(name) if name else name
     return execution_step(default_name, *args, **kwargs)
+
+
+def _extract_stacktrace():
+    '''
+    This function extracts stacktrace without file system access
+    by purely using sys._getframe() and removes part that belongs to
+    this file (core.py). We are not using inspect module because
+    its just a wrapper on top of sys._getframe() whos
+    logis is based on accessing source files on disk - exactly what
+    we are trying to avoid here. Same stands for traceback module
+
+    The reason for file system access avoidance is that
+    if code is located on an NFS, file access might be slow
+
+    Function returns a list of tuples (file_name, line_number)
+    '''
+
+    current_file_name = __name__.replace('.', '/') + ".py"
+    result = []
+    frame = sys._getframe(1)
+    # We just go down the frame stack in a loop
+    while frame:
+        if current_file_name not in frame.f_code.co_filename:
+            # Its important to extract information from the frame here
+            # as frame's current line most probably will change later.
+            result.append((frame.f_code.co_filename, frame.f_lineno))
+        frame = frame.f_back
+    return result
