@@ -64,8 +64,6 @@ class ConcatDataset(Dataset):
                 return i
 
     def __init__(self, datasets):
-        super(ConcatDataset, self).__init__()
-
         self.datasets = list(datasets)
         assert len(datasets) > 0, 'datasets should not be an empty iterable'
         self.cum_sizes = self.cumsum(self.datasets)
