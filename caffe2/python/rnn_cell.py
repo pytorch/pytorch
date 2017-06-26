@@ -1079,7 +1079,10 @@ class UnrolledCell(RNNCell):
             model.net.ZeroGradient(outputs[i], [])
         logging.debug("Added 0 gradients for blobs:",
                       [outputs[i] for i in outputs_without_grad])
-        return None, outputs
+
+        final_output = self.cell._prepare_output_sequence(model, outputs)
+
+        return final_output, outputs
 
 
 def GetLSTMParamNames():
