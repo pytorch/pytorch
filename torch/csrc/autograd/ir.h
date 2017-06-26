@@ -11,6 +11,58 @@
 
 namespace torch { namespace autograd {
 
+// Some comments on the IR:
+//
+// Variable bindings -> numbers, where tensors are stored
+// Perhaps optimize down the slot space. But then the variable
+// bindings are just numbers.  And we can change the list type
+// from standard vector to interned first element, or if it is
+// too big then it spills into malloc.  If you return one/two
+// things, it's just a fixed size instruction, otherwise you have
+// an overflow for the rest of the return types.
+//
+// It's nice to have the IR look like something that is similar
+// to other interpreters, so that it's more familiar.
+//
+// Single-use is important... but the less encoded it is in the
+// data structure, the easier it is to change.  Because the
+// instructions could carry information about, e.g., "the data
+// frame", rather than putting it in the IR.
+//
+// If you choose to do a fusion: imagine a graph, draw a circle around the ops
+// to fuse. Any outgoing edges are live, and need to be written out when
+// you fuse, but you can still do it in one pass, even when something is
+// not completely consumed.  It's not a prerequisite, it is just part
+// of the cost function for what the benefit would be.
+//
+// Get shapes for things and store it in the IR.
+//
+// OK to just do greedy fusion. Here are some fusions, do some fusions with it.
+// Is there a DP framework where we just get the right answer automatically?
+// Models for cost of doing optimization?  It's more stable: even if you
+// scramble up the answer order, the answer doesn't change.  "Oh I refactor,
+// this is prettier" and now performance goes away: NOT GOOD.
+//
+// Just recording global contiguousness might be good enough.
+//
+// Put the constants out of line, rather than interleaving them with the
+// tensor arguments
+//
+// Short term: demonstrate what the best possible speedup is. (Use ATen)
+// Subtlety: if you copy-pasted code and edit it, you have a modified
+// operator, and you don't have to recompile PyTorch.  So... Zach is
+// curious with Python: how does the set of tools know where all your
+// compilers are. So, hypothetically, setuptools should be able to "JIT"
+// C++.  Write a hilarious C++ function as a subclass of function,
+// and forward and backward is snippet of C++ code which are JIT
+// compiled: take string, create shared library, dlopen.  And then you
+// have that property.  Advantage to this, it's a test of using ATen
+// with PyTorch.  Give us an idea of what speed of this compute is
+// Python overhead, versus overhead in interpreter, or is it really
+// fusion that is going to give us the speedup.
+//
+// And it's only five ops. And the ops aren't hard to dispatch.
+
 // This IR is based on administrative normal form.
 
 class Arg;
