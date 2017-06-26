@@ -37,6 +37,20 @@ struct FunctionFlags {
   function_list next_functions;
 };
 
+struct FunctionDeleter {
+  void operator()(Function* p) const;
+};
+
+template<typename T>
+struct SharedFunctionMaker {
+  template<typename ...Args>
+  std::shared_ptr<T> operator()(Args && ... args) {
+    auto f = new T(std::forward<Args>(args) ...);
+    auto shared_f = std::shared_ptr<T>(f, FunctionDeleter());
+    return shared_f;
+  }
+};
+
 struct Function {
   Function()
     : num_inputs(0)
@@ -45,6 +59,7 @@ struct Function {
     , is_stochastic(false)
     , pre_hooks()
     , post_hooks()
+    , pyobj(nullptr)
     {}
 
   Function(FunctionFlags&& flags)
@@ -54,6 +69,7 @@ struct Function {
     , is_stochastic(false)
     , pre_hooks()
     , post_hooks()
+    , pyobj(nullptr)
     {}
 
   Function(const Function& other) = delete;
@@ -89,6 +105,9 @@ struct Function {
   bool is_stochastic;
   std::vector<std::shared_ptr<FunctionPreHook>> pre_hooks;
   std::vector<std::shared_ptr<FunctionPostHook>> post_hooks;
+
+  // strong reference, see FunctionDeleter
+  PyObject *pyobj;
 };
 
 
