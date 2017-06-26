@@ -1,3 +1,5 @@
+import bisect
+
 
 class Dataset(object):
     """An abstract class representing a Dataset.
@@ -49,13 +51,12 @@ class ConcatDataset(Dataset):
 
     @staticmethod
     def cumsum(sequence):
-        result = []
-        sum = 0
-        for s in sequence:
-            l = len(s)
-            cumsum.append(l + sum)
-            sum += l
-        return result
+        r, s = [], 0
+        for e in sequence:
+            l = len(e)
+            r.append(l + s)
+            s += l
+        return r
 
     @staticmethod
     def searchsorted(idx, sequence):
@@ -72,12 +73,9 @@ class ConcatDataset(Dataset):
         return self.cum_sizes[-1]
 
     def __getitem__(self, idx):
-        super(ConcatDataset, self).__getitem__(idx)
-        dataset_index = self.searchsorted(idx, self.cum_sizes)
-
-        if dataset_index == 0:
-            dataset_idx = idx
+        dataset_idx = bisect.bisect_right(self.cum_sizes, idx)
+        if dataset_idx == 0:
+            sample_idx = idx
         else:
-            dataset_idx = idx - self.cum_sizes[dataset_index - 1]
-
-        return self.datasets[dataset_index][dataset_idx]
+            sample_idx = idx - self.cum_sizes[dataset_idx - 1]
+        return self.datasets[dataset_idx][sample_idx]
