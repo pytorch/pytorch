@@ -75,13 +75,19 @@ class NLLLoss(_WeightedLoss):
 
         loss(x, class) = -weights[class] * x[class]
 
+    or in the case of ignore_index::
+
+        loss(x, class) = class != ignoreIndex ? -weights[class] * x[class] : 0
+
     Args:
         weight (Tensor, optional): a manual rescaling weight given to each class.
-                                   If given, has to be a Tensor of size "nclasses"
+           If given, has to be a Tensor of size "nclasses"
         size_average (bool, optional): By default, the losses are averaged over observations for each minibatch.
-                                       However, if the field size_average is set to False,
-                                       the losses are instead summed for each minibatch.
-
+           However, if the field size_average is set to False, the losses are
+           instead summed for each minibatch.
+        ignore_index (int, optional): Specifies a target value that is ignored
+            and does not contribute to the input gradient. When size_average is
+            True, the loss is averaged over non-ignored targets.
 
     Shape:
         - Input: :math:`(N, C)` where `C = number of classes`
@@ -102,10 +108,14 @@ class NLLLoss(_WeightedLoss):
         >>> output.backward()
     """
 
+    def __init__(self, weight=None, size_average=True, ignore_index=-100):
+        super(NLLLoss, self).__init__(weight, size_average)
+        self.ignore_index = ignore_index
+
     def forward(self, input, target):
         _assert_no_grad(target)
-        return F.nll_loss(input, target,
-                          self.weight, self.size_average)
+        return F.nll_loss(input, target, self.weight, self.size_average,
+                          self.ignore_index)
 
 
 class NLLLoss2d(_WeightedLoss):
@@ -391,10 +401,14 @@ class CrossEntropyLoss(_WeightedLoss):
 
     """
 
+    def __init__(self, weight=None, size_average=True, ignore_index=-100):
+        super(CrossEntropyLoss, self).__init__(weight, size_average)
+        self.ignore_index = ignore_index
+
     def forward(self, input, target):
         _assert_no_grad(target)
-        return F.cross_entropy(input, target,
-                               self.weight, self.size_average)
+        return F.cross_entropy(input, target, self.weight, self.size_average,
+                               self.ignore_index)
 
 
 class MultiLabelSoftMarginLoss(_WeightedLoss):
