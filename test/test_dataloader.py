@@ -39,6 +39,20 @@ class TestConcatDataset(TestCase):
         self.assertEqual(0, result[0])
         self.assertEqual(1, result[1])
 
+    def test_concat_two_non_singletons(self):
+        result = ConcatDataset([[0, 1, 2, 3, 4],
+                                [5, 6, 7, 8, 9]])
+        self.assertEqual(10, len(result))
+        self.assertEqual(0, result[0])
+        self.assertEqual(5, result[5])
+
+    def test_concat_raises_index_error(self):
+        result = ConcatDataset([[0, 1, 2, 3, 4],
+                                [5, 6, 7, 8, 9]])
+        with self.assertRaises(IndexError):
+            # this one goes to 11
+            result[11]
+
 
 class ErrorDataset(Dataset):
 
