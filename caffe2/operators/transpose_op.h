@@ -58,6 +58,7 @@ class TransposeOp final : public Operator<Context> {
   // buffer_ is used in TransposeOp<CUDAContext> so we can obtain a consistent
   // buffer on the GPU. It is not used in the CPUContext implementation.
   Tensor<Context> buffer_;
+  TensorCPU buffer_cpu_;
 };
 
 } // namespace caffe2
