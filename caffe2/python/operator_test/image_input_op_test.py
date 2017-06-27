@@ -6,12 +6,12 @@ from __future__ import unicode_literals
 import unittest
 try:
     import cv2
+    import lmdb
 except ImportError:
     pass  # Handled below
 
 from PIL import Image
 import numpy as np
-import lmdb
 import shutil
 try:
     import StringIO
@@ -207,6 +207,7 @@ def create_test(output_dir, width, height, default_bound,
 
 
 @unittest.skipIf('cv2' not in sys.modules, 'python-opencv is not installed')
+@unittest.skipIf('lmdb' not in sys.modules, 'python-lmdb is not installed')
 class TestImport(hu.HypothesisTestCase):
     @given(size_tuple=st.tuples(
         st.integers(min_value=8, max_value=4096),
