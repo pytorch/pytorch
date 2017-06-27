@@ -238,6 +238,13 @@ class OpSchema {
   }
 
  private:
+  [[noreturn]] Cost DefaultConstInferenceFunction(
+      const OperatorDef&,
+      const vector<TensorShape>&) {
+    CAFFE_THROW("No cost inference function registered.");
+  }
+
+ private:
   string file_;
   string doc_;
   std::vector<std::pair<const char*, const char*>> arg_desc_{};
@@ -271,11 +278,11 @@ class OpSchema {
         }
         return out;
       };
-  CostInferenceFunctionType cost_inference_function_ =
-      [](const OperatorDef& def, const vector<TensorShape>&) {
-        CAFFE_THROW("No cost inference function registered.");
-        return Cost();
-      };
+  CostInferenceFunctionType cost_inference_function_ = std::bind(
+      &OpSchema::DefaultConstInferenceFunction,
+      this,
+      std::placeholders::_1,
+      std::placeholders::_2);
   DeviceInferenceFunctionType device_inference_function_ =
       [](const OperatorDef& def) {
         auto op_device =
