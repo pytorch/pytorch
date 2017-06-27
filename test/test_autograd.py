@@ -1913,7 +1913,6 @@ ignore_inplace = set((
 
 gradgradcheck_exclude_classes = set((
     'Norm',
-    'Prod',
 ))
 
 for test in function_tests:
