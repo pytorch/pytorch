@@ -286,14 +286,14 @@ class GRU(RNNBase):
 
             \begin{array}{ll}
             r_t = sigmoid(W_{ir} x_t + b_{ir} + W_{hr} h_{(t-1)} + b_{hr}) \\
-            i_t = sigmoid(W_{ii} x_t + b_{ii} + W_hi h_{(t-1)} + b_{hi}) \\
+            z_t = sigmoid(W_{iz} x_t + b_{iz} + W_{hz} h_{(t-1)} + b_{hz}) \\
             n_t = \tanh(W_{in} x_t + b_{in} + r_t * (W_{hn} h_{(t-1)}+ b_{hn})) \\
-            h_t = (1 - i_t) * n_t + i_t * h_{(t-1)} \\
+            h_t = (1 - z_t) * n_t + z_t * h_{(t-1)} \\
             \end{array}
 
     where :math:`h_t` is the hidden state at time `t`, :math:`x_t` is the hidden
     state of the previous layer at time `t` or :math:`input_t` for the first layer,
-    and :math:`r_t`, :math:`i_t`, :math:`n_t` are the reset, input, and new gates, respectively.
+    and :math:`r_t`, :math:`z_t`, :math:`n_t` are the reset, input, and new gates, respectively.
 
     Args:
         input_size: The number of expected features in the input x
