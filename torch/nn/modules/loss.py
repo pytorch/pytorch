@@ -135,6 +135,47 @@ class NLLLoss2d(_WeightedLoss):
     pass
 
 
+class PoissonNLLLoss(_Loss):
+    r"""Negative log likelihood loss with Poisson distribution of target.
+
+    The loss can be described as::
+
+        target ~ Pois(input)
+        loss(input, target) = input - target * log(input) + log(target!)
+
+    The last term can be omitted or approximised with Stirling formula. The
+    approximation is used for target values more than 1. For targets less or
+    equal to 1 zeros are added to the loss.
+
+    Args:
+        log_input (bool, optional): if True the loss is computed as
+            `exp(input) - target * input`, if False the loss is
+            `input - target * log(input)`.
+        full (bool, optional): whether to compute full loss, i. e. to add the
+            Stirling approximation term
+            `target * log(target) - target + 0.5 * log(2 * pi * target)`.
+        size_average (bool, optional): By default, the losses are averaged over
+            observations for each minibatch. However, if the field size_average
+            is set to False, the losses are instead summed for each minibatch.
+
+    Examples::
+        >>> loss = nn.PoissonNLLLoss()
+        >>> log_input = autograd.Variable(torch.randn(5, 2), requires_grad=True)
+        >>> target = autograd.Variable(torch.randn(5, 2))
+        >>> output = loss(log_input, target)
+        >>> output.backward()
+    """
+    def __init__(self, log_input=True, full=False, size_average=True):
+        super(PoissonNLLLoss, self).__init__()
+        self.log_input = log_input
+        self.full = full
+        self.size_average = size_average
+
+    def forward(self, log_input, target):
+        _assert_no_grad(target)
+        return F.poisson_nll_loss(log_input, target, self.log_input, self.full, self.size_average)
+
+
 class KLDivLoss(_WeightedLoss):
     r"""The `Kullback-Leibler divergence`_ Loss
 

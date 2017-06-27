@@ -8,7 +8,7 @@ from .activation import Threshold, ReLU, Hardtanh, ReLU6, Sigmoid, Tanh, \
 from .loss import L1Loss, NLLLoss, KLDivLoss, MSELoss, BCELoss, BCEWithLogitsLoss, NLLLoss2d, \
     CosineEmbeddingLoss, HingeEmbeddingLoss, MarginRankingLoss, \
     MultiLabelMarginLoss, MultiLabelSoftMarginLoss, MultiMarginLoss, \
-    SmoothL1Loss, SoftMarginLoss, CrossEntropyLoss, TripletMarginLoss
+    SmoothL1Loss, SoftMarginLoss, CrossEntropyLoss, TripletMarginLoss, PoissonNLLLoss
 from .container import Container, Sequential, ModuleList, ParameterList
 from .pooling import AvgPool1d, AvgPool2d, AvgPool3d, MaxPool1d, MaxPool2d, MaxPool3d, \
     MaxUnpool1d, MaxUnpool2d, MaxUnpool3d, FractionalMaxPool2d, LPPool2d, AdaptiveMaxPool1d, \
@@ -32,7 +32,7 @@ __all__ = [
     'Sigmoid', 'Tanh', 'Softmax', 'Softmax2d', 'LogSoftmax', 'ELU', 'SELU', 'GLU', 'Hardshrink',
     'LeakyReLU', 'LogSigmoid', 'Softplus', 'Softshrink', 'PReLU', 'Softsign', 'Softmin',
     'Tanhshrink', 'RReLU', 'L1Loss', 'NLLLoss', 'KLDivLoss', 'MSELoss', 'BCELoss', 'BCEWithLogitsLoss',
-    'NLLLoss2d', 'CosineEmbeddingLoss', 'HingeEmbeddingLoss', 'MarginRankingLoss',
+    'NLLLoss2d', 'PoissonNLLLoss', 'CosineEmbeddingLoss', 'HingeEmbeddingLoss', 'MarginRankingLoss',
     'MultiLabelMarginLoss', 'MultiLabelSoftMarginLoss', 'MultiMarginLoss', 'SmoothL1Loss',
     'SoftMarginLoss', 'CrossEntropyLoss', 'Container', 'Sequential', 'ModuleList',
     'ParameterList', 'AvgPool1d', 'AvgPool2d', 'AvgPool3d', 'MaxPool1d', 'MaxPool2d',
