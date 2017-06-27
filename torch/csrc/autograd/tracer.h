@@ -17,7 +17,7 @@ public:
     , builder(std::unique_ptr<LetBuilder>(new LetBuilder()))
     {}
   std::shared_ptr<Local> makeLocal();
-  void addBinding(local_list lvals, std::shared_ptr<Expr> rval);
+  void addBinding(local_list lvals, std::shared_ptr<Instruction> rval);
   std::shared_ptr<Expr> expr(local_list locals);
 };
 

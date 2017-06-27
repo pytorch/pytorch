@@ -8,7 +8,7 @@ std::shared_ptr<Local> TracingState::makeLocal() {
   return std::make_shared<Local>(next_unique++);
 }
 
-void TracingState::addBinding(local_list lvals, std::shared_ptr<Expr> rval) {
+void TracingState::addBinding(local_list lvals, std::shared_ptr<Instruction> rval) {
   builder->add(Bind(lvals, rval));
 }
 
