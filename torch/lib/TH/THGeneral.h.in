@@ -42,8 +42,14 @@
 typedef void (*THErrorHandlerFunction)(const char *msg, void *data);
 typedef void (*THArgErrorHandlerFunction)(int argNumber, const char *msg, void *data);
 
+#define TH_DESC_BUFF_LEN 64
+typedef struct {
+    char str[TH_DESC_BUFF_LEN];
+} THDescBuff;
+
 
 TH_API double THLog1p(const double x);
+TH_API THDescBuff _THSizeDesc(const long *size, const long ndim);
 TH_API void _THError(const char *file, const int line, const char *fmt, ...);
 TH_API void _THAssertionFailed(const char *file, const int line, const char *exp, const char *fmt, ...);
 TH_API void THSetErrorHandler(THErrorHandlerFunction new_handler, void *data);

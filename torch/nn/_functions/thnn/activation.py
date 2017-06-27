@@ -223,7 +223,7 @@ class Threshold(Function):
                 False
             )
         else:
-            grad_input = grad_output.masked_fill(input > ctx.threshold, 0)
+            grad_input = grad_output.masked_fill(input <= ctx.threshold, 0)
         return grad_input, None, None, None
 
 

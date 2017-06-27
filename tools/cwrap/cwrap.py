@@ -4,6 +4,7 @@ from string import Template
 from copy import deepcopy
 from .plugins import ArgcountChecker, OptionalArguments, ArgumentReferences, \
     BeforeAfterCall, ConstantArguments, ReturnArguments, GILRelease
+from ..shared import cwrap_common
 
 
 class cwrap(object):
@@ -76,7 +77,7 @@ class cwrap(object):
             elif line == ']]':
                 in_declaration = False
                 declaration = yaml.load('\n'.join(declaration_lines))
-                self.set_declaration_defaults(declaration)
+                cwrap_common.set_declaration_defaults(declaration)
 
                 # Pass declaration in a list - maybe some plugins want to add
                 # multiple wrappers
@@ -103,24 +104,6 @@ class cwrap(object):
             i += 1
 
         return '\n'.join(output)
-
-    def set_declaration_defaults(self, declaration):
-        declaration.setdefault('arguments', [])
-        declaration.setdefault('return', 'void')
-        if 'cname' not in declaration:
-            declaration['cname'] = declaration['name']
-        # Simulate multiple dispatch, even if it's not necessary
-        if 'options' not in declaration:
-            declaration['options'] = [{'arguments': declaration['arguments']}]
-            del declaration['arguments']
-        # Parse arguments (some of them can be strings)
-        for option in declaration['options']:
-            option['arguments'] = self.parse_arguments(option['arguments'])
-        # Propagate defaults from declaration to options
-        for option in declaration['options']:
-            for k, v in declaration.items():
-                if k != 'name' and k != 'options':
-                    option.setdefault(k, v)
 
     def parse_arguments(self, args):
         new_args = []

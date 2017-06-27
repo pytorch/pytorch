@@ -2094,8 +2094,8 @@ masked_select(input, mask, out=None) -> Tensor
 Returns a new 1D `Tensor` which indexes the :attr:`input` `Tensor` according to
 the binary mask :attr:`mask` which is a `ByteTensor`.
 
-The :attr:`mask` tensor needs to have the same number of elements as
-:attr:`input`, but it's shape or dimensionality are irrelevant.
+The shapes of the :attr:`mask` tensor and the :attr:`input` tensor don't need to match,
+but they must be :ref:`broadcastable <broadcasting-semantics>`.
 
 .. note:: The returned `Tensor` does **not** use the same storage as the original `Tensor`
 
@@ -4692,7 +4692,7 @@ Example::
 
 add_docstr(torch._C.btrifact,
            """
-btrifact(A, info=None) -> Tensor, IntTensor
+btrifact(A, info=None, pivot=True) -> Tensor, IntTensor
 
 Batch LU factorization.
 
@@ -4701,6 +4701,7 @@ The optional argument `info` provides information if the
 factorization succeeded for each minibatch example.
 The info values are from dgetrf and a non-zero value indicates an error occurred.
 The specific values are from cublas if cuda is being used, otherwise LAPACK.
+Pivoting is done if pivot is set.
 
 Arguments:
     A (Tensor): tensor to factor.

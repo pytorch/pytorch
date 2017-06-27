@@ -109,7 +109,7 @@ def _flatten_tensors(tensors):
     offset = 0
     flat = tensors[0].new(size)
     for tensor, numel in zip(tensors, numels):
-        flat.narrow(0, offset, numel).copy_(tensor)
+        flat.narrow(0, offset, numel).copy_(tensor, broadcast=False)
         offset += numel
     return flat
 

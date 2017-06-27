@@ -231,7 +231,7 @@ Non-linear Activations
     :members:
 
 :hidden:`SELU`
-~~~~~~~~~~~~~
+~~~~~~~~~~~~~~
 
 .. autoclass:: SELU
     :members:
@@ -431,7 +431,7 @@ Dropout layers
     :members:
 
 :hidden:`AlphaDropout`
-~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: AlphaDropout
     :members:
@@ -447,7 +447,7 @@ Sparse layers
     :members:
 
 :hidden:`EmbeddingBag`
-~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: EmbeddingBag
     :members:
@@ -795,7 +795,7 @@ Non-linear activation functions
 .. autofunction:: elu
 
 :hidden:`selu`
-~~~~~~~~~~~~~
+~~~~~~~~~~~~~~
 
 .. autofunction:: selu
 
@@ -894,7 +894,7 @@ Dropout functions
 .. autofunction:: dropout
 
 :hidden:`alpha_dropout`
-~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: alpha_dropout
 
@@ -941,7 +941,7 @@ Loss functions
 .. autofunction:: binary_cross_entropy
 
 :hidden:`binary_cross_entropy_with_logits`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: binary_cross_entropy_with_logits
 
