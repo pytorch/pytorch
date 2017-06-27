@@ -495,6 +495,12 @@ Loss functions
 .. autoclass:: NLLLoss
     :members:
 
+:hidden:`PoissonNLLLoss`
+~~~~~~~~~~~~~~~~~
+
+.. autoclass:: PoissonNLLLoss
+    :members:
+
 :hidden:`NLLLoss2d`
 ~~~~~~~~~~~~~~~~~~~
 
@@ -914,6 +920,10 @@ Loss functions
 
 .. autofunction:: nll_loss
 
+:hidden:`poisson_nll_loss`
+~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: poisson_nll_loss
 
 :hidden:`kl_div`
 ~~~~~~~~~~~~~~~~
