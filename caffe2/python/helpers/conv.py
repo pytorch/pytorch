@@ -38,6 +38,17 @@ def _ConvBase(
     else:
         kernels = [kernel] * 2
 
+    requested_engine = kwargs.get('engine')
+    if requested_engine is not None:
+        if use_cudnn and requested_engine != 'CUDNN':
+            raise ValueError(
+                'When use_cudnn=True, the only engine you can specify is '
+                '"CUDNN"')
+        elif not use_cudnn and requested_engine == 'CUDNN':
+            raise ValueError(
+                'When use_cudnn=False, the only engine you can specify is '
+                '""')
+
     if use_cudnn:
         kwargs['engine'] = 'CUDNN'
         kwargs['exhaustive_search'] = cudnn_exhaustive_search
