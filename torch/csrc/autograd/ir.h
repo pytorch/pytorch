@@ -65,18 +65,17 @@ namespace torch { namespace autograd {
 
 // This IR is based on administrative normal form.
 
-class Arg;
+struct Arg;
 using arg_list = std::vector<std::shared_ptr<Arg>>;
 
-class Expr;
+struct Expr;
 
 using Location = std::string;
 
 // --------------------------------------------------------------------
 // Arguments, which can be passed to functions.  NON-tupled.
 
-class Arg {
-public:
+struct Arg {
   enum class Id {
     Local, // also known as Variable, but not called that to avoid confusion
     PyConst
