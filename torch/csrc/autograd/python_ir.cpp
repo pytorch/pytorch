@@ -5,6 +5,9 @@
 
 using namespace torch::autograd;
 
+// TODO: THIS IMPLEMENTATION CURRENTLY LEAKS IF STORED PYTHON OBJECTS IN AST
+// HAVE BACK REFERENCES, DUE TO CYCLE.  Need to fix this at some point.
+
 PyObject* THPExprClass = nullptr;
 
 PyObject* THPExpr_Wrap(const std::shared_ptr<Expr>& e)
@@ -24,10 +27,6 @@ PyObject* THPExpr_Wrap(const std::shared_ptr<Expr>& e)
 class TraverseExpr : public ExprVisitor<TraverseExpr, int>
 {
 public:
-  int visitPyApply(std::shared_ptr<PyApply> app, visitproc visit, void* arg) {
-    Py_VISIT(app->pyobj);
-    return 0;
-  }
   int visitLet(std::shared_ptr<Let>, visitproc, void*) {
     return 0;
   }
@@ -44,9 +43,6 @@ static int THPExpr_traverse(THPExpr *self, visitproc visit, void *arg)
 class ClearExpr : public ExprVisitor<ClearExpr>
 {
 public:
-  void visitPyApply(std::shared_ptr<PyApply> app) {
-    app->pyobj = nullptr;
-  }
   void visitLet(std::shared_ptr<Let>) { }
   void visitTuple(std::shared_ptr<Tuple>) { }
 };
