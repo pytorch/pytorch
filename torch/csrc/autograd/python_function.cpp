@@ -682,23 +682,32 @@ static std::shared_ptr<Expr> make_trace(PyObject* pyobj, PyObject *arg_objects, 
   std::shared_ptr<Expr> this_expr;
   if (GlobalTracingState) {
     auto num_args = PyTuple_GET_SIZE(arg_objects);
-    std::vector<std::shared_ptr<Arg>> args;
+    pyobj_list scalar_args;
+    local_list tensor_args;
+    std::vector<PyFunctionCConv::ArgType> arg_types;
     for (int i = 0; i < num_args; i++) {
       PyObject *arg_object = PyTuple_GET_ITEM(arg_objects, i);
       if (THPVariable_Check(arg_object)) {
+        arg_types.emplace_back(PyFunctionCConv::ArgType::Tensor);
         auto arg_var = ((THPVariable*)arg_object)->cdata;
         if (arg_var->trace_local) {
-          args.push_back(arg_var->trace_local);
+          tensor_args.push_back(arg_var->trace_local);
         } else {
           throw std::logic_error("not implemented yet AAA");
         }
       } else {
+        arg_types.emplace_back(PyFunctionCConv::ArgType::Scalar);
         Py_INCREF(arg_object);
-        args.push_back(std::make_shared<PyConst>(THPObjectPtr(arg_object)));
+        scalar_args.emplace_back(arg_object);
       }
     }
     Py_INCREF(pyobj);
-    this_expr = std::make_shared<PyApply>(THPObjectPtr(pyobj), args, is_legacy);
+    this_expr = std::make_shared<PyApply>(
+      THPObjectPtr(pyobj),
+      PyFunctionCConv(arg_types),
+      is_legacy,
+      std::move(scalar_args),
+      tensor_args);
   } else {
     this_expr = nullptr;
   }
@@ -1103,56 +1112,28 @@ std::shared_ptr<PyFunction> THPFunction_asFunction(THPFunction* self)
 
 namespace torch { namespace autograd {
 
-struct Value {
-  enum class Id { Variable, PyObject };
-  Id _id;
-  // Currently implemented in this silly way because I didn't feel like
-  // writing out the destruction for the union version.
-  std::shared_ptr<Variable> var;
-  THPObjectPtr pyobj;
-  Value(std::shared_ptr<Variable> var) : _id(Id::Variable), var(var) {}
-  Value(PyObject* pyobj) : _id(Id::PyObject), pyobj(pyobj) {}
-  PyObject* toPyObject() {
-    switch (_id) {
-    case Id::Variable:
-      return THPVariable_Wrap(var);
-    case Id::PyObject:
-      Py_INCREF(pyobj.get());
-      return pyobj.get();
-    }
-    __builtin_unreachable();
-  }
-};
-
-using value_list = std::vector<Value>;
-
 // NB: The interpreter currently lives here because it needs to call some
 // private functions from python_function for Python interpreter
 
 // TODO: This doesn't deallocate tensors soon enough
 struct TraceInterpreter
     : public ExprVisitor<TraceInterpreter, variable_list>
-    , public ArgVisitor<TraceInterpreter, Value>
 {
   // TODO: Don't do a store! BAD BAD BAD
   environment store;
   TraceInterpreter(environment inputs) : store(inputs) {} // COPY!!!
-  Value visitLocal(std::shared_ptr<Local> a) {
+  std::shared_ptr<Variable> visitLocal(std::shared_ptr<Local> a) {
     auto it = store.find(a->unique);
     if (it == store.end()) {
       throw std::logic_error("we don't have this result yet");
     } else {
-      return Value(it->second);
+      return it->second;
     }
-  }
-  Value visitPyConst(std::shared_ptr<PyConst> a) {
-    return Value(a->pyobj);
   }
   variable_list visitPyApply(std::shared_ptr<PyApply> e) {
     auto& obj = e->pyobj;
-    auto num_args = e->args.size();
-    variable_list input_vars;
-    input_vars.reserve(num_args);
+    auto num_args = e->cconv.arg_types.size();
+
     // Massage variables into form where we can THPFunction_apply it.
     // While in principle we can avoid putting things into Python
     // and then taking them out again, doing so seems to require an excess
@@ -1160,9 +1141,24 @@ struct TraceInterpreter
     // fundamentally be slow (since it calls into Python.) NOT. WORTH. IT.
 
     PyObject* input_objs = PyTuple_New(num_args);
-    for (size_t i = 0; i < num_args; i++) {
-      auto val = visitArg(e->args.at(i));
-      PyTuple_SET_ITEM(input_objs, i, val.toPyObject());
+    auto scalar_it = e->scalar_args.begin();
+    auto tensor_it = e->tensor_args.begin();
+    auto type_it = e->cconv.arg_types.begin();
+    for (size_t i = 0; i < num_args; ++i, ++type_it) {
+      auto type = *type_it;
+      PyObject* val;
+      switch (type) {
+        case PyFunctionCConv::ArgType::Tensor:
+          val = THPVariable_Wrap(visitLocal(*tensor_it));
+          ++tensor_it;
+          break;
+        case PyFunctionCConv::ArgType::Scalar:
+          val = (*scalar_it).get();
+          Py_INCREF(val);
+          ++scalar_it;
+          break;
+      }
+      PyTuple_SET_ITEM(input_objs, i, val);
     }
     THPObjectPtr output_objs;
     if (e->is_legacy) {
@@ -1198,18 +1194,12 @@ struct TraceInterpreter
     }
     return visitExpr(e->expr);
   }
-  variable_list visitLocals(std::shared_ptr<Locals> e) {
-    // similar to visitLocal, but does multiple lookups
+  variable_list visitTuple(std::shared_ptr<Tuple> e) {
     variable_list output_vars;
     auto num_locals = e->locals.size();
     output_vars.reserve(num_locals);
     for (auto l : e->locals) {
-      auto it = store.find(l->unique);
-      if (it == store.end()) {
-        throw std::logic_error("visitLocals: we don't have this result yet");
-      } else {
-        output_vars.push_back(it->second);
-      }
+      output_vars.push_back(visitLocal(l));
     }
     return output_vars;
   }

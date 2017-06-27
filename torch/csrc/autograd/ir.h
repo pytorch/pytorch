@@ -65,74 +65,21 @@ namespace torch { namespace autograd {
 
 // This IR is based on administrative normal form.
 
-struct Arg;
-using arg_list = std::vector<std::shared_ptr<Arg>>;
-
+struct Local;
 struct Expr;
 
+using local_list = std::vector<std::shared_ptr<Local>>;
+using pyobj_list = std::vector<THPObjectPtr>;
 using Location = std::string;
 
 // --------------------------------------------------------------------
 // Arguments, which can be passed to functions.  NON-tupled.
 
-struct Arg {
-  enum class Id {
-    Local, // also known as Variable, but not called that to avoid confusion
-    PyConst
-  };
-
-  Id _id;
-  Arg(Id id) : _id(id) {}
-
-  Arg(const Arg& other) = delete;
-  Arg(Arg&& other) = delete;
-};
-
-struct Local : public Arg {
-  // This is not used at the moment (except in the invocation of
-  // the Arg constructor, where it could be trivially inlined),
-  // but it can be used to implement some useful, type-dispatched
-  // functions.  See is(), dynCast() and cast() in
-  // https://github.com/WebAssembly/binaryen/blob/master/src/wasm.h
-  const static Id SelfId = Id::Local;
+struct Local {
   int unique;
   Local(int unique)
-    : Arg(SelfId)
-    , unique(unique)
+    : unique(unique)
     {}
-};
-using local_list = std::vector<std::shared_ptr<Local>>;
-
-struct PyConst : public Arg {
-  const static Id SelfId = Id::PyConst;
-  THPObjectPtr pyobj;
-  PyConst(THPObjectPtr&& pyobj)
-    : Arg(SelfId)
-    , pyobj(std::move(pyobj))
-    {}
-};
-
-// SubType is instance of CRTP; allows us to avoid virtual dispatch
-// ParameterType is used in lieu of the member variable trick, because
-// it allows you to do visitor tail calls.
-template<typename SubType, typename ReturnType = void>
-struct ArgVisitor {
-  /*
-  // Purposely undefined, to avoid C++ thinking that we are eventually
-  // going to define these (we will not.)
-  ReturnType visitLocal(std::shared_ptr<Local>, T...);
-  ReturnType visitPyConst(std::shared_ptr<PyConst>, T...);
-  */
-  template <typename... T>
-  ReturnType visitArg(std::shared_ptr<Arg> arg, T&&... args) {
-    switch (arg->_id) {
-      case Arg::Id::Local:
-        return static_cast<SubType*>(this)->visitLocal(std::static_pointer_cast<Local>(arg), args...);
-      case Arg::Id::PyConst:
-        return static_cast<SubType*>(this)->visitPyConst(std::static_pointer_cast<PyConst>(arg), args...);
-    }
-    __builtin_unreachable();
-  }
 };
 
 // --------------------------------------------------------------------
@@ -154,7 +101,7 @@ struct Expr {
   enum class Id {
     PyApply,
     Let,
-    Locals,
+    Tuple,
   };
 
   Id _id;
@@ -166,22 +113,51 @@ struct Expr {
   Expr(Expr&& other) = delete;
 };
 
+// The calling convention for a Python function specifies how we
+// need to intersperse tensor and Python arguments.
+struct PyFunctionCConv {
+  enum class ArgType { Tensor, Scalar };
+  std::vector<ArgType> arg_types;
+  PyFunctionCConv(std::vector<ArgType> arg_types) : arg_types(arg_types) {}
+};
+
 struct PyApply : public Expr {
+  // This is not used at the moment (except in the invocation of
+  // the Arg constructor, where it could be trivially inlined),
+  // but it can be used to implement some useful, type-dispatched
+  // functions.  See is(), dynCast() and cast() in
+  // https://github.com/WebAssembly/binaryen/blob/master/src/wasm.h
   const static Id SelfId = Id::PyApply;
+  // The Python object which contains the implementation of this function.
+  // This is either a class (non-legacy) or an object (legacy).  See
+  // TraceInterpreter for execution semantics.
   THPObjectPtr pyobj;
-  arg_list args;
+  // The calling convention for the Python function.
+  PyFunctionCConv cconv;
+  // Whether or not this is a legacy function implementation or not.
+  // We don't support executing traces with legacy functions at the moment.
   bool is_legacy;
-  PyApply(THPObjectPtr&& pyobj, arg_list args, bool is_legacy, Location loc)
+  // Scalar arguments to the Python function.  Not necessarily passed to
+  // the function in this order; see cconv for the correct order.
+  std::vector<THPObjectPtr> scalar_args;
+  // Tensor arguments to the Python function.  Not necessarily passed to
+  // the function in this order; see cconv for the correct order.
+  local_list tensor_args;
+  PyApply(THPObjectPtr&& pyobj, PyFunctionCConv cconv, bool is_legacy, pyobj_list&& scalar_args, local_list tensor_args, Location loc)
     : Expr(SelfId, loc)
     , pyobj(std::move(pyobj))
-    , args(args)
+    , cconv(cconv)
     , is_legacy(is_legacy)
+    , scalar_args(std::move(scalar_args))
+    , tensor_args(tensor_args)
     {}
-  PyApply(THPObjectPtr&& pyobj, arg_list args, bool is_legacy)
+  PyApply(THPObjectPtr&& pyobj, PyFunctionCConv cconv, bool is_legacy, pyobj_list&& scalar_args, local_list tensor_args)
     : Expr(SelfId)
     , pyobj(std::move(pyobj))
-    , args(args)
+    , cconv(cconv)
     , is_legacy(is_legacy)
+    , scalar_args(std::move(scalar_args))
+    , tensor_args(tensor_args)
     {}
 };
 
@@ -196,14 +172,14 @@ struct Let : public Expr {
     {}
 };
 
-struct Locals : public Expr {
-  const static Id SelfId = Id::Locals;
+struct Tuple : public Expr {
+  const static Id SelfId = Id::Tuple;
   local_list locals;
-  Locals(local_list locals, Location loc)
+  Tuple(local_list locals, Location loc)
     : Expr(SelfId, loc)
     , locals(locals)
     {};
-  Locals(local_list locals)
+  Tuple(local_list locals)
     : Expr(SelfId)
     , locals(locals)
     {};
@@ -225,8 +201,8 @@ struct ExprVisitor {
         return static_cast<SubType*>(this)->visitPyApply(std::static_pointer_cast<PyApply>(e), args...);
       case Expr::Id::Let:
         return static_cast<SubType*>(this)->visitLet(std::static_pointer_cast<Let>(e), args...);
-      case Expr::Id::Locals:
-        return static_cast<SubType*>(this)->visitLocals(std::static_pointer_cast<Locals>(e), args...);
+      case Expr::Id::Tuple:
+        return static_cast<SubType*>(this)->visitTuple(std::static_pointer_cast<Tuple>(e), args...);
     }
     __builtin_unreachable();
   }
