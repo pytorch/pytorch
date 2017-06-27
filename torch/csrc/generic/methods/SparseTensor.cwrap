@@ -126,7 +126,7 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
   return: self
   arguments:
     - THSTensor* self
-    - THSTensor* template
+    - THSTensor* the_template
 ]]
 
 [[
@@ -154,7 +154,9 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: t
   sparse: yes
-  with_stateless: True
+  variants:
+    - method
+    - function
   cname: newTranspose
   return: THSTensor*
   before_call: |
@@ -185,7 +187,8 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: mm
   sparse: yes
-  only_stateless: True
+  variants:
+    - function
   cname: spaddmm
   return: argument 0
   arguments:
@@ -200,7 +203,8 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: spmm
-  only_stateless: True
+  variants:
+    - function
   sparse: yes
   cname: spaddmm
   return: argument 0
@@ -216,7 +220,8 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: hspmm
-  only_stateless: True
+  variants:
+    - function
   sparse: yes
   cname: hspmm
   return: argument 0
@@ -230,7 +235,8 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: sspmm
-  only_stateless: True
+  variants:
+    - function
   sparse: yes
   cname: sspaddmm
   return: argument 0
@@ -247,7 +253,9 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: sspaddmm
   sparse: yes
-  with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THSTensor* result
@@ -265,7 +273,9 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
   name: spadd
   sparse: yes
   cname: spcadd
-  with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -288,7 +298,9 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: add
   sparse: yes
-  with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   cname: cadd
   arguments:
@@ -316,7 +328,9 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: sub
   sparse: yes
-  with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   cname: csub
   arguments:
@@ -345,7 +359,9 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
   name: mul
   sparse: yes
   return: argument 0
-  with_stateless: True
+  variants:
+    - method
+    - function
   options:
     - cname: mul
       arguments:
@@ -382,7 +398,9 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
   name: div
   sparse: yes
   cname: div
-  with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THSTensor* result
@@ -404,10 +422,17 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 
 [[
   name: pow
-  defined_if: defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || CUDA_FLOAT || CUDA_DOUBLE
+  types:
+    - float
+    - double
+  backends:
+    - CPU
+    - CUDA
   sparse: yes
   cname: pow
-  with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0
   arguments:
     - arg: THSTensor* result
@@ -432,7 +457,8 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
   name: getDevice
   sparse: yes
   python_name: get_device
-  defined_if: IS_CUDA
+  backends:
+    - CUDA
   return: long
   arguments:
     - THSTensor* self

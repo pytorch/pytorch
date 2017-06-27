@@ -102,12 +102,12 @@ For Example::
 
 would previously produce a Tensor with size: torch.Size([4,1]), but now produces a Tensor with size: torch.Size([4,4]).
 In order to help identify cases in your code where backwards incompatibilities introduced by broadcasting may exist,
-you may set `torch.utils.backcompat.broadcast.warning.enabled` to `True`, which will generate a python warning
+you may set `torch.utils.backcompat.broadcast_warning.enabled` to `True`, which will generate a python warning
 in such cases.
 
 For Example::
 
-    >>> torch.utils.backcompat.broadcast.warning.enabled=True
+    >>> torch.utils.backcompat.broadcast_warning.enabled=True
     >>> torch.add(torch.ones(4,1), torch.ones(4))
     __main__:1: UserWarning: self and other do not have the same shape, but are broadcastable, and have the same number of elements.
     Changing behavior in a backwards incompatible manner to broadcasting rather than viewing as 1-dimensional.

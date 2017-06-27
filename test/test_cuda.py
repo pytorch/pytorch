@@ -856,6 +856,12 @@ class TestCuda(TestCase):
     def test_broadcast_batched_matmul(self):
         TestTorch._test_broadcast_batched_matmul(self, lambda t: t.cuda())
 
+    def test_advancedindex(self):
+        TestTorch._test_advancedindex(self, lambda t: t.cuda())
+
+    def test_advancedindex_big(self):
+        TestTorch._test_advancedindex_big(self, lambda t: t.cuda())
+
     def test_btrifact(self):
         TestTorch._test_btrifact(self, lambda t: t.cuda())
 

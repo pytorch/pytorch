@@ -15,25 +15,7 @@
 
 
 THDescBuff THLongStorage_sizeDesc(const THLongStorage *size) {
-  const int L = TH_DESC_BUFF_LEN;
-  THDescBuff buf;
-  char *str = buf.str;
-  int n = 0;
-  n += snprintf(str, L-n, "[");
-  int i;
-  for(i = 0; i < size->size; i++) {
-    if(n >= L) break;
-    n += snprintf(str+n, L-n, "%ld", size->data[i]);
-    if(i < size->size-1) {
-      n += snprintf(str+n, L-n, " x ");
-    }
-  }
-  if(n < L - 2) {
-    snprintf(str+n, L-n, "]");
-  } else {
-    snprintf(str+L-5, 5, "...]");
-  }
-  return buf;
+  return _THSizeDesc(size->data, size->size);
 }
 
 THLongStorage *THLongStorage_newInferSize(THLongStorage *size, ptrdiff_t nElement)

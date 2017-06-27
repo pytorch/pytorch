@@ -8,6 +8,8 @@ import warnings
 from copy import deepcopy
 from collections import OrderedDict
 from itertools import product
+from operator import mul
+from functools import reduce
 import torch.nn.functional as F
 from torch.autograd import gradcheck
 from torch.autograd.gradcheck import gradgradcheck
@@ -543,6 +545,10 @@ class TestAutograd(TestCase):
         check_index(torch.LongTensor([0, 2]))
         check_index(torch.rand(4, 4).bernoulli().byte())
         check_index((Ellipsis, slice(2, None)))
+        check_index(([0], [0]))
+        check_index(([1, 2, 3], [0]))
+        check_index(([1, 2], [2, 1]))
+        check_index(([[1, 2], [3, 0]], [[0, 1], [2, 3]]))
 
     def test_indexing_duplicates(self):
         x = torch.arange(1, 17).view(4, 4)
@@ -553,6 +559,29 @@ class TestAutograd(TestCase):
         expected_grad = torch.zeros(4, 4)
         for i in idx:
             expected_grad[i] += 1
+        self.assertEqual(y.grad.data, expected_grad)
+
+        # with advanced indexing
+        x = torch.arange(1, 17).view(4, 4)
+        y = Variable(x, requires_grad=True)
+
+        idx = [[1, 1, 3, 2, 1, 2], [0]]
+        y[idx].sum().backward()
+        expected_grad = torch.zeros(4, 4)
+        for i in idx[0]:
+            for j in idx[1]:
+                expected_grad[i][j] += 1
+
+        self.assertEqual(y.grad.data, expected_grad)
+
+        x = torch.arange(1, 17).view(4, 4)
+        y = Variable(x, requires_grad=True)
+        idx = [[[1, 2], [0, 0]], [[0, 1], [1, 1]]]
+        y[idx].sum().backward()
+        expected_grad = torch.Tensor([[0, 2, 0, 0],
+                                      [1, 0, 0, 0],
+                                      [0, 1, 0, 0],
+                                      [0, 0, 0, 0]])
         self.assertEqual(y.grad.data, expected_grad)
 
     def test_basic_op_grad_fallback(self):
@@ -580,6 +609,7 @@ class TestAutograd(TestCase):
             (x.min(y())).sum().backward()
             (x.masked_fill(y() < 0, 0.5)).sum().backward()
             (x.masked_scatter(Variable(y().data < 0.25), z())).sum().backward()
+            (x.masked_select(Variable(y().data < 0.25))).sum().backward()
             (x.addcmul(1, y(), z())).sum().backward()
             (x.addcdiv(1, y(), z())).sum().backward()
             (x.abs() ** y()).sum().backward()
@@ -793,8 +823,12 @@ class TestAutograd(TestCase):
         self._test_setitem((5, 5), 1)
         self._test_setitem((5,), 1)
         self._test_setitem((1,), 0)
+        self._test_setitem((10,), [[0, 4, 2]])
+        self._test_setitem((5, 5), [[0, 4], [2, 2]])
         self._test_setitem_tensor((5, 5), 3)
+        self._test_setitem_tensor((5, 5), [[0, 1], [1, 0]])
         self._test_setitem_tensor((5,), 3)
+        self._test_setitem_tensor((5,), [[0, 1, 2, 3]])
 
     def test_setitem_mask(self):
         mask = torch.ByteTensor(5, 5).bernoulli_()
@@ -1272,6 +1306,14 @@ def index_variable(shape, max_indices):
     return Variable(index, requires_grad=False)
 
 
+def index_perm_variable(shape, max_indices):
+    if not isinstance(shape, tuple):
+        shape = (shape,)
+
+    index = torch.randperm(max_indices).narrow(0, 0, reduce(mul, shape)).view(shape)
+    return Variable(index, requires_grad=False)
+
+
 def gather_variable(shape, index_dim, max_indices, duplicate=False):
     assert len(shape) == 2
     assert index_dim < 2
@@ -1283,6 +1325,14 @@ def gather_variable(shape, index_dim, max_indices, duplicate=False):
     if duplicate:
         index.select(batch_dim, 0).copy_(index.select(batch_dim, 1))
     return Variable(index, requires_grad=False)
+
+
+def mask_not_all_zeros(shape):
+    assert len(shape) > 0
+    while True:
+        result = torch.randn(shape).gt(0)
+        if result.sum() > 0:
+            return result
 
 
 def prod_zeros(dim_size, dim_select):
@@ -1345,6 +1395,8 @@ function_tests = [
     (Index, (), (torch.rand(S, S, S), dont_convert([1, 2]))),
     (Index, (), (torch.rand(S, S, S), slice(0, 3)), 'slice'),
     (Index, (), (torch.rand(S, S, S), dont_convert([slice(0, 3), 1])), 'slice_index'),
+    (Index, (), (torch.rand(S, S, S), dont_convert([[0, 2, 3], [1, 3, 3], [0, 0, 2]])), 'adv_index'),
+    (Index, (), (torch.rand(S, S, S), dont_convert([[0, 0, 3], [1, 1, 3], [0, 0, 2]])), 'adv_index_dup'),
     (View, (), (torch.rand(S, S, S), torch.Size([S * S, S]))),
     (Expand, (), ((1, S, 1, S, 1), torch.Size([5, S, 5, S, 5]))),
     (Expand, (), ((S, 1), torch.Size([S, S, S])), 'new_dim'),
@@ -1505,7 +1557,7 @@ function_tests = [
     (Addcdiv, (), ((S, S), (S, 1), torch.rand(1, S) + 5e-2, 0.6), 'broadcast_rhs_scale'),
     (Addcdiv, (), ((1,), (S, S, 1), torch.rand(1, S) + 5e-2, 0.6), 'broadcast_all_scale'),
     (IndexAdd, (), ((S, S), 0, index_variable(2, S), (2, S))),
-    # (IndexCopy,     (0,),               ((S, S), index_variable(2, S), (2, S))      ),
+    (IndexCopy, (), ((S, S), 0, index_perm_variable(2, S), (2, S))),
     (IndexFill, (), ((S, S), 0, index_variable(2, S), 2)),
     (IndexSelect, (), ((S, S), 0, index_variable(2, S))),
     (Gather, (), ((M, S), 0, gather_variable((S, S), 1, M, True))),
@@ -1513,6 +1565,8 @@ function_tests = [
     (Gather, (), ((M, S), 1, gather_variable((M, S // 2), 0, S, True)), 'dim1'),
     (Scatter, (), ((M, S), 0, gather_variable((S, S), 1, M), (S, S))),
     (Scatter, (), ((M, S), 1, gather_variable((M, S // 2), 0, S), (M, S // 2)), 'dim1'),
+    (ScatterAdd, (), ((M, S), 0, gather_variable((S, S), 1, M), (S, S))),
+    (ScatterAdd, (), ((M, S), 1, gather_variable((M, S // 2), 0, S), (M, S // 2)), 'dim1'),
     (Concat, (), (0, (1, S, S), (2, S, S), (3, S, S))),
     (Concat, (), (-1, (S, S, 1), (S, S, 2), (S, S, 3)), 'negdim-1'),
     (Concat, (), (-2, (S, 1, S), (S, 2, S), (S, 3, S)), 'negdim-2'),
@@ -1542,7 +1596,11 @@ function_tests = [
     (MaskedFill, (), ((S, S), Variable(torch.randn(S, S).gt(0), requires_grad=False), 10)),
     # no lhs or all broadcast on MaskedFill because it's always inplace
     (MaskedFill, (), ((S, S), Variable(torch.randn(S,).gt(0), requires_grad=False), 10), 'broadcast_rhs'),
-    (MaskedSelect, (), ((S, S), Variable(torch.randn(S, S).gt(0), requires_grad=False))),
+    # ensure the mask isn't all zeros or else we get a tensor with 0 dimensions
+    (MaskedSelect, (), ((S, S), Variable(mask_not_all_zeros((S, S)), requires_grad=False))),
+    (MaskedSelect, (), ((S, S), Variable(mask_not_all_zeros((S,)), requires_grad=False)), 'broadcast_rhs'),
+    (MaskedSelect, (), ((S,), Variable(mask_not_all_zeros((S, S,)), requires_grad=False)), 'broadcast_lhs'),
+    (MaskedSelect, (), ((S, 1, S), Variable(mask_not_all_zeros((S, S)), requires_grad=False)), 'broadcast_all'),
     (Sort, (), ((S, M, S),)),
     (Sort, (), ((S, M, S), 1), 'dim'),
     (Sort, (), ((S, M, S), 1, True), 'dim_desc'),
@@ -1798,7 +1856,11 @@ method_tests = [
     ('unsqueeze', (S, S, S), (0,), 'first', [0]),
     ('unsqueeze', (S, S, S), (1,), 'middle', [0]),
     ('unsqueeze', (S, S, S), (3,), 'last', [0]),
-    ('masked_select', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False),)),
+    ('masked_select', (M, M), (Variable(mask_not_all_zeros((M, M)), requires_grad=False),)),
+    ('masked_select', (M, M), (Variable(mask_not_all_zeros((M,)), requires_grad=False),), 'broadcast_rhs'),
+    ('masked_select', (M,), (Variable(mask_not_all_zeros((M, M)), requires_grad=False),), 'broadcast_lhs'),
+    ('masked_select', (M, 1, M), (Variable(mask_not_all_zeros((M, M)), requires_grad=False),),
+     'broadcast_all'),
     ('masked_fill_', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False), 10)),
     # no lhs or all broadcast on masked_fill or masked_scatter because it's always inplace
     ('masked_fill_', (M, M), (Variable(torch.ByteTensor(M,).bernoulli_(), requires_grad=False), 10), 'broadcast_rhs'),
@@ -1848,8 +1910,6 @@ ignore_inplace = set((
 
 gradgradcheck_exclude_classes = set((
     'Cumprod',
-    'Gather',
-    'MaskedScatter',
     'Norm',
     'Prod',
 ))

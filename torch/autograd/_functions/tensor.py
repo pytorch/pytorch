@@ -4,7 +4,7 @@ from torch._utils import _accumulate
 
 from ..function import Function, InplaceFunction, once_differentiable
 from ..variable import Variable
-from .utils import maybe_unexpand, variable_expandable
+from .utils import maybe_unexpand
 
 
 class Index(Function):
@@ -14,13 +14,19 @@ class Index(Function):
         ctx.input_size = i.size()
         ctx.index = index
         result = i.index(ctx.index)
-        ctx.mark_shared_storage((i, result))
+        ctx.advanced_indexing = i._check_advanced_indexing(index)
+        if not ctx.advanced_indexing:
+            ctx.mark_shared_storage((i, result))
         return result
 
     @staticmethod
     def backward(ctx, grad_output):
-        grad_input = Variable(grad_output.data.new(ctx.input_size).zero_())
-        grad_input[ctx.index] = grad_output
+        grad_input = grad_output.data.new(ctx.input_size).zero_()
+        grad_input = Variable(grad_input)
+        if ctx.advanced_indexing:
+            grad_input._advanced_index_add(ctx.index, grad_output)
+        else:
+            grad_input[ctx.index] = grad_output
         return grad_input, None
 
 
@@ -189,10 +195,33 @@ class IndexAdd(InplaceFunction):
             grad_tensor1 = grad_output
 
         if ctx.needs_input_grad[3]:
-            index, = ctx.saved_tensors
-            grad_tensor2 = grad_output.index_select(ctx.dim, Variable(index))
+            index, = ctx.saved_variables
+            grad_tensor2 = grad_output.index_select(ctx.dim, index)
 
         return grad_tensor1, None, None, grad_tensor2, None
+
+
+class AdvancedIndexAdd(InplaceFunction):
+
+    @staticmethod
+    def forward(ctx, tensor1, adv_index, tensor2):
+        assert not ctx.needs_input_grad[1]
+        if ctx.needs_input_grad[2]:
+            ctx.adv_index = adv_index
+        ctx.mark_dirty(tensor1)
+        return tensor1._advanced_index_add(adv_index, tensor2)
+
+    @staticmethod
+    @once_differentiable
+    def backward(ctx, grad_output):
+        grad_tensor1 = grad_tensor2 = None
+
+        if ctx.needs_input_grad[0]:
+            grad_tensor1 = grad_output
+
+        if ctx.needs_input_grad[2]:
+            grad_tensor2 = grad_output._advanced_index_select(ctx.adv_index)
+        return grad_tensor1, None, grad_tensor2
 
 
 class IndexCopy(InplaceFunction):
@@ -207,20 +236,19 @@ class IndexCopy(InplaceFunction):
             tensor1 = tensor1.clone()
         else:
             ctx.mark_dirty(tensor1)
-        return tensor1.index_copy_(dim, index, tensor2)
+        return tensor1.index_copy_(ctx.dim, index, tensor2)
 
     @staticmethod
-    @once_differentiable
     def backward(ctx, grad_output):
         grad_tensor1 = grad_tensor2 = None
 
         if any(ctx.needs_input_grad):
-            index, = ctx.saved_tensors
+            index, = ctx.saved_variables
 
         if ctx.needs_input_grad[0]:
             grad_tensor1 = grad_output.clone().index_fill_(ctx.dim, index, 0)
 
-        if ctx.needs_input_grad[2]:
+        if ctx.needs_input_grad[3]:
             grad_tensor2 = grad_output.index_select(ctx.dim, index)
 
         return grad_tensor1, None, None, grad_tensor2, None
@@ -245,8 +273,8 @@ class IndexFill(InplaceFunction):
         grad_tensor = None
 
         if ctx.needs_input_grad[0]:
-            index, = ctx.saved_tensors
-            grad_tensor = grad_output.clone().index_fill_(ctx.dim, Variable(index), 0)
+            index, = ctx.saved_variables
+            grad_tensor = grad_output.clone().index_fill_(ctx.dim, index, 0)
 
         return grad_tensor, None, None, None, None
 
@@ -269,9 +297,9 @@ class IndexSelect(Function):
         grad_tensor = None
 
         if ctx.needs_input_grad[0]:
-            index, = ctx.saved_tensors
-            grad_tensor = Variable(grad_output.data.new(*ctx.input_size).zero_(), requires_grad=True)
-            grad_tensor = grad_tensor.index_add(ctx.dim, Variable(index), grad_output)
+            index, = ctx.saved_variables
+            grad_tensor = Variable(grad_output.data.new(*ctx.input_size).zero_())
+            grad_tensor = grad_tensor.index_add(ctx.dim, index, grad_output)
 
         return grad_tensor, None, None
 
@@ -384,18 +412,23 @@ class MaskedScatter(InplaceFunction):
         return tensor1.masked_scatter_(mask, tensor2)
 
     @staticmethod
-    @once_differentiable
     def backward(ctx, grad_output):
-        mask, = ctx.saved_tensors
+        mask, = ctx.saved_variables
         grad_tensor1 = grad_tensor2 = None
         if ctx.needs_input_grad[0]:
             grad_tensor1 = maybe_unexpand(grad_output.clone().masked_fill_(mask, 0), ctx.tensor1_size)
         if ctx.needs_input_grad[2]:
-            grad_tensor2 = grad_output.new(ctx.tensor2_size).zero_()
-            # mask is potentially expanded against tensor1
-            mask_expanded = mask.expand(ctx.tensor1_size) if variable_expandable(mask, ctx.tensor1_size) else mask
-            grad_output.masked_select(mask_expanded, out=grad_tensor2.view(-1))
-            grad_tensor2 = maybe_unexpand(grad_tensor2, ctx.tensor2_size)
+            grad_tensor2 = Variable(grad_output.data.new(ctx.tensor2_size).zero_())
+            mask_selected = grad_output.masked_select(mask)
+            diff_nelem = grad_tensor2.nelement() - mask_selected.nelement()
+            if diff_nelem > 0:
+                # because mask_selected returns a 1-d tensor with size of masked elements that are 1,
+                # we need to fill out the rest with zeros then reshape back to tensor2's size.
+                zeros_fillin = Variable(grad_output.data.new(diff_nelem).zero_())
+                mask_selected = torch.cat((mask_selected, zeros_fillin), 0)
+
+            mask_selected = mask_selected.view(ctx.tensor2_size)
+            grad_tensor2 = maybe_unexpand(mask_selected, ctx.tensor2_size)
         return grad_tensor1, None, grad_tensor2, None
 
 
@@ -414,10 +447,10 @@ class MaskedFill(InplaceFunction):
 
     @staticmethod
     def backward(ctx, grad_output):
-        mask, = ctx.saved_tensors
+        mask, = ctx.saved_variables
         grad_tensor = None
         if ctx.needs_input_grad[0]:
-            grad_tensor = maybe_unexpand(grad_output.clone().masked_fill_(Variable(mask), 0), ctx.tensor_size)
+            grad_tensor = maybe_unexpand(grad_output.clone().masked_fill_(mask, 0), ctx.tensor_size)
         return grad_tensor, None, None, None
 
 
@@ -432,11 +465,20 @@ class MaskedSelect(Function):
 
     @staticmethod
     def backward(ctx, grad_output):
-        mask, = ctx.saved_tensors
+        mask, = ctx.saved_variables
         grad_tensor = None
         if ctx.needs_input_grad[0]:
-            grad_tensor = Variable(grad_output.data.new(ctx.input_size).zero_(), requires_grad=True)
-            grad_tensor = grad_tensor.masked_scatter(Variable(mask), grad_output)
+            # determine the actual broadcasted sizes used
+            try:
+                new_size = torch._C._infer_size(ctx.input_size, mask.size())
+            except RuntimeError:
+                new_size = None
+
+            # we need to potentially expand grad_tensor, since it is passed to Variable.masked_scatter, which
+            # eventually is in-place (so can't rely on automatically broadcasting)
+            grad_tensor = Variable(grad_output.data.new(new_size if new_size is not None else ctx.input_size).zero_())
+            grad_tensor = grad_tensor.masked_scatter(mask, grad_output)
+            grad_tensor = maybe_unexpand(grad_tensor, ctx.input_size)
         return grad_tensor, None
 
 
@@ -459,13 +501,13 @@ class _MultiSelectionFunction(Function):
 
     @staticmethod
     def backward(ctx, grad_output, grad_indices=None):
-        grad_input = Variable(grad_output.data.new(ctx.input_size).zero_(), requires_grad=True)
+        grad_input = Variable(grad_output.data.new(ctx.input_size).zero_())
         if ctx.return_indices:
-            indices, = ctx.saved_tensors
+            indices, = ctx.saved_variables
         else:
             indices = ctx.indices
         dim = ctx.dim if ctx.dim is not None else grad_output.dim() - 1
-        return (grad_input.scatter(dim, Variable(indices), grad_output),) + (None,) * ctx.num_flags
+        return (grad_input.scatter(dim, indices, grad_output),) + (None,) * ctx.num_flags
 
 
 class Sort(_MultiSelectionFunction):
@@ -514,10 +556,9 @@ class Gather(Function):
         return input.gather(dim, index)
 
     @staticmethod
-    @once_differentiable
     def backward(ctx, grad_output):
-        index, = ctx.saved_tensors
-        grad_input = grad_output.new(ctx.input_size).zero_()
+        index, = ctx.saved_variables
+        grad_input = Variable(grad_output.data.new(ctx.input_size).zero_())
         return grad_input.scatter_add_(ctx.dim, index, grad_output), None, None
 
 
@@ -536,14 +577,37 @@ class Scatter(InplaceFunction):
 
     @staticmethod
     def backward(ctx, grad_output):
-        index, = ctx.saved_tensors
-        index_var = Variable(index)
+        index, = ctx.saved_variables
         grad_input = grad_source = None
         if ctx.needs_input_grad[0]:
             grad_input = grad_output.clone()
-            grad_input.scatter_(ctx.dim, index_var, 0)
+            grad_input.scatter_(ctx.dim, index, 0)
         if ctx.needs_input_grad[3]:
-            grad_source = grad_output.gather(ctx.dim, index_var)
+            grad_source = grad_output.gather(ctx.dim, index)
+        return grad_input, None, None, grad_source, None
+
+
+class ScatterAdd(InplaceFunction):
+
+    @staticmethod
+    def forward(ctx, input, dim, index, source, inplace=False):
+        assert not ctx.needs_input_grad[2], "ScatterAdd can't differentiate the index"
+        ctx.dim = dim
+        if inplace:
+            ctx.mark_dirty(input)
+        else:
+            input = input.clone()
+        ctx.save_for_backward(index)
+        return input.scatter_add_(ctx.dim, index, source)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        index, = ctx.saved_variables
+        grad_input = grad_source = None
+        if ctx.needs_input_grad[0]:
+            grad_input = grad_output
+        if ctx.needs_input_grad[3]:
+            grad_source = grad_output.gather(ctx.dim, index)
         return grad_input, None, None, grad_source, None
 
 
@@ -757,7 +821,7 @@ class Unfold(Function):
         idx = idx.view(ctx.input_size)
         idx_unfolded = idx.unfold(ctx.dim, ctx.size, ctx.step)
         idx_unfolded = idx_unfolded.contiguous().view(-1)
-        grad_input = Variable(grad_output.data.new(ctx.input_numel).zero_(), requires_grad=True)
+        grad_input = Variable(grad_output.data.new(ctx.input_numel).zero_())
         grad_output = grad_output.contiguous().view(-1)
-        grad_input = grad_input.index_add(0, Variable(idx_unfolded, requires_grad=False), grad_output)
+        grad_input = grad_input.index_add(0, Variable(idx_unfolded), grad_output)
         return grad_input.view(ctx.input_size), None, None, None

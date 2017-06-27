@@ -1,5 +1,7 @@
 [[
   name: lt
+  variants:
+    - method
   return: argument 0
   options:
     - cname: ltValue
@@ -36,7 +38,8 @@
 
 [[
   name: lt
-  only_stateless: True
+  variants:
+    - function
   return: argument 0
   options:
     - cname: ltValue
@@ -70,6 +73,8 @@
 
 [[
   name: gt
+  variants:
+    - method
   return: argument 0
   options:
     - cname: gtValue
@@ -106,7 +111,8 @@
 
 [[
   name: gt
-  only_stateless: True
+  variants:
+    - function
   return: argument 0
   options:
     - cname: gtValue
@@ -135,11 +141,14 @@
         - arg: THTensor* tensor
           broadcast: other fallback
         - THTensor* other
+
 ]]
 
 
 [[
   name: le
+  variants:
+    - method
   return: argument 0
   options:
     - cname: leValue
@@ -176,7 +185,8 @@
 
 [[
   name: le
-  only_stateless: True
+  variants:
+    - function
   return: argument 0
   options:
     - cname: leValue
@@ -210,6 +220,8 @@
 
 [[
   name: ge
+  variants:
+    - method
   return: argument 0
   options:
     - cname: geValue
@@ -246,7 +258,8 @@
 
 [[
   name: ge
-  only_stateless: True
+  variants:
+    - function
   return: argument 0
   options:
     - cname: geValue
@@ -280,6 +293,8 @@
 
 [[
   name: eq
+  variants:
+    - method
   return: argument 0
   options:
     - cname: eqValue
@@ -316,7 +331,8 @@
 
 [[
   name: eq
-  only_stateless: True
+  variants:
+    - function
   return: argument 0
   options:
     - cname: eqValue
@@ -350,6 +366,8 @@
 
 [[
   name: ne
+  variants:
+    - method
   return: argument 0
   options:
     - cname: neValue
@@ -386,7 +404,8 @@
 
 [[
   name: ne
-  only_stateless: True
+  variants:
+    - function
   return: argument 0
   options:
     - cname: neValue
@@ -419,7 +438,9 @@
 
 [[
   name: min
-  with_stateless: True
+  variants:
+    - method
+    - function
   options:
     - cname: minall
       return: real
@@ -460,7 +481,9 @@
 
 [[
   name: max
-  with_stateless: True
+  variants:
+    - method
+    - function
   options:
     - cname: maxall
       return: real
@@ -501,8 +524,11 @@
 
 [[
   name: kthvalue
-  defined_if: "!IS_CUDA"
-  with_stateless: True
+  backends:
+    - CPU
+  variants:
+    - method
+    - function
   return: argument 0,1
   options:
     - before_call: long __last_dim = THTensor_(nDimension)(LIBRARY_STATE ((THPTensor*)$arg2)->cdata)-1;
@@ -552,7 +578,9 @@
 
 [[
   name: mode
-  with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0,1
   options:
     - before_call: long __last_dim = THTensor_(nDimension)(LIBRARY_STATE ((THPTensor*)$arg2)->cdata)-1;
@@ -598,8 +626,11 @@
 
 [[
   name: median
-  defined_if: "!IS_CUDA"
-  with_stateless: True
+  backends:
+    - CPU
+  variants:
+    - method
+    - function
   return: argument 0,1
   options:
     - before_call: long __last_dim = THTensor_(nDimension)(LIBRARY_STATE ((THPTensor*)$arg2)->cdata)-1;
@@ -645,7 +676,9 @@
 
 [[
   name: sort
-  with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0,1
   options:
     - before_call: long __last_dim = THTensor_(nDimension)(LIBRARY_STATE ((THPTensor*)$arg2)->cdata)-1;
@@ -679,7 +712,9 @@
 
 [[
   name: topk
-  with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0,1
   options:
     - before_call: long __last_dim = THTensor_(nDimension)(LIBRARY_STATE ((THPTensor*)$arg2)->cdata)-1;
@@ -710,7 +745,11 @@
 
 [[
   name: all
-  defined_if: defined(TH_REAL_IS_BYTE) || defined(THC_REAL_IS_BYTE)
+  types:
+    - Byte
+  backends:
+    - CPU
+    - CUDA
   cname: logicalall
   return: bool
   arguments:
@@ -719,7 +758,11 @@
 
 [[
   name: any
-  defined_if: defined(TH_REAL_IS_BYTE) || defined(THC_REAL_IS_BYTE)
+  types:
+    - Byte
+  backends:
+    - CPU
+    - CUDA
   cname: logicalany
   return: bool
   arguments:

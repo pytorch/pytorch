@@ -10,13 +10,71 @@ ExpandType *newForExpand(LIBRARY_STATE_TYPE_NOARGS);
 template <typename TensorType>
 void expand(LIBRARY_STATE_TYPE TensorType *r, TensorType *tensor, THLongStorage *sizes);
 
-template <typename TensorType>
-void expand2(LIBRARY_STATE_TYPE TensorType *r1, TensorType *r2,
-             TensorType *e1, TensorType *e2);
+template <typename TensorType1, typename TensorType2>
+void expand2(LIBRARY_STATE_TYPE TensorType1 *r1, TensorType2 *r2,
+             TensorType1 *e1, TensorType2 *e2,
+             char *e1_name, char *e2_name) {
+  if (e1->nDimension <= 0) {
+    throw std::runtime_error(std::string("can't expand empty tensor ").append(e1_name));
+  }
+  if (e2->nDimension <= 0) {
+    throw std::runtime_error(std::string("can't expand empty tensor ").append(e2_name));
+  }
+  THLongStoragePtr sizes(THLongStorage_new());
+  char error_buffer[1024];
+  int ret = THLongStorage_inferSize2(sizes,
+                                     e1->size, e1->nDimension,
+                                     e2->size, e2->nDimension,
+                                     error_buffer, 1024);
+  if (ret != 0) {
+    throw std::runtime_error(error_buffer);
+  }
 
-template <typename TensorType>
-void expand3(LIBRARY_STATE_TYPE TensorType *r1, TensorType *r2, TensorType *r3,
-             TensorType *e1, TensorType *e2, TensorType *e3);
+  expand(LIBRARY_STATE r1, e1, sizes);
+  expand(LIBRARY_STATE r2, e2, sizes);
+}
+
+template <typename TensorType1, typename TensorType2, typename TensorType3>
+void expand3(LIBRARY_STATE_TYPE TensorType1 *r1, TensorType2 *r2, TensorType3 *r3,
+             TensorType1 *e1, TensorType2 *e2, TensorType3 *e3,
+             char *e1_name, char *e2_name, char *e3_name) {
+  if (e1->nDimension <= 0) {
+    throw std::runtime_error(std::string("can't expand empty tensor ").append(e1_name));
+  }
+  if (e2->nDimension <= 0) {
+    throw std::runtime_error(std::string("can't expand empty tensor ").append(e2_name));
+  }
+  if (e3->nDimension <= 0) {
+    throw std::runtime_error(std::string("can't expand empty tensor ").append(e3_name));
+  }
+
+  long *e_sizes[3];
+  long e_dims[3];
+
+  e_sizes[ 0 ] = e1->size;
+  e_sizes[ 1 ] = e2->size;
+  e_sizes[ 2 ] = e3->size;
+  e_dims[ 0 ] = e1->nDimension;
+  e_dims[ 1 ] = e2->nDimension;
+  e_dims[ 2 ] = e3->nDimension;
+
+  THLongStoragePtr sizes(THLongStorage_new());
+  char error_buffer[1024];
+  int ret = THLongStorage_inferSizeN(sizes,
+                                     3,
+                                     e_sizes,
+                                     e_dims,
+                                     error_buffer,
+                                     1024);
+
+  if(ret != 0) {
+    throw std::runtime_error(error_buffer);
+  }
+
+  expand(LIBRARY_STATE r1, e1, sizes);
+  expand(LIBRARY_STATE r2, e2, sizes);
+  expand(LIBRARY_STATE r3, e3, sizes);
+}
 
 template <typename ExpandType, typename TensorType>
 void check_backincompat_expand_warn(ExpandType *to_expand, TensorType *tensor,
@@ -91,15 +149,15 @@ void expand_inplace2(LIBRARY_STATE_TYPE TensorType *r1, TensorType *r2,
                                                          to_expand2_nElem, tensor_nElem);
 }
 
-template <typename TensorType>
-void expand_outplace2(LIBRARY_STATE_TYPE TensorType *r1, TensorType *r2,
-                      TensorType *to_expand1, TensorType *to_expand2,
+template <typename TensorType1, typename TensorType2>
+void expand_outplace2(LIBRARY_STATE_TYPE TensorType1 *r1, TensorType2 *r2,
+                      TensorType1 *to_expand1, TensorType2 *to_expand2,
                       char *to_expand1_name, char *to_expand2_name, bool fallback) {
   ptrdiff_t to_expand1_nElem = THSize_nElement(to_expand1->nDimension, to_expand1->size);
   ptrdiff_t to_expand2_nElem = THSize_nElement(to_expand2->nDimension, to_expand2->size);
   bool expand_warn = fallback && (to_expand1_nElem == to_expand2_nElem) && to_expand1_nElem != 0;
   try {
-    expand2<TensorType>(LIBRARY_STATE r1, r2, to_expand1, to_expand2);
+    expand2<TensorType1, TensorType2>(LIBRARY_STATE r1, r2, to_expand1, to_expand2, to_expand1_name, to_expand2_name);
   } catch (std::exception &e) {
     if (expand_warn) {
       std::ostringstream warn;
@@ -110,13 +168,13 @@ void expand_outplace2(LIBRARY_STATE_TYPE TensorType *r1, TensorType *r2,
     throw;
   }
 
-  check_backincompat_expand_warn<TensorType, TensorType>(to_expand1, to_expand2, to_expand1_name, to_expand2_name,
-                                                         fallback, to_expand1_nElem, to_expand2_nElem);
+  check_backincompat_expand_warn<TensorType1, TensorType2>(to_expand1, to_expand2, to_expand1_name, to_expand2_name,
+                                                           fallback, to_expand1_nElem, to_expand2_nElem);
 }
 
-template <typename TensorType>
-void expand_outplace3(LIBRARY_STATE_TYPE TensorType *r1, TensorType *r2, TensorType *r3,
-                      TensorType *to_expand1, TensorType *to_expand2, TensorType *to_expand3,
+template <typename TensorType1, typename TensorType2, typename TensorType3>
+void expand_outplace3(LIBRARY_STATE_TYPE TensorType1 *r1, TensorType2 *r2, TensorType3 *r3,
+                      TensorType1 *to_expand1, TensorType2 *to_expand2, TensorType3 *to_expand3,
                       char *to_expand1_name, char *to_expand2_name, char *to_expand3_name, bool fallback) {
   ptrdiff_t to_expand1_nElem = THSize_nElement(to_expand1->nDimension, to_expand1->size);
   ptrdiff_t to_expand2_nElem = THSize_nElement(to_expand2->nDimension, to_expand2->size);
@@ -125,7 +183,9 @@ void expand_outplace3(LIBRARY_STATE_TYPE TensorType *r1, TensorType *r2, TensorT
   bool to_expand3_warn = fallback && (to_expand1_nElem == to_expand3_nElem) && to_expand1_nElem != 0;
 
   try {
-    expand3<TensorType>(LIBRARY_STATE r1, r2, r3, to_expand1, to_expand2, to_expand3);
+    expand3<TensorType1, TensorType2, TensorType3>(LIBRARY_STATE r1, r2, r3,
+                                                   to_expand1, to_expand2, to_expand3,
+                                                   to_expand1_name, to_expand2_name, to_expand3_name);
   } catch (std::exception &e) {
     if(to_expand2_warn && to_expand3_warn) {
       std::ostringstream warn;
@@ -136,9 +196,9 @@ void expand_outplace3(LIBRARY_STATE_TYPE TensorType *r1, TensorType *r2, TensorT
     throw;
   }
 
-  check_backincompat_expand_warn<TensorType, TensorType>(to_expand1, to_expand2, to_expand1_name, to_expand2_name,
+  check_backincompat_expand_warn<TensorType1, TensorType2>(to_expand1, to_expand2, to_expand1_name, to_expand2_name,
                                                          fallback, to_expand1_nElem, to_expand2_nElem);
-  check_backincompat_expand_warn<TensorType, TensorType>(to_expand1, to_expand3, to_expand1_name, to_expand3_name,
+  check_backincompat_expand_warn<TensorType1, TensorType3>(to_expand1, to_expand3, to_expand1_name, to_expand3_name,
                                                          fallback, to_expand1_nElem, to_expand3_nElem);
 }
 
