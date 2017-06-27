@@ -52,8 +52,8 @@ bool TransposeOp<CUDAContext>::DoRunWithType() {
   // (1) the dimenions of the inputs
   // (2) the dimension of the outputs
   // (3) the axis mapping from inputs to outputs
-  TensorCPU buffer_cpu(vector<int>{3 * ndim});
-  int* buffer_data = buffer_cpu.mutable_data<int>();
+  buffer_cpu_.Resize(3 * ndim);
+  int* buffer_data = buffer_cpu_.mutable_data<int>();
   for (int i = 0; i < ndim; ++i) {
     *(buffer_data++) = input.dim32(i);
   }
@@ -64,7 +64,7 @@ bool TransposeOp<CUDAContext>::DoRunWithType() {
     *(buffer_data++) = axes_[i];
   }
   // Copy the dimension information to GPU.
-  buffer_.CopyFrom(buffer_cpu, &context_);
+  buffer_.CopyFrom(buffer_cpu_, &context_);
   transpose_gpu<T><<<CAFFE_GET_BLOCKS(count), CAFFE_CUDA_NUM_THREADS,
                      0, context_.cuda_stream()>>>(
       count, input.template data<T>(), output->template mutable_data<T>(),
