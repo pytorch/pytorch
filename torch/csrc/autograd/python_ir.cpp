@@ -75,7 +75,6 @@ static int THPExpr_clear(THPExpr *self)
 static void THPExpr_dealloc(THPExpr* self)
 {
   PyObject_GC_UnTrack(self);
-  THPExpr_clear(self);
   self->cdata.~shared_ptr<Expr>();
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
@@ -112,7 +111,6 @@ static int THPArg_clear(THPArg *self)
 static void THPArg_dealloc(THPArg* self)
 {
   PyObject_GC_UnTrack(self);
-  THPArg_clear(self);
   self->cdata.~shared_ptr<Arg>();
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
