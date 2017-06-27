@@ -671,10 +671,13 @@ def _Broadcast(devices, model, net, param, use_nccl=False):
         if _IsGPUBlob(model, param):
             master_device_opt = core.DeviceOption(model._device_type, master_dev)
             with core.DeviceScope(master_device_opt):
+                # Note that the root is the root _rank_ and not the root
+                # _device_. Thus we always use root=0, regardless of the
+                # devices used.
                 model.NCCLBroadcast(
                     model._device_grouped_blobs[param].values(),
                     model._device_grouped_blobs[param].values(),
-                    root=master_dev
+                    root=0,
                 )
                 return
 
