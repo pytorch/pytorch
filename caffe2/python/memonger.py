@@ -124,6 +124,7 @@ def _compute_blob_recycling_for_dag(
         dont_share_blobs = set([str(b) for b in dont_share_blobs])
 
     # Create mapping from blobs to ops
+    origproto = copy.deepcopy(netproto)
     blobs_to_ops = collections.defaultdict(lambda: [])
     blob_input_count = collections.defaultdict(lambda: 0)
     op_inputs = collections.defaultdict(lambda: 0)
@@ -177,10 +178,6 @@ def _compute_blob_recycling_for_dag(
         token_seq += 1
         return token_seq
 
-    def compatible(blob, cur_tokens):
-        # Do we have all tokens?
-        return len(req_tokens[blob] - cur_tokens) == 0
-
     saved_count = 0
 
     def descend(op_idx, free_blobs, tokens):
@@ -208,6 +205,13 @@ def _compute_blob_recycling_for_dag(
                             (-share_counts[actual_blob], actual_blob),
                         )
 
+        def can_be_used(blob, cur_tokens):
+            # Do we have all tokens, and this one was not released in this op?
+            for (_cnt, b) in new_free_blobs:
+                if b == blob:
+                    return False
+            return len(req_tokens[blob] - cur_tokens) == 0
+
         for outp in cur_op.output:
             if is_shareable(outp):
                 if outp not in output_blobs:
@@ -217,7 +221,7 @@ def _compute_blob_recycling_for_dag(
                         put_back = []
                         while len(free_blobs) > 0:
                             (negcnt, cand_freeb) = heapq.heappop(free_blobs)
-                            if compatible(cand_freeb, tokens):
+                            if can_be_used(cand_freeb, tokens):
                                 freeb = cand_freeb
                                 break
                             else:
@@ -231,7 +235,7 @@ def _compute_blob_recycling_for_dag(
 
                         # Heuristic to choose the most suitably sized blob
                         for b in free_blobs:
-                            if compatible(b, tokens):
+                            if can_be_used(b, tokens):
                                 sz = blob_sizes[b]
                                 if sz >= best_size:
                                     if best_size < bsize or best_size >= sz:
@@ -346,6 +350,7 @@ def _compute_blob_recycling_for_dag(
     log.info("Memonger memory optimization took {} secs".format(
         time.time() - start_time),
     )
+    verify_inplace_blobs(origproto, netproto)
     return netproto
 
 
@@ -917,6 +922,26 @@ def optimize_interference(net, static_blobs,
         net=net,
         blob_assignments=blob_assignments,
         assignments=assignments)
+
+
+def verify_inplace_blobs(net_a, net_b):
+    """
+    Verifies that net_a and net_b have the same in-place blob assignments.
+    Particularly, that memonger did not add an in-place assignment when that
+    did not exist before.
+    """
+    def get_inplaces(op):
+        out = list(op.output)
+        inplaces = []
+        for j, inp in enumerate(op.input):
+            if inp in out:
+                inplaces.append([j, out.index(inp)])
+        return inplaces
+
+    for op_a, op_b in zip(net_a.op, net_b.op):
+        assert op_a.type == op_b.type
+        assert get_inplaces(op_a) == get_inplaces(op_b), \
+           "Inplace assignments differ: {} \n--\n {}".format(op_a, op_b)
 
 
 def verify_graph_equality(net_a, net_b):
