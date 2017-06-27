@@ -7,19 +7,11 @@
 
 namespace torch { namespace autograd {
 
-std::string getArgName(Arg* arg) {
-  switch (arg->_id) {
-    case Arg::Id::Local: return "Local";
-    case Arg::Id::PyConst: return "PyConst";
-  }
-  __builtin_unreachable();
-}
-
 std::string getExprName(Expr* expr) {
   switch (expr->_id) {
     case Expr::Id::PyApply: return "PyApply";
     case Expr::Id::Let: return "Let";
-    case Expr::Id::Locals: return "Locals";
+    case Expr::Id::Tuple: return "Tuple";
   }
   __builtin_unreachable();
 }
@@ -40,19 +32,19 @@ std::string getPythonName(const PyObject* obj, bool is_legacy) {
 
 // TODO: proper pretty-printer
 
-class Printer : public ExprVisitor<Printer>, public ArgVisitor<Printer> {
+class Printer : public ExprVisitor<Printer> {
   std::ostream& s;
 
 public:
   Printer(std::ostream& s) : s(s) {}
 
-  // Arg
+  void printPyObject(THPObjectPtr& obj) {
+    THPObjectPtr repr { PyObject_Repr(obj.get()) };
+    s << THPUtils_unpackString(repr.get());
+  }
+
   void visitLocal(std::shared_ptr<Local> a) {
     s << "%" << a->unique;
-  }
-  void visitPyConst(std::shared_ptr<PyConst> a) {
-    THPObjectPtr repr { PyObject_Repr(a->pyobj.get()) };
-    s << THPUtils_unpackString(repr.get());
   }
 
   // Expr
@@ -75,20 +67,29 @@ public:
   void visitPyApply(std::shared_ptr<PyApply> e, int indent) {
     s << getPythonName(e->pyobj.get(), e->is_legacy);
     bool first = true;
-    for (auto a : e->args) {
+    for (auto& scalar : e->scalar_args) {
       if (first) {
         first = false;
         s << " ";
       } else {
         s << ", ";
       }
-      visitArg(a);
+      printPyObject(scalar);
+    }
+    for (auto& a : e->tensor_args) {
+      if (first) {
+        first = false;
+        s << " ";
+      } else {
+        s << ", ";
+      }
+      visitLocal(a);
     }
     if (e->is_legacy) {
       s << " (legacy)";
     }
   }
-  void visitLocals(std::shared_ptr<Locals> e, int indent) {
+  void visitTuple(std::shared_ptr<Tuple> e, int indent) {
     s << std::string(indent, ' ');
     s << "(";
     bool first = true;

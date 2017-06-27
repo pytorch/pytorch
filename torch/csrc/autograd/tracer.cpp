@@ -13,7 +13,7 @@ void TracingState::addBinding(local_list lvals, std::shared_ptr<Expr> rval) {
 }
 
 std::shared_ptr<Expr> TracingState::expr(local_list locals) {
-  return builder->expr(std::make_shared<Locals>(locals));
+  return builder->expr(std::make_shared<Tuple>(locals));
 }
 
 void Tracer_enter() {
