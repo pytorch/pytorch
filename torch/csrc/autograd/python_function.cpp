@@ -377,7 +377,7 @@ static void _transplant_var(Variable& var, const std::shared_ptr<Function>& fn, 
 // do in this case.
 static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
     std::unordered_set<PyObject *> &dirty_inputs, PyObject *raw_output,
-    PyObject *outputs, std::shared_ptr<Expr>& this_expr, bool is_volatile)
+    PyObject *outputs, std::shared_ptr<Instruction>& this_expr, bool is_volatile)
 {
   // Wrap outputs in Variables
   auto cdata = is_volatile ? nullptr : THPFunction_asFunction(self);
@@ -637,7 +637,7 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject *args) {
   return std::make_pair(std::move(unpacked), std::move(flags));
 }
 
-PyObject* process_outputs(THPFunction* grad_fn, const UnpackedInput& unpacked, THPObjectPtr&& raw_output, std::shared_ptr<Expr>&& this_expr, bool is_volatile) {
+PyObject* process_outputs(THPFunction* grad_fn, const UnpackedInput& unpacked, THPObjectPtr&& raw_output, std::shared_ptr<Instruction>&& this_expr, bool is_volatile) {
   bool unpack_output = _ensure_tuple(raw_output);
 
   auto num_outputs = PyTuple_GET_SIZE(raw_output.get());
@@ -680,9 +680,9 @@ PyObject* process_outputs(THPFunction* grad_fn, const UnpackedInput& unpacked, T
 }
 
 // This sort of reimplements unpack_input, but we have our own requirements
-static std::shared_ptr<Expr> make_trace(PyObject* pyobj, PyObject *arg_objects, bool is_legacy)
+static std::shared_ptr<Instruction> make_trace(PyObject* pyobj, PyObject *arg_objects, bool is_legacy)
 {
-  std::shared_ptr<Expr> this_expr;
+  std::shared_ptr<Instruction> this_expr;
   if (GlobalTracingState) {
     auto num_args = PyTuple_GET_SIZE(arg_objects);
     pyobj_list scalar_args;
@@ -705,12 +705,13 @@ static std::shared_ptr<Expr> make_trace(PyObject* pyobj, PyObject *arg_objects, 
       }
     }
     Py_INCREF(pyobj);
-    this_expr = std::make_shared<PyApply>(
+    auto op = std::make_shared<PythonOp>(
       THPObjectPtr(pyobj),
       PyFunctionCConv(arg_types),
       is_legacy,
-      std::move(scalar_args),
-      tensor_args);
+      std::move(scalar_args));
+    // TODO: location
+    this_expr = std::make_shared<Instruction>(op, tensor_args);
   } else {
     this_expr = nullptr;
   }
@@ -1121,10 +1122,13 @@ namespace torch { namespace autograd {
 // TODO: This doesn't deallocate tensors soon enough
 struct TraceInterpreter
     : public ExprVisitor<TraceInterpreter, variable_list>
+    , public OperatorVisitor<TraceInterpreter, std::function<variable_list(variable_list)>>
 {
-  // TODO: Don't do a store! BAD BAD BAD
+  // TODO: GC the store
   environment store;
-  TraceInterpreter(environment inputs) : store(inputs) {} // COPY!!!
+  TraceInterpreter(environment inputs) : store(inputs) {} // NB: This is a copy
+
+  // Local
   std::shared_ptr<Variable> visitLocal(std::shared_ptr<Local> a) {
     auto it = store.find(a->unique);
     if (it == store.end()) {
@@ -1133,64 +1137,80 @@ struct TraceInterpreter
       return it->second;
     }
   }
-  variable_list visitPyApply(std::shared_ptr<PyApply> e) {
-    auto& obj = e->pyobj;
-    auto num_args = e->cconv.arg_types.size();
 
-    // Massage variables into form where we can THPFunction_apply it.
-    // While in principle we can avoid putting things into Python
-    // and then taking them out again, doing so seems to require an excess
-    // of faffing about to optimize a codepath that is already going to
-    // fundamentally be slow (since it calls into Python.) NOT. WORTH. IT.
+  // Operator
+  std::function<variable_list(variable_list)> visitPythonOp(std::shared_ptr<PythonOp> e) {
+    return [e](variable_list tensor_args) {
+      auto& obj = e->pyobj;
+      auto num_args = e->cconv.arg_types.size();
 
-    PyObject* input_objs = PyTuple_New(num_args);
-    auto scalar_it = e->scalar_args.begin();
-    auto tensor_it = e->tensor_args.begin();
-    auto type_it = e->cconv.arg_types.begin();
-    for (size_t i = 0; i < num_args; ++i, ++type_it) {
-      auto type = *type_it;
-      PyObject* val;
-      switch (type) {
-        case PyFunctionCConv::ArgType::Tensor:
-          val = THPVariable_Wrap(visitLocal(*tensor_it));
-          ++tensor_it;
-          break;
-        case PyFunctionCConv::ArgType::Scalar:
-          val = (*scalar_it).get();
-          Py_INCREF(val);
-          ++scalar_it;
-          break;
+      // Massage variables into form where we can THPFunction_apply it.
+      // While in principle we can avoid putting things into Python
+      // and then taking them out again, doing so seems to require an excess
+      // of faffing about to optimize a codepath that is already going to
+      // fundamentally be slow (since it calls into Python.) NOT. WORTH. IT.
+
+      PyObject* input_objs = PyTuple_New(num_args);
+      auto scalar_it = e->scalar_args.begin();
+      auto tensor_it = tensor_args.begin();
+      auto type_it = e->cconv.arg_types.begin();
+      for (size_t i = 0; i < num_args; ++i, ++type_it) {
+        auto type = *type_it;
+        PyObject* val;
+        switch (type) {
+          case PyFunctionCConv::ArgType::Tensor:
+            val = THPVariable_Wrap(*tensor_it);
+            ++tensor_it;
+            break;
+          case PyFunctionCConv::ArgType::Scalar:
+            val = (*scalar_it).get();
+            Py_INCREF(val);
+            ++scalar_it;
+            break;
+        }
+        PyTuple_SET_ITEM(input_objs, i, val);
       }
-      PyTuple_SET_ITEM(input_objs, i, val);
-    }
-    THPObjectPtr output_objs;
-    if (e->is_legacy) {
-      throw std::logic_error("Re-execution of legacy objects not supported");
-      if (!THPFunction_Check(obj)) throw std::logic_error("Not a function in THPFunction_do_forward");
-      THPFunction *fn = (THPFunction*)obj.get();
-      output_objs = THPFunction_do_forward(fn, input_objs);
-    } else {
-      output_objs = THPFunction_apply(obj, input_objs);
-    }
-    if (!output_objs) {
-      throw python_error();
-    }
-    _ensure_tuple(output_objs);
-    auto num_outputs = PyTuple_GET_SIZE(output_objs.get());
-    variable_list output_vars;
-    output_vars.reserve(num_outputs);
-    for (Py_ssize_t i = 0; i < num_outputs; i++) {
-      PyObject *output_obj = PyTuple_GET_ITEM(output_objs.get(), i);
-      if (!THPVariable_Check(output_obj)) {
-        throw std::logic_error("THPFunction_apply returned a non-variable object");
+      THPObjectPtr output_objs;
+      if (e->is_legacy) {
+        throw std::logic_error("Re-execution of legacy objects not supported");
+        if (!THPFunction_Check(obj)) throw std::logic_error("Not a function in THPFunction_do_forward");
+        THPFunction *fn = (THPFunction*)obj.get();
+        output_objs = THPFunction_do_forward(fn, input_objs);
+      } else {
+        output_objs = THPFunction_apply(obj, input_objs);
       }
-      THPVariable* output_var = (THPVariable*)output_obj;
-      output_vars.emplace_back(output_var->cdata);
-    }
-    return output_vars;
+      if (!output_objs) {
+        throw python_error();
+      }
+      _ensure_tuple(output_objs);
+      auto num_outputs = PyTuple_GET_SIZE(output_objs.get());
+      variable_list output_vars;
+      output_vars.reserve(num_outputs);
+      for (Py_ssize_t i = 0; i < num_outputs; i++) {
+        PyObject *output_obj = PyTuple_GET_ITEM(output_objs.get(), i);
+        if (!THPVariable_Check(output_obj)) {
+          throw std::logic_error("THPFunction_apply returned a non-variable object");
+        }
+        THPVariable* output_var = (THPVariable*)output_obj;
+        output_vars.emplace_back(output_var->cdata);
+      }
+      return output_vars;
+    };
   }
+
+  // Instruction
+  variable_list visitInstruction(std::shared_ptr<Instruction> i) {
+    variable_list vars;
+    vars.reserve(i->args.size());
+    for (auto a : i->args) {
+        vars.emplace_back(visitLocal(a));
+    }
+    return visitOperator(i->op)(vars);
+  }
+
+  // Expr
   variable_list visitLet(std::shared_ptr<Let> e) {
-    auto vars_to_bind = visitExpr(e->bind.rval);
+    auto vars_to_bind = visitInstruction(e->bind.rval);
     // TODO: assert this has same size
     for (size_t i = 0; i < vars_to_bind.size(); i++) {
       store.insert({e->bind.lvals[i]->unique, vars_to_bind[i]});
