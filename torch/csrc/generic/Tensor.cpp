@@ -669,6 +669,12 @@ static bool THPTensor_(_convertToTensorIndexers)(
         PyErr_Format(PyExc_IndexError,
             "When performing advanced indexing the indexing objects must be LongTensors or "
             "convertible to LongTensors");
+
+        // Clean up Indexers
+        for (auto& idx : indexers) {
+          THLongTensor_free(idx->cdata);
+          Py_DECREF(idx);
+        }
         return false;
       }
       indexingDims.push_back(i);
@@ -720,6 +726,13 @@ static bool THPTensor_(_convertToTensorIndexers)(
           PyErr_Format(PyExc_IndexError, "index %lld from broadcast indexer is out of range "
               "for dimension %lld (of size %lld)",
               (long long)indexAtDim, (long long)dim, (long long)sizeAtDim);
+
+          // Clean up Indexers
+          for (auto& idx : indexers) {
+            THLongTensor_free(idx->cdata);
+            Py_DECREF(idx);
+          }
+
           return false;
         }
       }
@@ -731,10 +744,20 @@ static bool THPTensor_(_convertToTensorIndexers)(
       THLongTensor_free(tensor);
     }
     PyErr_Format(PyExc_IndexError, "The advanced indexing objects could not be broadcast");
+
+    // Clean up Indexers
+    for (auto& idx : indexers) {
+      THLongTensor_free(idx->cdata);
+      Py_DECREF(idx);
+    }
     return false;
   }
 
-  // TODO: what do we do with candidates? Are the GC'ed, or do we need to do something with them?
+  // Clean up Indexers
+  for (auto& idx : indexers) {
+    THLongTensor_free(idx->cdata);
+    Py_DECREF(idx);
+  }
   return true;
 }
 
@@ -744,9 +767,11 @@ static inline long THPTensor_(_indexToOffset)(
     ptrdiff_t index)
 {
   // We need to translate an "index" into a linear offset within the Tensor indexed.
-  // We will perform the normal mod/divide loop, except in the case of a broadcasted
-  // dimension, we need to take special care to utilize the broadcasted size and
-  // subset of indices
+  // We will perform the normal mod/divide loop, except in the case of an advance indexed
+  // dimension, we need to take special care to utilize the size and subset of indices
+  // specified by the Tensor at the advanced indexed dimension. We hereafter refer to
+  // this as the "broadcast" dimension, although in the case of a single indexer, the
+  // broadcast op is pretty much a no-op.
   //
   // For example, suppose we have a three-dimensional Tensor x of shape (5, 10, 15),
   // and our indexing operation is x[:, (2, 4, 5), :].
