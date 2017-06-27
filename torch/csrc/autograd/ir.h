@@ -11,6 +11,7 @@
 
 namespace torch { namespace autograd {
 
+// ---------------------------- >8 -------------------------------------
 // Some comments on the IR:
 //
 // Variable bindings -> numbers, where tensors are stored
@@ -62,18 +63,47 @@ namespace torch { namespace autograd {
 // fusion that is going to give us the speedup.
 //
 // And it's only five ops. And the ops aren't hard to dispatch.
+// ---------------------------- >8 -------------------------------------
 
-// This IR is based on administrative normal form.
-
+// A variable name, but we don't call it variable because that conflicts
+// with PyTorch's existing use of Variable for autograd tracing.
 struct Local;
+
+// Something that takes some number of tensor inputs, and produces some
+// number of tensor outputs.  The "prim-ops", so to speak.
+struct Operator;
+
+// Something that produces some number of tensor outputs.  In ANF
+// formalism, this is often called a CExpr.
+struct Instruction;
+
+// The top-level expression that handles bindings.  This is basically
+// a glorified singly linked list with a return statement at the end.
+// But in the functional interpretation, its a series of let-bindings
+// until you get to the end.  It's not very efficient.
 struct Expr;
+
+// There are a bunch of ways to think about this IR, depending on your
+// background.
+//
+// IF YOU ARE A FUNCTIONAL PROGRAMMER (ANF school): This is ANF, but we've named
+// non let-binding expressions in a funny way as "instructions".  Otherwise,
+// everything is as you expect.
+//
+// IF YOU ARE AN IMPERATIVE PROGRAMMER (SSA school): This is SSA, but the
+// list of instructions and then the final return are named in a funny way
+// as "expressions".  It's just the usual singly-linked list.
+//
+// Note that the IR as formulated today has NO control flow.  If we add it, I
+// would strongly recommend the functional style representation, rather than SSA
+// phi nodes.
 
 using local_list = std::vector<std::shared_ptr<Local>>;
 using pyobj_list = std::vector<THPObjectPtr>;
 using Location = std::string;
 
 // --------------------------------------------------------------------
-// Arguments, which can be passed to functions.  NON-tupled.
+// Variables, which refer to tensors (NEVER tuples of tensors)
 
 struct Local {
   int unique;
@@ -83,14 +113,103 @@ struct Local {
 };
 
 // --------------------------------------------------------------------
-// Bindings
+// Operators, which map tensors to tensors
 
-struct Bind {
-  local_list lvals;
-  std::shared_ptr<Expr> rval;
-  Bind(local_list lvals, std::shared_ptr<Expr> rval)
-    : lvals(lvals)
-    , rval(rval)
+// Although there is only one choice at the moment, this is the primary
+// candidate for adding extra options.  At the moment this AST is designed
+// CLOSED but long term we need a solution for operator extension.  That
+// requires careful design, because whatever it is we request from users
+// when they implement operator, is what we get FOREVER.
+
+struct Operator {
+  enum class Id {
+    PythonOp,
+  };
+  Id _id;
+  Operator(Id id) : _id(id) {}
+
+  Operator(const Operator& other) = delete;
+  Operator(Operator&& other) = delete;
+};
+
+// The calling convention for a Python function specifies how we
+// need to intersperse tensor and Python arguments.
+struct PyFunctionCConv {
+  enum class ArgType { Tensor, Scalar };
+  std::vector<ArgType> arg_types;
+  PyFunctionCConv(std::vector<ArgType> arg_types) : arg_types(arg_types) {}
+};
+
+struct PythonOp : public Operator {
+  // This is not used at the moment (except in the invocation of
+  // the Arg constructor, where it could be trivially inlined),
+  // but it can be used to implement some useful, type-dispatched
+  // functions.  See is(), dynCast() and cast() in
+  // https://github.com/WebAssembly/binaryen/blob/master/src/wasm.h
+  const static Id SelfId = Id::PythonOp;
+  // The Python object which contains the implementation of this function.
+  // This is either a class (non-legacy) or an object (legacy).  See
+  // TraceInterpreter for execution semantics.
+  THPObjectPtr pyobj;
+  // The calling convention for the Python function.
+  PyFunctionCConv cconv;
+  // Whether or not this is a legacy function implementation or not.
+  // We don't support executing traces with legacy functions at the moment.
+  bool is_legacy;
+  // Scalar arguments to the Python function.  Not necessarily passed to
+  // the function in this order; see cconv for the correct order.
+  std::vector<THPObjectPtr> scalar_args;
+  // NB: tensor arguments are in Apply
+  PythonOp(THPObjectPtr&& pyobj, PyFunctionCConv cconv, bool is_legacy, pyobj_list&& scalar_args)
+    : Operator(SelfId)
+    , pyobj(std::move(pyobj))
+    , cconv(cconv)
+    , is_legacy(is_legacy)
+    , scalar_args(std::move(scalar_args))
+    {}
+};
+
+// SubType is instance of CRTP; allows us to avoid virtual dispatch
+template<typename SubType, typename ReturnType = void>
+struct OperatorVisitor {
+  /*
+  // Purposely undefined, to avoid C++ thinking that we are eventually
+  // going to define these (we will not.)
+  ReturnType visitPythonOp(std::shared_ptr<PythonOp>, T...);
+  */
+  template <typename... T>
+  ReturnType visitOperator(std::shared_ptr<Operator> o, T&&... args) {
+    switch (o->_id) {
+      case Operator::Id::PythonOp:
+        return static_cast<SubType*>(this)->visitPythonOp(std::static_pointer_cast<PythonOp>(o), args...);
+    }
+    __builtin_unreachable();
+  }
+};
+
+
+// --------------------------------------------------------------------
+// Instruction
+
+// It is possible that not making this a variant is a mistake.  I am
+// not sure.  The benefit of making this a variant is that primitive
+// operators can be given instructions where the number of locals is
+// statically known.
+
+struct Instruction {
+  std::shared_ptr<Operator> op;
+  local_list args;
+  Location loc;
+
+  Instruction(std::shared_ptr<Operator> op, local_list args, Location loc)
+    : op(op)
+    , args(args)
+    , loc(loc)
+    {}
+  Instruction(std::shared_ptr<Operator> op, local_list args)
+    : op(op)
+    , args(args)
+    , loc("")
     {}
 };
 
@@ -99,7 +218,6 @@ struct Bind {
 
 struct Expr {
   enum class Id {
-    PyApply,
     Let,
     Tuple,
   };
@@ -113,54 +231,19 @@ struct Expr {
   Expr(Expr&& other) = delete;
 };
 
-// The calling convention for a Python function specifies how we
-// need to intersperse tensor and Python arguments.
-struct PyFunctionCConv {
-  enum class ArgType { Tensor, Scalar };
-  std::vector<ArgType> arg_types;
-  PyFunctionCConv(std::vector<ArgType> arg_types) : arg_types(arg_types) {}
-};
-
-struct PyApply : public Expr {
-  // This is not used at the moment (except in the invocation of
-  // the Arg constructor, where it could be trivially inlined),
-  // but it can be used to implement some useful, type-dispatched
-  // functions.  See is(), dynCast() and cast() in
-  // https://github.com/WebAssembly/binaryen/blob/master/src/wasm.h
-  const static Id SelfId = Id::PyApply;
-  // The Python object which contains the implementation of this function.
-  // This is either a class (non-legacy) or an object (legacy).  See
-  // TraceInterpreter for execution semantics.
-  THPObjectPtr pyobj;
-  // The calling convention for the Python function.
-  PyFunctionCConv cconv;
-  // Whether or not this is a legacy function implementation or not.
-  // We don't support executing traces with legacy functions at the moment.
-  bool is_legacy;
-  // Scalar arguments to the Python function.  Not necessarily passed to
-  // the function in this order; see cconv for the correct order.
-  std::vector<THPObjectPtr> scalar_args;
-  // Tensor arguments to the Python function.  Not necessarily passed to
-  // the function in this order; see cconv for the correct order.
-  local_list tensor_args;
-  PyApply(THPObjectPtr&& pyobj, PyFunctionCConv cconv, bool is_legacy, pyobj_list&& scalar_args, local_list tensor_args, Location loc)
-    : Expr(SelfId, loc)
-    , pyobj(std::move(pyobj))
-    , cconv(cconv)
-    , is_legacy(is_legacy)
-    , scalar_args(std::move(scalar_args))
-    , tensor_args(tensor_args)
-    {}
-  PyApply(THPObjectPtr&& pyobj, PyFunctionCConv cconv, bool is_legacy, pyobj_list&& scalar_args, local_list tensor_args)
-    : Expr(SelfId)
-    , pyobj(std::move(pyobj))
-    , cconv(cconv)
-    , is_legacy(is_legacy)
-    , scalar_args(std::move(scalar_args))
-    , tensor_args(tensor_args)
+// Helper structure for bindings.  Having a separate struct could come in handy
+// if we ever support recursive bindings (probably not), or we just want to put
+// all the bindings in a giant vector.
+struct Bind {
+  local_list lvals;
+  std::shared_ptr<Instruction> rval;
+  Bind(local_list lvals, std::shared_ptr<Instruction> rval)
+    : lvals(lvals)
+    , rval(rval)
     {}
 };
 
+// AKA singly linked list
 struct Let : public Expr {
   const static Id SelfId = Id::Let;
   Bind bind;
@@ -172,6 +255,7 @@ struct Let : public Expr {
     {}
 };
 
+// AKA return
 struct Tuple : public Expr {
   const static Id SelfId = Id::Tuple;
   local_list locals;
@@ -191,14 +275,12 @@ struct ExprVisitor {
   /*
   // Purposely undefined, to avoid C++ thinking that we are eventually
   // going to define these (we will not.)
-  ReturnType visitPyApply(std::shared_ptr<PyApply>, T...);
   ReturnType visitLet(std::shared_ptr<Let>, T...);
+  ReturnType visitTuple(std::shared_ptr<Tuple>, T...);
   */
   template <typename... T>
   ReturnType visitExpr(std::shared_ptr<Expr> e, T&&... args) {
     switch (e->_id) {
-      case Expr::Id::PyApply:
-        return static_cast<SubType*>(this)->visitPyApply(std::static_pointer_cast<PyApply>(e), args...);
       case Expr::Id::Let:
         return static_cast<SubType*>(this)->visitLet(std::static_pointer_cast<Let>(e), args...);
       case Expr::Id::Tuple:
