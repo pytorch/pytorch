@@ -94,6 +94,7 @@ REGISTER_CPU_OPERATOR(LengthsToRanges, LengthsToRangesOp<CPUContext>);
 REGISTER_CPU_OPERATOR(SegmentIdsToLengths, SegmentIdsToLengthsOp<CPUContext>);
 REGISTER_CPU_OPERATOR(SegmentIdsToRanges, SegmentIdsToRangesOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Slice, SliceOp<int, CPUContext>);
+REGISTER_CPU_OPERATOR(SliceGradient, SliceGradientOp<int, CPUContext>);
 REGISTER_CPU_OPERATOR(Squeeze, SqueezeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(ExpandDims, ExpandDimsOp<CPUContext>);
 REGISTER_CPU_OPERATOR(LengthsToWeights, LengthsToWeightsOp<CPUContext>);
@@ -982,8 +983,19 @@ SHOULD_NOT_DO_GRADIENT(LengthsToSegmentIds);
 SHOULD_NOT_DO_GRADIENT(SegmentIdsToLengths);
 SHOULD_NOT_DO_GRADIENT(SegmentIdsToRanges);
 SHOULD_NOT_DO_GRADIENT(SegmentIdsToLengthWeights);
-// TODO(azzolini): Add support for slice gradient
-SHOULD_NOT_DO_GRADIENT(Slice);
+
+struct GetSliceGradient : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  vector<OperatorDef> GetGradientDefs() override {
+    return vector<OperatorDef>{CreateOperatorDef(
+        "SliceGradient",
+        "",
+        std::vector<string>{I(0), I(1), I(2), GO(0)},
+        std::vector<string>{GI(0)})};
+  }
+};
+REGISTER_GRADIENT(Slice, GetSliceGradient);
+
 SHOULD_NOT_DO_GRADIENT(GatherRangesOp);
 SHOULD_NOT_DO_GRADIENT(LengthsGather);
 SHOULD_NOT_DO_GRADIENT(AccumulateHistogram);
