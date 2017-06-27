@@ -1060,6 +1060,10 @@ class SliceOp : public Operator<Context> {
   }
 
   DISABLE_COPY_AND_ASSIGN(SliceOp);
+
+ private:
+  TensorCPU starts_host_;
+  TensorCPU ends_host_;
 };
 
 template <class SIndex, class Context>
@@ -1082,6 +1086,10 @@ class SliceGradientOp : public Operator<Context> {
   }
 
   DISABLE_COPY_AND_ASSIGN(SliceGradientOp);
+
+ private:
+  TensorCPU starts_host_;
+  TensorCPU ends_host_;
 };
 
 template <class Context>

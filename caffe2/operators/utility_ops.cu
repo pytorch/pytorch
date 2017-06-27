@@ -21,39 +21,62 @@ __global__ void SliceCopyKernel(
     int src_block_size_bytes,
     char* dst_offset_bytes,
     int dst_block_size_bytes,
+    int copy_size,
     int itemsize,
     int num_blocks) {
-  CUDA_1D_KERNEL_LOOP(index, num_blocks) {
-    char* local_src_offset_bytes =
-        src_offset_bytes + index * src_block_size_bytes;
-    char* local_dst_offset_bytes =
-        dst_offset_bytes + index * dst_block_size_bytes;
-    memcpy(
-        local_dst_offset_bytes, local_src_offset_bytes, dst_block_size_bytes);
+  if ((copy_size % sizeof(int) == 0) &&
+      (src_block_size_bytes % sizeof(int) == 0) &&
+      (dst_block_size_bytes % sizeof(int) == 0)) {
+    int* src = (int*)src_offset_bytes;
+    int* dst = (int*)dst_offset_bytes;
+
+    int src_block_size = src_block_size_bytes / sizeof(int);
+    int dst_block_size = dst_block_size_bytes / sizeof(int);
+
+    int copyChunks = copy_size / sizeof(int);
+
+    CUDA_1D_KERNEL_LOOP(index, num_blocks * copyChunks) {
+      int chunk = index % copyChunks;
+      int block = index / copyChunks;
+
+      dst[block * dst_block_size + chunk] = src[block * src_block_size + chunk];
+    }
+  } else {
+    char* src = (char*)src_offset_bytes;
+    char* dst = (char*)dst_offset_bytes;
+
+    int src_block_size = src_block_size_bytes / sizeof(char);
+    int dst_block_size = dst_block_size_bytes / sizeof(char);
+
+    int copyChunks = copy_size / sizeof(char);
+
+    CUDA_1D_KERNEL_LOOP(index, num_blocks * copyChunks) {
+      int chunk = index % copyChunks;
+      int block = index / copyChunks;
+
+      dst[block * dst_block_size + chunk] = src[block * src_block_size + chunk];
+    }
   }
 }
-} // namespace
 
-template <>
-bool SliceOp<int, CUDAContext>::RunOnDevice() {
-  auto* output = Output(0);
-  auto& data = Input(0);
+template <class SIndex, class Context>
+bool SliceImplGpu(
+    Tensor<Context>* output,
+    const Tensor<Context>& data,
+    const TensorCPU& starts,
+    const TensorCPU& ends,
+    Context* context,
+    Tensor<Context>* gdata = nullptr,
+    const Tensor<Context>* go = nullptr) {
+  bool backward = output == nullptr;
 
-  auto& starts = Input(1);
-  auto& ends = Input(2);
+  auto* starts_data = starts.template data<SIndex>();
+  auto* ends_data = ends.template data<SIndex>();
 
   CAFFE_ENFORCE_EQ(starts.ndim(), 1);
   CAFFE_ENFORCE_EQ(ends.ndim(), 1);
   CAFFE_ENFORCE_GE(data.ndim(), starts.size());
   CAFFE_ENFORCE_EQ(starts.size(), ends.size());
-
-  TensorCPU starts_host;
-  TensorCPU ends_host;
-  starts_host.template CopyFrom<CUDAContext>(starts);
-  ends_host.template CopyFrom<CUDAContext>(ends);
-
-  auto* starts_data_host = starts_host.template data<int>();
-  auto* ends_data_host = ends_host.template data<int>();
 
   std::vector<int> starts_idx(data.ndim());
   std::vector<int> ends_idx(data.ndim());
@@ -66,8 +89,8 @@ bool SliceOp<int, CUDAContext>::RunOnDevice() {
       continue;
     }
     if (data.dims()[i] > 0) {
-      auto start = starts_data_host[i];
-      auto end = ends_data_host[i];
+      auto start = starts_data[i];
+      auto end = ends_data[i];
       if (start < 0) {
         start = data.dims()[i] + 1 + start;
       }
@@ -91,8 +114,10 @@ bool SliceOp<int, CUDAContext>::RunOnDevice() {
 
   if (data.size() <= 0) {
     // When the input is empty, we do not need to do copy.
-    output->Resize(dst_sizes);
-    output->raw_mutable_data(data.meta());
+    if (!backward) {
+      output->Resize(dst_sizes);
+      output->raw_mutable_data(data.meta());
+    }
     return true;
   }
   // for now only supports slicing in 1 dimension
@@ -105,55 +130,151 @@ bool SliceOp<int, CUDAContext>::RunOnDevice() {
     }
   }
   if (dim == -1) {
-    output->CopyFrom(data, &context_);
+    if (!backward) {
+      output->CopyFrom(data, context);
+    } else {
+      gdata->CopyFrom(*go, context);
+    }
     return true;
   }
-  auto unit = std::accumulate(
+  int unit = std::accumulate(
       data.dims().begin() + dim + 1,
       data.dims().end(),
       1,
       std::multiplies<int>());
-  auto num_blocks = std::accumulate(
+  int num_blocks = std::accumulate(
       data.dims().begin(),
       data.dims().begin() + dim,
       1,
       std::multiplies<int>());
-  output->Resize(dst_sizes);
-  auto* src_bytes = (char*)data.raw_data();
-  auto* dst_bytes = (char*)output->raw_mutable_data(data.meta());
-
-  auto src_nbytes = data.nbytes();
-  auto dst_nbytes = output->nbytes();
-
-  auto src_block_size = unit * data.dims()[dim];
-  auto dst_block_size = unit * (ends_idx[dim] - starts_idx[dim]);
-  auto src_offset = unit * starts_idx[dim];
-
-  if (num_blocks == 0 || dst_block_size == 0) {
-    return true;
+  if (!backward) {
+    output->Resize(dst_sizes);
+  } else {
+    gdata->ResizeLike(data);
   }
 
   auto itemsize = data.meta().itemsize();
-  auto src_block_size_bytes = itemsize * src_block_size;
-  auto dst_block_size_bytes = itemsize * dst_block_size;
-  auto src_offset_bytes = src_bytes + itemsize * src_offset;
-  auto dst_offset_bytes = dst_bytes;
 
-  SliceCopyKernel<<<
-      std::min(num_blocks, CAFFE_MAXIMUM_NUM_BLOCKS),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(
-      src_offset_bytes,
-      src_block_size_bytes,
-      dst_offset_bytes,
-      dst_block_size_bytes,
-      itemsize,
-      num_blocks);
+  if (!backward) {
+    char* src_bytes = (char*)data.raw_data();
+    char* dst_bytes = (char*)output->raw_mutable_data(data.meta());
+
+    size_t src_nbytes = data.nbytes();
+    size_t dst_nbytes = output->nbytes();
+
+    size_t src_block_size = unit * data.dims()[dim];
+    size_t dst_block_size = unit * (ends_idx[dim] - starts_idx[dim]);
+    size_t src_offset = unit * starts_idx[dim];
+
+    if (num_blocks == 0 || dst_block_size == 0) {
+      return true;
+    }
+
+    size_t src_block_size_bytes = itemsize * src_block_size;
+    size_t dst_block_size_bytes = itemsize * dst_block_size;
+    char* src_offset_bytes = src_bytes + itemsize * src_offset;
+    char* dst_offset_bytes = dst_bytes;
+
+    SliceCopyKernel<<<
+        std::min(num_blocks, CAFFE_MAXIMUM_NUM_BLOCKS),
+        CAFFE_CUDA_NUM_THREADS,
+        0,
+        context->cuda_stream()>>>(
+        src_offset_bytes,
+        src_block_size_bytes,
+        dst_offset_bytes,
+        dst_block_size_bytes,
+        dst_block_size_bytes,
+        itemsize,
+        num_blocks);
+  } else {
+    char* src_bytes = (char*)go->raw_data();
+    char* dst_bytes = (char*)gdata->raw_mutable_data(go->meta());
+
+    size_t src_nbytes = go->nbytes();
+    size_t dst_nbytes = gdata->nbytes();
+
+    size_t src_block_size = unit * (ends_idx[dim] - starts_idx[dim]);
+    size_t dst_block_size = unit * data.dims()[dim];
+    size_t dst_offset = unit * starts_idx[dim];
+
+    if (num_blocks == 0 || dst_block_size == 0) {
+      return true;
+    }
+
+    size_t src_block_size_bytes = itemsize * src_block_size;
+    size_t dst_block_size_bytes = itemsize * dst_block_size;
+
+    char* src_offset_bytes = src_bytes;
+    char* dst_offset_bytes = dst_bytes + itemsize * dst_offset;
+    // Zero out gradient blob before copy since we copy in fewer items than
+    // there is space for
+    math::Set<float, CUDAContext>(
+        gdata->size(),
+        0.0f,
+        (float*)gdata->raw_mutable_data(go->meta()),
+        context);
+
+    // If output tensor is empty, just return zeroed gradient tensor
+    if (!src_bytes) {
+      return true;
+    }
+
+    SliceCopyKernel<<<
+        std::min(num_blocks, CAFFE_MAXIMUM_NUM_BLOCKS),
+        CAFFE_CUDA_NUM_THREADS,
+        0,
+        context->cuda_stream()>>>(
+        src_offset_bytes,
+        src_block_size_bytes,
+        dst_offset_bytes,
+        dst_block_size_bytes,
+        src_block_size_bytes,
+        itemsize,
+        num_blocks);
+  }
+
   return true;
 }
 
+} // namespace
+
+template <>
+bool SliceOp<int, CUDAContext>::RunOnDevice() {
+  auto* output = Output(0);
+  auto& data = Input(0);
+
+  auto& starts = Input(1);
+  auto& ends = Input(2);
+
+  starts_host_.template CopyFrom<CUDAContext>(starts);
+  ends_host_.template CopyFrom<CUDAContext>(ends);
+
+  return SliceImplGpu<int, CUDAContext>(
+      output, data, starts_host_, ends_host_, &context_);
+}
+
 REGISTER_CUDA_OPERATOR(Slice, SliceOp<int, CUDAContext>);
+
+template <>
+bool SliceGradientOp<int, CUDAContext>::RunOnDevice() {
+  CAFFE_ENFORCE(InputSize() == 4);
+
+  auto* gdata = Output(0);
+  auto& data = Input(0);
+
+  auto& starts = Input(1);
+  auto& ends = Input(2);
+
+  auto& go = Input(3);
+
+  starts_host_.template CopyFrom<CUDAContext>(starts);
+  ends_host_.template CopyFrom<CUDAContext>(ends);
+
+  return SliceImplGpu<int, CUDAContext>(
+      nullptr, data, starts_host_, ends_host_, &context_, gdata, &go);
+}
+REGISTER_CUDA_OPERATOR(SliceGradient, SliceGradientOp<int, CUDAContext>);
 
 __global__ void NanCheckKernel(int N, const float* X, bool* result) {
   bool has_nan = false;
