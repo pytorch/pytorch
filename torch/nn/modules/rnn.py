@@ -212,10 +212,10 @@ class LSTM(RNNBase):
     .. math::
 
             \begin{array}{ll}
-            i_t = sigmoid(W_{ii} x_t + b_{ii} + W_{hi} h_{(t-1)} + b_{hi}) \\
-            f_t = sigmoid(W_{if} x_t + b_{if} + W_{hf} h_{(t-1)} + b_{hf}) \\
+            i_t = \mathrm{sigmoid}(W_{ii} x_t + b_{ii} + W_{hi} h_{(t-1)} + b_{hi}) \\
+            f_t = \mathrm{sigmoid}(W_{if} x_t + b_{if} + W_{hf} h_{(t-1)} + b_{hf}) \\
             g_t = \tanh(W_{ig} x_t + b_{ig} + W_{hc} h_{(t-1)} + b_{hg}) \\
-            o_t = sigmoid(W_{io} x_t + b_{io} + W_{ho} h_{(t-1)} + b_{ho}) \\
+            o_t = \mathrm{sigmoid}(W_{io} x_t + b_{io} + W_{ho} h_{(t-1)} + b_{ho}) \\
             c_t = f_t * c_{(t-1)} + i_t * g_t \\
             h_t = o_t * \tanh(c_t)
             \end{array}
@@ -285,8 +285,8 @@ class GRU(RNNBase):
     .. math::
 
             \begin{array}{ll}
-            r_t = sigmoid(W_{ir} x_t + b_{ir} + W_{hr} h_{(t-1)} + b_{hr}) \\
-            z_t = sigmoid(W_{iz} x_t + b_{iz} + W_{hz} h_{(t-1)} + b_{hz}) \\
+            r_t = \mathrm{sigmoid}(W_{ir} x_t + b_{ir} + W_{hr} h_{(t-1)} + b_{hr}) \\
+            z_t = \mathrm{sigmoid}(W_{iz} x_t + b_{iz} + W_{hz} h_{(t-1)} + b_{hz}) \\
             n_t = \tanh(W_{in} x_t + b_{in} + r_t * (W_{hn} h_{(t-1)}+ b_{hn})) \\
             h_t = (1 - z_t) * n_t + z_t * h_{(t-1)} \\
             \end{array}
@@ -432,10 +432,10 @@ class LSTMCell(RNNCellBase):
     .. math::
 
         \begin{array}{ll}
-        i = sigmoid(W_{ii} x + b_{ii} + W_{hi} h + b_{hi}) \\
-        f = sigmoid(W_{if} x + b_{if} + W_{hf} h + b_{hf}) \\
+        i = \mathrm{sigmoid}(W_{ii} x + b_{ii} + W_{hi} h + b_{hi}) \\
+        f = \mathrm{sigmoid}(W_{if} x + b_{if} + W_{hf} h + b_{hf}) \\
         g = \tanh(W_{ig} x + b_{ig} + W_{hc} h + b_{hg}) \\
-        o = sigmoid(W_{io} x + b_{io} + W_{ho} h + b_{ho}) \\
+        o = \mathrm{sigmoid}(W_{io} x + b_{io} + W_{ho} h + b_{ho}) \\
         c' = f * c + i * g \\
         h' = o * \tanh(c_t) \\
         \end{array}
@@ -506,8 +506,8 @@ class GRUCell(RNNCellBase):
     .. math::
 
         \begin{array}{ll}
-        r = sigmoid(W_{ir} x + b_{ir} + W_{hr} h + b_{hr}) \\
-        i = sigmoid(W_{ii} x + b_{ii} + W_{hi} h + b_{hi}) \\
+        r = \mathrm{sigmoid}(W_{ir} x + b_{ir} + W_{hr} h + b_{hr}) \\
+        i = \mathrm{sigmoid}(W_{ii} x + b_{ii} + W_{hi} h + b_{hi}) \\
         n = \tanh(W_{in} x + b_{in} + r * (W_{hn} h + b_{hn})) \\
         h' = (1 - i) * n + i * h
         \end{array}
