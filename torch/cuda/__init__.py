@@ -16,7 +16,7 @@ import torch
 from multiprocessing.util import register_after_fork as _register_after_fork
 
 _initialized = False
-_in_bad_fork = False
+_in_bad_fork = False  # this global is also used in torch.manual_seed
 _original_pid = False
 _cudart = None
 
