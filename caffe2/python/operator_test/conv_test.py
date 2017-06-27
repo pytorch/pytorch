@@ -2,14 +2,17 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import collections
+import functools
+
 import numpy as np
 from hypothesis import assume, given
 import hypothesis.strategies as st
-import collections
 
 from caffe2.proto import caffe2_pb2
-from caffe2.python import core, workspace
+from caffe2.python import brew, core, workspace
 import caffe2.python.hypothesis_test_util as hu
+from caffe2.python.model_helper import ModelHelper
 
 
 def _cudnn_supports(
@@ -406,8 +409,6 @@ class TestConvolution(hu.HypothesisTestCase):
            do=st.sampled_from(hu.device_options),
            engine=st.sampled_from(["CUDNN", ""]))
     def test_convolution_sync(self, net_type, num_workers, do, engine):
-        from caffe2.python.model_helper import ModelHelper
-        from caffe2.python import brew
         m = ModelHelper(name="test_model")
         n = 1
         d = 2
@@ -485,6 +486,44 @@ class TestConvolution(hu.HypothesisTestCase):
                 np.sum(np.square(output)),
                 1763719461732352.0,
                 rtol=1e-5)
+
+    def test_use_cudnn_engine_interactions(self):
+        """Make sure the use_cudnn and engine kwargs work as expected."""
+        for model_default in [None, True, False]:
+            arg_scope = {}
+            if model_default is not None:
+                arg_scope['use_cudnn'] = model_default
+            else:
+                model_default = True  # the default
+
+            model = ModelHelper(arg_scope=arg_scope)
+            self.assertEqual(model.arg_scope['use_cudnn'], model_default)
+            f = functools.partial(brew.conv, model,
+                                  'conv_in', 'conv_out', 10, 10, 5)
+
+            for op_cudnn in [None, True, False]:
+                for op_engine in [None, '', 'CUDNN']:
+                    kwargs = {}
+                    if op_cudnn is not None:
+                        kwargs['use_cudnn'] = op_cudnn
+                    else:
+                        op_cudnn = False  # the default
+                    if op_engine is not None:
+                        kwargs['engine'] = op_engine
+
+                    calculated_cudnn = kwargs.get('use_cudnn', model_default)
+                    expected_engine = kwargs.get(
+                        'engine',
+                        'CUDNN' if calculated_cudnn else '')
+
+                    if ((calculated_cudnn is True and op_engine == '') or
+                            (calculated_cudnn is False and op_engine == 'CUDNN')):
+                        with self.assertRaises(ValueError):
+                            f(**kwargs)
+                    else:
+                        f(**kwargs)
+                        self.assertEqual(model.Proto().op[-1].engine,
+                                         expected_engine)
 
 
 if __name__ == "__main__":
