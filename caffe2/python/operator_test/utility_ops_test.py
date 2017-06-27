@@ -34,8 +34,14 @@ class TestUtilityOps(hu.HypothesisTestCase):
             return [X[slc]]
 
         self.assertReferenceChecks(gc, op, [X, starts, ends], slice_ref)
-
         self.assertDeviceChecks(dc, op, [X, starts, ends], [0])
+        self.assertGradientChecks(
+            device_option=gc,
+            op=op,
+            inputs=[X, starts, ends],
+            outputs_to_check=0,
+            outputs_with_grads=[0],
+        )
 
     @given(dtype=st.sampled_from([np.float32, np.int32, np.int64]),
            ndims=st.integers(min_value=1, max_value=5),
