@@ -120,7 +120,7 @@ def caffe2_img(img):
 
 # Bounding box is ymin, xmin, height, width
 def create_test(output_dir, width, height, default_bound,
-                minsize, crop, means, stds, count):
+                minsize, crop, means, stds, count, multiple_label, num_labels):
     print("Creating a temporary lmdb database of %d pictures..." % (count))
 
     if default_bound is None:
@@ -171,8 +171,6 @@ def create_test(output_dir, width, height, default_bound,
             img_expected = verify_color_normalize(img_expected, means, stds)
             # print("Color image: %s" % (str(caffe2_img(img_expected))))
 
-            expected_results.append(caffe2_img(img_expected))
-
             tensor_protos = caffe2_pb2.TensorProtos()
             image_tensor = tensor_protos.protos.add()
             image_tensor.data_type = 4  # string data
@@ -181,7 +179,17 @@ def create_test(output_dir, width, height, default_bound,
 
             label_tensor = tensor_protos.protos.add()
             label_tensor.data_type = 2  # int32 data
-            label_tensor.int32_data.append(index)
+            if multiple_label == 0:
+                label_tensor.int32_data.append(index)
+                expected_label = index
+            else:
+                binary_labels = np.random.randint(2, size=num_labels)
+                for idx, val in enumerate(binary_labels.tolist()):
+                    if val == 1:
+                        label_tensor.int32_data.append(idx)
+                expected_label = binary_labels
+
+            expected_results.append([caffe2_img(img_expected), expected_label])
 
             if not do_default_bound:
                 bounding_tensor = tensor_protos.protos.add()
@@ -212,9 +220,13 @@ class TestImport(hu.HypothesisTestCase):
         stds=st.tuples(st.floats(min_value=1, max_value=10),
                        st.floats(min_value=1, max_value=10),
                        st.floats(min_value=1, max_value=10)),
+        multiple_label=st.integers(0, 1),
+        num_labels=st.integers(min_value=8, max_value=4096),
         **hu.gcs)
     @settings(verbosity=Verbosity.verbose)
-    def test_imageinput(self, size_tuple, means, stds, gc, dc):
+    def test_imageinput(
+            self, size_tuple, means, stds, multiple_label,
+            num_labels, gc, dc):
         # TODO: Does not test on GPU and does not test use_gpu_transform
         # WARNING: Using ModelHelper automatically does NHWC to NCHW
         # transformation if needed.
@@ -232,7 +244,9 @@ class TestImport(hu.HypothesisTestCase):
             crop=crop,
             means=means,
             stds=stds,
-            count=count_images
+            count=count_images,
+            multiple_label=multiple_label,
+            num_labels=num_labels,
         )
         for device_option in dc:
             with hu.temp_workspace():
@@ -259,7 +273,9 @@ class TestImport(hu.HypothesisTestCase):
                     bounding_width=width - 5,
                     mean_per_channel=means,
                     std_per_channel=stds,
-                    use_gpu_transform=(device_option.device_type == 1)
+                    use_gpu_transform=(device_option.device_type == 1),
+                    multiple_label=multiple_label,
+                    num_labels=num_labels,
                 )
 
                 imageop.device_option.CopyFrom(device_option)
@@ -272,11 +288,15 @@ class TestImport(hu.HypothesisTestCase):
                 # Our reference output is CHW so we swap
                 if device_option.device_type != 1:
                     expected = [img.swapaxes(0, 1).swapaxes(1, 2) for
-                                img in expected_images]
+                                (img, _) in expected_images]
                 else:
-                    expected = expected_images
+                    expected = [img for (img, _) in expected_images]
                 for i in range(count_images):
-                    self.assertEqual(l[i], i)
+                    if multiple_label == 0:
+                        self.assertEqual(l[i], expected_images[i][1])
+                    else:
+                        self.assertEqual(
+                            (l[i] - expected_images[i][1] > 0).sum(), 0)
                     self.assertEqual((expected[i] - result[i] > 1).sum(), 0)
                 # End for
             # End with
