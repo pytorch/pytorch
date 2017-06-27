@@ -68,6 +68,8 @@ class ImageInputOp final
   // Default parameters for images
   PerImageArg default_arg_;
   int batch_size_;
+  bool multiple_label_;
+  int num_labels_;
   bool color_;
   int scale_;
   // Minsize is similar to scale except that it will only
@@ -104,6 +106,10 @@ ImageInputOp<Context>::ImageInputOp(
         reader_(nullptr),
         batch_size_(
             OperatorBase::template GetSingleArgument<int>("batch_size", 0)),
+        multiple_label_(OperatorBase::template GetSingleArgument<int>(
+          "multiple_label", 0)),
+        num_labels_(OperatorBase::template GetSingleArgument<int>(
+          "num_labels", 0)),
         color_(OperatorBase::template GetSingleArgument<int>("color", 1)),
         scale_(OperatorBase::template GetSingleArgument<int>("scale", -1)),
         minsize_(OperatorBase::template GetSingleArgument<int>("minsize", -1)),
@@ -151,6 +157,14 @@ ImageInputOp<Context>::ImageInputOp(
     reader_ = owned_reader_.get();
   }
   CAFFE_ENFORCE_GT(batch_size_, 0, "Batch size should be nonnegative.");
+  if (use_caffe_datum_) {
+    CAFFE_ENFORCE_EQ(multiple_label_, 0,
+      "Caffe datum does not support multiple labels");
+  }
+  if (multiple_label_) {
+    CAFFE_ENFORCE_GT(num_labels_, 0,
+      "Number of labels must be set for using multiple label output.");
+  }
   CAFFE_ENFORCE((scale_ > 0) != (minsize_ > 0),
                 "Must provide one and only one of scaling or minsize");
   CAFFE_ENFORCE_GT(crop_, 0, "Must provide the cropping value.");
@@ -234,7 +248,11 @@ ImageInputOp<Context>::ImageInputOp(
       TIndex(crop_),
       TIndex(crop_),
       TIndex(color_ ? 3 : 1));
-  prefetched_label_.Resize(vector<TIndex>(1, batch_size_));
+  if (multiple_label_) {
+    prefetched_label_.Resize(TIndex(batch_size_), TIndex(num_labels_));
+  } else {
+    prefetched_label_.Resize(vector<TIndex>(1, batch_size_));
+  }
 }
 
 template <class Context>
@@ -342,15 +360,33 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
     }
 
     if (label_proto.data_type() == TensorProto::FLOAT) {
-      DCHECK_EQ(label_proto.float_data_size(), 1);
+      if (!multiple_label_) {
+        DCHECK_EQ(label_proto.float_data_size(), 1);
+        prefetched_label_.mutable_data<float>()[item_id] =
+            label_proto.float_data(0);
+      } else {
+        float* label_data = prefetched_label_.mutable_data<float>() +
+          item_id * num_labels_;
+        memset(label_data, 0, sizeof(float) * num_labels_);
+        for (int i = 0; i < label_proto.float_data_size(); ++i) {
+          label_data[(int)label_proto.float_data(i)] = 1.0;
+        }
+      }
 
-      prefetched_label_.mutable_data<float>()[item_id] =
-          label_proto.float_data(0);
     } else if (label_proto.data_type() == TensorProto::INT32) {
-      DCHECK_EQ(label_proto.int32_data_size(), 1);
+      if (!multiple_label_) {
+        DCHECK_EQ(label_proto.int32_data_size(), 1);
+        prefetched_label_.mutable_data<int>()[item_id] =
+            label_proto.int32_data(0);
+      } else {
+        int* label_data = prefetched_label_.mutable_data<int>() +
+          item_id * num_labels_;
+        memset(label_data, 0, sizeof(int) * num_labels_);
+        for (int i = 0; i < label_proto.int32_data_size(); ++i) {
+          label_data[label_proto.int32_data(i)] = 1;
+        }
+      }
 
-      prefetched_label_.mutable_data<int>()[item_id] =
-          label_proto.int32_data(0);
     } else {
       LOG(FATAL) << "Unsupported label type.";
     }
