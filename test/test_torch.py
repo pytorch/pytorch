@@ -3590,12 +3590,12 @@ class TestTorch(TestCase):
             torch.save(xh, f)
             f.seek(0)
             xh2 = torch.load(f)
-            self.assertEqual(xh, xh2)
+            self.assertEqual(xh.float(), xh2.float())
 
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_half_tensor_cuda(self):
         x = torch.randn(5, 5).half()
-        self.assertEqual(x.cuda().cpu(), x)
+        self.assertEqual(x.cuda(), x)
 
         xc = x.cuda()
         with tempfile.NamedTemporaryFile() as f:
@@ -3603,7 +3603,7 @@ class TestTorch(TestCase):
             f.seek(0)
             xc2 = torch.load(f)
             self.assertIsInstance(xc2, type(xc))
-            self.assertEqual(xc, xc2)
+            self.assertEqual(xc.float(), xc2.float())
 
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_serialization_cuda(self):
@@ -3748,6 +3748,8 @@ class TestTorch(TestCase):
 
     def test_print(self):
         for t in torch._tensor_classes:
+            if t == torch.HalfTensor:
+                continue  # HalfTensor does not support fill
             if t in torch.sparse._sparse_tensor_classes:
                 continue
             if t.is_cuda and not torch.cuda.is_available():

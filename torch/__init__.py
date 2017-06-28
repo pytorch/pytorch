@@ -268,12 +268,12 @@ class ByteTensor(_C.ByteTensorBase, _TensorBase):
 
 _storage_classes = {
     DoubleStorage, FloatStorage, LongStorage, IntStorage, ShortStorage,
-    CharStorage, ByteStorage,
+    CharStorage, ByteStorage, HalfStorage
 }
 
 _tensor_classes = {
     DoubleTensor, FloatTensor, LongTensor, IntTensor, ShortTensor,
-    CharTensor, ByteTensor,
+    CharTensor, ByteTensor, HalfTensor
 }
 
 
