@@ -22,6 +22,11 @@
 
 namespace caffe2 {
 
+class NetBase;
+typedef ObserverBase<NetBase> NetObserver;
+typedef std::function<std::unique_ptr<NetObserver>(NetBase*)>
+    NetObserverCreator;
+
 class OperatorBase;
 class Workspace;
 // Net is a thin struct that owns all the operators together with the operator
@@ -67,21 +72,29 @@ class NetBase {
    * Returns pointers to objects owned with unique_ptrs.
    * Use with caution.
    */
-  virtual vector<OperatorBase*> getOperators() const = 0;
+  virtual vector<OperatorBase*> GetOperators() const = 0;
 
-  void SetObserver(ObserverBase<NetBase>* observer) {
-    observer_ = observer;
+  void SetObserver(std::unique_ptr<NetObserver> observer) {
+    observer_ = std::move(observer);
   }
 
   void RemoveObserver() {
     observer_ = nullptr;
   }
 
+  NetObserver* GetObserver() {
+    return observer_.get();
+  }
+
+  const string& Name() {
+    return name_;
+  }
+
  protected:
   vector<string> external_input_;
   vector<string> external_output_;
   string name_;
-  ObserverBase<NetBase>* observer_ = nullptr;
+  std::unique_ptr<NetObserver> observer_;
   DISABLE_COPY_AND_ASSIGN(NetBase);
 };
 
@@ -119,7 +132,7 @@ class SimpleNet : public NetBase {
    *
    * Think carefully before using.
    */
-  vector<OperatorBase*> getOperators() const override {
+  vector<OperatorBase*> GetOperators() const override {
     vector<OperatorBase*> op_list;
     for (auto& op : operators_) {
       op_list.push_back(op.get());
@@ -170,7 +183,7 @@ class DAGNetBase : public NetBase {
     return execution_chains_;
   }
 
-  vector<OperatorBase*> getOperators() const override {
+  vector<OperatorBase*> GetOperators() const override {
     vector<OperatorBase*> op_list;
     for (auto& op_node : operator_nodes_) {
       op_list.push_back(op_node.operator_.get());
@@ -198,6 +211,8 @@ class DAGNetBase : public NetBase {
 
   DISABLE_COPY_AND_ASSIGN(DAGNetBase);
 };
+
+void SetGlobalNetObserverCreator(NetObserverCreator creator);
 
 }  // namespace caffe2
 

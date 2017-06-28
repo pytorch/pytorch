@@ -62,13 +62,28 @@ NetBase::NetBase(const NetDef& def, Workspace* /* unused */)
       *remaining_output.begin());
 }
 
+static NetObserverCreator GlobalNetObserverCreator = [](NetBase* net) {
+  // A no-op ObserverBase<NetBase> observer
+  return std::unique_ptr<NetObserver>(new NetObserver(net));
+};
+
+void SetGlobalNetObserverCreator(NetObserverCreator creator) {
+  GlobalNetObserverCreator = creator;
+  VLOG(1) << "Have set custom GlobalNetObserverCreator";
+}
+
 unique_ptr<NetBase> CreateNet(const NetDef& net_def, Workspace* ws) {
   // In default, we will return a simple network that just runs all operators
   // sequentially.
+  unique_ptr<NetBase> net;
   if (!net_def.has_type()) {
-    return make_unique<SimpleNet>(net_def, ws);
+    net = std::unique_ptr<NetBase>(new SimpleNet(net_def, ws));
+  } else {
+    net = NetRegistry()->Create(net_def.type(), net_def, ws);
   }
-  return NetRegistry()->Create(net_def.type(), net_def, ws);
+  VLOG(1) << "Adding a global observer to a net";
+  net->SetObserver(GlobalNetObserverCreator(net.get()));
+  return net;
 }
 
 SimpleNet::SimpleNet(const NetDef& net_def, Workspace* ws)

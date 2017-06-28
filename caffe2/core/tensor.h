@@ -759,7 +759,6 @@ class TensorPrinter {
   template <class Context>
   void PrintMeta(const Tensor<Context>& tensor);
 
- private:
   string MetaStr(const Tensor<CPUContext>& tensor);
 
  private:

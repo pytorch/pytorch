@@ -1,17 +1,15 @@
-#ifndef CAFFE2_CORE_OBSERVER_H_
-#define CAFFE2_CORE_OBSERVER_H_
+#pragma once
 
 namespace caffe2 {
 
-/* Use this to implement a Observer using the Observer Pattern template.
+/**
+ *  Use this to implement a Observer using the Observer Pattern template.
  */
 
 template <class T>
 class ObserverBase {
  public:
-  explicit ObserverBase(T* subject) : subject_(subject) {
-    subject_->SetObserver(this);
-  }
+  explicit ObserverBase(T* subject) : subject_(subject) {}
 
   virtual bool Start() {
     return false;
@@ -26,6 +24,4 @@ class ObserverBase {
   T* subject_;
 };
 
-} // namespace
-
-#endif // CAFFE2_CORE_OBSERVER_H_
+} // namespace caffe2
