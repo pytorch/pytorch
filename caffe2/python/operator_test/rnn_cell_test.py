@@ -712,6 +712,7 @@ class RNNCellTest(hu.HypothesisTestCase):
             [[net['final_output']], [unrolled['final_output']]],
             [0],
             inputs_with_grads=inputs_with_grads,
+            threshold=0.000001,
         )
 
     @given(
