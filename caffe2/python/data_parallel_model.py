@@ -250,18 +250,13 @@ def Parallelize(
 
     # Add initial parameter syncs
     log.info("Add initial parameter sync")
-    if (rendezvous is not None and num_shards > 1):
-        _AddDistributedParameterSync(
-            devices,
-            model_helper_obj,
-            model_helper_obj.param_init_net,
-            model_helper_obj.param_init_net,
-            rendezvous,
-            sync_names,
-        )
-
-    _SyncParams(
-        devices, model_helper_obj, model_helper_obj.param_init_net, sync_names
+    _SyncAllParams(
+        devices,
+        model_helper_obj,
+        model_helper_obj.param_init_net,
+        model_helper_obj.param_init_net,
+        rendezvous,
+        sync_names,
     )
 
     # Handle any operations that need to be done after parameter sync
@@ -397,20 +392,12 @@ def Parallelize_GPU_BMUF(
         model_helper_obj._warmup_broadcast.Proto().type = net_type
         model_helper_obj._warmup_broadcast.Proto().num_workers = \
             num_worker_threads
-        if rendezvous is not None and rendezvous['num_shards'] > 1:
-            _AddDistributedParameterSync(
-                devices,
-                model_helper_obj,
-                model_helper_obj.param_init_net,
-                model_helper_obj._warmup_broadcast,
-                rendezvous,
-                model_parameter_names
-            )
-
-        _SyncParams(
+        _SyncAllParams(
             devices,
             model_helper_obj,
+            model_helper_obj.param_init_net,
             model_helper_obj._warmup_broadcast,
+            rendezvous,
             model_parameter_names
         )
 
@@ -467,23 +454,14 @@ def Parallelize_GPU_BMUF(
                 _g(param), param
             )
 
-    if rendezvous is not None and rendezvous['num_shards'] > 1:
-        _AddDistributedParameterSync(
-            devices,
-            model_helper_obj,
-            model_helper_obj.param_init_net,
-            model_helper_obj._global_model_param_updates_net,
-            rendezvous,
-            model_parameter_names
-        )
-
-    _SyncParams(
+    _SyncAllParams(
         devices,
         model_helper_obj,
+        model_helper_obj.param_init_net,
         model_helper_obj._global_model_param_updates_net,
+        rendezvous,
         model_parameter_names
     )
-
 
     # Reset momentum-SGD parameters
     if reset_momentum_sgd:
@@ -640,21 +618,22 @@ def FinalizeAfterCheckpoint(model, blobs=None):
         model._checkpoint_net = core.Net("checkpoint_sync_net")
         model._checkpoint_net.RunAllOnGPU()
 
+        checkpoint_init_net = None
         if (model._rendezvous is not None and model._rendezvous['num_shards'] > 1):
             checkpoint_init_net = core.Net("checkpoint_init_net")
             checkpoint_init_net.RunAllOnGPU()
-            _AddDistributedParameterSync(
-                devices,
-                model,
-                checkpoint_init_net,
-                model._checkpoint_net,
-                model._rendezvous,
-                uniq_blob_names,
-            )
-            workspace.RunNetOnce(checkpoint_init_net)
 
-        # Setup sync of initial params
-        _SyncParams(devices, model, model._checkpoint_net, uniq_blob_names)
+        _SyncAllParams(
+            devices,
+            model,
+            checkpoint_init_net,
+            model._checkpoint_net,
+            model._rendezvous,
+            uniq_blob_names,
+        )
+
+        if (checkpoint_init_net):
+            workspace.RunNetOnce(checkpoint_init_net)
 
         workspace.CreateNet(model._checkpoint_net)
 
@@ -747,18 +726,34 @@ def _AllReduce(devices, model, net, param, use_nccl=False, control_input=None):
     _Broadcast(devices, model, net, param)
 
 
-def _SyncParams(devices, model, net, unique_param_names):
-    for param in unique_param_names:
-        _Broadcast(devices, model, net, param)
-
-
-def _AddDistributedParameterSync(
+def _SyncAllParams(
     devices,
     model,
     init_net,
     net,
     rendezvous,
-    uniq_param_names,
+    unique_param_names,
+):
+    if rendezvous is None or rendezvous['num_shards'] <= 1:
+        _SyncAllParamsSingleHost(devices, model, net, unique_param_names)
+    else:
+        _SyncAllParamsDistributed(
+            devices,
+            model,
+            init_net,
+            net,
+            rendezvous,
+            unique_param_names,
+        )
+
+
+def _SyncAllParamsDistributed(
+    devices,
+    model,
+    init_net,
+    net,
+    rendezvous,
+    unique_param_names,
 ):
     assert rendezvous['num_shards'] > 1
 
@@ -768,10 +763,11 @@ def _AddDistributedParameterSync(
     # Create a single common world for all broadcast operations.
     # This is not a problem since they are executed sequentially.
     comm_world = None
-    for param_name in sorted(uniq_param_names):
-        param = model._device_grouped_blobs[param_name][devices[0]]
+    for param_name in sorted(unique_param_names):
+        master_param = model._device_grouped_blobs[param_name][devices[0]]
+        params_group = model._device_grouped_blobs[param_name].values()
 
-        def broadcast(comm_world, param):
+        def broadcast(comm_world, params):
             if comm_world is None:
                 comm_world = init_net.CreateCommonWorld(
                     rendezvous['kv_handler'],
@@ -783,10 +779,11 @@ def _AddDistributedParameterSync(
                     status_blob="createcw_broadcast_status",
                 )
             net.Broadcast(
-                inputs=[comm_world, param],
-                outputs=[param],
+                inputs=[comm_world] + params,
+                outputs=params,
+                name=param_name,
                 engine=rendezvous['engine'],
-                status_blob="broadcast_{}_status".format(str(param)),
+                status_blob="broadcast_{}_status".format(param_name),
             )
             return comm_world
 
@@ -796,15 +793,26 @@ def _AddDistributedParameterSync(
 
         if rendezvous['engine'] == 'GLOO':
             with core.DeviceScope(device_opt):
-                comm_world = broadcast(comm_world, param)
+                comm_world = broadcast(comm_world, params_group)
         else:
             # Copy between GPU and CPU
             with core.DeviceScope(device_opt):
-                param_cpu = net.CopyGPUToCPU(param, str(param) + "cpu")
+                param_cpu = net.CopyGPUToCPU(
+                    master_param,
+                    str(master_param) + "cpu"
+                )
             with core.DeviceScope(cpu_device_opt):
-                comm_world = broadcast(comm_world, param_cpu)
+                comm_world = broadcast(comm_world, [param_cpu])
             with core.DeviceScope(device_opt):
-                net.CopyCPUToGPU(param_cpu, param)
+                net.CopyCPUToGPU(param_cpu, master_param)
+
+            # Broadcast locally
+            _Broadcast(devices, model, net, param_name)
+
+
+def _SyncAllParamsSingleHost(devices, model, net, unique_param_names):
+    for param in unique_param_names:
+        _Broadcast(devices, model, net, param)
 
 
 def _AllReduceBlobs(blob_names, devices, model, net, rendezvous, use_nccl,
