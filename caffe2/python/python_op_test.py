@@ -200,7 +200,7 @@ class PythonOpTest(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [x1, x2], [0, 1])
 
     @given(inputs=hu.tensors(n=3), **hu.gcs)
-    def test_gradient_multiple_with_indicies(self, inputs, gc, dc):
+    def test_gradient_multiple_with_indices(self, inputs, gc, dc):
         (x1, x2, x3) = inputs
 
         def f(inputs, outputs):

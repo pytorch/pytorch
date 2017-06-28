@@ -295,23 +295,23 @@ __global__ void sparse_length_sum_kernel(
     const T* in,
     T* out,
     const int* prefix_sum_length_data,
-    const TIndex* indicies,
+    const TIndex* indices,
     int N,
     int post,
     int len_length,
-    int len_indicies) {
+    int len_indices) {
   // len_length blocks
   int group = blockIdx.x;
 
   int start = group == 0 ? 0 : prefix_sum_length_data[group - 1];
   int end = prefix_sum_length_data[group];
-  CUDA_KERNEL_ASSERT(start < len_indicies);
-  CUDA_KERNEL_ASSERT(end <= len_indicies);
+  CUDA_KERNEL_ASSERT(start < len_indices);
+  CUDA_KERNEL_ASSERT(end <= len_indices);
 
   for (int i = threadIdx.x; i < post; i += blockDim.x) {
     T sum = (T)0;
     for (int line = start; line < end; ++line) {
-      sum += in[indicies[line] * post + i];
+      sum += in[indices[line] * post + i];
     }
     out[group * post + i] = sum;
   }
@@ -340,12 +340,12 @@ class CUDASparseLengthsSumOp : public Operator<CUDAContext> {
     const TIndex outputSize = lengthsInput.dim(0);
     int len_length = outputSize;
 
-    const TIndex* indicies;
+    const TIndex* indices;
     if (SparseFused) { // static if
-      auto& indiciesInput = Input(INDICES);
-      CAFFE_ENFORCE_EQ(1, indiciesInput.ndim(), "INDICES must be a vector");
-      indicies = indiciesInput.template data<TIndex>();
-      dataToReduceSize = indiciesInput.dim(0);
+      auto& indicesInput = Input(INDICES);
+      CAFFE_ENFORCE_EQ(1, indicesInput.ndim(), "INDICES must be a vector");
+      indices = indicesInput.template data<TIndex>();
+      dataToReduceSize = indicesInput.dim(0);
     } else {
       dataToReduceSize = dataSize;
     }
@@ -377,7 +377,7 @@ class CUDASparseLengthsSumOp : public Operator<CUDAContext> {
                 in_data,
                 out_data,
                 prefix_sum_length_data,
-                indicies,
+                indices,
                 N,
                 post,
                 len_length,
@@ -388,7 +388,7 @@ class CUDASparseLengthsSumOp : public Operator<CUDAContext> {
                 in_data,
                 out_data,
                 prefix_sum_length_data,
-                indicies,
+                indices,
                 N,
                 post,
                 len_length,
@@ -399,7 +399,7 @@ class CUDASparseLengthsSumOp : public Operator<CUDAContext> {
                 in_data,
                 out_data,
                 prefix_sum_length_data,
-                indicies,
+                indices,
                 N,
                 post,
                 len_length,
@@ -410,7 +410,7 @@ class CUDASparseLengthsSumOp : public Operator<CUDAContext> {
                 in_data,
                 out_data,
                 prefix_sum_length_data,
-                indicies,
+                indices,
                 N,
                 post,
                 len_length,

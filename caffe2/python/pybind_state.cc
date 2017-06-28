@@ -126,22 +126,22 @@ struct Func {
   py::object py_func;
   bool needs_workspace;
 };
-using FuncRegistery = std::unordered_map<std::string, Func>;
+using FuncRegistry = std::unordered_map<std::string, Func>;
 
-FuncRegistery& gRegistery() {
+FuncRegistry& gRegistry() {
   // Always leak the objects registered here.
-  static FuncRegistery* r = new FuncRegistery();
+  static FuncRegistry* r = new FuncRegistry();
   return *r;
 }
 
 const Func& getOpFunc(const std::string& token) {
   CAFFE_ENFORCE(
-      gRegistery().count(token),
+      gRegistry().count(token),
       "Python operator for ",
       token,
       " is not available. If you use distributed training it probably means "
       "that python implementation has to be registered in each of the workers");
-  return gRegistery()[token];
+  return gRegistry()[token];
 }
 
 const Func& getGradientFunc(const std::string& token) {
@@ -972,10 +972,10 @@ void addGlobalMethods(py::module& m) {
         }
         name += func.attr("__name__").cast<std::string>();
         std::string token = name;
-        for (int i = 1; gRegistery().count(token) > 0; ++i) {
+        for (int i = 1; gRegistry().count(token) > 0; ++i) {
           token = name + ":" + to_string(i);
         }
-        gRegistery()[token] = Func{func, pass_workspace};
+        gRegistry()[token] = Func{func, pass_workspace};
         return token;
       });
   m.def(
@@ -983,9 +983,9 @@ void addGlobalMethods(py::module& m) {
       [](const std::string& token, py::object func) {
         using namespace python_detail;
         CAFFE_ENFORCE(func != py::none());
-        CAFFE_ENFORCE(gRegistery().find(token) != gRegistery().end());
+        CAFFE_ENFORCE(gRegistry().find(token) != gRegistry().end());
         // For global sanity gradient ops shouldn't access workspace
-        gRegistery()[token + "_gradient"] = Func{func, false};
+        gRegistry()[token + "_gradient"] = Func{func, false};
       });
   m.def("infer_op_input_output_device", [](const py::bytes& op) {
     std::unique_ptr<caffe2::OperatorDef> def(new caffe2::OperatorDef());
