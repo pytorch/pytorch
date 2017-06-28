@@ -224,9 +224,9 @@ def matmul(tensor1, tensor2, out=None):
 
         def maybeSqueeze(tensor):
             if dim_tensor1 == 1:
-                return tensor.squeeze_(-2)
+                return tensor.squeeze(-2)
             elif dim_tensor2 == 1:
-                return tensor.squeeze_(-1)
+                return tensor.squeeze(-1)
             else:
                 return tensor
 
