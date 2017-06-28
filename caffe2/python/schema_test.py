@@ -174,6 +174,46 @@ class TestDB(unittest.TestCase):
         self.assertIn("b", sv.fields)
         self.assertEqual(0, len(sv.b.fields))
 
+    def testStructSubstraction(self):
+        s1 = schema.Struct(
+            ('a', schema.Scalar()),
+            ('b', schema.Scalar()),
+            ('c', schema.Scalar()),
+        )
+        s2 = schema.Struct(
+            ('b', schema.Scalar())
+        )
+        s = s1 - s2
+        self.assertEqual(['a', 'c'], s.field_names())
+
+        s3 = schema.Struct(
+            ('a', schema.Scalar())
+        )
+        s = s1 - s3
+        self.assertEqual(['b', 'c'], s.field_names())
+
+        with self.assertRaises(TypeError):
+            s1 - schema.Scalar()
+
+    def testStructNestedSubstraction(self):
+        s1 = schema.Struct(
+            ('a', schema.Scalar()),
+            ('b', schema.Struct(
+                ('c', schema.Scalar()),
+                ('d', schema.Scalar()),
+                ('e', schema.Scalar()),
+                ('f', schema.Scalar()),
+            )),
+        )
+        s2 = schema.Struct(
+            ('b', schema.Struct(
+                ('d', schema.Scalar()),
+                ('e', schema.Scalar()),
+            )),
+        )
+        s = s1 - s2
+        self.assertEqual(['a', 'b:c', 'b:f'], s.field_names())
+
     def testStructAddition(self):
         s1 = schema.Struct(
             ('a', schema.Scalar())
