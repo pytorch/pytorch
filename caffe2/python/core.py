@@ -2071,13 +2071,15 @@ def InjectCrossDeviceCopies(net, blob_to_device=None):
                     temp_remap[input] = new_name
                     blob_to_device[new_name] = dev
 
-        # Enforcing no in-place blob usage
+        # Enforcing no reuse blob between operators. In-place blob usage in an
+        # op is allowed. This is based on the assumption that in-place op has
+        # same device info
         for out_blob in op.output:
-            if out_blob in blob_to_device:
+            if out_blob in blob_to_device and out_blob not in op.input:
                 raise RuntimeError(
-                    "In-place blob: {} is not supported for inject device copy "
-                    "yet. Consider implementing it.".
-                    format(out_blob)
+                    "In-place blob: {} is not supported between operators. "
+                    "Failed op:\n {}".
+                    format(out_blob, op)
                 )
         blob_to_device.update({o: d for d, o in zip(output_dev, op.output)})
         new_op = caffe2_pb2.OperatorDef()
