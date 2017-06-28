@@ -418,6 +418,8 @@ class TestConvolution(hu.HypothesisTestCase):
         w = 5
         workspace.ResetWorkspace()
 
+        use_cudnn = (engine == 'CUDNN')
+
         np.random.seed(1701)
         # Build a binary tree of conv layers, summing at each node.
         for i in reversed(range(depth)):
@@ -438,6 +440,7 @@ class TestConvolution(hu.HypothesisTestCase):
                     stride=1,
                     pad=1,
                     deterministic=1,
+                    use_cudnn=use_cudnn,
                     engine=engine)
                 brew.conv(
                     m, bottom_2, mid_2,
@@ -449,6 +452,7 @@ class TestConvolution(hu.HypothesisTestCase):
                     bias_init=('ConstantFill', dict(value=b2)),
                     deterministic=1,
                     cudnn_state=np.random.randint(0, 3),
+                    use_cudnn=use_cudnn,
                     engine=engine)
                 m.net.Sum([mid_1, mid_2], top)
 
