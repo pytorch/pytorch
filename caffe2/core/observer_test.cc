@@ -21,16 +21,13 @@ class DummyObserver final : public ObserverBase<T> {
   bool Stop() override;
 
   ~DummyObserver() {}
-
- private:
-  vector<unique_ptr<DummyObserver<OperatorBase>>> ops_obs;
 };
 
 template <>
 bool DummyObserver<NetBase>::Start() {
   vector<OperatorBase*> operators = subject_->GetOperators();
   for (auto& op : operators) {
-    ops_obs.push_back(caffe2::make_unique<DummyObserver<OperatorBase>>(op));
+    op->SetObserver(caffe2::make_unique<DummyObserver<OperatorBase>>(op));
   }
   counter.fetch_add(1000);
   return true;
@@ -107,6 +104,7 @@ TEST(ObserverTest, TestNotify) {
   EXPECT_EQ(caffe2::dynamic_cast_if_rtti<SimpleNet*>(net.get()), net.get());
   unique_ptr<DummyObserver<NetBase>> net_ob =
       make_unique<DummyObserver<NetBase>>(net.get());
+  net.get()->SetObserver(std::move(net_ob));
   net.get()->Run();
   auto count_after = counter.load();
   EXPECT_EQ(1212, count_after - count_before);
@@ -120,6 +118,7 @@ TEST(ObserverTest, TestNotifyAfterDetach) {
   unique_ptr<NetBase> net(CreateNetTestHelper(&ws));
   unique_ptr<DummyObserver<NetBase>> net_ob =
       make_unique<DummyObserver<NetBase>>(net.get());
+  net.get()->SetObserver(std::move(net_ob));
   net.get()->RemoveObserver();
   net.get()->Run();
   auto count_after = counter.load();
@@ -135,6 +134,7 @@ TEST(ObserverTest, TestDAGNetBase) {
   EXPECT_EQ(caffe2::dynamic_cast_if_rtti<DAGNetBase*>(net.get()), net.get());
   unique_ptr<DummyObserver<NetBase>> net_ob =
       make_unique<DummyObserver<NetBase>>(net.get());
+  net.get()->SetObserver(std::move(net_ob));
   net.get()->Run();
   auto count_after = counter.load();
   EXPECT_EQ(1212, count_after - count_before);
