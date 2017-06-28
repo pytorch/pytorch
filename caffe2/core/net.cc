@@ -82,7 +82,9 @@ unique_ptr<NetBase> CreateNet(const NetDef& net_def, Workspace* ws) {
     net = NetRegistry()->Create(net_def.type(), net_def, ws);
   }
   VLOG(1) << "Adding a global observer to a net";
-  net->SetObserver(GlobalNetObserverCreator(net.get()));
+  if (net) {
+    net->SetObserver(GlobalNetObserverCreator(net.get()));
+  }
   return net;
 }
 
