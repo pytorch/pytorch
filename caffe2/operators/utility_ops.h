@@ -1047,21 +1047,50 @@ template <class SIndex, class Context>
 class SliceOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  USE_SIMPLE_CTOR_DTOR(SliceOp);
+  SliceOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
+        starts_(OperatorBase::GetRepeatedArgument<SIndex>("starts")),
+        ends_(OperatorBase::GetRepeatedArgument<SIndex>("ends")),
+        statically_inited_(false) {}
 
   bool RunOnDevice() override {
     auto* output = Output(0);
     auto& data = Input(0);
 
-    auto& starts = Input(1);
-    auto& ends = Input(2);
+    if (InputSize() > 1) {
+      starts_host_.template CopyFrom<Context>(Input(1));
+      ends_host_.template CopyFrom<Context>(Input(2));
+    } else {
+      if (!statically_inited_) {
+        CAFFE_ENFORCE(HasArgument("starts"));
+        CAFFE_ENFORCE(HasArgument("ends"));
+        CAFFE_ENFORCE_EQ(starts_.size(), ends_.size());
 
-    return SliceImpl<SIndex, Context>(output, data, starts, ends, &context_);
+        starts_host_.Resize(starts_.size());
+        ends_host_.Resize(ends_.size());
+
+        memcpy(
+            starts_host_.template mutable_data<SIndex>(),
+            starts_.data(),
+            sizeof(SIndex) * starts_.size());
+        memcpy(
+            ends_host_.template mutable_data<SIndex>(),
+            ends_.data(),
+            sizeof(SIndex) * ends_.size());
+        statically_inited_ = true;
+      }
+    }
+
+    return SliceImpl<SIndex, Context>(
+        output, data, starts_host_, ends_host_, &context_);
   }
 
   DISABLE_COPY_AND_ASSIGN(SliceOp);
 
  private:
+  std::vector<SIndex> starts_;
+  std::vector<SIndex> ends_;
+  bool statically_inited_;
   TensorCPU starts_host_;
   TensorCPU ends_host_;
 };
@@ -1070,24 +1099,57 @@ template <class SIndex, class Context>
 class SliceGradientOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  USE_SIMPLE_CTOR_DTOR(SliceGradientOp);
+  SliceGradientOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
+        starts_(OperatorBase::GetRepeatedArgument<SIndex>("starts")),
+        ends_(OperatorBase::GetRepeatedArgument<SIndex>("ends")),
+        statically_inited_(false) {}
 
   bool RunOnDevice() override {
     auto* gdata = Output(0);
     auto& data = Input(0);
 
-    auto& starts = Input(1);
-    auto& ends = Input(2);
+    if (InputSize() == 4) {
+      starts_host_.template CopyFrom<Context>(Input(1));
+      ends_host_.template CopyFrom<Context>(Input(2));
 
-    auto& go = Input(3);
+      auto& go = Input(3);
 
-    return SliceImpl<SIndex, Context>(
-        nullptr, data, starts, ends, &context_, gdata, &go);
+      return SliceImpl<SIndex, Context>(
+          nullptr, data, starts_host_, ends_host_, &context_, gdata, &go);
+    } else {
+      if (!statically_inited_) {
+        CAFFE_ENFORCE(HasArgument("starts"));
+        CAFFE_ENFORCE(HasArgument("ends"));
+        CAFFE_ENFORCE_EQ(starts_.size(), ends_.size());
+
+        starts_host_.Resize(starts_.size());
+        ends_host_.Resize(ends_.size());
+
+        memcpy(
+            starts_host_.template mutable_data<SIndex>(),
+            starts_.data(),
+            sizeof(SIndex) * starts_.size());
+        memcpy(
+            ends_host_.template mutable_data<SIndex>(),
+            ends_.data(),
+            sizeof(SIndex) * ends_.size());
+
+        statically_inited_ = true;
+      }
+      auto& go = Input(1);
+
+      return SliceImpl<SIndex, Context>(
+          nullptr, data, starts_host_, ends_host_, &context_, gdata, &go);
+    }
   }
 
   DISABLE_COPY_AND_ASSIGN(SliceGradientOp);
 
  private:
+  std::vector<SIndex> starts_;
+  std::vector<SIndex> ends_;
+  bool statically_inited_;
   TensorCPU starts_host_;
   TensorCPU ends_host_;
 };
