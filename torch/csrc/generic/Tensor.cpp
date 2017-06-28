@@ -721,7 +721,7 @@ static bool THPTensor_(_convertToTensorIndexers)(
       // View as 1D + get1D makes me sad :(
       THLongTensorPtr flat(THLongTensor_newView(contig.get(), viewer));
       for (ptrdiff_t i = 0; i < THLongTensor_nElement(flat.get()); ++i) {
-        long indexAtDim = THLongTensor_get1d(flat.get(), i);
+        long indexAtDim = THTensor_fastGet1d(flat.get(), i);
         if (indexAtDim >= sizeAtDim) {
           PyErr_Format(PyExc_IndexError, "index %lld from broadcast indexer is out of range "
               "for dimension %lld (of size %lld)",
@@ -833,7 +833,7 @@ static inline long THPTensor_(_indexToOffset)(
     auto broadcast = broadcasted.find(i);
     if (broadcast != broadcasted.end()) {
       sizeAtDim = THLongTensor_nElement(broadcast->second.get());
-      indexAtDim = THLongTensor_get1d(broadcast->second.get(), index % sizeAtDim);
+      indexAtDim = THTensor_fastGet1d(broadcast->second.get(), index % sizeAtDim);
 
       if (i > 0 && broadcasted.find(i - 1) != broadcasted.end()) {
         nextIndex = index;
@@ -911,7 +911,7 @@ static THIndexTensor* THPTensor_(_calculateLinearIndices)(
   for (ptrdiff_t i = 0; i < indexingElements; ++i) {
     long linearIdx = THPTensor_(_indexToOffset)(
         indexed, flattenedBroadcasters, i);
-    THLongTensor_set1d(linearIndices, i, baseOffset + linearIdx);
+    THTensor_fastSet1d(linearIndices, i, baseOffset + linearIdx);
   }
 
   // Need to copy to appropriate type, for example, if we calculated the
