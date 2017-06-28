@@ -173,6 +173,34 @@ def matmul(tensor1, tensor2, out=None):
             return torch.mm(tensor1, tensor2)
         else:
             return torch.mm(tensor1, tensor2, out=out)
+    elif dim_tensor1 >= 3 and (dim_tensor2 == 1 or dim_tensor2 == 2):
+        # optimization: use mm instead of bmm by folding tensor1's batch into
+        # its leading matrix dimension.
+
+        if dim_tensor2 == 1:
+            tensor2 = tensor2.unsqueeze(-1)
+
+        size1 = tensor1.size()
+        size2 = tensor2.size()
+        output_size = size1[:-1] + size2[-1:]
+
+        # fold the batch into the first dimension
+        tensor1 = tensor1.contiguous().view(-1, size1[-1])
+
+        if out is None or not out.is_contiguous():
+            output = torch.mm(tensor1, tensor2)
+        else:
+            output = torch.mm(tensor1, tensor2, out=out)
+
+        output = output.view(output_size)
+
+        if dim_tensor2 == 1:
+            output = output.squeeze(-1)
+
+        if out is not None:
+            out.set_(output)
+
+        return output
     elif (dim_tensor1 >= 1 and dim_tensor2 >= 1) and (dim_tensor1 >= 3 or dim_tensor2 >= 3):
         # ensure each tensor size is at least 3-dimensional
         tensor1_exp_size = torch.Size((1,) * max(3 - tensor1.dim(), 0) + tensor1.size())
