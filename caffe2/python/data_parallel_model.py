@@ -257,6 +257,7 @@ def Parallelize(
         model_helper_obj.param_init_net,
         rendezvous,
         sync_names,
+        max_concurrent_distributed_ops=1
     )
 
     # Handle any operations that need to be done after parameter sync
@@ -392,13 +393,15 @@ def Parallelize_GPU_BMUF(
         model_helper_obj._warmup_broadcast.Proto().type = net_type
         model_helper_obj._warmup_broadcast.Proto().num_workers = \
             num_worker_threads
+
         _SyncAllParams(
             devices,
             model_helper_obj,
             model_helper_obj.param_init_net,
             model_helper_obj._warmup_broadcast,
             rendezvous,
-            model_parameter_names
+            model_parameter_names,
+            max_concurrent_distributed_ops
         )
 
     # (Step-0) Initialize momentum parameters on master GPU.
@@ -454,13 +457,15 @@ def Parallelize_GPU_BMUF(
                 _g(param), param
             )
 
+
     _SyncAllParams(
         devices,
         model_helper_obj,
         model_helper_obj.param_init_net,
         model_helper_obj._global_model_param_updates_net,
         rendezvous,
-        model_parameter_names
+        model_parameter_names,
+        max_concurrent_distributed_ops
     )
 
     # Reset momentum-SGD parameters
@@ -630,8 +635,8 @@ def FinalizeAfterCheckpoint(model, blobs=None):
             model._checkpoint_net,
             model._rendezvous,
             uniq_blob_names,
+            max_concurrent_distributed_ops=1
         )
-
         if (checkpoint_init_net):
             workspace.RunNetOnce(checkpoint_init_net)
 
@@ -733,6 +738,7 @@ def _SyncAllParams(
     net,
     rendezvous,
     unique_param_names,
+    max_concurrent_distributed_ops=4
 ):
     if rendezvous is None or rendezvous['num_shards'] <= 1:
         _SyncAllParamsSingleHost(devices, model, net, unique_param_names)
@@ -744,6 +750,7 @@ def _SyncAllParams(
             net,
             rendezvous,
             unique_param_names,
+            max_concurrent_distributed_ops
         )
 
 
@@ -754,38 +761,34 @@ def _SyncAllParamsDistributed(
     net,
     rendezvous,
     unique_param_names,
+    max_concurrent_distributed_ops
 ):
     assert rendezvous['num_shards'] > 1
 
     gpu_device_opt = core.DeviceOption(model._device_type, devices[0])
     cpu_device_opt = core.DeviceOption(caffe2_pb2.CPU)
 
-    # Create a single common world for all broadcast operations.
-    # This is not a problem since they are executed sequentially.
-    comm_world = None
+    context = CollectivesConcurrencyControl(
+        "broadcast",
+        max_concurrent_distributed_ops,
+        init_net,
+        rendezvous
+    )
+
     for param_name in sorted(unique_param_names):
         master_param = model._device_grouped_blobs[param_name][devices[0]]
         params_group = model._device_grouped_blobs[param_name].values()
 
-        def broadcast(comm_world, params):
-            if comm_world is None:
-                comm_world = init_net.CreateCommonWorld(
-                    rendezvous['kv_handler'],
-                    "broadcast_cw",
-                    name=net.Proto().name + ".broadcast_cw_op",
-                    size=rendezvous['num_shards'],
-                    rank=rendezvous['shard_id'],
-                    engine=rendezvous['engine'],
-                    status_blob="createcw_broadcast_status",
-                )
+        def broadcast(params):
+            comm_world, control_input = context.get_control_and_context(params)
             net.Broadcast(
                 inputs=[comm_world] + params,
                 outputs=params,
                 name=param_name,
                 engine=rendezvous['engine'],
-                status_blob="broadcast_{}_status".format(param_name),
+                status_blob="broadcast_{}_status".format(str(param_name)),
+                control_input=control_input
             )
-            return comm_world
 
         device_opt = gpu_device_opt if _IsGPUBlob(
             model, param_name
@@ -793,7 +796,7 @@ def _SyncAllParamsDistributed(
 
         if rendezvous['engine'] == 'GLOO':
             with core.DeviceScope(device_opt):
-                comm_world = broadcast(comm_world, params_group)
+                broadcast(params_group)
         else:
             # Copy between GPU and CPU
             with core.DeviceScope(device_opt):
@@ -802,7 +805,7 @@ def _SyncAllParamsDistributed(
                     str(master_param) + "cpu"
                 )
             with core.DeviceScope(cpu_device_opt):
-                comm_world = broadcast(comm_world, [param_cpu])
+                broadcast([param_cpu])
             with core.DeviceScope(device_opt):
                 net.CopyCPUToGPU(param_cpu, master_param)
 
@@ -836,6 +839,53 @@ def _AllReduceBlobs(blob_names, devices, model, net, rendezvous, use_nccl,
         )
 
 
+class CollectivesConcurrencyControl(object):
+    """
+    Creates common worlds (up to max_concurrent_context) and manage the
+    sequential execution of collectives that shares the same context with
+    cyclic control inputs.
+    """
+    def __init__(
+        self,
+        name,
+        max_concurrent_context,
+        param_init_net,
+        rendezvous
+    ):
+        self.name = name
+        self.param_init_net = param_init_net
+        self.max_concurrent_context = max_concurrent_context
+        self.counter = 0
+        self.common_worlds = []
+        self.control_inputs = []
+        self.rendezvous = rendezvous
+
+    def get_control_and_context(self, control_output_blob):
+        common_world, control_input = [None, None]
+        current_slot = self.counter % self.max_concurrent_context
+        if len(self.common_worlds) < self.max_concurrent_context:
+            common_world = self.param_init_net.CreateCommonWorld(
+                self.rendezvous['kv_handler'],
+                "{}_{}_cw".format(self.name, current_slot),
+                name="{}_{}_cw_op".format(self.name, current_slot),
+                size=self.rendezvous['num_shards'],
+                rank=self.rendezvous['shard_id'],
+                engine=self.rendezvous['engine'],
+                status_blob="create_{}_cw_{}_status".format(
+                    self.name,
+                    current_slot
+                )
+            )
+            self.common_worlds.append(common_world)
+            self.control_inputs.append(control_output_blob)
+        else:
+            common_world = self.common_worlds[current_slot]
+            control_input = self.control_inputs[current_slot]
+            self.control_inputs[current_slot] = control_output_blob
+        self.counter += 1
+        return common_world, control_input
+
+
 def _AllReduceBlobsDistributed(
     blob_names,
     devices,
@@ -852,22 +902,15 @@ def _AllReduceBlobsDistributed(
 
     reducing_device_opt = master_device_opt
 
-    # We need to specify a partial order using control_input to ensure
-    # progress (all machines need to do same allreduce in parallel)
-    num_controls = max_concurrent_distributed_ops
-    cyclical_controls = []
+    context = CollectivesConcurrencyControl(
+        "allreduce",
+        max_concurrent_distributed_ops,
+        model.param_init_net,
+        rendezvous
+    )
 
-    # Since num_controls determines the partial ordering of
-    # allreduces, there is no need for more common world instances
-    # than there are parallel allreduce operations.
-    num_comm_worlds = num_controls
-    cyclical_comm_worlds = []
-
-    counter = 0
     nccl_control_blob = None
 
-    # Note: sorted order to ensure each host puts the operators in
-    # same order.
     for blob_name in blob_names:
         master_blob = model._device_grouped_blobs[blob_name][devices[0]]
         blobs_group = model._device_grouped_blobs[blob_name].values()
@@ -878,24 +921,10 @@ def _AllReduceBlobsDistributed(
         # so we need a temporary blob
         reduced_blob = str(master_blob) + "_red"
 
-        control_input = None if len(cyclical_controls) < num_controls \
-                        else cyclical_controls[counter % num_controls]
-        comm_world = None if len(cyclical_comm_worlds) < num_comm_worlds \
-                     else cyclical_comm_worlds[counter % num_comm_worlds]
-
-        def allreduce(comm_world, blobs):
+        def allreduce(blobs):
             with core.DeviceScope(reducing_device_opt):
-                if comm_world is None:
-                    comm_number = len(cyclical_comm_worlds)
-                    comm_world = model.param_init_net.CreateCommonWorld(
-                        rendezvous['kv_handler'],
-                        "allreduce_{}_cw".format(comm_number),
-                        name="allreduce_{}_cw_op".format(comm_number),
-                        size=rendezvous['num_shards'],
-                        rank=rendezvous['shard_id'],
-                        engine=rendezvous['engine'],
-                        status_blob="create_cw_{}_status".format(comm_number),
-                    )
+                comm_world, control_input = \
+                    context.get_control_and_context(blobs[0])
                 net.Allreduce(
                     inputs=[comm_world] + blobs,
                     outputs=blobs,
@@ -904,13 +933,11 @@ def _AllReduceBlobsDistributed(
                     control_input=control_input,
                     status_blob="allreduce_{}_status".format(blob_name),
                 )
-                return comm_world
 
         if rendezvous['engine'] == 'GLOO':
             # With Gloo cross GPU and cross machine allreduce
             # can be executed in a single operation
-            comm_world = allreduce(comm_world, blobs_group)
-            control_output = blobs_group[0]
+            allreduce(blobs_group)
         else:
             # Step 1: sum blobs from local GPUs to master GPU
             with core.DeviceScope(master_device_opt):
@@ -926,26 +953,13 @@ def _AllReduceBlobsDistributed(
                 net.Copy(master_blob, reduced_blob)
 
             # Step 2: allreduce between all hosts, between master GPUs
-            comm_world = allreduce(comm_world, [reduced_blob])
-            control_output = reduced_blob
+            allreduce([reduced_blob])
 
             with core.DeviceScope(master_device_opt):
                 net.Copy(reduced_blob, master_blob)
 
             # Step 3: broadcast locally
             _Broadcast(devices, model, net, blob_name)
-
-        if len(cyclical_controls) < num_controls:
-            cyclical_controls.append(control_output)
-        else:
-            cyclical_controls[counter % num_controls] = control_output
-
-        if len(cyclical_comm_worlds) < num_comm_worlds:
-            cyclical_comm_worlds.append(comm_world)
-        else:
-            assert cyclical_comm_worlds[counter % num_comm_worlds] == comm_world
-
-        counter += 1
 
 
 def _AllReduceBlobsSingleHost(blob_names, devices, model, net, use_nccl):
