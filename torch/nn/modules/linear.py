@@ -39,13 +39,15 @@ class Linear(Module):
         self.out_features = out_features
         self.weight = Parameter(torch.Tensor(out_features, in_features))
 
-        stdv = 1. / math.sqrt(self.weight.size(1))
-        self.initializer = {"weight": lambda x: init.uniform(x, -stdv, stdv)} \
-            if initializer is None else initializer
+        def _initializer(x):
+            stdv = 1. / math.sqrt(self.weight.size(1))
+            return init.uniform(x, -stdv, stdv)
+
+        self.initializer = {"weight": _initializer} if initializer is None else initializer
         if bias:
             self.bias = Parameter(torch.Tensor(out_features))
             if self.initializer.get("bias") is None:
-                self.initializer["bias"] = lambda x: init.uniform(x, -stdv, stdv)
+                self.initializer["bias"] = _initializer
         else:
             self.register_parameter('bias', None)
         self.reset_parameters()
