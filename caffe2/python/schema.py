@@ -479,6 +479,76 @@ class Struct(Field):
 
         return Struct(*(children.items()))
 
+    def __sub__(self, other):
+        """
+        Allows to remove common fields of two schema.Struct from self by
+        using '-' operator. If two Struct have common field names, the
+        removal is conducted recursively. If a child struct has no fields
+        inside, it will be removed from its parent. Here are examples:
+
+        Example 1
+        s1 = Struct(
+            ('a', Scalar()),
+            ('b', Scalar()),
+        )
+        s2 = Struct(('a', Scalar()))
+        s1 - s2 == Struct(('b', Scalar()))
+
+        Example 2
+        s1 = Struct(
+            ('b', Struct(
+                ('c', Scalar()),
+                ('d', Scalar()),
+            ))
+        )
+        s2 = Struct(
+            ('b', Struct(('c', Scalar()))),
+        )
+        s1 - s2 == Struct(
+            ('b', Struct(
+                ('d', Scalar()),
+            )),
+        )
+
+        Example 3
+        s1 = Struct(
+            ('a', Scalar()),
+            ('b', Struct(
+                ('d', Scalar()),
+            ))
+        )
+        s2 = Struct(
+            ('b', Struct(
+                ('c', Scalar())
+                ('d', Scalar())
+            )),
+        )
+        s1 - s2 == Struct(
+            ('a', Scalar()),
+        )
+        """
+        if not isinstance(other, Struct):
+            return NotImplemented
+
+        children = OrderedDict(self.get_children())
+        for name, right_field in other.get_children():
+            if name in children:
+                left_field = children[name]
+                if type(left_field) == type(right_field):
+                    if isinstance(left_field, Struct):
+                        child = left_field - right_field
+                        if child.get_children():
+                            children[name] = child
+                            continue
+                    children.pop(name)
+                else:
+                    raise TypeError(
+                        "Type of left_field, " + str(type(left_field)) +
+                        ", is not the same as that of right_field, " +
+                        str(type(right_field)) +
+                        ", yet they have the same field name, " + name)
+        return Struct(*(children.items()))
+
 
 class Scalar(Field):
     """Represents a typed scalar or tensor of fixed shape.
