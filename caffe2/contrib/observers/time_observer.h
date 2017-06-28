@@ -13,16 +13,18 @@ namespace caffe2 {
 template <class T>
 class TimeObserver final : public ObserverBase<T> {
  public:
-  explicit TimeObserver<T>(T* subject_) : ObserverBase<T>(subject_) {}
+  explicit TimeObserver<T>(T* subject) : ObserverBase<T>(subject) {}
   inline float average_time() const {
     return total_time_ / iterations_;
   }
   float average_time_children() const {
     float sum = 0.0f;
-    for (auto& ob : children_) {
-      sum += ob.get()->average_time();
+    for (auto* op : this->subject_->GetOperators()) {
+      auto* observer =
+          dynamic_cast_if_rtti<TimeObserver<OperatorBase>*>(op->GetObserver());
+      sum += observer->average_time();
     }
-    return sum / children_.size();
+    return sum / this->subject_->GetOperators().size();
   }
   ~TimeObserver() {}
 
@@ -31,8 +33,6 @@ class TimeObserver final : public ObserverBase<T> {
   float start_time_ = 0.0f;
   float total_time_ = 0.0f;
   int iterations_ = 0;
-
-  vector<unique_ptr<TimeObserver<OperatorBase>>> children_;
 
   bool Start() override;
   bool Stop() override;

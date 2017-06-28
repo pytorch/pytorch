@@ -28,7 +28,7 @@ class DummyObserver final : public ObserverBase<T> {
 
 template <>
 bool DummyObserver<NetBase>::Start() {
-  vector<OperatorBase*> operators = subject_->getOperators();
+  vector<OperatorBase*> operators = subject_->GetOperators();
   for (auto& op : operators) {
     ops_obs.push_back(caffe2::make_unique<DummyObserver<OperatorBase>>(op));
   }

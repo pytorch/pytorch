@@ -129,8 +129,8 @@ class OperatorBase {
     return arg_helper_;
   }
 
-  void SetObserver(ObserverBase<OperatorBase>* observer) {
-    observer_ = observer;
+  void SetObserver(std::unique_ptr<ObserverBase<OperatorBase>> observer) {
+    observer_ = std::move(observer);
   }
 
   void RemoveObserver() {
@@ -153,9 +153,13 @@ class OperatorBase {
  public:
   static constexpr int kNoNetPositionSet = -1;
 
+  ObserverBase<OperatorBase>* GetObserver() {
+    return observer_.get();
+  }
+
  protected:
-  ObserverBase<OperatorBase>* observer_ = nullptr;
   Workspace* operator_ws_;
+  std::unique_ptr<ObserverBase<OperatorBase>> observer_;
 
  private:
   OperatorDef operator_def_;

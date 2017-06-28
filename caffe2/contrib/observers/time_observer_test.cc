@@ -64,10 +64,15 @@ TEST(TimeObserverTest, Test3Seconds) {
   unique_ptr<NetBase> net(CreateNetTestHelper(&ws));
   unique_ptr<TimeObserver<NetBase>> net_ob =
       make_unique<TimeObserver<NetBase>>(net.get());
-  net.get()->Run();
-  CAFFE_ENFORCE(net_ob.get()->average_time_children() > 3000);
-  CAFFE_ENFORCE(net_ob.get()->average_time_children() < 3500);
-  CAFFE_ENFORCE(net_ob.get()->average_time() > 6000);
-  CAFFE_ENFORCE(net_ob.get()->average_time() < 6500);
+  net->SetObserver(std::move(net_ob));
+  net->Run();
+  auto* ob = dynamic_cast_if_rtti<TimeObserver<NetBase>*>(net->GetObserver());
+  CAFFE_ENFORCE(ob);
+  LOG(INFO) << "av time children: " << ob->average_time_children();
+  LOG(INFO) << "av time: " << ob->average_time();
+  CAFFE_ENFORCE(ob->average_time_children() > 3000);
+  CAFFE_ENFORCE(ob->average_time_children() < 3500);
+  CAFFE_ENFORCE(ob->average_time() > 6000);
+  CAFFE_ENFORCE(ob->average_time() < 6500);
 }
 }

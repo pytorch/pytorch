@@ -2,6 +2,7 @@
 #define CAFFE2_CORE_WORKSPACE_H_
 
 #include "caffe2/core/common.h"
+#include "caffe2/core/observer.h"
 
 #ifndef CAFFE2_MOBILE
 #error "mobile build state not defined"
