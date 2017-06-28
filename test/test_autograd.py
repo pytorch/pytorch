@@ -518,7 +518,7 @@ class TestAutograd(TestCase):
         x = torch.arange(1, 17).view(4, 4)
         y = Variable(x, requires_grad=True)
 
-        def check_index(idx):
+        def check_index(x, y, idx):
             if y.grad is not None:
                 y.grad.data.zero_()
             indexed_tensor = x[idx]
@@ -530,25 +530,42 @@ class TestAutograd(TestCase):
             self.assertEqual(indexed_tensor, indexed_var_t)
 
             indexed_var.sum().backward()
-            expected_grad = torch.zeros(4, 4)
+            expected_grad = torch.Tensor(x.size()).fill_(0)
             expected_grad[idx] = 1
             self.assertEqual(y.grad.data, expected_grad)
 
-        check_index(1)
-        check_index((1, 1))
-        check_index(slice(1, None))
-        check_index(slice(None, 2))
-        check_index((slice(None, 2), 2))
-        check_index((slice(1, 2), 2))
-        check_index((1, slice(2, None)))
-        check_index((slice(None, None), slice(2, None)))
-        check_index(torch.LongTensor([0, 2]))
-        check_index(torch.rand(4, 4).bernoulli().byte())
-        check_index((Ellipsis, slice(2, None)))
-        check_index(([0], [0]))
-        check_index(([1, 2, 3], [0]))
-        check_index(([1, 2], [2, 1]))
-        check_index(([[1, 2], [3, 0]], [[0, 1], [2, 3]]))
+        check_index(x, y, 1)
+        check_index(x, y, (1, 1))
+        check_index(x, y, slice(1, None))
+        check_index(x, y, slice(None, 2))
+        check_index(x, y, (slice(None, 2), 2))
+        check_index(x, y, (slice(1, 2), 2))
+        check_index(x, y, (1, slice(2, None)))
+        check_index(x, y, (slice(None, None), slice(2, None)))
+        check_index(x, y, torch.LongTensor([0, 2]))
+        check_index(x, y, torch.rand(4, 4).bernoulli().byte())
+        check_index(x, y, (Ellipsis, slice(2, None)))
+        check_index(x, y, ([0], [0]))
+        check_index(x, y, ([1, 2, 3], [0]))
+        check_index(x, y, ([1, 2], [2, 1]))
+        check_index(x, y, ([[1, 2], [3, 0]], [[0, 1], [2, 3]]))
+        check_index(x, y, ([slice(None), [2, 3]]))
+        check_index(x, y, ([[2, 3], slice(None)]))
+
+        x = torch.arange(1, 49).view(4, 3, 4)
+        y = Variable(x, requires_grad=True)
+
+        check_index(x, y, (slice(None), [0], [0]))
+        check_index(x, y, ([0], [0], slice(None)))
+        check_index(x, y, (slice(None), [0, 1, 2], [0]))
+        check_index(x, y, ([0, 1, 2], [0], slice(None)))
+        check_index(x, y, (slice(None), [1, 2], [2, 1]))
+        check_index(x, y, ([1, 2], [2, 1], slice(None)))
+        check_index(x, y, (slice(None), [[1, 2], [2, 0]], [[0, 1], [2, 3]]))
+        check_index(x, y, ([[1, 2], [3, 0]], [[0, 1], [2, 2]], slice(None)))
+        check_index(x, y, (slice(None), slice(None), [2, 1]))
+        check_index(x, y, (slice(None), [2, 1], slice(None)))
+        check_index(x, y, ([2, 1], slice(None), slice(None)))
 
     def test_indexing_duplicates(self):
         x = torch.arange(1, 17).view(4, 4)
@@ -582,6 +599,15 @@ class TestAutograd(TestCase):
                                       [1, 0, 0, 0],
                                       [0, 1, 0, 0],
                                       [0, 0, 0, 0]])
+        self.assertEqual(y.grad.data, expected_grad)
+
+        x = torch.arange(1, 65).view(4, 4, 4)
+        y = Variable(x, requires_grad=True)
+
+        idx = [[1, 1, 1], slice(None), slice(None)]
+        y[idx].sum().backward()
+        expected_grad = torch.Tensor(4, 4, 4).zero_()
+        expected_grad[1].fill_(3)
         self.assertEqual(y.grad.data, expected_grad)
 
     def test_basic_op_grad_fallback(self):
@@ -825,10 +851,20 @@ class TestAutograd(TestCase):
         self._test_setitem((1,), 0)
         self._test_setitem((10,), [[0, 4, 2]])
         self._test_setitem((5, 5), [[0, 4], [2, 2]])
+        self._test_setitem((5, 5, 5), [slice(None), slice(None), [1, 3]])
+        self._test_setitem((5, 5, 5), [slice(None), [1, 3], slice(None)])
+        self._test_setitem((5, 5, 5), [[1, 3], slice(None), slice(None)])
+        self._test_setitem((5, 5, 5), [slice(None), [2, 4], [1, 3]])
+        self._test_setitem((5, 5, 5), [[1, 3], [2, 4], slice(None)])
         self._test_setitem_tensor((5, 5), 3)
         self._test_setitem_tensor((5, 5), [[0, 1], [1, 0]])
         self._test_setitem_tensor((5,), 3)
         self._test_setitem_tensor((5,), [[0, 1, 2, 3]])
+        self._test_setitem_tensor((5, 5, 5), [slice(None), slice(None), [1, 3]])
+        self._test_setitem_tensor((5, 5, 5), [slice(None), [1, 3], slice(None)])
+        self._test_setitem_tensor((5, 5, 5), [[1, 3], slice(None), slice(None)])
+        self._test_setitem_tensor((5, 5, 5), [slice(None), [2, 4], [1, 3]])
+        self._test_setitem_tensor((5, 5, 5), [[1, 3], [2, 4], slice(None)])
 
     def test_setitem_mask(self):
         mask = torch.ByteTensor(5, 5).bernoulli_()
@@ -1397,6 +1433,10 @@ function_tests = [
     (Index, (), (torch.rand(S, S, S), dont_convert([slice(0, 3), 1])), 'slice_index'),
     (Index, (), (torch.rand(S, S, S), dont_convert([[0, 2, 3], [1, 3, 3], [0, 0, 2]])), 'adv_index'),
     (Index, (), (torch.rand(S, S, S), dont_convert([[0, 0, 3], [1, 1, 3], [0, 0, 2]])), 'adv_index_dup'),
+    (Index, (), (torch.rand(S, S, S), dont_convert([slice(None), slice(None), [0, 3]])), 'adv_index_end'),
+    (Index, (), (torch.rand(S, S, S), dont_convert([slice(None), [0, 3], slice(None)])), 'adv_index_mid'),
+    (Index, (), (torch.rand(S, S, S), dont_convert([[0, 3], slice(None), slice(None)])), 'adv_index_beg'),
+    (Index, (), (torch.rand(S, S, S), dont_convert([[0, 3], [1, 2], slice(None)])), 'adv_index_comb'),
     (View, (), (torch.rand(S, S, S), torch.Size([S * S, S]))),
     (Expand, (), ((1, S, 1, S, 1), torch.Size([5, S, 5, S, 5]))),
     (Expand, (), ((S, 1), torch.Size([S, S, S])), 'new_dim'),
