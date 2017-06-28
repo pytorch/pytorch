@@ -31,8 +31,7 @@ std::string getPythonName(const PyObject* obj, bool is_legacy) {
     // object in a externally visible way. Please don't!
     auto wobj = const_cast<PyObject*>(obj);
     THPObjectPtr name{PyObject_GetAttrString(wobj, "__name__")};
-    // TODO: missing error check
-    return std::string(PyString_AsString(name));
+    return THPUtils_unpackString(name.get());
   }
 }
 
