@@ -6,7 +6,9 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import core, model_helper, schema
+from caffe2.python.optimizer import get_param_device
 from caffe2.python.layers import layers
+from caffe2.proto import caffe2_pb2
 
 import logging
 import numpy as np
@@ -234,14 +236,30 @@ class LayerModelHelper(model_helper.ModelHelper):
     def layers(self):
         return self._layers
 
-    def apply_optimizers(self, train_net, train_init_net, grad_map):
+    def apply_optimizers(
+        self,
+        train_net,
+        train_init_net,
+        grad_map,
+        blob_to_device=None,
+    ):
+        CPU = core.DeviceOption(caffe2_pb2.CPU)
+        # if given, blob_to_device is a map from blob to device_option
+        blob_to_device = blob_to_device or {}
         for param, optimizer in self.param_to_optim.items():
             assert optimizer is not None, \
                 "default optimizer must have been set in add_layer"
             # note that not all params has gradient and thus we sent None if
-            # gradient does not exist
-            optimizer(
-                train_net, train_init_net, param, grad_map.get(str(param)))
+            # gradient does not exists
+            device = get_param_device(
+                param,
+                grad_map.get(str(param)),
+                param_to_device=blob_to_device,
+                default_device=CPU,
+            )
+            with core.DeviceScope(device):
+                optimizer(
+                    train_net, train_init_net, param, grad_map.get(str(param)))
 
     def _GetOne(self):
         return self.global_constants['ONE']

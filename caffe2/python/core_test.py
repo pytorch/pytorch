@@ -769,6 +769,27 @@ op {
 external_input: "data"
 """
 
+    def test_blob_inplace(self):
+        net = core.Net("test")
+        device_option = caffe2_pb2.DeviceOption()
+        device_option.device_type = caffe2_pb2.CUDA
+        device_option.cuda_gpu_id = 1
+
+        net.Adagrad(['param', 'moment', 'grad', 'lr'], ['param', 'moment'])
+        with core.DeviceScope(device_option):
+            net.Relu("param", "param_relu_no_sense")
+        net, _ = core.InjectCrossDeviceCopies(net)
+        op = net._net.op[1]
+        self.assertEqual(op.type, 'CopyCPUToGPU')
+        self.assertEqual(op.input[0], 'param')
+        self.assertEqual(op.output[0], 'param_cuda_1')
+        op = net._net.op[2]
+        self.assertEqual(op.input[0], 'param_cuda_1')
+
+        net.Relu('nonsense_input', 'moment')
+        with self.assertRaises(RuntimeError):
+            core.InjectCrossDeviceCopies(net)
+
 
 if __name__ == '__main__':
     unittest.main()
