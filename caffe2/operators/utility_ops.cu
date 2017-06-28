@@ -244,11 +244,29 @@ bool SliceOp<int, CUDAContext>::RunOnDevice() {
   auto* output = Output(0);
   auto& data = Input(0);
 
-  auto& starts = Input(1);
-  auto& ends = Input(2);
+  if (InputSize() > 1) {
+    starts_host_.template CopyFrom<CUDAContext>(Input(1));
+    ends_host_.template CopyFrom<CUDAContext>(Input(2));
+  } else {
+    if (!statically_inited_) {
+      CAFFE_ENFORCE(HasArgument("starts"));
+      CAFFE_ENFORCE(HasArgument("ends"));
+      CAFFE_ENFORCE_EQ(starts_.size(), ends_.size());
 
-  starts_host_.template CopyFrom<CUDAContext>(starts);
-  ends_host_.template CopyFrom<CUDAContext>(ends);
+      starts_host_.Resize(starts_.size());
+      ends_host_.Resize(ends_.size());
+
+      memcpy(
+          starts_host_.template mutable_data<int>(),
+          starts_.data(),
+          sizeof(int) * starts_.size());
+      memcpy(
+          ends_host_.template mutable_data<int>(),
+          ends_.data(),
+          sizeof(int) * ends_.size());
+      statically_inited_ = true;
+    }
+  }
 
   return SliceImplGpu<int, CUDAContext>(
       output, data, starts_host_, ends_host_, &context_);
@@ -258,21 +276,42 @@ REGISTER_CUDA_OPERATOR(Slice, SliceOp<int, CUDAContext>);
 
 template <>
 bool SliceGradientOp<int, CUDAContext>::RunOnDevice() {
-  CAFFE_ENFORCE(InputSize() == 4);
-
   auto* gdata = Output(0);
   auto& data = Input(0);
 
-  auto& starts = Input(1);
-  auto& ends = Input(2);
+  if (InputSize() == 4) {
+    starts_host_.template CopyFrom<CUDAContext>(Input(1));
+    ends_host_.template CopyFrom<CUDAContext>(Input(2));
 
-  auto& go = Input(3);
+    auto& go = Input(3);
 
-  starts_host_.template CopyFrom<CUDAContext>(starts);
-  ends_host_.template CopyFrom<CUDAContext>(ends);
+    return SliceImplGpu<int, CUDAContext>(
+        nullptr, data, starts_host_, ends_host_, &context_, gdata, &go);
+  } else {
+    if (!statically_inited_) {
+      CAFFE_ENFORCE(HasArgument("starts"));
+      CAFFE_ENFORCE(HasArgument("ends"));
+      CAFFE_ENFORCE_EQ(starts_.size(), ends_.size());
 
-  return SliceImplGpu<int, CUDAContext>(
-      nullptr, data, starts_host_, ends_host_, &context_, gdata, &go);
+      starts_host_.Resize(starts_.size());
+      ends_host_.Resize(ends_.size());
+
+      memcpy(
+          starts_host_.template mutable_data<int>(),
+          starts_.data(),
+          sizeof(int) * starts_.size());
+      memcpy(
+          ends_host_.template mutable_data<int>(),
+          ends_.data(),
+          sizeof(int) * ends_.size());
+
+      statically_inited_ = true;
+    }
+    auto& go = Input(1);
+
+    return SliceImplGpu<int, CUDAContext>(
+        nullptr, data, starts_host_, ends_host_, &context_, gdata, &go);
+  }
 }
 REGISTER_CUDA_OPERATOR(SliceGradient, SliceGradientOp<int, CUDAContext>);
 

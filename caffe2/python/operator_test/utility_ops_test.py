@@ -13,8 +13,8 @@ import random
 
 class TestUtilityOps(hu.HypothesisTestCase):
 
-    @given(X=hu.tensor(), neg=st.booleans(), **hu.gcs)
-    def test_slice(self, X, neg, gc, dc):
+    @given(X=hu.tensor(), args=st.booleans(), **hu.gcs)
+    def test_slice(self, X, args, gc, dc):
         X = X.astype(dtype=np.float32)
         dim = random.randint(0, X.ndim - 1)
         slice_start = random.randint(0, X.shape[dim] - 1)
@@ -24,21 +24,33 @@ class TestUtilityOps(hu.HypothesisTestCase):
         starts[dim] = slice_start
         ends[dim] = slice_end
 
-        op = core.CreateOperator(
-            "Slice", ["X", "starts", "ends"], ["Y"], device_option=gc
-        )
+        if args:
+            op = core.CreateOperator(
+                "Slice", ["X"], ["Y"], starts=starts, ends=ends, device_option=gc
+            )
 
-        def slice_ref(X, starts, ends):
-            slc = [slice(None)] * X.ndim
-            slc[dim] = slice(slice_start, slice_end)
-            return [X[slc]]
+            def slice_ref(X):
+                slc = [slice(None)] * X.ndim
+                slc[dim] = slice(slice_start, slice_end)
+                return [X[slc]]
+            inputs = [X]
+        else:
+            op = core.CreateOperator(
+                "Slice", ["X", "starts", "ends"], ["Y"], device_option=gc
+            )
 
-        self.assertReferenceChecks(gc, op, [X, starts, ends], slice_ref)
-        self.assertDeviceChecks(dc, op, [X, starts, ends], [0])
+            def slice_ref(x, starts, ends):
+                slc = [slice(None)] * x.ndim
+                slc[dim] = slice(slice_start, slice_end)
+                return [x[slc]]
+            inputs = [X, starts, ends]
+
+        self.assertReferenceChecks(gc, op, inputs, slice_ref)
+        self.assertDeviceChecks(dc, op, inputs, [0])
         self.assertGradientChecks(
             device_option=gc,
             op=op,
-            inputs=[X, starts, ends],
+            inputs=inputs,
             outputs_to_check=0,
             outputs_with_grads=[0],
         )
