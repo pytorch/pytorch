@@ -39,15 +39,11 @@ class Linear(Module):
         self.out_features = out_features
         self.weight = Parameter(torch.Tensor(out_features, in_features))
 
-        def _initializer(x):
-            stdv = 1. / math.sqrt(self.weight.size(1))
-            return init.uniform(x, -stdv, stdv)
-
-        self.initializer = {"weight": _initializer} if initializer is None else initializer
+        self.initializer = {"weight": self._initializer} if initializer is None else initializer
         if bias:
             self.bias = Parameter(torch.Tensor(out_features))
             if self.initializer.get("bias") is None:
-                self.initializer["bias"] = _initializer
+                self.initializer["bias"] = self._initializer
         else:
             self.register_parameter('bias', None)
         self.reset_parameters()
@@ -126,5 +122,9 @@ class Bilinear(Module):
             + 'in1_features=' + str(self.in1_features) \
             + ', in2_features=' + str(self.in2_features) \
             + ', out_features=' + str(self.out_features) + ')'
+
+    def _initializer(self, x):
+        stdv = 1. / math.sqrt(self.weight.size(1))
+        return init.uniform(x, -stdv, stdv)
 
 # TODO: PartialLinear - maybe in sparse?

@@ -34,19 +34,12 @@ class _ConvNd(Module):
             self.weight = Parameter(torch.Tensor(
                 out_channels, in_channels // groups, *kernel_size))
 
-        def _initializer(x):
-            n = self.in_channels
-            for k in self.kernel_size:
-                n *= k
-            stdv = 1. / math.sqrt(n)
-            return init.uniform(x, -stdv, stdv)
-
-        self.initializer = {"weight": _initializer} if initializer is None else initializer
+        self.initializer = {"weight": self._initializer} if initializer is None else initializer
 
         if bias:
             self.bias = Parameter(torch.Tensor(out_channels))
             if self.initializer.get("bias") is None:
-                self.initializer["bias"] = _initializer
+                self.initializer["bias"] = self._initializer
         else:
             self.register_parameter('bias', None)
         self.reset_parameters()
@@ -75,6 +68,13 @@ class _ConvNd(Module):
             s += ', bias=False'
         s += ')'
         return s.format(name=self.__class__.__name__, **self.__dict__)
+
+    def _initializer(self, x):
+        n = self.in_channels
+        for k in self.kernel_size:
+            n *= k
+        stdv = 1. / math.sqrt(n)
+        return init.uniform(x, -stdv, stdv)
 
 
 class Conv1d(_ConvNd):

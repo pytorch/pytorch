@@ -52,13 +52,10 @@ class RNNBase(Module):
                 else:
                     self._all_weights += [weights[:2]]
 
-        def _initializer(x):
-            stdv = 1.0 / math.sqrt(self.hidden_size)
-            return init.uniform(x, -stdv, stdv)
-        self.initializer = {"weight": _initializer} if initializer is None else initializer
+        self.initializer = {"weight": self._initializer} if initializer is None else initializer
 
         if bias and self.initializer.get("bias") is None:
-            self.initializer["bias"] = _initializer
+            self.initializer["bias"] = self._initializer
 
         self.reset_parameters()
 
@@ -141,6 +138,10 @@ class RNNBase(Module):
                     self._all_weights += [weights]
                 else:
                     self._all_weights += [weights[:2]]
+
+    def _initializer(self, x):
+        stdv = 1.0 / math.sqrt(self.hidden_size)
+        return init.uniform(x, -stdv, stdv)
 
     @property
     def all_weights(self):
