@@ -68,6 +68,10 @@ class Linear(Module):
             + str(self.in_features) + ' -> ' \
             + str(self.out_features) + ')'
 
+    def _initializer(self, x):
+        stdv = 1. / math.sqrt(self.weight.size(1))
+        return init.uniform(x, -stdv, stdv)
+
 
 class Bilinear(Module):
     r"""Applies a bilinear transformation to the incoming data: :math:`y = x_1 * A * x_2 + b`
@@ -122,9 +126,5 @@ class Bilinear(Module):
             + 'in1_features=' + str(self.in1_features) \
             + ', in2_features=' + str(self.in2_features) \
             + ', out_features=' + str(self.out_features) + ')'
-
-    def _initializer(self, x):
-        stdv = 1. / math.sqrt(self.weight.size(1))
-        return init.uniform(x, -stdv, stdv)
 
 # TODO: PartialLinear - maybe in sparse?
