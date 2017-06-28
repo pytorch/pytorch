@@ -883,6 +883,7 @@ static PyObject* THPTensor_(advancedIndexAdd)(THPTensor *self, PyObject *args) {
     return NULL;
   }
 
+  Py_INCREF(self);
   return (PyObject *)self;
   END_HANDLE_TH_ERRORS
 }

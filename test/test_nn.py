@@ -3401,6 +3401,24 @@ new_module_tests = [
     ),
 ]
 
+
+new_criterion_tests = [
+    dict(
+        module_name='PoissonNLLLoss',
+        input=torch.randn(2, 3, 4, 5),
+        target=torch.randn(2, 3, 4, 5).floor_().abs_(),
+        desc='reduced_loss',
+    ),
+    dict(
+        module_name='PoissonNLLLoss',
+        constructor_args=(False, True, True),
+        input=torch.randn(2, 3, 4, 5).abs_().add_(0.001),
+        target=torch.randn(2, 3, 4, 5).floor_().abs_(),
+        desc='full_loss',
+    ),
+]
+
+
 for test_params in module_tests + new_module_tests:
     # TODO: CUDA is not implemented yet
     if 'constructor' not in test_params:

@@ -1502,9 +1502,12 @@ function_tests = [
     (Cumsum, (), ((S, S, S), 0), 'dim0', [1]),
     (Cumsum, (), ((S, S, S), 1), 'dim1', [1]),
     (Cumsum, (), ((S,), 0), '1d', [1]),
-    (Cumprod, (0,), ((S, S, S),)),
-    (Cumprod, (1,), ((S, S, S),), 'dim1'),
-    (Cumprod, (0,), ((S,),), '1d'),
+    (Cumprod, (), ((S, S, S), 0),),
+    (Cumprod, (), ((S, S, S), 1), 'dim1'),
+    (Cumprod, (), ((S,), 0), '1d'),
+    (Cumprod, (), (prod_zeros(S, [0, 1]), 1), 'zeros_dim2', [1]),
+    (Cumprod, (), (prod_zeros(S, [0, 2]), 1), 'zeros_dim1', [1]),
+    (Cumprod, (), (prod_zeros(S, [1, 2]), 1), 'zeros_dim0', [1]),
     (Unfold, (), ((S, S, S), 1, 3, 1)),
     (Unfold, (), ((S, S, S), 2, 3, 2), 'lastdim'),
     (Min, (), ((S, S, S),),),
@@ -1745,8 +1748,8 @@ method_tests = [
     ('repeat', (S, S, S, S), (2, 3, 1, 4)),
     ('cumsum', (S, S, S), (1,)),
     ('cumsum', (S,), (0,), '1d'),
-    ('cumprod', (S, S, S), (1,)),
-    ('cumprod', (S,), (0,), '1d'),
+    ('cumprod', (S, S, S), (1,), 'dim1', [0]),
+    ('cumprod', prod_zeros(S, [0, 1]), (1,), 'zeros_dim', [0]),
     ('unfold', (S, S, S, S), (1, 3, 1)),
     ('unfold', (S, S, S), (2, 3, 2), 'lastdim'),
     ('addmm', (S, M), ((S, S), (S, M)),),
@@ -1908,11 +1911,12 @@ ignore_inplace = set((
 
 ))
 
-gradgradcheck_exclude_classes = set((
-    'Cumprod',
-    'Norm',
-    'Prod',
-))
+# these are just empirical observations, we should improve
+gradgradcheck_precision_override = {
+    'test_NormFunction_1_5': {'atol': 1e-2, 'rtol': 1e-2},
+    'test_NormFunction_2': {'atol': 1e-2, 'rtol': 1e-2},
+    'test_NormFunction_3': {'atol': 5e-2, 'rtol': 1e-2},
+}
 
 for test in function_tests:
     cls, constructor_args, call_args = test[:3]
@@ -1967,14 +1971,18 @@ for test in function_tests:
                         self.assertTrue(type(inp.data) == type(inp.grad.data))
                         self.assertTrue(inp.size() == inp.grad.size())
 
-            if cls.__name__ not in gradgradcheck_exclude_classes:
-                dummy_out = apply_fn(*input)
-                if isinstance(dummy_out, tuple):
-                    grad_y = tuple(Variable(torch.randn(x.size()), requires_grad=x.requires_grad)
-                                   for x in dummy_out if isinstance(x, Variable))
-                else:
-                    grad_y = (Variable(torch.randn(dummy_out.size()), requires_grad=dummy_out.requires_grad),)
+            dummy_out = apply_fn(*input)
+            if isinstance(dummy_out, tuple):
+                grad_y = tuple(Variable(torch.randn(x.size()), requires_grad=x.requires_grad)
+                               for x in dummy_out if isinstance(x, Variable))
+            else:
+                grad_y = (Variable(torch.randn(dummy_out.size()), requires_grad=dummy_out.requires_grad),)
 
+            if test_name in gradgradcheck_precision_override:
+                atol = gradgradcheck_precision_override[test_name]['atol']
+                rtol = gradgradcheck_precision_override[test_name]['rtol']
+                self.assertTrue(gradgradcheck(apply_fn, input, grad_y, atol=atol, rtol=rtol))
+            else:
                 self.assertTrue(gradgradcheck(apply_fn, input, grad_y,))
 
             # can't broadcast inplace to left hand side
