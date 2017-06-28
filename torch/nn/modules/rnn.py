@@ -318,13 +318,13 @@ class GRU(RNNBase):
         - **h_n** (num_layers * num_directions, batch, hidden_size): tensor containing the hidden state for t=seq_len
 
     Attributes:
-        weight_ih_l[k] : the learnable input-hidden weights of the k-th layer (W_ir|W_ii|W_in), of shape
+        weight_ih_l[k] : the learnable input-hidden weights of the k-th layer (W_ir|W_iz|W_in), of shape
                          `(input_size x 3*hidden_size)`
-        weight_hh_l[k] : the learnable hidden-hidden weights of the k-th layer (W_hr|W_hi|W_hn), of shape
+        weight_hh_l[k] : the learnable hidden-hidden weights of the k-th layer (W_hr|W_hz|W_hn), of shape
                          `(hidden_size x 3*hidden_size)`
-        bias_ih_l[k] : the learnable input-hidden bias of the k-th layer (b_ir|b_ii|b_in), of shape
+        bias_ih_l[k] : the learnable input-hidden bias of the k-th layer (b_ir|b_iz|b_in), of shape
                          `(3*hidden_size)`
-        bias_hh_l[k] : the learnable hidden-hidden bias of the k-th layer (W_hr|W_hi|W_hn), of shape
+        bias_hh_l[k] : the learnable hidden-hidden bias of the k-th layer (b_hr|b_hz|b_hn), of shape
                          `(3*hidden_size)`
     Examples::
 
@@ -507,9 +507,9 @@ class GRUCell(RNNCellBase):
 
         \begin{array}{ll}
         r = \mathrm{sigmoid}(W_{ir} x + b_{ir} + W_{hr} h + b_{hr}) \\
-        i = \mathrm{sigmoid}(W_{ii} x + b_{ii} + W_{hi} h + b_{hi}) \\
+        z = \mathrm{sigmoid}(W_{iz} x + b_{iz} + W_{hz} h + b_{hz}) \\
         n = \tanh(W_{in} x + b_{in} + r * (W_{hn} h + b_{hn})) \\
-        h' = (1 - i) * n + i * h
+        h' = (1 - z) * n + z * h
         \end{array}
 
     Args:
