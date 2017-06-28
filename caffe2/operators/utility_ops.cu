@@ -245,8 +245,8 @@ bool SliceOp<int, CUDAContext>::RunOnDevice() {
   auto& data = Input(0);
 
   if (InputSize() > 1) {
-    starts_host_.template CopyFrom<CUDAContext>(Input(1));
-    ends_host_.template CopyFrom<CUDAContext>(Input(2));
+    starts_host_.CopyFrom<CUDAContext>(Input(1));
+    ends_host_.CopyFrom<CUDAContext>(Input(2));
   } else {
     if (!statically_inited_) {
       CAFFE_ENFORCE(HasArgument("starts"));
@@ -257,11 +257,11 @@ bool SliceOp<int, CUDAContext>::RunOnDevice() {
       ends_host_.Resize(ends_.size());
 
       memcpy(
-          starts_host_.template mutable_data<int>(),
+          starts_host_.mutable_data<int>(),
           starts_.data(),
           sizeof(int) * starts_.size());
       memcpy(
-          ends_host_.template mutable_data<int>(),
+          ends_host_.mutable_data<int>(),
           ends_.data(),
           sizeof(int) * ends_.size());
       statically_inited_ = true;
@@ -280,8 +280,8 @@ bool SliceGradientOp<int, CUDAContext>::RunOnDevice() {
   auto& data = Input(0);
 
   if (InputSize() == 4) {
-    starts_host_.template CopyFrom<CUDAContext>(Input(1));
-    ends_host_.template CopyFrom<CUDAContext>(Input(2));
+    starts_host_.CopyFrom<CUDAContext>(Input(1));
+    ends_host_.CopyFrom<CUDAContext>(Input(2));
 
     auto& go = Input(3);
 
@@ -297,11 +297,11 @@ bool SliceGradientOp<int, CUDAContext>::RunOnDevice() {
       ends_host_.Resize(ends_.size());
 
       memcpy(
-          starts_host_.template mutable_data<int>(),
+          starts_host_.mutable_data<int>(),
           starts_.data(),
           sizeof(int) * starts_.size());
       memcpy(
-          ends_host_.template mutable_data<int>(),
+          ends_host_.mutable_data<int>(),
           ends_.data(),
           sizeof(int) * ends_.size());
 
@@ -450,7 +450,7 @@ bool MaxGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& grad_output = Input(1);
   const int kInputStartOffset = 2;
 
-  const float* data = output.template data<float>();
+  const float* data = output.data<float>();
 
   for (int i = 0; i < OutputSize(); i++) {
     auto& input = Input(i + kInputStartOffset);
