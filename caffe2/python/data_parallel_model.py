@@ -403,6 +403,10 @@ def Parallelize_GPU_BMUF(
             model_parameter_names,
             max_concurrent_distributed_ops
         )
+        for param_name in model_helper_obj._device_grouped_blobs.keys():
+            param = model_helper_obj._device_grouped_blobs[param_name][master_gpu]
+            with core.DeviceScope(master_gpu_opt):
+                model_helper_obj._warmup_broadcast.Copy(param, _g(param))
 
     # (Step-0) Initialize momentum parameters on master GPU.
     for param_name in model_helper_obj._device_grouped_blobs.keys():
