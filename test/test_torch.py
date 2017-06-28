@@ -1307,6 +1307,24 @@ class TestTorch(TestCase):
     def test_broadcast_batched_matmul(self):
         self._test_broadcast_batched_matmul(self, lambda t: t)
 
+    def test_matmul_out(self):
+
+        def check_matmul(size1, size2):
+            a = torch.randn(size1)
+            b = torch.randn(size2)
+            expected = torch.matmul(a, b)
+
+            out = torch.Tensor(expected.size()).zero_()
+            # make output non-contiguous
+            out = out.transpose(-1, -2).contiguous().transpose(-1, -2)
+            self.assertFalse(out.is_contiguous())
+
+            torch.matmul(a, b, out=out)
+            self.assertEqual(expected, out)
+
+        check_matmul((2, 3, 4), (2, 4, 5))
+        check_matmul((2, 3, 4), (4, 5))
+
     def test_broadcast_copy_fn(self):
         torch.zeros(5, 6).copy_(torch.zeros(6))
 
