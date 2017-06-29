@@ -11,13 +11,24 @@ CAFFE2_DEFINE_bool(
 namespace caffe2 {
 
 template <>
+void createSharedBuffer<CPUContext>(Workspace* ws) {
+  auto* mutexPtr = ws->CreateBlob("__CAFFE2_SHARED_CONV_BUFFER_CPU_MUTEX__")
+                       ->GetMutable<std::unique_ptr<std::mutex>>();
+  mutexPtr->reset(new std::mutex());
+  ws->CreateBlob("__CAFFE2_SHARED_CONV_BUFFER_CPU__");
+}
+
+template <>
 void runWithSharedBuffer(
     Workspace* ws,
     std::function<void(Tensor<CPUContext>* buffer)> f) {
-  static std::mutex m;
-  std::lock_guard<std::mutex> g(m);
-  auto* buffer = ws->CreateBlob("__CAFFE2_SHARED_CONV_BUFFER_CPU__")
-                     ->GetMutable<TensorCPU>();
+  auto* mutexBlob = ws->GetBlob("__CAFFE2_SHARED_CONV_BUFFER_CPU_MUTEX__");
+  CAFFE_ENFORCE(mutexBlob, "Must call createSharedBuffer() first");
+
+  auto* mutexPtr = mutexBlob->GetMutable<std::unique_ptr<std::mutex>>();
+  std::lock_guard<std::mutex> g(**mutexPtr);
+  auto* buffer =
+      ws->GetBlob("__CAFFE2_SHARED_CONV_BUFFER_CPU__")->GetMutable<TensorCPU>();
   f(buffer);
 }
 }
