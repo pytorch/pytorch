@@ -8,6 +8,8 @@ from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace, data_parallel_model, cnn, rnn_cell
 from caffe2.python import optimizer
 from caffe2.python.test_util import TestCase
+from future.utils import viewkeys
+
 
 
 class DataParallelModelTest(TestCase):
@@ -573,7 +575,9 @@ class ParallelizeGPUBMUFTest(TestCase):
         data_parallel_model.RunInitNet(model)
 
         # Check initial momentum params are zeros
-        self.assertEqual(model._device_grouped_blobs.keys(), ['fc_w', 'fc_b'])
+        self.assertEqual(
+            list(viewkeys(model._device_grouped_blobs)), ['fc_w', 'fc_b']
+        )
         self.assertEqual(workspace.FetchBlob('gpu_0/fc_b_v'), 0)
         np.testing.assert_equal(
             workspace.FetchBlob('gpu_0/fc_w_v'),

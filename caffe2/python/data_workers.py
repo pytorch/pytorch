@@ -64,6 +64,7 @@ try:
 except ImportError:
     # Py3
     import queue as Queue
+from itertools import chain
 import logging
 import threading
 import atexit
@@ -331,7 +332,9 @@ class DataInputCoordinator(object):
         # Feed empty arrays to the scratch blobs here, so that there won't be
         # race conditions when calling FeedBlob (which calls wworkspace
         # CreateBlob()) from enqueue threads
-        for b in self._scratch_blob.values() + self._scratch_status.values():
+        for b in chain(
+            self._scratch_blob.values(), self._scratch_status.values()
+        ):
             workspace.FeedBlob(
                 b,
                 np.array([]).astype(np.float32),

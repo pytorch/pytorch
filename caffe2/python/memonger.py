@@ -15,6 +15,7 @@ from caffe2.proto import caffe2_pb2
 import enum
 import logging
 import numpy as np
+from future.utils import viewitems, viewvalues
 
 log = logging.getLogger("memonger")
 log.setLevel(logging.INFO)
@@ -315,7 +316,7 @@ def _compute_blob_recycling_for_dag(
             saved_count += saved
 
     # Rename the shared blobs
-    shared_blobs = set(mapping.values())
+    shared_blobs = set(viewvalues(mapping))
     renamed = {}
     for j, b in enumerate(shared_blobs):
         if b in optim_op_outputs:
@@ -510,7 +511,7 @@ def topological_sort_traversal_longest_path(g):
     gt = _add_single_target_ifneeded(g)
     source_nodes = _find_source_nodes(gt)
     lpaths = _get_longest_paths(gt, source_nodes)
-    tree, root = _build_tree(lpaths.values())
+    tree, root = _build_tree(list(viewvalues(lpaths)))
     sorted_sources = _sort_tree_leaves(tree, root)
     assert(sorted(sorted_sources) == sorted(source_nodes))
 
@@ -785,7 +786,7 @@ def compute_assignments(ranges, static_blobs, algo):
     # be consumed externally. Sort these to the end of the list as opposed
     # to the beginning so that they can be shared as well.
     ranges = sorted(
-        list(ranges.items()),
+        viewitems(ranges),
         key=lambda p: (p[1].used is None, p[1].used),
     )
     # Update None values
@@ -867,7 +868,7 @@ def apply_recurrent_blob_assignments(op, blob_assignments, canonical_name):
                 step_proto.external_input[i] = canonical_name(einp)
         step_arg.s = str(step_proto).encode("ascii")
     # Store renamings
-    for blob, renamed in blob_assignments.items():
+    for blob, renamed in viewitems(blob_assignments):
         if blob in list(op.input) + list(op.output):
             a = caffe2_pb2.Argument()
             a.name = blob + ".rename"
@@ -1004,7 +1005,7 @@ def compute_statistics(assignments):
     blob_bytes = {
         blob: blob_nbytes(blob) for assignment in assignments
         for (blob, _) in assignment}
-    baseline_nbytes = sum(v for _, v in blob_bytes.items())
+    baseline_nbytes = sum(viewvalues(blob_bytes))
     optimized_nbytes = sum(
         max(blob_bytes[blob] for (blob, _) in assignment)
         for assignment in assignments)

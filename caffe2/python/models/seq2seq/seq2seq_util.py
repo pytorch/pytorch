@@ -8,6 +8,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import collections
+from future.utils import viewitems
 
 import caffe2.proto.caffe2_pb2 as caffe2_pb2
 from caffe2.python import core, rnn_cell
@@ -37,7 +38,7 @@ def gen_vocab(corpus, unk_threshold):
             tokens = sentence.strip().split()
             for token in tokens:
                 freqs[token] += 1
-    for token, freq in freqs.items():
+    for token, freq in viewitems(freqs):
         if freq > unk_threshold:
             vocab[token]
 

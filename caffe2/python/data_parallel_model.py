@@ -5,6 +5,7 @@ from __future__ import division
 from __future__ import print_function
 
 from collections import OrderedDict
+from future.utils import viewitems, viewkeys, viewvalues
 import logging
 import copy
 
@@ -164,8 +165,9 @@ def Parallelize(
     model_helper_obj._device_grouped_blobs.update(computed_params_grouped)
 
     model_helper_obj._param_names =\
-        model_helper_obj._device_grouped_blobs.keys()
-    model_helper_obj._computed_param_names = computed_params_grouped.keys()
+        list(viewkeys(model_helper_obj._device_grouped_blobs))
+    model_helper_obj._computed_param_names =\
+        list(viewkeys(computed_params_grouped))
 
     if not has_parameter_updates:
         log.info("Parameter update function not defined --> only forward")
@@ -190,7 +192,7 @@ def Parallelize(
         non_datapar_grads
     )
     model_helper_obj._device_grouped_blobs.update(gradients_grouped)
-    model_helper_obj._grad_names = gradients_grouped.keys()
+    model_helper_obj._grad_names = list(viewkeys(gradients_grouped))
     model_helper_obj._losses_by_gpu = losses_by_gpu
 
     _InferBlobDevice(model_helper_obj)
@@ -384,7 +386,9 @@ def Parallelize_GPU_BMUF(
         param_update_builder_fun(model_helper_obj)
     _ForEachGPU(devices, _InitializeParamUpdate, scoped=True)
 
-    model_parameter_names = model_helper_obj._device_grouped_blobs.keys()
+    model_parameter_names = list(
+        viewkeys(model_helper_obj._device_grouped_blobs)
+    )
     if warmup_iterations is not None:
         model_helper_obj._warmup_iterations = warmup_iterations
         # A net for broadcasting gpu-0 (master shard) parameters after
@@ -409,7 +413,7 @@ def Parallelize_GPU_BMUF(
                 model_helper_obj._warmup_broadcast.Copy(param, _g(param))
 
     # (Step-0) Initialize momentum parameters on master GPU.
-    for param_name in model_helper_obj._device_grouped_blobs.keys():
+    for param_name in viewkeys(model_helper_obj._device_grouped_blobs):
         param = model_helper_obj._device_grouped_blobs[param_name][master_gpu]
         with core.DeviceScope(master_gpu_opt):
             model_helper_obj._global_model_init_net.ConstantFill(
@@ -682,7 +686,7 @@ def _Broadcast(devices, model, net, param, use_nccl=False):
 
 
 def _AllReduce(devices, model, net, param, use_nccl=False, control_input=None):
-    blobs_group = model._device_grouped_blobs[param].values()
+    blobs_group = list(viewvalues(model._device_grouped_blobs[param]))
     if model._device_type == caffe2_pb2.CUDA and use_nccl:
         model.NCCLAllreduce(
             blobs_group, blobs_group, control_input=control_input
@@ -917,7 +921,7 @@ def _AllReduceBlobsDistributed(
 
     for blob_name in blob_names:
         master_blob = model._device_grouped_blobs[blob_name][devices[0]]
-        blobs_group = model._device_grouped_blobs[blob_name].values()
+        blobs_group = list(viewvalues(model._device_grouped_blobs[blob_name]))
 
         assert master_blob in blobs_group
 
@@ -980,7 +984,7 @@ def _AllReduceBlobsSingleHost(blob_names, devices, model, net, use_nccl):
 
     for blob_name in blob_names:
         # Group by blob_name for reduce.
-        blobs_group = model._device_grouped_blobs[blob_name].values()
+        blobs_group = list(viewvalues(model._device_grouped_blobs[blob_name]))
         assert len(blobs_group) == len(devices), \
             "Each GPU from {}, should have a copy of {}.".format(
                 devices, blob_name)
@@ -1016,7 +1020,7 @@ def _AllReduceBlobsSingleHost(blob_names, devices, model, net, use_nccl):
                             axis=0,
                             name="note:data_parallel_model")
 
-                        for gpu, g in model._device_grouped_blobs[blob_name].items():
+                        for gpu, g in viewitems(model._device_grouped_blobs[blob_name]):
                             device_opt = core.DeviceOption(model._device_type, gpu)
                             with core.DeviceScope(device_opt):
                                 model.Copy(grad_idx_concat, g.indices)
@@ -1028,7 +1032,7 @@ def _AllReduceBlobsSingleHost(blob_names, devices, model, net, use_nccl):
                          "{}/{}_val_splitinfo".format(master_ns, blob_name)],
                         axis=0, name="note:data_parallel_model")
 
-                    for gpu, g in model._device_grouped_blobs[blob_name].items():
+                    for gpu, g in viewitems(model._device_grouped_blobs[blob_name]):
                         device_opt = core.DeviceOption(model._device_type, gpu)
                         with core.DeviceScope(device_opt):
                             model.Copy(grad_val_concat, g.values)
@@ -1197,7 +1201,7 @@ def _GroupByDevice(model, devices, params, non_data_params):
         grouped[name][gpuid] = p
 
     # Confirm consistency
-    for j, (p, ps) in enumerate(grouped.items()):
+    for j, (p, ps) in enumerate(viewitems(grouped)):
         assert \
             len(ps) == len(devices), \
             "Param {} does not have value for each device (only {}: {})".format(
@@ -1206,7 +1210,7 @@ def _GroupByDevice(model, devices, params, non_data_params):
         # Ensure ordering
         if (ps[devices[0]] != params[j]):
             log.error("Params: {}".format(params))
-            log.error("Grouped: {}".format(grouped.keys()))
+            log.error("Grouped: {}".format(list(viewkeys(grouped))))
             assert ps[devices[0]] == params[j], \
                 "Incorrect ordering: {}".format(ps)
 
@@ -1261,7 +1265,7 @@ def _OptimizeGradientMemorySimple(model, losses_by_gpu, devices):
         model.net._net = memonger.share_grad_blobs(
             model.net,
             losses_by_gpu[device],
-            set(model.param_to_grad.values()),
+            set(viewvalues(model.param_to_grad)),
             namescope,
             share_activations=False,
         )
@@ -1281,7 +1285,7 @@ def OptimizeGradientMemory(model,
     recycle_activations: whether to also recycle forward pass activations
     """
     input_shapes_all_devices = {}
-    for b, shp in input_shapes.items():
+    for b, shp in viewitems(input_shapes):
         for d in model._devices:
             input_shapes_all_devices["{}_{}/{}".
                                      format(model._device_prefix, d, b)] = shp
@@ -1293,11 +1297,11 @@ def OptimizeGradientMemory(model,
 
     for device in model._devices:
         namescope = "{}_{}/".format(model._device_prefix, device)
-        excluded_blobs_by_device = set([namescope + b for b in excluded_blobs])
+        excluded_blobs_by_device = set(namescope + b for b in excluded_blobs)
         model.net._net = memonger.share_grad_blobs(
             model.net,
             model._losses_by_gpu[device],
-            set(model.param_to_grad.values()),
+            set(viewvalues(model.param_to_grad)),
             namescope,
             dont_share_blobs=excluded_blobs_by_device,
             share_activations=recycle_activations,
