@@ -746,6 +746,29 @@ class TestNN(NNTestCase):
             scale = compare_scaling(grads)
             self.assertEqual(scale, 1)
 
+    def test_weight_norm(self):
+        input = Variable(torch.randn(3, 5))
+        m = nn.Linear(5, 7)
+        expected_output = m(input)
+
+        # add weight normalization
+        m = torch.nn.utils.weight_norm(m)
+        self.assertEqual(m.weight_v.size(), m.weight.size())
+        self.assertEqual(m.weight_g.size(), (7, 1))
+        self.assertEqual(m(input), expected_output)
+
+        # remove weight norm
+        m = torch.nn.utils.remove_weight_norm(m)
+        self.assertFalse(hasattr(m, 'weight_g'))
+        self.assertFalse(hasattr(m, 'weight_v'))
+        self.assertEqual(m(input), expected_output)
+
+        # test with dim=1
+        m = torch.nn.utils.weight_norm(m, dim=1)
+        self.assertEqual(m.weight_v.size(), m.weight.size())
+        self.assertEqual(m.weight_g.size(), (1, 5))
+        self.assertEqual(m(input), expected_output)
+
     def test_embedding_padding_idx(self):
         embedding = nn.Embedding(10, 20, padding_idx=0)
         input = Variable(torch.LongTensor([[0, 2, 4, 5], [4, 3, 0, 9]]))
