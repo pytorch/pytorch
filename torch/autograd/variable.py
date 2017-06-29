@@ -61,7 +61,7 @@ class Variable(_C._VariableBase):
     def __getattr__(self, name):
         if name in self._fallthrough_methods:
             return getattr(self.data, name)
-        raise AttributeError(name)
+        return object.__getattribute__(self, name)
 
     def __getitem__(self, key):
         if torch.is_tensor(key):
@@ -495,7 +495,7 @@ class Variable(_C._VariableBase):
         return Cumsum.apply(self, dim)
 
     def cumprod(self, dim):
-        return Cumprod(dim)(self)
+        return Cumprod.apply(self, dim)
 
     def unfold(self, dim, size, step):
         return Unfold.apply(self, dim, size, step)

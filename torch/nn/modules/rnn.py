@@ -212,10 +212,10 @@ class LSTM(RNNBase):
     .. math::
 
             \begin{array}{ll}
-            i_t = sigmoid(W_{ii} x_t + b_{ii} + W_{hi} h_{(t-1)} + b_{hi}) \\
-            f_t = sigmoid(W_{if} x_t + b_{if} + W_{hf} h_{(t-1)} + b_{hf}) \\
+            i_t = \mathrm{sigmoid}(W_{ii} x_t + b_{ii} + W_{hi} h_{(t-1)} + b_{hi}) \\
+            f_t = \mathrm{sigmoid}(W_{if} x_t + b_{if} + W_{hf} h_{(t-1)} + b_{hf}) \\
             g_t = \tanh(W_{ig} x_t + b_{ig} + W_{hc} h_{(t-1)} + b_{hg}) \\
-            o_t = sigmoid(W_{io} x_t + b_{io} + W_{ho} h_{(t-1)} + b_{ho}) \\
+            o_t = \mathrm{sigmoid}(W_{io} x_t + b_{io} + W_{ho} h_{(t-1)} + b_{ho}) \\
             c_t = f_t * c_{(t-1)} + i_t * g_t \\
             h_t = o_t * \tanh(c_t)
             \end{array}
@@ -285,15 +285,15 @@ class GRU(RNNBase):
     .. math::
 
             \begin{array}{ll}
-            r_t = sigmoid(W_{ir} x_t + b_{ir} + W_{hr} h_{(t-1)} + b_{hr}) \\
-            i_t = sigmoid(W_{ii} x_t + b_{ii} + W_hi h_{(t-1)} + b_{hi}) \\
+            r_t = \mathrm{sigmoid}(W_{ir} x_t + b_{ir} + W_{hr} h_{(t-1)} + b_{hr}) \\
+            z_t = \mathrm{sigmoid}(W_{iz} x_t + b_{iz} + W_{hz} h_{(t-1)} + b_{hz}) \\
             n_t = \tanh(W_{in} x_t + b_{in} + r_t * (W_{hn} h_{(t-1)}+ b_{hn})) \\
-            h_t = (1 - i_t) * n_t + i_t * h_{(t-1)} \\
+            h_t = (1 - z_t) * n_t + z_t * h_{(t-1)} \\
             \end{array}
 
     where :math:`h_t` is the hidden state at time `t`, :math:`x_t` is the hidden
     state of the previous layer at time `t` or :math:`input_t` for the first layer,
-    and :math:`r_t`, :math:`i_t`, :math:`n_t` are the reset, input, and new gates, respectively.
+    and :math:`r_t`, :math:`z_t`, :math:`n_t` are the reset, input, and new gates, respectively.
 
     Args:
         input_size: The number of expected features in the input x
@@ -318,13 +318,13 @@ class GRU(RNNBase):
         - **h_n** (num_layers * num_directions, batch, hidden_size): tensor containing the hidden state for t=seq_len
 
     Attributes:
-        weight_ih_l[k] : the learnable input-hidden weights of the k-th layer (W_ir|W_ii|W_in), of shape
+        weight_ih_l[k] : the learnable input-hidden weights of the k-th layer (W_ir|W_iz|W_in), of shape
                          `(input_size x 3*hidden_size)`
-        weight_hh_l[k] : the learnable hidden-hidden weights of the k-th layer (W_hr|W_hi|W_hn), of shape
+        weight_hh_l[k] : the learnable hidden-hidden weights of the k-th layer (W_hr|W_hz|W_hn), of shape
                          `(hidden_size x 3*hidden_size)`
-        bias_ih_l[k] : the learnable input-hidden bias of the k-th layer (b_ir|b_ii|b_in), of shape
+        bias_ih_l[k] : the learnable input-hidden bias of the k-th layer (b_ir|b_iz|b_in), of shape
                          `(3*hidden_size)`
-        bias_hh_l[k] : the learnable hidden-hidden bias of the k-th layer (W_hr|W_hi|W_hn), of shape
+        bias_hh_l[k] : the learnable hidden-hidden bias of the k-th layer (b_hr|b_hz|b_hn), of shape
                          `(3*hidden_size)`
     Examples::
 
@@ -432,10 +432,10 @@ class LSTMCell(RNNCellBase):
     .. math::
 
         \begin{array}{ll}
-        i = sigmoid(W_{ii} x + b_{ii} + W_{hi} h + b_{hi}) \\
-        f = sigmoid(W_{if} x + b_{if} + W_{hf} h + b_{hf}) \\
+        i = \mathrm{sigmoid}(W_{ii} x + b_{ii} + W_{hi} h + b_{hi}) \\
+        f = \mathrm{sigmoid}(W_{if} x + b_{if} + W_{hf} h + b_{hf}) \\
         g = \tanh(W_{ig} x + b_{ig} + W_{hc} h + b_{hg}) \\
-        o = sigmoid(W_{io} x + b_{io} + W_{ho} h + b_{ho}) \\
+        o = \mathrm{sigmoid}(W_{io} x + b_{io} + W_{ho} h + b_{ho}) \\
         c' = f * c + i * g \\
         h' = o * \tanh(c_t) \\
         \end{array}
@@ -506,10 +506,10 @@ class GRUCell(RNNCellBase):
     .. math::
 
         \begin{array}{ll}
-        r = sigmoid(W_{ir} x + b_{ir} + W_{hr} h + b_{hr}) \\
-        i = sigmoid(W_{ii} x + b_{ii} + W_{hi} h + b_{hi}) \\
+        r = \mathrm{sigmoid}(W_{ir} x + b_{ir} + W_{hr} h + b_{hr}) \\
+        z = \mathrm{sigmoid}(W_{iz} x + b_{iz} + W_{hz} h + b_{hz}) \\
         n = \tanh(W_{in} x + b_{in} + r * (W_{hn} h + b_{hn})) \\
-        h' = (1 - i) * n + i * h
+        h' = (1 - z) * n + z * h
         \end{array}
 
     Args:

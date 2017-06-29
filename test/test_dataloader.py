@@ -3,7 +3,7 @@ import sys
 import torch
 import traceback
 import unittest
-from torch.utils.data import Dataset, TensorDataset, DataLoader
+from torch.utils.data import Dataset, TensorDataset, DataLoader, ConcatDataset
 from common import TestCase, run_tests, TEST_NUMPY
 from common_nn import TEST_CUDA
 
@@ -29,6 +29,38 @@ class TestTensorDataset(TestCase):
         for i in range(15):
             self.assertEqual(t[i], source[i][0])
             self.assertEqual(l[i], source[i][1])
+
+
+class TestConcatDataset(TestCase):
+
+    def test_concat_two_singletons(self):
+        result = ConcatDataset([[0], [1]])
+        self.assertEqual(2, len(result))
+        self.assertEqual(0, result[0])
+        self.assertEqual(1, result[1])
+
+    def test_concat_two_non_singletons(self):
+        result = ConcatDataset([[0, 1, 2, 3, 4],
+                                [5, 6, 7, 8, 9]])
+        self.assertEqual(10, len(result))
+        self.assertEqual(0, result[0])
+        self.assertEqual(5, result[5])
+
+    def test_concat_two_non_singletons_with_empty(self):
+        # Adding an empty dataset somewhere is correctly handled
+        result = ConcatDataset([[0, 1, 2, 3, 4],
+                                [],
+                                [5, 6, 7, 8, 9]])
+        self.assertEqual(10, len(result))
+        self.assertEqual(0, result[0])
+        self.assertEqual(5, result[5])
+
+    def test_concat_raises_index_error(self):
+        result = ConcatDataset([[0, 1, 2, 3, 4],
+                                [5, 6, 7, 8, 9]])
+        with self.assertRaises(IndexError):
+            # this one goes to 11
+            result[11]
 
 
 class ErrorDataset(Dataset):

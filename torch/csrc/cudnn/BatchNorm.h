@@ -1,9 +1,9 @@
 #ifndef THP_CUDNN_BATCH_NORM_INC
 #define THP_CUDNN_BATCH_NORM_INC
 
+#include "../Types.h"
 #include <cudnn.h>
 #include "THC/THC.h"
-#include "../Types.h"
 
 
 namespace torch { namespace cudnn {

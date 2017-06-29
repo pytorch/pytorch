@@ -1,3 +1,3 @@
 
-from .dataset import Dataset, TensorDataset
+from .dataset import Dataset, TensorDataset, ConcatDataset
 from .dataloader import DataLoader

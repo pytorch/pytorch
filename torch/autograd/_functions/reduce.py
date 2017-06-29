@@ -2,6 +2,7 @@ from functools import reduce
 
 from ..function import Function
 from ..variable import Variable
+import torch
 
 
 class Sum(Function):
@@ -47,6 +48,32 @@ class Prod(Function):
 
     @staticmethod
     def backward(ctx, grad_output):
+        def safe_zeros_backward(inp, dim):
+            # note that the gradient is equivalent to:
+            # cumprod(exclusive, normal) * cumprod(exclusive, reverse), e.g.:
+            # input:                        [    a,     b,     c]
+            # cumprod(exclusive, normal):   [1    ,     a, a * b]
+            # cumprod(exclusive, reverse):  [b * c,     c,     1]
+            # product:                      [b * c, a * c, a * b]
+            # and this is safe under input with 0s.
+            if inp.size(dim) == 1:
+                return grad_output
+
+            ones_size = torch.Size((inp.size()[:dim] + (1,) + inp.size()[dim + 1:]))
+            ones = Variable(grad_output.data.new(ones_size).fill_(1))
+            exclusive_normal_nocp = torch.cat((ones, inp.narrow(dim, 0, inp.size(dim) - 1)), dim)
+            exclusive_normal = exclusive_normal_nocp.cumprod(dim)
+
+            def reverse_dim(var, dim):
+                return var.index_select(dim, Variable(torch.arange(var.size(dim) - 1, -1, -1)).long())
+
+            narrow_reverse = reverse_dim(inp.narrow(dim, 1, inp.size(dim) - 1), dim)
+            exclusive_reverse_nocp = torch.cat((ones, narrow_reverse), dim)
+            exclusive_reverse = reverse_dim(exclusive_reverse_nocp.cumprod(dim), dim)
+
+            grad_input = grad_output.expand_as(exclusive_normal).mul(exclusive_normal.mul(exclusive_reverse))
+            return grad_input
+
         if ctx.dim is None:
             input, = ctx.saved_variables
             zero_idx = (input.data == 0).nonzero()
@@ -55,12 +82,8 @@ class Prod(Function):
             elif zero_idx.size(0) > 1:
                 return (grad_output * 0).expand_as(input), None, None
             else:
-                grad_input = Variable(grad_output.data.new(ctx.input_size).zero_())
-                zero_idx = tuple(zero_idx[0].cpu())
-                to_add = input.data.new(ctx.input_size).zero_()
-                to_add[zero_idx] = 1.
-                grad_input[zero_idx] = grad_output * (input + Variable(to_add)).prod()
-                return grad_input, None, None
+                return safe_zeros_backward(input.view(-1), 0).view_as(input), None, None
+
         else:
             input, output = ctx.saved_variables
             dim = ctx.dim if ctx.dim >= 0 else ctx.dim + input.dim()
@@ -71,30 +94,10 @@ class Prod(Function):
             zero_mask = input == 0
             slice_zero_count = zero_mask.sum(dim, True)
             total_zeros = slice_zero_count.data.sum()
-            grad_input = grad_output.mul(output).expand_as(input).div(input)
             if total_zeros == 0:
-                return grad_input, None, None
-
-            some_zeros = slice_zero_count.gt(0).expand_as(grad_input)
-            grad_input[some_zeros] = 0
-
-            single_zero_idx = slice_zero_count.data.eq(1).nonzero()
-
-            if len(single_zero_idx) == 0:
-                return grad_input, None, None
-
-            for idx in single_zero_idx:
-                idx_tuple = tuple(idx.cpu())
-                input_idx_tuple = idx_tuple[:dim] + (slice(0, None),) + idx_tuple[dim + 1:]
-
-                # slice_mask and input_copy are 1D
-                slice_mask = zero_mask[input_idx_tuple]
-                input_copy = input[input_idx_tuple].clone()
-                zero_idx = slice_mask.data.nonzero()[0, 0]
-                input_copy[zero_idx] = 1.
-
-                grad_idx_tuple = idx_tuple[:dim] + (zero_idx,) + idx_tuple[dim + 1:]
-                grad_input[grad_idx_tuple] = grad_output[idx_tuple] * input_copy.prod()
+                grad_input = grad_output.mul(output).expand_as(input).div(input)
+            else:
+                grad_input = safe_zeros_backward(input, dim)
 
             return grad_input, None, None
 

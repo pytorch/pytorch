@@ -173,6 +173,35 @@ def matmul(tensor1, tensor2, out=None):
             return torch.mm(tensor1, tensor2)
         else:
             return torch.mm(tensor1, tensor2, out=out)
+    elif dim_tensor1 >= 3 and (dim_tensor2 == 1 or dim_tensor2 == 2):
+        # optimization: use mm instead of bmm by folding tensor1's batch into
+        # its leading matrix dimension.
+
+        if dim_tensor2 == 1:
+            tensor2 = tensor2.unsqueeze(-1)
+
+        size1 = tensor1.size()
+        size2 = tensor2.size()
+        output_size = size1[:-1] + size2[-1:]
+
+        # fold the batch into the first dimension
+        tensor1 = tensor1.contiguous().view(-1, size1[-1])
+
+        if out is None or not out.is_contiguous():
+            output = torch.mm(tensor1, tensor2)
+        else:
+            output = torch.mm(tensor1, tensor2, out=out)
+
+        output = output.view(output_size)
+
+        if dim_tensor2 == 1:
+            output = output.squeeze(-1)
+
+        if out is not None:
+            out.set_(output)
+            return out
+
+        return output
     elif (dim_tensor1 >= 1 and dim_tensor2 >= 1) and (dim_tensor1 >= 3 or dim_tensor2 >= 3):
         # ensure each tensor size is at least 3-dimensional
         tensor1_exp_size = torch.Size((1,) * max(3 - tensor1.dim(), 0) + tensor1.size())
@@ -195,25 +224,24 @@ def matmul(tensor1, tensor2, out=None):
 
         def maybeSqueeze(tensor):
             if dim_tensor1 == 1:
-                return tensor.squeeze_(-2)
+                return tensor.squeeze(-2)
             elif dim_tensor2 == 1:
-                return tensor.squeeze_(-1)
+                return tensor.squeeze(-1)
             else:
                 return tensor
 
-        if out is None:
-            return maybeSqueeze(torch.bmm(tensor1_expanded, tensor2_expanded).view(*(total_expansion)))
+        if out is None or not out.is_contiguous():
+            output = torch.bmm(tensor1_expanded, tensor2_expanded)
         else:
-            # We can only safely reshape the output if the output (after the torch.bmm call)
-            # is contiguous.  This will happen only if:
-            # 1) We force it to be contiguous
-            # 2) The output came in as contiguous
-            # 3) The output came in as the wrong size (so was resized in the torch.bmm call).
-            #
-            # Even though 1) is inconsistent with other functions (e.g. torch.bmm) that will maintain
-            # output non-contiguity if the size is correct, we'll do it here for simplicity.
-            out = out.contiguous()
-            return (torch.bmm(tensor1_expanded, tensor2_expanded, out=out).
-                    set_(maybeSqueeze(out.view(*(total_expansion)))))
+            output = torch.bmm(tensor1_expanded, tensor2_expanded, out=out)
+
+        output = maybeSqueeze(output.view(total_expansion))
+
+        if out is not None:
+            out.set_(output)
+            return out
+
+        return output
+
     raise ValueError("both arguments to __matmul__ need to be at least 1D, "
                      "but they are {}D and {}D".format(dim_tensor1, dim_tensor2))

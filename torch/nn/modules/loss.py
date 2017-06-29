@@ -75,13 +75,19 @@ class NLLLoss(_WeightedLoss):
 
         loss(x, class) = -weights[class] * x[class]
 
+    or in the case of ignore_index::
+
+        loss(x, class) = class != ignoreIndex ? -weights[class] * x[class] : 0
+
     Args:
         weight (Tensor, optional): a manual rescaling weight given to each class.
-                                   If given, has to be a Tensor of size "nclasses"
+           If given, has to be a Tensor of size "nclasses"
         size_average (bool, optional): By default, the losses are averaged over observations for each minibatch.
-                                       However, if the field size_average is set to False,
-                                       the losses are instead summed for each minibatch.
-
+           However, if the field size_average is set to False, the losses are
+           instead summed for each minibatch.
+        ignore_index (int, optional): Specifies a target value that is ignored
+            and does not contribute to the input gradient. When size_average is
+            True, the loss is averaged over non-ignored targets.
 
     Shape:
         - Input: :math:`(N, C)` where `C = number of classes`
@@ -102,10 +108,14 @@ class NLLLoss(_WeightedLoss):
         >>> output.backward()
     """
 
+    def __init__(self, weight=None, size_average=True, ignore_index=-100):
+        super(NLLLoss, self).__init__(weight, size_average)
+        self.ignore_index = ignore_index
+
     def forward(self, input, target):
         _assert_no_grad(target)
-        return F.nll_loss(input, target,
-                          self.weight, self.size_average)
+        return F.nll_loss(input, target, self.weight, self.size_average,
+                          self.ignore_index)
 
 
 class NLLLoss2d(_WeightedLoss):
@@ -133,6 +143,47 @@ class NLLLoss2d(_WeightedLoss):
         >>> output.backward()
     """
     pass
+
+
+class PoissonNLLLoss(_Loss):
+    r"""Negative log likelihood loss with Poisson distribution of target.
+
+    The loss can be described as::
+
+        target ~ Pois(input)
+        loss(input, target) = input - target * log(input) + log(target!)
+
+    The last term can be omitted or approximised with Stirling formula. The
+    approximation is used for target values more than 1. For targets less or
+    equal to 1 zeros are added to the loss.
+
+    Args:
+        log_input (bool, optional): if True the loss is computed as
+            `exp(input) - target * input`, if False the loss is
+            `input - target * log(input)`.
+        full (bool, optional): whether to compute full loss, i. e. to add the
+            Stirling approximation term
+            `target * log(target) - target + 0.5 * log(2 * pi * target)`.
+        size_average (bool, optional): By default, the losses are averaged over
+            observations for each minibatch. However, if the field size_average
+            is set to False, the losses are instead summed for each minibatch.
+
+    Examples::
+        >>> loss = nn.PoissonNLLLoss()
+        >>> log_input = autograd.Variable(torch.randn(5, 2), requires_grad=True)
+        >>> target = autograd.Variable(torch.randn(5, 2))
+        >>> output = loss(log_input, target)
+        >>> output.backward()
+    """
+    def __init__(self, log_input=True, full=False, size_average=True):
+        super(PoissonNLLLoss, self).__init__()
+        self.log_input = log_input
+        self.full = full
+        self.size_average = size_average
+
+    def forward(self, log_input, target):
+        _assert_no_grad(target)
+        return F.poisson_nll_loss(log_input, target, self.log_input, self.full, self.size_average)
 
 
 class KLDivLoss(_WeightedLoss):
@@ -350,10 +401,14 @@ class CrossEntropyLoss(_WeightedLoss):
 
     """
 
+    def __init__(self, weight=None, size_average=True, ignore_index=-100):
+        super(CrossEntropyLoss, self).__init__(weight, size_average)
+        self.ignore_index = ignore_index
+
     def forward(self, input, target):
         _assert_no_grad(target)
-        return F.cross_entropy(input, target,
-                               self.weight, self.size_average)
+        return F.cross_entropy(input, target, self.weight, self.size_average,
+                               self.ignore_index)
 
 
 class MultiLabelSoftMarginLoss(_WeightedLoss):
