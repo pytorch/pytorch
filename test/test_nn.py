@@ -2202,6 +2202,19 @@ class TestNN(NNTestCase):
         output.backward(output.data)
         self.assertEqual(input.data, input.grad.data)
 
+    def test_bce_with_logits_is_same_as_sigmoid_and_bce(self):
+        target = Variable(torch.rand(5))
+        output = Variable(torch.rand(5, 1) - 0.5)
+
+        bce_logit_loss = nn.BCEWithLogitsLoss()(output, target)
+        bce_loss = nn.BCELoss()(nn.Sigmoid()(output), target)
+        self.assertEqual(bce_logit_loss.data[0], bce_loss.data[0])
+
+        weight = torch.rand(5)
+        bce_logit_loss = nn.BCEWithLogitsLoss(weight)(output, target)
+        bce_loss = nn.BCELoss(weight)(nn.Sigmoid()(output), target)
+        self.assertEqual(bce_logit_loss.data[0], bce_loss.data[0])
+
     def test_batchnorm_eval(self):
         types = (torch.FloatTensor,)
         if TEST_CUDA:
