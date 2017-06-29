@@ -1,3 +1,4 @@
+#include <Python.h>
 #include "Handles.h"
 
 #include <unordered_map>
