@@ -6,7 +6,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.proto import caffe2_pb2
-from caffe2.python import cnn, workspace, core, utils, rnn_cell
+from caffe2.python import workspace, core, utils, rnn_cell, model_helper
 
 import argparse
 import numpy as np
@@ -62,15 +62,15 @@ def generate_data(T, shape, num_labels):
 
 
 def create_model(args, queue, label_queue, input_shape):
-    model = cnn.CNNModelHelper(name="LSTM_bench")
+    model = model_helper.ModelHelper(name="LSTM_bench")
     seq_lengths, target = \
         model.net.AddExternalInputs(
             'seq_lengths',
             'target',
         )
 
-    input_blob = model.DequeueBlobs(queue, "input_data")
-    labels = model.DequeueBlobs(label_queue, "label")
+    input_blob = model.net.DequeueBlobs(queue, "input_data")
+    labels = model.net.DequeueBlobs(label_queue, "label")
 
     init_blobs = []
     if args.implementation in ["own", "static", "static_dag"]:
@@ -125,8 +125,8 @@ def create_model(args, queue, label_queue, input_shape):
     else:
         assert False, "Unknown implementation"
 
-    weights = model.UniformFill(labels, "weights")
-    softmax, loss = model.SoftmaxWithLoss(
+    weights = model.net.UniformFill(labels, "weights")
+    softmax, loss = model.net.SoftmaxWithLoss(
         [model.Flatten(output), labels, weights],
         ['softmax', 'loss'],
     )
