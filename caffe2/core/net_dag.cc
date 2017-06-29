@@ -548,7 +548,9 @@ void DAGNetBase::WorkerFunction() {
       remaining_ops_ -= chain.size();
       CAFFE_ENFORCE(remaining_ops_ >= 0);
       success_ &= this_success;
-      cv_.notify_one();
+      if (remaining_ops_ == 0 || !success_) {
+        cv_.notify_one();
+      }
 
       // Terminate thread if this or any other operator chain failed.
       if (!success_) {
