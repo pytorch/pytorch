@@ -350,7 +350,10 @@ def _compute_blob_recycling_for_dag(
     log.info("Memonger memory optimization took {} secs".format(
         time.time() - start_time),
     )
-    verify_inplace_blobs(origproto, netproto)
+    assert verify_graph_equality(origproto, netproto), \
+        "Memonger graph is not equal to original."
+    assert verify_inplace_blobs(origproto, netproto), \
+        "Inplace assignments differ in memonger net."
     return netproto
 
 
@@ -939,9 +942,11 @@ def verify_inplace_blobs(net_a, net_b):
         return inplaces
 
     for op_a, op_b in zip(net_a.op, net_b.op):
-        assert op_a.type == op_b.type
-        assert get_inplaces(op_a) == get_inplaces(op_b), \
-           "Inplace assignments differ: {} \n--\n {}".format(op_a, op_b)
+        if op_a.type != op_b.type:
+            return False
+        if get_inplaces(op_a) != get_inplaces(op_b):
+            return False
+    return True
 
 
 def verify_graph_equality(net_a, net_b):
