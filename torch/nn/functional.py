@@ -837,7 +837,7 @@ def pad(input, pad, mode='constant', value=0):
     if input.dim() == 4:
         assert len(pad) == 4, '4D tensors expect 4 values for padding'
         if mode == 'constant':
-            return ConstantPad2d(pad, value)(input)
+            return ConstantPad2d.apply(input, pad, value)
         elif mode == 'reflect':
             return _functions.thnn.ReflectionPad2d(*pad)(input)
         elif mode == 'replicate':
