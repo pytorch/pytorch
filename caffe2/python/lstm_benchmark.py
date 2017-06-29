@@ -19,7 +19,7 @@ log = logging.getLogger("lstm_bench")
 log.setLevel(logging.DEBUG)
 
 
-def generate_data(T, shape, num_labels):
+def generate_data(T, shape, num_labels, fixed_shape):
     '''
     Fill a queue with input data
     '''
@@ -47,7 +47,7 @@ def generate_data(T, shape, num_labels):
         # Randomize the seqlength
         random_shape = (
             [np.random.randint(1, shape[0])] + shape[1:]
-            if t > 0 and not args.fixed_shape else shape
+            if t > 0 and not fixed_shape else shape
         )
         X = np.random.rand(*random_shape).astype(np.float32)
         batch_size = random_shape[1]
@@ -155,7 +155,8 @@ def Caffe2LSTM(args):
     input_blob_shape = [args.seq_length, args.batch_size, args.input_dim]
     queue, label_queue, entry_counts = generate_data(T // args.seq_length,
                                        input_blob_shape,
-                                       args.hidden_dim)
+                                       args.hidden_dim,
+                                       args.fixed_shape)
 
     workspace.FeedBlob(
         "seq_lengths",
