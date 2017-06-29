@@ -554,7 +554,7 @@ def batch_norm(input, running_mean, running_var, weight=None, bias=None,
 
 # loss
 
-def nll_loss(input, target, weight=None, size_average=True):
+def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100):
     r"""The negative log likelihood loss.
 
     See :class:`~torch.nn.NLLLoss` for details.
@@ -563,14 +563,13 @@ def nll_loss(input, target, weight=None, size_average=True):
         input: :math:`(N, C)` where `C = number of classes` or `(N, C, H, W)` in case of 2D - Loss
         target: :math:`(N)` where each value is `0 <= targets[i] <= C-1`
         weight (Variable, optional): a manual rescaling weight given to each
-                class. If given, has to be a Variable of size "nclasses"
+            class. If given, has to be a Variable of size "nclasses"
         size_average (bool, optional): By default, the losses are averaged
-                over observations for each minibatch. However, if the field
-                sizeAverage is set to False, the losses are instead summed
-                for each minibatch.
-
-    Attributes:
-        weight: the class-weights given as input to the constructor
+            over observations for each minibatch. If size_average
+            is False, the losses are summed for each minibatch.
+        ignore_index (int, optional): Specifies a target value that is ignored
+            and does not contribute to the input gradient. When size_average is
+            True, the loss is averaged over non-ignored targets.
 
     Example:
         >>> # input is of size nBatch x nClasses = 3 x 5
@@ -582,8 +581,10 @@ def nll_loss(input, target, weight=None, size_average=True):
     """
     dim = input.dim()
     if dim == 2:
-        f = _functions.thnn.NLLLoss(size_average, -100, weight=weight)
+        f = _functions.thnn.NLLLoss(size_average, ignore_index, weight=weight)
     elif dim == 4:
+        if ignore_index != -100:
+            raise ValueError('ignore_index is not supported for 4-D inputs')
         f = _functions.thnn.NLLLoss2d(size_average, weight=weight)
     else:
         raise ValueError('Expected 2 or 4 dimensions (got {})'.format(dim))
@@ -635,8 +636,8 @@ def kl_div(input, target, size_average=True):
     return _functions.thnn.KLDivLoss(size_average)(input, target)
 
 
-def cross_entropy(input, target, weight=None, size_average=True):
-    r"""This criterion combines `log_softmax` and `nll_loss` in one single class.
+def cross_entropy(input, target, weight=None, size_average=True, ignore_index=-100):
+    r"""This criterion combines `log_softmax` and `nll_loss` in a single function.
 
     See :class:`torch.nn.CrossEntropyLoss` for details.
 
@@ -650,7 +651,7 @@ def cross_entropy(input, target, weight=None, size_average=True):
                 sizeAverage is set to False, the losses are instead summed
                 for each minibatch.
     """
-    return nll_loss(log_softmax(input), target, weight, size_average)
+    return nll_loss(log_softmax(input), target, weight, size_average, ignore_index)
 
 
 def binary_cross_entropy(input, target, weight=None, size_average=True):
