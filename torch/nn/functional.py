@@ -406,7 +406,7 @@ def adaptive_avg_pool2d(input, output_size):
 # Activation functions
 
 def dropout(input, p=0.5, training=False, inplace=False):
-    return _functions.dropout.Dropout(p, training, inplace)(input)
+    return _functions.dropout.Dropout.apply(input, p, training, inplace)
 
 
 def alpha_dropout(input, p=0.5, training=False):
