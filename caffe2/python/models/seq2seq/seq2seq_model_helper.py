@@ -6,15 +6,23 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import scope
-from caffe2.python.cnn import CNNModelHelper
+from caffe2.python.model_helper import ModelHelper
 
 
-class Seq2SeqModelHelper(CNNModelHelper):
+class Seq2SeqModelHelper(ModelHelper):
 
     def __init__(self, init_params=True, **kwargs):
+        arg_scope = {
+            'use_cudnn': kwargs.pop('use_cudnn', True),
+            'cudnn_exhaustive_search': kwargs.pop('cudnn_exhaustive_search', False),
+            'order': 'NHWC',
+        }
+        if kwargs.get('ws_nbytes_limit', None):
+            arg_scope['ws_nbytes_limit'] = kwargs.pop('ws_nbytes_limit')
+
         super(Seq2SeqModelHelper, self).__init__(
-            order='NHWC',
             init_params=init_params,
+            arg_scope=arg_scope,
             **kwargs
         )
         self.non_trainable_params = []
