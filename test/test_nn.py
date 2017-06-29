@@ -241,6 +241,17 @@ class TestNN(NNTestCase):
             d_params.append(p.grad.data)
         return params, d_params
 
+    def _assert_grad_and_gradgradchecks(self, apply_fn, inputs):
+        self.assertTrue(gradcheck(apply_fn, inputs))
+        dummy_out = apply_fn(*inputs)
+        if isinstance(dummy_out, tuple):
+            grad_y = tuple(Variable(torch.randn(x.size()), requires_grad=x.requires_grad)
+                           for x in dummy_out if isinstance(x, Variable))
+        else:
+            grad_y = (Variable(torch.randn(dummy_out.size()), requires_grad=dummy_out.requires_grad),)
+
+        self.assertTrue(gradgradcheck(apply_fn, inputs, grad_y,))
+
     def test_hooks(self):
         module = nn.Sigmoid()
         input = Variable(torch.ones(5, 5), requires_grad=True)
@@ -970,9 +981,9 @@ class TestNN(NNTestCase):
 
     def test_pad(self):
         inputs = Variable(torch.randn(1, 3, 4, 4), requires_grad=True)
-        self.assertTrue(gradcheck(lambda x: F.pad(x, (1, 1, 1, 1)), (inputs,)))
-        self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1)), (inputs,)))
-        self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), value=2), (inputs,)))
+        self._assert_grad_and_gradgradchecks(lambda x: F.pad(x, (1, 1, 1, 1)), (inputs,))
+        self._assert_grad_and_gradgradchecks(lambda x: F.pad(x, (-1, 1, -2, 1)), (inputs,))
+        self._assert_grad_and_gradgradchecks(lambda x: F.pad(x, (-1, 1, -2, 1), value=2), (inputs,))
         self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='replicate'), (inputs,)))
         self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='reflect'), (inputs,)))
 
