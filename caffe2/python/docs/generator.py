@@ -7,6 +7,7 @@ from __future__ import unicode_literals
 import os
 from caffe2.python import core, workspace
 from caffe2.python.docs.formatter import Markdown
+from future.utils import viewitems, viewvalues
 
 OpSchema = workspace.C.OpSchema
 
@@ -74,22 +75,15 @@ class OpDocGenerator(DocGenerator):
                 priority = 4
                 self.operators[name] = self.getOperatorDoc(name, schema, priority)
 
-        for name, engines in self.engines.items():
+        for name, engines in viewitems(self.engines):
             if name in self.operators:
                 self.operators[name].addEngines(engines)
 
         # Generate a sorted list of operators
-        operators = [v for k, v in self.operators.items()]
-
-        def compare(op1, op2):
-            if op1.priority == op2.priority:
-                if op1.name < op2.name:
-                    return -1
-                else:
-                    return 1
-            return op1.priority - op2.priority
-
-        return sorted(operators, cmp=compare)
+        return sorted(
+            viewvalues(self.operators),
+            key=lambda op: (op.priority, op.name)
+        )
 
     def createBody(self):
         operators = self.getOperators()
@@ -107,8 +101,8 @@ class OperatorEngine(object):
 
     def getDeviceImpl(self):
         deviceImplList = []
-        for device, impl in {'CPU': OpSchema.get_cpu_impl(self.op_name),
-                             'CUDA': OpSchema.get_cuda_impl(self.op_name)}.items():
+        for device, impl in [('CPU', OpSchema.get_cpu_impl(self.op_name)),
+                             ('CUDA', OpSchema.get_cuda_impl(self.op_name))]:
             if not impl:
                 continue
             deviceImplList.append((device, impl))

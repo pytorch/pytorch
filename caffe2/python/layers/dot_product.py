@@ -5,10 +5,11 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import core, schema
+from caffe2.python import schema
 from caffe2.python.layers.layers import (
     ModelLayer,
 )
+from future.utils import viewitems
 
 
 class DotProduct(ModelLayer):
@@ -23,7 +24,7 @@ class DotProduct(ModelLayer):
         assert len(set(input_record.field_types())) == 1, (
             "Inputs should be of the same field type")
 
-        for field_name, field_type in input_record.fields.items():
+        for field_name, field_type in viewitems(input_record.fields):
             assert isinstance(field_type, schema.Scalar),\
                 "Incorrect input type for {}. Excpected Scalar, but got: {}".\
                 format(field_name, field_type)

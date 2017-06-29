@@ -5,7 +5,7 @@ from __future__ import unicode_literals
 
 from caffe2.python import model_helper, workspace, core, rnn_cell
 from caffe2.proto import caffe2_pb2
-
+from future.utils import viewitems
 import numpy as np
 
 import unittest
@@ -108,11 +108,13 @@ class TestLSTMs(unittest.TestCase):
             # to our own.
             (param_extract_net, param_extract_mapping) = param_extract
             workspace.RunNetOnce(param_extract_net)
-            cudnn_lstm_params = {}
-            for input_type, pars in param_extract_mapping.items():
-                cudnn_lstm_params[input_type] = {}
-                for k, v in pars.items():
-                    cudnn_lstm_params[input_type][k] = workspace.FetchBlob(v[0])
+            cudnn_lstm_params = {
+                input_type: {
+                    k: workspace.FetchBlob(v[0])
+                    for k, v in viewitems(pars)
+                }
+                for input_type, pars in viewitems(param_extract_mapping)
+            }
 
             # Run the model 3 times, so that some parameter updates are done
             workspace.RunNet(cudnn_model.net.Proto().name, 3)

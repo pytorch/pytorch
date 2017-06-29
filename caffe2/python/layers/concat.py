@@ -9,6 +9,7 @@ from caffe2.python import schema
 from caffe2.python.layers.layers import (
     ModelLayer,
 )
+from future.utils import viewitems
 import numpy as np
 
 
@@ -23,7 +24,7 @@ class Concat(ModelLayer):
             format(input_record)
 
         shapes = []
-        for field_name, field_type in input_record.fields.items():
+        for field_name, field_type in viewitems(input_record.fields):
             assert isinstance(field_type, schema.Scalar),\
                 "Incorrect input type for {}. Excpected Scalar, but got: {}".\
                 format(field_name, field_type)

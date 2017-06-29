@@ -24,14 +24,9 @@ from caffe2.python import core
 from caffe2.python import workspace
 from caffe2.python.core import BlobReference
 from collections import OrderedDict, namedtuple
-try:
-    from past.builtins import basestring
-except ImportError:
-    print("You don't have the past package installed. ",
-          "This is necessary for python 2/3 compatibility. ",
-          "To do this, do 'pip install future'.")
-    import sys
-    sys.exit(1)
+from past.builtins import basestring
+from future.utils import viewitems, viewkeys, viewvalues
+from itertools import islice
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -308,9 +303,9 @@ class Struct(Field):
             ):
                 raise ValueError('Duplicate field name: %s' % name)
             self.fields[name] = self.fields[name] + field
-        for id, (_, field) in enumerate(self.fields.items()):
+        for id, (_, field) in enumerate(viewitems(self.fields)):
             field._set_parent(self, id)
-        Field.__init__(self, self.fields.values())
+        Field.__init__(self, viewvalues(self.fields))
         self._frozen = True
 
     def _struct_from_nested_name(self, nested_name, field):
@@ -327,45 +322,45 @@ class Struct(Field):
         return names[0], create_internal(names[1], field)
 
     def get_children(self):
-        return self.fields.items()
+        return list(viewitems(self.fields))
 
     def field_names(self):
         names = []
-        for name, field in self.fields.items():
+        for name, field in viewitems(self.fields):
             names += [_join_field_name(name, f) for f in field.field_names()]
         return names
 
     def field_types(self):
         types = []
-        for _, field in self.fields.items():
+        for _, field in viewitems(self.fields):
             types += field.field_types()
         return types
 
     def field_metadata(self):
         metadata = []
-        for _, field in self.fields.items():
+        for _, field in viewitems(self.fields):
             metadata += field.field_metadata()
         return metadata
 
     def field_blobs(self):
         blobs = []
-        for _, field in self.fields.items():
+        for _, field in viewitems(self.fields):
             blobs += field.field_blobs()
         return blobs
 
     def all_scalars(self):
         scalars = []
-        for _, field in self.fields.items():
+        for _, field in viewitems(self.fields):
             scalars += field.all_scalars()
         return scalars
 
     def has_blobs(self):
-        return all(field.has_blobs() for field in self.fields.values())
+        return all(field.has_blobs() for field in viewvalues(self.fields))
 
     def clone(self, keep_blobs=True):
         normalized_fields = [
             (k, _normalize_field(v, keep_blobs=keep_blobs))
-            for k, v in self.fields.items()
+            for k, v in viewitems(self.fields)
         ]
         return Struct(*normalized_fields)
 
@@ -386,8 +381,10 @@ class Struct(Field):
 
     def __repr__(self):
         return "Struct({})".format(
-            ', '.join(["{}={!r}".format(name, field)
-                       for name, field in self.fields.items()])
+            ', '.join(
+                "{}={!r}".format(name, field)
+               for name, field in viewitems(self.fields)
+            )
         )
 
     def __contains__(self, item):
@@ -405,16 +402,17 @@ class Struct(Field):
         Struct.
         """
         if isinstance(item, list) or isinstance(item, tuple):
+            keys = list(viewkeys(self.fields))
             return Struct(
                 * [
                     (
-                        self.fields.keys()[k]
+                        keys[k]
                         if isinstance(k, int) else k, self[k]
                     ) for k in item
                 ]
             )
         elif isinstance(item, int):
-            return self.fields.values()[item]
+            return next(islice(viewvalues(self.fields), item, None))
         else:
             field = self._get_field_by_nested_name(item)
             if field is None:
@@ -477,7 +475,7 @@ class Struct(Field):
             left_field = children[name]
             children[name] = left_field + right_field
 
-        return Struct(*(children.items()))
+        return Struct(*(viewitems(children)))
 
     def __sub__(self, other):
         """
@@ -972,7 +970,7 @@ def as_record(value):
         else:
             return Tuple(* [as_record(f) for f in value])
     elif isinstance(value, dict):
-        return Struct(* [(k, as_record(v)) for k, v in value.items()])
+        return Struct(* [(k, as_record(v)) for k, v in viewitems(value)])
     else:
         return _normalize_field(value)
 

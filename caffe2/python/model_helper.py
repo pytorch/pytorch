@@ -12,9 +12,12 @@ from caffe2.python.modeling.parameter_sharing import (
 )
 from caffe2.proto import caffe2_pb2
 
+from future.utils import viewitems, viewkeys
+from itertools import chain
 
 import logging
 import six
+
 
 # _known_working_ops are operators that do not need special care.
 _known_working_ops = [
@@ -359,7 +362,7 @@ class ModelHelper(object):
             param_to_grad = self.get_param_to_grad(params)
 
         return [
-            self.get_param_info(param) for param, grad in param_to_grad.items()
+            self.get_param_info(param) for param, grad in viewitems(param_to_grad)
             if (
                 not self.skip_sparse_optim or
                 not isinstance(grad, core.GradientSlice)
@@ -442,10 +445,11 @@ class ModelHelper(object):
         return self.net.__getattr__(op_type)
 
     def __dir__(self):
-        return sorted(set(
-            dir(type(self)) +
-            self.__dict__.keys() +
-            _known_working_ops))
+        return sorted(set(chain(
+            dir(type(self)),
+            viewkeys(self.__dict__),
+            _known_working_ops
+        )))
 
 
 def ExtractPredictorNet(

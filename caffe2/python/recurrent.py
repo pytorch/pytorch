@@ -7,7 +7,7 @@ from __future__ import unicode_literals
 
 from caffe2.python import core
 from caffe2.python.scope import CurrentNameScope
-
+from future.utils import viewitems, viewkeys
 
 def recurrent_net(
         net, cell_net, inputs, initial_cell_inputs,
@@ -85,7 +85,7 @@ def recurrent_net(
     if not forward_only:
         backward_ops, backward_mapping = core.GradientRegistry.GetBackwardPass(
             cell_net.Proto().op, inner_outputs_map)
-        backward_mapping = {str(k): v for k, v in backward_mapping.items()}
+        backward_mapping = {str(k): v for k, v in viewitems(backward_mapping)}
 
         backward_cell_net = core.Net("RecurrentBackwardStep")
         del backward_cell_net.Proto().op[:]
@@ -114,10 +114,12 @@ def recurrent_net(
         # are used by backward.
         ssa, blob_versions = core.get_ssa(cell_net.Proto())
         scratches = [
-            blob for (blob, ver) in blob_versions.items()
-            if ver > 0 and
-            blob in undefined and
-            blob not in cell_net.Proto().external_output]
+            blob
+            for blob, ver in viewitems(blob_versions)
+            if (ver > 0 and
+                blob in undefined and
+                blob not in cell_net.Proto().external_output)
+        ]
         backward_cell_net.Proto().external_input.extend(scratches)
         backward_cell_net.Proto().type = 'simple'
     else:
@@ -234,21 +236,22 @@ def recurrent_net(
                     )
 
     backward_args = {}
+    backward_mapping_keys = set(viewkeys(backward_mapping))
     if backward_cell_net is not None:
         backward_link_internal, backward_link_external, backward_link_offset = \
             unpack_triple(backward_links)
-        params = [x for x in references if x in backward_mapping.keys()]
+        params = [x for x in references if x in backward_mapping_keys]
         param_grads = [
             str(backward_mapping[x])
             for x in references
-            if x in backward_mapping.keys()
+            if x in backward_mapping_keys
         ]
         if recompute_blobs_on_backward is None:
             recompute_blobs_on_backward = set()
         backward_args = {
-            'param': map(all_inputs.index, params),
-            'backward_link_internal': map(str, backward_link_internal),
-            'backward_link_external': map(str, backward_link_external),
+            'param': [all_inputs.index(p) for p in params],
+            'backward_link_internal': [str(l) for l in backward_link_internal],
+            'backward_link_external': [str(l) for l in backward_link_external],
             'backward_link_offset': backward_link_offset,
             'backward_step_net': str(backward_cell_net.Proto()),
             'outputs_with_grads': outputs_with_grads,

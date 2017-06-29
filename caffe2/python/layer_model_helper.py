@@ -9,6 +9,7 @@ from caffe2.python import core, model_helper, schema
 from caffe2.python.optimizer import get_param_device
 from caffe2.python.layers import layers
 from caffe2.proto import caffe2_pb2
+from future.utils import viewitems
 
 import logging
 import numpy as np
@@ -246,7 +247,7 @@ class LayerModelHelper(model_helper.ModelHelper):
         CPU = core.DeviceOption(caffe2_pb2.CPU)
         # if given, blob_to_device is a map from blob to device_option
         blob_to_device = blob_to_device or {}
-        for param, optimizer in self.param_to_optim.items():
+        for param, optimizer in viewitems(self.param_to_optim):
             assert optimizer is not None, \
                 "default optimizer must have been set in add_layer"
             # note that not all params has gradient and thus we sent None if

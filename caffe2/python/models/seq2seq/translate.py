@@ -6,6 +6,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import argparse
+from future.utils import viewitems
 from itertools import izip
 import logging
 import numpy as np
@@ -517,7 +518,7 @@ def run_seq2seq_beam_decoder(args, model_params, decoding_params):
         args.target_corpus,
         args.unk_threshold,
     )
-    inversed_target_vocab = {v: k for (k, v) in target_vocab.items()}
+    inversed_target_vocab = {v: k for (k, v) in viewitems(target_vocab)}
     logger.info('Target vocab size {}'.format(len(target_vocab)))
 
     decoder = Seq2SeqModelCaffe2EnsembleDecoder(

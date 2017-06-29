@@ -11,6 +11,7 @@ import logging
 import numpy as np
 import random
 import six
+from future.utils import viewkeys
 
 from caffe2.proto import caffe2_pb2
 from caffe2.python.attention import (
@@ -1097,7 +1098,7 @@ def InitFromLSTMParams(lstm_pblobs, param_values):
     '''
     weight_params = GetLSTMParamNames()['weights']
     bias_params = GetLSTMParamNames()['biases']
-    for input_type in param_values.keys():
+    for input_type in viewkeys(param_values):
         weight_values = [
             param_values[input_type][w].flatten()
             for w in weight_params

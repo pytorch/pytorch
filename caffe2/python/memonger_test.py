@@ -7,6 +7,7 @@ import numpy as np
 
 from caffe2.python import workspace, memonger, core, model_helper, brew
 import caffe2.python.hypothesis_test_util as hu
+from future.utils import viewvalues
 import hypothesis.strategies as st
 from hypothesis import given, settings
 
@@ -105,7 +106,7 @@ class MemongerTest(hu.HypothesisTestCase):
         optim_proto = memonger.share_grad_blobs(
             m.net,
             ["name_x/loss"],
-            set(m.param_to_grad.values()),
+            set(viewvalues(m.param_to_grad)),
             "name_x/",
             share_activations=False,
         )
@@ -115,7 +116,7 @@ class MemongerTest(hu.HypothesisTestCase):
         optim_proto_wacts = memonger.share_grad_blobs(
             m.net,
             ["name_x/loss"],
-            set(m.param_to_grad.values()),
+            set(viewvalues(m.param_to_grad)),
             "name_x/",
             share_activations=True,
             dont_share_blobs=set([str(input_to_grad["name_x/fc1_w"])]),
@@ -181,7 +182,7 @@ class MemongerTest(hu.HypothesisTestCase):
         optim_proto = memonger.share_grad_blobs(
             m.net,
             ["name_x/loss1", "name_x/loss2"],
-            set(m.param_to_grad.values()),
+            set(viewvalues(m.param_to_grad)),
             "name_x",  # "name_x//shared_gradinp_0_shared" if using "name_x/"
             share_activations=True,
             dont_share_blobs=set(['name_x/fc6', 'name_x/fc5',

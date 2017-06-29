@@ -5,6 +5,7 @@ from __future__ import print_function
 import numpy as np
 import copy
 from functools import partial, reduce
+from future.utils import viewitems, viewkeys
 from hypothesis import assume, given, settings
 import hypothesis.strategies as st
 import unittest
@@ -116,7 +117,7 @@ class TestOperators(hu.HypothesisTestCase):
                "LE": lambda x1, x2: [x1 <= x2],
                "GT": lambda x1, x2: [x1 > x2],
                "GE": lambda x1, x2: [x1 >= x2]}
-        for name, ref in ops.items():
+        for name, ref in viewitems(ops):
             _test_binary(name, ref, gcs=hu.gcs_cpu_only)(self)
             _test_binary_broadcast(name, ref, gcs=hu.gcs_cpu_only)(self)
 
@@ -1684,8 +1685,8 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertEqual(iters[0], initial_iters + num_iters * num_nets)
 
     @given(a=hu.tensor(),
-           src=st.sampled_from(_NUMPY_TYPE_TO_ENUM.keys()),
-           dst=st.sampled_from(_NUMPY_TYPE_TO_ENUM.keys()),
+           src=st.sampled_from(list(viewkeys(_NUMPY_TYPE_TO_ENUM))),
+           dst=st.sampled_from(list(viewkeys(_NUMPY_TYPE_TO_ENUM))),
            use_name=st.booleans(),
            **hu.gcs)
     def test_cast(self, a, src, dst, use_name, gc, dc):
@@ -1804,8 +1805,9 @@ class TestOperators(hu.HypothesisTestCase):
 
         backward_ops, backward_mapping = core.GradientRegistry.GetBackwardPass(
             step_net.Proto().op, {"hidden_t": "hidden_t_grad"})
-        backward_mapping = {str(k): str(v) for k, v
-                            in backward_mapping.items()}
+        backward_mapping = {
+            str(k): str(v) for k, v in viewitems(backward_mapping)
+        }
         backward_step_net = core.Net("ElmanBackward")
         del backward_step_net.Proto().op[:]
         backward_step_net.Proto().op.extend(backward_ops)
@@ -1838,7 +1840,9 @@ class TestOperators(hu.HypothesisTestCase):
             alias_dst=["output", "hidden_output"],
             alias_offset=[1, -1],
             recurrent_states=["hidden"],
-            initial_recurrent_state_ids=map(inputs.index, recurrent_inputs),
+            initial_recurrent_state_ids=[
+                inputs.index(i) for i in recurrent_inputs
+            ],
             link_internal=link_internal,
             link_external=link_external,
             link_offset=link_offset,

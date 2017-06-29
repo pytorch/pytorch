@@ -8,18 +8,10 @@ import contextlib
 from google.protobuf.message import Message
 from multiprocessing import Process
 import os
-try:
-    from past.builtins import basestring
-except ImportError:
-    print("You don't have the past package installed. ",
-          "This is necessary for python 2/3 compatibility. ",
-          "To do this, do 'pip install future'.")
-    import sys
-    sys.exit(1)
-
 from collections import defaultdict
 import logging
 import numpy as np
+from past.builtins import basestring
 import shutil
 import socket
 import tempfile
