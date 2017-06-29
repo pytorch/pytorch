@@ -118,7 +118,7 @@ struct TopKTypeConfig<half> {
   typedef unsigned int RadixType;
 
   static inline __device__ RadixType convert(half v) {
-#if defined(__CUDACC_VER__) && __CUDACC_VER__ >= 80000
+#if CUDA_VERSION >= 8000
     RadixType x = __half_as_ushort(v);
     RadixType mask = -((x >> 15)) | 0x8000;
     return (x ^ mask);
@@ -129,7 +129,7 @@ struct TopKTypeConfig<half> {
   }
 
   static inline __device__ half deconvert(RadixType v) {
-#if defined(__CUDACC_VER__) && __CUDACC_VER__ >= 80000
+#if CUDA_VERSION >= 8000
     RadixType mask = ((v >> 15) - 1) | 0x8000;
     return __ushort_as_half(v ^ mask);
 #else
@@ -178,7 +178,7 @@ __device__ void countRadixUsingMask(CountType counts[RadixSize],
 #pragma unroll
     for (unsigned int j = 0; j < RadixSize; ++j) {
       bool vote = hasVal && (digitInRadix == j);
-      counts[j] += __popc(__ballot(vote));
+      counts[j] += __popc(WARP_BALLOT(vote, ACTIVE_MASK()));
     }
   }
 
