@@ -4,9 +4,12 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
+#include "caffe2/operators/conv_op_shared.h"
 #include "caffe2/operators/conv_pool_op_base.h"
 #include "caffe2/proto/caffe2_legacy.pb.h"
 #include "caffe2/utils/math.h"
+
+CAFFE2_DECLARE_bool(caffe2_force_shared_col_buffer);
 
 namespace caffe2 {
 
@@ -72,6 +75,12 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
     CAFFE_ENFORCE(stride_w_ > 0);
     CAFFE_ENFORCE(adj_h_ < stride_h_);
     CAFFE_ENFORCE(adj_w_ < stride_w_);
+
+    // Create shared buffer mutex in the constructor
+    // to avoid race-condition in DAGNet.
+    if (FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
+      createSharedBuffer<Context>(ws_);
+    }
   }
   // Sets the output size. The output channel is manually specified.
   void SetOutputSize(

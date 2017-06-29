@@ -3,7 +3,10 @@
 
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
+#include "caffe2/operators/conv_op_shared.h"
 #include "caffe2/operators/conv_pool_op_base.h"
+
+CAFFE2_DECLARE_bool(caffe2_force_shared_col_buffer);
 
 namespace caffe2 {
 
@@ -18,6 +21,12 @@ class ConvOp final : public ConvPoolOpBase<Context> {
     CAFFE_ENFORCE(
         group_ == 1 || order_ == StorageOrder::NCHW,
         "Group convolution only supports NCHW order right now.");
+
+    // Create shared buffer mutex in the constructor
+    // to avoid race-condition in DAGNet.
+    if (FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
+      createSharedBuffer<Context>(ws_);
+    }
   }
   ~ConvOp() {}
 

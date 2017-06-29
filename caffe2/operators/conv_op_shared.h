@@ -7,6 +7,17 @@
 
 namespace caffe2 {
 
+/**
+ * Creates a mutex and shared buffer in the workspace.
+ * Not thread-safe, must be called from the constructor.
+ */
+template <typename Context>
+void createSharedBuffer(Workspace* ws);
+
+/**
+ * Thread-safe, can be invoked from RunOnDevice() to serialize
+ * access to shared buffer.
+ */
 template <typename Context>
 void runWithSharedBuffer(
     Workspace* ws,
