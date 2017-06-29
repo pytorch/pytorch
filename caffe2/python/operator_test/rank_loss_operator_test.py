@@ -91,9 +91,9 @@ class TestPairWiseLossOps(hu.HypothesisTestCase):
         workspace.RunPlan(plan)
         down_output_pred = workspace.FetchBlob('down_output')
         up_output_pred = workspace.FetchBlob('up_output')
-        self.assertAlmostEqual(
+        np.testing.assert_allclose(
             np.asscalar(dx[0]),
             np.asscalar(
                 0.5 * dY[0] *
                 (up_output_pred[0] - down_output_pred[0]) / delta),
-            delta=abs(np.asscalar(dx[0]) * 1e-2))
+            rtol=1e-2, atol=1e-2)
