@@ -241,7 +241,7 @@ class TestNN(NNTestCase):
             d_params.append(p.grad.data)
         return params, d_params
 
-    def _assert_grad_and_gradgradchecks(self, apply_fn, inputs):
+    def _assertGradAndGradgradChecks(self, apply_fn, inputs):
         self.assertTrue(gradcheck(apply_fn, inputs))
         dummy_out = apply_fn(*inputs)
         if isinstance(dummy_out, tuple):
@@ -981,9 +981,9 @@ class TestNN(NNTestCase):
 
     def test_pad(self):
         inputs = Variable(torch.randn(1, 3, 4, 4), requires_grad=True)
-        self._assert_grad_and_gradgradchecks(lambda x: F.pad(x, (1, 1, 1, 1)), (inputs,))
-        self._assert_grad_and_gradgradchecks(lambda x: F.pad(x, (-1, 1, -2, 1)), (inputs,))
-        self._assert_grad_and_gradgradchecks(lambda x: F.pad(x, (-1, 1, -2, 1), value=2), (inputs,))
+        self._assertGradAndGradgradChecks(lambda x: F.pad(x, (1, 1, 1, 1)), (inputs,))
+        self._assertGradAndGradgradChecks(lambda x: F.pad(x, (-1, 1, -2, 1)), (inputs,))
+        self._assertGradAndGradgradChecks(lambda x: F.pad(x, (-1, 1, -2, 1), value=2), (inputs,))
         self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='replicate'), (inputs,)))
         self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='reflect'), (inputs,)))
 
@@ -2388,7 +2388,7 @@ class TestNN(NNTestCase):
         self.assertEqual(module.weight.grad.data, module_legacy.gradWeight)
         self.assertEqual(module.bias.grad.data, module_legacy.gradBias)
 
-        self.assertTrue(gradcheck(lambda x1, x2: F.bilinear(x1, x2, module.weight, module.bias), (input1_1, input2_1)))
+        self._assertGradAndGradgradChecks(lambda x1, x2: F.bilinear(x1, x2, module.weight, module.bias), (input1_1, input2_1))
 
     def run_conv_double_back_test(self, kern, stride, padding, chan_in, chan_out, batch_size,
                                   inp_size, dilation, no_weight, use_cuda=False, use_bias=True):
