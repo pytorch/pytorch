@@ -157,6 +157,21 @@ class TestGradientCalculation(test_util.TestCase):
             operators, {'out': 'out_grad'})
         self.assertEqual(gradients, desired_grad_operators)
 
+    def testVersionMismatch(self):
+        operators = [
+            CreateOperator('Direct', 'x', 'x'),
+            CreateOperator('Direct', 'y', 'x'),
+            CreateOperator('Direct', 'x', 'y'),
+        ]
+        try:
+            gradients, _ = GradientRegistry.GetBackwardPass(
+                operators, {'y': 'y_grad'})
+            self.assertFalse(True, "Should raise exception of incorrect version")
+        except RuntimeError as e:
+            print(e)
+            self.assertTrue("version" in str(e))
+            pass
+
     def testUseOutput(self):
         operators = [
             CreateOperator('UseOutput', 'in', 'hidden'),
