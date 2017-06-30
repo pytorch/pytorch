@@ -33,16 +33,26 @@ set(Torch_FOUND 1)
 add_definitions(-DTH_INDEX_BASE=0)
 add_subdirectory(lib/TH)
 include_directories(
+  # dense
   ${CMAKE_SOURCE_DIR}/lib/TH
   ${CMAKE_SOURCE_DIR}/lib/THC
   ${CMAKE_BINARY_DIR}/lib/TH
   ${CMAKE_BINARY_DIR}/lib/THC
-  ${CMAKE_SOURCE_DIR}/lib)
+  # sparse
+  ${CMAKE_SOURCE_DIR}/lib/THS
+  ${CMAKE_SOURCE_DIR}/lib/THCS
+  ${CMAKE_BINARY_DIR}/lib/THS
+  ${CMAKE_BINARY_DIR}/lib/THCS
+
+  ${CMAKE_SOURCE_DIR}/lib
+  ${CMAKE_BINARY_DIR}/lib)
 add_subdirectory(lib/THNN)
+add_subdirectory(lib/THS)
 find_package(CUDA 5.5)
 if(CUDA_FOUND)
   add_subdirectory(lib/THC)
   add_subdirectory(lib/THCUNN)
+  add_subdirectory(lib/THCS)
 else()
   message(STATUS "CUDA not found: disabling THC")
 endif()
