@@ -365,7 +365,7 @@ bool SoftmaxWithLossOp<float, CUDAContext>::RunOnDevice() {
   if (weights) {
     // Sum weights
     math::Sum<float, CUDAContext>(
-        N, weights, total_weight_ptr_.mutable_data<float>(), &context_);
+        N, weights, total_weight_ptr_.mutable_data<float>(), &context_, &scratch_);
     cudaMemcpyAsync(
         &total_weight,
         total_weight_ptr_.data<float>(),
@@ -377,7 +377,7 @@ bool SoftmaxWithLossOp<float, CUDAContext>::RunOnDevice() {
   // Sum of all losses
   float* avg_loss_data = avg_loss->mutable_data<float>();
   math::Sum<float, CUDAContext>(
-      losses_.size(), losses_.data<float>(), avg_loss_data, &context_);
+      losses_.size(), losses_.data<float>(), avg_loss_data, &context_, &scratch_);
   // Average of input batch size
   if (total_weight > 0) {
     math::Scale<float, CUDAContext>(
@@ -452,7 +452,8 @@ bool SpatialSoftmaxWithLossOp<float, CUDAContext>::RunOnDevice() {
       weights_.size(),
       weights_.data<float>(),
       total_weight_ptr_.mutable_data<float>(),
-      &context_);
+      &context_,
+      &scratch_);
   cudaMemcpyAsync(
       &h_total_weight,
       total_weight_ptr_.data<float>(),
@@ -461,7 +462,7 @@ bool SpatialSoftmaxWithLossOp<float, CUDAContext>::RunOnDevice() {
       context_.cuda_stream());
 
   math::Sum<float, CUDAContext>(
-      losses_.size(), losses_.data<float>(), avg_loss_data, &context_);
+      losses_.size(), losses_.data<float>(), avg_loss_data, &context_, &scratch_);
 
   // Final scaling
   if (h_total_weight > 0) {
@@ -555,7 +556,7 @@ bool SoftmaxWithLossGradientOp<float, CUDAContext>::RunOnDevice() {
   if (weights) {
     // Sum weights
     math::Sum<float, CUDAContext>(
-        N, weights, total_weight_ptr_.mutable_data<float>(), &context_);
+        N, weights, total_weight_ptr_.mutable_data<float>(), &context_, &scratch_);
     cudaMemcpyAsync(
         &total_weight,
         total_weight_ptr_.data<float>(),
@@ -642,7 +643,8 @@ bool SpatialSoftmaxWithLossGradientOp<float, CUDAContext>::RunOnDevice() {
       weights_.size(),
       weights_.data<float>(),
       total_weight_ptr_.mutable_data<float>(),
-      &context_);
+      &context_,
+      &scratch_);
 
   // Somewhat awkward scalar passing from device to host
   float h_total_weight;

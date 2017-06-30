@@ -730,7 +730,9 @@ void RandGaussian<float, CPUContext>(
 #define CAFFE2_SPECIALIZED_SUM(T)                                \
   template <>                                                    \
   void Sum<T, CPUContext>(                                       \
-      const int N, const T* x, T* y, CPUContext* /* unused */) { \
+      const int N, const T* x, T* y,                             \
+      CPUContext* /* unused */,                                  \
+      Tensor<CPUContext>* scratch_ptr /* unused */) {            \
     *y = ConstEigenVectorMap<T>(x, N).sum();                     \
   }
 
