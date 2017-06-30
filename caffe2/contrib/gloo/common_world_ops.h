@@ -28,6 +28,11 @@ class CreateCommonWorld final : public Operator<Context> {
     CAFFE_ENFORCE(rank_ >= 0 && rank_ < size_);
     name_ = def().name();
     device_ = createDevice();
+    auto timeout =
+        OperatorBase::template GetSingleArgument<int>("timeout_ms", -1);
+    if (timeout != -1) {
+      device_->setTimeout(std::chrono::milliseconds(timeout));
+    }
     status_blob_ =
         OperatorBase::GetSingleArgument<std::string>("status_blob", "");
     if (status_blob_ != "") {
