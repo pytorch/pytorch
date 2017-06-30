@@ -36,12 +36,20 @@ class Addmm(InplaceFunction):
                 grad_add_matrix = grad_add_matrix.mul(ctx.alpha)
 
         if ctx.needs_input_grad[1]:
-            grad_matrix1 = torch.mm(grad_output, matrix2.t())
+            if matrix1.stride() == (1, matrix1.size(0)):
+                # column major gradient if input is column major
+                grad_matrix1 = torch.mm(matrix2, grad_output.t()).t()
+            else:
+                grad_matrix1 = torch.mm(grad_output, matrix2.t())
             if ctx.beta != 1:
                 grad_matrix1 *= ctx.beta
 
         if ctx.needs_input_grad[2]:
-            grad_matrix2 = torch.mm(matrix1.t(), grad_output)
+            if matrix2.stride() == (1, matrix2.size(0)):
+                # column major gradient if input is column major
+                grad_matrix2 = torch.mm(grad_output.t(), matrix1).t()
+            else:
+                grad_matrix2 = torch.mm(matrix1.t(), grad_output)
             if ctx.beta != 1:
                 grad_matrix2 *= ctx.beta
 

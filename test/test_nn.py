@@ -2316,6 +2316,12 @@ class TestNN(NNTestCase):
         input = Variable(torch.randn(1, 1, 2, 2, 2), requires_grad=True)
         self.assertTrue(gradcheck(lambda x: F.upsample(x, 4, mode='trilinear'), (input,)))
 
+    def test_linear_broadcasting(self):
+        m = nn.Linear(5, 8)
+        inp = Variable(torch.randn(2, 3, 5))
+        expected = m(inp.view(6, 5)).view(2, 3, 8)
+        self.assertEqual(expected, m(inp))
+
     def test_bilinear(self):
         module = nn.Bilinear(10, 10, 8)
         module_legacy = legacy.Bilinear(10, 10, 8)

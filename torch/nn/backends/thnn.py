@@ -20,7 +20,6 @@ def _get_thnn_function_backend():
 
 def _initialize_backend():
     from .._functions.thnn import _all_functions as _thnn_functions
-    from .._functions.linear import Linear
     from .._functions.conv import ConvNd
     from .._functions.rnn import RNN, \
         RNNTanhCell, RNNReLUCell, GRUCell, LSTMCell
@@ -29,7 +28,6 @@ def _initialize_backend():
     from .._functions.loss import CosineEmbeddingLoss, \
         HingeEmbeddingLoss, MarginRankingLoss
 
-    backend.register_function('Linear', Linear)
     backend.register_function('ConvNd', ConvNd)
     backend.register_function('RNN', RNN)
     backend.register_function('RNNTanhCell', RNNTanhCell)
