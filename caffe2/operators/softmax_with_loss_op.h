@@ -37,6 +37,7 @@ class SoftmaxWithLossOp final : public Operator<Context> {
   Tensor<Context> weights_; // unignored weights
   Tensor<Context> sum_multiplier_; // Vector of ones for summing via dot prod
   Tensor<Context> total_weight_ptr_;
+  Tensor<Context> scratch_;
 };
 
 template <typename T, class Context>
@@ -67,6 +68,7 @@ class SoftmaxWithLossGradientOp final : public Operator<Context> {
   StorageOrder order_;
   bool only_loss_;
   int axis_;
+  Tensor<Context> scratch_;
 };
 
 } // namespace caffe2

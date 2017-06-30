@@ -23,6 +23,9 @@ extern "C" {
 
 namespace caffe2 {
 
+template <class Context>
+class Tensor;
+
 // An empty class as a placeholder for a math function that has no specific
 // engine specified.
 class DefaultEngine {};
@@ -223,7 +226,8 @@ void Dot(const int N, const T* a, const T* b, T* y, Context* context);
 
 // Sum of vector x, and writes the result to a single value y.
 template <typename T, class Context>
-void Sum(const int N, const T* x, T* y, Context* context);
+void Sum(const int N, const T* x, T* y, Context* context,
+         Tensor<Context>* scratch_ptr = nullptr);
 
 // Sum of squares of vector x, and writes the result to a single value y.
 template <typename T, class Context>
