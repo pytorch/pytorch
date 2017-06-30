@@ -418,6 +418,8 @@ class IR(object):
         self.frontier = defaultdict(int)
         self.gradient_frontier = {}
         self.gradient_generators = defaultdict(lambda: defaultdict(list))
+        self.out_version_history = defaultdict(list)
+        self.in_version_history = defaultdict(list)
 
         for op in operators:
             self.Play(op)
@@ -431,6 +433,7 @@ class IR(object):
         for s in op.input:
             in_versions[s] = self.frontier[s]
             self.input_usages[s][self.frontier[s]].append(len(self.ssa))
+            self.in_version_history[s].append((op, self.frontier[s]))
         # For output, they are the current version plus one. If this is a
         # newly created blob, its version starts with zero.
         out_versions = {}
@@ -438,6 +441,7 @@ class IR(object):
             if s in self.frontier:
                 self.frontier[s] += 1
             out_versions[s] = self.frontier[s]
+            self.out_version_history[s].append((op, self.frontier[s]))
         # Add to SSA for bookkeeping.
         self.ssa.append(OpSSA(op, in_versions, out_versions))
 
@@ -446,6 +450,26 @@ class IR(object):
         """Checks if the gradient operators can be correctly carried out."""
         forward_op, in_versions, out_versions = self.ssa[fwd_op_idx]
         original_index = GetIndexFromGradientList(g_output, grad_op_input)
+
+        # Functions to generate debug help for version-mismatches
+        def versionMismatchInfoOut(name):
+            s = "DEBUG HELP:\n"
+            s += "Maybe you use same output blob twice for different ops?\n"
+            s += "== Version history of blob [{}]\n".format(name)
+            for (op, vers) in self.out_version_history[name]:
+                s += "Version (out) {} <-- {}".format(vers, op)
+                s += "\n"
+            return s
+
+        def versionMismatchInfoIn(name):
+            s = "DEBUG HELP:\n"
+            s += "Maybe the blob was overwritten by another op?\n"
+            s += "== Version history of blob [{}]\n".format(name)
+            for (op, vers) in self.in_version_history[name]:
+                s += "version (in) {} <-- {}".format(vers, op)
+                s += "\n"
+            return s
+
         # If it is a dense or sparse gradient name, it should match the
         # version of the corresponding output.
         if original_index is not None:
@@ -455,20 +479,21 @@ class IR(object):
                 raise RuntimeError(
                     'Gradient name "%s" is expected to correspond '
                     'to version %d of "%s", but currently we have '
-                    'version %d.' % (
+                    'version %d.\n\n' % (
                         grad_op_input, out_versions[original_name],
                         original_name,
-                        self.gradient_frontier[original_name]))
+                        self.gradient_frontier[original_name]) +
+                    versionMismatchInfoOut(original_name))
         # If it is an output name, the current version should match the
         # version when the operator was run.
         elif grad_op_input in out_versions:
             if self.frontier[grad_op_input] != out_versions[grad_op_input]:
                 raise RuntimeError(
                     'Gradient operator needs output "%s" at version'
-                    ' %d, but currently we have version %d.' % (
+                    ' %d, but currently we have version %d.\n\n' % (
                         grad_op_input, out_versions[grad_op_input],
                         self.frontier[grad_op_input]
-                    )
+                    ) + versionMismatchInfoOut(grad_op_input)
                 )
         # If it is an input name, the current version should match the
         # version when the operator was run.
@@ -476,10 +501,10 @@ class IR(object):
             if (self.frontier[grad_op_input] != in_versions[grad_op_input]):
                 raise RuntimeError(
                     'Gradient operator needs input "%s" at version '
-                    '%d, but currently we have version %d.' % (
+                    '%d, but currently we have version %d.\n\n' % (
                         grad_op_input, in_versions[grad_op_input],
                         self.frontier[grad_op_input]
-                    )
+                    ) + versionMismatchInfoIn(grad_op_input)
                 )
         # If it is none of the above, it should be a blob that is
         # generated locally by one of the previous gradient operators.
