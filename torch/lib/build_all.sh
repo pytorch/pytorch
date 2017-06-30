@@ -28,7 +28,7 @@ cd "$(dirname "$0")/../.."
 BASE_DIR=$(pwd)
 cd torch/lib
 INSTALL_DIR="$(pwd)/tmp_install"
-BASIC_C_FLAGS=" -DTH_INDEX_BASE=0 -I$INSTALL_DIR/include \
+C_FLAGS=" -DTH_INDEX_BASE=0 -I$INSTALL_DIR/include \
   -I$INSTALL_DIR/include/TH -I$INSTALL_DIR/include/THC \
   -I$INSTALL_DIR/include/THS -I$INSTALL_DIR/include/THCS \
   -I$INSTALL_DIR/include/THPP "
@@ -36,13 +36,12 @@ LDFLAGS="-L$INSTALL_DIR/lib "
 LD_POSTFIX=".so.1"
 LD_POSTFIX_UNVERSIONED=".so"
 if [[ $(uname) == 'Darwin' ]]; then
-    LDFLAGS="$LDFLAGS -Qunused-arguments -Wl,-rpath,@loader_path"
+    LDFLAGS="$LDFLAGS -Wl,-rpath,@loader_path"
     LD_POSTFIX=".1.dylib"
     LD_POSTFIX_UNVERSIONED=".dylib"
 else
     LDFLAGS="$LDFLAGS -Wl,-rpath,\$ORIGIN"
 fi
-C_FLAGS="$BASIC_C_FLAGS $LDFLAGS"
 
 # Used to build an individual library, e.g. build TH
 function build() {
@@ -55,7 +54,9 @@ function build() {
               -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
               -DCMAKE_C_FLAGS="$C_FLAGS" \
               -DCMAKE_CXX_FLAGS="$C_FLAGS $CPP_FLAGS" \
-              -DCUDA_NVCC_FLAGS="$BASIC_C_FLAGS" \
+              -DCMAKE_EXE_LINKER_FLAGS="$LDFLAGS" \
+              -DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS" \
+              -DCUDA_NVCC_FLAGS="$C_FLAGS" \
               -DTH_INCLUDE_PATH="$INSTALL_DIR/include" \
               -DTH_LIB_PATH="$INSTALL_DIR/lib" \
               -DTH_LIBRARIES="$INSTALL_DIR/lib/libTH$LD_POSTFIX" \
