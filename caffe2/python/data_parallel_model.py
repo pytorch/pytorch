@@ -906,7 +906,7 @@ def _AllReduceBlobsDistributed(
     assert num_workers > 1, "Please specify more than 1 worker"
     all_reduce_engine = rendezvous['engine']
 
-    master_device_opt = core.DeviceOption(caffe2_pb2.CUDA, devices[0])
+    master_device_opt = core.DeviceOption(model._device_type, devices[0])
 
     reducing_device_opt = master_device_opt
 
