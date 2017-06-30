@@ -496,7 +496,7 @@ Loss functions
     :members:
 
 :hidden:`PoissonNLLLoss`
-~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: PoissonNLLLoss
     :members:
@@ -520,7 +520,7 @@ Loss functions
     :members:
 
 :hidden:`BCEWithLogitsLoss`
-~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: BCEWithLogitsLoss
     :members:
@@ -921,7 +921,7 @@ Loss functions
 .. autofunction:: nll_loss
 
 :hidden:`poisson_nll_loss`
-~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: poisson_nll_loss
 
