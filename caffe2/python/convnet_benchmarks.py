@@ -640,14 +640,14 @@ def GetArgumentParser():
 
 
 if __name__ == '__main__':
-    args = GetArgumentParser().parse_args()
+    args, extra_args = GetArgumentParser().parse_known_args()
     if (
         not args.batch_size or not args.model or not args.order
     ):
         GetArgumentParser().print_help()
     else:
         workspace.GlobalInit(
-            ['caffe2', '--caffe2_log_level=0'] +
+            ['caffe2', '--caffe2_log_level=0'] + extra_args +
             (['--caffe2_use_nvtx'] if args.use_nvtx else []) +
             (['--caffe2_htrace_span_log_path=' + args.htrace_span_log_path]
                 if args.htrace_span_log_path else []))
