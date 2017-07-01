@@ -2213,7 +2213,7 @@ class TestNN(NNTestCase):
         with self.assertRaises(ValueError):
             nn.BCEWithLogitsLoss()(input, target)
 
-    def test_bce_with_logits_gives_same_result_as_bce_and_sigmoid(self):
+    def test_bce_with_logits_gives_same_result_as_sigmooid_and_bce_loss(self):
         sigmoid = nn.Sigmoid()
 
         target = Variable(torch.rand(64, 4))
