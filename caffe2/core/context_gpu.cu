@@ -100,6 +100,19 @@ CudaMemoryPoolType GetCudaMemoryPoolType() {
   return g_cuda_memory_pool_type;
 }
 
+vector<TIndex> GetCUDATensorInfo(
+    void* c,
+    bool* shares_data,
+    size_t* capacity,
+    DeviceOption* device) {
+  vector<TIndex> dims =
+      GetTensorInfo<CUDAContext>(c, shares_data, capacity, device);
+  Tensor<CUDAContext>* tc = static_cast<Tensor<CUDAContext>*>(c);
+  device->set_device_type(CUDA);
+  device->set_cuda_gpu_id(GetGPUIDForPointer(tc->raw_data()));
+  return dims;
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // A wrapper to allow us to lazily initialize all cuda environments that Caffe
 // uses. This gets done the first time a caffe2::CUDAContext::New() gets called
@@ -167,10 +180,8 @@ static void Caffe2InitializeCuda() {
     GetTensorType<CUDAContext>
   );
 
-  RegisterShapeCallFunction(
-    TypeMeta::Id<Tensor<CUDAContext>>(),
-    GetTensorShape<CUDAContext>
-  );
+  RegisterTensorInfoFunction(
+      TypeMeta::Id<Tensor<CUDAContext>>(), GetCUDATensorInfo);
 
   // Check the versions of cuDNN that were compiled and linked with are compatible
   CheckCuDNNVersions();

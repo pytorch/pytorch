@@ -19,6 +19,7 @@ OPERATOR_SCHEMA(Broadcast)
       return in >= 2 && out == (in - 1);
     })
     .EnforceInplace([](int in, int out) { return (in - 1) == out; })
+    .InputsCanCrossDevices()
     .IdenticalTypeAndShapeOfInput(0)
     .SetDoc(R"DOC(
 Does a broadcast operation from the root node to every other node. The tensor
@@ -32,6 +33,7 @@ on each node should have been pre-created with the same shape and data type.
 OPERATOR_SCHEMA(Reduce)
     .NumInputs(2)
     .NumOutputs(1)
+    .InputsCanCrossDevices()
     .IdenticalTypeAndShapeOfInput(0)
     .SetDoc(R"DOC(
 Does a reduce operation from every node to the root node. Currently only
@@ -48,6 +50,7 @@ OPERATOR_SCHEMA(Allreduce)
     })
     .EnforceInplace([](int in, int out) { return (in - 1) == out; })
     .IdenticalTypeAndShapeOfInput(0)
+    .InputsCanCrossDevices()
     .SetDoc(R"DOC(
 Does an allreduce operation among the nodes. Currently only Sum is supported.
 )DOC")
@@ -58,6 +61,7 @@ Does an allreduce operation among the nodes. Currently only Sum is supported.
 OPERATOR_SCHEMA(Allgather)
     .NumInputs(2)
     .NumOutputs(1)
+    .InputsCanCrossDevices()
     .SetDoc(R"DOC(
 Does an allgather operation among the nodes.
 )DOC")

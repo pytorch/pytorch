@@ -219,19 +219,21 @@ Produces tensor containing data of first input and shape of second input.
 OPERATOR_SCHEMA(SumInt)
     .NumInputs(1, INT_MAX)
     .NumOutputs(1)
-    .TensorInferenceFunction(
-        [](const OperatorDef& def, const vector<TensorShape>& in) {
-          vector<TensorShape> out(1);
-          out.push_back(in[0]);
-          out[0].set_data_type(TensorProto::INT32);
-          return out;
-        })
+    .InputsCanCrossDevices()
+    .TensorInferenceFunction([](const OperatorDef& def,
+                                const vector<TensorShape>& in) {
+      vector<TensorShape> out(1);
+      out.push_back(in[0]);
+      out[0].set_data_type(TensorProto::INT32);
+      return out;
+    })
     .AllowInplace({{0, 0}});
 
 OPERATOR_SCHEMA(Sum)
     .NumInputs(1, INT_MAX)
     .NumOutputs(1)
     .AllowInplace({{0, 0}})
+    .InputsCanCrossDevices()
     .IdenticalTypeAndShapeOfInput(0)
     .SetDoc(R"DOC(
 Element-wise sum of each of the input tensors. The first input tensor can be
@@ -352,6 +354,7 @@ OPERATOR_SCHEMA(Copy)
     .NumInputs(1)
     .NumOutputs(1)
     .IdenticalTypeAndShape()
+    .InputsCanCrossDevices()
     .SetDoc("Copy input tensor into output, potentially across devices.")
     .Input(0, "input", "The input tensor.")
     .Output(0, "output", "Tensor that will contain a copy of the input.");
@@ -360,6 +363,7 @@ OPERATOR_SCHEMA(CopyGPUToCPU)
     .NumInputs(1)
     .NumOutputs(1)
     .IdenticalTypeAndShape()
+    .InputsCanCrossDevices()
     .DeviceInferenceFunction([](const OperatorDef& def) {
       CAFFE_ENFORCE(
           def.has_device_option(),
@@ -380,6 +384,7 @@ OPERATOR_SCHEMA(CopyCPUToGPU)
     .NumInputs(1)
     .NumOutputs(1)
     .IdenticalTypeAndShape()
+    .InputsCanCrossDevices()
     .DeviceInferenceFunction([](const OperatorDef& def) {
       CAFFE_ENFORCE(
           def.has_device_option(),
@@ -400,6 +405,7 @@ OPERATOR_SCHEMA(EnsureCPUOutput)
     .NumInputs(1)
     .NumOutputs(1)
     .IdenticalTypeAndShape()
+    .InputsCanCrossDevices()
     .DeviceInferenceFunction([](const OperatorDef& def) {
       auto op_device =
           def.has_device_option() ? def.device_option() : DeviceOption();
@@ -419,6 +425,7 @@ OPERATOR_SCHEMA(CopyFromCPUInput)
     .NumInputs(1)
     .NumOutputs(1)
     .IdenticalTypeAndShape()
+    .InputsCanCrossDevices()
     .DeviceInferenceFunction([](const OperatorDef& def) {
       auto op_device =
           def.has_device_option() ? def.device_option() : DeviceOption();

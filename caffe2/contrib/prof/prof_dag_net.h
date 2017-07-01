@@ -27,6 +27,7 @@ class ProfDAGNet : public DAGNetBase {
  protected:
   bool RunAt(const std::vector<int>& chain) override;
   void PrintStats();
+  void ValidateOpTensorDevices();
   ProfDAGProto ProtoMsg(std::pair<std::string, Stats> op_stat) const;
   std::vector<Stats> time_per_op_;
   CaffeMap<std::string, Stats> time_per_op_type_;

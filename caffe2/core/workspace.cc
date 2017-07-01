@@ -37,11 +37,12 @@ void Workspace::PrintBlobSizes() {
   vector<std::pair<size_t, std::string>> blob_sizes;
   for (const auto& s : blobs) {
     Blob* b = this->GetBlob(s);
-    ShapeCall shape_fun = GetShapeCallFunction(b->meta().id());
+    TensorInfoCall shape_fun = GetTensorInfoFunction(b->meta().id());
     if (shape_fun) {
       bool shares_data = false;
       size_t capacity;
-      auto shape = shape_fun(b->GetRaw(), shares_data, capacity);
+      DeviceOption _device;
+      auto shape = shape_fun(b->GetRaw(), &shares_data, &capacity, &_device);
       if (shares_data) {
         // Blobs sharing data do not actually take any memory
         capacity = 0;
@@ -63,11 +64,13 @@ void Workspace::PrintBlobSizes() {
   LOG(INFO) << "name;current shape;capacity bytes;percentage";
   for (const auto& sb : blob_sizes) {
     Blob* b = this->GetBlob(sb.second);
-    ShapeCall shape_fun = GetShapeCallFunction(b->meta().id());
+    TensorInfoCall shape_fun = GetTensorInfoFunction(b->meta().id());
     CHECK(shape_fun != nullptr);
     bool _shares_data = false;
     size_t capacity;
-    auto shape = shape_fun(b->GetRaw(), _shares_data, capacity);
+    DeviceOption _device;
+
+    auto shape = shape_fun(b->GetRaw(), &_shares_data, &capacity, &_device);
     std::stringstream ss;
     ss << sb.second << ";";
     for (const auto d : shape) {

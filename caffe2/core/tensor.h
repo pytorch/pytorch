@@ -733,15 +733,25 @@ TypeMeta GetTensorType(void* c) {
 }
 
 // Shape call registry
-typedef vector<TIndex> (*ShapeCall)(void*, bool& shares_data, size_t& capacity);
-ShapeCall GetShapeCallFunction(CaffeTypeId id);
-void RegisterShapeCallFunction(CaffeTypeId id, ShapeCall c);
+typedef vector<TIndex> (*TensorInfoCall)(
+    void*,
+    bool* shares_data,
+    size_t* capacity,
+    DeviceOption* device);
+TensorInfoCall GetTensorInfoFunction(CaffeTypeId id);
+void RegisterTensorInfoFunction(CaffeTypeId id, TensorInfoCall c);
 
 template <class Context>
-vector<TIndex> GetTensorShape(void* c, bool& shares_data, size_t& capacity) {
+vector<TIndex> GetTensorInfo(
+    void* c,
+    bool* shares_data,
+    size_t* capacity,
+    DeviceOption* device) {
   Tensor<Context>* tc = static_cast<Tensor<Context>*>(c);
-  shares_data = tc->shares_data();
-  capacity = tc->capacity_nbytes();
+  *shares_data = tc->shares_data();
+  *capacity = tc->capacity_nbytes();
+  device->set_device_type(CPU);
+  device->set_cuda_gpu_id(0);
   return tc->dims();
 }
 

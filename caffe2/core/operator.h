@@ -584,6 +584,9 @@ TensorShapes InferBlobShapesAndTypesFromMap(
     const CaffeMap<std::string, std::vector<TIndex>>& blob_dimensions,
     const vector<std::unique_ptr<NetDef>>& nets);
 
+std::map<string, std::pair<DeviceOption, DeviceOption>> ValidateTensorDevices(
+    OperatorBase& op);
+
 }  // namespace caffe2
 
 #endif  // CAFFE2_CORE_OPERATOR_H_
