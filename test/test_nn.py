@@ -2220,7 +2220,7 @@ class TestNN(NNTestCase):
         output = Variable(torch.rand(64, 4) - 0.5)
 
         self.assertEqual(nn.BCEWithLogitsLoss()(output, target), nn.BCELoss()(sigmoid(output), target))
-        
+
         weight = torch.rand(4)
         self.assertEqual(nn.BCEWithLogitsLoss(weight)(output, target), nn.BCELoss(weight)(sigmoid(output), target))
 
