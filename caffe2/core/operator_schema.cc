@@ -171,6 +171,11 @@ OpSchema& OpSchema::Private() {
   return *this;
 }
 
+OpSchema& OpSchema::InputsCanCrossDevices() {
+  inputs_can_cross_devices_ = true;
+  return *this;
+}
+
 OpSchema& OpSchema::TensorInferenceFunction(
     TensorInferenceFunctionType function) {
   tensor_inference_function_ = function;

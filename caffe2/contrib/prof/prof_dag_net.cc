@@ -21,12 +21,33 @@ ProfDAGNet::~ProfDAGNet() {
   PrintStats();
 }
 
+void ProfDAGNet::ValidateOpTensorDevices() {
+  bool had_mismatches = false;
+  for (int idx = 0; idx < operator_nodes_.size(); idx++) {
+    const auto& node = operator_nodes_[idx];
+    auto mismatches = ValidateTensorDevices(*node.operator_);
+    for (auto& mismatch : mismatches) {
+      had_mismatches = true;
+      LOG(INFO) << "== PERFORMANCE WARNING == \n"
+                << " Operator " << node.operator_->def().type()
+                << " expects GPU " << mismatch.second.first.cuda_gpu_id()
+                << " but tensor [" << mismatch.first << "] is on GPU "
+                << mismatch.second.second.cuda_gpu_id();
+    }
+  }
+  if (!had_mismatches) {
+    LOG(INFO) << "Analyzed operator & blob GPU assignments -- no mismatches";
+  }
+}
+
 bool ProfDAGNet::Run() {
   runs_++;
 
   // don't collect statistics from first run
   if (runs_ <= 1) {
-    return DAGNetBase::Run();
+    bool success = DAGNetBase::Run();
+    ValidateOpTensorDevices();
+    return success;
   }
 
   CAFFE_ENFORCE(
