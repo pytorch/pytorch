@@ -301,13 +301,13 @@ def GetArgumentParser():
 
 
 if __name__ == '__main__':
-    args = GetArgumentParser().parse_args()
+    args, extra_args = GetArgumentParser().parse_known_args()
 
     workspace.GlobalInit([
         'caffe2',
         '--caffe2_log_level=0',
         '--caffe2_print_blob_sizes_at_exit=0',
-        '--caffe2_gpu_memory_tracking=1'])
+        '--caffe2_gpu_memory_tracking=1'] + extra_args)
 
     device = core.DeviceOption(
         caffe2_pb2.CUDA if args.gpu else caffe2_pb2.CPU, 0)
