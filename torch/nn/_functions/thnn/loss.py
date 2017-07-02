@@ -4,6 +4,7 @@ from torch.autograd import Function
 
 from . import _all_functions
 from .auto import _BCELoss
+import warnings
 
 
 # TODO: move this code to THNN and remove _BCELoss from auto.py
@@ -19,6 +20,9 @@ class BCELoss(_BCELoss):
         del self.old_weight
 
     def forward(self, input, target):
+        if not target.is_same_size(input):
+            warnings.warn("Using a target size ({}) that is different to the input size ({}) is deprecated. "
+                          "Please ensure they have the same size.".format(target.size(), input.size()))
         assert input.nelement() == target.nelement()
         self._resize_weight(target)
         result = super(BCELoss, self).forward(input, target)

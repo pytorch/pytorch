@@ -674,6 +674,10 @@ def binary_cross_entropy(input, target, weight=None, size_average=True):
                 sizeAverage is set to False, the losses are instead summed
                 for each minibatch.
     """
+    if not target.is_same_size(input):
+        warnings.warn("Using a target size ({}) that is different to the input size ({}) is deprecated. "
+                      "Please ensure they have the same size.".format(target.size(), input.size()))
+
     return _functions.thnn.BCELoss(size_average, weight=weight)(input, target)
 
 
@@ -692,8 +696,12 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=Tr
                 sizeAverage is set to False, the losses are instead summed
                 for each minibatch.
     """
+    if not target.is_same_size(input):
+        raise ValueError("Target size ({}) must be the same as input size ({})".format(target.size(), input.size()))
+
     if weight is not None and target.dim() != 1:
         weight = weight.view(1, target.size(1)).expand_as(target)
+
     neg_abs = - input.abs()
     loss = input.clamp(min=0) - input * target + (1 + neg_abs.exp()).log()
 
