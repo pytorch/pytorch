@@ -254,9 +254,9 @@ class LSTM(RNNBase):
 
     Attributes:
         weight_ih_l[k] : the learnable input-hidden weights of the k-th layer `(W_ii|W_if|W_ig|W_io)`, of shape
-                         `(input_size x 4*hidden_size)`
+                         `(4*hidden_size x input_size)`
         weight_hh_l[k] : the learnable hidden-hidden weights of the k-th layer `(W_hi|W_hf|W_hg|W_ho)`, of shape
-                         `(hidden_size x 4*hidden_size)`
+                         `(4*hidden_size x hidden_size)`
         bias_ih_l[k] : the learnable input-hidden bias of the k-th layer `(b_ii|b_if|b_ig|b_io)`, of shape
                          `(4*hidden_size)`
         bias_hh_l[k] : the learnable hidden-hidden bias of the k-th layer `(b_hi|b_hf|b_hg|b_ho)`, of shape
@@ -319,9 +319,9 @@ class GRU(RNNBase):
 
     Attributes:
         weight_ih_l[k] : the learnable input-hidden weights of the k-th layer (W_ir|W_iz|W_in), of shape
-                         `(input_size x 3*hidden_size)`
+                         `(3*hidden_size x input_size)`
         weight_hh_l[k] : the learnable hidden-hidden weights of the k-th layer (W_hr|W_hz|W_hn), of shape
-                         `(hidden_size x 3*hidden_size)`
+                         `(3*hidden_size x hidden_size)`
         bias_ih_l[k] : the learnable input-hidden bias of the k-th layer (b_ir|b_iz|b_in), of shape
                          `(3*hidden_size)`
         bias_hh_l[k] : the learnable hidden-hidden bias of the k-th layer (b_hr|b_hz|b_hn), of shape
