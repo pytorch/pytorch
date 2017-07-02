@@ -1751,7 +1751,9 @@ class Net(object):
 
     def set_input_record(self, input_record):
         from caffe2.python import schema
-        assert self._input_record is None, (
+        assert self._input_record is None or (input_record.has_blobs() and
+            set(input_record.field_blobs()) ==
+            set(self._input_record.field_blobs())), (
             'Input schema cannot be reset')
         if not input_record.has_blobs():
             with NameScope(self.Name()):
@@ -1773,8 +1775,10 @@ class Net(object):
             self.set_input_record(record)
 
     def set_output_record(self, record):
-        assert self._output_record is None, (
-            'Output record cannot be reset')
+        assert self._output_record is None or (record.has_blobs() and
+            set(record.field_blobs()) ==
+            set(self._output_record.field_blobs())), (
+            'Output schema cannot be reset')
         for blob in record.field_blobs():
             assert self.BlobIsDefined(blob), "{} is not defined".format(blob)
         for blob in record.field_blobs():
