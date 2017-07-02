@@ -6,6 +6,7 @@ from . import _all_functions
 from .auto import _BCELoss
 import warnings
 
+
 # TODO: move this code to THNN and remove _BCELoss from auto.py
 class BCELoss(_BCELoss):
 
