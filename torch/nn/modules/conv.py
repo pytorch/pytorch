@@ -12,7 +12,7 @@ class _ConvNd(Module):
 
     def __init__(self, in_channels, out_channels, kernel_size, stride,
                  padding, dilation, transposed, output_padding, groups, bias,
-                 initializer=None):
+                 initializer):
         super(_ConvNd, self).__init__()
         if in_channels % groups != 0:
             raise ValueError('in_channels must be divisible by groups')
@@ -123,6 +123,8 @@ class Conv1d(_ConvNd):
         dilation (int or tuple, optional): Spacing between kernel elements
         groups (int, optional): Number of blocked connections from input channels to output channels
         bias (bool, optional): If True, adds a learnable bias to the output
+        initializer(dict, optional): dictionary of initializer of weights and bias, if None (default),
+        they are uniformly initialized
 
     Shape:
         - Input: :math:`(N, C_{in}, L_{in})`
@@ -147,14 +149,14 @@ class Conv1d(_ConvNd):
     """
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                 padding=0, dilation=1, groups=1, bias=True):
+                 padding=0, dilation=1, groups=1, bias=True, initializer=None):
         kernel_size = _single(kernel_size)
         stride = _single(stride)
         padding = _single(padding)
         dilation = _single(dilation)
         super(Conv1d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
-            False, _single(0), groups, bias)
+            False, _single(0), groups, bias, initializer)
 
     def forward(self, input):
         return F.conv1d(input, self.weight, self.bias, self.stride,
@@ -213,6 +215,8 @@ class Conv2d(_ConvNd):
         dilation (int or tuple, optional): Spacing between kernel elements
         groups (int, optional): Number of blocked connections from input channels to output channels
         bias (bool, optional): If True, adds a learnable bias to the output
+        initializer(dict, optional): dictionary of initializer of weights and bias, if None (default),
+        they are uniformly initialized
 
     Shape:
         - Input: :math:`(N, C_{in}, H_{in}, W_{in})`
@@ -244,14 +248,14 @@ class Conv2d(_ConvNd):
     """
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                 padding=0, dilation=1, groups=1, bias=True):
+                 padding=0, dilation=1, groups=1, bias=True, initializer=None):
         kernel_size = _pair(kernel_size)
         stride = _pair(stride)
         padding = _pair(padding)
         dilation = _pair(dilation)
         super(Conv2d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
-            False, _pair(0), groups, bias)
+            False, _pair(0), groups, bias, initializer)
 
     def forward(self, input):
         return F.conv2d(input, self.weight, self.bias, self.stride,
@@ -310,6 +314,8 @@ class Conv3d(_ConvNd):
         dilation (int or tuple, optional): Spacing between kernel elements
         groups (int, optional): Number of blocked connections from input channels to output channels
         bias (bool, optional): If True, adds a learnable bias to the output
+        initializer(dict, optional): dictionary of initializer of weights and bias, if None (default),
+        they are uniformly initialized
 
     Shape:
         - Input: :math:`(N, C_{in}, D_{in}, H_{in}, W_{in})`
@@ -340,14 +346,14 @@ class Conv3d(_ConvNd):
     """
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                 padding=0, dilation=1, groups=1, bias=True):
+                 padding=0, dilation=1, groups=1, bias=True, initializer=None):
         kernel_size = _triple(kernel_size)
         stride = _triple(stride)
         padding = _triple(padding)
         dilation = _triple(dilation)
         super(Conv3d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
-            False, _triple(0), groups, bias)
+            False, _triple(0), groups, bias, initializer)
 
     def forward(self, input):
         return F.conv3d(input, self.weight, self.bias, self.stride,

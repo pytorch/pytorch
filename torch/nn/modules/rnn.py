@@ -172,6 +172,8 @@ class RNN(RNNBase):
         batch_first: If True, then the input and output tensors are provided as (batch, seq, feature)
         dropout: If non-zero, introduces a dropout layer on the outputs of each RNN layer except the last layer
         bidirectional: If True, becomes a bidirectional RNN. Default: False
+        initializer: dictionary of initializer of weights and bias, if None (default),
+        they are uniformly initialized
 
     Inputs: input, h_0
         - **input** (seq_len, batch, input_size): tensor containing the features of the input sequence.
@@ -249,6 +251,8 @@ class LSTM(RNNBase):
         batch_first: If True, then the input and output tensors are provided as (batch, seq, feature)
         dropout: If non-zero, introduces a dropout layer on the outputs of each RNN layer except the last layer
         bidirectional: If True, becomes a bidirectional RNN. Default: False
+        initializer: dictionary of initializer of weights and bias, if None (default),
+        they are uniformly initialized
 
     Inputs: input, (h_0, c_0)
         - **input** (seq_len, batch, input_size): tensor containing the features of the input sequence.
@@ -319,6 +323,8 @@ class GRU(RNNBase):
         batch_first: If True, then the input and output tensors are provided as (batch, seq, feature)
         dropout: If non-zero, introduces a dropout layer on the outputs of each RNN layer except the last layer
         bidirectional: If True, becomes a bidirectional RNN. Default: False
+        initializer: dictionary of initializer of weights and bias, if None (default),
+        they are uniformly initialized
 
     Inputs: input, h_0
         - **input** (seq_len, batch, input_size): tensor containing the features of the input sequence.

@@ -14,7 +14,7 @@ class Linear(Module):
         in_features: size of each input sample
         out_features: size of each output sample
         bias: If set to False, the layer will not learn an additive bias. Default: True
-        initializer: dictionary of initializer of weights and bias. Default: dict()
+        initializer: dictionary of initializer of weights and bias, if None (default), they are uniformly initialized.
 
     Shape:
         - Input: :math:`(N, in\_features)`
