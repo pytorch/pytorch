@@ -455,7 +455,8 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
     """
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                 padding=0, output_padding=0, groups=1, bias=True, dilation=1):
+                 padding=0, output_padding=0, groups=1, bias=True, dilation=1,
+                 initializer=None):
         kernel_size = _single(kernel_size)
         stride = _single(stride)
         padding = _single(padding)
@@ -463,7 +464,7 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
         output_padding = _single(output_padding)
         super(ConvTranspose1d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
-            True, output_padding, groups, bias)
+            True, output_padding, groups, bias, initializer)
 
     def forward(self, input, output_size=None):
         output_padding = self._output_padding(input, output_size)
@@ -559,7 +560,8 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
     """
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                 padding=0, output_padding=0, groups=1, bias=True, dilation=1):
+                 padding=0, output_padding=0, groups=1, bias=True, dilation=1,
+                 initializer=None):
         kernel_size = _pair(kernel_size)
         stride = _pair(stride)
         padding = _pair(padding)
@@ -567,7 +569,7 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
         output_padding = _pair(output_padding)
         super(ConvTranspose2d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
-            True, output_padding, groups, bias)
+            True, output_padding, groups, bias, initializer)
 
     def forward(self, input, output_size=None):
         output_padding = self._output_padding(input, output_size)
@@ -656,7 +658,8 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
     """
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                 padding=0, output_padding=0, groups=1, bias=True, dilation=1):
+                 padding=0, output_padding=0, groups=1, bias=True, dilation=1,
+                 initializer=None):
         kernel_size = _triple(kernel_size)
         stride = _triple(stride)
         padding = _triple(padding)
@@ -664,7 +667,7 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
         output_padding = _triple(output_padding)
         super(ConvTranspose3d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
-            True, output_padding, groups, bias)
+            True, output_padding, groups, bias, initializer)
 
     def forward(self, input, output_size=None):
         output_padding = self._output_padding(input, output_size)
