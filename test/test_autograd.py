@@ -28,6 +28,7 @@ PRECISION = 1e-4
 
 parse_set_seed_once()
 
+
 @contextlib.contextmanager
 def backward_engine(engine):
     _prev_engine = Variable._execution_engine
@@ -1575,13 +1576,13 @@ function_tests = [
     (Median, (), ((S, S, S), 0, True), "keepdim"),
     (Median, (), ((S,), 0), 'dim0_1d'),
     (Median, (), ((S,), 0, True), "keepdim_1d"),
-    (Norm, (), (torch.rand(S, S, S), 1.5), '1_5'),
+    (Norm, (), (torch.rand(S, S, S) + 5e-2, 1.5), '1_5'),
     (Norm, (), ((S, S, S),), '2'),
     (Norm, (), ((S, S, S), 3), '3'),
-    (Norm, (), (torch.rand(S, S, S), 1.5, 1), '1_5_dim', [2]),
+    (Norm, (), (torch.rand(S, S, S) + 5e-2, 1.5, 1), '1_5_dim', [2]),
     (Norm, (), ((S, S, S), 2, 1), '2_dim', [2]),
     (Norm, (), ((S, S, S), 3, 1), '3_dim', [2]),
-    (Norm, (), (torch.rand(S, S, S), 1.5, 1, True), 'keepdim_1_5_dim', [2]),
+    (Norm, (), (torch.rand(S, S, S) + 5e-2, 1.5, 1, True), 'keepdim_1_5_dim', [2]),
     (Norm, (), ((S, S, S), 2, 1, True), 'keepdim_2_dim', [2]),
     (Norm, (), ((S, S, S), 3, 1, True), 'keepdim_3_dim', [2]),
     (Norm, (), ((S,), 2, 0), '2_dim_1d', [2]),
@@ -1954,8 +1955,8 @@ ignore_inplace = set((
 
 # these are just empirical observations, we should improve
 gradgradcheck_precision_override = {
-    'test_NormFunction_1_5': {'atol': 1e-2, 'rtol': 1e-2},
-    'test_NormFunction_2': {'atol': 1e-2, 'rtol': 1e-2},
+    'test_NormFunction_1_5': {'atol': 1.5e-2, 'rtol': 1e-2},
+    'test_NormFunction_2': {'atol': 2e-2, 'rtol': 1e-2},
     'test_NormFunction_3': {'atol': 5e-2, 'rtol': 1e-2},
 }
 
