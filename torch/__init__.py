@@ -5,7 +5,7 @@ Additionally, it provides many utilities for efficient serializing of
 Tensors and arbitrary types, and other useful utilities.
 
 It has a CUDA counterpart, that enables you to run your tensor computations
-on an NVIDIA GPU with compute capability >= 2.0.
+on an NVIDIA GPU with compute capability >= 3.0.
 """
 
 import sys
