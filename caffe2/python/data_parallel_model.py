@@ -666,7 +666,7 @@ def _Broadcast(devices, model, net, param, use_nccl=False):
                 # Note that the root is the root _rank_ and not the root
                 # _device_. Thus we always use root=0, regardless of the
                 # devices used.
-                model.NCCLBroadcast(
+                net.NCCLBroadcast(
                     model._device_grouped_blobs[param].values(),
                     model._device_grouped_blobs[param].values(),
                     root=0,
