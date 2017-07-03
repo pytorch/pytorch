@@ -5,6 +5,7 @@ import math
 import torch
 import unittest
 import warnings
+import random
 from copy import deepcopy
 from collections import OrderedDict
 from itertools import product
@@ -1920,20 +1921,50 @@ method_tests = [
 # TODO: clamp with min/max
 
 
-def create_input(call_args, requires_grad=True):
+def make_non_contiguous(tensor):
+    osize = list(tensor.size())
+
+    # randomly inflate a few dimensions in osize
+    for _ in range(2):
+        dim = random.randint(0, len(osize) - 1)
+        add = random.randint(4, 15)
+        osize[dim] = osize[dim] + add
+
+    # narrow doesn't make a non-contiguous tensor if we only narrow the 0-th dimension,
+    # (which will always happen with a 1-dimensional tensor), so let's make a new
+    # right-most dimension and cut it off
+
+    input = tensor.new(torch.Size(osize + [random.randint(2, 3)]))
+    input = input.select(len(input.size()) - 1, random.randint(0, 1))
+    # now extract the input of correct size from 'input'
+    for i in range(len(osize)):
+        if input.size(i) != tensor.size(i):
+            bounds = random.randint(1, input.size(i) - tensor.size(i))
+            input = input.narrow(i, bounds, tensor.size(i))
+
+    input.copy_(tensor)
+    return input
+
+
+def create_input(call_args, requires_grad=True, non_contiguous=False):
     if not isinstance(call_args, tuple):
         call_args = (call_args,)
 
     def map_arg(arg):
+        def maybe_non_contig(tensor):
+            return tensor if not non_contiguous else make_non_contiguous(tensor)
+
         if isinstance(arg, torch.Size) or isinstance(arg, dont_convert):
             return arg
         elif isinstance(arg, tuple) and not isinstance(arg[0], Variable):
-            return Variable(torch.randn(*arg).double(), requires_grad=requires_grad)
+            return Variable(maybe_non_contig(torch.randn(*arg).double()), requires_grad=requires_grad)
         elif torch.is_tensor(arg):
             if isinstance(arg, torch.FloatTensor):
-                return Variable(arg.double(), requires_grad=requires_grad)
+                return Variable(maybe_non_contig(arg.double()), requires_grad=requires_grad)
             else:
-                return Variable(arg, requires_grad=requires_grad)
+                return Variable(maybe_non_contig(arg), requires_grad=requires_grad)
+        elif isinstance(arg, Variable) and non_contiguous:
+            return Variable(maybe_non_contig(arg.data), requires_grad=arg.requires_grad)
         else:
             return arg
     return tuple(map_arg(arg) for arg in call_args)
@@ -1947,6 +1978,18 @@ def unpack_variables(args):
     else:
         return args
 
+
+def generate_gradoutput(dummy_out, non_contiguous=False):
+    def maybe_non_contig(tensor):
+        return tensor if not non_contiguous else make_non_contiguous(tensor)
+
+    if isinstance(dummy_out, tuple):
+        grad_y = tuple(Variable(maybe_non_contig(torch.randn(x.size())), requires_grad=x.requires_grad)
+                       for x in dummy_out if isinstance(x, Variable))
+    else:
+        grad_y = (Variable(maybe_non_contig(torch.randn(dummy_out.size())), requires_grad=dummy_out.requires_grad),)
+
+    return grad_y
 
 ignore_inplace = set((
     'test_DivConstantFunction_by_tensor',
@@ -1988,7 +2031,7 @@ for test in function_tests:
 
         def do_test(self, cls=cls, constructor_args=new_constructor_args,
                     call_args=new_call_args, test_name=test_name):
-            input = create_input(call_args)
+            input = create_input(call_args, non_contiguous="View" not in cls.__name__)
             if cls._is_legacy:
                 def apply_fn(*input):
                     return cls(*constructor_args)(*input)
@@ -2014,11 +2057,7 @@ for test in function_tests:
                         self.assertTrue(inp.size() == inp.grad.size())
 
             dummy_out = apply_fn(*input)
-            if isinstance(dummy_out, tuple):
-                grad_y = tuple(Variable(torch.randn(x.size()), requires_grad=x.requires_grad)
-                               for x in dummy_out if isinstance(x, Variable))
-            else:
-                grad_y = (Variable(torch.randn(dummy_out.size()), requires_grad=dummy_out.requires_grad),)
+            grad_y = generate_gradoutput(dummy_out, non_contiguous=True)
 
             if test_name in gradgradcheck_precision_override:
                 atol = gradgradcheck_precision_override[test_name]['atol']

@@ -82,7 +82,7 @@ class Prod(Function):
             elif zero_idx.size(0) > 1:
                 return (grad_output * 0).expand_as(input), None, None
             else:
-                return safe_zeros_backward(input.view(-1), 0).view_as(input), None, None
+                return safe_zeros_backward(input.contiguous().view(-1), 0).view_as(input), None, None
 
         else:
             input, output = ctx.saved_variables
