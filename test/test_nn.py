@@ -2388,7 +2388,8 @@ class TestNN(NNTestCase):
         self.assertEqual(module.weight.grad.data, module_legacy.gradWeight)
         self.assertEqual(module.bias.grad.data, module_legacy.gradBias)
 
-        self._assertGradAndGradgradChecks(lambda x1, x2: F.bilinear(x1, x2, module.weight, module.bias), (input1_1, input2_1))
+        self._assertGradAndGradgradChecks(lambda x1, x2: F.bilinear(x1, x2, module.weight, module.bias),
+                                          (input1_1, input2_1))
 
     def run_conv_double_back_test(self, kern, stride, padding, chan_in, chan_out, batch_size,
                                   inp_size, dilation, no_weight, use_cuda=False, use_bias=True):
