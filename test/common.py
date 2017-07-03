@@ -16,17 +16,25 @@ from torch.autograd import Variable
 torch.set_default_tensor_type('torch.DoubleTensor')
 
 SEED = 0
+SEED_SET = 0
 
-
-def run_tests():
+def parse_set_seed_once():
+    global SEED
+    global SEED_SET
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument('--seed', type=int, default=123)
     args, remaining = parser.parse_known_args()
-    SEED = args.seed
-    torch.manual_seed(args.seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(args.seed)
+    if SEED_SET == 0:
+        torch.manual_seed(args.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(args.seed)
+        SEED = args.seed
+        SEED_SET = 1
     remaining = [sys.argv[0]] + remaining
+    return remaining
+
+def run_tests():
+    remaining = parse_set_seed_once()
     unittest.main(argv=remaining)
 
 
