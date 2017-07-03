@@ -18,6 +18,7 @@ torch.set_default_tensor_type('torch.DoubleTensor')
 SEED = 0
 SEED_SET = 0
 
+
 def parse_set_seed_once():
     global SEED
     global SEED_SET
@@ -32,6 +33,7 @@ def parse_set_seed_once():
         SEED_SET = 1
     remaining = [sys.argv[0]] + remaining
     return remaining
+
 
 def run_tests():
     remaining = parse_set_seed_once()
