@@ -2029,7 +2029,7 @@ for test in function_tests:
 
         def do_test(self, cls=cls, constructor_args=new_constructor_args,
                     call_args=new_call_args, test_name=test_name):
-            input = create_input(call_args, non_contiguous=True if not "View" == cls.__name__ else False)
+            input = create_input(call_args, non_contiguous="View" not in cls.__name__)
             if cls._is_legacy:
                 def apply_fn(*input):
                     return cls(*constructor_args)(*input)
