@@ -37,7 +37,6 @@ Context::Context() {
   generator_registry[static_cast<int>(Backend::CPU)]
     .reset(new CPUGenerator(this));
   Type::registerAll(this);
-  current_default_type = &getType(Backend::CPU, ScalarType::Float);
 }
 
 Context::~Context() {

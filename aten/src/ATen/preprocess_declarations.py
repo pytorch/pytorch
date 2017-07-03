@@ -22,15 +22,15 @@ type_map = {
 all_types = type_map['floating_point'] + type_map['integral']
 type_map['all'] = all_types
 
-all_backends = ['CPU', 'CUDA']
-
+all_backends = ['CPU', 'CUDA', 'SparseCPU', 'SparseCUDA']
+default_backends =  ['CPU', 'CUDA']
 
 def process_types_and_backends(option):
     # if specific pairs were not listed, then enumerate them
     # based on the backend and type attributes
     # if backend or type is not defined, it is assumed to be all of them
     if 'backend_type_pairs' not in option:
-        backends = option.get('backends', all_backends)
+        backends = option.get('backends', default_backends)
         types = option.get('types', all_types)
         pairs = [[p, t] for p in backends for t in types]
     else:
