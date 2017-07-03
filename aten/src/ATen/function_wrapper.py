@@ -120,7 +120,7 @@ ALLOC_WRAP = {
 CONSTANT_REPLACEMENTS = [
     ('AS_REAL', '${AS_REAL}'),
     ('THPDefaultGenerator->cdata',
-     'dynamic_cast<${Backend}Generator&>(context->defaultGenerator(backend())).generator'),
+     'dynamic_cast<${Generator}&>(context->defaultGenerator(backend())).generator'),
     ('__storage_size.get\\(\\)',
      'THLongStorageView::make(static_cast<int64_t>(storage.size()))'),
     ('__last_dim', 'self.ndimension()-1'),

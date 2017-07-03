@@ -1,7 +1,7 @@
 #include "ATen/${Type}.h"
 #include "ATen/${Storage}.h"
 #include "ATen/${Tensor}.h"
-#include "ATen/${Backend}Generator.h"
+#include "ATen/${Generator}.h"
 #include "ATen/${Backend}ByteTensor.h"
 #include "ATen/${Backend}IntTensor.h"
 #include "ATen/${Backend}LongTensor.h"
@@ -33,7 +33,7 @@ std::unique_ptr<Storage> ${Type}::storageFromBlob(void * data, int64_t size) {
       new ${Storage}(context,data,size));
 }
 std::unique_ptr<Generator> ${Type}::generator() {
-  return std::unique_ptr<Generator>(new ${Backend}Generator(context));
+  return std::unique_ptr<Generator>(new ${Generator}(context));
 }
 
 const char * ${Type}::toString() const {

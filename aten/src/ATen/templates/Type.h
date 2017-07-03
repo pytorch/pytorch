@@ -34,16 +34,23 @@ enum class ScalarType {
 enum class Backend {
   CPU,
   CUDA,
+  SparseCPU,
+  SparseCUDA,
   NumOptions
 };
 
+
 constexpr Backend kCPU = Backend::CPU;
 constexpr Backend kCUDA = Backend::CUDA;
+constexpr Backend kSparseCPU = Backend::SparseCPU;
+constexpr Backend kSparseCUDA = Backend::SparseCUDA;
 
 static inline const char * toString(Backend b) {
   switch(b) {
     case Backend::CPU: return "CPU";
     case Backend::CUDA: return "CUDA";
+    case Backend::SparseCPU: return "SparseCPU";
+    case Backend::SparseCUDA: return "SparseCUDA";
     default: return "UNKNOWN_BACKEND";
   }
 }
@@ -65,13 +72,6 @@ static inline const char * toString(ScalarType t) {
   }
 #undef DEFINE_CASE
 }
-
-struct CPUTag {
-  static constexpr Backend value = Backend::CPU;
-};
-struct CUDATag {
-  static constexpr Backend value = Backend::CUDA;
-};
 
 enum class TypeID {
   ${type_ids}
