@@ -15,7 +15,7 @@ public:
   Type & getType(Backend p, ScalarType s) {
     auto & type = type_registry[static_cast<int>(p)][static_cast<int>(s)];
     if(!type)
-      runtime_error("%s%sType is not enabled.",toString(p),toString(s));
+      runtime_error("%s%s%sType is not enabled.",toString(p),toString(s));
     return *type;
   }
   Generator & defaultGenerator(Backend p) {
@@ -24,13 +24,7 @@ public:
       runtime_error("%s backend type not enabled.",toString(p));
     return *generator;
   }
-  Type & defaultType() {
-    return *current_default_type;
-  }
   bool hasCUDA() const;
-  void setDefaultType(Type & t) {
-    current_default_type = &t;
-  }
   ~Context();
   std::unique_ptr<Generator>
     generator_registry[static_cast<int>(Backend::NumOptions)];
@@ -38,7 +32,6 @@ public:
     [static_cast<int>(Backend::NumOptions)]
     [static_cast<int>(ScalarType::NumOptions)];
   THCState * thc_state;
-  Type * current_default_type;
 };
 
 Context & globalContext();

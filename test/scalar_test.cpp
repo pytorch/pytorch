@@ -14,9 +14,12 @@ struct Foo {
     scalar_type s = 1;
     cout << "hello, dispatch: " << t.toString() << s << "\n";
     auto data = (scalar_type*)a.data_ptr();
+    (void)data;
   }
   static void CUDA(const Type & t, Tensor a, Tensor b) {
   }
+  static void SparseCUDA(const Type & t, Tensor a, Tensor b) {}
+  static void SparseCPU(const Type & t, Tensor a, Tensor b) {}
 };
 template<>
 struct Foo<Half> {
