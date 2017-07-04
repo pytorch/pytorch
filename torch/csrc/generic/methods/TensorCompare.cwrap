@@ -626,9 +626,6 @@
 
 [[
   name: median
-  backends:
-    - CPU
-    - CUDA
   variants:
     - method
     - function

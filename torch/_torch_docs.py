@@ -2315,7 +2315,26 @@ Example::
 
 add_docstr(torch._C.median,
            """
-median(input, dim=-1, keepdim=False, values=None, indices=None) -> (Tensor, LongTensor)
+.. function:: median(input) -> float
+
+Returns the median value of all elements in the :attr:`input` Tensor.
+
+Args:
+    input (Tensor): the input `Tensor`
+
+Example::
+
+    >>> a = torch.randn(1, 3)
+    >>> a
+
+     0.4729 -0.2266 -0.2085
+    [torch.FloatTensor of size 1x3]
+
+    >>> torch.max(a)
+    -0.2085
+
+
+.. function:: median(input, dim=-1, keepdim=False, values=None, indices=None) -> (Tensor, LongTensor)
 
 Returns the median value of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
 Also returns the index location of the median value as a `LongTensor`.
