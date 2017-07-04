@@ -115,12 +115,14 @@ class Optimizer(object):
 
 class SgdOptimizer(Optimizer):
     def __init__(self, base_learning_rate=0.01, policy='fixed',
-                 momentum=0.0, nesterov=1, **kwargs):
+                 momentum=0.0, nesterov=1, sparse_dedup_aggregator=None,
+                 **kwargs):
         super(SgdOptimizer, self).__init__()
         self.base_learning_rate = base_learning_rate
         self.policy = policy
         self.momentum = momentum
         self.nesterov = nesterov
+        self.sparse_dedup_aggregator = sparse_dedup_aggregator
         self.init_kwargs = kwargs
 
     def _run(self, net, param_init_net, param_info):
@@ -163,6 +165,7 @@ class SgdOptimizer(Optimizer):
 
         if isinstance(grad, core.GradientSlice):
             assert self.momentum == 0., "Doesn't support momentum for sparse"
+            grad = self.dedup(net, self.sparse_dedup_aggregator, grad)
             net.ScatterWeightedSum(
                 [param, ONE, grad.indices, grad.values, lr],
                 param
@@ -189,12 +192,14 @@ class SgdOptimizer(Optimizer):
 
 class MultiPrecisionSgdOptimizer(SgdOptimizer):
     def __init__(self, base_learning_rate=0.1, momentum=0.0,
-                 policy="fixed", nesterov=1, **kwargs):
+                 policy="fixed", nesterov=1, sparse_dedup_aggregator=None,
+                 **kwargs):
         super(SgdOptimizer, self).__init__()
         self.base_learning_rate = base_learning_rate
         self.momentum = momentum
         self.policy = policy
         self.nesterov = nesterov
+        self.sparse_dedup_aggregator = sparse_dedup_aggregator
         self.init_kwargs = kwargs
 
     def _run(self, net, param_init_net, param_info):
