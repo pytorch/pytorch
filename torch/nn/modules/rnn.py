@@ -437,7 +437,7 @@ class LSTMCell(RNNCellBase):
         g = \tanh(W_{ig} x + b_{ig} + W_{hc} h + b_{hg}) \\
         o = \mathrm{sigmoid}(W_{io} x + b_{io} + W_{ho} h + b_{ho}) \\
         c' = f * c + i * g \\
-        h' = o * \tanh(c_t) \\
+        h' = o * \tanh(c') \\
         \end{array}
 
     Args:
