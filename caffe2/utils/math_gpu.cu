@@ -32,6 +32,9 @@ void Funcname<T, CUDAContext>(                                                 \
 
 DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Exp, expf);
 DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Log, logf);
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Cos, cosf);
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Sin, sinf);
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Abs, fabsf);
 
 __device__ float cuda_sqrf(const float x) { return x * x; }
 

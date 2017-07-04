@@ -1071,6 +1071,66 @@ class TestOperators(hu.HypothesisTestCase):
         dims=[10], elements=st.floats(allow_nan=False,
                                       allow_infinity=False)),
            **hu.gcs)
+    def test_abs(self, input_tensor, gc, dc):
+        op = core.CreateOperator(
+            "Abs",
+            ["input"],
+            ["output"]
+        )
+
+        def abs_ref(input_tensor):
+            return (np.abs(input_tensor),)
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[input_tensor],
+            reference=abs_ref)
+
+    @given(input_tensor=hu.arrays(
+        dims=[10], elements=st.floats(min_value=-10,
+                                      max_value=10)),
+           **hu.gcs)
+    def test_cos(self, input_tensor, gc, dc):
+        op = core.CreateOperator(
+            "Cos",
+            ["input"],
+            ["output"]
+        )
+
+        def cos_ref(input_tensor):
+            return (np.cos(input_tensor),)
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[input_tensor],
+            reference=cos_ref)
+
+    @given(input_tensor=hu.arrays(
+        dims=[10], elements=st.floats(min_value=-10,
+                                      max_value=10)),
+           **hu.gcs)
+    def test_sin(self, input_tensor, gc, dc):
+        op = core.CreateOperator(
+            "Sin",
+            ["input"],
+            ["output"]
+        )
+
+        def sin_ref(input_tensor):
+            return (np.sin(input_tensor),)
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[input_tensor],
+            reference=sin_ref)
+
+    @given(input_tensor=hu.arrays(
+        dims=[10], elements=st.floats(allow_nan=False,
+                                      allow_infinity=False)),
+           **hu.gcs)
     def test_exp(self, input_tensor, gc, dc):
         op = core.CreateOperator(
             "Exp",

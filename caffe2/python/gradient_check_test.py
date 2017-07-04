@@ -205,6 +205,29 @@ class TestTanh(test_util.TestCase):
                 self.assertTrue(res)
 
 
+class TestAbs(test_util.TestCase):
+
+    def setUp(self):
+        self.test_configs = [
+            (1, 1),
+            (2, 3),
+            (2, 3, 4),
+            (2, 3, 4, 5),
+        ]
+
+    def testAbs(self):
+        for input_size in self.test_configs:
+            op = core.CreateOperator("Abs", ["X"], ["Y"])
+            X = np.random.rand(*input_size).astype(np.float32)
+            # go away from the origin point to avoid kink problems
+            X += 0.01 * np.sign(X)
+            X[X == 0] = 0.01
+            res = device_checker.CheckSimple(op, [X], [0])
+            self.assertTrue(res)
+            for checker in gradient_checkers:
+                res, grad, grad_estimated = checker.CheckSimple(op, [X], 0, [0])
+                self.assertTrue(res)
+
 class TestExp(test_util.TestCase):
 
     def setUp(self):
@@ -225,6 +248,45 @@ class TestExp(test_util.TestCase):
                 res, grad, grad_estimated = checker.CheckSimple(op, [X], 0, [0])
                 self.assertTrue(res)
 
+class TestCos(test_util.TestCase):
+
+    def setUp(self):
+        self.test_configs = [
+            (1, 1),
+            (2, 3),
+            (2, 3, 4),
+            (2, 3, 4, 5),
+        ]
+
+    def testCos(self):
+        for input_size in self.test_configs:
+            op = core.CreateOperator("Cos", ["X"], ["Y"])
+            X = np.random.rand(*input_size).astype(np.float32) - 0.5
+            res = device_checker.CheckSimple(op, [X], [0])
+            self.assertTrue(res)
+            for checker in gradient_checkers:
+                res, grad, grad_estimated = checker.CheckSimple(op, [X], 0, [0])
+                self.assertTrue(res)
+
+class TestSin(test_util.TestCase):
+
+    def setUp(self):
+        self.test_configs = [
+            (1, 1),
+            (2, 3),
+            (2, 3, 4),
+            (2, 3, 4, 5),
+        ]
+
+    def testSin(self):
+        for input_size in self.test_configs:
+            op = core.CreateOperator("Sin", ["X"], ["Y"])
+            X = np.random.rand(*input_size).astype(np.float32) - 0.5
+            res = device_checker.CheckSimple(op, [X], [0])
+            self.assertTrue(res)
+            for checker in gradient_checkers:
+                res, grad, grad_estimated = checker.CheckSimple(op, [X], 0, [0])
+                self.assertTrue(res)
 
 class TestSigmoid(test_util.TestCase):
 
