@@ -63,6 +63,12 @@ void Exp(const int N, const T* x, T* y, Context* context);
 template <typename T, class Context>
 void Log(const int N, const T* x, T* y, Context* context);
 template <typename T, class Context>
+void Cos(const int N, const T* x, T* y, Context* context);
+template <typename T, class Context>
+void Sin(const int N, const T* x, T* y, Context* context);
+template <typename T, class Context>
+void Abs(const int N, const T* x, T* y, Context* context);
+template <typename T, class Context>
 void Sqr(const int N, const T* x, T* y, Context* context);
 
 template <typename T, class Context>
