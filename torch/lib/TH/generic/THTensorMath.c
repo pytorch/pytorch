@@ -591,7 +591,6 @@ static void THTensor_(quickselectnoidx)(real *arr, long k, long elements, long s
 real THTensor_(medianall)(THTensor *tensor)
 {
   THArgCheck(tensor->nDimension > 0, 1, "tensor must have one dimension");
-  THArgCheck(THTensor_(isContiguous)(tensor), 1, "input is not contiguous");
 
   real theMedian;
   ptrdiff_t numel;
