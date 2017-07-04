@@ -3814,6 +3814,9 @@ class TestTorch(TestCase):
         for i, sub in enumerate(x):
             self.assertEqual(sub, x[i])
 
+        x = torch.Tensor()
+        self.assertEqual(list(x), [])
+
     def test_accreal_type(self):
         x = torch.randn(2, 3, 4) * 10
         self.assertIsInstance(x.double().sum(), float)
