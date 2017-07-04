@@ -46,7 +46,8 @@ class L1Loss(_Loss):
 
     The division by `n` can be avoided if one sets the constructor argument `size_average=False`
     """
-    pass
+    def forward(self, input, target):
+        return F.l1_loss(input, target, self.size_average)
 
 
 class NLLLoss(_WeightedLoss):
@@ -211,7 +212,8 @@ class KLDivLoss(_WeightedLoss):
     .. _Kullback-Leibler divergence:
         https://en.wikipedia.org/wiki/Kullback-Leibler_divergence
     """
-    pass
+    def forward(self, input, target):
+        return F.kl_div(input, target, self.size_average)
 
 
 class MSELoss(_Loss):
@@ -228,7 +230,8 @@ class MSELoss(_Loss):
     `size_average` to `False`.
 
     """
-    pass
+    def forward(self, input, target):
+        return F.mse_loss(input, target, self.size_average)
 
 
 class BCELoss(_WeightedLoss):
