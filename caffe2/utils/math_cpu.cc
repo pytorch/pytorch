@@ -756,7 +756,8 @@ void SumSqr<float, CPUContext>(
     const int N,
     const float* x,
     float* y,
-    CPUContext* context) {
+    CPUContext* context /* unused */,
+    Tensor<CPUContext>* scratch_ptr /* unused */) {
   *y = ConstEigenVectorMap<float>(x, N).squaredNorm();
 }
 

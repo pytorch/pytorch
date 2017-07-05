@@ -80,7 +80,8 @@ class SumSqrElementsOp : public Operator<Context> {
         X.size(),
         X.template data<T>(),
         sum->template mutable_data<T>(),
-        &context_);
+        &context_,
+        &scratch_);
     if (average) {
       math::Scale<T, Context>(
           1,
@@ -91,6 +92,9 @@ class SumSqrElementsOp : public Operator<Context> {
     }
     return true;
   }
+
+ private:
+  Tensor<Context> scratch_;
 };
 
 template <typename T, class Context, bool ROWWISE>
