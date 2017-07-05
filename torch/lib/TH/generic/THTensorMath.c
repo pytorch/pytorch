@@ -1493,7 +1493,7 @@ void THTensor_(baddbmm)(THTensor *result, real beta, THTensor *t, real alpha, TH
 
   if (t != result) {
     THTensor_(resizeAs)(result, t);
-    if (beta != 0) {
+    if (beta != 0.0) {
       THTensor_(copy)(result, t);
     }
   }
