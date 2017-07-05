@@ -2,6 +2,10 @@
 set -e
 set -x
 
+LOCAL_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
+ROOT_DIR=$(dirname "$LOCAL_DIR")
+cd "$ROOT_DIR"
+
 APT_INSTALL_CMD='sudo apt-get install -y --no-install-recommends'
 
 if [ "$TRAVIS_OS_NAME" = 'linux' ]; then
@@ -30,8 +34,10 @@ if [ "$TRAVIS_OS_NAME" = 'linux' ]; then
         libpthread-stubs0-dev \
         libsnappy-dev \
         protobuf-compiler \
+        python \
         python-dev \
         python-pip \
+        python-wheel \
         software-properties-common \
         xsltproc
 
@@ -157,7 +163,13 @@ fi
 ####################
 # pip dependencies #
 ####################
-pip install numpy
+pip install \
+    future \
+    hypothesis \
+    numpy \
+    protobuf \
+    pytest \
+    scikit-image
 
 if [ "$BUILD_ANDROID" = 'true' ]; then
     #######################
