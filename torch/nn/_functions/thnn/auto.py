@@ -38,7 +38,7 @@ def _make_function_class_criterion(class_name, update_output, update_grad_input,
     @staticmethod
     @once_differentiable
     def backward_cls_backward(ctx, *grad_params):
-        raise ValueError("trying to differentiate function that doesn't support differentiation yet.")
+        raise ValueError(class_name + " can only be differentiated once.")
 
     backward_cls = type(class_name + "Backward", (Function,),
                         dict(forward=backward_cls_forward, backward=backward_cls_backward))
@@ -167,7 +167,7 @@ def _make_function_class(class_name, update_output, update_grad_input, acc_grad_
 
     @staticmethod
     def backward_cls_backward(ctx, *grad_params):
-        raise ValueError("trying to differentiate function that doesn't support differentiation yet.")
+        raise ValueError(class_name + " can only be differentiated once.")
 
     base_class = Function if not is_inplace else InplaceFunction
     backward_cls = type(class_name + "Backward", (base_class,), dict(forward=backward_cls_forward,
