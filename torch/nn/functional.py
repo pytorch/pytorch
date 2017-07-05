@@ -495,7 +495,7 @@ def leaky_relu(input, negative_slope=1e-2, inplace=False):
 
 
 def prelu(input, weight):
-    return _functions.thnn.PReLU()(input, weight)
+    return _functions.thnn.PReLU.apply(input, weight)
 
 
 def rrelu(input, lower=1. / 8, upper=1. / 3, training=False, inplace=False):
