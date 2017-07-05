@@ -283,13 +283,7 @@ class Tensor {
       }
 
       if (reset_tensor) {
-        data_.reset();
-        capacity_ = 0;
-        // If reserved is true and we changed tensor memory then it is fine
-        // to switch it to false, if Resize is called from Reserve then
-        // reserved_
-        // will be set to true at end of Reserve()
-        reserved_ = false;
+        FreeMemory();
       }
     }
   }
@@ -330,6 +324,20 @@ class Tensor {
 
   inline void Reshape(const vector<int>& dims) {
     Reshape(ToVectorTIndex(dims));
+  }
+
+  /**
+   * Release whatever memory the tensor was holding but keep size and type
+   * information. Subsequent call to mutable_data will trigger new memory
+   * allocation.
+   */
+  inline void FreeMemory() {
+    data_.reset();
+    capacity_ = 0;
+    // If reserved is true and we changed tensor memory then it is fine
+    // to switch it to false, if Resize is called from Reserve and it triggers
+    // FreeMemory() then reserved_ will be set to true at end of Reserve()
+    reserved_ = false;
   }
 
   /**
