@@ -107,12 +107,18 @@ inline bool ReadProtoFromFile(const string& filename, Message* proto) {
 
 #endif  // CAFFE2_USE_LITE_PROTO
 
-
-template <class IterableInputs, class IterableOutputs, class IterableArgs>
+template <
+    class IterableInputs = std::initializer_list<string>,
+    class IterableOutputs = std::initializer_list<string>,
+    class IterableArgs>
 OperatorDef CreateOperatorDef(
-    const string& type, const string& name, const IterableInputs& inputs,
-    const IterableOutputs& outputs, const IterableArgs& args,
-    const DeviceOption& device_option, const string& engine) {
+    const string& type,
+    const string& name,
+    const IterableInputs& inputs,
+    const IterableOutputs& outputs,
+    const IterableArgs& args,
+    const DeviceOption& device_option = DeviceOption(),
+    const string& engine = "") {
   OperatorDef def;
   def.set_type(type);
   def.set_name(name);
@@ -135,24 +141,27 @@ OperatorDef CreateOperatorDef(
 }
 
 // A simplified version compared to the full CreateOperator, if you do not need
-// to specify device option or engine.
-template <class IterableInputs, class IterableOutputs, class IterableArgs>
+// to specify args.
+template <
+    class IterableInputs = std::initializer_list<string>,
+    class IterableOutputs = std::initializer_list<string>>
 inline OperatorDef CreateOperatorDef(
-    const string& type, const string& name, const IterableInputs& inputs,
-    const IterableOutputs& outputs, const IterableArgs& args) {
+    const string& type,
+    const string& name,
+    const IterableInputs& inputs,
+    const IterableOutputs& outputs,
+    const DeviceOption& device_option = DeviceOption(),
+    const string& engine = "") {
   return CreateOperatorDef(
-      type, name, inputs, outputs, args, DeviceOption(), "");
+      type,
+      name,
+      inputs,
+      outputs,
+      std::vector<Argument>(),
+      device_option,
+      engine);
 }
 
-// A simplified version compared to the full CreateOperator, if you do not need
-// to specify device option or engine or args.
-template <class IterableInputs, class IterableOutputs>
-inline OperatorDef CreateOperatorDef(
-    const string& type, const string& name, const IterableInputs& inputs,
-    const IterableOutputs& outputs) {
-  return CreateOperatorDef(type, name, inputs, outputs,
-                           std::vector<Argument>(), DeviceOption(), "");
-}
 
 inline bool HasArgument(const OperatorDef& def, const string& name) {
   for (const Argument& arg : def.arg()) {
