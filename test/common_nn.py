@@ -226,7 +226,6 @@ module_tests = [
         module_name='Softsign',
         input_size=(3, 2, 5),
         reference_fn=lambda i, _: i.div(1 + torch.abs(i)),
-        check_gradgrad=False,
     ),
     dict(
         module_name='Softmin',
