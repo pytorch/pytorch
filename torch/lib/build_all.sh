@@ -49,11 +49,16 @@ function build() {
   # contain the cmake output
   mkdir -p build/$1
   cd build/$1
+  BUILD_C_FLAGS=''
+  case $1 in
+      THCS | THCUNN ) BUILD_C_FLAGS=$C_FLAGS;;
+      *) BUILD_C_FLAGS=$C_FLAGS" -fexceptions";;
+  esac
   cmake ../../$1 -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/FindCUDA" \
               -DTorch_FOUND="1" \
               -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
-              -DCMAKE_C_FLAGS="$C_FLAGS" \
-              -DCMAKE_CXX_FLAGS="$C_FLAGS $CPP_FLAGS" \
+              -DCMAKE_C_FLAGS="$BUILD_C_FLAGS" \
+              -DCMAKE_CXX_FLAGS="$BUILD_C_FLAGS $CPP_FLAGS" \
               -DCMAKE_EXE_LINKER_FLAGS="$LDFLAGS" \
               -DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS" \
               -DCUDA_NVCC_FLAGS="$C_FLAGS" \
