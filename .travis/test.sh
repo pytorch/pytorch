@@ -11,5 +11,12 @@ if [ "$BUILD_TESTS" = 'false' ]; then
     exit 0
 fi
 
-cd build
+# Ctests
+pushd build
 CTEST_OUTPUT_ON_FAILURE=1 make test
+popd
+
+# Python tests
+export PYTHONPATH="${PYTHONPATH}:${ROOT_DIR}/install"
+export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${ROOT_DIR}/install/lib"
+python -m pytest -v install/caffe2/python

@@ -20,11 +20,12 @@ elif [ "$BUILD" = 'linux-cuda' ]; then
     export BUILD_TESTS=false
 elif [ "$BUILD" = 'linux-mkl' ]; then
     export BUILD_MKL=true
+    export BUILD_TESTS=false
 elif [ "$BUILD" = 'linux-android' ]; then
     export BUILD_ANDROID=true
     export BUILD_TESTS=false
 elif [ "$BUILD" = 'osx' ]; then
-    # TODO(lukeyeager): enable after caffe2/caffe2#768, caffe2/caffe2#785
+    # TODO(lukeyeager): enable after caffe2/caffe2#785
     export BUILD_TESTS=false
 elif [ "$BUILD" = 'osx-ios' ]; then
     export BUILD_IOS=true
