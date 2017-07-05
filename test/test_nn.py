@@ -59,6 +59,20 @@ def default_tensor_type(type):
     return decorator
 
 
+def _assertGradAndGradgradChecks(assertTrueFn, apply_fn, inputs):
+    # call assert function rather than returning a bool since it's nicer
+    # if we get whether this failed on the gradcheck or the gradgradcheck.
+    assertTrueFn(gradcheck(apply_fn, inputs))
+    dummy_out = apply_fn(*inputs)
+    if isinstance(dummy_out, tuple):
+        grad_y = tuple(Variable(torch.randn(x.size()), requires_grad=x.requires_grad)
+                       for x in dummy_out if isinstance(x, Variable))
+    else:
+        grad_y = (Variable(torch.randn(dummy_out.size()), requires_grad=dummy_out.requires_grad),)
+
+    assertTrueFn(gradgradcheck(apply_fn, inputs, grad_y,))
+
+
 class InputVariableMixin(object):
     def _get_input(self):
         input = TestBase._get_input(self)
@@ -79,9 +93,15 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
         super(NewModuleTest, self).__init__(*args, **kwargs)
         self.cudnn = kwargs.get('cudnn', False)
         self.check_inplace = kwargs.get('check_inplace', False)
+        self.check_gradgrad = kwargs.get('check_gradgrad', True)
 
     def _do_test(self, test_case, module, input):
         test_case.check_jacobian(module, input, self.jacobian_input)
+
+        if self.check_gradgrad:
+            # could probably unify check_jacobian above with this.
+            params = tuple(x for x in module.parameters())
+            _assertGradAndGradgradChecks(test_case.assertTrue, lambda x, *args, **kw: module(x), (input,) + params)
 
         # check if module can be printed
         module.__repr__()
@@ -188,6 +208,15 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
 class NewCriterionTest(InputVariableMixin, CriterionTest):
     # TODO: check that criterions don't ignore grad_output
 
+    def __init__(self, *args, **kwargs):
+        super(NewCriterionTest, self).__init__(*args, **kwargs)
+        self.check_gradgrad = kwargs.get('check_gradgrad', True)
+
+    def _do_extra_tests(self, test_case, module, input, target):
+        if self.check_gradgrad:
+            params = tuple(x for x in module.parameters())
+            _assertGradAndGradgradChecks(test_case.assertTrue, lambda x, y, *args, **kw: module(x, y), (input, target) + params)
+
     def _get_target(self, target):
         return Variable(target, requires_grad=False)
 
@@ -242,17 +271,6 @@ class TestNN(NNTestCase):
             params.append(p.data)
             d_params.append(p.grad.data)
         return params, d_params
-
-    def _assertGradAndGradgradChecks(self, apply_fn, inputs):
-        self.assertTrue(gradcheck(apply_fn, inputs))
-        dummy_out = apply_fn(*inputs)
-        if isinstance(dummy_out, tuple):
-            grad_y = tuple(Variable(torch.randn(x.size()), requires_grad=x.requires_grad)
-                           for x in dummy_out if isinstance(x, Variable))
-        else:
-            grad_y = (Variable(torch.randn(dummy_out.size()), requires_grad=dummy_out.requires_grad),)
-
-        self.assertTrue(gradgradcheck(apply_fn, inputs, grad_y,))
 
     def test_module_backcompat(self):
         from torch.serialization import SourceChangeWarning
@@ -1011,9 +1029,9 @@ class TestNN(NNTestCase):
 
     def test_pad(self):
         inputs = Variable(torch.randn(1, 3, 4, 4), requires_grad=True)
-        self._assertGradAndGradgradChecks(lambda x: F.pad(x, (1, 1, 1, 1)), (inputs,))
-        self._assertGradAndGradgradChecks(lambda x: F.pad(x, (-1, 1, -2, 1)), (inputs,))
-        self._assertGradAndGradgradChecks(lambda x: F.pad(x, (-1, 1, -2, 1), value=2), (inputs,))
+        _assertGradAndGradgradChecks(self.assertTrue, lambda x: F.pad(x, (1, 1, 1, 1)), (inputs,))
+        _assertGradAndGradgradChecks(self.assertTrue, lambda x: F.pad(x, (-1, 1, -2, 1)), (inputs,))
+        _assertGradAndGradgradChecks(self.assertTrue, lambda x: F.pad(x, (-1, 1, -2, 1), value=2), (inputs,))
         self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='replicate'), (inputs,)))
         self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='reflect'), (inputs,)))
 
@@ -2640,8 +2658,8 @@ class TestNN(NNTestCase):
         self.assertEqual(module.weight.grad.data, module_legacy.gradWeight)
         self.assertEqual(module.bias.grad.data, module_legacy.gradBias)
 
-        self._assertGradAndGradgradChecks(lambda x1, x2: F.bilinear(x1, x2, module.weight, module.bias),
-                                          (input1_1, input2_1))
+        _assertGradAndGradgradChecks(self.assertTrue, lambda x1, x2: F.bilinear(x1, x2, module.weight, module.bias),
+                                     (input1_1, input2_1))
 
     def run_conv_double_back_test(self, kern, stride, padding, chan_in, chan_out, batch_size,
                                   inp_size, dilation, no_weight, groups=1, use_cuda=False, use_bias=True):
@@ -3216,27 +3234,31 @@ new_module_tests = [
         constructor_args=(10,),
         input_size=(4, 10),
         cudnn=True,
-        desc='affine'
+        desc='affine',
+        check_gradgrad=False,
     ),
     dict(
         module_name='BatchNorm1d',
         constructor_args=(5,),
         input_size=(4, 5, 3),
         cudnn=True,
-        desc='3d_input'
+        desc='3d_input',
+        check_gradgrad=False,
     ),
     dict(
         module_name='BatchNorm1d',
         constructor_args=(10, 1e-3, 0.3, False),
         input_size=(4, 10),
         cudnn=True,
-        desc='not_affine'
+        desc='not_affine',
+        check_gradgrad=False,
     ),
     dict(
         module_name='BatchNorm2d',
         constructor_args=(3,),
         input_size=(2, 3, 6, 6),
         cudnn=True,
+        check_gradgrad=False,
     ),
     dict(
         module_name='BatchNorm2d',
@@ -3244,6 +3266,7 @@ new_module_tests = [
         input_size=(2, 3, 6, 6),
         cudnn=True,
         desc='momentum',
+        check_gradgrad=False,
     ),
     dict(
         module_name='BatchNorm2d',
@@ -3251,26 +3274,30 @@ new_module_tests = [
         input_size=(2, 3, 6, 6),
         cudnn=True,
         desc='no_affine',
+        check_gradgrad=False,
     ),
     dict(
         module_name='BatchNorm3d',
         constructor_args=(3,),
         input_size=(2, 3, 4, 4, 4),
         cudnn=True,
+        check_gradgrad=False,
     ),
     dict(
         module_name='BatchNorm3d',
         constructor_args=(3, 1e-3, 0.7),
         input_size=(2, 3, 4, 4, 4),
         cudnn=True,
-        desc='momentum'
+        desc='momentum',
+        check_gradgrad=False,
     ),
     dict(
         module_name='BatchNorm3d',
         constructor_args=(3, 1e-3, 0.7, False),
         input_size=(2, 3, 4, 4, 4),
         cudnn=True,
-        desc='no_affine'
+        desc='no_affine',
+        check_gradgrad=False,
     ),
     dict(
         module_name='Conv1d',
@@ -3283,7 +3310,8 @@ new_module_tests = [
         constructor_args=(4, 5, 3, 2),
         input_size=(2, 4, 10),
         cudnn=True,
-        desc='stride'
+        desc='stride',
+        check_gradgrad=False,
     ),
     dict(
         module_name='Conv1d',
@@ -3323,19 +3351,22 @@ new_module_tests = [
         constructor=lambda: nn.Conv1d(4, 6, kernel_size=3, groups=2),
         input_size=(2, 4, 6),
         cudnn=True,
+        check_gradgrad=False,
     ),
     dict(
         module_name='ConvTranspose1d',
         constructor_args=(3, 4, 3, (3,), 1, (1,)),
         cudnn=True,
-        input_size=(1, 3, 7)
+        input_size=(1, 3, 7),
+        check_gradgrad=False,
     ),
     dict(
         module_name='ConvTranspose1d',
         constructor_args=(3, 4, 3, 2, 1, 1, 1, False),
         input_size=(1, 3, 6),
         cudnn=True,
-        desc='no_bias'
+        desc='no_bias',
+        check_gradgrad=False,
     ),
     # TODO
     # dict(
@@ -3348,13 +3379,15 @@ new_module_tests = [
     dict(
         module_name='MaxPool1d',
         constructor_args=(4,),
-        input_size=(2, 10, 4)
+        input_size=(2, 10, 4),
+        check_gradgrad=False,
     ),
     dict(
         module_name='MaxPool1d',
         constructor_args=(4, 4),
         input_size=(2, 10, 4),
-        desc='stride'
+        desc='stride',
+        check_gradgrad=False,
     ),
     dict(
         module_name='Conv2d',
@@ -3367,21 +3400,24 @@ new_module_tests = [
         constructor_args=(3, 4, (3, 3), (2, 2)),
         input_size=(2, 3, 6, 6),
         cudnn=True,
-        desc='strided'
+        desc='strided',
+        check_gradgrad=False
     ),
     dict(
         module_name='Conv2d',
         constructor_args=(3, 4, (3, 3), (2, 2), (1, 1)),
         input_size=(2, 3, 6, 6),
         cudnn=True,
-        desc='padding'
+        desc='padding',
+        check_gradgrad=False
     ),
     dict(
         module_name='Conv2d',
         constructor_args=(3, 2, (3, 3), (2, 2), (1, 1), (2, 2)),
         input_size=(2, 3, 8, 8),
         cudnn=True,
-        desc='dilated'
+        desc='dilated',
+        check_gradgrad=False,
     ),
     dict(
         module_name='Conv2d',
@@ -3395,17 +3431,20 @@ new_module_tests = [
         constructor=lambda: nn.Conv2d(4, 6, (3, 2), groups=2),
         input_size=(2, 4, 6, 5),
         cudnn=True,
+        check_gradgrad=False,
     ),
     dict(
         fullname='Conv2d_groups_thnn',
         constructor=lambda: nn.Conv2d(4, 6, (3, 2), groups=2),
         input_size=(2, 4, 6, 5),
+        check_gradgrad=False,
     ),
     dict(
         module_name='ConvTranspose2d',
         constructor_args=(3, 4, 3, (3, 2), 1, (1, 1)),
         cudnn=True,
-        input_size=(1, 3, 7, 6)
+        input_size=(1, 3, 7, 6),
+        check_gradgrad=False,
     ),
     # TODO
     # dict(
@@ -3420,73 +3459,86 @@ new_module_tests = [
         constructor_args=(3, 4, 3, (2, 3), 1, (1, 1), 1, False),
         input_size=(1, 3, 6, 7),
         cudnn=True,
-        desc='no_bias'
+        desc='no_bias',
+        check_gradgrad=False,
     ),
     dict(
         fullname='ConvTranspose2d_groups',
         constructor=lambda: nn.ConvTranspose2d(2, 4, (2, 3), groups=2),
         input_size=(1, 2, 4, 5),
         cudnn=True,
+        check_gradgrad=False,
     ),
     dict(
         module_name='MaxPool2d',
         constructor_args=((3, 3), (2, 2), (1, 1)),
-        input_size=(1, 3, 7, 7)
+        input_size=(1, 3, 7, 7),
+        check_gradgrad=False,
     ),
     dict(
         module_name='AvgPool1d',
         constructor_args=(2,),
         input_size=(2, 3, 6),
+        check_gradgrad=False,
     ),
     dict(
         module_name='AvgPool1d',
         constructor_args=((2,), (2,)),
         input_size=(2, 3, 6),
         desc='stride',
+        check_gradgrad=False,
     ),
     dict(
         module_name='AvgPool1d',
         constructor_args=(2, 2, 1),
         input_size=(2, 3, 6),
         desc='stride_pad',
+        check_gradgrad=False,
     ),
     dict(
         module_name='AvgPool2d',
         constructor_args=((2, 2),),
         input_size=(2, 3, 6, 6),
+        check_gradgrad=False,
     ),
     dict(
         module_name='AvgPool2d',
         constructor_args=((2, 2), (2, 2)),
         input_size=(2, 3, 6, 6),
         desc='stride',
+        check_gradgrad=False,
     ),
     dict(
         module_name='AvgPool2d',
         constructor_args=((2, 2), (2, 2), (1, 1)),
         input_size=(2, 3, 6, 6),
         desc='stride_pad',
+        check_gradgrad=False,
     ),
     dict(
         module_name='LPPool2d',
         constructor_args=(2, (2, 2), 2),
-        input_size=(1, 3, 7, 7)
+        input_size=(1, 3, 7, 7),
+        check_gradgrad=False,
     ),
     dict(
         module_name='LPPool2d',
         constructor_args=(1.5, 2),
         input=torch.rand(1, 3, 7, 7),
-        desc='norm'
+        desc='norm',
+        check_gradgrad=False,
     ),
     dict(
         module_name='ReflectionPad2d',
         constructor_args=((1, 2, 3, 4),),
-        input_size=(2, 3, 8, 8)
+        input_size=(2, 3, 8, 8),
+        check_gradgrad=False,
     ),
     dict(
         module_name='ReplicationPad2d',
         constructor_args=((1, 2, 3, 4),),
-        input_size=(2, 3, 4, 4)
+        input_size=(2, 3, 4, 4),
+        check_gradgrad=False,
     ),
     dict(
         module_name='ZeroPad2d',
@@ -3503,44 +3555,51 @@ new_module_tests = [
         constructor_args=(3, 4, (2, 3, 4)),
         input_size=(2, 3, 3, 4, 5),
         cudnn=True,
+        check_gradgrad=False,
     ),
     dict(
         module_name='Conv3d',
         constructor_args=(3, 4, (2, 3, 4), 1, 0, 1, 1, False),
         input_size=(2, 3, 3, 4, 5),
         cudnn=True,
-        desc='no_bias'
+        desc='no_bias',
+        check_gradgrad=False,
     ),
     dict(
         module_name='Conv3d',
         constructor_args=(3, 4, 2, 2),
         input_size=(2, 3, 5, 5, 5),
         cudnn=True,
-        desc='stride'
+        desc='stride',
+        check_gradgrad=False,
     ),
     dict(
         module_name='Conv3d',
         constructor_args=(3, 4, 2, 2, 1),
         input_size=(2, 3, 5, 5, 5),
         cudnn=True,
-        desc='stride_padding'
+        desc='stride_padding',
+        check_gradgrad=False,
     ),
     dict(
         fullname='Conv3d_groups',
         constructor=lambda: nn.Conv3d(4, 6, kernel_size=3, groups=2),
         input_size=(2, 4, 4, 5, 4),
         cudnn=True,
+        check_gradgrad=False,
     ),
     dict(
         fullname='Conv3d_dilated',
         constructor=lambda: nn.Conv3d(3, 4, kernel_size=2, dilation=2),
         input_size=(2, 3, 5, 5, 5),
+        check_gradgrad=False
     ),
     dict(
         module_name='ConvTranspose3d',
         constructor_args=(2, 3, (2, 3, 2)),
         cudnn=True,
-        input_size=(1, 2, 4, 5, 4)
+        input_size=(1, 2, 4, 5, 4),
+        check_gradgrad=False,
     ),
     # TODO
     # dict(
@@ -3553,61 +3612,71 @@ new_module_tests = [
     dict(
         module_name='MaxPool3d',
         constructor_args=((2, 2, 2),),
-        input_size=(2, 3, 5, 5, 5)
+        input_size=(2, 3, 5, 5, 5),
+        check_gradgrad=False,
     ),
     dict(
         module_name='MaxPool3d',
         constructor_args=(2, (2, 2, 2)),
         input_size=(2, 3, 5, 5, 5),
-        desc='stride'
+        desc='stride',
+        check_gradgrad=False,
     ),
     dict(
         module_name='MaxPool3d',
         constructor_args=(2, 2, (1, 1, 1)),
         input_size=(2, 3, 5, 5, 5),
-        desc='stride_padding'
+        desc='stride_padding',
+        check_gradgrad=False,
     ),
     dict(
         module_name='AvgPool3d',
         constructor_args=((2, 2, 2),),
-        input_size=(2, 3, 4, 4, 4)
+        input_size=(2, 3, 4, 4, 4),
+        check_gradgrad=False,
     ),
     dict(
         module_name='AvgPool3d',
         constructor_args=(2, (2, 2, 2)),
         input_size=(2, 3, 5, 5, 5),
-        desc='stride'
+        desc='stride',
+        check_gradgrad=False,
     ),
     dict(
         module_name='ReplicationPad3d',
         constructor_args=((1, 2, 3, 4, 5, 6),),
-        input_size=(2, 3, 5, 5, 5)
+        input_size=(2, 3, 5, 5, 5),
+        check_gradgrad=False,
     ),
     dict(
         module_name='Embedding',
         constructor_args=(4, 3),
         input=Variable(torch.randperm(2).repeat(1, 2)),
-        jacobian_input=False
+        jacobian_input=False,
+        check_gradgrad=False,
     ),
     dict(
         constructor=lambda: nn.Embedding(4, 3, sparse=True),
         input=Variable(torch.randperm(2).repeat(1, 2)),
         jacobian_input=False,
-        fullname='Embedding_sparse'
+        fullname='Embedding_sparse',
+        check_gradgrad=False,
     ),
     dict(
         constructor=lambda: nn.FractionalMaxPool2d(
             2, output_ratio=0.5, _random_samples=torch.DoubleTensor(1, 3, 2).uniform_()),
         input_size=(1, 3, 5, 5),
         fullname='FractionalMaxPool2d_ratio',
-        test_cuda=False
+        test_cuda=False,
+        check_gradgrad=False,
     ),
     dict(
         constructor=lambda: nn.FractionalMaxPool2d((2, 2), output_size=(
             4, 4), _random_samples=torch.DoubleTensor(1, 3, 2).uniform_()),
         input_size=(1, 3, 7, 7),
         fullname='FractionalMaxPool2d_size',
-        test_cuda=False
+        test_cuda=False,
+        check_gradgrad=False,
     ),
     dict(
         module_name='PixelShuffle',
@@ -3618,119 +3687,139 @@ new_module_tests = [
         module_name='Upsample',
         constructor_args=(12, None, 'nearest'),
         input_size=(1, 2, 4, 4),
-        desc='nearest_2d'
+        desc='nearest_2d',
+        check_gradgrad=False,
     ),
     dict(
         module_name='Upsample',
         constructor_args=((12, 16), None, 'nearest'),
         input_size=(1, 2, 3, 4),
-        desc='nearest_tuple_2d'
+        desc='nearest_tuple_2d',
+        check_gradgrad=False,
     ),
     dict(
         module_name='Upsample',
         constructor_args=(None, 4, 'nearest'),
         input_size=(1, 2, 4, 4),
-        desc='nearest_scale_2d'
+        desc='nearest_scale_2d',
+        check_gradgrad=False,
     ),
     dict(
         module_name='Upsample',
         constructor_args=(12, None, 'bilinear'),
         input_size=(1, 2, 4, 4),
-        desc='bilinear_2d'
+        desc='bilinear_2d',
+        check_gradgrad=False,
     ),
     dict(
         module_name='Upsample',
         constructor_args=((4, 6), None, 'bilinear'),
         input_size=(1, 2, 2, 3),
-        desc='bilinear_tuple_2d'
+        desc='bilinear_tuple_2d',
+        check_gradgrad=False,
     ),
     dict(
         module_name='Upsample',
         constructor_args=(None, 4, 'bilinear'),
         input_size=(1, 2, 4, 4),
-        desc='bilinear_scale_2d'
+        desc='bilinear_scale_2d',
+        check_gradgrad=False,
     ),
     dict(
         module_name='Upsample',
         constructor_args=(None, (2, 2), 'bilinear'),
         input_size=(1, 2, 4, 4),
-        desc='bilinear_scale_tuple_shared_2d'
+        desc='bilinear_scale_tuple_shared_2d',
+        check_gradgrad=False,
     ),
     dict(
         module_name='Upsample',
         constructor_args=(None, (2, 1), 'bilinear'),
         input_size=(1, 2, 4, 4),
-        desc='bilinear_scale_tuple_skewed_2d'
+        desc='bilinear_scale_tuple_skewed_2d',
+        check_gradgrad=False,
     ),
     dict(
         module_name='Upsample',
         constructor_args=(12, None, 'nearest'),
         input_size=(1, 2, 4, 4, 4),
-        desc='nearest_3d'
+        desc='nearest_3d',
+        check_gradgrad=False,
     ),
     dict(
         module_name='Upsample',
         constructor_args=((12, 16, 16), None, 'nearest'),
         input_size=(1, 2, 3, 4, 4),
-        desc='nearest_tuple_3d'
+        desc='nearest_tuple_3d',
+        check_gradgrad=False,
     ),
     dict(
         module_name='Upsample',
         constructor_args=(None, 4, 'nearest'),
         input_size=(1, 2, 4, 4, 4),
-        desc='nearest_scale_3d'
+        desc='nearest_scale_3d',
+        check_gradgrad=False,
     ),
     dict(
         module_name='Upsample',
         constructor_args=(12, None, 'trilinear'),
         input_size=(1, 2, 4, 4, 4),
-        desc='trilinear_3d'
+        desc='trilinear_3d',
+        check_gradgrad=False,
     ),
     dict(
         module_name='Upsample',
         constructor_args=((4, 6, 6), None, 'trilinear'),
         input_size=(1, 2, 2, 3, 3),
-        desc='trilinear_tuple_3d'
+        desc='trilinear_tuple_3d',
+        check_gradgrad=False,
     ),
     dict(
         module_name='Upsample',
         constructor_args=(None, 4, 'trilinear'),
         input_size=(1, 2, 4, 4, 4),
-        desc='trilinear_scale_3d'
+        desc='trilinear_scale_3d',
+        check_gradgrad=False
     ),
     dict(
         module_name='AdaptiveMaxPool1d',
         constructor_args=(3,),
-        input=torch.rand(1, 3, 5)
+        input=torch.rand(1, 3, 5),
+        check_gradgrad=False,
     ),
     dict(
         module_name='AdaptiveMaxPool2d',
         constructor_args=(3,),
         input=torch.rand(1, 3, 5, 6),
-        desc='single'
+        desc='single',
+        check_gradgrad=False,
     ),
     dict(
         module_name='AdaptiveMaxPool2d',
         constructor_args=((3, 4),),
         input=torch.rand(1, 3, 5, 6),
-        desc='tuple'
+        desc='tuple',
+        check_gradgrad=False,
     ),
     dict(
         module_name='AdaptiveAvgPool1d',
         constructor_args=(3,),
-        input=torch.rand(1, 3, 5)
+        input=torch.rand(1, 3, 5),
+        check_gradgrad=False,
     ),
     dict(
         module_name='AdaptiveAvgPool2d',
         constructor_args=(3,),
         input=torch.rand(1, 3, 5, 6),
-        desc='single'
+        desc='single',
+        check_gradgrad=False,
     ),
     dict(
         module_name='AdaptiveAvgPool2d',
         constructor_args=((3, 4),),
         input=torch.rand(1, 3, 5, 6),
-        desc='tuple'
+        desc='tuple',
+        check_gradgrad=False,
     ),
     dict(
         module_name='SELU',
@@ -3740,6 +3829,7 @@ new_module_tests = [
     dict(
         module_name='GLU',
         input_size=(5, 6),
+        check_gradgrad=False,
     ),
 ]
 
@@ -3791,19 +3881,22 @@ add_test(NewModuleTest(
         nn.MaxPool1d(2, return_indices=True),
         nn.MaxUnpool1d(2)),
     input_size=(1, 1, 4),
-    fullname='MaxUnpool1d_net'))
+    fullname='MaxUnpool1d_net',
+    check_gradgrad=False,))
 add_test(NewModuleTest(
     constructor=lambda: UnpoolingNet(
         nn.MaxPool2d(2, return_indices=True),
         nn.MaxUnpool2d(2)),
     input_size=(1, 1, 2, 4),
-    fullname='MaxUnpool2d_net'))
+    fullname='MaxUnpool2d_net',
+    check_gradgrad=False,))
 add_test(NewModuleTest(
     constructor=lambda: UnpoolingNet(
         nn.MaxPool3d(2, return_indices=True),
         nn.MaxUnpool3d(2)),
     input_size=(1, 1, 2, 4, 6),
-    fullname='MaxUnpool3d_net'))
+    fullname='MaxUnpool3d_net',
+    check_gradgrad=False,))
 
 if __name__ == '__main__':
     run_tests()
