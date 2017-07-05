@@ -97,6 +97,14 @@ class _TensorBase(object):
         """
         return self.storage().is_shared()
 
+    @property
+    def shape(self):
+        """Alias for .size()
+
+        Returns a torch.Size object, containing the dimensions of the tensor
+        """
+        return self.size()
+
     def __deepcopy__(self, _memo):
         memo = _memo.setdefault('torch', {})
         if self._cdata in memo:
