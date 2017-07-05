@@ -515,7 +515,7 @@ def tanhshrink(input):
 
 
 def softsign(input):
-    return _functions.activation.Softsign()(input)
+    return _functions.activation.Softsign.apply(input)
 
 
 def softplus(input, beta=1, threshold=20):
