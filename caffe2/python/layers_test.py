@@ -718,3 +718,102 @@ class TestLayers(LayersTestCase):
 
         schema.FeedRecord(input_record, [X])
         workspace.RunNetOnce(predict_net)
+
+    @given(
+        batch_size=st.integers(min_value=2, max_value=10),
+        input_dims=st.integers(min_value=5, max_value=10),
+        output_dims=st.integers(min_value=5, max_value=10),
+        bandwidth=st.floats(min_value=0.1, max_value=5),
+    )
+    def testRandomFourierFeatures(self, batch_size, input_dims, output_dims, bandwidth):
+        X = np.random.random((batch_size, input_dims)).astype(np.float32)
+        scale = np.sqrt(2.0 / output_dims)
+        input_record = self.new_record(schema.Scalar((np.float32, (input_dims,))))
+        schema.FeedRecord(input_record, [X])
+        input_blob = input_record.field_blobs()[0]
+        rff_output = self.model.RandomFourierFeatures(input_record,
+                                                      output_dims,
+                                                      bandwidth)
+        self.model.output_schema = schema.Struct()
+
+        self.assertEqual(
+            schema.Scalar((np.float32, (output_dims, ))),
+            rff_output
+        )
+
+        train_init_net, train_net = self.get_training_nets()
+
+        # Init net assertions
+        init_ops = self.assertNetContainOps(
+            train_init_net,
+            [
+                OpSpec("GaussianFill", None, None),
+                OpSpec("UniformFill", None, None),
+            ]
+        )
+
+        # Operation specifications
+        mat_mul_spec = OpSpec("MatMul", [input_blob, init_ops[0].output[0]],
+                              None)
+        add_spec = OpSpec("Add", [None, init_ops[1].output[0]], None,
+                          {'broadcast': 1, 'axis': 1})
+        cosine_spec = OpSpec("Cos", None, None)
+        scale_spec = OpSpec("Scale", None, rff_output.field_blobs(),
+                            {'scale': scale})
+
+        # Train net assertions
+        self.assertNetContainOps(
+            train_net,
+            [
+                mat_mul_spec,
+                add_spec,
+                cosine_spec,
+                scale_spec
+            ]
+        )
+
+        workspace.RunNetOnce(train_init_net)
+        W = workspace.FetchBlob(self.model.layers[0].w)
+        b = workspace.FetchBlob(self.model.layers[0].b)
+
+        workspace.RunNetOnce(train_net)
+        train_output = workspace.FetchBlob(rff_output())
+        train_ref = scale * np.cos(np.dot(X, W) + b)
+        npt.assert_almost_equal(train_output, train_ref)
+
+        # Eval net assertions
+        eval_net = self.get_eval_net()
+        self.assertNetContainOps(
+            eval_net,
+            [
+                mat_mul_spec,
+                add_spec,
+                cosine_spec,
+                scale_spec
+            ]
+        )
+        schema.FeedRecord(input_record, [X])
+        workspace.RunNetOnce(eval_net)
+
+        eval_output = workspace.FetchBlob(rff_output())
+        eval_ref = scale * np.cos(np.dot(X, W) + b)
+        npt.assert_almost_equal(eval_output, eval_ref)
+
+        # Predict net assertions
+        predict_net = self.get_predict_net()
+        self.assertNetContainOps(
+            predict_net,
+            [
+                mat_mul_spec,
+                add_spec,
+                cosine_spec,
+                scale_spec
+            ]
+        )
+
+        schema.FeedRecord(input_record, [X])
+        workspace.RunNetOnce(predict_net)
+
+        predict_output = workspace.FetchBlob(rff_output())
+        predict_ref = scale * np.cos(np.dot(X, W) + b)
+        npt.assert_almost_equal(predict_output, predict_ref)
