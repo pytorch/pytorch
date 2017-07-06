@@ -2392,14 +2392,14 @@ class TestNN(NNTestCase):
                                           (input1_1, input2_1))
 
     def run_conv_double_back_test(self, kern, stride, padding, chan_in, chan_out, batch_size,
-                                  inp_size, dilation, no_weight, use_cuda=False, use_bias=True):
+                                  inp_size, dilation, no_weight, groups=1, use_cuda=False, use_bias=True):
         tensor = torch.Tensor(1)
         if use_cuda:
             tensor = tensor.cuda()
 
         x = Variable(tensor.new(batch_size, chan_in, inp_size, inp_size), requires_grad=True)
         x.data.normal_()
-        weight = Variable(tensor.new(chan_out, chan_in, kern, kern), requires_grad=True)
+        weight = Variable(tensor.new(chan_out, int(chan_in/groups), kern, kern), requires_grad=True)
         weight.data.normal_()
         if use_bias:
             bias = Variable(tensor.new(chan_out), requires_grad=True)
@@ -2423,7 +2423,7 @@ class TestNN(NNTestCase):
                     lbias = None
             # We disable cudnn during forward to avoid finite difference imprecision issues
             with use_cudnn(False):
-                out = F.conv2d(lx, lweight, lbias, stride, padding, dilation)
+                out = F.conv2d(lx, lweight, lbias, stride, padding, dilation, groups)
             return out
 
         if no_weight:
@@ -2443,12 +2443,12 @@ class TestNN(NNTestCase):
     def test_conv_double_backward(self):
         batch_size = 2
         for kern, inp_size, dilations in [(3, 6, [1, 2]), (3, 7, [1, 2]), (4, 9, [1, 2]), (4, 10, [1, 2])]:
-            for stride, padding, chan_in, chan_out, dilation in product([1, 2], [0, 2], [1], [2, 3], dilations):
+            for stride, padding, chan_in, groups, chan_out, dilation in product([1, 2], [0, 2], [2], [1,2], [2, 3], dilations):
                 no_weight = stride == 2
                 result = self.run_conv_double_back_test(kern, stride,
-                                                        padding, chan_in, chan_out,
+                                                        padding, chan_in*groups, chan_out*groups,
                                                         batch_size, inp_size, dilation,
-                                                        no_weight)
+                                                        no_weight, groups=groups)
                 self.assertTrue(result,
                                 "Conv double backward test failed with parameters:" +
                                 "\nkern: " + str(kern) +
@@ -2458,7 +2458,8 @@ class TestNN(NNTestCase):
                                 "\nchan_out: " + str(chan_out) +
                                 "\nbatch_size: " + str(batch_size) +
                                 "\ninp_size: " + str(inp_size) +
-                                "\ndilation: " + str(dilation))
+                                "\ndilation: " + str(dilation) +
+                                "\ngroups: " + str(groups))
 
     def test_conv_double_backward_no_bias(self):
         kern = 3
