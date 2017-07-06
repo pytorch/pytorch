@@ -21,9 +21,10 @@ class AllreduceOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   AllreduceOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws), ws_(ws) {
-    status_blob_ =
-        OperatorBase::GetSingleArgument<std::string>("status_blob", "");
+      : Operator<Context>(operator_def, ws),
+        ws_(ws),
+        status_blob_(
+            OperatorBase::GetSingleArgument<std::string>("status_blob", "")) {
     if (status_blob_ != "") {
       ws_->CreateBlob(status_blob_);
     }

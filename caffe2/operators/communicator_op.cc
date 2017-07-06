@@ -69,6 +69,13 @@ Does an allgather operation among the nodes.
     .Input(1, "X", "A tensor to be allgathered.")
     .Output(0, "Y", "The allgathered tensor, same on all nodes.");
 
+OPERATOR_SCHEMA(Barrier)
+    .NumInputs(1)
+    .SetDoc(R"DOC(
+Does a barrier operation among the nodes.
+)DOC")
+    .Input(0, "comm_world", "The common world.");
+
 OPERATOR_SCHEMA(SendTensor)
     .NumInputs({2, 4})
     .NumOutputs(0)
@@ -143,6 +150,7 @@ SHOULD_NOT_DO_GRADIENT(Broadcast);
 SHOULD_NOT_DO_GRADIENT(Reduce);
 SHOULD_NOT_DO_GRADIENT(Allgather);
 SHOULD_NOT_DO_GRADIENT(Allreduce);
+SHOULD_NOT_DO_GRADIENT(Barrier);
 SHOULD_NOT_DO_GRADIENT(SendTensor);
 SHOULD_NOT_DO_GRADIENT(ReceiveTensor);
 
@@ -152,6 +160,7 @@ REGISTER_CPU_OPERATOR(Broadcast, NoDefaultEngineOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Reduce, NoDefaultEngineOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Allgather, NoDefaultEngineOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Allreduce, NoDefaultEngineOp<CPUContext>);
+REGISTER_CPU_OPERATOR(Barrier, NoDefaultEngineOp<CPUContext>);
 REGISTER_CPU_OPERATOR(SendTensor, NoDefaultEngineOp<CPUContext>);
 REGISTER_CPU_OPERATOR(ReceiveTensor, NoDefaultEngineOp<CPUContext>);
 
