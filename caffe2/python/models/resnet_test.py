@@ -4,6 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import numpy as np
+import time
 
 from caffe2.python import workspace, cnn, memonger, core
 import caffe2.python.models.resnet as resnet
@@ -129,7 +130,6 @@ class ResnetMemongerTest(hu.HypothesisTestCase):
         num_shared_blobs = count_shared_blobs(optim_proto)
 
         # Run model and compare results
-
         workspace.RunNetOnce(model.param_init_net)
         data = np.random.rand(4, 3, 227, 227).astype(np.float32)
 
@@ -142,7 +142,55 @@ class ResnetMemongerTest(hu.HypothesisTestCase):
         workspace.RunNetOnce(optim_proto)
         optimized_loss1 = workspace.FetchBlob("gpu_0/last_out_L1000")
         self.assertTrue(count_after < count_before)
-        self.assertTrue(num_shared_blobs < 7)
+        self.assertTrue(num_shared_blobs < 7 and num_shared_blobs > 0)
+        np.testing.assert_almost_equal(loss1, optimized_loss1)
+
+    def test_resnet_forward_only_fast_simplenet(self):
+        '''
+        Test C++ memonger that is only for simple nets
+        '''
+        model = cnn.CNNModelHelper(
+            order="NCHW",
+            name="test",
+            cudnn_exhaustive_search=True,
+        )
+        with core.NameScope("gpu_0"):
+                data = model.net.AddExternalInput("gpu_0/data")
+                resnet.create_resnet50(
+                    model,
+                    data,
+                    num_input_channels=3,
+                    num_labels=1000,
+                    is_test=True
+                )
+
+        count_before = count_blobs(model.net.Proto())
+        t = time.time()
+        optim_proto = memonger.optimize_inference_fast(
+            model.net.Proto(),
+            set(["gpu_0/data", "gpu_0/last_out_L1000"]).union(
+                set(model.net.Proto().external_input))
+        )
+        print("Optimization took {} secs".format(time.time() - t))
+        count_after = count_blobs(optim_proto)
+        num_shared_blobs = count_shared_blobs(optim_proto)
+
+        self.assertTrue(count_after < count_before)
+        print(count_after, count_before, num_shared_blobs)
+        self.assertTrue(num_shared_blobs < 7 and num_shared_blobs > 0)
+
+        # Run model and compare results
+        workspace.RunNetOnce(model.param_init_net)
+        data = np.random.rand(4, 3, 227, 227).astype(np.float32)
+
+        workspace.FeedBlob("gpu_0/data", data)
+        model.net.Proto().type = 'simple'
+
+        workspace.RunNetOnce(model.net)
+        loss1 = workspace.FetchBlob("gpu_0/last_out_L1000")
+
+        workspace.RunNetOnce(optim_proto)
+        optimized_loss1 = workspace.FetchBlob("gpu_0/last_out_L1000")
         np.testing.assert_almost_equal(loss1, optimized_loss1)
 
 

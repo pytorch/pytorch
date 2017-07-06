@@ -16,6 +16,7 @@ import enum
 import logging
 import numpy as np
 from future.utils import viewitems, viewvalues
+import caffe2.python._import_c_extension as C
 
 log = logging.getLogger("memonger")
 log.setLevel(logging.INFO)
@@ -882,6 +883,15 @@ class AssignmentAlgorithm(enum.Enum):
     DYNAMIC_PROGRAMMING = 1
 
 
+def optimize_inference_fast(net, static_blobs):
+    optim = caffe2_pb2.NetDef()
+    optim_str = C.memonger_optimize_inference_net(
+        net.SerializeToString(), [str(s).encode('utf-8') for s in static_blobs]
+    )
+    optim.ParseFromString(optim_str)
+    return optim
+
+
 def optimize_interference(net, static_blobs,
                           ordering_function=topological_sort_traversal,
                           blob_sizes=None,
@@ -907,6 +917,7 @@ def optimize_interference(net, static_blobs,
     3) Assign blobs to `canonical blobs`
     4) Rename blobs to canonical blobs
     """
+
     net = copy.deepcopy(net)
     g = compute_interference_graph(net.op)
     ordering = ordering_function(g)
