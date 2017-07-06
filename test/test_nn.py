@@ -215,7 +215,8 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
     def _do_extra_tests(self, test_case, module, input, target):
         if self.check_gradgrad:
             params = tuple(x for x in module.parameters())
-            _assertGradAndGradgradChecks(test_case.assertTrue, lambda x, y, *args, **kw: module(x, y), (input, target) + params)
+            _assertGradAndGradgradChecks(test_case.assertTrue, lambda x, y, *args, **kw: module(x, y),
+                                         (input, target) + params)
 
     def _get_target(self, target):
         return Variable(target, requires_grad=False)
