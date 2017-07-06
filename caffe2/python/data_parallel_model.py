@@ -526,6 +526,35 @@ def RunNet(model, num_iterations):
             workspace.RunNet(net_iter, num_iterations)
 
 
+def Synchronize(model, timeout_sec=30):
+    log.info("Creating synchronization barrier net")
+    assert model._rendezvous is not None, "Missing rendezvous"
+    assert model._rendezvous['engine'] == 'GLOO', "Engine does not support barrier"
+    assert model._rendezvous['num_shards'] > 1, \
+        "synchronization barrier requires multiple shards"
+    global barrier_instance
+    instance = barrier_instance
+    barrier_instance += 1
+    barrier_net = core.Net("sync_barrier_net_" + str(instance))
+    comm_world = barrier_net.CreateCommonWorld(
+        model._rendezvous['kv_handler'],
+        "sync_barrier_cw_" + str(instance),
+        name="sync_barrier_cw_op_" + str(instance),
+        size=model._rendezvous['num_shards'],
+        rank=model._rendezvous['shard_id'],
+        engine=model._rendezvous['engine'],
+        status_blob="sync_barrier_cw_status_" + str(instance),
+        timeout_ms=timeout_sec * 1000
+    )
+    barrier_net.Barrier(
+        inputs=[comm_world],
+        outputs=[],
+        engine=model._rendezvous['engine'],
+        status_blob="sync_barrier_status_" + str(instance),
+    )
+    workspace.RunNetOnce(barrier_net)
+
+
 def _ForEachGPU(gpu_ids, f, scoped=False, *args, **kwargs):
     for gpu_id in gpu_ids:
         device_opt = core.DeviceOption(caffe2_pb2.CUDA, gpu_id)
@@ -1307,3 +1336,6 @@ def OptimizeGradientMemory(model,
             share_activations=recycle_activations,
             blob_shapes=shapes,
         )
+
+
+barrier_instance = 0
