@@ -20,9 +20,9 @@ class BroadcastOp final : public Operator<Context> {
   BroadcastOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         root_(OperatorBase::template GetSingleArgument<int>("root", 0)),
-        ws_(ws) {
-    status_blob_ =
-        OperatorBase::GetSingleArgument<std::string>("status_blob", "");
+        ws_(ws),
+        status_blob_(
+            OperatorBase::GetSingleArgument<std::string>("status_blob", "")) {
     if (status_blob_ != "") {
       ws_->CreateBlob(status_blob_);
     }

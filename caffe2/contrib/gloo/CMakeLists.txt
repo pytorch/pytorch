@@ -1,6 +1,7 @@
 if(USE_GLOO)
   set(Caffe2_CONTRIB_GLOO_CPU_SRC
     "${CMAKE_CURRENT_SOURCE_DIR}/allreduce_ops.cc"
+    "${CMAKE_CURRENT_SOURCE_DIR}/barrier_ops.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/broadcast_ops.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/common.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/common_world_ops.cc"

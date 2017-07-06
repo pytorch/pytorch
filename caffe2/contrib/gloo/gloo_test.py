@@ -295,6 +295,46 @@ class TestCase(hu.HypothesisTestCase):
                     tmpdir=tmpdir,
                     use_float16=use_float16)
 
+    def _test_barrier(
+        self,
+        comm_rank=None,
+        comm_size=None,
+        tmpdir=None,
+    ):
+        store_handler, common_world = self.create_common_world(
+            comm_rank=comm_rank, comm_size=comm_size, tmpdir=tmpdir
+        )
+
+        net = core.Net("barrier")
+        net.Barrier(
+            [common_world],
+            [],
+            engine=op_engine)
+
+        workspace.CreateNet(net)
+        workspace.RunNet(net.Name())
+
+        # Run the net a few more times to check the operator
+        # works not just the first time it's called
+        for _tmp in range(4):
+            workspace.RunNet(net.Name())
+
+    @given(comm_size=st.integers(min_value=2, max_value=8),
+           device_option=st.sampled_from([hu.cpu_do]))
+    def test_barrier(self, comm_size, device_option):
+        TestCase.test_counter += 1
+        if os.getenv('COMM_RANK') is not None:
+            self.run_test_distributed(
+                self._test_broadcast,
+                device_option=device_option)
+        else:
+            with TemporaryDirectory() as tmpdir:
+                self.run_test_locally(
+                    self._test_barrier,
+                    comm_size=comm_size,
+                    device_option=device_option,
+                    tmpdir=tmpdir)
+
 if __name__ == "__main__":
     import unittest
     unittest.main()
