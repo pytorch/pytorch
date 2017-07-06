@@ -43,7 +43,7 @@ def Parallelize(
     broadcast_computed_params=True,
     optimize_gradient_memory=False,
     use_nccl=False,
-    max_concurrent_distributed_ops=4,
+    max_concurrent_distributed_ops=16,
     cpu_device=False,
 ):
     '''
