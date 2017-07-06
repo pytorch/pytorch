@@ -312,8 +312,9 @@ def _compute_blob_recycling_for_dag(
     # Start DFS from the heads' (losses or inputs)
     for head_blob in heads:
         for op_idx in blobs_to_ops[head_blob]:
-            saved = descend(op_idx, [], set([next_token()]))
-            saved_count += saved
+            if op_token_deposit[op_idx] is not None:
+                saved = descend(op_idx, [], set([next_token()]))
+                saved_count += saved
 
     # Rename the shared blobs
     shared_blobs = set(viewvalues(mapping))

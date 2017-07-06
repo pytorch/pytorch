@@ -307,7 +307,18 @@ class MemongerTest(hu.HypothesisTestCase):
         optim_proto = memonger.optimize_inference_for_dag(
             m.net, ["name_x/data"], "name_x/"
         )
+
         blobs_after = count_blobs(optim_proto)
+
+        # Extra test with when one of the parameters is also an input.
+        # This caused a bug before.
+        optim_proto_extra_input = memonger.optimize_inference_for_dag(
+            m.net, ["name_x/data", "name_x/fc1_w"], "name_x/"
+        )
+        blobs_after_extra_input = count_blobs(optim_proto_extra_input)
+        self.assertEqual(blobs_after, blobs_after_extra_input)
+        ###
+
         print(str(optim_proto))
         self.assertLess(blobs_after, blobs_before)
 
