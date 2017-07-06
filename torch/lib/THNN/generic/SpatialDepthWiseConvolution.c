@@ -124,9 +124,12 @@ void THNN_(SpatialDepthWiseConvolution_updateOutput)(
 
   THTensor *_weight = THTensor_(newTranspose)(weight, 0, 1);
   weight = THTensor_(newContiguous)(_weight);
-  THTensor *_bias = THTensor_(newTranspose)(bias, 0, 1);
-  bias = THTensor_(newContiguous)(_bias);
 
+  THTensor *_bias = NULL;
+  if(bias) {
+  	_bias = THTensor_(newTranspose)(bias, 0, 1);
+  	bias = THTensor_(newContiguous)(_bias);
+  }
 
   // resize weight
   long s1 = weight->size[0];
@@ -169,11 +172,13 @@ void THNN_(SpatialDepthWiseConvolution_updateOutput)(
     for(i = 0; i < nInputPlane; i++)
     {
       THTensor *weight_i = THTensor_(newSelect)(weight, 0, i);
-      THTensor *bias_i = THTensor_(newSelect)(bias, 0, i);
       THTensor *input_i = THTensor_(newNarrow)(input_t, 0, i, 1);
       THTensor *output_i = THTensor_(newSelect)(output_t, 0, i);
       THTensor *finput_i = THTensor_(newSelect)(finput_t, 0, i);
-
+      THTensor *bias_i = NULL;
+      if(bias) {
+        bias_i = THTensor_(newSelect)(bias, 0, i);
+      }
       THNN_(SpatialDepthWiseConvolution_updateOutput_frame)
 	(input_i, output_i, weight_i, bias_i, finput_i,
 	 kW, kH, dW, dH, padW, padH,
@@ -195,7 +200,6 @@ void THNN_(SpatialDepthWiseConvolution_updateOutput)(
   THTensor_(free)(_weight);
   THTensor_(free)(bias);
   THTensor_(free)(_bias);
-
   THTensor_(resize4d)(output, T, nInputPlane * nOutputPlane, outputHeight, outputWidth);
 
   if (batch == 0) {
@@ -430,15 +434,16 @@ void THNN_(SpatialDepthWiseConvolution_accGradParameters)(
 
   // Transpose gradWeight & gradBias
   THTensor_(transpose)(gradWeight, NULL, 0, 1);
-  THTensor_(transpose)(gradBias, NULL, 0, 1);
-
   THTensor *_gradWeight;
-  THTensor *_gradBias;
-  _gradBias = gradBias;
   _gradWeight = gradWeight;
-
   gradWeight = THTensor_(newContiguous)(gradWeight);
-  gradBias = THTensor_(newContiguous)(gradBias);
+
+  THTensor *_gradBias = NULL;
+  if(gradBias) {
+	  THTensor_(transpose)(gradBias, NULL, 0, 1);
+	  _gradBias = gradBias;
+	  gradBias = THTensor_(newContiguous)(gradBias);
+  }
 
   // resize gradWeight
   long s1 = gradWeight->size[0];
@@ -478,8 +483,10 @@ void THNN_(SpatialDepthWiseConvolution_accGradParameters)(
       THTensor *finput_i = THTensor_(newSelect)(finput_t, 0, i);
       THTensor *gradOutput_i = THTensor_(newSelect)(gradOutput_t, 0, i);
       THTensor *gradWeight_i = THTensor_(newSelect)(gradWeight, 0, i);
-      THTensor *gradBias_i = THTensor_(newSelect)(gradBias, 0, i);
-
+      THTensor *gradBias_i = NULL;
+      if(gradBias) {
+      	gradBias_i = THTensor_(newSelect)(gradBias, 0, i);
+      }
       THNN_(SpatialDepthWiseConvolution_accGradParameters_frame)(gradOutput_i, gradWeight_i,
                 gradBias_i, finput_i, scale);
 
@@ -495,14 +502,16 @@ void THNN_(SpatialDepthWiseConvolution_accGradParameters)(
 
   // Copy back and transpose back
   THTensor_(transpose)(_gradWeight, NULL, 0, 1);
-  THTensor_(transpose)(_gradBias, NULL, 0, 1);
   THTensor_(resize4d)(_gradWeight, nInputPlane, nOutputPlane, kH, kW);
-  THTensor_(resize2d)(_gradBias, nInputPlane, nOutputPlane);
-
   THTensor_(copy)(_gradWeight, gradWeight);
-  THTensor_(copy)(_gradBias, gradBias);
   THTensor_(transpose)(_gradWeight, NULL, 0, 1);
-  THTensor_(transpose)(_gradBias, NULL, 0, 1);
+
+  if(gradBias) {
+	  THTensor_(transpose)(_gradBias, NULL, 0, 1);
+	  THTensor_(resize2d)(_gradBias, nInputPlane, nOutputPlane);
+	  THTensor_(copy)(_gradBias, gradBias);
+	  THTensor_(transpose)(_gradBias, NULL, 0, 1);
+  }
 
   if (batch == 0) {
     THTensor_(select)(gradOutput, NULL, 0, 0);

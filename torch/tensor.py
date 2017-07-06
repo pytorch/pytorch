@@ -97,6 +97,14 @@ class _TensorBase(object):
         """
         return self.storage().is_shared()
 
+    @property
+    def shape(self):
+        """Alias for .size()
+
+        Returns a torch.Size object, containing the dimensions of the tensor
+        """
+        return self.size()
+
     def __deepcopy__(self, _memo):
         memo = _memo.setdefault('torch', {})
         if self._cdata in memo:
@@ -146,7 +154,10 @@ class _TensorBase(object):
     __nonzero__ = __bool__
 
     def __iter__(self):
-        return iter(map(lambda i: self.select(0, i), _range(self.size(0))))
+        if self.nelement() > 0:
+            return iter(map(lambda i: self.select(0, i), _range(self.size(0))))
+        else:
+            return iter([])
 
     def split(self, split_size, dim=0):
         """Splits this tensor into a tuple of tensors.

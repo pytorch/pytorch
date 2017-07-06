@@ -652,15 +652,14 @@ class Cumsum(Function):
 
 class Cumprod(Function):
 
-    def __init__(self, dim):
-        super(Cumprod, self).__init__()
-        self.dim = dim
+    @staticmethod
+    def forward(ctx, input, dim):
+        ctx.dim = dim
+        ctx.save_for_backward(input)
+        return torch.cumprod(input, dim=ctx.dim)
 
-    def forward(self, input):
-        self.save_for_backward(input)
-        return torch.cumprod(input, dim=self.dim)
-
-    def backward(self, grad_output):
+    @staticmethod
+    def backward(ctx, grad_output):
         '''
         There are two algorithms to do this. The first one
         is very efficient, but works only when there are no
@@ -734,38 +733,39 @@ class Cumprod(Function):
         dy_j / dx_k = 0, which is done right after the assert.
         '''
 
-        input, = self.saved_tensors
-        dim_size = input.size(self.dim)
+        input, = ctx.saved_variables
+        dim_size = input.size(ctx.dim)
         if dim_size == 1:
-            return grad_output
+            return grad_output, None
 
         #  Simple case with nonzero elements in the input
-        if (input != 0).all():
-            output = torch.cumprod(input, dim=self.dim)
-            return sum_scan_exclusive(output * grad_output, dim=self.dim) / input
+        if (input != 0).data.all():
+            output = torch.cumprod(input, dim=ctx.dim)
+            return sum_scan_exclusive(output * grad_output, dim=ctx.dim) / input, None
 
-        dim_padding = (slice(None, None),) * self.dim
+        positive_dim = ctx.dim if ctx.dim >= 0 else input.dim() + ctx.dim
+        dim_padding = (slice(None, None),) * (positive_dim)
 
         ones_size = list(input.size())
-        ones_size[self.dim] = 1
-        ones = input.new([1]).expand(ones_size)
-        grad_input = grad_output.new(input.size()).zero_()
+        ones_size[ctx.dim] = 1
+        ones = Variable(input.data.new([1]).expand(ones_size))
+        grad_input = Variable(grad_output.data.new(input.size()).zero_())
         for k in range(dim_size):
             if k == 0:
                 prods_from_k_plus_1 = torch.cumprod(
                     input[dim_padding + (slice(k + 1, None),)],
-                    dim=self.dim
+                    dim=ctx.dim
                 )
 
                 omitted_products = torch.cat(
                     (ones, prods_from_k_plus_1),
-                    self.dim
+                    dim=ctx.dim
                 )
 
             elif k == dim_size - 1:
                 prods_until_k = torch.prod(
                     input[dim_padding + (slice(None, k),)],
-                    dim=self.dim,
+                    dim=ctx.dim,
                     keepdim=True
                 )
 
@@ -774,31 +774,33 @@ class Cumprod(Function):
             else:
                 prods_until_k = torch.prod(
                     input[dim_padding + (slice(None, k),)],
-                    dim=self.dim,
+                    dim=ctx.dim,
                     keepdim=True
                 )
 
                 prods_from_k_plus_1 = torch.cumprod(
                     input[dim_padding + (slice(k + 1, None),)],
-                    dim=self.dim
+                    dim=ctx.dim
                 )
 
                 omitted_products = prods_until_k.expand_as(
                     prods_from_k_plus_1) * prods_from_k_plus_1
 
                 omitted_products = torch.cat(
-                    (prods_until_k, omitted_products), self.dim)
+                    (prods_until_k, omitted_products), ctx.dim)
 
             # At this point omitted_products is the same size
             # as input, except on the dimension dim where it's
             # dim_size - k
-            assert omitted_products.size(self.dim) == dim_size - k
+            assert omitted_products.size(ctx.dim) == dim_size - k
 
-            grad_input.select(self.dim, k).copy_(torch.sum(
+            # should we implement copy_ or _set_item in variable?
+            index = tuple(slice(None, None) for _ in range(positive_dim)) + (k,)
+            grad_input[index] = torch.sum(
                 grad_output[dim_padding + (slice(k, None),)] * omitted_products,
-                dim=self.dim))
+                dim=ctx.dim)
 
-        return grad_input
+        return grad_input, None
 
 
 class Unfold(Function):

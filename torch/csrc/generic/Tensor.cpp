@@ -506,23 +506,81 @@ static bool THPTensor_(_indexOnce)(PyObject *index, int &indexed_dim,
 }
 
 #ifndef TH_REAL_IS_HALF
-static bool THPTensor_(_checkAdvancedIndexing)(THPTensor *indexed, PyObject *arg) {
-  // Currently we only support the integer-array indexing strategy for advanced
-  // indexing - where we have ndim sequence/LongTensor arguments
 
+static bool THPTensor_(_checkBasicIntegerArrayIndexing)(THPTensor *indexed, PyObject *arg) {
   long ndim = THTensor_(nDimension)(LIBRARY_STATE indexed->cdata);
 
-  // Verify that all of the inputs are either Tensors or Sequences.
   if (PySequence_Check(arg) && PySequence_Size(arg) == ndim) {
+    THPObjectPtr fast = THPObjectPtr(PySequence_Fast(arg, NULL));
     for (Py_ssize_t i = 0; i < ndim; ++i) {
-      PyObject *item = PySequence_GetItem(arg, i);
+      PyObject *item = PySequence_Fast_GET_ITEM(fast.get(), i);
       if (!THPLongTensor_Check(item) && !PySequence_Check(item)) {
-        Py_DECREF(item);
         return false;
       }
-      Py_DECREF(item);
     }
     return true;
+  }
+  return false;
+}
+
+static bool THPTensor_(_checkAdvancedIndexing)(THPTensor *indexed, PyObject *arg) {
+  // Currently we only support two forms of advanced indexing:
+  //
+  // 1. "Basic Integer Array Indexing" the integer-array indexing strategy
+  // where we have ndim sequence/LongTensor arguments
+  // 2. Combining Advanced Indexing with ":", with the limitation that
+  // the advanced indexing dimensions must be adjacent, i.e.:
+  //
+  // x[:, :, [1,2], [3,4], :] --> valid
+  // x[:, [1,2], :, [3,4], :] --> not valid
+
+  // Verification, Step #1 -- ndim sequencers
+  if (THPTensor_(_checkBasicIntegerArrayIndexing)(indexed, arg)) return true;
+
+  // Verification, Step #2 -- at least one sequencer, all the rest are
+  // ':', can be less than ndim indexers, all sequencers adjacent
+
+  long ndim = THTensor_(nDimension)(LIBRARY_STATE indexed->cdata);
+  // TODO: should this be == ndim? --> for now, yes, but to support
+  // other things, no
+  if (PySequence_Check(arg) && PySequence_Size(arg) == ndim) {
+    THPObjectPtr fast = THPObjectPtr(PySequence_Fast(arg, NULL));
+
+    bool sequenceFound = false;
+    bool nonColonFound = false;
+    Py_ssize_t lastSeqDim = -1;
+
+    for (Py_ssize_t i = 0; i < ndim; ++i) {
+      PyObject *item = PySequence_Fast_GET_ITEM(fast.get(), i);
+      if (THPIndexTensor_Check(item) || PySequence_Check(item)) {
+        sequenceFound = true;
+
+        // non-adjacent sequencers not yet supported
+        if (i - 1 != lastSeqDim && lastSeqDim != -1) {
+          return false;
+        }
+        lastSeqDim = i;
+
+        continue;
+      }
+      if (PySlice_Check(item)) {
+        long dimSize = THTensor_(size)(LIBRARY_STATE indexed->cdata, i);
+        // Basically verify that the Slice is ':' and did not specify
+        // a specific start, end or step
+        Py_ssize_t start, end, length, step;
+        if (THPUtils_parseSlice(item, dimSize, &start, &end, &step, &length)) {
+          if (start != 0 || end != dimSize || step != 1 || length != dimSize) {
+            nonColonFound = true;
+            break;
+          }
+        }
+        continue;
+      }
+      nonColonFound = true;
+      break;
+    }
+
+    return sequenceFound && (!nonColonFound);
   }
   return false;
 
@@ -556,7 +614,6 @@ static bool THPTensor_(_checkAdvancedIndexing)(THPTensor *indexed, PyObject *arg
     }
   }
 
-  return false;
   **/
 }
 
@@ -568,106 +625,294 @@ static PyObject* THPTensor_(checkAdvancedIndexing)(THPTensor *self, PyObject *ar
   Py_RETURN_FALSE;
 }
 
-static bool THPTensor_(_convertToTensorIndexers)(PyObject *index, std::vector<THLongTensor*>& broadcasted) {
-  // At the top-level, index must be a sequence. PySequence_Fast returns a new
-  // reference
-  PyObject *fast = PySequence_Fast(index, NULL);
-  Py_ssize_t seqCount = PySequence_Fast_GET_SIZE(fast);
-  std::vector<THPLongTensor*> indexers;
+static bool THPTensor_(_convertToTensorIndexers)(
+    PyObject *index,
+    THTensorPtr& indexed,
+    Py_ssize_t& sequenceLength,
+    std::unordered_map<Py_ssize_t, THLongTensorPtr>& broadcasted) {
 
-  for (Py_ssize_t i = 0; i < seqCount; ++i) {
-    PyObject *temp = PyObject_CallFunctionObjArgs(THPLongTensorClass, PySequence_Fast_GET_ITEM(fast, i), NULL);
-    THPLongTensor *indexer = (THPLongTensor *) temp;
-    if (!indexer) {
-      PyErr_Format(PyExc_IndexError,
-          "When performing advanced indexing the indexing objects must be LongTensors or convertible to such");
-      return false;
+  // At the top-level, each indexing element must be one of 3 things:
+  //
+  // 1. A LongTensor
+  // 2. A sequence that can be converted into a LongTensor
+  // 3. A empty slice object (i.e. ':')
+  //
+  // This function loops through all of the indexing elements. If we encounter
+  // a LongTensor, we record the dimension at which it occurs. If we encounter
+  // another sequence type, we attempt to convert it to a LongTensor, and record
+  // its position.
+  //
+  // Next, once we have all of the indexing Tensors, we attempt to broadcast them.
+  // If they can be broadcasted, we store each of the broadcasted Tensors in the
+  // output map, with the dimension of the original tensor as the key.
+
+  // Indexes all indexing Tensors (pre-broadcast) by which dimension they occurred.
+  // Because we rely upon the THPLongTensor constructor to handle sequence -> tensor
+  // conversions, we store THPTensors rather than THTensors. We use an ordered map
+  // to maintain the order of Tensors via dimension. Because this is limited to
+  // ndim(Tensor), it should always be small + fast.
+
+  std::vector<Py_ssize_t> indexingDims;
+  std::vector<THPLongTensor*>indexers;
+
+  // The top-level indexer should be a sequence, per the check above
+  THPObjectPtr fast(PySequence_Fast(index, NULL));
+  sequenceLength = PySequence_Fast_GET_SIZE(fast.get());
+
+  for (Py_ssize_t i = 0; i < sequenceLength; ++i) {
+    PyObject *item = PySequence_Fast_GET_ITEM(fast.get(), i);
+    if (!PySlice_Check(item)) {
+      // Returns NULL upon conversion failure
+      THPLongTensor *indexer = (THPLongTensor *)PyObject_CallFunctionObjArgs(
+          THPLongTensorClass, PySequence_Fast_GET_ITEM(fast.get(), i), NULL);
+      if (!indexer) {
+        PyErr_Format(PyExc_IndexError,
+            "When performing advanced indexing the indexing objects must be LongTensors or "
+            "convertible to LongTensors");
+
+        // Clean up Indexers
+        for (auto& idx : indexers) {
+          THLongTensor_free(idx->cdata);
+          Py_DECREF(idx);
+        }
+        return false;
+      }
+      indexingDims.push_back(i);
+      indexers.push_back(indexer);
     }
-    indexers.push_back(indexer);
   }
-  Py_DECREF(fast);
 
-  THLongTensor **maybeBroadcasted = (THLongTensor **)THAlloc(seqCount * sizeof(THLongTensor*));
-  THLongTensor **candidates = (THLongTensor **)THAlloc(seqCount * sizeof(THLongTensor*));
+  // Next, we need to verify that the Tensors are broadcastable. Keep these
+  // as raw pointer vectors
+  std::vector<THLongTensor*> maybeBroadcasted;
+  std::vector<THLongTensor*> candidates;
 
-  for (Py_ssize_t i = 0; i < seqCount; ++i) {
-    maybeBroadcasted[i] = THLongTensor_new();
-    candidates[i] = THLongTensor_newWithTensor(indexers[i]->cdata);
+  // Extract the underlying Tensors for use in the expansion API call
+  for (const auto& indexer : indexers) {
+    maybeBroadcasted.emplace_back(THLongTensor_new());
+    // borrow the underlying Tensor from the indexer map
+    candidates.emplace_back(indexer->cdata);
   }
 
   // Broadcast/Expand indexing Tensors as necessary
-  bool broadcastSuccess = true;
   try {
-    THLongTensor_expandNd(maybeBroadcasted, candidates, seqCount);
-    // Place Broadcasted Tensors into output vector, implicitly transferring
-    // ownership
-    for (Py_ssize_t i = 0; i < seqCount; ++i) {
-      broadcasted.push_back(maybeBroadcasted[i]);
+    THLongTensor_expandNd(maybeBroadcasted.data(), candidates.data(), maybeBroadcasted.size());
+
+    // Broadcast succeeded, place Broadcasted Tensors into output map by the index at
+    // which they occurred, transferring ownership to that map object
+    for (unsigned int i = 0; i < indexingDims.size(); ++i) {
+      THLongTensorPtr owned(maybeBroadcasted[i]);
+      broadcasted[indexingDims[i]] = std::move(owned);
+    }
+
+    // Next, before doing any further work, we want to verify that all the indices
+    // are in bounds at each advanced index dimension
+
+    ptrdiff_t nElement = THLongTensor_nElement(broadcasted.begin()->second.get());
+    THLongStoragePtr viewer(THLongStorage_newWithSize(1));
+    THLongStorage_set(viewer.get(), 0, nElement);
+    for (auto& dimBroadcast : broadcasted) {
+      Py_ssize_t dim = dimBroadcast.first;
+      long sizeAtDim = THTensor_(size)(LIBRARY_STATE indexed, dim);
+
+      // Need to make contiguous to view as 1D :/
+      THLongTensorPtr contig(THLongTensor_newContiguous(dimBroadcast.second.get()));
+
+      // View as 1D + get1D makes me sad :(
+      THLongTensorPtr flat(THLongTensor_newView(contig.get(), viewer));
+      for (ptrdiff_t i = 0; i < THLongTensor_nElement(flat.get()); ++i) {
+        long indexAtDim = THTensor_fastGet1d(flat.get(), i);
+        if (indexAtDim >= sizeAtDim) {
+          PyErr_Format(PyExc_IndexError, "index %lld from broadcast indexer is out of range "
+              "for dimension %lld (of size %lld)",
+              (long long)indexAtDim, (long long)dim, (long long)sizeAtDim);
+
+          // Clean up Indexers
+          for (auto& idx : indexers) {
+            THLongTensor_free(idx->cdata);
+            Py_DECREF(idx);
+          }
+
+          return false;
+        }
+      }
     }
   } catch (std::exception& e) {
-    // Broadcasted failed, cleanup and set error
-    for (int i = 0; i < seqCount; ++i) {
-      THLongTensor_free(maybeBroadcasted[i]);
+    // Broadcasted failed, cleanup and return error. I'm not sure if there is a better
+    // way to do this where we don't have to manually clean up the memory
+    for (const auto& tensor : maybeBroadcasted) {
+      THLongTensor_free(tensor);
     }
-    broadcastSuccess = false;
     PyErr_Format(PyExc_IndexError, "The advanced indexing objects could not be broadcast");
+
+    // Clean up Indexers
+    for (auto& idx : indexers) {
+      THLongTensor_free(idx->cdata);
+      Py_DECREF(idx);
+    }
+    return false;
   }
 
-  // No matter what, need to cleanup the candidates
-  for (Py_ssize_t i = 0; i < seqCount; ++i) {
-    THLongTensor_free(candidates[i]);
+  // Clean up Indexers
+  for (auto& idx : indexers) {
+    THLongTensor_free(idx->cdata);
+    Py_DECREF(idx);
   }
-  THFree(candidates);
-  THFree(maybeBroadcasted);
+  return true;
+}
 
-  return broadcastSuccess;
+static inline long THPTensor_(_indexToOffset)(
+    THTensorPtr& indexed,
+    std::unordered_map<Py_ssize_t, THLongTensorPtr>& broadcasted,
+    ptrdiff_t index)
+{
+  // We need to translate an "index" into a linear offset within the Tensor indexed.
+  // We will perform the normal mod/divide loop, except in the case of an advance indexed
+  // dimension, we need to take special care to utilize the size and subset of indices
+  // specified by the Tensor at the advanced indexed dimension. We hereafter refer to
+  // this as the "broadcast" dimension, although in the case of a single indexer, the
+  // broadcast op is pretty much a no-op.
+  //
+  // For example, suppose we have a three-dimensional Tensor x of shape (5, 10, 15),
+  // and our indexing operation is x[:, (2, 4, 5), :].
+  //
+  // For Linear Index 32:
+  //
+  // dim = 2 (size = 15): 32 % 15 = 2; 32 / 15 = 2
+  // dim = 1 (size = 3): 2 % 3 = 2; 2 / 3 = 0
+  // dim = 0 (size = 5): 0 % 5 = 0; end
+  //
+  // So we have selected the index (0, 2, 2). Now for the strides calculation. For the
+  // non-broadcast dimensions, we simply do the index * the stride. But for the broadcast
+  // dimension we need to get the corresponding subset index (i.e., pick from (2, 4, 5))
+  // and use that before multiplying by the stride at that dimension.
+  //
+  // (assumes that x is contiguous)
+  //
+  // dim = 2 (stride = 1): 2 * stride = 2, offset = 2
+  // dim = 1 (stride = 15): (broadcast[2] = 5) * stride = 75, offset = 77
+  // dim = 0 (stride = 75): 0 * stride = 0, offset = 77
+  //
+  // So we can see how this works.
+  //
+  // The other complication occurs when we have more than one advanced indexer. Consider
+  // the case:
+  //
+  // x = torch.Tensor(3, 4, 6, 3)
+  // x.stride = (72, 18, 3, 1)
+  // x[:, [0, 1], [2, 3], :]
+  //
+  // Because the advanced indexers are broadcast and iterated as one, we need to apply
+  // the same index in each of the advanced indexing dimensions. When we reach an advanced
+  // indexing element, we look to see if the next dimension we will consider is also part
+  // of the advanced indexing. If it is, we maintain the index:
+  //
+  // For Linear Index 16:
+  //
+  // dim = 3 (size = 3): 16 % 3 = 1; 16 / 3 = 5
+  // dim = 2 (size = 2): 5 % 2 = 1; Do Not Update Index
+  // dim = 1 (size = 2): 5 % 2 = 1; 5 / 2 = 2
+  // dim = 0 (size = 3): 2 % 3 = 2; end
+  //
+  // Then for the offsets:
+  //
+  // dim = 3 (stride = 1): 1 * stride = 1, offset: 1
+  // dim = 2 (stride = 3): [2, 3][1] = 3 * stride = 9, offset = 10
+  // dim = 1 (stride = 18): [0, 1][1] = 1 * stride = 18, offset = 28
+  // dim = 0 (stride = 72): 2 * stride = 144, offset = 172
+  //
+  // Special care needs to be taken to handle advanced indexers at the beginning, end.
+
+  long offset = 0;
+  for (long i = THTensor_(nDimension)(LIBRARY_STATE indexed) - 1; i >= 0; --i) {
+    // Get size at dimension i, its the size of the indexed Tensor at that dimension if its
+    // not an advanced indexing dimension, otherwise its the size of the broadcast Tensor
+    ptrdiff_t sizeAtDim, indexAtDim, nextIndex;
+    long strideAtDim = THTensor_(stride)(LIBRARY_STATE indexed, i);
+
+    auto broadcast = broadcasted.find(i);
+    if (broadcast != broadcasted.end()) {
+      sizeAtDim = THLongTensor_nElement(broadcast->second.get());
+      indexAtDim = THTensor_fastGet1d(broadcast->second.get(), index % sizeAtDim);
+
+      if (i > 0 && broadcasted.find(i - 1) != broadcasted.end()) {
+        nextIndex = index;
+      } else {
+        nextIndex = index / sizeAtDim;
+      }
+    } else {
+      sizeAtDim = THTensor_(size)(LIBRARY_STATE indexed, i);
+      indexAtDim = index % sizeAtDim;
+      nextIndex = index / sizeAtDim;
+    }
+
+    offset += indexAtDim * strideAtDim;
+    index = nextIndex;
+  }
+
+  // size at dim is a bad name, because its really the number of elements in the
+  // broadcast tensor, rather than the size of the indexed Tensor at that dim
+
+  return offset;
 }
 
 // Caller takes ownership of the returned IndexTensor
 static THIndexTensor* THPTensor_(_calculateLinearIndices)(
-    THTensorPtr& indexed, std::vector<THLongTensor *>& broadcasted) {
+    THTensorPtr& indexed,
+    Py_ssize_t sequenceLength,
+    std::unordered_map<Py_ssize_t, THLongTensorPtr>& broadcasted) {
 
-  // Get the number of indices to generate - this will be equal to the number
-  // of elements in each broadcasted Tensor
-  ptrdiff_t indexingElements = THLongTensor_nElement(broadcasted.at(0));
+  // Get the number of indices to generate - this is the product of the size at each dimension,
+  // that is not part of the advanced indexing, multiplied by the nElement of one of the broadcast
+  // Tensors. For example:
+  //
+  // x = torch.Tensor(10)
+  // x[[0, 2, 4], ] --> no dims not part of indexing, size = 3
+  //
+  // x = torch.Tensor(5, 5)
+  // x[[0, 3, 3], [1]] --> no dims not part of indexing, size = 3
+  // x[:, [2, 3]] --> dim_0 not part of indexing, size = 5
+  //              --> multiply by nElement of broadcast Tensor, nElement = 2
+  //              --> total_size = 10
+  //
+  // x = torch.Tensor(5, 5, 5)
+  // x[[0, 1], :, :] --> dim_1, dim_2 not part of indexing, size = 5 * 5 = 25
+  //                 --> multiply by nElement of broadcast Tensor, nElement = 2
+  //                 --> total_size = 50
+
+  // TODO: should this be 1? what if there are no things to index? ????
+  ptrdiff_t indexingElements = THLongTensor_nElement(broadcasted.begin()->second.get());
+  for (Py_ssize_t i = 0; i < THTensor_(nDimension)(LIBRARY_STATE indexed.get()); ++i) {
+    indexingElements *= broadcasted.find(i) != broadcasted.end() ?
+      1 : THTensor_(size)(LIBRARY_STATE indexed.get(), i);
+  }
   THLongTensor *linearIndices = THLongTensor_newWithSize1d(indexingElements);
+
+  // The broadcasted advanced indexing tensor might not be one-dimensional, but we are
+  // generating a vector of indices, so we need to view the indexer as 1D prior to getting
+  // the value for the particular dimension.
+  std::unordered_map<Py_ssize_t, THLongTensorPtr> flattenedBroadcasters;
   THLongStorage *indexerSize = THLongStorage_newWithSize(1);
-  THLongStorage_set(indexerSize, 0, indexingElements);
 
-  for (ptrdiff_t i = 0; i < indexingElements; ++i) {
-    long linearIdx = THTensor_(storageOffset)(LIBRARY_STATE indexed);
-    for (int j = broadcasted.size() - 1; j >= 0; --j) {
-      // Given a series of broadcasted Tensors, we take the jth tensor from the sequence (representing
-      // the indices at dim j) and grab the ith value (used in generating the ith output value)
-      THLongTensor *indexer = THLongTensor_newContiguous(broadcasted.at(j));
+  // All broadcast Tensors have the same number of elements
+  THLongStorage_set(indexerSize,
+                    0,
+                    THLongTensor_nElement(broadcasted.begin()->second.get()));
 
-      // The indexing tensor might not be one-dimensional, but we are generating a vector of
-      // indices, so we need to view the indexer as 1D prior to getting the value for the
-      // particular dimension
-      THLongTensor *oned = THLongTensor_newView(indexer, indexerSize);
-
-      // Actually laod the value, and verify it is not out-of-bounds
-      long indexAtDim = THLongTensor_get1d(oned, i);
-      long dimSize = THTensor_(size)(LIBRARY_STATE indexed, j);
-      if (indexAtDim >= dimSize) {
-        PyErr_Format(PyExc_IndexError, "index %lld from broadcast indexer is out of range "
-            "for dimension %lld (of size %lld)",
-            (long long)indexAtDim, (long long)j, (long long)dimSize);
-
-        THLongTensor_free(oned);
-        THLongTensor_free(indexer);
-        THLongStorage_free(indexerSize);
-        THLongTensor_free(linearIndices);
-        return NULL;
-      }
-
-      linearIdx += THTensor_(stride)(LIBRARY_STATE indexed, j) * THLongTensor_get1d(oned, i);
-      THLongTensor_free(oned);
-      THLongTensor_free(indexer);
-    }
-    THLongTensor_set1d(linearIndices, i, linearIdx);
+  for (auto& broadcast : broadcasted) {
+    THLongTensor *contig = THLongTensor_newContiguous(broadcast.second.get());
+    THLongTensorPtr flat(THLongTensor_newView(contig, indexerSize));
+    flattenedBroadcasters[broadcast.first] = std::move(flat);
+    THLongTensor_free(contig);
   }
   THLongStorage_free(indexerSize);
+
+  long baseOffset = THTensor_(storageOffset)(LIBRARY_STATE indexed);
+  for (ptrdiff_t i = 0; i < indexingElements; ++i) {
+    long linearIdx = THPTensor_(_indexToOffset)(
+        indexed, flattenedBroadcasters, i);
+    THTensor_fastSet1d(linearIndices, i, baseOffset + linearIdx);
+  }
 
   // Need to copy to appropriate type, for example, if we calculated the
   // indices on the CPU but need to use them on the GPU
@@ -686,7 +931,7 @@ static THIndexTensor* THPTensor_(_calculateLinearIndices)(
 static bool THPTensor_(_advancedIndexCommonInit)(
     PyObject *index,
     THTensorPtr &indexed,
-    std::vector<THLongTensor*>& broadcasted,
+    std::unordered_map<Py_ssize_t, THLongTensorPtr>& broadcasted,
     THIndexTensor **linearIndices,
     THTensor **flattened) {
 
@@ -699,7 +944,9 @@ static bool THPTensor_(_advancedIndexCommonInit)(
 
   // First attempt to convert to Tensor indexers from the arbitrary
   // python/tensor objects passed
-  if (!THPTensor_(_convertToTensorIndexers)(index, broadcasted)) {
+
+  Py_ssize_t sequenceLength;
+  if (!THPTensor_(_convertToTensorIndexers)(index, indexed, sequenceLength, broadcasted)) {
     return false;
   }
 
@@ -707,10 +954,7 @@ static bool THPTensor_(_advancedIndexCommonInit)(
   // Our strategy is to view the indexed Tensor as a 1D Tensor, calculate
   // the linear indices for each tuple of indexing elements, and then call
   // indexSelect using those linear indices
-  *linearIndices = THPTensor_(_calculateLinearIndices)(indexed, broadcasted);
-  if (*linearIndices == NULL) {
-    return false;
-  }
+  *linearIndices = THPTensor_(_calculateLinearIndices)(indexed, sequenceLength, broadcasted);
 
   *flattened = THTensor_(newWithStorage1d)(LIBRARY_STATE
                                            THTensor_(storage)(LIBRARY_STATE indexed.get()),
@@ -725,21 +969,15 @@ static bool THPTensor_(_advancedIndexCommonInit)(
 // Should called, written in such a way that if any of the parameters are not
 // initialized we still don't crash
 static void THPTensor_(_advancedIndexCommonCleanup)(
-    std::vector<THLongTensor*>& broadcasted,
     THIndexTensor *linearIndices,
     THTensor *flattened) {
-
-  // Cleanup all TH memory
-  for (const auto& bTensor : broadcasted) {
-    THLongTensor_free(bTensor);
-  }
   if (linearIndices) THIndexTensor_(free)(LIBRARY_STATE linearIndices);
   if (flattened) THTensor_(free)(LIBRARY_STATE flattened);
 }
 
 static bool THPTensor_(_advancedIndexGet)(PyObject *index, THTensorPtr &tresult)
 {
-  std::vector<THLongTensor*> broadcasted;
+  std::unordered_map<Py_ssize_t, THLongTensorPtr> broadcasted;
   THIndexTensor *linearIndices = NULL;
   THTensor *flattened = NULL;
   bool success = THPTensor_(_advancedIndexCommonInit)(
@@ -748,32 +986,96 @@ static bool THPTensor_(_advancedIndexGet)(PyObject *index, THTensorPtr &tresult)
   if (success) {
     THTensor *result = THTensor_(new)(LIBRARY_STATE_NOARGS);
 
-    // Index Select makes a copy of the storage, thus it is enforcing NumPy semantics, which says that the
-    // array returned by advanced indexing is a copy, not a view
+    // Index Select makes a copy of the storage, thus it is enforcing NumPy semantics, which
+    // says that the array returned by advanced indexing is a copy, not a view
     THTensor_(indexSelect)(LIBRARY_STATE result, flattened, 0, linearIndices);
 
-    // In the event that the indexing Tensors are not vectors, we need to reshape
-    // the result to be the appropriate shape. Note that we do not use the strides
-    // of a broadcast Tensor, as they may have been mucked with to support the
-    // broadcast semantics
-    THTensor_(resizeNd)(LIBRARY_STATE result,
-                        THLongTensor_nDimension(broadcasted.at(0)),
-                        broadcasted.at(0)->size,
-                        NULL);
+    // Finally, we need to calculate the appropriate shape of the output Tensor
+    // The size at each dimension is unmodified from the input Tensor, except where
+    // there are advanced indexers. In this case, the n dimensions containing adjacent
+    // advanced indexers are reshaped to be the size of the broadcast indexer.
+    //
+    // Example, x = torch.Tensor(5, 10, 15)
+    //
+    // x[[0, 2, 4], [2, 3, 4], [1, 1, 2]]
+    //
+    // Broadcast Advanced Indexer Size: 1D Tensor of Size 3
+    // Result Size: 1D Tensor of Size 3
+    //
+    // x[:, [2, 4, 5], :]
+    // Broadcast Advanced Indexer Size: 1D Tensor of Size 3
+    // Result Size: (5, 3, 15)
+    //
+    // x[:, [[0, 0], [1, 2]], [[1, 3], [2, 4]]]
+    // Broadcast Advanced Indexer Size: 2D Tensor (2, 2)
+    // Result Size: (5, 2, 2)
+    //
+    // x[:, [[1, 2, 3], [2, 3, 4]], :]
+    // Broadcast Advanced Indexer Size: 2D Tensor of Size (2, 3)
+    // Result Size: (5, 2, 3, 15)
+
+    // First, calculate the number of dimensions of the output shape. This is the
+    // number of non-advanced indexed dimensions + the number of dimensions in the
+    // broadcast Tensor
+    int baseDims = THTensor_(nDimension)(LIBRARY_STATE tresult.get()) - broadcasted.size();
+
+    // Fast path, if we have ndim advanced indexers, the output shape is simply the
+    // broadcast shape
+    if (baseDims == 0) {
+      auto iter = broadcasted.begin();
+      THTensor_(resizeNd)(LIBRARY_STATE result,
+                          THLongTensor_nDimension(iter->second.get()),
+                          iter->second.get()->size,
+                          NULL);
+    } else {
+      // We have at least one dimension that is not part of advanced indexing. This
+      // implementation is pretty much shit, there might be a better way of doing this...
+      THLongTensor *broadcastShape = broadcasted.begin()->second.get();
+
+      int indexedDims = THLongTensor_nDimension(broadcastShape);
+      THLongStorage *outputShape = THLongStorage_newWithSize(baseDims + indexedDims);
+
+      int baseDimPtr = 0;
+      int outputDimPtr = 0;
+      bool insertedSubspace = false;
+      while (outputDimPtr != baseDims + indexedDims) {
+        auto iter = broadcasted.find(baseDimPtr);
+        if (iter == broadcasted.end()) {
+          outputShape->data[outputDimPtr] = THTensor_(size)(LIBRARY_STATE tresult.get(), baseDimPtr);
+          ++baseDimPtr;
+          ++outputDimPtr;
+        } else if (!insertedSubspace) {
+          for (int dim = 0; dim < indexedDims; ++dim) {
+            outputShape->data[outputDimPtr] = THLongTensor_size(iter->second.get(), dim);
+            ++outputDimPtr;
+          }
+          insertedSubspace = true;
+        } else {
+          // ignore
+          ++baseDimPtr;
+        }
+      }
+
+      THTensor_(resizeNd)(LIBRARY_STATE result,
+                          baseDims + indexedDims,
+                          outputShape->data,
+                          NULL);
+
+      THLongStorage_free(outputShape);
+    }
 
     // result ptr takes ownership of result tensor, and implicitly frees the
     // indexed one
     tresult = result;
   }
 
-  THPTensor_(_advancedIndexCommonCleanup)(broadcasted, linearIndices, flattened);
+  THPTensor_(_advancedIndexCommonCleanup)(linearIndices, flattened);
   return success;
 }
 
 static bool THPTensor_(_advancedIndexSet)(PyObject *index, THTensorPtr &dest, PyObject *src)
 {
-
-  std::vector<THLongTensor*> broadcasted;
+  std::unordered_map<Py_ssize_t, THLongTensorPtr> broadcasted;
   THIndexTensor *linearIndices = NULL;
   THTensor *flattened = NULL;
   bool success = THPTensor_(_advancedIndexCommonInit)(
@@ -807,12 +1109,12 @@ static bool THPTensor_(_advancedIndexSet)(PyObject *index, THTensorPtr &dest, Py
     }
   }
 
-  THPTensor_(_advancedIndexCommonCleanup)(broadcasted, linearIndices, flattened);
+  THPTensor_(_advancedIndexCommonCleanup)(linearIndices, flattened);
   return success;
 }
 
 static bool THPTensor_(_advancedIndexAdd)(PyObject *index, THTensorPtr &dest, THTensorPtr &src) {
-  std::vector<THLongTensor*> broadcasted;
+  std::unordered_map<Py_ssize_t, THLongTensorPtr> broadcasted;
   THIndexTensor *linearIndices = NULL;
   THTensor *flattened = NULL;
   bool success = THPTensor_(_advancedIndexCommonInit)(
@@ -832,12 +1134,12 @@ static bool THPTensor_(_advancedIndexAdd)(PyObject *index, THTensorPtr &dest, TH
     THTensor_(free)(LIBRARY_STATE cviewed);
   }
 
-  THPTensor_(_advancedIndexCommonCleanup)(broadcasted, linearIndices, flattened);
+  THPTensor_(_advancedIndexCommonCleanup)(linearIndices, flattened);
   return success;
 }
 
 static bool THPTensor_(_advancedIndexSelect)(PyObject *index, THTensorPtr &dest, THTensorPtr &src) {
-  std::vector<THLongTensor*> broadcasted;
+  std::unordered_map<Py_ssize_t, THLongTensorPtr> broadcasted;
   THIndexTensor *linearIndices = NULL;
   THTensor *flattened = NULL;
   bool success = THPTensor_(_advancedIndexCommonInit)(
@@ -857,7 +1159,7 @@ static bool THPTensor_(_advancedIndexSelect)(PyObject *index, THTensorPtr &dest,
     THTensor_(free)(LIBRARY_STATE cviewed);
   }
 
-  THPTensor_(_advancedIndexCommonCleanup)(broadcasted, linearIndices, flattened);
+  THPTensor_(_advancedIndexCommonCleanup)(linearIndices, flattened);
   return success;
 }
 

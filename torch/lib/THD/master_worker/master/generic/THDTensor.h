@@ -160,6 +160,7 @@ THD_API real THDTensor_(get4d)(const THDTensor *tensor, long x0, long x1,
 THD_API accreal THDTensor_(dot)(THDTensor *self, THDTensor *src);
 THD_API real THDTensor_(minall)(THDTensor *self);
 THD_API real THDTensor_(maxall)(THDTensor *self);
+THD_API real THDTensor_(medianall)(THDTensor *self);
 THD_API accreal THDTensor_(sumall)(THDTensor *self);
 THD_API accreal THDTensor_(prodall)(THDTensor *self);
 THD_API void THDTensor_(neg)(THDTensor *self, THDTensor *src);

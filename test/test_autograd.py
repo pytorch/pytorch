@@ -5,6 +5,7 @@ import math
 import torch
 import unittest
 import warnings
+import random
 from copy import deepcopy
 from collections import OrderedDict
 from itertools import product
@@ -15,7 +16,7 @@ from torch.autograd import gradcheck
 from torch.autograd.gradcheck import gradgradcheck
 from torch.autograd.function import once_differentiable
 
-from common import TestCase, run_tests, skipIfNoLapack
+from common import TestCase, run_tests, skipIfNoLapack, parse_set_seed_once
 from torch.autograd._functions import *
 from torch.autograd import Variable, Function
 
@@ -25,6 +26,8 @@ else:
     import pickle
 
 PRECISION = 1e-4
+
+parse_set_seed_once()
 
 
 @contextlib.contextmanager
@@ -518,7 +521,7 @@ class TestAutograd(TestCase):
         x = torch.arange(1, 17).view(4, 4)
         y = Variable(x, requires_grad=True)
 
-        def check_index(idx):
+        def check_index(x, y, idx):
             if y.grad is not None:
                 y.grad.data.zero_()
             indexed_tensor = x[idx]
@@ -530,25 +533,42 @@ class TestAutograd(TestCase):
             self.assertEqual(indexed_tensor, indexed_var_t)
 
             indexed_var.sum().backward()
-            expected_grad = torch.zeros(4, 4)
+            expected_grad = torch.Tensor(x.size()).fill_(0)
             expected_grad[idx] = 1
             self.assertEqual(y.grad.data, expected_grad)
 
-        check_index(1)
-        check_index((1, 1))
-        check_index(slice(1, None))
-        check_index(slice(None, 2))
-        check_index((slice(None, 2), 2))
-        check_index((slice(1, 2), 2))
-        check_index((1, slice(2, None)))
-        check_index((slice(None, None), slice(2, None)))
-        check_index(torch.LongTensor([0, 2]))
-        check_index(torch.rand(4, 4).bernoulli().byte())
-        check_index((Ellipsis, slice(2, None)))
-        check_index(([0], [0]))
-        check_index(([1, 2, 3], [0]))
-        check_index(([1, 2], [2, 1]))
-        check_index(([[1, 2], [3, 0]], [[0, 1], [2, 3]]))
+        check_index(x, y, 1)
+        check_index(x, y, (1, 1))
+        check_index(x, y, slice(1, None))
+        check_index(x, y, slice(None, 2))
+        check_index(x, y, (slice(None, 2), 2))
+        check_index(x, y, (slice(1, 2), 2))
+        check_index(x, y, (1, slice(2, None)))
+        check_index(x, y, (slice(None, None), slice(2, None)))
+        check_index(x, y, torch.LongTensor([0, 2]))
+        check_index(x, y, torch.rand(4, 4).bernoulli().byte())
+        check_index(x, y, (Ellipsis, slice(2, None)))
+        check_index(x, y, ([0], [0]))
+        check_index(x, y, ([1, 2, 3], [0]))
+        check_index(x, y, ([1, 2], [2, 1]))
+        check_index(x, y, ([[1, 2], [3, 0]], [[0, 1], [2, 3]]))
+        check_index(x, y, ([slice(None), [2, 3]]))
+        check_index(x, y, ([[2, 3], slice(None)]))
+
+        x = torch.arange(1, 49).view(4, 3, 4)
+        y = Variable(x, requires_grad=True)
+
+        check_index(x, y, (slice(None), [0], [0]))
+        check_index(x, y, ([0], [0], slice(None)))
+        check_index(x, y, (slice(None), [0, 1, 2], [0]))
+        check_index(x, y, ([0, 1, 2], [0], slice(None)))
+        check_index(x, y, (slice(None), [1, 2], [2, 1]))
+        check_index(x, y, ([1, 2], [2, 1], slice(None)))
+        check_index(x, y, (slice(None), [[1, 2], [2, 0]], [[0, 1], [2, 3]]))
+        check_index(x, y, ([[1, 2], [3, 0]], [[0, 1], [2, 2]], slice(None)))
+        check_index(x, y, (slice(None), slice(None), [2, 1]))
+        check_index(x, y, (slice(None), [2, 1], slice(None)))
+        check_index(x, y, ([2, 1], slice(None), slice(None)))
 
     def test_indexing_duplicates(self):
         x = torch.arange(1, 17).view(4, 4)
@@ -582,6 +602,15 @@ class TestAutograd(TestCase):
                                       [1, 0, 0, 0],
                                       [0, 1, 0, 0],
                                       [0, 0, 0, 0]])
+        self.assertEqual(y.grad.data, expected_grad)
+
+        x = torch.arange(1, 65).view(4, 4, 4)
+        y = Variable(x, requires_grad=True)
+
+        idx = [[1, 1, 1], slice(None), slice(None)]
+        y[idx].sum().backward()
+        expected_grad = torch.Tensor(4, 4, 4).zero_()
+        expected_grad[1].fill_(3)
         self.assertEqual(y.grad.data, expected_grad)
 
     def test_basic_op_grad_fallback(self):
@@ -825,10 +854,20 @@ class TestAutograd(TestCase):
         self._test_setitem((1,), 0)
         self._test_setitem((10,), [[0, 4, 2]])
         self._test_setitem((5, 5), [[0, 4], [2, 2]])
+        self._test_setitem((5, 5, 5), [slice(None), slice(None), [1, 3]])
+        self._test_setitem((5, 5, 5), [slice(None), [1, 3], slice(None)])
+        self._test_setitem((5, 5, 5), [[1, 3], slice(None), slice(None)])
+        self._test_setitem((5, 5, 5), [slice(None), [2, 4], [1, 3]])
+        self._test_setitem((5, 5, 5), [[1, 3], [2, 4], slice(None)])
         self._test_setitem_tensor((5, 5), 3)
         self._test_setitem_tensor((5, 5), [[0, 1], [1, 0]])
         self._test_setitem_tensor((5,), 3)
         self._test_setitem_tensor((5,), [[0, 1, 2, 3]])
+        self._test_setitem_tensor((5, 5, 5), [slice(None), slice(None), [1, 3]])
+        self._test_setitem_tensor((5, 5, 5), [slice(None), [1, 3], slice(None)])
+        self._test_setitem_tensor((5, 5, 5), [[1, 3], slice(None), slice(None)])
+        self._test_setitem_tensor((5, 5, 5), [slice(None), [2, 4], [1, 3]])
+        self._test_setitem_tensor((5, 5, 5), [[1, 3], [2, 4], slice(None)])
 
     def test_setitem_mask(self):
         mask = torch.ByteTensor(5, 5).bernoulli_()
@@ -1397,6 +1436,10 @@ function_tests = [
     (Index, (), (torch.rand(S, S, S), dont_convert([slice(0, 3), 1])), 'slice_index'),
     (Index, (), (torch.rand(S, S, S), dont_convert([[0, 2, 3], [1, 3, 3], [0, 0, 2]])), 'adv_index'),
     (Index, (), (torch.rand(S, S, S), dont_convert([[0, 0, 3], [1, 1, 3], [0, 0, 2]])), 'adv_index_dup'),
+    (Index, (), (torch.rand(S, S, S), dont_convert([slice(None), slice(None), [0, 3]])), 'adv_index_end'),
+    (Index, (), (torch.rand(S, S, S), dont_convert([slice(None), [0, 3], slice(None)])), 'adv_index_mid'),
+    (Index, (), (torch.rand(S, S, S), dont_convert([[0, 3], slice(None), slice(None)])), 'adv_index_beg'),
+    (Index, (), (torch.rand(S, S, S), dont_convert([[0, 3], [1, 2], slice(None)])), 'adv_index_comb'),
     (View, (), (torch.rand(S, S, S), torch.Size([S * S, S]))),
     (Expand, (), ((1, S, 1, S, 1), torch.Size([5, S, 5, S, 5]))),
     (Expand, (), ((S, 1), torch.Size([S, S, S])), 'new_dim'),
@@ -1435,20 +1478,20 @@ function_tests = [
     (Ceil, (), ((S, S, S),)),
     (Frac, (), ((S, S, S),)),
     (Fmod, (), ((S, S, S), 1.5)),
-    (Fmod, (), ((S, S, S), Variable(torch.rand(S, S, S) + 5e-2, requires_grad=False)), 'tensor'),
-    (Fmod, (), ((S, S, S), Variable(torch.rand(S) + 5e-2, requires_grad=False)), 'tensor_broadcast_rhs'),
-    (Fmod, (), ((S,), Variable(torch.rand(S, S, S) + 5e-2, requires_grad=False)), 'tensor_broadcast_lhs'),
-    (Fmod, (), ((S, 1, S), Variable(torch.rand(S, S) + 5e-2, requires_grad=False)), 'tensor_broadcast_all'),
+    (Fmod, (), ((S, S, S), Variable(torch.rand(S, S, S) + 1.5, requires_grad=False)), 'tensor'),
+    (Fmod, (), ((S, S, S), Variable(torch.rand(S) + 1.5, requires_grad=False)), 'tensor_broadcast_rhs'),
+    (Fmod, (), ((S,), Variable(torch.rand(S, S, S) + 1.5, requires_grad=False)), 'tensor_broadcast_lhs'),
+    (Fmod, (), ((S, 1, S), Variable(torch.rand(S, S) + 1.5, requires_grad=False)), 'tensor_broadcast_all'),
     (Lerp, (), ((S, S, S), (S, S, S), 0.2)),
     (Lerp, (), ((S, S, S), (S,), 0.2), 'broadcast_rhs'),
     (Lerp, (), ((S,), (S, S, S), 0.2), 'broadcast_lhs'),
     (Lerp, (), ((S, 1, S), (S, S), 0.2), 'broadcast_all'),
     (Rsqrt, (), (torch.rand(S, S, S) + 1e-2,)),
     (Remainder, (), ((S, S, S), 1.5)),
-    (Remainder, (), ((S, S, S), Variable(torch.rand(S, S, S) + 5e-2, requires_grad=False)), 'tensor'),
-    (Remainder, (), ((S, S, S), Variable(torch.rand(S) + 5e-2, requires_grad=False)), 'tensor_broadcast_rhs'),
-    (Remainder, (), ((S,), Variable(torch.rand(S, S, S) + 5e-2, requires_grad=False)), 'tensor_broadcast_lhs'),
-    (Remainder, (), ((S, 1, S), Variable(torch.rand(S, S) + 5e-2, requires_grad=False)), 'tensor_broadcast_all'),
+    (Remainder, (), ((S, S, S), Variable(torch.rand(S, S, S) + 1.5, requires_grad=False)), 'tensor'),
+    (Remainder, (), ((S, S, S), Variable(torch.rand(S) + 1.5, requires_grad=False)), 'tensor_broadcast_rhs'),
+    (Remainder, (), ((S,), Variable(torch.rand(S, S, S) + 1.5, requires_grad=False)), 'tensor_broadcast_lhs'),
+    (Remainder, (), ((S, 1, S), Variable(torch.rand(S, S) + 1.5, requires_grad=False)), 'tensor_broadcast_all'),
     (CmaxConstant, (), ((S, S, S), 0.5)),
     (CminConstant, (), ((S, S, S), 0.5)),
     (Mean, (), ((S, S, S),)),
@@ -1502,9 +1545,12 @@ function_tests = [
     (Cumsum, (), ((S, S, S), 0), 'dim0', [1]),
     (Cumsum, (), ((S, S, S), 1), 'dim1', [1]),
     (Cumsum, (), ((S,), 0), '1d', [1]),
-    (Cumprod, (0,), ((S, S, S),)),
-    (Cumprod, (1,), ((S, S, S),), 'dim1'),
-    (Cumprod, (0,), ((S,),), '1d'),
+    (Cumprod, (), ((S, S, S), 0),),
+    (Cumprod, (), ((S, S, S), 1), 'dim1'),
+    (Cumprod, (), ((S,), 0), '1d'),
+    (Cumprod, (), (prod_zeros(S, [0, 1]), 1), 'zeros_dim2', [1]),
+    (Cumprod, (), (prod_zeros(S, [0, 2]), 1), 'zeros_dim1', [1]),
+    (Cumprod, (), (prod_zeros(S, [1, 2]), 1), 'zeros_dim0', [1]),
     (Unfold, (), ((S, S, S), 1, 3, 1)),
     (Unfold, (), ((S, S, S), 2, 3, 2), 'lastdim'),
     (Min, (), ((S, S, S),),),
@@ -1531,13 +1577,13 @@ function_tests = [
     (Median, (), ((S, S, S), 0, True), "keepdim"),
     (Median, (), ((S,), 0), 'dim0_1d'),
     (Median, (), ((S,), 0, True), "keepdim_1d"),
-    (Norm, (), (torch.rand(S, S, S), 1.5), '1_5'),
+    (Norm, (), (torch.rand(S, S, S) + 5e-2, 1.5), '1_5'),
     (Norm, (), ((S, S, S),), '2'),
     (Norm, (), ((S, S, S), 3), '3'),
-    (Norm, (), (torch.rand(S, S, S), 1.5, 1), '1_5_dim', [2]),
+    (Norm, (), (torch.rand(S, S, S) + 5e-2, 1.5, 1), '1_5_dim', [2]),
     (Norm, (), ((S, S, S), 2, 1), '2_dim', [2]),
     (Norm, (), ((S, S, S), 3, 1), '3_dim', [2]),
-    (Norm, (), (torch.rand(S, S, S), 1.5, 1, True), 'keepdim_1_5_dim', [2]),
+    (Norm, (), (torch.rand(S, S, S) + 5e-2, 1.5, 1, True), 'keepdim_1_5_dim', [2]),
     (Norm, (), ((S, S, S), 2, 1, True), 'keepdim_2_dim', [2]),
     (Norm, (), ((S, S, S), 3, 1, True), 'keepdim_3_dim', [2]),
     (Norm, (), ((S,), 2, 0), '2_dim_1d', [2]),
@@ -1671,13 +1717,13 @@ method_tests = [
     ('ceil', (S, S, S), ()),
     ('rsqrt', (S, S, S), ()),
     ('fmod', (S, S, S), (1.5,)),
-    ('fmod', (S, S, S), (Variable(torch.rand(S, S, S) + 5e-2, requires_grad=False),), 'tensor'),
-    ('fmod', (S,), (Variable(torch.rand(S, S, S) + 5e-2, requires_grad=False),), 'tensor_broadcast_lhs'),
-    ('fmod', (S, 1, S), (Variable(torch.rand(S, S) + 5e-2, requires_grad=False),), 'tensor_broacast_all'),
+    ('fmod', (S, S, S), (Variable(torch.rand(S, S, S) + 1.5, requires_grad=False),), 'tensor'),
+    ('fmod', (S,), (Variable(torch.rand(S, S, S) + 1.5, requires_grad=False),), 'tensor_broadcast_lhs'),
+    ('fmod', (S, 1, S), (Variable(torch.rand(S, S) + 1.5, requires_grad=False),), 'tensor_broacast_all'),
     ('remainder', (S, S, S), (1.5,)),
-    ('remainder', (S, S, S), (Variable(torch.rand(S, S, S) + 5e-2, requires_grad=False),), 'tensor'),
-    ('remainder', (S,), (Variable(torch.rand(S, S, S) + 5e-2, requires_grad=False),), 'tensor_broadcast_lhs'),
-    ('remainder', (S, 1, S), (Variable(torch.rand(S, S) + 5e-2, requires_grad=False),), 'tensor_broacast_all'),
+    ('remainder', (S, S, S), (Variable(torch.rand(S, S, S) + 1.5, requires_grad=False),), 'tensor'),
+    ('remainder', (S,), (Variable(torch.rand(S, S, S) + 1.5, requires_grad=False),), 'tensor_broadcast_lhs'),
+    ('remainder', (S, 1, S), (Variable(torch.rand(S, S) + 1.5, requires_grad=False),), 'tensor_broacast_all'),
     ('lerp', (S, S, S), ((S, S, S), 0.4)),
     ('lerp', (S, S, S), ((S,), 0.4), 'broadcast_rhs'),
     ('lerp', (S,), ((S, S, S), 0.4), 'broadcast_lhs'),
@@ -1745,8 +1791,8 @@ method_tests = [
     ('repeat', (S, S, S, S), (2, 3, 1, 4)),
     ('cumsum', (S, S, S), (1,)),
     ('cumsum', (S,), (0,), '1d'),
-    ('cumprod', (S, S, S), (1,)),
-    ('cumprod', (S,), (0,), '1d'),
+    ('cumprod', (S, S, S), (1,), 'dim1', [0]),
+    ('cumprod', prod_zeros(S, [0, 1]), (1,), 'zeros_dim', [0]),
     ('unfold', (S, S, S, S), (1, 3, 1)),
     ('unfold', (S, S, S), (2, 3, 2), 'lastdim'),
     ('addmm', (S, M), ((S, S), (S, M)),),
@@ -1875,20 +1921,50 @@ method_tests = [
 # TODO: clamp with min/max
 
 
-def create_input(call_args, requires_grad=True):
+def make_non_contiguous(tensor):
+    osize = list(tensor.size())
+
+    # randomly inflate a few dimensions in osize
+    for _ in range(2):
+        dim = random.randint(0, len(osize) - 1)
+        add = random.randint(4, 15)
+        osize[dim] = osize[dim] + add
+
+    # narrow doesn't make a non-contiguous tensor if we only narrow the 0-th dimension,
+    # (which will always happen with a 1-dimensional tensor), so let's make a new
+    # right-most dimension and cut it off
+
+    input = tensor.new(torch.Size(osize + [random.randint(2, 3)]))
+    input = input.select(len(input.size()) - 1, random.randint(0, 1))
+    # now extract the input of correct size from 'input'
+    for i in range(len(osize)):
+        if input.size(i) != tensor.size(i):
+            bounds = random.randint(1, input.size(i) - tensor.size(i))
+            input = input.narrow(i, bounds, tensor.size(i))
+
+    input.copy_(tensor)
+    return input
+
+
+def create_input(call_args, requires_grad=True, non_contiguous=False):
     if not isinstance(call_args, tuple):
         call_args = (call_args,)
 
     def map_arg(arg):
+        def maybe_non_contig(tensor):
+            return tensor if not non_contiguous else make_non_contiguous(tensor)
+
         if isinstance(arg, torch.Size) or isinstance(arg, dont_convert):
             return arg
         elif isinstance(arg, tuple) and not isinstance(arg[0], Variable):
-            return Variable(torch.randn(*arg).double(), requires_grad=requires_grad)
+            return Variable(maybe_non_contig(torch.randn(*arg).double()), requires_grad=requires_grad)
         elif torch.is_tensor(arg):
             if isinstance(arg, torch.FloatTensor):
-                return Variable(arg.double(), requires_grad=requires_grad)
+                return Variable(maybe_non_contig(arg.double()), requires_grad=requires_grad)
             else:
-                return Variable(arg, requires_grad=requires_grad)
+                return Variable(maybe_non_contig(arg), requires_grad=requires_grad)
+        elif isinstance(arg, Variable) and non_contiguous:
+            return Variable(maybe_non_contig(arg.data), requires_grad=arg.requires_grad)
         else:
             return arg
     return tuple(map_arg(arg) for arg in call_args)
@@ -1903,16 +1979,29 @@ def unpack_variables(args):
         return args
 
 
+def generate_gradoutput(dummy_out, non_contiguous=False):
+    def maybe_non_contig(tensor):
+        return tensor if not non_contiguous else make_non_contiguous(tensor)
+
+    if isinstance(dummy_out, tuple):
+        grad_y = tuple(Variable(maybe_non_contig(torch.randn(x.size())), requires_grad=x.requires_grad)
+                       for x in dummy_out if isinstance(x, Variable))
+    else:
+        grad_y = (Variable(maybe_non_contig(torch.randn(dummy_out.size())), requires_grad=dummy_out.requires_grad),)
+
+    return grad_y
+
 ignore_inplace = set((
     'test_DivConstantFunction_by_tensor',
 
 ))
 
-gradgradcheck_exclude_classes = set((
-    'Cumprod',
-    'Norm',
-    'Prod',
-))
+# these are just empirical observations, we should improve
+gradgradcheck_precision_override = {
+    'test_NormFunction_1_5': {'atol': 1.5e-2, 'rtol': 1e-2},
+    'test_NormFunction_2': {'atol': 2e-2, 'rtol': 1e-2},
+    'test_NormFunction_3': {'atol': 5e-2, 'rtol': 1e-2},
+}
 
 for test in function_tests:
     cls, constructor_args, call_args = test[:3]
@@ -1942,7 +2031,7 @@ for test in function_tests:
 
         def do_test(self, cls=cls, constructor_args=new_constructor_args,
                     call_args=new_call_args, test_name=test_name):
-            input = create_input(call_args)
+            input = create_input(call_args, non_contiguous="View" not in cls.__name__)
             if cls._is_legacy:
                 def apply_fn(*input):
                     return cls(*constructor_args)(*input)
@@ -1967,14 +2056,14 @@ for test in function_tests:
                         self.assertTrue(type(inp.data) == type(inp.grad.data))
                         self.assertTrue(inp.size() == inp.grad.size())
 
-            if cls.__name__ not in gradgradcheck_exclude_classes:
-                dummy_out = apply_fn(*input)
-                if isinstance(dummy_out, tuple):
-                    grad_y = tuple(Variable(torch.randn(x.size()), requires_grad=x.requires_grad)
-                                   for x in dummy_out if isinstance(x, Variable))
-                else:
-                    grad_y = (Variable(torch.randn(dummy_out.size()), requires_grad=dummy_out.requires_grad),)
+            dummy_out = apply_fn(*input)
+            grad_y = generate_gradoutput(dummy_out, non_contiguous=True)
 
+            if test_name in gradgradcheck_precision_override:
+                atol = gradgradcheck_precision_override[test_name]['atol']
+                rtol = gradgradcheck_precision_override[test_name]['rtol']
+                self.assertTrue(gradgradcheck(apply_fn, input, grad_y, atol=atol, rtol=rtol))
+            else:
                 self.assertTrue(gradgradcheck(apply_fn, input, grad_y,))
 
             # can't broadcast inplace to left hand side

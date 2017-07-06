@@ -5,7 +5,7 @@ Additionally, it provides many utilities for efficient serializing of
 Tensors and arbitrary types, and other useful utilities.
 
 It has a CUDA counterpart, that enables you to run your tensor computations
-on an NVIDIA GPU with compute capability >= 2.0.
+on an NVIDIA GPU with compute capability >= 3.0.
 """
 
 import sys
@@ -129,7 +129,7 @@ def manual_seed(seed):
     Args:
         seed (int or long): The desired seed.
     """
-    if torch.cuda.is_available():
+    if torch.cuda.is_available() and not torch.cuda._in_bad_fork:
         torch.cuda.manual_seed_all(seed)
 
     return default_generator.manual_seed(seed)
@@ -268,12 +268,12 @@ class ByteTensor(_C.ByteTensorBase, _TensorBase):
 
 _storage_classes = {
     DoubleStorage, FloatStorage, LongStorage, IntStorage, ShortStorage,
-    CharStorage, ByteStorage,
+    CharStorage, ByteStorage, HalfStorage
 }
 
 _tensor_classes = {
     DoubleTensor, FloatTensor, LongTensor, IntTensor, ShortTensor,
-    CharTensor, ByteTensor,
+    CharTensor, ByteTensor, HalfTensor
 }
 
 

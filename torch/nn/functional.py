@@ -7,6 +7,7 @@ import math
 import torch
 from . import _functions
 from .modules import utils
+from ._functions.linear import Bilinear
 from ._functions.padding import ConstantPad2d
 from ..autograd import _functions as _autograd_functions
 from torch.autograd import Variable
@@ -405,7 +406,7 @@ def adaptive_avg_pool2d(input, output_size):
 # Activation functions
 
 def dropout(input, p=0.5, training=False, inplace=False):
-    return _functions.dropout.Dropout(p, training, inplace)(input)
+    return _functions.dropout.Dropout.apply(input, p, training, inplace)
 
 
 def alpha_dropout(input, p=0.5, training=False):
@@ -532,18 +533,21 @@ def sigmoid(input):
 # etc.
 
 def linear(input, weight, bias=None):
-    if bias is None:
-        return _functions.linear.Linear.apply(input, weight)
-    else:
-        return _functions.linear.Linear.apply(input, weight, bias)
+    if input.dim() == 2 and bias is not None:
+        # fused op is marginally faster
+        return torch.addmm(bias, input, weight.t())
+
+    output = input.matmul(weight.t())
+    if bias is not None:
+        output += bias
+    return output
 
 
 def bilinear(input1, input2, weight, bias=None):
-    state = _functions.linear.Bilinear()
     if bias is None:
-        return state(input1, input2, weight)
+        return Bilinear.apply(input1, input2, weight)
     else:
-        return state(input1, input2, weight, bias)
+        return Bilinear.apply(input1, input2, weight, bias)
 
 
 def batch_norm(input, running_mean, running_var, weight=None, bias=None,
@@ -554,7 +558,7 @@ def batch_norm(input, running_mean, running_var, weight=None, bias=None,
 
 # loss
 
-def nll_loss(input, target, weight=None, size_average=True):
+def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100):
     r"""The negative log likelihood loss.
 
     See :class:`~torch.nn.NLLLoss` for details.
@@ -563,14 +567,13 @@ def nll_loss(input, target, weight=None, size_average=True):
         input: :math:`(N, C)` where `C = number of classes` or `(N, C, H, W)` in case of 2D - Loss
         target: :math:`(N)` where each value is `0 <= targets[i] <= C-1`
         weight (Variable, optional): a manual rescaling weight given to each
-                class. If given, has to be a Variable of size "nclasses"
+            class. If given, has to be a Variable of size "nclasses"
         size_average (bool, optional): By default, the losses are averaged
-                over observations for each minibatch. However, if the field
-                sizeAverage is set to False, the losses are instead summed
-                for each minibatch.
-
-    Attributes:
-        weight: the class-weights given as input to the constructor
+            over observations for each minibatch. If size_average
+            is False, the losses are summed for each minibatch.
+        ignore_index (int, optional): Specifies a target value that is ignored
+            and does not contribute to the input gradient. When size_average is
+            True, the loss is averaged over non-ignored targets.
 
     Example:
         >>> # input is of size nBatch x nClasses = 3 x 5
@@ -582,8 +585,10 @@ def nll_loss(input, target, weight=None, size_average=True):
     """
     dim = input.dim()
     if dim == 2:
-        f = _functions.thnn.NLLLoss(size_average, -100, weight=weight)
+        f = _functions.thnn.NLLLoss(size_average, ignore_index, weight=weight)
     elif dim == 4:
+        if ignore_index != -100:
+            raise ValueError('ignore_index is not supported for 4-D inputs')
         f = _functions.thnn.NLLLoss2d(size_average, weight=weight)
     else:
         raise ValueError('Expected 2 or 4 dimensions (got {})'.format(dim))
@@ -635,8 +640,8 @@ def kl_div(input, target, size_average=True):
     return _functions.thnn.KLDivLoss(size_average)(input, target)
 
 
-def cross_entropy(input, target, weight=None, size_average=True):
-    r"""This criterion combines `log_softmax` and `nll_loss` in one single class.
+def cross_entropy(input, target, weight=None, size_average=True, ignore_index=-100):
+    r"""This criterion combines `log_softmax` and `nll_loss` in a single function.
 
     See :class:`torch.nn.CrossEntropyLoss` for details.
 
@@ -650,7 +655,7 @@ def cross_entropy(input, target, weight=None, size_average=True):
                 sizeAverage is set to False, the losses are instead summed
                 for each minibatch.
     """
-    return nll_loss(log_softmax(input), target, weight, size_average)
+    return nll_loss(log_softmax(input), target, weight, size_average, ignore_index)
 
 
 def binary_cross_entropy(input, target, weight=None, size_average=True):
@@ -669,6 +674,10 @@ def binary_cross_entropy(input, target, weight=None, size_average=True):
                 sizeAverage is set to False, the losses are instead summed
                 for each minibatch.
     """
+    if not target.is_same_size(input):
+        warnings.warn("Using a target size ({}) that is different to the input size ({}) is deprecated. "
+                      "Please ensure they have the same size.".format(target.size(), input.size()))
+
     return _functions.thnn.BCELoss(size_average, weight=weight)(input, target)
 
 
@@ -687,8 +696,12 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=Tr
                 sizeAverage is set to False, the losses are instead summed
                 for each minibatch.
     """
+    if not target.is_same_size(input):
+        raise ValueError("Target size ({}) must be the same as input size ({})".format(target.size(), input.size()))
+
     if weight is not None and target.dim() != 1:
         weight = weight.view(1, target.size(1)).expand_as(target)
+
     neg_abs = - input.abs()
     loss = input.clamp(min=0) - input * target + (1 + neg_abs.exp()).log()
 
@@ -824,7 +837,7 @@ def pad(input, pad, mode='constant', value=0):
     if input.dim() == 4:
         assert len(pad) == 4, '4D tensors expect 4 values for padding'
         if mode == 'constant':
-            return ConstantPad2d(pad, value)(input)
+            return ConstantPad2d.apply(input, pad, value)
         elif mode == 'reflect':
             return _functions.thnn.ReflectionPad2d(*pad)(input)
         elif mode == 'replicate':

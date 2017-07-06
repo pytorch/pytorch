@@ -34,10 +34,15 @@ def replicate(network, devices):
 
     for i, module in enumerate(modules):
         for key, child in module._modules.items():
-            module_idx = module_indices[child]
-            for j in range(num_replicas):
-                replica = module_copies[j][i]
-                replica._modules[key] = module_copies[j][module_idx]
+            if child is None:
+                for j in range(num_replicas):
+                    replica = module_copies[j][i]
+                    replica._modules[key] = None
+            else:
+                module_idx = module_indices[child]
+                for j in range(num_replicas):
+                    replica = module_copies[j][i]
+                    replica._modules[key] = module_copies[j][module_idx]
         for key, param in module._parameters.items():
             if param is None:
                 for j in range(num_replicas):

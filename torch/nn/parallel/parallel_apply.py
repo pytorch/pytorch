@@ -3,6 +3,23 @@ import torch
 from torch.autograd import Variable
 
 
+def get_a_var(obj):
+    if isinstance(obj, Variable):
+        return obj
+
+    if isinstance(obj, list) or isinstance(obj, tuple):
+        results = map(get_a_var, obj)
+        for result in results:
+            if isinstance(result, Variable):
+                return result
+    if isinstance(obj, dict):
+        results = map(get_a_var, obj.items())
+        for result in results:
+            if isinstance(result, Variable):
+                return result
+    return None
+
+
 def parallel_apply(modules, inputs, kwargs_tup=None):
     assert len(modules) == len(inputs)
     if kwargs_tup:
@@ -17,9 +34,7 @@ def parallel_apply(modules, inputs, kwargs_tup=None):
     results = {}
 
     def _worker(i, module, input, kwargs, results, lock):
-        var_input = input
-        while not isinstance(var_input, Variable):
-            var_input = var_input[0]
+        var_input = get_a_var(input)
         try:
             with torch.cuda.device_of(var_input):
                 output = module(*input, **kwargs)
