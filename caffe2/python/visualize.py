@@ -85,7 +85,7 @@ class PatchVisualizer(object):
                 cmap = cm.gray
         image = np.ones(image_shape) * bg_func(patches)
         for pid in range(num_patches):
-            row = pid / ncols * patch_size_expand[0]
+            row = pid // ncols * patch_size_expand[0]
             col = pid % ncols * patch_size_expand[1]
             image[row:row+patches.shape[1], col:col+patches.shape[2]] = \
                 patches[pid]
