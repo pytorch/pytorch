@@ -872,6 +872,24 @@ void addGlobalMethods(py::module& m) {
     return true;
   });
   m.def(
+      "memonger_optimize_inference_net",
+      [](const py::bytes& net_def,
+         const std::vector<std::string> static_blobs) {
+        NetDef def;
+        CAFFE_ENFORCE(
+            ParseProtobufFromLargeString(net_def.cast<std::string>(), &def));
+        py::gil_scoped_release g;
+
+        std::set<string> static_blobs_set(
+            static_blobs.begin(), static_blobs.end());
+        NetDef optimized =
+            caffe2::memonger::optimize_inference_net(def, static_blobs_set);
+
+        std::string protob;
+        CAFFE_ENFORCE(optimized.SerializeToString(&protob));
+        return py::bytes(protob);
+      });
+  m.def(
       "infer_shapes_and_types_from_workspace",
       [](const std::vector<py::bytes>& net_protos) {
         CAFFE_ENFORCE(gWorkspace);

@@ -5,6 +5,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/init.h"
 #include "caffe2/core/logging.h"
+#include "caffe2/core/memonger.h"
 #include "caffe2/core/net.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/scope_guard.h"
