@@ -3,13 +3,27 @@ from __future__ import division
 from __future__ import print_function
 
 import numpy as np
+import tempfile
+import shutil
 import unittest
+from multiprocessing import Process, Queue
 from caffe2.proto import caffe2_pb2
-from caffe2.python import core, workspace, data_parallel_model, cnn, rnn_cell
-from caffe2.python import optimizer
+from caffe2.python import core, cnn, data_parallel_model, dyndep, optimizer, \
+    rnn_cell, workspace
 from caffe2.python.test_util import TestCase
 from future.utils import viewkeys
 
+
+dyndep.InitOpsLibrary("@/caffe2/caffe2/distributed:file_store_handler_ops")
+
+
+class TemporaryDirectory:
+    def __enter__(self):
+        self.tmpdir = tempfile.mkdtemp()
+        return self.tmpdir
+
+    def __exit__(self, type, value, traceback):
+        shutil.rmtree(self.tmpdir)
 
 
 class DataParallelModelTest(TestCase):
@@ -76,6 +90,42 @@ class DataParallelModelTest(TestCase):
 
             workspace.RunNet(model.net.Proto().name)
         return workspace.FetchBlob("{}_0/fc_w".format(model._device_prefix))
+
+    def run_test_locally(self, fn, device_option=None, **kwargs):
+        # Queue for assertion errors on subprocesses
+        queue = Queue()
+
+        # Capture any exception thrown by the subprocess
+        def run_fn(*args, **kwargs):
+            try:
+                with core.DeviceScope(device_option):
+                    fn(*args, **kwargs)
+                    workspace.ResetWorkspace()
+            except Exception as ex:
+                queue.put(ex)
+
+        # Start N processes in the background
+        procs = []
+        for i in range(kwargs['comm_size']):
+            kwargs['comm_rank'] = i
+            proc = Process(
+                target=run_fn,
+                kwargs=kwargs)
+            proc.start()
+            procs.append(proc)
+
+        # Test complete, join background processes
+        while len(procs) > 0:
+            proc = procs.pop(0)
+            while proc.is_alive():
+                proc.join(1)
+
+                # Raise exception if we find any.
+                # Note that the following is executed ALSO after
+                # the last process was joined, so if ANY exception
+                # was raised, it will be re-raised here.
+                if not queue.empty():
+                    raise queue.get()
 
     def test_equiv(self):
         '''
@@ -153,6 +203,56 @@ class DataParallelModelTest(TestCase):
             self.assertFalse(c in checkpoint_params)
         self.assertFalse(core.BlobReference("cpu_1/data") in checkpoint_params)
         self.assertTrue(core.BlobReference("optimizer_iteration") in checkpoint_params)
+
+    def test_synchronization_barrier(self):
+
+        def run(comm_rank, comm_size, tmpdir):
+            def add_input_ops(model):
+                pass
+
+            def add_model_ops(model, loss_scale):
+                return []
+
+            def add_optimizer(model):
+                pass
+
+            store_handler = "store_handler"
+            workspace.RunOperatorOnce(
+                core.CreateOperator(
+                    "FileStoreHandlerCreate",
+                    [],
+                    [store_handler],
+                    path=tmpdir))
+            rendezvous = dict(
+                kv_handler=store_handler,
+                shard_id=comm_rank,
+                num_shards=comm_size,
+                engine='GLOO',
+            )
+
+            model = cnn.CNNModelHelper(
+                order="NHWC",
+                name="test",
+            )
+            data_parallel_model.Parallelize_CPU(
+                model,
+                input_builder_fun=add_input_ops,
+                forward_pass_builder_fun=add_model_ops,
+                optimizer_builder_fun=add_optimizer,
+                devices=[1, 2, 3],
+                rendezvous=rendezvous
+            )
+            data_parallel_model.RunInitNet(model)
+
+            for _ in range(2):
+                data_parallel_model.Synchronize(model)
+
+        with TemporaryDirectory() as tmpdir:
+            self.run_test_locally(
+                run,
+                comm_size=2,
+                device_option=core.DeviceOption(caffe2_pb2.CPU),
+                tmpdir=tmpdir)
 
 
 @unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
