@@ -2442,14 +2442,14 @@ class TestNN(NNTestCase):
 
     def test_conv_double_backward(self):
         batch_size = 2
-        for kern, inp_size, dilations in [(3, 6, [1, 2]), (3, 7, [1, 2]), (4, 9, [1, 2]), (4, 10, [1, 2])]:
-            for stride, padding, chan_in, groups, chan_out, dilation in \
-                    product([1, 2], [0, 2], [2], [1, 2], [2, 3], dilations):
+        for kern, inp_size, dilations in [(3, 6, [1, 2]), (3, 7, [1]), (4, 9, [1]), (4, 10, [1, 2])]:
+            for stride, padding, chan_in, chan_out, dilation in \
+                    product([1, 2], [0, 2], [2], [2, 3], dilations):
                 no_weight = stride == 2
                 result = self.run_conv_double_back_test(kern, stride,
-                                                        padding, chan_in * groups, chan_out * groups,
+                                                        padding, chan_in, chan_out,
                                                         batch_size, inp_size, dilation,
-                                                        no_weight, groups=groups)
+                                                        no_weight)
                 self.assertTrue(result,
                                 "Conv double backward test failed with parameters:" +
                                 "\nkern: " + str(kern) +
@@ -2459,8 +2459,7 @@ class TestNN(NNTestCase):
                                 "\nchan_out: " + str(chan_out) +
                                 "\nbatch_size: " + str(batch_size) +
                                 "\ninp_size: " + str(inp_size) +
-                                "\ndilation: " + str(dilation) +
-                                "\ngroups: " + str(groups))
+                                "\ndilation: " + str(dilation))
 
     def test_conv_double_backward_no_bias(self):
         kern = 3
@@ -2487,12 +2486,38 @@ class TestNN(NNTestCase):
                         "\ninp_size: " + str(inp_size) +
                         "\ndilation: " + str(dilation))
 
+    def test_conv_double_backward_groups(self):
+        kern = 3
+        stride = 1
+        padding = 2
+        chan_in, chan_out = 2, 4
+        batch_size = 2
+        inp_size = 6
+        dilation = 1
+        no_weight = False
+        groups = 2
+        result = self.run_conv_double_back_test(kern, stride,
+                                                padding, chan_in * groups, chan_out * groups,
+                                                batch_size, inp_size, dilation,
+                                                no_weight, groups=groups)
+        self.assertTrue(result,
+                        "Conv double backward test failed with parameters:" +
+                        "\nkern: " + str(kern) +
+                        "\nstride: " + str(stride) +
+                        "\npadding: " + str(padding) +
+                        "\nchan_in: " + str(chan_in) +
+                        "\nchan_out: " + str(chan_out) +
+                        "\nbatch_size: " + str(batch_size) +
+                        "\ninp_size: " + str(inp_size) +
+                        "\ndilation: " + str(dilation) +
+                        "\ngroups: " + str(groups))
+
     def test_error_conv_double_backward(self):
         batch_size = 2
 
         # Cannot provide ggW when stride is > 1
-        for kern, inp_size, dilations in [(3, 5, [1, 2]), (3, 7, [1, 2]), (4, 6, [1]), (4, 7, [2])]:
-            for stride, padding, chan_in, chan_out, dilation in product([2], [0, 1, 2], [1, 3], [1, 3], dilations):
+        for kern, inp_size, dilations in [(3, 5, [1, 2]), (3, 7, [1])]:
+            for stride, padding, chan_in, chan_out, dilation in product([2], [0, 1], [1], [2], dilations):
                 no_weight = False
                 with self.assertRaises(RuntimeError):
                     self.run_conv_double_back_test(kern, stride,
