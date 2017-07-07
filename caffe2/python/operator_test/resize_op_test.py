@@ -11,16 +11,19 @@ from hypothesis import given
 
 
 class TestResize(hu.HypothesisTestCase):
-    @given(width_scale=st.floats(0.2, 4.0) | st.just(2.0),
-           height_scale=st.floats(0.2, 4.0) | st.just(2.0),
-           size_w=st.integers(16, 128),
-           size_h=st.integers(16, 128),
-           input_channels=st.integers(1, 4),
+    @given(height_scale=st.floats(0.25, 4.0) | st.just(2.0),
+           width_scale=st.floats(0.25, 4.0) | st.just(2.0),
+           height=st.integers(4, 32),
+           width=st.integers(4, 32),
+           num_channels=st.integers(1, 4),
            batch_size=st.integers(1, 4),
+           seed=st.integers(0, 65535),
            **hu.gcs)
-    def test_nearest(self, width_scale, height_scale, size_w, size_h,
-                     input_channels, batch_size,
+    def test_nearest(self, height_scale, width_scale, height, width,
+                     num_channels, batch_size, seed,
                      gc, dc):
+
+        np.random.seed(seed)
         op = core.CreateOperator(
             "ResizeNearest",
             ["X"],
@@ -28,31 +31,76 @@ class TestResize(hu.HypothesisTestCase):
             width_scale=width_scale,
             height_scale=height_scale,
         )
+
         X = np.random.rand(
-            batch_size, input_channels, size_h, size_w).astype(np.float32)
+            batch_size, num_channels, height, width).astype(np.float32)
 
-        """
-        This reference check is disabled because PIL's nearest neighbor
-        resizing works differently than torch's SpatialUpSamplingNearest,
-        which is the behavior we really care about matching
         def ref(X):
-            from scipy import misc
-            N = X.shape[0]
-            C = X.shape[1]
-            Y_h = int(size_h * height_scale)
-            Y_w = int(size_w * width_scale)
-            Y = np.zeros((N, C, Y_h, Y_w)).astype(np.float32)
-            for n in range(N):
-                for c in range(C):
-                    X_ = X[n][c]
-                    assert len(X_.shape) == 2
-                    Y_ = misc.imresize(X_, (Y_h, Y_w), 'nearest', 'F')
-                    Y[n][c] = Y_
-            return (Y,)
-        self.assertReferenceChecks(gc, op, [X], ref)
-        """
+            output_height = np.int32(height * height_scale)
+            output_width = np.int32(width * width_scale)
 
+            output_h_idxs, output_w_idxs = np.meshgrid(np.arange(output_height),
+                                                       np.arange(output_width),
+                                                       indexing='ij')
+
+            input_h_idxs = np.minimum(
+                output_h_idxs / height_scale, height - 1).astype(np.int32)
+            input_w_idxs = np.minimum(
+                output_w_idxs / width_scale, width - 1).astype(np.int32)
+
+            Y = X[:, :, input_h_idxs, input_w_idxs]
+
+            return Y,
+
+        self.assertReferenceChecks(gc, op, [X], ref)
         self.assertDeviceChecks(dc, op, [X], [0])
+        self.assertGradientChecks(gc, op, [X], 0, [0], stepsize=0.1, threshold=1e-2)
+
+    @given(height_scale=st.floats(0.25, 4.0) | st.just(2.0),
+           width_scale=st.floats(0.25, 4.0) | st.just(2.0),
+           height=st.integers(4, 32),
+           width=st.integers(4, 32),
+           num_channels=st.integers(1, 4),
+           batch_size=st.integers(1, 4),
+           seed=st.integers(0, 65535),
+           **hu.gcs)
+    def test_nearest_grad(self, height_scale, width_scale, height, width,
+                          num_channels, batch_size, seed, gc, dc):
+
+        np.random.seed(seed)
+
+        output_height = np.int32(height * height_scale)
+        output_width = np.int32(width * width_scale)
+        X = np.random.rand(batch_size,
+                           num_channels,
+                           height,
+                           width).astype(np.float32)
+        dY = np.random.rand(batch_size,
+                            num_channels,
+                            output_height,
+                            output_width).astype(np.float32)
+
+        op = core.CreateOperator(
+            "ResizeNearestGradient",
+            ["dY", "X"],
+            ["dX"],
+            width_scale=width_scale,
+            height_scale=height_scale,
+        )
+
+        def ref(dY, X):
+            dX = np.zeros_like(X)
+
+            for i in range(output_height):
+                for j in range(output_width):
+                    input_i = np.minimum(i / height_scale, height - 1).astype(np.int32)
+                    input_j = np.minimum(j / width_scale, width - 1).astype(np.int32)
+                    dX[:, :, input_i, input_j] += dY[:, :, i, j]
+
+            return dX,
+
+        self.assertDeviceChecks(dc, op, [dY, X], [0])
+        self.assertReferenceChecks(gc, op, [dY, X], ref)
 
 
 if __name__ == "__main__":
