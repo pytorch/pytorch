@@ -94,6 +94,8 @@ class PiecewiseLinearTransformOp final : public Operator<Context> {
     return good_param == 3;
   }
 
+  void setUpTensors(TIndex& num_func_per_group, TIndex& num_group, TIndex M);
+
   void GetTransParamData(
       const T** bounds,
       const T** slopes,
@@ -230,6 +232,11 @@ class PiecewiseLinearTransformOp final : public Operator<Context> {
   vector<T> bounds_from_arg_;
   vector<T> slopes_from_arg_;
   vector<T> intercepts_from_arg_;
+
+  Tensor<Context> bounds_device_;
+  Tensor<Context> intercepts_device_;
+  Tensor<Context> slopes_device_;
+  bool gpu_copied_ = false;
 
   // If true, the piecewise linear functions are passed through args,
   // otherwise, they are passed through Input blobs.
