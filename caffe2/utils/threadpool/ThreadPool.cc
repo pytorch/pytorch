@@ -10,7 +10,11 @@ namespace caffe2 {
 
 // Default smallest amount of work that will be partitioned between
 // multiple threads; the runtime value is configurable
+#if CAFFE2_ANDROID
 constexpr size_t kDefaultMinWorkSize = 8;
+#else
+constexpr size_t kDefaultMinWorkSize = 80;
+#endif
 
 #ifdef CAFFE2_THREADPOOL_MAIN_IMBALANCE
 constexpr float kDefaultImbalanceRatio = 1.0f;
