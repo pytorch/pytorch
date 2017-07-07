@@ -18,8 +18,8 @@ TH_EXTERNC void scopy_(int *n, float *x, int *incx, float *y, int *incy);
 TH_EXTERNC void daxpy_(int *n, double *a, double *x, int *incx, double *y, int *incy);
 TH_EXTERNC void saxpy_(int *n, float *a, float *x, int *incx, float *y, int *incy);
 TH_EXTERNC double ddot_(int *n, double *x, int *incx, double *y, int *incy);
-#if BLAS_IS_ACCELERATE
-TH_EXTERNC ffloat cblas_sdot(const int n, const float *x, const int incx, const float *y, const int incy);
+#ifdef BLAS_USE_CBLAS_DOT
+TH_EXTERNC float cblas_sdot(const int n, const float *x, const int incx, const float *y, const int incy);
 #ifndef THBlas_C_sdot_
 #define THBlas_C_sdot_
 inline ffloat sdot_(const int *n, const float *x, const int *incx, const float *y, const int *incy)
