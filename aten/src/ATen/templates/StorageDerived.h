@@ -38,7 +38,7 @@ public:
 
 
 protected:
-  friend class ${Type};
+  friend struct ${Type};
   ${THStorage} *storage;
   Context* context;
 };

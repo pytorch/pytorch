@@ -157,16 +157,19 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
     env['AS_REAL'] = env['ScalarType']
     if scalar_name == "Half":
         if backend == "CUDA":
-            env['to_th_half'] = 'HalfFix<__half,Half>'
-            env['to_at_half'] = 'HalfFix<Half,__half>'
+            env['to_th_type'] = 'HalfFix<__half,Half>'
+            env['to_at_type'] = 'HalfFix<Half,__half>'
             env['AS_REAL'] = 'convert<half,double>'
             env['THScalarType'] = 'half'
         else:
-            env['to_th_half'] = 'HalfFix<THHalf,Half>'
-            env['to_at_half'] = 'HalfFix<Half,THHalf>'
+            env['to_th_type'] = 'HalfFix<THHalf,Half>'
+            env['to_at_type'] = 'HalfFix<Half,THHalf>'
+    elif scalar_name == 'Long':
+        env['to_th_type'] = 'long'
+        env['to_at_type'] = 'int64_t'
     else:
-        env['to_th_half'] = ''
-        env['to_at_half'] = ''
+        env['to_th_type'] = ''
+        env['to_at_type'] = ''
 
     declarations, definitions = function_wrapper.create_derived(
         env, declarations)
