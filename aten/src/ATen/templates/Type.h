@@ -8,10 +8,10 @@
 namespace at {
 
 class Context;
-class Storage;
-class Tensor;
+struct Storage;
+struct Tensor;
 class Scalar;
-class Generator;
+struct Generator;
 
 #define AT_FORALL_SCALAR_TYPES(_) \
 _(uint8_t,Byte,i) \

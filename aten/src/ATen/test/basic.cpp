@@ -198,7 +198,7 @@ int main()
 {
   std::cout << "=========================== CPU ===========================" << std::endl;
   test(CPU(kFloat));
-  if(globalContext().hasCUDA()) {
+  if(at::hasCUDA()) {
     std::cout << "=========================== GPU ===========================" << std::endl;
     test(CUDA(kFloat));
   }

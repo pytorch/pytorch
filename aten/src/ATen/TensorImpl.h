@@ -6,7 +6,7 @@
 #include <iostream>
 namespace at {
 
-class Type;
+struct Type;
 class Scalar;
 struct TensorImpl {
   TensorImpl(Type * type)
@@ -29,7 +29,7 @@ struct TensorImpl {
     }
   }
   virtual ~TensorImpl() {}
-  friend class Type;
+  friend struct Type;
 
   // 0-dim patchup of TH requires us to have a flag marking
   // if a Tensor should be treated as 0-dim.

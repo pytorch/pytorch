@@ -49,5 +49,8 @@ static inline Type& CUDA(ScalarType s) {
   return getType(Backend::CUDA, s);
 }
 
+static inline bool hasCUDA() {
+  return globalContext().hasCUDA();
+}
 
 }

@@ -56,12 +56,12 @@ auto ${Storage}::resize(long new_size) -> ${Storage}& {
 }
 
 auto ${Storage}::fill(Scalar value) -> ${Storage}& {
-  ${THStorage}_fill(${state,} storage, ${to_th_half}(value.to${ScalarName}()));
+  ${THStorage}_fill(${state,} storage, ${to_th_type}(value.to${ScalarName}()));
   return *this;
 }
 
 auto ${Storage}::set(std::size_t ind, Scalar value) -> ${Storage}& {
-  ${THStorage}_set(${state,} storage, ind, ${to_th_half}(value.to${ScalarName}()));
+  ${THStorage}_set(${state,} storage, ind, ${to_th_type}(value.to${ScalarName}()));
   return *this;
 }
 
@@ -71,13 +71,13 @@ auto ${Storage}::fast_set(std::size_t ind, Scalar value) -> ${Storage}& {
 
 auto ${Storage}::get(std::size_t ind) -> Scalar {
   // static cast to fix  long -> int64_t issues
-  return static_cast<${ScalarType}>(${to_at_half}(${THStorage}_get(${state,} storage, ind)));
+  return static_cast<${ScalarType}>(${to_at_type}(${THStorage}_get(${state,} storage, ind)));
 }
 
 auto ${Storage}::fast_get(std::size_t ind) -> Scalar {
   if(${isCUDA})
     throw std::runtime_error("unsupported operation 'fast_get'");
-  return static_cast<${ScalarType}>(${to_at_half}(storage->data[ind]));
+  return static_cast<${ScalarType}>(${to_at_type}(storage->data[ind]));
 }
 
 int ${Storage}::getDevice() const {
