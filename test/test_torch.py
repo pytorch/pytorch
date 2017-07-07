@@ -392,7 +392,7 @@ class TestTorch(TestCase):
         m1 = torch.Tensor(10, 10).uniform_(-10., 10.)
         res1 = m1.clone()
         res2 = m1.clone()
-        qs = torch.range(-5.1, 4.1)
+        qs = torch.arange(-5.1, 4.1)
         # Check the case where the divisor is a simple float
         for col_idx, q in enumerate(qs):
             # Reference
@@ -410,7 +410,7 @@ class TestTorch(TestCase):
         long_m1 = torch.LongTensor(10, 10).random_(-10, 10)
         long_res1 = long_m1.clone()
         long_res2 = long_m1.clone()
-        long_qs = torch.range(-5, 4).long()
+        long_qs = torch.arange(-5, 5).long()
         long_qs[5] = 5  # Can't handle the divisor=0 case
         for col_idx, long_q in enumerate(long_qs):
             # Reference
