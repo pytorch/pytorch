@@ -180,15 +180,12 @@ INSTALL(TARGETS ATen
 
 ADD_EXECUTABLE(scalar_test test/scalar_test.cpp)
 TARGET_LINK_LIBRARIES(scalar_test ATen)
-TARGET_LINK_LIBRARIES(scalar_test ${CUDA_LIBRARIES})
 
 ADD_EXECUTABLE(basic test/basic.cpp)
 TARGET_LINK_LIBRARIES(basic ATen)
-TARGET_LINK_LIBRARIES(basic ${CUDA_LIBRARIES})
 
 add_executable(atest test/atest.cpp)
 target_link_libraries(atest ATen)
-target_link_libraries(atest ${CUDA_LIBRARIES})
 
 FOREACH(HEADER ${base_h})
   INSTALL(FILES ${HEADER} DESTINATION ${TENSOR_LIB_INSTALL_INCLUDE_DIR}/ATen)
