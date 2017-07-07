@@ -15,6 +15,8 @@ auto dispatch(const Type & the_type, Args&&... args)
     -> decltype(F<double>::CPU(the_type,std::forward<Args>(args)...)) {
     switch(the_type.ID()) {
         ${cases}
+        default:
+            runtime_error("dispatch() not implemented for '%s'",the_type.toString());
     }
 }
 
@@ -25,7 +27,8 @@ auto dispatch(const Type & the_type, Args&&... args)
 def create_dispatch(all_types):
     cases = []
     for typ in all_types:
-        cases.append(CASE_TEMPLATE.substitute(typ))
+        if typ['Density'] != 'Sparse':
+            cases.append(CASE_TEMPLATE.substitute(typ))
     return MACRO_TEMPLATE.substitute(cases=cases)
 
 
