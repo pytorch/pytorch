@@ -1252,7 +1252,7 @@ def _ValidateParams(params):
         dupes = []
         sp = sorted(params)
         for j, p in enumerate(sp):
-            if j > 0 and params[j - 1] == p:
+            if j > 0 and sp[j - 1] == p:
                 dupes.append(p)
 
         assert len(params) == len(set_params), \
