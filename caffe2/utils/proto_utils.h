@@ -110,7 +110,7 @@ inline bool ReadProtoFromFile(const string& filename, Message* proto) {
 template <
     class IterableInputs = std::initializer_list<string>,
     class IterableOutputs = std::initializer_list<string>,
-    class IterableArgs>
+    class IterableArgs = std::initializer_list<Argument>>
 OperatorDef CreateOperatorDef(
     const string& type,
     const string& name,
