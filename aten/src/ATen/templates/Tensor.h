@@ -6,7 +6,7 @@
 #include "ATen/TensorAccessor.h"
 
 namespace at {
-class Type;
+struct Type;
 
 struct Tensor {
 
@@ -137,9 +137,9 @@ struct Tensor {
   //Tensor * add(Tensor & b);
   ${tensor_method_declarations}
 
-  friend class Type;
+  friend struct Type;
 
-//TODO(zach): sort out friend classes
+//TODO(zach): sort out friend structes
 public:
   TensorImpl * pImpl;
 };

@@ -27,7 +27,7 @@ public:
 public:
   ${THTensor} * tensor;
   Context* context;
-  friend class ${Type};
+  friend struct ${Type};
 };
 
 } // namespace thpp

@@ -26,13 +26,13 @@ Type & Type::toScalarType(ScalarType s) {
 }
 
 Tensor Type::tensorFromBlob(void * data, IntList sizes) {
-  int64_t strides[sizes.size()];
+  std::vector<int64_t> strides(sizes.size());
   int64_t stride = 1;
   for(size_t i = sizes.size(); i > 0; --i) {
     strides[i-1] = stride;
     stride *= sizes[i-1];
   }
-  return tensorFromBlob(data, sizes, IntList(strides,sizes.size()));
+  return tensorFromBlob(data, sizes, strides);
 }
 Tensor Type::tensorFromBlob(void * data, IntList sizes, IntList strides) {
   // size of the underlying storage is 1 bigger than the offset
