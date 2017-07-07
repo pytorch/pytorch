@@ -17,6 +17,11 @@ MASTER_PORT = '29500'
 MASTER_ADDR = '127.0.0.1'
 
 
+if not dist.is_available():
+    print('Distributed not available, skipping tests')
+    sys.exit(0)
+
+
 @contextmanager
 def _lock():
     lockfile = os.path.join(TEMP_DIR, 'lockfile')
