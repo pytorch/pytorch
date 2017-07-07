@@ -21,8 +21,8 @@ static inline T* checked_cast(Base* expr, const char * name, int pos) {
     T::typeString(),expr->type().toString(),pos,name);
 }
 
-class CPUGenerator;
-class Generator;
+struct CPUGenerator;
+struct Generator;
 static inline CPUGenerator * check_generator(Generator* expr) {
   if(auto result = dynamic_cast<CPUGenerator*>(expr))
     return result;

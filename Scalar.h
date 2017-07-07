@@ -88,7 +88,7 @@ private:
   Tensor t; //Note: cannot be in union be cause of copy/destruct behavior
             //ideally we try to pack this structure tighter if it becomes
             //a performance problem.
-  friend class Type;
+  friend struct Type;
 };
 
 // define the scalar.to<int64_t>() specializations

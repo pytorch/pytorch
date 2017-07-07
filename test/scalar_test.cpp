@@ -6,7 +6,6 @@ using std::cout;
 using namespace at;
 
 constexpr auto Float = ScalarType::Float;
-constexpr auto Double = ScalarType::Float;
 
 template<typename scalar_type>
 struct Foo {
@@ -34,15 +33,16 @@ int main() {
   Generator & gen = at::globalContext().defaultGenerator(Backend::CPU);
   cout << gen.seed() << "\n";
   auto && C = at::globalContext();
-  auto & CUDAFloat = C.getType(Backend::CPU,ScalarType::Float);
-  auto t2 = CUDAFloat.zeros({4,4});
-  cout << &t2 << "\n";
-  cout << "AFTER GET TYPE " << &CUDAFloat << "\n";
-  cout << "STORAGE: " << CUDAFloat.storage(4).get() << "\n";
-  auto s = CUDAFloat.storage(4);
-  s->fill(7);
-
-  cout << "GET " << s->get(3).toFloat() << "\n";
+  if(at::hasCUDA()) {
+    auto & CUDAFloat = C.getType(Backend::CPU,ScalarType::Float);
+    auto t2 = CUDAFloat.zeros({4,4});
+    cout << &t2 << "\n";
+    cout << "AFTER GET TYPE " << &CUDAFloat << "\n";
+    cout << "STORAGE: " << CUDAFloat.storage(4).get() << "\n";
+    auto s = CUDAFloat.storage(4);
+    s->fill(7);
+    cout << "GET " << s->get(3).toFloat() << "\n";
+  }
   auto t = CPU(Float).ones({4,4});
 
   auto wha2 = CPU(Float).zeros({4,4}).add(t).sum();
@@ -62,9 +62,11 @@ int main() {
   Tensor next_h = i2h.add(h2h);
   next_h = next_h.tanh();
 
-  auto r = CUDA(Float).copy(next_h);
+  if(at::hasCUDA()) {
+    auto r = CUDA(Float).copy(next_h);
 
-  cout << r << "\n";
+    cout << r << "\n";
+  }
   cout << T.randn({10,10,2}) << "\n";
 
   dispatch<Foo>(x.type(),x,prev_h);
