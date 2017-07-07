@@ -127,6 +127,8 @@ auto BatchNormBackward::apply(const variable_list& grad_outputs) -> variable_lis
     }
   }
 
+  auto grad_output = grad_outputs[0]->data->contiguous();
+
   if (use_cudnn && eps >= CUDNN_BN_MIN_EPSILON) {
 #ifdef WITH_CUDNN
     torch::cudnn::cudnn_batch_norm_backward(
@@ -134,7 +136,7 @@ auto BatchNormBackward::apply(const variable_list& grad_outputs) -> variable_lis
         torch::cudnn::getCudnnHandle(),
         torch::cudnn::getCudnnDataType(*input),
         (THVoidTensor*)input->cdata(),
-        (THVoidTensor*)grad_outputs[0]->data->cdata(),
+        (THVoidTensor*)grad_output->cdata(),
         (THVoidTensor*)grad_input->cdata(),
         (THVoidTensor*)grad_weight->cdata(),
         (THVoidTensor*)grad_bias->cdata(),
@@ -147,7 +149,6 @@ auto BatchNormBackward::apply(const variable_list& grad_outputs) -> variable_lis
         eps);
 #endif
   } else {
-    auto grad_output = grad_outputs[0]->data->contiguous();
     torch::nn::BatchNormalization_backward(
         input.get(),
         grad_output.get(),
