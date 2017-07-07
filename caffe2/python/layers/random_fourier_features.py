@@ -27,19 +27,20 @@ class RandomFourierFeatures(ModelLayer):
         super(RandomFourierFeatures, self).__init__(model, name, input_record,
                                                     **kwargs)
         assert isinstance(input_record, schema.Scalar), "Incorrect input type"
-        assert output_dims >= 1, "Expected output dimensions >= 1, got %s" \
-                                    % output_dims
 
         input_dims = input_record.field_type().shape[0]
         assert input_dims >= 1, "Expected input dimensions >= 1, got %s" \
                                     % input_dims
+        self.output_dims = output_dims
+        assert self.output_dims >= 1, "Expected output dimensions >= 1, got %s" \
+                                    % self.output_dims
 
         self.output_schema = schema.Scalar(
-            (np.float32, (output_dims, )),
+            (np.float32, (self.output_dims, )),
             model.net.NextScopedBlob(name + '_output')
         )
 
-        self.output_dims = output_dims
+        assert sigma > 0.0, "Expected bandwidth > 0, got %s" % sigma
 
         # Initialize train_init_net parameters
         w_init = w_init if w_init else (
@@ -58,7 +59,7 @@ class RandomFourierFeatures(ModelLayer):
                 initializer=core.CreateOperator(w_init[0],
                                                 [],
                                                 self.w,
-                                                shape=(input_dims, output_dims),
+                                                shape=(input_dims, self.output_dims),
                                                 **w_init[1]
                                                 ),
                 optimizer=model.NoOptim))
@@ -68,7 +69,7 @@ class RandomFourierFeatures(ModelLayer):
                 initializer=core.CreateOperator(b_init[0],
                                                 [],
                                                 self.b,
-                                                shape=[output_dims],
+                                                shape=[self.output_dims],
                                                 **b_init[1]
                                                 ),
                 optimizer=model.NoOptim))
