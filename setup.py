@@ -379,6 +379,8 @@ if WITH_CUDNN:
         "torch/csrc/cudnn/BatchNorm.cpp",
         "torch/csrc/cudnn/Conv.cpp",
         "torch/csrc/cudnn/cuDNN.cpp",
+        "torch/csrc/cudnn/GridSampler.cpp",
+        "torch/csrc/cudnn/AffineGridGenerator.cpp",
         "torch/csrc/cudnn/Types.cpp",
         "torch/csrc/cudnn/Handles.cpp",
     ]

@@ -2357,6 +2357,109 @@ class TestNN(NNTestCase):
         self.assertTrue(gradcheck(lambda x, y: F.cosine_similarity(x, y, dim=0), (input1, input2)))
         self.assertTrue(gradcheck(lambda x, y: F.cosine_similarity(x, y, dim=-1), (input1, input2)))
 
+    def test_grid_sample(self):
+        # test known input on CPU
+        input = Variable(torch.arange(1, 11).view(1, 1, 2, 5))
+        grid = Variable(torch.Tensor(
+            [[-1, -0.5, 0, 0.2, 1],
+             [-1, -0.333, 0, 0.5, 1],
+             [-1, -0.5, 0, 0.3333, 1],
+             [-1, -0.2, 0, 0.2, 1]]).view(1, 2, 5, 2))
+        output = F.grid_sample(input, grid)
+        groundtruth = torch.Tensor(
+            [[2.2500, 6.0000000000, 5.0000, 4.8340, 9.0000],
+             [2.2500, 6.333250045, 5.0000, 5.1000, 8.4000]]).view(1, 1, 2, 5)
+        self.assertEqual(output.data, groundtruth)
+
+        # do gradcheck
+        N = random.randint(1, 8)
+        C = random.randint(1, 8)
+        H = random.randint(1, 8)
+        W = random.randint(1, 8)
+        input = Variable(torch.randn(N, C, H, W), requires_grad=True)
+        grid = Variable(torch.randn(N, H, W, 2), requires_grad=True)
+        self.assertTrue(gradcheck(lambda inp, grid: F.grid_sample(inp, grid), (input, grid)))
+
+        # test CPU against CUDA
+        if TEST_CUDNN:
+            def test_shape(N, C, IH, IW, H, W):
+                input_cpu = Variable(torch.randn(C, N, IH, IW).transpose(0, 1), requires_grad=True)
+                grid_cpu = Variable(torch.randn(H, N, W, 2).transpose(0, 1), requires_grad=True)
+                out_cpu = F.grid_sample(input_cpu, grid_cpu)
+                self.assertTrue(out_cpu.size() == torch.Size([N, C, H, W]))
+
+                input_cuda = Variable(input_cpu.data.transpose(0, 1).cuda().transpose(0, 1), requires_grad=True)
+                grid_cuda = Variable(grid_cpu.data.transpose(0, 1).cuda().transpose(0, 1), requires_grad=True)
+                out_cuda = F.grid_sample(input_cuda, grid_cuda)
+                self.assertEqual(out_cpu, out_cuda)
+
+                gradients = out_cpu.data.new(out_cpu.size()).normal_()
+                out_cpu.backward(gradients)
+                out_cuda.backward(gradients.cuda())
+                self.assertEqual(input_cpu.grad, input_cuda.grad)
+                self.assertEqual(grid_cpu.grad, grid_cuda.grad)
+
+                # check that zero-dimensional input strides dont error out
+                base_input = torch.randn(C, IH, IW)
+                input_cpu = Variable(base_input.expand(input_cuda.size()), requires_grad=True)
+                grid_cpu = Variable(torch.randn(N, H, W, 2), requires_grad=True)
+                out_cpu = F.grid_sample(input_cpu, grid_cpu)
+
+                input_cuda = Variable(base_input.cuda().expand(input_cuda.size()), requires_grad=True)
+                grid_cuda = Variable(grid_cpu.data.cuda(), requires_grad=True)
+                out_cuda = F.grid_sample(input_cuda, grid_cuda)
+                self.assertEqual(out_cpu, out_cuda)
+
+            # test same size output
+            test_shape(N, C, H, W, H, W)
+
+            # test larger output
+            N = random.randint(1, 8)
+            C = random.randint(1, 8)
+            IH = random.randint(1, 8)
+            IW = random.randint(1, 8)
+            H = random.randint(IH + 1, 12)
+            W = random.randint(IH + 1, 12)
+            test_shape(N, C, IH, IW, H, W)
+
+            # test smaller output
+            N = random.randint(1, 8)
+            C = random.randint(1, 8)
+            IH = random.randint(1, 8)
+            IW = random.randint(1, 8)
+            H = random.randint(1, IH)
+            W = random.randint(1, IW)
+            test_shape(N, C, IH, IW, H, W)
+
+    def test_affine_grid(self):
+        # test known input on CPU
+        input = Variable(torch.arange(1, 7).view(1, 2, 3))
+        output = F.affine_grid(input, torch.Size([1, 1, 2, 2]))
+        groundtruth = torch.Tensor(
+            [[[0, -3], [2, 5]], [[4, 7], [6, 15]]]).view(1, 2, 2, 2)
+        self.assertEqual(output.data, groundtruth)
+
+        # do gradcheck
+        N = random.randint(1, 8)
+        C = random.randint(1, 8)
+        H = random.randint(1, 8)
+        W = random.randint(1, 8)
+        sz = torch.Size([N, C, H, W])
+        inp = Variable(torch.randn(N, 2, 3), requires_grad=True)
+        self.assertTrue(gradcheck(lambda inp: F.affine_grid(inp, sz), (inp,)))
+
+        # test CPU against CUDA
+        if TEST_CUDNN:
+            input_cpu = Variable(torch.randn(N, 2, 3), requires_grad=True)
+            out_cpu = F.affine_grid(input_cpu, sz)
+            gradients = torch.randn(out_cpu.size())
+            out_cpu.backward(gradients)
+            input_gpu = Variable(input_cpu.data.cuda(), requires_grad=True)
+            out_cuda = F.affine_grid(input_gpu, sz)
+            out_cuda.backward(gradients.cuda())
+            self.assertEqual(out_cpu, out_cuda)
+            self.assertEqual(input_cpu.grad, input_gpu.grad)
+
     def test_upsamplingNearest2d(self):
         m = nn.Upsample(size=4, mode='nearest')
         in_t = torch.ones(1, 1, 2, 2)
