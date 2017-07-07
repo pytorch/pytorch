@@ -18,8 +18,6 @@ struct Foo {
   }
   static void CUDA(const Type & t, Tensor a, Tensor b) {
   }
-  static void SparseCUDA(const Type & t, Tensor a, Tensor b) {}
-  static void SparseCPU(const Type & t, Tensor a, Tensor b) {}
 };
 template<>
 struct Foo<Half> {
