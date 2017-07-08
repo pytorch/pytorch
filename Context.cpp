@@ -20,11 +20,17 @@ static inline void argErrorHandler(int arg, const char * msg, void * data) {
   throw std::runtime_error(new_error.str());
 }
 
-Context::Context() {
+Context::Context()
+: thc_state(nullptr) {
 
   THSetDefaultErrorHandler(errorHandler,nullptr);
   THSetDefaultArgErrorHandler(argErrorHandler,nullptr);
 
+  generator_registry[static_cast<int>(Backend::CPU)]
+    .reset(new CPUGenerator(this));
+  Type::registerAll(this);
+}
+void Context::doInitCUDA() {
 #ifdef AT_CUDA_ENABLED
   thc_state = THCState_alloc();
   THCState_setDeviceAllocator(thc_state, THCCachingAllocator_get());
@@ -33,15 +39,11 @@ Context::Context() {
   generator_registry[static_cast<int>(Backend::CUDA)]
     .reset(new CUDAGenerator(this));
 #endif
-
-  generator_registry[static_cast<int>(Backend::CPU)]
-    .reset(new CPUGenerator(this));
-  Type::registerAll(this);
 }
-
 Context::~Context() {
 #ifdef AT_CUDA_ENABLED
-  THCState_free(thc_state);
+  if(thc_state)
+    THCState_free(thc_state);
 #endif
 }
 
