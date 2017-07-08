@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <unordered_map>
 #include <TH/TH.h>
+#include <ATen/ATen.h>
 #include <THC/THCCachingAllocator.h>
 #ifdef WITH_NCCL
 #include <nccl.h>
@@ -269,10 +270,7 @@ PyObject * THCPModule_cudaUnlockMutex(PyObject *module)
 bool THCPModule_initCuda(PyObject *torch_module) {
   HANDLE_TH_ERRORS
 #define ASSERT_TRUE(cond) if (!(cond)) { return false; }
-  state = THCState_alloc();
-  THCState_setDeviceAllocator(state, THCCachingAllocator_get());
-  state->cudaHostAllocator = &THCCachingHostAllocator;
-  THCudaInit(state);
+  state = at::globalContext().lazyInitCUDA();
 
 #ifdef USE_MAGMA
   THCMagma_init(state);
