@@ -704,10 +704,10 @@ if __name__ == '__main__':
     output_predict_net = args.predict_net
 
     text_format.Merge(
-        open(input_proto).read(), caffenet
+        open(input_proto, 'r').read(), caffenet
     )
     caffenet_pretrained.ParseFromString(
-        open(input_caffemodel).read()
+        open(input_caffemodel, 'rb').read()
     )
     net, pretrained_params = TranslateModel(
         caffenet, caffenet_pretrained, is_test=True
