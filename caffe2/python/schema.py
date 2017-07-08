@@ -57,9 +57,16 @@ def _normalize_field(field_or_type_or_blob, keep_blobs=True):
 
 FeatureSpec = namedtuple(
     'FeatureSpec',
-    ['feature_type', 'feature_names', 'feature_ids', 'feature_is_request_only']
+    [
+        'feature_type',
+        'feature_names',
+        'feature_ids',
+        'feature_is_request_only',
+        'desired_hash_size',
+    ]
 )
-FeatureSpec.__new__.__defaults__ = (None, None, None, None)
+
+FeatureSpec.__new__.__defaults__ = (None, None, None, None, None)
 
 
 class Metadata(

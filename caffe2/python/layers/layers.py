@@ -49,6 +49,7 @@ def set_request_only(field):
                 feature_names=f.metadata.feature_specs.feature_names,
                 feature_ids=f.metadata.feature_specs.feature_ids,
                 feature_is_request_only=True,
+                desired_hash_size=f.metadata.feature_specs.desired_hash_size,
             )
 
         # make sure not to set categorical_limit for a non-integer field
