@@ -10,8 +10,9 @@ import torch.nn.functional as F
 from torch.optim import SGD
 from torch.autograd import Variable
 from torch import sparse
-from torch.optim.lr_scheduler import LambdaLR, StepLR, MultiStepLR, ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau
-from common import TestCase, run_tests, TEST_WITH_UBSAN, TEST_WITH_ROCM
+from torch.optim.lr_scheduler import LambdaLR, StepLR, MultiStepLR, ExponentialLR, CosineAnnealingLR, \
+    ReduceLROnPlateau, CyclicLR
+from common import TestCase, run_tests, TEST_WITH_UBSAN
 
 
 def rosenbrock(tensor):
@@ -522,7 +523,8 @@ class TestLRScheduler(TestCase):
     def setUp(self):
         self.net = SchedulerTestNet()
         self.opt = SGD(
-            [{'params': self.net.conv1.parameters()}, {'params': self.net.conv2.parameters(), 'lr': 0.5}],
+            [{'params': self.net.conv1.parameters()},
+             {'params': self.net.conv2.parameters(), 'lr': 0.5}],
             lr=0.05)
 
     def test_step_lr(self):
@@ -639,15 +641,88 @@ class TestLRScheduler(TestCase):
             param_group['lr'] = 0.5
         targets = [[0.5] * 6 + [0.4] * 14, [0.5] * 6 + [0.3] * 14]
         metrics = [1.5 * (1.005 ** i) for i in range(20)]
-        scheduler = ReduceLROnPlateau(self.opt, mode='max', threshold_mode='rel', min_lr=[0.4, 0.3],
+        scheduler = ReduceLROnPlateau(self.opt, mode='max', threshold_mode='rel',
+                                      min_lr=[0.4, 0.3],
                                       threshold=0.1, patience=5, cooldown=5)
         self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
+
+    def test_cycle_lr_invalid_mode(self):
+        with self.assertRaises(ValueError):
+            scheduler = CyclicLR(self.opt, mode="CATS")
+
+    def test_cycle_lr_triangular_mode_one_lr(self):
+        target = [1, 2, 3, 4, 5, 4, 3, 2, 1, 2, 3]
+        targets = [target, target]
+        scheduler = CyclicLR(self.opt, base_lr=1, max_lr=5, step_size=4,
+                             mode='triangular')
+        batch_iterations = len(target)
+        self._test_cycle_lr(scheduler, targets, batch_iterations)
+
+    def test_cycle_lr_triangular2_mode_one_lr(self):
+        target = [1, 2, 3, 4, 5, 4, 3, 2, 1, 1.5, 2.0, 2.5, 3.0, 2.5, 2.0, 1.5, 1] + \
+                 [1.25, 1.50, 1.75, 2.00, 1.75]
+        targets = [target, target]
+        scheduler = CyclicLR(self.opt, base_lr=1, max_lr=5, step_size=4,
+                             mode='triangular2')
+        batch_iterations = len(target)
+        self._test_cycle_lr(scheduler, targets, batch_iterations)
+
+    def test_cycle_lr_exp_range_mode_one_lr(self):
+        base_lr, max_lr = 1, 5
+        diff_lr = max_lr - base_lr
+        gamma = 0.9
+        xs = [0, 0.25, 0.5, 0.75, 1, 0.75, 0.50, 0.25, 0, 0.25, 0.5, 0.75, 1]
+        target = list(map(lambda x: base_lr + x[1] * diff_lr * gamma**x[0], enumerate(xs)))
+        targets = [target, target]
+        scheduler = CyclicLR(self.opt, base_lr=base_lr,
+                             max_lr=max_lr, step_size=4,
+                             mode='exp_range', gamma=gamma)
+        batch_iterations = len(target)
+        self._test_cycle_lr(scheduler, targets, batch_iterations)
+
+    def test_cycle_lr_triangular_mode(self):
+        target_1 = [1, 2, 3, 4, 5, 4, 3, 2, 1, 2, 3]
+        target_2 = list(map(lambda x: x + 1, target_1))
+        targets = [target_1, target_2]
+        scheduler = CyclicLR(self.opt, base_lr=[1, 2], max_lr=[5, 6], step_size=4,
+                             mode='triangular')
+        batch_iterations = len(target_1)
+        self._test_cycle_lr(scheduler, targets, batch_iterations)
+
+    def test_cycle_lr_triangular2_mode(self):
+        target_1 = [1, 2, 3, 4, 5, 4, 3, 2, 1, 1.5, 2.0, 2.5, 3.0, 2.5, 2.0, 1.5, 1] + \
+                   [1.25, 1.50, 1.75, 2.00, 1.75]
+        target_2 = list(map(lambda x: x + 2, target_1))
+        targets = [target_1, target_2]
+        scheduler = CyclicLR(self.opt, base_lr=[1, 3], max_lr=[5, 7], step_size=4,
+                             mode='triangular2')
+        batch_iterations = len(target_1)
+        self._test_cycle_lr(scheduler, targets, batch_iterations)
+
+    def test_cycle_lr_exp_range_mode(self):
+        base_lr_1, max_lr_1 = 1, 5
+        base_lr_2, max_lr_2 = 5, 12
+
+        diff_lr_1 = max_lr_1 - base_lr_1
+        diff_lr_2 = max_lr_2 - base_lr_2
+
+        gamma = 0.9
+        xs = [0, 0.25, 0.5, 0.75, 1, 0.75, 0.50, 0.25, 0, 0.25, 0.5, 0.75, 1]
+        target_1 = list(map(lambda x: base_lr_1 + x[1] * diff_lr_1 * gamma**x[0], enumerate(xs)))
+        target_2 = list(map(lambda x: base_lr_2 + x[1] * diff_lr_2 * gamma**x[0], enumerate(xs)))
+        targets = [target_1, target_2]
+        scheduler = CyclicLR(self.opt, base_lr=[base_lr_1, base_lr_2],
+                             max_lr=[max_lr_1, max_lr_2], step_size=4,
+                             mode='exp_range', gamma=gamma)
+        batch_iterations = len(target_1)
+        self._test_cycle_lr(scheduler, targets, batch_iterations)
 
     def test_lambda_lr(self):
         epochs = 10
         self.opt.param_groups[0]['lr'] = 0.05
         self.opt.param_groups[1]['lr'] = 0.4
-        targets = [[0.05 * (0.9 ** x) for x in range(epochs)], [0.4 * (0.8 ** x) for x in range(epochs)]]
+        targets = [[0.05 * (0.9 ** x) for x in range(epochs)], [0.4 * (0.8 ** x)
+                                                                for x in range(epochs)]]
         scheduler = LambdaLR(self.opt,
                              lr_lambda=[lambda x1: 0.9 ** x1, lambda x2: 0.8 ** x2])
         self._test(scheduler, targets, epochs)
@@ -735,6 +810,17 @@ class TestLRScheduler(TestCase):
                 self.assertAlmostEqual(target[epoch], param_group['lr'],
                                        msg='LR is wrong in epoch {}: expected {}, got {}'.format(
                                            epoch, target[epoch], param_group['lr']), delta=1e-5)
+
+    def _test_cycle_lr(self, scheduler, targets, batch_iterations, verbose=False):
+        for batch_num in range(batch_iterations):
+            scheduler.batch_step(batch_num)
+            if verbose:
+                print('batch{}:\tlr={}'.format(batch_num, self.opt.param_groups[0]['lr']))
+            for param_group, target in zip(self.opt.param_groups, targets):
+                self.assertAlmostEqual(
+                    target[batch_num], param_group['lr'],
+                    msg='LR is wrong in batch_num {}: expected {}, got {}'.format(
+                        batch_num, target[batch_num], param_group['lr']), delta=1e-5)
 
 
 if __name__ == '__main__':

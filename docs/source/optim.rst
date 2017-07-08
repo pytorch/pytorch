@@ -145,3 +145,5 @@ allows dynamic learning rate reducing based on some validation measurements.
     :members:
 .. autoclass:: torch.optim.lr_scheduler.ReduceLROnPlateau
     :members:
+.. autoclass:: torch.optim.lr_scheduler.CyclicLR
+    :members:
