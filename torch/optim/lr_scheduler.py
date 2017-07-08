@@ -526,7 +526,7 @@ class CyclicLR(object):
                 self.scale_fn = lambda x: 1.
                 self.scale_mode = 'cycle'
             elif self.mode == 'triangular2':
-                self.scale_fn = lambda x: 1 / (2.**(x - 1))
+                self.scale_fn = lambda x: 1 / (2. ** (x - 1))
                 self.scale_mode = 'cycle'
             elif self.mode == 'exp_range':
                 self.scale_fn = lambda x: gamma**(x)
