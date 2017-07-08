@@ -394,7 +394,7 @@ class CrossEntropyLoss(_WeightedLoss):
         loss(x, class) = weights[class] * (-x[class] + log(\sum_j exp(x[j])))
 
     The losses are averaged across observations for each minibatch.
-    
+
     Args:
         weight (Tensor, optional): a manual rescaling weight given to each class.
            If given, has to be a Tensor of size "nclasses"
@@ -404,7 +404,7 @@ class CrossEntropyLoss(_WeightedLoss):
         ignore_index (int, optional): Specifies a target value that is ignored
             and does not contribute to the input gradient. When size_average is
             True, the loss is averaged over non-ignored targets.
-            
+
     Shape:
         - Input: :math:`(N, C)` where `C = number of classes`
         - Target: :math:`(N)` where each value is `0 <= targets[i] <= C-1
