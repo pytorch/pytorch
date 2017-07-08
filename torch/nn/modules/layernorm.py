@@ -4,20 +4,26 @@ from torch.nn.parameter import Parameter
 
 
 class _LayerNorm(Module):
-    def __init__(self, num_features, eps=1e-5):
+    def __init__(self, num_features, eps=1e-5, affine=True):
         super(_LayerNorm, self).__init__()
         self.num_features = num_features
+        self.affine = affine
         self.eps = eps
-        self.gamma = Parameter(torch.ones(num_features))
-        self.beta = Parameter(torch.zeros(num_features))
+        if self.affine:
+            self.weight = Parameter(torch.ones(num_features))
+            self.bias = Parameter(torch.zeros(num_features))
+        else:
+            self.register_parameter('weight', None)
+            self.register_parameter('bias', None)
         self.reset_parameters()
 
     def reset_parameters(self):
-        self.gamma.fill_(1)
-        self.beta.zero_()
+        if self.affine:
+            self.weight.fill_(1)
+            self.bias.zero_()
 
     def _check_input_dim(self, input):
-        if input.size(1) != self.gamma.nelement():
+        if input.size(1) != self.weight.nelement():
             raise ValueError('got {}-feature tensor, expected {}'
                              .format(input.size(1), self.num_features))
 
@@ -55,29 +61,24 @@ class _LayerNorm(Module):
         """
 
     def __repr__(self):
-        return ('{name}({num_features}, eps={eps})'
+        return ('{name}({num_features}, eps={eps}, affine={affine})'
                 .format(name=self.__class__.__name__, **self.__dict__))
 
 
-class InstanceNorm1d(_InstanceNorm):
+class LayerNorm1d(_LayerNorm):
     r"""Applies Layer Normalization over a 2d or 3d input that is seen as a mini-batch.
 
     .. math::
 
-        y = \frac{x - mean[x]}{ \sqrt{Var[x]} + \epsilon} * gamma + beta
+        y = \gamma * \frac{x - \mu_x}{\sigma_x + \epsilon} + \beta
 
     The mean and standard-deviation are calculated per-dimension separately
     for each object in a mini-batch. Gamma and beta are learnable parameter vectors
     of size C (where C is the input size).
 
-    At evaluation time (`.eval()`), the default behaviour of the InstanceNorm module stays the same
-    i.e. running mean/variance is NOT used for normalization. One can force using stored
-    mean and variance with `.train(False)` method.
-
     Args:
         num_features: num_features from an expected input of size `batch_size x num_features x width`
         eps: a value added to the denominator for numerical stability. Default: 1e-5
-        momentum: the value used for the running_mean and running_var computation. Default: 0.1
         affine: a boolean value that when set to true, gives the layer learnable affine parameters.
 
     Shape:
@@ -86,9 +87,9 @@ class InstanceNorm1d(_InstanceNorm):
 
     Examples:
         >>> # Without Learnable Parameters
-        >>> m = nn.InstanceNorm1d(100)
+        >>> m = nn.LayerNorm1d(100)
         >>> # With Learnable Parameters
-        >>> m = nn.InstanceNorm1d(100, affine=True)
+        >>> m = nn.LayerNorm1d(100, affine=True)
         >>> input = autograd.Variable(torch.randn(20, 100, 40))
         >>> output = m(input)
     """
@@ -97,28 +98,23 @@ class InstanceNorm1d(_InstanceNorm):
         if input.dim() != 3:
             raise ValueError('expected 3D input (got {}D input)'
                              .format(input.dim()))
-        super(InstanceNorm1d, self)._check_input_dim(input)
+        super(LayerNorm1d, self)._check_input_dim(input)
 
 
-class InstanceNorm2d(_InstanceNorm):
-    r"""Applies Layer Normalization over a 4d input that is seen as a mini-batch of 3d inputs
+class LayerNorm2d(_LayerNorm):
+    r"""Applies Layer Normalization over a 4d input that is seen as a mini-batch of 3d inputs.
 
     .. math::
 
-        y = \frac{x - mean[x]}{ \sqrt{Var[x]} + \epsilon} * gamma + beta
+        y = \gamma * \frac{x - \mu_x}{\sigma_x + \epsilon} + \beta
 
     The mean and standard-deviation are calculated per-dimension separately
     for each object in a mini-batch. Gamma and beta are learnable parameter vectors
     of size C (where C is the input size).
 
-    At evaluation time (`.eval()`), the default behaviour of the InstanceNorm module stays the same
-    i.e. running mean/variance is NOT used for normalization. One can force using stored
-    mean and variance with `.train(False)` method.
-
     Args:
         num_features: num_features from an expected input of size batch_size x num_features x height x width
         eps: a value added to the denominator for numerical stability. Default: 1e-5
-        momentum: the value used for the running_mean and running_var computation. Default: 0.1
         affine: a boolean value that when set to true, gives the layer learnable affine parameters.
 
     Shape:
@@ -127,9 +123,9 @@ class InstanceNorm2d(_InstanceNorm):
 
     Examples:
         >>> # Without Learnable Parameters
-        >>> m = nn.InstanceNorm2d(100)
+        >>> m = nn.LayerNorm2d(100)
         >>> # With Learnable Parameters
-        >>> m = nn.InstanceNorm2d(100, affine=True)
+        >>> m = nn.LayerNorm2d(100, affine=True)
         >>> input = autograd.Variable(torch.randn(20, 100, 35, 45))
         >>> output = m(input)
     """
@@ -138,29 +134,23 @@ class InstanceNorm2d(_InstanceNorm):
         if input.dim() != 4:
             raise ValueError('expected 4D input (got {}D input)'
                              .format(input.dim()))
-        super(InstanceNorm2d, self)._check_input_dim(input)
+        super(LayerNorm2d, self)._check_input_dim(input)
 
 
-class InstanceNorm3d(_InstanceNorm):
-    r"""Applies Layer Normalization over a 5d input that is seen as a mini-batch of 4d inputs
+class LayerNorm3d(_LayerNorm):
+    r"""Applies Layer Normalization over a 5d input that is seen as a mini-batch of 4d inputs.
 
     .. math::
 
-        y = \frac{x - mean[x]}{ \sqrt{Var[x]} + \epsilon} * gamma + beta
+        y = \gamma * \frac{x - \mu_x}{\sigma_x + \epsilon} + \beta
 
     The mean and standard-deviation are calculated per-dimension separately for each object in a mini-batch.
     Gamma and beta are learnable parameter vectors
     of size C (where C is the input size).
 
-    At evaluation time (`.eval()`), the default behaviour of the InstanceNorm module stays the same
-    i.e. running mean/variance is NOT used for normalization. One can force using stored
-    mean and variance with `.train(False)` method.
-
-
     Args:
         num_features: num_features from an expected input of size batch_size x num_features x depth x height x width
         eps: a value added to the denominator for numerical stability. Default: 1e-5
-        momentum: the value used for the running_mean and running_var computation. Default: 0.1
         affine: a boolean value that when set to true, gives the layer learnable affine parameters.
 
     Shape:
@@ -169,9 +159,9 @@ class InstanceNorm3d(_InstanceNorm):
 
     Examples:
         >>> # Without Learnable Parameters
-        >>> m = nn.InstanceNorm3d(100)
+        >>> m = nn.LayerNorm3d(100)
         >>> # With Learnable Parameters
-        >>> m = nn.InstanceNorm3d(100, affine=True)
+        >>> m = nn.LayerNorm3d(100, affine=True)
         >>> input = autograd.Variable(torch.randn(20, 100, 35, 45, 10))
         >>> output = m(input)
     """
@@ -180,4 +170,4 @@ class InstanceNorm3d(_InstanceNorm):
         if input.dim() != 5:
             raise ValueError('expected 5D input (got {}D input)'
                              .format(input.dim()))
-        super(InstanceNorm3d, self)._check_input_dim(input)
+        super(LayerNorm3d, self)._check_input_dim(input)

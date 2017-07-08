@@ -43,7 +43,7 @@ class InstanceNorm1d(_InstanceNorm):
 
     .. math::
 
-        y = \frac{x - mean[x]}{ \sqrt{Var[x]} + \epsilon} * gamma + beta
+        y = \gamma * \frac{x - \mu_x}{\sigma_x + \epsilon} + \beta
 
     The mean and standard-deviation are calculated per-dimension separately
     for each object in a mini-batch. Gamma and beta are learnable parameter vectors
@@ -83,11 +83,11 @@ class InstanceNorm1d(_InstanceNorm):
 
 
 class InstanceNorm2d(_InstanceNorm):
-    r"""Applies Instance Normalization over a 4d input that is seen as a mini-batch of 3d inputs
+    r"""Applies Instance Normalization over a 4d input that is seen as a mini-batch of 3d inputs.
 
     .. math::
 
-        y = \frac{x - mean[x]}{ \sqrt{Var[x]} + \epsilon} * gamma + beta
+        y = \gamma * \frac{x - \mu_x}{\sigma_x + \epsilon} + \beta
 
     The mean and standard-deviation are calculated per-dimension separately
     for each object in a mini-batch. Gamma and beta are learnable parameter vectors
@@ -127,11 +127,11 @@ class InstanceNorm2d(_InstanceNorm):
 
 
 class InstanceNorm3d(_InstanceNorm):
-    r"""Applies Instance Normalization over a 5d input that is seen as a mini-batch of 4d inputs
+    r"""Applies Instance Normalization over a 5d input that is seen as a mini-batch of 4d inputs.
 
     .. math::
 
-        y = \frac{x - mean[x]}{ \sqrt{Var[x]} + \epsilon} * gamma + beta
+        y = \gamma * \frac{x - \mu_x}{\sigma_x + \epsilon} + \beta
 
     The mean and standard-deviation are calculated per-dimension separately for each object in a mini-batch.
     Gamma and beta are learnable parameter vectors

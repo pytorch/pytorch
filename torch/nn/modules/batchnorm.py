@@ -53,7 +53,7 @@ class BatchNorm1d(_BatchNorm):
 
     .. math::
 
-        y = \frac{x - mean[x]}{ \sqrt{Var[x] + \epsilon}} * gamma + beta
+        y = \gamma * \frac{x - \mu_x}{\sigma_x + \epsilon} + \beta
 
     The mean and standard-deviation are calculated per-dimension over
     the mini-batches and gamma and beta are learnable parameter vectors
@@ -91,11 +91,11 @@ class BatchNorm1d(_BatchNorm):
 
 
 class BatchNorm2d(_BatchNorm):
-    r"""Applies Batch Normalization over a 4d input that is seen as a mini-batch of 3d inputs
+    r"""Applies Batch Normalization over a 4d input that is seen as a mini-batch of 3d inputs.
 
     .. math::
 
-        y = \frac{x - mean[x]}{ \sqrt{Var[x] + \epsilon}} * gamma + beta
+        y = \gamma * \frac{x - \mu_x}{\sigma_x + \epsilon} + \beta
 
     The mean and standard-deviation are calculated per-dimension over
     the mini-batches and gamma and beta are learnable parameter vectors
@@ -133,11 +133,11 @@ class BatchNorm2d(_BatchNorm):
 
 
 class BatchNorm3d(_BatchNorm):
-    r"""Applies Batch Normalization over a 5d input that is seen as a mini-batch of 4d inputs
+    r"""Applies Batch Normalization over a 5d input that is seen as a mini-batch of 4d inputs.
 
     .. math::
 
-        y = \frac{x - mean[x]}{ \sqrt{Var[x] + \epsilon}} * gamma + beta
+        y = \gamma * \frac{x - \mu_x}{\sigma_x + \epsilon} + \beta
 
     The mean and standard-deviation are calculated per-dimension over
     the mini-batches and gamma and beta are learnable parameter vectors
