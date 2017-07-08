@@ -49,7 +49,7 @@ class _BatchNorm(Module):
 
 
 class BatchNorm1d(_BatchNorm):
-    r"""Applies Batch Normalization over a 2d or 3d input that is seen as a mini-batch.
+    r"""Applies Batch Normalization over a 2D or 3D input that is seen as a mini-batch.
 
     .. math::
 
@@ -91,7 +91,7 @@ class BatchNorm1d(_BatchNorm):
 
 
 class BatchNorm2d(_BatchNorm):
-    r"""Applies Batch Normalization over a 4d input that is seen as a mini-batch of 3d inputs.
+    r"""Applies Batch Normalization over a 4D input that is seen as a mini-batch of 3D inputs.
 
     .. math::
 
@@ -133,7 +133,7 @@ class BatchNorm2d(_BatchNorm):
 
 
 class BatchNorm3d(_BatchNorm):
-    r"""Applies Batch Normalization over a 5d input that is seen as a mini-batch of 4d inputs.
+    r"""Applies Batch Normalization over a 5D input that is seen as a mini-batch of 4D inputs.
 
     .. math::
 

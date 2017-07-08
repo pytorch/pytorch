@@ -19,46 +19,29 @@ class _LayerNorm(Module):
 
     def reset_parameters(self):
         if self.affine:
-            self.weight.fill_(1)
-            self.bias.zero_()
+            self.weight.data.fill_(1)
+            self.bias.data.zero_()
 
     def _check_input_dim(self, input):
-        if input.size(1) != self.weight.nelement():
+        if self.affine and input.size(1) != self.weight.nelement():
             raise ValueError('got {}-feature tensor, expected {}'
                              .format(input.size(1), self.num_features))
 
     def forward(self, input):
         self._check_input_dim(input)
 
-        mean = input.mean(-1, keepdim=True)
-        std = input.std(-1, keepdim=True)
-        return self.gamma * (input - mean) / (std + self.eps) + self.beta
+        mean = input.mean(1, keepdim=True)
+        std = input.std(1, keepdim=True)
+        output = (input - mean.expand_as(input)) / (std.expand_as(input) + self.eps)
 
-        """
-        b, c = input.size(0), input.size(1)
-
-        # Repeat stored stats and affine transform params
-        running_mean = self.running_mean.repeat(b)
-        running_var = self.running_var.repeat(b)
-
-        weight, bias = None, None
         if self.affine:
-            weight = self.weight.repeat(b)
-            bias = self.bias.repeat(b)
-
-        # Apply instance norm
-        input_reshaped = input.contiguous().view(1, b * c, *input.size()[2:])
-
-        out = F.batch_norm(
-            input_reshaped, running_mean, running_var, weight, bias,
-            True, self.momentum, self.eps)
-
-        # Reshape back
-        self.running_mean.copy_(running_mean.view(b, c).mean(0, keepdim=False))
-        self.running_var.copy_(running_var.view(b, c).mean(0, keepdim=False))
-
-        return out.view(b, c, *input.size()[2:])
-        """
+            # Resize weights and biases to match dims
+            resized_weight = self.weight.view(1, self.num_features, *map(lambda x: 1, input.size()[2:])).expand_as(input)
+            resized_bias = self.bias.view(1, self.num_features, *map(lambda x: 1, input.size()[2:])).expand_as(input)
+            # Apply weight and bias
+            output = resized_weight * output + resized_bias
+        
+        return output
 
     def __repr__(self):
         return ('{name}({num_features}, eps={eps}, affine={affine})'
@@ -66,7 +49,7 @@ class _LayerNorm(Module):
 
 
 class LayerNorm1d(_LayerNorm):
-    r"""Applies Layer Normalization over a 2d or 3d input that is seen as a mini-batch.
+    r"""Applies Layer Normalization over a 2D or 3D input that is seen as a mini-batch.
 
     .. math::
 
@@ -82,8 +65,8 @@ class LayerNorm1d(_LayerNorm):
         affine: a boolean value that when set to true, gives the layer learnable affine parameters.
 
     Shape:
-        - Input: :math:`(N, C, L)`
-        - Output: :math:`(N, C, L)` (same shape as input)
+        - Input: :math:`(N, C)` or :math:`(N, C, L)`
+        - Output: :math:`(N, C)` or :math:`(N, C, L)` (same shape as input)
 
     Examples:
         >>> # Without Learnable Parameters
@@ -95,14 +78,14 @@ class LayerNorm1d(_LayerNorm):
     """
 
     def _check_input_dim(self, input):
-        if input.dim() != 3:
-            raise ValueError('expected 3D input (got {}D input)'
+        if input.dim() != 2 and input.dim() != 3:
+            raise ValueError('expected 2D or 3D input (got {}D input)'
                              .format(input.dim()))
         super(LayerNorm1d, self)._check_input_dim(input)
 
 
 class LayerNorm2d(_LayerNorm):
-    r"""Applies Layer Normalization over a 4d input that is seen as a mini-batch of 3d inputs.
+    r"""Applies Layer Normalization over a 4D input that is seen as a mini-batch of 3D inputs.
 
     .. math::
 
@@ -138,7 +121,7 @@ class LayerNorm2d(_LayerNorm):
 
 
 class LayerNorm3d(_LayerNorm):
-    r"""Applies Layer Normalization over a 5d input that is seen as a mini-batch of 4d inputs.
+    r"""Applies Layer Normalization over a 5D input that is seen as a mini-batch of 4D inputs.
 
     .. math::
 
