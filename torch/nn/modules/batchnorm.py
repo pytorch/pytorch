@@ -31,13 +31,7 @@ class _BatchNorm(Module):
             self.weight.data.uniform_()
             self.bias.data.zero_()
 
-    def _check_input_dim(self, input):
-        if input.size(1) != self.running_mean.nelement():
-            raise ValueError('got {}-feature tensor, expected {}'
-                             .format(input.size(1), self.num_features))
-
     def forward(self, input):
-        self._check_input_dim(input)
         return F.batch_norm(
             input, self.running_mean, self.running_var, self.weight, self.bias,
             self.training, self.momentum, self.eps)
