@@ -165,7 +165,7 @@ PyObject * THPModule_fromNumpy(PyObject *_unused, PyObject *array)
   } else if (type == NPY_FLOAT) {
     return PyObject_CallFunctionObjArgs(THPFloatTensorClass, array, NULL);
   } else if (type == NPY_HALF) {
-    return PyObject_CallFunctionObjArgs(THPHalfTensorClass, arraym NULL);
+    return PyObject_CallFunctionObjArgs(THPHalfTensorClass, array, NULL);
   } else if (type == NPY_INT64) {
     return PyObject_CallFunctionObjArgs(THPLongTensorClass, array, NULL);
   } else if (type == NPY_INT32) {
