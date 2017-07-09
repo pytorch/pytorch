@@ -179,7 +179,7 @@ conda install -c soumith magma-cuda80 # or magma-cuda75 if CUDA 7.5
 On OSX
 ```bash
 export CMAKE_PREFIX_PATH=[anaconda root directory]
-conda install numpy pyyaml setuptools cmake cffi
+conda install numpy pyyaml setuptools cmake cffi mkl
 ```
 
 #### Install PyTorch
