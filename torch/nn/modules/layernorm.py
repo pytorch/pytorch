@@ -1,6 +1,7 @@
 import torch
 from .module import Module
 from torch.nn.parameter import Parameter
+from .. import functional as F
 
 
 class _LayerNorm(Module):
@@ -30,18 +31,7 @@ class _LayerNorm(Module):
     def forward(self, input):
         self._check_input_dim(input)
 
-        mean = input.mean(1, keepdim=True)
-        std = input.std(1, keepdim=True)
-        output = (input - mean.expand_as(input)) / (std.expand_as(input) + self.eps)
-
-        if self.affine:
-            # Resize weights and biases to match dims
-            resized_weight = self.weight.view(1, self.num_features, *map(lambda x: 1, input.size()[2:]))
-            resized_bias = self.bias.view(1, self.num_features, *map(lambda x: 1, input.size()[2:]))
-            # Apply weight and bias
-            output = resized_weight.expand_as(input) * output + resized_bias.expand_as(input)
-
-        return output
+        return F.layer_norm(input, weight=self.weight, bias=self.bias, eps=self.eps)
 
     def __repr__(self):
         return ('{name}({num_features}, eps={eps}, affine={affine})'

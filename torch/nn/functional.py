@@ -556,6 +556,22 @@ def batch_norm(input, running_mean, running_var, weight=None, bias=None,
     return f(input, weight, bias)
 
 
+def layer_norm(input, weight=None, bias=None, eps=1e-5):
+    mean = input.mean(1, keepdim=True)
+    std = input.std(1, keepdim=True)
+    output = (input - mean.expand_as(input)) / (std.expand_as(input) + eps)
+
+    # Resize weights and biases to match dims
+    if weight is not None:
+        resized_weight = weight.view(1, input.size(1), *map(lambda x: 1, input.size()[2:]))
+        output = resized_weight.expand_as(input) * output
+    if bias is not None:        
+        resized_bias = bias.view(1, input.size(1), *map(lambda x: 1, input.size()[2:]))
+        output = ouput + resized_bias.expand_as(input)
+
+    return output
+
+
 # loss
 
 def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100):
