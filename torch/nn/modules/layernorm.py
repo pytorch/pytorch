@@ -36,11 +36,11 @@ class _LayerNorm(Module):
 
         if self.affine:
             # Resize weights and biases to match dims
-            resized_weight = self.weight.view(1, self.num_features, *map(lambda x: 1, input.size()[2:])).expand_as(input)
-            resized_bias = self.bias.view(1, self.num_features, *map(lambda x: 1, input.size()[2:])).expand_as(input)
+            resized_weight = self.weight.view(1, self.num_features, *map(lambda x: 1, input.size()[2:]))
+            resized_bias = self.bias.view(1, self.num_features, *map(lambda x: 1, input.size()[2:]))
             # Apply weight and bias
-            output = resized_weight * output + resized_bias
-        
+            output = resized_weight.expand_as(input) * output + resized_bias.expand_as(input)
+
         return output
 
     def __repr__(self):
