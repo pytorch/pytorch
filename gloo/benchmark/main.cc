@@ -16,6 +16,7 @@
 #include "gloo/barrier_all_to_all.h"
 #include "gloo/barrier_all_to_one.h"
 #include "gloo/broadcast_one_to_all.h"
+#include "gloo/pairwise_exchange.h"
 #include "gloo/common/common.h"
 #include "gloo/common/logging.h"
 #include "gloo/context.h"
@@ -136,6 +137,16 @@ class BroadcastOneToAllBenchmark : public Benchmark<T> {
   const int rootRank_ = 0;
 };
 
+template <typename T>
+class PairwiseExchangeBenchmark : public Benchmark<T> {
+  using Benchmark<T>::Benchmark;
+ public:
+  virtual void initialize(int elements) override {
+    this->algorithm_.reset(new PairwiseExchange(
+        this->context_, elements, this->getOptions().destinations));
+  }
+};
+
 } // namespace
 
 #define RUN_BENCHMARK(T)                                                   \
@@ -171,6 +182,10 @@ class BroadcastOneToAllBenchmark : public Benchmark<T> {
     fn = [&](std::shared_ptr<Context>& context) {                          \
       return gloo::make_unique<BroadcastOneToAllBenchmark<T>>(context, x); \
     };                                                                     \
+  } else if (x.benchmark == "pairwise_exchange") {                         \
+    fn = [&](std::shared_ptr<Context>& context) {                          \
+      return gloo::make_unique<PairwiseExchangeBenchmark<T>>(context, x);  \
+    };                                                                     \
   }                                                                        \
   if (!fn) {                                                               \
     GLOO_ENFORCE(false, "Invalid algorithm: ", x.benchmark);               \
@@ -180,8 +195,9 @@ class BroadcastOneToAllBenchmark : public Benchmark<T> {
 
 int main(int argc, char** argv) {
   auto x = benchmark::parseOptions(argc, argv);
-
-  if (x.halfPrecision) {
+  if (x.benchmark == "pairwise_exchange") {
+    RUN_BENCHMARK(char);
+  } else if (x.halfPrecision) {
     RUN_BENCHMARK(float16);
   } else {
     RUN_BENCHMARK(float);

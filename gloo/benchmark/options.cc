@@ -52,6 +52,8 @@ static void usage(int status, const char* argv0) {
   X("      --nanos            Display timing data in nanos instead of micros");
   X("      --gpudirect        Use GPUDirect (CUDA only)");
   X("      --halfprecision    Use 16-bit floating point values");
+  X("      --destinations     Number of separate destinations per host in "
+                              "pairwise exchange benchmark");
   X("");
   X("BENCHMARK is one of:");
   X("  allreduce_ring");
@@ -59,6 +61,7 @@ static void usage(int status, const char* argv0) {
   X("  allreduce_halving_doubling");
   X("  barrier_all_to_all");
   X("  broadcast_one_to_all");
+  X("  pairwise_exchange");
   X("");
 
   exit(status);
@@ -101,6 +104,7 @@ struct options parseOptions(int argc, char** argv) {
       {"inputs", required_argument, nullptr, 0x1008},
       {"gpudirect", no_argument, nullptr, 0x1009},
       {"halfprecision", no_argument, nullptr, 0x100a},
+      {"destinations", required_argument, nullptr, 0x100b},
       {"help", no_argument, nullptr, 0xffff},
       {nullptr, 0, nullptr, 0}};
 
@@ -191,6 +195,11 @@ struct options parseOptions(int argc, char** argv) {
       case 0x100a: // --halfprecision
       {
         result.halfPrecision = true;
+        break;
+      }
+      case 0x100b: // --destinations
+      {
+        result.destinations = atoi(optarg);
         break;
       }
       case 0xffff: // --help

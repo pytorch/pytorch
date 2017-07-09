@@ -41,6 +41,9 @@ class Benchmark {
 
   virtual void verify() {}
 
+  const options& getOptions() const {
+    return options_;
+  }
  protected:
   virtual std::vector<T*> allocate(int inputs, int elements) {
     std::vector<T*> ptrs;

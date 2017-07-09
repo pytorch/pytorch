@@ -187,3 +187,15 @@ Broadcast contents of buffer on one process to other P-1 processes.
 _Non-root processes_: receive buffer from root.
 
 _Root process_: send buffer to P-1 processes.
+
+## pairwise_exchange
+
+* Communication steps: variable
+* Bytes on the wire: S
+
+A communication pattern similar to the halving-doubling reduce-scatter,
+simplified for benchmarking purposes. The number of communication steps, C
+(which must be between 1 and lg(P)) is specified as input to the algorithm. In
+each step, the set of nodes is partitioned into pairs as in the corresponding
+step of halving-doubling reduce-scatter. Unlike the reduce-scatter, however, the
+buffer size sent in each step is the same (equal to S/C).

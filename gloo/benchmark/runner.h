@@ -44,7 +44,7 @@ class Runner {
   std::shared_ptr<Context> newContext();
 
   void printHeader();
-  void printDistribution(int elements);
+  void printDistribution(int elements, int elemSize);
 
   options options_;
   std::shared_ptr<transport::Device> device_;

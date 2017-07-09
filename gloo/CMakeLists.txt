@@ -22,6 +22,7 @@ list(APPEND GLOO_HDRS
   "${CMAKE_CURRENT_SOURCE_DIR}/broadcast_one_to_all.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/context.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/math.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/pairwise_exchange.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/types.h"
   )
 

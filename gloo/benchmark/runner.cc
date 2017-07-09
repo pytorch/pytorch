@@ -180,7 +180,7 @@ void Runner::run(BenchmarkFn<T>& fn, int n) {
       samples_.add(dt);
     }
 
-    printDistribution(n);
+    printDistribution(n, sizeof(T));
 
     // Barrier to make sure everybody arrived here and the temporary
     // context and benchmark can be destructed.
@@ -215,18 +215,23 @@ void Runner::printHeader() {
   if (options_.showNanos) {
     suffix = "(ns)";
   }
+  std::string bwSuffix = "(GB/s)";
 
   std::cout << std::right;
   std::cout << std::setw(11) << "elements";
-  std::cout << std::setw(11) << ("min " + suffix);
-  std::cout << std::setw(11) << ("p50 " + suffix);
-  std::cout << std::setw(11) << ("p99 " + suffix);
-  std::cout << std::setw(11) << ("max " + suffix);
+  std::cout << std::setw(11) << ("minL " + suffix);
+  std::cout << std::setw(11) << ("p50L " + suffix);
+  std::cout << std::setw(11) << ("p99L " + suffix);
+  std::cout << std::setw(11) << ("maxL " + suffix);
+  std::cout << std::setw(15) << ("minBW " + bwSuffix);
+  std::cout << std::setw(15) << ("p50BW " + bwSuffix);
+  std::cout << std::setw(15) << ("p99BW " + bwSuffix);
+  std::cout << std::setw(15) << ("maxBW " + bwSuffix);
   std::cout << std::setw(11) << "samples";
   std::cout << std::endl;
 }
 
-void Runner::printDistribution(int elements) {
+void Runner::printDistribution(int elements, int elemSize) {
   if (options_.contextRank != 0) {
     return;
   }
@@ -236,16 +241,26 @@ void Runner::printDistribution(int elements) {
     div = 1;
   }
 
+  auto dataSize = elements * elemSize * 1e9 / 1024 / 1024 / 1024;
+
   GLOO_ENFORCE_GE(samples_.size(), 1, "No samples found");
   std::cout << std::setw(11) << elements;
   std::cout << std::setw(11) << samples_.percentile(0.00) / div;
   std::cout << std::setw(11) << samples_.percentile(0.50) / div;
-  std::cout << std::setw(11) << samples_.percentile(0.90) / div;
   std::cout << std::setw(11) << samples_.percentile(0.99) / div;
+  std::cout << std::setw(11) << samples_.percentile(0.999999) / div;
+  std::cout << std::setw(15) << std::setprecision(4)
+            << (double)dataSize / samples_.percentile(0.999999);
+  std::cout << std::setw(15) << (double)dataSize / samples_.percentile(0.50);
+  std::cout << std::setw(15)
+            << (double)dataSize / samples_.percentile(0.01);
+  std::cout << std::setw(15) << (double)dataSize / samples_.percentile(0.00);
   std::cout << std::setw(11) << samples_.size();
   std::cout << std::endl;
 }
 
+template void Runner::run(BenchmarkFn<char>& fn);
+template void Runner::run(BenchmarkFn<char>& fn, int n);
 template void Runner::run(BenchmarkFn<float>& fn);
 template void Runner::run(BenchmarkFn<float>& fn, int n);
 template void Runner::run(BenchmarkFn<float16>& fn);
