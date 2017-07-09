@@ -8,8 +8,6 @@ class _InstanceNorm(_BatchNorm):
             num_features, eps, momentum, affine)
 
     def forward(self, input):
-        self._check_input_dim(input)
-
         b, c = input.size(0), input.size(1)
 
         # Repeat stored stats and affine transform params

@@ -2258,6 +2258,40 @@ class TestNN(NNTestCase):
         weight = torch.rand(4)
         self.assertEqual(nn.BCEWithLogitsLoss(weight)(output, target), nn.BCELoss(weight)(sigmoid(output), target))
 
+    def test_batchnorm_raises_error_if_running_mean_is_not_same_size_as_input(self):
+        input = Variable(torch.rand(2, 10))
+        running_var = torch.rand(10)
+        wrong_sizes = [9, 11]
+        for size in wrong_sizes:
+            with self.assertRaises(RuntimeError):
+                F.batch_norm(input, torch.rand(size), running_var)
+
+    def test_batchnorm_raises_error_if_running_var_is_not_same_size_as_input(self):
+        input = Variable(torch.rand(2, 10))
+        running_mean = torch.rand(10)
+        wrong_sizes = [9, 11]
+        for size in wrong_sizes:
+            with self.assertRaises(RuntimeError):
+                F.batch_norm(input, running_mean, torch.rand(size))
+
+    def test_batchnorm_raises_error_if_weight_is_not_same_size_as_input(self):
+        input = Variable(torch.rand(2, 10))
+        running_mean = torch.rand(10)
+        running_var = torch.rand(10)
+        wrong_sizes = [9, 11]
+        for size in wrong_sizes:
+            with self.assertRaises(RuntimeError):
+                F.batch_norm(input, running_mean, running_var, weight=Parameter(torch.rand(size)))
+
+    def test_batchnorm_raises_error_if_bias_is_not_same_size_as_input(self):
+        input = Variable(torch.rand(2, 10))
+        running_mean = torch.rand(10)
+        running_var = torch.rand(10)
+        wrong_sizes = [9, 11]
+        for size in wrong_sizes:
+            with self.assertRaises(RuntimeError):
+                F.batch_norm(input, running_mean, running_var, bias=Parameter(torch.rand(size)))
+
     def test_batchnorm_eval(self):
         types = (torch.FloatTensor,)
         if TEST_CUDA:
