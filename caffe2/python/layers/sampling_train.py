@@ -28,13 +28,11 @@ class SamplingTrain(ModelLayer):
         layer_class = get_layer_class(prediction_layer)
         assert issubclass(layer_class, SamplingTrainableMixin)
 
-        assert schema.is_schema_subset(
-            schema.Struct(
-                ('indices', schema.Scalar()),
-                ('input', schema.Scalar()),
-            ),
-            input_record
-        )
+        assert 'indices' in input_record
+        assert isinstance(input_record.indices, schema.Scalar),\
+            "input_record.indices is expected to be a schema.Scalar"
+        assert 'input' in input_record
+
         self.subtract_log_odd = subtract_log_odd
         if self.subtract_log_odd:
             assert 'sampling_prob' in input_record
