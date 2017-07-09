@@ -23,14 +23,7 @@ class _LayerNorm(Module):
             self.weight.data.fill_(1)
             self.bias.data.zero_()
 
-    def _check_input_dim(self, input):
-        if self.affine and input.size(1) != self.weight.nelement():
-            raise ValueError('got {}-feature tensor, expected {}'
-                             .format(input.size(1), self.num_features))
-
     def forward(self, input):
-        self._check_input_dim(input)
-
         return F.layer_norm(input, weight=self.weight, bias=self.bias, eps=self.eps)
 
     def __repr__(self):
