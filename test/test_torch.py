@@ -2823,16 +2823,18 @@ class TestTorch(TestCase):
                 # first, third rows,
                 [[0, 2], slice(None)],
 
-                # dupes
-                [slice(None), [0, 1, 1, 2, 2]],
-
                 # weird shape
                 [slice(None), [[0, 1],
                                [2, 3]]]
             ]
 
-            for indexer in indices_to_test:
+            # only test dupes on gets
+            get_indices_to_test = indices_to_test + [[slice(None), [0, 1, 1, 2, 2]]]
+
+            for indexer in get_indices_to_test:
                 assert_get_eq(reference, indexer)
+
+            for indexer in indices_to_test:
                 assert_set_eq(reference, indexer, 44)
                 assert_set_eq(reference,
                               indexer,
