@@ -542,7 +542,8 @@ class CyclicLR(object):
         if batch_iteration is None:
             batch_iteration = self.last_batch_iteration + 1
         self.last_batch_iteration = batch_iteration
-        self._update_lr()
+        for param_group, lr in zip(self.optimizer.param_groups, self.get_lr()):
+            param_group['lr'] = lr
 
     def _triangular_scale_fn(self, x):
         return 1.
@@ -553,11 +554,12 @@ class CyclicLR(object):
     def _exp_range_scale_fn(self, x):
         return self.gamma**(x)
 
-    def _update_lr(self):
+    def get_lr(self):
         step_size = float(self.step_size)
         cycle = np.floor(1 + self.last_batch_iteration / (2 * step_size))
         x = np.abs(self.last_batch_iteration / step_size - 2 * cycle + 1)
 
+        lrs = []
         param_lrs = zip(self.optimizer.param_groups, self.base_lrs, self.max_lrs)
         for param_group, base_lr, max_lr in param_lrs:
             base_height = (max_lr - base_lr) * np.maximum(0, (1 - x))
@@ -565,4 +567,5 @@ class CyclicLR(object):
                 lr = base_lr + base_height * self.scale_fn(cycle)
             else:
                 lr = base_lr + base_height * self.scale_fn(self.last_batch_iteration)
-            param_group['lr'] = lr
+            lrs.append(lr)
+        return lrs
