@@ -16,11 +16,11 @@ template <typename T>
 __global__ void LeakyReluGradientKernel(
     const int N,
     const T alpha,
-    const T* X,
+    const T* Y,
     const T* dY,
     T* dX) {
   CUDA_1D_KERNEL_LOOP(i, N) {
-    dX[i] = X[i] >= 0 ? dY[i] : dY[i] * alpha;
+    dX[i] = Y[i] >= 0 ? dY[i] : dY[i] * alpha;
   }
 }
 } // namespace
@@ -42,19 +42,19 @@ bool LeakyReluOp<float, CUDAContext>::RunOnDevice() {
 
 template <>
 bool LeakyReluGradientOp<float, CUDAContext>::RunOnDevice() {
-  const auto& X = Input(0);
+  const auto& Y = Input(0);
   const auto& dY = Input(1);
   auto* dX = Output(0);
-  dX->ResizeLike(X);
-  CAFFE_ENFORCE_EQ(X.size(), dY.size());
+  dX->ResizeLike(Y);
+  CAFFE_ENFORCE_EQ(Y.size(), dY.size());
   LeakyReluGradientKernel<<<
-      CAFFE_GET_BLOCKS(X.size()),
+      CAFFE_GET_BLOCKS(Y.size()),
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
-      X.size(),
+      Y.size(),
       alpha_,
-      X.data<float>(),
+      Y.data<float>(),
       dY.data<float>(),
       dX->mutable_data<float>());
   return true;
