@@ -523,13 +523,13 @@ class CyclicLR(object):
 
         if scale_fn is None:
             if self.mode == 'triangular':
-                self.scale_fn = lambda x: 1.
+                self.scale_fn = self._triangular_scale_fn
                 self.scale_mode = 'cycle'
             elif self.mode == 'triangular2':
-                self.scale_fn = lambda x: 1 / (2. ** (x - 1))
+                self.scale_fn = self._triangular2_scale_fn
                 self.scale_mode = 'cycle'
             elif self.mode == 'exp_range':
-                self.scale_fn = lambda x: gamma**(x)
+                self.scale_fn = self._exp_range_scale_fn
                 self.scale_mode = 'iterations'
         else:
             self.scale_fn = scale_fn
@@ -543,6 +543,15 @@ class CyclicLR(object):
             batch_iteration = self.last_batch_iteration + 1
         self.last_batch_iteration = batch_iteration
         self._update_lr()
+
+    def _triangular_scale_fn(self, x):
+        return 1.
+
+    def _triangular2_scale_fn(self, x):
+        return 1 / (2. ** (x - 1))
+
+    def _exp_range_scale_fn(self, x):
+        return self.gamma**(x)
 
     def _update_lr(self):
         step_size = float(self.step_size)
