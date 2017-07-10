@@ -7,17 +7,14 @@
 #include <iostream>
 #include <iomanip>
 
-#ifndef HAS_DEFAULTFLOAT
-namespace std {
-inline std::ios_base& defaultfloat(std::ios_base& __base)
-{
+
+namespace at {
+
+//not all C++ compilers have default float so we define our own here
+inline std::ios_base& defaultfloat(std::ios_base& __base) {
   __base.unsetf(std::ios_base::floatfield);
   return __base;
 }
-}
-#endif
-
-namespace at {
 
 std::ostream& operator<<(std::ostream & out, IntList list) {
   int i = 0;
@@ -100,7 +97,7 @@ static std::tuple<double, int64_t> __printFormat(std::ostream& stream, const Ten
       stream << std::scientific << std::setprecision(4);
     } else {
       sz = expMax + 1;
-      stream << std::defaultfloat;
+      stream << defaultfloat;
     }
   } else {
     if(expMax-expMin > 4) {
@@ -231,7 +228,7 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
   } else {
     Tensor tensor = tensor_.toType(getType(kCPU,kDouble)).contiguous();
     if(tensor.ndimension() == 0) {
-      stream << std::defaultfloat << tensor.data<double>()[0] << std::endl;
+      stream << defaultfloat << tensor.data<double>()[0] << std::endl;
       stream << "[ " << tensor_.pImpl->toString() << "{} ]";
     } else if(tensor.ndimension() == 1) {
       double scale;

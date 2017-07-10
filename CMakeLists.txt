@@ -84,25 +84,6 @@ ELSE()
   ENDIF()
 ENDIF()
 
-include(CheckCXXSourceCompiles)
-check_cxx_source_compiles(
-"
-#include <iostream>
-#include <iomanip>
-
-int main()
-{
-  std::cout << std::defaultfloat;
-  return 0;
-}
-"
-HAS_DEFAULTFLOAT
-)
-
-IF(HAS_DEFAULTFLOAT)
-  ADD_DEFINITIONS(-DHAS_DEFAULTFLOAT)
-ENDIF()
-
 # Can be compiled standalone
 IF(NOT TENSOR_LIB_INSTALL_BIN_DIR OR NOT TENSOR_LIB_INSTALL_LIB_DIR OR NOT TENSOR_LIB_INSTALL_INCLUDE_DIR)
   SET(TENSOR_LIB_INSTALL_BIN_DIR "bin" CACHE PATH "TENSOR_LIB install binary subdirectory")
