@@ -526,7 +526,7 @@ class TestNN(NNTestCase):
 
         l = nn.Linear(10, 20)
         net = Net()
-        data = torch.randn(5, 10)
+        data = Variable(torch.randn([5, 10]))
         net(data)
 
     def test_children(self):
