@@ -886,7 +886,6 @@ static THIndexTensor* THPTensor_(_calculateLinearIndices)(
     indexingElements *= broadcasted.find(i) != broadcasted.end() ?
       1 : THTensor_(size)(LIBRARY_STATE indexed.get(), i);
   }
-  THLongTensor *linearIndices = THLongTensor_newWithSize1d(indexingElements);
 
   // The broadcasted advanced indexing tensor might not be one-dimensional, but we are
   // generating a vector of indices, so we need to view the indexer as 1D prior to getting
@@ -907,23 +906,43 @@ static THIndexTensor* THPTensor_(_calculateLinearIndices)(
   }
   THLongStorage_free(indexerSize);
 
+#ifdef THC_GENERIC_FILE
+  // Call GPU kernel for index calculation
+  THCudaLongTensor *cudaIndices =
+    THCudaLongTensor_newWithSize1d(LIBRARY_STATE indexingElements);
+  long baseOffset = THTensor_(storageOffset)(LIBRARY_STATE indexed);
+
+  // Need to pass broadcast Tensors to API, pass NULL ptr for all empty
+  // (i.e. not-advanced indexed) dims
+  THCudaLongTensor *indexers[THTensor_(nDimension)(LIBRARY_STATE indexed.get())];
+
+  for (int i = 0; i < THTensor_(nDimension)(LIBRARY_STATE indexed.get()); ++i) {
+    bool adv = flattenedBroadcasters.find(i) != flattenedBroadcasters.end();
+    if (adv) {
+      THCudaLongTensor *bcIndices = THCudaLongTensor_newWithSize1d(
+        LIBRARY_STATE THLongTensor_nElement(flattenedBroadcasters[i].get()));
+      THCudaLongTensor_copyAsyncCPU(LIBRARY_STATE bcIndices, flattenedBroadcasters[i].get());
+      indexers[i] = bcIndices;
+    } else {
+      indexers[i] = NULL;
+    }
+    /* indexers[i] = flattenedBroadcasters.find(i) != flattenedBroadcasters.end() ? */
+    /*               flattenedBroadcasters[i].get() : */
+    /*               NULL; */
+  }
+
+  THTensor_(calculateAdvancedIndexingOffsets)(LIBRARY_STATE cudaIndices, indexed, baseOffset, indexers);
+
+  // TODO: free the cuda tensors
+  return cudaIndices;
+#else
+  THLongTensor *linearIndices = THLongTensor_newWithSize1d(indexingElements);
   long baseOffset = THTensor_(storageOffset)(LIBRARY_STATE indexed);
   for (ptrdiff_t i = 0; i < indexingElements; ++i) {
     long linearIdx = THPTensor_(_indexToOffset)(
         indexed, flattenedBroadcasters, i);
     THTensor_fastSet1d(linearIndices, i, baseOffset + linearIdx);
   }
-
-  // Need to copy to appropriate type, for example, if we calculated the
-  // indices on the CPU but need to use them on the GPU
-#ifdef THC_GENERIC_FILE
-  THIndexTensor *cudaIndices =
-    THIndexTensor_(newWithSize1d)(LIBRARY_STATE THLongTensor_nElement(linearIndices));
-  THIndexTensor_(copyAsyncCPU)(LIBRARY_STATE cudaIndices, linearIndices);
-  // need error check?
-  THLongTensor_free(linearIndices);
-  return cudaIndices;
-#else
   return linearIndices;
 #endif
 }

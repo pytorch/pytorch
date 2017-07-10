@@ -504,4 +504,61 @@ void THCTensor_(indexSelect)(THCState *state, THCTensor *dst, THCTensor *src, in
 #undef LARGE_INDEX
 }
 
+#define MAX_ADVINDEX_CALC_DIMS 5
+
+void THCTensor_(calculateAdvancedIndexingOffsets)(THCState *state,
+        THCudaLongTensor *output, THCTensor *indexed, ptrdiff_t baseOffset, THCudaLongTensor **indexers) {
+  int ndim = THCTensor_(nDimension)(state, indexed);
+  THAssert(ndim <= MAX_ADVINDEX_CALC_DIMS);
+
+  // TODO: check all Tensors on same GPU?
+  // TODO: check all indexers are contiguous and flat?
+
+  ptrdiff_t nElement = THCudaLongTensor_nElement(state, output);
+
+  /* for (int i = 0; i < ndim; ++i) { */
+  /*   printf("Indexing Tensor %d:", i); */
+  /*   if (indexers[i] == NULL) { */
+  /*     printf(" NULL\n"); */
+  /*   } else { */
+  /*     for (int j = 0; j < THCudaLongTensor_nElement(state, indexers[i]); ++j) { */
+  /*       printf(" %ld", THCudaLongTensor_get1d(state, indexers[i], j)); */
+  /*     } */
+  /*     printf("\n"); */
+  /*   } */
+  /* } */
+
+  // Set up arguments to pass to kernel
+  /* long sizes[MAX_ADVINDEX_CALC_DIMS]; */
+  /* long strides[MAX_ADVINDEX_CALC_DIMS]; */
+  /* bool adv[MAX_ADVINDEX_CALC_DIMS]; */
+  /* long *advIndexTensors[MAX_ADVINDEX_CALC_DIMS]; */
+
+  CLIData data;
+  for (int i = 0; i < ndim; ++i) {
+    data.adv[i] = indexers[i] != NULL;
+    data.sizes[i] = data.adv[i] ? THCudaLongTensor_nElement(state, indexers[i]) : THCTensor_(size)(state, indexed, i);
+    data.strides[i] = THCTensor_(stride)(state, indexed, i);
+    data.advIndexTensors[i] = data.adv[i] ? THCudaLongTensor_data(state, indexers[i]) : NULL;
+  }
+
+  const dim3 block = getApplyBlock();
+  dim3 grid;
+  THAssert(getApplyGrid(state, nElement, grid));
+
+  /* printf("launching kernel!\n"); */
+  /* calculateLinearIndices<<<grid, block, 0, THCState_getCurrentStream(state)>>>( */
+  calculateLinearIndices<<<1, 1, 0, THCState_getCurrentStream(state)>>>(
+    THCudaLongTensor_data(state, output),
+    nElement,
+    ndim,
+    baseOffset,
+    data
+  );
+
+  THCudaCheck(cudaGetLastError());
+}
+
+#undef MAX_ADVINDEX_CALC_DIMS
+
 #endif
