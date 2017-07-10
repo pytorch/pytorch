@@ -18,7 +18,18 @@ TH_EXTERNC void scopy_(int *n, float *x, int *incx, float *y, int *incy);
 TH_EXTERNC void daxpy_(int *n, double *a, double *x, int *incx, double *y, int *incy);
 TH_EXTERNC void saxpy_(int *n, float *a, float *x, int *incx, float *y, int *incy);
 TH_EXTERNC double ddot_(int *n, double *x, int *incx, double *y, int *incy);
+#ifdef BLAS_USE_CBLAS_DOT
+TH_EXTERNC float cblas_sdot(const int n, const float *x, const int incx, const float *y, const int incy);
+#ifndef THBlas_C_sdot_
+#define THBlas_C_sdot_
+inline ffloat sdot_(const int *n, const float *x, const int *incx, const float *y, const int *incy)
+{
+  return cblas_sdot(*n, x, *incx, y, *incy);
+}
+#endif
+#else
 TH_EXTERNC ffloat sdot_(int *n, float *x, int *incx, float *y, int *incy);
+#endif
 TH_EXTERNC void dgemv_(char *trans, int *m, int *n, double *alpha, double *a, int *lda, double *x, int *incx, double *beta, double *y, int *incy);
 TH_EXTERNC void sgemv_(char *trans, int *m, int *n, float *alpha, float *a, int *lda, float *x, int *incx, float *beta, float *y, int *incy);
 TH_EXTERNC void dger_(int *m, int *n, double *alpha, double *x, int *incx, double *y, int *incy, double *a, int *lda);
