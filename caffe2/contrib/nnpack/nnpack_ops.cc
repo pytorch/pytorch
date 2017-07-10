@@ -94,6 +94,9 @@ class NNPACKConvOp final : public ConvPoolOpBase<CPUContext> {
         this->order_ == StorageOrder::NCHW,
         "NNPack only supports NCHW order. Please consider adding "
         "TransposeOp with axes=[0, 3, 1, 2] before NNPack Conv.");
+    OPERATOR_NEEDS_FEATURE(
+        dilation_h() == 1 && dilation_w() == 1,
+        "The NNPack convolution does not support dilation yet.");
 #ifdef CAFFE2_USE_FBCODE
     // Facebook's nnpack build assumes existence of avx2, so we explicitly
     // check if the machine has avx2 support.
