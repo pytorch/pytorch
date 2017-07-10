@@ -515,6 +515,20 @@ class TestNN(NNTestCase):
         self.assertEqual(num_params(n), 3)
         self.assertEqual(num_params(s), 3)
 
+    def test_call_supports_python_dict_output(self):
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.l1 = l
+
+            def forward(self, *input):
+                return {"output": self.l1(input)}
+
+        l = nn.Linear(10, 20)
+        net = Net()
+        data = torch.randn(5, 10)
+        net(data)
+
     def test_children(self):
         l1 = nn.Linear(2, 2)
         l2 = nn.Linear(2, 2)
