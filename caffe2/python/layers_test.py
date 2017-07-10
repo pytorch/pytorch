@@ -31,6 +31,20 @@ from caffe2.python.layers.layers import (
 
 class TestLayers(LayersTestCase):
 
+    def _test_net(self, net, ops_list):
+        """
+        Helper function to assert the net contains some set of operations and
+        then to run the net.
+
+        Inputs:
+            net -- the network to test and run
+            ops_list -- the list of operation specifications to check for
+                        in the net
+        """
+        ops_output = self.assertNetContainOps(net, ops_list)
+        workspace.RunNetOnce(net)
+        return ops_output
+
     def testFCWithoutBias(self):
         output_dims = 2
         fc_without_bias = self.model.FCWithoutBias(
@@ -817,3 +831,106 @@ class TestLayers(LayersTestCase):
         predict_output = workspace.FetchBlob(rff_output())
         predict_ref = scale * np.cos(np.dot(X, W) + b)
         npt.assert_almost_equal(predict_output, predict_ref)
+
+    @given(
+        batch_size=st.integers(min_value=2, max_value=10),
+        input_dims=st.integers(min_value=5, max_value=10),
+        output_dims=st.integers(min_value=5, max_value=10),
+        s=st.integers(min_value=0, max_value=3),
+        scale=st.floats(min_value=0.1, max_value=5)
+    )
+    def testArcCosineFeatureMap(self, batch_size, input_dims, output_dims, s, scale):
+        X = np.random.normal(size=(batch_size, input_dims)).astype(np.float32)
+        input_record = self.new_record(schema.Scalar((np.float32, (input_dims,))))
+        schema.FeedRecord(input_record, [X])
+        input_blob = input_record.field_blobs()[0]
+
+        ac_output = self.model.ArcCosineFeatureMap(input_record,
+                                                   output_dims,
+                                                   s=s,
+                                                   scale=scale)
+        self.model.output_schema = schema.Struct()
+        self.assertEqual(
+            schema.Scalar((np.float32, (output_dims, ))),
+            ac_output
+        )
+
+        init_ops_list = [
+            OpSpec("GaussianFill", None, None),
+            OpSpec("UniformFill", None, None),
+        ]
+        train_init_net, train_net = self.get_training_nets()
+
+        # Init net assertions
+        init_ops = self._test_net(train_init_net, init_ops_list)
+        workspace.RunNetOnce(self.model.param_init_net)
+        W = workspace.FetchBlob(self.model.layers[0].random_w)
+        b = workspace.FetchBlob(self.model.layers[0].random_b)
+
+        # Operation specifications
+        fc_spec = OpSpec("FC", [input_blob, init_ops[0].output[0],
+                         init_ops[1].output[0]], None)
+        gt_spec = OpSpec("GT", None, None, {'broadcast': 1})
+        cast_spec = OpSpec("Cast", None, ac_output.field_blobs())
+        relu_spec = OpSpec("Relu", None, None)
+        relu_spec_output = OpSpec("Relu", None, ac_output.field_blobs())
+        pow_spec = OpSpec("Pow", None, None, {'exponent': float(s - 1)})
+        mul_spec = OpSpec("Mul", None, ac_output.field_blobs())
+
+        if s == 0:
+            ops_list = [
+                fc_spec,
+                gt_spec,
+                cast_spec,
+            ]
+
+        elif s == 1:
+            ops_list = [
+                fc_spec,
+                relu_spec_output,
+            ]
+
+        else:
+            ops_list = [
+                fc_spec,
+                relu_spec,
+                pow_spec,
+                mul_spec,
+            ]
+
+        # Train net assertions
+        self._test_net(train_net, ops_list)
+        self._arc_cosine_hypothesis_test(ac_output(), X, W, b, s)
+
+        # Eval net assertions
+        eval_net = self.get_eval_net()
+        self._test_net(eval_net, ops_list)
+        self._arc_cosine_hypothesis_test(ac_output(), X, W, b, s)
+
+        # Predict net assertions
+        predict_net = self.get_predict_net()
+        self._test_net(predict_net, ops_list)
+        self._arc_cosine_hypothesis_test(ac_output(), X, W, b, s)
+
+    def _arc_cosine_hypothesis_test(self, ac_output, X, W, b, s):
+        """
+        Runs hypothesis test for Arc Cosine layer.
+
+        Inputs:
+            ac_output -- output of net after running arc cosine layer
+            X -- input data
+            W -- weight parameter from train_init_net
+            b -- bias parameter from train_init_net
+            s -- degree parameter
+        """
+        # Get output from net
+        net_output = workspace.FetchBlob(ac_output)
+
+        # Computing output directly
+        x_rand = np.matmul(X, np.transpose(W)) + b
+        x_pow = np.power(x_rand, s)
+        h_rand_features = np.piecewise(x_rand, [x_rand <= 0, x_rand > 0], [0, 1])
+        output_ref = np.multiply(x_pow, h_rand_features)
+
+        # Comparing net output and computed output
+        npt.assert_allclose(net_output, output_ref, rtol=1e-04)
