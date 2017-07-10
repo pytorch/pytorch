@@ -243,6 +243,20 @@ class Atan(Function):
         return grad_output * i.mul(i).add_(1).reciprocal()
 
 
+class Atan2(Function):
+
+    @staticmethod
+    def forward(ctx, y, x):
+        ctx.save_for_backward(y, x)
+        return y.atan2(x)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        y, x, = ctx.saved_variables
+        denominator = y.mul(y).add(x.mul(x)).reciprocal()
+        return grad_output * x.mul(denominator), grad_output * y.neg().mul(denominator)
+
+
 # TODO: make inplace and update grad formulas
 class Reciprocal(Function):
 
