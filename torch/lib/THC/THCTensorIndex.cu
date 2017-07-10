@@ -332,33 +332,32 @@ __global__ void indexSelectLargeIndex(TensorInfo<T, IndexType> dst,
   }
 }
 
-struct CLIData {
-  long sizes[5];              // sizes for Tensor dims (either from the Tensor, or the size of the adv indexer at that dim)
-  long strides[5];            // strides for Tensor
-  bool adv[5];                // which Tensors are advanced indexers
-  long *advIndexTensors[5];    // Adv Indexing Tensors
+template <unsigned int Dims>
+struct LinearIndexCalcData {
+  // sizes for Tensor dims (either from the Tensor, or the size of the adv indexer at that dim)
+  long sizes[Dims];
+  long strides[Dims];            // strides for Tensor
+  bool adv[Dims];                // which Tensors are advanced indexers
+  long *advIndexTensors[Dims];   // Adv Indexing Tensors
 };
 
-/* __device__ __forceinline__ long calculateOffset( */
-__device__ long calculateOffset(
+template <unsigned int Dims>
+__device__ __forceinline__ long calculateOffset(
   long index,                  // index to calculate offset for
-  int ndim,                   // number of dimensions in Tensor
-  CLIData data
+  LinearIndexCalcData<Dims> data
 )
 {
   long offset = 0;
 
-  for (int dim = ndim - 1; dim >= 0; --dim) {
+#pragma unroll
+  for (int dim = Dims - 1; dim >= 0; --dim) {
     long sizeAtDim, strideAtDim, indexAtDim, nextIndex;
 
     strideAtDim = data.strides[dim];
     sizeAtDim = data.sizes[dim];
 
-    /* printf("size: %ld, stride: %d\n", sizeAtDim, strideAtDim); */
     if (data.adv[dim]) {
-      /* printf("indexing dim %d, with offset %ld\n", dim, index % sizeAtDim); */
       indexAtDim = data.advIndexTensors[dim][index % sizeAtDim];
-      /* indexAtDim = 0; */
       if (dim > 0 && data.adv[dim - 1]) {
         nextIndex = index;
       } else {
@@ -376,28 +375,18 @@ __device__ long calculateOffset(
   return offset;
 }
 
-
+template <unsigned int Dims>
 __global__ void calculateLinearIndices(
   long *output,               // output Tensor for indices
   int elements,               // number of elements in output <-> indices to calculate
-  int ndim,                   // number of dimensions in Tensor
-  ptrdiff_t baseOffset,
-  CLIData data
+  ptrdiff_t baseOffset,       // base offset into the Tensor
+  LinearIndexCalcData<Dims> data
 )
 {
-  /* printf("hello\n"); */
-  /* for (int i = 0; i < elements; ++i) { */
-  /*   printf("%ld\n", output[i]); */
-  /* } */
-
-  /* for (int i = 0; i < ndim; ++i) { */
-  /*   printf("size at dim %d: %ld\n", i, data.sizes[i]); */
-  /* } */
-
   for (long i = blockIdx.x * blockDim.x + threadIdx.x;
          i < elements;
          i += blockDim.x * gridDim.x) {
-      output[i] = baseOffset + calculateOffset(i, ndim, data);
+      output[i] = baseOffset + calculateOffset<Dims>(i, data);
    }
 }
 

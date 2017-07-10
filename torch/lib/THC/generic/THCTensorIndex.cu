@@ -506,55 +506,71 @@ void THCTensor_(indexSelect)(THCState *state, THCTensor *dst, THCTensor *src, in
 
 #define MAX_ADVINDEX_CALC_DIMS 5
 
-void THCTensor_(calculateAdvancedIndexingOffsets)(THCState *state,
-        THCudaLongTensor *output, THCTensor *indexed, ptrdiff_t baseOffset, THCudaLongTensor **indexers) {
+void THCTensor_(calculateAdvancedIndexingOffsets)(
+  THCState *state,
+  THCudaLongTensor *output,
+  THCTensor *indexed,
+  ptrdiff_t baseOffset,
+  THCudaLongTensor **indexers)
+{
   int ndim = THCTensor_(nDimension)(state, indexed);
   THAssert(ndim <= MAX_ADVINDEX_CALC_DIMS);
 
-  // TODO: check all Tensors on same GPU?
-  // TODO: check all indexers are contiguous and flat?
-
-  ptrdiff_t nElement = THCudaLongTensor_nElement(state, output);
-
-  /* for (int i = 0; i < ndim; ++i) { */
-  /*   printf("Indexing Tensor %d:", i); */
-  /*   if (indexers[i] == NULL) { */
-  /*     printf(" NULL\n"); */
-  /*   } else { */
-  /*     for (int j = 0; j < THCudaLongTensor_nElement(state, indexers[i]); ++j) { */
-  /*       printf(" %ld", THCudaLongTensor_get1d(state, indexers[i], j)); */
-  /*     } */
-  /*     printf("\n"); */
-  /*   } */
-  /* } */
-
-  // Set up arguments to pass to kernel
-  /* long sizes[MAX_ADVINDEX_CALC_DIMS]; */
-  /* long strides[MAX_ADVINDEX_CALC_DIMS]; */
-  /* bool adv[MAX_ADVINDEX_CALC_DIMS]; */
-  /* long *advIndexTensors[MAX_ADVINDEX_CALC_DIMS]; */
-
-  CLIData data;
+  // Assert all Tensors are on the same GPU, and that the indexing Tensors are
+  // contiguous
   for (int i = 0; i < ndim; ++i) {
-    data.adv[i] = indexers[i] != NULL;
-    data.sizes[i] = data.adv[i] ? THCudaLongTensor_nElement(state, indexers[i]) : THCTensor_(size)(state, indexed, i);
-    data.strides[i] = THCTensor_(stride)(state, indexed, i);
-    data.advIndexTensors[i] = data.adv[i] ? THCudaLongTensor_data(state, indexers[i]) : NULL;
+    if (indexers[i] != NULL) {
+      THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, output, indexers[i]));
+      THAssert(THCudaLongTensor_isContiguous(state, indexers[i]));
+    }
   }
 
+  // Set grid, block dims
+  ptrdiff_t nElement = THCudaLongTensor_nElement(state, output);
   const dim3 block = getApplyBlock();
   dim3 grid;
   THAssert(getApplyGrid(state, nElement, grid));
 
-  /* printf("launching kernel!\n"); */
-  /* calculateLinearIndices<<<grid, block, 0, THCState_getCurrentStream(state)>>>( */
-  calculateLinearIndices<<<1, 1, 0, THCState_getCurrentStream(state)>>>(
-    THCudaLongTensor_data(state, output),
-    nElement,
-    ndim,
-    baseOffset,
-    data
-  );
+#define HANDLE_CASE(DIMS)                                                                       \
+{                                                                                               \
+  LinearIndexCalcData<DIMS> data;                                                               \
+  for (int i = 0; i < DIMS; ++i) {                                                              \
+    data.adv[i] = indexers[i] != NULL;                                                          \
+    data.sizes[i] = data.adv[i] ?                                                               \
+      THCudaLongTensor_nElement(state, indexers[i]) :                                           \
+        THCTensor_(size)(state, indexed, i);                                                    \
+    data.strides[i] = THCTensor_(stride)(state, indexed, i);                                    \
+    data.advIndexTensors[i] = data.adv[i] ? THCudaLongTensor_data(state, indexers[i]) : NULL;   \
+  }                                                                                             \
+                                                                                                \
+  calculateLinearIndices<<<grid, block, 0, THCState_getCurrentStream(state)>>>(                 \
+    THCudaLongTensor_data(state, output),                                                       \
+    nElement,                                                                                   \
+    baseOffset,                                                                                 \
+    data                                                                                        \
+  );                                                                                            \
+}
+
+  switch (ndim) {
+    case 1:
+      HANDLE_CASE(1)
+      break;
+    case 2:
+      HANDLE_CASE(2)
+      break;
+    case 3:
+      HANDLE_CASE(3)
+      break;
+    case 4:
+      HANDLE_CASE(4)
+      break;
+    case 5:
+      HANDLE_CASE(5)
+      break;
+    default:
+      THAssert(false);
+}
+#undef HANDLE_CASE
 
   THCudaCheck(cudaGetLastError());
 }

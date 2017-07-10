@@ -926,14 +926,16 @@ static THIndexTensor* THPTensor_(_calculateLinearIndices)(
     } else {
       indexers[i] = NULL;
     }
-    /* indexers[i] = flattenedBroadcasters.find(i) != flattenedBroadcasters.end() ? */
-    /*               flattenedBroadcasters[i].get() : */
-    /*               NULL; */
   }
 
   THTensor_(calculateAdvancedIndexingOffsets)(LIBRARY_STATE cudaIndices, indexed, baseOffset, indexers);
 
-  // TODO: free the cuda tensors
+  // Free the indexers
+  for (int i = 0; i < THTensor_(nDimension)(LIBRARY_STATE indexed.get(); ++i) {
+    if (indexers[i] != NULL) {
+      THCudaLongTensor_free(indexers[i]);
+    }
+  }
   return cudaIndices;
 #else
   THLongTensor *linearIndices = THLongTensor_newWithSize1d(indexingElements);
