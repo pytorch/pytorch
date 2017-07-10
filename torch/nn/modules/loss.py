@@ -44,28 +44,33 @@ class L1Loss(_Loss):
 
     The sum operation still operates over all the elements, and divides by `n`.
 
-    The division by `n` can be avoided if one sets the constructor argument `size_average=False`
+    The division by `n` can be avoided if one sets the constructor argument
+    `size_average=False`
     """
     pass
 
 
 class NLLLoss(_WeightedLoss):
-    r"""The negative log likelihood loss. It is useful to train a classification problem with n classes
+    r"""The negative log likelihood loss. It is useful to train a classification
+    problem with n classes
 
     If provided, the optional argument `weights` should be a 1D Tensor assigning
     weight to each of the classes.
 
     This is particularly useful when you have an unbalanced training set.
 
-    The input given through a forward call is expected to contain log-probabilities
-    of each class: input has to be a 2D Tensor of size `(minibatch, n)`
+    The input given through a forward call is expected to contain
+    log-probabilities of each class: input has to be a 2D Tensor of size
+    `(minibatch, n)`
 
     Obtaining log-probabilities in a neural network is easily achieved by
     adding a  `LogSoftmax`  layer in the last layer of your network.
 
-    You may use `CrossEntropyLoss`  instead, if you prefer not to add an extra layer.
+    You may use `CrossEntropyLoss`  instead, if you prefer not to add an extra
+    layer.
 
-    The target that this loss expects is a class index `(0 to N-1, where N = number of classes)`
+    The target that this loss expects is a class index
+    `(0 to N-1, where N = number of classes)`
 
     The loss can be described as::
 
@@ -80,14 +85,15 @@ class NLLLoss(_WeightedLoss):
         loss(x, class) = class != ignoreIndex ? -weights[class] * x[class] : 0
 
     Args:
-        weight (Tensor, optional): a manual rescaling weight given to each class.
-           If given, has to be a Tensor of size "nclasses"
-        size_average (bool, optional): By default, the losses are averaged over observations for each minibatch.
-           However, if the field size_average is set to False, the losses are
-           instead summed for each minibatch.
+        weight (Tensor, optional): a manual rescaling weight given to each
+           class. If given, has to be a Tensor of size "nclasses"
+        size_average (bool, optional): By default, the losses are averaged
+           over observations for each minibatch. However, if the field
+           size_average is set to False, the losses are instead summed for
+           each minibatch.
         ignore_index (int, optional): Specifies a target value that is ignored
-            and does not contribute to the input gradient. When size_average is
-            True, the loss is averaged over non-ignored targets.
+            and does not contribute to the input gradient. When size_average
+            is True, the loss is averaged over non-ignored targets.
 
     Shape:
         - Input: :math:`(N, C)` where `C = number of classes`
@@ -119,14 +125,17 @@ class NLLLoss(_WeightedLoss):
 
 
 class NLLLoss2d(_WeightedLoss):
-    r"""This is negative log likehood loss, but for image inputs. It computes NLL loss per-pixel.
+    r"""This is negative log likehood loss, but for image inputs. It computes
+    NLL loss per-pixel.
 
     Args:
-        weight (Tensor, optional): a manual rescaling weight given to each class.
-            If given, has to be a 1D Tensor having as many elements, as there are classes.
-        size_average: By default, the losses are averaged over observations for each minibatch.
-            However, if the field size_average is set to False, the losses
-            are instead summed for each minibatch. Default: True
+        weight (Tensor, optional): a manual rescaling weight given to each
+            class. If given, has to be a 1D Tensor having as many elements,
+            as there are classes.
+        size_average: By default, the losses are averaged over observations
+            for each minibatch. However, if the field size_average is set to
+            False, the losses are instead summed for each minibatch.
+            Default: True
 
     Shape:
         - Input: :math:`(N, C, H, W)` where `C = number of classes`
@@ -242,7 +251,8 @@ class BCELoss(_WeightedLoss):
     .. math:: loss(o, t) = - 1/n \sum_i weights[i] * (t[i] * log(o[i]) + (1 - t[i]) * log(1 - o[i]))
 
     This is used for measuring the error of a reconstruction in for example
-    an auto-encoder. Note that the targets `t[i]` should be numbers between 0 and 1.
+    an auto-encoder. Note that the targets `t[i]` should be numbers
+    between 0 and 1.
 
     By default, the losses are averaged for each minibatch over observations
     *as well as* over dimensions. However, if the field `size_average` is set
@@ -253,11 +263,13 @@ class BCELoss(_WeightedLoss):
 
 
 class BCEWithLogitsLoss(Module):
-    r"""This loss combines a `Sigmoid` layer and the `BCELoss` in one single class.
-    This version is more numerically stable than using a plain `Sigmoid` followed by a `BCELoss` as, by combining the
-    operations into one layer, we take advantage of the log-sum-exp trick for numerical stability.
+    r"""This loss combines a `Sigmoid` layer and the `BCELoss` in one single
+    class. This version is more numerically stable than using a plain `Sigmoid`
+    followed by a `BCELoss` as, by combining the operations into one layer,
+    we take advantage of the log-sum-exp trick for numerical stability.
 
-    This Binary Cross Entropy between the target and the output logits (no sigmoid applied) is:
+    This Binary Cross Entropy between the target and the output logits
+    (no sigmoid applied) is:
 
     .. math:: loss(o, t) = - 1/n \sum_i (t[i] * log(sigmoid(o[i])) + (1 - t[i]) * log(1 - sigmoid(o[i])))
 
@@ -266,7 +278,8 @@ class BCEWithLogitsLoss(Module):
     .. math:: loss(o, t) = - 1/n \sum_i weights[i] * (t[i] * log(sigmoid(o[i])) + (1 - t[i]) * log(1 - sigmoid(o[i])))
 
     This is used for measuring the error of a reconstruction in for example
-    an auto-encoder. Note that the targets `t[i]` should be numbers between 0 and 1.
+    an auto-encoder. Note that the targets `t[i]` should be numbers
+    between 0 and 1.
 
     By default, the losses are averaged for each minibatch over observations
     *as well as* over dimensions. However, if the field `size_average` is set
@@ -288,9 +301,9 @@ class BCEWithLogitsLoss(Module):
 class HingeEmbeddingLoss(_Loss):
     r"""Measures the loss given an input `x` which is a 2D mini-batch tensor
     and a labels `y`, a 1D tensor containg values (`1` or `-1`).
-    This is usually used for measuring whether two inputs are similar or dissimilar,
-    e.g. using the L1 pairwise distance, and is typically used for learning
-    nonlinear embeddings or semi-supervised learning::
+    This is usually used for measuring whether two inputs are similar or
+    dissimilar, e.g. using the L1 pairwise distance, and is typically used
+    for learning nonlinear embeddings or semi-supervised learning::
 
                          { x_i,                  if y_i ==  1
         loss(x, y) = 1/n {
@@ -299,7 +312,8 @@ class HingeEmbeddingLoss(_Loss):
     `x` and `y` arbitrary shapes with a total of `n` elements each
     the sum operation still operates over all the elements, and divides by `n`.
 
-    The division by `n` can be avoided if one sets the internal variable `size_average=False`.
+    The division by `n` can be avoided if one sets the internal
+    variable `size_average=False`.
 
     The `margin` has a default value of `1`, or can be set in the constructor.
     """
@@ -316,8 +330,8 @@ class HingeEmbeddingLoss(_Loss):
 
 class MultiLabelMarginLoss(_Loss):
     r"""Creates a criterion that optimizes a multi-class multi-classification
-    hinge loss (margin-based loss) between input `x`  (a 2D mini-batch `Tensor`) and
-    output `y` (which is a 2D `Tensor` of target class indices).
+    hinge loss (margin-based loss) between input `x`  (a 2D mini-batch `Tensor`)
+    and output `y` (which is a 2D `Tensor` of target class indices).
     For each sample in the mini-batch::
 
         loss(x, y) = sum_ij(max(0, 1 - (x[y[j]] - x[i]))) / x.size(0)
@@ -417,7 +431,7 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
     target `y` (a binary 2D `Tensor`). For each sample in the minibatch::
 
        loss(x, y) = - sum_i (y[i] * log( 1 / (1 + exp(-x[i])) )
-                             + ( (1-y[i]) * log(exp(-x[i]) / (1 + exp(-x[i])) ) )
+                         + ( (1-y[i]) * log(exp(-x[i]) / (1 + exp(-x[i])) ) )
 
     where `i == 0` to `x.nElement()-1`, `y[i]  in {0,1}`.
     `y` and `x` must have the same size.
@@ -429,8 +443,8 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
 
 
 class CosineEmbeddingLoss(Module):
-    r"""Creates a criterion that measures the loss given  an input tensors x1, x2
-    and a `Tensor` label `y` with values 1 or -1.
+    r"""Creates a criterion that measures the loss given  an input tensors
+    x1, x2 and a `Tensor` label `y` with values 1 or -1.
     This is used for measuring whether two inputs are similar or dissimilar,
     using the cosine distance, and is typically used for learning nonlinear
     embeddings or semi-supervised learning.
@@ -474,7 +488,8 @@ class MarginRankingLoss(Module):
 
     if the internal variable `size_average = True`,
     the loss function averages the loss over the batch samples;
-    if `size_average = False`, then the loss function sums over the batch samples.
+    if `size_average = False`, then the loss function sums over the batch
+    samples.
     By default, `size_average` equals to `True`.
     """
 
@@ -489,9 +504,10 @@ class MarginRankingLoss(Module):
 
 
 class MultiMarginLoss(Module):
-    r"""Creates a criterion that optimizes a multi-class classification hinge loss
-    (margin-based loss) between input `x` (a 2D mini-batch `Tensor`) and
-    output `y` (which is a 1D tensor of target class indices, `0` <= `y` <= `x.size(1)`):
+    r"""Creates a criterion that optimizes a multi-class classification hinge
+    loss (margin-based loss) between input `x` (a 2D mini-batch `Tensor`) and
+    output `y` (which is a 1D tensor of target class indices,
+    `0` <= `y` <= `x.size(1)`):
 
     For each mini-batch sample::
 
@@ -526,14 +542,16 @@ class MultiMarginLoss(Module):
 
 
 class TripletMarginLoss(Module):
-    r"""Creates a criterion that measures the triplet loss given an input tensors x1, x2, x3
-    and a margin with a value greater than 0.
-    This is used for measuring a relative similarity between samples. A triplet is composed by
-    `a`, `p` and `n`: anchor, positive examples and negative example respectively.
-    The shape of all input variables should be :math:`(N, D)`.
+    r"""Creates a criterion that measures the triplet loss given an input
+    tensors x1, x2, x3 and a margin with a value greater than 0.
+    This is used for measuring a relative similarity between samples. A triplet
+    is composed by `a`, `p` and `n`: anchor, positive examples and negative
+    example respectively. The shape of all input variables should be
+    :math:`(N, D)`.
 
-    The distance swap is described in detail in the paper `Learning shallow convolutional feature descriptors with
-    triplet losses`_ by V. Balntas, E. Riba et al.
+    The distance swap is described in detail in the paper `Learning shallow
+    convolutional feature descriptors with triplet losses`_ by
+    V. Balntas, E. Riba et al.
 
     .. math::
         L(a, p, n) = \frac{1}{N} \left( \sum_{i=1}^N \max \{d(a_i, p_i) - d(a_i, n_i) + {\rm margin}, 0\} \right)

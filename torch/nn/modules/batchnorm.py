@@ -43,7 +43,8 @@ class _BatchNorm(Module):
 
 
 class BatchNorm1d(_BatchNorm):
-    r"""Applies Batch Normalization over a 2d or 3d input that is seen as a mini-batch.
+    r"""Applies Batch Normalization over a 2d or 3d input that is seen as a
+    mini-batch.
 
     .. math::
 
@@ -59,10 +60,14 @@ class BatchNorm1d(_BatchNorm):
     During evaluation, this running mean/variance is used for normalization.
 
     Args:
-        num_features: num_features from an expected input of size `batch_size x num_features [x width]`
-        eps: a value added to the denominator for numerical stability. Default: 1e-5
-        momentum: the value used for the running_mean and running_var computation. Default: 0.1
-        affine: a boolean value that when set to true, gives the layer learnable affine parameters.
+        num_features: num_features from an expected input of size
+            `batch_size x num_features [x width]`
+        eps: a value added to the denominator for numerical stability.
+            Default: 1e-5
+        momentum: the value used for the running_mean and running_var
+            computation. Default: 0.1
+        affine: a boolean value that when set to true, gives the layer learnable
+            affine parameters.
 
     Shape:
         - Input: :math:`(N, C)` or :math:`(N, C, L)`
@@ -85,7 +90,8 @@ class BatchNorm1d(_BatchNorm):
 
 
 class BatchNorm2d(_BatchNorm):
-    r"""Applies Batch Normalization over a 4d input that is seen as a mini-batch of 3d inputs
+    r"""Applies Batch Normalization over a 4d input that is seen as a mini-batch
+    of 3d inputs
 
     .. math::
 
@@ -101,10 +107,14 @@ class BatchNorm2d(_BatchNorm):
     During evaluation, this running mean/variance is used for normalization.
 
     Args:
-        num_features: num_features from an expected input of size batch_size x num_features x height x width
-        eps: a value added to the denominator for numerical stability. Default: 1e-5
-        momentum: the value used for the running_mean and running_var computation. Default: 0.1
-        affine: a boolean value that when set to true, gives the layer learnable affine parameters.
+        num_features: num_features from an expected input of
+            size batch_size x num_features x height x width
+        eps: a value added to the denominator for numerical stability.
+            Default: 1e-5
+        momentum: the value used for the running_mean and running_var
+            computation. Default: 0.1
+        affine: a boolean value that when set to true, gives the layer learnable
+            affine parameters.
 
     Shape:
         - Input: :math:`(N, C, H, W)`
@@ -127,7 +137,8 @@ class BatchNorm2d(_BatchNorm):
 
 
 class BatchNorm3d(_BatchNorm):
-    r"""Applies Batch Normalization over a 5d input that is seen as a mini-batch of 4d inputs
+    r"""Applies Batch Normalization over a 5d input that is seen as a mini-batch
+    of 4d inputs
 
     .. math::
 
@@ -143,10 +154,14 @@ class BatchNorm3d(_BatchNorm):
     During evaluation, this running mean/variance is used for normalization.
 
     Args:
-        num_features: num_features from an expected input of size batch_size x num_features x depth x height x width
-        eps: a value added to the denominator for numerical stability. Default: 1e-5
-        momentum: the value used for the running_mean and running_var computation. Default: 0.1
-        affine: a boolean value that when set to true, gives the layer learnable affine parameters.
+        num_features: num_features from an expected input of
+            size batch_size x num_features x depth x height x width
+        eps: a value added to the denominator for numerical stability.
+            Default: 1e-5
+        momentum: the value used for the running_mean and running_var
+            computation. Default: 0.1
+        affine: a boolean value that when set to true, gives the layer learnable
+            affine parameters.
 
     Shape:
         - Input: :math:`(N, C, D, H, W)`

@@ -33,8 +33,8 @@ written to the file. If shared is False then the changes on the storage do not
 affect the file.
 
 Size is the number of elements in the storage. If shared is False then the file
-must contain at least `size * sizeof(Type)` bytes (`Type` is the type of storage).
-If shared is True the file will be created if needed.
+must contain at least `size * sizeof(Type)` bytes (`Type` is the type of
+storage). If shared is True the file will be created if needed.
 
 Args:
     filename (str): file name to map

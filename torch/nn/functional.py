@@ -213,8 +213,10 @@ def avg_pool1d(input, kernel_size, stride=None, padding=0,
         kernel_size: the size of the window
         stride: the stride of the window. Default value is :attr:`kernel_size`
         padding: implicit zero padding to be added on both sides
-        ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
-        count_include_pad: when True, will include the zero-padding in the averaging calculation
+        ceil_mode: when True, will use `ceil` instead of `floor` to compute the
+            output shape
+        count_include_pad: when True, will include the zero-padding in the
+            averaging calculation
 
     Example:
         >>> # pool of square window of size=3, stride=2
@@ -252,8 +254,10 @@ def avg_pool2d(input, kernel_size, stride=None, padding=0,
           tuple (sh x sw). Default is equal to kernel size
         padding: implicit zero padding on the input, a single number or
           a tuple (padh x padw), Default: 0
-        ceil_mode: when True, will use `ceil` instead of `floor` in the formula to compute the output shape
-        count_include_pad: when True, will include the zero-padding in the averaging calculation
+        ceil_mode: when True, will use `ceil` instead of `floor` in the formula
+            to compute the output shape
+        count_include_pad: when True, will include the zero-padding in th
+            averaging calculation
     """
     return _functions.thnn.AvgPool2d(kernel_size, stride, padding,
                                      ceil_mode, count_include_pad)(input)
@@ -373,7 +377,8 @@ def adaptive_max_pool2d(input, output_size, return_indices=False):
     See :class:`~torch.nn.AdaptiveMaxPool2d` for details and output shape.
 
     Args:
-        output_size: the target output size (single integer or double-integer tuple)
+        output_size: the target output size (single integer or
+            double-integer tuple)
         return_indices: whether to return pooling indices
     """
     return _functions.thnn.AdaptiveMaxPool2d(output_size, return_indices)(input)
@@ -398,7 +403,8 @@ def adaptive_avg_pool2d(input, output_size):
     See :class:`~torch.nn.AdaptiveAvgPool2d` for details and output shape.
 
     Args:
-        output_size: the target output size (single integer or double-integer tuple)
+        output_size: the target output size (single integer or
+            double-integer tuple)
     """
     return _functions.thnn.AdaptiveAvgPool2d(output_size)(input)
 
@@ -564,7 +570,8 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100):
     See :class:`~torch.nn.NLLLoss` for details.
 
     Args:
-        input: :math:`(N, C)` where `C = number of classes` or `(N, C, H, W)` in case of 2D - Loss
+        input: :math:`(N, C)` where `C = number of classes` or `(N, C, H, W)`
+            in case of 2D - Loss
         target: :math:`(N)` where each value is `0 <= targets[i] <= C-1`
         weight (Variable, optional): a manual rescaling weight given to each
             class. If given, has to be a Variable of size "nclasses"
@@ -641,13 +648,15 @@ def kl_div(input, target, size_average=True):
 
 
 def cross_entropy(input, target, weight=None, size_average=True, ignore_index=-100):
-    r"""This criterion combines `log_softmax` and `nll_loss` in a single function.
+    r"""This criterion combines `log_softmax` and `nll_loss` in a single
+    function.
 
     See :class:`torch.nn.CrossEntropyLoss` for details.
 
     Args:
         input: Variable :math:`(N, C)` where `C = number of classes`
-        target: Variable :math:`(N)` where each value is `0 <= targets[i] <= C-1`
+        target: Variable :math:`(N)` where each value is
+            `0 <= targets[i] <= C-1`
         weight (Tensor, optional): a manual rescaling weight given to each
                 class. If given, has to be a Tensor of size "nclasses"
         size_average (bool, optional): By default, the losses are averaged
@@ -682,7 +691,8 @@ def binary_cross_entropy(input, target, weight=None, size_average=True):
 
 
 def binary_cross_entropy_with_logits(input, target, weight=None, size_average=True):
-    r"""Function that measures Binary Cross Entropy between target and output logits:
+    r"""Function that measures Binary Cross Entropy between target and output
+    logits:
 
     See :class:`~torch.nn.BCEWithLogitsLoss` for details.
 
@@ -750,22 +760,27 @@ def pixel_shuffle(input, upscale_factor):
 
 
 def upsample(input, size=None, scale_factor=None, mode='nearest'):
-    """Upsamples the input to either the given :attr:`size` or the given :attr:`scale_factor`
+    """Upsamples the input to either the given :attr:`size` or the given
+    :attr:`scale_factor`
 
     The algorithm used for upsampling is determined by :attr:`mode`.
 
     Currently spatial and volumetric upsampling are supported, i.e.
     expected inputs are 4-D or 5-D in shape.
 
-    The input dimensions are interpreted in the form: `mini-batch x channels x [depth] x height x width`
+    The input dimensions are interpreted in the form:
+    `mini-batch x channels x [depth] x height x width`
 
-    The modes available for upsampling are: `nearest`, `bilinear` (4D-only), `trilinear` (5D-only)
+    The modes available for upsampling are: `nearest`, `bilinear` (4D-only),
+    `trilinear` (5D-only)
 
     Args:
         input (Variable): input
-        size (int or Tuple[int, int] or Tuple[int, int, int]): output spatial size.
+        size (int or Tuple[int, int] or Tuple[int, int, int]):
+            output spatial size.
         scale_factor (int): multiplier for spatial size. Has to be an integer.
-        mode (string): algorithm used for upsampling: 'nearest' | 'bilinear' | 'trilinear'
+        mode (string): algorithm used for upsampling:
+            'nearest' | 'bilinear' | 'trilinear'
     """
     if input.dim() == 4 and mode == 'nearest':
         return _functions.thnn.UpsamplingNearest2d(_pair(size), scale_factor)(input)
@@ -790,12 +805,13 @@ def upsample_nearest(input, size=None, scale_factor=None):
 
     **Note:: This function is deprecated. Use nn.functional.upsample instead**
 
-    Currently spatial and volumetric upsampling are supported (i.e. expected inputs
-    are 4 or 5 dimensional).
+    Currently spatial and volumetric upsampling are supported (i.e. expected
+    inputs are 4 or 5 dimensional).
 
     Args:
         input (Variable): input
-        size (int or Tuple[int, int] or Tuple[int, int, int]): output spatial size.
+        size (int or Tuple[int, int] or Tuple[int, int, int]): output spatia
+            size.
         scale_factor (int): multiplier for spatial size. Has to be an integer.
     """
     # DeprecationWarning is ignored by default
@@ -808,8 +824,8 @@ def upsample_bilinear(input, size=None, scale_factor=None):
 
     **Note:: This function is deprecated. Use nn.functional.upsample instead**
 
-    Expected inputs are spatial (4 dimensional). Use upsample_trilinear for volumetric (5 dimensional)
-    inputs.
+    Expected inputs are spatial (4 dimensional). Use upsample_trilinear fo
+    volumetric (5 dimensional) inputs.
 
     Args:
         input (Variable): input
@@ -825,7 +841,8 @@ def pad(input, pad, mode='constant', value=0):
     """Pads tensor.
 
     Currently only 2D and 3D padding supported.
-    In case of 4D input tensor pad should be in form (pad_l, pad_r, pad_t, pad_b )
+    In case of 4D input tensor pad should be in form
+    (pad_l, pad_r, pad_t, pad_b ).
     In case of 5D pad should be (pleft, pright, ptop, pbottom, pfront, pback)
 
     Args:
@@ -894,7 +911,8 @@ def cosine_similarity(x1, x2, dim=1, eps=1e-8):
         x1 (Variable): First input.
         x2 (Variable): Second input (of size matching x1).
         dim (int, optional): Dimension of vectors. Default: 1
-        eps (float, optional): Small value to avoid division by zero. Default: 1e-8
+        eps (float, optional): Small value to avoid division by zero.
+            Default: 1e-8
 
     Shape:
         - Input: :math:`(\ast_1, D, \ast_2)` where D is at position `dim`.
@@ -912,14 +930,16 @@ def cosine_similarity(x1, x2, dim=1, eps=1e-8):
 
 
 def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, swap=False):
-    r"""Creates a criterion that measures the triplet loss given an input tensors x1, x2, x3
-    and a margin with a value greater than 0.
-    This is used for measuring a relative similarity between samples. A triplet is composed by
-    `a`, `p` and `n`: anchor, positive examples and negative example respectively.
-    The shape of all input variables should be :math:`(N, D)`.
+    r"""Creates a criterion that measures the triplet loss given an input
+    tensors x1, x2, x3 and a margin with a value greater than 0.
+    This is used for measuring a relative similarity between samples. A triplet
+    is composed by `a`, `p` and `n`: anchor, positive examples and negative
+    example respectively. The shape of all input variables should be
+    :math:`(N, D)`.
 
-    The distance swap is described in detail in the paper `Learning shallow convolutional feature descriptors with
-    triplet losses`_ by V. Balntas, E. Riba et al.
+    The distance swap is described in detail in the paper `Learning shallow
+    convolutional feature descriptors with triplet losses`_ by
+    V. Balntas, E. Riba et al.
 
     .. math::
         L(a, p, n) = \frac{1}{N} \left( \sum_{i=1}^N \max \{d(a_i, p_i) - d(a_i, n_i) + {\rm margin}, 0\} \right)
@@ -971,10 +991,12 @@ def normalize(input, p=2, dim=1, eps=1e-12):
     .. math::
         v = \frac{v}{\max(\lVert v \rVert_p, \epsilon)}
 
-    for each subtensor v over dimension dim of input. Each subtensor is flattened into a vector,
-    i.e. :math:`\lVert v \rVert_p` is not a matrix norm.
+    for each subtensor v over dimension dim of input. Each subtensor is
+    flattened into a vector, i.e. :math:`\lVert v \rVert_p` is not a matrix
+    norm.
 
-    With default arguments normalizes over the second dimension with Euclidean norm.
+    With default arguments normalizes over the second dimension with Euclidean
+    norm.
 
     Args:
         input: input tensor of any shape
