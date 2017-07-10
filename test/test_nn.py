@@ -521,8 +521,8 @@ class TestNN(NNTestCase):
                 super(Net, self).__init__()
                 self.l1 = l
 
-            def forward(self, *input):
-                return {"output": self.l1(input)}
+            def forward(self, inputs):
+                return {"output": self.l1(inputs)}
 
         l = nn.Linear(10, 20)
         net = Net()
