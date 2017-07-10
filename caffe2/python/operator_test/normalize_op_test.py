@@ -2,6 +2,8 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import functools
+
 import numpy as np
 from hypothesis import given
 import hypothesis.strategies as st
@@ -26,3 +28,22 @@ class TestNormalizeOp(hu.HypothesisTestCase):
         self.assertReferenceChecks(gc, op, [X], ref_normalize)
         self.assertDeviceChecks(dc, op, [X], [0])
         self.assertGradientChecks(gc, op, [X], 0, [0])
+
+    @given(X=hu.tensor(min_dim=1,
+                       max_dim=5,
+                       elements=st.floats(min_value=0.5, max_value=1.0)),
+           **hu.gcs)
+    def test_normalize_L1(self, X, gc, dc):
+        def ref(X, axis):
+            norm = abs(X).sum(axis=axis, keepdims=True)
+            return (X / norm,)
+
+        for axis in range(-X.ndim, X.ndim):
+            print('axis: ', axis)
+            op = core.CreateOperator("NormalizeL1", "X", "Y", axis=axis)
+            self.assertReferenceChecks(
+                gc,
+                op,
+                [X],
+                functools.partial(ref, axis=axis))
+            self.assertDeviceChecks(dc, op, [X], [0])

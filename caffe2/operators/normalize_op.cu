@@ -104,8 +104,58 @@ bool NormalizeGradientOp<float, CUDAContext>::RunOnDevice() {
   return true;
 }
 
+namespace {
+__global__ void NormalizeL1Kernel(
+    const int m,
+    const int n,
+    const int sf,
+    const float* xData,
+    float* yData) {
+  typedef cub::BlockReduce<float, CAFFE_CUDA_NUM_THREADS> BlockReduce;
+  __shared__ BlockReduce::TempStorage temp_storage;
+
+  for (int i = blockIdx.x; i < n; i += gridDim.x) {
+    auto base = (i / sf) * sf * m + (i % sf);
+
+    float sum = 0.0;
+    __shared__ float norm;
+    for (int j = threadIdx.x; j < m; j += blockDim.x) {
+      const auto x_ij = xData[base + j * sf];
+      sum += abs(x_ij);
+    }
+    float reduce_result = BlockReduce(temp_storage).Sum(sum);
+
+    if (threadIdx.x == 0) {
+      norm = reduce_result;
+    }
+    __syncthreads();
+    if (norm != 0) {
+      for (int j = threadIdx.x; j < m; j += blockDim.x) {
+        const auto index = base + j * sf;
+        yData[index] = xData[index] / norm;
+      }
+    }
+  }
+}
+} // namespace
+
+template <>
+void NormalizeL1Op<float, CUDAContext>::DoNormalize(
+    const float* xData,
+    float* yData,
+    const int m,
+    const int n,
+    const int sf) {
+  NormalizeL1Kernel<<<
+      min(n, CAFFE_MAXIMUM_NUM_BLOCKS),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context_.cuda_stream()>>>(m, n, sf, xData, yData);
+}
+
 REGISTER_CUDA_OPERATOR(Normalize, NormalizeOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(
     NormalizeGradient,
     NormalizeGradientOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(NormalizeL1, NormalizeL1Op<float, CUDAContext>);
 } // namespace
