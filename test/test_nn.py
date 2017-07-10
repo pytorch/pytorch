@@ -520,6 +520,10 @@ class TestNN(NNTestCase):
             def __init__(self):
                 super(Net, self).__init__()
                 self.l1 = l
+                self.register_backward_hook(self.hook)
+
+            def hook(self, module, grad_out, grad_in):
+                pass
 
             def forward(self, inputs):
                 return {"output": self.l1(inputs)}
