@@ -789,9 +789,9 @@ add_docstr_all('log_normal_', u"""
 log_normal_(mean=1, std=2, *, generator=None)
 
 Fills this tensor with numbers samples from the log-normal distribution
-parameterized by the given mean (\u00B5) and standard deviation (\u03C3). Note that
-:attr:`mean` and :attr:`stdv` are the mean and standard deviation of the
-underlying normal distribution, and not of the returned distribution:
+parameterized by the given mean (\u00B5) and standard deviation (\u03C3).
+Note that :attr:`mean` and :attr:`stdv` are the mean and standard deviation of
+the underlying normal distribution, and not of the returned distribution:
 
 .. math::
 

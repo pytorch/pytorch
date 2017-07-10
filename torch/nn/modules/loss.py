@@ -268,7 +268,8 @@ class BCEWithLogitsLoss(Module):
     followed by a `BCELoss` as, by combining the operations into one layer,
     we take advantage of the log-sum-exp trick for numerical stability.
 
-    This Binary Cross Entropy between the target and the output logits (no sigmoid applied) is:
+    This Binary Cross Entropy between the target and the output logits
+    (no sigmoid applied) is:
 
     .. math:: loss(o, t) = - 1/n \sum_i (t[i] * log(sigmoid(o[i])) + (1 - t[i]) * log(1 - sigmoid(o[i])))
 

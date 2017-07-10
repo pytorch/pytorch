@@ -29,37 +29,39 @@ class DistributedDataParallel(Module):
     each such replica handles a portion of the input. During the backwards
     pass, gradients from each node are averaged.
 
-    The batch size should be larger than the number of GPUs used locally. It should
-    also be an integer multiple of the number of GPUs so that each chunk is the
-    same size (so that each GPU processes the same number of samples).
+    The batch size should be larger than the number of GPUs used locally. It
+    should also be an integer multiple of the number of GPUs so that each chunk
+    is the same size (so that each GPU processes the same number of samples).
 
     See also: :ref:`cuda-nn-dataparallel-instead`. The same constraints on input
     as in :class:`torch.nn.DataParallel` apply.
 
-    Creation of this class requires the distributed package to be already initialized
-    in the process group mode (see :func:`torch.distributed.init_process_group`).
+    Creation of this class requires the distributed package to be already
+    initialized in the process group mode
+    (see :func:`torch.distributed.init_process_group`).
 
     .. warning::
         Constructor, forward method, and differentiation of the output (or a
         function of the output of this module) is a distributed synchronization
-        point. Take that into account in case different processes might be executing
-        different code.
+        point. Take that into account in case different processes might be
+        executing different code.
 
     .. warning::
-        This module assumes all parameters are registered in the model by the time
-        it is created. No parameters should be added nor removed later. Same applies
-        to buffers.
+        This module assumes all parameters are registered in the model by the
+        time it is created. No parameters should be added nor removed later.
+        Same applies to buffers.
 
     .. warning::
-        This module doesn't work with :func:`torch.autograd.grad` (i.e. it will only
-        work if gradients are to be accumulated in ``.grad`` attributes of parameters).
+        This module doesn't work with :func:`torch.autograd.grad` (i.e. it will
+        only work if gradients are to be accumulated in ``.grad`` attributes of
+        parameters).
 
     .. note::
         Parameters are never broadcast between processes. The module performs
-        an all-reduce step on gradients and assumes that they will be modified by the
-        optimizer in all processes in the same way. Buffers (e.g. BatchNorm stats) are
-        broadcast form the module in process of rank 0, to all other replicas in the
-        system in every iteration.
+        an all-reduce step on gradients and assumes that they will be modified
+        by the optimizer in all processes in the same way. Buffers
+        (e.g. BatchNorm stats) are broadcast form the module in process of rank
+        0, to all other replicas in the system in every iteration.
 
     Args:
         module: module to be parallelized

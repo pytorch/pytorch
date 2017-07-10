@@ -655,7 +655,8 @@ def cross_entropy(input, target, weight=None, size_average=True, ignore_index=-1
 
     Args:
         input: Variable :math:`(N, C)` where `C = number of classes`
-        target: Variable :math:`(N)` where each value is `0 <= targets[i] <= C-1`
+        target: Variable :math:`(N)` where each value is
+            `0 <= targets[i] <= C-1`
         weight (Tensor, optional): a manual rescaling weight given to each
                 class. If given, has to be a Tensor of size "nclasses"
         size_average (bool, optional): By default, the losses are averaged

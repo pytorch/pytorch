@@ -343,14 +343,14 @@ class GRU(RNNBase):
           containing the hidden state for t=seq_len
 
     Attributes:
-        weight_ih_l[k] : the learnable input-hidden weights of the k-th layer (W_ir|W_iz|W_in), of shape
-                         `(3*hidden_size x input_size)`
-        weight_hh_l[k] : the learnable hidden-hidden weights of the k-th layer (W_hr|W_hz|W_hn), of shape
-                         `(3*hidden_size x hidden_size)`
-        bias_ih_l[k] : the learnable input-hidden bias of the k-th layer (b_ir|b_iz|b_in), of shape
-                         `(3*hidden_size)`
-        bias_hh_l[k] : the learnable hidden-hidden bias of the k-th layer (b_hr|b_hz|b_hn), of shape
-                         `(3*hidden_size)`
+        weight_ih_l[k] : the learnable input-hidden weights of the k-th layer
+            (W_ir|W_iz|W_in), of shape `(3*hidden_size x input_size)`
+        weight_hh_l[k] : the learnable hidden-hidden weights of the k-th layer
+            (W_hr|W_hz|W_hn), of shape `(3*hidden_size x hidden_size)`
+        bias_ih_l[k] : the learnable input-hidden bias of the k-th layer
+            (b_ir|b_iz|b_in), of shape `(3*hidden_size)`
+        bias_hh_l[k] : the learnable hidden-hidden bias of the k-th layer
+            (b_hr|b_hz|b_hn), of shape `(3*hidden_size)`
     Examples::
 
         >>> rnn = nn.GRU(10, 20, 2)
@@ -387,19 +387,24 @@ class RNNCell(RNNCellBase):
     Args:
         input_size: The number of expected features in the input x
         hidden_size: The number of features in the hidden state h
-        bias: If False, then the layer does not use bias weights b_ih and b_hh. Default: True
+        bias: If False, then the layer does not use bias weights b_ih and b_hh.
+            Default: True
         nonlinearity: The non-linearity to use ['tanh'|'relu']. Default: 'tanh'
 
     Inputs: input, hidden
         - **input** (batch, input_size): tensor containing input features
-        - **hidden** (batch, hidden_size): tensor containing the initial hidden state for each element in the batch.
+        - **hidden** (batch, hidden_size): tensor containing the initial hidden
+          state for each element in the batch.
 
     Outputs: h'
-        - **h'** (batch, hidden_size): tensor containing the next hidden state for each element in the batch
+        - **h'** (batch, hidden_size): tensor containing the next hidden state
+          for each element in the batch
 
     Attributes:
-        weight_ih: the learnable input-hidden weights, of shape `(input_size x hidden_size)`
-        weight_hh: the learnable hidden-hidden weights, of shape `(hidden_size x hidden_size)`
+        weight_ih: the learnable input-hidden weights, of shape
+            `(input_size x hidden_size)`
+        weight_hh: the learnable hidden-hidden weights, of shape
+            `(hidden_size x hidden_size)`
         bias_ih: the learnable input-hidden bias, of shape `(hidden_size)`
         bias_hh: the learnable hidden-hidden bias, of shape `(hidden_size)`
 
@@ -468,20 +473,27 @@ class LSTMCell(RNNCellBase):
     Args:
         input_size: The number of expected features in the input x
         hidden_size: The number of features in the hidden state h
-        bias: If `False`, then the layer does not use bias weights `b_ih` and `b_hh`. Default: True
+        bias: If `False`, then the layer does not use bias weights `b_ih` and
+            `b_hh`. Default: True
 
     Inputs: input, (h_0, c_0)
         - **input** (batch, input_size): tensor containing input features
-        - **h_0** (batch, hidden_size): tensor containing the initial hidden state for each element in the batch.
-        - **c_0** (batch. hidden_size): tensor containing the initial cell state for each element in the batch.
+        - **h_0** (batch, hidden_size): tensor containing the initial hidden
+          state for each element in the batch.
+        - **c_0** (batch. hidden_size): tensor containing the initial cell state
+          for each element in the batch.
 
     Outputs: h_1, c_1
-        - **h_1** (batch, hidden_size): tensor containing the next hidden state for each element in the batch
-        - **c_1** (batch, hidden_size): tensor containing the next cell state for each element in the batch
+        - **h_1** (batch, hidden_size): tensor containing the next hidden state
+          for each element in the batch
+        - **c_1** (batch, hidden_size): tensor containing the next cell state
+          for each element in the batch
 
     Attributes:
-        weight_ih: the learnable input-hidden weights, of shape `(input_size x hidden_size)`
-        weight_hh: the learnable hidden-hidden weights, of shape `(hidden_size x hidden_size)`
+        weight_ih: the learnable input-hidden weights, of shape
+            `(input_size x hidden_size)`
+        weight_hh: the learnable hidden-hidden weights, of shape
+            `(hidden_size x hidden_size)`
         bias_ih: the learnable input-hidden bias, of shape `(hidden_size)`
         bias_hh: the learnable hidden-hidden bias, of shape `(hidden_size)`
 
@@ -540,18 +552,23 @@ class GRUCell(RNNCellBase):
     Args:
         input_size: The number of expected features in the input x
         hidden_size: The number of features in the hidden state h
-        bias: If `False`, then the layer does not use bias weights `b_ih` and `b_hh`. Default: `True`
+        bias: If `False`, then the layer does not use bias weights `b_ih` and
+            `b_hh`. Default: `True`
 
     Inputs: input, hidden
         - **input** (batch, input_size): tensor containing input features
-        - **hidden** (batch, hidden_size): tensor containing the initial hidden state for each element in the batch.
+        - **hidden** (batch, hidden_size): tensor containing the initial hidden
+          state for each element in the batch.
 
     Outputs: h'
-        - **h'**: (batch, hidden_size): tensor containing the next hidden state for each element in the batch
+        - **h'**: (batch, hidden_size): tensor containing the next hidden state
+          for each element in the batch
 
     Attributes:
-        weight_ih: the learnable input-hidden weights, of shape `(input_size x hidden_size)`
-        weight_hh: the learnable hidden-hidden weights, of shape `(hidden_size x hidden_size)`
+        weight_ih: the learnable input-hidden weights, of shape
+            `(input_size x hidden_size)`
+        weight_hh: the learnable hidden-hidden weights, of shape
+            `(hidden_size x hidden_size)`
         bias_ih: the learnable input-hidden bias, of shape `(hidden_size)`
         bias_hh: the learnable hidden-hidden bias, of shape `(hidden_size)`
 
