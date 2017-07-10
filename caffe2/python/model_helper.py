@@ -403,7 +403,7 @@ class ModelHelper(object):
             return self._computed_params[:]
         else:
             return [p for p in self._computed_params
-                    if p.GetNameScope() == namescope]
+                    if p.GetNameScope().startswith(namescope)]
 
     def GetAllParams(self, namescope=None):
         return self.GetParams(namescope) + self.GetComputedParams(namescope)
