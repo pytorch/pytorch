@@ -24,7 +24,7 @@ HASH_REGEX = re.compile(r'-([a-f0-9]*)\.')
 def load_url(url, model_dir=None, map_location=None):
     r"""Loads the Torch serialized object at the given URL.
 
-    If the object is already present in `model_dir`, it's deserialied and
+    If the object is already present in `model_dir`, it's deserialized and
     returned. The filename part of the URL should follow the naming convention
     ``filename-<sha256>.ext`` where ``<sha256>`` is the first eight or more
     digits of the SHA256 hash of the contents of the file. The hash is used to
@@ -32,7 +32,7 @@ def load_url(url, model_dir=None, map_location=None):
 
     The default value of `model_dir` is ``$TORCH_HOME/models`` where
     ``$TORCH_HOME`` defaults to ``~/.torch``. The default directory can be
-    overriden with the ``$TORCH_MODEL_ZOO`` environement variable.
+    overriden with the ``$TORCH_MODEL_ZOO`` environment variable.
 
     Args:
         url (string): URL of the object to download

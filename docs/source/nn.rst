@@ -496,7 +496,7 @@ Loss functions
     :members:
 
 :hidden:`PoissonNLLLoss`
-~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: PoissonNLLLoss
     :members:
@@ -520,7 +520,7 @@ Loss functions
     :members:
 
 :hidden:`BCEWithLogitsLoss`
-~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: BCEWithLogitsLoss
     :members:
@@ -631,6 +631,16 @@ Utilities
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: torch.nn.utils.clip_grad_norm
+
+:hidden:`weight_norm`
+~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: torch.nn.utils.weight_norm
+
+:hidden:`remove_weight_norm`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: torch.nn.utils.remove_weight_norm
 
 
 .. currentmodule:: torch.nn.utils.rnn
@@ -921,7 +931,7 @@ Loss functions
 .. autofunction:: nll_loss
 
 :hidden:`poisson_nll_loss`
-~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: poisson_nll_loss
 

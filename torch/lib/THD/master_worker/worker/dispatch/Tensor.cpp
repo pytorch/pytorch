@@ -386,6 +386,21 @@ static void tensorMaxall(rpc::RPCMessage& raw_message) {
   }
 }
 
+static void tensorMedianall(rpc::RPCMessage& raw_message) {
+  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
+  finalize(raw_message);
+
+  if (thpp::isInteger(tensor->type())) {
+    long long value = dynamic_cast<thpp::IntTensor*>(tensor)->medianall();
+    sendValueToMaster(value);
+  } else if (thpp::isFloat(tensor->type())) {
+    double value = dynamic_cast<thpp::FloatTensor*>(tensor)->medianall();
+    sendValueToMaster(value);
+  } else {
+    throw std::invalid_argument("expected scalar type");
+  }
+}
+
 static void tensorSumall(rpc::RPCMessage& raw_message) {
   thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
   finalize(raw_message);

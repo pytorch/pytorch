@@ -786,6 +786,11 @@ auto THSTensor<real>::maxall() -> scalar_type {
 }
 
 template<>
+auto THSTensor<real>::medianall() -> scalar_type {
+  throw std::runtime_error("THSTensor::medianall() not supported");
+}
+
+template<>
 auto THSTensor<real>::sumall() -> scalar_type {
   throw std::runtime_error("THSTensor::sumall() not supported");
 }

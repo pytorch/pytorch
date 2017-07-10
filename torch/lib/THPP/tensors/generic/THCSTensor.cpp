@@ -798,6 +798,11 @@ auto THCSTensor<real>::maxall() -> scalar_type {
 }
 
 template<>
+auto THCSTensor<real>::medianall() -> scalar_type {
+  throw std::runtime_error("THCSTensor::medianall() not supported");
+}
+
+template<>
 auto THCSTensor<real>::sumall() -> scalar_type {
   throw std::runtime_error("THCSTensor::sumall() not supported");
 }

@@ -241,6 +241,17 @@ class TestNN(NNTestCase):
             d_params.append(p.grad.data)
         return params, d_params
 
+    def _assertGradAndGradgradChecks(self, apply_fn, inputs):
+        self.assertTrue(gradcheck(apply_fn, inputs))
+        dummy_out = apply_fn(*inputs)
+        if isinstance(dummy_out, tuple):
+            grad_y = tuple(Variable(torch.randn(x.size()), requires_grad=x.requires_grad)
+                           for x in dummy_out if isinstance(x, Variable))
+        else:
+            grad_y = (Variable(torch.randn(dummy_out.size()), requires_grad=dummy_out.requires_grad),)
+
+        self.assertTrue(gradgradcheck(apply_fn, inputs, grad_y,))
+
     def test_hooks(self):
         module = nn.Sigmoid()
         input = Variable(torch.ones(5, 5), requires_grad=True)
@@ -746,6 +757,29 @@ class TestNN(NNTestCase):
             scale = compare_scaling(grads)
             self.assertEqual(scale, 1)
 
+    def test_weight_norm(self):
+        input = Variable(torch.randn(3, 5))
+        m = nn.Linear(5, 7)
+        expected_output = m(input)
+
+        # add weight normalization
+        m = torch.nn.utils.weight_norm(m)
+        self.assertEqual(m.weight_v.size(), m.weight.size())
+        self.assertEqual(m.weight_g.size(), (7, 1))
+        self.assertEqual(m(input), expected_output)
+
+        # remove weight norm
+        m = torch.nn.utils.remove_weight_norm(m)
+        self.assertFalse(hasattr(m, 'weight_g'))
+        self.assertFalse(hasattr(m, 'weight_v'))
+        self.assertEqual(m(input), expected_output)
+
+        # test with dim=1
+        m = torch.nn.utils.weight_norm(m, dim=1)
+        self.assertEqual(m.weight_v.size(), m.weight.size())
+        self.assertEqual(m.weight_g.size(), (1, 5))
+        self.assertEqual(m(input), expected_output)
+
     def test_embedding_padding_idx(self):
         embedding = nn.Embedding(10, 20, padding_idx=0)
         input = Variable(torch.LongTensor([[0, 2, 4, 5], [4, 3, 0, 9]]))
@@ -947,9 +981,9 @@ class TestNN(NNTestCase):
 
     def test_pad(self):
         inputs = Variable(torch.randn(1, 3, 4, 4), requires_grad=True)
-        self.assertTrue(gradcheck(lambda x: F.pad(x, (1, 1, 1, 1)), (inputs,)))
-        self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1)), (inputs,)))
-        self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), value=2), (inputs,)))
+        self._assertGradAndGradgradChecks(lambda x: F.pad(x, (1, 1, 1, 1)), (inputs,))
+        self._assertGradAndGradgradChecks(lambda x: F.pad(x, (-1, 1, -2, 1)), (inputs,))
+        self._assertGradAndGradgradChecks(lambda x: F.pad(x, (-1, 1, -2, 1), value=2), (inputs,))
         self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='replicate'), (inputs,)))
         self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='reflect'), (inputs,)))
 
@@ -2202,6 +2236,62 @@ class TestNN(NNTestCase):
         output.backward(output.data)
         self.assertEqual(input.data, input.grad.data)
 
+    def test_bce_with_logits_raises_if_target_and_input_are_different_size(self):
+        target = Variable(torch.rand(5))
+        input = Variable(torch.rand(5, 1))
+        with self.assertRaises(ValueError):
+            nn.BCEWithLogitsLoss()(input, target)
+
+        target = Variable(torch.rand(5, 1))
+        input = Variable(torch.rand(5))
+        with self.assertRaises(ValueError):
+            nn.BCEWithLogitsLoss()(input, target)
+
+    def test_bce_with_logits_gives_same_result_as_sigmooid_and_bce_loss(self):
+        sigmoid = nn.Sigmoid()
+
+        target = Variable(torch.rand(64, 4))
+        output = Variable(torch.rand(64, 4) - 0.5)
+
+        self.assertEqual(nn.BCEWithLogitsLoss()(output, target), nn.BCELoss()(sigmoid(output), target))
+
+        weight = torch.rand(4)
+        self.assertEqual(nn.BCEWithLogitsLoss(weight)(output, target), nn.BCELoss(weight)(sigmoid(output), target))
+
+    def test_batchnorm_raises_error_if_running_mean_is_not_same_size_as_input(self):
+        input = Variable(torch.rand(2, 10))
+        running_var = torch.rand(10)
+        wrong_sizes = [9, 11]
+        for size in wrong_sizes:
+            with self.assertRaises(RuntimeError):
+                F.batch_norm(input, torch.rand(size), running_var)
+
+    def test_batchnorm_raises_error_if_running_var_is_not_same_size_as_input(self):
+        input = Variable(torch.rand(2, 10))
+        running_mean = torch.rand(10)
+        wrong_sizes = [9, 11]
+        for size in wrong_sizes:
+            with self.assertRaises(RuntimeError):
+                F.batch_norm(input, running_mean, torch.rand(size))
+
+    def test_batchnorm_raises_error_if_weight_is_not_same_size_as_input(self):
+        input = Variable(torch.rand(2, 10))
+        running_mean = torch.rand(10)
+        running_var = torch.rand(10)
+        wrong_sizes = [9, 11]
+        for size in wrong_sizes:
+            with self.assertRaises(RuntimeError):
+                F.batch_norm(input, running_mean, running_var, weight=Parameter(torch.rand(size)))
+
+    def test_batchnorm_raises_error_if_bias_is_not_same_size_as_input(self):
+        input = Variable(torch.rand(2, 10))
+        running_mean = torch.rand(10)
+        running_var = torch.rand(10)
+        wrong_sizes = [9, 11]
+        for size in wrong_sizes:
+            with self.assertRaises(RuntimeError):
+                F.batch_norm(input, running_mean, running_var, bias=Parameter(torch.rand(size)))
+
     def test_batchnorm_eval(self):
         types = (torch.FloatTensor,)
         if TEST_CUDA:
@@ -2293,6 +2383,12 @@ class TestNN(NNTestCase):
         input = Variable(torch.randn(1, 1, 2, 2, 2), requires_grad=True)
         self.assertTrue(gradcheck(lambda x: F.upsample(x, 4, mode='trilinear'), (input,)))
 
+    def test_linear_broadcasting(self):
+        m = nn.Linear(5, 8)
+        inp = Variable(torch.randn(2, 3, 5))
+        expected = m(inp.view(6, 5)).view(2, 3, 8)
+        self.assertEqual(expected, m(inp))
+
     def test_bilinear(self):
         module = nn.Bilinear(10, 10, 8)
         module_legacy = legacy.Bilinear(10, 10, 8)
@@ -2326,7 +2422,8 @@ class TestNN(NNTestCase):
         self.assertEqual(module.weight.grad.data, module_legacy.gradWeight)
         self.assertEqual(module.bias.grad.data, module_legacy.gradBias)
 
-        self.assertTrue(gradcheck(lambda x1, x2: F.bilinear(x1, x2, module.weight, module.bias), (input1_1, input2_1)))
+        self._assertGradAndGradgradChecks(lambda x1, x2: F.bilinear(x1, x2, module.weight, module.bias),
+                                          (input1_1, input2_1))
 
     def run_conv_double_back_test(self, kern, stride, padding, chan_in, chan_out, batch_size,
                                   inp_size, dilation, no_weight, use_cuda=False, use_bias=True):

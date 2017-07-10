@@ -106,6 +106,7 @@ static const std::unordered_map<rpc::function_id_type, dispatch_fn> functions {
     {Functions::tensorDot, tensorDot},
     {Functions::tensorMinall, tensorMinall},
     {Functions::tensorMaxall, tensorMaxall},
+    {Functions::tensorMedianall, tensorMedianall},
     {Functions::tensorSumall, tensorSumall},
     {Functions::tensorProdall, tensorProdall},
     {Functions::tensorNeg, tensorNeg},
