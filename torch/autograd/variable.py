@@ -390,6 +390,9 @@ class Variable(_C._VariableBase):
     def atan(self):
         return Atan.apply(self)
 
+    def atan2(self, x):
+        return Atan2.apply(self, x)
+
     def sinh(self):
         return Sinh.apply(self)
 
