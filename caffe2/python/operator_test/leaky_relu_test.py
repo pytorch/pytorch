@@ -13,7 +13,7 @@ import caffe2.python.hypothesis_test_util as hu
 class TestLeakyRelu(hu.HypothesisTestCase):
 
     def _get_inputs(self, N, C, H, W, order):
-        input_data = np.random.rand(N, C, H, W).astype(np.float32)
+        input_data = np.random.rand(N, C, H, W).astype(np.float32) - 0.5
 
         # default step size is 0.05
         input_data[np.logical_and(
