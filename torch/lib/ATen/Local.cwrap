@@ -1,0 +1,72 @@
+[[
+  name: size
+  return: long
+  cpu_half: True
+  arguments:
+    - THTensor* self
+    - long dim
+]]
+
+[[
+  name: stride
+  return: long
+  cpu_half: True
+  arguments:
+    - THTensor* self
+    - long dim
+]]
+
+
+[[
+  name: tensor
+  return: THTensor*
+  cpu_half: True
+  variants: [function]
+  options:
+    - cname: new
+      arguments: []
+    - cname: newWithSize
+      arguments:
+        - THSize* size
+        - arg: THStride* stride
+          default: NULL
+    - cname: newWithStorage
+      arguments:
+        - THStorage* storage
+        - int64_t storageOffset
+        - THSize* size
+        - arg: THStride* stride
+          default: NULL
+]]
+
+[[
+  name: select
+  cpu_half: True
+  variants: [method,function]
+  return: argument 0
+  arguments:
+    - arg: THTensor* result
+      output: True
+    - THTensor* self
+    - int dim
+    - long sliceIndex
+  aten_custom_call: |
+    int64_t ndim = self.dim();
+    AT_ASSERT(ndim > 0, "select() cannot be applied to a 0-dim tensor.");
+    if(ndim == 1) {
+      ${THTensor}_narrow(${state,}result_->tensor, self_->tensor, dim, sliceIndex,1);
+      result_->setScalar(true);
+    } else {
+      ${THTensor}_select(${state,}result_->tensor, self_->tensor, dim, sliceIndex);
+    }
+]]
+
+[[
+  name: assign_
+  cname: copy
+  cpu_half: True
+  return: self
+  arguments:
+    - THTensor* self
+    - THTensor* src
+]]
