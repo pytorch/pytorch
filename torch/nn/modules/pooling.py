@@ -503,7 +503,7 @@ class MaxPool3d(Module):
 
         - a single ``int`` -- in which case the same value is used for the depth, height and width dimension
         - a ``tuple`` of three ints -- in which case, the first `int` is used for the depth dimension,
-          the second `int` for the width dimension and the third `int` for the width dimension
+          the second `int` for the height dimension and the third `int` for the width dimension
 
     Args:
         kernel_size: the size of the window to take a max over
@@ -577,7 +577,7 @@ class AvgPool3d(Module):
 
         - a single ``int`` -- in which case the same value is used for the depth, height and width dimension
         - a ``tuple`` of three ints -- in which case, the first `int` is used for the depth dimension,
-          the second `int` for the width dimension and the third `int` for the width dimension
+          the second `int` for the height dimension and the third `int` for the width dimension
 
     Args:
         kernel_size: the size of the window
