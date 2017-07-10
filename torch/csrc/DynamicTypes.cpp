@@ -58,18 +58,53 @@ static std::unordered_map<std::string, Type> type_names = {
   {"Int", Type::INT},
   {"Long", Type::LONG},
 };
+
+static std::unordered_map<std::string, at::ScalarType> attype_names = {
+  {"Float", at::kFloat},
+  {"Double", at::kDouble},
+  {"Half", at::kHalf},
+  {"Byte", at::kByte},
+  {"Char", at::kChar},
+  {"Short", at::kShort},
+  {"Int", at::kInt},
+  {"Long", at::kLong},
+};
 static std::unordered_map<PyTypeObject*, TensorType> pytype_to_tensortype;
 static std::unordered_map<TensorType, PyTypeObject*, TensorTypeHasher> tensortype_to_pytype;
+
+static std::unordered_map<PyTypeObject*, at::Type*> pytype_to_attype;
+static std::unordered_map<at::Type*, PyTypeObject*> attype_to_pytype;
 
 void registerPyTypeObject(PyTypeObject *pytype, const std::string& name, bool is_cuda, bool is_sparse)
 {
   TensorType type;
+  at::Backend device;
+  if(is_cuda) {
+    if(is_sparse){
+      device = at::kSparseCUDA;
+    } else {
+      device = at::kCUDA;
+    }
+  } else {
+    if(is_sparse){
+      device = at::kSparseCPU;
+    } else {
+      device = at::kCPU;
+    }
+  }
+
   type.data_type = type_names.at(name);
   type.is_cuda = is_cuda;
   type.is_sparse = is_sparse;
 
   pytype_to_tensortype[pytype] = type;
   tensortype_to_pytype[type] = pytype;
+
+  if(!(is_sparse && name == "Half")) {
+    at::Type * attype = &at::getType(device,attype_names.at(name));
+    pytype_to_attype[pytype] = attype;
+    attype_to_pytype[attype] = pytype;
+  }
 }
 
 PyTypeObject* getPyTypeObject(const thpp::Tensor& tensor)
@@ -80,6 +115,12 @@ PyTypeObject* getPyTypeObject(const thpp::Tensor& tensor)
   type.is_sparse = tensor.isSparse();
 
   return tensortype_to_pytype.at(type);
+}
+PyTypeObject* getPyTypeObject(const at::Tensor& tensor)
+{
+  if(attype_to_pytype.count(&tensor.type()) == 0)
+    throw std::invalid_argument("unsupported Tensor type.");
+  return attype_to_pytype.at(&tensor.type());
 }
 
 static std::unique_ptr<Tensor> createTensor(void *tensor, Type type, bool is_cuda, bool is_sparse)
@@ -166,6 +207,22 @@ std::unique_ptr<Tensor> createTensor(PyObject *data)
   auto wrapper = createTensor(tensor, type, tensor_type.is_cuda, tensor_type.is_sparse);
   wrapper->retain();
   return wrapper;
+}
+//rename to createTensor when THPP is removed
+at::Tensor createTensorAT(PyObject *data)
+{
+  auto tensor_type = pytype_to_attype.at(Py_TYPE(data));
+  auto tensor = ((THPVoidTensor *)data)->cdata;
+  return tensor_type->unsafeTensorFromTH(tensor);
+}
+PyObject* createPyObject(at::Tensor tensor)
+{
+  auto type = getPyTypeObject(tensor);
+  PyObject *obj = type->tp_alloc(type, 0);
+  if (obj) {
+    ((THPVoidTensor*)obj)->cdata = (THVoidTensor *)tensor.detach()->unsafeGetTH();
+  }
+  return obj;
 }
 
 PyObject* createPyObject(const thpp::Tensor& tensor)
