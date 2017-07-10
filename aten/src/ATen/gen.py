@@ -9,6 +9,7 @@ import preprocess_declarations
 import function_wrapper
 import dispatch_macros
 import copy_wrapper
+
 from code_template import CodeTemplate
 
 
@@ -197,6 +198,7 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
     top_env['type_registrations'].append(type_register)
     top_env['type_headers'].append(
         '#include "ATen/{}.h"'.format(env['Type']))
+
     return env
 
 

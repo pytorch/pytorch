@@ -1,6 +1,11 @@
 
 #include "ATen/ATen.h"
 
+// for TH compat test only...
+struct THFloatTensor;
+extern "C" THFloatTensor * THFloatTensor_newWithSize2d(size_t a, size_t b);
+extern "C" void THFloatTensor_fill(THFloatTensor *, float v);
+
 #include <iostream>
 #include <chrono>
 
@@ -191,7 +196,13 @@ static void test(Type & type) {
       f[1][0] = -1;
       std:: cout << f << std::endl;
   }
-
+  {
+    int a = 4;
+    THFloatTensor *t = THFloatTensor_newWithSize2d(a, a);
+    THFloatTensor_fill(t, a);
+    Tensor tt = CPU(kFloat).unsafeTensorFromTH(t);
+    std::cout << tt << std::endl;
+  }
 }
 
 int main()
