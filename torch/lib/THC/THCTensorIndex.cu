@@ -332,26 +332,26 @@ __global__ void indexSelectLargeIndex(TensorInfo<T, IndexType> dst,
   }
 }
 
-template <unsigned int Dims>
+template <typename IndexType, unsigned int Dims>
 struct LinearIndexCalcData {
   // sizes for Tensor dims (either from the Tensor, or the size of the adv indexer at that dim)
-  long sizes[Dims];
-  long strides[Dims];            // strides for Tensor
+  IndexType sizes[Dims];
+  IndexType strides[Dims];       // strides for Tensor
   bool adv[Dims];                // which Tensors are advanced indexers
   long *advIndexTensors[Dims];   // Adv Indexing Tensors
 };
 
-template <unsigned int Dims>
+template <typename IndexType, unsigned int Dims>
 __device__ __forceinline__ long calculateOffset(
-  long index,                  // index to calculate offset for
-  LinearIndexCalcData<Dims> data
+  IndexType index,                  // index to calculate offset for
+  LinearIndexCalcData<IndexType, Dims> data
 )
 {
-  long offset = 0;
+  IndexType offset = 0;
 
 #pragma unroll
   for (int dim = Dims - 1; dim >= 0; --dim) {
-    long sizeAtDim, strideAtDim, indexAtDim, nextIndex;
+    IndexType sizeAtDim, strideAtDim, indexAtDim, nextIndex;
 
     strideAtDim = data.strides[dim];
     sizeAtDim = data.sizes[dim];
@@ -375,18 +375,18 @@ __device__ __forceinline__ long calculateOffset(
   return offset;
 }
 
-template <unsigned int Dims>
+template <typename IndexType, unsigned int Dims>
 __global__ void calculateLinearIndices(
   long *output,               // output Tensor for indices
   int elements,               // number of elements in output <-> indices to calculate
   ptrdiff_t baseOffset,       // base offset into the Tensor
-  LinearIndexCalcData<Dims> data
+  LinearIndexCalcData<IndexType, Dims> data
 )
 {
   for (long i = blockIdx.x * blockDim.x + threadIdx.x;
          i < elements;
          i += blockDim.x * gridDim.x) {
-      output[i] = baseOffset + calculateOffset<Dims>(i, data);
+      output[i] = baseOffset + calculateOffset<IndexType, Dims>(i, data);
    }
 }
 
