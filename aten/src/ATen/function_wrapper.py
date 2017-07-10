@@ -1,5 +1,4 @@
 import re
-import yaml
 from code_template import CodeTemplate
 
 # temporary things we cannot handle
@@ -57,6 +56,7 @@ if(${name}_->isScalar()) {
     ${name}_ = static_cast<${Tensor}*>(${name}__.pImpl);
 }
 """)
+
 
 class NYIError(Exception):
     """Indicates we don't support this declaration yet"""
@@ -302,18 +302,18 @@ def create_derived(backend_type_env, declarations):
         return ret['type'] == 'long' or (backend_type_env['ScalarName'] == 'Long' and
                                          ret['type'] == 'real' or ret['type'] == 'accreal')
 
-    def handle_zero_dim(env,option):
+    def handle_zero_dim(env, option):
         if 'zero_dim_dispatch_when_scalar' not in option:
             return []
         check_name = option['zero_dim_dispatch_when_scalar']
-        zero_dim_actuals = [ arg['name']
-                             if arg['name'] != check_name else "Scalar({})".format(arg['name'])
-                             for arg in option['formals_list'] ]
-        return [ ZERO_DIM_CHECK.substitute(env,check_name = check_name, zero_dim_actuals=zero_dim_actuals) ]
+        zero_dim_actuals = [arg['name']
+                            if arg['name'] != check_name else "Scalar({})".format(arg['name'])
+                            for arg in option['formals_list']]
+        return [ZERO_DIM_CHECK.substitute(env, check_name=check_name, zero_dim_actuals=zero_dim_actuals)]
 
     def emit_body(env, option):
         body = []
-        body += handle_zero_dim(env,option)
+        body += handle_zero_dim(env, option)
         # arguments are potentially duplicated because of one argument
         # referencing another
         seen_names = set()
@@ -354,7 +354,7 @@ def create_derived(backend_type_env, declarations):
                 # resize tensors for special ops that require it
                 if 'resize' in arg:
                     resize = arg['resize']
-                    if type(resize) == str:
+                    if isinstance(resize, str):
                         body.append("{}.resize_({}.sizes());".format(
                             arg['name'], resize))
                     else:
@@ -395,7 +395,7 @@ def create_derived(backend_type_env, declarations):
 
         if ret['kind'] == 'arguments':
             if 'aten_custom_call' in option:
-                scalar_check = None # all aten_custom_call bodies handle settings on their own.
+                scalar_check = None  # all aten_custom_call bodies handle settings on their own.
                 body.append(CodeTemplate(option['aten_custom_call']).substitute(env))
             else:
                 body.append(call + ";")
@@ -407,7 +407,7 @@ def create_derived(backend_type_env, declarations):
                     body.append("bool maybe_scalar = {};".format(scalar_check))
                     scalar_check = 'maybe_scalar'
                 for arg in arguments:
-                    body.append("{}_->maybeScalar({});".format(arg['name'],scalar_check))
+                    body.append("{}_->maybeScalar({});".format(arg['name'], scalar_check))
             if len(arguments_indices) == 1:
                 arg = arguments[0]
                 body.append("return {};".format(arg['name']))
@@ -422,8 +422,8 @@ def create_derived(backend_type_env, declarations):
                 maybe_scalar = "->maybeScalar({})".format(scalar_check) \
                                if scalar_check is not None \
                                else ""
-                body.append(CodeTemplate(
-                    "return Tensor((new ${Tensor}(context,${arg_name}))${maybe_scalar},false);").substitute(env, arg_name=call,maybe_scalar=maybe_scalar))
+                return_tensor = "return Tensor((new ${Tensor}(context,${arg_name}))${maybe_scalar},false);"
+                body.append(CodeTemplate(return_tensor).substitute(env, arg_name=call, maybe_scalar=maybe_scalar))
             else:
                 # we using int64_t for long in the API, so correct it here...
                 if is_actual_return_long(ret):

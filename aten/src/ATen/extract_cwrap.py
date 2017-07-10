@@ -6,16 +6,16 @@ parser.add_option('-o', '--output', help='where to write the result file.',
 options, _ = parser.parse_args()
 
 files = [
-    #'../../csrc/cudnn/cuDNN.cwrap',
+    # '../../csrc/cudnn/cuDNN.cwrap',
     '../../csrc/generic/TensorMethods.cwrap',
-    #'../../csrc/generic/methods/SparseTensor.cwrap',
+    # '../../csrc/generic/methods/SparseTensor.cwrap',
     '../../csrc/generic/methods/Tensor.cwrap',
     '../../csrc/generic/methods/TensorApply.cwrap',
     '../../csrc/generic/methods/TensorCompare.cwrap',
     '../../csrc/generic/methods/TensorCuda.cwrap',
     '../../csrc/generic/methods/TensorMath.cwrap',
     '../../csrc/generic/methods/TensorRandom.cwrap',
-    #'../../csrc/generic/methods/TensorSerialization.cwrap',
+    # '../../csrc/generic/methods/TensorSerialization.cwrap',
 ]
 
 declaration_lines = []
@@ -35,4 +35,4 @@ for filename in files:
                 declaration_lines.append(line)
 
 with open(options.output, 'w') as output:
-    output.write('\n'.join(declaration_lines)+'\n')
+    output.write('\n'.join(declaration_lines) + '\n')
