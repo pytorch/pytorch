@@ -645,17 +645,6 @@
         - THTensor* self
         - CONSTANT __last_dim
         - bool keepdim
-    - before_call: |
-        long __last_dim = THTensor_(nDimension)(LIBRARY_STATE ((THPTensor*)$arg2)->cdata)-1;
-        maybeThrowBackCompatKeepdimWarn("median");
-      arguments:
-        - arg: THTensor* values
-          output: True
-        - arg: THIndexTensor* indices
-          output: True
-        - THTensor* self
-        - CONSTANT __last_dim
-        - CONSTANT false
     - before_call: maybeThrowBackCompatKeepdimWarn("median");
       arguments:
         - arg: THTensor* values
