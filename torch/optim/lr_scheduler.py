@@ -425,7 +425,7 @@ class CyclicLR(object):
     The distance between the two boundaries can be scaled on a per-iteration
     or per-cycle basis.
 
-    Cyclical leanring rate policy changes the learning rate after every batch.
+    Cyclical learning rate policy changes the learning rate after every batch.
     `batch_step` should be called after a batch has been used for training.
     To resume training, save `last_batch_iteration` and use it to instantiate `CycleLR`.
 
