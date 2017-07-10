@@ -471,19 +471,19 @@ def glu(input, dim=-1):
                          .format(dim, ndim))
     if dim < 0:
         dim += ndim
-    return _functions.thnn.GatedLinear(dim)(input)
+    return _functions.thnn.GatedLinear.apply(input, dim)
 
 
 def hardtanh(input, min_val=-1., max_val=1., inplace=False):
-    return _functions.thnn.auto.Hardtanh(min_val, max_val, inplace)(input)
+    return _functions.thnn.auto.Hardtanh.apply(input, min_val, max_val, inplace)
 
 
 def relu6(input, inplace=False):
-    return _functions.thnn.auto.Hardtanh(0, 6, inplace)(input)
+    return _functions.thnn.auto.Hardtanh.apply(input, 0, 6, inplace)
 
 
 def elu(input, alpha=1., inplace=False):
-    return _functions.thnn.auto.ELU(alpha, inplace)(input)
+    return _functions.thnn.auto.ELU.apply(input, alpha, inplace)
 
 
 def selu(input, inplace=False):
@@ -503,11 +503,11 @@ def rrelu(input, lower=1. / 8, upper=1. / 3, training=False, inplace=False):
 
 
 def logsigmoid(input):
-    return _functions.thnn.LogSigmoid()(input)
+    return _functions.thnn.LogSigmoid.apply(input)
 
 
 def hardshrink(input, lambd=0.5):
-    return _functions.thnn.auto.Hardshrink(lambd)(input)
+    return _functions.thnn.auto.Hardshrink.apply(input, lambd)
 
 
 def tanhshrink(input):
@@ -519,7 +519,7 @@ def softsign(input):
 
 
 def softplus(input, beta=1, threshold=20):
-    return _functions.thnn.auto.Softplus(beta, threshold)(input)
+    return _functions.thnn.auto.Softplus.apply(input, beta, threshold)
 
 
 def softmin(input):
@@ -527,15 +527,15 @@ def softmin(input):
 
 
 def softmax(input):
-    return _functions.thnn.auto.Softmax()(input)
+    return _functions.thnn.auto.Softmax.apply(input)
 
 
 def softshrink(input, lambd=0.5):
-    return _functions.thnn.auto.Softshrink(lambd)(input)
+    return _functions.thnn.auto.Softshrink.apply(input, lambd)
 
 
 def log_softmax(input):
-    return _functions.thnn.LogSoftmax()(input)
+    return _functions.thnn.LogSoftmax.apply(input)
 
 
 def tanh(input):
@@ -1033,9 +1033,9 @@ def pad(input, pad, mode='constant', value=0):
         if mode == 'constant':
             return ConstantPad2d.apply(input, pad, value)
         elif mode == 'reflect':
-            return _functions.thnn.ReflectionPad2d(*pad)(input)
+            return _functions.thnn.ReflectionPad2d.apply(input, *pad)
         elif mode == 'replicate':
-            return _functions.thnn.ReplicationPad2d(*pad)(input)
+            return _functions.thnn.ReplicationPad2d.apply(input, *pad)
     elif input.dim() == 5:
         assert len(pad) == 6, '5D tensors expect 6 values for padding'
         if mode == 'constant':
@@ -1043,7 +1043,7 @@ def pad(input, pad, mode='constant', value=0):
         elif mode == 'reflect':
             raise NotImplementedError
         elif mode == 'replicate':
-            return _functions.thnn.ReplicationPad3d(*pad)(input)
+            return _functions.thnn.ReplicationPad3d.apply(input, *pad)
     else:
         raise NotImplementedError("Only 4D and 5D padding is supported for now")
 
