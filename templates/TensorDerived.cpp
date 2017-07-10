@@ -32,6 +32,9 @@ int64_t ${Tensor}::dim() {
 const char * ${Tensor}::typeString() {
   return "${Type}";
 }
+void * ${Tensor}::unsafeGetTH() {
+  return tensor;
+}
 
 ${TensorDenseOrSparse}
 

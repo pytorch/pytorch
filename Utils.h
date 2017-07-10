@@ -1,7 +1,5 @@
 #pragma once
 
-#include "ATen/CPUGenerator.h"
-
 namespace at {
 
 #define AT_ASSERT(cond, ...) if (! (cond) ) { at::runtime_error(__VA_ARGS__); }
@@ -19,14 +17,6 @@ static inline T* checked_cast(Base* expr, const char * name, int pos) {
     return result;
   runtime_error("Expected object of type %s but found type %s for argument #%d '%s'",
     T::typeString(),expr->type().toString(),pos,name);
-}
-
-struct CPUGenerator;
-struct Generator;
-static inline CPUGenerator * check_generator(Generator* expr) {
-  if(auto result = dynamic_cast<CPUGenerator*>(expr))
-    return result;
-  runtime_error("Expected a 'CPUGenerator' but found 'CUDAGenerator'");
 }
 
 } // at

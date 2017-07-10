@@ -177,15 +177,6 @@ INSTALL(TARGETS ATen
   LIBRARY DESTINATION "${TENSOR_LIB_INSTALL_LIB_DIR}"
   ARCHIVE DESTINATION "${TENSOR_LIB_INSTALL_LIB_DIR}")
 
-ADD_EXECUTABLE(scalar_test test/scalar_test.cpp)
-TARGET_LINK_LIBRARIES(scalar_test ATen)
-
-ADD_EXECUTABLE(basic test/basic.cpp)
-TARGET_LINK_LIBRARIES(basic ATen)
-
-add_executable(atest test/atest.cpp)
-target_link_libraries(atest ATen)
-
 FOREACH(HEADER ${base_h})
   INSTALL(FILES ${HEADER} DESTINATION ${TENSOR_LIB_INSTALL_INCLUDE_DIR}/ATen)
 ENDFOREACH()

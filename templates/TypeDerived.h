@@ -2,6 +2,7 @@
 #include "ATen/Type.h"
 #include "ATen/Context.h"
 #include "ATen/TensorMethods.h"
+#include "ATen/CheckGenerator.h"
 
 namespace at {
 
@@ -18,6 +19,7 @@ struct ${Type} : public Type {
   virtual const char * toString() const override;
   virtual TypeID ID() const override;
   static const char * typeString();
+  Tensor unsafeTensorFromTH(void * th_pointer) override;
 
   // example
   // virtual Tensor * add(Tensor & a, Tensor & b) override;

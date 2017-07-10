@@ -17,7 +17,7 @@ public:
     initCUDAIfNeeded(p);
     auto & type = type_registry[static_cast<int>(p)][static_cast<int>(s)];
     if(!type)
-      runtime_error("%s%s%sType is not enabled.",toString(p),toString(s));
+      runtime_error("%s%sType is not enabled.",toString(p),toString(s));
     return *type;
   }
   Generator & defaultGenerator(Backend p) {

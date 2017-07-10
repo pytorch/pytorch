@@ -109,6 +109,10 @@ struct Tensor {
   template<typename T>
   T * data() const;
 
+  void * unsafeGetTH() {
+    return pImpl->unsafeGetTH();
+  }
+
   //toLongData(), toFloatData() etc.
   #define TO_TYPE_DATA(T,name,_) \
   T * to##name##Data() const;
