@@ -931,9 +931,9 @@ static THIndexTensor* THPTensor_(_calculateLinearIndices)(
   THTensor_(calculateAdvancedIndexingOffsets)(LIBRARY_STATE cudaIndices, indexed, baseOffset, indexers);
 
   // Free the indexers
-  for (int i = 0; i < THTensor_(nDimension)(LIBRARY_STATE indexed.get(); ++i) {
+  for (int i = 0; i < THTensor_(nDimension)(LIBRARY_STATE indexed.get()); ++i) {
     if (indexers[i] != NULL) {
-      THCudaLongTensor_free(indexers[i]);
+      THCudaLongTensor_free(LIBRARY_STATE indexers[i]);
     }
   }
   return cudaIndices;
