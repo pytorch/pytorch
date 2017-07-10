@@ -501,7 +501,7 @@ class MaxPool3d(Module):
 
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, :attr:`dilation` can either be:
 
-        - a single ``int`` -- in which case the same value is used for the height and width dimension
+        - a single ``int`` -- in which case the same value is used for the depth, height and width dimension
         - a ``tuple`` of three ints -- in which case, the first `int` is used for the depth dimension,
           the second `int` for the width dimension and the third `int` for the width dimension
 
@@ -575,7 +575,7 @@ class AvgPool3d(Module):
 
     The parameters :attr:`kernel_size`, :attr:`stride` can either be:
 
-        - a single ``int`` -- in which case the same value is used for the height and width dimension
+        - a single ``int`` -- in which case the same value is used for the depth, height and width dimension
         - a ``tuple`` of three ints -- in which case, the first `int` is used for the depth dimension,
           the second `int` for the width dimension and the third `int` for the width dimension
 
