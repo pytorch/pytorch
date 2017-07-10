@@ -77,6 +77,6 @@ add_subdirectory(src/ATen)
 include_directories(
 ${CMAKE_SOURCE_DIR}/src
 ${CMAKE_BINARY_DIR}/src/ATen)
-
+add_subdirectory(src/ATen/test)
 add_subdirectory(src/data)
 add_subdirectory(src/meter)
