@@ -1,6 +1,4 @@
-import os
 import sys
-import yaml
 from optparse import OptionParser
 
 import cwrap_parser
@@ -64,7 +62,7 @@ backends = ['CPU']
 if not options.no_cuda:
     backends.append('CUDA')
 
-densities = ['Dense','Sparse']
+densities = ['Dense', 'Sparse']
 
 scalar_types = [
     ('Byte', 'uint8_t', 'Long', 'unsigned char'),
@@ -113,7 +111,7 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
     env['Storage'] = "{}{}Storage".format(backend, scalar_name)
     env['Type'] = "{}{}{}Type".format(density_tag, backend, scalar_name)
     env['Tensor'] = "{}{}{}Tensor".format(density_tag, backend, scalar_name)
-    env['Backend'] = density_tag+backend
+    env['Backend'] = density_tag + backend
 
     # used for generating switch logic for external functions
     tag = density_tag + backend + scalar_name
@@ -149,7 +147,7 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
 
         env['THType'] = scalar_name
         env['THStorage'] = "TH{}Storage".format(scalar_name)
-        env['THTensor'] = 'TH{}{}Tensor'.format(th_density_tag,scalar_name)
+        env['THTensor'] = 'TH{}{}Tensor'.format(th_density_tag, scalar_name)
         env['THIndexTensor'] = 'THLongTensor'
         env['state'] = []
         env['isCUDA'] = 'false'
@@ -193,7 +191,7 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
     write(env['Tensor'] + ".h", TENSOR_DERIVED_H.substitute(env))
 
     type_register = (('context->type_registry[static_cast<int>(Backend::{})]' +
-                     '[static_cast<int>(ScalarType::{})].reset(new {}(context));')
+                      '[static_cast<int>(ScalarType::{})].reset(new {}(context));')
                      .format(env['Backend'], scalar_name, env['Type']))
     top_env['type_registrations'].append(type_register)
     top_env['type_headers'].append(
