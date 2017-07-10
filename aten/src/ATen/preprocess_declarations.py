@@ -2,7 +2,6 @@ import re
 from copy import deepcopy
 from function_wrapper import TYPE_FORMAL_GENERIC
 import common_with_cwrap
-import yaml
 
 type_map = {
     'floating_point': [
@@ -23,7 +22,8 @@ all_types = type_map['floating_point'] + type_map['integral']
 type_map['all'] = all_types
 
 all_backends = ['CPU', 'CUDA', 'SparseCPU', 'SparseCUDA']
-default_backends =  ['CPU', 'CUDA']
+default_backends = ['CPU', 'CUDA']
+
 
 def process_types_and_backends(option):
     # if specific pairs were not listed, then enumerate them
@@ -117,23 +117,25 @@ def set_mode(option):
 # where 'name' is the name of the argument that should be a scalar
 # during dispatch, if that argument is marked internally as holding a scalar
 # then the method will dispatch to that function.
+
+
 def discover_zero_dim_tensor_operations(declaration):
     def exclude(arg):
         return arg.get('ignore_check')
 
-    def signature(option,i=None,value=None):
-        elements = [TYPE_FORMAL_GENERIC.get(arg['type'],arg['type'])
+    def signature(option, i=None, value=None):
+        elements = [TYPE_FORMAL_GENERIC.get(arg['type'], arg['type'])
                     if i is None or j != i else value
                     for j, arg in enumerate(option['arguments'])
-                    if not exclude(arg) ]
+                    if not exclude(arg)]
         return '#'.join(elements)
     signature_to_option = {signature(option): option
                            for option in declaration['options']}
 
     for option in declaration['options']:
-        for i,arg in enumerate(option['arguments']):
+        for i, arg in enumerate(option['arguments']):
             if arg['type'] == 'real':
-                signature_of_tensor_version = signature(option,i,'Tensor &')
+                signature_of_tensor_version = signature(option, i, 'Tensor &')
                 if signature_of_tensor_version in signature_to_option:
                     tensor_version = \
                         signature_to_option[signature_of_tensor_version]
@@ -160,7 +162,6 @@ def run(declarations):
         common_with_cwrap.sort_by_number_of_options(declaration)
         discover_zero_dim_tensor_operations(declaration)
 
-        new_options = []
         for option in declaration['options']:
             set_mode(option)
             sanitize_return(option)

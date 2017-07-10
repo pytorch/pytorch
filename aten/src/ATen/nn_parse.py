@@ -1,4 +1,3 @@
-import yaml
 import re
 import common_with_cwrap
 from collections import OrderedDict
