@@ -363,14 +363,21 @@ void TensorSerializer<Context>::Serialize(
         proto.mutable_int64_data(),
         &this->context_);
     break;
-  case TensorProto_DataType_FLOAT16:
-    detail::CopyToProtoWithCast(
-        chunkSize,
-        reinterpret_cast<const uint16_t*>(input.template data<float16>()) +
-            chunkBegin,
-        proto.mutable_int32_data(),
-        &this->context_);
-    break;
+  case TensorProto_DataType_FLOAT16: {
+    const int kValue = 1;
+    CAFFE_ENFORCE_EQ(
+        reinterpret_cast<const char*>(&kValue)[0],
+        1,
+        "Serialization of FLOAT16 on big endian platform is not written yet.");
+    unique_ptr<char[]> buffer(new char[2 * chunkSize]);
+    this->context_.template Copy<char, Context, CPUContext>(
+        2 * chunkSize,
+        reinterpret_cast<const char*>(
+            input.template data<float16>() + chunkBegin),
+        buffer.get());
+    this->context_.FinishDeviceComputation();
+    proto.set_byte_data(buffer.release(), 2 * chunkSize);
+  } break;
   case TensorProto_DataType_DOUBLE:
     detail::CopyToProtoAsIs(
         chunkSize,
@@ -501,13 +508,31 @@ void TensorDeserializer<Context>::Deserialize(
           &context);
       break;
     case TensorProto_DataType_FLOAT16:
-      detail::CopyFromProtoWithCast(
-          chunkSize,
-          proto.int32_data(),
-          reinterpret_cast<uint16_t*>(
-              tensor->template mutable_data<float16>()) +
-              chunkBegin,
-          &context);
+      if (proto.has_byte_data()) {
+        const int kValue = 1;
+        CAFFE_ENFORCE_EQ(
+            reinterpret_cast<const char*>(&kValue)[0],
+            1,
+            "Serialization of FLOAT16 on big endian platform "
+            "is not written yet.");
+        CAFFE_ENFORCE_EQ(
+            2 * chunkSize,
+            proto.byte_data().size(),
+            "Incorrect proto field size.");
+        context.template Copy<float16, Context, CPUContext>(
+            chunkSize,
+            reinterpret_cast<const float16*>(proto.byte_data().data()),
+            tensor->template mutable_data<float16>() + chunkBegin);
+      } else {
+        // Backward compatibility with models which used int32_data field
+        detail::CopyFromProtoWithCast(
+            chunkSize,
+            proto.int32_data(),
+            reinterpret_cast<uint16_t*>(
+                tensor->template mutable_data<float16>()) +
+                chunkBegin,
+            &context);
+      }
       break;
     case TensorProto_DataType_DOUBLE:
       detail::CopyFromProtoAsIs(

@@ -555,6 +555,42 @@ TEST_SERIALIZATION_WITH_TYPE(uint8_t, int32_data)
 TEST_SERIALIZATION_WITH_TYPE(uint16_t, int32_data)
 TEST_SERIALIZATION_WITH_TYPE(int64_t, int64_data)
 
+TEST(TensorTest, float16) {
+  const TIndex kSize = 3000000;
+  Blob blob;
+  TensorCPU* tensor = blob.GetMutable<TensorCPU>();
+  tensor->Resize(kSize);
+  for (int i = 0; i < tensor->size(); ++i) {
+    tensor->mutable_data<float16>()[i].x = i % 10000;
+  }
+  string serialized = blob.Serialize("test");
+  BlobProto proto;
+  CHECK(proto.ParseFromString(serialized));
+  EXPECT_EQ(proto.name(), "test");
+  EXPECT_EQ(proto.type(), "Tensor");
+  EXPECT_TRUE(proto.has_tensor());
+  const TensorProto& tensor_proto = proto.tensor();
+  EXPECT_EQ(
+      tensor_proto.data_type(), TypeMetaToDataType(TypeMeta::Make<float16>()));
+  EXPECT_EQ(tensor_proto.byte_data().size(), 2 * kSize);
+  for (int i = 0; i < kSize; ++i) {
+    auto value = tensor->mutable_data<float16>()[i].x;
+    auto low_bits = static_cast<char>(value & 0xff);
+    auto high_bits = static_cast<char>(value >> 8);
+    EXPECT_EQ(tensor_proto.byte_data()[2 * i], low_bits);
+    EXPECT_EQ(tensor_proto.byte_data()[2 * i + 1], high_bits);
+  }
+  Blob new_blob;
+  EXPECT_NO_THROW(new_blob.Deserialize(serialized));
+  EXPECT_TRUE(new_blob.IsType<TensorCPU>());
+  const TensorCPU& new_tensor = blob.Get<TensorCPU>();
+  EXPECT_EQ(new_tensor.ndim(), 1);
+  EXPECT_EQ(new_tensor.dim(0), kSize);
+  for (int i = 0; i < kSize; ++i) {
+    EXPECT_EQ(new_tensor.data<float16>()[i].x, i % 10000);
+  }
+}
+
 TEST(QTensorTest, QTensorSerialization) {
   Blob blob;
   QTensor<CPUContext>* qtensor = blob.GetMutable<QTensor<CPUContext>>();
