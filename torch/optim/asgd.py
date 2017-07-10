@@ -5,7 +5,8 @@ from .optimizer import Optimizer
 class ASGD(Optimizer):
     """Implements Averaged Stochastic Gradient Descent.
 
-    It has been proposed in `Acceleration of stochastic approximation by averaging`_.
+    It has been proposed in `Acceleration of stochastic approximation by
+    averaging`_.
 
     Arguments:
         params (iterable): iterable of parameters to optimize or dicts defining

@@ -132,22 +132,25 @@ class Variable(_C._VariableBase):
         It should be a tensor of matching type and location, that contains
         the gradient of the differentiated function w.r.t. ``self``.
 
-        This function accumulates gradients in the leaves - you might need to zero
-        them before calling it.
+        This function accumulates gradients in the leaves - you might need to
+        zero them before calling it.
 
         Arguments:
-            grad_variables (Tensor, Variable or None): Gradient w.r.t. the variable.
-                If it is a tensor, it will be automatically converted to a Variable
-                that is volatile unless ``create_graph`` is True. None values can be
-                specified for scalar Variables or ones that don't require grad. If a
-                None value would be acceptable then this argument is optional.
-            retain_graph (bool, optional): If False, the graph used to compute the grads
-                will be freed. Note that in nearly all cases setting this option to True
-                is not needed and often can be worked around in a much more efficient
-                way. Defaults to the value of ``create_graph``.
+            grad_variables (Tensor, Variable or None): Gradient w.r.t. the
+                variable. If it is a tensor, it will be automatically converted
+                to a Variable that is volatile unless ``create_graph`` is True.
+                None values can be specified for scalar Variables or ones that
+                don't require grad. If a None value would be acceptable then
+                this argument is optional.
+            retain_graph (bool, optional): If False, the graph used to compute
+                the grads will be freed. Note that in nearly all cases setting
+                this option to True is not needed and often can be worked around
+                in a much more efficient way. Defaults to the value of
+                ``create_graph``.
             create_graph (bool, optional): If true, graph of the derivative will
-                be constructed, allowing to compute higher order derivative products.
-                Defaults to False, unless ``gradient`` is a volatile Variable.
+                be constructed, allowing to compute higher order derivative
+                products. Defaults to False, unless ``gradient`` is a volatile
+                Variable.
         """
         torch.autograd.backward(self, gradient, retain_graph, create_graph, retain_variables)
 
@@ -222,7 +225,9 @@ class Variable(_C._VariableBase):
         return result
 
     def detach_(self):
-        """Detaches the Variable from the graph that created it, making it a leaf."""
+        """Detaches the Variable from the graph that created it, making it a
+        leaf.
+        """
         self._grad_fn = None
         self.requires_grad = False
 

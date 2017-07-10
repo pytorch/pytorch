@@ -241,7 +241,8 @@ class _TensorBase(object):
         Unlike :meth:`expand`, this function copies the tensor's data.
 
         Args:
-            *sizes (torch.Size or int...): The number of times to repeat this tensor along each dimension
+            *sizes (torch.Size or int...): The number of times to repeat this
+                tensor along each dimension
 
         Example:
             >>> x = torch.Tensor([1, 2, 3])
