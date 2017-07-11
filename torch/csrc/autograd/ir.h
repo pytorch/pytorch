@@ -294,6 +294,20 @@ void printExpr(std::shared_ptr<Expr>);
 void printExpr(std::shared_ptr<Expr>, std::ostream& s);
 
 // --------------------------------------------------------------------
+// Graphs (i.e., functions, i.e., lambda expressions)
+
+struct Graph {
+  local_list params;
+  std::shared_ptr<Expr> body;
+  Graph(local_list params, std::shared_ptr<Expr> body)
+    : params(params)
+    , body(body)
+    {};
+};
+
+void printGraph(std::shared_ptr<Graph>, std::ostream& s);
+
+// --------------------------------------------------------------------
 // IR builder
 
 // This builder allows you to build a sequence of successively nested
