@@ -564,6 +564,26 @@ def batch_norm(input, running_mean, running_var, weight=None, bias=None,
 
 # loss
 
+def mse_loss(input, target, size_average=True):
+    r"""Mean squared error loss.
+
+    Measures the mean squared error between `n` elements in the input `x` and target `y`:
+
+    :math:`{loss}(x, y)  = 1/n \sum |x_i - y_i|^2`
+    """
+    return _functions.thnn.MSELoss(size_average)(input, target)
+
+
+def l1_loss(input, target, size_average=True):
+    r"""Mean absolute value loss.
+
+    Measures the mean absolute value of the element-wise difference between input `x` and target `y`:
+
+    :math:`{loss}(x, y)  = 1/n \sum |x_i - y_i|`
+    """
+    return _functions.thnn.L1Loss(size_average)(input, target)
+
+
 def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100):
     r"""The negative log likelihood loss.
 
