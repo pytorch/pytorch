@@ -121,7 +121,7 @@ THCTensor_(addmv)(THCState *state, THCTensor *r_, real beta, THCTensor *t, real 
 
     THCTensor_(addmm)(state, r_, beta, tAsMatrix, alpha, mat, vecAsMatrix);
 
-    // r_ will have answer as matrix, need to return a vecotr
+    // r_ will have answer as matrix, need to return a vector
     THCTensor_(resize1d)(state, r_, r_->size[0]);
     THCTensor_(free)(state, vecAsMatrix);
     THCTensor_(free)(state, tAsMatrix);
@@ -245,7 +245,9 @@ THCTensor_(addmm)(THCState *state, THCTensor *r_, real beta, THCTensor *t, real 
   if(t != r_)
   {
     THCTensor_(resizeAs)(state, r_, t);
-    THCTensor_(copy)(state, r_, t);
+    if (ScalarConvert<real, double>::to(beta) != 0.0) {
+      THCTensor_(copy)(state, r_, t);
+    }
   }
 
   /* r_ */
@@ -402,7 +404,9 @@ THCTensor_(addbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
 
   if (t != result) {
     THCTensor_(resizeAs)(state, result, t);
-    THCTensor_(copy)(state, result, t);
+    if (ScalarConvert<real, double>::to(beta) != 0.0) {
+      THCTensor_(copy)(state, result, t);
+    }
   }
 
   THCTensor *slice1 = THCTensor_(new)(state);
@@ -450,7 +454,9 @@ THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
 
   if (t != result) {
     THCTensor_(resizeAs)(state, result, t);
-    THCTensor_(copy)(state, result, t);
+    if (ScalarConvert<real, double>::to(beta) != 0.0) {
+      THCTensor_(copy)(state, result, t);
+    }
   }
 
   bool transpose_result;
