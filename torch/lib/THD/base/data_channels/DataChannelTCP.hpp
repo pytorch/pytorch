@@ -60,6 +60,7 @@ struct DataChannelTCP : DataChannel {
   THDGroup newGroup(const std::vector<rank_type>& ranks) override;
 
 private:
+  using req_ptr = std::unique_ptr<RequestTCP>;
   // Defines process to which master or worker is connected
   struct Process {
     rank_type rank;
