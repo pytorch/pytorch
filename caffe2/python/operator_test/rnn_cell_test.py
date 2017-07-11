@@ -3,9 +3,12 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import core, gradient_checker, rnn_cell, workspace, scope, utils
+from caffe2.python import (
+    core, gradient_checker, rnn_cell, workspace, scope, utils
+)
 from caffe2.python.attention import AttentionType
 from caffe2.python.model_helper import ModelHelper, ExtractPredictorNet
+from caffe2.python.rnn.rnn_cell_test_util import sigmoid, tanh, _prepare_rnn
 from caffe2.proto import caffe2_pb2
 import caffe2.python.hypothesis_test_util as hu
 
@@ -14,14 +17,6 @@ from hypothesis import given
 from hypothesis import settings as ht_settings
 import hypothesis.strategies as st
 import numpy as np
-
-
-def sigmoid(x):
-    return 1.0 / (1.0 + np.exp(-x))
-
-
-def tanh(x):
-    return 2.0 * sigmoid(2.0 * x) - 1
 
 
 def lstm_unit(hidden_t_prev, cell_t_prev, gates,
@@ -377,60 +372,6 @@ def lstm_input():
     return dims_.flatmap(create_input)
 
 
-def _prepare_lstm(t, n, dim_in, create_lstm, outputs_with_grads,
-                  forget_bias, memory_optim=False,
-                  forward_only=False, drop_states=False, T=None,
-                  two_d_initial_states=None, dim_out=None):
-    if dim_out is None:
-        dim_out = [dim_in]
-    print("Dims: ", t, n, dim_in, dim_out)
-
-    model = ModelHelper(name='external')
-
-    if two_d_initial_states is None:
-        two_d_initial_states = np.random.randint(2)
-
-    def generate_input_state(n, d):
-        if two_d_initial_states:
-            return np.random.randn(n, d).astype(np.float32)
-        return np.random.randn(1, n, d).astype(np.float32)
-
-    states = []
-    for layer_id, d in enumerate(dim_out):
-        h, c = model.net.AddExternalInputs(
-            "hidden_init_{}".format(layer_id),
-            "cell_init_{}".format(layer_id),
-        )
-        states.extend([h, c])
-        workspace.FeedBlob(h, generate_input_state(n, d).astype(np.float32))
-        workspace.FeedBlob(c, generate_input_state(n, d).astype(np.float32))
-
-    # Due to convoluted RNN scoping logic we make sure that things
-    # work from a namescope
-    with scope.NameScope("test_name_scope"):
-        input_blob, seq_lengths = model.net.AddScopedExternalInputs(
-            'input_blob', 'seq_lengths')
-
-        outputs = create_lstm(
-            model, input_blob, seq_lengths, states,
-            dim_in=dim_in, dim_out=dim_out, scope="external/recurrent",
-            outputs_with_grads=outputs_with_grads,
-            memory_optimization=memory_optim,
-            forget_bias=forget_bias,
-            forward_only=forward_only,
-            drop_states=drop_states,
-            static_rnn_unroll_size=T,
-        )
-
-    workspace.RunNetOnce(model.param_init_net)
-
-    workspace.FeedBlob(
-        seq_lengths,
-        np.random.randint(1, t + 1, size=(n,)).astype(np.int32)
-    )
-    return outputs, model.net, states + [input_blob]
-
-
 def _prepare_attention(t, n, dim_in, encoder_dim,
                           forward_only=False, T=None,
                           dim_out=None, residual=False):
@@ -626,9 +567,9 @@ class RNNCellTest(hu.HypothesisTestCase):
     def test_unroll_lstm(self, input_tensor, dim_out, outputs_with_grads,
                          **kwargs):
         lstms = [
-            _prepare_lstm(
+            _prepare_rnn(
                 *input_tensor.shape,
-                create_lstm=rnn_cell.LSTM,
+                create_rnn=rnn_cell.LSTM,
                 outputs_with_grads=outputs_with_grads,
                 T=T,
                 two_d_initial_states=False,
@@ -725,9 +666,9 @@ class RNNCellTest(hu.HypothesisTestCase):
     def test_layered_lstm(self, input_tensor, **kwargs):
         for outputs_with_grads in [[0], [1], [0, 1, 2, 3]]:
             for memory_optim in [False, True]:
-                _, net, inputs = _prepare_lstm(
+                _, net, inputs = _prepare_rnn(
                     *input_tensor.shape,
-                    create_lstm=rnn_cell.LSTM,
+                    create_rnn=rnn_cell.LSTM,
                     outputs_with_grads=outputs_with_grads,
                     memory_optim=memory_optim,
                     **kwargs
@@ -765,7 +706,7 @@ class RNNCellTest(hu.HypothesisTestCase):
         d = d // 4
         ref = partial(ref, forget_bias=forget_bias, drop_states=drop_states)
 
-        net = _prepare_lstm(t, n, d, create_lstm,
+        net = _prepare_rnn(t, n, d, create_lstm,
                             outputs_with_grads=outputs_with_grads,
                             memory_optim=memory_optim,
                             forget_bias=forget_bias,
