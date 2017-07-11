@@ -27,6 +27,14 @@ class _WeightedLoss(_Loss):
         super(_WeightedLoss, self).__init__(size_average)
         self.register_buffer('weight', weight)
 
+#<<<<<<< 4909000d3ebe587b17f6e2b86917775eb0c2509c
+#=======
+#    def forward(self, input, target):
+#        _assert_no_grad(target)
+#        backend_fn = getattr(self._backend, type(self).__name__)
+#        return backend_fn.apply(input, target, self.weight, self.size_average)
+
+#>>>>>>> Convert _WeightedLoss functions to new style autograd functions.
 
 class L1Loss(_Loss):
     r"""Creates a criterion that measures the mean absolute value of the
