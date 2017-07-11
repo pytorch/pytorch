@@ -1228,8 +1228,13 @@ struct TraceInterpreter
   }
 };
 
-variable_list interpret(std::shared_ptr<Expr> expr, environment env) {
-  return TraceInterpreter(env).visitExpr(expr);
+variable_list interpret(std::shared_ptr<Graph> graph, const variable_list& inputs) {
+  environment env;
+  // TODO: check that these match up
+  for (size_t i = 0; i < inputs.size(); i++) {
+    env.insert({graph->params[i]->unique, inputs[i]});
+  }
+  return TraceInterpreter(env).visitExpr(graph->body);
 }
 
 }} // namespace torch::autograd

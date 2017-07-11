@@ -8,15 +8,15 @@ using namespace torch::autograd;
 // TODO: THIS IMPLEMENTATION CURRENTLY LEAKS IF STORED PYTHON OBJECTS IN AST
 // HAVE BACK REFERENCES, DUE TO CYCLE.  Need to fix this at some point.
 
-PyObject* THPExprClass = nullptr;
+PyObject* THPGraphClass = nullptr;
 
-PyObject* THPExpr_Wrap(const std::shared_ptr<Expr>& e)
+PyObject* THPGraph_Wrap(const std::shared_ptr<Graph>& e)
 {
   if (!e) {
     Py_RETURN_NONE;
   } else {
-    auto type = (PyTypeObject*) THPExprClass;
-    THPExpr* obj = (THPExpr*)type->tp_alloc(type, 0);
+    auto type = (PyTypeObject*) THPGraphClass;
+    THPGraph* obj = (THPGraph*)type->tp_alloc(type, 0);
     if (obj) {
       obj->cdata = e;
     }
@@ -24,39 +24,20 @@ PyObject* THPExpr_Wrap(const std::shared_ptr<Expr>& e)
   }
 }
 
-class TraverseExpr : public ExprVisitor<TraverseExpr, int>
+static int THPGraph_traverse(THPGraph *self, visitproc visit, void *arg)
 {
-public:
-  int visitLet(std::shared_ptr<Let>, visitproc, void*) {
-    return 0;
-  }
-  int visitTuple(std::shared_ptr<Tuple>, visitproc, void*) {
-    return 0;
-  }
-};
-
-static int THPExpr_traverse(THPExpr *self, visitproc visit, void *arg)
-{
-  return self->cdata ? TraverseExpr().visitExpr(self->cdata, visit, arg) : 0;
+  return 0; // LEAK!
 }
 
-class ClearExpr : public ExprVisitor<ClearExpr>
+static int THPGraph_clear(THPGraph *self)
 {
-public:
-  void visitLet(std::shared_ptr<Let>) { }
-  void visitTuple(std::shared_ptr<Tuple>) { }
-};
-
-static int THPExpr_clear(THPExpr *self)
-{
-  if (self->cdata) ClearExpr().visitExpr(self->cdata);
-  return 0;
+  return 0; // LEAK!
 }
 
-static void THPExpr_dealloc(THPExpr* self)
+static void THPGraph_dealloc(THPGraph* self)
 {
   PyObject_GC_UnTrack(self);
-  self->cdata.~shared_ptr<Expr>();
+  self->cdata.~shared_ptr<Graph>();
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
@@ -83,24 +64,24 @@ PyObject *THPNode_get_name(THPNode *self) {
 }
 */
 
-static struct PyGetSetDef THPExpr_properties[] = {
+static struct PyGetSetDef THPGraph_properties[] = {
 //  {"_inputs", (getter)THPNode_get_inputs, NULL, NULL, NULL},
 //  {"_name", (getter)THPNode_get_name, NULL, NULL, NULL},
   {NULL}
 };
 
-static PyObject* THPExpr_str(THPExpr *self) {
+static PyObject* THPGraph_str(THPGraph *self) {
   std::stringstream ss;
-  printExpr(self->cdata, ss);
+  printGraph(self->cdata, ss);
   return THPUtils_packString(ss.str());
 }
 
-PyTypeObject THPExprType = {
+PyTypeObject THPGraphType = {
   PyVarObject_HEAD_INIT(NULL, 0)
-  "torch._C._ExprBase",                  /* tp_name */
-  sizeof(THPExpr),                       /* tp_basicsize */
+  "torch._C._GraphBase",                  /* tp_name */
+  sizeof(THPGraph),                       /* tp_basicsize */
   0,                                     /* tp_itemsize */
-  (destructor)THPExpr_dealloc,           /* tp_dealloc */
+  (destructor)THPGraph_dealloc,           /* tp_dealloc */
   0,                                     /* tp_print */
   0,                                     /* tp_getattr */
   0,                                     /* tp_setattr */
@@ -111,21 +92,21 @@ PyTypeObject THPExprType = {
   0,                                     /* tp_as_mapping */
   0,                                     /* tp_hash  */
   0,                                     /* tp_call */
-  (reprfunc)THPExpr_str,                 /* tp_str */
+  (reprfunc)THPGraph_str,                 /* tp_str */
   0,                                     /* tp_getattro */
   0,                                     /* tp_setattro */
   0,                                     /* tp_as_buffer */
   Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | Py_TPFLAGS_HAVE_GC, /* tp_flags */
   NULL,                                  /* tp_doc */
-  (traverseproc)THPExpr_traverse,        /* tp_traverse */
-  (inquiry)THPExpr_clear,                /* tp_clear */
+  (traverseproc)THPGraph_traverse,        /* tp_traverse */
+  (inquiry)THPGraph_clear,                /* tp_clear */
   0,                                     /* tp_richcompare */
   0,                                     /* tp_weaklistoffset */
   0,                                     /* tp_iter */
   0,                                     /* tp_iternext */
   0,                                     /* tp_methods */
   0,                                     /* tp_members */
-  THPExpr_properties,                    /* tp_getset */
+  THPGraph_properties,                    /* tp_getset */
   0,                                     /* tp_base */
   0,                                     /* tp_dict */
   0,                                     /* tp_descr_get */
@@ -138,9 +119,9 @@ PyTypeObject THPExprType = {
 };
 
 bool THPIR_initModule(PyObject *module) {
-  if (PyType_Ready(&THPExprType) < 0)
+  if (PyType_Ready(&THPGraphType) < 0)
     return false;
-  Py_INCREF(&THPExprType);
-  PyModule_AddObject(module, "_ExprBase", (PyObject *)&THPExprType);
+  Py_INCREF(&THPGraphType);
+  PyModule_AddObject(module, "_GraphBase", (PyObject *)&THPGraphType);
   return true;
 }

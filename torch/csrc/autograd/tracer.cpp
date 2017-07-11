@@ -12,8 +12,9 @@ void TracingState::addBinding(local_list lvals, std::shared_ptr<Instruction> rva
   builder->add(Bind(lvals, rval));
 }
 
-std::shared_ptr<Expr> TracingState::expr(local_list locals) {
-  return builder->expr(std::make_shared<Tuple>(locals));
+std::shared_ptr<Graph> TracingState::graph(local_list outputs) {
+  auto expr = builder->expr(std::make_shared<Tuple>(outputs));
+  return std::make_shared<Graph>(params, expr);
 }
 
 void Tracer_enter() {
@@ -23,13 +24,13 @@ void Tracer_enter() {
         GlobalTracingState = std::unique_ptr<TracingState>(new TracingState());
     }
 }
-std::shared_ptr<Expr> Tracer_exit(local_list outputs) {
+std::shared_ptr<Graph> Tracer_exit(local_list outputs) {
     if (!GlobalTracingState) {
         throw std::logic_error("attempting to exit trace, but none exist");
     } else {
         auto st = std::move(GlobalTracingState);
         GlobalTracingState = nullptr;
-        return st->expr(outputs);
+        return st->graph(outputs);
     }
 }
 
