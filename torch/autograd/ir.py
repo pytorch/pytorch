@@ -1,4 +1,4 @@
 import torch._C as _C
 
-class Expr(_C._ExprBase):
+class Graph(_C._GraphBase):
     pass

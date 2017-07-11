@@ -30,7 +30,7 @@ struct PyFunction : public Function {
 };
 
 using environment = std::unordered_map<int, std::shared_ptr<Variable>>;
-variable_list interpret(std::shared_ptr<Expr>, environment);
+variable_list interpret(std::shared_ptr<Graph>, const variable_list&);
 
 }} // namespace torch::autograd
 
