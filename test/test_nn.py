@@ -2442,9 +2442,9 @@ class TestNN(NNTestCase):
 
     def test_conv_double_backward(self):
         batch_size = 2
-        for kern, inp_size, dilations in [(3, 6, [1, 2]), (3, 7, [1]), (4, 9, [1]), (4, 10, [1, 2])]:
+        for kern, inp_size, dilations in [(3, 6, [1, 2]), (3, 7, [1]), (4, 9, [1])]:
             for stride, padding, chan_in, chan_out, dilation in \
-                    product([1, 2], [0, 2], [2], [2, 3], dilations):
+                    product([1, 2], [0, 2], [2], [3], dilations):
                 no_weight = stride == 2
                 result = self.run_conv_double_back_test(kern, stride,
                                                         padding, chan_in, chan_out,
