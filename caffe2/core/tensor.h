@@ -441,7 +441,7 @@ class Tensor {
     shares_data_ = true;
   }
 
-  bool shares_data() {
+  bool shares_data() const {
     return shares_data_;
   }
 
@@ -742,7 +742,7 @@ TypeMeta GetTensorType(void* c) {
 
 // Shape call registry
 typedef vector<TIndex> (*TensorInfoCall)(
-    void*,
+    const void*,
     bool* shares_data,
     size_t* capacity,
     DeviceOption* device);
@@ -751,11 +751,11 @@ void RegisterTensorInfoFunction(CaffeTypeId id, TensorInfoCall c);
 
 template <class Context>
 vector<TIndex> GetTensorInfo(
-    void* c,
+    const void* c,
     bool* shares_data,
     size_t* capacity,
     DeviceOption* device) {
-  Tensor<Context>* tc = static_cast<Tensor<Context>*>(c);
+  const Tensor<Context>* tc = static_cast<const Tensor<Context>*>(c);
   *shares_data = tc->shares_data();
   *capacity = tc->capacity_nbytes();
   device->set_device_type(CPU);

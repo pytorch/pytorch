@@ -86,7 +86,7 @@ class NetBase {
     return observer_.get();
   }
 
-  const string& Name() {
+  const string& Name() const {
     return name_;
   }
 
