@@ -10,8 +10,8 @@ class Threshold(Module):
 
     Threshold is defined as::
 
-         y =  x        if x >= threshold
-              value    if x <  threshold
+         y =  x        if x >  threshold
+              value    if x <= threshold
 
     Args:
         threshold: The value to threshold at
