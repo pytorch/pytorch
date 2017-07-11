@@ -194,7 +194,7 @@ def _sanitize_str(s):
     if len(sanitized) < 64:
         return sanitized
     else:
-        return s[:64] + '...<+len=%d>' % (len(s) - 64)
+        return sanitized[:64] + '...<+len=%d>' % (len(sanitized) - 64)
 
 
 def _arg_val(arg):
