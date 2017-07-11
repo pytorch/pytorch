@@ -11,7 +11,7 @@ namespace at {
 
 struct ${Tensor} : public TensorImpl {
 public:
-  ${Tensor}(Context* context);
+  explicit ${Tensor}(Context* context);
   ${Tensor}(Context* context, ${THTensor} * tensor);
   virtual ~${Tensor}();
   virtual const char * toString() const override;

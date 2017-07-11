@@ -39,7 +39,7 @@ struct Tensor {
     if(pImpl != nullptr)
       pImpl->retain();
   }
-  Tensor(Tensor && rhs)
+  Tensor(Tensor && rhs) noexcept
   : pImpl(rhs.pImpl) {
     rhs.pImpl = nullptr;
   }
