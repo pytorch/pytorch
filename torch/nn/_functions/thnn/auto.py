@@ -25,6 +25,25 @@ def _make_function_class_criterion(class_name, update_output, update_grad_input,
         additional_arg_idx += 1
 
     @staticmethod
+    def backward_cls_forward(ctx, input, target, grad_output, additional_args_ctx, backend_ctx):
+        ctx.additional_args = additional_args_ctx
+        ctx._backend = backend_ctx
+        grad_input = grad_output.new().resize_as_(input).zero_()
+        getattr(ctx._backend, update_grad_input.name)(ctx._backend.library_state, input, target,
+                                                      grad_input, *ctx.additional_args)
+        grad_output_expanded = grad_output.view(*repeat(1, grad_input.dim()))
+        grad_input.mul_(grad_output_expanded.expand_as(grad_input))
+        return grad_input
+
+    @staticmethod
+    @once_differentiable
+    def backward_cls_backward(ctx, *grad_params):
+        raise ValueError("trying to differentiate function that doesn't support differentiation yet.")
+
+    backward_cls = type(class_name + "Backward", (Function,),
+                        dict(forward=backward_cls_forward, backward=backward_cls_backward))
+
+    @staticmethod
     def forward(ctx, input, target, *args):
         ctx._backend = type2backend[type(input)]
         ctx.save_for_backward(input, target)
@@ -46,17 +65,13 @@ def _make_function_class_criterion(class_name, update_output, update_grad_input,
         return output
 
     @staticmethod
-    @once_differentiable
     def backward(ctx, grad_output):
-        input, target = ctx.saved_tensors
-        grad_input = grad_output.new().resize_as_(input).zero_()
-        getattr(ctx._backend, update_grad_input.name)(ctx._backend.library_state, input, target,
-                                                      grad_input, *ctx.additional_args)
-        grad_output_expanded = grad_output.view(*repeat(1, grad_input.dim()))
-        grad_input.mul_(grad_output_expanded.expand_as(grad_input))
-        return (grad_input, None) + (None,) * ctx.forward_args_count
+        input, target = ctx.saved_variables
+        # apply returns grad_input, so we need to return Nones for target (1) + 1 for each extra arg passed to forward.
+        return ((backward_cls.apply(input, target, grad_output, ctx.additional_args, ctx._backend),) +
+                (None,) * (ctx.forward_args_count + 1))
 
-    return type(class_name, (Function,), dict(forward=forward, backward=backward))
+    return type(class_name, (Function,), dict(forward=forward, backward=backward)), backward_cls
 
 
 def _find_buffers(args, ignored_args):
@@ -302,18 +317,16 @@ def _generate_function_classes(scope_dict):
         # This has to call a function to retain correct references to functions
         is_criterion_fn = 'Criterion' in fn
         if is_criterion_fn:
-            cls = _make_function_class_criterion(class_name, update_output,
-                                                 update_grad_input, acc_grad_parameters)
+            cls, backward_cls = _make_function_class_criterion(class_name, update_output,
+                                                               update_grad_input, acc_grad_parameters)
         else:
             cls, backward_cls = _make_function_class(class_name, update_output,
                                                      update_grad_input, acc_grad_parameters)
         scope_dict[class_name] = cls
-        if not is_criterion_fn:
-            scope_dict[class_name + 'Backward'] = backward_cls
+        scope_dict[backward_cls.__name__] = backward_cls
         if not class_name.startswith('_'):
             _all_functions.append(cls)
-            if not is_criterion_fn:
-                _all_functions.append(backward_cls)
+            _all_functions.append(backward_cls)
 
 
 _generate_function_classes(locals())
