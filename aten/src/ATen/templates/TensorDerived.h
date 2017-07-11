@@ -31,4 +31,4 @@ public:
   friend struct ${Type};
 };
 
-} // namespace thpp
+} // namespace at
