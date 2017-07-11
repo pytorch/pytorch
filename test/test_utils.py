@@ -336,7 +336,10 @@ class TestLuaReader(TestCase):
 
     @classmethod
     def init(cls):
-        path = download_file('https://download.pytorch.org/test_data/legacy_modules.t7')
+        try:
+            path = download_file('https://download.pytorch.org/test_data/legacy_modules.t7')
+        except unittest.SkipTest:
+            return
         tests = load_lua(path)
         for name, test in tests['modules'].items():
             test_name = 'test_' + name.replace('nn.', '')
