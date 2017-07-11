@@ -69,6 +69,14 @@ def MakeArgument(key, value):
     argument.name = key
     iterable = isinstance(value, collections.Iterable)
 
+    # Fast tracking common use case where a float32 array of tensor parameters
+    # needs to be serialized.  The entire array is guaranteed to have the same
+    # dtype, so no per-element checking necessary and no need to convert each
+    # element separately.
+    if isinstance(value, np.ndarray) and value.dtype.type is np.float32:
+        argument.floats.extend(value.flatten().tolist())
+        return argument
+
     if isinstance(value, np.ndarray):
         value = value.flatten().tolist()
     elif isinstance(value, np.generic):
