@@ -305,7 +305,10 @@ class SumOp : public Operator<Context> {
     } else if (Input(0).template IsType<int>()) {
       return DoRunWithType<int, int>();
     } else {
-      return false;
+      CAFFE_THROW(
+          "Sum operator only supports 32-bit float and ints, but",
+          " input was of type ",
+          Input(0).meta().name());
     }
   }
 };
