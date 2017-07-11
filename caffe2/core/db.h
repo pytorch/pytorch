@@ -170,15 +170,19 @@ class DBReader {
     db_type_ = db_type;
     source_ = source;
     db_ = CreateDB(db_type_, source_, READ);
-    CAFFE_ENFORCE(db_,
-        "Cannot open db: ", source_, " of type ", db_type_);
-    CAFFE_ENFORCE(num_shards >= 1);
-    CAFFE_ENFORCE(shard_id >= 0);
-    CAFFE_ENFORCE(shard_id < num_shards);
-    num_shards_ = num_shards;
-    shard_id_ = shard_id;
-    cursor_ = db_->NewCursor();
-    SeekToFirst();
+    CAFFE_ENFORCE(db_, "Cannot open db: ", source_, " of type ", db_type_);
+    InitializeCursor(num_shards, shard_id);
+  }
+
+  void Open(
+      unique_ptr<DB>&& db,
+      const int32_t num_shards = 1,
+      const int32_t shard_id = 0) {
+    cursor_.reset();
+    db_.reset();
+    db_ = std::move(db);
+    CAFFE_ENFORCE(db_.get(), "Passed null db");
+    InitializeCursor(num_shards, shard_id);
   }
 
  public:
@@ -237,6 +241,16 @@ class DBReader {
   }
 
  private:
+  void InitializeCursor(const int32_t num_shards, const int32_t shard_id) {
+    CAFFE_ENFORCE(num_shards >= 1);
+    CAFFE_ENFORCE(shard_id >= 0);
+    CAFFE_ENFORCE(shard_id < num_shards);
+    num_shards_ = num_shards;
+    shard_id_ = shard_id;
+    cursor_ = db_->NewCursor();
+    SeekToFirst();
+  }
+
   void MoveToBeginning() const {
     cursor_->SeekToFirst();
     for (auto s = 0; s < shard_id_; s++) {
