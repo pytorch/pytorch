@@ -758,79 +758,54 @@ class TestLayers(LayersTestCase):
         train_init_net, train_net = self.get_training_nets()
 
         # Init net assertions
-        init_ops = self.assertNetContainOps(
-            train_init_net,
-            [
-                OpSpec("GaussianFill", None, None),
-                OpSpec("UniformFill", None, None),
-            ]
-        )
-
-        # Operation specifications
-        mat_mul_spec = OpSpec("MatMul", [input_blob, init_ops[0].output[0]],
-                              None)
-        add_spec = OpSpec("Add", [None, init_ops[1].output[0]], None,
-                          {'broadcast': 1, 'axis': 1})
-        cosine_spec = OpSpec("Cos", None, None)
-        scale_spec = OpSpec("Scale", None, rff_output.field_blobs(),
-                            {'scale': scale})
-
-        # Train net assertions
-        self.assertNetContainOps(
-            train_net,
-            [
-                mat_mul_spec,
-                add_spec,
-                cosine_spec,
-                scale_spec
-            ]
-        )
-
-        workspace.RunNetOnce(train_init_net)
+        init_ops_list = [
+            OpSpec("GaussianFill", None, None),
+            OpSpec("UniformFill", None, None),
+        ]
+        init_ops = self._test_net(train_init_net, init_ops_list)
         W = workspace.FetchBlob(self.model.layers[0].w)
         b = workspace.FetchBlob(self.model.layers[0].b)
 
-        workspace.RunNetOnce(train_net)
-        train_output = workspace.FetchBlob(rff_output())
-        train_ref = scale * np.cos(np.dot(X, W) + b)
-        npt.assert_almost_equal(train_output, train_ref)
+        # Operation specifications
+        fc_spec = OpSpec("FC", [input_blob, init_ops[0].output[0],
+                         init_ops[1].output[0]], None)
+        cosine_spec = OpSpec("Cos", None, None)
+        scale_spec = OpSpec("Scale", None, rff_output.field_blobs(),
+                            {'scale': scale})
+        ops_list = [
+            fc_spec,
+            cosine_spec,
+            scale_spec
+        ]
+
+        # Train net assertions
+        self._test_net(train_net, ops_list)
+        self._rff_hypothesis_test(rff_output(), X, W, b, scale)
 
         # Eval net assertions
         eval_net = self.get_eval_net()
-        self.assertNetContainOps(
-            eval_net,
-            [
-                mat_mul_spec,
-                add_spec,
-                cosine_spec,
-                scale_spec
-            ]
-        )
-        schema.FeedRecord(input_record, [X])
-        workspace.RunNetOnce(eval_net)
-
-        eval_output = workspace.FetchBlob(rff_output())
-        eval_ref = scale * np.cos(np.dot(X, W) + b)
-        npt.assert_almost_equal(eval_output, eval_ref)
+        self._test_net(eval_net, ops_list)
+        self._rff_hypothesis_test(rff_output(), X, W, b, scale)
 
         # Predict net assertions
         predict_net = self.get_predict_net()
-        self.assertNetContainOps(
-            predict_net,
-            [
-                mat_mul_spec,
-                add_spec,
-                cosine_spec,
-                scale_spec
-            ]
-        )
+        self._test_net(predict_net, ops_list)
+        self._rff_hypothesis_test(rff_output(), X, W, b, scale)
 
-        schema.FeedRecord(input_record, [X])
-        workspace.RunNetOnce(predict_net)
+    def _rff_hypothesis_test(self, rff_output, X, W, b, scale):
+        """
+        Runs hypothesis test for Semi Random Features layer.
 
-        predict_output = workspace.FetchBlob(rff_output())
-        predict_ref = scale * np.cos(np.dot(X, W) + b)
-        npt.assert_almost_equal(predict_output, predict_ref)
+        Inputs:
+            rff_output -- output of net after running random fourier features layer
+            X -- input data
+            W -- weight parameter from train_init_net
+            b -- bias parameter from train_init_net
+            scale -- value by which to scale the output vector
+        """
+        output = workspace.FetchBlob(rff_output)
+        output_ref = scale * np.cos(np.dot(X, np.transpose(W)) + b)
+        npt.assert_allclose(output, output_ref, rtol=1e-4)
 
     @given(
         batch_size=st.integers(min_value=2, max_value=10),
