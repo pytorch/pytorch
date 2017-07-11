@@ -188,7 +188,6 @@ def _compute_blob_recycling_for_dag(
         op_token_deposit[op_idx] = None
         cur_op = ops[op_idx]
         new_free_blobs = set()
-        unused_free_blobs = set(free_blobs)
         saved = 0
 
         for b in list(cur_op.input) + list(cur_op.output):
@@ -253,8 +252,6 @@ def _compute_blob_recycling_for_dag(
                     if freeb is not None:
                         req_tokens[freeb] = req_tokens[freeb].union(tokens)
                         mapping[outp] = freeb
-                        if freeb in unused_free_blobs:
-                            unused_free_blobs.remove(freeb)
                         share_counts[freeb] += 1
 
                 output_blobs.add(outp)
@@ -297,7 +294,7 @@ def _compute_blob_recycling_for_dag(
                         new_tokens = tokens.union(set([next_token()]))
                     saved_desc = descend(
                         inp_op_idx,
-                        free_blobs[:],
+                        free_blobs,
                         new_tokens,
                     )
                     saved += saved_desc
@@ -996,8 +993,21 @@ def verify_graph_equality(net_a, net_b):
                 op_a.engine != op_b.engine):
             return False
 
+    # Print debug info
+    parent_list_a = parent_list(net_a.op)
+    parent_list_b = parent_list(net_b.op)
+    if parent_list_a != parent_list_b:
+        j = 0
+        for a, b in zip(parent_list_a, parent_list_b):
+            if a != b:
+                print("Difference {} vs {} \n {}".format(
+                    j, net_a.op[j], net_b.op[j]))
+                print("Parents: {} vs {}".format(a, b))
+
+            j += 1
+
     # Net wise equality check
-    return parent_list(net_a.op) == parent_list(net_b.op)
+    return parent_list_a == parent_list_b
 
 
 Statistics = collections.namedtuple(
