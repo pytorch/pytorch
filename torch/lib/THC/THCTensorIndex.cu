@@ -336,14 +336,17 @@ template <typename IndexType, unsigned int Dims>
 struct LinearIndexCalcData {
   // sizes for Tensor dims (either from the Tensor, or the size of the adv indexer at that dim)
   IndexType sizes[Dims];
-  IndexType strides[Dims];       // strides for Tensor
-  bool adv[Dims];                // which Tensors are advanced indexers
-  long *advIndexTensors[Dims];   // Adv Indexing Tensors
+  // strides for the Tensor we are indexing into
+  IndexType strides[Dims];
+  // these are pointers to the buffers containing the index selected at each dimension
+  // for all of the indices we want to generate. If a dimension is not under advanced indexing
+  // then the pointer is NULL
+  long *advIndexTensors[Dims];
 };
 
 template <typename IndexType, unsigned int Dims>
 __device__ __forceinline__ long calculateOffset(
-  IndexType index,                  // index to calculate offset for
+  IndexType index,
   LinearIndexCalcData<IndexType, Dims> data
 )
 {
@@ -356,16 +359,18 @@ __device__ __forceinline__ long calculateOffset(
     strideAtDim = data.strides[dim];
     sizeAtDim = data.sizes[dim];
 
-    if (data.adv[dim]) {
+    if (data.advIndexTensors[dim] != NULL) {
       indexAtDim = data.advIndexTensors[dim][index % sizeAtDim];
-      if (dim > 0 && data.adv[dim - 1]) {
+      // Check if next dimension is also advanced indexing, if so we must keep the index
+      // the same and iterate together
+      if (dim > 0 && data.advIndexTensors[dim - 1] != NULL) {
         nextIndex = index;
       } else {
         nextIndex = index / sizeAtDim;
       }
     } else {
-      indexAtDim = index % sizeAtDim;
       nextIndex = index / sizeAtDim;
+      indexAtDim = index - nextIndex * sizeAtDim;
     }
 
     offset += indexAtDim * strideAtDim;

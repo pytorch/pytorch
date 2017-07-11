@@ -535,12 +535,12 @@ void THCTensor_(calculateAdvancedIndexingOffsets)(
 {                                                                                               \
   LinearIndexCalcData<INDEX_TYPE, DIMS> data;                                                   \
   for (int i = 0; i < DIMS; ++i) {                                                              \
-    data.adv[i] = indexers[i] != NULL;                                                          \
-    data.sizes[i] = data.adv[i] ?                                                               \
+    data.sizes[i] = indexers[i] != NULL ?                                                       \
       THCudaLongTensor_nElement(state, indexers[i]) :                                           \
         THCTensor_(size)(state, indexed, i);                                                    \
     data.strides[i] = THCTensor_(stride)(state, indexed, i);                                    \
-    data.advIndexTensors[i] = data.adv[i] ? THCudaLongTensor_data(state, indexers[i]) : NULL;   \
+    data.advIndexTensors[i] = indexers[i] != NULL ?                                             \
+      THCudaLongTensor_data(state, indexers[i]) : NULL;                                         \
   }                                                                                             \
                                                                                                 \
   calculateLinearIndices<INDEX_TYPE, DIMS>                                                      \
