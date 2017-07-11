@@ -5,18 +5,18 @@
 
 #include "torch/csrc/autograd/variable.h"
 
-struct THPExpr {
+struct THPGraph {
     PyObject_HEAD
-    std::shared_ptr<torch::autograd::Expr> cdata;
+    std::shared_ptr<torch::autograd::Graph> cdata;
 };
 
-extern PyObject *THPExprClass;
+extern PyObject *THPGraphClass;
 
-PyObject * THPExpr_Wrap(const std::shared_ptr<torch::autograd::Expr>& node);
+PyObject * THPGraph_Wrap(const std::shared_ptr<torch::autograd::Graph>& node);
 
-inline bool THPExpr_Check(PyObject *obj)
+inline bool THPGraph_Check(PyObject *obj)
 {
-  return THPExprClass && PyObject_IsInstance(obj, THPExprClass);
+  return THPGraphClass && PyObject_IsInstance(obj, THPGraphClass);
 }
 
 bool THPIR_initModule(PyObject *module);

@@ -25,6 +25,7 @@ PyObject * THPTracer_enter(PyObject *_unused, PyObject *args)
         "tuple is not a Variable", i);
     auto local = GlobalTracingState->makeLocal();
     ((THPVariable*)input_obj)->cdata->trace_local = local;
+    GlobalTracingState->addParam(local);
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -54,6 +55,6 @@ PyObject * THPTracer_exit(PyObject *_unused, PyObject *args)
   }
 
   auto trace_expr = Tracer_exit(locals);
-  return THPExpr_Wrap(trace_expr);
+  return THPGraph_Wrap(trace_expr);
   END_HANDLE_TH_ERRORS
 }
