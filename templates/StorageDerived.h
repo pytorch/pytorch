@@ -43,4 +43,4 @@ protected:
   Context* context;
 };
 
-} // namespace thpp
+} // namespace at
