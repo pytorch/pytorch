@@ -101,13 +101,13 @@ CudaMemoryPoolType GetCudaMemoryPoolType() {
 }
 
 vector<TIndex> GetCUDATensorInfo(
-    void* c,
+    const void* c,
     bool* shares_data,
     size_t* capacity,
     DeviceOption* device) {
   vector<TIndex> dims =
       GetTensorInfo<CUDAContext>(c, shares_data, capacity, device);
-  Tensor<CUDAContext>* tc = static_cast<Tensor<CUDAContext>*>(c);
+  const Tensor<CUDAContext>* tc = static_cast<const Tensor<CUDAContext>*>(c);
   device->set_device_type(CUDA);
   device->set_cuda_gpu_id(GetGPUIDForPointer(tc->raw_data()));
   return dims;
