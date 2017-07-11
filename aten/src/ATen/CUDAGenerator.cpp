@@ -40,5 +40,5 @@ CUDAGenerator& CUDAGenerator::manualSeed(unsigned long seed) {
   return *this;
 }
 
-} // namespace thpp
+} // namespace at
 #endif //AT_CUDA_ENABLED
