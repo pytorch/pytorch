@@ -670,12 +670,11 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100):
     """
     dim = input.dim()
     if dim == 2:
-        f = _functions.thnn.NLLLoss(size_average, ignore_index, weight=weight)
+        return _functions.thnn.NLLLoss.apply(input, target, weight, size_average, ignore_index)
     elif dim == 4:
-        f = _functions.thnn.NLLLoss2d(size_average, ignore_index, weight=weight)
+        return _functions.thnn.NLLLoss2d.apply(input, target, weight, size_average, ignore_index)
     else:
         raise ValueError('Expected 2 or 4 dimensions (got {})'.format(dim))
-    return f(input, target)
 
 
 def poisson_nll_loss(input, target, log_input=True, full=False, size_average=True):
@@ -775,7 +774,7 @@ def binary_cross_entropy(input, target, weight=None, size_average=True):
         new_size = _infer_size(target.size(), weight.size())
         weight = weight.expand(new_size)
 
-    return _functions.thnn.BCELoss(size_average, weight=weight)(input, target)
+    return _functions.thnn.BCELoss.apply(input, target, weight, size_average)
 
 
 def binary_cross_entropy_with_logits(input, target, weight=None, size_average=True):
