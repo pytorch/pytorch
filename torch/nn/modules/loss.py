@@ -409,10 +409,19 @@ class CrossEntropyLoss(_WeightedLoss):
 
     The losses are averaged across observations for each minibatch.
 
+    Args:
+        weight (Tensor, optional): a manual rescaling weight given to each class.
+           If given, has to be a Tensor of size "nclasses"
+        size_average (bool, optional): By default, the losses are averaged over observations for each minibatch.
+           However, if the field size_average is set to False, the losses are
+           instead summed for each minibatch.
+        ignore_index (int, optional): Specifies a target value that is ignored
+            and does not contribute to the input gradient. When size_average is
+            True, the loss is averaged over non-ignored targets.
+
     Shape:
         - Input: :math:`(N, C)` where `C = number of classes`
-        - Target: :math:`(N)` where each value is `0 <= targets[i] <= C-1`
-
+        - Target: :math:`(N)` where each value is `0 <= targets[i] <= C-1
     """
 
     def __init__(self, weight=None, size_average=True, ignore_index=-100):
