@@ -109,7 +109,7 @@ class RNNBase(Module):
         return s.format(name=self.__class__.__name__, **self.__dict__)
 
     def __setstate__(self, d):
-        self.__dict__.update(d)
+        super(RNNBase, self).__setstate__(d)
         if 'all_weights' in d:
             self._all_weights = d['all_weights']
         if isinstance(self._all_weights[0][0], str):
