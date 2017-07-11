@@ -13,6 +13,23 @@ import numpy as np
 
 
 class RandomFourierFeatures(ModelLayer):
+    """
+    Implementation of random fourier feature map for feature processing.
+
+    Applies sqrt(2 / output_dims) * cos(wx+b), where:
+        output_dims is the output feature dimensions, and
+        wx + b applies FC using randomized, fixed weight and bias parameters
+
+    For more information, see the original paper:
+        https://people.eecs.berkeley.edu/~brecht/papers/07.rah.rec.nips.pdf
+
+    Inputs:
+        output_dims -- output feature dimensions
+        sigma -- bandwidth for the Gaussian kernel estimator
+        w_init -- initalization options for weight parameter
+        b_init -- initalization options for bias parameter
+
+    """
     def __init__(
             self,
             model,
@@ -30,10 +47,10 @@ class RandomFourierFeatures(ModelLayer):
 
         input_dims = input_record.field_type().shape[0]
         assert input_dims >= 1, "Expected input dimensions >= 1, got %s" \
-                                    % input_dims
+                                % input_dims
         self.output_dims = output_dims
         assert self.output_dims >= 1, "Expected output dimensions >= 1, got %s" \
-                                    % self.output_dims
+                                      % self.output_dims
 
         self.output_schema = schema.Scalar(
             (np.float32, (self.output_dims, )),
@@ -59,7 +76,7 @@ class RandomFourierFeatures(ModelLayer):
                 initializer=core.CreateOperator(w_init[0],
                                                 [],
                                                 self.w,
-                                                shape=(input_dims, self.output_dims),
+                                                shape=(self.output_dims, input_dims),
                                                 **w_init[1]
                                                 ),
                 optimizer=model.NoOptim))
@@ -75,13 +92,9 @@ class RandomFourierFeatures(ModelLayer):
                 optimizer=model.NoOptim))
 
     def add_ops(self, net):
-        # Matrix multiplication for input and w
-        weighted_term = net.MatMul(self.input_record.field_blobs() + [self.w],
-                                   net.NextScopedBlob('weighted_term'))
-        # Add wx + b
-        cosine_arg = net.Add([weighted_term, self.b],
-                             net.NextScopedBlob('cosine_arg'),
-                             broadcast=1, axis=1)
+        # Random features: wx + b
+        cosine_arg = net.FC(self.input_record.field_blobs() + [self.w, self.b],
+                            net.NextScopedBlob("cosine_arg"))
 
         # Apply cosine to new vectors
         new_feature_vec = net.Cos([cosine_arg],
