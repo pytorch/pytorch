@@ -228,6 +228,12 @@ class MaxUnpool1d(Module):
         return F.max_unpool1d(input, indices, self.kernel_size, self.stride,
                               self.padding, output_size)
 
+    def __repr__(self):
+        return self.__class__.__name__ + ' (' \
+            + 'size=' + str(self.kernel_size) \
+            + ', stride=' + str(self.stride) \
+            + ', padding=' + str(self.padding) + ')'
+
 
 class MaxUnpool2d(Module):
     r"""Computes a partial inverse of :class:`MaxPool2d`.
@@ -303,6 +309,12 @@ class MaxUnpool2d(Module):
         return F.max_unpool2d(input, indices, self.kernel_size, self.stride,
                               self.padding, output_size)
 
+    def __repr__(self):
+        return self.__class__.__name__ + ' (' \
+            + 'size=' + str(self.kernel_size) \
+            + ', stride=' + str(self.stride) \
+            + ', padding=' + str(self.padding) + ')'
+
 
 class MaxUnpool3d(Module):
     r"""Computes a partial inverse of :class:`MaxPool3d`.
@@ -357,6 +369,12 @@ class MaxUnpool3d(Module):
     def forward(self, input, indices, output_size=None):
         return F.max_unpool3d(input, indices, self.kernel_size, self.stride,
                               self.padding, output_size)
+
+    def __repr__(self):
+        return self.__class__.__name__ + ' (' \
+            + 'size=' + str(self.kernel_size) \
+            + ', stride=' + str(self.stride) \
+            + ', padding=' + str(self.padding) + ')'
 
 
 class AvgPool1d(Module):
@@ -416,6 +434,14 @@ class AvgPool1d(Module):
         return F.avg_pool1d(
             input, self.kernel_size, self.stride, self.padding, self.ceil_mode,
             self.count_include_pad)
+
+    def __repr__(self):
+        return self.__class__.__name__ + ' (' \
+            + 'size=' + str(self.kernel_size) \
+            + ', stride=' + str(self.stride) \
+            + ', padding=' + str(self.padding) \
+            + ', ceil_mode=' + str(self.ceil_mode) \
+            + ', count_include_pad=' + str(self.count_include_pad) + ')'
 
 
 class AvgPool2d(Module):
@@ -477,6 +503,14 @@ class AvgPool2d(Module):
     def forward(self, input):
         return F.avg_pool2d(input, self.kernel_size, self.stride,
                             self.padding, self.ceil_mode, self.count_include_pad)
+
+    def __repr__(self):
+        return self.__class__.__name__ + ' (' \
+            + 'size=' + str(self.kernel_size) \
+            + ', stride=' + str(self.stride) \
+            + ', padding=' + str(self.padding) \
+            + ', ceil_mode=' + str(self.ceil_mode) \
+            + ', count_include_pad=' + str(self.count_include_pad) + ')'
 
 
 class MaxPool3d(Module):
@@ -607,6 +641,11 @@ class AvgPool3d(Module):
 
     def forward(self, input):
         return F.avg_pool3d(input, self.kernel_size, self.stride)
+
+    def __repr__(self):
+        return self.__class__.__name__ + ' (' \
+            + 'size=' + str(self.kernel_size) \
+            + ', stride=' + str(self.stride) + ')'
 
 
 class FractionalMaxPool2d(Module):
