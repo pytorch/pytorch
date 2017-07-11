@@ -4,6 +4,7 @@ import string
 import unittest
 import itertools
 import contextlib
+import warnings
 from copy import deepcopy
 from itertools import repeat, product
 from functools import wraps, reduce
@@ -23,7 +24,7 @@ from torch.nn import Parameter
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     module_tests, criterion_tests, TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
     TEST_CUDNN_VERSION
-from common import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, TEST_SCIPY
+from common import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, TEST_SCIPY, download_file
 
 if TEST_SCIPY:
     from scipy import stats
@@ -251,6 +252,15 @@ class TestNN(NNTestCase):
             grad_y = (Variable(torch.randn(dummy_out.size()), requires_grad=dummy_out.requires_grad),)
 
         self.assertTrue(gradgradcheck(apply_fn, inputs, grad_y,))
+
+    def test_module_backcompat(self):
+        from torch.serialization import SourceChangeWarning
+        path = download_file('https://download.pytorch.org/test_data/linear.pt')
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore', SourceChangeWarning)
+            m = torch.load(path)
+        input = Variable(torch.randn(2, 3).float())
+        self.assertEqual(m(input).size(), (2, 5))
 
     def test_hooks(self):
         module = nn.Sigmoid()

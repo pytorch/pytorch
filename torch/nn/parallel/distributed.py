@@ -148,7 +148,7 @@ class DistributedDataParallel(Module):
             attrs['_reduction_threads'], attrs['_nccl_streams'], attrs['_default_streams']
 
     def __setstate__(self, state):
-        self.__dict__.update(state)
+        super(DistributedDataParallel, self).__setstate__(state)
         self._register_grad_hooks()
         self._start_reduction_threads()
 

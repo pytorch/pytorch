@@ -336,16 +336,8 @@ class TestLuaReader(TestCase):
 
     @classmethod
     def init(cls):
-        DATA_URL = 'https://download.pytorch.org/test_data/legacy_modules.t7'
-        data_dir = os.path.join(os.path.dirname(__file__), 'data')
-        test_file_path = os.path.join(data_dir, 'legacy_modules.t7')
-        succ = download_file(DATA_URL, test_file_path)
-        if not succ:
-            warnings.warn(("Couldn't download the test file for TestLuaReader! "
-                           "Tests will be incomplete!"), RuntimeWarning)
-            return
-
-        tests = load_lua(test_file_path)
+        path = download_file('https://download.pytorch.org/test_data/legacy_modules.t7')
+        tests = load_lua(path)
         for name, test in tests['modules'].items():
             test_name = 'test_' + name.replace('nn.', '')
             setattr(cls, test_name, cls._module_test(name, test))

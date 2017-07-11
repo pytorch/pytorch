@@ -241,6 +241,11 @@ class Module(object):
                     grad_fn.register_hook(wrapper)
         return result
 
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        if '_forward_pre_hooks' not in self.__dict__:
+            self._forward_pre_hooks = OrderedDict()
+
     def __getattr__(self, name):
         if '_parameters' in self.__dict__:
             _parameters = self.__dict__['_parameters']

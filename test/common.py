@@ -264,23 +264,28 @@ class TestCase(unittest.TestCase):
         assertRaisesRegex = unittest.TestCase.assertRaisesRegexp
 
 
-def download_file(url, path, binary=True):
+def download_file(url, binary=True):
     if sys.version_info < (3,):
+        from urlparse import urlsplit
         import urllib2
         request = urllib2
         error = urllib2
     else:
-        import urllib.request
-        import urllib.error
-        request = urllib.request
-        error = urllib.error
+        from urllib.parse import urlsplit
+        from urllib import request, error
+
+    filename = os.path.basename(urlsplit(url)[2])
+    data_dir = os.path.join(os.path.dirname(__file__), 'data')
+    path = os.path.join(data_dir, filename)
 
     if os.path.exists(path):
-        return True
+        return path
     try:
         data = request.urlopen(url, timeout=15).read()
         with open(path, 'wb' if binary else 'w') as f:
             f.write(data)
-        return True
-    except error.URLError as e:
-        return False
+        return path
+    except error.URLError:
+        msg = "could not download test file '{}'".format(url)
+        warnings.warn(msg, RuntimeWarning)
+        raise unittest.SkipTest(msg)
