@@ -64,22 +64,6 @@ struct python_error : public std::exception {
 
 #ifdef _THP_CORE
 
-struct THException: public std::exception {
-  THException(const char* msg): msg(msg) {};
-
-  virtual const char* what() const throw() {
-    return msg.c_str();
-  }
-
-  std::string msg;
-};
-
-struct THArgException: public THException {
-  THArgException(const char* msg, int argNumber): THException(msg), argNumber(argNumber) {};
-
-  const int argNumber;
-};
-
 bool THPException_init(PyObject *module);
 #endif
 
