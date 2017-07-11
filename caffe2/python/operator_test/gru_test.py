@@ -121,7 +121,7 @@ def _prepare_gru_unit_op(n, d, outputs_with_grads,
         model.net.AddExternalOutputs(hidden_t)
         workspace.RunNetOnce(model.param_init_net)
 
-        # 10 is used as a magic number to simualte some reasonable timestep
+        # 10 is used as a magic number to simulate some reasonable timestep
         # and generate some reasonable seq. lengths
         workspace.FeedBlob(
             seq_lengths,
@@ -137,13 +137,14 @@ def _prepare_gru_unit_op(n, d, outputs_with_grads,
 
 class GRUCellTest(hu.HypothesisTestCase):
 
-    # Make the test just for GRUUnitOp
+    # Test just for GRUUnitOp
     @given(
         input_tensor=gru_unit_op_input(),
+        fwd_only=st.booleans(),
         drop_states=st.booleans(),
     )
     @ht_settings(max_examples=15)
-    def test_gru_unit_op(self, input_tensor, drop_states, **kwargs):
+    def test_gru_unit_op(self, input_tensor, fwd_only, drop_states, **kwargs):
         outputs_with_grads = [0]
         ref = gru_unit
         ref = partial(ref)
@@ -155,7 +156,7 @@ class GRUCellTest(hu.HypothesisTestCase):
 
         net = _prepare_gru_unit_op(n, d,
                                    outputs_with_grads=outputs_with_grads,
-                                   forward_only=True,
+                                   forward_only=fwd_only,
                                    drop_states=drop_states)[1]
         # here we don't provide a real input for the net but just for one of
         # its ops (RecurrentNetworkOp). So have to hardcode this name
@@ -171,3 +172,17 @@ class GRUCellTest(hu.HypothesisTestCase):
             ref,
             outputs_to_check=[0],
         )
+
+        # Checking for hidden_prev and gates gradients
+        if not fwd_only:
+            for param in range(2):
+                print("Check param {}".format(param))
+                self.assertGradientChecks(
+                    device_option=hu.cpu_do,
+                    op=op,
+                    inputs=inputs,
+                    outputs_to_check=param,
+                    outputs_with_grads=outputs_with_grads,
+                    threshold=0.0001,
+                    stepsize=0.005,
+                )
