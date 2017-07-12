@@ -8,6 +8,23 @@
 namespace at {
 struct Type;
 
+// Tensor is a "generic" object holding a pointer to the underlying TensorImpl object, which
+// has an embedded reference count. In this way, Tensor is similar to boost::intrusive_ptr.
+//
+// For example:
+//
+// void func(Tensor a) {
+//   Tensor b = a;
+//   ...
+// }
+//
+// In this example, when we say Tensor b = a, we are creating a new object that points to the
+// same underlying TensorImpl, and bumps its reference count. When b goes out of scope, the
+// destructor decrements the reference count by calling release() on the TensorImpl it points to.
+// The existing constructors, operator overloads, etc. take care to implement the correct semantics.
+//
+// Note that Tensor can also be NULL, i.e. it is not associated with any underlying TensorImpl, and
+// special care must be taken to handle this.
 struct Tensor {
 
   Tensor()
@@ -22,7 +39,7 @@ struct Tensor {
     if(pImpl != nullptr)
       pImpl->retain();
   }
-  Tensor(Tensor && rhs)
+  Tensor(Tensor && rhs) noexcept
   : pImpl(rhs.pImpl) {
     rhs.pImpl = nullptr;
   }

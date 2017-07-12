@@ -9,7 +9,7 @@ namespace at {
 
 struct ${Storage} : public Storage {
 public:
-  ${Storage}(Context* context);
+  explicit ${Storage}(Context* context);
   ${Storage}(Context* context, ${THStorage} *wrapped);
   ${Storage}(Context* context, std::size_t size);
   ${Storage}(Context* context,
@@ -43,4 +43,4 @@ protected:
   Context* context;
 };
 
-} // namespace thpp
+} // namespace at

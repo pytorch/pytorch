@@ -7,7 +7,7 @@
 namespace at {
 
 struct ${Type} : public Type {
-  ${Type}(Context* context);
+  explicit ${Type}(Context* context);
   virtual ScalarType scalarType() override;
   virtual Backend backend() override;
   virtual bool isSparse() override;
