@@ -21,9 +21,10 @@ static inline T* checked_cast(Base* expr, const char * name, int pos) {
     T::typeString(),expr->type().toString(),pos,name);
 }
 
-template <typename T, typename TBase>
-static inline ArrayRef<T*> tensor_list_checked_cast(ArrayRef<TBase> tensors, const char * name, int pos) {
-  std::vector<T*> casted(tensors.size());
+// Converts a TensorList (i.e. ArrayRef<Tensor> to the underlying TH* Tensor Pointer)
+template <typename T, typename TBase, typename TH>
+static inline std::vector<TH*> tensor_list_checked_cast(ArrayRef<TBase> tensors, const char * name, int pos) {
+  std::vector<TH*> casted(tensors.size());
   for (unsigned int i = 0; i < tensors.size(); ++i) {
     auto *expr = tensors[i].pImpl;
     if (!expr) {
@@ -33,7 +34,7 @@ static inline ArrayRef<T*> tensor_list_checked_cast(ArrayRef<TBase> tensors, con
     }
     auto result = dynamic_cast<T*>(expr);
     if (result) {
-      casted.push_back(result);
+      casted.push_back(result->tensor);
     } else {
       runtime_error("Expected a Tensor of type %s but found a type %s for sequence element %u "
                     " in sequence argument at position #%d '%s'",

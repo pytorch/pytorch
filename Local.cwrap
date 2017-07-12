@@ -80,11 +80,5 @@
     - TensorList tensors
     - int dim
   aten_custom_call: |
-    size_t inputs_ = tensors_.size();
-    std::vector<${THTensor}*> t_;
-    t_.reserve(inputs_);
-    for (unsigned int i = 0; i < inputs_; ++i) {
-      t_.push_back(tensors_[i]->tensor);
-    }
-    ${THTensor}_catArray(${state,}self_->tensor, t_.data(), inputs_, dim);
+    ${THTensor}_catArray(${state,}self_->tensor, tensors_.data(), tensors_.size(), dim);
 ]]
