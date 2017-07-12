@@ -97,15 +97,16 @@ class ModelHelper(object):
             self.param_init_net = param_model.param_init_net
             self.param_to_grad = param_model.param_to_grad
             self.params = param_model.params
+            self._parameters_info = param_model._parameters_info
             self._computed_params = param_model._computed_params
         else:
             self.param_init_net = core.Net(self.name + '_init')
             self.param_to_grad = {}
             self.params = []
+            self._parameters_info = {}
             self._computed_params = []
 
         self._param_info_deprecated = []
-        self._parameters_info = {}
         self._devices = []
         self.gradient_ops_added = False
         self.init_params = init_params
