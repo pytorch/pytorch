@@ -73,12 +73,12 @@
 
 [[
   name: cat
-  variants: [method]
+  cname: catArray
+  variants: [function]
   return: self
   arguments:
     - arg: THTensor* self
+      output: True
     - TensorList tensors
     - int dim
-  aten_custom_call: |
-    ${THTensor}_catArray(${state,}self_->tensor, tensors_.data(), tensors_.size(), dim);
 ]]

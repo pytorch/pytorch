@@ -34,7 +34,7 @@ static inline std::vector<TH*> tensor_list_checked_cast(ArrayRef<TBase> tensors,
     }
     auto result = dynamic_cast<T*>(expr);
     if (result) {
-      casted.push_back(result->tensor);
+      casted[i] = result->tensor;
     } else {
       runtime_error("Expected a Tensor of type %s but found a type %s for sequence element %u "
                     " in sequence argument at position #%d '%s'",
