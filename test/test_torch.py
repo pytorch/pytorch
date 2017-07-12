@@ -3682,7 +3682,6 @@ class TestTorch(TestCase):
             sys.modules[module.__name__] = module
             return module
 
-        import os
         with tempfile.NamedTemporaryFile() as checkpoint:
             fname = os.path.join(os.path.dirname(__file__), 'data/network1.py')
             module = import_module('tmpmodule', fname)
