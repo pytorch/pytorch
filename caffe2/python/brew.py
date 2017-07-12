@@ -44,6 +44,7 @@ class HelperWrapper(object):
         'spatial_bn': spatial_bn,
         'relu': relu,
         'prelu': prelu,
+        'tanh': tanh,
         'concat': concat,
         'depth_concat': depth_concat,
         'sum': sum,
