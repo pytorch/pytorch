@@ -233,7 +233,7 @@ class Module(object):
             var = result
             while not isinstance(var, Variable):
                 if isinstance(var, dict):
-                    var = list(var.values())[0]
+                    var = next((v for v in var.values() if isinstance(v, Variable)))
                 else:
                     var = var[0]
             grad_fn = var.grad_fn
