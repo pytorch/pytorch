@@ -490,7 +490,7 @@ class TestLayers(LayersTestCase):
         schema.FeedRecord(float_features, [float_array])
 
         with Tags(Tags.EXCLUDE_FROM_PREDICTION):
-            log_float_features, = self.model.Log(float_features, 1)
+            log_float_features = self.model.Log(float_features, 1)
         joined = self.model.SelectRecordByContext(
             schema.Struct(
                 (InstantiationContext.PREDICTION, float_features),
@@ -529,15 +529,15 @@ class TestLayers(LayersTestCase):
             mean = net.ReduceFrontMean(in_record(), 1)
             net.Sub(
                 [in_record(), mean],
-                out_record[0](),
+                out_record(),
                 broadcast=1)
         normalized = self.model.Functional(
             self.model.input_feature_schema.float_features, 1,
             normalize, name="normalizer")
 
         # Attach metadata to one of the outputs and use it in FC
-        normalized[0].set_type((np.float32, 32))
-        self.model.output_schema = self.model.FC(normalized[0], 2)
+        normalized.set_type((np.float32, 32))
+        self.model.output_schema = self.model.FC(normalized, 2)
 
         predict_net = layer_model_instantiator.generate_predict_net(
             self.model)
@@ -557,11 +557,11 @@ class TestLayers(LayersTestCase):
             self.model.input_feature_schema.float_features, 1)
         normalized = self.model.Sub(
             schema.Tuple(
-                self.model.input_feature_schema.float_features, mean[0]),
+                self.model.input_feature_schema.float_features, mean),
             1, broadcast=1)
         # Attach metadata to one of the outputs and use it in FC
-        normalized[0].set_type((np.float32, (32,)))
-        self.model.output_schema = self.model.FC(normalized[0], 2)
+        normalized.set_type((np.float32, (32,)))
+        self.model.output_schema = self.model.FC(normalized, 2)
 
         predict_net = layer_model_instantiator.generate_predict_net(
             self.model)
@@ -580,10 +580,9 @@ class TestLayers(LayersTestCase):
         softsign = self.model.Softsign(
             schema.Tuple(self.model.input_feature_schema.float_features),
             1)
-        assert len(softsign.field_types()) == 1
-        assert softsign.field_types()[0].base == np.float32
-        assert softsign.field_types()[0].shape == (32,)
-        self.model.output_schema = self.model.FC(softsign[0], 2)
+        assert softsign.field_type().base == np.float32
+        assert softsign.field_type().shape == (32,)
+        self.model.output_schema = self.model.FC(softsign, 2)
 
         predict_net = layer_model_instantiator.generate_predict_net(
             self.model)

@@ -1,4 +1,4 @@
-## @package functional
+# @package functional
 # Module caffe2.python.layers.functional
 from __future__ import absolute_import
 from __future__ import division
@@ -11,6 +11,7 @@ from caffe2.python.layers.layers import (
 )
 import caffe2.proto.caffe2_pb2 as caffe2_pb2
 import numpy as np
+import six
 import logging
 
 logger = logging.getLogger(__name__)
@@ -28,10 +29,15 @@ class Functional(ModelLayer):
         super(Functional, self).__init__(model, name, input_record, **kwargs)
         self._function = function
         self._kwargs = kwargs
+        return_struct = (
+            isinstance(output_names_or_num, list) or
+            (isinstance(output_names_or_num, six.integer_types) and
+             output_names_or_num != 1)
+        )
 
         with scope.NameScope(self.name):
             if isinstance(output_names_or_num, int):
-                self.output_schema = schema.NewRecord(
+                struct_output_schema = schema.NewRecord(
                     model.net, schema.RawTuple(output_names_or_num))
             elif isinstance(output_names_or_num, schema.Field):
                 self.output_schema = output_names_or_num.clone(keep_blobs=True)
@@ -40,10 +46,17 @@ class Functional(ModelLayer):
                 if not isinstance(output_names_or_num, list):
                     output_names_or_num = [output_names_or_num]
                 out_tuple = [(out, np.void) for out in output_names_or_num]
-                self.output_schema = schema.NewRecord(
+                struct_output_schema = schema.NewRecord(
                     model.net, schema.Struct(*out_tuple))
 
-        num_outputs = len(self.output_schema.field_blobs())
+        num_outputs = len(struct_output_schema.field_blobs())
+
+        # functional layer returns Struct if more than one outputs or output is
+        # a list, otherwise Scalar
+        if return_struct:
+            self.output_schema = struct_output_schema
+        else:
+            self.output_schema = struct_output_schema[0]
 
         # If output_dtypes is provided, use it for output schema. Otherwise
         # the shape and type will be inferred.
@@ -65,7 +78,9 @@ class Functional(ModelLayer):
             function(type_net, self.input_record, self.output_schema, **kwargs)
             (shapes, types) = workspace.InferShapesAndTypes([type_net], {})
             for i in range(num_outputs):
-                blob = self.output_schema[i]()
+                scalar_schema = (self.output_schema[i] if return_struct
+                                 else self.output_schema)
+                blob = scalar_schema()
                 if blob not in types or blob not in shapes:
                     had_issues = True
                     continue
@@ -93,7 +108,7 @@ class Functional(ModelLayer):
                     dtype = (np.int64, shape)
 
                 if dtype is not None:
-                    self.output_schema[i].set_type(dtype)
+                    scalar_schema.set_type(dtype)
         except TypeError as ex:
             had_issues = True
             logger.warning(str(ex))
