@@ -27,10 +27,12 @@ TCP initialization
 ^^^^^^^^^^^^^^^^^^
 
 Initialization will utilize a network address reachable from all processes.
-If the address belongs to one of the machines, it requires that all processes
-have manually specified ranks. Otherwise, the it has to be a valid IP multicast
-address, and ranks can be assigned automatically. Multicast init also supports
-a ``group_name`` argument, which allows to use the same address for multiple jobs,
+If the address belongs to one of the machines, initialization requires that all processes
+have manually specified ranks. 
+
+Alternatively, the address has to be a valid IP multicast address, in which case,
+ranks can be assigned automatically. Multicast initialization also supports 
+a ``group_name`` argument, which allows you to use the same address for multiple jobs,
 as long as they use different group names.
 
 ::
@@ -39,6 +41,7 @@ as long as they use different group names.
 
     # Use address of one of the machines
     dist.init_process_group(init_method='tcp://10.1.1.20:23456', rank=args.rank, world_size=4)
+
     # or a multicast address - rank will be assigned automatically if unspecified
     dist.init_process_group(init_method='tcp://[ff15:1e18:5d4c:4cf0:d02d:b659:53ba:b0a7]:23456',
                             world_size=4)
@@ -46,10 +49,10 @@ as long as they use different group names.
 Shared file-system initialization
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Another initialization method makes use of a file system shared and visible for
+Another initialization method makes use of a file system shared and visible from
 all machines in a group. The URL should start with ``file://`` and contain a path
 to a non-existent file (in an existing directory) on a shared file system.
-This initialization method also supports a ``group_name`` argument, which allows to
+This initialization method also supports a ``group_name`` argument, which allows you to
 use the same shared file path for multiple jobs, as long as they use different
 group names.
 
@@ -77,19 +80,21 @@ are:
 * ``WORLD_SIZE`` - required; can be set either here, or in a call to init function
 * ``RANK`` - required; can be set either here, or in a call to init function
 
-The machine with rank 0 will be used to set up all connections. This is the
-default method, meaning that ``init_method`` does not have to be specified (or
+The machine with rank 0 will be used to set up all connections. 
+
+This is the default method, meaning that ``init_method`` does not have to be specified (or
 can be ``env://``).
 
 Groups
 ------
 
 By default collectives operate on the default group (also called the world) and
-require all processes to enter the call. However, some workloads can benefit
+require all processes to enter the distributed function call. However, some workloads can benefit
 from more fine-grained communication. This is where distributed groups come
 into play. :func:`~torch.distributed.new_group` function can be
 used to create new groups, with arbitrary subsets of all processes. It returns
-an opaque group handle that can be given as a ``group`` argument to all collectives.
+an opaque group handle that can be given as a ``group`` argument to all collectives 
+(collectives are distributed functions to exchange information in certain well-known programming patterns).
 
 .. autofunction:: new_group
 
