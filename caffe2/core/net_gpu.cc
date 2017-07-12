@@ -171,7 +171,7 @@ bool AsyncDAGNet::RunAt(const std::vector<int>& chain) {
   CAFFE_ENFORCE(!chain.empty(), "Chain should not be empty.");
   const auto source_idx = chain.front();
   internal::Stream stream{
-      operator_nodes_[source_idx].operator_->def().device_option()};
+      operator_nodes_[source_idx].operator_def_.device_option()};
   const auto& parents = operator_nodes_[source_idx].parents_;
   // Help ensure that our chaining is correct by verifying at least
   // one parent recorded an event.
@@ -184,21 +184,21 @@ bool AsyncDAGNet::RunAt(const std::vector<int>& chain) {
 
   for (auto source_parent_idx : operator_nodes_[source_idx].parents_) {
     ProfiledRange r(
-        operator_nodes_[source_parent_idx].operator_->def(), kWaitColor);
+        operator_nodes_[source_parent_idx].operator_def_, kWaitColor);
     stream.wait(events_[source_parent_idx].get());
   }
 
   // We've waited on all our parent indices.
   bool success = true;
   for (auto idx : chain) {
-    ProfiledRange r(operator_nodes_[idx].operator_->def(), kRunColor);
+    ProfiledRange r(operator_nodes_[idx].operator_def_, kRunColor);
     success &= operator_nodes_[idx].operator_->RunAsync();
   }
 
   // Record an event for the sink of the chain.
   const auto& sink_idx = chain.back();
   {
-    ProfiledRange r(operator_nodes_[sink_idx].operator_->def(), kRecordColor);
+    ProfiledRange r(operator_nodes_[sink_idx].operator_def_, kRecordColor);
     events_[sink_idx]->record(stream);
   }
   CAFFE_ENFORCE(
@@ -226,7 +226,7 @@ bool AsyncDAGNet::Run() {
     auto& event = events_[i];
     if (event->outstanding_) {
       VLOG(2) << "Synchronizing host on outstanding event";
-      ProfiledRange r(operator_nodes_[i].operator_->def(), kWaitColor);
+      ProfiledRange r(operator_nodes_[i].operator_def_, kWaitColor);
       stream.wait(event.get());
     }
   }
@@ -387,15 +387,13 @@ class SingleThreadAsyncNet : public SimpleNet {
        GPU has operators on this net */
     gpu_id_ = (-1);
     for (auto& op : operators_) {
-      if (op->def().has_device_option() &&
-          op->def().device_option().device_type() == 1 &&
-          op->def().device_option().has_cuda_gpu_id()) {
+      if (op->device_option().device_type() == CUDA) {
         if (gpu_id_ < 0) {
-          gpu_id_ = op->def().device_option().cuda_gpu_id();
+          gpu_id_ = op->device_option().cuda_gpu_id();
         } else {
           CAFFE_ENFORCE_EQ(
               gpu_id_,
-              op->def().device_option().cuda_gpu_id(),
+              op->device_option().cuda_gpu_id(),
               "One net can only have operators for one GPU");
         }
       }

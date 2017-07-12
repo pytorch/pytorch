@@ -25,13 +25,14 @@ void ProfDAGNet::ValidateOpTensorDevices() {
   bool had_mismatches = false;
   for (int idx = 0; idx < operator_nodes_.size(); idx++) {
     const auto& node = operator_nodes_[idx];
-    auto mismatches = ValidateTensorDevices(*node.operator_);
+    auto mismatches =
+        ValidateTensorDevices(*node.operator_, node.operator_def_);
     for (auto& mismatch : mismatches) {
       had_mismatches = true;
       LOG(INFO) << "== PERFORMANCE WARNING == \n"
-                << " Operator " << node.operator_->def().type()
-                << " expects GPU " << mismatch.second.first.cuda_gpu_id()
-                << " but tensor [" << mismatch.first << "] is on GPU "
+                << " Operator " << node.operator_def_.type() << " expects GPU "
+                << mismatch.second.first.cuda_gpu_id() << " but tensor ["
+                << mismatch.first << "] is on GPU "
                 << mismatch.second.second.cuda_gpu_id();
     }
   }
@@ -66,7 +67,7 @@ bool ProfDAGNet::Run() {
   CaffeMap<string, float> time_per_op_type_run;
   for (int idx = 0; idx < operator_nodes_.size(); idx++) {
     const auto& node = operator_nodes_[idx];
-    const string& op_type = node.operator_->def().type();
+    const string& op_type = node.operator_def_.type();
     time_per_op_type_run[op_type] +=
         time_per_op_[idx].sum - time_per_op_run[idx].sum;
   }
@@ -139,11 +140,11 @@ void ProfDAGNet::PrintStats() {
 
   for (int idx = 0; idx < operator_nodes_.size(); idx++) {
     auto& node = operator_nodes_[idx];
-    const string& op_type = node.operator_->def().type();
-    const string& print_name = node.operator_->def().name().size()
-        ? node.operator_->def().name()
-        : (node.operator_->def().output_size() ? node.operator_->def().output(0)
-                                               : "NO_OUTPUT");
+    const string& op_type = node.operator_def_.type();
+    const string& print_name = node.operator_def_.name().size()
+        ? node.operator_def_.name()
+        : (node.operator_def_.output_size() ? node.operator_def_.output(0)
+                                            : "NO_OUTPUT");
 
     float mean = time_per_op_[idx].sum / measured_runs;
     float stddev =
