@@ -98,9 +98,13 @@ class DataParallelModelTest(TestCase):
         # Capture any exception thrown by the subprocess
         def run_fn(*args, **kwargs):
             try:
-                with core.DeviceScope(device_option):
+                if device_option is None:
                     fn(*args, **kwargs)
                     workspace.ResetWorkspace()
+                else:
+                    with core.DeviceScope(device_option):
+                        fn(*args, **kwargs)
+                        workspace.ResetWorkspace()
             except Exception as ex:
                 queue.put(ex)
 
@@ -251,8 +255,13 @@ class DataParallelModelTest(TestCase):
             self.run_test_locally(
                 run,
                 comm_size=2,
-                device_option=core.DeviceOption(caffe2_pb2.CPU),
+                device_option=None,
                 tmpdir=tmpdir)
+
+    @unittest.expectedFailure
+    def test_device_scope_check(self):
+        with core.DeviceScope(self.device_option):
+            data_parallel_model.Parallelize_GPU()
 
 
 @unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
