@@ -7,12 +7,12 @@
 
 struct THPGraph {
     PyObject_HEAD
-    std::shared_ptr<torch::autograd::Graph> cdata;
+    std::unique_ptr<torch::autograd::Graph> cdata;
 };
 
 extern PyObject *THPGraphClass;
 
-PyObject * THPGraph_Wrap(const std::shared_ptr<torch::autograd::Graph>& node);
+PyObject * THPGraph_Wrap(const std::unique_ptr<torch::autograd::Graph> node);
 
 inline bool THPGraph_Check(PyObject *obj)
 {

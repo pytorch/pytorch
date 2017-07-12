@@ -10,7 +10,7 @@ using namespace torch::autograd;
 
 PyObject* THPGraphClass = nullptr;
 
-PyObject* THPGraph_Wrap(const std::shared_ptr<Graph>& e)
+PyObject* THPGraph_Wrap(std::unique_ptr<Graph> e)
 {
   if (!e) {
     Py_RETURN_NONE;
@@ -18,7 +18,7 @@ PyObject* THPGraph_Wrap(const std::shared_ptr<Graph>& e)
     auto type = (PyTypeObject*) THPGraphClass;
     THPGraph* obj = (THPGraph*)type->tp_alloc(type, 0);
     if (obj) {
-      obj->cdata = e;
+      obj->cdata = std::move(e);
     }
     return (PyObject*) obj;
   }
@@ -31,13 +31,13 @@ static int THPGraph_traverse(THPGraph *self, visitproc visit, void *arg)
 
 static int THPGraph_clear(THPGraph *self)
 {
-  return 0; // LEAK!
+  return 0; // LEAK! if implemented, must also implement traverse
 }
 
 static void THPGraph_dealloc(THPGraph* self)
 {
   PyObject_GC_UnTrack(self);
-  self->cdata.~shared_ptr<Graph>();
+  self->cdata = nullptr;
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
@@ -72,7 +72,7 @@ static struct PyGetSetDef THPGraph_properties[] = {
 
 static PyObject* THPGraph_str(THPGraph *self) {
   std::stringstream ss;
-  printGraph(self->cdata, ss);
+  ss << *self->cdata;
   return THPUtils_packString(ss.str());
 }
 
