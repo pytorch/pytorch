@@ -15,6 +15,7 @@
 
 CAFFE2_DECLARE_int(caffe2_tensor_chunk_size);
 CAFFE2_DECLARE_int(caffe2_max_tensor_serializer_threads);
+CAFFE2_DECLARE_bool(caffe2_serialize_fp16_as_bytes);
 
 namespace caffe2 {
 
@@ -364,19 +365,29 @@ void TensorSerializer<Context>::Serialize(
         &this->context_);
     break;
   case TensorProto_DataType_FLOAT16: {
-    const int kValue = 1;
-    CAFFE_ENFORCE_EQ(
-        reinterpret_cast<const char*>(&kValue)[0],
-        1,
-        "Serialization of FLOAT16 on big endian platform is not written yet.");
-    unique_ptr<char[]> buffer(new char[2 * chunkSize]);
-    this->context_.template Copy<char, Context, CPUContext>(
-        2 * chunkSize,
-        reinterpret_cast<const char*>(
-            input.template data<float16>() + chunkBegin),
-        buffer.get());
-    this->context_.FinishDeviceComputation();
-    proto.set_byte_data(buffer.release(), 2 * chunkSize);
+    if (FLAGS_caffe2_serialize_fp16_as_bytes) {
+      const int kValue = 1;
+      CAFFE_ENFORCE_EQ(
+          reinterpret_cast<const char*>(&kValue)[0],
+          1,
+          "Serialization of FLOAT16 on big endian platform "
+          "is not written yet.");
+      unique_ptr<char[]> buffer(new char[2 * chunkSize]);
+      this->context_.template Copy<char, Context, CPUContext>(
+          2 * chunkSize,
+          reinterpret_cast<const char*>(
+              input.template data<float16>() + chunkBegin),
+          buffer.get());
+      this->context_.FinishDeviceComputation();
+      proto.set_byte_data(buffer.release(), 2 * chunkSize);
+    } else {
+      detail::CopyToProtoWithCast(
+          chunkSize,
+          reinterpret_cast<const uint16_t*>(input.template data<float16>()) +
+              chunkBegin,
+          proto.mutable_int32_data(),
+          &this->context_);
+    }
   } break;
   case TensorProto_DataType_DOUBLE:
     detail::CopyToProtoAsIs(

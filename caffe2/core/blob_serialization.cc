@@ -16,6 +16,11 @@ CAFFE2_DEFINE_int(
     16,
     "Maximal number of threads that can be used for tensor serialization");
 
+CAFFE2_DEFINE_bool(
+    caffe2_serialize_fp16_as_bytes,
+    false,
+    "Serialize FLOAT16 tensors using byte_data field");
+
 namespace caffe2 {
 /**
  * @brief StringSerializer is the serializer for String.
