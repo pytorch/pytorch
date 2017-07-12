@@ -559,7 +559,9 @@ def bilinear(input1, input2, weight, bias=None):
 
 def batch_norm(input, running_mean, running_var, weight=None, bias=None,
                training=False, momentum=0.1, eps=1e-5):
-    f = torch._C._functions.BatchNorm(running_mean, running_var, training, momentum, eps, torch.backends.cudnn.enabled)
+    f = torch._C._functions.BatchNorm(running_mean, running_var, training,
+                                      momentum, eps,
+                                      torch.backends.cudnn.enabled)
     return f(input, weight, bias)
 
 
@@ -573,16 +575,16 @@ def layer_norm(input, weight=None, bias=None, eps=1e-5):
         if input.size(1) != weight.nelement():
             raise ValueError('got {}-feature tensor, expected {}'
                              .format(input.size(1), weight.nelement()))
-        else:
-            resized_weight = weight.view(1, input.size(1), *map(lambda x: 1, input.size()[2:]))
-            output = resized_weight.expand_as(input) * output
+        resized_weight = weight.view(1, input.size(1),
+                                     *map(lambda x: 1, input.size()[2:]))
+        output = resized_weight.expand_as(input) * output
     if bias is not None:
         if input.size(1) != bias.nelement():
             raise ValueError('got {}-feature tensor, expected {}'
                              .format(input.size(1), bias.nelement()))
-        else:
-            resized_bias = bias.view(1, input.size(1), *map(lambda x: 1, input.size()[2:]))
-            output = ouput + resized_bias.expand_as(input)
+        resized_bias = bias.view(1, input.size(1),
+                                 *map(lambda x: 1, input.size()[2:]))
+        output = ouput + resized_bias.expand_as(input)
 
     return output
 
