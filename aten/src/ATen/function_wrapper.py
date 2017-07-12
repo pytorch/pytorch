@@ -99,8 +99,9 @@ CHECKED_CAST = {
     'THStride*': CodeTemplate('THLongStorageView::make(${arg_name},true)'),
     'real': CodeTemplate('${arg_name}.to${ScalarName}()'),
     'accreal': CodeTemplate('${arg_name}.to${AccScalarName}()'),
-
+    'TensorList': CodeTemplate('tensor_list_checked_cast<${Tensor}>(${arg_name},"${arg_name}",${arg_pos})'),
 }
+
 CHECKED_USE = {
     'THTensor*': '{}_->tensor',
     'THIndexTensor*': '{}_->tensor',

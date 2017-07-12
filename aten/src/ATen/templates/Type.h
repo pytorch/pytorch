@@ -80,6 +80,7 @@ enum class TypeID {
 
 
 typedef ArrayRef<int64_t> IntList;
+typedef ArrayRef<Tensor> TensorList;
 
 struct Type {
   explicit Type(Context * context)
