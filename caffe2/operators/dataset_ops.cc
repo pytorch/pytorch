@@ -1,3 +1,5 @@
+#include "caffe2/operators/dataset_ops.h"
+
 #include <memory>
 #include <mutex>
 #include <string>
@@ -8,6 +10,12 @@
 #include "caffe2/utils/string_utils.h"
 
 namespace caffe2 {
+
+CAFFE_KNOWN_TYPE(std::unique_ptr<dataset_ops::TreeCursor>);
+CAFFE_KNOWN_TYPE(dataset_ops::TensorVectorPtr<CPUContext>);
+CAFFE_KNOWN_TYPE(dataset_ops::SharedTensorVectorPtr);
+
+namespace dataset_ops {
 namespace {
 
 const char kDatasetFieldSeparator = ':';
@@ -16,175 +24,171 @@ const char* kDatasetLengthField = "lengths";
 // how much percent to grow the dataset when needed
 const int kDatasetGrowthPct = 40;
 
-// used for lengths tensors in the dataset
-using TLength = int32_t;
-// used for all internal dataset operations (offsets, sizes to read, etc.)
-using TOffset = int64_t;
+} // namespace
 
-/**
- * Provides functionality to iterate across a list of tensors where some
- * of those tensors represent lengths in a hierarchical structure.
- */
-class TreeIterator {
- public:
-  struct FieldDesc {
-    int id;
-    int lengthFieldId = -1;
-    std::string name;
-  };
+TreeIterator::TreeIterator(const std::vector<std::string>& fields) {
+  // populate field vector and split field names
+  fields_.resize(fields.size());
+  std::vector<std::vector<std::string>> nameParts(fields_.size());
+  for (int i = 0; i < fields.size(); ++i) {
+    auto& field = fields_.at(i);
+    field.name = fields[i];
+    field.id = i;
+    field.lengthFieldId = -1;
+    nameParts.at(i) = split(kDatasetFieldSeparator, field.name);
+  }
 
-  explicit TreeIterator(const std::vector<std::string>& fields) {
-    // populate field vector and split field names
-    fields_.resize(fields.size());
-    std::vector<std::vector<std::string>> nameParts(fields_.size());
-    for (int i = 0; i < fields.size(); ++i) {
-      auto& field = fields_.at(i);
-      field.name = fields[i];
-      field.id = i;
-      field.lengthFieldId = -1;
-      nameParts.at(i) = split(kDatasetFieldSeparator, field.name);
+  // populate lengthFields
+  for (const auto& field : fields_) {
+    const auto& parts = nameParts.at(field.id);
+    if (!parts.empty() && parts.back() == kDatasetLengthField) {
+      lengthFieldIds_.push_back(field.id);
     }
+  }
 
-    // populate lengthFields
-    for (const auto& field : fields_) {
-      const auto& parts = nameParts.at(field.id);
-      if (!parts.empty() && parts.back() == kDatasetLengthField) {
-        lengthFieldIds_.push_back(field.id);
+  // find length-field with maximum prefix matching for each field
+  for (auto& field : fields_) {
+    // by default, we are matching against the root domain
+    int maxMatchLevel = 1;
+    int maxMatchLengthFieldId = -1;
+    for (int j = 0; j < numLengthFields(); ++j) {
+      const auto& lenField = lengthField(j);
+      // a length field can't have itself as its length field
+      if (field.id == lenField.id) {
+        continue;
+      }
+      auto lf = nameParts.at(lenField.id);
+      auto lfEnd = lf.end() - 1;
+      // check whether this lengthField is a prefix for this field name
+      if (std::mismatch(lf.begin(), lfEnd, nameParts.at(field.id).begin())
+              .first != lfEnd) {
+        continue;
+      }
+      if (lf.size() > maxMatchLevel) {
+        maxMatchLevel = lf.size();
+        maxMatchLengthFieldId = j;
       }
     }
+    field.lengthFieldId = maxMatchLengthFieldId;
+  }
 
-    // find length-field with maximum prefix matching for each field
-    for (auto& field : fields_) {
-      // by default, we are matching against the root domain
-      int maxMatchLevel = 1;
-      int maxMatchLengthFieldId = -1;
-      for (int j = 0; j < numLengthFields(); ++j) {
-        const auto& lenField = lengthField(j);
-        // a length field can't have itself as its length field
-        if (field.id == lenField.id) {
-          continue;
-        }
-        auto lf = nameParts.at(lenField.id);
-        auto lfEnd = lf.end() - 1;
-        // check whether this lengthField is a prefix for this field name
-        if (std::mismatch(lf.begin(), lfEnd, nameParts.at(field.id).begin())
-                .first != lfEnd) {
-          continue;
-        }
-        if (lf.size() > maxMatchLevel) {
-          maxMatchLevel = lf.size();
-          maxMatchLengthFieldId = j;
-        }
-      }
-      field.lengthFieldId = maxMatchLengthFieldId;
+  // check that fields are topologically sorted
+  // (no length field depends on a length defined afterwards)
+  for (const auto& field : fields_) {
+    const auto* lengthField = lengthFieldFor(field);
+    CAFFE_ENFORCE(
+        (lengthField == nullptr) || (lengthField->id < field.id),
+        "Error: Field ",
+        field.id,
+        " (",
+        field.name,
+        ") ",
+        "depends on a field defined afterwards: ",
+        lengthField->id,
+        " (",
+        lengthField->name,
+        ").");
+  }
+}
+
+void TreeIterator::advance(
+    const std::vector<const TLength*>& lengths,
+    std::vector<TOffset>& offsets,
+    std::vector<TOffset>& sizes,
+    std::vector<TOffset>& limits,
+    TOffset num) {
+  std::vector<TOffset> newOffsets;
+  CAFFE_ENFORCE_EQ(lengths.size(), numLengthFields());
+  CAFFE_ENFORCE_EQ(offsets.size(), numOffsetFields());
+  sizes.resize(offsets.size());
+  newOffsets.resize(offsets.size());
+  // first index, top level
+  {
+    auto limit = limits[0];
+    auto offset = offsets[0];
+    CAFFE_ENFORCE(limit >= offset, "Tried to advance past end of cursor.");
+    TOffset total = std::min(limit - offset, num);
+    sizes[0] = total;
+    newOffsets[0] = offset + total;
+  }
+  // child indices
+  for (int j = 1; j < numOffsetFields(); ++j) {
+    TOffset total = 0;
+    int parentOffsetId = offsetFieldIdFor(lengthField(j - 1));
+    const TLength* length = lengths[j - 1] + offsets[parentOffsetId];
+    for (int k = 0; k < sizes[parentOffsetId]; ++k) {
+      total += *(length++);
     }
+    auto offset = offsets[j];
+    CAFFE_ENFORCE(
+        offset + total <= limits[j],
+        "Inconsistent field length: ",
+        "tried to advance past the end of field ",
+        j);
+    sizes[j] = total;
+    newOffsets[j] = offset + total;
+  }
+  offsets = newOffsets;
+}
 
-    // check that fields are topologically sorted
-    // (no length field depends on a length defined afterwards)
-    for (const auto& field : fields_) {
-      const auto* lengthField = lengthFieldFor(field);
-      CAFFE_ENFORCE(
-          (lengthField == nullptr) || (lengthField->id < field.id),
-          "Error: Field ",
-          field.id,
-          " (",
-          field.name,
-          ") ",
-          "depends on a field defined afterwards: ",
-          lengthField->id,
-          " (",
-          lengthField->name,
-          ").");
+TreeWalker::TreeWalker(const vector<const Blob*>& inputs, TreeCursor& cursor)
+    : inputs_(inputs), cursor_(cursor), sizes_(cursor.it.numOffsetFields()) {
+  if (cursor.offsets.empty()) {
+    cursor.offsets.assign(cursor.it.numOffsetFields(), 0);
+  }
+
+  for (int fieldId = 0; fieldId < cursor_.it.fields().size(); ++fieldId) {
+    fields_.emplace_back(*this, fieldId);
+  }
+
+  gatherLengthData();
+
+  gatherSizeLimits();
+
+  // The invariant we hold is that we are always one step ahead
+  advance();
+}
+
+void TreeWalker::advance() {
+  prevOffsets_ = cursor_.offsets;
+  cursor_.it.advance(lengths_, cursor_.offsets, sizes_, limits_, 1);
+}
+
+std::vector<TIndex> TreeWalker::fieldDim(int fieldId) const {
+  auto tensorDim = input(fieldId).dims();
+  tensorDim[0] = sizes_[lengthIdx(fieldId)];
+  return tensorDim;
+}
+
+void* TreeWalker::fieldPtr(int fieldId) const {
+  auto& in = input(fieldId);
+  return (char*)in.raw_data() +
+      offset(fieldId) * in.size_from_dim(1) * in.meta().itemsize();
+}
+
+void TreeWalker::gatherLengthData() {
+  static const TLength lenZero = 0;
+  lengths_.resize(cursor_.it.numLengthFields());
+  for (int i = 0; i < lengths_.size(); ++i) {
+    auto& in = input(cursor_.it.lengthField(i).id);
+    if (in.size() > 0) {
+      lengths_[i] = in.data<int>();
+    } else {
+      lengths_[i] = &lenZero;
     }
   }
+}
 
-  void advance(
-      const std::vector<const TLength*>& lengths,
-      std::vector<TOffset>& offsets,
-      std::vector<TOffset>& sizes,
-      std::vector<TOffset>& limits,
-      TOffset num) {
-    std::vector<TOffset> newOffsets;
-    CAFFE_ENFORCE_EQ(lengths.size(), numLengthFields());
-    CAFFE_ENFORCE_EQ(offsets.size(), numOffsetFields());
-    sizes.resize(offsets.size());
-    newOffsets.resize(offsets.size());
-    // first index, top level
-    {
-      auto limit = limits[0];
-      auto offset = offsets[0];
-      CAFFE_ENFORCE(limit >= offset, "Tried to advance past end of cursor.");
-      TOffset total = std::min(limit - offset, num);
-      sizes[0] = total;
-      newOffsets[0] = offset + total;
-    }
-    // child indices
-    for (int j = 1; j < numOffsetFields(); ++j) {
-      TOffset total = 0;
-      int parentOffsetId = offsetFieldIdFor(lengthField(j - 1));
-      const TLength* length = lengths[j - 1] + offsets[parentOffsetId];
-      for (int k = 0; k < sizes[parentOffsetId]; ++k) {
-        total += *(length++);
-      }
-      auto offset = offsets[j];
-      CAFFE_ENFORCE(
-          offset + total <= limits[j],
-          "Inconsistent field length: ",
-          "tried to advance past the end of field ",
-          j);
-      sizes[j] = total;
-      newOffsets[j] = offset + total;
-    }
-    offsets = newOffsets;
+void TreeWalker::gatherSizeLimits() {
+  limits_.assign(sizes_.size(), std::numeric_limits<TOffset>::max());
+  for (auto fieldId = 0; fieldId < cursor_.it.fields().size(); ++fieldId) {
+    auto lengthFieldIdx = lengthIdx(fieldId);
+    limits_[lengthFieldIdx] =
+        std::min(limits_[lengthFieldIdx], (TOffset)input(fieldId).dims()[0]);
   }
+}
 
-  // Corresponds to the number of fields that have "length" as its last name
-  int numLengthFields() const {
-    return lengthFieldIds_.size();
-  }
-
-  // Corresponds to the number of length fields + 1 (for the top-level domain)
-  int numOffsetFields() const {
-    return numLengthFields() + 1;
-  }
-
-  // Get lengthField description for the given field
-  const FieldDesc* lengthFieldFor(const FieldDesc& desc) {
-    return (desc.lengthFieldId == -1)
-        ? nullptr
-        : &fields_.at(lengthFieldIds_.at(desc.lengthFieldId));
-  }
-
-  // Get lengthField description for the given lengthFieldId, where
-  // 0 <= lengthFieldId < numLengthFields()
-  const FieldDesc& lengthField(int lengthFieldId) {
-    return fields_.at(lengthFieldIds_.at(lengthFieldId));
-  }
-
-  // Returns the index into the 'offset' vector for the given field.
-  int offsetFieldIdFor(const FieldDesc& fieldDesc) {
-    return fieldDesc.lengthFieldId + 1;
-  }
-
-  // Returns the field description for all fields.
-  const std::vector<FieldDesc>& fields() {
-    return fields_;
-  }
-
- private:
-  // Description of each field
-  std::vector<FieldDesc> fields_;
-  // Index into fields_ above for the fields that are lengths.
-  std::vector<int> lengthFieldIds_;
-};
-
-class TreeCursor {
- public:
-  explicit TreeCursor(const TreeIterator& iterator) : it(iterator) {}
-  std::vector<TOffset> offsets;
-  std::mutex mutex_;
-  TreeIterator it;
-};
+namespace {
 
 class CreateTreeCursorOp : public Operator<CPUContext> {
  public:
@@ -273,136 +277,6 @@ class CheckDatasetConsistencyOp : public Operator<CPUContext> {
  private:
   TreeIterator iterator_;
 };
-
-/**
- * Simple wrapper class allowing an easy traversal of the tensors representing
- * the hirerarchical structure.
- */
-class TreeWalker {
- public:
-  TreeWalker(const vector<const Blob*>& inputs, TreeCursor& cursor)
-      : inputs_(inputs), cursor_(cursor), sizes_(cursor.it.numOffsetFields()) {
-    if (cursor.offsets.empty()) {
-      cursor.offsets.assign(cursor.it.numOffsetFields(), 0);
-    }
-
-    for (int fieldId = 0; fieldId < cursor_.it.fields().size(); ++fieldId) {
-      fields_.emplace_back(*this, fieldId);
-    }
-
-    gatherLengthData();
-
-    gatherSizeLimits();
-
-    // The invariant we hold is that we are always one step ahead
-    advance();
-  }
-
-  // Returns the number of records in a dataset
-  inline TOffset size() const {
-    return limits_.at(0);
-  }
-
-  void advance() {
-    prevOffsets_ = cursor_.offsets;
-    cursor_.it.advance(lengths_, cursor_.offsets, sizes_, limits_, 1);
-  }
-
- private:
-  inline const TensorCPU& input(int32_t idx) const {
-    return inputs_[idx]->Get<TensorCPU>();
-  }
-
-  // TODO: Change to fieldDesc
-  inline const TreeIterator::FieldDesc& field(int idx) const {
-    return cursor_.it.fields().at(idx);
-  }
-
-  inline int lengthIdx(int fieldId) const {
-    return field(fieldId).lengthFieldId + 1;
-  }
-
-  inline TOffset offset(int fieldId) const {
-    return prevOffsets_[lengthIdx(fieldId)];
-  }
-
-  std::vector<TIndex> fieldDim(int fieldId) const {
-    auto tensorDim = input(fieldId).dims();
-    tensorDim[0] = sizes_[lengthIdx(fieldId)];
-    return tensorDim;
-  }
-
-  void* fieldPtr(int fieldId) const {
-    auto& in = input(fieldId);
-    return (char*)in.raw_data() +
-        offset(fieldId) * in.size_from_dim(1) * in.meta().itemsize();
-  }
-
- public:
-  // Simple Proxy class to expose nicer API for field access
-  class Field {
-   public:
-    Field(TreeWalker& walker, int fieldId)
-        : walker_(walker), fieldId_(fieldId) {}
-
-    inline std::vector<TIndex> dim() const {
-      return walker_.fieldDim(fieldId_);
-    }
-
-    inline const TypeMeta& meta() const {
-      return walker_.input(fieldId_).meta();
-    }
-
-    inline void* ptr() const {
-      return walker_.fieldPtr(fieldId_);
-    }
-
-   private:
-    const TreeWalker& walker_;
-    const int fieldId_;
-  };
-
-  // Notice that a reference is returned. If advance() is called the fields will
-  // be updated to represent the new state.
-  inline const std::vector<Field>& fields() const {
-    return fields_;
-  }
-
- private:
-  void gatherLengthData() {
-    static const TLength lenZero = 0;
-    lengths_.resize(cursor_.it.numLengthFields());
-    for (int i = 0; i < lengths_.size(); ++i) {
-      auto& in = input(cursor_.it.lengthField(i).id);
-      if (in.size() > 0) {
-        lengths_[i] = in.data<int>();
-      } else {
-        lengths_[i] = &lenZero;
-      }
-    }
-  }
-
-  void gatherSizeLimits() {
-    limits_.assign(sizes_.size(), std::numeric_limits<TOffset>::max());
-    for (auto fieldId = 0; fieldId < cursor_.it.fields().size(); ++fieldId) {
-      auto lengthFieldIdx = lengthIdx(fieldId);
-      limits_[lengthFieldIdx] =
-          std::min(limits_[lengthFieldIdx], (TOffset)input(fieldId).dims()[0]);
-    }
-  }
-
-  const vector<const Blob*>& inputs_;
-  TreeCursor& cursor_;
-  std::vector<Field> fields_;
-
-  std::vector<const TLength*> lengths_;
-  std::vector<TOffset> limits_;
-  std::vector<TOffset> sizes_;
-  std::vector<TOffset> offsets_;
-  std::vector<TOffset> prevOffsets_;
-};
-
-using SharedTensorVectorPtr = std::shared_ptr<std::vector<TensorCPU>>;
 
 class PackRecordsOp : public Operator<CPUContext> {
  public:
@@ -522,9 +396,8 @@ class UnPackRecordsOp : public Operator<CPUContext> {
 
  private:
   void getShapeAndMetaFromInput(
-    std::vector<std::vector<TIndex>>& outputDims,
-    std::vector<const TypeMeta*>& metas
-  ) {
+      std::vector<std::vector<TIndex>>& outputDims,
+      std::vector<const TypeMeta*>& metas) {
     const auto* inputs = Input(0).template data<SharedTensorVectorPtr>();
 
     const auto& inputZero = inputs[0];
@@ -543,9 +416,8 @@ class UnPackRecordsOp : public Operator<CPUContext> {
   }
 
   void getShapeAndMetaFromPrototypeBlobs(
-    std::vector<std::vector<TIndex>>& outputDims,
-    std::vector<const TypeMeta*>& metas
-  ) {
+      std::vector<std::vector<TIndex>>& outputDims,
+      std::vector<const TypeMeta*>& metas) {
     const auto numTensors = fields_.size();
     CAFFE_ENFORCE_EQ(numTensors, InputSize() - 1);
     CAFFE_ENFORCE_EQ(numTensors, OutputSize());
@@ -928,9 +800,6 @@ class AtomicAppendOp final : public Operator<Context> {
     return true;
   }
 };
-
-template <class Context>
-using TensorVectorPtr = std::unique_ptr<std::vector<Tensor<Context>>>;
 
 template <class Context>
 class CreateTensorVectorOp final : public Operator<Context> {
@@ -1396,12 +1265,6 @@ SHOULD_NOT_DO_GRADIENT(ConcatTensorVector);
 SHOULD_NOT_DO_GRADIENT(CollectTensor);
 SHOULD_NOT_DO_GRADIENT(UnPackRecords);
 SHOULD_NOT_DO_GRADIENT(PackRecords);
-} // namespace
-CAFFE_KNOWN_TYPE(std::unique_ptr<TreeCursor>);
-CAFFE_KNOWN_TYPE(TensorVectorPtr<CPUContext>);
-CAFFE_KNOWN_TYPE(SharedTensorVectorPtr);
-
-namespace {
 
 class TreeCursorSerializer : public BlobSerializerBase {
  public:
@@ -1478,4 +1341,5 @@ REGISTER_BLOB_DESERIALIZER(std::unique_ptr<TreeCursor>, TreeCursorDeserializer);
 
 } // namespace
 
+} // dataset_ops
 } // caffe2
