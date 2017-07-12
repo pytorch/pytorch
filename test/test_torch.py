@@ -3735,13 +3735,12 @@ class TestTorch(TestCase):
 
     def test_from_file(self):
         size = 10000
-        filename = 'testPytorchStorageFromFile'
-        try:
-            s1 = torch.FloatStorage.from_file(filename, True, size)
+        with tempfile.NamedTemporaryFile() as f:
+            s1 = torch.FloatStorage.from_file(f.name, True, size)
             t1 = torch.FloatTensor(s1).copy_(torch.randn(size))
 
             # check mapping
-            s2 = torch.FloatStorage.from_file(filename, True, size)
+            s2 = torch.FloatStorage.from_file(f.name, True, size)
             t2 = torch.FloatTensor(s2)
             self.assertEqual(t1, t2, 0)
 
@@ -3754,9 +3753,6 @@ class TestTorch(TestCase):
             rnum = random.uniform(-1, 1)
             t2.fill_(rnum)
             self.assertEqual(t1, t2, 0)
-        finally:
-            if os.path.exists(filename):
-                os.remove(filename)
 
     def test_print(self):
         for t in torch._tensor_classes:
