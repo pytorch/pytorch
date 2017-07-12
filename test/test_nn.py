@@ -5,6 +5,7 @@ import unittest
 import itertools
 import contextlib
 import warnings
+import pickle
 from copy import deepcopy
 from itertools import repeat, product
 from functools import wraps, reduce
@@ -789,6 +790,11 @@ class TestNN(NNTestCase):
         self.assertEqual(m.weight_v.size(), m.weight.size())
         self.assertEqual(m.weight_g.size(), (1, 5))
         self.assertEqual(m(input), expected_output)
+
+    def test_weight_norm_pickle(self):
+        m = torch.nn.utils.weight_norm(nn.Linear(5, 7))
+        m = pickle.loads(pickle.dumps(m))
+        self.assertIsInstance(m, nn.Linear)
 
     def test_embedding_padding_idx(self):
         embedding = nn.Embedding(10, 20, padding_idx=0)
