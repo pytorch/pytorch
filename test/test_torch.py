@@ -2881,11 +2881,9 @@ class TestTorch(TestCase):
                 [slice(None), slice(None), [0, 2, 3], [1, 3, 4]],
                 [slice(None), slice(None), [0], [1, 2, 4]],
                 [slice(None), slice(None), [0, 1, 3], [4]],
-                [slice(None), slice(None), [[0, 1], [1, 0]], [[2, 3], [3, 0]]],
                 [slice(None), slice(None), [[0, 1], [1, 0]], [[2, 3]]],
                 [slice(None), slice(None), [[0, 1], [2, 3]], [[0]]],
                 [slice(None), slice(None), [[5, 6]], [[0, 3], [4, 4]]],
-                [slice(None), slice(None), [[2]], [[0, 3], [4, 4]]],
                 [slice(None), [0, 2, 3], [1, 3, 4], slice(None)],
                 [slice(None), [0], [1, 2, 4], slice(None)],
                 [slice(None), [0, 1, 3], [4], slice(None)],
@@ -2925,6 +2923,13 @@ class TestTorch(TestCase):
                 assert_set_eq(reference,
                               indexer,
                               get_set_tensor(reference, indexer))
+            indices_to_test += [
+                [slice(None), slice(None), [[0, 1], [1, 0]], [[2, 3], [3, 0]]],
+                [slice(None), slice(None), [[2]], [[0, 3], [4, 4]]],
+            ]
+            for indexer in indices_to_test:
+                assert_get_eq(reference, indexer)
+                assert_set_eq(reference, indexer, 1333)
 
     def test_advancedindex(self):
         self._test_advancedindex(self, lambda x: x)
