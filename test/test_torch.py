@@ -4054,6 +4054,13 @@ class TestTorch(TestCase):
         t2 = torch.from_numpy(t.numpy().transpose())
         self.assertEqual(t1, t2)
 
+    def test_inplace_division(self):
+        t = torch.rand(5, 5)
+        id_before = id(t)
+        t /= 2
+        id_after = id(t)
+        self.assertEqual(id_before, id_after)
+
 # Functions to test negative dimension wrapping
 METHOD = 1
 INPLACE_METHOD = 2

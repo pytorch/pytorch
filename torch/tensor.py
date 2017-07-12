@@ -333,6 +333,7 @@ class _TensorBase(object):
 
     def __idiv__(self, other):
         return self.div_(other)
+    __itruediv__ = __idiv__
 
     def __mod__(self, other):
         return self.remainder(other)
