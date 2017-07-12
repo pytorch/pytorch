@@ -7,21 +7,6 @@
 
 namespace torch { namespace autograd {
 
-std::string getOperatorName(const Operator& o) {
-  switch (o._id) {
-    case Operator::Id::PythonOp: return "PythonOp";
-  }
-  __builtin_unreachable();
-}
-
-std::string getExprName(const Expr& expr) {
-  switch (expr._id) {
-    case Expr::Id::Let: return "Let";
-    case Expr::Id::Tuple: return "Tuple";
-  }
-  __builtin_unreachable();
-}
-
 std::string getPythonName(const PyObject* obj, bool is_legacy) {
   AutoGIL gil;
   if (is_legacy) {
@@ -35,108 +20,46 @@ std::string getPythonName(const PyObject* obj, bool is_legacy) {
   }
 }
 
-// TODO: proper pretty-printer
-
-class Printer : public ExprVisitor<Printer>, public OperatorVisitor<Printer> {
-  std::ostream& s;
-
-public:
-  Printer(std::ostream& s) : s(s) {}
-
-  void printPyObject(THPObjectPtr& obj) {
-    THPObjectPtr repr { PyObject_Repr(obj.get()) };
-    s << THPUtils_unpackString(repr.get());
+std::ostream& operator<<(std::ostream & out, const Value & l) {
+  return out << "%" << l.unique;
+}
+std::ostream & operator<<(std::ostream & out, const value_list & values) {
+  bool first = true;
+  for(auto & v : values) {
+    if(!first)
+      out << ", ";
+    first = false;
+    out << *v;
   }
-
-  void visitLocal(std::shared_ptr<Local> a) {
-    s << "%" << a->unique;
-  }
-
-  // Operator
-  void visitPythonOp(std::shared_ptr<PythonOp> e) {
-    s << getPythonName(e->pyobj.get(), e->is_legacy);
-    if (e->is_legacy) {
-      s << " (legacy)";
-    }
-    for (auto& scalar : e->scalar_args) {
-      s << " ";
-      printPyObject(scalar);
-    }
-  }
-
-  // Instruction
-  void visitInstruction(std::shared_ptr<Instruction> i) {
-    visitOperator(i->op);
-    bool first = true;
-    for (auto& l : i->args) {
-      if (first) {
-        s << " ";
-      } else {
-        s << ", ";
-      }
-      visitLocal(l);
-    }
-  }
-
-  // Expr
-  void visitLet(std::shared_ptr<Let> e) {
-    bool first = true;
-    for (auto l : e->bind.lvals) {
-      if (first) {
-        first = false;
-      } else {
-        s << ", ";
-      }
-      visitLocal(l);
-    }
-    s << " = ";
-    visitInstruction(e->bind.rval);
-    s << std::endl;
-    visitExpr(e->expr);
-  }
-  void visitTuple(std::shared_ptr<Tuple> e) {
-    s << "ret (";
-    bool first = true;
-    for (auto l : e->locals) {
-      if (first) {
-        first = false;
-      } else {
-        s << ", ";
-      }
-      visitLocal(l);
-    }
-    s << ")";
-  }
-
-  // Graph
-  void visitGraph(std::shared_ptr<Graph> g) {
-    s << "graph";
-    bool first = true;
-    for (auto& l : g->params) {
-      if (first) {
-        s << " ";
-      } else {
-        s << ", ";
-      }
-      visitLocal(l);
-    }
-    s << " {" << std::endl;
-    visitExpr(g->body);
-    s << std::endl;
-    s << "}";
-  }
-};
-
-void printExpr(std::shared_ptr<Expr> e) {
-  Printer(std::cout).visitExpr(e);
+  return out;
 }
 
-void printExpr(std::shared_ptr<Expr> e, std::ostream& s) {
-  Printer(s).visitExpr(e);
+
+static std::ostream& operator<<(std::ostream & out, THPObjectPtr& obj) {
+   THPObjectPtr repr { PyObject_Repr(obj.get()) };
+   return out << THPUtils_unpackString(repr.get());
 }
 
-void printGraph(std::shared_ptr<Graph> e, std::ostream& s) {
-  Printer(s).visitGraph(e);
+std::ostream& operator<<(std::ostream & out, const Graph & g) {
+  for(auto n : g.nodes) {
+    out << n->outputs;
+    out << " = ";
+    switch(n->kind()) {
+      case Node::Id::PythonOp:
+        auto & value = (PythonOp&)*n;
+        out << getPythonName(value.pyobj.get(), value.is_legacy);
+        if (value.is_legacy) {
+          out << " (legacy)";
+        }
+        for (auto& scalar : value.scalar_args) {
+          out << " " << scalar;
+        }
+        break;
+    }
+    out << "(" << n->inputs << ")\n";
+  }
+  out << "return (" << g.outputs << ")\n";
+  return out;
 }
 
 }}
