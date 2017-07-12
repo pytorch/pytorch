@@ -51,7 +51,7 @@ namespace torch { namespace autograd {
 //
 // Short term: demonstrate what the best possible speedup is. (Use ATen)
 // Subtlety: if you copy-pasted code and edit it, you have a modified
-// operator, and you don't have to recompile PyTorch.  So... Zach is
+// node, and you don't have to recompile PyTorch.  So... Zach is
 // curious with Python: how does the set of tools know where all your
 // compilers are. So, hypothetically, setuptools should be able to "JIT"
 // C++.  Write a hilarious C++ function as a subclass of function,
@@ -67,21 +67,12 @@ namespace torch { namespace autograd {
 
 // A variable name, but we don't call it variable because that conflicts
 // with PyTorch's existing use of Variable for autograd tracing.
-struct Local;
+struct Value;
 
 // Something that takes some number of tensor inputs, and produces some
 // number of tensor outputs.  The "prim-ops", so to speak.
-struct Operator;
+struct Node;
 
-// Something that produces some number of tensor outputs.  In ANF
-// formalism, this is often called a CExpr.
-struct Instruction;
-
-// The top-level expression that handles bindings.  This is basically
-// a glorified singly linked list with a return statement at the end.
-// But in the functional interpretation, its a series of let-bindings
-// until you get to the end.  It's not very efficient.
-struct Expr;
 
 // There are a bunch of ways to think about this IR, depending on your
 // background.
@@ -98,49 +89,51 @@ struct Expr;
 // would strongly recommend the functional style representation, rather than SSA
 // phi nodes.
 
-using local_list = std::vector<std::shared_ptr<Local>>;
+using value_list = std::vector<std::shared_ptr<Value>>;
+using node_list = std::vector<std::shared_ptr<Node>>;
 using pyobj_list = std::vector<THPObjectPtr>;
 using Location = std::string;
 
 // --------------------------------------------------------------------
 // Variables, which refer to tensors (NEVER tuples of tensors)
 
-struct Local {
+struct Value {
   int unique;
-  Local(int unique)
+  Value(int unique)
     : unique(unique)
     {}
 };
 
 // --------------------------------------------------------------------
-// Operators, which map tensors to tensors
+// Nodes, which map tensors to tensors
 
 // Although there is only one choice at the moment, this is the primary
 // candidate for adding extra options.  At the moment this AST is designed
-// CLOSED but long term we need a solution for operator extension.  That
+// CLOSED but long term we need a solution for node extension.  That
 // requires careful design, because whatever it is we request from users
-// when they implement operator, is what we get FOREVER.
+// when they implement node, is what we get FOREVER.
 
-struct Operator {
+struct Node {
   enum class Id {
     PythonOp,
   };
+  value_list inputs;
+  value_list outputs;
+  Location loc;
   Id _id;
-  Operator(Id id) : _id(id) {}
-
-  Operator(const Operator& other) = delete;
-  Operator(Operator&& other) = delete;
+  Node(Id id) : _id(id) {}
+  Node(const Node& other) = delete;
+  Node(Node&& other) = delete;
+  Id kind() {
+    return _id;
+  }
+  Node & withLocation(const Location & loc_) {
+    loc = loc_;
+    return *this;
+  }
 };
 
-// The calling convention for a Python function specifies how we
-// need to intersperse tensor and Python arguments.
-struct PyFunctionCConv {
-  enum class ArgType { Tensor, Scalar };
-  std::vector<ArgType> arg_types;
-  PyFunctionCConv(std::vector<ArgType> arg_types) : arg_types(arg_types) {}
-};
-
-struct PythonOp : public Operator {
+struct PythonOp : public Node {
   // This is not used at the moment (except in the invocation of
   // the Arg constructor, where it could be trivially inlined),
   // but it can be used to implement some useful, type-dispatched
@@ -152,7 +145,9 @@ struct PythonOp : public Operator {
   // TraceInterpreter for execution semantics.
   THPObjectPtr pyobj;
   // The calling convention for the Python function.
-  PyFunctionCConv cconv;
+  // 's' -- python scalar argument
+  // 't' -- tensor argument
+  std::string cconv;
   // Whether or not this is a legacy function implementation or not.
   // We don't support executing traces with legacy functions at the moment.
   bool is_legacy;
@@ -160,8 +155,8 @@ struct PythonOp : public Operator {
   // the function in this order; see cconv for the correct order.
   std::vector<THPObjectPtr> scalar_args;
   // NB: tensor arguments are in Apply
-  PythonOp(THPObjectPtr&& pyobj, PyFunctionCConv cconv, bool is_legacy, pyobj_list&& scalar_args)
-    : Operator(SelfId)
+  PythonOp(THPObjectPtr&& pyobj, const std::string & cconv, bool is_legacy, pyobj_list&& scalar_args)
+    : Node(SelfId)
     , pyobj(std::move(pyobj))
     , cconv(cconv)
     , is_legacy(is_legacy)
@@ -169,163 +164,11 @@ struct PythonOp : public Operator {
     {}
 };
 
-// SubType is instance of CRTP; allows us to avoid virtual dispatch
-template<typename SubType, typename ReturnType = void>
-struct OperatorVisitor {
-  /*
-  // Purposely undefined, to avoid C++ thinking that we are eventually
-  // going to define these (we will not.)
-  ReturnType visitPythonOp(std::shared_ptr<PythonOp>, T...);
-  */
-  template <typename... T>
-  ReturnType visitOperator(std::shared_ptr<Operator> o, T&&... args) {
-    switch (o->_id) {
-      case Operator::Id::PythonOp:
-        return static_cast<SubType*>(this)->visitPythonOp(std::static_pointer_cast<PythonOp>(o), args...);
-    }
-    __builtin_unreachable();
-  }
-};
-
-
-// --------------------------------------------------------------------
-// Instruction
-
-// It is possible that not making this a variant is a mistake.  I am
-// not sure.  The benefit of making this a variant is that primitive
-// operators can be given instructions where the number of locals is
-// statically known.
-
-struct Instruction {
-  std::shared_ptr<Operator> op;
-  local_list args;
-  Location loc;
-
-  Instruction(std::shared_ptr<Operator> op, local_list args, Location loc)
-    : op(op)
-    , args(args)
-    , loc(loc)
-    {}
-  Instruction(std::shared_ptr<Operator> op, local_list args)
-    : op(op)
-    , args(args)
-    , loc("")
-    {}
-};
-
-// --------------------------------------------------------------------
-// Expressions (returns tupled arguments)
-
-struct Expr {
-  enum class Id {
-    Let,
-    Tuple,
-  };
-
-  Id _id;
-  Location _loc;
-  Expr(Id id) : _id(id) {}
-  Expr(Id id, Location loc) : _id(id), _loc(loc) {}
-
-  Expr(const Expr& other) = delete;
-  Expr(Expr&& other) = delete;
-};
-
-// Helper structure for bindings.  Having a separate struct could come in handy
-// if we ever support recursive bindings (probably not), or we just want to put
-// all the bindings in a giant vector.
-struct Bind {
-  local_list lvals;
-  std::shared_ptr<Instruction> rval;
-  Bind(local_list lvals, std::shared_ptr<Instruction> rval)
-    : lvals(lvals)
-    , rval(rval)
-    {}
-};
-
-// AKA singly linked list
-struct Let : public Expr {
-  const static Id SelfId = Id::Let;
-  Bind bind;
-  std::shared_ptr<Expr> expr;
-  Let(Bind bind, std::shared_ptr<Expr> expr)
-    : Expr(SelfId)
-    , bind(bind)
-    , expr(expr)
-    {}
-};
-
-// AKA return
-struct Tuple : public Expr {
-  const static Id SelfId = Id::Tuple;
-  local_list locals;
-  Tuple(local_list locals, Location loc)
-    : Expr(SelfId, loc)
-    , locals(locals)
-    {};
-  Tuple(local_list locals)
-    : Expr(SelfId)
-    , locals(locals)
-    {};
-};
-
-// SubType is instance of CRTP; allows us to avoid virtual dispatch
-template<typename SubType, typename ReturnType = void>
-struct ExprVisitor {
-  /*
-  // Purposely undefined, to avoid C++ thinking that we are eventually
-  // going to define these (we will not.)
-  ReturnType visitLet(std::shared_ptr<Let>, T...);
-  ReturnType visitTuple(std::shared_ptr<Tuple>, T...);
-  */
-  template <typename... T>
-  ReturnType visitExpr(std::shared_ptr<Expr> e, T&&... args) {
-    switch (e->_id) {
-      case Expr::Id::Let:
-        return static_cast<SubType*>(this)->visitLet(std::static_pointer_cast<Let>(e), args...);
-      case Expr::Id::Tuple:
-        return static_cast<SubType*>(this)->visitTuple(std::static_pointer_cast<Tuple>(e), args...);
-    }
-    __builtin_unreachable();
-  }
-};
-
-void printExpr(std::shared_ptr<Expr>);
-void printExpr(std::shared_ptr<Expr>, std::ostream& s);
-
-// --------------------------------------------------------------------
-// Graphs (i.e., functions, i.e., lambda expressions)
-
 struct Graph {
-  local_list params;
-  std::shared_ptr<Expr> body;
-  Graph(local_list params, std::shared_ptr<Expr> body)
-    : params(params)
-    , body(body)
-    {};
+  node_list nodes;
+  value_list inputs;
+  value_list outputs;
 };
-
-void printGraph(std::shared_ptr<Graph>, std::ostream& s);
-
-// --------------------------------------------------------------------
-// IR builder
-
-// This builder allows you to build a sequence of successively nested
-// let statements
-//
-// TODO: Consider doing liveness analysis at this point
-
-class LetBuilder {
-  std::vector<Bind> binds;
-public:
-  LetBuilder() {};
-  void add(Bind bind) { binds.emplace_back(bind); }
-  std::shared_ptr<Expr> expr(std::shared_ptr<Expr> e) {
-    for (auto it = binds.rbegin(); it != binds.rend(); ++it) {
-      e = std::make_shared<Let>(*it, e);
-    }
-    return e;
-  }
-};
+std::ostream& operator<<(std::ostream &  out, const Graph & g);
 
 }}
