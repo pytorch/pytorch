@@ -226,6 +226,15 @@ class BrewTest(unittest.TestCase):
         self.assertEqual(to_str_list(model.GetAllParams('c')), ['c/a', 'c/d'])
         self.assertEqual(to_str_list(model.GetAllParams('c/')), ['c/a', 'c/d'])
 
+    def test_param_consistence(self):
+        model = ModelHelper(name='test_mode')
+        cnv = brew.conv(model, 'data', 'cnv', 32, 32, 4)
+        step_model = ModelHelper(name='step_model', param_model=model)
+        a = brew.fc(step_model, cnv, 'a', 100, 200)
+        brew.fc(model, a, 'b', 200, 5)
+        # test the _parameters_info is shared between model and step_model
+        self.assertEqual(model._parameters_info, step_model._parameters_info)
+
 
 @unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
 class BrewGPUTest(unittest.TestCase):
