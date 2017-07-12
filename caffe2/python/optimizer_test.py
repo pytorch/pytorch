@@ -2,8 +2,9 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 from caffe2.python.optimizer import (
-        build_sgd, build_multi_precision_sgd,
-        build_ftrl, build_adagrad, build_adam, add_weight_decay)
+    build_sgd, build_multi_precision_sgd, build_ftrl,
+    build_adagrad, build_adam, add_weight_decay, SgdOptimizer)
+from caffe2.python.optimizer_context import UseOptimizer
 from caffe2.python.optimizer_test_util import OptimizerTestBase
 from caffe2.python.test_util import TestCase
 from caffe2.python import workspace
@@ -118,6 +119,68 @@ class TestWeightDecay(TestCase):
                     )
                 self.assertTrue(op.output[0] in expected_weight_grad)
                 expected_weight_grad.remove(op.output[0])
+
+        self.assertEqual(
+            expected_weight_grad,
+            set(),
+            "Not all weights were decayed: {}".format(expected_weight_grad)
+        )
+
+
+class TestOptimizerContext(TestCase):
+
+    def test_optimizer_context(self):
+        from caffe2.python import brew
+        from caffe2.python.model_helper import ModelHelper
+
+        model = ModelHelper(name="test", arg_scope={'order': 'NCHW'})
+        cnv_optim = SgdOptimizer(0.15)
+        weight_optim = SgdOptimizer(0.2)
+        bias_optim = SgdOptimizer(0.1)
+
+        with UseOptimizer(cnv_optim):
+            cnv = brew.conv(model, 'data', 'cnv', 32, 32, 4)
+        with UseOptimizer({'WEIGHT': weight_optim, 'BIAS': bias_optim}):
+            a = brew.fc(model, cnv, 'a', 100, 200)
+        pred = brew.fc(model, a, 'b', 200, 5)
+        (softmax, loss) = model.SoftmaxWithLoss(
+            [pred, 'label'],
+            ['softmax', 'loss'],
+        )
+        model.AddGradientOperators([loss])
+
+        add_weight_decay(model, weight_decay=1e-4)
+        # use the following optimizer if none specified in param_info
+        build_sgd(model, 0.11)
+
+        expected_weight_grad = {'b_w_grad', 'a_w_grad', 'cnv_w_grad'}
+        expected_learning_rate = {
+            'cnv_w_lr': -0.15, 'cnv_b_lr': -0.15,
+            'a_w_lr': -0.2, 'a_b_lr': -0.1,
+            'b_w_lr': -0.11, 'b_b_lr': -0.11
+        }
+
+        for op in model.net.Proto().op:
+            # Check the proto that all weights are decayed and not non-weights
+            # are decayed.
+            if op.type == 'WeightedSum' and 'wd_0_0' in op.input:
+                if op.output[0] not in expected_weight_grad:
+                    print(
+                        "Unexpected param for weight_decay: {}".
+                        format(op.output[0])
+                    )
+                self.assertTrue(op.output[0] in expected_weight_grad)
+                expected_weight_grad.remove(op.output[0])
+            # Check the learning rate for each parameter
+            if op.type == 'LearningRate':
+                val = 0
+                for arg in op.arg:
+                    if arg.name == 'base_lr':
+                        val = arg.f
+                self.assertEqual(
+                    val,
+                    expected_learning_rate[op.output[0]]
+                )
 
         self.assertEqual(
             expected_weight_grad,
