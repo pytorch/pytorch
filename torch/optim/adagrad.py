@@ -6,7 +6,8 @@ from .optimizer import Optimizer
 class Adagrad(Optimizer):
     """Implements Adagrad algorithm.
 
-    It has been proposed in `Adaptive Subgradient Methods for Online Learning and Stochastic Optimization`_.
+    It has been proposed in `Adaptive Subgradient Methods for Online Learning
+    and Stochastic Optimization`_.
 
     Arguments:
         params (iterable): iterable of parameters to optimize or dicts defining
@@ -15,8 +16,8 @@ class Adagrad(Optimizer):
         lr_decay (float, optional): learning rate decay (default: 0)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
 
-    .. _Adaptive Subgradient Methods for Online Learning and Stochastic Optimization:
-        http://jmlr.org/papers/v12/duchi11a.html
+    .. _Adaptive Subgradient Methods for Online Learning and Stochastic
+        Optimization: http://jmlr.org/papers/v12/duchi11a.html
     """
 
     def __init__(self, params, lr=1e-2, lr_decay=0, weight_decay=0):

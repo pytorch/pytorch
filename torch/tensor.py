@@ -241,7 +241,8 @@ class _TensorBase(object):
         Unlike :meth:`expand`, this function copies the tensor's data.
 
         Args:
-            *sizes (torch.Size or int...): The number of times to repeat this tensor along each dimension
+            *sizes (torch.Size or int...): The number of times to repeat this
+                tensor along each dimension
 
         Example:
             >>> x = torch.Tensor([1, 2, 3])
@@ -332,6 +333,7 @@ class _TensorBase(object):
 
     def __idiv__(self, other):
         return self.div_(other)
+    __itruediv__ = __idiv__
 
     def __mod__(self, other):
         return self.remainder(other)
@@ -365,6 +367,11 @@ class _TensorBase(object):
 
     def __hash__(self):
         return id(self)
+
+    # provide user guidance when they inavertently call autograd properties on a Tensor
+    @property
+    def data(self):
+        raise RuntimeError('cannot call .data on a torch.Tensor: did you intend to use autograd.Variable?')
 
 
 _TensorBase.type = _type

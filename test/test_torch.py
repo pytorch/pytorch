@@ -2823,16 +2823,18 @@ class TestTorch(TestCase):
                 # first, third rows,
                 [[0, 2], slice(None)],
 
-                # dupes
-                [slice(None), [0, 1, 1, 2, 2]],
-
                 # weird shape
                 [slice(None), [[0, 1],
                                [2, 3]]]
             ]
 
-            for indexer in indices_to_test:
+            # only test dupes on gets
+            get_indices_to_test = indices_to_test + [[slice(None), [0, 1, 1, 2, 2]]]
+
+            for indexer in get_indices_to_test:
                 assert_get_eq(reference, indexer)
+
+            for indexer in indices_to_test:
                 assert_set_eq(reference, indexer, 44)
                 assert_set_eq(reference,
                               indexer,
@@ -3652,15 +3654,8 @@ class TestTorch(TestCase):
         b = [a[i % 2] for i in range(4)]
         b += [a[0].storage()]
         b += [a[0].storage()[1:4]]
-        DATA_URL = 'https://download.pytorch.org/test_data/legacy_serialized.pt'
-        data_dir = os.path.join(os.path.dirname(__file__), 'data')
-        test_file_path = os.path.join(data_dir, 'legacy_serialized.pt')
-        succ = download_file(DATA_URL, test_file_path)
-        if not succ:
-            warnings.warn(("Couldn't download the test file for backwards compatibility! "
-                           "Tests will be incomplete!"), RuntimeWarning)
-            return
-        c = torch.load(test_file_path)
+        path = download_file('https://download.pytorch.org/test_data/legacy_serialized.pt')
+        c = torch.load(path)
         self.assertEqual(b, c, 0)
         self.assertTrue(isinstance(c[0], torch.FloatTensor))
         self.assertTrue(isinstance(c[1], torch.FloatTensor))
@@ -3711,15 +3706,7 @@ class TestTorch(TestCase):
                 self.assertTrue(w[0].category, 'SourceChangeWarning')
 
     def test_serialization_map_location(self):
-        DATA_URL = 'https://download.pytorch.org/test_data/gpu_tensors.pt'
-        data_dir = os.path.join(os.path.dirname(__file__), 'data')
-        test_file_path = os.path.join(data_dir, 'gpu_tensors.pt')
-        succ = download_file(DATA_URL, test_file_path)
-        if not succ:
-            warnings.warn(
-                "Couldn't download the test file for map_location! "
-                "Tests will be incomplete!", RuntimeWarning)
-            return
+        test_file_path = download_file('https://download.pytorch.org/test_data/gpu_tensors.pt')
 
         def map_location(storage, loc):
             return storage
@@ -4066,6 +4053,13 @@ class TestTorch(TestCase):
         t1 = t.t().contiguous()
         t2 = torch.from_numpy(t.numpy().transpose())
         self.assertEqual(t1, t2)
+
+    def test_inplace_division(self):
+        t = torch.rand(5, 5)
+        id_before = id(t)
+        t /= 2
+        id_after = id(t)
+        self.assertEqual(id_before, id_after)
 
 # Functions to test negative dimension wrapping
 METHOD = 1

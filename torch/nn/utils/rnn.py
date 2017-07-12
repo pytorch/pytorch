@@ -28,7 +28,8 @@ def pack_padded_sequence(input, lengths, batch_first=False):
 
     Input can be of size ``TxBx*`` where T is the length of the longest sequence
     (equal to ``lengths[0]``), B is the batch size, and * is any number of
-    dimensions (including 0). If ``batch_first`` is True ``BxTx*`` inputs are expected.
+    dimensions (including 0). If ``batch_first`` is True ``BxTx*`` inputs are
+    expected.
 
     The sequences should be sorted by length in a decreasing order, i.e.
     ``input[:,0]`` should be the longest sequence, and ``input[:,B-1]`` the
@@ -96,7 +97,8 @@ def pad_packed_sequence(sequence, batch_first=False):
 
     Arguments:
         sequence (PackedSequence): batch to pad
-        batch_first (bool, optional): if True, the output will be in BxTx* format.
+        batch_first (bool, optional): if True, the output will be in BxTx*
+            format.
 
     Returns:
         Tuple of Variable containing the padded sequence, and a list of lengths

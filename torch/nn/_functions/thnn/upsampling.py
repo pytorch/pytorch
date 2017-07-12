@@ -137,10 +137,6 @@ class UpsamplingBilinear2d(_UpsamplingBase):
         )
         return grad_input
 
-    def __setstate__(self, state):
-        self.__dict__.update(state)
-        self.scale_factor = _tuple(self.scale_factor)
-
 
 class UpsamplingNearest3d(_UpsamplingBase):
     def __init__(self, size=None, scale_factor=None):

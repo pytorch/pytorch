@@ -12,14 +12,16 @@ class Linear(Module):
     Args:
         in_features: size of each input sample
         out_features: size of each output sample
-        bias: If set to False, the layer will not learn an additive bias. Default: True
+        bias: If set to False, the layer will not learn an additive bias.
+            Default: True
 
     Shape:
         - Input: :math:`(N, in\_features)`
         - Output: :math:`(N, out\_features)`
 
     Attributes:
-        weight: the learnable weights of the module of shape (out_features x in_features)
+        weight: the learnable weights of the module of shape
+            (out_features x in_features)
         bias:   the learnable bias of the module of shape (out_features)
 
     Examples::
@@ -57,20 +59,23 @@ class Linear(Module):
 
 
 class Bilinear(Module):
-    r"""Applies a bilinear transformation to the incoming data: :math:`y = x_1 * A * x_2 + b`
+    r"""Applies a bilinear transformation to the incoming data:
+    :math:`y = x_1 * A * x_2 + b`
 
     Args:
         in1_features: size of each first input sample
         in2_features: size of each second input sample
         out_features: size of each output sample
-        bias: If set to False, the layer will not learn an additive bias. Default: True
+        bias: If set to False, the layer will not learn an additive bias.
+            Default: True
 
     Shape:
         - Input: :math:`(N, in1\_features)`, :math:`(N, in2\_features)`
         - Output: :math:`(N, out\_features)`
 
     Attributes:
-        weight: the learnable weights of the module of shape (out_features x in1_features x in2_features)
+        weight: the learnable weights of the module of shape
+            (out_features x in1_features x in2_features)
         bias:   the learnable bias of the module of shape (out_features)
 
     Examples::
