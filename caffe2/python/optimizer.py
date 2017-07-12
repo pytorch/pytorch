@@ -17,6 +17,7 @@ _OPTIMIZER_ITERATION_NAME = "optimizer_iteration"
 
 AuxOptimizerParams = namedtuple("AuxOptimizerParams", ["local", "shared"])
 
+
 class Optimizer(object):
     def __init__(self):
         self._aux_params = AuxOptimizerParams(local=[], shared=[])
@@ -208,7 +209,7 @@ class MultiPrecisionSgdOptimizer(SgdOptimizer):
                 if param_info.blob_copy is not None else None
 
         # If we have a straight fp32 parameter, run the base class
-        if param_fp32 == None:
+        if param_fp32 is None:
             return SgdOptimizer._run(self, net, param_init_net, param_info)
 
         grad = param_info.grad
@@ -478,7 +479,7 @@ def get_param_device(param_name, grad, param_to_device=None, default_device=None
     return device
 
 
-def _build(model, optimizer, weights_only=False):
+def _build(model, optimizer, weights_only=False, use_param_info_optim=True):
     param_to_device = _get_param_to_device(model)
 
     # Validate there are no duplicate params
@@ -494,7 +495,10 @@ def _build(model, optimizer, weights_only=False):
         device = get_param_device(param_name, param_info.grad, param_to_device)
 
         with core.DeviceScope(device):
-            optimizer(model.net, model.param_init_net, param_info)
+            if param_info.optimizer and use_param_info_optim:
+                param_info.optimizer(model.net, model.param_init_net, param_info)
+            else:
+                optimizer(model.net, model.param_init_net, param_info)
     return optimizer
 
 
@@ -510,6 +514,7 @@ def add_weight_decay(model, weight_decay):
         model,
         WeightDecayBuilder(weight_decay=weight_decay),
         weights_only=True,
+        use_param_info_optim=False,
     )
 
 
