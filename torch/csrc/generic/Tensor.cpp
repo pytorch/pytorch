@@ -913,8 +913,8 @@ static THIndexTensor* THPTensor_(_calculateLinearIndices)(
 
   // Need to pass broadcast Tensors to API, pass NULL ptr for all empty
   // (i.e. not-advanced indexed) dims
-  std::vector<THCudaLongTensor *> indexers;
-  indexers.reserve(THTensor_(nDimension)(LIBRARY_STATE indexed.get()));
+  std::vector<THCudaLongTensor *> indexers(
+      THTensor_(nDimension)(LIBRARY_STATE indexed.get()), NULL);
 
   // Count the number of advanced indexers, and set the pointers to NULL for
   // those that are not advanced indexing dims
@@ -922,8 +922,6 @@ static THIndexTensor* THPTensor_(_calculateLinearIndices)(
   for (int i = 0; i < THTensor_(nDimension)(LIBRARY_STATE indexed.get()); ++i) {
     if (flattenedBroadcasters.count(i) > 0) {
       ++advancedIndexers;
-    } else {
-      indexers[i] = NULL;
     }
   }
 
