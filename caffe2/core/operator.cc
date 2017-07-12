@@ -12,18 +12,30 @@
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/string_utils.h"
 
+CAFFE2_DEFINE_bool(
+    caffe2_enable_operator_debug,
+    true,
+    "If set, operator's will store debug information");
+
 namespace caffe2 {
 
 OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
     : operator_ws_(ws),
       operator_def_(operator_def),
+      device_option_(
+          operator_def.has_device_option() ? operator_def.device_option()
+                                           : DeviceOption()),
       arg_helper_(operator_def_) {
-  for (const string& input_str : operator_def_.input()) {
+  if (FLAGS_caffe2_enable_operator_debug) {
+    debug_operator_def_ = &operator_def_;
+  }
+
+  for (const string& input_str : operator_def.input()) {
     auto* blob = ws->GetBlob(input_str);
     CAFFE_ENFORCE(
         blob != nullptr,
         "op ",
-        operator_def_.type(),
+        operator_def.type(),
         ": Encountered a non-existing input blob: ",
         input_str);
     inputs_.push_back(blob);
@@ -31,7 +43,7 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
 
   GetOperatorLogger()(operator_def_);
 
-  for (const string& output_str : operator_def_.output()) {
+  for (const string& output_str : operator_def.output()) {
     outputs_.push_back(CHECK_NOTNULL(ws->CreateBlob(output_str)));
   }
 }
@@ -388,12 +400,13 @@ TensorShapes InferBlobShapesAndTypesFromMap(
 }
 
 std::map<string, std::pair<DeviceOption, DeviceOption>> ValidateTensorDevices(
-    OperatorBase& op) {
+    OperatorBase& op,
+    const OperatorDef& op_def) {
   std::map<string, std::pair<DeviceOption, DeviceOption>> mismatches;
-  DeviceOption op_device = op.def().device_option();
+  DeviceOption op_device = op_def.device_option();
 
   // Check from op schema if this op is used for crossing devices
-  auto op_schema = OpSchemaRegistry::Schema(op.def().type());
+  auto op_schema = OpSchemaRegistry::Schema(op_def.type());
   if (op_schema != nullptr) {
     if (op_schema->inputs_can_cross_devices()) {
       return mismatches;
@@ -421,10 +434,10 @@ std::map<string, std::pair<DeviceOption, DeviceOption>> ValidateTensorDevices(
 
   // Check that inputs have same device type as the op
   for (int i = 0; i < op.InputSize(); i++) {
-    Check(op.InputBlob(i), op.def().input(i));
+    Check(op.InputBlob(i), op_def.input(i));
   }
   for (int i = 0; i < op.OutputSize(); i++) {
-    Check(*op.OutputBlob(i), op.def().output(i));
+    Check(*op.OutputBlob(i), op_def.output(i));
   }
   return mismatches;
 }
