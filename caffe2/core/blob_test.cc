@@ -18,6 +18,7 @@
 
 CAFFE2_DEFINE_int64(caffe2_test_big_tensor_size, 100000000, "");
 CAFFE2_DECLARE_int(caffe2_tensor_chunk_size);
+CAFFE2_DECLARE_bool(caffe2_serialize_fp16_as_bytes);
 
 namespace caffe2 {
 
@@ -572,13 +573,17 @@ TEST(TensorTest, float16) {
   const TensorProto& tensor_proto = proto.tensor();
   EXPECT_EQ(
       tensor_proto.data_type(), TypeMetaToDataType(TypeMeta::Make<float16>()));
-  EXPECT_EQ(tensor_proto.byte_data().size(), 2 * kSize);
-  for (int i = 0; i < kSize; ++i) {
-    auto value = tensor->mutable_data<float16>()[i].x;
-    auto low_bits = static_cast<char>(value & 0xff);
-    auto high_bits = static_cast<char>(value >> 8);
-    EXPECT_EQ(tensor_proto.byte_data()[2 * i], low_bits);
-    EXPECT_EQ(tensor_proto.byte_data()[2 * i + 1], high_bits);
+  if (FLAGS_caffe2_serialize_fp16_as_bytes) {
+    EXPECT_EQ(tensor_proto.byte_data().size(), 2 * kSize);
+    for (int i = 0; i < kSize; ++i) {
+      auto value = tensor->mutable_data<float16>()[i].x;
+      auto low_bits = static_cast<char>(value & 0xff);
+      auto high_bits = static_cast<char>(value >> 8);
+      EXPECT_EQ(tensor_proto.byte_data()[2 * i], low_bits);
+      EXPECT_EQ(tensor_proto.byte_data()[2 * i + 1], high_bits);
+    }
+  } else {
+    EXPECT_EQ(tensor_proto.int32_data().size(), kSize);
   }
   Blob new_blob;
   EXPECT_NO_THROW(new_blob.Deserialize(serialized));
