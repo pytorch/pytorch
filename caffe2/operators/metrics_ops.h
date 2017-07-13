@@ -59,8 +59,13 @@ class QPSMetricOp final : public Operator<CPUContext> {
         *OperatorBase::Input<std::unique_ptr<QPSMetricState>>(0);
     auto examples = Input(1).dim(0);
     // All changes to metrics should happen under critical section.
-    {
+    if (examples > 0) {
       std::lock_guard<std::mutex> guard(metricsBlob.mutex);
+      if (metricsBlob.lifetimeExamples == 0) {
+        // start counting with the first real example seen
+        metricsBlob.lifetimeTimer.Start();
+        metricsBlob.windowTimer.Start();
+      }
       metricsBlob.windowExamples += examples;
       metricsBlob.lifetimeExamples += examples;
     }
