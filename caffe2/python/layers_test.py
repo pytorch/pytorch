@@ -416,8 +416,8 @@ class TestLayers(LayersTestCase):
 
     def testMapToRange(self):
         input_record = self.new_record(schema.Scalar(np.int32))
-        map_to_range_output = self.model.MapToRange(input_record,
-                                                    max_index=100)
+        indices_blob = self.model.MapToRange(input_record,
+                                             max_index=100).indices
         self.model.output_schema = schema.Struct()
 
         train_init_net, train_net = self.get_training_nets()
@@ -428,7 +428,7 @@ class TestLayers(LayersTestCase):
         )
         workspace.RunNetOnce(train_init_net)
         workspace.RunNetOnce(train_net)
-        indices = workspace.FetchBlob(map_to_range_output())
+        indices = workspace.FetchBlob(indices_blob())
         np.testing.assert_array_equal(
             np.array([1, 2, 3, 4, 5, 6, 2, 6], dtype=np.int32),
             indices
@@ -439,7 +439,7 @@ class TestLayers(LayersTestCase):
             [np.array([10, 3, 23, 35, 60, 15, 10, 15], dtype=np.int32)]
         )
         workspace.RunNetOnce(train_net)
-        indices = workspace.FetchBlob(map_to_range_output())
+        indices = workspace.FetchBlob(indices_blob())
         np.testing.assert_array_equal(
             np.array([1, 2, 7, 8, 9, 5, 1, 5], dtype=np.int32),
             indices
@@ -452,7 +452,7 @@ class TestLayers(LayersTestCase):
             [np.array([10, 3, 23, 35, 60, 15, 200], dtype=np.int32)]
         )
         workspace.RunNetOnce(eval_net)
-        indices = workspace.FetchBlob(map_to_range_output())
+        indices = workspace.FetchBlob(indices_blob())
         np.testing.assert_array_equal(
             np.array([1, 2, 7, 8, 9, 5, 0], dtype=np.int32),
             indices
@@ -463,7 +463,7 @@ class TestLayers(LayersTestCase):
             [np.array([10, 3, 23, 15, 101, 115], dtype=np.int32)]
         )
         workspace.RunNetOnce(eval_net)
-        indices = workspace.FetchBlob(map_to_range_output())
+        indices = workspace.FetchBlob(indices_blob())
         np.testing.assert_array_equal(
             np.array([1, 2, 7, 5, 0, 0], dtype=np.int32),
             indices
@@ -476,7 +476,7 @@ class TestLayers(LayersTestCase):
             [np.array([3, 3, 20, 23, 151, 35, 60, 15, 200], dtype=np.int32)]
         )
         workspace.RunNetOnce(predict_net)
-        indices = workspace.FetchBlob(map_to_range_output())
+        indices = workspace.FetchBlob(indices_blob())
         np.testing.assert_array_equal(
             np.array([2, 2, 3, 7, 0, 8, 9, 5, 0], dtype=np.int32),
             indices

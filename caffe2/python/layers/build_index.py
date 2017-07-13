@@ -43,8 +43,13 @@ class MapToRange(ModelLayer):
             )
         )
 
-        self.output_schema = schema.Scalar(
-            np.int64, model.net.NextScopedBlob(name + "_indices")
+        self.output_schema = schema.Struct(
+            ('indices', schema.Scalar(
+                np.int64, model.net.NextScopedBlob(name + "_indices")
+            )),
+            ('handler', schema.Scalar(
+                np.void, self.handler
+            )),
         )
 
     def add_train_ops(self, net):
@@ -59,7 +64,7 @@ class MapToRange(ModelLayer):
 
         # Load keys into indices
         indices = net.IndexGet([self.handler, keys],
-                                self.output_schema())
+                                self.output_schema.indices())
 
         net.StopGradient(indices, indices)
 
