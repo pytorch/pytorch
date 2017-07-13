@@ -1252,7 +1252,7 @@ Returns:
     (Tensor, Tensor): tuple containing
 
         - **e** (*Tensor*): the right eigenvalues of ``a``
-        - **v** (*Tensor*): the eigenvectors of ``a`` if ``eigenvectors`
+        - **v** (*Tensor*): the eigenvectors of ``a`` if ``eigenvectors``
                             is ``True``; otherwise an empty tensor
 """)
 
@@ -2200,9 +2200,7 @@ Example::
     0.4729
 
 
-.. function::
-
-    max(input, dim, keepdim=False, max=None, max_indices=None) -> (Tensor, LongTensor)
+.. function:: max(input, dim, keepdim=False, max=None, max_indices=None) -> (Tensor, LongTensor)
 
 Returns the maximum value of each row of the :attr:`input` Tensor in the given
 dimension :attr:`dim`. The second return value is the index location of each

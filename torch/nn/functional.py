@@ -876,7 +876,7 @@ def grid_sample(input, grid, mode='bilinear'):
 
 def affine_grid(theta, size):
     """Generates a 2d flow field, given a batch of affine matrices :attr:`theta`
-    Generally used in conjunction with :function:`grid_sample` to
+    Generally used in conjunction with :func:`grid_sample` to
     implement Spatial Transformer Networks.
 
     Args:
