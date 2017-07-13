@@ -33,7 +33,7 @@ void* NumpyArrayAllocator::realloc(void* ptr, ptrdiff_t size) {
   PyArrayObject *array_ptr = (PyArrayObject*)object.get();
   if (array_ptr && ptr == PyArray_DATA(array_ptr)) {
     void* newPtr = this->malloc(size);
-    memcpy(newPtr, ptr, std::min((long) size, PyArray_NBYTES(array_ptr)));
+    memcpy(newPtr, ptr, std::min((size_t) size, (size_t) PyArray_NBYTES(array_ptr)));
     // Whee! We're done!
     object = nullptr;
     return newPtr;
