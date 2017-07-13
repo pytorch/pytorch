@@ -198,11 +198,13 @@ def gradgradcheck(func, inputs, grad_outputs, eps=1e-6, atol=1e-5, rtol=1e-3):
     Returns:
         True if all differences satisfy allclose condition
     """
-    def new_func(*inputs):
-        outputs = func(*inputs)
+    def new_func(*input_args):
+        input_args = input_args[:-len(grad_outputs)]
+        outputs = func(*input_args)
         outputs = _as_tuple(outputs)
-        inputs = tuple(x for x in inputs if isinstance(x, Variable) if x.requires_grad)
-        grad_inputs = torch.autograd.grad(outputs, inputs, grad_outputs, only_inputs=True)
+        input_args = tuple(x for x in input_args if isinstance(x, Variable) if x.requires_grad)
+        # Ensure derivative wrt to grad_outputs are checked via only_inputs=False
+        grad_inputs = torch.autograd.grad(outputs, input_args, grad_outputs, only_inputs=False)
         return grad_inputs
 
-    return gradcheck(new_func, inputs, eps, atol, rtol)
+    return gradcheck(new_func, inputs + grad_outputs, eps, atol, rtol)
