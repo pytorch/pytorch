@@ -110,18 +110,13 @@ class Symeig(Function):
     def forward(ctx, input, eigenvectors=False, upper=True):
         ctx.eigenvectors = eigenvectors
         ctx.upper = upper
-        w, v = torch.symeig(input, eigenvectors=ctx.eigenvectors, upper=ctx.upper)
-        ctx.save_for_backward(input, w, v)
-        return w, v
+        e, V = torch.symeig(input, eigenvectors=ctx.eigenvectors, upper=ctx.upper)
+        ctx.save_for_backward(input, e, V)
+        return e, V
 
     @staticmethod
-    def backward(ctx, grad_w, grad_v):
-        x, w, v, = ctx.saved_variables
-
-        # gives an error if I don't do this..
-        x = x.data
-        w = w.data
-        v = v.data
+    def backward(ctx, grad_e, grad_V):
+        x, e, V, = ctx.saved_variables
 
         N = x.size(0)
 
@@ -133,10 +128,10 @@ class Symeig(Function):
             tri1 = lambda a: torch.triu(a, 1)
 
         def G(n):
-            return sum([v[:, m] * grad_v.t()[n].matmul(v[:, m]) / (w[n] - w[m])
+            return sum([V[:, m] * grad_V.t()[n].matmul(V[:, m]) / (e[n] - e[m])
                        for m in range(N) if m != n])
 
-        g = sum([torch.ger(v[:, n], v[:, n] * grad_w[n] + G(n))
+        g = sum([torch.ger(V[:, n], V[:, n] * grad_e[n] + G(n))
                  for n in range(N)])
 
         out = tri0(g) + tri1(g).t()
