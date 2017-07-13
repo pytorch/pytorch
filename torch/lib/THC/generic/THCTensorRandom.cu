@@ -155,7 +155,7 @@ THC_API void THCTensor_(multinomial)(struct THCState *state,
   int requiredShared = (numCategories < maxThreads ? numCategories : maxThreads)
                                 * (sizeof(real) * sizeof(accreal));
                                 
-  if (n_sample == 1 && maxShared > requiredShared) {
+  if (n_sample == 1 && maxShared >= requiredShared) {
     // Optimized allocation-free implementation
     // To exploit greater parallelism for the sampling, generate the
     // Uniform random samples in a separate kernel launch, into
