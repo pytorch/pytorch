@@ -34,7 +34,8 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
           THTensor *output,
           bool sizeAverage,
           THTensor *weights,
-          THTensor *total_weight)
+          THTensor *total_weight,
+          long ignore_index)
 {
   INITIAL_CHECK;
 
@@ -58,6 +59,7 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
   for (int b = 0; b < batch_size; b++) {
     for (int elem = 0; elem < map_size; elem++) {
       int cur_target = target_data[b * map_size + elem] - TH_INDEX_BASE;
+      if (cur_target == ignore_index) continue;
       THAssert(cur_target >= 0 && cur_target < n_classes);
 
       real cur_weight = weights ? weights_data[cur_target] : 1.0f;
@@ -84,7 +86,8 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
           THTensor *gradInput,
           bool sizeAverage,
           THTensor *weights,
-          THTensor *total_weight)
+          THTensor *total_weight,
+          long ignore_index)
 {
   INITIAL_CHECK;
   THArgCheck(THTensor_(isContiguous)(gradInput), 4,
@@ -114,6 +117,7 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
     int elem;
     for (elem = 0; elem < map_size; elem++) {
       int cur_target = target_data[b * map_size + elem] - TH_INDEX_BASE;
+      if (cur_target == ignore_index) continue;
       THAssert(cur_target >= 0 && cur_target < n_classes);
 
       gradInput_data[b * sample_size + cur_target * map_size + elem] =

@@ -553,7 +553,8 @@ TH_API void THNN_(SpatialClassNLLCriterion_updateOutput)(
                   THCTensor *output,
                   bool sizeAverage,
                   THCTensor *weights,       // [OPTIONAL]
-                  THCTensor *total_weight);
+                  THCTensor *total_weight,
+                  long ignore_index);
 
 TH_API void THNN_(SpatialClassNLLCriterion_updateGradInput)(
                   THCState *state,
@@ -562,7 +563,8 @@ TH_API void THNN_(SpatialClassNLLCriterion_updateGradInput)(
                   THCTensor *gradInput,
                   bool sizeAverage,
                   THCTensor *weights,       // [OPTIONAL]
-                  THCTensor *total_weight);
+                  THCTensor *total_weight,
+                  long ignore_index);
 
 TH_API void THNN_(SpatialConvolutionLocal_updateOutput)(
                   THCState *state,

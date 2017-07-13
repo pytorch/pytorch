@@ -118,8 +118,9 @@ class NLLLoss(_WeightedLoss):
                           self.ignore_index)
 
 
-class NLLLoss2d(_WeightedLoss):
-    r"""This is negative log likehood loss, but for image inputs. It computes NLL loss per-pixel.
+class NLLLoss2d(NLLLoss):
+    r"""This is negative log likehood loss, but for image inputs. It computes
+    NLL loss per-pixel.
 
     Args:
         weight (Tensor, optional): a manual rescaling weight given to each class.
