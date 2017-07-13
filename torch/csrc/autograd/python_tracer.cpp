@@ -24,9 +24,9 @@ PyObject * THPTracer_enter(PyObject *_unused, PyObject *args)
     THPUtils_assert(THPVariable_Check(input_obj), "element %d of input "
         "tuple is not a Variable", i);
 
-    auto local = GlobalTracingState->makeValue();
-    ((THPVariable*)input_obj)->cdata->trace_value = local;
-    GlobalTracingState->graph->inputs.push_back(local);
+    auto local = GlobalTracingState->makeValue(nullptr,0);
+    ((THPVariable*)input_obj)->cdata->trace_value = ValueRef(local.get());
+    GlobalTracingState->graph->inputs.push_back(std::move(local));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
