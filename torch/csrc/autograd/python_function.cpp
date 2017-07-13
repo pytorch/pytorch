@@ -80,7 +80,7 @@ auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
   for (size_t i = 0; i != inputs.size(); ++i) {
     PyObject* input;
     if (inputs[i]) {
-      input = createPyObject(*inputs[i]->data);
+      input = createPyObject(inputs[i]->data);
       if (!input) throw python_error();
     } else {
       input = Py_None;
@@ -104,7 +104,7 @@ auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
         msg += "')'";
         throw std::runtime_error(msg);
       }
-      tensor_results[i] = createTensor(obj);
+      tensor_results[i] = createTensorAT(obj);
     }
   }
 
@@ -453,10 +453,10 @@ static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
     if (!output_var) throw python_error();
 
     if (self->output_info) {
-      auto& output_tensor = *output_var->cdata->data;
+      auto& output_tensor = output_var->cdata->data;
       self->output_info->emplace_back(
         (PyObject *)getPyTypeObject(output_tensor),
-        output_tensor.getDevice(),
+        output_tensor.type().isCuda() ? output_tensor.get_device() : -1,
         output_tensor.sizes()
       );
     }
@@ -877,7 +877,7 @@ static PyObject *unpack_saved_variables(
 PyObject *THPFunction_saved_tensors(THPFunction *self, void *_unused)
 {
   return unpack_saved_variables(self, [](std::shared_ptr<Variable> var) {
-    return createPyObject(*var->data);
+    return createPyObject(var->data);
   });
 }
 

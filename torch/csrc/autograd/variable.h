@@ -4,7 +4,7 @@
 #include <mutex>
 #include <memory>
 #include <functional>
-#include <THPP/THPP.h>
+#include <ATen/ATen.h>
 
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/variable_version.h"
@@ -23,7 +23,7 @@ struct Variable : std::enable_shared_from_this<Variable> {
       , expected_version(-1) {}
 
     SavedVariable(const Variable& variable, Function* saved_for)
-      : data(variable.data->clone_shallow())
+      : data(variable.data)
       , has_grad_fn(variable.grad_fn != nullptr)
       , grad_accumulator(variable.grad_accumulator)
       , version(variable.version_counter->new_saved_ref())
@@ -35,7 +35,7 @@ struct Variable : std::enable_shared_from_this<Variable> {
         }
       }
 
-    std::unique_ptr<thpp::Tensor> data;
+    at::Tensor data;
     // The gradient function associated with this node. If has_grad_fn
     // is false, then this is a leaf node. Note that the grad_fn is not saved if
     // it would create a circular reference. In that case, the grad_fn must be
@@ -50,19 +50,19 @@ struct Variable : std::enable_shared_from_this<Variable> {
 
     std::shared_ptr<Variable> unpack(std::shared_ptr<Function> saved_for=nullptr);
 
-    std::unique_ptr<thpp::Tensor> unpack_data(std::shared_ptr<Function> saved_for=nullptr) {
+    at::Tensor unpack_data(std::shared_ptr<Function> saved_for=nullptr) {
       auto var = unpack(saved_for);
-      return var ? std::move(var->data) : nullptr;
+      return var ? var->data : at::Tensor();
     }
   };
 
   // WARNING: this registers the Variable as a new output
   Variable(
-      std::unique_ptr<thpp::Tensor> data,
+      at::Tensor data,
       std::shared_ptr<Function> grad_fn);
 
   Variable(
-      std::unique_ptr<thpp::Tensor> data,
+      at::Tensor data,
       bool requires_grad,
       bool is_volatile);
 
@@ -76,14 +76,15 @@ struct Variable : std::enable_shared_from_this<Variable> {
     return var ? var->save(saved_for) : SavedVariable();
   }
 
-  static inline std::shared_ptr<Variable> of(std::unique_ptr<thpp::Tensor> data, bool is_volatile=false) {
-    if (!data) {
+  // TODO: should be at::Tensor&& if we are taking ownership?
+  static inline std::shared_ptr<Variable> of(at::Tensor data, bool is_volatile=false) {
+    if (!data.defined()) {
       return std::shared_ptr<Variable>();
     }
-    return std::make_shared<Variable>(std::move(data), false, is_volatile);
+    return std::make_shared<Variable>(data, false, is_volatile);
   }
 
-  std::unique_ptr<thpp::Tensor> data;
+  at::Tensor data;
   std::shared_ptr<Function> grad_fn;
   std::shared_ptr<Variable> grad;
   std::unique_ptr<VariableVersion> version_counter;
