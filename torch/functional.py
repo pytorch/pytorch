@@ -58,7 +58,7 @@ def stack(sequence, dim=0, out=None):
     if len(sequence) == 0:
         raise ValueError("stack expects a non-empty sequence of tensors")
     if dim < 0:
-        dim += sequence[0].dim()
+        dim += sequence[0].dim() + 1
     inputs = [t.unsqueeze(dim) for t in sequence]
     if out is None:
         return torch.cat(inputs, dim)

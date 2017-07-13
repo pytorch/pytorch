@@ -1642,9 +1642,12 @@ class TestTorch(TestCase):
         x = torch.rand(2, 3, 4)
         y = torch.rand(2, 3, 4)
         z = torch.rand(2, 3, 4)
-        for dim in range(4):
+        for dim in range(-3, 4):
             res = torch.stack((x, y, z), dim)
-            expected_size = x.size()[:dim] + (3,) + x.size()[dim:]
+            if dim < 0:
+                expected_size = x.size()[:dim+4] + (3,) + x.size()[dim+4:]
+            else:
+                expected_size = x.size()[:dim] + (3,) + x.size()[dim:]
             self.assertEqual(res.size(), expected_size)
             self.assertEqual(res.select(dim, 0), x, 0)
             self.assertEqual(res.select(dim, 1), y, 0)
@@ -4130,7 +4133,6 @@ neg_dim_tests = [
     ('index_select', (10, 10), lambda: [DIM_ARG, idx_tensor((10,), 10)], [METHOD, FUNCTIONAL]),
     ('split', (10, 20), lambda: [5, DIM_ARG], [METHOD, FUNCTIONAL]),
     ('squeeze', (10, 1, 20, 1), lambda: [DIM_ARG], [METHOD, INPLACE_METHOD, FUNCTIONAL]),
-    ('stack', [(2, 3, 4), (2, 3, 4)], lambda: [DIM_ARG], [FUNCTIONAL]),
     ('unbind', (2, 3, 4), lambda: [DIM_ARG], [FUNCTIONAL]),
     ('unsqueeze', (10, 20), lambda: [DIM_ARG], [METHOD, INPLACE_METHOD, FUNCTIONAL], 1),
     ('cumprod', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
