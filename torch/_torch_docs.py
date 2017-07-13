@@ -2200,7 +2200,7 @@ Example::
     0.4729
 
 
-.. function:: max(input, dim, keepdim=False, max=None, max_indices=None) -> (Tensor, LongTensor)
+.. function:: max(input, dim, keepdim=False, out=None) -> (Tensor, LongTensor)
 
 Returns the maximum value of each row of the :attr:`input` Tensor in the given
 dimension :attr:`dim`. The second return value is the index location of each
@@ -2215,10 +2215,7 @@ Args:
     input (Tensor): the input `Tensor`
     dim (int): the dimension to reduce
     keepdim (bool): whether the output Tensors have :attr:`dim` retained or not
-    max (Tensor, optional): the result Tensor with maximum values
-           in dimension :attr:`dim`
-    max_indices (LongTensor, optional): the result Tensor with the index
-           locations of the maximum values in dimension :attr:`dim`
+    out (tuple, optional): the result tuple of two output Tensors (max, max_indices)
 
 Example::
 
@@ -2459,7 +2456,7 @@ Example::
     -0.22663167119026184
 
 
-.. function:: min(input, dim, keepdim=False, min=None, min_indices=None) -> (Tensor, LongTensor)
+.. function:: min(input, dim, keepdim=False, out=None) -> (Tensor, LongTensor)
 
 Returns the minimum value of each row of the :attr:`input` Tensor in the given
 dimension :attr:`dim`. The second return value is the index location of each
@@ -2474,10 +2471,7 @@ Args:
     input (Tensor): the input `Tensor`
     dim (int): the dimension to reduce
     keepdim (bool): whether the output tensors have :attr:`dim` retained or not
-    min (Tensor, optional): the result Tensor with minimum values
-           in dimension :attr:`dim`
-    min_indices (LongTensor, optional): the result Tensor with the index
-           locations of the minimum values in dimension :attr:`dim`
+    out (tuple, optional): the result tuple of two output Tensors (min, min_indices)
 
 Example::
 
