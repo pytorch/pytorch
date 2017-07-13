@@ -87,6 +87,72 @@ class TestAdam(OptimizerTestBase, TestCase):
             workspace.FetchBlob(param)
 
 
+class TestMultiOptimizers(TestCase):
+    def test_multiple_optimizers(self):
+        from caffe2.python import brew, core, optimizer
+        from caffe2.python.model_helper import ModelHelper
+
+        model = ModelHelper(name="test")
+        fc1 = brew.fc(model, 'data', 'fc1', 100, 50)
+        fc2 = brew.fc(model, fc1, 'fc2', 50, 25)
+        pred = brew.fc(model, fc2, 'fc3', 25, 10)
+        (softmax, loss) = model.SoftmaxWithLoss(
+            [pred, 'label'],
+            ['softmax', 'loss'],
+        )
+        model.AddGradientOperators([loss])
+
+        param_to_device = optimizer._get_param_to_device(model)
+
+        def infer_blob_device(blob_name):
+            return optimizer.get_param_device(
+                blob_name, "{}_grad".format(blob_name), param_to_device
+            )
+
+        sgd_1 = optimizer.SgdOptimizer(base_learning_rate=0.1)
+        sgd_2 = optimizer.SgdOptimizer(base_learning_rate=0.2)
+        adagrad = optimizer.AdagradOptimizer()
+
+        # Check same optimizer share the same learning rate.
+        with core.DeviceScope(infer_blob_device("fc1_w")):
+            sgd_1(model.net, model.param_init_net, "fc1_w", "fc1_w_grad")
+        with core.DeviceScope(infer_blob_device("fc1_b")):
+            sgd_1(model.net, model.param_init_net, "fc1_b", "fc1_b_grad")
+        fc1_lr_blobs = []
+        for op in model.net.Proto().op:
+            if op.type == 'WeightedSum' and op.input[0] == 'fc1_w' or \
+                    op.input[0] == 'fc1_b':
+                        fc1_lr_blobs.append(op.input[3])
+        self.assertEqual(fc1_lr_blobs[0], fc1_lr_blobs[1])
+
+        # Check different instance of the same optimizer has a different lr.
+        with core.DeviceScope(infer_blob_device("fc2_w")):
+            sgd_2(model.net, model.param_init_net, "fc2_w", "fc2_w_grad")
+        with core.DeviceScope(infer_blob_device("fc2_b")):
+            sgd_2(model.net, model.param_init_net, "fc2_b", "fc2_b_grad")
+        fc2_lr_blobs = []
+        for op in model.net.Proto().op:
+            if op.type == 'WeightedSum' and op.input[0] == 'fc2_w' or \
+                    op.input[0] == 'fc2_b':
+                        self.assertTrue(op.input[3] not in fc1_lr_blobs)
+                        fc2_lr_blobs.append(op.input[3])
+        self.assertEqual(fc2_lr_blobs[0], fc2_lr_blobs[1])
+
+        # Check different optimizer type case
+        with core.DeviceScope(infer_blob_device("fc3_w")):
+            adagrad(model.net, model.param_init_net, "fc3_w", "fc3_w_grad")
+        with core.DeviceScope(infer_blob_device("fc3_b")):
+            adagrad(model.net, model.param_init_net, "fc3_b", "fc3_b_grad")
+        fc3_lr_blobs = []
+        for op in model.net.Proto().op:
+            if op.type == 'Adagrad' and op.input[0] == 'fc3_w' or \
+                    op.input[0] == 'fc3_b':
+                        self.assertTrue(op.input[3] not in fc2_lr_blobs)
+                        self.assertTrue(op.input[3] not in fc1_lr_blobs)
+                        fc3_lr_blobs.append(op.input[3])
+        self.assertEqual(fc3_lr_blobs[0], fc3_lr_blobs[1])
+
+
 class TestWeightDecay(TestCase):
 
     def test_weight_decay(self):
