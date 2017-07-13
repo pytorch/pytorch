@@ -352,13 +352,21 @@ class VideoDecoder {
   void decodeFile(
       const std::string filename,
       const Params& params,
-      std::vector<std::unique_ptr<DecodedFrame>>& sampledFrames);
+      std::vector<std::unique_ptr<DecodedFrame>>& sampledFrames,
+      int maxFrames = 0, /* max frames we want decoded. 0 implies decode all */
+      bool decodeFromStart = true /* decode from start or randomly seek into
+                                     intermediate frame ? */
+      );
 
   void decodeMemory(
       const char* buffer,
       const int size,
       const Params& params,
-      std::vector<std::unique_ptr<DecodedFrame>>& sampledFrames);
+      std::vector<std::unique_ptr<DecodedFrame>>& sampledFrames,
+      int maxFrames = 0, /* max frames we want decoded. 0 implies decode all */
+      bool decodeFromStart = true /* decode from start or randomly seek into
+                                     intermediate frame ? */
+      );
 
  private:
   std::string ffmpegErrorStr(int result);
@@ -367,7 +375,11 @@ class VideoDecoder {
       const std::string& videoName,
       VideoIOContext& ioctx,
       const Params& params,
-      std::vector<std::unique_ptr<DecodedFrame>>& sampledFrames);
+      std::vector<std::unique_ptr<DecodedFrame>>& sampledFrames,
+      int maxFrames = 0, /* max frames we want decoded. 0 implies decode all */
+      bool decodeFromStart = true /* decode from start or randomly seek into
+                                     intermediate frame ? */
+      );
 };
 }
 

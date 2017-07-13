@@ -297,22 +297,24 @@ void VideoInputOp<Context>::DecodeAndTransform(
   // Decode the video from memory or read from a local file
   CHECK(GetClipAndLabelFromDBValue(value, buffer, label_data, randgen));
 
-  ClipTransform(
-      buffer,
-      3,
-      length_,
-      scale_h_,
-      scale_w_,
-      crop_size,
-      mirror,
-      mean,
-      std,
-      clip_data,
-      randgen,
-      mirror_this_clip,
-      is_test_);
+  if (buffer) {
+    ClipTransform(
+        buffer,
+        3,
+        length_,
+        scale_h_,
+        scale_w_,
+        crop_size,
+        mirror,
+        mean,
+        std,
+        clip_data,
+        randgen,
+        mirror_this_clip,
+        is_test_);
 
-  delete[] buffer;
+    delete[] buffer;
+  }
 }
 
 template <class Context>

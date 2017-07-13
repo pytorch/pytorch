@@ -447,7 +447,19 @@ bool DecodeClipFromMemoryBuffer(
   params.outputWidth_ = width ? width : -1;
   params.maximumOutputFrames_ = MAX_DECODING_FRAMES;
 
-  decoder.decodeMemory(video_buffer, size, params, sampledFrames);
+  bool isTemporalJitter = (start_frm < 0);
+  decoder.decodeMemory(
+      video_buffer,
+      size,
+      params,
+      sampledFrames,
+      length * sampling_rate,
+      !isTemporalJitter);
+
+  if (sampledFrames.size() < length * sampling_rate) {
+    /* selective decoding failed. Decode all frames. */
+    decoder.decodeMemory(video_buffer, size, params, sampledFrames);
+  }
 
   buffer = nullptr;
   int offset = 0;
@@ -463,6 +475,13 @@ bool DecodeClipFromMemoryBuffer(
     } else {
       use_start_frm = 0;
     }
+  }
+
+  if (sampledFrames.size() < length * sampling_rate) {
+    LOG(ERROR)
+        << "The video seems faulty and we could not decode suffient samples";
+    buffer = nullptr;
+    return true;
   }
 
   CAFFE_ENFORCE_LT(

@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <mutex>
+#include <random>
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -30,7 +31,9 @@ void VideoDecoder::decodeLoop(
     const string& videoName,
     VideoIOContext& ioctx,
     const Params& params,
-    std::vector<std::unique_ptr<DecodedFrame>>& sampledFrames) {
+    std::vector<std::unique_ptr<DecodedFrame>>& sampledFrames,
+    int maxFrames,
+    bool decodeFromStart) {
   AVPixelFormat pixFormat = params.pixelFormat_;
 
   AVFormatContext* inputContext = avformat_alloc_context();
@@ -40,6 +43,9 @@ void VideoDecoder::decodeLoop(
   AVPacket packet;
   av_init_packet(&packet); // init packet
   SwsContext* scaleContext_ = nullptr;
+  /* if a valid value is given for maxFrames, then decode only limited frames.
+   * Else decode all the frames */
+  bool mustDecodeAll = (maxFrames <= 0);
   try {
     inputContext->pb = ioctx.get_avio();
     inputContext->flags |= AVFMT_FLAG_CUSTOM_IO;
@@ -53,6 +59,7 @@ void VideoDecoder::decodeLoop(
     int len = ioctx.read(probe.get(), probeSz - AVPROBE_PADDING_SIZE);
     if (len < probeSz - AVPROBE_PADDING_SIZE) {
       LOG(ERROR) << "Insufficient data to determine video format";
+      return;
     }
 
     // seek back to start of stream
@@ -68,12 +75,14 @@ void VideoDecoder::decodeLoop(
     ret = avformat_open_input(&inputContext, "", nullptr, nullptr);
     if (ret < 0) {
       LOG(ERROR) << "Unable to open stream " << ffmpegErrorStr(ret);
+      return;
     }
 
     ret = avformat_find_stream_info(inputContext, nullptr);
     if (ret < 0) {
       LOG(ERROR) << "Unable to find stream info in " << videoName << " "
                  << ffmpegErrorStr(ret);
+      return;
     }
 
     // Decode the first video stream
@@ -92,6 +101,7 @@ void VideoDecoder::decodeLoop(
     if (videoStream_ == nullptr) {
       LOG(ERROR) << "Unable to find video stream in " << videoName << " "
                  << ffmpegErrorStr(ret);
+      return;
     }
 
     // Initialize codec
@@ -104,6 +114,7 @@ void VideoDecoder::decodeLoop(
     if (ret < 0) {
       LOG(ERROR) << "Cannot open video codec : "
                  << videoCodecContext_->codec->name;
+      return;
     }
 
     // Calcuate if we need to rescale the frames
@@ -166,6 +177,7 @@ void VideoDecoder::decodeLoop(
 
     if (params.intervals_.size() == 0) {
       LOG(ERROR) << "Empty sampling intervals.";
+      return;
     }
 
     std::vector<SampleInterval>::const_iterator itvlIter =
@@ -200,14 +212,57 @@ void VideoDecoder::decodeLoop(
     // frame index of outputed frames
     int outputFrameIndex = -1;
 
+    /* identify the starting point from where we must start decoding */
+    std::mt19937 meta_randgen(time(nullptr));
+    int random_ts = -1;
+    if (!decodeFromStart) {
+      if (videoStream_->duration > 0 && videoStream_->nb_frames > 0) {
+        /* we have a valid duration and nb_frames. We can safely
+         * detect an intermediate timestamp to start decoding from. */
+
+        /* estimate the average duration for the maxFrames # of frames */
+        double maxFramesDuration =
+            (videoStream_->duration * maxFrames) / (videoStream_->nb_frames);
+        int start_ts = 0;
+        int end_ts = videoStream_->duration - (int)maxFramesDuration;
+        end_ts = end_ts > 0 ? end_ts : 0;
+        /* pick a random timestamp between start and end timestamps.
+         * End timestamp is selected such that you have sufficient frames
+         * from random timestamp to satisfy the requirement of maxFrames */
+        random_ts =
+            std::uniform_int_distribution<>(start_ts, end_ts)(meta_randgen);
+        /* seek a frame at random_ts */
+        ret = av_seek_frame(
+            inputContext, videoStreamIndex_, random_ts, AVSEEK_FLAG_BACKWARD);
+        if (ret < 0) {
+          LOG(ERROR) << "Unable to decode from a random start point";
+          /* fall back to default decoding of all frames from start */
+          av_seek_frame(
+              inputContext, videoStreamIndex_, 0, AVSEEK_FLAG_BACKWARD);
+          mustDecodeAll = true;
+        }
+      } else {
+        /* we do not have  the necessary metadata to selectively decode frames.
+         * Decode all frames as we do in the default case */
+        LOG(INFO) << " Decoding all frames as we do not have suffiecient"
+                     " metadata for selective decoding.";
+        mustDecodeAll = true;
+      }
+    }
+
     int gotPicture = 0;
     int eof = 0;
+    int selectiveDecodedFrames = 0;
 
     // There is a delay between reading packets from the
     // transport and getting decoded frames back.
     // Therefore, after EOF, continue going while
     // the decoder is still giving us frames.
-    while (!eof || gotPicture) {
+    while ((!eof || gotPicture) &&
+           /* either you must decode all frames or decode upto maxFrames
+            * based on status of the mustDecodeAll flag */
+           (mustDecodeAll ||
+            ((!mustDecodeAll) && (selectiveDecodedFrames < maxFrames)))) {
       try {
         if (!eof) {
           ret = av_read_frame(inputContext, &packet);
@@ -245,112 +300,121 @@ void VideoDecoder::decodeLoop(
 
           frameIndex++;
 
-          timestamp = av_frame_get_best_effort_timestamp(videoStreamFrame_) *
-              av_q2d(videoStream_->time_base);
+          double frame_ts =
+              av_frame_get_best_effort_timestamp(videoStreamFrame_);
+          timestamp = frame_ts * av_q2d(videoStream_->time_base);
 
-          // if reaching the next interval, update the current fps
-          // and reset lastFrameTimestamp so the current frame could be sampled
-          // (unless fps == SpecialFps::SAMPLE_NO_FRAME)
-          if (itvlIter != params.intervals_.end() &&
-              timestamp >= itvlIter->timestamp) {
-            lastFrameTimestamp = -1.0;
-            currFps = itvlIter->fps;
-            prevTimestamp = itvlIter->timestamp;
-            itvlIter++;
+          if ((frame_ts >= random_ts && !mustDecodeAll) || mustDecodeAll) {
+            /* process current frame if:
+             * 1) We are not doing selective decoding and mustDecodeAll
+             *    OR
+             * 2) We are doing selective decoding and current frame
+             *   timestamp is >= random_ts from where we start selective
+             *   decoding*/
+            // if reaching the next interval, update the current fps
+            // and reset lastFrameTimestamp so the current frame could be
+            // sampled (unless fps == SpecialFps::SAMPLE_NO_FRAME)
             if (itvlIter != params.intervals_.end() &&
-                prevTimestamp >= itvlIter->timestamp) {
-              LOG(ERROR)
-                  << "Sampling interval timestamps must be strictly ascending.";
+                timestamp >= itvlIter->timestamp) {
+              lastFrameTimestamp = -1.0;
+              currFps = itvlIter->fps;
+              prevTimestamp = itvlIter->timestamp;
+              itvlIter++;
+              if (itvlIter != params.intervals_.end() &&
+                  prevTimestamp >= itvlIter->timestamp) {
+                LOG(ERROR)
+                    << "Sampling interval timestamp must be strictly ascending";
+              }
             }
-          }
 
-          // keyFrame will bypass all checks on fps sampling settings
-          bool keyFrame = params.keyFrames_ && videoStreamFrame_->key_frame;
-          if (!keyFrame) {
-            // if fps == SpecialFps::SAMPLE_NO_FRAME (0), don't sample at all
-            if (currFps == SpecialFps::SAMPLE_NO_FRAME) {
+            // keyFrame will bypass all checks on fps sampling settings
+            bool keyFrame = params.keyFrames_ && videoStreamFrame_->key_frame;
+            if (!keyFrame) {
+              // if fps == SpecialFps::SAMPLE_NO_FRAME (0), don't sample at all
+              if (currFps == SpecialFps::SAMPLE_NO_FRAME) {
+                av_free_packet(&packet);
+                continue;
+              }
+
+              // fps is considered reached in the following cases:
+              // 1. lastFrameTimestamp < 0 - start of a new interval
+              //    (or first frame)
+              // 2. currFps == SpecialFps::SAMPLE_ALL_FRAMES (-1) - sample every
+              //    frame
+              // 3. timestamp - lastFrameTimestamp has reached target fps and
+              //    currFps > 0 (not special fps setting)
+              // different modes for fps:
+              // SpecialFps::SAMPLE_NO_FRAMES (0):
+              //     disable fps sampling, no frame sampled at all
+              // SpecialFps::SAMPLE_ALL_FRAMES (-1):
+              //     unlimited fps sampling, will sample at native video fps
+              // SpecialFps::SAMPLE_TIMESTAMP_ONLY (-2):
+              //     disable fps sampling, but will get the frame at specific
+              //     timestamp
+              // others (> 0): decoding at the specified fps
+              bool fpsReached = lastFrameTimestamp < 0 ||
+                  currFps == SpecialFps::SAMPLE_ALL_FRAMES ||
+                  (currFps > 0 &&
+                   timestamp >= lastFrameTimestamp + (1 / currFps));
+
+              if (!fpsReached) {
+                av_free_packet(&packet);
+                continue;
+              }
+            }
+
+            lastFrameTimestamp = timestamp;
+
+            outputFrameIndex++;
+            if (params.maximumOutputFrames_ != -1 &&
+                outputFrameIndex >= params.maximumOutputFrames_) {
+              // enough frames
               av_free_packet(&packet);
-              continue;
+              break;
             }
 
-            // fps is considered reached in the following cases:
-            // 1. lastFrameTimestamp < 0 - start of a new interval
-            //    (or first frame)
-            // 2. currFps == SpecialFps::SAMPLE_ALL_FRAMES (-1) - sample every
-            //    frame
-            // 3. timestamp - lastFrameTimestamp has reached target fps and
-            //    currFps > 0 (not special fps setting)
-            // different modes for fps:
-            // SpecialFps::SAMPLE_NO_FRAMES (0):
-            //     disable fps sampling, no frame sampled at all
-            // SpecialFps::SAMPLE_ALL_FRAMES (-1):
-            //     unlimited fps sampling, will sample at native video fps
-            // SpecialFps::SAMPLE_TIMESTAMP_ONLY (-2):
-            //     disable fps sampling, but will get the frame at specific
-            //     timestamp
-            // others (> 0): decoding at the specified fps
-            bool fpsReached = lastFrameTimestamp < 0 ||
-                currFps == SpecialFps::SAMPLE_ALL_FRAMES ||
-                (currFps > 0 && timestamp >=
-                  lastFrameTimestamp + (1 / currFps));
-
-            if (!fpsReached) {
-              av_free_packet(&packet);
-              continue;
+            AVFrame* rgbFrame = av_frame_alloc();
+            if (!rgbFrame) {
+              LOG(ERROR) << "Error allocating AVframe";
             }
-          }
 
-          lastFrameTimestamp = timestamp;
+            try {
+              // Determine required buffer size and allocate buffer
+              int numBytes = avpicture_get_size(pixFormat, outWidth, outHeight);
+              DecodedFrame::AvDataPtr buffer(
+                  (uint8_t*)av_malloc(numBytes * sizeof(uint8_t)));
 
-          outputFrameIndex++;
-          if (params.maximumOutputFrames_ != -1 &&
-              outputFrameIndex >= params.maximumOutputFrames_) {
-            // enough frames
-            av_free_packet(&packet);
-            break;
-          }
+              int size = avpicture_fill(
+                  (AVPicture*)rgbFrame,
+                  buffer.get(),
+                  pixFormat,
+                  outWidth,
+                  outHeight);
 
-          AVFrame* rgbFrame = av_frame_alloc();
-          if (!rgbFrame) {
-            LOG(ERROR) << "Error allocating AVframe";
-          }
+              sws_scale(
+                  scaleContext_,
+                  videoStreamFrame_->data,
+                  videoStreamFrame_->linesize,
+                  0,
+                  videoCodecContext_->height,
+                  rgbFrame->data,
+                  rgbFrame->linesize);
 
-          try {
-            // Determine required buffer size and allocate buffer
-            int numBytes = avpicture_get_size(pixFormat, outWidth, outHeight);
-            DecodedFrame::AvDataPtr buffer(
-                (uint8_t*)av_malloc(numBytes * sizeof(uint8_t)));
-
-            int size = avpicture_fill(
-                (AVPicture*)rgbFrame,
-                buffer.get(),
-                pixFormat,
-                outWidth,
-                outHeight);
-
-            sws_scale(
-                scaleContext_,
-                videoStreamFrame_->data,
-                videoStreamFrame_->linesize,
-                0,
-                videoCodecContext_->height,
-                rgbFrame->data,
-                rgbFrame->linesize);
-
-            unique_ptr<DecodedFrame> frame = make_unique<DecodedFrame>();
-            frame->width_ = outWidth;
-            frame->height_ = outHeight;
-            frame->data_ = move(buffer);
-            frame->size_ = size;
-            frame->index_ = frameIndex;
-            frame->outputFrameIndex_ = outputFrameIndex;
-            frame->timestamp_ = timestamp;
-            frame->keyFrame_ = videoStreamFrame_->key_frame;
-
-            sampledFrames.push_back(move(frame));
-            av_frame_free(&rgbFrame);
-          } catch (const std::exception&) {
-            av_frame_free(&rgbFrame);
+              unique_ptr<DecodedFrame> frame = make_unique<DecodedFrame>();
+              frame->width_ = outWidth;
+              frame->height_ = outHeight;
+              frame->data_ = move(buffer);
+              frame->size_ = size;
+              frame->index_ = frameIndex;
+              frame->outputFrameIndex_ = outputFrameIndex;
+              frame->timestamp_ = timestamp;
+              frame->keyFrame_ = videoStreamFrame_->key_frame;
+              sampledFrames.push_back(move(frame));
+              selectiveDecodedFrames++;
+              av_frame_free(&rgbFrame);
+            } catch (const std::exception&) {
+              av_frame_free(&rgbFrame);
+            }
           }
           av_frame_unref(videoStreamFrame_);
         } catch (const std::exception&) {
@@ -386,17 +450,27 @@ void VideoDecoder::decodeMemory(
     const char* buffer,
     const int size,
     const Params& params,
-    std::vector<std::unique_ptr<DecodedFrame>>& sampledFrames) {
+    std::vector<std::unique_ptr<DecodedFrame>>& sampledFrames,
+    int maxFrames,
+    bool decodeFromStart) {
   VideoIOContext ioctx(buffer, size);
-  decodeLoop(string("Memory Buffer"), ioctx, params, sampledFrames);
+  decodeLoop(
+      string("Memory Buffer"),
+      ioctx,
+      params,
+      sampledFrames,
+      maxFrames,
+      decodeFromStart);
 }
 
 void VideoDecoder::decodeFile(
     const string file,
     const Params& params,
-    std::vector<std::unique_ptr<DecodedFrame>>& sampledFrames) {
+    std::vector<std::unique_ptr<DecodedFrame>>& sampledFrames,
+    int maxFrames,
+    bool decodeFromStart) {
   VideoIOContext ioctx(file);
-  decodeLoop(file, ioctx, params, sampledFrames);
+  decodeLoop(file, ioctx, params, sampledFrames, maxFrames, decodeFromStart);
 }
 
 string VideoDecoder::ffmpegErrorStr(int result) {
