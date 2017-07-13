@@ -140,9 +140,8 @@ THTensor* THPTensor_(fromNumpy)(PyObject *numpy_array) {
     THTensor *result = THTensor_(newWithStorage)(storage, 0, sizes, strides);
     return result;
   } else {
-    THStoragePtr storage(THStorage_(new)());
-    THTensor *result = THTensor_(newWithStorage)(storage, 0, NULL, NULL);
-    return result;
+    THPUtils_setError("do not support construct a tensor from zero dimensional array.");
+    return NULL;
   }
 }
 #endif
