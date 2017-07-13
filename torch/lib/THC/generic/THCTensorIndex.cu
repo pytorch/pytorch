@@ -504,4 +504,87 @@ void THCTensor_(indexSelect)(THCState *state, THCTensor *dst, THCTensor *src, in
 #undef LARGE_INDEX
 }
 
+#define MAX_ADVINDEX_CALC_DIMS 5
+
+void THCTensor_(calculateAdvancedIndexingOffsets)(
+  THCState *state,
+  THCudaLongTensor *output,
+  THCTensor *indexed,
+  ptrdiff_t baseOffset,
+  THCudaLongTensor **indexers)
+{
+  int ndim = THCTensor_(nDimension)(state, indexed);
+  THAssert(ndim <= MAX_ADVINDEX_CALC_DIMS);
+
+  // Assert all Tensors are on the same GPU, and that the indexing Tensors are
+  // contiguous
+  for (int i = 0; i < ndim; ++i) {
+    if (indexers[i] != NULL) {
+      THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, output, indexers[i]));
+      THAssert(THCudaLongTensor_isContiguous(state, indexers[i]));
+    }
+  }
+
+  // Set grid, block dims
+  ptrdiff_t nElement = THCudaLongTensor_nElement(state, output);
+  const dim3 block = getApplyBlock();
+  dim3 grid;
+  THAssert(getApplyGrid(state, nElement, grid));
+
+#define HANDLE_CASE(INDEX_TYPE, DIMS)                                                           \
+{                                                                                               \
+  LinearIndexCalcData<INDEX_TYPE, DIMS> data;                                                   \
+  for (int i = 0; i < DIMS; ++i) {                                                              \
+    data.sizes[i] = indexers[i] != NULL ?                                                       \
+      THCudaLongTensor_nElement(state, indexers[i]) :                                           \
+        THCTensor_(size)(state, indexed, i);                                                    \
+    data.strides[i] = THCTensor_(stride)(state, indexed, i);                                    \
+    data.advIndexTensors[i] = indexers[i] != NULL ?                                             \
+      THCudaLongTensor_data(state, indexers[i]) : NULL;                                         \
+  }                                                                                             \
+                                                                                                \
+  calculateLinearIndices<INDEX_TYPE, DIMS>                                                      \
+    <<<grid, block, 0, THCState_getCurrentStream(state)>>>(                                     \
+    THCudaLongTensor_data(state, output),                                                       \
+    nElement,                                                                                   \
+    baseOffset,                                                                                 \
+    data                                                                                        \
+  );                                                                                            \
+}
+
+#define RUN_T(INDEX_TYPE)         \
+  switch (ndim) {                 \
+    case 1:                       \
+      HANDLE_CASE(INDEX_TYPE, 1)  \
+      break;                      \
+    case 2:                       \
+      HANDLE_CASE(INDEX_TYPE, 2)  \
+      break;                      \
+    case 3:                       \
+      HANDLE_CASE(INDEX_TYPE, 3)  \
+      break;                      \
+    case 4:                       \
+      HANDLE_CASE(INDEX_TYPE, 4)  \
+      break;                      \
+    case 5:                       \
+      HANDLE_CASE(INDEX_TYPE, 5)  \
+      break;                      \
+    default:                      \
+      THAssert(false);            \
+}
+
+  if (TensorUtils<THCTensor>::canUse32BitIndexMath(state, indexed)) {
+    RUN_T(unsigned int);
+  } else {
+    RUN_T(unsigned long);
+  }
+
+#undef HANDLE_CASE
+#undef RUN_T
+
+  THCudaCheck(cudaGetLastError());
+}
+
+#undef MAX_ADVINDEX_CALC_DIMS
+
 #endif
