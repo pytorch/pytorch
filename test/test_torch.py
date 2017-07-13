@@ -1642,12 +1642,11 @@ class TestTorch(TestCase):
         x = torch.rand(2, 3, 4)
         y = torch.rand(2, 3, 4)
         z = torch.rand(2, 3, 4)
-        for dim in range(-3, 4):
+        for dim in range(4):
             res = torch.stack((x, y, z), dim)
-            if dim < 0:
-                expected_size = x.size()[:dim+4] + (3,) + x.size()[dim+4:]
-            else:
-                expected_size = x.size()[:dim] + (3,) + x.size()[dim:]
+            res_neg = torch.stack((x, y, z), dim-4)
+            expected_size = x.size()[:dim] + (3,) + x.size()[dim:]
+            self.assertEqual(res, res_neg)
             self.assertEqual(res.size(), expected_size)
             self.assertEqual(res.select(dim, 0), x, 0)
             self.assertEqual(res.select(dim, 1), y, 0)
