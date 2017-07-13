@@ -521,8 +521,8 @@ class Variable(_C._VariableBase):
         numel = self.numel() if dim is None else self.size(dim)
         return var.div(numel - int(unbiased))
 
-    def std(self, dim=None, keepdim=False):
-        return self.var(dim, keepdim).sqrt()
+    def std(self, dim=None, keepdim=False, unbiased=True):
+        return self.var(dim, keepdim, unbiased).sqrt()
 
     def renorm(self, p, dim, maxnorm):
         t = self.transpose(dim, 0)

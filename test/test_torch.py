@@ -202,20 +202,20 @@ class TestTorch(TestCase):
             fn_attr = getattr(torch, fn_name) if fn_name != "norm" else normfn_attr
 
             def fn(t, dim, keepdim=False):
-                ans = fn_attr(x, dim, keepdim)
+                ans = fn_attr(x, dim, keepdim=keepdim)
                 return ans if not isinstance(ans, tuple) else ans[0]
 
             dim = random.randint(0, 2)
-            self.assertEqual(fn(x, dim).unsqueeze(dim), fn(x, dim, True))
+            self.assertEqual(fn(x, dim).unsqueeze(dim), fn(x, dim, keepdim=True))
             self.assertEqual(x.ndimension() - 1, fn(x, dim).ndimension())
-            self.assertEqual(x.ndimension(), fn(x, dim, True).ndimension())
+            self.assertEqual(x.ndimension(), fn(x, dim, keepdim=True).ndimension())
 
             # check 1-d behavior
             x = torch.randn(1)
             dim = 0
-            self.assertEqual(fn(x, dim), fn(x, dim, True))
+            self.assertEqual(fn(x, dim), fn(x, dim, keepdim=True))
             self.assertEqual(x.ndimension(), fn(x, dim).ndimension())
-            self.assertEqual(x.ndimension(), fn(x, dim, True).ndimension())
+            self.assertEqual(x.ndimension(), fn(x, dim, keepdim=True).ndimension())
 
     def _testCSelection(self, torchfn, mathfn):
         # Two tensors
@@ -3188,6 +3188,21 @@ class TestTorch(TestCase):
         bignumber = 2 ^ 31 + 1
         res = torch.LongTensor((-bignumber,))
         self.assertGreater(res.abs()[0], 0)
+
+    def test_unbiased(self):
+        tensor = torch.randn(100)
+        self.assertEqual(tensor.var(0), tensor.var(0, unbiased=True))
+        self.assertEqual(tensor.var(), tensor.var(unbiased=True))
+        self.assertEqual(tensor.var(unbiased=False), tensor.var(0, unbiased=False)[0])
+
+        tensor = torch.FloatTensor([1.0, 2.0])
+        self.assertEqual(tensor.var(unbiased=True), 0.5)
+        self.assertEqual(tensor.var(unbiased=False), 0.25)
+
+        tensor = torch.randn(100)
+        self.assertEqual(tensor.std(0), tensor.std(0, unbiased=True))
+        self.assertEqual(tensor.std(), tensor.std(unbiased=True))
+        self.assertEqual(tensor.std(unbiased=False), tensor.std(0, unbiased=False)[0])
 
     def test_view(self):
         tensor = torch.rand(15)

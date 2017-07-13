@@ -2925,7 +2925,7 @@ void THTensor_(mean)(THTensor *r_, THTensor *t, int dimension, int keepdim)
   THTensor_(div)(r_, r_, t->size[dimension]);
 }
 
-void THTensor_(std)(THTensor *r_, THTensor *t, int dimension, int flag, int keepdim)
+void THTensor_(std)(THTensor *r_, THTensor *t, int dimension, int biased, int keepdim)
 {
   THLongStorage *dim;
 
@@ -2948,7 +2948,7 @@ void THTensor_(std)(THTensor *r_, THTensor *t, int dimension, int flag, int keep
                          sum2 += z*z;
                        }
 
-                       if(flag)
+                       if(biased)
                        {
                          sum /= t_size;
                          sum2 /= t_size;
@@ -2970,7 +2970,7 @@ void THTensor_(std)(THTensor *r_, THTensor *t, int dimension, int flag, int keep
   }
 }
 
-void THTensor_(var)(THTensor *r_, THTensor *t, int dimension, int flag, int keepdim)
+void THTensor_(var)(THTensor *r_, THTensor *t, int dimension, int biased, int keepdim)
 {
   THLongStorage *dim;
 
@@ -2993,7 +2993,7 @@ void THTensor_(var)(THTensor *r_, THTensor *t, int dimension, int flag, int keep
                          sum2 += z*z;
                        }
 
-                       if(flag)
+                       if(biased)
                        {
                          sum /= t_size;
                          sum2 /= t_size;
@@ -3133,18 +3133,18 @@ accreal THTensor_(meanall)(THTensor *tensor)
   return THTensor_(sumall)(tensor)/THTensor_(nElement)(tensor);
 }
 
-accreal THTensor_(varall)(THTensor *tensor)
+accreal THTensor_(varall)(THTensor *tensor, int biased)
 {
   accreal mean = THTensor_(meanall)(tensor);
   accreal sum = 0;
   TH_TENSOR_APPLY(real, tensor, sum += (*tensor_data - mean)*(*tensor_data - mean););
-  sum /= (THTensor_(nElement)(tensor)-1);
+  sum /= THTensor_(nElement)(tensor) - (biased ? 0 : 1);
   return sum;
 }
 
-accreal THTensor_(stdall)(THTensor *tensor)
+accreal THTensor_(stdall)(THTensor *tensor, int biased)
 {
-  return sqrt(THTensor_(varall)(tensor));
+  return sqrt(THTensor_(varall)(tensor, biased));
 }
 
 void THTensor_(linspace)(THTensor *r_, real a, real b, long n)
