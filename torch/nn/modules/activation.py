@@ -1,3 +1,4 @@
+import warnings
 import torch
 from torch.nn.parameter import Parameter
 
@@ -128,11 +129,15 @@ class Hardtanh(Module):
 
     def __init__(self, min_val=-1, max_val=1, inplace=False, min_value=None, max_value=None):
         super(Hardtanh, self).__init__()
+        if min_value is not None:
+            warnings.warn("keyword argument min_value is deprecated and renamed to min_val")
+            min_val = min_value
+        if max_value is not None:
+            warnings.warn("keyword argument max_value is deprecated and renamed to max_val")
+            max_val = max_value
+
         self.min_val = min_val
         self.max_val = max_val
-        assert min_value is None, "keyword argument min_value has been renamed to min_val"
-        assert max_value is None, "keyword argument max_value has been renamed to max_val"
-
         self.inplace = inplace
         assert self.max_val > self.min_val
 
