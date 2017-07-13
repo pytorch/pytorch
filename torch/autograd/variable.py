@@ -753,7 +753,7 @@ class Variable(_C._VariableBase):
         return Gesv.apply(self, a)
 
     def symeig(self, eigenvectors=False, upper=True):
-        return Symeig.appy(self, eigenvectors, upper)
+        return Symeig.apply(self, eigenvectors, upper)
 
     def multinomial(self, num_samples=1, with_replacement=False):
         return Multinomial(num_samples, with_replacement)(self)
