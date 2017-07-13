@@ -88,6 +88,7 @@ struct Type {
   virtual ~Type() {}
   virtual ScalarType scalarType() = 0;
   virtual Backend backend() = 0;
+  virtual bool isCuda() = 0;
   virtual bool isSparse() = 0;
   virtual bool isDistributed() = 0;
   static void registerAll(Context * context);

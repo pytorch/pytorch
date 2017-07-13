@@ -19,6 +19,7 @@ ScalarType ${Type}::scalarType() {
 Backend ${Type}::backend() {
   return Backend::${Backend};
 }
+bool ${Type}::isCuda() { return backend() == kCUDA; }
 bool ${Type}::isSparse() { return false; }
 bool ${Type}::isDistributed() { return false; }
 
