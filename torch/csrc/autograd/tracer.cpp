@@ -4,8 +4,8 @@ namespace torch { namespace autograd {
 
 std::unique_ptr<TracingState> GlobalTracingState = nullptr;
 
-std::shared_ptr<Value> TracingState::makeValue() {
-  return std::make_shared<Value>(next_unique++);
+std::unique_ptr<Value> TracingState::makeValue(Node * definition, size_t offset) {
+  return std::unique_ptr<Value>(new Value(next_unique++,definition,offset));
 }
 
 void Tracer_enter() {

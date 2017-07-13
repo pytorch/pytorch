@@ -23,7 +23,9 @@ std::string getPythonName(const PyObject* obj, bool is_legacy) {
 std::ostream& operator<<(std::ostream & out, const Value & l) {
   return out << "%" << l.unique;
 }
-std::ostream & operator<<(std::ostream & out, const value_list & values) {
+
+template<typename T>
+static void printValueList(std::ostream & out, const T & values) {
   bool first = true;
   for(auto & v : values) {
     if(!first)
@@ -31,6 +33,13 @@ std::ostream & operator<<(std::ostream & out, const value_list & values) {
     first = false;
     out << *v;
   }
+}
+std::ostream& operator<<(std::ostream & out, const value_list & l) {
+  printValueList(out, l);
+  return out;
+}
+std::ostream& operator<<(std::ostream & out, const std::vector<std::unique_ptr<Value>> & l) {
+  printValueList(out, l);
   return out;
 }
 

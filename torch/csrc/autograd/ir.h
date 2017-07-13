@@ -6,6 +6,8 @@
 #include <memory>
 #include <vector>
 #include <cassert>
+#include <atomic>
+#include "torch/csrc/IntrusivePtr.h"
 
 #include "torch/csrc/utils/object_ptr.h"
 
@@ -89,19 +91,28 @@ struct Node;
 // would strongly recommend the functional style representation, rather than SSA
 // phi nodes.
 
-using value_list = std::vector<std::shared_ptr<Value>>;
-using node_list = std::vector<std::shared_ptr<Node>>;
+using ValueRef = torch::IntrusivePtr<Value>;
+using NodeRef = torch::IntrusivePtr<Node>;
+using value_list = std::vector<ValueRef>;
+using node_list = std::vector<NodeRef>;
 using pyobj_list = std::vector<THPObjectPtr>;
 using Location = std::string;
+
 
 // --------------------------------------------------------------------
 // Variables, which refer to tensors (NEVER tuples of tensors)
 
+
 struct Value {
   int unique;
-  Value(int unique)
-    : unique(unique)
-    {}
+  Node * definition;
+  size_t offset;
+  Value(int unique, Node * definition = nullptr, size_t offset = 0)
+  : unique(unique), definition(definition), offset(offset) {}
+private:
+  friend class torch::IntrusivePtr<Value>;
+  void retain();
+  void release();
 };
 
 // --------------------------------------------------------------------
@@ -117,8 +128,8 @@ struct Node {
   enum class Id {
     PythonOp,
   };
-  value_list inputs;
-  value_list outputs;
+  std::vector<ValueRef> inputs;
+  std::vector<std::unique_ptr<Value>> outputs;
   Location loc;
   Id _id;
   Node(Id id) : _id(id) {}
@@ -127,11 +138,28 @@ struct Node {
   Id kind() {
     return _id;
   }
-  Node & withLocation(const Location & loc_) {
-    loc = loc_;
-    return *this;
+private:
+  void retain() {
+    ++refcount_;
   }
+  void release() {
+    if(--refcount_ == 0)
+      delete this;
+  }
+  friend class torch::IntrusivePtr<Value>;
+  friend class torch::IntrusivePtr<Node>;
+  friend class Value;
+  std::atomic<uint32_t> refcount_;
 };
+
+inline void Value::retain() {
+  if(definition)
+    definition->retain();
+}
+inline void Value::release() {
+  if(definition)
+    definition->release();
+}
 
 struct PythonOp : public Node {
   // This is not used at the moment (except in the invocation of
@@ -166,9 +194,10 @@ struct PythonOp : public Node {
 
 struct Graph {
   node_list nodes;
-  value_list inputs;
+  std::vector<std::unique_ptr<Value>> inputs;
   value_list outputs;
 };
+
 std::ostream& operator<<(std::ostream &  out, const Graph & g);
 
 }}
