@@ -36,7 +36,8 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
            THCTensor *output,
            bool sizeAverage,
            THCTensor *weights,
-           THCTensor *total_weight)
+           THCTensor *total_weight,
+           long ignore_index)
 {
   THNN_(SpatialClassNLLCriterion_shapeCheck)(state, input, target, weights);
 
@@ -75,7 +76,8 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
       THCTensor_(size)(state, input, 0),
       THCTensor_(size)(state, input, 1),
       THCTensor_(size)(state, input, 2) * THCTensor_(size)(state, input, 3),
-      blocks_per_sample
+      blocks_per_sample,
+      ignore_index
   );
   THCudaCheck(cudaGetLastError());
   if (sizeAverage) {
@@ -98,7 +100,8 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
            THCTensor *gradInput,
            bool sizeAverage,
            THCTensor *weights,
-           THCTensor *total_weight)
+           THCTensor *total_weight,
+           long ignore_index)
 {
   THNN_(SpatialClassNLLCriterion_shapeCheck)(state, input, target, weights);
   THArgCheck(THCTensor_(isContiguous)(state, gradInput), 4,
@@ -134,7 +137,8 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
       THCTensor_(size)(state, input, 0),
       THCTensor_(size)(state, input, 1),
       THCTensor_(size)(state, input, 2) *THCTensor_(size)(state, input, 3),
-      blocks_per_sample
+      blocks_per_sample,
+      ignore_index
   );
   THCudaCheck(cudaGetLastError());
 
