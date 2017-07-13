@@ -116,19 +116,14 @@ IF(NOT DEFINED cwrap_files)
 ENDIF()
 
 EXECUTE_PROCESS(
-    COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/gen.py ${CUDA_FLAG} -s ${CMAKE_CURRENT_SOURCE_DIR} --print-dependencies ${cwrap_files}
-    # user stderr rather than stdout so we can still debug the script with print
-    ERROR_VARIABLE generated_cpp
+    COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/gen.py ${CUDA_FLAG} -s ${CMAKE_CURRENT_SOURCE_DIR} --output-dependencies ${CMAKE_CURRENT_BINARY_DIR}/generated_cpp.txt ${cwrap_files}
     RESULT_VARIABLE RETURN_VALUE
 )
-
 if (NOT RETURN_VALUE EQUAL 0)
     message(STATUS ${generated_cpp})
     message(FATAL_ERROR "Failed to get generated_cpp list")
 endif()
-
-# Filter out anything that is not a source file
-filter_list(generated_cpp generated_cpp "(\\.cpp|\\.h)$")
+file(READ ${CMAKE_CURRENT_BINARY_DIR}/generated_cpp.txt generated_cpp)
 
 FILE(GLOB_RECURSE all_templates "templates/*")
 
