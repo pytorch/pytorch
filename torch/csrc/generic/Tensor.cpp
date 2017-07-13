@@ -140,7 +140,8 @@ THTensor* THPTensor_(fromNumpy)(PyObject *numpy_array) {
     THTensor *result = THTensor_(newWithStorage)(storage, 0, sizes, strides);
     return result;
   } else {
-    THPUtils_setError("do not support construct a tensor from zero dimensional array.");
+    THPUtils_setError("the given numpy array has zero-sized dimensions. "
+                      "Zero-sized dimensions are not supported in PyTorch");
     return NULL;
   }
 }
