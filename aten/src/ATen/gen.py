@@ -14,11 +14,13 @@ from code_template import CodeTemplate
 parser = OptionParser()
 parser.add_option('-s', '--source-path', help='path to source director for tensorlib',
                   action='store', default='.')
-parser.add_option('-p', '--print-dependencies',
-                  help='only output a list of dependencies', action='store_true')
+parser.add_option('-o', '--output-dependencies',
+                  help='only output a list of dependencies', action='store')
 parser.add_option('-n', '--no-cuda', action='store_true')
 
 options, files = parser.parse_args()
+if options.output_dependencies is not None:
+    output_dependencies_file = open(options.output_dependencies,'w')
 
 TEMPLATE_PATH = options.source_path + "/templates"
 GENERATOR_DERIVED = CodeTemplate.from_file(
@@ -91,12 +93,11 @@ top_env = {
 
 def write(filename, s):
     filename = "ATen/" + filename
-    if options.print_dependencies:
-        sys.stderr.write(filename + ";")
+    if options.output_dependencies is not None:
+        output_dependencies_file.write(filename + ";")
         return
     with open(filename, "w") as f:
         f.write(s)
-
 
 def generate_storage_type_and_tensor(backend, density, scalar_type, declarations):
     scalar_name, c_type, accreal, th_scalar_type = scalar_type
@@ -239,3 +240,6 @@ write('TensorMethods.h', TENSOR_METHODS_H.substitute(top_env))
 write('Functions.h', FUNCTIONS_H.substitute(top_env))
 write('Dispatch.h', dispatch_macros.create(all_types))
 write('Copy.cpp', copy_wrapper.create(all_types))
+
+if options.output_dependencies is not None:
+    output_dependencies_file.close()
