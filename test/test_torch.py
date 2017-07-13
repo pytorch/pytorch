@@ -1644,7 +1644,7 @@ class TestTorch(TestCase):
         z = torch.rand(2, 3, 4)
         for dim in range(4):
             res = torch.stack((x, y, z), dim)
-            res_neg = torch.stack((x, y, z), dim-4)
+            res_neg = torch.stack((x, y, z), dim - 4)
             expected_size = x.size()[:dim] + (3,) + x.size()[dim:]
             self.assertEqual(res, res_neg)
             self.assertEqual(res.size(), expected_size)
