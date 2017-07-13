@@ -99,8 +99,9 @@ CHECKED_CAST = {
     'THStride*': CodeTemplate('THLongStorageView::make(${arg_name},true)'),
     'real': CodeTemplate('${arg_name}.to${ScalarName}()'),
     'accreal': CodeTemplate('${arg_name}.to${AccScalarName}()'),
-
+    'TensorList': CodeTemplate('tensor_list_checked_cast<${Tensor}, Tensor, ${THTensor}>(${arg_name},"${arg_name}",${arg_pos})'),
 }
+
 CHECKED_USE = {
     'THTensor*': '{}_->tensor',
     'THIndexTensor*': '{}_->tensor',
@@ -108,6 +109,7 @@ CHECKED_USE = {
     'THIntegerTensor*': '{}_->tensor',
     'THStorage*': '{}_->storage',
     'THGenerator*': '{}_->generator',
+    'TensorList': "{0}_.data(), {0}_.size()",
 }
 
 ALLOC_WRAP = {
@@ -375,7 +377,8 @@ def create_derived(backend_type_env, declarations):
 
                 # dim() == 0 of all input tensors is and'd to form
                 # the test for whether the output is also a scalar
-                if not arg.get('output') and 'Tensor' in arg['type'] and not scalar_check_is_from_size:
+                if (not arg.get('output') and 'Tensor' in arg['type'] and
+                        'TensorList' not in arg['type'] and not scalar_check_is_from_size):
                     check = '{}.dim() == 0'.format(arg['name'])
                     scalar_check = (check if scalar_check is None
                                     else scalar_check + ' && ' + check)

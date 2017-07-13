@@ -70,3 +70,15 @@
     - THTensor* self
     - THTensor* src
 ]]
+
+[[
+  name: cat
+  cname: catArray
+  variants: [function]
+  return: self
+  arguments:
+    - arg: THTensor* self
+      output: True
+    - TensorList tensors
+    - int dim
+]]
