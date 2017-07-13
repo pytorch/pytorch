@@ -147,7 +147,7 @@ class Module(object):
         """
         return self._apply(lambda t: t.cuda(device_id))
 
-    def cpu(self, device_id=None):
+    def cpu(self):
         """Moves all model parameters and buffers to the CPU."""
         return self._apply(lambda t: t.cpu())
 
