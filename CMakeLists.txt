@@ -121,12 +121,14 @@ EXECUTE_PROCESS(
     ERROR_VARIABLE generated_cpp
     RESULT_VARIABLE RETURN_VALUE
 )
-# Filter out anything that is not a source file
-filter_list(generated_cpp generated_cpp "(\\.cpp|\\.h)$")
+
 if (NOT RETURN_VALUE EQUAL 0)
     message(STATUS ${generated_cpp})
     message(FATAL_ERROR "Failed to get generated_cpp list")
 endif()
+
+# Filter out anything that is not a source file
+filter_list(generated_cpp generated_cpp "(\\.cpp|\\.h)$")
 
 FILE(GLOB_RECURSE all_templates "templates/*")
 
