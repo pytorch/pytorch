@@ -887,6 +887,11 @@ Normalization functions
 
 .. autofunction:: batch_norm
 
+:hidden:`normalize`
+~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: normalize
+
 Linear functions
 ----------------
 
@@ -993,6 +998,15 @@ Vision functions
 
 .. autofunction:: upsample_bilinear
 
+:hidden:`grid_sample`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: grid_sample
+
+:hidden:`affine_grid`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: affine_grid
 
 
 torch.nn.init

@@ -274,6 +274,22 @@ int main() {
   ELSE (BLAS_F2C_DOUBLE_WORKS AND NOT BLAS_F2C_FLOAT_WORKS)
     SET(BLAS_F2C FALSE)
   ENDIF (BLAS_F2C_DOUBLE_WORKS AND NOT BLAS_F2C_FLOAT_WORKS)
+  CHECK_C_SOURCE_RUNS("
+#include <stdlib.h>
+#include <stdio.h>
+float x[4] = { 1, 2, 3, 4 };
+float y[4] = { .1, .01, .001, .0001 };
+extern float cblas_sdot();
+int main() {
+  int i;
+  double r = cblas_sdot(4, x, 1, y, 1);
+  exit((float)r != (float).1234);
+}" BLAS_USE_CBLAS_DOT )
+  IF (BLAS_USE_CBLAS_DOT)
+    SET(BLAS_USE_CBLAS_DOT TRUE)
+  ELSE (BLAS_USE_CBLAS_DOT)
+    SET(BLAS_USE_CBLAS_DOT FALSE)
+  ENDIF (BLAS_USE_CBLAS_DOT)
 ENDIF(BLAS_LIBRARIES)
 
 # epilogue

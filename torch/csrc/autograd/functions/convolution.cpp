@@ -133,6 +133,12 @@ static std::unique_ptr<Tensor> subtensor(Tensor* tensor, int dim, int groups, in
   return result->contiguous();
 }
 
+static std::shared_ptr<Variable> subvariable(std::shared_ptr<Variable> var, int dim, int groups, int g) {
+  long n = var->data->rawSizes()[dim] / groups;
+  auto result = std::make_shared<Narrow>(dim, n * g, n)->apply({var})[0];
+  return result;
+}
+
 static std::unique_ptr<Tensor> cat(const tensor_list& tensors, int dim) {
   int num_inputs = tensors.size();
   if (num_inputs == 0) {
@@ -443,6 +449,9 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
   if (ggI) {
     // Modified params with correct padding
     ConvParams gw_conv_params(*this);
+    // Disable groups as they are handled separately
+    auto groups = gw_conv_params.groups;
+    gw_conv_params.groups = 1;
     auto weight_size = weight->data->sizes();
     std::vector<long> kernel_size(weight_size.begin() + 2, weight_size.end());
     auto input_size = ggI->data->sizes();
@@ -463,12 +472,29 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
     auto gOt = std::make_shared<Transpose>(0, 1)->apply({gO})[0];
     auto ggIt = std::make_shared<Transpose>(0, 1)->apply({ggI})[0];
 
-    if (gOt->data->isCuda()) {
-      gOt = std::make_shared<Contiguous>()->apply({gOt})[0];
-    }
-
+    std::shared_ptr<Variable> gWt = nullptr;
     // Compute conv
-    auto gWt = std::make_shared<ConvForward>(gw_conv_params)->apply({ggIt, gOt, nullptr})[0];
+    if (groups == 1) {
+      if (gOt->data->isCuda()) {
+        gOt = std::make_shared<Contiguous>()->apply({gOt})[0];
+      }
+
+      // Compute conv
+      gWt = std::make_shared<ConvForward>(gw_conv_params)->apply({ggIt, gOt, nullptr})[0];
+    } else {
+      variable_list gWt_list(groups);
+      for (int g = 0; g < groups; ++g) {
+        auto ggIt_g = subvariable(ggIt, 0, groups, g);
+        auto gOt_g = subvariable(gOt, 0, groups, g);
+        if (gOt_g->data->isCuda()) {
+          gOt_g = std::make_shared<Contiguous>()->apply({gOt_g})[0];
+        }
+
+        gWt_list[g] = std::make_shared<ConvForward>(gw_conv_params)->apply({ggIt_g, gOt_g, nullptr})[0];
+      }
+
+      gWt = std::make_shared<Cat>(1)->apply(gWt_list)[0];
+    }
 
     // Transpose gW to match chan_in and chan_out
     gW = std::make_shared<Transpose>(0, 1)->apply({gWt})[0];
@@ -480,6 +506,9 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
     // select conv tranpose and swap stride and dilation
     ConvParams gi_conv_params(*this);
     gi_conv_params.transposed = true;
+    // Disable groups as they are handled separately
+    auto groups = gi_conv_params.groups;
+    gi_conv_params.groups = 1;
     for(size_t i=0; i<gi_conv_params.padding.size(); ++i) {
       if (gi_conv_params.stride[i] != 1) {
         // TODO: Remove this when transpose dilated is fixed
@@ -492,11 +521,27 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
     auto ggWt = std::make_shared<Transpose>(0, 1)->apply({ggW})[0];
     auto gOt = std::make_shared<Transpose>(0, 1)->apply({gO})[0];
 
-    if (gOt->data->isCuda()) {
-      gOt = std::make_shared<Contiguous>()->apply({gOt})[0];
-    }
+    std::shared_ptr<Variable> gIt = nullptr;
+    if (groups == 1) {
+      if (gOt->data->isCuda()) {
+        gOt = std::make_shared<Contiguous>()->apply({gOt})[0];
+      }
 
-    auto gIt = std::make_shared<ConvForward>(gi_conv_params)->apply({ggWt, gOt, nullptr})[0];
+      gIt = std::make_shared<ConvForward>(gi_conv_params)->apply({ggWt, gOt, nullptr})[0];
+    } else {
+      variable_list gIt_list(groups);
+      for (int g = 0; g < groups; ++g) {
+        auto ggWt_g = subvariable(ggWt, 1, groups, g);
+        auto gOt_g = subvariable(gOt, 0, groups, g);
+        if (gOt_g->data->isCuda()) {
+          gOt_g = std::make_shared<Contiguous>()->apply({gOt_g})[0];
+        }
+
+        gIt_list[g] = std::make_shared<ConvForward>(gi_conv_params)->apply({ggWt_g, gOt_g, nullptr})[0];
+      }
+
+      gIt = std::make_shared<Cat>(0)->apply(gIt_list)[0];
+    }
     
     gI = std::make_shared<Transpose>(0, 1)->apply({gIt})[0];
   }

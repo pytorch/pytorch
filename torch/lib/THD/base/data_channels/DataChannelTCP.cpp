@@ -277,7 +277,7 @@ void DataChannelTCP::allGather(std::vector<thpp::Tensor*>& output,
 
   auto j = group_rank, jnext = left;
   for (rank_type i = 0; i < group.size(); ++i) {
-    auto send_request = isend(*(output[j]), group.mustGetGlobalRank(right));
+    req_ptr send_request {isend(*(output[j]), group.mustGetGlobalRank(right))};
     receive(*(output[jnext]), group.mustGetGlobalRank(left));
     send_request->wait();
 
@@ -409,7 +409,7 @@ void DataChannelTCP::allReduce(thpp::Tensor& data, THDReduceOp operation,
       int dst = (newdst < rem) ? (newdst * 2 + 1) : (newdst + rem);
 
       auto dst_global_rank = group.mustGetGlobalRank(dst);
-      auto send_request = isend(data, dst_global_rank);
+      req_ptr send_request {isend(data, dst_global_rank)};
       receive(*tmp_tensor, dst_global_rank);
       send_request->wait();
 

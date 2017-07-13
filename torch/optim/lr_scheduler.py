@@ -38,8 +38,8 @@ class LambdaLR(_LRScheduler):
     Args:
         optimizer (Optimizer): Wrapped optimizer.
         lr_lambda (function or list): A function which computes a multiplicative
-            factor given an integer parameter epoch, or a list of such functions,
-            one for each group in optimizer.param_groups.
+            factor given an integer parameter epoch, or a list of such
+            functions, one for each group in optimizer.param_groups.
         last_epoch (int): The index of last epoch. Default: -1.
 
     Example:

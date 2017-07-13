@@ -70,6 +70,15 @@ struct Narrow : public Function {
   long size;
 };
 
+struct Cat : public Function {
+  Cat(long dim)
+    : dim(dim) {}
+
+  virtual variable_list apply(const variable_list& inputs) override;
+
+  long dim;
+};
+
 }}
 
 

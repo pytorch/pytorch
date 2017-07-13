@@ -321,8 +321,8 @@ void THTensor_(expandNd)(THTensor **rets, THTensor **ops, int count) {
     THArgCheck(THTensor_(nDimension)(ops[i]) > 0, i, "can't expand empty tensor %d", i);
   }
 
-  long *op_sizes[count];
-  long op_dims[count];
+  long **op_sizes = THAlloc(sizeof(long*) * count);
+  long *op_dims = THAlloc(sizeof(long) * count);
 
   for (int i = 0; i < count; ++i) {
     op_sizes[i] = ops[i]->size;
@@ -339,6 +339,8 @@ void THTensor_(expandNd)(THTensor **rets, THTensor **ops, int count) {
                                      1024);
 
   if(ret != 0) {
+    THFree(op_sizes);
+    THFree(op_dims);
     THLongStorage_free(sizes);
     THError(error_buffer);
     return;
@@ -348,6 +350,8 @@ void THTensor_(expandNd)(THTensor **rets, THTensor **ops, int count) {
     THTensor_(expand)(rets[i], ops[i], sizes);
   }
 
+  THFree(op_sizes);
+  THFree(op_dims);
   THLongStorage_free(sizes);
 }
 

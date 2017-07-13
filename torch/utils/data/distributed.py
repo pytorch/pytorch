@@ -1,7 +1,7 @@
 import math
 import torch
 from .sampler import Sampler
-from torch.distributed.collectives import get_world_size, get_rank
+from torch.distributed import get_world_size, get_rank
 
 
 class DistributedSampler(Sampler):

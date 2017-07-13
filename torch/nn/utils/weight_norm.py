@@ -41,16 +41,13 @@ class WeightNorm(object):
         module.register_parameter(name + '_v', Parameter(weight.data))
         setattr(module, name, fn.compute_weight(module))
 
-        handle = hooks.RemovableHandle(module._forward_pre_hooks)
-        module._forward_pre_hooks[handle.id] = fn
-        fn.handle = handle
+        # recompute weight before every forward()
+        module.register_forward_pre_hook(fn)
 
         return fn
 
     def remove(self, module):
         weight = self.compute_weight(module)
-
-        self.handle.remove()
         delattr(module, self.name)
         del module._parameters[self.name + '_g']
         del module._parameters[self.name + '_v']
@@ -113,9 +110,10 @@ def remove_weight_norm(module, name='weight'):
         >>> m = weight_norm(nn.Linear(20, 40))
         >>> remove_weight_norm(m)
     """
-    for hook in module._forward_pre_hooks.values():
+    for k, hook in module._forward_pre_hooks.items():
         if isinstance(hook, WeightNorm) and hook.name == name:
             hook.remove(module)
+            del module._forward_pre_hooks[k]
             return module
 
     raise ValueError("weight_norm of '{}' not found in {}"

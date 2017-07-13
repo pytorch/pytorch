@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include <libshm.h>
 #include <TH/TH.h>
+#include <ATen/ATen.h>
 
 #include "torch/csrc/utils/python_strings.h"
 
@@ -718,22 +719,6 @@ static PyMethodDef TorchMethods[] = {
   {NULL, NULL, 0, NULL}
 };
 
-static void errorHandler(const char *msg, void *data)
-{
-  throw THException(msg);
-}
-
-static void errorHandlerArg(int argNumber, const char *msg, void *data)
-{
-  throw THArgException(msg, argNumber);
-}
-
-static void updateErrorHandlers()
-{
-  THSetDefaultErrorHandler(errorHandler, NULL);
-  THSetDefaultArgErrorHandler(errorHandlerArg, NULL);
-}
-
 bool THCPDoubleStorage_init(PyObject *module);
 bool THCPFloatStorage_init(PyObject *module);
 bool THCPHalfStorage_init(PyObject *module);
@@ -923,7 +908,9 @@ PyMODINIT_FUNC PyInit__C()
   ASSERT_TRUE(THPDefaultGenerator != nullptr);
   ASSERT_TRUE(PyModule_AddObject(module, "default_generator", (PyObject*)THPDefaultGenerator) == 0);
 
-  updateErrorHandlers();
+  // force ATen to initialize because it handles
+  // setting up TH Errors so that they throw C++ exceptions
+  at::init();
 
 #ifdef WITH_NUMPY
   import_array();

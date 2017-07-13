@@ -9,7 +9,8 @@ def clip_grad_norm(parameters, max_norm, norm_type=2):
         parameters (Iterable[Variable]): an iterable of Variables that will have
             gradients normalized
         max_norm (float or int): max norm of the gradients
-        norm_type (float or int): type of the used p-norm. Can be ``'inf'`` for infinity norm.
+        norm_type (float or int): type of the used p-norm. Can be ``'inf'`` for
+            infinity norm.
 
     Returns:
         Total norm of the parameters (viewed as a single vector).

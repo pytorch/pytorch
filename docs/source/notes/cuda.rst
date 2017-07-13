@@ -12,7 +12,7 @@ of your selected device, and the results will be always placed in on the same
 device as the tensor.
 
 Cross-GPU operations are not allowed by default, with the only exception of
-:meth:`~torch.Tensor.copy_`. Unless you enable peer-to-peer memory accesses
+:meth:`~torch.Tensor.copy_`. Unless you enable peer-to-peer memory accesses,
 any attempts to launch ops on tensors spread across different devices will
 raise an error.
 
