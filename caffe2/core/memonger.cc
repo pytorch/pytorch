@@ -53,14 +53,14 @@ NetDef optimize_inference_net(
 
   for (int i = 0; i < ops.size(); i++) {
     auto& op = ops[i];
-    std::vector<std::string> new_free_blobs;
+    std::unordered_set<std::string> new_free_blobs;
 
     // Check if some input is used the last time, and release it
     for (auto& inp : op.input()) {
       auto rit = ranges.find(inp);
       if (rit != ranges.end() && rit->second.second == i) {
         if (mapping.find(inp) == mapping.end()) {
-          new_free_blobs.push_back(inp);
+          new_free_blobs.insert(inp);
           mapping[inp] = inp;
 
           // Safety check to prevent double-memongering nets.
@@ -71,7 +71,7 @@ NetDef optimize_inference_net(
           }
           renaming[inp] = shared_blob;
         } else {
-          new_free_blobs.push_back(mapping[inp]);
+          new_free_blobs.insert(mapping[inp]);
         }
       }
     }
