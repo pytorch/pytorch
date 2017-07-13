@@ -15,11 +15,10 @@
 // here, we need to register a fake overload for vector/string - here,
 // we just ignore the entries in the logs.
 
-#define INSTANTIATE_FOR_CONTAINER(container)               \
-  template <class... Types>                                \
-  std::ostream& operator<<(                                \
-      std::ostream& out, const container<Types...>& seq) { \
-    return out;                                            \
+#define INSTANTIATE_FOR_CONTAINER(container)                                \
+  template <class... Types>                                                 \
+  std::ostream& operator<<(std::ostream& out, const container<Types...>&) { \
+    return out;                                                             \
   }
 
 INSTANTIATE_FOR_CONTAINER(std::vector)
