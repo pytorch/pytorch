@@ -52,7 +52,7 @@ protected:
   void evaluate_function(FunctionTask& task);
   ReadyQueue& ready_queue(int device);
   void start_threads();
-  virtual void thread_main(std::shared_ptr<ReadyQueue> queue);
+  virtual void thread_main(std::shared_ptr<ReadyQueue> queue, int device);
   virtual void thread_on_exception(FunctionTask& task, std::exception& e);
 
   std::once_flag start_threads_flag;
