@@ -366,20 +366,20 @@ static void tensorStd(rpc::RPCMessage& raw_message) {
   thpp::Tensor *r = unpackRetrieveTensor(raw_message);
   thpp::Tensor *t = unpackRetrieveTensor(raw_message);
   int dimension = unpackInteger(raw_message);
-  int flag = unpackInteger(raw_message);
+  int biased = unpackInteger(raw_message);
   int keepdim = unpackInteger(raw_message);
   finalize(raw_message);
-  r->std(*t, dimension, flag, keepdim);
+  r->std(*t, dimension, biased, keepdim);
 }
 
 static void tensorVar(rpc::RPCMessage& raw_message) {
   thpp::Tensor *r = unpackRetrieveTensor(raw_message);
   thpp::Tensor *t = unpackRetrieveTensor(raw_message);
   int dimension = unpackInteger(raw_message);
-  int flag = unpackInteger(raw_message);
+  int biased = unpackInteger(raw_message);
   int keepdim = unpackInteger(raw_message);
   finalize(raw_message);
-  r->var(*t, dimension, flag, keepdim);
+  r->var(*t, dimension, biased, keepdim);
 }
 
 static void tensorNorm(rpc::RPCMessage& raw_message) {
@@ -480,13 +480,14 @@ static void tensorMeanall(rpc::RPCMessage& raw_message) {
 
 static void tensorVarall(rpc::RPCMessage& raw_message) {
   thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
+  int biased = unpackInteger(raw_message);
   finalize(raw_message);
 
   if (thpp::isInteger(tensor->type())) {
-    long long response = dynamic_cast<thpp::IntTensor*>(tensor)->varall();
+    long long response = dynamic_cast<thpp::IntTensor*>(tensor)->varall(biased);
     sendValueToMaster(response);
   } else if (thpp::isFloat(tensor->type())) {
-    double response = dynamic_cast<thpp::FloatTensor*>(tensor)->varall();
+    double response = dynamic_cast<thpp::FloatTensor*>(tensor)->varall(biased);
     sendValueToMaster(response);
   } else {
     throw std::invalid_argument("expected scalar type");
@@ -495,13 +496,14 @@ static void tensorVarall(rpc::RPCMessage& raw_message) {
 
 static void tensorStdall(rpc::RPCMessage& raw_message) {
   thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
+  int biased = unpackInteger(raw_message);
   finalize(raw_message);
 
   if (thpp::isInteger(tensor->type())) {
-    long long response = dynamic_cast<thpp::IntTensor*>(tensor)->stdall();
+    long long response = dynamic_cast<thpp::IntTensor*>(tensor)->stdall(biased);
     sendValueToMaster(response);
   } else if (thpp::isFloat(tensor->type())) {
-    double response = dynamic_cast<thpp::FloatTensor*>(tensor)->stdall();
+    double response = dynamic_cast<thpp::FloatTensor*>(tensor)->stdall(biased);
     sendValueToMaster(response);
   } else {
     throw std::invalid_argument("expected scalar type");
