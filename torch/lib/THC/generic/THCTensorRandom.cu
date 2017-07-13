@@ -146,22 +146,29 @@ THC_API void THCTensor_(multinomial)(struct THCState *state,
 
   THCudaLongTensor_resize2d(state, self, numDist, n_sample);
 
-  if (n_sample == 1) {
+  // get current device properties
+  cudaDeviceProp* props = THCState_getCurrentDeviceProperties(state);
+  THAssert(props != NULL);
+  int numSM = props->multiProcessorCount;
+  int maxThreads = props->maxThreadsPerBlock;
+  int maxShared = props->sharedMemPerBlock;
+  int requiredShared = (numCategories < maxThreads ? numCategories : maxThreads)
+                                * (sizeof(real) * sizeof(accreal));
+                                
+  if (n_sample == 1 && maxShared >= requiredShared) {
     // Optimized allocation-free implementation
     // To exploit greater parallelism for the sampling, generate the
     // Uniform random samples in a separate kernel launch, into
     // temporarily allocated memory. The device RNG is thread-limited
     THCTensor *sampled = THCTensor_(newWithSize2d)(state, numDist, n_sample);
     THCTensor_(uniform)(state, sampled, 0.0, 1.0);
-    cudaDeviceProp* props = THCState_getCurrentDeviceProperties(state);
-    THAssert(props != NULL);
-    int numSM = props->multiProcessorCount;
-    int maxThreads = props->maxThreadsPerBlock;
+
     dim3 block(numCategories < maxThreads ? numCategories : maxThreads);
     dim3 grid(numDist < numSM * 4 ? numDist : numSM * 4);
+
     sampleMultinomialOnce<real, accreal>
       <<<grid, block,
-         block.x * (sizeof(real) * sizeof(accreal)),
+         requiredShared,
          THCState_getCurrentStream(state)>>>(
       THCudaLongTensor_data(state, self),
       numDist,
