@@ -231,6 +231,16 @@ class Variable(_C._VariableBase):
         self._grad_fn = None
         self.requires_grad = False
 
+    def retain_grad(self):
+        """
+        Stores gradient into .grad on backprop, on non-user Variables, ie for
+        Variables where .creator is not None
+        """
+        def save_grad(grad):
+            self._grad = grad
+            return grad
+        self.register_hook(save_grad)
+
     def contiguous(self):
         self.data = self.data.contiguous()
         return self

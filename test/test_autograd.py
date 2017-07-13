@@ -380,6 +380,15 @@ class TestAutograd(TestCase):
         sum(fn(x, y)).sum().backward()
         self.assertTrue(was_called[0])
 
+    def test_retain_grad(self):
+        input = Variable(torch.rand(1, 3), requires_grad=True)
+        h1 = input * 3
+        out = h1.sum()
+
+        h1.retain_grad()
+        out.backward(torch.ones(1))
+        self.assertEqual(torch.ones(1, 3), h1.grad.data)
+
     def test_backward(self):
         v_t = torch.randn(5, 5)
         x_t = torch.randn(5, 5)
