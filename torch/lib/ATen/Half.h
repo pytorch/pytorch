@@ -3,6 +3,7 @@
 #include<stdint.h>
 #ifdef AT_CUDA_ENABLED
 #include <cuda.h>
+#include <cuda_runtime.h>
 #include <cuda_fp16.h>
 #endif
 
@@ -25,7 +26,7 @@ typedef struct  AT_ALIGN(2) {
   unsigned short x;
 #ifdef AT_CUDA_ENABLED
 #if CUDA_VERSION < 9000
-  operator half() { return half(x); }
+  operator half() { return half{ x }; }
 #else
   operator half() {
     __half_raw x_raw;
