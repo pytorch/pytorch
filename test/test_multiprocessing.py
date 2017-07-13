@@ -393,6 +393,10 @@ class TestMultiprocessing(TestCase):
         param = Parameter(torch.arange(1, 26).view(5, 5))
         self._test_autograd_sharing(param)
 
+    def test_empty_shared(self):
+        t = torch.Tensor()
+        t.share_memory_()
+
     def _test_is_shared(self):
         t = torch.randn(5, 5)
         self.assertFalse(t.is_shared())
