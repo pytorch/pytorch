@@ -126,6 +126,29 @@ class MemongerTest(hu.HypothesisTestCase):
 
         self.assertLess(count_blobs(optimized_net), count_blobs(m.Proto()))
 
+    def test_fast_memonger_unique_outputs(self):
+        m = model_helper.ModelHelper()
+        fc = []
+        for i in range(2):
+            z = brew.fc(
+                m, "data{}".format(i), "fc".format(i), dim_in=2, dim_out=2)
+            fc.append(z)
+        r = []
+        # Trick is here to have same input appear twice in a same Sum
+        for x in fc:
+            for y in fc:
+                r.append(brew.sum(m, [x, y], 1))
+        concated = brew.concat(m, r, "concated")
+        brew.relu(m, concated, "merged")
+
+        static_blobs = \
+            [o for op in m.param_init_net.Proto().op for o in op.output] + \
+            ["merged"] + ["data{}".format(i) for i in range(len(fc))]
+
+        optimized_net = memonger.optimize_inference_fast(
+            m.Proto(), static_blobs)
+        for op in optimized_net.op:
+            self.assertEqual(len(op.output), len(set(op.output)), str(op))
 
     @given(input_dim=st.integers(min_value=1, max_value=4),
            output_dim=st.integers(min_value=1, max_value=4),
