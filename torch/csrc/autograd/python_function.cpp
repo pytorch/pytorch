@@ -377,7 +377,7 @@ static void _transplant_var(Variable& var, const std::shared_ptr<Function>& fn, 
 // do in this case.
 static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
     std::unordered_set<PyObject *> &dirty_inputs, PyObject *raw_output,
-    PyObject *outputs, std::shared_ptr<Node>& this_expr, bool is_volatile)
+    PyObject *outputs, NodeRef& this_expr, bool is_volatile)
 {
   // Wrap outputs in Variables
   auto cdata = is_volatile ? nullptr : THPFunction_asFunction(self);
@@ -464,10 +464,13 @@ static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
       if (output_var->cdata->trace_value) {
           throw std::logic_error("trace already has local variable");
       }
-      auto local = GlobalTracingState->makeValue();
-      if(this_expr)
-        this_expr->outputs.push_back(local);
-      output_var->cdata->trace_value = local;
+      // adding outputs to a Node should be encapsulate somewhere because
+      // it requires setting up def/offset and ValueRef pointers correctly
+      auto local = GlobalTracingState->makeValue(this_expr.get(),this_expr->outputs.size());
+      if(this_expr) {
+        output_var->cdata->trace_value = ValueRef(local.get());
+        this_expr->outputs.push_back(std::move(local));
+      }
     }
     output_var->cdata->output_nr = i;
     PyTuple_SET_ITEM(outputs, i, (PyObject*)output_var);
@@ -637,7 +640,7 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject *args) {
   return std::make_pair(std::move(unpacked), std::move(flags));
 }
 
-PyObject* process_outputs(THPFunction* grad_fn, const UnpackedInput& unpacked, THPObjectPtr&& raw_output, std::shared_ptr<Node>&& this_expr, bool is_volatile) {
+PyObject* process_outputs(THPFunction* grad_fn, const UnpackedInput& unpacked, THPObjectPtr&& raw_output, NodeRef& this_expr, bool is_volatile) {
   bool unpack_output = _ensure_tuple(raw_output);
 
   auto num_outputs = PyTuple_GET_SIZE(raw_output.get());
@@ -680,7 +683,7 @@ PyObject* process_outputs(THPFunction* grad_fn, const UnpackedInput& unpacked, T
 }
 
 // This sort of reimplements unpack_input, but we have our own requirements
-static std::shared_ptr<Node> make_trace(PyObject* pyobj, PyObject *arg_objects, bool is_legacy)
+static NodeRef make_trace(PyObject* pyobj, PyObject *arg_objects, bool is_legacy)
 {
   if (GlobalTracingState) {
     auto num_args = PyTuple_GET_SIZE(arg_objects);
@@ -704,15 +707,15 @@ static std::shared_ptr<Node> make_trace(PyObject* pyobj, PyObject *arg_objects, 
       }
     }
     Py_INCREF(pyobj);
-    auto op = std::make_shared<PythonOp>(
+    auto op = NodeRef(new PythonOp(
       THPObjectPtr(pyobj),
       arg_types,
       is_legacy,
-      std::move(scalar_args));
+      std::move(scalar_args)));
     op->inputs = std::move(tensor_args);
     return op;
   } else {
-    return nullptr;
+    return NodeRef();
   }
 }
 
@@ -735,7 +738,7 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *_inputs)
 
   auto this_expr = make_trace((PyObject*)self, _inputs, true); // legacy
 
-  return process_outputs(self, unpacked_input, std::move(raw_output), std::move(this_expr), is_volatile);
+  return process_outputs(self, unpacked_input, std::move(raw_output), this_expr, is_volatile);
   END_HANDLE_TH_ERRORS
 }
 
@@ -776,7 +779,7 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *_inputs)
 
   auto this_expr = make_trace(cls, _inputs, false);
 
-  return process_outputs(ctx, unpacked_input, std::move(tensor_outputs), std::move(this_expr), is_volatile);
+  return process_outputs(ctx, unpacked_input, std::move(tensor_outputs), this_expr, is_volatile);
   END_HANDLE_TH_ERRORS
 }
 
@@ -1123,8 +1126,8 @@ struct TraceInterpreter
   // TODO: GC the store
   environment store;
   // Local
-  std::shared_ptr<Variable> evalValue(std::shared_ptr<Value> a) {
-    auto it = store.find(a->unique);
+  std::shared_ptr<Variable> evalValue(Value& a) {
+    auto it = store.find(a.unique);
     if (it == store.end()) {
       throw std::logic_error("we don't have this result yet");
     } else {
@@ -1191,11 +1194,11 @@ struct TraceInterpreter
   }
 
   // Instruction
-  void evalNode(std::shared_ptr<Node> i) {
+  void evalNode(NodeRef i) {
     variable_list vars;
     vars.reserve(i->outputs.size());
     for (auto a : i->inputs) {
-        vars.emplace_back(evalValue(a));
+        vars.emplace_back(evalValue(*a));
     }
     variable_list outputs;
     switch(i->kind()) {
@@ -1216,7 +1219,7 @@ struct TraceInterpreter
       evalNode(n);
     variable_list outputs;
     for(auto & o : graph.outputs)
-      outputs.push_back(evalValue(o));
+      outputs.push_back(evalValue(*o));
     return outputs;
   }
 };

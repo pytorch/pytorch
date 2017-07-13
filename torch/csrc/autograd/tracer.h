@@ -15,7 +15,7 @@ public:
     : next_unique(0)
     , graph(new Graph())
     {}
-  std::shared_ptr<Value> makeValue();
+  std::unique_ptr<Value> makeValue(Node * definition, size_t offset);
 };
 
 // Ugh, global state
