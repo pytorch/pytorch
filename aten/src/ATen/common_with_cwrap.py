@@ -53,7 +53,7 @@ def set_declaration_defaults(declaration):
 
 def filter_unique_options(options, allow_kwarg, type_to_signature, remove_self):
     def exclude_arg(arg):
-        return arg.get('ignore_check')
+        return arg.get('ignore_check') or arg['type'] == 'CONSTANT'
 
     def exclude_arg_with_self_check(arg):
         return exclude_arg(arg) or (remove_self and arg['name'] == 'self')
