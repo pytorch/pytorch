@@ -887,6 +887,11 @@ Normalization functions
 
 .. autofunction:: batch_norm
 
+:hidden:`normalize`
+~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: normalize
+
 Linear functions
 ----------------
 
