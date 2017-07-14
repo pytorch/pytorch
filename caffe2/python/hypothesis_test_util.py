@@ -550,11 +550,16 @@ class HypothesisTestCase(test_util.TestCase):
                     self._assertInferTensorChecks(
                         output_blob_name, shapes, types, output)
                 outs.append(output)
-            if grad_reference and output_to_grad:
+            if grad_reference is not None:
+                assert output_to_grad is not None, \
+                    "If grad_reference is set," \
+                    "output_to_grad has to be set as well"
+
                 with core.DeviceScope(device_option):
                     self._assertGradReferenceChecks(
                         op, inputs, reference_outputs,
-                        output_to_grad, grad_reference)
+                        output_to_grad, grad_reference,
+                        threshold=threshold)
             return outs
 
     def assertValidationChecks(
