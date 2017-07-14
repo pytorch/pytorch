@@ -1644,7 +1644,9 @@ class TestTorch(TestCase):
         z = torch.rand(2, 3, 4)
         for dim in range(4):
             res = torch.stack((x, y, z), dim)
+            res_neg = torch.stack((x, y, z), dim - 4)
             expected_size = x.size()[:dim] + (3,) + x.size()[dim:]
+            self.assertEqual(res, res_neg)
             self.assertEqual(res.size(), expected_size)
             self.assertEqual(res.select(dim, 0), x, 0)
             self.assertEqual(res.select(dim, 1), y, 0)
@@ -2881,11 +2883,9 @@ class TestTorch(TestCase):
                 [slice(None), slice(None), [0, 2, 3], [1, 3, 4]],
                 [slice(None), slice(None), [0], [1, 2, 4]],
                 [slice(None), slice(None), [0, 1, 3], [4]],
-                [slice(None), slice(None), [[0, 1], [1, 0]], [[2, 3], [3, 0]]],
                 [slice(None), slice(None), [[0, 1], [1, 0]], [[2, 3]]],
                 [slice(None), slice(None), [[0, 1], [2, 3]], [[0]]],
                 [slice(None), slice(None), [[5, 6]], [[0, 3], [4, 4]]],
-                [slice(None), slice(None), [[2]], [[0, 3], [4, 4]]],
                 [slice(None), [0, 2, 3], [1, 3, 4], slice(None)],
                 [slice(None), [0], [1, 2, 4], slice(None)],
                 [slice(None), [0, 1, 3], [4], slice(None)],
@@ -2925,6 +2925,13 @@ class TestTorch(TestCase):
                 assert_set_eq(reference,
                               indexer,
                               get_set_tensor(reference, indexer))
+            indices_to_test += [
+                [slice(None), slice(None), [[0, 1], [1, 0]], [[2, 3], [3, 0]]],
+                [slice(None), slice(None), [[2]], [[0, 3], [4, 4]]],
+            ]
+            for indexer in indices_to_test:
+                assert_get_eq(reference, indexer)
+                assert_set_eq(reference, indexer, 1333)
 
     def test_advancedindex(self):
         self._test_advancedindex(self, lambda x: x)
@@ -3682,7 +3689,6 @@ class TestTorch(TestCase):
             sys.modules[module.__name__] = module
             return module
 
-        import os
         with tempfile.NamedTemporaryFile() as checkpoint:
             fname = os.path.join(os.path.dirname(__file__), 'data/network1.py')
             module = import_module('tmpmodule', fname)
@@ -3735,13 +3741,12 @@ class TestTorch(TestCase):
 
     def test_from_file(self):
         size = 10000
-        filename = 'testPytorchStorageFromFile'
-        try:
-            s1 = torch.FloatStorage.from_file(filename, True, size)
+        with tempfile.NamedTemporaryFile() as f:
+            s1 = torch.FloatStorage.from_file(f.name, True, size)
             t1 = torch.FloatTensor(s1).copy_(torch.randn(size))
 
             # check mapping
-            s2 = torch.FloatStorage.from_file(filename, True, size)
+            s2 = torch.FloatStorage.from_file(f.name, True, size)
             t2 = torch.FloatTensor(s2)
             self.assertEqual(t1, t2, 0)
 
@@ -3754,9 +3759,6 @@ class TestTorch(TestCase):
             rnum = random.uniform(-1, 1)
             t2.fill_(rnum)
             self.assertEqual(t1, t2, 0)
-        finally:
-            if os.path.exists(filename):
-                os.remove(filename)
 
     def test_print(self):
         for t in torch._tensor_classes:
@@ -3950,6 +3952,10 @@ class TestTorch(TestCase):
         expected = torch.arange(1, 126).view(5, 5, 5)[:, 1]
         self.assertEqual(torch.from_numpy(x), expected)
 
+        # check zero dimentional
+        x = np.zeros((0, 2))
+        self.assertRaises(RuntimeError, lambda: torch.from_numpy(x))
+
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_numpy_index(self):
         i = np.int32([0, 1, 2])
@@ -4124,7 +4130,6 @@ neg_dim_tests = [
     ('index_select', (10, 10), lambda: [DIM_ARG, idx_tensor((10,), 10)], [METHOD, FUNCTIONAL]),
     ('split', (10, 20), lambda: [5, DIM_ARG], [METHOD, FUNCTIONAL]),
     ('squeeze', (10, 1, 20, 1), lambda: [DIM_ARG], [METHOD, INPLACE_METHOD, FUNCTIONAL]),
-    ('stack', [(2, 3, 4), (2, 3, 4)], lambda: [DIM_ARG], [FUNCTIONAL]),
     ('unbind', (2, 3, 4), lambda: [DIM_ARG], [FUNCTIONAL]),
     ('unsqueeze', (10, 20), lambda: [DIM_ARG], [METHOD, INPLACE_METHOD, FUNCTIONAL], 1),
     ('cumprod', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),

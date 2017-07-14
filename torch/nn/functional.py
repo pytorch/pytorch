@@ -621,9 +621,7 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100):
     if dim == 2:
         f = _functions.thnn.NLLLoss(size_average, ignore_index, weight=weight)
     elif dim == 4:
-        if ignore_index != -100:
-            raise ValueError('ignore_index is not supported for 4-D inputs')
-        f = _functions.thnn.NLLLoss2d(size_average, weight=weight)
+        f = _functions.thnn.NLLLoss2d(size_average, ignore_index, weight=weight)
     else:
         raise ValueError('Expected 2 or 4 dimensions (got {})'.format(dim))
     return f(input, target)
@@ -902,7 +900,7 @@ def grid_sample(input, grid, mode='bilinear'):
 
 def affine_grid(theta, size):
     """Generates a 2d flow field, given a batch of affine matrices :attr:`theta`
-    Generally used in conjunction with :function:`grid_sample` to
+    Generally used in conjunction with :func:`grid_sample` to
     implement Spatial Transformer Networks.
 
     Args:

@@ -18,6 +18,25 @@ FUNCTION(EXCLUDE_DIR list_name dir_name)
 ENDFUNCTION()
 
 ################################################################################
+SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
+
+INCLUDE(CheckCXXSourceCompiles)
+
+CHECK_CXX_SOURCE_COMPILES("
+#include <thread>
+
+thread_local int foo=1;
+
+int main() {
+  return 0;
+}" HAS_THREAD_LOCAL)
+
+IF(NOT HAS_THREAD_LOCAL)
+    MESSAGE(FATAL_ERROR "thread_local not supported. THD requires a compiler"
+                        " that supports thread_local. Please upgrade your "
+                        "compiler. If you are on OSX, upgrade to "
+                        "XCode 8 or newer.")
+ENDIF(NOT HAS_THREAD_LOCAL)
 
 FIND_PACKAGE(MPI)
 
@@ -101,7 +120,6 @@ EXCLUDE_DIR(all_cpp ".*/generic/.*\\.cpp$")
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR})
 
 ADD_LIBRARY(THD SHARED ${all_cpp})
-SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
 
 IF(THD_SO_VERSION)
   MESSAGE(STATUS "THD_SO_VERSION: ${THD_SO_VERSION}")

@@ -18,7 +18,8 @@ __global__ void cunn_SpatialClassNLLCriterion_updateOutput_kernel(
           int batch_size,
           int n_classes,
           int map_nelem,
-          int blocks_per_sample)
+          int blocks_per_sample,
+          long ignore_index)
 {
   __shared__ AccumT partial_sums[CUDA_NUM_THREADS];
 
@@ -35,10 +36,12 @@ __global__ void cunn_SpatialClassNLLCriterion_updateOutput_kernel(
        i < map_nelem;
        i += step) {
     t = target[toffset + i] - TH_INDEX_BASE;
-    assert(t >= 0 && t < n_classes);
-    cur_weight = weights ? weights[t] : ScalarConvert<int, T>::to(1);
-    input_sum -= input[ioffset + i + map_nelem * t] * cur_weight;
-    acc_weight += cur_weight;
+    if (t != ignore_index) {
+      assert(t >= 0 && t < n_classes);
+      cur_weight = weights ? weights[t] : ScalarConvert<int, T>::to(1);
+      input_sum -= input[ioffset + i + map_nelem * t] * cur_weight;
+      acc_weight += cur_weight;
+    }
   }
 
   __syncthreads();
@@ -71,7 +74,8 @@ __global__ void cunn_SpatialClassNLLCriterion_updateGradInput_kernel(
           int batch_size,
           int n_classes,
           int map_nelem,
-          int blocks_per_sample)
+          int blocks_per_sample,
+          long ignore_index)
 {
   if (*total_weight <= 0)
     return;
@@ -87,8 +91,10 @@ __global__ void cunn_SpatialClassNLLCriterion_updateGradInput_kernel(
        i < map_nelem;
        i += step) {
     t = (int)target[toffset + i] - TH_INDEX_BASE;
-    assert(t >= 0 && t < n_classes);
-    gradInput[ioffset + i + map_nelem * t] = -(weights ? weights[t] : ScalarConvert<int, T>::to(1)) * norm;
+    if (t != ignore_index) {
+      assert(t >= 0 && t < n_classes);
+      gradInput[ioffset + i + map_nelem * t] = -(weights ? weights[t] : ScalarConvert<int, T>::to(1)) * norm;
+    }
   }
 }
 

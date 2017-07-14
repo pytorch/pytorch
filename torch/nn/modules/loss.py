@@ -124,7 +124,7 @@ class NLLLoss(_WeightedLoss):
                           self.ignore_index)
 
 
-class NLLLoss2d(_WeightedLoss):
+class NLLLoss2d(NLLLoss):
     r"""This is negative log likehood loss, but for image inputs. It computes
     NLL loss per-pixel.
 
@@ -421,7 +421,7 @@ class CrossEntropyLoss(_WeightedLoss):
 
     Shape:
         - Input: :math:`(N, C)` where `C = number of classes`
-        - Target: :math:`(N)` where each value is `0 <= targets[i] <= C-1
+        - Target: :math:`(N)` where each value is `0 <= targets[i] <= C-1`
     """
 
     def __init__(self, weight=None, size_average=True, ignore_index=-100):
