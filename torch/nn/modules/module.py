@@ -77,6 +77,9 @@ class Module(object):
         Example:
             >>> self.register_buffer('running_mean', torch.zeros(num_features))
         """
+        if hasattr(self, name):
+            raise KeyError("attribute already exists '{}'".format(name))
+
         self._buffers[name] = tensor
 
     def register_parameter(self, name, param):
@@ -84,6 +87,9 @@ class Module(object):
 
         The parameter can be accessed as an attribute using given name.
         """
+        if hasattr(self, name):
+            raise KeyError("attribute already exists '{}'".format(name))
+
         if '_parameters' not in self.__dict__:
             raise AttributeError(
                 "cannot assign parameter before Module.__init__() call")
