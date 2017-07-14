@@ -29,6 +29,11 @@ IF(NOT CUDA_FOUND)
   FIND_PACKAGE(CUDA 6.5 REQUIRED)
 ENDIF()
 
+IF ($ENV{TH_BINARY_BUILD})
+  MESSAGE(STATUS "TH_BINARY_BUILD detected. Statically linking libstdc++")
+  SET(CMAKE_CXX_FLAGS "-static-libstdc++ ${CMAKE_CXX_FLAGS}")
+ENDIF()
+
 # Detect CUDA architecture and get best NVCC flags
 IF(NOT COMMAND CUDA_SELECT_NVCC_ARCH_FLAGS OR MSVC)
   INCLUDE(${CMAKE_CURRENT_SOURCE_DIR}/cmake/select_compute_arch.cmake)
