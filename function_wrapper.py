@@ -251,7 +251,7 @@ def create_generic(top_env, declarations):
         return None
 
     def format_formal(f):
-        return '{} {}'.format(f['type'],f['name'])
+        return '{} {}'.format(f['type'], f['name'])
 
     def process_option(option, output_options):
         option['inplace'] = re.search(
@@ -323,7 +323,7 @@ def create_generic(top_env, declarations):
         output_options = []
         for option in declaration['options']:
             try:
-                process_option(option,output_options)
+                process_option(option, output_options)
             except NYIError:
                 option['skip'] = True
         if len(output_options) > 0:
