@@ -1,0 +1,24 @@
+# https://travis-ci.org/zdevito/ATen
+language: python
+python:
+    - 2.7
+    - 3.6
+
+dist: trusty
+
+install:
+    - travis_retry pip install pyyaml
+
+script:
+    - mkdir build install
+    - cd build
+    - cmake .. -DNO_CUDA=1 -DCMAKE_INSTALL_PREFIX=../install
+    - make install
+
+matrix:
+    fast_finish: true
+    include:
+        env: LINT_CHECK
+        python: "2.7"
+        install: pip install flake8
+        script: flake8
