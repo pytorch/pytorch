@@ -85,6 +85,20 @@ TYPE_FORMAL_GENERIC = {
     'long': 'int64_t',
 }
 
+DYNAMIC_TYPE = {
+    'THTensor*': 'Tensor',
+    'THBoolTensor*': 'BoolTensor',
+    'THIndexTensor*': 'IndexTensor',
+    'THIntegerTensor*': 'IntegerTensor',
+    'THStorage*': 'Storage',
+    'THGenerator*': 'Generator',
+    'THSize*': 'IntList',
+    'THStride*': 'IntList',
+    'accreal': 'accreal',
+    'real': 'real',
+    'long': 'int64_t',
+}
+
 TYPE_RETURN = {
     'THTensor*': 'Tensor',
     'THIndexTensor*': 'Tensor',
@@ -164,10 +178,28 @@ def to_return_type(arg, option):
         rt = rt + ' &'
         if not is_mutable_formal_argument(arg, option):
             rt = 'const ' + rt
-    return rt
+    return {
+        'type': rt,
+        'dynamic_type': DYNAMIC_TYPE.get(arg['type'], arg['type']),
+    }
 
 
 def create_generic(top_env, declarations):
+
+    # change from THTensor* to Tensor & so we get how it will appear
+    # in the aten argument list...
+    def translate_formal(argument, option):
+        type_str = TYPE_FORMAL_GENERIC.get(argument['type'], argument['type'])
+        if type_str == 'Tensor &' and not is_mutable_formal_argument(argument, option):
+            type_str = 'const ' + type_str
+        translated = {
+            'name': argument['name'],
+            'type': type_str,
+            'dynamic_type': DYNAMIC_TYPE.get(argument['type'], argument['type']),
+        }
+        if argument.get('output'):
+            translated['output'] = True
+        return translated
 
     def get_formals(option):
         seen = set()
@@ -185,38 +217,43 @@ def create_generic(top_env, declarations):
         for argument in option['arguments']:
             if argument.get('output') and not argument.get('allocate', False):
                 insert(argument)
-        return result
 
-    def format_formal(argument, option):
-        type_str = TYPE_FORMAL_GENERIC.get(argument['type'], argument['type'])
-        if type_str == 'Tensor &' and not is_mutable_formal_argument(argument, option):
-            type_str = 'const ' + type_str
-        return '{} {}'.format(type_str, argument['name'])
+        return [translate_formal(argument, option) for argument in result]
 
-    def format_return_type(option):
+    def get_return_types(option):
         ret = option['return']
         if ret['kind'] == 'arguments':
             argument_indices = ret['arguments']
             if len(argument_indices) == 1:
                 the_arg = option['arguments'][argument_indices[0]]
-                return to_return_type(the_arg, option)
+                return [to_return_type(the_arg, option)]
             else:
-                types = [to_return_type(option['arguments'][idx], option)
-                         for idx in argument_indices]
-                return "std::tuple<{}>".format(','.join(types))
-
+                return [to_return_type(option['arguments'][idx], option)
+                        for idx in argument_indices]
         elif ret['kind'] == 'type':
-            return TYPE_RETURN.get(ret['type'], ret['type'])
+            return [{
+                'type': TYPE_RETURN.get(ret['type'], ret['type']),
+                'dynamic_type': DYNAMIC_TYPE.get(ret['type'], ret['type']),
+            }]
         else:
             raise Exception("format_return_type")
 
+    def format_return_type(return_types):
+        if len(return_types) == 1:
+            return return_types[0]['type']
+        return "std::tuple<{}>".format(','.join(r['type'] for r in return_types))
+        return return_types
+
     def find_first_tensor(formals):
-        for argument in formals:
-            if argument['type'] == "THTensor*" or argument['type'] == 'TensorList':
-                return argument['name']
+        for formal in formals:
+            if 'Tensor' == formal['dynamic_type'] or 'TensorList' == formal['dynamic_type']:
+                return formal['name']
         return None
 
-    def process_option(option):
+    def format_formal(f):
+        return '{} {}'.format(f['type'],f['name'])
+
+    def process_option(option, output_options):
         option['inplace'] = re.search(
             '(^__i|[^_]_$)', option['api_name']) is not None
 
@@ -226,13 +263,15 @@ def create_generic(top_env, declarations):
         # print(yaml.dump(option))
         formals = get_formals(option)
         option['formals_list'] = formals
-        option['formals'] = [format_formal(f, option) for f in formals]
+        option['formals'] = [format_formal(f) for f in formals]
+        option['returns'] = get_return_types(option)
         option['actuals'] = [f['name'] for f in formals]
-        option['method_formals'] = [format_formal(f, option) for f in formals
+
+        option['method_formals'] = [format_formal(f) for f in formals
                                     if f['name'] != 'self']
         option['method_actuals'] = [
             f['name'] if f['name'] != 'self' else '*this' for f in formals]
-        option['return_type'] = format_return_type(option)
+        option['return_type'] = format_return_type(option['returns'])
 
         option['const_mark'] = '' if option['inplace'] else ' const'
 
@@ -253,22 +292,46 @@ def create_generic(top_env, declarations):
                 TENSOR_METHOD_DECLARATION.substitute(env))
             top_env['tensor_method_definitions'].append(
                 TENSOR_METHOD_DEFINITION.substitute(env))
+            output_options.append({
+                'name': option['name'],
+                'arguments': [f for f in formals if f['name'] != 'self'],
+                'method_of': 'Tensor',
+                'returns': option['returns'],
+                'inplace': option['inplace'],
+            })
 
         if is_function:
             first_tensor = find_first_tensor(formals)
+            output_option = {
+                'name': option['name'],
+                'arguments': formals,
+                'returns': option['returns'],
+                'inplace': option['inplace'],
+            }
             if first_tensor is not None:
                 option['inferred_type'] = 'infer_type({})'.format(first_tensor)
                 top_env['function_declarations'].append(
                     FUNCTION_DECLARATION.substitute(env))
                 top_env['function_definitions'].append(
                     FUNCTION_DEFINITION.substitute(env))
+            else:
+                output_option['method_of'] = 'Type'
+            output_options.append(output_option)
 
+    output_declarations = []
     for declaration in declarations:
+        output_options = []
         for option in declaration['options']:
             try:
-                process_option(option)
+                process_option(option,output_options)
             except NYIError:
                 option['skip'] = True
+        if len(output_options) > 0:
+            output_declarations.append({
+                'name': output_options[0]['name'],
+                'options': output_options,
+            })
+    return output_declarations
 
 
 def create_derived(backend_type_env, declarations):
@@ -429,7 +492,7 @@ def create_derived(backend_type_env, declarations):
                 arg = arguments[0]
                 body.append("return {};".format(arg['name']))
             else:
-                types = [to_return_type(arg, option) for arg in arguments]
+                types = [to_return_type(arg, option)['type'] for arg in arguments]
                 # TODO: check for move semantics...
                 names = [arg['name'] for arg in arguments]
                 body.append(CodeTemplate("return std::tuple<${types}>(${names});").substitute(
