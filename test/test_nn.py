@@ -2334,6 +2334,20 @@ class TestNN(NNTestCase):
             self.assertEqual(res1, res2)
             self.assertEqual(grad1, grad2)
 
+    def test_layernorm_raises_error_if_weight_is_not_same_size_as_input(self):
+        input = Variable(torch.rand(2, 10))
+        wrong_sizes = [9, 11]
+        for size in wrong_sizes:
+            with self.assertRaises(RuntimeError):
+                F.layer_norm(input, weight=Parameter(torch.rand(size)))
+
+    def test_layernorm_raises_error_if_bias_is_not_same_size_as_input(self):
+        input = Variable(torch.rand(2, 10))
+        wrong_sizes = [9, 11]
+        for size in wrong_sizes:
+            with self.assertRaises(RuntimeError):
+                F.layer_norm(input, bias=Parameter(torch.rand(size)))
+
     def test_pairwise_distance(self):
         input1 = Variable(torch.randn(4, 4), requires_grad=True)
         input2 = Variable(torch.randn(4, 4), requires_grad=True)
@@ -3172,6 +3186,48 @@ new_module_tests = [
         input_size=(2, 3, 4, 4, 4),
         cudnn=True,
         desc='no_affine'
+    ),
+    dict(
+        module_name='LayerNorm1d',
+        constructor_args=(10,),
+        input_size=(4, 10),
+        desc='affine'
+    ),
+    dict(
+        module_name='LayerNorm1d',
+        constructor_args=(5,),
+        input_size=(4, 5, 3),
+        desc='3d_input'
+    ),
+    dict(
+        module_name='LayerNorm1d',
+        constructor_args=(10, 1e-3, False),
+        input_size=(4, 10),
+        desc='not_affine'
+    ),
+    dict(
+        module_name='LayerNorm2d',
+        constructor_args=(3,),
+        input_size=(2, 3, 6, 6),
+        desc='affine'
+    ),
+    dict(
+        module_name='LayerNorm2d',
+        constructor_args=(3, 1e-3, False),
+        input_size=(2, 3, 6, 6),
+        desc='not_affine'
+    ),
+    dict(
+        module_name='LayerNorm3d',
+        constructor_args=(3,),
+        input_size=(2, 3, 4, 4, 4),
+        desc='affine'
+    ),
+    dict(
+        module_name='LayerNorm3d',
+        constructor_args=(3, 1e-3, False),
+        input_size=(2, 3, 4, 4, 4),
+        desc='not_affine'
     ),
     dict(
         module_name='Conv1d',
