@@ -52,6 +52,11 @@ auto TupleParser::parse(std::shared_ptr<thpp::Tensor>& x, const std::string& par
   x.reset(torch::createTensor(obj)->clone_shallow());
 }
 
+auto TupleParser::parse(at::Tensor& x, const std::string& param_name) -> void {
+  PyObject* obj = next_arg();
+  x = torch::createTensorAT(obj);
+}
+
 auto TupleParser::parse(std::vector<int>& x, const std::string& param_name) -> void {
   PyObject* obj = next_arg();
   if (!PyTuple_Check(obj)) {
