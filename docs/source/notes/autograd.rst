@@ -68,12 +68,12 @@ model. ``volatile`` also determines that ``requires_grad is False``.
 Volatile differs from :ref:`excluding-requires_grad` in how the flag propagates.
 If there's even a single volatile input to an operation, its output is also
 going to be volatile. Volatility spreads accross the graph much easier than
-non-requiring gradient - you only need a **single** volatile leaf to have a
-volatile output, while you need **all** leaves to not require gradient to
-have an output the doesn't require gradient. Using volatile flag you don't
-need to change any settings of your model parameters to use it for
-inference. It's enough to create a volatile input, and this will ensure that
-no intermediate states are saved.
+non-requiring gradient - you only need to set a **single** leaf node to
+``volatile=True`` to have a volatile output, while you need to set **all** leaf
+and internal nodes to ``requires_grad=False`` to have an output that doesn't
+require a gradient. Using volatile flag you don't need to change any settings of
+your model parameters to use it for inference. It's enough to create a volatile
+input, and this will ensure that no intermediate states are saved.
 
 .. code::
 
