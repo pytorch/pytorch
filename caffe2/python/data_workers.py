@@ -43,6 +43,9 @@ chunks but data directly provided by fetchers is used.
 'batch_columns' can be used to specify which dimension is the batch dimension,
 for each of the inputs. Default is 0 for all iputs.
 
+'timeout' is the timeout in seconds after which if no data is available, the
+net will fail (default 600s = 10 mins).
+
 This function returns a list of numpy arrays corresponding to the different
 input blobs. In the example above, it would return two arrays, one for the
 data blob and another for the labels. These arrays can have arbitrary number
@@ -96,6 +99,7 @@ def init_data_input_workers(
     external_loggers=None,
     dont_rebatch=False,
     batch_columns=None,
+    timeout=600
 ):
     global global_coordinator
     device_option = scope.CurrentDeviceScope()
@@ -144,7 +148,7 @@ class DataInputCoordinator(object):
     def __init__(self, net, input_blob_names, batch_size,
                  device_option, namescope, input_source_name, queue,
                  init_fun=None, external_loggers=None, dont_rebatch=False,
-                 batch_columns=None):
+                 batch_columns=None, timeout=600):
         self._counter = 0
         self._input_blob_names = input_blob_names
         self._batch_size = batch_size
@@ -154,6 +158,7 @@ class DataInputCoordinator(object):
         self._namescope = namescope
         self._active = True
         self._started = False
+        self._timeout = timeout
         self._workers = []
         self._input_source_name = input_source_name
         self._c2_queue_capacity = 4
@@ -385,7 +390,7 @@ class DataInputCoordinator(object):
         '''
         for q, blob_name in zip(self._queues, self._input_blob_names):
             # Add operator to the Caffe2 network to dequeue
-            net.DequeueBlobs(q, blob_name)
+            net.DequeueBlobs(q, blob_name, timeout_secs=float(self._timeout))
 
     def _log_inputs_per_interval(self, inputs, force=False):
         self._inputs += inputs

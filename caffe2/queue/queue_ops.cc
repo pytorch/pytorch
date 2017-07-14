@@ -24,9 +24,17 @@ OPERATOR_SCHEMA(EnqueueBlobs)
       return inputs >= 2 && outputs >= 1 && inputs == outputs + 1;
     })
     .EnforceInplace([](int input, int output) { return input == output + 1; });
-OPERATOR_SCHEMA(DequeueBlobs).NumInputsOutputs([](int inputs, int outputs) {
-  return inputs == 1 && outputs >= 1;
-});
+OPERATOR_SCHEMA(DequeueBlobs)
+    .NumInputsOutputs([](int inputs, int outputs) {
+      return inputs == 1 && outputs >= 1;
+    })
+    .SetDoc(R"DOC(
+  Dequeue the blobs from queue.
+  )DOC")
+    .Arg("timeout_secs", "Timeout in secs, default: no timeout")
+    .Input(0, "queue", "The shared pointer for the BlobsQueue")
+    .Output(0, "blob", "The blob to store the dequeued data");
+
 OPERATOR_SCHEMA(CloseBlobsQueue).NumInputs(1).NumOutputs(0);
 
 OPERATOR_SCHEMA(SafeEnqueueBlobs)
@@ -54,7 +62,9 @@ step.
 The 1st input is the queue and the last output is the status. The rest are
 data blobs.
 )DOC")
-    .Input(0, "queue", "The shared pointer for the BlobsQueue");
+    .Input(0, "queue", "The shared pointer for the BlobsQueue")
+    .Output(0, "blob", "The blob to store the dequeued data")
+    .Output(1, "status", "Is set to 0/1 depending on the success of dequeue");
 
 OPERATOR_SCHEMA(WeightedSampleDequeueBlobs)
     .NumInputs(1, INT_MAX)

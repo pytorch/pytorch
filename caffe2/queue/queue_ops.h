@@ -58,16 +58,22 @@ template <typename Context>
 class DequeueBlobsOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  using Operator<Context>::Operator;
+
+  DequeueBlobsOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws) {
+    timeout_secs_ = OperatorBase::GetSingleArgument<float>("timeout_secs", 0);
+  }
+
   bool RunOnDevice() override {
     CAFFE_ENFORCE(InputSize() == 1);
     auto queue =
         OperatorBase::Inputs()[0]->template Get<std::shared_ptr<BlobsQueue>>();
     CAFFE_ENFORCE(queue && OutputSize() == queue->getNumBlobs());
-    return queue->blockingRead(this->Outputs());
+    return queue->blockingRead(this->Outputs(), timeout_secs_);
   }
 
  private:
+  float timeout_secs_;
 };
 
 template <typename Context>
@@ -114,6 +120,7 @@ class SafeDequeueBlobsOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   using Operator<Context>::Operator;
+
   bool RunOnDevice() override {
     CAFFE_ENFORCE(InputSize() == 1);
     auto queue = Operator<Context>::Inputs()[0]

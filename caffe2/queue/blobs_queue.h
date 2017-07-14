@@ -59,7 +59,9 @@ class BlobsQueue : public std::enable_shared_from_this<BlobsQueue> {
     close();
   }
 
-  bool blockingRead(const std::vector<Blob*>& inputs) {
+  bool blockingRead(
+      const std::vector<Blob*>& inputs,
+      float timeout_secs = 0.0f) {
     auto keeper = this->shared_from_this();
     std::unique_lock<std::mutex> g(mutex_);
     auto canRead = [this]() {
@@ -67,8 +69,17 @@ class BlobsQueue : public std::enable_shared_from_this<BlobsQueue> {
       return reader_ != writer_;
     };
     CAFFE_EVENT(stats_, queue_balance, -1);
-    cv_.wait(g, [this, canRead]() { return closing_ || canRead(); });
+    if (timeout_secs > 0) {
+      std::chrono::milliseconds timeout_ms(int(timeout_secs * 1000));
+      cv_.wait_for(
+          g, timeout_ms, [this, canRead]() { return closing_ || canRead(); });
+    } else {
+      cv_.wait(g, [this, canRead]() { return closing_ || canRead(); });
+    }
     if (!canRead()) {
+      if (timeout_secs > 0 && !closing_) {
+        LOG(ERROR) << "DequeueBlobs timed out in " << timeout_secs << " secs";
+      }
       return false;
     }
     DCHECK(canRead());

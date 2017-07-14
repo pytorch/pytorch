@@ -4,6 +4,7 @@ from __future__ import print_function
 
 import numpy as np
 import copy
+import time
 from functools import partial, reduce
 from future.utils import viewitems, viewkeys
 from hypothesis import assume, given, settings
@@ -1167,6 +1168,24 @@ class TestOperators(hu.HypothesisTestCase):
             inputs=[input_tensor],
             reference=log_ref)
         self.assertGradientChecks(gc, op, [input_tensor], 0, [0])
+
+    def test_blobs_dequeue_timeout(self):
+        op = core.CreateOperator(
+            "CreateBlobsQueue",
+            [],
+            ["queue"],
+            capacity=5,
+            num_blobs=1)
+        self.ws.run(op)
+        t = time.time()
+        op = core.CreateOperator(
+            "DequeueBlobs",
+            ["queue"],
+            ["out"],
+            timeout_secs=0.2)
+        self.assertRaises(RuntimeError, lambda: self.ws.run(op))
+        t = time.time() - t
+        self.assertGreater(t, 0.19)
 
     @given(num_threads=st.integers(1, 10),  # noqa
            num_elements=st.integers(1, 100),
