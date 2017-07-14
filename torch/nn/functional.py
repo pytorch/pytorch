@@ -573,18 +573,18 @@ def layer_norm(input, weight=None, bias=None, eps=1e-5):
     # Resize weights and biases to match dims
     if weight is not None:
         if input.size(1) != weight.nelement():
-            raise ValueError('got {}-feature tensor, expected {}'
+            raise RuntimeError('got {}-feature tensor, expected {}'
                              .format(input.size(1), weight.nelement()))
         resized_weight = weight.view(1, input.size(1),
                                      *map(lambda x: 1, input.size()[2:]))
         output = resized_weight.expand_as(input) * output
     if bias is not None:
         if input.size(1) != bias.nelement():
-            raise ValueError('got {}-feature tensor, expected {}'
+            raise RuntimeError('got {}-feature tensor, expected {}'
                              .format(input.size(1), bias.nelement()))
         resized_bias = bias.view(1, input.size(1),
                                  *map(lambda x: 1, input.size()[2:]))
-        output = ouput + resized_bias.expand_as(input)
+        output = output + resized_bias.expand_as(input)
 
     return output
 
