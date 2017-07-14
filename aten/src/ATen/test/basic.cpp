@@ -203,6 +203,13 @@ static void test(Type & type) {
     Tensor tt = CPU(kFloat).unsafeTensorFromTH(t);
     std::cout << tt << std::endl;
   }
+  {
+      Tensor a = CPU(kFloat).zeros({3,4});
+      Tensor b = CPU(kFloat).ones({3,7});
+      Tensor c = cat({a,b},1);
+      std::cout << c << std::endl;
+  }
+
 }
 
 int main()
