@@ -311,7 +311,8 @@ criterion_tests = [
         constructor_args=(None, True, 3),
         input_size=(2, 3, 5, 5),
         target=torch.rand(2, 5, 5).mul(4).floor().long(),
-        desc='ignore_index'
+        desc='ignore_index',
+        check_gradgrad=False,
     ),
     dict(
         module_name='HingeEmbeddingLoss',
