@@ -116,7 +116,6 @@ module_tests = [
         module_name='ELU',
         constructor_args=(2.,),
         input_size=(3, 2, 5),
-        check_gradgrad=False,
     ),
     # TODO: reference function
     dict(

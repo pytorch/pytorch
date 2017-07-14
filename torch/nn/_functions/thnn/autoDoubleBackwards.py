@@ -13,6 +13,20 @@ def hardtanh_double_backwards(ctx, ggI):
     return gI, ggO, None, None, None
 
 
+def elu_double_backwards(ctx, ggI):
+    t = ctx.saved_variables
+    input, grad_output = t[0], t[1]
+    alpha = ctx.additional_args[0]
+
+    negative_mask = (input < 0).type_as(ggI)
+    exp_alpha = input.exp() * alpha * negative_mask
+    gI = ggI * grad_output * exp_alpha
+
+    non_negative_mask = (input >= 0).type_as(ggI)
+    ggO = ggI * (exp_alpha + non_negative_mask)
+    return gI, ggO, None, None, None, None
+
+
 def l1loss_double_backwards(ctx, ggI):
     size_average = ctx.additional_args[0]
     input, target, grad_output = ctx.saved_variables
@@ -27,5 +41,6 @@ def l1loss_double_backwards(ctx, ggI):
 
 double_backwards_fns = {
     'Hardtanh': hardtanh_double_backwards,
+    'ELU': elu_double_backwards,
     'L1Loss': l1loss_double_backwards,
 }
