@@ -203,6 +203,23 @@ class LayerModelHelper(model_helper.ModelHelper):
         assert self._loss is None
         self._loss = loss
 
+    def add_loss(self, loss, name='unnamed'):
+        assert loss is not None, "Added loss should not be None"
+        assert isinstance(loss, schema.Scalar) or isinstance(
+            loss, schema.Struct
+        ), "Added loss should be a scalar or a struct"
+        if self._loss is None:
+            self._loss = schema.Struct((name, loss))
+        else:
+            prefix_base = name + '_auto_'
+            index = 0
+            prefix = name
+            while prefix in self._loss:
+                prefix = prefix_base + str(index)
+                index += 1
+            loss_struct = schema.Struct((prefix, loss))
+            self._loss = self._loss + loss_struct
+
     def __getattr__(self, layer):
         if layer.startswith('__'):
             raise AttributeError(layer)
