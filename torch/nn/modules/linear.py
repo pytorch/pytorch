@@ -111,9 +111,10 @@ class Bilinear(Module):
             + ', in2_features=' + str(self.in2_features) \
             + ', out_features=' + str(self.out_features) + ')'
 
-            
+
 class NoisyLinear(Module):
-    """Applies a noisy linear transformation to the incoming data: :math:`y = (mu_w + sigma_w \cdot epsilon_w)x + mu_b + sigma_b \cdot epsilon_b`
+    """Applies a noisy linear transformation to the incoming data: 
+        :math:`y = (mu_w + sigma_w \cdot epsilon_w)x + mu_b + sigma_b \cdot epsilon_b`
     More details can be found in the paper `Noisy Networks for Exploration` _ .
     Args:
         in_features: size of each input sample
@@ -141,12 +142,9 @@ class NoisyLinear(Module):
         self.factorised = factorised
         self.weight_mu = Parameter(torch.Tensor(out_features, in_features))
         self.weight_sigma = Parameter(torch.Tensor(out_features, in_features))
-        for name, param in self.parameters():
-            self.register_parameter("sigma_"+name, self.weight_sigma)
         if bias:
             self.bias_mu = Parameter(torch.Tensor(out_features))
             self.bias_sigma = Parameter(torch.Tensor(out_features))
-            self.register_parameter('sigma_bias', self.bias_sigma)
         else:
             self.register_parameter('bias', None)
         if not std_init:
@@ -192,9 +190,9 @@ class NoisyLinear(Module):
 
     def forward(self, input):
         if self.training:
-            return F.linear(input, 
-                        self.weight_mu + self.weight_sigma.mul(self.weight_epsilon), 
-                        self.bias_mu + self.bias_sigma.mul(self.bias_epsilon))
+            return F.linear(input,
+                            self.weight_mu + self.weight_sigma.mul(self.weight_epsilon),
+                            self.bias_mu + self.bias_sigma.mul(self.bias_epsilon))
         else:
             return F.linear(input, self.weight_mu, self.bias_mu)
 
