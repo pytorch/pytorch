@@ -6,6 +6,7 @@ from torch._thnn.utils import parse_header, THNN_H_PATH
 from torch.autograd import Variable
 from torch.autograd.function import Function, InplaceFunction, once_differentiable
 from torch._thnn import type2backend
+from .autoDoubleBackwards import double_backwards_fns
 
 from . import _all_functions
 
@@ -86,7 +87,7 @@ def _find_buffers(args, ignored_args):
     return buffers
 
 
-def _make_function_class(class_name, update_output, update_grad_input, acc_grad_parameters):
+def _make_function_class(class_name, update_output, update_grad_input, acc_grad_parameters, double_backwards_fn):
     def has_argument(fn, name):
         for arg in fn.arguments:
             if arg.name == name:
@@ -126,6 +127,7 @@ def _make_function_class(class_name, update_output, update_grad_input, acc_grad_
         ctx.additional_args = additional_args_ctx
         ctx.buffers = buffers_ctx
         ctx._backend = backend_ctx
+        ctx.save_for_backward(input, grad_output, *params)
         if save_output:
             output = params[0]
             params = params[1:]
@@ -167,7 +169,7 @@ def _make_function_class(class_name, update_output, update_grad_input, acc_grad_
 
     @staticmethod
     def backward_cls_backward(ctx, *grad_params):
-        raise ValueError(class_name + " can only be differentiated once.")
+        return double_backwards_fn(ctx, *grad_params)
 
     base_class = Function if not is_inplace else InplaceFunction
     backward_cls = type(class_name + "Backward", (base_class,), dict(forward=backward_cls_forward,
@@ -314,6 +316,11 @@ def _generate_function_classes(scope_dict):
         update_grad_input = function_by_name[fn + '_updateGradInput']
         acc_grad_parameters = function_by_name.get(fn + '_accGradParameters')
         class_name = name_remap.get(fn, fn)
+        double_backwards_fn = double_backwards_fns.get(class_name)
+        if double_backwards_fn is None:
+            def default_double_backwards_fn():
+                raise ValueError(class_name + " can only be differentiated once.")
+            double_backwards_fn = default_double_backwards_fn
         # This has to call a function to retain correct references to functions
         is_criterion_fn = 'Criterion' in fn
         if is_criterion_fn:
@@ -321,7 +328,8 @@ def _generate_function_classes(scope_dict):
                                                                update_grad_input, acc_grad_parameters)
         else:
             cls, backward_cls = _make_function_class(class_name, update_output,
-                                                     update_grad_input, acc_grad_parameters)
+                                                     update_grad_input, acc_grad_parameters,
+                                                     double_backwards_fn)
         scope_dict[class_name] = cls
         scope_dict[backward_cls.__name__] = backward_cls
         if not class_name.startswith('_'):

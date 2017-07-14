@@ -59,7 +59,6 @@ module_tests = [
         module_name='ReLU6',
         input_size=(2, 3, 4, 5),
         check_inplace=True,
-        check_gradgrad=False,
     ),
     dict(
         module_name='RReLU',
@@ -79,7 +78,6 @@ module_tests = [
         module_name='Hardtanh',
         input_size=(3, 2, 5),
         reference_fn=lambda i, _: i.clamp(-1, 1),
-        check_gradgrad=False,
     ),
     dict(
         module_name='Sigmoid',
