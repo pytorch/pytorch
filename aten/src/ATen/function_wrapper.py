@@ -261,7 +261,7 @@ def create_generic(top_env, declarations):
         for option in declaration['options']:
             try:
                 process_option(option)
-            except NYIError as e:
+            except NYIError:
                 option['skip'] = True
 
 
