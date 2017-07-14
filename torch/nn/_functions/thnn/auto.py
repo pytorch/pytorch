@@ -11,7 +11,8 @@ from .autoDoubleBackwards import double_backwards_fns
 from . import _all_functions
 
 
-def _make_function_class_criterion(class_name, update_output, update_grad_input, acc_grad_parameters):
+def _make_function_class_criterion(class_name, update_output, update_grad_input, acc_grad_parameters,
+                                   double_backwards_fn):
     weight_arg_idx = -1
     for i, arg in enumerate(update_output.arguments):
         if arg.name.startswith('weight'):
@@ -29,6 +30,7 @@ def _make_function_class_criterion(class_name, update_output, update_grad_input,
     def backward_cls_forward(ctx, input, target, grad_output, additional_args_ctx, backend_ctx):
         ctx.additional_args = additional_args_ctx
         ctx._backend = backend_ctx
+        ctx.save_for_backward(input, target, grad_output)
         grad_input = grad_output.new().resize_as_(input).zero_()
         getattr(ctx._backend, update_grad_input.name)(ctx._backend.library_state, input, target,
                                                       grad_input, *ctx.additional_args)
@@ -37,9 +39,8 @@ def _make_function_class_criterion(class_name, update_output, update_grad_input,
         return grad_input
 
     @staticmethod
-    @once_differentiable
     def backward_cls_backward(ctx, *grad_params):
-        raise ValueError(class_name + " can only be differentiated once.")
+        return double_backwards_fn(ctx, *grad_params)
 
     backward_cls = type(class_name + "Backward", (Function,),
                         dict(forward=backward_cls_forward, backward=backward_cls_backward))
@@ -318,14 +319,17 @@ def _generate_function_classes(scope_dict):
         class_name = name_remap.get(fn, fn)
         double_backwards_fn = double_backwards_fns.get(class_name)
         if double_backwards_fn is None:
-            def default_double_backwards_fn():
-                raise ValueError(class_name + " can only be differentiated once.")
-            double_backwards_fn = default_double_backwards_fn
+            def make_default_double_backwards_fn(class_name):
+                def default_double_backwards_fn(ctx, *grad_params):
+                    raise ValueError(class_name + " can only be differentiated once.")
+                return default_double_backwards_fn
+            double_backwards_fn = make_default_double_backwards_fn(class_name)
         # This has to call a function to retain correct references to functions
         is_criterion_fn = 'Criterion' in fn
         if is_criterion_fn:
             cls, backward_cls = _make_function_class_criterion(class_name, update_output,
-                                                               update_grad_input, acc_grad_parameters)
+                                                               update_grad_input, acc_grad_parameters,
+                                                               double_backwards_fn)
         else:
             cls, backward_cls = _make_function_class(class_name, update_output,
                                                      update_grad_input, acc_grad_parameters,
