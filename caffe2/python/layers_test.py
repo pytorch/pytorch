@@ -12,6 +12,7 @@ import caffe2.python.hypothesis_test_util as hu
 
 from caffe2.python import (
     layer_model_instantiator,
+    core,
     schema,
     workspace,
 )
@@ -30,6 +31,81 @@ from caffe2.python.layers.layers import (
 
 
 class TestLayers(LayersTestCase):
+    def testAddLoss(self):
+        input_record_LR = self.new_record(
+            schema.Struct(
+                ('label', schema.Scalar((np.float64, (1, )))),
+                ('prediction', schema.Scalar((np.float32, (2, )))),
+                ('weight', schema.Scalar((np.float64, (1, ))))
+            )
+        )
+        loss_LR = self.model.BatchLRLoss(input_record_LR)
+
+        self.model.add_loss(loss_LR)
+        assert 'unnamed' in self.model.loss
+        self.assertEqual(
+            schema.Scalar((np.float32, tuple())), self.model.loss.unnamed
+        )
+        self.assertEqual(loss_LR, self.model.loss.unnamed)
+
+        self.model.add_loss(loss_LR, 'addLoss')
+        assert 'addLoss' in self.model.loss
+        self.assertEqual(
+            schema.Scalar((np.float32, tuple())), self.model.loss.addLoss
+        )
+        self.assertEqual(loss_LR, self.model.loss.addLoss)
+
+        self.model.add_loss(
+            schema.Scalar(
+                dtype=np.float32, blob=core.BlobReference('loss_blob_1')
+            ), 'addLoss'
+        )
+        assert 'addLoss_auto_0' in self.model.loss
+        self.assertEqual(
+            schema.Scalar((np.float32, tuple())), self.model.loss.addLoss_auto_0
+        )
+        assert core.BlobReference('loss_blob_1') in self.model.loss.field_blobs()
+
+        self.model.add_loss(
+            schema.Struct(
+                (
+                    'structName', schema.Scalar(
+                        dtype=np.float32,
+                        blob=core.BlobReference('loss_blob_2')
+                    )
+                )
+            ), 'addLoss'
+        )
+        assert 'addLoss_auto_1' in self.model.loss
+        self.assertEqual(
+            schema.Struct(('structName', schema.Scalar((np.float32, tuple())))),
+            self.model.loss.addLoss_auto_1
+        )
+        assert core.BlobReference('loss_blob_2') in self.model.loss.field_blobs()
+
+        loss_in_tuple_0 = schema.Scalar(
+            dtype=np.float32, blob=core.BlobReference('loss_blob_in_tuple_0')
+        )
+
+        loss_in_tuple_1 = schema.Scalar(
+            dtype=np.float32, blob=core.BlobReference('loss_blob_in_tuple_1')
+        )
+
+        loss_tuple = schema.NamedTuple(
+            'loss_in_tuple', * [loss_in_tuple_0, loss_in_tuple_1]
+        )
+        self.model.add_loss(loss_tuple, 'addLoss')
+        assert 'addLoss_auto_2' in self.model.loss
+        self.assertEqual(
+            schema.Struct(
+                ('loss_in_tuple_0', schema.Scalar((np.float32, tuple()))),
+                ('loss_in_tuple_1', schema.Scalar((np.float32, tuple())))
+            ), self.model.loss.addLoss_auto_2
+        )
+        assert core.BlobReference('loss_blob_in_tuple_0')\
+         in self.model.loss.field_blobs()
+        assert core.BlobReference('loss_blob_in_tuple_1')\
+         in self.model.loss.field_blobs()
 
     def _test_net(self, net, ops_list):
         """
