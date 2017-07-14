@@ -9,6 +9,7 @@ OPERATOR_SCHEMA(Sum)
     .NumInputs(1, INT_MAX)
     .NumOutputs(1)
     .AllowInplace({{0, 0}})
+    .InputsCanCrossDevices()
     .IdenticalTypeAndShapeOfInput(0)
     .SetDoc(R"DOC(
 Element-wise sum of each of the input tensors. The first input tensor can be
