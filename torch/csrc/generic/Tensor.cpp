@@ -1191,17 +1191,7 @@ static bool THPTensor_(_advancedIndexSelect)(PyObject *index, THTensorPtr &dest,
       index, src, broadcasted, &linearIndices, &flattened);
 
   if (success) {
-    // Verify dest tensor is contiguous before flattening
-    THTensor *contiguous = THTensor_(newContiguous)(LIBRARY_STATE dest);
-    THTensor *cviewed = THTensor_(newWithStorage1d)(LIBRARY_STATE
-                                                    THTensor_(storage)(LIBRARY_STATE contiguous),
-                                                    THTensor_(storageOffset)(LIBRARY_STATE contiguous),
-                                                    THTensor_(nElement)(LIBRARY_STATE contiguous),
-                                                    1);
-
-    THTensor_(indexSelect)(LIBRARY_STATE cviewed, flattened, 0, linearIndices);
-    THTensor_(free)(LIBRARY_STATE contiguous);
-    THTensor_(free)(LIBRARY_STATE cviewed);
+    THTensor_(indexSelect)(LIBRARY_STATE dest, flattened, 0, linearIndices);
   }
 
   THPTensor_(_advancedIndexCommonCleanup)(linearIndices, flattened);
@@ -1246,7 +1236,7 @@ static PyObject* THPTensor_(advancedIndexSelect)(THPTensor *self, PyObject *args
   THPUtils_assert(THPTensor_(_checkAdvancedIndexing)(self, PyTuple_GET_ITEM(args, 0)),
       "first argument must be an indexer that triggers advanced indexing");
 
-  THTensorPtr dest(THTensor_(newWithSize1d)(LIBRARY_STATE 0));
+  THTensorPtr dest(THTensor_(new)(LIBRARY_STATE_NOARGS));
   THTensorPtr src(THTensor_(newWithTensor)(LIBRARY_STATE self->cdata));
 
   bool success = THPTensor_(_advancedIndexSelect)(PyTuple_GET_ITEM(args, 0), dest, src);
