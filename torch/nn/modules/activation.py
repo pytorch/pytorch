@@ -1,3 +1,4 @@
+import warnings
 import torch
 from torch.nn.parameter import Parameter
 
@@ -109,8 +110,8 @@ class Hardtanh(Module):
     The range of the linear region :math:`[-1, 1]` can be adjusted
 
     Args:
-        min_value: minimum value of the linear region range
-        max_value: maximum value of the linear region range
+        min_val: minimum value of the linear region range
+        max_val: maximum value of the linear region range
         inplace: can optionally do the operation in-place
 
     Shape:
@@ -126,10 +127,17 @@ class Hardtanh(Module):
         >>> print(m(input))
     """
 
-    def __init__(self, min_value=-1, max_value=1, inplace=False):
+    def __init__(self, min_val=-1, max_val=1, inplace=False, min_value=None, max_value=None):
         super(Hardtanh, self).__init__()
-        self.min_val = min_value
-        self.max_val = max_value
+        if min_value is not None:
+            warnings.warn("keyword argument min_value is deprecated and renamed to min_val")
+            min_val = min_value
+        if max_value is not None:
+            warnings.warn("keyword argument max_value is deprecated and renamed to max_val")
+            max_val = max_value
+
+        self.min_val = min_val
+        self.max_val = max_val
         self.inplace = inplace
         assert self.max_val > self.min_val
 
