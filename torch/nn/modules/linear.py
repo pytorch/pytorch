@@ -13,16 +13,14 @@ class Linear(Module):
     Args:
         in_features: size of each input sample
         out_features: size of each output sample
-        bias: If set to False, the layer will not learn an additive bias.
-            Default: True
+        bias: If set to False, the layer will not learn an additive bias. Default: True
 
     Shape:
         - Input: :math:`(N, in\_features)`
         - Output: :math:`(N, out\_features)`
 
     Attributes:
-        weight: the learnable weights of the module of shape
-            (out_features x in_features)
+        weight: the learnable weights of the module of shape (out_features x in_features)
         bias:   the learnable bias of the module of shape (out_features)
 
     Examples::
@@ -60,23 +58,20 @@ class Linear(Module):
 
 
 class Bilinear(Module):
-    r"""Applies a bilinear transformation to the incoming data:
-    :math:`y = x_1 * A * x_2 + b`
+    r"""Applies a bilinear transformation to the incoming data: :math:`y = x_1 * A * x_2 + b`
 
     Args:
         in1_features: size of each first input sample
         in2_features: size of each second input sample
         out_features: size of each output sample
-        bias: If set to False, the layer will not learn an additive bias.
-            Default: True
+        bias: If set to False, the layer will not learn an additive bias. Default: True
 
     Shape:
         - Input: :math:`(N, in1\_features)`, :math:`(N, in2\_features)`
         - Output: :math:`(N, out\_features)`
 
     Attributes:
-        weight: the learnable weights of the module of shape
-            (out_features x in1_features x in2_features)
+        weight: the learnable weights of the module of shape (out_features x in1_features x in2_features)
         bias:   the learnable bias of the module of shape (out_features)
 
     Examples::
@@ -125,7 +120,7 @@ class NoisyLinear(Module):
         out_features: size of each output sample
         bias: If set to False, the layer will not learn an additive bias. Default: True
         factorised: whether or not to use factorised noise. Default: True
-        std_init: initialization constant for standard deviation component of weights. If None, 
+        std_init: initialization constant for standard deviation component of weights. If None,
             defaults to 0.017 for independent and 0.4 for factorised. Default: None
     Shape:
         - Input: :math:`(N, in\_features)`
@@ -163,7 +158,7 @@ class NoisyLinear(Module):
             self.std_init = std_init
         self.reset_parameters(bias)
         self.reset_noise()
-        
+
     def reset_parameters(self, bias):
         if self.factorised:
             mu_range = 1. / math.sqrt(self.weight_mu.size(1))
@@ -179,12 +174,12 @@ class NoisyLinear(Module):
             if bias:
                 self.bias_mu.data.uniform_(-mu_range, mu_range)
                 self.bias_sigma.data.fill_(self.std_init)
-    
+
     def scale_noise(self, size):
         x = torch.Tensor(size).normal_()
         x = x.sign().mul(x.abs().sqrt())
         return x
-    
+
     def reset_noise(self):
         if self.factorised:
             epsilon_in = self.scale_noise(self.in_features)
@@ -194,7 +189,7 @@ class NoisyLinear(Module):
         else:
             self.weight_epsilon = Variable(torch.Tensor((self.out_features, self.in_features)).normal_())
             self.bias_epsilon = Variable(torch.Tensor(self.out_features).normal_())
-    
+
     def forward(self, input):
         if self.training:
             return F.linear(input, 
