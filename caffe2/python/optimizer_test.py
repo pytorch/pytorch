@@ -221,9 +221,8 @@ class TestOptimizerContext(TestCase):
 
         expected_weight_grad = {'b_w_grad', 'a_w_grad', 'cnv_w_grad'}
         expected_learning_rate = {
-            'cnv_w_lr': -0.15, 'cnv_b_lr': -0.15,
-            'a_w_lr': -0.2, 'a_b_lr': -0.1,
-            'b_w_lr': -0.11, 'b_b_lr': -0.11
+            'SgdOptimizer_0_lr_cpu': -0.15, 'SgdOptimizer_1_lr_cpu': -0.2,
+            'SgdOptimizer_2_lr_cpu': -0.1, 'SgdOptimizer_3_lr_cpu': -0.11
         }
 
         for op in model.net.Proto().op:
