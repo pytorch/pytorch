@@ -141,9 +141,12 @@ class NoisyLinear(Module):
         self.factorised = factorised
         self.weight_mu = Parameter(torch.Tensor(out_features, in_features))
         self.weight_sigma = Parameter(torch.Tensor(out_features, in_features))
+        for name, param in self.parameters():
+            self.register_parameter("sigma_"+name, self.weight_sigma)
         if bias:
             self.bias_mu = Parameter(torch.Tensor(out_features))
             self.bias_sigma = Parameter(torch.Tensor(out_features))
+            self.register_parameter('sigma_bias', self.bias_sigma)
         else:
             self.register_parameter('bias', None)
         if not std_init:
@@ -154,6 +157,7 @@ class NoisyLinear(Module):
         else:
             self.std_init = std_init
         self.reset_parameters(bias)
+        self.reset_noise()
         
     def reset_parameters(self, bias):
         if self.factorised:
@@ -176,22 +180,27 @@ class NoisyLinear(Module):
         x = x.sign().mul(x.abs().sqrt())
         return x
     
-    def forward(self, input):
+    def reset_noise(self):
         if self.factorised:
             epsilon_in = self.scale_noise(self.in_features)
             epsilon_out = self.scale_noise(self.out_features)
-            weight_epsilon = Variable(epsilon_out.ger(epsilon_in))
-            bias_epsilon = Variable(self.scale_noise(self.out_features))
+            self.weight_epsilon = Variable(epsilon_out.ger(epsilon_in))
+            self.bias_epsilon = Variable(self.scale_noise(self.out_features))
         else:
-            weight_epsilon = Variable(torch.Tensor((self.out_features, self.in_features)).normal_())
-            bias_epsilon = Variable(torch.Tensor(self.out_features).normal_())
-        return F.linear(input, 
-                        self.weight_mu + self.weight_sigma.mul(weight_epsilon), 
-                        self.bias_mu + self.bias_sigma.mul(bias_epsilon))
+            self.weight_epsilon = Variable(torch.Tensor((self.out_features, self.in_features)).normal_())
+            self.bias_epsilon = Variable(torch.Tensor(self.out_features).normal_())
     
+    def forward(self, input):
+        if self.training:
+            return F.linear(input, 
+                        self.weight_mu + self.weight_sigma.mul(self.weight_epsilon), 
+                        self.bias_mu + self.bias_sigma.mul(self.bias_epsilon))
+        else:
+            return F.linear(input, self.weight_mu, self.bias_mu)
+
     def __repr__(self):
         return self.__class__.__name__ + ' (' \
             + str(self.in_features) + ' -> ' \
             + str(self.out_features) + ')'
-            
+
 # TODO: PartialLinear - maybe in sparse?
