@@ -60,6 +60,11 @@ ELSE()
   ENDIF()
 ENDIF()
 
+IF ($ENV{TH_BINARY_BUILD})
+  MESSAGE(STATUS "TH_BINARY_BUILD detected. Statically linking libstdc++")
+  SET(CMAKE_CXX_FLAGS "-static-libstdc++ ${CMAKE_CXX_FLAGS}")
+ENDIF()
+
 # Can be compiled standalone
 IF(NOT THPP_INSTALL_BIN_DIR OR NOT THPP_INSTALL_LIB_DIR OR NOT THPP_INSTALL_INCLUDE_DIR)
   SET(THPP_INSTALL_BIN_DIR "bin" CACHE PATH "THPP install binary subdirectory")
