@@ -235,9 +235,8 @@ def avg_pool1d(input, kernel_size, stride=None, padding=0,
     kernel_size = _single(kernel_size) + (1,)
     stride = _single(stride) + (1,) if stride is not None else kernel_size
     padding = _single(padding) + (0,)
-    f = _functions.thnn.AvgPool2d(kernel_size, stride, padding,
-                                  ceil_mode, count_include_pad)
-    return f(input.unsqueeze(3)).squeeze(3)
+    return _functions.thnn.AvgPool2d.apply(input.unsqueeze(3), kernel_size, stride, padding,
+                                           ceil_mode, count_include_pad).squeeze(3)
 
 
 def avg_pool2d(input, kernel_size, stride=None, padding=0,
@@ -261,8 +260,8 @@ def avg_pool2d(input, kernel_size, stride=None, padding=0,
         count_include_pad: when True, will include the zero-padding in th
             averaging calculation
     """
-    return _functions.thnn.AvgPool2d(kernel_size, stride, padding,
-                                     ceil_mode, count_include_pad)(input)
+    return _functions.thnn.AvgPool2d.apply(input, kernel_size, stride, padding,
+                                           ceil_mode, count_include_pad)
 
 
 def avg_pool3d(input, kernel_size, stride=None):
@@ -270,26 +269,26 @@ def avg_pool3d(input, kernel_size, stride=None):
     size dt x dh x dw steps. The number of output features is equal to the
     number of input planes / dt.
     """
-    return _functions.thnn.AvgPool3d(kernel_size, stride)(input)
+    return _functions.thnn.AvgPool3d.apply(input, kernel_size, stride)
 
 
 # share the same interface
 def max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1,
                ceil_mode=False, return_indices=False):
-    return _functions.thnn.MaxPool1d(kernel_size, stride, padding, dilation,
-                                     return_indices, ceil_mode)(input)
+    return _functions.thnn.MaxPool1d.apply(input, kernel_size, stride, padding, dilation,
+                                           return_indices, ceil_mode)
 
 
 def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
                ceil_mode=False, return_indices=False):
-    return _functions.thnn.MaxPool2d(kernel_size, stride, padding, dilation,
-                                     return_indices, ceil_mode)(input)
+    return _functions.thnn.MaxPool2d.apply(input, kernel_size, stride, padding, dilation,
+                                           return_indices, ceil_mode)
 
 
 def max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1,
                ceil_mode=False, return_indices=False):
-    return _functions.thnn.MaxPool3d(kernel_size, stride, padding, dilation,
-                                     return_indices, ceil_mode)(input)
+    return _functions.thnn.MaxPool3d.apply(input, kernel_size, stride, padding, dilation,
+                                           return_indices, ceil_mode)
 
 
 def _unpool_output_size(input, kernel_size, stride, padding, output_size):
@@ -327,8 +326,7 @@ def max_unpool1d(input, indices, kernel_size, stride=None, padding=0,
     padding = _single(padding)
     output_size = _unpool_output_size(input, kernel_size, stride, padding,
                                       output_size)
-    f = _functions.thnn.MaxUnpool2d(output_size + [1])
-    return f(input.unsqueeze(3), indices.unsqueeze(3)).squeeze(3)
+    return _functions.thnn.MaxUnpool2d.apply(input.unsqueeze(3), indices.unsqueeze(3), output_size + [1]).squeeze(3)
 
 
 def max_unpool2d(input, indices, kernel_size, stride=None, padding=0,
@@ -338,8 +336,7 @@ def max_unpool2d(input, indices, kernel_size, stride=None, padding=0,
     padding = _pair(padding)
     output_size = _unpool_output_size(input, kernel_size, stride, padding,
                                       output_size)
-    f = _functions.thnn.MaxUnpool2d(output_size)
-    return f(input, indices)
+    return _functions.thnn.MaxUnpool2d.apply(input, indices, output_size)
 
 
 def max_unpool3d(input, indices, kernel_size, stride=None, padding=0,
@@ -349,8 +346,7 @@ def max_unpool3d(input, indices, kernel_size, stride=None, padding=0,
     padding = _triple(padding)
     output_size = _unpool_output_size(input, kernel_size, stride, padding,
                                       output_size)
-    f = _functions.thnn.MaxUnpool3d(output_size, stride, padding)
-    return f(input, indices)
+    return _functions.thnn.MaxUnpool3d.apply(input, indices, output_size, stride, padding)
 
 
 def lp_pool2d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
@@ -369,7 +365,7 @@ def adaptive_max_pool1d(input, output_size, return_indices=False):
         output_size: the target output size (single integer)
         return_indices: whether to return pooling indices
     """
-    return _functions.thnn.AdaptiveMaxPool1d(output_size, return_indices)(input)
+    return _functions.thnn.AdaptiveMaxPool1d.apply(input, output_size, return_indices)
 
 
 def adaptive_max_pool2d(input, output_size, return_indices=False):
@@ -383,7 +379,7 @@ def adaptive_max_pool2d(input, output_size, return_indices=False):
             double-integer tuple)
         return_indices: whether to return pooling indices
     """
-    return _functions.thnn.AdaptiveMaxPool2d(output_size, return_indices)(input)
+    return _functions.thnn.AdaptiveMaxPool2d.apply(input, output_size, return_indices)
 
 
 def adaptive_avg_pool1d(input, output_size):
@@ -395,7 +391,7 @@ def adaptive_avg_pool1d(input, output_size):
     Args:
         output_size: the target output size (single integer)
     """
-    return _functions.thnn.AdaptiveAvgPool1d(output_size)(input)
+    return _functions.thnn.AdaptiveAvgPool1d.apply(input, output_size)
 
 
 def adaptive_avg_pool2d(input, output_size):
@@ -408,7 +404,7 @@ def adaptive_avg_pool2d(input, output_size):
         output_size: the target output size (single integer or
             double-integer tuple)
     """
-    return _functions.thnn.AdaptiveAvgPool2d(output_size)(input)
+    return _functions.thnn.AdaptiveAvgPool2d.apply(input, output_size)
 
 
 # Activation functions
