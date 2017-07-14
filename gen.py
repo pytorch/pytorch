@@ -1,4 +1,3 @@
-import sys
 from optparse import OptionParser
 
 import cwrap_parser
@@ -20,7 +19,7 @@ parser.add_option('-n', '--no-cuda', action='store_true')
 
 options, files = parser.parse_args()
 if options.output_dependencies is not None:
-    output_dependencies_file = open(options.output_dependencies,'w')
+    output_dependencies_file = open(options.output_dependencies, 'w')
 
 TEMPLATE_PATH = options.source_path + "/templates"
 GENERATOR_DERIVED = CodeTemplate.from_file(
@@ -98,6 +97,7 @@ def write(filename, s):
         return
     with open(filename, "w") as f:
         f.write(s)
+
 
 def generate_storage_type_and_tensor(backend, density, scalar_type, declarations):
     scalar_name, c_type, accreal, th_scalar_type = scalar_type
