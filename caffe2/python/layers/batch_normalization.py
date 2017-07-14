@@ -35,7 +35,7 @@ class BatchNormalization(ModelLayer):
             if order == "NCHW":
                 input_dims = self.input_shape[0]
             elif order == "NHWC":
-                input_dims = self.input_shape[3]
+                input_dims = self.input_shape[2]
             else:
                 raise ValueError("Please specify a correct order")
         else:
