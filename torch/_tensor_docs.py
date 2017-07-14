@@ -301,17 +301,18 @@ copy_(src, async=False, broadcast=True) -> Tensor
 
 Copies the elements from :attr:`src` into this tensor and returns this tensor.
 
-If :attr:`broadcast` is True, the source tensor must be :ref:`broadcastable <broadcasting-semantics>`
-with this tensor. Otherwise, source tensor should have the same number of elements as this tensor.  It
-may be of a different data type or reside on a different device.
+If :attr:`broadcast` is True, the source tensor must be
+:ref:`broadcastable <broadcasting-semantics>` with this tensor. Otherwise,
+source tensor should have the same number of elements as this tensor.
+It may be of a different data type or reside on a different device.
 
 Args:
     src (Tensor): Source tensor to copy
     async (bool): If True and this copy is between CPU and GPU, then the copy
-                  may occur asynchronously with respect to the host. For other
-                  copies, this argument has no effect.
-    broadcast (bool): If True, :attr:`src` will be broadcast to the shape of the underlying
-                      tensor.
+        may occur asynchronously with respect to the host. For other
+        copies, this argument has no effect.
+    broadcast (bool): If True, :attr:`src` will be broadcast to the shape of
+        the underlying tensor.
 """)
 
 add_docstr_all('cos',
@@ -788,9 +789,9 @@ add_docstr_all('log_normal_', u"""
 log_normal_(mean=1, std=2, *, generator=None)
 
 Fills this tensor with numbers samples from the log-normal distribution
-parameterized by the given mean (\u00B5) and standard deviation (\u03C3). Note that
-:attr:`mean` and :attr:`stdv` are the mean and standard deviation of the
-underlying normal distribution, and not of the returned distribution:
+parameterized by the given mean (\u00B5) and standard deviation (\u03C3).
+Note that :attr:`mean` and :attr:`stdv` are the mean and standard deviation of
+the underlying normal distribution, and not of the returned distribution:
 
 .. math::
 
@@ -831,8 +832,8 @@ masked_scatter_(mask, source)
 Copies elements from :attr:`source` into this tensor at positions where the
 :attr:`mask` is one.
 The shape of :attr:`mask` must be :ref:`broadcastable <broadcasting-semantics>`
-with the shape of the underlying tensor. The :attr:`source` should have at least as many elements as the
-number of ones in :attr:`mask`
+with the shape of the underlying tensor. The :attr:`source` should have at least
+as many elements as the number of ones in :attr:`mask`
 
 Args:
     mask (ByteTensor): The binary mask
@@ -1229,8 +1230,9 @@ Writes all values from the Tensor :attr:`src` into self at the indices specified
 in the :attr:`index` Tensor. The indices are specified with respect to the
 given dimension, dim, in the manner described in :meth:`~Tensor.gather`.
 
-Note that, as for gather, the values of index must be between `0` and `(self.size(dim) -1)`
-inclusive and all values in a row along the specified dimension must be unique.
+Note that, as for gather, the values of index must be between `0` and
+`(self.size(dim) -1)` inclusive and all values in a row along the specified
+dimension must be unique.
 
 Args:
     input (Tensor): The source tensor
@@ -1277,9 +1279,9 @@ Args:
 
 .. note::
 
-    :meth:`select` is equivalent to slicing. For example, ``tensor.select(0, index)``
-    is equivalent to ``tensor[index]`` and ``tensor.select(2, index)`` is equivalent
-    to ``tensor[:,:,index]``.
+    :meth:`select` is equivalent to slicing. For example,
+    ``tensor.select(0, index)`` is equivalent to ``tensor[index]`` and
+    ``tensor.select(2, index)`` is equivalent to ``tensor[:,:,index]``.
 """)
 
 add_docstr_all('set_',
@@ -1448,8 +1450,9 @@ Subtracts a scalar or tensor from this tensor. If both :attr:`value` and
 :attr:`other` are specified, each element of :attr:`other` is scaled by
 :attr:`value` before being used.
 
-When :attr:`other` is a tensor, the shape of :attr:`other` must be :ref:`broadcastable <broadcasting-semantics>`
-with the shape of the underlying tensor.
+When :attr:`other` is a tensor, the shape of :attr:`other` must be
+:ref:`broadcastable <broadcasting-semantics>` with the shape of the underlying
+tensor.
 
 """)
 

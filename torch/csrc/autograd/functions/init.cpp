@@ -259,6 +259,8 @@ bool THPAutograd_initFunctions(PyObject* _unused)
   addClass<Expand, NoCtor>(module, ExpandClass, "Expand");
   static PyTypeObject NarrowClass;
   addClass<Narrow, NoCtor>(module, NarrowClass, "Narrow");
+  static PyTypeObject CatClass;
+  addClass<Cat, NoCtor>(module, CatClass, "Cat");
 
   THPObjectPtr parent(PyImport_ImportModule("torch._C"));
   if (!parent) return false;

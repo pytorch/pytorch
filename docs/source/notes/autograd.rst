@@ -70,7 +70,7 @@ If there's even a single volatile input to an operation, its output is also
 going to be volatile. Volatility spreads accross the graph much easier than
 non-requiring gradient - you only need a **single** volatile leaf to have a
 volatile output, while you need **all** leaves to not require gradient to
-have an output the doesn't require gradient. Using volatile flag you don't
+have an output that doesn't require gradient. Using volatile flag you don't
 need to change any settings of your model parameters to use it for
 inference. It's enough to create a volatile input, and this will ensure that
 no intermediate states are saved.

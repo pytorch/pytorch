@@ -387,13 +387,9 @@ class _DistTestBase(object):
         for dest in group:
             tensor = _build_tensor(dest + 1, -1)
             expected_tensor = _build_tensor(dest + 1, rank)
-            if rank == dest:
-                tensors = [_build_tensor(dest + 1, i) for i in group]
-                dist.scatter_send(tensors, tensor, group_id)
-                self.assertEqual(tensor, expected_tensor)
-            else:
-                dist.scatter_recv(tensor, dest, group_id)
-                self.assertEqual(tensor, expected_tensor)
+            tensors = [_build_tensor(dest + 1, i) for i in group] if rank == dest else []
+            dist.scatter(tensor, src=dest, scatter_list=tensors, group=group_id)
+            self.assertEqual(tensor, expected_tensor)
 
         self._barrier()
 
@@ -411,15 +407,12 @@ class _DistTestBase(object):
     def _test_gather_helper(self, group, group_id, rank):
         for dest in group:
             tensor = _build_tensor(dest + 1, rank)
+            tensors = [_build_tensor(dest + 1, -1) for i in group] if rank == dest else []
+            dist.gather(tensor, dst=dest, gather_list=tensors, group=group_id)
             if rank == dest:
-                tensors = [_build_tensor(dest + 1, -1) for i in group]
-                dist.gather_recv(tensors, tensor, group_id)
-
                 expected_tensors = [_build_tensor(dest + 1, i) for i in group]
                 for t1, t2 in zip(tensors, expected_tensors):
                     self.assertEqual(t1, t2)
-            else:
-                dist.gather_send(tensor, dest, group_id)
 
         self._barrier()
 

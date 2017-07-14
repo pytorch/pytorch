@@ -228,6 +228,12 @@ class MaxUnpool1d(Module):
         return F.max_unpool1d(input, indices, self.kernel_size, self.stride,
                               self.padding, output_size)
 
+    def __repr__(self):
+        return self.__class__.__name__ + ' (' \
+            + 'size=' + str(self.kernel_size) \
+            + ', stride=' + str(self.stride) \
+            + ', padding=' + str(self.padding) + ')'
+
 
 class MaxUnpool2d(Module):
     r"""Computes a partial inverse of :class:`MaxPool2d`.
@@ -303,6 +309,12 @@ class MaxUnpool2d(Module):
         return F.max_unpool2d(input, indices, self.kernel_size, self.stride,
                               self.padding, output_size)
 
+    def __repr__(self):
+        return self.__class__.__name__ + ' (' \
+            + 'size=' + str(self.kernel_size) \
+            + ', stride=' + str(self.stride) \
+            + ', padding=' + str(self.padding) + ')'
+
 
 class MaxUnpool3d(Module):
     r"""Computes a partial inverse of :class:`MaxPool3d`.
@@ -357,6 +369,12 @@ class MaxUnpool3d(Module):
     def forward(self, input, indices, output_size=None):
         return F.max_unpool3d(input, indices, self.kernel_size, self.stride,
                               self.padding, output_size)
+
+    def __repr__(self):
+        return self.__class__.__name__ + ' (' \
+            + 'size=' + str(self.kernel_size) \
+            + ', stride=' + str(self.stride) \
+            + ', padding=' + str(self.padding) + ')'
 
 
 class AvgPool1d(Module):
@@ -416,6 +434,14 @@ class AvgPool1d(Module):
         return F.avg_pool1d(
             input, self.kernel_size, self.stride, self.padding, self.ceil_mode,
             self.count_include_pad)
+
+    def __repr__(self):
+        return self.__class__.__name__ + ' (' \
+            + 'size=' + str(self.kernel_size) \
+            + ', stride=' + str(self.stride) \
+            + ', padding=' + str(self.padding) \
+            + ', ceil_mode=' + str(self.ceil_mode) \
+            + ', count_include_pad=' + str(self.count_include_pad) + ')'
 
 
 class AvgPool2d(Module):
@@ -478,6 +504,14 @@ class AvgPool2d(Module):
         return F.avg_pool2d(input, self.kernel_size, self.stride,
                             self.padding, self.ceil_mode, self.count_include_pad)
 
+    def __repr__(self):
+        return self.__class__.__name__ + ' (' \
+            + 'size=' + str(self.kernel_size) \
+            + ', stride=' + str(self.stride) \
+            + ', padding=' + str(self.padding) \
+            + ', ceil_mode=' + str(self.ceil_mode) \
+            + ', count_include_pad=' + str(self.count_include_pad) + ')'
+
 
 class MaxPool3d(Module):
     r"""Applies a 3D max pooling over an input signal composed of several input
@@ -501,9 +535,9 @@ class MaxPool3d(Module):
 
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, :attr:`dilation` can either be:
 
-        - a single ``int`` -- in which case the same value is used for the height and width dimension
+        - a single ``int`` -- in which case the same value is used for the depth, height and width dimension
         - a ``tuple`` of three ints -- in which case, the first `int` is used for the depth dimension,
-          the second `int` for the width dimension and the third `int` for the width dimension
+          the second `int` for the height dimension and the third `int` for the width dimension
 
     Args:
         kernel_size: the size of the window to take a max over
@@ -575,9 +609,9 @@ class AvgPool3d(Module):
 
     The parameters :attr:`kernel_size`, :attr:`stride` can either be:
 
-        - a single ``int`` -- in which case the same value is used for the height and width dimension
+        - a single ``int`` -- in which case the same value is used for the depth, height and width dimension
         - a ``tuple`` of three ints -- in which case, the first `int` is used for the depth dimension,
-          the second `int` for the width dimension and the third `int` for the width dimension
+          the second `int` for the height dimension and the third `int` for the width dimension
 
     Args:
         kernel_size: the size of the window
@@ -607,6 +641,11 @@ class AvgPool3d(Module):
 
     def forward(self, input):
         return F.avg_pool3d(input, self.kernel_size, self.stride)
+
+    def __repr__(self):
+        return self.__class__.__name__ + ' (' \
+            + 'size=' + str(self.kernel_size) \
+            + ', stride=' + str(self.stride) + ')'
 
 
 class FractionalMaxPool2d(Module):

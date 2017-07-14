@@ -1,5 +1,6 @@
 #include "torch/csrc/autograd/engine.h"
 #include "torch/csrc/autograd/functions/basic_ops.h"
+#include "torch/csrc/utils/auto_gpu.h"
 
 #include <atomic>
 #include <condition_variable>
@@ -106,8 +107,9 @@ Engine::Engine() : ready_queues() {
 // This Engine's ReadyQueues and their corresponding threads are leaked here
 Engine::~Engine() = default;
 
-auto Engine::thread_main(std::shared_ptr<ReadyQueue> queue) -> void {
+auto Engine::thread_main(std::shared_ptr<ReadyQueue> queue, int device) -> void {
   THInferNumThreads();
+  AutoGPU guard(device);
   while (1) {
     FunctionTask task = queue->pop_back();
     if (!task.base->has_error.load()) {
@@ -369,10 +371,12 @@ auto Engine::start_threads() -> void {
     num_devices = 0;
   }
 #endif
-  ready_queues = std::vector<std::shared_ptr<ReadyQueue>>(num_devices + 1);
-  for (auto& queue : ready_queues) {
+  int num_threads = num_devices + 1;
+  ready_queues = std::vector<std::shared_ptr<ReadyQueue>>(num_threads);
+  for (int i = 0; i < num_threads; ++i) {
+    auto& queue = ready_queues[i];
     queue.reset(new ReadyQueue());
-    std::thread t(&Engine::thread_main, this, queue);
+    std::thread t(&Engine::thread_main, this, queue, i - 1);
     t.detach();
   }
 }

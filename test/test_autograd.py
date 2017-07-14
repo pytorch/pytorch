@@ -920,8 +920,7 @@ class TestAutograd(TestCase):
         for i in range(10):
             Variable(torch.randn(10, 10), _grad_fn=CollectOnDelete())
 
-    @unittest.skipIf(not torch.cuda.is_available() or torch.cuda.device_count() < 2,
-                     "CUDA not available or <2 GPUs detected")
+    @unittest.skipIf(torch.cuda.device_count() < 2, "no multi-GPU")
     def test_unused_output_gpu(self):
         from torch.nn.parallel._functions import Broadcast
         x = Variable(torch.randn(5, 5).float().cuda(), requires_grad=True)
@@ -929,6 +928,25 @@ class TestAutograd(TestCase):
         y = outputs[-1] * 2
         y.sum().backward()
         self.assertEqual(x.grad.data, torch.ones(5, 5) * 2)
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "no multi-GPU")
+    def test_backward_device(self):
+        # check that current device matches the variable's device
+        device = [None]
+
+        class Identity(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                device[0] = torch.cuda.current_device()
+                return grad_output.clone()
+
+        v = Variable(torch.randn(1).cuda(1), requires_grad=True)
+        Identity.apply(v).backward()
+        self.assertEqual(device[0], 1)
 
     def test_detach(self):
         x = Variable(torch.randn(10, 10), requires_grad=True)
@@ -1462,6 +1480,7 @@ function_tests = [
     (Asin, (), (torch.randn(S, S, S).clamp(-0.9, 0.9),)),
     (Acos, (), (torch.randn(S, S, S).clamp(-0.9, 0.9),)),
     (Atan, (), ((S, S, S),)),
+    (Atan2, (), ((S, S), (S, S))),
     (Reciprocal, (), (torch.rand(S, S, S) + 0.1,)),
     (Cmax, (), ((S, S, S), (S, S, S))),
     (Cmax, (), ((S, S, S), (S,)), 'broadcast_rhs'),
@@ -1709,6 +1728,7 @@ method_tests = [
     ('asin', (S, S, S), ()),
     ('acos', (S, S, S), ()),
     ('atan', (S, S, S), ()),
+    ('atan2', (S, S, S), ((S, S, S),)),
     ('reciprocal', (S, S, S), ()),
     ('round', (S, S, S), ()),
     ('sign', (S, S, S), ()),

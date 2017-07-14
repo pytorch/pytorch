@@ -147,7 +147,7 @@ class Module(object):
         """
         return self._apply(lambda t: t.cuda(device_id))
 
-    def cpu(self, device_id=None):
+    def cpu(self):
         """Moves all model parameters and buffers to the CPU."""
         return self._apply(lambda t: t.cpu())
 
@@ -240,6 +240,11 @@ class Module(object):
                     functools.update_wrapper(wrapper, hook)
                     grad_fn.register_hook(wrapper)
         return result
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        if '_forward_pre_hooks' not in self.__dict__:
+            self._forward_pre_hooks = OrderedDict()
 
     def __getattr__(self, name):
         if '_parameters' in self.__dict__:

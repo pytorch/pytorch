@@ -1306,7 +1306,9 @@ void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
   if(t != r_)
   {
     THTensor_(resizeAs)(r_, t);
-    THTensor_(copy)(r_, t);
+    if (beta != 0.0) {
+      THTensor_(copy)(r_, t);
+    }
   }
 
   /* r_ */
@@ -1476,7 +1478,9 @@ void THTensor_(addbmm)(THTensor *result, real beta, THTensor *t, real alpha, THT
 
   if (t != result) {
     THTensor_(resizeAs)(result, t);
-    THTensor_(copy)(result, t);
+    if (beta != 0.0) {
+      THTensor_(copy)(result, t);
+    }
   }
 
   THTensor *matrix1 = THTensor_(new)();
@@ -1517,7 +1521,9 @@ void THTensor_(baddbmm)(THTensor *result, real beta, THTensor *t, real alpha, TH
 
   if (t != result) {
     THTensor_(resizeAs)(result, t);
-    THTensor_(copy)(result, t);
+    if (beta != 0.0) {
+      THTensor_(copy)(result, t);
+    }
   }
 
   THTensor *matrix1 = THTensor_(new)();

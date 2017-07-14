@@ -12,6 +12,8 @@ THC_API void THCTensor_(logNormal)(struct THCState *state, THCTensor *self, doub
 THC_API void THCTensor_(exponential)(struct THCState *state, THCTensor *self, double lambda);
 THC_API void THCTensor_(cauchy)(struct THCState *state, THCTensor *self, double median, double sigma);
 THC_API void THCTensor_(multinomial)(struct THCState *state, THCudaLongTensor *self, THCTensor *prob_dist, int n_sample, int with_replacement);
+THC_API void THCTensor_(multinomialAliasSetup)(struct THCState *state, THCTensor *probs, THCudaLongTensor *J, THCTensor *q);
+THC_API void THCTensor_(multinomialAliasDraw)(THCState *state, THCudaLongTensor *self, THCudaLongTensor *_J, THCTensor *_q);
 
 #endif
 

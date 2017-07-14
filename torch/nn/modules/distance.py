@@ -42,7 +42,8 @@ class CosineSimilarity(Module):
         x1 (Variable): First input.
         x2 (Variable): Second input (of size matching x1).
         dim (int, optional): Dimension of vectors. Default: 1
-        eps (float, optional): Small value to avoid division by zero. Default: 1e-8
+        eps (float, optional): Small value to avoid division by zero.
+            Default: 1e-8
 
     Shape:
         - Input: :math:`(\ast_1, D, \ast_2)` where D is at position `dim`.

@@ -70,6 +70,26 @@ struct ConvolutionDescriptor
   }
 };
 
+struct SpatialTransformerDescriptor
+{
+  cudnnSpatialTransformerDescriptor_t desc;
+  SpatialTransformerDescriptor() : desc(NULL) {
+    CHECK(cudnnCreateSpatialTransformerDescriptor(&desc));
+  }
+  SpatialTransformerDescriptor(const SpatialTransformerDescriptor&) = delete;
+  SpatialTransformerDescriptor(SpatialTransformerDescriptor&& ref)
+  {
+    desc = ref.desc;
+    ref.desc = NULL;
+  }
+  ~SpatialTransformerDescriptor() {
+    cudnnDestroySpatialTransformerDescriptor(desc);
+  }
+  void set(cudnnDataType_t dataType, int dim, int* size) {
+    CHECK(cudnnSetSpatialTransformerNdDescriptor(desc, CUDNN_SAMPLER_BILINEAR, dataType, dim, size));
+  }
+};
+
 union Constant
 {
   float f;

@@ -66,7 +66,8 @@ TH_API void THNN_(SpatialClassNLLCriterion_updateOutput)(
           THTensor *output,            // [OUT] a one-element tensor with loss
           bool sizeAverage,            // if true, the loss will be normalized by batch size and class weights
           THTensor *weights,           // [OPTIONAL] class weights
-          THTensor *total_weight);     // [BUFFER]
+          THTensor *total_weight,      // [BUFFER]
+          long ignore_index);          // target index to ignore (loss = 0, gradInput = 0)
 TH_API void THNN_(SpatialClassNLLCriterion_updateGradInput)(
           THNNState *state,            // library's state
           THTensor *input,             // input tensor (4D)
@@ -74,7 +75,9 @@ TH_API void THNN_(SpatialClassNLLCriterion_updateGradInput)(
           THTensor *gradInput,         // [OUT] gradient w.r.t. input
           bool sizeAverage,            // if true, the loss will be normalized by batch size and class weights
           THTensor *weights,           // [OPTIONAL] class weights
-          THTensor *total_weight);     // [BUFFER]
+          THTensor *total_weight,      // [BUFFER]
+          long ignore_index);          // target index to ignore (loss = 0, gradInput = 0)
+
 
 TH_API void THNN_(ELU_updateOutput)(
           THNNState *state,            // library's state
@@ -1170,6 +1173,18 @@ TH_API void THNN_(SpatialUpSamplingBilinear_updateGradInput)(
           int inputWidth,
           int outputHeight,
           int outputWidth);
+
+TH_API void THNN_(SpatialGridSamplerBilinear_updateOutput)(
+	  THNNState *state,
+	  THTensor *input,
+	  THTensor *grid,
+	  THTensor *output);
+
+TH_API void THNN_(SpatialGridSamplerBilinear_updateGradInput)(
+	  THNNState *state,
+	  THTensor *input, THTensor *gradInput,
+	  THTensor *grid, THTensor *gradGrid,
+	  THTensor *gradOutput);
 
 TH_API void THNN_(unfolded_acc)(
           THTensor *finput,

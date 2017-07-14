@@ -5,6 +5,7 @@
 #include "torch/csrc/autograd/functions/basic_ops.h"
 #include "torch/csrc/nn/THNN_generic.h"
 #include "torch/csrc/utils/auto_gpu.h"
+#include <sstream>
 
 #ifdef WITH_CUDNN
 #include "torch/csrc/cudnn/BatchNorm.h"
@@ -12,6 +13,16 @@
 #include "torch/csrc/cudnn/Types.h"
 extern THCState* state;
 #endif
+
+namespace {
+    void check_dims_match_num_input_features(const std::string& arg_name, long expected, long actual){
+      if (actual != expected){
+        std::stringstream ss;
+        ss << arg_name << " should contain " << expected << " elements not " << actual ;
+        throw std::runtime_error(ss.str());
+      }
+    }
+}
 
 namespace torch { namespace autograd {
 
@@ -23,11 +34,21 @@ using thpp::Tensor;
 
 auto BatchNormForward::apply(const variable_list& inputs) -> variable_list {
   check_input_variables("BatchNorm", inputs, 3, 1);
-
+  
   auto& input = inputs[0];
   auto& weight = inputs[1];
   auto& bias = inputs[2];
   AutoGPU guard(input->data->getDevice());
+   
+  auto num_features = input->data->rawSizes()[1];
+  check_dims_match_num_input_features("running_mean", num_features, running_mean->numel());
+  check_dims_match_num_input_features("running_var", num_features, running_var->numel());
+  if (weight){
+    check_dims_match_num_input_features("weight", num_features, weight->data->numel());
+  }
+  if (bias){
+    check_dims_match_num_input_features("bias", num_features, bias->data->numel());
+  }
 
   bool use_cudnn = false;
 #ifdef WITH_CUDNN
