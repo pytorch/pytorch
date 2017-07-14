@@ -119,7 +119,7 @@ class Bilinear(Module):
 
 class NoisyLinear(Module):
     """Applies a noisy linear transformation to the incoming data:
-        :math:`y = (mu_w + sigma_w \cdot epsilon_w)x 
+        :math:`y = (mu_w + sigma_w \cdot epsilon_w)x
             + mu_b + sigma_b \cdot epsilon_b`
     More details can be found in the paper `Noisy Networks for Exploration` _ .
     Args:
@@ -130,7 +130,7 @@ class NoisyLinear(Module):
         factorised: whether or not to use factorised noise.
             Default: True
         std_init: initialization constant for standard deviation component of
-            weights. If None, defaults to 0.017 for independent and 0.4 for 
+            weights. If None, defaults to 0.017 for independent and 0.4 for
             factorised. Default: None
     Shape:
         - Input: :math:`(N, in\_features)`
