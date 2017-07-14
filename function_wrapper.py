@@ -206,7 +206,7 @@ def create_generic(top_env, declarations):
 
     def find_first_tensor(formals):
         for argument in formals:
-            if argument['type'] == "THTensor*":
+            if argument['type'] == "THTensor*" or argument['type'] == 'TensorList':
                 return argument['name']
         return None
 
@@ -251,7 +251,7 @@ def create_generic(top_env, declarations):
         if is_function:
             first_tensor = find_first_tensor(formals)
             if first_tensor is not None:
-                option['inferred_type'] = '{}.type()'.format(first_tensor)
+                option['inferred_type'] = 'infer_type({})'.format(first_tensor)
                 top_env['function_declarations'].append(
                     FUNCTION_DECLARATION.substitute(env))
                 top_env['function_definitions'].append(
