@@ -1,7 +1,7 @@
 from torch.autograd import Variable
 
 
-def hardtanh_backwards_backwards(ctx, ggI):
+def hardtanh_double_backwards(ctx, ggI):
     t = ctx.saved_variables
     input, grad_output = t[0], t[1]
     min_val, max_val = ctx.additional_args[0:2]
@@ -12,6 +12,20 @@ def hardtanh_backwards_backwards(ctx, ggI):
     ggO = ggI * (max_mask - min_mask).type_as(grad_output)
     return gI, ggO, None, None, None
 
+
+def l1loss_double_backwards(ctx, ggI):
+    size_average = ctx.additional_args[0]
+    input, target, grad_output = ctx.saved_variables
+    gI = Variable(ggI.data.new(ggI.size()).zero_())
+
+    positive_mask = (input > target).type_as(ggI)
+    negative_mask = (input < target).type_as(ggI)
+    ggO = (ggI * (positive_mask - negative_mask)).sum()
+    if size_average:
+        ggO = ggO / input.nelement()
+    return gI, None, ggO, None, None
+
 double_backwards_fns = {
-    'Hardtanh': hardtanh_backwards_backwards
+    'Hardtanh': hardtanh_double_backwards,
+    'L1Loss': l1loss_double_backwards,
 }

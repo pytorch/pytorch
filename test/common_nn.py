@@ -236,7 +236,6 @@ criterion_tests = [
          target=torch.randn(2, 3, 4),
          reference_fn=lambda i, t, _: 1. / i.numel() *
          sum((a - b).abs().sum() for a, b in zip(i, t)),
-         check_gradgrad=False,
          ),
     dict(
         module_name='NLLLoss',
