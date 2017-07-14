@@ -53,10 +53,12 @@ class Optimizer(object):
         The name will be unique to the current device and optimizer instance.
         """
         classname = self.__class__.__name__
-        s = scope.CurrentDeviceScope()
-        if s.device_type == caffe2_pb2.CUDA:
+        current_scope = scope.CurrentDeviceScope()
+        if current_scope is None:
+            return '%s_%d_lr_cpu' % (classname, self._instance_num)
+        if current_scope.device_type == caffe2_pb2.CUDA:
             return '%s_%d_lr_gpu%d' % (
-                classname, self._instance_num, s.cuda_gpu_id
+                classname, self._instance_num, current_scope.cuda_gpu_id
             )
         else:
             return '%s_%d_lr_cpu' % (classname, self._instance_num)
