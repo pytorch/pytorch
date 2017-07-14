@@ -11,7 +11,7 @@ import collections
 from future.utils import viewitems
 
 import caffe2.proto.caffe2_pb2 as caffe2_pb2
-from caffe2.python import core, rnn_cell
+from caffe2.python import core, rnn_cell, brew
 
 
 PAD_ID = 0
@@ -292,14 +292,16 @@ def build_initial_rnn_decoder_states(
             initial_attention_weighted_encoder_context,
         )
     else:
-        decoder_initial_hidden_state = model.FC(
+        decoder_initial_hidden_state = brew.fc(
+            model,
             final_encoder_hidden_state,
             'decoder_initial_hidden_state',
             encoder_num_units,
             decoder_num_units,
             axis=2,
         )
-        decoder_initial_cell_state = model.FC(
+        decoder_initial_cell_state = brew.fc(
+            model,
             final_encoder_cell_state,
             'decoder_initial_cell_state',
             encoder_num_units,
@@ -320,7 +322,8 @@ def output_projection(
     decoder_softmax_size,
 ):
     if decoder_softmax_size is not None:
-        decoder_outputs = model.FC(
+        decoder_outputs = brew.fc(
+            model,
             decoder_outputs,
             'decoder_outputs_scaled',
             dim_in=decoder_output_size,
