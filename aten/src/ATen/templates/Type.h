@@ -111,6 +111,9 @@ struct Type {
   Tensor tensorFromBlob(void * data, IntList sizes);
   Tensor tensorFromBlob(void * data, IntList sizes, IntList strides);
   Tensor scalarTensor(Scalar s);
+
+  bool operator==(const Type& other) const;
+
   // example
   // virtual Tensor * add(Tensor & a, Tensor & b) = 0;
   ${type_method_declarations}
