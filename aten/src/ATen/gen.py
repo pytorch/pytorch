@@ -1,4 +1,5 @@
 from optparse import OptionParser
+import yaml
 
 import cwrap_parser
 import nn_parse
@@ -97,6 +98,14 @@ def write(filename, s):
         return
     with open(filename, "w") as f:
         f.write(s)
+
+
+def format_yaml(data):
+    if options.output_dependencies:
+        return ""  # yaml formatting is slow so don't do it if we will ditch it.
+    noalias_dumper = yaml.dumper.SafeDumper
+    noalias_dumper.ignore_aliases = lambda self, data: True
+    return yaml.dump(data, default_flow_style=False, Dumper=noalias_dumper)
 
 
 def generate_storage_type_and_tensor(backend, density, scalar_type, declarations):
@@ -218,7 +227,8 @@ for fname, env in generators.items():
 # note: this will fill in top_env['type/tensor_method_declarations/definitions']
 # and modify the declarations to include any information that will all_backends
 # be used by function_wrapper.create_derived
-function_wrapper.create_generic(top_env, declarations)
+output_declarations = function_wrapper.create_generic(top_env, declarations)
+write("Declarations.yaml", format_yaml(output_declarations))
 
 # populated by generate_storage_type_and_tensor
 all_types = []
