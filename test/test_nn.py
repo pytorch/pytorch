@@ -1532,7 +1532,7 @@ class TestNN(NNTestCase):
         c = nn.Conv2d(3, 3, 3)
         o1 = c(input)
         o1.sum().backward()
-        self.assertRaisesRegex(RuntimeError, 'Specify retain_variables=True',
+        self.assertRaisesRegex(RuntimeError, 'Specify retain_graph=True',
                                lambda: o1.sum().backward())
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
