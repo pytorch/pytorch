@@ -50,7 +50,7 @@ void Context::connectFullMesh(
     // Wait for address of other side of this pair to become available
     std::ostringstream key;
     key << i << "/" << rank;
-    store.wait({key.str()});
+    store.wait({key.str()}, dev->getTimeout());
 
     // Connect to other side of this pair
     auto addr = store.get(key.str());

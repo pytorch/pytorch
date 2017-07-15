@@ -31,6 +31,8 @@ class Device {
 
   virtual int getInterfaceSpeed() const { return 0; }
 
+  virtual std::chrono::milliseconds getTimeout() const = 0;
+
   virtual void setTimeout(const std::chrono::milliseconds& timeout) = 0;
 
   virtual std::unique_ptr<Pair> createPair() = 0;

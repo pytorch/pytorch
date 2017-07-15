@@ -53,6 +53,8 @@ class Device : public ::gloo::transport::Device,
 
   virtual void setTimeout(const std::chrono::milliseconds& timeout) override;
 
+  virtual std::chrono::milliseconds getTimeout() const override;
+
   virtual std::unique_ptr<::gloo::transport::Pair> createPair()
       override;
 
@@ -65,8 +67,6 @@ class Device : public ::gloo::transport::Device,
   ibv_comp_channel* comp_channel_;
 
   void loop();
-
-  std::chrono::milliseconds getTimeout() const;
 
   std::atomic<bool> done_;
   std::unique_ptr<std::thread> loop_;

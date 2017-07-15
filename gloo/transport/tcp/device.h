@@ -62,10 +62,11 @@ class Device : public ::gloo::transport::Device,
   virtual std::unique_ptr<::gloo::transport::Pair> createPair()
       override;
 
+  virtual std::chrono::milliseconds getTimeout() const override;
+
  protected:
   void loop();
 
-  std::chrono::milliseconds getTimeout() const;
   void registerDescriptor(int fd, int events, Pair* p);
   void unregisterDescriptor(int fd);
 
