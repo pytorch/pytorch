@@ -87,9 +87,6 @@ class Module(object):
 
         The parameter can be accessed as an attribute using given name.
         """
-        if hasattr(self, name):
-            raise KeyError("attribute already exists '{}'".format(name))
-
         if '_parameters' not in self.__dict__:
             raise AttributeError(
                 "cannot assign parameter before Module.__init__() call")
@@ -105,6 +102,8 @@ class Module(object):
                 "parameters must be created explicitly. To express '{0}' "
                 "as a function of another variable, compute the value in "
                 "the forward() method.".format(name))
+        elif name not in self._parameters.keys() and hasattr(self, name):
+            raise KeyError("attribute already exists '{}'".format(name))
         else:
             self._parameters[name] = param
 
