@@ -85,10 +85,11 @@ ELSE()
 ENDIF()
 
 # Can be compiled standalone
-IF(NOT TENSOR_LIB_INSTALL_BIN_DIR OR NOT TENSOR_LIB_INSTALL_LIB_DIR OR NOT TENSOR_LIB_INSTALL_INCLUDE_DIR)
-  SET(TENSOR_LIB_INSTALL_BIN_DIR "bin" CACHE PATH "TENSOR_LIB install binary subdirectory")
-  SET(TENSOR_LIB_INSTALL_LIB_DIR "lib" CACHE PATH "TENSOR_LIB install library subdirectory")
-  SET(TENSOR_LIB_INSTALL_INCLUDE_DIR "include" CACHE PATH "TENSOR_LIB install include subdirectory")
+IF(NOT AT_INSTALL_BIN_DIR OR NOT AT_INSTALL_LIB_DIR OR NOT AT_INSTALL_INCLUDE_DIR OR NOT AT_INSTALL_SHARE_DIR)
+  SET(AT_INSTALL_BIN_DIR "bin" CACHE PATH "AT install binary subdirectory")
+  SET(AT_INSTALL_LIB_DIR "lib" CACHE PATH "AT install library subdirectory")
+  SET(AT_INSTALL_INCLUDE_DIR "include" CACHE PATH "AT install include subdirectory")
+  SET(AT_INSTALL_SHARE_DIR "share" CACHE PATH "AT install include subdirectory")
 ENDIF()
 
 FILE(GLOB base_h RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "*.h")
@@ -115,25 +116,28 @@ IF(NOT DEFINED cwrap_files)
   )
 ENDIF()
 
+SET(GEN_COMMAND
+    python ${CMAKE_CURRENT_SOURCE_DIR}/gen.py ${CUDA_FLAG}
+    -s ${CMAKE_CURRENT_SOURCE_DIR}
+    ${cwrap_files}
+)
+
 EXECUTE_PROCESS(
-    COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/gen.py ${CUDA_FLAG} -s ${CMAKE_CURRENT_SOURCE_DIR} --print-dependencies ${cwrap_files}
-    # user stderr rather than stdout so we can still debug the script with print
-    ERROR_VARIABLE generated_cpp
+    COMMAND ${GEN_COMMAND} --output-dependencies ${CMAKE_CURRENT_BINARY_DIR}/generated_cpp.txt
     RESULT_VARIABLE RETURN_VALUE
 )
-# Filter out anything that is not a source file
-filter_list(generated_cpp generated_cpp "(\\.cpp|\\.h)$")
 if (NOT RETURN_VALUE EQUAL 0)
     message(STATUS ${generated_cpp})
     message(FATAL_ERROR "Failed to get generated_cpp list")
 endif()
+file(READ ${CMAKE_CURRENT_BINARY_DIR}/generated_cpp.txt generated_cpp)
 
 FILE(GLOB_RECURSE all_templates "templates/*")
 
 FILE(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/ATen)
 
 ADD_CUSTOM_COMMAND(OUTPUT ${generated_cpp}
-COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/gen.py ${CUDA_FLAG} -s ${CMAKE_CURRENT_SOURCE_DIR} ${cwrap_files}
+COMMAND ${GEN_COMMAND}
 DEPENDS ${all_python} ${all_templates} ${cwrap_files})
 
 SET(all_cpp ${base_cpp} ${generated_cpp})
@@ -156,14 +160,16 @@ IF(CUDA_FOUND)
 ENDIF()
 
 INSTALL(TARGETS ATen
-  RUNTIME DESTINATION "${TENSOR_LIB_INSTALL_BIN_DIR}"
-  LIBRARY DESTINATION "${TENSOR_LIB_INSTALL_LIB_DIR}"
-  ARCHIVE DESTINATION "${TENSOR_LIB_INSTALL_LIB_DIR}")
+  RUNTIME DESTINATION "${AT_INSTALL_BIN_DIR}"
+  LIBRARY DESTINATION "${AT_INSTALL_LIB_DIR}"
+  ARCHIVE DESTINATION "${AT_INSTALL_LIB_DIR}")
 
 FOREACH(HEADER ${base_h})
-  INSTALL(FILES ${HEADER} DESTINATION ${TENSOR_LIB_INSTALL_INCLUDE_DIR}/ATen)
+  INSTALL(FILES ${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen)
 ENDFOREACH()
 FOREACH(HEADER ${generated_h})
   INSTALL(FILES ${CMAKE_CURRENT_BINARY_DIR}/${HEADER}
-  DESTINATION ${TENSOR_LIB_INSTALL_INCLUDE_DIR}/ATen)
+  DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen)
 ENDFOREACH()
+INSTALL(FILES ${CMAKE_CURRENT_BINARY_DIR}/ATen/Declarations.yaml
+  DESTINATION ${AT_INSTALL_SHARE_DIR}/ATen)

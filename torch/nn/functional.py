@@ -595,9 +595,7 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100):
     if dim == 2:
         f = _functions.thnn.NLLLoss(size_average, ignore_index, weight=weight)
     elif dim == 4:
-        if ignore_index != -100:
-            raise ValueError('ignore_index is not supported for 4-D inputs')
-        f = _functions.thnn.NLLLoss2d(size_average, weight=weight)
+        f = _functions.thnn.NLLLoss2d(size_average, ignore_index, weight=weight)
     else:
         raise ValueError('Expected 2 or 4 dimensions (got {})'.format(dim))
     return f(input, target)

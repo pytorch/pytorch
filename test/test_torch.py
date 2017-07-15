@@ -202,20 +202,20 @@ class TestTorch(TestCase):
             fn_attr = getattr(torch, fn_name) if fn_name != "norm" else normfn_attr
 
             def fn(t, dim, keepdim=False):
-                ans = fn_attr(x, dim, keepdim)
+                ans = fn_attr(x, dim, keepdim=keepdim)
                 return ans if not isinstance(ans, tuple) else ans[0]
 
             dim = random.randint(0, 2)
-            self.assertEqual(fn(x, dim).unsqueeze(dim), fn(x, dim, True))
+            self.assertEqual(fn(x, dim).unsqueeze(dim), fn(x, dim, keepdim=True))
             self.assertEqual(x.ndimension() - 1, fn(x, dim).ndimension())
-            self.assertEqual(x.ndimension(), fn(x, dim, True).ndimension())
+            self.assertEqual(x.ndimension(), fn(x, dim, keepdim=True).ndimension())
 
             # check 1-d behavior
             x = torch.randn(1)
             dim = 0
-            self.assertEqual(fn(x, dim), fn(x, dim, True))
+            self.assertEqual(fn(x, dim), fn(x, dim, keepdim=True))
             self.assertEqual(x.ndimension(), fn(x, dim).ndimension())
-            self.assertEqual(x.ndimension(), fn(x, dim, True).ndimension())
+            self.assertEqual(x.ndimension(), fn(x, dim, keepdim=True).ndimension())
 
     def _testCSelection(self, torchfn, mathfn):
         # Two tensors
@@ -1644,7 +1644,9 @@ class TestTorch(TestCase):
         z = torch.rand(2, 3, 4)
         for dim in range(4):
             res = torch.stack((x, y, z), dim)
+            res_neg = torch.stack((x, y, z), dim - 4)
             expected_size = x.size()[:dim] + (3,) + x.size()[dim:]
+            self.assertEqual(res, res_neg)
             self.assertEqual(res.size(), expected_size)
             self.assertEqual(res.select(dim, 0), x, 0)
             self.assertEqual(res.select(dim, 1), y, 0)
@@ -3187,6 +3189,21 @@ class TestTorch(TestCase):
         res = torch.LongTensor((-bignumber,))
         self.assertGreater(res.abs()[0], 0)
 
+    def test_unbiased(self):
+        tensor = torch.randn(100)
+        self.assertEqual(tensor.var(0), tensor.var(0, unbiased=True))
+        self.assertEqual(tensor.var(), tensor.var(unbiased=True))
+        self.assertEqual(tensor.var(unbiased=False), tensor.var(0, unbiased=False)[0])
+
+        tensor = torch.FloatTensor([1.0, 2.0])
+        self.assertEqual(tensor.var(unbiased=True), 0.5)
+        self.assertEqual(tensor.var(unbiased=False), 0.25)
+
+        tensor = torch.randn(100)
+        self.assertEqual(tensor.std(0), tensor.std(0, unbiased=True))
+        self.assertEqual(tensor.std(), tensor.std(unbiased=True))
+        self.assertEqual(tensor.std(unbiased=False), tensor.std(0, unbiased=False)[0])
+
     def test_view(self):
         tensor = torch.rand(15)
         template = torch.rand(3, 5)
@@ -3950,6 +3967,10 @@ class TestTorch(TestCase):
         expected = torch.arange(1, 126).view(5, 5, 5)[:, 1]
         self.assertEqual(torch.from_numpy(x), expected)
 
+        # check zero dimentional
+        x = np.zeros((0, 2))
+        self.assertRaises(RuntimeError, lambda: torch.from_numpy(x))
+
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_numpy_index(self):
         i = np.int32([0, 1, 2])
@@ -4124,7 +4145,6 @@ neg_dim_tests = [
     ('index_select', (10, 10), lambda: [DIM_ARG, idx_tensor((10,), 10)], [METHOD, FUNCTIONAL]),
     ('split', (10, 20), lambda: [5, DIM_ARG], [METHOD, FUNCTIONAL]),
     ('squeeze', (10, 1, 20, 1), lambda: [DIM_ARG], [METHOD, INPLACE_METHOD, FUNCTIONAL]),
-    ('stack', [(2, 3, 4), (2, 3, 4)], lambda: [DIM_ARG], [FUNCTIONAL]),
     ('unbind', (2, 3, 4), lambda: [DIM_ARG], [FUNCTIONAL]),
     ('unsqueeze', (10, 20), lambda: [DIM_ARG], [METHOD, INPLACE_METHOD, FUNCTIONAL], 1),
     ('cumprod', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),

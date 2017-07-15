@@ -604,12 +604,12 @@ auto THSTensor<real>::mean(const Tensor& src, int dimension, int keepdim) -> THS
 }
 
 template<>
-auto THSTensor<real>::std(const Tensor& src, int dimension, int flag, int keepdim) -> THSTensor& {
+auto THSTensor<real>::std(const Tensor& src, int dimension, int biased, int keepdim) -> THSTensor& {
   throw std::runtime_error("THSTensor::std() not supported");
 }
 
 template<>
-auto THSTensor<real>::var(const Tensor& src, int dimension, int flag, int keepdim) -> THSTensor& {
+auto THSTensor<real>::var(const Tensor& src, int dimension, int biased, int keepdim) -> THSTensor& {
   throw std::runtime_error("THSTensor::var() not supported");
 }
 
@@ -644,12 +644,12 @@ auto THSTensor<real>::meanall() -> scalar_type {
 }
 
 template<>
-auto THSTensor<real>::varall() -> scalar_type {
+auto THSTensor<real>::varall(int biased) -> scalar_type {
   throw std::runtime_error("THSTensor::varall() not supported");
 }
 
 template<>
-auto THSTensor<real>::stdall() -> scalar_type {
+auto THSTensor<real>::stdall(int biased) -> scalar_type {
   throw std::runtime_error("THSTensor::stdall() not supported");
 }
 

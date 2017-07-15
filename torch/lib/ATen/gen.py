@@ -1,5 +1,5 @@
-import sys
 from optparse import OptionParser
+import yaml
 
 import cwrap_parser
 import nn_parse
@@ -14,11 +14,13 @@ from code_template import CodeTemplate
 parser = OptionParser()
 parser.add_option('-s', '--source-path', help='path to source director for tensorlib',
                   action='store', default='.')
-parser.add_option('-p', '--print-dependencies',
-                  help='only output a list of dependencies', action='store_true')
+parser.add_option('-o', '--output-dependencies',
+                  help='only output a list of dependencies', action='store')
 parser.add_option('-n', '--no-cuda', action='store_true')
 
 options, files = parser.parse_args()
+if options.output_dependencies is not None:
+    output_dependencies_file = open(options.output_dependencies, 'w')
 
 TEMPLATE_PATH = options.source_path + "/templates"
 GENERATOR_DERIVED = CodeTemplate.from_file(
@@ -91,11 +93,19 @@ top_env = {
 
 def write(filename, s):
     filename = "ATen/" + filename
-    if options.print_dependencies:
-        sys.stderr.write(filename + ";")
+    if options.output_dependencies is not None:
+        output_dependencies_file.write(filename + ";")
         return
     with open(filename, "w") as f:
         f.write(s)
+
+
+def format_yaml(data):
+    if options.output_dependencies:
+        return ""  # yaml formatting is slow so don't do it if we will ditch it.
+    noalias_dumper = yaml.dumper.SafeDumper
+    noalias_dumper.ignore_aliases = lambda self, data: True
+    return yaml.dump(data, default_flow_style=False, Dumper=noalias_dumper)
 
 
 def generate_storage_type_and_tensor(backend, density, scalar_type, declarations):
@@ -217,7 +227,8 @@ for fname, env in generators.items():
 # note: this will fill in top_env['type/tensor_method_declarations/definitions']
 # and modify the declarations to include any information that will all_backends
 # be used by function_wrapper.create_derived
-function_wrapper.create_generic(top_env, declarations)
+output_declarations = function_wrapper.create_generic(top_env, declarations)
+write("Declarations.yaml", format_yaml(output_declarations))
 
 # populated by generate_storage_type_and_tensor
 all_types = []
@@ -239,3 +250,6 @@ write('TensorMethods.h', TENSOR_METHODS_H.substitute(top_env))
 write('Functions.h', FUNCTIONS_H.substitute(top_env))
 write('Dispatch.h', dispatch_macros.create(all_types))
 write('Copy.cpp', copy_wrapper.create(all_types))
+
+if options.output_dependencies is not None:
+    output_dependencies_file.close()

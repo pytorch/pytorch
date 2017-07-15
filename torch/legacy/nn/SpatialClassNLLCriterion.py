@@ -4,16 +4,19 @@ from .Criterion import Criterion
 
 class SpatialClassNLLCriterion(Criterion):
 
-    def __init__(self, weights=None, sizeAverage=True):
+    def __init__(self, weights=None, sizeAverage=True, ignore_index=-100):
         assert weights is None or weights.dim() == 1
         super(SpatialClassNLLCriterion, self).__init__()
         self.sizeAverage = sizeAverage
         self.weights = weights
+        self.ignore_index = ignore_index
 
         self.output_tensor = torch.zeros(1)
         self.total_weight_tensor = torch.ones(1)
 
     def updateOutput(self, input, target):
+        if not hasattr(self, 'ignore_index'):
+            self.ignore_index = -100
         self._backend.SpatialClassNLLCriterion_updateOutput(
             self._backend.library_state,
             input,
@@ -21,7 +24,8 @@ class SpatialClassNLLCriterion(Criterion):
             self.output_tensor,
             self.sizeAverage,
             self.weights,
-            self.total_weight_tensor
+            self.total_weight_tensor,
+            self.ignore_index
         )
         self.output = self.output_tensor[0]
         return self.output
@@ -35,6 +39,7 @@ class SpatialClassNLLCriterion(Criterion):
             self.gradInput,
             self.sizeAverage,
             self.weights,
-            self.total_weight_tensor
+            self.total_weight_tensor,
+            self.ignore_index
         )
         return self.gradInput
