@@ -695,15 +695,10 @@ class Variable(_C._VariableBase):
         return MaskedSelect.apply(self, mask)
 
     def expand(self, *sizes):
-        if isinstance(sizes[0], torch.Size):
-            if len(sizes) > 1:
-                raise ValueError("expand expects a several ints or a single "
-                                 "torch.Size argument")
-            sizes = sizes[0]
         return Expand.apply(self, sizes)
 
     def expand_as(self, tensor):
-        return Expand.apply(self, tensor.size())
+        return Expand.apply(self, (tensor.size(),))
 
     def t(self):
         if self.dim() != 2:

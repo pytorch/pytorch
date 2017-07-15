@@ -105,12 +105,15 @@ class View(Function):
 class Expand(Function):
 
     @staticmethod
+    # NOTE: new_size can be a tuple of any arguments that expand accepts, including a single-element
+    # tuple containing torch.Size or a list
     def forward(ctx, i, new_size):
-        ctx.num_unsqueezed = len(new_size) - i.dim()
-        ctx.expanded_dims = [dim for dim, (expanded, original)
-                             in enumerate(zip(new_size[ctx.num_unsqueezed:], i.size()))
-                             if expanded != original]
         result = i.expand(*new_size)
+        ctx.num_unsqueezed = result.dim() - i.dim()
+        ctx.expanded_dims = [dim for dim, (expanded, original)
+                             in enumerate(zip(result.size()[ctx.num_unsqueezed:], i.size()))
+                             if expanded != original]
+
         ctx.mark_shared_storage((i, result))
         return result
 
