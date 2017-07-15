@@ -616,12 +616,16 @@ class Repeat(Function):
     @staticmethod
     def forward(ctx, input, repeats):
         ctx.repeats = repeats
+        ctx.input_dims = input.dim()
         return input.repeat(repeats)
 
     @staticmethod
     def backward(ctx, grad_output):
         grad_input = grad_output
-        for dim, repeat in enumerate(ctx.repeats):
+        num_unsqueezed = grad_output.dim() - ctx.input_dims
+        for _ in range(num_unsqueezed):
+            grad_input = grad_input.sum(0, keepdim=False)
+        for dim, repeat in enumerate(ctx.repeats[num_unsqueezed:]):
             if repeat == 1:
                 continue
             grad_input = sum(grad_input.chunk(repeat, dim))
