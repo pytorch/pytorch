@@ -45,7 +45,8 @@ def init_process_group(backend, init_method='env://', **kwargs):
     torch._C._dist_init_process_group(backend, init_method, world_size,
                                       group_name, rank)
     _initialized = _INITIALIZED_PG
-    assert torch._C._dist_init_extension(False, reduce_op, group)
+    if not torch._C._dist_init_extension(False, reduce_op, group):
+        raise RuntimeError("distributed module initialization failed")
 
 
 def init_master_worker(backend, init_method='env://', **kwargs):
@@ -75,7 +76,8 @@ def init_master_worker(backend, init_method='env://', **kwargs):
     import torch.distributed.remote_types as remote_types
     _extend_scope(collectives)
     _extend_scope(remote_types)
-    assert torch._C._dist_init_extension(True, reduce_op, group)
+    if not torch._C._dist_init_extension(True, reduce_op, group):
+        raise RuntimeError("distributed module initialization failed")
 
 
 class reduce_op(object):
