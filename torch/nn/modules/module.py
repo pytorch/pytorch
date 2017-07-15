@@ -112,11 +112,11 @@ class Module(object):
 
         The module can be accessed as an attribute using the given name.
         """
-        if hasattr(self, name):
-            raise KeyError("attribute already exists '{}'".format(name))
         if not isinstance(module, Module) and module is not None:
             raise TypeError("{} is not a Module subclass".format(
                 torch.typename(module)))
+        if hasattr(self, name):
+            raise KeyError("attribute already exists '{}'".format(name))
         self._modules[name] = module
 
     def _apply(self, fn):
