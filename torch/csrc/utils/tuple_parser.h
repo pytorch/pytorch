@@ -4,6 +4,7 @@
 #include <memory>
 #include <vector>
 #include <THPP/THPP.h>
+#include <ATen/ATen.h>
 
 namespace torch {
 
@@ -15,6 +16,7 @@ struct TupleParser {
   void parse(double& x, const std::string& param_name);
   void parse(std::unique_ptr<thpp::Tensor>& x, const std::string& param_name);
   void parse(std::shared_ptr<thpp::Tensor>& x, const std::string& param_name);
+  void parse(at::Tensor& x, const std::string& param_name);
   void parse(std::vector<int>& x, const std::string& param_name);
   void parse(std::string& x, const std::string& param_name);
 

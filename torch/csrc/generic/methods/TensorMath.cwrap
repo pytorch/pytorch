@@ -757,6 +757,10 @@
       return: accreal
       arguments:
         - THTensor* self
+        - arg: bool unbiased
+          if_true: 0
+          if_false: 1
+          default: 0
     - cname: var
       return: argument 0
       arguments:
@@ -765,7 +769,10 @@
         - THTensor* self
         - arg: long dim
           wrap_dim: self
-        - CONSTANT false
+        - arg: bool unbiased
+          if_true: 0
+          if_false: 1
+          default: 0
         - bool keepdim
     - cname: var
       return: argument 0
@@ -776,7 +783,10 @@
         - THTensor* self
         - arg: long dim
           wrap_dim: self
-        - CONSTANT false
+        - arg: bool unbiased
+          if_true: 0
+          if_false: 1
+          default: 0
         - CONSTANT false
 ]]
 
@@ -795,6 +805,10 @@
       return: accreal
       arguments:
         - THTensor* self
+        - arg: bool unbiased
+          if_true: 0
+          if_false: 1
+          default: 0
     - cname: std
       return: argument 0
       arguments:
@@ -803,7 +817,10 @@
         - THTensor* self
         - arg: long dim
           wrap_dim: self
-        - CONSTANT false
+        - arg: bool unbiased
+          if_true: 0
+          if_false: 1
+          default: 0
         - bool keepdim
     - cname: std
       return: argument 0
@@ -814,7 +831,10 @@
         - THTensor* self
         - arg: long dim
           wrap_dim: self
-        - CONSTANT false
+        - arg: bool unbiased
+          if_true: 0
+          if_false: 1
+          default: 0
         - CONSTANT false
 ]]
 

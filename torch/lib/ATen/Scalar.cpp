@@ -24,7 +24,14 @@ template<> int64_t convert(Half f) {
 
 #ifdef AT_CUDA_ENABLED
 template<> half convert(double d) {
-  return half { convert<Half,double>(d).x };
+
+#if CUDA_VERSION < 9000
+  return half {convert<Half,double>(d).x};
+#else
+  __half_raw raw;
+  raw.x = convert<Half,double>(d).x;
+  return half {raw};
+#endif
 }
 #endif
 
