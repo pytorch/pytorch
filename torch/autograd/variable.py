@@ -734,14 +734,14 @@ class Variable(_C._VariableBase):
     def permute(self, *permutation):
         return Permute.apply(self, permutation)
 
-    def diag(self, diagonal_idx=0):
-        return Diag.apply(self, diagonal_idx)
+    def diag(self, diagonal=0):
+        return Diag.apply(self, diagonal)
 
-    def tril(self, diagonal_idx=0):
-        return Tril.apply(self, diagonal_idx)
+    def tril(self, diagonal=0):
+        return Tril.apply(self, diagonal)
 
-    def triu(self, diagonal_idx=0):
-        return Triu.apply(self, diagonal_idx)
+    def triu(self, diagonal=0):
+        return Triu.apply(self, diagonal)
 
     def trace(self):
         return Trace.apply(self)
@@ -755,8 +755,8 @@ class Variable(_C._VariableBase):
     def gesv(self, a):
         return Gesv.apply(self, a)
 
-    def multinomial(self, num_samples=1, with_replacement=False):
-        return Multinomial(num_samples, with_replacement)(self)
+    def multinomial(self, num_samples=1, replacement=False):
+        return Multinomial(num_samples, replacement)(self)
 
     def bernoulli(self):
         return Bernoulli()(self)

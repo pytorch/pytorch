@@ -1694,7 +1694,7 @@
     - arg: THTensor* destination
       output: True
     - THTensor* self
-    - arg: long k
+    - arg: long diagonal
       default: 0
 ]]
 
@@ -1705,7 +1705,7 @@
   arguments:
     - THTensor* self
     - THTensor* self
-    - arg: long k
+    - arg: long diagonal
       default: 0
 ]]
 
@@ -1719,7 +1719,7 @@
     - arg: THTensor* destination
       output: True
     - THTensor* self
-    - arg: long k
+    - arg: long diagonal
       default: 0
 ]]
 
@@ -1730,7 +1730,7 @@
   arguments:
     - THTensor* self
     - THTensor* self
-    - arg: long k
+    - arg: long diagonal
       default: 0
 ]]
 
