@@ -14,7 +14,7 @@ from .pooling import AvgPool1d, AvgPool2d, AvgPool3d, MaxPool1d, MaxPool2d, MaxP
     MaxUnpool1d, MaxUnpool2d, MaxUnpool3d, FractionalMaxPool2d, LPPool2d, AdaptiveMaxPool1d, \
     AdaptiveMaxPool2d, AdaptiveAvgPool1d, AdaptiveAvgPool2d
 from .batchnorm import BatchNorm1d, BatchNorm2d, BatchNorm3d
-from .instancenorm import InstanceNorm1d, InstanceNorm2d, InstanceNorm3d
+from .instancenorm import LayerNorm, InstanceNorm1d, InstanceNorm2d, InstanceNorm3d
 from .dropout import Dropout, Dropout2d, Dropout3d, AlphaDropout
 from .padding import ReflectionPad2d, ReplicationPad2d, ReplicationPad3d, ZeroPad2d, ConstantPad2d
 from .normalization import CrossMapLRN2d

@@ -143,7 +143,7 @@ class InstanceNorm1d(_InstanceNorm):
 
 class InstanceNorm2d(_InstanceNorm):
     r"""Applies Instance Normalization over a 4D input that is seen as a
-    mini-batch of 3D inputs. 
+    mini-batch of 3D inputs.
 
     .. math::
 
