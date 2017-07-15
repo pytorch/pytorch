@@ -44,7 +44,7 @@ class LayerNorm(_InstanceNorm):
 
         y = \gamma * \frac{x - \mu_x}{\sigma_x + \epsilon} + \beta
 
-    The mean and standard-deviation are calculated per-dimension separately
+    The mean and standard deviation are calculated per-dimension separately
     for each object in a mini-batch. Gamma and beta are learnable parameter
     vectors of size C (where C is the input size).
 
@@ -97,7 +97,7 @@ class InstanceNorm1d(_InstanceNorm):
 
         y = \gamma * \frac{x - \mu_x}{\sigma_x + \epsilon} + \beta
 
-    The mean and standard-deviation are calculated per-dimension separately
+    The mean and standard deviation are calculated per-dimension separately
     for each object in a mini-batch. Gamma and beta are learnable parameter
     vectors of size C (where C is the input size). This can be seen as an
     extension of layer normalization where statistics are only calculated over
@@ -149,7 +149,7 @@ class InstanceNorm2d(_InstanceNorm):
 
         y = \gamma * \frac{x - \mu_x}{\sigma_x + \epsilon} + \beta
 
-    The mean and standard-deviation are calculated per-dimension separately
+    The mean and standard deviation are calculated per-dimension separately
     for each object in a mini-batch. Gamma and beta are learnable parameter
     vectors of size C (where C is the input size). This can be seen as an
     extension of layer normalization where statistics are only calculated over
@@ -199,7 +199,7 @@ class InstanceNorm3d(_InstanceNorm):
 
         y = \gamma * \frac{x - \mu_x}{\sigma_x + \epsilon} + \beta
 
-    The mean and standard-deviation are calculated per-dimension separately
+    The mean and standard deviation are calculated per-dimension separately
     for each object in a mini-batch. Gamma and beta are learnable parameter
     vectors of size C (where C is the input size). This can be seen as an
     extension of layer normalization where statistics are only calculated over
