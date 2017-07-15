@@ -37,7 +37,7 @@ __all__ = [
     'SoftMarginLoss', 'CrossEntropyLoss', 'Container', 'Sequential', 'ModuleList',
     'ParameterList', 'AvgPool1d', 'AvgPool2d', 'AvgPool3d', 'MaxPool1d', 'MaxPool2d',
     'MaxPool3d', 'MaxUnpool1d', 'MaxUnpool2d', 'MaxUnpool3d', 'FractionalMaxPool2d',
-    'LPPool2d', 'BatchNorm1d', 'BatchNorm2d', 'BatchNorm3d', 'InstanceNorm1d', 'InstanceNorm2d',
+    'LPPool2d', 'BatchNorm1d', 'BatchNorm2d', 'BatchNorm3d', 'LayerNorm', 'InstanceNorm1d', 'InstanceNorm2d',
     'InstanceNorm3d', 'Dropout', 'Dropout2d', 'Dropout3d', 'AlphaDropout', 'ReflectionPad2d',
     'ReplicationPad2d', 'ReplicationPad3d', 'CrossMapLRN2d',
     'Embedding', 'EmbeddingBag', 'RNNBase', 'RNN', 'LSTM', 'GRU', 'RNNCell', 'LSTMCell', 'GRUCell',

@@ -3174,6 +3174,18 @@ new_module_tests = [
         desc='no_affine'
     ),
     dict(
+        module_name='LayerNorm',
+        constructor_args=(10, 1e-3),
+        input_size=(4, 10),
+        desc='affine'
+    ),
+    dict(
+        module_name='LayerNorm',
+        constructor_args=(10, 1e-3, 0.7, False),
+        input_size=(4, 10),
+        desc='no_affine'
+    ),
+    dict(
         module_name='Conv1d',
         constructor_args=(4, 5, 3),
         input_size=(2, 4, 10),

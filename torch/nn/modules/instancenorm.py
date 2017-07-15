@@ -99,8 +99,8 @@ class InstanceNorm1d(_InstanceNorm):
 
     The mean and standard-deviation are calculated per-dimension separately
     for each object in a mini-batch. Gamma and beta are learnable parameter
-    vectors of size C (where C is the input size). Can be seen as an extension
-    of layer normalization where statistics are only calculated over
+    vectors of size C (where C is the input size). This can be seen as an
+    extension of layer normalization where statistics are only calculated over
     `num_features` and NOT all non-batch dimensions.
 
     During training, this layer keeps a running estimate of its computed mean
@@ -151,8 +151,8 @@ class InstanceNorm2d(_InstanceNorm):
 
     The mean and standard-deviation are calculated per-dimension separately
     for each object in a mini-batch. Gamma and beta are learnable parameter
-    vectors of size C (where C is the input size). Can be seen as an extension
-    of layer normalization where statistics are only calculated over
+    vectors of size C (where C is the input size). This can be seen as an
+    extension of layer normalization where statistics are only calculated over
     `num_features` and NOT all non-batch dimensions.
 
     During training, this layer keeps a running estimate of its computed mean
@@ -201,8 +201,8 @@ class InstanceNorm3d(_InstanceNorm):
 
     The mean and standard-deviation are calculated per-dimension separately
     for each object in a mini-batch. Gamma and beta are learnable parameter
-    vectors of size C (where C is the input size). Can be seen as an extension
-    of layer normalization where statistics are only calculated over
+    vectors of size C (where C is the input size). This can be seen as an
+    extension of layer normalization where statistics are only calculated over
     `num_features` and NOT all non-batch dimensions.
 
     During training, this layer keeps a running estimate of its computed mean
