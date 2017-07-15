@@ -100,7 +100,7 @@ auto SavedVariable::unpack(std::shared_ptr<Function> saved_for) -> std::shared_p
 
 const char* ERR_BACKWARD_TWICE =
     "Trying to backward through the graph a second time, but the buffers have "
-    "already been freed. Specify retain_variables=True when calling backward "
+    "already been freed. Specify retain_graph=True when calling backward "
     "the first time.";
 
 }} // namespace torch::autograd

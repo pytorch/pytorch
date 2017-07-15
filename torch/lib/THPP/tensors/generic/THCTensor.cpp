@@ -922,9 +922,9 @@ auto THCTensor<real>::mean(const Tensor& src, int dimension, int keepdim) -> THC
 }
 
 template<>
-auto THCTensor<real>::std(const Tensor& src, int dimension, int flag, int keepdim) -> THCTensor& {
+auto THCTensor<real>::std(const Tensor& src, int dimension, int biased, int keepdim) -> THCTensor& {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-  THCTensor_(std)(state, tensor, const_tensor_cast(src).tensor, dimension, flag, keepdim);
+  THCTensor_(std)(state, tensor, const_tensor_cast(src).tensor, dimension, biased, keepdim);
   return *this;
 #else
   throw std::runtime_error("floating point functions are available only for\
@@ -933,9 +933,9 @@ auto THCTensor<real>::std(const Tensor& src, int dimension, int flag, int keepdi
 }
 
 template<>
-auto THCTensor<real>::var(const Tensor& src, int dimension, int flag, int keepdim) -> THCTensor& {
+auto THCTensor<real>::var(const Tensor& src, int dimension, int biased, int keepdim) -> THCTensor& {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-  THCTensor_(var)(state, tensor, const_tensor_cast(src).tensor, dimension, flag, keepdim);
+  THCTensor_(var)(state, tensor, const_tensor_cast(src).tensor, dimension, biased, keepdim);
   return *this;
 #else
   throw std::runtime_error("floating point functions are available only for\
@@ -1020,9 +1020,9 @@ auto THCTensor<real>::meanall() -> scalar_type {
 }
 
 template<>
-auto THCTensor<real>::varall() -> scalar_type {
+auto THCTensor<real>::varall(int biased) -> scalar_type {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-  return THCTensor_(varall)(state, tensor);
+  return THCTensor_(varall)(state, tensor, biased);
 #else
   throw std::runtime_error("floating point functions are available only for\
       floating point tensors");
@@ -1030,9 +1030,9 @@ auto THCTensor<real>::varall() -> scalar_type {
 }
 
 template<>
-auto THCTensor<real>::stdall() -> scalar_type {
+auto THCTensor<real>::stdall(int biased) -> scalar_type {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-  return THCTensor_(stdall)(state, tensor);
+  return THCTensor_(stdall)(state, tensor, biased);
 #else
   throw std::runtime_error("floating point functions are available only for\
       floating point tensors");

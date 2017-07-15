@@ -179,8 +179,8 @@ struct Tensor {
   virtual Tensor& trunc(const Tensor& src) = 0;
   virtual Tensor& frac(const Tensor& src) = 0;
   virtual Tensor& mean(const Tensor& src, int dimension, int keepdim) = 0;
-  virtual Tensor& std(const Tensor& src, int dimension, int flag, int keepdim) = 0;
-  virtual Tensor& var(const Tensor& src, int dimension, int flag, int keepdim) = 0;
+  virtual Tensor& std(const Tensor& src, int dimension, int biased, int keepdim) = 0;
+  virtual Tensor& var(const Tensor& src, int dimension, int biased, int keepdim) = 0;
   virtual Tensor& rand(const Generator& _generator, THLongStorage *size) = 0;
   virtual Tensor& randn(const Generator& _generator, THLongStorage *size) = 0;
 
@@ -294,8 +294,8 @@ struct TensorScalarInterface : public Tensor {
 
   virtual scalar_type dist(const Tensor& src, scalar_type value) = 0;
   virtual scalar_type meanall() = 0;
-  virtual scalar_type varall() = 0;
-  virtual scalar_type stdall() = 0;
+  virtual scalar_type varall(int biased) = 0;
+  virtual scalar_type stdall(int biased) = 0;
   virtual scalar_type normall(scalar_type value) = 0;
   virtual TensorScalarInterface& linspace(scalar_type a, scalar_type b, long n) = 0;
   virtual TensorScalarInterface& logspace(scalar_type a, scalar_type b, long n) = 0;
