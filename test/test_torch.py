@@ -2296,7 +2296,7 @@ class TestTorch(TestCase):
         target_value = torch.rand(1000)
         # Dramatically alter the internal state of the main generator
         _ = torch.rand(100000)
-        forked_value = torch.rand(gen, 1000)
+        forked_value = torch.rand(1000, generator=gen)
         self.assertEqual(target_value, forked_value, 0, "RNG has not forked correctly.")
 
     def test_boxMullerState(self):
