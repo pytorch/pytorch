@@ -235,7 +235,7 @@ class ELU(Module):
     :math:`f(x) = max(0,x) + min(0, alpha * (exp(x) - 1))`
 
     Args:
-        alpha: the alpha value for the ELU formulation
+        alpha: the alpha value for the ELU formulation. Default: 1.0
         inplace: can optionally do the operation in-place
 
     Shape:
