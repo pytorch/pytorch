@@ -36,29 +36,90 @@ class _InstanceNorm(_BatchNorm):
         return self
 
 
-class InstanceNorm1d(_InstanceNorm):
-    r"""Applies Instance Normalization over a 2d or 3d input that is seen as a mini-batch.
+class LayerNorm(_InstanceNorm):
+    r"""Applies Layer Normalization over a 2D input that is seen
+    as a mini-batch of 1D inputs.
 
     .. math::
 
-        y = \frac{x - mean[x]}{ \sqrt{Var[x]} + \epsilon} * gamma + beta
+        y = \gamma * \frac{x - \mu_x}{\sigma_x + \epsilon} + \beta
 
     The mean and standard-deviation are calculated per-dimension separately
-    for each object in a mini-batch. Gamma and beta are learnable parameter vectors
-    of size C (where C is the input size).
+    for each object in a mini-batch. Gamma and beta are learnable parameter
+    vectors of size C (where C is the input size).
 
     During training, this layer keeps a running estimate of its computed mean
     and variance. The running sum is kept with a default momentum of 0.1.
 
-    At evaluation time (`.eval()`), the default behaviour of the InstanceNorm module stays the same
-    i.e. running mean/variance is NOT used for normalization. One can force using stored
-    mean and variance with `.train(False)` method.
+    At evaluation time (`.eval()`), the default behaviour of the LayerNorm
+    module stays the same, i.e. the running mean/variance is NOT used for
+    normalization. One can force using the stored mean and variance with
+    the `.train(False)` method.
 
     Args:
-        num_features: num_features from an expected input of size `batch_size x num_features x width`
-        eps: a value added to the denominator for numerical stability. Default: 1e-5
-        momentum: the value used for the running_mean and running_var computation. Default: 0.1
-        affine: a boolean value that when set to true, gives the layer learnable affine parameters.
+        num_features: num_features from an expected input of size
+            `batch_size x num_features`
+        eps: a value added to the denominator for numerical stability.
+            Default: 1e-5
+        momentum: the value used for the running_mean and running_var
+            computation. Default: 0.1
+        affine: a boolean value that when set to true, gives the layer learnable
+            affine parameters. Default: True
+
+    Shape:
+        - Input: :math:`(N, C)`
+        - Output: :math:`(N, C)` (same shape as input)
+
+    Examples:
+        >>> # With Learnable Parameters
+        >>> m = nn.LayerNorm(100)
+        >>> # Without Learnable Parameters
+        >>> m = nn.LayerNorm(100, affine=False)
+        >>> input = autograd.Variable(torch.randn(20, 100))
+        >>> output = m(input)
+    """
+
+    def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True):
+        super(LayerNorm, self).__init__(num_features, eps, momentum, affine)
+
+    def _check_input_dim(self, input):
+        if input.dim() != 2:
+            raise ValueError('expected 2D input (got {}D input)'
+                             .format(input.dim()))
+        super(LayerNorm, self)._check_input_dim(input)
+
+
+class InstanceNorm1d(_InstanceNorm):
+    r"""Applies Instance Normalization over a 3D input that is seen
+    as a mini-batch of 2D inputs.
+
+    .. math::
+
+        y = \gamma * \frac{x - \mu_x}{\sigma_x + \epsilon} + \beta
+
+    The mean and standard-deviation are calculated per-dimension separately
+    for each object in a mini-batch. Gamma and beta are learnable parameter
+    vectors of size C (where C is the input size). Can be seen as an extension
+    of layer normalization where statistics are only calculated over
+    `num_features` and NOT all non-batch dimensions.
+
+    During training, this layer keeps a running estimate of its computed mean
+    and variance. The running sum is kept with a default momentum of 0.1.
+
+    At evaluation time (`.eval()`), the default behaviour of the InstanceNorm
+    module stays the same, i.e. the running mean/variance is NOT used for
+    normalization. One can force using the stored mean and variance with
+    the `.train(False)` method.
+
+    Args:
+        num_features: num_features from an expected input of size
+            `batch_size x num_features x width`
+        eps: a value added to the denominator for numerical stability.
+            Default: 1e-5
+        momentum: the value used for the running_mean and running_var
+            computation. Default: 0.1
+        affine: a boolean value that when set to true, gives the layer learnable
+            affine parameters. Default: False
 
     Shape:
         - Input: :math:`(N, C, L)`
@@ -81,29 +142,36 @@ class InstanceNorm1d(_InstanceNorm):
 
 
 class InstanceNorm2d(_InstanceNorm):
-    r"""Applies Instance Normalization over a 4d input that is seen as a mini-batch of 3d inputs
+    r"""Applies Instance Normalization over a 4D input that is seen as a
+    mini-batch of 3D inputs. 
 
     .. math::
 
-        y = \frac{x - mean[x]}{ \sqrt{Var[x]} + \epsilon} * gamma + beta
+        y = \gamma * \frac{x - \mu_x}{\sigma_x + \epsilon} + \beta
 
     The mean and standard-deviation are calculated per-dimension separately
-    for each object in a mini-batch. Gamma and beta are learnable parameter vectors
-    of size C (where C is the input size).
+    for each object in a mini-batch. Gamma and beta are learnable parameter
+    vectors of size C (where C is the input size). Can be seen as an extension
+    of layer normalization where statistics are only calculated over
+    `num_features` and NOT all non-batch dimensions.
 
     During training, this layer keeps a running estimate of its computed mean
     and variance. The running sum is kept with a default momentum of 0.1.
 
-    At evaluation time (`.eval()`), the default behaviour of the InstanceNorm module stays the same
-    i.e. running mean/variance is NOT used for normalization. One can force using stored
-    mean and variance with `.train(False)` method.
+    At evaluation time (`.eval()`), the default behaviour of the InstanceNorm
+    module stays the same, i.e. the running mean/variance is NOT used for
+    normalization. One can force using the stored mean and variance with
+    the `.train(False)` method.
 
     Args:
-        num_features: num_features from an expected input of size batch_size x num_features x height x width
-        eps: a value added to the denominator for numerical stability. Default: 1e-5
-        momentum: the value used for the running_mean and running_var computation. Default: 0.1
-        affine: a boolean value that when set to true, gives the layer learnable affine parameters.
-
+        num_features: num_features from an expected input of size
+            `batch_size x num_features x height x width`
+        eps: a value added to the denominator for numerical stability.
+            Default: 1e-5
+        momentum: the value used for the running_mean and running_var
+            computation. Default: 0.1
+        affine: a boolean value that when set to true, gives the layer learnable
+            affine parameters. Default: False
     Shape:
         - Input: :math:`(N, C, H, W)`
         - Output: :math:`(N, C, H, W)` (same shape as input)
@@ -129,25 +197,31 @@ class InstanceNorm3d(_InstanceNorm):
 
     .. math::
 
-        y = \frac{x - mean[x]}{ \sqrt{Var[x]} + \epsilon} * gamma + beta
+        y = \gamma * \frac{x - \mu_x}{\sigma_x + \epsilon} + \beta
 
-    The mean and standard-deviation are calculated per-dimension separately for each object in a mini-batch.
-    Gamma and beta are learnable parameter vectors
-    of size C (where C is the input size).
+    The mean and standard-deviation are calculated per-dimension separately
+    for each object in a mini-batch. Gamma and beta are learnable parameter
+    vectors of size C (where C is the input size). Can be seen as an extension
+    of layer normalization where statistics are only calculated over
+    `num_features` and NOT all non-batch dimensions.
 
     During training, this layer keeps a running estimate of its computed mean
     and variance. The running sum is kept with a default momentum of 0.1.
 
-    At evaluation time (`.eval()`), the default behaviour of the InstanceNorm module stays the same
-    i.e. running mean/variance is NOT used for normalization. One can force using stored
-    mean and variance with `.train(False)` method.
-
+    At evaluation time (`.eval()`), the default behaviour of the InstanceNorm
+    module stays the same, i.e. the running mean/variance is NOT used for
+    normalization. One can force using the stored mean and variance with
+    the `.train(False)` method.
 
     Args:
-        num_features: num_features from an expected input of size batch_size x num_features x depth x height x width
-        eps: a value added to the denominator for numerical stability. Default: 1e-5
-        momentum: the value used for the running_mean and running_var computation. Default: 0.1
-        affine: a boolean value that when set to true, gives the layer learnable affine parameters.
+        num_features: num_features from an expected input of size
+            `batch_size x num_features x depth x height x width`
+        eps: a value added to the denominator for numerical stability.
+            Default: 1e-5
+        momentum: the value used for the running_mean and running_var
+            computation. Default: 0.1
+        affine: a boolean value that when set to true, gives the layer learnable
+            affine parameters. Default: False
 
     Shape:
         - Input: :math:`(N, C, D, H, W)`

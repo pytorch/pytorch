@@ -43,15 +43,15 @@ class _BatchNorm(Module):
 
 
 class BatchNorm1d(_BatchNorm):
-    r"""Applies Batch Normalization over a 2d or 3d input that is seen as a
-    mini-batch.
+    r"""Applies Batch Normalization over a 2D or 3D input that is seen as a
+    mini-batch of 1D or 2D inputs.
 
     .. math::
 
-        y = \frac{x - mean[x]}{ \sqrt{Var[x] + \epsilon}} * gamma + beta
+        y = \gamma * \frac{x - \mu_x}{\sigma_x + \epsilon} + \beta
 
-    The mean and standard-deviation are calculated per-dimension over
-    the mini-batches and gamma and beta are learnable parameter vectors
+    The mean and standard deviation are calculated per-dimension over
+    the mini-batches. Gamma and beta are learnable parameter vectors
     of size C (where C is the input size).
 
     During training, this layer keeps a running estimate of its computed mean
@@ -67,7 +67,7 @@ class BatchNorm1d(_BatchNorm):
         momentum: the value used for the running_mean and running_var
             computation. Default: 0.1
         affine: a boolean value that when set to true, gives the layer learnable
-            affine parameters.
+            affine parameters. Default: True
 
     Shape:
         - Input: :math:`(N, C)` or :math:`(N, C, L)`
@@ -90,15 +90,15 @@ class BatchNorm1d(_BatchNorm):
 
 
 class BatchNorm2d(_BatchNorm):
-    r"""Applies Batch Normalization over a 4d input that is seen as a mini-batch
-    of 3d inputs
+    r"""Applies Batch Normalization over a 4D input that is seen as a mini-batch
+    of 3D inputs.
 
     .. math::
 
-        y = \frac{x - mean[x]}{ \sqrt{Var[x] + \epsilon}} * gamma + beta
+        y = \gamma * \frac{x - \mu_x}{\sigma_x + \epsilon} + \beta
 
-    The mean and standard-deviation are calculated per-dimension over
-    the mini-batches and gamma and beta are learnable parameter vectors
+    The mean and standard deviation are calculated per-dimension over
+    the mini-batches. Gamma and beta are learnable parameter vectors
     of size C (where C is the input size).
 
     During training, this layer keeps a running estimate of its computed mean
@@ -114,7 +114,7 @@ class BatchNorm2d(_BatchNorm):
         momentum: the value used for the running_mean and running_var
             computation. Default: 0.1
         affine: a boolean value that when set to true, gives the layer learnable
-            affine parameters.
+            affine parameters. Default: True
 
     Shape:
         - Input: :math:`(N, C, H, W)`
@@ -137,15 +137,15 @@ class BatchNorm2d(_BatchNorm):
 
 
 class BatchNorm3d(_BatchNorm):
-    r"""Applies Batch Normalization over a 5d input that is seen as a mini-batch
-    of 4d inputs
+    r"""Applies Batch Normalization over a 5D input that is seen as a mini-batch
+    of 4D inputs.
 
     .. math::
 
-        y = \frac{x - mean[x]}{ \sqrt{Var[x] + \epsilon}} * gamma + beta
+        y = \gamma * \frac{x - \mu_x}{\sigma_x + \epsilon} + \beta
 
-    The mean and standard-deviation are calculated per-dimension over
-    the mini-batches and gamma and beta are learnable parameter vectors
+    The mean and standard deviation are calculated per-dimension over
+    the mini-batches. Gamma and beta are learnable parameter vectors
     of size C (where C is the input size).
 
     During training, this layer keeps a running estimate of its computed mean
@@ -161,7 +161,7 @@ class BatchNorm3d(_BatchNorm):
         momentum: the value used for the running_mean and running_var
             computation. Default: 0.1
         affine: a boolean value that when set to true, gives the layer learnable
-            affine parameters.
+            affine parameters. Default: True
 
     Shape:
         - Input: :math:`(N, C, D, H, W)`
