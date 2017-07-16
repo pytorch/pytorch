@@ -28,7 +28,7 @@ template<>
 struct THPUtils_typeTraits<real> {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || \
     defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || \
-    defined(THC_REAL_IS_HALF)
+    defined(THC_REAL_IS_HALF) || defined(TH_REAL_IS_HALF)
   static constexpr char *python_type_str = "float";
 #else
   static constexpr char *python_type_str = "int";
