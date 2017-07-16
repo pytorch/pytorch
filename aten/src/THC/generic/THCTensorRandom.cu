@@ -75,6 +75,29 @@ THC_API void THCTensor_(logNormal)(THCState* state, THCTensor *self_, double mea
   THCTensor_(freeCopyTo)(state, self, self_);
 };
 
+THC_API void THCTensor_(truncatedNormal)(THCState* state,
+                                          THCTensor *self_,
+                                          double mean, double stdv,
+                                          double min_val, double max_val)
+{
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
+  ptrdiff_t size = THCTensor_(nElement)(state, self_);
+  if (size == 0) return;
+  THCGenerator* gen = THCRandom_getGenerator(state);
+
+  THArgCheck(stdv > 0, 2, "standard deviation must be strictly positive");
+  THArgCheck(min_val < max_val, 3, "min_val mush be smaller than max_val");
+  THArgCheck(!isinf(min_val) || !isinf(max_val), 3, "min_val and max_val can not both be infinite");
+
+  THCTensor *self = THCTensor_(newContiguous)(state, self_);
+  real *data = THCTensor_(data)(state, self);
+
+  generateTruncatedNormal<real><<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
+      gen->gen_states, size, data, mean, stdv, min_val, max_val);
+
+  THCTensor_(freeCopyTo)(state, self, self_);
+};
+
 THC_API void THCTensor_(exponential)(THCState* state, THCTensor *self_, double lambda)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));

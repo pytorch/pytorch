@@ -4287,6 +4287,11 @@ class TestNNInit(TestCase):
         p_value = stats.kstest(samples, 'norm', args=(mean, std))[1]
         return p_value > 0.0001
 
+    def _is_truncated_normal(self, tensor, mean, std):
+        samples = tensor.view(-1).tolist()
+        p_value = stats.kstest(samples, 'truncnorm', args=(-2, 2, mean, std)).pvalue
+        return p_value > 0.0001
+
     def _is_uniform(self, tensor, a, b):
         samples = tensor.view(-1).tolist()
         p_value = stats.kstest(samples, 'uniform', args=(a, (b - a)))[1]
@@ -4363,6 +4368,17 @@ class TestNNInit(TestCase):
                 init.normal(input_tensor, mean=mean, std=std)
 
                 assert self._is_normal(input_tensor, mean, std)
+
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
+    def test_truncated_normal(self):
+        for as_variable in [True, False]:
+            for dims in [1, 2, 4]:
+                input_tensor = self._create_random_nd_tensor(dims, size_min=30, size_max=50, as_variable=as_variable)
+                mean = self._random_float(-3, 3)
+                std = self._random_float(1, 5)
+                init.truncated_normal(input_tensor, mean=mean, std=std)
+
+                assert self._is_truncated_normal(input_tensor, mean, std)
 
     def test_constant(self):
         for as_variable in [True, False]:

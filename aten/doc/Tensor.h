@@ -387,6 +387,7 @@ struct Tensor : public detail::TensorBase {
   Tensor & normal_(double mean=0, double std=1, Generator * generator=nullptr);
   Tensor & cauchy_(double median=0, double sigma=1, Generator * generator=nullptr);
   Tensor & log_normal_(double mean=1, double std=2, Generator * generator=nullptr);
+  Tensor & truncated_normal_(double mean=0, double std=1, double min_val=-2, double max_val=2, Generator * generator=nullptr);
   Tensor & exponential_(double lambd=1, Generator * generator=nullptr);
   Tensor & geometric_(double p, Generator * generator=nullptr);
   Tensor bernoulli(Generator * generator=nullptr) const;

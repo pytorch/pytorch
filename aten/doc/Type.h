@@ -637,6 +637,7 @@ struct AT_API Type {
   virtual Tensor & normal_(Tensor & self, double mean=0, double std=1, Generator * generator=nullptr) const;
   virtual Tensor & cauchy_(Tensor & self, double median=0, double sigma=1, Generator * generator=nullptr) const;
   virtual Tensor & log_normal_(Tensor & self, double mean=1, double std=2, Generator * generator=nullptr) const;
+  virtual Tensor & truncated_normal_(Tensor & self, double mean=0, double std=1, double min_val=-2, double max_val=2, Generator * generator=nullptr) const;
   virtual Tensor & exponential_(Tensor & self, double lambd=1, Generator * generator=nullptr) const;
   virtual Tensor & rand_out(Tensor & result, IntList size, Generator * generator=nullptr) const;
   virtual Tensor rand(IntList size, Generator * generator=nullptr) const;

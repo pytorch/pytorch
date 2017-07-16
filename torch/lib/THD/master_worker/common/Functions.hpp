@@ -222,6 +222,7 @@ enum Functions: std::uint16_t {
   tensorExponential,
   tensorCauchy,
   tensorLogNormal,
+  tensorTruncatedNormal,
   tensorMultinomial,
 
   // storage functions

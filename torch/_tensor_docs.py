@@ -1731,6 +1731,18 @@ trunc_() -> Tensor
 In-place version of :meth:`~Tensor.trunc`
 """)
 
+add_docstr_all('truncated_normal_', u"""
+truncated_normal_(mean=0, std=1, min_val=-2, max_val=2, *, generator=None)
+
+Fills this tensor with numbers samples from the truncated-normal distribution
+parameterized by the given mean (\u00B5), standard deviation (\u03C3), min_val(a) and max_val(b).
+
+.. math::
+
+    P(x)={\\frac {\\exp \\left(-{\\frac {1}{2}}({\\frac {x-\\mu }{\\sigma }}) ^{2}\\right)}
+    {\\int_{a}^b \\exp \\left(-{\\frac {1}{2}}({\\frac {x-\\mu }{\\sigma }}) ^{2}\\right)dx}}
+""")
+
 add_docstr_all('unfold',
                r"""
 unfold(dim, size, step) -> Tensor

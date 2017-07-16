@@ -1162,6 +1162,7 @@ torch.nn.init
 .. autofunction:: calculate_gain
 .. autofunction:: uniform
 .. autofunction:: normal
+.. autofunction:: truncated_normal
 .. autofunction:: constant
 .. autofunction:: eye
 .. autofunction:: dirac

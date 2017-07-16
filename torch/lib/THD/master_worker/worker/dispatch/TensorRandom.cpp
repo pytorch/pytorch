@@ -87,6 +87,17 @@ static void tensorLogNormal(rpc::RPCMessage& raw_message) {
   tensor.log_normal_(mean, stdv, _generator);
 }
 
+static void tensorTruncatedNormal(rpc::RPCMessage& raw_message) {
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Generator *_generator = unpackRetrieveGenerator(raw_message);
+  double mean = unpackFloat(raw_message);
+  double stdv = unpackFloat(raw_message);
+  double min_val = unpackFloat(raw_message);
+  double max_val = unpackFloat(raw_message);
+  finalize(raw_message);
+  tensor.truncated_normal_(mean, stdv, min_val, max_val, _generator);
+}
+
 static void tensorMultinomial(rpc::RPCMessage& raw_message) {
   at::Tensor tensor = unpackRetrieveTensor(raw_message);
   at::Generator *_generator = unpackRetrieveGenerator(raw_message);

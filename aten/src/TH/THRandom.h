@@ -57,6 +57,11 @@ TH_API float THRandom_uniformFloat(THGenerator *_generator, float a, float b);
 */
 TH_API double THRandom_normal(THGenerator *_generator, double mean, double stdv);
 
+/** Generates a random number from a truncated-normal distribution.
+    (With mean #mean# and standard deviation #stdv >= 0#, truncated from #min_val# to #max_val#).
+*/
+TH_API double THRandom_truncatedNormal(THGenerator *_generator, double mean, double stdv, double min_val, double max_val);
+
 /** Generates a random number from an exponential distribution.
     The density is $p(x) = lambda * exp(-lambda * x)$, where
     lambda is a positive number.

@@ -243,6 +243,7 @@ static const std::unordered_map<rpc::function_id_type, dispatch_fn> functions {
     {Functions::tensorExponential, tensorExponential},
     {Functions::tensorCauchy, tensorCauchy},
     {Functions::tensorLogNormal, tensorLogNormal},
+    {Functions::tensorTruncatedNormal, tensorTruncatedNormal},
     {Functions::tensorMultinomial, tensorMultinomial},
 
     {Functions::tensorGesv, tensorGesv},

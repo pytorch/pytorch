@@ -68,6 +68,7 @@ There are a few more in-place random sampling functions defined on Tensors as we
 - :func:`torch.Tensor.exponential_` - numbers drawn from the exponential distribution
 - :func:`torch.Tensor.geometric_` - elements drawn from the geometric distribution
 - :func:`torch.Tensor.log_normal_` - samples from the log-normal distribution
+- :func:`torch.Tensor.truncated_normal_` - samples from the truncated-normal distribution
 - :func:`torch.Tensor.normal_` - in-place version of :func:`torch.normal`
 - :func:`torch.Tensor.random_` - numbers sampled from the discrete uniform distribution
 - :func:`torch.Tensor.uniform_` - numbers sampled from the continuous uniform distribution
