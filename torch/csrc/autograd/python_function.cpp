@@ -7,12 +7,12 @@
 #include <exception>
 
 #include "THP.h"
-#include "torch/csrc/autograd/tracer.h"
 #include "torch/csrc/autograd/functions/accumulate_grad.h"
 #include "torch/csrc/autograd/functions/basic_ops.h"
 #include "torch/csrc/autograd/functions/utils.h"
 #include "torch/csrc/autograd/python_cpp_function.h"
 #include "torch/csrc/autograd/python_hook.h"
+#include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/utils/auto_gpu.h"
@@ -1115,116 +1115,3 @@ std::shared_ptr<PyFunction> THPFunction_asFunction(THPFunction* self)
   Py_INCREF((PyObject*)self);
   return std::shared_ptr<PyFunction>(&self->cdata, Decref());
 }
-
-namespace torch { namespace autograd {
-
-// NB: The interpreter currently lives here because it needs to call some
-// private functions from python_function for Python interpreter
-
-// TODO: This doesn't deallocate tensors soon enough
-struct TraceInterpreter
-{
-  // TODO: GC the store
-  std::unordered_map<Node*, std::shared_ptr<Variable>> store;
-  // Local
-  std::shared_ptr<Variable> evalValue(Node* a) {
-    auto it = store.find(a);
-    if (it == store.end()) {
-      throw std::logic_error("we don't have this result yet");
-    } else {
-      return it->second;
-    }
-  }
-
-  // Operator
-  variable_list evalPythonOp(PythonOp * e, const variable_list & tensor_args) {
-    auto& obj = e->pyobj;
-    auto num_args = e->cconv.size();
-
-    // Massage variables into form where we can THPFunction_apply it.
-    // While in principle we can avoid putting things into Python
-    // and then taking them out again, doing so seems to require an excess
-    // of faffing about to optimize a codepath that is already going to
-    // fundamentally be slow (since it calls into Python.) NOT. WORTH. IT.
-
-    PyObject* input_objs = PyTuple_New(num_args);
-    auto scalar_it = e->scalar_args.begin();
-    auto tensor_it = tensor_args.begin();
-    for (size_t i = 0; i < num_args; ++i) {
-      auto type = e->cconv[i];
-      PyObject* val;
-      switch (type) {
-        case 't':
-          val = THPVariable_Wrap(*tensor_it);
-          PyTuple_SET_ITEM(input_objs, i, val);
-          ++tensor_it;
-          break;
-        case 's':
-          val = (*scalar_it).get();
-          Py_INCREF(val);
-          PyTuple_SET_ITEM(input_objs, i, val);
-          ++scalar_it;
-          break;
-      }
-    }
-    THPObjectPtr output_objs;
-    if (e->is_legacy) {
-      throw std::logic_error("Re-execution of legacy objects not supported");
-      if (!THPFunction_Check(obj)) throw std::logic_error("Not a function in THPFunction_do_forward");
-      THPFunction *fn = (THPFunction*)obj.get();
-      output_objs = THPFunction_do_forward(fn, input_objs);
-    } else {
-      output_objs = THPFunction_apply(obj, input_objs);
-    }
-    if (!output_objs) {
-      throw python_error();
-    }
-    _ensure_tuple(output_objs);
-    auto num_outputs = PyTuple_GET_SIZE(output_objs.get());
-    variable_list output_vars;
-    output_vars.reserve(num_outputs);
-    for (Py_ssize_t i = 0; i < num_outputs; i++) {
-      PyObject *output_obj = PyTuple_GET_ITEM(output_objs.get(), i);
-      if (!THPVariable_Check(output_obj)) {
-        throw std::logic_error("THPFunction_apply returned a non-variable object");
-      }
-      THPVariable* output_var = (THPVariable*)output_obj;
-      output_vars.emplace_back(output_var->cdata);
-    }
-    return output_vars;
-  }
-
-  // Instruction
-  void evalNode(Node* node) {
-    variable_list vars;
-    for (auto a : node->inputs())
-        vars.push_back(evalValue(a));
-
-    IR_IF(node,PythonOp)
-      auto outputs = evalPythonOp(value, vars);
-      for(auto u : value->uses()) {
-        auto sel = u.user->cast<Select>();
-        store[sel] = outputs[sel->offset()];
-      }
-    IR_ELSE()
-      //ignore Param, Select, which are no-ops in the interpreter.
-    IR_END()
-  }
-  variable_list evalGraph(Graph & graph, const variable_list& inputs) {
-    int i = 0;
-    for(auto p : graph.inputs())
-      store[p] = inputs[i++];
-    for(auto n : graph.nodes())
-      evalNode(n);
-    variable_list outputs;
-    for(auto o : graph.outputs())
-      outputs.push_back(evalValue(o));
-    return outputs;
-  }
-};
-
-variable_list interpret(Graph & graph, const variable_list& inputs) {
-  return TraceInterpreter().evalGraph(graph,inputs);
-}
-
-}} // namespace torch::autograd

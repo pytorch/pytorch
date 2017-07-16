@@ -7,6 +7,5 @@ bool THPAutograd_initFunctions(PyObject* module);
 #include "torch/csrc/autograd/python_function.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/python_engine.h"
-#include "torch/csrc/autograd/python_ir.h"
 
 #endif
