@@ -1,7 +1,8 @@
 #include <Python.h>
-#include "torch/csrc/autograd/python_tracer.h"
+#include "torch/csrc/jit/python_tracer.h"
 
-#include "torch/csrc/autograd/tracer.h"
+#include "torch/csrc/jit/tracer.h"
+#include "torch/csrc/jit/python_ir.h"
 #include "torch/csrc/THP.h"
 
 using namespace torch::autograd;

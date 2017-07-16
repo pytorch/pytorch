@@ -5,7 +5,8 @@
 #include <memory>
 #include <vector>
 #include <iostream>
-namespace torch { namespace autograd {
+
+namespace torch { namespace jit {
 
 struct TracingState {
   jit::Graph & current() {

@@ -226,48 +226,6 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
   END_HANDLE_TH_ERRORS
 }
 
-PyObject *THPEngine_run_forward(THPEngine *self, PyObject *args, PyObject *kwargs)
-{
-  HANDLE_TH_ERRORS;
-  PyObject* graph_obj;
-  PyObject* input_objs;
-  const char *accepted_kwargs[] = {"graph", "inputs", NULL};
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OO", (char**)accepted_kwargs,
-        &graph_obj, &input_objs))
-    return NULL;
-
-  THPUtils_assert(THPGraph_Check(graph_obj), "graph argument is expected to be an "
-      "Graph, but got %s", THPUtils_typename(graph_obj));
-  THPUtils_assert(PyTuple_Check(input_objs), "inputs argument is expected to "
-      "be a tuple, but got %s", THPUtils_typename(input_objs));
-
-  Py_ssize_t num_inputs = PyTuple_GET_SIZE(input_objs);
-  variable_list inputs;
-  inputs.reserve(num_inputs);
-
-  torch:: jit::Graph & graph = *((THPGraph*)graph_obj)->cdata;
-
-  // TODO: skeevy, requires on invariant that the tracing numbering
-  // has the first N parameters allocated to parameters
-  for (int i = 0; i < num_inputs; i++) {
-    PyObject* input_obj = PyTuple_GET_ITEM(input_objs, i);
-    THPUtils_assert(THPVariable_Check(input_obj), "element %d of inputs "
-        "tuple is not a Variable", i);
-    inputs.push_back(((THPVariable*)input_obj)->cdata);
-  }
-
-  variable_list results = interpret(graph, inputs);
-
-  int num_outputs = results.size();
-  PyObject *result = PyTuple_New(num_outputs);
-  for (int i = 0; i < num_outputs; i++) {
-    PyTuple_SET_ITEM(result, i, THPVariable_Wrap(results.at(i)));
-  }
-
-  return result;
-  END_HANDLE_TH_ERRORS;
-}
-
 PyObject* THPEngine_queue_callback(PyObject *self, PyObject *_callback) {
   std::shared_ptr<PyObject> callback(_callback, [](PyObject *obj) { AutoGIL gil; Py_DECREF(obj); });
   Py_INCREF(_callback);
@@ -286,7 +244,6 @@ PyObject *THPEngine_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 
 static struct PyMethodDef THPEngine_methods[] = {
   {(char*)"run_backward", (PyCFunction)THPEngine_run_backward, METH_VARARGS | METH_KEYWORDS, NULL},
-  {(char*)"run_forward", (PyCFunction)THPEngine_run_forward, METH_VARARGS | METH_KEYWORDS, NULL},
   {(char*)"queue_callback", (PyCFunction)THPEngine_queue_callback, METH_O, NULL},
   {NULL}
 };
