@@ -1,5 +1,4 @@
 #include "torch/csrc/autograd/python_variable.h"
-#include "torch/csrc/autograd/python_ir.h"
 
 #include <structmember.h>
 
@@ -9,6 +8,7 @@
 #include "torch/csrc/autograd/python_cpp_function.h"
 #include "torch/csrc/autograd/python_hook.h"
 #include "torch/csrc/autograd/functions/accumulate_grad.h"
+#include "torch/csrc/jit/python_ir.h"
 #include "torch/csrc/cuda/AutoGPU.h"
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/Exceptions.h"
