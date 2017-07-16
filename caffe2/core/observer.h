@@ -20,6 +20,10 @@ class ObserverBase {
 
   virtual ~ObserverBase() noexcept {};
 
+  T* subject() const {
+    return subject_;
+  }
+
  protected:
   T* subject_;
 };
