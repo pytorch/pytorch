@@ -3009,7 +3009,7 @@ class TestTorch(TestCase):
         types = [
             'torch.ByteTensor',
             'torch.IntTensor',
-            'torch.HalfTensor'
+            'torch.HalfTensor',
             'torch.FloatTensor',
             'torch.DoubleTensor',
             'torch.LongTensor',
