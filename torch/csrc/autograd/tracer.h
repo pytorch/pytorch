@@ -1,26 +1,34 @@
 #pragma once
 
-#include "torch/csrc/autograd/ir.h"
+#include "torch/csrc/jit/ir.h"
 
 #include <memory>
 #include <vector>
-
+#include <iostream>
 namespace torch { namespace autograd {
 
-class TracingState {
-public:
-  int next_unique;
-  std::unique_ptr<Graph> graph;
-  TracingState()
-    : next_unique(0)
-    , graph(new Graph())
-    {}
-  std::unique_ptr<Value> makeValue(Node * definition, size_t offset);
+struct TracingState {
+  jit::Graph & current() {
+    assert(tracing());
+    return *graphs.back();
+  }
+  bool tracing() {
+    return graphs.size() > 0;
+  }
+  void enter() {
+    graphs.push_back(new jit::Graph());
+  }
+  std::unique_ptr<jit::Graph> exit() {
+    assert(graphs.size() > 0);
+    auto r = graphs.back();
+    graphs.pop_back();
+    return std::unique_ptr<jit::Graph>(r);
+  }
+private:
+  std::vector<jit::Graph *> graphs;
 };
 
 // Ugh, global state
-extern std::unique_ptr<TracingState> GlobalTracingState;
+extern TracingState GlobalTracingState;
 
-void Tracer_enter();
-std::unique_ptr<Graph> Tracer_exit(value_list locals);
 }}
