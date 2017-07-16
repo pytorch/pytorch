@@ -164,6 +164,10 @@ class OperatorBase {
     }
   }
 
+  int net_position() const {
+    return net_position_;
+  }
+
   void set_net_position(int idx) {
     net_position_ = idx;
   }
