@@ -35,7 +35,7 @@ class _DatasetReader(Reader):
         if self.cursor is None:
             self.cursor = init_net.CreateTreeCursor(
                 [],
-                [self.name],
+                init_net.NextScopedBlob(self.name),
                 fields=self.dataset.fields)
 
     def read(self, read_net):
