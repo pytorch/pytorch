@@ -1,4 +1,4 @@
-#include "torch/csrc/autograd/python_ir.h"
+#include "torch/csrc/jit/python_ir.h"
 #include "torch/csrc/utils/python_strings.h"
 
 #include <sstream>
@@ -38,7 +38,7 @@ static void THPGraph_dealloc(THPGraph* self)
 {
   PyObject_GC_UnTrack(self);
   assert(self->cdata);
-  delete self->cdata; 
+  delete self->cdata;
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
