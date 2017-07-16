@@ -8,7 +8,7 @@
 
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/variable_version.h"
-#include "torch/csrc/autograd/ir.h"
+#include "torch/csrc/jit/ir.h"
 #include "torch/csrc/Types.h"
 
 namespace torch { namespace autograd {
@@ -87,7 +87,7 @@ struct Variable : std::enable_shared_from_this<Variable> {
 
   at::Tensor data;
   std::shared_ptr<Function> grad_fn;
-  ValueRef trace_value;
+  jit::Node* trace_value;
   std::shared_ptr<Variable> grad;
   std::unique_ptr<VariableVersion> version_counter;
   std::vector<std::shared_ptr<FunctionPreHook>> hooks;
