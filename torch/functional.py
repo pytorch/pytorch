@@ -2,6 +2,7 @@ import torch
 from ._utils import _range
 from operator import mul
 from functools import reduce
+import collections
 
 __all__ = [
     'split', 'chunk', 'stack', 'unbind', 'btriunpack', 'matmul',
@@ -245,3 +246,23 @@ def matmul(tensor1, tensor2, out=None):
 
     raise ValueError("both arguments to __matmul__ need to be at least 1D, "
                      "but they are {}D and {}D".format(dim_tensor1, dim_tensor2))
+
+
+def sum(input, axes, keepdims=False, out=None):
+    if isinstance(axes, collections.Iterable)
+        if a.dim() > 3:
+            if keepdims:
+                for ax in axes:
+                    input = input.sum(ax, keepdims=True)
+            else:
+                for ax in sorted(axes, reverse=True):
+                    input = input.sum(ax)
+            if out is None:
+                return input
+            else:
+                return out.copy_(input)
+        else:
+            # permute
+            # reduce single dim
+    else:
+        return torch._C.sum(input, axes, keepdims, out)
