@@ -12,6 +12,8 @@
 // (class, gpu id, sizes)
 using output_info_type = std::tuple<PyObject *, int, std::vector<int64_t>>;
 
+
+namespace torch { namespace jit { struct Graph; }}
 namespace torch { namespace autograd {
 
 // A Function which is implemented by a Python object (i.e., a THPFunction).
@@ -29,8 +31,8 @@ struct PyFunction : public Function {
   PyObject* obj;
 };
 
-using environment = std::unordered_map<int, std::shared_ptr<Variable>>;
-variable_list interpret(Graph&, const variable_list&);
+
+variable_list interpret(jit::Graph&, const variable_list&);
 
 }} // namespace torch::autograd
 

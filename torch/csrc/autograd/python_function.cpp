@@ -24,6 +24,7 @@
 
 using namespace torch;
 using namespace torch::autograd;
+using namespace torch::jit;
 
 PyObject *THPFunctionClass = NULL;
 PyObject *THPStochasticFunctionClass = NULL;
@@ -377,7 +378,7 @@ static void _transplant_var(Variable& var, const std::shared_ptr<Function>& fn, 
 // do in this case.
 static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
     std::unordered_set<PyObject *> &dirty_inputs, PyObject *raw_output,
-    PyObject *outputs, NodeRef& this_expr, bool is_volatile)
+    PyObject *outputs, Node * this_expr, bool is_volatile)
 {
   // Wrap outputs in Variables
   auto cdata = is_volatile ? nullptr : THPFunction_asFunction(self);
@@ -460,26 +461,25 @@ static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
       );
     }
     t2var[output] = output_var;
-    if (GlobalTracingState) {
+    if (GlobalTracingState.tracing()) {
       if (output_var->cdata->trace_value) {
           throw std::logic_error("trace already has local variable");
       }
       // adding outputs to a Node should be encapsulate somewhere because
       // it requires setting up def/offset and ValueRef pointers correctly
-      auto local = GlobalTracingState->makeValue(this_expr.get(),this_expr->outputs.size());
       if(this_expr) {
-        output_var->cdata->trace_value = ValueRef(local.get());
-        this_expr->outputs.push_back(std::move(local));
+        auto r = GlobalTracingState.current().create<Select>(this_expr,i);
+        output_var->cdata->trace_value = r;
       }
     }
     output_var->cdata->output_nr = i;
     PyTuple_SET_ITEM(outputs, i, (PyObject*)output_var);
   }
-  if (GlobalTracingState) {
-    GlobalTracingState->graph->nodes.push_back(this_expr);
+  if (GlobalTracingState.tracing()) {
     if (!this_expr) {
       throw std::logic_error("trace not constructed even though tracing is on");
     }
+    GlobalTracingState.current().addNode(this_expr);
   }
 }
 
@@ -640,7 +640,7 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject *args) {
   return std::make_pair(std::move(unpacked), std::move(flags));
 }
 
-PyObject* process_outputs(THPFunction* grad_fn, const UnpackedInput& unpacked, THPObjectPtr&& raw_output, NodeRef& this_expr, bool is_volatile) {
+PyObject* process_outputs(THPFunction* grad_fn, const UnpackedInput& unpacked, THPObjectPtr&& raw_output, Node * this_expr, bool is_volatile) {
   bool unpack_output = _ensure_tuple(raw_output);
 
   auto num_outputs = PyTuple_GET_SIZE(raw_output.get());
@@ -683,40 +683,41 @@ PyObject* process_outputs(THPFunction* grad_fn, const UnpackedInput& unpacked, T
 }
 
 // This sort of reimplements unpack_input, but we have our own requirements
-static NodeRef make_trace(PyObject* pyobj, PyObject *arg_objects, bool is_legacy)
+static Node * make_trace(PyObject* pyobj, PyObject *arg_objects, bool is_legacy)
 {
-  if (GlobalTracingState) {
-    auto num_args = PyTuple_GET_SIZE(arg_objects);
-    pyobj_list scalar_args;
-    value_list tensor_args;
-    std::string arg_types;
-    for (int i = 0; i < num_args; i++) {
-      PyObject *arg_object = PyTuple_GET_ITEM(arg_objects, i);
-      if (THPVariable_Check(arg_object)) {
-        arg_types.push_back('t');
-        auto arg_var = ((THPVariable*)arg_object)->cdata;
-        if (arg_var->trace_value) {
-          tensor_args.push_back(arg_var->trace_value);
-        } else {
-          throw std::logic_error("not implemented yet AAA");
-        }
+  if(!GlobalTracingState.tracing())
+    return nullptr;
+
+  auto & graph = GlobalTracingState.current();
+  auto num_args = PyTuple_GET_SIZE(arg_objects);
+  pyobj_list scalar_args;
+  node_list tensor_args;
+  std::string arg_types;
+  for (int i = 0; i < num_args; i++) {
+    PyObject *arg_object = PyTuple_GET_ITEM(arg_objects, i);
+    if (THPVariable_Check(arg_object)) {
+      arg_types.push_back('t');
+      auto arg_var = ((THPVariable*)arg_object)->cdata;
+      if (arg_var->trace_value) {
+        tensor_args.push_back(arg_var->trace_value);
       } else {
-        arg_types.push_back('s');
-        Py_INCREF(arg_object);
-        scalar_args.emplace_back(arg_object);
+        throw std::logic_error("not implemented yet AAA");
       }
+    } else {
+      arg_types.push_back('s');
+      Py_INCREF(arg_object);
+      scalar_args.emplace_back(arg_object);
     }
-    Py_INCREF(pyobj);
-    auto op = NodeRef(new PythonOp(
-      THPObjectPtr(pyobj),
-      arg_types,
-      is_legacy,
-      std::move(scalar_args)));
-    op->inputs = std::move(tensor_args);
-    return op;
-  } else {
-    return NodeRef();
   }
+  Py_INCREF(pyobj);
+
+  auto op = graph.create<PythonOp>(THPObjectPtr(pyobj),
+    arg_types,
+    is_legacy,
+    std::move(scalar_args));
+  for(auto i : tensor_args)
+    op->addInput(i);
+  return op;
 }
 
 // Legacy codepath
@@ -1124,10 +1125,10 @@ namespace torch { namespace autograd {
 struct TraceInterpreter
 {
   // TODO: GC the store
-  environment store;
+  std::unordered_map<Node*, std::shared_ptr<Variable>> store;
   // Local
-  std::shared_ptr<Variable> evalValue(Value& a) {
-    auto it = store.find(a.unique);
+  std::shared_ptr<Variable> evalValue(Node* a) {
+    auto it = store.find(a);
     if (it == store.end()) {
       throw std::logic_error("we don't have this result yet");
     } else {
@@ -1136,7 +1137,7 @@ struct TraceInterpreter
   }
 
   // Operator
-  variable_list evalPythonOp(PythonOp * e, variable_list tensor_args) {
+  variable_list evalPythonOp(PythonOp * e, const variable_list & tensor_args) {
     auto& obj = e->pyobj;
     auto num_args = e->cconv.size();
 
@@ -1194,39 +1195,35 @@ struct TraceInterpreter
   }
 
   // Instruction
-  void evalNode(NodeRef i) {
+  void evalNode(Node* node) {
     variable_list vars;
-    vars.reserve(i->outputs.size());
-    for (auto a : i->inputs) {
-        vars.emplace_back(evalValue(*a));
-    }
-    variable_list outputs;
-    switch(i->kind()) {
-      case Node::Id::PythonOp:
-        outputs = evalPythonOp((PythonOp*)i.get(), vars);
-        break;
-      default:
-        throw std::runtime_error("unknown op kind?");
-    }
-    for(size_t j = 0; j < outputs.size(); ++j)
-      store[i->outputs[j]->unique] = outputs[j];
+    for (auto a : node->inputs())
+        vars.push_back(evalValue(a));
+
+    IR_IF(node,PythonOp)
+      auto outputs = evalPythonOp(value, vars);
+      for(auto u : value->uses()) {
+        auto sel = u.user->cast<Select>();
+        store[sel] = outputs[sel->offset()];
+      }
+    IR_ELSE()
+      //ignore Param, Select, which are no-ops in the interpreter.
+    IR_END()
   }
   variable_list evalGraph(Graph & graph, const variable_list& inputs) {
-    for (size_t i = 0; i < inputs.size(); i++) {
-      store[graph.inputs[i]->unique] = inputs[i];
-    }
-    for(auto & n : graph.nodes)
+    int i = 0;
+    for(auto p : graph.inputs())
+      store[p] = inputs[i++];
+    for(auto n : graph.nodes())
       evalNode(n);
     variable_list outputs;
-    for(auto & o : graph.outputs)
-      outputs.push_back(evalValue(*o));
+    for(auto o : graph.outputs())
+      outputs.push_back(evalValue(o));
     return outputs;
   }
 };
 
 variable_list interpret(Graph & graph, const variable_list& inputs) {
-  environment env;
-  // TODO: check that these match up
   return TraceInterpreter().evalGraph(graph,inputs);
 }
 

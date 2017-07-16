@@ -245,7 +245,7 @@ PyObject *THPEngine_run_forward(THPEngine *self, PyObject *args, PyObject *kwarg
   variable_list inputs;
   inputs.reserve(num_inputs);
 
-  Graph & graph = *((THPGraph*)graph_obj)->cdata;
+  torch:: jit::Graph & graph = *((THPGraph*)graph_obj)->cdata;
 
   // TODO: skeevy, requires on invariant that the tracing numbering
   // has the first N parameters allocated to parameters

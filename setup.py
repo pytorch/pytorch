@@ -347,7 +347,7 @@ main_sources = [
     "torch/csrc/autograd/function.cpp",
     "torch/csrc/autograd/variable.cpp",
     "torch/csrc/autograd/input_buffer.cpp",
-    "torch/csrc/autograd/ir.cpp",
+    "torch/csrc/jit/ir.cpp",
     "torch/csrc/autograd/tracer.cpp",
     "torch/csrc/autograd/python_function.cpp",
     "torch/csrc/autograd/python_cpp_function.cpp",
