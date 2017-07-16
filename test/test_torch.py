@@ -3089,6 +3089,7 @@ class TestTorch(TestCase):
         dtypes = [
             np.double,
             np.float,
+            np.half,
             np.int64,
             np.int32,
             np.int16,
