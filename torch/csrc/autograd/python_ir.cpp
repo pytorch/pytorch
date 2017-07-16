@@ -10,7 +10,7 @@ using namespace torch::autograd;
 
 PyObject* THPGraphClass = nullptr;
 
-PyObject* THPGraph_Wrap(std::unique_ptr<Graph> e)
+PyObject* THPGraph_Wrap(std::unique_ptr<torch::jit::Graph> e)
 {
   if (!e) {
     Py_RETURN_NONE;
@@ -18,7 +18,7 @@ PyObject* THPGraph_Wrap(std::unique_ptr<Graph> e)
     auto type = (PyTypeObject*) THPGraphClass;
     THPGraph* obj = (THPGraph*)type->tp_alloc(type, 0);
     if (obj) {
-      obj->cdata = std::move(e);
+      obj->cdata = e.release();
     }
     return (PyObject*) obj;
   }
@@ -37,7 +37,8 @@ static int THPGraph_clear(THPGraph *self)
 static void THPGraph_dealloc(THPGraph* self)
 {
   PyObject_GC_UnTrack(self);
-  self->cdata = nullptr;
+  assert(self->cdata);
+  delete self->cdata; 
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
