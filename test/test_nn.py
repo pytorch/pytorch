@@ -3381,14 +3381,12 @@ new_module_tests = [
         module_name='MaxPool1d',
         constructor_args=(4,),
         input_size=(2, 10, 4),
-        check_gradgrad=False,
     ),
     dict(
         module_name='MaxPool1d',
         constructor_args=(4, 4),
         input_size=(2, 10, 4),
         desc='stride',
-        check_gradgrad=False,
     ),
     dict(
         module_name='Conv2d',
