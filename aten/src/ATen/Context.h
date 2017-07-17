@@ -6,7 +6,7 @@
 #include "ATen/Type.h"
 #include "ATen/Utils.h"
 
-class THCState;
+struct THCState;
 
 namespace at {
 
