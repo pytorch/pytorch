@@ -46,7 +46,7 @@ class L1Loss(_Loss):
 
     The division by `n` can be avoided if one sets the constructor argument
     `size_average=False`.
-    
+
     Args:
         size_average (bool, optional): By default, the losses are averaged
            over observations for each minibatch. However, if the field
@@ -251,7 +251,7 @@ class MSELoss(_Loss):
 
     The division by `n` can be avoided if one sets the internal variable
     `size_average` to `False`.
-    
+
     Args:
         size_average (bool, optional): By default, the losses are averaged
            over observations for each minibatch. However, if the field
