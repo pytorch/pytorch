@@ -13,7 +13,7 @@ PyObject * THPJIT_initExtension(PyObject *_unused)
 
   THPGraphClass = PyMapping_GetItemString(jit_dict,(char*)"Graph");
   THPUtils_assert(THPGraphClass, "couldn't find "
-          "Graph class in torch.autograd module");
+          "Graph class in torch.jit module");
 
   Py_RETURN_TRUE;
 }
