@@ -9,7 +9,7 @@ class TestJit(TestCase):
         x = Variable(torch.Tensor([0.4]), requires_grad=True)
         y = Variable(torch.Tensor([0.7]), requires_grad=True)
 
-        torch._C._tracer_enter((x,y))
+        torch._C._tracer_enter((x, y))
         z = torch.sigmoid(torch.tanh(x * (x + y)))
         trace = torch._C._tracer_exit((z,))
 
