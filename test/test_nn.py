@@ -3195,7 +3195,7 @@ new_module_tests = [
     ),
     dict(
         module_name='LayerNorm',
-        constructor_args=(10, 1e-3, 0.7, False),
+        constructor_args=(10, 1e-3, False),
         input_size=(4, 10),
         desc='no_affine'
     ),
