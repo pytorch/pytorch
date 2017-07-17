@@ -99,9 +99,6 @@ class NLLLoss(_WeightedLoss):
         - Input: :math:`(N, C)` where `C = number of classes`
         - Target: :math:`(N)` where each value is `0 <= targets[i] <= C-1`
 
-    Attributes:
-        weight: the class-weights given as input to the constructor
-
     Examples::
 
         >>> m = nn.LogSoftmax()
