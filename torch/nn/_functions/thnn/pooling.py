@@ -1,3 +1,4 @@
+from torch.autograd import Variable
 from torch.autograd.function import Function, once_differentiable
 from torch._thnn import type2backend
 
@@ -326,11 +327,25 @@ class AvgPool2d(Function):
         return output
 
     @staticmethod
-    @once_differentiable
     def backward(ctx, grad_output):
+        input, = ctx.saved_variables
+        grad_input = AvgPool2dBackward.apply(input, grad_output, ctx.kernel_size, ctx.stride,
+                                             ctx.padding, ctx.ceil_mode, ctx.count_include_pad)
+        return grad_input, None, None, None, None, None
+
+
+class AvgPool2dBackward(Function):
+
+    @staticmethod
+    def forward(ctx, input, grad_output, kernel_size, stride, padding, ceil_mode, count_include_pad):
+        ctx.kernel_size = kernel_size
+        ctx.stride = stride
+        ctx.padding = padding
+        ctx.ceil_mode = ceil_mode
+        ctx.count_include_pad = count_include_pad
         backend = type2backend[type(grad_output)]
-        input, = ctx.saved_tensors
         grad_input = grad_output.new()
+        ctx.save_for_backward(input)
         backend.SpatialAveragePooling_updateGradInput(
             backend.library_state,
             input, grad_output, grad_input,
@@ -338,7 +353,14 @@ class AvgPool2d(Function):
             ctx.stride[1], ctx.stride[0],
             ctx.padding[1], ctx.padding[0],
             ctx.ceil_mode, ctx.count_include_pad)
-        return grad_input, None, None, None, None, None
+        return grad_input
+
+    @staticmethod
+    def backward(ctx, ggI):
+        input, = ctx.saved_variables
+        gI = Variable(ggI.data.new(ggI.size()).zero_())
+        ggO = AvgPool2d.apply(ggI, ctx.kernel_size, ctx.stride, ctx.padding, ctx.ceil_mode, ctx.count_include_pad)
+        return gI, ggO, None, None, None, None, None
 
 
 class AvgPool3d(Function):
@@ -513,6 +535,7 @@ class AdaptiveAvgPool2d(Function):
         return grad_input, None
 
 _all_functions.append(AvgPool2d)
+_all_functions.append(AvgPool2dBackward)
 _all_functions.append(AvgPool3d)
 _all_functions.append(MaxPool1d)
 _all_functions.append(MaxPool2d)
