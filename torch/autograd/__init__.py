@@ -152,5 +152,5 @@ def grad(outputs, inputs, grad_outputs=None, retain_graph=None, create_graph=Non
         outputs, grad_outputs, retain_graph,
         inputs, only_inputs)
 
-
-assert torch._C._autograd_init()
+status = torch._C._autograd_init()
+assert status, "Autograd failed to initialize."
