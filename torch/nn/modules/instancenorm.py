@@ -72,8 +72,7 @@ class LayerNorm(_InstanceNorm):
     def forward(self, input):
         mean = input.mean(1, keepdim=True)
         std = input.std(1, keepdim=True)
-        output = (input - mean.expand_as(input)) / (std.expand_as(input) +
-                                                    self.eps)
+        output = (input - mean) / (std + self.eps)
         if self.affine:
             if input.size(1) != self.weight.nelement():
                 raise RuntimeError('got {}-feature tensor, expected {}'
