@@ -8,16 +8,18 @@ namespace caffe2 {
 
 TEST(CPUContextTest, TestAllocAlignment) {
   for (int i = 1; i < 10; ++i) {
-    void* data = CPUContext::New(i);
-    EXPECT_EQ((reinterpret_cast<size_t>(data) % gCaffe2Alignment), 0);
-    CPUContext::Delete(data);
+    auto data = CPUContext::New(i);
+    EXPECT_EQ((reinterpret_cast<size_t>(data.first) % gCaffe2Alignment), 0);
+    data.second(data.first);
   }
 }
 
 TEST(CPUContextTest, TestAllocDealloc) {
-  float* data = static_cast<float*>(CPUContext::New(10 * sizeof(float)));
+  auto data_and_deleter = CPUContext::New(10 * sizeof(float));
+  float* data = static_cast<float*>(data_and_deleter.first);
   EXPECT_NE(data, nullptr);
-  float* dst_data = static_cast<float*>(CPUContext::New(10 * sizeof(float)));
+  auto dst_data_and_deleter = CPUContext::New(10 * sizeof(float));
+  float* dst_data = static_cast<float*>(dst_data_and_deleter.first);
   EXPECT_NE(dst_data, nullptr);
   for (int i = 0; i < 10; ++i) {
     data[i] = i;
@@ -28,8 +30,8 @@ TEST(CPUContextTest, TestAllocDealloc) {
   for (int i = 0; i < 10; ++i) {
     EXPECT_FLOAT_EQ(dst_data[i], i);
   }
-  CPUContext::Delete(data);
-  CPUContext::Delete(dst_data);
+  data_and_deleter.second(data);
+  dst_data_and_deleter.second(dst_data);
 }
 
 }  // namespace caffe2

@@ -122,8 +122,10 @@ class QTensor {
 
   unsigned char* mutable_data() {
     if (!data_) {
+      auto ptr_and_deleter = Context::New(nbytes());
       data_.reset(
-          static_cast<unsigned char*>(Context::New(nbytes())), Context::Delete);
+          static_cast<unsigned char*>(ptr_and_deleter.first),
+          ptr_and_deleter.second);
       capacity_ = nbytes() * CHAR_BIT;
     }
     CAFFE_ENFORCE(capacity_ == nbytes() * CHAR_BIT);

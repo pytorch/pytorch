@@ -41,11 +41,8 @@ class MKLContext final {
     return *random_generator_.get();
   }
 
-  inline static void* New(size_t nbytes) {
+  inline static std::pair<void*, MemoryDeleter> New(size_t nbytes) {
     return GetCPUAllocator()->New(nbytes);
-  }
-  inline static void Delete(void* data) {
-    GetCPUAllocator()->Delete(data);
   }
 
   // Two copy functions that deals with cross-device copies.

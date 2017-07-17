@@ -319,31 +319,26 @@ class CuDNNHandles {
  * not need more than one cudnn workspace per device.
  */
 struct CuDNNWorkspace {
-  ~CuDNNWorkspace() noexcept {
-    if (data_) {
-      CUDAContext::Delete(data_);
-    }
-  }
+  ~CuDNNWorkspace() noexcept {}
 
   void* get(size_t nbytes) {
     if (nbytes_ < nbytes) {
       reset();
-      data_ = CUDAContext::New(nbytes);
+      auto data_and_deleter = CUDAContext::New(nbytes);
+      data_ = {data_and_deleter.first, std::move(data_and_deleter.second)};
       nbytes_ = nbytes;
     }
     CAFFE_ENFORCE_GE(nbytes_, nbytes);
-    return data_;
+    return data_.get();
   }
 
   void reset() {
-    if (data_) {
-      CUDAContext::Delete(data_);
-    }
     data_ = nullptr;
     nbytes_ = 0;
   }
 
-  void* data_{nullptr};
+ private:
+  std::unique_ptr<void, MemoryDeleter> data_{nullptr};
   size_t nbytes_{0};
 };
 
