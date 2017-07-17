@@ -67,8 +67,6 @@ bool ClipGradientOp<float, CUDAContext>::RunOnDevice() {
   return true;
 }
 
-namespace {
 REGISTER_CUDA_OPERATOR(Clip, ClipOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(ClipGradient, ClipGradientOp<float, CUDAContext>);
-}  // namespace
 }  // namespace caffe2

@@ -51,8 +51,6 @@ bool FindOp<CUDAContext>::DoRunWithType() {
   return true;
 }
 
-namespace {
 REGISTER_CUDA_OPERATOR(Find, FindOp<CUDAContext>)
-}
 
 } // namespace caffe2

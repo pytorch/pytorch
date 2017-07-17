@@ -119,11 +119,8 @@ bool SparseMomentumSGDUpdateOp<float, CUDAContext>::DoRunWithType() {
   return true;
 }
 
-namespace {
 REGISTER_CUDA_OPERATOR(MomentumSGD, MomentumSGDOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(MomentumSGDUpdate, MomentumSGDUpdateOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(SparseMomentumSGDUpdate, SparseMomentumSGDUpdateOp<float, CUDAContext>);
-
-}
 
 }

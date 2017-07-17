@@ -2,7 +2,6 @@
 
 namespace caffe2 {
 
-namespace {
 REGISTER_CPU_OPERATOR(Adagrad, AdagradOp<float, CPUContext>);
 OPERATOR_SCHEMA(Adagrad)
     .NumInputs(4)
@@ -51,5 +50,4 @@ new_history) as in the dense case.
 
 SHOULD_NOT_DO_GRADIENT(Adagrad);
 SHOULD_NOT_DO_GRADIENT(SparseAdagrad);
-}
 }

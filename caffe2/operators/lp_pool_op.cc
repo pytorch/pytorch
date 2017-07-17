@@ -221,8 +221,6 @@ bool PoolGradientOp<float, CPUContext, LpPool>::RunOnDeviceWithOrderNHWC() {
   return true;
 }
 
-namespace {
-
 REGISTER_CPU_OPERATOR(LpPool, PoolOp<float, CPUContext, LpPool>);
 REGISTER_CPU_OPERATOR(
     LpPoolGradient,
@@ -269,5 +267,4 @@ class GetPoolGradient : public GradientMakerBase {
   }
 };
 REGISTER_GRADIENT(LpPool, GetPoolGradient);
-}
 }

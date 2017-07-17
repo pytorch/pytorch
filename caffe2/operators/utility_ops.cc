@@ -51,8 +51,6 @@ void UniqueOp<CPUContext>::DoRun() {
   }
 }
 
-namespace {
-
 REGISTER_CPU_OPERATOR(WallClockTime, WallClockTimeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Print, PrintOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Flatten, FlattenOp<CPUContext>);
@@ -682,6 +680,8 @@ Example:
     .Arg("ends", "List of ending indices")
     .Output(0, "output", "Sliced data tensor.");
 
+OPERATOR_SCHEMA(SliceGradient);
+
 OPERATOR_SCHEMA(Squeeze)
     .NumInputs(1)
     .NumOutputs(1)
@@ -1000,8 +1000,6 @@ REGISTER_GRADIENT(Slice, GetSliceGradient);
 SHOULD_NOT_DO_GRADIENT(GatherRangesOp);
 SHOULD_NOT_DO_GRADIENT(LengthsGather);
 SHOULD_NOT_DO_GRADIENT(AccumulateHistogram);
-
-} // namespace
 
 template <typename T, class Context>
 bool MaxOp<T, Context>::Compute() {

@@ -11,12 +11,9 @@ struct SqrCUDAFunctor {
   }
 };
 
-namespace {
-
 REGISTER_CUDA_OPERATOR(
     Sqr,
     UnaryElementwiseOp<TensorTypes<float>, CUDAContext, SqrCUDAFunctor>);
-}
 REGISTER_CUDA_OPERATOR(
     Pow,
     UnaryElementwiseWithArgsOp<TensorTypes<float>, CUDAContext, PowFunctor>);
