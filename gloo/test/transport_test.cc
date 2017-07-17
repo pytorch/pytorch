@@ -42,7 +42,7 @@ static void setMode(std::unique_ptr<transport::Pair>& pair, IoMode mode) {
       pair->setSync(true, true);
       break;
     default:
-      ASSERT_TRUE(false);
+      FAIL();
   }
 }
 
