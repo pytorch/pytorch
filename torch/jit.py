@@ -10,6 +10,9 @@ import contextlib
 # model = model.RNNModel(args.model, ...)
 # model = torch.jit.wrap_model(model)
 
+class Graph(torch._C._GraphBase):
+    pass
+
 def flatten(x):
     return tuple(F._iter_variables(x))
 
@@ -114,3 +117,6 @@ def verify_model(model):
             return real_out
     model.forward = types.MethodType(forward, model)
     return model
+
+if not torch._C._jit_init():
+    raise RuntimeError("JIT initialization failed")

@@ -5,6 +5,7 @@
 #include <memory>
 #include <vector>
 #include <iostream>
+#include <cassert>
 
 namespace torch { namespace jit {
 
@@ -13,12 +14,15 @@ struct TracingState {
     assert(tracing());
     return *graphs.back();
   }
+
   bool tracing() {
     return graphs.size() > 0;
   }
+
   void enter() {
     graphs.push_back(new jit::Graph());
   }
+
   std::unique_ptr<jit::Graph> exit() {
     assert(graphs.size() > 0);
     auto r = graphs.back();
@@ -29,7 +33,6 @@ private:
   std::vector<jit::Graph *> graphs;
 };
 
-// Ugh, global state
 extern TracingState GlobalTracingState;
 
 }}

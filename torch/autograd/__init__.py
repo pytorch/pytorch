@@ -11,9 +11,8 @@ from .variable import Variable
 from .function import Function, NestedIOFunction
 from .stochastic_function import StochasticFunction
 from .gradcheck import gradcheck
-from .ir import Graph
 
-__all__ = ['Variable', 'Function', 'StochasticFunction', 'Graph', 'backward']
+__all__ = ['Variable', 'Function', 'StochasticFunction', 'backward']
 
 
 def _make_grads(outputs, grads, user_create_graph):
