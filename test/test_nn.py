@@ -3181,49 +3181,49 @@ new_module_tests = [
     ),
     dict(
         module_name='LayerNorm',
-        constructor_args=(10,),
+        constructor_args=(10, 1e-3),
         input_size=(4, 10),
         desc='affine'
     ),
     dict(
         module_name='LayerNorm',
-        constructor_args=(10, 1e-3, False),
+        constructor_args=(None,),
         input_size=(4, 10),
         desc='no_affine'
     ),
     dict(
         module_name='InstanceNorm1d',
-        constructor_args=(5, 1e-3, True),
+        constructor_args=(5, 1e-3),
         input_size=(4, 5, 3),
         desc='affine'
     ),
     dict(
         module_name='InstanceNorm1d',
-        constructor_args=(5),
+        constructor_args=(None,),
         input_size=(4, 5, 3),
         desc='no_affine'
     ),
     dict(
         module_name='InstanceNorm2d',
-        constructor_args=(3, 1e-3, True),
+        constructor_args=(3, 1e-3),
         input_size=(2, 3, 6, 6),
         desc='affine'
     ),
     dict(
         module_name='InstanceNorm2d',
-        constructor_args=(3),
+        constructor_args=(None,),
         input_size=(2, 3, 6, 6),
         desc='no_affine'
     ),
     dict(
         module_name='InstanceNorm3d',
-        constructor_args=(3, 1e-3, True),
+        constructor_args=(3, 1e-3),
         input_size=(2, 3, 4, 4, 4),
         desc='affine'
     ),
     dict(
         module_name='InstanceNorm3d',
-        constructor_args=(3),
+        constructor_args=(None,),
         input_size=(2, 3, 4, 4, 4),
         desc='not_affine'
     ),
