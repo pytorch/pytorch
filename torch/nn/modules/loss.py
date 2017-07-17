@@ -45,7 +45,26 @@ class L1Loss(_Loss):
     The sum operation still operates over all the elements, and divides by `n`.
 
     The division by `n` can be avoided if one sets the constructor argument
-    `size_average=False`
+    `size_average=False`.
+
+    Args:
+        size_average (bool, optional): By default, the losses are averaged
+           over observations for each minibatch. However, if the field
+           size_average is set to False, the losses are instead summed for
+           each minibatch. Default: True
+
+    Shape:
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions`
+        - Target: :math:`(N, *)`, same shape as the input
+
+    Examples::
+
+        >>> loss = nn.L1Loss()
+        >>> input = autograd.Variable(torch.randn(3, 5), requires_grad=True)
+        >>> target = autograd.Variable(torch.randn(3, 5))
+        >>> output = loss(input, target)
+        >>> output.backward()
     """
     pass
 
@@ -90,7 +109,7 @@ class NLLLoss(_WeightedLoss):
         size_average (bool, optional): By default, the losses are averaged
            over observations for each minibatch. However, if the field
            size_average is set to False, the losses are instead summed for
-           each minibatch.
+           each minibatch. Default: True
         ignore_index (int, optional): Specifies a target value that is ignored
             and does not contribute to the input gradient. When size_average
             is True, the loss is averaged over non-ignored targets.
@@ -98,9 +117,6 @@ class NLLLoss(_WeightedLoss):
     Shape:
         - Input: :math:`(N, C)` where `C = number of classes`
         - Target: :math:`(N)` where each value is `0 <= targets[i] <= C-1`
-
-    Attributes:
-        weight: the class-weights given as input to the constructor
 
     Examples::
 
@@ -236,6 +252,24 @@ class MSELoss(_Loss):
     The division by `n` can be avoided if one sets the internal variable
     `size_average` to `False`.
 
+    Args:
+        size_average (bool, optional): By default, the losses are averaged
+           over observations for each minibatch. However, if the field
+           size_average is set to False, the losses are instead summed for
+           each minibatch. Default: True
+
+    Shape:
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions`
+        - Target: :math:`(N, *)`, same shape as the input
+
+    Examples::
+
+        >>> loss = nn.MSELoss()
+        >>> input = autograd.Variable(torch.randn(3, 5), requires_grad=True)
+        >>> target = autograd.Variable(torch.randn(3, 5))
+        >>> output = loss(input, target)
+        >>> output.backward()
     """
     pass
 
