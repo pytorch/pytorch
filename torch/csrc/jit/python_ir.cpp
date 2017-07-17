@@ -1,5 +1,6 @@
 #include "torch/csrc/jit/python_ir.h"
 #include "torch/csrc/utils/python_strings.h"
+#include "torch/csrc/jit/assert.h"
 
 #include <sstream>
 
@@ -37,7 +38,7 @@ static int THPGraph_clear(THPGraph *self)
 static void THPGraph_dealloc(THPGraph* self)
 {
   PyObject_GC_UnTrack(self);
-  assert(self->cdata);
+  JIT_ASSERT(self->cdata);
   delete self->cdata;
   Py_TYPE(self)->tp_free((PyObject*)self);
 }

@@ -7,13 +7,13 @@
 #include <Python.h>
 #include <memory>
 #include <vector>
-#include <cassert>
 #include <atomic>
 
 #include "torch/csrc/utils/object_ptr.h"
 
 #include "torch/csrc/jit/DisallowCopy.h"
 #include "ATen/ArrayRef.h"
+#include "torch/csrc/jit/assert.h"
 
 namespace torch { namespace jit {
 
@@ -116,7 +116,7 @@ public:
   }
   // Graphs
   Node* addInput(Node * node) {
-    assert(graph_ == node->graph_);
+    JIT_ASSERT(graph_ == node->graph_);
     node->uses_.emplace_back(this,inputs_.size());
     inputs_.push_back(node);
     return node;
