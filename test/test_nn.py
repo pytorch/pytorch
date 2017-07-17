@@ -938,7 +938,7 @@ class TestNN(NNTestCase):
             self.assertLess(abs(output.data.std() - std), 0.1)
             output.backward(input)
 
-    def _test_LayerNorm(self, cls, input):
+    def _test_InstanceNorm(self, cls, input):
         b, c = input.size(0), input.size(1)
         input_var = Variable(input)
 
@@ -953,20 +953,13 @@ class TestNN(NNTestCase):
         self.assertAlmostEqual(torch.abs(mean.data).mean(), 0, delta=1e-5)
         self.assertAlmostEqual(torch.abs(var.data).mean(), 1, delta=1e-5)
 
-    def test_LayerNorm(self):
-        b = random.randint(3, 5)
-        c = random.randint(1, 5)
-
-        input = torch.Tensor(b, c).uniform_()
-        self._test_LayerNorm(nn.LayerNorm, input)
-
     def test_InstanceNorm1d(self):
         b = random.randint(3, 5)
         c = random.randint(1, 5)
         d = random.randint(2, 5)
 
         input = torch.Tensor(b, c, d).uniform_()
-        self._test_LayerNorm(nn.InstanceNorm1d, input)
+        self._test_InstanceNorm(nn.InstanceNorm1d, input)
 
     def test_InstanceNorm2d(self):
         b = random.randint(3, 5)
@@ -975,7 +968,7 @@ class TestNN(NNTestCase):
         h = random.randint(2, 5)
 
         input = torch.Tensor(b, c, h, w).uniform_()
-        self._test_LayerNorm(nn.InstanceNorm2d, input)
+        self._test_InstanceNorm(nn.InstanceNorm2d, input)
 
     def test_InstanceNorm3d(self):
         b = random.randint(3, 5)
@@ -985,7 +978,7 @@ class TestNN(NNTestCase):
         d = random.randint(2, 5)
 
         input = torch.Tensor(b, c, h, w, d).uniform_()
-        self._test_LayerNorm(nn.InstanceNorm3d, input)
+        self._test_InstanceNorm(nn.InstanceNorm3d, input)
 
     def test_pad(self):
         inputs = Variable(torch.randn(1, 3, 4, 4), requires_grad=True)
@@ -2326,19 +2319,19 @@ class TestNN(NNTestCase):
             self.assertEqual(res1, res2)
             self.assertEqual(grad1, grad2)
 
-    def test_layernorm_raises_error_if_weight_is_not_same_size_as_input(self):
+    def test_instancenorm_raises_error_if_weight_is_not_same_size_as_input(self):
         input = Variable(torch.rand(2, 10))
         wrong_sizes = [9, 11]
         for size in wrong_sizes:
             with self.assertRaises(RuntimeError):
-                F.layer_norm(input, weight=Parameter(torch.rand(size)))
+                F.instance_norm(input, weight=Parameter(torch.rand(size)))
 
-    def test_layernorm_raises_error_if_bias_is_not_same_size_as_input(self):
+    def test_instancenorm_raises_error_if_bias_is_not_same_size_as_input(self):
         input = Variable(torch.rand(2, 10))
         wrong_sizes = [9, 11]
         for size in wrong_sizes:
             with self.assertRaises(RuntimeError):
-                F.layer_norm(input, bias=Parameter(torch.rand(size)))
+                F.instance_norm(input, bias=Parameter(torch.rand(size)))
 
     def test_pairwise_distance(self):
         input1 = Variable(torch.randn(4, 4), requires_grad=True)
