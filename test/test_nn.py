@@ -938,6 +938,22 @@ class TestNN(NNTestCase):
             self.assertLess(abs(output.data.std() - std), 0.1)
             output.backward(input)
 
+    def test_LayerNorm(self):
+        b = random.randint(3, 5)
+        c = random.randint(2, 5)
+
+        input_var = Variable(torch.Tensor(b, c).uniform_())
+
+        IN = nn.LayerNorm(c, eps=0)
+
+        output = IN(input_var)
+
+        mean = output.mean(1)
+        var = output.var(1, unbiased=False)
+
+        self.assertAlmostEqual(torch.abs(mean.data).mean(), 0, delta=1e-5)
+        self.assertAlmostEqual(torch.abs(var.data).mean(), 1, delta=1e-5)
+
     def _test_InstanceNorm(self, cls, input):
         b, c = input.size(0), input.size(1)
         input_var = Variable(input)
