@@ -1,12 +1,13 @@
 #pragma once
 
 #include "torch/csrc/jit/ir.h"
+#include "torch/csrc/jit/assert.h"
+#include "torch/csrc/autograd/variable.h"
 
 #include <memory>
 #include <vector>
 #include <iostream>
-#include <cassert>
-#include "torch/csrc/autograd/variable.h"
+#include <unordered_map>
 
 namespace torch { namespace jit {
 
@@ -21,7 +22,7 @@ struct TracingState {
   };
 
   jit::Graph & current() {
-    assert(tracing());
+    JIT_ASSERT(tracing());
     return *frames.back().graph;
   }
 
@@ -53,7 +54,7 @@ struct TracingState {
   }
 
   std::unique_ptr<jit::Graph> exit() {
-    assert(tracing());
+    JIT_ASSERT(tracing());
     auto r = std::move(frames.back());
     frames.pop_back();
     return std::move(r.graph);
