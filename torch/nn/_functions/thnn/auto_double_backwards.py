@@ -34,7 +34,7 @@ def leakyrelu_double_backwards(ctx, ggI):
 
     gI = Variable(ggI.data.new(ggI.size()).zero_())
     input_lt_0 = (input < 0).type_as(ggI)
-    input_ge_0 = (input >= 0 ).type_as(ggI)
+    input_ge_0 = (input >= 0).type_as(ggI)
     ggO = ggI * (input_lt_0 * negative_slope + input_ge_0)
     return gI, ggO, None, None, None
 
