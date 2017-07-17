@@ -726,9 +726,9 @@ void addGlobalMethods(py::module& m) {
   m.def("on_module_exit", []() { gWorkspaces.clear(); });
   // create_if_missing not used by necessary for pybind to do
   // properly do function overloading.
-  m.def("switch_workspace", [](Workspace* ws, py::object create_if_missing) {
-    gWorkspace = ws;
-  });
+  m.def(
+      "switch_workspace",
+      [](Workspace* ws, py::object /*create_if_missing*/) { gWorkspace = ws; });
   m.def(
       "switch_workspace",
       [](const std::string& name, const py::object create_if_missing) {
