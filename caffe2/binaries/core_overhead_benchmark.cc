@@ -150,4 +150,27 @@ static void BM_OperatorCreationCUDA(benchmark::State& state) {
 }
 BENCHMARK(BM_OperatorCreationCUDA);
 
+static void BM_TensorAllocDeallocCPU(benchmark::State& state) {
+  Tensor<CPUContext> tensor;
+  // small allocation
+  tensor.Resize(32, 32);
+  while (state.KeepRunning()) {
+    CHECK(tensor.mutable_data<float>());
+    tensor.FreeMemory();
+  }
+}
+BENCHMARK(BM_TensorAllocDeallocCPU);
+
+static void BM_TensorAllocDeallocCUDA(benchmark::State& state) {
+  CAFFE2_SKIP_IF_NO_GPU;
+  Tensor<CUDAContext> tensor;
+  // small allocation
+  tensor.Resize(32, 32);
+  while (state.KeepRunning()) {
+    CHECK(tensor.mutable_data<float>());
+    tensor.FreeMemory();
+  }
+}
+BENCHMARK(BM_TensorAllocDeallocCUDA);
+
 BENCHMARK_MAIN()

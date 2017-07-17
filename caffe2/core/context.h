@@ -18,12 +18,13 @@ namespace caffe2 {
 // Use 32-byte alignment should be enough for computation up to AVX512.
 constexpr size_t gCaffe2Alignment = 32;
 
+using MemoryDeleter = std::function<void(void* ptr)>;
+
 // A virtual allocator class to do memory allocation and deallocation.
 struct CPUAllocator {
   CPUAllocator() {}
   virtual ~CPUAllocator() noexcept {}
-  virtual void* New(size_t nbytes) = 0;
-  virtual void Delete(void* data) = 0;
+  virtual std::pair<void*, MemoryDeleter> New(size_t nbytes) = 0;
 };
 
 // A virtual struct that is used to report Caffe2's memory allocation and
@@ -43,7 +44,7 @@ class MemoryAllocationReporter {
 struct DefaultCPUAllocator final : CPUAllocator {
   DefaultCPUAllocator() {}
   ~DefaultCPUAllocator() override {}
-  void* New(size_t nbytes) override {
+  std::pair<void*, MemoryDeleter> New(size_t nbytes) override {
     void* data = nullptr;
 #ifdef __ANDROID__
     data = memalign(gCaffe2Alignment, nbytes);
@@ -54,12 +55,16 @@ struct DefaultCPUAllocator final : CPUAllocator {
 #endif
     CHECK(data) << "Failed to allocate " << nbytes << " bytes.";
     memset(data, 0, nbytes);
-    return data;
+    return {data, Delete};
   }
 #ifdef _MSC_VER
-  void Delete(void* data) override { _aligned_free(data); }
+  static void Delete(void* data) {
+    _aligned_free(data);
+  }
 #else
-  void Delete(void* data) override { free(data); }
+  static void Delete(void* data) {
+    free(data);
+  }
 #endif
 };
 
@@ -130,19 +135,17 @@ class CPUContext final {
     return *random_generator_.get();
   }
 
-  static void* New(size_t nbytes) {
-    void* data = GetCPUAllocator()->New(nbytes);
+  static std::pair<void*, MemoryDeleter> New(size_t nbytes) {
+    auto data_and_deleter = GetCPUAllocator()->New(nbytes);
     if (FLAGS_caffe2_report_cpu_memory_usage) {
-      reporter_.New(data, nbytes);
+      reporter_.New(data_and_deleter.first, nbytes);
+      auto original_deleter = data_and_deleter.second;
+      data_and_deleter.second = [original_deleter](void* data) {
+        reporter_.Delete(data);
+        original_deleter(data);
+      };
     }
-    return data;
-  }
-
-  static void Delete(void* data) {
-    if (FLAGS_caffe2_report_cpu_memory_usage) {
-      reporter_.Delete(data);
-    }
-    GetCPUAllocator()->Delete(data);
+    return data_and_deleter;
   }
 
   // Two copy functions that deals with cross-device copies.
