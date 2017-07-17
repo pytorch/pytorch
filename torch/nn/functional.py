@@ -568,7 +568,7 @@ def _expand_input_to_target(input, target, batch=False):
         b = input.size(0)
     else:
         b = 1
-    input_correct_dims = input.view(b, target.size(0),
+    input_correct_dims = input.view(b, target.size(1),
                                     *map(lambda x: 1, target.size()[2:]))
     return input_correct_dims.expand_as(target)
 
