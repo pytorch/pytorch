@@ -157,14 +157,12 @@ def _compute_blob_recycling_for_dag(
                     blobs_to_ops[inp].append(i)
                     share_counts[inp] = 1
 
-    # Traverse operators starting from the heads' blobs.
-    # Keep tabs on when blobs are seen first and last, and also
-    # when operators have their input satisfied. Share blobs only
-    # under same branch, avoiding problems with parallel workers.
     output_blobs = set()
     mapping = {}
     unknown_shapes = set()
 
+    # Helper function to return blob size based on shape inference.
+    # If we don't have shape inference available, return 0.
     def infer_blob_size(b):
         if b in blob_shapes:
             return np.prod(blob_shapes[b])
@@ -175,6 +173,9 @@ def _compute_blob_recycling_for_dag(
     global token_seq
     token_seq = 0
 
+    # Creates a next "token". Tokens are used to to keep track of
+    # dependendencies: a blob can be replaced by another only if that
+    # blob "holds" all tokens currently in scope.
     def next_token():
         global token_seq
         token_seq += 1
@@ -182,24 +183,42 @@ def _compute_blob_recycling_for_dag(
 
     saved_count = 0
 
+    # Main recursive function. We start recursion from the "heads" and
+    # only descend on an operator when all its inputs have been 'satisfied'.
+    # That is, all parent operators have been visited.
     def descend(op_idx, free_blobs, tokens):
-        # Take tokens left here
+        # Check if there are tokens left at this operator from a
+        # parent operator.
         tokens = tokens.union(op_token_deposit[op_idx])
         op_token_deposit[op_idx] = None
         cur_op = ops[op_idx]
+
+        # new_free_blobs contains the blobs that we will release after
+        # visiting this op
         new_free_blobs = set()
         saved = 0
 
+        # Update the tokens assigned to blobs to be union of the
+        # tokens we are currently holding and the tokens already held
+        # by that blob.
         for b in list(cur_op.input) + list(cur_op.output):
             actual_blob = b if b not in mapping else mapping[b]
             req_tokens[b] = req_tokens[b].union(tokens)
             if actual_blob != b:
+                # This blob has been assigned to another (recycled) blob,
+                # so update the token holdings of the recycled blob.
                 req_tokens[actual_blob] = req_tokens[actual_blob].union(tokens)
 
+        # Check each input and increment the counters for each of the input
+        # blobs.
         for inp in cur_op.input:
             if is_shareable(inp):
                 blob_input_count[inp] += 1
                 if blob_input_count[inp] == len(blobs_to_ops[inp]):
+                    # This input blob has been now consumed, so we
+                    # can release it to be recycled. If it was replaced
+                    # by another recycled blob, release the recycled blob
+                    # instead.
                     actual_blob = inp if inp not in mapping else mapping[inp]
                     if actual_blob not in dont_share_blobs:
                         new_free_blobs.add(
@@ -207,17 +226,26 @@ def _compute_blob_recycling_for_dag(
                         )
 
         def can_be_used(blob, cur_tokens):
-            # Do we have all tokens, and this one was not released in this op?
+            # Do we have all required tokens, and this one
+            # was not released in this op?
             for (_cnt, b) in new_free_blobs:
                 if b == blob:
                     return False
             return len(req_tokens[blob] - cur_tokens) == 0
 
+        # Check each output to see if we see the output the first time (i.e
+        # it is created by this op). if it is then, we can replace it with
+        # a recycled blob, if available.
         for outp in cur_op.output:
             if is_shareable(outp):
                 if outp not in output_blobs:
                     # First seen this blob as output, can assign to a free blob
                     freeb = None
+
+                    # We have two algorithms for choosing the blob to replace
+                    # this one. One that uses size information and another
+                    # that uses a priority queue that prefers blobs that are
+                    # have been shared before.
                     if blob_sizes is None:
                         put_back = []
                         while len(free_blobs) > 0:
@@ -249,6 +277,9 @@ def _compute_blob_recycling_for_dag(
                             free_blobs.remove(freeb)
                             saved += bsize
 
+                    # "freeb" is the blob output to be replaced with. We
+                    # update its tokens to include the tokens being held
+                    # now.
                     if freeb is not None:
                         req_tokens[freeb] = req_tokens[freeb].union(tokens)
                         mapping[outp] = freeb
@@ -256,6 +287,9 @@ def _compute_blob_recycling_for_dag(
 
                 output_blobs.add(outp)
 
+        # Process blobs released during this op visit. Depending
+        # on whether we have blob sizes or not, we store the list
+        # of free blobs differently (NOTE: this should be unified).
         for (cnt, nf) in new_free_blobs:
             already_inserted = False
             # Note: we prevent double insertion, but it can
@@ -281,6 +315,8 @@ def _compute_blob_recycling_for_dag(
             for _ in blobs_to_ops[outp]:
                 num_branches += 1
 
+        # Here we process each output again and see if we can descend
+        # down the operator graph.
         for outp in cur_op.output:
             for inp_op_idx in blobs_to_ops[outp]:
                 op_visit_count[inp_op_idx] += 1
@@ -300,7 +336,9 @@ def _compute_blob_recycling_for_dag(
                     saved += saved_desc
 
                 else:
-                    # Leave my tokens here
+                    # Leave my tokens here so that they can be grabbed
+                    # when we visit the operator (after all inputs have been
+                    # satisfied).
                     if op_token_deposit[inp_op_idx] is not None:
                         op_token_deposit[inp_op_idx] = \
                             op_token_deposit[inp_op_idx].union(tokens)
