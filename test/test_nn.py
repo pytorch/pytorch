@@ -945,10 +945,11 @@ class TestNN(NNTestCase):
         IN = cls(c, eps=0)
 
         output = IN(input_var)
-        out_reshaped = output.transpose(1, 0).contiguous().view(c, -1)
+        # Normalization occurs over last dimensions (not b or c)
+        out_reshaped = output.view(b, c, -1)
 
-        mean = out_reshaped.mean(1)
-        var = out_reshaped.var(1, unbiased=False)
+        mean = out_reshaped.mean(2)
+        var = out_reshaped.var(2, unbiased=False)
 
         self.assertAlmostEqual(torch.abs(mean.data).mean(), 0, delta=1e-5)
         self.assertAlmostEqual(torch.abs(var.data).mean(), 1, delta=1e-5)
