@@ -938,7 +938,7 @@ class TestNN(NNTestCase):
             self.assertLess(abs(output.data.std() - std), 0.1)
             output.backward(input)
 
-    def _test_InstanceNorm(self, cls, input):
+    def _test_LayerNorm(self, cls, input):
         b, c = input.size(0), input.size(1)
         input_var = Variable(input)
 
@@ -953,20 +953,20 @@ class TestNN(NNTestCase):
         self.assertAlmostEqual(torch.abs(mean.data).mean(), 0, delta=1e-5)
         self.assertAlmostEqual(torch.abs(var.data).mean(), 1, delta=1e-5)
 
-        # If momentum==1 running_mean/var should be
-        # equal to mean/var of the input
-        IN = cls(c, momentum=1, eps=0)
+    def test_LayerNorm(self):
+        b = random.randint(3, 5)
+        c = random.randint(1, 5)
 
-        output = IN(input_var)
+        input = torch.Tensor(b, c).uniform_()
+        self._test_LayerNorm(nn.LayerNorm, input)
 
-        input_reshaped = input_var.transpose(1, 0).contiguous().view(c, -1)
-        mean = input_reshaped.mean(1)
+    def test_InstanceNorm1d(self):
+        b = random.randint(3, 5)
+        c = random.randint(1, 5)
+        d = random.randint(2, 5)
 
-        input_reshaped = input_var.transpose(1, 0).contiguous().view(c, b, -1)
-        var = input_reshaped.var(2, unbiased=True)[:, :]
-
-        self.assertAlmostEqual(torch.abs(mean.data - IN.running_mean).mean(), 0, delta=1e-5)
-        self.assertAlmostEqual(torch.abs(var.data.mean(1) - IN.running_var).mean(), 0, delta=1e-5)
+        input = torch.Tensor(b, c, d).uniform_()
+        self._test_LayerNorm(nn.InstanceNorm1d, input)
 
     def test_InstanceNorm2d(self):
         b = random.randint(3, 5)
@@ -975,15 +975,7 @@ class TestNN(NNTestCase):
         h = random.randint(2, 5)
 
         input = torch.Tensor(b, c, h, w).uniform_()
-        self._test_InstanceNorm(nn.InstanceNorm2d, input)
-
-    def test_InstanceNorm1d(self):
-        b = random.randint(3, 5)
-        c = random.randint(1, 5)
-        d = random.randint(2, 5)
-
-        input = torch.Tensor(b, c, d).uniform_()
-        self._test_InstanceNorm(nn.InstanceNorm1d, input)
+        self._test_LayerNorm(nn.InstanceNorm2d, input)
 
     def test_InstanceNorm3d(self):
         b = random.randint(3, 5)
@@ -993,7 +985,7 @@ class TestNN(NNTestCase):
         d = random.randint(2, 5)
 
         input = torch.Tensor(b, c, h, w, d).uniform_()
-        self._test_InstanceNorm(nn.InstanceNorm3d, input)
+        self._test_LayerNorm(nn.InstanceNorm3d, input)
 
     def test_pad(self):
         inputs = Variable(torch.randn(1, 3, 4, 4), requires_grad=True)
@@ -3189,7 +3181,7 @@ new_module_tests = [
     ),
     dict(
         module_name='LayerNorm',
-        constructor_args=(10, 1e-3),
+        constructor_args=(10,),
         input_size=(4, 10),
         desc='affine'
     ),
@@ -3198,6 +3190,42 @@ new_module_tests = [
         constructor_args=(10, 1e-3, False),
         input_size=(4, 10),
         desc='no_affine'
+    ),
+    dict(
+        module_name='InstanceNorm1d',
+        constructor_args=(5, 1e-3, True),
+        input_size=(4, 5, 3),
+        desc='affine'
+    ),
+    dict(
+        module_name='InstanceNorm1d',
+        constructor_args=(5),
+        input_size=(4, 5, 3),
+        desc='no_affine'
+    ),
+    dict(
+        module_name='InstanceNorm2d',
+        constructor_args=(3, 1e-3, True),
+        input_size=(2, 3, 6, 6),
+        desc='affine'
+    ),
+    dict(
+        module_name='InstanceNorm2d',
+        constructor_args=(3),
+        input_size=(2, 3, 6, 6),
+        desc='no_affine'
+    ),
+    dict(
+        module_name='InstanceNorm3d',
+        constructor_args=(3, 1e-3, True),
+        input_size=(2, 3, 4, 4, 4),
+        desc='affine'
+    ),
+    dict(
+        module_name='InstanceNorm3d',
+        constructor_args=(3),
+        input_size=(2, 3, 4, 4, 4),
+        desc='not_affine'
     ),
     dict(
         module_name='Conv1d',
