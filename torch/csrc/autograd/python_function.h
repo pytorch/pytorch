@@ -32,8 +32,6 @@ struct PyFunction : public Function {
 };
 
 
-variable_list interpret(jit::Graph&, const variable_list&);
-
 }} // namespace torch::autograd
 
 struct THPFunction {
