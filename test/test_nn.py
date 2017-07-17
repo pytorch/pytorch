@@ -3626,14 +3626,12 @@ new_module_tests = [
         module_name='AvgPool3d',
         constructor_args=((2, 2, 2),),
         input_size=(2, 3, 4, 4, 4),
-        check_gradgrad=False,
     ),
     dict(
         module_name='AvgPool3d',
         constructor_args=(2, (2, 2, 2)),
         input_size=(2, 3, 5, 5, 5),
         desc='stride',
-        check_gradgrad=False,
     ),
     dict(
         module_name='ReplicationPad3d',
