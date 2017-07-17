@@ -1,42 +1,38 @@
-from .batchnorm import _BatchNorm
+import torch
+from .module import Module
+from torch.nn.parameter import Parameter
 from .. import functional as F
 
 
-class _InstanceNorm(_BatchNorm):
-    def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=False):
-        super(_InstanceNorm, self).__init__(
-            num_features, eps, momentum, affine)
+class _LayerNorm(Module):
+    def __init__(self, num_features, eps=1e-5, affine=True):
+        super(_LayerNorm, self).__init__()
+        self.num_features = num_features
+        self.affine = affine
+        self.eps = eps
+        if self.affine:
+            self.weight = Parameter(torch.ones(num_features))
+            self.bias = Parameter(torch.zeros(num_features))
+        else:
+            self.register_parameter('weight', None)
+            self.register_parameter('bias', None)
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        if self.affine:
+            self.weight.data.fill_(1)
+            self.bias.data.zero_()
 
     def forward(self, input):
-        b, c = input.size(0), input.size(1)
+        return F.layer_norm(input, weight=self.weight, bias=self.bias,
+                            eps=self.eps)
 
-        # Repeat stored stats and affine transform params
-        running_mean = self.running_mean.repeat(b)
-        running_var = self.running_var.repeat(b)
-
-        weight, bias = None, None
-        if self.affine:
-            weight = self.weight.repeat(b)
-            bias = self.bias.repeat(b)
-
-        # Apply instance norm
-        input_reshaped = input.contiguous().view(1, b * c, *input.size()[2:])
-
-        out = F.batch_norm(
-            input_reshaped, running_mean, running_var, weight, bias,
-            True, self.momentum, self.eps)
-
-        # Reshape back
-        self.running_mean.copy_(running_mean.view(b, c).mean(0, keepdim=False))
-        self.running_var.copy_(running_var.view(b, c).mean(0, keepdim=False))
-
-        return out.view(b, c, *input.size()[2:])
-
-    def eval(self):
-        return self
+    def __repr__(self):
+        return ('{name}({num_features}, eps={eps}, affine={affine})'
+                .format(name=self.__class__.__name__, **self.__dict__))
 
 
-class LayerNorm(_InstanceNorm):
+class LayerNorm(_LayerNorm):
     r"""Applies Layer Normalization over a 2D input that is seen
     as a mini-batch of 1D inputs.
 
@@ -48,21 +44,11 @@ class LayerNorm(_InstanceNorm):
     for each object in a mini-batch. Gamma and beta are learnable parameter
     vectors of size C (where C is the input size).
 
-    During training, this layer keeps a running estimate of its computed mean
-    and variance. The running sum is kept with a default momentum of 0.1.
-
-    At evaluation time (`.eval()`), the default behaviour of the LayerNorm
-    module stays the same, i.e. the running mean/variance is NOT used for
-    normalization. One can force using the stored mean and variance with
-    the `.train(False)` method.
-
     Args:
         num_features: num_features from an expected input of size
             `batch_size x num_features`
         eps: a value added to the denominator for numerical stability.
             Default: 1e-5
-        momentum: the value used for the running_mean and running_var
-            computation. Default: 0.1
         affine: a boolean value that when set to true, gives the layer learnable
             affine parameters. Default: True
 
@@ -79,8 +65,8 @@ class LayerNorm(_InstanceNorm):
         >>> output = m(input)
     """
 
-    def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True):
-        super(LayerNorm, self).__init__(num_features, eps, momentum, affine)
+    def __init__(self, num_features, eps=1e-5, affine=True):
+        super(LayerNorm, self).__init__(num_features, eps, affine)
 
     def _check_input_dim(self, input):
         if input.dim() != 2:
@@ -89,7 +75,7 @@ class LayerNorm(_InstanceNorm):
         super(LayerNorm, self)._check_input_dim(input)
 
 
-class InstanceNorm1d(_InstanceNorm):
+class InstanceNorm1d(_LayerNorm):
     r"""Applies Instance Normalization over a 3D input that is seen
     as a mini-batch of 2D inputs.
 
@@ -103,21 +89,11 @@ class InstanceNorm1d(_InstanceNorm):
     extension of layer normalization where statistics are only calculated over
     `num_features` and NOT all non-batch dimensions.
 
-    During training, this layer keeps a running estimate of its computed mean
-    and variance. The running sum is kept with a default momentum of 0.1.
-
-    At evaluation time (`.eval()`), the default behaviour of the InstanceNorm
-    module stays the same, i.e. the running mean/variance is NOT used for
-    normalization. One can force using the stored mean and variance with
-    the `.train(False)` method.
-
     Args:
         num_features: num_features from an expected input of size
             `batch_size x num_features x width`
         eps: a value added to the denominator for numerical stability.
             Default: 1e-5
-        momentum: the value used for the running_mean and running_var
-            computation. Default: 0.1
         affine: a boolean value that when set to true, gives the layer learnable
             affine parameters. Default: False
 
@@ -141,7 +117,7 @@ class InstanceNorm1d(_InstanceNorm):
         super(InstanceNorm1d, self)._check_input_dim(input)
 
 
-class InstanceNorm2d(_InstanceNorm):
+class InstanceNorm2d(_LayerNorm):
     r"""Applies Instance Normalization over a 4D input that is seen as a
     mini-batch of 3D inputs.
 
@@ -154,14 +130,6 @@ class InstanceNorm2d(_InstanceNorm):
     vectors of size C (where C is the input size). This can be seen as an
     extension of layer normalization where statistics are only calculated over
     `num_features` and NOT all non-batch dimensions.
-
-    During training, this layer keeps a running estimate of its computed mean
-    and variance. The running sum is kept with a default momentum of 0.1.
-
-    At evaluation time (`.eval()`), the default behaviour of the InstanceNorm
-    module stays the same, i.e. the running mean/variance is NOT used for
-    normalization. One can force using the stored mean and variance with
-    the `.train(False)` method.
 
     Args:
         num_features: num_features from an expected input of size
@@ -192,8 +160,9 @@ class InstanceNorm2d(_InstanceNorm):
         super(InstanceNorm2d, self)._check_input_dim(input)
 
 
-class InstanceNorm3d(_InstanceNorm):
-    r"""Applies Instance Normalization over a 5d input that is seen as a mini-batch of 4d inputs
+class InstanceNorm3d(_LayerNorm):
+    r"""Applies Instance Normalization over a 5D input that is seen as a
+    mini-batch of 4D inputs
 
     .. math::
 
@@ -205,21 +174,11 @@ class InstanceNorm3d(_InstanceNorm):
     extension of layer normalization where statistics are only calculated over
     `num_features` and NOT all non-batch dimensions.
 
-    During training, this layer keeps a running estimate of its computed mean
-    and variance. The running sum is kept with a default momentum of 0.1.
-
-    At evaluation time (`.eval()`), the default behaviour of the InstanceNorm
-    module stays the same, i.e. the running mean/variance is NOT used for
-    normalization. One can force using the stored mean and variance with
-    the `.train(False)` method.
-
     Args:
         num_features: num_features from an expected input of size
             `batch_size x num_features x depth x height x width`
         eps: a value added to the denominator for numerical stability.
             Default: 1e-5
-        momentum: the value used for the running_mean and running_var
-            computation. Default: 0.1
         affine: a boolean value that when set to true, gives the layer learnable
             affine parameters. Default: False
 
