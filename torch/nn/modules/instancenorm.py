@@ -25,7 +25,7 @@ class _InstanceNorm(Module):
 
     def forward(self, input):
         return F.instance_norm(input, weight=self.weight, bias=self.bias,
-                            eps=self.eps)
+                               eps=self.eps)
 
     def __repr__(self):
         if self.affine:
@@ -44,8 +44,8 @@ class LayerNorm(_InstanceNorm):
 
         y = \gamma * \frac{x - \mu_x}{\sigma_x + \epsilon} + \beta
 
-    The mean and standard deviation are calculated per-dimension separately
-    for each object in a mini-batch (over `num_features`). Gamma and beta are
+    The mean and standard deviation are calculated for each object in a
+    mini-batch (over `num_features`). Gamma and beta are
     optional learnable parameter vectors of size C (where C is the input size).
 
     Args:
@@ -72,7 +72,8 @@ class LayerNorm(_InstanceNorm):
     def forward(self, input):
         mean = input.mean(1, keepdim=True)
         std = input.std(1, keepdim=True)
-        output = (input - mean.expand_as(input)) / (std.expand_as(input) + self.eps)
+        output = (input - mean.expand_as(input)) / (std.expand_as(input) +
+                                                    self.eps)
         if self.affine:
             if input.size(1) != self.weight.nelement():
                 raise RuntimeError('got {}-feature tensor, expected {}'
@@ -88,7 +89,7 @@ class LayerNorm(_InstanceNorm):
         super(LayerNorm, self)._check_input_dim(input)
 
 
-class InstanceNorm1d(_LayerNorm):
+class InstanceNorm1d(_InstanceNorm):
     r"""Applies Instance Normalization over a 3D input that is seen
     as a mini-batch of 2D inputs.
 
@@ -129,7 +130,7 @@ class InstanceNorm1d(_LayerNorm):
         super(InstanceNorm1d, self)._check_input_dim(input)
 
 
-class InstanceNorm2d(_LayerNorm):
+class InstanceNorm2d(_InstanceNorm):
     r"""Applies Instance Normalization over a 4D input that is seen as a
     mini-batch of 3D inputs.
 
@@ -169,7 +170,7 @@ class InstanceNorm2d(_LayerNorm):
         super(InstanceNorm2d, self)._check_input_dim(input)
 
 
-class InstanceNorm3d(_LayerNorm):
+class InstanceNorm3d(_InstanceNorm):
     r"""Applies Instance Normalization over a 5D input that is seen as a
     mini-batch of 4D inputs
 
