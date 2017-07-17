@@ -68,18 +68,9 @@ class LayerNorm(_InstanceNorm):
         >>> output = m(input)
     """
 
-    # Assuming 2D inputs, no need to manipulate dimensions
     def forward(self, input):
-        mean = input.mean(1, keepdim=True)
-        std = input.std(1, keepdim=True)
-        output = (input - mean) / (std + self.eps)
-        if self.affine:
-            if input.size(1) != self.weight.nelement():
-                raise RuntimeError('got {}-feature tensor, expected {}'
-                                   .format(input.size(1),
-                                           self.weight.nelement()))
-            output = self.weight * output + self.bias
-        return output
+        return F.layer_norm(input, weight=self.weight, bias=self.bias,
+                            eps=self.eps)
 
     def _check_input_dim(self, input):
         if input.dim() != 2:

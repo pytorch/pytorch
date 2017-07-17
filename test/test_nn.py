@@ -2335,15 +2335,29 @@ class TestNN(NNTestCase):
             self.assertEqual(res1, res2)
             self.assertEqual(grad1, grad2)
 
-    def test_instancenorm_raises_error_if_weight_is_not_same_size_as_input(self):
+    def test_layernorm_raises_error_if_weight_is_not_same_size_as_input(self):
         input = Variable(torch.rand(2, 10))
+        wrong_sizes = [9, 11]
+        for size in wrong_sizes:
+            with self.assertRaises(RuntimeError):
+                F.layer_norm(input, weight=Parameter(torch.rand(size)))
+
+    def test_layernorm_raises_error_if_bias_is_not_same_size_as_input(self):
+        input = Variable(torch.rand(2, 10))
+        wrong_sizes = [9, 11]
+        for size in wrong_sizes:
+            with self.assertRaises(RuntimeError):
+                F.layer_norm(input, bias=Parameter(torch.rand(size)))
+
+    def test_instancenorm_raises_error_if_weight_is_not_same_size_as_input(self):
+        input = Variable(torch.rand(2, 10, 5))
         wrong_sizes = [9, 11]
         for size in wrong_sizes:
             with self.assertRaises(RuntimeError):
                 F.instance_norm(input, weight=Parameter(torch.rand(size)))
 
     def test_instancenorm_raises_error_if_bias_is_not_same_size_as_input(self):
-        input = Variable(torch.rand(2, 10))
+        input = Variable(torch.rand(2, 10, 5))
         wrong_sizes = [9, 11]
         for size in wrong_sizes:
             with self.assertRaises(RuntimeError):
