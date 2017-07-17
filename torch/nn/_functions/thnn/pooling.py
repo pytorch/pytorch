@@ -380,17 +380,33 @@ class AvgPool3d(Function):
         return output
 
     @staticmethod
-    @once_differentiable
     def backward(ctx, grad_output):
+        input, = ctx.saved_variables
+        grad_input = AvgPool3dBackwards.apply(input, grad_output, ctx.kernel_size, ctx.stride)
+        return grad_input, None, None
+
+
+class AvgPool3dBackwards(Function):
+
+    @staticmethod
+    def forward(ctx, input, grad_output, kernel_size, stride):
+        ctx.kernel_size = kernel_size
+        ctx.stride = stride
         backend = type2backend[type(grad_output)]
-        input, = ctx.saved_tensors
         grad_input = grad_output.new()
+        ctx.save_for_backward(input)
         backend.VolumetricAveragePooling_updateGradInput(backend.library_state,
                                                          input, grad_output, grad_input,
                                                          ctx.kernel_size[0], ctx.kernel_size[2], ctx.kernel_size[1],
                                                          ctx.stride[0], ctx.stride[2], ctx.stride[1])
-        return grad_input, None, None
+        return grad_input
 
+    @staticmethod
+    def backward(ctx, ggI):
+        input, = ctx.saved_variables
+        gI = Variable(ggI.data.new(ggI.size()).zero_())
+        ggO = AvgPool3d.apply(ggI, ctx.kernel_size, ctx.stride)
+        return gI, ggO, None, None
 
 class AdaptiveMaxPool1d(Function):
 
