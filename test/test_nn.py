@@ -59,10 +59,10 @@ def default_tensor_type(type):
     return decorator
 
 
-def _assertGradAndGradgradChecks(assertTrueFn, apply_fn, inputs):
+def _assertGradAndGradgradChecks(test_case, apply_fn, inputs):
     # call assert function rather than returning a bool since it's nicer
     # if we get whether this failed on the gradcheck or the gradgradcheck.
-    assertTrueFn(gradcheck(apply_fn, inputs))
+    test_case.assertTrue(gradcheck(apply_fn, inputs))
     dummy_out = apply_fn(*inputs)
     if isinstance(dummy_out, tuple):
         grad_y = tuple(Variable(torch.randn(x.size()), requires_grad=x.requires_grad)
@@ -70,7 +70,7 @@ def _assertGradAndGradgradChecks(assertTrueFn, apply_fn, inputs):
     else:
         grad_y = (Variable(torch.randn(dummy_out.size()), requires_grad=dummy_out.requires_grad),)
 
-    assertTrueFn(gradgradcheck(apply_fn, inputs, grad_y,))
+    test_case.assertTrue(gradgradcheck(apply_fn, inputs, grad_y,))
 
 
 class InputVariableMixin(object):
@@ -101,7 +101,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
         if self.check_gradgrad:
             # could probably unify check_jacobian above with this.
             params = tuple(x for x in module.parameters())
-            _assertGradAndGradgradChecks(test_case.assertTrue, lambda x, *args, **kw: module(x), (input,) + params)
+            _assertGradAndGradgradChecks(test_case, lambda x, *args, **kw: module(x), (input,) + params)
 
         # check if module can be printed
         module.__repr__()
@@ -215,7 +215,7 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
     def _do_extra_tests(self, test_case, module, input, target):
         if self.check_gradgrad:
             params = tuple(x for x in module.parameters())
-            _assertGradAndGradgradChecks(test_case.assertTrue, lambda x, y, *args, **kw: module(x, y),
+            _assertGradAndGradgradChecks(test_case, lambda x, y, *args, **kw: module(x, y),
                                          (input, target) + params)
 
     def _get_target(self, target):
@@ -1030,9 +1030,9 @@ class TestNN(NNTestCase):
 
     def test_pad(self):
         inputs = Variable(torch.randn(1, 3, 4, 4), requires_grad=True)
-        _assertGradAndGradgradChecks(self.assertTrue, lambda x: F.pad(x, (1, 1, 1, 1)), (inputs,))
-        _assertGradAndGradgradChecks(self.assertTrue, lambda x: F.pad(x, (-1, 1, -2, 1)), (inputs,))
-        _assertGradAndGradgradChecks(self.assertTrue, lambda x: F.pad(x, (-1, 1, -2, 1), value=2), (inputs,))
+        _assertGradAndGradgradChecks(self, lambda x: F.pad(x, (1, 1, 1, 1)), (inputs,))
+        _assertGradAndGradgradChecks(self, lambda x: F.pad(x, (-1, 1, -2, 1)), (inputs,))
+        _assertGradAndGradgradChecks(self, lambda x: F.pad(x, (-1, 1, -2, 1), value=2), (inputs,))
         self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='replicate'), (inputs,)))
         self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='reflect'), (inputs,)))
 
@@ -2659,7 +2659,7 @@ class TestNN(NNTestCase):
         self.assertEqual(module.weight.grad.data, module_legacy.gradWeight)
         self.assertEqual(module.bias.grad.data, module_legacy.gradBias)
 
-        _assertGradAndGradgradChecks(self.assertTrue, lambda x1, x2: F.bilinear(x1, x2, module.weight, module.bias),
+        _assertGradAndGradgradChecks(self, lambda x1, x2: F.bilinear(x1, x2, module.weight, module.bias),
                                      (input1_1, input2_1))
 
     def run_conv_double_back_test(self, kern, stride, padding, chan_in, chan_out, batch_size,

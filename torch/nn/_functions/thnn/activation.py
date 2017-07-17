@@ -13,6 +13,7 @@ class PReLU(Function):
         output = input.new()
         ctx.num_parameters = weight.numel()
         if ctx.num_parameters == 1:
+            # num_parameters == 0 is used indicate that a single weight is shared among all input channels.
             ctx.num_parameters = 0
         ctx._backend.PReLU_updateOutput(
             ctx._backend.library_state,
@@ -72,16 +73,20 @@ class PReLUBackward(Function):
         # Explanation: Let input be i, weight be w, grad_output be gO.
         # f(i, w) = i  if i > 0
         #         = wi if i <= 0
-        # df/dx * gO  = gO      if i > 0      df/dw * g0 = 0      if i > 0
+        # df/di * gO  = gO      if i > 0      df/dw * g0 = 0      if i > 0
         #             = g0 * w  if i <= 0                = g0 * i  if i <= 0
         # The rest is taking derivatives of these wrt i, w, gO and summing/expanding properly.
         if ctx.num_parameters == 0:
+            # from PReLU.forward: num_parameters == 0 is used indicate that a
+            # single weight is shared among all input channels.
             mask = positive_mask + nonpositive_mask * weight.expand_as(input)
             ggO = ggI * mask + ggW.expand_as(gO) * (nonpositive_mask * input)
             return ggW.expand_as(gO) * gO * nonpositive_mask, (ggI * gO * nonpositive_mask).sum(), ggO, None, None
         else:
             # Expand ggW to match size of ggI; a simple expand doesn't work because
-            # ggW is the size of the input channel (dim==1 unless there is only 1 dimension).
+            # ggW is the size of the input channel (dim==1 unless there is only 1 dimension).  For example,
+            # let ggI be size (3,4,5,6,7) and ggW be size (4).  Then we unsqueeze ggW to be size (4,1,1,1)
+            # so the expand succeeds.
             dims_to_unsqueeze = max(input.dim() - 2, 0)
             ggW_expanded = ggW
             for _ in range(dims_to_unsqueeze):
@@ -229,107 +234,8 @@ class Softmin(Function):
         return grad_input.mul(-1)
 
 
-# TODO: This class should be removed once THNN function support Variable backward
-class Threshold(Function):
-
-    @staticmethod
-    def forward(ctx, input, threshold, value, inplace):
-        if inplace:
-            if value > threshold:
-                raise RuntimeError('in-place processing requires value ({}) to not '
-                                   'exceed threshold ({})'.format(value, threshold))
-        ctx.threshold = threshold
-        ctx.value = value
-        ctx.inplace = inplace
-
-        if inplace:
-            ctx.mark_dirty(input)
-            output = input
-        else:
-            output = input.new(input.size())
-        ctx.save_for_backward(input)
-
-        backend = type2backend[type(input)]
-        backend.Threshold_updateOutput(
-            backend.library_state,
-            input,
-            output,
-            threshold,
-            value,
-            inplace
-        )
-        return output
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        input, = ctx.saved_variables
-        if grad_output.volatile:
-            grad_input = Variable(input.data.new(input.size()), volatile=True)
-            backend = type2backend[type(input.data)]
-            backend.Threshold_updateGradInput(
-                backend.library_state,
-                input.data,
-                grad_output.data,
-                grad_input.data,
-                ctx.threshold,
-                ctx.value,
-                False
-            )
-        else:
-            grad_input = grad_output.masked_fill(input <= ctx.threshold, 0)
-        return grad_input, None, None, None
-
-
-# TODO: This class should be removed once THNN function support Variable backward
-class LeakyReLU(Function):
-
-    @staticmethod
-    def forward(ctx, input, negative_slope, inplace):
-        ctx.negative_slope = negative_slope
-        ctx.inplace = inplace
-
-        if inplace:
-            ctx.mark_dirty(input)
-            output = input
-        else:
-            output = input.new(input.size())
-        ctx.save_for_backward(input)
-
-        backend = type2backend[type(input)]
-        backend.LeakyReLU_updateOutput(
-            backend.library_state,
-            input,
-            output,
-            negative_slope,
-            inplace
-        )
-        return output
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        input, = ctx.saved_variables
-        if grad_output.volatile:
-            grad_input = Variable(input.data.new(input.size()), volatile=True)
-            backend = type2backend[type(input.data)]
-            backend.LeakyReLU_updateGradInput(
-                backend.library_state,
-                input.data,
-                grad_output.data,
-                grad_input.data,
-                ctx.negative_slope,
-                False
-            )
-        else:
-            positive_mask = input > 0
-            negative_mask = input <= 0
-            mask = positive_mask.type_as(grad_output) + negative_mask.type_as(grad_output) * ctx.negative_slope
-            grad_input = mask * grad_output
-        return grad_input, None, None
-
 _all_functions.append(PReLU)
 _all_functions.append(PReLUBackward)
 _all_functions.append(RReLU)
 _all_functions.append(SELU)
 _all_functions.append(Softmin)
-_all_functions.append(Threshold)
-_all_functions.append(LeakyReLU)
