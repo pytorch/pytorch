@@ -22,7 +22,6 @@ struct AbsGradientCPUFunctor {
   }
 };
 
-namespace {
 REGISTER_CPU_OPERATOR(
     Abs,
     UnaryElementwiseOp<TensorTypes<float>, CPUContext, AbsCPUFunctor>);
@@ -59,5 +58,4 @@ class GetAbsGradient : public GradientMakerBase {
   }
 };
 REGISTER_GRADIENT(Abs, GetAbsGradient);
-} // namespace
 } // namespace caffe2

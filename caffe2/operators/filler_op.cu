@@ -21,8 +21,6 @@ bool RangeFillOp<float, CUDAContext>::Fill(
   return true;
 }
 
-namespace {
-
 REGISTER_CUDA_OPERATOR(UniformFill, UniformFillOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(UniformIntFill, UniformFillOp<int, CUDAContext>);
 REGISTER_CUDA_OPERATOR(ConstantFill, ConstantFillOp<CUDAContext>);
@@ -31,5 +29,4 @@ REGISTER_CUDA_OPERATOR(XavierFill, XavierFillOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(MSRAFill, MSRAFillOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(RangeFill, RangeFillOp<float, CUDAContext>);
 
-}  // namespace
 }  // namespace caffe2

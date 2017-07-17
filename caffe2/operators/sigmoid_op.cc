@@ -21,7 +21,6 @@ struct SigmoidGradientCPUFunctor {
   }
 };
 
-namespace {
 REGISTER_CPU_OPERATOR(
     Sigmoid, UnaryElementwiseOp<
         TensorTypes<float>, CPUContext, SigmoidCPUFunctor>);
@@ -65,5 +64,4 @@ class GetSigmoidGradient : public GradientMakerBase {
   }
 };
 REGISTER_GRADIENT(Sigmoid, GetSigmoidGradient);
-}  // namespace
 }  // namespace caffe2

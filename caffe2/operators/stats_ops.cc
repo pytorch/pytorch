@@ -5,7 +5,6 @@
 #include "caffe2/core/tensor.h"
 
 namespace caffe2 {
-namespace {
 
 class StatRegistryCreateOp : public Operator<CPUContext> {
  public:
@@ -206,7 +205,6 @@ OPERATOR_SCHEMA(StatRegistryExport)
     .Arg(
         "reset",
         "(default true) Whether to atomically reset the counters afterwards.");
-}
 
 OPERATOR_SCHEMA(TimerBegin)
     .NumInputs(0)

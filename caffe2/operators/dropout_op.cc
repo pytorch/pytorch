@@ -57,8 +57,6 @@ bool DropoutGradientOp<float, CPUContext>::RunOnDevice() {
   }
 }
 
-
-namespace {
 REGISTER_CPU_OPERATOR(Dropout, DropoutOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(DropoutGrad, DropoutGradientOp<float, CPUContext>);
 
@@ -94,5 +92,4 @@ class GetDropoutGradient : public GradientMakerBase {
   }
 };
 REGISTER_GRADIENT(Dropout, GetDropoutGradient);
-}  // namespace
 }  // namespace caffe2

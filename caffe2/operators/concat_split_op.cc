@@ -1,7 +1,6 @@
 #include "caffe2/operators/concat_split_op.h"
 
 namespace caffe2 {
-namespace {
 REGISTER_CPU_OPERATOR(Split, SplitOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Concat, ConcatOp<CPUContext>);
 OPERATOR_SCHEMA(Split)
@@ -74,5 +73,4 @@ class GetConcatGradient : public GradientMakerBase {
 };
 REGISTER_GRADIENT(Concat, GetConcatGradient);
 REGISTER_GRADIENT(DepthConcat, GetConcatGradient);
-}  // namespace
 }  // namespace caffe2

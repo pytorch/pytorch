@@ -46,12 +46,10 @@ struct SoftsignGradientCUDAFunctor {
   }
 };
 
-namespace {
 REGISTER_CUDA_OPERATOR(
     Softsign,
     UnaryElementwiseOp<TensorTypes<float>, CUDAContext, SoftsignCUDAFunctor>);
 REGISTER_CUDA_OPERATOR(
     SoftsignGradient,
     BinaryElementwiseOp<TensorTypes<float>, CUDAContext, WithoutBroadcast<SoftsignGradientCUDAFunctor>>);
-} // namespace
 } // namespace caffe2

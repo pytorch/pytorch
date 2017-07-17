@@ -459,7 +459,6 @@ bool PoolOp<T, Context, PoolType>::RunOnDeviceWithOrderNHWC() {
   return true;
 }
 
-namespace {
 REGISTER_CPU_OPERATOR(
     AveragePool,
     PoolOp<float, CPUContext, AveragePool<float>>);
@@ -508,5 +507,4 @@ data into the output blob Y for further processing.
   "tensor. Dimensions will vary based on various kernel, stride, and pad "
   "sizes.");
 
-}  // namespace
 }  // namespace caffe2

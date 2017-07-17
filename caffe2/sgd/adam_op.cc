@@ -2,7 +2,6 @@
 
 namespace caffe2 {
 
-namespace {
 REGISTER_CPU_OPERATOR(Adam, AdamOp<float, CPUContext>);
 OPERATOR_SCHEMA(Adam)
     .NumInputs(6)
@@ -68,6 +67,5 @@ Adam on (param, moment1[indices], momemnt2[indices], lr, iter) and returns
 
 SHOULD_NOT_DO_GRADIENT(Adam);
 SHOULD_NOT_DO_GRADIENT(SparseAdam);
-}
 
 }

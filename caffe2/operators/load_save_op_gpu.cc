@@ -12,9 +12,7 @@ void LoadOp<CUDAContext>::SetCurrentDevice(BlobProto* proto) {
   }
 }
 
-namespace {
 REGISTER_CUDA_OPERATOR(Load, LoadOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(Save, SaveOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(Checkpoint, CheckpointOp<CUDAContext>);
-}  // namespace
 }  // namespace caffe2

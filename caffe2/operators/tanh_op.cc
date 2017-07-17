@@ -28,7 +28,6 @@ struct TanhGradientCPUFunctor {
   }
 };
 
-namespace {
 REGISTER_CPU_OPERATOR(
     Tanh, UnaryElementwiseOp<TensorTypes<float>, CPUContext, TanhCPUFunctor>);
 REGISTER_CPU_OPERATOR(
@@ -64,5 +63,4 @@ class GetTanhGradient : public GradientMakerBase {
   }
 };
 REGISTER_GRADIENT(Tanh, GetTanhGradient);
-}  // namespace
 }  // namespace caffe2

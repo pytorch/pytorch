@@ -69,6 +69,7 @@ class ThrowException : public Operator<CPUContext> {
 OPERATOR_SCHEMA(JustTest).NumInputs(0, 1).NumOutputs(0, 1);
 OPERATOR_SCHEMA(JustTestCPUOnly).NumInputs(0, 1).NumOutputs(0, 1);
 OPERATOR_SCHEMA(ThrowException).NumInputs(0).NumOutputs(0);
+OPERATOR_SCHEMA(JustTestWithSomeOutput);
 
 REGISTER_CPU_OPERATOR(JustTest, JustTest);
 REGISTER_CPU_OPERATOR(JustTestCPUOnly, JustTest);

@@ -78,8 +78,6 @@ bool DropoutGradientOp<float, CUDAContext>::RunOnDevice() {
 }
 
 
-namespace {
 REGISTER_CUDA_OPERATOR(Dropout, DropoutOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(DropoutGrad, DropoutGradientOp<float, CUDAContext>);
-}  // namespace
 }  // namespace caffe2

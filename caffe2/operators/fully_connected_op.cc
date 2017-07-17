@@ -1,7 +1,6 @@
 #include "caffe2/operators/fully_connected_op.h"
 
 namespace caffe2 {
-namespace {
 
 REGISTER_CPU_OPERATOR(FC, FullyConnectedOp<CPUContext>);
 REGISTER_CPU_OPERATOR(FCGradient, FullyConnectedGradientOp<CPUContext>);
@@ -60,5 +59,4 @@ class GetFCGradient : public GradientMakerBase {
   }
 };
 REGISTER_GRADIENT(FC, GetFCGradient);
-}  // namespace
 }  // namespace caffe2

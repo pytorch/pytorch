@@ -232,8 +232,6 @@ bool InstanceNormGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   return true;
 }
 
-namespace {
-
 class GetInstanceNormGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
@@ -259,5 +257,4 @@ REGISTER_CPU_OPERATOR(
 OPERATOR_SCHEMA(InstanceNormGradient).NumInputs(4, 6).NumOutputs(3);
 
 REGISTER_GRADIENT(InstanceNorm, GetInstanceNormGradient);
-}
 }
