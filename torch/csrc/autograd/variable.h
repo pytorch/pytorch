@@ -93,7 +93,6 @@ struct Variable : std::enable_shared_from_this<Variable> {
   std::vector<std::shared_ptr<FunctionPreHook>> hooks;
   std::weak_ptr<Function> grad_accumulator;
   std::mutex grad_accumulator_lock;
-  std::mutex input_node_lock;
   bool requires_grad;
   bool is_volatile;
   // The "output number" of this variable; e.g., if this variable
