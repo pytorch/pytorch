@@ -6,7 +6,7 @@ from torch._thnn.utils import parse_header, THNN_H_PATH
 from torch.autograd import Variable
 from torch.autograd.function import Function, InplaceFunction, once_differentiable
 from torch._thnn import type2backend
-from .autoDoubleBackwards import double_backwards_fns
+from .auto_double_backwards import double_backwards_fns
 
 from . import _all_functions
 
@@ -25,25 +25,6 @@ def _make_function_class_criterion(class_name, update_output, update_grad_input,
         if not arg.name.startswith('weight') and arg.type == 'THTensor*':
             buffers_idx.append(additional_arg_idx)
         additional_arg_idx += 1
-
-    @staticmethod
-    def backward_cls_forward(ctx, input, target, grad_output, additional_args_ctx, backend_ctx):
-        ctx.additional_args = additional_args_ctx
-        ctx._backend = backend_ctx
-        ctx.save_for_backward(input, target, grad_output)
-        grad_input = grad_output.new().resize_as_(input).zero_()
-        getattr(ctx._backend, update_grad_input.name)(ctx._backend.library_state, input, target,
-                                                      grad_input, *ctx.additional_args)
-        grad_output_expanded = grad_output.view(*repeat(1, grad_input.dim()))
-        grad_input.mul_(grad_output_expanded.expand_as(grad_input))
-        return grad_input
-
-    @staticmethod
-    def backward_cls_backward(ctx, *grad_params):
-        return double_backwards_fn(ctx, *grad_params)
-
-    backward_cls = type(class_name + "Backward", (Function,),
-                        dict(forward=backward_cls_forward, backward=backward_cls_backward))
 
     @staticmethod
     def forward(ctx, input, target, *args):
@@ -73,6 +54,24 @@ def _make_function_class_criterion(class_name, update_output, update_grad_input,
         return ((backward_cls.apply(input, target, grad_output, ctx.additional_args, ctx._backend),) +
                 (None,) * (ctx.forward_args_count + 1))
 
+    @staticmethod
+    def backward_cls_forward(ctx, input, target, grad_output, additional_args_ctx, backend_ctx):
+        ctx.additional_args = additional_args_ctx
+        ctx._backend = backend_ctx
+        ctx.save_for_backward(input, target, grad_output)
+        grad_input = grad_output.new().resize_as_(input).zero_()
+        getattr(ctx._backend, update_grad_input.name)(ctx._backend.library_state, input, target,
+                                                      grad_input, *ctx.additional_args)
+        grad_output_expanded = grad_output.view(*repeat(1, grad_input.dim()))
+        grad_input.mul_(grad_output_expanded.expand_as(grad_input))
+        return grad_input
+
+    @staticmethod
+    def backward_cls_backward(ctx, *grad_params):
+        return double_backwards_fn(ctx, *grad_params)
+
+    backward_cls = type(class_name + "Backward", (Function,),
+                        dict(forward=backward_cls_forward, backward=backward_cls_backward))
     return type(class_name, (Function,), dict(forward=forward, backward=backward)), backward_cls
 
 
@@ -122,60 +121,6 @@ def _make_function_class(class_name, update_output, update_grad_input, acc_grad_
             buffer = ctx.buffers[name]
             additional_args = additional_args[:idx] + [buffer] + additional_args[idx:]
         return tuple(additional_args)
-
-    @staticmethod
-    def backward_cls_forward(ctx, input, grad_output, additional_args_ctx, backend_ctx, buffers_ctx, *params):
-        ctx.additional_args = additional_args_ctx
-        ctx.buffers = buffers_ctx
-        ctx._backend = backend_ctx
-        ctx.save_for_backward(input, grad_output, *params)
-        if save_output:
-            output = params[0]
-            params = params[1:]
-
-        grad_params = tuple(None for p in params)
-        grad_input_tuple = (None,)
-        if is_inplace:
-            ctx.inplace = additional_args_ctx[-1]
-
-        if ctx.needs_input_grad[0]:
-            additional_args = _initialize_buffers.__func__(ctx, 'update_grad_input')
-            if save_output:
-                additional_args = (output,) + additional_args
-
-            if is_inplace and ctx.inplace:
-                assert additional_args[-1] is True
-                tmp_args = list(additional_args)
-                tmp_args[-1] = False
-                additional_args = tuple(tmp_args)
-            grad_input = input.new(input.size())
-            params_without_bias = params if len(params) < 2 else params[:1]
-            update_grad_input_fn = getattr(ctx._backend, update_grad_input.name)
-            gi_args = params_without_bias + additional_args
-            update_grad_input_fn(ctx._backend.library_state, input, grad_output, grad_input, *gi_args)
-            grad_input_tuple = (grad_input,)
-
-        if acc_grad_parameters and any(ctx.needs_input_grad[1:]):
-            additional_args = _initialize_buffers.__func__(ctx, 'acc_grad_parameters')
-            grad_params = tuple(p.new(p.size()).zero_() for p in params)
-            appended_grads = len(expected_params) - len(grad_params)
-            grad_params += (None,) * appended_grads
-            acc_grad_parameters_fn = getattr(ctx._backend, acc_grad_parameters.name)
-            param_args = grad_params + additional_args + (1,)
-            acc_grad_parameters_fn(ctx._backend.library_state, input, grad_output, *param_args)
-            if appended_grads:
-                grad_params = grad_params[:-appended_grads]
-
-        return grad_input_tuple + grad_params
-
-    @staticmethod
-    def backward_cls_backward(ctx, *grad_params):
-        return double_backwards_fn(ctx, *grad_params)
-
-    base_class = Function if not is_inplace else InplaceFunction
-    backward_cls = type(class_name + "Backward", (base_class,), dict(forward=backward_cls_forward,
-                                                                     backward=backward_cls_backward,
-                                                                     _initialize_buffers=_initialize_buffers))
 
     @staticmethod
     def forward(ctx, input, *params):
@@ -245,6 +190,60 @@ def _make_function_class(class_name, update_output, update_grad_input, acc_grad_
         return (backward_cls.apply(input, grad_output, ctx.additional_args, ctx._backend, ctx.buffers, *tensor_params) +
                 (None,) * len(ctx.additional_args))
 
+    @staticmethod
+    def backward_cls_forward(ctx, input, grad_output, additional_args_ctx, backend_ctx, buffers_ctx, *params):
+        ctx.additional_args = additional_args_ctx
+        ctx.buffers = buffers_ctx
+        ctx._backend = backend_ctx
+        ctx.save_for_backward(input, grad_output, *params)
+        if save_output:
+            output = params[0]
+            params = params[1:]
+
+        grad_params = tuple(None for p in params)
+        grad_input_tuple = (None,)
+        if is_inplace:
+            ctx.inplace = additional_args_ctx[-1]
+
+        if ctx.needs_input_grad[0]:
+            additional_args = _initialize_buffers.__func__(ctx, 'update_grad_input')
+            if save_output:
+                additional_args = (output,) + additional_args
+
+            if is_inplace and ctx.inplace:
+                assert additional_args[-1] is True
+                tmp_args = list(additional_args)
+                tmp_args[-1] = False
+                additional_args = tuple(tmp_args)
+            grad_input = input.new(input.size())
+            params_without_bias = params if len(params) < 2 else params[:1]
+            update_grad_input_fn = getattr(ctx._backend, update_grad_input.name)
+            gi_args = params_without_bias + additional_args
+            update_grad_input_fn(ctx._backend.library_state, input, grad_output, grad_input, *gi_args)
+            grad_input_tuple = (grad_input,)
+
+        if acc_grad_parameters and any(ctx.needs_input_grad[1:]):
+            additional_args = _initialize_buffers.__func__(ctx, 'acc_grad_parameters')
+            grad_params = tuple(p.new(p.size()).zero_() for p in params)
+            appended_grads = len(expected_params) - len(grad_params)
+            grad_params += (None,) * appended_grads
+            acc_grad_parameters_fn = getattr(ctx._backend, acc_grad_parameters.name)
+            param_args = grad_params + additional_args + (1,)
+            acc_grad_parameters_fn(ctx._backend.library_state, input, grad_output, *param_args)
+            if appended_grads:
+                grad_params = grad_params[:-appended_grads]
+
+        return grad_input_tuple + grad_params
+
+    @staticmethod
+    def backward_cls_backward(ctx, *grad_params):
+        return double_backwards_fn(ctx, *grad_params)
+
+    base_class = Function if not is_inplace else InplaceFunction
+    backward_cls = type(class_name + "Backward", (base_class,), dict(forward=backward_cls_forward,
+                                                                     backward=backward_cls_backward,
+                                                                     _initialize_buffers=_initialize_buffers))
+
     return type(class_name, (base_class,), dict(forward=forward, backward=backward,
                                                 _initialize_buffers=_initialize_buffers)), backward_cls
 
@@ -279,8 +278,6 @@ def _generate_function_classes(scope_dict):
         'LookupTableBag',
         'PReLU',
         'RReLU',
-        'Threshold',
-        'LeakyReLU',
         'GRUFused',
         'LSTMFused',
         'unfolded',
