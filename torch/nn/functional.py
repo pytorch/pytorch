@@ -564,7 +564,10 @@ def batch_norm(input, running_mean, running_var, weight=None, bias=None,
 
 
 def _expand_input_to_target(input, target, batch=False):
-    b = batch and input.size(0) or b = 1
+    if batch:
+      b = input.size(0)
+    else:
+      b = 1
     input_correct_dims = input.view(b, target.size(0),
                                     *map(lambda x: 1, target.size()[2:]))
     return input_correct_dims.expand_as(target)
@@ -572,8 +575,8 @@ def _expand_input_to_target(input, target, batch=False):
 
 def instance_norm(input, weight=None, bias=None, eps=1e-5):
     b, c = input.size(0), input.size(1)
-    mean = _expand_input_to_target(input.view(b, c, -1).mean(2), input)
-    std = _expand_input_to_target(input.view(b, c, -1).std(2), input)
+    mean = _expand_input_to_target(input.view(b, c, -1).mean(2), input, True)
+    std = _expand_input_to_target(input.view(b, c, -1).std(2), input, True)
     output = (input - mean) / (std + eps)
 
     # Resize weights and biases to match dims
