@@ -225,7 +225,7 @@ void inclusive_scan_wrapper(
       NULL,
       temp_storage_bytes,
       length_data,
-      prefix_sum_length_buffer->template mutable_data<int>(),
+      prefix_sum_length_buffer->mutable_data<int>(),
       len_length,
       context_->cuda_stream());
   // Allocate temporary storage
@@ -233,13 +233,13 @@ void inclusive_scan_wrapper(
   buffer_size += temp_storage_bytes % sizeof(int) != 0 ? 1 : 0;
   prefix_sum_buffer->Resize(buffer_size);
   void* d_temp_storage =
-      static_cast<void*>(prefix_sum_buffer->template mutable_data<int>());
+      static_cast<void*>(prefix_sum_buffer->mutable_data<int>());
   // Run inclusive prefix sum
   cub::DeviceScan::InclusiveSum(
       d_temp_storage,
       temp_storage_bytes,
       length_data,
-      prefix_sum_length_buffer->template mutable_data<int>(),
+      prefix_sum_length_buffer->mutable_data<int>(),
       len_length,
       context_->cuda_stream());
 }
