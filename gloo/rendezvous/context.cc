@@ -11,6 +11,7 @@
 
 #include "gloo/common/logging.h"
 #include "gloo/transport/address.h"
+
 namespace gloo {
 namespace rendezvous {
 
@@ -21,12 +22,23 @@ Context::Context(int rank, int size)
 Context::~Context() {
 }
 
+std::vector<char> Context::extractAddress(
+    std::vector<char>& allAddrs, int i) {
+  // Extract address from the list of all addresses
+  int adjRank = (rank > i ? rank - 1 : rank);
+  // Adjust for the fact that nodes do not store address for themselves
+  int addrSize = allAddrs.size() / (size - 1);
+  return std::vector<char>(allAddrs.begin() + adjRank * addrSize,
+                           allAddrs.begin() + (adjRank + 1) * addrSize);
+}
+
 void Context::connectFullMesh(
     rendezvous::Store& store,
     std::shared_ptr<transport::Device>& dev) {
   std::vector<std::unique_ptr<transport::Pair>> pairs(size);
 
   // Create pair to connect to every other node in the collective
+  std::vector<char> allBytes;
   for (int i = 0; i < size; i++) {
     if (i == rank) {
       continue;
@@ -34,12 +46,13 @@ void Context::connectFullMesh(
 
     auto pair = dev->createPair();
     pairs[i] = std::move(pair);
-
-    // Store address for pair for this rank
-    std::ostringstream key;
-    key << rank << "/" << i;
-    store.set(key.str(), pairs[i]->address().bytes());
+    auto addrBytes = pairs[i]->address().bytes();
+    allBytes.insert(allBytes.end(), addrBytes.begin(), addrBytes.end());
   }
+
+  std::ostringstream key;
+  key << rank;
+  store.set(key.str(), allBytes);
 
   // Connect every pair
   for (int i = 0; i < size; i++) {
@@ -49,11 +62,12 @@ void Context::connectFullMesh(
 
     // Wait for address of other side of this pair to become available
     std::ostringstream key;
-    key << i << "/" << rank;
+    key << i;
     store.wait({key.str()}, dev->getTimeout());
 
     // Connect to other side of this pair
-    auto addr = store.get(key.str());
+    auto allAddrs = store.get(key.str());
+    auto addr = extractAddress(allAddrs, i);
     pairs[i]->connect(addr);
   }
 

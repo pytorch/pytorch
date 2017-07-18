@@ -10,6 +10,7 @@
 #pragma once
 
 #include <memory>
+#include <vector>
 
 #include "gloo/common/error.h"
 #include "gloo/context.h"
@@ -32,6 +33,7 @@ class Context : public ::gloo::Context {
       std::shared_ptr<transport::Device>& dev);
  protected:
   void setPairs(std::vector<std::unique_ptr<transport::Pair>>&& pairs);
+  std::vector<char> extractAddress(std::vector<char>& allAddrs, int i);
 };
 
 class ContextFactory {
