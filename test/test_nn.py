@@ -3188,46 +3188,16 @@ new_module_tests = [
         desc='no_affine'
     ),
     dict(
-        module_name='LayerNorm1d',
-        constructor_args=(10,),
+        module_name='LayerNorm',
+        constructor_args=(None,),
         input_size=(4, 10),
         desc='affine'
     ),
     dict(
-        module_name='LayerNorm1d',
-        constructor_args=(5,),
-        input_size=(4, 5, 3),
-        desc='3d_input'
-    ),
-    dict(
-        module_name='LayerNorm1d',
-        constructor_args=(10, 1e-3, False),
+        module_name='LayerNorm',
+        constructor_args=(100,),
         input_size=(4, 10),
-        desc='not_affine'
-    ),
-    dict(
-        module_name='LayerNorm2d',
-        constructor_args=(3,),
-        input_size=(2, 3, 6, 6),
-        desc='affine'
-    ),
-    dict(
-        module_name='LayerNorm2d',
-        constructor_args=(3, 1e-3, False),
-        input_size=(2, 3, 6, 6),
-        desc='not_affine'
-    ),
-    dict(
-        module_name='LayerNorm3d',
-        constructor_args=(3,),
-        input_size=(2, 3, 4, 4, 4),
-        desc='affine'
-    ),
-    dict(
-        module_name='LayerNorm3d',
-        constructor_args=(3, 1e-3, False),
-        input_size=(2, 3, 4, 4, 4),
-        desc='not_affine'
+        desc='no_affine'
     ),
     dict(
         module_name='Conv1d',

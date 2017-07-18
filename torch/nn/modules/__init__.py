@@ -14,8 +14,7 @@ from .pooling import AvgPool1d, AvgPool2d, AvgPool3d, MaxPool1d, MaxPool2d, MaxP
     MaxUnpool1d, MaxUnpool2d, MaxUnpool3d, FractionalMaxPool2d, LPPool2d, AdaptiveMaxPool1d, \
     AdaptiveMaxPool2d, AdaptiveAvgPool1d, AdaptiveAvgPool2d
 from .batchnorm import BatchNorm1d, BatchNorm2d, BatchNorm3d
-from .instancenorm import InstanceNorm1d, InstanceNorm2d, InstanceNorm3d
-from .layernorm import LayerNorm1d, LayerNorm2d, LayerNorm3d
+from .instancenorm import LayerNorm, InstanceNorm1d, InstanceNorm2d, InstanceNorm3d
 from .dropout import Dropout, Dropout2d, Dropout3d, AlphaDropout
 from .padding import ReflectionPad2d, ReplicationPad2d, ReplicationPad3d, ZeroPad2d, ConstantPad2d
 from .normalization import CrossMapLRN2d
@@ -38,8 +37,8 @@ __all__ = [
     'SoftMarginLoss', 'CrossEntropyLoss', 'Container', 'Sequential', 'ModuleList',
     'ParameterList', 'AvgPool1d', 'AvgPool2d', 'AvgPool3d', 'MaxPool1d', 'MaxPool2d',
     'MaxPool3d', 'MaxUnpool1d', 'MaxUnpool2d', 'MaxUnpool3d', 'FractionalMaxPool2d',
-    'LPPool2d', 'BatchNorm1d', 'BatchNorm2d', 'BatchNorm3d', 'InstanceNorm1d', 'InstanceNorm2d',
-    'InstanceNorm3d', 'LayerNorm1d', 'LayerNorm2d', 'LayerNorm3d', 'Dropout', 'Dropout2d', 'Dropout3d',
+    'LPPool2d', 'BatchNorm1d', 'BatchNorm2d', 'BatchNorm3d', 'LayerNorm', 'InstanceNorm1d',
+    'InstanceNorm2d', 'InstanceNorm3d', 'Dropout', 'Dropout2d', 'Dropout3d',
     'AlphaDropout', 'ReflectionPad2d', 'ReplicationPad2d', 'ReplicationPad3d', 'CrossMapLRN2d',
     'Embedding', 'EmbeddingBag', 'RNNBase', 'RNN', 'LSTM', 'GRU', 'RNNCell', 'LSTMCell', 'GRUCell',
     'PixelShuffle', 'Upsample', 'UpsamplingNearest2d', 'UpsamplingBilinear2d', 'PairwiseDistance',
