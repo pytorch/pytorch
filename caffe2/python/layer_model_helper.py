@@ -248,7 +248,7 @@ class LayerModelHelper(model_helper.ModelHelper):
             return wrapper
         else:
             raise ValueError(
-                "Tring to create non-registered layer: {0}".format(layer))
+                "Trying to create non-registered layer: {}".format(layer))
 
     @property
     def layers(self):
