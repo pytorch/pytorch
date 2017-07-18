@@ -2828,19 +2828,59 @@ TENSOR_IMPLEMENT_LOGICAL(le,<=)
 TENSOR_IMPLEMENT_LOGICAL(ge,>=)
 TENSOR_IMPLEMENT_LOGICAL(eq,==)
 TENSOR_IMPLEMENT_LOGICAL(ne,!=)
+                                                     \
+#define VECTOR_IMPLEMENT_FUNCTION(NAME, CFUNC)  \
+  void THVector_(NAME)(real *y, const real *x, const ptrdiff_t n) \
+  { \
+    ptrdiff_t i = 0;  \
+    for(; i<n-4; i+=4)  \
+    { \
+      y[i] = CFUNC(x[i]); \
+      y[i+1] = CFUNC(x[i+1]); \
+      y[i+2] = CFUNC(x[i+2]); \
+      y[i+3] = CFUNC(x[i+3]); \
+    } \
+    for(; i < n; i++) \
+      y[i] = CFUNC(x[i]); \
+  } \
+
+#define VECTOR_IMPLEMENT_FUNCTION_VALUE(NAME, CFUNC)  \
+  void THVector_(NAME)(real *y, const real *x, const real c, const ptrdiff_t n) \
+  { \
+    ptrdiff_t i = 0;  \
+    for(; i<n-4; i+=4)  \
+    { \
+      y[i] = CFUNC(x[i], c);  \
+      y[i+1] = CFUNC(x[i+1], c);  \
+      y[i+2] = CFUNC(x[i+2], c);  \
+      y[i+3] = CFUNC(x[i+3], c);  \
+    } \
+    for(; i < n; i++) \
+      y[i] = CFUNC(x[i], c);  \
+  } \
 
 #define LAB_IMPLEMENT_BASIC_FUNCTION(NAME, CFUNC)             \
+  VECTOR_IMPLEMENT_FUNCTION(NAME, CFUNC)  \
   void THTensor_(NAME)(THTensor *r_, THTensor *t)                \
   {                                                           \
     THTensor_(resizeAs)(r_, t);                               \
-    TH_TENSOR_APPLY2(real, t, real, r_, *r__data = CFUNC(*t_data);); \
+    if (THTensor_(isContiguous)(r_) && THTensor_(isContiguous)(t) && THTensor_(nElement)(r_) == THTensor_(nElement)(t)) { \
+      TH_TENSOR_APPLY2_CONTIG(real, r_, real, t, THVector_(NAME)(r__data, t_data, r__len););  \
+    } else {  \
+      TH_TENSOR_APPLY2(real, r_, real, t, *r__data = CFUNC(*t_data);); \
+    } \
   }                                                           \
 
 #define LAB_IMPLEMENT_BASIC_FUNCTION_VALUE(NAME, CFUNC)                 \
+  VECTOR_IMPLEMENT_FUNCTION_VALUE(NAME, CFUNC)  \
   void THTensor_(NAME)(THTensor *r_, THTensor *t, real value)              \
   {                                                                     \
     THTensor_(resizeAs)(r_, t);                                         \
-    TH_TENSOR_APPLY2(real, t, real, r_, *r__data = CFUNC(*t_data, value);); \
+    if (THTensor_(isContiguous)(r_) && THTensor_(isContiguous)(t) && THTensor_(nElement)(r_) == THTensor_(nElement)(t)) { \
+      TH_TENSOR_APPLY2_CONTIG(real, r_, real, t, THVector_(NAME)(r__data, t_data, value, r__len);); \
+    } else {  \
+      TH_TENSOR_APPLY2(real, r_, real, t, *r__data = CFUNC(*t_data, value);); \
+    } \
   }                                                                     \
 
 #if defined(TH_REAL_IS_LONG)
