@@ -552,7 +552,7 @@ static bool THPTensor_(_checkAdvancedIndexing)(THPTensor *indexed, PyObject *arg
 
     for (Py_ssize_t i = 0; i < ndim; ++i) {
       PyObject *item = PySequence_Fast_GET_ITEM(fast.get(), i);
-      if (THPIndexTensor_Check(item) || PySequence_Check(item)) {
+      if (THPLongTensor_Check(item) || PySequence_Check(item)) {
         sequenceFound = true;
 
         // non-adjacent sequencers not yet supported
