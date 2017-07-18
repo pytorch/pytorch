@@ -38,7 +38,7 @@ class _InstanceNorm(_BatchNorm):
         return self
 
 
-class LayerNorm(_InstanceNorm):
+class LayerNorm(Module):
     r"""Applies Layer Normalization over a 2D input that is seen
     as a mini-batch of 1D inputs.
 
@@ -71,7 +71,7 @@ class LayerNorm(_InstanceNorm):
     """
 
     def __init__(self, num_features=None, eps=1e-5):
-        super(_InstanceNorm, self).__init__()
+        super(Module, self).__init__()
         self.num_features = num_features
         self.affine = num_features is not None
         self.eps = eps
