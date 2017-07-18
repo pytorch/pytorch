@@ -87,5 +87,8 @@ void ReversePackedSegsOp<CUDAContext>::DoRunWithLengthType() {
         rev_data_ptr);
 }
 
+namespace {
 REGISTER_CUDA_OPERATOR(ReversePackedSegs, ReversePackedSegsOp<CUDAContext>);
+
+} // namespace
 } // namespace caffe2

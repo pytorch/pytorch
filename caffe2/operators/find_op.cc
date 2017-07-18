@@ -20,6 +20,8 @@ OPERATOR_SCHEMA(Find)
                 values are not found.
             )DOC");
 
+namespace {
 REGISTER_CPU_OPERATOR(Find, FindOp<CPUContext>)
+}
 
 } // namespace caffe2

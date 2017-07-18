@@ -21,6 +21,7 @@ struct SinGradientCPUFunctor {
   }
 };
 
+namespace {
 REGISTER_CPU_OPERATOR(
     Sin,
     UnaryElementwiseOp<TensorTypes<float>, CPUContext, SinCPUFunctor>);
@@ -54,4 +55,5 @@ class GetSinGradient : public GradientMakerBase {
   }
 };
 REGISTER_GRADIENT(Sin, GetSinGradient);
+} // namespace
 } // namespace caffe2

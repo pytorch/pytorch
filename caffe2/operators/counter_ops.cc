@@ -4,6 +4,7 @@
 
 namespace caffe2 {
 namespace {
+namespace {
 /**
  *  @brief CounterSerializer is the serializer for Counter type.
  *
@@ -134,6 +135,8 @@ SHOULD_NOT_DO_GRADIENT(ResetCounter);
 SHOULD_NOT_DO_GRADIENT(CountDown);
 SHOULD_NOT_DO_GRADIENT(CountUp);
 SHOULD_NOT_DO_GRADIENT(RetrieveCount);
+
+} // namespace
 
 CAFFE_KNOWN_TYPE(std::unique_ptr<Counter<int64_t>>);
 REGISTER_BLOB_SERIALIZER(

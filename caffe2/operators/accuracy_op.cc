@@ -43,6 +43,7 @@ bool AccuracyOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
+namespace {
 REGISTER_CPU_OPERATOR(Accuracy, AccuracyOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(Accuracy)
@@ -65,4 +66,5 @@ classes, it is considered a correct prediction.
           "accuracy");
 
 SHOULD_NOT_DO_GRADIENT(Accuracy);
+}  // namespace
 }  // namespace caffe2

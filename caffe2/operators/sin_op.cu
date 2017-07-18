@@ -49,6 +49,7 @@ struct SinGradientCUDAFunctor {
   }
 };
 
+namespace {
 REGISTER_CUDA_OPERATOR(
     Sin,
     UnaryElementwiseOp<TensorTypes<float>, CUDAContext, SinCUDAFunctor>);
@@ -58,4 +59,5 @@ REGISTER_CUDA_OPERATOR(
         TensorTypes<float>,
         CUDAContext,
         WithoutBroadcast<SinGradientCUDAFunctor>>);
+} // namespace
 } // namespace caffe2

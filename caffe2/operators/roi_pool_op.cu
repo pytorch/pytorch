@@ -202,7 +202,10 @@ bool RoIPoolGradientOp<float, CUDAContext>::RunOnDevice() {
   return true;
 }
 
+namespace {
+
 REGISTER_CUDA_OPERATOR(RoIPool, RoIPoolOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(RoIPoolGradient, RoIPoolGradientOp<float, CUDAContext>);
 
+} // namespace
 } // namespace caffe2

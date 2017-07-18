@@ -19,6 +19,7 @@ void MutexDeserializer::Deserialize(const BlobProto& /* unused */, Blob* blob) {
       caffe2::make_unique<std::mutex>();
 }
 
+namespace {
 REGISTER_CPU_OPERATOR(Iter, IterOp<CPUContext>);
 REGISTER_CPU_OPERATOR(AtomicIter, AtomicIterOp<CPUContext>);
 
@@ -50,4 +51,5 @@ algorithms.
 
 NO_GRADIENT(Iter);
 NO_GRADIENT(AtomicIter);
+}
 }  // namespace caffe2

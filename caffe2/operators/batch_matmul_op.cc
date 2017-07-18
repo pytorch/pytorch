@@ -1,6 +1,7 @@
 #include "caffe2/operators/batch_matmul_op.h"
 
 namespace caffe2 {
+namespace {
 
 REGISTER_CPU_OPERATOR(BatchMatMul, BatchMatMulOp<float, CPUContext>);
 
@@ -119,4 +120,5 @@ class GetBatchMatMulGradient : public GradientMakerBase {
 
 REGISTER_GRADIENT(BatchMatMul, GetBatchMatMulGradient);
 
+} // namespace
 } // namespace caffe2

@@ -7,6 +7,7 @@
 #include <cuda_profiler_api.h>
 
 namespace caffe2 {
+namespace {
 
 static std::vector<std::string> kCudaProfileConfiguration = {
     "gpustarttimestamp",
@@ -89,10 +90,6 @@ class CudaProfileStopOp : public OperatorBase {
   }
 };
 
-OPERATOR_SCHEMA(CudaProfileInitialize);
-OPERATOR_SCHEMA(CudaProfileStart);
-OPERATOR_SCHEMA(CudaProfileStop);
-
 REGISTER_CPU_OPERATOR(CudaProfileInitialize, CudaProfileInitializeOp);
 REGISTER_CPU_OPERATOR(CudaProfileStart, CudaProfileStartOp);
 REGISTER_CPU_OPERATOR(CudaProfileStop, CudaProfileStopOp);
@@ -101,4 +98,5 @@ REGISTER_CUDA_OPERATOR(CudaProfileInitialize, CudaProfileInitializeOp);
 REGISTER_CUDA_OPERATOR(CudaProfileStart, CudaProfileStartOp);
 REGISTER_CUDA_OPERATOR(CudaProfileStop, CudaProfileStopOp);
 
+} // namespace
 } // namespace caffe2

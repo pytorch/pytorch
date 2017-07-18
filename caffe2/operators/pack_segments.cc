@@ -2,6 +2,8 @@
 
 namespace caffe2 {
 
+namespace {
+
 REGISTER_CPU_OPERATOR(PackSegments, PackSegmentsOp<CPUContext>);
 REGISTER_CPU_OPERATOR(UnpackSegments, UnpackSegmentsOp<CPUContext>);
 
@@ -56,4 +58,5 @@ class GetUnpackSegmentsGradient : public GradientMakerBase {
   }
 };
 REGISTER_GRADIENT(UnpackSegments, GetUnpackSegmentsGradient);
+}
 } // namespace

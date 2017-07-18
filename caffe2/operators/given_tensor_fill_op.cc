@@ -1,6 +1,7 @@
 #include "caffe2/operators/given_tensor_fill_op.h"
 
 namespace caffe2 {
+namespace {
 
 REGISTER_CPU_OPERATOR(GivenTensorFill, GivenTensorFillOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(GivenTensorBoolFill, GivenTensorFillOp<bool, CPUContext>);
@@ -43,4 +44,5 @@ OPERATOR_SCHEMA(GivenTensorStringFill)
     .AllowInplace({{0, 0}})
     .TensorInferenceFunction(FillerTensorInference);
 
+} // namespace
 } // namespace caffe2

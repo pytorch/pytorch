@@ -22,6 +22,7 @@ struct SoftsignGradientCPUFunctor {
   }
 };
 
+namespace {
 REGISTER_CPU_OPERATOR(
     Softsign,
     UnaryElementwiseOp<TensorTypes<float>, CPUContext, SoftsignCPUFunctor>);
@@ -83,4 +84,5 @@ class GetSoftsignGradient : public GradientMakerBase {
 
 REGISTER_GRADIENT(Softsign, GetSoftsignGradient);
 
+} // namespace
 } // namespace caffe2

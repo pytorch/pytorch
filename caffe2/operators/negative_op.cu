@@ -20,8 +20,10 @@ struct NegativeCUDAFunctor {
   }
 };
 
+namespace {
 REGISTER_CUDA_OPERATOR(
     Negative, UnaryElementwiseOp<
         TensorTypes<float, double, int, long>, CUDAContext,
         NegativeCUDAFunctor>);
+}  // namespace
 }  // namespace caffe2

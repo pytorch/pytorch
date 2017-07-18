@@ -1,6 +1,7 @@
 #include "caffe2/operators/reshape_op.h"
 
 namespace caffe2 {
+namespace {
 
 REGISTER_CPU_OPERATOR(Reshape, ReshapeOp<float, CPUContext>);
 
@@ -138,5 +139,7 @@ class GetReshapeGradient : public GradientMakerBase {
 };
 
 REGISTER_GRADIENT(Reshape, GetReshapeGradient);
+
+} // namespace
 
 } // namespace caffe2

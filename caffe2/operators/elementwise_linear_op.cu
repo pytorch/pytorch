@@ -114,9 +114,13 @@ bool ElementwiseLinearGradientOp<float, CUDAContext>::RunOnDevice(){
   return true;
 }
 
+namespace {
+
 REGISTER_CUDA_OPERATOR(ElementwiseLinear,
                        ElementwiseLinearOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(ElementwiseLinearGradient,
                        ElementwiseLinearGradientOp<float, CUDAContext>);
+
+}  // namespace
 
 }  // namespace caffe2

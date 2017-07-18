@@ -315,6 +315,8 @@ bool PoolGradientOp<T, Context, PoolType>::RunOnDeviceWithOrderNHWC() {
   return true;
 }
 
+namespace {
+
 REGISTER_CPU_OPERATOR(
     AveragePoolGradient,
     PoolGradientOp<float, CPUContext, AveragePool<float>>);
@@ -337,4 +339,5 @@ class GetPoolGradient : public GradientMakerBase {
 };
 REGISTER_GRADIENT(AveragePool, GetPoolGradient);
 REGISTER_GRADIENT(MaxPool, GetPoolGradient);
+}
 }

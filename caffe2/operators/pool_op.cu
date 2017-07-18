@@ -1726,10 +1726,12 @@ bool PoolGradientOp<float, CUDAContext, MaxPool>::RunOnDeviceWithOrderNHWC() {
   return true;
 }
 
+namespace {
 REGISTER_CUDA_OPERATOR(AveragePool, PoolOp<float, CUDAContext, AveragePool>);
 REGISTER_CUDA_OPERATOR(AveragePoolGradient,
                        PoolGradientOp<float, CUDAContext, AveragePool>);
 REGISTER_CUDA_OPERATOR(MaxPool, PoolOp<float, CUDAContext, MaxPool>);
 REGISTER_CUDA_OPERATOR(MaxPoolGradient,
                        PoolGradientOp<float, CUDAContext, MaxPool>);
+}  // namespace
 }  // namespace caffe2

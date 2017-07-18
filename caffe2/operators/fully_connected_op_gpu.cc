@@ -53,6 +53,9 @@ bool FullyConnectedGradientOp<CUDAContext>::RunOnDevice() {
   return false;
 }
 
+namespace {
+
 REGISTER_CUDA_OPERATOR(FC, FullyConnectedOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(FCGradient, FullyConnectedGradientOp<CUDAContext>);
+}  // namespace
 }  // namespace caffe2

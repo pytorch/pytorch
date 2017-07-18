@@ -59,8 +59,6 @@ low-rank decomposition and the speed of the computation.
         "Output tensor from previous layer with size (M x N), "
         "where M is the batch size and N is the output size.");
 
-OPERATOR_SCHEMA(TTLinearGradient);
-
 GRADIENT_NOT_IMPLEMENTED_YET(TT);
 } // namespace
 } // namespace caffe2

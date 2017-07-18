@@ -1,6 +1,7 @@
 #include "lstm_unit_op.h"
 
 namespace caffe2 {
+namespace {
 REGISTER_CPU_OPERATOR(LSTMUnit, LSTMUnitOp<float, CPUContext>);
 OPERATOR_SCHEMA(LSTMUnit)
     .NumInputs(5)
@@ -30,4 +31,5 @@ class GetLSTMUnitGradient : public GradientMakerBase {
   }
 };
 REGISTER_GRADIENT(LSTMUnit, GetLSTMUnitGradient);
+}
 }

@@ -46,6 +46,8 @@ void rmsprop_update<CUDAContext>(
 }
 
 
+namespace {
 REGISTER_CUDA_OPERATOR(RmsProp, RmsPropOp<float, CUDAContext>);
+}
 
 }

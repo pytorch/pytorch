@@ -136,6 +136,8 @@ class CuDNNTransposeOp final : public Operator<CUDAContext> {
   std::vector<TIndex> new_dims_;
 };
 
+namespace {
 REGISTER_CUDNN_OPERATOR(Transpose, CuDNNTransposeOp);
+} // namespace
 
 } // namespace caffe2

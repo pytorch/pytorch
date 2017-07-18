@@ -185,29 +185,27 @@ class ReduceDimsGradientOp : public Operator<CUDAContext> {
   Tensor<CPUContext> shape_;
 };
 
-REGISTER_CUDA_OPERATOR_STR("ReduceFrontSum", ReduceDimsOp<float, CUDAContext>);
-REGISTER_CUDA_OPERATOR_STR(
-    "ReduceFrontSumGradient",
+REGISTER_CUDA_OPERATOR(ReduceFrontSum, ReduceDimsOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(
+    ReduceFrontSumGradient,
     ReduceDimsGradientOp<float, CUDAContext>);
-REGISTER_CUDA_OPERATOR_STR(
-    "ReduceFrontMean",
+REGISTER_CUDA_OPERATOR(
+    ReduceFrontMean,
     ReduceDimsOp<float, CUDAContext, true, true>);
-REGISTER_CUDA_OPERATOR_STR(
-    "ReduceFrontMeanGradient",
+REGISTER_CUDA_OPERATOR(
+    ReduceFrontMeanGradient,
     ReduceDimsGradientOp<float, CUDAContext, true, true>);
 
-REGISTER_CUDA_OPERATOR_STR(
-    "ReduceBackSum",
-    ReduceDimsOp<float, CUDAContext, false>);
-REGISTER_CUDA_OPERATOR_STR(
-    "ReduceBackSumGradient",
+REGISTER_CUDA_OPERATOR(ReduceBackSum, ReduceDimsOp<float, CUDAContext, false>);
+REGISTER_CUDA_OPERATOR(
+    ReduceBackSumGradient,
     ReduceDimsGradientOp<float, CUDAContext, false, false>);
 
-REGISTER_CUDA_OPERATOR_STR(
-    "ReduceBackMean",
+REGISTER_CUDA_OPERATOR(
+    ReduceBackMean,
     ReduceDimsOp<float, CUDAContext, false, true>);
-REGISTER_CUDA_OPERATOR_STR(
-    "ReduceBackMeanGradient",
+REGISTER_CUDA_OPERATOR(
+    ReduceBackMeanGradient,
     ReduceDimsGradientOp<float, CUDAContext, false, true>);
 
 namespace {
@@ -670,23 +668,23 @@ class CUDAUnsortedSegmentSumOp : public Operator<CUDAContext> {
   Tensor<CUDAContext> scaling_factors_; // for mean
 };
 
-REGISTER_CUDA_OPERATOR_STR(
-    "LengthsSum",
+REGISTER_CUDA_OPERATOR(
+    LengthsSum,
     CUDASparseLengthsSumOp<float, CUDAContext, false>);
-REGISTER_CUDA_OPERATOR_STR(
-    "SparseLengthsSum",
+REGISTER_CUDA_OPERATOR(
+    SparseLengthsSum,
     CUDASparseLengthsSumOp<float, CUDAContext, true>);
-REGISTER_CUDA_OPERATOR_STR(
-    "LengthsSumGradient",
+REGISTER_CUDA_OPERATOR(
+    LengthsSumGradient,
     CUDASparseLengthsSumGradientOp<float, CUDAContext>);
-REGISTER_CUDA_OPERATOR_STR(
-    "SparseLengthsSumGradient",
+REGISTER_CUDA_OPERATOR(
+    SparseLengthsSumGradient,
     CUDASparseLengthsSumGradientOp<float, CUDAContext>);
-REGISTER_CUDA_OPERATOR_STR(
-    "UnsortedSegmentSum",
+REGISTER_CUDA_OPERATOR(
+    UnsortedSegmentSum,
     CUDAUnsortedSegmentSumOp<float, int, false>);
-REGISTER_CUDA_OPERATOR_STR(
-    "UnsortedSegmentMean",
+REGISTER_CUDA_OPERATOR(
+    UnsortedSegmentMean,
     CUDAUnsortedSegmentSumOp<float, int, true>);
 
 } // namespace caffe2

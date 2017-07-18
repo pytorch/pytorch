@@ -1,6 +1,7 @@
 #include "caffe2/operators/reverse_packed_segs_op.h"
 
 namespace caffe2 {
+namespace {
 REGISTER_CPU_OPERATOR(ReversePackedSegs, ReversePackedSegsOp<CPUContext>);
 
 OPERATOR_SCHEMA(ReversePackedSegs)
@@ -30,4 +31,5 @@ class GetReversePackedSegsGradient : public GradientMakerBase {
   }
 };
 REGISTER_GRADIENT(ReversePackedSegs, GetReversePackedSegsGradient);
+} // namespace
 } // namespace caffe2

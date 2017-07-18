@@ -86,6 +86,8 @@ void TileGradientOp<float, CUDAContext>::DoTileGradient(
       reinterpret_cast<float*>(output_data));
 }
 
+namespace {
 REGISTER_CUDA_OPERATOR(Tile, TileOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(TileGradient, TileGradientOp<float, CUDAContext>);
+} // namespace
 } // namespace caffe2

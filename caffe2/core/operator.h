@@ -529,12 +529,7 @@ CAFFE_DECLARE_REGISTRY(
     Workspace*);
 #define REGISTER_CPU_OPERATOR_CREATOR(key, ...) \
   CAFFE_REGISTER_CREATOR(CPUOperatorRegistry, key, __VA_ARGS__)
-#define REGISTER_CPU_OPERATOR(name, ...)              \
-  extern void OperatorSchemaCheckForOperator##name(); \
-  static void __attribute__((__unused__))             \
-      CAFFE_ANONYMOUS_VARIABLE_CPU##name() {          \
-    OperatorSchemaCheckForOperator##name();           \
-  }                                                   \
+#define REGISTER_CPU_OPERATOR(name, ...) \
   CAFFE_REGISTER_CLASS(CPUOperatorRegistry, name, __VA_ARGS__)
 #define REGISTER_CPU_OPERATOR_STR(str_name, ...) \
   CAFFE_REGISTER_TYPED_CLASS(CPUOperatorRegistry, str_name, __VA_ARGS__)
@@ -549,12 +544,7 @@ CAFFE_DECLARE_REGISTRY(
     Workspace*);
 #define REGISTER_CUDA_OPERATOR_CREATOR(key, ...) \
   CAFFE_REGISTER_CREATOR(CUDAOperatorRegistry, key, __VA_ARGS__)
-#define REGISTER_CUDA_OPERATOR(name, ...)             \
-  extern void OperatorSchemaCheckForOperator##name(); \
-  static void __attribute__((__unused__))             \
-      CAFFE_ANONYMOUS_VARIABLE_CUDA##name() {         \
-    OperatorSchemaCheckForOperator##name();           \
-  }                                                   \
+#define REGISTER_CUDA_OPERATOR(name, ...) \
   CAFFE_REGISTER_CLASS(CUDAOperatorRegistry, name, __VA_ARGS__)
 #define REGISTER_CUDA_OPERATOR_STR(str_name, ...) \
   CAFFE_REGISTER_TYPED_CLASS(CUDAOperatorRegistry, str_name, __VA_ARGS__)

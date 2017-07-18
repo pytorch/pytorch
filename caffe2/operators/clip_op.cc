@@ -31,6 +31,7 @@ bool ClipGradientOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
+namespace {
 REGISTER_CPU_OPERATOR(Clip, ClipOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(ClipGradient, ClipGradientOp<float, CPUContext>);
 
@@ -71,4 +72,5 @@ class GetClipGradient : public GradientMakerBase {
   }
 };
 REGISTER_GRADIENT(Clip, GetClipGradient);
+}  // namespace
 }  // namespace caffe2

@@ -1,6 +1,7 @@
 #include "caffe2/operators/reduction_ops.h"
 
 namespace caffe2 {
+namespace {
 
 REGISTER_CPU_OPERATOR(SumElements, SumElementsOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(SumSqrElements, SumSqrElementsOp<float, CPUContext>);
@@ -73,8 +74,6 @@ class GetRowwiseMaxGradient : public GradientMakerBase {
 };
 REGISTER_GRADIENT(RowwiseMax, GetRowwiseMaxGradient);
 
-OPERATOR_SCHEMA(ColwiseMaxGradient);
-
 OPERATOR_SCHEMA(ColwiseMax)
     .NumInputs(1)
     .NumOutputs(1)
@@ -97,6 +96,7 @@ class GetColwiseMaxGradient : public GradientMakerBase {
   }
 };
 REGISTER_GRADIENT(ColwiseMax, GetColwiseMaxGradient);
+} // namespace
 
 template <typename T, class Context>
 bool SumElementsGradientOp<T, Context>::RunOnDevice() {

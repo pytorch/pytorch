@@ -11,6 +11,7 @@ struct SqrCPUFunctor {
   }
 };
 
+namespace {
 REGISTER_CPU_OPERATOR(
     Sqr,
     UnaryElementwiseOp<TensorTypes<float>, CPUContext, SqrCPUFunctor>);
@@ -99,4 +100,5 @@ class GetPowGradient : public GradientMakerBase {
 
 REGISTER_GRADIENT(Pow, GetPowGradient);
 
+} // namespace
 } // namespace caffe2

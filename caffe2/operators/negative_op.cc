@@ -13,6 +13,7 @@ struct NegativeCPUFunctor {
   }
 };
 
+namespace {
 REGISTER_CPU_OPERATOR(
     Negative, UnaryElementwiseOp<
         TensorTypes<float, double, int, long>, CPUContext, NegativeCPUFunctor>);
@@ -39,4 +40,5 @@ class GetNegativeGradient : public GradientMakerBase {
   }
 };
 REGISTER_GRADIENT(Negative, GetNegativeGradient);
+}  // namespace
 }  // namespace caffe2

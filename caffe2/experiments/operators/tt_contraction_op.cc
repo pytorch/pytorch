@@ -1,6 +1,7 @@
 #include "caffe2/experiments/operators/tt_contraction_op.h"
 
 namespace caffe2 {
+namespace {
 
 REGISTER_CPU_OPERATOR(TTContraction, TTContractionOp<float, CPUContext>);
 
@@ -37,4 +38,5 @@ class GetTTContractionGradient : public GradientMakerBase {
 
 REGISTER_GRADIENT(TTContraction, GetTTContractionGradient);
 
+} // namespace
 } // namespace caffe2

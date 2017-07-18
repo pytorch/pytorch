@@ -144,7 +144,9 @@ bool SparseAdamOp<float, CUDAContext>::DoRunWithType()
   return true;
 }
 
+namespace {
 REGISTER_CUDA_OPERATOR(Adam, AdamOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(SparseAdam, SparseAdamOp<float, CUDAContext>);
+}
 
 }

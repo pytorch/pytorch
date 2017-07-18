@@ -93,6 +93,7 @@ bool TransposeOp<CPUContext>::DoRunWithType() {
   return true;
 }
 
+namespace {
 REGISTER_CPU_OPERATOR(Transpose, TransposeOp<CPUContext>);
 
 OPERATOR_SCHEMA(Transpose)
@@ -165,4 +166,5 @@ class GetTransposeGradient : public GradientMakerBase {
   }
 };
 REGISTER_GRADIENT(Transpose, GetTransposeGradient);
+} // namespace
 } // namespace caffe2

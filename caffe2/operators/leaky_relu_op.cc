@@ -31,6 +31,8 @@ bool LeakyReluGradientOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
+namespace {
+
 REGISTER_CPU_OPERATOR(LeakyRelu, LeakyReluOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(
     LeakyReluGradient,
@@ -68,4 +70,5 @@ class GetLeakyReluGradient : public GradientMakerBase {
 
 REGISTER_GRADIENT(LeakyRelu, GetLeakyReluGradient);
 
+} // namespace
 } // namespace caffe2

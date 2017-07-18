@@ -40,6 +40,7 @@ struct SigmoidGradientCUDAFunctor {
   }
 };
 
+namespace {
 REGISTER_CUDA_OPERATOR(
     Sigmoid,
     UnaryElementwiseOp<TensorTypes<float>, CUDAContext, SigmoidCUDAFunctor>);
@@ -47,4 +48,5 @@ REGISTER_CUDA_OPERATOR(
     SigmoidGradient, BinaryElementwiseOp<
         TensorTypes<float>, CUDAContext,
         WithoutBroadcast<SigmoidGradientCUDAFunctor>>);
+}  // namespace
 }  // namespace caffe2

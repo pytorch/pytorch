@@ -3,6 +3,9 @@
 
 namespace caffe2 {
 
+namespace {
+
 REGISTER_CUDA_OPERATOR(Reshape, ReshapeOp<float, CUDAContext>);
 
+} // namespace
 } // namespace caffe2

@@ -150,6 +150,8 @@ bool TopKOp<float, CUDAContext>::RunOnDevice() {
   return true;
 }
 
+namespace {
 REGISTER_CUDA_OPERATOR(TopK, TopKOp<float, CUDAContext>);
+} // namespace
 
 } // namespace caffe2
