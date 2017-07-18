@@ -6,31 +6,60 @@
 #include <vector>
 #include <iostream>
 #include <cassert>
+#include "torch/csrc/autograd/variable.h"
 
 namespace torch { namespace jit {
 
 struct TracingState {
+  struct TracingFrame {
+    TracingFrame()
+      : graph(new jit::Graph())
+      , value_trace() {};
+
+    std::unique_ptr<jit::Graph> graph;
+    std::unordered_map<torch::autograd::Variable*, Node*> value_trace;
+  };
+
   jit::Graph & current() {
     assert(tracing());
-    return *graphs.back();
+    return *frames.back().graph;
   }
 
   bool tracing() {
-    return graphs.size() > 0;
+    return frames.size() > 0;
   }
 
   void enter() {
-    graphs.push_back(new jit::Graph());
+    frames.emplace_back();
+  }
+
+  void setValueTrace(torch::autograd::Variable* var, Node* trace) {
+    assert(tracing());
+    frames.back().value_trace[var] = trace;
+  }
+
+  Node* getValueTrace(torch::autograd::Variable* var, bool mustExist = false) {
+    assert(tracing());
+    auto& trace_map = frames.back().value_trace;
+    if (mustExist) {
+      return trace_map.at(var);
+    } else {
+      auto it = trace_map.find(var);
+      // TODO: handle the case when var is not in the map gracefully
+      if (it == trace_map.end())
+        throw std::runtime_error("TracingState::getValueTrace not fully implemented yet");
+      return it->second;
+    }
   }
 
   std::unique_ptr<jit::Graph> exit() {
-    assert(graphs.size() > 0);
-    auto r = graphs.back();
-    graphs.pop_back();
-    return std::unique_ptr<jit::Graph>(r);
+    assert(tracing());
+    auto r = std::move(frames.back());
+    frames.pop_back();
+    return std::move(r.graph);
   }
 private:
-  std::vector<jit::Graph *> graphs;
+  std::vector<TracingFrame> frames;
 };
 
 extern TracingState GlobalTracingState;
