@@ -142,8 +142,10 @@ class MaxPool2dBackward(Function):
         ctx.dilation = dilation
         ctx.return_indices = return_indices
         ctx.ceil_mode = ceil_mode
+        ctx.indices = indices
 
         grad_input = grad_output.new()
+        ctx.save_for_backward(input)
         backend = type2backend[type(input)]
         backend.SpatialDilatedMaxPooling_updateGradInput(backend.library_state,
                                                          input, grad_output, grad_input, indices,
@@ -156,7 +158,13 @@ class MaxPool2dBackward(Function):
 
     @staticmethod
     def backward(ctx, ggI, _ggIndices=None):
-        raise ValueError("MaxPool2d cannot be differentiated twice")
+        input, = ctx.saved_variables
+
+        gI = Variable(ggI.data.new(input.size()).zero_())
+        # ggO is equivalent to the 1d case, but the indices are given wrt the last two dimensions combined
+        indices_view = ctx.indices.view(ctx.indices.size()[:-2] + (-1,))
+        ggO = ggI.contiguous().view(ggI.size()[:-2] + (-1,)).gather(dim=2, index=indices_view).view_as(ctx.indices)
+        return gI, None, ggO, None, None, None, None, None, None
 
 
 class MaxPool3d(Function):

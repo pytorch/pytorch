@@ -3472,7 +3472,6 @@ new_module_tests = [
         module_name='MaxPool2d',
         constructor_args=((3, 3), (2, 2), (1, 1)),
         input_size=(1, 3, 7, 7),
-        check_gradgrad=False,
     ),
     dict(
         module_name='AvgPool1d',
