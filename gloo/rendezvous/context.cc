@@ -50,9 +50,9 @@ void Context::connectFullMesh(
     allBytes.insert(allBytes.end(), addrBytes.begin(), addrBytes.end());
   }
 
-  std::ostringstream key;
-  key << rank;
-  store.set(key.str(), allBytes);
+  std::ostringstream storeKey;
+  storeKey << rank;
+  store.set(storeKey.str(), allBytes);
 
   // Connect every pair
   for (int i = 0; i < size; i++) {
