@@ -85,13 +85,13 @@ private:
   Type * type_;
   std::vector<Node*> inputs_;
   use_list uses_;
-  Graph * graph_ = nullptr;
+  Graph* const graph_;
   size_t unique_ = 0;
   // what stage of computation 0-forward, 1-backward, 2-double-backward,...
   size_t stage_ = 0;
 protected:
-  Node(NodeKind kind_)
-  : kind_(kind_), type_(nullptr) {}
+  Node(NodeKind kind_, Graph* graph_)
+  : kind_(kind_), type_(nullptr), graph_(graph_) {}
 public:
   NodeKind kind() {
     return kind_;
@@ -151,8 +151,8 @@ struct PythonOp : public Node {
   // the function in this order; see cconv for the correct order.
   std::vector<THPObjectPtr> scalar_args;
 
-  PythonOp(THPObjectPtr&& pyobj, const std::string & cconv, bool is_legacy, pyobj_list&& scalar_args)
-    : Node(NodeKind::PythonOp)
+  PythonOp(Graph* graph, THPObjectPtr&& pyobj, const std::string & cconv, bool is_legacy, pyobj_list&& scalar_args)
+    : Node(NodeKind::PythonOp, graph)
     , pyobj(std::move(pyobj))
     , cconv(cconv)
     , is_legacy(is_legacy)
@@ -163,8 +163,9 @@ struct PythonOp : public Node {
  // an input tensor to the graph
 struct Param : public Node {
   static const NodeKind Kind = NodeKind::Param;
-  Param()
-  : Node(Kind) {}
+  Param(Graph* graph)
+  : Node(Kind, graph)
+  {}
 };
 
 // Select nodes are used to handle multiple returns for the ops that actually return
@@ -176,8 +177,8 @@ struct Param : public Node {
 // this will change if Tuples ever become first class.
 struct Select : public Node {
   static const NodeKind Kind = NodeKind::Select;
-  Select(Node * node, size_t offset)
-  : Node(Kind), offset_(offset) {
+  Select(Graph* graph, Node * node, size_t offset)
+  : Node(Kind, graph), offset_(offset) {
     addInput(node);
   }
   // which multi-return op is it?
@@ -196,20 +197,34 @@ private:
 template<NodeKind K>
 struct Primitive : public Node {
   static const NodeKind Kind = K;
-  Primitive()
-  : Node(Kind) {}
-  Primitive(ArrayRef<Node*> inputs)
-  : Primitive() {
+  Primitive(Graph* graph)
+  : Node(Kind, graph) {}
+  Primitive(Graph* graph, ArrayRef<Node*> inputs)
+  : Primitive(graph) {
     for(auto i : inputs)
       addInput(i);
   }
 };
+
+// NB: non-nullary constructors don't get forwarded to the
+// parents, so you have to spell out the constructors you want explicitly.
+
 // example primitive
-struct Add : public Primitive<NodeKind::Add> {};
+struct Add : public Primitive<NodeKind::Add> {
+  Add(Graph* graph)
+  : Primitive(graph) {}
+  Add(Graph* graph, ArrayRef<Node*> inputs)
+  : Primitive(graph, inputs) {}
+};
 
 // the outputs of the Graph are represented as an Node so that its inputs
 // can be tracked as Uses.
-struct Return : public Primitive<NodeKind::Return> {};
+struct Return : public Primitive<NodeKind::Return> {
+  Return(Graph* graph)
+  : Primitive(graph) {}
+  Return(Graph* graph, ArrayRef<Node*> inputs)
+  : Primitive(graph, inputs) {}
+};
 
 struct Graph {
 TH_DISALLOW_COPY_AND_ASSIGN(Graph);
@@ -232,9 +247,8 @@ private:
   // e.g. g.create<Select>(another,0);
   template<typename T, typename... Args >
   T * create(Args&&... args) {
-    T* r = new T(std::forward<Args>(args)...);
+    T* r = new T(this, std::forward<Args>(args)...);
     r->unique_ = all_nodes.size();
-    r->graph_ = this;
     all_nodes.push_back(r);
     return r;
   }
