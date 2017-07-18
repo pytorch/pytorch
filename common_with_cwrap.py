@@ -107,7 +107,7 @@ def enumerate_options_due_to_default(declaration,
     for option in declaration['options']:
         optional_args = []
         for i, arg in enumerate(option['arguments']):
-            if 'default' in arg and not is_nullable_tensor_arg(arg):
+            if 'default' in arg:
                 optional_args.append(i)
         for permutation in product((True, False), repeat=len(optional_args)):
             option_copy = deepcopy(option)
