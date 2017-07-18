@@ -226,6 +226,21 @@ ELSE()
 
   IF(USE_MAGMA)
     TARGET_LINK_LIBRARIES(THC ${MAGMA_LIBRARIES})
+    IF ($ENV{TH_BINARY_BUILD})
+      # because magma is linked statically and it wants a BLAS,
+      # we need to link the BLAS lib against THC. Usually TH will
+      # load a BLAS library and it's all fine, but in the binary builds,
+      # TH uses static linkage to MKL, so it doesn't have all symbols that
+      # magma needs. So in this case, explicitly find a BLAS and link against it
+      # just like in TH
+      SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../TH/cmake ${CMAKE_MODULE_PATH})
+      FIND_PACKAGE(BLAS)
+      IF(BLAS_FOUND)
+        TARGET_LINK_LIBRARIES(THC "${BLAS_LIBRARIES};${BLAS_LIBRARIES};${BLAS_LIBRARIES}")
+      ELSE(BLAS_FOUND)
+        MESSAGE(FATAL_ERROR "Binary build needs blas to be found here")
+      ENDIF(BLAS_FOUND)
+    ENDIF($ENV{TH_BINARY_BUILD})
   ENDIF(USE_MAGMA)
 
   IF(NOT THC_SO_VERSION)
