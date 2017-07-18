@@ -640,7 +640,7 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Tru
         return torch.sum(loss)
 
 
-def kl_div(input, target, size_average=True):
+def kl_div(input, target, size_average=True, weight=None):
     r"""The `Kullback-Leibler divergence`_ Loss.
 
     See :class:`~torch.nn.KLDivLoss` for details.
@@ -650,8 +650,10 @@ def kl_div(input, target, size_average=True):
         target: Variable of the same shape as input
         size_average: if True the output is divided by the number of elements
           in input tensor
+        weight (Tensor, optional): a manual rescaling weight given to each
+                class. If given, has to be a Tensor of size "nclasses"
     """
-    return _functions.thnn.KLDivLoss(size_average)(input, target)
+    return _functions.thnn.KLDivLoss(size_average, weight=weight)(input, target)
 
 
 def cross_entropy(input, target, weight=None, size_average=True, ignore_index=-100):

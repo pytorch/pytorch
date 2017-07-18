@@ -17,21 +17,11 @@ class _Loss(Module):
         super(_Loss, self).__init__()
         self.size_average = size_average
 
-    def forward(self, input, target):
-        _assert_no_grad(target)
-        backend_fn = getattr(self._backend, type(self).__name__)
-        return backend_fn(self.size_average)(input, target)
-
 
 class _WeightedLoss(_Loss):
     def __init__(self, weight=None, size_average=True):
         super(_WeightedLoss, self).__init__(size_average)
         self.register_buffer('weight', weight)
-
-    def forward(self, input, target):
-        _assert_no_grad(target)
-        backend_fn = getattr(self._backend, type(self).__name__)
-        return backend_fn(self.size_average, weight=self.weight)(input, target)
 
 
 class L1Loss(_Loss):
@@ -47,7 +37,9 @@ class L1Loss(_Loss):
     The division by `n` can be avoided if one sets the constructor argument
     `size_average=False`
     """
-    pass
+    def forward(self, input, target):
+        _assert_no_grad(target)
+        return F.l1_loss(input, target, size_average=self.size_average)
 
 
 class NLLLoss(_WeightedLoss):
@@ -220,7 +212,9 @@ class KLDivLoss(_WeightedLoss):
     .. _Kullback-Leibler divergence:
         https://en.wikipedia.org/wiki/Kullback-Leibler_divergence
     """
-    pass
+    def forward(self, input, target):
+        _assert_no_grad(target)
+        return F.kl_div(input, target, size_average=self.size_average, weight=self.weight)
 
 
 class MSELoss(_Loss):
@@ -237,7 +231,9 @@ class MSELoss(_Loss):
     `size_average` to `False`.
 
     """
-    pass
+    def forward(self, input, target):
+        _assert_no_grad(target)
+        return F.mse_loss(input, target, size_average=self.size_average)
 
 
 class BCELoss(_WeightedLoss):
@@ -259,7 +255,10 @@ class BCELoss(_WeightedLoss):
     to `False`, the losses are instead summed.
 
     """
-    pass
+    def forward(self, input, target):
+        _assert_no_grad(target)
+        return F.binary_cross_entropy(input, target, weight=self.weight,
+                                      size_average=self.size_average)
 
 
 class BCEWithLogitsLoss(Module):
@@ -344,7 +343,9 @@ class MultiLabelMarginLoss(_Loss):
 
     This allows for different samples to have variable amounts of target classes
     """
-    pass
+    def forward(self, input, target):
+        _assert_no_grad(target)
+        return F.multilabel_margin_loss(input, target, size_average=self.size_average)
 
 
 class SmoothL1Loss(_Loss):
@@ -364,7 +365,9 @@ class SmoothL1Loss(_Loss):
     The division by `n` can be avoided if one sets the internal variable
     `size_average` to `False`
     """
-    pass
+    def forward(self, input, target):
+        _assert_no_grad(target)
+        return F.smooth_l1_loss(input, target, size_average=self.size_average)
 
 
 class SoftMarginLoss(_Loss):
@@ -379,7 +382,9 @@ class SoftMarginLoss(_Loss):
     The normalization by the number of elements in the input can be disabled by
     setting `self.size_average` to `False`.
     """
-    pass
+    def forward(self, input, target):
+        _assert_no_grad(target)
+        return F.soft_margin_loss(input, target, size_average=self.size_average)
 
 
 class CrossEntropyLoss(_WeightedLoss):
