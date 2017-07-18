@@ -109,11 +109,14 @@ TYPE_RETURN = {
     'long': 'int64_t',
 }
 CHECKED_CAST = {
-    'THTensor*': CodeTemplate('checked_cast<${Tensor}>(${arg_name}.pImpl,"${arg_name}",${arg_pos})'),
-    'THBoolTensor*': CodeTemplate('checked_cast<${Backend}ByteTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos})'),
-    'THIndexTensor*': CodeTemplate('checked_cast<${Backend}LongTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos})'),
-    'THIntegerTensor*': CodeTemplate('checked_cast<${Backend}IntTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos})'),
-    'THStorage*': CodeTemplate('checked_cast<${Storage}>(&${arg_name},"${arg_name}",${arg_pos})'),
+    'THTensor*': CodeTemplate('checked_cast<${Tensor}>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
+    'THBoolTensor*':
+        CodeTemplate('checked_cast<${Backend}ByteTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
+    'THIndexTensor*':
+        CodeTemplate('checked_cast<${Backend}LongTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
+    'THIntegerTensor*':
+        CodeTemplate('checked_cast<${Backend}IntTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
+    'THStorage*': CodeTemplate('checked_cast<${Storage}>(&${arg_name},"${arg_name}",${arg_pos}, false)'),
     'THGenerator*': CodeTemplate('check_generator(&${arg_name})'),
     'THSize*': CodeTemplate('THLongStorageView::make(${arg_name},true)'),
     'THStride*': CodeTemplate('THLongStorageView::make(${arg_name},true)'),
@@ -132,6 +135,8 @@ CHECKED_USE = {
     'THGenerator*': '{}_->generator',
     'TensorList': "{0}_.data(), {0}_.size()",
 }
+
+CHECKED_USE_NULLABLE = CodeTemplate('${arg_name}_ ? ${usage} : NULL')
 
 ALLOC_WRAP = {
     'THTensor*': 'new ${Tensor}(context)',
@@ -341,12 +346,20 @@ def create_derived(backend_type_env, declarations):
     def requires_checked_cast(argument):
         return argument['type'] in CHECKED_CAST
 
+    def nullable_argument(argument):
+        return (argument['type'] == 'THTensor*' and
+                argument.get('default', '') == 'nullptr')
+
     def bool_option_is_string(argument):
         return 'if_true' in argument and isinstance(argument['if_true'], string_type)
 
     def get_argument(argument, option):
         if requires_checked_cast(argument):
-            return CHECKED_USE.get(argument['type'], '{}_').format(argument['name'])
+            checked_use = CHECKED_USE.get(argument['type'], '{}_').format(argument['name'])
+            if nullable_argument(argument):
+                checked_use = CHECKED_USE_NULLABLE.substitute(
+                                env={}, arg_name=argument['name'], usage=checked_use)
+            return checked_use
         elif argument['type'] == 'bool' and 'if_true' in argument:
             if bool_option_is_string(argument):
                 tpl = '({}) ? "{}" : "{}"'
@@ -424,8 +437,14 @@ def create_derived(backend_type_env, declarations):
                         arg['name'], arg['name']))
                 # extract the TensorImpl from an existing tensor (or Storage, etc.)
                 else:
+                    # special case where we allow undefined Tensors, and thus
+                    # the checked cast succeeds even if the Tensor is not
+                    # defined
+                    null_okay = 'true' if nullable_argument(arg) else 'false'
+
                     check_cast = CHECKED_CAST[arg['type']].substitute(
-                        env, arg_name=arg['name'], arg_pos=count)
+                        env, arg_name=arg['name'], arg_pos=count,
+                        null_okay=null_okay)
                     body.append("auto {}_ = {};".format(
                         arg['name'], check_cast))
                 if drop_argument(arg, option):
