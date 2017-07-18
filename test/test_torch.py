@@ -2546,7 +2546,7 @@ class TestTorch(TestCase):
         def ri(indices):
             choice = random.randint(0, 2)
             if choice == 0:
-                return torch.LongTensor(indices)
+                return conv_fn(torch.LongTensor(indices))
             elif choice == 1:
                 return list(indices)
             else:
