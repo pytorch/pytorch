@@ -87,7 +87,6 @@ struct Variable : std::enable_shared_from_this<Variable> {
 
   at::Tensor data;
   std::shared_ptr<Function> grad_fn;
-  jit::Node* trace_value;
   std::shared_ptr<Variable> grad;
   std::unique_ptr<VariableVersion> version_counter;
   std::vector<std::shared_ptr<FunctionPreHook>> hooks;
