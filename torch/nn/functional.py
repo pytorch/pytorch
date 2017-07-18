@@ -275,20 +275,23 @@ def avg_pool3d(input, kernel_size, stride=None):
 # share the same interface
 def max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1,
                ceil_mode=False, return_indices=False):
-    return _functions.thnn.MaxPool1d.apply(input, kernel_size, stride, padding, dilation,
-                                           return_indices, ceil_mode)
+    ret = _functions.thnn.MaxPool1d.apply(input, kernel_size, stride, padding, dilation,
+                                          ceil_mode)
+    return ret if return_indices else ret[0]
 
 
 def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
                ceil_mode=False, return_indices=False):
-    return _functions.thnn.MaxPool2d.apply(input, kernel_size, stride, padding, dilation,
-                                           return_indices, ceil_mode)
+    ret = _functions.thnn.MaxPool2d.apply(input, kernel_size, stride, padding, dilation,
+                                          ceil_mode)
+    return ret if return_indices else ret[0]
 
 
 def max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1,
                ceil_mode=False, return_indices=False):
-    return _functions.thnn.MaxPool3d.apply(input, kernel_size, stride, padding, dilation,
-                                           return_indices, ceil_mode)
+    ret = _functions.thnn.MaxPool3d.apply(input, kernel_size, stride, padding, dilation,
+                                          ceil_mode)
+    return ret if return_indices else ret[0]
 
 
 def _unpool_output_size(input, kernel_size, stride, padding, output_size):
