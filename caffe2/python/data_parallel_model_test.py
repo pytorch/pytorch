@@ -260,8 +260,8 @@ class DataParallelModelTest(TestCase):
 
     @unittest.expectedFailure
     def test_device_scope_check(self):
-        with core.DeviceScope(self.device_option):
-            data_parallel_model.Parallelize_GPU()
+        with core.DeviceScope(core.DeviceOption(caffe2_pb2.CUDA, 0)):
+            data_parallel_model.Parallelize_GPU(None, None, None)
 
 
 @unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
