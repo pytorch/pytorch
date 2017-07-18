@@ -10,8 +10,11 @@ namespace at {
 void runtime_error(const char *format, ...);
 
 template <typename T, typename Base>
-static inline T* checked_cast(Base* expr, const char * name, int pos) {
+static inline T* checked_cast(Base* expr, const char * name, int pos, bool allowNull) {
   if(!expr) {
+    if (allowNull) {
+      return (T*) expr;
+    }
     runtime_error("Expected a Tensor of type %s but found an undefined Tensor for argument #%d '%s'",
       T::typeString(),pos,name);
   }
