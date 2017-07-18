@@ -82,7 +82,7 @@ class MKLFallbackOp final : public Operator<MKLContext> {
 
     if (!base_op_->Run()) {
       LOG(ERROR) << "Base op run failed in MKLFallbackOp. Def: "
-                 << ProtoDebugString(def());
+                 << ProtoDebugString(this->debug_def());
       return false;
     }
 

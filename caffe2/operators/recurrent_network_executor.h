@@ -27,7 +27,8 @@ class RecurrentNetworkExecutor {
   void Exec(int t) {
     for (auto& op : timestep_ops_[t]) {
       bool success = op->RunAsync();
-      CAFFE_ENFORCE(success, "Failure running: " + ProtoDebugString(op->def()));
+      CAFFE_ENFORCE(
+          success, "Failure running: " + ProtoDebugString(op->debug_def()));
     }
   }
 

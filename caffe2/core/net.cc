@@ -126,8 +126,8 @@ SimpleNet::SimpleNet(
     } else {
       op = CreateOperator(operator_def, ws, idx);
       std::shared_ptr<const OperatorDef> operator_def_ptr{net_def,
-          &(net_def->op(idx))};
-      op->set_def(operator_def_ptr);
+                                                          &(net_def->op(idx))};
+      op->set_debug_def(operator_def_ptr);
     }
     operators_.emplace_back(std::move(op));
   }
@@ -139,11 +139,10 @@ bool SimpleNet::Run() {
   }
   VLOG(1) << "Running net " << name_;
   for (auto& op : operators_) {
-    VLOG(1) << "Running operator " << op->def().name()
-            << "(" << op->def().type() << ").";
+    VLOG(1) << "Running operator " << op->debug_def().name() << "("
+            << op->debug_def().type() << ").";
     if (!op->Run()) {
-      LOG(ERROR) << "Operator failed: "
-                      << ProtoDebugString(op->def());
+      LOG(ERROR) << "Operator failed: " << ProtoDebugString(op->debug_def());
       return false;
     }
   }
@@ -156,11 +155,10 @@ bool SimpleNet::Run() {
 bool SimpleNet::RunAsync() {
   VLOG(1) << "Running net " << name_;
   for (auto& op : operators_) {
-    VLOG(1) << "Running operator " << op->def().name()
-            << "(" << op->def().type() << ").";
+    VLOG(1) << "Running operator " << op->debug_def().name() << "("
+            << op->debug_def().type() << ").";
     if (!op->RunAsync()) {
-      LOG(ERROR) << "Operator failed: "
-                 << ProtoDebugString(op->def());
+      LOG(ERROR) << "Operator failed: " << ProtoDebugString(op->debug_def());
       return false;
     }
   }
@@ -210,12 +208,12 @@ vector<float> SimpleNet::TEST_Benchmark(
     for (int i = 0; i < main_runs; ++i) {
       int idx = 0;
       for (auto& op : operators_) {
-        const string& op_type = op->def().type();
+        const string& op_type = op->debug_def().type();
         timer.Start();
         CAFFE_ENFORCE(
             op->Run(),
             "operator ",
-            op->def().name(),
+            op->debug_def().name(),
             "(",
             op_type,
             ") has failed.");
@@ -228,11 +226,12 @@ vector<float> SimpleNet::TEST_Benchmark(
 
     int idx = 0;
     for (auto& op : operators_) {
-      const string& op_type = op->def().type();
+      const string& op_type = op->debug_def().type();
       const string& print_name =
-          (op->def().name().size()
-               ? op->def().name()
-               : (op->def().output_size() ? op->def().output(0) : "NO_OUTPUT"));
+          (op->debug_def().name().size()
+               ? op->debug_def().name()
+               : (op->debug_def().output_size() ? op->debug_def().output(0)
+                                                : "NO_OUTPUT"));
       LOG(INFO) << "Operator #" << idx << " (" << print_name << ", " << op_type
                 << ") " << time_per_op[idx] / main_runs << " ms/iter";
       ++idx;

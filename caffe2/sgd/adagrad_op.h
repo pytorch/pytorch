@@ -102,7 +102,7 @@ class SparseAdagradOp final : public Operator<Context> {
         CAFFE_ENFORCE_GE(
             Input(PARAM).size(),
             block_size + offsetIdx,
-            def().input(PARAM),
+            this->debug_def().input(PARAM),
             ", out of bound,  idx:",
             idx,
             " for input i:",
@@ -112,7 +112,7 @@ class SparseAdagradOp final : public Operator<Context> {
         CAFFE_ENFORCE_GE(
             Input(GRAD).size(),
             block_size + offsetI,
-            def().input(GRAD),
+            this->debug_def().input(GRAD),
             ", out of bound idx, idx:",
             idx,
             " for input i:",

@@ -84,7 +84,7 @@ class GPUFallbackOp final : public Operator<CUDAContext> {
 
     if (!base_op_->Run()) {
       LOG(ERROR) << "Base op run failed in GPUFallbackOp. Def: "
-                 << ProtoDebugString(def());
+                 << ProtoDebugString(this->debug_def());
       return false;
     }
     for (int i = 0; i < OutputSize(); ++i) {

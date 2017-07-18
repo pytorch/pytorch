@@ -52,16 +52,16 @@ class CuDNNPoolOp : public ConvPoolOpBase<CUDAContext> {
     CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&top_desc_));
     CUDNN_ENFORCE(cudnnCreatePoolingDescriptor(&pooling_desc_));
     // Figure out the pooling descriptor.
-    if (def().type().substr(0, 7) == "MaxPool") {
+    if (operator_def.type().substr(0, 7) == "MaxPool") {
 #if CUDNN_VERSION_MIN(6,0,0)
       mode_ = CUDNN_POOLING_MAX_DETERMINISTIC;
 #else
       mode_ = CUDNN_POOLING_MAX;
 #endif
-    } else if (def().type().substr(0, 11) == "AveragePool") {
+    } else if (operator_def.type().substr(0, 11) == "AveragePool") {
       mode_ = CUDNN_POOLING_AVERAGE_COUNT_EXCLUDE_PADDING;
     } else {
-      LOG(FATAL) << "Unsupported pooling method: " << def().type();
+      LOG(FATAL) << "Unsupported pooling method: " << operator_def.type();
     }
   }
 
@@ -193,12 +193,12 @@ class CuDNNPoolGradientOp : public ConvPoolOpBase<CUDAContext> {
     CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&top_desc_));
     CUDNN_ENFORCE(cudnnCreatePoolingDescriptor(&pooling_desc_));
     // Figure out the pooling descriptor.
-    if (def().type() == "MaxPoolGradient") {
+    if (operator_def.type() == "MaxPoolGradient") {
       mode_ = CUDNN_POOLING_MAX;
-    } else if (def().type() == "AveragePoolGradient") {
+    } else if (operator_def.type() == "AveragePoolGradient") {
       mode_ = CUDNN_POOLING_AVERAGE_COUNT_EXCLUDE_PADDING;
     } else {
-      LOG(FATAL) << "Unsupported pooling method: " << def().type();
+      LOG(FATAL) << "Unsupported pooling method: " << operator_def.type();
     }
   }
 

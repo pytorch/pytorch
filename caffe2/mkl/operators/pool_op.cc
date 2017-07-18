@@ -26,12 +26,12 @@ class MKLPoolOp final : public ConvPoolOpBase<MKLContext> {
           "Pad should be smaller than kernel.");
     }
     // Figure out the pooling descriptor.
-    if (def().type().substr(0, 7) == "MaxPool") {
+    if (operator_def.type().substr(0, 7) == "MaxPool") {
       algo = dnnAlgorithmPoolingMax;
-    } else if (def().type().substr(0, 11) == "AveragePool") {
+    } else if (operator_def.type().substr(0, 11) == "AveragePool") {
       algo = dnnAlgorithmPoolingAvg;
     } else {
-      LOG(FATAL) << "Unsupported pooling method: " << def().type();
+      LOG(FATAL) << "Unsupported pooling method: " << operator_def.type();
     }
   }
 

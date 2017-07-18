@@ -12,7 +12,9 @@ class CreateBlobsQueueOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   CreateBlobsQueueOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws), ws_(ws) {}
+      : Operator<Context>(operator_def, ws),
+        ws_(ws),
+        name(operator_def.output().Get(0)) {}
 
   bool RunOnDevice() override {
     const auto capacity =
@@ -24,8 +26,7 @@ class CreateBlobsQueueOp final : public Operator<Context> {
             "enforce_unique_name", false);
     const auto fieldNames =
         OperatorBase::template GetRepeatedArgument<std::string>("field_names");
-    CAFFE_ENFORCE_EQ(def().output().size(), 1);
-    const auto name = def().output().Get(0);
+    CAFFE_ENFORCE_EQ(this->OutputSize(), 1);
     auto queuePtr = Operator<Context>::Outputs()[0]
                         ->template GetMutable<std::shared_ptr<BlobsQueue>>();
     CAFFE_ENFORCE(queuePtr);
@@ -36,6 +37,7 @@ class CreateBlobsQueueOp final : public Operator<Context> {
 
  private:
   Workspace* ws_{nullptr};
+  const std::string name;
 };
 
 template <typename Context>

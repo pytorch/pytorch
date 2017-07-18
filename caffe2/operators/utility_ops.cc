@@ -1094,11 +1094,11 @@ bool NanCheckOp<CPUContext>::RunOnDevice() {
   bool all_finite = input_data.allFinite();
 
   if (!all_finite) {
-    std::cerr << "Tensor contained NaN or inf: [" << this->def().input(0) << "]"
-              << std::endl;
+    std::cerr << "Tensor contained NaN or inf: [" << this->debug_def().input(0)
+              << "]" << std::endl;
 
     for (int j = 0; j < InputSize(); j++) {
-      std::cerr << "Tensor name: " << this->def().input(j) << std::endl;
+      std::cerr << "Tensor name: " << this->debug_def().input(j) << std::endl;
       std::cerr << "Input tensor:" << std::endl;
       tensorPrinter_.Print<float>(Input(j));
       std::cerr << "NaN idxs:" << std::endl;
