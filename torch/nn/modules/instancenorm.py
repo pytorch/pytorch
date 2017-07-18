@@ -1,3 +1,4 @@
+import torch
 from .module import Module
 from .batchnorm import _BatchNorm
 from .. import functional as F
@@ -71,7 +72,7 @@ class LayerNorm(Module):
     """
 
     def __init__(self, num_features=None, eps=1e-5):
-        super(Module, self).__init__()
+        super(LayerNorm, self).__init__()
         self.num_features = num_features
         self.affine = num_features is not None
         self.eps = eps
