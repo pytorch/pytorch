@@ -19,7 +19,7 @@ struct Stats {
  */
 class ProfDAGNet : public DAGNetBase {
  public:
-  ProfDAGNet(const NetDef& net_def, Workspace* ws);
+  ProfDAGNet(const std::shared_ptr<const NetDef>& net_def, Workspace* ws);
   ~ProfDAGNet();
   bool Run() override;
   ProfDAGProtos GetOperatorStats();

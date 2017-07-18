@@ -12,24 +12,15 @@
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/string_utils.h"
 
-CAFFE2_DEFINE_bool(
-    caffe2_enable_operator_debug,
-    true,
-    "If set, operator's will store debug information");
-
 namespace caffe2 {
 
 OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
     : operator_ws_(ws),
-      operator_def_(operator_def),
+      operator_def_(std::make_shared<OperatorDef>(operator_def)),
       device_option_(
           operator_def.has_device_option() ? operator_def.device_option()
                                            : DeviceOption()),
-      arg_helper_(operator_def_) {
-  if (FLAGS_caffe2_enable_operator_debug) {
-    debug_operator_def_ = &operator_def_;
-  }
-
+      arg_helper_(operator_def) {
   for (const string& input_str : operator_def.input()) {
     auto* blob = ws->GetBlob(input_str);
     CAFFE_ENFORCE(
@@ -41,7 +32,7 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
     inputs_.push_back(blob);
   }
 
-  GetOperatorLogger()(operator_def_);
+  GetOperatorLogger()(operator_def);
 
   for (const string& output_str : operator_def.output()) {
     outputs_.push_back(CHECK_NOTNULL(ws->CreateBlob(output_str)));

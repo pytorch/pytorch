@@ -150,16 +150,18 @@ void Event::record(const Stream& stream) {
 
 } // namespace internal
 
-AsyncDAGNet::AsyncDAGNet(const NetDef& net_def, Workspace* ws)
+AsyncDAGNet::AsyncDAGNet(
+    const std::shared_ptr<const NetDef>& net_def,
+    Workspace* ws)
     : DAGNetBase(net_def, ws) {
-  VLOG(1) << "Constructing Async DAG Net " << net_def.name();
-  eventRecorded_.resize(net_def.op_size());
-  events_.reserve(net_def.op_size());
-  for (int idx = 0; idx < net_def.op_size(); ++idx) {
-    const OperatorDef& op_def = net_def.op(idx);
-    if (!op_def.has_device_option() && net_def.has_device_option()) {
+  VLOG(1) << "Constructing Async DAG Net " << net_def->name();
+  eventRecorded_.resize(net_def->op_size());
+  events_.reserve(net_def->op_size());
+  for (int idx = 0; idx < net_def->op_size(); ++idx) {
+    const OperatorDef& op_def = net_def->op(idx);
+    if (!op_def.has_device_option() && net_def->has_device_option()) {
       OperatorDef temp_def(op_def);
-      temp_def.mutable_device_option()->CopyFrom(net_def.device_option());
+      temp_def.mutable_device_option()->CopyFrom(net_def->device_option());
       events_.emplace_back(new internal::Event(temp_def.device_option()));
     } else {
       events_.emplace_back(new internal::Event(op_def.device_option()));

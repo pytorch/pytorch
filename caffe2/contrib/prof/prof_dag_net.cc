@@ -7,7 +7,9 @@
 
 namespace caffe2 {
 
-ProfDAGNet::ProfDAGNet(const NetDef& net_def, Workspace* ws)
+ProfDAGNet::ProfDAGNet(
+    const std::shared_ptr<const NetDef>& net_def,
+    Workspace* ws)
     : DAGNetBase(net_def, ws), time_per_op_(operator_nodes_.size()) {
   VLOG(1) << "Constructing ProfDAGNet " << name_;
 }

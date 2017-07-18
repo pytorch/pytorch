@@ -158,7 +158,9 @@ class Workspace {
    * exception is thrown.
    */
   NetBase* CreateNet(const NetDef& net_def, bool overwrite = false);
-
+  NetBase* CreateNet(
+      const std::shared_ptr<const NetDef>& net_def,
+      bool overwrite = false);
   /**
    * Gets the pointer to a created net. The workspace keeps ownership of the
    * network.
