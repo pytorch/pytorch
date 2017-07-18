@@ -365,8 +365,12 @@ class SaveOp final : public Operator<Context> {
           name = def().input(i);
         } else {
           auto match_pos = def().input(i).find(strip_prefix_);
-          name = def().input(i).substr(
-              match_pos + strip_prefix_.size(), string::npos);
+          if (match_pos == string::npos) {
+            name = def().input(i);
+          } else {
+            name = def().input(i).substr(
+                match_pos + strip_prefix_.size(), string::npos);
+          }
         }
         CAFFE_ENFORCE(
             input_names.insert(name).second, "Duplicated input: ", name);
