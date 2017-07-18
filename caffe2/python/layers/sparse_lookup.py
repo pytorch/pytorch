@@ -22,7 +22,7 @@ import operator
 
 class SparseLookup(ModelLayer):
     _supported_reducers = ['PositionWeighted', 'LogMeanExp', 'LogSumExp', 'Max',
-                           'Mean', 'Sum', 'Sqrt']
+                           'Mean', 'Sum', 'Sqrt', 'None']
 
     def __init__(self, model, input_record, inner_shape, reducer,
                  weight_init=None, weight_optim=None,
@@ -85,7 +85,7 @@ class SparseLookup(ModelLayer):
                 optimizer=weight_optim,
                 ps_param=LayerPsParam(
                     sparse_key=sparse_key,
-                    average_length=avg_length
+                    average_length=avg_length,
                 )
             ))
 
@@ -102,36 +102,47 @@ class SparseLookup(ModelLayer):
                     [
                         self.w,
                         self.input_record.items(),
-                        self.input_record.lengths()
+                        self.input_record.lengths(),
                     ],
                     self.output_schema.field_blobs(),
-                    engine='fp16'
+                    engine='fp16',
                 )
             elif self.reducer == 'Sqrt':
                 sqrt_weight = net.LengthsToWeights(
                     [self.input_record.lengths()],
                     [self.input_record.lengths() + '_sqrt'],
-                    power=0.5
+                    power=0.5,
                 )
                 net.SparseLengthsWeightedSum(
                     [
                         self.w,
                         sqrt_weight,
                         self.input_record.items(),
-                        self.input_record.lengths()
+                        self.input_record.lengths(),
                     ],
                     self.output_schema.field_blobs(),
-                    engine='fp16'
+                    engine='fp16',
+                )
+            elif self.reducer == 'None':
+                # Gather operator will gather the embedding for each id of
+                # each IdScoreList.
+                net.Gather(
+                    [
+                        self.w,
+                        self.input_record.items(),
+                    ],
+                    self.output_schema.field_blobs(),
+                    engine='fp16',
                 )
             else:
                 table_rows = net.Gather([self.w, self.input_record.items()])
                 segment_ids = net.LengthsToSegmentIds(
                     self.input_record.lengths(),
-                    self.input_record.lengths() + '_sid')
+                    self.input_record.lengths() + '_sid'),
                 net.__getattr__('SortedSegmentRange' + self.reducer)(
                     [table_rows, segment_ids],
                     self.output_schema.field_blobs(),
-                    engine='fp16'
+                    engine='fp16',
                 )
         elif schema.equal_schemas(
                 self.input_record,
@@ -143,10 +154,10 @@ class SparseLookup(ModelLayer):
                         self.w,
                         self.input_record.values(),
                         self.input_record.keys(),
-                        self.input_record.lengths()
+                        self.input_record.lengths(),
                     ],
                     self.output_schema.field_blobs(),
-                    engine='fp16'
+                    engine='fp16',
                 )
             elif self.reducer == 'PositionWeighted':
                 net.SparseLengthsWeightedSum(
@@ -154,14 +165,25 @@ class SparseLookup(ModelLayer):
                         self.w,
                         self.external_weights,
                         self.input_record.keys(),
-                        self.input_record.lengths()
+                        self.input_record.lengths(),
                     ],
                     self.output_schema.field_blobs(),
                     grad_on_weights=1,
-                    engine='fp16'
+                    engine='fp16',
+                )
+            elif self.reducer == 'None':
+                # Gather operator will gather the embedding for each id of
+                # each IdList.
+                net.Gather(
+                    [
+                        self.w,
+                        self.input_record.keys(),
+                    ],
+                    self.output_schema.field_blobs(),
+                    engine='fp16',
                 )
             else:
-                raise "Only Sum, Mean is supported for IdScoreList input." +\
+                raise "Only Sum, Mean, None are supported for IdScoreList input." +\
                     "Trying to create with {}".format(self.reducer)
         else:
             raise "Unsupported input type {0}".format(self.input_record)
