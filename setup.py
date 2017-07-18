@@ -236,6 +236,8 @@ if os.getenv('PYTORCH_BINARY_BUILD') and platform.system() == 'Linux':
     CXXNAME = os.getenv('CXX', 'g++')
     path = subprocess.check_output([CXXNAME, '-print-file-name=libstdc++.a'])
     path = path[:-1]
+    if type(path) != str: # python 3
+        path = path.decode("utf-8")
     extra_link_args += [path]
 
 cwd = os.path.dirname(os.path.abspath(__file__))
