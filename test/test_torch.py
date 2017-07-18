@@ -2762,6 +2762,16 @@ class TestTorch(TestCase):
         self.assertEqual(strided[rows, columns],
                          torch.Tensor([[4, 6], [2, 3]]))
 
+        # Tests using less than the number of dims, and ellipsis
+
+        # reference is 1 2
+        #              3 4
+        #              5 6
+        reference = conv_fn(consec((3, 2)))
+        self.assertEqual(reference[ri([0, 2]), ], torch.Tensor([[1, 2], [5, 6]]))
+        self.assertEqual(reference[ri([1]), ...], torch.Tensor([[3, 4]]))
+        self.assertEqual(reference[..., ri([1])], torch.Tensor([[2], [4], [6]]))
+
         if TEST_NUMPY:
             # we use numpy to compare against, to verify that our advanced
             # indexing semantics are the same, and also for ease of test
@@ -2864,6 +2874,19 @@ class TestTorch(TestCase):
                 [[[0, 1], [2, 3]], [[0]], slice(None)],
                 [[[2, 1]], [[0, 3], [4, 4]], slice(None)],
                 [[[2]], [[0, 3], [4, 1]], slice(None)],
+
+                # less dim, ellipsis
+                [[0, 2], ],
+                [[0, 2], slice(None)],
+                [[0, 2], Ellipsis],
+                [[0, 2], slice(None), Ellipsis],
+                [[0, 2], Ellipsis, slice(None)],
+                [[0, 2], [1, 3]],
+                [[0, 2], [1, 3], Ellipsis],
+                [Ellipsis, [1, 3], [2, 3]],
+                [Ellipsis, [2, 3, 4]],
+                [Ellipsis, slice(None), [2, 3, 4]],
+                [slice(None), Ellipsis, [2, 3, 4]],
             ]
 
             for indexer in indices_to_test:
@@ -2917,6 +2940,25 @@ class TestTorch(TestCase):
                 [[0], [4], [1, 3, 4], slice(None)],
                 [[1], [0, 2, 3], [1], slice(None)],
                 [[[1, 2], [1, 2]], [[0, 1], [2, 3]], [[2, 3], [3, 5]], slice(None)],
+
+                # less dim, ellipsis
+                [Ellipsis, [0, 3, 4]],
+                [Ellipsis, slice(None), [0, 3, 4]],
+                [Ellipsis, slice(None), slice(None), [0, 3, 4]],
+                [slice(None), Ellipsis, [0, 3, 4]],
+                [slice(None), slice(None), Ellipsis, [0, 3, 4]],
+                [slice(None), [0, 2, 3], [1, 3, 4]],
+                [slice(None), [0, 2, 3], [1, 3, 4], Ellipsis],
+                [Ellipsis, [0, 2, 3], [1, 3, 4], slice(None)],
+                [[0], [1, 2, 4]],
+                [[0], [1, 2, 4], slice(None)],
+                [[0], [1, 2, 4], Ellipsis],
+                [[0], [1, 2, 4], Ellipsis, slice(None)],
+                [[1], ],
+                [[0, 2, 1], [3], [4]],
+                [[0, 2, 1], [3], [4], slice(None)],
+                [[0, 2, 1], [3], [4], Ellipsis],
+                [Ellipsis, [0, 2, 1], [3], [4]],
             ]
 
             for indexer in indices_to_test:

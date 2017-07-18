@@ -555,6 +555,9 @@ class TestAutograd(TestCase):
         check_index(x, y, ([slice(None), [2, 3]]))
         check_index(x, y, ([[2, 3], slice(None)]))
 
+        # advanced indexing, with less dim, or ellipsis
+        check_index(x, y, ([0], ))
+
         x = torch.arange(1, 49).view(4, 3, 4)
         y = Variable(x, requires_grad=True)
 
@@ -569,6 +572,14 @@ class TestAutograd(TestCase):
         check_index(x, y, (slice(None), slice(None), [2, 1]))
         check_index(x, y, (slice(None), [2, 1], slice(None)))
         check_index(x, y, ([2, 1], slice(None), slice(None)))
+
+        # advanced indexing, with less dim, or ellipsis
+        check_index(x, y, ([0], ))
+        check_index(x, y, ([0], slice(None)))
+        check_index(x, y, ([0], Ellipsis))
+        check_index(x, y, ([1, 2], [0, 1]))
+        check_index(x, y, ([1, 2], [0, 1], Ellipsis))
+        check_index(x, y, (Ellipsis, [1, 2], [0, 1]))
 
     def test_indexing_duplicates(self):
         x = torch.arange(1, 17).view(4, 4)
@@ -1458,6 +1469,9 @@ function_tests = [
     (Index, (), (torch.rand(S, S, S), dont_convert([slice(None), [0, 3], slice(None)])), 'adv_index_mid'),
     (Index, (), (torch.rand(S, S, S), dont_convert([[0, 3], slice(None), slice(None)])), 'adv_index_beg'),
     (Index, (), (torch.rand(S, S, S), dont_convert([[0, 3], [1, 2], slice(None)])), 'adv_index_comb'),
+    (Index, (), (torch.rand(S, S, S), dont_convert([[0, 3], ])), 'adv_index_sub'),
+    (Index, (), (torch.rand(S, S, S), dont_convert([[0, 3], slice(None)])), 'adv_index_sub_2'),
+    (Index, (), (torch.rand(S, S, S), dont_convert([[0, 3], Ellipsis])), 'adv_index_sub_3'),
     (View, (), (torch.rand(S, S, S), torch.Size([S * S, S]))),
     (Expand, (), ((1, S, 1, S, 1), torch.Size([5, S, 5, S, 5]))),
     (Expand, (), ((S, 1), torch.Size([S, S, S])), 'new_dim'),
