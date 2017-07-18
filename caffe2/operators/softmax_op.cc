@@ -75,6 +75,7 @@ bool SoftmaxGradientOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
+namespace {
 REGISTER_CPU_OPERATOR(Softmax, SoftmaxOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(SoftmaxGradient, SoftmaxGradientOp<float, CPUContext>);
 
@@ -107,4 +108,5 @@ class GetSoftmaxGradient : public GradientMakerBase {
 REGISTER_GRADIENT(Softmax, GetSoftmaxGradient);
 REGISTER_GRADIENT(SoftmaxFp16, GetSoftmaxGradient);
 
+}  // namespace
 }  // namespace caffe2

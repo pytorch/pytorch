@@ -173,7 +173,9 @@ void batchToSpace(
       output->mutable_data<float>());
 }
 
+namespace {
 REGISTER_CUDA_OPERATOR(SpaceToBatch, SpaceToBatchOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(BatchToSpace, BatchToSpaceOp<CUDAContext>);
+}
 
 }

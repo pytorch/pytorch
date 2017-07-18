@@ -113,6 +113,8 @@ bool RoIPoolOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
+namespace {
+
 REGISTER_CPU_OPERATOR(RoIPool, RoIPoolOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(RoIPoolGradient, RoIPoolGradientOp<float, CPUContext>);
 
@@ -203,4 +205,5 @@ class GetRoIPoolGradient : public GradientMakerBase {
 
 REGISTER_GRADIENT(RoIPool, GetRoIPoolGradient);
 
+} // namespace
 } // namespace caffe2

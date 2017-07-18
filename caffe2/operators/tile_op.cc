@@ -1,6 +1,7 @@
 #include "caffe2/operators/tile_op.h"
 
 namespace caffe2 {
+namespace {
 
 REGISTER_CPU_OPERATOR(Tile, TileOp<CPUContext>);
 REGISTER_CPU_OPERATOR(TileGradient, TileGradientOp<float, CPUContext>);
@@ -68,5 +69,7 @@ class GetTileGradient : public GradientMakerBase {
 };
 
 REGISTER_GRADIENT(Tile, GetTileGradient);
+
+} // namespace
 
 } // namespace caffe2

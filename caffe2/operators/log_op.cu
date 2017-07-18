@@ -11,7 +11,10 @@ struct LogCUDAFunctor {
   }
 };
 
+namespace {
+
 REGISTER_CUDA_OPERATOR(
     Log,
     UnaryElementwiseOp<TensorTypes<float>, CUDAContext, LogCUDAFunctor>);
+}
 }

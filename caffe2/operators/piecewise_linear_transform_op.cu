@@ -276,8 +276,10 @@ bool PiecewiseLinearTransformOp<float, CUDAContext>::TransformBinary() {
   return true;
 }
 
+namespace {
 REGISTER_CUDA_OPERATOR(
     PiecewiseLinearTransform,
     PiecewiseLinearTransformOp<float, CUDAContext>);
+} // namespace
 
 } // namespace caffe2

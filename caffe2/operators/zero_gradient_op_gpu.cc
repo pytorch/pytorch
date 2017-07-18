@@ -2,5 +2,7 @@
 #include "caffe2/operators/zero_gradient_op.h"
 
 namespace caffe2 {
+namespace {
 REGISTER_CUDA_OPERATOR(ZeroGradient, ZeroGradientOp<CUDAContext>);
+}
 }

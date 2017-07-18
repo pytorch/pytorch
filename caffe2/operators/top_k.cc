@@ -154,6 +154,8 @@ bool TopKGradientOp<T, Context>::RunOnDevice() {
   return true;
 }
 
+namespace {
+
 REGISTER_CPU_OPERATOR(TopK, TopKOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(TopKGradient, TopKGradientOp<float, CPUContext>);
 
@@ -228,4 +230,5 @@ class GetTopKGradient : public GradientMakerBase {
 
 REGISTER_GRADIENT(TopK, GetTopKGradient);
 
+} // namespace
 } // namespace caffe2

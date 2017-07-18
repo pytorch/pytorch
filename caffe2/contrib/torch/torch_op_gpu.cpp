@@ -105,6 +105,9 @@ typename Torch<CUDAContext>::Traits::Tensor* Torch<CUDAContext>::newTensorAs(
 }
 }
 
+namespace {
+
 REGISTER_CUDA_OPERATOR(Torch, TorchOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(TorchGradient, TorchGradientOp<CUDAContext>);
+}
 }

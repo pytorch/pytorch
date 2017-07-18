@@ -50,6 +50,8 @@ namespace caffe2 {
 #define CAFFE2_HAS_CUDA_MPI_ALLREDUCE 0
 #endif // CAFFE2_FORCE_FALLBACK_CUDA_MPI
 
+namespace {
+
 REGISTER_CUDA_OPERATOR(
     MPICreateCommonWorld,
     MPICreateCommonWorldOp<CUDAContext>);
@@ -82,5 +84,6 @@ REGISTER_CUDA_OPERATOR(
     MPIAllreduce,
     GPUFallbackOp<MPIAllreduceOp<float, CPUContext>>);
 #endif
+}  // namespace
 
 }  // namespace caffe2

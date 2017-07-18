@@ -12,6 +12,8 @@ const char* TyTraits<CPUContext>::prelude = R"(
 )";
 }
 
+namespace {
+
 struct GetTorchGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   std::vector<OperatorDef> GetGradientDefs() override {
@@ -41,6 +43,6 @@ REGISTER_CPU_OPERATOR(TorchInit, TorchInitOp<CPUContext>);
 REGISTER_CPU_OPERATOR(TorchGradient, TorchGradientOp<CPUContext>);
 REGISTER_GRADIENT(Torch, GetTorchGradient);
 OPERATOR_SCHEMA(Torch).AllowInplace([](int, int) { return true; });
-OPERATOR_SCHEMA(TorchInit);
 OPERATOR_SCHEMA(TorchGradient).AllowInplace([](int, int) { return true; });
+}
 }

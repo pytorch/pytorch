@@ -21,6 +21,7 @@ struct CosGradientCPUFunctor {
   }
 };
 
+namespace {
 REGISTER_CPU_OPERATOR(
     Cos,
     UnaryElementwiseOp<TensorTypes<float>, CPUContext, CosCPUFunctor>);
@@ -57,4 +58,5 @@ class GetCosGradient : public GradientMakerBase {
   }
 };
 REGISTER_GRADIENT(Cos, GetCosGradient);
+} // namespace
 } // namespace caffe2

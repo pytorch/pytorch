@@ -5,6 +5,7 @@
 #include <cub/cub.cuh>
 
 namespace caffe2 {
+namespace {
 
 REGISTER_CUDA_OPERATOR(SumElements, SumElementsOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(SumSqrElements, SumSqrElementsOp<float, CUDAContext>);
@@ -71,6 +72,7 @@ __global__ void colwise_max_gradient_kernel(
     }
   }
 }
+} // namespace
 
 template <>
 bool SumElementsGradientOp<float, CUDAContext>::RunOnDevice() {

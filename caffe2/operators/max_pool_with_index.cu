@@ -219,8 +219,6 @@ class GetMaxPoolWithIndexGradient : public GradientMakerBase {
 
 REGISTER_GRADIENT(MaxPoolWithIndex, GetMaxPoolWithIndexGradient);
 
-OPERATOR_SCHEMA(MaxPoolWithIndexGradient);
-
 OPERATOR_SCHEMA(MaxPoolWithIndex)
     .NumInputs(1)
     .NumOutputs(2)

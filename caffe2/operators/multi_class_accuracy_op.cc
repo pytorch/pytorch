@@ -52,6 +52,7 @@ bool MultiClassAccuracyOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
+namespace {
 REGISTER_CPU_OPERATOR(
   MultiClassAccuracy, MultiClassAccuracyOp<float, CPUContext>);
 
@@ -83,4 +84,5 @@ and predicted scores of each class for each instance.
     "1-D int tensor (D,) of number of instances for each class in the batch.");
 
 SHOULD_NOT_DO_GRADIENT(MultiClassAccuracy);
+}  // namespace
 }  // namespace caffe2

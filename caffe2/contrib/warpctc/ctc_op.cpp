@@ -14,6 +14,7 @@ ctcComputeInfo workspaceInfo<CPUContext>(const CPUContext& context) {
 }
 }
 
+namespace {
 REGISTER_CPU_OPERATOR(CTC, CTCOp<float, CPUContext>);
 OPERATOR_SCHEMA(CTC)
     .NumInputs(4)
@@ -21,4 +22,5 @@ OPERATOR_SCHEMA(CTC)
 //    .EnforceInputOutputGradient({{0, 0}});
 NO_GRADIENT(CTC);
 
+}
 }

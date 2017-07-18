@@ -45,6 +45,7 @@ bool NCHW2NHWCOp<float, CPUContext>::RunOnDevice() {
 }
 
 
+namespace {
 REGISTER_CPU_OPERATOR(NHWC2NCHW, NHWC2NCHWOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(NCHW2NHWC, NCHW2NHWCOp<float, CPUContext>);
 
@@ -100,4 +101,5 @@ class GetNCHW2NHWCGradient : public GradientMakerBase {
   }
 };
 REGISTER_GRADIENT(NCHW2NHWC, GetNCHW2NHWCGradient);
+}  // namespace
 }  // namespace caffe2

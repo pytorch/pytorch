@@ -38,6 +38,7 @@ bool EluGradientOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
+namespace {
 REGISTER_CPU_OPERATOR(Elu, EluOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(EluGradient, EluGradientOp<float, CPUContext>);
 
@@ -79,4 +80,5 @@ class GetEluGradient : public GradientMakerBase {
 };
 REGISTER_GRADIENT(Elu, GetEluGradient);
 
+} // namespace
 } // namespace caffe2

@@ -49,6 +49,7 @@ struct AbsGradientCUDAFunctor {
   }
 };
 
+namespace {
 REGISTER_CUDA_OPERATOR(
     Abs,
     UnaryElementwiseOp<TensorTypes<float>, CUDAContext, AbsCUDAFunctor>);
@@ -58,4 +59,5 @@ REGISTER_CUDA_OPERATOR(
         TensorTypes<float>,
         CUDAContext,
         WithoutBroadcast<AbsGradientCUDAFunctor>>);
+} // namespace
 } // namespace caffe2

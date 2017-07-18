@@ -14,5 +14,7 @@ ctcComputeInfo workspaceInfo<CUDAContext>(const CUDAContext& context) {
 }
 }
 
+namespace {
 REGISTER_CUDA_OPERATOR(CTC, CTCOp<float, CUDAContext>);
+}
 }

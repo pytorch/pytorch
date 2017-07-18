@@ -50,6 +50,8 @@ bool NCHW2NHWCOp<float, CUDAContext>::RunOnDevice() {
 }
 
 
+namespace {
 REGISTER_CUDA_OPERATOR(NHWC2NCHW, NHWC2NCHWOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(NCHW2NHWC, NCHW2NHWCOp<float, CUDAContext>);
+}  // namespace
 }  // namespace caffe2

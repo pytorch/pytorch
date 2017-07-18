@@ -379,10 +379,9 @@ InferOpInputOutputDevice(const OperatorDef& op) {
 
 }  // namespace caffe2
 
-#define OPERATOR_SCHEMA(name)                       \
-  void OperatorSchemaCheckForOperator##name(){};    \
-  static OpSchema& CAFFE_ANONYMOUS_VARIABLE(name) = \
-      OpSchemaRegistry::NewSchema(#name, __FILE__, __LINE__)
+#define OPERATOR_SCHEMA(name)                                                 \
+  static OpSchema& CAFFE_ANONYMOUS_VARIABLE(name) =                           \
+    OpSchemaRegistry::NewSchema(#name, __FILE__, __LINE__)
 #define OPERATOR_SCHEMA_STR(name)                                  \
   static OpSchema& CAFFE_ANONYMOUS_VARIABLE(schema_registration) = \
       OpSchemaRegistry::NewSchema(name, __FILE__, __LINE__)

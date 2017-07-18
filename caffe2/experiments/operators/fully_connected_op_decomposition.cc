@@ -1,6 +1,7 @@
 #include "caffe2/experiments/operators/fully_connected_op_decomposition.h"
 
 namespace caffe2 {
+namespace {
 
 REGISTER_CPU_OPERATOR(FC_Decomp, FullyConnectedOpDecomp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(FCGradient_Decomp,
@@ -21,4 +22,5 @@ class GetFCDecompGradient : public GradientMakerBase {
   }
 };
 REGISTER_GRADIENT(FC_Decomp, GetFCDecompGradient);
+}  // namespace
 }  // namespace caffe2

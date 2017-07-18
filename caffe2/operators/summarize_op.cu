@@ -106,5 +106,7 @@ bool SummarizeOp<float, CUDAContext>::RunOnDevice() {
   return true;
 }
 
+namespace {
 REGISTER_CUDA_OPERATOR(Summarize, SummarizeOp<float, CUDAContext>);
+}  // namespace
 }  // namespace caffe2

@@ -51,8 +51,10 @@ bool HalfToFloatOp<CUDAContext>::RunOnDevice() {
   return true;
 }
 
+namespace {
 REGISTER_CUDA_OPERATOR(FloatToHalf, FloatToHalfOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(HalfToFloat, HalfToFloatOp<CUDAContext>);
+} // namespace
 } // namespace caffe2
 
 #endif // CAFFE_HAS_CUDA_FP16

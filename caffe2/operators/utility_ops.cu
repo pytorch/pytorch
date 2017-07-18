@@ -726,7 +726,9 @@ void UniqueOp<CUDAContext>::DoRun() {
         order2.data(), order1.data(), remapping, N, K);
   }
 }
+namespace {
 REGISTER_CUDA_OPERATOR(Unique, UniqueOp<CUDAContext>);
+} // namespace
 #endif // THRUST_VERSION >= 100800
 
 REGISTER_CUDA_OPERATOR(Size, SizeOp<CUDAContext>);

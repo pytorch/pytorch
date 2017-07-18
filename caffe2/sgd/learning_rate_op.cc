@@ -1,6 +1,7 @@
 #include "caffe2/sgd/learning_rate_op.h"
 
 namespace caffe2 {
+namespace {
 REGISTER_CPU_OPERATOR(LearningRate, LearningRateOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(LearningRate)
@@ -43,4 +44,5 @@ train_net.LearningRate(200, "LR", base_lr=-0.1,
   .Output(0, "output", "description needed");
 
 NO_GRADIENT(LearningRate);
+}  // namespace
 }  // namespace caffe2

@@ -3,6 +3,7 @@
 #include "caffe2/operators/conv_pool_op_base.h"
 
 namespace caffe2 {
+namespace {
 
 REGISTER_CPU_OPERATOR(Conv, ConvOp<float, CPUContext>);
 
@@ -36,4 +37,5 @@ why they are separate files.
   "stride size, and pad lengths."
   "");
 
+}  // namespace
 }  // namespace caffe2

@@ -220,6 +220,7 @@ bool SigmoidCrossEntropyWithLogitsGradientOp<float, CUDAContext>::
   return true;
 }
 
+namespace {
 REGISTER_CUDA_OPERATOR(LabelCrossEntropy,
                        LabelCrossEntropyOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(LabelCrossEntropyGradient,
@@ -243,4 +244,5 @@ REGISTER_CUDA_OPERATOR(CrossEntropy,
 REGISTER_CUDA_OPERATOR(CrossEntropyGradient,
                        GPUFallbackOp<CrossEntropyGradientOp<float, CPUContext>>);
 
+}  // namespace
 }  // namespace caffe2

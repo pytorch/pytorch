@@ -60,8 +60,10 @@ bool LeakyReluGradientOp<float, CUDAContext>::RunOnDevice() {
   return true;
 }
 
+namespace {
 REGISTER_CUDA_OPERATOR(LeakyRelu, LeakyReluOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(
     LeakyReluGradient,
     LeakyReluGradientOp<float, CUDAContext>);
+} // namespace
 } // namespace caffe2

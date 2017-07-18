@@ -250,6 +250,8 @@ bool CrossEntropyGradientOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
+
+namespace {
 REGISTER_CPU_OPERATOR(LabelCrossEntropy,
                       LabelCrossEntropyOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(LabelCrossEntropyGradient,
@@ -424,4 +426,5 @@ class GetCrossEntropyGradient : public GradientMakerBase {
 };
 REGISTER_GRADIENT(CrossEntropy, GetCrossEntropyGradient);
 
+}  // namespace
 }  // namespace caffe2

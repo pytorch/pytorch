@@ -333,6 +333,7 @@ bool CudnnSpatialBNGradientOp::RunOnDevice() {
   return true;
 }
 
+namespace {
 // Since there is no default implementation for spatial batch normalization,
 // we will register the cudnn version as the default as well.
 REGISTER_CUDA_OPERATOR(SpatialBN, CudnnSpatialBNOp);
@@ -340,4 +341,5 @@ REGISTER_CUDA_OPERATOR(SpatialBNGradient, CudnnSpatialBNGradientOp);
 
 REGISTER_CUDNN_OPERATOR(SpatialBN, CudnnSpatialBNOp);
 REGISTER_CUDNN_OPERATOR(SpatialBNGradient, CudnnSpatialBNGradientOp);
+}  // namespace
 }  // namespace caffe2

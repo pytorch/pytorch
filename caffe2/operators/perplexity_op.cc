@@ -21,6 +21,7 @@ bool PerplexityOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
+namespace {
 REGISTER_CPU_OPERATOR(Perplexity, PerplexityOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(Perplexity).NumInputs(1).NumOutputs(1)
@@ -37,4 +38,5 @@ single (float) perplexity value for the batch.
         "batch");
 
 SHOULD_NOT_DO_GRADIENT(Perplexity);
+}  // namespace
 }  // namespace caffe2

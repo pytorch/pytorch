@@ -135,6 +135,8 @@ bool ResizeNearestGradientOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
+namespace {
+
 REGISTER_CPU_OPERATOR(ResizeNearest, ResizeNearestOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(ResizeNearestGradient,
                       ResizeNearestGradientOp<float, CPUContext>);
@@ -173,4 +175,5 @@ class GetResizeNearestGradient : public GradientMakerBase {
 };
 REGISTER_GRADIENT(ResizeNearest, GetResizeNearestGradient);
 
+} // namespace
 } // namespace caffe2
