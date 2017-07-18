@@ -22,16 +22,58 @@
 #define IS_CUDA false
 #define CUDA_FLOAT false
 #else
+
 #define IS_CUDA true
-#define CUDA_BYTE defined(THC_REAL_IS_BYTE)
-#define CUDA_CHAR defined(THC_REAL_IS_CHAR)
-#define CUDA_SHORT defined(THC_REAL_IS_SHORT)
-#define CUDA_INT defined(THC_REAL_IS_INT)
-#define CUDA_LONG defined(THC_REAL_IS_LONG)
-#define CUDA_FLOAT defined(THC_REAL_IS_FLOAT)
-#define CUDA_DOUBLE defined(THC_REAL_IS_DOUBLE)
-#define CUDA_HALF defined(THC_REAL_IS_HALF)
+
+#if defined(THC_REAL_IS_BYTE)
+#define CUDA_BYTE 1
+#else
+#define CUDA_BYTE 0
 #endif
+
+#if defined(THC_REAL_IS_CHAR)
+#define CUDA_CHAR 1
+#else
+#define CUDA_CHAR 0
+#endif
+
+#if defined(THC_REAL_IS_SHORT)
+#define CUDA_SHORT 1
+#else
+#define CUDA_SHORT 0
+#endif
+
+#if defined(THC_REAL_IS_INT)
+#define CUDA_INT 1
+#else
+#define CUDA_INT 0
+#endif
+
+#if defined(THC_REAL_IS_LONG)
+#define CUDA_LONG 1
+#else
+#define CUDA_LONG 0
+#endif
+
+#if defined(THC_REAL_IS_FLOAT)
+#define CUDA_FLOAT 1
+#else
+#define CUDA_FLOAT 0
+#endif
+
+#if defined(THC_REAL_IS_DOUBLE)
+#define CUDA_DOUBLE 1
+#else
+#define CUDA_DOUBLE 0
+#endif
+
+#if defined(THC_REAL_IS_HALF)
+#define CUDA_HALF 1
+#else
+#define CUDA_HALF 0
+#endif
+
+#endif // ifndef THC_GENERIC_FILE
 
 #if IS_CUDA
 #define THIndexTensor THCudaLongTensor
