@@ -118,22 +118,22 @@ class Bilinear(Module):
 
 
 class NoisyLinear(Module):
-    """Applies a noisy linear transformation to the incoming data.
+    r"""Applies a noisy linear transformation to the incoming data.
     During training:
-        :math:`y = (mu_w + sigma_w \cdot epsilon_w)x
+        .. math:: `y = (mu_w + sigma_w \cdot epsilon_w)x
             + mu_b + sigma_b \cdot epsilon_b`
     During evaluation:
-        :math:`y = mu_w * x + mu_b`
+        .. math:: `y = mu_w * x + mu_b`
     More details can be found in the paper `Noisy Networks for Exploration` _ .
     Args:
         in_features: size of each input sample
         out_features: size of each output sample
         bias: If set to False, the layer will not learn an additive bias.
             Default: True
-        factorised: whether or not to use factorised noise.
+        factorized: whether or not to use factorized noise.
             Default: True
         std_init: constant for weight_sigma and bias_sigma initialization.
-            If None, defaults to 0.017 for independent and 0.4 for factorised.
+            If None, defaults to 0.017 for independent and 0.4 for factorized.
             Default: None
     Shape:
         - Input: :math:`(N, in\_features)`
@@ -153,11 +153,11 @@ class NoisyLinear(Module):
         >>> print(output)
         >>> print(output_new)
     """
-    def __init__(self, in_features, out_features, bias=True, factorised=True, std_init=None):
+    def __init__(self, in_features, out_features, bias=True, factorized=True, std_init=None):
         super(NoisyLinear, self).__init__()
         self.in_features = in_features
         self.out_features = out_features
-        self.factorised = factorised
+        self.factorized = factorized
         self.bias = bias
         self.weight_mu = Parameter(torch.Tensor(out_features, in_features))
         self.weight_sigma = Parameter(torch.Tensor(out_features, in_features))
@@ -167,7 +167,7 @@ class NoisyLinear(Module):
         else:
             self.register_parameter('bias', None)
         if not std_init:
-            if self.factorised:
+            if self.factorized:
                 self.std_init = 0.4
             else:
                 self.std_init = 0.017
@@ -177,7 +177,7 @@ class NoisyLinear(Module):
         self.reset_noise()
 
     def reset_parameters(self):
-        if self.factorised:
+        if self.factorized:
             mu_range = 1. / math.sqrt(self.weight_mu.size(1))
             self.weight_mu.data.uniform_(-mu_range, mu_range)
             self.weight_sigma.data.fill_(self.std_init / math.sqrt(self.weight_sigma.size(1)))
@@ -198,7 +198,7 @@ class NoisyLinear(Module):
         return x
 
     def reset_noise(self):
-        if self.factorised:
+        if self.factorized:
             epsilon_in = self.scale_noise(self.in_features)
             epsilon_out = self.scale_noise(self.out_features)
             self.weight_epsilon = Variable(epsilon_out.ger(epsilon_in))
@@ -218,7 +218,7 @@ class NoisyLinear(Module):
     def __repr__(self):
         return self.__class__.__name__ + ' (' \
             + str(self.in_features) + ' -> ' \
-            + str(self.out_features) + ', Factorised: ' \
-            + str(self.factorised) + ')'
+            + str(self.out_features) + ', Factorized: ' \
+            + str(self.factorized) + ')'
 
 # TODO: PartialLinear - maybe in sparse?
