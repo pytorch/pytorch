@@ -226,10 +226,7 @@ private:
   // actual representation of Graph is done with
   // inputs, outputs, nodes
   std::vector<Node*> all_nodes;
-public:
-  Graph() {
-    output_ = create<Return>();
-  }
+
   // like make_shared, forward arguments to node constructors
   // while also associating it with the graph
   // e.g. g.create<Select>(another,0);
@@ -241,15 +238,26 @@ public:
     all_nodes.push_back(r);
     return r;
   }
-  Param* addInput(Param * p) {
+public:
+  Graph() {
+    output_ = create<Return>();
+  }
+
+  Param * addInput() {
+    Param* p = create<Param>();
     inputs_.push_back(p);
     return p;
   }
-  void addOutput(Node * n) {
+
+  void registerOutput(Node * n) {
     output_->addInput(n);
   }
-  void addNode(Node * n) {
+
+  template<typename T, typename... Args >
+  Node * addNode(Args&&... args) {
+    T* n = create<T>(std::forward<Args>(args)...);
     nodes_.push_back(n);
+    return n;
   }
   const param_list & inputs() {
     return inputs_;
