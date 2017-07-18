@@ -15,6 +15,7 @@ from caffe2.proto import caffe2_pb2
 from collections import defaultdict
 from caffe2.python import scope, utils, workspace
 import caffe2.python._import_c_extension as C
+import google.protobuf.text_format as protobuftx
 import pickle
 import numpy as np
 import sys
@@ -1149,6 +1150,55 @@ def get_op_ids_in_path(ssa, blob_versions, inputs, outputs):
     return sorted(used_op_ids)
 
 
+def recurrent_network_op_remap(op, prefix, blob_remap):
+    """
+    Parameters
+    ----------
+    op : Caffe2 operator (RecurrentNetworkOp or RecurrentNetworkGradientOp).
+    prefix: this argument is not used in this function, just for legacy support.
+    blob_remap : Dictionary that represents the map from old blob name to new.
+
+    Updates blob names in arguments of RecurrentNetworkOp and
+    RecurrentNetworkGradientOp to conform to cloned input and output of both
+    operators and also makes sure names of locally generated blobs in arguments
+    have the same prefix as the input and output of the operators.
+    """
+
+    def get_remapped_str(blob_str):
+        if isinstance(blob_str, binary_type):
+            blob_str = blob_str.decode('utf-8')
+        return blob_remap.get(blob_str, blob_str).encode('utf-8')
+
+    for argument in op.arg:
+        if len(argument.strings) > 0:
+            for i in range(len(argument.strings)):
+                argument.strings[i] = get_remapped_str(argument.strings[i])
+        elif argument.name == 'timestep':
+            argument.s = get_remapped_str(argument.s)
+        elif argument.name.endswith('step_net'):
+            # argument is a proto
+            remap_proto(argument, blob_remap)
+
+
+DEFAULT_REMAP_FUNCS = {
+    'RecurrentNetwork': recurrent_network_op_remap,
+    'RecurrentNetworkGradient': recurrent_network_op_remap,
+}
+
+
+def remap_proto(argument, blob_remap):
+    proto = caffe2_pb2.NetDef()
+    protobuftx.Merge(argument.s.decode('utf-8'), proto)
+    subnet = Net(proto)
+
+    cloned_sub_net = subnet.Clone(
+        'cloned_sub_net',
+        blob_remap,
+    )
+
+    argument.s = str(cloned_sub_net.Proto()).encode('utf-8')
+
+
 def clone_and_bind_net(net, name, prefix, blob_remap=None, inputs=None,
                        keep_schema=True):
     """
@@ -1458,8 +1508,12 @@ class Net(object):
             op_id_mask:  optional list of operator indices to include in
                          the cloned net. If not provided, all ops are included.
         """
-        if remap_funcs is None:
-            remap_funcs = {}
+        orig_remap_funcs = {} if remap_funcs is None else remap_funcs
+        # by default we want to put RecurrentNetworkOp and
+        # RecurrentNetworkGradientOp into remap_funcs, as these two operators
+        # also take blobs and proto into the arguments.
+        remap_funcs = DEFAULT_REMAP_FUNCS.copy()
+        remap_funcs.update(orig_remap_funcs)
         proto = self._net
         new_proto = caffe2_pb2.NetDef()
         new_proto.CopyFrom(proto)
@@ -1485,7 +1539,11 @@ class Net(object):
             remap_list(new_op.input)
             remap_list(new_op.output)
             if new_op.type in remap_funcs:
-                remap_funcs[new_op.type](new_op, (name + '/') if name else '')
+                remap_funcs[new_op.type](
+                    new_op,
+                    (name + '/') if name else '',
+                    blob_remap,
+                )
             return new_op
 
         del new_proto.op[:]
