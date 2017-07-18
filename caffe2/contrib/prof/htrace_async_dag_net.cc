@@ -9,9 +9,9 @@ namespace {
 
 class HTraceAsyncDAGNet : public AsyncDAGNet {
  public:
-  HTraceAsyncDAGNet(const NetDef& net_def, Workspace* ws)
+  HTraceAsyncDAGNet(const std::shared_ptr<const NetDef>& net_def, Workspace* ws)
       : AsyncDAGNet(net_def, ws) {
-    VLOG(1) << "Constructing HTraceAsyncDAGNet " << net_def.name();
+    VLOG(1) << "Constructing HTraceAsyncDAGNet " << net_def->name();
 
     for (auto& worker : workers_) {
       std::thread::id worker_id = worker.get_id();

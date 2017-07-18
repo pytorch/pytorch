@@ -173,8 +173,7 @@ void WriteProtoToBinaryFile(const MessageLite& proto, const char* filename) {
 ArgumentHelper::ArgumentHelper(const OperatorDef& def) {
   for (auto& arg : def.arg()) {
     if (arg_map_.count(arg.name())) {
-      if (arg.SerializeAsString() !=
-          arg_map_[arg.name()]->SerializeAsString()) {
+      if (arg.SerializeAsString() != arg_map_[arg.name()].SerializeAsString()) {
         // If there are two arguments of the same name but different contents,
         // we will throw an error.
         CAFFE_THROW(
@@ -187,7 +186,7 @@ ArgumentHelper::ArgumentHelper(const OperatorDef& def) {
                      << ProtoDebugString(def);
       }
     }
-    arg_map_[arg.name()] = &arg;
+    arg_map_[arg.name()] = arg;
   }
 }
 
@@ -197,7 +196,7 @@ ArgumentHelper::ArgumentHelper(const NetDef& netdef) {
         arg_map_.count(arg.name()) == 0,
         "Duplicated argument name found in net def: ",
         ProtoDebugString(netdef));
-    arg_map_[arg.name()] = &arg;
+    arg_map_[arg.name()] = arg;
   }
 }
 
@@ -225,11 +224,11 @@ bool SupportsLosslessConversion(const InputType& value) {
       return default_value;                                                   \
     }                                                                         \
     CAFFE_ENFORCE(                                                            \
-        arg_map_.at(name)->has_##fieldname(),                                 \
+        arg_map_.at(name).has_##fieldname(),                                  \
         "Argument ",                                                          \
         name,                                                                 \
         " does not have the right field: expected field " #fieldname);        \
-    auto value = arg_map_.at(name)->fieldname();                              \
+    auto value = arg_map_.at(name).fieldname();                               \
     if (enforce_lossless_conversion) {                                        \
       auto supportsConversion =                                               \
           SupportsLosslessConversion<decltype(value), T>(value);              \
@@ -248,7 +247,7 @@ bool SupportsLosslessConversion(const InputType& value) {
     if (arg_map_.count(name) == 0) {                                          \
       return false;                                                           \
     }                                                                         \
-    return arg_map_.at(name)->has_##fieldname();                              \
+    return arg_map_.at(name).has_##fieldname();                               \
   }
 
 INSTANTIATE_GET_SINGLE_ARGUMENT(float, f, false)
@@ -273,7 +272,7 @@ INSTANTIATE_GET_SINGLE_ARGUMENT(string, s, false)
       return default_value;                                            \
     }                                                                  \
     vector<T> values;                                                  \
-    for (const auto& v : arg_map_.at(name)->fieldname()) {             \
+    for (const auto& v : arg_map_.at(name).fieldname()) {              \
       if (enforce_lossless_conversion) {                               \
         auto supportsConversion =                                      \
             SupportsLosslessConversion<decltype(v), T>(v);             \

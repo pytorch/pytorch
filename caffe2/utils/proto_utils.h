@@ -199,9 +199,9 @@ class ArgumentHelper {
   MessageType GetMessageArgument(const string& name) const {
     CAFFE_ENFORCE(arg_map_.count(name), "Cannot find parameter named ", name);
     MessageType message;
-    if (arg_map_.at(name)->has_s()) {
+    if (arg_map_.at(name).has_s()) {
       CAFFE_ENFORCE(
-          message.ParseFromString(arg_map_.at(name)->s()),
+          message.ParseFromString(arg_map_.at(name).s()),
           "Faild to parse content from the string");
     } else {
       VLOG(1) << "Return empty message for parameter " << name;
@@ -212,17 +212,17 @@ class ArgumentHelper {
   template <typename MessageType>
   vector<MessageType> GetRepeatedMessageArgument(const string& name) const {
     CAFFE_ENFORCE(arg_map_.count(name), "Cannot find parameter named ", name);
-    vector<MessageType> messages(arg_map_.at(name)->strings_size());
+    vector<MessageType> messages(arg_map_.at(name).strings_size());
     for (int i = 0; i < messages.size(); ++i) {
       CAFFE_ENFORCE(
-          messages[i].ParseFromString(arg_map_.at(name)->strings(i)),
+          messages[i].ParseFromString(arg_map_.at(name).strings(i)),
           "Faild to parse content from the string");
     }
     return messages;
   }
 
  private:
-  CaffeMap<string, const Argument*> arg_map_;
+  CaffeMap<string, Argument> arg_map_;
 };
 
 const Argument& GetArgument(const OperatorDef& def, const string& name);

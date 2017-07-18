@@ -35,7 +35,7 @@ struct Event {
 // execute each operator (implicitly on the same stream).
 class AsyncDAGNet : public DAGNetBase {
  public:
-  AsyncDAGNet(const NetDef& net_def, Workspace* ws);
+  AsyncDAGNet(const std::shared_ptr<const NetDef>& net_def, Workspace* ws);
   bool RunAt(const std::vector<int>& chain) override;
   bool Run() override;
 

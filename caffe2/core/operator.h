@@ -20,8 +20,6 @@
 #include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/utils/proto_utils.h"
 
-CAFFE2_DECLARE_bool(caffe2_enable_operator_debug);
-
 namespace caffe2 {
 
 class OperatorBase {
@@ -59,9 +57,9 @@ class OperatorBase {
     try {
       return inputs_.at(idx)->template Get<T>();
     } catch (::caffe2::EnforceNotMet& enf) {
-      if (FLAGS_caffe2_enable_operator_debug) {
+      if (has_def()) {
         enf.AppendMessage(".\nOffending Blob name: ");
-        enf.AppendMessage(debug_def().input(idx));
+        enf.AppendMessage(def().input(idx));
         enf.AppendMessage(".\n");
       }
       throw enf;
@@ -105,16 +103,16 @@ class OperatorBase {
   }
 
   virtual void AddRelatedBlobInfo(EnforceNotMet* err) {
-    if (!FLAGS_caffe2_enable_operator_debug) {
+    if (!has_def()) {
       return;
     }
+
     bool found_input;
     if (err->caller() != nullptr) {
       for (int i = 0; i < inputs_.size(); i++) {
         if (inputs_[i]->GetRaw() == err->caller()) {
           found_input = true;
-          err->AppendMessage(
-              "\n** while accessing input: " + debug_def().input(i));
+          err->AppendMessage("\n** while accessing input: " + def().input(i));
           break;
         }
       }
@@ -123,8 +121,7 @@ class OperatorBase {
           if (found_input) {
             err->AppendMessage("\n OR ");
           }
-          err->AppendMessage(
-              "\n** while accessing output: " + debug_def().output(i));
+          err->AppendMessage("\n** while accessing output: " + def().output(i));
           break;
         }
       }
@@ -132,14 +129,16 @@ class OperatorBase {
   }
 
   inline const OperatorDef& def() const {
-    return operator_def_;
+    CAFFE_ENFORCE(has_def(), "operator_def was null!");
+    return *operator_def_;
   }
 
-  inline const OperatorDef& debug_def() const {
-    CAFFE_ENFORCE(
-        debug_operator_def_ != nullptr,
-        "Called debug_def() wout debug mode. Set caffe2_enable_operator_debug");
-    return const_cast<const OperatorDef&>(*debug_operator_def_);
+  inline void set_def(std::shared_ptr<const OperatorDef>& operator_def) {
+    operator_def_ = operator_def;
+  }
+
+  inline bool has_def() const {
+    return operator_def_ != nullptr;
   }
 
   inline const ArgumentHelper& arg_helper() const {
@@ -188,8 +187,7 @@ class OperatorBase {
   std::unique_ptr<ObserverBase<OperatorBase>> observer_;
 
  private:
-  OperatorDef operator_def_;
-  OperatorDef* debug_operator_def_ = nullptr;
+  std::shared_ptr<const OperatorDef> operator_def_;
   DeviceOption device_option_;
   ArgumentHelper arg_helper_;
   vector<const Blob*> inputs_;
@@ -268,9 +266,9 @@ class Operator : public OperatorBase {
         // FinishDeviceComputation() returning error basically means that there
         // is something wrong with the device (like CUDA) that usually cannot be
         // recovered, so we should log FATAL.
-        if (FLAGS_caffe2_enable_operator_debug) {
+        if (has_def()) {
           LOG(FATAL) << "Computation on device returned error in operator\n"
-                     << ProtoDebugString(this->debug_def());
+                     << ProtoDebugString(this->def());
         } else {
           LOG(FATAL) << "Computation on device returned error in operator";
         }
@@ -280,9 +278,8 @@ class Operator : public OperatorBase {
       }
       return result;
     } catch (EnforceNotMet& err) {
-      if (FLAGS_caffe2_enable_operator_debug) {
-        err.AppendMessage(
-            "Error from operator: \n" + ProtoDebugString(debug_def()));
+      if (has_def()) {
+        err.AppendMessage("Error from operator: \n" + ProtoDebugString(def()));
         AddRelatedBlobInfo(&err);
       }
       this->RecordLastFailedOpNetPosition();
@@ -302,9 +299,8 @@ class Operator : public OperatorBase {
       }
       return result;
     } catch (EnforceNotMet& err) {
-      if (FLAGS_caffe2_enable_operator_debug) {
-        err.AppendMessage(
-            "Error from operator: \n" + ProtoDebugString(debug_def()));
+      if (has_def()) {
+        err.AppendMessage("Error from operator: \n" + ProtoDebugString(def()));
         AddRelatedBlobInfo(&err);
       }
       this->RecordLastFailedOpNetPosition();
