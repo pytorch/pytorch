@@ -25,7 +25,9 @@ PyObject * THPTracer_enter(PyObject *_unused, PyObject *args)
     PyObject* input_obj = PyTuple_GET_ITEM(input_objs, i);
     THPUtils_assert(THPVariable_Check(input_obj), "element %d of input "
         "tuple is not a Variable", i);
-    ((THPVariable*)input_obj)->cdata->trace_value = graph.addInput(graph.create<Param>());
+    auto& var = ((THPVariable*)input_obj)->cdata;
+    Param* p = graph.addInput();
+    GlobalTracingState.setValueTrace(var.get(), p);
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -38,7 +40,6 @@ PyObject * THPTracer_exit(PyObject *_unused, PyObject *args)
   if (!PyArg_ParseTuple(args, "O", &output_objs)) {
     return NULL;
   }
-  auto graph = GlobalTracingState.exit();
 
   THPUtils_assert(PyTuple_Check(output_objs), "outputs argument is "
     "expected to be a tuple, but got %s", THPUtils_typename(output_objs));
@@ -48,11 +49,17 @@ PyObject * THPTracer_exit(PyObject *_unused, PyObject *args)
     PyObject* output_obj = PyTuple_GET_ITEM(output_objs, i);
     THPUtils_assert(THPVariable_Check(output_obj), "element %d of outputs "
         "tuple is not a Variable", i);
-    THPUtils_assert(((THPVariable*)output_obj)->cdata->trace_value, "element %d of outputs "
-        "was not traced", i)
-    graph->addOutput(((THPVariable*)output_obj)->cdata->trace_value);
+    auto& var = ((THPVariable*)output_obj)->cdata;
+    Node *var_trace = NULL;
+    try {
+      var_trace = GlobalTracingState.getValueTrace(var.get(), true);
+    } catch (std::out_of_range& e) {
+      THPUtils_setError("element %d of outputs was not traced", i);
+      return NULL;
+    }
+    GlobalTracingState.current().registerOutput(var_trace);
   }
 
-  return THPGraph_Wrap(std::move(graph));
+  return THPGraph_Wrap(GlobalTracingState.exit());
   END_HANDLE_TH_ERRORS
 }
