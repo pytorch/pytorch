@@ -109,7 +109,7 @@ class LoadOp final : public Operator<Context> {
       // if argument source_blob_names is not given, then blob_names_ is
       // inferred from operator output
       if(blob_names_.empty()) {
-        for (const string& name : this->def().output()) {
+        for (const string& name : operator_def.output()) {
           blob_names_.push_back(name);
         }
       }
@@ -211,7 +211,7 @@ class LoadOp final : public Operator<Context> {
                 << " blobs from db.";
         return;
       }
-      for (const string& output_name : this->def().output()) {
+      for (const string& output_name : this->debug_def().output()) {
         if (blob_states.count(output_name) == 0) {
           LOG(ERROR) << "Failed to load blob: " << output_name;
         }
@@ -362,13 +362,13 @@ class SaveOp final : public Operator<Context> {
       for (int i = 0; i < blob_names_.size(); ++i) {
         std::string name;
         if (strip_prefix_.empty()) {
-          name = def().input(i);
+          name = operator_def.input(i);
         } else {
-          auto match_pos = def().input(i).find(strip_prefix_);
+          auto match_pos = operator_def.input(i).find(strip_prefix_);
           if (match_pos == string::npos) {
-            name = def().input(i);
+            name = operator_def.input(i);
           } else {
-            name = def().input(i).substr(
+            name = operator_def.input(i).substr(
                 match_pos + strip_prefix_.size(), string::npos);
           }
         }

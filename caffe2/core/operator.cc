@@ -16,7 +16,7 @@ namespace caffe2 {
 
 OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
     : operator_ws_(ws),
-      operator_def_(std::make_shared<OperatorDef>(operator_def)),
+      operator_debug_def_(std::make_shared<OperatorDef>(operator_def)),
       device_option_(
           operator_def.has_device_option() ? operator_def.device_option()
                                            : DeviceOption()),

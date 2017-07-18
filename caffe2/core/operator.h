@@ -57,9 +57,9 @@ class OperatorBase {
     try {
       return inputs_.at(idx)->template Get<T>();
     } catch (::caffe2::EnforceNotMet& enf) {
-      if (has_def()) {
+      if (has_debug_def()) {
         enf.AppendMessage(".\nOffending Blob name: ");
-        enf.AppendMessage(def().input(idx));
+        enf.AppendMessage(debug_def().input(idx));
         enf.AppendMessage(".\n");
       }
       throw enf;
@@ -103,7 +103,7 @@ class OperatorBase {
   }
 
   virtual void AddRelatedBlobInfo(EnforceNotMet* err) {
-    if (!has_def()) {
+    if (!has_debug_def()) {
       return;
     }
 
@@ -112,7 +112,8 @@ class OperatorBase {
       for (int i = 0; i < inputs_.size(); i++) {
         if (inputs_[i]->GetRaw() == err->caller()) {
           found_input = true;
-          err->AppendMessage("\n** while accessing input: " + def().input(i));
+          err->AppendMessage(
+              "\n** while accessing input: " + debug_def().input(i));
           break;
         }
       }
@@ -121,24 +122,25 @@ class OperatorBase {
           if (found_input) {
             err->AppendMessage("\n OR ");
           }
-          err->AppendMessage("\n** while accessing output: " + def().output(i));
+          err->AppendMessage(
+              "\n** while accessing output: " + debug_def().output(i));
           break;
         }
       }
     }
   }
 
-  inline const OperatorDef& def() const {
-    CAFFE_ENFORCE(has_def(), "operator_def was null!");
-    return *operator_def_;
+  inline const OperatorDef& debug_def() const {
+    CAFFE_ENFORCE(has_debug_def(), "operator_def was null!");
+    return *operator_debug_def_;
   }
 
-  inline void set_def(std::shared_ptr<const OperatorDef>& operator_def) {
-    operator_def_ = operator_def;
+  inline void set_debug_def(std::shared_ptr<const OperatorDef>& operator_def) {
+    operator_debug_def_ = operator_def;
   }
 
-  inline bool has_def() const {
-    return operator_def_ != nullptr;
+  inline bool has_debug_def() const {
+    return operator_debug_def_ != nullptr;
   }
 
   inline const ArgumentHelper& arg_helper() const {
@@ -187,7 +189,7 @@ class OperatorBase {
   std::unique_ptr<ObserverBase<OperatorBase>> observer_;
 
  private:
-  std::shared_ptr<const OperatorDef> operator_def_;
+  std::shared_ptr<const OperatorDef> operator_debug_def_;
   DeviceOption device_option_;
   ArgumentHelper arg_helper_;
   vector<const Blob*> inputs_;
@@ -266,9 +268,9 @@ class Operator : public OperatorBase {
         // FinishDeviceComputation() returning error basically means that there
         // is something wrong with the device (like CUDA) that usually cannot be
         // recovered, so we should log FATAL.
-        if (has_def()) {
+        if (has_debug_def()) {
           LOG(FATAL) << "Computation on device returned error in operator\n"
-                     << ProtoDebugString(this->def());
+                     << ProtoDebugString(this->debug_def());
         } else {
           LOG(FATAL) << "Computation on device returned error in operator";
         }
@@ -278,8 +280,9 @@ class Operator : public OperatorBase {
       }
       return result;
     } catch (EnforceNotMet& err) {
-      if (has_def()) {
-        err.AppendMessage("Error from operator: \n" + ProtoDebugString(def()));
+      if (has_debug_def()) {
+        err.AppendMessage(
+            "Error from operator: \n" + ProtoDebugString(debug_def()));
         AddRelatedBlobInfo(&err);
       }
       this->RecordLastFailedOpNetPosition();
@@ -299,8 +302,9 @@ class Operator : public OperatorBase {
       }
       return result;
     } catch (EnforceNotMet& err) {
-      if (has_def()) {
-        err.AppendMessage("Error from operator: \n" + ProtoDebugString(def()));
+      if (has_debug_def()) {
+        err.AppendMessage(
+            "Error from operator: \n" + ProtoDebugString(debug_def()));
         AddRelatedBlobInfo(&err);
       }
       this->RecordLastFailedOpNetPosition();
@@ -322,7 +326,6 @@ class Operator : public OperatorBase {
   /* using override */ using OperatorBase::GetSingleArgument;       \
   /* using override */ using OperatorBase::HasSingleArgumentOfType; \
   /* using override */ using OperatorBase::GetRepeatedArgument;     \
-  /* using override */ using OperatorBase::def;                     \
   /* using override */ using OperatorBase::InputIsType;             \
   /* using override */ using OperatorBase::InputSize;               \
   /* using override */ using OperatorBase::OutputSize

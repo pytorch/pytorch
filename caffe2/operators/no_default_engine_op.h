@@ -24,7 +24,7 @@ class NoDefaultEngineOp final : public Operator<Context> {
   bool RunOnDevice() override {
     CAFFE_THROW(
         "The operator ",
-        def().type(),
+        this->debug_def().type(),
         " does not have a default engine implementation. Please "
         "specify an engine explicitly for this operator.");
   }

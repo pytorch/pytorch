@@ -49,7 +49,7 @@ class HTraceDAGNet : public DAGNetBase {
 
     bool success = true;
     for (const auto idx : chain) {
-      auto def = operator_nodes_[idx].operator_->def();
+      auto def = operator_nodes_[idx].operator_def_;
       const string& print_name =
           (def.name().size() ? def.name() : (def.output_size() ? def.output(0)
                                                                : "NO_OUTPUT"));

@@ -9,18 +9,16 @@ nccl::NCCLExecution getNCCLElements(
     OperatorBase* op,
     const CUDAContext& context) {
   // We either do an N-N op, or an N-1 op.
-  CAFFE_ENFORCE(
-      op->def().input_size() == op->def().output_size() ||
-      op->def().output_size() == 1);
+  CAFFE_ENFORCE(op->InputSize() == op->OutputSize() || op->OutputSize() == 1);
   nccl::NCCLExecution ex;
   ex.stream_gpu_id = context.cuda_gpu_id();
   ex.stream = context.cuda_stream();
   ex.root = op->template GetSingleArgument<int>("root", 0);
-  ex.elements.resize(op->def().input_size());
-  for (auto i = 0; i < op->def().input_size(); ++i) {
+  ex.elements.resize(op->InputSize());
+  for (auto i = 0; i < op->InputSize(); ++i) {
     auto& el = ex.elements[i];
     el.src = &(op->Input<TensorCUDA>(i));
-    if (i < op->def().output_size()) {
+    if (i < op->OutputSize()) {
       el.dst = op->Output<TensorCUDA>(i);
     }
     // TODO - expensive (>1ms) - cache these.
@@ -34,7 +32,7 @@ namespace {
 // Check if all inputs are float
 template <typename T>
 bool AllInputsAre(OperatorBase* op) {
-  for (auto i = 0; i < op->def().input_size(); ++i) {
+  for (auto i = 0; i < op->InputSize(); ++i) {
     if (op->Input<TensorCUDA>(i).IsType<T>()) {
       continue;
     } else {

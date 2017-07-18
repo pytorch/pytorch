@@ -361,7 +361,7 @@ bool NanCheckOp<CUDAContext>::RunOnDevice() {
 
   // Print out diagnostic info if we have a NaN or inf
   if (result) {
-    std::cerr << "Tensor contained NaN or inf: " << this->def().input(0)
+    std::cerr << "Tensor contained NaN or inf: " << this->debug_def().input(0)
               << std::endl;
 
     for (int j = 0; j < InputSize(); j++) {
@@ -377,8 +377,8 @@ bool NanCheckOp<CUDAContext>::RunOnDevice() {
         cpu_X.CopyFrom(Input(j), &context_);
       }
       context_.FinishDeviceComputation();
-      std::cerr << "Input tensor: " << j << ": [" << def().input(j) << "]"
-                << std::endl;
+      std::cerr << "Input tensor: " << j << ": [" << this->debug_def().input(j)
+                << "]" << std::endl;
       tensorPrinter_.Print<float>(cpu_X);
 
       if (j == 0) {

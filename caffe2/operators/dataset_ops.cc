@@ -885,7 +885,7 @@ template <class Context>
 class CollectTensorOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  CollectTensorOp(const OperatorDef operator_def, Workspace* ws)
+  CollectTensorOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         numToCollect_(
             OperatorBase::GetSingleArgument<int>("num_to_collect", -1)),

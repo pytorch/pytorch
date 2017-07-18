@@ -50,7 +50,8 @@ class MKLOperator : public OperatorBase {
     try {
       return RunOnDevice();
     } catch (EnforceNotMet& err) {
-      err.AppendMessage("Error from operator: \n" + ProtoDebugString(def()));
+      err.AppendMessage(
+          "Error from operator: \n" + ProtoDebugString(debug_def()));
       throw;
     }
   }
