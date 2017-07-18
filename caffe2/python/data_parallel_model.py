@@ -85,7 +85,8 @@ def Parallelize(
                         in gradient computation to reduce memory footprint
       cpu_device        Use CPU instead of GPU
     '''
-    assert scope.CurrentDeviceScope() is None, \
+    assert scope.CurrentDeviceScope() is None \
+        or scope.CurrentDeviceScope().device_type == caffe2_pb2.CPU, \
         "Parallelize must be called without device-scope, \
         device scope was: {}".format(scope.CurrentDeviceScope())
 
