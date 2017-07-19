@@ -231,8 +231,14 @@ extra_compile_args = ['-std=c++11', '-Wno-write-strings',
                       '-fno-strict-aliasing']
 if os.getenv('PYTORCH_BINARY_BUILD') and platform.system() == 'Linux':
     print('PYTORCH_BINARY_BUILD found. Static linking libstdc++ on Linux')
-    extra_compile_args += ['-static-libstdc++']
-    extra_link_args += ['-static-libstdc++']
+    # get path of libstdc++ and link manually.
+    # for reasons unknown, -static-libstdc++ doesn't fully link some symbols
+    CXXNAME = os.getenv('CXX', 'g++')
+    path = subprocess.check_output([CXXNAME, '-print-file-name=libstdc++.a'])
+    path = path[:-1]
+    if type(path) != str: # python 3
+        path = path.decode(sys.stdout.encoding)
+    extra_link_args += [path]
 
 cwd = os.path.dirname(os.path.abspath(__file__))
 lib_path = os.path.join(cwd, "torch", "lib")
@@ -482,5 +488,5 @@ setup(name="torch", version=version,
           'lib/*.h',
           'lib/include/TH/*.h', 'lib/include/TH/generic/*.h',
           'lib/include/THC/*.h', 'lib/include/THC/generic/*.h']},
-      install_requires=['pyyaml'],
+      install_requires=['pyyaml', 'numpy'],
       )
