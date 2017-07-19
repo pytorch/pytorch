@@ -162,16 +162,6 @@ inline OperatorDef CreateOperatorDef(
       engine);
 }
 
-
-inline bool HasArgument(const OperatorDef& def, const string& name) {
-  for (const Argument& arg : def.arg()) {
-    if (arg.name() == name) {
-      return true;
-    }
-  }
-  return false;
-}
-
 /**
  * @brief A helper class to index into arguments.
  *
@@ -182,6 +172,44 @@ inline bool HasArgument(const OperatorDef& def, const string& name) {
  */
 class ArgumentHelper {
  public:
+  template <typename Def>
+  static bool HasArgument(const Def& def, const string& name) {
+    return ArgumentHelper(def).HasArgument(name);
+  }
+
+  template <typename Def, typename T>
+  static T GetSingleArgument(
+      const Def& def,
+      const string& name,
+      const T& default_value) {
+    return ArgumentHelper(def).GetSingleArgument<T>(name, default_value);
+  }
+
+  template <typename Def, typename T>
+  static bool HasSingleArgumentOfType(const Def& def, const string& name) {
+    return ArgumentHelper(def).HasSingleArgumentOfType<T>(name);
+  }
+
+  template <typename Def, typename T>
+  static vector<T> GetRepeatedArgument(
+      const Def& def,
+      const string& name,
+      const std::vector<T>& default_value = std::vector<T>()) {
+    return ArgumentHelper(def).GetRepeatedArgument<T>(name, default_value);
+  }
+
+  template <typename Def, typename MessageType>
+  static MessageType GetMessageArgument(const Def& def, const string& name) {
+    return ArgumentHelper(def).GetMessageArgument<MessageType>(name);
+  }
+
+  template <typename Def, typename MessageType>
+  static vector<MessageType> GetRepeatedMessageArgument(
+      const Def& def,
+      const string& name) {
+    return ArgumentHelper(def).GetRepeatedMessageArgument<MessageType>(name);
+  }
+
   explicit ArgumentHelper(const OperatorDef& def);
   explicit ArgumentHelper(const NetDef& netdef);
   bool HasArgument(const string& name) const;

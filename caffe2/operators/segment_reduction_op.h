@@ -466,7 +466,7 @@ UnsortedSegment{op} but as if all input slices belong to a single segment.
       grad_ins.push_back(tmp_dims);
 
       vector<Argument> args;
-      if (HasArgument(def_, "num_reduce_dim")) {
+      if (ArgumentHelper::HasArgument(def_, "num_reduce_dim")) {
         args.push_back(GetArgument(def_, "num_reduce_dim"));
       }
       // FIXME: pass in num_reduce_dims?!
@@ -523,7 +523,7 @@ UnsortedSegment{op} but as if all input slices belong to a single segment.
       grad_ins.push_back(tmp_dims);
 
       vector<Argument> args;
-      if (HasArgument(def_, "num_reduce_dim")) {
+      if (ArgumentHelper::HasArgument(def_, "num_reduce_dim")) {
         args.push_back(GetArgument(def_, "num_reduce_dim"));
       }
       // FIXME: pass in num_reduce_dims?!
