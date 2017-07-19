@@ -9,82 +9,25 @@ using std::min;
 
 namespace {
 
-template <typename T>
-class AveragePool {
- public:
-  static float initialize() {
-    return 0.0;
-  }
-
-  static void process(
-      const int x_col,
-      const int y_col,
-      ConstEigenMatrixMap<float>& x_mat,
-      EigenMatrixMap<float>& y_mat) {
-    y_mat.col(y_col) += x_mat.col(x_col);
-  }
-
-  static void process(const T& x_data, T& y_data) {
-    y_data += x_data;
-  }
-
-  static void finalize(const int size, T& y_data) {
-    y_data /= size;
-  }
-
-  static void
-  finalize(const int size, const int col, EigenMatrixMap<float>& y_mat) {
-    y_mat.col(col) /= size;
-  }
-
-  static bool runNeon() {
-    return true;
-  }
-};
-
-template <typename T>
-class MaxPool {
- public:
-  static float initialize() {
-    return std::numeric_limits<float>::lowest();
-  }
-
-  static void process(
-      const int x_col,
-      const int y_col,
-      ConstEigenMatrixMap<float>& x_mat,
-      EigenMatrixMap<float>& y_mat) {
-    y_mat.col(y_col) = y_mat.col(y_col).cwiseMax(x_mat.col(x_col));
-  }
-
-  static void process(const T& x_data, T& y_data) {
-    if (x_data > y_data) {
-      y_data = x_data;
-    }
-  }
-
-  static void finalize(const int /*size*/, T& /*y_data*/) {}
-
-  static void finalize(
-      const int /*size*/,
-      const int col,
-      EigenMatrixMap<float>& /*y_mat*/) {}
-
-  static bool runNeon() {
-    return false;
-  }
-};
-
 #ifdef __ARM_NEON__
 
-bool isNeonEligible(int inputH, int inputW,
-                    int outputH, int outputW,
-                    int kH, int kW,
-                    int strideH, int strideW,
-                    int padT, int padL, int padB, int padR,
-                    int dilationH, int dilationW,
-                    const float* input,
-                    float* output) {
+bool isNeon4x4p0s0Eligible(
+    int inputH,
+    int inputW,
+    int outputH,
+    int outputW,
+    int kH,
+    int kW,
+    int strideH,
+    int strideW,
+    int padT,
+    int padL,
+    int padB,
+    int padR,
+    int dilationH,
+    int dilationW,
+    const float* input,
+    float* output) {
   // Use this kernel only if:
   // Kernel width is 4x4
   // Kernel stride is 4x4
@@ -103,20 +46,21 @@ bool isNeonEligible(int inputH, int inputW,
   bool outputOk = ((inputH % outputH) == 0) && ((inputW % outputW) == 0);
   bool inputOk = (inputW % 4 == 0) && (inputH % 4 == 0);
   bool alignOk = isPointerAligned(input, sizeof(float32x4_t)) &&
-    isPointerAligned(output, sizeof(float32x4_t));
+      isPointerAligned(output, sizeof(float32x4_t));
 
-  return kernelOk && strideOk && padOk && dilationOk &&
-    outputOk && inputOk && alignOk;
+  return kernelOk && strideOk && padOk && dilationOk && outputOk && inputOk &&
+      alignOk;
 }
 
 // Vectorizes 4x4p0s0 averge pooling for ARM NEON
-void avgPoolNeon4x4p0s0Plane(int inputH, int inputW,
-                             const float* input,
-                             float* output) {
+void avgPoolNeon4x4p0s0Plane(
+    int inputH,
+    int inputW,
+    const float* input,
+    float* output) {
   constexpr int kKernelHeight = 4;
   constexpr int kKernelWidth = 4;
-  constexpr float kDiv =
-    (1.0f / ((float) kKernelHeight * (float) kKernelWidth));
+  constexpr float kDiv = (1.0f / ((float)kKernelHeight * (float)kKernelWidth));
 
   // Handle portion that can be unrolled by 4
   constexpr int kUnroll = 4;
@@ -202,10 +146,13 @@ void avgPoolNeon4x4p0s0Plane(int inputH, int inputW,
   }
 }
 
-void
-runNeonAveragePool4x4p0s0NCHW(int N, int C, int inputH, int inputW,
-                              const float* input,
-                              float* output) {
+void runNeonAveragePool4x4p0s0NCHW(
+    int N,
+    int C,
+    int inputH,
+    int inputW,
+    const float* input,
+    float* output) {
   // We only have the 4x4p0s0 implementation at present, which is
   // checked at a higher level
   int outputH = inputH / 4;
@@ -220,9 +167,291 @@ runNeonAveragePool4x4p0s0NCHW(int N, int C, int inputH, int inputW,
     }
   }
 }
+
+bool isNeon2x2p0s0Eligible(
+    int inputH,
+    int inputW,
+    int outputH,
+    int outputW,
+    int kH,
+    int kW,
+    int strideH,
+    int strideW,
+    int padT,
+    int padL,
+    int padB,
+    int padR,
+    int dilationH,
+    int dilationW,
+    const float* input,
+    float* output) {
+  // Use this kernel only if:
+  // Kernel width is 2x2
+  // Kernel stride is 2x2
+  // Padding is 0
+  // Dilation is 1
+  // Output width and height are even divisors of input width
+  // Input width and height are divisible by 4 (should be implied by
+  // all of the above, but just check again)
+  // Input and output pointers are aligned by float32x4_t
+
+  bool kernelOk = (kH == 2) && (kW == 2);
+  bool strideOk = (strideH == 2) && (strideW == 2);
+  bool padOk = (padT == 0) && (padL == 0) && (padB == 0) && (padR == 0);
+  bool dilationOk = (dilationH == 1) && (dilationW == 1);
+
+  bool outputOk = ((inputH % outputH) == 0) && ((inputW % outputW) == 0);
+  bool inputOk = (inputW % 4 == 0) && (inputH % 4 == 0);
+  bool alignOk = isPointerAligned(input, sizeof(float32x4_t)) &&
+      isPointerAligned(output, sizeof(float32x4_t));
+
+  return kernelOk && strideOk && padOk && dilationOk && outputOk && inputOk &&
+      alignOk;
+}
+
+// Vectorizes 2x2p0s0 averge pooling for ARM NEON
+void maxPoolNeon2x2p0s0Plane(
+    int inputH,
+    int inputW,
+    const float* input,
+    float* output) {
+  constexpr int kKernelHeight = 2;
+  constexpr int kKernelWidth = 2;
+
+  // Handle portion that can be unrolled by 4
+  constexpr int kUnroll = 4;
+  constexpr int kLoadSizeFloat = (sizeof(float32x4_t) / sizeof(float));
+  constexpr int kLoadCols = kUnroll * kLoadSizeFloat;
+
+  if (inputW % kLoadCols == 0) {
+    for (int h = 0; h < inputH; h += kKernelHeight) {
+      float* outputRow = output + (h / kKernelHeight) * (inputW / kKernelWidth);
+      const float* curInput = input + h * inputW;
+
+      for (int w = 0; w < inputW; w += kLoadCols) {
+        float32x2_t hmax_0, hmax_1, hmax_2, hmax_3;
+        {
+          float32x4_t v0_0 = vld1q_f32_aligned(curInput + 0 * inputW);
+          float32x4_t v0_1 = vld1q_f32_aligned(curInput + 1 * inputW);
+          float32x4_t vmax = vmaxq_f32(v0_0, v0_1);
+          hmax_0 = vpmax_f32(vget_low_f32(vmax), vget_high_f32(vmax));
+        }
+        curInput += kLoadSizeFloat;
+        {
+          float32x4_t v0_0 = vld1q_f32_aligned(curInput + 0 * inputW);
+          float32x4_t v0_1 = vld1q_f32_aligned(curInput + 1 * inputW);
+          float32x4_t vmax = vmaxq_f32(v0_0, v0_1);
+          hmax_1 = vpmax_f32(vget_low_f32(vmax), vget_high_f32(vmax));
+        }
+        curInput += kLoadSizeFloat;
+        {
+          float32x4_t v0_0 = vld1q_f32_aligned(curInput + 0 * inputW);
+          float32x4_t v0_1 = vld1q_f32_aligned(curInput + 1 * inputW);
+          float32x4_t vmax = vmaxq_f32(v0_0, v0_1);
+          hmax_2 = vpmax_f32(vget_low_f32(vmax), vget_high_f32(vmax));
+        }
+        curInput += kLoadSizeFloat;
+        {
+          float32x4_t v0_0 = vld1q_f32_aligned(curInput + 0 * inputW);
+          float32x4_t v0_1 = vld1q_f32_aligned(curInput + 1 * inputW);
+          float32x4_t vmax = vmaxq_f32(v0_0, v0_1);
+          hmax_3 = vpmax_f32(vget_low_f32(vmax), vget_high_f32(vmax));
+        }
+        curInput += kLoadSizeFloat;
+
+        float32x4_t out_0 = vcombine_f32(hmax_0, hmax_1);
+        float32x4_t out_1 = vcombine_f32(hmax_2, hmax_3);
+        vst1q_f32_aligned(&outputRow[w / kKernelWidth + 0], out_0);
+        vst1q_f32_aligned(&outputRow[w / kKernelWidth + 4], out_1);
+      }
+    }
+  } else {
+    // Not unrolled
+    for (int h = 0; h < inputH; h += kKernelHeight) {
+      const float* inputRow = input + h * inputW;
+      float* outputRow = output + (h / kKernelHeight) * (inputW / kKernelWidth);
+
+      for (int w = 0; w < inputW; w += kKernelWidth * 2) {
+        const float* curInput = inputRow + w;
+        float32x4_t v0_0 = vld1q_f32_aligned(curInput + 0 * inputW);
+        float32x4_t v0_1 = vld1q_f32_aligned(curInput + 1 * inputW);
+        float32x4_t vmax = vmaxq_f32(v0_0, v0_1);
+        float32x2_t hmax = vpmax_f32(vget_low_f32(vmax), vget_high_f32(vmax));
+        vst1_f32(&outputRow[w / kKernelWidth], hmax);
+      }
+    }
+  }
+}
+
+void runNeonMaxPool2x2p0s0NCHW(
+    int N,
+    int C,
+    int inputH,
+    int inputW,
+    const float* input,
+    float* output) {
+  // We only have the 2x2p0s0 implementation at present, which is
+  // checked at a higher level
+  int outputH = inputH / 2;
+  int outputW = inputW / 2;
+
+  for (int n = 0; n < N; ++n) {
+    for (int c = 0; c < C; ++c) {
+      const float* curInput = input + (n * C + c) * inputH * inputW;
+      float* curOutput = output + (n * C + c) * outputH * outputW;
+      maxPoolNeon2x2p0s0Plane(inputH, inputW, curInput, curOutput);
+    }
+  }
+}
 #endif // __ARM_NEON__
 
-}  // namespace
+} // namespace
+
+template <typename T>
+class AveragePool {
+ public:
+  static float initialize() {
+    return 0.0;
+  }
+
+  static void process(
+      const int x_col,
+      const int y_col,
+      ConstEigenMatrixMap<float>& x_mat,
+      EigenMatrixMap<float>& y_mat) {
+    y_mat.col(y_col) += x_mat.col(x_col);
+  }
+
+  static void process(const T& x_data, T& y_data) {
+    y_data += x_data;
+  }
+
+  static void finalize(const int size, T& y_data) {
+    y_data /= size;
+  }
+
+  static void
+  finalize(const int size, const int col, EigenMatrixMap<float>& y_mat) {
+    y_mat.col(col) /= size;
+  }
+
+  static bool runSpecialized(
+      int N,
+      int C,
+      int inputH,
+      int inputW,
+      int outputH,
+      int outputW,
+      int kH,
+      int kW,
+      int strideH,
+      int strideW,
+      int padT,
+      int padL,
+      int padB,
+      int padR,
+      int dilationH,
+      int dilationW,
+      const float* input,
+      float* output) {
+#ifdef __ARM_NEON__
+    if (isNeon4x4p0s0Eligible(
+            inputH,
+            inputW,
+            outputH,
+            outputW,
+            kH,
+            kW,
+            strideH,
+            strideW,
+            padT,
+            padL,
+            padB,
+            padR,
+            dilationH,
+            dilationW,
+            input,
+            output)) {
+      runNeonAveragePool4x4p0s0NCHW(N, C, inputH, inputW, input, output);
+      return true;
+    }
+#endif
+    return false;
+  }
+};
+
+template <typename T>
+class MaxPool {
+ public:
+  static float initialize() {
+    return std::numeric_limits<float>::lowest();
+  }
+
+  static void process(
+      const int x_col,
+      const int y_col,
+      ConstEigenMatrixMap<float>& x_mat,
+      EigenMatrixMap<float>& y_mat) {
+    y_mat.col(y_col) = y_mat.col(y_col).cwiseMax(x_mat.col(x_col));
+  }
+
+  static void process(const T& x_data, T& y_data) {
+    if (x_data > y_data) {
+      y_data = x_data;
+    }
+  }
+
+  static void finalize(const int /*size*/, T& /*y_data*/) {}
+
+  static void finalize(
+      const int /*size*/,
+      const int col,
+      EigenMatrixMap<float>& /*y_mat*/) {}
+
+  static bool runSpecialized(
+      int N,
+      int C,
+      int inputH,
+      int inputW,
+      int outputH,
+      int outputW,
+      int kH,
+      int kW,
+      int strideH,
+      int strideW,
+      int padT,
+      int padL,
+      int padB,
+      int padR,
+      int dilationH,
+      int dilationW,
+      const float* input,
+      float* output) {
+#ifdef __ARM_NEON__
+    if (isNeon2x2p0s0Eligible(
+            inputH,
+            inputW,
+            outputH,
+            outputW,
+            kH,
+            kW,
+            strideH,
+            strideW,
+            padT,
+            padL,
+            padB,
+            padR,
+            dilationH,
+            dilationW,
+            input,
+            output)) {
+      runNeonMaxPool2x2p0s0NCHW(N, C, inputH, inputW, input, output);
+      return true;
+    }
+#endif
+    return false;
+  }
+};
 
 template <typename T, class Context, typename PoolType>
 bool PoolOp<T, Context, PoolType>::RunOnDeviceWithOrderNCHW() {
@@ -243,30 +472,30 @@ bool PoolOp<T, Context, PoolType>::RunOnDeviceWithOrderNCHW() {
   int pooled_width = kernel_.size() > 1 ? Y->dim32(3) : 1;
   int pooled_depth = kernel_.size() > 2 ? Y->dim32(4) : 1;
 
-#ifdef __ARM_NEON__
   // We specialize certain variants on ARM for vectorization
-  if (PoolType::runNeon() && isNeonEligible(
-                                 X.dim32(2),
-                                 X.dim32(3),
-                                 Y->dim32(2),
-                                 Y->dim32(3),
-                                 kernel_h(),
-                                 kernel_w(),
-                                 stride_h(),
-                                 stride_w(),
-                                 pad_t(),
-                                 pad_l(),
-                                 pad_b(),
-                                 pad_r(),
-                                 dilation_h(),
-                                 dilation_w(),
-                                 Xdata,
-                                 Ydata)) {
-    runNeonAveragePool4x4p0s0NCHW(
-        X.dim32(0), X.dim32(1), X.dim32(2), X.dim32(3), Xdata, Ydata);
+  if (kernel_.size() == 2 &&
+      PoolType::runSpecialized(
+          X.dim32(0),
+          X.dim32(1),
+          X.dim32(2),
+          X.dim32(3),
+          Y->dim32(2),
+          Y->dim32(3),
+          kernel_h(),
+          kernel_w(),
+          stride_h(),
+          stride_w(),
+          pad_t(),
+          pad_l(),
+          pad_b(),
+          pad_r(),
+          dilation_h(),
+          dilation_w(),
+          Xdata,
+          Ydata)) {
     return true;
   }
-#endif // __ARM_NEON__
+
   switch (kernel_.size()) {
     case 1:
       for (int n = 0; n < X.dim32(0); ++n) {
@@ -450,8 +679,8 @@ bool PoolOp<T, Context, PoolType>::RunOnDeviceWithOrderNHWC() {
             }
           }
         }
-    }
-    break;
+      }
+      break;
     default:
       CAFFE_THROW("Unsupported pooling size : ", kernel_.size());
       return false;
@@ -465,48 +694,60 @@ REGISTER_CPU_OPERATOR(
     PoolOp<float, CPUContext, AveragePool<float>>);
 
 OPERATOR_SCHEMA(AveragePool)
-  .NumInputs(1)
-  .NumOutputs(1)
-  .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForPool)
-  .SetDoc(R"DOC(
+    .NumInputs(1)
+    .NumOutputs(1)
+    .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForPool)
+    .SetDoc(R"DOC(
 AveragePool consumes an input blob X and applies average pooling across the
 the blob according to kernel sizes, stride sizes, and pad lengths defined by the
 ConvPoolOpBase operator. Average pooling consisting of averaging all values of a
 subset of the input tensor according to the kernel size and downsampling the
 data into the output blob Y for further processing.
   )DOC")
-  .Input(0, "X", "Input data tensor from the previous operator; dimensions "
-  "depend on whether the NCHW or NHWC operators are being used. For example, "
-  "in the former, the input has size (N x C x H x W), where N is the batch "
-  "size, C is the number of channels, and H and W are the height and the width "
-  "of the data. The corresponding permutation of dimensions is used in the "
-  "latter case. ")
-  .Output(0, "Y", "Output data tensor from average pooling across the input "
-  "tensor. Dimensions will vary based on various kernel, stride, and pad "
-  "sizes.");
+    .Input(
+        0,
+        "X",
+        "Input data tensor from the previous operator; dimensions depend on "
+        "whether the NCHW or NHWC operators are being used. For example, in "
+        "the former, the input has size (N x C x H x W), where N is the batch "
+        "size, C is the number of channels, and H and W are the height and the "
+        "width of the data. The corresponding permutation of dimensions is "
+        "used in the latter case.")
+    .Output(
+        0,
+        "Y",
+        "Output data tensor from average pooling across the input "
+        "tensor. Dimensions will vary based on various kernel, stride, and pad "
+        "sizes.");
 
 REGISTER_CPU_OPERATOR(MaxPool, PoolOp<float, CPUContext, MaxPool<float>>);
 
 OPERATOR_SCHEMA(MaxPool)
-  .NumInputs(1)
-  .NumOutputs(1)
-  .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForPool)
-  .SetDoc(R"DOC(
+    .NumInputs(1)
+    .NumOutputs(1)
+    .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForPool)
+    .SetDoc(R"DOC(
 MaxPool consumes an input blob X and applies max pooling across the
 the blob according to kernel sizes, stride sizes, and pad lengths defined by the
 ConvPoolOpBase operator. Max pooling consisting of taking the maximumvalue of a
 subset of the input tensor according to the kernel size and downsampling the
 data into the output blob Y for further processing.
   )DOC")
-  .Input(0, "X", "Input data tensor from the previous operator; dimensions "
-  "depend on whether the NCHW or NHWC operators are being used. For example, "
-  "in the former, the input has size (N x C x H x W), where N is the batch "
-  "size, C is the number of channels, and H and W are the height and the width "
-  "of the data. The corresponding permutation of dimensions is used in the "
-  "latter case. ")
-  .Output(0, "Y", "Output data tensor from max pooling across the input "
-  "tensor. Dimensions will vary based on various kernel, stride, and pad "
-  "sizes.");
+    .Input(
+        0,
+        "X",
+        "Input data tensor from the previous operator; dimensions depend on "
+        "whether the NCHW or NHWC operators are being used. For example, in "
+        "the former, the input has size (N x C x H x W), where N is the batch "
+        "size, C is the number of channels, and H and W are the height and the "
+        "width of the data. The corresponding permutation of dimensions is "
+        "used in the latter case.")
+    .Output(
+        0,
+        "Y",
+        "Output data tensor from max pooling across the input "
+        "tensor. Dimensions will vary based on various kernel, stride, and pad "
+        "sizes.");
 
 }  // namespace
 }  // namespace caffe2

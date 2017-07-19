@@ -1,8 +1,20 @@
 #include "caffe2/utils/threadpool/ThreadPool.h"
 #include "caffe2/core/logging.h"
 
-CAFFE2_DEFINE_bool(caffe2_threadpool_force_inline, false,
-                   "Force to always run jobs on the calling thread");
+#if CAFFE2_ANDROID
+#include <cpu-features.h>
+#endif
+
+CAFFE2_DEFINE_bool(
+    caffe2_threadpool_force_inline,
+    false,
+    "Force to always run jobs on the calling thread");
+
+// Whether or not threadpool caps apply to Android
+CAFFE2_DEFINE_int(caffe2_threadpool_android_cap, true, "");
+
+// Whether or not threadpool caps apply to iOS
+CAFFE2_DEFINE_int(caffe2_threadpool_ios_cap, false, "");
 
 #if CAFFE2_THREADPOOL_MOBILE
 
@@ -20,6 +32,50 @@ constexpr size_t kDefaultMinWorkSize = 80;
 constexpr float kDefaultImbalanceRatio = 1.0f;
 #endif
 
+std::unique_ptr<ThreadPool> ThreadPool::defaultThreadPool() {
+  int numThreads = std::thread::hardware_concurrency();
+
+#ifdef CAFFE2_ANDROID
+  // std::thread::hardware_concurrency returns online cores
+  // (sysconf(_SC_NPROCESSORS_ONLN)), but we want the total number of CPUs. In
+  // most cases they will match, but since the threadpool is instantiated once,
+  // we want the number of threads for each device to be predictable.
+  int numCpus = android_getCpuCount();
+  LOG(INFO) << "Android cpu count: " << numCpus
+            << ", hardware_concurrency: " << numThreads;
+  numThreads = numCpus;
+#endif
+
+  bool applyCap = false;
+#if CAFFE2_ANDROID
+  applyCap = caffe2::FLAGS_caffe2_threadpool_android_cap;
+#elif CAFFE2_IOS
+  applyCap = caffe2::FLAGS_caffe2_threadpool_ios_cap;
+#else
+#error Undefined architecture
+#endif
+
+  if (applyCap) {
+    // 1 core  -> 1 thread
+    // 2 cores -> 2 threads
+    // 4 cores -> 2 threads
+    // 8 cores -> 4 threads
+    // more, continue limiting to half of available cores
+
+    if (numThreads <= 3) {
+      // no change
+    } else if (numThreads <= 5) {
+      // limit to 2
+      numThreads = 2;
+    } else {
+      // Use half the cores
+      numThreads = numThreads / 2;
+    }
+  }
+  LOG(INFO) << "Constructing thread pool with " << numThreads << " threads";
+  return caffe2::make_unique<ThreadPool>(numThreads);
+}
+
 ThreadPool::ThreadPool(int numThreads)
     : fn_(nullptr),
       workItemsPending_(0),
@@ -27,7 +83,8 @@ ThreadPool::ThreadPool(int numThreads)
       threadsReady_(0),
       minWorkSize_(kDefaultMinWorkSize)
 #ifdef CAFFE2_THREADPOOL_MAIN_IMBALANCE
-    , imbalanceRatio_(kDefaultImbalanceRatio)
+      ,
+      imbalanceRatio_(kDefaultImbalanceRatio)
 #endif
 {
   std::lock_guard<std::mutex> guard(mutex_);
@@ -35,15 +92,13 @@ ThreadPool::ThreadPool(int numThreads)
   // All worker threads (and the main thread) have a ThreadInfo
   for (auto i = 0; i < numThreads; ++i) {
     threadInfo_.emplace_back(
-      MakeAligned<ThreadInfo>::make(kCacheLineSize, i, numThreads));
+        MakeAligned<ThreadInfo>::make(kCacheLineSize, i, numThreads));
   }
 
   // The first ThreadInfo is for the main thread
   for (auto i = 1; i < numThreads; ++i) {
     auto pInfo = &(threadInfo_[i]);
-    auto fn = [pInfo, this, i]() {
-      (*pInfo)->threadMain(i, this);
-    };
+    auto fn = [pInfo, this, i]() { (*pInfo)->threadMain(i, this); };
 
     threads_.emplace_back(std::thread(std::move(fn)));
   }
@@ -65,26 +120,23 @@ ThreadPool::~ThreadPool() {
   }
 }
 
-int
-ThreadPool::getNumThreads() const {
+int ThreadPool::getNumThreads() const {
   std::lock_guard<std::mutex> guard(executionMutex_);
 
   return threadInfo_.size();
 }
 
-  // Sets the minimum work size (range) for which to invoke the
-  // threadpool; work sizes smaller than this will just be run on the
-  // main (calling) thread
-void
-ThreadPool::setMinWorkSize(size_t size) {
+// Sets the minimum work size (range) for which to invoke the
+// threadpool; work sizes smaller than this will just be run on the
+// main (calling) thread
+void ThreadPool::setMinWorkSize(size_t size) {
   std::lock_guard<std::mutex> guard(executionMutex_);
 
   minWorkSize_ = size;
 }
 
 #ifdef CAFFE2_THREADPOOL_MAIN_IMBALANCE
-void
-ThreadPool::setImbalanceRatio(float ratio) {
+void ThreadPool::setImbalanceRatio(float ratio) {
   std::lock_guard<std::mutex> guard(executionMutex_);
 
   imbalanceRatio_ = ratio;
@@ -92,8 +144,7 @@ ThreadPool::setImbalanceRatio(float ratio) {
 #endif
 
 #ifdef CAFFE2_THREADPOOL_STATS
-std::vector<ThreadStats>
-ThreadPool::getStats(bool reset) {
+std::vector<ThreadStats> ThreadPool::getStats(bool reset) {
   std::lock_guard<std::mutex> guard(executionMutex_);
 
   // Set up thread state
@@ -123,14 +174,13 @@ ThreadPool::getStats(bool reset) {
 }
 #endif
 
-void
-ThreadPool::run(const std::function<void(int, size_t)>& fn, size_t range) {
+void ThreadPool::run(const std::function<void(int, size_t)>& fn, size_t range) {
   std::lock_guard<std::mutex> guard(executionMutex_);
 
   // If there are no worker threads, or if the range is too small (too
   // little work), just run locally
   bool runLocally = threads_.empty() || range < minWorkSize_ ||
-                    FLAGS_caffe2_threadpool_force_inline;
+      FLAGS_caffe2_threadpool_force_inline;
 
   auto numThreads = threadInfo_.size();
   size_t workUnitsPerThread = 0;
@@ -140,25 +190,24 @@ ThreadPool::run(const std::function<void(int, size_t)>& fn, size_t range) {
   if (!runLocally) {
     size_t workUnitsPerThread = (numThreads + range - 1) / numThreads;
 
-    // On mobile devices (especially big.LITTLE cores), there is
-    // significant lag in getting other threads to participate versus
-    // the current thread, which is likely already running on a big
-    // core.
-    // Based on tests, the main thread will execute (through its own
-    // work and stealing others) about 25% more work than other
-    // threads.
-    // To reduce the work stealing overhead, give the main thread 25%
-    // more work to start with.
+// On mobile devices (especially big.LITTLE cores), there is
+// significant lag in getting other threads to participate versus
+// the current thread, which is likely already running on a big
+// core.
+// Based on tests, the main thread will execute (through its own
+// work and stealing others) about 25% more work than other
+// threads.
+// To reduce the work stealing overhead, give the main thread 25%
+// more work to start with.
 #ifdef CAFFE2_THREADPOOL_MAIN_IMBALANCE
-    firstThreadWork = (size_t) (imbalanceRatio_ * workUnitsPerThread);
+    firstThreadWork = (size_t)(imbalanceRatio_ * workUnitsPerThread);
     if (firstThreadWork >= range) {
       // give all to first thread
       runLocally = true;
     }
 
     size_t remainderWork = range - firstThreadWork;
-    otherThreadWork =
-      ((numThreads - 1) + remainderWork - 1) / (numThreads - 1);
+    otherThreadWork = ((numThreads - 1) + remainderWork - 1) / (numThreads - 1);
 #else
     firstThreadWork = workUnitsPerThread;
     otherThreadWork = workUnitsPerThread;
@@ -251,8 +300,7 @@ ThreadPool::run(const std::function<void(int, size_t)>& fn, size_t range) {
   }
 }
 
-void
-ThreadInfo::threadMain(int threadId, ThreadPool* pool) {
+void ThreadInfo::threadMain(int threadId, ThreadPool* pool) {
   long lastProcessedWorkId = 0;
 
   while (true) {
@@ -289,8 +337,7 @@ ThreadInfo::threadMain(int threadId, ThreadPool* pool) {
   }
 }
 
-bool
-ThreadInfo::runAndSteal(int threadId, ThreadPool* pool) {
+bool ThreadInfo::runAndSteal(int threadId, ThreadPool* pool) {
   auto lambdaFunctionToRun = pool->fn_;
   int localItemsCompleted = 0;
   int localItemsStolen = 0;
@@ -312,8 +359,7 @@ ThreadInfo::runAndSteal(int threadId, ThreadPool* pool) {
   }
 
   // Done, now look for other threads' items to steal
-  for (auto i = (threadId_ + 1) % numThreads_;
-       i != threadId_;
+  for (auto i = (threadId_ + 1) % numThreads_; i != threadId_;
        i = (i + 1) % numThreads_) {
     auto& otherThread = pool->threadInfo_[i];
 
@@ -339,7 +385,7 @@ ThreadInfo::runAndSteal(int threadId, ThreadPool* pool) {
 
   if (localItemsCompleted > 0) {
     auto numRemaining =
-      (pool->workItemsPending_ -= localItemsCompleted); // atomic
+        (pool->workItemsPending_ -= localItemsCompleted); // atomic
     DCHECK_GE(numRemaining, 0);
 
     if (numRemaining == 0) {

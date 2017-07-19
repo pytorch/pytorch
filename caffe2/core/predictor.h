@@ -14,6 +14,7 @@ class Predictor {
       const NetDef& init_net,
       const NetDef& run_net,
       Workspace* parent = nullptr);
+  ~Predictor();
 
   // Executes `run_net` on the inputs.
   // The first `inputs.size()` inputs from run_net::external_inputs
@@ -24,7 +25,9 @@ class Predictor {
 
   // Postcondition:
   //   outputs->size() == run_net.external_inputs.size()
-  void run(const TensorVector& inputs, TensorVector* outputs);
+
+  // Returns true on success
+  bool run(const TensorVector& inputs, TensorVector* outputs);
 
   const NetDef& def() const {
     return run_net_;

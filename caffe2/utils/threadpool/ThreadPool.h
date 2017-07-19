@@ -16,14 +16,14 @@
 // Compile-time flag to control usage of main thread work imbalance
 // #define CAFFE2_THREADPOOL_MAIN_IMBALANCE
 
+#include <stdlib.h> // posix_memalign
 #include <atomic>
 #include <condition_variable>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <thread>
 #include <vector>
-#include <functional>
-#include <stdlib.h> // posix_memalign
 
 //
 // A work-stealing threadpool loosely based off of pthreadpool
@@ -39,15 +39,15 @@ struct AllocAligned {
   template <typename... Args>
   static T* alloc(size_t align, Args&&... args) {
     void* p = nullptr;
-    // FIXME: we should just be able to use std::align
+// FIXME: we should just be able to use std::align
 #if !defined(__ANDROID__)
-    posix_memalign((void**) &p, align, sizeof(T));
+    posix_memalign((void**)&p, align, sizeof(T));
 #else
     p = memalign(align, sizeof(T));
 #endif
 
     if (p) {
-      return new(p) T(std::forward<Args>(args)...);
+      return new (p) T(std::forward<Args>(args)...);
     }
 
     return nullptr;
@@ -57,7 +57,7 @@ struct AllocAligned {
   static void release(T* p) {
     if (p) {
       p->~T();
-      free((void*) p);
+      free((void*)p);
     }
   }
 };
@@ -74,10 +74,11 @@ struct AlignedDeleter {
 template <typename T>
 struct MakeAligned {
   template <typename... Args>
-  static std::unique_ptr<T, AlignedDeleter<T>> make(size_t align,
-                                                    Args&&... args) {
+  static std::unique_ptr<T, AlignedDeleter<T>> make(
+      size_t align,
+      Args&&... args) {
     return std::unique_ptr<T, AlignedDeleter<T>>(
-      AllocAligned<T>::alloc(align, std::forward<Args>(args)...));
+        AllocAligned<T>::alloc(align, std::forward<Args>(args)...));
   }
 };
 
@@ -85,9 +86,7 @@ struct ThreadPool;
 
 #ifdef CAFFE2_THREADPOOL_STATS
 struct ThreadStats {
-  inline ThreadStats() :
-      numAssigned(0), numWorkedOn(0), numStolen(0) {
-  }
+  inline ThreadStats() : numAssigned(0), numWorkedOn(0), numStolen(0) {}
 
   inline void reset() {
     numAssigned = 0;
@@ -102,14 +101,13 @@ struct ThreadStats {
 #endif
 
 struct alignas(kCacheLineSize) ThreadInfo {
-  inline ThreadInfo(int threadId, int numThreads) :
-    rangeStart_(0),
-    rangeEnd_(0),
-    rangeLength_(0),
-    wantExit_(false),
-    threadId_(threadId),
-    numThreads_(numThreads) {
-  }
+  inline ThreadInfo(int threadId, int numThreads)
+      : rangeStart_(0),
+        rangeEnd_(0),
+        rangeLength_(0),
+        wantExit_(false),
+        threadId_(threadId),
+        numThreads_(numThreads) {}
 
   // Entry point for all worker threads
   void threadMain(int threadId, ThreadPool* pool);
@@ -154,9 +152,10 @@ struct alignas(kCacheLineSize) ThreadInfo {
 };
 
 class alignas(kCacheLineSize) ThreadPool {
-  public:
+ public:
   // Constructs a work-stealing threadpool with the given number of
   // threads
+  static std::unique_ptr<ThreadPool> defaultThreadPool();
   ThreadPool(int numThreads);
 
   // Shuts down all worker threads (if any) before destroying ourselves
@@ -169,7 +168,9 @@ class alignas(kCacheLineSize) ThreadPool {
   // threadpool; work sizes smaller than this will just be run on the
   // main (calling) thread
   void setMinWorkSize(size_t size);
-  size_t getMinWorkSize() const { return minWorkSize_; }
+  size_t getMinWorkSize() const {
+    return minWorkSize_;
+  }
 
 #ifdef CAFFE2_THREADPOOL_MAIN_IMBALANCE
   // Set imbalance factor for the main thread versus other threads;
@@ -186,7 +187,7 @@ class alignas(kCacheLineSize) ThreadPool {
   std::vector<ThreadStats> getStats(bool reset = false);
 #endif
 
-  protected:
+ protected:
   friend struct ThreadInfo;
 
   // What we are currently working on
@@ -220,8 +221,8 @@ class alignas(kCacheLineSize) ThreadPool {
   size_t threadsReady_;
 
   // The first entry is always for the main thread
-  std::vector<
-    std::unique_ptr<ThreadInfo, AlignedDeleter<ThreadInfo>>> threadInfo_;
+  std::vector<std::unique_ptr<ThreadInfo, AlignedDeleter<ThreadInfo>>>
+      threadInfo_;
 
   // Set of threads that we are managing
   std::vector<std::thread> threads_;
@@ -243,4 +244,4 @@ class alignas(kCacheLineSize) ThreadPool {
 
 #endif // CAFFE2_THREADPOOL_MOBILE
 
-#endif  // CAFFE2_UTILS_THREADPOOL_H_
+#endif // CAFFE2_UTILS_THREADPOOL_H_
