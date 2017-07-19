@@ -548,14 +548,20 @@ bool ConvTransposeMobileOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   // need buffers for the worker threads
   size_t colBlockSize = W + kernel_w_ / stride_w_;
   size_t threadYBufferSize = C * outputH * colBlockSize * stride_w_;
+  // Require 16 byte alignment, so 4-element alignment as these are floats.
+  size_t threadYBufferSizeAligned =
+      ((C * outputH * colBlockSize * stride_w_ + 3) / 4) * 4;
   size_t threadColBufferSize = C * kernel_h_ * kernel_w_ * W;
 
   // Work around GCC 4.9 bug when this is declared inside the inner lambda.
-  auto runLocalTile = [&](TensorCPU* threadBuffer, int threadId, size_t tileId) {
-    auto localYData = threadBuffer->template mutable_data<T>() + threadId * threadYBufferSize;
+  auto runLocalTile = [&](TensorCPU* threadBuffer,
+                          int threadId,
+                          size_t tileId) {
+    auto localYData = threadBuffer->template mutable_data<T>() +
+        threadId * threadYBufferSizeAligned;
 
     auto localColBufferData = threadBuffer->template mutable_data<T>() +
-    numThreads * threadYBufferSize + threadId * threadColBufferSize;
+        numThreads * threadYBufferSizeAligned + threadId * threadColBufferSize;
 
     runTileContiguous<T, Context>(tileId,
                                   N,
@@ -578,11 +584,14 @@ bool ConvTransposeMobileOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   };
 
   auto f = [&](Tensor<Context>* threadBuffer) {
-    threadBuffer->Resize(numThreads * threadYBufferSize + numThreads * threadColBufferSize);
+    threadBuffer->Resize(
+        numThreads * threadYBufferSizeAligned +
+        numThreads * threadColBufferSize);
     // Group together thread buffers for accumulation
     std::vector<T*> toSum(numThreads - 1);
     for (int i = 1; i < numThreads; ++i) {
-      toSum[i - 1] = threadBuffer->template mutable_data<T>() + i * threadYBufferSize;
+      toSum[i - 1] = threadBuffer->template mutable_data<T>() +
+          i * threadYBufferSizeAligned;
     }
 
     for (auto image_id = 0; image_id < N; ++image_id) {
@@ -591,7 +600,10 @@ bool ConvTransposeMobileOp<T, Context>::RunOnDeviceWithOrderNCHW() {
       // The column buffers are overwritten by the matrix multiplication
       // each time, so we need not clear them out each round
       math::Set<T, Context>(
-          numThreads * threadYBufferSize, 0, threadBuffer->template mutable_data<T>(), &context_);
+          numThreads * threadYBufferSizeAligned,
+          0,
+          threadBuffer->template mutable_data<T>(),
+          &context_);
 
       // Run tiled gemm and col2im in our threadpool; all of these tiles
       // are guaranteed to be full tiles

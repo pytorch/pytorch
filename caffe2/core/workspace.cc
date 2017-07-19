@@ -16,17 +16,6 @@ CAFFE2_DEFINE_bool(
     false,
     "If true, workspace destructor will print all blob shapes");
 
-#if CAFFE2_MOBILE
-// Threadpool restrictions
-
-// Whether or not threadpool caps apply to Android
-CAFFE2_DEFINE_int(caffe2_threadpool_android_cap, true, "");
-
-// Whether or not threadpool caps apply to iOS
-CAFFE2_DEFINE_int(caffe2_threadpool_ios_cap, false, "");
-
-#endif // CAFFE2_MOBILE
-
 namespace caffe2 {
 
 void Workspace::PrintBlobSizes() {
@@ -143,8 +132,7 @@ const Blob* Workspace::GetBlob(const string& name) const {
 }
 
 Blob* Workspace::GetBlob(const string& name) {
-  return const_cast<Blob*>(
-      static_cast<const Workspace*>(this)->GetBlob(name));
+  return const_cast<Blob*>(static_cast<const Workspace*>(this)->GetBlob(name));
 }
 
 NetBase* Workspace::CreateNet(const NetDef& net_def, bool overwrite) {
@@ -232,51 +220,18 @@ bool Workspace::RunNetOnce(const NetDef& net_def) {
   return true;
 }
 
-bool Workspace::RunPlan(const PlanDef& plan,
-                        ShouldContinue shouldContinue) {
+bool Workspace::RunPlan(const PlanDef& plan, ShouldContinue shouldContinue) {
   return RunPlanOnWorkspace(this, plan, shouldContinue);
 }
 
 #if CAFFE2_MOBILE
 ThreadPool* Workspace::GetThreadPool() {
   std::lock_guard<std::mutex> guard(thread_pool_creation_mutex_);
-
   if (!thread_pool_) {
-    int numThreads = std::thread::hardware_concurrency();
-
-    bool applyCap = false;
-#if CAFFE2_ANDROID
-    applyCap = caffe2::FLAGS_caffe2_threadpool_android_cap;
-#elif CAFFE2_IOS
-    applyCap = caffe2::FLAGS_caffe2_threadpool_ios_cap;
-#else
-#error Undefined architecture
-#endif
-
-    if (applyCap) {
-      // 1 core  -> 1 thread
-      // 2 cores -> 2 threads
-      // 4 cores -> 3 threads
-      // 8 cores -> 4 threads
-      // more, continue limiting to half of available cores
-
-      if (numThreads <= 3) {
-        // no change
-      } else if (numThreads <= 5) {
-        // limit to 3
-        numThreads = 3;
-      } else {
-        // Use half the cores
-        numThreads = numThreads / 2;
-      }
-    }
-
-    LOG(INFO) << "Constructing thread pool with " << numThreads << " threads";
-    thread_pool_.reset(new ThreadPool(numThreads));
+    thread_pool_ = ThreadPool::defaultThreadPool();
   }
-
   return thread_pool_.get();
 }
 #endif // CAFFE2_MOBILE
 
-}  // namespace caffe2
+} // namespace caffe2

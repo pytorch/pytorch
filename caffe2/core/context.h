@@ -53,7 +53,7 @@ struct DefaultCPUAllocator final : CPUAllocator {
 #else
     CAFFE_ENFORCE_EQ(posix_memalign(&data, gCaffe2Alignment, nbytes), 0);
 #endif
-    CHECK(data) << "Failed to allocate " << nbytes << " bytes.";
+    CAFFE_ENFORCE(data);
     memset(data, 0, nbytes);
     return {data, Delete};
   }

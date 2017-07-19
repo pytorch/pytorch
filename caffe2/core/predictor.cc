@@ -40,17 +40,22 @@ Predictor::Predictor(
   CAFFE_ENFORCE(ws_.CreateNet(run_net));
 }
 
-void Predictor::run(const TensorVector& inputs, TensorVector* outputs) {
+Predictor::~Predictor() {}
+
+bool Predictor::run(const TensorVector& inputs, TensorVector* outputs) {
   CAFFE_ENFORCE(inputs.size() <= run_net_.external_input_size());
   for (auto i = 0; i < inputs.size(); ++i) {
     shareInputTensor(&ws_, run_net_.external_input(i), inputs[i]);
   }
 
-  CAFFE_ENFORCE(ws_.RunNet(run_net_.name()));
+  if (!ws_.RunNet(run_net_.name())) {
+    return false;
+  }
 
   outputs->resize(run_net_.external_output_size());
   for (auto i = 0; i < outputs->size(); ++i) {
     (*outputs)[i] = extractOutputTensor(&ws_, run_net_.external_output(i));
   }
+  return true;
 }
 }

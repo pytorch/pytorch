@@ -22,6 +22,15 @@
 
 #include "caffe2/core/init.h"
 
+#if CAFFE2_ANDROID
+#ifndef SYS_gettid
+#define SYS_gettid __NR_gettid
+#endif
+#ifndef SYS_tgkill
+#define SYS_tgkill __NR_tgkill
+#endif
+#endif
+
 namespace {
 
 struct sigaction previousSighup;
