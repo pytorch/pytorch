@@ -4,8 +4,6 @@
 
 #include <sstream>
 
-using namespace torch::autograd;
-
 // TODO: THIS IMPLEMENTATION CURRENTLY LEAKS IF STORED PYTHON OBJECTS IN AST
 // HAVE BACK REFERENCES, DUE TO CYCLE.  Need to fix this at some point.
 

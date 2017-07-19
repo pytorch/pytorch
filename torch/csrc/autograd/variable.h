@@ -8,7 +8,6 @@
 
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/variable_version.h"
-#include "torch/csrc/jit/ir.h"
 #include "torch/csrc/Types.h"
 
 namespace torch { namespace autograd {

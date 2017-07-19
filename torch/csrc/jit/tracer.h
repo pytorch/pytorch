@@ -3,6 +3,7 @@
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/assert.h"
 #include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/jit/graph_fuser.h"
 
 #include <memory>
 #include <vector>
@@ -57,6 +58,9 @@ struct TracingState {
     JIT_ASSERT(tracing());
     auto r = std::move(frames.back());
     frames.pop_back();
+    std::cout << "GRAPH RECORDED\n" << *r.graph;
+    r.graph = FuseGraph(std::move(r.graph));
+    std::cout << "GRAPH FUSED\n" << *r.graph;
     return std::move(r.graph);
   }
 private:

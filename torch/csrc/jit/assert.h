@@ -24,10 +24,12 @@ void barf(const char *fmt, ...);
 
 #define JIT_ASSERT(cond) \
   if (__builtin_expect(!(cond), 0)) { \
-    ::torch::jit::barf("ASSERTION FAILED: file %s, line %u\n", __FILE__, __LINE__); \
+    ::torch::jit::barf("%s:%u: %s: Assertion `%s` failed.", __FILE__, __LINE__, __func__, #cond); \
   }
 
+//note: msg must be a string literal
+//node: In, ##__VA_ARGS '##' supresses the comma if __VA_ARGS__ is empty
 #define JIT_ASSERTM(cond, msg, ...) \
   if (__builtin_expect(!(cond), 0)) { \
-    ::torch::jit::barf(msg, __VA_ARGS__); \
+    ::torch::jit::barf("%s:%u: %s: Assertion `%s` failed: " msg , __FILE__, __LINE__, __func__, #cond,##__VA_ARGS__); \
   }

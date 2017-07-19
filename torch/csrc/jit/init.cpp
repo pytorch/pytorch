@@ -17,4 +17,3 @@ PyObject * THPJIT_initExtension(PyObject *_unused)
 
   Py_RETURN_TRUE;
 }
-
