@@ -275,20 +275,32 @@ void THCudaBlas_Hgemm(THCState *state, char transa, char transb, long m, long n,
     cublasSetStream(handle, THCState_getCurrentStream(state));
 
     // Check for native Hgemm support
-    if (THC_fastHalfInstructions(state)) {
+/*    if (THC_fastHalfInstructions(state)) {
       THCublasCheck(cublasHgemm(handle, opa, opb,
 				i_m, i_n, i_k, &alpha, a, i_lda, b, i_ldb,
 				&beta, c, i_ldc));
-    } else {
+    } else {*/
       // Simulated Hgemm
       float fAlpha = THC_half2float(alpha);
       float fBeta = THC_half2float(beta);
 
+#if CUDA_VERSION < 9000
       THCublasCheck(cublasSgemmEx(handle, opa, opb,
 				  i_m, i_n, i_k, &fAlpha,
                                   a, CUDA_R_16F, i_lda, b, CUDA_R_16F,
 				  i_ldb, &fBeta, c, CUDA_R_16F, i_ldc));
-    }
+#else
+      THCublasCheck(cublasSetMathMode(handle, CUBLAS_TENSOR_OP_MATH));
+      THCublasCheck(cublasGemmEx(handle, opa, opb,
+				  i_m, i_n, i_k, &fAlpha,
+                                  a, CUDA_R_16F, i_lda, b, CUDA_R_16F,
+				  i_ldb, &fBeta, c, CUDA_R_16F, i_ldc,
+				  CUDA_R_32F, CUBLAS_GEMM_DFALT_TENSOR_OP));
+      THCublasCheck(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
+
+						  
+#endif
+//    }
 
     return;
   }
