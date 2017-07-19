@@ -449,4 +449,15 @@ void THCTensor_(range)(THCState *state, THCTensor *r_, accreal xmin, accreal xma
   THCudaCheck(cudaGetLastError());
 }
 
+void THCTensor_(arange)(THCState* state, THCTensor *r_, accreal xmin, accreal xmax, accreal step) {
+#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
+  int m = fmod(xmax - xmin, step) == 0;
+#else
+  int m = (xmax - xmin) % step == 0;
+#endif
+  if (m)
+    xmax -= step;
+  THCTensor_(range)(state, r_, xmin, xmax, step);
+}
+
 #endif
