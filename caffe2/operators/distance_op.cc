@@ -423,10 +423,10 @@ class GetDotProductWithPaddingGradient : public GradientMakerBase {
   vector<OperatorDef> GetGradientDefs() override {
     float pad_value = 0;
     bool replicate = false;
-    if (HasArgument(Def(), "pad_value")) {
+    if (ArgumentHelper::HasArgument(Def(), "pad_value")) {
       pad_value = GetArgument(Def(), "pad_value").f();
     }
-    if (HasArgument(Def(), "replicate")) {
+    if (ArgumentHelper::HasArgument(Def(), "replicate")) {
       replicate = GetArgument(Def(), "replicate").i();
     }
 

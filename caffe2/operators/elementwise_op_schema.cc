@@ -115,7 +115,7 @@ For example, the following tensor shapes are supported:
 class GetAddGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
-    if (!HasArgument(Def(), "broadcast")) {
+    if (!ArgumentHelper::HasArgument(Def(), "broadcast")) {
       SetDense(0, GO(0));
       SetDense(1, GO(0));
       return vector<OperatorDef>();
@@ -136,7 +136,7 @@ REGISTER_GRADIENT(Add, GetAddGradient);
 class GetSubGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
-    if (!HasArgument(Def(), "broadcast")) {
+    if (!ArgumentHelper::HasArgument(Def(), "broadcast")) {
       SetDense(0, GO(0));
       return SingleGradientDef(
           "Negative", "", vector<string>{GO(0)}, vector<string>{GI(1)});
@@ -150,17 +150,17 @@ class GetSubGradient : public GradientMakerBase {
           vector<string>{GI(1) + "_autogen_pre_red"}));
 
       Argument axis, axis_str, order;
-      if (HasArgument(Def(), "axis")) {
+      if (ArgumentHelper::HasArgument(Def(), "axis")) {
         axis = GetArgument(Def(), "axis");
       } else {
         axis = MakeArgument<int>("axis", -1);
       }
-      if (HasArgument(Def(), "axis_str")) {
+      if (ArgumentHelper::HasArgument(Def(), "axis_str")) {
         axis_str = GetArgument(Def(), "axis_str");
       } else {
         axis_str = MakeArgument<string>("axis_str", "");
       }
-      if (HasArgument(Def(), "order")) {
+      if (ArgumentHelper::HasArgument(Def(), "order")) {
         order = GetArgument(Def(), "order");
       } else {
         order = MakeArgument<string>("order", "NCHW");
@@ -190,7 +190,7 @@ class GetMulGradient : public GradientMakerBase {
         "Gradient computation cannot be carried out if Mul uses in-place "
         "computation: ",
         ProtoDebugString(Def()));
-    if (!HasArgument(Def(), "broadcast")) {
+    if (!ArgumentHelper::HasArgument(Def(), "broadcast")) {
       return vector<OperatorDef>{
           CreateOperatorDef(
               "Mul", "", vector<string>{GO(0), I(1)}, vector<string>{GI(0)}),
@@ -198,22 +198,22 @@ class GetMulGradient : public GradientMakerBase {
               "Mul", "", vector<string>{GO(0), I(0)}, vector<string>{GI(1)})};
     } else {
       Argument broadcast, axis, axis_str, order;
-      if (HasArgument(Def(), "broadcast")) {
+      if (ArgumentHelper::HasArgument(Def(), "broadcast")) {
         broadcast = GetArgument(Def(), "broadcast");
       } else {
         broadcast = MakeArgument<int>("broadcast", 0);
       }
-      if (HasArgument(Def(), "axis")) {
+      if (ArgumentHelper::HasArgument(Def(), "axis")) {
         axis = GetArgument(Def(), "axis");
       } else {
         axis = MakeArgument<int>("axis", -1);
       }
-      if (HasArgument(Def(), "axis_str")) {
+      if (ArgumentHelper::HasArgument(Def(), "axis_str")) {
         axis_str = GetArgument(Def(), "axis_str");
       } else {
         axis_str = MakeArgument<string>("axis_str", "");
       }
-      if (HasArgument(Def(), "order")) {
+      if (ArgumentHelper::HasArgument(Def(), "order")) {
         order = GetArgument(Def(), "order");
       } else {
         order = MakeArgument<string>("order", "NCHW");
@@ -254,7 +254,7 @@ class GetDivGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
     CAFFE_ENFORCE(
-        !HasArgument(Def(), "broadcast"),
+        !ArgumentHelper::HasArgument(Def(), "broadcast"),
         "Gradient not ready yet for Div with broadcasting.");
     return SingleGradientDef(
         "DivGradient",

@@ -101,32 +101,34 @@ class ImageInputOp final
 
 template <class Context>
 ImageInputOp<Context>::ImageInputOp(
-      const OperatorDef& operator_def, Workspace* ws)
-      : PrefetchOperator<Context>(operator_def, ws),
-        reader_(nullptr),
-        batch_size_(
-            OperatorBase::template GetSingleArgument<int>("batch_size", 0)),
-        multiple_label_(OperatorBase::template GetSingleArgument<int>(
-          "multiple_label", 0)),
-        num_labels_(OperatorBase::template GetSingleArgument<int>(
-          "num_labels", 0)),
-        color_(OperatorBase::template GetSingleArgument<int>("color", 1)),
-        scale_(OperatorBase::template GetSingleArgument<int>("scale", -1)),
-        minsize_(OperatorBase::template GetSingleArgument<int>("minsize", -1)),
-        warp_(OperatorBase::template GetSingleArgument<int>("warp", 0)),
-        crop_(OperatorBase::template GetSingleArgument<int>("crop", -1)),
-        mirror_(OperatorBase::template GetSingleArgument<int>("mirror", 0)),
-        is_test_(OperatorBase::template GetSingleArgument<int>("is_test", 0)),
-        use_caffe_datum_(OperatorBase::template GetSingleArgument<int>(
-              "use_caffe_datum", 0)),
-        gpu_transform_(OperatorBase::template GetSingleArgument<int>(
-              "use_gpu_transform", 0)),
-        num_decode_threads_(OperatorBase::template GetSingleArgument<int>(
-              "decode_threads", 4)),
-        thread_pool_(std::make_shared<TaskThreadPool>(num_decode_threads_)),
-        // output type only supported with CUDA and use_gpu_transform for now
-        output_type_(cast::GetCastDataType(this->arg_helper(), "output_type"))
-{
+    const OperatorDef& operator_def,
+    Workspace* ws)
+    : PrefetchOperator<Context>(operator_def, ws),
+      reader_(nullptr),
+      batch_size_(
+          OperatorBase::template GetSingleArgument<int>("batch_size", 0)),
+      multiple_label_(
+          OperatorBase::template GetSingleArgument<int>("multiple_label", 0)),
+      num_labels_(
+          OperatorBase::template GetSingleArgument<int>("num_labels", 0)),
+      color_(OperatorBase::template GetSingleArgument<int>("color", 1)),
+      scale_(OperatorBase::template GetSingleArgument<int>("scale", -1)),
+      minsize_(OperatorBase::template GetSingleArgument<int>("minsize", -1)),
+      warp_(OperatorBase::template GetSingleArgument<int>("warp", 0)),
+      crop_(OperatorBase::template GetSingleArgument<int>("crop", -1)),
+      mirror_(OperatorBase::template GetSingleArgument<int>("mirror", 0)),
+      is_test_(OperatorBase::template GetSingleArgument<int>("is_test", 0)),
+      use_caffe_datum_(
+          OperatorBase::template GetSingleArgument<int>("use_caffe_datum", 0)),
+      gpu_transform_(OperatorBase::template GetSingleArgument<int>(
+          "use_gpu_transform",
+          0)),
+      num_decode_threads_(
+          OperatorBase::template GetSingleArgument<int>("decode_threads", 4)),
+      thread_pool_(std::make_shared<TaskThreadPool>(num_decode_threads_)),
+      // output type only supported with CUDA and use_gpu_transform for now
+      output_type_(
+          cast::GetCastDataType(ArgumentHelper(operator_def), "output_type")) {
   mean_ = OperatorBase::template GetRepeatedArgument<float>(
     "mean_per_channel",
     {OperatorBase::template GetSingleArgument<float>("mean", 0.)});
