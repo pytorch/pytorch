@@ -93,6 +93,14 @@ def filter_unique_options(options, allow_kwarg, type_to_signature, remove_self):
 
 def enumerate_options_due_to_default(declaration,
                                      allow_kwarg=True, type_to_signature=[], remove_self=True):
+
+    # Checks to see if an argument with a default keyword is a Tensor that
+    # by default can be NULL. In this case, instead of generating another
+    # option that excludes this argument, we will instead generate a single
+    # function call that allows for the Tensor to be NULL
+    def is_nullable_tensor_arg(arg):
+        return arg['type'] == 'THTensor*' and arg['default'] == 'nullptr'
+
     # TODO(zach): in cwrap this is shared among all declarations
     # but seems to assume that all declarations will have the same
     new_options = []
