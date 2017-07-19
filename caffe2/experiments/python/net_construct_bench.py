@@ -72,7 +72,7 @@ def Create(args):
     )
 
     # Model building functions
-    def create_resnet50_model_ops(model):
+    def create_resnet50_model_ops(model, loss_scale):
         [softmax, loss] = resnet.create_resnet50(
             model,
             "data",
@@ -84,7 +84,7 @@ def Create(args):
         return [loss]
 
     # SGD
-    def add_parameter_update_ops(model, lr_scale):
+    def add_parameter_update_ops(model):
         model.AddWeightDecay(1e-4)
         ITER = model.Iter("ITER")
         stepsz = int(30)
