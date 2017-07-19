@@ -69,6 +69,10 @@ void cudnn_batch_norm_forward(
     mode = CUDNN_BATCHNORM_PER_ACTIVATION;
   } else {
     mode = CUDNN_BATCHNORM_SPATIAL;
+#if CUDNN_VERSION >= 7000
+    if(training)
+      mode = CUDNN_BATCHNORM_SPATIAL_PERSISTENT;
+#endif
   }
 
   TensorDescriptor idesc;  // input descriptor
@@ -131,6 +135,11 @@ void cudnn_batch_norm_backward(
     mode = CUDNN_BATCHNORM_PER_ACTIVATION;
   } else {
     mode = CUDNN_BATCHNORM_SPATIAL;
+#if CUDNN_VERSION >= 7000
+    if(training)
+      mode = CUDNN_BATCHNORM_SPATIAL_PERSISTENT;
+#endif
+
   }
 
   THVoidTensor_assertContiguous(input);

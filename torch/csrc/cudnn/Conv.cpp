@@ -238,11 +238,11 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgo_t> {
          CUDNN_CONVOLUTION_BWD_FILTER_ALGO_0,
          CUDNN_CONVOLUTION_BWD_FILTER_ALGO_1,
          CUDNN_CONVOLUTION_BWD_FILTER_ALGO_FFT,
+         CUDNN_CONVOLUTION_BWD_FILTER_ALGO_3,
+         CUDNN_CONVOLUTION_BWD_FILTER_ALGO_WINOGRAD_NONFUSED,
 #if CUDNN_VERSION >= 6000
          CUDNN_CONVOLUTION_BWD_FILTER_ALGO_FFT_TILING,
 #endif
-         CUDNN_CONVOLUTION_BWD_FILTER_ALGO_3,
-         CUDNN_CONVOLUTION_BWD_FILTER_ALGO_WINOGRAD_NONFUSED,
     };
     size_t max_ws_size = getMaxWorkspaceSize<cudnnConvolutionBwdFilterAlgo_t>(handle,conv,algo,sizeof(algo)/sizeof(algo[0]),state);
     Workspace ws(state, max_ws_size);

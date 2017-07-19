@@ -67,6 +67,11 @@ struct ConvolutionDescriptor
     if (dataType == CUDNN_DATA_HALF) mathType = CUDNN_DATA_FLOAT;
     CHECK(cudnnSetConvolutionNdDescriptor(desc, dim, pad, stride, upscale,
           CUDNN_CROSS_CORRELATION, mathType));
+#if CUDNN_VERSION >= 7000
+    CHECK(cudnnSetConvolutionMathType(desc, CUDNN_DEFAULT_MATH));
+    if(dataType == CUDNN_DATA_HALF)
+      CHECK(cudnnSetConvolutionMathType(desc, CUDNN_TENSOR_OP_MATH));
+#endif
   }
 };
 
