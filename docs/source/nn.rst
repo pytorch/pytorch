@@ -913,6 +913,16 @@ Dropout functions
 
 .. autofunction:: alpha_dropout
 
+:hidden:`dropout2d`
+~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: dropout2d
+
+:hidden:`dropout3d`
+~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: dropout3d
+
 Distance functions
 ----------------------------------
 
@@ -930,30 +940,70 @@ Distance functions
 Loss functions
 --------------
 
-:hidden:`nll_loss`
-~~~~~~~~~~~~~~~~~~
+:hidden:`binary_cross_entropy`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. autofunction:: nll_loss
+.. autofunction:: binary_cross_entropy
 
 :hidden:`poisson_nll_loss`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: poisson_nll_loss
 
-:hidden:`kl_div`
-~~~~~~~~~~~~~~~~
+:hidden:`cosine_embedding_loss`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. autofunction:: kl_div
+.. autofunction:: cosine_embedding_loss
 
 :hidden:`cross_entropy`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: cross_entropy
 
-:hidden:`binary_cross_entropy`
+:hidden:`hinge_embedding_loss`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. autofunction:: binary_cross_entropy
+.. autofunction:: hinge_embedding_loss
+
+:hidden:`kl_div`
+~~~~~~~~~~~~~~~~
+
+.. autofunction:: kl_div
+
+:hidden:`l1_loss`
+~~~~~~~~~~~~~~~~~
+
+.. autofunction:: l1_loss
+
+:hidden:`mse_loss`
+~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: mse_loss
+
+:hidden:`margin_ranking_loss`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: margin_ranking_loss
+
+:hidden:`multilabel_margin_loss`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: multilabel_margin_loss
+
+:hidden:`multilabel_soft_margin_loss`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: multilabel_soft_margin_loss
+
+:hidden:`multi_margin_loss`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: multi_margin_loss
+
+:hidden:`nll_loss`
+~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: nll_loss
 
 :hidden:`binary_cross_entropy_with_logits`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -964,6 +1014,11 @@ Loss functions
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: smooth_l1_loss
+
+:hidden:`soft_margin_loss`
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: soft_margin_loss
 
 :hidden:`triplet_margin_loss`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
