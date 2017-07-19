@@ -358,7 +358,7 @@ def create_derived(backend_type_env, declarations):
             checked_use = CHECKED_USE.get(argument['type'], '{}_').format(argument['name'])
             if nullable_argument(argument):
                 checked_use = CHECKED_USE_NULLABLE.substitute(
-                                env={}, arg_name=argument['name'], usage=checked_use)
+                    env={}, arg_name=argument['name'], usage=checked_use)
             return checked_use
         elif argument['type'] == 'bool' and 'if_true' in argument:
             if bool_option_is_string(argument):
