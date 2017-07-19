@@ -102,3 +102,38 @@ class Gesv(Function):
         grad_b, _ = torch.gesv(grad_output, a.t())
         grad_a = -torch.mm(grad_b, X.t())
         return grad_b, grad_a
+
+
+class Symeig(Function):
+
+    @staticmethod
+    def forward(ctx, input, eigenvectors=False, upper=True):
+        ctx.eigenvectors = eigenvectors
+        ctx.upper = upper
+        e, V = torch.symeig(input, eigenvectors=ctx.eigenvectors, upper=ctx.upper)
+        ctx.save_for_backward(input, e, V)
+        return e, V
+
+    @staticmethod
+    def backward(ctx, grad_e, grad_V):
+        x, e, V, = ctx.saved_variables
+
+        N = x.size(0)
+
+        if ctx.upper:
+            tri0 = torch.triu
+            tri1 = lambda a: torch.tril(a, -1)
+        else:
+            tri0 = torch.tril
+            tri1 = lambda a: torch.triu(a, 1)
+
+        def G(n):
+            return sum([V[:, m] * grad_V.t()[n].matmul(V[:, m]) / (e[n] - e[m])
+                       for m in range(N) if m != n])
+
+        g = sum([torch.ger(V[:, n], V[:, n] * grad_e[n] + G(n))
+                 for n in range(N)])
+
+        out = tri0(g) + tri1(g).t()
+
+        return out, None, None
