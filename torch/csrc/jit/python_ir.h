@@ -3,7 +3,7 @@
 #include <Python.h>
 #include <memory>
 
-#include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/jit/ir.h"
 
 struct THPGraph {
     PyObject_HEAD

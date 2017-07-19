@@ -42,17 +42,24 @@ static std::ostream& operator<<(std::ostream & out, THPObjectPtr& obj) {
    return out << THPUtils_unpackString(repr.get());
 }
 
+std::string PythonOp::name() {
+  return getPythonName(pyobj.get(),is_legacy);
+}
+
 std::ostream& operator<<(std::ostream & out, Graph & g) {
   out << "graph(" << g.inputs() << ") {\n";
   for(auto n : g.nodes()) {
-    out << "  %" << n->unique() << " = ";
+    if(!n->cast<Select>()) //improve readibility by printing selects inline
+      out << "  %" << n->unique() << " = ";
     IR_IF(n,PythonOp)
-      out << getPythonName(value->pyobj.get(),value->is_legacy);
+      out << value->name();
       for (auto& scalar : value->scalar_args) {
         out << " " << scalar;
       }
       out << "(" << value->inputs() << ");\n";
-    IR_ELSEIF(Select)
+    IR_ELSEIF(Select) // print selects inline to improve readability
+    IR_ELSEIF(SimpleMap)
+      out << value->op << "!(" << value->inputs() << ");\n";
     IR_ELSE()
       out << toString(n->kind()) << "(" << n->inputs() << ");\n";
     IR_END()

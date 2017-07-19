@@ -24,8 +24,7 @@ def record_trace(f, inputs):
     out = f()
     trace = torch._C._tracer_exit(flatten(out))
     return (trace, out)
-
-
+    
 @contextlib.contextmanager
 def fork_rng():
     """
@@ -126,6 +125,26 @@ def verify_model(model):
     model.forward = types.MethodType(forward, model)
     return model
 
+def print_trace(model):
+    """
+    Trace and print the trace for a model, do not try to execute trace.
+    """
+    real_forward = model.forward
+    def forward(self, *args):
+        if not hasattr(self, "saved_trace"):
+            self.saved_trace, real_out = \
+                record_trace(lambda: real_forward(*args),
+                             tuple(self.parameters()) + flatten(args))
+            print(self.saved_trace)
+            import sys
+            sys.exit(0)
+            return real_out
+        else:
+            real_out = real_forward(*args)
+            return real_out
+
+    model.forward = types.MethodType(forward, model)
+    return model
 
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")
