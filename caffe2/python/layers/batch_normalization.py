@@ -97,14 +97,19 @@ class BatchNormalization(ModelLayer):
                                                 ),
                 optimizer=model.NoOptim))
 
-    def _add_ops(self, net, is_test):
-        input_blob = self.input_record.field_blobs()[0]
+    def _add_ops(self, net, is_test, out_blob=None):
+        original_input_blob = self.input_record.field_blobs()
+        input_blob = net.NextScopedBlob('expand_input')
         if len(self.input_shape) == 1:
-            input_blob = net.ExpandDims(input_blob,
-                                        input_blob,
+            input_blob = net.ExpandDims(original_input_blob,
                                         dims=[2, 3])
+        else:
+            input_blob = original_input_blob[0]
 
-        bn_output = self.output_schema.field_blobs()
+        if out_blob is None:
+            bn_output = self.output_schema.field_blobs()
+        else:
+            bn_output = out_blob
         if is_test:
             output_blobs = bn_output
         else:

@@ -324,12 +324,12 @@ class TestLayers(LayersTestCase):
         expand_dims_spec = OpSpec(
             "ExpandDims",
             [input_blob],
-            [input_blob],
+            None,
         )
 
         train_bn_spec = OpSpec(
             "SpatialBN",
-            [input_blob, init_ops[0].output[0], init_ops[1].output[0],
+            [None, init_ops[0].output[0], init_ops[1].output[0],
                 init_ops[2].output[0], init_ops[3].output[0]],
             [output_blob, init_ops[2].output[0], init_ops[3].output[0], None, None],
             {'is_test': 0, 'order': 'NCHW', 'momentum': 0.9},
@@ -337,7 +337,7 @@ class TestLayers(LayersTestCase):
 
         test_bn_spec = OpSpec(
             "SpatialBN",
-            [input_blob, init_ops[0].output[0], init_ops[1].output[0],
+            [None, init_ops[0].output[0], init_ops[1].output[0],
                 init_ops[2].output[0], init_ops[3].output[0]],
             [output_blob],
             {'is_test': 1, 'order': 'NCHW', 'momentum': 0.9},
