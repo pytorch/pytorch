@@ -711,12 +711,8 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=Tr
     if not target.is_same_size(input):
         raise ValueError("Target size ({}) must be the same as input size ({})".format(target.size(), input.size()))
 
-    if weight is not None and target.dim() != 1:
-        weight = weight.view(1, target.size(1)).expand_as(target)
-
     neg_abs = - input.abs()
     loss = input.clamp(min=0) - input * target + (1 + neg_abs.exp()).log()
-
     if weight is not None:
         loss = loss * weight
 
