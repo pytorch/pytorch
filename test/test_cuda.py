@@ -285,6 +285,7 @@ tests = [
     ('qr', small_2d_lapack_skinny, lambda t: [], 'skinny', float_types),
     ('qr', small_2d_lapack_fat, lambda t: [], 'fat', float_types),
     ('qr', large_2d_lapack, lambda t: [], 'big', float_types),
+    ('inverse', new_t(20, 20), lambda t: [], None, float_types),
 
 ]
 
