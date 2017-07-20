@@ -767,6 +767,9 @@ def binary_cross_entropy(input, target, weight=None, size_average=True):
     if not target.is_same_size(input):
         warnings.warn("Using a target size ({}) that is different to the input size ({}) is deprecated. "
                       "Please ensure they have the same size.".format(target.size(), input.size()))
+    if input.nelement() != target.nelement():
+        raise ValueError("Target and input must have the same number of elements. target nelement ({}) != input nelement ({})".
+                         format(target.nelement(), input.nelement()))
 
     if weight is not None:
         new_size = _infer_size(target.size(), weight.size())
