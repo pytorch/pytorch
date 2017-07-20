@@ -196,10 +196,11 @@ class TestWeightDecay(TestCase):
 class TestOptimizerContext(TestCase):
 
     def test_optimizer_context(self):
-        from caffe2.python import brew
+        from caffe2.python import brew, optimizer
         from caffe2.python.model_helper import ModelHelper
 
         model = ModelHelper(name="test", arg_scope={'order': 'NCHW'})
+        count = optimizer._optimizer_instance_count['SgdOptimizer']
         cnv_optim = SgdOptimizer(0.15)
         weight_optim = SgdOptimizer(0.2)
         bias_optim = SgdOptimizer(0.1)
@@ -218,11 +219,12 @@ class TestOptimizerContext(TestCase):
         add_weight_decay(model, weight_decay=1e-4)
         # use the following optimizer if none specified in param_info
         build_sgd(model, 0.11)
-
         expected_weight_grad = {'b_w_grad', 'a_w_grad', 'cnv_w_grad'}
         expected_learning_rate = {
-            'SgdOptimizer_0_lr_cpu': -0.15, 'SgdOptimizer_1_lr_cpu': -0.2,
-            'SgdOptimizer_2_lr_cpu': -0.1, 'SgdOptimizer_3_lr_cpu': -0.11
+            "SgdOptimizer_{}_lr_cpu".format(count): -0.15,
+            "SgdOptimizer_{}_lr_cpu".format(count + 1): -0.2,
+            "SgdOptimizer_{}_lr_cpu".format(count + 2): -0.1,
+            "SgdOptimizer_{}_lr_cpu".format(count + 3): -0.11
         }
 
         for op in model.net.Proto().op:
