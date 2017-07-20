@@ -449,32 +449,32 @@ class Variable(_C._VariableBase):
     def rsqrt(self):
         return Rsqrt.apply(self)
 
-    def sum(self, dim=None, keepdim=False):
+    def sum(self, dim=None, keepdim=None):
         return Sum.apply(self, dim, keepdim)
 
-    def prod(self, dim=None, keepdim=False):
+    def prod(self, dim=None, keepdim=None):
         return Prod.apply(self, dim, keepdim)
 
-    def mean(self, dim=None, keepdim=False):
+    def mean(self, dim=None, keepdim=None):
         return Mean.apply(self, dim, keepdim)
 
-    def max(self, dim=None, keepdim=False):
+    def max(self, dim=None, keepdim=None):
         if isinstance(dim, Variable):
             return Cmax.apply(self, dim)
         return Max.apply(self, dim, keepdim)
 
-    def min(self, dim=None, keepdim=False):
+    def min(self, dim=None, keepdim=None):
         if isinstance(dim, Variable):
             return Cmin.apply(self, dim)
         return Min.apply(self, dim, keepdim)
 
-    def mode(self, dim=None, keepdim=False):
+    def mode(self, dim=None, keepdim=None):
         return Mode.apply(self, dim, keepdim)
 
-    def median(self, dim=None, keepdim=False):
+    def median(self, dim=None, keepdim=None):
         return Median.apply(self, dim, keepdim)
 
-    def kthvalue(self, k, dim=None, keepdim=False):
+    def kthvalue(self, k, dim=None, keepdim=None):
         return Kthvalue.apply(self, k, dim, keepdim)
 
     def sort(self, dim=None, descending=False):
@@ -508,20 +508,21 @@ class Variable(_C._VariableBase):
     def unfold(self, dim, size, step):
         return Unfold.apply(self, dim, size, step)
 
-    def var(self, dim=None, keepdim=False, unbiased=True):
+    def var(self, dim=None, keepdim=None, unbiased=True):
+        keepdim_ = False if keepdim is None else keepdim
         mean = self.mean(dim, keepdim)
         if dim is None:
             mean = mean.view(*(1 for s in self.size()))
         # we could just set keepdim to True, but this preserves some fidelity
-        elif keepdim is False and self.dim() != 1:
+        elif keepdim_ is False and self.dim() != 1:
             mean = mean.unsqueeze(dim)
         mean_expanded = mean.expand_as(self)
         zero_centered = self.sub(mean_expanded)
-        var = zero_centered.mul(zero_centered).sum(dim, keepdim)
+        var = zero_centered.mul(zero_centered).sum(dim, keepdim=keepdim_)
         numel = self.numel() if dim is None else self.size(dim)
         return var.div(numel - int(unbiased))
 
-    def std(self, dim=None, keepdim=False, unbiased=True):
+    def std(self, dim=None, keepdim=None, unbiased=True):
         return self.var(dim, keepdim, unbiased).sqrt()
 
     def renorm(self, p, dim, maxnorm):
@@ -626,7 +627,7 @@ class Variable(_C._VariableBase):
     def addcdiv_(self, *args):
         return self._addcop(Addcdiv, args, True)
 
-    def norm(self, p=2, dim=None, keepdim=False):
+    def norm(self, p=2, dim=None, keepdim=None):
         return Norm.apply(self, p, dim, keepdim)
 
     def dist(self, tensor, p=2):
