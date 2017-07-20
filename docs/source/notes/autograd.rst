@@ -86,7 +86,7 @@ no intermediate states are saved.
     False
     >>> model(volatile_input).volatile
     True
-    >>> model(volatile_input).creator is None
+    >>> model(volatile_input).grad_fn is None
     True
 
 How autograd encodes the history
