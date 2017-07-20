@@ -9,6 +9,10 @@
 #include "torch/csrc/utils/tuple_parser.h"
 #include "torch/csrc/DynamicTypes.h"
 
+#ifdef WITH_C2ISL
+#include "torch/csrc/autograd/c2isl_function.h"
+#endif
+
 using namespace torch::autograd;
 using torch::TupleParser;
 
@@ -56,6 +60,14 @@ struct DelayedErrorCtor {
     return new DelayedError(msg);
   }
 };
+
+#ifdef WITH_C2ISL
+struct ISLMatMulCtor {
+  ISLMatMul* operator()(PyObject* args) {
+    return new ISLMatMul();
+  }
+};
+#endif // WITH_C2ISL
 
 struct NoCtor {
   Function* operator()(PyObject* args) {
@@ -279,6 +291,11 @@ bool THPAutograd_initFunctions(PyObject* _unused)
   addClass<Narrow, NoCtor>(module, NarrowClass, "Narrow");
   static PyTypeObject CatClass;
   addClass<Cat, NoCtor>(module, CatClass, "Cat");
+
+  #ifdef WITH_C2ISL
+  static PyTypeObject ISLMatMulClass;
+  addClass<ISLMatMul, ISLMatMulCtor>(module, ISLMatMulClass, "ISLMatMul");
+  #endif
 
   THPObjectPtr parent(PyImport_ImportModule("torch._C"));
   if (!parent) return false;

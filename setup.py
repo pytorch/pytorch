@@ -15,6 +15,7 @@ import os
 from tools.setup_helpers.env import check_env_flag
 from tools.setup_helpers.cuda import WITH_CUDA, CUDA_HOME
 from tools.setup_helpers.cudnn import WITH_CUDNN, CUDNN_LIB_DIR, CUDNN_INCLUDE_DIR
+from tools.setup_helpers.c2isl import WITH_C2ISL, C2ISL_LIB_DIR, C2ISL_INCLUDE_DIR
 from tools.setup_helpers.split_types import split_types
 DEBUG = check_env_flag('DEBUG')
 WITH_DISTRIBUTED = not check_env_flag('NO_DISTRIBUTED')
@@ -149,6 +150,10 @@ class build_ext(setuptools.command.build_ext.build_ext):
             print('-- Detected cuDNN at ' + CUDNN_LIB_DIR + ', ' + CUDNN_INCLUDE_DIR)
         else:
             print('-- Not using cuDNN')
+        if WITH_C2ISL:
+            print('-- Detected c2isl at ' + C2ISL_LIB_DIR + ', ' + C2ISL_INCLUDE_DIR)
+        else:
+            print('-- Not using c2isl')
         if WITH_CUDA:
             print('-- Detected CUDA at ' + CUDA_HOME)
         else:
@@ -393,6 +398,15 @@ if WITH_CUDNN:
         "torch/csrc/cudnn/Handles.cpp",
     ]
     extra_compile_args += ['-DWITH_CUDNN']
+
+if WITH_C2ISL:
+    main_libraries += ["c2isl_core"]
+    include_dirs.append(C2ISL_INCLUDE_DIR)
+    library_dirs.append(C2ISL_LIB_DIR)
+    main_sources += [
+        "torch/csrc/autograd/c2isl_function.cpp"
+    ]
+    extra_compile_args += ['-DWITH_C2ISL']
 
 if DEBUG:
     extra_compile_args += ['-O0', '-g']
