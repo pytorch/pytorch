@@ -12,7 +12,7 @@ __all__ = ['all_reduce', 'reduce', 'broadcast', 'all_gather', 'reduce_scatter']
 def _libnccl():
     global lib
     if lib is None:
-        lib = ctypes.cdll.LoadLibrary(None)
+        lib = ctypes.pydll.LoadLibrary(None)
         if hasattr(lib, 'ncclCommDestroy'):
             lib.ncclCommDestroy.restype = None
         else:

@@ -11,6 +11,8 @@
 #include "gloo/broadcast_one_to_all.h"
 #ifdef WITH_CUDA
 #include "gloo/cuda_allreduce_ring.h"
+#include "gloo/cuda_allreduce_halving_doubling.h"
+#include "gloo/cuda_allreduce_halving_doubling_pipelined.h"
 #include "gloo/cuda_broadcast_one_to_all.h"
 #endif
 #include "gloo/rendezvous/context.h"
@@ -306,7 +308,7 @@ struct algorithm_spec<CollectiveType::ALL_REDUCE, T> {
         throw std::runtime_error("Gloo backend only supports sum op for CUDA all reduce");
       }
       auto stream = THCState_getCurrentStream(THDGetCudaState());
-      algo = std::make_shared<::gloo::CudaAllreduceRing<T>>(
+      algo = std::make_shared<::gloo::CudaAllreduceHalvingDoublingPipelined<T>>(
         context,
         std::initializer_list<T*>{reinterpret_cast<T*>(input_buffer.get())},
         count,

@@ -41,6 +41,9 @@ class DistributedDataParallel(Module):
     (see :func:`torch.distributed.init_process_group`).
 
     .. warning::
+        This module works only with the ``gloo`` backend.
+
+    .. warning::
         Constructor, forward method, and differentiation of the output (or a
         function of the output of this module) is a distributed synchronization
         point. Take that into account in case different processes might be
@@ -116,18 +119,12 @@ class DistributedDataParallel(Module):
         self.bucket_map = {}
         MB = 1024 * 1024
         self.broadcast_bucket_size = 10 * MB  # used for param sync before forward
-        bucket_mb_base = 2
-        bucket_bytes_cap = bucket_mb_base * MB
+        bucket_bytes_cap = 1 * MB
         bucket_bytes = bucket_bytes_cap  # to init the first bucket immediately
         for param_tuple in zip(*map(lambda m: m.parameters(), self._module_copies)):
             if bucket_bytes >= bucket_bytes_cap:
                 self.bucket_sizes.append(0)
                 bucket_bytes = 0
-                # It's better to make the initial bucket smaller, because the last one can start
-                # all reduce only once backward is complete
-                bucket_bytes_cap = min(
-                    (bucket_mb_base + 5 * (len(self.bucket_sizes) - 1)) * MB,
-                    self.broadcast_bucket_size)
             self.bucket_sizes[-1] += 1
             for p in param_tuple:
                 self.bucket_map[p] = len(self.bucket_sizes) - 1
