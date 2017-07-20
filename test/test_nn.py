@@ -803,6 +803,20 @@ class TestNN(NNTestCase):
         self.assertEqual(output[0][0].sum().data[0], 0)
         self.assertEqual(output[1][2].sum().data[0], 0)
 
+    def test_embedding_functional(self):
+        a = Variable(torch.LongTensor([
+            [1, 3, 2],
+            [0, 2, 1]
+        ]))
+        embeddings = Variable(torch.rand(4, 3), requires_grad=True)
+
+        embed_old = torch.nn.Embedding(4, 3)
+        embed_old.weight.data = embeddings.data
+        res_old = embed_old(a)
+
+        res_F = F.embedding(a, embeddings)
+        self.assertEqual(res_old, res_F)
+
     def _test_EmbeddingBag(self, cuda, mode):
         # check a known test example
         es = nn.EmbeddingBag(5, 2, mode=mode)
