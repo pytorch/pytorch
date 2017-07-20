@@ -626,10 +626,11 @@ def embedding(input, embedding_matrix,
         [torch.FloatTensor of size 1x4x3]
 
     """
-    return torch.nn.backends.thnn.backend.Embedding(
+    return torch.nn.backends.thnn.backend.Embedding.apply(
+        input, embedding_matrix,
         -1, max_norm, norm_type,
         scale_grad_by_freq, sparse
-    )(input, embedding_matrix)
+    )
 
 
 def batch_norm(input, running_mean, running_var, weight=None, bias=None,
