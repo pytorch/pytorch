@@ -135,6 +135,7 @@ THTensor* THPTensor_(fromNumpy)(PyObject *numpy_array) {
     THStoragePtr storage(THStorage_(newWithDataAndAllocator)(
         (real*)PyArray_DATA(array),
         storage_size,
+        // See Note [Numpy memory management]
         &THNumpyArrayAllocator,
         new NumpyArrayAllocator(numpy_array)));
     THTensor *result = THTensor_(newWithStorage)(storage, 0, sizes, strides);
