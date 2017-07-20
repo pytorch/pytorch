@@ -26,8 +26,7 @@ class Linear(Module):
 
     Examples::
 
-        >>> m = nn.Linear(20, 30, initializer=lambda x: init.xavier_normal(x, 1))
-        >>> m = nn.Linear(20, 30, initializer={"weight": lambda x: init.xavier_normal(x, 1)})
+        >>> m = nn.Linear(20, 30)
         >>> input = autograd.Variable(torch.randn(128, 20))
         >>> output = m(input)
         >>> print(output.size())
