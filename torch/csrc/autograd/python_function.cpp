@@ -13,6 +13,7 @@
 #include "torch/csrc/autograd/functions/utils.h"
 #include "torch/csrc/autograd/python_cpp_function.h"
 #include "torch/csrc/autograd/python_hook.h"
+#include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/utils/auto_gpu.h"
@@ -24,11 +25,11 @@
 
 using namespace torch;
 using namespace torch::autograd;
+using namespace torch::jit;
 using thpp::Tensor;
 
 PyObject *THPFunctionClass = NULL;
 PyObject *THPStochasticFunctionClass = NULL;
-
 
 #define THPFunction_assert(condition, ...)                                     \
   if (!(condition)) { THPUtils_setError(__VA_ARGS__); throw python_error(); }
@@ -377,9 +378,12 @@ static void _transplant_var(Variable& var, const std::shared_ptr<Function>& fn, 
 // do in this case.
 static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
     std::unordered_set<PyObject *> &dirty_inputs, PyObject *raw_output,
-    PyObject *outputs, bool is_volatile)
+    PyObject *outputs, Node * this_expr, bool is_volatile)
 {
-  // Wrap outputs in Variables
+  // Either both or none should be true
+  assert(!(((bool)this_expr) ^ GlobalTracingState.tracing()));
+  bool is_tracing = this_expr && GlobalTracingState.tracing();
+
   auto cdata = is_volatile ? nullptr : THPFunction_asFunction(self);
   Py_ssize_t num_outputs = PyTuple_GET_SIZE(raw_output);
   if (self->cdata.is_executable) {
@@ -460,6 +464,13 @@ static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
       );
     }
     t2var[output] = output_var;
+    if (is_tracing) {
+      // NOTE: normally we don't add Select nodes when there's only a single
+      // output, but Python nodes can't be optimized away, so we simplify the
+      // code here.
+      Node* sel = GlobalTracingState.current().addNode<Select>(this_expr, i);
+      GlobalTracingState.setValueTrace(output_var->cdata.get(), sel);
+    }
     output_var->cdata->output_nr = i;
     PyTuple_SET_ITEM(outputs, i, (PyObject*)output_var);
   }
@@ -573,7 +584,6 @@ static void _mark_non_differentiable(THPFunction *self, t2var_type &t2var)
 }
 
 struct UnpackedInput {
-  PyObject *raw_input;
   THPObjectPtr tensor_input;
   variable_list input_vars;
 };
@@ -623,7 +633,7 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject *args) {
   return std::make_pair(std::move(unpacked), std::move(flags));
 }
 
-PyObject* process_outputs(THPFunction* grad_fn, const UnpackedInput& unpacked, THPObjectPtr&& raw_output, bool is_volatile) {
+PyObject* process_outputs(THPFunction* grad_fn, const UnpackedInput& unpacked, THPObjectPtr&& raw_output, Node * this_expr, bool is_volatile) {
   bool unpack_output = _ensure_tuple(raw_output);
 
   auto num_outputs = PyTuple_GET_SIZE(raw_output.get());
@@ -642,7 +652,7 @@ PyObject* process_outputs(THPFunction* grad_fn, const UnpackedInput& unpacked, T
 
   std::unordered_set<PyObject *> dirty_inputs;
   _mark_dirty(grad_fn, t2var, dirty_inputs);
-  _wrap_outputs(grad_fn, t2var, dirty_inputs, raw_output, outputs, is_volatile);
+  _wrap_outputs(grad_fn, t2var, dirty_inputs, raw_output, outputs, this_expr, is_volatile);
   _join_version_counters(grad_fn, t2var);
   if (grad_fn->cdata.is_executable) {
     _mark_non_differentiable(grad_fn, t2var);
@@ -665,6 +675,44 @@ PyObject* process_outputs(THPFunction* grad_fn, const UnpackedInput& unpacked, T
   return outputs.release();
 }
 
+// This sort of reimplements unpack_input, but we have our own requirements
+static Node * make_trace(PyObject* pyobj, PyObject *arg_objects,
+        const variable_list& input_vars,
+        const std::vector<bool>& is_variable_input, bool is_legacy)
+{
+  if (!GlobalTracingState.tracing())
+    return nullptr;
+
+  auto & graph = GlobalTracingState.current();
+  auto num_args = PyTuple_GET_SIZE(arg_objects);
+  pyobj_list scalar_args;
+  std::string arg_types;
+  arg_types.reserve(num_args);
+  scalar_args.reserve(num_args);
+  for (int i = 0; i < num_args; i++) {
+    PyObject *arg_object = PyTuple_GET_ITEM(arg_objects, i);
+    if (is_variable_input[i]) {
+      arg_types.push_back('t');
+    } else {
+      arg_types.push_back('s');
+      Py_INCREF(arg_object);
+      scalar_args.emplace_back(arg_object);
+    }
+  }
+
+  Py_INCREF(pyobj);
+  auto op = graph.addNode<PythonOp>(
+    THPObjectPtr(pyobj),
+    arg_types,
+    is_legacy,
+    std::move(scalar_args));
+  for (auto i : input_vars) {
+    op->addInput(GlobalTracingState.getValueTrace(i.get()));
+  }
+  return op;
+}
+
+// Legacy codepath
 PyObject *THPFunction_do_forward(THPFunction *self, PyObject *_inputs)
 {
   HANDLE_TH_ERRORS
@@ -681,7 +729,10 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *_inputs)
   THPObjectPtr raw_output(PyObject_CallObject(forward_fn, unpacked_input.tensor_input));
   if (!raw_output) return NULL;
 
-  return process_outputs(self, unpacked_input, std::move(raw_output), is_volatile);
+  auto this_expr = make_trace((PyObject*)self, _inputs, unpacked_input.input_vars,
+                              input_info.is_variable_input, true); // legacy
+
+  return process_outputs(self, unpacked_input, std::move(raw_output), this_expr, is_volatile);
   END_HANDLE_TH_ERRORS
 }
 
@@ -697,8 +748,8 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *_inputs)
 
   // Prepare inputs and allocate context (grad fn)
   auto info_pair = unpack_input<false>(_inputs);
-  auto& unpacked_input = info_pair.first;
-  auto& input_info = info_pair.second;
+  UnpackedInput& unpacked_input = info_pair.first;
+  InputFlags& input_info = info_pair.second;
   bool is_volatile = input_info.flags.is_volatile;
   ctx->cdata.set_flags(std::move(input_info.flags));
   ctx->needs_input_grad = input_info.needs_input_grad.release();
@@ -720,7 +771,10 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *_inputs)
   THPObjectPtr tensor_outputs(PyObject_CallObject(forward_fn, ctx_tensor_input));
   if (!tensor_outputs) return NULL;
 
-  return process_outputs(ctx, unpacked_input, std::move(tensor_outputs), is_volatile);
+  auto this_expr = make_trace(cls, _inputs, unpacked_input.input_vars,
+                              *ctx->is_variable_input, false);
+
+  return process_outputs(ctx, unpacked_input, std::move(tensor_outputs), this_expr, is_volatile);
   END_HANDLE_TH_ERRORS
 }
 
