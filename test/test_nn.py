@@ -2287,17 +2287,17 @@ class TestNN(NNTestCase):
 
         weight = torch.rand(4)
         self.assertEqual(nn.BCEWithLogitsLoss(weight)(output, target), nn.BCELoss(weight)(sigmoid(output), target))
-    
+
     def test_bce_with_logits_broadcasts_weights(self):
         target = Variable(torch.rand(16, 4))
         output = Variable(torch.rand(16, 4) - 0.5)
-        
+
         weight = torch.rand(4)
         out1 = nn.BCEWithLogitsLoss(weight)(output, target)
 
         weight = weight.expand(16, 4).contiguous()
         out2 = nn.BCEWithLogitsLoss(weight)(output, target)
-        
+
         self.assertEqual(out1, out2)
 
         weight = torch.rand(16, 1)
@@ -2312,13 +2312,13 @@ class TestNN(NNTestCase):
         sigmoid = nn.Sigmoid()
         target = Variable(torch.rand(16, 4))
         output = Variable(torch.rand(16, 4) - 0.5)
-        
+
         weight = torch.rand(4)
         out1 = nn.BCELoss(weight)(sigmoid(output), target)
 
         weight = weight.expand(16, 4).contiguous()
         out2 = nn.BCELoss(weight)(sigmoid(output), target)
-        
+
         self.assertEqual(out1, out2)
 
         weight = torch.rand(16, 1)
