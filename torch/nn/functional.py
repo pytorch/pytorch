@@ -447,6 +447,14 @@ def alpha_dropout(input, p=0.5, training=False):
     return output.mul_(a).add_(b)
 
 
+def dropout2d(input, p=0.5, training=False, inplace=False):
+    return _functions.dropout.FeatureDropout.apply(input, p, training, inplace)
+
+
+def dropout3d(input, p=0.5, training=False, inplace=False):
+    return _functions.dropout.FeatureDropout.apply(input, p, training, inplace)
+
+
 def threshold(input, threshold, value, inplace=False):
     return _functions.thnn.Threshold.apply(input, threshold, value, inplace)
 
@@ -557,6 +565,74 @@ def bilinear(input1, input2, weight, bias=None):
         return Bilinear.apply(input1, input2, weight, bias)
 
 
+def embedding(input, embedding_matrix,
+              max_norm=None, norm_type=2, scale_grad_by_freq=False,
+              sparse=False):
+    r"""A simple lookup table that looks up embeddings in a fixed dictionary and size.
+
+    This module is often used to retrieve word embeddings using indices.
+    The input to the module is a list of indices, and the embedding matrix,
+    and the output is the corresponding word embeddings.
+
+    Args:
+        input: tensor, containing indices into the embedding matrix
+        embedding_matrix:
+                Number of rows should correspond to the maximum possible index + 1,
+                number of columns is the embedding size
+        max_norm (float, optional): If given, will renormalize the embeddings to always have a norm lesser than this
+        norm_type (float, optional): The p of the p-norm to compute for the max_norm option
+        scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the frequency of
+                                                the words in the mini-batch.
+
+    Shape:
+        - Input: LongTensor `(N, W)`, N = mini-batch, W = number of indices to extract per mini-batch
+        - Embedding_matrix: FloatTensor `(V, embedding_dim)`, V = maximum index + 1, embedding_dim = embedding size
+        - Output: `(N, W, embedding_dim)`
+
+    Examples::
+
+        >>> # a batch of 2 samples of 4 indices each
+        >>> input = Variable(torch.LongTensor([[1,2,4,5],[4,3,2,9]]))
+        >>> # an embedding matrix containing 10 tensors of size 3
+        >>> embedding_matrix = Variable(torch.rand(10, 3))
+        >>> torch.nn.functional.embedding(input, embedding_matrix)
+
+        Variable containing:
+        (0 ,.,.) =
+         -1.0822  1.2522  0.2434
+          0.8393 -0.6062 -0.3348
+          0.6597  0.0350  0.0837
+          0.5521  0.9447  0.0498
+
+        (1 ,.,.) =
+          0.6597  0.0350  0.0837
+         -0.1527  0.0877  0.4260
+          0.8393 -0.6062 -0.3348
+         -0.8738 -0.9054  0.4281
+        [torch.FloatTensor of size 2x4x3]
+
+        >>> # example with padding_idx
+        >>> embedding_matrix = Variable(torch.rand(10, 3))
+        >>> embedding_matrix[0].zero_()
+        >>> input = Variable(torch.LongTensor([[0,2,0,5]]))
+        >>> torch.nn.functional.embedding(input, embedding_matrix)
+
+        Variable containing:
+        (0 ,.,.) =
+          0.0000  0.0000  0.0000
+          0.3452  0.4937 -0.9361
+          0.0000  0.0000  0.0000
+          0.0706 -2.1962 -0.6276
+        [torch.FloatTensor of size 1x4x3]
+
+    """
+    return torch.nn.backends.thnn.backend.Embedding.apply(
+        input, embedding_matrix,
+        -1, max_norm, norm_type,
+        scale_grad_by_freq, sparse
+    )
+
+
 def batch_norm(input, running_mean, running_var, weight=None, bias=None,
                training=False, momentum=0.1, eps=1e-5):
     f = torch._C._functions.BatchNorm(running_mean, running_var, training, momentum, eps, torch.backends.cudnn.enabled)
@@ -632,7 +708,7 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Tru
         return torch.sum(loss)
 
 
-def kl_div(input, target, size_average=True):
+def kl_div(input, target, size_average=True, weight=None):
     r"""The `Kullback-Leibler divergence`_ Loss.
 
     See :class:`~torch.nn.KLDivLoss` for details.
@@ -642,8 +718,10 @@ def kl_div(input, target, size_average=True):
         target: Variable of the same shape as input
         size_average: if True the output is divided by the number of elements
           in input tensor
+        weight (Tensor, optional): a manual rescaling weight given to each
+                class. If given, has to be a Tensor of size "nclasses"
     """
-    return _functions.thnn.KLDivLoss(size_average)(input, target)
+    return _functions.thnn.KLDivLoss(size_average, weight=weight)(input, target)
 
 
 def cross_entropy(input, target, weight=None, size_average=True, ignore_index=-100):
@@ -724,6 +802,49 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=Tr
 
 def smooth_l1_loss(input, target, size_average=True):
     return _functions.thnn.SmoothL1Loss(size_average)(input, target)
+
+
+def l1_loss(input, target, size_average=True):
+    return _functions.thnn.L1Loss(size_average)(input, target)
+
+
+def mse_loss(input, target, size_average=True):
+    return _functions.thnn.MSELoss(size_average)(input, target)
+
+
+def margin_ranking_loss(input1, input2, target, margin=0, size_average=True):
+    return _functions.loss.MarginRankingLoss(margin, size_average)(input1, input2, target)
+
+
+def hinge_embedding_loss(input, target, margin=1.0, size_average=True):
+    return _functions.loss.HingeEmbeddingLoss(margin, size_average)(input, target)
+
+
+def multilabel_margin_loss(input, target, size_average=True):
+    return _functions.thnn.MultiLabelMarginLoss(size_average)(input, target)
+
+
+def soft_margin_loss(input, target, size_average=True):
+    return _functions.thnn.SoftMarginLoss(size_average)(input, target)
+
+
+def multilabel_soft_margin_loss(input, target, weight=None, size_average=True):
+    input = torch.sigmoid(input)
+    return binary_cross_entropy(input, target, weight, size_average)
+
+
+def cosine_embedding_loss(input1, input2, target, margin=0, size_average=True):
+    return _functions.loss.CosineEmbeddingLoss(margin, size_average)(input1, input2, target)
+
+
+def multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=True):
+    if p != 1 and p != 2:
+        raise ValueError('only p == 1 and p == 2 supported')
+    if weight is not None and weight.dim() != 1:
+        raise ValueError('weight must be one-dimensional')
+
+    return _functions.thnn.MultiMarginLoss(size_average, p, margin,
+                                           weight=weight)(input, target)
 
 
 def pixel_shuffle(input, upscale_factor):

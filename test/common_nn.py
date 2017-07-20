@@ -216,7 +216,6 @@ module_tests = [
     ),
 ]
 
-
 criterion_tests = [
     dict(module_name='L1Loss',
          input_size=(2, 3, 4),

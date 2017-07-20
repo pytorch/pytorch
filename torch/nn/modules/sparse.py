@@ -88,10 +88,11 @@ class Embedding(Module):
         padding_idx = self.padding_idx
         if padding_idx is None:
             padding_idx = -1
-        return self._backend.Embedding(
+        return self._backend.Embedding.apply(
+            input, self.weight,
             padding_idx, self.max_norm, self.norm_type,
             self.scale_grad_by_freq, self.sparse
-        )(input, self.weight)
+        )
 
     def __repr__(self):
         s = '{name}({num_embeddings}, {embedding_dim}'

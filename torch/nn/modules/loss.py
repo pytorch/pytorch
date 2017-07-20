@@ -17,21 +17,11 @@ class _Loss(Module):
         super(_Loss, self).__init__()
         self.size_average = size_average
 
-    def forward(self, input, target):
-        _assert_no_grad(target)
-        backend_fn = getattr(self._backend, type(self).__name__)
-        return backend_fn(self.size_average)(input, target)
-
 
 class _WeightedLoss(_Loss):
     def __init__(self, weight=None, size_average=True):
         super(_WeightedLoss, self).__init__(size_average)
         self.register_buffer('weight', weight)
-
-    def forward(self, input, target):
-        _assert_no_grad(target)
-        backend_fn = getattr(self._backend, type(self).__name__)
-        return backend_fn(self.size_average, weight=self.weight)(input, target)
 
 
 class L1Loss(_Loss):
@@ -45,9 +35,30 @@ class L1Loss(_Loss):
     The sum operation still operates over all the elements, and divides by `n`.
 
     The division by `n` can be avoided if one sets the constructor argument
-    `size_average=False`
+    `size_average=False`.
+
+    Args:
+        size_average (bool, optional): By default, the losses are averaged
+           over observations for each minibatch. However, if the field
+           size_average is set to False, the losses are instead summed for
+           each minibatch. Default: True
+
+    Shape:
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions`
+        - Target: :math:`(N, *)`, same shape as the input
+
+    Examples::
+
+        >>> loss = nn.L1Loss()
+        >>> input = autograd.Variable(torch.randn(3, 5), requires_grad=True)
+        >>> target = autograd.Variable(torch.randn(3, 5))
+        >>> output = loss(input, target)
+        >>> output.backward()
     """
-    pass
+    def forward(self, input, target):
+        _assert_no_grad(target)
+        return F.l1_loss(input, target, size_average=self.size_average)
 
 
 class NLLLoss(_WeightedLoss):
@@ -90,7 +101,7 @@ class NLLLoss(_WeightedLoss):
         size_average (bool, optional): By default, the losses are averaged
            over observations for each minibatch. However, if the field
            size_average is set to False, the losses are instead summed for
-           each minibatch.
+           each minibatch. Default: True
         ignore_index (int, optional): Specifies a target value that is ignored
             and does not contribute to the input gradient. When size_average
             is True, the loss is averaged over non-ignored targets.
@@ -98,9 +109,6 @@ class NLLLoss(_WeightedLoss):
     Shape:
         - Input: :math:`(N, C)` where `C = number of classes`
         - Target: :math:`(N)` where each value is `0 <= targets[i] <= C-1`
-
-    Attributes:
-        weight: the class-weights given as input to the constructor
 
     Examples::
 
@@ -220,7 +228,9 @@ class KLDivLoss(_WeightedLoss):
     .. _Kullback-Leibler divergence:
         https://en.wikipedia.org/wiki/Kullback-Leibler_divergence
     """
-    pass
+    def forward(self, input, target):
+        _assert_no_grad(target)
+        return F.kl_div(input, target, size_average=self.size_average, weight=self.weight)
 
 
 class MSELoss(_Loss):
@@ -236,8 +246,28 @@ class MSELoss(_Loss):
     The division by `n` can be avoided if one sets the internal variable
     `size_average` to `False`.
 
+    Args:
+        size_average (bool, optional): By default, the losses are averaged
+           over observations for each minibatch. However, if the field
+           size_average is set to False, the losses are instead summed for
+           each minibatch. Default: True
+
+    Shape:
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions`
+        - Target: :math:`(N, *)`, same shape as the input
+
+    Examples::
+
+        >>> loss = nn.MSELoss()
+        >>> input = autograd.Variable(torch.randn(3, 5), requires_grad=True)
+        >>> target = autograd.Variable(torch.randn(3, 5))
+        >>> output = loss(input, target)
+        >>> output.backward()
     """
-    pass
+    def forward(self, input, target):
+        _assert_no_grad(target)
+        return F.mse_loss(input, target, size_average=self.size_average)
 
 
 class BCELoss(_WeightedLoss):
@@ -259,7 +289,10 @@ class BCELoss(_WeightedLoss):
     to `False`, the losses are instead summed.
 
     """
-    pass
+    def forward(self, input, target):
+        _assert_no_grad(target)
+        return F.binary_cross_entropy(input, target, weight=self.weight,
+                                      size_average=self.size_average)
 
 
 class BCEWithLogitsLoss(Module):
@@ -324,8 +357,7 @@ class HingeEmbeddingLoss(_Loss):
         self.size_average = size_average
 
     def forward(self, input, target):
-        return self._backend.HingeEmbeddingLoss(self.margin,
-                                                self.size_average)(input, target)
+        return F.hinge_embedding_loss(input, target, self.margin, self.size_average)
 
 
 class MultiLabelMarginLoss(_Loss):
@@ -345,7 +377,9 @@ class MultiLabelMarginLoss(_Loss):
 
     This allows for different samples to have variable amounts of target classes
     """
-    pass
+    def forward(self, input, target):
+        _assert_no_grad(target)
+        return F.multilabel_margin_loss(input, target, size_average=self.size_average)
 
 
 class SmoothL1Loss(_Loss):
@@ -365,7 +399,9 @@ class SmoothL1Loss(_Loss):
     The division by `n` can be avoided if one sets the internal variable
     `size_average` to `False`
     """
-    pass
+    def forward(self, input, target):
+        _assert_no_grad(target)
+        return F.smooth_l1_loss(input, target, size_average=self.size_average)
 
 
 class SoftMarginLoss(_Loss):
@@ -380,7 +416,9 @@ class SoftMarginLoss(_Loss):
     The normalization by the number of elements in the input can be disabled by
     setting `self.size_average` to `False`.
     """
-    pass
+    def forward(self, input, target):
+        _assert_no_grad(target)
+        return F.soft_margin_loss(input, target, size_average=self.size_average)
 
 
 class CrossEntropyLoss(_WeightedLoss):
@@ -447,8 +485,7 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
     """
 
     def forward(self, input, target):
-        return F.binary_cross_entropy(torch.sigmoid(input), target,
-                                      self.weight, self.size_average)
+        return F.multilabel_soft_margin_loss(input, target, self.weight, self.size_average)
 
 
 class CosineEmbeddingLoss(Module):
@@ -479,8 +516,7 @@ class CosineEmbeddingLoss(Module):
         self.size_average = size_average
 
     def forward(self, input1, input2, target):
-        return self._backend.CosineEmbeddingLoss(self.margin,
-                                                 self.size_average)(input1, input2, target)
+        return F.cosine_embedding_loss(input1, input2, target, self.margin, self.size_average)
 
 
 class MarginRankingLoss(Module):
@@ -508,8 +544,7 @@ class MarginRankingLoss(Module):
         self.size_average = size_average
 
     def forward(self, input1, input2, target):
-        return self._backend.MarginRankingLoss(self.margin,
-                                               self.size_average)(input1, input2, target)
+        return F.margin_ranking_loss(input1, input2, target, self.margin, self.size_average)
 
 
 class MultiMarginLoss(Module):
@@ -546,8 +581,8 @@ class MultiMarginLoss(Module):
         self.weight = weight
 
     def forward(self, input, target):
-        return self._backend.MultiMarginLoss(self.size_average, self.p,
-                                             self.margin, weight=self.weight)(input, target)
+        return F.multi_margin_loss(input, target, self.p, self.margin,
+                                   self.weight, self.size_average)
 
 
 class TripletMarginLoss(Module):

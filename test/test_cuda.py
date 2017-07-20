@@ -880,6 +880,14 @@ class TestCuda(TestCase):
     def test_tensor_scatterFill(self):
         TestTorch._test_scatter_base(self, lambda t: t.cuda(), 'scatter_', True, test_bounds=False)
 
+    def test_arange(self):
+        for t in ['IntTensor', 'LongTensor', 'FloatTensor', 'DoubleTensor']:
+            a = torch.cuda.__dict__[t]()
+            torch.arange(0, 10, out=a)
+            b = torch.__dict__[t]()
+            torch.arange(0, 10, out=b)
+            self.assertEqual(a, b.cuda())
+
     def test_nvtx(self):
         # Just making sure we can see the symbols
         torch.cuda.nvtx.range_push("foo")
