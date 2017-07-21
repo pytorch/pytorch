@@ -153,7 +153,9 @@ def RunEpoch(
     prefix = "{}_{}".format(train_model._device_prefix, train_model._devices[0])
     accuracy = workspace.FetchBlob(prefix + '/accuracy')
     loss = workspace.FetchBlob(prefix + '/loss')
-    learning_rate = workspace.FetchBlob(prefix + '/conv1_w_lr')
+    learning_rate = workspace.FetchBlob(
+        data_parallel_model.GetLearningRateBlobNames(train_model)[0]
+    )
     test_accuracy = 0
     if (test_model is not None):
         # Run 100 iters of testing
@@ -270,7 +272,7 @@ def Train(args):
     def add_optimizer(model):
         stepsz = int(30 * args.epoch_size / total_batch_size / num_shards)
         optimizer.add_weight_decay(model, args.weight_decay)
-        optimizer.build_sgd(
+        opt = optimizer.build_sgd(
             model,
             args.base_learning_rate,
             momentum=0.9,
@@ -279,6 +281,7 @@ def Train(args):
             stepsize=stepsz,
             gamma=0.1
         )
+        return opt
 
     # Input. Note that the reader must be shared with all GPUS.
     reader = train_model.CreateDB(
