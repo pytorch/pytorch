@@ -51,7 +51,7 @@ class aligned_allocator {
     return reinterpret_cast<pointer>(x);
   }
 
-  void deallocate(pointer p, size_type sz) {
+  void deallocate(pointer p, size_type /*sz*/) {
     free(p);
   }
 };
