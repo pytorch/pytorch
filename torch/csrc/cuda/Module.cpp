@@ -293,7 +293,7 @@ bool THCPModule_initCuda(PyObject *torch_module) {
   // TODO: register THCudaShutdown handler at exit
   return true;
 #undef ASSERT_TRUE
-  END_HANDLE_TH_ERRORS
+  END_HANDLE_TH_ERRORS_RET(false)
 }
 
 // Callback for python part. Used for additional initialization of python classes
