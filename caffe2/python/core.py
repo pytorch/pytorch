@@ -425,6 +425,18 @@ class IR(object):
         for op in operators:
             self.Play(op)
 
+        self.SanityCheck(operators)
+
+    def SanityCheck(self, operators):
+        # Validate StopGradient usage by checking that StopGradient's output
+        # is actually passed forward
+        for op in operators:
+            if op.type == 'StopGradient':
+                if op.output[0] not in self.input_usages:
+                    raise Exception("""StopGradient's output '{}' is orphan.
+You typically want to specify same input and output for
+StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
+
     def Play(self, op):
         """"Adds an op to the current IR, and update the internal states to
         reflect the blobs and versions after the execution of the op.
