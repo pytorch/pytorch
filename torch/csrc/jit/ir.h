@@ -145,25 +145,6 @@ public:
     inputs_.push_back(node);
     return node;
   }
-private:
-  use_list::iterator findUseForInput(size_t i) {
-    Node * old_node = inputs_[i];
-    Use use(this,i);
-    //O(N) on the use list, but unless we get nodes with +100 uses
-    //vector traversal still is probably faster than linked list
-    auto use_it = std::find(old_node->uses_.begin(),old_node->uses_.end(),use);
-    JIT_ASSERT(use_it != old_node->uses().end());
-    return use_it;
-  }
-  Node* dropInput(size_t i) {
-    JIT_ASSERT(i < inputs_.size());
-    auto old_node = inputs_[i];
-    auto use_it = findUseForInput(i);
-    old_node->uses_.erase(use_it);
-    inputs_[i] = nullptr;
-    return old_node;
-  }
-public:
   //returns the old input
   Node * replaceInput(size_t i, Node * newValue) {
     JIT_ASSERT(newValue->graph_ == graph_);
@@ -193,11 +174,6 @@ public:
     }
     uses_.clear();
   }
-private:
-  bool inGraphList() {
-    return next() && prev();
-  }
-public:
   void insertBefore(Node * n) {
     JIT_ASSERT(n->inGraphList());
     insertAfter(n->prev());
@@ -222,6 +198,8 @@ public:
   }
   void removeInput(size_t i) {
     dropInput(i);
+    // everything after this input shifts left,
+    // so we need to update their use offsets to match
     for(size_t j = i+1; j < inputs_.size(); j++) {
       auto it = findUseForInput(j);
       it->offset--;
@@ -233,20 +211,10 @@ public:
       dropInput(i);
     inputs_.clear();
   }
-  //iterators of the node list starting at this node
+  // iterators of the node list starting at this node
+  // useful for resuming a search starting at this node
   graph_node_list_iterator iterator();
   graph_node_list_iterator reverseIterator();
-private:
-  void removeFromList() {
-    JIT_ASSERT(inGraphList());
-    Node * next = this->next();
-    Node * prev = this->prev();
-    prev->next() = next;
-    next->prev() = prev;
-    this->next() = nullptr;
-    this->prev() = nullptr;
-  }
-public:
   void eraseFromParent();
   // dynamic cast: if(auto s = n.cast<Select>()) { ... }
   template<typename T>
@@ -258,6 +226,40 @@ public:
   virtual ~Node() {}
   //initialize this Node by copying properties of 'other'
   //translation of inputs is handled automatically in Graph::clone.
+private:
+  // lookup iterator in use list of _input i_ that corresponds to its use of _this_
+  use_list::iterator findUseForInput(size_t i) {
+    Node * old_node = inputs_[i];
+    Use use(this,i);
+    //O(N) on the use list, but unless we get nodes with +100 uses
+    //vector traversal still is probably faster than linked list
+    auto use_it = std::find(old_node->uses_.begin(),old_node->uses_.end(),use);
+    JIT_ASSERT(use_it != old_node->uses().end());
+    return use_it;
+  }
+  // remove the use of input i, this sets input i to nullptr, but
+  // is only used internally to Node before setting it to a new value
+  // or erasing the entry from the list.
+  Node* dropInput(size_t i) {
+    JIT_ASSERT(i < inputs_.size());
+    auto old_node = inputs_[i];
+    auto use_it = findUseForInput(i);
+    old_node->uses_.erase(use_it);
+    inputs_[i] = nullptr;
+    return old_node;
+  }
+  bool inGraphList() {
+    return next() && prev();
+  }
+  void removeFromList() {
+    JIT_ASSERT(inGraphList());
+    Node * next = this->next();
+    Node * prev = this->prev();
+    prev->next() = next;
+    next->prev() = prev;
+    this->next() = nullptr;
+    this->prev() = nullptr;
+  }
 protected:
   virtual Node * allocClone(Graph * in_graph) = 0;
 };
@@ -330,8 +332,13 @@ static inline bool operator!=(graph_node_list_iterator a,graph_node_list_iterato
 
 /******************* Nodes required inside a Graph ****************************/
 
-// using CRTP so that we can alloc new clones and dispatch for clone.
-// without tons of per-object boilerplate
+// NodeWithKind handles the mapping between concrete node type and
+// its NodeKind tag.
+//
+// It also sets up the clone infrastructure
+// using CRTP so that we can alloc new clones and dispatch to custom clone code
+// without significant boilerplate
+
 template<typename Self, NodeKind K>
 struct NodeWithKind : public Node {
   friend class Graph; /* so it can access allocClone() */
@@ -339,10 +346,14 @@ struct NodeWithKind : public Node {
   NodeWithKind()
   : Node(K) {}
   // virtual so we can easily define a default here
-  // but defined using CRTP so cloneFrom doesn't need casts.
+  // defined using CRTP so cloneFrom doesn't need casts.
   // called from allocClone
   virtual void cloneFrom(Self * s) {}
 protected:
+  // allocate a new Node with the same type as this node, and
+  // get it initialized in in_graph
+  // in_graph may not be the same graph as this->graph_ because we might be
+  // cloning the node into a new graph
   // defined here because we need to know Self to allocate a new node.
   // user-defined cloneFrom is called.
   virtual Node * allocClone(Graph * in_graph);
@@ -417,29 +428,21 @@ public:
     return outputs().size() - 1;
   }
 
-private:
-  void initNewNodeForGraph(Node * r) {
-    r->graph_ = this;
-    r->unique_ = next_unique++;
-    all_nodes.insert(r);
-  }
-  void freeNode(Node * n) {
-    all_nodes.erase(n);
-    delete n;
-  }
-public:
-  // like make_shared, forward arguments to node constructors
-  // while also associating it with the graph
+  // like make_shared, forward arguments to node initializers
+  // while also correctly allocating the node to live in this graph
   // e.g. g.create<Select>(another,0);
   template<typename T, typename... Args >
   T * create(Args&&... args) {
     // default construction of all nodes
     T* r = new T();
+    // common initialization for all nodes when they live in this graph
     initNewNodeForGraph(r);
     // custom per-node initialization
     r->init(std::forward<Args>(args)...);
     return r;
   }
+  // clone n, making a new node in _this_ graph.
+  // use node_map to translate inputs of n to inputs of the cloned node
   Node * createClone(Node * n, std::function<Node*(Node*)> node_map) {
     //n can be from a different graph
     Node * r = n->allocClone(this);
@@ -482,6 +485,18 @@ public:
     for(auto n : all_nodes)
       delete n;
   }
+private:
+  // per graph initialization for any node
+  // called from NodeWithKind::allocClone and Graph::create
+  void initNewNodeForGraph(Node * r) {
+    r->graph_ = this;
+    r->unique_ = next_unique++;
+    all_nodes.insert(r);
+  }
+  void freeNode(Node * n) {
+    all_nodes.erase(n);
+    delete n;
+  }
 };
 
 inline void Node::eraseFromParent() {
@@ -496,6 +511,7 @@ template<typename Self, NodeKind K>
 Node * NodeWithKind<Self,K>::allocClone(Graph * in_graph) {
   auto s = new Self();
   in_graph->initNewNodeForGraph(s);
+  // static cast is needed because the compiler doesn't know NodeWithKind is a CRTP.
   s->cloneFrom(static_cast<Self*>(this));
   return s;
 }
