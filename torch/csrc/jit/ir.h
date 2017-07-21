@@ -20,24 +20,14 @@
 namespace torch { namespace jit {
 
 // Graph represents one "function" of computation.
-// It uses a simple ownship model where the graph owns all the nodes inside it.
-// All refererences inside the graph are raw pointers.
+// It uses a simple ownership model where the graph owns all the nodes inside it.
+// All references inside the graph are raw pointers.
 // Destroying the Graph will invalidate any pointers to nodes in the graph.
 struct Graph;
 
-//Node is the base class of the IR graph. It represents one computation
+// Node is the base class of the IR graph. It represents one computation
 // and dependencies on a list of values. The "prim-ops", so to speak.
 struct Node;
-
-// Graphs and Nodes are immutable after construction.
-// That is, once a node is added to a graph, or an input is added to
-// a node, they cannot be removed. We allow incremental addition
-// of nodes to graphs and inputs to nodes to make construction easier.
-// This design simplifies use-def tracking since we never need to
-// patch the use-list and can build it incrementally.
-
-// Transforms are functional, building new graphs for each phase, using
-// environments/hash-tables to link from old to new.
 
 struct Type {}; // we will need a type, but for now it does nothing...
 
