@@ -128,14 +128,28 @@ public:
   const std::vector<Node*>& inputs() {
     return inputs_;
   }
+
   // Graphs
+
+  // Add a node as an input to the current node.  Returns the added
+  // node for ease of chaining.
+  //
+  // Given:   %3 = f(%1, %2)
+  // Execute: %3.addInput(%4)
+  // Result:  %3 = f(%1, %2, %4)
   Node* addInput(Node * node) {
     JIT_ASSERT(graph_ == node->graph_);
     node->uses_.emplace_back(this,inputs_.size());
     inputs_.push_back(node);
     return node;
   }
-  //returns the old input
+
+  // Replace the input of this node at position 'i' with
+  // 'newValue', returning the old node.
+  //
+  // Given:   %3 = f(%1, %2)
+  // Execute: %3.replaceInput(1, %4)
+  // Result:  %3 = f(%1, %4)
   Node * replaceInput(size_t i, Node * newValue) {
     JIT_ASSERT(newValue->graph_ == graph_);
     Node * old = dropInput(i);
@@ -143,8 +157,16 @@ public:
     newValue->uses_.emplace_back(this,i);
     return old;
   }
-  // llvm's replaceUsesOfWith
+
+  // Replace all occurrences of 'from' in the inputs of this
+  // node with 'to'. Corresponds to llvm's replaceUsesOfWith.
+  //
+  // Given:   %3 = f(%1, %2, %1)
+  // Execute: %3.replaceInputWith(%1, %4)
+  // Result:  %3 = f(%4, %2, %4)
   void replaceInputWith(Node * from, Node * to) {
+    JIT_ASSERT(from->graph_ == graph_);
+    JIT_ASSERT(to->graph_ == graph_);
     size_t i = 0;
     for(auto input : inputs()) {
       if(input == from)
@@ -156,6 +178,16 @@ public:
   const use_list & uses() {
     return uses_;
   }
+  
+  // Replaces all uses of this node with 'newValue'.
+  //
+  // Given:   %3 = f(%1, %2)
+  //          %4 = g(%3)
+  //          %5 = h(%3, %3)
+  // Execute: %3.replaceAllUsesWith(%6)
+  // Result:  %3 = f(%1, %2)
+  //          %4 = g(%6)
+  //          %5 = h(%6, %6)
   void replaceAllUsesWith(Node * newValue) {
     assert(graph_ == newValue->graph_);
     for(auto u : uses()) {
@@ -164,6 +196,16 @@ public:
     }
     uses_.clear();
   }
+
+  // Insert node 'n' before this one in the topological order.
+  //
+  // Given:   %3 = f(%1, %2)
+  //          %4 = g(%3)
+  // and unattached: %5 = h(%1)
+  // Execute: %4.insertBefore(%5)
+  // Result:  %3 = f(%1, %2)
+  //          %5 = h(%1)
+  //          %4 = g(%3)
   void insertBefore(Node * n) {
     JIT_ASSERT(n->inGraphList());
     insertAfter(n->prev());
