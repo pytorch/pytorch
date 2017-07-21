@@ -51,6 +51,7 @@ std::string PythonOp::name() {
 
 std::ostream& operator<<(std::ostream & out, Graph & g) {
   out << "graph(" << g.inputs() << ") {\n";
+  std::vector<FusionGroup*> groups;
   for(auto n : g.nodes()) {
     if(!n->cast<Select>()) { //improve readibility by printing selects inline
       out << "  %" << n->unique() << " = ";
@@ -61,6 +62,9 @@ std::ostream& operator<<(std::ostream & out, Graph & g) {
         }
       IR_ELSEIF(SimpleMap)
         out << value->op << "!";
+      IR_ELSEIF(FusionGroup)
+        out << "fusion_group_"<<groups.size();
+        groups.push_back(value);
       IR_ELSE()
         out << toString(n->kind()) << "??";
       IR_END()
@@ -75,6 +79,10 @@ std::ostream& operator<<(std::ostream & out, Graph & g) {
     }
   }
   out << "  return (" << g.outputs() << ");\n}\n";
+  size_t i = 0;
+  for(auto fg : groups) {
+    out << "with fusion_group_" <<i++ << " = " << fg->subgraph();
+  }
   return out;
 }
 
