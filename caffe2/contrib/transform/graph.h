@@ -17,6 +17,17 @@ namespace transform {
  */
 struct Node {
  public:
+  // Empty constructor for resize
+  Node() {}
+
+  // Alternate constructor
+  Node(
+      const OperatorDef& op,
+      bool active,
+      std::map<int, string> parents,
+      std::map<int, string> children)
+      : op(op), active(active), parents(parents), children(children) {}
+
   // The OperatorDef which this node represents.
   OperatorDef op;
 
@@ -24,8 +35,8 @@ struct Node {
   bool active = true;
 
   // Stores a pair (idx, blob), the index of the child, and the blob of edge.
-  std::map<int, string> children;
   std::map<int, string> parents;
+  std::map<int, string> children;
 };
 
 /**
@@ -82,6 +93,11 @@ struct Graph {
    * This is solved by performing SSA on all transformed blob names.
    */
   NetDef GetNetDef();
+
+  /**
+   * Deactivate a subgraph, and get rid of all edges into this subgraph.
+   */
+  void DeactivateSubgraph(std::vector<int> subgraph);
 
   const size_t size() const {
     return nodes_.size();
