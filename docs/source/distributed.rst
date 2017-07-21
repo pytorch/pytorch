@@ -7,6 +7,35 @@ Distributed communication package - torch.distributed
 .. automodule:: torch.distributed
 .. currentmodule:: torch.distributed
 
+Currently torch.distributed supports three backends, each with
+different capabilities. The table below shows which functions are available
+for use with CPU / CUDA tensors.
+MPI supports cuda only iff the implementation used to build PyTorch supports it.
+
++------------+-----------+-----------+-----------+
+| Backend    | ``tcp``   | ``gloo``  | ``mpi``   |
++------------+-----+-----+-----+-----+-----+-----+
+| Device     | CPU | GPU | CPU | GPU | CPU | GPU |
++============+=====+=====+=====+=====+=====+=====+
+| send       | ✓   | ✘   | ✘   | ✘   | ✓   | ?   |
++------------+-----+-----+-----+-----+-----+-----+
+| recv       | ✓   | ✘   | ✘   | ✘   | ✓   | ?   |
++------------+-----+-----+-----+-----+-----+-----+
+| broadcast  | ✓   | ✘   | ✓   | ✓   | ✓   | ?   |
++------------+-----+-----+-----+-----+-----+-----+
+| all_reduce | ✓   | ✘   | ✓   | ✓   | ✓   | ?   |
++------------+-----+-----+-----+-----+-----+-----+
+| reduce     | ✓   | ✘   | ✘   | ✘   | ✓   | ?   |
++------------+-----+-----+-----+-----+-----+-----+
+| all_gather | ✓   | ✘   | ✘   | ✘   | ✓   | ?   |
++------------+-----+-----+-----+-----+-----+-----+
+| gather     | ✓   | ✘   | ✘   | ✘   | ✓   | ?   |
++------------+-----+-----+-----+-----+-----+-----+
+| scatter    | ✓   | ✘   | ✘   | ✘   | ✓   | ?   |
++------------+-----+-----+-----+-----+-----+-----+
+| barrier    | ✓   | ✘   | ✓   | ✓   | ✓   | ?   |
++------------+-----+-----+-----+-----+-----+-----+
+
 Initialization
 --------------
 
@@ -28,10 +57,10 @@ TCP initialization
 
 Initialization will utilize a network address reachable from all processes.
 If the address belongs to one of the machines, initialization requires that all processes
-have manually specified ranks. 
+have manually specified ranks.
 
 Alternatively, the address has to be a valid IP multicast address, in which case,
-ranks can be assigned automatically. Multicast initialization also supports 
+ranks can be assigned automatically. Multicast initialization also supports
 a ``group_name`` argument, which allows you to use the same address for multiple jobs,
 as long as they use different group names.
 
@@ -80,7 +109,7 @@ are:
 * ``WORLD_SIZE`` - required; can be set either here, or in a call to init function
 * ``RANK`` - required; can be set either here, or in a call to init function
 
-The machine with rank 0 will be used to set up all connections. 
+The machine with rank 0 will be used to set up all connections.
 
 This is the default method, meaning that ``init_method`` does not have to be specified (or
 can be ``env://``).
@@ -93,7 +122,7 @@ require all processes to enter the distributed function call. However, some work
 from more fine-grained communication. This is where distributed groups come
 into play. :func:`~torch.distributed.new_group` function can be
 used to create new groups, with arbitrary subsets of all processes. It returns
-an opaque group handle that can be given as a ``group`` argument to all collectives 
+an opaque group handle that can be given as a ``group`` argument to all collectives
 (collectives are distributed functions to exchange information in certain well-known programming patterns).
 
 .. autofunction:: new_group
