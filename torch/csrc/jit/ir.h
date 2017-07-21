@@ -131,8 +131,10 @@ public:
 
   // Graphs
 
-  // Add a node as an input to the current node.  Returns the added
-  // node for ease of chaining.
+  // Add 'node' as an input to 'this' at the end of existing
+  // arguments.  Returns the added node for ease of chaining.
+  //
+  // Precondition: 'node' must be topologically before 'this'.
   //
   // Given:   %3 = f(%1, %2)
   // Execute: %3.addInput(%4)
@@ -144,8 +146,10 @@ public:
     return node;
   }
 
-  // Replace the input of this node at position 'i' with
+  // Replace the input of 'this' at position 'i' with
   // 'newValue', returning the old node.
+  //
+  // Precondition: 'newValue' must be topologically before 'this'.
   //
   // Given:   %3 = f(%1, %2)
   // Execute: %3.replaceInput(1, %4)
@@ -160,6 +164,8 @@ public:
 
   // Replace all occurrences of 'from' in the inputs of this
   // node with 'to'. Corresponds to llvm's replaceUsesOfWith.
+  //
+  // Precondition: 'to' must be topologically before 'this'.
   //
   // Given:   %3 = f(%1, %2, %1)
   // Execute: %3.replaceInputWith(%1, %4)
@@ -181,6 +187,10 @@ public:
   
   // Replaces all uses of this node with 'newValue'.
   //
+  // Precondition: 'newValue' must be topologically before all uses
+  // of 'this'.  A sound approximation is that 'newVAlue' is topologically
+  // before 'this'.
+  //
   // Given:   %3 = f(%1, %2)
   //          %4 = g(%3)
   //          %5 = h(%3, %3)
@@ -198,6 +208,9 @@ public:
   }
 
   // Insert node 'n' before this one in the topological order.
+  //
+  // Precondition: All inputs of 'n' must be topologically before
+  // 'this'.
   //
   // Given:   %3 = f(%1, %2)
   //          %4 = g(%3)
