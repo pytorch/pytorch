@@ -42,6 +42,28 @@ DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Sqr, cuda_sqrf);
 
 #undef DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION
 
+#define DELEGATE_SINCOS_CUDA_FUNCTION(T)                             \
+  __global__ void _Kernel_##T##_##SinCos(                            \
+      const int N, const T* x, T* ys, T* yc) {                       \
+    CUDA_1D_KERNEL_LOOP(i, N) {                                      \
+      sincos(x[i], ys + i, yc + i);                                  \
+    }                                                                \
+  }                                                                  \
+  template <>                                                        \
+  void SinCos<T, CUDAContext>(                                       \
+      const int N, const T* x, T* ys, T* yc, CUDAContext* context) { \
+    _Kernel_##T##_##SinCos<<<                                        \
+        CAFFE_GET_BLOCKS(N),                                         \
+        CAFFE_CUDA_NUM_THREADS,                                      \
+        0,                                                           \
+        context->cuda_stream()>>>(N, x, ys, yc);                     \
+  }
+
+DELEGATE_SINCOS_CUDA_FUNCTION(float)
+DELEGATE_SINCOS_CUDA_FUNCTION(double)
+
+#undef DELEGATE_SINCOS_CUDA_FUNCTION
+
 #define DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(T, Funcname, expr)               \
   __global__ void _Kernel_##T##_##Funcname(                                   \
       const int N, const T* a, const T* b, T* y) {                            \

@@ -436,6 +436,16 @@ DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sqr, vsSqr)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Sqr, vdSqr)
 #undef DELEGATE_SIMPLE_UNARY_FUNCTION
 
+#define DELEGATE_SINCOS_FUNCTION(T, OriginalFunc)           \
+  template <>                                               \
+  void SinCos<T, CPUContext>(                               \
+      const int N, const T* a, T* ys, T* yc, CPUContext*) { \
+    OriginalFunc(N, a, ys, yc);                             \
+  }
+DELEGATE_SINCOS_FUNCTION(float, vsSinCos)
+DELEGATE_SINCOS_FUNCTION(double, vdSinCos)
+#undef DELEGATE_SINCOS_FUNCTION
+
 #define DELEGATE_POWX_FUNCTION(T, OriginalFunc)                               \
   template <>                                                                 \
   void Powx<T, CPUContext>(const int N, const T* a, T b, T* y, CPUContext*) { \
@@ -475,6 +485,17 @@ DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sin, sin)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Abs, abs)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sqr, square)
 #undef DELEGATE_SIMPLE_UNARY_FUNCTION
+
+#define DELEGATE_SINCOS_FUNCTION(T)                                        \
+  template <>                                                              \
+  void SinCos<T, CPUContext>(                                              \
+      const int N, const T* x, T* ys, T* yc, CPUContext*) {                \
+    EigenVectorMap<T>(ys, N) = ConstEigenVectorMap<T>(x, N).array().sin(); \
+    EigenVectorMap<T>(yc, N) = ConstEigenVectorMap<T>(x, N).array().cos(); \
+  }
+DELEGATE_SINCOS_FUNCTION(float)
+DELEGATE_SINCOS_FUNCTION(double)
+#undef DELEGATE_SINCOS_FUNCTION
 
 #define DELEGATE_POWX_FUNCTION(T)                                             \
   template <>                                                                 \
