@@ -903,7 +903,7 @@ def upsample(input, size=None, scale_factor=None, mode='nearest'):
             output spatial size.
         scale_factor (int): multiplier for spatial size. Has to be an integer.
         mode (string): algorithm used for upsampling:
-            'nearest' | 'bilinear' | 'trilinear'
+            'nearest' | 'bilinear' | 'trilinear'. Default: 'nearest'
     """
     if input.dim() == 4 and mode == 'nearest':
         return _functions.thnn.UpsamplingNearest2d(_pair(size), scale_factor)(input)
