@@ -1,3 +1,4 @@
+#include "caffe2/operators/boolean_mask_ops.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/tensor.h"
 
@@ -42,78 +43,72 @@ class BooleanMaskLengthsOp final : public Operator<Context> {
     return true;
   }
 };
+}
 
-template <class Context>
-class BooleanMaskOp final : public Operator<Context> {
- public:
-  USE_OPERATOR_CONTEXT_FUNCTIONS;
-  BooleanMaskOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+template <>
+bool BooleanMaskOp<CPUContext>::RunOnDevice() {
+  auto& data = Input(0);
+  auto& mask = Input(1);
+  auto* dataOut = Output(0);
+  CAFFE_ENFORCE(data.ndim() >= 1);
+  CAFFE_ENFORCE_EQ(mask.ndim(), 1);
+  CAFFE_ENFORCE(data.dims()[0] == mask.dims()[0]);
 
-  bool RunOnDevice() override {
-    auto& data = Input(0);
-    auto& mask = Input(1);
-    auto* dataOut = Output(0);
-    CAFFE_ENFORCE(data.ndim() >= 1);
-    CAFFE_ENFORCE_EQ(mask.ndim(), 1);
-    CAFFE_ENFORCE(data.dims()[0] == mask.dims()[0]);
+  const auto* maskPtr = mask.template data<bool>();
+  int numOutputs = 0;
+  int outerSize = mask.size();
+  for (int i = 0; i < outerSize; ++i) {
+    if (maskPtr[i]) {
+      ++numOutputs;
+    }
+  }
+  std::vector<TIndex> outShape;
+  outShape.push_back(numOutputs);
+  outShape.insert(outShape.end(), data.dims().begin() + 1, data.dims().end());
+  dataOut->Resize(outShape);
+  auto* outPtr = (char*)dataOut->raw_mutable_data(data.meta());
 
-    const auto* maskPtr = mask.template data<bool>();
-    int numOutputs = 0;
-    int outerSize = mask.size();
-    for (int i = 0; i < outerSize; ++i) {
-      if (maskPtr[i]) {
-        ++numOutputs;
-      }
-    }
-    std::vector<TIndex> outShape;
-    outShape.push_back(numOutputs);
-    outShape.insert(outShape.end(), data.dims().begin() + 1, data.dims().end());
-    dataOut->Resize(outShape);
-    auto* outPtr = (char*)dataOut->raw_mutable_data(data.meta());
-    if (numOutputs == 0) {
-      return true;
-    }
-    auto innerSizeBytes = std::accumulate(
-                              data.dims().begin() + 1,
-                              data.dims().end(),
-                              1,
-                              std::multiplies<TIndex>()) *
-        data.meta().itemsize();
-    TIndex lastStart = -1;
-    const auto* inPtr = (char*)data.raw_data();
-    TIndex outStart = 0;
-    int64_t* out_vec;
-    if (OutputSize() == 2) {
-      auto* indicesOut = Output(1);
-      indicesOut->Resize(numOutputs);
-      out_vec = indicesOut->template mutable_data<int64_t>();
-    }
-    for (TIndex i = 0;; ++i) {
-      // mask was true and either a) became false, or b) sequence finished
-      if (lastStart != -1 && ((i >= outerSize) || !maskPtr[i])) {
-        const auto* src = inPtr + lastStart * innerSizeBytes;
-        auto* dst = outPtr + outStart * innerSizeBytes;
-        int numItems = i - lastStart;
-        context_.template CopyItems<CPUContext, CPUContext>(
-            data.meta(), numItems, src, dst);
-        outStart += numItems;
-        lastStart = -1;
-      }
-      if (i >= outerSize) {
-        break;
-      }
-      // mask was false and became true
-      if (lastStart == -1 && maskPtr[i]) {
-        lastStart = i;
-      }
-      if (maskPtr[i] && OutputSize() == 2) {
-        *(out_vec++) = i;
-      }
-    }
+  int64_t* out_vec;
+  if (OutputSize() == 2) {
+    auto* indicesOut = Output(1);
+    indicesOut->Resize(numOutputs);
+    out_vec = indicesOut->template mutable_data<int64_t>();
+  }
+
+  if (numOutputs == 0) {
     return true;
   }
-};
+  const auto innerSize = data.size_from_dim(1);
+  const auto innerSizeBytes = innerSize * data.meta().itemsize();
+
+  TIndex lastStart = -1;
+  const auto* inPtr = (char*)data.raw_data();
+  TIndex outStart = 0;
+
+  for (TIndex i = 0;; ++i) {
+    // mask was true and either a) became false, or b) sequence finished
+    if (lastStart != -1 && ((i >= outerSize) || !maskPtr[i])) {
+      const auto* src = inPtr + lastStart * innerSizeBytes;
+      auto* dst = outPtr + outStart * innerSizeBytes;
+      int numItems = i - lastStart;
+      context_.template CopyItems<CPUContext, CPUContext>(
+          data.meta(), numItems * innerSize, src, dst);
+      outStart += numItems;
+      lastStart = -1;
+    }
+    if (i >= outerSize) {
+      break;
+    }
+    // mask was false and became true
+    if (lastStart == -1 && maskPtr[i]) {
+      lastStart = i;
+    }
+    if (maskPtr[i] && OutputSize() == 2) {
+      *(out_vec++) = i;
+    }
+  }
+  return true;
+}
 
 REGISTER_CPU_OPERATOR(BooleanMask, BooleanMaskOp<CPUContext>);
 REGISTER_CPU_OPERATOR(BooleanMaskLengths, BooleanMaskLengthsOp<CPUContext>);
@@ -144,5 +139,4 @@ applied.
 
 NO_GRADIENT(BooleanMask)
 NO_GRADIENT(BooleanMaskLengths);
-}
 }
