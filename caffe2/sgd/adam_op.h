@@ -18,7 +18,7 @@ void adam_update(
     float eps_hat,
     float correction,
     const float* lr,
-    Context* context) {
+    Context* /*context*/) {
   for (auto i = 0; i < N; ++i) {
     float gi = g[i];
     float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);
@@ -42,7 +42,7 @@ void adam_compute(
     float eps_hat,
     float correction,
     const float* lr,
-    Context* context) {
+    Context* /*context*/) {
   for (auto i = 0; i < N; ++i) {
     float gi = g[i];
     float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);

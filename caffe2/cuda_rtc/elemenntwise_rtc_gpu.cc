@@ -11,7 +11,9 @@ class ElementwiseRTCFunction
   ElementwiseRTCFunction() : CudaRTCFunction(), name_(GetUniqueName()) {}
 
   template <typename... Args>
-  string KernelName(Args... args) { return name_; }
+  string KernelName(Args... /*args*/) {
+    return name_;
+  }
 
   template <typename... Args>
   string GetSource(Args... args);

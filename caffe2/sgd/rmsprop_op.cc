@@ -15,7 +15,7 @@ void rmsprop_update<CPUContext>(
     float momentum,
     float epsilon,
     const float* lr,
-    CPUContext* context) {
+    CPUContext* /*context*/) {
   ConstEigenVectorArrayMap<float> gVec(g, N);
   ConstEigenVectorArrayMap<float> msVec(ms, N);
   ConstEigenVectorArrayMap<float> momVec(mom, N);

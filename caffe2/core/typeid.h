@@ -221,7 +221,8 @@ class TypeMeta {
    * A placeholder function for types that do not allow assignment.
    */
   template <typename T>
-  static void _CopyNotAllowed(const void* src, void* dst, size_t n) {
+  static void
+  _CopyNotAllowed(const void* /*src*/, void* /*dst*/, size_t /*n*/) {
     std::cerr << "Type " << Name<T>() << " does not allow assignment.";
     // This is an error by design, so we will quit loud.
     abort();

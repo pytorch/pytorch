@@ -825,11 +825,11 @@ class LengthsToWeightsOp : public Operator<Context> {
 
     std::function<float(const int64_t& length, const float& power)> getWeight;
     if (power_ == 0.5) {
-      getWeight = [](const int64_t& length, const float& power) {
+      getWeight = [](const int64_t& length, const float& /*power*/) {
         return 1.0 / std::sqrt(length);
       };
     } else if (power_ == 1) {
-      getWeight = [](const int64_t& length, const float& power) {
+      getWeight = [](const int64_t& length, const float& /*power*/) {
         return 1.0 / length;
       };
     } else {

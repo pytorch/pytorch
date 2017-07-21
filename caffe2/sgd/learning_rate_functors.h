@@ -19,7 +19,7 @@ class LearningRateFunctor {
 template <typename T>
 class FixedLearningRate : public LearningRateFunctor<T> {
  public:
-  T operator()(const int64_t iter) const override {
+  T operator()(const int64_t /*iter*/) const override {
     return 1.;
   }
 };

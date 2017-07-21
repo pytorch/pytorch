@@ -66,8 +66,8 @@ namespace caffe2 {
       void MaskMatrix_Inc<float, CPUContext>(
           float* mask_seq,
           float* mat,
-          int M,
-          int N,
+          int /*M*/,
+          int /*N*/,
           int seq_len,
           float target) {
         for (int i = 0; i < seq_len; ++i) {

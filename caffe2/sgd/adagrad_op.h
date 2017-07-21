@@ -13,8 +13,8 @@ void adagrad_update(
     float* nw,
     float* nh,
     float epsilon,
-    const float *lr,
-    Context* context) {
+    const float* lr,
+    Context* /*context*/) {
   for (auto i = 0; i < N; ++i) {
     float gi = g[i];
     float hi = nh[i] = h[i] + gi * gi;

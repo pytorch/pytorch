@@ -65,7 +65,7 @@ class UnaryElementwiseWithArgsOp : public Operator<Context> {
  */
 template <typename Functor>
 struct WithDefaultConstructor {
-  explicit WithDefaultConstructor(OperatorBase& op) {}
+  explicit WithDefaultConstructor(OperatorBase& /*op*/) {}
 
   template <typename In, typename Out, typename Context>
   void operator()(int n, const In* in, Out* out, Context* c) {
@@ -225,22 +225,22 @@ struct WithoutBroadcast {
   }
   template <typename T, typename R, typename Context>
   inline void RunWithBroadcast(
-      const T* a,
-      const T* b,
-      R* out,
-      size_t pre,
-      size_t n,
+      const T* /*a*/,
+      const T* /*b*/,
+      R* /*out*/,
+      size_t /*pre*/,
+      size_t /*n*/,
       Context*) {
     CAFFE_NOT_IMPLEMENTED;
   }
   template <typename T, typename R, typename Context>
   inline void RunWithBroadcast2(
-      const T* a,
-      const T* b,
-      R* out,
-      size_t pre,
-      size_t n,
-      size_t post,
+      const T* /*a*/,
+      const T* /*b*/,
+      R* /*out*/,
+      size_t /*pre*/,
+      size_t /*n*/,
+      size_t /*post*/,
       Context*) {
     CAFFE_NOT_IMPLEMENTED;
   }

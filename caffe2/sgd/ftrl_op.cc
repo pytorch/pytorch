@@ -40,7 +40,7 @@ void ftrl_update(
     T* new_w,
     T* new_nz,
     const FtrlParams<T>& params,
-    Context* context) {
+    Context* /*context*/) {
   // TODO(cxj): use OMP when it is reliable
   // #pragma omp parallel for
   for (auto i = 0; i < N; ++i) {

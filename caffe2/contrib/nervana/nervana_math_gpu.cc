@@ -22,7 +22,7 @@ void Gemm<float, CUDAContext, NervanaEngine>(
     const float beta,
     float* C,
     CUDAContext* context,
-    TensorProto::DataType math_type) {
+    TensorProto::DataType /*math_type*/) {
   // Note that cublas follows fortran order, so the order is different from
   // the cblas convention.
   int lda = (TransA == CblasNoTrans) ? K : M;

@@ -19,7 +19,7 @@ struct ForEach {
   explicit ForEach(OperatorBase& op) : functor(op) {}
 
   template <typename In, typename Out, typename Context>
-  void operator()(int n, const In* in, Out* out, Context* c) {
+  void operator()(int n, const In* in, Out* out, Context* /*c*/) {
     for (int i = 0; i < n; ++i) {
       out[i] = functor(in[i]);
     }

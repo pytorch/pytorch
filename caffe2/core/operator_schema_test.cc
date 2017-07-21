@@ -212,13 +212,12 @@ TEST(OperatorSchemaTest, TestCastSchema) {
 OPERATOR_SCHEMA(OpSchemaCostInference)
     .NumInputs(2)
     .NumOutputs(2)
-    .CostInferenceFunction(
-        [](const OperatorDef& def, const vector<TensorShape>& inputs) {
-          struct OpSchema::Cost c;
-          c.flops =
-              2 * inputs[0].dims(0) * inputs[0].dims(1) * inputs[1].dims(1);
-          return c;
-        });
+    .CostInferenceFunction([](const OperatorDef& /*def*/,
+                              const vector<TensorShape>& inputs) {
+      struct OpSchema::Cost c;
+      c.flops = 2 * inputs[0].dims(0) * inputs[0].dims(1) * inputs[1].dims(1);
+      return c;
+    });
 
 TEST(OperatorSchemaTest, TestCostInference) {
   const OpSchema* schema = OpSchemaRegistry::Schema("OpSchemaCostInference");

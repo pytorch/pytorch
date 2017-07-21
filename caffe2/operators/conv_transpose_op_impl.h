@@ -168,7 +168,7 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   const T* Xdata = X.template data<T>();
   T* Ydata = Y->template mutable_data<T>();
 
-  auto f = [&](Tensor<Context>* col_buffer) {
+  auto f = [&](Tensor<Context>* /*col_buffer*/) {
     col_buffer_.Resize(vector<TIndex>{H, W, kernel_h_, kernel_w_, C});
     T* col_buffer_data = col_buffer_.template mutable_data<T>();
     for (auto image_id = 0; image_id < N; ++image_id) {

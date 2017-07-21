@@ -29,7 +29,7 @@ void LSTMUnit(
     T* C,
     T* H,
     const T forget_bias,
-    Context* context) {
+    Context* /*context*/) {
   for (int n = 0; n < N; ++n) {
     const bool valid = t < seqLengths[n];
 
@@ -79,7 +79,7 @@ void LSTMUnitGradient(
     T* C_prev_diff,
     T* X_diff,
     const T forget_bias,
-    Context* context) {
+    Context* /*context*/) {
   for (int n = 0; n < N; ++n) {
     const bool valid = t < seqLengths[n];
 

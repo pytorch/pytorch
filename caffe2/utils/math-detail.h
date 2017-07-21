@@ -29,7 +29,7 @@ struct ScaleImpl<T, CPUContext, 1> {
       const float alpha,
       const T* x,
       T* y,
-      CPUContext* context) {
+      CPUContext* /*context*/) {
     DCHECK_EQ(N, 1);
     *y = *x * alpha;
   }
@@ -55,7 +55,7 @@ struct AxpyImpl<T, CPUContext, 1> {
       const float alpha,
       const T* x,
       T* y,
-      CPUContext* context) {
+      CPUContext* /*context*/) {
     DCHECK_EQ(N, 1);
     *y += *x * alpha;
   }

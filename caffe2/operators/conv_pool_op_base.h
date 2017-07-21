@@ -260,11 +260,11 @@ class ConvPoolOpBase : public Operator<Context> {
   // kernel parameters and output output_dims and channel_first.
   static inline void InferOutputSize(
       vector<TIndex> input_dims,
-      int output_channel,
+      int /*output_channel*/,
       StorageOrder order,
       bool global_pooling,
       LegacyPadding legacy_pad,
-      int N,
+      int /*N*/,
       vector<int>& kernel,
       vector<int>& output_dims,
       vector<int> dilation,
