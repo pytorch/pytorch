@@ -75,7 +75,8 @@ _(Param) \
 _(Select) \
 _(Return) \
 _(Add) \
-_(SimpleMap)
+_(SimpleMap) \
+_(FusionGroup)
 
 enum class NodeKind {
 #define DEFINE_NODE(n) n,
@@ -108,13 +109,13 @@ private:
   Type * type_;
   std::vector<Node*> inputs_;
   use_list uses_;
-  Graph* const graph_;
+  Graph* graph_;
   size_t unique_ = 0;
   // what stage of computation 0-forward, 1-backward, 2-double-backward,...
   size_t stage_ = 0;
 protected:
-  Node(NodeKind kind_, Graph* graph_)
-  : next_in_graph{nullptr,nullptr}, kind_(kind_), type_(nullptr), graph_(graph_)  {}
+  Node(NodeKind kind_)
+  : next_in_graph{nullptr,nullptr}, kind_(kind_), type_(nullptr) {}
 public:
   NodeKind kind() {
     return kind_;
@@ -144,22 +145,32 @@ public:
     inputs_.push_back(node);
     return node;
   }
+private:
+  use_list::iterator findUseForInput(size_t i) {
+    Node * old_node = inputs_[i];
+    Use use(this,i);
+    //O(N) on the use list, but unless we get nodes with +100 uses
+    //vector traversal still is probably faster than linked list
+    auto use_it = std::find(old_node->uses_.begin(),old_node->uses_.end(),use);
+    JIT_ASSERT(use_it != old_node->uses().end());
+    return use_it;
+  }
+  Node* dropInput(size_t i) {
+    JIT_ASSERT(i < inputs_.size());
+    auto old_node = inputs_[i];
+    auto use_it = findUseForInput(i);
+    old_node->uses_.erase(use_it);
+    inputs_[i] = nullptr;
+    return old_node;
+  }
+public:
   //returns the old input
   Node * replaceInput(size_t i, Node * newValue) {
-    JIT_ASSERT(i < inputs_.size() && (!newValue || newValue->graph_ == graph_));
-    auto old_node = inputs_[i];
-    Use use(this,i);
-    if(old_node) {
-      //O(N) on the use list, but unless we get nodes with +100 uses
-      //vector traversal still is probably faster than linked list
-      auto use_it = std::find(old_node->uses_.begin(),old_node->uses_.end(),use);
-      JIT_ASSERT(use_it != old_node->uses().end());
-      old_node->uses_.erase(use_it);
-    }
-    if(newValue) {
-      newValue->uses_.push_back(use);
-    }
-    return old_node;
+    JIT_ASSERT(newValue->graph_ == graph_);
+    Node * old = dropInput(i);
+    inputs_[i] = newValue;
+    newValue->uses_.emplace_back(this,i);
+    return old;
   }
   // llvm's replaceUsesOfWith
   void replaceInputWith(Node * from, Node * to) {
@@ -209,11 +220,23 @@ public:
     removeFromList();
     insertBefore(n);
   }
-private:
-  void dropAllInputs() {
-    for(size_t i = 0; i < inputs().size(); ++i)
-      replaceInput(i, nullptr);
+  void removeInput(size_t i) {
+    dropInput(i);
+    for(size_t j = i+1; j < inputs_.size(); j++) {
+      auto it = findUseForInput(j);
+      it->offset--;
+    }
+    inputs_.erase(inputs_.begin() + i);
   }
+  void removeAllInputs() {
+    for(size_t i = 0; i < inputs().size(); ++i)
+      dropInput(i);
+    inputs_.clear();
+  }
+  //iterators of the node list starting at this node
+  graph_node_list_iterator iterator();
+  graph_node_list_iterator reverseIterator();
+private:
   void removeFromList() {
     JIT_ASSERT(inGraphList());
     Node * next = this->next();
@@ -232,110 +255,11 @@ public:
       return static_cast<T*>(this);
     return nullptr;
   }
-};
-
- // execute a Python function, used for Ops we can't optimize but that we want to optimize around
-struct PythonOp : public Node {
-  static const NodeKind Kind = NodeKind::PythonOp;
-  //TODO: make this non-autograd specific
-  //remove is_legacy, avoid THPObjectPtr to avoid big PyTorch dependency
-
-  // The Python object which contains the implementation of this function.
-  // This is either a class (non-legacy) or an object (legacy).  See
-  // TraceInterpreter for execution semantics.
-  THPObjectPtr pyobj;
-  // The calling convention for the Python function.
-  // 's' -- python scalar argument
-  // 't' -- tensor argument
-  std::string cconv;
-  bool is_legacy;
-  // Scalar arguments to the Python function.  Not necessarily passed to
-  // the function in this order; see cconv for the correct order.
-  std::vector<THPObjectPtr> scalar_args;
-  std::string name();
-  PythonOp(Graph* graph, THPObjectPtr&& pyobj, const std::string & cconv, bool is_legacy, pyobj_list&& scalar_args)
-    : Node(Kind, graph)
-    , pyobj(std::move(pyobj))
-    , cconv(cconv)
-    , is_legacy(is_legacy)
-    , scalar_args(std::move(scalar_args))
-    {}
-};
-
- // an input tensor to the graph
-struct Param : public Node {
-  static const NodeKind Kind = NodeKind::Param;
-  Param(Graph* graph)
-  : Node(Kind, graph)
-  {}
-};
-
-// Select nodes are used to handle multiple returns for the ops that actually return
-// multiple values like PythonOp
-// By convension, there is a unique select node for each output of an op
-// so you can iterate over uses of a multi-return op to get all the select nodes.
-// in this case
-// number_of_outputs = op.uses().size()
-// this will change if Tuples ever become first class.
-struct Select : public Node {
-  static const NodeKind Kind = NodeKind::Select;
-  Select(Graph* graph, Node * node, size_t offset)
-  : Node(Kind, graph), offset_(offset) {
-    addInput(node);
-  }
-  // which multi-return op is it?
-  Node * base() {
-    return inputs()[0];
-  }
-  // which output is it?
-  size_t offset() {
-    return offset_;
-  }
-private:
-  size_t offset_;
-};
-
-// helper to define simple primitive Ops.
-template<NodeKind K>
-struct Primitive : public Node {
-  static const NodeKind Kind = K;
-  Primitive(Graph* graph)
-  : Node(Kind, graph) {}
-  Primitive(Graph* graph, ArrayRef<Node*> inputs)
-  : Primitive(graph) {
-    for(auto i : inputs)
-      addInput(i);
-  }
-};
-
-// NB: non-nullary constructors don't get forwarded to the
-// parents, so you have to spell out the constructors you want explicitly.
-
-// example primitive
-struct Add : public Primitive<NodeKind::Add> {
-  Add(Graph* graph)
-  : Primitive(graph) {}
-  Add(Graph* graph, ArrayRef<Node*> inputs)
-  : Primitive(graph, inputs) {}
-};
-
-// Temporary node that represents single-return fusable math operators
-// until we have actual operators to reflect them.
-struct SimpleMap: public Primitive<NodeKind::SimpleMap> {
-  std::string op; //'Tanh'
-  SimpleMap(Graph * graph, const std::string & op)
-  : Primitive(graph), op(op) {}
-  SimpleMap(Graph * graph, const std::string & op, ArrayRef<Node*> inputs)
-  : Primitive(graph,inputs), op(op) {}
-};
-
-// the outputs of the Graph are represented as an Node so that its inputs
-// can be tracked as Uses.
-struct Return : public Primitive<NodeKind::Return> {
-  Return(Graph* graph)
-  : Primitive(graph) {}
-  Return(Graph* graph, ArrayRef<Node*> inputs)
-  : Primitive(graph, inputs) {}
+  virtual ~Node() {}
+  //initialize this Node by copying properties of 'other'
+  //translation of inputs is handled automatically in Graph::clone.
+protected:
+  virtual Node * allocClone(Graph * in_graph) = 0;
 };
 
 struct graph_node_list_iterator {
@@ -371,6 +295,14 @@ private:
   int d; //direction 0 is forward 1 is reverse, see next_in_graph
 };
 
+inline graph_node_list_iterator Node::iterator() {
+  return graph_node_list_iterator(this,0);
+}
+
+inline graph_node_list_iterator Node::reverseIterator() {
+  return graph_node_list_iterator(this,1);
+}
+
 struct graph_node_list {
   graph_node_list_iterator begin() {
     return graph_node_list_iterator(head->next_in_graph[d],d);
@@ -392,15 +324,55 @@ static inline bool operator==(graph_node_list_iterator a,graph_node_list_iterato
   return *a == *b;
 }
 
-
 static inline bool operator!=(graph_node_list_iterator a,graph_node_list_iterator b) {
   return *a != *b;
 }
 
+/******************* Nodes required inside a Graph ****************************/
+
+// using CRTP so that we can alloc new clones and dispatch for clone.
+// without tons of per-object boilerplate
+template<typename Self, NodeKind K>
+struct NodeWithKind : public Node {
+  friend class Graph; /* so it can access allocClone() */
+  static const NodeKind Kind = K;
+  NodeWithKind()
+  : Node(K) {}
+  // virtual so we can easily define a default here
+  // but defined using CRTP so cloneFrom doesn't need casts.
+  // called from allocClone
+  virtual void cloneFrom(Self * s) {}
+protected:
+  // defined here because we need to know Self to allocate a new node.
+  // user-defined cloneFrom is called.
+  virtual Node * allocClone(Graph * in_graph);
+};
+
+// helper to define simple primitive Ops.
+template<typename Self, NodeKind K>
+struct Primitive : public NodeWithKind<Self,K> {
+  void init() {}
+  void init(ArrayRef<Node*> inputs) {
+    for(auto i : inputs)
+      this->addInput(i);
+  }
+};
+
+
+// the outputs of the Graph are represented as an Node so that its inputs
+// can be tracked as Uses.
+struct Return : public Primitive<Return,NodeKind::Return> {};
+
+// an input tensor to the graph
+struct Param : public NodeWithKind<Param,NodeKind::Param> {
+  void init() {}
+};
 
 struct Graph {
 TH_DISALLOW_COPY_AND_ASSIGN(Graph);
 friend struct Node;
+template<typename Self, NodeKind K>
+friend struct NodeWithKind;
 private:
   param_list inputs_;
 
@@ -432,19 +404,48 @@ public:
     inputs_.push_back(p);
     return p;
   }
-
-  void registerOutput(Node * n) {
-    output_->addInput(n);
+  void eraseInput(size_t i) {
+    JIT_ASSERT(i < inputs_.size());
+    JIT_ASSERT(inputs_[i]->uses().size() == 0);
+    Node * n = inputs_[i];
+    inputs_.erase(inputs_.begin() + i);
+    freeNode(n);
   }
 
+  size_t registerOutput(Node * n) {
+    output_->addInput(n);
+    return outputs().size() - 1;
+  }
+
+private:
+  void initNewNodeForGraph(Node * r) {
+    r->graph_ = this;
+    r->unique_ = next_unique++;
+    all_nodes.insert(r);
+  }
+  void freeNode(Node * n) {
+    all_nodes.erase(n);
+    delete n;
+  }
+public:
   // like make_shared, forward arguments to node constructors
   // while also associating it with the graph
   // e.g. g.create<Select>(another,0);
   template<typename T, typename... Args >
   T * create(Args&&... args) {
-    T* r = new T(this, std::forward<Args>(args)...);
-    r->unique_ = next_unique++;
-    all_nodes.insert(r);
+    // default construction of all nodes
+    T* r = new T();
+    initNewNodeForGraph(r);
+    // custom per-node initialization
+    r->init(std::forward<Args>(args)...);
+    return r;
+  }
+  Node * createClone(Node * n, std::function<Node*(Node*)> node_map) {
+    //n can be from a different graph
+    Node * r = n->allocClone(this);
+    for(auto i : n->inputs()) {
+      r->addInput(node_map(i));
+    }
     return r;
   }
   Node * addNode(Node * n) {
@@ -452,10 +453,21 @@ public:
     n->insertBefore(output_);
     return n;
   }
+  Node * prependNode(Node * n) {
+    JIT_ASSERT(n->graph_ == this && !n->inGraphList());
+    n->insertAfter(output_);
+    return n;
+  }
+
   template<typename T, typename... Args >
   Node * addNode(Args&&... args) {
     T* n = create<T>(std::forward<Args>(args)...);
     return addNode(n);
+  }
+  Node * addClone(Node * n, std::function<Node*(Node*)> node_map) {
+    Node * r = createClone(n,node_map);
+    addNode(n);
+    return r;
   }
   const param_list & inputs() {
     return inputs_;
@@ -475,10 +487,17 @@ public:
 inline void Node::eraseFromParent() {
   JIT_ASSERT(inGraphList());
   JIT_ASSERTM(uses().size() == 0, "attempting to erase a Node that still has uses.");
-  dropAllInputs();
+  removeAllInputs();
   removeFromList();
-  graph_->all_nodes.erase(this);
-  delete this;
+  graph_->freeNode(this);
+}
+
+template<typename Self, NodeKind K>
+Node * NodeWithKind<Self,K>::allocClone(Graph * in_graph) {
+  auto s = new Self();
+  in_graph->initNewNodeForGraph(s);
+  s->cloneFrom(static_cast<Self*>(this));
+  return s;
 }
 
 // Helper macros for constructing switch statements over Node types
@@ -527,5 +546,98 @@ static inline const char * toString(NodeKind kind) {
       __builtin_unreachable();
   }
 }
+
+
+/************* All nodes not required to be defined before Graph **************/
+
+ // execute a Python function, used for Ops we can't optimize but that we want to optimize around
+struct PythonOp : public NodeWithKind<PythonOp,NodeKind::PythonOp> {
+  //TODO: make this non-autograd specific
+  //remove is_legacy, avoid THPObjectPtr to avoid big PyTorch dependency
+
+  // The Python object which contains the implementation of this function.
+  // This is either a class (non-legacy) or an object (legacy).  See
+  // TraceInterpreter for execution semantics.
+  THPObjectPtr pyobj;
+  // The calling convention for the Python function.
+  // 's' -- python scalar argument
+  // 't' -- tensor argument
+  std::string cconv;
+  bool is_legacy;
+  // Scalar arguments to the Python function.  Not necessarily passed to
+  // the function in this order; see cconv for the correct order.
+  std::vector<THPObjectPtr> scalar_args;
+  std::string name();
+  void init(THPObjectPtr&& pyobj, const std::string & cconv, bool is_legacy, pyobj_list&& scalar_args) {
+    this->pyobj = std::move(pyobj);
+    this->scalar_args = std::move(scalar_args);
+    this->cconv = cconv;
+    this->is_legacy = is_legacy;
+  }
+  virtual void cloneFrom(PythonOp * other) override {
+    throw std::runtime_error("cannot clone PythonOp because of THPObjectPtr");
+  }
+};
+
+// Select nodes are used to handle multiple returns for the ops that actually return
+// multiple values like PythonOp
+// By convension, there is a unique select node for each output of an op
+// so you can iterate over uses of a multi-return op to get all the select nodes.
+// in this case
+// number_of_outputs = op.uses().size()
+// this will change if Tuples ever become first class.
+struct Select : public NodeWithKind<Select,NodeKind::Select> {
+  void init(Node * node, size_t offset) {
+    addInput(node);
+    this->offset_ = offset;
+  }
+  // which multi-return op is it?
+  Node * base() {
+    return inputs()[0];
+  }
+  // which output is it?
+  size_t offset() {
+    return offset_;
+  }
+  virtual void cloneFrom(Select * other) override {
+    this->offset_ = other->offset_;
+  }
+private:
+  size_t offset_;
+};
+
+// NB: non-nullary constructors don't get forwarded to the
+// parents, so you have to spell out the constructors you want explicitly.
+
+// example primitive
+struct Add : public Primitive<Add,NodeKind::Add> {};
+
+// Temporary node that represents single-return fusable math operators
+// until we have actual operators to reflect them.
+struct SimpleMap: public NodeWithKind<SimpleMap, NodeKind::SimpleMap> {
+  std::string op; //'Tanh'
+  void init(const std::string & op, ArrayRef<Node*> inputs) {
+    this->op = op;
+    for(auto i : inputs)
+      addInput(i);
+  }
+  virtual void cloneFrom(SimpleMap * n) override {
+    this->op = n->op;
+  }
+};
+
+struct FusionGroup : public NodeWithKind<FusionGroup,NodeKind::FusionGroup> {
+  void init() {
+    subgraph_ = std::make_shared<Graph>();
+  }
+  virtual void cloneFrom(FusionGroup * other) {
+    subgraph_ = other->subgraph_;
+  }
+  Graph & subgraph() {
+    return *subgraph_;
+  }
+private:
+  std::shared_ptr<Graph> subgraph_;
+};
 
 }}

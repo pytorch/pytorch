@@ -60,7 +60,6 @@ struct TracingState {
     frames.pop_back();
     std::cout << "GRAPH RECORDED\n" << *r.graph;
     r.graph = FuseGraph(std::move(r.graph));
-    std::cout << "GRAPH FUSED\n" << *r.graph;
     return std::move(r.graph);
   }
 private:
