@@ -79,7 +79,7 @@ class Transaction {
  */
 class DB {
  public:
-  DB(const string& source, Mode mode) : mode_(mode) {}
+  DB(const string& /*source*/, Mode mode) : mode_(mode) {}
   virtual ~DB() { }
   /**
    * Closes the database.

@@ -281,8 +281,8 @@ void Gemm<float, CPUContext>(
     const float* B,
     const float beta,
     float* C,
-    CPUContext* context,
-    TensorProto::DataType math_type) {
+    CPUContext* /*context*/,
+    TensorProto::DataType /*math_type*/) {
   int lda = (TransA == CblasNoTrans) ? K : M;
   int ldb = (TransB == CblasNoTrans) ? N : K;
   cblas_sgemm(CblasRowMajor, TransA, TransB, M, N, K, alpha, A, lda, B, ldb,
@@ -304,7 +304,7 @@ void GemmEx<float, CPUContext>(
     const float beta,
     float* C,
     const int ldc,
-    CPUContext* context) {
+    CPUContext* /*context*/) {
   cblas_sgemm(CblasRowMajor, TransA, TransB, M, N, K, alpha, A, lda, B, ldb,
               beta, C, ldc);
 }
@@ -319,8 +319,8 @@ void Gemv<float, CPUContext>(
     const float* x,
     const float beta,
     float* y,
-    CPUContext* context,
-    TensorProto::DataType math_type) {
+    CPUContext* /*context*/,
+    TensorProto::DataType /*math_type*/) {
   cblas_sgemv(CblasRowMajor, TransA, M, N, alpha, A, N, x, 1, beta, y, 1);
 }
 
@@ -665,7 +665,7 @@ void Not<bool, CPUContext>(
     const int n,
     const bool* x,
     bool* y,
-    CPUContext* context) {
+    CPUContext* /*context*/) {
   for (int i = 0; i < n; ++i) {
     y[i] = !x[i];
   }
@@ -775,15 +775,19 @@ void SumSqr<float, CPUContext>(
     const int N,
     const float* x,
     float* y,
-    CPUContext* context /* unused */,
-    Tensor<CPUContext>* scratch_ptr /* unused */) {
+    CPUContext* /*context*/ /* unused */,
+    Tensor<CPUContext>* /*scratch_ptr*/ /* unused */) {
   *y = ConstEigenVectorMap<float>(x, N).squaredNorm();
 }
 
 template <>
 void Select<float, CPUContext>(
-      const int N, const int D, const float* x, const int* idx, float* y,
-      CPUContext* context) {
+    const int N,
+    const int D,
+    const float* x,
+    const int* idx,
+    float* y,
+    CPUContext* /*context*/) {
   for (int i = 0; i < N; ++i) {
     DCHECK_LT(idx[i], D);
     y[i] = x[i * D + idx[i]];
@@ -912,7 +916,7 @@ void Im2col<float, CPUContext, StorageOrder::NCHW>(
     const int stride_h,
     const int stride_w,
     float* data_col,
-    CPUContext* context) {
+    CPUContext* /*context*/) {
   const int output_h =
       (height + pad_b + pad_t - (dilation_h * (kernel_h - 1) + 1)) / stride_h +
       1;
@@ -1030,7 +1034,7 @@ void Im2col<float, CPUContext, StorageOrder::NHWC>(
     const int stride_h,
     const int stride_w,
     float* data_col,
-    CPUContext* context) {
+    CPUContext* /*context*/) {
   const int dkernel_h = dilation_h * (kernel_h - 1) + 1;
   const int dkernel_w = dilation_w * (kernel_w - 1) + 1;
 
@@ -1221,11 +1225,11 @@ void Col2im<float, CPUContext, StorageOrder::NHWC>(
 
 template <>
 void BiasCHW<float, CPUContext>(
-  const float* bias,
-  const int bias_channels,
-  const int image_size,
-  float* image,
-  CPUContext* context) {
+    const float* bias,
+    const int bias_channels,
+    const int image_size,
+    float* image,
+    CPUContext* /*context*/) {
   // Sum the per-channel bias into every image plane
   for (int c = 0; c < bias_channels; ++c) {
     float b = bias[c];
@@ -1305,8 +1309,14 @@ void BiasCHW<float, CPUContext>(
 
 template <>
 void CopyMatrix<CPUContext>(
-    const size_t itemsize, const int M, const int N, const void* A,
-    const int lda, void* B, const int ldb, CPUContext* context) {
+    const size_t itemsize,
+    const int M,
+    const int N,
+    const void* A,
+    const int lda,
+    void* B,
+    const int ldb,
+    CPUContext* /*context*/) {
   if (lda == N && ldb == N) {
     // can coalese to a single memcpy of size M * N
     memcpy(

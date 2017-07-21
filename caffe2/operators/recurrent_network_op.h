@@ -57,7 +57,10 @@ inline void UpdateTimestepBlob(Workspace* ws, std::string blob_name, int t) {
 }
 
 template <typename T, typename Context>
-void applyOffsetAlias(const OffsetAlias& oc, Workspace* ws, Context* context) {
+void applyOffsetAlias(
+    const OffsetAlias& oc,
+    Workspace* ws,
+    Context* /*context*/) {
   VLOG(1) << "Aliasing: " << oc.src << " to: " << oc.dst
           << " at offset: " << oc.offset;
   auto srcBlob = ws->GetBlob(oc.src);

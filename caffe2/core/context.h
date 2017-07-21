@@ -121,7 +121,7 @@ class CPUContext final {
 
   ~CPUContext() noexcept {}
 
-  inline void SwitchToDevice(int stream_id) {}
+  inline void SwitchToDevice(int /*stream_id*/) {}
   inline void SwitchToDevice() {
     SwitchToDevice(0);
   }

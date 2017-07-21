@@ -13,7 +13,7 @@ class ProtoDBCursor : public Cursor {
     : proto_(proto), iter_(0) {}
   ~ProtoDBCursor() {}
 
-  void Seek(const string& str) override {
+  void Seek(const string& /*str*/) override {
     CAFFE_THROW("ProtoDB is not designed to support seeking.");
   }
 

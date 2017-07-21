@@ -56,7 +56,7 @@ class Torch final {
     return Traits::tensorTy;
   }
 
-  void setContext(Context* context) {}
+  void setContext(Context* /*context*/) {}
 
   void setTensor(typename Traits::Tensor* t, Blob* blob) {
     CAFFE_ENFORCE_EQ(tensorTy(*blob), Traits::tensorTy);

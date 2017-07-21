@@ -28,7 +28,7 @@ class MiniDBCursor : public Cursor {
   }
   ~MiniDBCursor() {}
 
-  void Seek(const string& key) override {
+  void Seek(const string& /*key*/) override {
     LOG(FATAL) << "MiniDB does not support seeking to a specifi key.";
   }
 

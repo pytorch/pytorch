@@ -72,7 +72,7 @@ struct Reporter {
 // Returns a function that returns `true` if we should continue
 // iterating, given the current iteration count.
 std::function<bool(int64_t)> getContinuationTest(
-    Workspace* ws,
+    Workspace* /*ws*/,
     const ExecutionStep& step) {
   if (step.has_should_stop_blob()) {
     CAFFE_ENFORCE(
@@ -93,7 +93,7 @@ std::function<bool(int64_t)> getContinuationTest(
     if (onlyOnce) {
       return [](int64_t i) { return i == 0; };
     } else {
-      return [](int64_t i) { return true; };
+      return [](int64_t /*i*/) { return true; };
     }
   }
 };

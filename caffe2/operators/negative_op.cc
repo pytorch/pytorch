@@ -4,8 +4,8 @@ namespace caffe2 {
 
 struct NegativeCPUFunctor {
   template <typename T>
-  inline void operator()(const int n, const T* x,
-                         T* y, CPUContext* device_context) {
+  inline void
+  operator()(const int n, const T* x, T* y, CPUContext* /*device_context*/) {
     EigenVectorMap<T>(y, n) = -ConstEigenVectorMap<T>(x, n);
     // for (int i = 0; i < n; ++i) {
     //  y[i] = -x[i];

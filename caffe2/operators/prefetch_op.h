@@ -60,7 +60,7 @@ class PrefetchOperator : public OperatorBase {
     }
   }
 
-  bool Run(int /* unused */ stream_id) override {
+  bool Run(int /* unused */ /*stream_id*/) override {
     // Note(jiayq): We only start the prefetch_thread at the Run() function
     // instead of in the constructor, because the prefetch_thread needs to start
     // after all derived classes' constructors finish.

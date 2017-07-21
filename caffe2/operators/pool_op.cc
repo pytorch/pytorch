@@ -336,24 +336,24 @@ class AveragePool {
   }
 
   static bool runSpecialized(
-      int N,
-      int C,
-      int inputH,
-      int inputW,
-      int outputH,
-      int outputW,
-      int kH,
-      int kW,
-      int strideH,
-      int strideW,
-      int padT,
-      int padL,
-      int padB,
-      int padR,
-      int dilationH,
-      int dilationW,
-      const float* input,
-      float* output) {
+      int /*N*/,
+      int /*C*/,
+      int /*inputH*/,
+      int /*inputW*/,
+      int /*outputH*/,
+      int /*outputW*/,
+      int /*kH*/,
+      int /*kW*/,
+      int /*strideH*/,
+      int /*strideW*/,
+      int /*padT*/,
+      int /*padL*/,
+      int /*padB*/,
+      int /*padR*/,
+      int /*dilationH*/,
+      int /*dilationW*/,
+      const float* /*input*/,
+      float* /*output*/) {
 #ifdef __ARM_NEON__
     if (isNeon4x4p0s0Eligible(
             inputH,
@@ -405,28 +405,28 @@ class MaxPool {
 
   static void finalize(
       const int /*size*/,
-      const int col,
+      const int /*col*/,
       EigenMatrixMap<float>& /*y_mat*/) {}
 
   static bool runSpecialized(
-      int N,
-      int C,
-      int inputH,
-      int inputW,
-      int outputH,
-      int outputW,
-      int kH,
-      int kW,
-      int strideH,
-      int strideW,
-      int padT,
-      int padL,
-      int padB,
-      int padR,
-      int dilationH,
-      int dilationW,
-      const float* input,
-      float* output) {
+      int /*N*/,
+      int /*C*/,
+      int /*inputH*/,
+      int /*inputW*/,
+      int /*outputH*/,
+      int /*outputW*/,
+      int /*kH*/,
+      int /*kW*/,
+      int /*strideH*/,
+      int /*strideW*/,
+      int /*padT*/,
+      int /*padL*/,
+      int /*padB*/,
+      int /*padR*/,
+      int /*dilationH*/,
+      int /*dilationW*/,
+      const float* /*input*/,
+      float* /*output*/) {
 #ifdef __ARM_NEON__
     if (isNeon2x2p0s0Eligible(
             inputH,

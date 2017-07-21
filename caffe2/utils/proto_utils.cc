@@ -103,7 +103,9 @@ bool ReadProtoFromBinaryFile(const char* filename, MessageLite* proto) {
   return proto->ParseFromCodedStream(&coded_stream);
 }
 
-void WriteProtoToBinaryFile(const MessageLite& proto, const char* filename) {
+void WriteProtoToBinaryFile(
+    const MessageLite& /*proto*/,
+    const char* /*filename*/) {
   LOG(FATAL) << "Not implemented yet.";
 }
 

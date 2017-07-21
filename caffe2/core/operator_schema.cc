@@ -210,11 +210,11 @@ OpSchema& OpSchema::IdenticalTypeAndShapeOfInputDim(int idx, int dim) {
 
 OpSchema& OpSchema::ScalarType(::caffe2::TensorProto_DataType dt) {
   return TensorInferenceFunction(
-     [dt](const OperatorDef&, const vector<TensorShape>& input_types) {
-       vector<TensorShape> out(1);
-       out[0].set_data_type(dt);
-       return out;
-     });
+      [dt](const OperatorDef&, const vector<TensorShape>& /*input_types*/) {
+        vector<TensorShape> out(1);
+        out[0].set_data_type(dt);
+        return out;
+      });
 }
 
 OpSchema& OpSchema::CostInferenceFunction(CostInferenceFunctionType function) {

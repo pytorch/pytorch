@@ -15,7 +15,7 @@ void spaceToBatch(
     int pad_l,
     int block_size,
     Tensor<Context>* output,
-    Context* context) {
+    Context* /*context*/) {
   CAFFE_ENFORCE(input.ndim() == 4);
   CAFFE_ENFORCE(output->ndim() == 4);
 
@@ -65,7 +65,7 @@ void batchToSpace(
     int pad_l,
     int block_size,
     Tensor<Context>* output,
-    Context* context) {
+    Context* /*context*/) {
   CAFFE_ENFORCE(input.ndim() == 4);
   CAFFE_ENFORCE(output->ndim() == 4);
 

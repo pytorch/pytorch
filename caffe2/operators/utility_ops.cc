@@ -158,17 +158,17 @@ unchanged.
 OPERATOR_SCHEMA(FlattenToVec)
     .NumInputs(1)
     .NumOutputs(1)
-    .TensorInferenceFunction(
-        [](const OperatorDef& def, const vector<TensorShape>& in) {
-          vector<TensorShape> out(1);
-          int total = 1;
-          for (auto d : in[0].dims()) {
-            total *= d;
-          }
-          out[0].set_data_type(in[0].data_type());
-          out[0].add_dims(total);
-          return out;
-        })
+    .TensorInferenceFunction([](const OperatorDef& /*def*/,
+                                const vector<TensorShape>& in) {
+      vector<TensorShape> out(1);
+      int total = 1;
+      for (auto d : in[0].dims()) {
+        total *= d;
+      }
+      out[0].set_data_type(in[0].data_type());
+      out[0].add_dims(total);
+      return out;
+    })
     .SetDoc(R"DOC(
 Flattens the input tensor into a 1D vector.
 )DOC")
@@ -201,13 +201,13 @@ similar to multi-thread computation before you use it explicitly.
 OPERATOR_SCHEMA(ResizeLike)
     .NumInputs(2)
     .NumOutputs(1)
-    .TensorInferenceFunction(
-        [](const OperatorDef& def, const vector<TensorShape>& in) {
-          vector<TensorShape> out(1);
-          out.push_back(in[1]);
-          out[0].set_data_type(in[0].data_type());
-          return out;
-        })
+    .TensorInferenceFunction([](const OperatorDef& /*def*/,
+                                const vector<TensorShape>& in) {
+      vector<TensorShape> out(1);
+      out.push_back(in[1]);
+      out[0].set_data_type(in[0].data_type());
+      return out;
+    })
     .SetDoc(R"DOC(
 Produces tensor containing data of first input and shape of second input.
 )DOC")
@@ -219,7 +219,7 @@ OPERATOR_SCHEMA(SumInt)
     .NumInputs(1, INT_MAX)
     .NumOutputs(1)
     .InputsCanCrossDevices()
-    .TensorInferenceFunction([](const OperatorDef& def,
+    .TensorInferenceFunction([](const OperatorDef& /*def*/,
                                 const vector<TensorShape>& in) {
       vector<TensorShape> out(1);
       out.push_back(in[0]);
@@ -436,13 +436,13 @@ OPERATOR_SCHEMA(CopyOnDeviceLike)
 OPERATOR_SCHEMA(Shape)
     .NumInputs(1)
     .NumOutputs(1)
-    .TensorInferenceFunction(
-        [](const OperatorDef& def, const vector<TensorShape>& in) {
-          vector<TensorShape> out(1);
-          out[0].add_dims(in[0].dims().size());
-          out[0].set_data_type(TensorProto::INT32);
-          return out;
-        })
+    .TensorInferenceFunction([](const OperatorDef& /*def*/,
+                                const vector<TensorShape>& in) {
+      vector<TensorShape> out(1);
+      out[0].add_dims(in[0].dims().size());
+      out[0].set_data_type(TensorProto::INT32);
+      return out;
+    })
     .SetDoc("Produce a 1D int64 tensor with the shape of the input tensor.");
 
 OPERATOR_SCHEMA(HasElements)

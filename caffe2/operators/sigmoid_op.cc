@@ -5,8 +5,8 @@ namespace caffe2 {
 
 struct SigmoidCPUFunctor {
   template <typename T>
-  inline void operator()(const int n, const T* x,
-                         T* y, CPUContext* device_context) {
+  inline void
+  operator()(const int n, const T* x, T* y, CPUContext* /*device_context*/) {
     ConstEigenVectorArrayMap<T> xM(x, n);
     EigenVectorArrayMap<T>(y, n) = 1. / (1. + (-xM).exp());
   }
@@ -14,8 +14,12 @@ struct SigmoidCPUFunctor {
 
 struct SigmoidGradientCPUFunctor {
   template <typename T>
-  inline void
-  Run(const int n, const T* y, const T* dy, T* dx, CPUContext* device_context) {
+  inline void Run(
+      const int n,
+      const T* y,
+      const T* dy,
+      T* dx,
+      CPUContext* /*device_context*/) {
     ConstEigenVectorArrayMap<T> yM(y, n), dyM(dy, n);
     EigenVectorArrayMap<T>(dx, n) = dyM * yM * (1. - yM);
   }

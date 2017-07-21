@@ -263,8 +263,11 @@ void TensorSerializer<Context>::SerializeWithChunkSize(
 
 template <class Context>
 void TensorSerializer<Context>::Serialize(
-    const Tensor<Context>& input, const string& name,
-    TensorProto* proto_ptr, size_t chunkBegin, int32_t chunkSize) {
+    const Tensor<Context>& input,
+    const string& /*name*/,
+    TensorProto* proto_ptr,
+    size_t chunkBegin,
+    int32_t chunkSize) {
   CAFFE_ENFORCE(
       chunkBegin <= input.size(),
       "Chunk begin is out of tensor: ",

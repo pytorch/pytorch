@@ -7,9 +7,9 @@ REGISTER_CPU_OPERATOR(VideoInput, VideoInputOp<CPUContext>);
 OPERATOR_SCHEMA(VideoInput)
     .NumInputs(0, 1)
     .NumOutputs(2)
-    .TensorInferenceFunction([](
-        const OperatorDef& def,
-        const vector<TensorShape>& /* unused */ in) {
+    .TensorInferenceFunction([](const OperatorDef& def,
+                                const vector<
+                                    TensorShape>& /* unused */ /*in*/) {
       vector<TensorShape> out(2);
       ArgumentHelper helper(def);
       int batch_size = helper.GetSingleArgument<int>("batch_size", 0);

@@ -649,7 +649,7 @@ class VectorCursor : public db::Cursor {
     pos_ = 0;
   }
   ~VectorCursor() {}
-  void Seek(const string& key) override {}
+  void Seek(const string& /*key*/) override {}
   void SeekToFirst() override {}
   void Next() override {
     ++pos_;
@@ -790,7 +790,8 @@ TEST(CustomChunkSize, BigTensorSerialization) {
   tensor->mutable_data<float>();
   std::mutex mutex;
   int counter = 0;
-  auto acceptor = [&](const std::string& key, const std::string& value) {
+  auto acceptor = [&](const std::string& /*key*/,
+                      const std::string& /*value*/) {
     std::lock_guard<std::mutex> guard(mutex);
     counter++;
   };

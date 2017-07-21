@@ -7,8 +7,8 @@ namespace caffe2 {
 
 struct TanhCPUFunctor {
   template <typename T>
-  inline void operator()(const int n, const T* x,
-                         T* y, CPUContext* device_context) {
+  inline void
+  operator()(const int n, const T* x, T* y, CPUContext* /*device_context*/) {
 #ifdef CAFFE2_USE_ACCELERATE
     vvtanhf(y, x, &n);
 #else
@@ -20,8 +20,12 @@ struct TanhCPUFunctor {
 
 struct TanhGradientCPUFunctor {
   template <typename T>
-  inline void
-  Run(const int n, const T* y, const T* dy, T* dx, CPUContext* device_context) {
+  inline void Run(
+      const int n,
+      const T* y,
+      const T* dy,
+      T* dx,
+      CPUContext* /*device_context*/) {
     ConstEigenVectorArrayMap<T> dy_arr(dy, n);
     ConstEigenVectorArrayMap<T> y_arr(y, n);
     EigenVectorMap<T>(dx, n) = dy_arr * (1 - y_arr * y_arr);

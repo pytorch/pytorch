@@ -86,7 +86,8 @@ std::string Blob::Serialize(const string& name) const {
 // Specialization for StoreDeviceDetail for CPU - nothing needs to be done.
 template <>
 void TensorSerializer<CPUContext>::StoreDeviceDetail(
-    const Tensor<CPUContext>& input, TensorProto* proto) {}
+    const Tensor<CPUContext>& /*input*/,
+    TensorProto* /*proto*/) {}
 
 // The actual serialization registry objects.
 CAFFE_DEFINE_TYPED_REGISTRY(

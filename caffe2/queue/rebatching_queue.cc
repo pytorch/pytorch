@@ -156,7 +156,7 @@ bool RebatchingQueue::canWrite() const {
 }
 
 bool RebatchingQueue::enqueueOne(
-    CPUContext& context,
+    CPUContext& /*context*/,
     const std::vector<const TensorCPU*>& inputs) {
   std::vector<std::vector<TensorCPU>> splittedInputs;
   splittedInputs.emplace_back();

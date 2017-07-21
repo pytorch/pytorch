@@ -6,7 +6,7 @@ namespace caffe2 {
 struct SoftsignCPUFunctor {
   template <typename T>
   inline void
-  operator()(const int n, const T* x, T* y, CPUContext* device_context) {
+  operator()(const int n, const T* x, T* y, CPUContext* /*device_context*/) {
     ConstEigenVectorArrayMap<T> x_arr(x, n);
     EigenVectorMap<T>(y, n) = (1 + x_arr.abs()).inverse() * x_arr;
   }
@@ -14,8 +14,12 @@ struct SoftsignCPUFunctor {
 
 struct SoftsignGradientCPUFunctor {
   template <typename T>
-  inline void
-  Run(const int n, const T* x, const T* dy, T* dx, CPUContext* device_context) {
+  inline void Run(
+      const int n,
+      const T* x,
+      const T* dy,
+      T* dx,
+      CPUContext* /*device_context*/) {
     ConstEigenVectorArrayMap<T> dy_arr(dy, n);
     ConstEigenVectorArrayMap<T> x_arr(x, n);
     EigenVectorMap<T>(dx, n) = dy_arr * (1 + x_arr.abs()).pow(2).inverse();

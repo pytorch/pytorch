@@ -52,9 +52,9 @@ class NetBase {
    * opeartor.
    */
   virtual vector<float> TEST_Benchmark(
-      const int warmup_runs,
-      const int main_runs,
-      const bool run_individual) {
+      const int /*warmup_runs*/,
+      const int /*main_runs*/,
+      const bool /*run_individual*/) {
     LOG(ERROR) << "Benchmark not implemented for this net type.";
     return vector<float>();
   }

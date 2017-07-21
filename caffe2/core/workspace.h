@@ -37,7 +37,7 @@ struct StopOnSignal {
 
   StopOnSignal(const StopOnSignal& other) : handler_(other.handler_) {}
 
-  bool operator()(int iter) {
+  bool operator()(int /*iter*/) {
     return handler_->CheckForSignals() != SignalHandler::Action::STOP;
   }
 

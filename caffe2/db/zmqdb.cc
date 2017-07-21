@@ -32,7 +32,8 @@ class ZmqDBCursor : public Cursor {
     socket_.Disconnect(source_);
   }
 
-  void Seek(const string& key) override { /* do nothing */ }
+  void Seek(const string& /*key*/) override { /* do nothing */
+  }
 
   void SeekToFirst() override { /* do nothing */ }
 

@@ -23,7 +23,7 @@ class NetTestDummyOp final : public OperatorBase {
       : OperatorBase(operator_def, ws),
         fail_(OperatorBase::GetSingleArgument<bool>("fail", false)) {}
 
-  bool Run(int /* unused */ stream_id) override {
+  bool Run(int /* unused */ /*stream_id*/) override {
     if (fail_) {
       return false;
     }

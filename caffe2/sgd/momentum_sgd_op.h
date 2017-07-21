@@ -15,7 +15,7 @@ void momentum_sgd_update(
     float momentum,
     bool nesterov,
     float* param,
-    Context* context) {
+    Context* /*context*/) {
   const float LR = lr[0];
   for (auto i = 0; i < N; ++i) {
     if (!nesterov) {

@@ -46,7 +46,7 @@ class BlobSerializerBase {
       const Blob& blob,
       const std::string& name,
       SerializationAcceptor acceptor,
-      int chunk_size) {
+      int /*chunk_size*/) {
     // Base implementation.
     Serialize(blob, name, acceptor);
   }

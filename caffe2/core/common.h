@@ -201,7 +201,7 @@ class SkipIndices {
 template <>
 class SkipIndices<> {
  public:
-  static inline bool Contains(const int i) {
+  static inline bool Contains(const int /*i*/) {
     return false;
   }
 };
