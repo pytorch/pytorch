@@ -2071,7 +2071,7 @@ def copy_func_between_devices(src, dst):
         else:
             def fun(net, *args, **kw):
                 with DeviceScope(dst):
-                    return net.CopyGPUToGPU(*args, **kw)
+                    return net.Copy(*args, **kw)
             return fun
 
     if src.device_type == CUDA and dst.device_type == CPU:
