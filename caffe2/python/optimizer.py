@@ -48,20 +48,26 @@ class Optimizer(object):
     def _run(self, net, param_init_net, param_info):
         raise Exception("Not Impelemented")
 
+    def get_cpu_lr_blob_name(self):
+        classname = self.__class__.__name__
+        return '%s_%d_lr_cpu' % (classname, self._instance_num)
+
+    def get_gpu_lr_blob_name(self, gpu_id):
+        classname = self.__class__.__name__
+        return '%s_%d_lr_gpu%d' % (classname, self._instance_num, gpu_id)
+
     def get_lr_blob_name(self):
         """Returns an LR blob name.
         The name will be unique to the current device and optimizer instance.
         """
-        classname = self.__class__.__name__
         current_scope = scope.CurrentDeviceScope()
         if current_scope is None:
-            return '%s_%d_lr_cpu' % (classname, self._instance_num)
+            return self.get_cpu_lr_blob_name()
+
         if current_scope.device_type == caffe2_pb2.CUDA:
-            return '%s_%d_lr_gpu%d' % (
-                classname, self._instance_num, current_scope.cuda_gpu_id
-            )
+            return self.get_gpu_lr_blob_name(current_scope.cuda_gpu_id)
         else:
-            return '%s_%d_lr_cpu' % (classname, self._instance_num)
+            return self.get_cpu_lr_blob_name()
 
     def build_lr(self, net, param_init_net, base_learning_rate,
                  learning_rate_blob=None, policy="fixed",

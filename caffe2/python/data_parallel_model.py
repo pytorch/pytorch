@@ -236,7 +236,8 @@ def Parallelize(
                     param_update_builder_fun(model_helper_obj)
     else:
         log.info("Calling optimizer builder function")
-        optimizer_builder_fun(model_helper_obj)
+        optimizer = optimizer_builder_fun(model_helper_obj)
+        model_helper_obj._optimizer = optimizer
 
     (sync_blobs, sync_names) = _ComputeBlobsToSync(model_helper_obj)
     sync_blobs_grouped = _GroupByDevice(
@@ -688,6 +689,28 @@ def FinalizeAfterCheckpoint(model, blobs=None):
     # Run the sync
     log.info("Run checkpoint net")
     workspace.RunNet(model._checkpoint_net.Proto().name)
+
+
+def GetLearningRateBlobNames(model):
+    '''
+    Returns a list of learning rates blob names used in the optimizer.
+    '''
+    if model._optimizer is not None:
+        if model._device_type == caffe2_pb2.CPU:
+            return [model._optimizer.get_cpu_lr_blob_name()]
+        elif model._device_type == caffe2_pb2.CUDA:
+            return [model._optimizer.get_gpu_lr_blob_name(gpu)
+                    for gpu in model._devices]
+        else:
+            raise Exception(
+                "Unsupported device type : {}".format(model._device_type)
+            )
+    else:
+        lr_blob_names = []
+        for op in model.net.Proto().op:
+            if op.type == "LearningRate":
+                lr_blob_names.append(op.output(0))
+        return lr_blob_names
 
 
 def _Broadcast(devices, model, net, param, use_nccl=False):
