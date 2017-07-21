@@ -555,6 +555,9 @@ class TestAutograd(TestCase):
         check_index(x, y, ([slice(None), [2, 3]]))
         check_index(x, y, ([[2, 3], slice(None)]))
 
+        # advanced indexing, with less dim, or ellipsis
+        check_index(x, y, ([0], ))
+
         x = torch.arange(1, 49).view(4, 3, 4)
         y = Variable(x, requires_grad=True)
 
@@ -569,6 +572,14 @@ class TestAutograd(TestCase):
         check_index(x, y, (slice(None), slice(None), [2, 1]))
         check_index(x, y, (slice(None), [2, 1], slice(None)))
         check_index(x, y, ([2, 1], slice(None), slice(None)))
+
+        # advanced indexing, with less dim, or ellipsis
+        check_index(x, y, ([0], ))
+        check_index(x, y, ([0], slice(None)))
+        check_index(x, y, ([0], Ellipsis))
+        check_index(x, y, ([1, 2], [0, 1]))
+        check_index(x, y, ([1, 2], [0, 1], Ellipsis))
+        check_index(x, y, (Ellipsis, [1, 2], [0, 1]))
 
     def test_indexing_duplicates(self):
         x = torch.arange(1, 17).view(4, 4)
@@ -1355,6 +1366,52 @@ class TestAutograd(TestCase):
         c.backward(torch.ones(c.size()))
         self.assertEqual(x.grad.data, torch.ones(x.size()))
 
+    def test_keepdim_warning(self):
+        torch.utils.backcompat.keepdim_warning.enabled = True
+        x = Variable(torch.randn(3, 4), requires_grad=True)
+
+        def run_backward(y):
+            y_ = y
+            if type(y) is tuple:
+                y_ = y[0]
+            # check that backward runs smooth
+            y_.backward(y_.data.new(y_.size()).normal_())
+
+        def keepdim_check(f):
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                y = f(x, 1)
+                self.assertTrue(len(w) == 1)
+                self.assertTrue(issubclass(w[-1].category, UserWarning))
+                self.assertTrue("keepdim" in str(w[-1].message))
+                run_backward(y)
+                self.assertEqual(x.size(), x.grad.size())
+
+                # check against explicit keepdim
+                y2 = f(x, 1, keepdim=False)
+                self.assertEqual(y, y2)
+                run_backward(y2)
+
+                y3 = f(x, 1, keepdim=True)
+                if type(y3) == tuple:
+                    y3 = (y3[0].squeeze(1), y3[1].squeeze(1))
+                else:
+                    y3 = y3.squeeze(1)
+                self.assertEqual(y, y3)
+                run_backward(y3)
+
+        keepdim_check(torch.sum)
+        keepdim_check(torch.prod)
+        keepdim_check(torch.mean)
+        keepdim_check(torch.max)
+        keepdim_check(torch.min)
+        keepdim_check(torch.mode)
+        keepdim_check(torch.median)
+        keepdim_check(torch.kthvalue)
+        keepdim_check(torch.var)
+        keepdim_check(torch.std)
+        torch.utils.backcompat.keepdim_warning.enabled = False
+
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
@@ -1458,6 +1515,9 @@ function_tests = [
     (Index, (), (torch.rand(S, S, S), dont_convert([slice(None), [0, 3], slice(None)])), 'adv_index_mid'),
     (Index, (), (torch.rand(S, S, S), dont_convert([[0, 3], slice(None), slice(None)])), 'adv_index_beg'),
     (Index, (), (torch.rand(S, S, S), dont_convert([[0, 3], [1, 2], slice(None)])), 'adv_index_comb'),
+    (Index, (), (torch.rand(S, S, S), dont_convert([[0, 3], ])), 'adv_index_sub'),
+    (Index, (), (torch.rand(S, S, S), dont_convert([[0, 3], slice(None)])), 'adv_index_sub_2'),
+    (Index, (), (torch.rand(S, S, S), dont_convert([[0, 3], Ellipsis])), 'adv_index_sub_3'),
     (View, (), (torch.rand(S, S, S), torch.Size([S * S, S]))),
     (Expand, (), ((1, S, 1, S, 1), torch.Size([5, S, 5, S, 5]))),
     (Expand, (), ((S, 1), torch.Size([S, S, S])), 'new_dim'),
@@ -1561,6 +1621,7 @@ function_tests = [
     (Dot, (), ((L,), (L,)),),
     (Max, (), ((S, S, S),),),
     (Repeat, (), ((S, S, S, S), torch.Size([2, 3, 1, 2]))),
+    (Repeat, (), ((S, S, S, S), torch.Size([2, 2, 1, 3, 1, 2])), 'unsqueeze'),
     (Cumsum, (), ((S, S, S), 0), 'dim0', [1]),
     (Cumsum, (), ((S, S, S), 1), 'dim1', [1]),
     (Cumsum, (), ((S,), 0), '1d', [1]),

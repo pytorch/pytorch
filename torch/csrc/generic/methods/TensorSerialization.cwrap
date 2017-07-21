@@ -104,6 +104,7 @@ PyObject * THPTensor_(toNumpy)(THPTensor *self, PyObject *args) {
 
   // Create a PythonStorage object to hold the reference count.
   // PyArray_SetBaseObject steals the reference to the base object.
+  // See Note [Numpy memory management]
   Py_INCREF(self);
   if (PyArray_SetBaseObject((PyArrayObject*)(array.get()), (PyObject*)self) == -1) {
     Py_DECREF(self);

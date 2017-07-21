@@ -67,7 +67,7 @@ class DataParallel(Module):
         return scatter_kwargs(inputs, kwargs, device_ids, dim=self.dim)
 
     def parallel_apply(self, replicas, inputs, kwargs):
-        return parallel_apply(replicas, inputs, kwargs)
+        return parallel_apply(replicas, inputs, kwargs, self.device_ids)
 
     def gather(self, outputs, output_device):
         return gather(outputs, output_device, dim=self.dim)
@@ -101,5 +101,5 @@ def data_parallel(module, inputs, device_ids=None, output_device=None, dim=0, mo
     if len(device_ids) == 1:
         return module(*inputs[0], **module_kwargs[0])
     replicas = replicate(module, device_ids[:len(inputs)])
-    outputs = parallel_apply(replicas, inputs, module_kwargs)
+    outputs = parallel_apply(replicas, inputs, module_kwargs, device_ids)
     return gather(outputs, output_device, dim)

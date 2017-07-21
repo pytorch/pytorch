@@ -334,6 +334,8 @@ __global__ void indexSelectLargeIndex(TensorInfo<T, IndexType> dst,
 
 template <typename IndexType, unsigned int Dims>
 struct LinearIndexCalcData {
+  // sizes for the Tensor dims (from the Tensor, for bounds checking)
+  IndexType baseSizes[Dims];
   // sizes for Tensor dims (either from the Tensor, or the size of the adv indexer at that dim)
   IndexType sizes[Dims];
   // strides for the Tensor we are indexing into
@@ -373,6 +375,7 @@ __device__ __forceinline__ long calculateOffset(
       indexAtDim = index - nextIndex * sizeAtDim;
     }
 
+    assert(indexAtDim < data.baseSizes[dim]);
     offset += indexAtDim * strideAtDim;
     index = nextIndex;
   }

@@ -29,6 +29,28 @@ void StorageWeakRefAllocator::free(void* ptr) {
 
 
 #ifdef WITH_NUMPY
+/**
+ * Note [Numpy memory management]
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ * For efficiency reasons, when a user converts to/from numpy arrays,
+ * we want to share the underlying storage.  This means that if we
+ * turn a Numpy array into a Torch tensor, the Torch tensor must
+ * keep the Numpy array alive, and vice versa for conversions in
+ * the other direction.
+ *
+ * A Torch tensor keeps its backing Numpy array alive using the custom allocator
+ * THNumpyArrayAllocator (backed by NumpyArrayAllocator), which holds a
+ * THPObjectPointer to the Numpy PyArrayObject, and nulls it out upon free.
+ * The relevant code is in torch/csrc/generic/Tensor.cpp.
+ *
+ * A Numpy array keeps its backing Torch tensor alive using the base object
+ * <https://docs.scipy.org/doc/numpy-dev/reference/c-api.array.html#c.PyArray_SetBaseObject>
+ * field of Numpy, which is Numpy's hook for allowing an external user to
+ * manage memory.  The relevant code is in
+ * torch/csrc/generic/methods/TensorSerialization.cwrap
+ */
+
+// See Note [Numpy memory management]
 void* NumpyArrayAllocator::realloc(void* ptr, ptrdiff_t size) {
   PyArrayObject *array_ptr = (PyArrayObject*)object.get();
   if (array_ptr && ptr == PyArray_DATA(array_ptr)) {
@@ -41,7 +63,7 @@ void* NumpyArrayAllocator::realloc(void* ptr, ptrdiff_t size) {
   return allocator->realloc(allocatorContext, ptr, size);
 }
 
-
+// See Note [Numpy memory management]
 void NumpyArrayAllocator::free(void* ptr) {
   PyArrayObject *array_ptr = (PyArrayObject*)object.get();
   if (!array_ptr || ptr != PyArray_DATA(array_ptr))
@@ -79,6 +101,7 @@ THAllocator THStorageWeakRefAllocator = {
 };
 
 #ifdef WITH_NUMPY
+// See Note [Numpy memory management]
 THAllocator THNumpyArrayAllocator = {
   malloc_wrapper<NumpyArrayAllocator>,
   realloc_wrapper<NumpyArrayAllocator>,
