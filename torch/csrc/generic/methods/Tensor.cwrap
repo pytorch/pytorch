@@ -846,6 +846,8 @@ invalid_arguments:
 [[
   name: data_ptr
   defined_if: "!IS_DISTRIBUTED"
+  with_gil: True
+  auto_gpu: False
   return: void*
   cpu_half: True
   cname: data
