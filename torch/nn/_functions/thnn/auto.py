@@ -245,7 +245,7 @@ def _generate_function_classes(scope_dict):
         'SoftShrink': 'Softshrink',
         'MSECriterion': 'MSELoss',
         'AbsCriterion': 'L1Loss',
-        'BCECriterion': '_BCELoss',  # TODO: move the glue code into THNN
+        'BCECriterion': 'BCELoss',
         'ClassNLLCriterion': 'NLLLoss',
         'DistKLDivCriterion': 'KLDivLoss',
         'SpatialClassNLLCriterion': 'NLLLoss2d',

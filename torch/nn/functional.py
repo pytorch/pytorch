@@ -5,6 +5,7 @@ import warnings
 import math
 
 import torch
+from torch._C import _infer_size
 from . import _functions
 from .modules import utils
 from ._functions.linear import Bilinear
@@ -766,6 +767,13 @@ def binary_cross_entropy(input, target, weight=None, size_average=True):
     if not target.is_same_size(input):
         warnings.warn("Using a target size ({}) that is different to the input size ({}) is deprecated. "
                       "Please ensure they have the same size.".format(target.size(), input.size()))
+    if input.nelement() != target.nelement():
+        raise ValueError("Target and input must have the same number of elements. target nelement ({}) "
+                         "!= input nelement ({})".format(target.nelement(), input.nelement()))
+
+    if weight is not None:
+        new_size = _infer_size(target.size(), weight.size())
+        weight = weight.expand(new_size)
 
     return _functions.thnn.BCELoss(size_average, weight=weight)(input, target)
 
@@ -789,12 +797,8 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=Tr
     if not target.is_same_size(input):
         raise ValueError("Target size ({}) must be the same as input size ({})".format(target.size(), input.size()))
 
-    if weight is not None and target.dim() != 1:
-        weight = weight.view(1, target.size(1)).expand_as(target)
-
     neg_abs = - input.abs()
     loss = input.clamp(min=0) - input * target + (1 + neg_abs.exp()).log()
-
     if weight is not None:
         loss = loss * weight
 
