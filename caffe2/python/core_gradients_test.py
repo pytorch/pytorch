@@ -493,6 +493,21 @@ class TestGradientCalculation(test_util.TestCase):
             operators, {'out': 'out_grad'})
         self.assertEqual(gradients, desired_grad_operators)
 
+    @unittest.expectedFailure
+    def testStopGradientOrphan(self):
+        operators = [
+            CreateOperator('Direct', 'in', 'hidden'),
+            CreateOperator('StopGradient', 'hidden', 'auto_blobx'),
+            CreateOperator('Direct', 'hidden', 'out'),
+        ]
+        try:
+            # This should complain about incorrect use of StopGradient
+            gradients, _ = GradientRegistry.GetBackwardPass(
+                operators, {'out': 'out_grad'})
+        except Exception as e:
+            print(e)
+            raise e
+
     def testStopGradientInplace(self):
         operators = [
             CreateOperator('Direct', 'in', 'hidden'),
