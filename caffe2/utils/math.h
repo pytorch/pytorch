@@ -67,6 +67,8 @@ void Cos(const int N, const T* x, T* y, Context* context);
 template <typename T, class Context>
 void Sin(const int N, const T* x, T* y, Context* context);
 template <typename T, class Context>
+void SinCos(const int N, const T* x, T* ys, T* yc, Context* context);
+template <typename T, class Context>
 void Abs(const int N, const T* x, T* y, Context* context);
 template <typename T, class Context>
 void Sqr(const int N, const T* x, T* y, Context* context);
