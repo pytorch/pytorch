@@ -172,6 +172,22 @@ NetDef Graph::GetNetDef() {
   return netdef;
 }
 
+void Graph::DeactivateSubgraph(std::vector<int> subgraph) {
+  for (int idx : subgraph) {
+    // remove all edges connected to inactive node
+    for (const auto& edge : node(idx).parents) {
+      int parent = edge.first;
+      node(parent).children.erase(idx);
+    }
+    for (const auto& edge : node(idx).children) {
+      int child = edge.first;
+      node(child).parents.erase(idx);
+    }
+    // actually mark flags as false
+    node(idx).active = false;
+  }
+}
+
 } // namespace transform
 
 } // namespace caffe2

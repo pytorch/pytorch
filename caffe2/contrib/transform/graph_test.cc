@@ -22,7 +22,6 @@ class DummyOp final : public OperatorBase {
 };
 
 REGISTER_CPU_OPERATOR(DummyOp1, DummyOp);
-REGISTER_CUDA_OPERATOR(DummyOp1, DummyOp);
 
 OPERATOR_SCHEMA(DummyOp1)
     .NumInputs(0, INT_MAX)
@@ -30,7 +29,6 @@ OPERATOR_SCHEMA(DummyOp1)
     .AllowInplace({{0, 0}, {1, 1}});
 
 REGISTER_CPU_OPERATOR(DummyOp2, DummyOp);
-REGISTER_CUDA_OPERATOR(DummyOp2, DummyOp);
 
 OPERATOR_SCHEMA(DummyOp2)
     .NumInputs(0, INT_MAX)
@@ -38,7 +36,6 @@ OPERATOR_SCHEMA(DummyOp2)
     .AllowInplace({{0, 0}, {1, 1}});
 
 REGISTER_CPU_OPERATOR(DummyOp3, DummyOp);
-REGISTER_CUDA_OPERATOR(DummyOp3, DummyOp);
 
 OPERATOR_SCHEMA(DummyOp3)
     .NumInputs(0, INT_MAX)
