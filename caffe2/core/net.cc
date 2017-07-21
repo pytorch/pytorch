@@ -26,8 +26,7 @@ NetBase::NetBase(
       external_output_(
           def->external_output().begin(),
           def->external_output().end()),
-      name_(def->name()),
-      net_def_(def) {
+      name_(def->name()) {
   // Go through the operators and make sure that blobs are correctly made.
   std::set<string> known_blobs(
       external_input_.begin(), external_input_.end());

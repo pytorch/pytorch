@@ -90,16 +90,11 @@ class NetBase {
     return name_;
   }
 
-  const NetDef& def() const {
-    return *net_def_;
-  }
-
  protected:
   vector<string> external_input_;
   vector<string> external_output_;
   string name_;
   std::unique_ptr<NetObserver> observer_;
-  const std::shared_ptr<const NetDef> net_def_;
 
   DISABLE_COPY_AND_ASSIGN(NetBase);
 };
