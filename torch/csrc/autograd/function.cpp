@@ -4,7 +4,6 @@
 #include <THPP/THPP.h>
 
 #include "variable.h"
-#include "torch/csrc/utils/auto_gil.h"
 
 namespace torch { namespace autograd {
 

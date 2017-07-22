@@ -78,7 +78,7 @@ int THPCppFunction_traverse(PyObject* self, visitproc visit, void *arg)
 
 int THPCppFunction_clear(PyObject* self)
 {
-  ((THPCppFunction*)self)->cdata.reset();
+  ((THPCppFunction*)self)->cdata.~shared_ptr();
   return 0;
 }
 
