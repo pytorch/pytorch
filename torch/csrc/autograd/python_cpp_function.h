@@ -22,7 +22,7 @@ PyObject* CppFunction_pynew(PyTypeObject *type, PyObject *args, PyObject *kwds)
   if (!obj) return NULL;
   THPCppFunction* f = (THPCppFunction*)obj.get();
   HANDLE_TH_ERRORS
-  f->cdata.reset(Ctor()(args));
+  new (&f->cdata) std::shared_ptr<Function>(Ctor()(args));
   END_HANDLE_TH_ERRORS
   if (!f->cdata) {
     return NULL;
