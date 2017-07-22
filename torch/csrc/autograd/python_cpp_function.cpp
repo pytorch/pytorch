@@ -78,15 +78,13 @@ int THPCppFunction_traverse(PyObject* self, visitproc visit, void *arg)
 
 int THPCppFunction_clear(PyObject* self)
 {
-  delete ((THPCppFunction*)self)->cdata;
-  ((THPCppFunction*)self)->cdata = nullptr;
+  ((THPCppFunction*)self)->cdata.reset();
   return 0;
 }
 
 void THPCppFunction_dealloc(PyObject* self)
 {
-  delete ((THPCppFunction*)self)->cdata;
-  ((THPCppFunction*)self)->cdata = nullptr;
+  ((THPCppFunction*)self)->cdata.reset();
   Py_TYPE(self)->tp_free(self);
 }
 
@@ -189,7 +187,7 @@ PyObject* functionToPyObject(std::shared_ptr<Function> cdata)
     THPObjectPtr obj(type->tp_alloc(type, 0));
     if (!obj) return NULL;
     THPCppFunction* f = (THPCppFunction*)obj.get();
-    f->cdata = cdata.get();
+    f->cdata = cdata;
 
     cdata->pyobj = obj.release();
     Py_INCREF(cdata->pyobj);

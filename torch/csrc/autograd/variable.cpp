@@ -54,7 +54,7 @@ auto Variable::get_grad_accumulator() -> std::shared_ptr<Function> {
   auto result = grad_accumulator.lock();
   if (result) return result;
 
-  result = SharedFunctionMaker<AccumulateGrad>()(shared_from_this());
+  result = std::make_shared<AccumulateGrad>(shared_from_this());
   grad_accumulator = result;
   return result;
 }

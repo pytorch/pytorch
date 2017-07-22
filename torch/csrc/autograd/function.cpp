@@ -34,15 +34,4 @@ auto Function::name() -> std::string {
   return std::string(typeid(*this).name());
 }
 
-void FunctionDeleter::operator()(Function* p) const {
-    // If a wrapper exist, it owns p so we just release the refcount we hold to the PyObject
-    // Otherwise, free the Function that is not used anymore
-    if (p->pyobj) {
-      AutoGIL gil;
-      Py_DECREF(p->pyobj);
-    } else {
-      delete p;
-    }
-  }
-
 }} // namespace torch::autograd

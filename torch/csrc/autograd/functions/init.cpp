@@ -79,7 +79,7 @@ PyObject* getTupleAttr(PyObject* obj, void* _unused)
 {
   HANDLE_TH_ERRORS
   THPCppFunction* self = (THPCppFunction*)obj;
-  auto& arr = ((T*)(self->cdata))->*ptr;
+  auto& arr = ((T*)(self->cdata.get()))->*ptr;
   auto num_elems = arr.size();
   THPObjectPtr py_tuple(PyTuple_New(num_elems));
   if (!py_tuple) return NULL;
@@ -96,7 +96,7 @@ PyObject* getValueAttr(PyObject* obj, void* _unused)
 {
   HANDLE_TH_ERRORS
   THPCppFunction* self = (THPCppFunction*)obj;
-  auto& val = ((T*)(self->cdata))->*ptr;
+  auto& val = ((T*)(self->cdata.get()))->*ptr;
   return Convert(val);
   END_HANDLE_TH_ERRORS
 }
@@ -106,7 +106,7 @@ PyObject* getTensorAttr(PyObject* obj, void* _unused)
 {
   HANDLE_TH_ERRORS
   THPCppFunction* self = (THPCppFunction*)obj;
-  auto& val = ((T*)(self->cdata))->*ptr;
+  auto& val = ((T*)(self->cdata.get()))->*ptr;
   THPObjectPtr py_tensor;
   if (!val) {
     Py_INCREF(Py_None);
@@ -206,7 +206,7 @@ static struct PyGetSetDef conv_backward_backward_properties[] = {
 static PyObject* accumulateGradVar(PyObject *_self, void* _unused)
 {
   THPCppFunction* self = (THPCppFunction*)_self;
-  auto grad_acc = (AccumulateGrad*)self->cdata;
+  auto grad_acc = (AccumulateGrad*)self->cdata.get();
   auto var = grad_acc->variable.lock();
   if (!var) Py_RETURN_NONE;
   return THPVariable_Wrap(var);

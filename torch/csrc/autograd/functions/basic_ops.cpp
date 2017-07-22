@@ -17,7 +17,7 @@ auto DelayedError::apply(const variable_list& inputs) -> variable_list {
     outputs.emplace_back(var ? var->data->clone_shallow() : nullptr);
   }
   return wrap_outputs(inputs, std::move(outputs), [&](FunctionFlags f) {
-    return SharedFunctionMaker<Error>()(msg, std::move(f));
+    return std::make_shared<Error>(msg, std::move(f));
   });
 };
 
@@ -36,7 +36,7 @@ auto Add::apply(const variable_list& inputs) -> variable_list {
   }
 
   return wrap_outputs(inputs, as_tensor_list(std::move(output)), [&](FunctionFlags f) {
-    return SharedFunctionMaker<AddBackward>()(std::move(f));
+    return std::make_shared<AddBackward>(std::move(f));
   });
 };
 

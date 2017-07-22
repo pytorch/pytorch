@@ -238,7 +238,7 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
 
   auto outputs = as_tensor_list(std::move(output));
   return wrap_outputs(inputs, std::move(outputs), [&](FunctionFlags f) {
-    return SharedFunctionMaker<ConvBackward>()(
+    return std::make_shared<ConvBackward>(
         f, *this,
         inputs[0]->save(this), inputs[1]->save(this), Variable::save_opt(inputs[2].get(), this),
         std::move(columns), std::move(ones), std::move(convolution));
@@ -379,7 +379,7 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
                                  std::move(grad_weight),
                                  std::move(grad_bias));
   return wrap_outputs(all_inputs, std::move(outputs), [&](FunctionFlags f) {
-    return SharedFunctionMaker<ConvBackwardBackward>()(
+    return std::make_shared<ConvBackwardBackward>(
       f, *this,
       input_var->save(this), weight_var->save(this),
       Variable::save_opt(bias_var.get(), this), grad_outputs[0]->save(this));
@@ -476,24 +476,24 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
     // Compute conv
     if (groups == 1) {
       if (gOt->data->isCuda()) {
-        gOt = Contiguous()->apply({gOt})[0];
+        gOt = Contiguous().apply({gOt})[0];
       }
 
       // Compute conv
-      gWt = ConvForward(gw_conv_params)->apply({ggIt, gOt, nullptr})[0];
+      gWt = ConvForward(gw_conv_params).apply({ggIt, gOt, nullptr})[0];
     } else {
       variable_list gWt_list(groups);
       for (int g = 0; g < groups; ++g) {
         auto ggIt_g = subvariable(ggIt, 0, groups, g);
         auto gOt_g = subvariable(gOt, 0, groups, g);
         if (gOt_g->data->isCuda()) {
-          gOt_g = Contiguous()->apply({gOt_g})[0];
+          gOt_g = Contiguous().apply({gOt_g})[0];
         }
 
-        gWt_list[g] = ConvForward(gw_conv_params)->apply({ggIt_g, gOt_g, nullptr})[0];
+        gWt_list[g] = ConvForward(gw_conv_params).apply({ggIt_g, gOt_g, nullptr})[0];
       }
 
-      gWt = Cat(1)->apply(gWt_list)[0];
+      gWt = Cat(1).apply(gWt_list)[0];
     }
 
     // Transpose gW to match chan_in and chan_out
@@ -524,23 +524,23 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
     std::shared_ptr<Variable> gIt = nullptr;
     if (groups == 1) {
       if (gOt->data->isCuda()) {
-        gOt = Contiguous()->apply({gOt})[0];
+        gOt = Contiguous().apply({gOt})[0];
       }
 
-      gIt = ConvForward(gi_conv_params)->apply({ggWt, gOt, nullptr})[0];
+      gIt = ConvForward(gi_conv_params).apply({ggWt, gOt, nullptr})[0];
     } else {
       variable_list gIt_list(groups);
       for (int g = 0; g < groups; ++g) {
         auto ggWt_g = subvariable(ggWt, 1, groups, g);
         auto gOt_g = subvariable(gOt, 0, groups, g);
         if (gOt_g->data->isCuda()) {
-          gOt_g = Contiguous()->apply({gOt_g})[0];
+          gOt_g = Contiguous().apply({gOt_g})[0];
         }
 
-        gIt_list[g] = ConvForward(gi_conv_params)->apply({ggWt_g, gOt_g, nullptr})[0];
+        gIt_list[g] = ConvForward(gi_conv_params).apply({ggWt_g, gOt_g, nullptr})[0];
       }
 
-      gIt = Cat(0)->apply(gIt_list)[0];
+      gIt = Cat(0).apply(gIt_list)[0];
     }
     
     gI = Transpose(0, 1).apply({gIt})[0];

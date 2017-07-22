@@ -114,7 +114,7 @@ auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
   // but I don't have a better idea. These functions would raise an error
   // in backward anyway.
   return wrap_outputs(inputs, std::move(tensor_results), [this](FunctionFlags &&f) {
-    return SharedFunctionMaker<Error>()(name() + " is not differentiable twice", std::move(f));
+    return std::make_shared<Error>(name() + " is not differentiable twice", std::move(f));
   });
 }
 

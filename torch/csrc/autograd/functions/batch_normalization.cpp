@@ -101,7 +101,7 @@ auto BatchNormForward::apply(const variable_list& inputs) -> variable_list {
 
   auto outputs = as_tensor_list(std::move(output));
   return wrap_outputs(inputs, std::move(outputs), [&](FunctionFlags f) {
-    return SharedFunctionMaker<BatchNormBackward>()(
+    return std::make_shared<BatchNormBackward>(
         f, *this, std::move(save_mean), std::move(save_std),
         input->save(this),
         Variable::save_opt(weight.get(), this),
@@ -190,7 +190,7 @@ auto BatchNormBackward::apply(const variable_list& grad_outputs) -> variable_lis
                                  std::move(grad_weight),
                                  std::move(grad_bias));
   return wrap_outputs(grad_outputs, std::move(outputs), [&](FunctionFlags f) {
-    return SharedFunctionMaker<Error>()("BatchNormBackward is not differentiable", std::move(f));
+    return std::make_shared<Error>("BatchNormBackward is not differentiable", std::move(f));
   });
 };
 
