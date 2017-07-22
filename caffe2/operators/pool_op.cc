@@ -461,8 +461,6 @@ bool PoolOp<T, Context, PoolType>::RunOnDeviceWithOrderNCHW() {
 
   const float* Xdata = X.template data<float>();
   float* Ydata = Y->template mutable_data<float>();
-  math::Set<float, CPUContext>(
-      Y->size(), PoolType::initialize(), Ydata, &context_);
   // The main loop
   int channels = X.dim32(1);
   int height = X.dim32(2);
@@ -504,10 +502,12 @@ bool PoolOp<T, Context, PoolType>::RunOnDeviceWithOrderNCHW() {
             int hstart = ph * stride_h() - pad_t();
             int hend = min(hstart + kernel_h(), height);
             hstart = max(hstart, 0);
+            T Yh = PoolType::initialize();
             for (int h = hstart; h < hend; ++h) {
-              PoolType::process(Xdata[h], Ydata[ph]);
+              PoolType::process(Xdata[h], Yh);
             }
-            PoolType::finalize(hend - hstart, Ydata[ph]);
+            PoolType::finalize(hend - hstart, Yh);
+            Ydata[ph] = Yh;
           }
           // Do offset.
           Xdata += height;
@@ -527,14 +527,15 @@ bool PoolOp<T, Context, PoolType>::RunOnDeviceWithOrderNCHW() {
               int wend = min(wstart + kernel_w(), width);
               wstart = max(wstart, 0);
               const int pool_index = ph * pooled_width + pw;
+              T Yh = PoolType::initialize();
               for (int h = hstart; h < hend; ++h) {
                 for (int w = wstart; w < wend; ++w) {
                   const int input_index = h * width + w;
-                  PoolType::process(Xdata[input_index], Ydata[pool_index]);
+                  PoolType::process(Xdata[input_index], Yh);
                 }
               }
-              PoolType::finalize(
-                  (hend - hstart) * (wend - wstart), Ydata[pool_index]);
+              PoolType::finalize((hend - hstart) * (wend - wstart), Yh);
+              Ydata[pool_index] = Yh;
             }
           }
           // Do offset.
@@ -560,17 +561,18 @@ bool PoolOp<T, Context, PoolType>::RunOnDeviceWithOrderNCHW() {
                 dstart = max(dstart, 0);
                 const int pool_index =
                     ph * pooled_width * pooled_depth + pw * pooled_depth + pd;
+                T Yh = PoolType::initialize();
                 for (int h = hstart; h < hend; ++h) {
                   for (int w = wstart; w < wend; ++w) {
                     for (int d = dstart; d < dend; ++d) {
                       const int input_index = h * width * depth + w * depth + d;
-                      PoolType::process(Xdata[input_index], Ydata[pool_index]);
+                      PoolType::process(Xdata[input_index], Yh);
                     }
                   }
                 }
                 PoolType::finalize(
-                    (hend - hstart) * (wend - wstart) * (dend - dstart),
-                    Ydata[pool_index]);
+                    (hend - hstart) * (wend - wstart) * (dend - dstart), Yh);
+                Ydata[pool_index] = Yh;
               }
             }
           }
