@@ -10,6 +10,25 @@ from caffe2.python.layers.layers import InstantiationContext
 from caffe2.python.layers.tags import Tags
 
 
+def _over_move_to_gpu(layer):
+    return Tags.PREFER_GPU in layer.tags
+
+
+def _all_on_gpu(layer):
+    return Tags.CPU_ONLY not in layer.tags
+
+
+def _all_on_cpu(layer):
+    return False
+
+
+GPU_STRATEGIES = {
+    "NO": _all_on_cpu,
+    "OVER": _over_move_to_gpu,
+    "ALL": _all_on_gpu,
+}
+
+
 def _filter_layers(layers, include_tags):
     if include_tags is None:
         return layers

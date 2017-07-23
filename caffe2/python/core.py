@@ -2089,6 +2089,10 @@ def copy_func_between_devices(src, dst):
     raise ValueError('Non-supported devices: %s and %s' % (src, dst))
 
 
+def device_equal(src, dst):
+    return src.device_type == dst.device_type and src.cuda_gpu_id == dst.cuda_gpu_id
+
+
 class RemapEntry:
     def __init__(self, blob, device):
         self.blob = blob
@@ -2144,7 +2148,7 @@ def InjectCrossDeviceCopies(net, blob_to_device=None):
                         format(input)
                     )
 
-            if not blob_to_device[input] == dev:
+            if not device_equal(blob_to_device[input], dev):
                 # reuse already moved input
                 if (RemapEntry(input, dev) in blob_remap and
                         blob_to_device[blob_remap[RemapEntry(input, dev)]] == dev):
