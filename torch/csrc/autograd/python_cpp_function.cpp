@@ -78,7 +78,10 @@ int THPCppFunction_traverse(PyObject* self, visitproc visit, void *arg)
 
 int THPCppFunction_clear(PyObject* self)
 {
-  ((THPCppFunction*)self)->cdata.reset();
+  auto f = (THPCppFunction*)self;
+  // Remove the weak ref of the c++ object if it exist
+  f->cdata->pyobj = nullptr;
+  f->cdata.reset();
   return 0;
 }
 
@@ -189,8 +192,8 @@ PyObject* functionToPyObject(std::shared_ptr<Function> cdata)
     THPCppFunction* f = (THPCppFunction*)obj.get();
     new (&f->cdata) std::shared_ptr<Function>(cdata);
 
+    // No INCREF here as we only have a weak reference
     cdata->pyobj = obj.release();
-    Py_INCREF(cdata->pyobj);
   }
 
   return cdata->pyobj;
