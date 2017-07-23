@@ -630,6 +630,7 @@ class AttentionCell(RNNCell):
         self,
         encoder_output_dim,
         encoder_outputs,
+        encoder_lengths,
         decoder_cell,
         decoder_state_dim,
         attention_type,
@@ -640,6 +641,7 @@ class AttentionCell(RNNCell):
         super(AttentionCell, self).__init__(**kwargs)
         self.encoder_output_dim = encoder_output_dim
         self.encoder_outputs = encoder_outputs
+        self.encoder_lengths = encoder_lengths
         self.decoder_cell = decoder_cell
         self.decoder_state_dim = decoder_state_dim
         self.weighted_encoder_outputs = weighted_encoder_outputs
@@ -698,6 +700,7 @@ class AttentionCell(RNNCell):
                 attention_weighted_encoder_context_t_prev=(
                     attention_weighted_encoder_context_t_prev
                 ),
+                encoder_lengths=self.encoder_lengths,
             )
         else:
             (
@@ -712,6 +715,7 @@ class AttentionCell(RNNCell):
                 decoder_hidden_state_t=self.hidden_t_intermediate,
                 decoder_hidden_state_dim=self.decoder_state_dim,
                 scope=self.name,
+                encoder_lengths=self.encoder_lengths,
             )
 
         if self.attention_memory_optimization:
@@ -805,6 +809,7 @@ class LSTMWithAttentionCell(AttentionCell):
         self,
         encoder_output_dim,
         encoder_outputs,
+        encoder_lengths,
         decoder_input_dim,
         decoder_state_dim,
         name,
@@ -827,6 +832,7 @@ class LSTMWithAttentionCell(AttentionCell):
         super(LSTMWithAttentionCell, self).__init__(
             encoder_output_dim=encoder_output_dim,
             encoder_outputs=encoder_outputs,
+            encoder_lengths=encoder_lengths,
             decoder_cell=decoder_cell,
             decoder_state_dim=decoder_state_dim,
             name=name,
@@ -1269,6 +1275,7 @@ def LSTMWithAttention(
     initial_attention_weighted_encoder_context,
     encoder_output_dim,
     encoder_outputs,
+    encoder_lengths,
     decoder_input_dim,
     decoder_state_dim,
     scope,
@@ -1311,6 +1318,9 @@ def LSTMWithAttention(
     encoder_outputs: the sequence, on which we compute the attention context
     at every iteration
 
+    encoder_lengths: a tensor with lengths of each encoder sequence in batch
+    (may be None, meaning all encoder sequences are of same length)
+
     decoder_input_dim: input dimension (last dimension on decoder_inputs)
 
     decoder_state_dim: size of hidden states of LSTM
@@ -1337,6 +1347,7 @@ def LSTMWithAttention(
     cell = LSTMWithAttentionCell(
         encoder_output_dim=encoder_output_dim,
         encoder_outputs=encoder_outputs,
+        encoder_lengths=encoder_lengths,
         decoder_input_dim=decoder_input_dim,
         decoder_state_dim=decoder_state_dim,
         name=scope,

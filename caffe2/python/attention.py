@@ -48,9 +48,29 @@ def _calc_attention_weights(
     model,
     attention_logits_transposed,
     scope,
+    encoder_lengths=None,
 ):
-    # TODO: we could try to force some attention weights to be zeros,
-    # based on encoder_lengths.
+    if encoder_lengths is not None:
+        attention_logits = model.net.Squeeze(
+            [attention_logits_transposed],
+            [attention_logits_transposed],
+            dims=[2],
+        )
+        flat_attention_logits = model.net.UnpackSegments(
+            [encoder_lengths, attention_logits],
+            'flat_attention_logits',
+        )
+        masked_attention_logits = model.net.PackSegments(
+            [encoder_lengths, flat_attention_logits],
+            'masked_attention_logits',
+            pad_minf=True,
+        )
+        attention_logits_transposed = model.net.ExpandDims(
+            [masked_attention_logits],
+            [masked_attention_logits],
+            dims=[2],
+        )
+
     # [batch_size, encoder_length, 1]
     attention_weights_3d = brew.softmax(
         model,
@@ -131,6 +151,7 @@ def apply_recurrent_attention(
     decoder_hidden_state_dim,
     attention_weighted_encoder_context_t_prev,
     scope,
+    encoder_lengths=None,
 ):
     weighted_prev_attention_context = _apply_fc_weight_for_sum_match(
         model=model,
@@ -178,6 +199,7 @@ def apply_recurrent_attention(
         model=model,
         attention_logits_transposed=attention_logits_transposed,
         scope=scope,
+        encoder_lengths=encoder_lengths,
     )
 
     # [batch_size, encoder_output_dim, 1]
@@ -201,6 +223,7 @@ def apply_regular_attention(
     decoder_hidden_state_t,
     decoder_hidden_state_dim,
     scope,
+    encoder_lengths=None,
 ):
     weighted_decoder_hidden_state = _apply_fc_weight_for_sum_match(
         model=model,
@@ -231,6 +254,7 @@ def apply_regular_attention(
         model=model,
         attention_logits_transposed=attention_logits_transposed,
         scope=scope,
+        encoder_lengths=encoder_lengths,
     )
 
     # [batch_size, encoder_output_dim, 1]
