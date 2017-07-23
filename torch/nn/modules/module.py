@@ -1,4 +1,3 @@
-from itertools import chain
 from collections import OrderedDict
 import functools
 
