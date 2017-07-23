@@ -173,7 +173,7 @@ bool AsyncDAGNet::RunAt(const std::vector<int>& chain) {
   CAFFE_ENFORCE(!chain.empty(), "Chain should not be empty.");
   const auto source_idx = chain.front();
   internal::Stream stream{
-      operator_nodes_[source_idx].operator_def_.device_option()};
+      operator_nodes_[source_idx].operator_->device_option()};
   const auto& parents = operator_nodes_[source_idx].parents_;
   // Help ensure that our chaining is correct by verifying at least
   // one parent recorded an event.
@@ -186,21 +186,22 @@ bool AsyncDAGNet::RunAt(const std::vector<int>& chain) {
 
   for (auto source_parent_idx : operator_nodes_[source_idx].parents_) {
     ProfiledRange r(
-        operator_nodes_[source_parent_idx].operator_def_, kWaitColor);
+        operator_nodes_[source_parent_idx].operator_->debug_def(), kWaitColor);
     stream.wait(events_[source_parent_idx].get());
   }
 
   // We've waited on all our parent indices.
   bool success = true;
   for (auto idx : chain) {
-    ProfiledRange r(operator_nodes_[idx].operator_def_, kRunColor);
+    ProfiledRange r(operator_nodes_[idx].operator_->debug_def(), kRunColor);
     success &= operator_nodes_[idx].operator_->RunAsync();
   }
 
   // Record an event for the sink of the chain.
   const auto& sink_idx = chain.back();
   {
-    ProfiledRange r(operator_nodes_[sink_idx].operator_def_, kRecordColor);
+    ProfiledRange r(
+        operator_nodes_[sink_idx].operator_->debug_def(), kRecordColor);
     events_[sink_idx]->record(stream);
   }
   CAFFE_ENFORCE(
@@ -228,7 +229,7 @@ bool AsyncDAGNet::Run() {
     auto& event = events_[i];
     if (event->outstanding_) {
       VLOG(2) << "Synchronizing host on outstanding event";
-      ProfiledRange r(operator_nodes_[i].operator_def_, kWaitColor);
+      ProfiledRange r(operator_nodes_[i].operator_->debug_def(), kWaitColor);
       stream.wait(event.get());
     }
   }

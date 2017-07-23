@@ -142,7 +142,8 @@ class OperatorBase {
     return *operator_def_;
   }
 
-  inline void set_debug_def(std::shared_ptr<const OperatorDef>& operator_def) {
+  inline void set_debug_def(
+      const std::shared_ptr<const OperatorDef>& operator_def) {
     operator_def_ = operator_def;
   }
 
