@@ -157,7 +157,6 @@ class SimpleNet : public NetBase {
 namespace internal {
 struct OperatorNode {
   unique_ptr<OperatorBase> operator_;
-  OperatorDef operator_def_;
   vector<int> children_;
   vector<int> parents_;
   std::atomic<int> runtime_parent_count_;

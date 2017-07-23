@@ -20,10 +20,9 @@ namespace caffe2 {
 
 namespace {
 
-bool sameDevice(const OperatorDef& lhs, const OperatorDef& rhs) {
-  return lhs.device_option().device_type() ==
-      rhs.device_option().device_type() &&
-      lhs.device_option().cuda_gpu_id() == rhs.device_option().cuda_gpu_id();
+bool sameDevice(const DeviceOption& lhs, const DeviceOption& rhs) {
+  return lhs.device_type() == rhs.device_type() &&
+      lhs.cuda_gpu_id() == rhs.cuda_gpu_id();
 }
 
 using OpIndex = int;
@@ -180,8 +179,8 @@ DAGNetBase::ExecutionChains computeChains(
         node_seen_count[cur.first] == 1 &&
         (chain.size() == 0 ||
          sameDevice(
-             orig_nodes[cur.first].operator_def_,
-             orig_nodes[chain.back()].operator_def_)));
+             orig_nodes[cur.first].operator_->device_option(),
+             orig_nodes[chain.back()].operator_->device_option())));
   };
   auto commit_chain = [&]() {
     if (chain.size() > 0) {
@@ -289,10 +288,11 @@ DAGNetBase::DAGNetBase(
       OperatorDef temp_def(op_def);
       temp_def.mutable_device_option()->CopyFrom(net_def->device_option());
       operator_nodes_[idx].operator_ = CreateOperator(temp_def, ws, idx);
-      operator_nodes_[idx].operator_def_ = temp_def;
     } else {
-      operator_nodes_[idx].operator_ = CreateOperator(op_def, ws, idx);
-      operator_nodes_[idx].operator_def_ = op_def;
+      auto op = CreateOperator(op_def, ws, idx);
+      op->set_debug_def(
+          std::shared_ptr<const OperatorDef>{net_def, &(net_def->op(idx))});
+      operator_nodes_[idx].operator_ = std::move(op);
     }
     // Check the inputs, and set up parents if necessary. This addressese the
     // read after write case.
@@ -483,9 +483,9 @@ bool DAGNetBase::Run() {
     CAFFE_ENFORCE(
         op.runtime_parent_count_ == 0,
         "Operator ",
-        op.operator_def_.name(),
+        op.operator_->debug_def().name(),
         "(",
-        op.operator_def_.type(),
+        op.operator_->debug_def().type(),
         ") has some runtime parents left.");
   }
   if (observer_) {
@@ -508,8 +508,8 @@ void DAGNetBase::WorkerFunction() {
     }
 
     VLOG(1) << "Running operator #" << idx << " "
-            << operator_nodes_[idx].operator_def_.name() << "("
-            << operator_nodes_[idx].operator_def_.type() << ").";
+            << operator_nodes_[idx].operator_->debug_def().name() << "("
+            << operator_nodes_[idx].operator_->debug_def().type() << ").";
     CAFFE_ENFORCE(
         execution_chains_.find(idx) != execution_chains_.end(),
         "Can't find chain ",
@@ -519,7 +519,8 @@ void DAGNetBase::WorkerFunction() {
     bool this_success = RunAt(execution_chains_[idx]);
     if (!this_success) {
       LOG(ERROR) << "Operator chain failed: "
-                 << ProtoDebugString(operator_nodes_[idx].operator_def_);
+                 << ProtoDebugString(
+                        operator_nodes_[idx].operator_->debug_def());
     }
 
     // Do book-keeping
@@ -531,9 +532,9 @@ void DAGNetBase::WorkerFunction() {
             count >= 0,
             "Found runtime parent count smaller than zero for ",
             "operator node ",
-            operator_nodes_[child].operator_def_.name(),
+            operator_nodes_[child].operator_->debug_def().name(),
             "(",
-            operator_nodes_[child].operator_def_.type(),
+            operator_nodes_[child].operator_->debug_def().type(),
             ").");
 
         if (count != 0) {
@@ -620,7 +621,7 @@ class DAGNet : public DAGNetBase {
   bool RunAt(const std::vector<int>& chain) override {
     const auto& net_name = name_.c_str();
     for (const auto i : chain) {
-      const auto& opdef = operator_nodes_[i].operator_def_;
+      const auto& opdef = operator_nodes_[i].operator_->debug_def();
       const auto& op = operator_nodes_[i].operator_.get();
 
       const auto& op_name = opdef.name().c_str();
