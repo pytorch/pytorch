@@ -20,6 +20,8 @@ class PairwiseDistance(Module):
         - Input2: :math:`(N, D), same shape as the Input1
         - Output: :math:`(N, 1)`
 
+    Examples::
+
     >>> pdist = nn.PairwiseDistance(p=2)
     >>> input1 = autograd.Variable(torch.randn(100, 128))
     >>> input2 = autograd.Variable(torch.randn(100, 128))
@@ -49,6 +51,8 @@ class CosineSimilarity(Module):
         - Input1: :math:`(\ast_1, D, \ast_2)` where D is at position `dim`
         - Input2: :math:`(\ast_1, D, \ast_2)`, same shape as the Input1
         - Output: :math:`(\ast_1, \ast_2)`
+
+    Examples::
 
     >>> input1 = autograd.Variable(torch.randn(100, 128))
     >>> input2 = autograd.Variable(torch.randn(100, 128))
