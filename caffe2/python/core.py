@@ -2090,6 +2090,11 @@ def copy_func_between_devices(src, dst):
 
 
 def device_equal(src, dst):
+    '''
+    We are using this fucntion instead of == operator because optional-value
+    comparison between empty device_options and {device_type:0, cuda_gpu_id:0}
+    returns not equal in some cases.
+    '''
     return src.device_type == dst.device_type and src.cuda_gpu_id == dst.cuda_gpu_id
 
 
@@ -2182,12 +2187,17 @@ def InjectCrossDeviceCopies(net, blob_to_device=None):
         # Enforcing no reuse blob between operators. In-place blob usage in an
         # op is allowed. This is based on the assumption that in-place op has
         # same device info
-        for out_blob in op.output:
-            if out_blob in blob_to_device and out_blob not in op.input:
+        for out_blob, device in zip(op.output, output_dev):
+            if out_blob in blob_to_device and (
+                out_blob not in op.input and
+                not device_equal(blob_to_device[out_blob], device)
+            ):
                 raise RuntimeError(
-                    "In-place blob: {} is not supported between operators. "
-                    "Failed op:\n {}".
-                    format(out_blob, op)
+                    "In-place blob: {} is not supported between operators "
+                    "with different device option previous:{} now: {}. "
+                    "Failed op:\n {}".format(
+                        out_blob, blob_to_device[out_blob], device, op
+                    )
                 )
         blob_to_device.update({o: d for d, o in zip(output_dev, op.output)})
         new_op = caffe2_pb2.OperatorDef()

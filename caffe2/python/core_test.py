@@ -787,6 +787,10 @@ external_input: "data"
         self.assertEqual(op.input[0], 'param_cuda_1')
 
         net.Relu('nonsense_input', 'moment')
+        # should not raise inplace error
+        core.InjectCrossDeviceCopies(net)
+        with core.DeviceScope(device_option):
+            net.Relu('nonsense_input_gpu', 'moment')
         with self.assertRaises(RuntimeError):
             core.InjectCrossDeviceCopies(net)
 
