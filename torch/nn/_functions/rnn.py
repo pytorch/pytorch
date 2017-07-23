@@ -19,24 +19,32 @@ def RNNTanhCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
     return hy
 
 
-def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
-    if input.is_cuda:
+def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None, w_ci=None, w_cf=None, w_co=None):
+    # [DV] add peepholes `w_ci`, `w_cf`, `w_co`;
+    if input.is_cuda and w_ci is None and w_cf is None and w_co is None:
         igates = F.linear(input, w_ih)
         hgates = F.linear(hidden[0], w_hh)
-        state = fusedBackend.LSTMFused()
+        state  = fusedBackend.LSTMFused()
         return state(igates, hgates, hidden[1]) if b_ih is None else state(igates, hgates, hidden[1], b_ih, b_hh)
-
     hx, cx = hidden
-    gates = F.linear(input, w_ih, b_ih) + F.linear(hx, w_hh, b_hh)
+    gates  = F.linear(input, w_ih, b_ih) + F.linear(hx, w_hh, b_hh)
 
     ingate, forgetgate, cellgate, outgate = gates.chunk(4, 1)
+    if w_ci is not None:
+        peep_i = w_ci.unsqueeze(0).expand_as(cx) * cx
+        ingate = ingate + peep_i
+    if w_cf is not None:
+        peep_f = w_cf.unsqueeze(0).expand_as(cx) * cx
+        forgetgate = forgetgate + peep_f
 
-    ingate = F.sigmoid(ingate)
+    ingate     = F.sigmoid(ingate)
     forgetgate = F.sigmoid(forgetgate)
-    cellgate = F.tanh(cellgate)
+    cellgate   = F.tanh(cellgate)
+    cy         = (forgetgate * cx) + (ingate * cellgate)
+    if w_co is not None:
+        peep_o  = w_co.unsqueeze(0).expand_as(cy) * cy
+        outgate = outgate + peep_o
     outgate = F.sigmoid(outgate)
-
-    cy = (forgetgate * cx) + (ingate * cellgate)
     hy = outgate * F.tanh(cy)
 
     return hy, cy
@@ -207,7 +215,7 @@ def VariableRecurrentReverse(batch_sizes, inner):
 
 def AutogradRNN(mode, input_size, hidden_size, num_layers=1, batch_first=False,
                 dropout=0, train=True, bidirectional=False, batch_sizes=None,
-                dropout_state=None):
+                dropout_state=None, peepholes=False):
 
     if mode == 'RNN_RELU':
         cell = RNNReLUCell
@@ -336,10 +344,11 @@ class CudnnRNN(NestedIOFunction):
 
 def RNN(*args, **kwargs):
     def forward(input, *fargs, **fkwargs):
-        if cudnn.is_acceptable(input.data):
-            func = CudnnRNN(*args, **kwargs)
-        else:
+        if 'peepholes' in kwargs and kwargs['peepholes'] or not cudnn.is_acceptable(input.data):
             func = AutogradRNN(*args, **kwargs)
+        else:
+            kwargs.pop('peepholes', None)
+            func = CudnnRNN(*args, **kwargs)
         return func(input, *fargs, **fkwargs)
 
     return forward
