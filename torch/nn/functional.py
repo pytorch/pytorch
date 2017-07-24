@@ -722,7 +722,7 @@ def kl_div(input, target, size_average=True, weight=None):
         weight (Tensor, optional): a manual rescaling weight given to each
                 class. If given, has to be a Tensor of size "nclasses"
     """
-    return _functions.thnn.KLDivLoss(size_average, weight=weight)(input, target)
+    return _functions.thnn.KLDivLoss.apply(input, target, size_average)
 
 
 def cross_entropy(input, target, weight=None, size_average=True, ignore_index=-100):
