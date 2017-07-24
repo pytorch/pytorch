@@ -1,0 +1,11 @@
+graph(%1, %2) {
+  %15 = fusion_group_0(%1, %2), uses = [%15.0.i0];
+  return (%15.0);
+}
+with fusion_group_0 = graph(%5, %8) {
+  %9 = Add!(%5, %8), uses = [%7.i1];
+  %7 = Mul!(%5, %9), uses = [%4.i0];
+  %4 = Tanh!(%7), uses = [%2.i0];
+  %2 = Sigmoid!(%4), uses = [%0.i0];
+  return (%2);
+}
