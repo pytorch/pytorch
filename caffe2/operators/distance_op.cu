@@ -328,7 +328,6 @@ bool DotProductGradientOp<float, CUDAContext>::RunOnDevice() {
   return true;
 }
 
-namespace {
 REGISTER_CUDA_OPERATOR(SquaredL2Distance,
                        SquaredL2DistanceOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(SquaredL2DistanceGradient,
@@ -343,5 +342,4 @@ REGISTER_CUDA_OPERATOR(DotProduct, DotProductOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(
     DotProductGradient,
     DotProductGradientOp<float, CUDAContext>);
-}  // namespace
 }  // namespace caffe2

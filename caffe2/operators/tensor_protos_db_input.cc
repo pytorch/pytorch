@@ -1,7 +1,6 @@
 #include "caffe2/operators/tensor_protos_db_input.h"
 
 namespace caffe2 {
-namespace {
 REGISTER_CPU_OPERATOR(TensorProtosDBInput, TensorProtosDBInput<CPUContext>);
 
 OPERATOR_SCHEMA(TensorProtosDBInput)
@@ -30,5 +29,4 @@ corresponding index in the TensorProtos objects in the DB.
           "'batch_size' argument of the operator");
 
 NO_GRADIENT(TensorProtosDBInput);
-}  // namespace
 }  // namespace caffe2

@@ -12,7 +12,6 @@ struct LogCPUFunctor {
   }
 };
 
-namespace {
 REGISTER_CPU_OPERATOR(
     Log,
     UnaryElementwiseOp<TensorTypes<float>, CPUContext, LogCPUFunctor>);
@@ -46,5 +45,4 @@ class GetLogGradient : public GradientMakerBase {
 };
 REGISTER_GRADIENT(Log, GetLogGradient);
 
-} // namespace
 } // namespace caffe2

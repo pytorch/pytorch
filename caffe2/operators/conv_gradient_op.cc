@@ -3,7 +3,6 @@
 #include "caffe2/operators/conv_pool_op_base.h"
 
 namespace caffe2 {
-namespace {
 
 REGISTER_CPU_OPERATOR(ConvGradient, ConvGradientOp<float, CPUContext>);
 OPERATOR_SCHEMA(ConvGradient).NumInputs(2, 3).NumOutputs(1, 3);
@@ -51,5 +50,4 @@ class GetConvGradient : public GradientMakerBase {
 };
 REGISTER_GRADIENT(Conv, GetConvGradient);
 
-} // namespace
 } // namespace caffe2

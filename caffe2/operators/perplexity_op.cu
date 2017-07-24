@@ -42,7 +42,5 @@ bool PerplexityOp<float, CUDAContext>::RunOnDevice() {
   return true;
 }
 
-namespace {
 REGISTER_CUDA_OPERATOR(Perplexity, PerplexityOp<float, CUDAContext>);
-}  // namespace
 }  // namespace caffe2

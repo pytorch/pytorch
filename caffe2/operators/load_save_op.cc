@@ -9,7 +9,6 @@ void LoadOp<CPUContext>::SetCurrentDevice(BlobProto* proto) {
   }
 }
 
-namespace {
 REGISTER_CPU_OPERATOR(DBExists, DBExistsOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Load, LoadOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Save, SaveOp<CPUContext>);
@@ -129,10 +128,11 @@ counter). This is determined whether we need to do checkpointing.
         "(int, default 1) the checkpointing is carried out when "
         "(iter mod every) is zero.");
 
+OPERATOR_SCHEMA(Snapshot);
+
 NO_GRADIENT(Load);
 SHOULD_NOT_DO_GRADIENT(DBExists);
 SHOULD_NOT_DO_GRADIENT(Save);
 SHOULD_NOT_DO_GRADIENT(Checkpoint);
 SHOULD_NOT_DO_GRADIENT(Snapshot);
-}  // namespace
 }  // namespace caffe2

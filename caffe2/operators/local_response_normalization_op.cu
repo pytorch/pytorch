@@ -288,9 +288,7 @@ bool LRNGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
 }
 
 
-namespace {
 REGISTER_CUDA_OPERATOR(LRN, LRNOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(LRNGradient, LRNGradientOp<float, CUDAContext>);
-}
 
 }  // namespace caffe2

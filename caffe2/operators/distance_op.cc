@@ -263,7 +263,6 @@ bool DotProductWithPaddingOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
-namespace {
 // L2
 REGISTER_CPU_OPERATOR(SquaredL2Distance,
                       SquaredL2DistanceOp<float, CPUContext>);
@@ -443,5 +442,4 @@ class GetDotProductWithPaddingGradient : public GradientMakerBase {
   }
 };
 REGISTER_GRADIENT(DotProductWithPadding, GetDotProductWithPaddingGradient);
-}  // namespace
 }  // namespace caffe2

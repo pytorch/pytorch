@@ -368,10 +368,8 @@ bool PoolGradientOp<float, CUDAContext, LpPool>::
   return true;
 }
 
-namespace {
 REGISTER_CUDA_OPERATOR(LpPool, PoolOp<float, CUDAContext, LpPool>);
 REGISTER_CUDA_OPERATOR(
     LpPoolGradient,
     PoolGradientOp<float, CUDAContext, LpPool>);
-}
 }

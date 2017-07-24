@@ -35,7 +35,6 @@ bool SoftplusGradientOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
-namespace {
 REGISTER_CPU_OPERATOR(Softplus, SoftplusOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(SoftplusGradient, SoftplusGradientOp<float, CPUContext>);
 
@@ -71,5 +70,4 @@ class GetSoftplusGradient : public GradientMakerBase {
 };
 REGISTER_GRADIENT(Softplus, GetSoftplusGradient);
 
-} // namespace
 } // namespace caffe2

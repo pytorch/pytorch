@@ -763,7 +763,6 @@ bool SoftmaxGradientOp<float, CUDAContext>::RunOnDevice() {
   return true;
 }
 
-namespace {
 REGISTER_CUDA_OPERATOR(SoftmaxWithLoss,
                        SoftmaxWithLossOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(SoftmaxWithLossGradient,
@@ -777,5 +776,4 @@ REGISTER_CUDA_OPERATOR(
 REGISTER_CUDA_OPERATOR(Softmax, SoftmaxOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(SoftmaxGradient, SoftmaxGradientOp<float, CUDAContext>);
 
-} // namespace
 } // namespace caffe2

@@ -81,8 +81,6 @@ bool SparseAdagradOp<float, CUDAContext>::DoRunWithType()
   return true;
 }
 
-namespace {
 REGISTER_CUDA_OPERATOR(Adagrad, AdagradOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(SparseAdagrad, SparseAdagradOp<float, CUDAContext>);
-}
 }

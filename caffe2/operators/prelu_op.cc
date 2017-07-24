@@ -251,7 +251,6 @@ bool PReluGradientOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
-namespace {
 REGISTER_CPU_OPERATOR(PRelu, PReluOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(PReluGradient, PReluGradientOp<float, CPUContext>);
 
@@ -296,5 +295,4 @@ class GetPReluGradient : public GradientMakerBase {
 };
 REGISTER_GRADIENT(PRelu, GetPReluGradient);
 
-} // namespace
 } // namespace caffe2

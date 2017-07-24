@@ -25,8 +25,6 @@ struct ExpCUDAFunctor {
   }
 };
 
-namespace {
 REGISTER_CUDA_OPERATOR(
     Exp, UnaryElementwiseOp<TensorTypes<float>, CUDAContext, ExpCUDAFunctor>);
-}  // namespace
 }  // namespace caffe2

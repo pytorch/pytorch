@@ -52,10 +52,8 @@ bool SoftplusGradientOp<float, CUDAContext>::RunOnDevice() {
   return true;
 }
 
-namespace {
 REGISTER_CUDA_OPERATOR(Softplus, SoftplusOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(
     SoftplusGradient,
     SoftplusGradientOp<float, CUDAContext>);
-} // namespace
 } // namespace caffe2

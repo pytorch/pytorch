@@ -426,8 +426,6 @@ class CUDAAddOp final : public Operator<CUDAContext> {
   string order_;
 };
 
-namespace {
 REGISTER_CUDA_OPERATOR(Add, CUDAAddOp);
-} // namespace
 
 }  // namespace caffe2

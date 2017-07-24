@@ -47,10 +47,8 @@ class SleepOp final : public Operator<CPUContext> {
 
 OPERATOR_SCHEMA(Sleep).NumInputs(0, INT_MAX).NumOutputs(0, 1);
 
-namespace {
 REGISTER_CPU_OPERATOR(Sleep, SleepOp);
 REGISTER_CUDA_OPERATOR(Sleep, SleepOp);
-}  // namespace
 
 const char kSleepNetDefString[] =
 "  name: \"sleepnet\""

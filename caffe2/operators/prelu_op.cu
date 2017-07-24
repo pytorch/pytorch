@@ -276,8 +276,6 @@ bool PReluGradientOp<float, CUDAContext>::RunOnDevice() {
   return true;
 }
 
-namespace {
 REGISTER_CUDA_OPERATOR(PRelu, PReluOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(PReluGradient, PReluGradientOp<float, CUDAContext>);
-} // namespace
 } // namespace caffe2

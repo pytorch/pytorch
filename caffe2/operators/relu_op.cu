@@ -45,8 +45,6 @@ bool ReluGradientOp<float, CUDAContext>::RunOnDevice() {
   return true;
 }
 
-namespace {
 REGISTER_CUDA_OPERATOR(Relu, ReluOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(ReluGradient, ReluGradientOp<float, CUDAContext>);
-}  // namespace
 }  // namespace caffe2

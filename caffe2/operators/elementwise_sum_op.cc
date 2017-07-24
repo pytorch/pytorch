@@ -1,7 +1,6 @@
 #include "caffe2/operators/utility_ops.h"
 
 namespace caffe2 {
-namespace {
 
 REGISTER_CPU_OPERATOR(Sum, SumOp<CPUContext>);
 
@@ -19,5 +18,4 @@ have the same shape and data type.
 )DOC")
     .Input(0, "data_0", "First of the input tensors. Can be inplace.")
     .Output(0, "sum", "Output tensor. Same dimension as inputs.");
-}
 }

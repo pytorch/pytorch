@@ -2,7 +2,6 @@
 
 namespace caffe2 {
 
-namespace {
 REGISTER_CPU_OPERATOR(
     RecurrentNetworkBlobFetcher,
     RecurrentNetworkBlobFetcherOp<CPUContext>);
@@ -26,5 +25,4 @@ workspace under CPUContext.
         "1D tensor of strings containing extracted blob names.");
 
 SHOULD_NOT_DO_GRADIENT(RecurrentNetworkBlobFetcher);
-} // namespace
 } // namespace caffe2
