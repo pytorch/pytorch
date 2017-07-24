@@ -302,7 +302,8 @@ class TestCase(unittest.TestCase):
                      "python {} {} --accept").format(__main__.__file__, munged_id))
             if hasattr(self, "assertMultiLineEqual"):
                 # Python 2.7 only
-                self.assertMultiLineEqual(s, expected)
+                # NB: Python considers lhs "old" and rhs "new".
+                self.assertMultiLineEqual(expected, s)
             else:
                 self.assertEqual(s, expected)
 
