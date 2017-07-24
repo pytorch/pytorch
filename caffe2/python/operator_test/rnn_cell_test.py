@@ -374,7 +374,8 @@ def lstm_input():
 
 def _prepare_attention(t, n, dim_in, encoder_dim,
                           forward_only=False, T=None,
-                          dim_out=None, residual=False):
+                          dim_out=None, residual=False,
+                          final_dropout=False):
     if dim_out is None:
         dim_out = [dim_in]
     print("Dims: t={} n={} dim_in={} dim_out={}".format(t, n, dim_in, dim_out))
@@ -450,6 +451,15 @@ def _prepare_attention(t, n, dim_in, encoder_dim,
             weighted_encoder_outputs=weighted_encoder_outputs,
             attention_memory_optimization=True,
         )
+        if final_dropout:
+            # dropout ratio of 0.0 used to test mechanism but not interfere
+            # with numerical tests
+            attention_cell = rnn_cell.DropoutCell(
+                internal_cell=attention_cell,
+                dropout_ratio=0.0,
+                name='dropout',
+                forward_only=forward_only,
+            )
 
         attention_cell = (
             attention_cell if T is None
@@ -594,12 +604,14 @@ class RNNCellTest(hu.HypothesisTestCase):
         hidden_units=st.integers(min_value=1, max_value=3),
         num_layers=st.integers(min_value=1, max_value=3),
         residual=st.booleans(),
+        final_dropout=st.booleans(),
     )
     @ht_settings(max_examples=10)
     @utils.debug
     def test_unroll_attention(self, input_tensor, encoder_length,
                                     encoder_dim, hidden_units,
-                                    num_layers, residual):
+                                    num_layers, residual,
+                                    final_dropout):
 
         dim_out = [hidden_units] * num_layers
         encoder_tensor = np.random.random(
@@ -621,7 +633,9 @@ class RNNCellTest(hu.HypothesisTestCase):
                 encoder_dim=encoder_dim,
                 T=T,
                 dim_out=dim_out,
-                residual=residual) for T in [input_tensor.shape[0], None]
+                residual=residual,
+                final_dropout=final_dropout,
+            ) for T in [input_tensor.shape[0], None]
         ]
 
         workspace.FeedBlob(net['input_blob'], input_tensor)

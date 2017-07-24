@@ -420,14 +420,19 @@ class DropoutCell(RNNCell):
         )
 
     def _prepare_output(self, model, states):
-        output = states[self.get_output_state_index()]
+        output = self.internal_cell._prepare_output(
+            model,
+            states,
+        )
         if self.dropout_ratio is not None:
             output = self._apply_dropout(model, output)
         return output
 
     def _prepare_output_sequence(self, model, state_outputs):
-        output_sequence_index = 2 * self.get_output_state_index()
-        output = state_outputs[output_sequence_index]
+        output = self.internal_cell._prepare_output_sequence(
+            model,
+            state_outputs,
+        )
         if self.dropout_ratio is not None:
             output = self._apply_dropout(model, output)
         return output
