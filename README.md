@@ -7,7 +7,7 @@ Caffe2 is a lightweight, modular, and scalable deep learning framework. Building
 
 ## News and Events
 
-[Caffe2 research award competition request for proposals](https://research.fb.com/programs/research-awards/proposals/caffe2-request-for-proposals/)
+[Caffe2 research award competition request for proposals](https://research.fb.com/programs/research-awards/proposals/caffe2-rfp/)
 
 ## Questions and Feedback
 
