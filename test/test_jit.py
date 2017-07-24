@@ -1,5 +1,6 @@
 import torch
 import torch.jit
+import torch.nn as nn
 from torch.autograd import Variable
 from common import TestCase, run_tests
 
@@ -22,6 +23,16 @@ class TestJit(TestCase):
         self.assertEqual(z, zs)
 
         # TODO: test that backwards works correctly
+
+    def test_lstm(self):
+        # Careful: don't use fused backend (enabled with CUDA)
+        # Pasted from test_LSTM_cell
+        input = Variable(torch.randn(3, 10))
+        hx = Variable(torch.randn(3, 20))
+        cx = Variable(torch.randn(3, 20))
+        lstm = torch.jit.trace_model(nn.LSTMCell(10, 20))
+        trace, _ = lstm(input, (hx, cx))
+        self.assertExpected(str(trace))
 
 if __name__ == '__main__':
     run_tests()
