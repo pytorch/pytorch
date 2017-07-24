@@ -2288,6 +2288,13 @@ class TestNN(NNTestCase):
         weight = torch.rand(4)
         self.assertEqual(nn.BCEWithLogitsLoss(weight)(output, target), nn.BCELoss(weight)(sigmoid(output), target))
 
+    def test_bce_with_logits_has_correct_grad_at_zero(self):
+        output = Variable(torch.zeros(3, 1), requires_grad=True)
+        target = Variable(torch.zeros(3, 1))
+        nn.BCEWithLogitsLoss(size_average=False)(output, target).backward()
+        expected_grad = Variable(torch.Tensor(3, 1).fill_(0.5))
+        self.assertEqual(output.grad, expected_grad)
+
     def test_bce_with_logits_broadcasts_weights(self):
         target = Variable(torch.rand(16, 4))
         output = Variable(torch.rand(16, 4) - 0.5)
