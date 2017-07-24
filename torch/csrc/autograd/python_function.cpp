@@ -468,7 +468,7 @@ static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
       // NOTE: normally we don't add Select nodes when there's only a single
       // output, but Python nodes can't be optimized away, so we simplify the
       // code here.
-      Node* sel = GlobalTracingState.current().addNode<Select>(this_expr, i);
+      Node* sel = GlobalTracingState.current().appendNewNode<Select>(this_expr, i);
       GlobalTracingState.setValueTrace(output_var->cdata.get(), sel);
     }
     output_var->cdata->output_nr = i;
@@ -701,7 +701,7 @@ static Node * make_trace(PyObject* pyobj, PyObject *arg_objects,
   }
 
   Py_INCREF(pyobj);
-  auto op = graph.addNode<PythonOp>(
+  auto op = graph.appendNewNode<PythonOp>(
     THPObjectPtr(pyobj),
     arg_types,
     is_legacy,
