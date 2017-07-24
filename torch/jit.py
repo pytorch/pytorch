@@ -148,5 +148,22 @@ def print_trace(model):
     return model
 
 
+def trace_model(model):
+    """
+    Trace a function, but also return the trace.  If original
+    function returns output, this function returns (trace, output).
+
+    Unlike verify_model/wrap_model, this does NOT cache the trace
+    and attempt to rerun it.
+    """
+    real_forward = model.forward
+
+    def forward(self, *args):
+        return record_trace(lambda: real_forward(*args),
+                            tuple(self.parameters()) + flatten(args))
+    model.forward = types.MethodType(forward, model)
+    return model
+
+
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")
