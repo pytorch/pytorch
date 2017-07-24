@@ -197,7 +197,6 @@ struct GraphFuser {
     for(auto consumer : nodes) {
       topological_index[consumer] = i++;
     }
-    auto first_node = *nodes.begin();
     for(auto it = nodes.rbegin(); it != nodes.rend();) {
       it = scanNode(*it);
     }
