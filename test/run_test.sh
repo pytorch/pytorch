@@ -55,6 +55,9 @@ $PYCMD test_cuda.py $@
 echo "Running NCCL tests"
 $PYCMD test_nccl.py $@
 
+echo "Running c2isl tests"
+$PYCMD test_c2isl.py $@
+
 distributed_set_up() {
   export TEMP_DIR="$(mktemp -d)"
   rm -rf "$TEMP_DIR/"*
