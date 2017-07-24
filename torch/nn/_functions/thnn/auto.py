@@ -51,7 +51,34 @@ def _make_function_class_criterion(class_name, update_output, update_grad_input,
         grad_input.mul_(grad_output_expanded.expand_as(grad_input))
         return grad_input, None
 
-    return type(class_name, (Function,), dict(__init__=__init__, forward=forward, backward=backward))
+    @staticmethod
+    def forward_noweight(ctx, input, target, *args):
+        ctx.additional_args = list(args)
+        ctx.forward_args_count = len(ctx.additional_args)
+        ctx._backend = type2backend[type(input)]
+        ctx.save_for_backward(input, target)
+        for idx in buffers_idx:
+            ctx.additional_args.insert(idx, input.new(1))
+        output = input.new(1)
+        getattr(ctx._backend, update_output.name)(ctx._backend.library_state, input, target,
+                                                  output, *ctx.additional_args)
+        return output
+
+    @staticmethod
+    @once_differentiable
+    def backward_noweight(ctx, grad_output):
+        input, target = ctx.saved_tensors
+        grad_input = grad_output.new().resize_as_(input).zero_()
+        getattr(ctx._backend, update_grad_input.name)(ctx._backend.library_state, input, target,
+                                                      grad_input, *ctx.additional_args)
+        grad_output_expanded = grad_output.view(*repeat(1, grad_input.dim()))
+        grad_input.mul_(grad_output_expanded.expand_as(grad_input))
+        return (grad_input, None) + (None,) * ctx.forward_args_count
+
+    if weight_arg_idx >=0:
+        return type(class_name, (Function,), dict(__init__=__init__, forward=forward, backward=backward))
+    else:
+        return type(class_name, (Function,), dict(forward=forward_noweight, backward=backward_noweight))
 
 
 def _find_buffers(args, ignored_args):

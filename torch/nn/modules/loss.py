@@ -17,6 +17,10 @@ class _Loss(Module):
         super(_Loss, self).__init__()
         self.size_average = size_average
 
+#    def forward(self, input, target):
+#        _assert_no_grad(target)
+#        backend_fn = getattr(self._backend, type(self).__name__)
+#        return backend_fn.apply(input, target, self.size_average)
 
 class _WeightedLoss(_Loss):
     def __init__(self, weight=None, size_average=True):
@@ -205,7 +209,7 @@ class PoissonNLLLoss(_Loss):
         return F.poisson_nll_loss(log_input, target, self.log_input, self.full, self.size_average)
 
 
-class KLDivLoss(_WeightedLoss):
+class KLDivLoss(_Loss):
     r"""The `Kullback-Leibler divergence`_ Loss
 
     KL divergence is a useful distance measure for continuous distributions
@@ -232,7 +236,7 @@ class KLDivLoss(_WeightedLoss):
     """
     def forward(self, input, target):
         _assert_no_grad(target)
-        return F.kl_div(input, target, size_average=self.size_average, weight=self.weight)
+        return F.kl_div(input, target, size_average=self.size_average)
 
 
 class MSELoss(_Loss):
