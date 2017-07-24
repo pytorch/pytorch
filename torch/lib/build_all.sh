@@ -143,12 +143,14 @@ build ATen
 
 # THD, gloo have dependencies on Torch, CUDA, NCCL etc.
 if [[ $WITH_DISTRIBUTED -eq 1 ]]; then
-    if [ -d "gloo" ]; then
-      GLOO_FLAGS=""
-      if [[ $WITH_CUDA -eq 1 ]]; then
-        GLOO_FLAGS="-DUSE_CUDA=1 -DNCCL_ROOT_DIR=$INSTALL_DIR"
-      fi
-      build gloo "$GLOO_FLAGS"
+    if [ "$(uname)" == "Linux" ]; then
+        if [ -d "gloo" ]; then
+            GLOO_FLAGS=""
+            if [[ $WITH_CUDA -eq 1 ]]; then
+                GLOO_FLAGS="-DUSE_CUDA=1 -DNCCL_ROOT_DIR=$INSTALL_DIR"
+            fi
+            build gloo "$GLOO_FLAGS"
+        fi
     fi
     build THD
 fi
