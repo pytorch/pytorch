@@ -10,6 +10,7 @@
 #pragma once
 
 #include <cstdlib>
+#include <malloc.h>
 #include <memory>
 
 namespace gloo {
@@ -47,7 +48,7 @@ class aligned_allocator {
   inline pointer allocate(
       size_type sz,
       typename std::allocator<void>::const_pointer = 0) {
-    auto x = aligned_alloc(ALIGNMENT, sizeof(T) * sz);
+    auto x = memalign(ALIGNMENT, sizeof(T) * sz);
     return reinterpret_cast<pointer>(x);
   }
 
