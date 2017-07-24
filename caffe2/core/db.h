@@ -122,6 +122,23 @@ inline unique_ptr<DB> CreateDB(
 }
 
 /**
+ * Returns whether or not a database exists given the database type and path.
+ */
+inline bool DBExists(const string& db_type, const string& full_db_name) {
+  // Warning! We assume that creating a DB throws an exception if the DB
+  // does not exist. If the DB constructor does not follow this design
+  // pattern,
+  // the returned output (the existence tensor) can be wrong.
+  try {
+    std::unique_ptr<DB> db(
+        caffe2::db::CreateDB(db_type, full_db_name, caffe2::db::READ));
+    return true;
+  } catch (...) {
+    return false;
+  }
+}
+
+/**
  * A reader wrapper for DB that also allows us to serialize it.
  */
 class DBReader {

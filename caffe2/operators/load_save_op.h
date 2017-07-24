@@ -53,17 +53,8 @@ class DBExistsOp final : public Operator<Context> {
     auto* output = Output(0);
     output->Resize();
     bool* exists = output->template mutable_data<bool>();
-    // Warning! We assume that creating a DB throws an exception if the DB
-    // does not exist. If the DB constructor does not follow this design
-    // pattern,
-    // the returned output (the existence tensor) can be wrong.
-    try {
-      std::unique_ptr<DB> db(
-          caffe2::db::CreateDB(db_type_, full_db_name, caffe2::db::READ));
-      *exists = true;
-    } catch (...) {
-      *exists = false;
-    }
+
+    *exists = caffe2::db::DBExists(db_type_, full_db_name);
     return true;
   }
 
