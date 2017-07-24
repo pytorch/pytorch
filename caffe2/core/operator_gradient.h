@@ -146,7 +146,8 @@ class GradientMakerBase {
         g_output_.at(i).IsDense(),
         "Gradient of output ",
         def_.output(i),
-        " is either sparse or not provided.");
+        (g_output_.at(i).IsSparse() ? " is sparse (expected dense)."
+                                    : " is not provided!"));
     return g_output_.at(i).dense_;
   }
   string GO_I(const int i) {
@@ -154,7 +155,8 @@ class GradientMakerBase {
         g_output_.at(i).IsSparse(),
         "Gradient of output ",
         def_.output(i),
-        " is either dense or not provided.");
+        (g_output_.at(i).IsDense() ? " is dense (expected sparse)."
+                                   : " is not provided!"));
     return g_output_.at(i).indices_;
   }
   string GO_V(const int i) {
@@ -162,7 +164,8 @@ class GradientMakerBase {
         g_output_.at(i).IsSparse(),
         "Gradient of output ",
         def_.output(i),
-        "is either dense or not provided.");
+        (g_output_.at(i).IsDense() ? " is dense (expected sparse)."
+                                   : " is not provided!"));
     return g_output_.at(i).values_;
   }
   const GradientWrapper& GradOut(int i) {
