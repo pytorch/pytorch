@@ -43,12 +43,10 @@ struct TanhGradientCUDAFunctor {
   }
 };
 
-namespace {
 REGISTER_CUDA_OPERATOR(
     Tanh, UnaryElementwiseOp<TensorTypes<float>, CUDAContext, TanhCUDAFunctor>);
 REGISTER_CUDA_OPERATOR(
     TanhGradient, BinaryElementwiseOp<
         TensorTypes<float>, CUDAContext,
         WithoutBroadcast<TanhGradientCUDAFunctor>>);
-}  // namespace
 }  // namespace caffe2

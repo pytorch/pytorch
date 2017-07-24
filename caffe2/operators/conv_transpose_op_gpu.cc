@@ -3,10 +3,8 @@
 #include "caffe2/operators/conv_transpose_op_impl.h"
 
 namespace caffe2 {
-namespace {
 REGISTER_CUDA_OPERATOR(ConvTranspose, ConvTransposeOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(
     ConvTransposeGradient,
     ConvTransposeGradientOp<float, CUDAContext>);
-} // namespace
 } // namespace caffe2

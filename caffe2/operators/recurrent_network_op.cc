@@ -4,7 +4,6 @@
 namespace caffe2 {
 CAFFE_KNOWN_TYPE(detail::ScratchWorkspaces);
 
-namespace {
 REGISTER_CPU_OPERATOR(RecurrentNetwork, RecurrentNetworkOp<float, CPUContext>);
 OPERATOR_SCHEMA(RecurrentNetwork)
     .NumInputs(1, INT_MAX)
@@ -88,7 +87,6 @@ struct GetRecurrentNetworkGradient : public GradientMakerBase {
 };
 
 REGISTER_GRADIENT(RecurrentNetwork, GetRecurrentNetworkGradient);
-}
 
 namespace detail {
 void extractLinks(

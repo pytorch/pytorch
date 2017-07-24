@@ -49,7 +49,6 @@ struct CosGradientCUDAFunctor {
   }
 };
 
-namespace {
 REGISTER_CUDA_OPERATOR(
     Cos,
     UnaryElementwiseOp<TensorTypes<float>, CUDAContext, CosCUDAFunctor>);
@@ -59,5 +58,4 @@ REGISTER_CUDA_OPERATOR(
         TensorTypes<float>,
         CUDAContext,
         WithoutBroadcast<CosGradientCUDAFunctor>>);
-} // namespace
 } // namespace caffe2

@@ -80,10 +80,11 @@ bool ReluGradientOp<float16, CUDAContext>::RunOnDevice() {
   return true;
 }
 
-namespace {
+OPERATOR_SCHEMA(ReluFp16);
+OPERATOR_SCHEMA(ReluFp16Gradient);
+
 REGISTER_CUDA_OPERATOR(ReluFp16, ReluOp<float16, CUDAContext>);
 REGISTER_CUDA_OPERATOR(ReluFp16Gradient, ReluGradientOp<float16, CUDAContext>);
-}  // namespace
 }  // namespace caffe2
 
 #endif  // CAFFE_HAS_CUDA_FP16

@@ -135,10 +135,8 @@ bool ResizeNearestGradientOp<float, CUDAContext>::RunOnDevice() {
   return true;
 }
 
-namespace {
 REGISTER_CUDA_OPERATOR(ResizeNearest, ResizeNearestOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(
     ResizeNearestGradient,
     ResizeNearestGradientOp<float, CUDAContext>);
-} // namespace
 } // namespace caffe2

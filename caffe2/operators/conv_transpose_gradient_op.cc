@@ -2,7 +2,6 @@
 #include "caffe2/operators/conv_transpose_op_impl.h"
 
 namespace caffe2 {
-namespace {
 
 REGISTER_CPU_OPERATOR(
     ConvTransposeGradient,
@@ -23,5 +22,4 @@ class GetConvTransposeGradient : public GradientMakerBase {
 };
 REGISTER_GRADIENT(ConvTranspose, GetConvTransposeGradient);
 
-} // namespace
 } // namespace caffe2

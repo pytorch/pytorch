@@ -2,7 +2,6 @@
 
 namespace caffe2 {
 
-namespace {
 REGISTER_CPU_OPERATOR(MomentumSGD, MomentumSGDOp<float, CPUContext>);
 OPERATOR_SCHEMA(MomentumSGD)
     .NumInputs(3)
@@ -113,5 +112,4 @@ same blobs).
     .Arg("momentum", "Momentum hyperparameter.")
     .Arg("nesterov", "(boolean) Whether to use Nesterov Accelerated Gradient.");
 SHOULD_NOT_DO_GRADIENT(SparseMomentumSGDUpdate);
-}
 }

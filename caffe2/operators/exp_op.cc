@@ -11,7 +11,6 @@ struct ExpCPUFunctor {
   }
 };
 
-namespace {
 REGISTER_CPU_OPERATOR(
     Exp,
     UnaryElementwiseOp<TensorTypes<float>, CPUContext, ExpCPUFunctor>);
@@ -44,5 +43,4 @@ class GetExpGradient : public GradientMakerBase {
   }
 };
 REGISTER_GRADIENT(Exp, GetExpGradient);
-} // namespace
 } // namespace caffe2

@@ -2,7 +2,6 @@
 #include "caffe2/operators/conv_transpose_op_impl.h"
 
 namespace caffe2 {
-namespace {
 
 REGISTER_CPU_OPERATOR(ConvTranspose, ConvTransposeOp<float, CPUContext>);
 
@@ -47,5 +46,4 @@ OPERATOR_SCHEMA(ConvTranspose)
         "transposed convolution. The output dimensions are functions of the kernel"
         " size, stride size, and pad lengths.");
 
-} // namespace
 } // namespace caffe2

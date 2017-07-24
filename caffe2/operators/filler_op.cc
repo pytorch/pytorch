@@ -12,8 +12,6 @@ bool RangeFillOp<float, CPUContext>::Fill(
   return true;
 }
 
-namespace {
-
 REGISTER_CPU_OPERATOR(UniformFill, UniformFillOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(UniformIntFill, UniformFillOp<int, CPUContext>);
 REGISTER_CPU_OPERATOR(UniqueUniformFill, UniqueUniformFillOp<CPUContext>);
@@ -192,5 +190,4 @@ output would be [0,1,2,3,0,1,2,0].
         "1D tensor whose size is the sum of `lengths`");
 NO_GRADIENT(LengthsRangeFill);
 
-}  // namespace
 }  // namespace caffe2

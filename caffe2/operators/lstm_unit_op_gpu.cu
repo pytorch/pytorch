@@ -177,10 +177,8 @@ void LSTMUnitGradient<float, CUDAContext>(
 }
 }
 
-namespace {
 REGISTER_CUDA_OPERATOR(LSTMUnit, LSTMUnitOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(
     LSTMUnitGradient,
     LSTMUnitGradientOp<float, CUDAContext>);
-}
 }

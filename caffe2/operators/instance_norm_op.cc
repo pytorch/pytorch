@@ -97,8 +97,6 @@ bool InstanceNormOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   return true;
 }
 
-namespace {
-
 REGISTER_CPU_OPERATOR(InstanceNorm, InstanceNormOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(InstanceNorm)
@@ -144,7 +142,4 @@ computation.
         "Optional saved inverse stdev used during training to speed up "
         "gradient computation. Should not be used for testing.");
 
-
-
-} // namespace
 } // namespace caffe2

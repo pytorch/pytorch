@@ -77,8 +77,6 @@ bool ElementwiseLinearGradientOp<float, CPUContext>::RunOnDevice(){
   return true;
 }
 
-namespace {
-
 REGISTER_CPU_OPERATOR(
   ElementwiseLinear,
   ElementwiseLinearOp<float, CPUContext>);
@@ -123,5 +121,4 @@ REGISTER_GRADIENT(
   GetElementwiseLinearGradient
 );
 
-}  // namespace
 }  // namespace caffe2

@@ -1,7 +1,6 @@
 #include "caffe2/operators/im2col_op.h"
 
 namespace caffe2 {
-namespace {
 REGISTER_CPU_OPERATOR(Im2Col, Im2ColOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(Col2Im, Col2ImOp<float, CPUContext>);
 
@@ -81,5 +80,4 @@ OPERATOR_SCHEMA(Im2Col)
 
 OPERATOR_SCHEMA(Col2Im).NumInputs(2).NumOutputs(1);
 
-} // namespace
 } // namespace caffe2

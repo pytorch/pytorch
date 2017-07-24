@@ -2,8 +2,6 @@
 
 namespace caffe2 {
 
-namespace {
-
 REGISTER_CPU_OPERATOR(SpaceToBatch, SpaceToBatchOp<CPUContext>);
 OPERATOR_SCHEMA(SpaceToBatch).NumInputs(1).NumOutputs(1).SetDoc(R"DOC(
 
@@ -48,5 +46,4 @@ class GetBatchToSpaceGradient : public GradientMakerBase {
 };
 REGISTER_GRADIENT(SpaceToBatch, GetSpaceToBatchGradient);
 REGISTER_GRADIENT(BatchToSpace, GetBatchToSpaceGradient);
-}
 }

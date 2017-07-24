@@ -65,8 +65,6 @@ bool MultiClassAccuracyOp<float, CUDAContext>::RunOnDevice() {
   return true;
 }
 
-namespace {
 REGISTER_CUDA_OPERATOR(
   MultiClassAccuracy, MultiClassAccuracyOp<float, CUDAContext>);
-}  // namespace
 }  // namespace caffe2

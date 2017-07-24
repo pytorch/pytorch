@@ -227,7 +227,6 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   return true;
 }
 
-namespace {
 REGISTER_CPU_OPERATOR(LRN, LRNOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(LRNGradient, LRNGradientOp<float, CPUContext>);
 
@@ -251,5 +250,4 @@ class GetLRNGradient : public GradientMakerBase {
   }
 };
 REGISTER_GRADIENT(LRN, GetLRNGradient);
-}  // namespace
 }  // namespace caffe2

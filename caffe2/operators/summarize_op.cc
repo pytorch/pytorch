@@ -42,7 +42,6 @@ bool SummarizeOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
-namespace {
 REGISTER_CPU_OPERATOR(Summarize, SummarizeOp<float, CPUContext>);
 
 // Input: X; output: if set, a summarized Tensor of shape 4, with the values
@@ -63,5 +62,4 @@ greater than 0, the values are written to a log file in the root folder.
           "max, mean and standard deviation");
 
 SHOULD_NOT_DO_GRADIENT(Summarize);
-}  // namespace
 }  // namespace caffe2
