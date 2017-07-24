@@ -808,15 +808,15 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=Tr
 
 
 def smooth_l1_loss(input, target, size_average=True):
-    return _functions.thnn.SmoothL1Loss(size_average)(input, target)
+    return _functions.thnn.SmoothL1Loss.apply(input, target, size_average)
 
 
 def l1_loss(input, target, size_average=True):
-    return _functions.thnn.L1Loss(size_average)(input, target)
+    return _functions.thnn.L1Loss.apply(input, target, size_average)
 
 
 def mse_loss(input, target, size_average=True):
-    return _functions.thnn.MSELoss(size_average)(input, target)
+    return _functions.thnn.MSELoss.apply(input, target, size_average)
 
 
 def margin_ranking_loss(input1, input2, target, margin=0, size_average=True):
@@ -828,11 +828,11 @@ def hinge_embedding_loss(input, target, margin=1.0, size_average=True):
 
 
 def multilabel_margin_loss(input, target, size_average=True):
-    return _functions.thnn.MultiLabelMarginLoss(size_average)(input, target)
+    return _functions.thnn.MultiLabelMarginLoss.apply(input, target, size_average)
 
 
 def soft_margin_loss(input, target, size_average=True):
-    return _functions.thnn.SoftMarginLoss(size_average)(input, target)
+    return _functions.thnn.SoftMarginLoss.apply(input, target, size_average)
 
 
 def multilabel_soft_margin_loss(input, target, weight=None, size_average=True):
@@ -850,8 +850,7 @@ def multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=Tr
     if weight is not None and weight.dim() != 1:
         raise ValueError('weight must be one-dimensional')
 
-    return _functions.thnn.MultiMarginLoss(size_average, p, margin,
-                                           weight=weight)(input, target)
+    return _functions.thnn.MultiMarginLoss.apply(input, target, weight, size_average, p, margin)
 
 
 def pixel_shuffle(input, upscale_factor):
