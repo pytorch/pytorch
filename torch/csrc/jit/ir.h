@@ -444,7 +444,7 @@ static inline bool operator!=(graph_node_list_iterator a,graph_node_list_iterato
 
 template<typename Self, NodeKind K>
 struct NodeWithKind : public Node {
-  friend class Graph; /* so it can access allocClone() */
+  friend struct Graph; /* so it can access allocClone() */
   static const NodeKind Kind = K;
   NodeWithKind()
   : Node(K) {}
@@ -694,8 +694,8 @@ struct PythonOp : public NodeWithKind<PythonOp,NodeKind::PythonOp> {
     this->is_legacy = is_legacy;
   }
   virtual void cloneFrom(PythonOp * other) override {
-    this->cconv = cconv;
-    this->is_legacy = is_legacy;
+    this->cconv = other->cconv;
+    this->is_legacy = other->is_legacy;
     Py_INCREF(other->pyobj.get());
     this->pyobj = THPObjectPtr(other->pyobj.get());
     for(auto & sa : other->scalar_args) {
