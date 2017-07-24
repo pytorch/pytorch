@@ -7,14 +7,11 @@
 #include "caffe2/core/db.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/predictor.h"
+#include "caffe2/utils/cpuid.h"
 #include "caffe2/utils/mkl_utils.h"
 #include "caffe2/utils/string_utils.h"
 #include "google/protobuf/io/coded_stream.h"
 #include "google/protobuf/io/zero_copy_stream_impl_lite.h"
-
-#if defined(_MSC_VER)
-#include "caffe2/utils/windows_cpu_supports.h"
-#endif
 
 namespace caffe2 {
 namespace python {
@@ -1027,32 +1024,10 @@ void addGlobalMethods(py::module& m) {
     return std::make_pair(in_res, out_res);
   });
 
-#define CAFFE2_CPU_FEATURE_SUPPORT(feature)      \
-  m.def("builtin_cpu_supports_" #feature, []() { \
-    return __builtin_cpu_supports(#feature);     \
-  })
+#define CAFFE2_CPU_FEATURE_SUPPORT(feature) \
+  m.def("builtin_cpu_supports_" #feature, []() { return GetCpuId().feature(); })
 
-// Clang does not support __builtin_cpu_supports until
-// revision r240994:
-// http://lists.llvm.org/pipermail/cfe-commits/Week-of-Mon-20150629/131941.html
-#if (                                                                 \
-    __clang__ && ((__apple_build_version__ &&                         \
-                   ((__clang_major__ == 8 && __clang_minor__ == 0) || \
-                    (__clang_major__ <= 7))) ||                       \
-                  (!__apple_build_version__ &&                        \
-                   ((__clang_major__ == 3 && __clang_minor__ < 7) ||  \
-                    (__clang_major__ <= 2)))))
-#warning \
-    "Compiling without AVX2. Please consider upgrading your version of Clang."
-  // Provide a dummy avx2 flag.
-  m.def("builtin_cpu_supports_avx2", []() { return false; });
-#elif defined(CAFFE2_NO_BUILTIN_CPU_SUPPORTS) && !defined(__AVX2__)
-  // If the compile does not support builtin_cpu_supports, and avx2 is not
-  // manually specified, we mark it as not-supported.
-  m.def("builtin_cpu_supports_avx2", []() { return false; });
-#else
   CAFFE2_CPU_FEATURE_SUPPORT(avx2);
-#endif
 
 #undef CAFFE2_CPU_FEATURE_SUPPORT
 
