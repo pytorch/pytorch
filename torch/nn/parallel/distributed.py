@@ -161,7 +161,7 @@ class DistributedDataParallel(Module):
         return scatter_kwargs(inputs, kwargs, device_ids, dim=self.dim)
 
     def parallel_apply(self, replicas, inputs, kwargs):
-        return parallel_apply(replicas, inputs, kwargs, self.device_ids)
+        return parallel_apply(replicas, inputs, kwargs, self.device_ids[:len(replicas)])
 
     def gather(self, outputs, output_device):
         return gather(outputs, output_device, dim=self.dim)
