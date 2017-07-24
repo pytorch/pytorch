@@ -1836,6 +1836,42 @@ class TestNN(NNTestCase):
             (hx + cx).sum().backward()
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_LSTM_cudnn_weight_format(self):
+        rnn = nn.LSTM(10, 20, batch_first=True).cuda()
+        input = Variable(torch.randn(5, 4, 10).cuda(), requires_grad=True)
+        hx = Variable(torch.randn(1, 5, 20).cuda(), requires_grad=True)
+        cx = Variable(torch.randn(1, 5, 20).cuda(), requires_grad=True)
+        all_vars = [input, hx, cx] + list(rnn.parameters())
+
+        output = rnn(input, (hx, cx))
+        output[0].sum().backward()
+        grads = [v.grad.data.clone() for v in all_vars]
+        for v in all_vars:
+            v.grad.data.zero_()
+
+        # Weights will no longer view onto the same chunk of memory
+        weight = all_vars[4]
+        weight_data = weight.data.clone()
+        weight.data.set_(weight_data)
+
+        for i in range(2):
+            with warnings.catch_warnings(record=True) as w:
+                output_noncontig = rnn(input, (hx, cx))
+            if i == 0:
+                self.assertEqual(len(w), 1)
+                self.assertIn('weights are not part of single contiguous chunk of memory', w[0].message.args[0])
+            output_noncontig[0].sum().backward()
+            grads_noncontig = [v.grad.data.clone() for v in all_vars]
+            for v in all_vars:
+                v.grad.data.zero_()
+            self.assertEqual(output, output_noncontig)
+            self.assertEqual(grads_noncontig, grads)
+
+        # Make sure these still share storage
+        weight_data[:] = 4
+        self.assertEqual(weight_data, all_vars[4].data)
+
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_cuda_rnn_fused(self):
         def copy_rnn(rnn1, rnn2):
             for x_layer, y_layer in zip(rnn1.all_weights, rnn2.all_weights):
@@ -2165,6 +2201,7 @@ class TestNN(NNTestCase):
 
                     rnn_pickle = pickle.dumps(rnn)
                     rnn2 = pickle.loads(rnn_pickle)
+                    rnn2.flatten_parameters()
                     output3, hy3 = rnn2(input, hx)
 
                     if p == 0 or not train:
