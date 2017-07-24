@@ -2,11 +2,8 @@
 
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
+#include "caffe2/utils/cpuid.h"
 #include "caffe2/utils/mkl_utils.h"
-
-#if defined(_MSC_VER)
-#include "caffe2/utils/windows_cpu_supports.h"
-#endif
 
 #ifdef CAFFE2_HAS_MKL_SGEMM_PACK
 
@@ -22,23 +19,8 @@ class PackedFCOp final : public Operator<CPUContext> {
   PackedFCOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<CPUContext>(operator_def, ws),
         axis_(OperatorBase::GetSingleArgument<int32_t>("axis", 1)) {
-// Unfortunately, when we compile under mac, some versions of the shipped
-// clang does not support __builtin_cpu_supports until
-// revision r240994:
-// http://lists.llvm.org/pipermail/cfe-commits/Week-of-Mon-20150629/131941.html
-#if (                                                                 \
-    __clang__ && ((__apple_build_version__ &&                         \
-                   ((__clang_major__ == 8 && __clang_minor__ == 0) || \
-                    (__clang_major__ <= 7))) ||                       \
-                  (!__apple_build_version__ &&                        \
-                   ((__clang_major__ == 3 && __clang_minor__ < 7) ||  \
-                    (__clang_major__ <= 2)))))
-    CAFFE_THROW(
-        "You are building without avx2, in which case you won't be "
-        "able to utilize the speedup of packed sgemm anyway.");
-#else
     OPERATOR_NEEDS_FEATURE(
-        __builtin_cpu_supports("avx2") || operator_def.type() == "PackedFC",
+        GetCpuId().avx2() || operator_def.type() == "PackedFC",
         "If you are trying to use PackedFCOp as a FC with PACKED engine on "
         "a machine that does not have avx2, be noted that the functionality "
         "is not tuned and you are better off directly using FC.");
@@ -46,11 +28,10 @@ class PackedFCOp final : public Operator<CPUContext> {
     // from the check above, as the above is a performance hint and the below
     // is about correctness.
     CAFFE_ENFORCE(
-        __builtin_cpu_supports("avx2"),
+        GetCpuId().avx2(),
         "Do not run PackedFC on a machine that does not have avx2 "
         "right now, as there is a known issue with MKL 2017.0.098 "
         "that produces wrong results on non-avx2 machines.");
-#endif
   }
   ~PackedFCOp() {}
 

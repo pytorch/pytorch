@@ -6,6 +6,7 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/operators/conv_pool_op_base.h"
 #include "caffe2/operators/leaky_relu_op.h"
+#include "caffe2/utils/cpuid.h"
 #include "caffe2/utils/math.h"
 #include "nnpack.h"
 
@@ -100,8 +101,7 @@ class NNPACKConvOp final : public ConvPoolOpBase<CPUContext> {
 #ifdef CAFFE2_USE_FBCODE
     // Facebook's nnpack build assumes existence of avx2, so we explicitly
     // check if the machine has avx2 support.
-    OPERATOR_NEEDS_FEATURE(
-        __builtin_cpu_supports("avx2"), "NNPack requires AVX2");
+    OPERATOR_NEEDS_FEATURE(GetCpuId().avx2(), "NNPack requires AVX2");
 #endif
   }
 
@@ -231,8 +231,7 @@ class NNPACKMaxPoolOp final : public ConvPoolOpBase<CPUContext> {
 #ifdef CAFFE2_USE_FBCODE
     // Facebook's nnpack build assumes existence of avx2, so we explicitly
     // check if the machine has avx2 support.
-    OPERATOR_NEEDS_FEATURE(
-        __builtin_cpu_supports("avx2"), "NNPack requires AVX2");
+    OPERATOR_NEEDS_FEATURE(GetCpuId().avx2(), "NNPack requires AVX2");
 #endif
   }
 
@@ -287,8 +286,7 @@ class NNPACKReluOp final : public Operator<CPUContext> {
 #ifdef CAFFE2_USE_FBCODE
     // Facebook's nnpack build assumes existence of avx2, so we explicitly
     // check if the machine has avx2 support.
-    OPERATOR_NEEDS_FEATURE(
-        __builtin_cpu_supports("avx2"), "NNPack requires AVX2");
+    OPERATOR_NEEDS_FEATURE(GetCpuId().avx2(), "NNPack requires AVX2");
 #endif
   }
 
@@ -316,8 +314,7 @@ class NNPACKLeakyReluOp final : public LeakyReluOp<float, CPUContext> {
 #ifdef CAFFE2_USE_FBCODE
     // Facebook's nnpack build assumes existence of avx2, so we explicitly
     // check if the machine has avx2 support.
-    OPERATOR_NEEDS_FEATURE(
-        __builtin_cpu_supports("avx2"), "NNPack requires AVX2");
+    OPERATOR_NEEDS_FEATURE(GetCpuId().avx2(), "NNPack requires AVX2");
 #endif
   }
 
