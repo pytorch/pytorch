@@ -10,6 +10,7 @@
 #include <atomic>
 #include <algorithm>
 #include <unordered_set>
+#include <list>
 
 #include "torch/csrc/utils/object_ptr.h"
 
@@ -74,39 +75,26 @@ TH_FORALL_NODES(DEFINE_NODE)
 #undef DEFINE_NODE
 };
 
-struct graph_node_list_iterator;
-struct graph_node_list;
+using graph_node_list = std::list<Node*>;
 
 struct Node {
   TH_DISALLOW_COPY_AND_ASSIGN(Node);
   friend struct Graph;
-  friend struct graph_node_list_iterator;
-  friend struct graph_node_list;
 private:
-  // each node but Return/Param
-  // is associated with exactly one place in the node list...
-  // of the graph_
-  // this circular is a doubly-linked list, the Return node is used as the sentinel for the beginning and end of the list
-  // such that the list never has null pointers
-  // next_in_graph[0] is next pointer
-  // next_in_graph[1] is prev pointer
-  // using an array to allow the same iterator class for forward and reverse node lists
-  // This list represents a topological sort
-  Node * next_in_graph[2];
-  Node* & next() { return next_in_graph[0]; }
-  Node* & prev() { return next_in_graph[1]; }
+  graph_node_list::iterator nodes_iter_;
+  graph_node_list::iterator next() { return std::next(nodes_iter_); }
+  graph_node_list::iterator prev() { return std::prev(nodes_iter_); }
 
   const NodeKind kind_;
   Type * type_;
   std::vector<Node*> inputs_;
   use_list uses_;
   Graph* graph_;
-  size_t unique_ = 0;
-  // what stage of computation 0-forward, 1-backward, 2-double-backward,...
-  size_t stage_ = 0;
+  size_t unique_ = 0;          // unique id
+  size_t stage_ = 0;           // 0-forward, 1-backward, 2-double-backward,...
 protected:
   Node(NodeKind kind_)
-  : next_in_graph{nullptr,nullptr}, kind_(kind_), type_(nullptr) {}
+  : kind_(kind_), type_(nullptr) {}
 public:
   NodeKind kind() {
     return kind_;
@@ -128,6 +116,9 @@ public:
   }
   const std::vector<Node*>& inputs() {
     return inputs_;
+  }
+  const use_list & uses() {
+    return uses_;
   }
 
   // Graphs
@@ -152,7 +143,7 @@ public:
   // Result:  %3 = f(%1, %2, %4)
   Node* addInput(Node * node) {
     JIT_ASSERT(graph_ == node->graph_);
-    node->uses_.emplace_back(this,inputs_.size());
+    node->uses_.emplace_back(this, inputs_.size());
     inputs_.push_back(node);
     return node;
   }
@@ -167,7 +158,7 @@ public:
     JIT_ASSERT(newValue->graph_ == graph_);
     Node * old = dropInput(i);
     inputs_[i] = newValue;
-    newValue->uses_.emplace_back(this,i);
+    newValue->uses_.emplace_back(this, i);
     return old;
   }
 
@@ -186,10 +177,6 @@ public:
         replaceInput(i, to);
       i++;
     }
-  }
-
-  const use_list & uses() {
-    return uses_;
   }
 
   // Replaces all uses of this node with 'newValue'.
@@ -220,8 +207,8 @@ public:
   //          %5 = h(%1)
   //          %4 = g(%3)
   void insertBefore(Node * n) {
-    JIT_ASSERT(n->inGraphList()&& !this->inGraphList());
-    insertAfter(n->prev());
+    JIT_ASSERT(n->inGraphList());
+    insertAt(n->nodes_iter_);
   }
 
   // Insert unattached 'this' node after 'n' in the topological order.
@@ -234,12 +221,8 @@ public:
   //          %4 = g(%3)
   //          %5 = h(%1)
   void insertAfter(Node * n) {
-    JIT_ASSERT(!inGraphList() && n->inGraphList());
-    Node * next = n->next();
-    n->next() = this;
-    this->prev() = n;
-    this->next() = next;
-    next->prev() = this;
+    JIT_ASSERT(n->inGraphList());
+    insertAt(n->next());
   }
 
   // Move 'this' (already in the graph) after 'n' in the topological order.
@@ -251,7 +234,6 @@ public:
   //         %2 = f(%1)
   //
   void moveAfter(Node * n) {
-    JIT_ASSERT(inGraphList());
     removeFromList();
     insertAfter(n);
   }
@@ -264,7 +246,6 @@ public:
   // Result: %3 = g(%1)
   //         %2 = f(%1)
   void moveBefore(Node * n) {
-    JIT_ASSERT(inGraphList());
     removeFromList();
     insertBefore(n);
   }
@@ -301,8 +282,16 @@ public:
 
   // iterators of the node list starting at this node
   // useful for resuming a search starting at this node
-  graph_node_list_iterator iterator();
-  graph_node_list_iterator reverseIterator();
+  graph_node_list::iterator iterator() {
+    JIT_ASSERT(inGraphList());
+    return nodes_iter_;
+  }
+  graph_node_list::reverse_iterator reverseIterator() {
+    JIT_ASSERT(inGraphList());
+    // newly created reverse_iterator points to an element preceding
+    // (in forward order) the one pointed to by forward iter used to create it
+    return graph_node_list::reverse_iterator(std::next(nodes_iter_));
+  }
 
   // Remove 'this' from the instruction list and deallocate it.
   //
@@ -310,9 +299,9 @@ public:
   //
   // Given: %2 = f(%1)
   //        %3 = g(%1)
-  // Execute: %2.eraseFromParent()
+  // Execute: %2.destroy()
   // Result: %3 = g(%1)
-  void eraseFromParent();
+  void destroy();
 
   // Dynamically cast this node to the subclass indicated by the
   // template variable, returning nullptr if the cast is invalid..
@@ -326,112 +315,36 @@ public:
   }
 
   virtual ~Node() {}
-  //initialize this Node by copying properties of 'other'
-  //translation of inputs is handled automatically in Graph::clone.
 private:
-  // lookup iterator in use list of _input i_ that corresponds to its use of _this_
+  // Lookup iterator in use list of _input i_ that corresponds to its use of _this_
   use_list::iterator findUseForInput(size_t i) {
-    Node * old_node = inputs_[i];
-    Use use(this,i);
-    //O(N) on the use list, but unless we get nodes with +100 uses
-    //vector traversal still is probably faster than linked list
-    auto use_it = std::find(old_node->uses_.begin(),old_node->uses_.end(),use);
-    JIT_ASSERT(use_it != old_node->uses().end());
+    auto & input_uses = inputs_[i]->uses_;
+    // O(N) on the use list, but unless we get nodes with +100 uses
+    // vector traversal still is probably faster than linked list
+    auto use_it = std::find(input_uses.begin(), input_uses.end(), Use(this, i));
+    JIT_ASSERT(use_it != input_uses.end());
     return use_it;
   }
+
+  void insertAt(graph_node_list::iterator it);
+
   // remove the use of input i, this sets input i to nullptr, but
   // is only used internally to Node before setting it to a new value
   // or erasing the entry from the list.
   Node* dropInput(size_t i) {
     JIT_ASSERT(i < inputs_.size());
-    auto old_node = inputs_[i];
+    auto input_node = inputs_[i];
     auto use_it = findUseForInput(i);
-    old_node->uses_.erase(use_it);
+    input_node->uses_.erase(use_it);
     inputs_[i] = nullptr;
-    return old_node;
+    return input_node;
   }
-  bool inGraphList() {
-    JIT_ASSERT(next() != nullptr || prev() == nullptr);
-    return next() != nullptr;
-  }
-  void removeFromList() {
-    JIT_ASSERT(inGraphList());
-    Node * next = this->next();
-    Node * prev = this->prev();
-    prev->next() = next;
-    next->prev() = prev;
-    this->next() = nullptr;
-    this->prev() = nullptr;
-  }
+
+  bool inGraphList();
+  void removeFromList();
 protected:
   virtual Node * allocClone(Graph * in_graph) = 0;
 };
-
-struct graph_node_list_iterator {
-  graph_node_list_iterator()
-  : cur(nullptr), d(0) {}
-  graph_node_list_iterator(Node * cur, int d)
-  : cur(cur), d(d) {}
-  graph_node_list_iterator(const graph_node_list_iterator & rhs)
-  : cur(rhs.cur),d(rhs.d) {}
-  Node * operator*() { return cur; }
-  Node * operator->() { return cur; }
-  graph_node_list_iterator & operator++() {
-    JIT_ASSERT(cur);
-    cur = cur->next_in_graph[d];
-    return *this;
-  }
-  graph_node_list_iterator operator++(int) {
-    graph_node_list_iterator old = *this;
-    ++(*this);
-    return old;
-  }
-  // erase cur without invalidating this iterator
-  // named differently from eraseFromParent so that ->/. bugs do not
-  // silently cause the wrong one to be called.
-  // iterator will point to the previous entry after call
-  void eraseCurrentFromParent() {
-    Node * d = cur;
-    cur = cur->next_in_graph[d == 0 ? 1 : 0];
-    d->eraseFromParent();
-  }
-private:
-  Node * cur;
-  int d; //direction 0 is forward 1 is reverse, see next_in_graph
-};
-
-inline graph_node_list_iterator Node::iterator() {
-  return graph_node_list_iterator(this,0);
-}
-
-inline graph_node_list_iterator Node::reverseIterator() {
-  return graph_node_list_iterator(this,1);
-}
-
-struct graph_node_list {
-  graph_node_list_iterator begin() {
-    return graph_node_list_iterator(head->next_in_graph[d],d);
-  }
-  graph_node_list_iterator end() {
-    return graph_node_list_iterator(head,d);
-  }
-  graph_node_list reverse() {
-    return graph_node_list(head, d == 0 ? 1 : 0);
-  }
-  graph_node_list(Node * head, int d)
-  : head(head), d(d) {}
-private:
-  Node * head;
-  int d;
-};
-
-static inline bool operator==(graph_node_list_iterator a,graph_node_list_iterator b) {
-  return *a == *b;
-}
-
-static inline bool operator!=(graph_node_list_iterator a,graph_node_list_iterator b) {
-  return *a != *b;
-}
 
 /******************* Nodes required inside a Graph ****************************/
 
@@ -500,17 +413,25 @@ private:
   // actual representation of Graph is done with
   // inputs, outputs, nodes
 
-  //allows fast removal of nodes when they are deleted.
+  graph_node_list nodes_;
   std::unordered_set<Node*> all_nodes;
-  size_t next_unique;
+  size_t next_unique_;
 
 public:
   Graph()
-  : next_unique(0) {
+  : next_unique_(0) {
     output_ = create<Return>();
-    // initialize output_ as the head of our double-linked circular list.
-    output_->next() = output_;
-    output_->prev() = output_;
+    output_->insertAt(nodes_.begin());
+  }
+
+  const param_list & inputs() {
+    return inputs_;
+  }
+  const node_list & outputs() {
+    return output_->inputs();
+  }
+  const graph_node_list & nodes() {
+    return nodes_;
   }
 
   Param * addInput() {
@@ -518,6 +439,7 @@ public:
     inputs_.push_back(p);
     return p;
   }
+
   void eraseInput(size_t i) {
     JIT_ASSERT(i < inputs_.size());
     JIT_ASSERT(inputs_[i]->uses().size() == 0);
@@ -544,6 +466,7 @@ public:
     r->init(std::forward<Args>(args)...);
     return r;
   }
+
   // clone n, making a new node in _this_ graph.
   // use node_map to translate inputs of n to inputs of the cloned node
   Node * createClone(Node * n, std::function<Node*(Node*)> node_map) {
@@ -554,55 +477,68 @@ public:
     }
     return r;
   }
-  Node * addNode(Node * n) {
-    JIT_ASSERT(n->graph_ == this && !n->inGraphList());
+
+  Node * appendNode(Node * n) {
     n->insertBefore(output_);
     return n;
   }
+
   Node * prependNode(Node * n) {
-    JIT_ASSERT(n->graph_ == this && !n->inGraphList());
-    n->insertAfter(output_);
+    n->insertAt(nodes_.begin());
     return n;
   }
 
   template<typename T, typename... Args >
-  Node * addNode(Args&&... args) {
+  Node * appendNewNode(Args&&... args) {
     T* n = create<T>(std::forward<Args>(args)...);
-    return addNode(n);
+    return appendNode(n);
   }
-  Node * addClone(Node * n, std::function<Node*(Node*)> node_map) {
-    Node * r = createClone(n,node_map);
-    addNode(n);
-    return r;
+
+  template<typename T, typename... Args >
+  Node * prependNewNode(Args&&... args) {
+    T* n = create<T>(std::forward<Args>(args)...);
+    return prependNode(n);
   }
-  const param_list & inputs() {
-    return inputs_;
-  }
-  const node_list & outputs() {
-    return output_->inputs();
-  }
-  graph_node_list nodes() {
-    return graph_node_list(output_,0);
-  }
+
   ~Graph() {
-    for(auto n : all_nodes)
+    for (Node * n : all_nodes)
       delete n;
   }
+
 private:
   // per graph initialization for any node
   // called from NodeWithKind::allocClone and Graph::create
   void initNewNodeForGraph(Node * r) {
     r->graph_ = this;
-    r->unique_ = next_unique++;
-    all_nodes.insert(r);
+    r->unique_ = next_unique_++;
+    r->nodes_iter_ = nodes_.end();
+    all_nodes.emplace(r);
   }
+
   void freeNode(Node * n) {
-    all_nodes.erase(n);
-    delete n;
+    auto it = all_nodes.find(n);
+    JIT_ASSERT(it != all_nodes.end());
+    delete *it;
+    all_nodes.erase(it);
   }
 };
 
-inline void Node::eraseFromParent() {
+inline void Node::insertAt(graph_node_list::iterator it) {
+  JIT_ASSERT(!inGraphList())
+  nodes_iter_ = graph_->nodes_.insert(it, this);
+}
+
+inline bool Node::inGraphList() {
+  return nodes_iter_ != graph_->nodes_.end();
+}
+
+inline void Node::removeFromList() {
+  JIT_ASSERT(inGraphList());
+  graph_->nodes_.erase(nodes_iter_);
+  nodes_iter_ = graph_->nodes_.end();
+}
+
+inline void Node::destroy() {
   JIT_ASSERT(inGraphList());
   JIT_ASSERTM(uses().size() == 0, "attempting to erase a Node that still has uses.");
   removeAllInputs();

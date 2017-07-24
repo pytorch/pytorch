@@ -23,31 +23,46 @@ struct GraphFuser {
   // the tracer should handle this conversion, and then this code should
   // be deleted
   void replacePythonOps() {
-    auto nodes = graph->nodes();
-    for(auto it = nodes.begin(), end = nodes.end(); it != end; ++it) {
-      if(auto p = it->cast<PythonOp>()) {
-        std::string name = p->name();
-        if(simple_mappable.count(name) > 0) {
-          // replaces the Select(PythonOp,0) with just SimpleMap(opname)
-          auto new_op = graph->create<SimpleMap>(name,p->inputs());
-          new_op->insertAfter(p);
-          JIT_ASSERT(1 == p->uses().size());
-          auto single_select = p->uses()[0].user;
-          JIT_ASSERT(single_select->kind() == NodeKind::Select);
-          single_select->replaceAllUsesWith(new_op);
-          single_select->eraseFromParent();
-          //erasing p directly would invalidate iterator
-          it.eraseCurrentFromParent();
-        }
+    auto & nodes = graph->nodes();
+    auto it = nodes.begin();
+    while (it != nodes.end()) {
+      PythonOp *p = (*it)->cast<PythonOp>();
+      if (!p) {
+        ++it;
+        continue;
+      }
+
+      std::string name = p->name();
+      if (simple_mappable.count(name) == 0) {
+        ++it;
+        continue;
+      }
+
+      // replaces the Select(PythonOp,0) with just SimpleMap(opname)
+      auto new_op = graph->create<SimpleMap>(name,p->inputs());
+      new_op->insertAfter(p);
+      JIT_ASSERT(p->uses().size() == 1);
+      auto single_select = p->uses()[0].user;
+      JIT_ASSERT(single_select->kind() == NodeKind::Select);
+      single_select->replaceAllUsesWith(new_op);
+      single_select->destroy();
+
+      if (it == nodes.begin()) {
+        p->destroy();
+        it = nodes.begin();
+      } else {
+        // Erasing p directly would invalidate iterator
+        ++it;
+        p->destroy();
       }
     }
-    std::cout << "AFTER REPLACE\n" << *graph;
-
   }
+
   bool isFusable(Node * node) {
     //TODO: waiting on actual list of operators so we can replace SimpleMap
     return node->kind() == NodeKind::SimpleMap || node->kind() == NodeKind::FusionGroup;
   }
+
   // necessary condition for fusion. If all of the uses of producer are consumer
   // then it is safe to merge producer into consumer, because it doesn't have any other uses
   // If there are other uses, but they occur _after_ consumer, then we can still merge in producer
@@ -60,15 +75,16 @@ struct GraphFuser {
     }
     return true;
   }
+
   bool shouldFuse(Node * consumer, Node * producer) {
     // this handles cases where producer can be moved _into_ the fusion group of consumer.
     // TODO: extend to fusion of consumer into _producer's_ fusion blob
     // if the consumer allInputsAreThisProducer(consumer,producer)
     // we can move the consumer up into the producer.
-    // but this requires better handling of merging fusion groups so it is not done
-    // now
+    // but this requires better handling of merging fusion groups so it is not done now
     return isFusable(producer) && allUsersAreThisConsumerOrOccurAfterIt(consumer, producer);
   }
+
   // insert a producer node into a consuming fusion group.
   // DOES NOT WORK if n is a consumer of an output of the fusion group
   // returns the node _inside_ the group that represents the node
@@ -107,6 +123,7 @@ struct GraphFuser {
     }
     return subgraph.prependNode(in_graph);
   }
+
   // turn consumer node n into a fusion group with just n inside
   // to prepare for fusion and replace uses of n with the new group
   FusionGroup * createSingletonFusionGroup(Node * n) {
@@ -120,7 +137,7 @@ struct GraphFuser {
     auto sel = graph->create<Select>(group,0);
     sel->insertAfter(group);
     n->replaceAllUsesWith(sel);
-    n->eraseFromParent();
+    n->destroy();
     return group;
   }
 
@@ -141,12 +158,12 @@ struct GraphFuser {
       new_producer->insertAfter(group);
       producer->replaceAllUsesWith(new_producer);
     }
-    producer->eraseFromParent();
+    producer->destroy();
     return group;
   }
 
   // returns where to continue scanning
-  graph_node_list_iterator scanNode(Node * consumer) {
+  graph_node_list::reverse_iterator scanNode(Node * consumer) {
     if(isFusable(consumer)) {
       // handle inputs in reverse topological order as well...
       // otherwise in f(a,a+b) it will appear a is used twice if we consider
@@ -155,7 +172,7 @@ struct GraphFuser {
       for(auto i : inputs) {
         JIT_ASSERT(topological_index.count(i) > 0);
       }
-      std::sort(inputs.begin(),inputs.end(),[&](Node * a, Node * b) {
+      std::sort(inputs.begin(), inputs.end(), [&](Node * a, Node * b) {
         return topological_index[a] > topological_index[b];
       });
       for(auto producer : inputs) {
@@ -176,11 +193,12 @@ struct GraphFuser {
     for(auto p : graph->inputs()) {
       topological_index[p] = i++;
     }
-    for(auto consumer : graph->nodes()) {
+    const auto & nodes = graph->nodes();
+    for(auto consumer : nodes) {
       topological_index[consumer] = i++;
     }
-    auto reversed = graph->nodes().reverse();
-    for(auto it = reversed.begin(), end = reversed.end(); it != end;) {
+    auto first_node = *nodes.begin();
+    for(auto it = nodes.rbegin(); it != nodes.rend();) {
       it = scanNode(*it);
     }
     return std::move(graph);
