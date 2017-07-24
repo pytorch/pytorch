@@ -7,6 +7,7 @@ import contextlib
 from functools import wraps
 from itertools import product
 from copy import deepcopy
+import __main__
 
 import torch
 import torch.cuda
@@ -17,13 +18,17 @@ torch.set_default_tensor_type('torch.DoubleTensor')
 
 SEED = 0
 SEED_SET = 0
+ACCEPT = False
 
 
+# TODO rename me
 def parse_set_seed_once():
     global SEED
     global SEED_SET
+    global ACCEPT
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument('--seed', type=int, default=123)
+    parser.add_argument('--accept', action='store_true')
     args, remaining = parser.parse_known_args()
     if SEED_SET == 0:
         torch.manual_seed(args.seed)
@@ -31,6 +36,7 @@ def parse_set_seed_once():
             torch.cuda.manual_seed_all(args.seed)
         SEED = args.seed
         SEED_SET = 1
+    ACCEPT = args.accept
     remaining = [sys.argv[0]] + remaining
     return remaining
 
@@ -258,6 +264,47 @@ class TestCase(unittest.TestCase):
             if id(obj) == id(elem):
                 return
         raise AssertionError("object not found in iterable")
+
+    def assertExpected(self, s, subname=None):
+        """
+        Test that a string matches the recorded contents of a file
+        derived from the name of this test and subname.  You can
+        automatically update the recorded test output using --expect.
+
+        If you call this multiple times in a single function, you must
+        give a unique subname each time.
+        """
+        if not isinstance(s, str):
+            raise TypeError("assertExpected is strings only")
+
+        def remove_prefix(text, prefix):
+            if text.startswith(prefix):
+                return text[len(prefix):]
+            return text
+        munged_id = remove_prefix(self.id(), "__main__.")
+        expected_file = os.path.join(os.path.dirname(os.path.realpath(__file__)),
+                                     "expect",
+                                     munged_id)
+        if subname:
+            expected_file += "-" + subname
+        expected_file += ".expect"
+        expected = None
+        if ACCEPT:
+            with open(expected_file, 'w') as f:
+                f.write(s)
+        else:
+            try:
+                with open(expected_file) as f:
+                    expected = f.read()
+            except FileNotFoundError:
+                raise RuntimeError(
+                    ("No expect file exists; to accept the current output, run:\n"
+                     "python {} {} --accept").format(__main__.__file__, munged_id))
+            if hasattr(self, "assertMultiLineEqual"):
+                # Python 2.7 only
+                self.assertMultiLineEqual(s, expected)
+            else:
+                self.assertEqual(s, expected)
 
     if sys.version_info < (3, 2):
         # assertRaisesRegexp renamed assertRaisesRegex in 3.2
