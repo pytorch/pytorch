@@ -15,10 +15,13 @@ struct GraphFuser {
   std::unique_ptr<Graph> graph;
   // used to order nodes so we alway consider producer-consumer fusions
   // in reverse topological order
-  std::unordered_map<Node*,size_t> original_topological_position;
+  std::unordered_map<Node*,size_t> topological_index;
 
   GraphFuser(std::unique_ptr<Graph> graph)
   : graph(std::move(graph)) {}
+
+  // the tracer should handle this conversion, and then this code should
+  // be deleted
   void replacePythonOps() {
     auto nodes = graph->nodes();
     for(auto it = nodes.begin(), end = nodes.end(); it != end; ++it) {
@@ -30,6 +33,7 @@ struct GraphFuser {
           new_op->insertAfter(p);
           JIT_ASSERT(1 == p->uses().size());
           auto single_select = p->uses()[0].user;
+          JIT_ASSERT(single_select->kind() == NodeKind::Select);
           single_select->replaceAllUsesWith(new_op);
           single_select->eraseFromParent();
           //erasing p directly would invalidate iterator
@@ -51,7 +55,7 @@ struct GraphFuser {
   // In this case, producer becomes an output of the fusion group.
   bool allUsersAreThisConsumerOrOccurAfterIt(Node * consumer, Node * producer) {
     for(auto u : producer->uses()) {
-      if(u.user != consumer && original_topological_position[consumer] > original_topological_position[u.user])
+      if(u.user != consumer && topological_index[consumer] > topological_index[u.user])
         return false;
     }
     return true;
@@ -75,6 +79,7 @@ struct GraphFuser {
     // group's subgraph that correspond to them
     std::unordered_map<Node*,Node*> inputs_map;
     size_t i = 0;
+    JIT_ASSERT(group->inputs().size() == subgraph.inputs().size());
     for(auto input : group->inputs()) {
       inputs_map[input] = subgraph.inputs()[i++];
     }
@@ -108,7 +113,7 @@ struct GraphFuser {
     auto group = graph->create<FusionGroup>();
     // propogate position information for the new node so we can always
     // have a valid mapping
-    original_topological_position[group] = original_topological_position[n];
+    topological_index[group] = topological_index[n];
     group->insertBefore(n);
     Node * mergedNode = mergeNodeIntoGroup(group,n);
     group->subgraph().registerOutput(mergedNode);
@@ -148,10 +153,10 @@ struct GraphFuser {
       // the f-a fusion before the f-(a+b) fusion first.
       node_list inputs = consumer->inputs();
       for(auto i : inputs) {
-        JIT_ASSERT(original_topological_position.count(i) > 0);
+        JIT_ASSERT(topological_index.count(i) > 0);
       }
       std::sort(inputs.begin(),inputs.end(),[&](Node * a, Node * b) {
-        return original_topological_position[a] > original_topological_position[b];
+        return topological_index[a] > topological_index[b];
       });
       for(auto producer : inputs) {
         if(shouldFuse(consumer, producer)) {
@@ -169,10 +174,10 @@ struct GraphFuser {
     replacePythonOps();
     size_t i = 0;
     for(auto p : graph->inputs()) {
-      original_topological_position[p] = i++;
+      topological_index[p] = i++;
     }
     for(auto consumer : graph->nodes()) {
-      original_topological_position[consumer] = i++;
+      topological_index[consumer] = i++;
     }
     auto reversed = graph->nodes().reverse();
     for(auto it = reversed.begin(), end = reversed.end(); it != end;) {
