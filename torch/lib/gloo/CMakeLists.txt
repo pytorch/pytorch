@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 2.8.12 FATAL_ERROR)
+cmake_minimum_required(VERSION 2.8 FATAL_ERROR)
 
 project(gloo CXX C)
 
@@ -8,8 +8,8 @@ if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
 endif()
 
 # We want CMake to glob everything every time.
-execute_process(COMMAND
-  find "${PROJECT_SOURCE_DIR}" -name "CMakeLists.txt" -exec touch {} \;)
+# execute_process(COMMAND
+#   find "${PROJECT_SOURCE_DIR}" -name "CMakeLists.txt" -exec touch {} \;)
 
 # Local CMake modules
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/Modules)
