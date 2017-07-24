@@ -14,7 +14,7 @@ class TestJit(TestCase):
         trace = torch._C._tracer_exit((z,))
 
         # TODO: Do something more automated here
-        print(trace)
+        self.assertExpected(str(trace))
         return
 
         # Re-enable this when the interpreter is back
