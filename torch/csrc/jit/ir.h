@@ -143,7 +143,7 @@ public:
   // for example, if you are adding nodes to the end of the topsort, it's
   // impossible for them to refer to inputs that are not in the topsort.
   // If it is not obvious, please comment accordingly.
-  
+
   // Add 'node' as an input to 'this' at the end of existing
   // arguments.  Returns the added node for ease of chaining.
   //
@@ -191,7 +191,7 @@ public:
   const use_list & uses() {
     return uses_;
   }
-  
+
   // Replaces all uses of this node with 'newValue'.
   //
   // Given:   %3 = f(%1, %2)
@@ -220,10 +220,10 @@ public:
   //          %5 = h(%1)
   //          %4 = g(%3)
   void insertBefore(Node * n) {
-    JIT_ASSERT(n->inGraphList());
+    JIT_ASSERT(n->inGraphList()&& !this->inGraphList());
     insertAfter(n->prev());
   }
-  
+
   // Insert unattached 'this' node after 'n' in the topological order.
   //
   // Given: %3 = f(%1, %2)
@@ -249,13 +249,13 @@ public:
   // Execute: %2.moveAfter(%3)
   // Result: %3 = g(%1)
   //         %2 = f(%1)
-  //         
+  //
   void moveAfter(Node * n) {
     JIT_ASSERT(inGraphList());
     removeFromList();
     insertAfter(n);
   }
-  
+
   // Move a node 'n' (already in the graph) before 'this' in the topological order.
   //
   // Given: %2 = f(%1)
@@ -268,7 +268,7 @@ public:
     removeFromList();
     insertBefore(n);
   }
-  
+
   // Remove the input at 'i' from this node.
   //
   // WARNING: This is O(n) in the number of inputs, so avoid repeatedly calling
@@ -287,7 +287,7 @@ public:
     }
     inputs_.erase(inputs_.begin() + i);
   }
-  
+
   // Remove all inputs from a node.
   //
   // Given: %3 = f(%1, %2)
@@ -351,7 +351,8 @@ private:
     return old_node;
   }
   bool inGraphList() {
-    return next() && prev();
+    JIT_ASSERT(next() != nullptr || prev() == nullptr);
+    return next() != nullptr;
   }
   void removeFromList() {
     JIT_ASSERT(inGraphList());
@@ -693,7 +694,14 @@ struct PythonOp : public NodeWithKind<PythonOp,NodeKind::PythonOp> {
     this->is_legacy = is_legacy;
   }
   virtual void cloneFrom(PythonOp * other) override {
-    throw std::runtime_error("cannot clone PythonOp because of THPObjectPtr");
+    this->cconv = cconv;
+    this->is_legacy = is_legacy;
+    Py_INCREF(other->pyobj.get());
+    this->pyobj = THPObjectPtr(other->pyobj.get());
+    for(auto & sa : other->scalar_args) {
+      Py_INCREF(sa.get());
+      this->scalar_args.emplace_back(sa.get());
+    }
   }
 };
 
