@@ -22,14 +22,15 @@ class MKLConvTest(hu.HypothesisTestCase):
            input_channels=st.integers(1, 3),
            output_channels=st.integers(1, 3),
            batch_size=st.integers(1, 3),
+           use_bias=st.booleans(),
            **mu.gcs)
     @settings(max_examples=2, timeout=100)
     def test_mkl_convolution(self, stride, pad, kernel, size,
                              input_channels, output_channels,
-                             batch_size, gc, dc):
+                             batch_size, use_bias, gc, dc):
         op = core.CreateOperator(
             "Conv",
-            ["X", "w", "b"],
+            ["X", "w", "b"] if use_bias else ["X", "w"],
             ["Y"],
             stride=stride,
             pad=pad,
@@ -42,7 +43,7 @@ class MKLConvTest(hu.HypothesisTestCase):
             .astype(np.float32) - 0.5
         b = np.random.rand(output_channels).astype(np.float32) - 0.5
 
-        inputs = [X, w, b]
+        inputs = [X, w, b] if use_bias else [X, w]
         self.assertDeviceChecks(dc, op, inputs, [0])
 
 
