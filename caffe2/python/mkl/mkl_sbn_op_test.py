@@ -23,9 +23,9 @@ class MKLSpatialBNTest(hu.HypothesisTestCase):
            order=st.sampled_from(["NCHW"]),
            epsilon=st.floats(1e-5, 1e-2),
            **mu.gcs)
-    def test_mkl_BN(self, size, input_channels, batch_size, seed, order, epsilon,
-            gc, dc):
-
+    def test_spatialbn_test_mode(self, size, input_channels,
+                                 batch_size, seed, order, epsilon, gc, dc):
+        np.random.seed(seed)
         scale = np.random.rand(input_channels).astype(np.float32) + 0.5
         bias = np.random.rand(input_channels).astype(np.float32) - 0.5
         mean = np.random.randn(input_channels).astype(np.float32)
@@ -63,7 +63,7 @@ class MKLSpatialBNTest(hu.HypothesisTestCase):
             is_test=False,
             epsilon=epsilon,
         )
-        np.random.seed(1701)
+        np.random.seed(seed)
         scale = np.random.rand(input_channels).astype(np.float32) + 0.5
         bias = np.random.rand(input_channels).astype(np.float32) - 0.5
         mean = np.random.randn(input_channels).astype(np.float32)
