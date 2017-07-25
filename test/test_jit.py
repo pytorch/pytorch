@@ -36,7 +36,6 @@ class TestJit(TestCase):
         torch._C._jit_optim_fuse(trace)
         self.assertExpected(str(trace))
 
-    @unittest.skip("unconditional fusion phase has to be removed first")
     def test_autograd_closure(self):
         x = Variable(torch.Tensor([0.4]), requires_grad=True)
         y = Variable(torch.Tensor([0.7]), requires_grad=True)
@@ -44,11 +43,13 @@ class TestJit(TestCase):
         torch._C._tracer_enter((x, y))
 
         z = torch.sigmoid(torch.tanh(x * (x + y)))
+        w = torch.abs(x * x * x + y)
 
-        trace = torch._C._tracer_exit((z,))
+        trace = torch._C._tracer_exit((z, w))
         closure = torch._C._jit_createAutogradClosure(trace)
-        z2, = Variable._execution_engine.run_forward(closure, (x, y))
+        z2, w2 = Variable._execution_engine.run_forward(closure, (x, y))
         self.assertEqual(z, z2)
+        self.assertEqual(w, w2)
 
 
 if __name__ == '__main__':
