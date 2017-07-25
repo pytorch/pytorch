@@ -13,8 +13,6 @@ def gather_paths(env_vars):
 
 is_conda = 'conda' in sys.version or 'Continuum' in sys.version
 conda_dir = os.path.join(os.path.dirname(sys.executable), '..')
-if is_conda:
-    print('Found anaconda, will search for cudnn in conda packages')
 
 WITH_CUDNN = False
 CUDNN_LIB_DIR = None
