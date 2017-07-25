@@ -11,10 +11,9 @@ string FormatDoc() {
   return doc;
 }
 
-#define REGISTER_SEGMENT_DEF(...)                                              \
-  REGISTER_CPU_OPERATOR_STR(                                                   \
-      string(__VA_ARGS__::basename) + (__VA_ARGS__::OpDef::name),              \
-      __VA_ARGS__::ForwardOp);                                                 \
+// Helper macro when the main op is defined elsewhere, and we only need to
+// define the schema, and the gradient op.
+#define REGISTER_SEGMENT_DEF_SCHEMA_GRADIENT_ONLY(...)                         \
   OPERATOR_SCHEMA_STR(                                                         \
       string(__VA_ARGS__::basename) + (__VA_ARGS__::OpDef::name))              \
       .NumInputs(__VA_ARGS__::ForwardOp::kNumInputs)                           \
@@ -32,6 +31,12 @@ string FormatDoc() {
   REGISTER_GRADIENT_STR(                                                       \
       string(__VA_ARGS__::basename) + (__VA_ARGS__::OpDef::name),              \
       __VA_ARGS__::GetGradient)
+
+#define REGISTER_SEGMENT_DEF(...)                                 \
+  REGISTER_CPU_OPERATOR_STR(                                      \
+      string(__VA_ARGS__::basename) + (__VA_ARGS__::OpDef::name), \
+      __VA_ARGS__::ForwardOp);                                    \
+  REGISTER_SEGMENT_DEF_SCHEMA_GRADIENT_ONLY(__VA_ARGS__)
 
 REGISTER_SEGMENT_DEF(
     AbstractSortedSegmentRangeDef<float, int, CPUContext, SumRangeReducerDef>);
@@ -61,14 +66,20 @@ REGISTER_SEGMENT_DEF(
       AbstractUnsortedSegmentDef<float, int, CPUContext, reducer_def>);      \
   REGISTER_SEGMENT_DEF(                                                      \
       AbstractSparseUnsortedSegmentDef<float, int, CPUContext, reducer_def>) \
-  REGISTER_SEGMENT_DEF(                                                      \
-      AbstractLengthsDef<float, int, CPUContext, reducer_def>)               \
-  REGISTER_SEGMENT_DEF(                                                      \
-      AbstractSparseLengthsDef<float, int, CPUContext, reducer_def>)
+  REGISTER_SEGMENT_DEF(AbstractLengthsDef<float, int, CPUContext, reducer_def>)
 
 REGISTER_REDUCER_WITH_ALL_OPS(SumReducerDef);
 REGISTER_REDUCER_WITH_ALL_OPS(WeightedSumReducerDef);
 REGISTER_REDUCER_WITH_ALL_OPS(MeanReducerDef);
+
+// SparseLengths[Sum,WeightedSum,Mean] are now implemented separately,
+// so we only rely to the historical implementation for the backward + schema.
+REGISTER_SEGMENT_DEF_SCHEMA_GRADIENT_ONLY(
+    AbstractSparseLengthsDef<float, int, CPUContext, SumReducerDef>)
+REGISTER_SEGMENT_DEF_SCHEMA_GRADIENT_ONLY(
+    AbstractSparseLengthsDef<float, int, CPUContext, WeightedSumReducerDef>)
+REGISTER_SEGMENT_DEF_SCHEMA_GRADIENT_ONLY(
+    AbstractSparseLengthsDef<float, int, CPUContext, MeanReducerDef>)
 
 REGISTER_SEGMENT_DEF(AbstractReduceBackDef<float, CPUContext, SumReducerDef>);
 REGISTER_SEGMENT_DEF(AbstractReduceBackDef<float, CPUContext, MeanReducerDef>);
