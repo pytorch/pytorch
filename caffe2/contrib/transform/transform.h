@@ -63,8 +63,8 @@ class Transform {
    * Given the current subgraph (ordered), should we append the new node at idx?
    */
   virtual bool PatternRule(
-      const transform::Graph& /*g*/,
-      const std::vector<int>& /*subgraph*/,
+      const transform::Graph& g,
+      const std::vector<int>& subgraph,
       int /*idx*/) {
     CAFFE_NOT_IMPLEMENTED;
   }
@@ -74,8 +74,8 @@ class Transform {
    * Given a subgraph, can we accept it?
    */
   virtual bool ValidatorRule(
-      const transform::Graph& /*g*/,
-      const std::vector<int>& /*subgraph*/) {
+      const transform::Graph& g,
+      const std::vector<int>& subgraph) {
     CAFFE_NOT_IMPLEMENTED;
   }
 
@@ -84,8 +84,8 @@ class Transform {
    * upon the subgraph.
    */
   virtual bool ReplaceRule(
-      const std::vector<int>& /*subgraph*/,
-      transform::Graph* /*g_ptr*/) {
+      const std::vector<int>& subgraph,
+      transform::Graph* g_ptr) {
     CAFFE_NOT_IMPLEMENTED;
   }
 
@@ -108,6 +108,11 @@ class Transform {
       std::vector<int>* best_subgraph_ptr);
 };
 
+// Creates a Transform based on a key, which should be defined in registry.
+unique_ptr<Transform> CreateTransform(string key);
+
 CAFFE_DECLARE_REGISTRY(TransformRegistry, Transform);
+#define REGISTER_TRANSFORM(name, ...) \
+  CAFFE_REGISTER_CLASS(TransformRegistry, name, __VA_ARGS__)
 
 } // namespace

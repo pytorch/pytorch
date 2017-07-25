@@ -100,4 +100,8 @@ NetDef Transform::ApplyTo(const NetDef& orig_net) {
   return g.GetNetDef();
 }
 
+unique_ptr<Transform> CreateTransform(string key) {
+  return TransformRegistry()->Create(key);
+}
+
 } // namespace Caffe2

@@ -1,4 +1,5 @@
 if(USE_TRANSFORMS)
+  add_subdirectory(transforms)
   message(STATUS "Include Graph Transformations")
   set(Caffe2_CONTRIB_TRANSFORMS_CPU_SRC
     "${CMAKE_CURRENT_SOURCE_DIR}/transform.cc"
