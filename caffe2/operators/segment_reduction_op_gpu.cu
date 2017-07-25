@@ -331,12 +331,12 @@ __global__ void length_sum_gradient_kernel(
   }
 }
 
-template <typename T>
+template <typename T, typename IndexType>
 __global__ void sparse_length_sum_kernel(
     const T* in,
     T* out,
     const int* prefix_sum_length_data,
-    const TIndex* indices,
+    const IndexType* indices,
     int N,
     int post,
     int len_length,
@@ -370,6 +370,17 @@ class CUDASparseLengthsSumOp : public Operator<CUDAContext> {
   ~CUDASparseLengthsSumOp() {}
 
   bool RunOnDevice() override {
+    if (SparseFused) {
+      return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
+          this, Input(INDICES));
+    } else {
+      // type doesn't matter
+      return DoRunWithType<int32_t>();
+    }
+  }
+
+  template <typename IndexType>
+  bool DoRunWithType() {
     auto& dataInput = Input(0);
     auto& lengthsInput = Input(LENGTHS);
     auto* output = Output(0);
@@ -381,11 +392,11 @@ class CUDASparseLengthsSumOp : public Operator<CUDAContext> {
     const TIndex outputSize = lengthsInput.dim(0);
     int len_length = outputSize;
 
-    const TIndex* indices;
+    const IndexType* indices;
     if (SparseFused) { // static if
       auto& indicesInput = Input(INDICES);
       CAFFE_ENFORCE_EQ(1, indicesInput.ndim(), "INDICES must be a vector");
-      indices = indicesInput.template data<TIndex>();
+      indices = indicesInput.template data<IndexType>();
       dataToReduceSize = indicesInput.dim(0);
     } else {
       dataToReduceSize = dataSize;
@@ -413,7 +424,7 @@ class CUDASparseLengthsSumOp : public Operator<CUDAContext> {
 
     if (SparseFused) {
       if (post > 128) {
-        sparse_length_sum_kernel<T>
+        sparse_length_sum_kernel<T, IndexType>
             <<<len_length, 512, 0, context_.cuda_stream()>>>(
                 in_data,
                 out_data,
@@ -424,7 +435,7 @@ class CUDASparseLengthsSumOp : public Operator<CUDAContext> {
                 len_length,
                 dataToReduceSize);
       } else if (post > 64) {
-        sparse_length_sum_kernel<T>
+        sparse_length_sum_kernel<T, IndexType>
             <<<len_length, 128, 0, context_.cuda_stream()>>>(
                 in_data,
                 out_data,
@@ -435,7 +446,7 @@ class CUDASparseLengthsSumOp : public Operator<CUDAContext> {
                 len_length,
                 dataToReduceSize);
       } else if (post > 32) {
-        sparse_length_sum_kernel<T>
+        sparse_length_sum_kernel<T, IndexType>
             <<<len_length, 64, 0, context_.cuda_stream()>>>(
                 in_data,
                 out_data,
@@ -446,7 +457,7 @@ class CUDASparseLengthsSumOp : public Operator<CUDAContext> {
                 len_length,
                 dataToReduceSize);
       } else {
-        sparse_length_sum_kernel<T>
+        sparse_length_sum_kernel<T, IndexType>
             <<<len_length, 32, 0, context_.cuda_stream()>>>(
                 in_data,
                 out_data,

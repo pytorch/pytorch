@@ -319,16 +319,18 @@ class TestSegmentOps(hu.HypothesisTestCase):
         )(self)
 
     def test_sparse_lengths_ops(self):
-        LengthsTester()._test(
-            'SparseLengths',
-            hu.sparse_lengths_tensor(
-                dtype=np.float32,
-                min_value=1,
-                max_value=5,
-                allow_empty=True
-            ),
-            REFERENCES_ALL
-        )(self)
+        for itype in [np.int32, np.int64]:
+            LengthsTester()._test(
+                'SparseLengths',
+                hu.sparse_lengths_tensor(
+                    dtype=np.float32,
+                    min_value=1,
+                    max_value=5,
+                    allow_empty=True,
+                    itype=itype,
+                ),
+                REFERENCES_ALL
+            )(self)
 
     @unittest.skipIf(not workspace.has_gpu_support, "No gpu support")
     @given(**hu.gcs)
