@@ -22,13 +22,16 @@ class MKLReluOp : public MKLOperator<T> {
     if (dims_changed) {
       // First run or changed input size, will need to recreate environment
       primitive_.Reset(dnnReLUCreateForward<T>, nullptr, X.layout(), 0.f);
-      Y->Reset(X.dims(), primitive_, dnnResourceDst);
+      if (&X != Y) {
+        Y->Reset(X.dims(), primitive_, dnnResourceDst);
+      }
       buffer_.Reset(X.dims(), primitive_, dnnResourceDst, true);
     }
     // Try to share from the output: this allows us to avoid unnecessary copy
     // operations, if the output is already allocated and is having the same
     // layout as the buffer has.
     buffer_.ShareFrom(*Y);
+    CAFFE_ENFORCE(dnnLayoutCompare_F32(X.layout(), buffer_.layout()));
     resources_[dnnResourceSrc] = X.buffer();
     resources_[dnnResourceDst] = buffer_.buffer();
     ExecutePrimitive();
