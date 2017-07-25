@@ -392,7 +392,7 @@ def create_derived(backend_type_env, declarations):
 
     def is_actual_return_long(ret):
         return ret['type'] == 'long' or (backend_type_env['ScalarName'] == 'Long' and
-                                         ret['type'] == 'real' or ret['type'] == 'accreal')
+                                         (ret['type'] == 'real' or ret['type'] == 'accreal'))
 
     def handle_zero_dim(env, option):
         if 'zero_dim_dispatch_when_scalar' not in option:

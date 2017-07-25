@@ -208,6 +208,9 @@ static void test(Type & type) {
       Tensor b = CPU(kFloat).ones({3,7});
       Tensor c = cat({a,b},1);
       std::cout << c << std::endl;
+
+      Tensor e = CPU(kFloat).rand({});
+      check(*e.data<float>()== e.sum().toFloat());
   }
 
 }
