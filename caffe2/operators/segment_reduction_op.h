@@ -576,14 +576,25 @@ class AbstractSortedSegmentOp : public Operator<Context> {
   USE_SIMPLE_CTOR_DTOR(AbstractSortedSegmentOp);
 
   bool RunOnDevice() override {
+    if (SparseFused) {
+      return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
+          this, Input(INDICES));
+    } else {
+      // type doesn't matter
+      return DoRunWithType<TIndex>();
+    }
+  }
+
+  template <typename IndexType>
+  bool DoRunWithType() {
     // If more complicated fixed size logic becomes necessary, it can be moved
     // to the reducer class
     TIndex in_block_size = Input(0).size_from_dim(1);
-    return DispatchHelper<typename Reducer::FixedDispatch>::call(
+    return DispatchHelper<typename Reducer::FixedDispatch, IndexType>::call(
         this, in_block_size);
   }
 
-  template <int FixedSize>
+  template <typename IndexType, int FixedSize>
   bool DoRunWithValue() {
     auto& dataInput = Input(0);
     auto& segment_ids = Input(SEGMENT_IDS);
@@ -593,7 +604,7 @@ class AbstractSortedSegmentOp : public Operator<Context> {
     TIndex N = segment_ids.dim(0);
     const TIndex M = dataInput.dim(0);
 
-    const TIndex* idxs;
+    const IndexType* idxs;
     if (SparseFused) { // static if
       auto& indices = Input(INDICES);
       CAFFE_ENFORCE_EQ(1, indices.ndim(), "INDICES must be a vector");
@@ -601,7 +612,7 @@ class AbstractSortedSegmentOp : public Operator<Context> {
           N,
           indices.dim(0),
           "SEGMENT_IDS must have the same length as INDICES");
-      idxs = indices.template data<TIndex>();
+      idxs = indices.template data<IndexType>();
     } else {
       CAFFE_ENFORCE_EQ(
           N, M, "DATA must have the same first dimension as SEGMENT_IDS");
@@ -650,7 +661,7 @@ class AbstractSortedSegmentOp : public Operator<Context> {
 
       Reducer r(ctx, out + out_block_size * s_ids[start], &context_);
       for (; i < N && s_ids[start] == s_ids[i]; ++i) {
-        TIndex idx;
+        IndexType idx;
         if (SparseFused) { // static if
           CAFFE_ENFORCE(
               0 <= idxs[i] && idxs[i] < M,
@@ -969,14 +980,25 @@ class AbstractUnsortedSegmentOp : public Operator<Context> {
         OP_SINGLE_ARG(int, "num_segments", num_segments_, -1) {}
 
   bool RunOnDevice() override {
+    if (SparseFused) {
+      return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
+          this, Input(INDICES));
+    } else {
+      // type doesn't matter
+      return DoRunWithType<TIndex>();
+    }
+  }
+
+  template <typename IndexType>
+  bool DoRunWithType() {
     // If more complicated fixed size logic becomes necessary, it can be moved
     // to the reducer class
     TIndex in_block_size = Input(0).size_from_dim(1);
-    return DispatchHelper<typename Reducer::FixedDispatch>::call(
+    return DispatchHelper<typename Reducer::FixedDispatch, IndexType>::call(
         this, in_block_size);
   }
 
-  template <int FixedSize>
+  template <typename IndexType, int FixedSize>
   bool DoRunWithValue() {
     auto& data = Input(0);
     auto& segment_ids = Input(SEGMENT_IDS);
@@ -986,7 +1008,7 @@ class AbstractUnsortedSegmentOp : public Operator<Context> {
     TIndex N = segment_ids.dim(0);
     const TIndex M = data.dim(0);
 
-    const TIndex* idxs;
+    const IndexType* idxs;
     if (SparseFused) { // static if
       auto& indices = Input(INDICES);
       CAFFE_ENFORCE_EQ(1, indices.ndim(), "INDICES must be a vector");
@@ -994,7 +1016,7 @@ class AbstractUnsortedSegmentOp : public Operator<Context> {
           N,
           indices.dim(0),
           "SEGMENT_IDS must have the same length as INDICES");
-      idxs = indices.template data<TIndex>();
+      idxs = indices.template data<IndexType>();
     } else {
       CAFFE_ENFORCE_EQ(
           N, M, "DATA must have the same first dimension as SEGMENT_IDS");
@@ -1056,7 +1078,7 @@ class AbstractUnsortedSegmentOp : public Operator<Context> {
           s_id,
           ", range 0 to ",
           K);
-      TIndex idx;
+      IndexType idx;
       if (SparseFused) { // static if
         CAFFE_ENFORCE(
             0 <= idxs[i] && idxs[i] < M,
@@ -1351,14 +1373,25 @@ class AbstractLengthsOp : public Operator<Context> {
   USE_SIMPLE_CTOR_DTOR(AbstractLengthsOp);
 
   bool RunOnDevice() override {
-    // If more complicated fixed size logic becomes necessary, it can be moved
-    // to the reducer class
-    TIndex dataBlockSize = Input(0).size_from_dim(1);
-    return DispatchHelper<typename Reducer::FixedDispatch>::call(
-        this, dataBlockSize);
+    if (SparseFused) {
+      return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
+          this, Input(INDICES));
+    } else {
+      // type doesn't matter
+      return DoRunWithType<TIndex>();
+    }
   }
 
-  template <int FixedSize>
+  template <typename IndexType>
+  bool DoRunWithType() {
+    // If more complicated fixed size logic becomes necessary, it can be moved
+    // to the reducer class
+    TIndex in_block_size = Input(0).size_from_dim(1);
+    return DispatchHelper<typename Reducer::FixedDispatch, IndexType>::call(
+        this, in_block_size);
+  }
+
+  template <typename IndexType, int FixedSize>
   bool DoRunWithValue() {
     auto& dataInput = Input(0);
     auto& lengthsInput = Input(LENGTHS);
@@ -1370,11 +1403,11 @@ class AbstractLengthsOp : public Operator<Context> {
     TIndex dataToReduceSize;
     const TIndex outputSize = lengthsInput.dim(0);
 
-    const TIndex* indices;
+    const IndexType* indices;
     if (SparseFused) { // static if
       auto& indicesInput = Input(INDICES);
       CAFFE_ENFORCE_EQ(1, indicesInput.ndim(), "INDICES must be a vector");
-      indices = indicesInput.template data<TIndex>();
+      indices = indicesInput.template data<IndexType>();
       dataToReduceSize = indicesInput.dim(0);
     } else {
       dataToReduceSize = dataSize;
@@ -1413,7 +1446,7 @@ class AbstractLengthsOp : public Operator<Context> {
       Reducer reducer(ctx, out + out_block_size * rangeIndex, &context_);
       for (TIndex start = dataIndex; dataIndex < start + lengths[rangeIndex];
            ++dataIndex) {
-        TIndex idx;
+        IndexType idx;
         if (SparseFused) { // static if
           idx = indices[dataIndex];
           CAFFE_ENFORCE(
@@ -1557,14 +1590,25 @@ class AbstractLengthsWithMainInputGradientOp : public Operator<Context> {
   USE_SIMPLE_CTOR_DTOR(AbstractLengthsWithMainInputGradientOp);
 
   bool RunOnDevice() override {
-    // If more complicated fixed size logic becomes necessary, it can be moved
-    // to the reducer class
-    TIndex gradBlockSize = Input(SEGMENT_GRADS).size_from_dim(1);
-    return DispatchHelper<typename ReducerGradient::FixedDispatch>::call(
-        this, gradBlockSize);
+    if (SparseFused) {
+      return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
+          this, Input(INDICES));
+    } else {
+      // type doesn't matter
+      return DoRunWithType<TIndex>();
+    }
   }
 
-  template <int FixedSize>
+  template <typename IndexType>
+  bool DoRunWithType() {
+    // If more complicated fixed size logic becomes necessary, it can be moved
+    // to the reducer class
+    TIndex in_block_size = Input(SEGMENT_GRADS).size_from_dim(1);
+    return DispatchHelper<typename ReducerGradient::FixedDispatch, IndexType>::
+        call(this, in_block_size);
+  }
+
+  template <typename IndexType, int FixedSize>
   bool DoRunWithValue() {
     auto& dataInput = Input(DATA_INPUT);
     auto& segmentGradsInput = Input(SEGMENT_GRADS);
@@ -1587,10 +1631,10 @@ class AbstractLengthsWithMainInputGradientOp : public Operator<Context> {
 
     // Either first dim the data or how much we pull in indexies from it
     TIndex dataToReduceSize;
-    const TIndex* indices = nullptr;
+    const IndexType* indices = nullptr;
     if (SparseFused) { // static if
       auto& indicesInput = Input(INDICES);
-      indices = indicesInput.template data<TIndex>();
+      indices = indicesInput.template data<IndexType>();
       dataToReduceSize = indicesInput.dim(0);
     } else {
       dataToReduceSize = dataInput.dim(0);
@@ -1615,7 +1659,7 @@ class AbstractLengthsWithMainInputGradientOp : public Operator<Context> {
           ctx, segmentGrads + segmentBlockSize * rangeIndex, &context_);
       for (TIndex start = dataIndex; dataIndex < start + lengths[rangeIndex];
            ++dataIndex) {
-        TIndex data_pos;
+        IndexType data_pos;
         // No range checking, should've been verified in forward pass
         if (SparseFused) { // static if
           data_pos = indices[dataIndex];
