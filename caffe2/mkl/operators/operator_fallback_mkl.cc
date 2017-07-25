@@ -4,6 +4,7 @@
 #include "caffe2/operators/filler_op.h"
 #include "caffe2/operators/loss_op.h"
 #include "caffe2/operators/softmax_op.h"
+#include "caffe2/operators/utility_ops.h"
 #include "caffe2/utils/mkl/mkl_operator.h"
 
 // can add more non-MKL operators if needed
@@ -28,5 +29,8 @@ REGISTER_MKL_OPERATOR(
 REGISTER_MKL_OPERATOR(
     GaussianFill,
     mkl::MKLFallbackOp<GaussianFillOp<float, CPUContext>>);
+REGISTER_MKL_OPERATOR(
+    MSRAFill,
+    mkl::MKLFallbackOp<MSRAFillOp<float, CPUContext>>);
 
 } // namespace caffe2
