@@ -80,13 +80,16 @@ int THPCppFunction_clear(PyObject* self)
 {
   auto f = (THPCppFunction*)self;
   // Remove the weak ref of the c++ object if it exist
-  f->cdata->pyobj = nullptr;
+  if (f->cdata) {
+    f->cdata->pyobj = nullptr;
+  }
   f->cdata.reset();
   return 0;
 }
 
 void THPCppFunction_dealloc(PyObject* self)
 {
+  THPCppFunction_clear(self);
   ((THPCppFunction*)self)->cdata.~shared_ptr();
   Py_TYPE(self)->tp_free(self);
 }
