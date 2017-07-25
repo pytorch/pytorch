@@ -296,7 +296,7 @@ __global__ void length_sum_kernel(
 
   int start = group == 0 ? 0 : prefix_sum_length_data[group - 1];
   int end = prefix_sum_length_data[group];
-  CUDA_KERNEL_ASSERT(start < N);
+  CUDA_KERNEL_ASSERT(start <= N);
   CUDA_KERNEL_ASSERT(end <= N);
 
   for (int i = threadIdx.x; i < post; i += blockDim.x) {
@@ -321,7 +321,7 @@ __global__ void length_sum_gradient_kernel(
 
   int start = group == 0 ? 0 : prefix_sum_length_data[group - 1];
   int end = prefix_sum_length_data[group];
-  CUDA_KERNEL_ASSERT(start < N);
+  CUDA_KERNEL_ASSERT(start <= N);
   CUDA_KERNEL_ASSERT(end <= N);
 
   for (int i = threadIdx.x; i < post; i += blockDim.x) {
@@ -346,7 +346,7 @@ __global__ void sparse_length_sum_kernel(
 
   int start = group == 0 ? 0 : prefix_sum_length_data[group - 1];
   int end = prefix_sum_length_data[group];
-  CUDA_KERNEL_ASSERT(start < len_indices);
+  CUDA_KERNEL_ASSERT(start <= len_indices);
   CUDA_KERNEL_ASSERT(end <= len_indices);
 
   for (int i = threadIdx.x; i < post; i += blockDim.x) {
