@@ -13,6 +13,7 @@ class TestJit(TestCase):
         torch._C._tracer_enter((x, y))
         z = torch.sigmoid(torch.tanh(x * (x + y)))
         trace = torch._C._tracer_exit((z,))
+        torch._C._jit_optim_fuse(trace)
 
         self.assertExpected(str(trace))
         return
@@ -31,6 +32,7 @@ class TestJit(TestCase):
         cx = Variable(torch.randn(3, 20))
         lstm = torch.jit.trace_model(nn.LSTMCell(10, 20))
         trace, _ = lstm(input, (hx, cx))
+        torch._C._jit_optim_fuse(trace)
         self.assertExpected(str(trace))
 
 if __name__ == '__main__':
