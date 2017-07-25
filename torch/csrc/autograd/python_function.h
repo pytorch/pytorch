@@ -5,6 +5,7 @@
 #include <utility>
 #include <memory>
 
+#include "torch/csrc/Exceptions.h"
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/utils/object_ptr.h"
@@ -31,6 +32,20 @@ struct PyFunction : public Function {
   PyObject* obj;
 };
 
+/**
+ * Cast an object into a tuple, if it is not a tuple already. Returns true
+ * if the original object was not a tuple.
+ */
+inline bool ensure_tuple(THPObjectPtr& obj) {
+  if (PyTuple_Check(obj.get()))
+    return false;
+
+  PyObject *tuple = PyTuple_New(1);
+  if (!tuple) throw python_error();
+  PyTuple_SET_ITEM(tuple, 0, obj.release());
+  obj = tuple;
+  return true;
+}
 
 }} // namespace torch::autograd
 
