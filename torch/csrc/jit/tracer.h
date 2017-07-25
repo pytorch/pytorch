@@ -58,7 +58,6 @@ struct TracingState {
     JIT_ASSERT(tracing());
     auto r = std::move(frames.back());
     frames.pop_back();
-    r.graph = FuseGraph(std::move(r.graph));
     return std::move(r.graph);
   }
 private:
