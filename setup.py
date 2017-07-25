@@ -354,6 +354,7 @@ main_sources = [
     "torch/csrc/autograd/function.cpp",
     "torch/csrc/autograd/variable.cpp",
     "torch/csrc/autograd/input_buffer.cpp",
+    "torch/csrc/autograd/jit_closure.cpp",
     "torch/csrc/autograd/python_function.cpp",
     "torch/csrc/autograd/python_cpp_function.cpp",
     "torch/csrc/autograd/python_variable.cpp",
