@@ -71,6 +71,10 @@ void SinCos(const int N, const T* x, T* ys, T* yc, Context* context);
 template <typename T, class Context>
 void Abs(const int N, const T* x, T* y, Context* context);
 template <typename T, class Context>
+void Sqrt(const int N, const T* x, T* y, Context* context);
+template <typename T, class Context>
+void InvSqrt(const int N, const T* x, T* y, Context* context);
+template <typename T, class Context>
 void Sqr(const int N, const T* x, T* y, Context* context);
 
 template <typename T, class Context>
@@ -149,6 +153,15 @@ void RowwiseMax(const int N, const int D, const T* x, T* y,
 template <typename T, class Context>
 void ColwiseMax(const int N, const int D, const T* x, T* y,
                 Context* context);
+
+// Elemwise maximum of vector x and scalar alpha. y[i] = max(x[i], alpha)
+template <typename T, class Context>
+void Maximum(
+    const int N,
+    const float alpha,
+    const T* x,
+    T* y,
+    Context* context);
 
 // Decaf gemm provides a simpler interface to the gemm functions, with the
 // limitation that the data has to be contiguous in memory.

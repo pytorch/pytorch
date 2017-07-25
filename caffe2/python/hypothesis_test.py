@@ -2077,10 +2077,6 @@ class TestOperators(hu.HypothesisTestCase):
                                    np.square(X - Y).sum(axis=1) * 0.5,
                                    rtol=1e-4, atol=1e-4)
         check_grad(l2_op)
-        if gc.device_type == 1:
-            # Only SquaredL2Distance has CUDA implementation
-            return
-
         dot_op = core.CreateOperator("DotProduct", ["X", "Y"], ["dot"])
         self.ws.run(dot_op)
         np.testing.assert_allclose(self.ws.blobs[("dot")].fetch(),
