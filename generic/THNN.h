@@ -1461,6 +1461,26 @@ TH_API void THNN_(SpatialReplicationPadding_updateGradInput)(
           int pad_l, int pad_r,
           int pad_t, int pad_b);
 
+TH_API void THNN_(FeatureLPPooling_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          accreal power,
+          int width,
+          int stride,
+          bool batchMode);
+
+TH_API void THNN_(FeatureLPPooling_updateGradInput)(
+          THNNState *state,
+          THTensor* gradOutput,
+          THTensor* input,
+          THTensor* output,
+          THTensor* gradInput,
+          accreal power,
+          int width,
+          int stride,
+          bool batchMode);
+
 TH_API void THNN_(VolumetricReplicationPadding_updateOutput)(
           THNNState *state,
           THTensor *input,

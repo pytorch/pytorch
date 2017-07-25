@@ -179,6 +179,9 @@
 #include "generic/TemporalRowConvolution.c"
 #include "THGenerateFloatTypes.h"
 
+#include "generic/FeatureLPPooling.c"
+#include "THGenerateFloatTypes.h"
+
 #include "generic/BatchNormalization.c"
 #include "THGenerateFloatTypes.h"
 
@@ -280,4 +283,3 @@
 
 #include "generic/VolumetricUpSamplingTrilinear.c"
 #include "THGenerateFloatTypes.h"
-
