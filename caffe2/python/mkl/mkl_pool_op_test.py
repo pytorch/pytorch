@@ -5,7 +5,7 @@ from __future__ import unicode_literals
 
 import unittest
 import hypothesis.strategies as st
-from hypothesis import given, settings
+from hypothesis import given, settings, assume
 import numpy as np
 from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
@@ -25,8 +25,9 @@ class MKLPoolTest(hu.HypothesisTestCase):
            **mu.gcs)
     @settings(max_examples=2, timeout=100)
     def test_mkl_pooling(self, stride, pad, kernel, size,
-                             input_channels, batch_size,
-                             method, gc, dc):
+                         input_channels, batch_size,
+                         method, gc, dc):
+        assume(pad < kernel)
         op = core.CreateOperator(
             method,
             ["X"],
