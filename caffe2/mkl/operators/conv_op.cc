@@ -28,14 +28,27 @@ class MKLConvOp final : public ConvPoolOpBase<MKLContext> {
 
   // TODO(jiayq): support double if needed.
   bool RunOnDeviceWithOrderNCHW() override {
-    auto& X = OperatorBase::Input<MKLMemory<float>>(INPUT);
-    auto& filter = OperatorBase::Input<MKLMemory<float>>(FILTER);
-    auto& bias = OperatorBase::Input<MKLMemory<float>>(BIAS);
+    const auto& X = OperatorBase::Input<MKLMemory<float>>(INPUT);
+    const auto& filter = OperatorBase::Input<MKLMemory<float>>(FILTER);
+    const int M = filter.dim32(0);
+    if (InputSize() == 2 && !zero_bias_) {
+      TensorCPU cpu_zero_bias;
+      cpu_zero_bias.Resize(M);
+      CPUContext ctx;
+      math::Set<T, CPUContext>(
+          M, 0.0, cpu_zero_bias.template mutable_data<float>(), &ctx);
+
+      zero_bias_.reset(new MKLMemory<T>(std::vector<TIndex>{M}));
+      zero_bias_->CopyFrom(cpu_zero_bias);
+    }
+    const auto& bias = InputSize() == 2
+        ? *zero_bias_
+        : OperatorBase::Input<MKLMemory<float>>(BIAS);
+
     MKLMemory<float>* Y = OperatorBase::Output<MKLMemory<float>>(0);
     CAFFE_ENFORCE(4 == X.ndim());
     const int N = X.dim32(0), C = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
     CAFFE_ENFORCE(4 == filter.ndim());
-    const int M = filter.dim32(0);
 
     bool dims_changed;
     CHECK_INPUT_FILTER_DIMS(dims_changed);
@@ -112,6 +125,7 @@ class MKLConvOp final : public ConvPoolOpBase<MKLContext> {
  private:
   // Input: X, W, b
   // Output: Y
+  std::unique_ptr<MKLMemory<T>> zero_bias_;
   vector<TIndex> cached_input_dims_;
   vector<TIndex> cached_filter_dims_;
   PrimitiveWrapper<T> primitive_;
