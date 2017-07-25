@@ -10,45 +10,13 @@ namespace {
 
 using transform::Graph;
 
-static std::atomic<int> counter;
-
-class DummyOp final : public OperatorBase {
- public:
-  using OperatorBase::OperatorBase;
-  bool Run(int /* unused */) override {
-    counter.fetch_add(1);
-    return true;
-  }
-};
-
-REGISTER_CPU_OPERATOR(TDummyOp1, DummyOp);
-
-OPERATOR_SCHEMA(TDummyOp1)
-    .NumInputs(0, INT_MAX)
-    .NumOutputs(0, INT_MAX)
-    .AllowInplace({{0, 0}, {1, 1}});
-
-REGISTER_CPU_OPERATOR(TDummyOp2, DummyOp);
-
-OPERATOR_SCHEMA(TDummyOp2)
-    .NumInputs(0, INT_MAX)
-    .NumOutputs(0, INT_MAX)
-    .AllowInplace({{0, 0}, {1, 1}});
-
-REGISTER_CPU_OPERATOR(TDummyOp3, DummyOp);
-
-OPERATOR_SCHEMA(TDummyOp3)
-    .NumInputs(0, INT_MAX)
-    .NumOutputs(0, INT_MAX)
-    .AllowInplace({{0, 0}, {1, 1}});
-
 /**
- * This dummy transform will find all subgraphs of shape (TDummyOp1 ->
- * TDummyOp2) and replaces them with (TDummyOp3). Simple unit test.
+ * This dummy transform will find all subgraphs of shape (DummyOp1 ->
+ * DummyOp2) and replaces them with (DummyOp3). Simple unit test.
  */
 class DummyTransform : public Transform {
  public:
-  // Finds all patterns of the form (TDummyOp1 -> TDummyOp2)
+  // Finds all patterns of the form (DummyOp1 -> DummyOp2)
   bool PatternRule(const Graph& g, const std::vector<int>& subgraph, int idx)
       override {
     if (subgraph.size() >= pattern_chain.size()) {
@@ -73,24 +41,24 @@ class DummyTransform : public Transform {
     return true;
   }
 
-  // Checks if the subgraph matched is (TDummyOp1 -> TDummyOp2)
+  // Checks if the subgraph matched is (DummyOp1 -> DummyOp2)
   bool ValidatorRule(const Graph& g, const std::vector<int>& subgraph)
       override {
     if (subgraph.size() == 2) {
-      if (g.node(subgraph[0]).op.type() == "TDummyOp1" &&
-          g.node(subgraph[1]).op.type() == "TDummyOp2") {
+      if (g.node(subgraph[0]).op.type() == "DummyOp1" &&
+          g.node(subgraph[1]).op.type() == "DummyOp2") {
         return true;
       }
     }
     return false;
   }
 
-  // Replaces a match of (TDummyOp1 -> TDummyOp2) with (TDummyOp3)
+  // Replaces a match of (DummyOp1 -> DummyOp2) with (DummyOp3)
   bool ReplaceRule(const std::vector<int>& match, Graph* g_ptr) override {
     CHECK(g_ptr);
     auto& g = *g_ptr;
     OperatorDef new_op;
-    new_op.set_type("TDummyOp3");
+    new_op.set_type("DummyOp3");
     int new_idx = g.size();
 
     std::map<int, string> new_op_children;
@@ -125,8 +93,10 @@ class DummyTransform : public Transform {
   }
 
  private:
-  const std::vector<string> pattern_chain = {"TDummyOp1", "TDummyOp2"};
+  const std::vector<string> pattern_chain = {"DummyOp1", "DummyOp2"};
 };
+
+REGISTER_TRANSFORM(DummySwap, DummyTransform)
 
 // Adds an operator def to a netdef.
 // Returns the ptr, if you want to add anything extra (such as device_option)
@@ -154,14 +124,14 @@ TEST(TransformTest, TestPatternMatch) {
   ws.CreateBlob("in");
   NetDef netdef;
 
-  AddOp(&netdef, "TDummyOp1", {"in"}, {"mid1"});
-  AddOp(&netdef, "TDummyOp2", {"mid1"}, {"mid2"});
-  AddOp(&netdef, "TDummyOp1", {"mid2"}, {"mid3"});
-  AddOp(&netdef, "TDummyOp2", {"mid3"}, {"out"});
+  AddOp(&netdef, "DummyOp1", {"in"}, {"mid1"});
+  AddOp(&netdef, "DummyOp2", {"mid1"}, {"mid2"});
+  AddOp(&netdef, "DummyOp1", {"mid2"}, {"mid3"});
+  AddOp(&netdef, "DummyOp2", {"mid3"}, {"out"});
 
-  DummyTransform t;
+  auto t = CreateTransform("DummySwap");
   Graph g(netdef);
-  auto matches = t.PatternMatch(g);
+  auto matches = t->PatternMatch(g);
 
   EXPECT_EQ(matches.size(), 2);
   EXPECT_EQ(matches[0][0], 0);
@@ -175,15 +145,15 @@ TEST(TransformTest, TestReplacePattern) {
   ws.CreateBlob("in");
   NetDef netdef;
 
-  AddOp(&netdef, "TDummyOp1", {"in"}, {"mid1"});
-  AddOp(&netdef, "TDummyOp2", {"mid1"}, {"mid2"});
-  AddOp(&netdef, "TDummyOp1", {"mid2"}, {"mid3"});
-  AddOp(&netdef, "TDummyOp2", {"mid3"}, {"out"});
+  AddOp(&netdef, "DummyOp1", {"in"}, {"mid1"});
+  AddOp(&netdef, "DummyOp2", {"mid1"}, {"mid2"});
+  AddOp(&netdef, "DummyOp1", {"mid2"}, {"mid3"});
+  AddOp(&netdef, "DummyOp2", {"mid3"}, {"out"});
 
-  DummyTransform t;
+  auto t = CreateTransform("DummySwap");
   Graph g(netdef);
   std::vector<std::vector<int>> matches = {{0, 1}, {2, 3}};
-  t.ReplacePattern(matches, &g);
+  t->ReplacePattern(matches, &g);
 
   EXPECT_EQ(g.size(), 6);
   EXPECT_FALSE(g.is_node_active(0));
@@ -200,9 +170,9 @@ TEST(TransformTest, TestReplacePattern) {
   NetDef replaced_netdef = g.GetNetDef();
 
   EXPECT_EQ(replaced_netdef.op().size(), 2);
-  EXPECT_EQ(replaced_netdef.op(0).type(), "TDummyOp3");
+  EXPECT_EQ(replaced_netdef.op(0).type(), "DummyOp3");
   EXPECT_EQ(replaced_netdef.op(0).input(0), "in");
-  EXPECT_EQ(replaced_netdef.op(1).type(), "TDummyOp3");
+  EXPECT_EQ(replaced_netdef.op(1).type(), "DummyOp3");
   EXPECT_EQ(replaced_netdef.op(1).output(0), "out");
 }
 
@@ -211,19 +181,19 @@ TEST(TransformTest, TestTransformApply) {
   ws.CreateBlob("in");
   NetDef netdef;
 
-  AddOp(&netdef, "TDummyOp1", {"in"}, {"mid1"});
-  AddOp(&netdef, "TDummyOp2", {"mid1"}, {"mid2"});
-  AddOp(&netdef, "TDummyOp1", {"mid2"}, {"mid3"});
-  AddOp(&netdef, "TDummyOp2", {"mid3"}, {"out"});
+  AddOp(&netdef, "DummyOp1", {"in"}, {"mid1"});
+  AddOp(&netdef, "DummyOp2", {"mid1"}, {"mid2"});
+  AddOp(&netdef, "DummyOp1", {"mid2"}, {"mid3"});
+  AddOp(&netdef, "DummyOp2", {"mid3"}, {"out"});
 
-  DummyTransform t;
+  auto t = CreateTransform("DummySwap");
 
-  NetDef replaced_netdef = t.ApplyTo(netdef);
+  NetDef replaced_netdef = t->ApplyTo(netdef);
 
   EXPECT_EQ(replaced_netdef.op().size(), 2);
-  EXPECT_EQ(replaced_netdef.op(0).type(), "TDummyOp3");
+  EXPECT_EQ(replaced_netdef.op(0).type(), "DummyOp3");
   EXPECT_EQ(replaced_netdef.op(0).input(0), "in");
-  EXPECT_EQ(replaced_netdef.op(1).type(), "TDummyOp3");
+  EXPECT_EQ(replaced_netdef.op(1).type(), "DummyOp3");
   EXPECT_EQ(replaced_netdef.op(1).output(0), "out");
 }
 
