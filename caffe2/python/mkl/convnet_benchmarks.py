@@ -66,6 +66,8 @@ import argparse
 
 from caffe2.python import brew, cnn, workspace
 from caffe2.python.model_helper import ModelHelper
+
+from caffe2.python.models import resnet
 import numpy as np
 
 def MLP(order, cudnn_ws, mkl):
@@ -94,6 +96,15 @@ def MLP(order, cudnn_ws, mkl):
         model.AveragedLoss(xent, "loss")
     return model, d
 
+
+def ResNet50(order, cudnn_ws, mkl):
+    my_arg_scope = {'order': order, 'use_cudnn': True,
+                    'cudnn_exhaustive_search': True,
+                    'ws_nbytes_limit': str(cudnn_ws)}
+    model = ModelHelper(name="alexnet", arg_scope=my_arg_scope)
+    resnet.create_resnet50(model, "data", 3, 1000, is_test=True,
+                           final_avg_kernel=14)
+    return model, 448
 
 def AlexNet(order, cudnn_ws, mkl):
     my_arg_scope = {'order': order, 'use_cudnn': True,
@@ -695,14 +706,14 @@ def GetArgumentParser():
 
 
 if __name__ == '__main__':
-    args = GetArgumentParser().parse_args()
+    args, extra_args = GetArgumentParser().parse_known_args()
     if (
         not args.batch_size or not args.model or not args.order
     ):
         GetArgumentParser().print_help()
     else:
         workspace.GlobalInit(
-            ['caffe2', '--caffe2_log_level=0'] +
+            ['caffe2', '--caffe2_log_level=0'] + extra_args +
             (['--caffe2_use_nvtx'] if args.use_nvtx else []) +
             (['--caffe2_htrace_span_log_path=' + args.htrace_span_log_path]
                 if args.htrace_span_log_path else []))
@@ -712,6 +723,7 @@ if __name__ == '__main__':
             'OverFeat': OverFeat,
             'VGGA': VGGA,
             'Inception': Inception,
+            'ResNet50': ResNet50,
             'MLP': MLP,
         }
         Benchmark(model_map[args.model], args)
