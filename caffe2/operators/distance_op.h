@@ -155,6 +155,9 @@ class CosineSimilarityOp : public Operator<Context> {
  protected:
   INPUT_TAGS(X_IN, Y_IN);
   OUTPUT_TAGS(COS_OUT);
+
+ private:
+  Tensor<Context> aux_;
 };
 
 template <typename T, class Context>
@@ -164,73 +167,14 @@ class CosineSimilarityGradientOp final : public Operator<Context> {
       : Operator<Context>(def, ws) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  bool RunOnDevice() override {
-    auto& X = Input(X_IN);
-    auto& Y = Input(Y_IN);
-    auto& dCos = Input(DER_COS_IN);
-    auto* dX = Output(DER_X_OUT);
-    auto* dY = Output(DER_Y_OUT);
-    int N = X.ndim() > 0 ? X.dim32(0) : 1;
-    int D = X.size() / N;
-    CAFFE_ENFORCE(X.ndim() == Y.ndim());
-    for (int i = 0; i < X.ndim(); ++i) {
-      CAFFE_ENFORCE(X.dim32(i) == Y.dim32(i));
-    }
-    CAFFE_ENFORCE(dCos.ndim() == 1);
-    CAFFE_ENFORCE(dCos.dim32(0) == N);
-    dX->ResizeLike(X);
-    dY->ResizeLike(Y);
-
-    const auto* X_data = X.template data<T>();
-    const auto* Y_data = Y.template data<T>();
-    const auto* dCos_data = dCos.template data<T>();
-    auto* dX_data = dX->template mutable_data<T>();
-    auto* dY_data = dY->template mutable_data<T>();
-    T XN, YN, XY;
-    const T kEps = 1e-12f;
-    for (int i = 0; i < N; ++i) { // TODO: multithreading
-      auto offset = i * D;
-
-      // TODO: cache these result from the forward pass
-      // ||x||
-      math::Dot<T, CPUContext>(
-          D, X_data + offset, X_data + offset, &XN, &context_);
-      XN = std::sqrt(std::max(XN, kEps));
-      // ||y||
-      math::Dot<T, CPUContext>(
-          D, Y_data + offset, Y_data + offset, &YN, &context_);
-      YN = std::sqrt(std::max(YN, kEps));
-      // ||x|| * || y ||
-      T XYN = XN * YN;
-      // x^Ty
-      math::Dot<T, CPUContext>(
-          D, X_data + offset, Y_data + offset, &XY, &context_);
-
-      math::Scale<T, Context>(
-          D, dCos_data[i] / XYN, Y_data + offset, dX_data + offset, &context_);
-      math::Axpy(
-          D,
-          -dCos_data[i] * XY / (XN * XN * XYN),
-          X_data + offset,
-          dX_data + offset,
-          &context_);
-
-      math::Scale<T, Context>(
-          D, dCos_data[i] / XYN, X_data + offset, dY_data + offset, &context_);
-      math::Axpy(
-          D,
-          -dCos_data[i] * XY / (YN * YN * XYN),
-          Y_data + offset,
-          dY_data + offset,
-          &context_);
-    }
-
-    return true;
-  }
+  bool RunOnDevice() override;
 
  protected:
   INPUT_TAGS(X_IN, Y_IN, DER_COS_IN);
   OUTPUT_TAGS(DER_X_OUT, DER_Y_OUT);
+
+ private:
+  Tensor<Context> aux_;
 };
 
 template <typename T, class Context>

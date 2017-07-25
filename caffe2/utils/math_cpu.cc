@@ -11,6 +11,7 @@
 //     platforms, it allows one to quickly port Caffe2 to different platforms
 //     where BLAS may not be present.
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <random>
@@ -432,6 +433,10 @@ DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sin, vsSin)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Sin, vdSin)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Abs, vsAbs)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Abs, vdAbs)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sqrt, vsSqrt)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Sqrt, vdSqrt)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, InvSqrt, vsInvSqrt)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, InvSqrt, vdInvSqrt)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sqr, vsSqr)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Sqr, vdSqr)
 #undef DELEGATE_SIMPLE_UNARY_FUNCTION
@@ -483,6 +488,8 @@ DELEGATE_SIMPLE_UNARY_FUNCTION(float, Log, log)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Cos, cos)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sin, sin)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Abs, abs)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sqrt, sqrt)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, InvSqrt, rsqrt)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sqr, square)
 #undef DELEGATE_SIMPLE_UNARY_FUNCTION
 
@@ -556,6 +563,7 @@ DEFINE_SIMPLE_BINARY_FUNCTION(Div, /)
         ConstEigenMatrixMap<T>(x, D, N).colwise().maxCoeff();    \
   }
 CAFFE2_SPECIALIZED_ROWWISEMAX(float)
+#undef CAFFE2_SPECIALIZED_ROWWISEMAX
 
 #define CAFFE2_SPECIALIZED_COLWISEMAX(T)                         \
   template <>                                                    \
@@ -565,6 +573,17 @@ CAFFE2_SPECIALIZED_ROWWISEMAX(float)
         ConstEigenMatrixMap<T>(x, D, N).rowwise().maxCoeff();    \
   }
 CAFFE2_SPECIALIZED_COLWISEMAX(float)
+#undef CAFFE2_SPECIALIZED_COLWISEMAX
+
+#define CAFFE2_SPECIALIZED_MAXIMUM(T)                                          \
+  template <>                                                                  \
+  void Maximum<T, CPUContext>(                                                 \
+      const int N, const float alpha, const T* x, T* y, CPUContext* context) { \
+    std::transform(                                                            \
+        x, x + N, y, [&alpha](const T& x_i) { return std::max(x_i, alpha); }); \
+  }
+CAFFE2_SPECIALIZED_MAXIMUM(float)
+#undef CAFFE2_SPECIALIZED_MAXIMUM
 
 // AddToRow and AddToCol adds the corresponding row/col vector b to the matrix a
 // of shape M x N. The actual implementation uses eigen which is column major,
