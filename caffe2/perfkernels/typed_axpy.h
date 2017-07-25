@@ -7,6 +7,6 @@ namespace caffe2 {
 // It also provides a performance optimization hint (use_a) to see if a is going
 // to be 1 or not.
 template <typename IN, typename OUT>
-void TypedAxpy(const int N, const OUT a, const IN* x, OUT* y);
+void TypedAxpy(int N, const OUT a, const IN* x, OUT* y);
 
 } // namespace caffe2
