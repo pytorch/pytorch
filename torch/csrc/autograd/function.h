@@ -45,6 +45,7 @@ struct Function {
     , is_stochastic(false)
     , pre_hooks()
     , post_hooks()
+    , pyobj(nullptr)
     {}
 
   Function(FunctionFlags&& flags)
@@ -54,6 +55,7 @@ struct Function {
     , is_stochastic(false)
     , pre_hooks()
     , post_hooks()
+    , pyobj(nullptr)
     {}
 
   Function(const Function& other) = delete;
@@ -89,6 +91,8 @@ struct Function {
   bool is_stochastic;
   std::vector<std::shared_ptr<FunctionPreHook>> pre_hooks;
   std::vector<std::shared_ptr<FunctionPostHook>> post_hooks;
+
+  PyObject *pyobj;  // weak reference
 };
 
 
