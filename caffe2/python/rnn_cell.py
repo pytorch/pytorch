@@ -21,6 +21,8 @@ from caffe2.python.attention import (
 )
 from caffe2.python import core, recurrent, workspace, brew, scope
 from caffe2.python.modeling.parameter_sharing import ParameterSharing
+from caffe2.python.modeling.parameter_info import ParameterTags
+from caffe2.python.modeling.initializers import Initializer
 from caffe2.python.model_helper import ModelHelper
 
 
@@ -314,32 +316,27 @@ class MILSTMCell(LSTMCell):
             axis=2,
         )
 
-        # defining MI parameters
-        alpha = model.param_init_net.ConstantFill(
-            [],
-            [self.scope('alpha')],
+        # defining initializers for MI parameters
+        alpha = model.create_param(
+            self.scope('alpha'),
             shape=[4 * self.hidden_size],
-            value=1.0,
+            initializer=Initializer('ConstantFill', value=1.0),
         )
-        beta_h = model.param_init_net.ConstantFill(
-            [],
-            [self.scope('beta1')],
+        beta_h = model.create_param(
+            self.scope('beta1'),
             shape=[4 * self.hidden_size],
-            value=1.0,
+            initializer=Initializer('ConstantFill', value=1.0),
         )
-        beta_i = model.param_init_net.ConstantFill(
-            [],
-            [self.scope('beta2')],
+        beta_i = model.create_param(
+            self.scope('beta2'),
             shape=[4 * self.hidden_size],
-            value=1.0,
+            initializer=Initializer('ConstantFill', value=1.0),
         )
-        b = model.param_init_net.ConstantFill(
-            [],
-            [self.scope('b')],
+        b = model.create_param(
+            self.scope('b'),
             shape=[4 * self.hidden_size],
-            value=0.0,
+            initializer=Initializer('ConstantFill', value=0.0),
         )
-        model.params.extend([alpha, beta_h, beta_i, b])
 
         # alpha * input_t + beta_h
         # Shape: [1, batch_size, 4 * hidden_size]
@@ -982,20 +979,17 @@ def _LSTM(
         for i in range(num_layers):
             with core.NameScope(scope):
                 suffix = '_{}'.format(i) if num_layers > 1 else ''
-                initial_hidden = model.param_init_net.ConstantFill(
-                    [],
+                initial_hidden = model.create_param(
                     'initial_hidden_state' + suffix,
                     shape=[dim_out[i]],
-                    value=0.0,
+                    initializer=Initializer('ConstantFill', value=0.0),
                 )
-                initial_cell = model.param_init_net.ConstantFill(
-                    [],
+                initial_cell = model.create_param(
                     'initial_cell_state' + suffix,
                     shape=[dim_out[i]],
-                    value=0.0,
+                    initializer=Initializer('ConstantFill', value=0.0),
                 )
                 initial_states.extend([initial_hidden, initial_cell])
-                model.params.extend([initial_hidden, initial_cell])
 
     assert len(initial_states) == 2 * num_layers, \
             "Incorrect initial_states, was expecting 2 * num_layers elements" \
@@ -1199,11 +1193,12 @@ def cudnn_LSTM(model, input_blob, initial_states, dim_in, dim_out,
                          recurrent_bias_size
         total_sz = 4 * (first_layer_sz + (num_layers - 1) * upper_layer_sz)
 
-        weights = model.param_init_net.UniformFill(
-            [], "lstm_weight", shape=[total_sz])
-
-        model.params.append(weights)
-        model.weights.append(weights)
+        weights = model.create_param(
+            'lstm_weight',
+            shape=[total_sz],
+            initializer=Initializer('UniformFill'),
+            tags=ParameterTags.WEIGHT,
+        )
 
         lstm_args = {
             'hidden_size': dim_out,
