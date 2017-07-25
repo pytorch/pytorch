@@ -43,4 +43,23 @@ auto AddBackward::apply(const variable_list& grad_outputs) -> variable_list {
   return {grad_outputs[0], grad_outputs[0]};
 };
 
+auto Mul::apply(const variable_list& inputs) -> variable_list {
+  check_input_variables("Mul", inputs, 2);
+  auto& input1 = inputs[0]->data;
+  auto& input2 = inputs[1]->data;
+  AutoGPU guard(input1->getDevice());
+
+  auto output = input1->newTensor();
+  output->cmul(*input1, *input2);
+
+  return wrap_outputs(inputs, as_tensor_list(std::move(output)), [&](FunctionFlags f) {
+    return std::make_shared<MulBackward>(std::move(f), inputs[0]->save(this), inputs[1]->save(this));
+  });
+};
+
+auto MulBackward::apply(const variable_list& grad_outputs) -> variable_list {
+  check_input_variables("MulBackward", grad_outputs, 1);
+  throw std::runtime_error("MulBackward::apply not implemented");
+};
+
 }} // namespace torch::autograd

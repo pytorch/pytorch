@@ -60,4 +60,17 @@ struct AddBackward : public Function {
   virtual variable_list apply(const variable_list& gradOutputs) override;
 };
 
+struct Mul : public Function {
+  Mul() {}
+
+  virtual variable_list apply(const variable_list& inputs) override;
+};
+
+struct MulBackward : public Function {
+  MulBackward(FunctionFlags&& flags, SavedVariable a, SavedVariable b)
+    : Function(std::move(flags)) {}
+
+  virtual variable_list apply(const variable_list& gradOutputs) override;
+};
+
 }}

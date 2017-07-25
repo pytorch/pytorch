@@ -1,6 +1,7 @@
 #include <Python.h>
 #include "torch/csrc/jit/python_tracer.h"
 
+#include "torch/csrc/autograd/jit_closure.h"
 #include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/jit/python_ir.h"
 #include "torch/csrc/THP.h"
@@ -61,5 +62,27 @@ PyObject * THPTracer_exit(PyObject *_unused, PyObject *args)
   }
 
   return THPGraph_Wrap(GlobalTracingState.exit());
+  END_HANDLE_TH_ERRORS
+}
+
+void printGraph(const std::shared_ptr<Function>& fn) {
+  std::cout << fn->name() << "(";
+  for (auto& entry : fn->next_functions) {
+    printGraph(entry.first);
+  }
+  std::cout << ")";
+}
+
+
+PyObject * THPTracer_createAutogradClosure(PyObject *_unused, PyObject *pygraph) {
+  HANDLE_TH_ERRORS
+  THPUtils_assert(THPGraph_Check(pygraph), "getClosure expected a Graph, but got %s",
+      THPUtils_typename(pygraph));
+  Graph *graph = ((THPGraph*)pygraph)->cdata;
+
+  auto closure = createAutogradClosure(graph);
+
+  return THPWrapper_New(closure.release(),
+                        [](void *fn_list) { delete reinterpret_cast<AutogradClosure*>(fn_list); });
   END_HANDLE_TH_ERRORS
 }

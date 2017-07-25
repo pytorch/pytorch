@@ -34,22 +34,6 @@ PyObject *THPBatchNormBackwardBackwardFunction = NULL;
   if (!(condition)) { THPUtils_setError(__VA_ARGS__); throw python_error(); }
 
 /**
- * Cast an object into a tuple, if it is not a tuple already.  Returns true
- * if the original object was not a tuple.
- */
-static bool _ensure_tuple(THPObjectPtr& obj)
-{
-  if (PyTuple_Check(obj.get()))
-    return false;
-
-  PyObject *tuple = PyTuple_New(1);
-  if (!tuple) throw python_error();
-  PyTuple_SET_ITEM(tuple, 0, obj.release());
-  obj = tuple;
-  return true;
-}
-
-/**
  * Call into Python to allocate and zero a tensor as per info.
  */
 static PyObject* _allocate_grad_output(output_info_type& info, AutoGPU& gpu_guard)
@@ -154,7 +138,7 @@ auto PyFunction::apply(const variable_list& inputs) -> variable_list {
   if (!apply_fn) throw python_error();
   THPObjectPtr r(PyObject_CallObject(apply_fn, pyInputs.get()));
   if (!r) throw python_error();
-  _ensure_tuple(r);
+  ensure_tuple(r);
 
   auto& is_variable_input = *py_fn->is_variable_input;
   int num_outputs = PyTuple_GET_SIZE(r.get());
@@ -634,7 +618,7 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject *args) {
 }
 
 PyObject* process_outputs(THPFunction* grad_fn, const UnpackedInput& unpacked, THPObjectPtr&& raw_output, Node * this_expr, bool is_volatile) {
-  bool unpack_output = _ensure_tuple(raw_output);
+  bool unpack_output = ensure_tuple(raw_output);
 
   auto num_outputs = PyTuple_GET_SIZE(raw_output.get());
 
@@ -861,7 +845,7 @@ PyObject * THPFunction_do_backward(THPFunction *self, PyObject *args)
         "'backward' method", THPUtils_typename((PyObject*)self));
     THPObjectPtr grad_input(PyObject_CallObject(backward_fn, grad_output.get()));
     if (!grad_input) return NULL;
-    _ensure_tuple(grad_input);
+    ensure_tuple(grad_input);
 
     // We allow functions to return more gradients, than there were outputs,
     // if and only if the additional ones are all None
