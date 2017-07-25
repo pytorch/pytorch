@@ -1,4 +1,6 @@
+from __future__ import print_function
 import os
+import sys
 import glob
 from itertools import chain
 
@@ -9,6 +11,10 @@ from .cuda import WITH_CUDA, CUDA_HOME
 def gather_paths(env_vars):
     return list(chain(*(os.getenv(v, '').split(':') for v in env_vars)))
 
+is_conda = 'conda' in sys.version or 'Continuum' in sys.version
+conda_dir = os.path.join(os.path.dirname(sys.executable), '..')
+if is_conda:
+    print('Found anaconda, will search for cudnn in conda packages')
 
 WITH_CUDNN = False
 CUDNN_LIB_DIR = None
@@ -32,6 +38,9 @@ if WITH_CUDA and not check_env_flag('NO_CUDNN'):
         'C_INCLUDE_PATH',
         'CPLUS_INCLUDE_PATH',
     ])))
+    if is_conda:
+        lib_paths.append(os.path.join(conda_dir, 'lib'))
+        include_paths.append(os.path.join(conda_dir, 'include'))
     for path in lib_paths:
         if path is None or not os.path.exists(path):
             continue
