@@ -47,7 +47,8 @@ class MKLFallbackOp final : public Operator<MKLContext> {
     CAFFE_ENFORCE_EQ(def.device_option().device_type(), MKLDNN);
     OperatorDef base_def_(def);
     // base_def_ runs on CPU, so we will set its device option to CPU.
-    base_def_.clear_device_option();
+    // Copy to allow random_seed to be correctly propagated.
+    base_def_.mutable_device_option()->CopyFrom(def.device_option());
     base_def_.mutable_device_option()->set_device_type(CPU);
     // Set up the symbols for the local workspace.
     for (const string& name : def.input()) {
