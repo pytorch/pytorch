@@ -45,7 +45,7 @@ class L1Loss(_Loss):
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions`
+          dimensions
         - Target: :math:`(N, *)`, same shape as the input
 
     Examples::
@@ -149,7 +149,8 @@ class NLLLoss2d(NLLLoss):
         - Input: :math:`(N, C, H, W)` where `C = number of classes`
         - Target: :math:`(N, H, W)` where each value is `0 <= targets[i] <= C-1`
 
-    Examples:
+    Examples::
+
         >>> m = nn.Conv2d(16, 32, (3, 3)).float()
         >>> loss = nn.NLLLoss2d()
         >>> # input is of size nBatch x nClasses x height x width
@@ -186,6 +187,7 @@ class PoissonNLLLoss(_Loss):
             is set to False, the losses are instead summed for each minibatch.
 
     Examples::
+
         >>> loss = nn.PoissonNLLLoss()
         >>> log_input = autograd.Variable(torch.randn(5, 2), requires_grad=True)
         >>> target = autograd.Variable(torch.randn(5, 2))
@@ -254,7 +256,7 @@ class MSELoss(_Loss):
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions`
+          dimensions
         - Target: :math:`(N, *)`, same shape as the input
 
     Examples::
@@ -460,6 +462,14 @@ class CrossEntropyLoss(_WeightedLoss):
     Shape:
         - Input: :math:`(N, C)` where `C = number of classes`
         - Target: :math:`(N)` where each value is `0 <= targets[i] <= C-1`
+
+    Examples::
+
+        >>> loss = nn.CrossEntropyLoss()
+        >>> input = autograd.Variable(torch.randn(3, 5), requires_grad=True)
+        >>> target = autograd.Variable(torch.LongTensor(3).random_(5))
+        >>> output = loss(input, target)
+        >>> output.backward()
     """
 
     def __init__(self, weight=None, size_average=True, ignore_index=-100):
