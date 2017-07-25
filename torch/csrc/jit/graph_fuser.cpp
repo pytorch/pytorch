@@ -47,14 +47,9 @@ struct GraphFuser {
       single_select->replaceAllUsesWith(new_op);
       single_select->destroy();
 
-      if (it == nodes.begin()) {
-        p->destroy();
-        it = nodes.begin();
-      } else {
-        // Erasing p directly would invalidate iterator
-        ++it;
-        p->destroy();
-      }
+      // Erasing p directly would invalidate iterator
+      ++it;
+      p->destroy();
     }
   }
 

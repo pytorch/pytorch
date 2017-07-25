@@ -14,7 +14,6 @@ class TestJit(TestCase):
         z = torch.sigmoid(torch.tanh(x * (x + y)))
         trace = torch._C._tracer_exit((z,))
 
-        # TODO: Do something more automated here
         self.assertExpected(str(trace))
         return
 
