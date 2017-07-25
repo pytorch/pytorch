@@ -15,6 +15,9 @@ class MKLBNOp final : public SpatialBNOp<MKLContext> {
       : SpatialBNOp<MKLContext>(operator_def, ws) {
     OPERATOR_NEEDS_FEATURE(
         order_ == StorageOrder::NCHW, "Only NCHW order supported.");
+    OPERATOR_NEEDS_FEATURE(
+        operator_def.input(0) != operator_def.output(0),
+        "Inplace BN not supported");
   }
   ~MKLBNOp() {
     if (scale_bias_buffer_ != NULL) {
@@ -78,7 +81,6 @@ class MKLBNOp final : public SpatialBNOp<MKLContext> {
         running_mean_buf = (T*)running_mean->buffer();
         running_var_buf = (T*)running_var->buffer();
       }
-
       Y->Reset(X.dims(), primitive_, dnnResourceDst);
       buffer_.Reset(X.dims(), primitive_, dnnResourceDst, true);
 
