@@ -21,8 +21,6 @@ class MKLConvOp final : public ConvPoolOpBase<MKLContext> {
         "Uneven padding not supported.");
     OPERATOR_NEEDS_FEATURE(
         order_ == StorageOrder::NCHW, "Only NCHW order supported.");
-    OPERATOR_NEEDS_FEATURE(
-        group_ == 1, "Group convolution not supported yet.");
   }
   ~MKLConvOp() {}
 
@@ -30,6 +28,7 @@ class MKLConvOp final : public ConvPoolOpBase<MKLContext> {
   bool RunOnDeviceWithOrderNCHW() override {
     const auto& X = OperatorBase::Input<MKLMemory<float>>(INPUT);
     const auto& filter = OperatorBase::Input<MKLMemory<float>>(FILTER);
+
     const int M = filter.dim32(0);
     if (InputSize() == 2 && !zero_bias_) {
       TensorCPU cpu_zero_bias;
@@ -54,11 +53,16 @@ class MKLConvOp final : public ConvPoolOpBase<MKLContext> {
     CHECK_INPUT_FILTER_DIMS(dims_changed);
     if (dims_changed) {
       CAFFE_ENFORCE(
-          C == filter.dim32(1),
-          "Convolution op: # of input channels ",
+          C == filter.dim32(1) * group_,
+          "Convolution op: input channels does not match: # of input channels ",
           C,
-          " is not equal to kernel channels:",
-          filter.dim32(1));
+          " is not equal to kernel channels * group:",
+          filter.dim32(1),
+          "*",
+          group_);
+      CAFFE_ENFORCE(
+          M % group_ == 0,
+          "The number of output channels is not divisible by group.");
       CAFFE_ENFORCE(filter.dim32(2) == kernel_h());
       CAFFE_ENFORCE(filter.dim32(3) == kernel_w());
       CAFFE_ENFORCE(bias.ndim() == 1);
@@ -75,24 +79,39 @@ class MKLConvOp final : public ConvPoolOpBase<MKLContext> {
       size_t tdata_sizes[4] = {
           dummy_output.dim(3), dummy_output.dim(2),
           dummy_output.dim(1), dummy_output.dim(0)};
-      size_t fdata_sizes[4] = {kernel_w(), kernel_h(), C, M};
+      size_t fdata_sizes[5] = {
+          kernel_w(), kernel_h(), C / group_, M / group_, group_};
       size_t strides[2] = {stride_w(), stride_h()};
       int pads[2] = {-pad_l(), -pad_t()};
 
-      primitive_.Reset(
-          dnnConvolutionCreateForwardBias<float>,
-          nullptr,
-          dnnAlgorithmConvolutionDirect,
-          dimension,
-          bdata_sizes,
-          tdata_sizes,
-          fdata_sizes,
-          strides,
-          pads,
-          dnnBorderZeros);
+      if (group_ > 1) {
+        primitive_.Reset(
+            dnnGroupsConvolutionCreateForwardBias<float>,
+            nullptr,
+            dnnAlgorithmConvolutionDirect,
+            group_,
+            dimension,
+            bdata_sizes,
+            tdata_sizes,
+            fdata_sizes,
+            strides,
+            pads,
+            dnnBorderZeros);
+      } else {
+        primitive_.Reset(
+            dnnConvolutionCreateForwardBias<float>,
+            nullptr,
+            dnnAlgorithmConvolutionDirect,
+            dimension,
+            bdata_sizes,
+            tdata_sizes,
+            fdata_sizes,
+            strides,
+            pads,
+            dnnBorderZeros);
+      }
       Y->Reset(dummy_output.dims(), primitive_, dnnResourceDst);
       buffer_.Reset(dummy_output.dims(), primitive_, dnnResourceDst, true);
-
       input_layout_.Reset(primitive_, dnnResourceSrc);
       filter_layout_.Reset(primitive_, dnnResourceFilter);
       bias_layout_.Reset(primitive_, dnnResourceBias);
@@ -102,13 +121,31 @@ class MKLConvOp final : public ConvPoolOpBase<MKLContext> {
     // operations, if the output is already allocated and is having the same
     // layout as the buffer has.
     buffer_.ShareFrom(*Y);
+
     std::shared_ptr<void> X_view = X.View(
         input_layout_, primitive_, dnnResourceSrc);
-    std::shared_ptr<void> filter_view = filter.View(
-        filter_layout_, primitive_, dnnResourceFilter);
-    std::shared_ptr<void> bias_view = bias.View(
-        bias_layout_, primitive_, dnnResourceBias);
-    resources_[dnnResourceSrc] = X_view.get();
+    std::shared_ptr<void> bias_view =
+        bias.View(bias_layout_, primitive_, dnnResourceBias);
+    std::shared_ptr<void> filter_view;
+    if (group_ > 1) {
+      // Explicitly reformat the buffer.
+      MKLMemory<float> group_filter(
+          std::vector<TIndex>{TIndex(group_),
+                              TIndex(filter.dim32(0) / group_),
+                              TIndex(filter.dim32(1)),
+                              TIndex(filter.dim32(2)),
+                              TIndex(filter.dim32(3))},
+          nullptr,
+          dnnResourceFilter,
+          /*share_memory_if_possible=*/true);
+      group_filter.CopyFrom(filter.buffer());
+      filter_view =
+          group_filter.View(filter_layout_, primitive_, dnnResourceFilter);
+    } else {
+      filter_view = filter.View(filter_layout_, primitive_, dnnResourceFilter);
+    }
+
+    resources_[dnnResourceSrc] = X_view.get(); // X.buffer();
     resources_[dnnResourceFilter] = filter_view.get();
     resources_[dnnResourceBias] = bias_view.get();
     resources_[dnnResourceDst] = buffer_.buffer();
