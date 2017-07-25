@@ -35,39 +35,41 @@ def batchnorm_double_backwards_fn(input, gamma, ggI, ggG, ggB, gO, eps):
 
     # define some terms we will reuse
     M = reduce(mul, input.size()[0:1] + input.size()[2:])
-    mu = sum_exclude_dim1(input).div(M)
+    mu = sum_exclude_dim1(input).div_(M)
     input_sub_mu = input - mu
-    sigma2_eps = sum_exclude_dim1(input_sub_mu.pow(2)).div(M) + eps
+    sigma2_eps = sum_exclude_dim1(input_sub_mu.pow(2)).div_(M).add_(eps)
     sigma2_eps_neg_1_2 = (sigma2_eps).pow(-1. / 2)
     sigma2_eps_neg_3_2 = (sigma2_eps).pow(-3. / 2)
 
     # calculate gI
     input_mu_sigma2_neg_3_2 = (input_sub_mu * sigma2_eps_neg_3_2)
     gOinmu_sum = sum_exclude_dim1(gO * input_sub_mu)
+    gO_sum = sum_exclude_dim1(gO)
 
     # start with contribution of input term
     gI = None
     if ggI is not None:
+        ggI_sum = sum_exclude_dim1(ggI)
         ggIinmu_sum = sum_exclude_dim1(ggI * input_sub_mu)
-        all_sub = (1. / M * sum_exclude_dim1(ggI) * sum_exclude_dim1(gO) - sum_exclude_dim1(gO * ggI) +
-                   3. / M * (sigma2_eps).pow(-1) * gOinmu_sum * ggIinmu_sum)
-        gI_0t = 1. / M * input_mu_sigma2_neg_3_2 * all_sub
-        gI_1t = 1. / M * (ggIinmu_sum * sigma2_eps_neg_3_2) * (1. / M * sum_exclude_dim1(gO) - gO)
-        gI_2t = 1. / M * (gOinmu_sum * sigma2_eps_neg_3_2) * (1. / M * sum_exclude_dim1(ggI) - ggI)
-        gI = gamma_expanded * (gI_0t + gI_1t + gI_2t)
+        all_sub = ((ggI_sum * gO_sum).div_(M)).sub_(sum_exclude_dim1(gO * ggI)).add_(
+                   ((sigma2_eps).pow(-1) * gOinmu_sum * ggIinmu_sum).mul_(3. / M))
+        gI_0t = (input_mu_sigma2_neg_3_2 * all_sub).div_(M)
+        gI_1t = (ggIinmu_sum * sigma2_eps_neg_3_2).div_(M) * (gO_sum.div(M) - gO)
+        gI_2t = (gOinmu_sum * sigma2_eps_neg_3_2).div_(M) * (ggI_sum.div(M) - ggI)
+        gI = gamma_expanded * (gI_0t.add_(gI_1t).add_(gI_2t))
 
     # add contribution of gamma term to gI
     if affine and ggG is not None:
         t0 = gO * sigma2_eps_neg_1_2
-        t1 = -1. / M * sigma2_eps_neg_1_2 * sum_exclude_dim1(gO)
-        t2 = -1. / M * input_mu_sigma2_neg_3_2 * sum_exclude_dim1(gO * input_sub_mu)
-        gI_G_term = ggG_expanded * (t0 + t1 + t2)
-        gI = gI + gI_G_term if gI is not None else gI_G_term
+        t1 = (sigma2_eps_neg_1_2 * gO_sum).div_(-M)
+        t2 = (input_mu_sigma2_neg_3_2 * sum_exclude_dim1(gO * input_sub_mu)).div_(-M)
+        gI_G_term = ggG_expanded * (t0.add_(t1).add_(t2))
+        gI = gI.add_(gI_G_term) if gI is not None else gI_G_term
 
     # this is the first backward's grad_input
     def first_back_grad_input(gO, gamma):
-        h0 = (gamma / (sigma2_eps).sqrt()).div(M)
-        h1 = M * gO - sum_exclude_dim1(gO) - input_sub_mu.div(sigma2_eps) * sum_exclude_dim1(gO * input_sub_mu)
+        h0 = (gamma / (sigma2_eps).sqrt()).div_(M)
+        h1 = (M * gO).sub_(sum_exclude_dim1(gO)).sub_(input_sub_mu.div(sigma2_eps) * sum_exclude_dim1(gO * input_sub_mu))
         return h0 * h1
 
     # calculate gG
@@ -87,9 +89,9 @@ def batchnorm_double_backwards_fn(input, gamma, ggI, ggG, ggB, gO, eps):
         ggO = first_back_grad_input(ggI, gamma_expanded)
     if ggG is not None:
         ggO_G_term = ggG_expanded * input_sub_mu * sigma2_eps_neg_1_2
-        ggO = ggO + ggO_G_term if ggO is not None else ggO_G_term
+        ggO = ggO.add_(ggO_G_term) if ggO is not None else ggO_G_term
     if ggB is not None:
         ggO_B_term = ggB_expanded
-        ggO = ggO + ggO_B_term if ggO is not None else ggO_B_term
+        ggO = ggO.add_(ggO_B_term) if ggO is not None else ggO_B_term
 
     return gI, gG, gB, ggO
