@@ -140,20 +140,25 @@ bool SoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
     const float* label_data = T.data<float>();
 
     for (int i = 0; i < N; ++i) {
-      CAFFE_ENFORCE(
-          label_data[i] >= 0,
-          "Label prob seems incorrect: label prob value must be nonnegative: ",
-          label_data[i]);
       float l = 0.0;
       float total_prob = 0.0;
       float weight = weights ? weights[i] : 1.0;
       for (int j = 0; j < D; ++j) {
+        CAFFE_ENFORCE(
+            label_data[i * D + j] >= 0,
+            "Label prob seems incorrect: label prob value must be nonnegative:",
+            " ",
+            label_data[i * D + j]);
         l += -log(std::max(Pdata[i * D + j], 1e-20f)) * label_data[i * D + j] *
             weight;
         total_prob += label_data[i * D + j];
       }
       loss_sum += l;
-      DCHECK(std::abs(total_prob - 1.) < 1e-5f);
+      CAFFE_ENFORCE(
+          std::abs(total_prob - 1.) < 1e-5f,
+          "Label prob seems incorrect: label prob values do not sum to 1.0: ",
+          total_prob,
+          " vs 1.0 (+/- 1e-5)");
       weight_sum += weight;
     }
   }
