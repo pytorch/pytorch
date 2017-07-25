@@ -2828,39 +2828,8 @@ TENSOR_IMPLEMENT_LOGICAL(le,<=)
 TENSOR_IMPLEMENT_LOGICAL(ge,>=)
 TENSOR_IMPLEMENT_LOGICAL(eq,==)
 TENSOR_IMPLEMENT_LOGICAL(ne,!=)
-                                                     \
-#define VECTOR_IMPLEMENT_FUNCTION(NAME, CFUNC)  \
-  void THVector_(NAME)(real *y, const real *x, const ptrdiff_t n) \
-  { \
-    ptrdiff_t i = 0;  \
-    for(; i<n-4; i+=4)  \
-    { \
-      y[i] = CFUNC(x[i]); \
-      y[i+1] = CFUNC(x[i+1]); \
-      y[i+2] = CFUNC(x[i+2]); \
-      y[i+3] = CFUNC(x[i+3]); \
-    } \
-    for(; i < n; i++) \
-      y[i] = CFUNC(x[i]); \
-  } \
-
-#define VECTOR_IMPLEMENT_FUNCTION_VALUE(NAME, CFUNC)  \
-  void THVector_(NAME)(real *y, const real *x, const real c, const ptrdiff_t n) \
-  { \
-    ptrdiff_t i = 0;  \
-    for(; i<n-4; i+=4)  \
-    { \
-      y[i] = CFUNC(x[i], c);  \
-      y[i+1] = CFUNC(x[i+1], c);  \
-      y[i+2] = CFUNC(x[i+2], c);  \
-      y[i+3] = CFUNC(x[i+3], c);  \
-    } \
-    for(; i < n; i++) \
-      y[i] = CFUNC(x[i], c);  \
-  } \
 
 #define LAB_IMPLEMENT_BASIC_FUNCTION(NAME, CFUNC)             \
-  VECTOR_IMPLEMENT_FUNCTION(NAME, CFUNC)  \
   void THTensor_(NAME)(THTensor *r_, THTensor *t)                \
   {                                                           \
     THTensor_(resizeAs)(r_, t);                               \
@@ -2872,7 +2841,6 @@ TENSOR_IMPLEMENT_LOGICAL(ne,!=)
   }                                                           \
 
 #define LAB_IMPLEMENT_BASIC_FUNCTION_VALUE(NAME, CFUNC)                 \
-  VECTOR_IMPLEMENT_FUNCTION_VALUE(NAME, CFUNC)  \
   void THTensor_(NAME)(THTensor *r_, THTensor *t, real value)              \
   {                                                                     \
     THTensor_(resizeAs)(r_, t);                                         \
