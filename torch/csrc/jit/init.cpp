@@ -21,6 +21,12 @@ PyObject * THPJIT_initExtension(PyObject *_unused)
   Py_RETURN_TRUE;
 }
 
+// stub to run all C++ only tests for the JIT
+// the stuff in test_jit.cpp is kept separate from the rest of PyTorch
+// so we can build and iterate on it faster.
+// from test_jit.cpp
+namespace torch  { namespace jit { extern void runJITCPPTests(); } };
+
 namespace {
 
 using namespace torch::jit;
@@ -37,12 +43,20 @@ PyObject * wrap_optimizer(PyObject *_unused, PyObject *py_graph) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject * run_cpp_tests(PyObject *_unused, PyObject *_unused2) {
+    HANDLE_TH_ERRORS
+    runJITCPPTests();
+    Py_RETURN_NONE;
+    END_HANDLE_TH_ERRORS
+}
+
 struct PyMethodDef _THPJIT_methods[] = {
   {"_jit_init",       (PyCFunction)THPJIT_initExtension,      METH_NOARGS,  NULL},
   {"_tracer_enter",   (PyCFunction)THPTracer_enter,           METH_VARARGS, NULL},
   {"_tracer_exit",    (PyCFunction)THPTracer_exit,            METH_VARARGS, NULL},
   {"_jit_createAutogradClosure", (PyCFunction)THPTracer_createAutogradClosure, METH_O, NULL},
   {"_jit_optim_fuse", (PyCFunction)wrap_optimizer<FuseGraph>, METH_O,       NULL},
+  {"_jit_run_cpp_tests",(PyCFunction)run_cpp_tests,           METH_NOARGS,  NULL},
   {NULL}
 };
 

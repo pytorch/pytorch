@@ -51,6 +51,10 @@ class TestJit(TestCase):
         self.assertEqual(z, z2)
         self.assertEqual(w, w2)
 
+    def test_cpp(self):
+        torch._C._jit_run_cpp_tests()
+
 
 if __name__ == '__main__':
+
     run_tests()
