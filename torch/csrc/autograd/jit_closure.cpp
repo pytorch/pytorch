@@ -142,29 +142,19 @@ std::unique_ptr<AutogradClosure> createAutogradClosure(Graph *graph) {
   auto& inputs = result->roots;
 
   // Prepare output node.
-  Node *output = *graph->nodes().rbegin();
+  Node *output = graph->return_node();
   result->output = std::make_shared<Output>(output->inputs().size());
   node_map[output] = result->output;
 
-  // Iterate over nodes and inputs.
-  // NOTE: First ++ will skip the Return node.
-  auto nodes_it = ++graph->nodes().rbegin();
-  auto inputs_it = graph->inputs().rbegin();
-  auto next_node = [graph, &nodes_it, &inputs_it]() -> Node* {
-    if (nodes_it != graph->nodes().rend()) {
-      return *(nodes_it++);
-    } else if (inputs_it != graph->inputs().rend()) {
-      return *(inputs_it++);
-    } else {
-      return nullptr;
-    }
-  };
-  while (Node *node = next_node()) {
+  // Builds up a closure for node. It assumes that it has been called
+  // for all nodes that use outputs of node, which is why we iterate
+  // in reverse topological order.
+  auto add_node = [&](Node *node) {
     auto& uses = node->uses();
     auto& inputs = node->inputs();
     std::shared_ptr<Function> fn;
 
-    if (uses.size() == 0) continue; // Dead code elimination
+    if (uses.size() == 0) return; // Dead code elimination
 
     IR_IF(node, PythonOp)
       auto name = value->name();
@@ -180,7 +170,7 @@ std::unique_ptr<AutogradClosure> createAutogradClosure(Graph *graph) {
       throw std::runtime_error("don't know how to execute SimpleMaps");
     IR_ELSEIF(Select)
       // No-op. Selects are handled by their inputs.
-      continue;
+      return;
     IR_ELSEIF(FusionGroup)
       // TODO: Add an op for fusion groups once we can compile them
       throw std::runtime_error("don't know how to execute FusionGroups");
@@ -229,6 +219,13 @@ std::unique_ptr<AutogradClosure> createAutogradClosure(Graph *graph) {
     }
 
     node_map[node] = fn;
+  };
+
+  for (auto it = graph->nodes().rbegin(), end = graph->nodes().rend(); it != end; ++it) {
+    add_node(*it);
+  }
+  for (auto it = graph->inputs().rbegin(), end = graph->inputs().rend(); it != end; ++it) {
+    add_node(*it);
   }
 
   // Prepare inputs. They serve as an analog of the Select node in the IR.
