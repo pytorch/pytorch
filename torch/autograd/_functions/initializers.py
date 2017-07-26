@@ -1,5 +1,6 @@
 from ..function import InplaceFunction
 
+
 class Zero(InplaceFunction):
 
     @staticmethod
@@ -16,5 +17,4 @@ class Zero(InplaceFunction):
     @staticmethod
     def backward(ctx, grad_output):
         result, = ctx.saved_variables
-        return result.new(result.size()).zero_();
-
+        return result.new(result.size()).zero_()
