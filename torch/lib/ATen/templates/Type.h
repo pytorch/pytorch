@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <limits>
 
 #include "ATen/ArrayRef.h"
 #include "ATen/Half.h"
@@ -44,6 +45,18 @@ constexpr Backend kCPU = Backend::CPU;
 constexpr Backend kCUDA = Backend::CUDA;
 constexpr Backend kSparseCPU = Backend::SparseCPU;
 constexpr Backend kSparseCUDA = Backend::SparseCUDA;
+
+// Note [Undefined-dim versus 0-dim]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// Unlike Torch, ATen treats zero-dimension tensors as having ONE
+// element (that is to say, a zero-dimensional tensor is a scalar!)
+// This is in contrast to Torch, where a zero-dimension tensor has
+// zero elements.
+//
+// Because we are backed by Torch tensors, we need to be able to
+// represent this state (of numel==0).  kUndefinedDimensions represents this
+// situation.
+constexpr int64_t kUndefinedDimensions = std::numeric_limits<int64_t>::min();
 
 static inline const char * toString(Backend b) {
   switch(b) {
