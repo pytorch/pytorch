@@ -42,14 +42,18 @@ struct TracingState {
 
   Node* getValueTrace(torch::autograd::Variable* var, bool mustExist = false) {
     assert(tracing());
-    auto& trace_map = frames.back().value_trace;
+    auto& frame = frames.back();
+    auto& trace_map = frame.value_trace;
+    auto& graph = frame.graph;
     if (mustExist) {
       return trace_map.at(var);
     } else {
       auto it = trace_map.find(var);
-      // TODO: handle the case when var is not in the map gracefully
-      if (it == trace_map.end())
-        throw std::runtime_error("TracingState::getValueTrace not fully implemented yet");
+      if (it == trace_map.end()) {
+        Node *constant = graph->appendNewNode<Constant>(var->data);
+        trace_map[var] = constant;
+        return constant;
+      }
       return it->second;
     }
   }

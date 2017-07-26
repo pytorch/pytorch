@@ -51,6 +51,27 @@ class TestJit(TestCase):
         self.assertEqual(z, z2)
         self.assertEqual(w, w2)
 
+    def test_constant(self):
+
+        x = Variable(torch.randn(2, 2), requires_grad=True)
+
+        torch._C._tracer_enter((x,))
+
+        y = Variable(torch.diag(torch.Tensor([2, 2])))
+        z = x @ y
+
+        trace = torch._C._tracer_exit((z,))
+        closure = torch._C._jit_createAutogradClosure(trace)
+
+        z2, = Variable._execution_engine.run_forward(closure, (x,))
+        self.assertEqual(z, z2)
+
+        y.data.fill_(1000)  # make sure the data has been cloned
+
+        x2 = Variable(torch.ones(2, 2) * 2, requires_grad=True)
+        z3, = Variable._execution_engine.run_forward(closure, (x2,))
+        self.assertEqual(z3.data, torch.ones(2, 2) * 4)
+
     def test_cpp(self):
         torch._C._jit_run_cpp_tests()
 
