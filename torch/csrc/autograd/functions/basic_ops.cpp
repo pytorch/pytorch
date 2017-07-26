@@ -47,10 +47,9 @@ auto Mul::apply(const variable_list& inputs) -> variable_list {
   check_input_variables("Mul", inputs, 2);
   auto& input1 = inputs[0]->data;
   auto& input2 = inputs[1]->data;
-  AutoGPU guard(input1->getDevice());
+  AutoGPU guard(input1.type().isCuda() ? input1.get_device() : -1);
 
-  auto output = input1->newTensor();
-  output->cmul(*input1, *input2);
+  auto output = input1 * input2;
 
   return wrap_outputs(inputs, as_tensor_list(std::move(output)), [&](FunctionFlags f) {
     return std::make_shared<MulBackward>(std::move(f), inputs[0]->save(this), inputs[1]->save(this));
