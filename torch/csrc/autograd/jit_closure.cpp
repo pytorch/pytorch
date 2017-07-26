@@ -1,5 +1,7 @@
 #include "torch/csrc/autograd/jit_closure.h"
 
+#include "THPP/THPP.h"
+
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/autograd/functions/basic_ops.h"
@@ -131,6 +133,36 @@ struct PythonCall : public Function {
   std::vector<THPObjectPtr> scalar_args;
 };
 
+struct WrapConstant : public Function {
+  WrapConstant(at::Tensor value)
+    : value(std::move(value)) {
+    is_executable = true;
+    num_inputs = 1;
+  }
+
+  virtual variable_list apply(const variable_list& inputs) {
+    if (inputs.size() != 1 || inputs[0])
+      throw std::logic_error("WrapConstant nodes should only receive a single NULL input");
+    AutoGPU guard(value.type().isCuda() ? value.get_device() : -1);
+    return {std::make_shared<Variable>(value.clone(), false, false)};
+  }
+
+  at::Tensor value;
+};
+
+struct ConstantFactory : public Function {
+  ConstantFactory() {
+    is_executable = true;
+    num_inputs = 1;
+  }
+
+  virtual variable_list apply(const variable_list& inputs) {
+    if (inputs.size() != 1 || inputs[0])
+      throw std::logic_error("Constant nodes should only receive a single NULL input");
+    return variable_list(next_functions.size());
+  }
+};
+
 bool isMultireturn(Node * node) {
   // Either all or no uses are select nodes, so it's enough to check the first one
   return node->uses()[0].user->kind() == NodeKind::Select;
@@ -139,6 +171,7 @@ bool isMultireturn(Node * node) {
 std::unique_ptr<AutogradClosure> createAutogradClosure(Graph *graph) {
   std::unordered_map<Node*, std::shared_ptr<Function>> node_map;
   std::unique_ptr<AutogradClosure> result {new AutogradClosure()};
+  auto const_factory = std::make_shared<ConstantFactory>();
   auto& inputs = result->roots;
 
   // Prepare output node.
@@ -179,13 +212,16 @@ std::unique_ptr<AutogradClosure> createAutogradClosure(Graph *graph) {
       throw std::runtime_error("don't know how to execute FusionGroups");
     IR_ELSEIF(Param)
       fn = std::make_shared<Placeholder>();
+    IR_ELSEIF(Constant)
+      fn = std::make_shared<torch::autograd::WrapConstant>(value->value);
+      const_factory->next_functions.emplace_back(fn, 0);
     IR_ELSE()
       throw std::runtime_error(std::string("unrecognized NodeKind: ") + toString(node->kind()));
     IR_END()
 
     // Update function fields
     fn->is_executable = true;
-    if (node->kind() == NodeKind::Param) {
+    if (node->kind() == NodeKind::Param || node->kind() == NodeKind::Constant) {
       fn->num_inputs = 1;
     } else {
       fn->num_inputs = inputs.size();
@@ -230,6 +266,11 @@ std::unique_ptr<AutogradClosure> createAutogradClosure(Graph *graph) {
   for (auto it = graph->inputs().rbegin(), end = graph->inputs().rend(); it != end; ++it) {
     add_node(*it);
   }
+
+  // First input will always be a ConstantFactory that will trigger creation
+  // of all constant tensors.
+  // TODO: defer creation until they really become needed (memory saving).
+  inputs.emplace_back(std::move(const_factory), 0);
 
   // Prepare inputs. They serve as an analog of the Select node in the IR.
   // Before the closure will be run, an Input node will be appended, and
