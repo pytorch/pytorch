@@ -29,6 +29,7 @@ int64_t ${Tensor}::dim() {
   int64_t d = ${THTensor}_nDimension(${state,}tensor);
   if(d != 0)
     return d;
+  // See Note [Undefined-dim versus 0-dim]
   return kUndefinedDimensions;
 }
 
