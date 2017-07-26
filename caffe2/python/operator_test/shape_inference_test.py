@@ -279,13 +279,17 @@ class TestShapeInference(test_util.TestCase):
     def testShapeInferenceFlatten(self):
         model = model_helper.ModelHelper(name="test_model")
         model.FlattenToVec("X", "FlatVec")
+        model.FlattenToVec("empty", "EmptyFlatVec")
         workspace.FeedBlob("X", np.random.rand(17, 5, 13).astype(np.float32))
+        workspace.FeedBlob("empty", np.random.rand(0, 2, 3).astype(np.float32))
 
         self.InferTensorRunAndCompare(model)
 
         model = model_helper.ModelHelper(name="test_model")
         model.Flatten("X", "Flat")
+        model.Flatten("empty", "EmptyFlat")
         workspace.FeedBlob("X", np.random.rand(17, 5, 13).astype(np.float32))
+        workspace.FeedBlob("empty", np.random.rand(0, 2, 3).astype(np.float32))
 
         self.InferTensorRunAndCompare(model)
 

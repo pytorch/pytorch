@@ -193,10 +193,9 @@ class FlattenOp : public Operator<Context> {
   bool RunOnDevice() override {
     auto& input = Input(0);
     auto* output = Output(0);
-    DCHECK_GT(input.size(), 0);
     CAFFE_ENFORCE_GE(
         input.dims().size(), 2, "The rank of the tensor must be >= 2.");
-    output->Resize(input.dim(0), input.size() / input.dim(0));
+    output->Resize(input.dim(0), input.size_from_dim(1));
     context_.template CopyItems<Context, Context>(
         input.meta(),
         input.size(),
@@ -215,7 +214,6 @@ class FlattenToVecOp : public Operator<Context> {
   bool RunOnDevice() override {
     auto& input = Input(0);
     auto* output = Output(0);
-    DCHECK_GT(input.size(), 0);
     CAFFE_ENFORCE_GE(
         input.dims().size(), 1, "The rank of the tensor must be >= 1.");
     output->Resize(input.size());
