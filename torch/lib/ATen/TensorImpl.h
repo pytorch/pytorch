@@ -20,7 +20,7 @@ struct TensorImpl {
   virtual int64_t dim() = 0;
   virtual Scalar localScalar() = 0;
   virtual void assign_(Scalar s) = 0;
-  virtual void * unsafeGetTH() = 0;
+  virtual void * unsafeGetTH(bool retain) = 0;
   void retain() {
     ++refcount;
   }
