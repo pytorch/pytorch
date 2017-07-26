@@ -1,5 +1,4 @@
 from ..function import InplaceFunction
-from .tensor import NoGrad
 
 class Zero(InplaceFunction):
 
