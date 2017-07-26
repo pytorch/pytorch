@@ -421,7 +421,6 @@ public:
   Graph()
   : next_unique_(0) {
     output_ = create<Return>();
-    output_->insertAt(nodes_.begin());
   }
 
   const param_list & inputs() {
@@ -432,6 +431,9 @@ public:
   }
   const graph_node_list & nodes() {
     return nodes_;
+  }
+  Node * return_node() {
+    return output_;
   }
 
   Param * addInput() {
@@ -479,7 +481,7 @@ public:
   }
 
   Node * appendNode(Node * n) {
-    n->insertBefore(output_);
+    n->insertAt(nodes_.end());
     return n;
   }
 
