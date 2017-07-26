@@ -10,7 +10,7 @@ void THNN_(LogSigmoid_updateOutput)(
 {
   THTensor_(resizeAs)(output, input);
   THTensor_(resizeAs)(buffer, input);
-  //Use the LogSumExp trick to make this stable against underflow
+  //Use the LogSumExp trick to make this stable against overflow
   TH_TENSOR_APPLY3(real, output, real, input, real, buffer,
     real max_elem = fmax(0, -*input_data);
     real z = exp(-max_elem) + exp(-*input_data - max_elem);
