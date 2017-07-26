@@ -531,12 +531,11 @@ CAFFE_DECLARE_REGISTRY(
     Workspace*);
 #define REGISTER_CPU_OPERATOR_CREATOR(key, ...) \
   CAFFE_REGISTER_CREATOR(CPUOperatorRegistry, key, __VA_ARGS__)
-#define REGISTER_CPU_OPERATOR(name, ...)                      \
-  extern void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(); \
-  static void __attribute__((__unused__))                     \
-      CAFFE_ANONYMOUS_VARIABLE_CPU##name() {                  \
-    CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();           \
-  }                                                           \
+#define REGISTER_CPU_OPERATOR(name, ...)                           \
+  extern void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();      \
+  static void CAFFE2_UNUSED CAFFE_ANONYMOUS_VARIABLE_CPU##name() { \
+    CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                \
+  }                                                                \
   CAFFE_REGISTER_CLASS(CPUOperatorRegistry, name, __VA_ARGS__)
 #define REGISTER_CPU_OPERATOR_STR(str_name, ...) \
   CAFFE_REGISTER_TYPED_CLASS(CPUOperatorRegistry, str_name, __VA_ARGS__)
@@ -551,12 +550,11 @@ CAFFE_DECLARE_REGISTRY(
     Workspace*);
 #define REGISTER_CUDA_OPERATOR_CREATOR(key, ...) \
   CAFFE_REGISTER_CREATOR(CUDAOperatorRegistry, key, __VA_ARGS__)
-#define REGISTER_CUDA_OPERATOR(name, ...)                     \
-  extern void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(); \
-  static void __attribute__((__unused__))                     \
-      CAFFE_ANONYMOUS_VARIABLE_CUDA##name() {                 \
-    CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();           \
-  }                                                           \
+#define REGISTER_CUDA_OPERATOR(name, ...)                           \
+  extern void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();       \
+  static void CAFFE2_UNUSED CAFFE_ANONYMOUS_VARIABLE_CUDA##name() { \
+    CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                 \
+  }                                                                 \
   CAFFE_REGISTER_CLASS(CUDAOperatorRegistry, name, __VA_ARGS__)
 #define REGISTER_CUDA_OPERATOR_STR(str_name, ...) \
   CAFFE_REGISTER_TYPED_CLASS(CUDAOperatorRegistry, str_name, __VA_ARGS__)
