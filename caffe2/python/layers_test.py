@@ -887,39 +887,48 @@ class TestLayers(LayersTestCase):
         input_dims=st.integers(min_value=5, max_value=10),
         output_dims=st.integers(min_value=5, max_value=10),
         s=st.integers(min_value=0, max_value=3),
-        scale=st.floats(min_value=0.1, max_value=5)
+        scale=st.floats(min_value=0.1, max_value=5),
+        set_weight_as_global_constant=st.booleans()
     )
-    def testArcCosineFeatureMap(self, batch_size, input_dims, output_dims, s, scale):
+    def testArcCosineFeatureMap(self, batch_size, input_dims, output_dims, s, scale,
+                                set_weight_as_global_constant):
         X = np.random.normal(size=(batch_size, input_dims)).astype(np.float32)
         input_record = self.new_record(schema.Scalar((np.float32, (input_dims,))))
         schema.FeedRecord(input_record, [X])
         input_blob = input_record.field_blobs()[0]
 
-        ac_output = self.model.ArcCosineFeatureMap(input_record,
-                                                   output_dims,
-                                                   s=s,
-                                                   scale=scale)
+        ac_output = self.model.ArcCosineFeatureMap(
+            input_record,
+            output_dims,
+            s=s,
+            scale=scale,
+            set_weight_as_global_constant=set_weight_as_global_constant
+        )
         self.model.output_schema = schema.Struct()
         self.assertEqual(
             schema.Scalar((np.float32, (output_dims, ))),
             ac_output
         )
 
-        init_ops_list = [
-            OpSpec("GaussianFill", None, None),
-            OpSpec("UniformFill", None, None),
-        ]
         train_init_net, train_net = self.get_training_nets()
 
-        # Init net assertions
-        init_ops = self._test_net(train_init_net, init_ops_list)
-        workspace.RunNetOnce(self.model.param_init_net)
-        W = workspace.FetchBlob(self.model.layers[0].random_w)
-        b = workspace.FetchBlob(self.model.layers[0].random_b)
+        # Run create_init_net to initialize the global constants, and W and b
+        workspace.RunNetOnce(train_init_net)
+        workspace.RunNetOnce(self.model.create_init_net(name='init_net'))
+
+        if set_weight_as_global_constant:
+            W = workspace.FetchBlob(
+                self.model.global_constants['arc_cosine_feature_map_fixed_rand_W']
+            )
+            b = workspace.FetchBlob(
+                self.model.global_constants['arc_cosine_feature_map_fixed_rand_b']
+            )
+        else:
+            W = workspace.FetchBlob(self.model.layers[0].random_w)
+            b = workspace.FetchBlob(self.model.layers[0].random_b)
 
         # Operation specifications
-        fc_spec = OpSpec("FC", [input_blob, init_ops[0].output[0],
-                         init_ops[1].output[0]], None)
+        fc_spec = OpSpec("FC", [input_blob, None, None], None)
         gt_spec = OpSpec("GT", None, None, {'broadcast': 1})
         cast_spec = OpSpec("Cast", None, ac_output.field_blobs())
         relu_spec = OpSpec("Relu", None, None)
@@ -990,18 +999,23 @@ class TestLayers(LayersTestCase):
         input_dims=st.integers(min_value=5, max_value=10),
         output_dims=st.integers(min_value=5, max_value=10),
         s=st.integers(min_value=0, max_value=3),
-        scale=st.floats(min_value=0.1, max_value=5)
+        scale=st.floats(min_value=0.1, max_value=5),
+        set_weight_as_global_constant=st.booleans(),
     )
-    def testSemiRandomFeatures(self, batch_size, input_dims, output_dims, s, scale):
+    def testSemiRandomFeatures(self, batch_size, input_dims, output_dims, s, scale,
+                               set_weight_as_global_constant):
         X = np.random.normal(size=(batch_size, input_dims)).astype(np.float32)
         input_record = self.new_record(schema.Scalar((np.float32, (input_dims,))))
         schema.FeedRecord(input_record, [X])
         input_blob = input_record.field_blobs()[0]
 
-        srf_output = self.model.SemiRandomFeatures(input_record,
-                                                   output_dims,
-                                                   s=s,
-                                                   scale=scale)
+        srf_output = self.model.SemiRandomFeatures(
+            input_record,
+            output_dims,
+            s=s,
+            scale=scale,
+            set_weight_as_global_constant=set_weight_as_global_constant
+        )
         self.model.output_schema = schema.Struct()
         self.assertEqual(
             schema.Scalar((np.float32, (output_dims, ))),
@@ -1016,19 +1030,34 @@ class TestLayers(LayersTestCase):
         ]
         train_init_net, train_net = self.get_training_nets()
 
-        # Init net assertions
-        init_ops = self._test_net(train_init_net, init_ops_list)
         # Need to run to initialize the global constants for layer
-        workspace.RunNetOnce(self.model.param_init_net)
+        workspace.RunNetOnce(self.model.create_init_net(name='init_net'))
 
-        rand_w = workspace.FetchBlob(self.model.layers[0].random_w)
-        rand_b = workspace.FetchBlob(self.model.layers[0].random_b)
+        if set_weight_as_global_constant:
+            # If weight params are global constants, they won't be in train_init_net
+            init_ops = self._test_net(train_init_net, init_ops_list[:2])
+            rand_w = workspace.FetchBlob(
+                self.model.global_constants['semi_random_features_fixed_rand_W']
+            )
+            rand_b = workspace.FetchBlob(
+                self.model.global_constants['semi_random_features_fixed_rand_b']
+            )
 
-        # Operation specifications
-        fc_random_spec = OpSpec("FC", [input_blob, init_ops[0].output[0],
-                                init_ops[1].output[0]], None)
-        fc_learned_spec = OpSpec("FC", [input_blob, init_ops[2].output[0],
-                                 init_ops[3].output[0]], None)
+            # Operation specifications
+            fc_random_spec = OpSpec("FC", [input_blob, None, None], None)
+            fc_learned_spec = OpSpec("FC", [input_blob, init_ops[0].output[0],
+                                     init_ops[1].output[0]], None)
+        else:
+            init_ops = self._test_net(train_init_net, init_ops_list)
+            rand_w = workspace.FetchBlob(self.model.layers[0].random_w)
+            rand_b = workspace.FetchBlob(self.model.layers[0].random_b)
+
+            # Operation specifications
+            fc_random_spec = OpSpec("FC", [input_blob, init_ops[0].output[0],
+                                    init_ops[1].output[0]], None)
+            fc_learned_spec = OpSpec("FC", [input_blob, init_ops[2].output[0],
+                                     init_ops[3].output[0]], None)
+
         gt_spec = OpSpec("GT", None, None)
         cast_spec = OpSpec("Cast", None, None)
         relu_spec = OpSpec("Relu", None, None)
