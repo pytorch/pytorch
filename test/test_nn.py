@@ -3352,7 +3352,6 @@ new_module_tests = [
         constructor=lambda: nn.Conv1d(4, 6, kernel_size=3, groups=2),
         input_size=(2, 4, 6),
         cudnn=True,
-        check_gradgrad=False,
     ),
     dict(
         module_name='ConvTranspose1d',
@@ -3430,13 +3429,11 @@ new_module_tests = [
         constructor=lambda: nn.Conv2d(4, 6, (3, 2), groups=2),
         input_size=(2, 4, 6, 5),
         cudnn=True,
-        check_gradgrad=False,
     ),
     dict(
         fullname='Conv2d_groups_thnn',
         constructor=lambda: nn.Conv2d(4, 6, (3, 2), groups=2),
         input_size=(2, 4, 6, 5),
-        check_gradgrad=False,
     ),
     dict(
         module_name='ConvTranspose2d',
