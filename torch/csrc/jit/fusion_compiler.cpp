@@ -2,6 +2,7 @@
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/DisallowCopy.h"
 #include "torch/csrc/jit/code_template.h"
+#include "torch/csrc/jit/resource_guard.h"
 #include "ATen/ATen.h"
 #include <nvrtc.h>
 #include <cuda.h>
@@ -11,21 +12,20 @@
 #include <unordered_map>
 #include <vector>
 #include <sstream>
-#include <assert.h>
 #include <iostream>
 
 namespace torch { namespace jit {
 
-void findContiguous(
+std::vector<bool> findContiguous(
   at::IntList sizes,
-  at::IntList strides,
-  std::vector<bool> & cont) {
-  assert(sizes.size() == strides.size());
-  cont.resize(sizes.size());
+  at::IntList strides) {
+  JIT_ASSERT(sizes.size() == strides.size());
+  std::vector<bool> cont(sizes.size());
   for(size_t i = 0; i < sizes.size(); ++i) {
     int64_t expected_stride = (i + 1 < sizes.size()) ? sizes[i+1]*strides[i+1] : 1;
     cont[i] = strides[i] == expected_stride;
   }
+  return cont;
 }
 
 // compress dimensions when the tensor is marked as cont
@@ -36,7 +36,7 @@ static void compressContiguous(
   const std::vector<bool> & cont,
   uint32_t * c_sizes,
   uint32_t * c_strides) {
-  size_t c = 0;
+  size_t compressed_dims = 0;
   size_t cur = 0;
   size_t ndim = sizes.size();
   while(cur < ndim) {
@@ -67,9 +67,9 @@ static void compressContiguous(
    //  t t f x
    //  s     e
 
-    c_sizes[c] = total_size;
-    c_strides[c] = strides[cur-1];
-    c++;
+    c_sizes[compressed_dims] = total_size;
+    c_strides[compressed_dims] = strides[cur-1];
+    compressed_dims++;
   }
   JIT_ASSERT(!cont.back() || strides.back() == 1);
 }
@@ -134,9 +134,10 @@ static std::string nodeName(Node * n) {
   return "n"+std::to_string(n->unique());
 }
 
+// TODO: we need to support double-precision
 static std::unordered_map<std::string,std::string> simple_map_ops = {
   {"Sigmoid","1.f / (1.f + expf(-${0}))"},
-  {"Tanh","tanh(${0})"},
+  {"Tanh","tanhf(${0})"},
   {"Mul","${0} * ${1}"},
   {"Add","${0} + ${1}"},
 };
@@ -158,6 +159,7 @@ void emitCompilationUnit(std::ostream & out,
   Graph& subgraph = *agraph.graph;
   TemplateEnv env;
   env.s("kernelName",name);
+  // TODO: handle cases where we need to generate > 2^32 element tensors
   env.s("IndexType","unsigned int"); //avoiding slow header includes to get uint32_t
 
   std::stringstream body;
@@ -187,7 +189,7 @@ void emitCompilationUnit(std::ostream & out,
     env.s("node",nodeName(p));
     env.d("formal",formal_count++);
     env.s("access",format("t${formal}.data[t${formal}_offset]",env));
-    // TODO: auto doesn't work so we need to do shape/type inference
+    //TODO: actual type propagation rather than relying on auto..
     body << format("auto ${node} = ${access};\n",env);
   }
   for(auto n_ : subgraph.nodes()) {
@@ -225,8 +227,6 @@ static void nvrtcCheck(nvrtcResult result,const char * file, int line) {
 #define JIT_NVRTC_CHECK(result) \
   nvrtcCheck(result,__FILE__,__LINE__);
 
-#define JIT_CU_CHECK(result) \
-  cuCheck(result,__FILE__,__LINE__);
 static void cuCheck(CUresult result, const char * file, int line) {
   if(result != CUDA_SUCCESS) {
     const char * str;
@@ -249,7 +249,7 @@ static void cudaCheck(cudaError_t result, const char * file, int line) {
 #define JIT_CUDA_CHECK(result) \
     cudaCheck(result,__FILE__,__LINE__);
 
-static int cielDiv(int a, int b) {
+static int ceilDiv(int a, int b) {
   return (a + b - 1) / b;
 }
 
@@ -257,12 +257,12 @@ static int cielDiv(int a, int b) {
 //note dims[0], because we need to dynamically allocate the dims
 struct TensorInfo {
   void * data;
-  uint32_t dims[0];
+  uint32_t sizes_strides[0];
   uint32_t* sizes(size_t nDim) {
-    return &dims[0];
+    return &sizes_strides[0];
   }
   uint32_t* strides(size_t nDim) {
-    return &dims[nDim];
+    return &sizes_strides[nDim];
   }
 };
 
@@ -287,12 +287,14 @@ CompiledFusionFunction::CompiledFusionFunction(const std::string & name, Annotat
     cu << log.data();
     throw std::runtime_error(cu.str());
   }
+  ResourceGuard holdProgram([&] {
+    JIT_NVRTC_CHECK(nvrtcDestroyProgram(&program));
+  });
   JIT_NVRTC_CHECK(result);
   size_t ptx_size;
   JIT_NVRTC_CHECK(nvrtcGetPTXSize(program, &ptx_size));
   ptx.resize(ptx_size);
   JIT_NVRTC_CHECK(nvrtcGetPTX(program, ptx.data()));
-  JIT_NVRTC_CHECK(nvrtcDestroyProgram(&program));
 
   JIT_CU_CHECK(cuModuleLoadData(&module, ptx.data()));
   JIT_CU_CHECK(cuModuleGetFunction(&function, module, name.c_str()));
@@ -342,8 +344,8 @@ void CompiledFusionFunction::launch(at::ArrayRef<at::Tensor> inputs, at::ArrayRe
 }
 
 void CompiledFusionFunction::launch(uint32_t numel, void ** arguments) {
-int numBlocks = std::min(maxBlocks,cielDiv(numel,blockSize));
-  //std::cout << "maxBlocks = " << maxBlocks << " needed blocks: " << cielDiv(numel,blockSize)
+  int numBlocks = std::min(maxBlocks,ceilDiv(numel,blockSize));
+  //std::cout << "maxBlocks = " << maxBlocks << " needed blocks: " << ceilDiv(numel,blockSize)
   //          << " numblocks =  " << numBlocks;
 
   JIT_CU_CHECK(cuLaunchKernel(
