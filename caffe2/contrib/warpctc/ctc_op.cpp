@@ -19,6 +19,15 @@ OPERATOR_SCHEMA(CTC)
     .NumInputs(4)
     .NumOutputs(3);
 //    .EnforceInputOutputGradient({{0, 0}});
-NO_GRADIENT(CTC);
 
+namespace {
+class GetCTCGradient : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  vector<OperatorDef> GetGradientDefs() override {
+    return SingleGradientDef(
+        "Copy", "", vector<string>{O(0)}, vector<string>{GI(0)});
+  }
+};
+}
+REGISTER_GRADIENT(CTC, GetCTCGradient);
 }
