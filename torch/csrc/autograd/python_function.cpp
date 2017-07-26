@@ -453,6 +453,7 @@ static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
       // output, but Python nodes can't be optimized away, so we simplify the
       // code here.
       Node* sel = GlobalTracingState.current().appendNewNode<Select>(this_expr, i);
+      sel->inferTypeFrom(output_var->cdata->data);
       GlobalTracingState.setValueTrace(output_var->cdata.get(), sel);
     }
     output_var->cdata->output_nr = i;
