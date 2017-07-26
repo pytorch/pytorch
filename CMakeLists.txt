@@ -94,15 +94,16 @@ if(NOT MSVC)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -fPIC")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-narrowing")
 else()
-  if (NOT ${BUILD_SHARED_LIBS})
-    foreach(flag_var
-        CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
-        CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
+  foreach(flag_var
+      CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
+      CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
+    if (NOT ${BUILD_SHARED_LIBS})
       if(${flag_var} MATCHES "/MD")
         string(REGEX REPLACE "/MD" "/MT" ${flag_var} "${${flag_var}}")
       endif(${flag_var} MATCHES "/MD")
-    endforeach(flag_var)
-  endif()
+    endif()
+    set(${flag_var} "${${flag_var}} /MP /bigobj")
+  endforeach(flag_var)
 endif()
 
 if(NOT APPLE AND UNIX)
