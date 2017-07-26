@@ -69,6 +69,11 @@ bool SparseAdagradOp<float, CUDAContext>::DoRunWithType()
   auto N = Input(GRAD).size();
   auto grad_slice_sz = Input(GRAD).size_from_dim(Input(INDICES).ndim());
 
+  if (N == 0) {
+    // empty grad, nothing to do here, not even launching the kernel
+    return true;
+  }
+
   SparseAdagradKernel<SIndex><<<
     CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS, 0,
     context_.cuda_stream()>>>(
