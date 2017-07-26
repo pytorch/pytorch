@@ -200,7 +200,6 @@ auto BatchNormBackward::apply(const variable_list& grad_outputs) -> variable_lis
   all_inputs.push_back(input_var);
   if (weight.get()) {
     all_inputs.push_back(weight_var);
-    all_inputs.push_back(bias_var);
   }
   auto outputs =  as_tensor_list(std::move(grad_input),
                                  std::move(grad_weight),
@@ -253,11 +252,10 @@ auto BatchNormBackwardBackward::apply(const variable_list& grad_grad_inputs) -> 
 
   auto gI_var = getReturnTupleVar(r, 0);
   auto gG_var = getReturnTupleVar(r, 1);
-  auto gB_var = getReturnTupleVar(r, 2);
-  auto ggO_var = getReturnTupleVar(r, 3);
+  auto ggO_var = getReturnTupleVar(r, 2);
 
   if (weight_var) {
-    return {ggO_var, gI_var, gG_var, gB_var};
+    return {ggO_var, gI_var, gG_var};
   } else {
     return {ggO_var, gI_var};
   }

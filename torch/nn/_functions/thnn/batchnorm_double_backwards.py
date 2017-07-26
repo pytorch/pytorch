@@ -4,10 +4,10 @@ from operator import mul
 
 
 def sum_exclude_dim1(to_sum, keepdim=True):
-    to_sum = to_sum.sum(dim=0, keepdim=True)
-    dim = 2
-    for dim in range(2, to_sum.dim()):
-        to_sum = to_sum.sum(dim=dim, keepdim=True)
+    to_sum = to_sum.sum(dim=0, keepdim=keepdim)
+    start_point_exclusive = 1 if keepdim else 0
+    for dim in range(to_sum.dim() - 1, start_point_exclusive, -1):
+        to_sum = to_sum.sum(dim=dim, keepdim=keepdim)
     return to_sum
 
 
@@ -80,9 +80,6 @@ def batchnorm_double_backwards_fn(input, gamma, ggI, ggG, ggB, gO, eps):
         gG = ggI * first_back_grad_input(gO, 1)
         gG = sum_exclude_dim1(gG, keepdim=False)
 
-    # calculate gB
-    gB = None
-
     # calculate ggO
     ggO = None
     # contribution of input term
@@ -95,4 +92,4 @@ def batchnorm_double_backwards_fn(input, gamma, ggI, ggG, ggB, gO, eps):
         ggO_B_term = ggB_expanded
         ggO = ggO.add_(ggO_B_term) if ggO is not None else ggO_B_term
 
-    return gI, gG, gB, ggO
+    return gI, gG, ggO
