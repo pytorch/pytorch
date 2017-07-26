@@ -5,15 +5,18 @@
 *.lo
 *.o
 *.cuo
+*.obj
 
 # Compiled Dynamic libraries
 *.so
 *.dylib
+*.dll
 
 # Compiled Static libraries
 *.lai
 *.la
 *.a
+*.lib
 
 # Compiled protocol buffers
 *.pb.h
@@ -22,6 +25,7 @@
 
 # Compiled python
 *.pyc
+*.pyd
 
 # Compiled MATLAB
 *.mex*
