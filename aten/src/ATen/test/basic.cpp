@@ -200,7 +200,7 @@ static void test(Type & type) {
     int a = 4;
     THFloatTensor *t = THFloatTensor_newWithSize2d(a, a);
     THFloatTensor_fill(t, a);
-    Tensor tt = CPU(kFloat).unsafeTensorFromTH(t);
+    Tensor tt = CPU(kFloat).unsafeTensorFromTH(t,false);
     std::cout << tt << std::endl;
   }
   {

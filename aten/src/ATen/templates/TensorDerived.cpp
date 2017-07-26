@@ -36,7 +36,9 @@ int64_t ${Tensor}::dim() {
 const char * ${Tensor}::typeString() {
   return "${Type}";
 }
-void * ${Tensor}::unsafeGetTH() {
+void * ${Tensor}::unsafeGetTH(bool retain) {
+  if (retain)
+      ${THTensor}_retain(${state,} tensor);
   return tensor;
 }
 
