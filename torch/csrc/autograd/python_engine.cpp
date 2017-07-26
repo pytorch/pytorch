@@ -124,6 +124,8 @@ PyObject *THPEngine_run_forward(THPEngine *self, PyObject *args, PyObject *kwarg
 
   variable_list var_inputs;
   auto num_inputs = PyTuple_GET_SIZE(inputs);
+  var_inputs.reserve(1 + num_inputs);
+  var_inputs.emplace_back(nullptr); // For ConstantFactory
   for (int i = 0; i < num_inputs; ++i) {
     PyObject *input = PyTuple_GET_ITEM(inputs, i);
     THPUtils_assert(THPVariable_Check(input), "%d input is not a Variable", i);

@@ -15,7 +15,10 @@
 
 #include <ATen/ATen.h>
 
+#include "THPP/THPP.h"
+
 #include "torch/csrc/utils/object_ptr.h"
+#include "torch/csrc/utils/auto_gpu.h"
 
 #include "torch/csrc/jit/DisallowCopy.h"
 #include "ATen/ArrayRef.h"
@@ -175,6 +178,7 @@ _(Mul) \
 _(Negate) \
 _(Sigmoid) \
 _(Tanh) \
+_(Constant) \
 _(FusionGroup)
 
 enum class NodeKind {
@@ -791,6 +795,17 @@ struct Mul : public Primitive<Mul,NodeKind::Mul> {};
 struct Negate : public Primitive<Negate,NodeKind::Negate> {};
 struct Sigmoid : public Primitive<Sigmoid,NodeKind::Sigmoid> {};
 struct Tanh : public Primitive<Tanh,NodeKind::Tanh> {};
+
+// A tensor constant
+// TODO: constant compression
+struct Constant : public NodeWithKind<Constant, NodeKind::Constant,TypeKind::Single> {
+  void init(const at::Tensor& ref) {
+    AutoGPU guard(ref.type().isCuda() ? ref.get_device() : -1);
+    value = ref.clone();
+  }
+
+  at::Tensor value;
+};
 
 struct FusionGroup : public NodeWithKind<FusionGroup,NodeKind::FusionGroup,TypeKind::Multi> {
   void init() {
