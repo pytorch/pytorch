@@ -2,7 +2,7 @@
 language: python
 dist: trusty
 python:
-    - 2.7.8
+    - 2.7.9
     - 2.7
     - 3.5
     - 3.6
