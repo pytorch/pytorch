@@ -22,12 +22,6 @@ else()
   set(CMAKE_CXX_STANDARD 11)
 endif()
 
-# Nice trace in debug mode
-# see https://github.com/bombela/backward-cpp
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-  add_subdirectory(lib/backtrace)
-endif()
-
 # TH stuff
 set(Torch_FOUND 1)
 add_definitions(-DTH_INDEX_BASE=0)

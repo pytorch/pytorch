@@ -20,7 +20,7 @@ struct ${Type} : public Type {
   virtual const char * toString() const override;
   virtual TypeID ID() const override;
   static const char * typeString();
-  Tensor unsafeTensorFromTH(void * th_pointer) override;
+  Tensor unsafeTensorFromTH(void * th_pointer, bool retain) override;
 
   // example
   // virtual Tensor * add(Tensor & a, Tensor & b) override;
