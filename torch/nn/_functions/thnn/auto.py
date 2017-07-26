@@ -112,7 +112,6 @@ def _make_function_class(class_name, update_output, update_grad_input, acc_grad_
     # an inplace flag
     is_inplace = update_output.arguments[-1].name == 'inplace'
 
-    @staticmethod
     def _initialize_buffers(ctx, fn_name):
         additional_args = ctx.additional_args
         for idx, name in buffers[fn_name]:
@@ -143,9 +142,7 @@ def _make_function_class(class_name, update_output, update_grad_input, acc_grad_
             ctx.inplace = params[-1]
         # Allocate temporary buffers and insert them into additional_args
         ctx.buffers = defaultdict(type(input))
-        # we need to call __func__ here because the method is static; we could move it
-        # to outside the class but that would take some restructuring.
-        additional_args = _initialize_buffers.__func__(ctx, 'update_output')
+        additional_args = _initialize_buffers(ctx, 'update_output')
 
         # Fill in optional params with None
         args = tensor_params
@@ -206,7 +203,7 @@ def _make_function_class(class_name, update_output, update_grad_input, acc_grad_
             ctx.inplace = additional_args_ctx[-1]
 
         if ctx.needs_input_grad[0]:
-            additional_args = _initialize_buffers.__func__(ctx, 'update_grad_input')
+            additional_args = _initialize_buffers(ctx, 'update_grad_input')
             if save_output:
                 additional_args = (output,) + additional_args
 
@@ -223,7 +220,7 @@ def _make_function_class(class_name, update_output, update_grad_input, acc_grad_
             grad_input_tuple = (grad_input,)
 
         if acc_grad_parameters and any(ctx.needs_input_grad[1:]):
-            additional_args = _initialize_buffers.__func__(ctx, 'acc_grad_parameters')
+            additional_args = _initialize_buffers(ctx, 'acc_grad_parameters')
             grad_params = tuple(p.new(p.size()).zero_() for p in params)
             appended_grads = len(expected_params) - len(grad_params)
             grad_params += (None,) * appended_grads
@@ -241,11 +238,9 @@ def _make_function_class(class_name, update_output, update_grad_input, acc_grad_
 
     base_class = Function if not is_inplace else InplaceFunction
     backward_cls = type(class_name + "Backward", (base_class,), dict(forward=backward_cls_forward,
-                                                                     backward=backward_cls_backward,
-                                                                     _initialize_buffers=_initialize_buffers))
+                                                                     backward=backward_cls_backward))
 
-    return type(class_name, (base_class,), dict(forward=forward, backward=backward,
-                                                _initialize_buffers=_initialize_buffers)), backward_cls
+    return type(class_name, (base_class,), dict(forward=forward, backward=backward)), backward_cls
 
 
 def _generate_function_classes(scope_dict):
