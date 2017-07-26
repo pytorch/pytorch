@@ -26,7 +26,10 @@ IntList ${Tensor}::sizes() {
 int64_t ${Tensor}::dim() {
   if(isScalar())
     return 0;
-  return ${THTensor}_nDimension(${state,}tensor);
+  int64_t d = ${THTensor}_nDimension(${state,}tensor);
+  if(d != 0)
+    return d;
+  return kUndefinedDimensions;
 }
 
 const char * ${Tensor}::typeString() {
