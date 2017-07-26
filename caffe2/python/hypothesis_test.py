@@ -2055,45 +2055,6 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertEqual(s, self.ws.blobs[("a")].fetch())
         self.assertEqual(s, self.ws.blobs[("b")].fetch())
 
-    @given(n=st.integers(1, 3),
-           dim=st.integers(4, 16),
-           **hu.gcs)
-    def test_distances(self, n, dim, gc, dc):
-        X = np.random.uniform(-1, 1, (n, dim)).astype(np.float32)
-        Y = np.random.uniform(-1, 1, (n, dim)).astype(np.float32)
-        self.ws.create_blob("X").feed(X)
-        self.ws.create_blob("Y").feed(Y)
-
-        def check_grad(op):
-            self.assertGradientChecks(gc, op, [X, Y], 0, [0],
-                                      stepsize=1e-2, threshold=1e-2)
-            self.assertGradientChecks(gc, op, [X, Y], 1, [0],
-                                      stepsize=1e-2, threshold=1e-2)
-
-        l2_op = core.CreateOperator("SquaredL2Distance",
-                                    ["X", "Y"], ["l2_dist"])
-        self.ws.run(l2_op)
-        np.testing.assert_allclose(self.ws.blobs[("l2_dist")].fetch(),
-                                   np.square(X - Y).sum(axis=1) * 0.5,
-                                   rtol=1e-4, atol=1e-4)
-        check_grad(l2_op)
-        dot_op = core.CreateOperator("DotProduct", ["X", "Y"], ["dot"])
-        self.ws.run(dot_op)
-        np.testing.assert_allclose(self.ws.blobs[("dot")].fetch(),
-                                   np.multiply(X, Y).sum(axis=1),
-                                   rtol=1e-4, atol=1e-4)
-        check_grad(dot_op)
-
-        kEps = 1e-12
-        cos_op = core.CreateOperator("CosineSimilarity", ["X", "Y"], ["cos"])
-        self.ws.run(cos_op)
-        cos = np.divide(np.multiply(X, Y).sum(axis=1),
-                        np.multiply(np.linalg.norm(X, axis=1) + kEps,
-                                    np.linalg.norm(Y, axis=1) + kEps))
-        np.testing.assert_allclose(self.ws.blobs[("cos")].fetch(), cos,
-                                   rtol=1e-4, atol=1e-4)
-        check_grad(cos_op)
-
     @given(pad=st.integers(0, 3),
            size=st.integers(1, 10),
            input_channels=st.integers(1, 5),
