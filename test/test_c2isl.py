@@ -28,5 +28,31 @@ class TestC2isl(TestCase):
         y = a.matmul(b)
         self.assertEqual(x, y)
 
+    def test_bad_size(self):
+        a = Variable(torch.randn(2, 2).cuda())
+        b = Variable(torch.randn(2, 2).cuda())
+        c = Variable(torch.randn(4, 4).cuda())
+        d = Variable(torch.randn(4, 4).cuda())
+
+        op = torch.isl.IslMatMul()
+        op(a, b)
+        self.assertRaises(RuntimeError, lambda: op(c, d))
+
+    def test_bad_type(self):
+        a = Variable(torch.randn(2, 2).cuda())
+        b = Variable(torch.randn(2, 2).cuda())
+        op = torch.isl.IslMatMul('int32')
+        self.assertRaises(RuntimeError, lambda: op(a, b))
+
+    def test_bad_type_later(self):
+        x = [[1, 1], [1, 1]]
+        a = Variable(torch.FloatTensor(x).cuda())
+        b = Variable(torch.FloatTensor(x).cuda())
+        c = Variable(torch.DoubleTensor(x).cuda())
+        d = Variable(torch.DoubleTensor(x).cuda())
+        op = torch.isl.IslMatMul('float32')
+        op(a, b)
+        self.assertRaises(RuntimeError, lambda: op(c, d))
+
 if __name__ == '__main__':
     run_tests()

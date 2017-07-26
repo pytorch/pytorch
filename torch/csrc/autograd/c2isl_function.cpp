@@ -150,6 +150,23 @@ int64_t* newDLInt64Array(const at::IntList& arr) {
   return r;
 }
 
+bool eqDLType(const DLDataType& x, const DLDataType& y) {
+  if (x.code != y.code) return false;
+  if (x.bits != y.bits) return false;
+  if (x.lanes != y.lanes) return false;
+  return true;
+}
+
+bool eqDLMetadata(const DLMetadata& x, const DLMetadata& y) {
+  if (x.ndim != y.ndim) return false;
+  for (size_t i = 0; i < x.ndim; i++) {
+    if (x.shape[i] != y.shape[i]) return false;
+    if (x.strides[i] != y.strides[i]) return false;
+  }
+  if (!eqDLType(x.dtype, y.dtype)) return false;
+  return true;
+}
+
 DLMetadataUPtr toDLMetadata(at::Tensor& t) { // should be const
   DLMetadataUPtr res(new DLMetadata);
   res->ndim = t.dim();
@@ -204,18 +221,21 @@ at::Tensor variableToATen(const std::shared_ptr<Variable>& var) {
 variable_list IslFunction::apply(const variable_list& input_vars) {
   AutoGIL gil;
 
+  std::stringstream fname;
+  fname << "IslFunction" << kernelName;
+  check_input_variables(fname.str().c_str(), input_vars, inputs.size());
+
   // Use the same backend as the first tensor
   auto& input = input_vars.at(0);
   AutoGPU guard(input->data->getDevice());
 
   if (!pImpl_) {
     std::vector<const DLMetadata*> inMetas; // ownership managed by inTensorUPtrs
-    std::vector<DLMetadataUPtr> inMetaUPtrs;
     auto inputs_it = inputs.begin();
     for (auto input : input_vars) {
       auto at = variableToATen(input);
-      inMetaUPtrs.emplace_back(toDLMetadata(at));
-      auto meta = inMetaUPtrs.back().get();
+      inMetaUPtrs_.emplace_back(toDLMetadata(at));
+      auto meta = inMetaUPtrs_.back().get();
       inMetas.emplace_back(meta);
       // Check for consistency with TVM description
       if ((*inputs_it)->dtype.code() != meta->dtype.code ||
@@ -232,8 +252,6 @@ variable_list IslFunction::apply(const variable_list& input_vars) {
     pImpl_->SetKernelOptions(islKernelOptions);
     outputDLMetas_ = pImpl_->JITCompile(inMetas);
   }
-
-  // TODO: check size consistency
 
   auto backend = variableToATen(input).type().backend();
   std::vector<at::Tensor> output_ats;
@@ -252,8 +270,21 @@ variable_list IslFunction::apply(const variable_list& input_vars) {
   }
 
   std::vector<const void*> I;
+  auto in_meta_it = inMetaUPtrs_.begin();
+  int i = 0;
   for (auto& input : input_vars) {
-    I.push_back(variableToATen(input).data_ptr());
+    auto at = variableToATen(input);
+    auto cur_meta = toDLMetadata(at);
+    if (!eqDLMetadata(*cur_meta, **in_meta_it)) {
+      std::stringstream ss;
+      // TODO: give more informative message
+      ss << "Input " << i << " does not match size/stride/type ";
+      ss << "of initial inputs to IslFunction";
+      throw std::runtime_error(ss.str());
+    }
+    I.push_back(at.data_ptr());
+    in_meta_it++;
+    i++;
   }
 
   auto& grids = pImpl_->GetGridDims();

@@ -70,6 +70,7 @@ struct IslFunction : public Function, public IslParams {
 
   c2isl::ISLKernelOptions islKernelOptions;
   // NB: Ugh, but this is what c2isl's API returns, so...
+  std::vector<DLMetadataUPtr> inMetaUPtrs_;
   std::vector<::tvm::DLTensorUPtr> outputDLMetas_;
 
   IslFunction(IslParams params) : IslParams(std::move(params)) {}
