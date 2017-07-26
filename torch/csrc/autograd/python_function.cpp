@@ -294,7 +294,7 @@ PyObject *THPFunction_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
   // Python zero-initializes the object memory, so there's no need to initialize
   // most fields
   THPFunction* self = (THPFunction*)obj;
-  new (&self->cdata) torch::autograd::PyFunction(obj);
+  new (&self->cdata) PyFunction(obj);
   self->cdata.num_inputs = -1;
   self->cdata.is_stochastic = PyObject_IsInstance(obj, THPStochasticFunctionClass);
   return obj;

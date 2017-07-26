@@ -1,0 +1,21 @@
+dist: trusty
+sudo: required
+language: cpp
+
+matrix:
+  include:
+    - os: linux
+      compiler: gcc
+      env: BUILD_CUDA=OFF
+    - os: linux
+      compiler: gcc
+      env: BUILD_CUDA=ON
+
+cache:
+  apt: true
+
+install:
+  - ./.travis/install.sh
+
+script:
+  - ./.travis/build.sh

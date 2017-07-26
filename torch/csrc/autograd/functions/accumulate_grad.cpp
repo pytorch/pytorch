@@ -40,7 +40,7 @@ auto AccumulateGrad::apply(const variable_list& grads) -> variable_list {
 
   auto var = variable.lock();
   // It's possible that the Variable went out of scope and was freed.
-  // We still need to handle the unlikely case of someohe holding to its grad.
+  // We still need to handle the unlikely case of someone holding to its grad.
   if (!var) {
     auto var_grad = variable_grad.lock();
     // Everything was freed. Nothing to do.
@@ -68,8 +68,7 @@ auto AccumulateGrad::apply(const variable_list& grads) -> variable_list {
   }
 
   if (!var->grad) {
-    auto clone_fn = std::make_shared<Clone>();
-    var->grad = clone_fn->apply({new_grad})[0];
+    var->grad = Clone().apply({new_grad})[0];
     variable_grad = var->grad; // We need to update our reference
   // This case is not strictly necessary, but it makes the first-order only case
   // slightly more efficient and, what's more important, more predictable for
@@ -79,13 +78,12 @@ auto AccumulateGrad::apply(const variable_list& grads) -> variable_list {
   } else if (var->grad->is_volatile) {
     acc_inplace(var->grad, new_grad);
   } else {
-    auto add_fn = std::make_shared<Add>();
     // Once the grad becomes not volatile, it should stay like that
     if (!var->grad->is_volatile && new_grad->is_volatile) {
       new_grad = std::make_shared<Variable>(
               std::unique_ptr<thpp::Tensor>(new_grad->data->clone_shallow()), false, false);
     }
-    var->grad = add_fn->apply({var->grad, new_grad})[0];
+    var->grad = Add().apply({var->grad, new_grad})[0];
   }
 
   return variable_list();
