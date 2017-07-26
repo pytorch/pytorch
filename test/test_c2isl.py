@@ -3,7 +3,7 @@ import tvm
 
 import torch
 import torch.cuda
-import torch.isl
+import torch._isl
 from torch.autograd import Variable
 from common import TestCase, run_tests
 
@@ -24,7 +24,7 @@ class TestC2isl(TestCase):
         a = Variable(torch.randn(M, K).cuda())
         b = Variable(torch.randn(K, N).cuda())
 
-        x = torch.isl.IslMatMul()(a, b)
+        x = torch._isl.IslMatMul()(a, b)
         y = a.matmul(b)
         self.assertEqual(x, y)
 
@@ -34,14 +34,14 @@ class TestC2isl(TestCase):
         c = Variable(torch.randn(4, 4).cuda())
         d = Variable(torch.randn(4, 4).cuda())
 
-        op = torch.isl.IslMatMul()
+        op = torch._isl.IslMatMul()
         op(a, b)
         self.assertRaises(RuntimeError, lambda: op(c, d))
 
     def test_bad_type(self):
         a = Variable(torch.randn(2, 2).cuda())
         b = Variable(torch.randn(2, 2).cuda())
-        op = torch.isl.IslMatMul('int32')
+        op = torch._isl.IslMatMul('int32')
         self.assertRaises(RuntimeError, lambda: op(a, b))
 
     def test_bad_type_later(self):
@@ -50,7 +50,7 @@ class TestC2isl(TestCase):
         b = Variable(torch.FloatTensor(x).cuda())
         c = Variable(torch.DoubleTensor(x).cuda())
         d = Variable(torch.DoubleTensor(x).cuda())
-        op = torch.isl.IslMatMul('float32')
+        op = torch._isl.IslMatMul('float32')
         op(a, b)
         self.assertRaises(RuntimeError, lambda: op(c, d))
 

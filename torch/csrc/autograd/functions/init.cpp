@@ -76,11 +76,11 @@ struct IslFunctionCtor {
   IslFunction* operator()(PyObject* args) {
     IslParams params;
     TupleParser parser(args, 5);
-    parser.parse(params.kernelName, "name");
-    parser.parseNodeRefs<tvm::Tensor>(params.outputs, "outputs");
-    parser.parseNodeRefs<tvm::Tensor>(params.inputs, "inputs");
-    parser.parseNodeRefs<tvm::Var>(params.vars, "vars");
-    parser.parseNodeRefs<tvm::Tensor>(params.ops, "ops");
+    parser.parse(params.kernelName_, "name");
+    parser.parseNodeRefs<tvm::Tensor>(params.tvmOutputs_, "outputs");
+    parser.parseNodeRefs<tvm::Tensor>(params.tvmInputs_, "inputs");
+    parser.parseNodeRefs<tvm::Var>(params.tvmVars_, "vars");
+    parser.parseNodeRefs<tvm::Tensor>(params.tvmOps_, "ops");
 
     return new IslFunction(std::move(params));
   }

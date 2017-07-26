@@ -51,6 +51,10 @@ DLDataType toDLDataType(at::Type& ty) { // should be const
       t.code = DLDataTypeCode::kFloat;
       t.bits = 16;
       break;
+    // This weird default case is to take advantage of the fact that
+    // ScalarType is an enum class, so we can get exhaustiveness checking
+    // from the compiler.  Arguably, at::ScalarType shouldn't have this
+    // option at all, but I suppose it is being used somewhere.
     case at::ScalarType::NumOptions:
       throw std::logic_error("NumOptions is not a valid ScalarType");
   }
@@ -85,6 +89,7 @@ tvm::Type toTVMType(const DLDataType& t) {
 // Types never die
 at::Type& toATenType(at::Backend backend, const DLDataType& t) {
   at::ScalarType st;
+  if (t.lanes != 1) throw std::logic_error("ATen does not support lanes != 1");
   switch (t.code) {
     case DLDataTypeCode::kUInt:
       switch (t.bits) {
@@ -117,7 +122,6 @@ at::Type& toATenType(at::Backend backend, const DLDataType& t) {
 }
 
 at::Type& toATenType(const DLContext& ctx, const DLDataType& t) {
-  if (t.lanes != 1) throw std::logic_error("ATen does not support lanes != 1");
   at::Backend backend;
   switch (ctx.device_type) {
     case DLDeviceType::kCPU:
@@ -222,16 +226,16 @@ variable_list IslFunction::apply(const variable_list& input_vars) {
   AutoGIL gil;
 
   std::stringstream fname;
-  fname << "IslFunction" << kernelName;
-  check_input_variables(fname.str().c_str(), input_vars, inputs.size());
+  fname << "IslFunction" << kernelName_;
+  check_input_variables(fname.str().c_str(), input_vars, tvmInputs_.size());
 
   // Use the same backend as the first tensor
   auto& input = input_vars.at(0);
   AutoGPU guard(input->data->getDevice());
 
   if (!pImpl_) {
-    std::vector<const DLMetadata*> inMetas; // ownership managed by inTensorUPtrs
-    auto inputs_it = inputs.begin();
+    std::vector<const DLMetadata*> inMetas; // ownership managed by inMetaUPtrs_
+    auto inputs_it = tvmInputs_.begin();
     for (auto input : input_vars) {
       auto at = variableToATen(input);
       inMetaUPtrs_.emplace_back(toDLMetadata(at));
@@ -246,10 +250,10 @@ variable_list IslFunction::apply(const variable_list& input_vars) {
       inputs_it++;
     }
     pImpl_ = std::unique_ptr<c2isl::ISLTVMIROp>(
-              new c2isl::ISLTVMIROp(outputs, inputs, vars, ops)
+              new c2isl::ISLTVMIROp(tvmOutputs_, tvmInputs_, tvmVars_, tvmOps_)
              );
-    pImpl_->SetKernelName(kernelName);
-    pImpl_->SetKernelOptions(islKernelOptions);
+    pImpl_->SetKernelName(kernelName_);
+    pImpl_->SetKernelOptions(islKernelOptions_);
     outputDLMetas_ = pImpl_->JITCompile(inMetas);
   }
 
@@ -307,56 +311,10 @@ variable_list IslFunction::apply(const variable_list& input_vars) {
 
   // OK, return outputs
   return wrap_outputs(input_vars, std::move(compat_outputs), [&](FunctionFlags f) -> std::shared_ptr<Function> {
+    // TODO: Let us specify the backward class, which probably will be yet
+    // another IslFunction
     return std::make_shared<Error>("IslFunction backwards not implemented yet", std::move(f));
   });
 }
-
-    /*
-void IslMatMul::initTVM(const std::vector<const DLMetadata*>& input_metas) {
-  // TODO: I feel dirty doing copy-assignment
-  vars = { ::tvm::Var("M"), ::tvm::Var("N"), ::tvm::Var("O") };
-  inputs = {
-    ::tvm::placeholder({vars[0],vars[1]}, toTVMType(input_metas[0]->dtype), "A"),
-    ::tvm::placeholder({vars[1],vars[2]}, toTVMType(input_metas[1]->dtype), "B")
-  };
-  ops = {
-    ::tvm::makeMatMult(inputs[0], inputs[1], "C", 0, 0
-      // TODO: make the transpose configurable
-      //OperatorBase::GetSingleArgument<int>("trans_a", 0),
-      //OperatorBase::GetSingleArgument<int>("trans_b", 0)
-    )
-  };
-  outputs = { ops[0] };
-  kernelName = "matmul";
-  islKernelOptions.strategy = c2isl::ISLStrategy::Strategy::Default;
-  islKernelOptions.tilingAnnotation = ""; // use default PPCG
-}
-    // TODO GRADIENT!
-    this->SetupGradient([](const ArgumentHelper& args, std::vector<::tvm::Tensor> I, std::vector<::tvm::Tensor> GO, std::vector<std::string> GI) {
-      bool trans_a = args.GetSingleArgument<int>("trans_a", 0);
-      bool trans_b = args.GetSingleArgument<int>("trans_b", 0);
-      std::vector<::tvm::Tensor> gops;
-
-      if (trans_a) {
-        if (trans_b) {
-          gops.emplace_back(::tvm::makeMatMult(I[1], GO[0], GI[0], true, true));
-          gops.emplace_back(::tvm::makeMatMult(GO[0], I[0], GI[1], true, true));
-        } else {
-          gops.emplace_back(::tvm::makeMatMult(I[1], GO[0], GI[0], false, true));
-          gops.emplace_back(::tvm::makeMatMult(I[0], GO[0], GI[1], false, false));
-        }
-      } else {
-        if (trans_b) {
-          gops.emplace_back(::tvm::makeMatMult(GO[0], I[1], GI[0], false, false));
-          gops.emplace_back(::tvm::makeMatMult(GO[0], I[0], GI[1], true, false));
-        } else {
-          gops.emplace_back(::tvm::makeMatMult(GO[0], I[1], GI[0], false, true));
-          gops.emplace_back(::tvm::makeMatMult(I[0], GO[0], GI[1], true, false));
-        }
-      }
-      std::vector<::tvm::Tensor> goutput{ gops[0], gops[1] };
-      return std::make_pair(gops, goutput);
-    }
-    */
 
 }} // namespace torch::autograd

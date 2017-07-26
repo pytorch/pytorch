@@ -24,8 +24,9 @@ namespace torch { namespace autograd {
 // Here's our strategy:
 //  - We new-allocate shape and strides for both DLTensor and DLMetadata,
 //    and free them in our deleters.
-//  - The deleter for DLTensor also holds a reference to at::Tensor, to keep
-//    it live as long as we are passing around a smart pointer to DLTensor.
+//  - The deleter for DLTensor also holds an at::Tensor, to keep
+//    the underlying data live as long as we are passing around a smart pointer
+//    to DLTensor.
 
 using DLMetadata = DLTensor;
 
@@ -57,18 +58,18 @@ struct IslParams {
   // The TVM data.  We use these names to keep copy-pasting easier.
   // NB: the inputs here bake in the type in question, which means
   // that every IslFunction is monomorphic.
-  std::string kernelName;
-  std::vector<::tvm::Tensor> outputs;
-  std::vector<::tvm::Tensor> inputs;
-  std::vector<::tvm::Var> vars;
-  std::vector<::tvm::Tensor> ops;
+  std::string kernelName_;
+  std::vector<::tvm::Tensor> tvmOutputs_;
+  std::vector<::tvm::Tensor> tvmInputs_;
+  std::vector<::tvm::Var> tvmVars_;
+  std::vector<::tvm::Tensor> tvmOps_;
   // TODO: ISLKernelOptions
 };
 
 struct IslFunction : public Function, public IslParams {
   std::unique_ptr<c2isl::ISLTVMIROp> pImpl_;
 
-  c2isl::ISLKernelOptions islKernelOptions;
+  c2isl::ISLKernelOptions islKernelOptions_;
   // NB: Ugh, but this is what c2isl's API returns, so...
   std::vector<DLMetadataUPtr> inMetaUPtrs_;
   std::vector<::tvm::DLTensorUPtr> outputDLMetas_;
