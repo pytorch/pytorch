@@ -685,8 +685,10 @@ static Node * make_trace(PyObject* pyobj, PyObject *arg_objects,
     }
   }
 
-  // XXX: this has to be done before we append the PythonOp, because it
+  // NB: this has to be done before we append the PythonOp, because it
   // might need to register some values as constants (i.e. append new Nodes)
+  // If we do it the other order, the graph will be in the wrong topological
+  // order.
   std::vector<Node*> value_traces;
   value_traces.reserve(input_vars.size());
   for (auto& i : input_vars)
