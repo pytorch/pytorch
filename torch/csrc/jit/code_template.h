@@ -6,19 +6,36 @@
 
 namespace torch { namespace jit {
 
+// A template environment is a mapping from template variable names, e.g.,
+// identifier (corresponding to $identifier) to their expansions.
+//
+// This template environment supports storing strings, numbers and lists
+// of strings, and can be chained together (so that lookup proceeds in
+// in the top level environment, and then recurses into a parent
+// environment if the key is not found.)
 struct TemplateEnv {
-  TemplateEnv(TemplateEnv * parent = nullptr)
-  : parent(parent) {}
+  TemplateEnv()
+  : parent(nullptr) {}
+  TemplateEnv(TemplateEnv & parent)
+  : parent(&parent) {}
+
   using string_list = std::vector<std::string>;
-  // strings
+
+  // Add a string 'v' to the map at key 'k'.
   void s(const std::string & k, const std::string & v) {
     strings_[k] = v;
+    lists_.erase(k);
   }
-  // numbers
+
+  // Add a number 'v' to the map at key 'k'
   template<typename T>
   void d(const std::string & k, const T & v) {
     strings_[k] = std::to_string(v);
+    lists_.erase(k);
   }
+
+  // Retrieve the string representation of the value stored at 'k' from the map.
+  // Raises an exception if the key is not found.
   const std::string & s(const std::string & k) const {
     if(strings_.count(k) == 0) {
       if(parent) {
@@ -28,10 +45,15 @@ struct TemplateEnv {
     }
     return strings_.at(k);
   }
-  // lists of strings
+
+  // Store a list of strings 'v' in the map at 'k'.
   void v(const std::string & k, const string_list & v) {
     lists_[k] = v;
+    strings_.erase(k);
   }
+
+  // Retrieve a list of strings stored at 'k' from the map.
+  // Raises an exception if the key is not found.
   const string_list & v(const std::string & k) const {
     if(lists_.count(k) == 0) {
       if(parent) {
@@ -41,6 +63,8 @@ struct TemplateEnv {
     }
     return lists_.at(k);
   }
+
+  // Test if a string 'k' is a string (as opposed to a list.)
   bool keyIsString(const std::string & k) const {
     if(strings_.count(k) > 0)
       return true;
@@ -63,10 +87,10 @@ private:
 };
 
 /*
-# Match $identifier or ${identifier} and replace with value in env.
+# Match $identifier or ${identifier} and replace with the value in env.
 # If this identifier is at the beginning of whitespace on a line
 # and its value is a list then it is treated as
-# block subsitution by indenting all lines of all elements.
+# block substitution by indenting all lines of all elements.
 # If the identifier is on a line starting with non-whitespace and a list
 # then it is comma separated. ${,foo} will insert a comma before the list
 # if this list is not empty and ${foo,} will insert one after.
@@ -165,6 +189,10 @@ private:
     if(comma_after && strings.size() > 0)
       out << ", ";
   }
+  // These indentation functions follow the convention that they never emit
+  // leading or trailing newlines when the input string does not have leading
+  // or trailing newlines. It's the responsibility of the calling function
+  // to indent correctly in the context.
   void emitIndent(std::ostream & out, size_t indent) {
     for(size_t i = 0; i < indent; ++i) {
       out << " ";

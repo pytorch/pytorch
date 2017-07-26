@@ -11,10 +11,9 @@
 
 namespace torch { namespace jit {
 
-void findContiguous(
+std::vector<bool> findContiguous(
   at::IntList sizes,
-  at::IntList strides,
-  std::vector<bool> & cont);
+  at::IntList strides);
 
 // type information needed by the compiler for input/outputs
 // contiguity[i] is true if the dim i is contiguous with dim i + 1.
@@ -27,8 +26,8 @@ struct TensorDesc {
     calcDim();
   }
   TensorDesc(const at::Tensor & t)
-  : scalar_type(t.type().scalarType()) {
-    findContiguous(t.sizes(), t.strides(), contiguity);
+  : scalar_type(t.type().scalarType()),
+    contiguity(findContiguous(t.sizes(), t.strides())) {
     calcDim();
   }
   // number of dimensions after contiguity compression
