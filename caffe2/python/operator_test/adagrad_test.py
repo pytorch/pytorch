@@ -91,3 +91,38 @@ class TestAdagrad(hu.HypothesisTestCase):
             gc, op,
             [param, momentum, indices, grad, lr],
             ref_sparse)
+
+    @given(inputs=hu.tensors(n=2),
+           lr=st.floats(min_value=0.01, max_value=0.99,
+                        allow_nan=False, allow_infinity=False),
+           epsilon=st.floats(min_value=0.01, max_value=0.99,
+                             allow_nan=False, allow_infinity=False),
+           data_strategy=st.data(),
+           **hu.gcs)
+    def test_sparse_adagrad_empty(self, inputs, lr, epsilon,
+                                  data_strategy, gc, dc):
+        param, momentum = inputs
+        momentum = np.abs(momentum)
+        lr = np.array([lr], dtype=np.float32)
+
+        grad = np.empty(shape=(0,) + param.shape[1:], dtype=np.float32)
+        indices = np.empty(shape=(0,), dtype=np.int64)
+
+        hypothesis.note('indices.shape: %s' % str(indices.shape))
+
+        op = core.CreateOperator(
+            "SparseAdagrad",
+            ["param", "momentum", "indices", "grad", "lr"],
+            ["param", "momentum"],
+            epsilon=epsilon,
+            device_option=gc)
+
+        def ref_sparse(param, momentum, indices, grad, lr):
+            param_out = np.copy(param)
+            momentum_out = np.copy(momentum)
+            return (param_out, momentum_out)
+
+        self.assertReferenceChecks(
+            gc, op,
+            [param, momentum, indices, grad, lr],
+            ref_sparse)
