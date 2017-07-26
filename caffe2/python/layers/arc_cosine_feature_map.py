@@ -27,8 +27,13 @@ class ArcCosineFeatureMap(ModelLayer):
         output_dims -- dimensions of the output vector
         s -- degree to raise transformed features
         scale -- amount to scale the standard deviation
+        weight_init -- initialization distribution for weight parameter
+        bias_init -- initialization distribution for bias pararmeter
         weight_optim -- optimizer for weight params; None for random features
         bias_optim -- optimizer for bias param; None for random features
+        set_weight_as_global_constant -- if True, initialized random parameters
+                                         will be constant across all distributed
+                                         instances of the layer
     """
     def __init__(
             self,
@@ -37,8 +42,11 @@ class ArcCosineFeatureMap(ModelLayer):
             output_dims,
             s=0,
             scale=None,
+            weight_init=None,
+            bias_init=None,
             weight_optim=None,
             bias_optim=None,
+            set_weight_as_global_constant=False,
             name='arc_cosine_feature_map',
             **kwargs):
 
@@ -48,6 +56,7 @@ class ArcCosineFeatureMap(ModelLayer):
 
         self.params = []
         self.model = model
+        self.set_weight_as_global_constant = set_weight_as_global_constant
         self.name = name
 
         self.input_dims = input_record.field_type().shape[0]
@@ -75,30 +84,50 @@ class ArcCosineFeatureMap(ModelLayer):
 
         # Initialize train_init_net parameters
         # Random Parameters
-        self.random_w = self.model.net.NextScopedBlob(self.name + "_random_w")
-        self.random_b = self.model.net.NextScopedBlob(self.name + "_random_b")
-        self.params += self._initialize_params(self.random_w,
-                                               self.random_b,
-                                               w_optim=weight_optim,
-                                               b_optim=bias_optim)
+        if set_weight_as_global_constant:
+            w_init = np.random.normal(scale=self.stddev,
+                                      size=(self.output_dims, self.input_dims))
+            b_init = np.random.uniform(low=-0.5 * self.stddev,
+                                       high=0.5 * self.stddev,
+                                       size=self.output_dims)
+            self.random_w = self.model.add_global_constant(
+                name=self.name + "_fixed_rand_W",
+                array=w_init
+            )
+            self.random_b = self.model.add_global_constant(
+                name=self.name + "_fixed_rand_b",
+                array=b_init
+            )
+        else:
+            self.random_w = self.model.net.NextScopedBlob(self.name + "_random_w")
+            self.random_b = self.model.net.NextScopedBlob(self.name + "_random_b")
+            self.params += self._initialize_params(self.random_w,
+                                                   self.random_b,
+                                                   w_init=weight_init,
+                                                   b_init=bias_init,
+                                                   w_optim=weight_optim,
+                                                   b_optim=bias_optim)
 
-    def _initialize_params(self, w_blob, b_blob, w_optim=None, b_optim=None):
+    def _initialize_params(self, w_blob, b_blob, w_init=None, b_init=None,
+                           w_optim=None, b_optim=None):
         """
         Initializes the Layer Parameters for weight and bias terms for features
 
         Inputs :
             w_blob -- blob to contain w values
             b_blob -- blob to contain b values
+            w_init -- initialization distribution for weight parameter
+            b_init -- initialization distribution for bias parameter
             w_optim -- optimizer to use for w; if None, then will use no optimizer
             b_optim -- optimizer to user for b; if None, then will use no optimizer
         """
 
-        w_init = (
+        w_init = w_init if w_init else (
             'GaussianFill', {'mean': 0.0, 'std': self.stddev}
         )
         w_optim = w_optim if w_optim else self.model.NoOptim
 
-        b_init = (
+        b_init = b_init if b_init else (
             'UniformFill', {'min': -0.5 * self.stddev, 'max': 0.5 * self.stddev}
         )
         b_optim = b_optim if b_optim else self.model.NoOptim
