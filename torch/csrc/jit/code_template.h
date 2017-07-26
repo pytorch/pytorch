@@ -217,7 +217,7 @@ private:
   }
   std::string template_text;
 };
-static std::string format(const std::string & fmt, TemplateEnv & env) {
+static inline std::string format(const std::string & fmt, TemplateEnv & env) {
   return CodeTemplate(fmt).format(env);
 }
 
