@@ -391,8 +391,13 @@ def create_derived(backend_type_env, declarations):
                 for argument in option['arguments'] if not drop_argument(argument, option)]
 
     def is_actual_return_long(ret):
-        return ret['type'] == 'long' or (backend_type_env['ScalarName'] == 'Long' and
-                                         ret['type'] == 'real' or ret['type'] == 'accreal')
+        if ret['type'] == 'long':
+            return True
+        if ret['type'] == 'real':
+            return backend_type_env['ScalarName'] == 'Long'
+        if ret['type'] == 'accreal':
+            return backend_type_env['AccScalarName'] == 'Long'
+        return False
 
     def handle_zero_dim(env, option):
         if 'zero_dim_dispatch_when_scalar' not in option:
