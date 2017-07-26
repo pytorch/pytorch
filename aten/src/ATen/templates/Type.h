@@ -109,7 +109,7 @@ struct Type {
   virtual std::unique_ptr<Storage> storage(size_t size) = 0;
   virtual std::unique_ptr<Storage> storageFromBlob(void * data, int64_t size) = 0;
   virtual std::unique_ptr<Generator> generator() = 0;
-  virtual Tensor unsafeTensorFromTH(void * th_pointer) = 0;
+  virtual Tensor unsafeTensorFromTH(void * th_pointer, bool retain) = 0;
   virtual const char * toString() const = 0;
   Type & toBackend(Backend b);
   Type & toScalarType(ScalarType s);
