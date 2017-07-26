@@ -61,8 +61,6 @@ struct logSigmoid_updateGradInput_functor<half> {
         sign = one;
     }
     *gradInput = __hmul(*gradOutput, (__hneg(max_deriv) - __hmul(sign, __hdiv(z - one, z))));
-//    const half in_exp = THCNumerics<half>::exp(__hneg(*input));
-//    *gradInput = hdiv(__hmul(*gradOutput, in_exp), __hadd(one, in_exp));
 #else
     const float in = __half2float(*input);
     const float max = fmaxType(0.f, -*in);
@@ -75,10 +73,6 @@ struct logSigmoid_updateGradInput_functor<half> {
         sign = 1.f;
     }
     *gradInput = __float2half(go * (-max_deriv - sign*((z - 1.f)/z)));
-
-    //const float in_exp = THCNumerics<float>::exp(-(__half2float(*input)));
-    //const float go = __half2float(*gradOutput);
-    //*gradInput = __float2half(go * in_exp / (1.f + in_exp));
 #endif
   }
 };
