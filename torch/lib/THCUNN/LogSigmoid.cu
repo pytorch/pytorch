@@ -55,7 +55,7 @@ struct logSigmoid_updateGradInput_functor<half> {
     const half max = fmaxType(zero, __hneg(*input));
     const half z = THCNumerics<half>::exp(__hneg(max)) + THCNumerics<half>::exp(__hneg(*input) - max);
     half max_deriv = zero;
-    half sign = one;
+    half sign = __hneg(one);
     if(*input < zero){
         max_deriv = __hneg(one);
         sign = one;
@@ -67,7 +67,7 @@ struct logSigmoid_updateGradInput_functor<half> {
     const float z = THCNumerics<float>::exp(-max) + THCNumerics<float>::exp(-in - max);
     const float go = __half2float(*gradOutput);
     float max_deriv = 0.f;
-    float sign = 1.f;
+    float sign = -1.f;
     if(in < 0.f){
         max_deriv = -1.f;
         sign = 1.f;
