@@ -13,7 +13,7 @@ void THNN_(LogSigmoid_updateOutput)(
   //Use the LogSumExp trick to make this stable against underflow
   TH_TENSOR_APPLY3(real, output, real, input, real, buffer,
     real max_elem = fmax(0, -*input_data);
-    real z = exp(0 - max_elem) + exp(-*input_data - max_elem);
+    real z = exp(-max_elem) + exp(-*input_data - max_elem);
     *buffer_data = z;
     *output_data = -(max_elem + log(z));
   );
