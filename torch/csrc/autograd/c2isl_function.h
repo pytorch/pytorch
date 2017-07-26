@@ -53,27 +53,34 @@ using DLTensorSPtr = std::shared_ptr<DLTensor>;
 using DLMetadataUPtr = std::unique_ptr<DLTensor, DLMetadataDeleter>;
 using DLMetadataSPtr = std::shared_ptr<DLTensor>;
 
-struct ISLFunction : public Function {
-  std::unique_ptr<c2isl::ISLTVMIROp> pImpl_;
-
-  // The TVM data.  We use these names to keep copy-pasting easier
+struct IslParams {
+  // The TVM data.  We use these names to keep copy-pasting easier.
+  // NB: the inputs here bake in the type in question, which means
+  // that every IslFunction is monomorphic.
   std::string kernelName;
   std::vector<::tvm::Tensor> outputs;
   std::vector<::tvm::Tensor> inputs;
   std::vector<::tvm::Var> vars;
   std::vector<::tvm::Tensor> ops;
+  // TODO: ISLKernelOptions
+};
+
+struct IslFunction : public Function, public IslParams {
+  std::unique_ptr<c2isl::ISLTVMIROp> pImpl_;
+
   c2isl::ISLKernelOptions islKernelOptions;
   // NB: Ugh, but this is what c2isl's API returns, so...
   std::vector<::tvm::DLTensorUPtr> outputDLMetas_;
 
-  ISLFunction() {}
+  IslFunction(IslParams params) : IslParams(std::move(params)) {}
 
   virtual variable_list apply(const variable_list& inputs) override;
-  virtual void initTVM(const std::vector<const DLMetadata*>&) = 0;
 };
 
-struct ISLMatMul : public ISLFunction {
-  virtual void initTVM(const std::vector<const DLMetadata*>&) override;
+/*
+struct IslMatMul : public IslFunction {
+  IslMatMul() {}
 };
+*/
 
 }} // namespace torch::autograd

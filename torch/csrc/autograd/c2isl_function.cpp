@@ -201,7 +201,7 @@ at::Tensor variableToATen(const std::shared_ptr<Variable>& var) {
   return createTensorAT(data);
 }
 
-variable_list ISLFunction::apply(const variable_list& input_vars) {
+variable_list IslFunction::apply(const variable_list& input_vars) {
   AutoGIL gil;
 
   // Use the same backend as the first tensor
@@ -211,12 +211,20 @@ variable_list ISLFunction::apply(const variable_list& input_vars) {
   if (!pImpl_) {
     std::vector<const DLMetadata*> inMetas; // ownership managed by inTensorUPtrs
     std::vector<DLMetadataUPtr> inMetaUPtrs;
+    auto inputs_it = inputs.begin();
     for (auto input : input_vars) {
       auto at = variableToATen(input);
       inMetaUPtrs.emplace_back(toDLMetadata(at));
-      inMetas.emplace_back(inMetaUPtrs.back().get());
+      auto meta = inMetaUPtrs.back().get();
+      inMetas.emplace_back(meta);
+      // Check for consistency with TVM description
+      if ((*inputs_it)->dtype.code() != meta->dtype.code ||
+          (*inputs_it)->dtype.bits() != meta->dtype.bits ||
+          (*inputs_it)->dtype.lanes() != meta->dtype.lanes) {
+        throw std::logic_error("input tensor incompatible with tvm types");
+      }
+      inputs_it++;
     }
-    initTVM(inMetas);
     pImpl_ = std::unique_ptr<c2isl::ISLTVMIROp>(
               new c2isl::ISLTVMIROp(outputs, inputs, vars, ops)
              );
@@ -224,6 +232,8 @@ variable_list ISLFunction::apply(const variable_list& input_vars) {
     pImpl_->SetKernelOptions(islKernelOptions);
     outputDLMetas_ = pImpl_->JITCompile(inMetas);
   }
+
+  // TODO: check size consistency
 
   auto backend = variableToATen(input).type().backend();
   std::vector<at::Tensor> output_ats;
@@ -266,11 +276,12 @@ variable_list ISLFunction::apply(const variable_list& input_vars) {
 
   // OK, return outputs
   return wrap_outputs(input_vars, std::move(compat_outputs), [&](FunctionFlags f) -> std::shared_ptr<Function> {
-    return std::make_shared<Error>("ISLFunction backwards not implemented yet", std::move(f));
+    return std::make_shared<Error>("IslFunction backwards not implemented yet", std::move(f));
   });
 }
 
-void ISLMatMul::initTVM(const std::vector<const DLMetadata*>& input_metas) {
+    /*
+void IslMatMul::initTVM(const std::vector<const DLMetadata*>& input_metas) {
   // TODO: I feel dirty doing copy-assignment
   vars = { ::tvm::Var("M"), ::tvm::Var("N"), ::tvm::Var("O") };
   inputs = {
@@ -289,7 +300,6 @@ void ISLMatMul::initTVM(const std::vector<const DLMetadata*>& input_metas) {
   islKernelOptions.strategy = c2isl::ISLStrategy::Strategy::Default;
   islKernelOptions.tilingAnnotation = ""; // use default PPCG
 }
-    /*
     // TODO GRADIENT!
     this->SetupGradient([](const ArgumentHelper& args, std::vector<::tvm::Tensor> I, std::vector<::tvm::Tensor> GO, std::vector<std::string> GI) {
       bool trans_a = args.GetSingleArgument<int>("trans_a", 0);

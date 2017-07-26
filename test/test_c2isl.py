@@ -1,5 +1,9 @@
+# NB: tvm MUST be imported first, because of static initializer shenanigans.
+import tvm
+
 import torch
 import torch.cuda
+import torch.isl
 from torch.autograd import Variable
 from common import TestCase, run_tests
 
@@ -19,7 +23,8 @@ class TestC2isl(TestCase):
         # In test suite, this defaults to double
         a = Variable(torch.randn(M, K).cuda())
         b = Variable(torch.randn(K, N).cuda())
-        x = torch._C._functions.ISLMatMul()(a, b)
+
+        x = torch.isl.IslMatMul()(a, b)
         y = a.matmul(b)
         self.assertEqual(x, y)
 

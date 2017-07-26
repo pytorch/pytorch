@@ -62,9 +62,27 @@ struct DelayedErrorCtor {
 };
 
 #ifdef WITH_C2ISL
-struct ISLMatMulCtor {
-  ISLMatMul* operator()(PyObject* args) {
-    return new ISLMatMul();
+/*
+struct IslMatMulCtor {
+  IslMatMul* operator()(PyObject* args) {
+    return new IslMatMul();
+  }
+};
+*/
+
+// NB: In TVM, node handles are owned by their wrapping Python
+// Object!  This means that we have to keep the Python objects live.
+struct IslFunctionCtor {
+  IslFunction* operator()(PyObject* args) {
+    IslParams params;
+    TupleParser parser(args, 5);
+    parser.parse(params.kernelName, "name");
+    parser.parseNodeRefs<tvm::Tensor>(params.outputs, "outputs");
+    parser.parseNodeRefs<tvm::Tensor>(params.inputs, "inputs");
+    parser.parseNodeRefs<tvm::Var>(params.vars, "vars");
+    parser.parseNodeRefs<tvm::Tensor>(params.ops, "ops");
+
+    return new IslFunction(std::move(params));
   }
 };
 #endif // WITH_C2ISL
@@ -293,8 +311,8 @@ bool THPAutograd_initFunctions(PyObject* _unused)
   addClass<Cat, NoCtor>(module, CatClass, "Cat");
 
   #ifdef WITH_C2ISL
-  static PyTypeObject ISLMatMulClass;
-  addClass<ISLMatMul, ISLMatMulCtor>(module, ISLMatMulClass, "ISLMatMul");
+  static PyTypeObject IslFunctionClass;
+  addClass<IslFunction, IslFunctionCtor>(module, IslFunctionClass, "IslFunction");
   #endif
 
   THPObjectPtr parent(PyImport_ImportModule("torch._C"));
