@@ -35,9 +35,21 @@ def Caffe2TensorToNumpyArray(tensor):
             tensor.double_data, dtype=np.float64).reshape(tensor.dims)
     elif tensor.data_type == caffe2_pb2.TensorProto.INT32:
         return np.asarray(
-            tensor.double_data, dtype=np.int).reshape(tensor.dims)
+            tensor.int32_data, dtype=np.int).reshape(tensor.dims)   # pb.INT32=>np.int use int32_data
+    elif tensor.data_type == caffe2_pb2.TensorProto.INT16:
+        return np.asarray(
+            tensor.int32_data, dtype=np.int16).reshape(tensor.dims)  # pb.INT16=>np.int16 use int32_data
+    elif tensor.data_type == caffe2_pb2.TensorProto.UINT16:
+        return np.asarray(
+            tensor.int32_data, dtype=np.uint16).reshape(tensor.dims)  # pb.UINT16=>np.uint16 use int32_data
+    elif tensor.data_type == caffe2_pb2.TensorProto.INT8:
+        return np.asarray(
+            tensor.int32_data, dtype=np.int8).reshape(tensor.dims)  # pb.INT8=>np.int8 use int32_data
+    elif tensor.data_type == caffe2_pb2.TensorProto.UINT8:
+        return np.asarray(
+            tensor.int32_data, dtype=np.uint8).reshape(tensor.dims)  # pb.UINT8=>np.uint8 use int32_data
     else:
-        # TODO: complete the data type.
+        # TODO: complete the data type: bool, float16, byte, int64, string
         raise RuntimeError(
             "Tensor data type not supported yet: " + str(tensor.data_type))
 
@@ -56,8 +68,20 @@ def NumpyArrayToCaffe2Tensor(arr, name=None):
     elif arr.dtype == np.int:
         tensor.data_type = caffe2_pb2.TensorProto.INT32
         tensor.int32_data.extend(list(arr.flatten().astype(np.int)))
+    elif arr.dtype == np.int16:
+        tensor.data_type = caffe2_pb2.TensorProto.INT16
+        tensor.int32_data.extend(list(arr.flatten().astype(np.int16)))  # np.int16=>pb.INT16 use int32_data
+    elif arr.dtype == np.uint16:
+        tensor.data_type = caffe2_pb2.TensorProto.UINT16
+        tensor.int32_data.extend(list(arr.flatten().astype(np.uint16)))  # np.uint16=>pb.UNIT16 use int32_data
+    elif arr.dtype == np.int8:
+        tensor.data_type = caffe2_pb2.TensorProto.INT8
+        tensor.int32_data.extend(list(arr.flatten().astype(np.int8)))   # np.int8=>pb.INT8 use int32_data
+    elif arr.dtype == np.uint8:
+        tensor.data_type = caffe2_pb2.TensorProto.UINT8
+        tensor.int32_data.extend(list(arr.flatten().astype(np.uint8)))   # np.uint8=>pb.UNIT8 use int32_data
     else:
-        # TODO: complete the data type.
+        # TODO: complete the data type: bool, float16, byte, int64, string
         raise RuntimeError(
             "Numpy data type not supported yet: " + str(arr.dtype))
     return tensor
