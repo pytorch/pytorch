@@ -8,6 +8,7 @@ extern "C" void THFloatTensor_fill(THFloatTensor *, float v);
 
 #include <iostream>
 #include <chrono>
+#include <string.h>
 
 using namespace at;
 
@@ -215,13 +216,17 @@ static void test(Type & type) {
 
 }
 
-int main()
+int main(int argc, char ** argv)
 {
   std::cout << "=========================== CPU ===========================" << std::endl;
   test(CPU(kFloat));
   if(at::hasCUDA()) {
-    std::cout << "=========================== GPU ===========================" << std::endl;
-    test(CUDA(kFloat));
+    if(argc == 2 && 0 == strcmp(argv[1],"-n")) {
+      std::cout << "skipping cuda...\n";
+    } else {
+      std::cout << "=========================== GPU ===========================" << std::endl;
+      test(CUDA(kFloat));
+    }
   }
   return 0;
 }
