@@ -6,7 +6,7 @@ file(GLOB avx2_srcs *_avx2.cc)
 exclude(common_srcs "${common_srcs}" ${avx_srcs})
 exclude(common_srcs "${common_srcs}" ${avx2_srcs})
 
-set(Caffe2_CPU_SRCS ${common_srcs} ${tmp} PARENT_SCOPE)
+set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} ${common_srcs} PARENT_SCOPE)
 
 # TODO(jiayq): currently, we only implement the very base files for the
 # perfkernels. This is because to implement avx and avx2 files, we actually
