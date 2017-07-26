@@ -164,7 +164,7 @@ def RunOperatorsOnce(operators):
 def CallWithExceptionIntercept(func, op_id_fetcher, net_name, *args, **kwargs):
     try:
         return func(*args, **kwargs)
-    except Exception as ex:
+    except Exception:
         op_id = op_id_fetcher()
         net_tracebacks = operator_tracebacks.get(net_name, None)
         print("Traceback for operator {} in network {}".format(op_id, net_name))
@@ -172,7 +172,7 @@ def CallWithExceptionIntercept(func, op_id_fetcher, net_name, *args, **kwargs):
             tb = net_tracebacks[op_id]
             for line in tb:
                 print(':'.join(map(str, line)))
-        raise ex
+        raise
 
 
 def RunNetOnce(net):
