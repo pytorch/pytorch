@@ -50,7 +50,7 @@ static void codeTemplateTest() {
     TemplateEnv e;
     e.s("hi","foo");
     e.v("what",{"is","this"});
-    TemplateEnv c(&e);
+    TemplateEnv c(e);
     c.s("hi","foo2");
     JIT_ASSERT(e.s("hi") == "foo");
     JIT_ASSERT(c.s("hi") == "foo2");
