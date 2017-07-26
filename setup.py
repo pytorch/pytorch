@@ -346,7 +346,6 @@ main_sources = [
     "torch/csrc/jit/init.cpp",
     "torch/csrc/jit/ir.cpp",
     "torch/csrc/jit/graph_fuser.cpp",
-    "torch/csrc/jit/fusion_compiler.cpp",
     "torch/csrc/jit/test_jit.cpp",
     "torch/csrc/jit/tracer.cpp",
     "torch/csrc/jit/python_ir.cpp",
@@ -418,6 +417,7 @@ if WITH_CUDA:
         "torch/csrc/cuda/utils.cpp",
         "torch/csrc/cuda/expand_utils.cpp",
         "torch/csrc/cuda/serialization.cpp",
+        "torch/csrc/jit/fusion_compiler.cpp",
     ]
     main_sources += split_types("torch/csrc/cuda/Tensor.cpp")
 

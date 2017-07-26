@@ -1,6 +1,10 @@
 #include <iostream>
+#ifdef WITH_CUDA
 #include "torch/csrc/jit/fusion_compiler.h"
+#endif
 #include "torch/csrc/jit/code_template.h"
+#include "torch/csrc/jit/assert.h"
+#include "torch/csrc/jit/ir.h"
 
 namespace torch { namespace jit {
 
@@ -16,7 +20,7 @@ static std::ostream & operator<<(std::ostream & out, const std::vector<T> & list
   out << "}";
   return out;
 }
-using AR = ArrayRef<Node*>;
+using AR = at::ArrayRef<Node*>;
 
 static auto ct = CodeTemplate(R"(
 int foo($args) {
@@ -72,6 +76,7 @@ static void codeTemplateTest() {
   }
 }
 
+#ifdef WITH_CUDA
 static void fusionTests() {
   FusionCompiler comp;
   cudaFree(0);
@@ -153,6 +158,10 @@ static void fusionTests() {
   testOne(1,2,0,2);
 
 }
+#else //WITH_CUDA
+void fusionTests() {}
+#endif
+
 
 void runJITCPPTests() {
   codeTemplateTest();
