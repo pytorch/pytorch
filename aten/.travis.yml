@@ -6,6 +6,9 @@ python:
 
 dist: trusty
 
+before_install:
+    - sudo apt-get install -qq valgrind
+
 install:
     - travis_retry pip install pyyaml
 
@@ -14,6 +17,7 @@ script:
     - cd build
     - cmake .. -DNO_CUDA=1 -DCMAKE_INSTALL_PREFIX=../install
     - make install
+    - ../tools/run_tests.sh .
 
 matrix:
     fast_finish: true
