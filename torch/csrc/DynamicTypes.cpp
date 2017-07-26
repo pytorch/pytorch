@@ -213,14 +213,14 @@ at::Tensor createTensorAT(PyObject *data)
 {
   auto tensor_type = pytype_to_attype.at(Py_TYPE(data));
   auto tensor = ((THPVoidTensor *)data)->cdata;
-  return tensor_type->unsafeTensorFromTH(tensor);
+  return tensor_type->unsafeTensorFromTH(tensor, true);
 }
 PyObject* createPyObject(at::Tensor tensor)
 {
   auto type = getPyTypeObject(tensor);
   PyObject *obj = type->tp_alloc(type, 0);
   if (obj) {
-    ((THPVoidTensor*)obj)->cdata = (THVoidTensor *)tensor.detach()->unsafeGetTH();
+    ((THPVoidTensor*)obj)->cdata = (THVoidTensor *)tensor.detach()->unsafeGetTH(true);
   }
   return obj;
 }
