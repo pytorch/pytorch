@@ -38,11 +38,11 @@ namespace {
 TEST(BlobTest, Blob) {
   Blob blob;
 
-  int* int_unused UNUSED_VARIABLE = blob.GetMutable<int>();
+  int* int_unused CAFFE2_UNUSED = blob.GetMutable<int>();
   EXPECT_TRUE(blob.IsType<int>());
   EXPECT_FALSE(blob.IsType<BlobTestFoo>());
 
-  BlobTestFoo* foo_unused UNUSED_VARIABLE = blob.GetMutable<BlobTestFoo>();
+  BlobTestFoo* foo_unused CAFFE2_UNUSED = blob.GetMutable<BlobTestFoo>();
   EXPECT_TRUE(blob.IsType<BlobTestFoo>());
   EXPECT_FALSE(blob.IsType<int>());
 }
@@ -70,7 +70,7 @@ TEST(BlobTest, BlobUninitialized) {
 
 TEST(BlobTest, BlobWrongType) {
   Blob blob;
-  BlobTestFoo* foo_unused UNUSED_VARIABLE = blob.GetMutable<BlobTestFoo>();
+  BlobTestFoo* foo_unused CAFFE2_UNUSED = blob.GetMutable<BlobTestFoo>();
   EXPECT_TRUE(blob.IsType<BlobTestFoo>());
   EXPECT_FALSE(blob.IsType<int>());
   // When not null, we should only call with the right type.

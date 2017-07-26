@@ -64,9 +64,9 @@ using std::vector;
 
 // suppress an unused variable.
 #ifndef _MSC_VER
-#define UNUSED_VARIABLE __attribute__((unused))
+#define CAFFE2_UNUSED __attribute__((__unused__))
 #else
-#define UNUSED_VARIABLE 
+#define CAFFE2_UNUSED
 #endif //_MSC_VER
 
 // Disable the copy and assignment operator for a class. Note that this will
