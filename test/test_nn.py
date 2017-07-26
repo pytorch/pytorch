@@ -2352,7 +2352,6 @@ class TestNN(NNTestCase):
         weight = torch.FloatTensor(1).uniform_()
         self.assertEqual(nn.BCEWithLogitsLoss(weight)(output, target), nn.BCELoss(weight)(sigmoid(output), target))
 
-
     def test_bce_with_logits_has_correct_grad_at_zero(self):
         output = Variable(torch.zeros(3, 1), requires_grad=True)
         target = Variable(torch.zeros(3, 1))
