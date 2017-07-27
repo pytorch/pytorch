@@ -9,6 +9,7 @@ extern "C" void THFloatTensor_fill(THFloatTensor *, float v);
 #include <iostream>
 #include <chrono>
 #include <string.h>
+#include <sstream>
 #include "test_assert.h"
 
 using namespace at;
@@ -230,6 +231,13 @@ static void test(Type & type) {
 
       Tensor e = CPU(kFloat).rand({});
       ASSERT(*e.data<float>()== e.sum().toFloat());
+  }
+  {
+    Tensor b = CPU(kFloat).ones({3,7})*.0000001f;
+    std::stringstream s;
+    s << b << "\n";
+    std::string expect = "1e-07 *";
+    ASSERT(s.str().substr(0,expect.size()) == expect);
   }
 
 }
