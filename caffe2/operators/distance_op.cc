@@ -197,7 +197,7 @@ bool DotProductOp<float, CPUContext>::RunOnDevice() {
   auto* result = Output(DOT_OUT);
   CAFFE_ENFORCE_EQ(X.ndim(), Y.ndim());
   for (int i = 0; i < X.ndim(); ++i) {
-    CAFFE_ENFORCE_EQ(X.dim32(i), Y.dim32(i));
+    CAFFE_ENFORCE_EQ(X.dim32(i), Y.dim32(i), "dimension at ", i);
   }
   int N, D;
   if (X.size() > 0) {
