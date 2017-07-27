@@ -28,18 +28,18 @@ add_definitions(-DTH_INDEX_BASE=0)
 add_subdirectory(lib/TH)
 include_directories(
   # dense
-  ${CMAKE_SOURCE_DIR}/lib/TH
-  ${CMAKE_SOURCE_DIR}/lib/THC
-  ${CMAKE_BINARY_DIR}/lib/TH
-  ${CMAKE_BINARY_DIR}/lib/THC
+  ${CMAKE_CURRENT_SOURCE_DIR}/lib/TH
+  ${CMAKE_CURRENT_SOURCE_DIR}/lib/THC
+  ${CMAKE_CURRENT_BINARY_DIR}/lib/TH
+  ${CMAKE_CURRENT_BINARY_DIR}/lib/THC
   # sparse
-  ${CMAKE_SOURCE_DIR}/lib/THS
-  ${CMAKE_SOURCE_DIR}/lib/THCS
-  ${CMAKE_BINARY_DIR}/lib/THS
-  ${CMAKE_BINARY_DIR}/lib/THCS
+  ${CMAKE_CURRENT_SOURCE_DIR}/lib/THS
+  ${CMAKE_CURRENT_SOURCE_DIR}/lib/THCS
+  ${CMAKE_CURRENT_BINARY_DIR}/lib/THS
+  ${CMAKE_CURRENT_BINARY_DIR}/lib/THCS
 
-  ${CMAKE_SOURCE_DIR}/lib
-  ${CMAKE_BINARY_DIR}/lib)
+  ${CMAKE_CURRENT_SOURCE_DIR}/lib
+  ${CMAKE_CURRENT_BINARY_DIR}/lib)
 add_subdirectory(lib/THNN)
 add_subdirectory(lib/THS)
 
@@ -57,20 +57,20 @@ else()
 endif()
 
 set(cwrap_files
-  ${CMAKE_SOURCE_DIR}/tools/Declarations.cwrap
-  ${CMAKE_SOURCE_DIR}/src/ATen/Local.cwrap
-  ${CMAKE_SOURCE_DIR}/lib/THNN/generic/THNN.h
-  ${CMAKE_SOURCE_DIR}/lib/THCUNN/generic/THCUNN.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/tools/Declarations.cwrap
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/ATen/Local.cwrap
+  ${CMAKE_CURRENT_SOURCE_DIR}/lib/THNN/generic/THNN.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/lib/THCUNN/generic/THCUNN.h
 )
 
 include_directories(
-${CMAKE_SOURCE_DIR}/lib/THNN
-${CMAKE_SOURCE_DIR}/lib/THCUNN)
+${CMAKE_CURRENT_SOURCE_DIR}/lib/THNN
+${CMAKE_CURRENT_SOURCE_DIR}/lib/THCUNN)
 
 add_subdirectory(src/ATen)
 include_directories(
-${CMAKE_SOURCE_DIR}/src
-${CMAKE_BINARY_DIR}/src/ATen)
+${CMAKE_CURRENT_SOURCE_DIR}/src
+${CMAKE_CURRENT_BINARY_DIR}/src/ATen)
 add_subdirectory(src/ATen/test)
 add_subdirectory(src/data)
 add_subdirectory(src/meter)
