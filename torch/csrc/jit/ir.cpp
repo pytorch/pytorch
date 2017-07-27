@@ -56,17 +56,20 @@ std::ostream& operator<<(std::ostream & out, Graph & g) {
     if(!n->cast<Select>()) { //improve readibility by printing selects inline
       out << "  %" << n->unique() << " = ";
       IR_IF(n,PythonOp)
-        out << value->name();
+        out << "^" << value->name();
+        out << "(";
+        int i = 0;
         for (auto& scalar : value->scalar_args) {
-          out << " " << scalar;
+          if (i++ > 0)
+            out << ", ";
+          out << scalar;
         }
-      IR_ELSEIF(SimpleMap)
-        out << value->op << "!";
+        out << ")";
       IR_ELSEIF(FusionGroup)
-        out << "fusion_group_"<<groups.size();
+        out << "fusion_group_" << groups.size();
         groups.push_back(value);
       IR_ELSE()
-        out << toString(n->kind()) << "??";
+        out << toString(n->kind());
       IR_END()
       out << "(" << n->inputs() << "), uses = [";
       size_t i = 0;

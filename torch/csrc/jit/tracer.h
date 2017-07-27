@@ -3,7 +3,7 @@
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/assert.h"
 #include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/graph_fuser.h"
+#include "torch/csrc/jit/init_pass.h"
 
 #include <memory>
 #include <vector>
@@ -58,7 +58,7 @@ struct TracingState {
     JIT_ASSERT(tracing());
     auto r = std::move(frames.back());
     frames.pop_back();
-    return std::move(r.graph);
+    return InitializePyGraph(std::move(r.graph));
   }
 private:
   std::vector<TracingFrame> frames;
