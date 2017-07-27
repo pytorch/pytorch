@@ -157,7 +157,7 @@ std::unique_ptr<AutogradClosure> createAutogradClosure(Graph *graph) {
     if (uses.size() == 0) return; // Dead code elimination
 
 #define IR_ELSEIF_TRIVIAL(NAME, FNAME) \
-    IR_ELSEIF_NOCAST(NAME) fn = std::make_shared<FNAME>();
+    IR_ELSEIF(NAME) fn = std::make_shared<FNAME>();
 
     IR_IF(node, PythonOp)
       auto name = value->name();
