@@ -221,7 +221,7 @@ PyObject* createPyObject(at::Tensor& tensor)
   PyObject *obj = type->tp_alloc(type, 0);
   if (obj) {
     // Retain underlying TH Tensor
-    ((THPVoidTensor*)obj)->cdata = (THVoidTensor *)tensor.detach()->unsafeGetTH(true);
+    ((THPVoidTensor*)obj)->cdata = (THVoidTensor *)tensor.unsafeGetTH(true);
   }
   return obj;
 }

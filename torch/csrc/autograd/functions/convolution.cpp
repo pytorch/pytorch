@@ -21,7 +21,6 @@ using namespace torch::cudnn;
 #endif
 
 using namespace torch::nn;
-// using thpp::Tensor;
 using torch::cudnn::Convolution;
 using tensor_pair = std::pair<at::Tensor, at::Tensor>;
 
@@ -122,8 +121,7 @@ static auto view3d(const at::Tensor& tensor) -> at::Tensor {
 
 static at::Tensor subtensor(at::Tensor& tensor, int dim, int groups, int g) {
   if (!tensor.defined()) {
-    at::Tensor empty;
-    return empty;
+    return at::Tensor();
   }
   long n = tensor.sizes()[dim] / groups;
   return tensor.narrow(dim, n * g, n).contiguous();
@@ -138,14 +136,9 @@ static std::shared_ptr<Variable> subvariable(std::shared_ptr<Variable> var, int 
 static at::Tensor cat(const tensor_list& tensors, int dim) {
   int num_inputs = tensors.size();
   if (num_inputs == 0) {
-    at::Tensor empty;
-    return empty;
+    return at::Tensor();
   }
 
-  std::vector<at::Tensor> ptrs(num_inputs);
-  for (int i = 0; i < num_inputs; ++i) {
-    ptrs[i] = tensors[i];
-  }
   auto output = tensors[0].type().tensor();
   at::cat_out(tensors, dim, output);
   return output;
@@ -429,7 +422,7 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
     // View as (1, ggb.size(0), 1, 1...)
 
     // Expand
-    std::vector<long> new_size(gO->data.ndimension(), 1);
+    std::vector<int64_t> new_size(gO->data.ndimension(), 1);
     new_size[1] = ggb->data.sizes()[0];
     auto ggb_contiguous = Contiguous().apply({ggb})[0];
     auto ggb_view = View(new_size).apply({ggb_contiguous})[0];

@@ -18,7 +18,7 @@ auto Clone::apply(const variable_list& inputs) -> variable_list {
 
   at::Tensor output = input.clone();
 
-  return wrap_outputs(inputs, as_tensor_list(output), [&](FunctionFlags f) {
+  return wrap_outputs(inputs, as_tensor_list(std::move(output)), [&](FunctionFlags f) {
     return std::make_shared<Identity>(std::move(f));
   });
 };

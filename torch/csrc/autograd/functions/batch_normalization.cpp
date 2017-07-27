@@ -98,7 +98,7 @@ auto BatchNormForward::apply(const variable_list& inputs) -> variable_list {
         eps);
   }
 
-  auto outputs = as_tensor_list(output);
+  auto outputs = as_tensor_list(std::move(output));
   return wrap_outputs(inputs, std::move(outputs), [&](FunctionFlags f) {
     return std::make_shared<BatchNormBackward>(
         f, *this, std::move(save_mean), std::move(save_std),
