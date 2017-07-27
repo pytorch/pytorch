@@ -12,7 +12,7 @@ does not include templates. That is, there is one `Tensor` type. It can hold a
 CPU or CUDA Tensor, and the tensor may have Doubles, Float, Ints, etc. This design
 makes it easy to write generic code without templating everything.
 
-See the _generated_ [`Tensor.h` file](doc/Tensor.h) and [`Functions.h` file](doc/Tensor.h) for the provided API. Excerpt:
+See the _generated_ [`Tensor.h` file](doc/Tensor.h) and [`Functions.h` file](doc/Functions.h) for the provided API. Excerpt:
 ```c++
 Tensor atan2(const Tensor & other) const;
 Tensor & atan2_(const Tensor & other);
