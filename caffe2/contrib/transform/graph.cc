@@ -27,8 +27,8 @@ Graph::Graph(const NetDef& net) : netdef_(net) {
       auto it = edge_parent.find(blob);
       if (it != edge_parent.end()) {
         int j = it->second;
-        node(i).parents[j] = blob;
-        node(j).children[i] = blob;
+        node(i).parents[j].push_back(blob);
+        node(j).children[i].push_back(blob);
       } else {
         external_input_.insert(blob);
       }
@@ -84,9 +84,11 @@ const std::vector<std::pair<string, int>> Graph::GetSubgraphPerimeterHelper(
       const auto& list = from_children ? node(x).children : node(x).parents;
       for (const auto& edge : list) {
         int parent = edge.first;
-        const string& blob = edge.second;
+        const auto& blobs = edge.second;
         if (match_set.count(parent)) { // but has a parent that is in subgraph
-          edge_list.push_back({blob, x});
+          for (const string& blob : blobs) {
+            edge_list.push_back({blob, x});
+          }
         }
       }
     }
@@ -189,5 +191,24 @@ void Graph::DeactivateSubgraph(std::vector<int> subgraph) {
 }
 
 } // namespace transform
+
+OperatorDef* AddOp(
+    NetDef* netdef_ptr,
+    string op_type,
+    std::vector<string> inputs,
+    std::vector<string> outputs) {
+  CHECK(netdef_ptr);
+  auto& netdef = *netdef_ptr;
+  auto op_ptr = netdef.add_op();
+  auto& op = *op_ptr;
+  op.set_type(op_type);
+  for (const string& inp : inputs) {
+    op.add_input(inp);
+  }
+  for (const string& outp : outputs) {
+    op.add_output(outp);
+  }
+  return op_ptr;
+}
 
 } // namespace caffe2

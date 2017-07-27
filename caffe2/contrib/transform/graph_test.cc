@@ -42,27 +42,6 @@ OPERATOR_SCHEMA(DummyOp3)
     .NumOutputs(0, INT_MAX)
     .AllowInplace({{0, 0}, {1, 1}});
 
-// Adds an operator def to a netdef.
-// Returns the ptr, if you want to add anything extra (such as device_option)
-OperatorDef* AddOp(
-    NetDef* netdef_ptr,
-    string op_type,
-    std::vector<string> inputs,
-    std::vector<string> outputs) {
-  CHECK(netdef_ptr);
-  auto& netdef = *netdef_ptr;
-  auto op_ptr = netdef.add_op();
-  auto& op = *op_ptr;
-  op.set_type(op_type);
-  for (const string& inp : inputs) {
-    op.add_input(inp);
-  }
-  for (const string& outp : outputs) {
-    op.add_output(outp);
-  }
-  return op_ptr;
-}
-
 // Checks if two netdefs are  in terms of type, input, and output.
 void compare_netdefs(const NetDef& net_a, const NetDef& net_b) {
   EXPECT_EQ(net_a.op_size(), net_b.op_size());

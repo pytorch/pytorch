@@ -24,8 +24,8 @@ struct Node {
   Node(
       const OperatorDef& op,
       bool active,
-      std::map<int, string> parents,
-      std::map<int, string> children)
+      std::map<int, std::vector<string>> parents,
+      std::map<int, std::vector<string>> children)
       : op(op), active(active), parents(parents), children(children) {}
 
   // The OperatorDef which this node represents.
@@ -34,9 +34,11 @@ struct Node {
   // Keeps track of if an operator has been deleted through a transformation.
   bool active = true;
 
-  // Stores a pair (idx, blob), the index of the child, and the blob of edge.
-  std::map<int, string> parents;
-  std::map<int, string> children;
+  // Stores a pair (idx, blob_list),
+  //  idx = index of the child
+  //  blob_list = a list of strings, containing the blobs that connect the nodes
+  std::map<int, std::vector<string>> parents;
+  std::map<int, std::vector<string>> children;
 };
 
 /**
@@ -149,5 +151,13 @@ struct Graph {
 };
 
 } // namespace transform
+
+// Adds an operator def to a netdef.
+// Returns the ptr, if you want to add anything extra (such as device_option)
+OperatorDef* AddOp(
+    NetDef* netdef_ptr,
+    string op_type,
+    std::vector<string> inputs,
+    std::vector<string> outputs);
 
 } // namespace caffe2

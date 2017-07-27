@@ -39,7 +39,7 @@ std::vector<std::vector<int>> Transform::PatternMatch(const Graph& graph) {
 
 void Transform::TryNeighbors(
     const Graph& graph,
-    const std::map<int, string>& neighbors,
+    const std::map<int, std::vector<string>>& neighbors,
     std::vector<int>* subgraph_ptr,
     std::vector<int>* best_subgraph_ptr) {
   auto& subgraph = *subgraph_ptr;
@@ -83,9 +83,17 @@ void Transform::PatternMatchHelper(
 void Transform::ReplacePattern(
     const std::vector<vector<int>>& matches,
     Graph* graph) {
-  // Simply try to apply the replace rule upon every match.
   for (const auto& match : matches) {
-    if (!ReplaceRule(match, graph)) {
+    // Make sure each matched node is still active (not overwritten)
+    bool is_match_active = true;
+    for (int idx : match) {
+      if (!graph->is_node_active(idx)) {
+        is_match_active = false;
+      }
+    }
+
+    // Simply try to apply the replace rule upon every match.
+    if (is_match_active && !ReplaceRule(match, graph)) {
       CAFFE_THROW("Replace failed!");
     }
   }

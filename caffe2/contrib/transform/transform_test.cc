@@ -61,15 +61,16 @@ class DummyTransform : public Transform {
     new_op.set_type("DummyOp3");
     int new_idx = g.size();
 
-    std::map<int, string> new_op_children;
-    std::map<int, string> new_op_parents;
+    std::map<int, std::vector<string>> new_op_children;
+    std::map<int, std::vector<string>> new_op_parents;
 
     // for each node parent in the head of the match, connect it to our new node
     for (const auto& edge : g.node(match[0]).parents) {
       int parent = edge.first;
-      string blob = edge.second;
-      g.node(parent).children[new_idx] = blob;
-      new_op_parents[parent] = blob;
+      for (const auto& blob : edge.second) {
+        g.node(parent).children[new_idx].push_back(blob);
+        new_op_parents[parent].push_back(blob);
+      }
     }
     for (const string& blob : g.node(match[0]).op.input()) {
       new_op.add_input(blob);
@@ -78,9 +79,10 @@ class DummyTransform : public Transform {
     // for each child in the tail of the match, connect it to our new node
     for (const auto& edge : g.node(match[1]).children) {
       int child = edge.first;
-      string blob = edge.second;
-      g.node(child).parents[new_idx] = blob;
-      new_op_children[child] = blob;
+      for (const auto& blob : edge.second) {
+        g.node(child).parents[new_idx].push_back(blob);
+        new_op_children[child].push_back(blob);
+      }
     }
     for (const string& blob : g.node(match[1]).op.output()) {
       new_op.add_output(blob);
@@ -97,27 +99,6 @@ class DummyTransform : public Transform {
 };
 
 REGISTER_TRANSFORM(DummySwap, DummyTransform)
-
-// Adds an operator def to a netdef.
-// Returns the ptr, if you want to add anything extra (such as device_option)
-OperatorDef* AddOp(
-    NetDef* netdef_ptr,
-    string op_type,
-    std::vector<string> inputs,
-    std::vector<string> outputs) {
-  CHECK(netdef_ptr);
-  auto& netdef = *netdef_ptr;
-  auto op_ptr = netdef.add_op();
-  auto& op = *op_ptr;
-  op.set_type(op_type);
-  for (const string& inp : inputs) {
-    op.add_input(inp);
-  }
-  for (const string& outp : outputs) {
-    op.add_output(outp);
-  }
-  return op_ptr;
-}
 
 TEST(TransformTest, TestPatternMatch) {
   Workspace ws;
