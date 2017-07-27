@@ -42,7 +42,7 @@ class TestJit(TestCase):
 
         torch._C._tracer_enter((x, y))
 
-        z = torch.sigmoid(torch.tanh(x * (x + y)))
+        z, _ = torch.max(x * (x + y), 0)
         w = torch.abs(x * x * x + y)
 
         trace = torch._C._tracer_exit((z, w))

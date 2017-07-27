@@ -135,11 +135,11 @@ static std::string nodeName(Node * n) {
 }
 
 // TODO: we need to support double-precision
-static std::unordered_map<std::string,std::string> simple_map_ops = {
-  {"Sigmoid","1.f / (1.f + expf(-${0}))"},
-  {"Tanh","tanhf(${0})"},
-  {"Mul","${0} * ${1}"},
-  {"Add","${0} + ${1}"},
+static std::unordered_map<NodeKind,std::string> simple_map_ops = {
+  {NodeKind::Sigmoid,         "1.f / (1.f + expf(-${0}))"},
+  {NodeKind::Tanh,            "tanhf(${0})"},
+  {NodeKind::Mul,             "${0} * ${1}"},
+  {NodeKind::Add,             "${0} + ${1}"},
 };
 
 const char * toCString(at::ScalarType type) {
@@ -192,17 +192,13 @@ void emitCompilationUnit(std::ostream & out,
     //TODO: actual type propagation rather than relying on auto..
     body << format("auto ${node} = ${access};\n",env);
   }
-  for(auto n_ : subgraph.nodes()) {
-    if(n_->kind() == NodeKind::Return)
-      continue; //TODO: remove when return is not in list
-    auto n = n_->cast<SimpleMap>();
-    JIT_ASSERT(n);
+  for(auto n : subgraph.nodes()) {
     size_t i = 0;
     for(auto in : n->inputs()) {
       env.s(std::to_string(i++),nodeName(in));
     }
     env.s("node",nodeName(n));
-    env.s("rhs",format(simple_map_ops.at(n->op),env));
+    env.s("rhs",format(simple_map_ops.at(n->kind()),env));
     body << format("auto ${node} = ${rhs};\n",env);
   }
   for(auto o : subgraph.outputs()) {
