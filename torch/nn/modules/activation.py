@@ -631,8 +631,7 @@ class Softmax(Module):
     lie in the range (0,1) and sum to 1
 
     Softmax is defined as
-    :math:`f_i(x) = exp(x_i - shift) / sum_j exp(x_j - shift)`
-    where `shift = max_i x_i`
+    :math:`f_i(x) = exp(x_i) / sum_j exp(x_j)`
 
     Shape:
         - Input: :math:`(N, L)`
