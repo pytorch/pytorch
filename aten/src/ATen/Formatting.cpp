@@ -15,6 +15,19 @@ inline std::ios_base& defaultfloat(std::ios_base& __base) {
   __base.unsetf(std::ios_base::floatfield);
   return __base;
 }
+//saves/restores number formatting inside scope
+struct FormatGuard {
+  FormatGuard(std::ostream & out)
+  : out(out), saved(nullptr) {
+    saved.copyfmt(out);
+  }
+  ~FormatGuard() {
+    out.copyfmt(saved);
+  }
+private:
+  std::ostream & out;
+  std::ios saved;
+};
 
 std::ostream& operator<<(std::ostream & out, IntList list) {
   int i = 0;
@@ -131,6 +144,10 @@ static void __printIndent(std::ostream &stream, int64_t indent)
   }
 }
 
+static void printScale(std::ostream & stream, double scale) {
+  FormatGuard guard(stream);
+  stream << defaultfloat << scale << " *" << std::endl;
+}
 static void __printMatrix(std::ostream& stream, const Tensor& self, int64_t linesize, int64_t indent)
 {
   double scale;
@@ -155,7 +172,7 @@ static void __printMatrix(std::ostream& stream, const Tensor& self, int64_t line
       __printIndent(stream, indent);
     }
     if(scale != 1) {
-      stream << scale << " *" << std::endl;
+      printScale(stream,scale);
       __printIndent(stream, indent);
     }
     for(int64_t l = 0; l < self.size(0); l++) {
@@ -223,6 +240,7 @@ void __printTensor(std::ostream& stream, Tensor& self, int64_t linesize)
 }
 
 std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesize) {
+  FormatGuard guard(stream);
   if(!tensor_.defined()) {
     stream << "[ Tensor (empty) ]";
   } else {
@@ -235,7 +253,7 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
       int64_t sz;
       std::tie(scale, sz) =  __printFormat(stream, tensor);
       if(scale != 1) {
-        stream << scale << " *" << std::endl;
+        printScale(stream, scale);
       }
       double* tensor_p = tensor.data<double>();
       for(int64_t i = 0; i < tensor.size(0); i++) {
