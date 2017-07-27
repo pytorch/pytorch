@@ -29,11 +29,6 @@ install:
 script:
     - OMP_NUM_THREADS=2 ./test/run_test.sh
 
-# This reportedly works around an issue downloading packages from pypi on
-# travis.  Consider removing this after the underlying issue is fixed.
-# https://github.com/travis-ci/travis-ci/issues/2389
-sudo: false
-
 matrix:
     fast_finish: true
     include:
