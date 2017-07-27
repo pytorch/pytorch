@@ -34,19 +34,19 @@
         error);                     \
   } while (0)
 
-#define CHECK_INPUT_FILTER_DIMS(condition)      \
-  do {                                          \
-    if (cached_input_dims_ != X.dims() ||       \
-        cached_filter_dims_ != filter.dims()) { \
-      cached_input_dims_ = X.dims();            \
-      cached_filter_dims_ = filter.dims();      \
-      condition = true;                         \
-    } else {                                    \
-      condition = false;                        \
-    }                                           \
+#define CHECK_INPUT_FILTER_DIMS(X, filter, condition) \
+  do {                                                \
+    if (cached_input_dims_ != X.dims() ||             \
+        cached_filter_dims_ != filter.dims()) {       \
+      cached_input_dims_ = X.dims();                  \
+      cached_filter_dims_ = filter.dims();            \
+      condition = true;                               \
+    } else {                                          \
+      condition = false;                              \
+    }                                                 \
   } while (0)
 
-#define CHECK_INPUT_DIMS(condition)       \
+#define CHECK_INPUT_DIMS(X, condition)    \
   do {                                    \
     if (cached_input_dims_ != X.dims()) { \
       cached_input_dims_ = X.dims();      \

@@ -16,35 +16,30 @@ class MKLSumOp final : public MKLOperator<T> {
   }
 
   bool RunOnDevice() override {
-    auto X_ = [&](size_t i) -> const MKLMemory<float>& {
-      return OperatorBase::Input<MKLMemory<float>>(i);
-    };
+    const MKLMemory<float>& X0 = OperatorBase::Input<MKLMemory<float>>(0);
     MKLMemory<float>* Y = OperatorBase::Output<MKLMemory<float>>(0);
     bool dims_changed;
-    {
-      const auto& X = X_(0);
-      CHECK_INPUT_DIMS(dims_changed);
-    }
+    CHECK_INPUT_DIMS(X0, dims_changed);
     if (dims_changed) {
       primitive_.Reset(
           dnnSumCreate<float>,
           nullptr,
           this->InputSize(),
-          X_(0).layout(),
+          X0.layout(),
           coefficients_.data());
-      if (Y != &X_(0)) {
-        Y->Reset(X_(0).dims(), primitive_, dnnResourceDst);
+      if (Y != &X0) {
+        Y->Reset(X0.dims(), primitive_, dnnResourceDst);
       }
-      buffer_.Reset(X_(0).dims(), primitive_, dnnResourceDst, true);
+      buffer_.Reset(X0.dims(), primitive_, dnnResourceDst, true);
     }
     for (auto i = 0; i < this->InputSize(); ++i) {
-      CAFFE_ENFORCE(dnnLayoutCompare_F32(X_(0).layout(), X_(i).layout()));
+      const MKLMemory<float>& Xi = OperatorBase::Input<MKLMemory<float>>(i);
+      CAFFE_ENFORCE(dnnLayoutCompare_F32(X0.layout(), Xi.layout()));
+      resources_[dnnResourceMultipleSrc + i] = Xi.buffer();
     }
-    for (auto i = 0; i < this->InputSize(); ++i) {
-      resources_[dnnResourceMultipleSrc + i] = X_(i).buffer();
-    }
-    if (Y != &X_(0)) {
-      // TODO: MKLDNN seems broken in the in-place case.
+    if (Y != &X0) {
+      // TODO: MKLDNN seems broken in the in-place case, so when we specify
+      // in-place we will need to use buffer differnt from X0/Y.
       buffer_.ShareFrom(*Y);
     }
     resources_[dnnResourceDst] = buffer_.buffer();

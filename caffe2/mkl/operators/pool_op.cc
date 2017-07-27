@@ -64,7 +64,7 @@ bool MKLPoolOp<float>::RunOnDeviceWithOrderNCHW() {
   MKLMemory<float>* Y = OperatorBase::Output<MKLMemory<float>>(0);
 
   bool dims_changed;
-  CHECK_INPUT_DIMS(dims_changed);
+  CHECK_INPUT_DIMS(X, dims_changed);
   if (dims_changed) {
     // We will utilize the SetOutputSize() function in the base class
     // with dummy TensorCPU input and output to calculate the sizes.

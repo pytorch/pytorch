@@ -50,7 +50,7 @@ class MKLConvOp final : public ConvPoolOpBase<MKLContext> {
     CAFFE_ENFORCE(4 == filter.ndim());
 
     bool dims_changed;
-    CHECK_INPUT_FILTER_DIMS(dims_changed);
+    CHECK_INPUT_FILTER_DIMS(X, filter, dims_changed);
     if (dims_changed) {
       CAFFE_ENFORCE(
           C == filter.dim32(1) * group_,

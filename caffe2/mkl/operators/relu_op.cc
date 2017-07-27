@@ -18,7 +18,7 @@ class MKLReluOp : public MKLOperator<T> {
     auto* Y = Output(0);
 
     bool dims_changed;
-    CHECK_INPUT_DIMS(dims_changed);
+    CHECK_INPUT_DIMS(X, dims_changed);
     if (dims_changed) {
       // First run or changed input size, will need to recreate environment
       primitive_.Reset(dnnReLUCreateForward<T>, nullptr, X.layout(), 0.f);
