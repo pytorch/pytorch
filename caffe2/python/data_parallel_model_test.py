@@ -9,7 +9,7 @@ import unittest
 from multiprocessing import Process, Queue
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, cnn, data_parallel_model, dyndep, optimizer, \
-    rnn_cell, workspace
+    rnn_cell, workspace, model_helper, brew
 from caffe2.python.test_util import TestCase
 from future.utils import viewkeys
 
@@ -207,6 +207,59 @@ class DataParallelModelTest(TestCase):
             self.assertFalse(c in checkpoint_params)
         self.assertFalse(core.BlobReference("cpu_1/data") in checkpoint_params)
         self.assertTrue(core.BlobReference("optimizer_iteration") in checkpoint_params)
+
+    def test_net_conversion_and_append_net(self):
+        other = model_helper.ModelHelper()
+        fc1 = brew.fc(other, "data", "other_fc1", dim_in=3*227*227, dim_out=10)
+        fc2 = brew.fc(other, fc1, "other_fc2", dim_in=10, dim_out=10)
+        brew.fc(other, fc2, "other_fc3", dim_in=10, dim_out=10)
+
+        def add_input_ops(model):
+            model.net.UniformFill([], ["data"], shape=[4, 227, 227, 3])
+            model.net.UniformFill([], ["label"], shape=[4])
+
+        def add_model_ops(model, loss_scale):
+            model.NHWC2NCHW("data", "data_nchw")
+            model.Conv("data_nchw", 'conv1', 3, 64,
+                       weight_init=("MSRAFill", {}), kernel=7,
+                       stride=2, pad=3, no_bias=0)
+            model.SpatialBN('conv1', 'conv1_spatbn_relu', 64, epsilon=1e-3)
+            model.Relu('conv1_spatbn_relu', 'conv1_spatbn_relu')
+            model.MaxPool('conv1_spatbn_relu', 'pool1', kernel=3, stride=2)
+            model.FC('pool1', 'fc', dim_in=(64 * 56 * 56), dim_out=10)
+
+            # Append the net and param_init_net of the other model
+            appendnet = data_parallel_model.ConvertNetForDevice(other.net)
+            model.net.AppendNet(appendnet)
+
+            model.param_init_net.AppendNet(
+                data_parallel_model.ConvertNetForDevice(other.param_init_net))
+
+            model.Sigmoid('fc', 'fc_sigm')
+            model.Softmax('fc_sigm', 'softmax')
+            loss = model.AveragedLoss('softmax', 'loss')
+            return [loss]
+
+        def add_optimizer(model):
+            optimizer.build_sgd(model, 0.1, policy="fixed", momentum=0.9)
+
+        model = cnn.CNNModelHelper(
+            order="NCHW",
+            name="test",
+        )
+        data_parallel_model.Parallelize_CPU(
+            model,
+            input_builder_fun=add_input_ops,
+            forward_pass_builder_fun=add_model_ops,
+            optimizer_builder_fun=add_optimizer,
+            devices=range(4)
+        )
+
+        # Just create and run net and confirm no exception is thrown
+        workspace.RunNetOnce(model.param_init_net)
+        workspace.CreateNet(model.net)
+        workspace.RunNet(model.net)
+
 
     def test_synchronization_barrier(self):
 
