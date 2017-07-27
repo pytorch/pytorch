@@ -2,9 +2,9 @@
 #define CAFFE2_UTILS_MKL_OPERATOR_H_
 
 #include "caffe2/core/operator.h"
+#include "caffe2/mkl/utils/mkl_dnn_cppwrapper.h"
+#include "caffe2/mkl/utils/mkl_memory.h"
 #include "caffe2/proto/caffe2.pb.h"
-#include "caffe2/utils/mkl/mkl_dnn_cppwrapper.h"
-#include "caffe2/utils/mkl/mkl_memory.h"
 
 namespace caffe2 {
 

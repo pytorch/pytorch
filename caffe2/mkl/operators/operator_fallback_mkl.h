@@ -4,8 +4,8 @@
 #include "caffe2/core/common.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
+#include "caffe2/mkl/mkl_utils.h"
 #include "caffe2/proto/caffe2.pb.h"
-#include "caffe2/utils/mkl_utils.h"
 
 #ifdef CAFFE2_HAS_MKL_DNN
 namespace caffe2 {

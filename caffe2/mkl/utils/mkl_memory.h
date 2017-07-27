@@ -5,9 +5,9 @@
 #include <vector>
 #include <mutex>
 
-#include "caffe2/core/tensor.h" // for TIndex
 #include "caffe2/core/flags.h" // for TIndex
-#include "caffe2/utils/mkl/mkl_dnn_cppwrapper.h"
+#include "caffe2/core/tensor.h" // for TIndex
+#include "caffe2/mkl/utils/mkl_dnn_cppwrapper.h"
 
 // A global boolean variable that controls the behavior when we call View() on
 // an MKLMemory: if it is set true, then the View() function will actually

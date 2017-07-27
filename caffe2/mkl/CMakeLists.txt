@@ -1,5 +1,5 @@
 if(BLAS STREQUAL "MKL")
-        message(STATUS "Including MKL operators")
+  message(STATUS "Including MKL operators")
 
   # ---[ CPU files.
   file(GLOB_RECURSE tmp *.cc)
@@ -16,5 +16,5 @@ if(BLAS STREQUAL "MKL")
   set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} PARENT_SCOPE)
   set(Caffe2_CPU_TEST_SRCS ${Caffe2_CPU_TEST_SRCS} PARENT_SCOPE)
 else()
-        message(STATUS "Excluding mkl operators as we are not using mkl")
+  message(STATUS "Excluding mkl operators as we are not using mkl")
 endif()
