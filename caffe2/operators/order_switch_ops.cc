@@ -53,6 +53,8 @@ OPERATOR_SCHEMA(NHWC2NCHW)
     .NumOutputs(1)
     .TensorInferenceFunction([](const OperatorDef& /*unused*/ /*def*/,
                                 const vector<TensorShape>& in) {
+      CAFFE_ENFORCE_EQ(
+          in[0].dims_size(), 4, "Input for NHWC2NCHW must be 4 dimensional");
       vector<TensorShape> out(1);
       out[0].add_dims(in[0].dims(0));
       out[0].add_dims(in[0].dims(3));
