@@ -28,6 +28,7 @@ using thpp::Tensor;
 
 PyObject *THPFunctionClass = NULL;
 PyObject *THPStochasticFunctionClass = NULL;
+PyObject *THPBatchNormBackwardBackwardFunction = NULL;
 
 
 #define THPFunction_assert(condition, ...)                                     \
