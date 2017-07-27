@@ -70,13 +70,20 @@ void Transform::PatternMatchHelper(
       subgraph.size() > best_subgraph.size()) {
     best_subgraph = subgraph;
   }
-
   // Try adding each parent and child of every node in the subgraph,
   // and see if we can accept it.
-  for (int i : subgraph) {
+  int size_before = subgraph.size();
+  for (int i = 0; i < subgraph.size(); i++) {
+    int x = subgraph[i];
     TryNeighbors(
-        graph, graph.node(i).children, subgraph_ptr, best_subgraph_ptr);
-    TryNeighbors(graph, graph.node(i).parents, subgraph_ptr, best_subgraph_ptr);
+        graph, graph.node(x).children, subgraph_ptr, best_subgraph_ptr);
+    CAFFE_ENFORCE(
+        size_before == subgraph.size(),
+        "Subgraph size should not change after returning from recursive call.");
+    TryNeighbors(graph, graph.node(x).parents, subgraph_ptr, best_subgraph_ptr);
+    CAFFE_ENFORCE(
+        size_before == subgraph.size(),
+        "Subgraph size should not change after returning from recursive call.");
   }
 }
 
