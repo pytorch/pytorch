@@ -36,16 +36,14 @@ TEST(ConvToNNPackTest, TestSimple) {
   NetDef netdef;
   OperatorDef* op;
   op = AddOp(&netdef, "Conv", {"out"}, {"out"});
-  op->mutable_device_option()->set_device_type(CUDA);
   op = AddOp(&netdef, "Relu", {"out"}, {"out"});
-  op = AddOp(&netdef, "Conv", {"in"}, {"out"}); // if not CUDA, won't transform
+  op = AddOp(&netdef, "Conv", {"in"}, {"out"}); // if not CPU, won't transform
+  op->mutable_device_option()->set_device_type(CUDA);
   op = AddOp(&netdef, "Relu", {"out"}, {"out"});
   op = AddOp(&netdef, "Conv", {"out"}, {"out"});
-  op->mutable_device_option()->set_device_type(CUDA);
   op->set_engine("NNPACK"); // does not need to be transformed
   op = AddOp(&netdef, "Relu", {"out"}, {"out"});
   op = AddOp(&netdef, "Conv", {"out"}, {"out"});
-  op->mutable_device_option()->set_device_type(CUDA);
   op = AddOp(&netdef, "Relu", {"out"}, {"out"});
 
   auto t = TransformRegistry()->Create("ConvToNNPack");
@@ -53,7 +51,7 @@ TEST(ConvToNNPackTest, TestSimple) {
 
   int nnpack_count = 0;
   for (auto& op : transformed_netdef.op()) {
-    if (op.type() == "Conv" && op.device_option().device_type() == CUDA) {
+    if (op.type() == "Conv" && op.device_option().device_type() == CPU) {
       EXPECT_EQ(op.engine(), "NNPACK");
       nnpack_count++;
     }
