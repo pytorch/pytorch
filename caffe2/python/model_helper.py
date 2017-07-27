@@ -536,6 +536,16 @@ def ExtractPredictorNet(
                     " Op was: {}".format(str(op))
                 )
 
+    def rename_list(proto_list):
+        # proto lists don't support assignments
+        new_list = proto_list[:]
+        for j, b in enumerate(new_list):
+            if b in renames:
+                new_list[j] = renames[b]
+
+        del proto_list[:]
+        proto_list.extend(new_list)
+
     # Iterate through the ops and only include those whose inputs
     # we can satisfy.
     for op in ops[first_op_with_input:(last_op_with_output + 1)]:
@@ -553,9 +563,14 @@ def ExtractPredictorNet(
                         step_proto = caffe2_pb2.NetDef()
                         protobuftx.Merge(arg.s.decode("ascii"), step_proto)
                         for step_op in step_proto.op:
+                            rename_list(step_op.input)
+                            rename_list(step_op.output)
                             if device is not None:
                                 step_op.device_option.device_type = device.device_type
                                 step_op.device_option.cuda_gpu_id = device.cuda_gpu_id
+
+                        rename_list(step_proto.external_input)
+                        rename_list(step_proto.external_output)
 
                         # Add additional external inputs
                         external_inputs.update(
@@ -584,16 +599,6 @@ def ExtractPredictorNet(
                     op.type, set(op.input).difference(known_blobs)
                 )
             )
-
-    def rename_list(proto_list):
-        # proto lists don't support assignments
-        new_list = proto_list[:]
-        for j, b in enumerate(new_list):
-            if b in renames:
-                new_list[j] = renames[b]
-
-        del proto_list[:]
-        proto_list.extend(new_list)
 
     # Predictor net's external inputs and outputs include only those
     # that are part of this net.
