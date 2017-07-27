@@ -21,7 +21,11 @@ auto AccumulateGrad::acc_inplace(std::shared_ptr<Variable>& grad,
   auto& new_grad_data = new_grad->data;
   AutoGPU guard(grad_data.type().isCuda() ? grad_data.get_device() : -1);
 
-  grad_data += new_grad_data;
+  if (grad_data.type().isSparse() && !new_grad_data.type().isSparse()) {
+    grad->data = new_grad_data + grad_data;
+  } else {
+    grad_data += new_grad_data;
+  }
 }
 
 auto AccumulateGrad::apply(const variable_list& grads) -> variable_list {
