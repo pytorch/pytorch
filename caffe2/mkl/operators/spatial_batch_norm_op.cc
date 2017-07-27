@@ -54,7 +54,7 @@ class MKLBNOp final : public SpatialBNOp<MKLContext> {
     DCHECK_EQ(bias.dim32(0), C);
 
     bool dims_changed;
-    CHECK_INPUT_DIMS(dims_changed);
+    CHECK_INPUT_DIMS(X, dims_changed);
     if (dims_changed) {
       // Create main primitive.
       if (is_test_) {

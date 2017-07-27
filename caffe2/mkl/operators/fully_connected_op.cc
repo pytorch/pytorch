@@ -25,7 +25,7 @@ class MKLFullyConnectedOp final : public MKLOperator<T> {
     CAFFE_ENFORCE(bias.ndim() == 1, bias.ndim());
 
     bool dims_changed;
-    CHECK_INPUT_FILTER_DIMS(dims_changed);
+    CHECK_INPUT_FILTER_DIMS(X, filter, dims_changed);
     if (dims_changed) {
       const int N = filter.dim32(0);
       CAFFE_ENFORCE(N == bias.dim32(0));

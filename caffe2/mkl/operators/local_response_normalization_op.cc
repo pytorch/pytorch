@@ -40,7 +40,7 @@ bool MKLLRNOp<float>::RunOnDeviceWithOrderNCHW() {
   MKLMemory<float>* Y = OperatorBase::Output<MKLMemory<float>>(0);
 
   bool dims_changed;
-  CHECK_INPUT_DIMS(dims_changed);
+  CHECK_INPUT_DIMS(X, dims_changed);
   if (dims_changed) {
     size_t dim = X.ndim();
     CAFFE_ENFORCE(4 == dim);
