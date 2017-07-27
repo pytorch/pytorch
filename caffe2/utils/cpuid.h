@@ -24,70 +24,7 @@ const CpuId& GetCpuId();
  */
 class CpuId {
  public:
-  CpuId() {
-#ifdef _MSC_VER
-    int reg[4];
-    __cpuid(static_cast<int*>(reg), 0);
-    const int n = reg[0];
-    if (n >= 1) {
-      __cpuid(static_cast<int*>(reg), 1);
-      f1c_ = uint32_t(reg[2]);
-      f1d_ = uint32_t(reg[3]);
-    }
-    if (n >= 7) {
-      __cpuidex(static_cast<int*>(reg), 7, 0);
-      f7b_ = uint32_t(reg[1]);
-      f7c_ = uint32_t(reg[2]);
-    }
-#elif defined(__i386__) && defined(__PIC__) && !defined(__clang__) && \
-    defined(__GNUC__)
-    // The following block like the normal cpuid branch below, but gcc
-    // reserves ebx for use of its pic register so we must specially
-    // handle the save and restore to avoid clobbering the register
-    uint32_t n;
-    __asm__(
-        "pushl %%ebx\n\t"
-        "cpuid\n\t"
-        "popl %%ebx\n\t"
-        : "=a"(n)
-        : "a"(0)
-        : "ecx", "edx");
-    if (n >= 1) {
-      uint32_t f1a;
-      __asm__(
-          "pushl %%ebx\n\t"
-          "cpuid\n\t"
-          "popl %%ebx\n\t"
-          : "=a"(f1a), "=c"(f1c_), "=d"(f1d_)
-          : "a"(1)
-          :);
-    }
-    if (n >= 7) {
-      __asm__(
-          "pushl %%ebx\n\t"
-          "cpuid\n\t"
-          "movl %%ebx, %%eax\n\r"
-          "popl %%ebx"
-          : "=a"(f7b_), "=c"(f7c_)
-          : "a"(7), "c"(0)
-          : "edx");
-    }
-#elif defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
-    uint32_t n;
-    __asm__("cpuid" : "=a"(n) : "a"(0) : "ebx", "ecx", "edx");
-    if (n >= 1) {
-      uint32_t f1a;
-      __asm__("cpuid" : "=a"(f1a), "=c"(f1c_), "=d"(f1d_) : "a"(1) : "ebx");
-    }
-    if (n >= 7) {
-      uint32_t f7a;
-      __asm__("cpuid"
-              : "=a"(f7a), "=b"(f7b_), "=c"(f7c_)
-              : "a"(7), "c"(0)
-              : "edx");
-    }
-#endif
-  }
+  CpuId();
 
 #define X(name, r, bit)              \
   inline bool name() const {         \
@@ -126,6 +63,7 @@ class CpuId {
   C(f16c, 29)
   C(rdrand, 30)
 #undef C
+
 #define D(name, bit) X(name, f1d_, bit)
   D(fpu, 0)
   D(vme, 1)
@@ -185,18 +123,19 @@ class CpuId {
   B(avx512bw, 30)
   B(avx512vl, 31)
 #undef B
-#define C(name, bit) X(name, f7c_, bit)
-  C(prefetchwt1, 0)
-  C(avx512vbmi, 1)
+
+#define E(name, bit) X(name, f7c_, bit)
+  E(prefetchwt1, 0)
+  E(avx512vbmi, 1)
 #undef C
 
 #undef X
 
  private:
-  uint32_t f1c_ = 0;
-  uint32_t f1d_ = 0;
-  uint32_t f7b_ = 0;
-  uint32_t f7c_ = 0;
+  static uint32_t f1c_;
+  static uint32_t f1d_;
+  static uint32_t f7b_;
+  static uint32_t f7c_;
 };
 
 } // namespace caffe2
