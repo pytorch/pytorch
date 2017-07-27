@@ -544,7 +544,8 @@ def Synchronize(model, timeout_sec=30):
     barrier_instance += 1
     barrier_net = core.Net("sync_barrier_net_" + str(instance))
     comm_world = barrier_net.CreateCommonWorld(
-        model._rendezvous['kv_handler'],
+        [model._rendezvous['kv_handler']] +
+        _GetCommonWorldToFork(model.param_init_net),
         "sync_barrier_cw_" + str(instance),
         name="sync_barrier_cw_op_" + str(instance),
         size=model._rendezvous['num_shards'],
@@ -931,7 +932,8 @@ class CollectivesConcurrencyControl(object):
         current_slot = self.counter % self.max_concurrent_context
         if len(self.common_worlds) < self.max_concurrent_context:
             common_world = self.param_init_net.CreateCommonWorld(
-                self.rendezvous['kv_handler'],
+                [self.rendezvous['kv_handler']] +
+                _GetCommonWorldToFork(self.param_init_net),
                 "{}_{}_cw".format(self.name, current_slot),
                 name="{}_{}_cw_op".format(self.name, current_slot),
                 size=self.rendezvous['num_shards'],
@@ -1364,6 +1366,17 @@ def OptimizeGradientMemory(model,
             share_activations=recycle_activations,
             blob_shapes=shapes,
         )
+
+
+def _GetCommonWorldToFork(param_init_net):
+    '''
+    We can fork common worlds from existing ones. So inspect the param_init_net
+    for an already created commonworld
+    '''
+    for op in param_init_net.Proto().op:
+        if op.type == "CreateCommonWorld":
+            return [op.output[0]]
+    return []
 
 
 barrier_instance = 0
