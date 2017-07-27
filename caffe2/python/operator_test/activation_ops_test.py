@@ -43,9 +43,10 @@ class TestActivations(hu.HypothesisTestCase):
            inplace=st.booleans(),
            shared=st.booleans(),
            order=st.sampled_from(["NCHW", "NHWC"]),
+           seed=st.sampled_from([20, 100]),
            **hu.gcs)
-    def test_prelu(self, X, alpha, inplace, shared, order, gc, dc):
-        #np.random.seed(20)
+    def test_prelu(self, X, alpha, inplace, shared, order, seed, gc, dc):
+        np.random.seed(seed)
         W = np.random.randn(
             X.shape[1] if order == "NCHW" else X.shape[3]).astype(np.float32)
 
@@ -76,9 +77,9 @@ class TestActivations(hu.HypothesisTestCase):
 
         if not inplace:
             # Gradient check wrt X
-            self.assertGradientChecks(gc, op, [X, W], 0, [0])
+            self.assertGradientChecks(gc, op, [X, W], 0, [0], stepsize=1e-2)
             # Gradient check wrt W
-            self.assertGradientChecks(gc, op, [X, W], 1, [0])
+            self.assertGradientChecks(gc, op, [X, W], 1, [0], stepsize=1e-2)
 
     @given(X=hu.tensor(),
            alpha=st.floats(min_value=0.1, max_value=2.0),
