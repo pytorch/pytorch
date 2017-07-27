@@ -2,7 +2,7 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/operators/conv_pool_op_base.h"
 
-#include "caffe2/utils/mkl_utils.h"
+#include "caffe2/mkl/mkl_utils.h"
 
 #ifdef CAFFE2_HAS_MKL_DNN
 

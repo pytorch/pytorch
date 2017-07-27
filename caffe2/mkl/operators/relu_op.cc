@@ -1,5 +1,5 @@
 #include "caffe2/operators/relu_op.h"
-#include "caffe2/utils/mkl_utils.h"
+#include "caffe2/mkl/mkl_utils.h"
 
 #include "caffe2/utils/math.h"
 

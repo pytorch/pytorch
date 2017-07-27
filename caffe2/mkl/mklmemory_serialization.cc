@@ -1,6 +1,6 @@
 #include "caffe2/core/blob.h"
 #include "caffe2/core/blob_serialization.h"
-#include "caffe2/utils/mkl_utils.h"
+#include "caffe2/mkl/mkl_utils.h"
 
 #ifdef CAFFE2_HAS_MKL_DNN
 

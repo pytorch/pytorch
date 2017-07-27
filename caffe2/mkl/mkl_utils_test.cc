@@ -1,8 +1,8 @@
 #include "caffe2/core/blob.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/tensor.h"
+#include "caffe2/mkl/mkl_utils.h"
 #include "caffe2/proto/caffe2.pb.h"
-#include "caffe2/utils/mkl_utils.h"
 
 #include <gtest/gtest.h>
 

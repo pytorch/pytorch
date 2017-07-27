@@ -2,7 +2,7 @@
 #define CAFFE2_UTILS_MKL_UTILS_H_
 #ifdef CAFFE2_USE_MKL
 
-#include "caffe2/utils/mkl/mkl_version_check.h"
+#include "caffe2/mkl/utils/mkl_version_check.h"
 
 // MKLDNN_CHECK should be used in places where exceptions should not be thrown,
 // such as in destructors.
@@ -59,14 +59,14 @@
 // All caffe2 mkl related headers
 
 #ifdef CAFFE2_HAS_MKL_DNN
-#include "caffe2/utils/mkl/mkl_context.h"
-#include "caffe2/utils/mkl/mkl_dnn_cppwrapper.h"
-#include "caffe2/utils/mkl/mkl_memory.h"
-#include "caffe2/utils/mkl/mkl_operator.h"
+#include "caffe2/mkl/utils/mkl_context.h"
+#include "caffe2/mkl/utils/mkl_dnn_cppwrapper.h"
+#include "caffe2/mkl/utils/mkl_memory.h"
+#include "caffe2/mkl/utils/mkl_operator.h"
 #endif // CAFFE2_HAS_MKL_DNN
 
 #ifdef CAFFE2_HAS_MKL_SGEMM_PACK
-#include "caffe2/utils/mkl/sgemm_pack.h"
+#include "caffe2/mkl/utils/sgemm_pack.h"
 #endif // CAFFE2_HAS_MKL_SGEMM_PACK
 
 #endif // CAFFE2_USE_MKL

@@ -1,4 +1,4 @@
-// Do not directl include this file. Include caffe2/utils/mkl_utils.h instead.
+// Do not directl include this file. Include caffe2/mkl/mkl_utils.h instead.
 #ifndef CAFFE2_UTILS_MKL_MKL_DNN_CPPWRAPPER_H
 #define CAFFE2_UTILS_MKL_MKL_DNN_CPPWRAPPER_H
 

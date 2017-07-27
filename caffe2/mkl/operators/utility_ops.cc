@@ -1,6 +1,6 @@
 #include "caffe2/operators/utility_ops.h"
 #include "caffe2/core/operator.h"
-#include "caffe2/utils/mkl_utils.h"
+#include "caffe2/mkl/mkl_utils.h"
 #ifdef CAFFE2_HAS_MKL_DNN
 
 namespace caffe2 {
