@@ -34,6 +34,8 @@ class ArcCosineFeatureMap(ModelLayer):
         set_weight_as_global_constant -- if True, initialized random parameters
                                          will be constant across all distributed
                                          instances of the layer
+        initialize_output_schema -- if True, initialize output schema as Scalar
+                                    from Arc Cosine; else output schema is None
     """
     def __init__(
             self,
@@ -47,6 +49,7 @@ class ArcCosineFeatureMap(ModelLayer):
             weight_optim=None,
             bias_optim=None,
             set_weight_as_global_constant=False,
+            initialize_output_schema=True,
             name='arc_cosine_feature_map',
             **kwargs):
 
@@ -63,10 +66,11 @@ class ArcCosineFeatureMap(ModelLayer):
         assert self.input_dims >= 1, "Expected input dimensions >= 1, got %s" \
                                      % self.input_dims
 
-        self.output_schema = schema.Scalar(
-            (np.float32, (output_dims, )),
-            model.net.NextScopedBlob(name + '_output')
-        )
+        if initialize_output_schema:
+            self.output_schema = schema.Scalar(
+                (np.float32, (output_dims, )),
+                model.net.NextScopedBlob(name + '_output')
+            )
 
         self.output_dims = output_dims
         assert self.output_dims >= 1, "Expected output dimensions >= 1, got %s" \
