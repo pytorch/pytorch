@@ -3,6 +3,10 @@ language: python
 dist: precise
 sudo: required
 python:
+    - 2.7.9
+    - 2.7
+    - 3.5
+    - 3.6
     - nightly
 
 cache:
