@@ -322,7 +322,7 @@ def Train(args):
             'cudnn_exhaustive_search': True,
         }
         test_model = model_helper.ModelHelper(
-            name="resnet50_test", arg_scope=test_arg_scope
+            name="resnet50_test", arg_scope=test_arg_scope, init_params=False
         )
 
         test_reader = test_model.CreateDB(
