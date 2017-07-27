@@ -2,6 +2,7 @@
 #include "ATen/Tensor.h"
 #include "ATen/Storage.h"
 #include "ATen/Scalar.h"
+#include "ATen/SparseTensorRef.h"
 
 #include <iostream>
 ${type_headers}

@@ -23,7 +23,7 @@ std::unique_ptr<thpp::Tensor> createTensor(PyObject *data);
 // Creates Python tensor object from a Tensor
 PyObject* createPyObject(const thpp::Tensor& tensor);
 
-PyObject* createPyObject(at::Tensor tensor);
+PyObject* createPyObject(at::Tensor& tensor);
 PyTypeObject* getPyTypeObject(const at::Tensor& tensor);
 //rename to createPyObject when THPP is removed
 at::Tensor createTensorAT(PyObject *data);

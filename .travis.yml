@@ -1,6 +1,7 @@
 # https://travis-ci.org/pytorch/pytorch
 language: python
-dist: trusty
+dist: precise
+sudo: required
 python:
     - 2.7.9
     - 2.7
@@ -13,11 +14,17 @@ cache:
     - directories:
         - $HOME/.ccache
 
+before_install:
+  - sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+  - sudo apt-get update -qq
+
 install:
     - unset CCACHE_DISABLE
     - export CCACHE_DIR=$HOME/.ccache
-    - export CC="ccache gcc-4.8"
-    - export CXX="ccache g++-4.8"
+    - sudo apt-get install -qq g++-5
+    - sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-5 90
+    - export CC="ccache gcc-5"
+    - export CXX="ccache g++-5"
     - ccache --show-stats
     - travis_retry pip install --upgrade pip setuptools wheel
     - travis_retry pip install -r requirements.txt --only-binary=scipy
@@ -25,19 +32,6 @@ install:
 
 script:
     - OMP_NUM_THREADS=2 ./test/run_test.sh
-
-addons:
-    apt:
-        sources:
-            - ubuntu-toolchain-r-test
-        packages:
-            - gcc-4.8
-            - g++-4.8
-
-# This reportedly works around an issue downloading packages from pypi on
-# travis.  Consider removing this after the underlying issue is fixed.
-# https://github.com/travis-ci/travis-ci/issues/2389
-sudo: false
 
 matrix:
     fast_finish: true
