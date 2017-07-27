@@ -815,6 +815,22 @@ class TestLayers(LayersTestCase):
         bandwidth=st.floats(min_value=0.1, max_value=5),
     )
     def testRandomFourierFeatures(self, batch_size, input_dims, output_dims, bandwidth):
+
+        def _rff_hypothesis_test(rff_output, X, W, b, scale):
+            """
+            Runs hypothesis test for Semi Random Features layer.
+
+            Inputs:
+                rff_output -- output of net after running random fourier features layer
+                X -- input data
+                W -- weight parameter from train_init_net
+                b -- bias parameter from train_init_net
+                scale -- value by which to scale the output vector
+            """
+            output = workspace.FetchBlob(rff_output)
+            output_ref = scale * np.cos(np.dot(X, np.transpose(W)) + b)
+            npt.assert_allclose(output, output_ref, rtol=1e-4)
+
         X = np.random.random((batch_size, input_dims)).astype(np.float32)
         scale = np.sqrt(2.0 / output_dims)
         input_record = self.new_record(schema.Scalar((np.float32, (input_dims,))))
@@ -855,32 +871,17 @@ class TestLayers(LayersTestCase):
 
         # Train net assertions
         self._test_net(train_net, ops_list)
-        self._rff_hypothesis_test(rff_output(), X, W, b, scale)
+        _rff_hypothesis_test(rff_output(), X, W, b, scale)
 
         # Eval net assertions
         eval_net = self.get_eval_net()
         self._test_net(eval_net, ops_list)
-        self._rff_hypothesis_test(rff_output(), X, W, b, scale)
+        _rff_hypothesis_test(rff_output(), X, W, b, scale)
 
         # Predict net assertions
         predict_net = self.get_predict_net()
         self._test_net(predict_net, ops_list)
-        self._rff_hypothesis_test(rff_output(), X, W, b, scale)
-
-    def _rff_hypothesis_test(self, rff_output, X, W, b, scale):
-        """
-        Runs hypothesis test for Semi Random Features layer.
-
-        Inputs:
-            rff_output -- output of net after running random fourier features layer
-            X -- input data
-            W -- weight parameter from train_init_net
-            b -- bias parameter from train_init_net
-            scale -- value by which to scale the output vector
-        """
-        output = workspace.FetchBlob(rff_output)
-        output_ref = scale * np.cos(np.dot(X, np.transpose(W)) + b)
-        npt.assert_allclose(output, output_ref, rtol=1e-4)
+        _rff_hypothesis_test(rff_output(), X, W, b, scale)
 
     @given(
         batch_size=st.integers(min_value=2, max_value=10),
@@ -892,6 +893,30 @@ class TestLayers(LayersTestCase):
     )
     def testArcCosineFeatureMap(self, batch_size, input_dims, output_dims, s, scale,
                                 set_weight_as_global_constant):
+
+        def _arc_cosine_hypothesis_test(ac_output, X, W, b, s):
+            """
+            Runs hypothesis test for Arc Cosine layer.
+
+            Inputs:
+                ac_output -- output of net after running arc cosine layer
+                X -- input data
+                W -- weight parameter from train_init_net
+                b -- bias parameter from train_init_net
+                s -- degree parameter
+            """
+            # Get output from net
+            net_output = workspace.FetchBlob(ac_output)
+
+            # Computing output directly
+            x_rand = np.matmul(X, np.transpose(W)) + b
+            x_pow = np.power(x_rand, s)
+            h_rand_features = np.piecewise(x_rand, [x_rand <= 0, x_rand > 0], [0, 1])
+            output_ref = np.multiply(x_pow, h_rand_features)
+
+            # Comparing net output and computed output
+            npt.assert_allclose(net_output, output_ref, rtol=1e-4)
+
         X = np.random.normal(size=(batch_size, input_dims)).astype(np.float32)
         input_record = self.new_record(schema.Scalar((np.float32, (input_dims,))))
         schema.FeedRecord(input_record, [X])
@@ -959,40 +984,17 @@ class TestLayers(LayersTestCase):
 
         # Train net assertions
         self._test_net(train_net, ops_list)
-        self._arc_cosine_hypothesis_test(ac_output(), X, W, b, s)
+        _arc_cosine_hypothesis_test(ac_output(), X, W, b, s)
 
         # Eval net assertions
         eval_net = self.get_eval_net()
         self._test_net(eval_net, ops_list)
-        self._arc_cosine_hypothesis_test(ac_output(), X, W, b, s)
+        _arc_cosine_hypothesis_test(ac_output(), X, W, b, s)
 
         # Predict net assertions
         predict_net = self.get_predict_net()
         self._test_net(predict_net, ops_list)
-        self._arc_cosine_hypothesis_test(ac_output(), X, W, b, s)
-
-    def _arc_cosine_hypothesis_test(self, ac_output, X, W, b, s):
-        """
-        Runs hypothesis test for Arc Cosine layer.
-
-        Inputs:
-            ac_output -- output of net after running arc cosine layer
-            X -- input data
-            W -- weight parameter from train_init_net
-            b -- bias parameter from train_init_net
-            s -- degree parameter
-        """
-        # Get output from net
-        net_output = workspace.FetchBlob(ac_output)
-
-        # Computing output directly
-        x_rand = np.matmul(X, np.transpose(W)) + b
-        x_pow = np.power(x_rand, s)
-        h_rand_features = np.piecewise(x_rand, [x_rand <= 0, x_rand > 0], [0, 1])
-        output_ref = np.multiply(x_pow, h_rand_features)
-
-        # Comparing net output and computed output
-        npt.assert_allclose(net_output, output_ref, rtol=1e-4)
+        _arc_cosine_hypothesis_test(ac_output(), X, W, b, s)
 
     @given(
         batch_size=st.integers(min_value=2, max_value=10),
@@ -1001,14 +1003,63 @@ class TestLayers(LayersTestCase):
         s=st.integers(min_value=0, max_value=3),
         scale=st.floats(min_value=0.1, max_value=5),
         set_weight_as_global_constant=st.booleans(),
+        use_struct_input=st.booleans(),
     )
     def testSemiRandomFeatures(self, batch_size, input_dims, output_dims, s, scale,
-                               set_weight_as_global_constant):
-        X = np.random.normal(size=(batch_size, input_dims)).astype(np.float32)
-        input_record = self.new_record(schema.Scalar((np.float32, (input_dims,))))
-        schema.FeedRecord(input_record, [X])
-        input_blob = input_record.field_blobs()[0]
+                               set_weight_as_global_constant, use_struct_input):
 
+        def _semi_random_hypothesis_test(srf_output, X_full, X_random, rand_w,
+                                         rand_b, s):
+            """
+            Runs hypothesis test for Semi Random Features layer.
+
+            Inputs:
+                srf_output -- output of net after running semi random features layer
+                X_full -- full input data
+                X_random -- random-output input data
+                rand_w -- random-initialized weight parameter from train_init_net
+                rand_b -- random-initialized bias parameter from train_init_net
+                s -- degree parameter
+
+            """
+            # Get output from net
+            net_output = workspace.FetchBlob(srf_output)
+
+            # Fetch learned parameter blobs
+            learned_w = workspace.FetchBlob(self.model.layers[0].learned_w)
+            learned_b = workspace.FetchBlob(self.model.layers[0].learned_b)
+
+            # Computing output directly
+            x_rand = np.matmul(X_random, np.transpose(rand_w)) + rand_b
+            x_learn = np.matmul(X_full, np.transpose(learned_w)) + learned_b
+            x_pow = np.power(x_rand, s)
+            h_rand_features = np.piecewise(x_rand, [x_rand <= 0, x_rand > 0], [0, 1])
+            output_ref = np.multiply(np.multiply(x_pow, h_rand_features), x_learn)
+
+            # Comparing net output and computed output
+            npt.assert_allclose(net_output, output_ref, rtol=1e-4)
+
+        X_full = np.random.normal(size=(batch_size, input_dims)).astype(np.float32)
+        if use_struct_input:
+            X_random = np.random.normal(size=(batch_size, input_dims)).\
+                astype(np.float32)
+            input_data = [X_full, X_random]
+            input_record = self.new_record(schema.Struct(
+                ('full', schema.Scalar(
+                    (np.float32, (input_dims,))
+                )),
+                ('random', schema.Scalar(
+                    (np.float32, (input_dims,))
+                ))
+            ))
+        else:
+            X_random = X_full
+            input_data = [X_full]
+            input_record = self.new_record(schema.Scalar(
+                (np.float32, (input_dims,))
+            ))
+
+        schema.FeedRecord(input_record, input_data)
         srf_output = self.model.SemiRandomFeatures(
             input_record,
             output_dims,
@@ -1016,9 +1067,18 @@ class TestLayers(LayersTestCase):
             scale=scale,
             set_weight_as_global_constant=set_weight_as_global_constant
         )
+
         self.model.output_schema = schema.Struct()
+
         self.assertEqual(
-            schema.Scalar((np.float32, (output_dims, ))),
+            schema.Struct(
+                ('full', schema.Scalar(
+                    (np.float32, (output_dims,))
+                )),
+                ('random', schema.Scalar(
+                    (np.float32, (output_dims,))
+                ))
+            ),
             srf_output
         )
 
@@ -1044,8 +1104,8 @@ class TestLayers(LayersTestCase):
             )
 
             # Operation specifications
-            fc_random_spec = OpSpec("FC", [input_blob, None, None], None)
-            fc_learned_spec = OpSpec("FC", [input_blob, init_ops[0].output[0],
+            fc_random_spec = OpSpec("FC", [None, None, None], None)
+            fc_learned_spec = OpSpec("FC", [None, init_ops[0].output[0],
                                      init_ops[1].output[0]], None)
         else:
             init_ops = self._test_net(train_init_net, init_ops_list)
@@ -1053,22 +1113,22 @@ class TestLayers(LayersTestCase):
             rand_b = workspace.FetchBlob(self.model.layers[0].random_b)
 
             # Operation specifications
-            fc_random_spec = OpSpec("FC", [input_blob, init_ops[0].output[0],
+            fc_random_spec = OpSpec("FC", [None, init_ops[0].output[0],
                                     init_ops[1].output[0]], None)
-            fc_learned_spec = OpSpec("FC", [input_blob, init_ops[2].output[0],
+            fc_learned_spec = OpSpec("FC", [None, init_ops[2].output[0],
                                      init_ops[3].output[0]], None)
 
         gt_spec = OpSpec("GT", None, None)
-        cast_spec = OpSpec("Cast", None, None)
+        cast_spec = OpSpec("Cast", None, srf_output.random.field_blobs())
         relu_spec = OpSpec("Relu", None, None)
         pow_spec = OpSpec("Pow", None, None, {'exponent': float(s - 1)})
         mul_interim_spec = OpSpec("Mul", None, None)
-        mul_spec = OpSpec("Mul", None, srf_output.field_blobs())
+        mul_spec = OpSpec("Mul", None, srf_output.full.field_blobs())
 
         if s == 0:
             ops_list = [
-                fc_random_spec,
                 fc_learned_spec,
+                fc_random_spec,
                 gt_spec,
                 cast_spec,
                 mul_spec,
@@ -1076,16 +1136,16 @@ class TestLayers(LayersTestCase):
 
         elif s == 1:
             ops_list = [
-                fc_random_spec,
                 fc_learned_spec,
+                fc_random_spec,
                 relu_spec,
                 mul_spec,
             ]
 
         else:
             ops_list = [
-                fc_random_spec,
                 fc_learned_spec,
+                fc_random_spec,
                 relu_spec,
                 pow_spec,
                 mul_interim_spec,
@@ -1094,42 +1154,17 @@ class TestLayers(LayersTestCase):
 
         # Train net assertions
         self._test_net(train_net, ops_list)
-        self._semi_random_hypothesis_test(srf_output(), X, rand_w, rand_b, s)
+        _semi_random_hypothesis_test(srf_output.full(), X_full, X_random,
+                                     rand_w, rand_b, s)
 
         # Eval net assertions
         eval_net = self.get_eval_net()
         self._test_net(eval_net, ops_list)
-        self._semi_random_hypothesis_test(srf_output(), X, rand_w, rand_b, s)
+        _semi_random_hypothesis_test(srf_output.full(), X_full, X_random,
+                                     rand_w, rand_b, s)
 
         # Predict net assertions
         predict_net = self.get_predict_net()
         self._test_net(predict_net, ops_list)
-        self._semi_random_hypothesis_test(srf_output(), X, rand_w, rand_b, s)
-
-    def _semi_random_hypothesis_test(self, srf_output, X, rand_w, rand_b, s):
-        """
-        Runs hypothesis test for Semi Random Features layer.
-
-        Inputs:
-            srf_output -- output of net after running semi random features layer
-            X -- input data
-            rand_w -- random-initialized weight parameter from train_init_net
-            rand_b -- random-initialized bias parameter from train_init_net
-            s -- degree parameter
-        """
-        # Get output from net
-        net_output = workspace.FetchBlob(srf_output)
-
-        # Fetch learned parameter blobs
-        learned_w = workspace.FetchBlob(self.model.layers[0].learned_w)
-        learned_b = workspace.FetchBlob(self.model.layers[0].learned_b)
-
-        # Computing output directly
-        x_rand = np.matmul(X, np.transpose(rand_w)) + rand_b
-        x_learn = np.matmul(X, np.transpose(learned_w)) + learned_b
-        x_pow = np.power(x_rand, s)
-        h_rand_features = np.piecewise(x_rand, [x_rand <= 0, x_rand > 0], [0, 1])
-        output_ref = np.multiply(np.multiply(x_pow, h_rand_features), x_learn)
-
-        # Comparing net output and computed output
-        npt.assert_allclose(net_output, output_ref, rtol=1e-4)
+        _semi_random_hypothesis_test(srf_output.full(), X_full, X_random,
+                                     rand_w, rand_b, s)
