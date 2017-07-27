@@ -569,14 +569,11 @@ Node * NodeWithKind<Self,K>::allocClone(Graph * in_graph) {
   auto && __match_key = x; \
   switch(__match_key->kind()) { \
     case NodeKind::Kind: { \
-      Kind * value = static_cast<Kind*>(__match_key); (void) value;
+      auto * value = static_cast<::torch::jit::Kind*>(__match_key); (void) value;
 #define IR_ELSEIF(Kind) \
     } break; \
     case NodeKind::Kind: { \
-      Kind * value = static_cast<Kind*>(__match_key); (void) value;
-#define IR_ELSEIF_NOCAST(Kind) \
-    } break; \
-    case NodeKind::Kind: {
+      auto * value = static_cast<::torch::jit::Kind*>(__match_key); (void) value;
 #define IR_ELSE() \
     } break; \
     default: {
