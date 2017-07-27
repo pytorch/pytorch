@@ -50,6 +50,7 @@ class TestCase(hu.HypothesisTestCase):
                 with core.DeviceScope(device_option):
                     fn(*args, **kwargs)
                     workspace.ResetWorkspace()
+                    queue.put(True)
             except Exception as ex:
                 queue.put(ex)
 
@@ -67,14 +68,19 @@ class TestCase(hu.HypothesisTestCase):
         while len(procs) > 0:
             proc = procs.pop(0)
             while proc.is_alive():
-                proc.join(1)
+                proc.join(10)
 
-                # Raise exception if we find any.
+                # Raise exception if we find any. Otherwise each worker
+                # should put a True into the queue
                 # Note that the following is executed ALSO after
                 # the last process was joined, so if ANY exception
                 # was raised, it will be re-raised here.
-                if not queue.empty():
-                    raise queue.get()
+                self.assertFalse(queue.empty(), "Job failed without a result")
+                o = queue.get()
+                if isinstance(o, Exception):
+                    raise o
+                else:
+                    self.assertTrue(o)
 
     def run_test_distributed(self, fn, device_option=None, **kwargs):
         comm_rank = os.getenv('COMM_RANK')
