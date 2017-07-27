@@ -300,7 +300,7 @@ custom_precision = {
     'baddbmm': 1e-4,
     'rsqrt': 1e-4,
     'cumprod': 1e-4,
-    'qr': 1.02e-4,
+    'qr': 3e-4,
 }
 
 simple_pointwise = [
