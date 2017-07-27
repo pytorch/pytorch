@@ -66,7 +66,10 @@ _(Param) \
 _(Select) \
 _(Return) \
 _(Add) \
-_(SimpleMap) \
+_(Mul) \
+_(Negate) \
+_(Sigmoid) \
+_(Tanh) \
 _(FusionGroup)
 
 enum class NodeKind {
@@ -571,6 +574,9 @@ Node * NodeWithKind<Self,K>::allocClone(Graph * in_graph) {
     } break; \
     case NodeKind::Kind: { \
       Kind * value = static_cast<Kind*>(__match_key); (void) value;
+#define IR_ELSEIF_NOCAST(Kind) \
+    } break; \
+    case NodeKind::Kind: {
 #define IR_ELSE() \
     } break; \
     default: {
@@ -673,22 +679,11 @@ private:
 // NB: non-nullary constructors don't get forwarded to the
 // parents, so you have to spell out the constructors you want explicitly.
 
-// example primitive
 struct Add : public Primitive<Add,NodeKind::Add> {};
-
-// Temporary node that represents single-return fusable math operators
-// until we have actual operators to reflect them.
-struct SimpleMap: public NodeWithKind<SimpleMap, NodeKind::SimpleMap> {
-  std::string op; //'Tanh'
-  void init(const std::string & op, ArrayRef<Node*> inputs) {
-    this->op = op;
-    for(auto i : inputs)
-      addInput(i);
-  }
-  virtual void cloneFrom(SimpleMap * n) override {
-    this->op = n->op;
-  }
-};
+struct Mul : public Primitive<Mul,NodeKind::Mul> {};
+struct Negate : public Primitive<Negate,NodeKind::Negate> {};
+struct Sigmoid : public Primitive<Sigmoid,NodeKind::Sigmoid> {};
+struct Tanh : public Primitive<Tanh,NodeKind::Tanh> {};
 
 struct FusionGroup : public NodeWithKind<FusionGroup,NodeKind::FusionGroup> {
   void init() {
@@ -705,3 +700,14 @@ private:
 };
 
 }}
+
+namespace std {
+
+template<>
+struct hash<torch::jit::NodeKind> {
+  std::size_t operator()(const torch::jit::NodeKind& k) const {
+    return hash<int>()(static_cast<int>(k));
+  }
+};
+
+} // namespace std

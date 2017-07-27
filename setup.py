@@ -346,6 +346,7 @@ main_sources = [
     "torch/csrc/jit/init.cpp",
     "torch/csrc/jit/ir.cpp",
     "torch/csrc/jit/graph_fuser.cpp",
+    "torch/csrc/jit/init_pass.cpp",
     "torch/csrc/jit/test_jit.cpp",
     "torch/csrc/jit/tracer.cpp",
     "torch/csrc/jit/python_ir.cpp",

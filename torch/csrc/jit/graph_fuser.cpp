@@ -3,13 +3,17 @@
 
 namespace torch { namespace jit {
 
-std::unordered_set<std::string> simple_mappable = {
-  "Sigmoid",
-  "Tanh",
-  "Mul",
-  "Add",
-  "Negate",
+std::unordered_set<NodeKind> simple_mappable = {
+  NodeKind::Sigmoid,
+  NodeKind::Tanh,
+  NodeKind::Mul,
+  NodeKind::Add,
+  NodeKind::Negate
 };
+
+bool isSimpleMap(Node *node) {
+  return simple_mappable.count(node->kind());
+}
 
 struct GraphFuser {
   std::unique_ptr<Graph> graph;
@@ -20,42 +24,8 @@ struct GraphFuser {
   GraphFuser(std::unique_ptr<Graph> graph)
   : graph(std::move(graph)) {}
 
-  // the tracer should handle this conversion, and then this code should
-  // be deleted
-  void replacePythonOps() {
-    auto & nodes = graph->nodes();
-    auto it = nodes.begin();
-    while (it != nodes.end()) {
-      PythonOp *p = (*it)->cast<PythonOp>();
-      if (!p) {
-        ++it;
-        continue;
-      }
-
-      std::string name = p->name();
-      if (simple_mappable.count(name) == 0) {
-        ++it;
-        continue;
-      }
-
-      // replaces the Select(PythonOp,0) with just SimpleMap(opname)
-      auto new_op = graph->create<SimpleMap>(name,p->inputs());
-      new_op->insertAfter(p);
-      JIT_ASSERT(p->uses().size() == 1);
-      auto single_select = p->uses()[0].user;
-      JIT_ASSERT(single_select->kind() == NodeKind::Select);
-      single_select->replaceAllUsesWith(new_op);
-      single_select->destroy();
-
-      // Erasing p directly would invalidate iterator
-      ++it;
-      p->destroy();
-    }
-  }
-
   bool isFusable(Node * node) {
-    //TODO: waiting on actual list of operators so we can replace SimpleMap
-    return node->kind() == NodeKind::SimpleMap || node->kind() == NodeKind::FusionGroup;
+    return isSimpleMap(node) || node->kind() == NodeKind::FusionGroup;
   }
 
   // necessary condition for fusion. If all of the uses of producer are consumer
@@ -183,7 +153,6 @@ struct GraphFuser {
   }
 
   std::unique_ptr<Graph> run() {
-    replacePythonOps();
     size_t i = 0;
     for(auto p : graph->inputs()) {
       topological_index[p] = i++;

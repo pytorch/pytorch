@@ -77,6 +77,14 @@ static void codeTemplateTest() {
 }
 
 #ifdef WITH_CUDA
+template<typename T>
+Node * appendNewNode(Graph& graph, ArrayRef<Node*> inputs) {
+  auto n = graph.appendNewNode<T>();
+  for (auto i : inputs)
+    n->addInput(i);
+  return n;
+}
+
 static void fusionTests() {
   FusionCompiler comp;
   cudaFree(0);
@@ -85,7 +93,7 @@ static void fusionTests() {
     Graph graph;
     Node * i0 = graph.addInput();
     Node * i1 = graph.addInput();
-    auto o0 = graph.appendNewNode<SimpleMap>("Mul",AR({i0, i1}));
+    auto o0 = appendNewNode<Mul>(graph,AR({i0, i1}));
     graph.registerOutput(o0);
     auto a = at::CUDA(at::kFloat).rand({3,4});
     auto b = at::CUDA(at::kFloat).rand({4,3}).transpose(0,1);
@@ -108,15 +116,15 @@ static void fusionTests() {
     Node * i3 = graph.addInput();
     Node * i4 = graph.addInput();
 
-    auto p22 = graph.appendNewNode<SimpleMap>("Sigmoid",AR({i4}));
-    auto p20 = graph.appendNewNode<SimpleMap>("Sigmoid",AR({i3}));
-    auto p18 = graph.appendNewNode<SimpleMap>("Tanh",AR({i2}));
-    auto p16 = graph.appendNewNode<SimpleMap>("Sigmoid",AR({i1}));
-    auto p14 = graph.appendNewNode<SimpleMap>("Mul",AR({p20, i0}));
-    auto p11 = graph.appendNewNode<SimpleMap>("Mul",AR({p22, p18}));
-    auto o1 = graph.appendNewNode<SimpleMap>("Add",AR({p14, p11}));
-    auto p5 = graph.appendNewNode<SimpleMap>("Tanh",AR({o1}));
-    auto o0 = graph.appendNewNode<SimpleMap>("Mul",AR({p16, p5}));
+    auto p22 = appendNewNode<Sigmoid>(graph,AR({i4}));
+    auto p20 = appendNewNode<Sigmoid>(graph,AR({i3}));
+    auto p18 = appendNewNode<Tanh>(graph,AR({i2}));
+    auto p16 = appendNewNode<Sigmoid>(graph,AR({i1}));
+    auto p14 = appendNewNode<Mul>(graph,AR({p20, i0}));
+    auto p11 = appendNewNode<Mul>(graph,AR({p22, p18}));
+    auto o1 = appendNewNode<Add>(graph,AR({p14, p11}));
+    auto p5 = appendNewNode<Tanh>(graph,AR({o1}));
+    auto o0 = appendNewNode<Mul>(graph,AR({p16, p5}));
 
     graph.registerOutput(o0);
     graph.registerOutput(o1);

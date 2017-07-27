@@ -156,6 +156,9 @@ std::unique_ptr<AutogradClosure> createAutogradClosure(Graph *graph) {
 
     if (uses.size() == 0) return; // Dead code elimination
 
+#define IR_ELSEIF_TRIVIAL(NAME, FNAME) \
+    IR_ELSEIF_NOCAST(NAME) fn = std::make_shared<FNAME>();
+
     IR_IF(node, PythonOp)
       auto name = value->name();
       // TODO: specialized ops will be probably handled by the tracer
@@ -166,11 +169,11 @@ std::unique_ptr<AutogradClosure> createAutogradClosure(Graph *graph) {
       } else {
         fn = std::make_shared<PythonCall>(value);
       }
-    IR_ELSEIF(SimpleMap)
-      throw std::runtime_error("don't know how to execute SimpleMaps");
     IR_ELSEIF(Select)
       // No-op. Selects are handled by their inputs.
       return;
+    IR_ELSEIF_TRIVIAL(Add, Add)
+    IR_ELSEIF_TRIVIAL(Mul, Mul)
     IR_ELSEIF(FusionGroup)
       // TODO: Add an op for fusion groups once we can compile them
       throw std::runtime_error("don't know how to execute FusionGroups");
