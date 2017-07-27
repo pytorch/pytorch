@@ -102,7 +102,8 @@ def write(filename, s):
 
 def format_yaml(data):
     if options.output_dependencies:
-        return ""  # yaml formatting is slow so don't do it if we will ditch it.
+        # yaml formatting is slow so don't do it if we will ditch it.
+        return ""
     noalias_dumper = yaml.dumper.SafeDumper
     noalias_dumper.ignore_aliases = lambda self, data: True
     return yaml.dump(data, default_flow_style=False, Dumper=noalias_dumper)

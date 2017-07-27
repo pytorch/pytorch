@@ -179,7 +179,8 @@ def discover_sparse_tensor_operations(declaration):
             for i, arg in enumerate(option['arguments']):
                 if (arg['type'] == 'THSTensor*' and
                         option.get('aten_dense_sparse', False)):
-                    signature_of_tensor_version = signature(option, i, 'Tensor &')
+                    signature_of_tensor_version = signature(
+                        option, i, 'Tensor &')
                     if signature_of_tensor_version in signature_to_option:
                         tensor_version = \
                             signature_to_option[signature_of_tensor_version]
@@ -188,7 +189,7 @@ def discover_sparse_tensor_operations(declaration):
                                  if not exclude(arg)]
                         filtered_args = len(names)
                         tensor_version['when_sparse_dispatch'] = names[i -
-                                (raw_args - filtered_args)]
+                                                                       (raw_args - filtered_args)]
 
 
 def run(declarations):

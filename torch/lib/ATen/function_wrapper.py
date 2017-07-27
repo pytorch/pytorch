@@ -120,13 +120,17 @@ TYPE_RETURN = {
 CHECKED_CAST = {
     'THTensor*': CodeTemplate('checked_cast<${Tensor}>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
     'THSTensor*':
-    CodeTemplate('checked_cast<Sparse${Tensor}>(${arg_name}.tref.pImpl,"${arg_name}",${arg_pos},false)'),
+    CodeTemplate(
+        'checked_cast<Sparse${Tensor}>(${arg_name}.tref.pImpl,"${arg_name}",${arg_pos},false)'),
     'THBoolTensor*':
-        CodeTemplate('checked_cast<${Backend}ByteTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
+        CodeTemplate(
+            'checked_cast<${Backend}ByteTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
     'THIndexTensor*':
-        CodeTemplate('checked_cast<${Backend}LongTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
+        CodeTemplate(
+            'checked_cast<${Backend}LongTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
     'THIntegerTensor*':
-        CodeTemplate('checked_cast<${Backend}IntTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
+        CodeTemplate(
+            'checked_cast<${Backend}IntTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
     'THStorage*': CodeTemplate('checked_cast<${Storage}>(&${arg_name},"${arg_name}",${arg_pos}, false)'),
     'THGenerator*': CodeTemplate('check_generator(&${arg_name})'),
     'THSize*': CodeTemplate('THLongStorageView::make(${arg_name},true)'),
@@ -369,7 +373,8 @@ def create_derived(backend_type_env, declarations):
 
     def get_argument(argument, option):
         if requires_checked_cast(argument):
-            checked_use = CHECKED_USE.get(argument['type'], '{}_').format(argument['name'])
+            checked_use = CHECKED_USE.get(
+                argument['type'], '{}_').format(argument['name'])
             if nullable_argument(argument):
                 checked_use = CHECKED_USE_NULLABLE.substitute(
                     env={}, arg_name=argument['name'], usage=checked_use)
@@ -382,7 +387,8 @@ def create_derived(backend_type_env, declarations):
             return tpl.format(argument['name'],
                               argument['if_true'], argument['if_false'])
         elif argument['type'] == "CONSTANT":
-            if bool_option_is_string(argument):  # this is a bool that is actually a string...
+            # this is a bool that is actually a string...
+            if bool_option_is_string(argument):
                 return '"{}"'.format(argument['name'])
             v = str(argument['name'])
             for pattern, replacement in CONSTANT_REPLACEMENTS:
@@ -427,8 +433,8 @@ def create_derived(backend_type_env, declarations):
             return []
         check_name = option['when_sparse_dispatch']
         sparse_actuals = [arg['name']
-                            if arg['name'] != check_name else "SparseTensor({})".format(arg['name'])
-                            for arg in option['formals_list']]
+                          if arg['name'] != check_name else "SparseTensor({})".format(arg['name'])
+                          for arg in option['formals_list']]
         return [SPARSE_CHECK.substitute(env, check_name=check_name, sparse_actuals=sparse_actuals)]
 
     def emit_body(env, option):
@@ -477,7 +483,8 @@ def create_derived(backend_type_env, declarations):
                     body.append("auto {}_ = {};".format(
                         arg['name'], check_cast))
                 if drop_argument(arg, option):
-                    body.append("(void) {}_; //silence unused warning".format(arg['name']))
+                    body.append(
+                        "(void) {}_; //silence unused warning".format(arg['name']))
                 # resize tensors for special ops that require it
                 if 'resize' in arg:
                     resize = arg['resize']
@@ -513,7 +520,8 @@ def create_derived(backend_type_env, declarations):
         option['derived_actuals'] = get_arguments(option)
         is_nn = option['mode'] == 'NN'
         if is_cuda or is_nn:
-            option['derived_actuals'] = ['context->thc_state'] + option['derived_actuals']
+            option['derived_actuals'] = [
+                'context->thc_state'] + option['derived_actuals']
 
         if is_nn:
             prefix = 'THNN_{}'.format(env['THType'])
@@ -525,13 +533,16 @@ def create_derived(backend_type_env, declarations):
         else:
             prefix = env['THTensor'] + '_'
 
-        call = prefix + CodeTemplate("${cname}(${derived_actuals})").substitute(env)
+        call = prefix + \
+            CodeTemplate("${cname}(${derived_actuals})").substitute(env)
         ret = option['return']
 
         if ret['kind'] == 'arguments':
             if 'aten_custom_call' in option:
-                scalar_check = None  # all aten_custom_call bodies handle settings on their own.
-                body.append(CodeTemplate(option['aten_custom_call']).substitute(env))
+                # all aten_custom_call bodies handle settings on their own.
+                scalar_check = None
+                body.append(CodeTemplate(
+                    option['aten_custom_call']).substitute(env))
             else:
                 body.append(call + ";")
             arguments_indices = ret['arguments']
@@ -542,12 +553,14 @@ def create_derived(backend_type_env, declarations):
                     body.append("bool maybe_scalar = {};".format(scalar_check))
                     scalar_check = 'maybe_scalar'
                 for arg in arguments:
-                    body.append("{}_->maybeScalar({});".format(arg['name'], scalar_check))
+                    body.append(
+                        "{}_->maybeScalar({});".format(arg['name'], scalar_check))
             if len(arguments_indices) == 1:
                 arg = arguments[0]
                 body.append("return {};".format(arg['name']))
             else:
-                types = [to_return_type(arg, option)['type'] for arg in arguments]
+                types = [to_return_type(arg, option)['type']
+                         for arg in arguments]
                 # TODO: check for move semantics...
                 names = [arg['name'] for arg in arguments]
                 body.append(CodeTemplate("return std::tuple<${types}>(${names});").substitute(
@@ -558,7 +571,8 @@ def create_derived(backend_type_env, declarations):
                                if scalar_check is not None \
                                else ""
                 return_tensor = "return Tensor((new ${Tensor}(context,${arg_name}))${maybe_scalar},false);"
-                body.append(CodeTemplate(return_tensor).substitute(env, arg_name=call, maybe_scalar=maybe_scalar))
+                body.append(CodeTemplate(return_tensor).substitute(
+                    env, arg_name=call, maybe_scalar=maybe_scalar))
             else:
                 # we using int64_t for long in the API, so correct it here...
                 if is_actual_return_long(ret):
