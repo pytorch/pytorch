@@ -31,6 +31,7 @@ def Parallelize_CPU(*args, **kwargs):
     kwargs['cpu_device'] = True
     Parallelize(*args, **kwargs)
 
+
 def Parallelize(
     model_helper_obj,
     input_builder_fun,
@@ -139,6 +140,21 @@ def Parallelize(
         param_update_builder_fun is not None and
         optimizer_builder_fun is not None
     ), 'Can only specify one of param_update_builder_fun, optimizer_builder_fun'
+
+    # Check that a model that is used for validation/testing has
+    # init_params False, otherwise running the param init net will overwrite
+    # synchronized values by the training net
+    if not has_parameter_updates and model_helper_obj.init_params:
+        log.warning('')
+        log.warning("############# WARNING #############")
+        log.warning("Model {}/{} is used for testing/validation but".format(
+            model_helper_obj.name, model_helper_obj))
+        log.warning("has init_params=True!")
+        log.warning("This can conflict with model training.")
+        log.warning("Please ensure model = ModelHelper(init_params=False)")
+        log.warning('####################################')
+        log.warning('')
+        # TODO: make into assert
 
     for device in devices:
         device_opt = core.DeviceOption(model_helper_obj._device_type, device)
