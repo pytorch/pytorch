@@ -21,21 +21,6 @@ else()
   add_definitions(-DCAFFE2_UNIQUE_LONG_TYPEMETA)
 endif()
 
-# ---[ Check if __builtin_cpu_supports is supported by the compiler
-CHECK_CXX_SOURCE_COMPILES(
-    "#include <iostream>
-
-    int main(int argc, char** argv) {
-      std::cout << __builtin_cpu_supports(\"avx2\") << std::endl;
-      return 0;
-    }" HAS_BUILTIN_CPU_SUPPORTS)
-if (HAS_BUILTIN_CPU_SUPPORTS)
-  message(STATUS "This compiler has builtin_cpu_supports feature.")
-else()
-  message(STATUS "This compiler does not have builtin_cpu_supports feature.")
-  add_definitions(-DCAFFE2_NO_BUILTIN_CPU_SUPPORTS)
-endif()
-
 # Note(jiayq): on ubuntu 14.04, the default glog install uses ext/hash_set that
 # is being deprecated. As a result, we will test if this is the environment we
 # are building under. If yes, we will turn off deprecation warning for a
