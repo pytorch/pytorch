@@ -103,7 +103,7 @@ class Transform {
    */
   void TryNeighbors(
       const transform::Graph& graph,
-      const std::map<int, string>& neighbors,
+      const std::map<int, std::vector<string>>& neighbors,
       std::vector<int>* subgraph_ptr,
       std::vector<int>* best_subgraph_ptr);
 };
