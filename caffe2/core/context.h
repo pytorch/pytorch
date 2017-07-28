@@ -97,8 +97,8 @@ void SetCPUAllocator(CPUAllocator* alloc);
  *     execution, return false. For example, in a CUDAContext, this function
  *     carries out a stream synchronization and spots potential errors for
  *     the cuda kernel calls.
- * - static void* New(size_t nbytes): allocates memory.
- * - static void Delete(void* data): deletes memory.
+ * - static std::pair<void*, MemoryDeleter> New(size_t nbytes): allocates
+       memory and returns a deleter.
  * - template <class SrcContext, class DstContext> void CopyBytes(...): does
  *     cross context memory copy.
  * - template <typename T, class SrcContext, class DstContext> void Copy(...):
