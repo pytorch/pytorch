@@ -27,9 +27,9 @@ int64_t ${Tensor}::dim() {
   if(isScalar())
     return 0;
   int64_t d = ${THTensor}_nDimension(${state,}tensor);
-  if(d != 0)
-    return d;
   // See Note [Undefined-dim versus 0-dim]
+  if (d != 0)
+    return d;
   return kUndefinedDimensions;
 }
 
