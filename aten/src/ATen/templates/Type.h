@@ -5,6 +5,7 @@
 
 #include "ATen/ArrayRef.h"
 #include "ATen/Half.h"
+#include "ATen/SparseTensorRef.h"
 
 namespace at {
 
