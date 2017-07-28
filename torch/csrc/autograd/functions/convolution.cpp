@@ -10,6 +10,7 @@
 #include "torch/csrc/utils/auto_gpu.h"
 
 #include "THPP/Type.hpp"
+#include "ATen/Tensor.h"
 
 #ifdef WITH_CUDNN
 #include "torch/csrc/cudnn/Conv.h"
@@ -20,24 +21,23 @@ using namespace torch::cudnn;
 #endif
 
 using namespace torch::nn;
-using thpp::Tensor;
 using torch::cudnn::Convolution;
-using tensor_pair = std::pair<std::unique_ptr<Tensor>, std::unique_ptr<Tensor>>;
+using tensor_pair = std::pair<at::Tensor, at::Tensor>;
 
 namespace torch { namespace autograd {
 
 // Forward function definition and utility functions
 
-static std::unique_ptr<Tensor> compute_output(
-  Tensor* input, Tensor* weight, Tensor* bias, Tensor* columns, Tensor* ones,
+static at::Tensor compute_output(
+  at::Tensor& input, at::Tensor& weight, at::Tensor& bias, at::Tensor& columns, at::Tensor& ones,
   const std::vector<long>& kernel_size, const ConvParams& params);
 
-static std::unique_ptr<Tensor> compute_grad_input(
-  Tensor* input, Tensor* grad_output, Tensor* weight, Tensor* columns, Tensor* ones,
+static at::Tensor compute_grad_input(
+  at::Tensor& input, at::Tensor& grad_output, at::Tensor& weight, at::Tensor& columns, at::Tensor& ones,
   const std::vector<long>& kernel_size, const ConvParams& params);
 
 static tensor_pair compute_grad_params(
-  Tensor* input, Tensor* grad_output, Tensor* weight, Tensor* bias, Tensor* columns, Tensor* ones,
+  at::Tensor& input, at::Tensor& grad_output, at::Tensor& weight, at::Tensor& bias, at::Tensor& columns, at::Tensor& ones,
   const std::vector<long>& kernel_size, const ConvBackward& params);
 
 auto ConvParams::is_dilated() const -> bool {
@@ -74,9 +74,9 @@ auto ConvParams::view1d_as_2d() -> void {
   }
 }
 
-auto ConvParams::use_cudnn(const Tensor& input) const -> bool {
+auto ConvParams::use_cudnn(const at::Tensor& input) const -> bool {
 #ifdef WITH_CUDNN
-  if (!input.isCuda() || !cudnn_enabled) {
+  if (!input.type().isCuda() || !cudnn_enabled) {
     return false;
   }
   if (is_dilated()) {
@@ -89,10 +89,10 @@ auto ConvParams::use_cudnn(const Tensor& input) const -> bool {
   return false;
 }
 
-auto ConvForward::output_size(Tensor& input, Tensor& weight) -> std::vector<long> {
+auto ConvForward::output_size(at::Tensor& input, at::Tensor& weight) -> std::vector<long> {
   auto in_size = input.sizes();
   auto weight_size = weight.sizes();
-  auto dim = input.nDim();
+  auto dim = input.ndimension();
 
   std::vector<long> output_size(dim);
   output_size[0] = in_size[0];
@@ -109,48 +109,38 @@ auto ConvForward::output_size(Tensor& input, Tensor& weight) -> std::vector<long
   return output_size;
 }
 
-static auto view4d(const Tensor& tensor) -> std::unique_ptr<Tensor> {
-  if (tensor.nDim() != 3) throw std::runtime_error("expected 3D tensor");
-  auto result = tensor.newTensor();
-  result->unsqueeze(tensor, 2);
-  return result;
+static auto view4d(const at::Tensor& tensor) -> at::Tensor {
+  if (tensor.ndimension() != 3) throw std::runtime_error("expected 3D tensor");
+  return tensor.unsqueeze(2);
 }
 
-static auto view3d(const Tensor& tensor) -> std::unique_ptr<Tensor> {
-  if (tensor.nDim() != 4) throw std::runtime_error("expected 4D tensor");
-  auto result = tensor.newTensor();
-  result->squeeze(tensor, 2);
-  return result;
+static auto view3d(const at::Tensor& tensor) -> at::Tensor {
+  if (tensor.ndimension() != 4) throw std::runtime_error("expected 4D tensor");
+  return tensor.squeeze(2);
 }
 
-static std::unique_ptr<Tensor> subtensor(Tensor* tensor, int dim, int groups, int g) {
-  if (!tensor) {
-    return nullptr;
+static at::Tensor subtensor(at::Tensor& tensor, int dim, int groups, int g) {
+  if (!tensor.defined()) {
+    return at::Tensor();
   }
-  long n = tensor->rawSizes()[dim] / groups;
-  auto result = tensor->newTensor();
-  result->narrow(*tensor, dim, n * g, n);
-  return result->contiguous();
+  long n = tensor.sizes()[dim] / groups;
+  return tensor.narrow(dim, n * g, n).contiguous();
 }
 
 static std::shared_ptr<Variable> subvariable(std::shared_ptr<Variable> var, int dim, int groups, int g) {
-  long n = var->data->rawSizes()[dim] / groups;
+  long n = var->data.sizes()[dim] / groups;
   auto result = std::make_shared<Narrow>(dim, n * g, n)->apply({var})[0];
   return result;
 }
 
-static std::unique_ptr<Tensor> cat(const tensor_list& tensors, int dim) {
+static at::Tensor cat(const tensor_list& tensors, int dim) {
   int num_inputs = tensors.size();
   if (num_inputs == 0) {
-    return nullptr;
+    return at::Tensor();
   }
 
-  std::vector<Tensor*> ptrs(num_inputs);
-  for (int i = 0; i < num_inputs; ++i) {
-    ptrs[i] = tensors[i].get();
-  }
-  auto output = tensors[0]->newTensor();
-  output->cat(ptrs, dim);
+  auto output = tensors[0].type().tensor();
+  at::cat_out(tensors, dim, output);
   return output;
 }
 
@@ -161,79 +151,80 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
   check_input_variables("ConvNd", inputs, 3, 2);
   if (is_padding_neg()) throw std::runtime_error("negative padding is not supported");
   if (is_output_padding_neg()) throw std::runtime_error("negative output_padding is not supported");
-  AutoGPU guard(inputs[0]->data->getDevice());
-  auto input = inputs[0]->data->contiguous();
-  std::unique_ptr<Tensor> weight(inputs[1]->data->clone_shallow());
-  std::unique_ptr<Tensor> bias(inputs[2] ? inputs[2]->data->clone_shallow() : nullptr);
+  AutoGPU guard(inputs[0]->data.type().isCuda() ? inputs[0]->data.get_device() : -1);
+  auto input = inputs[0]->data.contiguous();
+  auto weight = inputs[1]->data;
+  auto bias = inputs[2] ? inputs[2]->data : at::Tensor();
 
-  int k = input->nDim();
+  int k = input.ndimension();
   if (k == 3) {
     view1d_as_2d();
-    input = view4d(*input);
-    weight = view4d(*weight);
+    input = view4d(input);
+    weight = view4d(weight);
   }
 
-  auto weight_size = weight->sizes();
+  auto weight_size = weight.sizes();
   std::vector<long> kernel_size(weight_size.begin() + 2, weight_size.end());
 
-  std::unique_ptr<Tensor> output;
+  auto output = input.type().tensor();
   tensor_list columns(groups);
   tensor_list ones(groups);
   std::unique_ptr<Convolution> convolution;
 
-  if (use_cudnn(*input)) {
+  if (use_cudnn(input)) {
 #ifdef WITH_CUDNN
-    if (input->type() != weight->type()){
+    if (input.type().ID() != weight.type().ID()){
       std::stringstream ss;
-      ss << "Input type (" << thpp::toString(input->type()) << ") and weight type (" << thpp::toString(weight->type()) << ") should be the same";
+      ss << "Input type (" << input.toString() << ") and weight type (" << weight.toString() << ") should be the same";
       throw std::runtime_error(ss.str());
     }
-    if (bias.get() != NULL && input->type() != bias->type()){
+    if (bias.defined() && input.type().ID() != bias.type().ID()){
       std::stringstream ss;
-      ss << "Input type (" << thpp::toString(input->type()) << ") and bias type (" << thpp::toString(bias->type()) << ") should be the same";
+      ss << "Input type (" << input.toString() << ") and bias type (" << bias.toString() << ") should be the same";
       throw std::runtime_error(ss.str());
     }
-    output = input->newTensor();
-    output->resize(output_size(*input, *weight));
+
+    output = input.type().tensor();
+    output.resize_(output_size(input, weight));
     if (transposed) {
       convolution.reset(cudnn_convolution_transpose_full_forward(
-          state, torch::cudnn::getCudnnHandle(), torch::cudnn::getCudnnDataType(*input),
-          (THVoidTensor*)input->cdata(), (THVoidTensor*)weight->cdata(),
-          bias ? (THVoidTensor*)bias->cdata() : nullptr, (THVoidTensor*)output->cdata(),
+          state, torch::cudnn::getCudnnHandle(), torch::cudnn::getCudnnDataType(input),
+          (THVoidTensor*)input.unsafeGetTH(false), (THVoidTensor*)weight.unsafeGetTH(false),
+          bias.defined() ? (THVoidTensor*)bias.unsafeGetTH(false) : nullptr, (THVoidTensor*)output.unsafeGetTH(false),
           padding, stride, dilation, groups, benchmark));
     } else {
       convolution.reset(cudnn_convolution_full_forward(
-          state, torch::cudnn::getCudnnHandle(), torch::cudnn::getCudnnDataType(*input),
-          (THVoidTensor*)input->cdata(), (THVoidTensor*)weight->cdata(),
-          bias ? (THVoidTensor*)bias->cdata() : nullptr, (THVoidTensor*)output->cdata(),
+          state, torch::cudnn::getCudnnHandle(), torch::cudnn::getCudnnDataType(input),
+          (THVoidTensor*)input.unsafeGetTH(false), (THVoidTensor*)weight.unsafeGetTH(false),
+          bias.defined() ? (THVoidTensor*)bias.unsafeGetTH(false) : nullptr, (THVoidTensor*)output.unsafeGetTH(false),
           padding, stride, dilation, groups, benchmark));
     }
 #endif
   } else {
     for (int g = 0; g < groups; ++g) {
-      columns[g] = input->newTensor();
-      ones[g] = input->newTensor();
+      columns[g] = input.type().tensor();
+      ones[g] = input.type().tensor();
     }
     if (groups == 1) {
       output = compute_output(
-          input.get(), weight.get(), bias.get(),
-          columns[0].get(), ones[0].get(), kernel_size, *this);
+          input, weight, bias,
+          columns[0], ones[0], kernel_size, *this);
     } else {
       tensor_list outputs(groups);
       for (int g = 0; g < groups; ++g) {
-        auto input_g = subtensor(input.get(), 1, groups, g);
-        auto weight_g = subtensor(weight.get(), 0, groups, g);
-        auto bias_g = subtensor(bias.get(), 0, groups, g);
+        auto input_g = subtensor(input, 1, groups, g);
+        auto weight_g = subtensor(weight, 0, groups, g);
+        auto bias_g = subtensor(bias, 0, groups, g);
         outputs[g] = compute_output(
-            input_g.get(), weight_g.get(), bias_g.get(),
-            columns[g].get(), ones[g].get(), kernel_size, *this);
+            input_g, weight_g, bias_g,
+            columns[g], ones[g], kernel_size, *this);
       }
       output = cat(outputs, 1);
     }
   }
 
   if (k == 3) {
-    output = view3d(*output);
+    output = view3d(output);
   }
 
   auto outputs = as_tensor_list(std::move(output));
@@ -257,63 +248,63 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
   auto weight_var = weight_.unpack();
   auto bias_var = bias_.unpack();
 
-  std::unique_ptr<thpp::Tensor> input {input_var->data->clone_shallow()};
-  std::unique_ptr<thpp::Tensor> weight {weight_var->data->clone_shallow()};
-  std::unique_ptr<thpp::Tensor> bias {bias_var ? bias_var->data->clone_shallow() : nullptr};
+  auto input = input_var->data;
+  auto weight = weight_var->data;
+  auto bias = bias_var ? bias_var->data : at::Tensor();
 
-  AutoGPU guard(input->getDevice());
+  AutoGPU guard(input.type().isCuda() ? input.get_device() : -1);
 
-  input = input->contiguous();
-  auto grad_output = grad_outputs[0]->data->contiguous();
+  input = input.contiguous();
+  auto grad_output = grad_outputs[0]->data.contiguous();
 
-  int k = input->nDim();
+  int k = input.ndimension();
   if (k == 3) {
-    input = view4d(*input);
-    weight = view4d(*weight);
-    grad_output = view4d(*grad_output);
+    input = view4d(input);
+    weight = view4d(weight);
+    grad_output = view4d(grad_output);
   }
 
-  auto weight_size = weight->sizes();
+  auto weight_size = weight.sizes();
   std::vector<long> kernel_size(weight_size.begin() + 2, weight_size.end());
 
-  bool use_cudnn = this->use_cudnn(*input);
+  bool use_cudnn = this->use_cudnn(input);
 
-  std::unique_ptr<Tensor> grad_input;
-  std::unique_ptr<Tensor> grad_weight;
-  std::unique_ptr<Tensor> grad_bias;
+  at::Tensor grad_input;
+  at::Tensor grad_weight;
+  at::Tensor grad_bias;
 
   if (should_compute_output(0)) {
     if (use_cudnn) {
 #ifdef WITH_CUDNN
-      grad_input = input->newTensor();
-      grad_input->resizeAs(*input);
+      grad_input = input.type().tensor();
+      grad_input.resize_as_(input);
       if (transposed) {
         // ConvTranspose uses the same kernels as regular convolution
         // but swaps forward and backward calls
         cudnn_convolution_forward(
-            state, torch::cudnn::getCudnnHandle(), torch::cudnn::getCudnnDataType(*input),
-            (THVoidTensor*)grad_output->cdata(), (THVoidTensor*)weight->cdata(), (THVoidTensor*)grad_input->cdata(),
+            state, torch::cudnn::getCudnnHandle(), torch::cudnn::getCudnnDataType(input),
+            (THVoidTensor*)grad_output.unsafeGetTH(false), (THVoidTensor*)weight.unsafeGetTH(false), (THVoidTensor*)grad_input.unsafeGetTH(false),
             convolution.get(), benchmark);
       } else {
         cudnn_convolution_backward_data(
-            state, torch::cudnn::getCudnnHandle(), torch::cudnn::getCudnnDataType(*input),
-            (THVoidTensor*)grad_output->cdata(), (THVoidTensor*)grad_input->cdata(), (THVoidTensor*)weight->cdata(),
+            state, torch::cudnn::getCudnnHandle(), torch::cudnn::getCudnnDataType(input),
+            (THVoidTensor*)grad_output.unsafeGetTH(false), (THVoidTensor*)grad_input.unsafeGetTH(false), (THVoidTensor*)weight.unsafeGetTH(false),
             convolution.get(), benchmark);
       }
 #endif
     } else if (groups == 1) {
       grad_input = compute_grad_input(
-          input.get(), grad_output.get(), weight.get(),
-          columns[0].get(), ones[0].get(), kernel_size, *this);
+          input, grad_output, weight,
+          columns[0], ones[0], kernel_size, *this);
     } else {
       tensor_list grad_inputs(groups);
       for (int g = 0; g < groups; ++g) {
-        auto input_g = subtensor(input.get(), 1, groups, g);
-        auto grad_output_g = subtensor(grad_output.get(), 1, groups, g);
-        auto weight_g = subtensor(weight.get(), 0, groups, g);
+        auto input_g = subtensor(input, 1, groups, g);
+        auto grad_output_g = subtensor(grad_output, 1, groups, g);
+        auto weight_g = subtensor(weight, 0, groups, g);
         grad_inputs[g] = compute_grad_input(
-            input_g.get(), grad_output_g.get(), weight_g.get(),
-            columns[g].get(), ones[g].get(), kernel_size, *this);
+            input_g, grad_output_g, weight_g,
+            columns[g], ones[g], kernel_size, *this);
       }
       grad_input = cat(grad_inputs, 1);
     }
@@ -322,51 +313,51 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
   if (should_compute_output(1) || should_compute_output(2)) {
     if (use_cudnn) {
 #ifdef WITH_CUDNN
-      grad_weight = weight->newTensor();
-      grad_weight->resizeAs(*weight);
+      grad_weight = weight.type().tensor();
+      grad_weight.resize_as_(weight);
       cudnn_convolution_backward_filter(
-          state, torch::cudnn::getCudnnHandle(), torch::cudnn::getCudnnDataType(*input),
-          (THVoidTensor*)grad_output->cdata(), (THVoidTensor*)input->cdata(), (THVoidTensor*)grad_weight->cdata(),
+          state, torch::cudnn::getCudnnHandle(), torch::cudnn::getCudnnDataType(input),
+          (THVoidTensor*)grad_output.unsafeGetTH(false), (THVoidTensor*)input.unsafeGetTH(false), (THVoidTensor*)grad_weight.unsafeGetTH(false),
           convolution.get(), benchmark);
 
-      if (bias && should_compute_output(2)) {
-        grad_bias = bias->newTensor();
-        grad_bias->resizeAs(*bias);
+      if (bias.defined() && should_compute_output(2)) {
+        grad_bias = bias.type().tensor();
+        grad_bias.resize_as_(bias);
         cudnn_convolution_backward_bias(
-            state, torch::cudnn::getCudnnHandle(), torch::cudnn::getCudnnDataType(*input),
-            (THVoidTensor*)grad_output->cdata(), (THVoidTensor*)grad_bias->cdata(),
+            state, torch::cudnn::getCudnnHandle(), torch::cudnn::getCudnnDataType(input),
+            (THVoidTensor*)grad_output.unsafeGetTH(false), (THVoidTensor*)grad_bias.unsafeGetTH(false),
             convolution.get());
       }
 #endif
     } else if (groups == 1) {
       std::tie(grad_weight, grad_bias) = compute_grad_params(
-          input.get(), grad_output.get(), weight.get(), bias.get(),
-          columns[0].get(), ones[0].get(), kernel_size, *this);
+          input, grad_output, weight, bias,
+          columns[0], ones[0], kernel_size, *this);
     } else {
       tensor_list grad_weights(groups);
       tensor_list grad_biases(groups);
       for (int g = 0; g < groups; ++g) {
-        auto input_g = subtensor(input.get(), 1, groups, g);
-        auto grad_output_g = subtensor(grad_output.get(), 1, groups, g);
-        auto weight_g = subtensor(weight.get(), 0, groups, g);
-        auto bias_g = subtensor(bias.get(), 0, groups, g);
+        auto input_g = subtensor(input, 1, groups, g);
+        auto grad_output_g = subtensor(grad_output, 1, groups, g);
+        auto weight_g = subtensor(weight, 0, groups, g);
+        auto bias_g = subtensor(bias, 0, groups, g);
         std::tie(grad_weights[g], grad_biases[g]) = compute_grad_params(
-            input_g.get(), grad_output_g.get(), weight_g.get(), bias_g.get(),
-            columns[g].get(), ones[g].get(), kernel_size, *this);
+            input_g, grad_output_g, weight_g, bias_g,
+            columns[g], ones[g], kernel_size, *this);
       }
       grad_weight = cat(grad_weights, 0);
-      if (bias && should_compute_output(2)) {
+      if (bias.defined() && should_compute_output(2)) {
         grad_bias = cat(grad_biases, 0);
       }
     }
   }
 
   if (k == 3) {
-    if (grad_input) {
-      grad_input = view3d(*grad_input);
+    if (grad_input.defined()) {
+      grad_input = view3d(grad_input);
     }
-    if (grad_weight) {
-      grad_weight = view3d(*grad_weight);
+    if (grad_weight.defined()) {
+      grad_weight = view3d(grad_weight);
     }
   }
 
@@ -409,14 +400,14 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
   // Compute ggO = conv(w, ggI) + conv(ggW, i) + ggb
   std::shared_ptr<Variable> ggO = nullptr;
   if (ggI) {
-    if (weight->data->isCuda()) {
+    if (weight->data.type().isCuda()) {
       weight = Contiguous().apply({weight})[0];
     }
     ggO = ConvForward(*this).apply({ggI, weight, nullptr})[0];
   }
 
   if (ggW) {
-    if (ggW->data->isCuda()) {
+    if (ggW->data.type().isCuda()) {
       ggW = Contiguous().apply({ggW})[0];
     }
     auto ggW_term = ConvForward(*this).apply({input_.unpack(), ggW, nullptr})[0];
@@ -429,13 +420,15 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
 
   if (ggb) {
     // View as (1, ggb.size(0), 1, 1...)
-    std::vector<long> new_size(gO->data->nDim(), 1);
-    new_size[1] = ggb->data->rawSizes()[0];
+
+    // Expand
+    std::vector<int64_t> new_size(gO->data.ndimension(), 1);
+    new_size[1] = ggb->data.sizes()[0];
     auto ggb_contiguous = Contiguous().apply({ggb})[0];
     auto ggb_view = View(new_size).apply({ggb_contiguous})[0];
 
-    // Expand 
-    auto ggb_expanded = Expand(gO->data->sizes()).apply({ggb_view})[0];
+    // Expand
+    auto ggb_expanded = Expand(gO->data.sizes()).apply({ggb_view})[0];
 
     if (ggO) {
       ggO = Add().apply({ggO, ggb_expanded})[0];
@@ -452,9 +445,9 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
     // Disable groups as they are handled separately
     auto groups = gw_conv_params.groups;
     gw_conv_params.groups = 1;
-    auto weight_size = weight->data->sizes();
+    auto weight_size = weight->data.sizes();
     std::vector<long> kernel_size(weight_size.begin() + 2, weight_size.end());
-    auto input_size = ggI->data->sizes();
+    auto input_size = ggI->data.sizes();
     std::vector<long> input_shape(input_size.begin() + 2, input_size.end());
     for(size_t i=0; i<gw_conv_params.padding.size(); ++i) {
       // Check if whole input has been used or not
@@ -475,7 +468,7 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
     std::shared_ptr<Variable> gWt = nullptr;
     // Compute conv
     if (groups == 1) {
-      if (gOt->data->isCuda()) {
+      if (gOt->data.type().isCuda()) {
         gOt = Contiguous().apply({gOt})[0];
       }
 
@@ -486,7 +479,7 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
       for (int g = 0; g < groups; ++g) {
         auto ggIt_g = subvariable(ggIt, 0, groups, g);
         auto gOt_g = subvariable(gOt, 0, groups, g);
-        if (gOt_g->data->isCuda()) {
+        if (gOt_g->data.type().isCuda()) {
           gOt_g = Contiguous().apply({gOt_g})[0];
         }
 
@@ -523,7 +516,7 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
 
     std::shared_ptr<Variable> gIt = nullptr;
     if (groups == 1) {
-      if (gOt->data->isCuda()) {
+      if (gOt->data.type().isCuda()) {
         gOt = Contiguous().apply({gOt})[0];
       }
 
@@ -533,7 +526,7 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
       for (int g = 0; g < groups; ++g) {
         auto ggWt_g = subvariable(ggWt, 1, groups, g);
         auto gOt_g = subvariable(gOt, 0, groups, g);
-        if (gOt_g->data->isCuda()) {
+        if (gOt_g->data.type().isCuda()) {
           gOt_g = Contiguous().apply({gOt_g})[0];
         }
 
@@ -542,7 +535,7 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
 
       gIt = Cat(0).apply(gIt_list)[0];
     }
-    
+
     gI = Transpose(0, 1).apply({gIt})[0];
   }
 
@@ -558,14 +551,14 @@ auto ConvBackwardBackward::releaseVariables() -> void {
 
 // Forward and backward functions for Tensor
 
-static std::unique_ptr<Tensor> compute_output(
-    Tensor* input, Tensor* weight, Tensor* bias,
-    Tensor* columns, Tensor* ones,
+static at::Tensor compute_output(
+    at::Tensor& input, at::Tensor& weight, at::Tensor& bias,
+    at::Tensor& columns, at::Tensor& ones,
     const std::vector<long>& kernel_size,
     const ConvParams& params) {
 
-  auto output = input->newTensor();
-  auto dim = input->nDim();
+  auto output = input.type().tensor();
+  auto dim = input.ndimension();
   auto dilated = params.is_dilated();
 
   if (dilated) {
@@ -575,15 +568,15 @@ static std::unique_ptr<Tensor> compute_output(
     } else /* !transposed */ {
       /* dilated && !transposed */
       if (dim == 4) {
-        SpatialDilatedConvolution_updateOutput(
-            input, output.get(), weight, bias, columns, ones,
+        at::SpatialDilatedConvolution_updateOutput(
+            input, output, weight, bias, columns, ones,
             kernel_size[1], kernel_size[0],
             params.stride[1], params.stride[0],
             params.padding[1], params.padding[0],
             params.dilation[1], params.dilation[0]); goto done;
       } else if (dim == 5) {
-        VolumetricDilatedConvolution_updateOutput(
-            input, output.get(), weight, bias, columns, ones,
+        at::VolumetricDilatedConvolution_updateOutput(
+            input, output, weight, bias, columns, ones,
             kernel_size[0], kernel_size[2], kernel_size[1],
             params.stride[0], params.stride[2], params.stride[1],
             params.padding[0], params.padding[2], params.padding[1],
@@ -594,15 +587,15 @@ static std::unique_ptr<Tensor> compute_output(
     if (params.transposed) {
       /* !dilated && transposed */
       if (dim == 4) {
-        SpatialFullConvolution_updateOutput(
-            input, output.get(), weight, bias, columns, ones,
+        at::SpatialFullConvolution_updateOutput(
+            input, output, weight, bias, columns, ones,
             kernel_size[1], kernel_size[0],
             params.stride[1], params.stride[0],
             params.padding[1], params.padding[0],
             params.output_padding[1], params.output_padding[0]); goto done;
       } else if (dim == 5) {
-        VolumetricFullConvolution_updateOutput(
-            input, output.get(), weight, bias, columns, ones,
+        at::VolumetricFullConvolution_updateOutput(
+            input, output, weight, bias, columns, ones,
             params.stride[0], params.stride[2], params.stride[1],
             params.padding[0], params.padding[2], params.padding[1],
             params.output_padding[0], params.output_padding[2], params.output_padding[1]); goto done;
@@ -610,19 +603,19 @@ static std::unique_ptr<Tensor> compute_output(
     } else /* !transposed */ {
       /* !dilated && !transposed */
       if (dim == 4) {
-        SpatialConvolutionMM_updateOutput(
-            input, output.get(), weight, bias, columns, ones,
+        at::SpatialConvolutionMM_updateOutput(
+            input, output, weight, bias, columns, ones,
             kernel_size[1], kernel_size[0],
             params.stride[1], params.stride[0],
             params.padding[1], params.padding[0]); goto done;
-      } else if (dim == 5 && input->isCuda()) {
-        VolumetricConvolution_updateOutput(
-            input, output.get(), weight, bias, columns, ones,
+      } else if (dim == 5 && input.type().isCuda()) {
+        at::VolumetricConvolution_updateOutput(
+            input, output, weight, bias, columns, ones,
             params.stride[0], params.stride[2], params.stride[1],
             params.padding[0], params.padding[2], params.padding[1]); goto done;
       } else if (dim == 5) {
-        VolumetricConvolutionMM_updateOutput(
-            input, output.get(), weight, bias, columns,
+        at::VolumetricConvolutionMM_updateOutput(
+            input, output, weight, bias, columns,
             kernel_size[0], kernel_size[2], kernel_size[1],
             params.stride[0], params.stride[2], params.stride[1],
             params.padding[0], params.padding[2], params.padding[1]); goto done;
@@ -635,13 +628,13 @@ done:
   return output;
 }
 
-static std::unique_ptr<Tensor> compute_grad_input(
-    Tensor* input, Tensor* grad_output, Tensor* weight, Tensor* columns, Tensor* ones,
+static at::Tensor compute_grad_input(
+    at::Tensor& input, at::Tensor& grad_output, at::Tensor& weight, at::Tensor& columns, at::Tensor& ones,
     const std::vector<long>& kernel_size, const ConvParams& params) {
 
-  auto grad_input = input->newTensor();
-  grad_input->resizeAs(*input);
-  auto dim = input->nDim();
+  auto grad_input = input.type().tensor();
+  grad_input.resize_as_(input);
+  auto dim = input.ndimension();
   auto dilated = params.is_dilated();
 
   if (dilated) {
@@ -651,15 +644,15 @@ static std::unique_ptr<Tensor> compute_grad_input(
     } else /* !transposed */ {
       /* dilated && !transposed */
       if (dim == 4) {
-        SpatialDilatedConvolution_updateGradInput(
-            input, grad_output, grad_input.get(), weight, columns,
+        at::SpatialDilatedConvolution_updateGradInput(
+            input, grad_output, grad_input, weight, columns,
             kernel_size[1], kernel_size[0],
             params.stride[1], params.stride[0],
             params.padding[1], params.padding[0],
             params.dilation[1], params.dilation[0]); goto done;
       } else if (dim == 5) {
-        VolumetricDilatedConvolution_updateGradInput(
-            input, grad_output, grad_input.get(), weight, columns,
+        at::VolumetricDilatedConvolution_updateGradInput(
+            input, grad_output, grad_input, weight, columns,
             kernel_size[0], kernel_size[2], kernel_size[1],
             params.stride[0], params.stride[2], params.stride[1],
             params.padding[0], params.padding[2], params.padding[1],
@@ -670,15 +663,15 @@ static std::unique_ptr<Tensor> compute_grad_input(
     if (params.transposed) {
       /* !dilated && transposed */
       if (dim == 4) {
-        SpatialFullConvolution_updateGradInput(
-            input, grad_output, grad_input.get(), weight, columns,
+        at::SpatialFullConvolution_updateGradInput(
+            input, grad_output, grad_input, weight, columns,
             kernel_size[1], kernel_size[0],
             params.stride[1], params.stride[0],
             params.padding[1], params.padding[0],
             params.output_padding[1], params.output_padding[0]); goto done;
       } else if (dim == 5) {
-        VolumetricFullConvolution_updateGradInput(
-            input, grad_output, grad_input.get(), weight, columns, ones,
+        at::VolumetricFullConvolution_updateGradInput(
+            input, grad_output, grad_input, weight, columns, ones,
             params.stride[0], params.stride[2], params.stride[1],
             params.padding[0], params.padding[2], params.padding[1],
             params.output_padding[0], params.output_padding[2], params.output_padding[1]); goto done;
@@ -686,19 +679,19 @@ static std::unique_ptr<Tensor> compute_grad_input(
     } else /* !transposed */ {
       /* !dilated && !transposed */
       if (dim == 4) {
-        SpatialConvolutionMM_updateGradInput(
-            input, grad_output, grad_input.get(), weight, columns, ones,
+        at::SpatialConvolutionMM_updateGradInput(
+            input, grad_output, grad_input, weight, columns, ones,
             kernel_size[1], kernel_size[0],
             params.stride[1], params.stride[0],
             params.padding[1], params.padding[0]); goto done;
-      } else if (dim == 5 && input->isCuda()) {
-        VolumetricConvolution_updateGradInput(
-            input, grad_output, grad_input.get(), weight, columns,
+      } else if (dim == 5 && input.type().isCuda()) {
+        at::VolumetricConvolution_updateGradInput(
+            input, grad_output, grad_input, weight, columns,
             params.stride[0], params.stride[2], params.stride[1],
             params.padding[0], params.padding[2], params.padding[1]); goto done;
       } else if (dim == 5) {
-        VolumetricConvolutionMM_updateGradInput(
-            input, grad_output, grad_input.get(), weight, columns, ones,
+        at::VolumetricConvolutionMM_updateGradInput(
+            input, grad_output, grad_input, weight, columns, ones,
             kernel_size[0], kernel_size[2], kernel_size[1],
             params.stride[0], params.stride[2], params.stride[1],
             params.padding[0], params.padding[2], params.padding[1]); goto done;
@@ -712,20 +705,20 @@ done:
 }
 
 static tensor_pair compute_grad_params(
-    Tensor* input, Tensor* grad_output, Tensor* weight, Tensor* bias,
-    Tensor* columns, Tensor* ones,
+    at::Tensor& input, at::Tensor& grad_output, at::Tensor& weight, at::Tensor& bias,
+    at::Tensor& columns, at::Tensor& ones,
     const std::vector<long>& kernel_size, const ConvBackward& params) {
 
-  auto grad_weight = weight->newTensor();
-  grad_weight->resizeAs(*weight).zero();
+  auto grad_weight = weight.type().tensor();
+  grad_weight.resize_as_(weight).zero_();
 
-  std::unique_ptr<Tensor> grad_bias;
-  if (bias && params.should_compute_output(2)) {
-    grad_bias = bias->newTensor();
-    grad_bias->resizeAs(*bias).zero();
+  at::Tensor grad_bias;
+  if (bias.defined() && params.should_compute_output(2)) {
+    grad_bias = bias.type().tensor();
+    grad_bias.resize_as_(bias).zero_();
   }
 
-  auto dim = input->nDim();
+  auto dim = input.ndimension();
   auto dilated = params.is_dilated();
 
   if (dilated) {
@@ -735,15 +728,15 @@ static tensor_pair compute_grad_params(
     } else /* !transposed */ {
       /* dilated && !transposed */
       if (dim == 4) {
-        SpatialDilatedConvolution_accGradParameters(
-            input, grad_output, grad_weight.get(), grad_bias.get(), columns, ones,
+        at::SpatialDilatedConvolution_accGradParameters(
+            input, grad_output, grad_weight, grad_bias, columns, ones,
             kernel_size[1], kernel_size[0],
             params.stride[1], params.stride[0],
             params.padding[1], params.padding[0],
             params.dilation[1], params.dilation[0], 1.0); goto done;
       } else if (dim == 5) {
-        VolumetricDilatedConvolution_accGradParameters(
-            input, grad_output, grad_weight.get(), grad_bias.get(), columns, ones,
+        at::VolumetricDilatedConvolution_accGradParameters(
+            input, grad_output, grad_weight, grad_bias, columns, ones,
             kernel_size[0], kernel_size[2], kernel_size[1],
             params.stride[0], params.stride[2], params.stride[1],
             params.padding[0], params.padding[2], params.padding[1],
@@ -754,15 +747,15 @@ static tensor_pair compute_grad_params(
     if (params.transposed) {
       /* !dilated && transposed */
       if (dim == 4) {
-        SpatialFullConvolution_accGradParameters(
-            input, grad_output, grad_weight.get(), grad_bias.get(), columns, ones,
+        at::SpatialFullConvolution_accGradParameters(
+            input, grad_output, grad_weight, grad_bias, columns, ones,
             kernel_size[1], kernel_size[0],
             params.stride[1], params.stride[0],
             params.padding[1], params.padding[0],
             params.output_padding[1], params.output_padding[0], 1.0); goto done;
       } else if (dim == 5) {
-        VolumetricFullConvolution_accGradParameters(
-            input, grad_output, grad_weight.get(), grad_bias.get(), columns, ones,
+        at::VolumetricFullConvolution_accGradParameters(
+            input, grad_output, grad_weight, grad_bias, columns, ones,
             params.stride[0], params.stride[2], params.stride[1],
             params.padding[0], params.padding[2], params.padding[1],
             params.output_padding[0], params.output_padding[2], params.output_padding[1], 1.0); goto done;
@@ -770,19 +763,19 @@ static tensor_pair compute_grad_params(
     } else /* !transposed */ {
       /* !dilated && !transposed */
       if (dim == 4) {
-        SpatialConvolutionMM_accGradParameters(
-            input, grad_output, grad_weight.get(), grad_bias.get(), columns, ones,
+        at::SpatialConvolutionMM_accGradParameters(
+            input, grad_output, grad_weight, grad_bias, columns, ones,
             kernel_size[1], kernel_size[0],
             params.stride[1], params.stride[0],
             params.padding[1], params.padding[0], 1.0); goto done;
-      } else if (dim == 5 && input->isCuda()) {
-        VolumetricConvolution_accGradParameters(
-            input, grad_output, grad_weight.get(), grad_bias.get(), columns, ones,
+      } else if (dim == 5 && input.type().isCuda()) {
+        at::VolumetricConvolution_accGradParameters(
+            input, grad_output, grad_weight, grad_bias, columns, ones,
             params.stride[0], params.stride[2], params.stride[1],
             params.padding[0], params.padding[2], params.padding[1], 1.0); goto done;
       } else if (dim == 5) {
-        VolumetricConvolutionMM_accGradParameters(
-            input, grad_output, grad_weight.get(), grad_bias.get(), columns,
+        at::VolumetricConvolutionMM_accGradParameters(
+            input, grad_output, grad_weight, grad_bias, columns,
             kernel_size[0], kernel_size[2], kernel_size[1],
             params.stride[0], params.stride[2], params.stride[1],
             params.padding[0], params.padding[2], params.padding[1], 1.0); goto done;

@@ -19,15 +19,12 @@ auto AccumulateGrad::acc_inplace(std::shared_ptr<Variable>& grad,
     std::shared_ptr<Variable>& new_grad) -> void {
   auto& grad_data = grad->data;
   auto& new_grad_data = new_grad->data;
-  AutoGPU guard(grad_data->getDevice());
+  AutoGPU guard(grad_data.type().isCuda() ? grad_data.get_device() : -1);
 
-  // The grad may need a promotion from a sparse to dense type
-  if (grad_data->isSparse() && !new_grad_data->isSparse()) {
-    std::unique_ptr<thpp::Tensor> result = new_grad_data->newTensor();
-    result->cadd(*new_grad_data, *grad_data);
-    grad->data = std::move(result);
+  if (grad_data.type().isSparse() && !new_grad_data.type().isSparse()) {
+    grad->data = new_grad_data + grad_data;
   } else {
-    grad_data->cadd(*grad_data, *new_grad_data);
+    grad_data += new_grad_data;
   }
 }
 
@@ -80,8 +77,7 @@ auto AccumulateGrad::apply(const variable_list& grads) -> variable_list {
   } else {
     // Once the grad becomes not volatile, it should stay like that
     if (!var->grad->is_volatile && new_grad->is_volatile) {
-      new_grad = std::make_shared<Variable>(
-              std::unique_ptr<thpp::Tensor>(new_grad->data->clone_shallow()), false, false);
+      new_grad = std::make_shared<Variable>(new_grad->data, false, false);
     }
     var->grad = Add().apply({var->grad, new_grad})[0];
   }

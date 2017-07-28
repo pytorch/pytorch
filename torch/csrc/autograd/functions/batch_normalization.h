@@ -2,7 +2,7 @@
 
 #include <Python.h>
 #include <memory>
-#include <THPP/THPP.h>
+#include <ATen/ATen.h>
 
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/variable.h"
@@ -10,8 +10,8 @@
 namespace torch { namespace autograd {
 
 struct BatchNormParams {
-  std::shared_ptr<thpp::Tensor> running_mean;
-  std::shared_ptr<thpp::Tensor> running_var;
+  at::Tensor running_mean;
+  at::Tensor running_var;
   bool training;
   double momentum;
   double eps;
@@ -29,8 +29,8 @@ struct BatchNormBackward : public Function, public BatchNormParams {
   BatchNormBackward(
       FunctionFlags flags,
       BatchNormParams params,
-      std::unique_ptr<thpp::Tensor> save_mean,
-      std::unique_ptr<thpp::Tensor> save_std,
+      at::Tensor save_mean,
+      at::Tensor save_std,
       SavedVariable input,
       SavedVariable weight,
       SavedVariable bias)
@@ -49,8 +49,8 @@ struct BatchNormBackward : public Function, public BatchNormParams {
 
   virtual void releaseVariables() override;
 
-  std::unique_ptr<thpp::Tensor> save_mean;
-  std::unique_ptr<thpp::Tensor> save_std;
+  at::Tensor save_mean;
+  at::Tensor save_std;
   SavedVariable input;
   SavedVariable weight;
   SavedVariable bias;
@@ -60,8 +60,8 @@ struct BatchNormBackwardBackward : public Function, public BatchNormParams {
   BatchNormBackwardBackward(
       FunctionFlags flags,
       BatchNormParams params,
-      std::unique_ptr<thpp::Tensor> save_mean,
-      std::unique_ptr<thpp::Tensor> save_std,
+      at::Tensor save_mean,
+      at::Tensor save_std,
       SavedVariable input,
       SavedVariable weight,
       SavedVariable grad_output)
@@ -80,8 +80,8 @@ struct BatchNormBackwardBackward : public Function, public BatchNormParams {
 
   virtual void releaseVariables() override;
 
-  std::unique_ptr<thpp::Tensor> save_mean;
-  std::unique_ptr<thpp::Tensor> save_std;
+  at::Tensor save_mean;
+  at::Tensor save_std;
   SavedVariable input;
   SavedVariable weight;
   SavedVariable grad_output;

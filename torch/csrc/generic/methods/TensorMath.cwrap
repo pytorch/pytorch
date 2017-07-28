@@ -1364,6 +1364,7 @@
         - THTensor* self
         - real value
     - cname: cadd
+      aten_sparse: True
       arguments:
         - arg: THTensor* result
           output: True
@@ -1374,6 +1375,7 @@
         - THTensor* other
     - sparse: True
       cname: spcadd
+      aten_dense_sparse: True
       arguments:
         - arg: THTensor* result
           output: True
@@ -1393,6 +1395,7 @@
         - THTensor* self
         - real value
     - cname: cadd
+      aten_sparse: True
       arguments:
         - THTensor* self
         - arg: THTensor* self
@@ -1402,6 +1405,7 @@
         - THTensor* other
     - sparse: True
       cname: spcadd
+      aten_dense_sparse: True
       arguments:
         - THTensor* self
         - THTensor* self

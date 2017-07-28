@@ -30,74 +30,69 @@ namespace {
 
 namespace torch { namespace autograd {
 
-using thpp::Tensor;
-
 #ifndef CUDNN_BN_MIN_EPSILON
 #define CUDNN_BN_MIN_EPSILON 0
 #endif
 
 auto BatchNormForward::apply(const variable_list& inputs) -> variable_list {
   check_input_variables("BatchNorm", inputs, 3, 1);
-  
+
   auto& input = inputs[0];
   auto& weight = inputs[1];
   auto& bias = inputs[2];
-  AutoGPU guard(input->data->getDevice());
-   
-  auto num_features = input->data->rawSizes()[1];
-  check_dims_match_num_input_features("running_mean", num_features, running_mean->numel());
-  check_dims_match_num_input_features("running_var", num_features, running_var->numel());
+  AutoGPU guard(input->data.type().isCuda() ? input->data.get_device() : -1);
+
+  auto num_features = input->data.sizes()[1];
+  check_dims_match_num_input_features("running_mean", num_features, running_mean.numel());
+  check_dims_match_num_input_features("running_var", num_features, running_var.numel());
   if (weight){
-    check_dims_match_num_input_features("weight", num_features, weight->data->numel());
+    check_dims_match_num_input_features("weight", num_features, weight->data.numel());
   }
   if (bias){
-    check_dims_match_num_input_features("bias", num_features, bias->data->numel());
+    check_dims_match_num_input_features("bias", num_features, bias->data.numel());
   }
 
   bool use_cudnn = false;
 #ifdef WITH_CUDNN
-  use_cudnn = (input->data->isCuda()
-               && input->data->type() != thpp::Type::HALF
+  use_cudnn = (input->data.type().isCuda()
+               && input->data.type().scalarType() != at::kHalf
                && weight && bias
                && cudnn_enabled && CUDNN_VERSION >= 5110L);
 #endif
 
-  auto output = input->data->newTensor();
-  output->resizeAs(*input->data);
-
-  std::unique_ptr<Tensor> save_mean(output->newTensor());
-  save_mean->resizeAs(*running_mean);
-  std::unique_ptr<Tensor> save_std(output->newTensor());
-  save_std->resizeAs(*running_var);
+  auto output = input->data.type().tensor(input->data.sizes());
+  auto save_mean = running_mean.type().tensor(running_mean.sizes());
+  auto save_std = running_var.type().tensor(running_var.sizes());
 
   if (use_cudnn && eps >= CUDNN_BN_MIN_EPSILON) {
 #ifdef WITH_CUDNN
     torch::cudnn::cudnn_batch_norm_forward(
         state,
         torch::cudnn::getCudnnHandle(),
-        torch::cudnn::getCudnnDataType(*input->data),
-        (THVoidTensor*)input->data->cdata(),
-        (THVoidTensor*)output->cdata(),
-        (THVoidTensor*)weight->data->cdata(),
-        (THVoidTensor*)bias->data->cdata(),
-        (THVoidTensor*)running_mean->cdata(),
-        (THVoidTensor*)running_var->cdata(),
-        (THVoidTensor*)save_mean->cdata(),
-        (THVoidTensor*)save_std->cdata(),
+        torch::cudnn::getCudnnDataType(input->data),
+        (THVoidTensor*)input->data.unsafeGetTH(false),
+        (THVoidTensor*)output.unsafeGetTH(false),
+        (THVoidTensor*)weight->data.unsafeGetTH(false),
+        (THVoidTensor*)bias->data.unsafeGetTH(false),
+        (THVoidTensor*)running_mean.unsafeGetTH(false),
+        (THVoidTensor*)running_var.unsafeGetTH(false),
+        (THVoidTensor*)save_mean.unsafeGetTH(false),
+        (THVoidTensor*)save_std.unsafeGetTH(false),
         training,
         momentum,
         eps);
 #endif
   } else {
-    torch::nn::BatchNormalization_updateOutput(
-        input->data.get(),
-        output.get(),
-        weight ? weight->data.get() : nullptr,
-        bias ? bias->data.get() : nullptr,
-        running_mean.get(),
-        running_var.get(),
-        save_mean.get(),
-        save_std.get(),
+      at::Tensor nt;
+      at::BatchNormalization_updateOutput(
+        input->data,
+        output,
+        weight ? weight->data : nt,
+        bias ? bias->data : nt,
+        running_mean,
+        running_var,
+        save_mean,
+        save_std,
         training,
         momentum,
         eps);
@@ -119,77 +114,74 @@ auto BatchNormBackward::apply(const variable_list& grad_outputs) -> variable_lis
   auto weight_var = this->weight.unpack();
   auto bias_var = this->bias.unpack();
 
-  std::unique_ptr<thpp::Tensor> input {input_var->data->clone_shallow()};
-  std::unique_ptr<thpp::Tensor> weight {weight_var ? weight_var->data->clone_shallow() : nullptr};
-  std::unique_ptr<thpp::Tensor> bias {bias_var ? bias_var->data->clone_shallow() : nullptr};
+  auto input = input_var->data;
+  auto weight = weight_var ? weight_var->data : at::Tensor();
+  auto bias = bias_var ? bias_var->data : at::Tensor();
 
-  AutoGPU guard(input->getDevice());
+  AutoGPU guard(input.type().isCuda() ? input.get_device() : -1);
 
   bool use_cudnn = false;
 #ifdef WITH_CUDNN
-  use_cudnn = (input->isCuda()
-               && input->type() != thpp::Type::HALF
-               && weight && bias && training
+  use_cudnn = (input.type().backend() == at::kCUDA
+               && input.type().scalarType() != at::kHalf
+               && weight.defined() && bias.defined() && training
                && cudnn_enabled && CUDNN_VERSION >= 5110L);
 #endif
 
-  std::unique_ptr<Tensor> grad_input;
+  at::Tensor grad_input;
   if (should_compute_output(0) || use_cudnn) {
-    grad_input = input->newTensor();
-    grad_input->resizeAs(*input);
+    grad_input = input.type().tensor(input.sizes());
   }
 
-  std::unique_ptr<Tensor> grad_weight;
+  at::Tensor grad_weight;
   if (should_compute_output(1) || use_cudnn) {
-    grad_weight = weight->newTensor();
-    grad_weight->resizeAs(*weight);
+    grad_weight = weight.type().tensor(weight.sizes());
     if (!use_cudnn) {
-      grad_weight->zero();
+      grad_weight.zero_();
     }
   }
 
-  std::unique_ptr<Tensor> grad_bias;
+  at::Tensor grad_bias;
   if (should_compute_output(2) || use_cudnn) {
-    grad_bias = bias->newTensor();
-    grad_bias->resizeAs(*bias);
+    grad_bias = bias.type().tensor(bias.sizes());
     if (!use_cudnn) {
-      grad_bias->zero();
+      grad_bias.zero_();
     }
   }
 
-  auto grad_output = grad_outputs[0]->data->contiguous();
+  auto grad_output = grad_outputs[0]->data.contiguous();
 
   if (use_cudnn && eps >= CUDNN_BN_MIN_EPSILON) {
 #ifdef WITH_CUDNN
     torch::cudnn::cudnn_batch_norm_backward(
         state,
         torch::cudnn::getCudnnHandle(),
-        torch::cudnn::getCudnnDataType(*input),
-        (THVoidTensor*)input->cdata(),
-        (THVoidTensor*)grad_output->cdata(),
-        (THVoidTensor*)grad_input->cdata(),
-        (THVoidTensor*)grad_weight->cdata(),
-        (THVoidTensor*)grad_bias->cdata(),
-        (THVoidTensor*)weight->cdata(),
-        (THVoidTensor*)running_mean->cdata(),
-        (THVoidTensor*)running_var->cdata(),
-        (THVoidTensor*)save_mean->cdata(),
-        (THVoidTensor*)save_std->cdata(),
+        torch::cudnn::getCudnnDataType(input),
+        (THVoidTensor*)input.unsafeGetTH(false),
+        (THVoidTensor*)grad_output.unsafeGetTH(false),
+        (THVoidTensor*)grad_input.unsafeGetTH(false),
+        (THVoidTensor*)grad_weight.unsafeGetTH(false),
+        (THVoidTensor*)grad_bias.unsafeGetTH(false),
+        (THVoidTensor*)weight.unsafeGetTH(false),
+        (THVoidTensor*)running_mean.unsafeGetTH(false),
+        (THVoidTensor*)running_var.unsafeGetTH(false),
+        (THVoidTensor*)save_mean.unsafeGetTH(false),
+        (THVoidTensor*)save_std.unsafeGetTH(false),
         training,
         eps);
 #endif
   } else {
-    torch::nn::BatchNormalization_backward(
-        input.get(),
-        grad_output.get(),
-        grad_input.get(),
-        grad_weight.get(),
-        grad_bias.get(),
-        weight.get(),
-        running_mean.get(),
-        running_var.get(),
-        save_mean.get(),
-        save_std.get(),
+    at::BatchNormalization_backward(
+        input,
+        grad_output,
+        grad_input,
+        grad_weight,
+        grad_bias,
+        weight,
+        running_mean,
+        running_var,
+        save_mean,
+        save_std,
         training,
         1.0,
         eps);

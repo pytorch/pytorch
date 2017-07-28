@@ -544,6 +544,7 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
   name: clone
   cname: newClone
   return: THTensor*
+  aten_sparse: True
   arguments:
     - THTensor* self
 ]]

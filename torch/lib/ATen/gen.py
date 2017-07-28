@@ -102,7 +102,8 @@ def write(filename, s):
 
 def format_yaml(data):
     if options.output_dependencies:
-        return ""  # yaml formatting is slow so don't do it if we will ditch it.
+        # yaml formatting is slow so don't do it if we will ditch it.
+        return ""
     noalias_dumper = yaml.dumper.SafeDumper
     noalias_dumper.ignore_aliases = lambda self, data: True
     return yaml.dump(data, default_flow_style=False, Dumper=noalias_dumper)
@@ -121,6 +122,7 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
     env['Storage'] = "{}{}Storage".format(backend, scalar_name)
     env['Type'] = "{}{}{}Type".format(density_tag, backend, scalar_name)
     env['Tensor'] = "{}{}{}Tensor".format(density_tag, backend, scalar_name)
+    env['SparseTensor'] = "Sparse{}{}Tensor".format(backend, scalar_name)
     env['Backend'] = density_tag + backend
 
     # used for generating switch logic for external functions
@@ -133,9 +135,9 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
                              '#include <THCUNN/THCUNN.h>',
                              '#undef THNN_',
                              '#undef THCIndexTensor_']
-        if density == 'Sparse':
-            env['th_headers'] += ['#include <THCS/THCS.h>',
-                                  '#undef THCIndexTensor_']
+        # if density == 'Sparse':
+        env['th_headers'] += ['#include <THCS/THCS.h>',
+                              '#undef THCIndexTensor_']
         sname = '' if scalar_name == "Float" else scalar_name
         env['THType'] = 'Cuda{}'.format(sname)
         env['THStorage'] = 'THCuda{}Storage'.format(sname)
@@ -152,8 +154,8 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
         env['th_headers'] = ['#include <TH/TH.h>',
                              '#include <THNN/THNN.h>',
                              '#undef THNN_']
-        if density == 'Sparse':
-            env['th_headers'].append('#include <THS/THS.h>')
+        # if density == 'Sparse':
+        env['th_headers'].append('#include <THS/THS.h>')
 
         env['THType'] = scalar_name
         env['THStorage'] = "TH{}Storage".format(scalar_name)
@@ -165,6 +167,7 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
         env['Generator'] = 'CPUGenerator'
     env['AS_REAL'] = env['ScalarType']
     if scalar_name == "Half":
+        env['SparseTensor'] = 'Tensor'
         if backend == "CUDA":
             env['to_th_type'] = 'HalfFix<__half,Half>'
             env['to_at_type'] = 'HalfFix<Half,__half>'

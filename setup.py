@@ -54,6 +54,9 @@ def parallelCCompile(self, sources, output_dir=None, macros=None,
         src, ext = build[obj]
         self._compile(obj, src, ext, cc_args, extra_postargs, pp_opts)
     num_jobs = multiprocessing.cpu_count()
+    max_jobs = os.getenv("MAX_JOBS")
+    if max_jobs is not None:
+        num_jobs = min(num_jobs, int(max_jobs))
     multiprocessing.pool.ThreadPool(num_jobs).map(_single_compile, objects)
 
     return objects

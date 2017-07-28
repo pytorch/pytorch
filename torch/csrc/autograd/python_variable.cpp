@@ -42,7 +42,7 @@ PyObject * THPVariable_Wrap(const std::shared_ptr<Variable>& var)
   } else {
     var->pyobj = THPVariable_NewWithVar((PyTypeObject *)THPVariableClass, var);
     THPVariable* py_var = (THPVariable*)var->pyobj;
-    py_var->data = torch::createPyObject(*var->data);
+    py_var->data = torch::createPyObject(var->data);
   }
   return var->pyobj;
 }
@@ -51,7 +51,7 @@ PyObject * THPVariable_Wrap(const std::shared_ptr<Variable>& var)
 PyObject * THPVariable_NewWithFunction(PyObject *data, const std::shared_ptr<torch::autograd::Function>& grad_fn)
 {
   THPUtils_assert(THPModule_isTensor(data), "data must be a Tensor");
-  auto v = std::make_shared<Variable>(torch::createTensor(data), grad_fn->is_executable, false);
+  auto v = std::make_shared<Variable>(torch::createTensorAT(data), grad_fn->is_executable, false);
   v->grad_fn = grad_fn;
   PyObject* obj = THPVariable_NewWithVar((PyTypeObject*)THPVariableClass, v);
   if (obj) {
@@ -65,7 +65,7 @@ PyObject * THPVariable_NewWithFunction(PyObject *data, const std::shared_ptr<tor
 // This function DOES NOT steal a reference to data
 PyObject * THPVariable_NewVolatile(PyObject *data)
 {
-  auto v = std::make_shared<Variable>(torch::createTensor(data), false, true);
+  auto v = std::make_shared<Variable>(torch::createTensorAT(data), false, true);
   PyObject* obj = THPVariable_NewWithVar((PyTypeObject*)THPVariableClass, v);
   if (obj) {
     v->pyobj = obj;
@@ -78,7 +78,7 @@ PyObject * THPVariable_NewVolatile(PyObject *data)
 // This function DOES NOT steal a reference to data
 PyObject * THPVariable_NewLeaf(PyObject *data)
 {
-  auto v = std::make_shared<Variable>(torch::createTensor(data), false, false);
+  auto v = std::make_shared<Variable>(torch::createTensorAT(data), false, false);
   PyObject* obj = THPVariable_NewWithVar((PyTypeObject*)THPVariableClass, v);
   if (obj) {
     v->pyobj = obj;
@@ -145,7 +145,7 @@ PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject *kwds)
 
   if (data == NULL || data == Py_None) {
     // For legacy serialization code, create an empty tensor temporarily.
-    thpp::THTensor<float> tensor;
+    at::Tensor tensor;
     _data = torch::createPyObject(tensor);
     data = _data.get();
   }
@@ -160,9 +160,9 @@ PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject *kwds)
 
   std::shared_ptr<Variable> var;
   if (grad_fn) {
-    var = std::make_shared<Variable>(torch::createTensor(data), THPFunction_asFunction((THPFunction*)grad_fn));
+    var = std::make_shared<Variable>(torch::createTensorAT(data), THPFunction_asFunction((THPFunction*)grad_fn));
   } else {
-    var = std::make_shared<Variable>(torch::createTensor(data), requires_grad, is_volatile);
+    var = std::make_shared<Variable>(torch::createTensorAT(data), requires_grad, is_volatile);
   }
   PyObject* self = THPVariable_NewWithVar(type, var);
   if (self) {
@@ -226,7 +226,7 @@ PyObject *THPVariable_is_leaf(THPVariable *self)
 PyObject * THPVariable_get_data(THPVariable *self)
 {
   if (!self->data) {
-    self->data = torch::createPyObject(*self->cdata->data);
+    self->data = torch::createPyObject(self->cdata->data);
   }
   Py_INCREF(self->data);
   return self->data;
@@ -240,7 +240,7 @@ int THPVariable_set_data(THPVariable *self, PyObject *data)
   Py_XDECREF(self->data);
   self->data = data;
   auto& var = *self->cdata;
-  auto tensor = torch::createTensor(data);
+  auto tensor = torch::createTensorAT(data);
   var.data.swap(tensor);
   return 0;
 }
@@ -270,13 +270,15 @@ int THPVariable_set_grad(THPVariable *self, PyObject *other)
   auto& other_var = ((THPVariable*)other)->cdata;
 
   // Make sure the data is ok
-  THPUtils_assertRet(-1, other_var->data->type() == var.data->type(),
+  THPUtils_assertRet(-1, other_var->data.type().ID() == var.data.type().ID(),
       "assigned grad has data of a different type");
-  THPUtils_assertRet(-1, other_var->data->isCuda() == var.data->isCuda(),
+  THPUtils_assertRet(-1, other_var->data.type().isCuda() == var.data.type().isCuda(),
       "assigned grad has data located on a different device");
-  THPUtils_assertRet(-1, other_var->data->getDevice() == var.data->getDevice(),
-      "assigned grad has data located on a different device");
-  THPUtils_assertRet(-1, other_var->data->sizes() == var.data->sizes(),
+  if (var.data.type().isCuda()) {
+    THPUtils_assertRet(-1, other_var->data.get_device() == var.data.get_device(),
+        "assigned grad has data located on a different device");
+  }
+  THPUtils_assertRet(-1, other_var->data.sizes().vec() == var.data.sizes().vec(),
       "assigned grad has data of a different size");
 
   var.grad = other_var;

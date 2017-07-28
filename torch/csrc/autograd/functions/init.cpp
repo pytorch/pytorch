@@ -101,18 +101,18 @@ PyObject* getValueAttr(PyObject* obj, void* _unused)
   END_HANDLE_TH_ERRORS
 }
 
-template<typename T, typename ParamsT, std::shared_ptr<thpp::Tensor> ParamsT::*ptr>
+template<typename T, typename ParamsT, at::Tensor ParamsT::*ptr>
 PyObject* getTensorAttr(PyObject* obj, void* _unused)
 {
   HANDLE_TH_ERRORS
   THPCppFunction* self = (THPCppFunction*)obj;
   auto& val = ((T*)(self->cdata.get()))->*ptr;
   THPObjectPtr py_tensor;
-  if (!val) {
+  if (!val.defined()) {
     Py_INCREF(Py_None);
     py_tensor = Py_None;
   } else {
-    py_tensor = torch::createPyObject(*val);
+    py_tensor = torch::createPyObject(val);
   }
   return py_tensor.release();
   END_HANDLE_TH_ERRORS
