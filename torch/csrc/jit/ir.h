@@ -146,7 +146,6 @@ struct Use {
   : user(user), offset(offset) {}
   Node * user;
   size_t offset;
-  void lint();
 };
 static inline bool operator==(const Use & a, const Use & b) {
   return a.user == b.user && a.offset == b.offset;
@@ -765,7 +764,7 @@ struct PythonOp : public NodeWithKind<PythonOp,NodeKind::PythonOp,TypeKind::Mult
 
 // Select nodes are used to handle multiple returns for the ops that actually return
 // multiple values like PythonOp
-// By convension, there is a unique select node for each output of an op
+// By convention, there is a unique select node for each output of an op
 // so you can iterate over uses of a multi-return op to get all the select nodes.
 // in this case
 // number_of_outputs = op.uses().size()
