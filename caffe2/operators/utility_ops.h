@@ -238,7 +238,7 @@ class ResizeLikeOp : public Operator<Context> {
     auto& input0 = Input(0);
     auto& input1 = Input(1);
     auto* output = Output(0);
-    DCHECK_EQ(input0.size(), input1.size());
+    CAFFE_ENFORCE_EQ(input0.size(), input1.size());
     output->ResizeLike(Input(1));
     context_.template CopyItems<Context, Context>(
         input0.meta(),
@@ -325,11 +325,11 @@ class WeightedSumOp : public Operator<Context> {
 
   template <typename DstType>
   bool DoRunWithType() {
-    DCHECK_EQ(InputSize() % 2, 0);
+    CAFFE_ENFORCE_EQ(InputSize() % 2, 0);
     auto& X0 = Input(0);
     auto& weight0 = Input(1);
-    DCHECK_GT(X0.size(), 0);
-    DCHECK_EQ(weight0.size(), 1);
+    CAFFE_ENFORCE_GT(X0.size(), 0);
+    CAFFE_ENFORCE_EQ(weight0.size(), 1);
     int size = X0.size();
     auto* output = Output(0);
     output->ResizeLike(X0);
@@ -350,8 +350,8 @@ class WeightedSumOp : public Operator<Context> {
         return false;
       }
       auto& weight = Input(i + 1);
-      DCHECK_EQ(X.size(), size);
-      DCHECK_EQ(weight.size(), 1);
+      CAFFE_ENFORCE_EQ(X.size(), size);
+      CAFFE_ENFORCE_EQ(weight.size(), 1);
       math::Axpy<DstType, Context>(
           size,
           weight.template data<float>(),
@@ -422,16 +422,16 @@ class ScatterWeightedSumOp : public Operator<Context> {
 
   template <typename Index, int FixedSize>
   bool DoRunWithValue() {
-    DCHECK_EQ(InputSize() % 2, 1);
+    CAFFE_ENFORCE_EQ(InputSize() % 2, 1);
     auto& X0 = Input(0);
     auto& weight0 = Input(1);
     auto& indices = Input(2);
     auto* output = Output(0);
     CAFFE_ENFORCE_EQ(&X0, output, "In place operation is required");
 
-    DCHECK_GT(X0.size(), 0);
-    DCHECK_GT(X0.ndim(), 0) << "X0 has to be at least the vector";
-    DCHECK_EQ(weight0.size(), 1);
+    CAFFE_ENFORCE_GT(X0.size(), 0);
+    CAFFE_ENFORCE_GT(X0.ndim(), 0, "X0 has to be at least the vector");
+    CAFFE_ENFORCE_EQ(weight0.size(), 1);
     TIndex M = X0.size();
     TIndex N = X0.dim(0);
     TIndex K = indices.size();
@@ -443,8 +443,12 @@ class ScatterWeightedSumOp : public Operator<Context> {
     if (w0 != 1.0) {
       for (int i = 0; i < K; ++i) {
         Index idx = idxs[i];
-        DCHECK(0 <= idx && idx < N) << "Index out of bounds: " << idx
-                                    << ", range 0 to " << N;
+        CAFFE_ENFORCE(
+            0 <= idx && idx < N,
+            "Index out of bounds: ",
+            idx,
+            ", range 0 to ",
+            N);
         math::ScaleFixedSize<T, Context, FixedSize>(
             block_size,
             w0,
@@ -456,8 +460,8 @@ class ScatterWeightedSumOp : public Operator<Context> {
     for (int inp = 3; inp < InputSize(); inp += 2) {
       auto& X = Input(inp);
       auto& weight = Input(inp + 1);
-      DCHECK_EQ(X.size(), block_size * K);
-      DCHECK_EQ(weight.size(), 1);
+      CAFFE_ENFORCE_EQ(X.size(), block_size * K);
+      CAFFE_ENFORCE_EQ(weight.size(), 1);
       const T* x_data = X.template data<T>();
       T w = *weight.template data<T>();
       for (int i = 0; i < K; ++i) {
@@ -579,12 +583,12 @@ class ScatterAssignOp : public Operator<Context> {
     auto* output = Output(0);
     CAFFE_ENFORCE_EQ(&input, output, "In place operation is required");
 
-    DCHECK_GT(input.ndim(), 0) << "X0 has to be at least the vector";
+    CAFFE_ENFORCE_GT(input.ndim(), 0, "X0 has to be at least the vector");
     TIndex M = input.size();
     TIndex N = input.dim(0);
     TIndex K = indices.size();
     TIndex block_size = M / N;
-    DCHECK_EQ(slices.size(), block_size * K);
+    CAFFE_ENFORCE_EQ(slices.size(), block_size * K);
     // TODO(dzhulgakov): it can be made to work with arbitrary data type by
     // using raw_mutable_data
     T* data = output->template mutable_data<T>();

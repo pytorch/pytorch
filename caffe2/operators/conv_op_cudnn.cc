@@ -523,8 +523,8 @@ bool CudnnConvOp::DoRunWithType() {
   if (InputSize() == 3) {
     auto& bias = Input(BIAS);
 
-    DCHECK_EQ(bias.ndim(), 1);
-    DCHECK_EQ(bias.dim32(0), M);
+    CAFFE_ENFORCE_EQ(bias.ndim(), 1);
+    CAFFE_ENFORCE_EQ(bias.dim32(0), M);
 
     CUDNN_ENFORCE(cudnnAddTensor(
         cudnn_wrapper_.inline_cudnn_handle(),

@@ -32,7 +32,7 @@ bool ReluGradientOp<float, CPUContext>::RunOnDevice() {
   auto& Y = Input(0);
   auto& dY = Input(1);
   auto* dX = Output(0);
-  DCHECK_EQ(dY.size(), Y.size());
+  CAFFE_ENFORCE_EQ(dY.size(), Y.size());
   dX->ResizeLike(Y);
 
   const float* Ydata = Y.data<float>();

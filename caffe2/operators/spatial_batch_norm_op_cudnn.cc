@@ -93,7 +93,7 @@ bool CudnnSpatialBNOp::DoRunWithType() {
   const auto& scale = Input(SCALE);
   const auto& bias = Input(BIAS);
 
-  DCHECK_GE(X.ndim(), 3);
+  CAFFE_ENFORCE_GE(X.ndim(), 3);
   const int N = X.dim32(0);
   const int C = X.ndim() > 3
       ? (order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(X.ndim() - 1))
@@ -105,10 +105,10 @@ bool CudnnSpatialBNOp::DoRunWithType() {
   const int D = X.ndim() > 4
       ? (order_ == StorageOrder::NCHW ? X.dim32(4) : X.dim32(3))
       : 1;
-  DCHECK_EQ(scale.ndim(), 1);
-  DCHECK_EQ(bias.ndim(), 1);
-  DCHECK_EQ(scale.dim32(0), C);
-  DCHECK_EQ(bias.dim32(0), C);
+  CAFFE_ENFORCE_EQ(scale.ndim(), 1);
+  CAFFE_ENFORCE_EQ(bias.ndim(), 1);
+  CAFFE_ENFORCE_EQ(scale.dim32(0), C);
+  CAFFE_ENFORCE_EQ(bias.dim32(0), C);
   // See if we need to reshape.
   if (X.dims() != cudnn_input_dims_) {
     VLOG(1) << "Setting descriptors.";
@@ -141,10 +141,10 @@ bool CudnnSpatialBNOp::DoRunWithType() {
     // Run inference mode.
     const auto& est_mean = Input(EST_MEAN);
     const auto& est_var = Input(EST_VAR);
-    DCHECK_EQ(est_mean.ndim(), 1);
-    DCHECK_EQ(est_var.ndim(), 1);
-    DCHECK_EQ(est_mean.dim32(0), C);
-    DCHECK_EQ(est_var.dim32(0), C);
+    CAFFE_ENFORCE_EQ(est_mean.ndim(), 1);
+    CAFFE_ENFORCE_EQ(est_var.ndim(), 1);
+    CAFFE_ENFORCE_EQ(est_mean.dim32(0), C);
+    CAFFE_ENFORCE_EQ(est_var.dim32(0), C);
 
     auto* Y = Output(OUTPUT);
     Y->ResizeLike(X);
@@ -191,10 +191,10 @@ bool CudnnSpatialBNOp::DoRunWithType() {
       math::Set<BNParamType, CUDAContext>(C, 0, running_var_data, &context_);
     } else {
       // Does not need to do initialization.
-      DCHECK_EQ(running_mean->ndim(), 1);
-      DCHECK_EQ(running_var->ndim(), 1);
-      DCHECK_EQ(running_mean->dim32(0), C);
-      DCHECK_EQ(running_var->dim32(0), C);
+      CAFFE_ENFORCE_EQ(running_mean->ndim(), 1);
+      CAFFE_ENFORCE_EQ(running_var->ndim(), 1);
+      CAFFE_ENFORCE_EQ(running_mean->dim32(0), C);
+      CAFFE_ENFORCE_EQ(running_var->dim32(0), C);
       running_mean_data = running_mean->template mutable_data<BNParamType>();
       running_var_data = running_var->template mutable_data<BNParamType>();
     }
@@ -248,7 +248,7 @@ bool CudnnSpatialBNGradientOp::DoRunWithType() {
   const auto& scale = Input(SCALE);
   const auto& dY = Input(OUTPUT_GRAD);
 
-  DCHECK_GE(X.ndim(), 3);
+  CAFFE_ENFORCE_GE(X.ndim(), 3);
   const int N = X.dim32(0);
   const int C = X.ndim() > 3
       ? (order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(X.ndim() - 1))
@@ -260,8 +260,8 @@ bool CudnnSpatialBNGradientOp::DoRunWithType() {
   const int D = X.ndim() > 4
       ? (order_ == StorageOrder::NCHW ? X.dim32(4) : X.dim32(3))
       : 1;
-  DCHECK_EQ(scale.ndim(), 1);
-  DCHECK_EQ(scale.dim32(0), C);
+  CAFFE_ENFORCE_EQ(scale.ndim(), 1);
+  CAFFE_ENFORCE_EQ(scale.dim32(0), C);
   // See if we need to reshape.
   if (X.dims() != cudnn_input_dims_) {
     if (order_ == StorageOrder::NCHW) {

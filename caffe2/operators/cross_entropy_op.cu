@@ -31,11 +31,12 @@ bool LabelCrossEntropyOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& label = Input(1);
   auto* Y = Output(0);
-  DCHECK_EQ(X.ndim(), 2);
+  CAFFE_ENFORCE_EQ(X.ndim(), 2);
   int N = X.dim32(0);
   int D = X.dim32(1);
-  DCHECK((label.ndim() == 1) || (label.ndim() == 2 && label.dim32(1) == 1));
-  DCHECK_EQ(label.dim32(0), N);
+  CAFFE_ENFORCE(
+      (label.ndim() == 1) || (label.ndim() == 2 && label.dim32(1) == 1));
+  CAFFE_ENFORCE_EQ(label.dim32(0), N);
   Y->Resize(vector<TIndex>(size_t(1), N));
   LabelCrossEntropyKernel<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS,
                             0, context_.cuda_stream()>>>(
@@ -50,13 +51,14 @@ bool LabelCrossEntropyGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& label = Input(1);
   auto& dY = Input(2);
   auto* dX = Output(0);
-  DCHECK_EQ(X.ndim(), 2);
+  CAFFE_ENFORCE_EQ(X.ndim(), 2);
   int N = X.dim32(0);
   int D = X.dim32(1);
-  DCHECK((label.ndim() == 1) || (label.ndim() == 2 && label.dim32(1) == 1));
-  DCHECK_EQ(label.dim32(0), N);
-  DCHECK_EQ(dY.ndim(), 1);
-  DCHECK_EQ(dY.dim32(0), N);
+  CAFFE_ENFORCE(
+      (label.ndim() == 1) || (label.ndim() == 2 && label.dim32(1) == 1));
+  CAFFE_ENFORCE_EQ(label.dim32(0), N);
+  CAFFE_ENFORCE_EQ(dY.ndim(), 1);
+  CAFFE_ENFORCE_EQ(dY.dim32(0), N);
   dX->ResizeLike(X);
   math::Set<float, CUDAContext>(
       dX->size(), 0.f, dX->mutable_data<float>(), &context_);

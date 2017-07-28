@@ -333,8 +333,8 @@ bool DivGradientOp<Context>::RunOnDevice() {
   auto& dZ = Input(2);
   auto* dX = Output(0);
   auto* dY = Output(1);
-  DCHECK_GT(Y.size(), 0);
-  DCHECK_GT(Z.size(), 0);
+  CAFFE_ENFORCE_GT(Y.size(), 0);
+  CAFFE_ENFORCE_GT(Z.size(), 0);
   dX->ResizeLike(Y);
   dY->ResizeLike(Y);
 

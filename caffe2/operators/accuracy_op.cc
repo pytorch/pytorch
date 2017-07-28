@@ -7,11 +7,11 @@ bool AccuracyOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(PREDICTION);
   auto& label = Input(LABEL);
   auto* Y = Output(0);
-  DCHECK_EQ(X.ndim(), 2);
+  CAFFE_ENFORCE_EQ(X.ndim(), 2);
   int N = X.dim32(0);
   int D = X.dim32(1);
-  DCHECK_EQ(label.ndim(), 1);
-  DCHECK_EQ(label.dim32(0), N);
+  CAFFE_ENFORCE_EQ(label.ndim(), 1);
+  CAFFE_ENFORCE_EQ(label.dim32(0), N);
   Y->Resize(vector<TIndex>());
   const auto* Xdata = X.data<float>();
   const auto* labelData = label.data<int>();
@@ -37,7 +37,7 @@ bool AccuracyOp<float, CPUContext>::RunOnDevice() {
       ++correct;
     }
   }
-  DCHECK_LE(correct, N);
+  CAFFE_ENFORCE_LE(correct, N);
   *(Y->mutable_data<float>()) = static_cast<float>(correct) / N;
 
   return true;

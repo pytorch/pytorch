@@ -48,11 +48,11 @@ bool AccuracyOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(PREDICTION);
   auto& label = Input(LABEL);
   auto* Y = Output(0);
-  DCHECK_EQ(X.ndim(), 2);
+  CAFFE_ENFORCE_EQ(X.ndim(), 2);
   int N = X.dim32(0);
   int D = X.dim32(1);
-  DCHECK_EQ(label.ndim(), 1);
-  DCHECK_EQ(label.dim32(0), N);
+  CAFFE_ENFORCE_EQ(label.ndim(), 1);
+  CAFFE_ENFORCE_EQ(label.dim32(0), N);
   Y->Resize(vector<TIndex>());
   float* Ydata = Y->mutable_data<float>();
   math::Set<float, CUDAContext>(1, 0, Ydata, &context_);
