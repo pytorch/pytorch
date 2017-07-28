@@ -7,7 +7,7 @@
 
 namespace caffe2 {
 
-// assumes one batch = one session
+// support multiple batches of sessions
 template <typename T, class Context>
 class PairWiseLossOp final : public Operator<Context> {
  public:
@@ -15,9 +15,9 @@ class PairWiseLossOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   bool RunOnDevice() override;
 
- protected:
-  // Input: X, label
-  // Output: Y
+ private:
+  INPUT_TAGS(XVALUE, LABEL, LENGTHS);
+  OUTPUT_TAGS(YVALUE);
 };
 
 template <typename T, class Context>
@@ -27,9 +27,9 @@ class PairWiseLossGradientOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   bool RunOnDevice() override;
 
- protected:
-  // Input: X, label, dY
-  // Ouptut: dX. There is no gradient with respect to the label.
+ private:
+  INPUT_TAGS(XVALUE, LABEL, DYVALUE, LENGTHS);
+  OUTPUT_TAGS(DXVALUE);
 };
 
 } // namespace caffe2
