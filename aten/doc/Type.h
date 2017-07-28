@@ -1,17 +1,19 @@
 #pragma once
 
 #include <memory>
+#include <limits>
 
 #include "ATen/ArrayRef.h"
 #include "ATen/Half.h"
+#include "ATen/SparseTensorRef.h"
 
 namespace at {
 
 class Context;
-class Storage;
-class Tensor;
+struct Storage;
+struct Tensor;
 class Scalar;
-class Generator;
+struct Generator;
 
 #define AT_FORALL_SCALAR_TYPES(_) \
 _(uint8_t,Byte,i) \
@@ -34,16 +36,35 @@ enum class ScalarType {
 enum class Backend {
   CPU,
   CUDA,
+  SparseCPU,
+  SparseCUDA,
   NumOptions
 };
 
+
 constexpr Backend kCPU = Backend::CPU;
 constexpr Backend kCUDA = Backend::CUDA;
+constexpr Backend kSparseCPU = Backend::SparseCPU;
+constexpr Backend kSparseCUDA = Backend::SparseCUDA;
+
+// Note [Undefined-dim versus 0-dim]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// Unlike Torch, ATen treats zero-dimension tensors as having ONE
+// element (that is to say, a zero-dimensional tensor is a scalar!)
+// This is in contrast to Torch, where a zero-dimension tensor has
+// zero elements.
+//
+// Because we are backed by Torch tensors, we need to be able to
+// represent this state (of numel==0).  kUndefinedDimensions represents this
+// situation.
+constexpr int64_t kUndefinedDimensions = std::numeric_limits<int64_t>::min();
 
 static inline const char * toString(Backend b) {
   switch(b) {
     case Backend::CPU: return "CPU";
     case Backend::CUDA: return "CUDA";
+    case Backend::SparseCPU: return "SparseCPU";
+    case Backend::SparseCUDA: return "SparseCUDA";
     default: return "UNKNOWN_BACKEND";
   }
 }
@@ -66,13 +87,6 @@ static inline const char * toString(ScalarType t) {
 #undef DEFINE_CASE
 }
 
-struct CPUTag {
-  static constexpr Backend value = Backend::CPU;
-};
-struct CUDATag {
-  static constexpr Backend value = Backend::CUDA;
-};
-
 enum class TypeID {
   CPUByte,
   CPUChar,
@@ -82,6 +96,13 @@ enum class TypeID {
   CPULong,
   CPUShort,
   CPUHalf,
+  SparseCPUByte,
+  SparseCPUChar,
+  SparseCPUDouble,
+  SparseCPUFloat,
+  SparseCPUInt,
+  SparseCPULong,
+  SparseCPUShort,
   CUDAByte,
   CUDAChar,
   CUDADouble,
@@ -90,17 +111,27 @@ enum class TypeID {
   CUDALong,
   CUDAShort,
   CUDAHalf,
+  SparseCUDAByte,
+  SparseCUDAChar,
+  SparseCUDADouble,
+  SparseCUDAFloat,
+  SparseCUDAInt,
+  SparseCUDALong,
+  SparseCUDAShort,
   NumOptions
 };
 
 
 typedef ArrayRef<int64_t> IntList;
+typedef ArrayRef<Tensor> TensorList;
 
 struct Type {
-  Type(Context * context)
+  explicit Type(Context * context)
   : context(context) {}
+  virtual ~Type() {}
   virtual ScalarType scalarType() = 0;
   virtual Backend backend() = 0;
+  virtual bool isCuda() = 0;
   virtual bool isSparse() = 0;
   virtual bool isDistributed() = 0;
   static void registerAll(Context * context);
@@ -108,6 +139,7 @@ struct Type {
   virtual std::unique_ptr<Storage> storage(size_t size) = 0;
   virtual std::unique_ptr<Storage> storageFromBlob(void * data, int64_t size) = 0;
   virtual std::unique_ptr<Generator> generator() = 0;
+  virtual Tensor unsafeTensorFromTH(void * th_pointer, bool retain) = 0;
   virtual const char * toString() const = 0;
   Type & toBackend(Backend b);
   Type & toScalarType(ScalarType s);
@@ -122,6 +154,9 @@ struct Type {
   Tensor tensorFromBlob(void * data, IntList sizes);
   Tensor tensorFromBlob(void * data, IntList sizes, IntList strides);
   Tensor scalarTensor(Scalar s);
+
+  bool operator==(const Type& other) const;
+
   // example
   // virtual Tensor * add(Tensor & a, Tensor & b) = 0;
   virtual int64_t m_storage_offset(const Tensor & self) ;
@@ -292,12 +327,11 @@ struct Type {
   virtual std::tuple<Tensor,Tensor> mode(const Tensor & self, int64_t dim) ;
   virtual std::tuple<Tensor &,Tensor &> median_out(const Tensor & self, bool keepdim, Tensor & values, Tensor & indices) ;
   virtual std::tuple<Tensor,Tensor> median(const Tensor & self, bool keepdim) ;
-  virtual std::tuple<Tensor &,Tensor &> median_out(const Tensor & self, Tensor & values, Tensor & indices) ;
-  virtual std::tuple<Tensor,Tensor> median(const Tensor & self) ;
   virtual std::tuple<Tensor &,Tensor &> median_out(const Tensor & self, int64_t dim, Tensor & values, Tensor & indices) ;
   virtual std::tuple<Tensor,Tensor> median(const Tensor & self, int64_t dim) ;
   virtual std::tuple<Tensor &,Tensor &> median_out(const Tensor & self, int64_t dim, bool keepdim, Tensor & values, Tensor & indices) ;
   virtual std::tuple<Tensor,Tensor> median(const Tensor & self, int64_t dim, bool keepdim) ;
+  virtual Scalar median(const Tensor & self) ;
   virtual std::tuple<Tensor &,Tensor &> sort_out(const Tensor & self, Tensor & values, Tensor & indices) ;
   virtual std::tuple<Tensor,Tensor> sort(const Tensor & self) ;
   virtual std::tuple<Tensor &,Tensor &> sort_out(const Tensor & self, int64_t dim, Tensor & values, Tensor & indices) ;
@@ -386,15 +420,21 @@ struct Type {
   virtual Tensor & mean_out(const Tensor & self, int64_t dim, Tensor & destination) ;
   virtual Tensor mean(const Tensor & self, int64_t dim) ;
   virtual Scalar mean(const Tensor & self) ;
+  virtual Tensor & var_out(const Tensor & self, int64_t dim, bool unbiased, bool keepdim, Tensor & destination) ;
+  virtual Tensor var(const Tensor & self, int64_t dim, bool unbiased, bool keepdim) ;
   virtual Tensor & var_out(const Tensor & self, int64_t dim, bool keepdim, Tensor & destination) ;
   virtual Tensor var(const Tensor & self, int64_t dim, bool keepdim) ;
   virtual Tensor & var_out(const Tensor & self, int64_t dim, Tensor & destination) ;
   virtual Tensor var(const Tensor & self, int64_t dim) ;
+  virtual Scalar var(const Tensor & self, bool unbiased) ;
   virtual Scalar var(const Tensor & self) ;
+  virtual Tensor & std_out(const Tensor & self, int64_t dim, bool unbiased, bool keepdim, Tensor & destination) ;
+  virtual Tensor std(const Tensor & self, int64_t dim, bool unbiased, bool keepdim) ;
   virtual Tensor & std_out(const Tensor & self, int64_t dim, bool keepdim, Tensor & destination) ;
   virtual Tensor std(const Tensor & self, int64_t dim, bool keepdim) ;
   virtual Tensor & std_out(const Tensor & self, int64_t dim, Tensor & destination) ;
   virtual Tensor std(const Tensor & self, int64_t dim) ;
+  virtual Scalar std(const Tensor & self, bool unbiased) ;
   virtual Scalar std(const Tensor & self) ;
   virtual Tensor & norm_out(const Tensor & self, Scalar p, int64_t dim, bool keepdim, Tensor & destination) ;
   virtual Tensor norm(const Tensor & self, Scalar p, int64_t dim, bool keepdim) ;
@@ -462,13 +502,19 @@ struct Type {
   virtual Scalar trace(const Tensor & self) ;
   virtual Tensor & add_out(const Tensor & self, Scalar value, const Tensor & other, Tensor & result) ;
   virtual Tensor add(const Tensor & self, Scalar value, const Tensor & other) ;
+  virtual Tensor & add_out(const Tensor & self, Scalar value, SparseTensor other, Tensor & result) ;
+  virtual Tensor add(const Tensor & self, Scalar value, SparseTensor other) ;
   virtual Tensor & add_out(const Tensor & self, Scalar value, Tensor & result) ;
   virtual Tensor add(const Tensor & self, Scalar value) ;
   virtual Tensor & add_out(const Tensor & self, const Tensor & other, Tensor & result) ;
   virtual Tensor add(const Tensor & self, const Tensor & other) ;
+  virtual Tensor & add_out(const Tensor & self, SparseTensor other, Tensor & result) ;
+  virtual Tensor add(const Tensor & self, SparseTensor other) ;
   virtual Tensor & m_add_(Tensor & self, Scalar value, const Tensor & other) ;
+  virtual Tensor & m_add_(Tensor & self, Scalar value, SparseTensor other) ;
   virtual Tensor & m_add_(Tensor & self, Scalar value) ;
   virtual Tensor & m_add_(Tensor & self, const Tensor & other) ;
+  virtual Tensor & m_add_(Tensor & self, SparseTensor other) ;
   virtual Tensor & sub_out(const Tensor & self, Scalar value, const Tensor & other, Tensor & result) ;
   virtual Tensor sub(const Tensor & self, Scalar value, const Tensor & other) ;
   virtual Tensor & sub_out(const Tensor & self, Scalar value, Tensor & result) ;
@@ -509,17 +555,17 @@ struct Type {
   virtual Tensor & m_clamp_(Tensor & self, Scalar min, Scalar max) ;
   virtual Tensor & m_clamp_(Tensor & self, Scalar min) ;
   virtual Scalar dot(const Tensor & self, const Tensor & tensor) ;
-  virtual Tensor & tril_out(const Tensor & self, int64_t k, Tensor & destination) ;
-  virtual Tensor tril(const Tensor & self, int64_t k) ;
+  virtual Tensor & tril_out(const Tensor & self, int64_t diagonal, Tensor & destination) ;
+  virtual Tensor tril(const Tensor & self, int64_t diagonal) ;
   virtual Tensor & tril_out(const Tensor & self, Tensor & destination) ;
   virtual Tensor tril(const Tensor & self) ;
-  virtual Tensor & m_tril_(Tensor & self, int64_t k) ;
+  virtual Tensor & m_tril_(Tensor & self, int64_t diagonal) ;
   virtual Tensor & m_tril_(Tensor & self) ;
-  virtual Tensor & triu_out(const Tensor & self, int64_t k, Tensor & destination) ;
-  virtual Tensor triu(const Tensor & self, int64_t k) ;
+  virtual Tensor & triu_out(const Tensor & self, int64_t diagonal, Tensor & destination) ;
+  virtual Tensor triu(const Tensor & self, int64_t diagonal) ;
   virtual Tensor & triu_out(const Tensor & self, Tensor & destination) ;
   virtual Tensor triu(const Tensor & self) ;
-  virtual Tensor & m_triu_(Tensor & self, int64_t k) ;
+  virtual Tensor & m_triu_(Tensor & self, int64_t diagonal) ;
   virtual Tensor & m_triu_(Tensor & self) ;
   virtual Tensor & cross_out(const Tensor & self, const Tensor & other, int64_t dim, Tensor & destination) ;
   virtual Tensor cross(const Tensor & self, const Tensor & other, int64_t dim) ;
@@ -658,8 +704,12 @@ struct Type {
   virtual std::tuple<Tensor,const Tensor &> ormqr(const Tensor & self, const Tensor & input2, const Tensor & input3, bool left) ;
   virtual std::tuple<Tensor &,const Tensor &> ormqr_out(const Tensor & self, const Tensor & input2, const Tensor & input3, Tensor & result) ;
   virtual std::tuple<Tensor,const Tensor &> ormqr(const Tensor & self, const Tensor & input2, const Tensor & input3) ;
+  virtual std::tuple<Tensor &,Tensor &> btrifact_out(const Tensor & info, bool pivot, const Tensor & self, Tensor & result, Tensor & pivots) ;
+  virtual std::tuple<Tensor,Tensor> btrifact(const Tensor & info, bool pivot, const Tensor & self) ;
   virtual std::tuple<Tensor &,Tensor &> btrifact_out(const Tensor & info, const Tensor & self, Tensor & result, Tensor & pivots) ;
   virtual std::tuple<Tensor,Tensor> btrifact(const Tensor & info, const Tensor & self) ;
+  virtual std::tuple<Tensor &,Tensor &> btrifact_out(bool pivot, const Tensor & self, Tensor & result, Tensor & pivots) ;
+  virtual std::tuple<Tensor,Tensor> btrifact(bool pivot, const Tensor & self) ;
   virtual std::tuple<Tensor &,Tensor &> btrifact_out(const Tensor & self, Tensor & result, Tensor & pivots) ;
   virtual std::tuple<Tensor,Tensor> btrifact(const Tensor & self) ;
   virtual Tensor & btrisolve_out(const Tensor & self, const Tensor & LU_data, const Tensor & LU_pivots, Tensor & result) ;
@@ -714,6 +764,8 @@ struct Type {
   virtual Tensor & select_out(const Tensor & self, int dim, int64_t sliceIndex, Tensor & result) ;
   virtual Tensor select(const Tensor & self, int dim, int64_t sliceIndex) ;
   virtual Tensor & m_assign_(Tensor & self, const Tensor & src) ;
+  virtual Tensor & cat_out(TensorList tensors, int dim, Tensor & self) ;
+  virtual Tensor cat(TensorList tensors, int dim) ;
   virtual void Abs_updateOutput(const Tensor & input, const Tensor & output) ;
   virtual void Abs_updateGradInput(const Tensor & input, const Tensor & gradOutput, const Tensor & gradInput) ;
   virtual void AbsCriterion_updateOutput(const Tensor & input, const Tensor & target, const Tensor & output, bool sizeAverage) ;
@@ -726,10 +778,10 @@ struct Type {
   virtual void ClassNLLCriterion_updateOutput(const Tensor & input, const Tensor & target, const Tensor & output, bool sizeAverage, const Tensor & total_weight, int64_t ignore_index) ;
   virtual void ClassNLLCriterion_updateGradInput(const Tensor & input, const Tensor & target, const Tensor & gradInput, bool sizeAverage, const Tensor & weights, const Tensor & total_weight, int64_t ignore_index) ;
   virtual void ClassNLLCriterion_updateGradInput(const Tensor & input, const Tensor & target, const Tensor & gradInput, bool sizeAverage, const Tensor & total_weight, int64_t ignore_index) ;
-  virtual void SpatialClassNLLCriterion_updateOutput(const Tensor & input, const Tensor & target, const Tensor & output, bool sizeAverage, const Tensor & weights, const Tensor & total_weight) ;
-  virtual void SpatialClassNLLCriterion_updateOutput(const Tensor & input, const Tensor & target, const Tensor & output, bool sizeAverage, const Tensor & total_weight) ;
-  virtual void SpatialClassNLLCriterion_updateGradInput(const Tensor & input, const Tensor & target, const Tensor & gradInput, bool sizeAverage, const Tensor & weights, const Tensor & total_weight) ;
-  virtual void SpatialClassNLLCriterion_updateGradInput(const Tensor & input, const Tensor & target, const Tensor & gradInput, bool sizeAverage, const Tensor & total_weight) ;
+  virtual void SpatialClassNLLCriterion_updateOutput(const Tensor & input, const Tensor & target, const Tensor & output, bool sizeAverage, const Tensor & weights, const Tensor & total_weight, int64_t ignore_index) ;
+  virtual void SpatialClassNLLCriterion_updateOutput(const Tensor & input, const Tensor & target, const Tensor & output, bool sizeAverage, const Tensor & total_weight, int64_t ignore_index) ;
+  virtual void SpatialClassNLLCriterion_updateGradInput(const Tensor & input, const Tensor & target, const Tensor & gradInput, bool sizeAverage, const Tensor & weights, const Tensor & total_weight, int64_t ignore_index) ;
+  virtual void SpatialClassNLLCriterion_updateGradInput(const Tensor & input, const Tensor & target, const Tensor & gradInput, bool sizeAverage, const Tensor & total_weight, int64_t ignore_index) ;
   virtual void ELU_updateOutput(const Tensor & input, const Tensor & output, Scalar alpha, bool inplace) ;
   virtual void ELU_updateGradInput(const Tensor & input, const Tensor & gradOutput, const Tensor & gradInput, const Tensor & output, Scalar alpha, bool inplace) ;
   virtual void DistKLDivCriterion_updateOutput(const Tensor & input, const Tensor & target, const Tensor & output, bool sizeAverage) ;
@@ -870,6 +922,8 @@ struct Type {
   virtual void SpatialUpSamplingNearest_updateGradInput(const Tensor & input, const Tensor & gradOutput, const Tensor & gradInput, int scale_factor) ;
   virtual void SpatialUpSamplingBilinear_updateOutput(const Tensor & input, const Tensor & output, int outputHeight, int outputWidth) ;
   virtual void SpatialUpSamplingBilinear_updateGradInput(const Tensor & gradOutput, const Tensor & gradInput, int nbatch, int nchannels, int inputHeight, int inputWidth, int outputHeight, int outputWidth) ;
+  virtual void SpatialGridSamplerBilinear_updateOutput(const Tensor & input, const Tensor & grid, const Tensor & output) ;
+  virtual void SpatialGridSamplerBilinear_updateGradInput(const Tensor & input, const Tensor & gradInput, const Tensor & grid, const Tensor & gradGrid, const Tensor & gradOutput) ;
   virtual void VolumetricAveragePooling_updateOutput(const Tensor & input, const Tensor & output, int kT, int kW, int kH, int dT, int dW, int dH) ;
   virtual void VolumetricAveragePooling_updateGradInput(const Tensor & input, const Tensor & gradOutput, const Tensor & gradInput, int kT, int kW, int kH, int dT, int dW, int dH) ;
   virtual void VolumetricConvolution_updateOutput(const Tensor & input, const Tensor & output, const Tensor & weight, const Tensor & bias, const Tensor & finput, const Tensor & fgradInput, int dT, int dW, int dH, int pT, int pW, int pH) ;
