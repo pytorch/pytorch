@@ -39,8 +39,6 @@ PyObject * wrap_optimizer(PyObject *_unused, PyObject *py_graph) {
   THPUtils_assert(THPGraph_Check(py_graph), "expected a Graph instance");
   THPGraph *graph = (THPGraph*)py_graph;
   graph->cdata = optimizer(std::unique_ptr<Graph>{graph->cdata}).release();
-  // TODO: Make this lint optional
-  graph->cdata->lint();
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -58,6 +56,7 @@ struct PyMethodDef _THPJIT_methods[] = {
   {"_tracer_exit",    (PyCFunction)THPTracer_exit,            METH_VARARGS, NULL},
   {"_jit_createAutogradClosure", (PyCFunction)THPTracer_createAutogradClosure, METH_O, NULL},
   {"_jit_optim_fuse", (PyCFunction)wrap_optimizer<FuseGraph>, METH_O,       NULL},
+  {"_jit_optim_lint", (PyCFunction)wrap_optimizer<LintGraph>, METH_O,       NULL},
   {"_jit_run_cpp_tests",(PyCFunction)run_cpp_tests,           METH_NOARGS,  NULL},
   {NULL}
 };

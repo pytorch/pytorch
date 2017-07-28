@@ -260,4 +260,9 @@ void Graph::lint() {
 
 }
 
+std::unique_ptr<Graph> LintGraph(std::unique_ptr<Graph> graph) {
+  graph->lint();
+  return graph;
+}
+
 }}
