@@ -1,7 +1,5 @@
 #include "torch/csrc/autograd/jit_closure.h"
 
-#include "THPP/THPP.h"
-
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/autograd/functions/basic_ops.h"
@@ -133,6 +131,25 @@ struct PythonCall : public Function {
   std::vector<THPObjectPtr> scalar_args;
 };
 
+// Note [Handling nullary functions in the autograd engine]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// Today, the autograd engine cannot handle nullary functions, because
+// it assumes that every non-input function has at least one input.
+// This fits nicely with the scheduling strategy, which schedules a
+// function for execution when all of its inputs are ready. Unfortunately,
+// constants are nullary.
+//
+// Instead, we use a little hack. Rather than creating an extra root
+// for every constant, we add a single new root, ConstantFactory, which
+// when run triggers all of the actual constant functions, WrapConstant,
+// which actually contribute a constant.  Furthermore, we use a single
+// null input to ensure that the next_function index has a valid offset.
+//
+// One possible alternative to represent this might be to special case constants
+// in the execution engine, as a separate vector of roots. But the current
+// strategy seems to work fine and isn't too difficult to construct a trace
+// for.
+
 struct WrapConstant : public Function {
   WrapConstant(at::Tensor value)
     : value(std::move(value)) {
@@ -150,6 +167,7 @@ struct WrapConstant : public Function {
   at::Tensor value;
 };
 
+// See Note [Handling nullary functions in the autograd engine]
 struct ConstantFactory : public Function {
   ConstantFactory() {
     is_executable = true;
