@@ -15,8 +15,6 @@
 
 #include <ATen/ATen.h>
 
-#include "THPP/THPP.h"
-
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/auto_gpu.h"
 
