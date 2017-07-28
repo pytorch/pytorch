@@ -1060,6 +1060,48 @@ TH_API void THNN_(SpatialDilatedConvolution_accGradParameters)(
           int dilationW, int dilationH,
           accreal scale);
 
+TH_API void THNN_(SpatialFullDilatedConvolution_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          THTensor *weight,
+          THTensor *bias,         // [OPTIONAL]
+          THTensor *columns,
+          THTensor *ones,
+          int kW, int kH,
+          int dW, int dH,
+          int padW, int padH,
+          int dilationW, int dilationH,
+          int adjW, int adjH);
+
+TH_API void THNN_(SpatialFullDilatedConvolution_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          THTensor *weight,
+          THTensor *gradColumns,
+          int kW, int kH,
+          int dW, int dH,
+          int padW, int padH,
+          int dilationW, int dilationH,
+          int adjW, int adjH);
+
+TH_API void THNN_(SpatialFullDilatedConvolution_accGradParameters)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradWeight,
+          THTensor *gradBias,     // [OPTIONAL]
+          THTensor *columns,
+          THTensor *ones,
+          int kW, int kH,
+          int dW, int dH,
+          int padW, int padH,
+          int dilationW, int dilationH,
+          int adjW, int adjH,
+          accreal scale);
+
 TH_API void THNN_(SpatialMaxPooling_updateOutput)(
           THNNState *state,
           THTensor *input,
@@ -1370,6 +1412,45 @@ TH_API void THNN_(VolumetricDilatedConvolution_accGradParameters)(
           int padT, int padW, int padH,
           int dilationT, int dilationW, int dilationH,
           accreal scale);
+
+TH_API void THNN_(VolumetricFullDilatedConvolution_updateOutput)(
+          THNNState *state,         // library state
+          THTensor *input,          // 4D or 5D (batch) tensor
+          THTensor *output,         // [OUT] volumetric convolution output
+          THTensor *weight,         // weight tensor (nInputPlane x nOutputPlane x kT x kH x kW)
+          THTensor *bias,           // [OPTIONAL] gradBias tensor (nOutputPlane)
+          THTensor *finput,         // [OUT] internal columns buffer
+          THTensor *fgradInput,     // [OUT] internal ones buffer
+          int dT, int dW, int dH,   // stride of the convolution
+          int pT, int pW, int pH,   // padding
+          int dilationT, int dilationW, int dilationH,
+          int aT, int aW, int aH);  // extra output adjustment
+TH_API void THNN_(VolumetricFullDilatedConvolution_updateGradInput)(
+          THNNState *state,         // library state
+          THTensor *input,          // 4D or 5D (batch) tensor
+          THTensor *gradOutput,     // gradient w.r.t. output
+          THTensor *gradInput,      // [OUT] gradient w.r.t. input
+          THTensor *weight,         // weight tensor (nInputPlane x nOutputPlane x kT x kH x kW)
+          THTensor *finput,         // internal columns buffer
+          THTensor *fgradInput,     // internal ones buffer
+          int dT, int dW, int dH,   // stride
+          int pT, int pW, int pH,   // padding
+          int dilationT, int dilationW, int dilationH,
+          int aT, int aW, int aH);  // extra output adjustment
+
+TH_API void THNN_(VolumetricFullDilatedConvolution_accGradParameters)(
+          THNNState *state,         // library state
+          THTensor *input,          // 4D or 5D (batch) tensor
+          THTensor *gradOutput,     // gradient w.r.t. output
+          THTensor *gradWeight,     // gradWeight tensor (nInputPlane x nOutputPlane x kT x kH x kW)
+          THTensor *gradBias,       // [OPTIONAL] gradBias tensor (nOutputPlane)
+          THTensor *finput,         // internal columns buffer
+          THTensor *fgradInput,     // internal ones buffer
+          int dT, int dW, int dH,   // stride
+          int pT, int pW, int pH,   // padding
+          int dilationT, int dilationW, int dilationH,
+          int aT, int aW, int aH,   // extra output adjustment
+          accreal scale);           // scaling factor
 
 TH_API void THNN_(VolumetricMaxPooling_updateOutput)(
           THNNState *state,

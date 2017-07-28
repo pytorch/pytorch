@@ -200,6 +200,9 @@
 #include "generic/SpatialConvolutionLocal.c"
 #include "THGenerateFloatTypes.h"
 
+#include "generic/SpatialFullDilatedConvolution.c"
+#include "THGenerateFloatTypes.h"
+
 #include "generic/SpatialFullConvolution.c"
 #include "THGenerateFloatTypes.h"
 
@@ -249,6 +252,9 @@
 #include "THGenerateFloatTypes.h"
 
 #include "generic/VolumetricConvolutionMM.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/VolumetricFullDilatedConvolution.c"
 #include "THGenerateFloatTypes.h"
 
 #include "generic/VolumetricFullConvolution.c"
