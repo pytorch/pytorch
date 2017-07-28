@@ -1360,6 +1360,7 @@ tensor.
 // of fused sparse support. But using "lengths" representation actually implies
 // continuous segments and thus range reducers can be used for non-sparse
 // version.
+
 template <
     typename TData,
     typename TLengths,
@@ -1476,6 +1477,7 @@ class AbstractLengthsOp : public Operator<Context> {
     }
     CAFFE_ENFORCE(
         dataIndex == dataToReduceSize, dataIndex, " != ", dataToReduceSize);
+
     return true;
   }
 
