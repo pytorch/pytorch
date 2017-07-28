@@ -97,3 +97,49 @@ class TestPairWiseLossOps(hu.HypothesisTestCase):
                 0.5 * dY[0] *
                 (up_output_pred[0] - down_output_pred[0]) / delta),
             rtol=1e-2, atol=1e-2)
+
+    @given(n=st.integers(0, 10), k=st.integers(1, 5), **hu.gcs_cpu_only)
+    def test_pair_wise_loss_batch(self, n, k, gc, dc):
+        lengths = np.random.randint(k, size=n).astype(np.int32) + 1
+        X = np.random.rand(sum(lengths)).astype(np.float32)
+        label = np.random.randint(k, size=sum(lengths)).astype(np.float32)
+
+        def pair_wise_op(X, label, lengths):
+            N = lengths.size
+            output = np.zeros(N).astype(np.float32)
+
+            def f(x):
+                return np.log(1 + np.exp(x))
+
+            offset = 0
+            for idx in range(N):
+                offset += lengths[idx - 1] if idx > 0 else 0
+                count = 0
+                for i in range(offset, offset + lengths[idx]):
+                    for j in range(offset, i):
+                        if label[i] == label[j]:
+                            continue
+                        sign = 1 if label[i] > label[j] else -1
+                        output[idx] += f(sign * (X[j] - X[i]))
+                        count += 1
+                if count > 0:
+                    output[idx] /= count
+            return [output]
+
+        op = core.CreateOperator(
+            'PairWiseLoss',
+            ['X', 'label', 'lengths'],
+            'out'
+        )
+
+        # Check against numpy reference
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[X, label, lengths],
+            reference=pair_wise_op,
+        )
+        # Check over multiple devices
+        self.assertDeviceChecks(dc, op, [X, label, lengths], [0])
+        # Gradient check
+        self.assertGradientChecks(gc, op, [X, label, lengths], 0, [0])
