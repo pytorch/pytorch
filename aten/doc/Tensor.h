@@ -6,13 +6,30 @@
 #include "ATen/TensorAccessor.h"
 
 namespace at {
-class Type;
+struct Type;
 
+// Tensor is a "generic" object holding a pointer to the underlying TensorImpl object, which
+// has an embedded reference count. In this way, Tensor is similar to boost::intrusive_ptr.
+//
+// For example:
+//
+// void func(Tensor a) {
+//   Tensor b = a;
+//   ...
+// }
+//
+// In this example, when we say Tensor b = a, we are creating a new object that points to the
+// same underlying TensorImpl, and bumps its reference count. When b goes out of scope, the
+// destructor decrements the reference count by calling release() on the TensorImpl it points to.
+// The existing constructors, operator overloads, etc. take care to implement the correct semantics.
+//
+// Note that Tensor can also be NULL, i.e. it is not associated with any underlying TensorImpl, and
+// special care must be taken to handle this.
 struct Tensor {
 
   Tensor()
   : pImpl(nullptr){}
-  explicit Tensor(TensorImpl * self, bool retain = true)
+  explicit Tensor(TensorImpl * self, bool retain)
   : pImpl(self) {
     if(pImpl != nullptr && retain)
       pImpl->retain();
@@ -22,7 +39,7 @@ struct Tensor {
     if(pImpl != nullptr)
       pImpl->retain();
   }
-  Tensor(Tensor && rhs)
+  Tensor(Tensor && rhs) noexcept
   : pImpl(rhs.pImpl) {
     rhs.pImpl = nullptr;
   }
@@ -46,12 +63,11 @@ struct Tensor {
   }
   Tensor & operator=(Scalar v) &&;
   Tensor & assign_(Scalar v);
-  
   void reset() {
     Tensor().swap(*this);
   }
   void reset(TensorImpl * rhs) {
-    Tensor(rhs).swap(*this);
+    Tensor(rhs,true).swap(*this);
   }
   void reset(TensorImpl * rhs, bool retain) {
     Tensor(rhs, retain).swap(*this );
@@ -109,6 +125,10 @@ struct Tensor {
 
   template<typename T>
   T * data() const;
+
+  void * unsafeGetTH(bool retain) {
+    return pImpl->unsafeGetTH(retain);
+  }
 
   //toLongData(), toFloatData() etc.
   #define TO_TYPE_DATA(T,name,_) \
@@ -240,9 +260,9 @@ struct Tensor {
   std::tuple<Tensor,Tensor> mode(int64_t dim, bool keepdim) const;
   std::tuple<Tensor,Tensor> mode(int64_t dim) const;
   std::tuple<Tensor,Tensor> median(bool keepdim) const;
-  std::tuple<Tensor,Tensor> median() const;
   std::tuple<Tensor,Tensor> median(int64_t dim) const;
   std::tuple<Tensor,Tensor> median(int64_t dim, bool keepdim) const;
+  Scalar median() const;
   std::tuple<Tensor,Tensor> sort() const;
   std::tuple<Tensor,Tensor> sort(int64_t dim) const;
   std::tuple<Tensor,Tensor> sort(int64_t dim, bool descending) const;
@@ -300,11 +320,15 @@ struct Tensor {
   Tensor mean(int64_t dim, bool keepdim) const;
   Tensor mean(int64_t dim) const;
   Scalar mean() const;
+  Tensor var(int64_t dim, bool unbiased, bool keepdim) const;
   Tensor var(int64_t dim, bool keepdim) const;
   Tensor var(int64_t dim) const;
+  Scalar var(bool unbiased) const;
   Scalar var() const;
+  Tensor std(int64_t dim, bool unbiased, bool keepdim) const;
   Tensor std(int64_t dim, bool keepdim) const;
   Tensor std(int64_t dim) const;
+  Scalar std(bool unbiased) const;
   Scalar std() const;
   Tensor norm(Scalar p, int64_t dim, bool keepdim) const;
   Tensor norm(Scalar p, int64_t dim) const;
@@ -343,11 +367,15 @@ struct Tensor {
   Tensor & sign_();
   Scalar trace() const;
   Tensor add(Scalar value, const Tensor & other) const;
+  Tensor add(Scalar value, SparseTensor other) const;
   Tensor add(Scalar value) const;
   Tensor add(const Tensor & other) const;
+  Tensor add(SparseTensor other) const;
   Tensor & add_(Scalar value, const Tensor & other);
+  Tensor & add_(Scalar value, SparseTensor other);
   Tensor & add_(Scalar value);
   Tensor & add_(const Tensor & other);
+  Tensor & add_(SparseTensor other);
   Tensor sub(Scalar value, const Tensor & other) const;
   Tensor sub(Scalar value) const;
   Tensor sub(const Tensor & other) const;
@@ -375,13 +403,13 @@ struct Tensor {
   Tensor & clamp_(Scalar min, Scalar max);
   Tensor & clamp_(Scalar min);
   Scalar dot(const Tensor & tensor) const;
-  Tensor tril(int64_t k) const;
+  Tensor tril(int64_t diagonal) const;
   Tensor tril() const;
-  Tensor & tril_(int64_t k);
+  Tensor & tril_(int64_t diagonal);
   Tensor & tril_();
-  Tensor triu(int64_t k) const;
+  Tensor triu(int64_t diagonal) const;
   Tensor triu() const;
-  Tensor & triu_(int64_t k);
+  Tensor & triu_(int64_t diagonal);
   Tensor & triu_();
   Tensor cross(const Tensor & other, int64_t dim) const;
   Tensor cross(const Tensor & other) const;
@@ -459,7 +487,9 @@ struct Tensor {
   std::tuple<Tensor,const Tensor &> ormqr(const Tensor & input2, const Tensor & input3, bool left, bool transpose) const;
   std::tuple<Tensor,const Tensor &> ormqr(const Tensor & input2, const Tensor & input3, bool left) const;
   std::tuple<Tensor,const Tensor &> ormqr(const Tensor & input2, const Tensor & input3) const;
+  std::tuple<Tensor,Tensor> btrifact(const Tensor & info, bool pivot) const;
   std::tuple<Tensor,Tensor> btrifact(const Tensor & info) const;
+  std::tuple<Tensor,Tensor> btrifact(bool pivot) const;
   std::tuple<Tensor,Tensor> btrifact() const;
   Tensor btrisolve(const Tensor & LU_data, const Tensor & LU_pivots) const;
   Tensor multinomial(Generator & generator, int64_t num_samples, bool replacement) const;
@@ -491,9 +521,9 @@ struct Tensor {
   Tensor select(int dim, int64_t sliceIndex) const;
   Tensor & assign_(const Tensor & src);
 
-  friend class Type;
+  friend struct Type;
 
-//TODO(zach): sort out friend classes
+//TODO(zach): sort out friend structes
 public:
   TensorImpl * pImpl;
 };
