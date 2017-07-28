@@ -50,6 +50,25 @@
   only_register: True
 ]]
 [[
+  python_name: _check_advanced_indexing
+  name: THPTensor_(checkAdvancedIndexing)
+  cpu_half: False
+  only_register: True
+  override_method_flags: METH_O
+]]
+[[
+  python_name: _advanced_index_add
+  name: THPTensor_(advancedIndexAdd)
+  cpu_half: False
+  only_register: True
+]]
+[[
+  python_name: _advanced_index_select
+  name: THPTensor_(advancedIndexSelect)
+  cpu_half: False
+  only_register: True
+]]
+[[
   name: resize_
   return: self
   cname: resize
@@ -228,7 +247,8 @@
   arguments:
     - arg: THTensor* result
       output: True
-    - THTensor* self
+    - arg: THTensor* self
+      broadcast: mask fallback types:Byte
     - THBoolTensor* mask
 ]]
 [[
@@ -377,6 +397,7 @@
   name: clone
   cname: newClone
   return: THTensor*
+  aten_sparse: True
   arguments:
     - THTensor* self
 ]]
@@ -493,6 +514,7 @@
     - function
   backends:
     - CPU
+    - CUDA
   return: argument 0
   before_arg_assign: |
     PyErr_WarnEx(PyExc_UserWarning, "torch.range is deprecated in favor of torch.arange "
@@ -512,6 +534,7 @@
     - function
   backends:
     - CPU
+    - CUDA
   return: argument 0
   options:
       - arguments:
@@ -587,6 +610,8 @@
 [[
   name: data_ptr
   defined_if: "!IS_DISTRIBUTED"
+  with_gil: True
+  auto_gpu: False
   return: void*
   cpu_half: True
   cname: data
@@ -1429,14 +1454,17 @@
 ]]
 [[
   name: median
-  backends:
-    - CPU
   variants:
     - method
     - function
   return: argument 0,1
   options:
-    - before_call: long __last_dim = THTensor_(nDimension)(LIBRARY_STATE ((THPTensor*)$arg2)->cdata)-1;
+    - cname: medianall
+      return: real
+      arguments:
+        - THTensor* self
+    - cname: median
+      before_call: long __last_dim = THTensor_(nDimension)(LIBRARY_STATE ((THPTensor*)$arg2)->cdata)-1;
       arguments:
         - arg: THTensor* values
           output: True
@@ -1445,17 +1473,6 @@
         - THTensor* self
         - CONSTANT __last_dim
         - bool keepdim
-    - before_call: |
-        long __last_dim = THTensor_(nDimension)(LIBRARY_STATE ((THPTensor*)$arg2)->cdata)-1;
-        maybeThrowBackCompatKeepdimWarn("median");
-      arguments:
-        - arg: THTensor* values
-          output: True
-        - arg: THIndexTensor* indices
-          output: True
-        - THTensor* self
-        - CONSTANT __last_dim
-        - CONSTANT false
     - before_call: maybeThrowBackCompatKeepdimWarn("median");
       arguments:
         - arg: THTensor* values
@@ -2287,6 +2304,10 @@
       return: accreal
       arguments:
         - THTensor* self
+        - arg: bool unbiased
+          if_true: 0
+          if_false: 1
+          default: 0
     - cname: var
       return: argument 0
       arguments:
@@ -2295,7 +2316,10 @@
         - THTensor* self
         - arg: long dim
           wrap_dim: self
-        - CONSTANT false
+        - arg: bool unbiased
+          if_true: 0
+          if_false: 1
+          default: 0
         - bool keepdim
     - cname: var
       return: argument 0
@@ -2306,7 +2330,10 @@
         - THTensor* self
         - arg: long dim
           wrap_dim: self
-        - CONSTANT false
+        - arg: bool unbiased
+          if_true: 0
+          if_false: 1
+          default: 0
         - CONSTANT false
 ]]
 [[
@@ -2324,6 +2351,10 @@
       return: accreal
       arguments:
         - THTensor* self
+        - arg: bool unbiased
+          if_true: 0
+          if_false: 1
+          default: 0
     - cname: std
       return: argument 0
       arguments:
@@ -2332,7 +2363,10 @@
         - THTensor* self
         - arg: long dim
           wrap_dim: self
-        - CONSTANT false
+        - arg: bool unbiased
+          if_true: 0
+          if_false: 1
+          default: 0
         - bool keepdim
     - cname: std
       return: argument 0
@@ -2343,7 +2377,10 @@
         - THTensor* self
         - arg: long dim
           wrap_dim: self
-        - CONSTANT false
+        - arg: bool unbiased
+          if_true: 0
+          if_false: 1
+          default: 0
         - CONSTANT false
 ]]
 [[
@@ -2843,6 +2880,7 @@
         - THTensor* self
         - real value
     - cname: cadd
+      aten_sparse: True
       arguments:
         - arg: THTensor* result
           output: True
@@ -2853,6 +2891,7 @@
         - THTensor* other
     - sparse: True
       cname: spcadd
+      aten_dense_sparse: True
       arguments:
         - arg: THTensor* result
           output: True
@@ -2871,6 +2910,7 @@
         - THTensor* self
         - real value
     - cname: cadd
+      aten_sparse: True
       arguments:
         - THTensor* self
         - arg: THTensor* self
@@ -2880,6 +2920,7 @@
         - THTensor* other
     - sparse: True
       cname: spcadd
+      aten_dense_sparse: True
       arguments:
         - THTensor* self
         - THTensor* self
@@ -3153,7 +3194,7 @@
     - arg: THTensor* destination
       output: True
     - THTensor* self
-    - arg: long k
+    - arg: long diagonal
       default: 0
 ]]
 [[
@@ -3163,7 +3204,7 @@
   arguments:
     - THTensor* self
     - THTensor* self
-    - arg: long k
+    - arg: long diagonal
       default: 0
 ]]
 [[
@@ -3176,7 +3217,7 @@
     - arg: THTensor* destination
       output: True
     - THTensor* self
-    - arg: long k
+    - arg: long diagonal
       default: 0
 ]]
 [[
@@ -3186,7 +3227,7 @@
   arguments:
     - THTensor* self
     - THTensor* self
-    - arg: long k
+    - arg: long diagonal
       default: 0
 ]]
 [[
@@ -3954,6 +3995,9 @@
     - arg: THIntegerTensor* info
       kwarg_only: True
       default: NULL
+    - arg: bool pivot
+      kwarg_only: True
+      default: "true"
     - THTensor* self
 ]]
 [[
