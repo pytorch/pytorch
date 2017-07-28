@@ -14,7 +14,9 @@ class TestJit(TestCase):
         torch._C._tracer_enter((x, y))
         z = torch.sigmoid(torch.tanh(x * (x + y)))
         trace = torch._C._tracer_exit((z,))
+        torch._C._jit_optim_lint(trace)
         torch._C._jit_optim_fuse(trace)
+        torch._C._jit_optim_lint(trace)
 
         self.assertExpected(str(trace))
         return
@@ -33,7 +35,9 @@ class TestJit(TestCase):
         cx = Variable(torch.randn(3, 20))
         lstm = torch.jit.trace_model(nn.LSTMCell(10, 20))
         trace, _ = lstm(input, (hx, cx))
+        torch._C._jit_optim_lint(trace)
         torch._C._jit_optim_fuse(trace)
+        torch._C._jit_optim_lint(trace)
         self.assertExpected(str(trace))
 
     def test_autograd_closure(self):
@@ -46,6 +50,7 @@ class TestJit(TestCase):
         w = torch.abs(x * x * x + y)
 
         trace = torch._C._tracer_exit((z, w))
+        torch._C._jit_optim_lint(trace)
         closure = torch._C._jit_createAutogradClosure(trace)
         z2, w2 = Variable._execution_engine.run_forward(closure, (x, y))
         self.assertEqual(z, z2)

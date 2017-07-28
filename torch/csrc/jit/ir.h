@@ -823,6 +823,8 @@ private:
   std::shared_ptr<Graph> subgraph_;
 };
 
+std::unique_ptr<Graph> LintGraph(std::unique_ptr<Graph> graph);
+
 }}
 
 namespace std {
