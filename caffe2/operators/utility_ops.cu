@@ -565,16 +565,16 @@ bool ScatterWeightedSumOp<float, CUDAContext>::RunOnDevice() {
 template <>
 template <typename Index>
 bool ScatterWeightedSumOp<float,CUDAContext>::DoRunWithType() {
-  DCHECK_EQ(InputSize() % 2, 1);
+  CAFFE_ENFORCE_EQ(InputSize() % 2, 1);
   auto& X0 = Input(0);
   auto& weight0 = Input(1);
   auto& indices = Input(2);
   auto* output = Output(0);
 
   CAFFE_ENFORCE_EQ(&X0, output, "In place operation is required");
-  DCHECK_GT(X0.size(), 0);
-  DCHECK_GT(X0.ndim(), 0) << "X0 has to be at least the vector";
-  DCHECK_EQ(weight0.size(), 1);
+  CAFFE_ENFORCE_GT(X0.size(), 0);
+  CAFFE_ENFORCE_GT(X0.ndim(), 0, "X0 has to be at least the vector");
+  CAFFE_ENFORCE_EQ(weight0.size(), 1);
 
   TIndex M = X0.size();
   TIndex N = X0.dim(0);

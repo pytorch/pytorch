@@ -37,7 +37,7 @@ bool DropoutGradientOp<float, CPUContext>::RunOnDevice() {
   auto& dY = Input(0);
   auto& mask = Input(1);
   auto* dX = Output(0);
-  DCHECK_EQ(dY.size(), mask.size());
+  CAFFE_ENFORCE_EQ(dY.size(), mask.size());
   dX->Resize(dY.dims());
   if (is_test_) {
     if (dX != &dY) {

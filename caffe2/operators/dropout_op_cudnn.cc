@@ -41,8 +41,8 @@ class CuDNNDropoutOp final : public Operator<CUDAContext> {
         cudnn_wrapper_(&context_),
         ratio_(OperatorBase::GetSingleArgument<float>("ratio", 0.5)),
         is_test_(OperatorBase::GetSingleArgument<int>("is_test", 0)) {
-    DCHECK_GE(ratio_, 0);
-    DCHECK_LT(ratio_, 1);
+    CAFFE_ENFORCE_GE(ratio_, 0);
+    CAFFE_ENFORCE_LT(ratio_, 1);
     CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&data_desc_));
 
     CUDNN_ENFORCE(cudnnCreateDropoutDescriptor(&dropout_desc_));
@@ -83,8 +83,8 @@ class CuDNNDropoutGradientOp final : public Operator<CUDAContext> {
         cudnn_wrapper_(&context_),
         ratio_(OperatorBase::GetSingleArgument<float>("ratio", 0.5)),
         is_test_(OperatorBase::GetSingleArgument<int>("is_test", 0)) {
-    DCHECK_GE(ratio_, 0);
-    DCHECK_LT(ratio_, 1);
+    CAFFE_ENFORCE_GE(ratio_, 0);
+    CAFFE_ENFORCE_LT(ratio_, 1);
     CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&data_desc_));
 
     CUDNN_ENFORCE(cudnnCreateDropoutDescriptor(&dropout_desc_));

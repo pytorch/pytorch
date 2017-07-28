@@ -22,8 +22,8 @@ bool SpatialBNGradientOp<CPUContext>::RunOnDevice() {
 
   const int sample_size = H * W * D;
 
-  DCHECK_EQ(scale.ndim(), 1);
-  DCHECK_EQ(scale.dim32(0), C);
+  CAFFE_ENFORCE_EQ(scale.ndim(), 1);
+  CAFFE_ENFORCE_EQ(scale.dim32(0), C);
 
   ConstEigenVectorArrayMap<float> scale_arr(scale.data<float>(), C);
   ConstEigenVectorArrayMap<float> mean_arr(Input(SAVED_MEAN).data<float>(), C);

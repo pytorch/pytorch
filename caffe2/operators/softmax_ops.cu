@@ -296,15 +296,15 @@ bool SoftmaxWithLossOp<float, CUDAContext>::RunOnDevice() {
   total_weight_ptr_.Resize(1);
 
   if (label_prob_mode_) {
-    DCHECK_GE(T.ndim(), 2);
-    DCHECK_EQ(T.size_to_dim(canonical_axis), N);
-    DCHECK_EQ(T.size_from_dim(canonical_axis), D);
+    CAFFE_ENFORCE_GE(T.ndim(), 2);
+    CAFFE_ENFORCE_EQ(T.size_to_dim(canonical_axis), N);
+    CAFFE_ENFORCE_EQ(T.size_from_dim(canonical_axis), D);
   } else {
     if (T.ndim() == canonical_axis) {
-      DCHECK_EQ(T.size(), N);
+      CAFFE_ENFORCE_EQ(T.size(), N);
     } else {
-      DCHECK_EQ(T.size_to_dim(canonical_axis), N);
-      DCHECK_EQ(T.size_from_dim(canonical_axis), 1);
+      CAFFE_ENFORCE_EQ(T.size_to_dim(canonical_axis), N);
+      CAFFE_ENFORCE_EQ(T.size_from_dim(canonical_axis), 1);
     }
   }
 
@@ -399,9 +399,9 @@ bool SpatialSoftmaxWithLossOp<float, CUDAContext>::RunOnDevice() {
   D = X.dim32(1);
   P->ResizeLike(X);
   total_weight_ptr_.Resize(1);
-  DCHECK_EQ(X.ndim(), 4);
-  DCHECK_EQ(T.ndim(), 3);
-  DCHECK_EQ(T.dim32(0), N);
+  CAFFE_ENFORCE_EQ(X.ndim(), 4);
+  CAFFE_ENFORCE_EQ(T.ndim(), 3);
+  CAFFE_ENFORCE_EQ(T.dim32(0), N);
 
   int H = X.dim32(2);
   int W = X.dim32(3);
@@ -499,15 +499,15 @@ bool SoftmaxWithLossGradientOp<float, CUDAContext>::RunOnDevice() {
   total_weight_ptr_.Resize(1);
 
   if (label_prob_mode_) {
-    DCHECK_GE(T.ndim(), 2);
-    DCHECK_EQ(T.size_to_dim(canonical_axis), N);
-    DCHECK_EQ(T.size_from_dim(canonical_axis), D);
+    CAFFE_ENFORCE_GE(T.ndim(), 2);
+    CAFFE_ENFORCE_EQ(T.size_to_dim(canonical_axis), N);
+    CAFFE_ENFORCE_EQ(T.size_from_dim(canonical_axis), D);
   } else {
     if (T.ndim() == canonical_axis) {
-      DCHECK_EQ(T.size(), N);
+      CAFFE_ENFORCE_EQ(T.size(), N);
     } else {
-      DCHECK_EQ(T.size_to_dim(canonical_axis), N);
-      DCHECK_EQ(T.size_from_dim(canonical_axis), 1);
+      CAFFE_ENFORCE_EQ(T.size_to_dim(canonical_axis), N);
+      CAFFE_ENFORCE_EQ(T.size_from_dim(canonical_axis), 1);
     }
   }
 
@@ -609,8 +609,8 @@ bool SpatialSoftmaxWithLossGradientOp<float, CUDAContext>::RunOnDevice() {
 
   total_weight_ptr_.Resize(1);
   // Spatial mode, compute softmax for each x, y location
-  DCHECK_EQ(X.ndim(), 4);
-  DCHECK_EQ(T.ndim(), 3);
+  CAFFE_ENFORCE_EQ(X.ndim(), 4);
+  CAFFE_ENFORCE_EQ(T.ndim(), 3);
 
   int H = X.dim32(2);
   int W = X.dim32(3);
