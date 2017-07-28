@@ -31,7 +31,11 @@ def process_types_and_backends(option):
     # if backend or type is not defined, it is assumed to be all of them
     if 'backend_type_pairs' not in option:
         backends = option.get('backends', default_backends)
+        if option.get('aten_sparse', False):
+            backends = all_backends
+
         types = option.get('types', all_types)
+
         pairs = [[p, t] for p in backends for t in types]
     else:
         pairs = option['backend_type_pairs']
@@ -46,7 +50,12 @@ def process_types_and_backends(option):
         return [(p, t)]
     pairs = set(p for pair in pairs for p in expand(pair))
 
-    # special case remove Half for cpu unless it is explicitly enabled
+    # disable CUDA Half if there is a Sparse argument
+    for arg in option.get('arguments', []):
+        if arg['type'] == 'THSTensor*':
+            pairs.discard(('CUDA', 'Half'))
+
+    # special case remove Half for cpu unless it is explicitly enabled,
     if not option.get('cpu_half', False):
         pairs.discard(('CPU', 'Half'))
 
@@ -150,6 +159,39 @@ def discover_zero_dim_tensor_operations(declaration):
                     # print("SHARED "+names[i])
 
 
+def discover_sparse_tensor_operations(declaration):
+    def exclude(arg):
+        return arg.get('ignore_check')
+
+    def signature(option, i=None, value=None):
+        elements = [TYPE_FORMAL_GENERIC.get(arg['type'], arg['type'])
+                    if i is None or j != i else value
+                    for j, arg in enumerate(option['arguments'])
+                    if not exclude(arg)]
+        return '#'.join(elements)
+
+    name = declaration['name']
+    if name == 'add' or name == 'add_':
+        signature_to_option = {signature(option): option
+                               for option in declaration['options']}
+
+        for option in declaration['options']:
+            for i, arg in enumerate(option['arguments']):
+                if (arg['type'] == 'THSTensor*' and
+                        option.get('aten_dense_sparse', False)):
+                    signature_of_tensor_version = signature(
+                        option, i, 'Tensor &')
+                    if signature_of_tensor_version in signature_to_option:
+                        tensor_version = \
+                            signature_to_option[signature_of_tensor_version]
+                        raw_args = len(tensor_version['arguments'])
+                        names = [arg['name'] for arg in tensor_version['arguments']
+                                 if not exclude(arg)]
+                        filtered_args = len(names)
+                        tensor_version['when_sparse_dispatch'] = names[i -
+                                                                       (raw_args - filtered_args)]
+
+
 def run(declarations):
     declarations = [d for d in declarations if not exclude(d)]
     for declaration in declarations:
@@ -161,6 +203,7 @@ def run(declarations):
             remove_self=True)
         common_with_cwrap.sort_by_number_of_options(declaration)
         discover_zero_dim_tensor_operations(declaration)
+        discover_sparse_tensor_operations(declaration)
 
         for option in declaration['options']:
             set_mode(option)
