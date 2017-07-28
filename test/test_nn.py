@@ -3596,7 +3596,7 @@ new_module_tests = [
     ),
     dict(
         module_name='ConvTranspose3d',
-        constructor_args=(2, 3, (2, 3, 2), 1, 0, 0, 1, True, (2, 2, 2)),
+        constructor_args=(2, 3, (2, 3, 2), (3, 2, 3), 0, 0, 1, True, (2, 3, 2)),
         cudnn=True,
         input_size=(1, 2, 4, 5, 4),
         desc='dilated',
