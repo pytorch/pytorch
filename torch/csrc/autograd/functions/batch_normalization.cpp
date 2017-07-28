@@ -5,7 +5,6 @@
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/functions/utils.h"
 #include "torch/csrc/autograd/functions/basic_ops.h"
-#include "torch/csrc/nn/THNN_generic.h"
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/utils/auto_gpu.h"
 #include "torch/csrc/Exceptions.h"

@@ -3,7 +3,6 @@
 #include <Python.h>
 #include <memory>
 #include <stdio.h>
-#include <THPP/THPP.h>
 #include <typeindex>
 #include <unordered_map>
 

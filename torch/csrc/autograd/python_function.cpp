@@ -5,7 +5,6 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <exception>
-#include <THPP/THPP.h>
 
 #include "THP.h"
 #include "torch/csrc/autograd/functions/accumulate_grad.h"
@@ -24,7 +23,6 @@
 
 using namespace torch;
 using namespace torch::autograd;
-using thpp::Tensor;
 
 PyObject *THPFunctionClass = NULL;
 PyObject *THPStochasticFunctionClass = NULL;
@@ -105,7 +103,7 @@ auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
         msg += "')'";
         throw std::runtime_error(msg);
       }
-      tensor_results[i] = createTensorAT(obj);
+      tensor_results[i] = createTensor(obj);
     }
   }
 
