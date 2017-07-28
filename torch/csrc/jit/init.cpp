@@ -39,6 +39,8 @@ PyObject * wrap_optimizer(PyObject *_unused, PyObject *py_graph) {
   THPUtils_assert(THPGraph_Check(py_graph), "expected a Graph instance");
   THPGraph *graph = (THPGraph*)py_graph;
   graph->cdata = optimizer(std::unique_ptr<Graph>{graph->cdata}).release();
+  // TODO: Make this lint optional
+  graph->cdata->lint();
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }

@@ -124,6 +124,8 @@ static void fusionTests() {
     graph.registerOutput(o0);
     graph.registerOutput(o1);
 
+    graph.lint();
+
     std::vector<at::Tensor> inputs;
     std::vector<at::Tensor> outputs;
     for(size_t i = 0; i < graph.inputs().size(); i++) {
