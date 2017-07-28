@@ -6,7 +6,7 @@
 const int64_t DOUBLE_INT_MAX = 9007199254740992;
 
 // Trailing underscore to avoid conflict with macro of same name
-inline bool THPUtils_checkLong_(PyObject* obj) {
+inline bool THPUtils_checkLong(PyObject* obj) {
 #if PY_MAJOR_VERSION == 2
   return (PyLong_Check(obj) || PyInt_Check(obj)) && !PyBool_Check(obj);
 #else
@@ -14,7 +14,7 @@ inline bool THPUtils_checkLong_(PyObject* obj) {
 #endif
 }
 
-inline long THPUtils_unpackLong_(PyObject* obj) {
+inline long THPUtils_unpackLong(PyObject* obj) {
   if (PyLong_Check(obj)) {
     int overflow;
     long long value = PyLong_AsLongLongAndOverflow(obj, &overflow);

@@ -38,7 +38,7 @@ struct TupleParser {
     x.resize(size);
     for (int i = 0; i < size; ++i) {
       PyObject* item = PyTuple_GET_ITEM(obj, i);
-      if (!THPUtils_checkLong_(item)) {
+      if (!THPUtils_checkLong(item)) {
         throw invalid_type("tuple of long (void*)", param_name);
       }
       auto p = static_cast<std::shared_ptr<tvm::Node>*>(PyLong_AsVoidPtr(item));

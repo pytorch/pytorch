@@ -215,11 +215,8 @@ DLTensorUPtr toDLTensor(at::Tensor& t) {
   return res;
 }
 
-// TODO: Replace this with the direct thing when ATen replaces thpp
 at::Tensor variableToATen(const std::shared_ptr<Variable>& var) {
-  THPObjectPtr pyvar(THPVariable_Wrap(var));
-  PyObject* data = ((THPVariable*)pyvar.get())->data;
-  return createTensorAT(data);
+  return var->data;
 }
 
 variable_list IslFunction::apply(const variable_list& input_vars) {
@@ -231,7 +228,7 @@ variable_list IslFunction::apply(const variable_list& input_vars) {
 
   // Use the same backend as the first tensor
   auto& input = input_vars.at(0);
-  AutoGPU guard(input->data->getDevice());
+  AutoGPU guard(input->data);
 
   if (!pImpl_) {
     std::vector<const DLMetadata*> inMetas; // ownership managed by inMetaUPtrs_
@@ -300,17 +297,8 @@ variable_list IslFunction::apply(const variable_list& input_vars) {
     0, THCState_getCurrentStream(state),
     P, O, I);
 
-  // TODO: Remove this idiotic conversion once ATen replace thpp
-  // in PyTorch proper.  Once you do, remove AutoGIL, since this
-  // is the only place we're interacting with Python.
-  tensor_list compat_outputs;
-  for (auto& output : output_ats) {
-    THPObjectPtr p(createPyObject(output));
-    compat_outputs.emplace_back(createTensor(p.get()));
-  }
-
   // OK, return outputs
-  return wrap_outputs(input_vars, std::move(compat_outputs), [&](FunctionFlags f) -> std::shared_ptr<Function> {
+  return wrap_outputs(input_vars, std::move(output_ats), [&](FunctionFlags f) -> std::shared_ptr<Function> {
     // TODO: Let us specify the backward class, which probably will be yet
     // another IslFunction
     return std::make_shared<Error>("IslFunction backwards not implemented yet", std::move(f));

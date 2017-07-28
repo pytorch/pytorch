@@ -28,10 +28,10 @@ auto TupleParser::parse(bool& x, const std::string& param_name) -> void {
 
 auto TupleParser::parse(int& x, const std::string& param_name) -> void {
   PyObject* obj = next_arg();
-  if (!THPUtils_checkLong_(obj)) {
+  if (!THPUtils_checkLong(obj)) {
     throw invalid_type("int", param_name);
   }
-  x = THPUtils_unpackLong_(obj);
+  x = THPUtils_unpackLong(obj);
 }
 
 auto TupleParser::parse(double& x, const std::string& param_name) -> void {
@@ -56,10 +56,10 @@ auto TupleParser::parse(std::vector<int>& x, const std::string& param_name) -> v
   x.resize(size);
   for (int i = 0; i < size; ++i) {
     PyObject* item = PyTuple_GET_ITEM(obj, i);
-    if (!THPUtils_checkLong_(item)) {
+    if (!THPUtils_checkLong(item)) {
       throw invalid_type("tuple of int", param_name);
     }
-    x[i] = THPUtils_unpackLong_(item);
+    x[i] = THPUtils_unpackLong(item);
   }
 }
 
