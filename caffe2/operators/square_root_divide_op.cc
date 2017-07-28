@@ -2,9 +2,7 @@
 
 namespace caffe2 {
 
-REGISTER_CPU_OPERATOR(
-    SquareRootDivide,
-    SquareRootDivideOp<int32_t, CPUContext>);
+REGISTER_CPU_OPERATOR(SquareRootDivide, SquareRootDivideOp<CPUContext>);
 OPERATOR_SCHEMA(SquareRootDivide)
     .NumInputs(2)
     .NumOutputs(1)
@@ -18,15 +16,15 @@ output slice is identical to the input one (no scaling)
 Example:
 
   Data = [
-    [1.0, 2.0],
-    [3.0, 4.0]
+    [2.0, 4.0],
+    [9.0, 12.0]
   ]
 
   SCALE = [4, 9]
 
   OUTPUT = [
-    [2.0, 4.0],
-    [9.0, 12.0]
+    [1.0, 2.0],
+    [3.0, 4.0]
   ]
 
 )DOC");
