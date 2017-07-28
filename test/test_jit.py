@@ -52,13 +52,12 @@ class TestJit(TestCase):
         self.assertEqual(w, w2)
 
     def test_constant(self):
-
         x = Variable(torch.randn(2, 2), requires_grad=True)
 
         torch._C._tracer_enter((x,))
 
         y = Variable(torch.diag(torch.Tensor([2, 2])))
-        z = x @ y
+        z = x.matmul(y)
 
         trace = torch._C._tracer_exit((z,))
         closure = torch._C._jit_createAutogradClosure(trace)
