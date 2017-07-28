@@ -571,7 +571,22 @@ static std::unique_ptr<Tensor> compute_output(
   if (dilated) {
     if (params.transposed) {
       /* dilated && transposed */
-      /* NOT IMPLEMENTED */
+      if (dim == 4) {
+        SpatialFullDilatedConvolution_updateOutput(
+            input, output.get(), weight, bias, columns, ones,
+            kernel_size[1], kernel_size[0],
+            params.stride[1], params.stride[0],
+            params.padding[1], params.padding[0],
+            params.dilation[1], params.dilation[0],
+            params.output_padding[1], params.output_padding[0]); goto done;
+      } else if (dim == 5) {
+        VolumetricFullDilatedConvolution_updateOutput(
+            input, output.get(), weight, bias, columns, ones,
+            params.stride[0], params.stride[2], params.stride[1],
+            params.padding[0], params.padding[2], params.padding[1],
+            params.dilation[0], params.dilation[2], params.dilation[1],
+            params.output_padding[0], params.output_padding[2], params.output_padding[1]); goto done;
+      }
     } else /* !transposed */ {
       /* dilated && !transposed */
       if (dim == 4) {
@@ -647,7 +662,22 @@ static std::unique_ptr<Tensor> compute_grad_input(
   if (dilated) {
     if (params.transposed) {
       /* dilated && transposed */
-      /* NOT IMPLEMENTED */
+      if (dim == 4) {
+        SpatialFullDilatedConvolution_updateGradInput(
+            input, grad_output, grad_input.get(), weight, columns,
+            kernel_size[1], kernel_size[0],
+            params.stride[1], params.stride[0],
+            params.padding[1], params.padding[0],
+            params.dilation[1], params.dilation[0],
+            params.output_padding[1], params.output_padding[0]); goto done;
+      } else if (dim == 5) {
+        VolumetricFullDilatedConvolution_updateGradInput(
+            input, grad_output, grad_input.get(), weight, columns, ones,
+            params.stride[0], params.stride[2], params.stride[1],
+            params.padding[0], params.padding[2], params.padding[1],
+            params.dilation[0], params.dilation[2], params.dilation[1],
+            params.output_padding[0], params.output_padding[2], params.output_padding[1]); goto done;
+      }
     } else /* !transposed */ {
       /* dilated && !transposed */
       if (dim == 4) {
@@ -731,7 +761,22 @@ static tensor_pair compute_grad_params(
   if (dilated) {
     if (params.transposed) {
       /* dilated && transposed */
-      /* NOT IMPLEMENTED */
+      if (dim == 4) {
+        SpatialFullDilatedConvolution_accGradParameters(
+            input, grad_output, grad_weight.get(), grad_bias.get(), columns, ones,
+            kernel_size[1], kernel_size[0],
+            params.stride[1], params.stride[0],
+            params.padding[1], params.padding[0],
+            params.dilation[1], params.dilation[0],
+            params.output_padding[1], params.output_padding[0], 1.0); goto done;
+      } else if (dim == 5) {
+        VolumetricFullDilatedConvolution_accGradParameters(
+            input, grad_output, grad_weight.get(), grad_bias.get(), columns, ones,
+            params.stride[0], params.stride[2], params.stride[1],
+            params.padding[0], params.padding[2], params.padding[1],
+            params.dilation[0], params.dilation[2], params.dilation[1],
+            params.output_padding[0], params.output_padding[2], params.output_padding[1], 1.0); goto done;
+      }
     } else /* !transposed */ {
       /* dilated && !transposed */
       if (dim == 4) {
