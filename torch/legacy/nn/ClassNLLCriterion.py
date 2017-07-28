@@ -17,6 +17,7 @@ class ClassNLLCriterion(Criterion):
         self.total_weight_tensor = torch.ones(1)
 
     def updateOutput(self, input, target):
+        self.ignore_index = getattr(self, "ignore_index", -100)
         target = target.long()
         self._backend.ClassNLLCriterion_updateOutput(
             self._backend.library_state,
