@@ -1,6 +1,7 @@
 #include "caffe2/operators/segment_reduction_op.h"
 
 namespace caffe2 {
+
 namespace {
 
 template <typename Def>
