@@ -158,7 +158,7 @@ struct ConstantFactory : public Function {
 
   virtual variable_list apply(const variable_list& inputs) {
     if (inputs.size() != 1 || inputs[0])
-      throw std::logic_error("Constant nodes should only receive a single NULL input");
+      throw std::logic_error("ConstantFactory nodes should only receive a single NULL input");
     return variable_list(next_functions.size());
   }
 };
