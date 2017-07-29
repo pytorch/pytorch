@@ -54,6 +54,9 @@ def parallelCCompile(self, sources, output_dir=None, macros=None,
         src, ext = build[obj]
         self._compile(obj, src, ext, cc_args, extra_postargs, pp_opts)
     num_jobs = multiprocessing.cpu_count()
+    max_jobs = os.getenv("MAX_JOBS")
+    if max_jobs is not None:
+        num_jobs = min(num_jobs, int(max_jobs))
     multiprocessing.pool.ThreadPool(num_jobs).map(_single_compile, objects)
 
     return objects
@@ -231,8 +234,14 @@ extra_compile_args = ['-std=c++11', '-Wno-write-strings',
                       '-fno-strict-aliasing']
 if os.getenv('PYTORCH_BINARY_BUILD') and platform.system() == 'Linux':
     print('PYTORCH_BINARY_BUILD found. Static linking libstdc++ on Linux')
-    extra_compile_args += ['-static-libstdc++']
-    extra_link_args += ['-static-libstdc++']
+    # get path of libstdc++ and link manually.
+    # for reasons unknown, -static-libstdc++ doesn't fully link some symbols
+    CXXNAME = os.getenv('CXX', 'g++')
+    path = subprocess.check_output([CXXNAME, '-print-file-name=libstdc++.a'])
+    path = path[:-1]
+    if type(path) != str:  # python 3
+        path = path.decode(sys.stdout.encoding)
+    extra_link_args += [path]
 
 cwd = os.path.dirname(os.path.abspath(__file__))
 lib_path = os.path.join(cwd, "torch", "lib")
@@ -311,7 +320,6 @@ main_sources = [
     "torch/csrc/autograd/functions/accumulate_grad.cpp",
     "torch/csrc/autograd/functions/utils.cpp",
     "torch/csrc/autograd/functions/init.cpp",
-    "torch/csrc/nn/THNN_generic.cpp",
 ]
 main_sources += split_types("torch/csrc/Tensor.cpp")
 
@@ -449,7 +457,7 @@ if WITH_CUDA:
                        )
     extensions.append(THCUNN)
 
-version = '0.1.12'
+version = '0.2.0'
 if os.getenv('PYTORCH_BUILD_VERSION'):
     assert os.getenv('PYTORCH_BUILD_NUMBER') is not None
     version = os.getenv('PYTORCH_BUILD_VERSION') \
@@ -482,5 +490,5 @@ setup(name="torch", version=version,
           'lib/*.h',
           'lib/include/TH/*.h', 'lib/include/TH/generic/*.h',
           'lib/include/THC/*.h', 'lib/include/THC/generic/*.h']},
-      install_requires=['pyyaml'],
+      install_requires=['pyyaml', 'numpy'],
       )

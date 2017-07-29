@@ -9,7 +9,6 @@
 #include <vector>
 #include <utility>
 #include <memory>
-#include <THPP/THPP.h>
 
 #include "torch/csrc/autograd/variable.h"
 

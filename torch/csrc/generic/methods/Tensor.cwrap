@@ -544,6 +544,7 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
   name: clone
   cname: newClone
   return: THTensor*
+  aten_sparse: True
   arguments:
     - THTensor* self
 ]]
@@ -670,6 +671,7 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
     - function
   backends:
     - CPU
+    - CUDA
   return: argument 0
   before_arg_assign: |
     PyErr_WarnEx(PyExc_UserWarning, "torch.range is deprecated in favor of torch.arange "
@@ -690,6 +692,7 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
     - function
   backends:
     - CPU
+    - CUDA
   return: argument 0
   options:
       - arguments:
@@ -844,6 +847,8 @@ invalid_arguments:
 [[
   name: data_ptr
   defined_if: "!IS_DISTRIBUTED"
+  with_gil: True
+  auto_gpu: False
   return: void*
   cpu_half: True
   cname: data

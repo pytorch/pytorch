@@ -26,5 +26,6 @@ THC_API void THCTensor_(logspace)(THCState *state, THCTensor *r_, real a, real b
 #endif
 
 THC_API void THCTensor_(range)(THCState *state, THCTensor *r_, accreal xmin, accreal xmax, accreal step);
+THC_API void THCTensor_(arange)(THCState *state, THCTensor *r_, accreal xmin, accreal xmax, accreal step);
 
 #endif

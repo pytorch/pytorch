@@ -5,6 +5,7 @@ import warnings
 import math
 
 import torch
+from torch._C import _infer_size
 from . import _functions
 from .modules import utils
 from ._functions.linear import Bilinear
@@ -234,9 +235,8 @@ def avg_pool1d(input, kernel_size, stride=None, padding=0,
     kernel_size = _single(kernel_size) + (1,)
     stride = _single(stride) + (1,) if stride is not None else kernel_size
     padding = _single(padding) + (0,)
-    f = _functions.thnn.AvgPool2d(kernel_size, stride, padding,
-                                  ceil_mode, count_include_pad)
-    return f(input.unsqueeze(3)).squeeze(3)
+    return _functions.thnn.AvgPool2d.apply(input.unsqueeze(3), kernel_size, stride, padding,
+                                           ceil_mode, count_include_pad).squeeze(3)
 
 
 def avg_pool2d(input, kernel_size, stride=None, padding=0,
@@ -260,8 +260,8 @@ def avg_pool2d(input, kernel_size, stride=None, padding=0,
         count_include_pad: when True, will include the zero-padding in th
             averaging calculation
     """
-    return _functions.thnn.AvgPool2d(kernel_size, stride, padding,
-                                     ceil_mode, count_include_pad)(input)
+    return _functions.thnn.AvgPool2d.apply(input, kernel_size, stride, padding,
+                                           ceil_mode, count_include_pad)
 
 
 def avg_pool3d(input, kernel_size, stride=None):
@@ -269,26 +269,29 @@ def avg_pool3d(input, kernel_size, stride=None):
     size dt x dh x dw steps. The number of output features is equal to the
     number of input planes / dt.
     """
-    return _functions.thnn.AvgPool3d(kernel_size, stride)(input)
+    return _functions.thnn.AvgPool3d.apply(input, kernel_size, stride)
 
 
 # share the same interface
 def max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1,
                ceil_mode=False, return_indices=False):
-    return _functions.thnn.MaxPool1d(kernel_size, stride, padding, dilation,
-                                     return_indices, ceil_mode)(input)
+    ret = _functions.thnn.MaxPool1d.apply(input, kernel_size, stride, padding, dilation,
+                                          ceil_mode)
+    return ret if return_indices else ret[0]
 
 
 def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
                ceil_mode=False, return_indices=False):
-    return _functions.thnn.MaxPool2d(kernel_size, stride, padding, dilation,
-                                     return_indices, ceil_mode)(input)
+    ret = _functions.thnn.MaxPool2d.apply(input, kernel_size, stride, padding, dilation,
+                                          ceil_mode)
+    return ret if return_indices else ret[0]
 
 
 def max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1,
                ceil_mode=False, return_indices=False):
-    return _functions.thnn.MaxPool3d(kernel_size, stride, padding, dilation,
-                                     return_indices, ceil_mode)(input)
+    ret = _functions.thnn.MaxPool3d.apply(input, kernel_size, stride, padding, dilation,
+                                          ceil_mode)
+    return ret if return_indices else ret[0]
 
 
 def _unpool_output_size(input, kernel_size, stride, padding, output_size):
@@ -326,8 +329,7 @@ def max_unpool1d(input, indices, kernel_size, stride=None, padding=0,
     padding = _single(padding)
     output_size = _unpool_output_size(input, kernel_size, stride, padding,
                                       output_size)
-    f = _functions.thnn.MaxUnpool2d(output_size + [1])
-    return f(input.unsqueeze(3), indices.unsqueeze(3)).squeeze(3)
+    return _functions.thnn.MaxUnpool2d.apply(input.unsqueeze(3), indices.unsqueeze(3), output_size + [1]).squeeze(3)
 
 
 def max_unpool2d(input, indices, kernel_size, stride=None, padding=0,
@@ -337,8 +339,7 @@ def max_unpool2d(input, indices, kernel_size, stride=None, padding=0,
     padding = _pair(padding)
     output_size = _unpool_output_size(input, kernel_size, stride, padding,
                                       output_size)
-    f = _functions.thnn.MaxUnpool2d(output_size)
-    return f(input, indices)
+    return _functions.thnn.MaxUnpool2d.apply(input, indices, output_size)
 
 
 def max_unpool3d(input, indices, kernel_size, stride=None, padding=0,
@@ -348,8 +349,7 @@ def max_unpool3d(input, indices, kernel_size, stride=None, padding=0,
     padding = _triple(padding)
     output_size = _unpool_output_size(input, kernel_size, stride, padding,
                                       output_size)
-    f = _functions.thnn.MaxUnpool3d(output_size, stride, padding)
-    return f(input, indices)
+    return _functions.thnn.MaxUnpool3d.apply(input, indices, output_size, stride, padding)
 
 
 def lp_pool2d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
@@ -368,7 +368,7 @@ def adaptive_max_pool1d(input, output_size, return_indices=False):
         output_size: the target output size (single integer)
         return_indices: whether to return pooling indices
     """
-    return _functions.thnn.AdaptiveMaxPool1d(output_size, return_indices)(input)
+    return _functions.thnn.AdaptiveMaxPool1d.apply(input, output_size, return_indices)
 
 
 def adaptive_max_pool2d(input, output_size, return_indices=False):
@@ -382,7 +382,7 @@ def adaptive_max_pool2d(input, output_size, return_indices=False):
             double-integer tuple)
         return_indices: whether to return pooling indices
     """
-    return _functions.thnn.AdaptiveMaxPool2d(output_size, return_indices)(input)
+    return _functions.thnn.AdaptiveMaxPool2d.apply(input, output_size, return_indices)
 
 
 def adaptive_avg_pool1d(input, output_size):
@@ -394,7 +394,7 @@ def adaptive_avg_pool1d(input, output_size):
     Args:
         output_size: the target output size (single integer)
     """
-    return _functions.thnn.AdaptiveAvgPool1d(output_size)(input)
+    return _functions.thnn.AdaptiveAvgPool1d.apply(input, output_size)
 
 
 def adaptive_avg_pool2d(input, output_size):
@@ -407,7 +407,7 @@ def adaptive_avg_pool2d(input, output_size):
         output_size: the target output size (single integer or
             double-integer tuple)
     """
-    return _functions.thnn.AdaptiveAvgPool2d(output_size)(input)
+    return _functions.thnn.AdaptiveAvgPool2d.apply(input, output_size)
 
 
 # Activation functions
@@ -447,6 +447,14 @@ def alpha_dropout(input, p=0.5, training=False):
     return output.mul_(a).add_(b)
 
 
+def dropout2d(input, p=0.5, training=False, inplace=False):
+    return _functions.dropout.FeatureDropout.apply(input, p, training, inplace)
+
+
+def dropout3d(input, p=0.5, training=False, inplace=False):
+    return _functions.dropout.FeatureDropout.apply(input, p, training, inplace)
+
+
 def threshold(input, threshold, value, inplace=False):
     return _functions.thnn.Threshold.apply(input, threshold, value, inplace)
 
@@ -462,19 +470,19 @@ def glu(input, dim=-1):
                          .format(dim, ndim))
     if dim < 0:
         dim += ndim
-    return _functions.thnn.GatedLinear(dim)(input)
+    return _functions.thnn.GatedLinear.apply(input, dim)
 
 
 def hardtanh(input, min_val=-1., max_val=1., inplace=False):
-    return _functions.thnn.auto.Hardtanh(min_val, max_val, inplace)(input)
+    return _functions.thnn.auto.Hardtanh.apply(input, min_val, max_val, inplace)
 
 
 def relu6(input, inplace=False):
-    return _functions.thnn.auto.Hardtanh(0, 6, inplace)(input)
+    return _functions.thnn.auto.Hardtanh.apply(input, 0, 6, inplace)
 
 
 def elu(input, alpha=1., inplace=False):
-    return _functions.thnn.auto.ELU(alpha, inplace)(input)
+    return _functions.thnn.auto.ELU.apply(input, alpha, inplace)
 
 
 def selu(input, inplace=False):
@@ -486,7 +494,7 @@ def leaky_relu(input, negative_slope=1e-2, inplace=False):
 
 
 def prelu(input, weight):
-    return _functions.thnn.PReLU()(input, weight)
+    return _functions.thnn.PReLU.apply(input, weight)
 
 
 def rrelu(input, lower=1. / 8, upper=1. / 3, training=False, inplace=False):
@@ -494,11 +502,11 @@ def rrelu(input, lower=1. / 8, upper=1. / 3, training=False, inplace=False):
 
 
 def logsigmoid(input):
-    return _functions.thnn.LogSigmoid()(input)
+    return _functions.thnn.LogSigmoid.apply(input)
 
 
 def hardshrink(input, lambd=0.5):
-    return _functions.thnn.auto.Hardshrink(lambd)(input)
+    return _functions.thnn.auto.Hardshrink.apply(input, lambd)
 
 
 def tanhshrink(input):
@@ -506,11 +514,11 @@ def tanhshrink(input):
 
 
 def softsign(input):
-    return _functions.activation.Softsign()(input)
+    return _functions.activation.Softsign.apply(input)
 
 
 def softplus(input, beta=1, threshold=20):
-    return _functions.thnn.auto.Softplus(beta, threshold)(input)
+    return _functions.thnn.auto.Softplus.apply(input, beta, threshold)
 
 
 def softmin(input):
@@ -518,15 +526,15 @@ def softmin(input):
 
 
 def softmax(input):
-    return _functions.thnn.auto.Softmax()(input)
+    return _functions.thnn.auto.Softmax.apply(input)
 
 
 def softshrink(input, lambd=0.5):
-    return _functions.thnn.auto.Softshrink(lambd)(input)
+    return _functions.thnn.auto.Softshrink.apply(input, lambd)
 
 
 def log_softmax(input):
-    return _functions.thnn.LogSoftmax()(input)
+    return _functions.thnn.LogSoftmax.apply(input)
 
 
 def tanh(input):
@@ -555,6 +563,74 @@ def bilinear(input1, input2, weight, bias=None):
         return Bilinear.apply(input1, input2, weight)
     else:
         return Bilinear.apply(input1, input2, weight, bias)
+
+
+def embedding(input, embedding_matrix,
+              max_norm=None, norm_type=2, scale_grad_by_freq=False,
+              sparse=False):
+    r"""A simple lookup table that looks up embeddings in a fixed dictionary and size.
+
+    This module is often used to retrieve word embeddings using indices.
+    The input to the module is a list of indices, and the embedding matrix,
+    and the output is the corresponding word embeddings.
+
+    Args:
+        input: tensor, containing indices into the embedding matrix
+        embedding_matrix:
+                Number of rows should correspond to the maximum possible index + 1,
+                number of columns is the embedding size
+        max_norm (float, optional): If given, will renormalize the embeddings to always have a norm lesser than this
+        norm_type (float, optional): The p of the p-norm to compute for the max_norm option
+        scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the frequency of
+                                                the words in the mini-batch.
+
+    Shape:
+        - Input: LongTensor `(N, W)`, N = mini-batch, W = number of indices to extract per mini-batch
+        - Embedding_matrix: FloatTensor `(V, embedding_dim)`, V = maximum index + 1, embedding_dim = embedding size
+        - Output: `(N, W, embedding_dim)`
+
+    Examples::
+
+        >>> # a batch of 2 samples of 4 indices each
+        >>> input = Variable(torch.LongTensor([[1,2,4,5],[4,3,2,9]]))
+        >>> # an embedding matrix containing 10 tensors of size 3
+        >>> embedding_matrix = Variable(torch.rand(10, 3))
+        >>> torch.nn.functional.embedding(input, embedding_matrix)
+
+        Variable containing:
+        (0 ,.,.) =
+         -1.0822  1.2522  0.2434
+          0.8393 -0.6062 -0.3348
+          0.6597  0.0350  0.0837
+          0.5521  0.9447  0.0498
+
+        (1 ,.,.) =
+          0.6597  0.0350  0.0837
+         -0.1527  0.0877  0.4260
+          0.8393 -0.6062 -0.3348
+         -0.8738 -0.9054  0.4281
+        [torch.FloatTensor of size 2x4x3]
+
+        >>> # example with padding_idx
+        >>> embedding_matrix = Variable(torch.rand(10, 3))
+        >>> embedding_matrix[0].zero_()
+        >>> input = Variable(torch.LongTensor([[0,2,0,5]]))
+        >>> torch.nn.functional.embedding(input, embedding_matrix)
+
+        Variable containing:
+        (0 ,.,.) =
+          0.0000  0.0000  0.0000
+          0.3452  0.4937 -0.9361
+          0.0000  0.0000  0.0000
+          0.0706 -2.1962 -0.6276
+        [torch.FloatTensor of size 1x4x3]
+
+    """
+    return torch.nn.backends.thnn.backend.Embedding.apply(
+        input, embedding_matrix,
+        -1, max_norm, norm_type,
+        scale_grad_by_freq, sparse
+    )
 
 
 def batch_norm(input, running_mean, running_var, weight=None, bias=None,
@@ -593,12 +669,11 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100):
     """
     dim = input.dim()
     if dim == 2:
-        f = _functions.thnn.NLLLoss(size_average, ignore_index, weight=weight)
+        return _functions.thnn.NLLLoss.apply(input, target, weight, size_average, ignore_index)
     elif dim == 4:
-        f = _functions.thnn.NLLLoss2d(size_average, ignore_index, weight=weight)
+        return _functions.thnn.NLLLoss2d.apply(input, target, weight, size_average, ignore_index)
     else:
         raise ValueError('Expected 2 or 4 dimensions (got {})'.format(dim))
-    return f(input, target)
 
 
 def poisson_nll_loss(input, target, log_input=True, full=False, size_average=True):
@@ -632,7 +707,7 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Tru
         return torch.sum(loss)
 
 
-def kl_div(input, target, size_average=True):
+def kl_div(input, target, size_average=True, weight=None):
     r"""The `Kullback-Leibler divergence`_ Loss.
 
     See :class:`~torch.nn.KLDivLoss` for details.
@@ -642,8 +717,10 @@ def kl_div(input, target, size_average=True):
         target: Variable of the same shape as input
         size_average: if True the output is divided by the number of elements
           in input tensor
+        weight (Tensor, optional): a manual rescaling weight given to each
+                class. If given, has to be a Tensor of size "nclasses"
     """
-    return _functions.thnn.KLDivLoss(size_average)(input, target)
+    return _functions.thnn.KLDivLoss.apply(input, target, size_average)
 
 
 def cross_entropy(input, target, weight=None, size_average=True, ignore_index=-100):
@@ -688,8 +765,15 @@ def binary_cross_entropy(input, target, weight=None, size_average=True):
     if not target.is_same_size(input):
         warnings.warn("Using a target size ({}) that is different to the input size ({}) is deprecated. "
                       "Please ensure they have the same size.".format(target.size(), input.size()))
+    if input.nelement() != target.nelement():
+        raise ValueError("Target and input must have the same number of elements. target nelement ({}) "
+                         "!= input nelement ({})".format(target.nelement(), input.nelement()))
 
-    return _functions.thnn.BCELoss(size_average, weight=weight)(input, target)
+    if weight is not None:
+        new_size = _infer_size(target.size(), weight.size())
+        weight = weight.expand(new_size)
+
+    return _functions.thnn.BCELoss.apply(input, target, weight, size_average)
 
 
 def binary_cross_entropy_with_logits(input, target, weight=None, size_average=True):
@@ -711,11 +795,8 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=Tr
     if not target.is_same_size(input):
         raise ValueError("Target size ({}) must be the same as input size ({})".format(target.size(), input.size()))
 
-    if weight is not None and target.dim() != 1:
-        weight = weight.view(1, target.size(1)).expand_as(target)
-
-    neg_abs = - input.abs()
-    loss = input.clamp(min=0) - input * target + (1 + neg_abs.exp()).log()
+    max_val = (-input).clamp(min=0)
+    loss = input - input * target + max_val + ((-max_val).exp() + (-input - max_val).exp()).log()
 
     if weight is not None:
         loss = loss * weight
@@ -727,7 +808,49 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=Tr
 
 
 def smooth_l1_loss(input, target, size_average=True):
-    return _functions.thnn.SmoothL1Loss(size_average)(input, target)
+    return _functions.thnn.SmoothL1Loss.apply(input, target, size_average)
+
+
+def l1_loss(input, target, size_average=True):
+    return _functions.thnn.L1Loss.apply(input, target, size_average)
+
+
+def mse_loss(input, target, size_average=True):
+    return _functions.thnn.MSELoss.apply(input, target, size_average)
+
+
+def margin_ranking_loss(input1, input2, target, margin=0, size_average=True):
+    return _functions.loss.MarginRankingLoss(margin, size_average)(input1, input2, target)
+
+
+def hinge_embedding_loss(input, target, margin=1.0, size_average=True):
+    return _functions.loss.HingeEmbeddingLoss(margin, size_average)(input, target)
+
+
+def multilabel_margin_loss(input, target, size_average=True):
+    return _functions.thnn.MultiLabelMarginLoss.apply(input, target, size_average)
+
+
+def soft_margin_loss(input, target, size_average=True):
+    return _functions.thnn.SoftMarginLoss.apply(input, target, size_average)
+
+
+def multilabel_soft_margin_loss(input, target, weight=None, size_average=True):
+    input = torch.sigmoid(input)
+    return binary_cross_entropy(input, target, weight, size_average)
+
+
+def cosine_embedding_loss(input1, input2, target, margin=0, size_average=True):
+    return _functions.loss.CosineEmbeddingLoss(margin, size_average)(input1, input2, target)
+
+
+def multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=True):
+    if p != 1 and p != 2:
+        raise ValueError('only p == 1 and p == 2 supported')
+    if weight is not None and weight.dim() != 1:
+        raise ValueError('weight must be one-dimensional')
+
+    return _functions.thnn.MultiMarginLoss.apply(input, target, weight, size_average, p, margin)
 
 
 def pixel_shuffle(input, upscale_factor):
@@ -782,7 +905,7 @@ def upsample(input, size=None, scale_factor=None, mode='nearest'):
             output spatial size.
         scale_factor (int): multiplier for spatial size. Has to be an integer.
         mode (string): algorithm used for upsampling:
-            'nearest' | 'bilinear' | 'trilinear'
+            'nearest' | 'bilinear' | 'trilinear'. Default: 'nearest'
     """
     if input.dim() == 4 and mode == 'nearest':
         return _functions.thnn.UpsamplingNearest2d(_pair(size), scale_factor)(input)
@@ -907,9 +1030,9 @@ def pad(input, pad, mode='constant', value=0):
         if mode == 'constant':
             return ConstantPad2d.apply(input, pad, value)
         elif mode == 'reflect':
-            return _functions.thnn.ReflectionPad2d(*pad)(input)
+            return _functions.thnn.ReflectionPad2d.apply(input, *pad)
         elif mode == 'replicate':
-            return _functions.thnn.ReplicationPad2d(*pad)(input)
+            return _functions.thnn.ReplicationPad2d.apply(input, *pad)
     elif input.dim() == 5:
         assert len(pad) == 6, '5D tensors expect 6 values for padding'
         if mode == 'constant':
@@ -917,7 +1040,7 @@ def pad(input, pad, mode='constant', value=0):
         elif mode == 'reflect':
             raise NotImplementedError
         elif mode == 'replicate':
-            return _functions.thnn.ReplicationPad3d(*pad)(input)
+            return _functions.thnn.ReplicationPad3d.apply(input, *pad)
     else:
         raise NotImplementedError("Only 4D and 5D padding is supported for now")
 

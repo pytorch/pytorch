@@ -202,20 +202,20 @@ class TestTorch(TestCase):
             fn_attr = getattr(torch, fn_name) if fn_name != "norm" else normfn_attr
 
             def fn(t, dim, keepdim=False):
-                ans = fn_attr(x, dim, keepdim)
+                ans = fn_attr(x, dim, keepdim=keepdim)
                 return ans if not isinstance(ans, tuple) else ans[0]
 
             dim = random.randint(0, 2)
-            self.assertEqual(fn(x, dim).unsqueeze(dim), fn(x, dim, True))
+            self.assertEqual(fn(x, dim).unsqueeze(dim), fn(x, dim, keepdim=True))
             self.assertEqual(x.ndimension() - 1, fn(x, dim).ndimension())
-            self.assertEqual(x.ndimension(), fn(x, dim, True).ndimension())
+            self.assertEqual(x.ndimension(), fn(x, dim, keepdim=True).ndimension())
 
             # check 1-d behavior
             x = torch.randn(1)
             dim = 0
-            self.assertEqual(fn(x, dim), fn(x, dim, True))
+            self.assertEqual(fn(x, dim), fn(x, dim, keepdim=True))
             self.assertEqual(x.ndimension(), fn(x, dim).ndimension())
-            self.assertEqual(x.ndimension(), fn(x, dim, True).ndimension())
+            self.assertEqual(x.ndimension(), fn(x, dim, keepdim=True).ndimension())
 
     def _testCSelection(self, torchfn, mathfn):
         # Two tensors
@@ -2296,7 +2296,7 @@ class TestTorch(TestCase):
         target_value = torch.rand(1000)
         # Dramatically alter the internal state of the main generator
         _ = torch.rand(100000)
-        forked_value = torch.rand(gen, 1000)
+        forked_value = torch.rand(1000, generator=gen)
         self.assertEqual(target_value, forked_value, 0, "RNG has not forked correctly.")
 
     def test_boxMullerState(self):
@@ -2546,7 +2546,7 @@ class TestTorch(TestCase):
         def ri(indices):
             choice = random.randint(0, 2)
             if choice == 0:
-                return torch.LongTensor(indices)
+                return conv_fn(torch.LongTensor(indices))
             elif choice == 1:
                 return list(indices)
             else:
@@ -2762,6 +2762,16 @@ class TestTorch(TestCase):
         self.assertEqual(strided[rows, columns],
                          torch.Tensor([[4, 6], [2, 3]]))
 
+        # Tests using less than the number of dims, and ellipsis
+
+        # reference is 1 2
+        #              3 4
+        #              5 6
+        reference = conv_fn(consec((3, 2)))
+        self.assertEqual(reference[ri([0, 2]), ], torch.Tensor([[1, 2], [5, 6]]))
+        self.assertEqual(reference[ri([1]), ...], torch.Tensor([[3, 4]]))
+        self.assertEqual(reference[..., ri([1])], torch.Tensor([[2], [4], [6]]))
+
         if TEST_NUMPY:
             # we use numpy to compare against, to verify that our advanced
             # indexing semantics are the same, and also for ease of test
@@ -2864,6 +2874,19 @@ class TestTorch(TestCase):
                 [[[0, 1], [2, 3]], [[0]], slice(None)],
                 [[[2, 1]], [[0, 3], [4, 4]], slice(None)],
                 [[[2]], [[0, 3], [4, 1]], slice(None)],
+
+                # less dim, ellipsis
+                [[0, 2], ],
+                [[0, 2], slice(None)],
+                [[0, 2], Ellipsis],
+                [[0, 2], slice(None), Ellipsis],
+                [[0, 2], Ellipsis, slice(None)],
+                [[0, 2], [1, 3]],
+                [[0, 2], [1, 3], Ellipsis],
+                [Ellipsis, [1, 3], [2, 3]],
+                [Ellipsis, [2, 3, 4]],
+                [Ellipsis, slice(None), [2, 3, 4]],
+                [slice(None), Ellipsis, [2, 3, 4]],
             ]
 
             for indexer in indices_to_test:
@@ -2917,6 +2940,25 @@ class TestTorch(TestCase):
                 [[0], [4], [1, 3, 4], slice(None)],
                 [[1], [0, 2, 3], [1], slice(None)],
                 [[[1, 2], [1, 2]], [[0, 1], [2, 3]], [[2, 3], [3, 5]], slice(None)],
+
+                # less dim, ellipsis
+                [Ellipsis, [0, 3, 4]],
+                [Ellipsis, slice(None), [0, 3, 4]],
+                [Ellipsis, slice(None), slice(None), [0, 3, 4]],
+                [slice(None), Ellipsis, [0, 3, 4]],
+                [slice(None), slice(None), Ellipsis, [0, 3, 4]],
+                [slice(None), [0, 2, 3], [1, 3, 4]],
+                [slice(None), [0, 2, 3], [1, 3, 4], Ellipsis],
+                [Ellipsis, [0, 2, 3], [1, 3, 4], slice(None)],
+                [[0], [1, 2, 4]],
+                [[0], [1, 2, 4], slice(None)],
+                [[0], [1, 2, 4], Ellipsis],
+                [[0], [1, 2, 4], Ellipsis, slice(None)],
+                [[1], ],
+                [[0, 2, 1], [3], [4]],
+                [[0, 2, 1], [3], [4], slice(None)],
+                [[0, 2, 1], [3], [4], Ellipsis],
+                [Ellipsis, [0, 2, 1], [3], [4]],
             ]
 
             for indexer in indices_to_test:
@@ -3188,6 +3230,21 @@ class TestTorch(TestCase):
         bignumber = 2 ^ 31 + 1
         res = torch.LongTensor((-bignumber,))
         self.assertGreater(res.abs()[0], 0)
+
+    def test_unbiased(self):
+        tensor = torch.randn(100)
+        self.assertEqual(tensor.var(0), tensor.var(0, unbiased=True))
+        self.assertEqual(tensor.var(), tensor.var(unbiased=True))
+        self.assertEqual(tensor.var(unbiased=False), tensor.var(0, unbiased=False)[0])
+
+        tensor = torch.FloatTensor([1.0, 2.0])
+        self.assertEqual(tensor.var(unbiased=True), 0.5)
+        self.assertEqual(tensor.var(unbiased=False), 0.25)
+
+        tensor = torch.randn(100)
+        self.assertEqual(tensor.std(0), tensor.std(0, unbiased=True))
+        self.assertEqual(tensor.std(), tensor.std(unbiased=True))
+        self.assertEqual(tensor.std(unbiased=False), tensor.std(0, unbiased=False)[0])
 
     def test_view(self):
         tensor = torch.rand(15)

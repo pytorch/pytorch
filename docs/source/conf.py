@@ -205,7 +205,7 @@ from sphinx import addnodes
 
 
 def patched_make_field(self, types, domain, items, **kw):
-    # `kw` catches `env=None` needed for newer sphinx while maingaining
+    # `kw` catches `env=None` needed for newer sphinx while maintaining
     #  backwards compatibility when passed along further down!
 
     # type: (List, unicode, Tuple) -> nodes.field

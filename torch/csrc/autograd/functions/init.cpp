@@ -101,18 +101,18 @@ PyObject* getValueAttr(PyObject* obj, void* _unused)
   END_HANDLE_TH_ERRORS
 }
 
-template<typename T, typename ParamsT, std::shared_ptr<thpp::Tensor> ParamsT::*ptr>
+template<typename T, typename ParamsT, at::Tensor ParamsT::*ptr>
 PyObject* getTensorAttr(PyObject* obj, void* _unused)
 {
   HANDLE_TH_ERRORS
   THPCppFunction* self = (THPCppFunction*)obj;
   auto& val = ((T*)(self->cdata.get()))->*ptr;
   THPObjectPtr py_tensor;
-  if (!val) {
+  if (!val.defined()) {
     Py_INCREF(Py_None);
     py_tensor = Py_None;
   } else {
-    py_tensor = torch::createPyObject(*val);
+    py_tensor = torch::createPyObject(val);
   }
   return py_tensor.release();
   END_HANDLE_TH_ERRORS
@@ -148,6 +148,23 @@ static struct PyGetSetDef batch_norm_backward_properties[] = {
   {(char*)"eps", (getter)getValueAttr<BatchNormBackward, double, BatchNormParams,
                                          &BatchNormParams::eps, double, PyFloat_FromDouble>, NULL, NULL, NULL},
   {(char*)"cudnn_enabled", (getter)getValueAttr<BatchNormBackward, bool, BatchNormParams,
+                                         &BatchNormParams::cudnn_enabled, long, PyBool_FromLong>, NULL, NULL, NULL},
+  {NULL}
+};
+
+static struct PyGetSetDef batch_norm_backward_backward_properties[] = {
+  THP_FUNCTION_DEFAULT_PROPERTIES,
+  {(char*)"running_mean", (getter)getTensorAttr<BatchNormBackwardBackward, BatchNormParams,
+                                         &BatchNormParams::running_mean>, NULL, NULL, NULL},
+  {(char*)"running_var", (getter)getTensorAttr<BatchNormBackwardBackward, BatchNormParams,
+                                         &BatchNormParams::running_var>, NULL, NULL, NULL},
+  {(char*)"training", (getter)getValueAttr<BatchNormBackwardBackward, bool, BatchNormParams,
+                                         &BatchNormParams::training, long, PyBool_FromLong>, NULL, NULL, NULL},
+  {(char*)"momentum", (getter)getValueAttr<BatchNormBackwardBackward, double, BatchNormParams,
+                                         &BatchNormParams::momentum, double, PyFloat_FromDouble>, NULL, NULL, NULL},
+  {(char*)"eps", (getter)getValueAttr<BatchNormBackwardBackward, double, BatchNormParams,
+                                         &BatchNormParams::eps, double, PyFloat_FromDouble>, NULL, NULL, NULL},
+  {(char*)"cudnn_enabled", (getter)getValueAttr<BatchNormBackwardBackward, bool, BatchNormParams,
                                          &BatchNormParams::cudnn_enabled, long, PyBool_FromLong>, NULL, NULL, NULL},
   {NULL}
 };
@@ -223,9 +240,10 @@ bool THPAutograd_initFunctions(PyObject* _unused)
   THPObjectPtr module(PyModule_New("torch._C._functions"));
   if (!module) return false;
 
-  static PyTypeObject BatchNormClass, BatchNormBackwardClass;
+  static PyTypeObject BatchNormClass, BatchNormBackwardClass, BatchNormBackwardBackwardClass;
   addClass<BatchNormForward, BatchNormCtor>(module, BatchNormClass, "BatchNorm", batch_norm_forward_properties);
   addClass<BatchNormBackward, NoCtor>(module, BatchNormBackwardClass, "BatchNormBackward", batch_norm_backward_properties);
+  addClass<BatchNormBackwardBackward, NoCtor>(module, BatchNormBackwardBackwardClass, "BatchNormBackwardBackward", batch_norm_backward_backward_properties);
 
   static PyTypeObject ConvClass, ConvBackwardClass, ConvBackwardBackwardClass;
   addClass<ConvForward, ConvCtor>(module, ConvClass, "ConvNd", conv_forward_properties);

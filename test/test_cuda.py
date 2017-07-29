@@ -285,6 +285,7 @@ tests = [
     ('qr', small_2d_lapack_skinny, lambda t: [], 'skinny', float_types),
     ('qr', small_2d_lapack_fat, lambda t: [], 'fat', float_types),
     ('qr', large_2d_lapack, lambda t: [], 'big', float_types),
+    ('inverse', new_t(20, 20), lambda t: [], None, float_types),
 
 ]
 
@@ -299,7 +300,7 @@ custom_precision = {
     'baddbmm': 1e-4,
     'rsqrt': 1e-4,
     'cumprod': 1e-4,
-    'qr': 1e-4,
+    'qr': 3e-4,
 }
 
 simple_pointwise = [
@@ -879,6 +880,14 @@ class TestCuda(TestCase):
 
     def test_tensor_scatterFill(self):
         TestTorch._test_scatter_base(self, lambda t: t.cuda(), 'scatter_', True, test_bounds=False)
+
+    def test_arange(self):
+        for t in ['IntTensor', 'LongTensor', 'FloatTensor', 'DoubleTensor']:
+            a = torch.cuda.__dict__[t]()
+            torch.arange(0, 10, out=a)
+            b = torch.__dict__[t]()
+            torch.arange(0, 10, out=b)
+            self.assertEqual(a, b.cuda())
 
     def test_nvtx(self):
         # Just making sure we can see the symbols

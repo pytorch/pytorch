@@ -665,7 +665,7 @@ void THDTensor_(mean)(THDTensor *r_, THDTensor *t, int dimension, int keepdim) {
   }
 }
 
-void THDTensor_(std)(THDTensor *r_, THDTensor *t, int dimension, int flag, int keepdim) {
+void THDTensor_(std)(THDTensor *r_, THDTensor *t, int dimension, int biased, int keepdim) {
   THArgCheck(dimension >= 0 && dimension < THDTensor_(nDimension)(t), 3,
              "invalid dimension %d", dimension + TH_INDEX_BASE);
 
@@ -675,7 +675,7 @@ void THDTensor_(std)(THDTensor *r_, THDTensor *t, int dimension, int flag, int k
   THLongStorage_free(dim);
 
   masterCommandChannel->sendMessage(
-    packMessage(Functions::tensorStd, r_, t, dimension, flag, keepdim),
+    packMessage(Functions::tensorStd, r_, t, dimension, biased, keepdim),
     THDState::s_current_worker
   );
 
@@ -684,7 +684,7 @@ void THDTensor_(std)(THDTensor *r_, THDTensor *t, int dimension, int flag, int k
   }
 }
 
-void THDTensor_(var)(THDTensor *r_, THDTensor *t, int dimension, int flag, int keepdim) {
+void THDTensor_(var)(THDTensor *r_, THDTensor *t, int dimension, int biased, int keepdim) {
   THArgCheck(dimension >= 0 && dimension < THDTensor_(nDimension)(t), 3,
              "invalid dimension %d", dimension + TH_INDEX_BASE);
 
@@ -694,7 +694,7 @@ void THDTensor_(var)(THDTensor *r_, THDTensor *t, int dimension, int flag, int k
   THLongStorage_free(dim);
 
   masterCommandChannel->sendMessage(
-    packMessage(Functions::tensorVar, r_, t, dimension, flag, keepdim),
+    packMessage(Functions::tensorVar, r_, t, dimension, biased, keepdim),
     THDState::s_current_worker
   );
 
@@ -767,18 +767,18 @@ accreal THDTensor_(meanall)(THDTensor *tensor) {
   return receiveValueFromWorker<accreal>(THDState::s_current_worker);
 }
 
-accreal THDTensor_(varall)(THDTensor *tensor) {
+accreal THDTensor_(varall)(THDTensor *tensor, int biased) {
   masterCommandChannel->sendMessage(
-    packMessage(Functions::tensorVarall, tensor),
+    packMessage(Functions::tensorVarall, tensor, biased),
     THDState::s_current_worker
   );
 
   return receiveValueFromWorker<accreal>(THDState::s_current_worker);
 }
 
-accreal THDTensor_(stdall)(THDTensor *tensor) {
+accreal THDTensor_(stdall)(THDTensor *tensor, int biased) {
   masterCommandChannel->sendMessage(
-    packMessage(Functions::tensorStdall, tensor),
+    packMessage(Functions::tensorStdall, tensor, biased),
     THDState::s_current_worker
   );
 

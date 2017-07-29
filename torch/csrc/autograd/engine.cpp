@@ -10,18 +10,16 @@
 #include <mutex>
 #include <set>
 #include <string>
-#include <THPP/THPP.h>
 #include <thread>
 #include <unordered_set>
 #include <typeinfo>
 #include <sstream>
+#include <TH/TH.h>
 
 #ifdef WITH_CUDA
 #include <cuda.h>
 #include <THC/THC.h>
 #endif
-
-using thpp::Tensor;
 
 namespace torch { namespace autograd {
 

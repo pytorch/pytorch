@@ -167,7 +167,7 @@ If you want to disable CUDA support, export environment variable `NO_CUDA=1`.
 
 On Linux
 ```bash
-export CMAKE_PREFIX_PATH=[anaconda root directory]
+export CMAKE_PREFIX_PATH="$(dirname $(which conda))/../" # [anaconda root directory]
 
 # Install basic dependencies
 conda install numpy pyyaml mkl setuptools cmake gcc cffi

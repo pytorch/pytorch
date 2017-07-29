@@ -20,7 +20,7 @@ public:
   virtual int64_t dim() override;
   virtual Scalar localScalar() override;
   virtual void assign_(Scalar s) override;
-  virtual void * unsafeGetTH() override;
+  virtual void * unsafeGetTH(bool retain) override;
   static const char * typeString();
 
 //TODO(zach): sort of friend permissions later so this

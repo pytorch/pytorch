@@ -1,9 +1,11 @@
 #pragma once
 
 #include <memory>
+#include <limits>
 
 #include "ATen/ArrayRef.h"
 #include "ATen/Half.h"
+#include "ATen/SparseTensorRef.h"
 
 namespace at {
 
@@ -44,6 +46,18 @@ constexpr Backend kCPU = Backend::CPU;
 constexpr Backend kCUDA = Backend::CUDA;
 constexpr Backend kSparseCPU = Backend::SparseCPU;
 constexpr Backend kSparseCUDA = Backend::SparseCUDA;
+
+// Note [Undefined-dim versus 0-dim]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// Unlike Torch, ATen treats zero-dimension tensors as having ONE
+// element (that is to say, a zero-dimensional tensor is a scalar!)
+// This is in contrast to Torch, where a zero-dimension tensor has
+// zero elements.
+//
+// Because we are backed by Torch tensors, we need to be able to
+// represent this state (of numel==0).  kUndefinedDimensions represents this
+// situation.
+constexpr int64_t kUndefinedDimensions = std::numeric_limits<int64_t>::min();
 
 static inline const char * toString(Backend b) {
   switch(b) {
@@ -96,7 +110,7 @@ struct Type {
   virtual std::unique_ptr<Storage> storage(size_t size) = 0;
   virtual std::unique_ptr<Storage> storageFromBlob(void * data, int64_t size) = 0;
   virtual std::unique_ptr<Generator> generator() = 0;
-  virtual Tensor unsafeTensorFromTH(void * th_pointer) = 0;
+  virtual Tensor unsafeTensorFromTH(void * th_pointer, bool retain) = 0;
   virtual const char * toString() const = 0;
   Type & toBackend(Backend b);
   Type & toScalarType(ScalarType s);
@@ -111,6 +125,9 @@ struct Type {
   Tensor tensorFromBlob(void * data, IntList sizes);
   Tensor tensorFromBlob(void * data, IntList sizes, IntList strides);
   Tensor scalarTensor(Scalar s);
+
+  bool operator==(const Type& other) const;
+
   // example
   // virtual Tensor * add(Tensor & a, Tensor & b) = 0;
   ${type_method_declarations}

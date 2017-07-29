@@ -40,8 +40,8 @@ All :class:`Variable` s keep track of in-place operations applied to them, and
 if the implementation detects that a variable was saved for backward in one of
 the functions, but it was modified in-place afterwards, an error will be raised
 once backward pass is started. This ensures that if you're using in-place
-functions and not seing any errors, you can be sure that the computed gradients
-are correct.
+functions and not seeing any errors, you can be sure that the computed
+gradients are correct.
 
 
 .. autoclass:: Variable
