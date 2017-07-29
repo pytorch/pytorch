@@ -3,7 +3,6 @@
 #include <Python.h>
 #include <memory>
 #include <string>
-#include <THPP/THPP.h>
 
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/variable.h"
@@ -62,4 +61,3 @@ struct AddBackward : public Function {
 };
 
 }}
-

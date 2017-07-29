@@ -320,7 +320,6 @@ main_sources = [
     "torch/csrc/autograd/functions/accumulate_grad.cpp",
     "torch/csrc/autograd/functions/utils.cpp",
     "torch/csrc/autograd/functions/init.cpp",
-    "torch/csrc/nn/THNN_generic.cpp",
 ]
 main_sources += split_types("torch/csrc/Tensor.cpp")
 

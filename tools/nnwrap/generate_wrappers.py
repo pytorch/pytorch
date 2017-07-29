@@ -2,7 +2,7 @@ import os
 import sys
 from string import Template, ascii_lowercase
 from ..cwrap import cwrap
-from ..cwrap.plugins import StandaloneExtension, GenericNN, NullableArguments, AutoGPU
+from ..cwrap.plugins import StandaloneExtension, NullableArguments, AutoGPU
 from ..shared import import_module
 
 BASE_PATH = os.path.realpath(os.path.join(__file__, '..', '..', '..'))
@@ -98,7 +98,6 @@ def wrap_function(name, type, arguments):
 def generate_wrappers():
     wrap_nn()
     wrap_cunn()
-    wrap_generic()
 
 
 def wrap_nn():
@@ -129,67 +128,3 @@ def wrap_cunn():
         NullableArguments(),
         AutoGPU(has_self=False),
     ])
-
-
-GENERIC_FUNCTION_TEMPLATE = Template("""\
-[[
-  name: $name
-  return: void
-  options:
-""")
-
-
-def wrap_generic_function(name, backends):
-    declaration = ''
-    declaration += GENERIC_FUNCTION_TEMPLATE.substitute(name=name)
-    for backend in backends:
-        declaration += '    - cname: ' + name + '\n'
-        declaration += '      backend: ' + backend['name'] + '\n'
-        declaration += '      arguments:\n'
-        for arg in backend['arguments']:
-            declaration += '       - arg: ' + arg.type + ' ' + arg.name + '\n'
-            if arg.is_optional:
-                declaration += '         optional: True\n'
-    declaration += ']]\n\n\n'
-    return declaration
-
-
-def wrap_generic():
-    from collections import OrderedDict
-    defs = OrderedDict()
-
-    def should_wrap_function(name):
-        if name.startswith('LookupTable_'):
-            return False
-        return (name.endswith('updateOutput') or
-                name.endswith('updateGradInput') or
-                name.endswith('accGradParameters') or
-                name.endswith('backward'))
-
-    def add_functions(name, functions):
-        for fn in functions:
-            if not should_wrap_function(fn.name):
-                continue
-            if fn.name not in defs:
-                defs[fn.name] = []
-            defs[fn.name] += [{
-                'name': name,
-                'arguments': fn.arguments[1:],
-            }]
-
-    add_functions('nn', thnn_utils.parse_header(thnn_utils.THNN_H_PATH))
-    add_functions('cunn', thnn_utils.parse_header(thnn_utils.THCUNN_H_PATH))
-
-    wrapper = ''
-    for name, backends in defs.items():
-        wrapper += wrap_generic_function(name, backends)
-    with open('torch/csrc/nn/THNN_generic.cwrap', 'w') as f:
-        f.write(wrapper)
-
-    cwrap('torch/csrc/nn/THNN_generic.cwrap', plugins=[
-        GenericNN(header=True),
-    ], default_plugins=False, destination='torch/csrc/nn/THNN_generic.h')
-
-    cwrap('torch/csrc/nn/THNN_generic.cwrap', plugins=[
-        GenericNN(),
-    ], default_plugins=False)

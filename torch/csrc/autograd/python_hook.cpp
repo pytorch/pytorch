@@ -8,9 +8,7 @@
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/Exceptions.h"
-#include <THPP/THPP.h>
 
-using thpp::Tensor;
 using torch::autograd::variable_list;
 
 static PyObject* wrap_variables(const variable_list& c_variables);

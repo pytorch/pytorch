@@ -11,7 +11,6 @@
 #include "torch/csrc/cuda/AutoGPU.h"
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/Exceptions.h"
-#include <THPP/tensors/THTensor.hpp>
 
 
 using namespace torch::autograd;
@@ -51,7 +50,7 @@ PyObject * THPVariable_Wrap(const std::shared_ptr<Variable>& var)
 PyObject * THPVariable_NewWithFunction(PyObject *data, const std::shared_ptr<torch::autograd::Function>& grad_fn)
 {
   THPUtils_assert(THPModule_isTensor(data), "data must be a Tensor");
-  auto v = std::make_shared<Variable>(torch::createTensorAT(data), grad_fn->is_executable, false);
+  auto v = std::make_shared<Variable>(torch::createTensor(data), grad_fn->is_executable, false);
   v->grad_fn = grad_fn;
   PyObject* obj = THPVariable_NewWithVar((PyTypeObject*)THPVariableClass, v);
   if (obj) {
@@ -65,7 +64,7 @@ PyObject * THPVariable_NewWithFunction(PyObject *data, const std::shared_ptr<tor
 // This function DOES NOT steal a reference to data
 PyObject * THPVariable_NewVolatile(PyObject *data)
 {
-  auto v = std::make_shared<Variable>(torch::createTensorAT(data), false, true);
+  auto v = std::make_shared<Variable>(torch::createTensor(data), false, true);
   PyObject* obj = THPVariable_NewWithVar((PyTypeObject*)THPVariableClass, v);
   if (obj) {
     v->pyobj = obj;
@@ -78,7 +77,7 @@ PyObject * THPVariable_NewVolatile(PyObject *data)
 // This function DOES NOT steal a reference to data
 PyObject * THPVariable_NewLeaf(PyObject *data)
 {
-  auto v = std::make_shared<Variable>(torch::createTensorAT(data), false, false);
+  auto v = std::make_shared<Variable>(torch::createTensor(data), false, false);
   PyObject* obj = THPVariable_NewWithVar((PyTypeObject*)THPVariableClass, v);
   if (obj) {
     v->pyobj = obj;
@@ -160,9 +159,9 @@ PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject *kwds)
 
   std::shared_ptr<Variable> var;
   if (grad_fn) {
-    var = std::make_shared<Variable>(torch::createTensorAT(data), THPFunction_asFunction((THPFunction*)grad_fn));
+    var = std::make_shared<Variable>(torch::createTensor(data), THPFunction_asFunction((THPFunction*)grad_fn));
   } else {
-    var = std::make_shared<Variable>(torch::createTensorAT(data), requires_grad, is_volatile);
+    var = std::make_shared<Variable>(torch::createTensor(data), requires_grad, is_volatile);
   }
   PyObject* self = THPVariable_NewWithVar(type, var);
   if (self) {
@@ -240,7 +239,7 @@ int THPVariable_set_data(THPVariable *self, PyObject *data)
   Py_XDECREF(self->data);
   self->data = data;
   auto& var = *self->cdata;
-  auto tensor = torch::createTensorAT(data);
+  auto tensor = torch::createTensor(data);
   var.data.swap(tensor);
   return 0;
 }

@@ -20,20 +20,6 @@ cudnnDataType_t getCudnnDataType(PyObject *tensorClass)
   throw std::runtime_error(msg);
 }
 
-cudnnDataType_t getCudnnDataType(const thpp::Tensor& tensor)
-{
-  if (tensor.type() == thpp::Type::FLOAT) {
-    return CUDNN_DATA_FLOAT;
-  } else if (tensor.type() == thpp::Type::DOUBLE) {
-    return CUDNN_DATA_DOUBLE;
-  } else if (tensor.type() == thpp::Type::HALF) {
-    return CUDNN_DATA_HALF;
-  }
-  std::string msg("getCudnnDataType() not supported for ");
-  msg += (int)tensor.type();
-  throw std::runtime_error(msg);
-}
-
 cudnnDataType_t getCudnnDataType(const at::Tensor& tensor) {
   if (tensor.type().scalarType() == at::kFloat) {
     return CUDNN_DATA_FLOAT;

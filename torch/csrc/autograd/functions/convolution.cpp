@@ -6,10 +6,8 @@
 #include "torch/csrc/autograd/functions/utils.h"
 #include "torch/csrc/autograd/functions/basic_ops.h"
 #include "torch/csrc/autograd/functions/tensor.h"
-#include "torch/csrc/nn/THNN_generic.h"
 #include "torch/csrc/utils/auto_gpu.h"
 
-#include "THPP/Type.hpp"
 #include "ATen/Tensor.h"
 
 #ifdef WITH_CUDNN
@@ -20,7 +18,6 @@ extern THCState* state;
 using namespace torch::cudnn;
 #endif
 
-using namespace torch::nn;
 using torch::cudnn::Convolution;
 using tensor_pair = std::pair<at::Tensor, at::Tensor>;
 
