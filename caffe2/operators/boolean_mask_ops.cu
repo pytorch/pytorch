@@ -38,10 +38,10 @@ class BooleanMaskOp<CUDAContext> final : public Operator<CUDAContext> {
     CAFFE_ENFORCE_EQ(mask.ndim(), 1);
     CAFFE_ENFORCE(src.dims()[0] == mask.dims()[0]);
 
-    const auto* maskData = mask.template data<bool>();
+    const auto* maskData = mask.data<bool>();
     const auto outerSize = mask.dims()[0];
     indices_.Resize(outerSize);
-    auto* indicesData = indices_.template mutable_data<TIndex>();
+    auto* indicesData = indices_.mutable_data<TIndex>();
 
     size_t numBytes = 0;
     cub::CountingInputIterator<int> itr(0);
@@ -59,7 +59,7 @@ class BooleanMaskOp<CUDAContext> final : public Operator<CUDAContext> {
         static_cast<TIndex>((numBytes + sizeof(TIndex) - 1) / sizeof(TIndex));
     // allocate one more TIndex at the end of scratch for storing numOfOutput
     scratch_.Resize(numTIndex + 1);
-    auto* scratchData = scratch_.template mutable_data<TIndex>();
+    auto* scratchData = scratch_.mutable_data<TIndex>();
     auto* numOfOutputData = scratchData + numTIndex;
 
     cub::DeviceSelect::Flagged(
@@ -86,7 +86,7 @@ class BooleanMaskOp<CUDAContext> final : public Operator<CUDAContext> {
     if (OutputSize() == 2) {
       auto* indicesOut = Output(1);
       indicesOut->Resize(numOfOutput);
-      indicesOut->template mutable_data<TIndex>();
+      indicesOut->mutable_data<TIndex>();
     }
 
     if (numOfOutput > 0) {
