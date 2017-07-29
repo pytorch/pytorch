@@ -158,10 +158,10 @@ class NoisyLinear(Module):
         self.in_features = in_features
         self.out_features = out_features
         self.factorized = factorized
-        self.bias = bias
+        self.include_bias = bias
         self.weight_mu = Parameter(torch.Tensor(out_features, in_features))
         self.weight_sigma = Parameter(torch.Tensor(out_features, in_features))
-        if self.bias:
+        if self.include_bias:
             self.bias_mu = Parameter(torch.Tensor(out_features))
             self.bias_sigma = Parameter(torch.Tensor(out_features))
         else:
@@ -181,14 +181,14 @@ class NoisyLinear(Module):
             mu_range = 1. / math.sqrt(self.weight_mu.size(1))
             self.weight_mu.data.uniform_(-mu_range, mu_range)
             self.weight_sigma.data.fill_(self.std_init / math.sqrt(self.weight_sigma.size(1)))
-            if self.bias:
+            if self.include_bias:
                 self.bias_mu.data.uniform_(-mu_range, mu_range)
                 self.bias_sigma.data.fill_(self.std_init / math.sqrt(self.bias_sigma.size(0)))
         else:
             mu_range = math.sqrt(3. / self.weight_mu.size(1))
             self.weight_mu.data.uniform_(-mu_range, mu_range)
             self.weight_sigma.data.fill_(self.std_init)
-            if self.bias:
+            if self.include_bias:
                 self.bias_mu.data.uniform_(-mu_range, mu_range)
                 self.bias_sigma.data.fill_(self.std_init)
 
