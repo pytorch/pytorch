@@ -2700,7 +2700,7 @@ class TestNN(NNTestCase):
                                 "\ndilation: " + str(dilation))
 
     def test_noisylinear(self):
-        input_tensor = Variable(torch.Tensor((4, 10)))
+        input_tensor = Variable(torch.Tensor(4,10))
         noisy = nn.modules.linear.NoisyLinear(10, 8)
         first_output = noisy(input_tensor)
         noisy.reset_noise()
