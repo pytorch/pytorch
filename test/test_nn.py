@@ -2699,7 +2699,7 @@ class TestNN(NNTestCase):
                                 "\ninp_size: " + str(inp_size) +
                                 "\ndilation: " + str(dilation))
 
-    def test_NoisyLinear(self):
+    def test_noisylinear(self):
         input_tensor = Tensor((4, 10))
         noisy = nn.modules.linear.NoisyLinear(10, 8)
         first_output = noisy(input_tensor)
