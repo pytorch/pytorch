@@ -199,10 +199,10 @@ class NoisyLinear(Module):
 
     def reset_noise(self):
         if self.factorized:
-            epsilon_in = self.scale_noise(self.in_features)
-            epsilon_out = self.scale_noise(self.out_features)
+            epsilon_in = self._scale_noise(self.in_features)
+            epsilon_out = self._scale_noise(self.out_features)
             self.weight_epsilon = Variable(epsilon_out.ger(epsilon_in))
-            self.bias_epsilon = Variable(self.scale_noise(self.out_features))
+            self.bias_epsilon = Variable(self._scale_noise(self.out_features))
         else:
             self.weight_epsilon = Variable(torch.randn((self.out_features, self.in_features)))
             self.bias_epsilon = Variable(torch.randn(self.out_features))
