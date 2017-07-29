@@ -80,13 +80,15 @@ class LayersTestCase(test_util.TestCase):
         workspace.RunNetOnce(train_init_net)
         workspace.RunNetOnce(train_net)
 
-    def run_train_net_forward_only(self):
+    def run_train_net_forward_only(self, num_iter=1):
         self.model.output_schema = schema.Struct()
         train_init_net, train_net = \
             layer_model_instantiator.generate_training_nets_forward_only(
                 self.model)
         workspace.RunNetOnce(train_init_net)
-        workspace.RunNetOnce(train_net)
+        assert num_iter > 0, 'num_iter must be larger than 0'
+        workspace.CreateNet(train_net)
+        workspace.RunNet(train_net.Proto().name, num_iter=num_iter)
 
     def assertBlobsEqual(self, spec_blobs, op_blobs):
         """
