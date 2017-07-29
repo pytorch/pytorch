@@ -1,64 +1,104 @@
-from .batchnorm import _BatchNorm
+import torch
+from .module import Module
+from torch.nn.parameter import Parameter
 from .. import functional as F
 
 
-class _InstanceNorm(_BatchNorm):
-    def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=False):
-        super(_InstanceNorm, self).__init__(
-            num_features, eps, momentum, affine)
+class _InstanceNorm(Module):
+    def __init__(self, num_features=None, eps=1e-5):
+        super(_InstanceNorm, self).__init__()
+        self.num_features = num_features
+        self.affine = num_features is not None
+        self.eps = eps
+        if self.affine:
+            self.weight = Parameter(torch.ones(num_features))
+            self.bias = Parameter(torch.zeros(num_features))
+        else:
+            self.register_parameter('weight', None)
+            self.register_parameter('bias', None)
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        if self.affine:
+            self.weight.data.fill_(1)
+            self.bias.data.zero_()
 
     def forward(self, input):
-        b, c = input.size(0), input.size(1)
+        return F.instance_norm(input, weight=self.weight, bias=self.bias,
+                               eps=self.eps)
 
-        # Repeat stored stats and affine transform params
-        running_mean = self.running_mean.repeat(b)
-        running_var = self.running_var.repeat(b)
-
-        weight, bias = None, None
+    def __repr__(self):
         if self.affine:
-            weight = self.weight.repeat(b)
-            bias = self.bias.repeat(b)
-
-        # Apply instance norm
-        input_reshaped = input.contiguous().view(1, b * c, *input.size()[2:])
-
-        out = F.batch_norm(
-            input_reshaped, running_mean, running_var, weight, bias,
-            True, self.momentum, self.eps)
-
-        # Reshape back
-        self.running_mean.copy_(running_mean.view(b, c).mean(0, keepdim=False))
-        self.running_var.copy_(running_var.view(b, c).mean(0, keepdim=False))
-
-        return out.view(b, c, *input.size()[2:])
-
-    def eval(self):
-        return self
+            return ('{name}({num_features}, eps={eps})'
+                    .format(name=self.__class__.__name__, **self.__dict__))
+        else:
+            return ('{name}(eps={eps})'
+                    .format(name=self.__class__.__name__, **self.__dict__))
 
 
-class InstanceNorm1d(_InstanceNorm):
-    r"""Applies Instance Normalization over a 2d or 3d input that is seen as a mini-batch.
+class LayerNorm(_InstanceNorm):
+    r"""Applies Layer Normalization over a 2D input that is seen
+    as a mini-batch of 1D inputs.
 
     .. math::
 
-        y = \frac{x - mean[x]}{ \sqrt{Var[x]} + \epsilon} * gamma + beta
+        y = \gamma * \frac{x - \mu_x}{\sigma_x + \epsilon} + \beta
 
-    The mean and standard-deviation are calculated per-dimension separately
-    for each object in a mini-batch. Gamma and beta are learnable parameter vectors
-    of size C (where C is the input size).
-
-    During training, this layer keeps a running estimate of its computed mean
-    and variance. The running sum is kept with a default momentum of 0.1.
-
-    At evaluation time (`.eval()`), the default behaviour of the InstanceNorm module stays the same
-    i.e. running mean/variance is NOT used for normalization. One can force using stored
-    mean and variance with `.train(False)` method.
+    The mean and standard deviation are calculated for each object in a
+    mini-batch (over `num_features`). Gamma and beta are
+    optional learnable parameter vectors of size C (where C is the input size).
 
     Args:
-        num_features: num_features from an expected input of size `batch_size x num_features x width`
-        eps: a value added to the denominator for numerical stability. Default: 1e-5
-        momentum: the value used for the running_mean and running_var computation. Default: 0.1
-        affine: a boolean value that when set to true, gives the layer learnable affine parameters.
+        num_features: num_features from an expected input of size
+            `batch_size x num_features`. Specified only if learnable parameters
+            are desired. Default: None
+        eps: a value added to the denominator for numerical stability.
+            Default: 1e-5
+
+    Shape:
+        - Input: :math:`(N, C)`
+        - Output: :math:`(N, C)` (same shape as input)
+
+    Examples:
+        >>> # Without Learnable Parameters
+        >>> m = nn.LayerNorm()
+        >>> # With Learnable Parameters
+        >>> m = nn.LayerNorm(100)
+        >>> input = autograd.Variable(torch.randn(20, 100))
+        >>> output = m(input)
+    """
+
+    def forward(self, input):
+        return F.layer_norm(input, weight=self.weight, bias=self.bias,
+                            eps=self.eps)
+
+    def _check_input_dim(self, input):
+        if input.dim() != 2:
+            raise ValueError('expected 2D input (got {}D input)'
+                             .format(input.dim()))
+        super(LayerNorm, self)._check_input_dim(input)
+
+
+class InstanceNorm1d(_InstanceNorm):
+    r"""Applies Instance Normalization over a 3D input that is seen
+    as a mini-batch of 2D inputs.
+
+    .. math::
+
+        y = \gamma * \frac{x - \mu_x}{\sigma_x + \epsilon} + \beta
+
+    The mean and standard deviation are calculated per-dimension separately
+    for each object in a mini-batch. Gamma and beta are optional learnable
+    parameter vectors of size C (where C is the input size). This can be seen as
+    an extension of layer normalization where statistics are not calculated over
+    `batch_size` or `num_features`.
+
+    Args:
+        num_features: num_features from an expected input of size
+            `batch_size x num_features x length`. Specified only if learnable
+            parameters are desired. Default: None
+        eps: a value added to the denominator for numerical stability.
+            Default: 1e-5
 
     Shape:
         - Input: :math:`(N, C, L)`
@@ -66,9 +106,9 @@ class InstanceNorm1d(_InstanceNorm):
 
     Examples:
         >>> # Without Learnable Parameters
-        >>> m = nn.InstanceNorm1d(100)
+        >>> m = nn.InstanceNorm1d()
         >>> # With Learnable Parameters
-        >>> m = nn.InstanceNorm1d(100, affine=True)
+        >>> m = nn.InstanceNorm1d(100)
         >>> input = autograd.Variable(torch.randn(20, 100, 40))
         >>> output = m(input)
     """
@@ -81,38 +121,34 @@ class InstanceNorm1d(_InstanceNorm):
 
 
 class InstanceNorm2d(_InstanceNorm):
-    r"""Applies Instance Normalization over a 4d input that is seen as a mini-batch of 3d inputs
+    r"""Applies Instance Normalization over a 4D input that is seen as a
+    mini-batch of 3D inputs.
 
     .. math::
 
-        y = \frac{x - mean[x]}{ \sqrt{Var[x]} + \epsilon} * gamma + beta
+        y = \gamma * \frac{x - \mu_x}{\sigma_x + \epsilon} + \beta
 
-    The mean and standard-deviation are calculated per-dimension separately
-    for each object in a mini-batch. Gamma and beta are learnable parameter vectors
-    of size C (where C is the input size).
-
-    During training, this layer keeps a running estimate of its computed mean
-    and variance. The running sum is kept with a default momentum of 0.1.
-
-    At evaluation time (`.eval()`), the default behaviour of the InstanceNorm module stays the same
-    i.e. running mean/variance is NOT used for normalization. One can force using stored
-    mean and variance with `.train(False)` method.
+    The mean and standard deviation are calculated per-dimension separately
+    for each object in a mini-batch. Gamma and beta are optional learnable
+    parameter vectors of size C (where C is the input size). This can be seen as
+    an extension of layer normalization where statistics are not calculated over
+    `batch_size` or `num_features`.
 
     Args:
-        num_features: num_features from an expected input of size batch_size x num_features x height x width
-        eps: a value added to the denominator for numerical stability. Default: 1e-5
-        momentum: the value used for the running_mean and running_var computation. Default: 0.1
-        affine: a boolean value that when set to true, gives the layer learnable affine parameters.
-
+        num_features: num_features from an expected input of size
+            `batch_size x num_features x height x width`. Specified only if
+            learnable parameters are desired. Default: None
+        eps: a value added to the denominator for numerical stability.
+            Default: 1e-5
     Shape:
         - Input: :math:`(N, C, H, W)`
         - Output: :math:`(N, C, H, W)` (same shape as input)
 
     Examples:
         >>> # Without Learnable Parameters
-        >>> m = nn.InstanceNorm2d(100)
+        >>> m = nn.InstanceNorm2d()
         >>> # With Learnable Parameters
-        >>> m = nn.InstanceNorm2d(100, affine=True)
+        >>> m = nn.InstanceNorm2d(100)
         >>> input = autograd.Variable(torch.randn(20, 100, 35, 45))
         >>> output = m(input)
     """
@@ -125,29 +161,25 @@ class InstanceNorm2d(_InstanceNorm):
 
 
 class InstanceNorm3d(_InstanceNorm):
-    r"""Applies Instance Normalization over a 5d input that is seen as a mini-batch of 4d inputs
+    r"""Applies Instance Normalization over a 5D input that is seen as a
+    mini-batch of 4D inputs
 
     .. math::
 
-        y = \frac{x - mean[x]}{ \sqrt{Var[x]} + \epsilon} * gamma + beta
+        y = \gamma * \frac{x - \mu_x}{\sigma_x + \epsilon} + \beta
 
-    The mean and standard-deviation are calculated per-dimension separately for each object in a mini-batch.
-    Gamma and beta are learnable parameter vectors
-    of size C (where C is the input size).
-
-    During training, this layer keeps a running estimate of its computed mean
-    and variance. The running sum is kept with a default momentum of 0.1.
-
-    At evaluation time (`.eval()`), the default behaviour of the InstanceNorm module stays the same
-    i.e. running mean/variance is NOT used for normalization. One can force using stored
-    mean and variance with `.train(False)` method.
-
+    The mean and standard deviation are calculated per-dimension separately
+    for each object in a mini-batch. Gamma and beta are optional learnable
+    parameter vectors of size C (where C is the input size). This can be seen as
+    an extension of layer normalization where statistics are not calculated over
+    `batch_size` or `num_features`.
 
     Args:
-        num_features: num_features from an expected input of size batch_size x num_features x depth x height x width
-        eps: a value added to the denominator for numerical stability. Default: 1e-5
-        momentum: the value used for the running_mean and running_var computation. Default: 0.1
-        affine: a boolean value that when set to true, gives the layer learnable affine parameters.
+        num_features: num_features from an expected input of size
+            `batch_size x num_features x depth x height x width`. Specified only
+            if learnable parameters are desired. Default: None
+        eps: a value added to the denominator for numerical stability.
+            Default: 1e-5
 
     Shape:
         - Input: :math:`(N, C, D, H, W)`
@@ -155,9 +187,9 @@ class InstanceNorm3d(_InstanceNorm):
 
     Examples:
         >>> # Without Learnable Parameters
-        >>> m = nn.InstanceNorm3d(100)
+        >>> m = nn.InstanceNorm3d()
         >>> # With Learnable Parameters
-        >>> m = nn.InstanceNorm3d(100, affine=True)
+        >>> m = nn.InstanceNorm3d(100)
         >>> input = autograd.Variable(torch.randn(20, 100, 35, 45, 10))
         >>> output = m(input)
     """

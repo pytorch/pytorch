@@ -635,8 +635,61 @@ def embedding(input, embedding_matrix,
 
 def batch_norm(input, running_mean, running_var, weight=None, bias=None,
                training=False, momentum=0.1, eps=1e-5):
-    f = torch._C._functions.BatchNorm(running_mean, running_var, training, momentum, eps, torch.backends.cudnn.enabled)
+    f = torch._C._functions.BatchNorm(running_mean, running_var, training,
+                                      momentum, eps,
+                                      torch.backends.cudnn.enabled)
     return f(input, weight, bias)
+
+
+def layer_norm(input, weight=None, bias=None, eps=1e-5):
+    mean = input.mean(1, keepdim=True)
+    std = input.std(1, keepdim=True)
+    output = (input - mean) / (std + eps)
+
+    # Resize weights and biases to match dims
+    if weight is not None:
+        if input.size(1) != weight.nelement():
+            raise RuntimeError('got {}-feature tensor, expected {}'
+                               .format(input.size(1), weight.nelement()))
+        output = weight * output
+    if bias is not None:
+        if input.size(1) != bias.nelement():
+            raise RuntimeError('got {}-feature tensor, expected {}'
+                               .format(input.size(1), bias.nelement()))
+        output = output + bias
+
+    return output
+
+
+def _expand_input_to_target(input, target, batch=False):
+    if batch:
+        b = input.size(0)
+    else:
+        b = 1
+    input_correct_dims = input.view(b, target.size(1),
+                                    *map(lambda x: 1, target.size()[2:]))
+    return input_correct_dims.expand_as(target)
+
+
+def instance_norm(input, weight=None, bias=None, eps=1e-5):
+    b, c = input.size(0), input.size(1)
+    mean = _expand_input_to_target(input.view(b, c, -1).mean(2), input, True)
+    std = _expand_input_to_target(input.view(b, c, -1).std(2), input, True)
+    output = (input - mean) / (std + eps)
+
+    # Resize weights and biases to match dims
+    if weight is not None:
+        if input.size(1) != weight.nelement():
+            raise RuntimeError('got {}-feature tensor, expected {}'
+                               .format(input.size(1), weight.nelement()))
+        output = _expand_input_to_target(weight, input) * output
+    if bias is not None:
+        if input.size(1) != bias.nelement():
+            raise RuntimeError('got {}-feature tensor, expected {}'
+                               .format(input.size(1), bias.nelement()))
+        output = output + _expand_input_to_target(bias, input)
+
+    return output
 
 
 # loss
