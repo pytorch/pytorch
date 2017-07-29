@@ -230,10 +230,16 @@ class DataInputCoordinator(object):
         return success
 
     def _get(self):
+        start_time = time.time()
+        last_warning = time.time()
         while self.is_active():
             try:
                 return self._internal_queue.get(block=True, timeout=0.5)
             except Queue.Empty:
+                if time.time() - last_warning > 10.0:
+                    log.warning("** Data input is slow: (still) no data in {} secs.".format(
+                        time.time() - start_time))
+                    last_warning = time.time()
                 continue
         return None
 
