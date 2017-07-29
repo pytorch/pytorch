@@ -118,6 +118,8 @@ PyTypeObject* getPyTypeObject(const thpp::Tensor& tensor)
 }
 PyTypeObject* getPyTypeObject(const at::Tensor& tensor)
 {
+  if(!tensor.defined())
+    throw std::invalid_argument("trying to get type of undefined at::Tensor");
   if(attype_to_pytype.count(&tensor.type()) == 0)
     throw std::invalid_argument("unsupported Tensor type.");
   return attype_to_pytype.at(&tensor.type());

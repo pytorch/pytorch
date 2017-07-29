@@ -145,7 +145,7 @@ PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject *kwds)
 
   if (data == NULL || data == Py_None) {
     // For legacy serialization code, create an empty tensor temporarily.
-    at::Tensor tensor;
+    at::Tensor tensor = at::CPU(at::kFloat).tensor();
     _data = torch::createPyObject(tensor);
     data = _data.get();
   }
