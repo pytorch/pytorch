@@ -3647,6 +3647,11 @@ new_module_tests = [
         desc='tuple'
     ),
     dict(
+        module_name='NoisyLinear',
+        constructor_args=(10, 8),
+        input_size=(4, 10),
+    ),
+    dict(
         module_name='SELU',
         input_size=(3, 2, 5),
         check_inplace=True
@@ -3654,11 +3659,6 @@ new_module_tests = [
     dict(
         module_name='GLU',
         input_size=(5, 6),
-    ),
-    dict(
-        module_name='NoisyLinear',
-        constructor_args=(10, 8),
-        input_size=(4, 10),
     ),
 ]
 
