@@ -58,7 +58,7 @@ class InstanceNorm1d(_InstanceNorm):
         num_features: num_features from an expected input of size `batch_size x num_features x width`
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
-        affine: a boolean value that when set to true, gives the layer learnable affine parameters.
+        affine: a boolean value that when set to true, gives the layer learnable affine parameters. Default: False
 
     Shape:
         - Input: :math:`(N, C, L)`
@@ -102,7 +102,7 @@ class InstanceNorm2d(_InstanceNorm):
         num_features: num_features from an expected input of size batch_size x num_features x height x width
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
-        affine: a boolean value that when set to true, gives the layer learnable affine parameters.
+        affine: a boolean value that when set to true, gives the layer learnable affine parameters. Default: False
 
     Shape:
         - Input: :math:`(N, C, H, W)`
@@ -147,7 +147,7 @@ class InstanceNorm3d(_InstanceNorm):
         num_features: num_features from an expected input of size batch_size x num_features x depth x height x width
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
-        affine: a boolean value that when set to true, gives the layer learnable affine parameters.
+        affine: a boolean value that when set to true, gives the layer learnable affine parameters. Default: False
 
     Shape:
         - Input: :math:`(N, C, D, H, W)`
