@@ -142,7 +142,7 @@ class _SelectionFunction(Function):
     has_all_reduce = True
     # additional_args is prepended before dim when calling the tensor
     # function. It's a no-op for subclasses other than kthvalue.
-    # kthvalue not only requires us to pass a dim, but also preceed it with k.
+    # kthvalue not only requires us to pass a dim, but also precede it with k.
 
     @classmethod
     def forward(cls, ctx, input, dim=None, keepdim=None, additional_args=tuple()):

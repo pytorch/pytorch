@@ -168,7 +168,7 @@ if(CUDA_VERSION VERSION_LESS "3.0")
   # CMake policy 0007 NEW states that empty list elements are not
   # ignored.  I'm just setting it to avoid the warning that's printed.
   cmake_policy(SET CMP0007 NEW)
-  # Note that this will remove all occurances of -G.
+  # Note that this will remove all occurrences of -G.
   list(REMOVE_ITEM depends_CUDA_NVCC_FLAGS "-G")
   cmake_policy(POP)
 endif()

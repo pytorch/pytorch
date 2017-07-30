@@ -2545,7 +2545,7 @@ class TestNN(NNTestCase):
                 self.assertEqual(input_cpu.grad, input_cuda.grad)
                 self.assertEqual(grid_cpu.grad, grid_cuda.grad)
 
-                # check that zero-dimensional input strides dont error out
+                # check that zero-dimensional input strides don't error out
                 base_input = torch.randn(C, IH, IW)
                 input_cpu = Variable(base_input.expand(input_cuda.size()), requires_grad=True)
                 grid_cpu = Variable(torch.randn(N, H, W, 2), requires_grad=True)

@@ -38,7 +38,7 @@ public:
 
 #undef DEFINE_IMPLICIT_CTOR
 
-  // return a new scalar that is guarenteed to be not backed by a tensor.
+  // return a new scalar that is guaranteed to be not backed by a tensor.
   Scalar local() {
     if (Tag::HAS_t != tag) {
       return *this;

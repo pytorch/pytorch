@@ -6,7 +6,7 @@ from ._functions import Scatter, Gather
 def scatter(inputs, target_gpus, dim=0):
     """
     Slices variables into approximately equal chunks and
-    distributes them accross given GPUs. Duplicates
+    distributes them across given GPUs. Duplicates
     references to objects that are not variables. Does not
     support Tensors.
     """
