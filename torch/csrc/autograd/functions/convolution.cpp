@@ -148,7 +148,7 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
   check_input_variables("ConvNd", inputs, 3, 2);
   if (is_padding_neg()) throw std::runtime_error("negative padding is not supported");
   if (is_output_padding_neg()) throw std::runtime_error("negative output_padding is not supported");
-  AutoGPU guard(inputs[0]->data.type().isCuda() ? inputs[0]->data.get_device() : -1);
+  AutoGPU guard(inputs[0]->data);
   auto input = inputs[0]->data.contiguous();
   auto weight = inputs[1]->data;
   auto bias = inputs[2] ? inputs[2]->data : at::Tensor();
@@ -249,7 +249,7 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
   auto weight = weight_var->data;
   auto bias = bias_var ? bias_var->data : at::Tensor();
 
-  AutoGPU guard(input.type().isCuda() ? input.get_device() : -1);
+  AutoGPU guard(input);
 
   input = input.contiguous();
   auto grad_output = grad_outputs[0]->data.contiguous();

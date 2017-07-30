@@ -14,7 +14,7 @@ auto Identity::apply(const variable_list& inputs) -> variable_list {
 auto Clone::apply(const variable_list& inputs) -> variable_list {
   check_input_variables("Clone", inputs, 1);
   auto& input = inputs[0]->data;
-  AutoGPU guard(input.type().isCuda() ? input.get_device() : -1);
+  AutoGPU guard(input);
 
   at::Tensor output = input.clone();
 
@@ -26,7 +26,7 @@ auto Clone::apply(const variable_list& inputs) -> variable_list {
 auto Contiguous::apply(const variable_list& inputs) -> variable_list {
   check_input_variables("Contiguous", inputs, 1);
   auto& input = inputs[0]->data;
-  AutoGPU guard(input.type().isCuda() ? input.get_device() : -1);
+  AutoGPU guard(input);
 
   at::Tensor output = input.contiguous();
 
@@ -39,7 +39,7 @@ auto Transpose::apply(const variable_list& inputs) -> variable_list {
   check_input_variables("Transpose", inputs, 1);
 
   auto& input = inputs[0]->data;
-  AutoGPU guard(input.type().isCuda() ? input.get_device() : -1);
+  AutoGPU guard(input);
 
   at::Tensor output = input.transpose(dim1, dim2);
 
@@ -52,7 +52,7 @@ auto View::apply(const variable_list& inputs) -> variable_list {
   check_input_variables("View", inputs, 1);
 
   auto& input = inputs[0]->data;
-  AutoGPU guard(input.type().isCuda() ? input.get_device() : -1);
+  AutoGPU guard(input);
 
   at::Tensor output = input.view(size);
 
@@ -65,7 +65,7 @@ auto Expand::apply(const variable_list& inputs) -> variable_list {
   check_input_variables("Expand", inputs, 1);
 
   auto& input = inputs[0]->data;
-  AutoGPU guard(input.type().isCuda() ? input.get_device() : -1);
+  AutoGPU guard(input);
 
   at::Tensor output = input.expand(size);
 
@@ -78,7 +78,7 @@ auto Narrow::apply(const variable_list& inputs) -> variable_list {
   check_input_variables("Narrow", inputs, 1);
 
   auto& input = inputs[0]->data;
-  AutoGPU guard(input.type().isCuda() ? input.get_device() : -1);
+  AutoGPU guard(input);
 
   at::Tensor output = input.narrow(dim, start, size);
 
@@ -94,7 +94,7 @@ auto Cat::apply(const variable_list& inputs) -> variable_list {
   }
 
   auto& input = inputs[0]->data;
-  AutoGPU guard(input.type().isCuda() ? input.get_device() : -1);
+  AutoGPU guard(input);
 
   std::vector<at::Tensor> tensors(num_inputs);
   for (int i = 0; i < num_inputs; ++i) {

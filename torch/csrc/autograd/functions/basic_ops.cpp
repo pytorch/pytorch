@@ -25,7 +25,7 @@ auto Add::apply(const variable_list& inputs) -> variable_list {
   check_input_variables("Add", inputs, 2);
   auto& input1 = inputs[0]->data;
   auto& input2 = inputs[1]->data;
-  AutoGPU guard(input1.type().isCuda() ? input1.get_device() : -1);
+  AutoGPU guard(input1);
 
   at::Tensor output;
   if (input1.type().isSparse()) {

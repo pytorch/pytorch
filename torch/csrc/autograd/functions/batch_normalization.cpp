@@ -39,7 +39,7 @@ auto BatchNormForward::apply(const variable_list& inputs) -> variable_list {
   auto& input = inputs[0];
   auto& weight = inputs[1];
   auto& bias = inputs[2];
-  AutoGPU guard(input->data.type().isCuda() ? input->data.get_device() : -1);
+  AutoGPU guard(input->data);
 
   auto num_features = input->data.sizes()[1];
   check_dims_match_num_input_features("running_mean", num_features, running_mean.numel());
@@ -117,7 +117,7 @@ auto BatchNormBackward::apply(const variable_list& grad_outputs) -> variable_lis
   auto weight = weight_var ? weight_var->data : at::Tensor();
   auto bias = bias_var ? bias_var->data : at::Tensor();
 
-  AutoGPU guard(input.type().isCuda() ? input.get_device() : -1);
+  AutoGPU guard(input);
 
   bool use_cudnn = false;
 #ifdef WITH_CUDNN
