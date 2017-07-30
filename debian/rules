@@ -22,8 +22,9 @@ export NO_CUDA = 1
 override_dh_python3:
 	dh_python3 --requires=requirements.txt
 	dh_numpy3
-	find debian/ -type f -name 'libshm.*.so' -exec sh -c \
-		"cd $$(dirname {}); ln -s libshm.*.so libshm.so" \;
+	set -e; \
+		cd debian/python3-torch-cpu/usr/lib/python*/dist-packages/torch/lib/; \
+		ln -s libshm.*.so libshm.so
 
 override_dh_auto_clean:
 	dh_auto_clean
