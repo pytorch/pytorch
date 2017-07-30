@@ -7,8 +7,9 @@ export DEB_CFLAGS_MAINT_APPEND   = # -march=native
 export DEB_CXXFLAGS_MAINT_APPEND = # -march=native
 export DEB_LDFLAGS_MAINT_APPEND  = -Wl,--as-needed
 
-export PYBUILD_NAME=torch
+export PYBUILD_NAME=torch-cpu
 export LC_ALL=C.UTF-8
+export PYBUILD_DISABLE_python3.6=1
 
 # -- Pytorch Flags
 export NO_CUDA = 1
@@ -20,7 +21,10 @@ export NO_CUDA = 1
 override_dh_python3:
 	dh_python3 --requires=requirements.txt
 	dh_numpy3
+	find debian/ -type f -name 'libshm.*.so' -exec sh -c \
+		"cd $$(dirname {}); ln -s libshm.*.so libshm.so" \;
 
 override_dh_auto_clean:
 	dh_auto_clean
 	-find . -type d -name __pycache__ -exec rm -rf '{}' +
+	-$(RM) debian/python3-torch

@@ -2,4 +2,4 @@
 Test-Command: python3 -c "import torch"
 
 # Upstream Unittest, Allowed to fail because PyTorch is still in BETA
-Test-Command: sh test/run_test.sh -p python3.5 || true
+Test-Command: bash test/run_test.sh -p python3.5 || true
