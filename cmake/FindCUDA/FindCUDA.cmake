@@ -542,7 +542,7 @@ mark_as_advanced(
 # Makefile and similar generators don't define CMAKE_CONFIGURATION_TYPES, so we
 # need to add another entry for the CMAKE_BUILD_TYPE.  We also need to add the
 # standerd set of 4 build types (Debug, MinSizeRel, Release, and RelWithDebInfo)
-# for completeness.  We need run this loop in order to accomodate the addition
+# for completeness.  We need run this loop in order to accommodate the addition
 # of extra configuration types.  Duplicate entries will be removed by
 # REMOVE_DUPLICATES.
 set(CUDA_configuration_types ${CMAKE_CONFIGURATION_TYPES} ${CMAKE_BUILD_TYPE} Debug MinSizeRel Release RelWithDebInfo)

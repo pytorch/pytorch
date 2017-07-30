@@ -70,7 +70,7 @@ void Store::StoreDeamon::deamon() {
       try {
         query(rank);
       } catch (...) {
-        // There was an error when processing query. Probably an exception occured in
+        // There was an error when processing query. Probably an exception occurred in
         // recv/send what would indicate that socket on the other side has been closed.
         // If the closing was due to normal exit, then the store should exit too.
         // Otherwise, if it was different exception, other processes will get
@@ -190,7 +190,7 @@ void Store::wait(const std::vector<std::string>& keys) {
   for (std::size_t i = 0; i < nkeys; i++) {
     send_string(_socket, keys[i], (i != (nkeys - 1)));
   }
-  // after sending the query, wait for a 'stop_waiting' reponse
+  // after sending the query, wait for a 'stop_waiting' response
   QueryType qr;
   recv_bytes<QueryType>(_socket, &qr, 1);
   if (qr != QueryType::STOP_WAITING)

@@ -30,8 +30,8 @@ class Sum(Module):
 
     def updateGradInput(self, input, gradOutput):
         dimension = self._getPositiveDimension(input)
-        # zero-strides dont work with MKL/BLAS, so
-        # dont set self.gradInput to zero-stride tensor.
+        # zero-strides don't work with MKL/BLAS, so
+        # don't set self.gradInput to zero-stride tensor.
         # Instead, do a deepcopy.
         size = list(input.size())
         size[dimension] = 1

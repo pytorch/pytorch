@@ -1,0 +1,59 @@
+Source: pytorch
+Section: science
+Priority: optional
+Maintainer: Zhou Mo <cdluminate@gmail.com>
+Build-Depends: cmake,
+               debhelper (>= 10),
+               dh-python,
+               git,
+               libasio-dev,
+               libblas-dev | libblas.so,
+# torch/lib/ATen B-D on python-*
+               python,
+               python-yaml,
+# python3 depends
+               python3-all,
+               python3-all-dev,
+               python3-cffi,
+               python3-numpy,
+               python3-setuptools,
+               python3-yaml,
+Standards-Version: 4.0.0
+Homepage: http://pytorch.org/
+Vcs-Git: https://github.com/CDLuminate/pytorch
+Vcs-Browser: https://github.com/CDLuminate/pytorch
+X-Python3-Version: >= 3.5
+
+# PyTorch supports Python2 but we should not make new Python2 packages.
+
+Package: python3-torch-cpu
+Architecture: any
+Multi-Arch: foreign
+Depends: python3 (>= 3.5),
+         python3-cffi,
+         python3-numpy,
+         ${misc:Depends},
+         ${shlibs:Depends},
+         ${python3:Depends},
+Conflicts: python3-torch-cuda
+Description: Tensors and Dynamic neural networks with GPU acceleration
+ PyTorch is a Python package that provides two high-level features:
+ .
+  - Tensor computation (like NumPy) with strong GPU acceleration
+  - Deep neural networks built on a tape-based autograd system
+ .
+ You can reuse your favorite Python packages such as NumPy, SciPy and Cython
+ to extend PyTorch when needed.
+ .
+ Usually one uses PyTorch either as:
+ .
+  - a replacement for NumPy to use the power of GPUs.
+  - a deep learning research platform that provides maximum flexibility and speed
+ .
+ PyTorch has minimal framework overhead. We integrate acceleration libraries
+ such as Intel MKL and NVIDIA (cuDNN, NCCL) to maximize speed.
+ At the core, its CPU and GPU Tensor and neural network backends
+ (TH, THC, THNN, THCUNN) are written as independent libraries with a C99 API.
+ They are mature and have been tested for years.
+ .
+ Pytorch is in an early-release beta. Expect some adventures and rough edges.

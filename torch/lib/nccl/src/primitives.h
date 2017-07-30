@@ -23,7 +23,7 @@
  * PostFlag. The primitive routines wait for all WaitFlag args to attain
  * at least a value of SUBSTEPS*(step-1)+substep+1 (i.e. completion of
  * corresponding substep by previous step) before executing the transfer.
- * After each substep is transfered, all PostFlag arguments get updated to
+ * After each substep is transferred, all PostFlag arguments get updated to
  * the value SUBSTEPS*step+substep+1.
  */
 
