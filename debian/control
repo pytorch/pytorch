@@ -14,7 +14,7 @@ Build-Depends: cmake,
                python3-numpy,
                python3-setuptools,
                python3-yaml,
-Standards-Version: 3.9.8
+Standards-Version: 4.0.0
 Homepage: http://pytorch.org/
 Vcs-Git: https://github.com/CDLuminate/pytorch
 Vcs-Browser: https://github.com/CDLuminate/pytorch
