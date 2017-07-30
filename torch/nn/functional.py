@@ -38,7 +38,8 @@ def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1,
         groups: split input into groups, in_channels should be divisible by
           the number of groups
 
-    Examples:
+    Examples::
+
         >>> # With square kernels and equal stride
         >>> filters = autograd.Variable(torch.randn(8,4,3,3))
         >>> inputs = autograd.Variable(torch.randn(1,4,5,5))
@@ -70,7 +71,8 @@ def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1,
         groups: split input into groups, in_channels should be divisible by
           the number of groups
 
-    Examples:
+    Examples::
+
         >>> filters = autograd.Variable(torch.randn(33, 16, 3))
         >>> inputs = autograd.Variable(torch.randn(20, 16, 50))
         >>> F.conv1d(inputs, filters)
@@ -102,7 +104,8 @@ def conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1,
         groups: split input into groups, in_channels should be divisible by
           the number of groups
 
-    Examples:
+    Examples::
+
         >>> filters = autograd.Variable(torch.randn(33, 16, 3, 3, 3))
         >>> inputs = autograd.Variable(torch.randn(20, 16, 50, 10, 20))
         >>> F.conv3d(inputs, filters)
@@ -220,7 +223,8 @@ def avg_pool1d(input, kernel_size, stride=None, padding=0,
         count_include_pad: when True, will include the zero-padding in the
             averaging calculation
 
-    Example:
+    Example::
+
         >>> # pool of square window of size=3, stride=2
         >>> input = Variable(torch.Tensor([[[1,2,3,4,5,6,7]]]))
         >>> F.avg_pool1d(input, kernel_size=3, stride=2)
@@ -659,7 +663,8 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100):
             and does not contribute to the input gradient. When size_average is
             True, the loss is averaged over non-ignored targets.
 
-    Example:
+    Example::
+
         >>> # input is of size nBatch x nClasses = 3 x 5
         >>> input = autograd.Variable(torch.randn(3, 5))
         >>> # each element in target has to have 0 <= value < nclasses
@@ -738,10 +743,17 @@ def cross_entropy(input, target, weight=None, size_average=True, ignore_index=-1
         size_average (bool, optional): By default, the losses are averaged
                 over observations for each minibatch. However, if the field
                 sizeAverage is set to False, the losses are instead summed
-                for each minibatch.
+                for each minibatch. Default: True
         ignore_index (int, optional): Specifies a target value that is ignored
                 and does not contribute to the input gradient. When size_average is
-                True, the loss is averaged over non-ignored targets.
+                True, the loss is averaged over non-ignored targets. Default: -100
+                
+    Examples::
+
+        >>> input = autograd.Variable(torch.randn(3, 5), requires_grad=True)
+        >>> target = autograd.Variable(torch.LongTensor(3).random_(5))
+        >>> loss = F.cross_entropy(input, target)
+        >>> loss.backward()
     """
     return nll_loss(log_softmax(input), target, weight, size_average, ignore_index)
 
@@ -760,7 +772,14 @@ def binary_cross_entropy(input, target, weight=None, size_average=True):
         size_average (bool, optional): By default, the losses are averaged
                 over observations for each minibatch. However, if the field
                 sizeAverage is set to False, the losses are instead summed
-                for each minibatch.
+                for each minibatch. Default: True
+
+    Examples::
+
+        >>> input = autograd.Variable(torch.randn(3), requires_grad=True)
+        >>> target = autograd.Variable(torch.FloatTensor(3).random_(2))
+        >>> loss = F.binary_cross_entropy(F.sigmoid(input), target)
+        >>> loss.backward()
     """
     if not target.is_same_size(input):
         warnings.warn("Using a target size ({}) that is different to the input size ({}) is deprecated. "
@@ -778,7 +797,7 @@ def binary_cross_entropy(input, target, weight=None, size_average=True):
 
 def binary_cross_entropy_with_logits(input, target, weight=None, size_average=True):
     r"""Function that measures Binary Cross Entropy between target and output
-    logits:
+    logits.
 
     See :class:`~torch.nn.BCEWithLogitsLoss` for details.
 
@@ -790,7 +809,14 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=Tr
         size_average (bool, optional): By default, the losses are averaged
                 over observations for each minibatch. However, if the field
                 sizeAverage is set to False, the losses are instead summed
-                for each minibatch.
+                for each minibatch. Default: True
+
+    Examples::
+
+        >>> input = autograd.Variable(torch.randn(3), requires_grad=True)
+        >>> target = autograd.Variable(torch.FloatTensor(3).random_(2))
+        >>> loss = F.binary_cross_entropy_with_logits(input, target)
+        >>> loss.backward()
     """
     if not target.is_same_size(input):
         raise ValueError("Target size ({}) must be the same as input size ({})".format(target.size(), input.size()))
@@ -863,7 +889,8 @@ def pixel_shuffle(input, upscale_factor):
         input (Variable): Input
         upscale_factor (int): factor to increase spatial resolution by
 
-    Examples:
+    Examples::
+
         >>> ps = nn.PixelShuffle(3)
         >>> input = autograd.Variable(torch.Tensor(1, 9, 4, 4))
         >>> output = ps(input)
