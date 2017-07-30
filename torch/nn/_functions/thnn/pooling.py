@@ -432,47 +432,61 @@ class AvgPool2dBackward(Function):
 class AvgPool3d(Function):
 
     @staticmethod
-    def forward(ctx, input, kernel_size, stride=None):
+    def forward(ctx, input, kernel_size, stride=None, padding=0,
+                ceil_mode=False, count_include_pad=True):
         ctx.kernel_size = _triple(kernel_size)
         ctx.stride = _triple(stride if stride is not None else kernel_size)
+        ctx.padding = _triple(padding)
+        ctx.ceil_mode = ceil_mode
+        ctx.count_include_pad = count_include_pad
         backend = type2backend[type(input)]
         output = input.new()
         # can avoid this with cudnn
         ctx.save_for_backward(input)
-        backend.VolumetricAveragePooling_updateOutput(backend.library_state,
-                                                      input, output,
-                                                      ctx.kernel_size[0], ctx.kernel_size[2], ctx.kernel_size[1],
-                                                      ctx.stride[0], ctx.stride[2], ctx.stride[1])
+        backend.VolumetricAveragePooling_updateOutput(
+            backend.library_state,
+            input, output,
+            ctx.kernel_size[0], ctx.kernel_size[2], ctx.kernel_size[1],
+            ctx.stride[0], ctx.stride[2], ctx.stride[1],
+            ctx.padding[0], ctx.padding[2], ctx.padding[1],
+            ctx.ceil_mode, ctx.count_include_pad)
         return output
 
     @staticmethod
     def backward(ctx, grad_output):
         input, = ctx.saved_variables
-        grad_input = AvgPool3dBackward.apply(input, grad_output, ctx.kernel_size, ctx.stride)
-        return grad_input, None, None
+        grad_input = AvgPool3dBackward.apply(input, grad_output, ctx.kernel_size, ctx.stride,
+                                             ctx.padding, ctx.ceil_mode, ctx.count_include_pad)
+        return grad_input, None, None, None, None, None
 
 
 class AvgPool3dBackward(Function):
 
     @staticmethod
-    def forward(ctx, input, grad_output, kernel_size, stride):
+    def forward(ctx, input, grad_output, kernel_size, stride, padding, ceil_mode, count_include_pad):
         ctx.kernel_size = kernel_size
         ctx.stride = stride
+        ctx.padding = padding
+        ctx.ceil_mode = ceil_mode
+        ctx.count_include_pad = count_include_pad
         backend = type2backend[type(grad_output)]
         grad_input = grad_output.new()
         ctx.save_for_backward(input)
-        backend.VolumetricAveragePooling_updateGradInput(backend.library_state,
-                                                         input, grad_output, grad_input,
-                                                         ctx.kernel_size[0], ctx.kernel_size[2], ctx.kernel_size[1],
-                                                         ctx.stride[0], ctx.stride[2], ctx.stride[1])
+        backend.VolumetricAveragePooling_updateGradInput(
+            backend.library_state,
+            input, grad_output, grad_input,
+            ctx.kernel_size[0], ctx.kernel_size[2], ctx.kernel_size[1],
+            ctx.stride[0], ctx.stride[2], ctx.stride[1],
+            ctx.padding[0], ctx.padding[2], ctx.padding[1],
+            ctx.ceil_mode, ctx.count_include_pad)
         return grad_input
 
     @staticmethod
     def backward(ctx, ggI):
         input, = ctx.saved_variables
         gI = Variable(ggI.data.new(ggI.size()).zero_())
-        ggO = AvgPool3d.apply(ggI, ctx.kernel_size, ctx.stride)
-        return gI, ggO, None, None
+        ggO = AvgPool3d.apply(ggI, ctx.kernel_size, ctx.stride, ctx.padding, ctx.ceil_mode, ctx.count_include_pad)
+        return gI, ggO, None, None, None, None, None
 
 
 class AdaptiveMaxPool1d(Function):

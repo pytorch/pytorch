@@ -3753,6 +3753,36 @@ new_module_tests = [
         desc='stride',
     ),
     dict(
+        module_name='AvgPool3d',
+        constructor_args=(2, 2, (1, 1, 1)),
+        input_size=(2, 3, 5, 5, 5),
+        desc='stride_pad',
+    ),
+    dict(
+        module_name='AvgPool3d',
+        constructor_args=(4, 2, (1, 2, 1)),
+        input_size=(2, 3, 5, 5, 5),
+        desc='stride_pad_gpu_fixedkw_output',
+    ),
+    dict(
+        module_name='AvgPool3d',
+        constructor_args=((2, 4, 8), 1, (1, 1, 2)),
+        input_size=(2, 3, 2, 4, 8),
+        desc='stride_pad_gpu_general_output',
+    ),
+    dict(
+        module_name='AvgPool3d',
+        constructor_args=(3, 1, 0),
+        input_size=(2, 3, 4, 4, 4),
+        desc='stride1_pad0_gpu_input',
+    ),
+    dict(
+        module_name='AvgPool3d',
+        constructor_args=(2, 2, (1, 1, 1)),
+        input_size=(2, 3, 4, 4, 4),
+        desc='stride_pad_gpu_input_nooverlap',
+    ),
+    dict(
         module_name='ReplicationPad3d',
         constructor_args=((1, 2, 3, 4, 5, 6),),
         input_size=(2, 3, 5, 5, 5),
