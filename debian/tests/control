@@ -1,5 +1,6 @@
 # Python3 Import Test
 Test-Command: python3 -c "import torch as th; print(th.__version__)"
 
-# Upstream Unittest, Allowed to fail because PyTorch is still in BETA
-Test-Command: bash test/run_test.sh -p python3.5 || true
+# Upstream Unittest bash script
+# This is allowed to fail because PyTorch is still in BETA
+Test-Command: bash test/run_test.sh -p python3.5 2>/dev/null
