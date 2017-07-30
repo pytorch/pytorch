@@ -1,0 +1,6 @@
+pytorch (0.1.12~1) experimental; urgency=low
+
+  * Initial release. (Closes: #853923)
+  * Experimental and unofficial packaging.
+
+ -- Zhou Mo <cdluminate@gmail.com>  Thu, 02 Feb 2017 05:01:26 +0000

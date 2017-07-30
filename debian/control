@@ -1,0 +1,45 @@
+Source: pytorch
+Section: science
+Priority: optional
+Maintainer: Zhou Mo <cdluminate@gmail.com>
+Build-Depends: cmake,
+               debhelper (>= 10),
+               dh-python,
+               git,
+               libasio-dev,
+               libblas-dev | libblas.so,
+               python3-all,
+               python3-all-dev,
+               python3-cffi,
+               python3-numpy,
+               python3-setuptools,
+               python3-yaml,
+Standards-Version: 3.9.8
+Homepage: http://pytorch.org/
+Vcs-Git: https://github.com/CDLuminate/pytorch
+Vcs-Browser: https://github.com/CDLuminate/pytorch
+X-Python3-Version: >= 3.5
+
+# PyTorch supports Python2 but we should not make new Python2 packages.
+
+Package: python3-torch-cpu
+Architecture: any
+Multi-Arch: foreign
+Depends: python3 (>= 3.5),
+         python3-cffi,
+         python3-numpy,
+         ${misc:Depends},
+         ${shlibs:Depends},
+         ${python3:Depends},
+Description: Tensors and Dynamic neural networks with GPU acceleration
+ PyTorch is a python package that provides two high-level features:
+ .
+ * Tensor computation (like numpy) with strong GPU acceleration
+ * Deep Neural Networks built on a tape-based autograd system
+ .
+ You can reuse your favorite python packages such as numpy, scipy and
+ Cython to extend PyTorch when needed.
+ .
+ PyTorch is in an early-release Beta. Expect some adventures and rough edges.
+ .
+ This package contains python3 version of PyTorch.
