@@ -1249,14 +1249,18 @@ TH_API void THNN_(VolumetricAveragePooling_updateOutput)(
           THTensor *input,
           THTensor *output,
           int kT, int kW, int kH,
-          int dT, int dW, int dH);
+          int dT, int dW, int dH,
+          int padT, int padW, int padH,
+          bool ceil_mode, bool count_include_pad);
 TH_API void THNN_(VolumetricAveragePooling_updateGradInput)(
           THNNState *state,
           THTensor *input,
           THTensor *gradOutput,
           THTensor *gradInput,
           int kT, int kW, int kH,
-          int dT, int dW, int dH);
+          int dT, int dW, int dH,
+          int padT, int padW, int padH,
+          bool ceil_mode, bool count_include_pad);
 
 TH_API void THNN_(VolumetricConvolution_updateOutput)(
           THNNState *state,
