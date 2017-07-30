@@ -8,6 +8,10 @@ Build-Depends: cmake,
                git,
                libasio-dev,
                libblas-dev | libblas.so,
+# torch/lib/ATen B-D on python-*
+               python,
+               python-yaml,
+# python3 depends
                python3-all,
                python3-all-dev,
                python3-cffi,

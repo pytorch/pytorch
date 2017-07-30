@@ -1,6 +1,5 @@
-pytorch (0.2.0-git20170729) experimental; urgency=low
+pytorch (0.2.0.git20170729) experimental; urgency=low
 
   * Initial release. (Closes: #853923)
-  * Experimental and unofficial packaging.
 
- -- Zhou Mo <cdluminate@gmail.com>  Thu, 02 Feb 2017 05:01:26 +0000
+ -- Zhou Mo <cdluminate@gmail.com>  Sun, 30 Jul 2017 10:12:52 +0000

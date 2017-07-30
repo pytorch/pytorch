@@ -9,6 +9,7 @@ export DEB_LDFLAGS_MAINT_APPEND  = -Wl,--as-needed
 
 export PYBUILD_NAME=torch-cpu
 export LC_ALL=C.UTF-8
+export PYBUILD_DISABLE_python2=1
 export PYBUILD_DISABLE_python3.6=1
 
 # -- Pytorch Flags
