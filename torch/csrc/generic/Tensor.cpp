@@ -1384,7 +1384,7 @@ static PyObject * THPTensor_(getValue)(THPTensor *self, PyObject *index)
       return THPUtils_(newReal)(THStorage_(get)(LIBRARY_STATE sresult, storage_offset));
     }
   }
-  THPUtils_setError("An unknown error has occured when indexing a tensor "
+  THPUtils_setError("An unknown error has occurred when indexing a tensor "
       "in THPTensor_(getValue). Please report this in a github issue at: "
       "https://github.com/pytorch/pytorch");
   return NULL;
@@ -1482,7 +1482,7 @@ static int THPTensor_(setValue)(THPTensor *self, PyObject *index, PyObject *valu
     }
     return 0;
   }
-  THPUtils_setError("An unknown error has occured when indexing a tensor "
+  THPUtils_setError("An unknown error has occurred when indexing a tensor "
       "in THPTensor_(setValue). Please report this in a github issue at: "
       "https://github.com/pytorch/pytorch");
   return -1;

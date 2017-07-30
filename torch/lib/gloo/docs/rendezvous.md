@@ -58,7 +58,7 @@ rendezvous to a particular namespace.
 
 There are many more key/value stores that can be used for rendezvous
 (e.g. [etcd](https://coreos.com/etcd) or [ZooKeeper](https://zookeeper.apache.org/)).
-As long as a C or C++ interface for your store of choice is availabe,
+As long as a C or C++ interface for your store of choice is available,
 is relatively easy to hook it up to the Gloo rendezvous process.
 See the `gloo::rendezvous::Store` abstract base class for the interface to implement.
 
