@@ -91,13 +91,11 @@ module_tests = [
         module_name='Softmax',
         input_size=(10, 20),
         reference_fn=lambda i, _: torch.exp(i).div(torch.exp(i).sum(1, True).expand(10, 20)),
-        check_gradgrad=False,
     ),
     dict(
         module_name='Softmax2d',
         input_size=(1, 3, 10, 20),
         reference_fn=lambda i, _: torch.exp(i).div(torch.exp(i).sum(1, False)),
-        check_gradgrad=False,
     ),
     dict(
         module_name='LogSoftmax',
@@ -240,7 +238,20 @@ criterion_tests = [
         module_name='NLLLoss',
         input=torch.rand(15, 10).log(),
         target=torch.Tensor(15).uniform_().mul(10).floor().long(),
-        check_gradgrad=False,
+    ),
+    dict(
+        module_name='NLLLoss',
+        constructor_args=(None, False),
+        input=torch.rand(15, 10).log(),
+        target=torch.Tensor(15).uniform_().mul(10).floor().long(),
+        desc='no_size_average'
+    ),
+    dict(
+        module_name='NLLLoss',
+        constructor_args=(None, True, 2),
+        input=torch.rand(15, 10).log(),
+        target=torch.Tensor(15).uniform_().mul(10).floor().long(),
+        desc='ignore_index'
     ),
     dict(
         module_name='NLLLoss',
@@ -248,7 +259,20 @@ criterion_tests = [
         input=torch.rand(15, 10).add(1e-2).log(),
         target=torch.Tensor(15).uniform_().mul(10).floor().long(),
         desc='weights',
-        check_gradgrad=False,
+    ),
+    dict(
+        module_name='NLLLoss',
+        constructor_args=(torch.rand(10), True, 2),
+        input=torch.rand(15, 10).add(1e-2).log(),
+        target=torch.Tensor(15).uniform_().mul(10).floor().long(),
+        desc='weights_ignore_index'
+    ),
+    dict(
+        module_name='NLLLoss',
+        constructor_args=(torch.rand(10), True, -1),
+        input=torch.rand(15, 10).add(1e-2).log(),
+        target=torch.Tensor(15).uniform_().mul(10 + 1).floor().long() - 1,
+        desc='weights_ignore_index_neg'
     ),
     dict(
         module_name='KLDivLoss',
@@ -295,7 +319,6 @@ criterion_tests = [
         module_name='NLLLoss2d',
         input_size=(2, 3, 5, 5),
         target=torch.rand(2, 5, 5).mul(3).floor().long(),
-        check_gradgrad=False,
     ),
     dict(
         module_name='NLLLoss2d',
@@ -303,7 +326,6 @@ criterion_tests = [
         input_size=(2, 3, 5, 5),
         target=torch.rand(2, 5, 5).mul(3).floor().long(),
         desc='weights',
-        check_gradgrad=False,
     ),
     dict(
         module_name='NLLLoss2d',
@@ -311,7 +333,6 @@ criterion_tests = [
         input_size=(2, 3, 5, 5),
         target=torch.rand(2, 5, 5).mul(4).floor().long(),
         desc='ignore_index',
-        check_gradgrad=False,
     ),
     dict(
         module_name='HingeEmbeddingLoss',
