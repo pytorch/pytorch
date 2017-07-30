@@ -1,31 +1,25 @@
 #!/usr/bin/make -f
 #export DH_VERBOSE=1
 
+# -- Debian Flags
 export DEB_BUILD_MAINT_OPTIONS   = hardening=+all
 export DEB_CFLAGS_MAINT_APPEND   = # -march=native
 export DEB_CXXFLAGS_MAINT_APPEND = # -march=native
 export DEB_LDFLAGS_MAINT_APPEND  = -Wl,--as-needed
 
+export PYBUILD_NAME=torch
+export LC_ALL=C.UTF-8
+
+# -- Pytorch Flags
 export NO_CUDA = 1
 #export WITH_DISTRIBUTED = ON
 
-PY3 = $(shell py3versions -rd)
-PY3TORCH_PKG = python3-torch-cpu
-
 %:
-	dh $@ --with python3,python2
-
-override_dh_auto_build:
-	$(PY3) setup.py build
-
-override_dh_auto_install:
-	$(PY3) setup.py install --install-layout=deb --root=$(shell pwd)/debian/$(PY3TORCH_PKG)/
+	dh $@ --with python3 --buildsystem=pybuild
 
 override_dh_python3:
 	dh_python3 --requires=requirements.txt
 	dh_numpy3
-	set -e; cd debian/$(PY3TORCH_PKG)/usr/lib/python3/dist-packages/torch/lib/;\
-		ln -s libshm.*.so libshm.so
 
 override_dh_auto_clean:
 	dh_auto_clean
