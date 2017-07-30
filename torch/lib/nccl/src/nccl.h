@@ -46,7 +46,7 @@ typedef enum { ncclSuccess                 =  0,
 
 /* Generates a unique Id with each call. Used to generate commId for
  * ncclCommInitAll. uniqueId will be created in such a way that it is
- * guaranteed to be unique accross the host. */
+ * guaranteed to be unique across the host. */
 ncclResult_t  ncclGetUniqueId(ncclUniqueId* uniqueId);
 ncclResult_t pncclGetUniqueId(ncclUniqueId* uniqueId);
 

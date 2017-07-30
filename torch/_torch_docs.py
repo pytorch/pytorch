@@ -1817,7 +1817,7 @@ along a given dimension.
 If :attr:`dim` is not given, the last dimension of the `input` is chosen.
 
 A tuple of `(values, indices)` is returned, where the `indices` is the indices
-of the kth-smallest element in the original `input` Tensor in dimention `dim`.
+of the kth-smallest element in the original `input` Tensor in dimension `dim`.
 
 If :attr:`keepdim` is true, both the :attr:`values` and :attr:`indices` Tensors
 are the same size as :attr:`input`, except in the dimension :attr:`dim` where

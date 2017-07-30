@@ -10,7 +10,7 @@ import torch.utils.hooks as hooks
 
 def _addindent(s_, numSpaces):
     s = s_.split('\n')
-    # dont do anything for single-line stuff
+    # don't do anything for single-line stuff
     if len(s) == 1:
         return s_
     first = s.pop(0)
