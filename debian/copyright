@@ -1,96 +1,10 @@
 Format: http://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
-Upstream-Name: pytorch
-Source: http://pytorch.org/
+Upstream-Name: PyTorch
+Source: http://pytorch.org
 #
 # Please double check copyright with the licensecheck(1) command.
 
-Files:     .gitignore
-           .travis.yml
-           Dockerfile
-           cmake/FindCUDA/FindCUDA/select_compute_arch.cmake
-           docs/*
-           requirements.txt
-           setup.cfg
-           setup.py
-           test/*
-           tools/*
-           torch/__init__.py
-           torch/_tensor_docs.py
-           torch/_tensor_str.py
-           torch/_thnn/__init__.py
-           torch/_thnn/utils.py
-           torch/_torch_docs.py
-           torch/_utils.py
-           torch/autograd/*
-           torch/backends/__init__.py
-           torch/backends/cudnn/__init__.py
-           torch/backends/cudnn/rnn.py
-           torch/csrc/*
-           torch/cuda/__init__.py
-           torch/cuda/comm.py
-           torch/cuda/nccl.py
-           torch/cuda/random.py
-           torch/cuda/streams.py
-           torch/distributed/__init__.py
-           torch/distributed/collectives.py
-           torch/distributed/remote_types.py
-           torch/functional.py
-           torch/legacy/*
-           torch/lib/TH/*
-           torch/lib/THC/*
-           torch/lib/THCS/*
-           torch/lib/THCUNN/*
-           torch/lib/THD/*
-           torch/lib/THNN/*
-           torch/lib/THPP/*
-           torch/lib/THS/*
-           torch/lib/build_all.sh
-           torch/lib/libshm/CMakeLists.txt
-           torch/lib/libshm/alloc_info.h
-           torch/lib/libshm/core.cpp
-           torch/lib/libshm/err.h
-           torch/lib/libshm/libshm.h
-           torch/lib/libshm/manager.cpp
-           torch/lib/libshm/socket.h
-           torch/multiprocessing/__init__.py
-           torch/multiprocessing/pool.py
-           torch/multiprocessing/queue.py
-           torch/multiprocessing/reductions.py
-           torch/nn/*
-           torch/optim/__init__.py
-           torch/optim/adadelta.py
-           torch/optim/adagrad.py
-           torch/optim/adam.py
-           torch/optim/adamax.py
-           torch/optim/asgd.py
-           torch/optim/lbfgs.py
-           torch/optim/optimizer.py
-           torch/optim/rmsprop.py
-           torch/optim/rprop.py
-           torch/optim/sgd.py
-           torch/serialization.py
-           torch/sparse/__init__.py
-           torch/storage.py
-           torch/tensor.py
-           torch/utils/__init__.py
-           torch/utils/data/__init__.py
-           torch/utils/data/dataloader.py
-           torch/utils/data/dataset.py
-           torch/utils/data/sampler.py
-           torch/utils/ffi/__init__.py
-           torch/utils/hooks.py
-           torch/utils/model_zoo.py
-           torch/utils/serialization/__init__.py
-           torch/utils/trainer/__init__.py
-           torch/utils/trainer/plugins/__init__.py
-           torch/utils/trainer/plugins/accuracy.py
-           torch/utils/trainer/plugins/logger.py
-           torch/utils/trainer/plugins/loss.py
-           torch/utils/trainer/plugins/monitor.py
-           torch/utils/trainer/plugins/plugin.py
-           torch/utils/trainer/plugins/progress.py
-           torch/utils/trainer/plugins/time.py
-           torch/utils/trainer/trainer.py
+Files:     *
 Copyright: Copyright (c) 2016-     Facebook, Inc            (Adam Paszke)
            Copyright (c) 2014-     Facebook, Inc            (Soumith Chintala)
            Copyright (c) 2011-2014 Idiap Research Institute (Ronan Collobert)
@@ -100,11 +14,24 @@ Copyright: Copyright (c) 2016-     Facebook, Inc            (Adam Paszke)
            Copyright (c) 2006-2010 NEC Laboratories America (Ronan Collobert, Leon Bottou, Iain Melvin, Jason Weston)
            Copyright (c) 2006      Idiap Research Institute (Samy Bengio)
            Copyright (c) 2001-2004 Idiap Research Institute (Ronan Collobert, Samy Bengio, Johnny Mariethoz)
-License:   BSD-3-Clause-with-slight-modification
+License:   BSD-3-Clause-pytorch-slight-modification
+
+Files:     debian/*
+Copyright: 2017 Mo Zhou <cdluminate@gmail.com>
+License:   BSD-3-Clause
+
+Files:     torch/lib/gloo/gloo/*
+Copyright: 2017 present, Facebook, Inc.
+License:   BSD-3-Clause-pytorch-slight-modification 
 
 Files:     torch/lib/nccl/*
 Copyright: 2015-2016 NVIDIA CORPORATION.
-License:   BSD-3-Clause-with-slight-modification-by-nvidia
+License:   BSD-3-Clause
+
+Files:     torch/lib/TH/THHalf.c
+Copyright: 1993-2014 NVIDIA Corporation.
+           2015-2016 NVIDIA CORPORATION.
+License:   BSD-3-Clause-pytorch-slight-modification
 
 Files:     cmake/FindCUDA/FindCUDA.cmake
 Copyright: 2007-2009 Scientific Computing and Imaging Institute, University of Utah
@@ -113,6 +40,10 @@ License:   Expat
 
 Files:     cmake/FindCUDA/FindCUDA/run_nvcc.cmake
 Copyright: 2008-2009 NVIDIA Corporation.
+License:   Expat
+
+Files:     torch/_six.py
+Copyright: 2010-2017 Benjamin Peterson
 License:   Expat
 
 Files:     cmake/FindCUDA/FindCUDA/parse_cubin.cmake
@@ -125,10 +56,13 @@ Copyright: 2007-2009 Scientific Computing and Imaging Institute, University of U
            2008-2009 NVIDIA Corporation.
 License:   Expat
 
-Files:     torch/lib/TH/THHalf.c
-Copyright: 1993-2014 NVIDIA Corporation.
-License:   __UNKNOWN__
-# FIXME https://github.com/pytorch/pytorch/issues/654
+Files:     torch/lib/nccl/src/libwrap.h
+Copyright: 2015-2016 NVIDIA CORPORATION.
+License:   BSD-3-Clause-pytorch-slight-modification
+
+Files:     torch/lib/THCUNN/IndexLinear.cu
+Copyright: 2016 ArrayFire
+License:   BSD-3-Clause
 
 Files:     torch/lib/TH/THRandom.c
 Copyright: 1997-2002 Makoto Matsumoto and Takuji Nishimura,
@@ -138,36 +72,7 @@ Files:     torch/utils/serialization/read_lua_file.py
 Copyright: 2016 Brendan Shillingford
 License:   BSD-3-Clause
 
-Files:     debian/*
-Copyright: 2017 Zhou Mo <cdluminate@gmail.com>
-License:   BSD-3-Clause
-
-License:   BSD-3-Clause
- Redistribution and use in source and binary forms, with or without
- modification, are permitted provided that the following conditions
- are met:
- 1. Redistributions of source code must retain the above copyright
-    notice, this list of conditions and the following disclaimer.
- 2. Redistributions in binary form must reproduce the above copyright
-    notice, this list of conditions and the following disclaimer in the
-    documentation and/or other materials provided with the distribution.
- 3. Neither the name of the University nor the names of its contributors
-    may be used to endorse or promote products derived from this software
-    without specific prior written permission.
- .
- THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT 
- LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR 
- A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE HOLDERS OR
- CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, 
- EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, 
- PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR 
- PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF 
- LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING 
- NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS 
- SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-License:   BSD-3-Clause-with-slight-modification
+License:   BSD-3-Clause-pytorch-slight-modification
  All rights reserved.
  .
  Redistribution and use in source and binary forms, with or without
@@ -216,35 +121,27 @@ License: Expat
  TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
  SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-License:   BSD-3-Clause-with-slight-modification-by-nvidia
- Copyright (c) 2015-2016, NVIDIA CORPORATION. All rights reserved.
- .
+License: BSD-3-Clause
  Redistribution and use in source and binary forms, with or without
  modification, are permitted provided that the following conditions
  are met:
-  * Redistributions of source code must retain the above copyright
+ 1. Redistributions of source code must retain the above copyright
     notice, this list of conditions and the following disclaimer.
-  * Redistributions in binary form must reproduce the above copyright
+ 2. Redistributions in binary form must reproduce the above copyright
     notice, this list of conditions and the following disclaimer in the
     documentation and/or other materials provided with the distribution.
-  * Neither the name of NVIDIA CORPORATION, Lawrence Berkeley National
-    Laboratory, the U.S. Department of Energy, nor the names of their
-    contributors may be used to endorse or promote products derived
-    from this software without specific prior written permission.
+ 3. Neither the name of the University nor the names of its contributors
+    may be used to endorse or promote products derived from this software
+    without specific prior written permission.
  .
- THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
- EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
- CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
- OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- .
- The U.S. Department of Energy funded the development of this software
- under subcontract 7078610 with Lawrence Berkeley National Laboratory.
-
-
+ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT 
+ LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR 
+ A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE HOLDERS OR
+ CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, 
+ EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, 
+ PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR 
+ PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF 
+ LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING 
+ NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS 
+ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
