@@ -1,8 +1,7 @@
 #pragma once
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
-#include "caffe2/perfkernels/typed_axpy.h"
-#include "caffe2/utils/math.h"
+#include "caffe2/perfkernels/embedding_lookup.h"
 
 namespace caffe2 {
 
@@ -63,6 +62,7 @@ class CPUSparseLengthsReductionOp : public Operator<CPUContext> {
 
     if (USE_WEIGHT) { // static if
       auto& weightInput = Input(WEIGHT);
+      CAFFE_ENFORCE_EQ(1, weightInput.ndim(), "WEIGHT must be a vector");
       CAFFE_ENFORCE_EQ(
           weightInput.size(),
           indices_size,
@@ -70,36 +70,18 @@ class CPUSparseLengthsReductionOp : public Operator<CPUContext> {
       in_weight = weightInput.template data<T>();
     }
 
-    TIndex current = 0;
-    for (int m = 0; m < M; ++m) {
-      memset(out_data, 0, sizeof(T) * D);
-      for (int i = 0; i < lengths[m]; ++i) {
-        CAFFE_ENFORCE_LT(current, indices_size);
-        CAFFE_ENFORCE_LT(indices[current], N);
-#ifdef __GNUC__
-        if (current + 1 < indices_size) {
-          __builtin_prefetch(in_data + D * indices[current + 1], 0, 1);
-        }
-#endif // __GNUC__
-        TypedAxpy<InputType, T>(
-            D,
-            USE_WEIGHT ? in_weight[current] : 1.0,
-            in_data + D * indices[current],
-            out_data);
-        ++current;
-      }
-
-      if (USE_MEAN && lengths[m]) { // static if
-        math::Scale<T, CPUContext>(
-            D, 1.f / lengths[m], out_data, out_data, &context_);
-      }
-      out_data += D;
-    }
-    CAFFE_ENFORCE_EQ(
-        current,
-        indicesInput.size(),
-        "Your input seems to be incorrect: the sum of lengths values should be "
-        "the size of the indices tensor, but it appears not.");
+    // delegate work to perfkernel that branches based on architecture
+    EmbeddingLookup(
+        D,
+        M,
+        indices_size,
+        N,
+        in_data,
+        indices,
+        lengths,
+        in_weight,
+        USE_MEAN,
+        out_data);
     return true;
   }
 
