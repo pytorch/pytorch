@@ -267,12 +267,29 @@ def avg_pool2d(input, kernel_size, stride=None, padding=0,
                                            ceil_mode, count_include_pad)
 
 
-def avg_pool3d(input, kernel_size, stride=None):
+def avg_pool3d(input, kernel_size, stride=None, padding=0,
+               ceil_mode=False, count_include_pad=True):
     """Applies 3D average-pooling operation in kt x kh x kw regions by step
     size dt x dh x dw steps. The number of output features is equal to the
     number of input planes / dt.
+
+    See :class:`~torch.nn.AvgPool3d` for details and output shape.
+
+    Args:
+        input: input tensor (minibatch x in_channels x iT x iH x iW)
+        kernel_size: size of the pooling region, a single number or a
+          tuple (kt x kh x kw)
+        stride: stride of the pooling operation, a single number or a
+          tuple (st x sh x sw). Default is equal to kernel size
+        padding: implicit zero padding on the input, a single number or
+          a tuple (padt x padh x padw), Default: 0
+        ceil_mode: when True, will use `ceil` instead of `floor` in the formula
+            to compute the output shape
+        count_include_pad: when True, will include the zero-padding in th
+            averaging calculation
     """
-    return _functions.thnn.AvgPool3d.apply(input, kernel_size, stride)
+    return _functions.thnn.AvgPool3d.apply(input, kernel_size, stride, padding,
+                                           ceil_mode, count_include_pad)
 
 
 # share the same interface
