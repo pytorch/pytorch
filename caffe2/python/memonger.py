@@ -145,17 +145,22 @@ def _compute_blob_recycling_for_dag(
     for op in ops:
         optim_op_outputs.update(set(op.output))
 
+    blob_seen = collections.defaultdict(lambda: 0)
     for i, op in enumerate(ops):
         for inp in op.input:
             if is_shareable(inp) or inp in heads:
                 if inp in optim_op_outputs:
                     blobs_to_ops[inp].append(i)
-                    op_inputs[i] += 1
+                    assert blob_seen[inp] > 0, \
+                        "Input {} was not output by an op before".format(inp)
+                    op_inputs[i] += blob_seen[inp]
                 else:
                     # For external blobs, we don't increase the op_inputs
                     # count.
                     blobs_to_ops[inp].append(i)
                     share_counts[inp] = 1
+        for outp in op.output:
+            blob_seen[outp] += 1
 
     output_blobs = set()
     mapping = {}
