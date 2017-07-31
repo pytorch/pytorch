@@ -71,9 +71,19 @@ class PrintOp final : public Operator<Context> {
                 ? ws->RootFolder() + "/" + operator_def.input(0) +
                     kPrintFileExtension
                 : "",
-            OperatorBase::GetSingleArgument<int>("limit", 0)) {}
+            OperatorBase::GetSingleArgument<int>("limit", 0)),
+        every_n_(OperatorBase::GetSingleArgument<int>("every_n", 1)) {
+    CAFFE_ENFORCE_GE(every_n_, 1);
+  }
 
   bool RunOnDevice() override {
+    if (++occurrences_mod_n_ > every_n_) {
+      occurrences_mod_n_ -= every_n_;
+    }
+    if (occurrences_mod_n_ != 1) {
+      return true;
+    }
+
     if (!OperatorBase::InputIsType<Tensor<Context>>(0) &&
         !OperatorBase::InputIsType<TensorCPU>(0)) {
       LOG(INFO) << "Blob of type: "
@@ -126,6 +136,8 @@ class PrintOp final : public Operator<Context> {
 
  private:
   TensorPrinter tensor_printer_;
+  int every_n_;
+  int occurrences_mod_n_{0};
 };
 
 /**
