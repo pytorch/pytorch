@@ -501,7 +501,7 @@ def prelu(input, weight):
 
 
 def rrelu(input, lower=1. / 8, upper=1. / 3, training=False, inplace=False):
-    return _functions.thnn.RReLU(lower, upper, training, inplace)(input)
+    return _functions.thnn.RReLU.apply(input, lower, upper, training, inplace)
 
 
 def logsigmoid(input):
