@@ -15,6 +15,20 @@ def elu_double_backwards(ctx, ggI):
     return gI, ggO, None, None, None, None
 
 
+def hardshrink_double_backwards(ctx, ggI):
+    t = ctx.saved_variables
+    input = t[0]
+    lambd = ctx.additional_args[0]
+    gI = None
+
+    gt_lambda_mask = (input > lambd).type_as(ggI)
+    lt_neg_lambda_mask = (input < -lambd).type_as(ggI)
+    mask = gt_lambda_mask + lt_neg_lambda_mask
+    ggO = ggI * mask
+
+    return gI, ggO, None, None, None
+
+
 def hardtanh_double_backwards(ctx, ggI):
     t = ctx.saved_variables
     input, grad_output = t[0], t[1]
@@ -139,6 +153,7 @@ def nllloss_double_backwards(ctx, ggI):
 
 double_backwards_fns = {
     'ELU': elu_double_backwards,
+    'Hardshrink': hardshrink_double_backwards,
     'Hardtanh': hardtanh_double_backwards,
     'LeakyReLU': leakyrelu_double_backwards,
     'LogSoftmax': logsoftmax_double_backwards,

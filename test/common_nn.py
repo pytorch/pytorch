@@ -116,7 +116,6 @@ module_tests = [
         module_name='Hardshrink',
         constructor_args=(2.,),
         input_size=(4, 3, 2, 4),
-        check_gradgrad=False,
     ),
     dict(
         module_name='LeakyReLU',
