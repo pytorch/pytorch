@@ -5,11 +5,14 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import core, schema, scope
+import logging
+from caffe2.python import core, schema, scope, workspace
 from caffe2.python.layers.tags import TagContext
 
 from collections import namedtuple
 import numpy as np
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 # Some types to simplify descriptions of things traveling between ops
 IdList = schema.List(np.int64)
@@ -109,10 +112,56 @@ class LayerParameter(object):
                  ps_param=None):
         assert isinstance(parameter, core.BlobReference), \
             "expect {0} to be a blob reference".format(str(parameter))
+        # need to put the following line (shape) before initialier
+        # shape will be updated once initializer is (re)set
+        self._shape = None
         self.parameter = parameter
         self.optimizer = optimizer
         self.initializer = initializer
         self.ps_param = ps_param
+
+    @property
+    def initializer(self):
+        return self._initializer
+
+    @initializer.setter
+    def initializer(self, op):
+        assert core.IsOperator(getattr(op, 'type', None)), \
+            "initializer expects an operator, got type: {}".format(type(op))
+        self._initializer = op
+        if op is not None:
+            shape = self._infer_shape_from_initializer()
+            assert self.shape is None or self.shape == shape, \
+                "inconsistent shape for layer parameter:"\
+                " {}, expect: {}, but got {}".format(self, self.shape, shape)
+            self._shape = shape
+
+    @property
+    def shape(self):
+        return self._shape
+
+    def _infer_shape_from_initializer(self):
+        for arg in self.initializer.arg:
+            if arg.name == 'shape':
+                return list(arg.ints)
+        with workspace.WorkspaceGuard("model_init_by_loading_params"):
+            try:
+                net = core.Net("shape_checker")
+                net._net.op.extend([self.initializer])
+                shape_blob = net.NextScopedBlob(self.parameter + "_shape")
+                net.Shape([self.parameter], shape_blob)
+                workspace.RunNetOnce(net)
+                return workspace.FetchBlob(shape_blob).tolist()
+            except RuntimeError:
+                logger.warning(
+                    "Cannot infer the shape of blob {} from operator {}".format(
+                        self.parameter, self.initializer.type)
+                )
+                workspace.ResetWorkspace()
+                return None
+
+    def __str__(self):
+        return str(self.parameter)
 
 
 def is_request_only_scalar(scalar):
