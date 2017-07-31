@@ -153,6 +153,8 @@ void Node::lint() {
 
   IR_IF(this, Return)
     JIT_ASSERT(uses_.size() == 0);
+  IR_ELSEIF(Constant)
+    JIT_ASSERT(inputs_.size() == 0);
   IR_ELSEIF(Param)
     JIT_ASSERT(inputs_.size() == 0);
   IR_ELSEIF(Select)
