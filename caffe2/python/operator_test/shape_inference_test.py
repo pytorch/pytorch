@@ -7,7 +7,7 @@ import numpy as np
 import unittest
 
 from caffe2.proto import caffe2_pb2
-from caffe2.python import workspace, test_util, model_helper, brew
+from caffe2.python import core, workspace, test_util, model_helper, brew
 
 
 class TestShapeInference(test_util.TestCase):
@@ -299,6 +299,15 @@ class TestShapeInference(test_util.TestCase):
         workspace.FeedBlob("X", np.random.rand(4, 26, 32).astype(np.float32))
 
         self.InferTensorRunAndCompare(model)
+
+    def testSqueeze(self):
+        net = core.Net("sq")
+        net.Squeeze(["data"], ["data_squeezed"], dims=[3, 1])
+        (shapes, types) = workspace.InferShapesAndTypes(
+            [net],
+            {'data': [64, 1, 96, 1, 4]}
+        )
+        self.assertEqual(shapes['data_squeezed'], [64, 96, 4])
 
     def testCast(self):
         model = model_helper.ModelHelper(name="test_model")
