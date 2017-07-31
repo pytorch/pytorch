@@ -101,7 +101,8 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
         if self.check_gradgrad:
             # could probably unify check_jacobian above with this.
             params = tuple(x for x in module.parameters())
-            _assertGradAndGradgradChecks(test_case, lambda x, *args, **kw: module(x), (input,) + params)
+            _assertGradAndGradgradChecks(test_case,
+                                         lambda x, *args, **kw: test_case._forward(module, x), (input,) + params)
 
         # check if module can be printed
         module.__repr__()

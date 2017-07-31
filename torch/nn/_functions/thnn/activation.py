@@ -116,50 +116,75 @@ class PReLUBackward(Function):
 
 class RReLU(InplaceFunction):
 
-    def __init__(self, lower, upper, train, inplace=False):
-        super(RReLU, self).__init__(inplace)
-        self.lower = lower
-        self.upper = upper
-        self.train = train
-
-    def forward(self, input):
-        self._backend = type2backend[type(input)]
-        if self.inplace:
-            self.mark_dirty(input)
+    @staticmethod
+    def forward(ctx, input, lower, upper, train, inplace):
+        ctx.lower = lower
+        ctx.upper = upper
+        ctx.train = train
+        ctx.inplace = inplace
+        ctx._backend = type2backend[type(input)]
+        if ctx.inplace:
+            ctx.mark_dirty(input)
             output = input
         else:
             output = input.new(input.size())
-        self.noise = input.new()
-        self._backend.RReLU_updateOutput(
-            self._backend.library_state,
+        ctx.noise = input.new()
+        ctx._backend.RReLU_updateOutput(
+            ctx._backend.library_state,
             input,
             output,
-            self.noise,
-            self.lower,
-            self.upper,
-            self.train,
-            self.inplace,
+            ctx.noise,
+            ctx.lower,
+            ctx.upper,
+            ctx.train,
+            ctx.inplace,
             torch.default_generator if not input.is_cuda else 0
         )
-        self.save_for_backward(input)
+        ctx.save_for_backward(input)
         return output
 
-    def backward(self, grad_output):
-        input, = self.saved_tensors
+    @staticmethod
+    def backward(ctx, grad_output):
+        input, = ctx.saved_variables
+        return RReLUBackward.apply(input, grad_output, ctx.noise, ctx.lower, ctx.upper, ctx.train), None, None, None, None
+
+
+class RReLUBackward(Function):
+
+    @staticmethod
+    def forward(ctx, input, grad_output, noise, lower, upper, train):
+        ctx.noise = noise
+        ctx.lower = lower
+        ctx.upper = upper
+        ctx.train = train
+        ctx._backend = type2backend[type(input)]
+        ctx.save_for_backward(input)
+
         grad_input = input.new()
-        self._backend.RReLU_updateGradInput(
-            self._backend.library_state,
+        ctx._backend.RReLU_updateGradInput(
+            ctx._backend.library_state,
             input,
             grad_output,
             grad_input,
-            self.noise,
-            self.lower,
-            self.upper,
-            self.train,
+            ctx.noise,
+            ctx.lower,
+            ctx.upper,
+            ctx.train,
             False
         )
         return grad_input
 
+    @staticmethod
+    def backward(ctx, ggI):
+        input, = ctx.saved_variables
+
+        gI = None
+
+        positive_mask = (input > 0).type_as(ggI)
+        nonpositive_mask = (input <= 0).type_as(ggI)
+        mask = positive_mask + nonpositive_mask * Variable(ctx.noise)
+        ggO = ggI * mask
+        return gI, ggO, None, None, None, None
 
 class SELU(InplaceFunction):
     alpha = 1.6732632423543772848170429916717
@@ -237,5 +262,6 @@ class Softmin(Function):
 _all_functions.append(PReLU)
 _all_functions.append(PReLUBackward)
 _all_functions.append(RReLU)
+_all_functions.append(RReLUBackward)
 _all_functions.append(SELU)
 _all_functions.append(Softmin)

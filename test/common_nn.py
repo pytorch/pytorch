@@ -64,7 +64,6 @@ module_tests = [
         module_name='RReLU',
         input_size=(1, 2, 2),
         test_cuda=False,
-        check_gradgrad=False,
     ),
     dict(
         module_name='RReLU',
@@ -72,7 +71,6 @@ module_tests = [
         input_size=(4, 4, 5),
         desc='with_up_down',
         test_cuda=False,
-        check_gradgrad=False,
     ),
     dict(
         module_name='Hardtanh',
