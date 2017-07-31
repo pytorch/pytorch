@@ -184,7 +184,7 @@ void Node::lint() {
   IR_ELSEIF(Select)
     JIT_ASSERT(inputs_.size() == 1);
   IR_ELSEIF(PythonOp)
-    int n_scalars = 0, n_tensors = 0;
+    std::size_t n_scalars = 0, n_tensors = 0;
     for (auto c : value->cconv) {
       if (c == 's') {
         n_scalars++;
@@ -288,9 +288,8 @@ void Graph::lint() {
 
 }
 
-std::unique_ptr<Graph> LintGraph(std::unique_ptr<Graph> graph) {
+void LintGraph(std::unique_ptr<Graph>& graph) {
   graph->lint();
-  return graph;
 }
 
 }}

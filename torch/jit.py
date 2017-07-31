@@ -11,18 +11,14 @@ import contextlib
 # model = torch.jit.wrap_model(model)
 
 
-class Graph(torch._C._GraphBase):
-    pass
-
-
 def flatten(x):
     return tuple(F._iter_variables(x))
 
 
 def record_trace(f, inputs):
-    torch._C._tracer_enter(inputs)
+    trace = torch._C._tracer_enter(inputs)
     out = f()
-    trace = torch._C._tracer_exit(flatten(out))
+    torch._C._tracer_exit(trace, flatten(out))
     return (trace, out)
 
 
