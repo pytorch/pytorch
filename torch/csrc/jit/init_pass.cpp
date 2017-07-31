@@ -28,7 +28,7 @@ std::unordered_map<std::string, constructor_type> constructors = {
 
 } // anonymous namespace
 
-std::unique_ptr<Graph> MatchJITOps(std::unique_ptr<Graph> graph) {
+void MatchJITOps(std::unique_ptr<Graph>& graph) {
   auto & nodes = graph->nodes();
   auto it = nodes.begin();
   while (it != nodes.end()) {
@@ -67,7 +67,6 @@ std::unique_ptr<Graph> MatchJITOps(std::unique_ptr<Graph> graph) {
     ++it;
     p->destroy();
   }
-  return graph;
 }
 
 }}

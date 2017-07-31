@@ -4,6 +4,6 @@
 
 namespace torch { namespace jit {
 
-std::unique_ptr<Graph> FuseGraph(std::unique_ptr<Graph> graph);
+void FuseGraph(std::unique_ptr<Graph>& graph);
 
 }}

@@ -9,7 +9,7 @@
 #include <ATen/ATen.h>
 
 #include "torch/csrc/utils/python_strings.h"
-#include "torch/csrc/jit/python_ir.h"
+#include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/jit/init.h"
 
 #ifdef WITH_CUDNN
@@ -824,8 +824,8 @@ PyMODINIT_FUNC PyInit__C()
   ASSERT_TRUE(THPSize_init(module));
   ASSERT_TRUE(THPVariable_initModule(module));
   ASSERT_TRUE(THPFunction_initModule(module));
-  ASSERT_TRUE(THPIR_initModule(module));
   ASSERT_TRUE(THPEngine_initModule(module));
+  ASSERT_TRUE(THPTracer_initModule(module));
 
   ASSERT_TRUE(THPDoubleStorage_init(module));
   ASSERT_TRUE(THPFloatStorage_init(module));

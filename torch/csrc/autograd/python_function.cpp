@@ -362,12 +362,8 @@ static void _transplant_var(Variable& var, const std::shared_ptr<Function>& fn, 
 // do in this case.
 static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
     std::unordered_set<PyObject *> &dirty_inputs, PyObject *raw_output,
-    PyObject *outputs, Node * this_expr, bool is_volatile)
+    PyObject *outputs, bool is_volatile)
 {
-  // Either both or none should be true
-  assert(!(((bool)this_expr) ^ GlobalTracingState.tracing()));
-  bool is_tracing = this_expr && GlobalTracingState.tracing();
-
   auto cdata = is_volatile ? nullptr : THPFunction_asFunction(self);
   Py_ssize_t num_outputs = PyTuple_GET_SIZE(raw_output);
   if (self->cdata.is_executable) {
@@ -448,14 +444,6 @@ static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
       );
     }
     t2var[output] = output_var;
-    if (is_tracing) {
-      // NOTE: normally we don't add Select nodes when there's only a single
-      // output, but Python nodes can't be optimized away, so we simplify the
-      // code here.
-      Node* sel = GlobalTracingState.current().appendNewNode<Select>(this_expr, i);
-      sel->inferTypeFrom(output_var->cdata->data);
-      GlobalTracingState.setValueTrace(output_var->cdata.get(), sel);
-    }
     output_var->cdata->output_nr = i;
     PyTuple_SET_ITEM(outputs, i, (PyObject*)output_var);
   }
@@ -618,7 +606,7 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject *args) {
   return std::make_pair(std::move(unpacked), std::move(flags));
 }
 
-PyObject* process_outputs(THPFunction* grad_fn, const UnpackedInput& unpacked, THPObjectPtr&& raw_output, Node * this_expr, bool is_volatile) {
+PyObject* process_outputs(THPFunction* grad_fn, const UnpackedInput& unpacked, THPObjectPtr&& raw_output, bool is_volatile) {
   bool unpack_output = ensure_tuple(raw_output);
 
   auto num_outputs = PyTuple_GET_SIZE(raw_output.get());
@@ -637,7 +625,7 @@ PyObject* process_outputs(THPFunction* grad_fn, const UnpackedInput& unpacked, T
 
   std::unordered_set<PyObject *> dirty_inputs;
   _mark_dirty(grad_fn, t2var, dirty_inputs);
-  _wrap_outputs(grad_fn, t2var, dirty_inputs, raw_output, outputs, this_expr, is_volatile);
+  _wrap_outputs(grad_fn, t2var, dirty_inputs, raw_output, outputs, is_volatile);
   _join_version_counters(grad_fn, t2var);
   if (grad_fn->cdata.is_executable) {
     _mark_non_differentiable(grad_fn, t2var);
@@ -661,21 +649,34 @@ PyObject* process_outputs(THPFunction* grad_fn, const UnpackedInput& unpacked, T
 }
 
 // This sort of reimplements unpack_input, but we have our own requirements
-static Node * make_trace(PyObject* pyobj, PyObject *arg_objects,
+static void make_trace(PyObject* op_obj, PyObject *input_objects,
+        PyObject *output_objects,
         const variable_list& input_vars,
-        const std::vector<bool>& is_variable_input, bool is_legacy)
+        const std::vector<bool>& is_variable_input)
 {
-  if (!GlobalTracingState.tracing())
-    return nullptr;
+  if (!tracer::isTracing(input_vars))
+    return;
 
-  auto & graph = GlobalTracingState.current();
-  auto num_args = PyTuple_GET_SIZE(arg_objects);
+  // Isolate C variable ptrs in a vector
+  Py_INCREF(output_objects);
+  THPObjectPtr output_obj_ptr {output_objects};
+  ensure_tuple(output_obj_ptr);
+  variable_list output_vars;
+  for (int i = 0; i < PyTuple_GET_SIZE(output_obj_ptr.get()); ++i) {
+    THPVariable *var = (THPVariable*)PyTuple_GET_ITEM(output_obj_ptr.get(), i);
+    output_vars.emplace_back(var->cdata);
+  }
+
+  // Save scalar args and the calling convention
+  auto tracing_state = tracer::getTracingState(input_vars);
+  auto& graph = tracing_state->graph;
+  auto num_args = PyTuple_GET_SIZE(input_objects);
   pyobj_list scalar_args;
   std::string arg_types;
   arg_types.reserve(num_args);
   scalar_args.reserve(num_args);
   for (int i = 0; i < num_args; i++) {
-    PyObject *arg_object = PyTuple_GET_ITEM(arg_objects, i);
+    PyObject *arg_object = PyTuple_GET_ITEM(input_objects, i);
     if (is_variable_input[i]) {
       arg_types.push_back('t');
     } else {
@@ -692,18 +693,30 @@ static Node * make_trace(PyObject* pyobj, PyObject *arg_objects,
   std::vector<Node*> value_traces;
   value_traces.reserve(input_vars.size());
   for (auto& i : input_vars)
-    value_traces.emplace_back(GlobalTracingState.getValueTrace(i.get()));
+    value_traces.emplace_back(tracer::getValueTrace(tracing_state, i));
 
-  Py_INCREF(pyobj);
-  auto op = graph.appendNewNode<PythonOp>(
-    THPObjectPtr(pyobj),
+  // Construct the IR Node and its Selects
+  Py_INCREF(op_obj);
+  auto this_expr = graph->appendNewNode<PythonOp>(
+    THPObjectPtr(op_obj),
     arg_types,
-    is_legacy,
+    false, // TODO: remove is_legacy
     std::move(scalar_args));
   for (auto t : value_traces)
-    op->addInput(t);
+    this_expr->addInput(t);
 
-  return op;
+  int num_outputs = output_vars.size();
+  for (int i = 0; i < num_outputs; ++i) {
+    auto& output = output_vars[i];
+    // NOTE: normally we don't add Select nodes when there's only a single
+    // output, but Python nodes can't be optimized away, so we simplify the
+    // code here.
+    Node* sel = graph->appendNewNode<Select>(this_expr, i);
+    sel->inferTypeFrom(output->data);
+    tracer::setValueTrace(tracing_state, output, sel);
+  }
+
+  // TODO: register hooks based on traceability
 }
 
 // Legacy codepath
@@ -723,10 +736,11 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *_inputs)
   THPObjectPtr raw_output(PyObject_CallObject(forward_fn, unpacked_input.tensor_input));
   if (!raw_output) return NULL;
 
-  auto this_expr = make_trace((PyObject*)self, _inputs, unpacked_input.input_vars,
-                              input_info.is_variable_input, true); // legacy
+  if (tracer::isTracing(unpacked_input.input_vars)) {
+    throw std::runtime_error("legacy tracing not supported");
+  }
 
-  return process_outputs(self, unpacked_input, std::move(raw_output), this_expr, is_volatile);
+  return process_outputs(self, unpacked_input, std::move(raw_output), is_volatile);
   END_HANDLE_TH_ERRORS
 }
 
@@ -765,10 +779,13 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *_inputs)
   THPObjectPtr tensor_outputs(PyObject_CallObject(forward_fn, ctx_tensor_input));
   if (!tensor_outputs) return NULL;
 
-  auto this_expr = make_trace(cls, _inputs, unpacked_input.input_vars,
-                              *ctx->is_variable_input, false);
 
-  return process_outputs(ctx, unpacked_input, std::move(tensor_outputs), this_expr, is_volatile);
+  THPObjectPtr outputs {process_outputs(ctx, unpacked_input, std::move(tensor_outputs),
+                                        is_volatile)};
+
+  make_trace(cls, _inputs, outputs, unpacked_input.input_vars, *ctx->is_variable_input);
+
+  return outputs.release();
   END_HANDLE_TH_ERRORS
 }
 
