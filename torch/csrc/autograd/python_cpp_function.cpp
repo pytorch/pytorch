@@ -42,7 +42,7 @@ PyObject* THPCppFunction_call(PyObject* self, PyObject* args, PyObject *kwargs)
 
   HANDLE_TH_ERRORS {
     AutoNoGIL nogil;
-    output = ((THPCppFunction*)self)->cdata->apply(vars);
+    output = (*((THPCppFunction*)self)->cdata)(vars);
   }
   END_HANDLE_TH_ERRORS
 

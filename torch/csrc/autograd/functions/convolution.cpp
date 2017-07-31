@@ -134,7 +134,7 @@ static at::Tensor subtensor(at::Tensor& tensor, int dim, int groups, int g) {
 
 static std::shared_ptr<Variable> subvariable(std::shared_ptr<Variable> var, int dim, int groups, int g) {
   int64_t n = var->data.sizes()[dim] / groups;
-  auto result = std::make_shared<Narrow>(dim, n * g, n)->apply({var})[0];
+  auto result = apply_fn<Narrow>(dim, n * g, n)(var);
   return result;
 }
 
@@ -407,18 +407,18 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
   std::shared_ptr<Variable> ggO = nullptr;
   if (ggI) {
     if (weight->data.type().isCuda()) {
-      weight = Contiguous().apply({weight})[0];
+      weight = apply_fn<Contiguous>()(weight);
     }
-    ggO = ConvForward(*this).apply({ggI, weight, nullptr})[0];
+    ggO = apply_fn<ConvForward>(*this)(ggI, weight, nullptr);
   }
 
   if (ggW) {
     if (ggW->data.type().isCuda()) {
-      ggW = Contiguous().apply({ggW})[0];
+      ggW = apply_fn<Contiguous>()(ggW);
     }
-    auto ggW_term = ConvForward(*this).apply({input_.unpack(), ggW, nullptr})[0];
+    auto ggW_term = apply_fn<ConvForward>(*this)(input_.unpack(), ggW, nullptr);
     if (ggO) {
-      ggO = Add().apply({ggO, ggW_term})[0];
+      ggO = apply_fn<Add>()(ggO, ggW_term);
     } else {
       ggO = ggW_term;
     }
@@ -430,14 +430,14 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
     // Expand
     std::vector<int64_t> new_size(gO->data.ndimension(), 1);
     new_size[1] = ggb->data.sizes()[0];
-    auto ggb_contiguous = Contiguous().apply({ggb})[0];
-    auto ggb_view = View(new_size).apply({ggb_contiguous})[0];
+    auto ggb_contiguous = apply_fn<Contiguous>()(ggb);
+    auto ggb_view = apply_fn<View>(new_size)(ggb_contiguous);
 
     // Expand
-    auto ggb_expanded = Expand(gO->data.sizes()).apply({ggb_view})[0];
+    auto ggb_expanded = apply_fn<Expand>(gO->data.sizes())(ggb_view);
 
     if (ggO) {
-      ggO = Add().apply({ggO, ggb_expanded})[0];
+      ggO = apply_fn<Add>()(ggO, ggb_expanded);
     } else {
       ggO = ggb_expanded;
     }
@@ -452,39 +452,38 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
     // Disable groups as they are handled separately
     auto groups = gw_conv_params.groups;
     gw_conv_params.groups = 1;
-
     std::swap(gw_conv_params.dilation, gw_conv_params.stride);
 
     // Transpose gO and ggI to accumulate over batch
-    auto gOt = Transpose(0, 1).apply({gO})[0];
-    auto ggIt = Transpose(0, 1).apply({ggI})[0];
+    auto gOt = apply_fn<Transpose>(0, 1)(gO);
+    auto ggIt = apply_fn<Transpose>(0, 1)(ggI);
 
     std::shared_ptr<Variable> gWt = nullptr;
     // Compute conv
     if (groups == 1) {
       if (gOt->data.type().isCuda()) {
-        gOt = Contiguous().apply({gOt})[0];
+        gOt = apply_fn<Contiguous>()(gOt);
       }
 
       // Compute conv
-      gWt = ConvForward(gw_conv_params).apply({ggIt, gOt, nullptr})[0];
+      gWt = apply_fn<ConvForward>(gw_conv_params)(ggIt, gOt, nullptr);
     } else {
       variable_list gWt_list(groups);
       for (int g = 0; g < groups; ++g) {
         auto ggIt_g = subvariable(ggIt, 0, groups, g);
         auto gOt_g = subvariable(gOt, 0, groups, g);
         if (gOt_g->data.type().isCuda()) {
-          gOt_g = Contiguous().apply({gOt_g})[0];
+          gOt_g = apply_fn<Contiguous>()(gOt_g);
         }
 
-        gWt_list[g] = ConvForward(gw_conv_params).apply({ggIt_g, gOt_g, nullptr})[0];
+        gWt_list[g] = apply_fn<ConvForward>(gw_conv_params)(ggIt_g, gOt_g, nullptr);
       }
 
-      gWt = Cat(1).apply(gWt_list)[0];
+      gWt = apply_fn<Cat>(1)(gWt_list);
     }
 
     // Transpose gW to match chan_in and chan_out
-    gW = Transpose(0, 1).apply({gWt})[0];
+    gW = apply_fn<Transpose>(0, 1)(gWt);
 
     // narrow gW to only relevant portion
     // we do it this way instead of narrowing the input itself because
@@ -493,7 +492,7 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
     auto w_size = weight->data.sizes();
     for (size_t i = 2; i < gW_size.size(); ++i) {
       if (gW_size[i] > w_size[i]) {
-          gW = Narrow(i, 0, w_size[i]).apply({gW})[0];
+          gW = apply_fn<Narrow>(i, 0, w_size[i])(gW);
       }
     }
   }
@@ -539,32 +538,32 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
     auto groups = gi_conv_params.groups;
     gi_conv_params.groups = 1;
 
-    auto ggWt = Transpose(0, 1).apply({ggW})[0];
-    auto gOt = Transpose(0, 1).apply({gO})[0];
+    auto ggWt = apply_fn<Transpose>(0, 1)(ggW);
+    auto gOt = apply_fn<Transpose>(0, 1)(gO);
 
     std::shared_ptr<Variable> gIt = nullptr;
     if (groups == 1) {
       if (gOt->data.type().isCuda()) {
-        gOt = Contiguous().apply({gOt})[0];
+        gOt = apply_fn<Contiguous>()(gOt);
       }
 
-      gIt = ConvForward(gi_conv_params).apply({ggWt, gOt, nullptr})[0];
+      gIt = apply_fn<ConvForward>(gi_conv_params)(ggWt, gOt, nullptr);
     } else {
       variable_list gIt_list(groups);
       for (int g = 0; g < groups; ++g) {
         auto ggWt_g = subvariable(ggWt, 1, groups, g);
         auto gOt_g = subvariable(gOt, 0, groups, g);
         if (gOt_g->data.type().isCuda()) {
-          gOt_g = Contiguous().apply({gOt_g})[0];
+          gOt_g = apply_fn<Contiguous>()(gOt_g);
         }
 
-        gIt_list[g] = ConvForward(gi_conv_params).apply({ggWt_g, gOt_g, nullptr})[0];
+        gIt_list[g] = apply_fn<ConvForward>(gi_conv_params)(ggWt_g, gOt_g, nullptr);
       }
 
-      gIt = Cat(0).apply(gIt_list)[0];
+      gIt = apply_fn<Cat>(0)(gIt_list);
     }
 
-    gI = Transpose(0, 1).apply({gIt})[0];
+    gI = apply_fn<Transpose>(0, 1)(gIt);
   }
 
   return {ggO, gI, gW};
