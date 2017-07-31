@@ -2,6 +2,7 @@
 #define THC_SCAN_UTILS_INC
 
 #include "THCAsmUtils.cuh"
+#include "THCDeviceUtils.cuh"
 
 // Collection of in-kernel scan / prefix sum utilities
 
