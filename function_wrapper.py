@@ -316,8 +316,9 @@ def create_generic(top_env, declarations):
             top_env['tensor_method_definitions'].append(
                 TENSOR_METHOD_DEFINITION.substitute(env))
             output_options.append({
-                'name': option['name'],
-                'arguments': [f for f in formals if f['name'] != 'self'],
+                'name': option['api_name'],
+                'method_prefix': option['method_prefix'],
+                'arguments': formals,
                 'method_of': 'Tensor',
                 'returns': option['returns'],
                 'inplace': option['inplace'],
@@ -326,7 +327,7 @@ def create_generic(top_env, declarations):
         if is_function:
             first_tensor = find_first_tensor(formals)
             output_option = {
-                'name': option['name'],
+                'name': option['api_name'],
                 'arguments': formals,
                 'returns': option['returns'],
                 'inplace': option['inplace'],
