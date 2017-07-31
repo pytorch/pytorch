@@ -65,7 +65,7 @@ auto AccumulateGrad::apply(const variable_list& grads) -> variable_list {
   }
 
   if (!var->grad) {
-    var->grad = Clone().apply({new_grad})[0];
+    var->grad = apply_fn<Clone>()(new_grad);
     variable_grad = var->grad; // We need to update our reference
   // This case is not strictly necessary, but it makes the first-order only case
   // slightly more efficient and, what's more important, more predictable for
@@ -79,7 +79,7 @@ auto AccumulateGrad::apply(const variable_list& grads) -> variable_list {
     if (!var->grad->is_volatile && new_grad->is_volatile) {
       new_grad = std::make_shared<Variable>(new_grad->data, false, false);
     }
-    var->grad = Add().apply({var->grad, new_grad})[0];
+    var->grad = apply_fn<Add>()(var->grad, new_grad);
   }
 
   return variable_list();
