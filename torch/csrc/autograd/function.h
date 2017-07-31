@@ -63,7 +63,14 @@ struct Function {
   virtual ~Function() {}
 
   // Implements the operation
+  // NOTE: Don't call this function directly. Use apply_fn or operator() instead.
   virtual variable_list apply(const variable_list& inputs) = 0;
+
+  variable_list operator()(const variable_list& inputs) {
+    variable_list outputs = apply(inputs);
+    // TODO: trace this function
+    return outputs;
+  }
 
   // Computes is_executable, is_volatile, and next_functions from a list
   // of input variables
@@ -95,5 +102,22 @@ struct Function {
   PyObject *pyobj;  // weak reference
 };
 
+template<typename T>
+struct apply_fn {
+  template<typename... Args>
+  apply_fn(Args&& ...args)
+    : fn_(std::make_shared<T>(std::forward<Args>(args)...)) {}
+
+  std::shared_ptr<Variable> operator()(const variable_list& inputs) {
+    return (*fn_)(inputs)[0];
+  }
+
+  template<typename... Args>
+  std::shared_ptr<Variable> operator()(Args&& ...inputs) {
+    return (*fn_)(variable_list{inputs...})[0];
+  }
+
+  std::shared_ptr<T> fn_;
+};
 
 }} // namespace torch::autograd
