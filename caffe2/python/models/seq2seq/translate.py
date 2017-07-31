@@ -12,7 +12,7 @@ import logging
 import numpy as np
 import sys
 
-from caffe2.python import attention, core, rnn_cell, workspace
+from caffe2.python import core, rnn_cell, workspace
 from caffe2.python.models.seq2seq.beam_search import BeamSearchForwardOnly
 from caffe2.python.models.seq2seq.seq2seq_model_helper import Seq2SeqModelHelper
 import caffe2.python.models.seq2seq.seq2seq_util as seq2seq_util
@@ -67,12 +67,13 @@ class Seq2SeqModelCaffe2EnsembleDecoder(object):
         (
             encoder_outputs,
             weighted_encoder_outputs,
-            final_encoder_hidden_state,
-            final_encoder_cell_state,
-            encoder_output_dim,
+            final_encoder_hidden_states,
+            final_encoder_cell_states,
+            encoder_units_per_layer,
         ) = seq2seq_util.build_embedding_encoder(
             model=model,
             encoder_params=model_params['encoder_type'],
+            num_decoder_layers=len(model_params['decoder_layer_configs']),
             inputs=self.encoder_inputs,
             input_lengths=self.encoder_lengths,
             vocab_size=self.source_vocab_size,
@@ -80,6 +81,7 @@ class Seq2SeqModelCaffe2EnsembleDecoder(object):
             embedding_size=model_params['encoder_embedding_size'],
             use_attention=use_attention,
             num_gpus=0,
+            forward_only=True,
             scope=scope,
         )
         with core.NameScope(scope):
@@ -110,62 +112,73 @@ class Seq2SeqModelCaffe2EnsembleDecoder(object):
                 'embedded_tokens_t_prev',
             )
 
-        decoder_num_units = (
-            model_params['decoder_layer_configs'][0]['num_units']
-        )
-
-        with core.NameScope(scope):
-            if not use_attention and final_encoder_hidden_state is not None:
-                final_encoder_hidden_state = model.net.Tile(
-                    final_encoder_hidden_state,
-                    'final_encoder_hidden_state_tiled',
-                    tiles=self.beam_size,
-                    axis=1,
+        decoder_cells = []
+        decoder_units_per_layer = []
+        for i, layer_config in enumerate(model_params['decoder_layer_configs']):
+            num_units = layer_config['num_units']
+            decoder_units_per_layer.append(num_units)
+            if i == 0:
+                input_size = model_params['decoder_embedding_size']
+            else:
+                input_size = (
+                    model_params['decoder_layer_configs'][i - 1]['num_units']
                 )
-            if not use_attention and final_encoder_cell_state is not None:
-                final_encoder_cell_state = model.net.Tile(
-                    final_encoder_cell_state,
-                    'final_encoder_cell_state_tiled',
-                    tiles=self.beam_size,
-                    axis=1,
-                )
-            initial_states = seq2seq_util.build_initial_rnn_decoder_states(
-                model=model,
-                encoder_num_units=encoder_output_dim,
-                decoder_num_units=decoder_num_units,
-                final_encoder_hidden_state=final_encoder_hidden_state,
-                final_encoder_cell_state=final_encoder_cell_state,
-                use_attention=use_attention,
-            )
 
-        if use_attention:
-            decoder_cell = rnn_cell.LSTMWithAttentionCell(
-                encoder_output_dim=encoder_output_dim,
-                encoder_outputs=encoder_outputs,
-                decoder_input_dim=model_params['decoder_embedding_size'],
-                decoder_state_dim=decoder_num_units,
-                name=self.scope(scope, 'decoder'),
-                attention_type=attention.AttentionType.Regular,
-                weighted_encoder_outputs=weighted_encoder_outputs,
-                forget_bias=0.0,
-                lstm_memory_optimization=False,
-                attention_memory_optimization=True,
-            )
-            decoder_output_dim = decoder_num_units + encoder_output_dim
-        else:
-            decoder_cell = rnn_cell.LSTMCell(
-                name=self.scope(scope, 'decoder'),
-                input_size=model_params['decoder_embedding_size'],
-                hidden_size=decoder_num_units,
+            cell = rnn_cell.LSTMCell(
+                name=seq2seq_util.get_layer_scope(scope, 'decoder', i),
+                forward_only=True,
+                input_size=input_size,
+                hidden_size=num_units,
                 forget_bias=0.0,
                 memory_optimization=False,
             )
-            decoder_output_dim = decoder_num_units
+            decoder_cells.append(cell)
 
+        with core.NameScope(scope):
+            if final_encoder_hidden_states is not None:
+                for i in range(len(final_encoder_hidden_states)):
+                    if final_encoder_hidden_states[i] is not None:
+                        final_encoder_hidden_states[i] = model.net.Tile(
+                            final_encoder_hidden_states[i],
+                            'final_encoder_hidden_tiled_{}'.format(i),
+                            tiles=self.beam_size,
+                            axis=1,
+                        )
+            if final_encoder_cell_states is not None:
+                for i in range(len(final_encoder_cell_states)):
+                    if final_encoder_cell_states[i] is not None:
+                        final_encoder_cell_states[i] = model.net.Tile(
+                            final_encoder_cell_states[i],
+                            'final_encoder_cell_tiled_{}'.format(i),
+                            tiles=self.beam_size,
+                            axis=1,
+                        )
+            initial_states = \
+                seq2seq_util.build_initial_rnn_decoder_states(
+                    model=model,
+                    encoder_units_per_layer=encoder_units_per_layer,
+                    decoder_units_per_layer=decoder_units_per_layer,
+                    final_encoder_hidden_states=final_encoder_hidden_states,
+                    final_encoder_cell_states=final_encoder_cell_states,
+                    use_attention=use_attention,
+                )
+
+        attention_decoder = seq2seq_util.LSTMWithAttentionDecoder(
+            encoder_outputs=encoder_outputs,
+            encoder_output_dim=encoder_units_per_layer[-1],
+            vocab_size=self.target_vocab_size,
+            attention_type=attention_type,
+            embedding_size=model_params['decoder_embedding_size'],
+            decoder_num_units=decoder_units_per_layer[-1],
+            decoder_cells=decoder_cells,
+            weighted_encoder_outputs=weighted_encoder_outputs,
+            name=scope,
+        )
         states_prev = step_model.net.AddExternalInputs(*[
-            s + '_prev' for s in decoder_cell.get_state_names()
+            '{}/{}_prev'.format(scope, s)
+            for s in attention_decoder.get_state_names()
         ])
-        _, states = decoder_cell.apply(
+        decoder_outputs, states = attention_decoder.apply(
             model=step_model,
             input_t=embedded_tokens_t_prev,
             seq_lengths=fake_seq_lengths,
@@ -213,12 +226,12 @@ class Seq2SeqModelCaffe2EnsembleDecoder(object):
                     'decoder_outputs_flattened',
                     'decoder_outputs_and_contexts_combination_old_shape',
                 ],
-                shape=[-1, decoder_output_dim],
+                shape=[-1, attention_decoder.get_output_dim()],
             )
             output_logits = seq2seq_util.output_projection(
                 model=step_model,
                 decoder_outputs=decoder_outputs_flattened,
-                decoder_output_size=decoder_output_dim,
+                decoder_output_size=attention_decoder.get_output_dim(),
                 target_vocab_size=self.target_vocab_size,
                 decoder_softmax_size=model_params['decoder_softmax_size'],
             )
@@ -232,7 +245,7 @@ class Seq2SeqModelCaffe2EnsembleDecoder(object):
                 'output_log_probs',
             )
             if use_attention:
-                attention_weights = decoder_cell.get_attention_weights()
+                attention_weights = attention_decoder.get_attention_weights()
             else:
                 attention_weights = step_model.net.ConstantFill(
                     [self.encoder_inputs],
