@@ -1,0 +1,7 @@
+# NB: Keep this synced with torch/lib/gloo/.gitmodules
+[submodule "third-party/googletest"]
+	path = torch/lib/gloo/third-party/googletest
+	url = https://github.com/google/googletest.git
+[submodule "third-party/nccl"]
+	path = torch/lib/gloo/third-party/nccl
+	url = https://github.com/nvidia/nccl
