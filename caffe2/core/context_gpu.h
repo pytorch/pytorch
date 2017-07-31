@@ -106,7 +106,7 @@ class CUDAContext final {
     if (curand_generator_) {
       CURAND_ENFORCE(curandDestroyGenerator(curand_generator_));
     }
-    CAFFE_ENFORCE(FinishDeviceComputation());
+    FinishDeviceComputation();
   }
 
   inline void SwitchToDevice(int stream_id) {
@@ -117,15 +117,11 @@ class CUDAContext final {
     SwitchToDevice(0);
   }
 
-  bool FinishDeviceComputation() {
+  void FinishDeviceComputation() {
     cudaStreamSynchronize(cuda_objects_.GetStream(gpu_id_, stream_id_));
     cudaError_t error = cudaGetLastError();
-    if (error == cudaSuccess) {
-      return true;
-    } else {
-      LOG(ERROR) << "Encountered CUDA error: "
-                      << cudaGetErrorString(error);
-      return false;
+    if (error != cudaSuccess) {
+      CAFFE_THROW("Encountered CUDA error: ", cudaGetErrorString(error));
     }
   }
 

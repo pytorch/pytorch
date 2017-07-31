@@ -261,23 +261,11 @@ class Operator : public OperatorBase {
         observer_->Start();
       }
       context_.SwitchToDevice(stream_id);
-      bool started = RunOnDevice();
-      bool finished = context_.FinishDeviceComputation();
-      auto result = started && finished;
+      bool result = RunOnDevice();
       if (!result) {
         this->RecordLastFailedOpNetPosition();
       }
-      if (!finished) {
-        // FinishDeviceComputation() returning error basically means that there
-        // is something wrong with the device (like CUDA) that usually cannot be
-        // recovered, so we should log FATAL.
-        if (has_debug_def()) {
-          LOG(FATAL) << "Computation on device returned error in operator\n"
-                     << ProtoDebugString(this->debug_def());
-        } else {
-          LOG(FATAL) << "Computation on device returned error in operator";
-        }
-      }
+      context_.FinishDeviceComputation(); // throws on error
       if (observer_) {
         observer_->Stop();
       }

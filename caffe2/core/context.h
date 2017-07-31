@@ -92,9 +92,9 @@ void SetCPUAllocator(CPUAllocator* alloc);
  * implementing if you want to write your own context class:
  * - void SwitchToDevice(): any necessary code to switch to the device before
  *     running anything.
- * - bool FinishDeviceComputation(): any wrapping-up work after all the
+ * - void FinishDeviceComputation(): any wrapping-up work after all the
  *     computation of the operator is done. If there are errors during the
- *     execution, return false. For example, in a CUDAContext, this function
+ *     execution, throw exception. For example, in a CUDAContext, this function
  *     carries out a stream synchronization and spots potential errors for
  *     the cuda kernel calls.
  * - static std::pair<void*, MemoryDeleter> New(size_t nbytes): allocates
@@ -126,7 +126,7 @@ class CPUContext final {
     SwitchToDevice(0);
   }
 
-  inline bool FinishDeviceComputation() { return true; }
+  inline void FinishDeviceComputation() {}
 
   inline rand_gen_type& RandGenerator() {
     if (!random_generator_.get()) {

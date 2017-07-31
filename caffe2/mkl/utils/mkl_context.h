@@ -30,9 +30,7 @@ class MKLContext final {
   ~MKLContext() {}
 
   inline void SwitchToDevice(int /*stream_id*/ = 0) {}
-  inline bool FinishDeviceComputation() {
-    return true;
-  }
+  inline void FinishDeviceComputation() {}
 
   inline std::mt19937& RandGenerator() {
     if (!random_generator_.get()) {
