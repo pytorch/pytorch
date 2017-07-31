@@ -146,7 +146,8 @@ class RReLU(InplaceFunction):
     @staticmethod
     def backward(ctx, grad_output):
         input, = ctx.saved_variables
-        return RReLUBackward.apply(input, grad_output, ctx.noise, ctx.lower, ctx.upper, ctx.train), None, None, None, None
+        return (RReLUBackward.apply(input, grad_output, ctx.noise, ctx.lower, ctx.upper, ctx.train),
+                None, None, None, None)
 
 
 class RReLUBackward(Function):
@@ -185,6 +186,7 @@ class RReLUBackward(Function):
         mask = positive_mask + nonpositive_mask * Variable(ctx.noise)
         ggO = ggI * mask
         return gI, ggO, None, None, None, None
+
 
 class SELU(InplaceFunction):
     alpha = 1.6732632423543772848170429916717
