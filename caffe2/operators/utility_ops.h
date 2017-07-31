@@ -1291,25 +1291,34 @@ class SqueezeOp : public Operator<Context> {
         "Input needs at least ",
         (dims_.back() + 1),
         " dimensions.");
+
+    std::vector<int> newDims = ComputeDims(input.dims(), dims_);
+    output->Reshape(newDims);
+    return true;
+  }
+
+  static std::vector<int> ComputeDims(
+      std::vector<TIndex> inputDims,
+      std::vector<int> dims) {
     int j = 0;
     std::vector<int> newDims;
-    for (int i = 0; i < input.dims().size(); ++i) {
-      if (j < dims_.size() && dims_[j] == i) {
-        CAFFE_ENFORCE(
-            input.dims()[i] == 1,
+    for (int i = 0; i < inputDims.size(); ++i) {
+      if (j < dims.size() && dims[j] == i) {
+        CAFFE_ENFORCE_EQ(
+            inputDims[i],
+            1,
             "Dimension ",
             i,
             " of input must be 1",
             " instead of ",
-            input.dims()[i],
+            inputDims[i],
             ".");
         ++j;
         continue;
       }
-      newDims.push_back(input.dims().at(i));
+      newDims.push_back(inputDims.at(i));
     }
-    output->Reshape(newDims);
-    return true;
+    return newDims;
   }
 
  private:
