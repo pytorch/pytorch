@@ -62,7 +62,7 @@ struct TracingState {
     JIT_ASSERT(tracing());
     auto r = std::move(frames.back());
     frames.pop_back();
-    return InitializePyGraph(std::move(r.graph));
+    return MatchAndReplacePythonOps(std::move(r.graph));
   }
 private:
   std::vector<TracingFrame> frames;
