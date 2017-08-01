@@ -40,6 +40,13 @@ struct GraphFuser {
     }
     return true;
   }
+  bool allUsersAreThisConsumer(Node * consumer, Node * producer) {
+    for(auto u : producer->uses()) {
+      if(u.user != consumer)
+        return false;
+    }
+    return true;
+  }
 
   bool shouldFuse(Node * consumer, Node * producer) {
     // this handles cases where producer can be moved _into_ the fusion group of consumer.
@@ -105,6 +112,10 @@ struct GraphFuser {
     n->destroy();
     return group;
   }
+  void insertAfter(Node * n, Node * after) {
+    n->insertAfter(after);
+    topological_index[n] = topological_index[after];
+  }
 
   FusionGroup * fuse(Node * consumer, Node * producer) {
     auto group = consumer->cast<FusionGroup>();
@@ -120,11 +131,70 @@ struct GraphFuser {
     if(producer->uses().size() != 0) {
       size_t offset = group->subgraph().registerOutput(merged);
       Node * new_producer = graph->create<Select>(group,offset);
-      new_producer->insertAfter(group);
+      insertAfter(new_producer, group);
       producer->replaceAllUsesWith(new_producer);
     }
     producer->destroy();
     return group;
+  }
+
+  // in places where op can be fused into a consumer but chunk is in the way
+  // distribute chunk to op's operands:
+  // replace a,b = chunk(op(x,y,z)) with:
+  // x0,x1 = chunk(x)
+  // y0,y1 = chunk(y)
+  // z0,z1 = chunk(z)
+  // a = op(x0,y0,z0)
+  // b = op(x1,y1,x1)
+
+  bool tryToMoveChunk(Node * consumer, Node * producer_) {
+    // if we are fusing a select,
+    Select * producer = producer_->cast<Select>();
+    if(!producer)
+      return false;
+    // and the select refers to a chunk,
+    Chunk * chunk = producer->base()->cast<Chunk>();
+    if(!chunk)
+      return false;
+    // and the thing being chunked is fusable into the consumer
+    Node * producer_for_chunk = chunk->base();
+    if(!isFusable(producer_for_chunk) || !allUsersAreThisConsumer(chunk,producer_for_chunk))
+      return false;
+    // and all uses of the chunk are in this consumer
+    for(auto s : chunk->uses()) {
+      for(auto u : s.user->uses()) {
+        if(u.user != consumer)
+          return false;
+      }
+    }
+
+    std::vector<Chunk*> chunks;
+    for(auto input : producer_for_chunk->inputs()) {
+      Chunk * c = graph->create<Chunk>(chunk->num_chunks,chunk->dim);
+      c->addInput(input);
+      insertAfter(c,chunk);
+      chunks.push_back(c);
+    }
+
+    //as we replace/remove the selects the use list changes, so copy it first
+    use_list copy_uses = chunk->uses();
+    for(auto s : copy_uses) {
+      Select * sel = s.user->cast<Select>();
+      size_t i = sel->offset();
+      size_t j = 0;
+      Node * new_output = graph->createClone(producer_for_chunk,[&](Node * n) {
+        auto & c = chunks[j++];
+        Select * ns = graph->create<Select>(c,i);
+        insertAfter(ns,c);
+        return ns;
+      });
+      insertAfter(new_output,s.user);
+      s.user->replaceAllUsesWith(new_output);
+      s.user->destroy();
+    }
+    chunk->destroy();
+    producer_for_chunk->destroy();
+    return true;
   }
 
   // returns where to continue scanning
@@ -141,6 +211,11 @@ struct GraphFuser {
         return topological_index[a] > topological_index[b];
       });
       for(auto producer : inputs) {
+        if(tryToMoveChunk(consumer,producer)) {
+          // the chunk before this consumer was re-arranged to allow fusion,
+          // we scan this consumer again to perform the fusion
+          return consumer->reverseIterator();
+        }
         if(shouldFuse(consumer, producer)) {
           auto fusion_group = fuse(consumer,producer);
           // after fusion, consumer moves into a FusionGroup, so inputs is no longer valid
