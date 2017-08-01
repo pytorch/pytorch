@@ -598,3 +598,31 @@ class HypothesisTestCase(test_util.TestCase):
                     list(op.input) + list(op.output), inputs + outputs)))
             else:
                 validator(inputs=inputs, outputs=outputs)
+
+    def assertRunOpRaises(
+        self,
+        device_option,
+        op,
+        inputs,
+        input_device_options=None,
+        exception=(Exception,),
+        regexp=None,
+    ):
+        if input_device_options is None:
+            input_device_options = {}
+
+        op = copy.deepcopy(op)
+        op.device_option.CopyFrom(device_option)
+
+        with temp_workspace():
+            for (n, b) in zip(op.input, inputs):
+                workspace.FeedBlob(
+                    n,
+                    b,
+                    device_option=input_device_options.get(n, device_option)
+                )
+            if regexp is None:
+                self.assertRaises(exception, workspace.RunOperatorOnce, op)
+            else:
+                self.assertRaisesRegexp(
+                    exception, regexp, workspace.RunOperatorOnce, op)

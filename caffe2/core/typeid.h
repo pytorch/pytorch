@@ -243,7 +243,9 @@ class TypeMeta {
    * Returns a TypeMeta object that corresponds to the typename T.
    */
   template <typename T>
-  static typename std::enable_if<std::is_fundamental<T>::value, TypeMeta>::type
+  static typename std::enable_if<
+      std::is_fundamental<T>::value || std::is_pointer<T>::value,
+      TypeMeta>::type
   Make() {
     return TypeMeta(Id<T>(), ItemSize<T>(), nullptr, nullptr, nullptr);
   }
@@ -251,7 +253,7 @@ class TypeMeta {
   template <
       typename T,
       typename std::enable_if<
-          !std::is_fundamental<T>::value &&
+          !(std::is_fundamental<T>::value || std::is_pointer<T>::value) &&
           std::is_copy_assignable<T>::value>::type* = nullptr>
   static TypeMeta Make() {
     return TypeMeta(Id<T>(), ItemSize<T>(), _Ctor<T>, _Copy<T>, _Dtor<T>);
@@ -260,7 +262,7 @@ class TypeMeta {
   template <typename T>
   static TypeMeta Make(
       typename std::enable_if<
-          !std::is_fundamental<T>::value &&
+          !(std::is_fundamental<T>::value || std::is_pointer<T>::value) &&
           !std::is_copy_assignable<T>::value>::type* = 0) {
     return TypeMeta(
         Id<T>(), ItemSize<T>(), _Ctor<T>, _CopyNotAllowed<T>, _Dtor<T>);
