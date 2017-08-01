@@ -1619,7 +1619,8 @@ class Net(object):
         input_names = {str(k): str(v) for k, v in viewitems(inputs)}
         output_names = [str(o) for o in outputs]
         proto = self._net
-        ssa, blob_versions = get_ssa(proto)
+        blob_versions = {str(i): 0 for i in inputs}
+        ssa, blob_versions = get_ssa(proto, blob_versions)
         used_op_ids = get_op_ids_in_path(ssa, blob_versions, inputs, outputs)
         disallowed_op_ids = get_op_ids_in_path(ssa, blob_versions, [], inputs)
         assert len(set(used_op_ids) & set(disallowed_op_ids)) == 0, (
