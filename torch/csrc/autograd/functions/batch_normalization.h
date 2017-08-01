@@ -60,16 +60,12 @@ struct BatchNormBackwardBackward : public Function, public BatchNormParams {
   BatchNormBackwardBackward(
       FunctionFlags flags,
       BatchNormParams params,
-      std::unique_ptr<thpp::Tensor> save_mean,
-      std::unique_ptr<thpp::Tensor> save_std,
       SavedVariable input,
       SavedVariable weight,
       SavedVariable grad_output)
     : Function(std::move(flags))
     , BatchNormParams(std::move(params)) {
       if (is_executable) {
-        this->save_mean = std::move(save_mean);
-        this->save_std = std::move(save_std);
         this->input = std::move(input);
         this->weight = std::move(weight);
         this->grad_output = std::move(grad_output);
@@ -80,8 +76,6 @@ struct BatchNormBackwardBackward : public Function, public BatchNormParams {
 
   virtual void releaseVariables() override;
 
-  std::unique_ptr<thpp::Tensor> save_mean;
-  std::unique_ptr<thpp::Tensor> save_std;
   SavedVariable input;
   SavedVariable weight;
   SavedVariable grad_output;
