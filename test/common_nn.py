@@ -139,7 +139,6 @@ module_tests = [
         module_name='Softplus',
         input_size=(10, 20),
         reference_fn=lambda i, _: torch.log(1 + torch.exp(i)),
-        check_gradgrad=False,
     ),
     dict(
         module_name='Softplus',
@@ -147,7 +146,14 @@ module_tests = [
         input_size=(10, 20),
         reference_fn=lambda i, _: 1. / 2. * torch.log(1 + torch.exp(2 * i)),
         desc='beta',
-        check_gradgrad=False,
+    ),
+    dict(
+        module_name='Softplus',
+        constructor_args=(2, -100),
+        input_size=(10, 20),
+        reference_fn=(lambda i, _: ((i * 2) > -100).type_as(i) * i +
+                                   ((i * 2) <= -100).type_as(i) * 1. / 2. * torch.log(1 + torch.exp(2 * i))),
+        desc='beta_threshold',
     ),
     dict(
         module_name='Softshrink',

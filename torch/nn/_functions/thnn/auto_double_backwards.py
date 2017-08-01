@@ -91,6 +91,25 @@ def softmax_double_backwards(ctx, ggI):
     return gI, ggO, None, None, None, None
 
 
+def softplus_double_backwards(ctx, ggI):
+    t = ctx.saved_variables
+    input, gO, output = t[0], t[1], t[2]
+    beta, threshold = ctx.additional_args[0], ctx.additional_args[1]
+
+    input_beta = input * beta
+    above_threshold = ((input_beta) > threshold).type_as(ggI)
+    below_threshold = ((input_beta) <= threshold).type_as(ggI)
+
+    exp_output_beta = (output * beta).exp()
+    first_deriv = (exp_output_beta - 1) / exp_output_beta
+    first_deriv_below_threshold = first_deriv * below_threshold
+
+    gI = ggI * gO * first_deriv_below_threshold * beta / exp_output_beta
+    ggO = ggI * (above_threshold + first_deriv_below_threshold)
+
+    return gI, ggO, None, None, None, None
+
+
 def threshold_double_backwards(ctx, ggI):
     t = ctx.saved_variables
     input = t[0]
@@ -158,6 +177,7 @@ double_backwards_fns = {
     'LeakyReLU': leakyrelu_double_backwards,
     'LogSoftmax': logsoftmax_double_backwards,
     'Softmax': softmax_double_backwards,
+    'Softplus': softplus_double_backwards,
     'Threshold': threshold_double_backwards,
     'L1Loss': l1loss_double_backwards,
     'NLLLoss': nllloss_double_backwards,
