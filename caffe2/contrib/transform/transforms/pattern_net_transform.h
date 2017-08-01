@@ -33,6 +33,14 @@ class PatternNetTransform : public Transform {
     }
   }
 
+  void EnableArgumentMatching() {
+    argument_match_ = true;
+  }
+
+  void DisableArgumentMatching() {
+    argument_match_ = false;
+  }
+
  protected:
   /**
    * We want to the final result of subgraph to match the PatternNet in the
@@ -113,7 +121,6 @@ class PatternNetTransform : public Transform {
   transform::Graph r_;
 
   // This flag determines if the transform will match operator arguments.
-  // TODO(benz): Write a good argument comparator
   bool argument_match_ = false;
 
   const string TransformBlobWrapper(const string& blob_name) {

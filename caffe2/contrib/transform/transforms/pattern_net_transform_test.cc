@@ -217,6 +217,191 @@ TEST(PatternNetTransformTest, TestHardTransform) {
   EXPECT_EQ(14, counter.load());
 }
 
+TEST(PatternNetTransformTest, TestGeneralStringMatching) {
+  Workspace ws;
+  ws.CreateBlob("in");
+
+  NetDef pdef;
+  AddOp(&pdef, "*", {"in"}, {"mid"});
+  AddOp(&pdef, "DummyOp1|DummyOp2", {"mid"}, {"mid2"});
+  AddOp(&pdef, "DummyOp3", {"mid2"}, {"out"});
+
+  NetDef rdef;
+  AddOp(&rdef, "DummyOp1", {"in"}, {"out"});
+
+  NetDef netdef;
+  AddOp(&netdef, "DummyOp1", {"in"}, {"mid"});
+  AddOp(&netdef, "DummyOp3", {"mid"}, {"mid"}); // start of match 1
+  AddOp(&netdef, "DummyOp2", {"mid"}, {"mid"});
+  AddOp(&netdef, "DummyOp3", {"mid"}, {"mid"}); // end of match 1
+  AddOp(&netdef, "DummyOp1", {"mid"}, {"mid"}); // start of match 2
+  AddOp(&netdef, "DummyOp1", {"mid"}, {"mid"});
+  AddOp(&netdef, "DummyOp3", {"mid"}, {"mid"}); // end of match 2
+  AddOp(&netdef, "DummyOp3", {"mid"}, {"out"});
+
+  PatternNetTransform t(pdef, rdef);
+  transform::Graph g(netdef);
+  auto matches = t.PatternMatch(g);
+  EXPECT_EQ(matches.size(), 2);
+}
+
+TEST(PatternNetTransformTest, TestDeviceOptionMatching) {
+  Workspace ws;
+  ws.CreateBlob("in");
+
+  NetDef pdef;
+  auto op = AddOp(&pdef, "DummyOp1", {"in"}, {"out"});
+  op->mutable_device_option()->set_device_type(CPU);
+
+  NetDef rdef;
+  op = AddOp(&rdef, "DummyOp1", {"in"}, {"out"});
+  op->mutable_device_option()->set_device_type(CUDA);
+
+  NetDef netdef;
+  op = AddOp(&netdef, "DummyOp1", {"in"}, {"mid"});
+  op->mutable_device_option()->set_device_type(CPU);
+  op = AddOp(&netdef, "DummyOp1", {"mid"}, {"mid"}); // should not match
+  op->mutable_device_option()->set_device_type(CUDA);
+  op = AddOp(&netdef, "DummyOp1", {"mid"}, {"out"});
+  op->mutable_device_option()->set_device_type(CPU);
+
+  PatternNetTransform t(pdef, rdef);
+  transform::Graph g(netdef);
+  auto matches = t.PatternMatch(g);
+  EXPECT_EQ(matches.size(), 2);
+
+  NetDef transformed_net = t.ApplyTo(netdef);
+  for (const auto& opdef : transformed_net.op()) {
+    EXPECT_TRUE(opdef.has_device_option());
+    EXPECT_EQ(opdef.device_option().device_type(), CUDA);
+  }
+}
+
+TEST(PatternNetTransformTest, TestEngineMatching) {
+  Workspace ws;
+  ws.CreateBlob("in");
+
+  NetDef pdef;
+  auto op = AddOp(&pdef, "DummyOp1", {"in"}, {"out"});
+  op->set_engine("FakeEng1|FakeEng2");
+
+  NetDef rdef;
+  op = AddOp(&rdef, "DummyOp1", {"in"}, {"out"});
+  op->set_engine("FakeEng3");
+
+  NetDef netdef;
+  op = AddOp(&netdef, "DummyOp1", {"in"}, {"mid"});
+  op->set_engine("FakeEng1");
+  op = AddOp(&netdef, "DummyOp1", {"mid"}, {"mid"});
+  op->set_engine("FakeEng2");
+  op = AddOp(&netdef, "DummyOp1", {"mid"}, {"out"}); // should not match
+  op->set_engine("FakeEng3");
+
+  PatternNetTransform t(pdef, rdef);
+  transform::Graph g(netdef);
+  auto matches = t.PatternMatch(g);
+  EXPECT_EQ(matches.size(), 2);
+
+  NetDef transformed_net = t.ApplyTo(netdef);
+  for (const auto& opdef : transformed_net.op()) {
+    EXPECT_EQ(opdef.engine(), "FakeEng3");
+  }
+}
+
+TEST(PatternNetTransformTest, TestSingularArgumentMatching) {
+  Workspace ws;
+  ws.CreateBlob("in");
+
+  NetDef pdef;
+  auto op = AddOp(&pdef, "Conv", {"in"}, {"out"});
+  {
+    auto arg = op->add_arg();
+    arg->set_name("stride_w");
+    arg->set_i(3);
+  }
+  {
+    auto arg = op->add_arg();
+    arg->set_name("stride_h");
+    arg->set_i(3);
+  }
+
+  NetDef rdef;
+  op = AddOp(&rdef, "Conv", {"in"}, {"out"});
+  {
+    auto arg = op->add_arg();
+    arg->set_name("stride_w");
+    arg->set_i(5);
+  }
+  {
+    auto arg = op->add_arg();
+    arg->set_name("stride_h");
+    arg->set_i(5);
+  }
+
+  NetDef netdef;
+  op = AddOp(&netdef, "Conv", {"in"}, {"mid"}); // Will match
+  {
+    auto arg = op->add_arg();
+    arg->set_name("stride_w");
+    arg->set_i(3);
+  }
+  {
+    auto arg = op->add_arg();
+    arg->set_name("stride_h");
+    arg->set_i(3);
+  }
+  op = AddOp(&netdef, "Conv", {"mid"}, {"mid"}); // Has bad args, will not match
+  {
+    auto arg = op->add_arg();
+    arg->set_name("stride_w");
+    arg->set_i(4);
+  }
+  {
+    auto arg = op->add_arg();
+    arg->set_name("stride_h");
+    arg->set_i(4);
+  }
+  op = AddOp(&netdef, "Conv", {"mid"}, {"mid"}); // Has no args, will not match
+  op = AddOp(&netdef, "Conv", {"mid"}, {"out"}); // Has different names
+  {
+    auto arg = op->add_arg();
+    arg->set_name("yolo");
+    arg->set_i(3);
+  }
+  {
+    auto arg = op->add_arg();
+    arg->set_name("swag");
+    arg->set_i(3);
+  }
+  op = AddOp(&netdef, "Conv", {"in"}, {"mid"}); // Will match
+  {
+    auto arg = op->add_arg();
+    arg->set_name("stride_w");
+    arg->set_i(3);
+  }
+  {
+    auto arg = op->add_arg();
+    arg->set_name("stride_h");
+    arg->set_i(3);
+  }
+
+  PatternNetTransform t(pdef, rdef);
+  t.EnableArgumentMatching();
+  transform::Graph g(netdef);
+  auto matches = t.PatternMatch(g);
+  EXPECT_EQ(matches.size(), 2);
+  NetDef transformed_net = t.ApplyTo(netdef);
+  EXPECT_EQ(transformed_net.op(0).arg(0).name(), "stride_w");
+  EXPECT_EQ(transformed_net.op(0).arg(0).i(), 5);
+  EXPECT_EQ(transformed_net.op(0).arg(1).name(), "stride_h");
+  EXPECT_EQ(transformed_net.op(0).arg(1).i(), 5);
+
+  EXPECT_EQ(transformed_net.op(4).arg(0).name(), "stride_w");
+  EXPECT_EQ(transformed_net.op(4).arg(0).i(), 5);
+  EXPECT_EQ(transformed_net.op(4).arg(1).name(), "stride_h");
+  EXPECT_EQ(transformed_net.op(4).arg(1).i(), 5);
+}
+
 /**
  *           |--(Op2)--|
  * P = --->(Op1)----->(Op3)--->
