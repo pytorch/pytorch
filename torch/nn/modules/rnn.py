@@ -181,6 +181,7 @@ class RNNBase(Module):
 
     def __setstate__(self, d):
         super(RNNBase, self).__setstate__(d)
+        self.__dict__.setdefault('_data_ptrs', [])
         if 'all_weights' in d:
             self._all_weights = d['all_weights']
         if isinstance(self._all_weights[0][0], str):
