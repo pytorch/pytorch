@@ -177,7 +177,8 @@ _(Negate) \
 _(Sigmoid) \
 _(Tanh) \
 _(Constant) \
-_(FusionGroup)
+_(FusionGroup) \
+_(Chunk)
 
 enum class NodeKind {
 #define DEFINE_NODE(n) n,
@@ -209,8 +210,11 @@ public:
   NodeKind kind() {
     return kind_;
   }
-  const Type* type() {
+  const Type* type() const {
     return type_.get();
+  }
+  bool hasMultipleOutputs() const {
+    return type()->kind() == TypeKind::Multi;
   }
   void inferTypeFrom(const at::Tensor& output) {
     auto single_type = type_->cast<TypeSingle>();
@@ -797,6 +801,18 @@ struct Mul : public Primitive<Mul,NodeKind::Mul> {};
 struct Negate : public Primitive<Negate,NodeKind::Negate> {};
 struct Sigmoid : public Primitive<Sigmoid,NodeKind::Sigmoid> {};
 struct Tanh : public Primitive<Tanh,NodeKind::Tanh> {};
+
+struct Chunk : public NodeWithKind<Chunk, NodeKind::Chunk, TypeKind::Multi> {
+  void init(int64_t num_chunks_, int64_t dim_) {
+    num_chunks = num_chunks_;
+    dim = dim_;
+  }
+  Node * base() {
+    return inputs()[0];
+  }
+  int64_t num_chunks;
+  int64_t dim;
+};
 
 // A tensor constant
 // TODO: constant compression
