@@ -13,18 +13,18 @@ def image_input(
         if (use_gpu_transform):
             kwargs['use_gpu_transform'] = 1 if use_gpu_transform else 0
             # GPU transform will handle NHWC -> NCHW
-            data, label = model.net.ImageInput(
-                blob_in, [blob_out[0], blob_out[1]], **kwargs
-            )
+            outputs = model.net.ImageInput(blob_in, blob_out, **kwargs)
             pass
         else:
-            data, label = model.net.ImageInput(
-                blob_in, [blob_out[0] + '_nhwc', blob_out[1]], **kwargs
+            outputs = model.net.ImageInput(
+                blob_in, [blob_out[0] + '_nhwc'] + blob_out[1:], **kwargs
             )
-            data = model.net.NHWC2NCHW(data, blob_out[0])
+            outputs_list = list(outputs)
+            outputs_list[0] = model.net.NHWC2NCHW(outputs_list[0], blob_out[0])
+            outputs = tuple(outputs_list)
     else:
-        data, label = model.net.ImageInput(blob_in, blob_out, **kwargs)
-    return data, label
+        outputs = model.net.ImageInput(blob_in, blob_out, **kwargs)
+    return outputs
 
 
 def video_input(model, blob_in, blob_out, **kwargs):

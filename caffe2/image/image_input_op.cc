@@ -6,7 +6,7 @@ REGISTER_CPU_OPERATOR(ImageInput, ImageInputOp<CPUContext>);
 
 OPERATOR_SCHEMA(ImageInput)
     .NumInputs(0, 1)
-    .NumOutputs(2)
+    .NumOutputs(2, INT_MAX)
     .TensorInferenceFunction(
         [](const OperatorDef& def, const vector<TensorShape>& /* unused */ ) {
           vector<TensorShape> out(2);
@@ -75,9 +75,14 @@ The dimension of the output image will always be cropxcrop
     .Arg("db", "Name of the database (if not passed as input)")
     .Arg("db_type", "Type of database (if not passed as input)."
          " Defaults to leveldb")
+    .Arg("output_sizes", "The sizes of any outputs besides the data and label "
+         "(should have a number of elements equal to the number of additional "
+         "outputs)")
     .Input(0, "reader", "The input reader (a db::DBReader)")
     .Output(0, "data", "Tensor containing the images")
-    .Output(1, "label", "Tensor containing the labels");
+    .Output(1, "label", "Tensor containing the labels")
+    .Output(2, "additional outputs", "Any outputs after the first 2 will be "
+            "Tensors read from the input TensorProtos");
 
 NO_GRADIENT(ImageInput);
 
