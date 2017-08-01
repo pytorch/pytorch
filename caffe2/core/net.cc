@@ -81,7 +81,7 @@ void SetGlobalNetObserverCreator(NetObserverCreator creator) {
 }
 
 unique_ptr<NetBase> CreateNet(const NetDef& net_def, Workspace* ws) {
-  const auto tmp_net_def = std::make_shared<const NetDef>(net_def);
+  std::shared_ptr<NetDef> tmp_net_def(new NetDef(net_def));
   return CreateNet(tmp_net_def, ws);
 }
 
