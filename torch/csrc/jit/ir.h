@@ -36,7 +36,8 @@ struct Node;
 
 #define TH_FORALL_TYPES(_) \
 _(Multi) \
-_(Single)
+_(Tensor) \
+_(Handle)
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -71,19 +72,19 @@ public:
   static std::unique_ptr<Type> newWithKind(TypeKind kind);
 };
 
-// Type of nodes with a single output
-struct TypeSingle : public Type {
+// This node represents a single Tensor value
+struct TensorType : public Type {
 private:
   friend struct Type;
 
   std::vector<std::int64_t> sizes_;
   std::vector<std::int64_t> strides_;
 
-  TypeSingle()
-    : Type(TypeKind::Single) {}
+  TensorType()
+    : Type(TypeKind::Tensor) {}
 
 public:
-  static const TypeKind Kind = TypeKind::Single;
+  static const TypeKind Kind = TypeKind::Tensor;
 
   void inferFrom(const at::Tensor& tensor) {
     auto ndim = tensor.dim();
@@ -103,23 +104,52 @@ public:
 };
 
 // Type of multireturn nodes. Note that it doesn't mean that they must always
-// have multiple outputs.
-struct TypeMulti : public Type {
+// have multiple outputs, but each output will be represented with a select node.
+struct MultiType : public Type {
 private:
   friend struct Type;
 
-  TypeMulti()
+  MultiType()
     : Type(TypeKind::Multi) {}
 
 public:
   static const TypeKind Kind = TypeKind::Multi;
 };
 
+// This value represents an opaque handle to external state.
+// Operators that produce/consume values of this type agree on
+// the format.
+
+/* Example Usage: passing state to opaque autograd Functions:
+graph(%1, %8) {
+  %2.0, %2.1 = ^AddConstant(2, False)(%1) // first output is Type::Handle, containing ctx
+  %4.0, %4.1 = ^Add(False)(%2.1, %1) // first output is Type::Handle, containing ctx
+  %6.0, %6.1 = ^Abs()(%4.1) // first output is Type::Handle, containing ctx
+  ---------------- stage 1 ----------------
+  %13 = AutogradOp[AbsBackward](%6.0, %8) // first argument is Type::Handle, consuming ctx
+  %15 = AutogradOp[AddBackward](%4.0, %13.0) // first argument is Type::Handle, consuming ctx
+  %18 = AutogradOp[AddConstantBackward](%2.0, %15.1) // first argument is Type::Handle, consuming ctx
+  %20 = AutogradOp[N5torch8autograd3AddE](%18.0, %18.0)
+  return (%6.0, %20.0);
+}
+*/
+struct HandleType : public Type {
+private:
+  friend struct Type;
+
+  HandleType()
+    : Type(TypeKind::Handle) {}
+
+public:
+  static const TypeKind Kind = TypeKind::Handle;
+};
+
+
 inline std::unique_ptr<Type> Type::newWithKind(TypeKind kind) {
   switch (kind) {
 #define HANDLE_KIND(KIND) \
   case TypeKind::KIND:    \
-    return std::unique_ptr<Type>(static_cast<Type*>(new Type##KIND()));
+    return std::unique_ptr<Type>(static_cast<Type*>(new KIND##Type()));
     TH_FORALL_TYPES(HANDLE_KIND)
   }
 #undef HANDLE_KIND
@@ -130,7 +160,7 @@ inline std::unique_ptr<Type> Type::clone() {
 #define HANDLE_KIND(KIND) \
   case TypeKind::KIND:    \
     return std::unique_ptr<Type>(static_cast<Type*>( \
-          new Type##KIND(*(static_cast<Type##KIND*>(this)))));
+          new KIND##Type(*(static_cast<KIND##Type*>(this)))));
   switch (kind_) {
     TH_FORALL_TYPES(HANDLE_KIND)
   }
@@ -216,8 +246,11 @@ public:
   bool hasMultipleOutputs() const {
     return type()->kind() == TypeKind::Multi;
   }
+  void setType(TypeKind type_kind) {
+    type_ = std::move(Type::newWithKind(type_kind));
+  }
   void inferTypeFrom(const at::Tensor& output) {
-    auto single_type = type_->cast<TypeSingle>();
+    auto single_type = type_->cast<TensorType>();
     JIT_ASSERT(single_type);
     single_type->inferFrom(output);
   }
@@ -475,6 +508,9 @@ protected:
 // using CRTP so that we can alloc new clones and dispatch to custom clone code
 // without significant boilerplate
 
+// TypeKind T is the default for this node type, but
+// can be changed with setType()
+
 template<typename Self, NodeKind K, TypeKind T>
 struct NodeWithKind : public Node {
   friend struct Graph; /* so it can access allocClone() */
@@ -497,7 +533,7 @@ protected:
 
 // helper to define simple primitive Ops.
 template<typename Self, NodeKind K>
-struct Primitive : public NodeWithKind<Self, K, TypeKind::Single> {
+struct Primitive : public NodeWithKind<Self, K, TypeKind::Tensor> {
   void init() {}
   void init(ArrayRef<Node*> inputs) {
     for(auto i : inputs)
@@ -510,7 +546,7 @@ struct Primitive : public NodeWithKind<Self, K, TypeKind::Single> {
 struct Return : public Primitive<Return, NodeKind::Return> {};
 
 // an input tensor to the graph
-struct Param : public NodeWithKind<Param, NodeKind::Param, TypeKind::Single> {
+struct Param : public NodeWithKind<Param, NodeKind::Param, TypeKind::Tensor> {
   void init() {}
 };
 
@@ -773,7 +809,7 @@ struct PythonOp : public NodeWithKind<PythonOp,NodeKind::PythonOp,TypeKind::Mult
 // in this case
 // number_of_outputs = op.uses().size()
 // this will change if Tuples ever become first class.
-struct Select : public NodeWithKind<Select,NodeKind::Select,TypeKind::Single> {
+struct Select : public NodeWithKind<Select,NodeKind::Select,TypeKind::Tensor> {
   void init(Node * node, size_t offset) {
     addInput(node);
     this->offset_ = offset;
@@ -816,7 +852,7 @@ struct Chunk : public NodeWithKind<Chunk, NodeKind::Chunk, TypeKind::Multi> {
 
 // A tensor constant
 // TODO: constant compression
-struct Constant : public NodeWithKind<Constant, NodeKind::Constant,TypeKind::Single> {
+struct Constant : public NodeWithKind<Constant, NodeKind::Constant,TypeKind::Tensor> {
   void init(const at::Tensor& ref) {
     AutoGPU guard(ref.type().isCuda() ? ref.get_device() : -1);
     value = ref.clone();
