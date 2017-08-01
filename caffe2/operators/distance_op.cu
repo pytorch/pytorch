@@ -37,9 +37,15 @@ bool SquaredL2DistanceOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& Y = Input(1);
   auto* distance = Output(0);
-  DCHECK_EQ(X.ndim(), Y.ndim());
+  CAFFE_ENFORCE_EQ(X.ndim(), Y.ndim());
   for (int i = 0; i < X.ndim(); ++i) {
-    DCHECK_EQ(X.dim32(i), Y.dim32(i));
+    CAFFE_ENFORCE_EQ(
+        X.dim32(i),
+        Y.dim32(i),
+        "Mismatch in dimensions",
+        X.dims(),
+        " / ",
+        Y.dims());
   }
   int N = X.ndim() > 0 ? X.dim32(0) : 1;
   int D = X.size() / N;
@@ -75,10 +81,16 @@ bool SquaredL2DistanceGradientOp<float, CUDAContext>::RunOnDevice() {
   int D = N > 0 ? X.size() / N : 0;
   CAFFE_ENFORCE(X.ndim() == Y.ndim());
   for (int i = 0; i < X.ndim(); ++i) {
-    CAFFE_ENFORCE(X.dim32(i) == Y.dim32(i));
+    CAFFE_ENFORCE_EQ(
+        X.dim32(i),
+        Y.dim32(i),
+        "Mismatch on dimensions: ",
+        X.dims(),
+        " / ",
+        Y.dims());
   }
-  CAFFE_ENFORCE(dDistance.ndim() == 1);
-  CAFFE_ENFORCE(dDistance.dim32(0) == N);
+  CAFFE_ENFORCE_EQ(dDistance.ndim(), 1);
+  CAFFE_ENFORCE_EQ(dDistance.dim32(0), N);
   dX->ResizeLike(X);
   dY->ResizeLike(Y);
   math::Sub<float, CUDAContext>(
