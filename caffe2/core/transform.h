@@ -1,7 +1,7 @@
 #pragma once
 
-#include "caffe2/contrib/transform/graph.h"
 #include "caffe2/core/common.h"
+#include "caffe2/core/graph.h"
 #include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/utils/proto_utils.h"
 

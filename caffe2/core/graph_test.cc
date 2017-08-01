@@ -1,6 +1,6 @@
 #include <google/protobuf/text_format.h>
 #include <gtest/gtest.h>
-#include "caffe2/contrib/transform/graph.h"
+#include "caffe2/core/graph.h"
 #include "caffe2/core/net.h"
 #include "caffe2/core/operator.h"
 

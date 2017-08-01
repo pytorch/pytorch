@@ -1,4 +1,4 @@
-#include "caffe2/contrib/transform/transform.h"
+#include "caffe2/core/transform.h"
 
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"

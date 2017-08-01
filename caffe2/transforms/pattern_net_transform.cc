@@ -1,4 +1,4 @@
-#include "caffe2/contrib/transform/transforms/pattern_net_transform.h"
+#include "caffe2/transforms/pattern_net_transform.h"
 
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
