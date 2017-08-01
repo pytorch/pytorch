@@ -197,7 +197,7 @@ auto BatchNormBackward::apply(const variable_list& grad_outputs) -> variable_lis
                                  std::move(grad_bias));
   return wrap_outputs(all_inputs, std::move(outputs), [&](FunctionFlags f) {
     return std::make_shared<BatchNormBackwardBackward>(
-      f, *this, std::move(save_mean), std::move(save_std),
+      f, *this,
       input_var->save(this), Variable::save_opt(weight_var.get(), this),
       grad_outputs[0]->save(this));
     });
