@@ -310,6 +310,7 @@ class OpSchemaRegistry {
     auto& m = map();
     if (m.count(key)) {
       const auto& schema = m[key];
+      std::ios_base::Init init;
       std::cerr << "Trying to register schema with name "
                 << key << " from file " << file << " line " << line
                 << ", but it is already registered from file "
