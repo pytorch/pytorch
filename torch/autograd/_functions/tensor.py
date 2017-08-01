@@ -212,6 +212,7 @@ class AdvancedIndexAdd(InplaceFunction):
         if ctx.needs_input_grad[2]:
             ctx.adv_index = adv_index
         ctx.mark_dirty(tensor1)
+        ctx.tensor2_size = tensor2.size()
         return tensor1._advanced_index_add(adv_index, tensor2)
 
     @staticmethod
@@ -223,7 +224,7 @@ class AdvancedIndexAdd(InplaceFunction):
             grad_tensor1 = grad_output
 
         if ctx.needs_input_grad[2]:
-            grad_tensor2 = grad_output._advanced_index_select(ctx.adv_index)
+            grad_tensor2 = grad_output._advanced_index_select(ctx.adv_index).contiguous().view(ctx.tensor2_size)
         return grad_tensor1, None, grad_tensor2
 
 
