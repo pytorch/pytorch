@@ -60,7 +60,11 @@ __global__ void NearestNeighborGradientKernel(
     const int out_x = fminf(x / width_scale, output_width - 1);
     const int out_index =
         ((n * num_channels + c) * output_height + out_y) * output_width + out_x;
+#if __CUDA_ARCH__ >= 350
     atomicAdd(dX + out_index, __ldg(dY + index));
+#else
+    atomicAdd(dX + out_index, *(dY + index));
+#endif
   }
 }
 
