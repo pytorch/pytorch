@@ -7,6 +7,7 @@
 #include "caffe2/core/db.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/predictor.h"
+#include "caffe2/core/transform.h"
 #include "caffe2/mkl/mkl_utils.h"
 #include "caffe2/utils/cpuid.h"
 #include "caffe2/utils/string_utils.h"
@@ -868,6 +869,23 @@ void addGlobalMethods(py::module& m) {
     CAFFE_ENFORCE(gWorkspace->RunPlan(def));
     return true;
   });
+  m.def(
+      "apply_transform",
+      [](const string& transform_key, const py::bytes& net_def) {
+        NetDef def;
+        CAFFE_ENFORCE(
+            ParseProtobufFromLargeString(net_def.cast<std::string>(), &def));
+        py::gil_scoped_release g;
+
+        auto t = TransformRegistry()->Create(transform_key);
+        CAFFE_ENFORCE(
+            t != nullptr, "Transform not found in registry: ", transform_key);
+        NetDef transformed_net = t->ApplyTo(def);
+
+        std::string protob;
+        CAFFE_ENFORCE(transformed_net.SerializeToString(&protob));
+        return py::bytes(protob);
+      });
   m.def(
       "memonger_optimize_inference_net",
       [](const py::bytes& net_def,
