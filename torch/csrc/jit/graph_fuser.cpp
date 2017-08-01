@@ -17,8 +17,14 @@ bool isSimpleMap(Node *node) {
 
 struct GraphFuser {
   std::unique_ptr<Graph> graph;
-  // used to order nodes so we alway consider producer-consumer fusions
-  // in reverse topological order
+
+
+  // Used to order nodes so we alway consider producer-consumer fusions
+  // in reverse topological order.
+  // If topological_index[a] > topological_index[b] then a occurs after b.
+  // Because nodes can be added to this graph during optimization, this mapping is not bijective.
+  // Newly generated nodes will copy the location where they are inserted.
+  
   std::unordered_map<Node*,size_t> topological_index;
 
   GraphFuser(std::unique_ptr<Graph> graph)
