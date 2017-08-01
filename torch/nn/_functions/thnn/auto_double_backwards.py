@@ -39,6 +39,21 @@ def leakyrelu_double_backwards(ctx, ggI):
     return gI, ggO, None, None, None
 
 
+def logsoftmax_double_backwards(ctx, ggI):
+    t = ctx.saved_variables
+    gO, output = t[1], t[2]
+
+    output_exp = output.exp()
+    gO_sum = gO.sum(dim=1, keepdim=True)
+    ggI_output_exp = ggI * output_exp
+    ggI_output_exp_sum = ggI_output_exp.sum(dim=1, keepdim=True)
+
+    gI = output_exp * gO_sum * ggI_output_exp_sum - ggI_output_exp * gO_sum
+    ggO = ggI - ggI_output_exp_sum
+
+    return gI, ggO, None, None, None, None
+
+
 def softmax_double_backwards(ctx, ggI):
     t = ctx.saved_variables
     gO, output = t[1], t[2]
@@ -126,6 +141,7 @@ double_backwards_fns = {
     'ELU': elu_double_backwards,
     'Hardtanh': hardtanh_double_backwards,
     'LeakyReLU': leakyrelu_double_backwards,
+    'LogSoftmax': logsoftmax_double_backwards,
     'Softmax': softmax_double_backwards,
     'Threshold': threshold_double_backwards,
     'L1Loss': l1loss_double_backwards,
