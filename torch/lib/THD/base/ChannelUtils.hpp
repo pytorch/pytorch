@@ -1,6 +1,6 @@
 #pragma once
 
-#include <THPP/Tensor.hpp>
+#include <ATen/ATen.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <cstdlib>
@@ -54,8 +54,8 @@ enum class DeviceType : std::uint8_t {
   LAST
 };
 
-inline DeviceType getDeviceType(thpp::Tensor& tensor) {
-    return tensor.isCuda() ? DeviceType::CUDA : DeviceType::CPU;
+inline DeviceType getDeviceType(at::Tensor& tensor) {
+    return tensor.type().isCuda() ? DeviceType::CUDA : DeviceType::CPU;
 }
 
 } // namespace thd

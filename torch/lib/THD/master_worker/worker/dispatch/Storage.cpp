@@ -1,29 +1,29 @@
-static std::unique_ptr<thpp::Storage> createStorage(thpp::Type type) {
+static std::unique_ptr<at::Storage> createStorage(thpp::Type type) {
   if (type == thpp::Type::UCHAR)
-    return std::unique_ptr<thpp::Storage>(new thpp::THStorage<uint8_t>());
+    return at::getType(at::Backend::CPU, at::ScalarType::Byte).storage();
   else if (type == thpp::Type::CHAR)
-    return std::unique_ptr<thpp::Storage>(new thpp::THStorage<int8_t>());
+    return at::getType(at::Backend::CPU, at::ScalarType::Char).storage();
   else if (type == thpp::Type::SHORT)
-    return std::unique_ptr<thpp::Storage>(new thpp::THStorage<int16_t>());
+    return at::getType(at::Backend::CPU, at::ScalarType::Short).storage();
   else if (type == thpp::Type::INT)
-    return std::unique_ptr<thpp::Storage>(new thpp::THStorage<int32_t>());
-  else if (type == thpp::Type::LONG_LONG)
-    return std::unique_ptr<thpp::Storage>(new thpp::THStorage<int64_t>());
+    return at::getType(at::Backend::CPU, at::ScalarType::Int).storage();
+  else if (type == thpp::Type::LONG)
+    return at::getType(at::Backend::CPU, at::ScalarType::Long).storage();
   else if (type == thpp::Type::FLOAT)
-    return std::unique_ptr<thpp::Storage>(new thpp::THStorage<float>());
+    return at::getType(at::Backend::CPU, at::ScalarType::Float).storage();
   else if (type == thpp::Type::DOUBLE)
-    return std::unique_ptr<thpp::Storage>(new thpp::THStorage<double>());
+    return at::getType(at::Backend::CPU, at::ScalarType::Double).storage();
   throw std::invalid_argument("passed character doesn't represent a storage type");
 }
 
-static std::unique_ptr<thpp::Storage> createStorage(thpp::Type type, std::size_t size) {
-  std::unique_ptr<thpp::Storage> storage = createStorage(type);
+static std::unique_ptr<at::Storage> createStorage(thpp::Type type, std::size_t size) {
+  std::unique_ptr<at::Storage> storage = createStorage(type);
   storage->resize(size);
   return storage;
 }
 
 static void storageSet(rpc::RPCMessage& raw_message) {
-  thpp::Storage *storage = unpackRetrieveStorage(raw_message);
+  at::Storage *storage = unpackRetrieveStorage(raw_message);
   ptrdiff_t offset = unpackInteger(raw_message);
   thpp::Type type = peekType(raw_message);
   if (thpp::isInteger(type)) {
@@ -40,7 +40,7 @@ static void storageSet(rpc::RPCMessage& raw_message) {
 }
 
 static void storageGet(rpc::RPCMessage& raw_message) {
-  thpp::Storage *storage = unpackRetrieveStorage(raw_message);
+  at::Storage *storage = unpackRetrieveStorage(raw_message);
   ptrdiff_t offset = unpackInteger(raw_message);
   thpp::Type type = unpackType(raw_message);
   finalize(raw_message);
@@ -79,7 +79,7 @@ static void storageNewWithSize(rpc::RPCMessage& raw_message) {
 static void storageNewWithSizeN(rpc::RPCMessage& raw_message, std::size_t size) {
   thpp::Type storage_type = unpackType(raw_message);
   object_id_type storage_id = unpackStorage(raw_message);
-  std::unique_ptr<thpp::Storage> storage = createStorage(storage_type, size);
+  std::unique_ptr<at::Storage> storage = createStorage(storage_type, size);
   thpp::Type value_type = peekType(raw_message);
   if (thpp::isInteger(value_type)) {
     thpp::IntStorage* raw_storage = dynamic_cast<thpp::IntStorage*>(storage.get());
@@ -130,14 +130,14 @@ static void storageFree(rpc::RPCMessage& raw_message) {
 }
 
 static void storageResize(rpc::RPCMessage& raw_message) {
-  thpp::Storage *storage = unpackRetrieveStorage(raw_message);
+  at::Storage *storage = unpackRetrieveStorage(raw_message);
   int64_t new_size = unpackInteger(raw_message);
   finalize(raw_message);
   storage->resize(new_size);
 }
 
 static void storageFill(rpc::RPCMessage& raw_message) {
-  thpp::Storage *storage = unpackRetrieveStorage(raw_message);
+  at::Storage *storage = unpackRetrieveStorage(raw_message);
   thpp::Type type = peekType(raw_message);
   if (thpp::isInteger(type)) {
     int64_t val = unpackInteger(raw_message);

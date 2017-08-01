@@ -30,15 +30,15 @@ void sendValueToMaster(double value) {
   dataChannel->send(scalar, 0);
 }
 
-thpp::Tensor* unpackRetrieveTensor(rpc::RPCMessage& message) {
-  return workerTensors.at(unpackTensor(message)).get();
+at::Tensor& unpackRetrieveTensor(rpc::RPCMessage& message) {
+  return workerTensors.at(unpackTensor(message));
 }
 
-thpp::Storage* unpackRetrieveStorage(rpc::RPCMessage& message) {
+at::Storage* unpackRetrieveStorage(rpc::RPCMessage& message) {
   return workerStorages.at(unpackStorage(message)).get();
 }
 
-thpp::Generator* unpackRetrieveGenerator(rpc::RPCMessage& message) {
+at::Generator* unpackRetrieveGenerator(rpc::RPCMessage& message) {
   return workerGenerators.at(unpackGenerator(message)).get();
 }
 
@@ -74,7 +74,7 @@ static const std::unordered_map<rpc::function_id_type, dispatch_fn> functions {
 
     {Functions::tensorCopyFromMaster, tensorCopyFromMaster},
     {Functions::tensorCopyFromWorker, tensorCopyFromWorker},
-    
+
     {Functions::tensorNew, tensorNew},
     {Functions::tensorNewWithSize, tensorNewWithSize},
     {Functions::tensorNewWithStorage, tensorNewWithStorage},
