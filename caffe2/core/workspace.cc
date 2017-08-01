@@ -136,7 +136,7 @@ Blob* Workspace::GetBlob(const string& name) {
 }
 
 NetBase* Workspace::CreateNet(const NetDef& net_def, bool overwrite) {
-  const auto tmp_net_def = std::make_shared<const NetDef>(net_def);
+  std::shared_ptr<NetDef> tmp_net_def(new NetDef(net_def));
   return CreateNet(tmp_net_def, overwrite);
 }
 
