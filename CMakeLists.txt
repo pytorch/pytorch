@@ -90,7 +90,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "binaries")
 # ---[ Build flags
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c11")
 if(NOT MSVC)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -fPIC")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -O2 -fPIC")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-narrowing")
 else()
   foreach(flag_var
