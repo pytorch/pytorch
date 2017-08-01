@@ -98,6 +98,7 @@ def get_analytical_jacobian(input, output):
     grad_output = output.data.clone().zero_()
     flat_grad_output = grad_output.view(-1)
     reentrant = True
+    correct_grad_sizes = True
 
     for i in range(flat_grad_output.numel()):
         flat_grad_output.zero_()
@@ -105,17 +106,19 @@ def get_analytical_jacobian(input, output):
         for jacobian_c in (jacobian, jacobian_reentrant):
             zero_gradients(input)
             output.backward(grad_output, create_graph=True)
-            for jacobian_x, (d_x, _) in zip(jacobian_c, iter_variables(input)):
+            for jacobian_x, (d_x, x) in zip(jacobian_c, iter_variables(input)):
                 if d_x is None:
                     jacobian_x[:, i].zero_()
                 else:
+                    if d_x.size() != x.size():
+                        correct_grad_sizes = False
                     jacobian_x[:, i] = d_x.to_dense() if d_x.is_sparse else d_x
 
     for jacobian_x, jacobian_reentrant_x in zip(jacobian, jacobian_reentrant):
         if (jacobian_x - jacobian_reentrant_x).abs().max() != 0:
             reentrant = False
 
-    return jacobian, reentrant
+    return jacobian, reentrant, correct_grad_sizes
 
 
 def _as_tuple(x):
@@ -158,7 +161,7 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3):
         def fn(input):
             return _as_tuple(func(*input))[i].data
 
-        analytical, reentrant = get_analytical_jacobian(_as_tuple(inputs), o)
+        analytical, reentrant, correct_grad_sizes = get_analytical_jacobian(_as_tuple(inputs), o)
         numerical = get_numerical_jacobian(fn, inputs, inputs, eps)
 
         for a, n in zip(analytical, numerical):
@@ -166,6 +169,9 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3):
                 return False
 
         if not reentrant:
+            return False
+
+        if not correct_grad_sizes:
             return False
 
     # check if the backward multiplies by grad_output
