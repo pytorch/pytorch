@@ -50,12 +50,30 @@ std::string PythonOp::name() {
   return getPythonName(pyobj.get(),is_legacy);
 }
 
+static void emitUses(std::ostream & out, Node * n) {
+  size_t i = 0;
+  for(auto u : n->uses()) {
+    if(i++ > 0)
+      out << ", ";
+    out << *u.user << ".i" << u.offset;
+  }
+}
+
 std::ostream& operator<<(std::ostream & out, Graph & g) {
   out << "graph(" << g.inputs() << ") {\n";
   std::vector<FusionGroup*> groups;
   for(auto n : g.nodes()) {
     if(!n->cast<Select>()) { //improve readibility by printing selects inline
-      out << "  %" << n->unique() << " = ";
+      out << "  ";
+      if(n->type()->kind() == TypeKind::Multi) {
+        node_list selects;
+        for(auto u : n->uses())
+          selects.push_back(u.user);
+        out << selects;
+      } else {
+        out << "%" << n->unique();
+      }
+      out << " = ";
       IR_IF(n,PythonOp)
         out << "^" << value->name();
         out << "(";
@@ -73,11 +91,17 @@ std::ostream& operator<<(std::ostream & out, Graph & g) {
         out << toString(n->kind());
       IR_END()
       out << "(" << n->inputs() << "), uses = [";
-      size_t i = 0;
-      for(auto u : n->uses()) {
-        if(i++ > 0)
-          out << ", ";
-        out << *u.user << ".i" << u.offset;
+      if(n->type()->kind() == TypeKind::Multi) {
+        size_t i = 0;
+        for(auto u : n->uses()) {
+          if(i++ > 0)
+            out << ", ";
+          out << "[";
+          emitUses(out,u.user);
+          out << "]";
+        }
+      } else {
+        emitUses(out,n);
       }
       out << "];\n";
     }
