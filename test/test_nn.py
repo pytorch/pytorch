@@ -1862,40 +1862,51 @@ class TestNN(NNTestCase):
             (hx + cx).sum().backward()
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
-    def test_LSTM_cudnn_weight_format(self):
-        rnn = nn.LSTM(10, 20, batch_first=True).cuda()
-        input = Variable(torch.randn(5, 4, 10).cuda(), requires_grad=True)
-        hx = Variable(torch.randn(1, 5, 20).cuda(), requires_grad=True)
-        cx = Variable(torch.randn(1, 5, 20).cuda(), requires_grad=True)
-        all_vars = [input, hx, cx] + list(rnn.parameters())
+    def test_cudnn_weight_format(self):
+        rnns = [
+            nn.LSTM(10, 20, batch_first=True),
+            nn.GRU(10, 20, batch_first=True),
+            nn.RNN(10, 20, batch_first=True)
+        ]
+        first_warn = True
+        for rnn in rnns:
+            rnn.cuda()
+            input = Variable(torch.randn(5, 4, 10).cuda(), requires_grad=True)
+            hx = Variable(torch.randn(1, 5, 20).cuda(), requires_grad=True)
+            all_vars = [input, hx] + list(rnn.parameters())
+            if isinstance(rnn, nn.LSTM):
+                cx = Variable(torch.randn(1, 5, 20).cuda(), requires_grad=True)
+                all_vars[2:2] = [cx]
+                hx = (hx, cx)
 
-        output = rnn(input, (hx, cx))
-        output[0].sum().backward()
-        grads = [v.grad.data.clone() for v in all_vars]
-        for v in all_vars:
-            v.grad.data.zero_()
-
-        # Weights will no longer view onto the same chunk of memory
-        weight = all_vars[4]
-        weight_data = weight.data.clone()
-        weight.data.set_(weight_data)
-
-        for i in range(2):
-            with warnings.catch_warnings(record=True) as w:
-                output_noncontig = rnn(input, (hx, cx))
-            if i == 0:
-                self.assertEqual(len(w), 1)
-                self.assertIn('weights are not part of single contiguous chunk of memory', w[0].message.args[0])
-            output_noncontig[0].sum().backward()
-            grads_noncontig = [v.grad.data.clone() for v in all_vars]
+            output = rnn(input, hx)
+            output[0].sum().backward()
+            grads = [v.grad.data.clone() for v in all_vars]
             for v in all_vars:
                 v.grad.data.zero_()
-            self.assertEqual(output, output_noncontig)
-            self.assertEqual(grads_noncontig, grads)
 
-        # Make sure these still share storage
-        weight_data[:] = 4
-        self.assertEqual(weight_data, all_vars[4].data)
+            # Weights will no longer view onto the same chunk of memory
+            weight = all_vars[4]
+            weight_data = weight.data.clone()
+            weight.data.set_(weight_data)
+
+            for i in range(2):
+                with warnings.catch_warnings(record=True) as w:
+                    output_noncontig = rnn(input, hx)
+                if first_warn:
+                    self.assertEqual(len(w), 1)
+                    self.assertIn('weights are not part of single contiguous chunk of memory', w[0].message.args[0])
+                    first_warn = False
+                output_noncontig[0].sum().backward()
+                grads_noncontig = [v.grad.data.clone() for v in all_vars]
+                for v in all_vars:
+                    v.grad.data.zero_()
+                self.assertEqual(output, output_noncontig)
+                self.assertEqual(grads_noncontig, grads)
+
+            # Make sure these still share storage
+            weight_data[:] = 4
+            self.assertEqual(weight_data, all_vars[4].data)
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_cuda_rnn_fused(self):
