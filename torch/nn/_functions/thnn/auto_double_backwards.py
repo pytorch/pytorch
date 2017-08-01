@@ -53,6 +53,7 @@ def logsoftmax_double_backwards(ctx, ggI):
 
     return gI, ggO, None, None, None, None
 
+
 def softmax_double_backwards(ctx, ggI):
     t = ctx.saved_variables
     gO, output = t[1], t[2]
