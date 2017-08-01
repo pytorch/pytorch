@@ -29,16 +29,17 @@ def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1,
     Args:
         input: input tensor (minibatch x in_channels x iH x iW)
         weight: filters tensor (out_channels, in_channels/groups, kH, kW)
-        bias: optional bias tensor (out_channels)
+        bias: optional bias tensor (out_channels). Default: None
         stride: the stride of the convolving kernel. Can be a single number or
           a tuple (sh x sw). Default: 1
         padding: implicit zero padding on the input. Can be a single number or
           a tuple. Default: 0
         dilation: the spacing between kernel elements. Default: 1
         groups: split input into groups, in_channels should be divisible by
-          the number of groups
+          the number of groups. Default: 1
 
-    Examples:
+    Examples::
+
         >>> # With square kernels and equal stride
         >>> filters = autograd.Variable(torch.randn(8,4,3,3))
         >>> inputs = autograd.Variable(torch.randn(1,4,5,5))
@@ -62,15 +63,16 @@ def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1,
     Args:
         input: input tensor of shape (minibatch x in_channels x iW)
         weight: filters of shape (out_channels, in_channels, kW)
-        bias: optional bias of shape (out_channels)
+        bias: optional bias of shape (out_channels). Default: None
         stride: the stride of the convolving kernel, default 1
         padding: implicit zero padding on the input. Can be a single number or
           a tuple. Default: 0
         dilation: the spacing between kernel elements. Default: 1
         groups: split input into groups, in_channels should be divisible by
-          the number of groups
+          the number of groups. Default: 1
 
-    Examples:
+    Examples::
+
         >>> filters = autograd.Variable(torch.randn(33, 16, 3))
         >>> inputs = autograd.Variable(torch.randn(20, 16, 50))
         >>> F.conv1d(inputs, filters)
@@ -86,23 +88,24 @@ def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1,
 def conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1,
            groups=1):
     """Applies a 3D convolution over an input image composed of several input
-        planes.
+    planes.
 
     See :class:`~torch.nn.Conv3d` for details and output shape.
 
     Args:
         input: input tensor of shape (minibatch x in_channels x iT x iH x iW)
         weight: filters tensor of shape (out_channels, in_channels, kT, kH, kW)
-        bias: optional bias tensor of shape (out_channels)
+        bias: optional bias tensor of shape (out_channels). Default: None
         stride: the stride of the convolving kernel. Can be a single number or
           a tuple (st x sh x sw). Default: 1
         padding: implicit zero padding on the input. Can be a single number or
           a tuple. Default: 0
         dilation: the spacing between kernel elements. Default: 1
         groups: split input into groups, in_channels should be divisible by
-          the number of groups
+          the number of groups. Default: 1
 
-    Examples:
+    Examples::
+
         >>> filters = autograd.Variable(torch.randn(33, 16, 3, 3, 3))
         >>> inputs = autograd.Variable(torch.randn(20, 16, 50, 10, 20))
         >>> F.conv3d(inputs, filters)
@@ -126,11 +129,11 @@ def conv_transpose1d(input, weight, bias=None, stride=1, padding=0,
     Args:
         input: input tensor of shape (minibatch x in_channels x iW)
         weight: filters of shape (in_channels x out_channels x kW)
-        bias: optional bias of shape (out_channels)
+        bias: optional bias of shape (out_channels). Default: None
         stride: the stride of the convolving kernel. Default: 1
         padding: implicit zero padding on the input. Default: 0
         groups: split input into groups, in_channels should be divisible by
-          the number of groups
+          the number of groups. Default: 1
         output_padding: A zero-padding of 0 <= padding < stride that should be
           added to the output. Default: 0
         dilation: the spacing between kernel elements. Default: 1
@@ -154,13 +157,13 @@ def conv_transpose2d(input, weight, bias=None, stride=1, padding=0,
     Args:
         input: input tensor of shape (minibatch x in_channels x iH x iW)
         weight: filters of shape (in_channels x out_channels x kH x kW)
-        bias: optional bias of shape (out_channels)
+        bias: optional bias of shape (out_channels). Default: None
         stride: the stride of the convolving kernel, a single number or a
           tuple (sh x sw). Default: 1
         padding: implicit zero padding on the input, a single number or a
           tuple (padh x padw). Default: 0
         groups: split input into groups, in_channels should be divisible by
-          the number of groups
+          the number of groups. Default: 1
         output_padding: A zero-padding of 0 <= padding < stride that should be
           added to the output. Can be a single number or a tuple. Default: 0
         dilation: the spacing between kernel elements. Default: 1
@@ -184,7 +187,7 @@ def conv_transpose3d(input, weight, bias=None, stride=1, padding=0,
     Args:
         input: input tensor of shape (minibatch x in_channels x iT x iH x iW)
         weight: filters of shape (in_channels x out_channels x kH x kW)
-        bias: optional bias of shape (out_channels)
+        bias: optional bias of shape (out_channels). Default: None
         stride: the stride of the convolving kernel, a single number or a
           tuple (sh x sw). Default: 1
         padding: implicit zero padding on the input, a single number or a
@@ -192,7 +195,7 @@ def conv_transpose3d(input, weight, bias=None, stride=1, padding=0,
         output_padding: A zero-padding of 0 <= padding < stride that should be
           added to the output. Can be a single number or a tuple. Default: 0
         groups: split input into groups, in_channels should be divisible by
-          the number of groups
+          the number of groups. Default: 1
         dilation: the spacing between kernel elements. Default: 1
     """
     if input is not None and input.dim() != 5:
@@ -214,11 +217,11 @@ def avg_pool1d(input, kernel_size, stride=None, padding=0,
     Args:
         kernel_size: the size of the window
         stride: the stride of the window. Default value is :attr:`kernel_size`
-        padding: implicit zero padding to be added on both sides
+        padding: implicit zero padding to be added on both sides. Default: 0
         ceil_mode: when True, will use `ceil` instead of `floor` to compute the
-            output shape
+            output shape. Default: False
         count_include_pad: when True, will include the zero-padding in the
-            averaging calculation
+            averaging calculation. Default: True
 
     Example:
         >>> # pool of square window of size=3, stride=2
@@ -256,9 +259,9 @@ def avg_pool2d(input, kernel_size, stride=None, padding=0,
         padding: implicit zero padding on the input, a single number or
           a tuple (padh x padw), Default: 0
         ceil_mode: when True, will use `ceil` instead of `floor` in the formula
-            to compute the output shape
+            to compute the output shape. Default: False
         count_include_pad: when True, will include the zero-padding in th
-            averaging calculation
+            averaging calculation. Default: True
     """
     return _functions.thnn.AvgPool2d.apply(input, kernel_size, stride, padding,
                                            ceil_mode, count_include_pad)
@@ -366,7 +369,7 @@ def adaptive_max_pool1d(input, output_size, return_indices=False):
 
     Args:
         output_size: the target output size (single integer)
-        return_indices: whether to return pooling indices
+        return_indices: whether to return pooling indices. Default: False
     """
     return _functions.thnn.AdaptiveMaxPool1d.apply(input, output_size, return_indices)
 
@@ -380,7 +383,7 @@ def adaptive_max_pool2d(input, output_size, return_indices=False):
     Args:
         output_size: the target output size (single integer or
             double-integer tuple)
-        return_indices: whether to return pooling indices
+        return_indices: whether to return pooling indices. Default: False
     """
     return _functions.thnn.AdaptiveMaxPool2d.apply(input, output_size, return_indices)
 
@@ -422,8 +425,8 @@ def alpha_dropout(input, p=0.5, training=False):
     See :class:`~torch.nn.AlphaDropout` for details.
 
     Args:
-        p (float, optional): the drop probability
-        training (bool, optional): switch between training and evaluation mode
+        p (float, optional): the drop probability. Default: 0.5
+        training (bool, optional): switch between training and evaluation mode. Default: False
     """
     if p < 0 or p > 1:
         raise ValueError("dropout probability has to be between 0 and 1, "
@@ -654,12 +657,13 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100):
             class. If given, has to be a Variable of size "nclasses"
         size_average (bool, optional): By default, the losses are averaged
             over observations for each minibatch. If size_average
-            is False, the losses are summed for each minibatch.
+            is False, the losses are summed for each minibatch. Default: True
         ignore_index (int, optional): Specifies a target value that is ignored
             and does not contribute to the input gradient. When size_average is
-            True, the loss is averaged over non-ignored targets.
+            True, the loss is averaged over non-ignored targets. Default: -100
 
-    Example:
+    Example::
+
         >>> # input is of size nBatch x nClasses = 3 x 5
         >>> input = autograd.Variable(torch.randn(3, 5))
         >>> # each element in target has to have 0 <= value < nclasses
@@ -686,13 +690,13 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Tru
         target: random sample :math:`target \sim Pois(input)`.
         log_input: if True the loss is computed as
             `exp(input) - target * input`, if False then loss is
-            `input - target * log(input)`.
+            `input - target * log(input)`. Default: True
         full: whether to compute full loss, i. e. to add the Stirling
-            approximation term
+            approximation term. Default: False
             `target * log(target) - target + 0.5 * log(2 * pi * target)`.
         size_average: By default, the losses are averaged over observations for
             each minibatch. However, if the field sizeAverage is set to False,
-            the losses are instead summed for each minibatch.
+            the losses are instead summed for each minibatch. Default: True
     """
     if log_input:
         loss = torch.exp(input) - target * input
@@ -716,7 +720,7 @@ def kl_div(input, target, size_average=True, weight=None):
         input: Variable of arbitrary shape
         target: Variable of the same shape as input
         size_average: if True the output is divided by the number of elements
-          in input tensor
+          in input tensor. Default: True
         weight (Tensor, optional): a manual rescaling weight given to each
                 class. If given, has to be a Tensor of size "nclasses"
     """
@@ -738,10 +742,10 @@ def cross_entropy(input, target, weight=None, size_average=True, ignore_index=-1
         size_average (bool, optional): By default, the losses are averaged
                 over observations for each minibatch. However, if the field
                 sizeAverage is set to False, the losses are instead summed
-                for each minibatch.
+                for each minibatch. Default: True
         ignore_index (int, optional): Specifies a target value that is ignored
                 and does not contribute to the input gradient. When size_average is
-                True, the loss is averaged over non-ignored targets.
+                True, the loss is averaged over non-ignored targets. Default: -100
     """
     return nll_loss(log_softmax(input), target, weight, size_average, ignore_index)
 
@@ -760,7 +764,7 @@ def binary_cross_entropy(input, target, weight=None, size_average=True):
         size_average (bool, optional): By default, the losses are averaged
                 over observations for each minibatch. However, if the field
                 sizeAverage is set to False, the losses are instead summed
-                for each minibatch.
+                for each minibatch. Default: True
     """
     if not target.is_same_size(input):
         warnings.warn("Using a target size ({}) that is different to the input size ({}) is deprecated. "
@@ -790,7 +794,7 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=Tr
         size_average (bool, optional): By default, the losses are averaged
                 over observations for each minibatch. However, if the field
                 sizeAverage is set to False, the losses are instead summed
-                for each minibatch.
+                for each minibatch. Default: True
     """
     if not target.is_same_size(input):
         raise ValueError("Target size ({}) must be the same as input size ({})".format(target.size(), input.size()))
@@ -863,7 +867,8 @@ def pixel_shuffle(input, upscale_factor):
         input (Variable): Input
         upscale_factor (int): factor to increase spatial resolution by
 
-    Examples:
+    Examples::
+
         >>> ps = nn.PixelShuffle(3)
         >>> input = autograd.Variable(torch.Tensor(1, 9, 4, 4))
         >>> output = ps(input)
@@ -1022,8 +1027,8 @@ def pad(input, pad, mode='constant', value=0):
     Args:
         input (Variable): 4D or 5D tensor
         pad (tuple): 4-elem or 6-elem tuple
-        mode: 'constant', 'reflect' or 'replicate'
-        value: fill value for 'constant' padding
+        mode: 'constant', 'reflect' or 'replicate'. Default: 'constant'
+        value: fill value for 'constant' padding. Default: 0
     """
     if input.dim() == 4:
         assert len(pad) == 4, '4D tensors expect 4 values for padding'
@@ -1051,17 +1056,20 @@ def pairwise_distance(x1, x2, p=2, eps=1e-6):
     r"""
     Computes the batchwise pairwise distance between vectors v1,v2:
 
-        .. math ::
-            \Vert x \Vert _p := \left( \sum_{i=1}^n  \vert x_i \vert ^ p \right) ^ {1/p}
+    .. math ::
+        \Vert x \Vert _p := \left( \sum_{i=1}^n  \vert x_i \vert ^ p \right) ^ {1/p}
 
-        Args:
-            x1: first input tensor
-            x2: second input tensor
-            p: the norm degree. Default: 2
+    Args:
+        x1: first input tensor
+        x2: second input tensor
+        p: the norm degree. Default: 2
+        eps (float, optional): Small value to avoid division by zero. Default: 1e-6
 
-        Shape:
-            - Input: :math:`(N, D)` where `D = vector dimension`
-            - Output: :math:`(N, 1)`
+    Shape:
+        - Input: :math:`(N, D)` where `D = vector dimension`
+        - Output: :math:`(N, 1)`
+
+    Example::
 
         >>> input1 = autograd.Variable(torch.randn(100, 128))
         >>> input2 = autograd.Variable(torch.randn(100, 128))
@@ -1092,10 +1100,12 @@ def cosine_similarity(x1, x2, dim=1, eps=1e-8):
         - Input: :math:`(\ast_1, D, \ast_2)` where D is at position `dim`.
         - Output: :math:`(\ast_1, \ast_2)` where 1 is at position `dim`.
 
-    >>> input1 = autograd.Variable(torch.randn(100, 128))
-    >>> input2 = autograd.Variable(torch.randn(100, 128))
-    >>> output = F.cosine_similarity(input1, input2)
-    >>> print(output)
+    Example::
+
+        >>> input1 = autograd.Variable(torch.randn(100, 128))
+        >>> input2 = autograd.Variable(torch.randn(100, 128))
+        >>> output = F.cosine_similarity(input1, input2)
+        >>> print(output)
     """
     w12 = torch.sum(x1 * x2, dim)
     w1 = torch.norm(x1, 2, dim)
@@ -1124,13 +1134,16 @@ def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, s
         anchor: anchor input tensor
         positive: positive input tensor
         negative: negative input tensor
+        margin: the margin value. Default: 1
         p: the norm degree. Default: 2
-        eps: small epsilon value to avoid numerical issues
-        swap: compute distance swap
+        eps: small epsilon value to avoid numerical issues. Default: 1e-6
+        swap: compute distance swap. Default: False
 
     Shape:
         - Input: :math:`(N, D)` where `D = vector dimension`
         - Output: :math:`(N, 1)`
+
+    Example::
 
         >>> input1 = autograd.Variable(torch.randn(100, 128))
         >>> input2 = autograd.Variable(torch.randn(100, 128))
@@ -1174,8 +1187,8 @@ def normalize(input, p=2, dim=1, eps=1e-12):
 
     Args:
         input: input tensor of any shape
-        p (float): the exponent value in the norm formulation
-        dim (int): the dimension to reduce
-        eps (float): small value to avoid division by zero
+        p (float): the exponent value in the norm formulation. Default: 2
+        dim (int): the dimension to reduce. Default: 1
+        eps (float): small value to avoid division by zero. Default: 1e-12
     """
     return input / input.norm(p, dim, True).clamp(min=eps).expand_as(input)
