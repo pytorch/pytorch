@@ -3,13 +3,13 @@ from torch.autograd import Variable
 from collections import Iterable
 
 
-def iter_gradients(x):
+def iter_variables(x):
     if isinstance(x, Variable):
         if x.requires_grad:
-            yield x.grad.data if x.grad is not None else None
+            yield (x.grad.data, x.data) if x.grad is not None else (None, None)
     elif isinstance(x, Iterable):
         for elem in x:
-            for result in iter_gradients(elem):
+            for result in iter_variables(elem):
                 yield result
 
 
@@ -94,21 +94,28 @@ def get_numerical_jacobian(fn, input, target, eps=1e-3):
 
 def get_analytical_jacobian(input, output):
     jacobian = make_jacobian(input, output.numel())
+    jacobian_reentrant = make_jacobian(input, output.numel())
     grad_output = output.data.clone().zero_()
     flat_grad_output = grad_output.view(-1)
+    reentrant = True
 
     for i in range(flat_grad_output.numel()):
         flat_grad_output.zero_()
         flat_grad_output[i] = 1
-        zero_gradients(input)
-        output.backward(grad_output, retain_graph=True)
-        for jacobian_x, d_x in zip(jacobian, iter_gradients(input)):
-            if d_x is None:
-                jacobian_x[:, i].zero_()
-            else:
-                jacobian_x[:, i] = d_x.to_dense() if d_x.is_sparse else d_x
+        for jacobian_c in (jacobian, jacobian_reentrant):
+            zero_gradients(input)
+            output.backward(grad_output, create_graph=True)
+            for jacobian_x, (d_x, _) in zip(jacobian_c, iter_variables(input)):
+                if d_x is None:
+                    jacobian_x[:, i].zero_()
+                else:
+                    jacobian_x[:, i] = d_x.to_dense() if d_x.is_sparse else d_x
 
-    return jacobian
+    for jacobian_x, jacobian_reentrant_x in zip(jacobian, jacobian_reentrant):
+        if (jacobian_x - jacobian_reentrant_x).abs().max() != 0:
+            reentrant = False
+
+    return jacobian, reentrant
 
 
 def _as_tuple(x):
@@ -151,12 +158,15 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3):
         def fn(input):
             return _as_tuple(func(*input))[i].data
 
-        analytical = get_analytical_jacobian(_as_tuple(inputs), o)
+        analytical, reentrant = get_analytical_jacobian(_as_tuple(inputs), o)
         numerical = get_numerical_jacobian(fn, inputs, inputs, eps)
 
         for a, n in zip(analytical, numerical):
             if not ((a - n).abs() <= (atol + rtol * n.abs())).all():
                 return False
+
+        if not reentrant:
+            return False
 
     # check if the backward multiplies by grad_output
     zero_gradients(inputs)
@@ -202,7 +212,7 @@ def gradgradcheck(func, inputs, grad_outputs, eps=1e-6, atol=1e-5, rtol=1e-3):
         input_args = input_args[:-len(grad_outputs)]
         outputs = func(*input_args)
         outputs = _as_tuple(outputs)
-        input_args = tuple(x for x in input_args if isinstance(x, Variable) if x.requires_grad)
+        input_args = tuple(x for x in input_args if isinstance(x, Variable) and x.requires_grad)
         grad_inputs = torch.autograd.grad(outputs, input_args, grad_outputs)
         return grad_inputs
 
