@@ -1,5 +1,5 @@
 graph(%1, %2) {
-  %15 = fusion_group_0(%1, %2), uses = [%15.0.i0];
+  %15.0 = fusion_group_0(%1, %2), uses = [[%0.i0]];
   return (%15.0);
 }
 with fusion_group_0 = graph(%5, %8) {
