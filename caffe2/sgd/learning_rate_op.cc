@@ -4,9 +4,9 @@ namespace caffe2 {
 REGISTER_CPU_OPERATOR(LearningRate, LearningRateOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(LearningRate)
-  .NumInputs(1)
-  .NumOutputs(1)
-  .SetDoc(R"DOC(
+    .NumInputs(1)
+    .NumOutputs(1)
+    .SetDoc(R"DOC(
 Learning rate is a decreasing function of time. With low learning rates the
 improvements will be linear. With high learning rates they will start to look
 more exponential. Learning rate is controled by the following arguments:
@@ -33,14 +33,21 @@ Example usage:
 train_net.LearningRate(200, "LR", base_lr=-0.1,
                             policy="step", stepsize=20, gamma=0.9)
 )DOC")
-  .Arg("base_lr", "(float, required) base learning rate")
-  .Arg("policy", "(float, default 1.0) strategy for gamma enforcement")
-  .Arg("power", "(float, default 1.0) used only for inv policy type")
-  .Arg("gamma", "(float, default 1.0) momentum of change")
-  .Arg("stepsize", "(float, default 1.0) sampling rate on iterations")
-  .Arg("max_iter", "(int, default -1) maximum iterations in this training run")
-  .Input(0, "input", "description needed")
-  .Output(0, "output", "description needed");
+    .Arg("base_lr", "(float, required) base learning rate")
+    .Arg("policy", "(float, default 1.0) strategy for gamma enforcement")
+    .Arg("power", "(float, default 1.0) used only for inv policy type")
+    .Arg("gamma", "(float, default 1.0) momentum of change")
+    .Arg("stepsize", "(float, default 1.0) sampling rate on iterations")
+    .Arg(
+        "max_iter",
+        "(int, default -1) maximum iterations in this training run")
+    .Input(0, "input", "description needed")
+    .Output(0, "output", "description needed")
+    .DeviceInferenceFunction([](const OperatorDef& def) {
+      return std::make_pair(
+          std::vector<DeviceOption>{DeviceOption()},
+          std::vector<DeviceOption>{def.device_option()});
+    });
 
 NO_GRADIENT(LearningRate);
 }  // namespace caffe2
