@@ -42,7 +42,10 @@ class StringJoinOp final : public Operator<Context> {
   StringJoinOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         delimiter_(
-            OperatorBase::GetSingleArgument<std::string>("delimiter", ",")) {}
+            OperatorBase::GetSingleArgument<std::string>("delimiter", ",")),
+        axis_(OperatorBase::GetSingleArgument<int>("axis", 0)) {
+    CAFFE_ENFORCE(axis_ == 0 || axis_ == 1);
+  }
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<
@@ -54,6 +57,7 @@ class StringJoinOp final : public Operator<Context> {
         uint16_t,
         int32_t,
         int64_t,
+        std::string,
         bool>>::call(this, Input(0));
   }
 
@@ -62,6 +66,7 @@ class StringJoinOp final : public Operator<Context> {
 
  protected:
   std::string delimiter_;
+  int axis_;
 };
 
 } // namespace caffe2
