@@ -8,6 +8,7 @@
 
 #include <Python.h>
 #include "torch/csrc/autograd/function_hook.h"
+#include "torch/csrc/jit/tracer.h"
 
 #include <ATen/ATen.h>
 
@@ -37,7 +38,7 @@ struct FunctionFlags {
   function_list next_functions;
 };
 
-struct Function {
+struct Function : std::enable_shared_from_this<Function> {
   Function()
     : num_inputs(0)
     , next_functions()
@@ -68,9 +69,18 @@ struct Function {
 
   variable_list operator()(const variable_list& inputs) {
     variable_list outputs = apply(inputs);
-    // TODO: trace this function
+    if (jit::tracer::isTracing(inputs))
+      createTrace(inputs, outputs);
     return outputs;
   }
+
+  void createTrace(const variable_list& inputs, const variable_list& outputs);
+
+  // PyFunctions are not managed by shared_ptrs by default, but are bound to the
+  // lifetime of their Python object instead.
+  virtual std::shared_ptr<Function> getSharedPtr() {
+    return shared_from_this();
+  };
 
   // Computes is_executable, is_volatile, and next_functions from a list
   // of input variables

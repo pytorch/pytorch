@@ -17,38 +17,46 @@ namespace torch { namespace jit { namespace tracer {
 
 struct TracingState : public std::enable_shared_from_this<TracingState> {
   TracingState()
-    : graph(new Graph()) {}
+    : graph(new Graph())
+    , active(false) {}
 
   std::unique_ptr<Graph> graph;
+  bool active;
 };
 
 using torch::autograd::Variable;
 using variable_list = std::vector<std::shared_ptr<Variable>>;
 
 inline bool isTracing(const variable_list& vars) {
-  for (auto& var : vars)
-    if (!var->tracing_state.state.expired())
-      return true;
+  for (auto& var : vars) {
+    if (!var) continue;
+    auto state = var->tracing_state.state.lock();
+    if (state && state->active)
+        return true;
+  }
   return false;
 }
 
 inline std::shared_ptr<TracingState> getTracingState(const variable_list& vars) {
   std::shared_ptr<TracingState> state;
   for (auto& var : vars) {
+    if (!var) continue;
     auto var_state = var->tracing_state.state.lock();
     if (var_state) {
       if (!state) {
         state = var_state;
-      } else if (state != var_state) {
-        throw std::runtime_error("Mixing up traces");
       }
+      JIT_ASSERT(state == var_state);
     }
   }
   JIT_ASSERT(state);
   return state;
 }
 
+// TODO: what if an output is used in an in-place op? it might appear in the trace again,
+// but it really points to a different place in the graph than its trace
 inline void setValueTrace(const std::shared_ptr<TracingState>& state, const std::shared_ptr<Variable>& var, Node *node) {
+  JIT_ASSERT(var->tracing_state.state.lock() == state || var->tracing_state.state.expired());
   var->tracing_state.state = state;
   var->tracing_state.trace = node;
 }
@@ -74,17 +82,17 @@ inline std::shared_ptr<TracingState> enter(const variable_list& inputs) {
     input->tracing_state.state = state;
     input->tracing_state.trace = state->graph->addInput();
   }
+  state->active = true;
   // TODO: register exit hooks!
   return state;
 }
 
-inline void exit(const std::shared_ptr<TracingState>& state, const variable_list& outputs) {
+inline void exit(const variable_list& outputs) {
+  auto state = getTracingState(outputs);
   for (auto& output : outputs) {
-    JIT_ASSERT(output->tracing_state.state.lock() == state);
     state->graph->registerOutput(getValueTrace(state, output, true));
-    output->tracing_state.state.reset();
-    output->tracing_state.trace = nullptr;
   }
+  state->active = false;
   // TODO: register enter hooks!
 }
 

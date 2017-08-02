@@ -349,7 +349,6 @@ main_sources = [
     "torch/csrc/jit/init_pass.cpp",
     "torch/csrc/jit/test_jit.cpp",
     "torch/csrc/jit/tracer.cpp",
-    "torch/csrc/jit/python_ir.cpp",
     "torch/csrc/jit/python_tracer.cpp",
     "torch/csrc/autograd/init.cpp",
     "torch/csrc/autograd/engine.cpp",
