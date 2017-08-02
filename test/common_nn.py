@@ -158,14 +158,12 @@ module_tests = [
     dict(
         module_name='Softshrink',
         input_size=(3, 2, 5),
-        check_gradgrad=False,
     ),
     dict(
         module_name='Softshrink',
         constructor_args=(1,),
         input_size=(3, 2, 5),
         desc='lambda',
-        check_gradgrad=False,
     ),
     dict(
         module_name='CrossMapLRN2d',
