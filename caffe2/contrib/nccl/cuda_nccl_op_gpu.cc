@@ -139,6 +139,7 @@ OPERATOR_SCHEMA(NCCLAllreduce)
     .NumInputs(1, CAFFE2_COMPILE_TIME_MAX_GPUS)
     .NumOutputs(1, CAFFE2_COMPILE_TIME_MAX_GPUS)
     .IdenticalTypeAndShape()
+    .InputsCanCrossDevices()
     .AllowOneToOneInplace();
 SHOULD_NOT_DO_GRADIENT(NCCLAllreduce);
 
@@ -147,6 +148,7 @@ OPERATOR_SCHEMA(NCCLBroadcast)
     .NumInputs(1, CAFFE2_COMPILE_TIME_MAX_GPUS)
     .NumOutputs(1, CAFFE2_COMPILE_TIME_MAX_GPUS)
     .IdenticalTypeAndShape()
+    .InputsCanCrossDevices()
     .EnforceOneToOneInplace();
 SHOULD_NOT_DO_GRADIENT(NCCLBroadcast);
 
@@ -155,13 +157,15 @@ OPERATOR_SCHEMA(NCCLReduce)
     .NumInputs(1, CAFFE2_COMPILE_TIME_MAX_GPUS)
     .NumOutputs(1)
     .IdenticalTypeAndShapeOfInput(0)
+    .InputsCanCrossDevices()
     .AllowInplace({{0, 0}});
 SHOULD_NOT_DO_GRADIENT(NCCLReduce);
 
 REGISTER_CUDA_OPERATOR(NCCLAllGather, NCCLAllGatherOp);
 OPERATOR_SCHEMA(NCCLAllGather)
     .NumInputs(1, CAFFE2_COMPILE_TIME_MAX_GPUS)
-    .NumOutputs(1, CAFFE2_COMPILE_TIME_MAX_GPUS);
+    .NumOutputs(1, CAFFE2_COMPILE_TIME_MAX_GPUS)
+    .InputsCanCrossDevices();
 SHOULD_NOT_DO_GRADIENT(NCCLAllGather);
 } // namespace
 
