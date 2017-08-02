@@ -110,6 +110,10 @@ def softplus_double_backwards(ctx, ggI):
     return gI, ggO, None, None, None, None
 
 
+def softshrink_double_backwards(ctx, ggI):
+    return hardshrink_double_backwards(ctx, ggI)
+
+
 def threshold_double_backwards(ctx, ggI):
     t = ctx.saved_variables
     input = t[0]
@@ -178,6 +182,7 @@ double_backwards_fns = {
     'LogSoftmax': logsoftmax_double_backwards,
     'Softmax': softmax_double_backwards,
     'Softplus': softplus_double_backwards,
+    'Softshrink': softshrink_double_backwards,
     'Threshold': threshold_double_backwards,
     'L1Loss': l1loss_double_backwards,
     'NLLLoss': nllloss_double_backwards,
