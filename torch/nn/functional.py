@@ -796,7 +796,7 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=Tr
                 sizeAverage is set to False, the losses are instead summed
                 for each minibatch. Default: True
     """
-    if not target.is_same_size(input):
+    if not (target.size() == input.size()):
         raise ValueError("Target size ({}) must be the same as input size ({})".format(target.size(), input.size()))
 
     max_val = (-input).clamp(min=0)
