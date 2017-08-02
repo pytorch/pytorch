@@ -133,7 +133,6 @@ module_tests = [
         module_name='LogSigmoid',
         input_size=(2, 3, 4),
         reference_fn=lambda i, _: i.sigmoid().log(),
-        check_gradgrad=False,
     ),
     dict(
         module_name='Softplus',
