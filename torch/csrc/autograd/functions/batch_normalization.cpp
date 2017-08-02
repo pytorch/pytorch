@@ -8,6 +8,7 @@
 #include "torch/csrc/nn/THNN_generic.h"
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/utils/auto_gpu.h"
+#include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
 #include <sstream>
 
@@ -65,9 +66,9 @@ auto BatchNormForward::apply(const variable_list& inputs) -> variable_list {
   auto output = input->data->newTensor();
   output->resizeAs(*input->data);
 
-  std::unique_ptr<Tensor> save_mean(output->newTensor());
+  std::shared_ptr<Tensor> save_mean(output->newTensor());
   save_mean->resizeAs(*running_mean);
-  std::unique_ptr<Tensor> save_std(output->newTensor());
+  std::shared_ptr<Tensor> save_std(output->newTensor());
   save_std->resizeAs(*running_var);
 
   if (use_cudnn && eps >= CUDNN_BN_MIN_EPSILON) {
@@ -206,7 +207,7 @@ auto BatchNormBackward::apply(const variable_list& grad_outputs) -> variable_lis
                                  std::move(grad_bias));
   return wrap_outputs(all_inputs, std::move(outputs), [&](FunctionFlags f) {
     return std::make_shared<BatchNormBackwardBackward>(
-      f, *this,
+      f, *this, save_mean, save_std,
       input_var->save(this), Variable::save_opt(weight_var.get(), this),
       grad_outputs[0]->save(this));
     });
@@ -241,9 +242,18 @@ auto BatchNormBackwardBackward::apply(const variable_list& grad_grad_inputs) -> 
   THPObjectPtr ggb_pvar(ggb ? THPVariable_Wrap(ggb) : Py_None);
   THPObjectPtr gO_pvar(THPVariable_Wrap(gO));
   THPObjectPtr eps_py(PyFloat_FromDouble(eps));
-  PyObject* args = PyTuple_Pack(7, input_pvar.get(), weight_pvar.get(),
+  THPObjectPtr save_mean_py(createPyObject(*save_mean));
+  THPObjectPtr save_std_py(createPyObject(*save_std));
+  THPObjectPtr running_mean_py(createPyObject(*running_mean));
+  THPObjectPtr running_var_py(createPyObject(*running_var));
+  THPObjectPtr training_py(training ? Py_True : Py_False);
+
+  PyObject* args = PyTuple_Pack(12, input_pvar.get(), weight_pvar.get(),
                                 ggi_pvar.get(), ggW_pvar.get(), ggb_pvar.get(),
-                                gO_pvar.get(), eps_py.get());
+                                gO_pvar.get(), eps_py.get(),
+                                save_mean_py.get(), save_std_py.get(),
+                                running_mean_py.get(), running_var_py.get(),
+                                training_py.get());
   THPObjectPtr r(PyObject_CallObject(THPBatchNormBackwardBackwardFunction, args));
   if (!r) throw python_error();
   if (!PyTuple_Check(r.get())) {
