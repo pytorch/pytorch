@@ -1092,6 +1092,13 @@ class TestNN(NNTestCase):
         indices.add_(1)
         self.assertRaises(RuntimeError, lambda: output.backward(grad_output))
 
+    def test_batchnorm_eval(self):
+        self._test_batchnorm_eval()
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_batchnorm_eval_cuda(self):
+        self._test_batchnorm_eval(torch.cuda.FloatTensor)
+
     def test_MaxPool1d_indices(self):
         self._test_maxpool_indices(1)
 
@@ -2434,31 +2441,27 @@ class TestNN(NNTestCase):
             with self.assertRaises(RuntimeError):
                 F.batch_norm(input, running_mean, running_var, bias=Parameter(torch.rand(size)))
 
-    def test_batchnorm_eval(self):
-        types = (torch.FloatTensor,)
-        if TEST_CUDA:
-            types += (torch.cuda.FloatTensor,)
-        for tp in types:
-            module = nn.BatchNorm1d(3).type(tp)
-            module.eval()
+    def _test_batchnorm_eval(self, test_type=torch.FloatTensor):
+        module = nn.BatchNorm1d(3).type(test_type)
+        module.eval()
 
-            data = Variable(torch.rand(4, 3).type(tp), requires_grad=True)
-            grad = torch.rand(4, 3).type(tp)
+        data = Variable(torch.rand(4, 3).type(test_type), requires_grad=True)
+        grad = torch.rand(4, 3).type(test_type)
 
-            # 1st pass
-            res1 = module(data)
-            res1.backward(grad)
-            grad1 = data.grad.data.clone()
+        # 1st pass
+        res1 = module(data)
+        res1.backward(grad)
+        grad1 = data.grad.data.clone()
 
-            # 2nd pass
-            if data.grad is not None:
-                data.grad.data.zero_()
+        # 2nd pass
+        if data.grad is not None:
+            data.grad.data.zero_()
 
-            res2 = module(data)
-            res2.backward(grad)
-            grad2 = data.grad.data.clone()
-            self.assertEqual(res1, res2)
-            self.assertEqual(grad1, grad2)
+        res2 = module(data)
+        res2.backward(grad)
+        grad2 = data.grad.data.clone()
+        self.assertEqual(res1, res2)
+        self.assertEqual(grad1, grad2)
 
     def test_pairwise_distance(self):
         input1 = Variable(torch.randn(4, 4), requires_grad=True)
