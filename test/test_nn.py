@@ -3241,6 +3241,7 @@ new_module_tests = [
         constructor_args=(10,),
         input_size=(4, 10),
         cudnn=True,
+        check_eval=True,
         desc='affine',
     ),
     dict(
@@ -3248,6 +3249,7 @@ new_module_tests = [
         constructor_args=(5,),
         input_size=(4, 5, 3),
         cudnn=True,
+        check_eval=True,
         desc='3d_input',
     ),
     dict(
@@ -3255,6 +3257,7 @@ new_module_tests = [
         constructor_args=(10, 1e-3, 0.3, False),
         input_size=(4, 10),
         cudnn=True,
+        check_eval=True,
         desc='not_affine',
     ),
     dict(
@@ -3262,6 +3265,7 @@ new_module_tests = [
         constructor_args=(5, 1e-3, 0.3, False),
         input_size=(4, 5, 3),
         cudnn=True,
+        check_eval=True,
         desc='3d_input_not_affine',
     ),
     dict(
@@ -3269,12 +3273,14 @@ new_module_tests = [
         constructor_args=(3,),
         input_size=(2, 3, 6, 6),
         cudnn=True,
+        check_eval=True,
     ),
     dict(
         module_name='BatchNorm2d',
         constructor_args=(3, 1e-3, 0.8),
         input_size=(2, 3, 6, 6),
         cudnn=True,
+        check_eval=True,
         desc='momentum',
     ),
     dict(
@@ -3282,6 +3288,7 @@ new_module_tests = [
         constructor_args=(3, 1e-3, 0.8, False),
         input_size=(2, 3, 6, 6),
         cudnn=True,
+        check_eval=True,
         desc='not_affine',
     ),
     dict(
@@ -3289,12 +3296,14 @@ new_module_tests = [
         constructor_args=(3,),
         input_size=(2, 3, 4, 4, 4),
         cudnn=True,
+        check_eval=True,
     ),
     dict(
         module_name='BatchNorm3d',
         constructor_args=(3, 1e-3, 0.7),
         input_size=(2, 3, 4, 4, 4),
         cudnn=True,
+        check_eval=True,
         desc='momentum',
     ),
     dict(
@@ -3302,6 +3311,7 @@ new_module_tests = [
         constructor_args=(3, 1e-3, 0.7, False),
         input_size=(2, 3, 4, 4, 4),
         cudnn=True,
+        check_eval=True,
         desc='not_affine',
     ),
     dict(
@@ -3837,6 +3847,21 @@ for test_params in module_tests + new_module_tests:
         test_params['constructor'] = getattr(nn, name)
     test = NewModuleTest(**test_params)
     add_test(test)
+    if 'check_eval' in test_params:
+        # create a new test that is identical but that sets module.training to False
+        test_params['desc'] = test_params.get('desc', '') + 'eval'
+
+        def gen_eval_constructor(constructor):
+            def eval_constructor(*args, **kwargs):
+                cons = constructor(*args, **kwargs)
+                cons.training = False
+                return cons
+            eval_constructor.__name__ = constructor.__name__
+            return eval_constructor
+
+        test_params['constructor'] = gen_eval_constructor(test_params['constructor'])
+        test = NewModuleTest(**test_params)
+        add_test(test)
 
 for test_params in criterion_tests + new_criterion_tests:
     name = test_params.pop('module_name')
