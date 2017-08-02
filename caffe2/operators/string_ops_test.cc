@@ -38,6 +38,46 @@ class StringJoinOpTest : public testing::Test {
   Workspace ws_;
 };
 
+TEST_F(StringJoinOpTest, testString1DJoin) {
+  std::vector<std::string> input = {"a", "xx", "c"};
+
+  auto blob = caffe2::make_unique<Blob>();
+  auto* tensor = blob->GetMutable<TensorCPU>();
+  tensor->Resize(input.size());
+  auto* data = tensor->mutable_data<std::string>();
+  for (int i = 0; i < input.size(); ++i) {
+    *data++ = input[i];
+  }
+
+  EXPECT_TRUE(runOp(*tensor));
+
+  const auto* outputData = checkAndGetOutput(input.size());
+  EXPECT_EQ(outputData[0], "a,");
+  EXPECT_EQ(outputData[1], "xx,");
+  EXPECT_EQ(outputData[2], "c,");
+}
+
+TEST_F(StringJoinOpTest, testString2DJoin) {
+  std::vector<std::vector<std::string>> input = {{"aa", "bb", "cc"},
+                                                 {"dd", "ee", "ff"}};
+
+  auto blob = caffe2::make_unique<Blob>();
+  auto* tensor = blob->GetMutable<TensorCPU>();
+  tensor->Resize(input.size(), input[0].size());
+  auto* data = tensor->mutable_data<std::string>();
+  for (int i = 0; i < input.size(); ++i) {
+    for (int j = 0; j < input[0].size(); ++j) {
+      *data++ = input[i][j];
+    }
+  }
+
+  EXPECT_TRUE(runOp(*tensor));
+
+  const auto* outputData = checkAndGetOutput(input.size());
+  EXPECT_EQ(outputData[0], "aa,bb,cc,");
+  EXPECT_EQ(outputData[1], "dd,ee,ff,");
+}
+
 TEST_F(StringJoinOpTest, testFloat1DJoin) {
   std::vector<float> input = {3.90, 5.234, 8.12};
 
