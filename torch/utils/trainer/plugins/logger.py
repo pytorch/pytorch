@@ -9,27 +9,27 @@ def is_sequence(arg):
             hasattr(arg, "__iter__"))
 
 class Logger(Plugin):
-    ''' 
-        Logger plugin for Trainer
-    '''
+    """Logger plugin for Trainer"""
     alignment = 4
     separator = '#' * 80
 
     def __init__(self, fields, interval=[(1, 'iteration'), (1, 'epoch')]):
-        '''
+        """
             Args:
-                fields: The fields to log. May either be the name of some stat (e.g. ProgressMonitor)
-                    will have `stat_name='progress'`, in which case all of the fields under 
-                    `log_HOOK_fields` will be logged. Finer-grained control can be specified
-                    by using individual fields such as `progress.percent`. 
-                interval: A List of 2-tuples where each tuple contains (k, HOOK_TIME). 
-                    k (int): The logger will be called every 'k' HOOK_TIMES
-                    HOOK_TIME (string): The logger will be called at the given hook
+                fields: The fields to log. May either be the name of some stat 
+                    (e.g. ProgressMonitor) will have `stat_name='progress'`,
+                    in which case all of the fields under `log_HOOK_fields`
+                    will be logged. Finer-grained control can be specified by
+                    using individual fields such as `progress.percent`. 
+                interval: A List of 2-tuples where each tuple contains 
+                    (k, HOOK). 
+                    k (int): The logger will be called every 'k' HOOK
+                    HOOK (string): The logger will be called at the given hook
             
             Examples:
                 >>> progress_m = ProgressMonitor()
                 >>> logger = Logger(["progress"], [(2, 'iteration')])
-        '''
+        """
         if not is_sequence(fields):
             raise ValueError("'fields' must be a sequence of strings, not {}".format(type(fields)))
 
