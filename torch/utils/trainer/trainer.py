@@ -3,6 +3,13 @@ from torch.autograd import Variable
 
 
 class Trainer(object):
+    ''' 
+        The Trainer is a lightweight wrapper to encapsulate a typical training 
+        loop. 
+        It contains 4 callbacks in (accesssible from trainer.get_plugin_queues()).
+        Plugins (and subclasses thereof, or anything that provides the required 
+        methods) can be registered to trigger at these predefined times. 
+    '''
 
     def __init__(self, model=None, criterion=None, optimizer=None, dataset=None):
         self.model = model
@@ -17,6 +24,9 @@ class Trainer(object):
             'batch': [],
             'update': [],
         }
+
+    def get_plugin_queues(self):
+        return self.plugin_queues
 
     def register_plugin(self, plugin):
         plugin.register(self)
