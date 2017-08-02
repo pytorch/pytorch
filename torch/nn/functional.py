@@ -766,7 +766,7 @@ def binary_cross_entropy(input, target, weight=None, size_average=True):
                 sizeAverage is set to False, the losses are instead summed
                 for each minibatch. Default: True
     """
-    if not target.is_same_size(input):
+    if not (target.size() == input.size()):
         warnings.warn("Using a target size ({}) that is different to the input size ({}) is deprecated. "
                       "Please ensure they have the same size.".format(target.size(), input.size()))
     if input.nelement() != target.nelement():
