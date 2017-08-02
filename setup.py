@@ -257,6 +257,10 @@ class clean(distutils.command.clean.clean):
 ################################################################################
 
 include_dirs = []
+
+if os.getenv('CONDA_PREFIX'):
+    include_dirs.append(os.path.join(os.getenv('CONDA_PREFIX'), "include"))
+
 library_dirs = []
 extra_link_args = []
 extra_compile_args = ['-std=c++11', '-Wno-write-strings',
@@ -293,6 +297,7 @@ include_dirs += [
     tmp_install_path + "/include/THPP",
     tmp_install_path + "/include/THNN",
     tmp_install_path + "/include/ATen",
+    tmp_install_path + "/include/toffee",
 ]
 
 library_dirs.append(lib_path)
@@ -308,6 +313,7 @@ THPP_LIB = os.path.join(lib_path, 'libTHPP.so.1')
 ATEN_LIB = os.path.join(lib_path, 'libATen.so.1')
 THD_LIB = os.path.join(lib_path, 'libTHD.so.1')
 NCCL_LIB = os.path.join(lib_path, 'libnccl.so.1')
+TOFFEE_LIB = os.path.join(lib_path, 'libtoffee.so.1')
 if platform.system() == 'Darwin':
     TH_LIB = os.path.join(lib_path, 'libTH.1.dylib')
     THS_LIB = os.path.join(lib_path, 'libTHS.1.dylib')
@@ -319,6 +325,7 @@ if platform.system() == 'Darwin':
     ATEN_LIB = os.path.join(lib_path, 'libATen.1.dylib')
     THD_LIB = os.path.join(lib_path, 'libTHD.1.dylib')
     NCCL_LIB = os.path.join(lib_path, 'libnccl.1.dylib')
+    TOFFEE_LIB = os.path.join(lib_path, 'libtoffee.1.dylib')
 
 if WITH_NCCL and (subprocess.call('ldconfig -p | grep libnccl >/dev/null', shell=True) == 0 or
                   subprocess.call('/sbin/ldconfig -p | grep libnccl >/dev/null', shell=True) == 0):
@@ -326,7 +333,7 @@ if WITH_NCCL and (subprocess.call('ldconfig -p | grep libnccl >/dev/null', shell
 
 main_compile_args = ['-D_THP_CORE']
 main_libraries = ['shm']
-main_link_args = [TH_LIB, THS_LIB, THPP_LIB, THNN_LIB, ATEN_LIB]
+main_link_args = [TH_LIB, THS_LIB, THPP_LIB, THNN_LIB, ATEN_LIB, TOFFEE_LIB]
 main_sources = [
     "torch/csrc/PtrWrapper.cpp",
     "torch/csrc/Module.cpp",
@@ -346,6 +353,7 @@ main_sources = [
     "torch/csrc/jit/init.cpp",
     "torch/csrc/jit/ir.cpp",
     "torch/csrc/jit/graph_fuser.cpp",
+    "torch/csrc/jit/graph_exporter.cpp",
     "torch/csrc/jit/init_pass.cpp",
     "torch/csrc/jit/dead_code_elimination.cpp",
     "torch/csrc/jit/test_jit.cpp",

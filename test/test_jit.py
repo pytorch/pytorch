@@ -24,6 +24,16 @@ class TestJit(TestCase):
 
         self.assertExpected(str(trace))
 
+    def test_export(self):
+        x = Variable(torch.Tensor([0.4]), requires_grad=True)
+        y = Variable(torch.Tensor([0.7]), requires_grad=True)
+
+        trace, (x, y) = torch._C._tracer_enter((x, y))
+        z = -torch.sigmoid(torch.tanh(x * (x + y)))
+        torch._C._tracer_exit((z,))
+        torch._C._jit_pass_lint(trace)
+        self.assertExpected(torch._C._jit_pass_export(trace))
+
     def test_lstm(self):
         # Careful: don't use fused backend (enabled with CUDA)
         # Pasted from test_LSTM_cell
@@ -108,49 +118,6 @@ class TestJit(TestCase):
         out = lstm(input, (hx, cx))
         out2 = lstm(input, (hx, cx))
         self.assertEqual(out, out2)
-
-    @unittest.skip("in-place is not supported")
-    def test_alexnet(self):
-
-        class AlexNet(nn.Module):
-
-            def __init__(self, num_classes=1000):
-                super(AlexNet, self).__init__()
-                self.features = nn.Sequential(
-                    nn.Conv2d(3, 64, kernel_size=11, stride=4, padding=2),
-                    nn.ReLU(inplace=True),
-                    nn.MaxPool2d(kernel_size=3, stride=2),
-                    nn.Conv2d(64, 192, kernel_size=5, padding=2),
-                    nn.ReLU(inplace=True),
-                    nn.MaxPool2d(kernel_size=3, stride=2),
-                    nn.Conv2d(192, 384, kernel_size=3, padding=1),
-                    nn.ReLU(inplace=True),
-                    nn.Conv2d(384, 256, kernel_size=3, padding=1),
-                    nn.ReLU(inplace=True),
-                    nn.Conv2d(256, 256, kernel_size=3, padding=1),
-                    nn.ReLU(inplace=True),
-                    nn.MaxPool2d(kernel_size=3, stride=2),
-                )
-                self.classifier = nn.Sequential(
-                    nn.Dropout(),
-                    nn.Linear(256 * 6 * 6, 4096),
-                    nn.ReLU(inplace=True),
-                    nn.Dropout(),
-                    nn.Linear(4096, 4096),
-                    nn.ReLU(inplace=True),
-                    nn.Linear(4096, num_classes),
-                )
-
-            def forward(self, x):
-                x = self.features(x)
-                x = x.view(x.size(0), 256 * 6 * 6)
-                x = self.classifier(x)
-                return x
-
-        model = torch.jit.traced(AlexNet())
-        x = Variable(torch.randn(10, 3, 224, 224), requires_grad=True)
-        trace, _ = model(x)
-        self.assertExpected(str(trace))
 
     def test_autograd_closure(self):
         a = x = Variable(torch.Tensor([0.4]), requires_grad=True)

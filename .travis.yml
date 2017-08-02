@@ -29,6 +29,8 @@ addons:
             - ubuntu-toolchain-r-test
         packages:
             - g++-5
+            - protobuf-compiler
+            - libprotobuf-dev
 
 script:
     - OMP_NUM_THREADS=2 ./test/run_test.sh
