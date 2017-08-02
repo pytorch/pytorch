@@ -24,6 +24,7 @@ std::unordered_map<std::string, constructor_type> constructors = {
   {"Sigmoid",     trivial_ctor<Sigmoid>},
   {"Tanh",        trivial_ctor<Tanh>},
   {"Chunk",       chunk_ctor},
+  {"Negate",      trivial_ctor<Negate>},
 };
 
 } // anonymous namespace

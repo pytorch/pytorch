@@ -140,6 +140,7 @@ build THPP
 CPP_FLAGS=" -std=c++11 "
 build libshm
 build ATen
+build ToffeeIR
 
 # THD, gloo have dependencies on Torch, CUDA, NCCL etc.
 if [[ $WITH_DISTRIBUTED -eq 1 ]]; then

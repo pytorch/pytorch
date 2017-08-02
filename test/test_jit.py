@@ -24,6 +24,18 @@ class TestJit(TestCase):
 
         self.assertExpected(str(trace))
 
+    def test_export(self):
+        x = Variable(torch.Tensor([0.4]), requires_grad=True)
+        y = Variable(torch.Tensor([0.7]), requires_grad=True)
+
+        trace = torch._C._tracer_enter((x, y))
+        z = -torch.sigmoid(torch.tanh(x * (x + y)))
+        torch._C._tracer_exit((z,))
+        torch._C._jit_pass_lint(trace)
+        torch._C._jit_pass_init(trace)
+        torch._C._jit_pass_lint(trace)
+        self.assertExpected(torch._C._jit_pass_export(trace))
+
     def test_lstm(self):
         # Careful: don't use fused backend (enabled with CUDA)
         # Pasted from test_LSTM_cell
@@ -148,9 +160,10 @@ class TestJit(TestCase):
                 return x
 
         model = torch.jit.traced(AlexNet())
-        x = Variable(torch.randn(10, 3, 224, 224), requires_grad=True)
+        x = Variable(torch.randn(10, 3, 224, 224).fill_(1.0), requires_grad=True)
         trace, _ = model(x)
         self.assertExpected(str(trace))
+        self.assertExpected(torch._C._jit_pass_export(trace), "pbtxt")
 
     def test_autograd_closure(self):
         a = x = Variable(torch.Tensor([0.4]), requires_grad=True)
