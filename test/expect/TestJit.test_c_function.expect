@@ -1,0 +1,4 @@
+graph(%1, %2, %3) {
+  %4.0 = CppOp[N5torch8autograd11ConvForwardE](%1, %2, %3), uses = [[%0.i0]];
+  return (%4.0);
+}

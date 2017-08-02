@@ -13,7 +13,7 @@ class TestJit(TestCase):
 
         trace = torch._C._tracer_enter((x, y))
         z = torch.sigmoid(torch.tanh(x * (x + y)))
-        torch._C._tracer_exit(trace, (z,))
+        torch._C._tracer_exit((z,))
         torch._C._jit_pass_lint(trace)
         torch._C._jit_pass_init(trace)
         torch._C._jit_pass_lint(trace)
@@ -46,7 +46,7 @@ class TestJit(TestCase):
         z, _ = torch.max(x * (x + y), 0)
         w = torch.abs(x * x * x + y)
 
-        torch._C._tracer_exit(trace, (z, w))
+        torch._C._tracer_exit((z, w))
         torch._C._jit_pass_lint(trace)
         torch._C._jit_pass_init(trace)
         torch._C._jit_pass_lint(trace)
@@ -63,7 +63,7 @@ class TestJit(TestCase):
         y = Variable(torch.diag(torch.Tensor([2, 2])))
         z = x.matmul(y)
 
-        torch._C._tracer_exit(trace, (z,))
+        torch._C._tracer_exit((z,))
         closure = torch._C._jit_createAutogradClosure(trace)
 
         z2, = Variable._execution_engine.run_forward(closure, (x,))
@@ -74,6 +74,15 @@ class TestJit(TestCase):
         x2 = Variable(torch.ones(2, 2) * 2, requires_grad=True)
         z3, = Variable._execution_engine.run_forward(closure, (x2,))
         self.assertEqual(z3.data, torch.ones(2, 2) * 4)
+
+    def test_c_function(self):
+        x = Variable(torch.randn(1, 3, 10, 10))
+        m = nn.Conv2d(3, 8, 3, 1)
+
+        trace = torch._C._tracer_enter((x,) + tuple(m.parameters()))
+        y = m(x)
+        torch._C._tracer_exit((y,))
+        self.assertExpected(str(trace))
 
     def test_cpp(self):
         torch._C._jit_run_cpp_tests()
