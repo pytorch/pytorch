@@ -31,12 +31,15 @@ class Logger(Plugin):
                 >>> logger = Logger(["progress"], [(2, 'iteration')])
         """
         if not is_sequence(fields):
-            raise ValueError("'fields' must be a sequence of strings, not {}".format(type(fields)))
+            raise ValueError(
+                "'fields' must be a sequence of strings, not {}".format(
+                    type(fields)))
 
         for i, val in enumerate(fields):
             if not isinstance(val, string_types):
-                raise ValueError("Element {} of 'fields' ({}) must be a string.".format(
-                    i, val))
+                raise ValueError(
+                    "Element {} of 'fields' ({}) must be a string.".format(
+                        i, val))
 
         super(Logger, self).__init__(interval)
         self.field_widths = defaultdict(lambda: defaultdict(int))
