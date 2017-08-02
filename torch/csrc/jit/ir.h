@@ -22,6 +22,12 @@
 #include "ATen/ArrayRef.h"
 #include "torch/csrc/jit/assert.h"
 
+namespace torch { namespace autograd {
+
+struct Function;
+
+}} // namespace torch::autograd
+
 namespace torch { namespace jit {
 
 // Graph represents one "function" of computation.
@@ -198,6 +204,7 @@ using ArrayRef = at::ArrayRef<T>;
 // defined using x-macros so that we can generate toString easily
 #define TH_FORALL_NODES(_) \
 _(PythonOp) \
+_(CppOp) \
 _(Param) \
 _(Select) \
 _(Return) \
@@ -799,6 +806,16 @@ struct PythonOp : public NodeWithKind<PythonOp,NodeKind::PythonOp,TypeKind::Mult
       Py_INCREF(sa.get());
       this->scalar_args.emplace_back(sa.get());
     }
+  }
+};
+
+struct CppOp : public NodeWithKind<CppOp,NodeKind::CppOp,TypeKind::Multi> {
+  std::shared_ptr<torch::autograd::Function> fn;
+
+  std::string name();
+
+  void init(std::shared_ptr<torch::autograd::Function> fn) {
+    this->fn = std::move(fn);
   }
 };
 

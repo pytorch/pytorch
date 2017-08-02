@@ -3,7 +3,6 @@
 
 #include "torch/csrc/autograd/jit_closure.h"
 #include "torch/csrc/jit/tracer.h"
-#include "torch/csrc/jit/python_ir.h"
 #include "torch/csrc/jit/assert.h"
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/THP.h"
@@ -138,13 +137,11 @@ PyObject * THPTracer_enter(PyObject *_unused, PyObject *args)
 PyObject * THPTracer_exit(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
-  PyObject* state_obj = NULL;
   PyObject* output_objs = NULL;
-  if (!PyArg_ParseTuple(args, "OO", &state_obj, &output_objs)) {
+  if (!PyArg_ParseTuple(args, "O", &output_objs)) {
     return NULL;
   }
 
-  THPUtils_assert(THPTracingState_Check(state_obj), "graph argument is not a graph");
   THPUtils_assert(PyTuple_Check(output_objs), "outputs argument is "
     "expected to be a tuple, but got %s", THPUtils_typename(output_objs));
   Py_ssize_t num_outputs = PyTuple_GET_SIZE(output_objs);
@@ -158,8 +155,7 @@ PyObject * THPTracer_exit(PyObject *_unused, PyObject *args)
     outputs.emplace_back(var);
   }
 
-  THPTracingState *py_state = (THPTracingState*)state_obj;
-  tracer::exit(py_state->cdata, outputs);
+  tracer::exit(outputs);
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS

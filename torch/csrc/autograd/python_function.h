@@ -27,6 +27,7 @@ struct PyFunction : public Function {
 
   virtual void releaseVariables() override;
   virtual std::string name() override;
+  virtual std::shared_ptr<Function> getSharedPtr() override;
 
   // THPFunction this Function is wrapping.
   PyObject* obj;

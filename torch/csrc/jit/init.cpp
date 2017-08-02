@@ -5,12 +5,11 @@
 #include "torch/csrc/jit/graph_fuser.h"
 #include "torch/csrc/jit/init_pass.h"
 #include "torch/csrc/jit/python_tracer.h"
-#include "torch/csrc/jit/python_ir.h"
 
 
 PyObject * THPJIT_initExtension(PyObject *_unused)
 {
-  // NOTE: leaving this code, because it will likely be useful at some point
+  // Leaving this code here, because it will likely be useful at some point
   //PyObject *jit_module = PyImport_ImportModule("torch.jit");
   //THPUtils_assert(jit_module, "class loader couldn't access "
           //"torch.jit module");
