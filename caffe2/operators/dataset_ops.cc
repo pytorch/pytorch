@@ -436,7 +436,10 @@ class ReadNextBatchOp : public Operator<CPUContext> {
  public:
   ReadNextBatchOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator(operator_def, ws),
-        batchSize_(OperatorBase::GetSingleArgument<int>("batch_size", 1)) {}
+        batchSize_(OperatorBase::GetSingleArgument<int>("batch_size", 1)),
+        enforceBatchSize_(OperatorBase::GetSingleArgument<bool>(
+            "enforce_batch_size",
+            false)) {}
 
   bool RunOnDevice() override {
     auto& cursor = OperatorBase::Input<std::unique_ptr<TreeCursor>>(0);
@@ -472,6 +475,12 @@ class ReadNextBatchOp : public Operator<CPUContext> {
       }
       offsets = cursor->offsets;
       cursor->it.advance(lengths, cursor->offsets, sizes, limits, batchSize_);
+      if (enforceBatchSize_ && sizes[0] < batchSize_) {
+        // if we enforce batch_size but don't have enough rows left to
+        // complete a full batch, return empty for all columns.
+        // This signals end of dataset to the caller.
+        sizes.assign(sizes.size(), 0);
+      }
     }
     // gather data
     std::vector<TIndex> outDim;
@@ -497,6 +506,7 @@ class ReadNextBatchOp : public Operator<CPUContext> {
     return true;
   }
   int batchSize_;
+  bool enforceBatchSize_;
 };
 
 class ComputeOffsetOp : public Operator<CPUContext> {
@@ -638,6 +648,8 @@ class ReadRandomBatchOp : public Operator<CPUContext> {
   ReadRandomBatchOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator(operator_def, ws),
         batchSize_(OperatorBase::GetSingleArgument<int>("batch_size", 1)),
+        enforceBatchSize_(
+            OperatorBase::GetSingleArgument<bool>("enforce_batch_size", false)),
         loopOver_(OperatorBase::GetSingleArgument<bool>("loop_over", false)) {}
   bool RunOnDevice() override {
     auto& cursor = OperatorBase::Input<std::unique_ptr<TreeCursor>>(0);
@@ -653,6 +665,11 @@ class ReadRandomBatchOp : public Operator<CPUContext> {
       std::lock_guard<std::mutex> lock(cursor->mutex_);
       cursor->offsets.resize(1);
       idx = cursor->offsets.at(0);
+      // if we want to enforce batch size but we dont have a complete
+      // batch, skip the last rows.
+      if (enforceBatchSize_ && idx + batchSize_ > idxblob.size()) {
+        idx = idxblob.size();
+      }
       if (loopOver_ && idx >= idxblob.size()) {
         cursor->offsets.at(0) = 0;
         idx = 0;
@@ -714,6 +731,7 @@ class ReadRandomBatchOp : public Operator<CPUContext> {
     return true;
   }
   int batchSize_;
+  bool enforceBatchSize_;
   bool loopOver_;
 };
 
