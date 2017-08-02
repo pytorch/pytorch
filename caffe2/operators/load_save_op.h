@@ -20,6 +20,7 @@ struct BlobState {
   int64_t total_size;
   int64_t current_size;
   bool is_tensor;
+  std::set<int32_t> seen_chunks_ids;
 
   explicit BlobState(
       int64_t total_size = 0,
@@ -247,14 +248,44 @@ class LoadOp final : public Operator<Context> {
       blob->Reset();
     }
     blob->Deserialize(proto);
+    if (proto.has_content_num_chunks()) {
+      if (!blob_states.count(key)) {
+        blob_states[key] = BlobState(proto.content_num_chunks());
+      }
+      CAFFE_ENFORCE(
+          blob_states[key]
+              .seen_chunks_ids.insert(proto.content_chunk_id())
+              .second,
+          "Chunk with the same id has occured twice for: ",
+          key);
+      CAFFE_ENFORCE(
+          proto.content_chunk_id() >= 0 &&
+              proto.content_chunk_id() < blob_states[key].total_size,
+          "Chunk id has to be not less than 0 and "
+          "less than content_num_chunks for key: ",
+          key);
+      blob_states[key].current_size++;
+      CAFFE_ENFORCE(
+          !blob_states[key].is_tensor,
+          "Proto with content_chunks can not store tensor: ",
+          key);
+      CAFFE_ENFORCE(
+          blob_states[key].current_size <= blob_states[key].total_size,
+          "Found an extra part for an already filled blob: ",
+          key);
+      if (blob_states[key].current_size == blob_states[key].total_size) {
+        (*loaded_blobs)++;
+      }
+      return;
+    }
     if (!proto.has_tensor()) {
-      // Only tensors can be seen multiple times as chunks.
-      CAFFE_ENFORCE(blob_states.count(key) == 0, "Blob duplicated:", key);
+      // If blob is divided into chunks the field content_chunks has to be set,
+      // otherwise only tensors can be seen multiple times as chunks.
+      CAFFE_ENFORCE(blob_states.count(key) == 0, "Blob duplicated: ", key);
       blob_states[key] = BlobState();
       (*loaded_blobs)++;
       return;
     }
-
     CAFFE_ENFORCE(proto.has_tensor());
     if (blob_states.count(key)) {
       CAFFE_ENFORCE(blob_states[key].is_tensor, "Must be tensor ", key);
@@ -296,16 +327,14 @@ class LoadOp final : public Operator<Context> {
       const std::unordered_map<string, BlobState>& blob_states) {
     for (const auto& iter : blob_states) {
       const BlobState& blob_state = iter.second;
-      if (blob_state.is_tensor) {
-        CAFFE_ENFORCE(
-            blob_state.current_size == blob_state.total_size,
-            "Data size mismatch for blob ",
-            iter.first,
-            ". Expected: ",
-            blob_state.total_size,
-            " Read: ",
-            blob_state.current_size);
-      }
+      CAFFE_ENFORCE(
+          blob_state.current_size == blob_state.total_size,
+          "Data size mismatch for blob ",
+          iter.first,
+          ". Expected: ",
+          blob_state.total_size,
+          " Read: ",
+          blob_state.current_size);
     }
   }
 

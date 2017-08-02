@@ -292,6 +292,10 @@ message BlobProto {
   optional TensorProto tensor = 3;
   optional bytes content = 4;
   optional QTensorProto qtensor = 5;
+  // If blob is not Tensor and is divided into chunks, content_num_chunks
+  // contains number of chunks, into which blob was divided.
+  optional int32 content_num_chunks = 6;
+  optional int32 content_chunk_id = 7;
 }
 
 // Protobuf format to serialize DBReader.
