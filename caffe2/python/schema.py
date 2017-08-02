@@ -847,8 +847,10 @@ class _SchemaNode(object):
         map_names = ['lengths', 'keys', 'values']
 
         if len(self.children) == 0 or self.field is not None:
-            assert self.field is not None
-            return self.field
+            if self.field is None:
+                return Struct()
+            else:
+                return self.field
 
         child_names = []
         for child in self.children:

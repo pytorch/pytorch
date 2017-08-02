@@ -335,6 +335,12 @@ class TestDB(unittest.TestCase):
         self.assertFalse('b:c:x' in st)
         self.assertFalse('b:c:d:x' in st)
 
+    def testFromEmptyColumnList(self):
+        st = schema.Struct()
+        columns = st.field_names()
+        rec = schema.from_column_list(col_names=columns)
+        self.assertEqual(rec, schema.Struct())
+
     def testFromColumnList(self):
         st = schema.Struct(
             ('a', schema.Scalar()),
