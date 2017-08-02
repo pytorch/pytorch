@@ -3,7 +3,7 @@ from __future__ import division
 from __future__ import print_function
 
 import numpy as np
-from hypothesis import assume, given
+from hypothesis import assume, given, settings
 import hypothesis.strategies as st
 import os
 import unittest
@@ -168,6 +168,29 @@ class TestPooling(hu.HypothesisTestCase):
         X = X.transpose((0, 3, 1, 2))
 
         self.assertDeviceChecks(dc, op, [X], [0])
+
+    @given(sz=st.integers(1, 20),
+           batch_size=st.integers(1, 4),
+           engine=st.sampled_from(["", "CUDNN"]),
+           **hu.gcs)
+    @settings(max_examples=3, timeout=10)
+    def test_global_avg_pool_nchw(self, sz, batch_size, engine, gc, dc):
+        ''' Special test to stress the fast path of NCHW average pool '''
+        op = core.CreateOperator(
+            "AveragePool",
+            ["X"],
+            ["Y"],
+            stride=1,
+            kernel=sz,
+            pad=0,
+            order="NCHW",
+            engine=engine,
+        )
+        X = np.random.rand(
+            batch_size, 3, sz, sz).astype(np.float32)
+
+        self.assertDeviceChecks(dc, op, [X], [0])
+        self.assertGradientChecks(gc, op, [X], 0, [0])
 
     @given(stride=st.integers(1, 3),
            pad=st.integers(0, 3),
