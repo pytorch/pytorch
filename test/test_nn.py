@@ -527,7 +527,7 @@ class TestNN(NNTestCase):
                 self.check_backward_hook_flag = True
 
             def forward(self, inputs):
-                return {"output": self.l1(inputs)}
+                return {"output": self.l1(inputs).sum()}
 
         l = nn.Linear(10, 20)
         net = Net()
