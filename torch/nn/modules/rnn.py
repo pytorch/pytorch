@@ -135,7 +135,7 @@ class RNNBase(Module):
             hx = torch.autograd.Variable(input.data.new(self.num_layers *
                                                         num_directions,
                                                         max_batch_size,
-                                                        self.hidden_size).zero_())
+                                                        self.hidden_size).zero_(), requires_grad=False)
             if self.mode == 'LSTM':
                 hx = (hx, hx)
 
