@@ -532,8 +532,8 @@ class TestNN(NNTestCase):
         l = nn.Linear(10, 20)
         net = Net()
         data = Variable(torch.randn([5, 10]))
-        output = net(data)
-        output.backward()
+        model_output = net(data)
+        model_output["output"].backward()
         assert net.check_backward_hook_flag
 
     def test_children(self):
