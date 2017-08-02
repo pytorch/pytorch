@@ -2,9 +2,37 @@
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/conv_pool_op_base.h"
 
+#include <cub/cub.cuh>
+
 namespace caffe2 {
 
 namespace {
+
+template <typename T>
+__global__ void
+global_avgpool_kernel_NCHW(const int NC, const int sz, const T* data, T* out) {
+  typedef cub::BlockReduce<T, CAFFE_CUDA_NUM_THREADS> BlockReduce;
+  __shared__ typename BlockReduce::TempStorage temp_storage;
+  for (int j = blockIdx.x; j < NC; j += gridDim.x) {
+    T sum(0);
+    for (int k = threadIdx.x; k < sz; k += blockDim.x) {
+      sum += data[j * sz + k];
+    }
+    float totalsum = BlockReduce(temp_storage).Sum(sum);
+    if (threadIdx.x == 0) {
+      out[j] = totalsum / sz;
+    }
+    __syncthreads();
+  }
+}
+
+template <typename T>
+__global__ void
+global_avgpool_backward_NCHW(const int NC, const int sz, const T* dx, T* out) {
+  CUDA_1D_KERNEL_LOOP(i, NC * sz) {
+    out[i] = dx[i / sz] / sz;
+  }
+}
 
 template <typename T>
 void setTensorDescriptor(
@@ -106,6 +134,22 @@ class CuDNNPoolOp : public ConvPoolOpBase<CUDAContext> {
         break;
       default:
         LOG(FATAL) << "Unknown storage order: " << order_;
+    }
+
+    // Fast path for global pooling, as cudnn is slow. But only
+    // on float, because fp16 not supported for CUB.
+    if (sizeof(T) == 4) {
+      if (order_ == StorageOrder::NCHW && Y->size() == N * C) {
+        if (mode_ == CUDNN_POOLING_AVERAGE_COUNT_EXCLUDE_PADDING) {
+          global_avgpool_kernel_NCHW<float>
+              <<<std::min(N * C, CAFFE_MAXIMUM_NUM_BLOCKS),
+                 CAFFE_CUDA_NUM_THREADS,
+                 0,
+                 context_.cuda_stream()>>>(
+                  N * C, H * W * D, X.data<float>(), Y->mutable_data<float>());
+          return true;
+        }
+      }
     }
 
     if (cudnn_input_dims_ != X.dims()) {
@@ -244,6 +288,25 @@ class CuDNNPoolGradientOp : public ConvPoolOpBase<CUDAContext> {
       break;
     default:
       LOG(FATAL) << "Unknown storage order: " << order_;
+    }
+
+    // Fast path for global pooling, as cudnn is slow. But only
+    // on float, because fp16 not supported for CUB.
+    if (sizeof(T) == 4) {
+      if (order_ == StorageOrder::NCHW && dY.size() == N * C) {
+        if (mode_ == CUDNN_POOLING_AVERAGE_COUNT_EXCLUDE_PADDING) {
+          global_avgpool_backward_NCHW<float>
+              <<<CAFFE_GET_BLOCKS(dX->size()),
+                 CAFFE_CUDA_NUM_THREADS,
+                 0,
+                 context_.cuda_stream()>>>(
+                  N * C,
+                  H * W * D,
+                  dY.data<float>(),
+                  dX->mutable_data<float>());
+          return true;
+        }
+      }
     }
 
     if (kernel_.size() == 1) {
