@@ -824,7 +824,7 @@ def mse_loss(input, target, size_average=True):
 
 
 def margin_ranking_loss(input1, input2, target, margin=0, size_average=True):
-    return _functions.loss.MarginRankingLoss(margin, size_average)(input1, input2, target)
+    return _functions.loss.MarginRankingLoss.apply(input1, input2, target, margin, size_average)
 
 
 def hinge_embedding_loss(input, target, margin=1.0, size_average=True):
