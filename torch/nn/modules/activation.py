@@ -598,9 +598,7 @@ class Softmin(Module):
     rescaling them so that the elements of the n-dimensional output Tensor
     lie in the range `(0, 1)` and sum to 1
 
-    :math:`f(x) = exp(-x_i - {shift}) / sum_j exp(-x_j - {shift})`
-
-    where :math:`{shift} = max_i - x_i`
+    :math:`f(x) = exp(-x_i) / sum_j exp(-x_j)`
 
     Shape:
         - Input: :math:`(N, L)`

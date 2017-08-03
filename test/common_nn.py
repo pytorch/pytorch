@@ -217,7 +217,11 @@ module_tests = [
     dict(
         module_name='Softmin',
         input_size=(10, 20),
-        check_gradgrad=False,
+    ),
+    dict(
+        module_name='Softmin',
+        input_size=(2, 3, 5, 10),
+        desc='multidim',
     ),
     dict(
         module_name='Tanhshrink',
