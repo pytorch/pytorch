@@ -26,7 +26,7 @@ def _initialize_backend():
     from .._functions.dropout import Dropout, FeatureDropout
     from .._functions.activation import Softsign
     from .._functions.loss import CosineEmbeddingLoss, \
-        HingeEmbeddingLoss, MarginRankingLoss
+        HingeEmbeddingLoss, HingeEmbeddingLossBackward, MarginRankingLoss
 
     backend.register_function('ConvNd', ConvNd)
     backend.register_function('RNN', RNN)
@@ -39,6 +39,7 @@ def _initialize_backend():
     backend.register_function('Dropout3d', FeatureDropout)
     backend.register_function('CosineEmbeddingLoss', CosineEmbeddingLoss)
     backend.register_function('HingeEmbeddingLoss', HingeEmbeddingLoss)
+    backend.register_function('HingeEmbeddingLossBackward', HingeEmbeddingLossBackward)
     backend.register_function('MarginRankingLoss', MarginRankingLoss)
     backend.register_function('Softsign', Softsign)
     for cls in _thnn_functions:

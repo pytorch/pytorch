@@ -92,40 +92,62 @@ class CosineEmbeddingLoss(Function):
 
 
 class HingeEmbeddingLoss(Function):
-    def __init__(self, margin=1, size_average=True):
-        super(HingeEmbeddingLoss, self).__init__()
-        self.margin = margin
-        self.size_average = size_average
-
-    def forward(self, input, target):
+    @staticmethod
+    def forward(ctx, input, target, margin, size_average):
+        ctx.margin = margin
+        ctx.size_average = size_average
         buffer = input.new()
         buffer.resize_as_(input).copy_(input)
         buffer[torch.eq(target, -1.)] = 0
         output = buffer.sum()
 
-        buffer.fill_(self.margin).add_(-1, input)
+        buffer.fill_(ctx.margin).add_(-1, input)
         buffer.clamp_(min=0)
         buffer[torch.eq(target, 1.)] = 0
         output += buffer.sum()
 
-        if self.size_average:
+        if ctx.size_average:
             output = output / input.nelement()
 
-        self.save_for_backward(input, target)
+        ctx.save_for_backward(input, target)
         return input.new((output,))
 
-    def backward(self, grad_output):
-        input, target = self.saved_tensors
-        grad_input = input.new().resize_as_(input).copy_(target)
-        grad_input[torch.mul(torch.eq(target, -1), torch.gt(input, self.margin))] = 0
+    @staticmethod
+    def backward(ctx, grad_output):
+        input, target = ctx.saved_variables
+        return (HingeEmbeddingLossBackward.apply(input, target, grad_output, ctx.margin, ctx.size_average),
+                None, None, None, None)
 
-        if self.size_average:
+
+class HingeEmbeddingLossBackward(Function):
+    @staticmethod
+    def forward(ctx, input, target, grad_output, margin, size_average):
+        ctx.margin = margin
+        ctx.size_average = size_average
+        ctx.save_for_backward(input, target, grad_output)
+        grad_input = input.new().resize_as_(input).copy_(target)
+        grad_input[torch.mul(torch.eq(target, -1), torch.gt(input, ctx.margin))] = 0
+
+        if ctx.size_average:
             grad_input.mul_(1. / input.nelement())
 
         if grad_output[0] != 1:
             grad_input.mul_(grad_output[0])
 
-        return grad_input, None
+        return grad_input
+
+    @staticmethod
+    def backward(ctx, ggI):
+        input, target, gO = ctx.saved_variables
+        div_factor = input.nelement() if ctx.size_average else 1
+
+        gI = None
+
+        target_1_mask = (target == 1).type_as(ggI)
+        target_neg_1_and_input_used = ((target == -1) + ((ctx.margin - input) >= 0) == 2).type_as(ggI)
+        ggO = (ggI * target_1_mask - ggI * target_neg_1_and_input_used).sum() / div_factor
+
+        return gI, None, ggO, None, None
 
 
 class MarginRankingLoss(Function):

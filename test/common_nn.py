@@ -353,7 +353,6 @@ criterion_tests = [
         module_name='HingeEmbeddingLoss',
         input=torch.rand(10),
         target=torch.randn(10).gt(0).double().mul_(2).sub(1),
-        check_gradgrad=False,
     ),
     dict(
         module_name='HingeEmbeddingLoss',
@@ -361,7 +360,13 @@ criterion_tests = [
         input=torch.rand(10),
         target=torch.randn(10).gt(0).double().mul_(2).sub(1),
         desc='margin',
-        check_gradgrad=False,
+    ),
+    dict(
+        module_name='HingeEmbeddingLoss',
+        constructor_args=(0.5, False),
+        input=torch.rand(10),
+        target=torch.randn(10).gt(0).double().mul_(2).sub(1),
+        desc='margin_no_size_average',
     ),
     dict(
         module_name='MultiLabelMarginLoss',

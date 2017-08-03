@@ -828,7 +828,7 @@ def margin_ranking_loss(input1, input2, target, margin=0, size_average=True):
 
 
 def hinge_embedding_loss(input, target, margin=1.0, size_average=True):
-    return _functions.loss.HingeEmbeddingLoss(margin, size_average)(input, target)
+    return _functions.loss.HingeEmbeddingLoss.apply(input, target, margin, size_average)
 
 
 def multilabel_margin_loss(input, target, size_average=True):
