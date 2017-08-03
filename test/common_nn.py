@@ -287,7 +287,14 @@ criterion_tests = [
         input=torch.randn(2, 3, 4, 5),
         target=torch.randn(2, 3, 4, 5),
         reference_fn=lambda i, t, _: (i - t).abs().pow(2).sum() / i.numel(),
-        check_gradgrad=False,
+    ),
+    dict(
+        module_name='MSELoss',
+        constructor_args=(False,),
+        input=torch.randn(2, 3, 4, 5),
+        target=torch.randn(2, 3, 4, 5),
+        reference_fn=lambda i, t, _: (i - t).abs().pow(2).sum(),
+        desc='no_size_average',
     ),
     dict(
         module_name='BCELoss',

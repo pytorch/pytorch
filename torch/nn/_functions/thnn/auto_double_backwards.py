@@ -165,6 +165,17 @@ def threshold_double_backwards(ctx, ggI):
     return gI, ggO, None, None, None
 
 
+def mseloss_double_backwards(ctx, ggI):
+    size_average = ctx.additional_args[0]
+    input, target, gO = ctx.saved_variables
+    div_factor = input.nelement() if size_average else 1
+
+    gI = ggI * (gO * 2. / div_factor).expand_as(input)
+    ggO = (ggI * (input - target)).sum() * (2. / div_factor)
+
+    return gI, None, ggO, None, None
+
+
 def l1loss_double_backwards(ctx, ggI):
     size_average = ctx.additional_args[0]
     input, target, grad_output = ctx.saved_variables
@@ -227,6 +238,7 @@ double_backwards_fns = {
     'Softshrink': softshrink_double_backwards,
     'Threshold': threshold_double_backwards,
     'L1Loss': l1loss_double_backwards,
+    'MSELoss': mseloss_double_backwards,
     'NLLLoss': nllloss_double_backwards,
     'NLLLoss2d': nllloss_double_backwards,
 }
