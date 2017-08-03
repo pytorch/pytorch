@@ -87,6 +87,11 @@ unique_ptr<cub::CachingDeviceAllocator> g_cub_allocator;
 // unique.
 static std::unordered_map<void*, uint8_t> g_cuda_device_affiliation;
 
+// Keep track of enabled peer access
+static std::vector<bool> g_enabled_peer_access(
+    false,
+    CAFFE2_COMPILE_TIME_MAX_GPUS * CAFFE2_COMPILE_TIME_MAX_GPUS);
+
 // Data structures for optional memory tracking. Access to these structures
 // is garded by the CUDAContext::mutex.
 static std::unordered_map<void*, long> g_size_map;
@@ -137,43 +142,7 @@ static void Caffe2InitializeCuda() {
       "max number of gpus expected (",
       CAFFE2_COMPILE_TIME_MAX_GPUS,
       "). Increase that and recompile the caffe binary.");
-  // Save the current device so we can restore it after moving across
-  // different devices.
-  int init_device;
-  CUDA_ENFORCE(cudaGetDevice(&init_device));
 
-  for (int i = 0; i < NumCudaDevices(); ++i) {
-    auto err = cudaSetDevice(i);
-    if (err != cudaSuccess) {
-      LOG(WARNING)
-          << "Cannot use device " << i
-          << "due to the following error: " << cudaGetErrorString(err);
-      continue;
-    }
-    // Enable peer access.
-    const int peer_group = i / CAFFE2_CUDA_MAX_PEER_SIZE;
-    const int peer_start = peer_group * CAFFE2_CUDA_MAX_PEER_SIZE;
-    const int peer_end = std::min(
-        NumCudaDevices(), (peer_group + 1) * CAFFE2_CUDA_MAX_PEER_SIZE);
-    VLOG(1) << "Enabling peer access within group #" << peer_group
-            << ", from gpuid " << peer_start << " to " << peer_end - 1
-            << ", for gpuid " << i << ".";
-
-    for (int j = peer_start; j < peer_end; ++j) {
-      if (i == j) continue;
-      int can_access;
-      CUDA_ENFORCE(cudaDeviceCanAccessPeer(&can_access, i, j));
-      if (can_access) {
-        VLOG(1) << "Enabling peer access from " << i << " to " << j;
-        // Note: just for future reference, the 0 here is not a gpu id, it is
-        // a reserved flag for cudaDeviceEnablePeerAccess that should always be
-        // zero currently.
-        CUDA_ENFORCE(cudaDeviceEnablePeerAccess(j, 0));
-      }
-    }
-  }
-  // Restore the current device.
-  CUDA_ENFORCE(cudaSetDevice(init_device));
 
   RegisterTypeCallFunction(
     TypeMeta::Id<Tensor<CUDAContext>>(),
@@ -185,6 +154,32 @@ static void Caffe2InitializeCuda() {
 
   // Check the versions of cuDNN that were compiled and linked with are compatible
   CheckCuDNNVersions();
+}
+
+void CUDAContext::enableDevice2DeviceAccess(int device1, int device2) {
+  std::lock_guard<std::mutex> lock(CUDAContext::mutex());
+  int lookup_key = CAFFE2_COMPILE_TIME_MAX_GPUS * device1 + device2;
+  if (g_enabled_peer_access[lookup_key]) {
+    return;
+  }
+
+  int cur_device;
+  CUDA_ENFORCE(cudaGetDevice(&cur_device));
+
+  auto err = cudaSetDevice(device1);
+  int can_access;
+  CUDA_ENFORCE(cudaDeviceCanAccessPeer(&can_access, device1, device2));
+  if (can_access) {
+    VLOG(1) << "Enabling peer access from " << device1 << " to " << device2;
+    // Note: just for future reference, the 0 here is not a gpu id, it is
+    // a reserved flag for cudaDeviceEnablePeerAccess that should always be
+    // zero currently.
+    CUDA_ENFORCE(cudaDeviceEnablePeerAccess(device2, 0));
+  }
+  g_enabled_peer_access[lookup_key] = true;
+
+  // Restore the current device.
+  CUDA_ENFORCE(cudaSetDevice(cur_device));
 }
 
 #ifdef CAFFE2_USE_CNMEM
@@ -334,6 +329,7 @@ CUDAContext::CUDAContext(const int gpu_id)
     : gpu_id_(gpu_id == -1 ? GetDefaultGPUID() : gpu_id)
     , random_seed_(math::randomNumberSeed()) {
   static Caffe2CudaInitializerHelper g_cuda_initializer_;
+  enablePeerAccess();
 }
 
 CUDAContext::CUDAContext(const DeviceOption& option)
@@ -342,7 +338,19 @@ CUDAContext::CUDAContext(const DeviceOption& option)
       random_seed_(option.has_random_seed() ?
                    option.random_seed() : math::randomNumberSeed()) {
   static Caffe2CudaInitializerHelper g_cuda_initializer_;
-  DCHECK_EQ(option.device_type(), CUDA);
+  CAFFE_ENFORCE_EQ(option.device_type(), CUDA);
+  enablePeerAccess();
+}
+
+void CUDAContext::enablePeerAccess() {
+  // Ensure only connections inside peer are set.
+  const int peer_group = gpu_id_ / CAFFE2_CUDA_MAX_PEER_SIZE;
+  const int peer_start = peer_group * CAFFE2_CUDA_MAX_PEER_SIZE;
+
+  for (int dev = peer_start; dev < gpu_id_; ++dev) {
+    enableDevice2DeviceAccess(dev, gpu_id_);
+    enableDevice2DeviceAccess(gpu_id_, dev);
+  }
 }
 
 // shared mutex to lock out alloc / free during NCCL launches
