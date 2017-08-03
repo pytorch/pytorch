@@ -1,8 +1,7 @@
 INCLUDE(CheckCXXSourceCompiles)
 
-set(CMAKE_REQUIRED_FLAGS "-std=c++11")
-
 # ---[ Check if the data type long and int32_t/int64_t overlap. 
+set(CMAKE_REQUIRED_FLAGS "-std=c++11")
 CHECK_CXX_SOURCE_COMPILES(
     "#include <cstdint>
 
@@ -21,10 +20,13 @@ else()
   add_definitions(-DCAFFE2_UNIQUE_LONG_TYPEMETA)
 endif()
 
+
+# ---[ Check if we want to turn off deprecated warning due to glog.
 # Note(jiayq): on ubuntu 14.04, the default glog install uses ext/hash_set that
 # is being deprecated. As a result, we will test if this is the environment we
 # are building under. If yes, we will turn off deprecation warning for a
 # cleaner build output.
+set(CMAKE_REQUIRED_FLAGS "-std=c++11")
 CHECK_CXX_SOURCE_COMPILES(
     "#include <glog/stl_logging.h>
     int main(int argc, char** argv) {
@@ -35,6 +37,34 @@ CHECK_CXX_SOURCE_COMPILES(
 if(NOT CAFFE2_NEED_TO_TURN_OFF_DEPRECATION_WARNING AND NOT MSVC)
   message(STATUS "Turning off deprecation warning due to glog.")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-deprecated")
+endif()
+
+# ---[ Check if the compiler has avx/avx2 support. We will only check avx2.
+
+if (MSVC)
+  set(CMAKE_REQUIRED_FLAGS "/arch:AVX2")
+else()
+  set(CMAKE_REQUIRED_FLAGS "-mavx2")
+endif()
+CHECK_CXX_SOURCE_COMPILES(
+    "#include <immintrin.h>
+     int main() {
+       __m256i a, b;
+       a = _mm256_set1_epi8 (1);
+       b = a;
+       _mm256_add_epi8 (a,a);
+       return 0;
+     }" CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
+if (CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
+  message(STATUS "Current compiler supports avx2 extention. Will build perfkernels.")
+  # Currently MSVC seems to have a symbol not found error while linking (related
+  # to source file order?). As a result we will currently disable the perfkernel
+  # in msvc.
+  # Also see CMakeLists.txt under caffe2/perfkernels.
+  if (NOT MSVC)
+    add_definitions(-DCAFFE2_PERF_WITH_AVX)
+    add_definitions(-DCAFFE2_PERF_WITH_AVX2)
+  endif()
 endif()
 
 # ---[ If we are using msvc, set no warning flags
