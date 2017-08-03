@@ -1,14 +1,46 @@
+""" Base logging class"""
 from collections import defaultdict
+from six import string_types
 from .plugin import Plugin
 
+def is_sequence(arg):
+    return (not hasattr(arg, "strip") and
+            (hasattr(arg, "__getitem__") or
+            hasattr(arg, "__iter__")))
 
 class Logger(Plugin):
+    """Logger plugin for Trainer"""
     alignment = 4
     separator = '#' * 80
 
-    def __init__(self, fields, interval=None):
-        if interval is None:
-            interval = [(1, 'iteration'), (1, 'epoch')]
+    def __init__(self, fields, interval=[(1, 'iteration'), (1, 'epoch')]):
+        """
+            Args:
+                fields: The fields to log. May either be the name of some stat 
+                    (e.g. ProgressMonitor) will have `stat_name='progress'`,
+                    in which case all of the fields under `log_HOOK_fields`
+                    will be logged. Finer-grained control can be specified by
+                    using individual fields such as `progress.percent`. 
+                interval: A List of 2-tuples where each tuple contains 
+                    (k, HOOK). 
+                    k (int): The logger will be called every 'k' HOOK
+                    HOOK (string): The logger will be called at the given hook
+            
+            Examples:
+                >>> progress_m = ProgressMonitor()
+                >>> logger = Logger(["progress"], [(2, 'iteration')])
+        """
+        if not is_sequence(fields):
+            raise ValueError(
+                "'fields' must be a sequence of strings, not {}".format(
+                    type(fields)))
+
+        for i, val in enumerate(fields):
+            if not isinstance(val, string_types):
+                raise ValueError(
+                    "Element {} of 'fields' ({}) must be a string.".format(
+                        i, val))
+
         super(Logger, self).__init__(interval)
         self.field_widths = defaultdict(lambda: defaultdict(int))
         self.fields = list(map(lambda f: f.split('.'), fields))
