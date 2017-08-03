@@ -31,7 +31,7 @@ class DotProduct(ModelLayer):
 
         self.output_schema = schema.Scalar(
             (input_record.field_types()[0].base, ()),
-            model.net.NextScopedBlob(name + '_output'))
+            self.get_next_blob_reference('output'))
 
     def add_ops(self, net):
         net.DotProduct(

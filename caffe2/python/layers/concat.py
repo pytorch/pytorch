@@ -44,7 +44,7 @@ class Concat(ModelLayer):
         if axis == 0:
             self.output_schema = schema.from_blob_list(
                 input_record[0],
-                [model.net.NextScopedBlob(name + '_output')]
+                [self.get_next_blob_reference('output')]
             )
             return
 
@@ -60,7 +60,7 @@ class Concat(ModelLayer):
 
         self.output_schema = schema.Scalar(
             (np.float32, output_dims),
-            model.net.NextScopedBlob(name + '_output'))
+            self.get_next_blob_reference('output'))
 
     def add_ops(self, net):
         net.Concat(

@@ -24,7 +24,7 @@ class Dropout(ModelLayer):
             "Expected 0 <= ratio < 1, but got ratio of %s" % ratio
 
         self.output_schema = input_record.clone_schema()
-        self.output_schema.set_value(model.net.NextScopedBlob(name + '_output'))
+        self.output_schema.set_value(self.get_next_blob_reference('output'))
 
         self.ratio = ratio
 

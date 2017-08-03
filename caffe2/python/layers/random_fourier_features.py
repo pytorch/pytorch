@@ -3,11 +3,8 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import core, schema
-from caffe2.python.layers.layers import (
-    ModelLayer,
-    LayerParameter
-)
+from caffe2.python import schema
+from caffe2.python.layers.layers import ModelLayer
 
 import numpy as np
 
@@ -54,7 +51,7 @@ class RandomFourierFeatures(ModelLayer):
 
         self.output_schema = schema.Scalar(
             (np.float32, (self.output_dims, )),
-            model.net.NextScopedBlob(name + '_output')
+            self.get_next_blob_reference('output')
         )
 
         assert sigma > 0.0, "Expected bandwidth > 0, got %s" % sigma
@@ -68,28 +65,15 @@ class RandomFourierFeatures(ModelLayer):
             'UniformFill', {'min': 0.0, 'max': 2 * np.pi}
         )
 
-        self.w = model.net.NextScopedBlob(name + "_w")
-        self.b = model.net.NextScopedBlob(name + "_b")
-        self.params.append(
-            LayerParameter(
-                parameter=self.w,
-                initializer=core.CreateOperator(w_init[0],
-                                                [],
-                                                self.w,
-                                                shape=(self.output_dims, input_dims),
-                                                **w_init[1]
-                                                ),
-                optimizer=model.NoOptim))
-        self.params.append(
-            LayerParameter(
-                parameter=self.b,
-                initializer=core.CreateOperator(b_init[0],
-                                                [],
-                                                self.b,
-                                                shape=[self.output_dims],
-                                                **b_init[1]
-                                                ),
-                optimizer=model.NoOptim))
+        self.w = self.create_param(param_name='w',
+                                   shape=[self.output_dims, input_dims],
+                                   initializer=w_init,
+                                   optimizer=model.NoOptim)
+
+        self.b = self.create_param(param_name='b',
+                                   shape=[self.output_dims],
+                                   initializer=b_init,
+                                   optimizer=model.NoOptim)
 
     def add_ops(self, net):
         # Random features: wx + b

@@ -24,7 +24,7 @@ class SparseFeatureHash(ModelLayer):
         self.seed = seed
         self.lengths_blob = schema.Scalar(
             np.int32,
-            model.net.NextScopedBlob(name + "_lengths"),
+            self.get_next_blob_reference("lengths"),
         )
 
         if schema.equal_schemas(input_record, IdList):
@@ -35,7 +35,7 @@ class SparseFeatureHash(ModelLayer):
             )
             hashed_indices = schema.Scalar(
                 np.int64,
-                model.net.NextScopedBlob(name + "_hashed_idx")
+                self.get_next_blob_reference("hashed_idx")
             )
             hashed_indices.set_metadata(metadata)
             self.output_schema = schema.List(
@@ -45,7 +45,7 @@ class SparseFeatureHash(ModelLayer):
         elif schema.equal_schemas(input_record, IdScoreList):
             self.values_blob = schema.Scalar(
                 np.float32,
-                model.net.NextScopedBlob(name + "_values"),
+                self.get_next_blob_reference("values"),
             )
             self.modulo = self.extract_hash_size(input_record.keys.metadata)
             metadata = schema.Metadata(
@@ -54,7 +54,7 @@ class SparseFeatureHash(ModelLayer):
             )
             hashed_indices = schema.Scalar(
                 np.int64,
-                model.net.NextScopedBlob(name + "_hashed_idx")
+                self.get_next_blob_reference("hashed_idx")
             )
             hashed_indices.set_metadata(metadata)
             self.output_schema = schema.Map(

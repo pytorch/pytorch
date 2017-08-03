@@ -40,7 +40,8 @@ class BatchDistillLRLoss(ModelLayer):
 
         self.output_schema = schema.Scalar(
             np.float32,
-            model.net.NextScopedBlob(name + '_output'))
+            self.get_next_blob_reference('output')
+        )
 
     def add_train_ops(self, net):
         label = self.input_record.label()

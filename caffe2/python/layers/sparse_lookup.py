@@ -5,12 +5,11 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import core, schema
+from caffe2.python import schema
 from caffe2.python.layers.layers import (
     get_categorical_limit,
     IdList,
     IdScoreList,
-    LayerParameter,
     LayerPsParam,
     ModelLayer,
 )
@@ -48,17 +47,11 @@ class SparseLookup(ModelLayer):
 
         assert input_dim is not None, "Unbounded features are not supported"
 
-        self.output_schema = schema.Scalar(
-            (np.float32, inner_shape),
-            model.net.NextScopedBlob(name + '_output'),
-        )
-
         scale = math.sqrt(1.0 / input_dim)
         self.shape = [input_dim] + inner_shape
         self.weight_init = weight_init if weight_init else (
             'UniformFill', {'min': -scale, 'max': scale})
 
-        self.w = model.net.NextScopedBlob(name + "_w")
         if schema.equal_schemas(self.input_record, IdList):
             sparse_key = self.input_record.items()
         elif schema.equal_schemas(
@@ -73,21 +66,20 @@ class SparseLookup(ModelLayer):
             avg_length = self.input_record.lengths.metadata.expected_value
         else:
             avg_length = None
-        self.params.append(
-            LayerParameter(
-                parameter=self.w,
-                initializer=core.CreateOperator(self.weight_init[0],
-                                                [],
-                                                self.w,
-                                                shape=self.shape,
-                                                **self.weight_init[1]
-                                                ),
-                optimizer=weight_optim,
-                ps_param=LayerPsParam(
-                    sparse_key=sparse_key,
-                    average_length=avg_length,
-                )
-            ))
+
+        self.w = self.create_param(param_name='w',
+                                   shape=self.shape,
+                                   initializer=self.weight_init,
+                                   optimizer=weight_optim,
+                                   ps_param=LayerPsParam(
+                                       sparse_key=sparse_key,
+                                       average_length=avg_length
+                                   ))
+
+        self.output_schema = schema.Scalar(
+            (np.float32, inner_shape),
+            self.get_next_blob_reference('output'),
+        )
 
     def get_memory_usage(self):
         return functools.reduce(operator.mul, self.shape) * 4

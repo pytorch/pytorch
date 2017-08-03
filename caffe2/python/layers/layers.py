@@ -292,6 +292,21 @@ class ModelLayer(object):
             if param.initializer:
                 init_net._net.op.extend([param.initializer])
 
+    def create_param(self, param_name, shape, initializer, optimizer,
+                       ps_param=None):
+        with scope.NameScope(self.name, reset=True):
+            param = self.model.create_param(param_name=param_name,
+                                            shape=shape,
+                                            initializer=initializer,
+                                            optimizer=optimizer,
+                                            ps_param=ps_param)
+            self.params.append(param)
+            return param.parameter
+
+    def get_next_blob_reference(self, name):
+        with scope.NameScope(self.name, reset=True):
+            return self.model.net.NextScopedBlob(name)
+
     def add_operators(self, net, init_net=None,
                       context=InstantiationContext.TRAINING):
         '''

@@ -5,8 +5,8 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import core, schema
-from caffe2.python.layers.layers import (ModelLayer, LayerParameter)
+from caffe2.python import schema
+from caffe2.python.layers.layers import ModelLayer
 from caffe2.python.layers.sampling_trainable_mixin import SamplingTrainableMixin
 
 import math
@@ -37,7 +37,7 @@ class FCWithoutBias(SamplingTrainableMixin, ModelLayer):
 
         self.output_schema = schema.Scalar(
             (np.float32, (output_dims, )),
-            model.net.NextScopedBlob(name + '_output')
+            self.get_next_blob_reference('output')
         )
 
         scale = math.sqrt(1.0 / input_dims)
@@ -46,20 +46,10 @@ class FCWithoutBias(SamplingTrainableMixin, ModelLayer):
                             'max': scale}
         )
 
-        self.w = model.net.NextScopedBlob(name + "_w")
-
-        self.params.append(
-            LayerParameter(
-                parameter=self.w,
-                initializer=core.CreateOperator(
-                    weight_init[0], [],
-                    self.w,
-                    shape=[output_dims, input_dims],
-                    **weight_init[1]
-                ),
-                optimizer=weight_optim
-            )
-        )
+        self.w = self.create_param(param_name='w',
+                                   shape=[output_dims, input_dims],
+                                   initializer=weight_init,
+                                   optimizer=weight_optim)
 
     def _add_ops(self, net, params):
         net.MatMul(
