@@ -525,7 +525,7 @@ def softplus(input, beta=1, threshold=20):
 
 
 def softmin(input):
-    return _functions.thnn.Softmin()(input)
+    return _functions.thnn.Softmin.apply(input)
 
 
 def softmax(input):
