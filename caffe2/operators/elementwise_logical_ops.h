@@ -22,7 +22,8 @@ class WhereOp final : public Operator<Context> {
         OP_SINGLE_ARG(bool, "broadcast_on_rows", enable_broadcast_, 0) {}
 
   bool RunOnDevice() override {
-    return DispatchHelper<TensorTypes<float, double, int, long, std::string>>::
+    return DispatchHelper<
+        TensorTypes<float, double, int, long, std::string, bool>>::
         call(this, Input(1));
   }
 
