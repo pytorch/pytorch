@@ -2,6 +2,28 @@
 
 namespace caffe2 {
 
+// registering 3 input version
+OPERATOR_SCHEMA(SparseLengthsIndicesInGradientSumGradient)
+    .NumInputs(3)
+    .NumOutputs(1);
+REGISTER_CPU_OPERATOR(
+    SparseLengthsIndicesInGradientSumGradient,
+    AbstractLengthsGradientOp<
+        float,
+        int,
+        CPUContext,
+        SumReducerDef::template ReducerGradient<float, CPUContext>,
+        true /*GradientNeedIndices*/>);
+OPERATOR_SCHEMA(LengthsIndicesInGradientSumGradient).NumInputs(3).NumOutputs(1);
+REGISTER_CPU_OPERATOR(
+    LengthsIndicesInGradientSumGradient,
+    AbstractLengthsGradientOp<
+        float,
+        int,
+        CPUContext,
+        SumReducerDef::template ReducerGradient<float, CPUContext>,
+        true /*GradientNeedIndices*/>);
+
 namespace {
 
 template <typename Def>
@@ -56,27 +78,43 @@ REGISTER_SEGMENT_DEF(
 REGISTER_SEGMENT_DEF(
     AbstractSortedSegmentRangeDef<float, int, CPUContext, MaxRangeReducerDef>);
 
-#define REGISTER_REDUCER_WITH_ALL_OPS(reducer_def)                           \
-  REGISTER_SEGMENT_DEF(                                                      \
-      AbstractReduceFrontDef<float, CPUContext, reducer_def>);               \
-  REGISTER_SEGMENT_DEF(                                                      \
-      AbstractSortedSegmentDef<float, int, CPUContext, reducer_def>);        \
-  REGISTER_SEGMENT_DEF(                                                      \
-      AbstractSparseSortedSegmentDef<float, int, CPUContext, reducer_def>);  \
-  REGISTER_SEGMENT_DEF(                                                      \
-      AbstractUnsortedSegmentDef<float, int, CPUContext, reducer_def>);      \
-  REGISTER_SEGMENT_DEF(                                                      \
-      AbstractSparseUnsortedSegmentDef<float, int, CPUContext, reducer_def>) \
-  REGISTER_SEGMENT_DEF(AbstractLengthsDef<float, int, CPUContext, reducer_def>)
+#define REGISTER_REDUCER_WITH_OPS(reducer_def)                              \
+  REGISTER_SEGMENT_DEF(                                                     \
+      AbstractReduceFrontDef<float, CPUContext, reducer_def>);              \
+  REGISTER_SEGMENT_DEF(                                                     \
+      AbstractSortedSegmentDef<float, int, CPUContext, reducer_def>);       \
+  REGISTER_SEGMENT_DEF(                                                     \
+      AbstractSparseSortedSegmentDef<float, int, CPUContext, reducer_def>); \
+  REGISTER_SEGMENT_DEF(                                                     \
+      AbstractUnsortedSegmentDef<float, int, CPUContext, reducer_def>);     \
+  REGISTER_SEGMENT_DEF(                                                     \
+      AbstractSparseUnsortedSegmentDef<float, int, CPUContext, reducer_def>)
 
-REGISTER_REDUCER_WITH_ALL_OPS(SumReducerDef);
+#define REGISTER_REDUCER_WITH_LENGTH_OPS(reducer_def, GradientNeedIndices) \
+  REGISTER_SEGMENT_DEF(AbstractLengthsDef<                                 \
+                       float,                                              \
+                       int,                                                \
+                       CPUContext,                                         \
+                       reducer_def,                                        \
+                       GradientNeedIndices>)
+
+#define REGISTER_REDUCER_WITH_ALL_OPS(reducer_def) \
+  REGISTER_REDUCER_WITH_OPS(reducer_def)           \
+  REGISTER_REDUCER_WITH_LENGTH_OPS(reducer_def, false)
+
+REGISTER_REDUCER_WITH_OPS(SumReducerDef);
+REGISTER_REDUCER_WITH_LENGTH_OPS(SumReducerDef, true);
 REGISTER_REDUCER_WITH_ALL_OPS(WeightedSumReducerDef);
 REGISTER_REDUCER_WITH_ALL_OPS(MeanReducerDef);
 
 // SparseLengths[Sum,WeightedSum,Mean] are now implemented separately,
 // so we only rely to the historical implementation for the backward + schema.
-REGISTER_SEGMENT_DEF_SCHEMA_GRADIENT_ONLY(
-    AbstractSparseLengthsDef<float, int, CPUContext, SumReducerDef>)
+REGISTER_SEGMENT_DEF_SCHEMA_GRADIENT_ONLY(AbstractSparseLengthsDef<
+                                          float,
+                                          int,
+                                          CPUContext,
+                                          SumReducerDef,
+                                          true /*GradientNeedIndices*/>)
 REGISTER_SEGMENT_DEF_SCHEMA_GRADIENT_ONLY(
     AbstractSparseLengthsDef<float, int, CPUContext, WeightedSumReducerDef>)
 REGISTER_SEGMENT_DEF_SCHEMA_GRADIENT_ONLY(

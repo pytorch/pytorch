@@ -1492,8 +1492,20 @@ class AbstractLengthsOp : public Operator<Context> {
   InputAccessor inputAccessor_;
 };
 
-// Gradient actually doesn't depend on whether sparse lookup is fused or not
-template <typename T, typename TLengths, class Context, class ReducerGradient>
+/*
+ * Some notice:
+ * 1. Gradient actually doesn't depend on whether sparse lookup is fused or not
+ * 2. INDICES are not used in CPU version, but they are needed in async CUDA
+ *    version. So we register 3 input version for CPU as gradient op for
+ *    GPU/CPU convert. We then register 2 input version for CPU for backward
+ *    compatibility with older nets.
+ */
+template <
+    typename T,
+    typename TLengths,
+    class Context,
+    class ReducerGradient,
+    bool GradientNeedIndices = false>
 class AbstractLengthsGradientOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -1570,11 +1582,12 @@ class AbstractLengthsGradientOp : public Operator<Context> {
   //   orig_arg1, orig_arg2, ..., orig_argN, SEGMENT_GRADS, SEGMENT_IDS
   // orig_argXs represent original op's inputs and will be passed to the reducer
   // directly
-  static constexpr int kNumInputs =
-      ReducerGradient::originalInputs().size() + 2;
+  static constexpr int kNumInputs = ReducerGradient::originalInputs().size() +
+      2 + (GradientNeedIndices ? 1 : 0);
   enum _InputTags {
     SEGMENT_GRADS = ReducerGradient::originalInputs().size(),
-    LENGTHS
+    LENGTHS,
+    INDICES
   };
 };
 
@@ -1700,7 +1713,8 @@ template <
     typename ForwardOp,
     typename ReducerDef,
     typename ReducerGradient,
-    bool SparseFused>
+    bool SparseFused,
+    bool GradientNeedIndices = false>
 struct LengthsOpGetGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
@@ -1711,12 +1725,23 @@ struct LengthsOpGetGradient : public GradientMakerBase {
     grad_ins.push_back(GO(0));
     grad_ins.push_back(I(ForwardOp::LENGTHS));
     string suffix = "Gradient";
+    bool indices_pushed = false;
     if (ReducerGradient::requiresDataInput(Def())) {
       grad_ins.push_back(I(0));
       if (SparseFused) {
         grad_ins.push_back(I(ForwardOp::INDICES));
+        indices_pushed = true;
       }
       suffix = "WithMainInput" + suffix;
+    }
+    if (GradientNeedIndices && !indices_pushed) {
+      if (SparseFused) {
+        grad_ins.push_back(I(ForwardOp::INDICES));
+      } else {
+        // Hacky: using Input as Indices, remove this after we have specialized
+        // cuda LengthsIndicesInGradientSumGradient
+        grad_ins.push_back(I(0));
+      }
     }
     vector<string> grad_outs;
     grad_outs.push_back({SparseFused ? GI_V(0) : GI(0)});
@@ -1725,8 +1750,9 @@ struct LengthsOpGetGradient : public GradientMakerBase {
       grad_outs.push_back(GI(i));
     }
     vector<OperatorDef> r{CreateOperatorDef(
-        string(SparseFused ? "SparseLengths" : "Lengths") + ReducerDef::name +
-            suffix,
+        string(SparseFused ? "SparseLengths" : "Lengths") +
+            string(GradientNeedIndices ? "IndicesInGradient" : "") +
+            ReducerDef::name + suffix,
         "",
         grad_ins,
         grad_outs)};
@@ -1737,7 +1763,12 @@ struct LengthsOpGetGradient : public GradientMakerBase {
   }
 };
 
-template <typename T, typename SIndex, typename Context, typename ReducerDef>
+template <
+    typename T,
+    typename SIndex,
+    typename Context,
+    typename ReducerDef,
+    bool GradientNeedIndices = false>
 struct AbstractLengthsDef {
   using OpDef = ReducerDef;
   static constexpr const char* basename = "Lengths";
@@ -1784,10 +1815,16 @@ i.e. `len(LENGTHS)`. Other dimensions are inherited from the input tensor.
       ForwardOp,
       ReducerDef,
       ReducerGradient,
-      false /*SparseFused*/>;
+      false /*SparseFused*/,
+      GradientNeedIndices>;
 };
 
-template <typename T, typename SIndex, typename Context, typename ReducerDef>
+template <
+    typename T,
+    typename SIndex,
+    typename Context,
+    typename ReducerDef,
+    bool GradientNeedIndices = false>
 struct AbstractSparseLengthsDef {
   using OpDef = ReducerDef;
   static constexpr const char* basename = "SparseLengths";
@@ -1833,20 +1870,32 @@ i.e. `len(LENGTHS)`. Other dimensions are inherited from the input tensor.
   using ForwardOp = AbstractLengthsOp<T, SIndex, Context, Reducer>;
   // TODO(dzhulgakov): we're registering the same class twice here,
   // consider avoiding op duplication here
-  using BackwardOp =
-      AbstractLengthsGradientOp<T, SIndex, Context, ReducerGradient>;
+  // Note: registering 2 input version for now because of naming in the macro,
+  // will register 3 input version alone
+  /* INDICES are not used in CPU version, but they are needed in async CUDA
+   *    version. So we register 3 input version for CPU as gradient op for
+   *    GPU/CPU convert. We then register 2 input version for CPU for backward
+   *    compatibility with older nets.
+   */
+  using BackwardOp = AbstractLengthsGradientOp<
+      T,
+      SIndex,
+      Context,
+      ReducerGradient,
+      false /*GradientNeedIndices*/>;
   using WithMainInputBackwardOp = AbstractLengthsWithMainInputGradientOp<
       T,
       SIndex,
       Context,
       ReducerGradient>;
+  // Will return 3 input version. This is aliging new CPU/GPU nets.
   using GetGradient = LengthsOpGetGradient<
       ForwardOp,
       ReducerDef,
       ReducerGradient,
-      true /*SparseFused*/>;
+      true /*SparseFused*/,
+      GradientNeedIndices>;
 };
-
 } // namespace caffe2
 
 #endif // CAFFE2_OPERATORS_SEGMENT_REDUCTION_OP_H_
