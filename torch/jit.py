@@ -16,9 +16,10 @@ def flatten(x):
 
 
 def record_trace(f, inputs):
-    trace = torch._C._tracer_enter(inputs)
+    trace, inputs = torch._C._tracer_enter(inputs)
     out = f()
-    torch._C._tracer_exit(flatten(out))
+    # TODO: unflatten
+    out = torch._C._tracer_exit(flatten(out))
     torch._C._jit_pass_lint(trace)
     return (trace, out)
 
