@@ -2,7 +2,7 @@ import torch
 import torch.jit
 import torch.nn as nn
 import unittest
-from torch.autograd import Variable
+from torch.autograd import Variable, Function
 from common import TestCase, run_tests
 
 
@@ -85,6 +85,19 @@ class TestJit(TestCase):
         y = m(x)
         torch._C._tracer_exit((y,))
         self.assertExpected(str(trace))
+
+    def test_legacy_fail(self):
+
+        class Legacy(Function):
+            def forward(self, x):
+                return x
+
+            def backward(self, grad_output):
+                return grad_output
+        x = Variable(torch.Tensor([0]), requires_grad=True)
+        trace = torch._C._tracer_enter((x,))
+        self.assertRaises(RuntimeError, lambda: Legacy()(x))
+        torch._C._tracer_exit((x,))
 
     def test_cpp(self):
         torch._C._jit_run_cpp_tests()
