@@ -7,6 +7,8 @@ from common import TestCase, run_tests
 
 
 class TestJit(TestCase):
+    maxDiff = None
+
     def test_simple(self):
         x = Variable(torch.Tensor([0.4]), requires_grad=True)
         y = Variable(torch.Tensor([0.7]), requires_grad=True)
