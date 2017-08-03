@@ -33,6 +33,9 @@ auto Function::name() -> std::string {
   return std::string(typeid(*this).name());
 }
 
+// This function is analogous to make_trace which operates on PythonOp, but this
+// function instead works for C++ implemented autograd Functions, which don't
+// actually have any backing Python class. We still need to trace them!
 void Function::createTrace(const variable_list& inputs, const variable_list& outputs) {
   using namespace torch::jit;
   auto state = tracer::getTracingState(inputs);
