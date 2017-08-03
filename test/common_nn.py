@@ -387,7 +387,13 @@ criterion_tests = [
         module_name='SmoothL1Loss',
         input_size=(5, 10),
         target=torch.randn(5, 10),
-        check_gradgrad=False,
+    ),
+    dict(
+        module_name='SmoothL1Loss',
+        constructor_args=(False,),
+        input_size=(5, 10),
+        target=torch.randn(5, 10),
+        desc='no_size_average',
     ),
     dict(
         module_name='SoftMarginLoss',
