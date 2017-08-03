@@ -1,4 +1,5 @@
 from torch.autograd import Variable
+import torch
 
 
 def elu_double_backwards(ctx, ggI):
@@ -13,6 +14,32 @@ def elu_double_backwards(ctx, ggI):
     non_negative_mask = (input >= 0).type_as(ggI)
     ggO = ggI * (exp_alpha + non_negative_mask)
     return gI, ggO, None, None, None, None
+
+
+def gatedlinear_double_backwards(ctx, ggI):
+    input, gO = ctx.saved_variables
+    dim = ctx.additional_args[0]
+
+    input_size = input.size(dim) // 2
+
+    first_half = input.narrow(dim, 0, input_size)
+    second_half = input.narrow(dim, input_size, input_size)
+    sig_second_half = second_half.sigmoid()
+    one_sub_sig_second_half = 1 - sig_second_half
+    sig_one_sub_sig = sig_second_half * one_sub_sig_second_half
+
+    ggI_first_half = ggI.narrow(dim, 0, input_size)
+    ggI_second_half = ggI.narrow(dim, input_size, input_size)
+    ggI_second_half_times_first_half = ggI_second_half * first_half
+
+    gI_first_half = ggI_second_half * gO * sig_one_sub_sig
+    second_order_sh = sig_one_sub_sig * one_sub_sig_second_half - sig_second_half * sig_one_sub_sig
+    gI_second_half = ggI_second_half_times_first_half * gO * second_order_sh + ggI_first_half * gO * sig_one_sub_sig
+    gI = torch.cat((gI_first_half, gI_second_half), dim)
+
+    ggO = ggI_first_half * sig_second_half + ggI_second_half_times_first_half * sig_one_sub_sig
+
+    return gI, ggO, None, None, None
 
 
 def hardshrink_double_backwards(ctx, ggI):
@@ -189,6 +216,7 @@ def nllloss_double_backwards(ctx, ggI):
 
 double_backwards_fns = {
     'ELU': elu_double_backwards,
+    'GatedLinear': gatedlinear_double_backwards,
     'Hardshrink': hardshrink_double_backwards,
     'Hardtanh': hardtanh_double_backwards,
     'LeakyReLU': leakyrelu_double_backwards,
