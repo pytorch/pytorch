@@ -690,10 +690,15 @@ static void make_trace(PyObject* op_obj, PyObject *input_objects,
     }
   }
 
-  // NB: this has to be done before we append the PythonOp, because it
-  // might need to register some values as constants (i.e. append new Nodes)
+  // Note [getValueTrace can allocate nodes]
+  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  // When an input variable is not traced, we create a constant instruction
+  // to represent it.  This means that you must invoke getValueTrace() BEFORE
+  // actually constructing the function that takes these variables as inputs.
   // If we do it the other order, the graph will be in the wrong topological
   // order.
+
+  // See Note [getValueTrace can allocate nodes]
   std::vector<Node*> value_traces;
   value_traces.reserve(input_vars.size());
   for (auto& i : input_vars)

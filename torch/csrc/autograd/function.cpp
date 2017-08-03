@@ -40,9 +40,15 @@ void Function::createTrace(const variable_list& inputs, const variable_list& out
   using namespace torch::jit;
   auto state = tracer::getTracingState(inputs);
   auto& graph = state->graph;
-  auto* this_node = graph->appendNewNode<CppOp>(getSharedPtr());
+  // See Note [getValueTrace can allocate nodes]
+  std::vector<Node*> value_traces;
+  value_traces.reserve(inputs.size());
   for (auto& input: inputs) {
-    this_node->addInput(tracer::getValueTrace(state, input));
+    value_traces.emplace_back(tracer::getValueTrace(state, input));
+  }
+  auto* this_node = graph->appendNewNode<CppOp>(getSharedPtr());
+  for (auto value: value_traces) {
+    this_node->addInput(value);
   }
   int num_outputs = outputs.size();
   for (int i = 0; i < num_outputs; ++i) {

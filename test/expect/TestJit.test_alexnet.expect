@@ -1,0 +1,27 @@
+graph(%1, %2, %3, %4, %5, %6, %7, %8, %9, %10, %11, %12, %13, %14, %15, %16, %17) {
+  %18.0 = CppOp[ConvForward](%17, %1, %2), uses = [[%20.i0]];
+  %20.0 = ^Threshold(0, 0, True)(%18.0), uses = [[%22.i0]];
+  %22.0, %22.1 = ^MaxPool2d(3, 2, 0, 1, False)(%20.0), uses = [[%25.i0], []];
+  %25.0 = CppOp[ConvForward](%22.0, %3, %4), uses = [[%27.i0]];
+  %27.0 = ^Threshold(0, 0, True)(%25.0), uses = [[%29.i0]];
+  %29.0, %29.1 = ^MaxPool2d(3, 2, 0, 1, False)(%27.0), uses = [[%32.i0], []];
+  %32.0 = CppOp[ConvForward](%29.0, %5, %6), uses = [[%34.i0]];
+  %34.0 = ^Threshold(0, 0, True)(%32.0), uses = [[%36.i0]];
+  %36.0 = CppOp[ConvForward](%34.0, %7, %8), uses = [[%38.i0]];
+  %38.0 = ^Threshold(0, 0, True)(%36.0), uses = [[%40.i0]];
+  %40.0 = CppOp[ConvForward](%38.0, %9, %10), uses = [[%42.i0]];
+  %42.0 = ^Threshold(0, 0, True)(%40.0), uses = [[%44.i0]];
+  %44.0, %44.1 = ^MaxPool2d(3, 2, 0, 1, False)(%42.0), uses = [[%47.i0], []];
+  %47.0 = ^View((10, 9216))(%44.0), uses = [[%49.i0]];
+  %49.0 = ^Dropout(0.5, True, False)(%47.0), uses = [[%53.i1]];
+  %51.0 = ^Transpose(0, 1)(%11), uses = [[%53.i2]];
+  %53.0 = ^Addmm(1, 1, False)(%12, %49.0, %51.0), uses = [[%55.i0]];
+  %55.0 = ^Threshold(0, 0, True)(%53.0), uses = [[%57.i0]];
+  %57.0 = ^Dropout(0.5, True, False)(%55.0), uses = [[%61.i1]];
+  %59.0 = ^Transpose(0, 1)(%13), uses = [[%61.i2]];
+  %61.0 = ^Addmm(1, 1, False)(%14, %57.0, %59.0), uses = [[%63.i0]];
+  %63.0 = ^Threshold(0, 0, True)(%61.0), uses = [[%67.i1]];
+  %65.0 = ^Transpose(0, 1)(%15), uses = [[%67.i2]];
+  %67.0 = ^Addmm(1, 1, False)(%16, %63.0, %65.0), uses = [[%0.i0]];
+  return (%67.0);
+}
