@@ -4,6 +4,7 @@
 
 #include "variable.h"
 #include "torch/csrc/jit/ir.h"
+#include "torch/csrc/autograd/functions/tensor.h"
 
 namespace torch { namespace autograd {
 
@@ -36,27 +37,49 @@ auto Function::name() -> std::string {
 // This function is analogous to make_trace which operates on PythonOp, but this
 // function instead works for C++ implemented autograd Functions, which don't
 // actually have any backing Python class. We still need to trace them!
-void Function::createTrace(const variable_list& inputs, const variable_list& outputs) {
+variable_list Function::tracedApply(variable_list inputs) {
   using namespace torch::jit;
+  bool is_traceable = static_cast<bool>(dynamic_cast<Identity*>(this));
+  // Traceable Functions are completely transparent to the JIT.
+  if (is_traceable) {
+    return apply(inputs);
+  }
   auto state = tracer::getTracingState(inputs);
+
+  // Register eval hooks if backward of this function is not traceable.
+  // This has to be done early, because it modifies inputs.
+  bool is_backward_traceable = false;
+  std::shared_ptr<tracer::EvalCommonState> eval_state;
+  if (!is_backward_traceable) {
+    eval_state = tracer::EvalExitHook::registerHook(state, inputs);
+  }
+
+  // Insert a CppOp in the trace.
   auto& graph = state->graph;
-  // See Note [getValueTrace can allocate nodes]
-  std::vector<Node*> value_traces;
-  value_traces.reserve(inputs.size());
+  auto* this_node = graph->create<CppOp>(getSharedPtr());
   for (auto& input: inputs) {
-    value_traces.emplace_back(tracer::getValueTrace(state, input));
+      this_node->addInput(tracer::getValueTrace(state, input));
   }
-  auto* this_node = graph->appendNewNode<CppOp>(getSharedPtr());
-  for (auto value: value_traces) {
-    this_node->addInput(value);
-  }
+  graph->appendNode(this_node);
+
+  // Finally apply this Function.
+  variable_list outputs = apply(inputs);
+
+  // Set up output traces.
   int num_outputs = outputs.size();
   for (int i = 0; i < num_outputs; ++i) {
-    auto& output = outputs[i];
-    Node* sel = graph->appendNewNode<Select>(this_node, i);
-    sel->inferTypeFrom(output->data);
-    tracer::setValueTrace(state, output, sel);
+      auto& output = outputs[i];
+      Node* sel = graph->appendNewNode<Select>(this_node, i);
+      sel->inferTypeFrom(output->data);
+      tracer::setValueTrace(state, output, sel);
   }
+
+  // Register the point where Eval region starts in backward.
+  // NOTE: this modifies outputs.
+  if (!is_backward_traceable) {
+    tracer::EvalEnterHook::registerHook(state, outputs, eval_state);
+  }
+  return outputs;
 }
 
 }} // namespace torch::autograd

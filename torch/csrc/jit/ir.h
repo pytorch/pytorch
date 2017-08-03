@@ -208,6 +208,7 @@ _(CppOp) \
 _(Param) \
 _(Select) \
 _(Return) \
+_(Eval) \
 _(Add) \
 _(Mul) \
 _(Negate) \
@@ -258,7 +259,7 @@ public:
     return type()->kind() == TypeKind::MultiType;
   }
   void setType(const Type* type) {
-    type_ = std::move(type->clone());
+    type_ = type->clone();
   }
   void inferTypeFrom(const at::Tensor& output) {
     auto single_type = type_->cast<TensorType>();
@@ -583,10 +584,14 @@ private:
   std::unordered_set<Node*> all_nodes;
   size_t next_unique_;
 
+  size_t new_node_stage_;
+
 public:
   Graph()
-  : next_unique_(0) {
+  : next_unique_(0)
+  , new_node_stage_(0) {
     output_ = create<Return>();
+    output_->stage_ = -1; // >= than all stages
   }
 
   const param_list & inputs() {
@@ -606,6 +611,13 @@ public:
     Param* p = create<Param>();
     inputs_.push_back(p);
     return p;
+  }
+
+  void advanceStage() {
+    new_node_stage_++;
+  }
+  size_t stage() {
+    return new_node_stage_;
   }
 
   void eraseInput(size_t i) {
@@ -681,6 +693,7 @@ private:
   // called from NodeWithKind::allocClone and Graph::create
   void initNewNodeForGraph(Node * r) {
     r->graph_ = this;
+    r->stage_ = new_node_stage_;
     r->unique_ = next_unique_++;
     r->nodes_iter_ = nodes_.end();
     all_nodes.emplace(r);
@@ -837,6 +850,10 @@ struct CppOp : public NodeWithKind<CppOp,NodeKind::CppOp,TypeKind::MultiType> {
   void init(std::shared_ptr<torch::autograd::Function> fn) {
     this->fn = std::move(fn);
   }
+};
+
+struct Eval : public NodeWithKind<Eval,NodeKind::Eval,TypeKind::Multi> {
+  void init() {};
 };
 
 // Select nodes are used to handle multiple returns for the ops that actually return
