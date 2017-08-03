@@ -4,55 +4,55 @@ from torch.autograd.function import once_differentiable
 
 
 class CosineEmbeddingLoss(Function):
-    def __init__(self, margin=0, size_average=True):
-        super(CosineEmbeddingLoss, self).__init__()
-        self.margin = margin
-        self.size_average = size_average
-
-    def forward(self, input1, input2, y):
-        self.w1 = input1.new()
-        self.w22 = input1.new()
-        self.w = input1.new()
-        self.w32 = input1.new()
-        self._outputs = input1.new()
+    @staticmethod
+    def forward(ctx, input1, input2, y, margin, size_average):
+        ctx.margin = margin
+        ctx.size_average = size_average
+        ctx.w1 = input1.new()
+        ctx.w22 = input1.new()
+        ctx.w = input1.new()
+        ctx.w32 = input1.new()
+        ctx._outputs = input1.new()
 
         _idx = input1.new().byte()
 
         buffer = torch.mul(input1, input2)
-        torch.sum(buffer, 1, out=self.w1, keepdim=True)
+        torch.sum(buffer, 1, out=ctx.w1, keepdim=True)
 
         epsilon = 1e-12
         torch.mul(input1, input1, out=buffer)
-        torch.sum(buffer, 1, out=self.w22, keepdim=True).add_(epsilon)
+        torch.sum(buffer, 1, out=ctx.w22, keepdim=True).add_(epsilon)
 
-        self._outputs.resize_as_(self.w22).fill_(1)
-        torch.div(self._outputs, self.w22, out=self.w22)
-        self.w.resize_as_(self.w22).copy_(self.w22)
+        ctx._outputs.resize_as_(ctx.w22).fill_(1)
+        torch.div(ctx._outputs, ctx.w22, out=ctx.w22)
+        ctx.w.resize_as_(ctx.w22).copy_(ctx.w22)
 
         torch.mul(input2, input2, out=buffer)
-        torch.sum(buffer, 1, out=self.w32, keepdim=True).add_(epsilon)
-        torch.div(self._outputs, self.w32, out=self.w32)
-        self.w.mul_(self.w32)
-        self.w.sqrt_()
+        torch.sum(buffer, 1, out=ctx.w32, keepdim=True).add_(epsilon)
+        torch.div(ctx._outputs, ctx.w32, out=ctx.w32)
+        ctx.w.mul_(ctx.w32)
+        ctx.w.sqrt_()
 
-        torch.mul(self.w1, self.w, out=self._outputs)
-        self._outputs = self._outputs.select(1, 0)
+        torch.mul(ctx.w1, ctx.w, out=ctx._outputs)
+        ctx._outputs = ctx._outputs.select(1, 0)
 
         torch.eq(y, -1, out=_idx)
-        self._outputs[_idx] = self._outputs[_idx].add_(-self.margin).clamp_(min=0)
+        ctx._outputs[_idx] = ctx._outputs[_idx].add_(-ctx.margin).clamp_(min=0)
         torch.eq(y, 1, out=_idx)
-        self._outputs[_idx] = self._outputs[_idx].mul_(-1).add_(1)
+        ctx._outputs[_idx] = ctx._outputs[_idx].mul_(-1).add_(1)
 
-        output = self._outputs.sum()
+        output = ctx._outputs.sum()
 
-        if self.size_average:
+        if ctx.size_average:
             output = output / y.size(0)
 
-        self.save_for_backward(input1, input2, y)
+        ctx.save_for_backward(input1, input2, y)
         return input1.new((output,))
 
-    def backward(self, grad_output):
-        v1, v2, y = self.saved_tensors
+    @staticmethod
+    @once_differentiable
+    def backward(ctx, grad_output):
+        v1, v2, y = ctx.saved_tensors
 
         buffer = v1.new()
         _idx = v1.new().byte()
@@ -62,15 +62,15 @@ class CosineEmbeddingLoss(Function):
         gw1.resize_as_(v1).copy_(v2)
         gw2.resize_as_(v1).copy_(v1)
 
-        torch.mul(self.w1, self.w22, out=buffer)
+        torch.mul(ctx.w1, ctx.w22, out=buffer)
         gw1.addcmul_(-1, buffer.expand_as(v1), v1)
-        gw1.mul_(self.w.expand_as(v1))
+        gw1.mul_(ctx.w.expand_as(v1))
 
-        torch.mul(self.w1, self.w32, out=buffer)
+        torch.mul(ctx.w1, ctx.w32, out=buffer)
         gw2.addcmul_(-1, buffer.expand_as(v1), v2)
-        gw2.mul_(self.w.expand_as(v1))
+        gw2.mul_(ctx.w.expand_as(v1))
 
-        torch.le(self._outputs, 0, out=_idx)
+        torch.le(ctx._outputs, 0, out=_idx)
         _idx = _idx.view(-1, 1).expand(gw1.size())
         gw1[_idx] = 0
         gw2[_idx] = 0
@@ -80,7 +80,7 @@ class CosineEmbeddingLoss(Function):
         gw1[_idx] = gw1[_idx].mul_(-1)
         gw2[_idx] = gw2[_idx].mul_(-1)
 
-        if self.size_average:
+        if ctx.size_average:
             gw1.div_(y.size(0))
             gw2.div_(y.size(0))
 
@@ -89,7 +89,7 @@ class CosineEmbeddingLoss(Function):
             gw1.mul_(grad_output_val)
             gw2.mul_(grad_output_val)
 
-        return gw1, gw2, None
+        return gw1, gw2, None, None, None
 
 
 class HingeEmbeddingLoss(Function):
@@ -125,6 +125,7 @@ class HingeEmbeddingLossBackward(Function):
     def forward(ctx, input, target, grad_output, margin, size_average):
         ctx.margin = margin
         ctx.size_average = size_average
+        ctx.save_for_backward(input, target, grad_output)
         grad_input = input.new().resize_as_(input).copy_(target)
         grad_input[torch.mul(torch.eq(target, -1), torch.gt(input, ctx.margin))] = 0
 
@@ -190,4 +191,4 @@ class MarginRankingLoss(Function):
             grad_input1.div_(y.size(0))
             grad_input2.div_(y.size(0))
 
-        return grad_input1, grad_input2, None
+        return grad_input1, grad_input2, None, None, None

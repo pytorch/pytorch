@@ -845,7 +845,7 @@ def multilabel_soft_margin_loss(input, target, weight=None, size_average=True):
 
 
 def cosine_embedding_loss(input1, input2, target, margin=0, size_average=True):
-    return _functions.loss.CosineEmbeddingLoss(margin, size_average)(input1, input2, target)
+    return _functions.loss.CosineEmbeddingLoss.apply(input1, input2, target, margin, size_average)
 
 
 def multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=True):
