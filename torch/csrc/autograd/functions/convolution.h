@@ -39,6 +39,7 @@ struct ConvParams {
 struct ConvForward : public Function, public ConvParams {
   explicit ConvForward(ConvParams params) : ConvParams(std::move(params)) {}
 
+  virtual std::string name() override;
   virtual variable_list apply(const variable_list& inputs) override;
 
   std::vector<long> output_size(at::Tensor& input, at::Tensor& weight);
