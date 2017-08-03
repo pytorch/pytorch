@@ -3864,7 +3864,12 @@ new_module_tests = [
     dict(
         module_name='GLU',
         input_size=(5, 6),
-        check_gradgrad=False,
+    ),
+    dict(
+        module_name='GLU',
+        constructor_args=(1,),
+        input_size=(5, 6, 7),
+        desc='dim'
     ),
 ]
 
