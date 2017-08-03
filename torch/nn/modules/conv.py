@@ -107,13 +107,14 @@ class Conv1d(_ConvNd):
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
-        stride (int or tuple, optional): Stride of the convolution
+        stride (int or tuple, optional): Stride of the convolution. Default: 1
         padding (int or tuple, optional): Zero-padding added to both sides of
-            the input dilation (int or tuple, optional): Spacing between kernel
-            elements
+            the input. Default: 0
+        dilation (int or tuple, optional): Spacing between kernel
+            elements. Default: 1
         groups (int, optional): Number of blocked connections from input
-            channels to output channels
-        bias (bool, optional): If True, adds a learnable bias to the output
+            channels to output channels. Default: 1
+        bias (bool, optional): If True, adds a learnable bias to the output. Default: True
 
     Shape:
         - Input: :math:`(N, C_{in}, L_{in})`
@@ -204,11 +205,11 @@ class Conv2d(_ConvNd):
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
-        stride (int or tuple, optional): Stride of the convolution
-        padding (int or tuple, optional): Zero-padding added to both sides of the input
-        dilation (int or tuple, optional): Spacing between kernel elements
-        groups (int, optional): Number of blocked connections from input channels to output channels
-        bias (bool, optional): If True, adds a learnable bias to the output
+        stride (int or tuple, optional): Stride of the convolution. Default: 1
+        padding (int or tuple, optional): Zero-padding added to both sides of the input. Default: 0
+        dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
+        groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
+        bias (bool, optional): If True, adds a learnable bias to the output. Default: True
 
     Shape:
         - Input: :math:`(N, C_{in}, H_{in}, W_{in})`
@@ -301,11 +302,11 @@ class Conv3d(_ConvNd):
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
-        stride (int or tuple, optional): Stride of the convolution
-        padding (int or tuple, optional): Zero-padding added to both sides of the input
-        dilation (int or tuple, optional): Spacing between kernel elements
-        groups (int, optional): Number of blocked connections from input channels to output channels
-        bias (bool, optional): If True, adds a learnable bias to the output
+        stride (int or tuple, optional): Stride of the convolution. Default: 1
+        padding (int or tuple, optional): Zero-padding added to both sides of the input. Default: 0
+        dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
+        groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
+        bias (bool, optional): If True, adds a learnable bias to the output. Default: True
 
     Shape:
         - Input: :math:`(N, C_{in}, D_{in}, H_{in}, W_{in})`
@@ -426,12 +427,12 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
-        stride (int or tuple, optional): Stride of the convolution
-        padding (int or tuple, optional): Zero-padding added to both sides of the input
-        output_padding (int or tuple, optional): Zero-padding added to one side of the output
-        groups (int, optional): Number of blocked connections from input channels to output channels
-        bias (bool, optional): If True, adds a learnable bias to the output
-        dilation (int or tuple, optional): Spacing between kernel elements
+        stride (int or tuple, optional): Stride of the convolution. Default: 1
+        padding (int or tuple, optional): Zero-padding added to both sides of the input. Default: 0
+        output_padding (int or tuple, optional): Zero-padding added to one side of the output. Default: 0
+        groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
+        bias (bool, optional): If True, adds a learnable bias to the output. Default: True
+        dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
 
     Shape:
         - Input: :math:`(N, C_{in}, L_{in})`
@@ -504,12 +505,12 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
-        stride (int or tuple, optional): Stride of the convolution
-        padding (int or tuple, optional): Zero-padding added to both sides of the input
-        output_padding (int or tuple, optional): Zero-padding added to one side of the output
-        groups (int, optional): Number of blocked connections from input channels to output channels
-        bias (bool, optional): If True, adds a learnable bias to the output
-        dilation (int or tuple, optional): Spacing between kernel elements
+        stride (int or tuple, optional): Stride of the convolution. Default: 1
+        padding (int or tuple, optional): Zero-padding added to both sides of the input. Default: 0
+        output_padding (int or tuple, optional): Zero-padding added to one side of the output. Default: 0
+        groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
+        bias (bool, optional): If True, adds a learnable bias to the output. Default: True
+        dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
 
     Shape:
         - Input: :math:`(N, C_{in}, H_{in}, W_{in})`
@@ -610,12 +611,12 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
-        stride (int or tuple, optional): Stride of the convolution
-        padding (int or tuple, optional): Zero-padding added to both sides of the input
-        output_padding (int or tuple, optional): Zero-padding added to one side of the output
-        groups (int, optional): Number of blocked connections from input channels to output channels
-        bias (bool, optional): If True, adds a learnable bias to the output
-        dilation (int or tuple, optional): Spacing between kernel elements
+        stride (int or tuple, optional): Stride of the convolution. Default: 1
+        padding (int or tuple, optional): Zero-padding added to both sides of the input. Default: 0
+        output_padding (int or tuple, optional): Zero-padding added to one side of the output. Default: 0
+        groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
+        bias (bool, optional): If True, adds a learnable bias to the output. Default: True
+        dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
 
     Shape:
         - Input: :math:`(N, C_{in}, D_{in}, H_{in}, W_{in})`
