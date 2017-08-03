@@ -19,7 +19,7 @@ IdList = schema.List(np.int64)
 IdScoreList = schema.Map(np.int64, np.float32)
 
 
-def get_categorical_limit(record):
+def get_key(record):
     if schema.equal_schemas(record, IdList):
         key = 'values'
     elif schema.equal_schemas(record, IdScoreList, check_field_types=False):
@@ -28,7 +28,12 @@ def get_categorical_limit(record):
         raise NotImplementedError()
     assert record[key].metadata is not None, (
         "Blob {} doesn't have metadata".format(str(record[key]())))
-    return record[key].metadata.categorical_limit
+    return record[key]
+
+
+def get_categorical_limit(record):
+    key = get_key(record)
+    return key.metadata.categorical_limit
 
 
 def set_request_only(field):
