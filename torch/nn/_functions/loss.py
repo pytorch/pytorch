@@ -1,5 +1,6 @@
 import torch
 from torch.autograd import Function
+from torch.autograd.function import once_differentiable
 
 
 class CosineEmbeddingLoss(Function):
@@ -124,7 +125,6 @@ class HingeEmbeddingLossBackward(Function):
     def forward(ctx, input, target, grad_output, margin, size_average):
         ctx.margin = margin
         ctx.size_average = size_average
-        ctx.save_for_backward(input, target, grad_output)
         grad_input = input.new().resize_as_(input).copy_(target)
         grad_input[torch.mul(torch.eq(target, -1), torch.gt(input, ctx.margin))] = 0
 
@@ -151,34 +151,34 @@ class HingeEmbeddingLossBackward(Function):
 
 
 class MarginRankingLoss(Function):
-    def __init__(self, margin=1, size_average=True):
-        super(MarginRankingLoss, self).__init__()
-        self.margin = margin
-        self.size_average = size_average
-
-    def forward(self, input1, input2, y):
+    @staticmethod
+    def forward(ctx, input1, input2, y, margin, size_average):
+        ctx.margin = margin
+        ctx.size_average = size_average
         _output = input1.clone()
         _output.add_(-1, input2)
         _output.mul_(-1).mul_(y)
-        _output.add_(self.margin)
+        _output.add_(ctx.margin)
         _output.clamp_(min=0)
         output = _output.sum()
 
-        if self.size_average:
+        if ctx.size_average:
             output = output / y.size(0)
 
-        self.save_for_backward(input1, input2, y)
+        ctx.save_for_backward(input1, input2, y)
         return input1.new((output,))
 
-    def backward(self, grad_output):
-        input1, input2, y = self.saved_tensors
+    @staticmethod
+    @once_differentiable
+    def backward(ctx, grad_output):
+        input1, input2, y = ctx.saved_tensors
         grad_input1 = input1.new().resize_as_(input1)
         grad_input2 = input2.new().resize_as_(input2)
 
         dist = input1.clone()
         dist.add_(-1, input2)
         dist.mul_(-1).mul_(y)
-        dist.add_(self.margin)
+        dist.add_(ctx.margin)
         mask = dist.ge(0)
 
         grad_input1.copy_(mask)
@@ -186,7 +186,7 @@ class MarginRankingLoss(Function):
         grad_input2.copy_(mask)
         grad_input2.mul_(y)
 
-        if self.size_average:
+        if ctx.size_average:
             grad_input1.div_(y.size(0))
             grad_input2.div_(y.size(0))
 
