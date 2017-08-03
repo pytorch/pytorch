@@ -165,13 +165,13 @@ def threshold_double_backwards(ctx, ggI):
     return gI, ggO, None, None, None
 
 
-def mseloss_double_backwards(ctx, ggI):
+def klddivloss_double_backwards(ctx, ggI):
     size_average = ctx.additional_args[0]
     input, target, gO = ctx.saved_variables
     div_factor = input.nelement() if size_average else 1
 
-    gI = ggI * (gO * 2. / div_factor).expand_as(input)
-    ggO = (ggI * (input - target)).sum() * (2. / div_factor)
+    gI = None
+    ggO = (ggI * target).sum() / -div_factor
 
     return gI, None, ggO, None, None
 
@@ -186,6 +186,17 @@ def l1loss_double_backwards(ctx, ggI):
     ggO = (ggI * (positive_mask - negative_mask)).sum()
     if size_average:
         ggO = ggO / input.nelement()
+    return gI, None, ggO, None, None
+
+
+def mseloss_double_backwards(ctx, ggI):
+    size_average = ctx.additional_args[0]
+    input, target, gO = ctx.saved_variables
+    div_factor = input.nelement() if size_average else 1
+
+    gI = ggI * (gO * 2. / div_factor).expand_as(input)
+    ggO = (ggI * (input - target)).sum() * (2. / div_factor)
+
     return gI, None, ggO, None, None
 
 
@@ -237,7 +248,7 @@ def smoothl1loss_double_backwards(ctx, ggI):
     large_error_neg_mask = (((input_sub_target <= 0) + large_error_mask) == 2).type_as(ggI)
     small_error_mask = small_error_mask.type_as(ggI)
 
-    gI = 1. / div_factor * small_error_mask * ggI * gO
+    gI = small_error_mask * ggI * gO / div_factor
     ggO = (ggI * (input_sub_target * small_error_mask + large_error_pos_mask - large_error_neg_mask)).sum() / div_factor
 
     return gI, None, ggO, None, None, None
@@ -254,6 +265,7 @@ double_backwards_fns = {
     'Softplus': softplus_double_backwards,
     'Softshrink': softshrink_double_backwards,
     'Threshold': threshold_double_backwards,
+    'KLDivLoss': klddivloss_double_backwards,
     'L1Loss': l1loss_double_backwards,
     'MSELoss': mseloss_double_backwards,
     'NLLLoss': nllloss_double_backwards,
