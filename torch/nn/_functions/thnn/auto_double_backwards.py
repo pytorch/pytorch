@@ -225,6 +225,23 @@ def nllloss_double_backwards(ctx, ggI):
     return gI, None, ggO, None, None, None
 
 
+def smoothl1loss_double_backwards(ctx, ggI):
+    size_average = ctx.additional_args[0]
+    input, target, gO = ctx.saved_variables
+    div_factor = input.nelement() if size_average else 1
+
+    input_sub_target = input - target
+    small_error_mask = (input_sub_target.abs() < 1)
+    large_error_mask = (small_error_mask == 0)
+    large_error_pos_mask = (((input_sub_target > 0) + large_error_mask) == 2).type_as(ggI)
+    large_error_neg_mask = (((input_sub_target <= 0) + large_error_mask) == 2).type_as(ggI)
+    small_error_mask = small_error_mask.type_as(ggI)
+
+    gI = 1. / div_factor * small_error_mask * ggI * gO
+    ggO = (ggI * (input_sub_target * small_error_mask + large_error_pos_mask - large_error_neg_mask)).sum() / div_factor
+
+    return gI, None, ggO, None, None, None
+
 double_backwards_fns = {
     'ELU': elu_double_backwards,
     'GatedLinear': gatedlinear_double_backwards,
@@ -241,4 +258,5 @@ double_backwards_fns = {
     'MSELoss': mseloss_double_backwards,
     'NLLLoss': nllloss_double_backwards,
     'NLLLoss2d': nllloss_double_backwards,
+    'SmoothL1Loss': smoothl1loss_double_backwards,
 }
