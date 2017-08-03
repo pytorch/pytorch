@@ -6,7 +6,7 @@ namespace caffe2 {
 
 class FileStoreHandler : public StoreHandler {
  public:
-  explicit FileStoreHandler(std::string& path);
+  explicit FileStoreHandler(const std::string& path, const std::string& prefix);
   virtual ~FileStoreHandler();
 
   virtual void set(const std::string& name, const std::string& data) override;

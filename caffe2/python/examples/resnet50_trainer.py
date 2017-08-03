@@ -244,6 +244,7 @@ def Train(args):
                 core.CreateOperator(
                     "FileStoreHandlerCreate", [], [store_handler],
                     path=args.file_store_path,
+                    prefix=args.run_id,
                 )
             )
         rendezvous = dict(
