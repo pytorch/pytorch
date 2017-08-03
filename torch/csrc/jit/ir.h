@@ -809,6 +809,8 @@ struct PythonOp : public NodeWithKind<PythonOp,NodeKind::PythonOp,TypeKind::Mult
   }
 };
 
+// A Cpp operator is an operator which dispatches directly to an autograd function.
+// TODO: These are not executable without reentrant engine.
 struct CppOp : public NodeWithKind<CppOp,NodeKind::CppOp,TypeKind::Multi> {
   std::shared_ptr<torch::autograd::Function> fn;
 
