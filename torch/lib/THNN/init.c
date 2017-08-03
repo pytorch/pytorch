@@ -179,6 +179,9 @@
 #include "generic/TemporalRowConvolution.c"
 #include "THGenerateFloatTypes.h"
 
+#include "generic/FeatureLPPooling.c"
+#include "THGenerateFloatTypes.h"
+
 #include "generic/BatchNormalization.c"
 #include "THGenerateFloatTypes.h"
 
@@ -195,6 +198,9 @@
 #include "THGenerateFloatTypes.h"
 
 #include "generic/SpatialConvolutionLocal.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/SpatialFullDilatedConvolution.c"
 #include "THGenerateFloatTypes.h"
 
 #include "generic/SpatialFullConvolution.c"
@@ -248,6 +254,9 @@
 #include "generic/VolumetricConvolutionMM.c"
 #include "THGenerateFloatTypes.h"
 
+#include "generic/VolumetricFullDilatedConvolution.c"
+#include "THGenerateFloatTypes.h"
+
 #include "generic/VolumetricFullConvolution.c"
 #include "THGenerateFloatTypes.h"
 
@@ -280,4 +289,3 @@
 
 #include "generic/VolumetricUpSamplingTrilinear.c"
 #include "THGenerateFloatTypes.h"
-
