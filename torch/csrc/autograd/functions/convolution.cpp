@@ -94,6 +94,8 @@ auto ConvParams::use_cudnn(const at::Tensor& input) const -> bool {
   return false;
 }
 
+std::string ConvForward::name() { return "ConvForward"; }
+
 auto ConvForward::output_size(at::Tensor& input, at::Tensor& weight) -> std::vector<int64_t> {
   auto in_size = input.sizes();
   auto weight_size = weight.sizes();
