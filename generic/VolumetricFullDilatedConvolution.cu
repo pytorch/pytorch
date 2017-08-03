@@ -24,13 +24,16 @@ static inline void THNN_(VolumetricFullDilatedConvolution_shapeCheck)(
          "bias tensor has to be contiguous");
   THArgCheck(dT > 0 && dW > 0 && dH > 0, 8,
          "stride should be greater than zero, but got dT: %d dH: %d dW: %d", dT, dH, dW);
-  THArgCheck(adjT < dT && adjW < dW && adjH < dH, 14,
-         "output adjustment must be smaller than stride, but got "
-         "adjT: %d adjH: %d adjW: %d dT: %d dH: %d dW: %d",
-         adjT, adjH, adjW, dT, dH, dW);
   THArgCheck(dilationT > 0 && dilationW > 0 && dilationH > 0, 15,
              "dilation should be greater than zero, but got dilationT: %d, dilationH: %d, dilationW: %d",
              dilationT, dilationH, dilationW);
+  THArgCheck((adjT < dT || adjT < dilationT)
+             && (adjW < dW || adjW < dilationW)
+             && (adjH < dH || adjH < dilationH), 15,
+             "output padding must be smaller than either stride or dilation,"
+             " but got adjT: %d adjH: %d adjW: %d dT: %d dH: %d dW: %d "
+             "dilationT: %d dilationH: %d dilationW: %d",
+             adjT, adjH, adjW, dT, dH, dW, dilationT, dilationH, dilationW);
 
   int ndim = input->nDimension;
   int nInputPlane = THCTensor_(size)(state, weight, 0);
@@ -178,7 +181,9 @@ void THNN_(VolumetricFullDilatedConvolution_updateOutput)(
     col2vol<real, accreal>(
       THCState_getCurrentStream(state),
       THCTensor_(data)(state, columns),
-      nOutputPlane, outputDepth, outputHeight, outputWidth, kT, kH, kW, padT, padH, padW, dT, dH, dW,
+      nOutputPlane, outputDepth, outputHeight, outputWidth,
+      inputDepth, inputHeight, inputWidth,
+      kT, kH, kW, padT, padH, padW, dT, dH, dW,
       dilationT, dilationH, dilationW,
       THCTensor_(data)(state, output_n)
     );
