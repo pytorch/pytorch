@@ -1,23 +1,33 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/SpatialConvolutionMM.cu"
+#define THC_GENERIC_FILE "generic/SpatialFullDilatedConvolution.cu"
 #else
 
-static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
+static inline void THNN_(SpatialFullDilatedConvolution_shapeCheck)(
                          THCState *state,
                          THCTensor *input, THCTensor *gradOutput,
                          THCTensor *weight, THCTensor *bias,
-                         int kH, int kW, int dH, int dW, int padH, int padW) {
+                         int kH, int kW, int dH, int dW, int padH, int padW,
+                         int dilationH, int dilationW,
+                         int adjH, int adjW) {
   THArgCheck(kW > 0 && kH > 0, 9,
              "kernel size should be greater than zero, but got kH: %d kW: %d", kH, kW);
   THArgCheck(dW > 0 && dH > 0, 11,
              "stride should be greater than zero, but got dH: %d dW: %d", dH, dW);
+  THArgCheck(dilationW > 0 && dilationH > 0, 15,
+             "dilation should be greater than zero, but got dilationH: %d, dilationW: %d",
+             dilationH, dilationW);
+  THArgCheck((adjW < dW || adjW < dilationW) && (adjH < dH || adjH < dilationH), 15,
+             "output padding must be smaller than either stride or dilation, but got adjH: %d adjW: %d dH: %d dW: %d dilationH: %d dilationW: %d",
+             adjH, adjW, dH, dW, dilationH, dilationW);
+  THArgCheck(THCTensor_(isContiguous)(state, weight), 4,
+             "weight tensor has to be contiguous");
   THArgCheck(!bias || THCTensor_(isContiguous)(state, bias), 5,
              "bias tensor has to be contiguous");
   THCUNN_argCheck(state, weight->nDimension == 2 || weight->nDimension == 4, 5, weight,
                   "2D or 4D weight tensor expected, but got: %s");
 
   if (bias != NULL) {
-    THCUNN_check_dim_size(state, bias, 1, 0, weight->size[0]);
+    THCUNN_check_dim_size(state, bias, 1, 0, weight->size[1]);
   }
 
   int ndim = input->nDimension;
@@ -34,17 +44,17 @@ static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
   THCUNN_argCheck(state, ndim == 3 || ndim == 4, 2, input,
                   "3D or 4D input tensor expected but got: %s");
 
-  long nInputPlane  = weight->size[1] / (kH * kW);
+  long nInputPlane  = weight->size[0];
   long inputHeight  = input->size[dimh];
   long inputWidth   = input->size[dimw];
-  long nOutputPlane = weight->size[0];
-  long outputHeight = (inputHeight + 2*padH - kH) / dH + 1;
-  long outputWidth  = (inputWidth + 2*padW - kW) / dW + 1;
+  long nOutputPlane = weight->size[1];
+  long outputHeight = (inputHeight - 1) * dH - 2*padH + (dilationH * (kH - 1) + 1) + adjH;
+  long outputWidth  = (inputWidth - 1) * dW - 2*padW + (dilationW * (kW - 1) + 1) + adjW;
 
   if (outputWidth < 1 || outputHeight < 1)
-      THError("Given input size: (%d x %d x %d). "
-              "Calculated output size: (%d x %d x %d). Output size is too small",
-              nInputPlane,inputHeight,inputWidth,nOutputPlane,outputHeight,outputWidth);
+    THError("Given input size: (%d x %d x %d). "
+            "Calculated output size: (%d x %d x %d). Output size is too small",
+            nInputPlane,inputHeight,inputWidth,nOutputPlane,outputHeight,outputWidth);
 
   THCUNN_check_dim_size(state, input, ndim, dimf, nInputPlane);
 
@@ -55,7 +65,7 @@ static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
   }
 }
 
-void THNN_(SpatialConvolutionMM_updateOutput)(
+void THNN_(SpatialFullDilatedConvolution_updateOutput)(
            THCState *state,
            THCTensor *input,
            THCTensor *output,
@@ -65,32 +75,23 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
            THCTensor *ones,
            int kW, int kH,
            int dW, int dH,
-           int padW, int padH) {
+           int padW, int padH,
+           int dilationW, int dilationH,
+           int adjW, int adjH)
+{
 
-  THCUNN_assertSameGPU(state, 5, input, output, weight, columns, ones);
-  if (bias) {
-    THCUNN_assertSameGPU(state, 2, weight, bias);
-  }
-  THArgCheck(THCTensor_(isContiguous)(state, weight), 4,
-             "weight tensor has to be contiguous");
+  int nInputPlane = THCTensor_(size)(state, weight, 0);
+  int nOutputPlane = THCTensor_(size)(state, weight, 1);
 
-  int freeWeight = 0;
-
-  // Params:
-  int nInputPlane = weight->nDimension == 2 ? weight->size[1]/(kH*kW) : weight->size[1];
-  int nOutputPlane = weight->size[0];
-
-  if (weight->nDimension == 4) {
-    long s1 = weight->size[0];
-    long s2 = weight->size[1] * weight->size[2] * weight->size[3];
-    weight = THCTensor_(newWithStorage2d)(state, weight->storage, weight->storageOffset, s1, -1, s2, -1);
-    freeWeight = 1;
-  }
-
-  THNN_(SpatialConvolutionMM_shapeCheck)
-       (state, input, NULL, weight, bias, kH, kW, dH, dW, padH, padW);
+  THCUNN_assertSameGPU(state, 6, input, output, weight,
+                       bias, columns, ones);
+  THNN_(SpatialFullDilatedConvolution_shapeCheck)
+       (state, input, NULL, weight, bias, kH, kW, dH, dW, padH, padW, dilationH, dilationW, adjH, adjW);
 
   input = THCTensor_(newContiguous)(state, input);
+  weight = THCTensor_(newContiguous)(state, weight);
+  bias = bias ? THCTensor_(newContiguous)(state, bias) : bias;
+
   int batch = 1;
   if (input->nDimension == 3) {
     // Force batch
@@ -100,8 +101,8 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
 
   long inputWidth   = input->size[3];
   long inputHeight  = input->size[2];
-  long outputWidth  = (inputWidth + 2*padW - kW) / dW + 1;
-  long outputHeight = (inputHeight + 2*padH - kH) / dH + 1;
+  long outputHeight = (inputHeight - 1) * dH - 2*padH + (dilationH * (kH - 1) + 1) + adjH;
+  long outputWidth  = (inputWidth - 1) * dW - 2*padW + (dilationW * (kW - 1) + 1) + adjW;
 
   // Batch size + input planes
   long batchSize = input->size[0];
@@ -110,7 +111,7 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
   THCTensor_(resize4d)(state, output, batchSize, nOutputPlane, outputHeight, outputWidth);
 
   // Resize temporary columns
-  THCTensor_(resize2d)(state, columns, nInputPlane*kW*kH, outputHeight*outputWidth);
+  THCTensor_(resize2d)(state, columns, nOutputPlane*kW*kH, inputHeight*inputWidth);
 
   // Define a buffer of ones, for bias accumulation
   // Note: this buffer can be shared with other modules, it only ever gets increased,
@@ -131,7 +132,39 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
     THCTensor_(select)(state, input_n, input, 0, elt);
     THCTensor_(select)(state, output_n, output, 0, elt);
 
-    // Do Bias first:
+    // M,N,K are dims of matrix A and B
+    // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
+    long m = weight->size[1] * weight->size[2] * weight->size[3];
+    long n = columns->size[1];
+    long k = weight->size[0];
+
+    // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
+    #ifdef THC_REAL_IS_FLOAT
+    THCudaBlas_Sgemm(
+    #elif defined(THC_REAL_IS_HALF)
+    THCudaBlas_Hgemm(
+    #elif defined(THC_REAL_IS_DOUBLE)
+    THCudaBlas_Dgemm(
+    #endif
+        state,
+        'n', 't',
+        n, m, k,
+        ScalarConvert<int, real>::to(1),
+        THCTensor_(data)(state, input_n), n,
+        THCTensor_(data)(state, weight), m,
+        ScalarConvert<int, real>::to(0),
+        THCTensor_(data)(state, columns), n
+    );
+
+    // Unpack columns back into input:
+    col2im<real, accreal>(
+      THCState_getCurrentStream(state),
+      THCTensor_(data)(state, columns),
+      nOutputPlane, outputHeight, outputWidth, inputHeight, inputWidth, kH, kW, padH, padW, dH, dW,
+      dilationH, dilationW, THCTensor_(data)(state, output_n)
+    );
+
+    // Do Bias after:
     // M,N,K are dims of matrix A and B
     // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
     long m_ = nOutputPlane;
@@ -153,26 +186,98 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
           ScalarConvert<int, real>::to(1),
           THCTensor_(data)(state, ones), k_,
           THCTensor_(data)(state, bias), k_,
-          ScalarConvert<int, real>::to(0),
+          ScalarConvert<int, real>::to(1),
           THCTensor_(data)(state, output_n), n_
       );
-    } else {
-      THCTensor_(zero)(state, output_n);
     }
+  }
+
+  // Free
+  THCTensor_(free)(state, input_n);
+  THCTensor_(free)(state, output_n);
+
+  // Resize output
+  if (batch == 0) {
+    THCTensor_(resize3d)(state, output, nOutputPlane, outputHeight, outputWidth);
+    THCTensor_(resize3d)(state, input, nInputPlane, inputHeight, inputWidth);
+  }
+
+  THCTensor_(free)(state, input);
+  THCTensor_(free)(state, weight);
+  if (bias) THCTensor_(free)(state, bias);
+  
+}
+
+void THNN_(SpatialFullDilatedConvolution_updateGradInput)(
+           THCState *state,
+           THCTensor *input,
+           THCTensor *gradOutput,
+           THCTensor *gradInput,
+           THCTensor *weight,
+           THCTensor *gradColumns,
+           int kW, int kH,
+           int dW, int dH,
+           int padW, int padH,
+           int dilationW, int dilationH,
+           int adjW, int adjH)
+{
+  int nInputPlane = THCTensor_(size)(state, weight, 0);
+  int nOutputPlane = THCTensor_(size)(state, weight, 1);
+
+  THCUNN_assertSameGPU(state, 5, input, gradOutput, weight,
+                       gradColumns, gradInput);
+  THNN_(SpatialFullDilatedConvolution_shapeCheck)
+       (state, input, gradOutput, weight, NULL, kH, kW, dH, dW, padH, padW, dilationH, dilationW, adjH, adjW);
+
+  input = THCTensor_(newContiguous)(state, input);
+  gradOutput = THCTensor_(newContiguous)(state, gradOutput);
+  weight = THCTensor_(newContiguous)(state, weight);
+  int batch = 1;
+  if (input->nDimension == 3) {
+    // Force batch
+    batch = 0;
+    THCTensor_(resize4d)(state, input, 1, input->size[0], input->size[1], input->size[2]);
+    THCTensor_(resize4d)(state, gradOutput, 1, gradOutput->size[0], gradOutput->size[1], gradOutput->size[2]);
+  }
+
+  long inputWidth   = input->size[3];
+  long inputHeight  = input->size[2];
+  long outputHeight = (inputHeight - 1) * dH - 2*padH + (dilationH * (kH - 1) + 1) + adjH;
+  long outputWidth  = (inputWidth - 1) * dW - 2*padW + (dilationW * (kW - 1) + 1) + adjW;
+
+  // Batch size + input planes
+  long batchSize = input->size[0];
+
+  // Resize output
+  THCTensor_(resize4d)(state, gradInput, batchSize, nInputPlane, inputHeight, inputWidth);
+
+  // Resize temporary columns
+  THCTensor_(resize2d)(state, gradColumns, nOutputPlane*kW*kH, inputHeight*inputWidth);
+
+  // Helpers
+  THCTensor *gradInput_n = THCTensor_(new)(state);
+  THCTensor *gradOutput_n = THCTensor_(new)(state);
+
+  // For each elt in batch, do:
+  for (int elt = 0; elt < batchSize; elt ++) {
+    // Matrix mulitply per sample:
+    THCTensor_(select)(state, gradInput_n, gradInput, 0, elt);
+    THCTensor_(select)(state, gradOutput_n, gradOutput, 0, elt);
 
     // Extract columns:
     im2col(
       THCState_getCurrentStream(state),
-      THCTensor_(data)(state, input_n),
-      nInputPlane, inputHeight, inputWidth, kH, kW, padH, padW, dH, dW,
-      1, 1, THCTensor_(data)(state, columns)
+      THCTensor_(data)(state, gradOutput_n),
+      nOutputPlane, outputHeight, outputWidth, kH, kW, padH, padW, dH, dW,
+      dilationH, dilationW, THCTensor_(data)(state, gradColumns)
     );
+
 
     // M,N,K are dims of matrix A and B
     // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
-    long m = nOutputPlane;
-    long n = columns->size[1];
-    long k = nInputPlane*kH*kW;
+    long m = weight->size[0];
+    long n = gradColumns->size[1];
+    long k = weight->size[1] * weight->size[2] * weight->size[3];
 
     // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
     #ifdef THC_REAL_IS_FLOAT
@@ -186,132 +291,17 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
         'n', 'n',
         n, m, k,
         ScalarConvert<int, real>::to(1),
-        THCTensor_(data)(state, columns), n,
+        THCTensor_(data)(state, gradColumns), n,
         THCTensor_(data)(state, weight), k,
-        ScalarConvert<int, real>::to(1),
-        THCTensor_(data)(state, output_n), n
-    );
-  }
-
-  // Free
-  THCTensor_(free)(state, input_n);
-  THCTensor_(free)(state, output_n);
-  if (freeWeight)
-    THCTensor_(free)(state, weight);
-
-  // Resize output
-  if (batch == 0) {
-    THCTensor_(resize3d)(state, output, nOutputPlane, outputHeight, outputWidth);
-    THCTensor_(resize3d)(state, input, nInputPlane, inputHeight, inputWidth);
-  }
-
-  THCTensor_(free)(state, input);
-}
-
-void THNN_(SpatialConvolutionMM_updateGradInput)(
-           THCState *state,
-           THCTensor *input,
-           THCTensor *gradOutput,
-           THCTensor *gradInput,
-           THCTensor *weight,
-           THCTensor *gradColumns,
-           THCTensor *ones,
-           int kW, int kH,
-           int dW, int dH,
-           int padW, int padH) {
-
-  THCUNN_assertSameGPU(state, 5, input, gradOutput, weight,
-                       gradColumns, gradInput);
-  THArgCheck(THCTensor_(isContiguous)(state, weight), 4,
-             "weight tensor has to be contiguous");
-
-  // Params
-  int nInputPlane = weight->nDimension == 2 ? weight->size[1]/(kW*kH) : weight->size[1];
-  int nOutputPlane = weight->size[0];
-
-  int freeWeight = 0;
-  if (weight->nDimension == 4) {
-    long s1 = weight->size[0];
-    long s2 = weight->size[1] * weight->size[2] * weight->size[3];
-    weight = THCTensor_(newWithStorage2d)(state, weight->storage, weight->storageOffset, s1, -1, s2, -1);
-    freeWeight = 1;
-  }
-
-  THNN_(SpatialConvolutionMM_shapeCheck)
-       (state, input, gradOutput, weight, NULL, kH, kW, dH, dW, padH, padW);
-
-  input = THCTensor_(newContiguous)(state, input);
-  gradOutput = THCTensor_(newContiguous)(state, gradOutput);
-  int batch = 1;
-  if (input->nDimension == 3) {
-    // Force batch
-    batch = 0;
-    THCTensor_(resize4d)(state, input, 1, input->size[0], input->size[1], input->size[2]);
-    THCTensor_(resize4d)(state, gradOutput, 1, gradOutput->size[0], gradOutput->size[1], gradOutput->size[2]);
-  }
-
-  long inputWidth   = input->size[3];
-  long inputHeight  = input->size[2];
-  long outputWidth  = (inputWidth + 2*padW - kW) / dW + 1;
-  long outputHeight = (inputHeight + 2*padH - kH) / dH + 1;
-
-  // Batch size + input planes
-  long batchSize = input->size[0];
-
-  // Resize output
-  THCTensor_(resize4d)(state, gradInput, batchSize, nInputPlane, inputHeight, inputWidth);
-
-  // Resize temporary columns
-  THCTensor_(resize2d)(state, gradColumns, nInputPlane*kW*kH, outputHeight*outputWidth);
-
-  // Helpers
-  THCTensor *gradInput_n = THCTensor_(new)(state);
-  THCTensor *gradOutput_n = THCTensor_(new)(state);
-
-  // For each elt in batch, do:
-  for (int elt = 0; elt < batchSize; elt ++) {
-    // Matrix mulitply per sample:
-    THCTensor_(select)(state, gradInput_n, gradInput, 0, elt);
-    THCTensor_(select)(state, gradOutput_n, gradOutput, 0, elt);
-
-    // M,N,K are dims of matrix A and B
-    // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
-    long m = nInputPlane*kW*kH;
-    long n = gradColumns->size[1];
-    long k = nOutputPlane;
-
-    // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
-    #ifdef THC_REAL_IS_FLOAT
-    THCudaBlas_Sgemm(
-    #elif defined(THC_REAL_IS_HALF)
-    THCudaBlas_Hgemm(
-    #elif defined(THC_REAL_IS_DOUBLE)
-    THCudaBlas_Dgemm(
-    #endif
-        state,
-        'n', 't',
-        n, m, k,
-        ScalarConvert<int, real>::to(1),
-        THCTensor_(data)(state, gradOutput_n), n,
-        THCTensor_(data)(state, weight), m,
         ScalarConvert<int, real>::to(0),
-        THCTensor_(data)(state, gradColumns), n
-    );
-
-    // Unpack columns back into input:
-    col2im<real, accreal>(
-      THCState_getCurrentStream(state),
-      THCTensor_(data)(state, gradColumns),
-      nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth, kH, kW, padH, padW, dH, dW,
-      1, 1, THCTensor_(data)(state, gradInput_n)
+        THCTensor_(data)(state, gradInput_n), n
     );
   }
+
 
   // Free
   THCTensor_(free)(state, gradInput_n);
   THCTensor_(free)(state, gradOutput_n);
-  if (freeWeight)
-    THCTensor_(free)(state, weight);
 
   // Resize output
   if (batch == 0) {
@@ -322,9 +312,11 @@ void THNN_(SpatialConvolutionMM_updateGradInput)(
 
   THCTensor_(free)(state, input);
   THCTensor_(free)(state, gradOutput);
+  THCTensor_(free)(state, weight);
 }
 
-void THNN_(SpatialConvolutionMM_accGradParameters)(
+
+void THNN_(SpatialFullDilatedConvolution_accGradParameters)(
            THCState *state,
            THCTensor *input,
            THCTensor *gradOutput,
@@ -335,31 +327,22 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
            int kW, int kH,
            int dW, int dH,
            int padW, int padH,
-           accreal scale_) {
-
+           int dilationW, int dilationH,
+           int adjW, int adjH,
+           accreal scale_)
+{
   real scale = ScalarConvert<accreal, real>::to(scale_);
-  THCUNN_assertSameGPU(state, 5, input, gradOutput, gradWeight, columns, ones);
-  if (gradBias) {
-   THCUNN_assertSameGPU(state, 2, gradWeight, gradBias);
-  }
-  THArgCheck(THCTensor_(isContiguous)(state, gradWeight), 4,
-             "weight tensor has to be contiguous");
+  int nInputPlane = THCTensor_(size)(state, gradWeight, 0);
+  int nOutputPlane = THCTensor_(size)(state, gradWeight, 1);
 
-  // Params
-  int nInputPlane = gradWeight->nDimension == 2 ? gradWeight->size[1]/(kW*kH) : gradWeight->size[1];
-  int nOutputPlane = gradWeight->size[0];
+  THCUNN_assertSameGPU(state, 6, input, gradOutput, gradWeight,
+                       gradBias, columns, ones);
+  THNN_(SpatialFullDilatedConvolution_shapeCheck)
+       (state, input, gradOutput, gradWeight, gradBias, kH, kW, dH, dW, padH, padW, dilationH, dilationW, adjH, adjW);
 
-  int freeWeight = 0;
-  if (gradWeight->nDimension == 4) {
-    long s1 = gradWeight->size[0];
-    long s2 = gradWeight->size[1] * gradWeight->size[2] * gradWeight->size[3];
-    gradWeight = THCTensor_(newWithStorage2d)(state, gradWeight->storage, gradWeight->storageOffset, s1, -1, s2, -1);
-    freeWeight = 1;
-  }
-
-  THNN_(SpatialConvolutionMM_shapeCheck)
-       (state, input, gradOutput, gradWeight, gradBias, kH, kW, dH, dW, padH, padW);
-
+  THArgCheck(THCTensor_(isContiguous)(state, gradWeight), 4, "gradWeight needs to be contiguous");
+  if (gradBias)
+    THArgCheck(THCTensor_(isContiguous)(state, gradBias), 5, "gradBias needs to be contiguous");
   input = THCTensor_(newContiguous)(state, input);
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
   int batch = 1;
@@ -372,8 +355,8 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
 
   long inputWidth   = input->size[3];
   long inputHeight  = input->size[2];
-  long outputWidth  = (inputWidth + 2*padW - kW) / dW + 1;
-  long outputHeight = (inputHeight + 2*padH - kH) / dH + 1;
+  long outputHeight = (inputHeight - 1) * dH - 2*padH + (dilationH * (kH - 1) + 1) + adjH;
+  long outputWidth  = (inputWidth - 1) * dW - 2*padW + (dilationW * (kW - 1) + 1) + adjW;
 
   // Batch size + input planes
   long batchSize = input->size[0];
@@ -386,7 +369,7 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
   }
 
   // Resize temporary columns
-  THCTensor_(resize2d)(state, columns, nInputPlane*kW*kH, outputHeight*outputWidth);
+  THCTensor_(resize2d)(state, columns, nOutputPlane*kW*kH, inputHeight*inputWidth);
 
   // Helpers
   THCTensor *input_n = THCTensor_(new)(state);
@@ -401,16 +384,16 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
     // Extract columns:
     im2col(
       THCState_getCurrentStream(state),
-      THCTensor_(data)(state, input_n),
-      nInputPlane, inputHeight, inputWidth, kH, kW, padH, padW, dH, dW,
-      1, 1, THCTensor_(data)(state, columns)
+      THCTensor_(data)(state, gradOutput_n),
+      nOutputPlane, outputHeight, outputWidth, kH, kW, padH, padW, dH, dW,
+      dilationH, dilationW, THCTensor_(data)(state, columns)
     );
 
     // M,N,K are dims of matrix A and B
     // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
-    long m = nOutputPlane;
-    long n = nInputPlane*kW*kH;
-    long k = columns->size[1];
+    long n = columns->size[0];   // nOutputPlane * kh * kw
+    long m = input_n->size[0];   // nInputPlane
+    long k = columns->size[1];   // inputHeight * inputWidth
 
     // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
     #ifdef THC_REAL_IS_FLOAT
@@ -425,7 +408,7 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
         n, m, k,
         scale,
         THCTensor_(data)(state, columns), k,
-        THCTensor_(data)(state, gradOutput_n), k,
+        THCTensor_(data)(state, input_n), k,
         ScalarConvert<int, real>::to(1),
         THCTensor_(data)(state, gradWeight), n
     );
@@ -472,8 +455,6 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
   // Free
   THCTensor_(free)(state, input_n);
   THCTensor_(free)(state, gradOutput_n);
-  if (freeWeight)
-    THCTensor_(free)(state, gradWeight);
 
   // Resize
   if (batch == 0) {
