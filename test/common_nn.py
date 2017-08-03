@@ -280,7 +280,13 @@ criterion_tests = [
         module_name='KLDivLoss',
         input=torch.rand(10, 10).log(),
         target=torch.rand(10, 10),
-        check_gradgrad=False,
+    ),
+    dict(
+        module_name='KLDivLoss',
+        constructor_args=(False,),
+        input=torch.rand(10, 10).log(),
+        target=torch.rand(10, 10),
+        desc='no_size_average',
     ),
     dict(
         module_name='MSELoss',
