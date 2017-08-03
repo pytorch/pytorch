@@ -565,7 +565,7 @@ class LSTMCell(RNNCellBase):
         weight_ih: the learnable input-hidden weights, of shape
             `(4*hidden_size x input_size)`
         weight_hh: the learnable hidden-hidden weights, of shape
-            `(4*hidden_size x input_size)`
+            `(4*hidden_size x hidden_size)`
         bias_ih: the learnable input-hidden bias, of shape `(4*hidden_size)`
         bias_hh: the learnable hidden-hidden bias, of shape `(4*hidden_size)`
 
@@ -640,7 +640,7 @@ class GRUCell(RNNCellBase):
         weight_ih: the learnable input-hidden weights, of shape
             `(3*hidden_size x input_size)`
         weight_hh: the learnable hidden-hidden weights, of shape
-            `(3*hidden_size x input_size)`
+            `(3*hidden_size x hidden_size)`
         bias_ih: the learnable input-hidden bias, of shape `(3*hidden_size)`
         bias_hh: the learnable hidden-hidden bias, of shape `(3*hidden_size)`
 
