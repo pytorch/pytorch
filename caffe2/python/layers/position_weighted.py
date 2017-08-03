@@ -8,10 +8,9 @@ from __future__ import unicode_literals
 import logging
 import numpy as np
 
-from caffe2.python import core, schema
+from caffe2.python import schema
 from caffe2.python.layers.layers import (
     get_categorical_limit,
-    LayerParameter,
     ModelLayer,
 )
 
@@ -38,23 +37,15 @@ class PositionWeighted(ModelLayer):
                 'categorical_limit of the keys: {}'.format(
                     str(input_record.lengths()), self.shape))
 
-        self.pos_w = model.net.NextScopedBlob(name + "_pos_w")
-        self.params.append(
-            LayerParameter(
-                parameter=self.pos_w,
-                initializer=core.CreateOperator('ConstantFill',
-                                                [],
-                                                self.pos_w,
-                                                shape=[self.shape, ],
-                                                value=1.0
-                                                ),
-                optimizer=weight_optim
-            ))
+        self.pos_w = self.create_param(param_name='pos_w',
+                                       shape=[self.shape, ],
+                                       initializer=('ConstantFill', {'value': 1.0}),
+                                       optimizer=weight_optim)
 
         self.output_schema = schema.Struct(
             ('position_weights',
                 schema.Scalar((np.float32, self.shape),
-                              model.net.NextScopedBlob(name + "_pos_w_gather")))
+                              self.get_next_blob_reference("pos_w_gather")))
         )
 
         self.tags.update({Tags.HANDLE_AS_SPARSE_LAYER})

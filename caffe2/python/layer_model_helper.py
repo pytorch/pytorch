@@ -6,6 +6,9 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import core, model_helper, schema
+from caffe2.python.modeling.parameter_sharing import (
+    parameter_sharing_context,
+)
 from caffe2.python.optimizer import get_param_device
 from caffe2.python.layers import layers
 from caffe2.proto import caffe2_pb2
@@ -13,6 +16,7 @@ from future.utils import viewitems
 
 import logging
 import numpy as np
+import six
 logger = logging.getLogger(__name__)
 
 
@@ -122,6 +126,42 @@ class LayerModelHelper(model_helper.ModelHelper):
         init_net = core.Net(name)
         self._add_global_constants(init_net)
         return init_net
+
+    def create_param(self, param_name, shape, initializer, optimizer=None,
+                     ps_param=None):
+        if isinstance(param_name, core.BlobReference):
+            param_name = str(param_name)
+        elif isinstance(param_name, six.string_types):
+            # Parameter name will be equal to current Namescope that got
+            # resolved with the respect of parameter sharing of the scopes.
+            param_name = parameter_sharing_context.get_parameter_name(
+                param_name)
+        else:
+            raise "Unsupported type for param_name"
+
+        param_blob = core.BlobReference(param_name)
+
+        if len(initializer) == 1:
+            init_op_args = {}
+        else:
+            assert len(initializer) == 2
+            init_op_args = initializer[1]
+        if shape is not None:
+            init_op_args.update({'shape': shape})
+
+        param = layers.LayerParameter(
+            parameter=param_blob,
+            initializer=core.CreateOperator(
+                initializer[0],
+                [],
+                param_blob,
+                **init_op_args
+            ),
+            optimizer=optimizer,
+            ps_param=ps_param,
+        )
+
+        return param
 
     def next_layer_name(self, prefix):
         base_name = core.ScopedName(prefix)

@@ -4,10 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import core, schema
-from caffe2.python.layers.layers import (
-    ModelLayer,
-    LayerParameter
-)
+from caffe2.python.layers.layers import ModelLayer
 
 import numpy as np
 
@@ -60,7 +57,6 @@ class ArcCosineFeatureMap(ModelLayer):
         self.params = []
         self.model = model
         self.set_weight_as_global_constant = set_weight_as_global_constant
-        self.name = name
 
         self.input_dims = input_record.field_type().shape[0]
         assert self.input_dims >= 1, "Expected input dimensions >= 1, got %s" \
@@ -103,16 +99,16 @@ class ArcCosineFeatureMap(ModelLayer):
                 array=b_init
             )
         else:
-            self.random_w = self.model.net.NextScopedBlob(self.name + "_random_w")
-            self.random_b = self.model.net.NextScopedBlob(self.name + "_random_b")
-            self.params += self._initialize_params(self.random_w,
-                                                   self.random_b,
-                                                   w_init=weight_init,
-                                                   b_init=bias_init,
-                                                   w_optim=weight_optim,
-                                                   b_optim=bias_optim)
+            (self.random_w, self.random_b) = self._initialize_params(
+                'random_w',
+                'random_b',
+                w_init=weight_init,
+                b_init=bias_init,
+                w_optim=weight_optim,
+                b_optim=bias_optim
+            )
 
-    def _initialize_params(self, w_blob, b_blob, w_init=None, b_init=None,
+    def _initialize_params(self, w_name, b_name, w_init=None, b_init=None,
                            w_optim=None, b_optim=None):
         """
         Initializes the Layer Parameters for weight and bias terms for features
@@ -136,24 +132,15 @@ class ArcCosineFeatureMap(ModelLayer):
         )
         b_optim = b_optim if b_optim else self.model.NoOptim
 
-        w_param = LayerParameter(
-            parameter=w_blob,
-            initializer=core.CreateOperator(w_init[0],
-                                            [],
-                                            w_blob,
-                                            shape=(self.output_dims, self.input_dims),
-                                            **w_init[1]
-                                            ),
-            optimizer=w_optim)
-        b_param = LayerParameter(
-            parameter=b_blob,
-            initializer=core.CreateOperator(b_init[0],
-                                            [],
-                                            b_blob,
-                                            shape=[self.output_dims],
-                                            **b_init[1]
-                                            ),
-            optimizer=b_optim)
+        w_param = self.create_param(param_name=w_name,
+                                    shape=(self.output_dims, self.input_dims),
+                                    initializer=w_init,
+                                    optimizer=w_optim)
+
+        b_param = self.create_param(param_name=b_name,
+                                    shape=[self.output_dims],
+                                    initializer=b_init,
+                                    optimizer=b_optim)
 
         return [w_param, b_param]
 

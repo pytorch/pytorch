@@ -8,7 +8,7 @@ from __future__ import unicode_literals
 import numpy as np
 
 from caffe2.python import core, schema
-from caffe2.python.layers.layers import LayerParameter, ModelLayer
+from caffe2.python.layers.layers import ModelLayer
 
 
 class UniformSampling(ModelLayer):
@@ -36,41 +36,25 @@ class UniformSampling(ModelLayer):
 
         self.num_elements = num_elements
 
-        self.num_samples = model.net.NextScopedBlob(name + "_num_samples")
-        self.params.append(
-            LayerParameter(
-                parameter=self.num_samples,
-                initializer=core.CreateOperator(
-                    "GivenTensorInt64Fill",
-                    [],
-                    self.num_samples,
-                    shape=(1, ),
-                    values=[num_samples],
-                ),
-                optimizer=model.NoOptim,
-            )
-        )
+        num_examples_init = ('GivenTensorInt64Fill',
+                             {'values': [num_samples]})
+        self.num_samples = self.create_param(param_name='num_examples',
+                                              shape=(1,),
+                                              initializer=num_examples_init,
+                                              optimizer=model.NoOptim)
 
-        self.sampling_prob = model.net.NextScopedBlob(name + "_prob")
-        self.params.append(
-            LayerParameter(
-                parameter=self.sampling_prob,
-                initializer=core.CreateOperator(
-                    "ConstantFill",
-                    [],
-                    self.sampling_prob,
-                    shape=(num_samples, ),
-                    value=float(num_samples) / num_elements,
-                    dtype=core.DataType.FLOAT
-                ),
-                optimizer=model.NoOptim,
-            )
-        )
+        sampling_blob_init = ('ConstantFill',
+                              {'value': float(num_samples) / num_elements,
+                               'dtype': core.DataType.FLOAT})
+        self.sampling_prob = self.create_param(param_name='prob',
+                                               shape=(num_samples,),
+                                               initializer=sampling_blob_init,
+                                               optimizer=model.NoOptim)
 
         self.output_schema = schema.Struct(
             (
                 'samples', schema.Scalar(
-                    np.int32, model.net.NextScopedBlob(name + "_samples")
+                    np.int32, self.get_next_blob_reference("samples")
                 )
             ),
             ('sampling_prob', schema.Scalar(np.float32, self.sampling_prob)),
@@ -83,7 +67,7 @@ class UniformSampling(ModelLayer):
         shape = net.Sub([self.num_samples, shape], shape)
         samples = net.UniqueUniformFill(
             [shape, self.input_record()],
-            net.NextScopedBlob("samples"),
+            net.NextScopedBlob("samples_before_concat"),
             min=0,
             max=self.num_elements - 1,
             input_as_shape=True

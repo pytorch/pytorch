@@ -6,10 +6,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import core, schema
-from caffe2.python.layers.layers import (
-    LayerParameter,
-    ModelLayer,
-)
+from caffe2.python.layers.layers import ModelLayer
 
 
 class LastNWindowCollector(ModelLayer):
@@ -29,31 +26,21 @@ class LastNWindowCollector(ModelLayer):
         assert isinstance(input_record, schema.Scalar), \
             "Got {!r}".format(input_record)
 
-        self.last_n = model.net.NextScopedBlob(self.name + "_last_n")
-        self.next_blob = model.net.NextScopedBlob(self.name + "_next")
+        self.last_n = self.create_param(param_name='last_n',
+                                        shape=[0],
+                                        initializer=('ConstantFill', {}),
+                                        optimizer=model.NoOptim)
 
-        self.params.append(LayerParameter(
-            parameter=self.last_n,
-            initializer=core.CreateOperator(
-                'ConstantFill', [], self.last_n, shape=[0]
-            ),
-            optimizer=model.NoOptim,
-        ))
-        self.params.append(LayerParameter(
-            parameter=self.next_blob,
-            initializer=core.CreateOperator(
-                'ConstantFill',
-                [],
-                self.next_blob,
-                shape=[],
-                value=0,
-                dtype=core.DataType.INT32,
-            ),
-            optimizer=model.NoOptim,
-        ))
+        self.next_blob = self.create_param(
+            param_name='next',
+            shape=[],
+            initializer=('ConstantFill',
+                         {'value': 0, 'dtype': core.DataType.INT32}),
+            optimizer=model.NoOptim
+        )
 
         self.output_schema = schema.from_blob_list(
-            input_record, [model.net.NextScopedBlob(name + "_output")])
+            input_record, [self.get_next_blob_reference("output")])
 
     def add_ops(self, net):
         net.LastNWindowCollector(

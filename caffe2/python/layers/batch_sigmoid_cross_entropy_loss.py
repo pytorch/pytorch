@@ -36,7 +36,7 @@ class BatchSigmoidCrossEntropyLoss(ModelLayer):
         self.tags.update([Tags.EXCLUDE_FROM_PREDICTION])
 
         self.output_schema = schema.Scalar(
-            (np.float32, tuple()), model.net.NextScopedBlob(name + '_loss')
+            (np.float32, tuple()), self.get_next_blob_reference('loss')
         )
 
     def add_ops(self, net):

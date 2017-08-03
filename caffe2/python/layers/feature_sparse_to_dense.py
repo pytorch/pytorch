@@ -36,7 +36,7 @@ class FeatureSparseToDense(ModelLayer):
                     field,
                     schema.Scalar(
                         (np.float32, (len(feature_specs.feature_ids), )),
-                        model.net.NextScopedBlob(name + '_' + field + '_output')
+                        self.get_next_blob_reference(field + '_output')
                     )
                 ))
             elif feature_specs.feature_type == 'ID_LIST':
@@ -49,14 +49,14 @@ class FeatureSparseToDense(ModelLayer):
                                     np.int32,
                                     (len(feature_specs.feature_ids), 2)
                                 ),
-                                model.net.NextScopedBlob(
-                                    name + '_' + field + '_ranges')
+                                self.get_next_blob_reference(
+                                    field + '_ranges')
                             ),
                          ),
                         ('values',
                          schema.Scalar(np.int64,
-                                       model.net.NextScopedBlob(
-                                           name + '_' + field + '_values')
+                                       self.get_next_blob_reference(
+                                           field + '_values')
                                        ),
                          )
                     )
@@ -71,20 +71,20 @@ class FeatureSparseToDense(ModelLayer):
                                     np.int32,
                                     (len(feature_specs.feature_ids), 2)
                                 ),
-                                model.net.NextScopedBlob(
-                                    name + '_' + field + '_ranges')
+                                self.get_next_blob_reference(
+                                    field + '_ranges')
                             ),
                          ),
                         ('ids',
                          schema.Scalar(np.int64,
-                                       model.net.NextScopedBlob(
-                                           name + '_' + field + '_ids')
+                                       self.get_next_blob_reference(
+                                           field + '_ids')
                                        ),
                          ),
                         ('scores',
                          schema.Scalar(np.float32,
-                                       model.net.NextScopedBlob(
-                                           name + '_' + field + '_scores')
+                                       self.get_next_blob_reference(
+                                           field + '_scores')
                                        ),
                          )
                     )

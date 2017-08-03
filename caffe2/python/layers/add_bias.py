@@ -5,13 +5,9 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import core, schema
-from caffe2.python.layers.layers import (
-    ModelLayer,
-    LayerParameter
-)
+from caffe2.python import schema
+from caffe2.python.layers.layers import ModelLayer
 import math
-import numpy as np
 
 
 class AddBias(ModelLayer):
@@ -27,27 +23,21 @@ class AddBias(ModelLayer):
         assert input_dims > 0, (
             "AddBias expects input dimensions > 0, got {}".format(input_dims))
 
-        self.output_schema = schema.Scalar(
-            (input_record.field_type().base, (input_dims, )),
-            model.net.NextScopedBlob(name + '_output')
-        )
-
         scale = math.sqrt(1.0 / input_dims)
         bias_init = bias_init if bias_init else (
             'UniformFill', {'min': -scale, 'max': scale})
 
-        self.b = model.net.NextScopedBlob(name + "_b")
+        self.b = self.create_param(
+            param_name='b',
+            shape=[input_dims, ],
+            initializer=bias_init,
+            optimizer=bias_optim,
+        )
 
-        self.params.append(
-            LayerParameter(
-                parameter=self.b,
-                initializer=core.CreateOperator(bias_init[0],
-                                                [],
-                                                self.b,
-                                                shape=[input_dims, ],
-                                                **bias_init[1]
-                                                ),
-                optimizer=bias_optim))
+        self.output_schema = schema.Scalar(
+            (input_record.field_type().base, (input_dims, )),
+            self.get_next_blob_reference('output')
+        )
 
     def add_ops(self, net):
         net.Add(self.input_record.field_blobs() + [self.b],
