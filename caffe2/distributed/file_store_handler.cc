@@ -5,6 +5,7 @@
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/stat.h>
 
 #include <array>
 #include <chrono>
@@ -15,8 +16,31 @@
 
 namespace caffe2 {
 
-FileStoreHandler::FileStoreHandler(std::string& path) {
+static std::string encodeName(const std::string& name) {
+  std::array<uint64_t, 2> out;
+  MurmurHash3_x64_128(name.data(), name.size(), 0xcafef00d, out.data());
+
+  // Size is 33 to have space for final NUL
+  std::array<char, 33> buf;
+  for (int i = 0; i < 16; i++) {
+    snprintf(&buf[i * 2], buf.size() - (i * 2), "%02x", ((char*)out.data())[i]);
+  }
+
+  // Return everything but the final NUL
+  return std::string(buf.data(), buf.size() - 1);
+}
+
+FileStoreHandler::FileStoreHandler(
+    const std::string& path,
+    const std::string& prefix) {
   basePath_ = realPath(path);
+  if (!prefix.empty()) {
+    basePath_ = basePath_ + "/" + encodeName(prefix);
+  }
+  auto ret = mkdir(basePath_.c_str(), 0777);
+  if (ret == -1) {
+    CHECK_EQ(errno, EEXIST) << "mkdir: " << strerror(errno);
+  }
 }
 
 FileStoreHandler::~FileStoreHandler() {}
@@ -31,16 +55,6 @@ std::string FileStoreHandler::realPath(const std::string& path) {
 #endif
   CHECK_EQ(buf.data(), ret) << "realpath: " << strerror(errno);
   return std::string(buf.data());
-}
-
-static std::string encodeName(const std::string& name) {
-  uint64_t out[2];
-  MurmurHash3_x64_128(name.data(), name.size(), 0xcafef00d, &out);
-  std::array<char, 32> buf;
-  for (int i = 0; i < 16; i++) {
-    snprintf(&buf[i * 2], buf.size() - (i * 2), "%02x", ((char*)out)[i]);
-  }
-  return std::string(buf.data(), buf.size());
 }
 
 std::string FileStoreHandler::tmpPath(const std::string& name) {

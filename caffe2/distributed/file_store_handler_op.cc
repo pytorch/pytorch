@@ -18,6 +18,7 @@ cumbersome. Use an ephemeral path to ensure multiple processes or runs
 don't interfere.
 )DOC")
     .Arg("path", "base path used by the FileStoreHandler")
+    .Arg("prefix", "prefix for all keys used by this store")
     .Output(0, "handler", "unique_ptr<StoreHandler>");
 
 NO_GRADIENT(FileStoreHandlerCreateOp);
