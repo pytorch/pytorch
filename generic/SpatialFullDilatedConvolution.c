@@ -30,16 +30,16 @@ static void THNN_(im2col)(const real* data_im, const int channels,
 }
 
 static void THNN_(col2im)(const real* data_col, const int channels,
-      const int height, const int width, const int kernel_h, const int kernel_w,
+      const int height, const int width,
+      const int output_height, const int output_width,
+      const int kernel_h, const int kernel_w,
       const int pad_h, const int pad_w,
       const int stride_h, const int stride_w,
       const int dilation_h, const int dilation_w,
       real* data_im) {
   memset(data_im, 0, sizeof(real) * height * width * channels);
-  const int height_col = (height + 2 * pad_h -
-                          (dilation_h * (kernel_h - 1) + 1)) / stride_h + 1;
-  const int width_col = (width + 2 * pad_w -
-                         (dilation_w * (kernel_w - 1) + 1)) / stride_w + 1;
+  const int height_col = output_height;
+  const int width_col = output_width;
   const int channels_col = channels * kernel_h * kernel_w;
   for (int c_col = 0; c_col < channels_col; ++c_col) {
     int w_offset = c_col % kernel_w;
@@ -67,12 +67,12 @@ static inline void THNN_(SpatialFullDilatedConvolution_shapeCheck)(
              "kernel size should be greater than zero, but got kH: %d kW: %d", kH, kW);
   THArgCheck(dW > 0 && dH > 0, 11,
 	     "stride should be greater than zero, but got dH: %d dW: %d", dH, dW);
-  THArgCheck(adjW < dW && adjH < dH, 15,
-             "output adjustment must be smaller than stride, but got adjH: %d adjW: %d dH: %d dW: %d",
-             adjH, adjW, dH, dW);
   THArgCheck(dilationW > 0 && dilationH > 0, 15,
              "dilation should be greater than zero, but got dilationH: %d, dilationW: %d",
              dilationH, dilationW);
+  THArgCheck((adjW < dW || adjW < dilationW) && (adjH < dH || adjH < dilationH), 15,
+             "output padding must be smaller than either stride or dilation, but got adjH: %d adjW: %d dH: %d dW: %d dilationH: %d dilationW: %d",
+             adjH, adjW, dH, dW, dilationH, dilationW);
   THNN_ARGCHECK(weight->nDimension == 2 || weight->nDimension == 4, 5, weight,
 		"2D or 4D weight tensor expected, but got: %s");
 
@@ -201,7 +201,7 @@ void THNN_(SpatialFullDilatedConvolution_updateOutput)(
     // Unpack columns back into input:
     THNN_(col2im)(
       THTensor_(data)(columns),
-      nOutputPlane, outputHeight, outputWidth, kH, kW, padH, padW, dH, dW,
+      nOutputPlane, outputHeight, outputWidth, inputHeight, inputWidth, kH, kW, padH, padW, dH, dW,
       dilationH, dilationW,
       THTensor_(data)(output_n)
     );
