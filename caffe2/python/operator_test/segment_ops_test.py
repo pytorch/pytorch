@@ -356,11 +356,6 @@ class TestSegmentOps(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [X, Y], [0])
         self.assertGradientChecks(gc, op, [X, Y], 0, [0])
 
-        X = np.random.rand(3, 64).astype(np.float32)
-        Y = np.asarray([20, 20, 10]).astype(np.int32)
-        op = core.CreateOperator("LengthsSumGradient", ["X", "Y"], "out")
-        self.assertDeviceChecks(dc, op, [X, Y], [0])
-
     @given(**hu.gcs)
     def test_sparse_lengths_sum_gpu(self, gc, dc):
         X = np.random.rand(50, 3, 4, 5).astype(np.float32)
@@ -368,13 +363,31 @@ class TestSegmentOps(hu.HypothesisTestCase):
         Z = np.asarray([4, 4, 2]).astype(np.int32)
         op = core.CreateOperator("SparseLengthsSum", ["X", "Y", "Z"], "out")
         self.assertDeviceChecks(dc, op, [X, Y, Z], [0])
-
         self.assertGradientChecks(gc, op, [X, Y, Z], 0, [0])
 
+    @given(**hu.gcs)
+    def test_sparse_lengths_indices_in_gradient_sum_gpu(self, gc, dc):
+        X = np.random.rand(3, 3, 4, 5).astype(np.float32)
+        Y = np.asarray([3, 3, 2]).astype(np.int32)
+        Z = np.random.randint(0, 50, size=8).astype(np.int64)
+        op = core.CreateOperator(
+            "SparseLengthsIndicesInGradientSumGradient", ["X", "Y", "Z"], "out"
+        )
+        self.assertDeviceChecks(dc, op, [X, Y, Z], [0])
+
+    @given(**hu.gcs_cpu_only)
+    def test_legacy_sparse_and_lengths_sum_gradient(self, gc, dc):
         X = np.random.rand(3, 64).astype(np.float32)
         Y = np.asarray([20, 20, 10]).astype(np.int32)
-        op = core.CreateOperator("SparseLengthsSumGradient", ["X", "Y"], "out")
-        self.assertDeviceChecks(dc, op, [X, Y], [0])
+        workspace.FeedBlob("X", X)
+        workspace.FeedBlob("Y", Y)
+        test_net = core.Net("test_net")
+        test_net.SparseLengthsSumGradient(["X", "Y"], "out1")
+        test_net.LengthsSumGradient(["X", "Y"], "out2")
+        workspace.RunNetOnce(test_net)
+        out1 = workspace.FetchBlob("out1")
+        out2 = workspace.FetchBlob("out2")
+        self.assertTrue((out1 == out2).all())
 
 
 if __name__ == "__main__":
