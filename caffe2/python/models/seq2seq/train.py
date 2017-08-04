@@ -214,7 +214,7 @@ class Seq2SeqModelCaffe2:
             workspace.GetNameScope() + 'target_weights',
         )
         attention_type = self.model_params['attention']
-        assert attention_type in ['none', 'regular']
+        assert attention_type in ['none', 'regular', 'dot']
 
         (
             encoder_outputs,
