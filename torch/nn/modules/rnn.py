@@ -135,7 +135,7 @@ class RNNBase(Module):
             hx = torch.autograd.Variable(input.data.new(self.num_layers *
                                                         num_directions,
                                                         max_batch_size,
-                                                        self.hidden_size).zero_())
+                                                        self.hidden_size).zero_(), requires_grad=False)
             if self.mode == 'LSTM':
                 hx = (hx, hx)
 
@@ -181,6 +181,7 @@ class RNNBase(Module):
 
     def __setstate__(self, d):
         super(RNNBase, self).__setstate__(d)
+        self.__dict__.setdefault('_data_ptrs', [])
         if 'all_weights' in d:
             self._all_weights = d['all_weights']
         if isinstance(self._all_weights[0][0], str):
@@ -562,11 +563,11 @@ class LSTMCell(RNNCellBase):
 
     Attributes:
         weight_ih: the learnable input-hidden weights, of shape
-            `(input_size x hidden_size)`
+            `(4*hidden_size x input_size)`
         weight_hh: the learnable hidden-hidden weights, of shape
-            `(hidden_size x hidden_size)`
-        bias_ih: the learnable input-hidden bias, of shape `(hidden_size)`
-        bias_hh: the learnable hidden-hidden bias, of shape `(hidden_size)`
+            `(4*hidden_size x hidden_size)`
+        bias_ih: the learnable input-hidden bias, of shape `(4*hidden_size)`
+        bias_hh: the learnable hidden-hidden bias, of shape `(4*hidden_size)`
 
     Examples::
 
@@ -637,11 +638,11 @@ class GRUCell(RNNCellBase):
 
     Attributes:
         weight_ih: the learnable input-hidden weights, of shape
-            `(input_size x hidden_size)`
+            `(3*hidden_size x input_size)`
         weight_hh: the learnable hidden-hidden weights, of shape
-            `(hidden_size x hidden_size)`
-        bias_ih: the learnable input-hidden bias, of shape `(hidden_size)`
-        bias_hh: the learnable hidden-hidden bias, of shape `(hidden_size)`
+            `(3*hidden_size x hidden_size)`
+        bias_ih: the learnable input-hidden bias, of shape `(3*hidden_size)`
+        bias_hh: the learnable hidden-hidden bias, of shape `(3*hidden_size)`
 
     Examples::
 

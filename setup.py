@@ -282,7 +282,8 @@ if platform.system() == 'Darwin':
     THD_LIB = os.path.join(lib_path, 'libTHD.1.dylib')
     NCCL_LIB = os.path.join(lib_path, 'libnccl.1.dylib')
 
-if WITH_NCCL and subprocess.call('ldconfig -p | grep libnccl >/dev/null', shell=True) == 0:
+if WITH_NCCL and (subprocess.call('ldconfig -p | grep libnccl >/dev/null', shell=True) == 0 or
+                  subprocess.call('/sbin/ldconfig -p | grep libnccl >/dev/null', shell=True) == 0):
         SYSTEM_NCCL = True
 
 main_compile_args = ['-D_THP_CORE']
