@@ -102,56 +102,6 @@ static void THTensor_(random1__)(THTensor *self, THGenerator *gen, long b)
       default: 1
 ]]
 
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-static void THTensor_(normal_means)(THTensor *self, THGenerator *gen, THTensor *means, double stddev)
-{
-  THTensor_(resizeAs)(self, means);
-  THTensor_(normal)(self, gen, 0, stddev);
-  THTensor_(cadd)(self, self, 1, means);
-}
-
-static void THTensor_(normal_stddevs)(THTensor *self, THGenerator *gen, double mean, THTensor *stddevs)
-{
-  THTensor_(resizeAs)(self, stddevs);
-  THTensor_(normal)(self, gen, 0, 1);
-  THTensor_(cmul)(self, self, stddevs);
-  THTensor_(add)(self, self, mean);
-}
-
-static void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, THTensor *means, THTensor *stddevs)
-{
-  THTensor_(resizeAs)(self, means);
-  THTensor_(normal)(self, gen, 0, 1);
-  THTensor_(cmul)(self, self, stddevs);
-  THTensor_(cadd)(self, self, 1, means);
-}
-#endif
-
-#if CUDA_FLOAT || CUDA_DOUBLE || CUDA_HALF
-static void THTensor_(normal_means)(THCState *_, THTensor *self, THTensor *means, double stddev)
-{
-  THTensor_(resizeAs)(LIBRARY_STATE self, means);
-  THTensor_(normal)(LIBRARY_STATE self, 0, stddev);
-  THTensor_(cadd)(LIBRARY_STATE self, self, AS_REAL(1), means);
-}
-
-static void THTensor_(normal_stddevs)(THCState *_, THTensor *self, double mean, THTensor *stddevs)
-{
-  THTensor_(resizeAs)(LIBRARY_STATE self, stddevs);
-  THTensor_(normal)(LIBRARY_STATE self, 0, 1);
-  THTensor_(cmul)(LIBRARY_STATE self, self, stddevs);
-  THTensor_(add)(LIBRARY_STATE self, self, AS_REAL(mean));
-}
-
-static void THTensor_(normal_means_stddevs)(THCState *_, THTensor *self, THTensor *means, THTensor *stddevs)
-{
-  THTensor_(resizeAs)(LIBRARY_STATE self, means);
-  THTensor_(normal)(LIBRARY_STATE self, 0, 1);
-  THTensor_(cmul)(LIBRARY_STATE self, self, stddevs);
-  THTensor_(cadd)(LIBRARY_STATE self, self, AS_REAL(1), means);
-}
-#endif
-
 [[
   name: normal
   types:
