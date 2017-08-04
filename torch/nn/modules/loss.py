@@ -436,7 +436,7 @@ class CrossEntropyLoss(_WeightedLoss):
     `input` has to be a 2D `Tensor` of size `batch x n`.
 
     This criterion expects a class index (0 to nClasses-1) as the
-    `target` for each value of a 1D tensor of size `n`
+    `target` for each value of a 1D tensor of size `batch`
 
     The loss can be described as::
 
