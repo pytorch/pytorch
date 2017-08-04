@@ -1,3 +1,4 @@
+#include <Python.h>
 #include <iostream>
 #ifdef WITH_CUDA
 #include "torch/csrc/jit/fusion_compiler.h"
