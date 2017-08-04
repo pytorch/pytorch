@@ -1,6 +1,7 @@
 **IMPORTANT NOTE**
 
 **NCCL1 is no longer maintained/updated and has been replaced by NCCL2, available at**
+
 **http://developer.nvidia.com/nccl.**
 
 # NCCL
