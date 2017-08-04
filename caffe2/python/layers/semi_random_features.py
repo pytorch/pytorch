@@ -43,7 +43,7 @@ class SemiRandomFeatures(ArcCosineFeatureMap):
             model,
             input_record,
             output_dims,
-            s=0,
+            s=1,
             scale=None,
             weight_init=None,
             bias_init=None,
