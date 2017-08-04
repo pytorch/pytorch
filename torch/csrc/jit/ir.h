@@ -73,7 +73,7 @@ public:
     return nullptr;
   }
 
-  std::unique_ptr<Type> clone();
+  std::unique_ptr<Type> clone() const;
 
   static std::unique_ptr<Type> newWithKind(TypeKind kind);
 };
@@ -101,10 +101,10 @@ public:
     std::copy(tensor.strides().begin(), tensor.strides().end(), strides_.begin());
   }
 
-  const std::vector<std::int64_t>& sizes() {
+  const std::vector<std::int64_t>& sizes() const {
     return sizes_;
   }
-  const std::vector<std::int64_t>& strides() {
+  const std::vector<std::int64_t>& strides() const {
     return strides_;
   }
 };
@@ -162,11 +162,11 @@ inline std::unique_ptr<Type> Type::newWithKind(TypeKind kind) {
   __builtin_unreachable();
 }
 
-inline std::unique_ptr<Type> Type::clone() {
+inline std::unique_ptr<Type> Type::clone() const {
 #define HANDLE_KIND(KIND) \
   case TypeKind::KIND:    \
     return std::unique_ptr<Type>(static_cast<Type*>( \
-          new KIND##Type(*(static_cast<KIND##Type*>(this)))));
+          new KIND##Type(*(static_cast<const KIND##Type*>(this)))));
   switch (kind_) {
     TH_FORALL_TYPES(HANDLE_KIND)
   }
@@ -247,14 +247,18 @@ public:
   NodeKind kind() {
     return kind_;
   }
+  // The returned Type is live ONLY as long as it is the
+  // Type for this node; e.g., setType() will invalidate any
+  // old type() references.  This makes me nervous; see
+  // https://github.com/ezyang/pytorch/issues/52
   const Type* type() const {
     return type_.get();
   }
   bool hasMultipleOutputs() const {
     return type()->kind() == TypeKind::Multi;
   }
-  void setType(TypeKind type_kind) {
-    type_ = std::move(Type::newWithKind(type_kind));
+  void setType(const Type* type) {
+    type_ = std::move(type->clone());
   }
   void inferTypeFrom(const at::Tensor& output) {
     auto single_type = type_->cast<TensorType>();
@@ -728,21 +732,35 @@ Node * NodeWithKind<Self,K,T>::allocClone(Graph * in_graph) {
 // read 'between' these defines to see how they turn into a big switch
 // statement
 
-#define IR_IF(x,Kind) \
+// TODO: I'm pretty sure Constness can be done with C++ templates, ala
+// std::is_const, but no time to work it out...
+#define GENERIC_IF(Constness, Suffix, KindClass, x, Kind) \
   auto && __match_key = x; \
   switch(__match_key->kind()) { \
-    case NodeKind::Kind: { \
-      auto * value = static_cast<::torch::jit::Kind*>(__match_key); (void) value;
-#define IR_ELSEIF(Kind) \
+    case KindClass::Kind: { \
+      auto * value = static_cast<Constness ::torch::jit::Kind##Suffix*>(__match_key); (void) value;
+#define GENERIC_ELSEIF(Constness, Suffix, KindClass, Kind) \
     } break; \
-    case NodeKind::Kind: { \
-      auto * value = static_cast<::torch::jit::Kind*>(__match_key); (void) value;
-#define IR_ELSE() \
+    case KindClass::Kind: { \
+      auto * value = static_cast<Constness ::torch::jit::Kind##Suffix*>(__match_key); (void) value;
+#define GENERIC_ELSE() \
     } break; \
     default: {
-#define IR_END() \
+#define GENERIC_END() \
     } break; \
   };
+
+// Mutable case
+#define IR_IF(x,Kind) GENERIC_IF(,,NodeKind,x,Kind)
+#define IR_ELSEIF(Kind) GENERIC_ELSEIF(,,NodeKind,Kind)
+#define IR_ELSE() GENERIC_ELSE()
+#define IR_END() GENERIC_END()
+
+// Immutable case
+#define TYPE_IF(x,Kind) GENERIC_IF(const,Type,TypeKind,x,Kind)
+#define TYPE_ELSEIF(Kind) GENERIC_ELSEIF(const,Type,TypeKind,Kind)
+#define TYPE_ELSE() GENERIC_ELSE()
+#define TYPE_END() GENERIC_END()
 
 /* example:
   Node * n = ...;

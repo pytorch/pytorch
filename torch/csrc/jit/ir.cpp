@@ -64,8 +64,45 @@ static void emitUses(std::ostream & out, Node * n) {
   }
 }
 
+std::ostream& operator<<(std::ostream & out, const Type & t) {
+  TYPE_IF(&t, Multi)
+    out << "Multi";
+  TYPE_ELSEIF(Handle)
+    out << "Handle";
+  TYPE_ELSEIF(Tensor)
+    out << "(";
+    auto& sizes = value->sizes();
+    auto& strides = value->strides();
+    JIT_ASSERT(sizes.size() == strides.size());
+    for (size_t i = 0; i < sizes.size(); i++) {
+      if (i > 0) {
+        out << ", ";
+      }
+      // TODO: figure out a good way to output strides, or
+      // add a "debug" printing mode which adds the extra stuff
+      out << sizes[i]; // << "%" << strides[i];
+    }
+    out << ")";
+  TYPE_END()
+  return out;
+}
+
+struct node_list_with_types {
+  const node_list& nodes;
+  node_list_with_types(const node_list& nodes) : nodes(nodes) {}
+};
+std::ostream& operator<<(std::ostream & out, node_list_with_types l) {
+  size_t i = 0;
+  for(auto n : l.nodes) {
+    if(i++ > 0)
+      out << ", ";
+    out << *n << " : " << *n->type();
+  }
+  return out;
+}
+
 std::ostream& operator<<(std::ostream & out, Graph & g) {
-  out << "graph(" << g.inputs() << ") {\n";
+  out << "graph(" << node_list_with_types(g.inputs()) << ") {\n";
   std::vector<FusionGroup*> groups;
   size_t prev_stage = 0;
   for(auto n : g.nodes()) {
@@ -79,7 +116,7 @@ std::ostream& operator<<(std::ostream & out, Graph & g) {
         node_list selects;
         for (auto u : n->uses())
           selects.push_back(u.user);
-        out << selects;
+        out << node_list_with_types(selects);
       } else {
         out << "%" << n->unique();
       }
