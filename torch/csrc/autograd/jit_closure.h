@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Python.h>
 #include <memory>
 
 #include "torch/csrc/jit/ir.h"
