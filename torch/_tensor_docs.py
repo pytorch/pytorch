@@ -1115,9 +1115,9 @@ add_docstr_all('random_',
                """
 random_(from=0, to=None, *, generator=None)
 
-Fills this tensor with numbers sampled from the uniform distribution or
-discrete uniform distribution over [from, to - 1]. If not specified, the
-values are only bounded by this tensor's data type.
+Fills this tensor with numbers sampled from the discrete uniform distribution
+over [from, to - 1]. If not specified, the values are only bounded by this
+tensor's data type.
 """)
 
 add_docstr_all('reciprocal',
