@@ -226,6 +226,10 @@ class clean(distutils.command.clean.clean):
 ################################################################################
 
 include_dirs = []
+
+if os.getenv('CONDA_PREFIX'):
+    include_dirs.append(os.path.join(os.getenv('CONDA_PREFIX'), "include"))
+
 library_dirs = []
 extra_link_args = []
 extra_compile_args = ['-std=c++11', '-Wno-write-strings',
