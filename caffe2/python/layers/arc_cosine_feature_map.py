@@ -3,7 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import core, schema
+from caffe2.python import schema
 from caffe2.python.layers.layers import ModelLayer
 
 import numpy as np
@@ -39,7 +39,7 @@ class ArcCosineFeatureMap(ModelLayer):
             model,
             input_record,
             output_dims,
-            s=0,
+            s=1,
             scale=None,
             weight_init=None,
             bias_init=None,
@@ -156,14 +156,9 @@ class ArcCosineFeatureMap(ModelLayer):
             s -- degree to raise the transformed features
         """
         if s == 0:
-            # Apply Heaviside step function to random features
-            ZEROS = self.model.global_constants['ZERO']
-            bool_vec = net.GT([input_features, ZEROS],
-                              net.NextScopedBlob('bool_vec'),
-                              broadcast=1)
-            return net.Cast(bool_vec,
-                            output_blob,
-                            to=core.DataType.FLOAT)
+            softsign_features = net.Softsign([input_features],
+                                             net.NextScopedBlob('softsign'))
+            return net.Relu(softsign_features, output_blob)
         elif s == 1:
             return net.Relu([input_features],
                             output_blob)

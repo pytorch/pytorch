@@ -911,7 +911,14 @@ class TestLayers(LayersTestCase):
             # Computing output directly
             x_rand = np.matmul(X, np.transpose(W)) + b
             x_pow = np.power(x_rand, s)
-            h_rand_features = np.piecewise(x_rand, [x_rand <= 0, x_rand > 0], [0, 1])
+            if s > 0:
+                h_rand_features = np.piecewise(x_rand,
+                                               [x_rand <= 0, x_rand > 0],
+                                               [0, 1])
+            else:
+                h_rand_features = np.piecewise(x_rand,
+                                               [x_rand <= 0, x_rand > 0],
+                                               [0, lambda x: x / (1 + x)])
             output_ref = np.multiply(x_pow, h_rand_features)
 
             # Comparing net output and computed output
@@ -954,8 +961,7 @@ class TestLayers(LayersTestCase):
 
         # Operation specifications
         fc_spec = OpSpec("FC", [input_blob, None, None], None)
-        gt_spec = OpSpec("GT", None, None, {'broadcast': 1})
-        cast_spec = OpSpec("Cast", None, ac_output.field_blobs())
+        softsign_spec = OpSpec("Softsign", None, None)
         relu_spec = OpSpec("Relu", None, None)
         relu_spec_output = OpSpec("Relu", None, ac_output.field_blobs())
         pow_spec = OpSpec("Pow", None, None, {'exponent': float(s - 1)})
@@ -964,16 +970,14 @@ class TestLayers(LayersTestCase):
         if s == 0:
             ops_list = [
                 fc_spec,
-                gt_spec,
-                cast_spec,
+                softsign_spec,
+                relu_spec_output,
             ]
-
         elif s == 1:
             ops_list = [
                 fc_spec,
                 relu_spec_output,
             ]
-
         else:
             ops_list = [
                 fc_spec,
@@ -1033,7 +1037,14 @@ class TestLayers(LayersTestCase):
             x_rand = np.matmul(X_random, np.transpose(rand_w)) + rand_b
             x_learn = np.matmul(X_full, np.transpose(learned_w)) + learned_b
             x_pow = np.power(x_rand, s)
-            h_rand_features = np.piecewise(x_rand, [x_rand <= 0, x_rand > 0], [0, 1])
+            if s > 0:
+                h_rand_features = np.piecewise(x_rand,
+                                               [x_rand <= 0, x_rand > 0],
+                                               [0, 1])
+            else:
+                h_rand_features = np.piecewise(x_rand,
+                                               [x_rand <= 0, x_rand > 0],
+                                               [0, lambda x: x / (1 + x)])
             output_ref = np.multiply(np.multiply(x_pow, h_rand_features), x_learn)
 
             # Comparing net output and computed output
@@ -1118,30 +1129,28 @@ class TestLayers(LayersTestCase):
             fc_learned_spec = OpSpec("FC", [None, init_ops[2].output[0],
                                      init_ops[3].output[0]], None)
 
-        gt_spec = OpSpec("GT", None, None)
-        cast_spec = OpSpec("Cast", None, srf_output.random.field_blobs())
+        softsign_spec = OpSpec("Softsign", None, None)
         relu_spec = OpSpec("Relu", None, None)
+        relu_output_spec = OpSpec("Relu", None, srf_output.random.field_blobs())
         pow_spec = OpSpec("Pow", None, None, {'exponent': float(s - 1)})
-        mul_interim_spec = OpSpec("Mul", None, None)
+        mul_interim_spec = OpSpec("Mul", None, srf_output.random.field_blobs())
         mul_spec = OpSpec("Mul", None, srf_output.full.field_blobs())
 
         if s == 0:
             ops_list = [
                 fc_learned_spec,
                 fc_random_spec,
-                gt_spec,
-                cast_spec,
+                softsign_spec,
+                relu_output_spec,
                 mul_spec,
             ]
-
         elif s == 1:
             ops_list = [
                 fc_learned_spec,
                 fc_random_spec,
-                relu_spec,
+                relu_output_spec,
                 mul_spec,
             ]
-
         else:
             ops_list = [
                 fc_learned_spec,
