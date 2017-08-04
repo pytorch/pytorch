@@ -7,12 +7,13 @@
 #include "caffe2/core/blob_serialization.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/context.h"
+#include "caffe2/core/db.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/qtensor.h"
+#include "caffe2/core/qtensor_serialization.h"
 #include "caffe2/core/registry.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/core/types.h"
-#include "caffe2/core/utils_test.h"
 #include "caffe2/core/workspace.h"
 #include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/utils/proto_utils.h"
@@ -636,6 +637,71 @@ TEST(QTensorTest, QTensorSerialization) {
     }
   }
 }
+
+using StringMap = std::vector<std::pair<string, string>>;
+
+class VectorCursor : public db::Cursor {
+ public:
+  explicit VectorCursor(StringMap* data) : data_(data) {
+    pos_ = 0;
+  }
+  ~VectorCursor() {}
+  void Seek(const string& /* unused */) override {}
+  void SeekToFirst() override {}
+  void Next() override {
+    ++pos_;
+  }
+  string key() override {
+    return (*data_)[pos_].first;
+  }
+  string value() override {
+    return (*data_)[pos_].second;
+  }
+  bool Valid() override {
+    return pos_ < data_->size();
+  }
+
+ private:
+  StringMap* data_ = nullptr;
+  size_t pos_ = 0;
+};
+
+class VectorDB : public db::DB {
+ public:
+  VectorDB(const string& source, db::Mode mode)
+      : DB(source, mode), name_(source) {}
+  ~VectorDB() {
+    data_.erase(name_);
+  }
+  void Close() override {}
+  std::unique_ptr<db::Cursor> NewCursor() override {
+    return make_unique<VectorCursor>(getData());
+  }
+  std::unique_ptr<db::Transaction> NewTransaction() override {
+    CAFFE_THROW("Not implemented");
+  }
+  static void registerData(const string& name, StringMap&& data) {
+    std::lock_guard<std::mutex> guard(dataRegistryMutex_);
+    data_[name] = std::move(data);
+  }
+
+ private:
+  StringMap* getData() {
+    auto it = data_.find(name_);
+    CAFFE_ENFORCE(it != data_.end(), "Can't find ", name_);
+    return &(it->second);
+  }
+
+ private:
+  string name_;
+  static std::mutex dataRegistryMutex_;
+  static std::map<string, StringMap> data_;
+};
+
+std::mutex VectorDB::dataRegistryMutex_;
+std::map<string, StringMap> VectorDB::data_;
+
+REGISTER_CAFFE2_DB(vector_db, VectorDB);
 
 template <typename TypeParam>
 class TypedTensorTest : public ::testing::Test {};
