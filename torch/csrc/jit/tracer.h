@@ -127,6 +127,7 @@ inline std::shared_ptr<TracingState> enter(const variable_list& inputs) {
     JIT_ASSERT(input->tracing_state.state.expired());
     input->tracing_state.state = state;
     input->tracing_state.trace = state->graph->addInput();
+    input->tracing_state.trace->inferTypeFrom(input->data);
   }
   state->active = true;
   // TODO: register exit hooks!
