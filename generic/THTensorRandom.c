@@ -55,6 +55,29 @@ void THTensor_(normal)(THTensor *self, THGenerator *_generator, double mean, dou
   TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_normal(_generator, mean, stdv););
 }
 
+void THTensor_(normal_means)(THTensor *self, THGenerator *gen, THTensor *means, double stddev)
+{
+  THTensor_(resizeAs)(self, means);
+  THTensor_(normal)(self, gen, 0, stddev);
+  THTensor_(cadd)(self, self, 1, means);
+}
+
+void THTensor_(normal_stddevs)(THTensor *self, THGenerator *gen, double mean, THTensor *stddevs)
+{
+  THTensor_(resizeAs)(self, stddevs);
+  THTensor_(normal)(self, gen, 0, 1);
+  THTensor_(cmul)(self, self, stddevs);
+  THTensor_(add)(self, self, mean);
+}
+
+void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, THTensor *means, THTensor *stddevs)
+{
+  THTensor_(resizeAs)(self, means);
+  THTensor_(normal)(self, gen, 0, 1);
+  THTensor_(cmul)(self, self, stddevs);
+  THTensor_(cadd)(self, self, 1, means);
+}
+
 void THTensor_(exponential)(THTensor *self, THGenerator *_generator, double lambda)
 {
   TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_exponential(_generator, lambda););
