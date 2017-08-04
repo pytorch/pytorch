@@ -18,6 +18,7 @@ from caffe2.python.attention import (
     AttentionType,
     apply_regular_attention,
     apply_recurrent_attention,
+    apply_dot_attention,
 )
 from caffe2.python import core, recurrent, workspace, brew, scope
 from caffe2.python.modeling.parameter_sharing import ParameterSharing
@@ -651,6 +652,7 @@ class AttentionCell(RNNCell):
         assert attention_type in [
             AttentionType.Regular,
             AttentionType.Recurrent,
+            AttentionType.Dot,
         ]
         self.attention_type = attention_type
         self.attention_memory_optimization = attention_memory_optimization
@@ -704,7 +706,7 @@ class AttentionCell(RNNCell):
                 ),
                 encoder_lengths=self.encoder_lengths,
             )
-        else:
+        elif self.attention_type == AttentionType.Regular:
             (
                 attention_weighted_encoder_context_t,
                 self.attention_weights_3d,
@@ -719,6 +721,24 @@ class AttentionCell(RNNCell):
                 scope=self.name,
                 encoder_lengths=self.encoder_lengths,
             )
+        elif self.attention_type == AttentionType.Dot:
+            (
+                attention_weighted_encoder_context_t,
+                self.attention_weights_3d,
+                attention_blobs,
+            ) = apply_dot_attention(
+                model=model,
+                encoder_output_dim=self.encoder_output_dim,
+                encoder_outputs_transposed=self.encoder_outputs_transposed,
+                decoder_hidden_state_t=self.hidden_t_intermediate,
+                decoder_hidden_state_dim=self.decoder_state_dim,
+                scope=self.name,
+                encoder_lengths=self.encoder_lengths,
+            )
+        else:
+            raise Exception('Attention type {} not implemented'.format(
+                self.attention_type
+            ))
 
         if self.attention_memory_optimization:
             self.recompute_blobs.extend(attention_blobs)
@@ -744,7 +764,10 @@ class AttentionCell(RNNCell):
                 self.scope('encoder_outputs_transposed'),
                 axes=[1, 2, 0],
             )
-        if self.weighted_encoder_outputs is None:
+        if (
+            self.weighted_encoder_outputs is None and
+            self.attention_type != AttentionType.Dot
+        ):
             self.weighted_encoder_outputs = brew.fc(
                 model,
                 self.encoder_outputs,
