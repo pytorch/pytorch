@@ -118,6 +118,7 @@ include_directories(BEFORE ${PROJECT_BINARY_DIR})
 
 # ---[ Third party builds.
 include_directories(${PROJECT_SOURCE_DIR})
+include_directories(${PROJECT_SOURCE_DIR}/build_host_protoc/include)
 
 # ---[ Old caffe protobuf.
 add_subdirectory(caffe/proto)
