@@ -41,9 +41,9 @@ struct Graph;
 struct Node;
 
 #define TH_FORALL_TYPES(_) \
-_(Multi) \
-_(Tensor) \
-_(Handle)
+_(MultiType) \
+_(TensorType) \
+_(HandleType)
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -87,10 +87,10 @@ private:
   std::vector<std::int64_t> strides_;
 
   TensorType()
-    : Type(TypeKind::Tensor) {}
+    : Type(TypeKind::TensorType) {}
 
 public:
-  static const TypeKind Kind = TypeKind::Tensor;
+  static const TypeKind Kind = TypeKind::TensorType;
 
   void inferFrom(const at::Tensor& tensor) {
     auto ndim = tensor.dim();
@@ -116,10 +116,10 @@ private:
   friend struct Type;
 
   MultiType()
-    : Type(TypeKind::Multi) {}
+    : Type(TypeKind::MultiType) {}
 
 public:
-  static const TypeKind Kind = TypeKind::Multi;
+  static const TypeKind Kind = TypeKind::MultiType;
 };
 
 // This value represents an opaque handle to external state.
@@ -144,10 +144,10 @@ private:
   friend struct Type;
 
   HandleType()
-    : Type(TypeKind::Handle) {}
+    : Type(TypeKind::HandleType) {}
 
 public:
-  static const TypeKind Kind = TypeKind::Handle;
+  static const TypeKind Kind = TypeKind::HandleType;
 };
 
 
@@ -155,7 +155,7 @@ inline std::unique_ptr<Type> Type::newWithKind(TypeKind kind) {
   switch (kind) {
 #define HANDLE_KIND(KIND) \
   case TypeKind::KIND:    \
-    return std::unique_ptr<Type>(static_cast<Type*>(new KIND##Type()));
+    return std::unique_ptr<Type>(static_cast<Type*>(new KIND()));
     TH_FORALL_TYPES(HANDLE_KIND)
   }
 #undef HANDLE_KIND
@@ -166,7 +166,7 @@ inline std::unique_ptr<Type> Type::clone() const {
 #define HANDLE_KIND(KIND) \
   case TypeKind::KIND:    \
     return std::unique_ptr<Type>(static_cast<Type*>( \
-          new KIND##Type(*(static_cast<const KIND##Type*>(this)))));
+          new KIND(*(static_cast<const KIND*>(this)))));
   switch (kind_) {
     TH_FORALL_TYPES(HANDLE_KIND)
   }
@@ -255,7 +255,7 @@ public:
     return type_.get();
   }
   bool hasMultipleOutputs() const {
-    return type()->kind() == TypeKind::Multi;
+    return type()->kind() == TypeKind::MultiType;
   }
   void setType(const Type* type) {
     type_ = std::move(type->clone());
@@ -544,7 +544,7 @@ protected:
 
 // helper to define simple primitive Ops.
 template<typename Self, NodeKind K>
-struct Primitive : public NodeWithKind<Self, K, TypeKind::Tensor> {
+struct Primitive : public NodeWithKind<Self, K, TypeKind::TensorType> {
   void init() {}
   void init(ArrayRef<Node*> inputs) {
     for(auto i : inputs)
@@ -557,7 +557,7 @@ struct Primitive : public NodeWithKind<Self, K, TypeKind::Tensor> {
 struct Return : public Primitive<Return, NodeKind::Return> {};
 
 // an input tensor to the graph
-struct Param : public NodeWithKind<Param, NodeKind::Param, TypeKind::Tensor> {
+struct Param : public NodeWithKind<Param, NodeKind::Param, TypeKind::TensorType> {
   void init() {}
 };
 
@@ -734,15 +734,15 @@ Node * NodeWithKind<Self,K,T>::allocClone(Graph * in_graph) {
 
 // TODO: I'm pretty sure Constness can be done with C++ templates, ala
 // std::is_const, but no time to work it out...
-#define GENERIC_IF(Constness, Suffix, KindClass, x, Kind) \
+#define GENERIC_IF(Constness, KindClass, x, Kind) \
   auto && __match_key = x; \
   switch(__match_key->kind()) { \
     case KindClass::Kind: { \
-      auto * value = static_cast<Constness ::torch::jit::Kind##Suffix*>(__match_key); (void) value;
-#define GENERIC_ELSEIF(Constness, Suffix, KindClass, Kind) \
+      auto * value = static_cast<Constness ::torch::jit::Kind*>(__match_key); (void) value;
+#define GENERIC_ELSEIF(Constness, KindClass, Kind) \
     } break; \
     case KindClass::Kind: { \
-      auto * value = static_cast<Constness ::torch::jit::Kind##Suffix*>(__match_key); (void) value;
+      auto * value = static_cast<Constness ::torch::jit::Kind*>(__match_key); (void) value;
 #define GENERIC_ELSE() \
     } break; \
     default: {
@@ -751,14 +751,14 @@ Node * NodeWithKind<Self,K,T>::allocClone(Graph * in_graph) {
   };
 
 // Mutable case
-#define IR_IF(x,Kind) GENERIC_IF(,,NodeKind,x,Kind)
-#define IR_ELSEIF(Kind) GENERIC_ELSEIF(,,NodeKind,Kind)
+#define IR_IF(x,Kind) GENERIC_IF(,NodeKind,x,Kind)
+#define IR_ELSEIF(Kind) GENERIC_ELSEIF(,NodeKind,Kind)
 #define IR_ELSE() GENERIC_ELSE()
 #define IR_END() GENERIC_END()
 
 // Immutable case
-#define TYPE_IF(x,Kind) GENERIC_IF(const,Type,TypeKind,x,Kind)
-#define TYPE_ELSEIF(Kind) GENERIC_ELSEIF(const,Type,TypeKind,Kind)
+#define TYPE_IF(x,Kind) GENERIC_IF(const,TypeKind,x,Kind)
+#define TYPE_ELSEIF(Kind) GENERIC_ELSEIF(const,TypeKind,Kind)
 #define TYPE_ELSE() GENERIC_ELSE()
 #define TYPE_END() GENERIC_END()
 
@@ -792,7 +792,7 @@ static inline const char * toString(NodeKind kind) {
 /************* All nodes not required to be defined before Graph **************/
 
  // execute a Python function, used for Ops we can't optimize but that we want to optimize around
-struct PythonOp : public NodeWithKind<PythonOp,NodeKind::PythonOp,TypeKind::Multi> {
+struct PythonOp : public NodeWithKind<PythonOp,NodeKind::PythonOp,TypeKind::MultiType> {
   //TODO: make this non-autograd specific
   //remove is_legacy, avoid THPObjectPtr to avoid big PyTorch dependency
 
@@ -829,7 +829,7 @@ struct PythonOp : public NodeWithKind<PythonOp,NodeKind::PythonOp,TypeKind::Mult
 
 // A Cpp operator is an operator which dispatches directly to an autograd function.
 // TODO: These are not executable without reentrant engine.
-struct CppOp : public NodeWithKind<CppOp,NodeKind::CppOp,TypeKind::Multi> {
+struct CppOp : public NodeWithKind<CppOp,NodeKind::CppOp,TypeKind::MultiType> {
   std::shared_ptr<torch::autograd::Function> fn;
 
   std::string name();
@@ -846,7 +846,7 @@ struct CppOp : public NodeWithKind<CppOp,NodeKind::CppOp,TypeKind::Multi> {
 // in this case
 // number_of_outputs = op.uses().size()
 // this will change if Tuples ever become first class.
-struct Select : public NodeWithKind<Select,NodeKind::Select,TypeKind::Tensor> {
+struct Select : public NodeWithKind<Select,NodeKind::Select,TypeKind::TensorType> {
   void init(Node * node, size_t offset) {
     addInput(node);
     this->offset_ = offset;
@@ -875,7 +875,7 @@ struct Negate : public Primitive<Negate,NodeKind::Negate> {};
 struct Sigmoid : public Primitive<Sigmoid,NodeKind::Sigmoid> {};
 struct Tanh : public Primitive<Tanh,NodeKind::Tanh> {};
 
-struct Chunk : public NodeWithKind<Chunk, NodeKind::Chunk, TypeKind::Multi> {
+struct Chunk : public NodeWithKind<Chunk, NodeKind::Chunk, TypeKind::MultiType> {
   void init(int64_t num_chunks_, int64_t dim_) {
     num_chunks = num_chunks_;
     dim = dim_;
@@ -889,7 +889,7 @@ struct Chunk : public NodeWithKind<Chunk, NodeKind::Chunk, TypeKind::Multi> {
 
 // A tensor constant
 // TODO: constant compression
-struct Constant : public NodeWithKind<Constant, NodeKind::Constant,TypeKind::Tensor> {
+struct Constant : public NodeWithKind<Constant, NodeKind::Constant,TypeKind::TensorType> {
   void init(const at::Tensor& ref) {
     AutoGPU guard(ref.type().isCuda() ? ref.get_device() : -1);
     value = ref.clone();
@@ -898,7 +898,7 @@ struct Constant : public NodeWithKind<Constant, NodeKind::Constant,TypeKind::Ten
   at::Tensor value;
 };
 
-struct FusionGroup : public NodeWithKind<FusionGroup,NodeKind::FusionGroup,TypeKind::Multi> {
+struct FusionGroup : public NodeWithKind<FusionGroup,NodeKind::FusionGroup,TypeKind::MultiType> {
   void init() {
     subgraph_ = std::make_shared<Graph>();
   }
