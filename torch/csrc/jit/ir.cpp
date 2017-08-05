@@ -65,11 +65,11 @@ static void emitUses(std::ostream & out, Node * n) {
 }
 
 std::ostream& operator<<(std::ostream & out, const Type & t) {
-  TYPE_IF(&t, Multi)
+  TYPE_IF(&t, MultiType)
     out << "Multi";
-  TYPE_ELSEIF(Handle)
+  TYPE_ELSEIF(HandleType)
     out << "Handle";
-  TYPE_ELSEIF(Tensor)
+  TYPE_ELSEIF(TensorType)
     out << "(";
     auto& sizes = value->sizes();
     auto& strides = value->strides();
@@ -112,7 +112,7 @@ std::ostream& operator<<(std::ostream & out, Graph & g) {
         prev_stage = n->stage();
       }
       out << "  ";
-      if (n->type()->kind() == TypeKind::Multi) {
+      if (n->type()->kind() == TypeKind::MultiType) {
         node_list selects;
         for (auto u : n->uses())
           selects.push_back(u.user);
@@ -140,7 +140,7 @@ std::ostream& operator<<(std::ostream & out, Graph & g) {
         out << toString(n->kind());
       IR_END()
       out << "(" << n->inputs() << "), uses = [";
-      if(n->type()->kind() == TypeKind::Multi) {
+      if(n->type()->kind() == TypeKind::MultiType) {
         size_t i = 0;
         for(auto u : n->uses()) {
           if(i++ > 0)
@@ -206,7 +206,7 @@ void Node::lint() {
       // Select invariant
       // - Multi-return nodes only have select uses
       // - uses = [Select 0, Select 1, Select 2, ...]
-      if (type_->kind() == TypeKind::Multi) {
+      if (type_->kind() == TypeKind::MultiType) {
         JIT_ASSERT(use.offset == 0);
         IR_IF(use.user, Select)
           JIT_ASSERT(value->offset() == i);
