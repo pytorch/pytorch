@@ -700,15 +700,13 @@ class FractionalMaxPool2d(Module):
                              "an output size, or a pooling ratio")
 
     def forward(self, input):
-        kwargs = {}
+        output_size, output_ratio = None, None
         if self.outh is not None:
-            kwargs['output_size'] = self.outh, self.outw
+            output_size = self.outh, self.outw
         else:
-            kwargs['output_ratio'] = self.rh, self.rw
-        func = self._backend.FractionalMaxPool2d(self.kw, self.kh,
-                                                 return_indices=self.return_indices,
-                                                 _random_samples=self._random_samples, **kwargs)
-        return func(input)
+            output_ratio = self.rh, self.rw
+        return self._backend.FractionalMaxPool2d.apply(input, self.kw, self.kh, output_size, output_ratio,
+                                                       self.return_indices, self._random_samples)
 
 
 class LPPool2d(Module):

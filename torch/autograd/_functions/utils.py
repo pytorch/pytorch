@@ -14,9 +14,9 @@ def maybe_unexpand(variable, old_size):
                      if expanded != original]
 
     for _ in range(num_unsqueezed):
-        variable = variable.sum(0)
+        variable = variable.sum(0, keepdim=False)
     for dim in expanded_dims:
-        variable = variable.sum(dim, True)
+        variable = variable.sum(dim, keepdim=True)
     return variable
 
 

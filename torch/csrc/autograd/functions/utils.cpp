@@ -11,13 +11,13 @@ variable_list wrap_outputs(const variable_list& inputs, tensor_list&& outputs,
   result.reserve(outputs.size());
   if (flags.is_volatile) {
     for (auto& output : outputs) {
-     result.emplace_back(Variable::of(std::move(output), true));
+     result.emplace_back(Variable::of(output, true));
     }
   } else {
     auto grad_fn = ctr(std::move(flags));
     for (auto& output : outputs) {
-      if (output) {
-        result.emplace_back(std::make_shared<Variable>(std::move(output), grad_fn));
+      if (output.defined()) {
+        result.emplace_back(std::make_shared<Variable>(output, grad_fn));
       } else {
         ++grad_fn->num_inputs;
         result.emplace_back(nullptr);

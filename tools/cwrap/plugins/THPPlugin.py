@@ -439,7 +439,10 @@ ${cpu}
                 declaration['variables'] += ['PyObject *__out;']
                 self.generate_out_options(declaration)
             if has_long_args(declaration):
-                declaration['no_kwargs'] = True
+                for option in declaration['options']:
+                    for arg in option['arguments']:
+                        if arg.get('long_args', False):
+                            arg['no_kwargs'] = True
             for option in declaration['options']:
                 option['cname'] = 'TH{}Tensor_({})'.format(
                     'S' if option.get('sparse', False) else '', option['cname'])
@@ -554,7 +557,9 @@ ${cpu}
 
         if any(arg.get('long_args', False) for arg in option['arguments']):
             code = code.replace('__argcount ==', '__argcount >=')
-            expected = str(int(option.get('output_provided', False)))
+            expected = str(int(option.get('output_provided', False)) +
+                           sum(not arg.get('no_kwargs', False) and not arg.get('ignore_check', False)
+                               for arg in option['arguments']))
             code = '__dictcount == ' + expected + ' &&\n          ' + code
 
         return code

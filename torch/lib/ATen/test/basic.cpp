@@ -200,7 +200,7 @@ static void test(Type & type) {
     int a = 4;
     THFloatTensor *t = THFloatTensor_newWithSize2d(a, a);
     THFloatTensor_fill(t, a);
-    Tensor tt = CPU(kFloat).unsafeTensorFromTH(t);
+    Tensor tt = CPU(kFloat).unsafeTensorFromTH(t,false);
     std::cout << tt << std::endl;
   }
   {
@@ -208,6 +208,9 @@ static void test(Type & type) {
       Tensor b = CPU(kFloat).ones({3,7});
       Tensor c = cat({a,b},1);
       std::cout << c << std::endl;
+
+      Tensor e = CPU(kFloat).rand({});
+      check(*e.data<float>()== e.sum().toFloat());
   }
 
 }

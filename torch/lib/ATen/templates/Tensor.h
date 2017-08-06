@@ -29,7 +29,7 @@ struct Tensor {
 
   Tensor()
   : pImpl(nullptr){}
-  explicit Tensor(TensorImpl * self, bool retain = true)
+  explicit Tensor(TensorImpl * self, bool retain)
   : pImpl(self) {
     if(pImpl != nullptr && retain)
       pImpl->retain();
@@ -67,7 +67,7 @@ struct Tensor {
     Tensor().swap(*this);
   }
   void reset(TensorImpl * rhs) {
-    Tensor(rhs).swap(*this);
+    Tensor(rhs,true).swap(*this);
   }
   void reset(TensorImpl * rhs, bool retain) {
     Tensor(rhs, retain).swap(*this );
@@ -126,8 +126,8 @@ struct Tensor {
   template<typename T>
   T * data() const;
 
-  void * unsafeGetTH() {
-    return pImpl->unsafeGetTH();
+  void * unsafeGetTH(bool retain) {
+    return pImpl->unsafeGetTH(retain);
   }
 
   //toLongData(), toFloatData() etc.

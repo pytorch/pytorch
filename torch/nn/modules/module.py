@@ -1,4 +1,3 @@
-from itertools import chain
 from collections import OrderedDict
 import functools
 
@@ -357,7 +356,13 @@ class Module(object):
             if isinstance(param, Parameter):
                 # backwards compatibility for serialized parameters
                 param = param.data
-            own_state[name].copy_(param)
+            try:
+                own_state[name].copy_(param)
+            except:
+                print('While copying the parameter named {}, whose dimensions in the model are'
+                      ' {} and whose dimensions in the checkpoint are {}, ...'.format(
+                          name, own_state[name].size(), param.size()))
+                raise
 
         missing = set(own_state.keys()) - set(state_dict.keys())
         if len(missing) > 0:

@@ -22,7 +22,7 @@ class Upsample(Module):
     Args:
         size (tuple, optional): a tuple of ints ([D_out], H_out, W_out) output sizes
         scale_factor (int / tuple of ints, optional): the multiplier for the image height / width / depth
-        mode (string, optional): the upsampling algorithm: nearest | bilinear | trilinear
+        mode (string, optional): the upsampling algorithm: nearest | bilinear | trilinear. Default: nearest
 
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})` or :math:`(N, C, D_{in}, H_{in}, W_{in})`

@@ -7,33 +7,38 @@ from .auto import _BCELoss
 import warnings
 
 
+def _resize_weight(ctx, target):
+    ctx.old_weight = ctx.weight
+    if ctx.weight is not None and target.dim() != 1:
+        ctx.weight = ctx.weight.view(1, target.size(1)).expand_as(target)
+
+
+def _unresize_weight(ctx):
+    ctx.weight = ctx.old_weight
+    del ctx.old_weight
+
+
 # TODO: move this code to THNN and remove _BCELoss from auto.py
 class BCELoss(_BCELoss):
 
-    def _resize_weight(self, target):
-        self.old_weight = self.weight
-        if self.weight is not None and target.dim() != 1:
-            self.weight = self.weight.view(1, target.size(1)).expand_as(target)
-
-    def _unresize_weight(self):
-        self.weight = self.old_weight
-        del self.old_weight
-
-    def forward(self, input, target):
+    @staticmethod
+    def forward(ctx, input, target, weight, *args):
         if not target.is_same_size(input):
             warnings.warn("Using a target size ({}) that is different to the input size ({}) is deprecated. "
                           "Please ensure they have the same size.".format(target.size(), input.size()))
         assert input.nelement() == target.nelement()
-        self._resize_weight(target)
-        result = super(BCELoss, self).forward(input, target)
-        self._unresize_weight()
+        ctx.weight = weight
+        _resize_weight(ctx, target)
+        result = _BCELoss.forward(ctx, input, target, ctx.weight, *args)
+        _unresize_weight(ctx)
         return result
 
-    def backward(self, grad_output):
-        target = self.saved_tensors[1]
-        self._resize_weight(target)
-        result = super(BCELoss, self).backward(grad_output)
-        self._unresize_weight()
+    @staticmethod
+    def backward(ctx, grad_output):
+        target = ctx.saved_tensors[1]
+        _resize_weight(ctx, target)
+        result = _BCELoss.backward(ctx, grad_output)
+        _unresize_weight(ctx)
         return result
 
 

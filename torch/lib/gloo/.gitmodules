@@ -1,0 +1,6 @@
+[submodule "third-party/googletest"]
+	path = third-party/googletest
+	url = https://github.com/google/googletest.git
+[submodule "third-party/nccl"]
+	path = third-party/nccl
+	url = https://github.com/nvidia/nccl

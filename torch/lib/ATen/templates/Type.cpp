@@ -2,6 +2,7 @@
 #include "ATen/Tensor.h"
 #include "ATen/Storage.h"
 #include "ATen/Scalar.h"
+#include "ATen/SparseTensorRef.h"
 
 #include <iostream>
 ${type_headers}
@@ -52,6 +53,10 @@ Tensor Type::scalarTensor(Scalar s) {
   if(s.isBackedByTensor())
     return s.t.toType(*this);
   return tensor({}).fill_(s);
+}
+
+bool Type::operator==(const Type& other) const {
+  return this->ID() == other.ID();
 }
 
 ${type_method_definitions}

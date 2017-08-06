@@ -19,16 +19,15 @@ void InputBuffer::add(size_t pos, std::shared_ptr<Variable>&& var) {
     auto version = **var->version_counter;
     buffer[pos] = std::make_pair<>(std::move(var), version);
   } else {
-    auto add_fn = std::make_shared<Add>();
-    variable_list result = add_fn->apply({item.first, var});
+    variable_list result = Add().apply({item.first, var});
     buffer[pos] = std::make_pair<>(std::move(result[0]), 0);
   }
 }
 
 auto InputBuffer::device() const -> int {
   for (auto& pair : buffer) {
-    if (pair.first) {
-      return pair.first->data->getDevice();
+    if (pair.first && pair.first->data.type().isCuda()) {
+      return pair.first->data.get_device();
     }
   }
   return -1;

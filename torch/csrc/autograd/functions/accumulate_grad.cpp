@@ -19,15 +19,12 @@ auto AccumulateGrad::acc_inplace(std::shared_ptr<Variable>& grad,
     std::shared_ptr<Variable>& new_grad) -> void {
   auto& grad_data = grad->data;
   auto& new_grad_data = new_grad->data;
-  AutoGPU guard(grad_data->getDevice());
+  AutoGPU guard(grad_data);
 
-  // The grad may need a promotion from a sparse to dense type
-  if (grad_data->isSparse() && !new_grad_data->isSparse()) {
-    std::unique_ptr<thpp::Tensor> result = new_grad_data->newTensor();
-    result->cadd(*new_grad_data, *grad_data);
-    grad->data = std::move(result);
+  if (grad_data.type().isSparse() && !new_grad_data.type().isSparse()) {
+    grad->data = new_grad_data + grad_data;
   } else {
-    grad_data->cadd(*grad_data, *new_grad_data);
+    grad_data += new_grad_data;
   }
 }
 
@@ -40,7 +37,7 @@ auto AccumulateGrad::apply(const variable_list& grads) -> variable_list {
 
   auto var = variable.lock();
   // It's possible that the Variable went out of scope and was freed.
-  // We still need to handle the unlikely case of someohe holding to its grad.
+  // We still need to handle the unlikely case of someone holding to its grad.
   if (!var) {
     auto var_grad = variable_grad.lock();
     // Everything was freed. Nothing to do.
@@ -68,8 +65,7 @@ auto AccumulateGrad::apply(const variable_list& grads) -> variable_list {
   }
 
   if (!var->grad) {
-    auto clone_fn = std::make_shared<Clone>();
-    var->grad = clone_fn->apply({new_grad})[0];
+    var->grad = Clone().apply({new_grad})[0];
     variable_grad = var->grad; // We need to update our reference
   // This case is not strictly necessary, but it makes the first-order only case
   // slightly more efficient and, what's more important, more predictable for
@@ -79,13 +75,11 @@ auto AccumulateGrad::apply(const variable_list& grads) -> variable_list {
   } else if (var->grad->is_volatile) {
     acc_inplace(var->grad, new_grad);
   } else {
-    auto add_fn = std::make_shared<Add>();
     // Once the grad becomes not volatile, it should stay like that
     if (!var->grad->is_volatile && new_grad->is_volatile) {
-      new_grad = std::make_shared<Variable>(
-              std::unique_ptr<thpp::Tensor>(new_grad->data->clone_shallow()), false, false);
+      new_grad = std::make_shared<Variable>(new_grad->data, false, false);
     }
-    var->grad = add_fn->apply({var->grad, new_grad})[0];
+    var->grad = Add().apply({var->grad, new_grad})[0];
   }
 
   return variable_list();

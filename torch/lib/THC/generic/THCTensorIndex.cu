@@ -535,6 +535,7 @@ void THCTensor_(calculateAdvancedIndexingOffsets)(
 {                                                                                               \
   LinearIndexCalcData<INDEX_TYPE, DIMS> data;                                                   \
   for (int i = 0; i < DIMS; ++i) {                                                              \
+    data.baseSizes[i] = THCTensor_(size)(state, indexed, i);                                    \
     data.sizes[i] = indexers[i] != NULL ?                                                       \
       THCudaLongTensor_nElement(state, indexers[i]) :                                           \
         THCTensor_(size)(state, indexed, i);                                                    \

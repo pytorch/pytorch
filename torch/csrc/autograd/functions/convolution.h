@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Python.h>
-#include <THPP/THPP.h>
+#include <ATen/ATen.h>
 #include <memory>
 #include <vector>
 #include <iostream>
@@ -33,7 +33,7 @@ struct ConvParams {
   bool is_output_padding_neg() const;
   bool is_padding_neg() const;
   void view1d_as_2d();
-  bool use_cudnn(const thpp::Tensor& input) const;
+  bool use_cudnn(const at::Tensor& input) const;
 };
 
 struct ConvForward : public Function, public ConvParams {
@@ -41,7 +41,7 @@ struct ConvForward : public Function, public ConvParams {
 
   virtual variable_list apply(const variable_list& inputs) override;
 
-  std::vector<long> output_size(thpp::Tensor& input, thpp::Tensor& weight);
+  std::vector<long> output_size(at::Tensor& input, at::Tensor& weight);
 };
 
 struct ConvBackward : public Function, public ConvParams {

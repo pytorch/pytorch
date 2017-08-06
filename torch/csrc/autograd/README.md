@@ -29,4 +29,5 @@ classes:
 
 Outside of `PyFunction`, the C++ objects largely avoid referencing Python
 objects (there are a few exceptions, like `pyobj` in `Variable`, and
-`PyFunction`, whose whole point is to let C++ call into Python).
+`PyFunction`, whose whole point is to let C++ call into Python). And `pyobj`
+in `Function` to ensure uniqueness of the associated python wrapper (if it exists).

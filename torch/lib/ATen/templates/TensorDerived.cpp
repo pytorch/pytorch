@@ -26,13 +26,19 @@ IntList ${Tensor}::sizes() {
 int64_t ${Tensor}::dim() {
   if(isScalar())
     return 0;
-  return ${THTensor}_nDimension(${state,}tensor);
+  int64_t d = ${THTensor}_nDimension(${state,}tensor);
+  // See Note [Undefined-dim versus 0-dim]
+  if (d != 0)
+    return d;
+  return kUndefinedDimensions;
 }
 
 const char * ${Tensor}::typeString() {
   return "${Type}";
 }
-void * ${Tensor}::unsafeGetTH() {
+void * ${Tensor}::unsafeGetTH(bool retain) {
+  if (retain)
+      ${THTensor}_retain(${state,} tensor);
   return tensor;
 }
 

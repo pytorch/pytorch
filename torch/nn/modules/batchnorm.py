@@ -115,6 +115,7 @@ class BatchNorm2d(_BatchNorm):
             computation. Default: 0.1
         affine: a boolean value that when set to true, gives the layer learnable
             affine parameters. Default: True
+
     Shape:
         - Input: :math:`(N, C, H, W)`
         - Output: :math:`(N, C, H, W)` (same shape as input)

@@ -14,7 +14,7 @@ auto DelayedError::apply(const variable_list& inputs) -> variable_list {
   tensor_list outputs;
   outputs.reserve(inputs.size());
   for (auto& var : inputs) {
-    outputs.emplace_back(var ? var->data->clone_shallow() : nullptr);
+    outputs.emplace_back(var ? var->data : at::Tensor());
   }
   return wrap_outputs(inputs, std::move(outputs), [&](FunctionFlags f) {
     return std::make_shared<Error>(msg, std::move(f));
@@ -25,16 +25,14 @@ auto Add::apply(const variable_list& inputs) -> variable_list {
   check_input_variables("Add", inputs, 2);
   auto& input1 = inputs[0]->data;
   auto& input2 = inputs[1]->data;
-  AutoGPU guard(input1->getDevice());
+  AutoGPU guard(input1);
 
-  bool first_sparse = input1->isSparse();
-  auto output = first_sparse ? input2->newTensor() : input1->newTensor();
-  if (first_sparse) {
-    output->cadd(*input2, *input1);
+  at::Tensor output;
+  if (input1.type().isSparse()) {
+    output = input2 + input1;
   } else {
-    output->cadd(*input1, *input2);
+    output = input1 + input2;
   }
-
   return wrap_outputs(inputs, as_tensor_list(std::move(output)), [&](FunctionFlags f) {
     return std::make_shared<AddBackward>(std::move(f));
   });

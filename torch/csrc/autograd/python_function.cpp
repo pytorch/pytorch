@@ -5,7 +5,6 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <exception>
-#include <THPP/THPP.h>
 
 #include "THP.h"
 #include "torch/csrc/autograd/functions/accumulate_grad.h"
@@ -24,10 +23,10 @@
 
 using namespace torch;
 using namespace torch::autograd;
-using thpp::Tensor;
 
 PyObject *THPFunctionClass = NULL;
 PyObject *THPStochasticFunctionClass = NULL;
+PyObject *THPBatchNormBackwardBackwardFunction = NULL;
 
 
 #define THPFunction_assert(condition, ...)                                     \
@@ -57,9 +56,10 @@ static PyObject* _allocate_grad_output(output_info_type& info, AutoGPU& gpu_guar
   // TODO: no need to do this for non-differentiable outputs
   PyObject *tensor_cls = std::get<0>(info);
   gpu_guard.setDevice(std::get<1>(info));
-  std::vector<long> &sizes = std::get<2>(info);
+  std::vector<int64_t> &sizes = std::get<2>(info);
+  std::vector<long> long_sizes(sizes.begin(), sizes.end());
 
-  THPObjectPtr grad_size(THPSize_New(sizes.size(), sizes.data()));
+  THPObjectPtr grad_size(THPSize_New(long_sizes.size(), long_sizes.data()));
   if (!grad_size) throw python_error();
   THPObjectPtr new_grad(PyObject_CallFunctionObjArgs(tensor_cls, grad_size.get(), NULL));
   if (!new_grad) throw python_error();
@@ -79,7 +79,7 @@ auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
   for (size_t i = 0; i != inputs.size(); ++i) {
     PyObject* input;
     if (inputs[i]) {
-      input = createPyObject(*inputs[i]->data);
+      input = createPyObject(inputs[i]->data);
       if (!input) throw python_error();
     } else {
       input = Py_None;
@@ -294,7 +294,7 @@ PyObject *THPFunction_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
   // Python zero-initializes the object memory, so there's no need to initialize
   // most fields
   THPFunction* self = (THPFunction*)obj;
-  new (&self->cdata) torch::autograd::PyFunction(obj);
+  new (&self->cdata) PyFunction(obj);
   self->cdata.num_inputs = -1;
   self->cdata.is_stochastic = PyObject_IsInstance(obj, THPStochasticFunctionClass);
   return obj;
@@ -452,10 +452,10 @@ static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
     if (!output_var) throw python_error();
 
     if (self->output_info) {
-      auto& output_tensor = *output_var->cdata->data;
+      auto& output_tensor = output_var->cdata->data;
       self->output_info->emplace_back(
         (PyObject *)getPyTypeObject(output_tensor),
-        output_tensor.getDevice(),
+        output_tensor.type().isCuda() ? output_tensor.get_device() : -1,
         output_tensor.sizes()
       );
     }
@@ -876,7 +876,7 @@ static PyObject *unpack_saved_variables(
 PyObject *THPFunction_saved_tensors(THPFunction *self, void *_unused)
 {
   return unpack_saved_variables(self, [](std::shared_ptr<Variable> var) {
-    return createPyObject(*var->data);
+    return createPyObject(var->data);
   });
 }
 
