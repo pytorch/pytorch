@@ -586,12 +586,9 @@ def layer_norm(input, weight=None, bias=None, eps=1e-5):
 
 
 def _expand_input_to_target(input, target, batch=False):
-    if batch:
-        b = input.size(0)
-    else:
-        b = 1
+    b = batch and input.size(0) or 1
     input_correct_dims = input.view(b, target.size(1),
-                                    *map(lambda x: 1, target.size()[2:]))
+                                    *repeat(1, target.dim() - 2))
     return input_correct_dims.expand_as(target)
 
 
