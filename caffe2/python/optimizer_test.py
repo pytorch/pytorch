@@ -244,7 +244,7 @@ class TestOptimizerContext(TestCase):
                 for arg in op.arg:
                     if arg.name == 'base_lr':
                         val = arg.f
-                self.assertEqual(
+                self.assertAlmostEqual(
                     val,
                     expected_learning_rate[op.output[0]]
                 )
