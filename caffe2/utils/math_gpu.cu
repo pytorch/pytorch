@@ -178,11 +178,10 @@ void Gemm<float16, CUDAContext>(
         N));
 
   } else if (math_type == TensorProto_DataType_FLOAT16) {
-    // convert alpha, beta from caffe2::float16 -> __half
-    __half alpha_fp16;
-    alpha_fp16.x = convert::To<float, float16>(alpha).x;
-    __half beta_fp16;
-    beta_fp16.x = convert::To<float, float16>(beta).x;
+    // convert alpha, beta from float -> __half
+    auto alpha_fp16 = convert::floatToHalf(alpha);
+    auto beta_fp16 = convert::floatToHalf(beta);
+
     // call cublasHgemm
     CUBLAS_CHECK(cublasHgemm(
         context->cublas_handle(),
@@ -353,10 +352,8 @@ void Gemv<float16, CUDAContext>(
         CUDA_R_16F,
         LDC));
   } else if (math_type == TensorProto_DataType_FLOAT16) {
-    __half alpha_fp16;
-    alpha_fp16.x = convert::To<float, float16>(alpha).x;
-    __half beta_fp16;
-    beta_fp16.x = convert::To<float, float16>(beta).x;
+    auto alpha_fp16 = convert::floatToHalf(alpha);
+    auto beta_fp16 = convert::floatToHalf(beta);
 
     CUBLAS_CHECK(cublasHgemm(
         context->cublas_handle(),
