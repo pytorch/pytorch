@@ -3,7 +3,9 @@
 set(Caffe2_known_gpu_archs8 "20 21(20) 30 35 50 52 60 61") # for CUDA 8.x
 set(Caffe2_known_gpu_archs7 "20 21(20) 30 35 50 52") # for CUDA 7.x
 # This list will be used for CUDA_ARCH_NAME = All option
-set(Caffe2_known_gpu_archs ${Caffe2_known_gpu_archs8}) # latest supported CUDA version is 8.x
+set(Caffe2_known_gpu_archs "20 21(20) 30 35 50 52 60 61 70")
+set(Caffe2_known_gpu_archs7 "20 21(20) 30 35 50 52")
+set(Caffe2_known_gpu_archs8 "20 21(20) 30 35 50 52 60 61")
 
 ################################################################################################
 # A function for automatic detection of GPUs installed  (if autodetection is enabled)
@@ -88,6 +90,8 @@ function(caffe2_select_nvcc_arch_flags out_variable)
     set(__cuda_arch_bin "50")
   elseif(${CUDA_ARCH_NAME} STREQUAL "Pascal")
     set(__cuda_arch_bin "60 61")
+  elseif(${CUDA_ARCH_NAME} STREQUAL "Volta")
+    set(__cuda_arch_bin "70")
   elseif(${CUDA_ARCH_NAME} STREQUAL "All")
     set(__cuda_arch_bin ${Caffe2_known_gpu_archs})
   elseif(${CUDA_ARCH_NAME} STREQUAL "Auto")
@@ -187,11 +191,12 @@ elseif (${CUDA_VERSION} LESS 8.0) # CUDA 7.x
   list(APPEND CUDA_NVCC_FLAGS "-D_MWAITXINTRIN_H_INCLUDED")
   list(APPEND CUDA_NVCC_FLAGS "-D__STRICT_ANSI__")
 elseif (${CUDA_VERSION} LESS 9.0) # CUDA 8.x
+  set(Caffe2_known_gpu_archs ${Caffe2_known_gpu_archs8})
+  list(APPEND CUDA_NVCC_FLAGS "-D_MWAITXINTRIN_H_INCLUDED")
+  list(APPEND CUDA_NVCC_FLAGS "-D__STRICT_ANSI__")
   # CUDA 8 may complain that sm_20 is no longer supported. Suppress the
   # warning for now.
   list(APPEND CUDA_NVCC_FLAGS "-Wno-deprecated-gpu-targets")
-else() # CUDA 9.x or later version
-  message(STATUS "The CUDA version is not offcially supported yet, cmake process will continue")
 endif()
 
 include_directories(SYSTEM ${CUDA_INCLUDE_DIRS})

@@ -62,7 +62,12 @@ __device__ void exclusivePrefixScan(T* smem, T in, T* out, T* carry, BinaryFunct
 template <typename T, bool KillWARDependency, class BinaryFunction>
 __device__ void inclusiveBinaryPrefixScan(T* smem, bool in, T* out, BinaryFunction binop) {
   // Within-warp, we use warp voting.
+#if CUDA_VERSION >= 9000
+  T vote = __ballot_sync(__activemask(), in);
+#else
   T vote = __ballot(in);
+#endif
+
   T index = __popc(getLaneMaskLe() & vote);
   T carry = __popc(vote);
 

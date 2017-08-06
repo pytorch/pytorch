@@ -167,7 +167,11 @@ __device__ void countRadixUsingMask(CountType counts[RadixSize],
 #pragma unroll
     for (unsigned int j = 0; j < RadixSize; ++j) {
       bool vote = hasVal && (digitInRadix == j);
+#if CUDA_VERSION >= 9000
+      counts[j] += __popc(__ballot_sync(__activemask(), vote));
+#else
       counts[j] += __popc(__ballot(vote));
+#endif
     }
   }
 
