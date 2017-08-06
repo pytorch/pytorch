@@ -1075,6 +1075,12 @@ class TestAutograd(TestCase):
         o = (b + a).sum()
         o.backward()
 
+    def test_shape(self):
+        x = Variable(torch.randn(3, 4))
+        self.assertEqual(2, len(x.shape))
+        self.assertEqual(x.shape[0], 3)
+        self.assertEqual(x.shape[1], 4)
+
     def test_return_leaf(self):
         class Identity(Function):
 

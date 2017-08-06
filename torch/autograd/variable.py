@@ -57,6 +57,7 @@ class Variable(_C._VariableBase):
         'dim',
         'get_device',
         'is_cuda',
+        'shape'
     }
 
     def __getattr__(self, name):
