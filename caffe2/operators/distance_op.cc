@@ -39,16 +39,20 @@ bool L1DistanceOp<float, CPUContext>::RunOnDevice() {
   for (int i = 0; i < X.ndim(); ++i) {
     CAFFE_ENFORCE_EQ(X.dim32(i), Y.dim32(i));
   }
-  distance->Resize(1);
+  int N = X.ndim() > 0 ? X.dim32(0) : 1;
+  distance->Resize(N);
+  int D = N > 0 ? X.size() / N : 0;
+
   const float* X_data = X.data<float>();
   const float* Y_data = Y.data<float>();
 
-  *(distance->mutable_data<float>()) =
-      (ConstEigenVectorMap<float>(X_data, X.size()).array() -
-       ConstEigenVectorMap<float>(Y_data, Y.size()).array())
-          .abs()
-          .sum();
-  // L1(x, y) = sum(|x-y|)
+  for (int i = 0; i < N; ++i) {
+    (distance->mutable_data<float>())[i] =
+        (ConstEigenVectorMap<float>(X_data + i * D, D).array() -
+         ConstEigenVectorMap<float>(Y_data + i * D, D).array())
+            .abs()
+            .sum();
+  }
   return true;
 }
 
@@ -70,7 +74,7 @@ bool L1DistanceGradientOp<float, CPUContext>::RunOnDevice() {
     CAFFE_ENFORCE(X.dim32(i) == Y.dim32(i));
   }
   CAFFE_ENFORCE(dDistance.ndim() == 1);
-  CAFFE_ENFORCE(dDistance.dim32(0) == 1);
+  CAFFE_ENFORCE(dDistance.dim32(0) == N);
   dX->ResizeLike(X);
   dY->ResizeLike(Y);
 
@@ -81,11 +85,11 @@ bool L1DistanceGradientOp<float, CPUContext>::RunOnDevice() {
           (X.data<float>())[offset + j] - (Y.data<float>())[offset + j];
       const float kEps = 1e-12;
       if (temp < -kEps) {
-        dX->mutable_data<float>()[offset + j] = -(dDistance.data<float>())[0];
-        dY->mutable_data<float>()[offset + j] = (dDistance.data<float>())[0];
+        dX->mutable_data<float>()[offset + j] = -(dDistance.data<float>())[i];
+        dY->mutable_data<float>()[offset + j] = (dDistance.data<float>())[i];
       } else if (temp > kEps) {
-        dX->mutable_data<float>()[offset + j] = (dDistance.data<float>())[0];
-        dY->mutable_data<float>()[offset + j] = -(dDistance.data<float>())[0];
+        dX->mutable_data<float>()[offset + j] = (dDistance.data<float>())[i];
+        dY->mutable_data<float>()[offset + j] = -(dDistance.data<float>())[i];
       } else {
         dX->mutable_data<float>()[offset + j] = 0;
         dY->mutable_data<float>()[offset + j] = 0;
