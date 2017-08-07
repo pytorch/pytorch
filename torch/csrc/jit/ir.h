@@ -852,7 +852,7 @@ struct CppOp : public NodeWithKind<CppOp,NodeKind::CppOp,TypeKind::MultiType> {
   }
 };
 
-struct Eval : public NodeWithKind<Eval,NodeKind::Eval,TypeKind::Multi> {
+struct Eval : public NodeWithKind<Eval,NodeKind::Eval,TypeKind::MultiType> {
   void init() {};
 };
 
