@@ -199,8 +199,8 @@ std::string ExportGraph(std::unique_ptr<Graph>& g) {
 
         attr = p_n->add_attribute();
         attr->set_name("is_test");
-        // TODO: set_i on bool? Ugh.
-        attr->set_i(PyObject_IsTrue(value->scalar_args.at(1)));
+        // NB: PyTorch's boolean is is_training, which is the inverted sense
+        attr->set_i(!PyObject_IsTrue(value->scalar_args.at(1)));
 
         p_n->add_output("tmp" + std::to_string(temp_next_unique++));
       } else if (value->name() == "Addmm" &&
