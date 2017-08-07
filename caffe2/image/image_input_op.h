@@ -1,3 +1,5 @@
+// Copyright 2004-present Facebook. All Rights Reserved.
+
 #ifndef CAFFE2_IMAGE_IMAGE_INPUT_OP_H_
 #define CAFFE2_IMAGE_IMAGE_INPUT_OP_H_
 
@@ -20,6 +22,14 @@ class CUDAContext;
 template <class Context>
 class ImageInputOp final
     : public PrefetchOperator<Context> {
+  // SINGLE_LABEL: single integer label for multi-class classification
+  // MULTI_LABEL_SPARSE: sparse active label indices for multi-label classification
+  // MULTI_LABEL_DENSE: dense label embedding vector for label embedding regression
+  enum LABEL_TYPE {
+    SINGLE_LABEL = 0,
+    MULTI_LABEL_SPARSE = 1,
+    MULTI_LABEL_DENSE = 2
+  };
  public:
   using OperatorBase::OutputSize;
   using PrefetchOperator<Context>::context_;
@@ -70,7 +80,7 @@ class ImageInputOp final
   // Default parameters for images
   PerImageArg default_arg_;
   int batch_size_;
-  bool multiple_label_;
+  LABEL_TYPE label_type_;
   int num_labels_;
   bool color_;
   int scale_;
@@ -111,8 +121,8 @@ ImageInputOp<Context>::ImageInputOp(
       prefetched_additional_outputs_on_device_(OutputSize() - 2),
       batch_size_(
           OperatorBase::template GetSingleArgument<int>("batch_size", 0)),
-      multiple_label_(
-          OperatorBase::template GetSingleArgument<int>("multiple_label", 0)),
+      label_type_(static_cast<LABEL_TYPE>(
+        OperatorBase::template GetSingleArgument<int>("label_type", 0))),
       num_labels_(
           OperatorBase::template GetSingleArgument<int>("num_labels", 0)),
       color_(OperatorBase::template GetSingleArgument<int>("color", 1)),
@@ -168,12 +178,12 @@ ImageInputOp<Context>::ImageInputOp(
   }
   CAFFE_ENFORCE_GT(batch_size_, 0, "Batch size should be nonnegative.");
   if (use_caffe_datum_) {
-    CAFFE_ENFORCE_EQ(multiple_label_, 0,
-      "Caffe datum does not support multiple labels");
+    CAFFE_ENFORCE_EQ(label_type_, SINGLE_LABEL,
+      "Caffe datum only supports single integer label");
   }
-  if (multiple_label_) {
+  if (label_type_ !=  SINGLE_LABEL) {
     CAFFE_ENFORCE_GT(num_labels_, 0,
-      "Number of labels must be set for using multiple label output.");
+      "Number of labels must be set for using either sparse label indices or dense label embedding.");
   }
   CAFFE_ENFORCE((scale_ > 0) != (minsize_ > 0),
                 "Must provide one and only one of scaling or minsize");
@@ -265,7 +275,7 @@ ImageInputOp<Context>::ImageInputOp(
       TIndex(crop_),
       TIndex(crop_),
       TIndex(color_ ? 3 : 1));
-  if (multiple_label_) {
+  if (label_type_ != SINGLE_LABEL) {
     prefetched_label_.Resize(TIndex(batch_size_), TIndex(num_labels_));
   } else {
     prefetched_label_.Resize(vector<TIndex>(1, batch_size_));
@@ -388,35 +398,51 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
     }
 
     if (label_proto.data_type() == TensorProto::FLOAT) {
-      if (!multiple_label_) {
+      if (label_type_ == SINGLE_LABEL) {
         DCHECK_EQ(label_proto.float_data_size(), 1);
         prefetched_label_.mutable_data<float>()[item_id] =
             label_proto.float_data(0);
-      } else {
+      } else if (label_type_ == MULTI_LABEL_SPARSE) {
         float* label_data = prefetched_label_.mutable_data<float>() +
           item_id * num_labels_;
         memset(label_data, 0, sizeof(float) * num_labels_);
         for (int i = 0; i < label_proto.float_data_size(); ++i) {
           label_data[(int)label_proto.float_data(i)] = 1.0;
         }
+      } else if (label_type_ == MULTI_LABEL_DENSE) {
+        CAFFE_ENFORCE(label_proto.float_data_size() == num_labels_);
+        float* label_data = prefetched_label_.mutable_data<float>() +
+          item_id * num_labels_;
+        for (int i = 0; i < label_proto.float_data_size(); ++i) {
+          label_data[i] = label_proto.float_data(i);
+        }
+      } else {
+        LOG(ERROR) << "Unknown label type:" << label_type_;
       }
-
     } else if (label_proto.data_type() == TensorProto::INT32) {
-      if (!multiple_label_) {
+      if (label_type_ == SINGLE_LABEL) {
         DCHECK_EQ(label_proto.int32_data_size(), 1);
         prefetched_label_.mutable_data<int>()[item_id] =
             label_proto.int32_data(0);
-      } else {
+      } else if (label_type_ == MULTI_LABEL_SPARSE) {
         int* label_data = prefetched_label_.mutable_data<int>() +
           item_id * num_labels_;
         memset(label_data, 0, sizeof(int) * num_labels_);
         for (int i = 0; i < label_proto.int32_data_size(); ++i) {
           label_data[label_proto.int32_data(i)] = 1;
         }
+      } else if (label_type_ == MULTI_LABEL_DENSE) {
+        CAFFE_ENFORCE(label_proto.int32_data_size() == num_labels_);
+        int* label_data = prefetched_label_.mutable_data<int>() +
+          item_id * num_labels_;
+        for (int i = 0; i < label_proto.int32_data_size(); ++i) {
+          label_data[i] = label_proto.int32_data(i);
+        }
+      } else {
+        LOG(ERROR) << "Unknown label type:" << label_type_;
       }
-
     } else {
-      LOG(FATAL) << "Unsupported label type.";
+      LOG(FATAL) << "Unsupported label data type.";
     }
 
     for (int i = 0; i < additional_output_protos.size(); ++i) {

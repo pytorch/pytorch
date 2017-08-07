@@ -120,7 +120,7 @@ def caffe2_img(img):
 
 # Bounding box is ymin, xmin, height, width
 def create_test(output_dir, width, height, default_bound, minsize, crop, means,
-                stds, count, multiple_label, num_labels, output1=None,
+                stds, count, label_type, num_labels, output1=None,
                 output2_size=None):
     print("Creating a temporary lmdb database of %d pictures..." % (count))
 
@@ -180,15 +180,21 @@ def create_test(output_dir, width, height, default_bound, minsize, crop, means,
 
             label_tensor = tensor_protos.protos.add()
             label_tensor.data_type = 2  # int32 data
-            if multiple_label == 0:
+            assert (label_type >= 0 and label_type <= 2)
+            if label_type == 0:
                 label_tensor.int32_data.append(index)
                 expected_label = index
-            else:
+            elif label_type == 1:
                 binary_labels = np.random.randint(2, size=num_labels)
                 for idx, val in enumerate(binary_labels.tolist()):
                     if val == 1:
                         label_tensor.int32_data.append(idx)
                 expected_label = binary_labels
+            elif label_type == 2:
+                embedding_label = np.random.randint(100, size=num_labels)
+                for _idx, val in enumerate(embedding_label.tolist()):
+                    label_tensor.int32_data.append(val)
+                expected_label = embedding_label
 
             if output1:
                 output1_tensor = tensor_protos.protos.add()
@@ -223,7 +229,7 @@ def create_test(output_dir, width, height, default_bound, minsize, crop, means,
 
 
 def run_test(
-        size_tuple, means, stds, multiple_label, num_labels, dc, validator,
+        size_tuple, means, stds, label_type, num_labels, dc, validator,
         output1=None, output2_size=None):
     # TODO: Does not test on GPU and does not test use_gpu_transform
     # WARNING: Using ModelHelper automatically does NHWC to NCHW
@@ -243,7 +249,7 @@ def run_test(
         means=means,
         stds=stds,
         count=count_images,
-        multiple_label=multiple_label,
+        label_type=label_type,
         num_labels=num_labels,
         output1=output1,
         output2_size=output2_size
@@ -282,7 +288,7 @@ def run_test(
                 mean_per_channel=means,
                 std_per_channel=stds,
                 use_gpu_transform=(device_option.device_type == 1),
-                multiple_label=multiple_label,
+                label_type=label_type,
                 num_labels=num_labels,
                 output_sizes=output_sizes
             )
@@ -303,7 +309,7 @@ def run_test(
 @unittest.skipIf('lmdb' not in sys.modules, 'python-lmdb is not installed')
 class TestImport(hu.HypothesisTestCase):
     def validate_image_and_label(
-            self, expected_images, device_option, count_images, multiple_label):
+            self, expected_images, device_option, count_images, label_type):
         l = workspace.FetchBlob('label')
         result = workspace.FetchBlob('data').astype(np.int32)
         # If we don't use_gpu_transform, the output is in NHWC
@@ -314,7 +320,7 @@ class TestImport(hu.HypothesisTestCase):
         else:
             expected = [img for (img, _, _, _) in expected_images]
         for i in range(count_images):
-            if multiple_label == 0:
+            if label_type == 0:
                 self.assertEqual(l[i], expected_images[i][1])
             else:
                 self.assertEqual(
@@ -335,19 +341,19 @@ class TestImport(hu.HypothesisTestCase):
         stds=st.tuples(st.floats(min_value=1, max_value=10),
                        st.floats(min_value=1, max_value=10),
                        st.floats(min_value=1, max_value=10)),
-        multiple_label=st.integers(0, 1),
+        label_type=st.integers(0, 2),
         num_labels=st.integers(min_value=8, max_value=4096),
         **hu.gcs)
     @settings(verbosity=Verbosity.verbose)
     def test_imageinput(
-            self, size_tuple, means, stds, multiple_label,
+            self, size_tuple, means, stds, label_type,
             num_labels, gc, dc):
         def validator(expected_images, device_option, count_images):
             self.validate_image_and_label(
-                expected_images, device_option, count_images, multiple_label)
+                expected_images, device_option, count_images, label_type)
         # End validator
         run_test(
-            size_tuple, means, stds, multiple_label, num_labels, dc,
+            size_tuple, means, stds, label_type, num_labels, dc,
             validator)
     # End test_imageinput
 
@@ -363,18 +369,18 @@ class TestImport(hu.HypothesisTestCase):
         stds=st.tuples(st.floats(min_value=1, max_value=10),
                        st.floats(min_value=1, max_value=10),
                        st.floats(min_value=1, max_value=10)),
-        multiple_label=st.integers(0, 1),
+        label_type=st.integers(0, 2),
         num_labels=st.integers(min_value=8, max_value=4096),
         output1=st.floats(min_value=1, max_value=10),
         output2_size=st.integers(min_value=2, max_value=10),
         **hu.gcs)
     @settings(verbosity=Verbosity.verbose)
     def test_imageinput_with_additional_outputs(
-            self, size_tuple, means, stds, multiple_label,
+            self, size_tuple, means, stds, label_type,
             num_labels, output1, output2_size, gc, dc):
         def validator(expected_images, device_option, count_images):
             self.validate_image_and_label(
-                expected_images, device_option, count_images, multiple_label)
+                expected_images, device_option, count_images, label_type)
 
             output1_result = workspace.FetchBlob('output1')
             output2_result = workspace.FetchBlob('output2')
@@ -386,7 +392,7 @@ class TestImport(hu.HypothesisTestCase):
             # End for
         # End validator
         run_test(
-            size_tuple, means, stds, multiple_label, num_labels, dc,
+            size_tuple, means, stds, label_type, num_labels, dc,
             validator, output1, output2_size)
     # End test_imageinput
 
