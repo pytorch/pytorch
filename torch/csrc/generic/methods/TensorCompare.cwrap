@@ -682,6 +682,15 @@
         - THTensor* self
         - CONSTANT __last_dim
         - CONSTANT false
+    - before_call: long __last_dim = THTensor_(nDimension)(LIBRARY_STATE ((THPTensor*)$arg2)->cdata)-1;
+      arguments:
+        - arg: THTensor* values
+          output: True
+        - arg: THIndexTensor* indices
+          output: True
+        - THTensor* self
+        - CONSTANT __last_dim
+        - bool descending
     - arguments:
         - arg: THTensor* values
           output: True
