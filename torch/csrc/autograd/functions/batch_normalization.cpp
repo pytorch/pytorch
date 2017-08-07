@@ -102,9 +102,7 @@ auto BatchNormForward::apply(const variable_list& inputs) -> variable_list {
   return wrap_outputs(inputs, std::move(outputs), [&](FunctionFlags f) {
     return std::make_shared<BatchNormBackward>(
         f, *this, std::move(save_mean), std::move(save_std),
-        input->save(this),
-        Variable::save_opt(weight.get(), this),
-        Variable::save_opt(bias.get(), this));
+        input, weight, bias);
   });
 };
 
@@ -199,8 +197,8 @@ auto BatchNormBackward::apply(const variable_list& grad_outputs) -> variable_lis
   return wrap_outputs(all_inputs, std::move(outputs), [&](FunctionFlags f) {
     return std::make_shared<BatchNormBackwardBackward>(
       f, *this, save_mean, save_std,
-      input_var->save(this), Variable::save_opt(weight_var.get(), this),
-      grad_outputs[0]->save(this));
+      input_var, weight_var,
+      grad_outputs[0]);
     });
 };
 

@@ -228,7 +228,7 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
   return wrap_outputs(inputs, std::move(outputs), [&](FunctionFlags f) {
     return std::make_shared<ConvBackward>(
         f, *this,
-        inputs[0]->save(this), inputs[1]->save(this), Variable::save_opt(inputs[2].get(), this),
+        inputs[0], inputs[1], inputs[2],
         std::move(columns), std::move(ones), std::move(convolution));
   });
 };
@@ -369,8 +369,8 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
   return wrap_outputs(all_inputs, std::move(outputs), [&](FunctionFlags f) {
     return std::make_shared<ConvBackwardBackward>(
       f, *this,
-      input_var->save(this), weight_var->save(this),
-      Variable::save_opt(bias_var.get(), this), grad_outputs[0]->save(this));
+      input_var, weight_var,
+      bias_var, grad_outputs[0]);
   });
 };
 
