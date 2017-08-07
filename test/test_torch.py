@@ -198,17 +198,21 @@ class TestTorch(TestCase):
             return attr(t, 2, dim, keepdim)
 
         for fn_name in dim_red_fns:
-            x = torch.randn(3, 4, 5)
             fn_attr = getattr(torch, fn_name) if fn_name != "norm" else normfn_attr
 
-            def fn(t, dim, keepdim=False):
+            def fn(x, dim, keepdim=False):
                 ans = fn_attr(x, dim, keepdim=keepdim)
                 return ans if not isinstance(ans, tuple) else ans[0]
 
+            def test_multidim(x, dim):
+                self.assertEqual(fn(x, dim).unsqueeze(dim), fn(x, dim, keepdim=True))
+                self.assertEqual(x.ndimension() - 1, fn(x, dim).ndimension())
+                self.assertEqual(x.ndimension(), fn(x, dim, keepdim=True).ndimension())
+
+            # general case
+            x = torch.randn(3, 4, 5)
             dim = random.randint(0, 2)
-            self.assertEqual(fn(x, dim).unsqueeze(dim), fn(x, dim, keepdim=True))
-            self.assertEqual(x.ndimension() - 1, fn(x, dim).ndimension())
-            self.assertEqual(x.ndimension(), fn(x, dim, keepdim=True).ndimension())
+            test_multidim(x, dim)
 
             # check 1-d behavior
             x = torch.randn(1)
@@ -222,16 +226,7 @@ class TestTorch(TestCase):
             singleton_dim = random.randint(0, 2)
             dims[singleton_dim] = 1
             x = torch.randn(dims)
-            fn_attr = getattr(torch, fn_name) if fn_name != "norm" else normfn_attr
-
-            def fn(t, dim, keepdim=False):
-                ans = fn_attr(x, dim, keepdim=keepdim)
-                return ans if not isinstance(ans, tuple) else ans[0]
-
-            dim = singleton_dim
-            self.assertEqual(fn(x, dim).unsqueeze(dim), fn(x, dim, keepdim=True))
-            self.assertEqual(x.ndimension() - 1, fn(x, dim).ndimension())
-            self.assertEqual(x.ndimension(), fn(x, dim, keepdim=True).ndimension())
+            test_multidim(x, singleton_dim)
 
     def _testCSelection(self, torchfn, mathfn):
         # Two tensors
