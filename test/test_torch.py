@@ -200,7 +200,8 @@ class TestTorch(TestCase):
     def test_min(self):
         self._testSelection(torch.min, min)
 
-    def test_dim_reduction(self):
+    @staticmethod
+    def _test_dim_reduction(self, cast):
         dim_red_fns = [
             "mean", "median", "mode", "norm", "prod",
             "std", "sum", "var", "max", "min"]
@@ -210,24 +211,38 @@ class TestTorch(TestCase):
             return attr(t, 2, dim, keepdim)
 
         for fn_name in dim_red_fns:
-            x = torch.randn(3, 4, 5)
             fn_attr = getattr(torch, fn_name) if fn_name != "norm" else normfn_attr
 
-            def fn(t, dim, keepdim=False):
+            def fn(x, dim, keepdim=False):
                 ans = fn_attr(x, dim, keepdim=keepdim)
                 return ans if not isinstance(ans, tuple) else ans[0]
 
+            def test_multidim(x, dim):
+                self.assertEqual(fn(x, dim).unsqueeze(dim), fn(x, dim, keepdim=True))
+                self.assertEqual(x.ndimension() - 1, fn(x, dim).ndimension())
+                self.assertEqual(x.ndimension(), fn(x, dim, keepdim=True).ndimension())
+
+            # general case
+            x = cast(torch.randn(3, 4, 5))
             dim = random.randint(0, 2)
-            self.assertEqual(fn(x, dim).unsqueeze(dim), fn(x, dim, keepdim=True))
-            self.assertEqual(x.ndimension() - 1, fn(x, dim).ndimension())
-            self.assertEqual(x.ndimension(), fn(x, dim, keepdim=True).ndimension())
+            test_multidim(x, dim)
 
             # check 1-d behavior
-            x = torch.randn(1)
+            x = cast(torch.randn(1))
             dim = 0
             self.assertEqual(fn(x, dim), fn(x, dim, keepdim=True))
             self.assertEqual(x.ndimension(), fn(x, dim).ndimension())
             self.assertEqual(x.ndimension(), fn(x, dim, keepdim=True).ndimension())
+
+            # check reducing of a singleton dimension
+            dims = [3, 4, 5]
+            singleton_dim = random.randint(0, 2)
+            dims[singleton_dim] = 1
+            x = cast(torch.randn(dims))
+            test_multidim(x, singleton_dim)
+
+    def test_dim_reduction(self):
+        self._test_dim_reduction(self, lambda t: t)
 
     def _testCSelection(self, torchfn, mathfn):
         # Two tensors

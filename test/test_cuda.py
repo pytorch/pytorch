@@ -873,6 +873,9 @@ class TestCuda(TestCase):
     def test_btrisolve(self):
         TestTorch._test_btrisolve(self, lambda t: t.cuda())
 
+    def test_dim_reduction(self):
+        TestTorch._test_dim_reduction(self, lambda t: t.cuda())
+
     def test_tensor_gather(self):
         TestTorch._test_gather(self, lambda t: t.cuda(), False)
 
