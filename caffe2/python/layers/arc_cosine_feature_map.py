@@ -5,7 +5,6 @@ from __future__ import unicode_literals
 
 from caffe2.python import schema
 from caffe2.python.layers.layers import ModelLayer
-
 import numpy as np
 
 
@@ -40,7 +39,7 @@ class ArcCosineFeatureMap(ModelLayer):
             input_record,
             output_dims,
             s=1,
-            scale=None,
+            scale=1.0,
             weight_init=None,
             bias_init=None,
             weight_optim=None,
@@ -53,7 +52,6 @@ class ArcCosineFeatureMap(ModelLayer):
         super(ArcCosineFeatureMap, self).__init__(model, name, input_record,
                                                   **kwargs)
         assert isinstance(input_record, schema.Scalar), "Incorrect input type"
-
         self.params = []
         self.model = model
         self.set_weight_as_global_constant = set_weight_as_global_constant
@@ -76,11 +74,8 @@ class ArcCosineFeatureMap(ModelLayer):
         assert isinstance(self.s, int), "Expected s to be type int, got type %s" \
                                         % type(self.s)
 
-        if scale:
-            assert (scale > 0.0), "Expected scale > 0, got %s" % scale
-            self.stddev = 1 / scale
-        else:
-            self.stddev = np.sqrt(1.0 / self.input_dims)
+        assert (scale > 0.0), "Expected scale > 0, got %s" % scale
+        self.stddev = scale * np.sqrt(1.0 / self.input_dims)
 
         # Initialize train_init_net parameters
         # Random Parameters
