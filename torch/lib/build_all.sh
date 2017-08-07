@@ -123,6 +123,7 @@ build TH
 build THS
 build THNN
 
+CPP_FLAGS=" -std=c++11 "
 if [[ $WITH_CUDA -eq 1 ]]; then
     build THC
     build THCS
@@ -137,7 +138,6 @@ fi
 build THPP
 
 # The shared memory manager depends on TH
-CPP_FLAGS=" -std=c++11 "
 build libshm
 build ATen
 
