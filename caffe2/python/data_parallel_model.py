@@ -898,7 +898,7 @@ def _SyncAllParamsDistributed(
 
     for param_name in sorted(unique_param_names):
         master_param = model._device_grouped_blobs[param_name][devices[0]]
-        params_group = model._device_grouped_blobs[param_name].values()
+        params_group = list(viewvalues(model._device_grouped_blobs[param_name]))
 
         def broadcast(params):
             comm_world, control_input = context.get_control_and_context(params)
