@@ -1,4 +1,4 @@
-#include "blobs_queue_db.h"
+#include "caffe2/queue/blobs_queue_db.h"
 
 #include <algorithm>
 #include <chrono>
