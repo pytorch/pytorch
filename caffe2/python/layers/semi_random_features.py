@@ -29,11 +29,24 @@ class SemiRandomFeatures(ArcCosineFeatureMap):
         s -- if s == 0, will obtain linear semi-random features;
              else if s == 1, will obtain squared semi-random features;
              else s >= 2, will obtain higher order semi-random features
-        scale -- amount to scale the standard deviation
-        weight_init -- initialization distribution for weight parameter
-        bias_init -- initialization distribution for bias pararmeter
+        scale_random -- amount to scale the standard deviation
+                        (for random parameter initialization when weight_init or
+                        bias_init hasn't been specified)
+        scale_learned -- amount to scale the standard deviation
+                        (for learned parameter initialization when weight_init or
+                        bias_init hasn't been specified)
+
+        weight_init_random -- initialization distribution for random weight parameter
+                              (if None, will use Gaussian distribution)
+        bias_init_random -- initialization distribution for random bias pararmeter
+                            (if None, will use Uniform distribution)
+        weight_init_learned -- initialization distribution for learned weight parameter
+                               (if None, will use Gaussian distribution)
+        bias_init_learned -- initialization distribution for learned bias pararmeter
+                             (if None, will use Uniform distribution)
         weight_optim -- optimizer for weight params for learned features
         bias_optim -- optimizer for bias param for learned features
+
         set_weight_as_global_constant -- if True, initialized random parameters
                                          will be constant across all distributed
                                          instances of the layer
@@ -44,9 +57,12 @@ class SemiRandomFeatures(ArcCosineFeatureMap):
             input_record,
             output_dims,
             s=1,
-            scale=None,
-            weight_init=None,
-            bias_init=None,
+            scale_random=1.0,
+            scale_learned=1.0,
+            weight_init_random=None,
+            bias_init_random=None,
+            weight_init_learned=None,
+            bias_init_learned=None,
             weight_optim=None,
             bias_optim=None,
             set_weight_as_global_constant=False,
@@ -73,9 +89,9 @@ class SemiRandomFeatures(ArcCosineFeatureMap):
             self.input_record_full,
             output_dims,
             s=s,
-            scale=scale,
-            weight_init=weight_init,
-            bias_init=bias_init,
+            scale=scale_random,       # To initialize the random parameters
+            weight_init=weight_init_random,
+            bias_init=bias_init_random,
             weight_optim=None,
             bias_optim=None,
             set_weight_as_global_constant=set_weight_as_global_constant,
@@ -94,13 +110,20 @@ class SemiRandomFeatures(ArcCosineFeatureMap):
             ),),
         )
 
+        # To initialize the learnable parameters
+        assert (scale_learned > 0.0), \
+            "Expected scale (learned) > 0, got %s" % scale_learned
+        self.stddev = scale_learned * np.sqrt(1.0 / self.input_dims)
+
         # Learned Parameters
-        (self.learned_w, self.learned_b) = self._initialize_params('learned_w',
-                                                                   'learned_b',
-                                                                   w_init=weight_init,
-                                                                   b_init=bias_init,
-                                                                   w_optim=weight_optim,
-                                                                   b_optim=bias_optim)
+        (self.learned_w, self.learned_b) = self._initialize_params(
+            'learned_w',
+            'learned_b',
+            w_init=weight_init_learned,
+            b_init=bias_init_learned,
+            w_optim=weight_optim,
+            b_optim=bias_optim
+        )
 
     def add_ops(self, net):
         # Learned features: wx + b

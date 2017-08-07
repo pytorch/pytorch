@@ -1075,7 +1075,8 @@ class TestLayers(LayersTestCase):
             input_record,
             output_dims,
             s=s,
-            scale=scale,
+            scale_random=scale,
+            scale_learned=scale,
             set_weight_as_global_constant=set_weight_as_global_constant
         )
 
