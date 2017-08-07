@@ -1595,6 +1595,10 @@ void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
     THLongTensor_zero(indices_);
 
     if(t->size[dimension] == 1) {
+      if (!keepdim) {
+        THTensor_(squeeze1d)(values_, values_, dimension);
+        THLongTensor_squeeze1d(indices_, indices_, dimension);
+      }
       return;
     }
 
@@ -1671,6 +1675,10 @@ void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
     THLongTensor_zero(indices_);
 
     if(t->size[dimension] == 1) {
+      if (!keepdim) {
+        THTensor_(squeeze1d)(values_, values_, dimension);
+        THLongTensor_squeeze1d(indices_, indices_, dimension);
+      }
       return;
     }
 
