@@ -217,6 +217,22 @@ class TestTorch(TestCase):
             self.assertEqual(x.ndimension(), fn(x, dim).ndimension())
             self.assertEqual(x.ndimension(), fn(x, dim, keepdim=True).ndimension())
 
+            # check reducing of a singleton dimension
+            dims = [3, 4, 5]
+            singleton_dim = random.randint(0, 2)
+            dims[singleton_dim] = 1
+            x = torch.randn(dims)
+            fn_attr = getattr(torch, fn_name) if fn_name != "norm" else normfn_attr
+
+            def fn(t, dim, keepdim=False):
+                ans = fn_attr(x, dim, keepdim=keepdim)
+                return ans if not isinstance(ans, tuple) else ans[0]
+
+            dim = singleton_dim
+            self.assertEqual(fn(x, dim).unsqueeze(dim), fn(x, dim, keepdim=True))
+            self.assertEqual(x.ndimension() - 1, fn(x, dim).ndimension())
+            self.assertEqual(x.ndimension(), fn(x, dim, keepdim=True).ndimension())
+
     def _testCSelection(self, torchfn, mathfn):
         # Two tensors
         size = (100, 100)
