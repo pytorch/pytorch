@@ -156,19 +156,13 @@ bool L1DistanceOp<float, CUDAContext>::RunOnDevice() {
   }
   const int N = X.ndim() > 0 ? X.dim32(0) : 1;
   const int D = N > 0 ? X.size() / N : 0;
-
-  distance->Resize(N);
-
+  distance->Resize(vector<TIndex>(size_t(1), N));
   L1DistanceKernel<<<
       std::min(N, CAFFE_MAXIMUM_NUM_BLOCKS),
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
       N, D, X.data<float>(), Y.data<float>(), distance->mutable_data<float>());
-  math::Sum<float, CUDAContext>(
-      N, distance->data<float>(), distance->mutable_data<float>(), &context_);
-
-  distance->Resize(1);
 
   return true;
 }
@@ -185,12 +179,13 @@ __global__ void L1DistanceGradientKernel(
     T* dY) {
   CUDA_1D_KERNEL_LOOP(i, N * D) {
     constexpr float kEps = 1e-12;
+    int k = i / D;
     if (X[i] - Y[i] < -kEps) {
-      dX[i] = -dDistance[0];
-      dY[i] = dDistance[0];
+      dX[i] = -dDistance[k];
+      dY[i] = dDistance[k];
     } else if (X[i] - Y[i] > kEps) {
-      dX[i] = dDistance[0];
-      dY[i] = -dDistance[0];
+      dX[i] = dDistance[k];
+      dY[i] = -dDistance[k];
     } else {
       dX[i] = 0;
       dY[i] = 0;
@@ -206,16 +201,22 @@ bool L1DistanceGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& dDistance = Input(2);
   auto* dX = Output(0);
   auto* dY = Output(1);
-  CAFFE_ENFORCE_EQ(X.ndim(), Y.ndim());
+  int N = X.ndim() > 0 ? X.dim32(0) : 1;
+  int D = N > 0 ? X.size() / N : 0;
+  CAFFE_ENFORCE(X.ndim() == Y.ndim());
   for (int i = 0; i < X.ndim(); ++i) {
-    CAFFE_ENFORCE_EQ(X.dim32(i), Y.dim32(i));
+    CAFFE_ENFORCE_EQ(
+        X.dim32(i),
+        Y.dim32(i),
+        "Mismatch on dimensions: ",
+        X.dims(),
+        " / ",
+        Y.dims());
   }
-  CAFFE_ENFORCE(dDistance.ndim() == 1);
-  CAFFE_ENFORCE(dDistance.dim32(0) == 1);
+  CAFFE_ENFORCE_EQ(dDistance.ndim(), 1);
+  CAFFE_ENFORCE_EQ(dDistance.dim32(0), N);
   dX->ResizeLike(X);
   dY->ResizeLike(Y);
-  const int N = X.ndim() > 0 ? X.dim32(0) : 1;
-  const int D = N > 0 ? X.size() / N : 0;
 
   L1DistanceGradientKernel<<<
       CAFFE_GET_BLOCKS(N * D),

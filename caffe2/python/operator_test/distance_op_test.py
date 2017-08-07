@@ -57,13 +57,12 @@ class DistanceTest(hu.HypothesisTestCase):
         # Gradient check wrt Y
         self.assertGradientChecks(gc, op, [X, Y], 1, [0])
 
-    @given(inputs=hu.tensors(n=2,
-                             min_dim=1,
-                             max_dim=4,
-                             dtype=np.float32),
+    @given(n=st.integers(1, 3),
+           dim=st.integers(4, 16),
            **hu.gcs)
-    def test_L1_distance(self, inputs, gc, dc):
-        X, Y = inputs
+    def test_L1_distance(self, n, dim, gc, dc):
+        X = np.random.uniform(-1, 1, (n, dim)).astype(np.float32)
+        Y = np.random.uniform(-1, 1, (n, dim)).astype(np.float32)
         # avoid kinks by moving away from 0
         X += 0.02 * np.sign(X - Y)
         X[(X - Y) == 0.0] += 0.02
@@ -77,7 +76,8 @@ class DistanceTest(hu.HypothesisTestCase):
         )
         self.ws.run(op)
         np.testing.assert_allclose(self.ws.blobs[("l1_dist")].fetch(),
-                                     np.linalg.norm((X - Y).flatten(), ord=1),
+                                    [np.linalg.norm(x - y, ord=1)
+                                        for x, y in zip(X, Y)],
                                     rtol=1e-4, atol=1e-4)
 
         self.assertDeviceChecks(dc, op, [X, Y], [0])
