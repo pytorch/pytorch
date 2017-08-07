@@ -2658,14 +2658,20 @@ class TestTorch(TestCase):
 
         # Case 1: Purely Integer Array Indexing
         reference = conv_fn(consec((10,)))
+        self.assertEqual(reference[[0]], consec((1,)))
         self.assertEqual(reference[ri([0]), ], consec((1,)))
         self.assertEqual(reference[ri([3]), ], consec((1,), 4))
+        self.assertEqual(reference[[2, 3, 4]], consec((3,), 3))
         self.assertEqual(reference[ri([2, 3, 4]), ], consec((3,), 3))
         self.assertEqual(reference[ri([0, 2, 4]), ], torch.Tensor([1, 3, 5]))
 
         # setting values
-        reference[ri([0],), ] = -1
+        reference[[0]] = -2
+        self.assertEqual(reference[[0]], torch.Tensor([-2]))
+        reference[[0]] = -1
         self.assertEqual(reference[ri([0]), ], torch.Tensor([-1]))
+        reference[[2, 3, 4]] = 4
+        self.assertEqual(reference[[2, 3, 4]], torch.Tensor([4, 4, 4]))
         reference[ri([2, 3, 4]), ] = 3
         self.assertEqual(reference[ri([2, 3, 4]), ], torch.Tensor([3, 3, 3]))
         reference[ri([0, 2, 4]), ] = conv_fn(torch.Tensor([5, 4, 3]))
@@ -2679,8 +2685,10 @@ class TestTorch(TestCase):
         strided.set_(reference.storage(), storage_offset=0,
                      size=torch.Size([4]), stride=[2])
 
+        self.assertEqual(strided[[0]], torch.Tensor([1]))
         self.assertEqual(strided[ri([0]), ], torch.Tensor([1]))
         self.assertEqual(strided[ri([3]), ], torch.Tensor([7]))
+        self.assertEqual(strided[[1, 2]], torch.Tensor([3, 5]))
         self.assertEqual(strided[ri([1, 2]), ], torch.Tensor([3, 5]))
         self.assertEqual(strided[ri([[2, 1], [0, 3]]), ],
                          torch.Tensor([[5, 3], [1, 7]]))
@@ -2689,8 +2697,10 @@ class TestTorch(TestCase):
         strided = conv_fn(torch.Tensor())
         strided.set_(reference.storage(), storage_offset=4,
                      size=torch.Size([2]), stride=[4])
+        self.assertEqual(strided[[0]], torch.Tensor([5]))
         self.assertEqual(strided[ri([0]), ], torch.Tensor([5]))
         self.assertEqual(strided[ri([1]), ], torch.Tensor([9]))
+        self.assertEqual(strided[[0, 1]], torch.Tensor([5, 9]))
         self.assertEqual(strided[ri([0, 1]), ], torch.Tensor([5, 9]))
         self.assertEqual(strided[ri([[0, 1], [1, 0]]), ],
                          torch.Tensor([[5, 9], [9, 5]]))

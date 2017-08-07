@@ -601,6 +601,7 @@ class TestAutograd(TestCase):
         check_index(x, y, ([[2, 3], slice(None)]))
 
         # advanced indexing, with less dim, or ellipsis
+        check_index(x, y, ([0]))
         check_index(x, y, ([0], ))
 
         x = torch.arange(1, 49).view(4, 3, 4)
