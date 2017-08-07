@@ -31,17 +31,17 @@ struct BatchNormBackward : public Function, public BatchNormParams {
       BatchNormParams params,
       at::Tensor save_mean,
       at::Tensor save_std,
-      SavedVariable input,
-      SavedVariable weight,
-      SavedVariable bias)
+      const std::shared_ptr<Variable> &input,
+      const std::shared_ptr<Variable> &weight,
+      const std::shared_ptr<Variable> &bias)
     : Function(std::move(flags))
     , BatchNormParams(std::move(params)) {
       if (is_executable) {
         this->save_mean = std::move(save_mean);
         this->save_std = std::move(save_std);
-        this->input = std::move(input);
-        this->weight = std::move(weight);
-        this->bias = std::move(bias);
+        this->input = std::move(input->save(this));
+        this->weight = std::move(Variable::save_opt(weight.get(), this));
+        this->bias = std::move(Variable::save_opt(bias.get(), this));
       }
     }
 
@@ -62,17 +62,17 @@ struct BatchNormBackwardBackward : public Function, public BatchNormParams {
       BatchNormParams params,
       at::Tensor save_mean,
       at::Tensor save_std,
-      SavedVariable input,
-      SavedVariable weight,
-      SavedVariable grad_output)
+      const std::shared_ptr<Variable> &input,
+      const std::shared_ptr<Variable> &weight,
+      const std::shared_ptr<Variable> &grad_output)
     : Function(std::move(flags))
     , BatchNormParams(std::move(params)) {
       if (is_executable) {
         this->save_mean = std::move(save_mean);
         this->save_std = std::move(save_std);
-        this->input = std::move(input);
-        this->weight = std::move(weight);
-        this->grad_output = std::move(grad_output);
+        this->input = std::move(input->save(this));
+        this->weight = std::move(Variable::save_opt(weight.get(), this));
+        this->grad_output = std::move(grad_output->save(this));
       }
     }
 
