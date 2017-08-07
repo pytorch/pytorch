@@ -97,7 +97,7 @@ class DataWorkersTest(unittest.TestCase):
         workspace.RunNetOnce(model.param_init_net)
         workspace.CreateNet(model.net)
 
-        while coordinator._coordinators[0]._inputs < 100:
+        while coordinator._coordinators[0]._state._inputs < 100:
             time.sleep(0.01)
 
         # Run a couple of rounds
@@ -166,7 +166,7 @@ class DataWorkersTest(unittest.TestCase):
         workspace.CreateNet(model.net)
         workspace.CreateNet(val_model.net)
 
-        while coordinator._coordinators[0]._inputs < 900:
+        while coordinator._coordinators[0]._state._inputs < 900:
             time.sleep(0.01)
 
         with timeout_guard.CompleteInTimeOrDie(5):
