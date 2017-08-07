@@ -116,6 +116,9 @@ void RecurrentBaseOp<T>::initialize(
   // RNN setup
   {
     CUDNN_ENFORCE(cudnnSetRNNDescriptor(
+#if CUDNN_MAJOR >= 7
+        cudnn_wrapper_.inline_cudnn_handle(),
+#endif
         rnnDesc_,
         hiddenSize,
         numLayers,
@@ -123,6 +126,9 @@ void RecurrentBaseOp<T>::initialize(
         rnnInput,
         rnnDirection,
         rnnMode,
+#if CUDNN_MAJOR >= 7
+        CUDNN_RNN_ALGO_STANDARD, // TODO: verify correctness / efficiency.
+#endif
         cudnnTypeWrapper<T>::type));
   }
   // X setup

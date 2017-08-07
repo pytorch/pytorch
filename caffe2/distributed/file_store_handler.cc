@@ -12,6 +12,10 @@
 #include <iostream>
 #include <thread>
 
+#if defined(_MSC_VER)
+#include <direct.h> // for _mkdir
+#endif
+
 #include "caffe2/utils/murmur_hash3.h"
 
 namespace caffe2 {
@@ -37,7 +41,11 @@ FileStoreHandler::FileStoreHandler(
   if (!prefix.empty()) {
     basePath_ = basePath_ + "/" + encodeName(prefix);
   }
+#if defined(_MSC_VER)
+  auto ret = _mkdir(basePath_.c_str());
+#else
   auto ret = mkdir(basePath_.c_str(), 0777);
+#endif // defined(_MSC_VER)
   if (ret == -1) {
     CHECK_EQ(errno, EEXIST) << "mkdir: " << strerror(errno);
   }
