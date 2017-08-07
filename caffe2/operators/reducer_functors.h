@@ -1,3 +1,5 @@
+// Copyright 2004-present Facebook. All Rights Reserved.
+
 #ifndef CAFFE2_OPERATORS_RECUDER_FUNCTORS_H_
 #define CAFFE2_OPERATORS_RECUDER_FUNCTORS_H_
 
@@ -5,6 +7,7 @@
 
 #include "caffe2/core/context.h"
 #include "caffe2/utils/math.h"
+#include "caffe2/utils/proto_utils.h"
 
 namespace caffe2 {
 
@@ -730,7 +733,23 @@ struct MeanReducerDef {
   static constexpr const char* doc =
       "Mean computes the element-wise mean of the input slices. "
       "Operation doesn't change the shape of the individual blocks.";
-  static void PopulateSchema(OpSchema& /*schema*/) {}
+  static void PopulateSchema(OpSchema& schema) {
+    schema.TensorInferenceFunction(
+        [](const OperatorDef& def, const vector<TensorShape>& in) {
+          CAFFE_ENFORCE_EQ(1, in.size());
+          const auto& input_shape = in[0];
+
+          ArgumentHelper helper(def);
+          auto num_reduce_dims =
+              helper.GetSingleArgument<int32_t>("num_reduce_dim", 1);
+          TensorShape output_shape;
+
+          for (auto i = num_reduce_dims; i < input_shape.dims().size(); ++i) {
+            output_shape.add_dims(input_shape.dims(i));
+          }
+          return std::vector<TensorShape>{output_shape};
+        });
+  }
 };
 
 } // namespace caffe2
