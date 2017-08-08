@@ -85,3 +85,8 @@ if (${CMAKE_CXX_COMPILER_ID} STREQUAL "MSVC")
       /wd4996 # (3): Use of a deprecated member
   )
 endif()
+
+# ---[ If we are building on ios, we will enable -mfpu=neon-fp16 for iOS Metal build.
+if (IOS)
+  add_definitions("-mfpu=neon-fp16")
+endif()
