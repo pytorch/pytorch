@@ -3,11 +3,11 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import workspace, scope, gru_cell
+from caffe2.python import workspace, core, scope, gru_cell
 from caffe2.python.model_helper import ModelHelper
 from caffe2.python.rnn.rnn_cell_test_util import sigmoid, tanh, _prepare_rnn
 import caffe2.python.hypothesis_test_util as hu
-
+from caffe2.proto import caffe2_pb2
 
 from functools import partial
 from hypothesis import given
@@ -150,7 +150,7 @@ def gru_input():
     return dims_.flatmap(create_input)
 
 
-def _prepare_gru_unit_op(n, d, outputs_with_grads,
+def _prepare_gru_unit_op(gc, n, d, outputs_with_grads,
                          forward_only=False, drop_states=False,
                          two_d_initial_states=None):
     print("Dims: (n,d) = ({},{})".format(n, d))
@@ -173,11 +173,13 @@ def _prepare_gru_unit_op(n, d, outputs_with_grads,
             )
         workspace.FeedBlob(
             hidden_t_prev,
-            generate_input_state(n, d).astype(np.float32)
+            generate_input_state(n, d).astype(np.float32),
+            device_option=gc
         )
         workspace.FeedBlob(
             gates_t,
-            generate_input_state(n, 3 * d).astype(np.float32)
+            generate_input_state(n, 3 * d).astype(np.float32),
+            device_option=gc
         )
 
         hidden_t = model.net.GRUUnit(
@@ -198,12 +200,15 @@ def _prepare_gru_unit_op(n, d, outputs_with_grads,
         # and generate some reasonable seq. lengths
         workspace.FeedBlob(
             seq_lengths,
-            np.random.randint(1, 10, size=(n,)).astype(np.int32)
+            np.random.randint(1, 10, size=(n,)).astype(np.int32),
+            device_option=gc
         )
         workspace.FeedBlob(
             timestep,
-            np.random.randint(1, 10, size=(1,)).astype(np.int32)
+            np.random.randint(1, 10, size=(1,)).astype(np.int32),
+            device_option=core.DeviceOption(caffe2_pb2.CPU),
         )
+        print("Feed {}".format(timestep))
 
     return hidden_t, model.net
 
@@ -215,9 +220,10 @@ class GRUCellTest(hu.HypothesisTestCase):
         input_tensor=gru_unit_op_input(),
         fwd_only=st.booleans(),
         drop_states=st.booleans(),
+        **hu.gcs
     )
     @ht_settings(max_examples=15)
-    def test_gru_unit_op(self, input_tensor, fwd_only, drop_states, **kwargs):
+    def test_gru_unit_op(self, input_tensor, fwd_only, drop_states, gc, dc):
         outputs_with_grads = [0]
         ref = gru_unit
         ref = partial(ref)
@@ -227,22 +233,26 @@ class GRUCellTest(hu.HypothesisTestCase):
         d = d // 3
         ref = partial(ref, drop_states=drop_states)
 
-        net = _prepare_gru_unit_op(n, d,
-                                   outputs_with_grads=outputs_with_grads,
-                                   forward_only=fwd_only,
-                                   drop_states=drop_states)[1]
+        with core.DeviceScope(gc):
+            net = _prepare_gru_unit_op(gc, n, d,
+                                       outputs_with_grads=outputs_with_grads,
+                                       forward_only=fwd_only,
+                                       drop_states=drop_states)[1]
         # here we don't provide a real input for the net but just for one of
         # its ops (RecurrentNetworkOp). So have to hardcode this name
         workspace.FeedBlob("test_name_scope/external/recurrent/i2h",
-                           input_tensor)
+                           input_tensor,
+                           device_option=gc)
+        print(str(net.Proto()))
         op = net._net.op[-1]
         inputs = [workspace.FetchBlob(name) for name in op.input]
 
         self.assertReferenceChecks(
-            hu.cpu_do,
+            gc,
             op,
             inputs,
             ref,
+            input_device_options={op.input[3]: hu.cpu_do},
             outputs_to_check=[0],
         )
 
@@ -251,19 +261,21 @@ class GRUCellTest(hu.HypothesisTestCase):
             for param in range(2):
                 print("Check param {}".format(param))
                 self.assertGradientChecks(
-                    device_option=hu.cpu_do,
+                    device_option=gc,
                     op=op,
                     inputs=inputs,
                     outputs_to_check=param,
                     outputs_with_grads=outputs_with_grads,
                     threshold=0.0001,
                     stepsize=0.005,
+                    input_device_options={op.input[3]: hu.cpu_do},
                 )
 
     @given(
         input_tensor=gru_input(),
         fwd_only=st.booleans(),
         drop_states=st.booleans(),
+        **hu.gcs
     )
     @ht_settings(max_examples=15)
     def test_gru_main(self, **kwargs):
@@ -273,32 +285,33 @@ class GRUCellTest(hu.HypothesisTestCase):
                            **kwargs)
 
     def gru_base(self, create_rnn, ref, outputs_with_grads,
-                  input_tensor, fwd_only, drop_states):
+                  input_tensor, fwd_only, drop_states, gc, dc):
         print("GRU test parameters: ", locals())
-
         t, n, d = input_tensor.shape
         assert d % 3 == 0
         d = d // 3
         ref = partial(ref, drop_states=drop_states)
-
-        net = _prepare_rnn(t, n, d, create_rnn,
-                            outputs_with_grads=outputs_with_grads,
-                            memory_optim=False,
-                            forget_bias=0.0,
-                            forward_only=fwd_only,
-                            drop_states=drop_states)[1]
+        with core.DeviceScope(gc):
+            net = _prepare_rnn(t, n, d, create_rnn,
+                                outputs_with_grads=outputs_with_grads,
+                                memory_optim=False,
+                                forget_bias=0.0,
+                                forward_only=fwd_only,
+                                drop_states=drop_states)[1]
         # here we don't provide a real input for the net but just for one of
         # its ops (RecurrentNetworkOp). So have to hardcode this name
         workspace.FeedBlob("test_name_scope/external/recurrent/i2h",
-                           input_tensor)
+                           input_tensor,
+                           device_option=gc)
         op = net._net.op[-1]
         inputs = [workspace.FetchBlob(name) for name in op.input]
 
         self.assertReferenceChecks(
-            hu.cpu_do,
+            gc,
             op,
             inputs,
             ref,
+            input_device_options={"timestep": hu.cpu_do},
             outputs_to_check=list(range(2)),
         )
 
@@ -307,11 +320,12 @@ class GRUCellTest(hu.HypothesisTestCase):
             for param in range(2):
                 print("Check param {}".format(param))
                 self.assertGradientChecks(
-                    device_option=hu.cpu_do,
+                    device_option=gc,
                     op=op,
                     inputs=inputs,
                     outputs_to_check=param,
                     outputs_with_grads=outputs_with_grads,
                     threshold=0.001,
                     stepsize=0.005,
+                    input_device_options={"timestep": hu.cpu_do},
                 )
