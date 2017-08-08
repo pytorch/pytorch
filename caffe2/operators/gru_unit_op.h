@@ -8,6 +8,16 @@
 namespace caffe2 {
 namespace detail {
 
+template <typename T>
+inline T sigmoid(T x) {
+  return 1.0f / (1.0f + exp(-x));
+}
+
+template <typename T>
+inline T host_tanh(T x) {
+  return 2.0f * sigmoid(2.0f * x) - 1.0f;
+}
+
 template <typename T, typename Context>
 void GRUUnit(
     int N,
@@ -17,7 +27,32 @@ void GRUUnit(
     const T* X,
     const int32_t* seqLengths,
     bool drop_states,
-    T* H);
+    T* H,
+    Context* /*context*/) {
+  for (int n = 0; n < N; ++n) {
+    const bool valid = t < seqLengths[n];
+
+    for (int d = 0; d < D; ++d) {
+      if (!valid) {
+        if (drop_states) {
+          H[d] = 0;
+        } else {
+          H[d] = H_prev[d];
+        }
+      } else {
+        const T update = X[1 * D + d];
+        const T output = X[2 * D + d];
+        T sigmoid_update = sigmoid(update);
+        H[d] = H_prev[d] * sigmoid_update +
+            host_tanh(output) * (1.0f - sigmoid_update);
+      }
+    }
+
+    H_prev += D;
+    X += 3 * D;
+    H += D;
+  }
+}
 
 template <typename T, typename Context>
 void GRUUnitGradient(
@@ -31,9 +66,48 @@ void GRUUnitGradient(
     const T* H_diff,
     bool drop_states,
     T* H_prev_diff,
-    T* X_diff);
+    T* X_diff,
+    Context* /*context*/) {
+  for (int n = 0; n < N; ++n) {
+    const bool valid = t < seqLengths[n];
 
-}; // namespace detail
+    for (int d = 0; d < D; ++d) {
+      T* h_prev_diff = H_prev_diff + d;
+      T* reset_diff = X_diff + 0 * D + d;
+      T* update_diff = X_diff + 1 * D + d;
+      T* output_diff = X_diff + 2 * D + d;
+
+      if (!valid) {
+        if (drop_states) {
+          *h_prev_diff = 0;
+        } else {
+          *h_prev_diff = H_diff[d];
+        }
+        *reset_diff = 0;
+        *update_diff = 0;
+        *output_diff = 0;
+      } else {
+        // Calculate Gate Outputs
+        const T u = sigmoid(X[1 * D + d]);
+        const T o = host_tanh(X[2 * D + d]);
+
+        *h_prev_diff = H_diff[d] * u;
+        *reset_diff = 0; // 0 contribution to gradient from this operation
+        *update_diff = (H_diff[d] * H_prev[d] - H_diff[d] * o) * u * (1.0f - u);
+        *output_diff = H_diff[d] * (1.0f - u) * (1.0f - o * o);
+      }
+    }
+
+    H_prev += D;
+    X += 3 * D;
+    H += D;
+    H_diff += D;
+    X_diff += 3 * D;
+    H_prev_diff += D;
+  }
+}
+
+} // namespace detail
 
 template <typename T, typename Context>
 class GRUUnitOp : public Operator<Context> {
@@ -64,7 +138,7 @@ class GRUUnitOp : public Operator<Context> {
     auto* H = Output(HIDDEN_T)->template mutable_data<T>();
 
     detail::GRUUnit<T, Context>(
-        N, D, t, H_prev, X, seqLengths, drop_states_, H);
+        N, D, t, H_prev, X, seqLengths, drop_states_, H, &context_);
     return true;
   }
 
@@ -118,7 +192,8 @@ class GRUUnitGradientOp : public Operator<Context> {
         H_diff,
         drop_states_,
         H_prev_diff,
-        X_diff);
+        X_diff,
+        &context_);
     return true;
   }
 
