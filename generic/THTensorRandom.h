@@ -3,6 +3,8 @@
 #else
 
 TH_API void THTensor_(random)(THTensor *self, THGenerator *_generator);
+TH_API void THTensor_(clampedRandom)(THTensor *self, THGenerator *_generator, long min, long max);
+TH_API void THTensor_(cappedRandom)(THTensor *self, THGenerator *_generator, long max);
 TH_API void THTensor_(geometric)(THTensor *self, THGenerator *_generator, double p);
 TH_API void THTensor_(bernoulli)(THTensor *self, THGenerator *_generator, double p);
 TH_API void THTensor_(bernoulli_FloatTensor)(THTensor *self, THGenerator *_generator, THFloatTensor *p);
