@@ -199,9 +199,6 @@ class CUDAContext final {
  protected:
   static void Delete(void* data);
 
-  static void enableDevice2DeviceAccess(int device1, int device2);
-  void enablePeerAccess();
-
   int gpu_id_;
   int stream_id_ = 0;
   int random_seed_;
