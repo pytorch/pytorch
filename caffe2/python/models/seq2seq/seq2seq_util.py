@@ -280,7 +280,7 @@ def build_embedding_encoder(
             None,
         )
 
-        return_final_state = i > (num_encoder_layers - num_encoder_layers)
+        return_final_state = i >= (num_encoder_layers - num_decoder_layers)
         (
             layer_outputs,
             final_layer_hidden_state,
@@ -333,6 +333,7 @@ class LSTMWithAttentionDecoder(object):
         self,
         encoder_outputs,
         encoder_output_dim,
+        encoder_lengths,
         vocab_size,
         attention_type,
         embedding_size,
@@ -362,6 +363,7 @@ class LSTMWithAttentionDecoder(object):
             self.cell = rnn_cell.AttentionCell(
                 encoder_output_dim=encoder_output_dim,
                 encoder_outputs=encoder_outputs,
+                encoder_lengths=encoder_lengths,
                 decoder_cell=decoder_cell,
                 decoder_state_dim=decoder_num_units,
                 name=self.scope('attention_decoder'),
@@ -440,7 +442,10 @@ def build_initial_rnn_decoder_states(
     initial_states = []
     for i, decoder_num_units in enumerate(decoder_units_per_layer):
 
-        if final_encoder_hidden_states and len(final_encoder_hidden_states) > i:
+        if (
+            final_encoder_hidden_states and
+            len(final_encoder_hidden_states) > (i + offset)
+        ):
             final_encoder_hidden_state = final_encoder_hidden_states[i + offset]
         else:
             final_encoder_hidden_state = None
@@ -466,7 +471,10 @@ def build_initial_rnn_decoder_states(
             decoder_initial_hidden_state = final_encoder_hidden_state
         initial_states.append(decoder_initial_hidden_state)
 
-        if final_encoder_cell_states and len(final_encoder_cell_states) > i:
+        if (
+            final_encoder_cell_states and
+            len(final_encoder_cell_states) > (i + offset)
+        ):
             final_encoder_cell_state = final_encoder_cell_states[i + offset]
         else:
             final_encoder_cell_state = None
@@ -586,6 +594,7 @@ def build_embedding_decoder(
     attention_decoder = LSTMWithAttentionDecoder(
         encoder_outputs=encoder_outputs,
         encoder_output_dim=encoder_units_per_layer[-1],
+        encoder_lengths=encoder_lengths,
         vocab_size=vocab_size,
         attention_type=attention_type,
         embedding_size=embedding_size,

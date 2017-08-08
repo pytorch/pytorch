@@ -85,13 +85,15 @@ class Seq2SeqModelCaffe2EnsembleDecoder(object):
             scope=scope,
         )
         with core.NameScope(scope):
-            # [max_source_length, beam_size, encoder_output_dim]
-            encoder_outputs = model.net.Tile(
-                encoder_outputs,
-                'encoder_outputs_tiled',
-                tiles=self.beam_size,
-                axis=1,
-            )
+            if use_attention:
+                # [max_source_length, beam_size, encoder_output_dim]
+                encoder_outputs = model.net.Tile(
+                    encoder_outputs,
+                    'encoder_outputs_tiled',
+                    tiles=self.beam_size,
+                    axis=1,
+                )
+
             if weighted_encoder_outputs is not None:
                 weighted_encoder_outputs = model.net.Tile(
                     weighted_encoder_outputs,
@@ -166,6 +168,7 @@ class Seq2SeqModelCaffe2EnsembleDecoder(object):
         attention_decoder = seq2seq_util.LSTMWithAttentionDecoder(
             encoder_outputs=encoder_outputs,
             encoder_output_dim=encoder_units_per_layer[-1],
+            encoder_lengths=None,
             vocab_size=self.target_vocab_size,
             attention_type=attention_type,
             embedding_size=model_params['decoder_embedding_size'],
@@ -185,18 +188,6 @@ class Seq2SeqModelCaffe2EnsembleDecoder(object):
             states=states_prev,
             timestep=timestep,
         )
-        if use_attention:
-            with core.NameScope(scope or ''):
-                decoder_outputs, _ = step_model.net.Concat(
-                    [states[0], states[2]],
-                    [
-                        'states_and_context_combination',
-                        '_states_and_context_combination_concat_dims',
-                    ],
-                    axis=2,
-                )
-        else:
-            decoder_outputs = states[0]
 
         state_configs = [
             BeamSearchForwardOnly.StateConfig(
