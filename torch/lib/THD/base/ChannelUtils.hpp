@@ -5,6 +5,7 @@
 #include <sys/types.h>
 #include <cstdlib>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <string>
 #include <system_error>
