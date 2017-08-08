@@ -81,6 +81,10 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
       // TODO: figure out a good way to output strides, or
       // add a "debug" printing mode which adds the extra stuff
       out << sizes[i]; // << "%" << strides[i];
+      int64_t expected = i + 1 < sizes.size() ? sizes[i+1]*strides[i+1] : 1;
+      if (strides[i] != expected) {
+        out << "!"; //mark non-contiguous
+      }
     }
     out << ")";
   TYPE_END()
@@ -96,7 +100,12 @@ std::ostream& operator<<(std::ostream & out, node_list_with_types l) {
   for(auto n : l.nodes) {
     if(i++ > 0)
       out << ", ";
-    out << *n << " : " << *n->type();
+
+    out << *n << " : ";
+    if(n->hasType())
+      out << *n->type();
+    else
+      out << "UNKNOWN_TYPE";
   }
   return out;
 }
@@ -112,14 +121,14 @@ std::ostream& operator<<(std::ostream & out, Graph & g) {
         prev_stage = n->stage();
       }
       out << "  ";
-      if (n->type()->kind() == TypeKind::MultiType) {
-        node_list selects;
+      node_list outputs;
+      if (n->hasMultipleOutputs()) {
         for (auto u : n->uses())
-          selects.push_back(u.user);
-        out << node_list_with_types(selects);
+          outputs.push_back(u.user);
       } else {
-        out << "%" << n->unique();
+        outputs.push_back(n);
       }
+      out << node_list_with_types(outputs);
       out << " = ";
       IR_IF(n,PythonOp)
         out << "^" << value->name();
@@ -140,7 +149,7 @@ std::ostream& operator<<(std::ostream & out, Graph & g) {
         out << toString(n->kind());
       IR_END()
       out << "(" << n->inputs() << "), uses = [";
-      if(n->type()->kind() == TypeKind::MultiType) {
+      if(n->hasMultipleOutputs()) {
         size_t i = 0;
         for(auto u : n->uses()) {
           if(i++ > 0)
@@ -206,7 +215,7 @@ void Node::lint() {
       // Select invariant
       // - Multi-return nodes only have select uses
       // - uses = [Select 0, Select 1, Select 2, ...]
-      if (type_->kind() == TypeKind::MultiType) {
+      if (type_ && type_->kind() == TypeKind::MultiType) {
         JIT_ASSERT(use.offset == 0);
         IR_IF(use.user, Select)
           JIT_ASSERT(value->offset() == i);

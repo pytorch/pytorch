@@ -51,6 +51,9 @@ enum class TypeKind {
 #undef DEFINE_TYPE
 };
 
+struct Type;
+using TypePtr = std::shared_ptr<Type>;
+
 struct Type {
 private:
   TypeKind kind_;
@@ -72,47 +75,35 @@ public:
       return static_cast<T*>(this);
     return nullptr;
   }
-
-  std::unique_ptr<Type> clone() const;
-
-  static std::unique_ptr<Type> newWithKind(TypeKind kind);
 };
 
 // This node represents a single Tensor value
 struct TensorType : public Type {
-private:
   friend struct Type;
-
-  std::vector<std::int64_t> sizes_;
-  std::vector<std::int64_t> strides_;
-
-  TensorType()
-    : Type(TypeKind::TensorType) {}
-
-public:
-  static const TypeKind Kind = TypeKind::TensorType;
-
-  void inferFrom(const at::Tensor& tensor) {
-    auto ndim = tensor.dim();
-    sizes_.resize(ndim);
-    strides_.resize(ndim);
-    // NOTE: This is not memcpy! These are assignments.
-    std::copy(tensor.sizes().begin(), tensor.sizes().end(), sizes_.begin());
-    std::copy(tensor.strides().begin(), tensor.strides().end(), strides_.begin());
+  TensorType(const at::Tensor& tensor)
+    : Type(TypeKind::TensorType) {
+      auto ndim = tensor.dim();
+      sizes_.resize(ndim);
+      strides_.resize(ndim);
+      // NOTE: This is not memcpy! These are assignments.
+      std::copy(tensor.sizes().begin(), tensor.sizes().end(), sizes_.begin());
+      std::copy(tensor.strides().begin(), tensor.strides().end(), strides_.begin());
   }
-
+  static const TypeKind Kind = TypeKind::TensorType;
   const std::vector<std::int64_t>& sizes() const {
     return sizes_;
   }
   const std::vector<std::int64_t>& strides() const {
     return strides_;
   }
+private:
+  std::vector<int64_t> sizes_;
+  std::vector<int64_t> strides_;
 };
 
 // Type of multireturn nodes. Note that it doesn't mean that they must always
 // have multiple outputs, but each output will be represented with a select node.
 struct MultiType : public Type {
-private:
   friend struct Type;
 
   MultiType()
@@ -149,30 +140,6 @@ private:
 public:
   static const TypeKind Kind = TypeKind::HandleType;
 };
-
-
-inline std::unique_ptr<Type> Type::newWithKind(TypeKind kind) {
-  switch (kind) {
-#define HANDLE_KIND(KIND) \
-  case TypeKind::KIND:    \
-    return std::unique_ptr<Type>(static_cast<Type*>(new KIND()));
-    TH_FORALL_TYPES(HANDLE_KIND)
-  }
-#undef HANDLE_KIND
-  __builtin_unreachable();
-}
-
-inline std::unique_ptr<Type> Type::clone() const {
-#define HANDLE_KIND(KIND) \
-  case TypeKind::KIND:    \
-    return std::unique_ptr<Type>(static_cast<Type*>( \
-          new KIND(*(static_cast<const KIND*>(this)))));
-  switch (kind_) {
-    TH_FORALL_TYPES(HANDLE_KIND)
-  }
-#undef HANDLE_KIND
-  __builtin_unreachable();
-}
 
 // Each use is represented by this type, see Node::uses()
 // 'user' is the consumer of the node, offset is the index into
@@ -241,30 +208,29 @@ private:
   size_t unique_ = 0;          // unique id
   size_t stage_ = 0;           // 0-forward, 1-backward, 2-double-backward,...
 protected:
-  std::unique_ptr<Type> type_;
-  Node(NodeKind kind_, TypeKind type_kind)
-  : kind_(kind_), type_(Type::newWithKind(type_kind)) {}
+  TypePtr type_;
+  Node(NodeKind kind_)
+  : kind_(kind_) {}
 public:
-  NodeKind kind() {
+  NodeKind kind() const {
     return kind_;
   }
-  // The returned Type is live ONLY as long as it is the
-  // Type for this node; e.g., setType() will invalidate any
-  // old type() references.  This makes me nervous; see
-  // https://github.com/ezyang/pytorch/issues/52
-  const Type* type() const {
-    return type_.get();
+  const TypePtr & type() const {
+    JIT_ASSERT(type_ != nullptr);
+    return type_;
   }
   bool hasMultipleOutputs() const {
-    return type()->kind() == TypeKind::MultiType;
+    return hasType() && type()->kind() == TypeKind::MultiType;
   }
-  void setType(const Type* type) {
-    type_ = type->clone();
+  bool hasType() const {
+    return type_ != nullptr;
+  }
+  Node* setType(const TypePtr type) {
+    type_ = type;
+    return this;
   }
   void inferTypeFrom(const at::Tensor& output) {
-    auto single_type = type_->cast<TensorType>();
-    JIT_ASSERT(single_type);
-    single_type->inferFrom(output);
+    setType(std::make_shared<TensorType>(output));
   }
   Graph * owningGraph() {
     return graph_;
@@ -520,15 +486,26 @@ protected:
 // using CRTP so that we can alloc new clones and dispatch to custom clone code
 // without significant boilerplate
 
-// TypeKind T is the default for this node type, but
+// DefaultType constructs the default Type for this node, but
 // can be changed with setType()
 
-template<typename Self, NodeKind K, TypeKind T>
+struct NullDefault {
+  static TypePtr get() { return nullptr; }
+};
+struct MultiTypeDefault {
+  static TypePtr get() {
+    static TypePtr multiType = std::make_shared<MultiType>();
+    return multiType;
+  }
+};
+template<typename Self, NodeKind K, typename DefaultType = NullDefault>
 struct NodeWithKind : public Node {
   friend struct Graph; /* so it can access allocClone() */
   static const NodeKind Kind = K;
   NodeWithKind()
-  : Node(K, T) {}
+  : Node(K) {
+    setType(DefaultType::get());
+  }
   // virtual so we can easily define a default here
   // defined using CRTP so cloneFrom doesn't need casts.
   // called from allocClone
@@ -536,7 +513,7 @@ struct NodeWithKind : public Node {
 protected:
   // allocate a new Node with the same type as this node, and
   // get it initialized in in_graph
-  // in_graph may not be the same graph as this->graph_ because we might be
+  // in_graph may not be the fsame graph as this->graph_ because we might be
   // cloning the node into a new graph
   // defined here because we need to know Self to allocate a new node.
   // user-defined cloneFrom is called.
@@ -545,7 +522,7 @@ protected:
 
 // helper to define simple primitive Ops.
 template<typename Self, NodeKind K>
-struct Primitive : public NodeWithKind<Self, K, TypeKind::TensorType> {
+struct Primitive : public NodeWithKind<Self, K> {
   void init() {}
   void init(ArrayRef<Node*> inputs) {
     for(auto i : inputs)
@@ -558,14 +535,14 @@ struct Primitive : public NodeWithKind<Self, K, TypeKind::TensorType> {
 struct Return : public Primitive<Return, NodeKind::Return> {};
 
 // an input tensor to the graph
-struct Param : public NodeWithKind<Param, NodeKind::Param, TypeKind::TensorType> {
+struct Param : public NodeWithKind<Param, NodeKind::Param> {
   void init() {}
 };
 
 struct Graph {
 TH_DISALLOW_COPY_AND_ASSIGN(Graph);
 friend struct Node;
-template<typename Self, NodeKind K, TypeKind T>
+template<typename Self, NodeKind K, typename DefaultType>
 friend struct NodeWithKind;
 private:
   param_list inputs_;
@@ -730,10 +707,10 @@ inline void Node::destroy() {
   graph_->freeNode(this);
 }
 
-template<typename Self, NodeKind K, TypeKind T>
-Node * NodeWithKind<Self,K,T>::allocClone(Graph * in_graph) {
+template<typename Self, NodeKind K, typename DefaultType>
+Node * NodeWithKind<Self,K,DefaultType>::allocClone(Graph * in_graph) {
   auto s = new Self();
-  s->type_ = this->type_->clone();
+  s->type_ = this->type_;
   in_graph->initNewNodeForGraph(s);
   // static cast is needed because the compiler doesn't know NodeWithKind is a CRTP.
   s->cloneFrom(static_cast<Self*>(this));
@@ -789,7 +766,7 @@ Node * NodeWithKind<Self,K,T>::allocClone(Graph * in_graph) {
 */
 
 std::ostream& operator<<(std::ostream & out, Graph & g);
-
+std::ostream& operator<<(std::ostream & out, const Type & t);
 static inline const char * toString(NodeKind kind) {
   switch(kind) {
 #define DEFINE_CASE(Kind) \
@@ -805,7 +782,7 @@ static inline const char * toString(NodeKind kind) {
 /************* All nodes not required to be defined before Graph **************/
 
  // execute a Python function, used for Ops we can't optimize but that we want to optimize around
-struct PythonOp : public NodeWithKind<PythonOp,NodeKind::PythonOp,TypeKind::MultiType> {
+struct PythonOp : public NodeWithKind<PythonOp,NodeKind::PythonOp,MultiTypeDefault> {
   //TODO: make this non-autograd specific
   //remove is_legacy, avoid THPObjectPtr to avoid big PyTorch dependency
 
@@ -842,17 +819,15 @@ struct PythonOp : public NodeWithKind<PythonOp,NodeKind::PythonOp,TypeKind::Mult
 
 // A Cpp operator is an operator which dispatches directly to an autograd function.
 // TODO: These are not executable without reentrant engine.
-struct CppOp : public NodeWithKind<CppOp,NodeKind::CppOp,TypeKind::MultiType> {
+struct CppOp : public NodeWithKind<CppOp,NodeKind::CppOp, MultiTypeDefault> {
   std::shared_ptr<torch::autograd::Function> fn;
-
   std::string name();
-
   void init(std::shared_ptr<torch::autograd::Function> fn) {
     this->fn = std::move(fn);
   }
 };
 
-struct Eval : public NodeWithKind<Eval,NodeKind::Eval,TypeKind::MultiType> {
+struct Eval : public NodeWithKind<Eval,NodeKind::Eval,MultiTypeDefault> {
   void init() {};
 };
 
@@ -863,7 +838,7 @@ struct Eval : public NodeWithKind<Eval,NodeKind::Eval,TypeKind::MultiType> {
 // in this case
 // number_of_outputs = op.uses().size()
 // this will change if Tuples ever become first class.
-struct Select : public NodeWithKind<Select,NodeKind::Select,TypeKind::TensorType> {
+struct Select : public NodeWithKind<Select,NodeKind::Select> {
   void init(Node * node, size_t offset) {
     addInput(node);
     this->offset_ = offset;
@@ -892,7 +867,7 @@ struct Negate : public Primitive<Negate,NodeKind::Negate> {};
 struct Sigmoid : public Primitive<Sigmoid,NodeKind::Sigmoid> {};
 struct Tanh : public Primitive<Tanh,NodeKind::Tanh> {};
 
-struct Chunk : public NodeWithKind<Chunk, NodeKind::Chunk, TypeKind::MultiType> {
+struct Chunk : public NodeWithKind<Chunk, NodeKind::Chunk,MultiTypeDefault> {
   void init(int64_t num_chunks_, int64_t dim_) {
     num_chunks = num_chunks_;
     dim = dim_;
@@ -906,7 +881,7 @@ struct Chunk : public NodeWithKind<Chunk, NodeKind::Chunk, TypeKind::MultiType> 
 
 // A tensor constant
 // TODO: constant compression
-struct Constant : public NodeWithKind<Constant, NodeKind::Constant,TypeKind::TensorType> {
+struct Constant : public NodeWithKind<Constant, NodeKind::Constant> {
   void init(const at::Tensor& ref) {
     AutoGPU guard(ref.type().isCuda() ? ref.get_device() : -1);
     value = ref.clone();
@@ -915,7 +890,7 @@ struct Constant : public NodeWithKind<Constant, NodeKind::Constant,TypeKind::Ten
   at::Tensor value;
 };
 
-struct FusionGroup : public NodeWithKind<FusionGroup,NodeKind::FusionGroup,TypeKind::MultiType> {
+struct FusionGroup : public NodeWithKind<FusionGroup,NodeKind::FusionGroup,MultiTypeDefault> {
   void init() {
     subgraph_ = std::make_shared<Graph>();
   }

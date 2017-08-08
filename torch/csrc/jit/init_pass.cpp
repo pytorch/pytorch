@@ -53,7 +53,6 @@ void MatchJITOps(std::unique_ptr<Graph>& graph) {
     new_op->insertAfter(p);
 
     if(new_op->hasMultipleOutputs()) {
-      new_op->setType(p->type());
       p->replaceAllUsesWith(new_op);
     } else {
       // PythonOps are always multireturn. We need to remove the Select node.
