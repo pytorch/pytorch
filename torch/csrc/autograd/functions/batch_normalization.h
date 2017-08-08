@@ -39,9 +39,9 @@ struct BatchNormBackward : public Function, public BatchNormParams {
       if (is_executable) {
         this->save_mean = std::move(save_mean);
         this->save_std = std::move(save_std);
-        this->input = std::move(input->save(this));
-        this->weight = std::move(Variable::save_opt(weight.get(), this));
-        this->bias = std::move(Variable::save_opt(bias.get(), this));
+        this->input = input->save(this);
+        this->weight = Variable::save_opt(weight.get(), this);
+        this->bias = Variable::save_opt(bias.get(), this);
       }
     }
 
@@ -70,9 +70,9 @@ struct BatchNormBackwardBackward : public Function, public BatchNormParams {
       if (is_executable) {
         this->save_mean = std::move(save_mean);
         this->save_std = std::move(save_std);
-        this->input = std::move(input->save(this));
-        this->weight = std::move(Variable::save_opt(weight.get(), this));
-        this->grad_output = std::move(grad_output->save(this));
+        this->input = input->save(this);
+        this->weight = Variable::save_opt(weight.get(), this);
+        this->grad_output = grad_output->save(this);
       }
     }
 
