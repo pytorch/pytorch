@@ -13,6 +13,7 @@ import numpy as np
 import random
 import time
 import sys
+import os
 
 import caffe2.proto.caffe2_pb2 as caffe2_pb2
 from caffe2.python import core, workspace, data_parallel_model
@@ -274,21 +275,18 @@ class Seq2SeqModelCaffe2:
             ['target_weights', 'target_weights_old_shape'],
             shape=[-1],
         )
-        output_probs = model.net.Softmax(
-            [output_logits],
-            ['output_probs'],
-            engine=('CUDNN' if self.num_gpus > 0 else None),
+        _, loss_per_word = model.net.SoftmaxWithLoss(
+            [output_logits, targets, target_weights],
+            ['OutputProbs_INVALID', 'loss_per_word'],
+            only_loss=True,
         )
-        label_cross_entropy = model.net.LabelCrossEntropy(
-            [output_probs, targets],
-            ['label_cross_entropy'],
+
+        num_words = model.net.SumElements(
+            [target_weights],
+            'num_words',
         )
-        weighted_label_cross_entropy = model.net.Mul(
-            [label_cross_entropy, target_weights],
-            'weighted_label_cross_entropy',
-        )
-        total_loss_scalar = model.net.SumElements(
-            [weighted_label_cross_entropy],
+        total_loss_scalar = model.net.Mul(
+            [loss_per_word, num_words],
             'total_loss_scalar',
         )
         total_loss_scalar_weighted = model.net.Scale(
@@ -550,6 +548,33 @@ class Seq2SeqModelCaffe2:
 
         return self.total_loss_scalar()
 
+    def save(self, checkpoint_path_prefix, current_step):
+        checkpoint_path = '{0}-{1}'.format(
+            checkpoint_path_prefix,
+            current_step,
+        )
+
+        assert workspace.RunOperatorOnce(core.CreateOperator(
+            'Save',
+            self.model.GetAllParams(),
+            [],
+            absolute_path=True,
+            db=checkpoint_path,
+            db_type='minidb',
+        ))
+
+        checkpoint_config_path = os.path.join(
+            os.path.dirname(checkpoint_path_prefix),
+            'checkpoint',
+        )
+        with open(checkpoint_config_path, 'w') as checkpoint_config_file:
+            checkpoint_config_file.write(
+                'model_checkpoint_path: "' + checkpoint_path + '"\n'
+                'all_model_checkpoint_paths: "' + checkpoint_path + '"\n'
+            )
+            logger.info('Saved checkpoint file to ' + checkpoint_path)
+
+        return checkpoint_path
 
 def gen_batches(source_corpus, target_corpus, source_vocab, target_vocab,
                 batch_size, max_length):
@@ -638,20 +663,11 @@ def run_seq2seq_model(args, model_params=None):
             for batch in batches_eval:
                 total_loss += model_obj.step(
                     batch=batch,
-                    forward_only=False,
+                    forward_only=True,
                 )
             logger.info('\teval loss {}'.format(total_loss))
             if args.checkpoint is not None:
-                checkpoint_path = '{0}-{1}'.format(args.checkpoint, i)
-                assert workspace.RunOperatorOnce(core.CreateOperator(
-                    'Save',
-                    model_obj.model.GetAllParams(),
-                    [],
-                    absolute_path=True,
-                    db=checkpoint_path,
-                    db_type='minidb',
-                ))
-                logger.info('Model saved to ' + checkpoint_path)
+                model_obj.save(args.checkpoint, i)
 
 
 def main():
