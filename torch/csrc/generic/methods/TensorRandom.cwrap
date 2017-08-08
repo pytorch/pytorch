@@ -15,20 +15,6 @@
     - long n
 ]]
 
-#if !defined(TH_REAL_IS_HALF) && !IS_CUDA && !IS_DISTRIBUTED
-static void THTensor_(random2__)(THTensor *self, THGenerator *gen, long a, long b)
-{
-  THArgCheck(b > a, 2, "upper bound must be greater than lower bound");
-  TH_TENSOR_APPLY(real, self, *self_data = ((THRandom_random(gen) % (b-a)) + a);)
-}
-
-static void THTensor_(random1__)(THTensor *self, THGenerator *gen, long b)
-{
-  THArgCheck(b > 0, 1, "upper bound must be positive");
-  TH_TENSOR_APPLY(real, self, *self_data = (THRandom_random(gen) % b);)
-}
-#endif
-
 [[
   name: random_
   defined_if: "!IS_DISTRIBUTED"
@@ -42,14 +28,14 @@ static void THTensor_(random1__)(THTensor *self, THGenerator *gen, long b)
         - arg: THGenerator* generator
           default: THPDefaultGenerator->cdata
           kwarg_only: True
-    - cname: random1__
+    - cname: cappedRandom
       arguments:
         - THTensor* self
         - arg: THGenerator* generator
           default: THPDefaultGenerator->cdata
           kwarg_only: True
         - long to
-    - cname: random2__
+    - cname: clampedRandom
       arguments:
         - THTensor* self
         - arg: THGenerator* generator
