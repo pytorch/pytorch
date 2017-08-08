@@ -35,6 +35,9 @@ def parse_set_seed_once():
     return remaining
 
 
+parse_set_seed_once()
+
+
 def run_tests():
     remaining = parse_set_seed_once()
     unittest.main(argv=remaining)

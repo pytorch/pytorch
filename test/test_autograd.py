@@ -16,7 +16,7 @@ from torch.autograd import gradcheck
 from torch.autograd.gradcheck import gradgradcheck
 from torch.autograd.function import once_differentiable
 
-from common import TestCase, run_tests, skipIfNoLapack, parse_set_seed_once
+from common import TestCase, run_tests, skipIfNoLapack
 from torch.autograd._functions import *
 from torch.autograd import Variable, Function
 
@@ -26,8 +26,6 @@ else:
     import pickle
 
 PRECISION = 1e-4
-
-parse_set_seed_once()
 
 
 @contextlib.contextmanager
