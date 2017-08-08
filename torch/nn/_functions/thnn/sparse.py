@@ -45,7 +45,7 @@ class Embedding(Function):
 
         output = weight.new()
         if max_norm is not None:
-            cls._renorm(indices, weight, max_norm, norm_type)
+            cls._renorm(ctx, indices, weight, max_norm, norm_type)
 
         if indices.dim() == 1:
             output = torch.index_select(weight, 0, indices)
