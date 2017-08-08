@@ -3249,6 +3249,19 @@ new_criterion_tests = [
         target=torch.randn(15, 10).gt(0).double(),
         desc='weights'
     ),
+    dict(
+        module_name='PoissonNLLLoss',
+        input=torch.randn(2, 3, 4, 5),
+        target=torch.randn(2, 3, 4, 5).floor_().abs_(),
+        desc='reduced_loss',
+    ),
+    dict(
+        module_name='PoissonNLLLoss',
+        constructor_args=(False, True, True),
+        input=torch.randn(2, 3, 4, 5).abs_().add_(0.001),
+        target=torch.randn(2, 3, 4, 5).floor_().abs_(),
+        desc='full_loss',
+    ),
 ]
 
 new_module_tests = [
@@ -3851,23 +3864,6 @@ new_module_tests = [
         module_name='GLU',
         input_size=(5, 6),
         check_gradgrad=False,
-    ),
-]
-
-
-new_criterion_tests = [
-    dict(
-        module_name='PoissonNLLLoss',
-        input=torch.randn(2, 3, 4, 5),
-        target=torch.randn(2, 3, 4, 5).floor_().abs_(),
-        desc='reduced_loss',
-    ),
-    dict(
-        module_name='PoissonNLLLoss',
-        constructor_args=(False, True, True),
-        input=torch.randn(2, 3, 4, 5).abs_().add_(0.001),
-        target=torch.randn(2, 3, 4, 5).floor_().abs_(),
-        desc='full_loss',
     ),
 ]
 
