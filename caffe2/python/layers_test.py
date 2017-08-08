@@ -1178,3 +1178,76 @@ class TestLayers(LayersTestCase):
         self._test_net(predict_net, ops_list)
         _semi_random_hypothesis_test(srf_output.full(), X_full, X_random,
                                      rand_w, rand_b, s)
+
+    def testConv(self):
+        batch_size = 50
+        H = 1
+        W = 10
+        C = 50
+        output_dims = 32
+        kernel_h = 1
+        kernel_w = 3
+        stride_h = 1
+        stride_w = 1
+        pad_t = 0
+        pad_b = 0
+        pad_r = None
+        pad_l = None
+
+        input_record = self.new_record(schema.Scalar((np.float32, (H, W, C))))
+        X = np.random.random((batch_size, H, W, C)).astype(np.float32)
+        schema.FeedRecord(input_record, [X])
+        conv = self.model.Conv(
+            input_record,
+            output_dims,
+            kernel_h=kernel_h,
+            kernel_w=kernel_w,
+            stride_h=stride_h,
+            stride_w=stride_w,
+            pad_t=pad_t,
+            pad_b=pad_b,
+            pad_r=pad_r,
+            pad_l=pad_l,
+            order='NHWC'
+        )
+
+        self.assertEqual(
+            schema.Scalar((np.float32, (output_dims,))),
+            conv
+        )
+
+        self.run_train_net_forward_only()
+        output_record = schema.FetchRecord(conv)
+        # check the number of output channels is the same as input in this example
+        assert output_record.field_types()[0].shape == (H, W, output_dims)
+        assert output_record().shape == (batch_size, H, W, output_dims)
+
+        train_init_net, train_net = self.get_training_nets()
+        # Init net assertions
+        init_ops = self.assertNetContainOps(
+            train_init_net,
+            [
+                OpSpec("XavierFill", None, None),
+                OpSpec("ConstantFill", None, None),
+            ]
+        )
+        conv_spec = OpSpec(
+            "Conv",
+            [
+                input_record.field_blobs()[0],
+                init_ops[0].output[0],
+                init_ops[1].output[0],
+            ],
+            conv.field_blobs()
+        )
+
+        # Train net assertions
+        self.assertNetContainOps(train_net, [conv_spec])
+
+        # Predict net assertions
+        predict_net = self.get_predict_net()
+        self.assertNetContainOps(predict_net, [conv_spec])
+
+        # Eval net assertions
+        eval_net = self.get_eval_net()
+        self.assertNetContainOps(eval_net, [conv_spec])
