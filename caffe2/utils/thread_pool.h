@@ -86,8 +86,8 @@ class TaskThreadPool{
     /// @brief Wait for queue to be empty
     void waitWorkComplete() {
         std::unique_lock<std::mutex> lock(mutex_);
-        if (!complete_)
-            completed_.wait(lock);
+        while (!complete_)
+          completed_.wait(lock);
     }
 
  private:
