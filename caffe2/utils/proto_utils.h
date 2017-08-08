@@ -8,7 +8,6 @@
 
 #include "caffe2/core/logging.h"
 #include "caffe2/proto/caffe2.pb.h"
-#include "caffe2/proto/predictor_consts.pb.h"
 
 namespace caffe2 {
 
