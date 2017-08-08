@@ -690,7 +690,8 @@
           output: True
         - THTensor* self
         - CONSTANT __last_dim
-        - bool descending
+        - arg: bool descending
+          kwarg_only: True
     - arguments:
         - arg: THTensor* values
           output: True
