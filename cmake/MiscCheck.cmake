@@ -26,6 +26,7 @@ endif()
 # is being deprecated. As a result, we will test if this is the environment we
 # are building under. If yes, we will turn off deprecation warning for a
 # cleaner build output.
+set(CMAKE_REQUIRED_FLAGS "-std=c++11")
 CHECK_CXX_SOURCE_COMPILES(
     "#include <glog/stl_logging.h>
     int main(int argc, char** argv) {
