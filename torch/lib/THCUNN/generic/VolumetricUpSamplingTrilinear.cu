@@ -1,3 +1,4 @@
+#include "hip/hip_runtime.h"
 #ifndef THC_GENERIC_FILE
 #define THC_GENERIC_FILE "generic/VolumetricUpSamplingTrilinear.cu"
 #else
@@ -61,10 +62,9 @@ void THNN_(VolumetricUpSamplingTrilinear_updateOutput)(
   const int num_kernels = outputDepth * outputHeight * outputWidth;
   const int num_threads =
     THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
-  cudaStream_t stream = THCState_getCurrentStream(state);
-  caffe_gpu_interp2_kernel<real, accreal> <<<THCCeilDiv(num_kernels, num_threads), num_threads ,
-   0 , stream>>>(num_kernels, rdepth, rheight, rwidth, idata, odata);
-  THCudaCheck(cudaGetLastError());
+  hipStream_t stream = THCState_getCurrentStream(state);
+  hipLaunchKernelGGL((caffe_gpu_interp2_kernel<real, accreal>), dim3(THCCeilDiv(num_kernels, num_threads)), dim3(num_threads ), 0 , stream, num_kernels, rdepth, rheight, rwidth, idata, odata);
+  THCudaCheck(hipGetLastError());
   THCTensor_(free)(state, input);
 }
 
@@ -107,10 +107,9 @@ void THNN_(VolumetricUpSamplingTrilinear_updateGradInput)(
   const int num_kernels = depth2 * height2 * width2;
   const int num_threads =
     THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
-  cudaStream_t stream = THCState_getCurrentStream(state);
-  caffe_gpu_interp2_kernel_backward<real ,accreal> <<<THCCeilDiv(num_kernels, num_threads),
-  num_threads, 0, stream>>>(num_kernels, rdepth, rheight, rwidth, data1, data2);
-  THCudaCheck(cudaGetLastError());
+  hipStream_t stream = THCState_getCurrentStream(state);
+  hipLaunchKernelGGL((caffe_gpu_interp2_kernel_backward<real ,accreal>), dim3(THCCeilDiv(num_kernels, num_threads)), dim3(num_threads), 0, stream, num_kernels, rdepth, rheight, rwidth, data1, data2);
+  THCudaCheck(hipGetLastError());
   THCTensor_(free)(state, gradInput);
   THCTensor_(free)(state, gradOutput);
 }

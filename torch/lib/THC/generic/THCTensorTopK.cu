@@ -29,8 +29,9 @@ THC_API void THCTensor_(topk)(THCState* state,
   THLongStorage_free(topKSize);
 
 #define RUN_K(INDEX_T, DIM, DIR)                                        \
-  gatherTopK<real, INDEX_T, DIM, DIR>                                         \
-    <<<grid, block, 0, THCState_getCurrentStream(state)>>>(             \
+  hipLaunchKernelGGL(                                                   \
+    (gatherTopK<real, INDEX_T, DIM, DIR>),                              \
+      grid, block, 0, THCState_getCurrentStream(state),                 \
       inputInfo,                                                        \
       sliceSize,                                                        \
       k,                                                                \
@@ -153,7 +154,7 @@ THC_API void THCTensor_(topk)(THCState* state,
     }
   }
 
-  THCudaCheck(cudaGetLastError());
+  THCudaCheck(hipGetLastError());
 }
 
 #endif // THC_GENERIC_FILE

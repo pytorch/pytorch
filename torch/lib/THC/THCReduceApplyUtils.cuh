@@ -1,3 +1,4 @@
+#include "hip/hip_runtime.h"
 #ifndef THC_REDUCE_APPLY_UTILS_INC
 #define THC_REDUCE_APPLY_UTILS_INC
 
@@ -14,9 +15,9 @@ enum TensorArgType { ReadWrite, ReadOnly };
 
 template <typename IndexType>
 __device__ __forceinline__ IndexType getLinearBlockId() {
-  return blockIdx.z * gridDim.y * gridDim.x +
-    blockIdx.y * gridDim.x +
-    blockIdx.x;
+  return hipBlockIdx_z * hipGridDim_y * hipGridDim_x +
+    hipBlockIdx_y * hipGridDim_x +
+    hipBlockIdx_x;
 }
 
 // Reduce N values concurrently, i.e. suppose N = 2, and there are 4 threads:
@@ -39,10 +40,10 @@ __device__ void reduceNValuesInBlock(T *smem,
   // We store each of the N values contiguously, so if N = 2, all values for
   // the first threadVal for each thread in the block are stored followed by
   // all of the values for the second threadVal for each thread in the block
-  if (threadIdx.x < numVals) {
+  if (hipThreadIdx_x < numVals) {
 #pragma unroll
     for (int i = 0; i < N; ++i) {
-      smem[i * numVals + threadIdx.x] = threadVals[i];
+      smem[i * numVals + hipThreadIdx_x] = threadVals[i];
     }
   }
   __syncthreads();
@@ -53,13 +54,13 @@ __device__ void reduceNValuesInBlock(T *smem,
   // followed by the 32 outputs for the second threadVal, etc.
   int numLanesParticipating = min(numVals, warpSize);
 
-  if (numVals > warpSize && ((threadIdx.x / warpSize) == 0 )) {
+  if (numVals > warpSize && ((hipThreadIdx_x / warpSize) == 0 )) {
 #pragma unroll
     for (int i = 0; i < N; ++i) {
-      threadVals[i] = threadIdx.x < numVals ? threadVals[i] : init;
+      threadVals[i] = hipThreadIdx_x < numVals ? threadVals[i] : init;
     }
 
-    for (int i = warpSize + threadIdx.x; i < numVals; i += warpSize) {
+    for (int i = warpSize + hipThreadIdx_x; i < numVals; i += warpSize) {
 #pragma unroll
       for (int j = 0; j < N; ++j) {
         threadVals[j] = reduceOp(threadVals[j], smem[j * numVals + i]);
@@ -68,12 +69,12 @@ __device__ void reduceNValuesInBlock(T *smem,
 
 #pragma unroll
     for (int i = 0; i < N; ++i) {
-      smem[i * numLanesParticipating + threadIdx.x] = threadVals[i];
+      smem[i * numLanesParticipating + hipThreadIdx_x] = threadVals[i];
     }
   }
   __syncthreads();
 
-  if (threadIdx.x == 0) {
+  if (hipThreadIdx_x == 0) {
     if (numLanesParticipating == 32) {
 #pragma unroll
       for (int i = 0; i < N; ++i) {
@@ -93,7 +94,7 @@ __device__ void reduceNValuesInBlock(T *smem,
   }
 }
 
-// Block-wide reduction in shared memory helper; only threadIdx.x == 0 will
+// Block-wide reduction in shared memory helper; only hipThreadIdx_x == 0 will
 // return the reduced value
 template <typename T, typename ReduceOp>
 __device__ T reduceBlock(T* smem,
@@ -115,7 +116,7 @@ __device__ T reduceBlockWithNThreadLocalReductions(T *smem,
                          int numVals,
                          ReduceOp reduceOp,
                          T init) {
-  int offset = threadIdx.x * N;
+  int offset = hipThreadIdx_x * N;
   T local = offset < numVals ? threadVals[0] : init;
 
 #pragma unroll
@@ -125,7 +126,7 @@ __device__ T reduceBlockWithNThreadLocalReductions(T *smem,
     local = reduceOp(local, next);
   }
 
-  return reduceBlock<T, ReduceOp>(smem, blockDim.x < numVals ? blockDim.x : numVals, local, reduceOp, init);
+  return reduceBlock<T, ReduceOp>(smem, hipBlockDim_x < numVals ? hipBlockDim_x : numVals, local, reduceOp, init);
 }
 
 // Make sure the given tensor doesn't have too many dimensions

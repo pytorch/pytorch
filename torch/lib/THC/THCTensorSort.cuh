@@ -1,3 +1,4 @@
+#include "hip/hip_runtime.h"
 #ifndef THC_TENSORSORT_CUH
 #define THC_TENSORSORT_CUH
 
@@ -47,7 +48,7 @@ fillSliceWithIndex(TensorInfo<long, IndexType> out,
     IndexToOffset<long, IndexType, Dim>::get(slice, out);
   long* base = &out.data[offset];
 
-  for (long i = threadIdx.x; i < sliceSize; i += blockDim.x) {
+  for (long i = hipThreadIdx_x; i < sliceSize; i += hipBlockDim_x) {
     // Torch indices are 1-based (hence the +1)
     base[i * sliceStride] = i + TH_INDEX_BASE;
   }

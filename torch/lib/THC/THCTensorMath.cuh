@@ -1,12 +1,13 @@
+#include "hip/hip_runtime.h"
 #ifndef THC_TENSORMATH_CUH
 #define THC_TENSORMATH_CUH
 
 // Copy the kth diagonal of a matrix B to a vector A.
 template <typename T>
 __global__ void THCTensor_copyFromDiagonal(T* a, T* b, ptrdiff_t start, ptrdiff_t size, ptrdiff_t strideSum, ptrdiff_t strideA) {
-  for (ptrdiff_t linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+  for (ptrdiff_t linearIndex = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
        linearIndex < size;
-       linearIndex += gridDim.x * blockDim.x) {
+       linearIndex += hipGridDim_x * hipBlockDim_x) {
     const ptrdiff_t bOffset = start + strideSum * linearIndex;
     a[strideA * linearIndex] = b[bOffset];
   }
@@ -15,9 +16,9 @@ __global__ void THCTensor_copyFromDiagonal(T* a, T* b, ptrdiff_t start, ptrdiff_
 // Copy vector B to the kth diagonal of a matrix A
 template <typename T>
 __global__ void THCTensor_copyToDiagonal(T* a, T* b, ptrdiff_t start, ptrdiff_t size, ptrdiff_t strideSum, ptrdiff_t strideB) {
-  for (ptrdiff_t linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+  for (ptrdiff_t linearIndex = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
        linearIndex < size;
-       linearIndex += gridDim.x * blockDim.x) {
+       linearIndex += hipGridDim_x * hipBlockDim_x) {
     const ptrdiff_t aOffset = start + strideSum * linearIndex;
     a[aOffset] = b[strideB * linearIndex];
   }
@@ -67,7 +68,7 @@ struct OutputTensorSizeStride {
 
 /**
   * Kernel used to concatenated grimDim.y tensors into an output tensor. Uses a grid-stride loop based off of
-  * the blockIdx.x, threadIdx.x for each input to copy each element from each input tensor into the output.
+  * the hipBlockIdx_x, hipThreadIdx_x for each input to copy each element from each input tensor into the output.
   *
   * output: base pointer to the storage associated with the output tensor
   * inputs: GPU-allocated array of input metadata for each input to concatenate in the kernel
@@ -84,15 +85,15 @@ __global__ void CatArrayBatchedCopy(
     OutputTensorSizeStride<IndexType, CAT_ARRAY_MAX_INPUT_DIMS> os,
     const int concatDim,
     IndexType dimStride) {
-  T* data = inputs[blockIdx.y].input;
-  IndexType offset = inputs[blockIdx.y].offset;
-  IndexType dimSize = inputs[blockIdx.y].dimSize;
-  IndexType nElements = inputs[blockIdx.y].nElements;
+  T* data = inputs[hipBlockIdx_y].input;
+  IndexType offset = inputs[hipBlockIdx_y].offset;
+  IndexType dimSize = inputs[hipBlockIdx_y].dimSize;
+  IndexType nElements = inputs[hipBlockIdx_y].nElements;
   IndexType dataOffset = offset * dimStride;
 
-  for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+  for (IndexType linearIndex = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
       linearIndex < nElements;
-      linearIndex += gridDim.x * blockDim.x) {
+      linearIndex += hipGridDim_x * hipBlockDim_x) {
     IndexType elementOffset = CatArrIndexToOffset<IndexType, Dims>::compute(
         os.outputSize, os.outputStride, dimSize, concatDim, linearIndex);
     output[dataOffset + elementOffset] = data[linearIndex];

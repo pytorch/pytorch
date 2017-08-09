@@ -1,3 +1,4 @@
+#include "hip/hip_runtime.h"
 #ifndef THC_DEVICE_UTILS_INC
 #define THC_DEVICE_UTILS_INC
 

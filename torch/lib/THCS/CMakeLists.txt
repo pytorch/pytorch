@@ -47,6 +47,7 @@ ENDIF()
 INCLUDE_DIRECTORIES(${CUDA_INCLUDE_DIRS})
 INCLUDE_DIRECTORIES("${CUDA_SDK_ROOT_DIR}/common/inc")
 
+INCLUDE_DIRECTORIES("/home/sthornto/HIP/include")
 IF ($ENV{TH_BINARY_BUILD})
   MESSAGE(STATUS "TH_BINARY_BUILD detected. Statically linking libstdc++")
   SET(CMAKE_CXX_FLAGS "-static-libstdc++ ${CMAKE_CXX_FLAGS}")
@@ -113,6 +114,10 @@ SET(src-cuda
   THCSTensor.cu
   THCSparse.cu
   )
+
+SET_PROPERTY(SOURCE 
+  THCSTensor.c
+    APPEND PROPERTY COMPILE_DEFINITIONS "__HIP_PLATFORM_NVCC__")
 
 MESSAGE(STATUS "got cuda version " ${CUDA_VERSION})
 

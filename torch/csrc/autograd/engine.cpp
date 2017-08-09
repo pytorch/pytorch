@@ -364,8 +364,8 @@ auto Engine::start_threads() -> void {
   int num_devices = 0;
 #ifdef WITH_CUDA
   // check for case of compiled with CUDA but no available devices
-  if (cudaGetDeviceCount(&num_devices) != cudaSuccess) {
-    cudaGetLastError();
+  if (hipGetDeviceCount(&num_devices) != hipSuccess) {
+    hipGetLastError();
     num_devices = 0;
   }
 #endif

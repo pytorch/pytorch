@@ -1,6 +1,6 @@
 #include "THCCachingAllocator.h"
 
-#include <cuda_runtime_api.h>
+#include <hip/hip_runtime_api.h>
 #include <deque>
 #include <map>
 #include <memory>
@@ -15,11 +15,11 @@
 //   re-allocated on the same stream, but not on any other stream.
 // - The allocator attempts to find the smallest cached block that will fit the
 //   requested size. If the block is larger than the requested size, it may be
-//   split. If no block is found, the allocator will delegate to cudaMalloc.
-// - If the cudaMalloc fails, the allocator will free all cached blocks that
+//   split. If no block is found, the allocator will delegate to hipMalloc.
+// - If the hipMalloc fails, the allocator will free all cached blocks that
 //   are not split and retry the allocation.
 // - Large (>1MB) and small allocation requests are handled separately. Large
-//   allocation requests can be filled by a cudaMalloc call of the exact size.
+//   allocation requests can be filled by a hipMalloc call of the exact size.
 //   Small requests will allocate and split a 1MB buffer, if necessary.
 //
 // With this allocator, allocations and frees should logically be considered
@@ -45,7 +45,7 @@ const size_t kSmallAlloc = 1048576; // largest "small" allocation is 1 MiB
 
 struct Block {
   int           device;      // gpu
-  cudaStream_t  stream;      // allocation stream
+  hipStream_t  stream;      // allocation stream
   stream_set    stream_uses; // streams on which the block was used
   size_t        size;        // block size in bytes
   char*         ptr;         // memory address
@@ -54,7 +54,7 @@ struct Block {
   Block*        next;        // next block if split from a larger allocation
   int           event_count; // number of outstanding CUDA events
 
-  Block(int device, cudaStream_t stream, size_t size, char* ptr=NULL) :
+  Block(int device, hipStream_t stream, size_t size, char* ptr=NULL) :
       device(device), stream(stream), stream_uses(), size(size), ptr(ptr),
       allocated(0), prev(NULL), next(NULL), event_count(0) { }
 };
@@ -83,7 +83,7 @@ struct THCCachingAllocator
   // lock around all operations
   std::mutex mutex;
 
-  // lock around calls to cudaFree (to prevent deadlocks with NCCL)
+  // lock around calls to hipFree (to prevent deadlocks with NCCL)
   std::mutex cuda_free_mutex;
 
   // cached blocks larger than 1 MB
@@ -96,25 +96,25 @@ struct THCCachingAllocator
   std::unordered_map<void*, Block*> allocated_blocks;
 
   // outstanding cuda events
-  std::deque<std::pair<cudaEvent_t, Block*>> cuda_events;
+  std::deque<std::pair<hipEvent_t, Block*>> cuda_events;
 
   THCCachingAllocator() :
       large_blocks(BlockComparator),
       small_blocks(BlockComparator) {}
 
   /** allocates a block which is safe to use from the provided stream */
-  cudaError_t malloc(void** devPtr, size_t size, cudaStream_t stream)
+  hipError_t malloc(void** devPtr, size_t size, hipStream_t stream)
   {
     std::lock_guard<std::mutex> lock(mutex);
 
     int device;
-    cudaError_t err = cudaGetDevice(&device);
-    if (err != cudaSuccess) {
+    hipError_t err = hipGetDevice(&device);
+    if (err != hipSuccess) {
       return err;
     }
 
     err = process_events();
-    if (err != cudaSuccess) {
+    if (err != hipSuccess) {
       return err;
     }
 
@@ -135,7 +135,7 @@ struct THCCachingAllocator
       void* ptr;
       size_t alloc_size = small ? kSmallAlloc : size;
       err = cuda_malloc_retry(device, &ptr, alloc_size);
-      if (err != cudaSuccess) {
+      if (err != hipSuccess) {
         return err;
       }
       block = new Block(device, stream, alloc_size, (char*)ptr);
@@ -161,19 +161,19 @@ struct THCCachingAllocator
     allocated_blocks[block->ptr] = block;
 
     *devPtr = (void*)block->ptr;
-    return cudaSuccess;
+    return hipSuccess;
   }
 
-  cudaError_t free(void* ptr)
+  hipError_t free(void* ptr)
   {
     std::lock_guard<std::mutex> lock(mutex);
     if (!ptr) {
-      return cudaSuccess;
+      return hipSuccess;
     }
 
     auto it = allocated_blocks.find(ptr);
     if (it == allocated_blocks.end()) {
-      return cudaErrorInvalidDevicePointer;
+      return hipErrorInvalidDevicePointer;
     }
 
     Block* block = it->second;
@@ -185,22 +185,22 @@ struct THCCachingAllocator
     }
 
     free_block(block);
-    return cudaSuccess;
+    return hipSuccess;
   }
 
   /** returns cached blocks to the system allocator */
-  cudaError_t emptyCache()
+  hipError_t emptyCache()
   {
     std::lock_guard<std::mutex> lock(mutex);
-    cudaError_t err = free_blocks(large_blocks, large_blocks.begin(), large_blocks.end());
-    if (err != cudaSuccess) {
+    hipError_t err = free_blocks(large_blocks, large_blocks.begin(), large_blocks.end());
+    if (err != hipSuccess) {
       return err;
     }
     err = free_blocks(small_blocks, small_blocks.begin(), small_blocks.end());
-    if (err != cudaSuccess) {
+    if (err != hipSuccess) {
       return err;
     }
-    return cudaSuccess;
+    return hipSuccess;
   }
 
   void* getBaseAllocation(void* ptr, size_t* outSize)
@@ -308,36 +308,36 @@ struct THCCachingAllocator
     return size;
   }
 
-  cudaError_t cuda_malloc_retry(int device, void** devPtr, size_t size)
+  hipError_t cuda_malloc_retry(int device, void** devPtr, size_t size)
   {
-    // Try cudaMalloc. If cudaMalloc fails, frees all non-split cached blocks
+    // Try hipMalloc. If hipMalloc fails, frees all non-split cached blocks
     // and retries.
-    cudaError_t err = cudaMalloc(devPtr, size);
-    if (err != cudaSuccess) {
-      cudaGetLastError();
+    hipError_t err = hipMalloc(devPtr, size);
+    if (err != hipSuccess) {
+      hipGetLastError();
       err = free_cached_blocks(device);
-      if (err != cudaSuccess) {
+      if (err != hipSuccess) {
         return err;
       }
-      err = cudaMalloc(devPtr, size);
-      if (err != cudaSuccess) {
+      err = hipMalloc(devPtr, size);
+      if (err != hipSuccess) {
         return err;
       }
     }
-    return cudaSuccess;
+    return hipSuccess;
   }
 
-  cudaError_t free_cached_blocks(int device)
+  hipError_t free_cached_blocks(int device)
   {
     // Free all non-split cached blocks on device
     Block lower_bound(device, NULL, 0);
     Block upper_bound(device + 1, NULL, 0);
 
-    cudaError_t err = free_blocks(
+    hipError_t err = free_blocks(
         large_blocks,
         large_blocks.lower_bound(&lower_bound),
         large_blocks.lower_bound(&upper_bound));
-    if (err != cudaSuccess) {
+    if (err != hipSuccess) {
       return err;
     }
     err = free_blocks(
@@ -347,15 +347,15 @@ struct THCCachingAllocator
     return err;
   }
 
-  cudaError_t free_blocks(FreeBlocks& blocks, FreeBlocks::iterator it, FreeBlocks::iterator end)
+  hipError_t free_blocks(FreeBlocks& blocks, FreeBlocks::iterator it, FreeBlocks::iterator end)
   {
     // Frees all non-split blocks between `it` and `end`
     std::lock_guard<std::mutex> lock(cuda_free_mutex);
     while (it != end) {
       Block* block = *it;
       if (!block->prev && !block->next) {
-        cudaError_t err = cudaFree((void*)block->ptr);
-        if (err != cudaSuccess) {
+        hipError_t err = hipFree((void*)block->ptr);
+        if (err != hipSuccess) {
           return err;
         }
         auto cur = it;
@@ -366,7 +366,7 @@ struct THCCachingAllocator
         ++it;
       }
     }
-    return cudaSuccess;
+    return hipSuccess;
   }
 
   Block* find_allocated_block(void *ptr) {
@@ -377,38 +377,38 @@ struct THCCachingAllocator
     return it->second;
   }
 
-  cudaError_t insert_events(Block* block)
+  hipError_t insert_events(Block* block)
   {
-    cudaError_t err;
+    hipError_t err;
 
     int prev_device;
-    err = cudaGetDevice(&prev_device);
-    if (err != cudaSuccess) return err;
+    err = hipGetDevice(&prev_device);
+    if (err != hipSuccess) return err;
 
     std::set<THCStreamPtr> streams(std::move(block->stream_uses));
     THAssert(block->stream_uses.empty());
     for (auto it = streams.begin(); it != streams.end(); ++it) {
       auto& stream = *it;
 
-      err = cudaSetDevice(stream->device);
-      if (err != cudaSuccess) break;
+      err = hipSetDevice(stream->device);
+      if (err != hipSuccess) break;
 
-      cudaEvent_t event;
-      err = cudaEventCreateWithFlags(&event, cudaEventDisableTiming);
-      if (err != cudaSuccess) break;
+      hipEvent_t event;
+      err = hipEventCreateWithFlags(&event, hipEventDisableTiming);
+      if (err != hipSuccess) break;
 
-      err = cudaEventRecord(event, stream->stream);
-      if (err != cudaSuccess) break;
+      err = hipEventRecord(event, stream->stream);
+      if (err != hipSuccess) break;
 
       block->event_count++;
       cuda_events.emplace_back(event, block);
     }
 
-    cudaSetDevice(prev_device);
+    hipSetDevice(prev_device);
     return err;
   }
 
-  cudaError_t process_events()
+  hipError_t process_events()
   {
     // Process outstanding cudaEvents. Events that are completed are removed
     // from the queue, and the 'event_count' for the corresponding allocation
@@ -417,17 +417,17 @@ struct THCCachingAllocator
     // the processing of some events may be delayed.
     while (!cuda_events.empty()) {
       auto& e = cuda_events.front();
-      cudaEvent_t event = e.first;
+      hipEvent_t event = e.first;
       Block* block = e.second;
 
-      cudaError_t err = cudaEventQuery(event);
-      if (err == cudaErrorNotReady) {
+      hipError_t err = hipEventQuery(event);
+      if (err == hipErrorNotReady) {
         break;
-      } else if (err != cudaSuccess) {
+      } else if (err != hipSuccess) {
         return err;
       }
-      err = cudaEventDestroy(event);
-      if (err != cudaSuccess) {
+      err = hipEventDestroy(event);
+      if (err != hipSuccess) {
         return err;
       }
 
@@ -437,33 +437,33 @@ struct THCCachingAllocator
       }
       cuda_events.pop_front();
     }
-    return cudaSuccess;
+    return hipSuccess;
   }
 };
 
-static cudaError_t THCCachingAllocator_malloc(void* ctx, void** ptr, size_t size, cudaStream_t stream)
+static hipError_t THCCachingAllocator_malloc(void* ctx, void** ptr, size_t size, hipStream_t stream)
 {
   THCCachingAllocator* a = (THCCachingAllocator*) ctx;
   return a->malloc(ptr, size, stream);
 }
 
-static cudaError_t THCCachingAllocator_free(void* ctx, void* ptr)
+static hipError_t THCCachingAllocator_free(void* ctx, void* ptr)
 {
   THCCachingAllocator* a = (THCCachingAllocator*) ctx;
   return a->free(ptr);
 }
 
-static cudaError_t THCCachingAllocator_emptyCache(void* ctx)
+static hipError_t THCCachingAllocator_emptyCache(void* ctx)
 {
   THCCachingAllocator* a = (THCCachingAllocator*) ctx;
   return a->emptyCache();
 }
 
-static cudaError_t THCCachingAllocator_cacheInfo(void* ctx, int dev_id, size_t* cachedAndFree, size_t* largestBlock)
+static hipError_t THCCachingAllocator_cacheInfo(void* ctx, int dev_id, size_t* cachedAndFree, size_t* largestBlock)
 {
   THCCachingAllocator* a = (THCCachingAllocator*) ctx;
   a->cacheInfo(dev_id, cachedAndFree, largestBlock);
-  return cudaSuccess;
+  return hipSuccess;
 }
 
 static THCCachingAllocator caching_allocator;

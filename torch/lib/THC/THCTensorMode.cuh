@@ -1,3 +1,4 @@
+#include "hip/hip_runtime.h"
 #ifndef THC_TENSOR_MODE_CUH
 #define THC_TENSOR_MODE_CUH
 
@@ -92,8 +93,8 @@ __global__ void computeMode(
     TensorInfo<long, unsigned int> indices,
     long sliceSize)
 {
-  int tidx = threadIdx.x;
-  int stidx = blockDim.x + threadIdx.x; // Second index this thread responsible for
+  int tidx = hipThreadIdx_x;
+  int stidx = hipBlockDim_x + hipThreadIdx_x; // Second index this thread responsible for
 
   // First, we need to calculate the offset into the sorted Tensor that represents
   // the start of the slice for this block to calculate the mode for. This offset
@@ -108,7 +109,7 @@ __global__ void computeMode(
   // Initially, the buffer will be organized as follows:
   //
   // [smem (slice elements) | bmem (valid indices) | <scratch space>]
-  extern __shared__ char shmem[];
+  HIP_DYNAMIC_SHARED( char, shmem)
 
   // smem represents a proportion of the shared memory buffer that is used to store
   // the elements from the slice:

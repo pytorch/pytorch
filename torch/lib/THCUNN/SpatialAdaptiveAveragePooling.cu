@@ -1,3 +1,4 @@
+#include "hip/hip_runtime.h"
 #include "THCUNN.h"
 #include "THCHalf.h"
 #include "THCHalfAutoNumerics.cuh"
@@ -27,17 +28,17 @@ __global__ void adaptiveaveragepool(T *input, T *output,
   int xx, yy;
 
   // compute offsets based on thread/block ID
-  int o = blockIdx.x;
+  int o = hipBlockIdx_x;
   int i = o;
-  //int k = blockIdx.x % input_n;
+  //int k = hipBlockIdx_x % input_n;
 
-  int xx_start = threadIdx.x;
+  int xx_start = hipThreadIdx_x;
   int xx_end = output_w;
-  const int xx_step = blockDim.x;
+  const int xx_step = hipBlockDim_x;
 
-  int yy_start = blockDim.y*blockIdx.y + threadIdx.y;
+  int yy_start = hipBlockDim_y*hipBlockIdx_y + hipThreadIdx_y;
   int yy_end = output_h;
-  const int yy_step = blockDim.y*gridDim.y;
+  const int yy_step = hipBlockDim_y*hipGridDim_y;
   // select input/output plane
   output = output + o*output_w*output_h;
   input = input + i*strided;
@@ -87,16 +88,16 @@ __global__ void adaptiveaveragegradinput(
   int x, y;
 
   // compute offsets based on thread/block ID
-  int o = blockIdx.x;
+  int o = hipBlockIdx_x;
   int i = o;
 
-  int x_start = threadIdx.x;
+  int x_start = hipThreadIdx_x;
   int x_end = input_w;
-  int x_step = blockDim.x;
+  int x_step = hipBlockDim_x;
 
-  int y_start = blockDim.y*blockIdx.y + threadIdx.y;
+  int y_start = hipBlockDim_y*hipBlockIdx_y + hipThreadIdx_y;
   int y_end = input_h;
-  int y_step = blockDim.y*gridDim.y;
+  int y_step = hipBlockDim_y*hipGridDim_y;
 
   // select input/output plane
   gradOutput = gradOutput + o*output_w*output_h;
@@ -149,16 +150,16 @@ __global__ void atomicadaptiveaveragegradinput(
   int xx, yy;
 
   // compute offsets based on thread/block ID
-  int o = blockIdx.x;
+  int o = hipBlockIdx_x;
   int i = o;
 
-  int xx_start = threadIdx.x;
+  int xx_start = hipThreadIdx_x;
   int xx_end = output_w;
-  int xx_step = blockDim.x;
+  int xx_step = hipBlockDim_x;
 
-  int yy_start = blockDim.y*blockIdx.y + threadIdx.y;
+  int yy_start = hipBlockDim_y*hipBlockIdx_y + hipThreadIdx_y;
   int yy_end = output_h;
-  int yy_step = blockDim.y*gridDim.y;
+  int yy_step = hipBlockDim_y*hipGridDim_y;
 
   // select input/output plane
   gradOutput = gradOutput + o*output_w*output_h;

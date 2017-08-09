@@ -1,3 +1,4 @@
+#include "hip/hip_runtime.h"
 #include "THCUNN.h"
 #include "THCHalf.h"
 #include "THCHalfAutoNumerics.cuh"
@@ -39,7 +40,7 @@ __global__ void rreluUpdateOutputTrain(int n, curandStateMtgp32 *state,
   {
     if (input[i] <= 0)
     {
-      T r = curand_uniform_type<T>(&state[blockIdx.x]);
+      T r = curand_uniform_type<T>(&state[hipBlockIdx_x]);
       r = ScalarConvert<double, T>::to(r * (b-a) + a);
       output[i] = input[i] * r;
       noise[i] = r;

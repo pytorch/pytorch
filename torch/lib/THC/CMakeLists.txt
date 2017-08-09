@@ -61,6 +61,12 @@ ENDIF()
 INCLUDE_DIRECTORIES(${CUDA_INCLUDE_DIRS})
 INCLUDE_DIRECTORIES("${CUDA_SDK_ROOT_DIR}/common/inc")
 
+INCLUDE_DIRECTORIES("/home/sthornto/HIP/include")
+get_property(dirs DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES)
+foreach(dir ${dirs})
+  message(STATUS "dir='${dir}'")
+endforeach()
+
 IF ("$ENV{STATIC_TH}" STREQUAL "YES")
 LIST(APPEND CUDA_NVCC_FLAGS "-Xcompiler -fPIC")
 ENDIF()
@@ -192,6 +198,18 @@ SET(src-cuda
   THCTensorMode.cu
   )
 
+SET_PROPERTY(SOURCE 
+    THCCachingAllocator.cpp
+    THCCachingHostAllocator.cpp
+    THCGeneral.c
+    THCStorageCopy.c
+    THCStream.cpp
+    THCTensor.c
+    THCTensorCopy.c
+    THCTensorRandom.cpp
+    THCThreadLocal.c
+    APPEND PROPERTY COMPILE_DEFINITIONS "__HIP_PLATFORM_NVCC__")
+ 
 # loop over all types
 foreach(THC_TYPE Byte Char Short Int Long Half Float Double)
    # loop over files which need to be split between types (because of long compile times)

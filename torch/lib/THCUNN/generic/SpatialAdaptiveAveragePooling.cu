@@ -1,3 +1,4 @@
+#include "hip/hip_runtime.h"
 #ifndef THC_GENERIC_FILE
 #define THC_GENERIC_FILE "generic/SpatialAdaptiveAveragePooling.cu"
 #else
@@ -41,10 +42,10 @@ void THNN_(SpatialAdaptiveAveragePooling_updateOutput)(
     dim3 threads(32,8);
 
     // run averagepool kernel
-    adaptiveaveragepool <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (input_data, output_data,
+    hipLaunchKernelGGL((adaptiveaveragepool), dim3(blocks), dim3(threads), 0, THCState_getCurrentStream(state), input_data, output_data,
                                    nInputPlane, nInputRows, nInputCols, nOutputRows, nOutputCols,
                                    istride_h, istride_w, istride_d);
-    THCudaCheck(cudaGetLastError());
+    THCudaCheck(hipGetLastError());
 
   } else {
     input = THCTensor_(newContiguous)(state, input);
@@ -70,10 +71,10 @@ void THNN_(SpatialAdaptiveAveragePooling_updateOutput)(
     dim3 threads(32,8);
 
     // run averagepool kernel
-    adaptiveaveragepool <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (input_data, output_data,
+    hipLaunchKernelGGL((adaptiveaveragepool), dim3(blocks), dim3(threads), 0, THCState_getCurrentStream(state), input_data, output_data,
                                    nInputPlane, nInputRows, nInputCols, nOutputRows, nOutputCols,
                                    istride_h, istride_w, istride_d);
-    THCudaCheck(cudaGetLastError());
+    THCudaCheck(hipGetLastError());
     // clean
     THCTensor_(free)(state, input);
   }
@@ -118,16 +119,16 @@ void THNN_(SpatialAdaptiveAveragePooling_updateGradInput)(
     if(atomic)
     {
       // run updateGradInput kernel, accumulate gradients atomically
-      atomicadaptiveaveragegradinput <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (gradInput_data, gradOutput_data,
+      hipLaunchKernelGGL((atomicadaptiveaveragegradinput), dim3(blocks), dim3(threads), 0, THCState_getCurrentStream(state), gradInput_data, gradOutput_data,
                                           nInputPlane, nInputRows, nInputCols, nOutputRows, nOutputCols);
     }
     else
     {
       // run updateGradInput kernel
-      adaptiveaveragegradinput <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (gradInput_data, gradOutput_data,
+      hipLaunchKernelGGL((adaptiveaveragegradinput), dim3(blocks), dim3(threads), 0, THCState_getCurrentStream(state), gradInput_data, gradOutput_data,
                                           nInputPlane, nInputRows, nInputCols, nOutputRows, nOutputCols);
     }
-    THCudaCheck(cudaGetLastError());
+    THCudaCheck(hipGetLastError());
   } else {
     long nInputCols = input->size[3];
     long nInputRows = input->size[2];
@@ -153,16 +154,16 @@ void THNN_(SpatialAdaptiveAveragePooling_updateGradInput)(
     if(atomic)
     {
       // run updateGradInput kernel, accumulate gradients atomically
-      atomicadaptiveaveragegradinput <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (gradInput_data, gradOutput_data,
+      hipLaunchKernelGGL((atomicadaptiveaveragegradinput), dim3(blocks), dim3(threads), 0, THCState_getCurrentStream(state), gradInput_data, gradOutput_data,
                                           nInputPlane, nInputRows, nInputCols, nOutputRows, nOutputCols);
     }
     else
     {
       // run updateGradInput kernel, accumulate gradients atomically
-      adaptiveaveragegradinput <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (gradInput_data, gradOutput_data,
+      hipLaunchKernelGGL((adaptiveaveragegradinput), dim3(blocks), dim3(threads), 0, THCState_getCurrentStream(state), gradInput_data, gradOutput_data,
                                           nInputPlane, nInputRows, nInputCols, nOutputRows, nOutputCols);
     }
-    THCudaCheck(cudaGetLastError());
+    THCudaCheck(hipGetLastError());
   }
 
   // clean

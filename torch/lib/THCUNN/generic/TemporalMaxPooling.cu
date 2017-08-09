@@ -1,3 +1,4 @@
+#include "hip/hip_runtime.h"
 #ifndef THC_GENERIC_FILE
 #define THC_GENERIC_FILE "generic/TemporalMaxPooling.cu"
 #else
@@ -109,9 +110,9 @@ void THNN_(TemporalMaxPooling_updateOutput)(
   }
 
   dim3 threads(nthreads);
-  cunn_TemporalMaxPooling_updateOutputKernel <<< blocks, threads, 0, THCState_getCurrentStream(state) >>>(
+  hipLaunchKernelGGL((cunn_TemporalMaxPooling_updateOutputKernel), dim3(blocks), dim3(threads), 0, THCState_getCurrentStream(state) , 
       input_data, output_data, indices_data, input_w, input_n, output_w, kW, dW);
-  THCudaCheck(cudaGetLastError());
+  THCudaCheck(hipGetLastError());
   THCTensor_(free)(state, input);
 
 }
@@ -174,13 +175,13 @@ void THNN_(TemporalMaxPooling_updateGradInput)(
 
   dim3 threads(nthreads);
   if (kW <= dW) {
-    cunn_TemporalMaxPooling_updateGradInputKernel <<< blocks, threads, 0, THCState_getCurrentStream(state) >>>(
+    hipLaunchKernelGGL((cunn_TemporalMaxPooling_updateGradInputKernel), dim3(blocks), dim3(threads), 0, THCState_getCurrentStream(state) , 
         gradInput_data, gradOutput_data, indices_data, input_w, input_n, output_w, kW, dW);
   } else {
-    cunn_TemporalMaxPooling_updateGradInputKernelAtomic <<< blocks, threads, 0, THCState_getCurrentStream(state) >>>(
+    hipLaunchKernelGGL((cunn_TemporalMaxPooling_updateGradInputKernelAtomic), dim3(blocks), dim3(threads), 0, THCState_getCurrentStream(state) , 
         gradInput_data, gradOutput_data, indices_data, input_w, input_n, output_w, kW, dW);
   }
-  THCudaCheck(cudaGetLastError());
+  THCudaCheck(hipGetLastError());
   THCTensor_(free)(state, gradOutput);
 
 }

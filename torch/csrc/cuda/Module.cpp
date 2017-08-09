@@ -84,7 +84,7 @@ static bool THCPModule_assignStateless()
 
 void THCPModule_setDevice(int device)
 {
-  THCudaCheck(cudaSetDevice(device));
+  THCudaCheck(hipSetDevice(device));
 }
 
 PyObject * THCPModule_setDevice_wrap(PyObject *self, PyObject *arg)
@@ -103,7 +103,7 @@ PyObject * THCPModule_getDevice_wrap(PyObject *self)
 {
   HANDLE_TH_ERRORS
   int device;
-  THCudaCheck(cudaGetDevice(&device));
+  THCudaCheck(hipGetDevice(&device));
   return PyLong_FromLong(device);
   END_HANDLE_TH_ERRORS
 }
@@ -112,8 +112,8 @@ PyObject * THCPModule_getDeviceCount_wrap(PyObject *self)
 {
   HANDLE_TH_ERRORS
   int ndevice;
-  if (cudaGetDeviceCount(&ndevice) != cudaSuccess) {
-    cudaGetLastError();
+  if (hipGetDeviceCount(&ndevice) != hipSuccess) {
+    hipGetLastError();
     ndevice = 0;
   }
   return PyLong_FromLong(ndevice);
@@ -141,8 +141,8 @@ PyObject * THCPModule_setStream_wrap(PyObject *self, PyObject *obj)
 PyObject * THCPModule_isDriverSufficient(PyObject *self)
 {
   int count;
-  cudaError_t err = cudaGetDeviceCount(&count);
-  if (err == cudaErrorInsufficientDriver) {
+  hipError_t err = hipGetDeviceCount(&count);
+  if (err == hipErrorInsufficientDriver) {
     return PyBool_FromLong(0);
   }
   return PyBool_FromLong(1);
@@ -151,11 +151,11 @@ PyObject * THCPModule_isDriverSufficient(PyObject *self)
 PyObject * THCPModule_getDriverVersion(PyObject *self)
 {
   int driverVersion = -1;
-  cudaError_t err = cudaDriverGetVersion(&driverVersion);
-  if (err != cudaSuccess) {
+  hipError_t err = hipDriverGetVersion(&driverVersion);
+  if (err != hipSuccess) {
     PyErr_Format(PyExc_RuntimeError,
-                    "Error calling cudaDriverGetVersion: %d %s",
-                    err, cudaGetErrorString(err));
+                    "Error calling hipDriverGetVersion: %d %s",
+                    err, hipGetErrorString(err));
     return NULL;
   }
   return PyLong_FromLong((long) driverVersion);
@@ -234,7 +234,7 @@ PyObject * THCPModule_cudaHostAllocator(PyObject *_unused)
 PyObject * THCPModule_cudaSynchronize(PyObject *_unused)
 {
   HANDLE_TH_ERRORS
-  THCudaCheck(cudaDeviceSynchronize());
+  THCudaCheck(hipDeviceSynchronize());
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }

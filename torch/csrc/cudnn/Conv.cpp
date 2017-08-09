@@ -312,7 +312,7 @@ Workspace chooseAlgorithm(
   try {
     return Workspace(state, workspace_size);
   } catch (std::runtime_error& e) {
-    cudaGetLastError(); // clear OOM error
+    hipGetLastError(); // clear OOM error
 
     // switch to default algorithm and record it in the cache to prevent
     // further OOM errors

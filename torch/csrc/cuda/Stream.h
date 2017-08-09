@@ -9,7 +9,7 @@ struct THCPStream {
   PyObject_HEAD
   THCStream *cdata;
   int device;
-  cudaStream_t cuda_stream;
+  hipStream_t cuda_stream;
 };
 extern PyObject *THCPStreamClass;
 

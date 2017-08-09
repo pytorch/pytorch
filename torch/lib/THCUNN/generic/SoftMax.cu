@@ -1,3 +1,4 @@
+#include "hip/hip_runtime.h"
 #ifndef THC_GENERIC_FILE
 #define THC_GENERIC_FILE "generic/SoftMax.cu"
 #else
@@ -64,12 +65,12 @@ void THNN_(SoftMax_updateOutput)(
 
   dim3 blocks(batchSize, blocksY, blocksZ);
   dim3 threads(SOFTMAX_THREADS);
-  cunn_SoftMax_updateOutput_kernel<real, accreal><<<blocks, threads, 0, THCState_getCurrentStream(state)>>>(
+  hipLaunchKernelGGL((cunn_SoftMax_updateOutput_kernel<real, accreal>), dim3(blocks), dim3(threads), 0, THCState_getCurrentStream(state), 
     THCTensor_(data)(state, output),
     THCTensor_(data)(state, input),
     batchSize, dim, stride0, stride1
   );
-  THCudaCheck(cudaGetLastError());
+  THCudaCheck(hipGetLastError());
 
   THCTensor_(free)(state, input);
 }
@@ -139,13 +140,13 @@ void THNN_(SoftMax_updateGradInput)(
 
   dim3 blocks(batchSize, blocksY, blocksZ);
   dim3 threads(SOFTMAX_THREADS);
-  cunn_SoftMax_updateGradInput_kernel<real, accreal><<<blocks, threads, 0, THCState_getCurrentStream(state)>>>(
+  hipLaunchKernelGGL((cunn_SoftMax_updateGradInput_kernel<real, accreal>), dim3(blocks), dim3(threads), 0, THCState_getCurrentStream(state), 
     THCTensor_(data)(state, gradInput),
     THCTensor_(data)(state, output),
     THCTensor_(data)(state, gradOutput),
     batchSize, dim, stride0, stride1
   );
-  THCudaCheck(cudaGetLastError());
+  THCudaCheck(hipGetLastError());
 
   THCTensor_(free)(state, gradOutput);
   THCTensor_(free)(state, output);

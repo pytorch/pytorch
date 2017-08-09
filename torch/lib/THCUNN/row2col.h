@@ -1,3 +1,4 @@
+#include "hip/hip_runtime.h"
 #ifndef THCUNN_ROW2COL_H
 #define THCUNN_ROW2COL_H
 
@@ -28,7 +29,7 @@ row2col_kernel(const int n, const Dtype *data_row, const int width,
 }
 
 template <typename Dtype>
-void row2col(cudaStream_t stream, const Dtype *data_row, const int channels,
+void row2col(hipStream_t stream, const Dtype *data_row, const int channels,
              const int width, const int ksize_w, const int pad_w,
              const int stride_w, const int dilation_w, Dtype *data_col) {
   // We are going to launch channels * width_col kernels, each
@@ -37,10 +38,10 @@ void row2col(cudaStream_t stream, const Dtype *data_row, const int channels,
       (width + 2 * pad_w - (dilation_w * (ksize_w - 1) + 1)) / stride_w + 1;
   int num_kernels = channels * width_col;
   // Launch
-  row2col_kernel<<<GET_BLOCKS(num_kernels), CUDA_NUM_THREADS, 0, stream>>>(
+  hipLaunchKernelGGL((row2col_kernel), dim3(GET_BLOCKS(num_kernels)), dim3(CUDA_NUM_THREADS), 0, stream, 
       num_kernels, data_row, width, ksize_w, pad_w, stride_w, 1, width_col,
       data_col);
-  THCudaCheck(cudaGetLastError());
+  THCudaCheck(hipGetLastError());
 }
 
 template <typename Dtype, typename Acctype>
@@ -72,7 +73,7 @@ __global__ void col2row_kernel(const int n, const Dtype *data_col,
   }
 
 template <typename Dtype, typename Acctype>
-void col2row(cudaStream_t stream, const Dtype *data_col, const int channels,
+void col2row(hipStream_t stream, const Dtype *data_col, const int channels,
              const int width, const int patch_w, const int pad_w,
              const int stride_w, const int dilation_w, Dtype *data_row) {
   int width_col =
@@ -80,11 +81,12 @@ void col2row(cudaStream_t stream, const Dtype *data_col, const int channels,
   int num_kernels = channels * width;
   // To avoid involving atomic operations, we will launch one kernel per
   // bottom dimension, and then in the kernel add up the top dimensions.
-  col2row_kernel<
-      Dtype, Acctype><<<GET_BLOCKS(num_kernels), CUDA_NUM_THREADS, 0, stream>>>(
+  hipLaunchKernelGGL(
+  (col2row_kernel<
+      Dtype, Acctype>), GET_BLOCKS(num_kernels), CUDA_NUM_THREADS, 0, stream, 
       num_kernels, data_col, width, channels, patch_w, pad_w, stride_w,
       dilation_w, width_col, data_row);
 
-  THCudaCheck(cudaGetLastError());
+  THCudaCheck(hipGetLastError());
 }
 #endif

@@ -1,3 +1,4 @@
+#include "hip/hip_runtime.h"
 #include "THCUNN.h"
 #include "THCHalf.h"
 #include "THCHalfAutoNumerics.cuh"
@@ -23,17 +24,17 @@ __global__ void subsample(Dtype *input, Dtype *output, Dtype *weight, Dtype *bia
   int output_h = (input_h - kH) / dH + 1;
 
   // compute offsets based on thread/block ID
-  int o = blockIdx.x;
+  int o = hipBlockIdx_x;
   int i = o;
-  int k = blockIdx.x % input_n;
+  int k = hipBlockIdx_x % input_n;
 
-  int xx_start = threadIdx.x;
+  int xx_start = hipThreadIdx_x;
   int xx_end = output_w;
-  int xx_step = blockDim.x;
+  int xx_step = hipBlockDim_x;
 
-  int yy_start = blockDim.y*blockIdx.y + threadIdx.y;
+  int yy_start = hipBlockDim_y*hipBlockIdx_y + hipThreadIdx_y;
   int yy_end = output_h;
-  int yy_step = blockDim.y*gridDim.y;
+  int yy_step = hipBlockDim_y*hipGridDim_y;
 
   // select input/output plane
   output = output + o*output_w*output_h;
@@ -82,24 +83,24 @@ __global__ void subgradweight(Dtype *input, Dtype *gradOutput, Dtype *gradWeight
   int output_h = (input_h - kH) / dH + 1;
 
   // compute offsets based on thread/block ID
-  int o = blockIdx.x;
+  int o = hipBlockIdx_x;
   int i = o;
-  int k = blockIdx.x % input_n;
+  int k = hipBlockIdx_x % input_n;
 
-  int xx_start = threadIdx.x;
+  int xx_start = hipThreadIdx_x;
   int xx_end = output_w;
-  int xx_step = blockDim.x;
+  int xx_step = hipBlockDim_x;
 
-  int yy_start = threadIdx.y;
+  int yy_start = hipThreadIdx_y;
   int yy_end = output_h;
-  int yy_step = blockDim.y;
+  int yy_step = hipBlockDim_y;
 
   // select input/output plane
   gradOutput = gradOutput + o*output_w*output_h;
   input = input + i*input_w*input_h;
 
   // thread ID
-  int tid = blockDim.x*threadIdx.y + threadIdx.x;
+  int tid = hipBlockDim_x*hipThreadIdx_y + hipThreadIdx_x;
 
   // create array to hold partial sums
   __shared__ Acctype sums[CUDA_MAX_THREADS];
@@ -123,9 +124,9 @@ __global__ void subgradweight(Dtype *input, Dtype *gradOutput, Dtype *gradWeight
   __syncthreads();
 
   // reduce: accumulate all partial sums to produce final gradWeight
-  if ((threadIdx.x == 0) && (threadIdx.y == 0)) {
+  if ((hipThreadIdx_x == 0) && (hipThreadIdx_y == 0)) {
     Acctype scaledSums = Acctype(0);
-    for(int i = 0; i < blockDim.x*blockDim.y; i++) {
+    for(int i = 0; i < hipBlockDim_x*hipBlockDim_y; i++) {
       scaledSums += scale*sums[i];
     }
     gradWeight[k] += ScalarConvert<Acctype, Dtype>::to(scaledSums);
@@ -134,15 +135,15 @@ __global__ void subgradweight(Dtype *input, Dtype *gradOutput, Dtype *gradWeight
 
   // compute gradBias
   sums[tid] = 0;
-  for (int i=tid; i<output_w*output_h; i+=(blockDim.x*blockDim.y)) {
+  for (int i=tid; i<output_w*output_h; i+=(hipBlockDim_x*hipBlockDim_y)) {
     sums[tid] += gradOutput[i];
   }
   __syncthreads();
 
   // reduce gradBias
-  if ((threadIdx.x == 0) && (threadIdx.y == 0)) {
+  if ((hipThreadIdx_x == 0) && (hipThreadIdx_y == 0)) {
     Acctype scaledSums = Acctype(0);
-    for (int i=0; i<(blockDim.x*blockDim.y); i++) {
+    for (int i=0; i<(hipBlockDim_x*hipBlockDim_y); i++) {
       scaledSums += scale*sums[i];
     }
     gradBias[k] += ScalarConvert<Acctype, Dtype>::to(scaledSums);
@@ -166,17 +167,17 @@ __global__ void subgradinput(Dtype *gradInput, Dtype *gradOutput, Dtype *weight,
   int output_h = (input_h - kH) / dH + 1;
 
   // compute offsets based on thread/block ID
-  int o = blockIdx.x;
+  int o = hipBlockIdx_x;
   int i = o;
-  int k = blockIdx.x % input_n;
+  int k = hipBlockIdx_x % input_n;
 
-  int xx_start = threadIdx.x;
+  int xx_start = hipThreadIdx_x;
   int xx_end = output_w;
-  int xx_step = blockDim.x;
+  int xx_step = hipBlockDim_x;
 
-  int yy_start = blockDim.y*blockIdx.y + threadIdx.y;
+  int yy_start = hipBlockDim_y*hipBlockIdx_y + hipThreadIdx_y;
   int yy_end = output_h;
-  int yy_step = blockDim.y*gridDim.y;
+  int yy_step = hipBlockDim_y*hipGridDim_y;
 
   // select input/output plane
   gradOutput = gradOutput + o*output_w*output_h;
@@ -220,17 +221,17 @@ __global__ void subgradinputAtomic(Dtype *gradInput, Dtype *gradOutput, Dtype *w
   int output_h = (input_h - kH) / dH + 1;
 
   // compute offsets based on thread/block ID
-  int o = blockIdx.x;
+  int o = hipBlockIdx_x;
   int i = o;
-  int k = blockIdx.x % input_n;
+  int k = hipBlockIdx_x % input_n;
 
-  int xx_start = threadIdx.x;
+  int xx_start = hipThreadIdx_x;
   int xx_end = output_w;
-  int xx_step = blockDim.x;
+  int xx_step = hipBlockDim_x;
 
-  int yy_start = blockDim.y*blockIdx.y + threadIdx.y;
+  int yy_start = hipBlockDim_y*hipBlockIdx_y + hipThreadIdx_y;
   int yy_end = output_h;
-  int yy_step = blockDim.y*gridDim.y;
+  int yy_step = hipBlockDim_y*hipGridDim_y;
 
   // select input/output plane
   gradOutput = gradOutput + o*output_w*output_h;

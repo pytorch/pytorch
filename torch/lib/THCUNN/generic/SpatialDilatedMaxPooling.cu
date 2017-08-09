@@ -1,3 +1,4 @@
+#include "hip/hip_runtime.h"
 #ifndef THC_GENERIC_FILE
 #define THC_GENERIC_FILE "generic/SpatialDilatedMaxPooling.cu"
 #else
@@ -145,11 +146,10 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
 
   int count = THCTensor_(nElement)(state, output);
 
-  MaxPoolForward<real, accreal> <<< GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state) >>>
-      (count, input_data,
+  hipLaunchKernelGGL((MaxPoolForward<real, accreal>), dim3(GET_BLOCKS(count)), dim3(CUDA_NUM_THREADS), 0, THCState_getCurrentStream(state) , count, input_data,
       batchSize, nInputPlane, nInputRows, nInputCols, nOutputRows, nOutputCols,
       kH, kW, dH, dW, padH, padW, dilationH, dilationW, output_data, indices_data);
-  THCudaCheck(cudaGetLastError());
+  THCudaCheck(hipGetLastError());
 
   if(input->nDimension == 3)
     THCTensor_(resize3d)(state, output, nInputPlane, nOutputRows, nOutputCols);
@@ -218,14 +218,13 @@ void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
 
   int count = THCTensor_(nElement)(state, input);
 
-  MaxPoolBackward<real, accreal> <<< GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state) >>>
-      (count,
+  hipLaunchKernelGGL((MaxPoolBackward<real, accreal>), dim3(GET_BLOCKS(count)), dim3(CUDA_NUM_THREADS), 0, THCState_getCurrentStream(state) , count,
       THCTensor_(data)(state, gradOutput),
       THCIndexTensor_(data)(state, indices),
       batchSize, nInputPlane, nInputRows, nInputCols, nOutputRows, nOutputCols,
       kH, kW, dH, dW, padH, padW, dilationH, dilationW,
       THCTensor_(data)(state, gradInput));
-  THCudaCheck(cudaGetLastError());
+  THCudaCheck(hipGetLastError());
 
   THCTensor_(free)(state, gradOutput);
 

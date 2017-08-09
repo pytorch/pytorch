@@ -904,7 +904,7 @@ int THCTensor_(checkGPU)(THCState *state, unsigned int nTensors, ...)
     THCState_getKernelPeerToPeerAccessEnabled(state);
 
   int curDev = -1;
-  THCudaCheck(cudaGetDevice(&curDev));
+  THCudaCheck(hipGetDevice(&curDev));
   va_list(args);
   va_start(args, nTensors);
   int valid = 1;

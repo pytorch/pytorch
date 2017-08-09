@@ -1,3 +1,4 @@
+#include "hip/hip_runtime.h"
 #include "THCUNN.h"
 #include "THCHalf.h"
 #include "THCHalfAutoNumerics.cuh"
@@ -6,8 +7,8 @@
 template <typename T, typename AccumT>
 __global__ void cunn_SpatialLogSoftMax_updateOutput_kernel(T *output, T *input, int classSize, int height, int width)
 {
-  int batchIndex = blockIdx.x;
-  int index = threadIdx.x;
+  int batchIndex = hipBlockIdx_x;
+  int index = hipThreadIdx_x;
 
   while (index < height*width) {
     int y = index / width;
@@ -42,15 +43,15 @@ __global__ void cunn_SpatialLogSoftMax_updateOutput_kernel(T *output, T *input, 
         x;
       output[outputIndex] = input[inputStartIndex + i] - logsum;
     }
-    index += blockDim.x;
+    index += hipBlockDim_x;
   }
 }
 
 template <typename T, typename AccumT>
 __global__ void cunn_SpatialLogSoftMax_updateGradInput_kernel(T *gradInput, T *output, T *gradOutput, int classSize, int height, int width)
 {
-  int batchIndex = blockIdx.x;
-  int index = threadIdx.x;
+  int batchIndex = hipBlockIdx_x;
+  int index = hipThreadIdx_x;
 
   while (index < height*width) {
     int y = index / width;
@@ -79,7 +80,7 @@ __global__ void cunn_SpatialLogSoftMax_updateGradInput_kernel(T *gradInput, T *o
       gradInput[inputIndex] = ScalarConvert<AccumT, T>::to(
         gradOutput[outputStartIndex + i] - THCNumerics<T>::exp(output[outputStartIndex + i]) * sum);
     }
-    index += blockDim.x;
+    index += hipBlockDim_x;
   }
 }
 
@@ -151,19 +152,19 @@ blockReduce(AccumT* smem, AccumT val,
   // need a sync here
   __syncthreads();
 
-  smem[threadIdx.x] = val;
+  smem[hipThreadIdx_x] = val;
 
   __syncthreads();
 
   AccumT warpVal = defaultVal;
 
   // First warp will perform per-warp reductions for the remaining warps
-  if ((threadIdx.x / 32) == 0) // only threads in warp1 go into this (if)
+  if ((hipThreadIdx_x / 32) == 0) // only threads in warp1 go into this (if)
   {
-    int lane = threadIdx.x % 32; // from 0 to 31
+    int lane = hipThreadIdx_x % 32; // from 0 to 31
 
     // if less than 1024 threads per block, then only activate the relevant lanes
-    if (lane < blockDim.x / 32)
+    if (lane < hipBlockDim_x / 32)
     {
 #pragma unroll
       for (int i = 0; i < 32; ++i)
@@ -180,9 +181,9 @@ blockReduce(AccumT* smem, AccumT val,
   // First thread will perform a reduction of the above per-warp reductions
   AccumT blockVal = defaultVal;
 
-  if (threadIdx.x == 0)
+  if (hipThreadIdx_x == 0)
   {
-    for (int i = 0; i < blockDim.x / 32; ++i)
+    for (int i = 0; i < hipBlockDim_x / 32; ++i)
     {
       blockVal = r(blockVal, smem[i]);
     }
@@ -212,19 +213,19 @@ ilpReduce(T* data,
           AccumT defaultVal)
 {
   AccumT threadVal = defaultVal;
-  int offset = threadIdx.x;
+  int offset = hipThreadIdx_x;
 
-  int last = size % (ILP * blockDim.x);
+  int last = size % (ILP * hipBlockDim_x);
 
   // Body (unroll by ILP times)
-  for (; offset < size - last; offset += blockDim.x * ILP)
+  for (; offset < size - last; offset += hipBlockDim_x * ILP)
   {
     T tmp[ILP];
 
 #pragma unroll
     for (int j = 0; j < ILP; ++j)
     {
-      tmp[j] = data[offset + j * blockDim.x];
+      tmp[j] = data[offset + j * hipBlockDim_x];
     }
 
 #pragma unroll
@@ -235,7 +236,7 @@ ilpReduce(T* data,
   }
 
   // Epilogue
-  for (; offset < size; offset += blockDim.x)
+  for (; offset < size; offset += hipBlockDim_x)
   {
     threadVal = r(threadVal, data[offset]);
   }
@@ -249,10 +250,10 @@ cunn_LogSoftMax_updateOutput_kernel(T *output, T *input, int classes)
 {
   SharedMem<AccumT> smem;
   AccumT *buffer = smem.getPointer();
-  // forward pointers to batch[blockIdx.x]
+  // forward pointers to batch[hipBlockIdx_x]
   // each block handles a sample in the mini-batch
-  input += blockIdx.x * classes;
-  output += blockIdx.x * classes;
+  input += hipBlockIdx_x * classes;
+  output += hipBlockIdx_x * classes;
 
   // find the max of the batch
   AccumT threadMax = ilpReduce<MaxFloat, ILP, T, AccumT>(
@@ -269,26 +270,26 @@ cunn_LogSoftMax_updateOutput_kernel(T *output, T *input, int classes)
           buffer, threadExp, SumFloat<AccumT, AccumT>(), AccumT(0), LSMFinal<AccumT>(max_k)));
 
   // Output LSM (hand ILP)
-  int offset = threadIdx.x;
+  int offset = hipThreadIdx_x;
 
-  int last = classes % (ILP * blockDim.x);
-  for (; offset < classes - last; offset += blockDim.x * ILP)
+  int last = classes % (ILP * hipBlockDim_x);
+  for (; offset < classes - last; offset += hipBlockDim_x * ILP)
   {
     T tmp[ILP];
 
 #pragma unroll
     for (int j = 0; j < ILP; ++j) {
-      tmp[j] = input[offset + j * blockDim.x];
+      tmp[j] = input[offset + j * hipBlockDim_x];
     }
 
 #pragma unroll
     for (int j = 0; j < ILP; ++j)
     {
-      output[offset + j * blockDim.x] = tmp[j] - logsum_k;
+      output[offset + j * hipBlockDim_x] = tmp[j] - logsum_k;
     }
   }
 
-  for (; offset < classes; offset += blockDim.x)
+  for (; offset < classes; offset += hipBlockDim_x)
   {
     output[offset] = input[offset] - logsum_k;
   }
@@ -303,9 +304,9 @@ cunn_LogSoftMax_updateGradInput_kernel(T *gradInput,
 {
   SharedMem<AccumT> smem;
   AccumT *buffer = smem.getPointer();
-  gradInput += blockIdx.x * classes;
-  output += blockIdx.x * classes;
-  gradOutput += blockIdx.x * classes;
+  gradInput += hipBlockIdx_x * classes;
+  output += hipBlockIdx_x * classes;
+  gradOutput += hipBlockIdx_x * classes;
 
   AccumT threadSum = ilpReduce<SumFloat, 4, T, AccumT>(
       gradOutput, classes, SumFloat<T, AccumT>(), AccumT(0));
@@ -314,9 +315,9 @@ cunn_LogSoftMax_updateGradInput_kernel(T *gradInput,
           buffer, threadSum, SumFloat<AccumT, AccumT>(), AccumT(0)));
 
   // Update gradInput (hand ILP)
-  int offset = threadIdx.x;
-  int last = classes % (ILP * blockDim.x);
-  for (; offset < classes - last; offset += blockDim.x * ILP)
+  int offset = hipThreadIdx_x;
+  int last = classes % (ILP * hipBlockDim_x);
+  for (; offset < classes - last; offset += hipBlockDim_x * ILP)
   {
     T tmpGradOutput[ILP];
     T tmpOutput[ILP];
@@ -324,19 +325,19 @@ cunn_LogSoftMax_updateGradInput_kernel(T *gradInput,
 #pragma unroll
     for (int j = 0; j < ILP; ++j)
     {
-      tmpGradOutput[j] = gradOutput[offset + j * blockDim.x];
-      tmpOutput[j] = output[offset + j * blockDim.x];
+      tmpGradOutput[j] = gradOutput[offset + j * hipBlockDim_x];
+      tmpOutput[j] = output[offset + j * hipBlockDim_x];
     }
 
 #pragma unroll
     for (int j = 0; j < ILP; ++j)
     {
-      gradInput[offset + j * blockDim.x] =
+      gradInput[offset + j * hipBlockDim_x] =
         tmpGradOutput[j] - THCNumerics<T>::exp(tmpOutput[j]) * sum_k;
     }
   }
 
-  for (; offset < classes; offset += blockDim.x)
+  for (; offset < classes; offset += hipBlockDim_x)
   {
     gradInput[offset] =
       gradOutput[offset] - THCNumerics<T>::exp(output[offset]) * sum_k;

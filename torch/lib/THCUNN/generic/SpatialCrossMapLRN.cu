@@ -1,3 +1,4 @@
+#include "hip/hip_runtime.h"
 #ifndef THC_GENERIC_FILE
 #define THC_GENERIC_FILE "generic/SpatialCrossMapLRN.cu"
 #else
@@ -34,14 +35,14 @@ void LRNforward(THCState* state, THCTensor* input, THCTensor* output,
   input = THCTensor_(newContiguous)(state, input);
 
   int n_threads = batchSize * imsize_h * imsize_w;
-  LRNFillScale<real, accreal> <<<GET_BLOCKS(n_threads), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state)>>>(
+  hipLaunchKernelGGL((LRNFillScale<real, accreal>), dim3(GET_BLOCKS(n_threads)), dim3(CUDA_NUM_THREADS), 0, THCState_getCurrentStream(state), 
       n_threads, THCTensor_(data)(state, input), batchSize, nInputPlane, imsize_h, imsize_w, local_size,
       alpha / local_size, k, THCTensor_(data)(state, scale));
   n_threads *= nInputPlane;
-  THCudaCheck(cudaGetLastError());
-  LRNComputeOutput<<<GET_BLOCKS(n_threads), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state)>>>(
+  THCudaCheck(hipGetLastError());
+  hipLaunchKernelGGL((LRNComputeOutput), dim3(GET_BLOCKS(n_threads)), dim3(CUDA_NUM_THREADS), 0, THCState_getCurrentStream(state), 
     n_threads, THCTensor_(data)(state, input), THCTensor_(data)(state, scale), -beta, THCTensor_(data)(state, output));
-  THCudaCheck(cudaGetLastError());
+  THCudaCheck(hipGetLastError());
 
   THCTensor_(free)(state, input);
 }
@@ -80,12 +81,12 @@ void LRNbackward(THCState* state, THCTensor* input, THCTensor* output,
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
 
   int n_threads = batchSize * imsize_h * imsize_w;
-  LRNComputeDiff<real, accreal> <<<GET_BLOCKS(n_threads), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state)>>>(
+  hipLaunchKernelGGL((LRNComputeDiff<real, accreal>), dim3(GET_BLOCKS(n_threads)), dim3(CUDA_NUM_THREADS), 0, THCState_getCurrentStream(state), 
       n_threads, THCTensor_(data)(state, input), THCTensor_(data)(state, output),
       THCTensor_(data)(state, scale), THCTensor_(data)(state, gradOutput), batchSize, nInputPlane, imsize_h, imsize_w,
       local_size, -beta, ScalarConvert<int, real>::to(2) * alpha * beta / local_size,
       THCTensor_(data)(state, gradInput));
-  THCudaCheck(cudaGetLastError());
+  THCudaCheck(hipGetLastError());
 
   THCTensor_(free)(state, input);
   THCTensor_(free)(state, gradOutput);

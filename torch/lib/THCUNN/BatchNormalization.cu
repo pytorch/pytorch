@@ -1,3 +1,4 @@
+#include "hip/hip_runtime.h"
 #include "THCUNN.h"
 #include "common.h"
 #include "THCHalf.h"
@@ -84,11 +85,11 @@ static __device__ __forceinline__ T warpSum(T val) {
   }
 #else
   __shared__ T values[MAX_BLOCK_SIZE];
-  values[threadIdx.x] = val;
+  values[hipThreadIdx_x] = val;
   __threadfence_block();
-  const int base = (threadIdx.x / WARP_SIZE) * WARP_SIZE;
+  const int base = (hipThreadIdx_x / WARP_SIZE) * WARP_SIZE;
   for (int i = 1; i < WARP_SIZE; i++) {
-    val += values[base + ((i + threadIdx.x) % WARP_SIZE)];
+    val += values[base + ((i + hipThreadIdx_x) % WARP_SIZE)];
   }
 #endif
   return val;
@@ -106,7 +107,7 @@ template<typename T, typename Op, typename DeviceTensor3>
 __device__ T reduce(Op op, DeviceTensor3 tensor, int plane) {
   T sum = (T)0;
   for (int batch = 0; batch < tensor.getSize(0); ++batch) {
-    for (int x = threadIdx.x; x < tensor.getSize(2); x += blockDim.x) {
+    for (int x = hipThreadIdx_x; x < tensor.getSize(2); x += hipBlockDim_x) {
       sum += op(batch, plane, x);
     }
   }
@@ -117,17 +118,17 @@ __device__ T reduce(Op op, DeviceTensor3 tensor, int plane) {
   // 'transpose', and reduce within warp again
   __shared__ T shared[32];
   __syncthreads();
-  if (threadIdx.x % WARP_SIZE == 0) {
-    shared[threadIdx.x / WARP_SIZE] = sum;
+  if (hipThreadIdx_x % WARP_SIZE == 0) {
+    shared[hipThreadIdx_x / WARP_SIZE] = sum;
   }
-  if (threadIdx.x >= blockDim.x / WARP_SIZE && threadIdx.x < WARP_SIZE) {
+  if (hipThreadIdx_x >= hipBlockDim_x / WARP_SIZE && hipThreadIdx_x < WARP_SIZE) {
     // zero out the other entries in shared
-    shared[threadIdx.x] = (T)0;
+    shared[hipThreadIdx_x] = (T)0;
   }
   __syncthreads();
-  if (threadIdx.x / WARP_SIZE == 0) {
-    sum = warpSum(shared[threadIdx.x]);
-    if (threadIdx.x == 0) {
+  if (hipThreadIdx_x / WARP_SIZE == 0) {
+    sum = warpSum(shared[hipThreadIdx_x]);
+    if (hipThreadIdx_x == 0) {
       shared[0] = sum;
     }
   }
@@ -147,7 +148,7 @@ __global__ void BatchNormalizationUpdateOutputInference_kernel(
     const DeviceTensor1 bias,
     Acctype epsilon) {
 
-  int plane = blockIdx.x;
+  int plane = hipBlockIdx_x;
 
   Acctype invstd = Acctype(1) / sqrt(runningVar[plane].ldg() + epsilon);
   Acctype mean = ScalarConvert<Dtype, Acctype>::to(runningMean[plane].ldg());
@@ -156,7 +157,7 @@ __global__ void BatchNormalizationUpdateOutputInference_kernel(
 
   // Write normalized and update the output
   for (int batch = 0; batch < input.getSize(0); batch++) {
-    for (int x = threadIdx.x; x < input.getSize(2); x += blockDim.x) {
+    for (int x = hipThreadIdx_x; x < input.getSize(2); x += hipBlockDim_x) {
       Dtype inp = input[batch][plane][x].ldg();
       output[batch][plane][x] = ScalarConvert<Acctype, Dtype>::to(gamma * (inp - mean) * invstd + beta);
     }
@@ -176,7 +177,7 @@ __global__ void BatchNormalizationUpdateOutput_kernel(
     DeviceTensor1 saveMean,
     DeviceTensor1 saveStd) {
 
-  int plane = blockIdx.x;
+  int plane = hipBlockIdx_x;
   int N = input.getSize(0) * input.getSize(2);
 
   Acctype norm = Acctype(1) / N;
@@ -191,7 +192,7 @@ __global__ void BatchNormalizationUpdateOutput_kernel(
   }
 
   // Save the mean, variance, and moving averages
-  if (threadIdx.x == 0) {
+  if (hipThreadIdx_x == 0) {
     // Momentum based writeback
     Acctype unbiasedVar = varN / (N - 1);
     saveMean[plane] = ScalarConvert<Acctype, Dtype>::to(mean);
@@ -204,7 +205,7 @@ __global__ void BatchNormalizationUpdateOutput_kernel(
   Acctype gamma = weight.numElements() > 0 ? ScalarConvert<Dtype, Acctype>::to(weight[plane]) : ScalarConvert<int, Acctype>::to(1);
   Acctype beta = bias.numElements() > 0 ? ScalarConvert<Dtype, Acctype>::to(bias[plane]) : ScalarConvert<int, Acctype>::to(0);
   for (int batch = 0; batch < input.getSize(0); ++batch) {
-    for (int x = threadIdx.x; x < input.getSize(2); x += blockDim.x) {
+    for (int x = hipThreadIdx_x; x < input.getSize(2); x += hipBlockDim_x) {
       Dtype inp = input[batch][plane][x].ldg();
       output[batch][plane][x] = ScalarConvert<Acctype, Dtype>::to(gamma * (inp - mean) * invStd + beta);
     }
@@ -227,7 +228,7 @@ __global__ void BatchNormalizationBackward_kernel(
     Acctype scale,
     double eps) {
 
-  int plane = blockIdx.x;
+  int plane = hipBlockIdx_x;
   int N = gradOutput.getSize(0) * gradOutput.getSize(2);
 
   Acctype mean, stdVal;
@@ -256,7 +257,7 @@ __global__ void BatchNormalizationBackward_kernel(
 
   if (gradInput.numElements() > 0) {
     for (int batch = 0; batch < gradOutput.getSize(0); ++batch) {
-      for (int x = threadIdx.x; x < gradOutput.getSize(2); x += blockDim.x) {
+      for (int x = hipThreadIdx_x; x < gradOutput.getSize(2); x += hipBlockDim_x) {
         Dtype gradOut = gradOutput[batch][plane][x];
         if (train) {
           Dtype inp = input[batch][plane][x];
@@ -270,13 +271,13 @@ __global__ void BatchNormalizationBackward_kernel(
   }
 
   if (gradWeight.numElements() > 0) {
-    if (threadIdx.x == 0) {
+    if (hipThreadIdx_x == 0) {
       gradWeight[plane] += ScalarConvert<Acctype, Dtype>::to(scale * dotP * stdVal);
     }
   }
 
   if (gradBias.numElements() > 0) {
-    if (threadIdx.x == 0) {
+    if (hipThreadIdx_x == 0) {
       gradBias[plane] += ScalarConvert<Acctype, Dtype>::to(scale * gradOutputSum);
     }
   }

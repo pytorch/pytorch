@@ -1,3 +1,4 @@
+#include "hip/hip_runtime.h"
 #ifndef THC_GENERIC_FILE
 #define THC_GENERIC_FILE "generic/VolumetricMaxUnpooling.cu"
 #else
@@ -145,12 +146,11 @@ void THNN_(VolumetricMaxUnpooling_updateOutput)(
               THCCeilDiv(inputHeight, static_cast<int>(block.y)),
               totalZ > 65535 ? 65535 : totalZ);
 
-    cuda_VolumetricMaxUnpooling_updateOutput<<<grid, block,
-          0, THCState_getCurrentStream(state)>>>(
+    hipLaunchKernelGGL((cuda_VolumetricMaxUnpooling_updateOutput), dim3(grid), dim3(block), 0, THCState_getCurrentStream(state), 
                              cudaInput, cudaIndices, cudaOutput,
                              dT, dH, dW,
                              padT, padH, padW, offsetZ);
-    THCudaCheck(cudaGetLastError());
+    THCudaCheck(hipGetLastError());
     totalZ -= 65535;
     offsetZ += 65535;
   }
@@ -235,14 +235,13 @@ void THNN_(VolumetricMaxUnpooling_updateGradInput)(
               THCCeilDiv(inputHeight, static_cast<int>(block.y)),
               totalZ > 65535 ? 65535 : totalZ);
 
-    cuda_VolumetricMaxUnpooling_updateGradInput<<<grid, block,
-      0, THCState_getCurrentStream(state)>>>(
+    hipLaunchKernelGGL((cuda_VolumetricMaxUnpooling_updateGradInput), dim3(grid), dim3(block), 0, THCState_getCurrentStream(state), 
                                              cudaGradOutput,
                                              cudaIndices,
                                              cudaGradInput,
                                              dT, dH, dW,
                                              padT, padH, padW, offsetZ);
-    THCudaCheck(cudaGetLastError());
+    THCudaCheck(hipGetLastError());
     totalZ -= 65535;
     offsetZ += 65535;
   }

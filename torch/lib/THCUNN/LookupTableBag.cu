@@ -1,3 +1,4 @@
+#include "hip/hip_runtime.h"
 #include "THCUNN.h"
 #include "common.h"
 
@@ -26,13 +27,13 @@ __global__ void cunn_LookupTableBag_updateOutputKernel(
 
   // the strategy here is that each bag x feature is handled by a single thread
 
-  long chunksPerBag = THCCeilDiv(stride, (long) blockDim.x);
+  long chunksPerBag = THCCeilDiv(stride, (long) hipBlockDim_x);
   long numChunks = numBags * chunksPerBag;
-  long chunkOffset = blockIdx.x * blockDim.y + threadIdx.y;
-  long chunkStride = gridDim.x * blockDim.y;
+  long chunkOffset = hipBlockIdx_x * hipBlockDim_y + hipThreadIdx_y;
+  long chunkStride = hipGridDim_x * hipBlockDim_y;
 
   for (long chunk = chunkOffset; chunk < numChunks; chunk += chunkStride) {
-    long featureDim = (chunk % chunksPerBag) * blockDim.x + threadIdx.x;
+    long featureDim = (chunk % chunksPerBag) * hipBlockDim_x + hipThreadIdx_x;
     if (featureDim < stride) {
       long bag = chunk / chunksPerBag;
       Dtype*  weightFeat = weight + featureDim;
@@ -69,7 +70,7 @@ __global__ void cunn_LookupTableBag_accGradParametersKernel(
   long *count, Dtype defaultScale, ptrdiff_t numel, long stride,
   int mode, long *bag_size) {
 
-  int idx = blockIdx.x * 4 + threadIdx.y;
+  int idx = hipBlockIdx_x * 4 + hipThreadIdx_y;
 
   // Each warp is responsible for an input into the LookupTable.
   // If the preceding input has the same as this input, then the warp
@@ -88,7 +89,7 @@ __global__ void cunn_LookupTableBag_accGradParametersKernel(
   if (idx < numel
       && (idx == 0 || input[idx] != input[idx - 1])) {
     do {
-      const int startFeature = threadIdx.x + blockIdx.y * blockDim.x * SZ;
+      const int startFeature = hipThreadIdx_x + hipBlockIdx_y * hipBlockDim_x * SZ;
       const int weightRow = ((int) input[idx] - TH_INDEX_BASE) * stride;
 
       // Note: only this line changes from LookupTable_accgradParametersKernel

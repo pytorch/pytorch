@@ -1,3 +1,4 @@
+#include "hip/hip_runtime.h"
 #include "THCTensorMath.h"
 #include "THCGeneral.h"
 #include "THCBlas.h"
@@ -16,7 +17,7 @@
  * - row_size is the size of the dimension along which to compute the variance;
  *
  * The dimensions to the outside and inside of the specified dimension are considered as flattened.
- * Thread blocks with the same blockIdx.y process an "outer row" (i.e. an element of the flattened
+ * Thread blocks with the same hipBlockIdx_y process an "outer row" (i.e. an element of the flattened
  * outer dimensions, which contains several "inner rows").
  * Each thread processes a single inner row at a time.
  */
@@ -25,8 +26,8 @@ __global__ void THCTensor_kernel_scanOuterDim(T *tgt_, T *src_,
                                               unsigned num_orows, unsigned num_irows, unsigned row_size,
                                               T init, BinaryOp binary_op)
 {
-  for (unsigned orow = blockIdx.x; orow < num_orows; orow += gridDim.x) {
-    for (unsigned irow = blockIdx.y * blockDim.x + threadIdx.x; irow < num_irows; irow += gridDim.y * blockDim.x) {
+  for (unsigned orow = hipBlockIdx_x; orow < num_orows; orow += hipGridDim_x) {
+    for (unsigned irow = hipBlockIdx_y * hipBlockDim_x + hipThreadIdx_x; irow < num_irows; irow += hipGridDim_y * hipBlockDim_x) {
       T *src = src_ + orow * row_size * num_irows + irow;
       T *tgt = tgt_ + orow * row_size * num_irows + irow;
       T acc = init;
@@ -59,12 +60,12 @@ __global__ void THCTensor_kernel_scanInnermostDim(T *tgt_, T *src_,
 {
   __shared__ T sbuf[num_threads_y][2 * num_threads_x];
 
-  T* row_buf = sbuf[threadIdx.y];
+  T* row_buf = sbuf[hipThreadIdx_y];
 
-  for (unsigned block_row = blockIdx.x * blockDim.y;
+  for (unsigned block_row = hipBlockIdx_x * hipBlockDim_y;
        block_row < num_rows;
-       block_row += blockDim.y * gridDim.x) {
-    unsigned row = block_row + threadIdx.y;
+       block_row += hipBlockDim_y * hipGridDim_x) {
+    unsigned row = block_row + hipThreadIdx_y;
     T block_total = init;
 
     T *row_src = src_ + row * row_size;
@@ -74,23 +75,23 @@ __global__ void THCTensor_kernel_scanInnermostDim(T *tgt_, T *src_,
     // all blocks processed so far.
     for (unsigned block_col = 0; block_col < row_size; block_col += 2 * num_threads_x) {
       // Load data into shared memory (two values per thread).
-      unsigned col1 = block_col + threadIdx.x;
-      unsigned col2 = block_col + num_threads_x + threadIdx.x;
+      unsigned col1 = block_col + hipThreadIdx_x;
+      unsigned col2 = block_col + num_threads_x + hipThreadIdx_x;
       if (row < num_rows) {
         if (col1 < row_size) {
-          row_buf[threadIdx.x] = row_src[col1];
+          row_buf[hipThreadIdx_x] = row_src[col1];
         } else {
-          row_buf[threadIdx.x] = init;
+          row_buf[hipThreadIdx_x] = init;
         }
 
         if (col2 < row_size) {
-          row_buf[num_threads_x + threadIdx.x] = row_src[col2];
+          row_buf[num_threads_x + hipThreadIdx_x] = row_src[col2];
         } else {
-          row_buf[num_threads_x + threadIdx.x] = init;
+          row_buf[num_threads_x + hipThreadIdx_x] = init;
         }
 
         // Add the total value of all previous blocks to the first value of this block.
-        if (threadIdx.x == 0) {
+        if (hipThreadIdx_x == 0) {
           row_buf[0] = binary_op(row_buf[0], block_total);
         }
       }
@@ -98,8 +99,8 @@ __global__ void THCTensor_kernel_scanInnermostDim(T *tgt_, T *src_,
 
       // Parallel reduction (up-sweep).
       for (unsigned s = num_threads_x, d = 1; s >= 1; s >>= 1, d <<= 1) {
-        if (row < num_rows && threadIdx.x < s) {
-          unsigned offset = (2 * threadIdx.x + 1) * d - 1;
+        if (row < num_rows && hipThreadIdx_x < s) {
+          unsigned offset = (2 * hipThreadIdx_x + 1) * d - 1;
           row_buf[offset + d] = binary_op(row_buf[offset], row_buf[offset + d]);
         }
         __syncthreads();
@@ -107,8 +108,8 @@ __global__ void THCTensor_kernel_scanInnermostDim(T *tgt_, T *src_,
 
       // Down-sweep.
       for (unsigned s = 2, d = num_threads_x / 2; d >= 1; s <<= 1, d >>= 1) {
-        if (row < num_rows && threadIdx.x < s - 1) {
-          unsigned offset = 2 * (threadIdx.x + 1) * d - 1;
+        if (row < num_rows && hipThreadIdx_x < s - 1) {
+          unsigned offset = 2 * (hipThreadIdx_x + 1) * d - 1;
           row_buf[offset + d] = binary_op(row_buf[offset], row_buf[offset + d]);
         }
         __syncthreads();
@@ -116,8 +117,8 @@ __global__ void THCTensor_kernel_scanInnermostDim(T *tgt_, T *src_,
 
       // Write back to output.
       if (row < num_rows) {
-        if (col1 < row_size) row_tgt[col1] = row_buf[threadIdx.x];
-        if (col2 < row_size) row_tgt[col2] = row_buf[num_threads_x + threadIdx.x];
+        if (col1 < row_size) row_tgt[col1] = row_buf[hipThreadIdx_x];
+        if (col2 < row_size) row_tgt[col2] = row_buf[num_threads_x + hipThreadIdx_x];
       }
       block_total = row_buf[2 * num_threads_x - 1];
       __syncthreads();
