@@ -433,10 +433,10 @@ class CrossEntropyLoss(_WeightedLoss):
 
     The `input` is expected to contain scores for each class.
 
-    `input` has to be a 2D `Tensor` of size `batch x n`.
+    `input` has to be a 2D `Tensor` of size `(minibatch,n)`.
 
     This criterion expects a class index (0 to nClasses-1) as the
-    `target` for each value of a 1D tensor of size `n`
+    `target` for each value of a 1D tensor of size `minibatch`
 
     The loss can be described as::
 
