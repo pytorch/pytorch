@@ -89,6 +89,14 @@ struct TensorType : public Type {
       std::copy(tensor.sizes().begin(), tensor.sizes().end(), sizes_.begin());
       std::copy(tensor.strides().begin(), tensor.strides().end(), strides_.begin());
   }
+  TensorType(const std::vector<int64_t> & sizes)
+  : Type(TypeKind::TensorType), sizes_(sizes) {
+    strides_.resize(sizes_.size());
+    strides_.back() = 1;
+    for(size_t i = sizes_.size() - 1; i > 0; i--) {
+      strides_[i-1] = strides_[i]*sizes_[i];
+    }
+  }
   static const TypeKind Kind = TypeKind::TensorType;
   const std::vector<std::int64_t>& sizes() const {
     return sizes_;
@@ -96,7 +104,12 @@ struct TensorType : public Type {
   const std::vector<std::int64_t>& strides() const {
     return strides_;
   }
+  TypePtr contiguous() const {
+    return std::make_shared<TensorType>(sizes_);
+  }
 private:
+  friend class TensorPtr;
+
   std::vector<int64_t> sizes_;
   std::vector<int64_t> strides_;
 };
@@ -217,6 +230,9 @@ public:
   }
   const TypePtr & type() const {
     JIT_ASSERT(type_ != nullptr);
+    return type_;
+  }
+  const TypePtr & typeOption() const {
     return type_;
   }
   bool hasMultipleOutputs() const {
@@ -513,7 +529,7 @@ struct NodeWithKind : public Node {
 protected:
   // allocate a new Node with the same type as this node, and
   // get it initialized in in_graph
-  // in_graph may not be the fsame graph as this->graph_ because we might be
+  // in_graph may not be the same graph as this->graph_ because we might be
   // cloning the node into a new graph
   // defined here because we need to know Self to allocate a new node.
   // user-defined cloneFrom is called.

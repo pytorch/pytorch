@@ -6,7 +6,9 @@
 #include "torch/csrc/autograd/functions/utils.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/python_function.h"
-
+#ifdef WITH_CUDA
+#include "torch/csrc/jit/fusion_compiler.h"
+#endif
 namespace torch { namespace autograd {
 
 using namespace torch::jit;
@@ -181,10 +183,73 @@ struct ConstantFactory : public Function {
   }
 };
 
-bool isMultireturn(Node * node) {
-  // Either all or no uses are select nodes, so it's enough to check the first one
-  return node->uses()[0].user->kind() == NodeKind::Select;
+static variable_list variablesFromTensors(at::TensorList tensors) {
+  variable_list r;
+  r.reserve(tensors.size());
+  for(auto & t : tensors)
+    r.push_back(std::make_shared<Variable>(t,false,false));
+  return r;
 }
+
+struct FusionGroupFunction : public Function {
+  FusionGroupFunction(const std::shared_ptr<CompiledFusionFunction> & function)
+  : function(function) {}
+  virtual variable_list apply(const variable_list& inputs) {
+    #ifdef WITH_CUDA
+    //TODO: handle the case where inputs do not match the device function was
+    // compiled for
+    std::vector<at::Tensor> data;
+    for(auto & input : inputs)
+      data.push_back(input->data);
+    AutoGPU guard(data.back());
+    std::vector<at::Tensor> outputs;
+    outputs.reserve(function->outputDescriptors().size());
+    for(auto & od : function->outputDescriptors()) {
+      outputs.push_back(at::CUDA(od.scalar_type).tensor(data.back().sizes()));
+    }
+    function->launch(data, outputs);
+    return variablesFromTensors(outputs);
+    #else
+    throw std::runtime_error("FusionGroup requires CUDA");
+    #endif
+  }
+private:
+  #ifdef WITH_CUDA
+  std::shared_ptr<CompiledFusionFunction> function;
+  #endif
+};
+
+std::vector<at::Tensor> split(const at::Tensor & tensor, int split_size, int dim=0) {
+  if(dim < 0)
+    dim += tensor.dim();
+  auto dim_size = tensor.size(dim);
+  auto num_splits = (dim_size + split_size - 1) / split_size;
+  auto last_split_size = split_size - (split_size * num_splits - dim_size);
+  std::vector<at::Tensor> outputs;
+  for(int i = 0; i < num_splits; i++) {
+    auto sz =  (i < num_splits - 1) ? split_size : last_split_size;
+    outputs.push_back(tensor.narrow(dim,i*split_size, sz));
+  }
+  return outputs;
+}
+
+std::vector<at::Tensor> chunk(const at::Tensor & tensor, int chunks, int dim=0) {
+  if(dim < 0)
+      dim += tensor.dim();
+  auto split_size = (tensor.size(dim) + chunks - 1) / chunks;
+  return split(tensor, split_size, dim);
+}
+struct ChunkFunction : public Function {
+  ChunkFunction(int chunks, int dim)
+  : chunks(chunks), dim(dim) {}
+  virtual variable_list apply(const variable_list& inputs) {
+    auto outputs = chunk(inputs[0]->data, chunks,dim);
+    return variablesFromTensors(outputs);
+  }
+private:
+  int chunks;
+  int dim;
+};
 
 std::unique_ptr<AutogradClosure> createAutogradClosure(Graph *graph) {
   std::unordered_map<Node*, std::shared_ptr<Function>> node_map;
@@ -226,13 +291,15 @@ std::unique_ptr<AutogradClosure> createAutogradClosure(Graph *graph) {
     IR_ELSEIF_TRIVIAL(Add, Add)
     IR_ELSEIF_TRIVIAL(Mul, Mul)
     IR_ELSEIF(FusionGroup)
-      // TODO: Add an op for fusion groups once we can compile them
-      throw std::runtime_error("don't know how to execute FusionGroups");
+      auto fusion_fn = sharedFusionCompiler().getOrCompile(value->subgraph());
+      fn = std::make_shared<FusionGroupFunction>(fusion_fn);
     IR_ELSEIF(Param)
       fn = std::make_shared<Placeholder>();
     IR_ELSEIF(Constant)
       fn = std::make_shared<torch::autograd::WrapConstant>(value->value);
       const_factory->next_functions.emplace_back(fn, 0);
+    IR_ELSEIF(Chunk)
+      fn = std::make_shared<ChunkFunction>(value->num_chunks,value->dim);
     IR_ELSE()
       throw std::runtime_error(std::string("unrecognized NodeKind: ") + toString(node->kind()));
     IR_END()
@@ -247,7 +314,7 @@ std::unique_ptr<AutogradClosure> createAutogradClosure(Graph *graph) {
 
     // Gather uses of each output
     std::vector<const use_list*> output_uses_ptrs;
-    if (isMultireturn(node)) {
+    if (node->hasMultipleOutputs()) {
       // Each use is a single Select node corresponding to an output
       for (auto& use : uses) {
         auto& select_uses = use.user->uses();

@@ -30,6 +30,10 @@ struct TensorDesc {
     contiguity(findContiguous(t.sizes(), t.strides())) {
     calcDim();
   }
+  TensorDesc(at::ScalarType st, at::IntList sizes, at::IntList strides)
+  : scalar_type(st), contiguity(findContiguous(sizes, strides)) {
+    calcDim();
+  }
   // number of dimensions after contiguity compression
   size_t nDim() const {
     return nDim_;
@@ -62,6 +66,9 @@ struct CompiledFusionFunction {
   CompiledFusionFunction(const std::string & name, AnnotatedGraph & agraph);
   ~CompiledFusionFunction();
   void launch(at::ArrayRef<at::Tensor> inputs, at::ArrayRef<at::Tensor> outputs);
+  const std::vector<TensorDesc> & outputDescriptors() const {
+    return output_desc;
+  }
 private:
   void launch(uint32_t numel, void ** arguments);
   std::string name;
@@ -86,7 +93,10 @@ private:
 struct FusionCompiler {
   TH_DISALLOW_COPY_AND_ASSIGN(FusionCompiler);
   FusionCompiler();
+  // ignores types in graph, and uses specific contiguity annotations
   std::shared_ptr<CompiledFusionFunction> getOrCompile(AnnotatedGraph & agraph);
+  // uses type annotations in graph to create Annotated graph
+  std::shared_ptr<CompiledFusionFunction> getOrCompile(Graph & graph);
   // debugging function that lets you do everything from compilation to execution
   // in one step.
   // this should not be used in the hot path of execution because it has to serialize
@@ -95,5 +105,7 @@ struct FusionCompiler {
 private:
   std::unordered_map<std::string, std::shared_ptr<CompiledFusionFunction> > cache;
 };
+
+FusionCompiler & sharedFusionCompiler();
 
 }}
