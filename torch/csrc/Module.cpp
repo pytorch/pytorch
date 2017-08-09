@@ -501,7 +501,8 @@ static PyObject *THPModule_setBackcompatBroadcastWarn(PyObject *module, PyObject
 
 static PyObject *THPModule_getBackcompatBroadcastWarn(PyObject *module)
 {
-  return getBackCompatBroadcastWarn() ? Py_True : Py_False;
+  if (getBackCompatBroadcastWarn()) Py_RETURN_TRUE;
+  else Py_RETURN_FALSE;
 }
 
 static PyObject *THPModule_setBackcompatKeepdimWarn(PyObject *module, PyObject *arg) {
@@ -513,7 +514,8 @@ static PyObject *THPModule_setBackcompatKeepdimWarn(PyObject *module, PyObject *
 
 static PyObject *THPModule_getBackcompatKeepdimWarn(PyObject *module)
 {
-  return getBackCompatKeepdimWarn() ? Py_True : Py_False;
+  if (getBackCompatKeepdimWarn()) Py_RETURN_TRUE;
+  else Py_RETURN_FALSE;
 }
 
 PyObject *THPModule_hasDistributed(PyObject *_unused)
