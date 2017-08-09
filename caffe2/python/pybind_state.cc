@@ -693,6 +693,26 @@ void addGlobalMethods(py::module& m) {
 #endif // CAFFE2_HAS_MKL_DNN
       );
 
+  m.def("set_per_op_engine_pref", [](const PerOpEnginePrefType& pref) -> void {
+    caffe2::SetPerOpEnginePref(pref);
+  });
+
+  m.def("set_global_engine_pref", [](const GlobalEnginePrefType& pref) -> void {
+    caffe2::SetGlobalEnginePref(pref);
+  });
+  m.def(
+      "set_engine_pref",
+      [](const PerOpEnginePrefType& per_op_pref,
+         const GlobalEnginePrefType& global_pref) -> void {
+        caffe2::SetEnginePref(per_op_pref, global_pref);
+      });
+  m.def(
+      "set_op_engine_pref",
+      [](const std::string& op_type,
+         const CaffeMap<int, EnginePrefType>& op_pref) -> void {
+        caffe2::SetOpEnginePref(op_type, op_pref);
+      });
+
   m.def("global_init", [](std::vector<std::string> args) -> void {
     int argc = args.size();
     std::vector<char*> argv;

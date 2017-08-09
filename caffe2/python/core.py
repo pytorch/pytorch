@@ -2602,3 +2602,9 @@ def _extract_stacktrace():
             result.append((frame.f_code.co_filename, frame.f_lineno))
         frame = frame.f_back
     return result
+
+
+SetPerOpEnginePref = C.set_per_op_engine_pref
+SetGlobalEnginePref = C.set_global_engine_pref
+SetEnginePref = C.set_engine_pref
+SetOpEnginePref = C.set_op_engine_pref
