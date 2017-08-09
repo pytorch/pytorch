@@ -382,11 +382,11 @@ std::shared_ptr<CompiledFusionFunction> FusionCompiler::getOrCompile(Graph & gra
   for(auto & input : graph.inputs()) {
     // graph doesn't record scalar type yet..., assuming float
     TensorType * t = input->type()->cast<TensorType>();
-    agraph.input_desc.push_back(TensorDesc(at::kFloat,t->sizes(),t->strides()));
+    agraph.input_desc.push_back(TensorDesc(t->scalarType(),t->sizes(),t->strides()));
   }
   for(auto & output : graph.outputs()) {
     TensorType * t = output->type()->cast<TensorType>();
-    agraph.output_desc.push_back(TensorDesc(at::kFloat,t->sizes(),t->strides()));
+    agraph.output_desc.push_back(TensorDesc(t->scalarType(),t->sizes(),t->strides()));
   }
   return getOrCompile(agraph);
 }

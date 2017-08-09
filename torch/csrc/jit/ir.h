@@ -81,7 +81,7 @@ public:
 struct TensorType : public Type {
   friend struct Type;
   TensorType(const at::Tensor& tensor)
-    : Type(TypeKind::TensorType) {
+    : Type(TypeKind::TensorType), scalar_type_(tensor.type().scalarType()) {
       auto ndim = tensor.dim();
       sizes_.resize(ndim);
       strides_.resize(ndim);
@@ -89,8 +89,8 @@ struct TensorType : public Type {
       std::copy(tensor.sizes().begin(), tensor.sizes().end(), sizes_.begin());
       std::copy(tensor.strides().begin(), tensor.strides().end(), strides_.begin());
   }
-  TensorType(const std::vector<int64_t> & sizes)
-  : Type(TypeKind::TensorType), sizes_(sizes) {
+  TensorType(at::ScalarType type, const std::vector<int64_t> & sizes)
+  : Type(TypeKind::TensorType), scalar_type_(type), sizes_(sizes) {
     strides_.resize(sizes_.size());
     strides_.back() = 1;
     for(size_t i = sizes_.size() - 1; i > 0; i--) {
@@ -98,6 +98,9 @@ struct TensorType : public Type {
     }
   }
   static const TypeKind Kind = TypeKind::TensorType;
+  at::ScalarType scalarType() const {
+    return scalar_type_;
+  }
   const std::vector<std::int64_t>& sizes() const {
     return sizes_;
   }
@@ -105,11 +108,10 @@ struct TensorType : public Type {
     return strides_;
   }
   TypePtr contiguous() const {
-    return std::make_shared<TensorType>(sizes_);
+    return std::make_shared<TensorType>(scalar_type_,sizes_);
   }
 private:
-  friend class TensorPtr;
-
+  at::ScalarType scalar_type_;
   std::vector<int64_t> sizes_;
   std::vector<int64_t> strides_;
 };
