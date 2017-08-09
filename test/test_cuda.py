@@ -455,6 +455,9 @@ class TestCuda(TestCase):
         x = torch.randn(5, 5).cuda(1)
         self.assertEqual(x.int().get_device(), 1)
 
+    def test_neg(self):
+        TestTorch._test_neg(self, lambda t: t.cuda())
+
     def _test_broadcast(self, input):
         if torch.cuda.device_count() < 2:
             raise unittest.SkipTest("only one GPU detected")
