@@ -9,6 +9,49 @@
 namespace caffe2 {
 
 template <class Context>
+class OneHotOp final : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+
+  OneHotOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws) {}
+
+  bool RunOnDevice() override {
+    auto& indices = Input(0);
+    CAFFE_ENFORCE_EQ(
+        indices.ndim(),
+        1,
+        "indices input must be 1D tensor of data type TIndex");
+
+    // Index size input must be in CPU context
+    auto& index_size_tensor = OperatorBase::Input<Tensor<CPUContext>>(1);
+    CAFFE_ENFORCE_EQ(
+        index_size_tensor.size(),
+        1,
+        "index_size_tensor input must be scalar of data type TIndex");
+
+    auto batch_size = indices.size();
+    auto index_size = *index_size_tensor.template data<TIndex>();
+    auto one_hots = Output(0);
+    one_hots->Resize(batch_size, index_size);
+    auto output_size = one_hots->size();
+    if (output_size == 0) {
+      return true;
+    }
+
+    DoOneHotOp(batch_size, index_size, indices, one_hots);
+    return true;
+  }
+
+ protected:
+  void DoOneHotOp(
+      TIndex batch_size,
+      TIndex index_size,
+      const Tensor<Context>& indices,
+      Tensor<Context>* output);
+};
+
+template <class Context>
 class BatchOneHotOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;

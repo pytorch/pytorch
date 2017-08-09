@@ -47,38 +47,22 @@ bool BatchOneHotOp<CPUContext>::DoRunWithType() {
   return true;
 }
 
-namespace {
-
-class OneHotOp : public Operator<CPUContext> {
- public:
-  OneHotOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator(operator_def, ws) {}
-
-  bool RunOnDevice() override {
-    auto& indices = Input(0);
-    auto& index_size_tensor = Input(1);
-    CAFFE_ENFORCE(indices.ndim() == 1);
-    CAFFE_ENFORCE(index_size_tensor.size() == 1);
-    auto batch_size = indices.size();
-    auto index_size = *index_size_tensor.data<int64_t>();
-
-    auto* indices_ptr = indices.data<int64_t>();
-    auto* one_hots = Output(0);
-    one_hots->Resize(batch_size, index_size);
-    if (one_hots->size() == 0) {
-      return true;
-    }
-    auto* one_hots_ptr = one_hots->mutable_data<float>();
-    memset(one_hots_ptr, 0, one_hots->nbytes());
-    for (int i = 0; i < batch_size; ++i) {
-      auto label_idx = indices_ptr[i];
-      DCHECK((0 <= label_idx) && (label_idx < index_size));
-      one_hots_ptr[label_idx] = 1.0;
-      one_hots_ptr += index_size;
-    }
-    return true;
+template <>
+void OneHotOp<CPUContext>::DoOneHotOp(
+    TIndex batch_size,
+    TIndex index_size,
+    const Tensor<CPUContext>& indices,
+    Tensor<CPUContext>* one_hots) {
+  const TIndex* indices_ptr = indices.template data<TIndex>();
+  float* one_hots_ptr = one_hots->template mutable_data<float>();
+  memset(one_hots_ptr, 0, one_hots->nbytes());
+  for (int i = 0; i < batch_size; ++i) {
+    auto label_idx = indices_ptr[i];
+    DCHECK((0 <= label_idx) && (label_idx < index_size));
+    one_hots_ptr[label_idx] = 1.0;
+    one_hots_ptr += index_size;
   }
-};
+}
 
 class SegmentOneHotOp : public Operator<CPUContext> {
  public:
@@ -119,7 +103,7 @@ class SegmentOneHotOp : public Operator<CPUContext> {
   }
 };
 REGISTER_CPU_OPERATOR(BatchOneHot, BatchOneHotOp<CPUContext>);
-REGISTER_CPU_OPERATOR(OneHot, OneHotOp);
+REGISTER_CPU_OPERATOR(OneHot, OneHotOp<CPUContext>);
 REGISTER_CPU_OPERATOR(SegmentOneHot, SegmentOneHotOp);
 
 OPERATOR_SCHEMA(BatchOneHot)
@@ -153,7 +137,10 @@ where each inner dimension has the size of the index and has 1.0 in the index
 active in the given example, and 0.0 everywhere else.
 )DOC")
     .Input(0, "indices", "The active index for each example in the batch.")
-    .Input(1, "index_size_tensor", "Scalar with the size of the index.")
+    .Input(
+        1,
+        "index_size_tensor",
+        "Scalar with the size of the index. Must be in CPU context")
     .Output(0, "one_hots", "Matrix of size len(indices) x index_size");
 
 OPERATOR_SCHEMA(SegmentOneHot)
@@ -171,5 +158,4 @@ that has the elements in each sequence set to 1.0, and 0.0 everywhere else.
 NO_GRADIENT(BatchOneHot);
 NO_GRADIENT(OneHot);
 NO_GRADIENT(SegmentOneHot);
-}
 }

@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 from caffe2.python import core
+from caffe2.proto import caffe2_pb2
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
@@ -58,8 +59,9 @@ class TestOneHotOps(hu.HypothesisTestCase):
         hot_indices=hu.tensor(
             min_dim=1, max_dim=1, dtype=np.int64,
             elements=st.integers(min_value=0, max_value=42)),
-        end_padding=st.integers(min_value=0, max_value=2))
-    def test_one_hot(self, hot_indices, end_padding):
+        end_padding=st.integers(min_value=0, max_value=2),
+        **hu.gcs)
+    def test_one_hot(self, hot_indices, end_padding, gc, dc):
 
         def one_hot_ref(hot_indices, size):
             out = np.zeros([len(hot_indices), size], dtype=float)
@@ -73,10 +75,11 @@ class TestOneHotOps(hu.HypothesisTestCase):
             size = 1
         op = core.CreateOperator('OneHot', ['hot_indices', 'size'], ['output'])
         self.assertReferenceChecks(
-            hu.cpu_do,
+            gc,
             op,
             [hot_indices, size],
-            one_hot_ref)
+            one_hot_ref,
+            input_device_options={'size': core.DeviceOption(caffe2_pb2.CPU)})
 
     @given(hot_indices=_one_hots())
     def test_segment_one_hot(self, hot_indices):
