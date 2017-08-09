@@ -18,9 +18,9 @@ def tanh(x):
 
 
 def _prepare_rnn(t, n, dim_in, create_rnn, outputs_with_grads,
-                  forget_bias, memory_optim=False,
-                  forward_only=False, drop_states=False, T=None,
-                  two_d_initial_states=None, dim_out=None):
+                 forget_bias, memory_optim=False,
+                 forward_only=False, drop_states=False, T=None,
+                 two_d_initial_states=None, dim_out=None, no_cell_state=False):
     if dim_out is None:
         dim_out = [dim_in]
     print("Dims: ", t, n, dim_in, dim_out)
@@ -37,14 +37,22 @@ def _prepare_rnn(t, n, dim_in, create_rnn, outputs_with_grads,
             return np.random.randn(1, n, d).astype(np.float32)
 
     states = []
-    for layer_id, d in enumerate(dim_out):
-        h, c = model.net.AddExternalInputs(
-            "hidden_init_{}".format(layer_id),
-            "cell_init_{}".format(layer_id),
-        )
-        states.extend([h, c])
-        workspace.FeedBlob(h, generate_input_state(n, d).astype(np.float32))
-        workspace.FeedBlob(c, generate_input_state(n, d).astype(np.float32))
+    if no_cell_state:
+        # For cell class like GRU, which does not have cell_state
+        for layer_id, d in enumerate(dim_out):
+            h = model.net.AddExternalInputs("hidden_init_{}".format(layer_id))
+            states.append(h)
+            workspace.FeedBlob(h, generate_input_state(n, d).astype(np.float32))
+    else:
+        # For cell class like LSTM, which have both hidden_state and cell_state
+        for layer_id, d in enumerate(dim_out):
+            h, c = model.net.AddExternalInputs(
+                "hidden_init_{}".format(layer_id),
+                "cell_init_{}".format(layer_id),
+            )
+            states.extend([h, c])
+            workspace.FeedBlob(h, generate_input_state(n, d).astype(np.float32))
+            workspace.FeedBlob(c, generate_input_state(n, d).astype(np.float32))
 
     # Due to convoluted RNN scoping logic we make sure that things
     # work from a namescope
