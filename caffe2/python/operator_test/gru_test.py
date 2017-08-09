@@ -49,18 +49,20 @@ def gru_unit(hidden_t_prev, gates_out_t,
 
     valid = (t < seq_lengths).astype(np.int32)
     assert valid.shape == (N, D)
-    hidden_t = update_gate_t * hidden_t_prev + (1 - update_gate_t) * output_gate_t
-    hidden_t = hidden_t * valid + hidden_t_prev * (1 - valid) * (1 - drop_states)
+    hidden_t = update_gate_t * hidden_t_prev + \
+        (1 - update_gate_t) * output_gate_t
+    hidden_t = hidden_t * valid + hidden_t_prev * \
+        (1 - valid) * (1 - drop_states)
     hidden_t = hidden_t.reshape(1, N, D)
 
     return (hidden_t, )
 
 
 def gru_reference(input, hidden_input,
-                   reset_gate_w, reset_gate_b,
-                   update_gate_w, update_gate_b,
-                   output_gate_w, output_gate_b,
-                   seq_lengths, drop_states=False):
+                  reset_gate_w, reset_gate_b,
+                  update_gate_w, update_gate_b,
+                  output_gate_w, output_gate_b,
+                  seq_lengths, drop_states=False):
     D = hidden_input.shape[hidden_input.ndim - 1]
     T = input.shape[0]
     N = input.shape[1]
@@ -281,11 +283,11 @@ class GRUCellTest(hu.HypothesisTestCase):
     def test_gru_main(self, **kwargs):
         for outputs_with_grads in [[0], [1], [0, 1]]:
             self.gru_base(gru_cell.GRU, gru_reference,
-                           outputs_with_grads=outputs_with_grads,
-                           **kwargs)
+                          outputs_with_grads=outputs_with_grads,
+                          **kwargs)
 
     def gru_base(self, create_rnn, ref, outputs_with_grads,
-                  input_tensor, fwd_only, drop_states, gc, dc):
+                 input_tensor, fwd_only, drop_states, gc, dc):
         print("GRU test parameters: ", locals())
         t, n, d = input_tensor.shape
         assert d % 3 == 0
@@ -293,11 +295,12 @@ class GRUCellTest(hu.HypothesisTestCase):
         ref = partial(ref, drop_states=drop_states)
         with core.DeviceScope(gc):
             net = _prepare_rnn(t, n, d, create_rnn,
-                                outputs_with_grads=outputs_with_grads,
-                                memory_optim=False,
-                                forget_bias=0.0,
-                                forward_only=fwd_only,
-                                drop_states=drop_states)[1]
+                               outputs_with_grads=outputs_with_grads,
+                               memory_optim=False,
+                               forget_bias=0.0,
+                               forward_only=fwd_only,
+                               drop_states=drop_states,
+                               no_cell_state=True)[1]
         # here we don't provide a real input for the net but just for one of
         # its ops (RecurrentNetworkOp). So have to hardcode this name
         workspace.FeedBlob("test_name_scope/external/recurrent/i2h",
