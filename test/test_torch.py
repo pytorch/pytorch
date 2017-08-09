@@ -341,14 +341,33 @@ class TestTorch(TestCase):
         res_csub.sub_(scalar)
         self.assertEqual(res_add, res_csub)
 
-    def test_neg(self):
-        a = torch.randn(100, 90)
-        zeros = torch.Tensor().resize_as_(a).zero_()
+    @staticmethod
+    def _test_neg(self, cast):
+        float_types = ['torch.DoubleTensor', 'torch.FloatTensor', 'torch.LongTensor']
+        int_types = ['torch.IntTensor', 'torch.ShortTensor']
 
-        res_add = torch.add(zeros, -1, a)
-        res_neg = a.clone()
-        res_neg.neg_()
-        self.assertEqual(res_neg, res_add)
+        for t in float_types + int_types:
+            if t in float_types:
+                a = cast(torch.randn(100, 90).type(t))
+            else:
+                a = cast(torch.Tensor(100, 90).type(t).random_())
+            zeros = cast(torch.Tensor().type(t)).resize_as_(a).zero_()
+
+            res_add = torch.add(zeros, -1, a)
+            res_neg = a.clone()
+            res_neg.neg_()
+            self.assertEqual(res_neg, res_add)
+
+            # test out of place as well
+            res_neg_out_place = a.clone().neg()
+            self.assertEqual(res_neg_out_place, res_add)
+
+            # test via __neg__ operator
+            res_neg_op = -a.clone()
+            self.assertEqual(res_neg_op, res_add)
+
+    def test_neg(self):
+        self._test_neg(self, lambda t: t)
 
     def test_reciprocal(self):
         a = torch.randn(100, 89)

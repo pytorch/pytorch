@@ -979,6 +979,9 @@
   name: neg
   types:
     - floating_point
+    - Long
+    - Int
+    - Short
   backends:
     - CPU
     - CUDA
@@ -998,6 +1001,9 @@
   name: neg_
   types:
     - floating_point
+    - Long
+    - Int
+    - Short
   backends:
     - CPU
     - CUDA
