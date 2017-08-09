@@ -48,9 +48,17 @@ REGISTER_BLOB_DESERIALIZER(
     (std::unordered_map<int32_t, int64_t>),
     MapDeserializer<int32_t, int64_t>);
 
+REGISTER_CPU_OPERATOR(CreateMap, CreateMapOp<CPUContext>);
 REGISTER_CPU_OPERATOR(KeyValueToMap, KeyValueToMapOp<CPUContext>);
-
 REGISTER_CPU_OPERATOR(MapToKeyValue, MapToKeyValueOp<CPUContext>);
+
+OPERATOR_SCHEMA(CreateMap)
+    .NumInputs(0)
+    .NumOutputs(1)
+    .SetDoc("Create an empty map blob")
+    .Arg("key_dtype", "Key's TensorProto::DataType (default INT32)")
+    .Arg("value_dtype", "Value's TensorProto::DataType (default INT32)")
+    .Output(0, "map blob", "Blob reference to the map");
 
 OPERATOR_SCHEMA(KeyValueToMap)
     .NumInputs(2)
