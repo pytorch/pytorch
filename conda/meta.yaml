@@ -1,0 +1,40 @@
+{% set version = "0.8.dev" %}
+
+package:
+  name: caffe2
+  version: {{ version }}
+
+source:
+  path: ..
+
+build:
+  number: 1
+  skip: True  # [win]
+
+requirements:
+  build:
+    - future
+    - glog
+    - numpy
+    - six
+    - eigen
+    - python <3
+    - protobuf
+    - cmake
+  run:
+    - future
+    - glog
+    - numpy
+    - six
+    - eigen
+    - python <3
+    - protobuf
+
+about:
+  home: https://caffe2.ai/
+  license: BSD
+  summary: deep learning library
+
+extra:
+  recipe-maintainers:
+    - ezyang
