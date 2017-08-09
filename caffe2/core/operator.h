@@ -612,6 +612,23 @@ unique_ptr<OperatorBase> CreateOperator(
     Workspace* ws,
     int net_position = OperatorBase::kNoNetPositionSet);
 
+// User can set the preferred engines as a list of engine names, in
+// descending order of preference.
+using EnginePrefType = std::vector<std::string>;
+// {device_type -> {operator_name -> EnginePrefType}}
+using PerOpEnginePrefType =
+    CaffeMap<int, CaffeMap<std::string, EnginePrefType>>;
+// {device_type -> EnginePrefType}
+using GlobalEnginePrefType = CaffeMap<int, EnginePrefType>;
+void SetPerOpEnginePref(const PerOpEnginePrefType& per_op_engine_pref);
+void SetGlobalEnginePref(const GlobalEnginePrefType& global_engine_pref);
+void SetEnginePref(
+    const PerOpEnginePrefType& per_op_engine_pref,
+    const GlobalEnginePrefType& global_engine_pref);
+void SetOpEnginePref(
+    const std::string& op_type,
+    const CaffeMap<int, EnginePrefType>& op_pref);
+
 TensorShapes InferBlobShapesAndTypesFromWorkspace(
     Workspace* ws,
     const vector<std::unique_ptr<NetDef>>& nets);

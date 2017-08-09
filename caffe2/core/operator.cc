@@ -39,6 +39,9 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
 }
 
 namespace {
+static PerOpEnginePrefType g_per_op_engine_pref{};
+static GlobalEnginePrefType g_global_engine_pref{};
+
 unique_ptr<OperatorBase> TryCreateOperator(
     const string& key, const OperatorDef& operator_def, Workspace* ws) {
   auto type = operator_def.device_option().device_type();
@@ -64,8 +67,11 @@ unique_ptr<OperatorBase> _CreateOperator(
     const OperatorDef& operator_def,
     Workspace* ws) {
   static StaticLinkingProtector g_protector;
+  const auto op_type = operator_def.type();
+  const auto device_type = operator_def.device_option().device_type();
+
   // first, check with OpSchema if the operator is legal.
-  auto* schema = OpSchemaRegistry::Schema(operator_def.type());
+  auto* schema = OpSchemaRegistry::Schema(op_type);
   if (schema) {
     CAFFE_ENFORCE(
         schema->Verify(operator_def),
@@ -75,38 +81,50 @@ unique_ptr<OperatorBase> _CreateOperator(
     // We would like to recommend every op to register its schema, so if there
     // is not one, we print a LOG_ERROR. But we will still allow the operator
     // to be constructed.
-    LOG(ERROR) << "Cannot find operator schema for "
-               << operator_def.type()
+    LOG(ERROR) << "Cannot find operator schema for " << op_type
                << ". Will skip schema checking.";
   }
 
-  // Second, if the user has provided an engine, try create that engine
+  // second try engines specified in the operator_def and preferred engines
+  std::vector<std::string> engines{};
   if (operator_def.engine().size()) {
-    vector<string> engine_choices = split(',', operator_def.engine());
-    for (const string& engine : engine_choices) {
-      string key = operator_def.type() + "_ENGINE_" + engine;
-      VLOG(1) << "Trying to create operator " << operator_def.type()
-              << " with engine " << engine;
-      auto op = TryCreateOperator(key, operator_def, ws);
-      if (op) {
-        return op;
-      } else {
-        // If the above fails, we will just return the normal case with the
-        // default implementation.
-        VLOG(1) << "Operator with engine " << engine
-                << " is not available. Using default implementation.";
-      }
+    const auto op_def_engines = split(',', operator_def.engine());
+    engines.insert(engines.end(), op_def_engines.begin(), op_def_engines.end());
+  }
+  if (g_per_op_engine_pref.count(device_type) &&
+      g_per_op_engine_pref[device_type].count(op_type)) {
+    const auto& preferred_engines = g_per_op_engine_pref[device_type][op_type];
+    engines.insert(
+        engines.end(), preferred_engines.begin(), preferred_engines.end());
+  }
+  if (g_global_engine_pref.count(device_type)) {
+    const auto& preferred_engines = g_global_engine_pref[device_type];
+    engines.insert(
+        engines.end(), preferred_engines.begin(), preferred_engines.end());
+  }
+  for (const auto& engine : engines) {
+    const std::string key = op_type + "_ENGINE_" + engine;
+    VLOG(1) << "Trying to create operator " << op_type << " with engine "
+            << engine;
+    auto op = TryCreateOperator(key, operator_def, ws);
+    if (op) {
+      return op;
+    } else {
+      // If the above fails, we will just return the normal case with the
+      // default implementation.
+      VLOG(1) << "Operator with engine " << engine << " is not available.";
     }
   }
+  VLOG(1) << "Using default implementation.";
 
   // Lastly, if the engine does not work here, try using the default engine.
-  auto op = TryCreateOperator(operator_def.type(), operator_def, ws);
+  auto op = TryCreateOperator(op_type, operator_def, ws);
   CAFFE_ENFORCE(
       op,
       "Cannot create operator of type '",
-      operator_def.type(),
+      op_type,
       "' on the device '",
-      DeviceTypeName(operator_def.device_option().device_type()),
+      DeviceTypeName(device_type),
       "'. Verify that implementation for the corresponding device exist. It "
       "might also happen if the binary is not linked with the operator "
       "implementation code. If Python frontend is used it might happen if "
@@ -116,6 +134,70 @@ unique_ptr<OperatorBase> _CreateOperator(
 }
 
 } // namespace
+
+void SetPerOpEnginePref(const PerOpEnginePrefType& per_op_engine_pref) {
+  for (const auto& device_pref_pair : per_op_engine_pref) {
+    const auto& device_type = device_pref_pair.first;
+    CAFFE_ENFORCE(
+        gDeviceTypeRegistry()->count(device_type),
+        "Device type ",
+        device_type,
+        " not registered.");
+    auto* registry = gDeviceTypeRegistry()->at(device_type);
+
+    for (const auto& op_pref_pair : device_pref_pair.second) {
+      const auto& op_type = op_pref_pair.first;
+      CAFFE_ENFORCE(
+          registry->Has(op_type),
+          "Operator type ",
+          op_type,
+          " not registered in ",
+          device_type,
+          " registry.");
+    }
+  }
+  g_per_op_engine_pref = per_op_engine_pref;
+}
+
+void SetGlobalEnginePref(const GlobalEnginePrefType& global_engine_pref) {
+  for (const auto& device_pref_pair : global_engine_pref) {
+    const auto& device_type = device_pref_pair.first;
+    CAFFE_ENFORCE(
+        gDeviceTypeRegistry()->count(device_type),
+        "Device type ",
+        device_type,
+        " not registered.");
+  }
+  g_global_engine_pref = global_engine_pref;
+}
+
+void SetEnginePref(
+    const PerOpEnginePrefType& per_op_engine_pref,
+    const GlobalEnginePrefType& global_engine_pref) {
+  SetPerOpEnginePref(per_op_engine_pref);
+  SetGlobalEnginePref(global_engine_pref);
+}
+
+void SetOpEnginePref(
+    const std::string& op_type,
+    const CaffeMap<int, EnginePrefType>& op_pref) {
+  for (const auto& device_pref_pair : op_pref) {
+    const auto& device_type = device_pref_pair.first;
+    CAFFE_ENFORCE(
+        gDeviceTypeRegistry()->count(device_type),
+        "Device type ",
+        device_type,
+        " not registered.");
+    CAFFE_ENFORCE(
+        gDeviceTypeRegistry()->at(device_type)->Has(op_type),
+        "Operator type ",
+        op_type,
+        " not registered in ",
+        device_type,
+        " registry.");
+    g_per_op_engine_pref[device_type][op_type] = device_pref_pair.second;
+  }
+}
 
 unique_ptr<OperatorBase> CreateOperator(
     const OperatorDef& operator_def,
