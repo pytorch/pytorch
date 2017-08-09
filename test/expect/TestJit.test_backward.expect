@@ -1,6 +1,6 @@
-graph(%1 : (2, 2), %2 : (2, 2), %7 : UNKNOWN_TYPE) {
-  %3.0 : (2, 2) = ^MulConstant(2)(%2), uses = [[%5.i0]];
-  %5.0 : (2, 2) = ^Mul()(%3.0, %1), uses = [[%0.i0]];
+graph(%1 : Double(2, 2), %2 : Double(2, 2), %7 : UNKNOWN_TYPE) {
+  %3.0 : Double(2, 2) = ^MulConstant(2)(%2), uses = [[%5.i0]];
+  %5.0 : Double(2, 2) = ^Mul()(%3.0, %1), uses = [[%0.i0]];
   ---------------- stage 1 ----------------
   %8.0 : UNKNOWN_TYPE, %8.1 : UNKNOWN_TYPE = Eval(%7), uses = [[%18.i0], [%0.i1]];
   %18.0 : UNKNOWN_TYPE = Eval(%8.0), uses = [[%0.i2]];

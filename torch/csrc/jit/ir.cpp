@@ -70,7 +70,7 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
   TYPE_ELSEIF(HandleType)
     out << "Handle";
   TYPE_ELSEIF(TensorType)
-    out << "(";
+    out << at::toString(value->scalarType()) << "(";
     auto& sizes = value->sizes();
     auto& strides = value->strides();
     JIT_ASSERT(sizes.size() == strides.size());
