@@ -380,7 +380,6 @@ std::shared_ptr<CompiledFusionFunction> FusionCompiler::getOrCompile(AnnotatedGr
 std::shared_ptr<CompiledFusionFunction> FusionCompiler::getOrCompile(Graph & graph) {
   AnnotatedGraph agraph { &graph };
   for(auto & input : graph.inputs()) {
-    // graph doesn't record scalar type yet..., assuming float
     TensorType * t = input->type()->cast<TensorType>();
     agraph.input_desc.push_back(TensorDesc(t->scalarType(),t->sizes(),t->strides()));
   }
