@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+import itertools
 import numpy as np
 import tempfile
 import unittest
@@ -13,6 +14,19 @@ import caffe2.python.hypothesis_test_util as hu
 
 
 class TestMap(hu.HypothesisTestCase):
+
+    def test_create_map(self):
+        dtypes = [core.DataType.INT32, core.DataType.INT64]
+        for key_dtype, value_dtype in itertools.product(dtypes, dtypes):
+            op = core.CreateOperator(
+                'CreateMap',
+                [],
+                ['map'],
+                key_dtype=key_dtype,
+                value_dtype=value_dtype,
+            )
+            workspace.RunOperatorOnce(op)
+            self.assertTrue(workspace.HasBlob('map'))
 
     def test_map(self):
 
