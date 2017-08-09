@@ -9,6 +9,11 @@
 #include <nccl.h>
 #include <unordered_map>
 
+#define NCCL_VERSION_MIN(major, minor, patch) \
+  ((NCCL_MAJOR > major) || \
+    ((NCCL_MAJOR == major) && ((NCCL_MINOR > minor) || \
+      ((NCCL_MINOR == minor) && (NCCL_PATCH >= patch)) )))
+
 namespace caffe2 {
 
 namespace nccl {
