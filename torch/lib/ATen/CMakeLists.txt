@@ -148,24 +148,7 @@ DEPENDS ${all_python} ${all_templates} ${cwrap_files})
 SET(all_cpp ${base_cpp} ${generated_cpp})
 filter_list(generated_h generated_cpp "\\.h$")
 
-INCLUDE_DIRECTORIES("/home/sthornto/HIP/include")
-# SET_PROPERTY(SOURCE 
-#     CPUGenerator.cpp
-#     Utils.cpp
-#     Context.cpp
-#     test/atest.cpp
-#     test/scalar_test.cpp
-#     test/basic.cpp
-#     templates/TensorSparse.cpp
-#     templates/TensorDerived.cpp
-#     templates/TensorDense.cpp
-#     templates/TypeDerived.cpp
-#     templates/StorageDerived.cpp
-#     templates/Type.cpp
-#     Formatting.cpp
-#     CUDAGenerator.cpp
-#     Scalar.cpp
-#     APPEND PROPERTY COMPILE_DEFINITIONS "__HIP_PLATFORM_NVCC__")
+INCLUDE_DIRECTORIES("${CMAKE_CURRENT_SOURCE_DIR}/../hip/include")
 ADD_DEFINITIONS(-D__HIP_PLATFORM_NVCC__)
 
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR}/..)

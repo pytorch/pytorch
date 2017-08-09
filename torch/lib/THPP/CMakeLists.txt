@@ -86,7 +86,7 @@ IF(NOT CUDA_FOUND)
   EXCLUDE_DIR(all_cpp "TraitsCuda.cpp")
 ENDIF()
 
-INCLUDE_DIRECTORIES("/home/sthornto/HIP/include")
+INCLUDE_DIRECTORIES("${CMAKE_CURRENT_SOURCE_DIR}/../hip/include")
 SET_PROPERTY(SOURCE 
     Traits.cpp
     storages/THStorage.cpp

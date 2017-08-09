@@ -248,6 +248,7 @@ cwd = os.path.dirname(os.path.abspath(__file__))
 lib_path = os.path.join(cwd, "torch", "lib")
 
 tmp_install_path = lib_path + "/tmp_install"
+hip_include_path = lib_path + "/hip/include"
 include_dirs += [
     cwd,
     os.path.join(cwd, "torch", "csrc"),
@@ -356,7 +357,7 @@ if WITH_CUDA:
         if os.path.exists(cuda_lib_path):
             break
     include_dirs.append(cuda_include_path)
-    include_dirs.append('/home/sthornto/HIP/include')
+    include_dirs.append(hip_include_path)
     extra_compile_args += ['-D__HIP_PLATFORM_NVCC__']
     include_dirs.append(tmp_install_path + "/include/THCUNN")
     library_dirs.append(cuda_lib_path)
