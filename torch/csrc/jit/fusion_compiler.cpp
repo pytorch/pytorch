@@ -377,6 +377,20 @@ std::shared_ptr<CompiledFusionFunction> FusionCompiler::getOrCompile(AnnotatedGr
   return it->second;
 }
 
+std::shared_ptr<CompiledFusionFunction> FusionCompiler::getOrCompile(Graph & graph) {
+  AnnotatedGraph agraph { &graph };
+  for(auto & input : graph.inputs()) {
+    // graph doesn't record scalar type yet..., assuming float
+    TensorType * t = input->type()->cast<TensorType>();
+    agraph.input_desc.push_back(TensorDesc(at::kFloat,t->sizes(),t->strides()));
+  }
+  for(auto & output : graph.outputs()) {
+    TensorType * t = output->type()->cast<TensorType>();
+    agraph.output_desc.push_back(TensorDesc(at::kFloat,t->sizes(),t->strides()));
+  }
+  return getOrCompile(agraph);
+}
+
 void FusionCompiler::debugLaunchGraph(Graph & graph, at::ArrayRef<at::Tensor> inputs, at::ArrayRef<at::Tensor> outputs) {
   AnnotatedGraph agraph { &graph };
   for(auto & i : inputs) {
@@ -387,6 +401,12 @@ void FusionCompiler::debugLaunchGraph(Graph & graph, at::ArrayRef<at::Tensor> in
   }
   auto func = getOrCompile(agraph);
   func->launch(inputs, outputs);
+}
+
+//TODO: thread safety
+FusionCompiler & sharedFusionCompiler() {
+  static FusionCompiler compiler;
+  return compiler;
 }
 
 }}
