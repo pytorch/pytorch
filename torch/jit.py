@@ -58,6 +58,7 @@ def _time(name, enabled=True):
     stream.record_event(start)
     yield
     stream.record_event(end)
+    end.synchronize()
     print("{} time: {} ms".format(name, start.elapsed_time(end)))
 
 
