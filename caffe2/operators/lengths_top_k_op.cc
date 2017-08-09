@@ -6,7 +6,7 @@ template <typename T, class Context>
 bool LengthsTopKOp<T, Context>::RunOnDevice() {
   auto& X = Input(X_IN);
   auto& Y = Input(Y_IN);
-  auto N = Y.dim(0);
+  int N = Y.dim32(0);
   const T* X_data = X.template data<T>();
   const int* input_len = Y.template data<int>();
   auto* output_topk_values = Output(TOPK_VALUES_OUT);
