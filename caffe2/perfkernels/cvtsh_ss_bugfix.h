@@ -1,6 +1,6 @@
 #pragma once
 
-#if defined(__APPLE__) && (__clang_major__ < 8)
+#if defined(__APPLE__) && ((__clang_major__ < 8) || ((__clang_major__ == 8) && (__clang_minor__ < 1)))
 
 #include <emmintrin.h>
 
