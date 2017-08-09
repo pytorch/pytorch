@@ -1,0 +1,6 @@
+#ifndef HIP_INCLUDE_HIP_NVCC_DETAIL_HIP_TEXTURE_TYPES_H
+#define HIP_INCLUDE_HIP_NVCC_DETAIL_HIP_TEXTURE_TYPES_H
+
+#include <texture_types.h>
+
+#endif
