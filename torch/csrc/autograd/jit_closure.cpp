@@ -191,11 +191,12 @@ static variable_list variablesFromTensors(at::TensorList tensors) {
   return r;
 }
 
+
+#ifdef WITH_CUDA
 struct FusionGroupFunction : public Function {
   FusionGroupFunction(const std::shared_ptr<CompiledFusionFunction> & function)
   : function(function) {}
   virtual variable_list apply(const variable_list& inputs) {
-    #ifdef WITH_CUDA
     //TODO: handle the case where inputs do not match the device function was
     // compiled for
     std::vector<at::Tensor> data;
@@ -209,15 +210,11 @@ struct FusionGroupFunction : public Function {
     }
     function->launch(data, outputs);
     return variablesFromTensors(outputs);
-    #else
-    throw std::runtime_error("FusionGroup requires CUDA");
-    #endif
   }
 private:
-  #ifdef WITH_CUDA
   std::shared_ptr<CompiledFusionFunction> function;
-  #endif
 };
+#endif
 
 std::vector<at::Tensor> split(const at::Tensor & tensor, int split_size, int dim=0) {
   if(dim < 0)
@@ -291,8 +288,12 @@ std::unique_ptr<AutogradClosure> createAutogradClosure(Graph *graph) {
     IR_ELSEIF_TRIVIAL(Add, Add)
     IR_ELSEIF_TRIVIAL(Mul, Mul)
     IR_ELSEIF(FusionGroup)
-      auto fusion_fn = sharedFusionCompiler().getOrCompile(value->subgraph());
-      fn = std::make_shared<FusionGroupFunction>(fusion_fn);
+#ifdef WITH_CUDA
+        auto fusion_fn = sharedFusionCompiler().getOrCompile(value->subgraph());
+        fn = std::make_shared<FusionGroupFunction>(fusion_fn);
+#else
+        throw std::runtime_error("don't know how to execute FusionGroups without CUDA");
+#endif
     IR_ELSEIF(Param)
       fn = std::make_shared<Placeholder>();
     IR_ELSEIF(Constant)
