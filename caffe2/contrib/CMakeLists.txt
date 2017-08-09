@@ -3,6 +3,7 @@ add_subdirectory(ios)
 add_subdirectory(nccl)
 add_subdirectory(nnpack)
 add_subdirectory(observers)
+add_subdirectory(opengl)
 add_subdirectory(shm_mutex)
 # Finally pass the src lists back to the parent
 

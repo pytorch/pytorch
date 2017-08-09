@@ -70,13 +70,14 @@ if (ANDROID OR IOS)
       # nnpack_ukernels: common files
       ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/psimd/2d-fourier-8x8.c
       ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/psimd/2d-fourier-16x16.c
-      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/psimd/2d-winograd-8x8-3x3.c
-      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/psimd/relu.c
       ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/psimd/softmax.c
-      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/psimd/fft-block-mac.c
       ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/psimd/blas/shdotxf.c
       # nnpack_ukernels: neon files
+      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/neon/relu.c
+      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/neon/2d-winograd-8x8-3x3.c
+      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/neon/2d-winograd-8x8-3x3-fp16.c
       ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/neon/blas/conv1x1.c
+      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/neon/blas/h4gemm.c
       ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/neon/blas/s4gemm.c
       ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/neon/blas/c4gemm.c
       ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/neon/blas/s4c2gemm.c
@@ -90,7 +91,7 @@ if (ANDROID OR IOS)
       ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/init.c
       ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/convolution-output.c
       ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/convolution-input-gradient.c
-      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/convolution-kernel.c
+      ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/convolution-kernel-gradient.c
       ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/convolution-inference.c
       ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/fully-connected-output.c
       ${CAFFE2_THIRD_PARTY_ROOT}/NNPACK/src/fully-connected-inference.c

@@ -51,7 +51,7 @@ cmake .. \
     -DCMAKE_INSTALL_PREFIX=../install \
     -DANDROID_NDK=$ANDROID_NDK \
     -DCMAKE_BUILD_TYPE=Release \
-    -DANDROID_ABI="armeabi-v7a with NEON" \
+    -DANDROID_ABI="armeabi-v7a with NEON FP16" \
     -DANDROID_NATIVE_API_LEVEL=21 \
     -DUSE_CUDA=OFF \
     -DBUILD_TEST=OFF \
