@@ -78,7 +78,9 @@ struct GraphFuser {
     // add n's inputs to the fusion group's input list if we don't already have them
     for(auto input : n->inputs()) {
       if(inputs_map.count(input) == 0) {
-        inputs_map[input] = subgraph.addInput();
+        auto in_group = subgraph.addInput();
+        in_group->setType(input->typeOption());
+        inputs_map[input] = in_group;
         group->addInput(input);
       }
     }
@@ -111,6 +113,7 @@ struct GraphFuser {
     Node * mergedNode = mergeNodeIntoGroup(group,n);
     group->subgraph().registerOutput(mergedNode);
     auto sel = graph->create<Select>(group,0);
+    sel->setType(n->typeOption());
     sel->insertAfter(group);
     n->replaceAllUsesWith(sel);
     n->destroy();
@@ -135,6 +138,7 @@ struct GraphFuser {
     if(producer->uses().size() != 0) {
       size_t offset = group->subgraph().registerOutput(merged);
       Node * new_producer = graph->create<Select>(group,offset);
+      new_producer->setType(producer->typeOption());
       insertAfter(new_producer, group);
       producer->replaceAllUsesWith(new_producer);
     }
@@ -145,10 +149,10 @@ struct GraphFuser {
   // in places where op can be fused into a consumer but chunk is in the way
   // distribute chunk to op's operands:
   // replace a,b = chunk(op(x,y,z)) with:
-  // x0,x1 = chunk(x)
-  // y0,y1 = chunk(y)
-  // z0,z1 = chunk(z)
-  // a = op(x0,y0,z0)
+  // x0,x1 = chunk(x) (x0 has a's type, x1 has b's type)
+  // y0,y1 = chunk(y) (y0 has a's type, y1 has b's type)
+  // z0,z1 = chunk(z) (z0 has a's type, z1 has b's type)
+  // a = op(x0,y0,z0) (a,b have their same size but are now contiguous)
   // b = op(x1,y1,x1)
 
   bool tryToMoveChunk(Node * consumer, Node * producer_) {
@@ -189,9 +193,13 @@ struct GraphFuser {
       Node * new_output = graph->createClone(producer_for_chunk,[&](Node * n) {
         auto & c = chunks[j++];
         Select * ns = graph->create<Select>(c,i);
+        ns->setType(sel->typeOption());
         insertAfter(ns,c);
         return ns;
       });
+      if(sel->hasType()) {
+        new_output->setType(sel->type()->cast<TensorType>()->contiguous());
+      }
       insertAfter(new_output,s.user);
       s.user->replaceAllUsesWith(new_output);
       s.user->destroy();
