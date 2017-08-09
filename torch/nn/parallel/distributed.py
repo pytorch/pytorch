@@ -104,7 +104,7 @@ class DistributedDataParallel(Module):
                     copy_param.detach_()
                     copy_param.requires_grad = param.requires_grad
         else:
-            self._modules_copies = [self.module]
+            self._module_copies = [self.module]
 
         # Split parameters into buckets that will coalesce reductions
         # TODO: different types need different buckets
