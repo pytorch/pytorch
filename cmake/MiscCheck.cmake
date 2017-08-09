@@ -86,7 +86,11 @@ if (${CMAKE_CXX_COMPILER_ID} STREQUAL "MSVC")
   )
 endif()
 
-# ---[ If we are building on ios, we will enable -mfpu=neon-fp16 for iOS Metal build.
+# ---[ If we are building on ios, or building with opengl support, we will
+# enable -mfpu=neon-fp16 for iOS Metal build. For Android, this fpu setting
+# is going to be done with android-cmake by setting
+#     -DANDROID_ABI="armeabi-v7a with NEON FP16"
+# in the build command.
 if (IOS)
   add_definitions("-mfpu=neon-fp16")
 endif()

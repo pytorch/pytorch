@@ -50,6 +50,7 @@ option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
 option(USE_OPENMP "Use OpenMP for parallel code" ON)
 option(BUILD_PYTHON "Build Python binaries" ON)
 option(BUILD_BINARY "Build C++ binaries" ON)
+option(USE_MOBILE_OPENGL "Use OpenGL for mobile code" ON)
 
 # External projects
 include(ExternalProject)
