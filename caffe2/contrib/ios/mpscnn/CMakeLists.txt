@@ -1,4 +1,4 @@
-if(IOS)
+if(USE_METAL)
   file(GLOB_RECURSE tmp *.mm *.cc)
   # exclude test files
   file(GLOB_RECURSE test_files *_test.cc)
