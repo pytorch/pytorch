@@ -129,6 +129,11 @@ void runNCCL(const NCCLExecution& ex, F&& f) {
   {
     // lock out alloc / free while NCCL launches
     std::lock_guard<std::mutex> lock(CUDAContext::mutex());
+
+#if NCCL_VERSION_MIN(2, 0, 0)
+    ncclGroupStart();
+#endif
+
     for (auto i = 0; i < ex.elements.size(); ++i) {
       auto& ctx = ex.elements[i];
       DeviceGuard g(ctx.device);
@@ -139,6 +144,19 @@ void runNCCL(const NCCLExecution& ex, F&& f) {
       DCHECK_EQ(ctx.device, GetGPUIDForPointer(ctx.src->raw_data()));
       CUDA_ENFORCE(cudaStreamWaitEvent(stream, context->master_event_, 0));
       f(ctx, comm, stream);
+    }
+
+#if NCCL_VERSION_MIN(2, 0, 0)
+    ncclGroupEnd();
+#endif
+
+    for (auto i = 0; i < ex.elements.size(); ++i) {
+      auto& ctx = ex.elements[i];
+      DeviceGuard g(ctx.device);
+      auto& comm = comms[i];
+      auto& stream = streams[i];
+      auto& event = events[i];
+
       // Record an event on each children stream that we have finished
       // our computation
       CUDA_ENFORCE(cudaEventRecord(event, stream));
@@ -221,6 +239,15 @@ void NCCL<T>::AllGather(const NCCLExecution& ex) {
         }
         ctx.dst->Resize(dims);
         ctx.dst->template mutable_data<T>();
+#if NCCL_VERSION_MIN(2, 0, 0)
+        CAFFE_NCCL_CHECK(ncclAllGather(
+            ctx.src->raw_data(),
+            ctx.dst->raw_mutable_data(),
+            ctx.src->size(),
+            ncclTypeWrapper<T>::type,
+            comm,
+            stream));
+#else
         CAFFE_NCCL_CHECK(ncclAllGather(
             ctx.src->raw_data(),
             ctx.src->size(),
@@ -228,6 +255,7 @@ void NCCL<T>::AllGather(const NCCLExecution& ex) {
             ctx.dst->raw_mutable_data(),
             comm,
             stream));
+#endif
       });
 }
 
