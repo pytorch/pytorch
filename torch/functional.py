@@ -5,7 +5,7 @@ from functools import reduce
 import collections
 
 __all__ = [
-    'split', 'chunk', 'stack', 'unbind', 'btriunpack', 'matmul',
+    'split', 'chunk', 'stack', 'unbind', 'btriunpack', 'matmul', 'sum'
 ]
 
 
@@ -251,12 +251,8 @@ def matmul(tensor1, tensor2, out=None):
 def sum(input, axes, keepdims=False, out=None):
     if isinstance(axes, collections.Iterable)
         if a.dim() > 3:
-            if keepdims:
-                for ax in axes:
-                    input = input.sum(ax, keepdims=True)
-            else:
-                for ax in sorted(axes, reverse=True):
-                    input = input.sum(ax)
+            for ax in sorted(axes, reverse=True):
+                input = input.sum(ax)
             if out is None:
                 return input
             else:
