@@ -39,6 +39,7 @@ import atexit
 import time
 import collections
 import six
+import traceback
 
 from abc import ABCMeta, abstractmethod
 
@@ -251,7 +252,7 @@ class Worker(object):
         self._worker_fun(self._worker_id)
 
     def handle_exception(self, e):
-        print(e)
+        traceback.print_exc()
         logging.exception("Exception in worker", e)
         self._coordinator._stop("Exception in worker {}: {}".format(
             self._worker_id, e
