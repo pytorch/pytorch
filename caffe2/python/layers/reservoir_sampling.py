@@ -30,6 +30,7 @@ class ReservoirSampling(ModelLayer):
         self.reservoir = model.net.NextScopedBlob(name + "_reservoir")
         self.num_visited_blob = model.net.NextScopedBlob(
             name + "_num_visited")
+        self.mutex = model.net.NextScopedBlob(name + "_mutex")
 
         self.params.append(LayerParameter(
             parameter=self.reservoir,
@@ -50,6 +51,13 @@ class ReservoirSampling(ModelLayer):
             ),
             optimizer=model.NoOptim,
         ))
+        self.params.append(
+            LayerParameter(
+                parameter=self.mutex,
+                initializer=core.CreateOperator("CreateMutex", [], self.mutex),
+                optimizer=model.NoOptim,
+            ),
+        )
 
         self.extra_input_blobs = []
         self.extra_output_blobs = []
@@ -81,17 +89,19 @@ class ReservoirSampling(ModelLayer):
                 optimizer=model.NoOptim,
             ))
 
-        self.output_schema = schema.from_blob_list(
-            input_record.data, [model.net.NextScopedBlob(name + "_output")])
+        self.output_schema = schema.Struct(
+            (
+                'reservoir',
+                schema.from_blob_list(input_record.data, [self.reservoir])
+            ),
+            ('num_visited', schema.Scalar(blob=self.num_visited_blob)),
+            ('mutex', schema.Scalar(blob=self.mutex)),
+        )
 
     def add_ops(self, net):
         net.ReservoirSampling(
-            [self.reservoir, self.num_visited_blob, self.input_record.data()]
-            + self.extra_input_blobs,
+            [self.reservoir, self.num_visited_blob, self.input_record.data(),
+             self.mutex] + self.extra_input_blobs,
             [self.reservoir, self.num_visited_blob] + self.extra_output_blobs,
             num_to_collect=self.num_to_collect,
         )
-        # Copy to make sure DAG of record is not broken.
-        # Also, the output of this is likely going through a pipeline, which
-        # will move data and require us to copy anyway.
-        net.Copy(self.reservoir, self.output_schema())
