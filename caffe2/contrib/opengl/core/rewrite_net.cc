@@ -272,7 +272,7 @@ NetDef rewritePredictNetForOpenGL(const NetDef& predictNet, bool useTextureInput
 
 #ifdef CAFFE2_ANDROID
   // TODO: debug InstanceNorm models on Mali devices
-  AndroidGLContext* context = (AndroidGLContext*) GLContext::getGLContext();
+  AndroidGLContext* context = (AndroidGLContext*)GLContext::getGLContext();
   if (context->get_platform() == Mali) {
     opKeySet.erase("OpenGLInstanceNorm");
     opKeySet.erase("OpenGLInstanceNormPRelu");
