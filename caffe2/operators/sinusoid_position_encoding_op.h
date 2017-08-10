@@ -13,8 +13,9 @@ class SinusoidPositionEncodingOp : public Operator<Context> {
         embedding_size_(OperatorBase::template GetSingleArgument<int>(
             "embedding_size",
             100)),
-        alpha_(
-            OperatorBase::template GetSingleArgument<float>("alpha", 10000)) {}
+        alpha_(OperatorBase::template GetSingleArgument<float>("alpha", 10000)),
+        amplitude_(
+            OperatorBase::template GetSingleArgument<float>("amplitude", 1)) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override {
@@ -46,9 +47,9 @@ class SinusoidPositionEncodingOp : public Operator<Context> {
 
         int loc = i * embedding_size_ + j;
         if (j % 2 == 0) {
-          out[loc] = std::sin(pos / dim_scale);
+          out[loc] = amplitude_ * std::sin(pos / dim_scale);
         } else {
-          out[loc] = std::cos(pos / dim_scale);
+          out[loc] = amplitude_ * std::cos(pos / dim_scale);
         }
       }
     }
@@ -58,6 +59,7 @@ class SinusoidPositionEncodingOp : public Operator<Context> {
  protected:
   int embedding_size_;
   float alpha_;
+  float amplitude_;
 };
 
 } // namespace caffe2

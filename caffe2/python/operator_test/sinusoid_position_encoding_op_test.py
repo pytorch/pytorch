@@ -15,6 +15,8 @@ MAX_TEST_SEQUENCE_LENGTH = 10
 MAX_TEST_BATCH_SIZE = 5
 MIN_TEST_ALPHA = 5000.0
 MAX_TEST_ALPHA = 20000.0
+MIN_TEST_AMPLITUDE = 0.1
+MAX_TEST_AMPLITUDE = 10.0
 
 
 class TestSinusoidPositionEncodingOp(hu.HypothesisTestCase):
@@ -26,18 +28,27 @@ class TestSinusoidPositionEncodingOp(hu.HypothesisTestCase):
         ),
         embedding_size=st.integers(1, MAX_TEST_EMBEDDING_SIZE),
         alpha=st.floats(MIN_TEST_ALPHA, MAX_TEST_ALPHA),
+        amplitude=st.floats(MIN_TEST_AMPLITUDE, MAX_TEST_AMPLITUDE),
         **hu.gcs_cpu_only
     )
-    def test_sinusoid_embedding(self, positions, embedding_size, alpha, gc, dc):
+    def test_sinusoid_embedding(
+        self, positions, embedding_size, alpha, amplitude, gc, dc
+    ):
         op = core.CreateOperator(
-            "SinusoidPositionEncoding", ["positions"], ["output"],
+            "SinusoidPositionEncoding",
+            ["positions"],
+            ["output"],
             embedding_size=embedding_size,
-            alpha=alpha
+            alpha=alpha,
+            amplitude=amplitude,
         )
 
         def sinusoid_encoding(dim, position):
             x = 1. * position / math.pow(alpha, 1. * dim / embedding_size)
-            return math.sin(x) if dim % 2 == 0 else math.cos(x)
+            if dim % 2 == 0:
+                return amplitude * math.sin(x)
+            else:
+                return amplitude * math.cos(x)
 
         def sinusoid_embedding_op(positions):
             output_shape = (len(positions), len(positions[0]), embedding_size)
