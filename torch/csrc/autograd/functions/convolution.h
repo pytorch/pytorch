@@ -59,9 +59,9 @@ struct ConvBackward : public Function, public ConvParams {
     , ConvParams(std::move(params))
     , convolution(std::move(convolution)) {
       if (is_executable) {
-        this->input_ = std::move(input->save(this));
-        this->weight_ = std::move(weight->save(this));
-        this->bias_ = std::move(Variable::save_opt(bias.get(), this));
+        this->input_ = input->save(this);
+        this->weight_ = weight->save(this);
+        this->bias_ = Variable::save_opt(bias.get(), this);
         this->columns = std::move(columns);
         this->ones = std::move(ones);
       }
@@ -90,10 +90,10 @@ struct ConvBackwardBackward : public Function, public ConvParams {
     : Function(std::move(flags))
     , ConvParams(std::move(params)) {
       if (is_executable) {
-        this->input_ = std::move(input->save(this));
-        this->weight_ = std::move(weight->save(this));
-        this->bias_ = std::move(Variable::save_opt(bias.get(), this));
-        this->grad_output_ = std::move(grad_output->save(this));
+        this->input_ = input->save(this);
+        this->weight_ = weight->save(this);
+        this->bias_ = Variable::save_opt(bias.get(), this);
+        this->grad_output_ = grad_output->save(this);
       }
     }
 
