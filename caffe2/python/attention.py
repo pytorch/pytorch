@@ -58,11 +58,11 @@ def _calc_attention_weights(
         )
         flat_attention_logits = model.net.UnpackSegments(
             [encoder_lengths, attention_logits],
-            'flat_attention_logits',
+            s(scope, 'flat_attention_logits'),
         )
         masked_attention_logits = model.net.PackSegments(
             [encoder_lengths, flat_attention_logits],
-            'masked_attention_logits',
+            s(scope, 'masked_attention_logits'),
             pad_minf=True,
         )
         attention_logits_transposed = model.net.ExpandDims(
