@@ -4009,7 +4009,7 @@ class TestTorch(TestCase):
         expected = torch.arange(1, 126).view(5, 5, 5)[:, 1]
         self.assertEqual(torch.from_numpy(x), expected)
 
-        # check zero dimensional
+        # check zero dimentional
         x = np.zeros((0, 2))
         self.assertRaises(RuntimeError, lambda: torch.from_numpy(x))
 

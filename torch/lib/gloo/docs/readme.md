@@ -23,7 +23,7 @@ overview of these domains and how they interact.
 
 ## Overview
 
-Gloo algorithms are collective algorithms, meaning they can run in
+Gloo algorithms are collective algoritms, meaning they can run in
 parallel across two or more processes/machines. To be able to execute
 across multiple machines, they first need to find each other. We call
 this _rendezvous_ and it is the first thing to address when
