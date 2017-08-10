@@ -913,17 +913,17 @@ def upsample(input, size=None, scale_factor=None, mode='nearest'):
             'nearest' | 'bilinear' | 'trilinear'. Default: 'nearest'
     """
     if input.dim() == 4 and mode == 'nearest':
-        return _functions.thnn.UpsamplingNearest2d(_pair(size), scale_factor)(input)
+        return _functions.thnn.UpsamplingNearest2d.apply(input, _pair(size), scale_factor)
     elif input.dim() == 5 and mode == 'nearest':
-        return _functions.thnn.UpsamplingNearest3d(_triple(size), scale_factor)(input)
+        return _functions.thnn.UpsamplingNearest3d.apply(input, _triple(size), scale_factor)
     elif input.dim() == 4 and mode == 'bilinear':
-        return _functions.thnn.UpsamplingBilinear2d(_pair(size), scale_factor)(input)
+        return _functions.thnn.UpsamplingBilinear2d.apply(input, _pair(size), scale_factor)
     elif input.dim() == 4 and mode == 'trilinear':
         raise NotImplementedError("Got 4D input, but trilinear mode needs 5D input")
     elif input.dim() == 5 and mode == 'bilinear':
         raise NotImplementedError("Got 5D input, but bilinear mode needs 4D input")
     elif input.dim() == 5 and mode == 'trilinear':
-            return _functions.thnn.UpsamplingTrilinear3d(_triple(size), scale_factor)(input)
+        return _functions.thnn.UpsamplingTrilinear3d.apply(input, _triple(size), scale_factor)
     else:
         raise NotImplementedError("Input Error: Only 4D and 5D input Tensors supported"
                                   " (got {}D) for the modes: nearest | bilinear | trilinear"
