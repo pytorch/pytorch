@@ -70,6 +70,10 @@ class TreeIterator {
     return fields_;
   }
 
+  const std::vector<int>& lengthFieldIds() const {
+    return lengthFieldIds_;
+  }
+
  private:
   // Description of each field
   std::vector<FieldDesc> fields_;
@@ -133,12 +137,24 @@ class TreeWalker {
       return walker_.fieldDim(fieldId_);
     }
 
+    inline TIndex size() const {
+      TIndex size = 1;
+      for (const auto d : dim()) {
+        size *= d;
+      }
+      return size;
+    }
+
     inline const TypeMeta& meta() const {
       return walker_.input(fieldId_).meta();
     }
 
     inline void* ptr() const {
       return walker_.fieldPtr(fieldId_);
+    }
+
+    int fieldId() const {
+      return fieldId_;
     }
 
    private:
