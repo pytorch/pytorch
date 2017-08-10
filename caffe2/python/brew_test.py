@@ -180,13 +180,13 @@ class BrewTest(unittest.TestCase):
                 blob_out="out",
                 dim_in=3,
                 dim_out=64,
-                kernel=3,
+                kernel=[8, 3]
             )
         model.Validate()
         workspace.RunNetOnce(model.param_init_net)
         workspace.RunNetOnce(model.net)
         out = workspace.FetchBlob("out")
-        self.assertEqual(out.shape, (64, 17, 17, 64))
+        self.assertEqual(out.shape, (64, 15, 17, 64))
 
     def test_cnn_model_helper_deprecated(self):
         X = np.random.rand(64, 32, 32, 3).astype(np.float32) - 0.5

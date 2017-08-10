@@ -36,7 +36,11 @@ def _ConvBase(
         else:
             kernels = kernel
     else:
-        kernels = [kernel] * 2
+        if isinstance(kernel, list):
+            assert len(kernel) == 2, "Conv support only a 2D kernel."
+            kernels = kernel
+        else:
+            kernels = [kernel] * 2
 
     requested_engine = kwargs.get('engine')
     if requested_engine is not None:
@@ -113,12 +117,22 @@ def _ConvBase(
             order=order,
             **kwargs)
     else:
-        return model.net.Conv(
-            inputs,
-            blob_out,
-            kernel=kernel,
-            order=order,
-            **kwargs)
+        if isinstance(kernel, list):
+            return model.net.Conv(
+                inputs,
+                blob_out,
+                kernel_h=kernel[0],
+                kernel_w=kernel[1],
+                order=order,
+                **kwargs)
+        else:
+            return model.net.Conv(
+                inputs,
+                blob_out,
+                kernel=kernel,
+                order=order,
+                **kwargs)
+
 
 
 def conv_nd(
