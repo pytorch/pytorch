@@ -537,9 +537,10 @@ THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
 
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
   // Compute pointers to matrices in each batch.
+#if CUDA_VERSION < 8000  
   size_t matrices_size = num_batches * sizeof(real*);
 
-  // Copy pointers to device.
+//   Copy pointers to device.
   const real **d_matrices1, **d_matrices2;
   real **d_result_matrices;
   THCudaCheck(THCudaMalloc(state, (void**)&d_matrices1, matrices_size));
@@ -558,7 +559,6 @@ THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
   createBatchGemmBuffer<<<grid, block, 0, THCState_getCurrentStream(state)>>>(
     (const real**)d_result_matrices, THCTensor_(data)(state,result_),
     result_->stride[0], num_batches);
-
 #ifdef THC_REAL_IS_FLOAT
   THCudaBlas_SgemmBatched(
       state,
@@ -592,6 +592,38 @@ THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
   THCudaFree(state, d_matrices1);
   THCudaFree(state, d_matrices2);
   THCudaFree(state, d_result_matrices);
+  
+#else
+#ifdef THC_REAL_IS_FLOAT
+  THCudaBlas_SgemmStridedBatched(
+      state,
+      transpose_batch1,
+      transpose_batch2,
+      result_->size[transpose_result ? 2 : 1],
+      result_->size[transpose_result ? 1 : 2],
+      batch1_->size[transpose_result ? 1 : 2],
+      alpha,
+      THCTensor_(data)(state, batch1_), lda, batch1_->stride[0],
+      THCTensor_(data)(state, batch2_), ldb, batch2_->stride[0],
+      beta,
+      THCTensor_(data)(state, result_), ldc, result_->stride[0],      
+      num_batches);
+#elif defined(THC_REAL_IS_DOUBLE)
+  THCudaBlas_DgemmStridedBatched(
+      state,
+      transpose_batch1,
+      transpose_batch2,
+      result_->size[transpose_result ? 2 : 1],
+      result_->size[transpose_result ? 1 : 2],
+      batch1_->size[transpose_result ? 1 : 2],
+      alpha,
+      THCTensor_(data)(state, batch1_), lda, batch1_->stride[0],
+      THCTensor_(data)(state, batch2_), ldb, batch2_->stride[0],
+      beta,
+      THCTensor_(data)(state, result_), ldc, result_->stride[0],      
+      num_batches);
+#endif
+#endif
 
 #elif defined(THC_REAL_IS_HALF)
   // Currently no HgemmBatched in Cublas

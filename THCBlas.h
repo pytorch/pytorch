@@ -31,7 +31,14 @@ THC_API void THCudaBlas_SgemmBatched(THCState *state, char transa, char transb, 
 THC_API void THCudaBlas_DgemmBatched(THCState *state, char transa, char transb, long m, long n, long k,
                                      double alpha, const double *a[], long lda, const double *b[], long ldb,
                                      double beta, double *c[], long ldc, long batchCount);
-
+#if CUDA_VERSION >= 8000
+THC_API void THCudaBlas_SgemmStridedBatched(THCState *state, char transa, char transb, long m, long n, long k,
+                                     float alpha, const float *a, long lda, long strideA, const float *b, long ldb, long strideB,
+                                     float beta, float *c, long ldc, long strideC, long batchCount);
+THC_API void THCudaBlas_DgemmStridedBatched(THCState *state, char transa, char transb, long m, long n, long k,
+                                     double alpha, const double *a, long lda, long strideA, const double *b, long ldb, long strideB, 
+                                     double beta, double *c, long ldc, long strideC, long batchCount);
+#endif
 /* Inverse */
 THC_API void THCudaBlas_Sgetrf(THCState *state, int n, float **a, int lda, int *pivot, int *info, int batchSize);
 THC_API void THCudaBlas_Dgetrf(THCState *state, int n, double **a, int lda, int *pivot, int *info, int batchSize);
