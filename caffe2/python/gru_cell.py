@@ -147,4 +147,4 @@ class GRUCell(rnn_cell.RNNCell):
         return (self.scope('hidden_t'),)
 
 
-GRU = functools.partial(rnn_cell._RNN, GRUCell, no_cell_state=True)
+GRU = functools.partial(rnn_cell._LSTM, GRUCell)
