@@ -21,7 +21,7 @@ by providing these two tensors, as well as the size of the sparse tensor
     >>> torch.sparse.FloatTensor(i, v, torch.Size([2,3])).to_dense()
      0  0  3
      4  0  0
-    [torch.FloatTensor of size 2x2]
+    [torch.FloatTensor of size 2x3]
 
 You can also construct hybrid sparse tensors, where only the first n
 dimensions are sparse, and the rest of the dimensions are dense.
