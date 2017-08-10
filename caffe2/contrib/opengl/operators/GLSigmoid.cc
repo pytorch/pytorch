@@ -9,32 +9,22 @@
 #include <iostream>
 #include <vector>
 
+typedef enum { Sigmoid, Tanh } OpType;
+
 class GLSigmoid : public GLFilter {
  public:
-  static constexpr int MaxBatchSize = 4;
-
-  binding* inputData[MaxBatchSize];
+  binding* inputData;
   binding* outputSize;
 
-  const int batch_size;
-
-  const std::vector<binding*> input_bindings(int batch_size) {
-    std::vector<binding*> bindings({BINDING(outputSize)});
-    for (int i = 0; i < batch_size; i++) {
-      bindings.push_back(inputData[i] = new binding{"inputData[" + caffe2::to_string(i) + "]"});
-    }
-    return bindings;
-  }
-
-  GLSigmoid(int _batch_size = 1)
+  GLSigmoid(OpType opType)
       : GLFilter("GLSigmoid",
                  vertex_shader,
                  fragment_shader,
-                 input_bindings(_batch_size),
+                 {BINDING(outputSize), BINDING(inputData)},
                  {/* no uniform blocks */},
                  {/* no attributes */},
-                 {{"BATCH_SIZE", caffe2::to_string(_batch_size)}}),
-        batch_size(_batch_size) {}
+                 {{"SIGMOID", caffe2::to_string(opType == Sigmoid)},
+                  {"TANH", caffe2::to_string(opType == Tanh)}}) {}
 
   template <typename T>
   void sigmoid(const GLImageVector<T>& input_images, const GLImageVector<T>& output_images);
@@ -45,8 +35,8 @@ class GLSigmoid : public GLFilter {
 // MARK: GLSL
 
 const char* GLSigmoid::fragment_shader = R"GLSL(#version 300 es
-
-#define BATCH_SIZE    $(BATCH_SIZE)
+#define SIGMOID $(SIGMOID)
+#define TANH $(TANH)
 
 precision mediump float;
 precision mediump int;
@@ -56,30 +46,16 @@ in highp vec2 v_texCoord;
 
 uniform ivec2 outputSize;
 
-uniform sampler2D inputData[BATCH_SIZE];
+uniform sampler2D inputData;
 
-layout(location = 0) out mediump vec4 outputData0;
-#if BATCH_SIZE > 1
-layout(location = 1) out mediump vec4 outputData1;
-#if BATCH_SIZE > 2
-layout(location = 2) out mediump vec4 outputData2;
-#if BATCH_SIZE > 3
-layout(location = 3) out mediump vec4 outputData3;
-#endif
-#endif
-#endif
+layout(location = 0) out mediump vec4 outputData;
 
 void main() {
-    ivec2 texelCoord = ivec2(v_texCoord * vec2(outputSize));
-    outputData0 = vec4(1.0) / (vec4(1.0) + exp(-texelFetch(inputData[0], ivec2(texelCoord), 0)));
-    #if BATCH_SIZE > 1
-    outputData1 = vec4(1.0) / (vec4(1.0) + exp(-texelFetch(inputData[1], ivec2(texelCoord), 0)));
-    #if BATCH_SIZE > 2
-    outputData2 = vec4(1.0) / (vec4(1.0) + exp(-texelFetch(inputData[2], ivec2(texelCoord), 0)));
-    #if BATCH_SIZE > 3
-    outputData3 = vec4(1.0) / (vec4(1.0) + exp(-texelFetch(inputData[3], ivec2(texelCoord), 0)));
-#endif
-#endif
+  ivec2 texelCoord = ivec2(v_texCoord * vec2(outputSize));
+#if SIGMOID
+  outputData = vec4(1.0) / (vec4(1.0) + exp(-texelFetch(inputData, ivec2(texelCoord), 0)));
+#elif TANH
+  outputData = tanh(texelFetch(inputData, ivec2(texelCoord), 0));
 #endif
 }
 
@@ -94,15 +70,9 @@ void GLSigmoid::sigmoid(const GLImageVector<T>& input_images,
     int input_slices = input_image->slices;
     int output_slices = output_image->slices;
 
-    for (int is = 0; is < input_slices; is += batch_size) {
-
-      std::vector<texture_attachment> input_attachments;
-      for (int ib = 0; ib < batch_size; ib++) {
-        input_attachments.push_back({input_image->textures[is + ib], inputData[ib]});
-      }
-
-      run(input_attachments,
-          {output_image->textures.begin() + is, output_image->textures.begin() + is + batch_size},
+    for (int is = 0; is < input_slices; is++) {
+      run(std::vector<texture_attachment>({{input_image->textures[is], inputData}}),
+          {output_image->textures.begin() + is, output_image->textures.begin() + is + 1},
           [&]() { glUniform2i(outputSize->location, output_image->width, output_image->height); },
           output_image->width,
           output_image->height);
@@ -111,14 +81,11 @@ void GLSigmoid::sigmoid(const GLImageVector<T>& input_images,
 }
 
 namespace caffe2 {
-template <typename T>
+template <typename T, OpType opType>
 class OpenGLSigmoidOp final : public Operator<CPUContext>, ImageAllocator<T> {
  public:
   OpenGLSigmoidOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CPUContext>(operator_def, ws),
-        order_(StringToStorageOrder(OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
-    OPERATOR_NEEDS_FEATURE(this->order_ == StorageOrder::NCHW, "OpenGL only supports NCHW order.");
-  }
+      : Operator<CPUContext>(operator_def, ws) {}
 
   bool RunOnDevice() override {
     const GLImageVector<T>& input = Inputs()[0]->template Get<GLImageVector<T>>();
@@ -137,9 +104,7 @@ class OpenGLSigmoidOp final : public Operator<CPUContext>, ImageAllocator<T> {
         num_images, output_width, output_height, output_channels, is_last);
 
     if (!_sigmoid) {
-      int batch_size = 1;
-      batch_size = OperatorBase::GetSingleArgument<int>("batch_size", batch_size);
-      _sigmoid.reset(new GLSigmoid(batch_size));
+      _sigmoid.reset(new GLSigmoid(opType));
     }
 
     _sigmoid->sigmoid(input, *output);
@@ -150,12 +115,18 @@ class OpenGLSigmoidOp final : public Operator<CPUContext>, ImageAllocator<T> {
   }
 
  private:
-  StorageOrder order_;
   std::unique_ptr<GLSigmoid> _sigmoid;
 };
 
-REGISTER_CPU_OPERATOR(OpenGLSigmoid, OpenGLSigmoidOp<float16_t>);
+REGISTER_CPU_OPERATOR(OpenGLSigmoid, OpenGLSigmoidOp<float16_t, Sigmoid>);
 OPERATOR_SCHEMA(OpenGLSigmoid)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .AllowInplace({{0, 0}})
+    .IdenticalTypeAndShape();
+
+REGISTER_CPU_OPERATOR(OpenGLTanh, OpenGLSigmoidOp<float16_t, Tanh>);
+OPERATOR_SCHEMA(OpenGLTanh)
     .NumInputs(1)
     .NumOutputs(1)
     .AllowInplace({{0, 0}})

@@ -96,7 +96,10 @@ class GLImageVector {
   int tile_y_ = 0;
 
  public:
-  GLImage<T>* operator[](int index) const { return images_[index]; }
+  GLImage<T>* operator[](int index) const {
+    CAFFE_ENFORCE_LT(index, num_images_, "Out of bounds when accessing GLImageVector");
+    return images_[index];
+  }
 
   void push_back(GLImage<T>* image) {
     CAFFE_ENFORCE_EQ(image->channels, channels_);

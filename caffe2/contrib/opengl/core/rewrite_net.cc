@@ -6,6 +6,10 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#ifdef CAFFE2_ANDROID
+#include "../android/AndroidGLContext.h"
+#endif
+
 namespace caffe2 {
 
 struct Analysis {
@@ -264,7 +268,16 @@ NetDef rewritePredictNetForOpenGL(const NetDef& predictNet, bool useTextureInput
   bool needCopyOps = false;
 
   const auto& opKeyList = CPUOperatorRegistry()->Keys();
-  const auto& opKeySet = std::set<std::string>(opKeyList.begin(), opKeyList.end());
+  auto opKeySet = std::set<std::string>(opKeyList.begin(), opKeyList.end());
+
+#ifdef CAFFE2_ANDROID
+  // TODO: debug InstanceNorm models on Mali devices
+  AndroidGLContext* context = (AndroidGLContext*) GLContext::getGLContext();
+  if (context->get_platform() == Mali) {
+    opKeySet.erase("OpenGLInstanceNorm");
+    opKeySet.erase("OpenGLInstanceNormPRelu");
+  }
+#endif
   for (auto i = 0; i < net.op_size(); ++i) {
     auto* op = net.mutable_op(i);
     string openGLOp = std::string("OpenGL") + op->type();
@@ -290,11 +303,13 @@ NetDef rewritePredictNetForOpenGL(const NetDef& predictNet, bool useTextureInput
     // For end-to-end testing
     if (net.op(net.op_size() - 1).type() !=
         replacements["OpenGLBRGNCHWCToPackedInt8BGRAStylizerDeprocess"]) {
-      auto last_op = net.op(net.op_size() - 1);
+      auto* last_op = net.mutable_op(net.op_size() - 1);
+      auto output = last_op->output(0) + "M";
+      last_op->set_output(0, output);
       auto* copy_op = net.add_op();
       copy_op->set_name("CopyFromOpenGL");
       copy_op->set_type("CopyFromOpenGL");
-      copy_op->add_input(last_op.output(0));
+      copy_op->add_input(output);
       // rename output blob in case input and output blob has the same name
       copy_op->add_output(net.external_output(0));
     }

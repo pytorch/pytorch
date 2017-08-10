@@ -605,7 +605,7 @@ void testOpenGLRelu(int N, int C, int H, int W, float error) {
   checkError(ws.GetBlob("Y_cpu")->Get<TensorCPU>(), ws.GetBlob("Y_ref")->Get<TensorCPU>(), error);
 }
 
-void testOpenGLAdd(int N, int C, int H, int W, int batch_size = 1, float error = 0.1) {
+void testOpenGLAdd(int N, int C, int H, int W, float error = 0.1) {
   LOG(INFO) << "OpenGL Add Test "
             << "C: " << C << ", H: " << H << ", W: " << W;
   Workspace ws;
@@ -643,11 +643,6 @@ void testOpenGLAdd(int N, int C, int H, int W, int batch_size = 1, float error =
     op.set_type("OpenGLAdd");
     op.add_input("X_gl0");
     op.add_input("X_gl1");
-    {
-      auto& arg = *(op.add_arg());
-      arg.set_name("batch_size");
-      arg.set_i(batch_size);
-    }
     op.add_output("Y_gl");
   }
 
@@ -783,6 +778,125 @@ void testOpenGLSigmoid(int N, int C, int H, int W, float error) {
     auto& arg = *(op.add_arg());
     arg.set_name("order");
     arg.set_s("NCHW");
+    op.add_output("Y_ref");
+  }
+
+  ws.RunNetOnce(netdef);
+  const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>(); // openGL
+  const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>(); // CPU
+
+  checkError(ws.GetBlob("Y_cpu")->Get<TensorCPU>(), ws.GetBlob("Y_ref")->Get<TensorCPU>(), error);
+}
+
+void testOpenGLTanh(int N, int C, int H, int W, float error) {
+  LOG(INFO) << "OpenGL Tanh Test "
+            << "C: " << C << ", H: " << H << ", W: " << W;
+  Workspace ws;
+  {
+    auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
+    t->Resize(N, C, H, W);
+    CPUContext ctx;
+    math::RandGaussian<float, CPUContext>(t->size(), -3, 3, t->mutable_data<float>(), &ctx);
+  }
+
+  NetDef netdef;
+  {
+    auto& op = *(netdef.add_op());
+    op.set_type("CopyToOpenGL");
+    op.add_input("X_cpu");
+    op.add_output("X_gl");
+  }
+
+  {
+    auto& op = *(netdef.add_op());
+    op.set_type("OpenGLTanh");
+    op.add_input("X_gl");
+    op.add_output("Y_gl");
+  }
+
+  {
+    auto& op = *(netdef.add_op());
+    op.set_type("CopyFromOpenGL");
+    op.add_input("Y_gl");
+    op.add_output("Y_cpu");
+  }
+
+  {
+    auto& op = *(netdef.add_op());
+    op.set_type("Tanh");
+    op.add_input("X_cpu");
+    auto& arg = *(op.add_arg());
+    arg.set_name("order");
+    arg.set_s("NCHW");
+    op.add_output("Y_ref");
+  }
+
+  ws.RunNetOnce(netdef);
+  const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>(); // openGL
+  const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>(); // CPU
+
+  checkError(ws.GetBlob("Y_cpu")->Get<TensorCPU>(), ws.GetBlob("Y_ref")->Get<TensorCPU>(), error);
+}
+
+void testOpenGLMul(int N, int C, int H, int W, float error) {
+  LOG(INFO) << "OpenGL Mul Test "
+            << "C: " << C << ", H: " << H << ", W: " << W;
+  Workspace ws;
+  {
+    auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
+    t->Resize(N, C, H, W);
+    CPUContext ctx;
+    math::RandGaussian<float, CPUContext>(t->size(), -10, 10, t->mutable_data<float>(), &ctx);
+  }
+
+  {
+    auto* t = ws.CreateBlob("B")->GetMutable<TensorCPU>();
+    t->Resize(1);
+    CPUContext ctx;
+    math::RandGaussian<float, CPUContext>(t->size(), -10, 10, t->mutable_data<float>(), &ctx);
+  }
+
+  NetDef netdef;
+  {
+    auto& op = *(netdef.add_op());
+    op.set_type("CopyToOpenGL");
+    op.add_input("X_cpu");
+    op.add_output("X_gl");
+  }
+
+  {
+    auto& op = *(netdef.add_op());
+    op.set_type("OpenGLMul");
+    op.add_input("X_gl");
+    op.add_input("B");
+    op.add_output("Y_gl");
+
+    {
+      auto& arg = *(op.add_arg());
+      arg.set_name("broadcast");
+      arg.set_i(1);
+    }
+  }
+
+  {
+    auto& op = *(netdef.add_op());
+    op.set_type("CopyFromOpenGL");
+    op.add_input("Y_gl");
+    op.add_output("Y_cpu");
+  }
+
+  {
+    auto& op = *(netdef.add_op());
+    op.set_type("Mul");
+    op.add_input("X_cpu");
+    op.add_input("B");
+
+    {
+      auto& arg = *(op.add_arg());
+      arg.set_name("broadcast");
+      arg.set_i(1);
+    }
+
     op.add_output("Y_ref");
   }
 
@@ -1630,50 +1744,83 @@ static NetDef truncateAfter(NetDef def, size_t idx) {
   return def;
 }
 
-void compareModelsForOpenGL(const NetDef& initNet, NetDef predictNet) {
-  auto* arg = predictNet.mutable_op(0)->mutable_arg(1);
-  CHECK_EQ(arg->name(), "noise_std");
-  arg->set_f(0.000001);
+void compareModelsForOpenGL(std::string name,
+                            const NetDef& initNet,
+                            NetDef predictNet,
+                            int width,
+                            int height,
+                            int channel,
+                            std::string input_type,
+                            std::string input_order) {
+  if (name == "styleTransfer") {
+    auto* arg = predictNet.mutable_op(0)->mutable_arg(1);
+    CHECK_EQ(arg->name(), "noise_std");
+    arg->set_f(0.000001);
+  }
 
   for (auto i = 0; i < predictNet.op_size(); ++i) {
     auto truncatedPredictNet = truncateAfter(predictNet, i);
 
-    // The copyFromMetalGPUop is added in the rewriting process
-    NetDef truncatedOpenGLPredictNet = rewritePredictNetForOpenGL(truncatedPredictNet);
-
-    // Change the last blob to external_output(0) for the cpu predict net
-    auto output_blob = truncatedPredictNet.external_output(0) + "_output";
+    // Change the last blob to external_output(0) for the predict net
+    auto output_blob = "_OUTPUT_BLOB__";
     truncatedPredictNet.set_external_output(0, output_blob);
     truncatedPredictNet.mutable_op(truncatedPredictNet.op_size() - 1)->set_output(0, output_blob);
 
-    LOG(INFO) << "truncatedOpenGLPredictNet";
-    dumpDefForOpenGL(truncatedOpenGLPredictNet);
+    NetDef truncatedOpenGLPredictNet = rewritePredictNetForOpenGL(truncatedPredictNet);
 
     LOG(INFO) << "truncatedPredictNet";
     dumpDefForOpenGL(truncatedPredictNet);
 
-    const int width = 720, height = 1280;
+    LOG(INFO) << "truncatedOpenGLPredictNet";
+    dumpDefForOpenGL(truncatedOpenGLPredictNet);
 
+    CPUContext ctx;
     Workspace cws;
     cws.RunNetOnce(initNet);
-    {
-      auto* t = cws.CreateBlob(predictNet.external_input(0))->GetMutable<TensorCPU>();
-      t->Resize(1, height, width, 4);
-      for (auto i = 0; i < t->size(); ++i) {
-        t->mutable_data<uint8_t>()[i] = i % 255;
+
+    auto* t_cpu = cws.CreateBlob(truncatedPredictNet.external_input(0))->GetMutable<TensorCPU>();
+    if (name == "styleTransfer") {
+      CAFFE_ENFORCE_EQ(input_order, "NHWC");
+      CAFFE_ENFORCE_EQ(input_type, "uint8_t");
+      t_cpu->Resize(1, height, width, channel);
+      for (auto i = 0; i < t_cpu->size(); ++i) {
+        t_cpu->mutable_data<uint8_t>()[i] = i % 255;
       }
+    } else if (name == "segmentation") {
+      CAFFE_ENFORCE_EQ(input_order, "NCHW");
+      CAFFE_ENFORCE_EQ(input_type, "float");
+      t_cpu->Resize(1, channel, height, width);
+      float* input = t_cpu->mutable_data<float>();
+      const int size = width * height;
+      // Limit input range to YUV
+      math::RandGaussian<float, CPUContext>(size, 0.5, 0.15, input, &ctx); // Y: 0 ~ 1
+      math::RandGaussian<float, CPUContext>(size, 0, 0.12, input + size, &ctx); // U: -0.436 ~ 0.436
+      math::RandGaussian<float, CPUContext>(size, 0, 0.2, input + 2 * size, &ctx); // V: -0.615 ~ 0.615
+    } else {
+      CAFFE_THROW("CompareModels only works with style transfer and segmentation now");
     }
-    cws.RunNetOnce(truncatedPredictNet);
 
     Workspace mws;
     mws.RunNetOnce(initNet);
-    {
-      auto* t = mws.CreateBlob(predictNet.external_input(0))->GetMutable<TensorCPU>();
-      t->Resize(1, height, width, 4);
-      for (auto i = 0; i < t->size(); ++i) {
-        t->mutable_data<uint8_t>()[i] = i % 255;
+
+    auto* t_gl =
+        mws.CreateBlob(truncatedOpenGLPredictNet.external_input(0))->GetMutable<TensorCPU>();
+    if (name == "styleTransfer") {
+      CAFFE_ENFORCE_EQ(input_order, "NHWC");
+      CAFFE_ENFORCE_EQ(input_type, "uint8_t");
+      t_gl->Resize(1, height, width, channel);
+      for (auto i = 0; i < t_gl->size(); ++i) {
+        t_gl->mutable_data<uint8_t>()[i] = i % 255;
       }
+    } else if (name == "segmentation") {
+      CAFFE_ENFORCE_EQ(input_order, "NCHW");
+      CAFFE_ENFORCE_EQ(input_type, "float");
+      t_gl->Resize(1, channel, height, width);
+      float* input = t_gl->mutable_data<float>();
+      memcpy(input, t_cpu->mutable_data<float>(), t_cpu->capacity_nbytes());
     }
+
+    cws.RunNetOnce(truncatedPredictNet);
     mws.RunNetOnce(truncatedOpenGLPredictNet);
 
     const auto m_name =
@@ -1684,7 +1831,7 @@ void compareModelsForOpenGL(const NetDef& initNet, NetDef predictNet) {
     {
       const auto& mt = mws.GetBlob(m_name)->Get<TensorCPU>(); // GPU
       const auto& ct = cws.GetBlob(c_name)->Get<TensorCPU>(); // CPU
-      checkError(mt, ct, 10);
+      checkError(mt, ct, 1);
     }
   }
 }
@@ -1704,6 +1851,7 @@ int runModelBenchmarks(caffe2::NetDef& init_net,
   std::unique_ptr<caffe2::Workspace> workspace(new caffe2::Workspace());
 
   // caffe2::dumpDefForOpenGL(init_net);
+  caffe2::dumpDefForOpenGL(predict_net);
 
   CAFFE_ENFORCE(workspace->RunNetOnce(init_net));
   caffe2::NetDef net_def;
@@ -1775,7 +1923,7 @@ int runModelBenchmarks(caffe2::NetDef& init_net,
 #else
                                                               false
 #endif
-    );
+                                                              );
 
     Blob* blob = nullptr;
     if (!net_def.external_input_size()) {
@@ -1907,7 +2055,6 @@ void squareFactors(int N, int& r1, int& r2) {
 }
 
 void testOpenGL() {
-
   // Test a bunch of different tiled convolutions
   std::vector<int> channels({4, 8, 16});
 
@@ -2208,15 +2355,25 @@ void testOpenGL() {
   testOpenGLRelu(1, 6, 640, 360, 0.1);
 
   LOG(INFO) << "Test OpenGL Add";
-  testOpenGLAdd(1, 16, 640, 360, 1, 0.1);
-  testOpenGLAdd(1, 16, 640, 360, 2, 0.1);
-  testOpenGLAdd(1, 16, 640, 360, 4, 0.1);
-  testOpenGLAdd(1, 12, 640, 360, 3, 0.1);
+  testOpenGLAdd(1, 16, 640, 360, 0.1);
+  testOpenGLAdd(1, 16, 640, 360, 0.1);
+  testOpenGLAdd(1, 16, 640, 360, 0.1);
+  testOpenGLAdd(1, 12, 640, 360, 0.1);
 
   LOG(INFO) << "Test OpenGL Sigmoid";
   testOpenGLSigmoid(1, 4, 16, 16, 0.1);
   testOpenGLSigmoid(1, 12, 64, 48, 0.1);
   testOpenGLSigmoid(1, 6, 640, 360, 0.1);
+
+  LOG(INFO) << "Test OpenGL Tanh";
+  testOpenGLTanh(1, 4, 16, 16, 0.1);
+  testOpenGLTanh(1, 12, 64, 48, 0.1);
+  testOpenGLTanh(1, 6, 640, 360, 0.1);
+
+  LOG(INFO) << "Test OpenGL Mul";
+  testOpenGLMul(1, 4, 16, 16, 0.1);
+  testOpenGLMul(1, 12, 64, 48, 0.1);
+  testOpenGLMul(1, 6, 640, 360, 0.1);
 
   LOG(INFO) << "Test OpenGL Concat";
   testOpenGLConcat(1, std::vector<int>{4, 4}, 16, 16);
@@ -2329,23 +2486,32 @@ void testOpenGL() {
   testOpenGLConv(3, 4, 10, 10, 4, 3, 3, 0, 2, ConvTranspose, 0.5, true, 1, 1);
   testOpenGLConv(3, 16, 6, 6, 16, 3, 3, 0, 1, ConvPRelu, 2, true, 1, 1);
   testOpenGLConv(3, 16, 6, 6, 16, 3, 3, 0, 1, ConvTransposePRelu, 2, true, 1, 1);
+
   testOpenGLPRelu(3, 4, 16, 16, 4, 0.1);
-  testOpenGLRelu(3, 4, 16, 16, 0.1);
-  testOpenGLAdd(3, 16, 640, 360, 1, 0.1);
-  testOpenGLSigmoid(3, 4, 16, 16, 0.1);
-  testOpenGLInstanceNorm(3, 4, 16, 16, 0.2);
-  testOpenGLInstanceNormPRelu(3, 4, 16, 16, 0.2);
-  testOpenGLResize(3, 4, 16, 16, 1, 1, 1, 0.1);
-  testOpenGLPadImage(3, 3, 4, 4, 2, 0.01);
-  testOpenGLSoftmax(3, 1000, 0.1);
   testOpenGLPRelu(5, 4, 16, 16, 4, 0.1);
+
+  testOpenGLRelu(3, 4, 16, 16, 0.1);
   testOpenGLRelu(7, 4, 16, 16, 0.1);
-  testOpenGLAdd(9, 16, 640, 360, 1, 0.1);
+
+  testOpenGLAdd(3, 16, 640, 360, 0.1);
+  testOpenGLAdd(9, 16, 640, 360, 0.1);
+
+  testOpenGLSigmoid(3, 4, 16, 16, 0.1);
   testOpenGLSigmoid(11, 4, 16, 16, 0.1);
+
+  testOpenGLInstanceNorm(3, 4, 16, 16, 0.2);
   testOpenGLInstanceNorm(13, 4, 16, 16, 0.2);
+
+  testOpenGLInstanceNormPRelu(3, 4, 16, 16, 0.2);
   testOpenGLInstanceNormPRelu(15, 4, 16, 16, 0.2);
+
+  testOpenGLResize(3, 4, 16, 16, 1, 1, 1, 0.1);
   testOpenGLResize(16, 4, 16, 16, 1, 1, 1, 0.1);
+
+  testOpenGLPadImage(3, 3, 4, 4, 2, 0.01);
   testOpenGLPadImage(23, 3, 4, 4, 2, 0.01);
+
+  testOpenGLSoftmax(3, 1000, 0.1);
   testOpenGLSoftmax(27, 100, 0.1);
 
   testOpenGLNormPlanarYUV(4, 3, 192, 192, 0.01);

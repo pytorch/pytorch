@@ -11,30 +11,18 @@
 
 class GLAdd : public GLFilter {
  public:
-  static constexpr int MaxBatchSize = 4;
-
-  binding* inputData[2 * MaxBatchSize];
+  binding* inputData[2];
   binding* outputSize;
 
-  const int batch_size;
-
-  const std::vector<binding*> input_bindings(int batch_size) {
-    std::vector<binding*> bindings({BINDING(outputSize)});
-    for (int i = 0; i < 2 * batch_size; i++) {
-      bindings.push_back(inputData[i] = new binding{"inputData[" + caffe2::to_string(i) + "]"});
-    }
-    return bindings;
-  }
-
-  GLAdd(int _batch_size = 1)
+  GLAdd()
       : GLFilter("GLAdd",
                  vertex_shader,
                  fragment_shader,
-                 input_bindings(_batch_size),
+                 std::vector<binding*>(
+                     {BINDING(outputSize), BINDING(inputData[0]), BINDING(inputData[1])}),
                  {/* no uniform blocks */},
                  {/* no attributes */},
-                 {{"BATCH_SIZE", caffe2::to_string(_batch_size)}}),
-        batch_size(_batch_size) {}
+                 {/* no replacements */}) {}
 
   template <typename T>
   void add(const GLImageVector<T>& input_image0,
@@ -48,8 +36,6 @@ class GLAdd : public GLFilter {
 
 const char* GLAdd::fragment_shader = R"GLSL(#version 300 es
 
-#define BATCH_SIZE    $(BATCH_SIZE)
-
 precision mediump float;
 precision mediump int;
 precision mediump sampler2D;
@@ -58,31 +44,13 @@ in highp vec2 v_texCoord;
 
 uniform ivec2 outputSize;
 
-uniform sampler2D inputData[2 * BATCH_SIZE];
+uniform sampler2D inputData[2];
 
-layout(location = 0) out mediump vec4 outputData0;
-#if BATCH_SIZE > 1
-layout(location = 1) out mediump vec4 outputData1;
-#if BATCH_SIZE > 2
-layout(location = 2) out mediump vec4 outputData2;
-#if BATCH_SIZE > 3
-layout(location = 3) out mediump vec4 outputData3;
-#endif
-#endif
-#endif
+layout(location = 0) out mediump vec4 outputData;
 
 void main() {
     ivec2 texelCoord = ivec2(v_texCoord * vec2(outputSize));
-    outputData0 = texelFetch(inputData[0], texelCoord, 0) + texelFetch(inputData[1], texelCoord, 0);
-#if BATCH_SIZE > 1
-    outputData1 = texelFetch(inputData[2], texelCoord, 0) + texelFetch(inputData[3], texelCoord, 0);
-#if BATCH_SIZE > 2
-    outputData2 = texelFetch(inputData[4], texelCoord, 0) + texelFetch(inputData[5], texelCoord, 0);
-#if BATCH_SIZE > 3
-    outputData3 = texelFetch(inputData[6], texelCoord, 0) + texelFetch(inputData[7], texelCoord, 0);
-#endif
-#endif
-#endif
+    outputData = texelFetch(inputData[0], texelCoord, 0) + texelFetch(inputData[1], texelCoord, 0);
 }
 
 )GLSL";
@@ -95,22 +63,17 @@ void GLAdd::add(const GLImageVector<T>& input_images0,
   for (int i = 0; i < num_images; i++) {
     GLImage<T>* input_image0 = input_images0[i];
     GLImage<T>* input_image1 = input_images1[i];
-    int input_slices0 = input_image0->slices;
-    int input_slices1 = input_image1->slices;
+    int input_slices = input_image0->slices;
     GLImage<T>* output_image = output_images[i];
     int output_slices = output_image->slices;
-    gl_log(GL_VERBOSE, "batch_size: %d\n", batch_size);
-    for (int is = 0; is < input_slices0; is += batch_size) {
-      gl_log(GL_VERBOSE, "is: %d\n", is);
 
+    for (int is = 0; is < input_slices; is++) {
       std::vector<texture_attachment> input_attachments;
-      for (int i = 0; i < batch_size; i++) {
-        input_attachments.push_back({input_image0->textures[is + i], inputData[2 * i]});
-        input_attachments.push_back({input_image1->textures[is + i], inputData[2 * i + 1]});
-      }
+      input_attachments.push_back({input_image0->textures[is], inputData[0]});
+      input_attachments.push_back({input_image1->textures[is], inputData[1]});
 
       run(input_attachments,
-          {output_image->textures.begin() + is, output_image->textures.begin() + is + batch_size},
+          {output_image->textures.begin() + is, output_image->textures.begin() + is + 1},
           [&]() { glUniform2i(outputSize->location, output_image->width, output_image->height); },
           output_image->width,
           output_image->height);
@@ -123,9 +86,12 @@ template <typename T>
 class OpenGLAddOp final : public Operator<CPUContext>, ImageAllocator<T> {
  public:
   OpenGLAddOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CPUContext>(operator_def, ws),
-        order_(StringToStorageOrder(OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
-    OPERATOR_NEEDS_FEATURE(this->order_ == StorageOrder::NCHW, "OpenGL only supports NCHW order.");
+      : Operator<CPUContext>(operator_def, ws) {
+    OPERATOR_NEEDS_FEATURE(OperatorBase::HasArgument("broadcast") == false,
+                           "OpenGLAdd does not support broadcast");
+
+    OPERATOR_NEEDS_FEATURE(OperatorBase::HasArgument("axis") == false,
+                           "OpenGLMul does not support axis");
   }
 
   bool RunOnDevice() override {
@@ -152,10 +118,7 @@ class OpenGLAddOp final : public Operator<CPUContext>, ImageAllocator<T> {
         num_images, output_width, output_height, output_channels, is_last);
 
     if (!_add) {
-      int batch_size = 1;
-
-      batch_size = OperatorBase::GetSingleArgument<int>("batch_size", batch_size);
-      _add.reset(new GLAdd(batch_size));
+      _add.reset(new GLAdd());
     }
 
     _add->add(input0, input1, *output);
@@ -166,7 +129,6 @@ class OpenGLAddOp final : public Operator<CPUContext>, ImageAllocator<T> {
   }
 
  private:
-  StorageOrder order_;
   std::unique_ptr<GLAdd> _add;
 };
 
