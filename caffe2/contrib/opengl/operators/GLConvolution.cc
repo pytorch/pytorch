@@ -292,7 +292,9 @@ layout(location = 3) out mediump vec4 outputData3;
 #endif
 #endif
 
-const bool no_bounds = bool(TEXTURE_BORDER_CLAMP) || all(equal(input_padding, ivec2(0)));
+#define TILED_CONVOLUTION ((INPUT_TILES > 1) || (OUTPUT_TILES > 1))
+
+const bool no_bounds = !TILED_CONVOLUTION && (bool(TEXTURE_BORDER_CLAMP) || all(equal(input_padding, ivec2(0))));
 
 #define IN_BOUNDS(p, p0, p1) (all(greaterThanEqual(p, p0)) && all(lessThan(p, p1)))
 
@@ -333,8 +335,6 @@ const bool no_bounds = bool(TEXTURE_BORDER_CLAMP) || all(equal(input_padding, iv
 
 #endif
 
-#define TILED_CONVOLUTION ((INPUT_TILES > 1) || (OUTPUT_TILES > 1))
-
 void main() {
   ivec2 inputSize = textureSize(inputData[0], 0);
   ivec2 texelCoord = ivec2(v_texCoord * vec2(outputSize));
@@ -344,20 +344,18 @@ void main() {
   ivec2 tile = texelCoord / outputTileSize;
   ivec2 tileCoord = texelCoord % outputTileSize;
   int tileNum = 2 * tile.y + tile.x;
-#define LOOP_PRECISION highp
 #else
   const ivec2 inputTiles = ivec2(1, 1);
   const ivec2 tile = ivec2(0, 0);
   ivec2 tileCoord = texelCoord;
   const int tileNum = 0;
-#define LOOP_PRECISION mediump
 #endif
 
 #if !TRANSPOSED_CONVOLUTION
   tileCoord = input_stride * tileCoord - input_padding;
 #endif
 
-  LOOP_PRECISION vec4 sum[OUTPUT_BATCH_SIZE] = vec4[OUTPUT_BATCH_SIZE](vec4(0)
+  highp vec4 sum[OUTPUT_BATCH_SIZE] = vec4[OUTPUT_BATCH_SIZE](vec4(0)
 #if OUTPUT_BATCH_SIZE > 1
                                                                        , vec4(0)
 #if OUTPUT_BATCH_SIZE > 2

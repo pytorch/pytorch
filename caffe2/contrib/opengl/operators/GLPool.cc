@@ -144,7 +144,11 @@ const float MIN_FLOAT = -exp2(14.0);
 void main() {
   ivec2 inputSize = textureSize(inputData, 0);
   ivec2 texelCoord = input_stride * ivec2(v_texCoord * vec2(outputSize)) - input_padding;
+#if MAX_POOL
   vec4 pool = vec4(0);
+#else
+  highp vec4 pool = vec4(0);
+#endif
 
   POOL;
 

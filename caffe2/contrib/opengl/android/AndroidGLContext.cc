@@ -98,30 +98,20 @@ void AndroidGLContext::init_gles3() {
 }
 
 std::unordered_map<std::string, GL_Renderer> AndroidGLContext::_renderer_map = {
-    {"Adreno", Adreno}, {"Mali", Mali}, {"PowerVR", PowerVR}};
-
-void AndroidGLContext::detect_platform() {
-  static std::once_flag once;
-  std::call_once(once, [&]() {
-    std::string rendererStr((const char*)glGetString(GL_RENDERER));
-    std::regex regStr("^[A-Za-z]*");
-    std::smatch matchs;
-    if (std::regex_search(rendererStr, matchs, regStr)) {
-      const std::string renderer = *matchs.begin();
-      LOG(INFO) << "GL_Renderer: " << renderer;
-      auto found = _renderer_map.find(renderer);
-      if (found != _renderer_map.end()) {
-        _renderer = found->second;
-      } else {
-        CAFFE_THROW("Unsupported GPU renderer");
-      }
-    }
-  });
-}
+    {"Adreno", Adreno}, {"Mali", Mali} /*, {"PowerVR", PowerVR} */};
 
 GL_Renderer AndroidGLContext::get_platform() {
-  detect_platform();
-  return _renderer;
+  std::string rendererStr((const char*)glGetString(GL_RENDERER));
+  std::regex regStr("^[A-Za-z]*");
+  std::smatch matchs;
+  if (std::regex_search(rendererStr, matchs, regStr)) {
+    const std::string renderer = *matchs.begin();
+    auto found = _renderer_map.find(renderer);
+    if (found != _renderer_map.end()) {
+      return found->second;
+    }
+  }
+  CAFFE_THROW("Unsupported GPU renderer");
 }
 
 AndroidGLContext::AndroidGLContext() {

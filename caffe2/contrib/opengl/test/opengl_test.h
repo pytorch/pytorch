@@ -4,7 +4,14 @@
 
 namespace caffe2 {
 void testOpenGL();
-void compareModelsForOpenGL(const NetDef& initNet, NetDef predictNet);
+void compareModelsForOpenGL(std::string name,
+                            const NetDef& initNet,
+                            NetDef predictNet,
+                            int width,
+                            int height,
+                            int channel,
+                            std::string input_type,
+                            std::string input_order);
 int runModelBenchmarks(caffe2::NetDef& init_net,
                        caffe2::NetDef& predict_net,
                        int warm_up_runs,

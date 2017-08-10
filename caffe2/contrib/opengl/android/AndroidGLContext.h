@@ -6,12 +6,11 @@
 #include "../core/GLTexture.h"
 #include <unordered_map>
 
-enum GL_Renderer { Adreno, Mali, PowerVR };
+enum GL_Renderer { Adreno, Mali /*, PowerVR */};
 
 class AndroidGLContext : public GLContext {
  private:
   EGLContext _eglcontext;
-  GL_Renderer _renderer;
   static std::unordered_map<std::string, GL_Renderer> _renderer_map;
 
   EGLContext create_opengl_thread_context();
@@ -25,6 +24,5 @@ class AndroidGLContext : public GLContext {
   void reset_context();
   void flush_context();
   void init_gles3();
-  void detect_platform();
   GL_Renderer get_platform();
 };
