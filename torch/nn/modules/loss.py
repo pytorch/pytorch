@@ -286,10 +286,25 @@ class BCELoss(_WeightedLoss):
     an auto-encoder. Note that the targets `t[i]` should be numbers
     between 0 and 1.
 
-    By default, the losses are averaged for each minibatch over observations
-    *as well as* over dimensions. However, if the field `size_average` is set
-    to `False`, the losses are instead summed.
+    Args:
+        size_average (bool, optional): By default, the losses are averaged
+            over observations for each minibatch. However, if the field
+            size_average is set to False, the losses are instead summed for
+            each minibatch. Default: True
 
+    Shape:
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
+        - Target: :math:`(N, *)`, same shape as the input
+
+    Examples::
+
+        >>> m = nn.Sigmoid()
+        >>> loss = nn.BCELoss()
+        >>> input = autograd.Variable(torch.randn(3), requires_grad=True)
+        >>> target = autograd.Variable(torch.FloatTensor(3).random_(2))
+        >>> output = loss(m(input), target)
+        >>> output.backward()
     """
     def forward(self, input, target):
         _assert_no_grad(target)
@@ -316,10 +331,24 @@ class BCEWithLogitsLoss(Module):
     an auto-encoder. Note that the targets `t[i]` should be numbers
     between 0 and 1.
 
-    By default, the losses are averaged for each minibatch over observations
-    *as well as* over dimensions. However, if the field `size_average` is set
-    to `False`, the losses are instead summed.
+    Args:
+        size_average (bool, optional): By default, the losses are averaged
+            over observations for each minibatch. However, if the field
+            size_average is set to False, the losses are instead summed for
+            each minibatch. Default: True
 
+     Shape:
+         - Input: :math:`(N, *)` where `*` means, any number of additional
+           dimensions
+         - Target: :math:`(N, *)`, same shape as the input
+
+     Examples::
+
+         >>> loss = nn.BCEWithLogitsLoss()
+         >>> input = autograd.Variable(torch.randn(3), requires_grad=True)
+         >>> target = autograd.Variable(torch.FloatTensor(3).random_(2))
+         >>> output = loss(input, target)
+         >>> output.backward()
     """
     def __init__(self, weight=None, size_average=True):
         super(BCEWithLogitsLoss, self).__init__()
