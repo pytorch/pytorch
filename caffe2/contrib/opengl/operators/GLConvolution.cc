@@ -27,6 +27,8 @@ class GLConvolution : public GLFilter {
     int input_channels;
     int output_channels;
     point kernel_size;
+    point input_tile_size;
+    point output_tile_size;
     point input_padding;
     point input_stride;
     bool transposed;
@@ -38,9 +40,6 @@ class GLConvolution : public GLFilter {
 
   binding* inputData[MaxInputBatchSize];
   binding* previousData[MaxOutputBatchSize];
-  binding* kernelSize;
-  binding* inputTileSize;
-  binding* outputTileSize;
   binding* outputSize;
   binding* accumulate;
   binding* fusePRelu;
@@ -58,12 +57,7 @@ class GLConvolution : public GLFilter {
   static const char* fragment_shader;
 
   const std::vector<binding*> input_bindings(int input_batch_size, int output_batch_size) {
-    std::vector<binding*> bindings({BINDING(inputTileSize),
-                                    BINDING(outputTileSize),
-                                    BINDING(outputSize),
-                                    BINDING(accumulate),
-                                    BINDING(kernelSize),
-                                    BINDING(fusePRelu)});
+    std::vector<binding*> bindings({BINDING(outputSize), BINDING(accumulate), BINDING(fusePRelu)});
 
     for (int i = 0; i < input_batch_size; i++) {
       bindings.push_back(inputData[i] = new binding{"inputData[" + caffe2::to_string(i) + "]"});
@@ -115,6 +109,10 @@ class GLConvolution : public GLFilter {
              {"OUTPUT_BATCH_SIZE", caffe2::to_string(_output_batch_size)},
              {"INPUT_TILES", caffe2::to_string(_input_tiles)},
              {"OUTPUT_TILES", caffe2::to_string(_output_tiles)},
+             {"INPUT_TILE_WIDTH", caffe2::to_string(_geometry.input_tile_size.x)},
+             {"INPUT_TILE_HEIGHT", caffe2::to_string(_geometry.input_tile_size.y)},
+             {"OUTPUT_TILE_WIDTH", caffe2::to_string(_geometry.output_tile_size.x)},
+             {"OUTPUT_TILE_HEIGHT", caffe2::to_string(_geometry.output_tile_size.y)},
              {"INPUT_PADDING_X",
               caffe2::to_string(_geometry.transposed
                                     ? _geometry.kernel_size.x - 1 - _geometry.input_padding.x
@@ -232,6 +230,11 @@ const char* GLConvolution::fragment_shader = R"GLSL(#version 300 es
 #define OUTPUT_TILES                $(OUTPUT_TILES)
 #define TEXTURE_BORDER_CLAMP        $(TEXTURE_BORDER_CLAMP)
 
+#define INPUT_TILE_WIDTH            $(INPUT_TILE_WIDTH)
+#define INPUT_TILE_HEIGHT           $(INPUT_TILE_HEIGHT)
+#define OUTPUT_TILE_WIDTH           $(OUTPUT_TILE_WIDTH)
+#define OUTPUT_TILE_HEIGHT          $(OUTPUT_TILE_HEIGHT)
+
 precision mediump float;
 precision mediump int;
 precision mediump sampler2D;
@@ -243,10 +246,10 @@ const ivec2 input_stride = ivec2($(INPUT_STRIDE_X), $(INPUT_STRIDE_Y));
 const ivec2 kernel_size = ivec2($(KERNEL_SIZE_X), $(KERNEL_SIZE_Y));
 const int channels = 4;
 
-uniform ivec2 kernelSize;
+const ivec2 inputTileSize = ivec2(INPUT_TILE_WIDTH, INPUT_TILE_HEIGHT);
+const ivec2 outputTileSize = ivec2(OUTPUT_TILE_WIDTH, OUTPUT_TILE_HEIGHT);
+
 uniform ivec2 outputSize;
-uniform ivec2 inputTileSize;
-uniform ivec2 outputTileSize;
 uniform bool accumulate;
 uniform bool fusePRelu;
 
@@ -304,11 +307,12 @@ const bool no_bounds = !TILED_CONVOLUTION && (bool(TEXTURE_BORDER_CLAMP) || all(
   ivec2 p0 = (input_padding + input_stride - tileCoord % input_stride) % input_stride; \
   for (int y = p0.y; y < kernel_size.y; y+=input_stride.y) { \
     for (int x = p0.x; x < kernel_size.x; x+=input_stride.x) { \
+      int i = y * kernel_size.x + x; \
       ivec2 idx = tileCoord + ivec2(x, y) - input_padding; \
       if (no_bounds || IN_BOUNDS(idx, ivec2(0), inputTileSize * input_stride)) { \
         vec4 data = texelFetch(inputData[ib], inputTileOffset + idx / input_stride, 0); \
         for (int ob = 0; ob < OUTPUT_BATCH_SIZE; ob++) { \
-          mediump mat4 k = unpackKernel(kernel_block[ib].kernel_data[INPUT_TILES * OUTPUT_TILES * ob + kernelIdx].data[y * kernelSize.x + x]); \
+          mediump mat4 k = unpackKernel(kernel_block[ib].kernel_data[INPUT_TILES * OUTPUT_TILES * ob + kernelIdx].data[i]); \
           sum[ob] += k * data; \
         } \
       } \
@@ -319,8 +323,8 @@ const bool no_bounds = !TILED_CONVOLUTION && (bool(TEXTURE_BORDER_CLAMP) || all(
 #else
 
 #define CONVOLUTION(ib) { \
-  for (int y = 0, i = 0; y < kernelSize.y; y++) { \
-    for (int x = 0; x < kernelSize.x; x++, i++) { \
+  for (int y = 0, i = 0; y < kernel_size.y; y++) { \
+    for (int x = 0; x < kernel_size.x; x++, i++) { \
       ivec2 idx = tileCoord + ivec2(x, y); \
       if (no_bounds || IN_BOUNDS(idx, ivec2(0), inputTileSize)) { \
         vec4 data = texelFetch(inputData[ib], inputTileOffset + idx, 0); \
@@ -439,6 +443,10 @@ void GLConvolution::convolution(const GLImageVector<T>& input_images,
     for (int is = 0; is < input_slices; is += input_batch_size) {
       for (int os = 0; os < output_slices; os += output_batch_size) {
         gl_log(GL_VERBOSE, "GLConvolution::convolution - is: %d, os: %d\n", is, os);
+
+        const int output_batches =
+            std::min(4 * output_tiles * output_batch_size, geometry.output_channels - 4 * os);
+
         int binding_point = 0;
         attach_uniform_buffer(bias_block, binding_point++, [&](float16_t* data, size_t size) {
           if (size != output_tiles * (4 * ((output_batch_size + 1) / 2 * 2) * sizeof(float16_t))) {
@@ -449,10 +457,8 @@ void GLConvolution::convolution(const GLImageVector<T>& input_images,
             throw std::runtime_error("Bias size mismatch");
           }
 
-          for (int ib = 0; ib < std::min(4 * output_tiles * output_batch_size,
-                                         geometry.output_channels - 4 * os);
-               ib++) {
-            data[ib] = bias[4 * os + ib];
+          for (int ob = 0; ob < output_batches; ob++) {
+            data[ob] = bias[4 * os + ob];
           }
         });
 
@@ -473,11 +479,9 @@ void GLConvolution::convolution(const GLImageVector<T>& input_images,
         if (prelu_scale != nullptr && is == input_slices - input_batch_size) {
           attach_uniform_buffer(
               prelu_scale_block, binding_point++, [&](float16_t* data, size_t size) {
-                for (int i = 0;
-                     i < std::min(4 * output_batch_size, geometry.output_channels - 4 * os);
-                     i++) {
-                  data[i] = prelu_scale_size == geometry.output_channels ? prelu_scale[4 * os + i]
-                                                                         : prelu_scale[0];
+                for (int ob = 0; ob < output_batches; ob++) {
+                  data[ob] = prelu_scale_size == geometry.output_channels ? prelu_scale[4 * os + ob]
+                                                                          : prelu_scale[0];
                 }
               });
         }
@@ -494,15 +498,12 @@ void GLConvolution::convolution(const GLImageVector<T>& input_images,
             {output_image->textures.begin() + os,
              output_image->textures.begin() + os + output_batch_size},
             [&]() {
-              glUniform2i(inputTileSize->location, input_image->width, input_image->height);
-              glUniform2i(outputTileSize->location, output_image->width, output_image->height);
               glUniform2i(outputSize->location,
                           output_image->width * output_image->tile_x,
                           output_image->height * output_image->tile_y);
               glUniform1i(accumulate->location, is != 0);
               glUniform1i(fusePRelu->location,
                           prelu_scale != nullptr && is == input_slices - input_batch_size);
-              glUniform2i(kernelSize->location, geometry.kernel_size.x, geometry.kernel_size.y);
             },
             output_image->width * output_image->tile_x,
             output_image->height * output_image->tile_y);
@@ -538,9 +539,9 @@ static void computeBatchSizes(GLConvolution::descriptor& geometry,
   if (iPhoneVersion() >= 8) {
     // iPhone 6S and up
     input_batch_size =
-        input_slices % 8 == 0
-            ? 8
-            : input_slices % 4 == 0 ? 4 : input_slices % 3 == 0 ? 3 : input_slices % 2 == 0 ? 2 : 1;
+        /* input_slices % 8 == 0 ? 8 : */ input_slices % 4 == 0
+            ? 4
+            : input_slices % 3 == 0 ? 3 : input_slices % 2 == 0 ? 2 : 1;
     output_batch_size =
         output_slices % 4 == 0 ? 4 : output_slices % 3 == 0 ? 3 : output_slices % 2 == 0 ? 2 : 1;
   }
@@ -611,6 +612,8 @@ class OpenGLConvOp final : public ConvPoolOpBase<CPUContext>, ImageAllocator<T> 
     GLConvolution::descriptor geometry{input_channels,
                                        output_channels,
                                        {kernel_width, kernel_height},
+                                       {input_width, input_height},
+                                       {output_width, output_height},
                                        {pad_l(), pad_t()},
                                        {stride_w(), stride_h()},
                                        false};
@@ -727,6 +730,8 @@ class OpenGLConvTransposeOp final : public ConvTransposeUnpoolBase<CPUContext>, 
     GLConvolution::descriptor geometry{input_channels,
                                        output_channels,
                                        {kernel_width, kernel_height},
+                                       {input_width, input_height},
+                                       {output_width, output_height},
                                        {pad_l_, pad_t_},
                                        {stride_w_, stride_h_},
                                        true};

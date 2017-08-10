@@ -119,8 +119,8 @@ static double BenchGLConvolution(int input_channels,
                                  int input_stride,
                                  bool transposed,
                                  caffe2::Workspace* ws = nullptr) {
-  int tile_x, tile_y;
-  squareFactors(input_channels / 4, tile_x, tile_y);
+  int tile_x = 1, tile_y = 1;
+  // squareFactors(input_channels / 4, tile_x, tile_y);
 
   gl_log(GL_LOG, "Input Tiles Factors: %d, %d\n", tile_x, tile_y);
 
@@ -249,11 +249,11 @@ void TestGLConvolution() {
   //  std::vector<int> channels({512, 256, 128, 64});
 
   // large input sizes
-  //  std::vector<int> sizes({208, 312, 416, 720, 1080});
-  //  std::vector<int> channels({16, 4});
+  std::vector<int> sizes({208, 312, 416, 720, 1080});
+  std::vector<int> channels({16, 4});
 
-  std::vector<int> sizes({14, 26, 52, 104});
-  std::vector<int> channels({24, 16, 4});
+  //  std::vector<int> sizes({14, 26, 52, 104});
+  //  std::vector<int> channels({24, 16, 4});
 
   std::vector<int> kernels({1, 3});
 

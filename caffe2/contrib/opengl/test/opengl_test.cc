@@ -1795,7 +1795,8 @@ void compareModelsForOpenGL(std::string name,
       // Limit input range to YUV
       math::RandGaussian<float, CPUContext>(size, 0.5, 0.15, input, &ctx); // Y: 0 ~ 1
       math::RandGaussian<float, CPUContext>(size, 0, 0.12, input + size, &ctx); // U: -0.436 ~ 0.436
-      math::RandGaussian<float, CPUContext>(size, 0, 0.2, input + 2 * size, &ctx); // V: -0.615 ~ 0.615
+      math::RandGaussian<float, CPUContext>(
+          size, 0, 0.2, input + 2 * size, &ctx); // V: -0.615 ~ 0.615
     } else {
       CAFFE_THROW("CompareModels only works with style transfer and segmentation now");
     }
@@ -1923,7 +1924,7 @@ int runModelBenchmarks(caffe2::NetDef& init_net,
 #else
                                                               false
 #endif
-                                                              );
+    );
 
     Blob* blob = nullptr;
     if (!net_def.external_input_size()) {
