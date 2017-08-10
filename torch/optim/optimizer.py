@@ -138,13 +138,13 @@ class Optimizer(object):
         """
         assert isinstance(param_group, dict), "param group must be a dict"
 
-        params = param_group.get('params')
+        params = param_group['params']
         if isinstance(params, Variable):
             param_group['params'] = [params]
         else:
             param_group['params'] = list(params)
 
-        for param in params:
+        for param in param_group['params']:
             if not isinstance(param, Variable):
                 raise TypeError("optimizer can only optimize Variables, "
                                 "but one of the params is " + torch.typename(param))
@@ -162,9 +162,9 @@ class Optimizer(object):
 
         param_set = set()
         for group in self.param_groups:
-            param_set.update(set(group.get('params')))
+            param_set.update(set(group['params']))
 
-        if not param_set.isdisjoint(set(params)):
+        if not param_set.isdisjoint(set(param_group['params'])):
             raise ValueError("some parameters appear in more than one parameter group")
 
         self.param_groups.append(param_group)
