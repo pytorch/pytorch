@@ -130,7 +130,7 @@ class Variable(_C._VariableBase):
 
         The graph is differentiated using the chain rule. If the variable is
         non-scalar (i.e. its data has more than one element) and requires
-        gradient, the function additionally requires specifying ``gradient``.
+        gradient, the function additionaly requires specifying ``gradient``.
         It should be a tensor of matching type and location, that contains
         the gradient of the differentiated function w.r.t. ``self``.
 

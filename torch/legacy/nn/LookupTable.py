@@ -111,7 +111,7 @@ class LookupTable(Module):
         if self.maxNorm is None:
             return
 
-        # copy input into _input, so _input is continuous.
+        # copy input into _input, so _input is continous.
         # The copied _input will be modified in the C code.
         self._input.resize_(input.size()).copy_(input)
         row_idx = self._input
