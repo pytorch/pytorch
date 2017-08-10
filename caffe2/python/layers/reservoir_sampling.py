@@ -26,8 +26,6 @@ class ReservoirSampling(ModelLayer):
             model, name, input_record, **kwargs)
         assert num_to_collect > 0
         self.num_to_collect = num_to_collect
-        assert isinstance(input_record, schema.Scalar), \
-            "Got {!r}".format(input_record)
 
         self.reservoir = model.net.NextScopedBlob(name + "_reservoir")
         self.num_visited_blob = model.net.NextScopedBlob(
@@ -53,13 +51,44 @@ class ReservoirSampling(ModelLayer):
             optimizer=model.NoOptim,
         ))
 
+        self.extra_input_blobs = []
+        self.extra_output_blobs = []
+        if 'object_id' in input_record:
+            self.extra_input_blobs.append(input_record.object_id())
+            object_to_pos = model.net.NextScopedBlob(name + "_object_to_pos")
+            pos_to_object = model.net.NextScopedBlob(name + "_pos_to_object")
+            self.extra_input_blobs.extend([object_to_pos, pos_to_object])
+            self.extra_output_blobs.extend([object_to_pos, pos_to_object])
+            self.params.append(LayerParameter(
+                parameter=object_to_pos,
+                initializer=core.CreateOperator(
+                    'CreateMap', [], object_to_pos,
+                    key_dtype=core.DataType.INT64,
+                    valued_dtype=core.DataType.INT32,
+                ),
+                optimizer=model.NoOptim,
+            ))
+            self.params.append(LayerParameter(
+                parameter=pos_to_object,
+                initializer=core.CreateOperator(
+                    'ConstantFill',
+                    [],
+                    pos_to_object,
+                    shape=[0],
+                    value=0,
+                    dtype=core.DataType.INT64,
+                ),
+                optimizer=model.NoOptim,
+            ))
+
         self.output_schema = schema.from_blob_list(
-            input_record, [model.net.NextScopedBlob(name + "_output")])
+            input_record.data, [model.net.NextScopedBlob(name + "_output")])
 
     def add_ops(self, net):
         net.ReservoirSampling(
-            [self.reservoir, self.num_visited_blob, self.input_record()],
-            [self.reservoir, self.num_visited_blob],
+            [self.reservoir, self.num_visited_blob, self.input_record.data()]
+            + self.extra_input_blobs,
+            [self.reservoir, self.num_visited_blob] + self.extra_output_blobs,
             num_to_collect=self.num_to_collect,
         )
         # Copy to make sure DAG of record is not broken.
