@@ -141,7 +141,7 @@ int main(int argc, char* argv[]) {
   int nVis = 0;
   CUDACHECK(cudaGetDeviceCount(&nVis));
 
-  unsigned long long N = 0;
+  uint64_t N = 0;
   if (argc > 1) {
     int t = sscanf(argv[1], "%llu", &N);
     if (t == 0) {
@@ -204,15 +204,15 @@ int main(int argc, char* argv[]) {
   printf("# %10s  %12s  %6s  %4s  %7s  %5s  %5s  %7s\n",
       "bytes", "N", "type", "root", "time", "algbw", "busbw", "delta");
 
-  RunTests<char>(N / sizeof(char), ncclChar, comms, dList);
-  RunTests<int>(N / sizeof(int), ncclInt, comms, dList);
+  RunTests<int8_t>(N / sizeof(int8_t), ncclChar, comms, dList);
+  RunTests<int32_t>(N / sizeof(int32_t), ncclInt, comms, dList);
 #ifdef CUDA_HAS_HALF
   RunTests<half>(N / sizeof(half), ncclHalf, comms, dList);
 #endif
   RunTests<float>(N / sizeof(float), ncclFloat, comms, dList);
   RunTests<double>(N / sizeof(double), ncclDouble, comms, dList);
-  RunTests<long long>(N / sizeof(long long), ncclInt64, comms, dList);
-  RunTests<unsigned long long>(N / sizeof(unsigned long long), ncclUint64, comms, dList);
+  RunTests<int64_t>(N / sizeof(int64_t), ncclInt64, comms, dList);
+  RunTests<uint64_t>(N / sizeof(uint64_t), ncclUint64, comms, dList);
 
   printf("\n");
 

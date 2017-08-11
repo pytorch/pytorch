@@ -76,7 +76,7 @@ struct MULTI {
 };
 
 template<class FUNC>
-struct MULTI<FUNC, char> {
+struct MULTI<FUNC, int8_t> {
   static_assert(sizeof(PackType) == 2 * sizeof(uint32_t),
       "PackType must be twice the size of uint32_t.");
   union converter {
@@ -100,13 +100,13 @@ struct MULTI<FUNC, char> {
 };
 
 template<class FUNC>
-struct MULTI<FUNC, int> {
-  static_assert(sizeof(PackType) == 2 * sizeof(int),
+struct MULTI<FUNC, int32_t> {
+  static_assert(sizeof(PackType) == 2 * sizeof(int32_t),
       "PackType must be twice the size of int.");
   union converter {
     PackType storage;
     struct {
-      int a, b;
+      int32_t a, b;
     };
   };
 
@@ -181,21 +181,21 @@ struct MULTI<FUNC, double> {
 };
 
 template<class FUNC>
-struct MULTI<FUNC, unsigned long long> {
-  static_assert(sizeof(PackType) == sizeof(unsigned long long),
-      "PackType must be the same size as unsigned long long.");
+struct MULTI<FUNC, uint64_t> {
+  static_assert(sizeof(PackType) == sizeof(uint64_t),
+      "PackType must be the same size as uint64_t.");
   __device__ PackType operator()(const PackType x, const PackType y) const {
-    unsigned long long rv = FUNC()(x, y);
+    uint64_t rv = FUNC()(x, y);
     return rv;
   }
 };
 
 template<class FUNC>
-struct MULTI<FUNC, long long> {
-  static_assert(sizeof(PackType) == sizeof(long long),
-      "PackType must be the same size as long long.");
+struct MULTI<FUNC, int64_t> {
+  static_assert(sizeof(PackType) == sizeof(int64_t),
+      "PackType must be the same size as int64_t.");
   __device__ PackType operator()(const PackType x, const PackType y) const {
-    long long rv = FUNC()((long long)x, (long long)y);
+    int64_t rv = FUNC()((int64_t)x, (int64_t)y);
     return rv;
   }
 };
@@ -341,12 +341,12 @@ __device__ inline void incrementOpCounter(const KernelArgs<T> *args) {
 
 template <int THREADS, typename T> __device__ __forceinline__
 void LoadRing(const DevRing<char>* src, DevRing<T>* dst) {
-  enum { NUM_WORDS = sizeof(DevRing<char>) / sizeof(long long) };
-  static_assert(sizeof(DevRing<char>) % sizeof(long long) == 0, "Bad alignment");
+  enum { NUM_WORDS = sizeof(DevRing<char>) / sizeof(int64_t) };
+  static_assert(sizeof(DevRing<char>) % sizeof(int64_t) == 0, "Bad alignment");
   static_assert(THREADS >= NUM_WORDS, "Not enough threads to load DevRing");
   static_assert(sizeof(DevRing<char>) == sizeof(DevRing<T>), "DevRing size mismatch");
-  long long* lldst = reinterpret_cast<long long*>(dst);
-  const long long* llsrc = reinterpret_cast<const long long*>(src);
+  int64_t* lldst = reinterpret_cast<int64_t*>(dst);
+  const int64_t* llsrc = reinterpret_cast<const int64_t*>(src);
   if (threadIdx.x < NUM_WORDS) {
     lldst[threadIdx.x] = llsrc[threadIdx.x];
   }

@@ -31,7 +31,7 @@
 } while(0)
 
 template<typename T>
-void Randomize(T* const dest, const int N, const int randomSeed);
+void Randomize(T* const dest, const int N, const int64_t randomSeed);
 
 template<typename T>
 void Accumulate(T* dest, const T* contrib, int N, ncclRedOp_t op);
@@ -54,14 +54,14 @@ void GenerateRandom(curandGenerator_t generator, T * const dest,
     const int N);
 
 template<>
-void GenerateRandom<char>(curandGenerator_t generator, char * const dest,
+void GenerateRandom<uint8_t>(curandGenerator_t generator, uint8_t * const dest,
     const int N) {
   CURAND_CHK(curandGenerate(generator, (unsigned int*)dest,
-      N * sizeof(char) / sizeof(int)));
+      N * sizeof(uint8_t) / sizeof(int)));
 }
 
 template<>
-void GenerateRandom<int>(curandGenerator_t generator, int * const dest,
+void GenerateRandom<uint32_t>(curandGenerator_t generator, uint32_t * const dest,
     const int N) {
   CURAND_CHK(curandGenerate(generator, (unsigned int*)dest, N));
 }
@@ -79,14 +79,14 @@ void GenerateRandom<double>(curandGenerator_t generator, double * const dest,
 }
 
 template<>
-void GenerateRandom<unsigned long long>(curandGenerator_t generator, unsigned long long * const dest,
+void GenerateRandom<uint64_t>(curandGenerator_t generator, uint64_t * const dest,
     const int N) {
   CURAND_CHK(curandGenerateLongLong(generator, dest, N));
 }
 
 
 template<typename T>
-void Randomize(T* const dest, const int N, const int randomSeed) {
+void Randomize(T* const dest, const int N, const int64_t randomSeed) {
   curandGenerator_t gen;
   CURAND_CHK(curandCreateGenerator(&gen, CURAND_RNG_PSEUDO_MTGP32));
   CURAND_CHK(curandSetPseudoRandomGeneratorSeed(gen, randomSeed));
@@ -96,19 +96,19 @@ void Randomize(T* const dest, const int N, const int randomSeed) {
 }
 
 template<>
-void Randomize(unsigned long long* const dest, const int N, const int randomSeed) {
+void Randomize(uint64_t* const dest, const int N, const int64_t randomSeed) {
   curandGenerator_t gen;
   CURAND_CHK(curandCreateGenerator(&gen, CURAND_RNG_QUASI_SOBOL64));
-  GenerateRandom<unsigned long long>(gen, dest, N);
+  GenerateRandom<uint64_t>(gen, dest, N);
   CURAND_CHK(curandDestroyGenerator(gen));
   CUDACHECK(cudaDeviceSynchronize());
 }
 
 template<>
-void Randomize(long long* const dest, const int N, const int randomSeed) {
+void Randomize(int64_t* const dest, const int N, const int64_t randomSeed) {
   curandGenerator_t gen;
   CURAND_CHK(curandCreateGenerator(&gen, CURAND_RNG_QUASI_SOBOL64));
-  GenerateRandom<unsigned long long>(gen, (unsigned long long *)dest, N);
+  GenerateRandom<uint64_t>(gen, (uint64_t *)dest, N);
   CURAND_CHK(curandDestroyGenerator(gen));
   CUDACHECK(cudaDeviceSynchronize());
 }
@@ -121,7 +121,7 @@ __global__ void halve(const float * src, half* dest, int N) {
 }
 
 template<>
-void Randomize<half>(half* const dest, const int N, const int randomSeed) {
+void Randomize<half>(half* const dest, const int N, const int64_t randomSeed) {
   curandGenerator_t gen;
   CURAND_CHK(curandCreateGenerator(&gen, CURAND_RNG_PSEUDO_MTGP32));
   CURAND_CHK(curandSetPseudoRandomGeneratorSeed(gen, randomSeed));
@@ -136,11 +136,11 @@ void Randomize<half>(half* const dest, const int N, const int randomSeed) {
 }
 #endif
 
-void makeRandom(void* ptr, int n, ncclDataType_t type, int seed) {
+void makeRandom(void* ptr, int n, ncclDataType_t type, int64_t seed) {
   if (type == ncclChar)
-    Randomize<char>((char*)ptr, n, seed);
+    Randomize<int8_t>((int8_t*)ptr, n, seed);
   else if (type == ncclInt)
-    Randomize<int>((int*)ptr, n, seed);
+    Randomize<int32_t>((int32_t*)ptr, n, seed);
 #ifdef CUDA_HAS_HALF
   else if (type == ncclHalf)
     Randomize<half>((half*)ptr, n, seed);
@@ -150,9 +150,9 @@ void makeRandom(void* ptr, int n, ncclDataType_t type, int seed) {
   else if (type == ncclDouble)
     Randomize<double>((double*)ptr, n, seed);
   else if (type == ncclInt64)
-    Randomize<long long>((long long*)ptr, n, seed);
+    Randomize<int64_t>((int64_t*)ptr, n, seed);
   else if (type == ncclUint64)
-    Randomize<unsigned long long>((unsigned long long*)ptr, n, seed);
+    Randomize<uint64_t>((uint64_t*)ptr, n, seed);
 
   return;
 }
@@ -247,15 +247,15 @@ void Accumulate(T* dest, const T* contrib, int N, ncclRedOp_t op) {
 
 void accVec(void* out, void* in, int n, ncclDataType_t type, ncclRedOp_t op) {
   switch (type) {
-    case ncclChar:   accVecType<char>               (out, in, n, op); break;
-    case ncclInt:    accVecType<int>                (out, in, n, op); break;
+    case ncclChar:   accVecType<int8_t>               (out, in, n, op); break;
+    case ncclInt:    accVecType<int32_t>                (out, in, n, op); break;
 #ifdef CUDA_HAS_HALF
     case ncclHalf:   accVecType<half>               (out, in, n, op); break;
 #endif
     case ncclFloat:  accVecType<float>              (out, in, n, op); break;
     case ncclDouble: accVecType<double>             (out, in, n, op); break;
-    case ncclInt64:  accVecType<long long>          (out, in, n, op); break;
-    case ncclUint64: accVecType<unsigned long long> (out, in, n, op); break;
+    case ncclInt64:  accVecType<int64_t>          (out, in, n, op); break;
+    case ncclUint64: accVecType<uint64_t> (out, in, n, op); break;
     default:
       printf("Unknown reduction type.\n");
       exit(EXIT_FAILURE);
@@ -316,15 +316,15 @@ double CheckDelta(const T* results, const T* expected, int N) {
 
 void maxDiff(double* max, void* first, void* second, int n, ncclDataType_t type, cudaStream_t s) {
   switch (type) {
-    case ncclChar:   deltaKern<char, 512>              <<<1,512,0,s>>>((char*)first, (char*)second, n, max); break;
-    case ncclInt:    deltaKern<int, 512>               <<<1,512,0,s>>>((int*)first, (int*)second, n, max); break;
+    case ncclChar:   deltaKern<int8_t, 512>              <<<1,512,0,s>>>((uint8_t*)first, (uint8_t*)second, n, max); break;
+    case ncclInt:    deltaKern<int32_t, 512>               <<<1,512,0,s>>>((int32_t*)first, (int32_t*)second, n, max); break;
 #ifdef CUDA_HAS_HALF
     case ncclHalf:   deltaKern<half, 512>              <<<1,512,0,s>>>((half*)first, (half*)second, n, max); break;
 #endif
     case ncclFloat:  deltaKern<float, 512>             <<<1,512,0,s>>>((float*)first, (float*)second, n, max); break;
     case ncclDouble: deltaKern<double, 512>            <<<1,512,0,s>>>((double*)first, (double*)second, n, max); break;
-    case ncclInt64:  deltaKern<long long, 512>         <<<1,512,0,s>>>((long long*)first, (long long*)second, n, max); break;
-    case ncclUint64: deltaKern<unsigned long long, 512><<<1,512,0,s>>>((unsigned long long*)first, (unsigned long long*)second, n, max); break;
+    case ncclInt64:  deltaKern<int64_t, 512>         <<<1,512,0,s>>>((int64_t*)first, (int64_t*)second, n, max); break;
+    case ncclUint64: deltaKern<uint64_t, 512><<<1,512,0,s>>>((uint64_t*)first, (uint64_t*)second, n, max); break;
     default:
       printf("Unknown reduction type.\n");
       exit(EXIT_FAILURE);
@@ -379,15 +379,15 @@ ncclDataType_t strToType(const char* s) {
 
 size_t wordSize(ncclDataType_t type) {
   switch(type) {
-    case ncclChar:   return sizeof(char);
-    case ncclInt:    return sizeof(int);
+    case ncclChar:   return sizeof(int8_t);
+    case ncclInt:    return sizeof(int32_t);
 #ifdef CUDA_HAS_HALF
     case ncclHalf:   return sizeof(short);
 #endif
     case ncclFloat:  return sizeof(float);
     case ncclDouble: return sizeof(double);
-    case ncclInt64:  return sizeof(long long);
-    case ncclUint64: return sizeof(unsigned long long);
+    case ncclInt64:  return sizeof(int64_t);
+    case ncclUint64: return sizeof(uint64_t);
   }
 
   return 0;
@@ -421,7 +421,7 @@ ncclRedOp_t strToOp(const char* s) {
 
 int strToPosInt(const char* s) {
   errno = 0;
-  long temp = strtol(s, NULL, 10);
+  int64_t temp = (int64_t) strtol(s, NULL, 10);
   if (errno != 0 || temp > INT_MAX || temp < 0)
     return 0;
   return (int)temp;
@@ -429,7 +429,7 @@ int strToPosInt(const char* s) {
 
 int strToNonNeg(const char* s) {
   errno = 0;
-  long temp = strtol(s, NULL, 10);
+  int64_t temp = (int64_t) strtol(s, NULL, 10);
   if (errno != 0 || temp > INT_MAX || temp < 0)
     return -1;
   return (int)temp;

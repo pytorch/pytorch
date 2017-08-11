@@ -32,7 +32,7 @@ struct ncclMem {
 };
 
 template <typename T>
-struct alignas(long long) DevRing {
+struct alignas(int64_t) DevRing {
   volatile int* __restrict__ prevOpCounter;
   volatile int* __restrict__ nextOpCounter;
   volatile int* __restrict__ sendFlagToNext;
