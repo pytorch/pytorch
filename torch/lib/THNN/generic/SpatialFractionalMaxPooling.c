@@ -2,18 +2,18 @@
 #define TH_GENERIC_FILE "generic/SpatialFractionalMaxPooling.c"
 #else
 
-static long* THNN_(SpatialFractionalMaxPooling_generateIntervals)(
+static int64_t* THNN_(SpatialFractionalMaxPooling_generateIntervals)(
   real sample,
-  long inputSize,
-  long outputSize,
+  int64_t inputSize,
+  int64_t outputSize,
   int poolSize) {
   real alpha = (real) (inputSize - poolSize) / (real) (outputSize - 1);
-  long* sequence = (long*) THAlloc(sizeof(long) * outputSize);
+  int64_t* sequence = (int64_t*) THAlloc(sizeof(int64_t) * outputSize);
 
-  long i;
+  int64_t i;
   for (i = 0; i < outputSize - 1; ++i) {
     sequence[i] =
-      (long) ((i + sample) * alpha) - (long) (sample * alpha);
+      (int64_t) ((i + sample) * alpha) - (int64_t) (sample * alpha);
   }
   sequence[outputSize - 1] = inputSize - poolSize;
 
@@ -25,47 +25,47 @@ static void THNN_(SpatialFractionalMaxPooling_updateOutput_frame)(
   real* output,
   THIndex_t* indices,
   real* randomSamples,
-  long numPlanes,
-  long inputW, long inputH,
-  long outputW, long outputH,
+  int64_t numPlanes,
+  int64_t inputW, int64_t inputH,
+  int64_t outputW, int64_t outputH,
   int poolSizeW, int poolSizeH) {
-  long plane;
+  int64_t plane;
 #pragma omp parallel for private(plane)
   for (plane = 0; plane < numPlanes; ++plane) {
     /* each plane contains 2 random samples, one for W and one for H */
     real* randomSamplesForPlane = randomSamples + plane * 2;
 
     /* Generate interval sequence */
-    long* sequenceW =
+    int64_t* sequenceW =
       THNN_(SpatialFractionalMaxPooling_generateIntervals)(
         randomSamplesForPlane[0], inputW, outputW, poolSizeW);
-    long* sequenceH =
+    int64_t* sequenceH =
       THNN_(SpatialFractionalMaxPooling_generateIntervals)(
         randomSamplesForPlane[1], inputH, outputH, poolSizeH);
 
     /* loop over output */
-    long h, w;
+    int64_t h, w;
 
     real* inputForPlane = input + plane * inputW * inputH;
     real* outputForPlane = output + plane * outputW * outputH;
     THIndex_t* indicesForPlane = indices + plane * outputW * outputH;
 
     for (h = 0; h < outputH; ++h) {
-      long inputHStart = sequenceH[h];
+      int64_t inputHStart = sequenceH[h];
 
       for (w = 0; w < outputW; ++w) {
-        long inputWStart = sequenceW[w];
+        int64_t inputWStart = sequenceW[w];
 
         real maxVal = -THInf;
-        long maxIndex = -1;
+        int64_t maxIndex = -1;
 
-        long h2, w2;
+        int64_t h2, w2;
         for (h2 = inputHStart; h2 < inputHStart + poolSizeH; ++h2) {
           for (w2 = inputWStart; w2 < inputWStart + poolSizeW; ++w2) {
             THAssert(h2 >= 0 && h2 < inputH);
             THAssert(w2 >= 0 && w2 < inputW);
 
-            long planeIndex = h2 * inputW + w2;
+            int64_t planeIndex = h2 * inputW + w2;
             real val = inputForPlane[planeIndex];
             if (val > maxVal) {
               maxVal = val;
@@ -97,12 +97,12 @@ void THNN_(SpatialFractionalMaxPooling_updateOutput)(
     THIndexTensor *indices,
     THTensor *randomSamples) {
 
-  long numBatch = 1;
+  int64_t numBatch = 1;
   int planeDim = 0;
   int heightDim = 1;
   int widthDim = 2;
 
-  long numInputDims = THTensor_(nDimension)(input);
+  int64_t numInputDims = THTensor_(nDimension)(input);
   THNN_ARGCHECK(numInputDims == 3 || numInputDims == 4, 2, input,
 		"3D or 4D (batch mode) tensor expected for input, but got: %s");
 
@@ -114,9 +114,9 @@ void THNN_(SpatialFractionalMaxPooling_updateOutput)(
   }
 
   /* sizes */
-  long numPlanes = THTensor_(size)(input, planeDim);
-  long inputH = THTensor_(size)(input, heightDim);
-  long inputW = THTensor_(size)(input, widthDim);
+  int64_t numPlanes = THTensor_(size)(input, planeDim);
+  int64_t inputH = THTensor_(size)(input, heightDim);
+  int64_t inputW = THTensor_(size)(input, widthDim);
 
   THArgCheck(outputH + poolSizeH - 1 < inputH, 7,
              "poolSizeH (%d) too large relative to input height (%d)",
@@ -145,7 +145,7 @@ void THNN_(SpatialFractionalMaxPooling_updateOutput)(
     /* indices will contain the locations for each output point */
     THIndexTensor_(resize4d)(indices, numBatch, numPlanes, outputH, outputW);
 
-    long batch;
+    int64_t batch;
 #pragma omp parallel for private(batch)
     for (batch = 0; batch < numBatch; ++batch) {
       THNN_(SpatialFractionalMaxPooling_updateOutput_frame)(
@@ -165,21 +165,21 @@ static void THNN_(SpatialFractionalMaxPooling_updateGradInput_frame)(
   real* gradInput,
   real* gradOutput,
   THIndex_t* indices,
-  long numPlanes,
-  long inputW, long inputH,
-  long outputW, long outputH) {
-  long plane;
+  int64_t numPlanes,
+  int64_t inputW, int64_t inputH,
+  int64_t outputW, int64_t outputH) {
+  int64_t plane;
 #pragma omp parallel for private(plane)
   for (plane = 0; plane < numPlanes; plane++) {
     real* gradInputForPlane = gradInput + plane * inputW * inputH;
     real* gradOutputForPlane = gradOutput + plane * outputW * outputH;
     THIndex_t* indicesForPlane = indices + plane * outputW * outputH;
 
-    long h, w;
+    int64_t h, w;
     for (h = 0; h < outputH; ++h) {
       for (w = 0; w < outputW; ++w) {
-        long outputIndex = h * outputW + w;
-        long index = indicesForPlane[outputIndex] - TH_INDEX_BASE;
+        int64_t outputIndex = h * outputW + w;
+        int64_t index = indicesForPlane[outputIndex] - TH_INDEX_BASE;
         THAssert(index >= 0 && index < inputW * inputH);
 
         gradInputForPlane[index] += gradOutputForPlane[outputIndex];
@@ -197,12 +197,12 @@ void THNN_(SpatialFractionalMaxPooling_updateGradInput)(
     int poolSizeW, int poolSizeH,
     THIndexTensor *indices) {
 
-  long numBatch = 1;
+  int64_t numBatch = 1;
   int planeDim = 0;
   int heightDim = 1;
   int widthDim = 2;
 
-  long numInputDims = THTensor_(nDimension)(input);
+  int64_t numInputDims = THTensor_(nDimension)(input);
   if (numInputDims == 4) {
     numBatch = THTensor_(size)(input, 0);
     planeDim = 1;
@@ -211,9 +211,9 @@ void THNN_(SpatialFractionalMaxPooling_updateGradInput)(
   }
 
   /* sizes */
-  long numPlanes = THTensor_(size)(input, planeDim);
-  long inputH = THTensor_(size)(input, heightDim);
-  long inputW = THTensor_(size)(input, widthDim);
+  int64_t numPlanes = THTensor_(size)(input, planeDim);
+  int64_t inputH = THTensor_(size)(input, heightDim);
+  int64_t inputW = THTensor_(size)(input, widthDim);
 
   THArgCheck(outputW == THTensor_(size)(gradOutput, widthDim), 3,
              "gradOutput width unexpected");
@@ -235,7 +235,7 @@ void THNN_(SpatialFractionalMaxPooling_updateGradInput)(
       THIndexTensor_(data)(indices),
       numPlanes, inputW, inputH, outputW, outputH);
   } else {
-    long batch;
+    int64_t batch;
 #pragma omp parallel for private(batch)
     for (batch = 0; batch < numBatch; ++batch) {
       THNN_(SpatialFractionalMaxPooling_updateGradInput_frame)(

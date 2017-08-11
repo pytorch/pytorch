@@ -15,13 +15,13 @@
   }                                                                              \
                                                                                  \
   {                                                                              \
-    long input0 = THTensor_(size)(input, 0);                                     \
-    long input1 = THTensor_(size)(input, 1);                                     \
-    long input2 = THTensor_(size)(input, 2);                                     \
-    long input3 = THTensor_(size)(input, 3);                                     \
-    long target0 = THIndexTensor_(size)(target, 0);                              \
-    long target1 = THIndexTensor_(size)(target, 1);                              \
-    long target2 = THIndexTensor_(size)(target, 2);                              \
+    int64_t input0 = THTensor_(size)(input, 0);                                     \
+    int64_t input1 = THTensor_(size)(input, 1);                                     \
+    int64_t input2 = THTensor_(size)(input, 2);                                     \
+    int64_t input3 = THTensor_(size)(input, 3);                                     \
+    int64_t target0 = THIndexTensor_(size)(target, 0);                              \
+    int64_t target1 = THIndexTensor_(size)(target, 1);                              \
+    int64_t target2 = THIndexTensor_(size)(target, 2);                              \
     THAssertMsg(input0 == target0 && input2 == target1 && input3 == target2,     \
               "size mismatch (got input: %ldx%ldx%ldx%ld, target: %ldx%ldx%ld)", \
               input0, input1, input2, input3, target0, target1, target2);        \
@@ -35,7 +35,7 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
           bool sizeAverage,
           THTensor *weights,
           THTensor *total_weight,
-          long ignore_index)
+          int64_t ignore_index)
 {
   INITIAL_CHECK;
 
@@ -49,10 +49,10 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
   real *output_data = THTensor_(data)(output);
   real *total_weight_data = THTensor_(data)(total_weight);
 
-  long batch_size = THTensor_(size)(input, 0);
-  long n_classes = THTensor_(size)(input, 1);
-  long map_size = THTensor_(size)(input, 2) * THTensor_(size)(input, 3);
-  long sample_size = map_size * n_classes;
+  int64_t batch_size = THTensor_(size)(input, 0);
+  int64_t n_classes = THTensor_(size)(input, 1);
+  int64_t map_size = THTensor_(size)(input, 2) * THTensor_(size)(input, 3);
+  int64_t sample_size = map_size * n_classes;
 
   real total_weight_acc = 0;
   real output_acc = 0;
@@ -87,7 +87,7 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
           bool sizeAverage,
           THTensor *weights,
           THTensor *total_weight,
-          long ignore_index)
+          int64_t ignore_index)
 {
   INITIAL_CHECK;
   THArgCheck(THTensor_(isContiguous)(gradInput), 4,
@@ -104,10 +104,10 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
   real *weights_data = weights ? THTensor_(data)(weights) : NULL;
   real *gradInput_data = THTensor_(data)(gradInput);
 
-  long batch_size = THTensor_(size)(input, 0);
-  long n_classes = THTensor_(size)(input, 1);
-  long map_size = THTensor_(size)(input, 2) * THTensor_(size)(input, 3);
-  long sample_size = map_size * n_classes;
+  int64_t batch_size = THTensor_(size)(input, 0);
+  int64_t n_classes = THTensor_(size)(input, 1);
+  int64_t map_size = THTensor_(size)(input, 2) * THTensor_(size)(input, 3);
+  int64_t sample_size = map_size * n_classes;
 
   real normalize = sizeAverage ? *total_weight_data : 1.0f;
 

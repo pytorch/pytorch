@@ -94,7 +94,7 @@ THNN_(FeatureLPPooling_resizeForOutputCPU)(THTensor* toResize,
   int inputDim = THTensor_(nDimension)(input);
   THAssert(inputDim >= 1 && inputDim <= 4);
 
-  long outSize =
+  int64_t outSize =
     flpOutputSize(THTensor_(size)(input, 0), width, stride);
   if (batchMode) {
     THAssert(inputDim > 1);
