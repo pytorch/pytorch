@@ -12,17 +12,17 @@
     - arg: THGenerator* generator
       default: THPDefaultGenerator->cdata
       kwarg_only: True
-    - long n
+    - int64_t n
 ]]
 
 #if !defined(TH_REAL_IS_HALF) && !IS_CUDA && !IS_DISTRIBUTED
-static void THTensor_(random2__)(THTensor *self, THGenerator *gen, long a, long b)
+static void THTensor_(random2__)(THTensor *self, THGenerator *gen, int64_t a, int64_t b)
 {
   THArgCheck(b > a, 2, "upper bound must be greater than lower bound");
   TH_TENSOR_APPLY(real, self, *self_data = ((THRandom_random(gen) % (b-a)) + a);)
 }
 
-static void THTensor_(random1__)(THTensor *self, THGenerator *gen, long b)
+static void THTensor_(random1__)(THTensor *self, THGenerator *gen, int64_t b)
 {
   THArgCheck(b > 0, 1, "upper bound must be positive");
   TH_TENSOR_APPLY(real, self, *self_data = (THRandom_random(gen) % b);)
@@ -48,15 +48,15 @@ static void THTensor_(random1__)(THTensor *self, THGenerator *gen, long b)
         - arg: THGenerator* generator
           default: THPDefaultGenerator->cdata
           kwarg_only: True
-        - long to
+        - int64_t to
     - cname: random2__
       arguments:
         - THTensor* self
         - arg: THGenerator* generator
           default: THPDefaultGenerator->cdata
           kwarg_only: True
-        - long from
-        - long to
+        - int64_t from
+        - int64_t to
 ]]
 
 [[
@@ -77,7 +77,7 @@ static void THTensor_(random1__)(THTensor *self, THGenerator *gen, long b)
       default: THPDefaultGenerator->cdata
       kwarg_only: True
     - THTensor* self
-    - long num_samples
+    - int num_samples
     - arg: bool replacement
       default: "false"
 ]]
