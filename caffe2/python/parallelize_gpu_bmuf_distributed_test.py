@@ -14,14 +14,18 @@ log = logging.getLogger("parallelize_gpu_bmuf_distributed_test")
 log.setLevel(logging.INFO)
 
 
-def bmuf_process(filestore_dir, process_id, shared_results):
+def bmuf_process(filestore_dir, process_id, shared_results, nesterov=False):
     # We need to import caffe2 in every process to initialize CUDA independently.
     from caffe2.python import core, cnn, data_parallel_model, workspace, dyndep
     from caffe2.proto import caffe2_pb2
     dyndep.InitOpsLibrary("@/caffe2/caffe2/distributed:file_store_handler_ops")
 
-    if not workspace.has_gpu_support or workspace.NumCudaDevices() < 2:
+    if not workspace.has_gpu_support:
         log.info('No GPU support test is Ignored.')
+        return
+
+    if workspace.NumCudaDevices() < 4:
+        log.info('Not enough GPU support, test IGNORED')
         return
 
     model = cnn.CNNModelHelper(
@@ -100,7 +104,8 @@ def bmuf_process(filestore_dir, process_id, shared_results):
         _model_build_fun,
         _param_update_fun,
         devices=gpu_ids,
-        rendezvous=rendezvous
+        rendezvous=rendezvous,
+        nesterov=nesterov
     )
 
     data_parallel_model.RunInitNet(model)
@@ -170,13 +175,19 @@ def bmuf_process(filestore_dir, process_id, shared_results):
 class DistrubitedTest(unittest.TestCase):
 
     def test_bmuf_distributed(self):
+        self._test_bmuf_distributed()
+
+    def test_bmuf_distributed_nesterov(self):
+        self._test_bmuf_distributed(nesterov=True)
+
+    def _test_bmuf_distributed(self, nesterov=False):
         processes = []
         filestore_dir = tempfile.mkdtemp()
         results = Manager().dict()
         for idx in range(0, 2):
             process = Process(
                 target=bmuf_process,
-                args=(filestore_dir, idx, results)
+                args=(filestore_dir, idx, results, nesterov)
             )
             processes.append(process)
             process.start()
@@ -218,5 +229,9 @@ class DistrubitedTest(unittest.TestCase):
         np.testing.assert_almost_equal(v_w, 0.75 * v_w_ + g_w)
 
         # Check params update step
-        np.testing.assert_equal(w_0, w_g_ + v_w)
-        np.testing.assert_equal(b_0, b_g_ + v_b)
+        if nesterov:
+            np.testing.assert_equal(w_0, w_g_ + v_w - 0.75 * (v_w - v_w_))
+            np.testing.assert_equal(b_0, b_g_ + v_b - 0.75 * (v_b - v_b_))
+        else:
+            np.testing.assert_equal(w_0, w_g_ + v_w)
+            np.testing.assert_equal(b_0, b_g_ + v_b)
