@@ -15,7 +15,7 @@
 // [batch dim][feature dim][opt dim 1][opt dim 2]
 THCDeviceTensor<real, 4>
 THNN_(FeatureLPPooling_upcast)(THCState* state, THCTensor* t, bool batchMode) {
-  int inputDim = THCTensor_(nDimension)(state, t);
+  int inputDim = (int) THCTensor_(nDimension)(state, t);
 
   if (inputDim == 1) {
     // [feature dim]
@@ -58,10 +58,10 @@ THNN_(FeatureLPPooling_resizeForOutput)(THCState* state,
                                         bool batchMode,
                                         int width,
                                         int stride) {
-  int inputDim = THCTensor_(nDimension)(state, input);
+  int inputDim = (int) THCTensor_(nDimension)(state, input);
   THAssert(inputDim >= 1 && inputDim <= 4);
 
-  long outSize =
+  int64_t outSize =
     lpPoolingOutputSize(THCTensor_(size)(state, input, 0), width, stride);
   if (batchMode) {
     THAssert(inputDim > 1);
@@ -109,7 +109,7 @@ void
 THNN_(FeatureLPPooling_resize)(THCState* state,
                                THCTensor* toResize,
                                THCTensor* src) {
-  int inputDim = THCTensor_(nDimension)(state, src);
+  int inputDim = (int) THCTensor_(nDimension)(state, src);
   THAssert(inputDim >= 1 && inputDim <= 4);
 
   if (inputDim == 1) {
@@ -149,7 +149,7 @@ void THNN_(FeatureLPPooling_updateOutput)(THCState* state,
                                           bool batchMode) {
   THCUNN_assertSameGPU(state, 2, inputTH, outputTH);
 
-  int inputDim = THCTensor_(nDimension)(state, inputTH);
+  int inputDim = (int) THCTensor_(nDimension)(state, inputTH);
 
   if (batchMode) {
     THArgCheck(inputDim >= 2 && inputDim <= 4, 2,

@@ -51,8 +51,8 @@ __device__ __forceinline__ bool warpHasCollision(int val)
 
 template <typename Dtype>
 __global__ void cunn_LookupTable_accGradParametersKernelByFeature(
-  long *input, Dtype *gradOutput, Dtype *gradWeight, Dtype scale, ptrdiff_t numel,
-  long stride, int paddingValue) {
+  int64_t *input, Dtype *gradOutput, Dtype *gradWeight, Dtype scale, ptrdiff_t numel,
+  int64_t stride, int paddingValue) {
 
   const int featureDim = blockIdx.x * 4 + threadIdx.x / 32;
   if (featureDim >= stride) {
@@ -99,8 +99,8 @@ __global__ void cunn_LookupTable_accGradParametersKernelByFeature(
 
 template <typename Dtype, typename Acctype>
 __global__ void cunn_LookupTable_accGradParametersKernel(
-  long *input, long *indices, Dtype *gradOutput, Dtype *gradWeight,
-  long *count, Dtype defaultScale, ptrdiff_t numel, long stride, int paddingValue) {
+  int64_t *input, int64_t *indices, Dtype *gradOutput, Dtype *gradWeight,
+  int64_t *count, Dtype defaultScale, ptrdiff_t numel, int64_t stride, int paddingValue) {
 
   int idx = blockIdx.x * 4 + threadIdx.y;
 

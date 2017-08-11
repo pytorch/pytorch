@@ -81,7 +81,7 @@ TH_API void THNN_(ClassNLLCriterion_updateOutput)(
                   bool sizeAverage,
                   THCTensor *weights,       // [OPTIONAL]
                   THCTensor *total_weight,
-                  long ignore_index);
+                  int64_t ignore_index);
 
 TH_API void THNN_(ClassNLLCriterion_updateGradInput)(
                   THCState *state,
@@ -91,7 +91,7 @@ TH_API void THNN_(ClassNLLCriterion_updateGradInput)(
                   bool sizeAverage,
                   THCTensor *weights,       // [OPTIONAL]
                   THCTensor *total_weight,
-                  long ignore_index);
+                  int64_t ignore_index);
 
 TH_API void THNN_(DistKLDivCriterion_updateOutput)(
                   THCState *state,
@@ -376,7 +376,7 @@ TH_API void THNN_(PReLU_updateOutput)(
                   THCTensor *input,
                   THCTensor *output,
                   THCTensor *weight,
-                  long nOutputPlane);
+                  int64_t nOutputPlane);
 
 TH_API void THNN_(PReLU_updateGradInput)(
                   THCState *state,
@@ -384,7 +384,7 @@ TH_API void THNN_(PReLU_updateGradInput)(
                   THCTensor *gradOutput,
                   THCTensor *gradInput,
                   THCTensor *weight,
-                  long nOutputPlane);
+                  int64_t nOutputPlane);
 
 TH_API void THNN_(PReLU_accGradParameters)(
                   THCState *state,
@@ -395,7 +395,7 @@ TH_API void THNN_(PReLU_accGradParameters)(
                   THCTensor *gradWeight,
                   THCTensor *gradWeightBuf,
                   THCTensor *gradWeightBuf2,
-                  long nOutputPlane,
+                  int64_t nOutputPlane,
                   accreal scale);
 
 TH_API void THNN_(SmoothL1Criterion_updateOutput)(
@@ -466,7 +466,7 @@ TH_API void THNN_(SparseLinear_updateParameters)(
 TH_API void THNN_(IndexLinear_updateOutput)(
                   THCState *state,
                   THCIndexTensor *keys,
-                  long keysOffset,
+                  int64_t keysOffset,
                   THCTensor *values,
                   THCIndexTensor *sizes,
                   THCIndexTensor *cumSumSizes,
@@ -479,7 +479,7 @@ TH_API void THNN_(IndexLinear_updateOutput)(
 TH_API void THNN_(IndexLinear_accGradParameters)(
                   THCState *state,
                   THCIndexTensor *keys,
-                  long keysOffset,
+                  int64_t keysOffset,
                   THCTensor *values,
                   THCIndexTensor *sizes,
                   THCIndexTensor *cumSumSizes,
@@ -495,7 +495,7 @@ TH_API void THNN_(IndexLinear_accGradParameters)(
 TH_API void THNN_(IndexLinear_accUpdateGradParameters)(
                   THCState *state,
                   THCIndexTensor *keys,
-                  long keysOffset,
+                  int64_t keysOffset,
                   THCTensor *values,
                   THCIndexTensor *sizes,
                   THCIndexTensor *cumSumSizes,
@@ -513,7 +513,7 @@ TH_API void THNN_(IndexLinear_updateParameters)(
                   THCTensor *bias,
                   THCIndexTensor *runningKeys,
                   THCIndexTensor *cumSumSizes,
-                  long keysOffset,
+                  int64_t keysOffset,
                   accreal weightDecay,
                   accreal learningRate);
 
@@ -574,7 +574,7 @@ TH_API void THNN_(SpatialClassNLLCriterion_updateOutput)(
                   bool sizeAverage,
                   THCTensor *weights,       // [OPTIONAL]
                   THCTensor *total_weight,
-                  long ignore_index);
+                  int64_t ignore_index);
 
 TH_API void THNN_(SpatialClassNLLCriterion_updateGradInput)(
                   THCState *state,
@@ -584,7 +584,7 @@ TH_API void THNN_(SpatialClassNLLCriterion_updateGradInput)(
                   bool sizeAverage,
                   THCTensor *weights,       // [OPTIONAL]
                   THCTensor *total_weight,
-                  long ignore_index);
+                  int64_t ignore_index);
 
 TH_API void THNN_(SpatialConvolutionLocal_updateOutput)(
                   THCState *state,
@@ -597,8 +597,8 @@ TH_API void THNN_(SpatialConvolutionLocal_updateOutput)(
                   int kW, int kH,
                   int dW, int dH,
                   int padW, int padH,
-                  long inputWidth, long inputHeight,
-                  long outputWidth, long outputHeight);
+                  int64_t inputWidth, int64_t inputHeight,
+                  int64_t outputWidth, int64_t outputHeight);
 
 TH_API void THNN_(SpatialConvolutionLocal_updateGradInput)(
                   THCState *state,
@@ -611,8 +611,8 @@ TH_API void THNN_(SpatialConvolutionLocal_updateGradInput)(
                   int kW, int kH,
                   int dW, int dH,
                   int padW, int padH,
-                  long inputWidth, long inputHeight,
-                  long outputWidth, long outputHeight);
+                  int64_t inputWidth, int64_t inputHeight,
+                  int64_t outputWidth, int64_t outputHeight);
 
 TH_API void THNN_(SpatialConvolutionLocal_accGradParameters)(
                   THCState *state,
@@ -625,8 +625,8 @@ TH_API void THNN_(SpatialConvolutionLocal_accGradParameters)(
                   int kW, int kH,
                   int dW, int dH,
                   int padW, int padH,
-                  long inputWidth, long inputHeight,
-                  long outputWidth, long outputHeight,
+                  int64_t inputWidth, int64_t inputHeight,
+                  int64_t outputWidth, int64_t outputHeight,
                   accreal scale);
 
 TH_API void THNN_(SpatialConvolutionMM_updateOutput)(
