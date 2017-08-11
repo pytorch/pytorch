@@ -193,6 +193,18 @@ bool GetCudaPeerAccessPattern(vector<vector<bool> >* pattern) {
   return true;
 }
 
+bool TensorCoreAvailable() {
+  // requires CUDA 9.0 and above
+#if CUDA_VERSION < 9000
+  return false;
+#else
+  int device = GetCurrentGPUID();
+  auto& prop = GetDeviceProperty(device);
+
+  return prop.major >= 7;
+#endif
+}
+
 const char* cublasGetErrorString(cublasStatus_t error) {
   switch (error) {
   case CUBLAS_STATUS_SUCCESS:
