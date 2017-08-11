@@ -42,6 +42,13 @@
 
 namespace caffe2 {
 
+#if CUDA_VERSION >= 9000
+/**
+ * Empty class to identify TensorCore-based math
+ */
+class TensorCoreEngine {};
+#endif
+
 /**
  * A runtime function to report the cuda version that Caffe2 is built with.
  */
@@ -105,6 +112,11 @@ void DeviceQuery(const int deviceid);
  * the GPU access pattern.
  */
 bool GetCudaPeerAccessPattern(vector<vector<bool> >* pattern);
+
+/**
+ * Return the availability of TensorCores for math
+ */
+bool TensorCoreAvailable();
 
 /**
  * Return a human readable cublas error string.

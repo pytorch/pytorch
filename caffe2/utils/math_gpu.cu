@@ -204,6 +204,98 @@ void Gemm<float16, CUDAContext>(
   }
 }
 
+#if CUDA_VERSION >= 9000
+
+// No change, but required. Defer to default CUDA engine
+template <>
+void Gemm<float, CUDAContext, TensorCoreEngine>(
+    const CBLAS_TRANSPOSE TransA,
+    const CBLAS_TRANSPOSE TransB,
+    const int M,
+    const int N,
+    const int K,
+    const float alpha,
+    const float* A,
+    const float* B,
+    const float beta,
+    float* C,
+    CUDAContext* context,
+    TensorProto::DataType math_type) {
+  return Gemm<float,CUDAContext>(TransA,
+                                 TransB,
+                                 M,
+                                 N,
+                                 K,
+                                 alpha,
+                                 A,
+                                 B,
+                                 beta,
+                                 C,
+                                 context,
+                                 math_type);
+}
+
+template <>
+void Gemm<float16, CUDAContext, TensorCoreEngine>(
+    const CBLAS_TRANSPOSE TransA,
+    const CBLAS_TRANSPOSE TransB,
+    const int M,
+    const int N,
+    const int K,
+    const float alpha,
+    const float16* A,
+    const float16* B,
+    const float beta,
+    float16* C,
+    CUDAContext* context,
+    TensorProto::DataType math_type) {
+  // Note that cublas follows fortran order, so the order is different from
+  // the cblas convention.
+  int lda = (TransA == CblasNoTrans) ? K : M;
+  int ldb = (TransB == CblasNoTrans) ? N : K;
+  cublasOperation_t cuTransA =
+      (TransA == CblasNoTrans) ? CUBLAS_OP_N : CUBLAS_OP_T;
+  cublasOperation_t cuTransB =
+      (TransB == CblasNoTrans) ? CUBLAS_OP_N : CUBLAS_OP_T;
+
+  // enable TensorCore for this call on this handle
+  if (TensorCoreAvailable()) {
+    CUBLAS_ENFORCE(cublasSetMathMode(
+        context->cublas_handle(),
+        CUBLAS_TENSOR_OP_MATH));
+  }
+
+  CUBLAS_CHECK(cublasGemmEx(
+      context->cublas_handle(),
+      cuTransB,
+      cuTransA,
+      N,
+      M,
+      K,
+      &alpha,
+      B,
+      CUDA_R_16F,
+      ldb,
+      A,
+      CUDA_R_16F,
+      lda,
+      &beta,
+      C,
+      CUDA_R_16F,
+      N,
+      CUDA_R_32F,
+      CUBLAS_GEMM_DFALT_TENSOR_OP));
+
+  // Now disable TensorCore math for subsequent calls to this handle
+  if (TensorCoreAvailable()) {
+    CUBLAS_ENFORCE(cublasSetMathMode(
+        context->cublas_handle(),
+        CUBLAS_DEFAULT_MATH));
+  }
+}
+
+#endif // CUDA_VERSION >= 9000
+
 template <>
 void GemmEx<float, CUDAContext>(
     const CBLAS_TRANSPOSE TransA,
