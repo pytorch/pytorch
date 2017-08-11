@@ -58,7 +58,7 @@ static PyObject* _allocate_grad_output(output_info_type& info, AutoGPU& gpu_guar
   // TODO: no need to do this for non-differentiable outputs
   PyObject *tensor_cls = std::get<0>(info);
   gpu_guard.setDevice(std::get<1>(info));
-  std::vector<long> &sizes = std::get<2>(info);
+  std::vector<int64_t> &sizes = std::get<2>(info);
 
   THPObjectPtr grad_size(THPSize_New(sizes.size(), sizes.data()));
   if (!grad_size) throw python_error();
@@ -936,13 +936,13 @@ int setObject(PyObject* obj, PyObject* value, void* _unused) {
   return 0;
 }
 
-template<typename M, M THPFunction::*ptr, PyObject* (*Convert)(long)>
+template<typename M, M THPFunction::*ptr, PyObject* (*Convert)(int64_t)>
 PyObject* getMember(PyObject* obj, void* _unused) {
   auto self = (THPFunction*)obj;
   return Convert(self->*ptr);
 }
 
-template<typename M, M Function::*ptr, PyObject* (*Convert)(long)>
+template<typename M, M Function::*ptr, PyObject* (*Convert)(int64_t)>
 PyObject* getImplMember(PyObject* obj, void* _unused) {
   auto self = (THPFunction*)obj;
   return Convert(self->cdata.*ptr);

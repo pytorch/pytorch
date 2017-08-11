@@ -91,7 +91,7 @@ PyObject * THCPModule_setDevice_wrap(PyObject *self, PyObject *arg)
 {
   HANDLE_TH_ERRORS
   THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to setDevice");
-  long device = THPUtils_unpackLong(arg);
+  int64_t device = THPUtils_unpackLong(arg);
 
   THCPModule_setDevice(device);
 
@@ -158,7 +158,7 @@ PyObject * THCPModule_getDriverVersion(PyObject *self)
                     err, cudaGetErrorString(err));
     return NULL;
   }
-  return PyLong_FromLong((long) driverVersion);
+  return PyLong_FromLong((int64_t) driverVersion);
 }
 
 PyObject * THCPModule_getRNGState(PyObject *_unused)
@@ -185,7 +185,7 @@ PyObject * THCPModule_setRNGState(PyObject *_unused, PyObject *_new_rng_state)
 PyObject * THCPModule_manualSeed(PyObject *_unused, PyObject *seed)
 {
   HANDLE_TH_ERRORS
-  THPUtils_assert(THPUtils_checkLong(seed), "manual_seed expected a long, "
+  THPUtils_assert(THPUtils_checkLong(seed), "manual_seed expected an int64_t, "
           "but got %s", THPUtils_typename(seed));
   THCRandom_manualSeed(state, THPUtils_unpackLong(seed));
   Py_RETURN_NONE;
@@ -195,7 +195,7 @@ PyObject * THCPModule_manualSeed(PyObject *_unused, PyObject *seed)
 PyObject * THCPModule_manualSeedAll(PyObject *_unused, PyObject *seed)
 {
   HANDLE_TH_ERRORS
-  THPUtils_assert(THPUtils_checkLong(seed), "manual_seed expected a long, "
+  THPUtils_assert(THPUtils_checkLong(seed), "manual_seed expected an int64_t, "
           "but got %s", THPUtils_typename(seed));
   THCRandom_manualSeedAll(state, THPUtils_unpackLong(seed));
   Py_RETURN_NONE;

@@ -42,7 +42,7 @@ struct ConvForward : public Function, public ConvParams {
 
   virtual variable_list apply(const variable_list& inputs) override;
 
-  std::vector<long> output_size(thpp::Tensor& input, thpp::Tensor& weight);
+  std::vector<int64_t> output_size(thpp::Tensor& input, thpp::Tensor& weight);
 };
 
 struct ConvBackward : public Function, public ConvParams {

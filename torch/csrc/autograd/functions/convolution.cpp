@@ -30,15 +30,15 @@ namespace torch { namespace autograd {
 
 static std::unique_ptr<Tensor> compute_output(
   Tensor* input, Tensor* weight, Tensor* bias, Tensor* columns, Tensor* ones,
-  const std::vector<long>& kernel_size, const ConvParams& params);
+  const std::vector<int64_t>& kernel_size, const ConvParams& params);
 
 static std::unique_ptr<Tensor> compute_grad_input(
   Tensor* input, Tensor* grad_output, Tensor* weight, Tensor* columns, Tensor* ones,
-  const std::vector<long>& kernel_size, const ConvParams& params);
+  const std::vector<int64_t>& kernel_size, const ConvParams& params);
 
 static tensor_pair compute_grad_params(
   Tensor* input, Tensor* grad_output, Tensor* weight, Tensor* bias, Tensor* columns, Tensor* ones,
-  const std::vector<long>& kernel_size, const ConvBackward& params);
+  const std::vector<int64_t>& kernel_size, const ConvBackward& params);
 
 auto ConvParams::is_dilated() const -> bool {
   bool is_dilated = false;
@@ -98,12 +98,12 @@ auto ConvParams::use_cudnn(const Tensor& input) const -> bool {
   return false;
 }
 
-auto ConvForward::output_size(Tensor& input, Tensor& weight) -> std::vector<long> {
+auto ConvForward::output_size(Tensor& input, Tensor& weight) -> std::vector<int64_t> {
   auto in_size = input.sizes();
   auto weight_size = weight.sizes();
   auto dim = input.nDim();
 
-  std::vector<long> output_size(dim);
+  std::vector<int64_t> output_size(dim);
   output_size[0] = in_size[0];
   output_size[1] = transposed ? weight_size[1] * groups : weight_size[0];
   for (int d = 2; d < dim; ++d) {
@@ -136,26 +136,26 @@ static std::unique_ptr<Tensor> subtensor(Tensor* tensor, int dim, int groups, in
   if (!tensor) {
     return nullptr;
   }
-  long n = tensor->rawSizes()[dim] / groups;
+  int64_t n = tensor->rawSizes()[dim] / groups;
   auto result = tensor->newTensor();
   result->narrow(*tensor, dim, n * g, n);
   return result->contiguous();
 }
 
 static std::shared_ptr<Variable> subvariable(std::shared_ptr<Variable> var, int dim, int groups, int g) {
-  long n = var->data->rawSizes()[dim] / groups;
+  int64_t n = var->data->rawSizes()[dim] / groups;
   auto result = std::make_shared<Narrow>(dim, n * g, n)->apply({var})[0];
   return result;
 }
 
 static std::unique_ptr<Tensor> cat(const tensor_list& tensors, int dim) {
-  int num_inputs = tensors.size();
+  int64_t num_inputs = tensors.size();
   if (num_inputs == 0) {
     return nullptr;
   }
 
   std::vector<Tensor*> ptrs(num_inputs);
-  for (int i = 0; i < num_inputs; ++i) {
+  for (int64_t i = 0; i < num_inputs; ++i) {
     ptrs[i] = tensors[i].get();
   }
   auto output = tensors[0]->newTensor();
@@ -183,7 +183,7 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
   }
 
   auto weight_size = weight->sizes();
-  std::vector<long> kernel_size(weight_size.begin() + 2, weight_size.end());
+  std::vector<int64_t> kernel_size(weight_size.begin() + 2, weight_size.end());
 
   std::unique_ptr<Tensor> output;
   tensor_list columns(groups);
@@ -283,7 +283,7 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
   }
 
   auto weight_size = weight->sizes();
-  std::vector<long> kernel_size(weight_size.begin() + 2, weight_size.end());
+  std::vector<int64_t> kernel_size(weight_size.begin() + 2, weight_size.end());
 
   bool use_cudnn = this->use_cudnn(*input);
 
@@ -439,7 +439,7 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
 
   if (ggb) {
     // View as (1, ggb.size(0), 1, 1...)
-    std::vector<long> new_size(gO->data->nDim(), 1);
+    std::vector<int64_t> new_size(gO->data->nDim(), 1);
     new_size[1] = ggb->data->rawSizes()[0];
     auto ggb_contiguous = Contiguous().apply({ggb})[0];
     auto ggb_view = View(new_size).apply({ggb_contiguous})[0];
@@ -521,11 +521,11 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
 
     // calculate output_padding
     auto weight_size = weight->data->sizes();
-    std::vector<long> kernel_size(weight_size.begin() + 2, weight_size.end());
+    std::vector<int64_t> kernel_size(weight_size.begin() + 2, weight_size.end());
     auto input_size = input->data->sizes();
-    std::vector<long> input_shape(input_size.begin() + 2, input_size.end());
+    std::vector<int64_t> input_shape(input_size.begin() + 2, input_size.end());
     auto grad_output_size = gO->data->sizes();
-    std::vector<long> grad_output_shape(grad_output_size.begin() + 2, grad_output_size.end());
+    std::vector<int64_t> grad_output_shape(grad_output_size.begin() + 2, grad_output_size.end());
 
     if (kernel_size.size() == 1) {
       auto expected_input_shape = (kernel_size[0] - 1) * gi_conv_params.stride[1]
@@ -593,7 +593,7 @@ auto ConvBackwardBackward::releaseVariables() -> void {
 static std::unique_ptr<Tensor> compute_output(
     Tensor* input, Tensor* weight, Tensor* bias,
     Tensor* columns, Tensor* ones,
-    const std::vector<long>& kernel_size,
+    const std::vector<int64_t>& kernel_size,
     const ConvParams& params) {
 
   auto output = input->newTensor();
@@ -666,7 +666,7 @@ done:
 
 static std::unique_ptr<Tensor> compute_grad_input(
     Tensor* input, Tensor* grad_output, Tensor* weight, Tensor* columns, Tensor* ones,
-    const std::vector<long>& kernel_size, const ConvParams& params) {
+    const std::vector<int64_t>& kernel_size, const ConvParams& params) {
 
   auto grad_input = input->newTensor();
   grad_input->resizeAs(*input);
@@ -740,7 +740,7 @@ done:
 static tensor_pair compute_grad_params(
     Tensor* input, Tensor* grad_output, Tensor* weight, Tensor* bias,
     Tensor* columns, Tensor* ones,
-    const std::vector<long>& kernel_size, const ConvBackward& params) {
+    const std::vector<int64_t>& kernel_size, const ConvBackward& params) {
 
   auto grad_weight = weight->newTensor();
   grad_weight->resizeAs(*weight).zero();

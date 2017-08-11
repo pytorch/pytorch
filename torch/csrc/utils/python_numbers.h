@@ -13,21 +13,21 @@ inline bool THPUtils_checkLong(PyObject* obj) {
 #endif
 }
 
-inline long THPUtils_unpackLong(PyObject* obj) {
+inline int64_t THPUtils_unpackLong(PyObject* obj) {
   if (PyLong_Check(obj)) {
     int overflow;
-    long long value = PyLong_AsLongLongAndOverflow(obj, &overflow);
+    int64_t value = PyLong_AsLongLongAndOverflow(obj, &overflow);
     if (overflow != 0) {
-      throw std::runtime_error("Overflow when unpacking long");
+      throw std::runtime_error("Overflow when unpacking 64-bit integer type");
     }
-    return (long)value;
+    return (int64_t)value;
   }
 #if PY_MAJOR_VERSION == 2
   if (PyInt_Check(obj)) {
     return PyInt_AS_LONG(obj);
   }
 #endif
-  throw std::runtime_error("Could not unpack long");
+  throw std::runtime_error("Could not unpack 64-bit integer type");
 }
 
 inline bool THPUtils_checkDouble(PyObject* obj) {
@@ -44,12 +44,12 @@ inline double THPUtils_unpackDouble(PyObject* obj) {
   }
   if (PyLong_Check(obj)) {
     int overflow;
-    long long value = PyLong_AsLongLongAndOverflow(obj, &overflow);
+    int64_t value = PyLong_AsLongLongAndOverflow(obj, &overflow);
     if (overflow != 0) {
-      throw std::runtime_error("Overflow when unpacking double");
+      throw std::runtime_error("Overflow when unpacking 64-bit floating point type");
     }
     if (value > DOUBLE_INT_MAX || value < -DOUBLE_INT_MAX) {
-      throw std::runtime_error("Precision loss when unpacking double");
+      throw std::runtime_error("Precision loss when unpacking 64-bit floating point type");
     }
     return (double)value;
   }
@@ -58,5 +58,5 @@ inline double THPUtils_unpackDouble(PyObject* obj) {
     return (double)PyInt_AS_LONG(obj);
   }
 #endif
-  throw std::runtime_error("Could not unpack double");
+  throw std::runtime_error("Could not unpack 64-bit floating point type");
 }
