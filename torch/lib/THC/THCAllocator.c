@@ -34,7 +34,7 @@ static cudaError_t THCIpcAllocator_free(void* ctx, void* devPtr)
 {
   cudaError_t err;
   int prev_device;
-  int device = (int)(long)ctx;
+  int device = (int)(int64_t)ctx;
 
   err = cudaGetDevice(&prev_device);
   if (err != cudaSuccess) { return err; }
