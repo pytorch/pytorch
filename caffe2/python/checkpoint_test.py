@@ -9,15 +9,17 @@ from caffe2.python.session import LocalSession
 from caffe2.python.dataset import Dataset
 from caffe2.python.pipeline import pipe
 from caffe2.python.checkpoint import (
-    CheckpointManager, MultiNodeCheckpointManager, Job, JobRunner)
+    CheckpointManager, MultiNodeCheckpointManager, Job, JobRunner,
+    UploadTaskGroupBuilder)
 from caffe2.python.net_builder import ops
-from caffe2.python.task import Task, Node
+from caffe2.python.task import Node, Task, TaskGroup, WorkspaceType
 from caffe2.python.test_util import TestCase
 from caffe2.python.dataio import ReaderWithLimit
-import tempfile
-import numpy as np
-import shutil
 
+import numpy as np
+import os
+import shutil
+import tempfile
 
 def build_pipeline(node_id):
     with Node('reader:%d' % node_id):
@@ -39,6 +41,26 @@ def build_pipeline(node_id):
 
 EXPECTED_TOTALS = [103, 115, 136, 145]
 
+
+def local_copy_op(src, dest):
+    def copy_op(inputs, outputs):
+        shutil.copyfile(src, dest)
+    return copy_op
+
+
+class UploadToLocalFile(UploadTaskGroupBuilder):
+    def __init__(self, dest_dir):
+        self.dest_dir = dest_dir
+
+    def build(self, epoch, checkpoint_manager):
+        with TaskGroup(WorkspaceType.GLOBAL) as upload_task_group:
+            for node, manager in checkpoint_manager._node_managers:
+                with Node(str(node)), Task():
+                    src_path = manager._db_name(epoch)
+                    dest_path = os.path.join(self.dest_dir, str(node))
+                    ops.Python((local_copy_op,
+                                [src_path, dest_path], {}))([], [])
+        return upload_task_group
 
 class TestCheckpoint(TestCase):
     def run_with(self, builder):
@@ -141,6 +163,66 @@ class TestCheckpoint(TestCase):
             self.assertFalse(
                 job_runner.load_blobs_from_checkpoints(
                     blob_names=model_blob_names, epoch=5, session=session))
+
+        finally:
+            shutil.rmtree(tmpdir)
+
+    def test_get_ckpt_db_name(self):
+        try:
+            tmpdir = tempfile.mkdtemp()
+            num_nodes = 3
+            checkpoint = MultiNodeCheckpointManager(tmpdir, 'minidb')
+            with Job() as job:
+                for node_id in range(num_nodes):
+                    build_pipeline(node_id)
+            compiled_job = job.compile(LocalSession)
+            checkpoint.init(compiled_job.nodes_to_checkpoint())
+
+            for node_id in range(num_nodes):
+                epoch = 5
+                node_name = 'reader:%d' % node_id
+                expected_db_name = tmpdir + '/' + node_name + '.000005'
+                self.assertEquals(
+                    checkpoint.get_ckpt_db_name(node_name, epoch),
+                    expected_db_name)
+
+        finally:
+            shutil.rmtree(tmpdir)
+
+    def test_upload_checkpoint(self):
+        try:
+            tmpdir = tempfile.mkdtemp()
+            upload_dir = os.path.join(tmpdir, "upload")
+            os.mkdir(upload_dir)
+            num_nodes = 3
+
+            ws = workspace.C.Workspace()
+            session = LocalSession(ws)
+            checkpoint = MultiNodeCheckpointManager(tmpdir, 'minidb')
+            with Job() as job:
+                for node_id in range(num_nodes):
+                    build_pipeline(node_id)
+            compiled_job = job.compile(LocalSession)
+            local_upload_builder = UploadToLocalFile(upload_dir)
+            job_runner = JobRunner(
+                compiled_job, checkpoint,
+                upload_task_group_builder=local_upload_builder)
+
+            # The uploaded files do not exist yet.
+            for node_id in range(num_nodes):
+                node_name = 'reader:%d' % node_id
+                upload_path = os.path.join(upload_dir, node_name)
+                self.assertFalse(os.path.exists(upload_path))
+
+            # Run the job runner.
+            num_epochs = job_runner(session)
+            self.assertEquals(num_epochs, len(EXPECTED_TOTALS))
+
+            # The uploaded files should exist now.
+            for node_id in range(num_nodes):
+                node_name = 'reader:%d' % node_id
+                upload_path = os.path.join(upload_dir, node_name)
+                self.assertTrue(os.path.exists(upload_path))
 
         finally:
             shutil.rmtree(tmpdir)
