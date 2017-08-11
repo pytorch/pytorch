@@ -67,8 +67,8 @@ DataChannelTCP::DataChannelTCP(InitMethod::Config config, int timeout)
   : _socket(-1)
   , _port(0)
   , _timeout(timeout)
-  , _poll_events(nullptr)
   , _processes(config.world_size)
+  , _poll_events(nullptr)
 {
   _rank = config.rank;
 

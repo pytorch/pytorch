@@ -147,9 +147,9 @@ bool Store::StoreDeamon::checkAndUpdate(std::vector<std::string>& keys) const {
 
 Store::Store(const std::string& addr,
              port_type port, int listen_socket)
- : _store_addr(addr)
+ : _socket(-1)
+ , _store_addr(addr)
  , _store_port(port)
- , _socket(-1)
  , _store_thread(nullptr)
 {
   if (listen_socket != Store::CLIENT_ONLY) {
