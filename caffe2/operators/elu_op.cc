@@ -15,7 +15,7 @@ bool EluOp<float, CPUContext>::RunOnDevice() {
   auto* Ydata = Y->template mutable_data<float>();
   ConstEigenVectorArrayMap<float> Xvec(Xdata, X.size());
   EigenVectorArrayMap<float> Yvec(Ydata, Y->size());
-  Yvec = (Xvec > 0).select(Xvec, alpha_ * (Xvec.exp() - 1.0f));
+  Yvec = Xvec.cwiseMax(0.f) + (alpha_ * (Xvec.exp() - 1.0f)).cwiseMin(0.f);
   return true;
 }
 
