@@ -13,6 +13,18 @@
 namespace caffe2 {
 namespace db {
 
+namespace {
+const std::string& GetStringFromBlob(Blob* blob) {
+  if (blob->template IsType<string>()) {
+    return blob->template Get<string>();
+  } else if (blob->template IsType<Tensor<CPUContext>>()) {
+    return *blob->template Get<Tensor<CPUContext>>().template data<string>();
+  } else {
+    CAFFE_THROW("Unsupported Blob type");
+  }
+}
+}
+
 class BlobsQueueDBCursor : public Cursor {
  public:
   explicit BlobsQueueDBCursor(
@@ -56,9 +68,9 @@ class BlobsQueueDBCursor : public Cursor {
     }
 
     if (key_blob_index_ >= 0) {
-      key_ = (blob_vector[key_blob_index_])->Get<string>();
+      key_ = GetStringFromBlob(blob_vector[key_blob_index_]);
     }
-    value_ = (blob_vector[value_blob_index_])->Get<string>();
+    value_ = GetStringFromBlob(blob_vector[value_blob_index_]);
     valid_ = true;
   }
 
