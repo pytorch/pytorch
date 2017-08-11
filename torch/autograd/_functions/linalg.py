@@ -102,3 +102,44 @@ class Gesv(Function):
         grad_b, _ = torch.gesv(grad_output, a.t())
         grad_a = -torch.mm(grad_b, X.t())
         return grad_b, grad_a
+
+class Potrf(Function):
+    """
+    cf. Iain Murray (2016); arXiv 1602.07527
+    """
+
+    @staticmethod
+    def forward(ctx, a, upper=True):
+        ctx.upper = upper
+        fact = torch.potrf(a, upper)
+        ctx.save_for_backward(fact)
+        return fact
+
+    @staticmethod
+    def Phi(A):
+        """
+        Return lower triangle of A and halve the diagonal.
+        """
+        B = A.tril()
+        for i in range(B.size(0)):
+            B[i, i] = B[i, i] * 0.5
+        return B
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        L, = ctx.saved_variables
+
+        if ctx.upper:
+            L = L.t()
+            grad_output = grad_output.t()
+
+        # make sure not to double-count variation, since
+        # only half of output matrix is unique
+        Lbar = grad_output.tril()
+
+        P = Potrf.Phi(torch.mm(L.t(), Lbar))
+        S = torch.gesv(P + P.t(), L.t())[0]
+        S = torch.gesv(S.t(), L.t())[0]
+        S = Potrf.Phi(S)
+
+        return S, None
