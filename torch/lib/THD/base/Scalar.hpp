@@ -53,6 +53,6 @@ private:
 };
 
 using FloatScalar = ScalarWrapper<double>;
-using IntScalar = ScalarWrapper<long long>;
+using IntScalar = ScalarWrapper<int64_t>;
 
 } // namespace thd
