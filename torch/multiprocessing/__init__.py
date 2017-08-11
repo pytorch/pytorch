@@ -34,7 +34,7 @@ if sys.version_info < (3, 3):
     from .pool import Pool
 
 
-if sys.platform == 'darwin':
+if sys.platform == 'darwin' or sys.platform == 'win32':
     _sharing_strategy = 'file_system'
     _all_sharing_strategies = {'file_system'}
 else:

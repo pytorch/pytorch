@@ -20,6 +20,8 @@ _in_bad_fork = False  # this global is also used in torch.manual_seed
 _original_pid = False
 _cudart = None
 
+CUDA_WINDOWS_LIB = 'cudart64_80'
+
 
 def is_available():
     """Returns a bool indicating if CUDA is currently available."""
@@ -35,7 +37,10 @@ def _sleep(cycles):
 
 def _load_cudart():
     # First check the main program for CUDA symbols
-    lib = ctypes.cdll.LoadLibrary(None)
+    if platform.system() == 'Windows':
+        lib = ctypes.cdll.LoadLibrary(CUDA_WINDOWS_LIB)
+    else:
+        lib = ctypes.cdll.LoadLibrary(None)
     if hasattr(lib, 'cudaGetErrorName'):
         return lib
 

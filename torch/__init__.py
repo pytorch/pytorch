@@ -8,7 +8,7 @@ It has a CUDA counterpart, that enables you to run your tensor computations
 on an NVIDIA GPU with compute capability >= 3.0.
 """
 
-import sys
+import platform, sys
 from ._utils import _import_dotted_name
 from .version import __version__
 
@@ -26,17 +26,27 @@ __all__ = [
 # Load the extension module
 ################################################################################
 
-# Loading the extension with RTLD_GLOBAL option allows to not link extension
-# modules against the _C shared object. Their missing THP symbols will be
-# automatically filled by the dynamic loader.
-import os as _dl_flags
-
 # if we have numpy, it *must* be imported before the call to setdlopenflags()
 # or there is risk that later c modules will segfault when importing numpy
 try:
     import numpy as np
 except:
     pass
+
+if platform.system() == 'Windows':
+    import os
+    os.environ['PATH'] = os.path.dirname(__file__) + '\\lib\\;' + os.environ['PATH']
+
+    from torch._C import *
+    __all__ += [name for name in dir(_C)
+                if name[0] != '_' and
+                not name.endswith('Base')]
+
+else:
+    # Loading the extension with RTLD_GLOBAL option allows to not link extension
+    # modules against the _C shared object. Their missing THP symbols will be
+    # automatically filled by the dynamic loader.
+    import os as _dl_flags
 
 # first check if the os package has the required flags
 if not hasattr(_dl_flags, 'RTLD_GLOBAL') or not hasattr(_dl_flags, 'RTLD_NOW'):
@@ -291,6 +301,8 @@ from .functional import *
 ################################################################################
 
 def manager_path():
+    if platform.system() == 'Windows':
+        return b""
     import os
     path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'lib', 'torch_shm_manager')
     if not os.path.exists(path):

@@ -37,7 +37,8 @@ class THPPlugin(CWrapPlugin):
         'THStride*': Template('__stride.get()'),
         'void*': Template('THPUtils_unpackLong($arg)'),
         'long': Template('THPUtils_unpackLong($arg)'),
-        'int': Template('THPUtils_unpackLong($arg)'),
+        'int64_t': Template('THPUtils_unpackLong($arg)'),
+        'int': Template('(int) THPUtils_unpackLong($arg)'),
         'bool': Template('($arg == Py_True ? true : false)'),
         'float': Template('THPFloatUtils_unpackReal($arg)'),
         'double': Template('THPDoubleUtils_unpackReal($arg)'),
@@ -75,6 +76,7 @@ class THPPlugin(CWrapPlugin):
         'THStride*': Template('THPUtils_tryUnpackLongs($arg, __stride)'),
         'void*': Template('THPUtils_checkLong($arg)'),
         'long': Template('THPUtils_checkLong($arg)'),
+        'int64_t': Template('THPUtils_checkLong($arg)'),
         'int': Template('THPUtils_checkLong($arg)'),
         'bool': Template('PyBool_Check($arg)'),
         'float': Template('THPFloatUtils_checkReal($arg)'),
@@ -94,7 +96,9 @@ class THPPlugin(CWrapPlugin):
         'THCudaIntTensor*': Template('return THCPIntTensor_New($result);'),
         'THCudaLongTensor*': Template('return THCPLongTensor_New($result);'),
         # TODO: make it smarter - it should return python long if result doesn't fit into an int
-        'long': Template('return PyInt_FromLong($result);'),
+        'long': Template('return PyLong_FromLongLong($result);'),
+        'int64_t': Template('return PyLong_FromLongLong($result);'),
+        'int': Template('return PyLong_FromLong($result);'),
         'accreal': Template('return THPUtils_(newAccreal)($result);'),
         'self': Template('Py_INCREF(self);\nreturn (PyObject*)self;'),
         'real': Template('return THPUtils_(newReal)($result);'),
@@ -111,8 +115,8 @@ static PyMethodDef TH${sparse}PTensor_$stateless(methods)[] = {
 PyObject * $name(PyObject *self, PyObject *args, PyObject *kwargs)
 {
     HANDLE_TH_ERRORS
-    int __tuplecount = args ? PyTuple_Size(args) : 0;
-    int __dictcount = kwargs ? PyDict_Size(kwargs) : 0;
+    int __tuplecount = args ? (int) PyTuple_Size(args) : 0;
+    int __dictcount = kwargs ? (int) PyDict_Size(kwargs) : 0;
     int __argcount = __tuplecount + __dictcount;
     $variables
     $init
@@ -183,6 +187,8 @@ ${cpu}
         'THSize*': 'torch.Size',
         'THStride*': 'tuple',
         'long': 'int',
+        'int64_t': 'int',
+        'int': 'int',
         'real': '" RealStr "',
         'double': 'float',
         'accreal': '" RealStr "',
