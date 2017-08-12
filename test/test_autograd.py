@@ -1514,9 +1514,11 @@ def prod_single_zero(dim_size):
     result[0, 1] = 0
     return Variable(result, requires_grad=True)
 
+
 def _make_cov(S):
     L = torch.tril(torch.rand(S, S))
     return torch.mm(L, L.t())
+
 
 class dont_convert(tuple):
     pass
