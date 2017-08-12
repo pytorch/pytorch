@@ -277,6 +277,7 @@ tests = [
     ('view_as', small_3d, lambda t: [t(100, 10)],),
     ('zero', small_3d, lambda t: [],),
     ('zeros', small_3d, lambda t: [1, 2, 3, 4],),
+    ('eye', small_2d, lambda t: [3, 4],),
     ('rsqrt', lambda t: small_3d(t) + 1, lambda t: [], None, float_types),
     ('sinh', lambda t: small_3d(t).clamp(-1, 1), lambda t: [], None, float_types),
     ('tan', lambda t: small_3d(t).clamp(-1, 1), lambda t: [], None, float_types),
