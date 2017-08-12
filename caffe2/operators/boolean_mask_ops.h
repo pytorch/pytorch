@@ -23,7 +23,11 @@ class SequenceMaskOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   explicit SequenceMaskOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        axis_(OperatorBase::GetSingleArgument<int>("axis", 1)) {
+        axis_(OperatorBase::GetSingleArgument<int>("axis", 1)),
+        grad_(OperatorBase::GetSingleArgument<bool>("grad", false)),
+        fill_val_(OperatorBase::GetSingleArgument<float>(
+            "fill_val",
+            -1.0f * std::numeric_limits<float>::infinity())) {
     // Mode argument is required
     mode_ = GetArgument(operator_def, "mode").s();
   }
@@ -33,6 +37,8 @@ class SequenceMaskOp final : public Operator<Context> {
  private:
   int axis_;
   std::string mode_;
+  bool grad_;
+  float fill_val_;
 };
 
 } // caffe2
