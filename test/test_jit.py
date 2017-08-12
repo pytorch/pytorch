@@ -30,14 +30,84 @@ class TestJit(TestCase):
         input = Variable(torch.randn(3, 10))
         hx = Variable(torch.randn(3, 20))
         cx = Variable(torch.randn(3, 20))
-        lstm = torch.jit.trace_model(nn.LSTMCell(10, 20))
-        trace, _ = lstm(input, (hx, cx))
+        trace, _ = torch.jit.record_trace(
+            nn.LSTMCell(10, 20), input, (hx, cx))
         torch._C._jit_pass_lint(trace)
         torch._C._jit_pass_init(trace)
         torch._C._jit_pass_lint(trace)
         torch._C._jit_pass_fuse(trace)
         torch._C._jit_pass_lint(trace)
         self.assertExpected(str(trace))
+
+    def test_function_as_argument(self):
+        # Careful: don't use fused backend (enabled with CUDA)
+        # Pasted from test_LSTM_cell
+        input = Variable(torch.randn(3, 10))
+        hx = Variable(torch.randn(3, 20))
+        cx = Variable(torch.randn(3, 20))
+        lstm = nn.LSTMCell(10, 20)
+
+        def a_function(a, b):
+            return lstm(a, b)
+        trace, _ = torch.jit.record_trace(
+            a_function, input, (hx, cx), parameters=lstm.parameters())
+        torch._C._jit_pass_lint(trace)
+        torch._C._jit_pass_init(trace)
+        torch._C._jit_pass_lint(trace)
+        torch._C._jit_pass_fuse(trace)
+        torch._C._jit_pass_lint(trace)
+        self.assertExpected(str(trace))
+
+    def test_verify(self):
+        x = Variable(torch.Tensor([0.4]), requires_grad=True)
+        y = Variable(torch.Tensor([0.7]), requires_grad=True)
+
+        def doit(x, y):
+            return torch.sigmoid(torch.tanh(x * (x + y)))
+
+        traced = torch.jit.traced(
+            doit, enabled=True, verify=True, time=True, optimize=False)
+        z = traced(x, y)
+        z2 = traced(x, y)
+        self.assertEqual(z, torch.sigmoid(torch.tanh(x * (x + y))))
+        self.assertEqual(z, z2)
+
+    def test_traced_function(self):
+        x = Variable(torch.Tensor([0.4]), requires_grad=True)
+        y = Variable(torch.Tensor([0.7]), requires_grad=True)
+
+        def doit(x, y):
+            return torch.sigmoid(torch.tanh(x * (x + y)))
+
+        traced = torch.jit.traced(doit)
+        z = traced(x, y)
+        z2 = traced(x, y)
+        self.assertEqual(z, torch.sigmoid(torch.tanh(x * (x + y))))
+        self.assertEqual(z, z2)
+
+    def test_disabled_traced_function(self):
+        x = Variable(torch.Tensor([0.4]), requires_grad=True)
+        y = Variable(torch.Tensor([0.7]), requires_grad=True)
+
+        def doit(x, y):
+            return torch.sigmoid(torch.tanh(x * (x + y)))
+
+        traced = torch.jit.traced(doit, enabled=False)
+        z = traced(x, y)
+        z2 = traced(x, y)
+        self.assertEqual(z, torch.sigmoid(torch.tanh(x * (x + y))))
+        self.assertEqual(z, z2)
+
+    def test_traced_module(self):
+        input = Variable(torch.randn(3, 10))
+        hx = Variable(torch.randn(3, 20))
+        cx = Variable(torch.randn(3, 20))
+        lstm = nn.LSTMCell(10, 20)
+        lstm = torch.jit.traced(lstm, verify=True)
+
+        out = lstm(input, (hx, cx))
+        out2 = lstm(input, (hx, cx))
+        self.assertEqual(out, out2)
 
     @unittest.skip("in-place is not supported")
     def test_alexnet(self):
@@ -77,7 +147,7 @@ class TestJit(TestCase):
                 x = self.classifier(x)
                 return x
 
-        model = torch.jit.trace_model(AlexNet())
+        model = torch.jit.traced(AlexNet())
         x = Variable(torch.randn(10, 3, 224, 224), requires_grad=True)
         trace, _ = model(x)
         self.assertExpected(str(trace))
@@ -165,7 +235,8 @@ class TestJit(TestCase):
         z, = torch._C._tracer_exit((z,))
         torch._C._jit_pass_lint(trace)
 
-        grad, = torch.autograd.grad(z, x, Variable(torch.ones(2, 2), requires_grad=True), create_graph=True)
+        grad, = torch.autograd.grad(z, x, Variable(
+            torch.ones(2, 2), requires_grad=True), create_graph=True)
         torch._C._jit_pass_lint(trace)
 
         # Run dead code elimination to remove unused trace nodes

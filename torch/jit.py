@@ -1,31 +1,24 @@
 import torch.autograd.function as F
 import torch._C
 from torch.autograd import Variable
+from torch.nn import Module
+import itertools
 import types
 import contextlib
-
+import os
 # Example how to use:
 #
 # import torch.jit
 # model = model.RNNModel(args.model, ...)
-# model = torch.jit.wrap_model(model)
+# model = torch.jit.traced(model)
 
 
 def flatten(x):
     return tuple(F._iter_variables(x))
 
 
-def record_trace(f, inputs):
-    trace, inputs = torch._C._tracer_enter(inputs)
-    out = f()
-    # TODO: unflatten
-    out = torch._C._tracer_exit(flatten(out))
-    torch._C._jit_pass_lint(trace)
-    return (trace, out)
-
-
 @contextlib.contextmanager
-def fork_rng():
+def _fork_rng(enabled=True):
     """
     Forks the RNG, so that when you return, the RNG is reset
     to the state that it was previously in.  This is important
@@ -38,6 +31,10 @@ def fork_rng():
     they may behave differently.  Interesting question is whether
     or not backwards pass ever has randomness.  I hope not.
     """
+    if not enabled:
+        yield
+        return
+
     cpu_rng_state = torch.get_rng_state()
     gpu_rng_state = None
     if torch.cuda.is_available():
@@ -50,117 +47,154 @@ def fork_rng():
         torch.cuda.set_rng_state(gpu_rng_state)
 
 
-# LIMITATIONS:
-# - This assumes that the model will run exactly identically the
-#   next time you call forward; if the model looks at some global
-#   variables, or has data dependent computation, we will silently
-#   give the wrong result.  Adding sanity checking is a TODO.
-def wrap_model(model):
-    """
-    Trace a model the first time you run it, and then use that trace
-    to execute the model on subsequent runs.
-    """
-    real_forward = model.forward
+@contextlib.contextmanager
+def _time(name, enabled=True):
+    if not enabled:
+        yield
+        return
+    stream = torch.cuda.current_stream()
+    start = torch.cuda.Event(enable_timing=True)
+    end = torch.cuda.Event(enable_timing=True)
+    stream.record_event(start)
+    yield
+    stream.record_event(end)
+    print("{} time: {} ms".format(name, start.elapsed_time(end)))
 
-    def forward(self, *args):
-        if not hasattr(self, "saved_trace"):
-            # TODO: saved_out LEAKS those tensors
-            self.saved_trace, self.saved_out = \
-                record_trace(lambda: real_forward(*args),
-                             tuple(self.parameters()) + flatten(args))
-            return self.saved_out
+
+def _clone_inputs(all_args):
+    # It doesn't matter that we throw away flags, because
+    # we're not going to try to do backwards on the trace output.
+    return tuple(Variable(a.data.clone()) for a in all_args)
+
+
+def _verify(flat_trace_out, flat_real_out):
+    # test for equality
+    for x, y in zip(flat_trace_out, flat_real_out):
+        if isinstance(x, Variable) and isinstance(y, Variable):
+            max_diff = torch.max(torch.abs(x.data - y.data))
+            print("max diff: ", max_diff)
+            if max_diff > 1e-6:
+                print(x)
+                print(y)
+                raise "JIT and real computation mismatch"
         else:
-            flat_out = Variable._execution_engine.run_forward(
-                self.saved_trace, tuple(self.parameters()) + flatten(args))
-            return F._unflatten(flat_out, self.saved_out)
-    model.forward = types.MethodType(forward, model)
-    return model
+            print(x)
+            print(y)
+            raise "Output is not variables"
+
+# holds run() to run the function and self.inputs which
+# are all the variable inputs
 
 
-def verify_model(model):
-    """
-    Test if a model can be JITed, by tracing it, and then running the
-    real model and the trace side-by-side.  This will throw an error
-    if they give different results.  Once you have verified they behave
-    identically, you can use wrap_model.
-    """
-    real_forward = model.forward
+class Traceable(object):
+    _next_trace_id = 0
+    _dump_traces = os.environ.get('PYTORCH_JIT_DUMP', False)
 
-    def forward(self, *args):
-        if not hasattr(self, "saved_trace"):
-            self.saved_trace, real_out = \
-                record_trace(lambda: real_forward(*args),
-                             tuple(self.parameters()) + flatten(args))
-            return real_out
+    def __init__(self, function_or_module, trace_name=None, optimize=False, verify=False, time=False, enabled=True):
+        if isinstance(function_or_module, Module):
+            real_forward = function_or_module.forward
+            self._run = lambda args: real_forward(*args)
+            self._additional_inputs = lambda: function_or_module.parameters()
         else:
-            # clone the input tensors and run the tracing engine
-            cloned_inputs = []
-            for inp in tuple(self.parameters()) + flatten(args):
-                # It doesn't matter that we throw away flags, because
-                # we're not going to try to do backwards on the trace output.
-                cloned_inputs.append(Variable(inp.data.clone()))
+            self._run = lambda args: function_or_module(*args)
+            self._additional_inputs = lambda: ()
 
-            with fork_rng():
-                flat_trace_out = Variable._execution_engine.run_forward(self.saved_trace, tuple(cloned_inputs))
+        self.trace_name = trace_name
+        self.saved_trace = None
+        self.saved_closure = None
+        self.optimize = optimize
+        self.verify = verify
+        self.time = time
+        self.enabled = enabled
+        if self.trace_name is None:
+            self.trace_name = "trace_{}".format(Traceable._next_trace_id)
+            Traceable._next_trace_id += 1
 
-            # run the real model on the actual variables
-            real_out = real_forward(*args)
-            flat_real_out = flatten(real_out)
+    def _run_pass(self, name, p, trace):
+        if Traceable._dump_traces:
+            with open("{}_{}_input.ir".format(self.trace_name, name), "w") as file:
+                file.write(str(trace))
+        p(trace)
+        torch._C._jit_pass_lint(trace)
+        if Traceable._dump_traces:
+            with open("{}_{}_output.ir".format(self.trace_name, name), "w") as file:
+                file.write(str(trace))
 
-            # test for equality
-            for x, y in zip(flat_trace_out, flat_real_out):
-                if isinstance(x, Variable) and isinstance(y, Variable):
-                    # TODO: Could there ever be numeric instability?
-                    if not x.data.equal(y.data):
-                        print(x)
-                        print(y)
-                        raise "JIT and real computation mismatch"
-                else:
-                    print(x)
-                    print(y)
-                    raise "Output is not variables"
+    def run_trace(self, all_inputs):
+        if self.saved_closure is None:
+            self.saved_closure = torch._C._jit_createAutogradClosure(
+                self.saved_trace)
+        with _time("run_trace", self.time):
+            assert(self.saved_closure is not None)
+            return Variable._execution_engine.run_forward(
+                self.saved_closure, all_inputs)
 
-            return real_out
-    model.forward = types.MethodType(forward, model)
-    return model
+    def get_all_inputs(self, args, extra):
+        return tuple(x for x in itertools.chain(self._additional_inputs(), flatten(args), extra))
+
+    # create and return a trace, possibly verifying it before returning it
+    def record_trace(self, args, extra):
+        all_inputs = self.get_all_inputs(args, extra)
+        if self.verify:
+            cloned_inputs = _clone_inputs(all_inputs)
+        with _time("record_trace", self.time), _fork_rng(self.verify):
+            self.saved_trace, inputs = torch._C._tracer_enter(all_inputs)
+            out = self._run(args)
+            flat_out = torch._C._tracer_exit(flatten(out))
+
+        torch._C._jit_pass_lint(self.saved_trace)
+        if self.optimize:
+            self._run_pass("init", torch._C._jit_pass_init, self.saved_trace)
+            self._run_pass("fuse", torch._C._jit_pass_fuse, self.saved_trace)
+
+        if self.verify:
+            flat_trace_out = self.run_trace(cloned_inputs)
+            _verify(flat_trace_out, flat_out)
+
+        return self.saved_trace, F._unflatten(flat_out, out)
+
+    def run(self, args, extra):
+        # tracing is disabled, run the real thing, possibly timing it
+        if not self.enabled:
+            with _time("run_real", self.time):
+                return self._run(args)
+        # tracing, but no trace exists, create one, possibly verifying it
+        # by running it after creating it
+        if self.saved_trace is None:
+            _, out = self.record_trace(args, extra)
+            self.proto = F._to_proto(out)
+            return out
+        all_inputs = self.get_all_inputs(args, extra)
+
+        # just run the already created trace
+        if not self.verify:
+            return F._unflatten(self.run_trace(all_inputs), self.proto)
+
+        # verify an already created trace...
+        cloned_inputs = _clone_inputs(all_inputs)
+        with _time("run_real", self.time), _fork_rng():
+            out_real = self._run(args)
+        flat_trace_out = self.run_trace(cloned_inputs)
+        _verify(flat_trace_out, flatten(out_real))
+        return out_real
 
 
-def print_trace(model):
-    """
-    Trace and print the trace for a model, do not try to execute trace.
-    """
-    real_forward = model.forward
-
-    def forward(self, *args):
-        if not hasattr(self, "saved_trace"):
-            self.saved_trace, real_out = \
-                record_trace(lambda: real_forward(*args),
-                             tuple(self.parameters()) + flatten(args))
-            print(self.saved_trace)
-            return real_out
-        else:
-            real_out = real_forward(*args)
-            return real_out
-
-    model.forward = types.MethodType(forward, model)
-    return model
+def record_trace(traceable, *args, **kwargs):
+    parameters = kwargs.pop('parameters', ())
+    return Traceable(traceable, **kwargs).record_trace(
+        args, parameters)
 
 
-def trace_model(model):
-    """
-    Trace a function, but also return the trace.  If original
-    function returns output, this function returns (trace, output).
-
-    Unlike verify_model/wrap_model, this does NOT cache the trace
-    and attempt to rerun it.
-    """
-    real_forward = model.forward
-
-    def forward(self, *args):
-        return record_trace(lambda: real_forward(*args),
-                            tuple(self.parameters()) + flatten(args))
-    model.forward = types.MethodType(forward, model)
-    return model
+def traced(traceable, **kwargs):
+    t = Traceable(traceable, **kwargs)
+    if isinstance(traceable, Module):
+        def forward(self, *args):
+            return t.run(args, ())
+        traceable.forward = types.MethodType(forward, traceable)
+        return traceable
+    else:
+        return lambda *args, **kwargs: \
+            t.run(args, kwargs.get('parameters', ()))
 
 
 if not torch._C._jit_init():
