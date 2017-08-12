@@ -627,7 +627,7 @@ class TestNN(NNTestCase):
 
     def test_ListModule(self):
         modules = [nn.ReLU(), nn.Linear(5, 5)]
-        module_list = ModuleList(modules)
+        module_list = nn.ModuleList(modules)
 
         def check():
             self.assertEqual(len(module_list), len(modules))
