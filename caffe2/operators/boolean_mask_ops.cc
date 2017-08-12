@@ -43,7 +43,7 @@ class BooleanMaskLengthsOp final : public Operator<Context> {
     return true;
   }
 };
-}
+} // namespace
 
 template <>
 bool BooleanMaskOp<CPUContext>::RunOnDevice() {
@@ -139,4 +139,165 @@ applied.
 
 NO_GRADIENT(BooleanMask)
 NO_GRADIENT(BooleanMaskLengths);
+
+const float minf = -1.0f * std::numeric_limits<float>::infinity();
+
+// Template this on a functor object so we can generate different
+// implementations at compile time and have a better chance of inlining
+template <typename Functor>
+void MaskWithFunctor(
+    size_t N,
+    size_t D,
+    const float* in,
+    Functor fn,
+    float* out) {
+  // TODO(T20952436): vector implementation
+  for (int i = 0; i < N; ++i) {
+    for (int j = 0; j < D; ++j) {
+      auto val = in[D * i + j];
+      out[D * i + j] = (fn(i, j, val) ? minf : val);
+    }
+  }
 }
+
+namespace {
+
+class SequenceFunctor {
+ public:
+  explicit SequenceFunctor(const int* sl) : sl(sl) {}
+  bool operator()(int i, int j, float /* val*/) {
+    return j >= sl[i];
+  }
+
+ private:
+  const int* sl;
+};
+
+class UpperFunctor {
+ public:
+  bool operator()(int i, int j, float /* val */) {
+    return j > i;
+  }
+};
+
+class LowerFunctor {
+ public:
+  bool operator()(int i, int j, float /* val */) {
+    return j < i;
+  }
+};
+
+class UpperDiagFunctor {
+ public:
+  bool operator()(int i, int j, float /* val */) {
+    return j >= i;
+  }
+};
+
+class LowerDiagFunctor {
+ public:
+  bool operator()(int i, int j, float /* val */) {
+    return j <= i;
+  }
+};
+
+} // namespace
+
+template <>
+bool SequenceMaskOp<CPUContext>::RunOnDevice() {
+  const Tensor<CPUContext>* input = &Input(0);
+  const Tensor<CPUContext>* sequence_lengths = nullptr;
+
+  if (mode_ == "sequence") {
+    sequence_lengths = &Input(1);
+  }
+
+  auto* output = Output(0);
+  output->ResizeLike(*input);
+
+  const auto canonical_axis = input->canonical_axis_index(axis_);
+  const int left = input->size_to_dim(canonical_axis);
+  const int right = input->size_from_dim(canonical_axis);
+
+  if (mode_ == "sequence") {
+    CAFFE_ENFORCE(
+        sequence_lengths, "Sequence length not provided for mode 'sequence'!");
+    MaskWithFunctor(
+        left,
+        right,
+        input->data<float>(),
+        SequenceFunctor(sequence_lengths->data<int>()),
+        output->mutable_data<float>());
+  } else if (mode_ == "upper") {
+    MaskWithFunctor(
+        left,
+        right,
+        input->data<float>(),
+        UpperFunctor(),
+        output->mutable_data<float>());
+  } else if (mode_ == "lower") {
+    MaskWithFunctor(
+        left,
+        right,
+        input->data<float>(),
+        LowerFunctor(),
+        output->mutable_data<float>());
+  } else if (mode_ == "upperdiag") {
+    MaskWithFunctor(
+        left,
+        right,
+        input->data<float>(),
+        UpperDiagFunctor(),
+        output->mutable_data<float>());
+  } else if (mode_ == "lowerdiag") {
+    MaskWithFunctor(
+        left,
+        right,
+        input->data<float>(),
+        LowerDiagFunctor(),
+        output->mutable_data<float>());
+  } else {
+    CAFFE_ENFORCE(false, "Unsupported mode for SequenceMaskOp!");
+    return false;
+  }
+
+  return true;
+}
+
+REGISTER_CPU_OPERATOR(SequenceMask, SequenceMaskOp<CPUContext>);
+
+OPERATOR_SCHEMA(SequenceMask)
+    .NumInputs(1, 2)
+    .NumOutputs(1)
+    .SetDoc(R"DOC(
+Mask op designed for use in attention mechanisms for sequence modeling tasks.
+
+Two current operating modes:
+1) Given a 2D input tensor and 1D tensor of sequence lengths, for each row i in
+      the input tensor, set elements in that row to -inf if their column index
+      j >= sequence_lengths[i]. This mode takes two inputs and argument mode =
+      'sequence'
+2) Triangular mask. Given row index i and column index j, set elements to -inf
+      given the following conditions:
+
+      mode='upper', x_ij = -inf if j < i
+      mode='lower', x_ij = -inf if j > i
+      mode='upperdiag', x_ij = -inf if j <= i
+      mode='lowerdiag', x_ij = -inf if j >= i
+
+    This mode takes one input.
+)DOC")
+    .Input(0, "input", "Tensor to apply masking to")
+    .Input(1, "sequence_lengths", "1D Tensor of sequence lengths for mode #1")
+    .Output(0, "masked_tensor", "Input tensor with masking applied")
+    .Arg(
+        "mode",
+        "(string) Mode selection. Possible values: "
+        "'sequence', 'upper', 'lower', 'upperdiag', 'lowerdiag'")
+    .Arg(
+        "axis",
+        "(int) Beginning axis of row elements. All dimensions to the left "
+        "will be treated as row indices and those to the right (inclusive) "
+        "will be treated as column indices in the 2D mask");
+
+} // namespace caffe2
