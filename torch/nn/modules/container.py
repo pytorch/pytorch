@@ -1,7 +1,8 @@
 from collections import OrderedDict
 import string
 import torch
-import warnings, random
+import warnings
+import random
 from .module import Module
 
 
@@ -156,7 +157,6 @@ class ModuleList(Module):
         while newhash in self._modules:
             newhash = str(random.getrandbits(32))
         return newhash
-
 
 
 class ParameterList(Module):
