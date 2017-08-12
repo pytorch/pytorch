@@ -196,27 +196,26 @@ class TestCheckpoint(TestCase):
             os.mkdir(upload_dir)
             num_nodes = 3
 
-            ws = workspace.C.Workspace()
-            session = LocalSession(ws)
-            checkpoint = MultiNodeCheckpointManager(tmpdir, 'minidb')
-            with Job() as job:
-                for node_id in range(num_nodes):
-                    build_pipeline(node_id)
-            compiled_job = job.compile(LocalSession)
-            local_upload_builder = UploadToLocalFile(upload_dir)
-            job_runner = JobRunner(
-                compiled_job, checkpoint,
-                upload_task_group_builder=local_upload_builder)
-
             # The uploaded files do not exist yet.
             for node_id in range(num_nodes):
                 node_name = 'reader:%d' % node_id
                 upload_path = os.path.join(upload_dir, node_name)
                 self.assertFalse(os.path.exists(upload_path))
 
-            # Run the job runner.
-            num_epochs = job_runner(session)
-            self.assertEquals(num_epochs, len(EXPECTED_TOTALS))
+            # Create and run the job runner.
+            for node_id in range(3):
+                ws = workspace.C.Workspace()
+                session = LocalSession(ws)
+                checkpoint = MultiNodeCheckpointManager(tmpdir, 'minidb')
+                with Job() as job:
+                    build_pipeline(node_id)
+                compiled_job = job.compile(LocalSession)
+                local_upload_builder = UploadToLocalFile(upload_dir)
+                job_runner = JobRunner(
+                    compiled_job, checkpoint,
+                    upload_task_group_builder=local_upload_builder)
+                num_epochs = job_runner(session)
+                self.assertEquals(num_epochs, len(EXPECTED_TOTALS))
 
             # The uploaded files should exist now.
             for node_id in range(num_nodes):
