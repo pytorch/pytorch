@@ -16,6 +16,7 @@ THC_API void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor, THCT
 THC_API void THCTensor_(tril)(THCState *state, THCTensor *self, THCTensor *src, long k);
 THC_API void THCTensor_(triu)(THCState *state, THCTensor *self, THCTensor *src, long k);
 THC_API void THCTensor_(diag)(THCState *state, THCTensor *self, THCTensor *src, long k);
+THC_API void THCTensor_(eye)(THCState *state, THCTensor *self, long n, long m);
 THC_API accreal THCTensor_(trace)(THCState *state, THCTensor *self);
 
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
