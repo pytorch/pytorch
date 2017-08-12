@@ -627,14 +627,18 @@ class TestNN(NNTestCase):
 
     def test_ListModule(self):
         modules = [nn.ReLU(), nn.Linear(5, 5)]
-        module_list = nn.ModuleList(modules)
+        module_list = ModuleList(modules)
 
         def check():
             self.assertEqual(len(module_list), len(modules))
             for m1, m2 in zip(modules, module_list):
                 self.assertIs(m1, m2)
-            for m1, m2 in zip(modules, module_list.children()):
-                self.assertIs(m1, m2)
+            children = list(module_list.children())
+            # children don't have to be ordered in the order of module_list
+            for m1 in modules:  # every module is a child of module_list
+                self.assertIn(m1, children)
+            for m2 in children:  # every child is in modules
+                self.assertIn(m2, modules)
             for i in range(len(modules)):
                 self.assertIs(module_list[i], modules[i])
 
@@ -651,6 +655,12 @@ class TestNN(NNTestCase):
         check()
         modules[2] = nn.Conv2d(5, 3, 2)
         module_list[2] = modules[2]
+        check()
+        modules.insert(2, nn.SELU())
+        module_list.insert(2, modules[2])
+        check()
+        del modules[1]
+        del module_list[1]
         check()
 
         with self.assertRaises(TypeError):
