@@ -150,12 +150,13 @@ void MaskWithFunctor(
     size_t D,
     const float* in,
     Functor fn,
+    float fill_val,
     float* out) {
   // TODO(T20952436): vector implementation
   for (int i = 0; i < N; ++i) {
     for (int j = 0; j < D; ++j) {
       auto val = in[D * i + j];
-      out[D * i + j] = (fn(i, j, val) ? minf : val);
+      out[D * i + j] = (fn(i, j, val) ? fill_val : val);
     }
   }
 }
@@ -219,6 +220,7 @@ bool SequenceMaskOp<CPUContext>::RunOnDevice() {
   const int left = input->size_to_dim(canonical_axis);
   const int right = input->size_from_dim(canonical_axis);
 
+  float fill_val = (grad_ ? 0.0f : fill_val_);
   if (mode_ == "sequence") {
     CAFFE_ENFORCE(
         sequence_lengths, "Sequence length not provided for mode 'sequence'!");
@@ -227,6 +229,7 @@ bool SequenceMaskOp<CPUContext>::RunOnDevice() {
         right,
         input->data<float>(),
         SequenceFunctor(sequence_lengths->data<int>()),
+        fill_val,
         output->mutable_data<float>());
   } else if (mode_ == "upper") {
     MaskWithFunctor(
@@ -234,6 +237,7 @@ bool SequenceMaskOp<CPUContext>::RunOnDevice() {
         right,
         input->data<float>(),
         UpperFunctor(),
+        fill_val,
         output->mutable_data<float>());
   } else if (mode_ == "lower") {
     MaskWithFunctor(
@@ -241,6 +245,7 @@ bool SequenceMaskOp<CPUContext>::RunOnDevice() {
         right,
         input->data<float>(),
         LowerFunctor(),
+        fill_val,
         output->mutable_data<float>());
   } else if (mode_ == "upperdiag") {
     MaskWithFunctor(
@@ -248,6 +253,7 @@ bool SequenceMaskOp<CPUContext>::RunOnDevice() {
         right,
         input->data<float>(),
         UpperDiagFunctor(),
+        fill_val,
         output->mutable_data<float>());
   } else if (mode_ == "lowerdiag") {
     MaskWithFunctor(
@@ -255,6 +261,7 @@ bool SequenceMaskOp<CPUContext>::RunOnDevice() {
         right,
         input->data<float>(),
         LowerDiagFunctor(),
+        fill_val,
         output->mutable_data<float>());
   } else {
     CAFFE_ENFORCE(false, "Unsupported mode for SequenceMaskOp!");
@@ -298,6 +305,40 @@ Two current operating modes:
         "axis",
         "(int) Beginning axis of row elements. All dimensions to the left "
         "will be treated as row indices and those to the right (inclusive) "
-        "will be treated as column indices in the 2D mask");
+        "will be treated as column indices in the 2D mask")
+    .Arg("grad", "(bool) operate in gradient mode");
+
+class GetSequenceMaskGradient : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  vector<OperatorDef> GetGradientDefs() override {
+    vector<Argument> args;
+    args.reserve(Def().arg().size());
+    for (const auto& x : Def().arg()) {
+      args.push_back(x);
+    }
+    args.push_back(MakeArgument<bool>("grad", true));
+    if (def_.input_size() == 1) {
+      return SingleGradientDef(
+          "SequenceMask",
+          "",
+          vector<string>{GO(0)},
+          vector<string>{GI(0)},
+          args);
+    } else {
+      return SingleGradientDef(
+          "SequenceMask",
+          "",
+          vector<string>{GO(0), I(1)},
+          vector<string>{GI(0)},
+          args);
+    }
+  }
+
+  bool CopyArguments() const override {
+    return false;
+  }
+};
+
+REGISTER_GRADIENT(SequenceMask, GetSequenceMaskGradient);
 
 } // namespace caffe2

@@ -48,25 +48,26 @@ class TestBooleanMaskOp(hu.HypothesisTestCase):
                        elements=st.floats(min_value=0.5, max_value=1.0)),
            **hu.gcs)
     def test_sequence_mask_with_lengths(self, x, gc, dc):
+        fill_val = 1e-9  # finite fill value needed for gradient check
         op = core.CreateOperator("SequenceMask",
                                  ["data", "lengths"],
                                  ["masked_data"],
                                  mode="sequence",
-                                 axis=len(x.shape) - 1)
+                                 axis=len(x.shape) - 1,
+                                 fill_val=fill_val)
         elem_dim = x.shape[-1]
         leading_dim = 1
         for dim in x.shape[:-1]:
             leading_dim *= dim
         lengths = np.random.randint(0, elem_dim, [leading_dim])\
             .astype(np.int32)
-        print('lengths', lengths)
 
         def ref(x, lengths):
             ref = np.reshape(x, [leading_dim, elem_dim])
             for i in range(leading_dim):
                 for j in range(elem_dim):
                     if j >= lengths[i]:
-                        ref[i, j] = -np.inf
+                        ref[i, j] = fill_val
             return [ref.reshape(x.shape)]
 
         self.assertReferenceChecks(gc, op, [x, lengths], ref)
@@ -78,12 +79,14 @@ class TestBooleanMaskOp(hu.HypothesisTestCase):
            mode=st.sampled_from(['upper', 'lower', 'upperdiag', 'lowerdiag']),
            **hu.gcs)
     def test_sequence_mask_triangle(self, x, mode, gc, dc):
+        fill_val = 1e-9  # finite fill value needed for gradient check
         x = np.array([[0, 1], [2, 3]], dtype=np.float32)
         op = core.CreateOperator("SequenceMask",
                                  ["data"],
                                  ["masked_data"],
                                  mode=mode,
-                                 axis=len(x.shape) - 1)
+                                 axis=len(x.shape) - 1,
+                                 fill_val=fill_val)
         elem_dim = x.shape[-1]
         leading_dim = 1
         for dim in x.shape[:-1]:
@@ -107,8 +110,9 @@ class TestBooleanMaskOp(hu.HypothesisTestCase):
             for i in range(leading_dim):
                 for j in range(elem_dim):
                     if compare(i, j):
-                        ref[i, j] = -np.inf
+                        ref[i, j] = fill_val
             return [ref.reshape(x.shape)]
 
         self.assertReferenceChecks(gc, op, [x], ref)
         self.assertDeviceChecks(dc, op, [x], [0])
+        self.assertGradientChecks(gc, op, [x], 0, [0])
