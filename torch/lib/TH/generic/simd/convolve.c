@@ -109,6 +109,8 @@ static int haveCPUFeature(unsigned int feature) {
 
 #endif
 
+#include <stdint.h>
+
 void convolve_5x5_sse(float* output, float* input, float* kernel, int64_t outRows, int64_t outCols, int64_t outStride, int64_t inCols);
 void convolve_5x5_avx(float* output, float* input, float* kernel, int64_t outRows, int64_t outCols, int64_t outStride, int64_t inCols);
 

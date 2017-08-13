@@ -15,6 +15,7 @@ import os
 from tools.setup_helpers.env import check_env_flag
 from tools.setup_helpers.cuda import WITH_CUDA, CUDA_HOME
 from tools.setup_helpers.cudnn import WITH_CUDNN, CUDNN_LIB_DIR, CUDNN_INCLUDE_DIR
+from tools.setup_helpers.nvtoolext import NVTOOLEXT_HOME
 from tools.setup_helpers.split_types import split_types
 
 DEBUG = check_env_flag('DEBUG')
@@ -100,8 +101,8 @@ class build_deps(Command):
             build_all_cmd += ['--with-nccl']
         if WITH_DISTRIBUTED:
             build_all_cmd += ['--with-distributed']
-        if subprocess.call(build_all_cmd) != 0:
-            sys.exit(1)
+        # if subprocess.call(build_all_cmd) != 0:
+        #     sys.exit(1)
         generate_nn_wrappers()
 
 
@@ -301,7 +302,7 @@ if IS_WINDOWS:
     THNN_LIB = os.path.join(lib_path, 'THNN.lib')
     THCUNN_LIB = os.path.join(lib_path, 'THCUNN.lib')
     THPP_LIB = os.path.join(lib_path, 'THPP.lib')
-    ATEN_LIB = os.path.join(lib_path, 'libATen.lib')
+    ATEN_LIB = os.path.join(lib_path, 'ATen.lib')
     _C_LIB = 'build/temp.win-amd64-' + str(sys.version_info[0]) + '.' + str(sys.version_info[1]) + '/Release/torch/csrc/_C.cp' + str(sys.version_info[0]) + str(sys.version_info[1]) + '-win_amd64.lib'
 
 if not IS_WINDOWS and WITH_NCCL and subprocess.call('ldconfig -p | grep libnccl >/dev/null', shell=True) == 0:
@@ -370,8 +371,16 @@ if WITH_DISTRIBUTED:
     main_link_args += [THD_LIB]
 
 if WITH_CUDA:
+    nvtoolext_lib_name = None
     if IS_WINDOWS:
         cuda_lib_path = CUDA_HOME + '/lib/x64/'
+        nvtoolext_lib_path = NVTOOLEXT_HOME  + '/lib/x64/'
+        nvtoolext_include_path = os.path.join(NVTOOLEXT_HOME, 'include')
+        
+        library_dirs.append(nvtoolext_lib_path)
+        include_dirs.append(nvtoolext_include_path)
+        
+        nvtoolext_lib_name = 'nvToolsExt64_1'
     else:
         cuda_lib_dirs = ['lib64', 'lib']
 
@@ -380,13 +389,15 @@ if WITH_CUDA:
             if os.path.exists(cuda_lib_path):
                 break
         extra_link_args.append('-Wl,-rpath,' + cuda_lib_path)
+        
+        nvtoolext_lib_name = 'nvToolsExt'
     library_dirs.append(cuda_lib_path)
     cuda_include_path = os.path.join(CUDA_HOME, 'include')
     include_dirs.append(cuda_include_path)
     include_dirs.append(tmp_install_path + "/include/THCUNN")
     extra_compile_args += ['-DWITH_CUDA']
     extra_compile_args += ['-DCUDA_LIB_PATH=' + cuda_lib_path]
-    main_libraries += ['cudart', 'nvToolsExt']
+    main_libraries += ['cudart', nvtoolext_lib_name]
     main_link_args += [THC_LIB, THCS_LIB, THCUNN_LIB]
     main_sources += [
         "torch/csrc/cuda/Module.cpp",

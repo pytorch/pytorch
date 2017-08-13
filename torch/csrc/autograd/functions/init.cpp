@@ -125,13 +125,13 @@ static struct PyGetSetDef batch_norm_forward_properties[] = {
   {(char*)"running_var", (getter)getTensorAttr<BatchNormForward, BatchNormParams,
                                          &BatchNormParams::running_var>, NULL, NULL, NULL},
   {(char*)"training", (getter)getValueAttr<BatchNormForward, bool, BatchNormParams,
-                                         &BatchNormParams::training, int64_t, PyBool_FromLong>, NULL, NULL, NULL},
+                                         &BatchNormParams::training, long, PyBool_FromLong>, NULL, NULL, NULL},
   {(char*)"momentum", (getter)getValueAttr<BatchNormForward, double, BatchNormParams,
                                          &BatchNormParams::momentum, double, PyFloat_FromDouble>, NULL, NULL, NULL},
   {(char*)"eps", (getter)getValueAttr<BatchNormForward, double, BatchNormParams,
                                          &BatchNormParams::eps, double, PyFloat_FromDouble>, NULL, NULL, NULL},
   {(char*)"cudnn_enabled", (getter)getValueAttr<BatchNormForward, bool, BatchNormParams,
-                                         &BatchNormParams::cudnn_enabled, int64_t, PyBool_FromLong>, NULL, NULL, NULL},
+                                         &BatchNormParams::cudnn_enabled, long, PyBool_FromLong>, NULL, NULL, NULL},
   {NULL}
 };
 
@@ -142,13 +142,13 @@ static struct PyGetSetDef batch_norm_backward_properties[] = {
   {(char*)"running_var", (getter)getTensorAttr<BatchNormBackward, BatchNormParams,
                                          &BatchNormParams::running_var>, NULL, NULL, NULL},
   {(char*)"training", (getter)getValueAttr<BatchNormBackward, bool, BatchNormParams,
-                                         &BatchNormParams::training, int64_t, PyBool_FromLong>, NULL, NULL, NULL},
+                                         &BatchNormParams::training, long, PyBool_FromLong>, NULL, NULL, NULL},
   {(char*)"momentum", (getter)getValueAttr<BatchNormBackward, double, BatchNormParams,
                                          &BatchNormParams::momentum, double, PyFloat_FromDouble>, NULL, NULL, NULL},
   {(char*)"eps", (getter)getValueAttr<BatchNormBackward, double, BatchNormParams,
                                          &BatchNormParams::eps, double, PyFloat_FromDouble>, NULL, NULL, NULL},
   {(char*)"cudnn_enabled", (getter)getValueAttr<BatchNormBackward, bool, BatchNormParams,
-                                         &BatchNormParams::cudnn_enabled, int64_t, PyBool_FromLong>, NULL, NULL, NULL},
+                                         &BatchNormParams::cudnn_enabled, long, PyBool_FromLong>, NULL, NULL, NULL},
   {NULL}
 };
 
@@ -159,13 +159,13 @@ static struct PyGetSetDef batch_norm_backward_backward_properties[] = {
   {(char*)"running_var", (getter)getTensorAttr<BatchNormBackwardBackward, BatchNormParams,
                                          &BatchNormParams::running_var>, NULL, NULL, NULL},
   {(char*)"training", (getter)getValueAttr<BatchNormBackwardBackward, bool, BatchNormParams,
-                                         &BatchNormParams::training, int64_t, PyBool_FromLong>, NULL, NULL, NULL},
+                                         &BatchNormParams::training, long, PyBool_FromLong>, NULL, NULL, NULL},
   {(char*)"momentum", (getter)getValueAttr<BatchNormBackwardBackward, double, BatchNormParams,
                                          &BatchNormParams::momentum, double, PyFloat_FromDouble>, NULL, NULL, NULL},
   {(char*)"eps", (getter)getValueAttr<BatchNormBackwardBackward, double, BatchNormParams,
                                          &BatchNormParams::eps, double, PyFloat_FromDouble>, NULL, NULL, NULL},
   {(char*)"cudnn_enabled", (getter)getValueAttr<BatchNormBackwardBackward, bool, BatchNormParams,
-                                         &BatchNormParams::cudnn_enabled, int64_t, PyBool_FromLong>, NULL, NULL, NULL},
+                                         &BatchNormParams::cudnn_enabled, long, PyBool_FromLong>, NULL, NULL, NULL},
   {NULL}
 };
 
@@ -178,7 +178,7 @@ static struct PyGetSetDef conv_forward_properties[] = {
   {(char*)"dilation", (getter)getTupleAttr<ConvForward, std::vector<int>, ConvParams,
                                          &ConvParams::dilation, int64_t, PyInt_FromLong>, NULL, NULL, NULL},
   {(char*)"transposed", (getter)getValueAttr<ConvForward, bool, ConvParams,
-                                         &ConvParams::transposed, int64_t, PyBool_FromLong>, NULL, NULL, NULL},
+                                         &ConvParams::transposed, long, PyBool_FromLong>, NULL, NULL, NULL},
   {(char*)"output_padding", (getter)getTupleAttr<ConvForward, std::vector<int>, ConvParams,
                                          &ConvParams::output_padding, int64_t, PyInt_FromLong>, NULL, NULL, NULL},
   {(char*)"groups", (getter)getValueAttr<ConvForward, int, ConvParams,
@@ -195,7 +195,7 @@ static struct PyGetSetDef conv_backward_properties[] = {
   {(char*)"dilation", (getter)getTupleAttr<ConvBackward, std::vector<int>, ConvParams,
                                          &ConvParams::dilation, int64_t, PyInt_FromLong>, NULL, NULL, NULL},
   {(char*)"transposed", (getter)getValueAttr<ConvBackward, bool, ConvParams,
-                                         &ConvParams::transposed, int64_t, PyBool_FromLong>, NULL, NULL, NULL},
+                                         &ConvParams::transposed, long, PyBool_FromLong>, NULL, NULL, NULL},
   {(char*)"output_padding", (getter)getTupleAttr<ConvBackward, std::vector<int>, ConvParams,
                                          &ConvParams::output_padding, int64_t, PyInt_FromLong>, NULL, NULL, NULL},
   {(char*)"groups", (getter)getValueAttr<ConvBackward, int, ConvParams,
@@ -212,7 +212,7 @@ static struct PyGetSetDef conv_backward_backward_properties[] = {
   {(char*)"dilation", (getter)getTupleAttr<ConvBackwardBackward, std::vector<int>, ConvParams,
                                          &ConvParams::dilation, int64_t, PyInt_FromLong>, NULL, NULL, NULL},
   {(char*)"transposed", (getter)getValueAttr<ConvBackwardBackward, bool, ConvParams,
-                                         &ConvParams::transposed, int64_t, PyBool_FromLong>, NULL, NULL, NULL},
+                                         &ConvParams::transposed, long, PyBool_FromLong>, NULL, NULL, NULL},
   {(char*)"output_padding", (getter)getTupleAttr<ConvBackwardBackward, std::vector<int>, ConvParams,
                                          &ConvParams::output_padding, int64_t, PyInt_FromLong>, NULL, NULL, NULL},
   {(char*)"groups", (getter)getValueAttr<ConvBackwardBackward, int, ConvParams,

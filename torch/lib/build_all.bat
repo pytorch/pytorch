@@ -18,11 +18,18 @@ set C_FLAGS=%BASIC_C_FLAGS% /D_WIN32 /Z7 /EHa /DNOMINMAX
 set LINK_FLAGS=/DEBUG:FULL
 
 mkdir tmp_install
+
+IF "%~1"=="--with-cuda" (
+  set /a NO_CUDA=0
+) ELSE (
+  set /a NO_CUDA=1
+)
+
 call:build TH
 call:build THS
 call:build THNN
 
-IF "%~1"=="--with-cuda" (
+IF %NO_CUDA% EQU 0 (
   call:build THC
   call:build THCS 
   call:build THCUNN
@@ -56,11 +63,15 @@ goto:eof
                   -DTHS_LIBRARIES="%INSTALL_DIR%/lib/THS.lib" ^
                   -DTHC_LIBRARIES="%INSTALL_DIR%/lib/THC.lib" ^
                   -DTHCS_LIBRARIES="%INSTALL_DIR%/lib/THCS.lib" ^
-                  -DATEN_LIBRARIES="%INSTALL_DIR%/lib/libATen.lib" ^
+                  -DATEN_LIBRARIES="%INSTALL_DIR%/lib/ATen.lib" ^
+                  -DTHNN_LIBRARIES="%INSTALL_DIR%/lib/THNN.lib" ^
+                  -DTHCUNN_LIBRARIES="%INSTALL_DIR%/lib/THCUNN.lib" ^
+                  -DTHPP_LIBRARIES="%INSTALL_DIR%/lib/libTHPP.lib" ^
                   -DTH_SO_VERSION=1 ^
                   -DTHC_SO_VERSION=1 ^
                   -DTHNN_SO_VERSION=1 ^
                   -DTHCUNN_SO_VERSION=1 ^
+                  -DNO_CUDA=%NO_CUDA% ^
                   -DCMAKE_BUILD_TYPE=Release ^
                   -DLAPACK_LIBRARIES="%INSTALL_DIR%/lib/mkl_rt.lib" -DLAPACK_FOUND=TRUE 
                   :: debug/release

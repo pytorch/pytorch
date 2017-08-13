@@ -48,27 +48,27 @@ else:
     # automatically filled by the dynamic loader.
     import os as _dl_flags
 
-# first check if the os package has the required flags
-if not hasattr(_dl_flags, 'RTLD_GLOBAL') or not hasattr(_dl_flags, 'RTLD_NOW'):
-    try:
-        # next try if DLFCN exists
-        import DLFCN as _dl_flags
-    except ImportError:
-        # as a last attempt, use compile-time constants
-        import torch._dl as _dl_flags
+    # first check if the os package has the required flags
+    if not hasattr(_dl_flags, 'RTLD_GLOBAL') or not hasattr(_dl_flags, 'RTLD_NOW'):
+        try:
+            # next try if DLFCN exists
+            import DLFCN as _dl_flags
+        except ImportError:
+            # as a last attempt, use compile-time constants
+            import torch._dl as _dl_flags
 
-old_flags = sys.getdlopenflags()
-sys.setdlopenflags(_dl_flags.RTLD_GLOBAL | _dl_flags.RTLD_NOW)
+    old_flags = sys.getdlopenflags()
+    sys.setdlopenflags(_dl_flags.RTLD_GLOBAL | _dl_flags.RTLD_NOW)
 
-from torch._C import *
+    from torch._C import *
 
-__all__ += [name for name in dir(_C)
-            if name[0] != '_' and
-            not name.endswith('Base')]
+    __all__ += [name for name in dir(_C)
+                if name[0] != '_' and
+                not name.endswith('Base')]
 
-sys.setdlopenflags(old_flags)
-del _dl_flags
-del old_flags
+    sys.setdlopenflags(old_flags)
+    del _dl_flags
+    del old_flags
 
 ################################################################################
 # Define basic utilities

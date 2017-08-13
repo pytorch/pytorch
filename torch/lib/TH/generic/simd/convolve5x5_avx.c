@@ -1,5 +1,7 @@
 #include <immintrin.h>
 #include "common_simd.h"
+#include <stdint.h>
+
 
 #define CLEAR_AVX() _mm256_zeroupper()
 

@@ -304,7 +304,7 @@ bool THC_reduceDim(THCState* state,
         //x dim does different columns
         //y dim helps with the same reduction
         //If we only have 8 loops, don't bother sharing work across ydim
-        uint64_t ydim = THCCeilDiv(reductionSize, 8L);
+        uint64_t ydim = THCCeilDiv(reductionSize, (int64_t) 8L);
 
         //don't want y dim any bigger than 16, leaving min x dim to 32
         ydim = min((uint64_t) 16, ydim);

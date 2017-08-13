@@ -1,5 +1,6 @@
 #include <smmintrin.h>
 #include "common_simd.h"
+#include <stdint.h>
 
 
 /* SSE variants */

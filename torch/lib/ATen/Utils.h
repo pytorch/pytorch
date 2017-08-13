@@ -1,13 +1,14 @@
 #pragma once
 
 #include "ArrayRef.h"
+#include "ATenGeneral.h"
 
 namespace at {
 
 #define AT_ASSERT(cond, ...) if (! (cond) ) { at::runtime_error(__VA_ARGS__); }
 
 [[noreturn]]
-void runtime_error(const char *format, ...);
+ATen_CLASS void runtime_error(const char *format, ...);
 
 template <typename T, typename Base>
 static inline T* checked_cast(Base* expr, const char * name, int pos, bool allowNull) {

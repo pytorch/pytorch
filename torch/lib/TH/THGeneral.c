@@ -359,11 +359,11 @@ TH_API void THInferNumThreads(void)
 #endif
 }
 
-TH_API THDescBuff _THSizeDesc(const uint8_t *size, const uint8_t ndim) {
-  const uint8_t L = TH_DESC_BUFF_LEN;
+TH_API THDescBuff _THSizeDesc(const int64_t *size, const int64_t ndim) {
+  const int L = TH_DESC_BUFF_LEN;
   THDescBuff buf;
   char *str = buf.str;
-  uint8_t i, n = 0;
+  int i, n = 0;
   n += snprintf(str, L-n, "[");
 
   for (i = 0; i < ndim; i++) {

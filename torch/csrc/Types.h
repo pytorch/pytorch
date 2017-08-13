@@ -2,6 +2,7 @@
 #define THP_TYPES_INC
 
 #include <Python.h>
+#include <stdint.h>
 #include <cstddef>
 
 template <typename T> struct THPTypeInfo {};

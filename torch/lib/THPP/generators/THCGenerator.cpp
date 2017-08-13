@@ -33,7 +33,7 @@ uint64_t THCGenerator::seed() {
   return THCRandom_initialSeed(state);
 }
 
-THCGenerator& THCGenerator::manualSeed(uint64_t) {
+THCGenerator& THCGenerator::manualSeed(uint64_t seed) {
   THCRandom_manualSeed(state, seed);
   return *this;
 }

@@ -1,6 +1,7 @@
 #ifndef TH_GENERAL_INC
 #define TH_GENERAL_INC
 
+#include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdarg.h>
@@ -50,7 +51,7 @@ typedef struct {
 
 
 TH_API double THLog1p(const double x);
-TH_API THDescBuff _THSizeDesc(const uint8_t *size, const uint8_t ndim);
+TH_API THDescBuff _THSizeDesc(const int64_t *size, const int64_t ndim);
 TH_API void _THError(const char *file, const int line, const char *fmt, ...);
 TH_API void _THAssertionFailed(const char *file, const int line, const char *exp, const char *fmt, ...);
 TH_API void THSetErrorHandler(THErrorHandlerFunction new_handler, void *data);

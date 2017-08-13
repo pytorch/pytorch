@@ -3,7 +3,7 @@
 #else
 
 THC_API void
-THCTensor_(sum)(THCState* state, THCTensor *self, THCTensor *src, int64_t dimension, int keepdim) {
+THCTensor_(sum)(THCState* state, THCTensor *self, THCTensor *src, int dimension, int keepdim) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, src));
   if (!THC_reduceDim(state, self, src,
                      thrust::identity<real>(),
@@ -18,7 +18,7 @@ THCTensor_(sum)(THCState* state, THCTensor *self, THCTensor *src, int64_t dimens
 }
 
 THC_API void
-THCTensor_(prod)(THCState* state, THCTensor *self, THCTensor *src, int dimension) {
+THCTensor_(prod)(THCState* state, THCTensor *self, THCTensor *src, int dimension, int keepdim) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, src));
   if (!THC_reduceDim(state, self, src,
                      thrust::identity<real>(),
@@ -33,7 +33,7 @@ THCTensor_(prod)(THCState* state, THCTensor *self, THCTensor *src, int dimension
 }
 
 THC_API void
-THCTensor_(mean)(THCState *state, THCTensor *self, THCTensor *src, int64_t dim, int keepdim)
+THCTensor_(mean)(THCState *state, THCTensor *self, THCTensor *src, int dim, int keepdim)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, src));
   THCTensor_(sum)(state, self, src, dim, keepdim);

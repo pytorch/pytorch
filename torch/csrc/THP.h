@@ -18,8 +18,11 @@
 
 // By default, don't specify library state (TH doesn't use one)
 #define LIBRARY_STATE
+
 #define LIBRARY_STATE_NOARGS
+
 #define LIBRARY_STATE_TYPE
+
 #define LIBRARY_STATE_TYPE_NOARGS
 
 #ifdef _WIN32

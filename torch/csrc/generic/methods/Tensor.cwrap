@@ -777,15 +777,15 @@ static PyObject * THPTensor_stateless_(cat)(THPTensor *_unused, PyObject *args, 
 #endif
   static char* argnames[] = { "seq", "dim", "out", NULL };
   PyObject *_seq = NULL;
-  int64_t dim = 0;
-  PyObject *__out = NULL;
+  long dim = 0;
+  PyObject *___out = NULL;
 
   THPObjectPtr sequence;
   std::vector<THTensor *> tensors;
   THPTensorPtr result;
   Py_ssize_t len;
 
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|lO", argnames, &_seq, &dim, &__out)) {
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|lO", argnames, &_seq, &dim, &___out)) {
     goto invalid_arguments;
   }
 
@@ -798,12 +798,12 @@ static PyObject * THPTensor_stateless_(cat)(THPTensor *_unused, PyObject *args, 
   len = PySequence_Fast_GET_SIZE(sequence.get());
   THPUtils_assert(len > 0, "seq can't be empty");
 
-  if (__out && __out != Py_None) {
-    if (!THPTensor_(Check)(__out)) {
+  if (___out && ___out != Py_None) {
+    if (!THPTensor_(Check)(___out)) {
       goto invalid_arguments;
     }
-    Py_INCREF(__out);
-    result = (THPTensor *)__out;
+    Py_INCREF(___out);
+    result = (THPTensor *)___out;
   } else {
     result = (THPTensor *)THPTensor_(NewEmpty)();
     if (!result) return NULL;

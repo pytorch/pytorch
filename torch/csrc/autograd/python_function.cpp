@@ -942,7 +942,7 @@ PyObject* getMember(PyObject* obj, void* _unused) {
   return Convert(self->*ptr);
 }
 
-template<typename M, M Function::*ptr, PyObject* (*Convert)(int64_t)>
+template<typename M, M Function::*ptr, PyObject* (*Convert)(long)>
 PyObject* getImplMember(PyObject* obj, void* _unused) {
   auto self = (THPFunction*)obj;
   return Convert(self->cdata.*ptr);

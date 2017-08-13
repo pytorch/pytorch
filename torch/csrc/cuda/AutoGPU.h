@@ -5,6 +5,7 @@
 #include "THP.h"
 #include "torch/csrc/utils/auto_gpu.h"
 
+
 class THP_CLASS THCPAutoGPU : public AutoGPU {
 public:
   explicit THCPAutoGPU(int device_id=-1);

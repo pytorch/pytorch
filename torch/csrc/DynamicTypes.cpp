@@ -67,7 +67,7 @@ static std::unordered_map<std::string, at::ScalarType> attype_names = {
   {"Char", at::kChar},
   {"Short", at::kShort},
   {"Int", at::kInt},
-  {"Long", at::kLongLong},
+  {"Long", at::kLong},
 };
 static std::unordered_map<PyTypeObject*, TensorType> pytype_to_tensortype;
 static std::unordered_map<TensorType, PyTypeObject*, TensorTypeHasher> tensortype_to_pytype;

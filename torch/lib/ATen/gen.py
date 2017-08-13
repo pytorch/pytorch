@@ -68,11 +68,11 @@ densities = ['Dense', 'Sparse']
 
 scalar_types = [
     ('Byte', 'uint8_t', 'Long', 'unsigned char'),
-    ('Char', 'int8_t', 'Long', 'char'),
+    ('Char', 'int8_t', 'Long', 'signed char'),
     ('Double', 'double', 'Double', 'double'),
     ('Float', 'float', 'Double', 'float'),
     ('Int', 'int', 'Long', 'int'),
-    ('Long', 'int64_t', 'Long', 'long'),
+    ('Long', 'int64_t', 'Long', 'long long'),
     ('Short', 'int16_t', 'Long', 'short'),
     ('Half', 'Half', 'Double', 'THHalf'),
 ]
