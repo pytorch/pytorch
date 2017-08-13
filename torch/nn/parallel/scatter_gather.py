@@ -15,23 +15,26 @@ def scatter(inputs, target_gpus, dim=0):
             return Scatter.apply(target_gpus, None, dim, obj)
         assert not torch.is_tensor(obj), "Tensors not supported in scatter."
         if isinstance(obj, tuple):
-            return tuple(zip(*map(scatter_map, obj)))
+            return list(zip(*map(scatter_map, obj)))
         if isinstance(obj, list):
-            return tuple(map(list, zip(*map(scatter_map, obj))))
+            return list(map(list, zip(*map(scatter_map, obj))))
         if isinstance(obj, dict):
-            return tuple(map(type(obj), zip(*map(scatter_map, obj.items()))))
-        return tuple(obj for targets in target_gpus)
+            return list(map(type(obj), zip(*map(scatter_map, obj.items()))))
+        return [obj for targets in target_gpus]
 
     return scatter_map(inputs)
 
 
 def scatter_kwargs(inputs, kwargs, target_gpus, dim=0):
     """Scatter with support for kwargs dictionary"""
-    inputs = scatter(inputs, target_gpus, dim)
-    if kwargs is None or len(kwargs) == 0:
-        kwargs = tuple({} for _ in inputs)
-    else:
-        kwargs = scatter(kwargs, target_gpus, dim)[:len(inputs)]
+    inputs = scatter(inputs, target_gpus, dim) if inputs else []
+    kwargs = scatter(kwargs, target_gpus, dim) if kwargs else []
+    if len(inputs) < len(kwargs):
+        inputs.extend([() for _ in range(len(kwargs) - len(inputs))])
+    elif len(kwargs) < len(inputs):
+        kwargs.extend([{} for _ in range(len(inputs) - len(kwargs))])
+    inputs = tuple(inputs)
+    kwargs = tuple(kwargs)
     return inputs, kwargs
 
 
