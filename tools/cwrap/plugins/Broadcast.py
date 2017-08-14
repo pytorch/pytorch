@@ -159,10 +159,10 @@ class Broadcast(CWrapPlugin):
         """${code_arg_op_a}${code_arg_op_other1}${code_arg_op_other2}
            ${expand_code}""")
 
-    def getInPlacePreExpand1Template(self, type_other_other, raise_errors):
+    def getInPlacePreExpand1Template(self, type_op_other, raise_errors):
         size_check = """THSize_isSameSizeAs(${arg_op_a}->size, ${arg_op_a}->nDimension,
                                             ${arg_op_other}->size, ${arg_op_other}->nDimension);"""
-        expand_code = ("${arg_op_other}_guard = \n" + self.getNewForExpand(type_other_other) + "\n" +
+        expand_code = ("${arg_op_other}_guard = \n" + self.getNewForExpand(type_op_other) + "\n" +
                        """expand_inplace1(LIBRARY_STATE ${arg_op_other}_guard.get(), ${arg_op_other}, ${arg_op_a},
                                          \"${op_other}\", \"${op_a}\", !${raise_errors});""")
         success_code = """${arg_op_other} = ${arg_op_other}_guard.get();"""
