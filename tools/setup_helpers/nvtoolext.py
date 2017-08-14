@@ -16,9 +16,9 @@ else:
         NVTOOLEXT_HOME = None
     else:
         NVTOOLEXT_HOME = os.getenv('NVTOOLSEXT_PATH', WINDOWS_HOME).replace('\\','/')
-    if not os.path.exists(NVTOOLEXT_HOME):
-        NVTOOLEXT_HOME = ctypes.util.find_library('nvToolsExt64_1')
-        if NVTOOLEXT_HOME is not None:
-            NVTOOLEXT_HOME = os.path.dirname(NVTOOLEXT_HOME)
-        else:
-            NVTOOLEXT_HOME  = None
+        if not os.path.exists(NVTOOLEXT_HOME):
+            NVTOOLEXT_HOME = ctypes.util.find_library('nvToolsExt64_1')
+            if NVTOOLEXT_HOME is not None:
+                NVTOOLEXT_HOME = os.path.dirname(NVTOOLEXT_HOME)
+            else:
+                NVTOOLEXT_HOME  = None
