@@ -49,7 +49,7 @@ def _fork_rng(enabled=True):
 
 @contextlib.contextmanager
 def _time(name, enabled=True):
-    if not enabled:
+    if not enabled or not torch.cuda.is_available():
         yield
         return
     stream = torch.cuda.current_stream()
@@ -91,6 +91,13 @@ class Traceable(object):
     _dump_traces = os.environ.get('PYTORCH_JIT_DUMP', False)
 
     def __init__(self, function_or_module, trace_name=None, optimize=False, verify=False, time=False, enabled=True):
+        """
+        time - collect cuda timing stats for perf debugging
+        verify - run the original code, and check it is within threshold
+        optimize - run optimizations like fusion on the trace before running
+        enabled - flag to turn off tracing so you can check timing of stuff that cannot be traced
+        """
+
         if isinstance(function_or_module, Module):
             real_forward = function_or_module.forward
             self._run = lambda args: real_forward(*args)
