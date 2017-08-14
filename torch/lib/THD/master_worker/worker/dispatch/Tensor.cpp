@@ -6,7 +6,7 @@ static std::unique_ptr<thpp::Tensor> createTensor(thpp::Type type, Ts &... args)
         new thpp::THTensor<unsigned char>(std::forward<Ts>(args)...));
   else if (type == thpp::Type::CHAR)
     return std::unique_ptr<thpp::Tensor>(
-        new thpp::THTensor<char>(std::forward<Ts>(args)...));
+        new thpp::THTensor<int8_t>(std::forward<Ts>(args)...));
   else if (type == thpp::Type::SHORT)
     return std::unique_ptr<thpp::Tensor>(
         new thpp::THTensor<short>(std::forward<Ts>(args)...));

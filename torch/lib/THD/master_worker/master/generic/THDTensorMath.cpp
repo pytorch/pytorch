@@ -223,7 +223,7 @@ void THDTensor_(nonzero)(THDLongTensor *subscript, THDTensor *tensor) {
     ),
     THDState::s_current_worker
   );
-  long long numel = receiveValueFromWorker<long long>(tensor->storage->node_id);
+  int64_t numel = receiveValueFromWorker<int64_t>(tensor->storage->node_id);
   THDLongTensor__resize2d(subscript, numel, tensor->nDimension);
 }
 
