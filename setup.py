@@ -234,12 +234,12 @@ include_dirs = []
 library_dirs = []
 extra_link_args = []
 if IS_WINDOWS:
-  extra_compile_args = ['/Z7', '/EHa', '/DNOMINMAX']
+    extra_compile_args = ['/Z7', '/EHa', '/DNOMINMAX']
 else:
-  extra_compile_args = ['-std=c++11', '-Wno-write-strings',
-                      # Python 2.6 requires -fno-strict-aliasing, see
-                      # http://legacy.python.org/dev/peps/pep-3123/
-                      '-fno-strict-aliasing']
+    extra_compile_args = ['-std=c++11', '-Wno-write-strings',
+                          # Python 2.6 requires -fno-strict-aliasing, see
+                          # http://legacy.python.org/dev/peps/pep-3123/
+                          '-fno-strict-aliasing']
 if os.getenv('PYTORCH_BINARY_BUILD') and IS_LINUX:
     print('PYTORCH_BINARY_BUILD found. Static linking libstdc++ on Linux')
     # get path of libstdc++ and link manually.
@@ -303,7 +303,9 @@ if IS_WINDOWS:
     THCUNN_LIB = os.path.join(lib_path, 'THCUNN.lib')
     THPP_LIB = os.path.join(lib_path, 'THPP.lib')
     ATEN_LIB = os.path.join(lib_path, 'ATen.lib')
-    _C_LIB = 'build/temp.win-amd64-' + str(sys.version_info[0]) + '.' + str(sys.version_info[1]) + '/Release/torch/csrc/_C.cp' + str(sys.version_info[0]) + str(sys.version_info[1]) + '-win_amd64.lib'
+    _C_LIB = 'build/temp.win-amd64-' + str(sys.version_info[0]) + '.' + str(
+        sys.version_info[1]) + '/Release/torch/csrc/_C.cp' + str(
+            sys.version_info[0]) + str(sys.version_info[1]) + '-win_amd64.lib'
 
 if not IS_WINDOWS and WITH_NCCL and subprocess.call('ldconfig -p | grep libnccl >/dev/null', shell=True) == 0:
         SYSTEM_NCCL = True
@@ -374,12 +376,12 @@ if WITH_CUDA:
     nvtoolext_lib_name = None
     if IS_WINDOWS:
         cuda_lib_path = CUDA_HOME + '/lib/x64/'
-        nvtoolext_lib_path = NVTOOLEXT_HOME  + '/lib/x64/'
+        nvtoolext_lib_path = NVTOOLEXT_HOME + '/lib/x64/'
         nvtoolext_include_path = os.path.join(NVTOOLEXT_HOME, 'include')
-        
+
         library_dirs.append(nvtoolext_lib_path)
         include_dirs.append(nvtoolext_include_path)
-        
+
         nvtoolext_lib_name = 'nvToolsExt64_1'
     else:
         cuda_lib_dirs = ['lib64', 'lib']
@@ -389,7 +391,7 @@ if WITH_CUDA:
             if os.path.exists(cuda_lib_path):
                 break
         extra_link_args.append('-Wl,-rpath,' + cuda_lib_path)
-        
+
         nvtoolext_lib_name = 'nvToolsExt'
     library_dirs.append(cuda_lib_path)
     cuda_include_path = os.path.join(CUDA_HOME, 'include')

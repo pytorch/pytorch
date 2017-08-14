@@ -8,7 +8,8 @@ It has a CUDA counterpart, that enables you to run your tensor computations
 on an NVIDIA GPU with compute capability >= 3.0.
 """
 
-import platform, sys
+import sys
+import platform
 from ._utils import _import_dotted_name
 from .version import __version__
 

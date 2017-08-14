@@ -8,6 +8,7 @@ from .env import check_env_flag
 LINUX_HOME = '/usr/local/cuda'
 WINDOWS_HOME = 'C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v8.0'
 
+
 def find_nvcc():
     proc = Popen(['which', 'nvcc'], stdout=PIPE, stderr=PIPE)
     out, err = proc.communicate()
@@ -27,7 +28,7 @@ else:
     if osname != 'Windows':
         CUDA_HOME = os.getenv('CUDA_HOME', LINUX_HOME)
     else:
-        CUDA_HOME = os.getenv('CUDA_PATH', WINDOWS_HOME).replace('\\','/')
+        CUDA_HOME = os.getenv('CUDA_PATH', WINDOWS_HOME).replace('\\', '/')
     if not os.path.exists(CUDA_HOME):
         if osname == 'Linux':
             cuda_path = find_nvcc()
