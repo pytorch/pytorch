@@ -36,7 +36,7 @@ std::string ExportGraph(std::unique_ptr<Graph>& g) {
     for (auto input : node->inputs()) {
       p_n->add_input(node_name(input));
     }
-    if (node->type()->kind() == TypeKind::Multi) {
+    if (node->type()->kind() == TypeKind::MultiType) {
       for (auto u : node->uses()) {
         p_n->add_output(node_name(u.user));
       }
@@ -77,7 +77,7 @@ std::string ExportGraph(std::unique_ptr<Graph>& g) {
         // engineer it from the input types...
         // TODO: dynamic_cast ew
         auto weight_type = node->inputs().at(1)->type();
-        JIT_ASSERT(weight_type->kind() == TypeKind::Tensor);
+        JIT_ASSERT(weight_type->kind() == TypeKind::TensorType);
         auto weight_size = static_cast<const TensorType*>(weight_type)->sizes();
         std::vector<int64_t> kernel_size(weight_size.begin() + 2, weight_size.end());
         attr = p_n->add_attribute();
@@ -121,108 +121,129 @@ std::string ExportGraph(std::unique_ptr<Graph>& g) {
     IR_ELSEIF(PythonOp)
       // NB: All inplace designations are dropped
 
-      // I have purposely NOT added these operators to the IR and
-      // then transformed them in init_pass, because I don't think
-      // we should be in the business of adding every operator
-      // to the subclass hierarchy.  See:
-      // https://github.com/ezyang/pytorch/issues/36
-      //
-      // There is something pretty irritating here: many Python classes
-      // have default arguments, but when we trace a Python operator,
-      // we don't have any visibility into the defaults that would have
-      // been picked by the function itself.  See:
-      // https://github.com/ezyang/pytorch/issues/40
-      if (value->name() == "Threshold" &&
-          // Caffe2 backend only supports ReLU, not Threshold
-          value->scalar_args.size() >= 2 &&
-          THPUtils_unpackLong(value->scalar_args[0]) == 0 && // threshold
-          THPUtils_unpackLong(value->scalar_args[1]) == 0) { // value
-        p_n->set_op_type("Relu");
-      } else if (value->name() == "MaxPool2d" &&
-          // TODO: This is very fragile!
-          value->scalar_args.size() == 5 &&
-          !PyObject_IsTrue(value->scalar_args[4])) {
-        // MaxPool2d(kernel_size, stride=None, padding=0, dilation=1, return_indices=False, ceil_mode=False)
-        // e.g., MaxPool2d(3, 2, 0, 1, False) from AlexNet
-        // TODO: put these attributes in the standard
-        p_n->set_op_type("MaxPool");
-        toffee::AttributeProto* attr;
-        attr = p_n->add_attribute();
-        attr->set_name("kernel");
-        attr->set_i(THPUtils_unpackLong(value->scalar_args[0]));
+      bool done = false;
+      do {
+        /*
+        THPObjectPtr primspec_fn(PyObject_GetAttrString(value->pyobj.get(), "primspec"));
+        if (!primspec_fn) break;
+        THPObjectPtr py_primspec_args(PyTuple_New());
+        THPObjectPtr raw_output(PyObject_CallObject(primspec_fn, py_primspec_args));
+        if (!raw_output) break;
 
-        attr = p_n->add_attribute();
-        attr->set_name("stride");
-        attr->set_i(THPUtils_unpackLong(value->scalar_args[1]));
+        // NO ERROR CHECKING WHATSOVER!!!
+        PyObject* py_op_type = PyDict_GetItem(raw_output.get(), THPUtils_packString("name"));
+        PyObject* py_inputs = PyDict_GetItem(raw_output.get(), THPUtils_packString("inputs"));
+        PyObject* py_attrs = PyDict_GetItem(raw_output.get(), THPUtils_packString("attrs"));
 
-        attr = p_n->add_attribute();
-        attr->set_name("pad");
-        attr->set_i(THPUtils_unpackLong(value->scalar_args[2]));
+        done = true;
+        */
+      } while (0);
 
-        attr = p_n->add_attribute();
-        attr->set_name("dilation");
-        attr->set_i(THPUtils_unpackLong(value->scalar_args[3]));
+      if (!done) {
 
-        // Toffee returns only one arg
-        p_n->clear_output();
-        p_n->add_output(node_name(node->uses().at(0).user));
-      } else if (value->name() == "View") {
-        p_n->set_op_type("Reshape");
-        toffee::AttributeProto* attr;
+        // I have purposely NOT added these operators to the IR and
+        // then transformed them in init_pass, because I don't think
+        // we should be in the business of adding every operator
+        // to the subclass hierarchy.  See:
+        // https://github.com/ezyang/pytorch/issues/36
+        //
+        // There is something pretty irritating here: many Python classes
+        // have default arguments, but when we trace a Python operator,
+        // we don't have any visibility into the defaults that would have
+        // been picked by the function itself.  See:
+        // https://github.com/ezyang/pytorch/issues/40
+        if (value->name() == "Threshold" &&
+            // Caffe2 backend only supports ReLU, not Threshold
+            value->scalar_args.size() >= 2 &&
+            THPUtils_unpackLong(value->scalar_args[0]) == 0 && // threshold
+            THPUtils_unpackLong(value->scalar_args[1]) == 0) { // value
+          p_n->set_op_type("Relu");
+        } else if (value->name() == "MaxPool2d" &&
+            // TODO: This is very fragile!
+            value->scalar_args.size() == 5 &&
+            !PyObject_IsTrue(value->scalar_args[4])) {
+          // MaxPool2d(kernel_size, stride=None, padding=0, dilation=1, return_indices=False, ceil_mode=False)
+          // e.g., MaxPool2d(3, 2, 0, 1, False) from AlexNet
+          // TODO: put these attributes in the standard
+          p_n->set_op_type("MaxPool");
+          toffee::AttributeProto* attr;
+          attr = p_n->add_attribute();
+          attr->set_name("kernel");
+          attr->set_i(THPUtils_unpackLong(value->scalar_args[0]));
 
-        attr = p_n->add_attribute();
-        attr->set_name("shape");
-        auto& t = value->scalar_args.at(0);
-        for (int i = 0, c = PyTuple_Size(t); i < c; i++) {
-          attr->add_ints(THPUtils_unpackLong(PyTuple_GET_ITEM(t.get(), i)));
+          attr = p_n->add_attribute();
+          attr->set_name("stride");
+          attr->set_i(THPUtils_unpackLong(value->scalar_args[1]));
+
+          attr = p_n->add_attribute();
+          attr->set_name("pad");
+          attr->set_i(THPUtils_unpackLong(value->scalar_args[2]));
+
+          attr = p_n->add_attribute();
+          attr->set_name("dilation");
+          attr->set_i(THPUtils_unpackLong(value->scalar_args[3]));
+
+          // Toffee returns only one arg
+          p_n->clear_output();
+          p_n->add_output(node_name(node->uses().at(0).user));
+        } else if (value->name() == "View") {
+          p_n->set_op_type("Reshape");
+          toffee::AttributeProto* attr;
+
+          attr = p_n->add_attribute();
+          attr->set_name("shape");
+          auto& t = value->scalar_args.at(0);
+          for (int i = 0, c = PyTuple_Size(t); i < c; i++) {
+            attr->add_ints(THPUtils_unpackLong(PyTuple_GET_ITEM(t.get(), i)));
+          }
+
+          p_n->add_output("tmp" + std::to_string(temp_next_unique++));
+        } else if (value->name() == "Transpose") {
+          p_n->set_op_type("Transpose");
+          toffee::AttributeProto* attr;
+
+          attr = p_n->add_attribute();
+          attr->set_name("axes");
+          for (auto& scalar_arg : value->scalar_args) {
+            attr->add_ints(THPUtils_unpackLong(scalar_arg.get()));
+          }
+        } else if (value->name() == "Dropout") {
+          // Dropout(0.5, True, False)
+          // p, training, inplace (inplace punted)
+          p_n->set_op_type("Dropout");
+          toffee::AttributeProto* attr;
+
+          attr = p_n->add_attribute();
+          attr->set_name("ratio");
+          attr->set_f(THPUtils_unpackDouble(value->scalar_args.at(0))); // NB: precision loss
+
+          attr = p_n->add_attribute();
+          attr->set_name("is_test");
+          // NB: PyTorch's boolean is is_training, which is the inverted sense
+          attr->set_i(!PyObject_IsTrue(value->scalar_args.at(1)));
+
+          p_n->add_output("tmp" + std::to_string(temp_next_unique++));
+        } else if (value->name() == "Addmm" &&
+                   value->scalar_args.size() >= 2 &&
+                   // NB: FC doesn't support weights so we have to
+                   // exclude these addmm's
+                   // TODO: Double check this does the right thing
+                   // in terms of numeric precision
+                   THPUtils_unpackDouble(value->scalar_args[0]) == 1.0 &&
+                   THPUtils_unpackDouble(value->scalar_args[1]) == 1.0) {
+          // TODO: handle cases when FC doesn't work.  Addmm supports a 2D bias
+          // and FC does not.  We need to detect this case and do something
+          // different.
+          p_n->set_op_type("FC");
+          // Redo the inputs: bias is first for PyTorch and last for Caffe2
+          p_n->clear_input();
+          p_n->add_input(node_name(node->inputs().at(1)));
+          p_n->add_input(node_name(node->inputs().at(2)));
+          p_n->add_input(node_name(node->inputs().at(0)));
+
+        } else {
+          throw std::runtime_error("PythonOp not supported " + value->name());
         }
-
-        p_n->add_output("tmp" + std::to_string(temp_next_unique++));
-      } else if (value->name() == "Transpose") {
-        p_n->set_op_type("Transpose");
-        toffee::AttributeProto* attr;
-
-        attr = p_n->add_attribute();
-        attr->set_name("axes");
-        for (auto& scalar_arg : value->scalar_args) {
-          attr->add_ints(THPUtils_unpackLong(scalar_arg.get()));
-        }
-      } else if (value->name() == "Dropout") {
-        // Dropout(0.5, True, False)
-        // p, training, inplace (inplace punted)
-        p_n->set_op_type("Dropout");
-        toffee::AttributeProto* attr;
-
-        attr = p_n->add_attribute();
-        attr->set_name("ratio");
-        attr->set_f(THPUtils_unpackDouble(value->scalar_args.at(0))); // NB: precision loss
-
-        attr = p_n->add_attribute();
-        attr->set_name("is_test");
-        // NB: PyTorch's boolean is is_training, which is the inverted sense
-        attr->set_i(!PyObject_IsTrue(value->scalar_args.at(1)));
-
-        p_n->add_output("tmp" + std::to_string(temp_next_unique++));
-      } else if (value->name() == "Addmm" &&
-                 value->scalar_args.size() >= 2 &&
-                 // NB: FC doesn't support weights so we have to
-                 // exclude these addmm's
-                 // TODO: Double check this does the right thing
-                 // in terms of numeric precision
-                 THPUtils_unpackDouble(value->scalar_args[0]) == 1.0 &&
-                 THPUtils_unpackDouble(value->scalar_args[1]) == 1.0) {
-        // TODO: handle cases when FC doesn't work.  Addmm supports a 2D bias
-        // and FC does not.  We need to detect this case and do something
-        // different.
-        p_n->set_op_type("FC");
-        // Redo the inputs: bias is first for PyTorch and last for Caffe2
-        p_n->clear_input();
-        p_n->add_input(node_name(node->inputs().at(1)));
-        p_n->add_input(node_name(node->inputs().at(2)));
-        p_n->add_input(node_name(node->inputs().at(0)));
-
-      } else {
-        throw std::runtime_error("PythonOp not supported " + value->name());
       }
     IR_ELSE()
       throw std::runtime_error("Not supported");
