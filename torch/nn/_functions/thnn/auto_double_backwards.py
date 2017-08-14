@@ -48,9 +48,7 @@ def hardshrink_double_backwards(ctx, ggI):
     lambd = ctx.additional_args[0]
     gI = None
 
-    gt_lambda_mask = (input > lambd).type_as(ggI)
-    lt_neg_lambda_mask = (input < -lambd).type_as(ggI)
-    mask = gt_lambda_mask + lt_neg_lambda_mask
+    mask = Variable(ggI.data.new(input.size()).zero_()).masked_fill_(input > lambd, 1).masked_fill_(input < -lambd, 1)
     ggO = ggI * mask
 
     return gI, ggO, None, None, None
@@ -137,8 +135,8 @@ def softplus_double_backwards(ctx, ggI):
     beta, threshold = ctx.additional_args[0], ctx.additional_args[1]
 
     input_beta = input * beta
-    above_threshold = ((input_beta) > threshold).type_as(ggI)
-    below_threshold = ((input_beta) <= threshold).type_as(ggI)
+    above_threshold = Variable(ggI.data.new(ggI.size()).zero_()).masked_fill_(input_beta > threshold, 1)
+    below_threshold = Variable(ggI.data.new(ggI.size()).zero_()).masked_fill_(input_beta <= threshold, 1)
 
     exp_output_beta = (output * beta).exp()
     first_deriv = (exp_output_beta - 1) / exp_output_beta

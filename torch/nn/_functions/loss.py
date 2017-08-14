@@ -1,5 +1,5 @@
 import torch
-from torch.autograd import Function
+from torch.autograd import Function, Variable
 from torch.autograd.function import once_differentiable
 
 
@@ -144,7 +144,7 @@ class HingeEmbeddingLossBackward(Function):
 
         gI = None
 
-        target_1_mask = (target == 1).type_as(ggI)
+        target_1_mask = Variable(ggI.data.new(ggI.size()).zero_()).masked_fill_(target == 1, 1)
         target_neg_1_and_input_used = ((target == -1) + ((ctx.margin - input) >= 0) == 2).type_as(ggI)
         ggO = (ggI * target_1_mask - ggI * target_neg_1_and_input_used).sum() / div_factor
 
