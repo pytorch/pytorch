@@ -289,24 +289,18 @@ def apply_dot_attention(
     # [batch_size, decoder_state_dim, 1]
     expanddims_squeezed_weighted_decoder_hidden_state = model.net.ExpandDims(
         squeezed_weighted_decoder_hidden_state,
-        s(scope, 'expanddims_squeezed_weighted_decoder_hidden_state'),
+        squeezed_weighted_decoder_hidden_state,
         dims=[2],
-    )
-
-    # [batch_size, encoder_length, encoder_output_dim]
-    encoder_outputs_for_dot_product = model.net.Transpose(
-        encoder_outputs_transposed,
-        s(scope, 'encoder_outputs_for_dot_product'),
-        axes=[0, 2, 1],
     )
 
     # [batch_size, encoder_output_dim, 1]
     attention_logits_transposed = model.net.BatchMatMul(
         [
-            encoder_outputs_for_dot_product,
+            encoder_outputs_transposed,
             expanddims_squeezed_weighted_decoder_hidden_state,
         ],
         s(scope, 'attention_logits'),
+        trans_a=1,
     )
 
     # [batch_size, encoder_length, 1]
