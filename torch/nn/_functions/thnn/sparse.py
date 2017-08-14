@@ -10,12 +10,10 @@ class Embedding(Function):
 
     @staticmethod
     def _renorm(ctx, indices, weight, max_norm, norm_type):
-        if indices.dim() == 2:
-            indices = indices.clone().view(-1)
-
+        # clone indices since LookupTable_renorm modifies it in-place
         ctx._backend.LookupTable_renorm(
             ctx._backend.library_state,
-            indices,
+            indices.clone().view(-1),
             weight,
             max_norm,
             norm_type
