@@ -126,8 +126,9 @@ std::string ExportGraph(std::unique_ptr<Graph>& g) {
 
       bool done = false;
       do {
+        if (!PyObject_HasAttrString(value->pyobj.get(), "primspec")) break;
         THPObjectPtr primspec_fn(PyObject_GetAttrString(value->pyobj.get(), "primspec"));
-        if (!primspec_fn) break;
+        if (!primspec_fn) throw python_error();
         int num_args = node->inputs().size();
         THPObjectPtr py_primspec_args(PyTuple_New(num_args));
         // Symbolically represent tensors as longs for now.  Hypothetically,
