@@ -19,10 +19,10 @@ constexpr size_t VEC_SIZE = 3;
 
 int main() {
   THLongStorage *storage1 = THLongStorage_newWithSize(STORAGE_SIZE);
-  long *data = storage1->data;
-  for (long i = 0; i < STORAGE_SIZE; i++)
+  int64_t *data = storage1->data;
+  for (int64_t i = 0; i < STORAGE_SIZE; i++)
     data[i] = i;
-  std::vector<long> vec(VEC_SIZE, 7);  // VEC_SIZE sevens
+  std::vector<int64_t> vec(VEC_SIZE, 7);  // VEC_SIZE sevens
   std::unique_ptr<RPCMessage> msg_ptr =
     packMessage(1, 1.0f, 100l, -12, LLONG_MAX, storage1, vec);
   auto &msg = *msg_ptr;
@@ -35,21 +35,21 @@ int main() {
   assert(arg1 == 1.0);
 
   assert(peekType(msg) == thpp::Type::LONG);
-  long long arg2 = unpackInteger(msg);
+  int64_t arg2 = unpackInteger(msg);
   assert(arg2 == 100);
 
   assert(peekType(msg) == thpp::Type::INT);
-  long long arg3 = unpackInteger(msg);
+  int64_t arg3 = unpackInteger(msg);
   assert(arg3 == -12);
 
   assert(peekType(msg) == thpp::Type::LONG_LONG);
-  long long arg4 = unpackInteger(msg);
+  int64_t arg4 = unpackInteger(msg);
   assert(arg4 == LLONG_MAX);
 
   assert(peekType(msg) == thpp::Type::LONG_STORAGE);
   THLongStorage *storage2 = unpackTHLongStorage(msg);
   assert(storage2->size == STORAGE_SIZE);
-  for (long i = 0; i < STORAGE_SIZE; i++)
+  for (int64_t i = 0; i < STORAGE_SIZE; i++)
     assert(storage2->data[i] == i);
   
   int vec_size = unpackInteger(msg);
