@@ -23,6 +23,14 @@
 #define NUMPY_TYPE_ENUM NPY_UINT8
 #endif
 
+#define COPY_FROM_ARRAY(ELTYPE) \
+{ \
+  ELTYPE *data = (ELTYPE*)PyArray_DATA(array); \
+  for (ptrdiff_t i=0; i<storage_size; i++) {   \
+    storage->data[i] = data[i];                \
+  }                                            \
+}
+
 #endif
 
 PyObject *THPTensorClass = NULL;
@@ -117,11 +125,12 @@ THTensor* THPTensor_(fromNumpy)(PyObject *numpy_array) {
 
     THLongStoragePtr strides(THLongStorage_newWithSize(ndim));
     long *strides_data = strides->data;
+    long elsize = PyArray_ITEMSIZE(array);
     for (int i = 0; i < ndim; ++i) {
       // numpy uses bytes, torch uses elements
       // we have to cast sizeof to long, because otherwise stride gets
       // promoted to size_t, and is UB for negative values
-      strides_data[i] = PyArray_STRIDE(array, i) / ((long)sizeof(real));
+      strides_data[i] = PyArray_STRIDE(array, i) / elsize;
       if (strides_data[i] < 0) {
         THPUtils_setError("some of the strides of a given numpy array are "
             "negative. This is currently not supported, but will be added in "
@@ -132,13 +141,28 @@ THTensor* THPTensor_(fromNumpy)(PyObject *numpy_array) {
       storage_size += strides_data[i] * (sizes_data[i] - 1);
     }
 
-    THStoragePtr storage(THStorage_(newWithDataAndAllocator)(
-        (real*)PyArray_DATA(array),
-        storage_size,
-        // See Note [Numpy memory management]
-        &THNumpyArrayAllocator,
-        new NumpyArrayAllocator(numpy_array)));
-    THTensor *result = THTensor_(newWithStorage)(storage, 0, sizes, strides);
+    THTensor *result = NULL;
+    if (PyArray_TYPE(array) == NUMPY_TYPE_ENUM) {
+      THStoragePtr storage(THStorage_(newWithDataAndAllocator)(
+          (real*)PyArray_DATA(array),
+          storage_size,
+          // See Note [Numpy memory management]
+          &THNumpyArrayAllocator,
+          new NumpyArrayAllocator(numpy_array)));
+      result = THTensor_(newWithStorage)(storage, 0, sizes, strides);
+    }
+    else {
+      THStoragePtr storage(THStorage_(newWithSize)(storage_size));
+      switch (PyArray_TYPE(array)) {
+        case NPY_DOUBLE: COPY_FROM_ARRAY(double);  break;
+        case NPY_FLOAT:  COPY_FROM_ARRAY(float);   break;
+        case NPY_INT64:  COPY_FROM_ARRAY(int64_t); break;
+        case NPY_INT32:  COPY_FROM_ARRAY(int32_t); break;
+        case NPY_INT16:  COPY_FROM_ARRAY(int16_t); break;
+        case NPY_UINT8:  COPY_FROM_ARRAY(uint8_t); break;
+      }
+      result = THTensor_(newWithStorage)(storage, 0, sizes, strides);
+    }
     return result;
   } else {
     THPUtils_setError("the given numpy array has zero-sized dimensions. "
@@ -227,8 +251,7 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
 
 #ifdef NUMPY_TYPE_ENUM
   // torch.Tensor(np.ndarray array)
-  if (num_args == 1 && PyArray_Check(first_arg) &&
-      PyArray_TYPE((PyArrayObject*)first_arg) == NUMPY_TYPE_ENUM) {
+  if (num_args == 1 && PyArray_Check(first_arg)) {
     THPObjectPtr numpy_array(
       PyArray_FromArray((PyArrayObject*)first_arg, nullptr, NPY_ARRAY_BEHAVED));
     self->cdata = THPTensor_(fromNumpy)(numpy_array.get());
