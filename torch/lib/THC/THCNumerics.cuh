@@ -44,6 +44,7 @@ struct THCNumerics<char> {
   static inline __host__ __device__ bool eq(char a, char b) { return a == b; }
   static inline __host__ __device__ bool ne(char a, char b) { return a != b; }
 
+  static inline __host__ __device__  char neg(char a) { return -a; }
   static inline __host__ __device__  char add(char a, char b) { return a + b; }
   static inline __host__ __device__  char mul(char a, char b) { return a * b; }
   static inline __host__ __device__  char sub(char a, char b) { return a - b; }
@@ -63,6 +64,7 @@ struct THCNumerics<short> {
   static inline __host__ __device__ bool eq(short a, short b) { return a == b; }
   static inline __host__ __device__ bool ne(short a, short b) { return a != b; }
 
+  static inline __host__ __device__  short neg(short a) { return -a; }
   static inline __host__ __device__  short add(short a, short b) { return a + b; }
   static inline __host__ __device__  short mul(short a, short b) { return a * b; }
   static inline __host__ __device__  short sub(short a, short b) { return a - b; }
@@ -82,6 +84,7 @@ struct THCNumerics<int> {
   static inline __host__ __device__ bool eq(int a, int b) { return a == b; }
   static inline __host__ __device__ bool ne(int a, int b) { return a != b; }
 
+  static inline __host__ __device__  int neg(int a) { return -a; }
   static inline __host__ __device__  int add(int a, int b) { return a + b; }
   static inline __host__ __device__  int mul(int a, int b) { return a * b; }
   static inline __host__ __device__  int sub(int a, int b) { return a - b; }
@@ -101,6 +104,7 @@ struct THCNumerics<long> {
   static inline __host__ __device__ bool eq(long a, long b) { return a == b; }
   static inline __host__ __device__ bool ne(long a, long b) { return a != b; }
 
+  static inline __host__ __device__  long neg(long a) { return -a; }
   static inline __host__ __device__  long add(long a, long b) { return a + b; }
   static inline __host__ __device__  long mul(long a, long b) { return a * b; }
   static inline __host__ __device__  long sub(long a, long b) { return a - b; }
