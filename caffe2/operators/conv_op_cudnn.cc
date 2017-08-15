@@ -462,6 +462,9 @@ bool CudnnConvOp::DoRunWithType() {
       CUDNN_ENFORCE(cudnnSetConvolutionMathType(
             conv_desc_, CUDNN_TENSOR_OP_MATH));
     }
+
+    // enable cuDNN conv groups
+    CUDNN_CHECK(cudnnSetConvolutionGroupCount(conv_desc_, group_));
 #endif
 
     if (force_algo_[ALGO_FWD] >= 0) {
@@ -524,7 +527,26 @@ bool CudnnConvOp::DoRunWithType() {
   }
 
   // Now, actually run the computation.
-  // Filter
+  // Run directly through cuDNN if possible
+#if CUDNN_VERSION_MIN(7,0,0)
+  cudnn_wrapper_.with_cudnn_state(cudnn_state_, [&](CuDNNState* state) {
+    CUDNN_ENFORCE(cudnnConvolutionForward(
+        state->cudnn_handle(),
+        cudnnTypeWrapper<T_X>::kOne(),
+        bottom_desc_,
+        X.template data<T_X>(),
+        filter_desc_,
+        filter.template data<T_W>(),
+        conv_desc_,
+        algo_,
+        state->workspace().get(cudnn_ws_nbytes_),
+        cudnn_ws_nbytes_,
+        cudnnTypeWrapper<T_Y>::kZero(),
+        top_desc_,
+        Y->template mutable_data<T_Y>()));
+  });
+#else
+  // otherwise manually run through groups
   for (int i = 0; i < group_; ++i) {
     cudnn_wrapper_.with_cudnn_state(cudnn_state_, [&](CuDNNState* state) {
       CUDNN_ENFORCE(cudnnConvolutionForward(
@@ -543,6 +565,7 @@ bool CudnnConvOp::DoRunWithType() {
           Y->template mutable_data<T_Y>() + i * group_offset_Y));
     });
   }
+#endif
   // Bias
   if (InputSize() == 3) {
     auto& bias = Input(BIAS);
@@ -796,9 +819,12 @@ bool CudnnConvGradientOp::DoRunWithType() {
       CUDNN_ENFORCE(cudnnSetConvolutionMathType(
             conv_desc_, CUDNN_TENSOR_OP_MATH));
     }
-#endif
-    // Set the workspace
 
+    // set cuDNN groups if appropriate
+    CUDNN_CHECK(cudnnSetConvolutionGroupCount(conv_desc_, group_));
+#endif
+
+    // Set the workspace
     size_t bwd_filter_ws_size, bwd_data_ws_size;
 
     // Choose dW algorithm
@@ -955,6 +981,43 @@ bool CudnnConvGradientOp::DoRunWithType() {
         dbias->template mutable_data<T_DB>()));
   }
 
+#if CUDNN_VERSION_MIN(7,0,0)
+  cudnn_wrapper_.with_cudnn_state(cudnn_state_, [&](CuDNNState* state) {
+    CUDNN_ENFORCE(cudnnConvolutionBackwardFilter(
+        state->cudnn_handle(),
+        cudnnTypeWrapper<T_X>::kOne(),
+        bottom_desc_,
+        X.template data<T_X>(),
+        top_desc_,
+        dY.template data<T_DY>(),
+        conv_desc_,
+        bwd_filter_algo_,
+        state->workspace().get(cudnn_ws_nbytes_),
+        cudnn_ws_nbytes_,
+        cudnnTypeWrapper<T_DW>::kZero(),
+        filter_desc_,
+        dfilter->template mutable_data<T_DW>()));
+    if (OutputSize() == 3 || (no_bias_ && (OutputSize() == 2))) {
+      // Compute the gradient w.r.t. the input.
+      auto* dX = Output(no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD);
+      dX->ResizeLike(X);
+      CUDNN_ENFORCE(cudnnConvolutionBackwardData(
+          state->cudnn_handle(),
+          cudnnTypeWrapper<T_W>::kOne(),
+          filter_desc_,
+          filter.template data<T_W>(),
+          top_desc_,
+          dY.template data<T_DY>(),
+          conv_desc_,
+          bwd_data_algo_,
+          state->workspace().get(cudnn_ws_nbytes_),
+          cudnn_ws_nbytes_,
+          cudnnTypeWrapper<T_DX>::kZero(),
+          bottom_desc_,
+          dX->template mutable_data<T_DX>()));
+    }
+  });
+#else
   for (int i = 0; i < group_; ++i) {
     cudnn_wrapper_.with_cudnn_state(cudnn_state_, [&](CuDNNState* state) {
       CUDNN_ENFORCE(cudnnConvolutionBackwardFilter(
@@ -992,6 +1055,7 @@ bool CudnnConvGradientOp::DoRunWithType() {
       }
     });
   }
+#endif
   return true;
 }
 
