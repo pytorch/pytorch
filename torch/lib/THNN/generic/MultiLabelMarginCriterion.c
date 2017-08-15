@@ -13,8 +13,8 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
 {
   real *input_data, *isTarget_data;
   THIndex_t *target_data;
-  long nframe, dim;
-  long t, d, dt, ddt;
+  int64_t nframe, dim;
+  int64_t t, d, dt, ddt;
   real sum;
 
   THArgCheck((input->nDimension == 1) || (input->nDimension == 2), 2,
@@ -102,8 +102,8 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
   real *gradInput_data;
   THIndex_t *target_data;
   real *isTarget_data;
-  long nframe, dim;
-  long t, d, dt;
+  int64_t nframe, dim;
+  int64_t t, d, dt;
   real g;
 
   THArgCheck((input->nDimension == 1) || (input->nDimension == 2), 2,
