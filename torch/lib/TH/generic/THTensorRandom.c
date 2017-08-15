@@ -24,12 +24,12 @@ void THTensor_(random)(THTensor *self, THGenerator *_generator)
 }
 
 void THTensor_(clampedRandom)(THTensor *self, THGenerator *_generator, long min, long max) {
-  THArgCheck(max > min, 2, "upper bound must be greater than lower bound");
+  THArgCheck(max > min, 2, "max must be greater than min");
   TH_TENSOR_APPLY(real, self, *self_data = (real)((THRandom_random(_generator) % (max - min)) + min);)
 }
 
 void THTensor_(cappedRandom)(THTensor *self, THGenerator *_generator, long max) {
-  THArgCheck(max > 0, 1, "upper bound must be positive");
+  THArgCheck(max > 0, 1, "max must be positive");
   THTensor_(clampedRandom)(self, _generator, 0, max);
 }
 
