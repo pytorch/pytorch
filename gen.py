@@ -68,13 +68,13 @@ if not options.no_cuda:
 densities = ['Dense', 'Sparse']
 
 scalar_types = [
-    ('Byte', 'uint8_t', 'Long', 'unsigned char'),
-    ('Char', 'int8_t', 'Long', 'char'),
+    ('Byte', 'uint8_t', 'Long', 'uint8_t'),
+    ('Char', 'int8_t', 'Long', 'int8_t'),
     ('Double', 'double', 'Double', 'double'),
     ('Float', 'float', 'Double', 'float'),
-    ('Int', 'int', 'Long', 'int'),
-    ('Long', 'int64_t', 'Long', 'long'),
-    ('Short', 'int16_t', 'Long', 'short'),
+    ('Int', 'int', 'Long', 'int32_t'),
+    ('Long', 'int64_t', 'Long', 'int64_t'),
+    ('Short', 'int16_t', 'Long', 'int16_t'),
     ('Half', 'Half', 'Double', 'THHalf'),
 ]
 

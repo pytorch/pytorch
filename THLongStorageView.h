@@ -31,7 +31,7 @@ private:
       storage.data = &one;
       storage.size = 1;
     } else {
-      storage.data = (long*)(ref.data());
+      storage.data = (int64_t*)(ref.data());
       storage.size = ref.size();
     }
     storage.refcount = 0;
@@ -39,7 +39,7 @@ private:
     storage.allocator = nullptr;
     storage.allocatorContext = nullptr;
   }
-  long one;
+  int64_t one;
   THLongStorage storage;
   bool empty_to_null;
 };
