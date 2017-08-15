@@ -1291,6 +1291,7 @@ def _InferBlobDevice(model):
                     step_proto = caffe2_pb2.NetDef()
                     protobuftx.Merge(step_arg.s.decode("ascii"), step_proto)
                     map_ops(step_proto)
+    map_ops(model.param_init_net.Proto())
     map_ops(model.net.Proto())
     model._blob_to_device = mapping
 
