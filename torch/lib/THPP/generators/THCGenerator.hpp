@@ -13,8 +13,8 @@ struct THCGenerator : public Generator {
   virtual THCGenerator& copy(const Generator& from) override;
   virtual THCGenerator& free() override;
 
-  virtual unsigned long seed() override;
-  virtual THCGenerator& manualSeed(unsigned long seed) override;
+  virtual uint64_t seed() override;
+  virtual THCGenerator& manualSeed(uint64_t seed) override;
 
 protected:
   THCState *state;
