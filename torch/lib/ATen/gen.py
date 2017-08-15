@@ -1,5 +1,6 @@
 from optparse import OptionParser
 import yaml
+import platform
 
 import cwrap_parser
 import nn_parse
@@ -66,13 +67,19 @@ if not options.no_cuda:
 
 densities = ['Dense', 'Sparse']
 
+long_name = None
+if platform.system() != 'Windows':
+    long_name = 'long'
+else:
+    long_name = 'long long'
+
 scalar_types = [
     ('Byte', 'uint8_t', 'Long', 'unsigned char'),
-    ('Char', 'int8_t', 'Long', 'char'),
+    ('Char', 'int8_t', 'Long', 'signed char'),
     ('Double', 'double', 'Double', 'double'),
     ('Float', 'float', 'Double', 'float'),
     ('Int', 'int', 'Long', 'int'),
-    ('Long', 'int64_t', 'Long', 'long'),
+    ('Long', 'int64_t', 'Long', long_name),
     ('Short', 'int16_t', 'Long', 'short'),
     ('Half', 'Half', 'Double', 'THHalf'),
 ]
