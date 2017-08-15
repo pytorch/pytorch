@@ -1,6 +1,7 @@
 #include "torch/csrc/jit/graph_exporter.h"
 #include "torch/csrc/utils/python_numbers.h"
 #include "torch/csrc/utils/python_strings.h"
+#include "torch/csrc/Exceptions.h"
 
 #include <toffee/toffee.pb.h>
 #include <google/protobuf/text_format.h>
@@ -45,6 +46,7 @@ std::string ExportGraph(std::unique_ptr<Graph>& g) {
       p_n->add_output(node_name(node));
     }
     // See https://fb.quip.com/TbPaAzijnd3e
+    // TODO: Delete these
     IR_IF(node, Add)
       p_n->set_op_type("Add");
     IR_ELSEIF(Mul)
@@ -136,7 +138,12 @@ std::string ExportGraph(std::unique_ptr<Graph>& g) {
           PyTuple_SET_ITEM(py_primspec_args.get(), i, PyLong_FromLong(i)); // steals!
         }
         THPObjectPtr raw_output(PyObject_CallObject(primspec_fn, py_primspec_args));
-        if (!raw_output) break;
+        if (!raw_output) {
+          throw python_error();
+        }
+        if (raw_output == Py_None) {
+          break;
+        }
         if (!PyDict_Check(raw_output.get())) throw std::runtime_error("primspec did not return a dict");
 
         PyObject* py_op_type = PyDict_GetItemString(raw_output.get(), "name");
@@ -165,7 +172,7 @@ std::string ExportGraph(std::unique_ptr<Graph>& g) {
           while (PyDict_Next(py_attrs, &pos, &key, &value)) {
             toffee::AttributeProto* attr = p_n->add_attribute();
             if (!THPUtils_checkString(key)) throw std::runtime_error("non-string key in attrs from primspec");
-            p_n->set_name(THPUtils_unpackString(key));
+            attr->set_name(THPUtils_unpackString(key));
             if (THPUtils_checkLong(value)) {
               attr->set_i(THPUtils_unpackLong(value));
             } else if (THPUtils_checkDouble(value)) { // order matters, since all longs are doubles

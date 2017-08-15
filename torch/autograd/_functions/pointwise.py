@@ -1,3 +1,5 @@
+import torch
+
 from itertools import repeat
 
 from ..._thnn import type2backend
@@ -53,6 +55,12 @@ class Log1p(Function):
 class Tanh(InplaceFunction):
 
     @staticmethod
+    def primspec(i, inplace=False):
+        if inplace:
+            return None
+        return torch.toffee.op("TanH", i)
+
+    @staticmethod
     def forward(ctx, i, inplace=False):
         if inplace:
             ctx.mark_dirty(i)
@@ -76,6 +84,12 @@ class Tanh(InplaceFunction):
 
 
 class Sigmoid(InplaceFunction):
+
+    @staticmethod
+    def primspec(i, inplace=False):
+        if inplace:
+            return None
+        return torch.toffee.op("Sigmoid", i)
 
     @staticmethod
     def forward(ctx, i, inplace=False):

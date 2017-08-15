@@ -1,10 +1,17 @@
 import torch
+import torch.toffee
 from ..function import Function, InplaceFunction
 from .utils import maybe_unexpand, maybe_unexpand_or_view
 import math
 
 
 class Add(InplaceFunction):
+
+    @staticmethod
+    def primspec(a, b, inplace=False):
+        if inplace:
+            return None
+        return torch.toffee.op("Add", a, b)
 
     @staticmethod
     def forward(ctx, a, b, inplace=False):
@@ -39,6 +46,12 @@ class Sub(InplaceFunction):
 
 
 class Mul(Function):
+
+    @staticmethod
+    def primspec(a, b, inplace=False):
+        if inplace:
+            return None
+        return torch.toffee.op("Mul", a, b)
 
     @staticmethod
     def forward(ctx, a, b):
@@ -214,6 +227,12 @@ class PowConstant(Function):
 
 
 class Negate(InplaceFunction):
+
+    @staticmethod
+    def primspec(i, inplace=False):
+        if inplace:
+            return None
+        return torch.toffee.op("Scale", i, scale=float(-1))
 
     @staticmethod
     def forward(ctx, i, inplace=False):

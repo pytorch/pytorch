@@ -32,8 +32,6 @@ class TestJit(TestCase):
         z = -torch.sigmoid(torch.tanh(x * (x + y)))
         torch._C._tracer_exit((z,))
         torch._C._jit_pass_lint(trace)
-        torch._C._jit_pass_init(trace)
-        torch._C._jit_pass_lint(trace)
         self.assertExpected(torch._C._jit_pass_export(trace))
 
     def test_lstm(self):
