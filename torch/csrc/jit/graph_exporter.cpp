@@ -1,5 +1,6 @@
 #include "torch/csrc/jit/graph_exporter.h"
 #include "torch/csrc/utils/python_numbers.h"
+#include "torch/csrc/utils/python_strings.h"
 
 #include <toffee/toffee.pb.h>
 #include <google/protobuf/text_format.h>
@@ -123,20 +124,85 @@ std::string ExportGraph(std::unique_ptr<Graph>& g) {
 
       bool done = false;
       do {
-        /*
         THPObjectPtr primspec_fn(PyObject_GetAttrString(value->pyobj.get(), "primspec"));
         if (!primspec_fn) break;
-        THPObjectPtr py_primspec_args(PyTuple_New());
+        int num_args = node->inputs().size();
+        THPObjectPtr py_primspec_args(PyTuple_New(num_args));
+        // Symbolically represent tensors as longs for now.  Hypothetically,
+        // we could pass a Variable in instead, which could allow for
+        // "modifications" to the inputs before they get glommed into the
+        // Toffee IR.
+        for (int i = 0; i < num_args; ++i) {
+          PyTuple_SET_ITEM(py_primspec_args.get(), i, PyLong_FromLong(i)); // steals!
+        }
         THPObjectPtr raw_output(PyObject_CallObject(primspec_fn, py_primspec_args));
         if (!raw_output) break;
+        if (!PyDict_Check(raw_output.get())) throw std::runtime_error("primspec did not return a dict");
 
-        // NO ERROR CHECKING WHATSOVER!!!
-        PyObject* py_op_type = PyDict_GetItem(raw_output.get(), THPUtils_packString("name"));
-        PyObject* py_inputs = PyDict_GetItem(raw_output.get(), THPUtils_packString("inputs"));
-        PyObject* py_attrs = PyDict_GetItem(raw_output.get(), THPUtils_packString("attrs"));
+        PyObject* py_op_type = PyDict_GetItemString(raw_output.get(), "name");
+        if (!py_op_type) throw std::runtime_error("primspec missing name key");
+        if (!THPUtils_checkString(py_op_type)) throw std::runtime_error("primspec returned a non-string name");
+        p_n->set_op_type(THPUtils_unpackString(py_op_type));
+
+        PyObject* py_inputs = PyDict_GetItemString(raw_output.get(), "inputs");
+        if (py_inputs) {
+          if (!PyTuple_Check(py_inputs)) throw std::runtime_error("primspec returned non-tuple inputs");
+
+          p_n->clear_input();
+          Py_ssize_t num_inputs = PyTuple_GET_SIZE(py_inputs);
+          for (int i = 0; i < num_inputs; i++) {
+            // TODO: better error message when at is out of bounds
+            p_n->add_input(node_name(node->inputs().at(PyLong_AsLong(PyTuple_GET_ITEM(py_inputs, i)))));
+          }
+        }
+        // otherwise, default to preserving the inputs directly
+
+        PyObject* py_attrs = PyDict_GetItemString(raw_output.get(), "attrs");
+        if (py_attrs) {
+          if (!PyDict_Check(py_attrs)) throw std::runtime_error("primspec did not return a dict attrs entry");
+          PyObject *key, *value;
+          Py_ssize_t pos = 0;
+          while (PyDict_Next(py_attrs, &pos, &key, &value)) {
+            toffee::AttributeProto* attr = p_n->add_attribute();
+            if (!THPUtils_checkString(key)) throw std::runtime_error("non-string key in attrs from primspec");
+            p_n->set_name(THPUtils_unpackString(key));
+            if (THPUtils_checkLong(value)) {
+              attr->set_i(THPUtils_unpackLong(value));
+            } else if (THPUtils_checkDouble(value)) { // order matters, since all longs are doubles
+              attr->set_f(THPUtils_unpackDouble(value)); // TODO: precision?!
+            } else if (THPUtils_checkString(value)) {
+              // TODO: binary data?!
+              attr->set_s(THPUtils_unpackString(value));
+            } else if (PyTuple_Check(value)) {
+              Py_ssize_t num_value_items = PyTuple_GET_SIZE(value);
+              int seen_int = 0;
+              int seen_float = 0;
+              int seen_string = 0;
+              for (Py_ssize_t i = 0; i < num_value_items; i++) {
+                if (THPUtils_checkLong(value)) {
+                  attr->add_ints(THPUtils_unpackLong(value));
+                  seen_int = 1;
+                } else if (THPUtils_checkDouble(value)) { // order matters, since all longs are doubles
+                  attr->add_floats(THPUtils_unpackDouble(value)); // TODO: precision?!
+                  seen_float = 1;
+                } else if (THPUtils_checkString(value)) {
+                  // TODO: binary data?!
+                  attr->add_strings(THPUtils_unpackString(value));
+                  seen_string = 1;
+                } else {
+                  // TODO: better message
+                  throw std::runtime_error("unrecognized type of tuple entry in primspec attrs");
+                }
+                // TODO: Tensor constants?
+              }
+              if (seen_int + seen_float + seen_string > 1) {
+                throw std::runtime_error("cannot have multiple types in attribute tuple");
+              }
+            }
+          }
+        }
 
         done = true;
-        */
       } while (0);
 
       if (!done) {
