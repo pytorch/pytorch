@@ -50,7 +50,7 @@ auto ${Storage}::free() -> ${Storage}& {
   return *this;
 }
 
-auto ${Storage}::resize(long new_size) -> ${Storage}& {
+auto ${Storage}::resize(int64_t new_size) -> ${Storage}& {
   ${THStorage}_resize(${state,} storage, new_size);
   return *this;
 }

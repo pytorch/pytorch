@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ATen/ATenGeneral.h"
 #include "ATen/Scalar.h"
 #include "ATen/Type.h"
 #include "ATen/TypeMethods.h"
