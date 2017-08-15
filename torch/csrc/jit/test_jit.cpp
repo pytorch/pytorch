@@ -6,6 +6,8 @@
 #include "torch/csrc/jit/code_template.h"
 #include "torch/csrc/jit/assert.h"
 #include "torch/csrc/jit/ir.h"
+#include "torch/csrc/jit/attributes.h"
+#include "torch/csrc/jit/interned_strings.h"
 
 namespace torch { namespace jit {
 
@@ -168,10 +170,47 @@ static void fusionTests() {
 void fusionTests() {}
 #endif
 
+void attributesTest() {
+  auto one = kParam;
+  auto two = kReturn;
+  auto three = kConstant;
+  Attributes attr;
+  attr.f_(one,3.4).i_(two,5).s_(three,"what");
+  assert(attr.f(one) == 3.4);
+  assert(attr.s(three) == "what");
+  assert(attr.i(two) == 5);
+  attr.s_(one,"no");
+  assert(attr.s(one) == "no");
+  assert(attr.hasAttribute(three));
+  assert(!attr.hasAttribute(four));
+  attr.ss_(two, {"hi", "now"});
+  assert(attr.ss(two).at(1) == "now");
+
+  Attributes attr2 = attr;
+  assert(two.s(one) == "no");
+  attr2.f_(one,5);
+  assert(attr.s(one) == "no");
+  assert(attr2.f(one) == 5);
+}
+
+void internedStringsTests () {
+
+  assert(kParam == stringToSymbol("Param"));
+  assert(kReturn == stringToSymbol("Return"));
+  assert(symbolToString(kReturn) == "Return");
+  assert(stringToSymbol("What") == kLastSymbol);
+  assert(stringToSymbol("What2") == kLastSymbol+1);
+  assert(stringToSymbol("What") == kLastSymbol);
+  assert(stringToSymbol("What2") == kLastSymbol+1);
+  assert(symbolToString(kLastSymbol+1) == "What2");
+}
+
 
 void runJITCPPTests() {
   codeTemplateTest();
   fusionTests();
+  attributesTest();
+  internedStringsTests();
 }
 
 }}
