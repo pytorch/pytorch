@@ -36,6 +36,8 @@ MPI supports cuda only if the implementation used to build PyTorch supports it.
 | barrier    | ✓   | ✘   | ✓   | ✓   | ✓   | ?   |
 +------------+-----+-----+-----+-----+-----+-----+
 
+.. _distributed-basics:
+
 Basics
 ------
 
