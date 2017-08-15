@@ -2845,10 +2845,12 @@ TENSOR_IMPLEMENT_LOGICAL(ne,!=)
 
 #if defined(TH_REAL_IS_LONG)
 LAB_IMPLEMENT_BASIC_FUNCTION(abs,labs)
+LAB_IMPLEMENT_BASIC_FUNCTION(neg,-)
 #endif /* long only part */
 
 #if defined(TH_REAL_IS_SHORT) || defined(TH_REAL_IS_INT)
 LAB_IMPLEMENT_BASIC_FUNCTION(abs,abs)
+LAB_IMPLEMENT_BASIC_FUNCTION(neg,-)
 #endif /* int only part */
 
 #if defined(TH_REAL_IS_BYTE)
