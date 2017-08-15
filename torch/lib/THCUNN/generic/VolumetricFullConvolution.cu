@@ -51,12 +51,12 @@ static inline void THNN_(VolumetricFullConvolution_shapeCheck)(
     dimw++;
   }
 
-  long inputWidth   = input->size[dimw];
-  long inputHeight  = input->size[dimh];
-  long inputDepth  = input->size[dimd];
-  long outputWidth  = (inputWidth - 1) * dW - 2*padW + kW + adjW;
-  long outputHeight = (inputHeight - 1) * dH - 2*padH + kH + adjH;
-  long outputDepth = (inputDepth - 1) * dT - 2*padT + kT + adjT;
+  int64_t inputWidth   = input->size[dimw];
+  int64_t inputHeight  = input->size[dimh];
+  int64_t inputDepth  = input->size[dimd];
+  int64_t outputWidth  = (inputWidth - 1) * dW - 2*padW + kW + adjW;
+  int64_t outputHeight = (inputHeight - 1) * dH - 2*padH + kH + adjH;
+  int64_t outputDepth = (inputDepth - 1) * dT - 2*padT + kT + adjT;
 
   if (outputDepth < 1 || outputWidth < 1 || outputHeight < 1)
     THError("Given input size: (%dx%dx%dx%d). Calculated output size: (%dx%dx%dx%d). Output size is too small",
@@ -111,15 +111,15 @@ void THNN_(VolumetricFullConvolution_updateOutput)(
     THCTensor_(resize5d)(state, input, 1, input->size[0], input->size[1], input->size[2], input->size[3]);
   }
 
-  long inputWidth   = input->size[4];
-  long inputHeight  = input->size[3];
-  long inputDepth  = input->size[2];
-  long outputWidth  = (inputWidth - 1) * dW - 2*padW + kW + adjW;
-  long outputHeight = (inputHeight - 1) * dH - 2*padH + kH + adjH;
-  long outputDepth = (inputDepth - 1) * dT - 2*padT + kT + adjT;
+  int64_t inputWidth   = input->size[4];
+  int64_t inputHeight  = input->size[3];
+  int64_t inputDepth  = input->size[2];
+  int64_t outputWidth  = (inputWidth - 1) * dW - 2*padW + kW + adjW;
+  int64_t outputHeight = (inputHeight - 1) * dH - 2*padH + kH + adjH;
+  int64_t outputDepth = (inputDepth - 1) * dT - 2*padT + kT + adjT;
 
   // Batch size + input planes
-  long batchSize = input->size[0];
+  int64_t batchSize = input->size[0];
 
   // Resize output
   THCTensor_(resize5d)(state, output, batchSize, nOutputPlane, outputDepth, outputHeight, outputWidth);
@@ -148,9 +148,9 @@ void THNN_(VolumetricFullConvolution_updateOutput)(
 
     // M,N,K are dims of matrix A and B
     // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
-    long m = weight->size[1] * weight->size[2] * weight->size[3] * weight->size[4];
-    long n = columns->size[1];
-    long k = weight->size[0];
+    int64_t m = weight->size[1] * weight->size[2] * weight->size[3] * weight->size[4];
+    int64_t n = columns->size[1];
+    int64_t k = weight->size[0];
 
     // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
     #ifdef THC_REAL_IS_FLOAT
@@ -182,9 +182,9 @@ void THNN_(VolumetricFullConvolution_updateOutput)(
     // Do Bias after:
     // M,N,K are dims of matrix A and B
     // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
-    long m_ = nOutputPlane;
-    long n_ = outputDepth * outputHeight * outputWidth;
-    long k_ = 1;
+    int64_t m_ = nOutputPlane;
+    int64_t n_ = outputDepth * outputHeight * outputWidth;
+    int64_t k_ = 1;
 
     // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
     if (bias) {
@@ -262,15 +262,15 @@ void THNN_(VolumetricFullConvolution_updateGradInput)(
     THCTensor_(resize5d)(state, gradOutput, 1, gradOutput->size[0], gradOutput->size[1], gradOutput->size[2], gradOutput->size[3]);
   }
 
-  long inputWidth   = input->size[4];
-  long inputHeight  = input->size[3];
-  long inputDepth   = input->size[2];
-  long outputWidth  = (inputWidth - 1) * dW - 2*padW + kW + adjW;
-  long outputHeight = (inputHeight - 1) * dH - 2*padH + kH + adjH;
-  long outputDepth = (inputDepth - 1) * dT - 2*padT + kT + adjT;
+  int64_t inputWidth   = input->size[4];
+  int64_t inputHeight  = input->size[3];
+  int64_t inputDepth   = input->size[2];
+  int64_t outputWidth  = (inputWidth - 1) * dW - 2*padW + kW + adjW;
+  int64_t outputHeight = (inputHeight - 1) * dH - 2*padH + kH + adjH;
+  int64_t outputDepth = (inputDepth - 1) * dT - 2*padT + kT + adjT;
 
   // Batch size + input planes
-  long batchSize = input->size[0];
+  int64_t batchSize = input->size[0];
 
   // Resize output
   THCTensor_(resize5d)(state, gradInput, batchSize, nInputPlane, inputDepth, inputHeight, inputWidth);
@@ -300,9 +300,9 @@ void THNN_(VolumetricFullConvolution_updateGradInput)(
 
     // M,N,K are dims of matrix A and B
     // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
-    long m = weight->size[0];
-    long n = gradColumns->size[1];
-    long k = weight->size[1] * weight->size[2] * weight->size[3] * weight->size[4];
+    int64_t m = weight->size[0];
+    int64_t n = gradColumns->size[1];
+    int64_t k = weight->size[1] * weight->size[2] * weight->size[3] * weight->size[4];
 
     // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
     #ifdef THC_REAL_IS_FLOAT
@@ -386,15 +386,15 @@ void THNN_(VolumetricFullConvolution_accGradParameters)(
     THCTensor_(resize5d)(state, gradOutput, 1, gradOutput->size[0], gradOutput->size[1], gradOutput->size[2], gradOutput->size[3]);
   }
 
-  long inputWidth   = input->size[4];
-  long inputHeight  = input->size[3];
-  long inputDepth   = input->size[2];
-  long outputWidth  = (inputWidth - 1) * dW - 2*padW + kW + adjW;
-  long outputHeight = (inputHeight - 1) * dH - 2*padH + kH + adjH;
-  long outputDepth  = (inputDepth - 1) * dT - 2*padT + kT + adjT;
+  int64_t inputWidth   = input->size[4];
+  int64_t inputHeight  = input->size[3];
+  int64_t inputDepth   = input->size[2];
+  int64_t outputWidth  = (inputWidth - 1) * dW - 2*padW + kW + adjW;
+  int64_t outputHeight = (inputHeight - 1) * dH - 2*padH + kH + adjH;
+  int64_t outputDepth  = (inputDepth - 1) * dT - 2*padT + kT + adjT;
 
   // Batch size + input planes
-  long batchSize = input->size[0];
+  int64_t batchSize = input->size[0];
 
   // Define a buffer of ones, for bias accumulation
   if (ones->nDimension != 3 || ones->size[0]*ones->size[1]*ones->size[2] < outputDepth*outputHeight*outputWidth) {
@@ -427,9 +427,9 @@ void THNN_(VolumetricFullConvolution_accGradParameters)(
 
     // M,N,K are dims of matrix A and B
     // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
-    long n = columns->size[0];   // nOutputPlane * kt * kh * kw
-    long m = input_n->size[0];   // nInputPlane
-    long k = columns->size[1];   // inputHeight * inputWidth
+    int64_t n = columns->size[0];   // nOutputPlane * kt * kh * kw
+    int64_t m = input_n->size[0];   // nInputPlane
+    int64_t k = columns->size[1];   // inputHeight * inputWidth
 
     // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
     #ifdef THC_REAL_IS_FLOAT
@@ -452,8 +452,8 @@ void THNN_(VolumetricFullConvolution_accGradParameters)(
     // Do Bias:
     // M,N,K are dims of matrix A and B
     // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
-    long m_ = nOutputPlane;
-    long k_ = outputDepth * outputHeight * outputWidth;
+    int64_t m_ = nOutputPlane;
+    int64_t k_ = outputDepth * outputHeight * outputWidth;
 
     // Do GEMV (note: this is a bit confusing because gemv assumes column-major matrices)
     if (gradBias) {

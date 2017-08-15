@@ -19,7 +19,7 @@ __global__ void cunn_SpatialClassNLLCriterion_updateOutput_kernel(
           int n_classes,
           int map_nelem,
           int blocks_per_sample,
-          long ignore_index)
+          int64_t ignore_index)
 {
   __shared__ AccumT partial_sums[CUDA_NUM_THREADS];
 
@@ -75,7 +75,7 @@ __global__ void cunn_SpatialClassNLLCriterion_updateGradInput_kernel(
           int n_classes,
           int map_nelem,
           int blocks_per_sample,
-          long ignore_index)
+          int64_t ignore_index)
 {
   if (*total_weight <= 0)
     return;

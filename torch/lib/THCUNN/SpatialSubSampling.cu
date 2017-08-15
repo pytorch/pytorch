@@ -111,7 +111,7 @@ __global__ void subgradweight(Dtype *input, Dtype *gradOutput, Dtype *gradWeight
       Dtype *ptr_input = input + yy*dH*input_w + xx*dW;
       Dtype *ptr_gradOutput = gradOutput + yy*output_w + xx;
       Dtype z = *ptr_gradOutput;
-      long kx, ky;
+      int64_t kx, ky;
       for(ky = 0; ky < kH; ky++) {
         for(kx = 0; kx < kW; kx++) {
           sums[tid] += z * ptr_input[kx];
