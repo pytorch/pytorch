@@ -53,10 +53,10 @@ struct PyMethodDef _THPJIT_methods[] = {
   {"_tracer_enter",   (PyCFunction)THPTracer_enter,           METH_VARARGS, NULL},
   {"_tracer_exit",    (PyCFunction)THPTracer_exit,            METH_VARARGS, NULL},
   {"_jit_createAutogradClosure", (PyCFunction)THPTracer_createAutogradClosure, METH_O, NULL},
-  {"_jit_pass_init", (PyCFunction)wrap_pass<MatchJITOps>, METH_O,       NULL},
-  {"_jit_pass_fuse", (PyCFunction)wrap_pass<FuseGraph>, METH_O,       NULL},
-  {"_jit_pass_dco",  (PyCFunction)wrap_pass<EliminateDeadCode>, METH_O,       NULL},
-  {"_jit_pass_lint", (PyCFunction)wrap_pass<LintGraph>, METH_O,       NULL},
+  {"_jit_pass_init", (PyCFunction)wrap_pass<MatchJITOps>,     METH_O,       "init"},
+  {"_jit_pass_fuse", (PyCFunction)wrap_pass<FuseGraph>,       METH_O,       "fuse"},
+  {"_jit_pass_dco",  (PyCFunction)wrap_pass<EliminateDeadCode>, METH_O,     "dco"},
+  {"_jit_pass_lint", (PyCFunction)wrap_pass<LintGraph>,       METH_O,       "lint"},
   {"_jit_run_cpp_tests",(PyCFunction)run_cpp_tests,           METH_NOARGS,  NULL},
   {NULL}
 };
