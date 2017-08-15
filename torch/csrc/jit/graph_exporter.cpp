@@ -79,9 +79,9 @@ std::string ExportGraph(std::unique_ptr<Graph>& g) {
         // recorded in ConvForward.  So we have to reverse
         // engineer it from the input types...
         // TODO: dynamic_cast ew
-        auto weight_type = node->inputs().at(1)->type();
-        JIT_ASSERT(weight_type->kind() == TypeKind::TensorType);
-        auto weight_size = static_cast<const TensorType*>(weight_type)->sizes();
+        auto weight_type = node->inputs().at(1)->type()->cast<TensorType>();
+        JIT_ASSERT(weight_type);
+        auto weight_size = weight_type->sizes();
         std::vector<int64_t> kernel_size(weight_size.begin() + 2, weight_size.end());
         attr = p_n->add_attribute();
         attr->set_name("kernels");
