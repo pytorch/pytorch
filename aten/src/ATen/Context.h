@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <mutex>
+#include "ATen/ATenGeneral.h"
 #include "ATen/Generator.h"
 #include "ATen/Type.h"
 #include "ATen/Utils.h"
@@ -10,7 +11,7 @@ struct THCState;
 
 namespace at {
 
-class Context {
+class ATen_CLASS  Context {
 public:
   Context();
   Type & getType(Backend p, ScalarType s) {
@@ -52,7 +53,7 @@ private:
   std::once_flag thc_init;
 };
 
-Context & globalContext();
+ATen_CLASS Context & globalContext();
 
 static inline void init() {
   globalContext();

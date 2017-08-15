@@ -31,11 +31,11 @@ CUDAGenerator& CUDAGenerator::free() {
   return *this;
 }
 
-unsigned long CUDAGenerator::seed() {
+uint64_t CUDAGenerator::seed() {
   return THCRandom_initialSeed(context->thc_state);
 }
 
-CUDAGenerator& CUDAGenerator::manualSeed(unsigned long seed) {
+CUDAGenerator& CUDAGenerator::manualSeed(uint64_t seed) {
   THCRandom_manualSeed(context->thc_state, seed);
   return *this;
 }
