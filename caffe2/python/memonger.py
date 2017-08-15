@@ -44,7 +44,7 @@ def share_grad_blobs(
         name = str(b)
         # Note: need to look at _{namescope} pattern as it matches
         # to handle the auto-split gradients
-        return "_grad" in name and (name.startswith(namescope) or
+        return name.endswith("_grad") and (name.startswith(namescope) or
             name.startswith("_" + namescope)) and name not in param_grads
 
     def is_grad_op(op):
@@ -895,6 +895,7 @@ def apply_assignments(net, blob_assignments):
             op.input[i] = canonical_name(input_)
         for i, output in enumerate(op.output):
             op.output[i] = canonical_name(output)
+
 
 
 def apply_recurrent_blob_assignments(op, blob_assignments, canonical_name):
