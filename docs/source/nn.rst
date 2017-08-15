@@ -620,7 +620,7 @@ DataParallel layers (multi-GPU, distributed)
 :hidden:`DistributedDataParallel`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. autoclass:: torch.nn.parallel.DataParallel
+.. autoclass:: torch.nn.parallel.DistributedDataParallel
     :members:
 
 
