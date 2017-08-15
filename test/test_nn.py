@@ -823,6 +823,21 @@ class TestNN(NNTestCase):
         self.assertEqual(output[0][0].sum().data[0], 0)
         self.assertEqual(output[1][2].sum().data[0], 0)
 
+    def test_embedding_max_norm(self):
+        embedding = nn.Embedding(22, 5, max_norm=1.0)
+        input = Variable(torch.LongTensor([2, 8, 8, 6]))
+        output = embedding(input)
+        self.assertEqual(output[1], output[2])
+        self.assertTrue(output.data.norm(p=2, dim=1).le(1).all())
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_embedding_max_norm_cuda(self):
+        embedding = nn.Embedding(22, 5, max_norm=1.0).cuda()
+        input = Variable(torch.LongTensor([2, 8, 8, 6])).cuda()
+        output = embedding(input)
+        self.assertEqual(output[1], output[2])
+        self.assertTrue(output.data.norm(p=2, dim=1).le(1).all())
+
     def test_embedding_functional(self):
         a = Variable(torch.LongTensor([
             [1, 3, 2],
