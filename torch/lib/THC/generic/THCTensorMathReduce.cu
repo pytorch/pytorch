@@ -7,8 +7,9 @@ THCTensor_(sum)(THCState* state, THCTensor *self, THCTensor *src, long dimension
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, src));
   if (!THC_reduceDim(state, self, src,
                      thrust::identity<real>(),
-                     ReduceAdd<real, real>(),
-                     ScalarConvert<int, real>::to(0),
+                     ReduceAdd<real, accreal>(),
+                     ReduceAdd<accreal, accreal>(),
+                     ScalarConvert<int, accreal>::to(0),
                      dimension,
                      keepdim)) {
     THArgCheck(false, 2, CUTORCH_DIM_WARNING);
@@ -22,8 +23,9 @@ THCTensor_(prod)(THCState* state, THCTensor *self, THCTensor *src, long dimensio
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, src));
   if (!THC_reduceDim(state, self, src,
                      thrust::identity<real>(),
-                     ReduceMultiply<real, real>(),
-                     ScalarConvert<int, real>::to(1),
+                     ReduceMultiply<real, accreal>(),
+                     ReduceMultiply<accreal, accreal>(),
+                     ScalarConvert<int, accreal>::to(1),
                      dimension,
                      keepdim)) {
     THArgCheck(false, 2, CUTORCH_DIM_WARNING);
@@ -161,23 +163,23 @@ THCTensor_(norm)(THCState *state, THCTensor* self, THCTensor* src, real value, l
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, src));
   if (THCNumerics<real>::eq(value, ScalarConvert<float, real>::to(0.0))) {
     THC_reduceDim(state, self, src,
-                  TensorNonZeroOp<real>(), ReduceAdd<real, real>(),
-                  ScalarConvert<float, real>::to(0.0), dimension, keepdim);
+                  TensorNonZeroOp<real>(), ReduceAdd<real, accreal>(), ReduceAdd<accreal, accreal>(),
+                  ScalarConvert<float, accreal>::to(0.0), dimension, keepdim);
   } else if (THCNumerics<real>::eq(value, ScalarConvert<float, real>::to(1.0))) {
     THC_reduceDim(state, self, src,
-                  TensorNormOp<real, 1>(value), ReduceAdd<real, real>(),
-                  ScalarConvert<float, real>::to(0.0), dimension, keepdim);
+                  TensorNormOp<real, 1>(value), ReduceAdd<real, accreal>(), ReduceAdd<accreal, accreal>(),
+                  ScalarConvert<float, accreal>::to(0.0), dimension, keepdim);
 
   } else if (THCNumerics<real>::eq(value, ScalarConvert<float, real>::to(2.0))) {
     THC_reduceDim(state, self, src,
-                  TensorNormOp<real, 2>(value), ReduceAdd<real, real>(),
-                  ScalarConvert<float, real>::to(0.0), dimension, keepdim);
+                  TensorNormOp<real, 2>(value), ReduceAdd<real, accreal>(), ReduceAdd<accreal, accreal>(),
+                  ScalarConvert<float, accreal>::to(0.0), dimension, keepdim);
     THCTensor_(pow)(state, self, self, ScalarConvert<float, real>::to(0.5));
 
   } else {
     THC_reduceDim(state, self, src,
-                  TensorNormOp<real, -1>(value), ReduceAdd<real, real>(),
-                  ScalarConvert<float, real>::to(0.0), dimension, keepdim);
+                  TensorNormOp<real, -1>(value), ReduceAdd<real, accreal>(), ReduceAdd<accreal, accreal>(),
+                  ScalarConvert<float, accreal>::to(0.0), dimension, keepdim);
     THCTensor_(pow)(state, self, self, THCNumerics<real>::cinv(value));
   }
 
