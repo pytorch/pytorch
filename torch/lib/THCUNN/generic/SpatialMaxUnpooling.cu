@@ -1,3 +1,4 @@
+#include "hip/hip_runtime.h"
 #ifndef THC_GENERIC_FILE
 #define THC_GENERIC_FILE "generic/SpatialMaxUnpooling.cu"
 #else
@@ -37,10 +38,9 @@ void THNN_(SpatialMaxUnpooling_updateOutput)(
 
   int count = THCTensor_(nElement)(state, input);
 
-  MaxUnpoolForward <<< GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state) >>>
-      (count, THCTensor_(data)(state, input), THCIndexTensor_(data)(state, indices),
+  hipLaunchKernelGGL((MaxUnpoolForward), dim3(GET_BLOCKS(count)), dim3(CUDA_NUM_THREADS), 0, THCState_getCurrentStream(state) , count, THCTensor_(data)(state, input), THCIndexTensor_(data)(state, indices),
       batchSize, nInputPlane, nInputRows, nInputCols, oheight, owidth, THCTensor_(data)(state, output));
-  THCudaCheck(cudaGetLastError());
+  THCudaCheck(hipGetLastError());
 
   if(input->nDimension == 3)
     THCTensor_(resize3d)(state, output, nInputPlane, oheight, owidth);
@@ -90,10 +90,9 @@ void THNN_(SpatialMaxUnpooling_updateGradInput)(
 
   int count = THCTensor_(nElement)(state, input);
 
-  MaxUnpoolBackward <<< GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state) >>>
-      (count, THCTensor_(data)(state, gradOutput), THCIndexTensor_(data)(state, indices),
+  hipLaunchKernelGGL((MaxUnpoolBackward), dim3(GET_BLOCKS(count)), dim3(CUDA_NUM_THREADS), 0, THCState_getCurrentStream(state) , count, THCTensor_(data)(state, gradOutput), THCIndexTensor_(data)(state, indices),
       batchSize, nInputPlane, nInputRows, nInputCols, oheight, owidth, THCTensor_(data)(state, gradInput));
-  THCudaCheck(cudaGetLastError());
+  THCudaCheck(hipGetLastError());
 
   // clean
   THCTensor_(free)(state, input);

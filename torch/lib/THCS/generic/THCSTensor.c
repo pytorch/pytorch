@@ -373,7 +373,7 @@ int THCSTensor_(checkGPU)(THCState *state, unsigned int nSparseTensors, unsigned
 
   int curDev = -1;
   unsigned int nDenseTensors = nTensors - nSparseTensors;
-  THCudaCheck(cudaGetDevice(&curDev));
+  THCudaCheck(hipGetDevice(&curDev));
   va_list(args);
   va_start(args, nTensors);
   int valid = 1;

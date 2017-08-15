@@ -1,3 +1,4 @@
+#include "hip/hip_runtime.h"
 #ifndef THCS_GENERIC_FILE
 #define THCS_GENERIC_FILE "generic/THCSTensor.cu"
 #else
@@ -31,7 +32,7 @@ THCTensor *THCSTensor_(toDense)(THCState *state, THCSTensor *self) {
 
   real one = ScalarConvert<int, real>::to(1);
   THCSTensor_(spcadd)(state, dst, dst, one, self);
-  THCudaCheck(cudaGetLastError());
+  THCudaCheck(hipGetLastError());
   return dst;
 }
 
@@ -65,7 +66,7 @@ THCSTensor *THCSTensor_(newCoalesce)(THCState *state, THCSTensor *self) {
   int nDimI = self->nDimensionI;
   long stride = values->stride[0];
 
-  cudaStream_t stream = THCState_getCurrentStream(state);
+  hipStream_t stream = THCState_getCurrentStream(state);
 
   THCIndexTensor *indices1D = THCSTensor_(newFlattenedIndices)(state, self);
 
@@ -106,7 +107,7 @@ THCSTensor *THCSTensor_(newCoalesce)(THCState *state, THCSTensor *self) {
 
   dim3 grid(THCCeilDiv(newNnz, (long) 4), THCCeilDiv(stride, (long) 128));
   dim3 block(32, 4);
-  THCSTensor_coalesceValuesKernel<real, accreal><<<grid, block, 0, stream>>>(
+  hipLaunchKernelGGL((THCSTensor_coalesceValuesKernel<real, accreal>), dim3(grid), dim3(block), 0, stream, 
     THCIndexTensor_(data)(state, uniqueOffsets),
     THCIndexTensor_(data)(state, origIndices),
     THCTensor_(data)(state, values),
@@ -121,7 +122,7 @@ THCSTensor *THCSTensor_(newCoalesce)(THCState *state, THCSTensor *self) {
   // int blockX = min(stride, (long) 512);
   // dim3 block(blockX, 512 / blockX);
   // int grid = min((long) 1024, THCCeilDiv((long) newNnz * stride, (long) block.x * block.y));
-  // THCSTensor_coalesceValuesKernel_gridStrided<real, accreal><<<grid, block, 0, stream>>>(
+  // hipLaunchKernel(HIP_KERNEL_NAME(THCSTensor_coalesceValuesKernel_gridStrided<real, accreal>), dim3(grid), dim3(block), 0, stream, 
   //   THCIndexTensor_(data)(state, uniqueOffsets),
   //   THCIndexTensor_(data)(state, origIndices),
   //   THCTensor_(data)(state, values),
@@ -168,7 +169,7 @@ THCSTensor *THCSTensor_(newCoalesce)(THCState *state, THCSTensor *self) {
   THCTensor_(free)(state, newValues);
 
   dst->coalesced = 1;
-  THCudaCheck(cudaGetLastError());
+  THCudaCheck(hipGetLastError());
   return dst;
 #undef THRUST_EXEC
 }

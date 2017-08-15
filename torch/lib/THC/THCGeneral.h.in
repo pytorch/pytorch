@@ -6,12 +6,45 @@
 #include "THCThreadLocal.h"
 #undef log1p
 
-#include "cuda.h"
-#include "cuda_runtime.h"
+#include <hip/hip_runtime_api.h>
+
 #include "cublas_v2.h"
 #include "cusparse.h"
 
 #cmakedefine USE_MAGMA
+
+
+// Manual Serialization strategy to bypass the serialization attempted by compiler
+#if defined(__HIP_PLATFORM_HCC__)
+  #include <hip/hip_hcc.h>
+
+  template<typename T>
+    class Magic_wrapper {
+        // TODO: this is temporary, and it has the unpleasant property of
+        //       leaking memory.
+        T* p_ = nullptr;
+    public:
+        Magic_wrapper() = default;
+        explicit
+        Magic_wrapper(const T& x)
+        {
+            hipHostMalloc(&p_, sizeof(T)); new (p_) T{x};
+        }
+
+        operator const T&() const [[hc]] { return p_[0]; }
+    };
+
+  template<typename T>
+  Magic_wrapper<T> make_magic_wrapper(const T& x)
+  {
+    return Magic_wrapper<T>{x};
+  }
+  #define reference_to_const(...) __VA_ARGS__ const&
+#else
+  #define make_magic_wrapper(x) x
+  #define reference_to_const(...) __VA_ARGS__
+#endif
+
 
 #ifdef __cplusplus
 # define THC_EXTERNC extern "C"
@@ -46,11 +79,11 @@ typedef struct THCStream THCStream;
 typedef struct THCState THCState;
 
 typedef struct _THCDeviceAllocator {
-   cudaError_t (*malloc)( void*, void**, size_t,         cudaStream_t);
-   cudaError_t (*realloc)(void*, void**, size_t, size_t, cudaStream_t);
-   cudaError_t (*free)(void*, void*);
-   cudaError_t (*emptyCache)(void*);
-   cudaError_t  (*cacheInfo)(void*, int, size_t*, size_t*);
+   hipError_t (*malloc)( void*, void**, size_t,         hipStream_t);
+   hipError_t (*realloc)(void*, void**, size_t, size_t, hipStream_t);
+   hipError_t (*free)(void*, void*);
+   hipError_t (*emptyCache)(void*);
+   hipError_t  (*cacheInfo)(void*, int, size_t*, size_t*);
    void* state;
 } THCDeviceAllocator;
 
@@ -75,7 +108,7 @@ typedef struct _THCCudaResourcesPerDevice {
 /* Global state to be held in the cutorch table. */
 struct THCState {
   struct THCRNGState* rngState;
-  struct cudaDeviceProp* deviceProperties;
+  struct hipDeviceProp_t* deviceProperties;
   /* Set of all allocated resources. resourcePerDevice[dev]->streams[0] is NULL,
      which specifies the per-device default stream. blasHandles and
      sparseHandles do not have a default and must be explicitly initialized.
@@ -143,7 +176,7 @@ THC_API void THCState_setPeerToPeerAccess(THCState* state, int dev, int devToAcc
 THC_API int THCState_getKernelPeerToPeerAccessEnabled(THCState* state);
 THC_API void THCState_setKernelPeerToPeerAccessEnabled(THCState* state, int val);
 
-THC_API struct cudaDeviceProp* THCState_getCurrentDeviceProperties(THCState* state);
+THC_API struct hipDeviceProp_t* THCState_getCurrentDeviceProperties(THCState* state);
 
 THC_API struct THCRNGState* THCState_getRngState(THCState* state);
 THC_API THAllocator* THCState_getCudaHostAllocator(THCState* state);
@@ -160,12 +193,12 @@ THC_API void THCState_reserveStreams(THCState* state, int numStreams, int nonBlo
 THC_API int THCState_getNumStreams(THCState* state);
 
 /* Stream API */
-THC_API cudaStream_t THCState_getCurrentStreamOnDevice(THCState *state, int device);
-THC_API cudaStream_t THCState_getCurrentStream(THCState *state);
+THC_API hipStream_t THCState_getCurrentStreamOnDevice(THCState *state, int device);
+THC_API hipStream_t THCState_getCurrentStream(THCState *state);
 THC_API struct THCStream* THCState_getStream(THCState *state);
 THC_API void THCState_setStream(THCState *state, struct THCStream* stream);
 /* deprecated stream API */
-THC_API cudaStream_t THCState_getDeviceStream(THCState *state, int device, int stream);
+THC_API hipStream_t THCState_getDeviceStream(THCState *state, int device, int stream);
 THC_API int THCState_getCurrentStreamIndex(THCState *state);
 THC_API void THCState_setCurrentStreamIndex(THCState *state, int stream);
 
@@ -197,19 +230,19 @@ THC_API size_t THCState_getDeviceScratchSpaceSize(THCState* state, int device);
 #define THCublasCheck(err)  __THCublasCheck(err,  __FILE__, __LINE__)
 #define THCusparseCheck(err)  __THCusparseCheck(err,  __FILE__, __LINE__)
 
-THC_API void __THCudaCheck(cudaError_t err, const char *file, const int line);
-THC_API void __THCudaCheckWarn(cudaError_t err, const char *file, const int line);
+THC_API void __THCudaCheck(hipError_t err, const char *file, const int line);
+THC_API void __THCudaCheckWarn(hipError_t err, const char *file, const int line);
 THC_API void __THCublasCheck(cublasStatus_t status, const char *file, const int line);
 THC_API void __THCusparseCheck(cusparseStatus_t status, const char *file, const int line);
 
-THC_API cudaError_t THCudaMalloc(THCState *state, void **ptr, size_t size);
-THC_API cudaError_t THCudaFree(THCState *state, void *ptr);
+THC_API hipError_t THCudaMalloc(THCState *state, void **ptr, size_t size);
+THC_API hipError_t THCudaFree(THCState *state, void *ptr);
 THC_API void* THCudaHostAlloc(THCState *state, size_t size);
 THC_API void THCudaHostFree(THCState *state, void *ptr);
 THC_API void THCudaHostRecord(THCState *state, void *ptr);
 
-THC_API cudaError_t THCudaMemGetInfo(THCState *state, size_t* freeBytes, size_t* totalBytes);
-THC_API cudaError_t THCudaMemGetInfoCached(THCState *state, size_t* freeBytes, size_t* totalBytes, size_t* largestBlock);
+THC_API hipError_t THCudaMemGetInfo(THCState *state, size_t* freeBytes, size_t* totalBytes);
+THC_API hipError_t THCudaMemGetInfoCached(THCState *state, size_t* freeBytes, size_t* totalBytes, size_t* largestBlock);
 THC_API void THCSetGCHandler(THCState *state,
                              void (*torchGCHandlerFunction)(void *data),
                              void *data );

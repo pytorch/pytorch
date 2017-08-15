@@ -1,3 +1,4 @@
+#include "hip/hip_runtime.h"
 #ifndef THC_GENERIC_FILE
 #define THC_GENERIC_FILE "generic/LogSoftMax.cu"
 #else
@@ -77,8 +78,7 @@ void THNN_(LogSoftMax_updateOutput)(
     dim3 grid(batchSize);
     dim3 block(1024);
 
-    cunn_LogSoftMax_updateOutput_kernel<2, real, accreal>
-      <<<grid, block, block.x * sizeof(accreal), THCState_getCurrentStream(state)>>>(
+    hipLaunchKernelGGL((cunn_LogSoftMax_updateOutput_kernel<2, real, accreal>), dim3(grid), dim3(block), block.x * sizeof(accreal), THCState_getCurrentStream(state), 
         THCTensor_(data)(state, output),
         THCTensor_(data)(state, input),
         classSize
@@ -89,18 +89,17 @@ void THNN_(LogSoftMax_updateOutput)(
     dim3 grid(batchSize);
     dim3 block(1024);
 
-    cunn_SpatialLogSoftMax_updateOutput_kernel<real, accreal>
-      <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+    hipLaunchKernelGGL((cunn_SpatialLogSoftMax_updateOutput_kernel<real, accreal>), dim3(grid), dim3(block), 0, THCState_getCurrentStream(state), 
         THCTensor_(data)(state, output),
         THCTensor_(data)(state, input),
         classSize, height, width
     );
   }
 
-  cudaError errcode = cudaGetLastError();
-  if (errcode != cudaSuccess)
+  hipError_t errcode = hipGetLastError();
+  if (errcode != hipSuccess)
   {
-    THError(cudaGetErrorString(errcode));
+    THError(hipGetErrorString(errcode));
   }
 
   THCTensor_(free)(state, input);
@@ -204,8 +203,7 @@ void THNN_(LogSoftMax_updateGradInput)(
     dim3 grid(batchSize);
     dim3 block(1024);
 
-    cunn_LogSoftMax_updateGradInput_kernel<2, real, accreal>
-      <<<grid, block, block.x * sizeof(accreal), THCState_getCurrentStream(state)>>>(
+    hipLaunchKernelGGL((cunn_LogSoftMax_updateGradInput_kernel<2, real, accreal>), dim3(grid), dim3(block), block.x * sizeof(accreal), THCState_getCurrentStream(state), 
         THCTensor_(data)(state, gradInput),
         THCTensor_(data)(state, output),
         THCTensor_(data)(state, gradOutput),
@@ -217,8 +215,7 @@ void THNN_(LogSoftMax_updateGradInput)(
     dim3 grid(batchSize);
     dim3 block(1024);
 
-    cunn_SpatialLogSoftMax_updateGradInput_kernel<real, accreal>
-      <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+    hipLaunchKernelGGL((cunn_SpatialLogSoftMax_updateGradInput_kernel<real, accreal>), dim3(grid), dim3(block), 0, THCState_getCurrentStream(state), 
         THCTensor_(data)(state, gradInput),
         THCTensor_(data)(state, output),
         THCTensor_(data)(state, gradOutput),
@@ -226,10 +223,10 @@ void THNN_(LogSoftMax_updateGradInput)(
     );
   }
 
-  cudaError errcode = cudaGetLastError();
-  if (errcode != cudaSuccess)
+  hipError_t errcode = hipGetLastError();
+  if (errcode != hipSuccess)
   {
-    THError(cudaGetErrorString(errcode));
+    THError(hipGetErrorString(errcode));
   }
 
   THCTensor_(free)(state, gradOutput);

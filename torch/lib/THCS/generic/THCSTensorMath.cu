@@ -1,3 +1,4 @@
+#include "hip/hip_runtime.h"
 #ifndef THCS_GENERIC_FILE
 #define THCS_GENERIC_FILE "generic/THCSTensorMath.cu"
 #else
@@ -248,16 +249,14 @@ void THCSTensor_(spcadd)(THCState *state, THCTensor *r_, THCTensor *dense, real 
     if (sparse->nDimensionV == 0) {
       THArgCheck(getApplyGrid(state, nnz, grid), 1, CUTORCH_DIM_WARNING);
 
-      THCSTensor_sparseElementwiseKernelScalar<TensorCAddOp<real>, unsigned long, real>
-        <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+      hipLaunchKernelGGL((THCSTensor_sparseElementwiseKernelScalar<TensorCAddOp<real>, unsigned long, real>), dim3(grid), dim3(block), 0, THCState_getCurrentStream(state), 
           TensorCAddOp<real>(value),
           V_INFO(r_), I_INFO(indices), V_INFO(values),
           (unsigned long) nnz);
     } else {
       THArgCheck(getApplyGrid(state, nnz * block.x, grid), 1, CUTORCH_DIM_WARNING);
 
-      THCSTensor_sparseElementwiseKernel<TensorCAddOp<real>, unsigned long, real>
-        <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+      hipLaunchKernelGGL((THCSTensor_sparseElementwiseKernel<TensorCAddOp<real>, unsigned long, real>), dim3(grid), dim3(block), 0, THCState_getCurrentStream(state), 
           TensorCAddOp<real>(value),
           V_INFO(r_), I_INFO(indices), V_INFO(values),
           (unsigned long) nnz);
@@ -293,7 +292,7 @@ void THCSTensor_(spcadd)(THCState *state, THCTensor *r_, THCTensor *dense, real 
     THLongStorage_free(r_view_size);
     THCTensor_(free)(state, r_view);
   }
-  THCudaCheck(cudaGetLastError());
+  THCudaCheck(hipGetLastError());
 
   THCIndexTensor_(free)(state, indices);
   THCTensor_(free)(state, values);
@@ -438,20 +437,18 @@ void THCSTensor_(cmul)(THCState *state, THCSTensor *r_, THCSTensor *t_, THCSTens
   dim3 grid;
   THArgCheck(getApplyGrid(state, valueSize, grid), 1, CUTORCH_DIM_WARNING);
 
-  THCSTensor_valueSparseIntersectionKernel<TensorMulOp<real>, unsigned long, real>
-    <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+  hipLaunchKernelGGL((THCSTensor_valueSparseIntersectionKernel<TensorMulOp<real>, unsigned long, real>), dim3(grid), dim3(block), 0, THCState_getCurrentStream(state), 
       TensorMulOp<real>(),
       I_INFO(r_indices_), I_INFO(t_indices_), I_INFO(s_indices_),
       V_INFO(r_values_), V_INFO(t_values_), V_INFO(s_values_),
       (unsigned long)t_nnz, (unsigned long)s_nnz);
-  THCudaCheck(cudaGetLastError());
+  THCudaCheck(hipGetLastError());
 
   THCudaLongStorage *resultNnz = THCudaLongStorage_newWithSize(state, 1);
-  THCSTensor_indexSparseIntersectionKernel<unsigned long, real>
-    <<<1, 1, 0, THCState_getCurrentStream(state)>>>(
+  hipLaunchKernelGGL((THCSTensor_indexSparseIntersectionKernel<unsigned long, real>), dim3(1), dim3(1), 0, THCState_getCurrentStream(state), 
       I_INFO(r_indices_), I_INFO(t_indices_), I_INFO(s_indices_),
       (unsigned long)t_nnz, (unsigned long)s_nnz, (unsigned long*)resultNnz->data);
-  THCudaCheck(cudaGetLastError());
+  THCudaCheck(hipGetLastError());
   r_->nnz = THCudaLongStorage_get(state, resultNnz, 0);
   THCudaLongStorage_free(state, resultNnz);
   r_->coalesced = 1;

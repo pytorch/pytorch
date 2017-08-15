@@ -1,7 +1,7 @@
 #include "THCStream.h"
 
 #include <mutex>
-#include <cuda_runtime_api.h>
+#include <hip/hip_runtime_api.h>
 #include "THAtomic.h"
 
 #define MAX_DEVICES 256
@@ -18,8 +18,8 @@ THCStream* THCStream_new(int flags)
 {
   THCStream* self = (THCStream*) malloc(sizeof(THCStream));
   self->refcount = 1;
-  THCudaCheck(cudaGetDevice(&self->device));
-  THCudaCheck(cudaStreamCreateWithFlags(&self->stream, flags));
+  THCudaCheck(hipGetDevice(&self->device));
+  THCudaCheck(hipStreamCreateWithFlags(&self->stream, flags));
   return self;
 }
 
@@ -36,8 +36,13 @@ THCStream* THCStream_newWithPriority(int flags, int priority)
 {
   THCStream* self = (THCStream*) malloc(sizeof(THCStream));
   self->refcount = 1;
-  THCudaCheck(cudaGetDevice(&self->device));
-  THCudaCheck(cudaStreamCreateWithPriority(&self->stream, flags, priority));
+  THCudaCheck(hipGetDevice(&self->device));
+#ifdef __HIP_PLATFORM_NVCC__
+  THCudaCheck(hipCUDAErrorTohipError(cudaStreamCreateWithPriority(&self->stream, flags, priority)));
+#else
+  // TODO
+  THCudaCheck(hipStreamCreateWithFlags(&self->stream, flags));
+#endif
   return self;
 }
 
@@ -47,7 +52,7 @@ void THCStream_free(THCStream* self)
     return;
   }
   if (THAtomicDecrementRef(&self->refcount)) {
-    THCudaCheckWarn(cudaStreamDestroy(self->stream));
+    THCudaCheckWarn(hipStreamDestroy(self->stream));
     free(self);
   }
 }

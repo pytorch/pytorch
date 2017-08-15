@@ -1,3 +1,4 @@
+#include "hip/hip_runtime.h"
 #include "THCUNN.h"
 #include "common.h"
 #include "THCDeviceTensor.cuh"
@@ -20,10 +21,10 @@ __global__ void cuda_VolumetricDilatedMaxPooling_updateOutput(
   int dilationT, int dilationH, int dilationW,
   int offsetZ)
 {
-  int oColumn = blockIdx.x * blockDim.x + threadIdx.x;
-  int oRow    = blockIdx.y * blockDim.y + threadIdx.y;
-  int oFrame  = (blockIdx.z + offsetZ) % output.getSize(1); // output frame/time
-  int slice   = (blockIdx.z + offsetZ) / output.getSize(1); // output slice/feature
+  int oColumn = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+  int oRow    = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
+  int oFrame  = (hipBlockIdx_z + offsetZ) % output.getSize(1); // output frame/time
+  int slice   = (hipBlockIdx_z + offsetZ) / output.getSize(1); // output slice/feature
 
   if (oRow < output.getSize(2) && oColumn < output.getSize(3))
   {
@@ -84,10 +85,10 @@ __global__ void cuda_VolumetricDilatedMaxPooling_updateOutput(
   int dilationT, int dilationH, int dilationW,
   int offsetZ)
 {
-  int oColumn = blockIdx.x * blockDim.x + threadIdx.x;
-  int oRow    = blockIdx.y * blockDim.y + threadIdx.y;
-  int oFrame  = (blockIdx.z + offsetZ) % output.getSize(1); // output frame/time
-  int slice   = (blockIdx.z + offsetZ) / output.getSize(1); // output slice/feature
+  int oColumn = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+  int oRow    = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
+  int oFrame  = (hipBlockIdx_z + offsetZ) % output.getSize(1); // output frame/time
+  int slice   = (hipBlockIdx_z + offsetZ) / output.getSize(1); // output slice/feature
 
   if (oRow < output.getSize(2) && oColumn < output.getSize(3))
   {
@@ -148,10 +149,10 @@ __global__ void cuda_VolumetricDilatedMaxPooling_updateGradInput(
   int dilationT, int dilationH, int dilationW,
   int offsetZ)
 {
-  int oColumn = blockIdx.x * blockDim.x + threadIdx.x;
-  int oRow    = blockIdx.y * blockDim.y + threadIdx.y;
-  int oFrame  = (blockIdx.z + offsetZ) % gradOutput.getSize(1); // output frame/time
-  int slice   = (blockIdx.z + offsetZ) / gradOutput.getSize(1); // output slice/feature
+  int oColumn = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+  int oRow    = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
+  int oFrame  = (hipBlockIdx_z + offsetZ) % gradOutput.getSize(1); // output frame/time
+  int slice   = (hipBlockIdx_z + offsetZ) / gradOutput.getSize(1); // output slice/feature
 
   if (oRow < gradOutput.getSize(2) && oColumn < gradOutput.getSize(3))
   {

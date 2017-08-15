@@ -19,7 +19,8 @@ from tools.setup_helpers.split_types import split_types
 DEBUG = check_env_flag('DEBUG')
 WITH_DISTRIBUTED = not check_env_flag('NO_DISTRIBUTED')
 WITH_DISTRIBUTED_MW = WITH_DISTRIBUTED and check_env_flag('WITH_DISTRIBUTED_MW')
-WITH_NCCL = WITH_CUDA and platform.system() != 'Darwin'
+# WITH_NCCL = WITH_CUDA and platform.system() != 'Darwin'
+WITH_NCCL = False
 SYSTEM_NCCL = False
 
 
@@ -247,6 +248,7 @@ cwd = os.path.dirname(os.path.abspath(__file__))
 lib_path = os.path.join(cwd, "torch", "lib")
 
 tmp_install_path = lib_path + "/tmp_install"
+hip_include_path = lib_path + "/hip/include"
 include_dirs += [
     cwd,
     os.path.join(cwd, "torch", "csrc"),
@@ -355,6 +357,8 @@ if WITH_CUDA:
         if os.path.exists(cuda_lib_path):
             break
     include_dirs.append(cuda_include_path)
+    include_dirs.append(hip_include_path)
+    extra_compile_args += ['-D__HIP_PLATFORM_NVCC__']
     include_dirs.append(tmp_install_path + "/include/THCUNN")
     library_dirs.append(cuda_lib_path)
     extra_link_args.append('-Wl,-rpath,' + cuda_lib_path)

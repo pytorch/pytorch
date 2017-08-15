@@ -148,6 +148,9 @@ DEPENDS ${all_python} ${all_templates} ${cwrap_files})
 SET(all_cpp ${base_cpp} ${generated_cpp})
 filter_list(generated_h generated_cpp "\\.h$")
 
+INCLUDE_DIRECTORIES("${CMAKE_CURRENT_SOURCE_DIR}/../hip/include")
+ADD_DEFINITIONS(-D__HIP_PLATFORM_NVCC__)
+
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR}/..)
 # so the build can find the generated header files
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_BINARY_DIR})

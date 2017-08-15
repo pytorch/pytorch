@@ -2,7 +2,7 @@
 #define THC_DEVICE_TENSOR_INC
 
 #include <cuda.h>
-#include <cuda_runtime.h>
+#include <hip/hip_runtime.h>
 
 // A CUDA 6.5 compatible version of static_assert. Remove once on CUDA 7.0.
 template <bool>
@@ -233,7 +233,7 @@ class THCDeviceTensor {
 
   /// Zeroes out the tensor asynchronously. Asserts if the contents
   /// in question are not contiguous.
-  void zero(cudaStream_t stream = 0);
+  void zero(hipStream_t stream = 0);
 
  private:
   /// Raw pointer to where the tensor data begins

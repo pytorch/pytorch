@@ -59,9 +59,9 @@ public:
     allocatorContext = ctx;
   }
 
-  cudaError_t malloc(void** ptr, size_t size, cudaStream_t stream);
-  cudaError_t realloc(void** ptr, size_t old_size, size_t size, cudaStream_t stream);
-  cudaError_t free(void* ptr);
+  hipError_t malloc(void** ptr, size_t size, hipStream_t stream);
+  hipError_t realloc(void** ptr, size_t old_size, size_t size, hipStream_t stream);
+  hipError_t free(void* ptr);
 
   THPObjectPtr object;
   THCDeviceAllocator *allocator;

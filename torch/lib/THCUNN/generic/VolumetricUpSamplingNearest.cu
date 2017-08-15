@@ -1,3 +1,4 @@
+#include "hip/hip_runtime.h"
 #ifndef THC_GENERIC_FILE
 #define THC_GENERIC_FILE "generic/VolumetricUpSamplingNearest.cu"
 #else
@@ -115,8 +116,8 @@ void THNN_(VolumetricUpSamplingNearest_updateOutput)(
   dim3 threads(nthreads);
 
   // kernel:
-  vupscale<<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (input_data, output_data, no_elements, scale_factor, d1, d2, d3, d4);
-  THCudaCheck(cudaGetLastError());
+  hipLaunchKernelGGL((vupscale), dim3(blocks), dim3(threads), 0, THCState_getCurrentStream(state), input_data, output_data, no_elements, scale_factor, d1, d2, d3, d4);
+  THCudaCheck(hipGetLastError());
 
   // final cut:
   THCTensor_(free)(state, input);
@@ -176,9 +177,9 @@ void THNN_(VolumetricUpSamplingNearest_updateGradInput)(
   dim3 threads(nthreads);
 
   // kernel:
-  vdownscale<real ,accreal> <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (gradInput_data, gradOutput_data, no_elements,
+  hipLaunchKernelGGL((vdownscale<real ,accreal>), dim3(blocks), dim3(threads), 0, THCState_getCurrentStream(state), gradInput_data, gradOutput_data, no_elements,
     scale_factor, d1, d2, d3, d4);
-  THCudaCheck(cudaGetLastError());
+  THCudaCheck(hipGetLastError());
   THCTensor_(free)(state, gradOutput);
 }
 

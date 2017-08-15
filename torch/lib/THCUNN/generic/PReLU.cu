@@ -1,3 +1,4 @@
+#include "hip/hip_runtime.h"
 #ifndef THC_GENERIC_FILE
 #define THC_GENERIC_FILE "generic/PReLU.cu"
 #else
@@ -32,13 +33,13 @@ void THNN_(PReLU_updateOutput)(
       mapSize *= input->size[d];
     }
     int nElemsPerSample = nOutputPlane * mapSize;
-    preluForward<<<GET_BLOCKS(n), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state)>>>(
+    hipLaunchKernelGGL((preluForward), dim3(GET_BLOCKS(n)), dim3(CUDA_NUM_THREADS), 0, THCState_getCurrentStream(state), 
       THCTensor_(data)(state, output),
       THCTensor_(data)(state, input),
       w,
       n, nElemsPerSample, mapSize
     );
-    THCudaCheck(cudaGetLastError());
+    THCudaCheck(hipGetLastError());
     THCTensor_(free)(state, input);
   }
 
@@ -77,14 +78,14 @@ void THNN_(PReLU_updateGradInput)(
       mapSize *= input->size[d];
     }
     int nElemsPerSample = nOutputPlane * mapSize;
-    preluBackward<<<GET_BLOCKS(n), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state)>>>(
+    hipLaunchKernelGGL((preluBackward), dim3(GET_BLOCKS(n)), dim3(CUDA_NUM_THREADS), 0, THCState_getCurrentStream(state), 
       THCTensor_(data)(state, gradInput),
       THCTensor_(data)(state, input),
       w,
       THCTensor_(data)(state, gradOutput),
       n, nElemsPerSample, mapSize
     );
-    THCudaCheck(cudaGetLastError());
+    THCudaCheck(hipGetLastError());
     THCTensor_(free)(state, input);
     THCTensor_(free)(state, gradOutput);
   }

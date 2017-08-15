@@ -1,3 +1,4 @@
+#include "hip/hip_runtime.h"
 #include "THCUNN.h"
 #include "common.h"
 #include "THCDeviceTensor.cuh"
@@ -16,9 +17,9 @@ __global__ void SpatialReflectionPadding_updateOutput(
   THCDeviceTensor<Dtype, 4> output,
   int padT, int padB, int padL, int padR) {
 
-  int outputPointId = threadIdx.x + blockIdx.x * blockDim.x;
-  int plane = blockIdx.y;
-  int batch = blockIdx.z;
+  int outputPointId = hipThreadIdx_x + hipBlockIdx_x * hipBlockDim_x;
+  int plane = hipBlockIdx_y;
+  int batch = hipBlockIdx_z;
   if (outputPointId >= output.getSize(2) * output.getSize(3)) {
     return;
   }
@@ -52,9 +53,9 @@ __global__ void SpatialReflectionPadding_updateGradInput(
   THCDeviceTensor<Dtype, 4> gradOutput,
   int padT, int padB, int padL, int padR) {
 
-  int outputPointId = threadIdx.x + blockIdx.x * blockDim.x;
-  int plane = blockIdx.y;
-  int batch = blockIdx.z;
+  int outputPointId = hipThreadIdx_x + hipBlockIdx_x * hipBlockDim_x;
+  int plane = hipBlockIdx_y;
+  int batch = hipBlockIdx_z;
   if (outputPointId >= gradOutput.getSize(2) * gradOutput.getSize(3)) {
     return;
   }

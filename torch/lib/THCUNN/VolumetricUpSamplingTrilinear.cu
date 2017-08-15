@@ -1,3 +1,4 @@
+#include "hip/hip_runtime.h"
 // Adapted from interp.cpp from Caffe util by Pauline Luc
 // Originally developed by George Papandreou
 #include "THCUNN.h"
@@ -14,7 +15,7 @@ __launch_bounds__(1024)
 __global__ void caffe_gpu_interp2_kernel(const int n,
     const Acctype rdepth, const Acctype rheight, const Acctype rwidth,
     const THCDeviceTensor<Dtype, 5> data1, THCDeviceTensor<Dtype, 5> data2) {
-  int index = threadIdx.x + blockIdx.x * blockDim.x;
+  int index = hipThreadIdx_x + hipBlockIdx_x * hipBlockDim_x;
   const int batchsize = data1.getSize(0);
   const int channels = data1.getSize(1);
   const int depth1 = data1.getSize(2);
@@ -82,7 +83,7 @@ __launch_bounds__(1024)
 __global__ void caffe_gpu_interp2_kernel_backward(const int n,
     const Acctype rdepth, const Acctype rheight, const Acctype rwidth,
     THCDeviceTensor<Dtype, 5> data1, const THCDeviceTensor<Dtype, 5> data2){
-  int index = threadIdx.x + blockIdx.x * blockDim.x;
+  int index = hipThreadIdx_x + hipBlockIdx_x * hipBlockDim_x;
   const int batchsize = data1.getSize(0);
   const int channels = data1.getSize(1);
   const int depth1 = data1.getSize(2);

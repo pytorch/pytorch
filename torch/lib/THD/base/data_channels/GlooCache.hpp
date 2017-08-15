@@ -171,8 +171,8 @@ struct GlooCache {
 #ifdef WITH_CUDA
     } else if (t_dev == DeviceType::CUDA) {
       auto stream = THCState_getCurrentStream(THDGetCudaState());
-      THCudaCheck(cudaMemcpyAsync(input_buffer, t.data(), tensor_bytes,
-                                  cudaMemcpyDeviceToDevice, stream));
+      THCudaCheck(hipMemcpyAsync(input_buffer, t.data(), tensor_bytes,
+                                  hipMemcpyDeviceToDevice, stream));
 #endif
     } else {
       throw std::runtime_error("unsupported device in memcpy_input");
@@ -189,8 +189,8 @@ struct GlooCache {
 #ifdef WITH_CUDA
     } else if (t_dev == DeviceType::CUDA) {
       auto stream = THCState_getCurrentStream(THDGetCudaState());
-      THCudaCheck(cudaMemcpyAsync(t.data(), output_buffer, tensor_bytes,
-                                  cudaMemcpyDeviceToDevice, stream));
+      THCudaCheck(hipMemcpyAsync(t.data(), output_buffer, tensor_bytes,
+                                  hipMemcpyDeviceToDevice, stream));
 #endif
     } else {
       throw std::runtime_error("unsupported device in memcpy_input");
@@ -312,7 +312,7 @@ struct algorithm_spec<CollectiveType::ALL_REDUCE, T> {
         context,
         std::initializer_list<T*>{reinterpret_cast<T*>(input_buffer.get())},
         count,
-        std::vector<cudaStream_t>{stream});
+        std::vector<hipStream_t>{stream});
 #endif
     } else {
       throw std::runtime_error("unsupported tensor device in Gloo allReduce");
@@ -365,7 +365,7 @@ struct algorithm_spec<CollectiveType::BROADCAST, T> {
         count,
         src_rank,
         0,
-        std::vector<cudaStream_t>{stream});
+        std::vector<hipStream_t>{stream});
 #endif
     } else {
       throw std::runtime_error("unsupported tensor device in Gloo broadcast");

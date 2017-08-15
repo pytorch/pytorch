@@ -59,11 +59,11 @@ inline void CHECK(cudnnStatus_t status)
   }
 }
 
-inline void CUDA_CHECK(cudaError_t error)
+inline void CUDA_CHECK(hipError_t error)
 {
   if (error) {
     std::string msg("CUDA error: ");
-    msg += cudaGetErrorString(error);
+    msg += hipGetErrorString(error);
     throw std::runtime_error(msg);
   }
 }

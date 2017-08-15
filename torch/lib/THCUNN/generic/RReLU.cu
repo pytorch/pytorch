@@ -1,3 +1,4 @@
+#include "hip/hip_runtime.h"
 #ifndef THC_GENERIC_FILE
 #define THC_GENERIC_FILE "generic/RReLU.cu"
 #else
@@ -27,7 +28,7 @@ void THNN_(RReLU_updateOutput)(
     ptrdiff_t n = THCTensor_(nElement)(state, input);
     if (inplace)
     {
-      rreluUpdateOutputTrain<<<NUM_BLOCKS(n), BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
+      hipLaunchKernelGGL((rreluUpdateOutputTrain), dim3(NUM_BLOCKS(n)), dim3(BLOCK_SIZE), 0, THCState_getCurrentStream(state), 
         n, gen_states, input_data, noise_data, input_data, lower, upper);
       THCTensor_(set)(state, output, input);
     }
@@ -35,10 +36,10 @@ void THNN_(RReLU_updateOutput)(
     {
       THCTensor_(resizeAs)(state, output, input);
       real *output_data = THCTensor_(data)(state, output);
-      rreluUpdateOutputTrain<<<NUM_BLOCKS(n), BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
+      hipLaunchKernelGGL((rreluUpdateOutputTrain), dim3(NUM_BLOCKS(n)), dim3(BLOCK_SIZE), 0, THCState_getCurrentStream(state), 
         n, gen_states, input_data, noise_data, output_data, lower, upper);
     }
-    THCudaCheck(cudaGetLastError());
+    THCudaCheck(hipGetLastError());
     THCTensor_(free)(state, input);
   }
   else

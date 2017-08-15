@@ -7,7 +7,8 @@ static void *THCudaHostAllocator_malloc(void* ctx, ptrdiff_t size) {
 
   if (size == 0) return NULL;
 
-  THCudaCheck(cudaMallocHost(&ptr, size));
+  //THCudaCheck(hipHostMalloc(&ptr, size, 0));
+  THCudaCheck(hipCUDAErrorTohipError(cudaMallocHost(&ptr, size)));
 
   return ptr;
 }
@@ -15,6 +16,7 @@ static void *THCudaHostAllocator_malloc(void* ctx, ptrdiff_t size) {
 static void THCudaHostAllocator_free(void* ctx, void* ptr) {
   if (!ptr) return;
 
+  //THCudaCheck(hipHostFree(ptr));
   THCudaCheck(cudaFreeHost(ptr));
 }
 
@@ -24,27 +26,27 @@ THAllocator THCudaHostAllocator = {
   &THCudaHostAllocator_free
 };
 
-static cudaError_t THCIpcAllocator_malloc(void* ctx, void** devPtr, size_t size, cudaStream_t stream)
+static hipError_t THCIpcAllocator_malloc(void* ctx, void** devPtr, size_t size, hipStream_t stream)
 {
   THError("THCIpcAllocator.malloc() not supported");
-  return cudaSuccess;
+  return hipSuccess;
 }
 
-static cudaError_t THCIpcAllocator_free(void* ctx, void* devPtr)
+static hipError_t THCIpcAllocator_free(void* ctx, void* devPtr)
 {
-  cudaError_t err;
+  hipError_t err;
   int prev_device;
   int device = (int)(long)ctx;
 
-  err = cudaGetDevice(&prev_device);
-  if (err != cudaSuccess) { return err; }
+  err = hipGetDevice(&prev_device);
+  if (err != hipSuccess) { return err; }
 
-  err = cudaSetDevice(device);
-  if (err != cudaSuccess) { return err; }
+  err = hipSetDevice(device);
+  if (err != hipSuccess) { return err; }
 
-  err = cudaIpcCloseMemHandle(devPtr);
+  err = hipIpcCloseMemHandle(devPtr);
 
-  cudaSetDevice(prev_device);
+  hipSetDevice(prev_device);
   return err;
 }
 
@@ -70,7 +72,7 @@ static void *THCUVAAllocator_alloc(void* ctx, ptrdiff_t size) {
 
 static void THCUVAAllocator_free(void* ctx, void* ptr) {
   if (!ptr) return;
-  THCudaCheck(cudaFree(ptr));
+  THCudaCheck(hipFree(ptr));
 }
 
 THAllocator THCUVAAllocator = {

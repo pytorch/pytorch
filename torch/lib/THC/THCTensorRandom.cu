@@ -1,3 +1,4 @@
+#include "hip/hip_runtime.h"
 #include "THCTensorRandom.h"
 #include "THCDeviceUtils.cuh"
 #include "THCGeneral.h"
@@ -5,6 +6,8 @@
 #include "THCTensorMath.h"
 #include "THCReduceApplyUtils.cuh"
 #include "THCTensorRandom.cuh"
+
+#include <hip/hip_runtime.h>
 
 #include <thrust/functional.h>
 #include <curand.h>
@@ -50,14 +53,14 @@ __host__ void THCRandom_getRNGState(THCState* state, THByteTensor *rng_state)
   THByteTensor_resize1d(rng_state, total_size);
   THArgCheck(THByteTensor_nElement(rng_state) == total_size, 1, "RNG state is wrong size");
   THArgCheck(THByteTensor_isContiguous(rng_state), 1, "RNG state must be contiguous");
-  THCudaCheck(cudaMemcpy(THByteTensor_data(rng_state), gen->gen_states,
-                         states_size, cudaMemcpyDeviceToHost));
+  THCudaCheck(hipMemcpy(THByteTensor_data(rng_state), gen->gen_states,
+                         states_size, hipMemcpyDeviceToHost));
   memcpy(THByteTensor_data(rng_state) + states_size, &gen->initial_seed, seed_size);
 }
 
 __global__ void set_rngstate_kernel(curandStateMtgp32 *state, mtgp32_kernel_params *kernel)
 {
-  state[threadIdx.x].k = kernel;
+  state[hipThreadIdx_x].k = kernel;
 }
 
 __host__ void THCRandom_setRNGState(THCState* state, THByteTensor *rng_state)
@@ -70,20 +73,21 @@ __host__ void THCRandom_setRNGState(THCState* state, THByteTensor *rng_state)
   THArgCheck(THByteTensor_nElement(rng_state) == total_size, 1, "RNG state is wrong size");
   THArgCheck(THByteTensor_isContiguous(rng_state), 1, "RNG state must be contiguous");
 
-  THCudaCheck(cudaMemcpy(gen->gen_states, THByteTensor_data(rng_state),
-                         states_size, cudaMemcpyHostToDevice));
-  set_rngstate_kernel<<<1, MAX_NUM_BLOCKS, 0, THCState_getCurrentStream(state)>>>(
-      gen->gen_states, gen->kernel_params);
+  THCudaCheck(hipMemcpy(gen->gen_states, THByteTensor_data(rng_state),
+                         states_size, hipMemcpyHostToDevice));
+  hipLaunchKernelGGL(
+    (set_rngstate_kernel), 1, MAX_NUM_BLOCKS, 0, THCState_getCurrentStream(state), 
+        gen->gen_states, gen->kernel_params);
   memcpy(&gen->initial_seed, THByteTensor_data(rng_state) + states_size, seed_size);
 }
 
 #define GENERATE_KERNEL1(NAME, T, ARG1, CURAND_T, CURAND_FUNC, TRANSFORM)      \
 __global__ void NAME(curandStateMtgp32 *state, int size, T *result, ARG1)      \
 {                                                                              \
-  int idx = blockIdx.x * BLOCK_SIZE + threadIdx.x;                             \
+  int idx = hipBlockIdx_x * BLOCK_SIZE + hipThreadIdx_x;                             \
   int rounded_size = THCCeilDiv(size, BLOCK_SIZE) * BLOCK_SIZE;                \
   for (int i = idx; i < rounded_size; i += BLOCK_SIZE * MAX_NUM_BLOCKS) {      \
-    CURAND_T x = CURAND_FUNC(&state[blockIdx.x]);                              \
+    CURAND_T x = CURAND_FUNC(&state[hipBlockIdx_x]);                              \
     if (i < size) {                                                            \
       T y = TRANSFORM;                                                         \
       result[i] = y;                                                           \
@@ -94,10 +98,10 @@ __global__ void NAME(curandStateMtgp32 *state, int size, T *result, ARG1)      \
 #define GENERATE_KERNEL2(NAME, T, ARG1, ARG2, CURAND_T, CURAND_FUNC, TRANSFORM)      \
 __global__ void NAME(curandStateMtgp32 *state, int size, T *result, ARG1, ARG2)      \
 {                                                                                    \
-  int idx = blockIdx.x * BLOCK_SIZE + threadIdx.x;                                   \
+  int idx = hipBlockIdx_x * BLOCK_SIZE + hipThreadIdx_x;                                   \
   int rounded_size = THCCeilDiv(size, BLOCK_SIZE) * BLOCK_SIZE;                      \
   for (int i = idx; i < rounded_size; i += BLOCK_SIZE * MAX_NUM_BLOCKS) {            \
-    CURAND_T x = CURAND_FUNC(&state[blockIdx.x]);                                    \
+    CURAND_T x = CURAND_FUNC(&state[hipBlockIdx_x]);                                    \
     if (i < size) {                                                                  \
       T y = TRANSFORM;                                                               \
       result[i] = y;                                                                 \
@@ -115,15 +119,15 @@ template<typename real, typename prob_type>
 __global__ void generate_bernoulli_tensor(curandStateMtgp32 *state, int size,
         real *result, prob_type *probs)
 {
-  int idx = blockIdx.x * BLOCK_SIZE + threadIdx.x;
+  int idx = hipBlockIdx_x * BLOCK_SIZE + hipThreadIdx_x;
   int rounded_size = THCCeilDiv(size, BLOCK_SIZE) * BLOCK_SIZE;
   for (int i = idx; i < rounded_size; i += BLOCK_SIZE * MAX_NUM_BLOCKS) {
     if (is_same<prob_type, double>::value) {
-      double x = curand_uniform_double(&state[blockIdx.x]);
+      double x = curand_uniform_double(&state[hipBlockIdx_x]);
       if (i < size)
         result[i] = ScalarConvert<bool, real>::to(x <= probs[i]);
     } else {
-      float x = curand_uniform(&state[blockIdx.x]);
+      float x = curand_uniform(&state[hipBlockIdx_x]);
       if (i < size)
         result[i] = ScalarConvert<bool, real>::to(x <= probs[i]);
     }

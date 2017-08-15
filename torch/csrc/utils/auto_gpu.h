@@ -9,7 +9,7 @@
 
 #ifdef WITH_CUDA
 #include <cuda.h>
-#include <cuda_runtime.h>
+#include <hip/hip_runtime.h>
 #endif
 
 struct AutoGPU {
@@ -24,7 +24,7 @@ struct AutoGPU {
   ~AutoGPU() {
 #ifdef WITH_CUDA
     if (original_device != -1) {
-      cudaSetDevice(original_device);
+      hipSetDevice(original_device);
     }
 #endif
   }
@@ -35,12 +35,12 @@ struct AutoGPU {
       return;
     }
     if (original_device == -1) {
-      cudaCheck(cudaGetDevice(&original_device));
+      cudaCheck(hipGetDevice(&original_device));
       if (device != original_device) {
-        cudaCheck(cudaSetDevice(device));
+        cudaCheck(hipSetDevice(device));
       }
     } else {
-      cudaCheck(cudaSetDevice(device));
+      cudaCheck(hipSetDevice(device));
     }
 #endif
   }
@@ -49,12 +49,12 @@ struct AutoGPU {
 
 private:
 #ifdef WITH_CUDA
-  static void cudaCheck(cudaError_t err) {
-    if (err != cudaSuccess) {
+  static void cudaCheck(hipError_t err) {
+    if (err != hipSuccess) {
       std::string msg = "CUDA error (";
       msg += std::to_string(err);
       msg += "): ";
-      msg += cudaGetErrorString(err);
+      msg += hipGetErrorString(err);
       throw std::runtime_error(msg);
     }
   }

@@ -6,6 +6,6 @@
 #include <THC/THC.h>
 
 THD_API void THDSetCudaStatePtr(THCState **state);
-THD_API void THDRegisterCudaStream(cudaStream_t stream);
+THD_API void THDRegisterCudaStream(hipStream_t stream);
 #endif
 

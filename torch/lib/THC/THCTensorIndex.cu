@@ -1,3 +1,4 @@
+#include "hip/hip_runtime.h"
 #include "THC.h"
 #include "THCTensorMath.h"
 #include "THCGeneral.h"
@@ -39,9 +40,9 @@ __global__ void indexCopySmallIndex(TensorInfo<T, IndexType> dst,
 
     // We stride over the output ignoring the indexed dimension
     // (innerSize), whose offset calculation is handled differently
-    for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+    for (IndexType linearIndex = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
          linearIndex < innerSize;
-         linearIndex += gridDim.x * blockDim.x) {
+         linearIndex += hipGridDim_x * hipBlockDim_x) {
       IndexType dstOffset =
         IndexToOffset<T, IndexType, DstDim>::get(linearIndex, dst);
 
@@ -72,9 +73,9 @@ __global__ void indexCopyLargeIndex(TensorInfo<T, IndexType> dst,
                                     long dstCopyDimSize) {
   // We stride over the output including the indexed dimension
   // (totalSize), and calculate the destination index point based on that
-  for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+  for (IndexType linearIndex = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
        linearIndex < innerSize * indices.sizes[0];
-       linearIndex += gridDim.x * blockDim.x) {
+       linearIndex += hipGridDim_x * hipBlockDim_x) {
     IndexType srcIndex = linearIndex / innerSize;
     IndexType elementInSlice = linearIndex % innerSize;
 
@@ -122,9 +123,9 @@ __global__ void indexAddSmallIndex(TensorInfo<T, IndexType> dst,
 
     // We stride over the output ignoring the indexed dimension
     // (innerSize), whose offset calculation is handled differently
-    for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+    for (IndexType linearIndex = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
          linearIndex < innerSize;
-         linearIndex += gridDim.x * blockDim.x) {
+         linearIndex += hipGridDim_x * hipBlockDim_x) {
       IndexType dstOffset =
         IndexToOffset<T, IndexType, DstDim>::get(linearIndex, dst);
       dstOffset += dstIndex * dst.strides[dstAddDim];
@@ -154,9 +155,9 @@ __global__ void indexAddLargeIndex(TensorInfo<T, IndexType> dst,
                                    long dstAddDimSize) {
   // We stride over the output including the indexed dimension
   // (totalSize), and calculate the destination index point based on that
-  for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+  for (IndexType linearIndex = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
        linearIndex < innerSize * indices.sizes[0];
-       linearIndex += gridDim.x * blockDim.x) {
+       linearIndex += hipGridDim_x * hipBlockDim_x) {
     IndexType srcIndex = linearIndex / innerSize;
     IndexType elementInSlice = linearIndex % innerSize;
 
@@ -203,9 +204,9 @@ __global__ void indexFillSmallIndex(TensorInfo<T, IndexType> dst,
 
     // We stride over the output ignoring the indexed dimension
     // (innerSize), whose offset calculation is handled differently
-    for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+    for (IndexType linearIndex = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
          linearIndex < innerSize;
-         linearIndex += gridDim.x * blockDim.x) {
+         linearIndex += hipGridDim_x * hipBlockDim_x) {
       IndexType dstOffset =
           IndexToOffset<T, IndexType, DstDim>::get(linearIndex, dst);
       dstOffset += dstIndex_ * dst.strides[dstFillDim];
@@ -230,9 +231,9 @@ __global__ void indexFillLargeIndex(TensorInfo<T, IndexType> dst,
                                     T val) {
   // We stride over the output including the indexed dimension
   // (totalSize), and calculate the destination index point based on that
-  for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+  for (IndexType linearIndex = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
        linearIndex < innerSize * indices.sizes[0];
-       linearIndex += gridDim.x * blockDim.x) {
+       linearIndex += hipGridDim_x * hipBlockDim_x) {
     IndexType dstIndex = linearIndex / innerSize;
     IndexType elementInSlice = linearIndex % innerSize;
 
@@ -276,9 +277,9 @@ __global__ void indexSelectSmallIndex(TensorInfo<T, IndexType> dst,
 
     // We stride over the output ignoring the indexed dimension
     // (innerSize), whose offset calculation is handled differently
-    for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+    for (IndexType linearIndex = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
          linearIndex < innerSize;
-         linearIndex += gridDim.x * blockDim.x) {
+         linearIndex += hipGridDim_x * hipBlockDim_x) {
       IndexType dstOffset =
         IndexToOffset<T, IndexType, DstDim>::get(linearIndex, dst);
       dstOffset += dstIndex * dst.strides[dstSelectDim];
@@ -309,9 +310,9 @@ __global__ void indexSelectLargeIndex(TensorInfo<T, IndexType> dst,
                                       long srcSelectDimSize) {
   // We stride over the output including the indexed dimension
   // (totalSize), and calculate the destination index point based on that
-  for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+  for (IndexType linearIndex = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
        linearIndex < totalSize;
-       linearIndex += gridDim.x * blockDim.x) {
+       linearIndex += hipGridDim_x * hipBlockDim_x) {
     IndexType dstIndex = linearIndex / innerSize;
     IndexType elementInSlice = linearIndex % innerSize;
 
@@ -391,9 +392,9 @@ __global__ void calculateLinearIndices(
   LinearIndexCalcData<IndexType, Dims> data
 )
 {
-  for (long i = blockIdx.x * blockDim.x + threadIdx.x;
+  for (long i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
          i < elements;
-         i += blockDim.x * gridDim.x) {
+         i += hipBlockDim_x * hipGridDim_x) {
       output[i] = baseOffset + calculateOffset<IndexType, Dims>(i, data);
    }
 }

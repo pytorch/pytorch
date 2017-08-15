@@ -1,3 +1,4 @@
+#include "hip/hip_runtime.h"
 #ifndef THC_GENERIC_FILE
 #define THC_GENERIC_FILE "generic/LookupTableBag.cu"
 #else
@@ -29,7 +30,7 @@ void THNN_(LookupTableBag_updateOutput)(
     bag_size_data = THCIndexTensor_(data)(state, bag_size);
   }
 
-  cudaStream_t stream = THCState_getCurrentStream(state);
+  hipStream_t stream = THCState_getCurrentStream(state);
 
   THLongStorage *inputSize = THCIndexTensor_(newSizeOf)(state, input);
   THLongStorage *outputSize = THLongStorage_newWithSize(2);
@@ -43,7 +44,7 @@ void THNN_(LookupTableBag_updateOutput)(
 
   dim3 block = dim3(32, 8);
   int grid = 1024;
-  cunn_LookupTableBag_updateOutputKernel<real, accreal><<<grid, block, 0, stream>>>(
+  hipLaunchKernelGGL((cunn_LookupTableBag_updateOutputKernel<real, accreal>), dim3(grid), dim3(block), 0, stream, 
     THCIndexTensor_(data)(state, input),
     THCIndexTensor_(data)(state, offsets),
     THCTensor_(data)(state, weight),
@@ -56,7 +57,7 @@ void THNN_(LookupTableBag_updateOutput)(
     bag_size_data
   );
 
-  THCudaCheck(cudaGetLastError());
+  THCudaCheck(hipGetLastError());
 }
 
 
@@ -97,7 +98,7 @@ void THNN_(LookupTableBag_accGradParameters)(
   ptrdiff_t numel = THCIndexTensor_(nElement)(state, input);
   long stride = THCTensor_(stride)(state, gradWeight, 0);
 
-  cudaStream_t stream = THCState_getCurrentStream(state);
+  hipStream_t stream = THCState_getCurrentStream(state);
 
   THLongStorage *inputSize = THCIndexTensor_(newSizeOf)(state, input);
   THCIndexTensor_(resize)(state, sortedIndices, inputSize, NULL);
@@ -179,7 +180,7 @@ void THNN_(LookupTableBag_accGradParameters)(
 
   dim3 grid(THCCeilDiv(numel, (ptrdiff_t) 4), THCCeilDiv(stride, (long) 128));
   dim3 block(32, 4);
-  cunn_LookupTableBag_accGradParametersKernel<real, accreal><<<grid, block, 0, stream>>>(
+  hipLaunchKernelGGL((cunn_LookupTableBag_accGradParametersKernel<real, accreal>), dim3(grid), dim3(block), 0, stream, 
     sortedIndices_data,
     origIndices_data,
     THCTensor_(data)(state, gradOutput),
@@ -194,7 +195,7 @@ void THNN_(LookupTableBag_accGradParameters)(
   );
 
   THCTensor_(free)(state, gradOutput);
-  THCudaCheck(cudaGetLastError());
+  THCudaCheck(hipGetLastError());
 }
 
 #endif

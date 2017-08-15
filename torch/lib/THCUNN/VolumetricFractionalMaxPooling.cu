@@ -1,3 +1,4 @@
+#include "hip/hip_runtime.h"
 #include "THCUNN.h"
 #include "common.h"
 #include "THCDeviceTensor.cuh"
@@ -33,9 +34,9 @@ __global__ void VolumetricFractionalMaxPooling_updateOutput(
   int poolSizeT, int poolSizeW, int poolSizeH) {
 
   // Output (h, w) point that this thread is responsible for
-  int ourOutputPoint = threadIdx.x + blockIdx.x * blockDim.x;
-  int plane = blockIdx.y;
-  int batch = blockIdx.z;
+  int ourOutputPoint = hipThreadIdx_x + hipBlockIdx_x * hipBlockDim_x;
+  int plane = hipBlockIdx_y;
+  int batch = hipBlockIdx_z;
 
   // Each thread generates a specific output point
   if (ourOutputPoint < output.getSize(2) * output.getSize(3) * output.getSize(4)){
@@ -94,9 +95,9 @@ __global__ void VolumetricFractionalMaxPooling_updateGradInput(
   THCDeviceTensor<Dtype, 5> gradOutput,
   THCDeviceTensor<THCIndex_t, 5> indices) {
   // Output (h, w) point that this thread is responsible for
-  int ourOutputPoint = threadIdx.x + blockIdx.x * blockDim.x;
-  int plane = blockIdx.y;
-  int batch = blockIdx.z;
+  int ourOutputPoint = hipThreadIdx_x + hipBlockIdx_x * hipBlockDim_x;
+  int plane = hipBlockIdx_y;
+  int batch = hipBlockIdx_z;
 
   // Each thread generates a specific output point
   if (ourOutputPoint < gradOutput.getSize(2) * gradOutput.getSize(3) * gradOutput.getSize(4)) {

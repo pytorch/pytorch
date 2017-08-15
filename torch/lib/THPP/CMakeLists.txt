@@ -86,6 +86,25 @@ IF(NOT CUDA_FOUND)
   EXCLUDE_DIR(all_cpp "TraitsCuda.cpp")
 ENDIF()
 
+INCLUDE_DIRECTORIES("${CMAKE_CURRENT_SOURCE_DIR}/../hip/include")
+SET_PROPERTY(SOURCE 
+    Traits.cpp
+    storages/THStorage.cpp
+    storages/generic/THStorage.cpp
+    storages/generic/THCStorage.cpp
+    storages/THCStorage.cpp
+    tensors/THTensor.cpp
+    tensors/THSTensor.cpp
+    tensors/generic/THTensor.cpp
+    tensors/generic/THSTensor.cpp
+    tensors/generic/THCTensor.cpp
+    tensors/generic/THCSTensor.cpp
+    tensors/THCTensor.cpp
+    tensors/THCSTensor.cpp
+    generators/THGenerator.cpp
+    generators/THCGenerator.cpp
+    TraitsCuda.cpp
+    APPEND PROPERTY COMPILE_DEFINITIONS "__HIP_PLATFORM_NVCC__")
 
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR})
 ADD_LIBRARY(THPP SHARED ${all_cpp})

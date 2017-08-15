@@ -1,3 +1,4 @@
+#include "hip/hip_runtime.h"
 #ifndef THC_TENSORMATH_REDUCE_CUH
 #define THC_TENSORMATH_REDUCE_CUH
 
@@ -133,9 +134,9 @@ template<typename Real>
 __global__ void THCTensor_kernel_renorm(Real *data, const Real value, const ptrdiff_t size, const Real maxnorm)
 {
   __shared__ Real buffer[32];
-  long tx = threadIdx.x;
-  long bx = blockIdx.x;
-  long step = blockDim.x;
+  long tx = hipThreadIdx_x;
+  long bx = hipBlockIdx_x;
+  long step = hipBlockDim_x;
   Real *row = data + size*bx;
 
   buffer[tx] = ScalarConvert<int, Real>::to(0);
@@ -151,7 +152,7 @@ __global__ void THCTensor_kernel_renorm(Real *data, const Real value, const ptrd
     );
   }
   // add (reduce)
-  for (unsigned int stride = blockDim.x >> 1; stride > 0; stride >>= 1)
+  for (unsigned int stride = hipBlockDim_x >> 1; stride > 0; stride >>= 1)
   {
     __syncthreads();
     if (tx < stride)
@@ -301,15 +302,15 @@ __forceinline__ __device__ Real THCTensor_computeVar(Real sum, Real sum2, unsign
  * - if apply_sqrt is set, compute the standard deviation instead of variance
  *
  * The dimensions to the outside and inside of the specified dimension are considered as flattened.
- * Thread blocks with the same blockIdx.y process an "outer row" (i.e. an element of the flattened
+ * Thread blocks with the same hipBlockIdx_y process an "outer row" (i.e. an element of the flattened
  * outer dimensions, which contains several "inner rows").
  * Each thread processes a single inner row at a time.
  */
 template<typename Real, bool flag, bool apply_sqrt>
 __global__ void THCTensor_kernel_varOuterDim(Real *tgt, Real *src_, unsigned num_orows, unsigned num_irows, unsigned row_size)
 {
-  for (unsigned orow = blockIdx.x; orow < num_orows; orow += gridDim.x) {
-    for (unsigned irow = blockIdx.y * blockDim.x + threadIdx.x; irow < num_irows; irow += gridDim.y * blockDim.x) {
+  for (unsigned orow = hipBlockIdx_x; orow < num_orows; orow += hipGridDim_x) {
+    for (unsigned irow = hipBlockIdx_y * hipBlockDim_x + hipThreadIdx_x; irow < num_irows; irow += hipGridDim_y * hipBlockDim_x) {
       Real *src = src_ + orow * row_size * num_irows + irow;
       Real sum = ScalarConvert<int, Real>::to(0), sum2 = ScalarConvert<int, Real>::to(0);
 
@@ -350,15 +351,17 @@ __host__ void THCTensor_varOuterDim(THCState *state, TensorTypeK *tgt, TensorTyp
   dim3 grid(min(maxGridDim, num_orows), min(maxGridDim, THCCeilDiv(num_irows, threads.x)));
 
   if (flag) {
-    THCTensor_kernel_varOuterDim<Real, true, apply_sqrt><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
-        TensorUtils<TensorTypeK>::getData(state, tgt), TensorUtils<TensorTypeK>::getData(state, src), num_orows, num_irows, row_size);
+    hipLaunchKernelGGL(
+      (THCTensor_kernel_varOuterDim<Real, true, apply_sqrt>), grid, threads, 0, THCState_getCurrentStream(state), 
+          TensorUtils<TensorTypeK>::getData(state, tgt), TensorUtils<TensorTypeK>::getData(state, src), num_orows, num_irows, row_size);
   } else {
-    THCTensor_kernel_varOuterDim<Real, false, apply_sqrt><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
-        TensorUtils<TensorTypeK>::getData(state, tgt), TensorUtils<TensorTypeK>::getData(state, src), num_orows, num_irows, row_size);
+    hipLaunchKernelGGL(
+      (THCTensor_kernel_varOuterDim<Real, false, apply_sqrt>), grid, threads, 0, THCState_getCurrentStream(state),
+          TensorUtils<TensorTypeK>::getData(state, tgt), TensorUtils<TensorTypeK>::getData(state, src), num_orows, num_irows, row_size);
   }
-  cudaError errcode = cudaGetLastError();
-  if (errcode != cudaSuccess) {
-    THError(cudaGetErrorString(errcode));
+  hipError_t errcode = hipGetLastError();
+  if (errcode != hipSuccess) {
+    THError(hipGetErrorString(errcode));
   }
 }
 
@@ -380,36 +383,36 @@ __global__ void THCTensor_kernel_varInnermostDim(Real *tgt, Real *src_, unsigned
   __shared__ Real ssum[32][16];
   __shared__ Real ssum2[32][16];
 
-  for (unsigned block_row = blockIdx.x * blockDim.y; block_row < num_rows; block_row += blockDim.y * gridDim.x) {
-    unsigned row = block_row + threadIdx.y;
+  for (unsigned block_row = hipBlockIdx_x * hipBlockDim_y; block_row < num_rows; block_row += hipBlockDim_y * hipGridDim_x) {
+    unsigned row = block_row + hipThreadIdx_y;
     Real sum = ScalarConvert<int, Real>::to(0), sum2 = ScalarConvert<int, Real>::to(0);
     if (row < num_rows) {
       Real *src = src_ + row * row_size;
       // Sequential reduction within a thread.
-      for (unsigned col = threadIdx.x; col < row_size; col += blockDim.x) {
+      for (unsigned col = hipThreadIdx_x; col < row_size; col += hipBlockDim_x) {
         Real val = src[col];
         sum = THCNumerics<Real>::add(sum, val);
         sum2 = THCNumerics<Real>::add(sum2, THCNumerics<Real>::mul(val, val));
       }
     }
-    ssum[threadIdx.y][threadIdx.x] = sum;
-    ssum2[threadIdx.y][threadIdx.x] = sum2;
+    ssum[hipThreadIdx_y][hipThreadIdx_x] = sum;
+    ssum2[hipThreadIdx_y][hipThreadIdx_x] = sum2;
     __syncthreads();
 
     // Reduce intermediate values to single value.
     for (unsigned s = 8; s > 1; s >>= 1) {
-      if (row < num_rows && threadIdx.x < s) {
-        ssum[threadIdx.y][threadIdx.x] =
-          THCNumerics<Real>::add(ssum[threadIdx.y][threadIdx.x], ssum[threadIdx.y][threadIdx.x + s]);
-        ssum2[threadIdx.y][threadIdx.x] =
-          THCNumerics<Real>::add(ssum2[threadIdx.y][threadIdx.x], ssum2[threadIdx.y][threadIdx.x + s]);
+      if (row < num_rows && hipThreadIdx_x < s) {
+        ssum[hipThreadIdx_y][hipThreadIdx_x] =
+          THCNumerics<Real>::add(ssum[hipThreadIdx_y][hipThreadIdx_x], ssum[hipThreadIdx_y][hipThreadIdx_x + s]);
+        ssum2[hipThreadIdx_y][hipThreadIdx_x] =
+          THCNumerics<Real>::add(ssum2[hipThreadIdx_y][hipThreadIdx_x], ssum2[hipThreadIdx_y][hipThreadIdx_x + s]);
       }
       __syncthreads();
     }
 
-    if (row < num_rows && threadIdx.x == 0) {
-      sum = THCNumerics<Real>::add(ssum[threadIdx.y][0], ssum[threadIdx.y][1]);
-      sum2 = THCNumerics<Real>::add(ssum2[threadIdx.y][0], ssum2[threadIdx.y][1]);
+    if (row < num_rows && hipThreadIdx_x == 0) {
+      sum = THCNumerics<Real>::add(ssum[hipThreadIdx_y][0], ssum[hipThreadIdx_y][1]);
+      sum2 = THCNumerics<Real>::add(ssum2[hipThreadIdx_y][0], ssum2[hipThreadIdx_y][1]);
       tgt[row] = THCTensor_computeVar<Real, flag, apply_sqrt>(sum, sum2, row_size);
     }
     __syncthreads();
@@ -432,15 +435,17 @@ __host__ void THCTensor_varInnermostDim(THCState *state, TensorTypeK *tgt, Tenso
   dim3 grid(min(1024, THCCeilDiv(num_rows, threads.y)));
 
   if (flag) {
-    THCTensor_kernel_varInnermostDim<Real, true, apply_sqrt><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
-        TensorUtils<TensorTypeK>::getData(state, tgt), TensorUtils<TensorTypeK>::getData(state, src), num_rows, row_size);
+    hipLaunchKernelGGL(
+      (THCTensor_kernel_varInnermostDim<Real, true, apply_sqrt>), grid, threads, 0, THCState_getCurrentStream(state), 
+          TensorUtils<TensorTypeK>::getData(state, tgt), TensorUtils<TensorTypeK>::getData(state, src), num_rows, row_size);
   } else {
-    THCTensor_kernel_varInnermostDim<Real, false, apply_sqrt><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
-        TensorUtils<TensorTypeK>::getData(state, tgt), TensorUtils<TensorTypeK>::getData(state, src), num_rows, row_size);
+    hipLaunchKernelGGL(
+      (THCTensor_kernel_varInnermostDim<Real, false, apply_sqrt>), grid, threads, 0, THCState_getCurrentStream(state), 
+          TensorUtils<TensorTypeK>::getData(state, tgt), TensorUtils<TensorTypeK>::getData(state, src), num_rows, row_size);
   }
-  cudaError errcode = cudaGetLastError();
-  if (errcode != cudaSuccess) {
-    THError(cudaGetErrorString(errcode));
+  hipError_t errcode = hipGetLastError();
+  if (errcode != hipSuccess) {
+    THError(hipGetErrorString(errcode));
   }
 }
 
@@ -460,10 +465,10 @@ kernelTransformReduceOuterDimIndex(K *tgt1,
                                    unsigned row_size,
                                    thrust::pair<K, Index> init,
                                    BinaryFunction binary_op) {
-  for (unsigned orow = blockIdx.x; orow < num_orows; orow += gridDim.x) {
-    for (unsigned irow = blockIdx.y * blockDim.x + threadIdx.x;
+  for (unsigned orow = hipBlockIdx_x; orow < num_orows; orow += hipGridDim_x) {
+    for (unsigned irow = hipBlockIdx_y * hipBlockDim_x + hipThreadIdx_x;
          irow < num_irows;
-         irow += gridDim.y * blockDim.x) {
+         irow += hipGridDim_y * hipBlockDim_x) {
       K *src = src_ + orow * row_size * num_irows + irow;
       thrust::pair<K, Index> acc = init;
 
@@ -509,14 +514,15 @@ THC_transformReduceOuterDimIndex(THCState *state,
   dim3 grid(min(maxGridDim, num_orows),
             min(maxGridDim, THCCeilDiv(num_irows, threads.x)));
 
-  kernelTransformReduceOuterDimIndex
-    <<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
-      TensorUtils<TensorTypeK>::getData(state, tgt1),
-      TensorUtils<TensorTypeIndex>::getData(state, tgt2),
-      TensorUtils<TensorTypeK>::getData(state, src),
-      num_orows, num_irows, row_size, init, binary_op);
+  hipLaunchKernelGGL(
+    (kernelTransformReduceOuterDimIndex), 
+      grid, threads, 0, THCState_getCurrentStream(state), 
+        TensorUtils<TensorTypeK>::getData(state, tgt1),
+        TensorUtils<TensorTypeIndex>::getData(state, tgt2),
+        TensorUtils<TensorTypeK>::getData(state, src),
+        num_orows, num_irows, row_size, init, binary_op);
 
-  THCudaCheck(cudaGetLastError());
+  THCudaCheck(hipGetLastError());
 }
 
 /* Reduce the innermost dimension of a tensor (on thrust::pair functors which are (value, index))
@@ -541,42 +547,42 @@ kernelTransformReduceInnermostDimIndex(K *tgt1,
   __shared__ K sbuf[32][16 + 1]; // avoid bank conflict
   __shared__ Index ibuf[32][16 + 1]; // avoid bank conflict
 
-  for (unsigned block_row = blockIdx.x * blockDim.y;
+  for (unsigned block_row = hipBlockIdx_x * hipBlockDim_y;
        block_row < num_rows;
-       block_row += blockDim.y * gridDim.x) {
-    unsigned row = block_row + threadIdx.y;
+       block_row += hipBlockDim_y * hipGridDim_x) {
+    unsigned row = block_row + hipThreadIdx_y;
     thrust::pair<K, Index> acc = init;
     if (row < num_rows) {
       K *src = src_ + row * row_size;
       // Sequential reduction within a thread.
-      for (unsigned col = threadIdx.x; col < row_size; col += blockDim.x) {
+      for (unsigned col = hipThreadIdx_x; col < row_size; col += hipBlockDim_x) {
         acc = binary_op(acc, thrust::make_pair<K, Index>(src[col], col + TH_INDEX_BASE));
       }
     }
 
-    sbuf[threadIdx.y][threadIdx.x] = acc.first;
-    ibuf[threadIdx.y][threadIdx.x] = acc.second;
+    sbuf[hipThreadIdx_y][hipThreadIdx_x] = acc.first;
+    ibuf[hipThreadIdx_y][hipThreadIdx_x] = acc.second;
 
     __syncthreads();
 
     // Reduce intermediate values to single value.
-    K* sline = &sbuf[threadIdx.y][0];
-    Index* iline = &ibuf[threadIdx.y][0];
+    K* sline = &sbuf[hipThreadIdx_y][0];
+    Index* iline = &ibuf[hipThreadIdx_y][0];
     for (unsigned s = 8; s > 0; s >>= 1) {
-      if (row < num_rows && threadIdx.x < s) {
+      if (row < num_rows && hipThreadIdx_x < s) {
         thrust::pair<K, Index> arg1 =
-          thrust::make_pair<K, Index>(sline[threadIdx.x], iline[threadIdx.x]);
+          thrust::make_pair<K, Index>(sline[hipThreadIdx_x], iline[hipThreadIdx_x]);
         thrust::pair<K, Index> arg2 =
-          thrust::make_pair<K, Index>(sline[threadIdx.x + s], iline[threadIdx.x + s]);
+          thrust::make_pair<K, Index>(sline[hipThreadIdx_x + s], iline[hipThreadIdx_x + s]);
         thrust::pair<K, Index> res = binary_op(arg1, arg2);
 
-        sline[threadIdx.x] = res.first;
-        iline[threadIdx.x] = res.second;
+        sline[hipThreadIdx_x] = res.first;
+        iline[hipThreadIdx_x] = res.second;
       }
       __syncthreads();
     }
 
-    if (row < num_rows && threadIdx.x == 0) {
+    if (row < num_rows && hipThreadIdx_x == 0) {
       tgt1[row] = sline[0];
       tgt2[row] = iline[0];
     }
@@ -606,14 +612,15 @@ THC_transformReduceInnermostDimIndex(THCState *state,
   dim3 threads(16, 32);
   dim3 grid(min(1024, THCCeilDiv(num_rows, threads.y)));
 
-  kernelTransformReduceInnermostDimIndex
-    <<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
+  hipLaunchKernelGGL(
+  (kernelTransformReduceInnermostDimIndex), 
+    grid, threads, 0, THCState_getCurrentStream(state), 
       TensorUtils<TensorTypeK>::getData(state, tgt1),
       TensorUtils<TensorTypeIndex>::getData(state, tgt2),
       TensorUtils<TensorTypeK>::getData(state, src),
       num_rows, row_size, init, binary_op);
 
-  THCudaCheck(cudaGetLastError());
+  THCudaCheck(hipGetLastError());
 }
 
 template <typename TensorTypeK,

@@ -9,10 +9,10 @@
 //
 // This provides a drop-in replacement for THCudaHostAllocator, which re-uses
 // freed pinned (page-locked) memory allocations. This avoids device
-// synchronizations due to cudaFreeHost calls.
+// synchronizations due to hipHostFree calls.
 //
 // To ensure correct behavior, THCCachingHostAllocator_recordEvent must be
-// called anytime a pointer from this allocator is used in a cudaMemcpyAsync
+// called anytime a pointer from this allocator is used in a hipMemcpyAsync
 // call between host and device. The THC library implements this for storages
 // and tensors in THCTensor_(copyAsyncCPU) and THCTensor_(copyAsyncCuda).
 //
@@ -23,7 +23,7 @@ THC_API THAllocator THCCachingHostAllocator;
 
 // Records an event in the specified stream. The allocation 'ptr' will not be
 // re-used until the event has occured.
-THC_API cudaError_t THCCachingHostAllocator_recordEvent(void *ptr, THCStream *stream);
+THC_API hipError_t THCCachingHostAllocator_recordEvent(void *ptr, THCStream *stream);
 
 // Releases cached pinned memory allocations via cudaHostFree
 THC_API void THCCachingHostAllocator_emptyCache(void);

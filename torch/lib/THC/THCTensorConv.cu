@@ -1,8 +1,10 @@
+#include "hip/hip_runtime.h"
 #include "THCTensorConv.h"
 #include "THCTensorMath.h"
 #include "THCTensorCopy.h"
 #include "THCGeneral.h"
 #include <stdio.h>
+#include <hip/hip_runtime.h>
 
 /*
  * Description:
@@ -44,23 +46,23 @@ template <bool swapkernel, int T_kernel_h, int T_kernel_w>
   int output_n = kernel_n / input_n;
 
   // generate offsets according to block/thread ids
-  int xx_start = threadIdx.x;
+  int xx_start = hipThreadIdx_x;
   int xx_end = output_w;
-  int xx_step = blockDim.x;
+  int xx_step = hipBlockDim_x;
 
-  int yy_start = blockDim.y*blockIdx.y + threadIdx.y;
+  int yy_start = hipBlockDim_y*hipBlockIdx_y + hipThreadIdx_y;
   int yy_end = output_h;
-  int yy_step = blockDim.y*gridDim.y;
+  int yy_step = hipBlockDim_y*hipGridDim_y;
 
-  int oo_start = blockIdx.x;
+  int oo_start = hipBlockIdx_x;
   int oo_end = oo_start+1;
 
-  int ii_start = (blockIdx.x / output_n) * input_n;
+  int ii_start = (hipBlockIdx_x / output_n) * input_n;
   int ii_end = ii_start + input_n;
 
   // nb threads, unique thread id
-  int tid = blockDim.x*blockDim.y*threadIdx.z + blockDim.x * threadIdx.y + threadIdx.x;
-  int nthreads = blockDim.x * blockDim.y * blockDim.z;
+  int tid = hipBlockDim_x*hipBlockDim_y*hipThreadIdx_z + hipBlockDim_x * hipThreadIdx_y + hipThreadIdx_x;
+  int nthreads = hipBlockDim_x * hipBlockDim_y * hipBlockDim_z;
 
   // iterators
   int oo, ii, xx, yy, kx, ky, kk;
@@ -204,19 +206,19 @@ __global__ void conv2genericrev(float *input, float *kernel, float *output,
   int output_w = input_w - (kernel_w - 1) * stride_w;
 
   // this thread only processes one output, defined by the block Ids
-  int kk = blockIdx.x;
-  int ii = blockIdx.y;
+  int kk = hipBlockIdx_x;
+  int ii = hipBlockIdx_y;
 
   // batch id
-  int batch = threadIdx.z;
+  int batch = hipThreadIdx_z;
 
   // kernel id
-  int kid = threadIdx.x;
-  int nkids = blockDim.x;
+  int kid = hipThreadIdx_x;
+  int nkids = hipBlockDim_x;
 
   // thread ID
-  int tid = kid + batch*blockDim.x;
-  int nthreads = blockDim.x * blockDim.z;
+  int tid = kid + batch*hipBlockDim_x;
+  int nthreads = hipBlockDim_x * hipBlockDim_z;
 
   // one thread only sees one output
   output = output + (kk * input_n + ii) * output_h*output_w;
@@ -229,7 +231,7 @@ __global__ void conv2genericrev(float *input, float *kernel, float *output,
 
   // convolution loop
   int xx, yy, kx, ky;
-  yy = threadIdx.y;
+  yy = hipThreadIdx_y;
   float *output_p = output_s + yy * output_w;
   for(xx=0; xx<output_w; xx++) {
     // Dot product in two dimensions... (between input image and kernel)
@@ -376,21 +378,23 @@ THC_API void THCudaTensor_conv2Dmv(THCState *state, THCudaTensor *output, float 
   // convolution: xcorr2 or conv2
   if (type[1] == 'x') {
 #define X_CONV_KERNEL(dim)                                              \
-    conv2generic <false, (dim), (dim)> <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> ( \
-        input_data, weight_data, output_data,                           \
-        nInputPlane, nInputRows, nInputCols,                            \
-        nOutputPlane*nInputPlane, nKernelRows, nKernelCols,             \
-        srow, scol);
+    hipLaunchKernelGGL(                                                 \
+      (conv2generic <false, (dim), (dim)>), blocks, threads, 0, THCState_getCurrentStream(state), \
+          input_data, weight_data, output_data,                         \
+          nInputPlane, nInputRows, nInputCols,                          \
+          nOutputPlane*nInputPlane, nKernelRows, nKernelCols,           \
+          srow, scol);
 
     FOR_KERNEL_SPECIALIZED_DIMENSION(nKernelRows, nKernelCols, X_CONV_KERNEL);
 #undef X_CONV_KERNEL
   } else { // 'c'
 #define C_CONV_KERNEL(dim)                                              \
-    conv2generic <true, (dim), (dim)> <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (           \
-        input_data, weight_data, output_data,                           \
-        nInputPlane, nInputRows, nInputCols,                            \
-        nOutputPlane*nInputPlane, nKernelRows, nKernelCols,             \
-        srow, scol);
+    hipLaunchKernelGGL(                                                 \
+      (conv2generic <true, (dim), (dim)>), blocks, threads, 0, THCState_getCurrentStream(state),           \
+          input_data, weight_data, output_data,                         \
+          nInputPlane, nInputRows, nInputCols,                          \
+          nOutputPlane*nInputPlane, nKernelRows, nKernelCols,           \
+          srow, scol);
 
     FOR_KERNEL_SPECIALIZED_DIMENSION(nKernelRows, nKernelCols, C_CONV_KERNEL);
 #undef C_CONV_KERNEL
@@ -401,9 +405,9 @@ THC_API void THCudaTensor_conv2Dmv(THCState *state, THCudaTensor *output, float 
   THCudaTensor_free(state, kernel);
 
   // check for errors
-  cudaError_t err = cudaGetLastError();
-  if (err != cudaSuccess) {
-    printf("error in conv2Dmv: %s\n", cudaGetErrorString(err));
+  hipError_t err = hipGetLastError();
+  if (err != hipSuccess) {
+    printf("error in conv2Dmv: %s\n", hipGetErrorString(err));
     THError("aborting");
   }
 }
@@ -497,21 +501,23 @@ THC_API void THCudaTensor_conv2Dmm(THCState *state, THCudaTensor *output, float 
   // convolution: xcorr2 or conv2
   if (type[1] == 'x') {
 #define X_CONV_KERNEL(dim)                                              \
-    conv2generic <false, (dim), (dim)> <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> ( \
-      input_data, weight_data, output_data,                             \
-      nInputPlane, nInputRows, nInputCols,                              \
-      nOutputPlane*nInputPlane, nKernelRows, nKernelCols,               \
-      srow, scol);
+    hipLaunchKernelGGL(                                                 \
+      (conv2generic <false, (dim), (dim)>), blocks, threads, 0, THCState_getCurrentStream(state), \
+        input_data, weight_data, output_data,                           \
+        nInputPlane, nInputRows, nInputCols,                            \
+        nOutputPlane*nInputPlane, nKernelRows, nKernelCols,             \
+        srow, scol);
 
     FOR_KERNEL_SPECIALIZED_DIMENSION(nKernelCols, nKernelRows, X_CONV_KERNEL);
 #undef X_CONV_KERNEL
   } else { // 'c'
 #define C_CONV_KERNEL(dim)                                              \
-    conv2generic <true, (dim), (dim)> <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> ( \
-      input_data, weight_data, output_data,                             \
-      nInputPlane, nInputRows, nInputCols,                              \
-      nOutputPlane*nInputPlane, nKernelRows, nKernelCols,               \
-      srow, scol);                                                      \
+    hipLaunchKernelGGL(                                                 \
+      (conv2generic <true, (dim), (dim)>), blocks, threads, 0, THCState_getCurrentStream(state), \
+        input_data, weight_data, output_data,                           \
+        nInputPlane, nInputRows, nInputCols,                            \
+        nOutputPlane*nInputPlane, nKernelRows, nKernelCols,             \
+        srow, scol);                                                    \
 
     FOR_KERNEL_SPECIALIZED_DIMENSION(nKernelCols, nKernelRows, C_CONV_KERNEL);
 #undef C_CONV_KERNEL
@@ -522,11 +528,11 @@ THC_API void THCudaTensor_conv2Dmm(THCState *state, THCudaTensor *output, float 
   THCudaTensor_free(state, kernel);
 
   // check for errors
-  cudaError_t err = cudaGetLastError();
-  if (err != cudaSuccess) {
-    cudaDeviceProp deviceProp;
-    cudaGetDeviceProperties(&deviceProp, 0);
-    printf("error in conv2Dmm: %s\n", cudaGetErrorString(err));
+  hipError_t err = hipGetLastError();
+  if (err != hipSuccess) {
+    hipDeviceProp_t deviceProp;
+    hipGetDeviceProperties(&deviceProp, 0);
+    printf("error in conv2Dmm: %s\n", hipGetErrorString(err));
     printf("requested grid size: %dx%dx%d, max allowed: %dx%dx%d\n",
            blocks.x, blocks.y, blocks.z,
            deviceProp.maxGridSize[0], deviceProp.maxGridSize[1], deviceProp.maxGridSize[2]);
@@ -594,20 +600,21 @@ THC_API void THCudaTensor_conv2DRevger(THCState *state, THCudaTensor *output, fl
   dim3 threads(128/nOutputRows, nOutputRows);
 
   // compute rev conv
-  conv2genericrev <<<blocks, threads, 0, THCState_getCurrentStream(state)>>>(
-    input_data, kernel_data, output_data,
-    nInputPlane, nInputRows, nInputCols,
-    nKernelPlane, nKernelRows, nKernelCols,
-    alpha, srow, scol);
+  hipLaunchKernelGGL(
+    (conv2genericrev), blocks, threads, 0, THCState_getCurrentStream(state), 
+      input_data, kernel_data, output_data,
+      nInputPlane, nInputRows, nInputCols,
+      nKernelPlane, nKernelRows, nKernelCols,
+      alpha, srow, scol);
 
   // clean
   THCudaTensor_free(state, input);
   THCudaTensor_free(state, kernel);
 
   // check for errors
-  cudaError_t err = cudaGetLastError();
-  if (err != cudaSuccess) {
-    printf("error in conv2DRevger: %s\n", cudaGetErrorString(err));
+  hipError_t err = hipGetLastError();
+  if (err != hipSuccess) {
+    printf("error in conv2DRevger: %s\n", hipGetErrorString(err));
     THError("aborting");
   }
 }
@@ -673,13 +680,14 @@ THC_API void THCudaTensor_conv2DRevgerm(THCState *state, THCudaTensor *output, f
     dim3 threads(cst, nOutputRows, subbatch);
 
     // compute rev conv
-    conv2genericrev <<<blocks, threads, 0, THCState_getCurrentStream(state)>>>(
-      input_data + input->stride[0]*sl,
-      kernel_data + kernel->stride[0]*sl,
-      output_data,
-      nInputPlane, nInputRows, nInputCols,
-      nKernelPlane, nKernelRows, nKernelCols,
-      alpha, srow, scol);
+    hipLaunchKernelGGL(
+      (conv2genericrev), blocks, threads, 0, THCState_getCurrentStream(state), 
+        input_data + input->stride[0]*sl,
+        kernel_data + kernel->stride[0]*sl,
+        output_data,
+        nInputPlane, nInputRows, nInputCols,
+        nKernelPlane, nKernelRows, nKernelCols,
+        alpha, srow, scol);
   }
 
   // clean
@@ -687,9 +695,9 @@ THC_API void THCudaTensor_conv2DRevgerm(THCState *state, THCudaTensor *output, f
   THCudaTensor_free(state, kernel);
 
   // check for errors
-  cudaError_t err = cudaGetLastError();
-  if (err != cudaSuccess) {
-    printf("error in conv2DRevger: %s\n", cudaGetErrorString(err));
+  hipError_t err = hipGetLastError();
+  if (err != hipSuccess) {
+    printf("error in conv2DRevger: %s\n", hipGetErrorString(err));
     THError("aborting");
   }
 }
@@ -726,24 +734,24 @@ template <bool swapkernel, int T_kernel_h, int T_kernel_w>
   // int output_n = kernel_n / fanin;
 
   // generate offsets according to block/thread ids
-  int xx_start = threadIdx.x;
+  int xx_start = hipThreadIdx_x;
   int xx_end = output_w;
-  int xx_step = blockDim.x;
+  int xx_step = hipBlockDim_x;
 
-  int yy_start = blockDim.y*blockIdx.y + threadIdx.y;
+  int yy_start = hipBlockDim_y*hipBlockIdx_y + hipThreadIdx_y;
   int yy_end = output_h;
-  int yy_step = blockDim.y*gridDim.y;
+  int yy_step = hipBlockDim_y*hipGridDim_y;
 
-  int oo_start = blockIdx.x;
+  int oo_start = hipBlockIdx_x;
   int oo_end = oo_start+1;
 
-  int table_start = blockIdx.x * (fanin * 2);
+  int table_start = hipBlockIdx_x * (fanin * 2);
   int table_end = table_start + (fanin * 2);
 
   // nb threads, unique thread id
-  int tid = blockDim.x*blockDim.y*threadIdx.z
-    + blockDim.x * threadIdx.y + threadIdx.x;
-  int nthreads = blockDim.x * blockDim.y * blockDim.z;
+  int tid = hipBlockDim_x*hipBlockDim_y*hipThreadIdx_z
+    + hipBlockDim_x * hipThreadIdx_y + hipThreadIdx_x;
+  int nthreads = hipBlockDim_x * hipBlockDim_y * hipBlockDim_z;
 
   // iterators
   int oo, ii, xx, yy, kx, ky, kk;
@@ -930,10 +938,11 @@ THC_API void THCudaTensor_conv2Dmap(THCState *state, THCudaTensor *output, THCud
   dim3 threads(nthreads_x,nthreads_y);
 
 #define GENERIC_MAP_KERNEL(dim)                                         \
-  conv2mapgeneric <false, (dim), (dim)> <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> ( \
-      input_data, kernel_data, output_data, nInputPlane, nInputRows,    \
-      nInputCols, nOutputPlane*fanin, nKernelRows, nKernelCols,         \
-      stride_x, stride_y, table_data, fanin);
+  hipLaunchKernelGGL(                                                   \
+    (conv2mapgeneric <false, (dim), (dim)>), blocks, threads, 0, THCState_getCurrentStream(state), \
+        input_data, kernel_data, output_data, nInputPlane, nInputRows,  \
+        nInputCols, nOutputPlane*fanin, nKernelRows, nKernelCols,       \
+        stride_x, stride_y, table_data, fanin);
 
   FOR_KERNEL_SPECIALIZED_DIMENSION(nKernelCols, nKernelRows, GENERIC_MAP_KERNEL);
 #undef GENERIC_MAP_KERNEL
@@ -943,9 +952,9 @@ THC_API void THCudaTensor_conv2Dmap(THCState *state, THCudaTensor *output, THCud
   THCudaTensor_free(state, table);
 
   // check for errors
-  cudaError_t err = cudaGetLastError();
-  if (err != cudaSuccess) {
-    printf("error in conv2Dmap: %s\n", cudaGetErrorString(err));
+  hipError_t err = hipGetLastError();
+  if (err != hipSuccess) {
+    printf("error in conv2Dmap: %s\n", hipGetErrorString(err));
     THError("aborting");
   }
 }

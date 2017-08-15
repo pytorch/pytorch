@@ -1,3 +1,4 @@
+#include "hip/hip_runtime.h"
 #include "THCUNN.h"
 #include "common.h"
 
@@ -53,8 +54,8 @@ __global__ void upscale(Dtype *input, Dtype *output, long no_elements,
                         int scale_factor, int d1, int d2, int d3)
 {
   // output offset:
-  long ii = threadIdx.x + blockDim.x * blockIdx.x;
-  ii += threadIdx.y + blockDim.y * (blockDim.x * gridDim.x) * blockIdx.y;
+  long ii = hipThreadIdx_x + hipBlockDim_x * hipBlockIdx_x;
+  ii += hipThreadIdx_y + hipBlockDim_y * (hipBlockDim_x * hipGridDim_x) * hipBlockIdx_y;
   if (ii >= no_elements) return;
   int ipidx = translate_idx(ii, d1, d2, d3, scale_factor);
   output[ii]=input[ipidx];
@@ -68,8 +69,8 @@ __global__ void downscale(Dtype *gradInput_data, Dtype *gradOutput_data, long no
                               int scale_factor, int d1, int d2, int d3)
 {
   // output offset:
-  long ii = threadIdx.x + blockDim.x * blockIdx.x;
-  ii += threadIdx.y + blockDim.y * (blockDim.x * gridDim.x) * blockIdx.y;
+  long ii = hipThreadIdx_x + hipBlockDim_x * hipBlockIdx_x;
+  ii += hipThreadIdx_y + hipBlockDim_y * (hipBlockDim_x * hipGridDim_x) * hipBlockIdx_y;
   if (ii >= no_elements) return;
   Acctype sum = Acctype(0);
   for (int i=0; i < scale_factor; i++){

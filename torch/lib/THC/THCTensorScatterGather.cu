@@ -1,3 +1,4 @@
+#include "hip/hip_runtime.h"
 #include "THCTensorMath.h"
 #include "THCGeneral.h"
 #include "THCAtomics.cuh"
@@ -81,9 +82,9 @@ __global__ void THCudaTensor_gatherKernel(
     TensorInfo<long, IndexType> index,
     const int dim,
     const IndexType totalElements) {
-  for (IndexType linearId = blockIdx.x * blockDim.x + threadIdx.x;
+  for (IndexType linearId = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
        linearId < totalElements;
-       linearId += gridDim.x * blockDim.x) {
+       linearId += hipGridDim_x * hipBlockDim_x) {
     IndexType tensorOffset = 0;
     IndexType srcOffset = 0;
     IndexType indexOffset = 0;
@@ -108,9 +109,9 @@ __global__ void THCudaTensor_scatterKernel(
     TensorInfo<long, IndexType> index,
     const int dim,
     const IndexType totalElements) {
-  for (IndexType linearId = blockIdx.x * blockDim.x + threadIdx.x;
+  for (IndexType linearId = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
        linearId < totalElements;
-       linearId += gridDim.x * blockDim.x) {
+       linearId += hipGridDim_x * hipBlockDim_x) {
     IndexType tensorOffset = 0;
     IndexType srcOffset = 0;
     IndexType indexOffset = 0;
@@ -135,9 +136,9 @@ __global__ void THCudaTensor_scatterAddKernel(
     TensorInfo<long, IndexType> index,
     const int dim,
     const IndexType totalElements) {
-  for (IndexType linearId = blockIdx.x * blockDim.x + threadIdx.x;
+  for (IndexType linearId = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
        linearId < totalElements;
-       linearId += gridDim.x * blockDim.x) {
+       linearId += hipGridDim_x * hipBlockDim_x) {
     IndexType tensorOffset = 0;
     IndexType srcOffset = 0;
     IndexType indexOffset = 0;
@@ -162,9 +163,9 @@ __global__ void THCudaTensor_scatterFillKernel(
     Real value,
     const int dim,
     const IndexType totalElements) {
-  for (IndexType linearId = blockIdx.x * blockDim.x + threadIdx.x;
+  for (IndexType linearId = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
        linearId < totalElements;
-       linearId += gridDim.x * blockDim.x) {
+       linearId += hipGridDim_x * hipBlockDim_x) {
     IndexType tensorOffset = 0;
     IndexType indexOffset = 0;
 

@@ -1,3 +1,4 @@
+#include "hip/hip_runtime.h"
 #ifndef THC_GENERIC_FILE
 #define THC_GENERIC_FILE "generic/ClassNLLCriterion.cu"
 #else
@@ -57,8 +58,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
   real *total_weight_data = THCTensor_(data)(state, total_weight);
 
   if (THCTensor_(nDimension)(state, input) == 1) {
-    cunn_ClassNLLCriterion_updateOutput_kernel1<real>
-      <<<1, 1, 0, THCState_getCurrentStream(state)>>>(
+    hipLaunchKernelGGL((cunn_ClassNLLCriterion_updateOutput_kernel1<real>), dim3(1), dim3(1), 0, THCState_getCurrentStream(state), 
         output_data,
         total_weight_data,
         input_data,
@@ -70,8 +70,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
     );
 
   } else if (THCTensor_(nDimension)(state, input) == 2) {
-    cunn_ClassNLLCriterion_updateOutput_kernel<real, accreal>
-      <<<1, NTHREADS, 0, THCState_getCurrentStream(state)>>>(
+    hipLaunchKernelGGL((cunn_ClassNLLCriterion_updateOutput_kernel<real, accreal>), dim3(1), dim3(NTHREADS), 0, THCState_getCurrentStream(state), 
         output_data,
         total_weight_data,
         input_data,
@@ -84,7 +83,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
         ignore_index
     );
   }
-  THCudaCheck(cudaGetLastError());
+  THCudaCheck(hipGetLastError());
 
   if (weights) {
     THCTensor_(free)(state, weights);
@@ -144,8 +143,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
   real *total_weight_data = THCTensor_(data)(state, total_weight);
 
   if (THCTensor_(nDimension)(state, input) == 1) {
-    cunn_ClassNLLCriterion_updateGradInput_kernel1<real>
-      <<<1, 1, 0, THCState_getCurrentStream(state)>>>(
+    hipLaunchKernelGGL((cunn_ClassNLLCriterion_updateGradInput_kernel1<real>), dim3(1), dim3(1), 0, THCState_getCurrentStream(state), 
         gradInput_data,
         weights_data,
         target_data,
@@ -155,8 +153,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
         ignore_index
     );
   } else {
-    cunn_ClassNLLCriterion_updateGradInput_kernel<real>
-      <<<1, NTHREADS, 0, THCState_getCurrentStream(state)>>>(
+    hipLaunchKernelGGL((cunn_ClassNLLCriterion_updateGradInput_kernel<real>), dim3(1), dim3(NTHREADS), 0, THCState_getCurrentStream(state), 
         gradInput_data,
         target_data,
         weights_data,
@@ -168,7 +165,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
         ignore_index
     );
   }
-  THCudaCheck(cudaGetLastError());
+  THCudaCheck(hipGetLastError());
 
   if (weights) {
     THCTensor_(free)(state, weights);

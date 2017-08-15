@@ -18,7 +18,7 @@ THCTensor_(add)(THCState *state, THCTensor *self_, THCTensor *src_, real value)
     }
   }
 
-  THCudaCheck(cudaGetLastError());
+  THCudaCheck(hipGetLastError());
 }
 
 THC_API void
@@ -37,7 +37,7 @@ THCTensor_(sub)(THCState *state, THCTensor *self_, THCTensor *src_, real value)
     }
   }
 
-  THCudaCheck(cudaGetLastError());
+  THCudaCheck(hipGetLastError());
 }
 
 THC_API void
@@ -56,7 +56,7 @@ THCTensor_(mul)(THCState *state, THCTensor *self_, THCTensor *src_, real value)
     }
   }
 
-  THCudaCheck(cudaGetLastError());
+  THCudaCheck(hipGetLastError());
 }
 
 THC_API void
@@ -77,7 +77,7 @@ THCTensor_(div)(THCState* state, THCTensor *self_, THCTensor *src_, real value)
     }
   }
 
-  THCudaCheck(cudaGetLastError());
+  THCudaCheck(hipGetLastError());
 }
 
 THC_API void
@@ -100,7 +100,7 @@ THCTensor_(lshift)(THCState* state, THCTensor *self_, THCTensor *src_, real valu
     }
   }
 
-  THCudaCheck(cudaGetLastError());
+  THCudaCheck(hipGetLastError());
 #endif
 }
 
@@ -124,7 +124,7 @@ THCTensor_(rshift)(THCState* state, THCTensor *self_, THCTensor *src_, real valu
     }
   }
 
-  THCudaCheck(cudaGetLastError());
+  THCudaCheck(hipGetLastError());
 #endif
 }
 
@@ -144,7 +144,7 @@ THCTensor_(fmod)(THCState *state, THCTensor *self_, THCTensor *src_, real value)
     }
   }
 
-  THCudaCheck(cudaGetLastError());
+  THCudaCheck(hipGetLastError());
 }
 
 THC_API void
@@ -163,7 +163,7 @@ THCTensor_(remainder)(THCState *state, THCTensor *self_, THCTensor *src_, real v
     }
   }
 
-  THCudaCheck(cudaGetLastError());
+  THCudaCheck(hipGetLastError());
 }
 
 void THCTensor_(tril)(THCState *state, THCTensor *self_, THCTensor *src_, long k)
@@ -196,7 +196,7 @@ void THCTensor_(tril)(THCState *state, THCTensor *self_, THCTensor *src_, long k
   if (self_ == src_)
     THCTensor_(freeCopyTo)(state, src, src_);
 
-  THCudaCheck(cudaGetLastError());
+  THCudaCheck(hipGetLastError());
 }
 
 void THCTensor_(triu)(THCState *state, THCTensor *self_, THCTensor *src_, long k)
@@ -229,7 +229,7 @@ void THCTensor_(triu)(THCState *state, THCTensor *self_, THCTensor *src_, long k
   if (self_ == src_)
     THCTensor_(freeCopyTo)(state, src, src_);
 
-  THCudaCheck(cudaGetLastError());
+  THCudaCheck(hipGetLastError());
 }
 
 THC_API int THCTensor_(equal)(THCState *state, THCTensor *self_, THCTensor *src_)
@@ -276,7 +276,7 @@ THCTensor_(bitand)(THCState* state, THCTensor *self_, THCTensor *src_, real valu
     }
   }
 
-  THCudaCheck(cudaGetLastError());
+  THCudaCheck(hipGetLastError());
 #endif
 }
 
@@ -298,7 +298,7 @@ THCTensor_(bitor)(THCState* state, THCTensor *self_, THCTensor *src_, real value
     }
   }
 
-  THCudaCheck(cudaGetLastError());
+  THCudaCheck(hipGetLastError());
 #endif
 }
 
@@ -320,7 +320,7 @@ THCTensor_(bitxor)(THCState* state, THCTensor *self_, THCTensor *src_, real valu
     }
   }
 
-  THCudaCheck(cudaGetLastError());
+  THCudaCheck(hipGetLastError());
 #endif
 }
 

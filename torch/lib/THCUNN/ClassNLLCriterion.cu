@@ -1,3 +1,4 @@
+#include "hip/hip_runtime.h"
 #include "THCUNN.h"
 #include "common.h"
 #include "THCHalf.h"
@@ -17,7 +18,7 @@ __global__ void cunn_ClassNLLCriterion_updateOutput_kernel1(Dtype *output,
                                                            int size_average,
                                                            int n_classes,
                                                            long ignore_index) {
-  assert(threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0);
+  assert(hipThreadIdx_x == 0 && hipThreadIdx_y == 0 && hipThreadIdx_z == 0);
 
   // TODO: T4951791 Reuse code between updateOutput_kernel1 and
   // updateOutput_kernel.
@@ -49,15 +50,15 @@ __global__ void cunn_ClassNLLCriterion_updateOutput_kernel(Dtype *output,
   int i, t;
   Dtype cur_weight;
 
-  shInputs[threadIdx.x] = ScalarConvert<int, Acctype>::to(0);
-  acc_weight[threadIdx.x] = ScalarConvert<int, Acctype>::to(0);
-  for (i = threadIdx.x; i < nframe; i += NTHREADS) {
+  shInputs[hipThreadIdx_x] = ScalarConvert<int, Acctype>::to(0);
+  acc_weight[hipThreadIdx_x] = ScalarConvert<int, Acctype>::to(0);
+  for (i = hipThreadIdx_x; i < nframe; i += NTHREADS) {
       t = target[i] - TH_INDEX_BASE;
       if (t != ignore_index) {
         assert(t >= 0 && t < n_classes);
         cur_weight = weights ? weights[t] : ScalarConvert<int, Dtype>::to(1);
-        shInputs[threadIdx.x] -= input[i * ndim + t] * cur_weight;
-        acc_weight[threadIdx.x] += cur_weight;
+        shInputs[hipThreadIdx_x] -= input[i * ndim + t] * cur_weight;
+        acc_weight[hipThreadIdx_x] += cur_weight;
       }
   }
   __syncthreads();
@@ -65,7 +66,7 @@ __global__ void cunn_ClassNLLCriterion_updateOutput_kernel(Dtype *output,
   // TODO: T4951791 Reuse code between updateOutput_kernel1 and
   // updateOutput_kernel
 
-  if (threadIdx.x == 0) {
+  if (hipThreadIdx_x == 0) {
     *output = *total_weight = ScalarConvert<int, Dtype>::to(0);
     Acctype outputAcc = 0;
     Acctype total_weightAcc = 0;
@@ -122,7 +123,7 @@ __global__ void cunn_ClassNLLCriterion_updateGradInput_kernel(
   int i, t;
   Dtype norm = size_average ? (ScalarConvert<int, Dtype>::to(1) / *total_weight) : ScalarConvert<int, Dtype>::to(1);
 
-  for (i = threadIdx.x; i < nframe; i += NTHREADS) {
+  for (i = hipThreadIdx_x; i < nframe; i += NTHREADS) {
     t = (int)target[i] - TH_INDEX_BASE;
     if (t != ignore_index) {
       assert(t >= 0 && t < n_classes);

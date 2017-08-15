@@ -64,7 +64,7 @@ static Generator* THCRandom_rawGenerator(THCState* state)
 {
   THCRNGState* rng_state = THCState_getRngState(state);
   int device;
-  THCudaCheck(cudaGetDevice(&device));
+  THCudaCheck(hipGetDevice(&device));
   if (device >= rng_state->num_devices) THError("Invalid device index.");
   return &rng_state->gen[device];
 }
@@ -118,12 +118,12 @@ void THCRandom_manualSeedAll(THCState* state, unsigned long long seed)
 {
   THCRNGState* rng_state = THCState_getRngState(state);
   int currentDevice;
-  THCudaCheck(cudaGetDevice(&currentDevice));
+  THCudaCheck(hipGetDevice(&currentDevice));
   for (int i = 0; i < rng_state->num_devices; ++i) {
-    THCudaCheck(cudaSetDevice(i));
+    THCudaCheck(hipSetDevice(i));
     THCRandom_manualSeed(state, seed);
   }
-  THCudaCheck(cudaSetDevice(currentDevice));
+  THCudaCheck(hipSetDevice(currentDevice));
 }
 
 /* Get the initial seed */

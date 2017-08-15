@@ -1,3 +1,4 @@
+#include "hip/hip_runtime.h"
 #ifndef THC_GENERIC_FILE
 #define THC_GENERIC_FILE "generic/VolumetricReplicationPadding.cu"
 #else
@@ -116,7 +117,7 @@ void THNN_(VolumetricReplicationPadding_updateOutput)(
             devOutput.getSize(0));
   dim3 blockSize(outputPlaneSize > 256 ? 256 : outputPlaneSize);
 
-  VolumetricReplicationPadding_updateOutput<real><<<gridSize, blockSize, 0, THCState_getCurrentStream(state)>>>(
+  hipLaunchKernelGGL((VolumetricReplicationPadding_updateOutput<real>), dim3(gridSize), dim3(blockSize), 0, THCState_getCurrentStream(state), 
     devInput, devOutput, pfront, pback, ptop, pbottom, pleft, pright);
 }
 
@@ -167,7 +168,7 @@ void THNN_(VolumetricReplicationPadding_updateGradInput)(
             devGradOutput.getSize(0));
   dim3 blockSize(outputPlaneSize > 256 ? 256 : outputPlaneSize);
 
-  VolumetricReplicationPadding_updateGradInput<<<gridSize, blockSize, 0, THCState_getCurrentStream(state)>>>(
+  hipLaunchKernelGGL((VolumetricReplicationPadding_updateGradInput), dim3(gridSize), dim3(blockSize), 0, THCState_getCurrentStream(state), 
     devGradInput, devGradOutput, pfront, pback, ptop, pbottom, pleft, pright);
 }
 

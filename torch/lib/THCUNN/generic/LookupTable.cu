@@ -1,3 +1,4 @@
+#include "hip/hip_runtime.h"
 #ifndef THC_GENERIC_FILE
 #define THC_GENERIC_FILE "generic/LookupTable.cu"
 #else
@@ -31,13 +32,13 @@ void THNN_(LookupTable_accGradParameters)(
   ptrdiff_t numel = THCIndexTensor_(nElement)(state, input);
   long stride = THCTensor_(stride)(state, gradWeight, 0);
 
-  cudaStream_t stream = THCState_getCurrentStream(state);
+  hipStream_t stream = THCState_getCurrentStream(state);
 
   if (numel <= 768 && !scaleGradByFreq) {
     dim3 grid(THCCeilDiv(stride, (long) 4));
     dim3 block(128);
 
-    cunn_LookupTable_accGradParametersKernelByFeature<<<grid, block, 0, stream>>>(
+    hipLaunchKernelGGL((cunn_LookupTable_accGradParametersKernelByFeature), dim3(grid), dim3(block), 0, stream, 
       THCIndexTensor_(data)(state, input),
       THCTensor_(data)(state, gradOutput),
       THCTensor_(data)(state, gradWeight),
@@ -46,7 +47,7 @@ void THNN_(LookupTable_accGradParameters)(
       stride,
       paddingValue);
     THCTensor_(free)(state, gradOutput);
-    THCudaCheck(cudaGetLastError());
+    THCudaCheck(hipGetLastError());
     return;
   }
 
@@ -129,7 +130,7 @@ void THNN_(LookupTable_accGradParameters)(
 
   dim3 grid(THCCeilDiv(numel, (ptrdiff_t) 4), THCCeilDiv(stride, (long) 128));
   dim3 block(32, 4);
-  cunn_LookupTable_accGradParametersKernel<real, accreal><<<grid, block, 0, stream>>>(
+  hipLaunchKernelGGL((cunn_LookupTable_accGradParametersKernel<real, accreal>), dim3(grid), dim3(block), 0, stream, 
     sortedIndices_data,
     origIndices_data,
     THCTensor_(data)(state, gradOutput),
@@ -142,7 +143,7 @@ void THNN_(LookupTable_accGradParameters)(
   );
 
   THCTensor_(free)(state, gradOutput);
-  THCudaCheck(cudaGetLastError());
+  THCudaCheck(hipGetLastError());
 }
 
 void THNN_(LookupTable_renorm)(

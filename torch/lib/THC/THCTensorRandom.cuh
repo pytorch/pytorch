@@ -1,3 +1,4 @@
+#include "hip/hip_runtime.h"
 #ifndef THC_TENSOR_RANDOM_CUH
 #define THC_TENSOR_RANDOM_CUH
 
@@ -14,10 +15,10 @@
 template <typename T>
 __global__ void generateLogNormal(curandStateMtgp32 *state, int size, T *result, double mean, double stddev)
 {
-  int idx = blockIdx.x * BLOCK_SIZE + threadIdx.x;
+  int idx = hipBlockIdx_x * BLOCK_SIZE + hipThreadIdx_x;
   int rounded_size = THCCeilDiv(size, BLOCK_SIZE) * BLOCK_SIZE;
   for (int i = idx; i < rounded_size; i += BLOCK_SIZE * MAX_NUM_BLOCKS) {
-    float x = curand_log_normal(&state[blockIdx.x], mean, stddev);
+    float x = curand_log_normal(&state[hipBlockIdx_x], mean, stddev);
     if (i < size) {
       result[i] = ScalarConvert<float, T>::to(x);
     }
@@ -27,10 +28,10 @@ __global__ void generateLogNormal(curandStateMtgp32 *state, int size, T *result,
 template <>
 __global__ void generateLogNormal<double>(curandStateMtgp32 *state, int size, double *result, double mean, double stddev)
 {
-  int idx = blockIdx.x * BLOCK_SIZE + threadIdx.x;
+  int idx = hipBlockIdx_x * BLOCK_SIZE + hipThreadIdx_x;
   int rounded_size = THCCeilDiv(size, BLOCK_SIZE) * BLOCK_SIZE;
   for (int i = idx; i < rounded_size; i += BLOCK_SIZE * MAX_NUM_BLOCKS) {
-    double x = curand_log_normal_double(&state[blockIdx.x], mean, stddev);
+    double x = curand_log_normal_double(&state[hipBlockIdx_x], mean, stddev);
     if (i < size) {
       result[i] = x;
     }
@@ -40,7 +41,7 @@ __global__ void generateLogNormal<double>(curandStateMtgp32 *state, int size, do
 template <typename T>
 __global__ void
 multinomialAliasDrawKernel(int size, long *output, long *J, T *q, long K,  T *uniform, T *bernoulli){
-  long idx = blockIdx.x * BLOCK_SIZE + threadIdx.x;
+  long idx = hipBlockIdx_x * BLOCK_SIZE + hipThreadIdx_x;
   if (idx < size) {
     long rand_ind = ScalarConvert<T, long>::to(uniform[idx]);
     T bern_uniform = bernoulli[idx];
@@ -52,7 +53,7 @@ multinomialAliasDrawKernel(int size, long *output, long *J, T *q, long K,  T *un
 template <typename T>
 __global__ void
 aliasMultinomialFilter(T *q, T *probs, long *smaller, long *larger, long *J_data, long *larger_short_data, long *smaller_short_data, T one, long inputsize){
-  long idx = blockIdx.x * BLOCK_SIZE + threadIdx.x;
+  long idx = hipBlockIdx_x * BLOCK_SIZE + hipThreadIdx_x;
   if (idx < inputsize) {
     larger_short_data[idx] = 0;
     smaller_short_data[idx] = 0;
@@ -72,7 +73,7 @@ aliasMultinomialFilter(T *q, T *probs, long *smaller, long *larger, long *J_data
 template <typename T>
 __global__ void
 condDiv(T *q, long *J, long inputsize, T q_max) {
-  long idx = blockIdx.x * BLOCK_SIZE + threadIdx.x;
+  long idx = hipBlockIdx_x * BLOCK_SIZE + hipThreadIdx_x;
   T one = ScalarConvert<int, T>::to(1);
   if (idx < inputsize) {
     if (J[idx] <= 0) {
@@ -95,21 +96,21 @@ __global__ void renormRowsL1(T* dist, long rows, long cols) {
   extern __shared__ __align__(sizeof(T)) unsigned char my_smem[];
   T *smem = reinterpret_cast<T *>(my_smem);
 
-  for (long row = blockIdx.x; row < rows; row += gridDim.x) {
+  for (long row = hipBlockIdx_x; row < rows; row += hipGridDim_x) {
     T sum = ScalarConvert<int, T>::to(0);
-    for (long col = threadIdx.x; col < cols; col += blockDim.x) {
+    for (long col = hipThreadIdx_x; col < cols; col += hipBlockDim_x) {
       sum = THCNumerics<T>::add(sum, dist[row * cols + col]);
     }
 
-    sum = reduceBlock(smem, blockDim.x, sum, ReduceAdd<T, T>(), ScalarConvert<int, T>::to(0));
-    if (threadIdx.x == 0) {
+    sum = reduceBlock(smem, hipBlockDim_x, sum, ReduceAdd<T, T>(), ScalarConvert<int, T>::to(0));
+    if (hipThreadIdx_x == 0) {
       smem[0] = sum;
     }
     __syncthreads();
 
     sum = smem[0];
     if (THCNumerics<T>::gt(sum, ScalarConvert<int, T>::to(0))) {
-      for (long col = threadIdx.x; col < cols; col += blockDim.x) {
+      for (long col = hipThreadIdx_x; col < cols; col += hipBlockDim_x) {
         dist[row * cols + col] = THCNumerics<T>::div(dist[row * cols + col], sum);
       }
     }
@@ -157,29 +158,29 @@ sampleMultinomialOnce(long* dest,
   __shared__ bool found;
 
   // Shared Memory hold blockdim.x T for holding the cumulative sum,
-  // blockDim.x AccT for normalizing the probabilities,
+  // hipBlockDim_x AccT for normalizing the probabilities,
   T *smem = reinterpret_cast<T *>(my_smem);
-  AccT *asmem = reinterpret_cast<AccT *>(&my_smem[blockDim.x * sizeof(T)]);
+  AccT *asmem = reinterpret_cast<AccT *>(&my_smem[hipBlockDim_x * sizeof(T)]);
 
   AccT accZero = ScalarConvert<int, AccT>::to(0);
   T zero = ScalarConvert<int, T>::to(0);
 
-  for (long curDist = blockIdx.x;
-       curDist < distributions; curDist += gridDim.x) {
+  for (long curDist = hipBlockIdx_x;
+       curDist < distributions; curDist += hipGridDim_x) {
     // Each block handles one distribution
     // First pass, find the total sum of the distribution
     AccT sum = accZero;
-    for (int cat = threadIdx.x; cat < categories; cat += blockDim.x) {
+    for (int cat = hipThreadIdx_x; cat < categories; cat += hipBlockDim_x) {
       sum = THCNumerics<AccT>::add(
         sum,
         ScalarConvert<T, AccT>::to(dist[curDist * categories + cat]));
     }
 
-    // threadIdx.x == 0 has the sum value from this
-    sum = reduceBlock(asmem, blockDim.x, sum, ReduceAdd<AccT, AccT>(), accZero);
+    // hipThreadIdx_x == 0 has the sum value from this
+    sum = reduceBlock(asmem, hipBlockDim_x, sum, ReduceAdd<AccT, AccT>(), accZero);
 
     // Broadcast sum and sample value
-    if (threadIdx.x == 0) {
+    if (hipThreadIdx_x == 0) {
       // Make sure the sum of our distribution didn't overflow
       assert(!isinf(sum));
 
@@ -194,20 +195,20 @@ sampleMultinomialOnce(long* dest,
 
     if (THCNumerics<AccT>::eq(sum,  accZero) || THCNumerics<T>::eq(sample, zero)) {
       // Choose the first element
-      if (threadIdx.x == 0) {
+      if (hipThreadIdx_x == 0) {
         dest[curDist] = TH_INDEX_BASE;
       }
 
       continue;
     }
 
-    int chunks = THCCeilDiv(categories, (int) blockDim.x);
+    int chunks = THCCeilDiv(categories, (int) hipBlockDim_x);
     T prevHighProb = zero;
     found = false;
 
     for (int chunk = 0; chunk < chunks && !found; ++chunk) {
       // All threads in bounds load a value
-      int cat = chunk * blockDim.x + threadIdx.x;
+      int cat = chunk * hipBlockDim_x + hipThreadIdx_x;
 
       AccT val =
         cat < categories ?
@@ -216,30 +217,30 @@ sampleMultinomialOnce(long* dest,
               sum) :
           accZero;
 
-      smem[threadIdx.x] = ScalarConvert<AccT, T>::to(val);
+      smem[hipThreadIdx_x] = ScalarConvert<AccT, T>::to(val);
       __syncthreads();
 
       // Perform an inclusive prefix sum of the shared memory contents
-      for (int offset = 1; offset < blockDim.x; offset *= 2) {
+      for (int offset = 1; offset < hipBlockDim_x; offset *= 2) {
         T val = zero;
 
-        if (threadIdx.x >= offset) {
-          val = THCNumerics<T>::add(smem[threadIdx.x - offset], smem[threadIdx.x]);
+        if (hipThreadIdx_x >= offset) {
+          val = THCNumerics<T>::add(smem[hipThreadIdx_x - offset], smem[hipThreadIdx_x]);
         }
 
         __syncthreads();
-        if (threadIdx.x >= offset) {
-          smem[threadIdx.x] = val;
+        if (hipThreadIdx_x >= offset) {
+          smem[hipThreadIdx_x] = val;
         }
         __syncthreads();
       }
 
       // Each thread will check to see if the sample falls in its
       // bucket
-      T curBucket = THCNumerics<T>::add(smem[threadIdx.x], prevHighProb);
+      T curBucket = THCNumerics<T>::add(smem[hipThreadIdx_x], prevHighProb);
       T prevBucket =
-        threadIdx.x == 0 ? prevHighProb :
-        THCNumerics<T>::add(smem[threadIdx.x - 1], prevHighProb);
+        hipThreadIdx_x == 0 ? prevHighProb :
+        THCNumerics<T>::add(smem[hipThreadIdx_x - 1], prevHighProb);
       bool inBucket =
         (cat < categories) &&
         (!THCNumerics<T>::gt(sample, curBucket)) &&
@@ -253,12 +254,12 @@ sampleMultinomialOnce(long* dest,
       }
 
       // Store the previous scan's high value for future use
-      prevHighProb = THCNumerics<T>::add(prevHighProb, smem[blockDim.x - 1]);
+      prevHighProb = THCNumerics<T>::add(prevHighProb, smem[hipBlockDim_x - 1]);
 
       __syncthreads();
     }
 
-    if (threadIdx.x == 0 && !found) {
+    if (hipThreadIdx_x == 0 && !found) {
       // This should address a rare bug where we don't select a valid index. This likely occurs when
       // due to floating point arithmetic rounding errors, our cumulative sum does not add up to 1, but
       // and our uniform sample is greater than this value. In this case we likely have unitialized memory
@@ -290,18 +291,18 @@ sampleMultinomialWithReplacement(curandStateMtgp32* state,
   // call to update the generator state.
 
   // The block determines the distribution for which we generate a point
-  for (long curDist = blockIdx.x;
+  for (long curDist = hipBlockIdx_x;
        curDist < distributions;
-       curDist += gridDim.x) {
+       curDist += hipGridDim_x) {
     for (int sampleBase = 0;
-         sampleBase < totalSamples; sampleBase += blockDim.y) {
+         sampleBase < totalSamples; sampleBase += hipBlockDim_y) {
       // The warp determines the sample
-      int sample = sampleBase + threadIdx.y;
+      int sample = sampleBase + hipThreadIdx_y;
 
       // All threads participate in this
-      T r = ScalarConvert<float, T>::to(curand_uniform(&state[blockIdx.x]));
+      T r = ScalarConvert<float, T>::to(curand_uniform(&state[hipBlockIdx_x]));
 
-      if (threadIdx.x == 0 && sample < totalSamples) {
+      if (hipThreadIdx_x == 0 && sample < totalSamples) {
         // Find the bucket that a uniform sample lies in
         int choice = binarySearchForMultinomial<T>(
           normDistPrefixSum + curDist * categories,
@@ -333,16 +334,16 @@ sampleMultinomialWithoutReplacement(curandStateMtgp32* state,
 
   // The block and warp determines the distribution for which we
   // generate a point
-  for (long curDistBase = blockIdx.x * blockDim.y;
+  for (long curDistBase = hipBlockIdx_x * hipBlockDim_y;
        curDistBase < distributions;
-       curDistBase += gridDim.x * blockDim.y) {
+       curDistBase += hipGridDim_x * hipBlockDim_y) {
     // The warp determines the distribution
-    long curDist = curDistBase + threadIdx.y;
+    long curDist = curDistBase + hipThreadIdx_y;
 
     // All threads must participate in this
-    T r = ScalarConvert<float, T>::to(curand_uniform(&state[blockIdx.x]));
+    T r = ScalarConvert<float, T>::to(curand_uniform(&state[hipBlockIdx_x]));
 
-    if (threadIdx.x == 0 && curDist < distributions) {
+    if (hipThreadIdx_x == 0 && curDist < distributions) {
       // Find the bucket that a uniform sample lies in
       int choice = binarySearchForMultinomial<T>(
         normDistPrefixSum + curDist * categories,

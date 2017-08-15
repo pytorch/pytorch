@@ -1,3 +1,4 @@
+#include "hip/hip_runtime.h"
 #ifndef THC_TENSOR_TOPK_CUH
 #define THC_TENSOR_TOPK_CUH
 
@@ -162,14 +163,14 @@ __device__ void countRadixUsingMask(CountType counts[RadixSize],
     counts[i] = 0;
   }
 
-  if (threadIdx.x < RadixSize) {
-    smem[threadIdx.x] = 0;
+  if (hipThreadIdx_x < RadixSize) {
+    smem[hipThreadIdx_x] = 0;
   }
   __syncthreads();
 
   // Scan over all the data. Upon a read, the warp will accumulate
   // counts per each digit in the radix using warp voting.
-  for (IndexType i = threadIdx.x; i < sliceSize; i += blockDim.x) {
+  for (IndexType i = hipThreadIdx_x; i < sliceSize; i += hipBlockDim_x) {
     BitDataType val = TopKTypeConfig<DataType>::convert(doLdg(&data[i * withinSliceStride]));
 
     bool hasVal = ((val & desiredMask) == desired);
@@ -215,14 +216,14 @@ __device__ DataType findPattern(DataType* smem,
                              IndexType withinSliceStride,
                              BitDataType desired,
                              BitDataType desiredMask) {
-  if (threadIdx.x < 32) {
-    smem[threadIdx.x] = ScalarConvert<int, DataType>::to(0);
+  if (hipThreadIdx_x < 32) {
+    smem[hipThreadIdx_x] = ScalarConvert<int, DataType>::to(0);
   }
   __syncthreads();
 
   // All threads participate in the loop, in order to sync on the flag
-  IndexType numIterations = THCRoundUp(sliceSize, (IndexType) blockDim.x);
-  for (IndexType i = threadIdx.x; i < numIterations; i += blockDim.x) {
+  IndexType numIterations = THCRoundUp(sliceSize, (IndexType) hipBlockDim_x);
+  for (IndexType i = hipThreadIdx_x; i < numIterations; i += hipBlockDim_x) {
     bool inRange = (i < sliceSize);
     DataType v = inRange ? doLdg(&data[i * withinSliceStride]) : ScalarConvert<int, DataType>::to(0);
 
@@ -408,10 +409,10 @@ __global__ void gatherTopK(TensorInfo<T, IndexType> input,
   // All threads need to participate in the loop and the prefix sum,
   // but not necessarily in the load; hence loop bounds being rounded
   // up to a multiple of the block dim.
-  IndexType numIterations = THCRoundUp(inputSliceSize, (IndexType) blockDim.x);
+  IndexType numIterations = THCRoundUp(inputSliceSize, (IndexType) hipBlockDim_x);
   IndexType writeIndexStart = 0;
 
-  for (IndexType i = threadIdx.x; i < numIterations; i += blockDim.x) {
+  for (IndexType i = hipThreadIdx_x; i < numIterations; i += hipBlockDim_x) {
     bool inRange = (i < inputSliceSize);
     T v =
       inRange ? doLdg(&inputSliceStart[i * inputWithinSliceStride]) : ScalarConvert<int, T>::to(0);
@@ -448,7 +449,7 @@ __global__ void gatherTopK(TensorInfo<T, IndexType> input,
   assert(outputSliceSize >= writeIndexStart);
   IndexType topKRemaining = (outputSliceSize - writeIndexStart);
 
-  for (IndexType i = threadIdx.x; i < numIterations; i += blockDim.x) {
+  for (IndexType i = hipThreadIdx_x; i < numIterations; i += hipBlockDim_x) {
     bool inRange = (i < inputSliceSize);
     T v =
       inRange ? doLdg(&inputSliceStart[i * inputWithinSliceStride]) : ScalarConvert<int, T>::to(0);
