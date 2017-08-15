@@ -2,6 +2,7 @@ import torch
 import torch.jit
 import torch.nn as nn
 import unittest
+import math
 from torch.autograd import Variable, Function
 from common import TestCase, run_tests
 
@@ -42,6 +43,7 @@ class TestJit(TestCase):
         cx = Variable(torch.randn(3, 20))
         trace, _ = torch.jit.record_trace(
             nn.LSTMCell(10, 20), input, (hx, cx))
+        print(str(trace))
         torch._C._jit_pass_lint(trace)
         torch._C._jit_pass_init(trace)
         torch._C._jit_pass_lint(trace)
@@ -159,8 +161,102 @@ class TestJit(TestCase):
 
         x = Variable(torch.randn(10, 3, 224, 224).fill_(1.0), requires_grad=True)
         trace, _ = torch.jit.record_trace(AlexNet(), x)
+        print(str(trace))
         self.assertExpected(str(trace))
         self.assertExpected(torch._C._jit_pass_export(trace), "pbtxt")
+
+    def test_vgg(self):
+        inplace = False
+        cfg = {
+            'A': [64, 'M', 128, 'M', 256, 256, 'M', 512, 512, 'M', 512, 512, 'M'],
+            'B': [64, 64, 'M', 128, 128, 'M', 256, 256, 'M', 512, 512, 'M', 512, 512, 'M'],
+            'D': [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 'M', 512, 512, 512, 'M', 512, 512, 512, 'M'],
+            'E': [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 256, 'M', 512, 512, 512, 512, 'M', 512, 512, 512, 512, 'M'],
+        }
+
+        class VGG(nn.Module):
+
+            def __init__(self, features, num_classes=1000):
+                super(VGG, self).__init__()
+                self.features = features
+                self.classifier = nn.Sequential(
+                    nn.Linear(512 * 7 * 7, 4096),
+                    nn.ReLU(inplace=inplace),
+                    nn.Dropout(),
+                    nn.Linear(4096, 4096),
+                    nn.ReLU(inplace=inplace),
+                    nn.Dropout(),
+                    nn.Linear(4096, num_classes),
+                )
+                self._initialize_weights()
+
+            def _initialize_weights(self):
+                for m in self.modules():
+                    if isinstance(m, nn.Conv2d):
+                        n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
+                        m.weight.data.normal_(0, math.sqrt(2. / n))
+                        if m.bias is not None:
+                            m.bias.data.zero_()
+                    elif isinstance(m, nn.BatchNorm2d):
+                        m.weight.data.fill_(1)
+                        m.bias.data.zero_()
+                    elif isinstance(m, nn.Linear):
+                        n = m.weight.size(1)
+                        m.weight.data.normal_(0, 0.01)
+                        m.bias.data.zero_()
+
+            def forward(self, x):
+                x = self.features(x)
+                x = x.view(x.size(0), -1)
+                x = self.classifier(x)
+                return x
+
+        def make_layers(cfg, batch_norm=False):
+            layers = []
+            in_channels = 3
+            for v in cfg:
+                if v == 'M':
+                    layers += [nn.MaxPool2d(kernel_size=2, stride=2)]
+                else:
+                    conv2d = nn.Conv2d(in_channels, v, kernel_size=3, padding=1)
+                    if batch_norm:
+                        layers += [conv2d, nn.BatchNorm2d(v), nn.ReLU(inplace=inplace)]
+                    else:
+                        layers += [conv2d, nn.ReLU(inplace=inplace)]
+                    in_channels = v
+            return nn.Sequential(*layers)
+
+        # VGG 16-layer model (configuration "D")
+        x = Variable(torch.randn(10, 3, 224, 224).fill_(1.0), requires_grad=True)
+        vgg16 = VGG(make_layers(cfg['D']))
+        trace, _ = torch.jit.record_trace(vgg16, x)
+        print(str(trace))
+        self.assertExpected(str(trace), "16")
+        self.assertExpected(torch._C._jit_pass_export(trace), "16-pbtxt")
+
+        # # VGG 16-layer model (configuration "D") with batch normalization
+        # x = Variable(torch.randn(10, 3, 224, 224).fill_(1.0), requires_grad=True)
+        # vgg16_bn = VGG(make_layers(cfg['D'], batch_norm=True))
+        # trace, _ = torch.jit.record_trace(vgg16_bn, x)
+        # print(str(trace))
+        # self.assertExpected(str(trace), "16_bn")
+        # self.assertExpected(torch._C._jit_pass_export(trace), "16_bn-pbtxt")
+
+        # VGG 19-layer model (configuration "E")
+        x = Variable(torch.randn(10, 3, 224, 224).fill_(1.0), requires_grad=True)
+        vgg19 = VGG(make_layers(cfg['E']))
+        trace, _ = torch.jit.record_trace(vgg19, x)
+        print(str(trace))
+        self.assertExpected(str(trace), "19")
+        self.assertExpected(torch._C._jit_pass_export(trace), "19-pbtxt")
+
+        # # VGG 19-layer model (configuration 'E') with batch normalization
+        # x = Variable(torch.randn(10, 3, 224, 224).fill_(1.0), requires_grad=True)
+        # vgg19_bn = VGG(make_layers(cfg['E'], batch_norm=True))
+        # trace, _ = torch.jit.record_trace(vgg19_bn, x)
+        # print(str(trace))
+        # self.assertExpected(str(trace), "19_bn")
+        # self.assertExpected(torch._C._jit_pass_export(trace), "19_bn-pbtxt")
 
     def test_autograd_closure(self):
         a = x = Variable(torch.Tensor([0.4]), requires_grad=True)
