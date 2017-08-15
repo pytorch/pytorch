@@ -856,29 +856,29 @@ class TestNN(NNTestCase):
         # check a known test example
         es = nn.EmbeddingBag(5, 2, mode=mode)
         es.weight.data.copy_(torch.arange(1, 11).resize_as_(es.weight.data))
-        input = Variable(torch.LongTensor([3, 1, 1, 1, 4]))
-        offsets = Variable(torch.LongTensor([0, 2]))
+        input = Variable(torch.LongTensor([3, 1, 1, 1, 4, 0]))
+        offsets = Variable(torch.LongTensor([0, 3]))
         grad_output = torch.arange(1, 5).view(2, 2).type(torch.Tensor)
 
         if mode == 'sum':
             expected_output = torch.Tensor(
-                [[10, 12],
-                 [15, 18]])
+                [[13, 16],
+                 [13, 16]])
             expected_grad_weight = torch.Tensor(
-                [[0, 0],
-                 [7, 10],
+                [[3, 4],
+                 [5, 8],
                  [0, 0],
                  [1, 2],
                  [3, 4]])
         else:
             expected_output = torch.Tensor(
-                [[10. / 2, 12. / 2],
-                 [15. / 3, 18. / 3]])
+                [[13. / 3, 16. / 3],
+                 [13. / 3, 16. / 3]])
             expected_grad_weight = torch.Tensor(
-                [[0., 0.],
-                 [1. / 2 + 3. / 3 + 3. / 3, 2. / 2 + 4. / 3 + 4. / 3],
+                [[3. / 3, 4. / 3],
+                 [1. / 3 + 1. / 3 + 3. / 3, 2. / 3 + 2. / 3 + 4. / 3],
                  [0., 0.],
-                 [1. / 2, 2. / 2],
+                 [1. / 3, 2. / 3],
                  [3. / 3, 4. / 3]])
 
         if cuda:
@@ -894,6 +894,16 @@ class TestNN(NNTestCase):
 
         self.assertEqual(output.data, expected_output)
         self.assertEqual(es.weight.grad.data, expected_grad_weight)
+
+        # check same example except as 2D
+        input = Variable(torch.LongTensor([[3, 1, 1], [1, 4, 0]]))
+        es.zero_grad()
+        output = es(input)
+        output.backward(grad_output)
+
+        self.assertEqual(output.data, expected_output)
+        self.assertEqual(es.weight.grad.data, expected_grad_weight)
+
 
         # now compare EmbeddingBag vs Embedding + Sum/Mean, for constant bag length
         def _test_vs_Embedding(N, D, B, L):
