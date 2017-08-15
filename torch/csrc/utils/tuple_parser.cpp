@@ -90,7 +90,7 @@ auto TupleParser::invalid_type(const std::string& expected, const std::string& p
   PyObject* obj = PyTuple_GET_ITEM(args, idx -1);
   if (PyTuple_Check(obj)){
     msg += " but got tuple of (";
-    int size = PyTuple_GET_SIZE(obj);
+    int size = (int) PyTuple_GET_SIZE(obj);
     for (int i = 0; i < size; ++i) {
       msg += Py_TYPE(PyTuple_GET_ITEM(obj, i))->tp_name;
       if (i != size - 1){

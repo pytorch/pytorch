@@ -4,7 +4,7 @@
 #include <Python.h>
 #include "torch/csrc/utils/auto_gpu.h"
 
-class THCPAutoGPU : public AutoGPU {
+class THP_CLASS THCPAutoGPU : public AutoGPU {
 public:
   explicit THCPAutoGPU(int device_id=-1);
   THCPAutoGPU(PyObject *args, PyObject *self=NULL);
