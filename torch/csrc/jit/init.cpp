@@ -5,7 +5,6 @@
 #include "torch/csrc/jit/graph_fuser.h"
 #include "torch/csrc/jit/init_pass.h"
 #include "torch/csrc/jit/dead_code_elimination.h"
-#include "torch/csrc/jit/graph_exporter.h"
 #include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/utils/python_strings.h"
 
