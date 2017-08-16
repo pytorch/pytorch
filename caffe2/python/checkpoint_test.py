@@ -22,7 +22,7 @@ import shutil
 import tempfile
 
 def build_pipeline(node_id):
-    with Node('reader:%d' % node_id):
+    with Node('trainer:%d' % node_id):
         with Job.current().init_group, Task():
             data_arr = Struct(('val', np.array(list(range(10)))))
             data = ConstRecord(ops, data_arr)
@@ -137,8 +137,8 @@ class TestCheckpoint(TestCase):
             ws = workspace.C.Workspace()
             session = LocalSession(ws)
             self.assertEquals(len(ws.blobs), 0)
-            model_blob_names = ['reader:1/task/GivenTensorInt64Fill:0',
-                                'reader:2/task/GivenTensorInt64Fill:0']
+            model_blob_names = ['trainer:1/task/GivenTensorInt64Fill:0',
+                                'trainer:2/task/GivenTensorInt64Fill:0']
             checkpoint = MultiNodeCheckpointManager(tmpdir, 'minidb')
             with Job() as job:
                 for node_id in range(3):
@@ -180,7 +180,7 @@ class TestCheckpoint(TestCase):
 
             for node_id in range(num_nodes):
                 epoch = 5
-                node_name = 'reader:%d' % node_id
+                node_name = 'trainer:%d' % node_id
                 expected_db_name = tmpdir + '/' + node_name + '.000005'
                 self.assertEquals(
                     checkpoint.get_ckpt_db_name(node_name, epoch),
@@ -198,7 +198,7 @@ class TestCheckpoint(TestCase):
 
             # The uploaded files do not exist yet.
             for node_id in range(num_nodes):
-                node_name = 'reader:%d' % node_id
+                node_name = 'trainer:%d' % node_id
                 upload_path = os.path.join(upload_dir, node_name)
                 self.assertFalse(os.path.exists(upload_path))
 
@@ -219,7 +219,7 @@ class TestCheckpoint(TestCase):
 
             # The uploaded files should exist now.
             for node_id in range(num_nodes):
-                node_name = 'reader:%d' % node_id
+                node_name = 'trainer:%d' % node_id
                 upload_path = os.path.join(upload_dir, node_name)
                 self.assertTrue(os.path.exists(upload_path))
 
