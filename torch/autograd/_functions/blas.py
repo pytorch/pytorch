@@ -1,4 +1,5 @@
 import torch
+import torch.toffee
 
 from ..function import Function, InplaceFunction
 from .utils import maybe_unexpand
@@ -14,6 +15,12 @@ def _get_output(ctx, arg, inplace=False):
 
 
 class Addmm(InplaceFunction):
+
+    @staticmethod
+    def primspec(add_matrix, matrix1, matrix2, alpha=1, beta=1, inplace=False):
+        # Toffee does have caffe2
+        if alpha != 1 or beta != 1: return None
+        return torch.toffee.op("FC", matrix1, matrix2, add_matrix)
 
     @staticmethod
     def forward(ctx, add_matrix, matrix1, matrix2, alpha=1, beta=1, inplace=False):
