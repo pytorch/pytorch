@@ -8,13 +8,11 @@ from __future__ import unicode_literals
 import networkx as nx
 import collections
 import time
-import heapq
 import copy
 from caffe2.python import workspace
 from caffe2.proto import caffe2_pb2
 import enum
 import logging
-import numpy as np
 from future.utils import viewitems, viewvalues
 import caffe2.python._import_c_extension as C
 
@@ -74,16 +72,38 @@ def share_grad_blobs(
     activations = set(activations[:-2])
 
     # Gradient ops
-    grad_ops = [op for op in netproto.op if is_grad_op(op)]
-    return _compute_blob_recycling_for_dag(
-        netproto,
-        losses,
-        grad_ops,
-        lambda b: is_grad_blob(b) or (share_activations and b in activations),
-        namescope,
-        {} if dont_share_blobs is None else dont_share_blobs,
-        blob_shapes
+    grad_op_indices = []
+    for idx, op in enumerate(netproto.op):
+        if (is_grad_op(op)):
+            grad_op_indices.append(idx)
+
+    shared_blobs = set()
+    for op in net.Proto().op:
+        for b in list(op.input) + list(op.output):
+            if is_grad_blob(b) or (share_activations and b in activations):
+                shared_blobs.add(b)
+    start_time = time.time()
+    optim_str = C.memonger_compute_blob_recycling_for_dag(
+        netproto.SerializeToString(),
+        [str(s).encode('utf-8') for s in losses],
+        grad_op_indices,
+        set(str(s).encode('utf-8') for s in shared_blobs),
+        namescope.encode('utf-8'),
+        set() if dont_share_blobs is None else dont_share_blobs,
+        {} if blob_shapes is None else blob_shapes
     )
+
+    log.info("Memonger memory optimization took {} secs".format(
+        time.time() - start_time),
+    )
+
+    optim = caffe2_pb2.NetDef()
+    optim.ParseFromString(optim_str)
+    assert verify_graph_equality(net.Proto(), optim), \
+        "Memonger graph is not equal to original."
+    assert verify_inplace_blobs(net.Proto(), optim), \
+        "Inplace assignments differ in memonger net."
+    return optim
 
 
 def optimize_inference_for_dag(net, input_blobs, namescope=""):
@@ -94,311 +114,48 @@ def optimize_inference_for_dag(net, input_blobs, namescope=""):
     def is_activation_blob(b):
         return b not in external_input and b not in external_output
 
+    activation_blobs = set()
     seen_as_output = set()
     ops = list(net.Proto().op)
+    op_indices = [index for index, op in enumerate(net.Proto().op)]
 
     # Sanity check: check that all external inputs are properlyh accounted
     # and that no gradient ops are included in 'net'
     for op in ops:
         for b in op.input:
-            if is_activation_blob(b) and b not in seen_as_output:
-                assert False, "{} not in external input".format(b)
+            if is_activation_blob(b):
+                activation_blobs.add(b)
+                if b not in seen_as_output:
+                    assert False, "{} not in external input".format(b)
+        for b in op.output:
+            if is_activation_blob(b):
+                activation_blobs.add(b)
         seen_as_output = seen_as_output.union(set(op.output))
         assert not op.is_gradient_op, \
             "You can only pass inference-only nets to optimize_inference_for_dag"
-
-    return _compute_blob_recycling_for_dag(
-        netproto, input_blobs, ops, is_activation_blob,
-        namescope, set(), None,
+    start_time = time.time()
+    optim_str = C.memonger_compute_blob_recycling_for_dag(
+        netproto.SerializeToString(),
+        [str(s).encode('utf-8') for s in input_blobs],
+        op_indices,
+        set(str(s).encode('utf-8') for s in activation_blobs),
+        namescope.encode('utf-8'),
+        set(),
+        {}
     )
 
-
-def _compute_blob_recycling_for_dag(
-    netproto, heads, ops, is_shareable,
-    namescope, dont_share_blobs, blob_shapes=None,
-):
-    '''
-    Computes a blob recycling by traversing the computation DAG. The resulting
-    model can be executed safely on a DAGNet.
-    '''
-    start_time = time.time()
-    if dont_share_blobs is not None:
-        dont_share_blobs = set([str(b) for b in dont_share_blobs])
-
-    # Create mapping from blobs to ops
-    origproto = copy.deepcopy(netproto)
-    blobs_to_ops = collections.defaultdict(lambda: [])
-    blob_input_count = collections.defaultdict(lambda: 0)
-    op_inputs = collections.defaultdict(lambda: 0)
-    op_visit_count = collections.defaultdict(lambda: 0)
-    share_counts = collections.defaultdict(lambda: 0)
-    req_tokens = collections.defaultdict(lambda: set())
-    op_token_deposit = [set() for _ in ops]
-
-    blob_sizes = {} if blob_shapes is not None else None
-
-    # First figure out which of the shareable blobs
-    # are 'internal' to the optimization. For example, if optimizing
-    # only gradient ops, then activation blobs will be 'external' as they
-    # are not output by these ops.
-    optim_op_outputs = set()
-    for op in ops:
-        optim_op_outputs.update(set(op.output))
-
-    blob_seen = collections.defaultdict(lambda: 0)
-    for i, op in enumerate(ops):
-        for inp in op.input:
-            if is_shareable(inp) or inp in heads:
-                if inp in optim_op_outputs:
-                    blobs_to_ops[inp].append(i)
-                    assert blob_seen[inp] > 0, \
-                        "Input {} was not output by an op before".format(inp)
-                    op_inputs[i] += blob_seen[inp]
-                else:
-                    # For external blobs, we don't increase the op_inputs
-                    # count.
-                    blobs_to_ops[inp].append(i)
-                    share_counts[inp] = 1
-        for outp in op.output:
-            blob_seen[outp] += 1
-
-    output_blobs = set()
-    mapping = {}
-    unknown_shapes = set()
-
-    # Helper function to return blob size based on shape inference.
-    # If we don't have shape inference available, return 0.
-    def infer_blob_size(b):
-        if b in blob_shapes:
-            return np.prod(blob_shapes[b])
-        else:
-            unknown_shapes.add(b)
-        return 0
-
-    global token_seq
-    token_seq = 0
-
-    # Creates a next "token". Tokens are used to to keep track of
-    # dependendencies: a blob can be replaced by another only if that
-    # blob "holds" all tokens currently in scope.
-    def next_token():
-        global token_seq
-        token_seq += 1
-        return token_seq
-
-    saved_count = 0
-
-    # Main recursive function. We start recursion from the "heads" and
-    # only descend on an operator when all its inputs have been 'satisfied'.
-    # That is, all parent operators have been visited.
-    def descend(op_idx, free_blobs, tokens):
-        # Check if there are tokens left at this operator from a
-        # parent operator.
-        tokens = tokens.union(op_token_deposit[op_idx])
-        op_token_deposit[op_idx] = None
-        cur_op = ops[op_idx]
-
-        # new_free_blobs contains the blobs that we will release after
-        # visiting this op
-        new_free_blobs = set()
-        saved = 0
-
-        # Update the tokens assigned to blobs to be union of the
-        # tokens we are currently holding and the tokens already held
-        # by that blob.
-        for b in list(cur_op.input) + list(cur_op.output):
-            actual_blob = b if b not in mapping else mapping[b]
-            req_tokens[b] = req_tokens[b].union(tokens)
-            if actual_blob != b:
-                # This blob has been assigned to another (recycled) blob,
-                # so update the token holdings of the recycled blob.
-                req_tokens[actual_blob] = req_tokens[actual_blob].union(tokens)
-
-        # Check each input and increment the counters for each of the input
-        # blobs.
-        for inp in cur_op.input:
-            if is_shareable(inp):
-                blob_input_count[inp] += 1
-                if blob_input_count[inp] == len(blobs_to_ops[inp]):
-                    # This input blob has been now consumed, so we
-                    # can release it to be recycled. If it was replaced
-                    # by another recycled blob, release the recycled blob
-                    # instead.
-                    actual_blob = inp if inp not in mapping else mapping[inp]
-                    if actual_blob not in dont_share_blobs:
-                        new_free_blobs.add(
-                            (-share_counts[actual_blob], actual_blob),
-                        )
-
-        def can_be_used(blob, cur_tokens):
-            # Do we have all required tokens, and this one
-            # was not released in this op?
-            for (_cnt, b) in new_free_blobs:
-                if b == blob:
-                    return False
-            return len(req_tokens[blob] - cur_tokens) == 0
-
-        # Check each output to see if we see the output the first time (i.e
-        # it is created by this op). if it is then, we can replace it with
-        # a recycled blob, if available.
-        for outp in cur_op.output:
-            if is_shareable(outp):
-                if outp not in output_blobs:
-                    # First seen this blob as output, can assign to a free blob
-                    freeb = None
-
-                    # We have two algorithms for choosing the blob to replace
-                    # this one. One that uses size information and another
-                    # that uses a priority queue that prefers blobs that are
-                    # have been shared before.
-                    if blob_sizes is None:
-                        put_back = []
-                        while len(free_blobs) > 0:
-                            (negcnt, cand_freeb) = heapq.heappop(free_blobs)
-                            if can_be_used(cand_freeb, tokens):
-                                freeb = cand_freeb
-                                break
-                            else:
-                                put_back.append((negcnt, cand_freeb))
-                        for cnt, b in put_back:
-                            heapq.heappush(free_blobs, (cnt, b))
-                    else:
-                        bsize = infer_blob_size(outp)
-                        best_blob = None
-                        best_size = -1
-
-                        # Heuristic to choose the most suitably sized blob
-                        for b in free_blobs:
-                            if can_be_used(b, tokens):
-                                sz = blob_sizes[b]
-                                if sz >= best_size:
-                                    if best_size < bsize or best_size >= sz:
-                                        best_size = sz
-                                        best_blob = b
-
-                        freeb = best_blob
-
-                        if freeb is not None:
-                            free_blobs.remove(freeb)
-                            saved += bsize
-
-                    # "freeb" is the blob output to be replaced with. We
-                    # update its tokens to include the tokens being held
-                    # now.
-                    if freeb is not None:
-                        req_tokens[freeb] = req_tokens[freeb].union(tokens)
-                        mapping[outp] = freeb
-                        share_counts[freeb] += 1
-
-                output_blobs.add(outp)
-
-        # Process blobs released during this op visit. Depending
-        # on whether we have blob sizes or not, we store the list
-        # of free blobs differently (NOTE: this should be unified).
-        for (cnt, nf) in new_free_blobs:
-            already_inserted = False
-            # Note: we prevent double insertion, but it can
-            # happen because of parallel branches. Token management
-            # ensures free blobs are handled correctly.
-            if blob_sizes is None:
-                for _c, b in free_blobs:
-                    if b == nf:
-                        already_inserted = True
-                if not already_inserted:
-                    heapq.heappush(free_blobs, (cnt, nf))
-            else:
-                if nf not in blob_sizes:
-                    blob_sizes[nf] = infer_blob_size(outp)
-                if nf in free_blobs:
-                    already_inserted = True
-                if not already_inserted:
-                    free_blobs.append(nf)
-
-        num_branches = 0
-        # Count branches
-        for outp in cur_op.output:
-            for _ in blobs_to_ops[outp]:
-                num_branches += 1
-
-        # Here we process each output again and see if we can descend
-        # down the operator graph.
-        for outp in cur_op.output:
-            for inp_op_idx in blobs_to_ops[outp]:
-                op_visit_count[inp_op_idx] += 1
-
-                # Descend only if we have satisfied all inputs
-                if op_visit_count[inp_op_idx] == op_inputs[inp_op_idx]:
-                    assert inp_op_idx != op_idx
-                    new_tokens = tokens
-                    if num_branches > 1:
-                        # Optimization
-                        new_tokens = tokens.union(set([next_token()]))
-                    saved_desc = descend(
-                        inp_op_idx,
-                        free_blobs,
-                        new_tokens,
-                    )
-                    saved += saved_desc
-
-                else:
-                    # Leave my tokens here so that they can be grabbed
-                    # when we visit the operator (after all inputs have been
-                    # satisfied).
-                    if op_token_deposit[inp_op_idx] is not None:
-                        op_token_deposit[inp_op_idx] = \
-                            op_token_deposit[inp_op_idx].union(tokens)
-
-        return saved
-
-    # Start DFS from the heads' (losses or inputs)
-    for head_blob in heads:
-        for op_idx in blobs_to_ops[head_blob]:
-            if op_token_deposit[op_idx] is not None:
-                saved = descend(op_idx, [], set([next_token()]))
-                saved_count += saved
-
-    # Rename the shared blobs
-    shared_blobs = set(viewvalues(mapping))
-    renamed = {}
-    for j, b in enumerate(shared_blobs):
-        if b in optim_op_outputs:
-            renamed[b] = namescope + "__m{}_shared".format(j)
-        else:
-            renamed[b] = b
-
-    # Update the mapping recursively
-    mapping.update(renamed)
-    had_changes = True
-    while had_changes:
-        had_changes = False
-        for k, v in mapping.items():
-            if v in renamed and renamed[v] != v:
-                renamed[k] = renamed[v]
-                mapping[k] = renamed[k]
-                had_changes = True
-
-    shared_blobs = set(mapping.values())
-
-    if saved_count > 0:
-        log.info("Remapping {} blobs, using {} shared; saved apprx {} MB".format(
-            len(mapping), len(shared_blobs), int(saved_count * 4 / 1024 / 1024),
-        ))
-        log.info("Could not infer sizes for: {}".format(unknown_shapes))
-    else:
-        log.info("Remapping {} blobs, using {} shared".format(
-            len(mapping), len(shared_blobs),
-        ))
-
-    apply_assignments(netproto, mapping)
     log.info("Memonger memory optimization took {} secs".format(
         time.time() - start_time),
     )
-    assert verify_graph_equality(origproto, netproto), \
-        "Memonger graph is not equal to original."
-    assert verify_inplace_blobs(origproto, netproto), \
-        "Inplace assignments differ in memonger net."
-    return netproto
 
+    optim = caffe2_pb2.NetDef()
+    optim.ParseFromString(optim_str)
+
+    assert verify_graph_equality(net.Proto(), optim), \
+        "Memonger graph is not equal to original."
+    assert verify_inplace_blobs(net.Proto(), optim), \
+        "Inplace assignments differ in memonger net."
+    return optim
 
 def _find_source_nodes(g):
     ''' Return nodes without predecessors '''
@@ -927,7 +684,8 @@ class AssignmentAlgorithm(enum.Enum):
 def optimize_inference_fast(net, static_blobs):
     optim = caffe2_pb2.NetDef()
     optim_str = C.memonger_optimize_inference_net(
-        net.SerializeToString(), [str(s).encode('utf-8') for s in static_blobs]
+        net.SerializeToString(),
+        [str(s).encode('utf-8') for s in static_blobs]
     )
     optim.ParseFromString(optim_str)
     return optim
