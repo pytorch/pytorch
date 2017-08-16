@@ -39,17 +39,8 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
 }
 
 namespace {
-
-PerOpEnginePrefType& g_per_op_engine_pref() {
-  static auto* g_per_op_engine_pref_ = new PerOpEnginePrefType();
-  return *g_per_op_engine_pref_;
-}
-
-GlobalEnginePrefType& g_global_engine_pref() {
-  static auto* g_global_engine_pref_ =
-      new GlobalEnginePrefType{{DeviceType::CUDA, {"CUDNN"}}};
-  return *g_global_engine_pref_;
-}
+static PerOpEnginePrefType g_per_op_engine_pref{};
+static GlobalEnginePrefType g_global_engine_pref{};
 
 unique_ptr<OperatorBase> TryCreateOperator(
     const string& key, const OperatorDef& operator_def, Workspace* ws) {
@@ -100,15 +91,14 @@ unique_ptr<OperatorBase> _CreateOperator(
     const auto op_def_engines = split(',', operator_def.engine());
     engines.insert(engines.end(), op_def_engines.begin(), op_def_engines.end());
   }
-  if (g_per_op_engine_pref().count(device_type) &&
-      g_per_op_engine_pref()[device_type].count(op_type)) {
-    const auto& preferred_engines =
-        g_per_op_engine_pref()[device_type][op_type];
+  if (g_per_op_engine_pref.count(device_type) &&
+      g_per_op_engine_pref[device_type].count(op_type)) {
+    const auto& preferred_engines = g_per_op_engine_pref[device_type][op_type];
     engines.insert(
         engines.end(), preferred_engines.begin(), preferred_engines.end());
   }
-  if (g_global_engine_pref().count(device_type)) {
-    const auto& preferred_engines = g_global_engine_pref()[device_type];
+  if (g_global_engine_pref.count(device_type)) {
+    const auto& preferred_engines = g_global_engine_pref[device_type];
     engines.insert(
         engines.end(), preferred_engines.begin(), preferred_engines.end());
   }
@@ -166,7 +156,7 @@ void SetPerOpEnginePref(const PerOpEnginePrefType& per_op_engine_pref) {
           " registry.");
     }
   }
-  g_per_op_engine_pref() = per_op_engine_pref;
+  g_per_op_engine_pref = per_op_engine_pref;
 }
 
 void SetGlobalEnginePref(const GlobalEnginePrefType& global_engine_pref) {
@@ -178,7 +168,7 @@ void SetGlobalEnginePref(const GlobalEnginePrefType& global_engine_pref) {
         device_type,
         " not registered.");
   }
-  g_global_engine_pref() = global_engine_pref;
+  g_global_engine_pref = global_engine_pref;
 }
 
 void SetEnginePref(
@@ -205,7 +195,7 @@ void SetOpEnginePref(
         " not registered in ",
         device_type,
         " registry.");
-    g_per_op_engine_pref()[device_type][op_type] = device_pref_pair.second;
+    g_per_op_engine_pref[device_type][op_type] = device_pref_pair.second;
   }
 }
 
