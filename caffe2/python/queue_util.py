@@ -29,6 +29,10 @@ class _QueueReader(dataio.Reader):
             field_names=self.schema().field_names())
         return [dequeue_net], status_blob, fields
 
+    def read(self, net):
+        net, _, fields = self.read_ex(net, None)
+        return net, fields
+
 
 class _QueueWriter(dataio.Writer):
     def __init__(self, wrapper):
