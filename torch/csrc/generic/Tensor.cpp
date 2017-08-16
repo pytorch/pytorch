@@ -26,7 +26,7 @@
 #define COPY_FROM_ARRAY(ELTYPE) \
 { \
   ELTYPE *data = (ELTYPE*)PyArray_DATA(array); \
-  for (ptrdiff_t i=0; i<storage_size; i++) {   \
+  for (size_t i=0; i<storage_size; i++) {   \
     storage->data[i] = data[i];                \
   }                                            \
 }
