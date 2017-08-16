@@ -147,7 +147,7 @@ static void THPTensor_(setInconsistentDepthError)(std::vector<size_t> &sizes,
   THPUtils_setError(error.c_str());
 }
 
-#ifdef NUMPY_TYPE_ENUM
+#if defined(NUMPY_TYPE_ENUM) || defined(THC_GENERIC_FILE)
 
 #ifndef THC_REAL_IS_HALF
 #define load_real real
@@ -190,17 +190,20 @@ THTensor* THPTensor_(fromNumpy)(PyObject *numpy_array) {
     }
 
     THTensor *result = NULL;
+#ifdef NUMPY_TYPE_ENUM
     if (PyArray_TYPE(array) == NUMPY_TYPE_ENUM) {
       THStoragePtr storage(THStorage_(newWithDataAndAllocator)(
-          (real*)PyArray_DATA(array),
+          LIBRARY_STATE (real*)PyArray_DATA(array),
           storage_size,
           // See Note [Numpy memory management]
           &THNumpyArrayAllocator,
           new NumpyArrayAllocator(numpy_array)));
-      result = THTensor_(newWithStorage)(storage, 0, sizes, strides);
+      result = THTensor_(newWithStorage)(LIBRARY_STATE storage, 0, sizes, strides);
     }
-    else {
-      THStoragePtr storage(THStorage_(newWithSize)(storage_size));
+    else 
+#endif
+    {
+      THStoragePtr storage(THStorage_(newWithSize)(LIBRARY_STATE storage_size));
       switch (PyArray_TYPE(array)) {
         case NPY_DOUBLE: COPY_FROM_ARRAY(double,  array, storage, storage_size); break;
         case NPY_FLOAT:  COPY_FROM_ARRAY(float,   array, storage, storage_size); break;
@@ -209,7 +212,7 @@ THTensor* THPTensor_(fromNumpy)(PyObject *numpy_array) {
         case NPY_INT16:  COPY_FROM_ARRAY(int16_t, array, storage, storage_size); break;
         case NPY_UINT8:  COPY_FROM_ARRAY(uint8_t, array, storage, storage_size); break;
       }
-      result = THTensor_(newWithStorage)(storage, 0, sizes, strides);
+      result = THTensor_(newWithStorage)(LIBRARY_STATE storage, 0, sizes, strides);
     }
     return result;
   } else {
@@ -299,7 +302,7 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
     return (PyObject *)self.release();
   }
 
-#ifdef NUMPY_TYPE_ENUM
+#if defined(NUMPY_TYPE_ENUM) || defined(THC_GENERIC_FILE)
   // torch.Tensor(np.ndarray array)
   if (num_args == 1 && PyArray_Check(first_arg)) {
     THPObjectPtr numpy_array(
