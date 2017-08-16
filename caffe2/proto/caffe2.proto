@@ -268,7 +268,7 @@ message ExecutionStep {
   // If yes, the workflow and nets are re-created every time this step is run.
   optional bool create_workspace = 12;
 
-  // How many copies of the children exeuction steps to run concurrently.
+  // How many copies of the children execution steps to run concurrently.
   optional int32 num_concurrent_instances = 13;
 }
 

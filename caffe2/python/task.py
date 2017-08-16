@@ -335,6 +335,9 @@ class TaskGroup(object):
             return Task()
         return tasks[0]
 
+    def workspace_type(self):
+        return self._workspace_type
+
 
 class TaskOutput(object):
     """

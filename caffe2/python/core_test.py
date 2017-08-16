@@ -10,6 +10,7 @@ import numpy as np
 
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace, test_util
+from caffe2.python.task import Node, Task
 
 
 class TestScopes(test_util.TestCase):
@@ -427,6 +428,39 @@ class TestOperatorTraceback(test_util.TestCase):
         with self.assertRaises(Exception):
             ws.run(net)
         self.op_name_check(net, cf, line)
+
+
+class TestCreatePlan(test_util.TestCase):
+
+    def test_create_plan_from_proto_correctly(self):
+        from caffe2.python.net_builder import ops
+        with Node('trainer'), Task(name='my_task', num_instances=2) as task:
+            with ops.task_init():
+                globl = ops.Const(0)
+            with ops.task_instance_init():
+                local = ops.Const(0)
+            with ops.loop(100):
+                ops.Copy(globl, local)
+            with ops.task_instance_exit():
+                ops.Add([globl, local], [globl])
+            with ops.task_exit():
+                ops.Mul([globl, globl], [globl])
+
+        plan = core.Plan(task.get_step())
+        test_plan = core.Plan.create_from_proto(plan.Proto())
+
+        self.assertEqual(len(plan.Steps()), 1)
+        self.assertEqual(len(test_plan.Steps()), 1)
+        self.assertEqual(plan.Steps()[0].Name(), test_plan.Steps()[0].Name())
+
+        self.assertEqual(len(plan.Nets()), len(test_plan.Nets()))
+        for idx in range(0, len(plan.Nets())):
+            # When we create Net for test_plan, we will end up with new Net
+            # name with postfix.
+            net_1 = plan.Nets()[idx]
+            net_2 = test_plan.Nets()[idx]
+            trim_size = len(net_1.Name())
+            self.assertEqual(net_1.Name(), net_2.Name()[:trim_size])
 
 
 @unittest.skipIf(not workspace.has_gpu_support, 'No GPU support')
