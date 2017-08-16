@@ -39,4 +39,4 @@ void MemoryAllocationReporter::Delete(void* ptr) {
   size_table_.erase(it);
 }
 
-}  // namespace caffe2
+} // namespace caffe2
