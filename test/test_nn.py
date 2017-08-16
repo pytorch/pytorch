@@ -895,8 +895,8 @@ class TestNN(NNTestCase):
         self.assertEqual(output.data, expected_output)
         self.assertEqual(es.weight.grad.data, expected_grad_weight)
 
-        # check same example except as 2D
-        input = Variable(torch.LongTensor([[3, 1, 1], [1, 4, 0]]))
+        # check same example except as 2D (2 x 3)
+        input = Variable(input.data.view(2, -1))
         es.zero_grad()
         output = es(input)
         output.backward(grad_output)
