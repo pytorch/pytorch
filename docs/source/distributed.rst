@@ -42,13 +42,15 @@ Basics
 ------
 
 The `torch.distributed` package provides PyTorch support and communication primitives
-for synchronous multiprocess parallelism across several computation nodes running on one or more
-machines. This differs from the kinds of parallelism provided by :func:`torch.nn.DataParallel`
-and :module:`torch.multiprocessing` in that it supports multiple network-connected machines and
-in that the user must explicitly launch a separate copy of the main training script for each
-process.
+for multiprocess parallelism across several computation nodes running on one or more
+machines. The class :func:`torch.nn.parallel.DistributedDataParallel` builds on this
+functionality to provide synchronous distributed training as a wrapper around any
+PyTorch model. This differs from the kinds of parallelism provided by
+:module:`torch.multiprocessing` and :func:`torch.nn.DataParallel` in that it supports
+multiple network-connected machines and in that the user must explicitly launch a separate
+copy of the main training script for each process.
 
-In the single-machine case, `torch.distributed` or the
+In the single-machine synchronous case, `torch.distributed` or the
 :func:`torch.nn.parallel.DistributedDataParallel` wrapper may still have advantages over other
 approaches to data-parallelism, including :func:`torch.nn.DataParallel`:
 
