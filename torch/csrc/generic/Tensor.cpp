@@ -23,13 +23,54 @@
 #define NUMPY_TYPE_ENUM NPY_UINT8
 #endif
 
-#define COPY_FROM_ARRAY(ELTYPE) \
+#define COPY_FROM_ARRAY_CPU(ELTYPE, ARRAY, STORAGE, SIZE) \
 { \
-  ELTYPE *data = (ELTYPE*)PyArray_DATA(array); \
-  for (size_t i=0; i<storage_size; i++) {   \
-    storage->data[i] = data[i];                \
-  }                                            \
+  ELTYPE *arrdata = (ELTYPE*)PyArray_DATA(ARRAY);         \
+  real *data = STORAGE->data;                             \
+  for (size_t i=0; i<SIZE; i++) {                         \
+    data[i] = arrdata[i];                                 \
+  }                                                       \
 }
+
+#define COPY_FROM_ARRAY_CUDA(ELTYPE, ARRAY, STORAGE, SIZE) \
+{ \
+  ELTYPE *arrdata = (ELTYPE*)PyArray_DATA(ARRAY);              \
+  std::unique_ptr<load_real> data_guard(new load_real[SIZE]);  \
+  load_real *data = data_guard.get();                          \
+  for (size_t i=0; i<SIZE; i++) {                              \
+    data[i] = arrdata[i];                                      \
+  }                                                            \
+  THHostStorage *cpu_storage =                                 \
+      THHostStorage_(newWithData)(data_guard.get(), SIZE);     \
+  cpu_storage->flag &= ~TH_STORAGE_FREEMEM;                    \
+  THCStorage_(copyCPU)(LIBRARY_STATE STORAGE, cpu_storage);    \
+  THHostStorage_(free)(cpu_storage);                           \
+}
+
+#define COPY_FROM_ARRAY_CUDA_HALF(ELTYPE, ARRAY, STORAGE, SIZE) \
+{ \
+  ELTYPE *arrdata = (ELTYPE*)PyArray_DATA(ARRAY);                  \
+  std::unique_ptr<load_real> data_guard(new load_real[SIZE]);      \
+  load_real *data = data_guard.get();                              \
+  for (size_t i=0; i<SIZE; i++) {                                  \
+    data[i] = arrdata[i];                                          \
+  }                                                                \
+  THFloatStorage *cpu_storage =                                    \
+      THFloatStorage_newWithData(data_guard.get(), storage_size);  \
+  cpu_storage->flag &= ~TH_STORAGE_FREEMEM;                        \
+  THCudaHalfStorage_copyFloat(LIBRARY_STATE STORAGE, cpu_storage); \
+  THFloatStorage_free(cpu_storage);                                \
+}
+
+#ifdef THC_GENERIC_FILE
+#ifdef THC_REAL_IS_HALF
+#define COPY_FROM_ARRAY COPY_FROM_ARRAY_CUDA_HALF
+#else
+#define COPY_FROM_ARRAY COPY_FROM_ARRAY_CUDA
+#endif
+#else
+#define COPY_FROM_ARRAY COPY_FROM_ARRAY_CPU
+#endif
 
 #endif
 
@@ -107,6 +148,13 @@ static void THPTensor_(setInconsistentDepthError)(std::vector<size_t> &sizes,
 }
 
 #ifdef NUMPY_TYPE_ENUM
+
+#ifndef THC_REAL_IS_HALF
+#define load_real real
+#else
+#define load_real float
+#endif
+
 THTensor* THPTensor_(fromNumpy)(PyObject *numpy_array) {
   PyArrayObject *array = (PyArrayObject*)numpy_array;
 
@@ -154,12 +202,12 @@ THTensor* THPTensor_(fromNumpy)(PyObject *numpy_array) {
     else {
       THStoragePtr storage(THStorage_(newWithSize)(storage_size));
       switch (PyArray_TYPE(array)) {
-        case NPY_DOUBLE: COPY_FROM_ARRAY(double);  break;
-        case NPY_FLOAT:  COPY_FROM_ARRAY(float);   break;
-        case NPY_INT64:  COPY_FROM_ARRAY(int64_t); break;
-        case NPY_INT32:  COPY_FROM_ARRAY(int32_t); break;
-        case NPY_INT16:  COPY_FROM_ARRAY(int16_t); break;
-        case NPY_UINT8:  COPY_FROM_ARRAY(uint8_t); break;
+        case NPY_DOUBLE: COPY_FROM_ARRAY(double,  array, storage, storage_size); break;
+        case NPY_FLOAT:  COPY_FROM_ARRAY(float,   array, storage, storage_size); break;
+        case NPY_INT64:  COPY_FROM_ARRAY(int64_t, array, storage, storage_size); break;
+        case NPY_INT32:  COPY_FROM_ARRAY(int32_t, array, storage, storage_size); break;
+        case NPY_INT16:  COPY_FROM_ARRAY(int16_t, array, storage, storage_size); break;
+        case NPY_UINT8:  COPY_FROM_ARRAY(uint8_t, array, storage, storage_size); break;
       }
       result = THTensor_(newWithStorage)(storage, 0, sizes, strides);
     }
@@ -170,6 +218,8 @@ THTensor* THPTensor_(fromNumpy)(PyObject *numpy_array) {
     return NULL;
   }
 }
+
+#undef load_real
 #endif
 
 static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject *kwargs)
