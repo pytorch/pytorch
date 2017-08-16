@@ -904,7 +904,6 @@ class TestNN(NNTestCase):
         self.assertEqual(output.data, expected_output)
         self.assertEqual(es.weight.grad.data, expected_grad_weight)
 
-
         # now compare EmbeddingBag vs Embedding + Sum/Mean, for constant bag length
         def _test_vs_Embedding(N, D, B, L):
             es = nn.EmbeddingBag(N, D, mode=mode)
