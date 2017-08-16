@@ -178,6 +178,124 @@ TEST(TransformTest, TestTransformApply) {
   EXPECT_EQ(replaced_netdef.op(1).output(0), "out");
 }
 
+/**
+ * Transform with Sorted Order matching.
+ * Matches two operators of type DummyOp1, even if disconnected.
+ * These operators will be given in execution order,
+ * but doesn't need connectivity.
+ * Changes them to DummyOp2.
+ */
+class SortedDummyTransform : public Transform {
+ public:
+  SortedDummyTransform() {
+    SetPatternMatchType(SORTED_WRT_EXECUTION_ORDER);
+  }
+  bool PatternRule(const Graph& g, const std::vector<int>& subgraph, int idx)
+      override {
+    if (g.node(idx).op.type() != "DummyOp1") {
+      return false;
+    }
+    return true;
+  }
+  bool ValidatorRule(const Graph& g, const std::vector<int>& subgraph)
+      override {
+    if (subgraph.size() == 2) {
+      if (g.node(subgraph[0]).op.type() == "DummyOp1" &&
+          g.node(subgraph[1]).op.type() == "DummyOp1") {
+        return true;
+      }
+    }
+    return false;
+  }
+  bool ReplaceRule(const std::vector<int>& match, Graph* g_ptr) override {
+    CHECK(g_ptr);
+    for (const auto& x : match) {
+      g_ptr->node(x).op.set_type("DummyOp2");
+    }
+    return true;
+  }
+};
+
+REGISTER_TRANSFORM(SortedDummySwap, SortedDummyTransform)
+
+TEST(TransformTest, TestPatternMatchTypeSortedOrder) {
+  Workspace ws;
+  ws.CreateBlob("in");
+  NetDef netdef;
+
+  AddOp(&netdef, "DummyOp1", {"in"}, {"mid1"});
+  AddOp(&netdef, "DummyOp3", {"mid1"}, {"mid2"});
+  AddOp(&netdef, "DummyOp1", {"mid2"}, {"mid3"});
+  AddOp(&netdef, "DummyOp3", {"mid3"}, {"out"});
+
+  auto t = CreateTransform("SortedDummySwap");
+  NetDef replaced_netdef = t->ApplyTo(netdef);
+
+  EXPECT_EQ(replaced_netdef.op().size(), 4);
+  EXPECT_EQ(replaced_netdef.op(0).type(), "DummyOp2");
+  EXPECT_EQ(replaced_netdef.op(2).type(), "DummyOp2");
+}
+
+/**
+ * General subgraph transform.
+ * Matches a DummyOp1, and a DummyOp2.
+ * Order doesn't matter. Connectedness doesn't matter.
+ * Turns them into DummyOp3.
+ */
+class GeneralDummyTransform : public Transform {
+ public:
+  GeneralDummyTransform() {
+    SetPatternMatchType(GENERAL);
+  }
+  bool PatternRule(const Graph& g, const std::vector<int>& subgraph, int idx)
+      override {
+    if (subgraph.size() == 0 && g.node(idx).op.type() == "DummyOp1") {
+      return true;
+    }
+    if (subgraph.size() == 1 && g.node(idx).op.type() == "DummyOp2") {
+      return true;
+    }
+    return false;
+  }
+  bool ValidatorRule(const Graph& g, const std::vector<int>& subgraph)
+      override {
+    if (subgraph.size() == 2) {
+      if (g.node(subgraph[0]).op.type() == "DummyOp1" &&
+          g.node(subgraph[1]).op.type() == "DummyOp2") {
+        return true;
+      }
+    }
+    return false;
+  }
+  bool ReplaceRule(const std::vector<int>& match, Graph* g_ptr) override {
+    CHECK(g_ptr);
+    for (const auto& x : match) {
+      g_ptr->node(x).op.set_type("DummyOp3");
+    }
+    return true;
+  }
+};
+
+REGISTER_TRANSFORM(GeneralDummySwap, GeneralDummyTransform)
+
+TEST(TransformTest, TestPatternMatchTypeGeneral) {
+  Workspace ws;
+  ws.CreateBlob("in");
+  NetDef netdef;
+
+  AddOp(&netdef, "DummyOp2", {"in"}, {"mid1"});
+  AddOp(&netdef, "DummyOp3", {"mid1"}, {"mid2"});
+  AddOp(&netdef, "DummyOp1", {"mid2"}, {"mid3"});
+  AddOp(&netdef, "DummyOp3", {"mid3"}, {"out"});
+
+  auto t = CreateTransform("GeneralDummySwap");
+  NetDef replaced_netdef = t->ApplyTo(netdef);
+
+  EXPECT_EQ(replaced_netdef.op().size(), 4);
+  EXPECT_EQ(replaced_netdef.op(0).type(), "DummyOp3");
+  EXPECT_EQ(replaced_netdef.op(2).type(), "DummyOp3");
+}
+
 } // namespace
 
 } // namespace Caffe2
