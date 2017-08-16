@@ -216,7 +216,7 @@ def Train(args):
     train_arg_scope = {
         'order': 'NCHW',
         'use_cudnn': True,
-        'cudnn_exhaustice_search': True,
+        'cudnn_exhaustive_search': True,
         'ws_nbytes_limit': (args.cudnn_workspace_limit_mb * 1024 * 1024),
     }
     train_model = model_helper.ModelHelper(
