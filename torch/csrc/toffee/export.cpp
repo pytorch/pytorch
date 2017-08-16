@@ -165,7 +165,6 @@ std::string ExportGraph(std::unique_ptr<Graph>& g) {
         PyObject *key, *value;
         Py_ssize_t pos = 0;
         while (PyDict_Next(py_attrs, &pos, &key, &value)) {
-          toffee::AttributeProto* attr = p_n->add_attribute();
           if (!THPUtils_checkString(key)) throw std::runtime_error("non-string key in attrs from primspec");
           if (THPUtils_unpackString(key) == "_outputs") {
             // This is a special hack to handle cases when PyTorch supports
@@ -197,6 +196,7 @@ std::string ExportGraph(std::unique_ptr<Graph>& g) {
             }
             continue;
           }
+          toffee::AttributeProto* attr = p_n->add_attribute();
           attr->set_name(THPUtils_unpackString(key));
           if (THPUtils_checkLong(value)) {
             attr->set_i(THPUtils_unpackLong(value));
