@@ -181,11 +181,6 @@ class OperatorBase {
     return device_option_;
   }
 
-  const std::string type() {
-    CAFFE_ENFORCE(operator_def_.get() != nullptr);
-    return operator_def_->type();
-  }
-
  public:
   static constexpr int kNoNetPositionSet = -1;
 
@@ -274,7 +269,6 @@ class Operator : public OperatorBase {
       if (observer_) {
         observer_->Stop();
       }
-
       return result;
     } catch (EnforceNotMet& err) {
       if (has_debug_def()) {
