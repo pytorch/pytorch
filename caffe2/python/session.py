@@ -82,7 +82,7 @@ class Session(object):
         return self._open
 
     @classmethod
-    def compile(cls, runnable):
+    def compile(cls, runnable, workspace_type=None):
         if isinstance(runnable, CompiledRunnable):
             assert cls == runnable.session_class, (
                 'Runnable was compiled for different session type. ' +
@@ -94,13 +94,34 @@ class Session(object):
             return cls._compiled_cache[runnable]
 
         if isinstance(runnable, TaskGroup):
+            if workspace_type:
+                if runnable.workspace_type():
+                    assert runnable.workspace_type() == workspace_type, \
+                        "Require {} but already have {}".format(
+                            workspace_type, runnable.workspace_type())
+                else:
+                    runnable._workspace_type = workspace_type
             tg = runnable
         else:
-            tg = TaskGroup(workspace_type=WorkspaceType.GLOBAL)
+            if workspace_type is None:
+                workspace_type = WorkspaceType.GLOBAL
+            tg = TaskGroup(workspace_type=workspace_type)
             if isinstance(runnable, Task):
                 tg.add(runnable)
             elif isinstance(runnable, core.ExecutionStep):
                 tg.add(Task(step=runnable))
+            elif isinstance(runnable, core.Plan):
+                # ExecutionSteps in Plan() object is supposed to run sequentially, while
+                # tasks in TaskGroup run in parallel. So if we have multiple
+                # ExecutionSteps in Plan() object, we choose to have a root
+                # ExecutionStep to wrap all ExecutionSteps.
+                assert len(runnable.Steps()) > 0
+                if len(runnable.Steps()) == 1:
+                    tg.add(Task(step=runnable.Steps()[0]))
+                else:
+                    # Task takes a list of ExecutionSteps and automatically wrap into
+                    # a root ExecutionStep
+                    tg.add(Task(step=runnable.Steps()))
             else:
                 step = core.execution_step('runnable', runnable)
                 tg.add(Task(step=step))
@@ -109,9 +130,9 @@ class Session(object):
         cls._compiled_cache[runnable] = compiled
         return compiled
 
-    def run(self, runnable):
+    def run(self, runnable, workspace_type=None):
         assert self.is_open(), 'Session is closed.'
-        self._run_compiled(self.compile(runnable).obj)
+        self._run_compiled(self.compile(runnable, workspace_type).obj)
 
     def close(self):
         if self.is_open():
