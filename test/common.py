@@ -269,7 +269,7 @@ class TestCase(unittest.TestCase):
         """
         Test that a string matches the recorded contents of a file
         derived from the name of this test and subname.  You can
-        automatically update the recorded test output using --expect.
+        automatically update the recorded test output using --accept.
 
         If you call this multiple times in a single function, you must
         give a unique subname each time.

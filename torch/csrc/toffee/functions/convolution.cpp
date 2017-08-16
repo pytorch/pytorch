@@ -1,5 +1,7 @@
 #include "torch/csrc/autograd/functions/convolution.h"
 
+namespace torch { namespace autograd {
+
 void ConvForward::primspec(PrimSpecContext* ctx, jit::node_list inputs, jit::node_list outputs) {
   toffee::NodeProto* p_n = ctx->graph->add_node();
   p_n->set_op_type("Conv");
@@ -60,3 +62,4 @@ void ConvForward::primspec(PrimSpecContext* ctx, jit::node_list inputs, jit::nod
   // ignore benchmark/cudnn_enabled
 }
 
+}}

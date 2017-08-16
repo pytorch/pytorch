@@ -103,6 +103,8 @@ struct PythonCall : public Function {
         if (var_it == inputs.end())
           throw std::runtime_error("expected too many inputs");
         obj = THPVariable_Wrap(*(var_it++));
+      } else {
+        throw std::runtime_error("unexpected calling convention");
       }
       Py_INCREF(obj);
       PyTuple_SET_ITEM(py_inputs.get(), input_nr++, obj);

@@ -1,12 +1,26 @@
 from torch.autograd import Variable
 from torch.autograd.function import Function, once_differentiable
 from torch._thnn import type2backend
+import torch.toffee
 
 from . import _all_functions
 from torch.nn.modules.utils import _single, _pair, _triple
 
 
 class MaxPool1d(Function):
+
+    @staticmethod
+    def primspec(input, kernel_size, stride=None, padding=0, dilation=1,
+                 ceil_mode=False):
+        if ceil_mode:
+            return None
+        return torch.toffee.op("MaxPool", input,
+                               kernel=kernel_size,
+                               stride=stride,
+                               pad=padding,
+                               dilation=dilation,
+                               _outputs=(0,))
+
 
     @staticmethod
     def forward(ctx, input, kernel_size, stride=None, padding=0, dilation=1,
@@ -79,6 +93,18 @@ class MaxPool1dBackward(Function):
 
 
 class MaxPool2d(Function):
+
+    @staticmethod
+    def primspec(input, kernel_size, stride=None, padding=0, dilation=1,
+                 ceil_mode=False):
+        if ceil_mode:
+            return None
+        return torch.toffee.op("MaxPool", input,
+                               kernel=kernel_size,
+                               stride=stride,
+                               pad=padding,
+                               dilation=dilation,
+                               _outputs=(0,))
 
     @staticmethod
     def forward(ctx, input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False):

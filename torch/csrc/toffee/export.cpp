@@ -1,4 +1,4 @@
-#include "torch/csrc/jit/graph_exporter.h"
+#include "torch/csrc/toffee/export.h"
 #include "torch/csrc/utils/python_numbers.h"
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/Exceptions.h"
@@ -105,14 +105,33 @@ std::string ExportGraph(std::unique_ptr<Graph>& g) {
       }
       THPObjectPtr primspec_fn(PyObject_GetAttrString(value->pyobj.get(), "primspec"));
       if (!primspec_fn) throw python_error();
-      int num_args = node->inputs().size();
-      THPObjectPtr py_primspec_args(PyTuple_New(num_args));
+      THPObjectPtr py_primspec_args(PyTuple_New(value->cconv.size()));
       // Symbolically represent tensors as longs for now.  Hypothetically,
       // we could pass a Variable in instead, which could allow for
       // "modifications" to the inputs before they get glommed into the
       // Toffee IR.
-      for (int i = 0; i < num_args; ++i) {
-        PyTuple_SET_ITEM(py_primspec_args.get(), i, PyLong_FromLong(i)); // steals!
+
+      // TODO: This is copy-pasted from jit_closure.cpp
+      auto node_it = node->inputs().begin();
+      auto scalar_it = value->scalar_args.begin();
+      Py_ssize_t input_nr = 0;
+
+      for (auto arg_type : value->cconv) {
+        PyObject *obj;
+        if (arg_type == 's') {
+          if (scalar_it == value->scalar_args.end())
+            throw std::runtime_error("expected too many scalar args");
+          obj = (scalar_it++)->get();
+          Py_INCREF(obj);
+        } else if (arg_type == 't') {
+          if (node_it == node->inputs().end())
+            throw std::runtime_error("expected too many inputs");
+          // TODO: Send in something more reasonable here
+          obj = PyLong_FromLong(node_it - node->inputs().begin());
+        } else {
+          throw std::runtime_error("unexpected calling convention");
+        }
+        PyTuple_SET_ITEM(py_primspec_args.get(), input_nr++, obj);
       }
       THPObjectPtr raw_output(PyObject_CallObject(primspec_fn, py_primspec_args));
       if (!raw_output) {
@@ -149,6 +168,28 @@ std::string ExportGraph(std::unique_ptr<Graph>& g) {
         while (PyDict_Next(py_attrs, &pos, &key, &value)) {
           toffee::AttributeProto* attr = p_n->add_attribute();
           if (!THPUtils_checkString(key)) throw std::runtime_error("non-string key in attrs from primspec");
+          if (THPUtils_unpackString(key) == "_outputs") {
+            // This is a special hack to handle cases when PyTorch supports
+            // more outputs than Toffee IR does OR the outputs are in the wrong
+            // order.
+            // TODO: if we drop an output that is used later, we must FAIL THE
+            // EXPORT. Right now I believe we just create a malformed ToffeeIR
+            // spec.
+            if (node->type()->kind() != TypeKind::MultiType) {
+              // NB: Actually, this can never happen because PythonOp is always
+              // multi-return (lol)
+              throw std::runtime_error("can't use _outputs for a function that doesn't return multiple things");
+            }
+            p_n->clear_output();
+            if (!PyTuple_Check(value)) throw std::runtime_error("_outputs was not tuple");
+            Py_ssize_t num_toffee_outputs = PyTuple_GET_SIZE(value);
+            for (Py_ssize_t i = 0; i < num_toffee_outputs; i++) {
+              PyObject *ix = PyTuple_GET_ITEM(value, i);
+              if (!THPUtils_checkLong(ix)) throw std::runtime_error("_outputs entry was not numeric index");
+              p_n->add_output(node_name(node->uses().at(THPUtils_unpackLong(ix)).user));
+            }
+            continue;
+          }
           attr->set_name(THPUtils_unpackString(key));
           if (THPUtils_checkLong(value)) {
             attr->set_i(THPUtils_unpackLong(value));
@@ -163,15 +204,16 @@ std::string ExportGraph(std::unique_ptr<Graph>& g) {
             int seen_float = 0;
             int seen_string = 0;
             for (Py_ssize_t i = 0; i < num_value_items; i++) {
-              if (THPUtils_checkLong(value)) {
-                attr->add_ints(THPUtils_unpackLong(value));
+              PyObject *elem = PyTuple_GET_ITEM(value, i);
+              if (THPUtils_checkLong(elem)) {
+                attr->add_ints(THPUtils_unpackLong(elem));
                 seen_int = 1;
-              } else if (THPUtils_checkDouble(value)) { // order matters, since all longs are doubles
-                attr->add_floats(THPUtils_unpackDouble(value)); // TODO: precision?!
+              } else if (THPUtils_checkDouble(elem)) { // order matters, since all longs are doubles
+                attr->add_floats(THPUtils_unpackDouble(elem)); // TODO: precision?!
                 seen_float = 1;
-              } else if (THPUtils_checkString(value)) {
+              } else if (THPUtils_checkString(elem)) {
                 // TODO: binary data?!
-                attr->add_strings(THPUtils_unpackString(value));
+                attr->add_strings(THPUtils_unpackString(elem));
                 seen_string = 1;
               } else {
                 // TODO: better message
@@ -201,40 +243,6 @@ std::string ExportGraph(std::unique_ptr<Graph>& g) {
         // we don't have any visibility into the defaults that would have
         // been picked by the function itself.  See:
         // https://github.com/ezyang/pytorch/issues/40
-        if (value->name() == "Threshold" &&
-            // Caffe2 backend only supports ReLU, not Threshold
-            value->scalar_args.size() >= 2 &&
-            THPUtils_unpackLong(value->scalar_args[0]) == 0 && // threshold
-            THPUtils_unpackLong(value->scalar_args[1]) == 0) { // value
-          p_n->set_op_type("Relu");
-        } else if (value->name() == "MaxPool2d" &&
-            // TODO: This is very fragile!
-            value->scalar_args.size() == 5 &&
-            !PyObject_IsTrue(value->scalar_args[4])) {
-          // MaxPool2d(kernel_size, stride=None, padding=0, dilation=1, return_indices=False, ceil_mode=False)
-          // e.g., MaxPool2d(3, 2, 0, 1, False) from AlexNet
-          // TODO: put these attributes in the standard
-          p_n->set_op_type("MaxPool");
-          toffee::AttributeProto* attr;
-          attr = p_n->add_attribute();
-          attr->set_name("kernel");
-          attr->set_i(THPUtils_unpackLong(value->scalar_args[0]));
-
-          attr = p_n->add_attribute();
-          attr->set_name("stride");
-          attr->set_i(THPUtils_unpackLong(value->scalar_args[1]));
-
-          attr = p_n->add_attribute();
-          attr->set_name("pad");
-          attr->set_i(THPUtils_unpackLong(value->scalar_args[2]));
-
-          attr = p_n->add_attribute();
-          attr->set_name("dilation");
-          attr->set_i(THPUtils_unpackLong(value->scalar_args[3]));
-
-          // Toffee returns only one arg
-          p_n->clear_output();
-          p_n->add_output(node_name(node->uses().at(0).user));
         } else if (value->name() == "View") {
           p_n->set_op_type("Reshape");
           toffee::AttributeProto* attr;
