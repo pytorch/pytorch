@@ -22,8 +22,7 @@ std::string ExportGraph(std::unique_ptr<Graph>& g) {
   toffee::GraphProto p_g;
   torch::autograd::PrimSpecContext ctx;
   ctx.graph = &p_g;
-  // TODO: This needs to be exported from Python
-  // int temp_next_unique = 0;
+  int temp_next_unique = 0;
   p_g.set_name("torch-jit-export");
   for (auto input : g->inputs()) {
     p_g.add_input(node_name(input));
@@ -186,7 +185,15 @@ std::string ExportGraph(std::unique_ptr<Graph>& g) {
             for (Py_ssize_t i = 0; i < num_toffee_outputs; i++) {
               PyObject *ix = PyTuple_GET_ITEM(value, i);
               if (!THPUtils_checkLong(ix)) throw std::runtime_error("_outputs entry was not numeric index");
-              p_n->add_output(node_name(node->uses().at(THPUtils_unpackLong(ix)).user));
+              long l = THPUtils_unpackLong(ix);
+              if (l >= 0) {
+                p_n->add_output(node_name(node->uses().at(l).user));
+              } else {
+                // This is an extra Toffee IR output which PyTorch doesn't have.
+                // What we will do is just add a dummy output to work around
+                // this.
+                p_n->add_output("tmp" + std::to_string(temp_next_unique++));
+              }
             }
             continue;
           }
@@ -243,18 +250,6 @@ std::string ExportGraph(std::unique_ptr<Graph>& g) {
         // we don't have any visibility into the defaults that would have
         // been picked by the function itself.  See:
         // https://github.com/ezyang/pytorch/issues/40
-        } else if (value->name() == "View") {
-          p_n->set_op_type("Reshape");
-          toffee::AttributeProto* attr;
-
-          attr = p_n->add_attribute();
-          attr->set_name("shape");
-          auto& t = value->scalar_args.at(0);
-          for (int i = 0, c = PyTuple_Size(t); i < c; i++) {
-            attr->add_ints(THPUtils_unpackLong(PyTuple_GET_ITEM(t.get(), i)));
-          }
-
-          p_n->add_output("tmp" + std::to_string(temp_next_unique++));
         } else if (value->name() == "Transpose") {
           p_n->set_op_type("Transpose");
           toffee::AttributeProto* attr;
