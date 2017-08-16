@@ -20,6 +20,8 @@ std::string node_name(Node* n) {
 // Exports a graph to ToffeeIR
 std::string ExportGraph(std::unique_ptr<Graph>& g) {
   toffee::GraphProto p_g;
+  torch::autograd::PrimSpecContext ctx;
+  ctx.graph = &p_g;
   // TODO: This needs to be exported from Python
   // int temp_next_unique = 0;
   p_g.set_name("torch-jit-export");
@@ -35,31 +37,39 @@ std::string ExportGraph(std::unique_ptr<Graph>& g) {
       // of the select invariant
       continue;
     }
-    toffee::NodeProto* p_n = p_g.add_node();
-    for (auto input : node->inputs()) {
-      p_n->add_input(node_name(input));
-    }
-    if (node->type()->kind() == TypeKind::MultiType) {
-      for (auto u : node->uses()) {
-        p_n->add_output(node_name(u.user));
+    auto generic_node = [&]() {
+      toffee::NodeProto* p_n = p_g.add_node();
+      for (auto input : node->inputs()) {
+        p_n->add_input(node_name(input));
       }
-    } else {
-      p_n->add_output(node_name(node));
-    }
+      if (node->type()->kind() == TypeKind::MultiType) {
+        for (auto u : node->uses()) {
+          p_n->add_output(node_name(u.user));
+        }
+      } else {
+        p_n->add_output(node_name(node));
+      }
+      return p_n;
+    };
     // See https://fb.quip.com/TbPaAzijnd3e
     // TODO: Delete these
     IR_IF(node, Add)
+      toffee::NodeProto* p_n = generic_node();
       p_n->set_op_type("Add");
     IR_ELSEIF(Mul)
+      toffee::NodeProto* p_n = generic_node();
       p_n->set_op_type("Mul");
     IR_ELSEIF(Negate)
+      toffee::NodeProto* p_n = generic_node();
       p_n->set_op_type("Scale");
       toffee::AttributeProto* attr = p_n->add_attribute();
       attr->set_name("scale");
       attr->set_f(-1);
     IR_ELSEIF(Sigmoid)
+      toffee::NodeProto* p_n = generic_node();
       p_n->set_op_type("Sigmoid");
     IR_ELSEIF(Tanh)
+      toffee::NodeProto* p_n = generic_node();
       p_n->set_op_type("TanH");
     IR_ELSEIF(Constant)
       throw std::runtime_error("Constant not supported yet");
@@ -72,58 +82,23 @@ std::string ExportGraph(std::unique_ptr<Graph>& g) {
     IR_ELSEIF(FusionGroup)
       throw std::runtime_error("FusionGroup not supported.  Try exporting before fusing");
     IR_ELSEIF(CppOp)
-      if (auto fn = std::dynamic_pointer_cast<autograd::ConvForward>(value->fn)) {
-        p_n->set_op_type("Conv");
-        toffee::AttributeProto* attr;
-        // Irritatingly, Caffe2 requires us to specify kernels,
-        // but we don't actually have that information directly
-        // recorded in ConvForward.  So we have to reverse
-        // engineer it from the input types...
-        // TODO: dynamic_cast ew
-        auto weight_type = node->inputs().at(1)->type()->cast<TensorType>();
-        JIT_ASSERT(weight_type);
-        auto weight_size = weight_type->sizes();
-        std::vector<int64_t> kernel_size(weight_size.begin() + 2, weight_size.end());
-        attr = p_n->add_attribute();
-        attr->set_name("kernels");
-        for (int kernel : kernel_size) {
-          attr->add_ints(kernel);
+      if (auto fn = std::dynamic_pointer_cast<autograd::HasPrimSpec>(value->fn)) {
+        node_list outputs;
+        if (node->type()->kind() == TypeKind::MultiType) {
+          for (auto u : node->uses()) {
+            outputs.push_back(u.user);
+          }
+        } else {
+          outputs.push_back(node);
         }
-
-        attr = p_n->add_attribute();
-        attr->set_name("strides");
-        for (int stride : fn->stride) {
-          attr->add_ints(stride);
-        }
-        attr = p_n->add_attribute();
-        attr->set_name("pads");
-        for (int padding : fn->padding) {
-          attr->add_ints(padding);
-        }
-        // NB: Caffe2 let's specifying top and bottom pads separately;
-        // PyTorch assumes it's symmetric
-        for (int padding : fn->padding) {
-          attr->add_ints(padding);
-        }
-        attr = p_n->add_attribute();
-        attr->set_name("dilations");
-        for (int dilation : fn->dilation) {
-          attr->add_ints(dilation);
-        }
-        // Not in Toffee?
-        JIT_ASSERT(fn->transposed == false);
-        for (int output_padding : fn->output_padding) {
-          JIT_ASSERT(output_padding == 0);
-        }
-        attr = p_n->add_attribute();
-        attr->set_name("group");
-        attr->set_i(fn->groups);
-        // ignore benchmark/cudnn_enabled
+        fn->primspec(&ctx, node->inputs(), outputs);
       } else {
-        throw std::runtime_error("CppOp not supported " + value->name());
+        throw std::runtime_error("CppOp doesn't define primspec " + value->name());
       }
     IR_ELSEIF(PythonOp)
       // NB: All inplace designations are dropped
+
+      toffee::NodeProto* p_n = generic_node();
 
       if (!PyObject_HasAttrString(value->pyobj.get(), "primspec")) {
         throw std::runtime_error("PythonOp doesn't define primspec " + value->name());
