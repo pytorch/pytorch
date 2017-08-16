@@ -6,7 +6,7 @@ from torch.autograd import Variable, Function
 from common import TestCase, run_tests
 
 # TODO: Un-jankify this
-toffee_only = unittest.skipIf(hasattr(torch._C, "_jit_pass_export"), "no Toffee support")
+toffee_only = unittest.skipIf(not hasattr(torch._C, "_jit_pass_export"), "no Toffee support")
 
 
 class TestJit(TestCase):
