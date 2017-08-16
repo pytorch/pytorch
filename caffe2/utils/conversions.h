@@ -112,7 +112,7 @@ inline float cpu_half2float(float16 h) {
 #if __CUDACC__
 
 #if CUDA_VERSION >= 9000
-inline float16 halfToFloat16(half x) {
+CONVERSIONS_DECL float16 halfToFloat16(half x) {
   float16 r = *reinterpret_cast<float16*>(&x);
   return r;
 }
