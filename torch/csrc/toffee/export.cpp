@@ -127,6 +127,7 @@ std::string ExportGraph(std::unique_ptr<Graph>& g) {
             throw std::runtime_error("expected too many inputs");
           // TODO: Send in something more reasonable here
           obj = PyLong_FromLong(node_it - node->inputs().begin());
+          node_it++;
         } else {
           throw std::runtime_error("unexpected calling convention");
         }
