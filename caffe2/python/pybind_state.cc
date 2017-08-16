@@ -907,9 +907,35 @@ void addGlobalMethods(py::module& m) {
         return py::bytes(protob);
       });
   m.def(
+      "memonger_compute_blob_recycling_for_dag",
+      [](const py::bytes& net_def,
+         const std::vector<string>& input_blobs,
+         const std::vector<int>& op_indices,
+         const std::unordered_set<string>& shareable_blob_names,
+         const string& namescope,
+         const std::unordered_set<string>& dont_share_blob_names,
+         const std::unordered_map<string, vector<int>>& blob_shapes) {
+        py::gil_scoped_release g;
+        NetDef net;
+        CAFFE_ENFORCE(
+            ParseProtobufFromLargeString(net_def.cast<std::string>(), &net));
+        NetDef optimized_proto =
+            caffe2::memonger::compute_blob_recycling_for_dag(
+                net,
+                input_blobs,
+                op_indices,
+                shareable_blob_names,
+                namescope,
+                dont_share_blob_names,
+                blob_shapes);
+        std::string protob;
+        CAFFE_ENFORCE(optimized_proto.SerializeToString(&protob));
+        return py::bytes(protob);
+      });
+  m.def(
       "memonger_optimize_inference_net",
       [](const py::bytes& net_def,
-         const std::vector<std::string> static_blobs) {
+         const std::vector<std::string>& static_blobs) {
         NetDef def;
         CAFFE_ENFORCE(
             ParseProtobufFromLargeString(net_def.cast<std::string>(), &def));

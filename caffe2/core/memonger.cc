@@ -64,7 +64,8 @@ NetDef optimize_inference_net(
           mapping[inp] = inp;
 
           // Safety check to prevent double-memongering nets.
-          string shared_blob = "__m" + to_string(renaming.size()) + "_shared";
+          string shared_blob =
+              "__m" + caffe2::to_string(renaming.size()) + "_shared";
           if (all_blobs.find(shared_blob) != all_blobs.end()) {
             LOG(INFO) << "Net was already memongered!";
             return net;
@@ -119,5 +120,403 @@ NetDef optimize_inference_net(
   LOG(INFO) << "optimized net using " << renaming.size() << " shared blobs";
   return optim_net;
 }
+
+class ComputeBlobRecyclingForDag {
+ public:
+  explicit ComputeBlobRecyclingForDag(const int size)
+      : op_inputs_(size),
+        op_visited_count_(size),
+        op_token_deposit_(size),
+        op_visited_(size, false) {}
+  NetDef OptimizeNet(
+      const NetDef& net,
+      const std::vector<string>& heads,
+      const std::vector<int>& op_indices,
+      const std::unordered_set<string>& shareable_blob_names,
+      const string& namescope,
+      const std::unordered_set<string>& dont_share_blob_names,
+      const std::unordered_map<string, vector<int>>& blob_shapes) {
+    // Construct the set of input blobs.
+    std::unordered_set<string> heads_blobs_set(heads.begin(), heads.end());
+
+    // Construct the set of output blobs we want to optimize.
+    for (const int op_index : op_indices) {
+      for (const auto& output : net.op(op_index).output()) {
+        optim_op_outputs_.insert(output);
+      }
+    }
+
+    // Compute operators in degree (op_inputs_) and initialize how many ops are
+    // sharing input blobs (share_counts_).
+    // Note: We have to handle the cases where output blobs are shared.
+    std::unordered_map<string, int> blob_seen;
+    for (const int op_index : op_indices) {
+      for (const auto& input : net.op(op_index).input()) {
+        if (has_key(shareable_blob_names, input) ||
+            has_key(heads_blobs_set, input)) {
+          if (has_key(optim_op_outputs_, input)) {
+            CAFFE_ENFORCE(
+                blob_seen.find(input) != blob_seen.end(),
+                "Input ",
+                input,
+                " was not output by an op before");
+            op_inputs_[op_index] += blob_seen[input];
+          } else {
+            share_counts_[input] = 1;
+          }
+          blob_to_ops_[input].push_back(op_index);
+        }
+      }
+      for (const auto& output : net.op(op_index).output()) {
+        blob_seen[output] += 1;
+      }
+    }
+
+    // The main recursive call. Here we do start DFS in the operator graph
+    // from the input blobs.
+    for (const auto& input_blob : heads) {
+      for (const int op_index : blob_to_ops_[input_blob]) {
+        if (!op_visited_[op_index]) {
+          vector<std::pair<int, string>> free_blobs;
+          std::unordered_set<int> tokens{tokens_counter_++};
+          process_op(
+              net,
+              shareable_blob_names,
+              namescope,
+              dont_share_blob_names,
+              blob_shapes,
+              op_index,
+              &free_blobs,
+              &tokens);
+        }
+      }
+    }
+
+    // Rename mapped blobs.
+    std::unordered_map<string, string> renamed;
+    int name_idx = 0;
+    std::unordered_set<string> mapped_blobs_set;
+    for (const auto& mapped_blob : mapping_) {
+      mapped_blobs_set.insert(mapped_blob.second);
+      if (has_key(optim_op_outputs_, mapped_blob.second)) {
+        if (renamed.find(mapped_blob.second) == renamed.end()) {
+          renamed.insert(
+              {mapped_blob.second,
+               namescope + "__m" + caffe2::to_string(name_idx++) + "_shared"});
+        }
+      } else {
+        renamed.insert({mapped_blob.second, mapped_blob.second});
+      }
+    }
+
+    // Recursively rename mapped_blobs.
+    mapping_.insert(renamed.begin(), renamed.end());
+    bool had_changes = true;
+    while (had_changes) {
+      had_changes = false;
+      for (const auto mapped_blob : mapping_) {
+        if (has_key(renamed, mapped_blob.second) &&
+            renamed[mapped_blob.second] != mapped_blob.second) {
+          renamed[mapped_blob.first] = renamed[mapped_blob.second];
+          mapping_[mapped_blob.first] = renamed[mapped_blob.first];
+        }
+      }
+    }
+
+    NetDef optimized_net = net;
+    // Rename optimized_net blobs.
+    for (int i = 0; i < optimized_net.op_size(); ++i) {
+      for (int j = 0; j < optimized_net.op(i).input_size(); ++j) {
+        const string& input_name =
+            get_blob_or_mapped_blob(optimized_net.op(i).input(j));
+        optimized_net.mutable_op(i)->set_input(j, input_name);
+      }
+
+      for (int j = 0; j < optimized_net.op(i).output_size(); ++j) {
+        auto output_name =
+            get_blob_or_mapped_blob(optimized_net.op(i).output(j));
+        optimized_net.mutable_op(i)->set_output(j, output_name);
+      }
+    }
+
+    LOG(INFO) << "Remapping " << mapping_.size() << " using "
+              << mapped_blobs_set.size() << " shared blobs.";
+    if (floats_saved_ > 0) {
+      LOG(INFO) << "Memoger saved approximately : "
+                << (floats_saved_ * 4.0 / 1024.0 / 1024.0) << " MB.";
+    }
+
+    return optimized_net;
+  }
+
+ private:
+  template <typename K, typename V>
+  inline bool has_key(const std::unordered_map<K, V>& in_map, const K& key) {
+    return in_map.find(key) != in_map.end();
+  }
+
+  template <typename K>
+  inline bool has_key(const std::unordered_set<K>& in_set, const K& key) {
+    return in_set.find(key) != in_set.end();
+  }
+
+  void process_op(
+      const NetDef& net,
+      const std::unordered_set<string>& shareable_blob_names,
+      const string& namescope,
+      const std::unordered_set<string>& dont_share_blob_names,
+      const std::unordered_map<string, vector<int>>& blob_shapes,
+      int op_index,
+      std::vector<std::pair<int, string>>* free_blobs,
+      std::unordered_set<int>* tokens) {
+    // The tokens we have now is the union of current tokens operator is holding
+    // and tokens pushed from parents.
+    tokens->insert(
+        op_token_deposit_[op_index].begin(), op_token_deposit_[op_index].end());
+    op_token_deposit_[op_index].clear();
+    CAFFE_ENFORCE(!op_visited_[op_index]);
+    op_visited_[op_index] = true;
+
+    const OperatorDef& current_op = net.op(op_index);
+
+    // The set of freed input blobs by processing current op.
+    std::vector<std::pair<int, string>> new_free_blobs;
+    std::unordered_set<string> new_free_blobs_set;
+
+    // Now update blob tokens.
+    for (const auto& input : current_op.input()) {
+      const auto& actual_blob = get_blob_or_mapped_blob(input);
+      req_tokens_[actual_blob].insert(tokens->begin(), tokens->end());
+      if (actual_blob != input) {
+        req_tokens_[input].insert(tokens->begin(), tokens->end());
+      }
+    }
+    for (const auto& output : current_op.output()) {
+      const auto& actual_blob = get_blob_or_mapped_blob(output);
+      req_tokens_[actual_blob].insert(tokens->begin(), tokens->end());
+      if (actual_blob != output) {
+        req_tokens_[output].insert(tokens->begin(), tokens->end());
+      }
+    }
+
+    // Increment blob count and check if we can free input blobs.
+    for (const auto& input : current_op.input()) {
+      if (has_key(shareable_blob_names, input)) {
+        blob_input_count_[input]++;
+        if (blob_input_count_[input] == blob_to_ops_[input].size()) {
+          const string& actual_blob = get_blob_or_mapped_blob(input);
+          if (!has_key(dont_share_blob_names, actual_blob)) {
+            new_free_blobs.emplace_back(
+                -share_counts_[actual_blob], actual_blob);
+            new_free_blobs_set.insert(actual_blob);
+          }
+        }
+      }
+    }
+
+    // Check if we can recycle free blobs and use it as output blob.
+    for (const auto& output : current_op.output()) {
+      if (has_key(shareable_blob_names, output) &&
+          !has_key(processed_output_blobs_, output) &&
+          !has_key(new_free_blobs_set, output)) {
+        const string freed_blob =
+            get_free_blob(output, blob_shapes, tokens, free_blobs);
+        if (freed_blob != "") {
+          req_tokens_[freed_blob].insert(tokens->begin(), tokens->end());
+          share_counts_[freed_blob]++;
+          mapping_[output] = freed_blob;
+        }
+        processed_output_blobs_.insert(output);
+      }
+    }
+
+    // Insert new freed blobs.
+    std::unordered_set<string> free_blob_set;
+    for (const auto& free_blob : *free_blobs) {
+      free_blob_set.insert(free_blob.second);
+    }
+    for (const auto& new_free_blob : new_free_blobs) {
+      if (!has_key(free_blob_set, new_free_blob.second)) {
+        free_blobs->push_back(new_free_blob);
+        if (blob_shapes.size() > 0) {
+          if (!has_key(blob_sizes_, new_free_blob.second)) {
+            blob_sizes_.insert(
+                {new_free_blob.second,
+                 infer_blob_size(new_free_blob.second, blob_shapes)});
+          }
+        }
+        std::push_heap(
+            free_blobs->begin(),
+            free_blobs->end(),
+            std::greater<std::pair<int, string>>());
+      }
+    }
+
+    int num_branches = 0;
+    for (const auto& output : current_op.output()) {
+      num_branches += blob_to_ops_[output].size();
+    }
+
+    for (const auto& output : current_op.output()) {
+      for (const auto& input_op_index : blob_to_ops_[output]) {
+        op_visited_count_[input_op_index]++;
+        if (op_visited_count_[input_op_index] == op_inputs_[input_op_index]) {
+          std::unordered_set<int> new_tokens;
+          new_tokens.insert(tokens->begin(), tokens->end());
+          if (num_branches > 1) {
+            new_tokens.insert(tokens_counter_++);
+          }
+          process_op(
+              net,
+              shareable_blob_names,
+              namescope,
+              dont_share_blob_names,
+              blob_shapes,
+              input_op_index,
+              free_blobs,
+              &new_tokens);
+        } else {
+          if (!op_visited_[input_op_index]) {
+            op_token_deposit_[input_op_index].insert(
+                tokens->begin(), tokens->end());
+          }
+        }
+      }
+    }
+  }
+
+  inline int infer_blob_size(
+      const string& blob_name,
+      const std::unordered_map<string, vector<int>>& blob_shapes) {
+    const auto& blob_shapes_iter = blob_shapes.find(blob_name);
+    if (blob_shapes_iter == blob_shapes.end()) {
+      return 0;
+    }
+    int size = 1;
+    for (int i = 0; i < blob_shapes_iter->second.size(); ++i) {
+      size *= blob_shapes_iter->second[i];
+    }
+    return size;
+  }
+
+  inline string get_blob_or_mapped_blob(const string& blob_name) {
+    auto mapped_blob = mapping_.find(blob_name);
+    if (mapped_blob == mapping_.end()) {
+      return blob_name;
+    } else {
+      return mapped_blob->second;
+    }
+  }
+
+  // Rturns true if the op that generates that blob acquires all tokens.
+  inline bool can_use_blob(
+      const string& blob_name,
+      std::unordered_set<int>* tokens) {
+    for (const int token : req_tokens_[blob_name]) {
+      if (tokens->find(token) == tokens->end()) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  // Returns the name of the blob that we are going to map blob_name into.
+  inline string get_free_blob(
+      const string& blob_name,
+      const std::unordered_map<string, vector<int>>& blob_shapes,
+      std::unordered_set<int>* tokens,
+      std::vector<std::pair<int, string>>* free_blobs) {
+    string freed_blob = "";
+    if (blob_shapes.size() == 0) {
+      std::vector<std::pair<int, string>> cant_use_blobs;
+      while (free_blobs->size() > 0) {
+        std::pop_heap(
+            free_blobs->begin(),
+            free_blobs->end(),
+            std::greater<std::pair<int, string>>());
+        const auto cand_free_blob = free_blobs->back();
+        free_blobs->pop_back();
+        if (can_use_blob(cand_free_blob.second, tokens)) {
+          freed_blob = cand_free_blob.second;
+          break;
+        } else {
+          cant_use_blobs.push_back(cand_free_blob);
+        }
+      }
+      for (const auto& cant_use_blob : cant_use_blobs) {
+        free_blobs->push_back(cant_use_blob);
+        std::push_heap(
+            free_blobs->begin(),
+            free_blobs->end(),
+            std::greater<std::pair<int, string>>());
+      }
+    } else {
+      // Heuristic to choose the largest blob to fit output thats
+      // slightly less than blob_size.
+      const int blob_size = infer_blob_size(blob_name, blob_shapes);
+      int best_size = -1;
+      int free_blob_index = -1;
+      for (int i = 0; i < free_blobs->size(); ++i) {
+        const string& cb_name = (*free_blobs)[i].second;
+        if (can_use_blob(cb_name, tokens)) {
+          const int cand_bz = blob_sizes_[cb_name];
+          CAFFE_ENFORCE(blob_sizes_.find(cb_name) != blob_sizes_.end());
+          if (cand_bz >= best_size) {
+            if (best_size < blob_size || best_size >= cand_bz) {
+              best_size = cand_bz;
+              free_blob_index = i;
+            }
+          }
+        }
+      }
+      if (free_blob_index != -1) {
+        floats_saved_ += best_size;
+        freed_blob = (*free_blobs)[free_blob_index].second;
+        free_blobs->erase(free_blobs->begin() + free_blob_index);
+      }
+    }
+    return freed_blob;
+  };
+
+  int tokens_counter_ = 1;
+  int floats_saved_ = 0;
+  // blob_name -> Op edges.
+  std::unordered_map<string, std::vector<int>> blob_to_ops_;
+  // Current Op in degree.
+  std::unordered_map<string, int> blob_input_count_;
+  // Op in degree.
+  std::vector<int> op_inputs_;
+  // Current Op visit counts.
+  std::vector<int> op_visited_count_;
+  std::unordered_map<string, int> share_counts_;
+  std::unordered_map<string, int> blob_sizes_;
+  std::unordered_map<string, std::unordered_set<int>> req_tokens_;
+  std::vector<std::unordered_set<int>> op_token_deposit_;
+  std::unordered_set<string> optim_op_outputs_;
+  std::unordered_map<string, string> mapping_;
+  // The set of output blobs we already processed.
+  std::unordered_set<string> processed_output_blobs_;
+  std::vector<bool> op_visited_;
+};
+
+NetDef compute_blob_recycling_for_dag(
+    const NetDef& net,
+    const std::vector<string>& heads,
+    const std::vector<int>& op_indices,
+    const std::unordered_set<string>& shareable_blob_names,
+    const string& namescope,
+    const std::unordered_set<string>& dont_share_blob_names,
+    const std::unordered_map<string, vector<int>>& blob_shapes) {
+  ComputeBlobRecyclingForDag memonger(net.op_size());
+  return memonger.OptimizeNet(
+      net,
+      heads,
+      op_indices,
+      shareable_blob_names,
+      namescope,
+      dont_share_blob_names,
+      blob_shapes);
 }
-}
+
+} // memonger
+} // caffe2
