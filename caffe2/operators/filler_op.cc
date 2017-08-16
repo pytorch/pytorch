@@ -12,10 +12,28 @@ bool RangeFillOp<float, CPUContext>::Fill(
   return true;
 }
 
+template <>
+template <typename T>
+bool DiagonalFillOp<CPUContext>::FillWithType(TensorCPU* output) {
+  VerifyOutputShape(output);
+  T value = OperatorBase::GetSingleArgument<T>("value", 0);
+  auto* data = output->template mutable_data<T>();
+  // first fill everything with 0
+  math::Set<T, CPUContext>(output->size(), T(0), data, &context_);
+  // then calculate step size for diagonal
+  auto step = GetStepSize(output);
+  for (TIndex i = 0; i < output->size(); i += step) {
+    math::Set<T, CPUContext>(1, value, data, &context_);
+    data += step;
+  }
+  return true;
+}
+
 REGISTER_CPU_OPERATOR(UniformFill, UniformFillOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(UniformIntFill, UniformFillOp<int, CPUContext>);
 REGISTER_CPU_OPERATOR(UniqueUniformFill, UniqueUniformFillOp<CPUContext>);
 REGISTER_CPU_OPERATOR(ConstantFill, ConstantFillOp<CPUContext>);
+REGISTER_CPU_OPERATOR(DiagonalFill, DiagonalFillOp<CPUContext>);
 REGISTER_CPU_OPERATOR(GaussianFill, GaussianFillOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(XavierFill, XavierFillOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(MSRAFill, MSRAFillOp<float, CPUContext>);
@@ -69,6 +87,55 @@ NOTE: Currently, it supports data type of float, int32, int64, and bool.
         0,
         "output",
         "Output tensor of constant values specified by 'value'"
+        "argument and its type is specified by the 'dtype' argument");
+
+OPERATOR_SCHEMA(DiagonalFill)
+    .NumInputs(0, 1)
+    .NumOutputs(1)
+    .AllowInplace({{0, 0}})
+    .TensorInferenceFunction(FillerTensorInference)
+    .SetDoc(R"DOC(
+The operator fills the diagonal elements of the output tensor (>= 2D)
+with a constant value specified by the 'value' argument, and others 0. If
+number of dimensions of the output tensor is greater than 2, all dimensions
+must be equal.
+
+The data type is specified by the 'dtype' argument. The 'dtype' argument must
+be one of the data types specified in the 'DataType' enum field in the
+TensorProto message. If the 'dtype' argument is not provided, the data type of
+'value' is used.
+
+The output tensor shape is specified by the 'shape' argument. If the number of
+input is 1, the shape will be identical to that of the input at run time with
+optional additional dimensions appended at the end as specified by 'extra_shape'
+argument. In that case the 'shape' argument should not be set.
+
+If input_as_shape is set to true, then the input should be a 1D tensor
+containing the desired output shape (the dimensions specified in extra_shape
+will also be appended)
+
+NOTE: Currently, it supports data type of float, int32, int64, and bool.
+)DOC")
+    .Arg("value", "The value for the elements of the output tensor.")
+    .Arg(
+        "dtype",
+        "The data type for the elements of the output tensor."
+        "Strictly must be one of the types from DataType enum in TensorProto.")
+    .Arg(
+        "shape",
+        "The shape of the output tensor."
+        "Cannot set the shape argument and pass in an input at the same time.")
+    .Arg(
+        "extra_shape",
+        "The additional dimensions appended at the end of the shape indicated"
+        "by the input blob."
+        "Cannot set the extra_shape argument when there is no input blob.")
+    .Arg("input_as_shape", "1D tensor containing the desired output shape")
+    .Input(0, "input", "Input tensor (optional) to provide shape information.")
+    .Output(
+        0,
+        "output",
+        "Output tensor"
         "argument and its type is specified by the 'dtype' argument");
 
 OPERATOR_SCHEMA(UniformFill)
@@ -171,6 +238,7 @@ NO_GRADIENT(UniformFill);
 NO_GRADIENT(UniformIntFill);
 NO_GRADIENT(UniqueUniformFill);
 NO_GRADIENT(ConstantFill);
+NO_GRADIENT(DiagonalFill);
 NO_GRADIENT(GaussianFill);
 NO_GRADIENT(XavierFill);
 NO_GRADIENT(MSRAFill);

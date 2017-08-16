@@ -13,6 +13,12 @@ import caffe2.python.hypothesis_test_util as hu
 import numpy as np
 
 
+def _fill_diagonal(shape, value):
+    result = np.zeros(shape)
+    np.fill_diagonal(result, value)
+    return (result,)
+
+
 class TestFillerOperator(hu.HypothesisTestCase):
 
     @given(**hu.gcs)
@@ -75,6 +81,47 @@ class TestFillerOperator(hu.HypothesisTestCase):
             np.testing.assert_array_equal(shape, blob_out.shape)
             self.assertTrue((blob_out >= a).all())
             self.assertTrue((blob_out <= b).all())
+
+    @given(
+        shape=st.sampled_from(
+            [
+                [3, 3],
+                [5, 5, 5],
+                [7, 7, 7, 7],
+            ]
+        ),
+        **hu.gcs
+    )
+    def test_diagonal_fill_op_float(self, shape, gc, dc):
+        value = 2.5
+        op = core.CreateOperator(
+            'DiagonalFill',
+            [],
+            'out',
+            shape=shape,  # scalar
+            value=value,
+        )
+
+        for device_option in dc:
+            op.device_option.CopyFrom(device_option)
+            # Check against numpy reference
+            self.assertReferenceChecks(gc, op, [shape, value], _fill_diagonal)
+
+    @given(**hu.gcs)
+    def test_diagonal_fill_op_int(self, gc, dc):
+        value = 2
+        shape = [3, 3]
+        op = core.CreateOperator(
+            'DiagonalFill',
+            [],
+            'out',
+            shape=shape,
+            dtype=core.DataType.INT32,
+            value=value,
+        )
+
+        # Check against numpy reference
+        self.assertReferenceChecks(gc, op, [shape, value], _fill_diagonal)
 
     @given(**hu.gcs)
     def test_gaussian_fill_op(self, gc, dc):
