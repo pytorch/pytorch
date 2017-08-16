@@ -1,4 +1,4 @@
-#include "torch/csrc/autograd/convolution.h"
+#include "torch/csrc/autograd/functions/convolution.h"
 
 void ConvForward::primspec(PrimSpecContext* ctx, jit::node_list inputs, jit::node_list outputs) {
   toffee::NodeProto* p_n = ctx->graph->add_node();
