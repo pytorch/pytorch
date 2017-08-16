@@ -258,6 +258,8 @@ class clean(distutils.command.clean.clean):
 
 include_dirs = []
 
+# TODO: This is a hack: this needs to eventually be replaced with a sustainable
+# way of getting our hands on protobuf headers
 if os.getenv('CONDA_PREFIX'):
     include_dirs.append(os.path.join(os.getenv('CONDA_PREFIX'), "include"))
 
