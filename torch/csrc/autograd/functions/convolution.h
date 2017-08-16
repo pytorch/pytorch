@@ -43,7 +43,7 @@ struct ConvForward : public Function, public ConvParams, public HasPrimSpec {
 
   virtual std::string name() override;
   virtual variable_list apply(const variable_list& inputs) override;
-  virtual void primspec(PrimSpecContext* ctx, jit::node_list inputs, jit::node_list outputs);
+  HAS_PRIMSPEC;
 
   std::vector<int64_t> output_size(at::Tensor& input, at::Tensor& weight);
 };

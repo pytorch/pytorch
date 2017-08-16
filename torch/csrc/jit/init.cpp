@@ -9,6 +9,9 @@
 #include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/utils/python_strings.h"
 
+#ifdef WITH_TOFFEE
+#include "torch/csrc/toffee/export.h"
+#endif
 
 PyObject * THPJIT_initExtension(PyObject *_unused)
 {
@@ -43,6 +46,7 @@ PyObject * wrap_pass(PyObject *_unused, PyObject *py_state) {
   END_HANDLE_TH_ERRORS
 }
 
+#ifdef WITH_TOFFEE
 PyObject * export_graph(PyObject *_unused, PyObject *py_state) {
   HANDLE_TH_ERRORS
   THPUtils_assert(THPTracingState_Check(py_state), "expected a TracingState instance");
@@ -50,6 +54,7 @@ PyObject * export_graph(PyObject *_unused, PyObject *py_state) {
   return THPUtils_packString(ExportGraph(state->cdata->graph));
   END_HANDLE_TH_ERRORS
 }
+#endif // WITH_TOFFEE
 
 PyObject * run_cpp_tests(PyObject *_unused, PyObject *_unused2) {
     HANDLE_TH_ERRORS
@@ -67,7 +72,9 @@ struct PyMethodDef _THPJIT_methods[] = {
   {"_jit_pass_fuse", (PyCFunction)wrap_pass<FuseGraph>,       METH_O,       "fuse"},
   {"_jit_pass_dco",  (PyCFunction)wrap_pass<EliminateDeadCode>, METH_O,     "dco"},
   {"_jit_pass_lint", (PyCFunction)wrap_pass<LintGraph>,       METH_O,       "lint"},
+#ifdef WITH_TOFFEE
   {"_jit_pass_export", (PyCFunction)export_graph,             METH_O,       "export"},
+#endif // WITH_TOFFEE
   {"_jit_run_cpp_tests",(PyCFunction)run_cpp_tests,           METH_NOARGS,  NULL},
   {NULL}
 };
