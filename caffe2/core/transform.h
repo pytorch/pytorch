@@ -43,6 +43,36 @@ class Transform {
   virtual ~Transform() {}
 
   /**
+   * Determines the type of subgraphs that PatternMatch will find.
+   *
+   * CONNECTED_SUBGRAPH will only match subgraphs that are connected.
+   * These subgraphs satisfy that every node of the match is connected to the
+   * subgraph of the nodes that come before it.
+   * For example, in the graph (1) --> (2) --> (3) --> (4),
+   *    This is capable of matching the subgraph [2, 3] and [4, 3]
+   *    This is not capable of matching the subgraph [2, 4].
+   *
+   *
+   * SORTED_WRT_EXECUTION_ORDER will match subgraphs that guarantee
+   * sorted execution order.
+   * The nodes don't have to be connected. It is faster than General.
+   * For example, in the graph (1) --> (2) --> (3) --> (4),
+   *    This is capable of matching the subgraph [2, 4], [3, 4].
+   *    This is not capable of matching the subgraph [3, 1], [4, 3].
+   *
+   *
+   * GENERAL can match any subgraph.
+   * For example, in the graph (1) --> (2) --> (3) --> (4),
+   *    This is capable of matching subgraphs [2, 4], [3, 4], [4, 2, 1].
+   *    There is no ordered subgraph of G that cannot be matched by this.
+   */
+  enum PatternMatchType {
+    CONNECTED_SUBGRAPH,
+    SORTED_WRT_EXECUTION_ORDER,
+    GENERAL
+  };
+
+  /**
    * Generates all matches (stored as ordered subgraphs) and returns them.
    *
    * A match is stored as vector<int>, which is a mapping to OperatorDefs
@@ -89,6 +119,10 @@ class Transform {
     CAFFE_NOT_IMPLEMENTED;
   }
 
+  void SetPatternMatchType(PatternMatchType type) {
+    pattern_match_type_ = type;
+  }
+
  private:
   /**
    * A helper function for PatternMatch, which keeps track of the best subgraph
@@ -96,6 +130,7 @@ class Transform {
    */
   void PatternMatchHelper(
       const transform::Graph& graph,
+      const std::vector<bool>& matched,
       std::vector<int>* subgraph_ptr,
       std::vector<int>* best_subgraph_ptr);
   /**
@@ -104,8 +139,11 @@ class Transform {
   void TryNeighbors(
       const transform::Graph& graph,
       const std::map<int, std::vector<string>>& neighbors,
+      const std::vector<bool>& matched,
       std::vector<int>* subgraph_ptr,
       std::vector<int>* best_subgraph_ptr);
+
+  PatternMatchType pattern_match_type_ = CONNECTED_SUBGRAPH;
 };
 
 // Creates a Transform based on a key, which should be defined in registry.
