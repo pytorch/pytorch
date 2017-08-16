@@ -5,6 +5,9 @@ import unittest
 from torch.autograd import Variable, Function
 from common import TestCase, run_tests
 
+# TODO: Un-jankify this
+toffee_only = unittest.skipIf(hasattr(torch._C, "_jit_pass_export"), "no Toffee support")
+
 
 class TestJit(TestCase):
     maxDiff = None
@@ -24,6 +27,7 @@ class TestJit(TestCase):
 
         self.assertExpected(str(trace))
 
+    @toffee_only
     def test_export(self):
         x = Variable(torch.Tensor([0.4]), requires_grad=True)
         y = Variable(torch.Tensor([0.7]), requires_grad=True)
