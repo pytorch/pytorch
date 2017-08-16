@@ -1,5 +1,6 @@
 from functools import reduce
 import torch
+import torch.toffee
 from torch._utils import _accumulate
 
 from ..function import Function, InplaceFunction, once_differentiable
@@ -74,6 +75,10 @@ class NoGrad(Function):
 
 
 class Transpose(Function):
+
+    @staticmethod
+    def primspec(i, dim1, dim2):
+        return torch.toffee.op("Transpose", i, axes=(dim1, dim2))
 
     @staticmethod
     def forward(ctx, i, dim1, dim2):
