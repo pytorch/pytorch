@@ -83,11 +83,17 @@ distributed_set_up
 BACKEND=gloo WORLD_SIZE=3 $PYCMD ./test_distributed.py
 distributed_tear_down
 
+echo "Running distributed tests for the Gloo backend"
+distributed_set_up
+BACKEND=gloo WORLD_SIZE=3 INIT_METHOD='file://'$TEMP_DIR'/shared_init_file' $PYCMD ./test_distributed.py
+distributed_tear_down
+
 if [ -x "$(command -v mpiexec)" ]; then
   echo "Running distributed tests for the MPI backend"
   distributed_set_up
   BACKEND=mpi mpiexec -n 3 $PYCMD ./test_distributed.py
   distributed_tear_down
+
   echo "Running distributed tests for the MPI backend with file init_method"
   distributed_set_up
   BACKEND=mpi INIT_METHOD='file://'$TEMP_DIR'/shared_init_file' mpiexec -n 3 $PYCMD ./test_distributed.py
