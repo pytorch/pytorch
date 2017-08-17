@@ -52,35 +52,35 @@ std::string ExportGraph(std::unique_ptr<Graph>& g) {
     };
     // See https://fb.quip.com/TbPaAzijnd3e
     // TODO: Delete these
-    IR_IF2(node, Add)
+    IR_IF(node, Add)
       toffee::NodeProto* p_n = generic_node();
       p_n->set_op_type("Add");
-    IR_ELSEIF2(Mul)
+    IR_ELSEIF(Mul)
       toffee::NodeProto* p_n = generic_node();
       p_n->set_op_type("Mul");
-    IR_ELSEIF2(Negate)
+    IR_ELSEIF(Negate)
       toffee::NodeProto* p_n = generic_node();
       p_n->set_op_type("Scale");
       toffee::AttributeProto* attr = p_n->add_attribute();
       attr->set_name("scale");
       attr->set_f(-1);
-    IR_ELSEIF2(Sigmoid)
+    IR_ELSEIF(Sigmoid)
       toffee::NodeProto* p_n = generic_node();
       p_n->set_op_type("Sigmoid");
-    IR_ELSEIF2(Tanh)
+    IR_ELSEIF(Tanh)
       toffee::NodeProto* p_n = generic_node();
       p_n->set_op_type("TanH");
-    IR_ELSEIF2(Constant)
+    IR_ELSEIF(Constant)
       throw std::runtime_error("Constant not supported yet");
-    IR_ELSEIF2(Return)
+    IR_ELSEIF(Return)
       JIT_ASSERT(0);
-    IR_ELSEIF2(Select)
+    IR_ELSEIF(Select)
       JIT_ASSERT(0);
-    IR_ELSEIF2(Param)
+    IR_ELSEIF(Param)
       JIT_ASSERT(0);
-    IR_ELSEIF2(FusionGroup)
+    IR_ELSEIF(FusionGroup)
       throw std::runtime_error("FusionGroup not supported.  Try exporting before fusing");
-    IR_ELSEIF(CppOp)
+    IR_ELSEIFM(CppOp)
       if (auto fn = std::dynamic_pointer_cast<autograd::HasPrimSpec>(value->fn)) {
         node_list outputs;
         if (node->type()->kind() == TypeKind::MultiType) {
@@ -94,7 +94,7 @@ std::string ExportGraph(std::unique_ptr<Graph>& g) {
       } else {
         throw std::runtime_error("CppOp doesn't define primspec " + value->name());
       }
-    IR_ELSEIF(PythonOp)
+    IR_ELSEIFM(PythonOp)
       // NB: All inplace designations are dropped
 
       toffee::NodeProto* p_n = generic_node();

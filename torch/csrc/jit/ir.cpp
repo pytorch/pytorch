@@ -130,7 +130,7 @@ std::ostream& operator<<(std::ostream & out, Graph & g) {
       }
       out << node_list_with_types(outputs);
       out << " = ";
-      IR_IF(n,PythonOp)
+      IR_IFM(n,PythonOp)
         out << "^" << value->name();
         out << "(";
         int i = 0;
@@ -140,10 +140,10 @@ std::ostream& operator<<(std::ostream & out, Graph & g) {
           out << scalar;
         }
         out << ")";
-      IR_ELSEIF2(FusionGroup)
+      IR_ELSEIF(FusionGroup)
         out << "fusion_group_" << groups.size();
         groups.push_back(value);
-      IR_ELSEIF(CppOp)
+      IR_ELSEIFM(CppOp)
         out << "CppOp[" << value->name() << "]";
       IR_ELSE()
         out << symbolToString(n->kind());
@@ -217,7 +217,7 @@ void Node::lint() {
       // - uses = [Select 0, Select 1, Select 2, ...]
       if (type_ && type_->kind() == TypeKind::MultiType) {
         JIT_ASSERT(use.offset == 0);
-        IR_IF2(use.user, Select)
+        IR_IF(use.user, Select)
           JIT_ASSERT(value->offset() == i);
         IR_ELSE()
           JIT_ASSERT(0);
@@ -233,15 +233,15 @@ void Node::lint() {
   // - Select inputs is one
   // - Python operator cconv is correct
 
-  IR_IF2(this,Constant)
+  IR_IF(this,Constant)
     JIT_ASSERT(inputs_.size() == 0);
-  IR_ELSEIF2(Return)
+  IR_ELSEIF(Return)
     JIT_ASSERT(uses_.size() == 0);
-  IR_ELSEIF2(Param)
+  IR_ELSEIF(Param)
     JIT_ASSERT(inputs_.size() == 0);
-  IR_ELSEIF2(Select)
+  IR_ELSEIF(Select)
     JIT_ASSERT(inputs_.size() == 1);
-  IR_ELSEIF(PythonOp)
+  IR_ELSEIFM(PythonOp)
     std::size_t n_scalars = 0, n_tensors = 0;
     for (auto c : value->cconv) {
       if (c == 's') {
@@ -255,25 +255,25 @@ void Node::lint() {
     }
     JIT_ASSERT(n_scalars == value->scalar_args.size());
     JIT_ASSERT(n_tensors == inputs_.size());
-  IR_ELSEIF(CppOp)
+  IR_ELSEIFM(CppOp)
     // TODO: add invariants
-  IR_ELSEIF2(Eval)
+  IR_ELSEIF(Eval)
     // TODO: add invariants
   // TODO: It's not good for these ops to be top-level, it makes cases longer.
-  IR_ELSEIF2(Add)
+  IR_ELSEIF(Add)
     JIT_ASSERT(inputs_.size() == 2);
-  IR_ELSEIF2(Mul)
+  IR_ELSEIF(Mul)
     JIT_ASSERT(inputs_.size() == 2);
-  IR_ELSEIF2(Negate)
+  IR_ELSEIF(Negate)
     JIT_ASSERT(inputs_.size() == 1);
-  IR_ELSEIF2(Sigmoid)
+  IR_ELSEIF(Sigmoid)
     JIT_ASSERT(inputs_.size() == 1);
-  IR_ELSEIF2(Tanh)
+  IR_ELSEIF(Tanh)
     JIT_ASSERT(inputs_.size() == 1);
-  IR_ELSEIF2(FusionGroup)
+  IR_ELSEIF(FusionGroup)
     // TODO: Typecheck the parameters
     value->g(kSubgraph)->lint();
-  IR_ELSEIF2(Chunk)
+  IR_ELSEIF(Chunk)
     JIT_ASSERT(inputs_.size() == 1);
   IR_END()
 

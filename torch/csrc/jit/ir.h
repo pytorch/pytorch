@@ -715,17 +715,17 @@ inline void Node::destroy() {
   };
 
 // Mutable case
-#define IR_IF(x,Kind) GENERIC_IF(,k##Kind,x,Kind)
-#define IR_ELSEIF(Kind) GENERIC_ELSEIF(,k##Kind,Kind)
+#define IR_IFM(x,Kind) GENERIC_IF(,k##Kind,x,Kind)
+#define IR_ELSEIFM(Kind) GENERIC_ELSEIF(,k##Kind,Kind)
 #define IR_ELSE() GENERIC_ELSE()
 #define IR_END() GENERIC_END()
 
-#define IR_IF2(x, Kind) \
+#define IR_IF(x, Kind) \
   auto && __match_key = x; \
   switch(__match_key->kind()) { \
     case ::torch::jit::k##Kind: { \
       auto * value = __match_key; (void) value;
-#define IR_ELSEIF2(Kind) \
+#define IR_ELSEIF(Kind) \
     } break; \
     case ::torch::jit::k##Kind: { \
       auto * value = __match_key; (void) value;
@@ -742,7 +742,7 @@ inline void Node::destroy() {
     cout << "Select of" << value->base() << "\n";
   IR_ELSEIF(PythonOp)
     cout << value->pyobj << "\n";
-  IR_ELSEIF2(Add)
+  IR_ELSEIF(Add)
     cout << "Add" << \n";
   IR_ELSE() // optional
     cout << "something else\n";

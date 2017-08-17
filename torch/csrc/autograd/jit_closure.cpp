@@ -272,9 +272,9 @@ std::unique_ptr<AutogradClosure> createAutogradClosure(Graph *graph) {
     if (uses.size() == 0) return; // Dead code elimination
 
 #define IR_ELSEIF_TRIVIAL(NAME, FNAME) \
-    IR_ELSEIF2(NAME) fn = std::make_shared<FNAME>();
+    IR_ELSEIF(NAME) fn = std::make_shared<FNAME>();
 
-    IR_IF(node, PythonOp)
+    IR_IFM(node, PythonOp)
       auto name = value->name();
       // TODO: specialized ops will be probably handled by the tracer
       if (name == "Add") {
@@ -284,24 +284,24 @@ std::unique_ptr<AutogradClosure> createAutogradClosure(Graph *graph) {
       } else {
         fn = std::make_shared<PythonCall>(value);
       }
-    IR_ELSEIF2(Select)
+    IR_ELSEIF(Select)
       // No-op. Selects are handled by their inputs.
       return;
     IR_ELSEIF_TRIVIAL(Add, Add)
     IR_ELSEIF_TRIVIAL(Mul, Mul)
-    IR_ELSEIF2(FusionGroup)
+    IR_ELSEIF(FusionGroup)
 #ifdef WITH_CUDA
         auto fusion_fn = sharedFusionCompiler().getOrCompile(*value->g(kSubgraph));
         fn = std::make_shared<FusionGroupFunction>(fusion_fn);
 #else
         throw std::runtime_error("don't know how to execute FusionGroups without CUDA");
 #endif
-    IR_ELSEIF2(Param)
+    IR_ELSEIF(Param)
       fn = std::make_shared<Placeholder>();
-    IR_ELSEIF2(Constant)
+    IR_ELSEIF(Constant)
       fn = std::make_shared<torch::autograd::WrapConstant>(value->t(kValue));
       const_factory->next_functions.emplace_back(fn, 0);
-    IR_ELSEIF2(Chunk)
+    IR_ELSEIF(Chunk)
       fn = std::make_shared<ChunkFunction>(value->i(kNumChunks),value->i(kDim));
     IR_ELSE()
       throw std::runtime_error(std::string("unrecognized NodeKind: ") + symbolToString(node->kind()));
