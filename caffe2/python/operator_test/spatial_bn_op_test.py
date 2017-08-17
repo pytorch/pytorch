@@ -19,14 +19,15 @@ class TestSpatialBN(hu.HypothesisTestCase):
            seed=st.integers(0, 65535),
            order=st.sampled_from(["NCHW", "NHWC"]),
            epsilon=st.floats(min_value=1e-5, max_value=1e-2),
+           inplace=st.sampled_from([True, False]),
            **hu.gcs)
     def test_spatialbn_test_mode_3d(
             self, size, input_channels, batch_size, seed, order, epsilon,
-            gc, dc):
+            inplace, gc, dc):
         op = core.CreateOperator(
             "SpatialBN",
             ["X", "scale", "bias", "mean", "var"],
-            ["Y"],
+            ["X" if inplace else "Y"],
             order=order,
             is_test=True,
             epsilon=epsilon,
@@ -62,14 +63,15 @@ class TestSpatialBN(hu.HypothesisTestCase):
            seed=st.integers(0, 65535),
            order=st.sampled_from(["NCHW", "NHWC"]),
            epsilon=st.floats(min_value=1e-5, max_value=1e-2),
+           inplace=st.sampled_from([True, False]),
            **hu.gcs)
     def test_spatialbn_test_mode_1d(
             self, size, input_channels, batch_size, seed, order, epsilon,
-            gc, dc):
+            inplace, gc, dc):
         op = core.CreateOperator(
             "SpatialBN",
             ["X", "scale", "bias", "mean", "var"],
-            ["Y"],
+            ["X" if inplace else "Y"],
             order=order,
             is_test=True,
             epsilon=epsilon,
@@ -104,14 +106,15 @@ class TestSpatialBN(hu.HypothesisTestCase):
            order=st.sampled_from(["NCHW", "NHWC"]),
            epsilon=st.floats(min_value=1e-5, max_value=1e-2),
            engine=st.sampled_from(["", "CUDNN"]),
+           inplace=st.sampled_from([True, False]),
            **hu.gcs)
     def test_spatialbn_test_mode(
             self, size, input_channels, batch_size, seed, order, epsilon,
-            engine, gc, dc):
+            inplace, engine, gc, dc):
         op = core.CreateOperator(
             "SpatialBN",
             ["X", "scale", "bias", "mean", "var"],
-            ["Y"],
+            ["X" if inplace else "Y"],
             order=order,
             is_test=True,
             epsilon=epsilon,
@@ -148,14 +151,16 @@ class TestSpatialBN(hu.HypothesisTestCase):
            order=st.sampled_from(["NCHW", "NHWC"]),
            epsilon=st.floats(1e-5, 1e-2),
            engine=st.sampled_from(["", "CUDNN"]),
+           inplace=st.sampled_from([True, False]),
            **hu.gcs)
     def test_spatialbn_train_mode(
             self, size, input_channels, batch_size, seed, order, epsilon,
-            engine, gc, dc):
+            inplace, engine, gc, dc):
         op = core.CreateOperator(
             "SpatialBN",
             ["X", "scale", "bias", "running_mean", "running_var"],
-            ["Y", "running_mean", "running_var", "saved_mean", "saved_var"],
+            ["X" if inplace else "Y",
+             "running_mean", "running_var", "saved_mean", "saved_var"],
             order=order,
             is_test=False,
             epsilon=epsilon,
