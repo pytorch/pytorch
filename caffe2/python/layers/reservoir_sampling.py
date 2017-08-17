@@ -6,10 +6,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import core, schema
-from caffe2.python.layers.layers import (
-    LayerParameter,
-    ModelLayer,
-)
+from caffe2.python.layers.layers import ModelLayer
 
 
 class ReservoirSampling(ModelLayer):
@@ -27,67 +24,51 @@ class ReservoirSampling(ModelLayer):
         assert num_to_collect > 0
         self.num_to_collect = num_to_collect
 
-        self.reservoir = model.net.NextScopedBlob(name + "_reservoir")
-        self.num_visited_blob = model.net.NextScopedBlob(
-            name + "_num_visited")
-        self.mutex = model.net.NextScopedBlob(name + "_mutex")
-
-        self.params.append(LayerParameter(
-            parameter=self.reservoir,
-            initializer=core.CreateOperator(
-                'ConstantFill', [], self.reservoir, shape=[0]
-            ),
+        self.reservoir = self.create_param(
+            param_name='reservoir',
+            shape=[0],
+            initializer=('ConstantFill',),
             optimizer=model.NoOptim,
-        ))
-        self.params.append(LayerParameter(
-            parameter=self.num_visited_blob,
-            initializer=core.CreateOperator(
-                'ConstantFill',
-                [],
-                self.num_visited_blob,
-                shape=[],
-                value=0,
-                dtype=core.DataType.INT64,
-            ),
+        )
+        self.num_visited_blob = self.create_param(
+            param_name='num_visited',
+            shape=[],
+            initializer=('ConstantFill', {
+                'value': 0,
+                'dtype': core.DataType.INT64,
+            }),
             optimizer=model.NoOptim,
-        ))
-        self.params.append(
-            LayerParameter(
-                parameter=self.mutex,
-                initializer=core.CreateOperator("CreateMutex", [], self.mutex),
-                optimizer=model.NoOptim,
-            ),
+        )
+        self.mutex = self.create_param(
+            param_name='mutex',
+            shape=None,
+            initializer=('CreateMutex',),
+            optimizer=model.NoOptim,
         )
 
         self.extra_input_blobs = []
         self.extra_output_blobs = []
         if 'object_id' in input_record:
+            object_to_pos = self.create_param(
+                param_name='object_to_pos',
+                initializer=('CreateMap', {
+                    'key_dtype': core.DataType.INT64,
+                    'valued_dtype': core.DataType.INT32,
+                }),
+                optimizer=model.NoOptim,
+            )
+            pos_to_object = self.create_param(
+                param_name='pos_to_object',
+                shape=[0],
+                initializer=('ConstantFill', {
+                    'value': 0,
+                    'dtype': core.DataType.INT64,
+                }),
+                optimizer=model.NoOptim,
+            )
             self.extra_input_blobs.append(input_record.object_id())
-            object_to_pos = model.net.NextScopedBlob(name + "_object_to_pos")
-            pos_to_object = model.net.NextScopedBlob(name + "_pos_to_object")
             self.extra_input_blobs.extend([object_to_pos, pos_to_object])
             self.extra_output_blobs.extend([object_to_pos, pos_to_object])
-            self.params.append(LayerParameter(
-                parameter=object_to_pos,
-                initializer=core.CreateOperator(
-                    'CreateMap', [], object_to_pos,
-                    key_dtype=core.DataType.INT64,
-                    valued_dtype=core.DataType.INT32,
-                ),
-                optimizer=model.NoOptim,
-            ))
-            self.params.append(LayerParameter(
-                parameter=pos_to_object,
-                initializer=core.CreateOperator(
-                    'ConstantFill',
-                    [],
-                    pos_to_object,
-                    shape=[0],
-                    value=0,
-                    dtype=core.DataType.INT64,
-                ),
-                optimizer=model.NoOptim,
-            ))
 
         self.output_schema = schema.Struct(
             (
