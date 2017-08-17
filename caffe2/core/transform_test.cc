@@ -161,15 +161,12 @@ TEST(TransformTest, TestTransformApply) {
   Workspace ws;
   ws.CreateBlob("in");
   NetDef netdef;
-
   AddOp(&netdef, "DummyOp1", {"in"}, {"mid1"});
   AddOp(&netdef, "DummyOp2", {"mid1"}, {"mid2"});
   AddOp(&netdef, "DummyOp1", {"mid2"}, {"mid3"});
   AddOp(&netdef, "DummyOp2", {"mid3"}, {"out"});
 
-  auto t = CreateTransform("DummySwap");
-
-  NetDef replaced_netdef = t->ApplyTo(netdef);
+  NetDef replaced_netdef = ApplyTransform("DummySwap", netdef);
 
   EXPECT_EQ(replaced_netdef.op().size(), 2);
   EXPECT_EQ(replaced_netdef.op(0).type(), "DummyOp3");
@@ -294,6 +291,133 @@ TEST(TransformTest, TestPatternMatchTypeGeneral) {
   EXPECT_EQ(replaced_netdef.op().size(), 4);
   EXPECT_EQ(replaced_netdef.op(0).type(), "DummyOp3");
   EXPECT_EQ(replaced_netdef.op(2).type(), "DummyOp3");
+}
+
+class TransformSleepFastOp final : public OperatorBase {
+ public:
+  using OperatorBase::OperatorBase;
+  bool Run(int /* unused */) override {
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    return true;
+  }
+};
+
+REGISTER_CPU_OPERATOR(TransformSleepFastOp, TransformSleepFastOp);
+
+OPERATOR_SCHEMA(TransformSleepFastOp)
+    .NumInputs(0, INT_MAX)
+    .NumOutputs(0, INT_MAX)
+    .AllowInplace({{0, 0}, {1, 1}});
+
+class TransformSleepSlowOp final : public OperatorBase {
+ public:
+  using OperatorBase::OperatorBase;
+  bool Run(int /* unused */) override {
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    return true;
+  }
+};
+
+REGISTER_CPU_OPERATOR(TransformSleepSlowOp, TransformSleepSlowOp);
+
+OPERATOR_SCHEMA(TransformSleepSlowOp)
+    .NumInputs(0, INT_MAX)
+    .NumOutputs(0, INT_MAX)
+    .AllowInplace({{0, 0}, {1, 1}});
+
+/**
+ * This dummy transform will find all operators of type old_type,
+ * and replace them with type new_type.
+ */
+class TypeSwapTransform : public Transform {
+ public:
+  // Determine the actual strings through inheriting from derived type.
+  explicit TypeSwapTransform(string old_type, string new_type)
+      : old_type(old_type), new_type(new_type) {}
+
+  // Really simple, only accept if it's a FastSleepOp, and no match so far.
+  bool PatternRule(const Graph& g, const std::vector<int>& subgraph, int idx)
+      override {
+    if (subgraph.size() == 0 && g.node(idx).op.type() == old_type) {
+      return true;
+    }
+    return false;
+  }
+  // Checks if the subgraph matched is a FastSleepOp
+  bool ValidatorRule(const Graph& g, const std::vector<int>& subgraph)
+      override {
+    if (subgraph.size() == 1) {
+      if (g.node(subgraph[0]).op.type() == old_type) {
+        return true;
+      }
+    }
+    return false;
+  }
+  // Replaces op of original type to new type.
+  bool ReplaceRule(const std::vector<int>& match, Graph* g_ptr) override {
+    CHECK(g_ptr);
+    auto& g = *g_ptr;
+    g.node(match[0]).op.set_type(new_type);
+    return true;
+  }
+
+ private:
+  string old_type;
+  string new_type;
+};
+
+class FastToSlowTransform : public TypeSwapTransform {
+ public:
+  explicit FastToSlowTransform()
+      : TypeSwapTransform("TransformSleepFastOp", "TransformSleepSlowOp") {}
+};
+
+REGISTER_TRANSFORM(FastToSlow, FastToSlowTransform);
+
+class SlowToFastTransform : public TypeSwapTransform {
+ public:
+  explicit SlowToFastTransform()
+      : TypeSwapTransform("TransformSleepSlowOp", "TransformSleepFastOp") {}
+};
+
+REGISTER_TRANSFORM(SlowToFast, SlowToFastTransform);
+
+TEST(TransformTest, TestApplyTransformIfFasterIsFaster) {
+  NetDef init_netdef;
+  auto* op = AddOp(&init_netdef, "ConstantFill", {}, {"in"});
+
+  NetDef netdef;
+  AddOp(&netdef, "DummyOp1", {"in"}, {"mid"});
+  AddOp(&netdef, "TransformSleepSlowOp", {"mid"}, {"out"});
+  netdef.add_external_input("in"); // This is important for this function.
+
+  // Make sure the transform would work normally.
+  auto transformed_net = ApplyTransform("SlowToFast", netdef);
+  EXPECT_EQ(transformed_net.op(1).type(), "TransformSleepFastOp");
+
+  // Should be still transform normally.
+  auto mystery_net =
+      ApplyTransformIfFaster("SlowToFast", netdef, init_netdef, 5, 10, 1.01);
+  EXPECT_EQ(mystery_net.op(1).type(), "TransformSleepFastOp");
+}
+
+TEST(TransformTest, TestApplyTransformIfFasterButSlower) {
+  NetDef init_netdef;
+  auto* op = AddOp(&init_netdef, "ConstantFill", {}, {"in"});
+
+  NetDef netdef;
+  AddOp(&netdef, "DummyOp1", {"in"}, {"mid"});
+  AddOp(&netdef, "TransformSleepFastOp", {"mid"}, {"out"});
+  netdef.add_external_input("in"); // This is important for this function.
+
+  // Make sure the transform would work normally.
+  auto transformed_net = ApplyTransform("FastToSlow", netdef);
+  EXPECT_EQ(transformed_net.op(1).type(), "TransformSleepSlowOp");
+
+  // Should not actually change!
+  auto mystery_net =
+      ApplyTransformIfFaster("FastToSlow", netdef, init_netdef, 5, 10, 1.01);
+  EXPECT_EQ(mystery_net.op(1).type(), "TransformSleepFastOp");
 }
 
 } // namespace

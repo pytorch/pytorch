@@ -3,6 +3,7 @@
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/net.h"
+#include "caffe2/core/timer.h"
 #include "caffe2/proto/caffe2.pb.h"
 
 namespace caffe2 {
@@ -178,8 +179,81 @@ NetDef Transform::ApplyTo(const NetDef& orig_net) {
   return g.GetNetDef();
 }
 
+// Create a Transform object
 unique_ptr<Transform> CreateTransform(string key) {
-  return TransformRegistry()->Create(key);
+  auto t = TransformRegistry()->Create(key);
+  CAFFE_ENFORCE(t != nullptr, "Transform not found in registry: ", key);
+  return t;
+}
+
+// Create a Transform object from registry,
+// and immediately apply it to a Netdef.
+NetDef ApplyTransform(const string& key, const NetDef& netdef) {
+  auto t = CreateTransform(key);
+  return t->ApplyTo(netdef);
+}
+
+double average_net_run_duration(
+    const NetDef& netdef,
+    const NetDef& init_netdef,
+    const int warmup_runs,
+    const int main_runs) {
+  Workspace ws;
+  if (init_netdef.op_size() > 0) {
+    std::unique_ptr<NetBase> init_net(CreateNet(init_netdef, &ws));
+    CHECK(init_net);
+    CAFFE_ENFORCE(init_net->Run(), "Init run has failed!");
+  } else {
+    // If a proper init_net is not provided, then this is the best we can do.
+    for (auto inp : netdef.external_input()) {
+      ws.CreateBlob(inp);
+    }
+  }
+  std::unique_ptr<NetBase> net(CreateNet(netdef, &ws));
+  CHECK(net);
+  CAFFE_ENFORCE(
+      warmup_runs >= 0,
+      "Number of warm up runs should be non negative, provided ",
+      warmup_runs,
+      ".");
+
+  for (int i = 0; i < warmup_runs; i++) {
+    CAFFE_ENFORCE(net->Run(), "Warmup run ", i, " has failed.");
+  }
+
+  CAFFE_ENFORCE(
+      main_runs > 0,
+      "Number of main runs should be positive, provided ",
+      main_runs,
+      ".");
+  Timer timer;
+  for (int i = 0; i < main_runs; i++) {
+    CAFFE_ENFORCE(net->Run(), "Main run ", i, " has failed.");
+  }
+  return timer.MilliSeconds();
+}
+
+// Create a Transform object from registry, apply it to a NetDef.
+// Will only return the transformed net if it is faster than the old net.
+// This will run the init net first, will run the two nets warmup_runs times.
+// Then, we will take the average time of main_runs runs, and only keep the
+// transformed net if it is faster by a factor of improvement_threshold.
+NetDef ApplyTransformIfFaster(
+    const string& key,
+    const NetDef& netdef,
+    const NetDef& init_netdef,
+    const int warmup_runs,
+    const int main_runs,
+    const double improvement_threshold) {
+  NetDef transformed_netdef = ApplyTransform(key, netdef);
+  double original_net_time =
+      average_net_run_duration(netdef, init_netdef, warmup_runs, main_runs);
+  double new_net_time = average_net_run_duration(
+      transformed_netdef, init_netdef, warmup_runs, main_runs);
+  if (original_net_time > improvement_threshold * new_net_time) {
+    return transformed_netdef;
+  }
+  return netdef;
 }
 
 } // namespace Caffe2
