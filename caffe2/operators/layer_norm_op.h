@@ -54,7 +54,10 @@ class LayerNormGradientOp : public Operator<Context> {
   float epsilon_;
 
   Tensor<Context> scratch_;
+  Tensor<Context> gscratch_;
   Tensor<Context> seg_indices_;
+  Tensor<Context> dstdev_;
+  Tensor<Context> dmean_;
 };
 
 } // namespace caffe2

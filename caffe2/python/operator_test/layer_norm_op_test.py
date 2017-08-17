@@ -12,7 +12,7 @@ import numpy as np
 
 
 class TestLayerNormOp(hu.HypothesisTestCase):
-    @given(X=hu.tensors(n=1), **hu.gcs_cpu_only)
+    @given(X=hu.tensors(n=1), **hu.gcs)
     def test_layer_norm_grad_op(self, X, gc, dc):
         X = X[0]
         if len(X.shape) == 1:
@@ -42,7 +42,7 @@ class TestLayerNormOp(hu.HypothesisTestCase):
             return [norm, mean, stdev]
 
         norm, mean, stdev = layer_norm_ref(X)
-        gout = np.zeros(X.shape, dtype=np.float32)
+        gout = norm
 
         def layer_norm_grad_ref(gout_full, norm, mean_full, stdev_full, X_full):
             left = reduce(mul, X_full.shape[:axis], 1)
@@ -67,6 +67,7 @@ class TestLayerNormOp(hu.HypothesisTestCase):
             # final outputs
             dx = dx_end + dx_stdev + dxmean
             dx = dx.reshape(X_full.shape)
+
             return [dx]
 
         self.assertReferenceChecks(
@@ -82,7 +83,7 @@ class TestLayerNormOp(hu.HypothesisTestCase):
             outputs_to_check=[0],
         )
 
-    @given(X=hu.tensors(n=1), **hu.gcs_cpu_only)
+    @given(X=hu.tensors(n=1), **hu.gcs)
     def test_layer_norm_op(self, X, gc, dc):
         X = X[0]
         if len(X.shape) == 1:
