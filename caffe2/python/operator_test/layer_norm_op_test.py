@@ -3,13 +3,14 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import core
+from caffe2.python import brew, core, workspace
 from functools import reduce
 from hypothesis import given
 from operator import mul
 import caffe2.python.hypothesis_test_util as hu
 import numpy as np
 
+from caffe2.python.model_helper import ModelHelper
 
 class TestLayerNormOp(hu.HypothesisTestCase):
     @given(X=hu.tensors(n=1), **hu.gcs)
@@ -124,3 +125,25 @@ class TestLayerNormOp(hu.HypothesisTestCase):
             inputs=[X],
             outputs_to_check=[0, 1, 2],
         )
+
+    @given(X=hu.tensors(n=1), **hu.gcs)
+    def test_layer_norm_brew_wrapper(self, X, gc, dc):
+        X = X[0]
+        if len(X.shape) == 1:
+            X = np.expand_dims(X, axis=0)
+        axis = np.random.randint(0, len(X.shape))
+        epsilon = 1e-4
+
+        workspace.FeedBlob('X', X)
+
+        model = ModelHelper(name='test_layer_norm_brew_wrapper')
+        brew.layer_norm(
+            model,
+            'X',
+            'Y',
+            axis=axis,
+            epsilon=epsilon,
+        )
+
+        workspace.RunNetOnce(model.param_init_net)
+        workspace.RunNetOnce(model.net)
