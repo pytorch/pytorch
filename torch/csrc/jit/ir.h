@@ -517,18 +517,6 @@ protected:
 };
 #define THE_CTOR(Name) \
   Name(Graph * g) : NodeWithKind(g) {}
-#define THE_CTORP(Name) \
-  Name(Graph * g) : Primitive(g) {}
-// helper to define simple primitive Ops.
-template<typename Self, NodeKind K>
-struct Primitive : public NodeWithKind<Self, K> {
-  Primitive(Graph * g) : NodeWithKind<Self,K>(g) {}
-  void init() {}
-  void init(ArrayRef<Node*> inputs) {
-    for(auto i : inputs)
-      this->addInput(i);
-  }
-};
 
 
 struct Graph {
@@ -750,7 +738,7 @@ inline void Node::destroy() {
     cout << "Select of" << value->base() << "\n";
   IR_ELSEIF(PythonOp)
     cout << value->pyobj << "\n";
-  IR_ELSEIF(Add)
+  IR_ELSEIF2(Add)
     cout << "Add" << \n";
   IR_ELSE() // optional
     cout << "something else\n";
@@ -845,15 +833,6 @@ struct Select : public NodeWithKind<Select,kSelect> {
 private:
   size_t offset_;
 };
-
-// NB: non-nullary constructors don't get forwarded to the
-// parents, so you have to spell out the constructors you want explicitly.
-
-struct Add : public Primitive<Add,kAdd> { THE_CTORP(Add) };
-struct Mul : public Primitive<Mul,kMul> {THE_CTORP(Mul)};
-struct Negate : public Primitive<Negate,kNegate> {THE_CTORP(Negate)};
-struct Sigmoid : public Primitive<Sigmoid,kSigmoid> {THE_CTORP(Sigmoid)};
-struct Tanh : public Primitive<Tanh,kTanh> {THE_CTORP(Tanh)};
 
 struct Chunk : public NodeWithKind<Chunk, kChunk> {
   THE_CTOR(Chunk)

@@ -52,22 +52,22 @@ std::string ExportGraph(std::unique_ptr<Graph>& g) {
     };
     // See https://fb.quip.com/TbPaAzijnd3e
     // TODO: Delete these
-    IR_IF(node, Add)
+    IR_IF2(node, Add)
       toffee::NodeProto* p_n = generic_node();
       p_n->set_op_type("Add");
-    IR_ELSEIF(Mul)
+    IR_ELSEIF2(Mul)
       toffee::NodeProto* p_n = generic_node();
       p_n->set_op_type("Mul");
-    IR_ELSEIF(Negate)
+    IR_ELSEIF2(Negate)
       toffee::NodeProto* p_n = generic_node();
       p_n->set_op_type("Scale");
       toffee::AttributeProto* attr = p_n->add_attribute();
       attr->set_name("scale");
       attr->set_f(-1);
-    IR_ELSEIF(Sigmoid)
+    IR_ELSEIF2(Sigmoid)
       toffee::NodeProto* p_n = generic_node();
       p_n->set_op_type("Sigmoid");
-    IR_ELSEIF(Tanh)
+    IR_ELSEIF2(Tanh)
       toffee::NodeProto* p_n = generic_node();
       p_n->set_op_type("TanH");
     IR_ELSEIF(Constant)
