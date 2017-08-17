@@ -64,8 +64,12 @@ struct GraphFuser {
   // insert a producer node into a consuming fusion group.
   // DOES NOT WORK if n is a consumer of an output of the fusion group
   // returns the node _inside_ the group that represents the node
-  Node * mergeNodeIntoGroup(FusionGroup * group, Node * n) {
-    auto & subgraph = group->subgraph();
+  Graph & getSubgraph(Node * n) {
+    JIT_ASSERT(n->kind() == kFusionGroup);
+    return *n->g(kSubgraph);
+  }
+  Node * mergeNodeIntoGroup(Node* group, Node * n) {
+    auto & subgraph = getSubgraph(group);
     auto & inputs = group->inputs();
     // map from nodes in the surrounding graph to parameters in the fusion
     // group's subgraph that correspond to them
@@ -104,14 +108,14 @@ struct GraphFuser {
 
   // turn consumer node n into a fusion group with just n inside
   // to prepare for fusion and replace uses of n with the new group
-  FusionGroup * createSingletonFusionGroup(Node * n) {
-    auto group = graph->createOld<FusionGroup>();
+  Node * createSingletonFusionGroup(Node * n) {
+    auto group = graph->createFusionGroup();
     // propogate position information for the new node so we can always
     // have a valid mapping
     topological_index[group] = topological_index[n];
     group->insertBefore(n);
     Node * mergedNode = mergeNodeIntoGroup(group,n);
-    group->subgraph().registerOutput(mergedNode);
+    getSubgraph(group).registerOutput(mergedNode);
     auto sel = graph->createOld<Select>(group,0);
     sel->setType(n->typeOption());
     sel->insertAfter(group);
@@ -124,10 +128,9 @@ struct GraphFuser {
     topological_index[n] = topological_index[after];
   }
 
-  FusionGroup * fuse(Node * consumer, Node * producer) {
-    auto group = consumer->cast<FusionGroup>();
-
-    if(!group) {
+  Node * fuse(Node * consumer, Node * producer) {
+    auto group = consumer;
+    if(group->kind() != kFusionGroup) {
       group = createSingletonFusionGroup(consumer);
     }
     Node * merged = mergeNodeIntoGroup(group, producer);
@@ -136,7 +139,7 @@ struct GraphFuser {
     // if these exist, re-route them to the version of producer
     // created in FusionGroup
     if(producer->uses().size() != 0) {
-      size_t offset = group->subgraph().registerOutput(merged);
+      size_t offset = getSubgraph(group).registerOutput(merged);
       Node * new_producer = graph->createOld<Select>(group,offset);
       new_producer->setType(producer->typeOption());
       insertAfter(new_producer, group);

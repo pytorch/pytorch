@@ -492,7 +492,9 @@ protected:
   virtual Node * allocNewInstance(Graph * g) {
     return new Node(g,kind());
   }
-  virtual void cloneFrom(Node * s) {}
+  virtual void cloneFrom(Node * s) {
+    copyAttributes(*s);
+  }
 };
 
 /******************* Nodes required inside a Graph ****************************/
@@ -621,6 +623,17 @@ public:
     auto n = create(kChunk,{input});
     n->i_(kNumChunks,numChunks);
     n->i_(kDim, dim);
+    return n;
+  }
+  Node * createConstant(const at::Tensor& ref) {
+    AutoGPU guard(ref.type().isCuda() ? ref.get_device() : -1);
+    auto n = create(kConstant);
+    n->t_(kValue,ref.clone());
+    return n;
+  }
+  Node * createFusionGroup() {
+    auto n = create(kFusionGroup);
+    n->g_(kSubgraph,std::make_shared<Graph>());
     return n;
   }
 
@@ -788,6 +801,7 @@ struct PythonOp : public NodeWithKind<PythonOp,kPythonOp> {
     this->is_legacy = is_legacy;
   }
   virtual void cloneFrom(Node * other_) override {
+    Node::cloneFrom(other_);
     auto other = other_->cast<PythonOp>();
     this->cconv = other->cconv;
     this->is_legacy = other->is_legacy;
@@ -809,11 +823,6 @@ struct CppOp : public NodeWithKind<CppOp,kCppOp> {
   void init(std::shared_ptr<torch::autograd::Function> fn) {
     this->fn = std::move(fn);
   }
-};
-
-struct Eval : public NodeWithKind<Eval,kEval> {
-  THE_CTOR(Eval)
-  void init() {};
 };
 
 // Select nodes are used to handle multiple returns for the ops that actually return
@@ -838,39 +847,12 @@ struct Select : public NodeWithKind<Select,kSelect> {
     return offset_;
   }
   virtual void cloneFrom(Node* other_) override {
+    Node::cloneFrom(other_);
     auto other = other_->cast<Select>();
     this->offset_ = other->offset_;
   }
 private:
   size_t offset_;
-};
-
-// A tensor constant
-// TODO: constant compression
-struct Constant : public NodeWithKind<Constant, kConstant> {
-  THE_CTOR(Constant)
-  void init(const at::Tensor& ref) {
-    AutoGPU guard(ref.type().isCuda() ? ref.get_device() : -1);
-    value = ref.clone();
-  }
-
-  at::Tensor value;
-};
-
-struct FusionGroup : public NodeWithKind<FusionGroup,kFusionGroup> {
-  THE_CTOR(FusionGroup)
-  void init() {
-    subgraph_ = std::make_shared<Graph>();
-  }
-  virtual void cloneFrom(Node * other_) {
-    auto other = other_->cast<FusionGroup>();
-    subgraph_ = other->subgraph_;
-  }
-  Graph & subgraph() {
-    return *subgraph_;
-  }
-private:
-  std::shared_ptr<Graph> subgraph_;
 };
 
 void LintGraph(std::unique_ptr<Graph>& graph);

@@ -24,7 +24,10 @@ _(Constant) \
 _(FusionGroup) \
 _(Chunk) \
 _(NumChunks) \
-_(Dim)
+_(Dim) \
+_(Offset) \
+_(Value) \
+_(Subgraph)
 
 enum BuiltinSymbol {
   #define DEFINE_SYMBOL(s) \

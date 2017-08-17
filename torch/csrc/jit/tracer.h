@@ -168,7 +168,7 @@ inline Node* getValueTrace(const std::shared_ptr<TracingState>& state, const std
 
   if (mustExist) throw std::runtime_error("untraced variable");
 
-  Node *constant = state->graph->appendNode(state->graph->createOld<Constant>(var->data));
+  Node *constant = state->graph->appendNode(state->graph->createConstant(var->data));
   setValueTrace(state, var, constant);
   return constant;
 }

@@ -70,7 +70,7 @@ std::string ExportGraph(std::unique_ptr<Graph>& g) {
     IR_ELSEIF2(Tanh)
       toffee::NodeProto* p_n = generic_node();
       p_n->set_op_type("TanH");
-    IR_ELSEIF(Constant)
+    IR_ELSEIF2(Constant)
       throw std::runtime_error("Constant not supported yet");
     IR_ELSEIF2(Return)
       JIT_ASSERT(0);
@@ -78,7 +78,7 @@ std::string ExportGraph(std::unique_ptr<Graph>& g) {
       JIT_ASSERT(0);
     IR_ELSEIF2(Param)
       JIT_ASSERT(0);
-    IR_ELSEIF(FusionGroup)
+    IR_ELSEIF2(FusionGroup)
       throw std::runtime_error("FusionGroup not supported.  Try exporting before fusing");
     IR_ELSEIF(CppOp)
       if (auto fn = std::dynamic_pointer_cast<autograd::HasPrimSpec>(value->fn)) {
