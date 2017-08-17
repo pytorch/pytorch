@@ -26,8 +26,8 @@ std::string getPythonName(const PyObject* obj, bool is_legacy) {
   }
 }
 std::ostream& operator<<(std::ostream & out, Node & n) {
-  if(auto s = n.cast<Select>())
-    out << "%" << s->base()->unique() << "." << s->offset();
+  if(n.kind() == kSelect)
+    out << "%" << n.base()->unique() << "." << n.offset();
   else
     out << "%" << n.unique();
   return out;
@@ -115,7 +115,7 @@ std::ostream& operator<<(std::ostream & out, Graph & g) {
   std::vector<Node*> groups;
   size_t prev_stage = 0;
   for(auto n : g.nodes()) {
-    if(!n->cast<Select>()) { //improve readibility by printing selects inline
+    if(n->kind() != kSelect) { //improve readibility by printing selects inline
       if (n->stage() != prev_stage) {
         out << "  ---------------- stage " << n->stage() << " ----------------\n";
         prev_stage = n->stage();
@@ -217,7 +217,7 @@ void Node::lint() {
       // - uses = [Select 0, Select 1, Select 2, ...]
       if (type_ && type_->kind() == TypeKind::MultiType) {
         JIT_ASSERT(use.offset == 0);
-        IR_IF(use.user, Select)
+        IR_IF2(use.user, Select)
           JIT_ASSERT(value->offset() == i);
         IR_ELSE()
           JIT_ASSERT(0);
@@ -239,7 +239,7 @@ void Node::lint() {
     JIT_ASSERT(uses_.size() == 0);
   IR_ELSEIF2(Param)
     JIT_ASSERT(inputs_.size() == 0);
-  IR_ELSEIF(Select)
+  IR_ELSEIF2(Select)
     JIT_ASSERT(inputs_.size() == 1);
   IR_ELSEIF(PythonOp)
     std::size_t n_scalars = 0, n_tensors = 0;

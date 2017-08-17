@@ -126,7 +126,7 @@ void EvalExitHook::run(variable_list& vars) {
   int num_vars = vars.size();
   for (int i = 0; i < num_vars; ++i) {
     auto& var = vars[i];
-    auto select = graph->appendNode(graph->createOld<Select>(common_state->eval_node, i));
+    auto select = graph->appendNode(graph->createSelect(common_state->eval_node, i));
     tracer::setValueTrace(tracing_state, var, select);
   }
   EvalEnterHook::registerHook(tracing_state, vars, common_state->next_common_state);

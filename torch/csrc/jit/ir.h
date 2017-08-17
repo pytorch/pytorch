@@ -261,6 +261,11 @@ public:
   Node * base() {
     return inputs_.at(0);
   }
+  // select is used so frequently enought it is reasonable to have a helper
+  // to access the offset.
+  size_t offset() {
+    return size_t(i(kOffset));
+  }
   const use_list & uses() {
     return uses_;
   }
@@ -499,38 +504,9 @@ protected:
 
 /******************* Nodes required inside a Graph ****************************/
 
-// NodeWithKind handles the mapping between concrete node type and
-// its NodeKind tag.
-//
-// It also sets up the clone infrastructure
-// using CRTP so that we can alloc new clones and dispatch to custom clone code
-// without significant boilerplate
-
-// DefaultType constructs the default Type for this node, but
-// can be changed with setType()
-
-template<typename Self, NodeKind K>
-struct NodeWithKind : public Node {
-  friend struct Graph; /* so it can access allocClone() */
-  static const NodeKind Kind = K;
-  NodeWithKind(Graph * g)
-  : Node(g,K) {
-  }
-protected:
-  // allocate a new Node with the same type as this node, and
-  virtual Node * allocNewInstance(Graph * g) override {
-    return new Self(g);
-  }
-};
-#define THE_CTOR(Name) \
-  Name(Graph * g) : NodeWithKind(g) {}
-
-
 struct Graph {
 TH_DISALLOW_COPY_AND_ASSIGN(Graph);
 friend struct Node;
-template<typename Self, NodeKind K>
-friend struct NodeWithKind;
 private:
   param_list inputs_;
 
@@ -597,18 +573,6 @@ public:
     return outputs().size() - 1;
   }
 
-  // like make_shared, forward arguments to node initializers
-  // while also correctly allocating the node to live in this graph
-  // e.g. g.createOld<Select>(another,0);
-  template<typename T, typename... Args >
-  T * createOld(Args&&... args) {
-    // default construction of all nodes
-    T* r = new T(this);
-    // common initialization for all nodes when they live in this graph
-    // custom per-node initialization
-    r->init(std::forward<Args>(args)...);
-    return r;
-  }
   Node * create(NodeKind kind) {
     return new Node(this,kind);
   }
@@ -619,6 +583,21 @@ public:
       n->addInput(i);
     return n;
   }
+
+  // Select nodes are used to handle multiple returns for the ops that actually return
+  // multiple values like PythonOp
+  // By convention, there is a unique select node for each output of an op
+  // so you can iterate over uses of a multi-return op to get all the select nodes.
+  // in this case
+  // number_of_outputs = op.uses().size()
+  // this will change if Tuples ever become first class.
+
+  Node * createSelect(Node * n, int64_t offset) {
+    auto r = create(kSelect,{n});
+    r->i_(kOffset,offset);
+    return r;
+  }
+
   Node * createChunk(Node * input, int64_t numChunks, int64_t dim) {
     auto n = create(kChunk,{input});
     n->i_(kNumChunks,numChunks);
@@ -636,7 +615,8 @@ public:
     n->g_(kSubgraph,std::make_shared<Graph>());
     return n;
   }
-
+  Node * createPythonOp(THPObjectPtr&& pyobj, const std::string & cconv, bool is_legacy, pyobj_list&& scalar_args);
+  Node * createCppOp(const std::shared_ptr<torch::autograd::Function> & fn);
   // clone n, making a new node in _this_ graph.
   // use node_map to translate inputs of n to inputs of the cloned node
   Node * createClone(Node * n, std::function<Node*(Node*)> node_map) {
@@ -776,8 +756,20 @@ std::ostream& operator<<(std::ostream & out, const Type & t);
 /************* All nodes not required to be defined before Graph **************/
 
  // execute a Python function, used for Ops we can't optimize but that we want to optimize around
-struct PythonOp : public NodeWithKind<PythonOp,kPythonOp> {
-  THE_CTOR(PythonOp)
+struct PythonOp : public Node {
+  static const NodeKind Kind = kPythonOp;
+  PythonOp(Graph * graph)
+  : Node(graph,kPythonOp) {}
+  PythonOp* init(THPObjectPtr&& pyobj, const std::string & cconv, bool is_legacy, pyobj_list&& scalar_args) {
+    this->pyobj = std::move(pyobj);
+    this->scalar_args = std::move(scalar_args);
+    this->cconv = cconv;
+    this->is_legacy = is_legacy;
+    return this;
+  }
+  virtual Node * allocNewInstance(Graph * g) override {
+    return new PythonOp(g);
+  }
   //TODO: make this non-autograd specific
   //remove is_legacy, avoid THPObjectPtr to avoid big PyTorch dependency
 
@@ -794,12 +786,6 @@ struct PythonOp : public NodeWithKind<PythonOp,kPythonOp> {
   // the function in this order; see cconv for the correct order.
   std::vector<THPObjectPtr> scalar_args;
   std::string name();
-  void init(THPObjectPtr&& pyobj, const std::string & cconv, bool is_legacy, pyobj_list&& scalar_args) {
-    this->pyobj = std::move(pyobj);
-    this->scalar_args = std::move(scalar_args);
-    this->cconv = cconv;
-    this->is_legacy = is_legacy;
-  }
   virtual void cloneFrom(Node * other_) override {
     Node::cloneFrom(other_);
     auto other = other_->cast<PythonOp>();
@@ -813,47 +799,31 @@ struct PythonOp : public NodeWithKind<PythonOp,kPythonOp> {
     }
   }
 };
+inline Node * Graph::createPythonOp(THPObjectPtr&& pyobj, const std::string & cconv, bool is_legacy, pyobj_list&& scalar_args) {
+  auto op = new PythonOp(this);
+  return op->init(std::move(pyobj),cconv,is_legacy,std::move(scalar_args));
+}
 
 // A Cpp operator is an operator which dispatches directly to an autograd function.
 // TODO: These are not executable without reentrant engine.
-struct CppOp : public NodeWithKind<CppOp,kCppOp> {
-  THE_CTOR(CppOp)
+struct CppOp : public Node {
+  static const NodeKind Kind = kCppOp;
+  CppOp(Graph * g)
+  : Node(g,kCppOp) {}
   std::shared_ptr<torch::autograd::Function> fn;
   std::string name();
-  void init(std::shared_ptr<torch::autograd::Function> fn) {
+  CppOp* init(std::shared_ptr<torch::autograd::Function> fn) {
     this->fn = std::move(fn);
+    return this;
+  }
+  virtual Node * allocNewInstance(Graph * g) override {
+    return new CppOp(g);
   }
 };
-
-// Select nodes are used to handle multiple returns for the ops that actually return
-// multiple values like PythonOp
-// By convention, there is a unique select node for each output of an op
-// so you can iterate over uses of a multi-return op to get all the select nodes.
-// in this case
-// number_of_outputs = op.uses().size()
-// this will change if Tuples ever become first class.
-struct Select : public NodeWithKind<Select,kSelect> {
-  THE_CTOR(Select)
-  void init(Node * node, size_t offset) {
-    addInput(node);
-    this->offset_ = offset;
-  }
-  // which multi-return op is it?
-  Node * base() {
-    return inputs()[0];
-  }
-  // which output is it?
-  size_t offset() {
-    return offset_;
-  }
-  virtual void cloneFrom(Node* other_) override {
-    Node::cloneFrom(other_);
-    auto other = other_->cast<Select>();
-    this->offset_ = other->offset_;
-  }
-private:
-  size_t offset_;
-};
+inline Node * Graph::createCppOp(const std::shared_ptr<torch::autograd::Function> & fn) {
+  auto op = new CppOp(this);
+  return op->init(fn);
+}
 
 void LintGraph(std::unique_ptr<Graph>& graph);
 

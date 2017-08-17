@@ -284,7 +284,7 @@ std::unique_ptr<AutogradClosure> createAutogradClosure(Graph *graph) {
       } else {
         fn = std::make_shared<PythonCall>(value);
       }
-    IR_ELSEIF(Select)
+    IR_ELSEIF2(Select)
       // No-op. Selects are handled by their inputs.
       return;
     IR_ELSEIF_TRIVIAL(Add, Add)
