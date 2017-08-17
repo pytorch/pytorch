@@ -44,6 +44,10 @@ struct HasPrimSpec {
   virtual void primspec(PrimSpecContext* ctx, jit::node_list inputs, jit::node_list outputs) = 0;
 #endif // WITH_TOFFEE
 
+// The reason we have this macro is because the class definition in headers need
+// to declare primspec if they are overriding them... but this needs to be
+// macro-controlled (don't define it if WITH_TOFFEE is not defined).  To make
+// this work we use a macro; as an added bonus it's less typing.
 #ifdef WITH_TOFFEE
 #define HAS_PRIMSPEC virtual void primspec(PrimSpecContext* ctx, jit::node_list inputs, jit::node_list outputs) override
 #else // WITH_TOFFEE
