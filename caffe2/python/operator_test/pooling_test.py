@@ -25,19 +25,20 @@ class TestPooling(hu.HypothesisTestCase):
            input_channels=st.integers(1, 3),
            batch_size=st.integers(1, 3),
            order=st.sampled_from(["NCHW", "NHWC"]),
-           method=st.sampled_from(["MaxPool", "AveragePool", "LpPool"]),
+           op_type=st.sampled_from(["MaxPool", "AveragePool", "LpPool",
+                                   "MaxPool2D", "AveragePool2D"]),
            **hu.gcs)
     def test_pooling_separate_stride_pad(self, stride_h, stride_w,
                                          pad_t, pad_l, pad_b,
                                          pad_r, kernel, size,
                                          input_channels,
                                          batch_size, order,
-                                         method,
+                                         op_type,
                                          gc, dc):
         assume(np.max([pad_t, pad_l, pad_b, pad_r]) < kernel)
 
         op = core.CreateOperator(
-            method,
+            op_type,
             ["X"],
             ["Y"],
             stride_h=stride_h,
@@ -55,7 +56,7 @@ class TestPooling(hu.HypothesisTestCase):
         if order == "NCHW":
             X = X.transpose((0, 3, 1, 2))
         self.assertDeviceChecks(dc, op, [X], [0])
-        if method not in ('MaxPool'):
+        if 'MaxPool' not in op_type:
             self.assertGradientChecks(gc, op, [X], 0, [0])
 
     # This test is to check if CUDNN works for bigger batch size or not
@@ -85,13 +86,14 @@ class TestPooling(hu.HypothesisTestCase):
            input_channels=st.integers(1, 3),
            batch_size=st.integers(1, 3),
            order=st.sampled_from(["NCHW", "NHWC"]),
-           method=st.sampled_from(["MaxPool", "AveragePool"]),
+           op_type=st.sampled_from(["MaxPool", "AveragePool",
+                                    "MaxPool1D", "AveragePool1D"]),
            **hu.gcs)
     def test_pooling_1d(self, stride, pad, kernel, size, input_channels,
-                        batch_size, order, method, gc, dc):
+                        batch_size, order, op_type, gc, dc):
         assume(pad < kernel)
         op = core.CreateOperator(
-            method,
+            op_type,
             ["X"],
             ["Y"],
             strides=[stride],
@@ -106,7 +108,7 @@ class TestPooling(hu.HypothesisTestCase):
             X = X.transpose((0, 2, 1))
 
         self.assertDeviceChecks(dc, op, [X], [0])
-        if method not in ('MaxPool'):
+        if 'MaxPool' not in op_type:
             self.assertGradientChecks(gc, op, [X], 0, [0])
 
     @given(stride=st.integers(1, 3),
@@ -116,14 +118,15 @@ class TestPooling(hu.HypothesisTestCase):
            input_channels=st.integers(1, 3),
            batch_size=st.integers(1, 3),
            order=st.sampled_from(["NCHW", "NHWC"]),
-           method=st.sampled_from(["MaxPool", "AveragePool"]),
+           op_type=st.sampled_from(["MaxPool", "AveragePool",
+                                    "MaxPool3D", "AveragePool3D"]),
            engine=st.sampled_from(["", "CUDNN"]),
            **hu.gcs)
     def test_pooling_3d(self, stride, pad, kernel, size, input_channels,
-                        batch_size, order, method, engine, gc, dc):
+                        batch_size, order, op_type, engine, gc, dc):
         assume(pad < kernel)
         op = core.CreateOperator(
-            method,
+            op_type,
             ["X"],
             ["Y"],
             strides=[stride] * 3,
@@ -138,7 +141,7 @@ class TestPooling(hu.HypothesisTestCase):
             X = X.transpose((0, 4, 1, 2, 3))
 
         self.assertDeviceChecks(dc, op, [X], [0])
-        if method not in ('MaxPool'):
+        if 'MaxPool' not in op_type:
             self.assertGradientChecks(gc, op, [X], 0, [0])
 
     @unittest.skipIf(not workspace.has_gpu_support, "No GPU support")
@@ -172,12 +175,13 @@ class TestPooling(hu.HypothesisTestCase):
     @given(sz=st.integers(1, 20),
            batch_size=st.integers(1, 4),
            engine=st.sampled_from(["", "CUDNN"]),
+           op_type=st.sampled_from(["AveragePool", "AveragePool2D"]),
            **hu.gcs)
     @settings(max_examples=3, timeout=10)
-    def test_global_avg_pool_nchw(self, sz, batch_size, engine, gc, dc):
+    def test_global_avg_pool_nchw(self, op_type, sz, batch_size, engine, gc, dc):
         ''' Special test to stress the fast path of NCHW average pool '''
         op = core.CreateOperator(
-            "AveragePool",
+            op_type,
             ["X"],
             ["Y"],
             stride=1,
@@ -199,15 +203,16 @@ class TestPooling(hu.HypothesisTestCase):
            input_channels=st.integers(1, 3),
            batch_size=st.integers(1, 3),
            order=st.sampled_from(["NCHW", "NHWC"]),
-           method=st.sampled_from(["MaxPool", "AveragePool", "LpPool"]),
+           op_type=st.sampled_from(["MaxPool", "AveragePool", "LpPool",
+                                   "MaxPool2D", "AveragePool2D"]),
            engine=st.sampled_from(["", "CUDNN"]),
            **hu.gcs)
     def test_pooling(self, stride, pad, kernel, size,
                      input_channels, batch_size,
-                     order, method, engine, gc, dc):
+                     order, op_type, engine, gc, dc):
         assume(pad < kernel)
         op = core.CreateOperator(
-            method,
+            op_type,
             ["X"],
             ["Y"],
             stride=stride,
@@ -222,20 +227,20 @@ class TestPooling(hu.HypothesisTestCase):
             X = X.transpose((0, 3, 1, 2))
 
         self.assertDeviceChecks(dc, op, [X], [0])
-        if method not in ('MaxPool'):
+        if 'MaxPool' not in op_type:
             self.assertGradientChecks(gc, op, [X], 0, [0])
 
     @given(size=st.integers(7, 9),
            input_channels=st.integers(1, 3),
            batch_size=st.integers(1, 3),
            order=st.sampled_from(["NCHW", "NHWC"]),
-           method=st.sampled_from(["MaxPool", "AveragePool", "LpPool"]),
+           op_type=st.sampled_from(["MaxPool", "AveragePool", "LpPool"]),
            engine=st.sampled_from(["", "CUDNN"]),
            **hu.gcs)
     def test_global_pooling(self, size, input_channels, batch_size,
-                            order, method, engine, gc, dc):
+                            order, op_type, engine, gc, dc):
         op = core.CreateOperator(
-            method,
+            op_type,
             ["X"],
             ["Y"],
             order=order,
@@ -248,7 +253,7 @@ class TestPooling(hu.HypothesisTestCase):
             X = X.transpose((0, 3, 1, 2))
 
         self.assertDeviceChecks(dc, op, [X], [0])
-        if method not in ('MaxPool'):
+        if 'MaxPool' not in op_type:
             self.assertGradientChecks(gc, op, [X], 0, [0])
 
 

@@ -32,7 +32,8 @@ def _cudnn_supports(
 
 class TestConvolution(hu.HypothesisTestCase):
     # CUDNN does NOT support different padding values and we skip it
-    @given(stride_h=st.integers(1, 3),
+    @given(op_type=st.sampled_from(["Conv", "Conv2D"]),
+           stride_h=st.integers(1, 3),
            stride_w=st.integers(1, 3),
            pad_t=st.integers(0, 3),
            pad_l=st.integers(0, 3),
@@ -48,7 +49,8 @@ class TestConvolution(hu.HypothesisTestCase):
            shared_buffer=st.booleans(),
            use_bias=st.booleans(),
            **hu.gcs)
-    def test_convolution_separate_stride_pad_gradients(self, stride_h, stride_w,
+    def test_convolution_separate_stride_pad_gradients(self, op_type,
+                                                       stride_h, stride_w,
                                                        pad_t, pad_l, pad_b,
                                                        pad_r, kernel, size,
                                                        input_channels,
@@ -58,7 +60,7 @@ class TestConvolution(hu.HypothesisTestCase):
                                                        use_bias,
                                                        gc, dc):
         op = core.CreateOperator(
-            "Conv",
+            op_type,
             ["X", "w", "b"] if use_bias else ["X", "w"],
             ["Y"],
             stride_h=stride_h,
@@ -95,21 +97,23 @@ class TestConvolution(hu.HypothesisTestCase):
             self.assertGradientChecks(gc, op, inputs, i, [0])
 
     # CUDNN does NOT support different padding values and we skip it
-    @given(stride_h=st.integers(1, 3),
-            stride_w=st.integers(1, 3),
-            pad_t=st.integers(0, 3),
-            pad_l=st.integers(0, 3),
-            pad_b=st.integers(0, 3),
-            pad_r=st.integers(0, 3),
-            kernel=st.integers(1, 5),
-            size=st.integers(7, 10),
-            input_channels=st.integers(1, 8),
-            output_channels=st.integers(1, 8),
-            batch_size=st.integers(1, 3),
-            engine=st.sampled_from(["", "EIGEN"]),
-            use_bias=st.booleans(),
-            **hu.gcs)
-    def test_convolution_separate_stride_pad_layout(self, stride_h, stride_w,
+    @given(op_type=st.sampled_from(["Conv", "Conv2D"]),
+           stride_h=st.integers(1, 3),
+           stride_w=st.integers(1, 3),
+           pad_t=st.integers(0, 3),
+           pad_l=st.integers(0, 3),
+           pad_b=st.integers(0, 3),
+           pad_r=st.integers(0, 3),
+           kernel=st.integers(1, 5),
+           size=st.integers(7, 10),
+           input_channels=st.integers(1, 8),
+           output_channels=st.integers(1, 8),
+           batch_size=st.integers(1, 3),
+           engine=st.sampled_from(["", "EIGEN"]),
+           use_bias=st.booleans(),
+           **hu.gcs)
+    def test_convolution_separate_stride_pad_layout(self, op_type,
+                                                    stride_h, stride_w,
                                                     pad_t, pad_l, pad_b, pad_r,
                                                     kernel, size,
                                                     input_channels,
@@ -124,7 +128,7 @@ class TestConvolution(hu.HypothesisTestCase):
         outputs = {}
         for order in ["NCHW", "NHWC"]:
             op = core.CreateOperator(
-                "Conv",
+                op_type,
                 ["X", "w", "b"] if use_bias else ["X", "w"],
                 ["Y"],
                 stride_h=stride_h,
@@ -155,7 +159,8 @@ class TestConvolution(hu.HypothesisTestCase):
             atol=1e-4,
             rtol=1e-4)
 
-    @given(stride=st.integers(1, 3),
+    @given(op_type=st.sampled_from(["Conv", "Conv2D"]),
+           stride=st.integers(1, 3),
            pad=st.integers(0, 3),
            kernel=st.integers(1, 5),
            dilation=st.integers(1, 3),
@@ -167,9 +172,9 @@ class TestConvolution(hu.HypothesisTestCase):
            engine=st.sampled_from(["", "CUDNN", "MKLDNN"]),
            use_bias=st.booleans(),
            **hu.gcs)
-    def test_convolution_gradients(self, stride, pad, kernel, dilation, size,
-                                   input_channels, output_channels, batch_size,
-                                   order, engine, use_bias, gc, dc):
+    def test_convolution_gradients(self, op_type, stride, pad, kernel, dilation,
+                                   size, input_channels, output_channels,
+                                   batch_size, order, engine, use_bias, gc, dc):
         dkernel = dilation * (kernel - 1) + 1
 
         if gc.device_type == caffe2_pb2.CUDA and engine == 'CUDNN':
@@ -179,7 +184,7 @@ class TestConvolution(hu.HypothesisTestCase):
         assume(engine != "MKLDNN" or use_bias is True)
 
         op = core.CreateOperator(
-            "Conv",
+            op_type,
             ["X", "w", "b"] if use_bias else ["X", "w"],
             ["Y"],
             stride=stride,
@@ -214,37 +219,38 @@ class TestConvolution(hu.HypothesisTestCase):
                             batch_size, stride, size, kernel, dilation, pad,
                             use_bias, gc, dc):
         dkernel = dilation * (kernel - 1) + 1
-        op = core.CreateOperator(
-            "Conv",
-            ["X", "w", "b"] if use_bias else ["X", "w"],
-            ["Y"],
-            strides=[stride] * n,
-            kernels=[kernel] * n,
-            dilations=[dilation] * n,
-            pads=[pad] * n * 2,
-            order="NCHW",
-            engine="",
-        )
+        for op_type in ["Conv", "Conv" + str(n) + "D"]:
+            op = core.CreateOperator(
+                op_type,
+                ["X", "w", "b"] if use_bias else ["X", "w"],
+                ["Y"],
+                strides=[stride] * n,
+                kernels=[kernel] * n,
+                dilations=[dilation] * n,
+                pads=[pad] * n * 2,
+                order="NCHW",
+                engine="",
+            )
 
-        input_dims = [batch_size, input_channels]
-        input_dims.extend([size] * n)
-        filter_dims = [output_channels, input_channels]
-        filter_dims.extend([kernel] * n)
+            input_dims = [batch_size, input_channels]
+            input_dims.extend([size] * n)
+            filter_dims = [output_channels, input_channels]
+            filter_dims.extend([kernel] * n)
 
-        X = np.random.rand(*input_dims).astype(np.float32) - 0.5
-        w = np.random.rand(*filter_dims).astype(np.float32) - 0.5
-        b = np.random.rand(output_channels).astype(np.float32) - 0.5
+            X = np.random.rand(*input_dims).astype(np.float32) - 0.5
+            w = np.random.rand(*filter_dims).astype(np.float32) - 0.5
+            b = np.random.rand(output_channels).astype(np.float32) - 0.5
 
-        inputs = [X, w, b] if use_bias else [X, w]
+            inputs = [X, w, b] if use_bias else [X, w]
 
-        if size + pad + pad < dkernel or size + pad + pad < dkernel:
-            with self.assertRaises(RuntimeError):
-                self.assertDeviceChecks(dc, op, inputs, [0])
-            return
+            if size + pad + pad < dkernel or size + pad + pad < dkernel:
+                with self.assertRaises(RuntimeError):
+                    self.assertDeviceChecks(dc, op, inputs, [0])
+                return
 
-        self.assertDeviceChecks(dc, op, inputs, [0])
-        for i in range(len(inputs)):
-            self.assertGradientChecks(gc, op, inputs, i, [0])
+            self.assertDeviceChecks(dc, op, inputs, [0])
+            for i in range(len(inputs)):
+                self.assertGradientChecks(gc, op, inputs, i, [0])
 
     @given(input_channels=st.integers(1, 3),
            output_channels=st.integers(1, 2),
@@ -282,7 +288,8 @@ class TestConvolution(hu.HypothesisTestCase):
             kernel, dilation, pad, use_bias, gc, dc
         )
 
-    @given(batch_size=st.integers(1, 2),
+    @given(op_type=st.sampled_from(["Conv", "Conv3D"]),
+           batch_size=st.integers(1, 2),
            stride=st.integers(1, 2),
            size=st.integers(3, 5),
            kernel=st.integers(1, 2),
@@ -290,8 +297,8 @@ class TestConvolution(hu.HypothesisTestCase):
            pad=st.integers(0, 2),
            use_bias=st.booleans(),
            **hu.gcs)
-    def test_3d_convolution_cudnn_nchw(self, batch_size, stride, size, kernel,
-                                       dilation, pad, use_bias, gc, dc):
+    def test_3d_convolution_cudnn_nchw(self, op_type, batch_size, stride, size,
+                                       kernel, dilation, pad, use_bias, gc, dc):
         input_channels = 1
         output_channels = 1
         n = 3
@@ -299,7 +306,7 @@ class TestConvolution(hu.HypothesisTestCase):
         order = "NCHW"
 
         op = core.CreateOperator(
-            "Conv",
+            op_type,
             ["X", "w", "b"] if use_bias else ["X", "w"],
             ["Y"],
             strides=[stride] * n,
@@ -329,7 +336,8 @@ class TestConvolution(hu.HypothesisTestCase):
         for i in range(len(inputs)):
             self.assertGradientChecks(gc, op, inputs, i, [0])
 
-    @given(stride=st.integers(1, 3),
+    @given(op_type=st.sampled_from(["Conv", "Conv2D"]),
+           stride=st.integers(1, 3),
            pad=st.integers(0, 3),
            kernel=st.integers(1, 5),
            dilation=st.integers(1, 3),
@@ -339,9 +347,9 @@ class TestConvolution(hu.HypothesisTestCase):
            batch_size=st.integers(1, 3),
            use_bias=st.booleans(),
            **hu.gcs)
-    def test_convolution_layout(self, stride, pad, kernel, dilation, size,
-                                input_channels, output_channels, batch_size,
-                                use_bias, gc, dc):
+    def test_convolution_layout(self, op_type, stride, pad, kernel, dilation,
+                                size, input_channels, output_channels,
+                                batch_size, use_bias, gc, dc):
         assume(size >= dilation * (kernel - 1) + 1)
 
         X = np.random.rand(
@@ -360,7 +368,7 @@ class TestConvolution(hu.HypothesisTestCase):
 
             for engine in engine_list:
                 op = core.CreateOperator(
-                    "Conv",
+                    op_type,
                     ["X", "w", "b"] if use_bias else ["X", "w"],
                     ["Y"],
                     stride=stride,

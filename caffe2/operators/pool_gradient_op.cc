@@ -321,9 +321,39 @@ REGISTER_CPU_OPERATOR(
 OPERATOR_SCHEMA(AveragePoolGradient).NumInputs(3).NumOutputs(1);
 
 REGISTER_CPU_OPERATOR(
+    AveragePool1DGradient,
+    PoolGradientOp<float, CPUContext, AveragePool<float>>);
+OPERATOR_SCHEMA(AveragePool1DGradient).NumInputs(3).NumOutputs(1);
+
+REGISTER_CPU_OPERATOR(
+    AveragePool2DGradient,
+    PoolGradientOp<float, CPUContext, AveragePool<float>>);
+OPERATOR_SCHEMA(AveragePool2DGradient).NumInputs(3).NumOutputs(1);
+
+REGISTER_CPU_OPERATOR(
+    AveragePool3DGradient,
+    PoolGradientOp<float, CPUContext, AveragePool<float>>);
+OPERATOR_SCHEMA(AveragePool3DGradient).NumInputs(3).NumOutputs(1);
+
+REGISTER_CPU_OPERATOR(
     MaxPoolGradient,
     PoolGradientOp<float, CPUContext, MaxPool<float>>);
 OPERATOR_SCHEMA(MaxPoolGradient).NumInputs(3).NumOutputs(1);
+
+REGISTER_CPU_OPERATOR(
+    MaxPool1DGradient,
+    PoolGradientOp<float, CPUContext, MaxPool<float>>);
+OPERATOR_SCHEMA(MaxPool1DGradient).NumInputs(3).NumOutputs(1);
+
+REGISTER_CPU_OPERATOR(
+    MaxPool2DGradient,
+    PoolGradientOp<float, CPUContext, MaxPool<float>>);
+OPERATOR_SCHEMA(MaxPool2DGradient).NumInputs(3).NumOutputs(1);
+
+REGISTER_CPU_OPERATOR(
+    MaxPool3DGradient,
+    PoolGradientOp<float, CPUContext, MaxPool<float>>);
+OPERATOR_SCHEMA(MaxPool3DGradient).NumInputs(3).NumOutputs(1);
 
 class GetPoolGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
@@ -336,5 +366,11 @@ class GetPoolGradient : public GradientMakerBase {
   }
 };
 REGISTER_GRADIENT(AveragePool, GetPoolGradient);
+REGISTER_GRADIENT(AveragePool1D, GetPoolGradient);
+REGISTER_GRADIENT(AveragePool2D, GetPoolGradient);
+REGISTER_GRADIENT(AveragePool3D, GetPoolGradient);
 REGISTER_GRADIENT(MaxPool, GetPoolGradient);
+REGISTER_GRADIENT(MaxPool1D, GetPoolGradient);
+REGISTER_GRADIENT(MaxPool2D, GetPoolGradient);
+REGISTER_GRADIENT(MaxPool3D, GetPoolGradient);
 }

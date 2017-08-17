@@ -207,5 +207,8 @@ bool EigenConvOp<T>::RunOnDeviceWithOrderNHWC() {
 }
 
 REGISTER_CPU_OPERATOR_WITH_ENGINE(Conv, EIGEN, EigenConvOp<float>);
+REGISTER_CPU_OPERATOR_WITH_ENGINE(Conv1D, EIGEN, EigenConvOp<float>);
+REGISTER_CPU_OPERATOR_WITH_ENGINE(Conv2D, EIGEN, EigenConvOp<float>);
+REGISTER_CPU_OPERATOR_WITH_ENGINE(Conv3D, EIGEN, EigenConvOp<float>);
 
 } // namespace caffe2

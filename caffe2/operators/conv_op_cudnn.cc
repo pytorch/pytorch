@@ -1090,4 +1090,13 @@ bool CudnnConvGradientOp::RunOnDevice() {
 REGISTER_CUDNN_OPERATOR(Conv, CudnnConvOp);
 REGISTER_CUDNN_OPERATOR(ConvGradient, CudnnConvGradientOp);
 
+REGISTER_CUDNN_OPERATOR(Conv1D, CudnnConvOp);
+REGISTER_CUDNN_OPERATOR(Conv1DGradient, CudnnConvGradientOp);
+
+REGISTER_CUDNN_OPERATOR(Conv2D, CudnnConvOp);
+REGISTER_CUDNN_OPERATOR(Conv2DGradient, CudnnConvGradientOp);
+
+REGISTER_CUDNN_OPERATOR(Conv3D, CudnnConvOp);
+REGISTER_CUDNN_OPERATOR(Conv3DGradient, CudnnConvGradientOp);
+
 }  // namespace caffe2
