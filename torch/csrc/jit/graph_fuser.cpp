@@ -105,14 +105,14 @@ struct GraphFuser {
   // turn consumer node n into a fusion group with just n inside
   // to prepare for fusion and replace uses of n with the new group
   FusionGroup * createSingletonFusionGroup(Node * n) {
-    auto group = graph->create<FusionGroup>();
+    auto group = graph->createOld<FusionGroup>();
     // propogate position information for the new node so we can always
     // have a valid mapping
     topological_index[group] = topological_index[n];
     group->insertBefore(n);
     Node * mergedNode = mergeNodeIntoGroup(group,n);
     group->subgraph().registerOutput(mergedNode);
-    auto sel = graph->create<Select>(group,0);
+    auto sel = graph->createOld<Select>(group,0);
     sel->setType(n->typeOption());
     sel->insertAfter(group);
     n->replaceAllUsesWith(sel);
@@ -137,7 +137,7 @@ struct GraphFuser {
     // created in FusionGroup
     if(producer->uses().size() != 0) {
       size_t offset = group->subgraph().registerOutput(merged);
-      Node * new_producer = graph->create<Select>(group,offset);
+      Node * new_producer = graph->createOld<Select>(group,offset);
       new_producer->setType(producer->typeOption());
       insertAfter(new_producer, group);
       producer->replaceAllUsesWith(new_producer);
@@ -178,7 +178,7 @@ struct GraphFuser {
 
     std::vector<Chunk*> chunks;
     for(auto input : producer_for_chunk->inputs()) {
-      Chunk * c = graph->create<Chunk>(chunk->num_chunks,chunk->dim);
+      Chunk * c = graph->createOld<Chunk>(chunk->num_chunks,chunk->dim);
       c->addInput(input);
       insertAfter(c,chunk);
       chunks.push_back(c);
@@ -192,7 +192,7 @@ struct GraphFuser {
       size_t j = 0;
       Node * new_output = graph->createClone(producer_for_chunk,[&](Node * n) {
         auto & c = chunks[j++];
-        Select * ns = graph->create<Select>(c,i);
+        Select * ns = graph->createOld<Select>(c,i);
         ns->setType(sel->typeOption());
         insertAfter(ns,c);
         return ns;

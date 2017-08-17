@@ -530,17 +530,6 @@ struct Primitive : public NodeWithKind<Self, K> {
   }
 };
 
-// the outputs of the Graph are represented as an Node so that its inputs
-// can be tracked as Uses.
-struct Return : public Primitive<Return, kReturn> {
-  THE_CTORP(Return)
-};
-
-// an input tensor to the graph
-struct Param : public NodeWithKind<Param, kParam> {
-  THE_CTOR(Param)
-  void init() {}
-};
 
 struct Graph {
 TH_DISALLOW_COPY_AND_ASSIGN(Graph);
@@ -554,7 +543,7 @@ private:
   // as a Use object
   // also used as the beginning/end of the circular node list to avoid
   // having corner cases where the list is empty.
-  Return * output_;
+  Node * output_;
 
   // only used to keep track of allocated nodes
   // actual representation of Graph is done with
@@ -570,7 +559,7 @@ public:
   Graph()
   : next_unique_(0)
   , new_node_stage_(0) {
-    output_ = create<Return>();
+    output_ = create(kReturn);
     output_->stage_ = -1; // >= than all stages
   }
 
@@ -587,8 +576,8 @@ public:
     return output_;
   }
 
-  Param * addInput() {
-    Param* p = create<Param>();
+  Node * addInput() {
+    Node* p = create(kParam);
     inputs_.push_back(p);
     return p;
   }
@@ -615,15 +604,25 @@ public:
 
   // like make_shared, forward arguments to node initializers
   // while also correctly allocating the node to live in this graph
-  // e.g. g.create<Select>(another,0);
+  // e.g. g.createOld<Select>(another,0);
   template<typename T, typename... Args >
-  T * create(Args&&... args) {
+  T * createOld(Args&&... args) {
     // default construction of all nodes
     T* r = new T(this);
     // common initialization for all nodes when they live in this graph
     // custom per-node initialization
     r->init(std::forward<Args>(args)...);
     return r;
+  }
+  Node * create(NodeKind kind) {
+    return new Node(this,kind);
+  }
+
+  Node * create(NodeKind kind, ArrayRef<Node*> inputs) {
+    auto n = new Node(this,kind);
+    for(auto i : inputs)
+      n->addInput(i);
+    return n;
   }
 
   // clone n, making a new node in _this_ graph.
@@ -728,6 +727,16 @@ inline void Node::destroy() {
 #define IR_ELSEIF(Kind) GENERIC_ELSEIF(,k##Kind,Kind)
 #define IR_ELSE() GENERIC_ELSE()
 #define IR_END() GENERIC_END()
+
+#define IR_IF2(x, Kind) \
+  auto && __match_key = x; \
+  switch(__match_key->kind()) { \
+    case ::torch::jit::k##Kind: { \
+      auto * value = __match_key; (void) value;
+#define IR_ELSEIF2(Kind) \
+    } break; \
+    case ::torch::jit::k##Kind: { \
+      auto * value = __match_key; (void) value;
 
 // Immutable case
 #define TYPE_IF(x,Kind) GENERIC_IF(const,TypeKind::Kind,x,Kind)
