@@ -1729,7 +1729,38 @@ bool PoolGradientOp<float, CUDAContext, MaxPool>::RunOnDeviceWithOrderNHWC() {
 REGISTER_CUDA_OPERATOR(AveragePool, PoolOp<float, CUDAContext, AveragePool>);
 REGISTER_CUDA_OPERATOR(AveragePoolGradient,
                        PoolGradientOp<float, CUDAContext, AveragePool>);
+
+REGISTER_CUDA_OPERATOR(AveragePool1D, PoolOp<float, CUDAContext, AveragePool>);
+REGISTER_CUDA_OPERATOR(
+    AveragePool1DGradient,
+    PoolGradientOp<float, CUDAContext, AveragePool>);
+
+REGISTER_CUDA_OPERATOR(AveragePool2D, PoolOp<float, CUDAContext, AveragePool>);
+REGISTER_CUDA_OPERATOR(
+    AveragePool2DGradient,
+    PoolGradientOp<float, CUDAContext, AveragePool>);
+
+REGISTER_CUDA_OPERATOR(AveragePool3D, PoolOp<float, CUDAContext, AveragePool>);
+REGISTER_CUDA_OPERATOR(
+    AveragePool3DGradient,
+    PoolGradientOp<float, CUDAContext, AveragePool>);
+
 REGISTER_CUDA_OPERATOR(MaxPool, PoolOp<float, CUDAContext, MaxPool>);
 REGISTER_CUDA_OPERATOR(MaxPoolGradient,
                        PoolGradientOp<float, CUDAContext, MaxPool>);
+
+REGISTER_CUDA_OPERATOR(MaxPool1D, PoolOp<float, CUDAContext, MaxPool>);
+REGISTER_CUDA_OPERATOR(
+    MaxPool1DGradient,
+    PoolGradientOp<float, CUDAContext, MaxPool>);
+
+REGISTER_CUDA_OPERATOR(MaxPool2D, PoolOp<float, CUDAContext, MaxPool>);
+REGISTER_CUDA_OPERATOR(
+    MaxPool2DGradient,
+    PoolGradientOp<float, CUDAContext, MaxPool>);
+
+REGISTER_CUDA_OPERATOR(MaxPool3D, PoolOp<float, CUDAContext, MaxPool>);
+REGISTER_CUDA_OPERATOR(
+    MaxPool3DGradient,
+    PoolGradientOp<float, CUDAContext, MaxPool>);
 }  // namespace caffe2
