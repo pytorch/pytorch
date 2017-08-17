@@ -236,8 +236,8 @@ def recurrent_net(
                     )
 
     backward_args = {}
-    backward_mapping_keys = set(viewkeys(backward_mapping))
     if backward_cell_net is not None:
+        backward_mapping_keys = set(viewkeys(backward_mapping))
         backward_link_internal, backward_link_external, backward_link_offset = \
             unpack_triple(backward_links)
         params = [x for x in references if x in backward_mapping_keys]
