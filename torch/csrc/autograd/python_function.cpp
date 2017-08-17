@@ -751,11 +751,11 @@ static void trace_create(TraceInfo& info, PyObject* op_obj,
 
   // Construct the IR Node and its Selects
   Py_INCREF(op_obj);
-  auto this_expr = graph->appendNewNode<PythonOp>(
+  auto this_expr = graph->appendNode(graph->create<PythonOp>(
     THPObjectPtr(op_obj),
     arg_types,
     false, // TODO: remove is_legacy
-    std::move(scalar_args));
+    std::move(scalar_args)));
   for (auto t : value_traces)
     this_expr->addInput(t);
 
@@ -765,7 +765,7 @@ static void trace_create(TraceInfo& info, PyObject* op_obj,
     // NOTE: normally we don't add Select nodes when there's only a single
     // output, but Python nodes can't be optimized away, so we simplify the
     // code here.
-    Node* sel = graph->appendNewNode<Select>(this_expr, i);
+    Node* sel = graph->appendNode(graph->create<Select>(this_expr, i));
     sel->inferTypeFrom(output->data);
     tracer::setValueTrace(tracing_state, output, sel);
   }

@@ -69,7 +69,7 @@ variable_list Function::tracedApply(variable_list inputs) {
   int num_outputs = outputs.size();
   for (int i = 0; i < num_outputs; ++i) {
       auto& output = outputs[i];
-      Node* sel = graph->appendNewNode<Select>(this_node, i);
+      Node* sel = graph->appendNode(graph->create<Select>(this_node, i));
       sel->inferTypeFrom(output->data);
       tracer::setValueTrace(state, output, sel);
   }
