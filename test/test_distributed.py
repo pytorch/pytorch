@@ -228,6 +228,7 @@ class _DistTestBase(object):
         self._test_broadcast_helper(group, group_id, rank)
 
     @unittest.skipIf(BACKEND != 'gloo', "Only Gloo backend supports CUDA allReduce")
+    @unittest.skipIf(not torch.cuda.is_available(), 'CUDA not available')
     def test_broadcast_cuda(self):
         group, group_id, rank = self._init_global_test()
         self._test_broadcast_helper(group, group_id, rank, True)
@@ -333,6 +334,7 @@ class _DistTestBase(object):
         )
 
     @unittest.skipIf(BACKEND != 'gloo', "Only Gloo backend supports CUDA allReduce")
+    @unittest.skipIf(not torch.cuda.is_available(), 'CUDA not available')
     def test_all_reduce_sum_cuda(self):
         group, group_id, rank = self._init_global_test()
         self._test_all_reduce_helper(
