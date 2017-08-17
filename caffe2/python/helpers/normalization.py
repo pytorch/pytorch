@@ -118,3 +118,34 @@ def spatial_bn(model, blob_in, blob_out, dim_in,
             order=order, **kwargs)
         # Return the output
         return blob_outputs[0]
+
+
+def layer_norm(model, blob_in, blob_out, **kwargs):
+    def init_scalar_blob(value, suffix):
+        return model.param_init_net.ConstantFill(
+            [], blob_out + "_" + suffix, shape=[1], value=value)
+
+    scale, bias = init_scalar_blob(1.0, "s"), init_scalar_blob(0.0, "b")
+
+    model.AddParameter(scale, ParameterTags.WEIGHT)
+    model.AddParameter(bias, ParameterTags.BIAS)
+
+    normalized, mean, stdev = model.net.LayerNorm(
+        [blob_in],
+        [blob_out, blob_out + "_mean", blob_out + "_stdev"],
+        **kwargs
+    )
+
+    weighted = model.net.Mul(
+        [normalized, scale],
+        [blob_out + "_weighted"],
+        broadcast=1,
+    )
+
+    biased = model.net.Mul(
+        [weighted, bias],
+        [blob_out + "_biased"],
+        broadcast=1,
+    )
+
+    return biased, mean, stdev

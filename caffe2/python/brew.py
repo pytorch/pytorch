@@ -60,6 +60,7 @@ class HelperWrapper(object):
         'video_input': video_input,
         'add_weight_decay': add_weight_decay,
         'elementwise_linear': elementwise_linear,
+        'layer_norm': layer_norm,
     }
 
     def __init__(self, wrapped):
