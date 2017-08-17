@@ -558,10 +558,14 @@ if BACKEND == 'tcp' or BACKEND == 'gloo':
                     self.assertEqual(p.exitcode, 0)
 
             if skip_ok:
-                exit_code_reduce = reduce((lambda x, y: x if x == y else None), (p.exitcode for p in self.processes))
-                if exit_code_reduce == SKIP_IF_NO_CUDA_EXIT_CODE:
+                first_process = self.processes[0]
+                # do this first so we don't give an error message about mismatched exit codes if the first isn't valid
+                assert first_process.exitcode == 0 or first_process.exitcode == SKIP_IF_NO_CUDA_EXIT_CODE
+
+                for p in self.processes:
+                    self.assertEqual(p.exitcode, first_process.exitcode)
+                if first_process.exitcode == SKIP_IF_NO_CUDA_EXIT_CODE:
                     raise unittest.SkipTest("cuda is not available")
-                self.assertEqual(exit_code_reduce, 0)
 
 elif BACKEND == 'mpi':
     dist.init_process_group(init_method=INIT_METHOD, backend='mpi')
