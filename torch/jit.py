@@ -107,8 +107,7 @@ class Traceable(object):
             self.trace_name = "trace_{}".format(Traceable._next_trace_id)
             Traceable._next_trace_id += 1
 
-    def _run_pass(self, p, suffix=''):
-        name = p.__doc__
+    def _run_pass(self, name, p):
         if Traceable._dump_traces:
             with open("{}_{}_input.ir".format(self.trace_name, name), "w") as f:
                 f.write(str(self.saved_trace))

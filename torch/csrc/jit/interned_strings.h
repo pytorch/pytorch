@@ -22,7 +22,9 @@ _(Sigmoid) \
 _(Tanh) \
 _(Constant) \
 _(FusionGroup) \
-_(Chunk)
+_(Chunk) \
+_(NumChunks) \
+_(Dim)
 
 enum BuiltinSymbol {
   #define DEFINE_SYMBOL(s) \

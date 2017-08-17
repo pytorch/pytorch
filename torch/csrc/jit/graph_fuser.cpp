@@ -161,8 +161,8 @@ struct GraphFuser {
     if(!producer)
       return false;
     // and the select refers to a chunk,
-    Chunk * chunk = producer->base()->cast<Chunk>();
-    if(!chunk)
+    auto * chunk = producer->base();
+    if(chunk->kind() != kChunk)
       return false;
     // and the thing being chunked is fusable into the consumer
     Node * producer_for_chunk = chunk->base();
@@ -176,10 +176,9 @@ struct GraphFuser {
       }
     }
 
-    std::vector<Chunk*> chunks;
+    std::vector<Node*> chunks;
     for(auto input : producer_for_chunk->inputs()) {
-      Chunk * c = graph->createOld<Chunk>(chunk->num_chunks,chunk->dim);
-      c->addInput(input);
+      Node * c = graph->createChunk(input,chunk->i(kNumChunks),chunk->i(kDim));
       insertAfter(c,chunk);
       chunks.push_back(c);
     }
