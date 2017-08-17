@@ -82,7 +82,7 @@ static void inline THNN_(VolumetricConvolutionMM_shapeCheck)(
   }
 }
 
-static int THNN_(view_weight)(THTensor *_weight)
+static int THNN_(view_weight)(THTensor **_weight)
 {
   THTensor *weight = *_weight;
   if (weight->nDimension == 5) {
