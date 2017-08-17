@@ -19,7 +19,7 @@ void THCTensor_(indexCopy)(THCState *state, THCTensor *dst, int dim, THCudaLongT
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, dst, src));
   THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, indices));
 
-  int dims = (int) THCTensor_(nDimension)(state, dst);
+  int dims = THCTensor_(nDimension)(state, dst);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
   dims = THCTensor_(nDimension)(state, src);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 5, CUTORCH_DIM_WARNING);
@@ -28,7 +28,7 @@ void THCTensor_(indexCopy)(THCState *state, THCTensor *dst, int dim, THCudaLongT
 
   ptrdiff_t numIndices = THCudaLongTensor_nElement(state, indices);
 
-  int srcDims = (int) THCTensor_(nDimension)(state, src);
+  int srcDims = THCTensor_(nDimension)(state, src);
   cudaStream_t stream = THCState_getCurrentStream(state);
 
   THArgCheck(THCudaLongTensor_nDimension(state, indices) == 1, 3,
@@ -389,7 +389,7 @@ void THCTensor_(indexSelect)(THCState *state, THCTensor *dst, THCTensor *src, in
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, dst, src, indices));
 
-  int dims = (int) THCTensor_(nDimension)(state, dst);
+  int dims = THCTensor_(nDimension)(state, dst);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
   dims = THCTensor_(nDimension)(state, src);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 3, CUTORCH_DIM_WARNING);
@@ -398,7 +398,7 @@ void THCTensor_(indexSelect)(THCState *state, THCTensor *dst, THCTensor *src, in
 
   ptrdiff_t numIndices = THCudaLongTensor_nElement(state, indices);
 
-  int srcDims = (int) THCTensor_(nDimension)(state, src);
+  int srcDims = THCTensor_(nDimension)(state, src);
   cudaStream_t stream = THCState_getCurrentStream(state);
 
   THArgCheck(THCudaLongTensor_nDimension(state, indices) == 1, 3,

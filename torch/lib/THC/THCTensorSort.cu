@@ -3,7 +3,7 @@
 void THCudaLongTensor_fillSliceWithIndex(THCState* state,
                                          THCudaLongTensor* t,
                                          int dim) {
-  int dims = THCudaLongTensor_nDimension(state, t);
+  int64_t dims = THCudaLongTensor_nDimension(state, t);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
 
   ptrdiff_t inElements = THCudaLongTensor_nElement(state, t);
@@ -30,7 +30,7 @@ void THCudaLongTensor_fillSliceWithIndex(THCState* state,
       info, numSlices, sliceSize, info.strides[collapseDim])
 
   if (TensorUtils<THCudaLongTensor>::canUse32BitIndexMath(state, t)) {
-    TensorInfo<int64_t, unsigned int> info =
+    TensorInfo<int64_t, uint32_t> info =
       getTensorInfo<THCudaLongTensor, unsigned int>(state, t);
     info.reduceDim(dim);
     int collapseDim = info.collapseDims(dim);

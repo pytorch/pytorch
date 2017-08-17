@@ -45,7 +45,7 @@ multinomialAliasDrawKernel(int size, int64_t *output, int64_t *J, T *q, int64_t 
     int64_t rand_ind = ScalarConvert<T, int64_t>::to(uniform[idx]);
     T bern_uniform = bernoulli[idx];
     int _mask = (int) THCNumerics<T>::lt(bern_uniform, q[rand_ind]);
-    output[idx] = J[rand_ind]*(1 -_mask) + (rand_ind+1LL) * _mask;
+    output[idx] = J[rand_ind]*(1 -_mask) + (rand_ind+1L) * _mask;
   }  
 }
 

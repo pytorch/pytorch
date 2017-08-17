@@ -73,7 +73,7 @@ struct AtomicAddIntegerImpl<T, 8> {
     do {
       assumed = old;
       newval = val +  (T)old;
-      old = atomicCAS((uint64_t *) address_as_ui, (uint64_t) assumed, (uint64_t) newval);
+      old = atomicCAS(address_as_ui, assumed, newval);
     } while (assumed != old);
   }
 };
