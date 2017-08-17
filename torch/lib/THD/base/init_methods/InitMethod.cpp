@@ -23,7 +23,7 @@ InitMethod::Config getInitConfig(std::string argument, int world_size,
     } catch(std::exception& e) {
       if (rank == -1)
         throw std::invalid_argument("world_size is not set - it is required for "
-                                    "`tcp://` and `file://` init methods");
+                                    "`tcp://` and `file://` init methods with this backend");
       throw std::invalid_argument("invalid world_size");
     }
 

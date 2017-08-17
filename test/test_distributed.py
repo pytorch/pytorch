@@ -13,6 +13,7 @@ from common import TestCase
 
 BACKEND = os.environ['BACKEND']
 TEMP_DIR = os.environ['TEMP_DIR']
+INIT_METHOD = os.getenv('INIT_METHOD', 'env://')
 MASTER_PORT = '29500'
 MASTER_ADDR = '127.0.0.1'
 
@@ -523,7 +524,7 @@ if BACKEND == 'tcp' or BACKEND == 'gloo':
         def _run(self, rank):
             self.rank = rank
             try:
-                dist.init_process_group(backend=BACKEND)
+                dist.init_process_group(init_method=INIT_METHOD, backend=BACKEND, world_size=int(WORLD_SIZE))
             except RuntimeError as e:
                 if 'recompile' in e.args[0]:
                     sys.exit(0)
@@ -538,7 +539,7 @@ if BACKEND == 'tcp' or BACKEND == 'gloo':
                 self.assertEqual(p.exitcode, 0)
 
 elif BACKEND == 'mpi':
-    dist.init_process_group(backend='mpi')
+    dist.init_process_group(init_method=INIT_METHOD, backend='mpi')
 
     class TestMPI(TestCase, _DistTestBase):
         pass

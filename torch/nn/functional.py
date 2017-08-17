@@ -1008,7 +1008,7 @@ def affine_grid(theta, size):
     Args:
         theta (Variable): input batch of affine matrices (N x 2 x 3)
         size (torch.Size): the target output image size (N x C x H x W)
-                           Example: torch.Size(32, 3, 24, 24)
+                           Example: torch.Size((32, 3, 24, 24))
 
     Returns:
         output (Variable): output Tensor of size (N x H x W x 2)
