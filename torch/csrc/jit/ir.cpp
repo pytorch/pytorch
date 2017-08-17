@@ -273,7 +273,7 @@ void Node::lint() {
   IR_ELSEIF(FusionGroup)
     // TODO: Typecheck the parameters
     value->subgraph().lint();
-  IR_ELSEIF(Chunk)
+  IR_ELSEIF2(Chunk)
     JIT_ASSERT(inputs_.size() == 1);
   IR_END()
 

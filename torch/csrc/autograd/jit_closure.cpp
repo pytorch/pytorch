@@ -301,8 +301,8 @@ std::unique_ptr<AutogradClosure> createAutogradClosure(Graph *graph) {
     IR_ELSEIF(Constant)
       fn = std::make_shared<torch::autograd::WrapConstant>(value->value);
       const_factory->next_functions.emplace_back(fn, 0);
-    IR_ELSEIF(Chunk)
-      fn = std::make_shared<ChunkFunction>(value->num_chunks,value->dim);
+    IR_ELSEIF2(Chunk)
+      fn = std::make_shared<ChunkFunction>(value->i(kNumChunks),value->i(kDim));
     IR_ELSE()
       throw std::runtime_error(std::string("unrecognized NodeKind: ") + symbolToString(node->kind()));
     IR_END()

@@ -256,6 +256,11 @@ public:
   const std::vector<Node*>& inputs() {
     return inputs_;
   }
+  // lots of things like select/chunk have a single input, so we have a
+  // helper to make accessing it easier
+  Node * base() {
+    return inputs_.at(0);
+  }
   const use_list & uses() {
     return uses_;
   }
@@ -612,6 +617,12 @@ public:
       n->addInput(i);
     return n;
   }
+  Node * createChunk(Node * input, int64_t numChunks, int64_t dim) {
+    auto n = create(kChunk,{input});
+    n->i_(kNumChunks,numChunks);
+    n->i_(kDim, dim);
+    return n;
+  }
 
   // clone n, making a new node in _this_ graph.
   // use node_map to translate inputs of n to inputs of the cloned node
@@ -832,19 +843,6 @@ struct Select : public NodeWithKind<Select,kSelect> {
   }
 private:
   size_t offset_;
-};
-
-struct Chunk : public NodeWithKind<Chunk, kChunk> {
-  THE_CTOR(Chunk)
-  void init(int64_t num_chunks_, int64_t dim_) {
-    num_chunks = num_chunks_;
-    dim = dim_;
-  }
-  Node * base() {
-    return inputs()[0];
-  }
-  int64_t num_chunks;
-  int64_t dim;
 };
 
 // A tensor constant

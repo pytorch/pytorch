@@ -8,13 +8,13 @@ namespace {
 using constructor_type = std::function<Node*(Graph*, PythonOp*)>;
 
 Node * trivial_ctor(Graph *graph, PythonOp *p) {
-  return graph->create(stringToSymbol(p->name()));
+  return graph->create(stringToSymbol(p->name()), p->inputs());
 }
 
 Node * chunk_ctor(Graph * graph, PythonOp * p) {
   auto num_chunks = PyLong_AsLong(p->scalar_args[0]);
   auto dim = PyLong_AsLong(p->scalar_args[1]);
-  return graph->createOld<Chunk>(num_chunks,dim);
+  return graph->createChunk(p->base(),num_chunks,dim);
 }
 
 std::unordered_map<std::string, constructor_type> constructors = {
@@ -47,9 +47,6 @@ void MatchJITOps(std::unique_ptr<Graph>& graph) {
 
     // Set up the Node that will replace p
     auto new_op = constructor(graph.get(), p);
-    for (Node *input : p->inputs()) {
-      new_op->addInput(input);
-    }
     new_op->insertAfter(p);
 
     if(new_op->hasMultipleOutputs()) {
