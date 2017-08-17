@@ -6,6 +6,7 @@ from __future__ import unicode_literals
 import numpy as np
 
 from caffe2.python import workspace, memonger, core, model_helper, brew
+from caffe2.proto import caffe2_pb2
 import caffe2.python.hypothesis_test_util as hu
 from future.utils import viewvalues
 import hypothesis.strategies as st
@@ -220,6 +221,53 @@ class MemongerTest(hu.HypothesisTestCase):
         optimized_grad = workspace.FetchBlob(str(input_to_grad["name_x/fc1_w"]))
         np.testing.assert_almost_equal(loss, optimized_loss)
         np.testing.assert_almost_equal(grad, optimized_grad)
+
+    def test_memonger_mix_cpu_gpu(self):
+        '''
+        Check that memonger does not make blobs cross CPU/GPU boundary
+        '''
+        m = model_helper.ModelHelper()
+        with core.DeviceScope(core.DeviceOption(caffe2_pb2.CUDA, 0)):
+            fc1 = brew.fc(m, "data", "fc1", dim_in=2, dim_out=2)
+            fc2 = brew.fc(m, fc1, "fc2", dim_in=2, dim_out=2)
+            fc3 = brew.fc(m, fc2, "fc3", dim_in=2, dim_out=2)
+            fc4 = brew.fc(m, fc3, "fc4", dim_in=2, dim_out=2)
+            fc4_cpu = m.net.CopyGPUToCPU(fc4, "fc4_cpu")
+        with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU, 0)):
+            fc5_cpu = brew.fc(m, fc4_cpu, "fc5_cpu", dim_in=2, dim_out=2)
+            fc6_cpu = brew.fc(m, fc5_cpu, "fc6_cpu", dim_in=2, dim_out=2)
+            fc7_cpu = brew.fc(m, fc6_cpu, "fc7_cpu", dim_in=2, dim_out=2)
+            fc7_cpu.Relu([], fc7_cpu) \
+               .Softmax([], "pred") \
+               .LabelCrossEntropy(["label"], ["xent"]) \
+               .AveragedLoss([], "loss")
+        m.AddGradientOperators(["loss"])
+
+        blobs_before = count_blobs(m.net.Proto())
+        optim_proto = memonger.share_grad_blobs(
+            m.net,
+            ["loss"],
+            set(viewvalues(m.param_to_grad)),
+            "",
+            share_activations=True,
+            dont_share_blobs=set(),
+        )
+        blobs_after = count_blobs(optim_proto)
+        self.assertLess(blobs_after, blobs_before)
+
+        # Create set of blobs on CPU side and GPU side and check they don't
+        # overlap
+        device_blobs = {caffe2_pb2.CPU: set(), caffe2_pb2.CUDA: set()}
+        for op in optim_proto.op:
+            if op.type not in ['CopyCPUToGPU', "CopyGPUToCPU"]:
+                dev = op.device_option.device_type
+                for b in list(op.input) + list(op.output):
+                    device_blobs[dev].add(b)
+
+        device_crossers = device_blobs[caffe2_pb2.CPU].intersection(
+            device_blobs[caffe2_pb2.CUDA]
+        )
+        self.assertEquals(device_crossers, set())
 
     @given(input_dim=st.integers(min_value=4, max_value=4),
            output_dim=st.integers(min_value=4, max_value=4),

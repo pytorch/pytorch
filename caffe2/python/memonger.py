@@ -55,7 +55,7 @@ def share_grad_blobs(
     log.warn("NOTE: Executing memonger to optimize gradient memory")
 
     # Collect ops that have something to do with gradients
-    if not namescope.endswith("/"):
+    if namescope != "" and not namescope.endswith("/"):
         namescope += "/"
 
     netproto = copy.deepcopy(net.Proto())
