@@ -40,7 +40,7 @@ Initialization
 --------------
 
 The package needs to be initialized using the :func:`torch.distributed.init_process_group`
-function before calling any other methods. This locks until all processes have
+function before calling any other methods. This blocks until all processes have
 joined.
 
 .. autofunction:: init_process_group
@@ -58,7 +58,7 @@ TCP initialization
 
 There are two ways to intialize using TCP, both requiring a network address
 reachable from all processes and a desired ``world_size``. The first way
-requires specifying an address that belongs to the rank 0 process. This form of
+requires specifying an address that belongs to the rank 0 process. This first way of
 initialization requires that all processes have manually specified ranks.
 
 Alternatively, the address has to be a valid IP multicast address, in which case
