@@ -96,7 +96,7 @@ class View(Function):
 
     @staticmethod
     def primspec(i, sizes):
-        return torch.toffee.op("Reshape", i, shape=sizes, _outputs=(0,-1))
+        return torch.toffee.op("Reshape", i, shape=sizes, _outputs=(0, -1))
 
     @staticmethod
     def forward(ctx, i, sizes):

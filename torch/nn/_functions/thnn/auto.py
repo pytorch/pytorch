@@ -92,7 +92,8 @@ def _find_buffers(args, ignored_args):
     return buffers
 
 
-def _make_function_class(class_name, update_output, update_grad_input, acc_grad_parameters, double_backwards_fn, primspec_fn):
+def _make_function_class(class_name, update_output, update_grad_input, acc_grad_parameters,
+                         double_backwards_fn, primspec_fn):
     def has_argument(fn, name):
         for arg in fn.arguments:
             if arg.name == name:
