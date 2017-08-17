@@ -21,6 +21,8 @@
 #include "torch/csrc/jit/DisallowCopy.h"
 #include "ATen/ArrayRef.h"
 #include "torch/csrc/jit/assert.h"
+#include "torch/csrc/jit/interned_strings.h"
+#include "torch/csrc/jit/attributes.h"
 
 namespace torch { namespace autograd {
 
@@ -181,34 +183,10 @@ using use_list = std::vector<Use>;
 using pyobj_list = std::vector<THPObjectPtr>;
 template<typename T>
 using ArrayRef = at::ArrayRef<T>;
-
-
-// defined using x-macros so that we can generate toString easily
-#define TH_FORALL_NODES(_) \
-_(PythonOp) \
-_(CppOp) \
-_(Param) \
-_(Select) \
-_(Return) \
-_(Eval) \
-_(Add) \
-_(Mul) \
-_(Negate) \
-_(Sigmoid) \
-_(Tanh) \
-_(Constant) \
-_(FusionGroup) \
-_(Chunk)
-
-enum class NodeKind {
-#define DEFINE_NODE(n) n,
-TH_FORALL_NODES(DEFINE_NODE)
-#undef DEFINE_NODE
-};
-
+using NodeKind = Symbol;
 using graph_node_list = std::list<Node*>;
 
-struct Node {
+struct Node : public Attributes {
   TH_DISALLOW_COPY_AND_ASSIGN(Node);
   friend struct Graph;
 private:
@@ -550,10 +528,10 @@ struct Primitive : public NodeWithKind<Self, K> {
 
 // the outputs of the Graph are represented as an Node so that its inputs
 // can be tracked as Uses.
-struct Return : public Primitive<Return, NodeKind::Return> {};
+struct Return : public Primitive<Return, kReturn> {};
 
 // an input tensor to the graph
-struct Param : public NodeWithKind<Param, NodeKind::Param> {
+struct Param : public NodeWithKind<Param, kParam> {
   void init() {}
 };
 
@@ -742,14 +720,14 @@ Node * NodeWithKind<Self,K,DefaultType>::allocClone(Graph * in_graph) {
 
 // TODO: I'm pretty sure Constness can be done with C++ templates, ala
 // std::is_const, but no time to work it out...
-#define GENERIC_IF(Constness, KindClass, x, Kind) \
+#define GENERIC_IF(Constness, FullKind, x, Kind) \
   auto && __match_key = x; \
   switch(__match_key->kind()) { \
-    case KindClass::Kind: { \
+    case FullKind: { \
       auto * value = static_cast<Constness ::torch::jit::Kind*>(__match_key); (void) value;
-#define GENERIC_ELSEIF(Constness, KindClass, Kind) \
+#define GENERIC_ELSEIF(Constness, FullKind, Kind) \
     } break; \
-    case KindClass::Kind: { \
+    case FullKind: { \
       auto * value = static_cast<Constness ::torch::jit::Kind*>(__match_key); (void) value;
 #define GENERIC_ELSE() \
     } break; \
@@ -759,14 +737,14 @@ Node * NodeWithKind<Self,K,DefaultType>::allocClone(Graph * in_graph) {
   };
 
 // Mutable case
-#define IR_IF(x,Kind) GENERIC_IF(,NodeKind,x,Kind)
-#define IR_ELSEIF(Kind) GENERIC_ELSEIF(,NodeKind,Kind)
+#define IR_IF(x,Kind) GENERIC_IF(,k##Kind,x,Kind)
+#define IR_ELSEIF(Kind) GENERIC_ELSEIF(,k##Kind,Kind)
 #define IR_ELSE() GENERIC_ELSE()
 #define IR_END() GENERIC_END()
 
 // Immutable case
-#define TYPE_IF(x,Kind) GENERIC_IF(const,TypeKind,x,Kind)
-#define TYPE_ELSEIF(Kind) GENERIC_ELSEIF(const,TypeKind,Kind)
+#define TYPE_IF(x,Kind) GENERIC_IF(const,TypeKind::Kind,x,Kind)
+#define TYPE_ELSEIF(Kind) GENERIC_ELSEIF(const,TypeKind::Kind,Kind)
 #define TYPE_ELSE() GENERIC_ELSE()
 #define TYPE_END() GENERIC_END()
 
@@ -785,22 +763,12 @@ Node * NodeWithKind<Self,K,DefaultType>::allocClone(Graph * in_graph) {
 
 std::ostream& operator<<(std::ostream & out, Graph & g);
 std::ostream& operator<<(std::ostream & out, const Type & t);
-static inline const char * toString(NodeKind kind) {
-  switch(kind) {
-#define DEFINE_CASE(Kind) \
-    case NodeKind::Kind: return #Kind;
-    TH_FORALL_NODES(DEFINE_CASE)
-#undef DEFINE_CASE
-    default:
-      __builtin_unreachable();
-  }
-}
 
 
 /************* All nodes not required to be defined before Graph **************/
 
  // execute a Python function, used for Ops we can't optimize but that we want to optimize around
-struct PythonOp : public NodeWithKind<PythonOp,NodeKind::PythonOp,MultiTypeDefault> {
+struct PythonOp : public NodeWithKind<PythonOp,kPythonOp,MultiTypeDefault> {
   //TODO: make this non-autograd specific
   //remove is_legacy, avoid THPObjectPtr to avoid big PyTorch dependency
 
@@ -837,7 +805,7 @@ struct PythonOp : public NodeWithKind<PythonOp,NodeKind::PythonOp,MultiTypeDefau
 
 // A Cpp operator is an operator which dispatches directly to an autograd function.
 // TODO: These are not executable without reentrant engine.
-struct CppOp : public NodeWithKind<CppOp,NodeKind::CppOp, MultiTypeDefault> {
+struct CppOp : public NodeWithKind<CppOp,kCppOp, MultiTypeDefault> {
   std::shared_ptr<torch::autograd::Function> fn;
   std::string name();
   void init(std::shared_ptr<torch::autograd::Function> fn) {
@@ -845,7 +813,7 @@ struct CppOp : public NodeWithKind<CppOp,NodeKind::CppOp, MultiTypeDefault> {
   }
 };
 
-struct Eval : public NodeWithKind<Eval,NodeKind::Eval,MultiTypeDefault> {
+struct Eval : public NodeWithKind<Eval,kEval,MultiTypeDefault> {
   void init() {};
 };
 
@@ -856,7 +824,7 @@ struct Eval : public NodeWithKind<Eval,NodeKind::Eval,MultiTypeDefault> {
 // in this case
 // number_of_outputs = op.uses().size()
 // this will change if Tuples ever become first class.
-struct Select : public NodeWithKind<Select,NodeKind::Select> {
+struct Select : public NodeWithKind<Select,kSelect> {
   void init(Node * node, size_t offset) {
     addInput(node);
     this->offset_ = offset;
@@ -879,13 +847,13 @@ private:
 // NB: non-nullary constructors don't get forwarded to the
 // parents, so you have to spell out the constructors you want explicitly.
 
-struct Add : public Primitive<Add,NodeKind::Add> {};
-struct Mul : public Primitive<Mul,NodeKind::Mul> {};
-struct Negate : public Primitive<Negate,NodeKind::Negate> {};
-struct Sigmoid : public Primitive<Sigmoid,NodeKind::Sigmoid> {};
-struct Tanh : public Primitive<Tanh,NodeKind::Tanh> {};
+struct Add : public Primitive<Add,kAdd> {};
+struct Mul : public Primitive<Mul,kMul> {};
+struct Negate : public Primitive<Negate,kNegate> {};
+struct Sigmoid : public Primitive<Sigmoid,kSigmoid> {};
+struct Tanh : public Primitive<Tanh,kTanh> {};
 
-struct Chunk : public NodeWithKind<Chunk, NodeKind::Chunk,MultiTypeDefault> {
+struct Chunk : public NodeWithKind<Chunk, kChunk,MultiTypeDefault> {
   void init(int64_t num_chunks_, int64_t dim_) {
     num_chunks = num_chunks_;
     dim = dim_;
@@ -899,7 +867,7 @@ struct Chunk : public NodeWithKind<Chunk, NodeKind::Chunk,MultiTypeDefault> {
 
 // A tensor constant
 // TODO: constant compression
-struct Constant : public NodeWithKind<Constant, NodeKind::Constant> {
+struct Constant : public NodeWithKind<Constant, kConstant> {
   void init(const at::Tensor& ref) {
     AutoGPU guard(ref.type().isCuda() ? ref.get_device() : -1);
     value = ref.clone();
@@ -908,7 +876,7 @@ struct Constant : public NodeWithKind<Constant, NodeKind::Constant> {
   at::Tensor value;
 };
 
-struct FusionGroup : public NodeWithKind<FusionGroup,NodeKind::FusionGroup,MultiTypeDefault> {
+struct FusionGroup : public NodeWithKind<FusionGroup,kFusionGroup,MultiTypeDefault> {
   void init() {
     subgraph_ = std::make_shared<Graph>();
   }
@@ -925,14 +893,3 @@ private:
 void LintGraph(std::unique_ptr<Graph>& graph);
 
 }} // namespace torch::jit
-
-namespace std {
-
-template<>
-struct hash<torch::jit::NodeKind> {
-  std::size_t operator()(const torch::jit::NodeKind& k) const {
-    return hash<int>()(static_cast<int>(k));
-  }
-};
-
-} // namespace std

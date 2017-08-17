@@ -136,10 +136,10 @@ static std::string nodeName(Node * n) {
 
 // TODO: we need to support double-precision
 static std::unordered_map<NodeKind,std::string> simple_map_ops = {
-  {NodeKind::Sigmoid,         "1.f / (1.f + expf(-${0}))"},
-  {NodeKind::Tanh,            "tanhf(${0})"},
-  {NodeKind::Mul,             "${0} * ${1}"},
-  {NodeKind::Add,             "${0} + ${1}"},
+  {kSigmoid,         "1.f / (1.f + expf(-${0}))"},
+  {kTanh,            "tanhf(${0})"},
+  {kMul,             "${0} * ${1}"},
+  {kAdd,             "${0} + ${1}"},
 };
 
 const char * toCString(at::ScalarType type) {

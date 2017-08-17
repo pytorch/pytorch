@@ -4,11 +4,11 @@
 namespace torch { namespace jit {
 
 std::unordered_set<NodeKind> simple_mappable = {
-  NodeKind::Sigmoid,
-  NodeKind::Tanh,
-  NodeKind::Mul,
-  NodeKind::Add,
-  NodeKind::Negate
+  kSigmoid,
+  kTanh,
+  kMul,
+  kAdd,
+  kNegate
 };
 
 bool isSimpleMap(Node *node) {
@@ -29,7 +29,7 @@ struct GraphFuser {
   : graph(graph) {}
 
   bool isFusable(Node * node) {
-    return isSimpleMap(node) || node->kind() == NodeKind::FusionGroup;
+    return isSimpleMap(node) || node->kind() == kFusionGroup;
   }
 
   // necessary condition for fusion. If all of the uses of producer are consumer

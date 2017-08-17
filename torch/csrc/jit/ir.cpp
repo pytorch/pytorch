@@ -146,7 +146,7 @@ std::ostream& operator<<(std::ostream & out, Graph & g) {
       IR_ELSEIF(CppOp)
         out << "CppOp[" << value->name() << "]";
       IR_ELSE()
-        out << toString(n->kind());
+        out << symbolToString(n->kind());
       IR_END()
       out << "(" << n->inputs() << "), uses = [";
       if(n->hasMultipleOutputs()) {
@@ -190,7 +190,7 @@ void Node::lint() {
   // - Owning graph is non-null and consistent
   // - The "Select" invariant, when the node is MultiReturn
 
-  if (kind_ != NodeKind::Param && kind_ != NodeKind::Return) {
+  if (kind_ != kParam && kind_ != kReturn) {
     JIT_ASSERT(*nodes_iter_ == this);
   }
 
@@ -302,14 +302,14 @@ void Graph::lint() {
   };
 
   for (auto input : inputs_) {
-    JIT_ASSERT(input->kind_ == NodeKind::Param);
+    JIT_ASSERT(input->kind_ == kParam);
     input->lint();
     check_node(input);
   }
   for (auto n : nodes_) {
     n->lint();
-    JIT_ASSERT(n->kind_ != NodeKind::Param);
-    JIT_ASSERT(n->kind_ != NodeKind::Return);
+    JIT_ASSERT(n->kind_ != kParam);
+    JIT_ASSERT(n->kind_ != kReturn);
     for (auto input : n->inputs_) {
       JIT_ASSERT(in_scope.count(input) == 1);
     }
@@ -319,7 +319,7 @@ void Graph::lint() {
     }
     check_node(n);
   }
-  JIT_ASSERT(output_->kind() == NodeKind::Return);
+  JIT_ASSERT(output_->kind() == kReturn);
   output_->lint();
   for (auto output : output_->inputs_) {
     JIT_ASSERT(in_scope.count(output) == 1);

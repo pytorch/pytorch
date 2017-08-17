@@ -59,7 +59,7 @@ void MatchJITOps(std::unique_ptr<Graph>& graph) {
       // PythonOps are always multireturn. We need to remove the Select node.
       JIT_ASSERT(p->uses().size() == 1);
       auto single_select = p->uses()[0].user;
-      JIT_ASSERT(single_select->kind() == NodeKind::Select);
+      JIT_ASSERT(single_select->kind() == kSelect);
       new_op->setType(single_select->type());
       single_select->replaceAllUsesWith(new_op);
       single_select->destroy();

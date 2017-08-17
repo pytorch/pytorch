@@ -31,7 +31,7 @@ std::string ExportGraph(std::unique_ptr<Graph>& g) {
     p_g.add_output(node_name(output));
   }
   for (auto node : g->nodes()) {
-    if (node->kind() == NodeKind::Select) {
+    if (node->kind() == kSelect) {
       // No select nodes in ToffeeIR: instead we make use
       // of the select invariant
       continue;

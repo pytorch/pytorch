@@ -304,12 +304,12 @@ std::unique_ptr<AutogradClosure> createAutogradClosure(Graph *graph) {
     IR_ELSEIF(Chunk)
       fn = std::make_shared<ChunkFunction>(value->num_chunks,value->dim);
     IR_ELSE()
-      throw std::runtime_error(std::string("unrecognized NodeKind: ") + toString(node->kind()));
+      throw std::runtime_error(std::string("unrecognized NodeKind: ") + symbolToString(node->kind()));
     IR_END()
 
     // Update function fields
     fn->is_executable = true;
-    if (node->kind() == NodeKind::Param || node->kind() == NodeKind::Constant) {
+    if (node->kind() == kParam || node->kind() == kConstant) {
       fn->num_inputs = 1;
     } else {
       fn->num_inputs = inputs.size();
