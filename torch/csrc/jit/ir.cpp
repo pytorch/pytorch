@@ -233,11 +233,11 @@ void Node::lint() {
   // - Select inputs is one
   // - Python operator cconv is correct
 
-  IR_IF(this, Return)
-    JIT_ASSERT(uses_.size() == 0);
-  IR_ELSEIF(Constant)
+  IR_IF(this,Constant)
     JIT_ASSERT(inputs_.size() == 0);
-  IR_ELSEIF(Param)
+  IR_ELSEIF2(Return)
+    JIT_ASSERT(uses_.size() == 0);
+  IR_ELSEIF2(Param)
     JIT_ASSERT(inputs_.size() == 0);
   IR_ELSEIF(Select)
     JIT_ASSERT(inputs_.size() == 1);

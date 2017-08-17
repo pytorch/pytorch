@@ -9,13 +9,13 @@ using constructor_type = std::function<Node*(Graph*, PythonOp*)>;
 
 template<typename T>
 Node * trivial_ctor(Graph *graph, PythonOp *p) {
-  return graph->create<T>();
+  return graph->createOld<T>();
 }
 
 Node * chunk_ctor(Graph * graph, PythonOp * p) {
   auto num_chunks = PyLong_AsLong(p->scalar_args[0]);
   auto dim = PyLong_AsLong(p->scalar_args[1]);
-  return graph->create<Chunk>(num_chunks,dim);
+  return graph->createOld<Chunk>(num_chunks,dim);
 }
 
 std::unordered_map<std::string, constructor_type> constructors = {

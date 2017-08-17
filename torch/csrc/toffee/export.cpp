@@ -72,11 +72,11 @@ std::string ExportGraph(std::unique_ptr<Graph>& g) {
       p_n->set_op_type("TanH");
     IR_ELSEIF(Constant)
       throw std::runtime_error("Constant not supported yet");
-    IR_ELSEIF(Return)
+    IR_ELSEIF2(Return)
       JIT_ASSERT(0);
     IR_ELSEIF(Select)
       JIT_ASSERT(0);
-    IR_ELSEIF(Param)
+    IR_ELSEIF2(Param)
       JIT_ASSERT(0);
     IR_ELSEIF(FusionGroup)
       throw std::runtime_error("FusionGroup not supported.  Try exporting before fusing");

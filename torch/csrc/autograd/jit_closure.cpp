@@ -296,7 +296,7 @@ std::unique_ptr<AutogradClosure> createAutogradClosure(Graph *graph) {
 #else
         throw std::runtime_error("don't know how to execute FusionGroups without CUDA");
 #endif
-    IR_ELSEIF(Param)
+    IR_ELSEIF2(Param)
       fn = std::make_shared<Placeholder>();
     IR_ELSEIF(Constant)
       fn = std::make_shared<torch::autograd::WrapConstant>(value->value);

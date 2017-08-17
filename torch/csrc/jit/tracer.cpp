@@ -103,7 +103,7 @@ void TraceExitHook::registerHook(const std::shared_ptr<TracingState>& tracing_st
 
 void EvalEnterHook::run(variable_list& vars) {
   auto& graph = tracing_state->graph;
-  Node *eval_node = common_state->eval_node = graph->appendNode(graph->create<Eval>());
+  Node *eval_node = common_state->eval_node = graph->appendNode(graph->createOld<Eval>());
   for (auto& input : vars)  {
     eval_node->addInput(tracer::getValueTrace(tracing_state, input, true));
   }
@@ -126,7 +126,7 @@ void EvalExitHook::run(variable_list& vars) {
   int num_vars = vars.size();
   for (int i = 0; i < num_vars; ++i) {
     auto& var = vars[i];
-    auto select = graph->appendNode(graph->create<Select>(common_state->eval_node, i));
+    auto select = graph->appendNode(graph->createOld<Select>(common_state->eval_node, i));
     tracer::setValueTrace(tracing_state, var, select);
   }
   EvalEnterHook::registerHook(tracing_state, vars, common_state->next_common_state);
