@@ -174,6 +174,18 @@ class SequenceFunctor {
   const int* sl;
 };
 
+class WindowFunctor {
+ public:
+  explicit WindowFunctor(const int* c, int r) : c(c), r(r) {}
+  bool operator()(int i, int j, float /* val*/) {
+    return j > c[i] + r || j < c[i] - r;
+  }
+
+ private:
+  const int* c;
+  const int r;
+};
+
 class UpperFunctor {
  public:
   bool operator()(int i, int j, float /* val */) {
@@ -208,9 +220,12 @@ template <>
 bool SequenceMaskOp<CPUContext>::RunOnDevice() {
   const Tensor<CPUContext>* input = &Input(0);
   const Tensor<CPUContext>* sequence_lengths = nullptr;
+  const Tensor<CPUContext>* window_centers = nullptr;
 
   if (mode_ == "sequence") {
     sequence_lengths = &Input(1);
+  } else if (mode_ == "window") {
+    window_centers = &Input(1);
   }
 
   auto* output = Output(0);
@@ -229,6 +244,14 @@ bool SequenceMaskOp<CPUContext>::RunOnDevice() {
         right,
         input->data<float>(),
         SequenceFunctor(sequence_lengths->data<int>()),
+        fill_val,
+        output->mutable_data<float>());
+  } else if (mode_ == "window") {
+    MaskWithFunctor(
+        left,
+        right,
+        input->data<float>(),
+        WindowFunctor(window_centers->data<int>(), radius_),
         fill_val,
         output->mutable_data<float>());
   } else if (mode_ == "upper") {
@@ -293,6 +316,11 @@ Two current operating modes:
       mode='lowerdiag', x_ij = -inf if j >= i
 
     This mode takes one input.
+3) Window Mask. Given a 2D input tensor and 1D tensor of window centers,
+   for each row i in the input tensor, set elements in that row to -inf
+   if their column index j outside [center - radius, center + radius].
+   This mode takes two inputs and argument mode = 'sequence'.
+   Argument 'radius' should be provided.
 )DOC")
     .Input(0, "input", "Tensor to apply masking to")
     .Input(1, "sequence_lengths", "1D Tensor of sequence lengths for mode #1")
@@ -306,7 +334,8 @@ Two current operating modes:
         "(int) Beginning axis of row elements. All dimensions to the left "
         "will be treated as row indices and those to the right (inclusive) "
         "will be treated as column indices in the 2D mask")
-    .Arg("grad", "(bool) operate in gradient mode");
+    .Arg("grad", "(bool) operate in gradient mode")
+    .Arg("radius", "(int) radius of windows in window mode");
 
 class GetSequenceMaskGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
