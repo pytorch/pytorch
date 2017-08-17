@@ -12,7 +12,8 @@ class Dropout(InplaceFunction):
 
     @staticmethod
     def primspec(input, p=0.5, train=False, inplace=False):
-        if inplace: return None
+        if inplace:
+            return None
         return torch.toffee.op("Dropout", input, ratio=float(p), is_test=not train, _outputs=(0, -1))
 
     @classmethod

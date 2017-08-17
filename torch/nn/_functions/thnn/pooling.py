@@ -21,7 +21,6 @@ class MaxPool1d(Function):
                                dilation=dilation,
                                _outputs=(0,))
 
-
     @staticmethod
     def forward(ctx, input, kernel_size, stride=None, padding=0, dilation=1,
                 ceil_mode=False):
