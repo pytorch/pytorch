@@ -5,11 +5,12 @@
 #include <memory>
 #include <vector>
 #include "torch/csrc/jit/interned_strings.h"
+#include <ATen/ATen.h>
 
 namespace torch { namespace jit {
 
 enum class AttributeKind {
-  f,fs,i,is,s,ss
+  f,fs,i,is,s,ss,t,ts,g,gs
 };
 struct AttributeValue {
   AttributeValue(Symbol name)
@@ -62,11 +63,19 @@ using IntAttr = ScalarAttributeValue<int64_t,AttributeKind::i>;
 using IntsAttr = VectorAttributeValue<int64_t,AttributeKind::is>;
 using StringAttr = ScalarAttributeValue<std::string,AttributeKind::s>;
 using StringsAttr = VectorAttributeValue<std::string,AttributeKind::ss>;
+using TensorAttr = ScalarAttributeValue<at::Tensor,AttributeKind::t>;
+using TensorsAttr = VectorAttributeValue<at::Tensor,AttributeKind::ts>;
+struct Graph;
+using GraphAttr = ScalarAttributeValue<std::shared_ptr<Graph>,AttributeKind::g>;
+using GraphsAttr = VectorAttributeValue<std::shared_ptr<Graph>,AttributeKind::gs>;
+
+
 // Tensor, shared_ptr<Graph>
 
 struct Attributes {
   Attributes() {}
-  Attributes(const Attributes & rhs) {
+  void copyAttributes(const Attributes & rhs) {
+    values_.clear();
     for(auto & i : rhs.values_) {
       values_.push_back(i->clone());
     }
@@ -94,6 +103,11 @@ struct Attributes {
   CREATE_ACCESSOR(Strings,ss)
   CREATE_ACCESSOR(Int,i)
   CREATE_ACCESSOR(Ints,is)
+  CREATE_ACCESSOR(Tensor,t)
+  CREATE_ACCESSOR(Tensors,ts)
+  CREATE_ACCESSOR(Graph,g)
+  CREATE_ACCESSOR(Graphs,gs)
+
   #undef CREATE_ACCESSOR
 private:
   template<typename T>

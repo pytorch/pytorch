@@ -185,7 +185,8 @@ void attributesTest() {
   attr.ss_(two, {"hi", "now"});
   assert(attr.ss(two).at(1) == "now");
 
-  Attributes attr2 = attr;
+  Attributes attr2;
+  attr2.copyAttributes(attr);
   assert(two.s(one) == "no");
   attr2.f_(one,5);
   assert(attr.s(one) == "no");

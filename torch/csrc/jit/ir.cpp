@@ -112,7 +112,7 @@ std::ostream& operator<<(std::ostream & out, node_list_with_types l) {
 
 std::ostream& operator<<(std::ostream & out, Graph & g) {
   out << "graph(" << node_list_with_types(g.inputs()) << ") {\n";
-  std::vector<FusionGroup*> groups;
+  std::vector<Node*> groups;
   size_t prev_stage = 0;
   for(auto n : g.nodes()) {
     if(!n->cast<Select>()) { //improve readibility by printing selects inline
@@ -140,7 +140,7 @@ std::ostream& operator<<(std::ostream & out, Graph & g) {
           out << scalar;
         }
         out << ")";
-      IR_ELSEIF(FusionGroup)
+      IR_ELSEIF2(FusionGroup)
         out << "fusion_group_" << groups.size();
         groups.push_back(value);
       IR_ELSEIF(CppOp)
@@ -167,7 +167,7 @@ std::ostream& operator<<(std::ostream & out, Graph & g) {
   out << "  return (" << g.outputs() << ");\n}\n";
   size_t i = 0;
   for(auto fg : groups) {
-    out << "with fusion_group_" <<i++ << " = " << fg->subgraph();
+    out << "with fusion_group_" <<i++ << " = " << *fg->g(kSubgraph);
   }
   return out;
 }
@@ -233,7 +233,7 @@ void Node::lint() {
   // - Select inputs is one
   // - Python operator cconv is correct
 
-  IR_IF(this,Constant)
+  IR_IF2(this,Constant)
     JIT_ASSERT(inputs_.size() == 0);
   IR_ELSEIF2(Return)
     JIT_ASSERT(uses_.size() == 0);
@@ -257,7 +257,7 @@ void Node::lint() {
     JIT_ASSERT(n_tensors == inputs_.size());
   IR_ELSEIF(CppOp)
     // TODO: add invariants
-  IR_ELSEIF(Eval)
+  IR_ELSEIF2(Eval)
     // TODO: add invariants
   // TODO: It's not good for these ops to be top-level, it makes cases longer.
   IR_ELSEIF2(Add)
@@ -270,9 +270,9 @@ void Node::lint() {
     JIT_ASSERT(inputs_.size() == 1);
   IR_ELSEIF2(Tanh)
     JIT_ASSERT(inputs_.size() == 1);
-  IR_ELSEIF(FusionGroup)
+  IR_ELSEIF2(FusionGroup)
     // TODO: Typecheck the parameters
-    value->subgraph().lint();
+    value->g(kSubgraph)->lint();
   IR_ELSEIF2(Chunk)
     JIT_ASSERT(inputs_.size() == 1);
   IR_END()
