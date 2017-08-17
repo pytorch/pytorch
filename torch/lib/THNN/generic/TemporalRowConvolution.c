@@ -81,7 +81,7 @@ static void THNN_(unfolded_acc_row)(
 			            + kw * (nOutputFrame);
 			real *dst = input_data + c * (nInputFrame);
 
-			ix = (size_t)(kw);
+			ix = (int64_t)(kw);
 			if (dW == 1) {
 			  real *dst_slice = dst + (size_t)(ix);
 			  THVector_(cadd)(dst_slice, dst_slice, src, 1, nOutputFrame);
