@@ -2,11 +2,25 @@
 #define CAFFE2_CORE_COMMON_GPU_H_
 
 #include <assert.h>
-#include <cublas_v2.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
+
+// Disable strict aliasing errors for CUDA 9.
+// The cuda_fp16.h header in CUDA 9 RC triggers this diagnostic.
+// It is included by cusparse.h as well, so guarding the
+// inclusion of that header here is not enough.
+#if CUDA_VERSION >= 9000
+#ifdef __GNUC__
+#if __GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 6)
+#pragma GCC diagnostic push
+#endif
+#pragma GCC diagnostic ignored "-Wstrict-aliasing"
+#endif // __GNUC__
+#endif // CUDA_VERSION >= 9000
+
+#include <cublas_v2.h>
 #include <curand.h>
-#include <driver_types.h>  // cuda driver types
+#include <driver_types.h>
 
 #include "caffe2/core/logging.h"
 #include "caffe2/core/common.h"
@@ -26,6 +40,15 @@
 #ifdef CAFFE_HAS_CUDA_FP16
 #include <cuda_fp16.h>
 #endif
+
+// Re-enable strict aliasing diagnostic if it was disabled.
+#if CUDA_VERSION >= 9000
+#ifdef __GNUC__
+#if __GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 6)
+#pragma GCC diagnostic pop
+#endif
+#endif // __GNUC__
+#endif // CUDA_VERSION >= 9000
 
 /**
  * The maximum number of GPUs that caffe2 recognizes.
