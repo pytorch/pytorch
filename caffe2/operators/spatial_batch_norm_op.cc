@@ -156,6 +156,7 @@ REGISTER_CPU_OPERATOR(SpatialBN, SpatialBNOp<CPUContext>);
 OPERATOR_SCHEMA(SpatialBN)
     .NumInputs(5)
     .NumOutputs({1, 5})
+    .AllowInplace({{0, 0}})
     .EnforceInplace({{3, 1}, {4, 2}})
     .TensorInferenceFunction(
         [](const OperatorDef& def, const vector<TensorShape>& in) {
