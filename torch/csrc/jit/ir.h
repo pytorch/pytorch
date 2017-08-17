@@ -186,6 +186,20 @@ using ArrayRef = at::ArrayRef<T>;
 using NodeKind = Symbol;
 using graph_node_list = std::list<Node*>;
 
+inline TypePtr getInitialType(NodeKind kind) {
+  static TypePtr multiType = std::make_shared<MultiType>();
+  switch(kind) {
+    case kPythonOp:
+    case kCppOp:
+    case kEval:
+    case kChunk:
+    case kFusionGroup:
+      return multiType;
+    default:
+      return nullptr;
+  }
+}
+
 struct Node : public Attributes {
   TH_DISALLOW_COPY_AND_ASSIGN(Node);
   friend struct Graph;
@@ -202,8 +216,7 @@ private:
   size_t stage_ = 0;           // 0-forward, 1-backward, 2-double-backward,...
 protected:
   TypePtr type_;
-  Node(NodeKind kind_)
-  : kind_(kind_) {}
+  Node(Graph * graph_, NodeKind kind_); //defined after graph
 public:
   NodeKind kind() const {
     return kind_;
@@ -470,7 +483,11 @@ private:
   void removeFromList();
   void lint();
 protected:
-  virtual Node * allocClone(Graph * in_graph) = 0;
+  // subclasses must override
+  virtual Node * allocNewInstance(Graph * g) {
+    return new Node(g,kind());
+  }
+  virtual void cloneFrom(Node * s) {}
 };
 
 /******************* Nodes required inside a Graph ****************************/
@@ -485,40 +502,27 @@ protected:
 // DefaultType constructs the default Type for this node, but
 // can be changed with setType()
 
-struct NullDefault {
-  static TypePtr get() { return nullptr; }
-};
-struct MultiTypeDefault {
-  static TypePtr get() {
-    static TypePtr multiType = std::make_shared<MultiType>();
-    return multiType;
-  }
-};
-template<typename Self, NodeKind K, typename DefaultType = NullDefault>
+template<typename Self, NodeKind K>
 struct NodeWithKind : public Node {
   friend struct Graph; /* so it can access allocClone() */
   static const NodeKind Kind = K;
-  NodeWithKind()
-  : Node(K) {
-    setType(DefaultType::get());
+  NodeWithKind(Graph * g)
+  : Node(g,K) {
   }
-  // virtual so we can easily define a default here
-  // defined using CRTP so cloneFrom doesn't need casts.
-  // called from allocClone
-  virtual void cloneFrom(Self * s) {}
 protected:
   // allocate a new Node with the same type as this node, and
-  // get it initialized in in_graph
-  // in_graph may not be the same graph as this->graph_ because we might be
-  // cloning the node into a new graph
-  // defined here because we need to know Self to allocate a new node.
-  // user-defined cloneFrom is called.
-  virtual Node * allocClone(Graph * in_graph);
+  virtual Node * allocNewInstance(Graph * g) override {
+    return new Self(g);
+  }
 };
-
+#define THE_CTOR(Name) \
+  Name(Graph * g) : NodeWithKind(g) {}
+#define THE_CTORP(Name) \
+  Name(Graph * g) : Primitive(g) {}
 // helper to define simple primitive Ops.
 template<typename Self, NodeKind K>
 struct Primitive : public NodeWithKind<Self, K> {
+  Primitive(Graph * g) : NodeWithKind<Self,K>(g) {}
   void init() {}
   void init(ArrayRef<Node*> inputs) {
     for(auto i : inputs)
@@ -528,17 +532,20 @@ struct Primitive : public NodeWithKind<Self, K> {
 
 // the outputs of the Graph are represented as an Node so that its inputs
 // can be tracked as Uses.
-struct Return : public Primitive<Return, kReturn> {};
+struct Return : public Primitive<Return, kReturn> {
+  THE_CTORP(Return)
+};
 
 // an input tensor to the graph
 struct Param : public NodeWithKind<Param, kParam> {
+  THE_CTOR(Param)
   void init() {}
 };
 
 struct Graph {
 TH_DISALLOW_COPY_AND_ASSIGN(Graph);
 friend struct Node;
-template<typename Self, NodeKind K, typename DefaultType>
+template<typename Self, NodeKind K>
 friend struct NodeWithKind;
 private:
   param_list inputs_;
@@ -612,9 +619,8 @@ public:
   template<typename T, typename... Args >
   T * create(Args&&... args) {
     // default construction of all nodes
-    T* r = new T();
+    T* r = new T(this);
     // common initialization for all nodes when they live in this graph
-    initNewNodeForGraph(r);
     // custom per-node initialization
     r->init(std::forward<Args>(args)...);
     return r;
@@ -624,7 +630,9 @@ public:
   // use node_map to translate inputs of n to inputs of the cloned node
   Node * createClone(Node * n, std::function<Node*(Node*)> node_map) {
     //n can be from a different graph
-    Node * r = n->allocClone(this);
+    Node * r = n->allocNewInstance(this);
+    r->type_ = n->type_;
+    r->cloneFrom(n);
     for(auto i : n->inputs()) {
       r->addInput(node_map(i));
     }
@@ -641,18 +649,6 @@ public:
     return n;
   }
 
-  template<typename T, typename... Args >
-  Node * appendNewNode(Args&&... args) {
-    T* n = create<T>(std::forward<Args>(args)...);
-    return appendNode(n);
-  }
-
-  template<typename T, typename... Args >
-  Node * prependNewNode(Args&&... args) {
-    T* n = create<T>(std::forward<Args>(args)...);
-    return prependNode(n);
-  }
-
   // Checks well-formedness and invariants of graph
   void lint();
 
@@ -662,15 +658,6 @@ public:
   }
 
 private:
-  // per graph initialization for any node
-  // called from NodeWithKind::allocClone and Graph::create
-  void initNewNodeForGraph(Node * r) {
-    r->graph_ = this;
-    r->stage_ = new_node_stage_;
-    r->unique_ = next_unique_++;
-    r->nodes_iter_ = nodes_.end();
-    all_nodes.emplace(r);
-  }
 
   void freeNode(Node * n) {
     auto it = all_nodes.find(n);
@@ -679,6 +666,16 @@ private:
     all_nodes.erase(it);
   }
 };
+
+inline Node::Node(Graph * graph_, NodeKind kind_) :
+  nodes_iter_(graph_->nodes_.end()),
+  kind_(kind_),
+  graph_(graph_),
+  unique_(graph_->next_unique_++),
+  stage_(graph_->new_node_stage_),
+  type_(getInitialType(kind_)) {
+  graph_->all_nodes.emplace(this);
+}
 
 inline void Node::insertAt(graph_node_list::iterator it) {
   JIT_ASSERT(!inGraphList())
@@ -701,16 +698,6 @@ inline void Node::destroy() {
   removeAllInputs();
   removeFromList();
   graph_->freeNode(this);
-}
-
-template<typename Self, NodeKind K, typename DefaultType>
-Node * NodeWithKind<Self,K,DefaultType>::allocClone(Graph * in_graph) {
-  auto s = new Self();
-  s->type_ = this->type_;
-  in_graph->initNewNodeForGraph(s);
-  // static cast is needed because the compiler doesn't know NodeWithKind is a CRTP.
-  s->cloneFrom(static_cast<Self*>(this));
-  return s;
 }
 
 // Helper macros for constructing switch statements over Node types
@@ -768,7 +755,8 @@ std::ostream& operator<<(std::ostream & out, const Type & t);
 /************* All nodes not required to be defined before Graph **************/
 
  // execute a Python function, used for Ops we can't optimize but that we want to optimize around
-struct PythonOp : public NodeWithKind<PythonOp,kPythonOp,MultiTypeDefault> {
+struct PythonOp : public NodeWithKind<PythonOp,kPythonOp> {
+  THE_CTOR(PythonOp)
   //TODO: make this non-autograd specific
   //remove is_legacy, avoid THPObjectPtr to avoid big PyTorch dependency
 
@@ -791,7 +779,8 @@ struct PythonOp : public NodeWithKind<PythonOp,kPythonOp,MultiTypeDefault> {
     this->cconv = cconv;
     this->is_legacy = is_legacy;
   }
-  virtual void cloneFrom(PythonOp * other) override {
+  virtual void cloneFrom(Node * other_) override {
+    auto other = other_->cast<PythonOp>();
     this->cconv = other->cconv;
     this->is_legacy = other->is_legacy;
     Py_INCREF(other->pyobj.get());
@@ -805,7 +794,8 @@ struct PythonOp : public NodeWithKind<PythonOp,kPythonOp,MultiTypeDefault> {
 
 // A Cpp operator is an operator which dispatches directly to an autograd function.
 // TODO: These are not executable without reentrant engine.
-struct CppOp : public NodeWithKind<CppOp,kCppOp, MultiTypeDefault> {
+struct CppOp : public NodeWithKind<CppOp,kCppOp> {
+  THE_CTOR(CppOp)
   std::shared_ptr<torch::autograd::Function> fn;
   std::string name();
   void init(std::shared_ptr<torch::autograd::Function> fn) {
@@ -813,7 +803,8 @@ struct CppOp : public NodeWithKind<CppOp,kCppOp, MultiTypeDefault> {
   }
 };
 
-struct Eval : public NodeWithKind<Eval,kEval,MultiTypeDefault> {
+struct Eval : public NodeWithKind<Eval,kEval> {
+  THE_CTOR(Eval)
   void init() {};
 };
 
@@ -825,6 +816,7 @@ struct Eval : public NodeWithKind<Eval,kEval,MultiTypeDefault> {
 // number_of_outputs = op.uses().size()
 // this will change if Tuples ever become first class.
 struct Select : public NodeWithKind<Select,kSelect> {
+  THE_CTOR(Select)
   void init(Node * node, size_t offset) {
     addInput(node);
     this->offset_ = offset;
@@ -837,7 +829,8 @@ struct Select : public NodeWithKind<Select,kSelect> {
   size_t offset() {
     return offset_;
   }
-  virtual void cloneFrom(Select * other) override {
+  virtual void cloneFrom(Node* other_) override {
+    auto other = other_->cast<Select>();
     this->offset_ = other->offset_;
   }
 private:
@@ -847,13 +840,14 @@ private:
 // NB: non-nullary constructors don't get forwarded to the
 // parents, so you have to spell out the constructors you want explicitly.
 
-struct Add : public Primitive<Add,kAdd> {};
-struct Mul : public Primitive<Mul,kMul> {};
-struct Negate : public Primitive<Negate,kNegate> {};
-struct Sigmoid : public Primitive<Sigmoid,kSigmoid> {};
-struct Tanh : public Primitive<Tanh,kTanh> {};
+struct Add : public Primitive<Add,kAdd> { THE_CTORP(Add) };
+struct Mul : public Primitive<Mul,kMul> {THE_CTORP(Mul)};
+struct Negate : public Primitive<Negate,kNegate> {THE_CTORP(Negate)};
+struct Sigmoid : public Primitive<Sigmoid,kSigmoid> {THE_CTORP(Sigmoid)};
+struct Tanh : public Primitive<Tanh,kTanh> {THE_CTORP(Tanh)};
 
-struct Chunk : public NodeWithKind<Chunk, kChunk,MultiTypeDefault> {
+struct Chunk : public NodeWithKind<Chunk, kChunk> {
+  THE_CTOR(Chunk)
   void init(int64_t num_chunks_, int64_t dim_) {
     num_chunks = num_chunks_;
     dim = dim_;
@@ -868,6 +862,7 @@ struct Chunk : public NodeWithKind<Chunk, kChunk,MultiTypeDefault> {
 // A tensor constant
 // TODO: constant compression
 struct Constant : public NodeWithKind<Constant, kConstant> {
+  THE_CTOR(Constant)
   void init(const at::Tensor& ref) {
     AutoGPU guard(ref.type().isCuda() ? ref.get_device() : -1);
     value = ref.clone();
@@ -876,11 +871,13 @@ struct Constant : public NodeWithKind<Constant, kConstant> {
   at::Tensor value;
 };
 
-struct FusionGroup : public NodeWithKind<FusionGroup,kFusionGroup,MultiTypeDefault> {
+struct FusionGroup : public NodeWithKind<FusionGroup,kFusionGroup> {
+  THE_CTOR(FusionGroup)
   void init() {
     subgraph_ = std::make_shared<Graph>();
   }
-  virtual void cloneFrom(FusionGroup * other) {
+  virtual void cloneFrom(Node * other_) {
+    auto other = other_->cast<FusionGroup>();
     subgraph_ = other->subgraph_;
   }
   Graph & subgraph() {

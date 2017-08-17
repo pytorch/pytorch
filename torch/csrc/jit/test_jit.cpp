@@ -80,7 +80,7 @@ static void codeTemplateTest() {
 #ifdef WITH_CUDA
 template<typename T>
 Node * appendNewNode(Graph& graph, ArrayRef<Node*> inputs) {
-  return graph.appendNewNode<T>(inputs);
+  return graph.appendNode(graph.create<T>(inputs));
 }
 
 static void fusionTests() {
