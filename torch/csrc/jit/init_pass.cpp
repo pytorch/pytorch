@@ -7,9 +7,8 @@ namespace {
 
 using constructor_type = std::function<Node*(Graph*, PythonOp*)>;
 
-template<typename T>
 Node * trivial_ctor(Graph *graph, PythonOp *p) {
-  return graph->createOld<T>();
+  return graph->create(stringToSymbol(p->name()));
 }
 
 Node * chunk_ctor(Graph * graph, PythonOp * p) {
@@ -19,12 +18,12 @@ Node * chunk_ctor(Graph * graph, PythonOp * p) {
 }
 
 std::unordered_map<std::string, constructor_type> constructors = {
-  {"Add",         trivial_ctor<Add>},
-  {"Mul",         trivial_ctor<Mul>},
-  {"Sigmoid",     trivial_ctor<Sigmoid>},
-  {"Tanh",        trivial_ctor<Tanh>},
+  {"Add",         trivial_ctor},
+  {"Mul",         trivial_ctor},
+  {"Sigmoid",     trivial_ctor},
+  {"Tanh",        trivial_ctor},
   {"Chunk",       chunk_ctor},
-  {"Negate",      trivial_ctor<Negate>},
+  {"Negate",      trivial_ctor},
 };
 
 } // anonymous namespace

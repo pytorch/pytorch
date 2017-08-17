@@ -260,15 +260,15 @@ void Node::lint() {
   IR_ELSEIF(Eval)
     // TODO: add invariants
   // TODO: It's not good for these ops to be top-level, it makes cases longer.
-  IR_ELSEIF(Add)
+  IR_ELSEIF2(Add)
     JIT_ASSERT(inputs_.size() == 2);
-  IR_ELSEIF(Mul)
+  IR_ELSEIF2(Mul)
     JIT_ASSERT(inputs_.size() == 2);
-  IR_ELSEIF(Negate)
+  IR_ELSEIF2(Negate)
     JIT_ASSERT(inputs_.size() == 1);
-  IR_ELSEIF(Sigmoid)
+  IR_ELSEIF2(Sigmoid)
     JIT_ASSERT(inputs_.size() == 1);
-  IR_ELSEIF(Tanh)
+  IR_ELSEIF2(Tanh)
     JIT_ASSERT(inputs_.size() == 1);
   IR_ELSEIF(FusionGroup)
     // TODO: Typecheck the parameters
