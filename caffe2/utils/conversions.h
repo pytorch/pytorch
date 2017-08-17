@@ -3,7 +3,9 @@
 #include <caffe2/core/types.h>
 
 #ifdef __CUDA_ARCH__
-#include <cuda_fp16.h>
+// Proxy for including cuda_fp16.h, because common_gpu.h
+// has necessary diagnostic guards.
+#include <caffe2/core/common_gpu.h>
 #endif
 
 #ifdef __CUDA_ARCH__
@@ -113,7 +115,18 @@ inline float cpu_half2float(float16 h) {
 
 #if CUDA_VERSION >= 9000
 CONVERSIONS_DECL float16 halfToFloat16(half x) {
+#ifdef __GNUC__
+#if __GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 6)
+#pragma GCC diagnostic push
+#endif
+#pragma GCC diagnostic ignored "-Wstrict-aliasing"
+#endif // __GNUC__
   float16 r = *reinterpret_cast<float16*>(&x);
+#ifdef __GNUC__
+#if __GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 6)
+#pragma GCC diagnostic pop
+#endif
+#endif // __GNUC__
   return r;
 }
 
