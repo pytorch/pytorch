@@ -897,12 +897,38 @@ void addGlobalMethods(py::module& m) {
             ParseProtobufFromLargeString(net_def.cast<std::string>(), &def));
         py::gil_scoped_release g;
 
-        auto t = TransformRegistry()->Create(transform_key);
-        CAFFE_ENFORCE(
-            t != nullptr, "Transform not found in registry: ", transform_key);
-        NetDef transformed_net = t->ApplyTo(def);
+        auto transformed_net = ApplyTransform(transform_key, def);
 
         std::string protob;
+        CAFFE_ENFORCE(transformed_net.SerializeToString(&protob));
+        return py::bytes(protob);
+      });
+  m.def(
+      "apply_transform_if_faster",
+      [](const string& transform_key,
+         const py::bytes& net_def_bytes,
+         const py::bytes& init_def_bytes,
+         int warmup_runs,
+         int main_runs,
+         double improvement_threshold) {
+        NetDef def;
+        CAFFE_ENFORCE(ParseProtobufFromLargeString(
+            net_def_bytes.cast<std::string>(), &def));
+        NetDef init_def;
+        CAFFE_ENFORCE(ParseProtobufFromLargeString(
+            init_def_bytes.cast<std::string>(), &init_def));
+        py::gil_scoped_release g;
+
+        std::string protob;
+
+        auto transformed_net = ApplyTransformIfFaster(
+            transform_key,
+            def,
+            init_def,
+            warmup_runs,
+            main_runs,
+            improvement_threshold);
+
         CAFFE_ENFORCE(transformed_net.SerializeToString(&protob));
         return py::bytes(protob);
       });

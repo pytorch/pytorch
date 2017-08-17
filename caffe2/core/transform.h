@@ -2,6 +2,7 @@
 
 #include "caffe2/core/common.h"
 #include "caffe2/core/graph.h"
+#include "caffe2/core/workspace.h"
 #include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/utils/proto_utils.h"
 
@@ -152,5 +153,22 @@ unique_ptr<Transform> CreateTransform(string key);
 CAFFE_DECLARE_REGISTRY(TransformRegistry, Transform);
 #define REGISTER_TRANSFORM(name, ...) \
   CAFFE_REGISTER_CLASS(TransformRegistry, name, __VA_ARGS__)
+
+// Create a Transform object from registry,
+// and immediately apply it to a Netdef.
+NetDef ApplyTransform(const string& key, const NetDef& netdef);
+
+// Create a Transform object from registry, apply it to a NetDef.
+// Will only return the transformed net if it is faster than the old net.
+// This will run the init net first, will run the two nets warmup_runs times.
+// Then, we will take the average time of main_runs runs, and only keep the
+// transformed net if it is faster by a factor of improvement_threshold.
+NetDef ApplyTransformIfFaster(
+    const string& key,
+    const NetDef& netdef,
+    const NetDef& init_netdef,
+    const int warmup_runs,
+    const int main_runs,
+    const double improvement_threshold);
 
 } // namespace
