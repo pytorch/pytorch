@@ -139,8 +139,8 @@ int THLongStorage_inferExpandGeometry(int64_t *tensorSizes, int64_t *tensorStrid
       } else {
         THFree(expandedSizesCalc);
         THFree(expandedStridesCalc);
-        snprintf(error_buffer, buffer_len, "The expanded size of the tensor (%ld) must match the existing size (%ld) at "
-                 "non-singleton dimension %ld.", targetSize, size, i);
+        snprintf(error_buffer, buffer_len, "The expanded size of the tensor (%" PRId64 ") must match the existing size (%" PRId64 ") at "
+                 "non-singleton dimension %" PRId64 ".", targetSize, size, i);
         return -1;
       }
     }
