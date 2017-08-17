@@ -11,7 +11,7 @@ def threshold_primspec(input, threshold=0, value=0, inplace=False):
 def leakyrelu_primspec(input, negative_slope, inplace=False):
     if inplace:
         return None
-    return torch.toffee.op("LeakyRelu", input, alpha=float(negative_slope))
+    return torch.toffee.op("LeakyRelu", input, alpha=negative_slope)
 
 
 primspec_fns = {

@@ -4,6 +4,7 @@
 #include "torch/csrc/Exceptions.h"
 
 #include <toffee/toffee.pb.h>
+#include <toffee/schema.h>
 #include <google/protobuf/text_format.h>
 #include <google/protobuf/io/zero_copy_stream_impl.h>
 
@@ -162,7 +163,11 @@ std::string ExportGraph(std::shared_ptr<Graph>& g) {
       PyObject* py_op_type = PyDict_GetItemString(raw_output.get(), "name");
       if (!py_op_type) throw std::runtime_error("primspec missing name key");
       if (!THPUtils_checkString(py_op_type)) throw std::runtime_error("primspec returned a non-string name");
-      p_n->set_op_type(THPUtils_unpackString(py_op_type));
+      std::string op_type = THPUtils_unpackString(py_op_type);
+      p_n->set_op_type(op_type);
+
+      const toffee::OpSchema* op_schema = toffee::OpSchemaRegistry::Schema(op_type);
+      // For now, DON'T require op schema to exist
 
       PyObject* py_inputs = PyDict_GetItemString(raw_output.get(), "inputs");
       if (py_inputs) {
@@ -215,11 +220,36 @@ std::string ExportGraph(std::shared_ptr<Graph>& g) {
             continue;
           }
           toffee::AttributeProto* attr = p_n->add_attribute();
-          attr->set_name(THPUtils_unpackString(key));
-          if (THPUtils_checkLong(value)) {
-            attr->set_i(THPUtils_unpackLong(value));
-          } else if (THPUtils_checkDouble(value)) { // order matters, since all longs are doubles
-            attr->set_f(THPUtils_unpackDouble(value)); // TODO: precision?!
+          auto key_s = THPUtils_unpackString(key);
+          attr->set_name(key_s);
+          if (THPUtils_checkDouble(value)) {
+            // OK, so, sometimes a Python user will pass an integer, where
+            // really what we wanted was a float.  We'll use the Toffee IR
+            // schema to disambiguate this case, if it is available.
+            bool done = false;
+            do {
+              if (!op_schema) break;
+              auto attr_it = op_schema->attributes().find(key_s);
+              if (attr_it == op_schema->attributes().end()) break;
+              if (attr_it->second.type == toffee::OpSchema::AttrType::FLOAT) {
+                attr->set_f(THPUtils_unpackDouble(value));
+              } else if (attr_it->second.type == toffee::OpSchema::AttrType::INT) {
+                attr->set_i(THPUtils_unpackLong(value));
+              } else {
+                // We are NOT in the business of schema checking.  Fallback on
+                // detecting the type.
+                break;
+              }
+              done = true;
+            } while (0);
+            if (!done) {
+              // order matters, since all longs are doubles
+              if (THPUtils_checkLong(value)) {
+                attr->set_i(THPUtils_unpackLong(value));
+              } else {
+                attr->set_f(THPUtils_unpackDouble(value)); // TODO: precision?!
+              }
+            }
           } else if (THPUtils_checkString(value)) {
             // TODO: binary data?!
             attr->set_s(THPUtils_unpackString(value));
@@ -230,12 +260,38 @@ std::string ExportGraph(std::shared_ptr<Graph>& g) {
             int seen_string = 0;
             for (Py_ssize_t i = 0; i < num_value_items; i++) {
               PyObject *elem = PyTuple_GET_ITEM(value, i);
-              if (THPUtils_checkLong(elem)) {
-                attr->add_ints(THPUtils_unpackLong(elem));
-                seen_int = 1;
-              } else if (THPUtils_checkDouble(elem)) { // order matters, since all longs are doubles
-                attr->add_floats(THPUtils_unpackDouble(elem)); // TODO: precision?!
-                seen_float = 1;
+              if (THPUtils_checkDouble(elem)) {
+                // Copy paste BUT NOT QUITE job of the checkDouble logic from
+                // above.  This sort of code kind of makes me wish we didn't
+                // distinguish between FLOATS and FLOAT.
+                bool done = false;
+                do {
+                  if (!op_schema) break;
+                  auto attr_it = op_schema->attributes().find(key_s);
+                  if (attr_it == op_schema->attributes().end()) break;
+                  if (attr_it->second.type == toffee::OpSchema::AttrType::FLOATS) {
+                    attr->add_floats(THPUtils_unpackDouble(elem));
+                    seen_float = 1;
+                  } else if (attr_it->second.type == toffee::OpSchema::AttrType::INTS) {
+                    attr->add_ints(THPUtils_unpackLong(elem));
+                    seen_int = 1;
+                  } else {
+                    // We are NOT in the business of schema checking.  Fallback on
+                    // detecting the type.
+                    break;
+                  }
+                  done = true;
+                } while (0);
+                if (!done) {
+                  // order matters, since all longs are doubles
+                  if (THPUtils_checkLong(elem)) {
+                    attr->add_ints(THPUtils_unpackLong(elem));
+                    seen_int = 1;
+                  } else {
+                    attr->set_f(THPUtils_unpackDouble(elem)); // TODO: precision?!
+                    seen_float = 1;
+                  }
+                }
               } else if (THPUtils_checkString(elem)) {
                 // TODO: binary data?!
                 attr->add_strings(THPUtils_unpackString(elem));
