@@ -376,7 +376,7 @@ void THCTensor_(diag)(THCState *state, THCTensor *self_, THCTensor *src_, int64_
   THCudaCheck(cudaGetLastError());
 }
 
-void THCTensor_(eye)(THCState *state, THCTensor *self_, long n, long m)
+void THCTensor_(eye)(THCState *state, THCTensor *self_, int64_t n, int64_t m)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
   THArgCheck(n > 0, 1, "invalid argument");
@@ -387,9 +387,9 @@ void THCTensor_(eye)(THCState *state, THCTensor *self_, long n, long m)
   THCTensor_(resize2d)(state, self_, n, m);
   THCTensor_(zero)(state, self_);
 
-  long sz = THMin(n, m);
-  long stride = THCTensor_(stride)(state, self_, 0) +
-                THCTensor_(stride)(state, self_, 1);
+  int64_t sz = THMin(n, m);
+  int64_t stride = THCTensor_(stride)(state, self_, 0) +
+                   THCTensor_(stride)(state, self_, 1);
 
   THCTensor *diag = THCTensor_(newWithStorage1d)(state, self_->storage,
       self_->storageOffset,  sz, stride);
