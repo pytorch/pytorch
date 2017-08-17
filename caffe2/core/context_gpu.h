@@ -15,8 +15,7 @@ namespace caffe2 {
 
 enum class CudaMemoryPoolType {
   NONE = 0,
-  CNMEM = 1,
-  CUB = 2,
+  CUB = 1,
 };
 
 /**
