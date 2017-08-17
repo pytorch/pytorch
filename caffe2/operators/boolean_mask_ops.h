@@ -24,6 +24,7 @@ class SequenceMaskOp final : public Operator<Context> {
   explicit SequenceMaskOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         axis_(OperatorBase::GetSingleArgument<int>("axis", 1)),
+        radius_(OperatorBase::GetSingleArgument<int>("radius", 10)),
         grad_(OperatorBase::GetSingleArgument<bool>("grad", false)),
         fill_val_(OperatorBase::GetSingleArgument<float>(
             "fill_val",
@@ -36,6 +37,7 @@ class SequenceMaskOp final : public Operator<Context> {
 
  private:
   int axis_;
+  int radius_;
   std::string mode_;
   bool grad_;
   float fill_val_;
