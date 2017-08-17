@@ -320,6 +320,10 @@ class IndexSelect(Function):
 class Concat(Function):
 
     @staticmethod
+    def primspec(dim, *inputs):
+        return torch.toffee.op("Concat", inputs, axis=dim)
+
+    @staticmethod
     def forward(ctx, dim, *inputs):
         ctx.dim = dim
         ctx.input_sizes = [i.size(dim) for i in inputs]
