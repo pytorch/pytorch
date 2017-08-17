@@ -308,7 +308,7 @@ if IS_WINDOWS:
             sys.version_info[0]) + str(sys.version_info[1]) + '-win_amd64.lib'
 
 if not IS_WINDOWS and WITH_NCCL and (subprocess.call('ldconfig -p | grep libnccl >/dev/null', shell=True) == 0 or
-                  subprocess.call('/sbin/ldconfig -p | grep libnccl >/dev/null', shell=True) == 0):
+                                     subprocess.call('/sbin/ldconfig -p | grep libnccl >/dev/null', shell=True) == 0):
         SYSTEM_NCCL = True
 
 main_compile_args = ['-D_THP_CORE']
