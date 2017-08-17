@@ -168,7 +168,10 @@ bool ConcatOp<Context>::RunOnDevice() {
   split->Resize(vector<TIndex>(1, InputSize()));
   int* axis_data = split->template mutable_data<int>();
   auto& input_zero = Input(0);
-  CAFFE_ENFORCE_LT(axis_, input_zero.ndim(), "Axis not in input ndim range.");
+  CAFFE_ENFORCE_LT(
+      axis_,
+      input_zero.ndim() + (add_axis_ ? 1 : 0),
+      "Axis not in input ndim range.");
   for (int i = 1; i < InputSize(); ++i) {
     CAFFE_ENFORCE(
         Input(i).meta() == input_zero.meta(),
