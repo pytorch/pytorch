@@ -169,6 +169,13 @@ class ComputeBlobRecyclingForDag {
       }
       for (const auto& output : net.op(op_index).output()) {
         blob_seen[output] += 1;
+        blob_device_[output] = net.op(op_index).device_option();
+        // Exception for CopyGPUToCPU that has
+        // cuda device option but whose inputs/outputs are on CPU
+        if (net.op(op_index).type() == "CopyGPUToCPU") {
+          blob_device_[output].set_device_type(0);
+          blob_device_[output].set_cuda_gpu_id(0);
+        }
       }
     }
 
@@ -242,7 +249,7 @@ class ComputeBlobRecyclingForDag {
     LOG(INFO) << "Remapping " << mapping_.size() << " using "
               << mapped_blobs_set.size() << " shared blobs.";
     if (floats_saved_ > 0) {
-      LOG(INFO) << "Memoger saved approximately : "
+      LOG(INFO) << "Memonger saved approximately : "
                 << (floats_saved_ * 4.0 / 1024.0 / 1024.0) << " MB.";
     }
 
@@ -319,8 +326,8 @@ class ComputeBlobRecyclingForDag {
       if (has_key(shareable_blob_names, output) &&
           !has_key(processed_output_blobs_, output) &&
           !has_key(new_free_blobs_set, output)) {
-        const string freed_blob =
-            get_free_blob(output, blob_shapes, tokens, free_blobs);
+        const string freed_blob = get_free_blob(
+            output, blob_shapes, tokens, free_blobs, blob_device_[output]);
         if (freed_blob != "") {
           req_tokens_[freed_blob].insert(tokens->begin(), tokens->end());
           share_counts_[freed_blob]++;
@@ -411,7 +418,13 @@ class ComputeBlobRecyclingForDag {
   // Rturns true if the op that generates that blob acquires all tokens.
   inline bool can_use_blob(
       const string& blob_name,
-      std::unordered_set<int>* tokens) {
+      std::unordered_set<int>* tokens,
+      const DeviceOption& device_option) {
+    const DeviceOption& blob_device = blob_device_[blob_name];
+    if (device_option.device_type() != blob_device.device_type() ||
+        device_option.cuda_gpu_id() != blob_device.cuda_gpu_id()) {
+      return false;
+    }
     for (const int token : req_tokens_[blob_name]) {
       if (tokens->find(token) == tokens->end()) {
         return false;
@@ -425,7 +438,8 @@ class ComputeBlobRecyclingForDag {
       const string& blob_name,
       const std::unordered_map<string, vector<int>>& blob_shapes,
       std::unordered_set<int>* tokens,
-      std::vector<std::pair<int, string>>* free_blobs) {
+      std::vector<std::pair<int, string>>* free_blobs,
+      const DeviceOption& device) {
     string freed_blob = "";
     if (blob_shapes.size() == 0) {
       std::vector<std::pair<int, string>> cant_use_blobs;
@@ -436,7 +450,7 @@ class ComputeBlobRecyclingForDag {
             std::greater<std::pair<int, string>>());
         const auto cand_free_blob = free_blobs->back();
         free_blobs->pop_back();
-        if (can_use_blob(cand_free_blob.second, tokens)) {
+        if (can_use_blob(cand_free_blob.second, tokens, device)) {
           freed_blob = cand_free_blob.second;
           break;
         } else {
@@ -458,7 +472,7 @@ class ComputeBlobRecyclingForDag {
       int free_blob_index = -1;
       for (int i = 0; i < free_blobs->size(); ++i) {
         const string& cb_name = (*free_blobs)[i].second;
-        if (can_use_blob(cb_name, tokens)) {
+        if (can_use_blob(cb_name, tokens, device)) {
           const int cand_bz = blob_sizes_[cb_name];
           CAFFE_ENFORCE(blob_sizes_.find(cb_name) != blob_sizes_.end());
           if (cand_bz >= best_size) {
@@ -494,6 +508,7 @@ class ComputeBlobRecyclingForDag {
   std::vector<std::unordered_set<int>> op_token_deposit_;
   std::unordered_set<string> optim_op_outputs_;
   std::unordered_map<string, string> mapping_;
+  std::unordered_map<string, DeviceOption> blob_device_;
   // The set of output blobs we already processed.
   std::unordered_set<string> processed_output_blobs_;
   std::vector<bool> op_visited_;
