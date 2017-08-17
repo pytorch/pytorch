@@ -459,6 +459,7 @@ main_link_args += [TOFFEE_LIB]
 main_sources += [
     "torch/csrc/toffee/export.cpp",
     "torch/csrc/autograd/functions/toffee/convolution.cpp",
+    "torch/csrc/autograd/functions/toffee/batch_normalization.cpp",
 ]
 extra_compile_args += ['-DWITH_TOFFEE']
 

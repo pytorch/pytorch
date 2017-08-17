@@ -23,6 +23,7 @@ struct PrimSpecContext {
   std::string node(jit::Node *n) {
     return std::to_string(n->unique());
   }
+  int batch_norm_count = 0;
 };
 
 struct primspec_unconvertible : public std::runtime_error {
