@@ -377,6 +377,12 @@ class Clone(Function):
 class Squeeze(InplaceFunction):
 
     @staticmethod
+    def primspec(input, dim, inplace=False):
+        if inplace:
+            return None
+        return torch.toffee.op("Squeeze", input, dims=[dim])
+
+    @staticmethod
     def forward(ctx, input, dim=None, inplace=False):
         ctx.dim = dim
         ctx.input_size = input.size()

@@ -397,6 +397,17 @@ class FractionalMaxPool2dBackward(Function):
 class AvgPool2d(Function):
 
     @staticmethod
+    def primspec(input, kernel_size, stride=None, padding=0,
+                 ceil_mode=False, count_include_pad=True):
+        if ceil_mode:
+            return None
+        return torch.toffee.op("AveragePool", input,
+                               kernel=kernel_size,
+                               stride=stride,
+                               pad=padding,
+                               _outputs=(0,))
+
+    @staticmethod
     def forward(ctx, input, kernel_size, stride=None, padding=0,
                 ceil_mode=False, count_include_pad=True):
         ctx.kernel_size = _pair(kernel_size)
