@@ -4,6 +4,7 @@
 #include <string>
 #include <unordered_map>
 #include "torch/csrc/jit/interned_strings.h"
+#include "torch/csrc/jit/assert.h"
 
 namespace torch { namespace jit {
 
