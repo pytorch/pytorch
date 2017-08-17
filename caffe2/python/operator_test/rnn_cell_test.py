@@ -894,6 +894,11 @@ class RNNCellTest(hu.HypothesisTestCase):
         op = net._net.op[-1]
         inputs = [workspace.FetchBlob(name) for name in op.input]
 
+        # Validate forward only mode is in effect
+        if fwd_only:
+            for arg in op.arg:
+                self.assertFalse(arg.name == 'backward_step_net')
+
         self.assertReferenceChecks(
             hu.cpu_do,
             op,

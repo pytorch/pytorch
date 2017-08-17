@@ -82,6 +82,7 @@ class RNNCell(object):
             links=dict(zip(states_prev, states)),
             timestep=timestep,
             scope=self.name,
+            forward_only=self.forward_only,
             outputs_with_grads=outputs_with_grads,
             recompute_blobs_on_backward=self.recompute_blobs,
         )
