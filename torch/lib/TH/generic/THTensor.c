@@ -922,7 +922,7 @@ THDescBuff THTensor_(desc)(const THTensor *tensor) {
   int i;
   for(i = 0; i < tensor->nDimension; i++) {
     if(n >= L) break;
-    n += snprintf(str+n, L-n, "%lld", tensor->size[i]);
+    n += snprintf(str+n, L-n, "%" PRId64, tensor->size[i]);
     if(i < tensor->nDimension-1) {
       n += snprintf(str+n, L-n, "x");
     }

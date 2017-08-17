@@ -11,6 +11,7 @@
 #include <time.h>
 #include <string.h>
 #include <stddef.h>
+#include <inttypes.h>
 
 #cmakedefine USE_BLAS
 #cmakedefine USE_LAPACK

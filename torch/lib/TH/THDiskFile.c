@@ -407,7 +407,7 @@ static size_t THDiskFile_readLong(THFile *self, int64_t *data, size_t n)
     size_t i;
     for(i = 0; i < n; i++)
     {
-      int ret = fscanf(dfself->handle, "%lld", &data[i]); if(ret <= 0) break; else nread++;
+      int ret = fscanf(dfself->handle, "%" PRId64, &data[i]); if(ret <= 0) break; else nread++;
     }
     if(dfself->file.isAutoSpacing && (n > 0))
     {
@@ -482,7 +482,7 @@ static size_t THDiskFile_writeLong(THFile *self, int64_t *data, size_t n)
     size_t i;
     for(i = 0; i < n; i++)
     {
-      int ret = fprintf(dfself->handle, "%lld", data[i]); if(ret <= 0) break; else nwrite++;
+      int ret = fprintf(dfself->handle, "%" PRId64, data[i]); if(ret <= 0) break; else nwrite++;
       if( dfself->file.isAutoSpacing && (i < n-1) )
         fprintf(dfself->handle, " ");
     }

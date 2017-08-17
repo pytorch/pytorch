@@ -403,7 +403,7 @@ static size_t THMemoryFile_readLong(THFile *self, int64_t *data, size_t n)
       size_t nByteRead = 0;
       char spaceChar = 0;
       char *spacePtr = THMemoryFile_strnextspace(mfself->storage->data+mfself->position, &spaceChar);
-      int nByteRead_; int ret = sscanf(mfself->storage->data+mfself->position, "%lld%n", &data[i], &nByteRead_); nByteRead = nByteRead_; if(ret <= 0) break; else nread++;
+      int nByteRead_; int ret = sscanf(mfself->storage->data+mfself->position, "%" PRId64 "%n", &data[i], &nByteRead_); nByteRead = nByteRead_; if(ret <= 0) break; else nread++;
       if(ret == EOF)
       {
         while(mfself->storage->data[mfself->position])
@@ -487,7 +487,7 @@ static size_t THMemoryFile_writeLong(THFile *self, int64_t *data, size_t n)
       ssize_t nByteWritten;
       while (1)
       {
-        nByteWritten = snprintf(mfself->storage->data+mfself->position, mfself->storage->size-mfself->position, "%lld", data[i]);
+        nByteWritten = snprintf(mfself->storage->data+mfself->position, mfself->storage->size-mfself->position, "%" PRId64, data[i]);
         if( (nByteWritten > -1) && (nByteWritten < mfself->storage->size-mfself->position) )
         {
           mfself->position += nByteWritten;

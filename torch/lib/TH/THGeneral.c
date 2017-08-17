@@ -368,7 +368,7 @@ TH_API THDescBuff _THSizeDesc(const int64_t *size, const int64_t ndim) {
 
   for (i = 0; i < ndim; i++) {
     if (n >= L) break;
-    n += snprintf(str+n, L-n, "%d", size[i]);
+    n += snprintf(str+n, L-n, "%" PRId64, size[i]);
     if (i < ndim-1) {
       n += snprintf(str+n, L-n, " x ");
     }

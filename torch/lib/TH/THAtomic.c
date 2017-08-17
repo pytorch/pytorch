@@ -54,7 +54,6 @@ int THAtomicAdd(int32_t volatile *a, int32_t value)
 #if defined(USE_C11_ATOMICS)
   return atomic_fetch_add(a, value);
 #elif defined(USE_MSC_ATOMICS)
-  //assert(sizeof(int32_t) == sizeof(long));
   return _InterlockedExchangeAdd((int32_t*)a, value);
 #elif defined(USE_GCC_ATOMICS)
   return __sync_fetch_and_add(a, value);
@@ -82,7 +81,6 @@ int THAtomicCompareAndSwap(int32_t volatile *a, int32_t oldvalue, int32_t newval
 #if defined(USE_C11_ATOMICS)
   return atomic_compare_exchange_strong(a, &oldvalue, newvalue);
 #elif defined(USE_MSC_ATOMICS)
-  //assert(sizeof(int32_t) == sizeof(long));
   return (_InterlockedCompareExchange((int32_t*)a, (int32_t)newvalue, (int32_t)oldvalue) == (int32_t)oldvalue);
 #elif defined(USE_GCC_ATOMICS)
   return __sync_bool_compare_and_swap(a, oldvalue, newvalue);

@@ -68,8 +68,8 @@ int THLongStorage_inferSize2(THLongStorage *output, int64_t *sizesA, int64_t dim
       expandedSizes[i] = THMax(sizeA, sizeB);
     } else {
       THFree(expandedSizes);
-      snprintf(error_buffer, buffer_len, "The size of tensor a (%ld) must match the size of tensor b (%ld) at "
-               "non-singleton dimension %ld.", sizeA, sizeB, i);
+      snprintf(error_buffer, buffer_len, "The size of tensor a (%" PRId64 ") must match the size of tensor b (%" PRId64 ") at "
+               "non-singleton dimension %" PRId64 ".", sizeA, sizeB, i);
       return -1;
     }
   }
@@ -104,8 +104,8 @@ int THLongStorage_inferSizeN(THLongStorage *output, int n, int64_t **sizes, int6
         expandedSizes[ i ] =  THMax(expandedSizes[ i ], size);
       } else {
         THFree(expandedSizes);
-        snprintf(error_buffer, buffer_len, "The size of tensor %i (%ld) must match the expanded size"
-                 "of tensor (%ld) at non-singleton dimension %ld.", j, size, expandedSizes[ i ], i);
+        snprintf(error_buffer, buffer_len, "The size of tensor %i (%" PRId64 ") must match the expanded size"
+                 "of tensor (%" PRId64 ") at non-singleton dimension %" PRId64 ".", j, size, expandedSizes[ i ], i);
         return -1;
       }
     }

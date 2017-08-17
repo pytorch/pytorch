@@ -205,7 +205,7 @@ void THTensor_(multinomialAliasDraw)(THLongTensor *self, THGenerator *_generator
 
       _q = THTensor_fastGet1d(q, rand_ind);
 
-      _mask = (int) THRandom_bernoulli(_generator, _q);
+      _mask = THRandom_bernoulli(_generator, _q);
       
       J_sample = THTensor_fastGet1d(J, rand_ind);
 
