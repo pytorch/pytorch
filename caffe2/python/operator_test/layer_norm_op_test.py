@@ -12,7 +12,7 @@ import numpy as np
 
 
 class TestLayerNormOp(hu.HypothesisTestCase):
-    @given(X=hu.tensors(n=1), **hu.gcs_cpu_only)
+    @given(X=hu.tensors(n=1), **hu.gcs)
     def test_layer_norm_op(self, X, gc, dc):
         X = X[0]
         if len(X.shape) == 1:
@@ -46,4 +46,10 @@ class TestLayerNormOp(hu.HypothesisTestCase):
             op=op,
             inputs=[X],
             reference=layer_norm_ref
+        )
+        self.assertDeviceChecks(
+            device_options=dc,
+            op=op,
+            inputs=[X],
+            outputs_to_check=[0, 1, 2],
         )
