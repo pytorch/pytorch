@@ -74,7 +74,7 @@ std::string ExportGraph(std::unique_ptr<Graph>& g) {
       throw std::runtime_error("Constant not supported yet");
     IR_ELSEIF2(Return)
       JIT_ASSERT(0);
-    IR_ELSEIF(Select)
+    IR_ELSEIF2(Select)
       JIT_ASSERT(0);
     IR_ELSEIF2(Param)
       JIT_ASSERT(0);

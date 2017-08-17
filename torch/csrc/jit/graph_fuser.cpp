@@ -116,7 +116,7 @@ struct GraphFuser {
     group->insertBefore(n);
     Node * mergedNode = mergeNodeIntoGroup(group,n);
     getSubgraph(group).registerOutput(mergedNode);
-    auto sel = graph->createOld<Select>(group,0);
+    auto sel = graph->createSelect(group,0);
     sel->setType(n->typeOption());
     sel->insertAfter(group);
     n->replaceAllUsesWith(sel);
@@ -140,7 +140,7 @@ struct GraphFuser {
     // created in FusionGroup
     if(producer->uses().size() != 0) {
       size_t offset = getSubgraph(group).registerOutput(merged);
-      Node * new_producer = graph->createOld<Select>(group,offset);
+      Node * new_producer = graph->createSelect(group,offset);
       new_producer->setType(producer->typeOption());
       insertAfter(new_producer, group);
       producer->replaceAllUsesWith(new_producer);
@@ -158,10 +158,9 @@ struct GraphFuser {
   // a = op(x0,y0,z0) (a,b have their same size but are now contiguous)
   // b = op(x1,y1,x1)
 
-  bool tryToMoveChunk(Node * consumer, Node * producer_) {
+  bool tryToMoveChunk(Node * consumer, Node * producer) {
     // if we are fusing a select,
-    Select * producer = producer_->cast<Select>();
-    if(!producer)
+    if(producer->kind() != kSelect)
       return false;
     // and the select refers to a chunk,
     auto * chunk = producer->base();
@@ -189,12 +188,12 @@ struct GraphFuser {
     //as we replace/remove the selects the use list changes, so copy it first
     use_list copy_uses = chunk->uses();
     for(auto s : copy_uses) {
-      Select * sel = s.user->cast<Select>();
+      Node* sel = s.user;
       size_t i = sel->offset();
       size_t j = 0;
       Node * new_output = graph->createClone(producer_for_chunk,[&](Node * n) {
         auto & c = chunks[j++];
-        Select * ns = graph->createOld<Select>(c,i);
+        Node * ns = graph->createSelect(c,i);
         ns->setType(sel->typeOption());
         insertAfter(ns,c);
         return ns;

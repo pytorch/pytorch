@@ -56,7 +56,7 @@ variable_list Function::tracedApply(variable_list inputs) {
 
   // Insert a CppOp in the trace.
   auto& graph = state->graph;
-  auto* this_node = graph->createOld<CppOp>(getSharedPtr());
+  auto* this_node = graph->createCppOp(getSharedPtr());
   for (auto& input: inputs) {
       this_node->addInput(tracer::getValueTrace(state, input));
   }
@@ -69,7 +69,7 @@ variable_list Function::tracedApply(variable_list inputs) {
   int num_outputs = outputs.size();
   for (int i = 0; i < num_outputs; ++i) {
       auto& output = outputs[i];
-      Node* sel = graph->appendNode(graph->createOld<Select>(this_node, i));
+      Node* sel = graph->appendNode(graph->createSelect(this_node, i));
       sel->inferTypeFrom(output->data);
       tracer::setValueTrace(state, output, sel);
   }
