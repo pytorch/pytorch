@@ -49,15 +49,108 @@ bool LayerNormOp<CPUContext>::DoRunWithType<float>() {
   mean_map = input_map.rowwise().mean();
   stdev_map =
       (input_map.unaryExpr(sqr).rowwise().mean() - mean_map.unaryExpr(sqr))
+          .unaryExpr(add_ep)
           .unaryExpr(fsqrt);
-  output_map =
-      (input_map - mean_map.replicate(1, right))
-          .cwiseQuotient(stdev_map.unaryExpr(add_ep).replicate(1, right));
+  output_map = (input_map - mean_map.replicate(1, right))
+                   .cwiseQuotient(stdev_map.replicate(1, right));
 
   return true;
 }
 
 REGISTER_CPU_OPERATOR(LayerNorm, LayerNormOp<CPUContext>);
+
+template <>
+template <>
+bool LayerNormGradientOp<CPUContext>::DoRunWithType<float>() {
+  const auto& dout = Input(0);
+  const auto& norm_outputs = Input(1);
+  const auto& means = Input(2);
+  const auto& stdev = Input(3);
+  const auto& norm_inputs = Input(4);
+  auto* ginput = Output(0);
+
+  const auto canonical_axis = norm_inputs.canonical_axis_index(axis_);
+  const int left = norm_inputs.size_to_dim(canonical_axis);
+  const int right = norm_inputs.size_from_dim(canonical_axis);
+
+  ginput->ResizeLike(norm_inputs);
+
+  auto dout_map = ConstEigenMatrixMapRowMajor<float>(
+      dout.template data<float>(), left, right);
+  auto means_map =
+      ConstEigenMatrixMapRowMajor<float>(means.template data<float>(), left, 1);
+  auto stdev_map =
+      ConstEigenMatrixMapRowMajor<float>(stdev.template data<float>(), left, 1);
+  auto norm_inputs_map = ConstEigenMatrixMapRowMajor<float>(
+      norm_inputs.template data<float>(), left, right);
+  auto ginput_map = EigenMatrixMapRowMajor<float>(
+      ginput->template mutable_data<float>(), left, right);
+
+  // Helper functors
+  auto sqr = [](float f) { return f * f; };
+  auto recip = [](float f) { return 1.0f / f; };
+  auto neg_recip = [](float f) { return -1.0f / f; };
+
+  // Gradients - output block
+  // -1 / (stdev + epsilon)^2 * \sum_j^D x_ij - mean * dout
+  // First part: -1 / (stdev + epsilon)^2
+  auto dstdev_end_0 = stdev_map.unaryExpr(sqr).unaryExpr(neg_recip);
+  // Second part: \sum_j^D x_ij - mean * dout
+  auto dstdev_end_1 = (norm_inputs_map - means_map.replicate(1, right))
+                          .cwiseProduct(dout_map)
+                          .rowwise()
+                          .sum();
+  auto dstdev_end = dstdev_end_0.cwiseProduct(dstdev_end_1);
+  // \sum_j^D -dout * 1/(std+epsilon)
+  auto dmean_end = stdev_map.unaryExpr(neg_recip)
+                       .replicate(1, right)
+                       .cwiseProduct(dout_map)
+                       .rowwise()
+                       .sum();
+  // 1.0 / (stdev + epsilon) * dout
+  auto dx_end =
+      stdev_map.unaryExpr(recip).replicate(1, right).cwiseProduct(dout_map);
+
+  // Gradients - standard deviation block
+  // -1.0*(mean / stdev) * dstdev_end
+  auto dmean_stdev = stdev_map.unaryExpr(neg_recip)
+                         .cwiseProduct(means_map)
+                         .replicate(1, right)
+                         .cwiseProduct(dstdev_end);
+  // (mean / (D*stdev)) * dstdev
+  auto dx_stdev = (1.0f / right) *
+      norm_inputs_map.cwiseQuotient(stdev_map.replicate(1, right))
+          .cwiseProduct(dstdev_end.replicate(1, right));
+
+  // Gradients - mean block
+  auto dmean = dmean_end + dmean_stdev;
+  auto dx_mean = (1.0f / right) * dmean.replicate(1, right);
+
+  ginput_map = dx_end + dx_stdev + dx_mean;
+
+  return true;
+}
+
+OPERATOR_SCHEMA(LayerNormGradient).NumInputs(5).NumOutputs(1);
+
+REGISTER_CPU_OPERATOR(LayerNormGradient, LayerNormGradientOp<CPUContext>);
+
+namespace {
+
+class GetLayerNormGradient : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  vector<OperatorDef> GetGradientDefs() override {
+    return SingleGradientDef(
+        "LayerNormGradient",
+        "",
+        vector<string>{GO(0), O(0), O(1), O(2), I(0)},
+        vector<string>{GI(0)});
+  }
+};
+
+}  // namespace
+
+REGISTER_GRADIENT(LayerNorm, GetLayerNormGradient);
 
 OPERATOR_SCHEMA(LayerNorm)
     .NumInputs(1)
@@ -87,7 +180,7 @@ Computes layer normalization as described in https://arxiv.org/pdf/1607.06450.pd
 Given an input vector x \in [a_0, a_1, ...,a_{k-1}, a_k, ..., a_{n-1}],
 this op treats dimensions a_k thorugh a_{n-1} as feature vectors. For each
 feature vector, the op contains the mean and standard deviation. Then,
-it returns the normalized values (with respect to the feature vector).
+it returns the normalized values (with restdev_mapct to the feature vector).
 
 Note that this op does not contain the scale an bias terms described in the
 paper. Simply follow this op with an FC op to add those. Concretely, this op

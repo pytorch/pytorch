@@ -16,10 +16,13 @@ struct SqrTransform {
 };
 
 // X = X - Y^2
-__global__ void
-sqrtXMinusYSquaredKernel(const int N, float* x, const float* y) {
+__global__ void sqrtXMinusYSquaredKernel(
+    const int N,
+    float* x,
+    const float* y,
+    const float epsilon) {
   CUDA_1D_KERNEL_LOOP(i, N) {
-    x[i] = sqrtf(x[i] - y[i] * y[i]);
+    x[i] = sqrtf(x[i] - y[i] * y[i] + epsilon);
   }
 }
 
@@ -27,13 +30,12 @@ sqrtXMinusYSquaredKernel(const int N, float* x, const float* y) {
 __global__ void normalizeKernel(
     const int row_dim,
     const int N,
-    const float epsilon,
     const float* x,
     const float* mu,
     const float* sigma,
     float* out) {
   CUDA_1D_KERNEL_LOOP(i, N) {
-    out[i] = (x[i] - mu[i / row_dim]) / (sigma[i / row_dim] + epsilon);
+    out[i] = (x[i] - mu[i / row_dim]) / (sigma[i / row_dim]);
   }
 }
 
@@ -78,7 +80,7 @@ bool LayerNormOp<CUDAContext>::DoRunWithType<float>() {
     mean->CopyFrom(input);
     mean->Resize(stats_dims);
     math::Set<float, CUDAContext>(
-        left, 0.0f, stdev->mutable_data<float>(), &context_);
+        left, std::sqrt(epsilon_), stdev->mutable_data<float>(), &context_);
   } else {
     // Calculate row-wise means
     // First stage: sum up feature vectors
@@ -155,16 +157,19 @@ bool LayerNormOp<CUDAContext>::DoRunWithType<float>() {
         stdev->mutable_data<float>(),
         &context_);
 
-    // stddev = sqrt(E(x^2) - E(x)^2)
+    // stddev = sqrt(E(x^2) - E(x)^2 + epsilon)
     sqrtXMinusYSquaredKernel<<<
         CAFFE_GET_BLOCKS(left),
         CAFFE_CUDA_NUM_THREADS,
         0,
         context_.cuda_stream()>>>(
-        left, stdev->mutable_data<float>(), mean->mutable_data<float>());
+        left,
+        stdev->mutable_data<float>(),
+        mean->mutable_data<float>(),
+        epsilon_);
   }
 
-  // out[i, j] = (in[i,j] - mu[i]) / (sigma[i] + epsilon)
+  // out[i, j] = (in[i,j] - mu[i]) / (sigma[i])
   normalizeKernel<<<
       CAFFE_GET_BLOCKS(left),
       CAFFE_CUDA_NUM_THREADS,
@@ -172,7 +177,6 @@ bool LayerNormOp<CUDAContext>::DoRunWithType<float>() {
       context_.cuda_stream()>>>(
       right,
       left * right,
-      epsilon_,
       input.data<float>(),
       mean->data<float>(),
       stdev->data<float>(),
