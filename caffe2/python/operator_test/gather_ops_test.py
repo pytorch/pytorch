@@ -51,7 +51,7 @@ def _inputs(draw):
 
 class TestBatchGatherOps(hu.HypothesisTestCase):
     @given(inputs=_inputs(),
-           **hu.gcs_cpu_only)
+           **hu.gcs)
     def test_batch_gather_ops(self, inputs, gc, dc):
         data, ind = inputs
         op = core.CreateOperator(

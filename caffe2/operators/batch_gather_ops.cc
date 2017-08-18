@@ -1,7 +1,6 @@
 #include "caffe2/operators/batch_gather_ops.h"
 
 namespace caffe2 {
-namespace {
 
 REGISTER_CPU_OPERATOR(BatchGather, BatchGatherOp<CPUContext>);
 REGISTER_CPU_OPERATOR(BatchGatherGradient, BatchGatherGradientOp<CPUContext>);
@@ -67,5 +66,4 @@ class GetBatchGatherGradient : public GradientMakerBase {
 
 REGISTER_GRADIENT(BatchGather, GetBatchGatherGradient);
 
-} // namespace
 } // namespace caffe2
