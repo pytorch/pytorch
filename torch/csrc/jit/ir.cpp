@@ -93,13 +93,21 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
 
 struct node_list_with_types {
   const node_list& nodes;
-  node_list_with_types(const node_list& nodes) : nodes(nodes) {}
+  bool use_newlines;
+  node_list_with_types(const node_list& nodes, bool use_newlines = false)
+    : nodes(nodes), use_newlines(use_newlines) {}
 };
 std::ostream& operator<<(std::ostream & out, node_list_with_types l) {
   size_t i = 0;
   for(auto n : l.nodes) {
-    if(i++ > 0)
-      out << ", ";
+    if(i++ > 0) {
+      if (l.use_newlines) {
+        // TODO: Indent here is hard-coded for "graph(": un-hard-code it
+        out << "\n      ";
+      } else {
+        out << ", ";
+      }
+    }
 
     out << *n << " : ";
     if(n->hasType())
@@ -165,7 +173,7 @@ void printAttributes(std::ostream & out, Node * n) {
 }
 
 std::ostream& operator<<(std::ostream & out, Graph & g) {
-  out << "graph(" << node_list_with_types(g.inputs()) << ") {\n";
+  out << "graph(" << node_list_with_types(g.inputs(), true) << ") {\n";
   std::vector<Node*> groups;
   size_t prev_stage = 0;
   for(auto n : g.nodes()) {
