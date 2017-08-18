@@ -3,8 +3,8 @@
 #include <string>
 #include <unordered_map>
 #include <mutex>
-#include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/jit/assert.h"
+#include "torch/csrc/jit/interned_strings.h"
 
 namespace torch { namespace jit {
 
@@ -28,6 +28,10 @@ struct InternedStrings {
     return k;
   }
   const char * string(Symbol sym) {
+    // Builtin Symbols are also in the maps, but
+    // we can bypass the need to acquire a lock
+    // to read the map for Builtins because we already
+    // know their string value
     switch(sym) {
       #define DEFINE_CASE(s) \
         case k##s: return #s;
