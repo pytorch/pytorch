@@ -3,6 +3,7 @@
 #include "caffe2/core/common.h"
 #include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/utils/proto_utils.h"
+#include "caffe2/utils/string_utils.h"
 
 #include <algorithm>
 #include <unordered_map>
@@ -159,5 +160,20 @@ OperatorDef* AddOp(
     string op_type,
     std::vector<string> inputs,
     std::vector<string> outputs);
+
+/**
+ * This allows for the use of * and | to match operator types,
+ * engines, or any other property that is represented by strings.
+ *
+ * For example, if we wanted to match an operator to Conv or FC, we can give:
+ * "Conv|FC" as the type() of that op.
+ */
+bool MatchStrings(string p, string s);
+
+/**
+ * This ensures that each named arg that exists in the pattern exists in g_op,
+ * is equal in value.
+ */
+bool MatchArguments(const OperatorDef& p_op, const OperatorDef& g_op);
 
 } // namespace caffe2

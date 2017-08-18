@@ -13,9 +13,9 @@ using transform::Graph;
 TEST(ConvToNNPackTest, TestSimple) {
   NetDef netdef;
   OperatorDef* op;
-  op = AddOp(&netdef, "Conv", {"out"}, {"out"});
+  op = AddOp(&netdef, "Conv", {"in"}, {"out"});
   op = AddOp(&netdef, "Relu", {"out"}, {"out"});
-  op = AddOp(&netdef, "Conv", {"in"}, {"out"}); // if not CPU, won't transform
+  op = AddOp(&netdef, "Conv", {"out"}, {"out"}); // if not CPU, won't transform
   op->mutable_device_option()->set_device_type(CUDA);
   op = AddOp(&netdef, "Relu", {"out"}, {"out"});
   op = AddOp(&netdef, "Conv", {"out"}, {"out"});
