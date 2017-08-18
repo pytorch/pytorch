@@ -301,7 +301,6 @@ criterion_tests = [
         module_name='CrossEntropyLoss',
         input=torch.randn(15, 10),
         target=torch.Tensor(15).uniform_().mul(10).floor().long(),
-        check_gradgrad=False,
     ),
     dict(
         module_name='CrossEntropyLoss',
@@ -309,7 +308,6 @@ criterion_tests = [
         input=torch.randn(15, 10),
         target=torch.Tensor(15).uniform_().mul(10).floor().long(),
         desc='weights',
-        check_gradgrad=False,
     ),
     dict(
         module_name='NLLLoss2d',
