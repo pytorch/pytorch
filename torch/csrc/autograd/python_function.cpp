@@ -651,68 +651,25 @@ PyObject* process_outputs(THPFunction* grad_fn, const UnpackedInput& unpacked, T
   return outputs.release();
 }
 
-struct TraceInfo {
-  bool is_tracing;
-  std::shared_ptr<tracer::TracingState> tracing_state;
-
-  bool is_backward_traceable;
-  std::shared_ptr<tracer::EvalCommonState> eval_state;
-};
-
-static TraceInfo trace_wrap_inputs(THPObjectPtr& raw_inputs, InputFlags& flags, UnpackedInput& unpacked) {
-  TraceInfo info;
-  info.is_tracing = tracer::isTracing(unpacked.input_vars);
-  if (!info.is_tracing)
-    return info;
-
-  info.tracing_state = tracer::getTracingState(unpacked.input_vars);
-
-
-  // TODO: actually trace backward of some ops (e.g. Add)
-  info.is_backward_traceable = false;
-  if (!info.is_backward_traceable) {
-    // NOTE: this modifies unpacked.input_vars
-    info.eval_state = tracer::EvalExitHook::registerHook(info.tracing_state, unpacked.input_vars);
-
-    // Make a copy of raw_inputs with new Variables
-    int num_inputs = PyTuple_GET_SIZE(raw_inputs.get());
-    THPObjectPtr updated_inputs(PyTuple_New(num_inputs));
-    int vars_i = 0;
-    for (int i = 0; i < num_inputs; ++i) {
-      PyObject *obj;
-      if (flags.is_variable_input[i]) {
-        obj = THPVariable_Wrap(unpacked.input_vars[vars_i++]);
-      } else {
-        obj = PyTuple_GET_ITEM(raw_inputs.get(), i);
-        Py_INCREF(obj);
-      }
-      PyTuple_SET_ITEM(updated_inputs.get(), i, obj);
-    }
-
-    // Replace inputs and Recompute unpacked and flags
-    std::tie(unpacked, flags) = unpack_input<false>(updated_inputs.get());
-    raw_inputs = std::move(updated_inputs);
-  }
-  return info;
-}
-
-// This sort of reimplements unpack_input, but we have our own requirements
-static void trace_create(TraceInfo& info, PyObject* op_obj,
-        PyObject *input_objects, THPObjectPtr& output_objects,
+static void trace_create(PyObject* op_obj,
+        PyObject *input_objects, PyObject *output_objects,
         const variable_list& input_vars, const std::vector<bool>& is_variable_input) {
-  if (!info.is_tracing)
+  if (!tracer::isTracing(input_vars))
     return;
 
+  auto tracing_state = tracer::getTracingState(input_vars);
+
   // Isolate C variable ptrs in a vector
-  bool unpack_output = ensure_tuple(output_objects);
+  Py_INCREF(output_objects);
+  THPObjectPtr output_tuple(output_objects);
+  ensure_tuple(output_tuple);
   variable_list output_vars;
-  for (int i = 0; i < PyTuple_GET_SIZE(output_objects.get()); ++i) {
-    THPVariable *var = (THPVariable*)PyTuple_GET_ITEM(output_objects.get(), i);
+  for (int i = 0; i < PyTuple_GET_SIZE(output_tuple.get()); ++i) {
+    THPVariable *var = (THPVariable*)PyTuple_GET_ITEM(output_tuple.get(), i);
     output_vars.emplace_back(var->cdata);
   }
 
   // Save scalar args and the calling convention
-  auto& tracing_state = info.tracing_state;
   auto& graph = tracing_state->graph;
   auto num_args = PyTuple_GET_SIZE(input_objects);
   pyobj_list scalar_args;
@@ -770,19 +727,14 @@ static void trace_create(TraceInfo& info, PyObject* op_obj,
     tracer::setValueTrace(tracing_state, output, sel);
   }
 
-  if (!info.is_backward_traceable) {
-    tracer::EvalEnterHook::registerHook(tracing_state, output_vars, info.eval_state);
-    for (int i = 0; i < PyTuple_GET_SIZE(output_objects.get()); ++i) {
-      PyObject *obj = PyTuple_GET_ITEM(output_objects.get(), i);
-      PyTuple_SET_ITEM(output_objects.get(), i, THPVariable_Wrap(output_vars[i]));
-      Py_DECREF(obj);
-    }
-  }
-
-  if (unpack_output) {
-    PyObject *output = PyTuple_GET_ITEM(output_objects.get(), 0);
-    Py_INCREF(output);
-    output_objects = output;
+  // See definition in function.cpp.
+  // TODO: call into some Python method to check this
+  bool passes_state_transparently = false;
+  // NB: this path is executed only for forward of Python functions, so there's no need to check
+  // tracing_state->in_eval_subgraph (it's always false, because they are never part of backward
+  // subgraphs AND we don't even materialize the forward function).
+  if (!passes_state_transparently) {
+    tracer::nontraceableBackwardSubgraph(input_vars, output_vars);
   }
 }
 
@@ -811,11 +763,9 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *_inputs)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject *THPFunction_apply(PyObject *cls, PyObject *_inputs)
+PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
 {
   HANDLE_TH_ERRORS
-  Py_INCREF(_inputs);
-  THPObjectPtr inputs(_inputs);
 
   THPObjectPtr backward_cls(PyObject_GetAttrString(cls, "_backward_cls"));
   if (!backward_cls) return NULL;
@@ -828,8 +778,6 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *_inputs)
   UnpackedInput& unpacked_input = info_pair.first;
   InputFlags& input_info = info_pair.second;
 
-  auto trace_data = trace_wrap_inputs(inputs, input_info, unpacked_input);
-
   // Initialize backward function (and ctx)
   bool is_volatile = input_info.flags.is_volatile;
   ctx->cdata.set_flags(std::move(input_info.flags));
@@ -837,7 +785,7 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *_inputs)
   ctx->is_variable_input = new std::vector<bool>(std::move(input_info.is_variable_input));
 
   // Prepend ctx to tensor_input, in preparation for static method call
-  auto num_args = PyTuple_GET_SIZE(inputs.get());
+  auto num_args = PyTuple_GET_SIZE(inputs);
   THPObjectPtr ctx_tensor_input(PyTuple_New(num_args + 1));
   PyTuple_SET_ITEM(ctx_tensor_input.get(), 0, ctx_obj.release());
   for (int i = 0; i < num_args; ++i) {
@@ -845,7 +793,6 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *_inputs)
     Py_INCREF(arg);
     PyTuple_SET_ITEM(ctx_tensor_input.get(), i + 1, arg);
   }
-
 
   // Call forward
   THPObjectPtr forward_fn(PyObject_GetAttrString(cls, "forward"));
@@ -857,7 +804,7 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *_inputs)
   THPObjectPtr outputs {process_outputs(ctx, unpacked_input, std::move(tensor_outputs),
                                         is_volatile)};
 
-  trace_create(trace_data, cls, inputs, outputs, unpacked_input.input_vars, *ctx->is_variable_input);
+  trace_create(cls, inputs, outputs, unpacked_input.input_vars, *ctx->is_variable_input);
 
   return outputs.release();
   END_HANDLE_TH_ERRORS

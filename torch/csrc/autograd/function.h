@@ -7,6 +7,7 @@
 // and their derivatives). Some functions may be used as both.
 
 #include <Python.h>
+#include "torch/csrc/utils/auto_unique_ptr.h"
 #include "torch/csrc/autograd/function_hook.h"
 #include "torch/csrc/jit/tracer.h"
 
@@ -15,6 +16,12 @@
 #include <memory>
 #include <vector>
 
+namespace torch { namespace jit { namespace tracer {
+
+struct FunctionTracingState;
+
+}}}
+
 namespace torch { namespace autograd {
 
 struct Function;
@@ -22,7 +29,9 @@ struct Variable;
 
 using tensor_list = std::vector<at::Tensor>;
 using variable_list = std::vector<std::shared_ptr<Variable>>;
-using function_list = std::vector<std::pair<std::shared_ptr<Function>, int>>;
+using edge_type = std::pair<std::shared_ptr<Function>, int>;
+using function_list = std::vector<edge_type>;
+using saved_variable_list = std::vector<SavedVariable>;
 
 // State used to create "backward" functions
 struct FunctionFlags {
@@ -101,6 +110,24 @@ struct Function : std::enable_shared_from_this<Function> {
     next_functions = std::move(flags.next_functions);
   }
 
+  // An op is traceable if all operations happening within apply() are performed
+  // on autograd Variables (i.e. apply mostly instantiates and applies other functions).
+  virtual inline bool is_traceable() { return false; };
+
+  // An op is said to pass state transparently to backward, if the state consists
+  // only of (Saved)Variables and only non-variable objects that parametrize the
+  // operation in some way that defines the graph structure. In particular,
+  // parametrization MUST NOT depend on the data of any Variable.
+  // NOTE: this value matters only if is_traceable() returns false.
+  virtual inline bool passes_state_transparently() { return false; };
+
+  // Let's the JIT find inputs to apply that are not present explicitly in arguments.
+  // Required only for functions that are not traceable, don't pass state to
+  // backward transparently, and are not backwards closures of functions that don't
+  // pass the state transparently. Which means that hopefully they will hardly ever
+  // need to be implemented :)
+  virtual inline std::unique_ptr<saved_variable_list> saved_variables() { return nullptr; }
+
   int num_inputs;
   function_list next_functions;
   bool is_executable;
@@ -109,6 +136,33 @@ struct Function : std::enable_shared_from_this<Function> {
   std::vector<std::shared_ptr<FunctionPostHook>> post_hooks;
 
   PyObject *pyobj;  // weak reference
+
+  auto_unique_ptr<jit::tracer::FunctionTracingState> tracing_state;
+};
+
+// Actually what is a ForwardFunction here applies to all functions that are
+// applied only in forward OR are backward closures that don't save any Variables.
+// I chose this name, because the second situation is quite rare.
+template<bool transparent_state = false>
+struct ForwardFunction : public Function {
+  ForwardFunction() {}
+  ForwardFunction(FunctionFlags&& f): Function(std::move(f)) {}
+
+  virtual inline std::unique_ptr<saved_variable_list> saved_variables() final {
+    return std::unique_ptr<saved_variable_list>(new saved_variable_list());
+  }
+
+  virtual inline bool is_traceable() final { return false; };
+
+  virtual inline bool passes_state_transparently() final { return transparent_state; };
+};
+
+// See Function::is_traceable() for definition.
+struct TraceableFunction : public Function {
+  TraceableFunction() {}
+  TraceableFunction(FunctionFlags&& f): Function(std::move(f)) {}
+
+  virtual inline bool is_traceable() final { return true; };
 };
 
 template<typename T>

@@ -4,6 +4,7 @@
 #include "accumulate_grad.h"
 #include "basic_ops.h"
 #include "tensor.h"
+#include "special.h"
 #include "torch/csrc/THP.h"
 #include "torch/csrc/autograd/python_cpp_function.h"
 #include "torch/csrc/utils/tuple_parser.h"
@@ -279,6 +280,9 @@ bool THPAutograd_initFunctions(PyObject* _unused)
   addClass<Narrow, NoCtor>(module, NarrowClass, "Narrow");
   static PyTypeObject CatClass;
   addClass<Cat, NoCtor>(module, CatClass, "Cat");
+
+  static PyTypeObject EvalClass;
+  addClass<Eval, NoCtor>(module, EvalClass, "Eval");
 
   THPObjectPtr parent(PyImport_ImportModule("torch._C"));
   if (!parent) return false;

@@ -1,8 +1,12 @@
-graph(%1 : Double(2, 2), %2 : Double(2, 2), %7 : UNKNOWN_TYPE) {
+graph(%1 : Double(2, 2), %2 : Double(2, 2), %7 : Double(2, 2), %24 : Double(2, 2), %25 : Double(2, 2!)) {
   %3.0 : Double(2, 2) = ^MulConstant(2)(%2), uses = [[%5.i0]];
   %5.0 : Double(2, 2) = ^Mul()(%3.0, %1), uses = [[%0.i0]];
   ---------------- stage 1 ----------------
-  %8.0 : UNKNOWN_TYPE, %8.1 : UNKNOWN_TYPE = Eval(%7), uses = [[%18.i0], [%0.i1]];
-  %18.0 : UNKNOWN_TYPE = Eval(%8.0), uses = [[%0.i2]];
-  return (%5.0, %8.1, %18.0);
+  %8.0 : Double(2, 2), %8.1 : Double(2, 2) = CppOp[N5torch8autograd4EvalE](%7), uses = [[%0.i2], [%18.i0]];
+  %18.0 : Double(2, 2) = CppOp[N5torch8autograd4EvalE](%8.1), uses = [[%0.i1]];
+  ---------------- stage 2 ----------------
+  %26.0 : Double(2, 2) = CppOp[N5torch8autograd4EvalE](%24), uses = [[%34.i1]];
+  %34.0 : Double(2, 2), %34.1 : Double(2, 2), %34.2 : Double(2, 2) = CppOp[N5torch8autograd4EvalE](%25, %26.0), uses = [[%60.i0], [%0.i5], [%0.i4]];
+  %60.0 : Double(2, 2) = CppOp[N5torch8autograd4EvalE](%34.0), uses = [[%0.i3]];
+  return (%5.0, %18.0, %8.0, %60.0, %34.2, %34.1);
 }

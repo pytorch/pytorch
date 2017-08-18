@@ -46,7 +46,7 @@ auto Variable::get_grad_accumulator() -> std::shared_ptr<Function> {
   if (grad_fn) {
     throw std::logic_error("get_grad_accumulator() should be only called on leaf Variables");
   }
-  if (!requires_grad) return nullptr;
+  if (is_volatile) return nullptr;
 
   std::lock_guard<std::mutex> lock(grad_accumulator_lock);
 

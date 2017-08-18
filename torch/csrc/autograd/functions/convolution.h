@@ -38,7 +38,7 @@ struct ConvParams {
   bool use_cudnn(const at::Tensor& input) const;
 };
 
-struct ConvForward : public Function, public ConvParams, public HasPrimSpec {
+struct ConvForward : public ForwardFunction<>, public ConvParams, public HasPrimSpec {
   explicit ConvForward(ConvParams params) : ConvParams(std::move(params)) {}
 
   virtual std::string name() override;

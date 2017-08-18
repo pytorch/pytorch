@@ -135,9 +135,9 @@ class Traceable(object):
         if self.verify:
             cloned_inputs = _clone_inputs(trace_inputs)
         with _time("record_trace", self.time), _fork_rng(self.verify):
-            self.saved_trace, inputs = torch._C._tracer_enter(trace_inputs)
+            self.saved_trace = torch._C._tracer_enter(trace_inputs)
             out = self._run(*args)
-            flat_out = torch._C._tracer_exit(flatten(out))
+            torch._C._tracer_exit(flatten(out))
 
         torch._C._jit_pass_lint(self.saved_trace)
         if self.optimize:
@@ -146,9 +146,9 @@ class Traceable(object):
 
         if self.verify:
             flat_trace_out = self.run_trace(cloned_inputs)
-            _verify(flat_trace_out, flat_out)
+            _verify(flat_trace_out, flatten(out))
 
-        return self.saved_trace, function._unflatten(flat_out, out)
+        return self.saved_trace, out
 
     def run(self, args, extra):
         # tracing is disabled, run the real thing, possibly timing it

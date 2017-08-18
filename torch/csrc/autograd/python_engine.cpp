@@ -16,26 +16,32 @@ struct THPEngine {
     PyObject_HEAD
 };
 
-struct PythonEngine : public Engine {
-  virtual void thread_main(std::shared_ptr<ReadyQueue> queue, int device) override {
-    // Create a PyThreadState, but release the GIL. This lets AutoGIL calls
-    // inside thread_main acquire the GIL without having to create a new
-    // PyThreadState each time.
-    AutoGIL gil;
-    AutoNoGIL no_gil;
-    Engine::thread_main(queue, device);
-  }
+static torch::autograd::python::PythonEngine engine;
 
-  virtual void thread_on_exception(FunctionTask& task, std::exception& e) override {
-    auto python_err = dynamic_cast<python_error*>(&e);
-    if (python_err) {
-      python_err->persist();
-    }
-    Engine::thread_on_exception(task, e);
-  }
-};
+namespace torch { namespace autograd { namespace python {
 
-static PythonEngine engine;
+void PythonEngine::thread_main(std::shared_ptr<ReadyQueue> queue, int device) {
+  // Create a PyThreadState, but release the GIL. This lets AutoGIL calls
+  // inside thread_main acquire the GIL without having to create a new
+  // PyThreadState each time.
+  AutoGIL gil;
+  AutoNoGIL no_gil;
+  Engine::thread_main(queue, device);
+}
+
+void PythonEngine::thread_on_exception(FunctionTask& task, std::exception& e) {
+  auto python_err = dynamic_cast<python_error*>(&e);
+  if (python_err) {
+    python_err->persist();
+  }
+  Engine::thread_on_exception(task, e);
+}
+
+PythonEngine& PythonEngine::getDefaultEngine() {
+  return engine;
+}
+
+}}} // namespace torch::autograd::python
 
 PyObject *THPEngineClass = NULL;
 
@@ -195,10 +201,9 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     // If grad_fn is NULL (as is the case for a leaf node), we instead
     // interpret the gradient function to be a grad accumulator,
     // which will accumulate its inputs into the grad property of the
-    // variable.  These nodes get suppressed in some situations,
+    // variable. These nodes get suppressed in some situations,
     // see "suppress grad accumulation" below.
     auto grad_fn = variable->grad_fn ? variable->grad_fn : variable->get_grad_accumulator();
-    THPUtils_assert(grad_fn, "element %d of variables tuple does not require grad", i);
     int output_nr = variable->grad_fn ? variable->output_nr : 0;
     roots[i] = std::make_pair<>(std::move(grad_fn), output_nr);
 
