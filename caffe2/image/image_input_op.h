@@ -60,7 +60,7 @@ class ImageInputOp final
   };
 
   bool GetImageAndLabelAndInfoFromDBValue(
-      const string& value, cv::Mat* img, PerImageArg& info, int item_id);
+      const string& value, cv::Mat* img, PerImageArg& info, std::mt19937 *randgen, int item_id);
   void DecodeAndTransform(
       const std::string& value, float *image_data, int item_id,
       const int channels, std::size_t thread_index);
@@ -99,6 +99,10 @@ class ImageInputOp final
   bool use_caffe_datum_;
   bool gpu_transform_;
   bool mean_std_copied_ = false;
+
+  // random minsize
+  vector<int> random_scale_;
+  bool random_scaling_;
 
   // thread pool for parse + decode
   int num_decode_threads_;
@@ -142,7 +146,16 @@ ImageInputOp<Context>::ImageInputOp(
       thread_pool_(std::make_shared<TaskThreadPool>(num_decode_threads_)),
       // output type only supported with CUDA and use_gpu_transform for now
       output_type_(
-          cast::GetCastDataType(ArgumentHelper(operator_def), "output_type")) {
+          cast::GetCastDataType(ArgumentHelper(operator_def), "output_type")),
+      random_scale_(
+          OperatorBase::template GetRepeatedArgument<int>("random_scale", {-1,-1})) {
+  if ((random_scale_[0] == -1) || (random_scale_[1] == -1)) {
+    random_scaling_ = false;
+  } else {
+    random_scaling_ = true;
+    minsize_ = random_scale_[0];
+  }
+
   mean_ = OperatorBase::template GetRepeatedArgument<float>(
     "mean_per_channel",
     {OperatorBase::template GetSingleArgument<float>("mean", 0.)});
@@ -206,6 +219,11 @@ ImageInputOp<Context>::ImageInputOp(
       "If the output sizes are specified, they must be specified for all "
       "additional outputs");
 
+  CAFFE_ENFORCE(random_scale_.size() == 2,
+      "Must provide [scale_min, scale_max]");
+  CAFFE_ENFORCE_GE(random_scale_[1], random_scale_[0],
+      "random scale must provide a range [min, max]");
+
   if (default_arg_.bounding_params.ymin < 0
       || default_arg_.bounding_params.xmin < 0
       || default_arg_.bounding_params.height < 0
@@ -240,13 +258,20 @@ ImageInputOp<Context>::ImageInputOp(
       default_arg_.bounding_params.width
               << ")";
   }
-  if (scale_ > 0) {
+  if (scale_ > 0 && !random_scaling_) {
     LOG(INFO) << "    Scaling image to " << scale_
               << (warp_ ? " with " : " without ") << "warping;";
   } else {
-    // Here, minsize_ > 0
-    LOG(INFO) << "    Ensuring minimum image size of " << minsize_
-              << (warp_ ? " with " : " without ") << "warping;";
+    if (random_scaling_) {
+      // randomly set min_size_ for each image
+      LOG(INFO) << "    Randomly scaling shortest side between "
+                << random_scale_[0] << " and "
+                << random_scale_[1];
+    } else {
+      // Here, minsize_ > 0
+      LOG(INFO) << "    Ensuring minimum image size of " << minsize_
+                << (warp_ ? " with " : " without ") << "warping;";
+    }
   }
   LOG(INFO) << "    " << (is_test_ ? "Central" : "Random")
             << " cropping image to " << crop_
@@ -292,6 +317,7 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
     const string& value,
     cv::Mat* img,
     PerImageArg& info,
+    std::mt19937 *randgen,
     int item_id) {
   //
   // recommend using --caffe2_use_fatal_for_enforce=1 when using ImageInputOp
@@ -515,6 +541,13 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
   cv::Mat scaled_img;
 
   int scale_to_use = scale_ > 0 ? scale_ : minsize_;
+
+  // set the random minsize
+  if (random_scaling_) {
+    scale_to_use = std::uniform_int_distribution<>(random_scale_[0],
+                                                   random_scale_[1])(*randgen);
+  }
+
   if (warp_) {
     scaled_width = scale_to_use;
     scaled_height = scale_to_use;
@@ -527,15 +560,14 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
     scaled_width =
         static_cast<float>(img->cols) * scale_to_use / img->rows;
   }
-  if ((scale_ > 0 &&
-       (scaled_height != img->rows || scaled_width != img->cols))
-      || (scaled_height > img->rows || scaled_width > img->cols)) {
+  if ((scale_ > 0 ||
+       ((scaled_height != img->rows || scaled_width != img->cols))
+      || (scaled_height > img->rows || scaled_width > img->cols))) {
     // We rescale in all cases if we are using scale_
     // but only to make the image bigger if using minsize_
-    /*
-    LOG(INFO) << "Scaling to " << scaled_width << " x " << scaled_height
-              << " From " << img->cols << " x " << img->rows;
-    */
+    //
+    //LOG(INFO) << "Scaling to " << scaled_width << " x " << scaled_height
+    //          << " From " << img->cols << " x " << img->rows;
     cv::resize(
         *img,
         scaled_img,
@@ -670,7 +702,7 @@ void ImageInputOp<Context>::DecodeAndTransform(
   cv::Mat img;
   // Decode the image
   PerImageArg info;
-  CHECK(GetImageAndLabelAndInfoFromDBValue(value, &img, info, item_id));
+  CHECK(GetImageAndLabelAndInfoFromDBValue(value, &img, info, randgen, item_id));
 
   // Factor out the image transformation
   TransformImage<Context>(img, channels, image_data, crop_, mirror_,
@@ -690,7 +722,7 @@ void ImageInputOp<Context>::DecodeAndTransposeOnly(
   cv::Mat img;
   // Decode the image
   PerImageArg info;
-  CHECK(GetImageAndLabelAndInfoFromDBValue(value, &img, info, item_id));
+  CHECK(GetImageAndLabelAndInfoFromDBValue(value, &img, info, randgen, item_id));
 
   // Factor out the image transformation
   CropTransposeImage<Context>(img, channels, image_data, crop_, mirror_,
