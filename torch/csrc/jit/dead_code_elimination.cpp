@@ -3,11 +3,11 @@
 namespace torch { namespace jit {
 
 void EliminateDeadCode(std::unique_ptr<Graph>& graph) {
-  auto& nodes = graph->nodes();
-  for (auto it = nodes.rbegin(); it != nodes.rend();) {
-    Node *node = *it++;
-    if (node->uses().size() == 0) {
-      node->destroy();
+  auto nodes = graph->nodes().reverse();
+  for(auto it = nodes.begin(); it != nodes.end(); it++) {
+    auto node = *it;
+    if(node->uses().size() == 0) {
+      it.destroyCurrent();
     }
   }
 }
