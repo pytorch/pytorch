@@ -379,7 +379,7 @@ criterion_tests = [
         module_name='SoftMarginLoss',
         input_size=(5, 5),
         target=torch.randn(5, 5).sign(),
-        check_gradgrad=False,
+        check_no_size_average=True,
     ),
     dict(
         module_name='CosineEmbeddingLoss',
