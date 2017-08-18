@@ -700,6 +700,11 @@ class TestLayers(LayersTestCase):
         self.assertEqual((k,), topk.field_types()[1].shape)
         self.assertEqual(['TopK/values', 'TopK/indices'], topk.field_blobs())
 
+    def testFunctionalLayerSameOperatorOutputNames(self):
+        Con1 = self.model.ConstantFill([], 1, value=1)
+        Con2 = self.model.ConstantFill([], 1, value=2)
+        self.assertNotEqual(str(Con1), str(Con2))
+
     def testFunctionalLayerWithOutputDtypes(self):
         loss = self.model.AveragedLoss(
             self.model.input_feature_schema,
