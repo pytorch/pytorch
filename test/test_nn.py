@@ -3937,6 +3937,19 @@ for test_params in criterion_tests + new_criterion_tests:
     test_params['constructor'] = getattr(nn, name)
     test = NewCriterionTest(**test_params)
     add_test(test)
+    if 'check_no_size_average' in test_params:
+        test_params['desc'] = test_params.get('desc', '') + 'no_size_average'
+
+        def gen_no_size_average_constructor(constructor):
+            def no_size_average_constructor(*args, **kwargs):
+                cons = constructor(*args, size_average=False, **kwargs)
+                return cons
+                no_size_average_constructor.__name__ = constructor.__name__
+                return no_size_average_constructor
+
+        test_params['constructor'] = gen_eval_constructor(test_params['constructor'])
+        test = NewCriterionTest(**test_params)
+        add_test(test)
 
 
 class UnpoolingNet(nn.Module):

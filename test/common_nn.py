@@ -240,13 +240,7 @@ criterion_tests = [
         module_name='NLLLoss',
         input=torch.rand(15, 10).log(),
         target=torch.Tensor(15).uniform_().mul(10).floor().long(),
-    ),
-    dict(
-        module_name='NLLLoss',
-        constructor_args=(None, False),
-        input=torch.rand(15, 10).log(),
-        target=torch.Tensor(15).uniform_().mul(10).floor().long(),
-        desc='no_size_average'
+        check_no_size_average=True,
     ),
     dict(
         module_name='NLLLoss',
@@ -280,27 +274,14 @@ criterion_tests = [
         module_name='KLDivLoss',
         input=torch.rand(10, 10).log(),
         target=torch.rand(10, 10),
-    ),
-    dict(
-        module_name='KLDivLoss',
-        constructor_args=(False,),
-        input=torch.rand(10, 10).log(),
-        target=torch.rand(10, 10),
-        desc='no_size_average',
+        check_no_size_average=True,
     ),
     dict(
         module_name='MSELoss',
         input=torch.randn(2, 3, 4, 5),
         target=torch.randn(2, 3, 4, 5),
         reference_fn=lambda i, t, _: (i - t).abs().pow(2).sum() / i.numel(),
-    ),
-    dict(
-        module_name='MSELoss',
-        constructor_args=(False,),
-        input=torch.randn(2, 3, 4, 5),
-        target=torch.randn(2, 3, 4, 5),
-        reference_fn=lambda i, t, _: (i - t).abs().pow(2).sum(),
-        desc='no_size_average',
+        check_no_size_average=True,
     ),
     dict(
         module_name='BCELoss',
@@ -360,13 +341,7 @@ criterion_tests = [
         input=torch.rand(10),
         target=torch.randn(10).gt(0).double().mul_(2).sub(1),
         desc='margin',
-    ),
-    dict(
-        module_name='HingeEmbeddingLoss',
-        constructor_args=(0.5, False),
-        input=torch.rand(10),
-        target=torch.randn(10).gt(0).double().mul_(2).sub(1),
-        desc='margin_no_size_average',
+        check_no_size_average=True,
     ),
     dict(
         module_name='MultiLabelMarginLoss',
@@ -398,13 +373,7 @@ criterion_tests = [
         module_name='SmoothL1Loss',
         input_size=(5, 10),
         target=torch.randn(5, 10),
-    ),
-    dict(
-        module_name='SmoothL1Loss',
-        constructor_args=(False,),
-        input_size=(5, 10),
-        target=torch.randn(5, 10),
-        desc='no_size_average',
+        check_no_size_average=True,
     ),
     dict(
         module_name='SoftMarginLoss',
