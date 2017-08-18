@@ -62,8 +62,16 @@ def _time(name, enabled=True):
     print("{} time: {} ms".format(name, start.elapsed_time(end)))
 
 
+def _varify(args):
+    return tuple(a if isinstance(a, Variable) else Variable(a, requires_grad=False) for a in args)
+
+
 def _clone_inputs(all_args):
-    return tuple(Variable(a.data.clone(), requires_grad=a.requires_grad, volatile=a.volatile) for a in all_args)
+    for a in all_args:
+        if isinstance(a, Variable):
+            yield Variable(a.data.clone(), requires_grad=a.requires_grad, volatile=a.volatile)
+        else:
+            yield a.clone()
 
 
 def _verify(flat_trace_out, flat_real_out):
@@ -91,10 +99,10 @@ class Traceable(object):
 
         if isinstance(function_or_module, Module):
             self._run = function_or_module.forward
-            self._additional_inputs = lambda: function_or_module.parameters()
+            self._state_dict = lambda: function_or_module.state_dict(keep_vars=True)
         else:
             self._run = function_or_module
-            self._additional_inputs = lambda: ()
+            self._state_dict = lambda: {}
 
         self.trace_name = trace_name
         self.saved_trace = None
@@ -112,6 +120,7 @@ class Traceable(object):
             with open("{}_{}_input.ir".format(self.trace_name, name), "w") as f:
                 f.write(str(self.saved_trace))
         p(self.saved_trace)
+        # TODO: Make linting optional
         torch._C._jit_pass_lint(self.saved_trace)
         if Traceable._dump_traces:
             with open("{}_{}_output.ir".format(self.trace_name, name), "w") as f:
@@ -124,16 +133,17 @@ class Traceable(object):
         with _time("run_trace", self.time):
             assert(self.saved_closure is not None)
             return Variable._execution_engine.run_forward(
-                self.saved_closure, trace_inputs)
+                self.saved_closure, _varify(trace_inputs))
 
     def get_trace_inputs(self, args, extra):
-        return tuple(x for x in itertools.chain(self._additional_inputs(), flatten(args), extra))
+        # TODO: don't discard keys from state_dict
+        return tuple(itertools.chain(self._state_dict().values(), flatten(args), extra))
 
     # create and return a trace, possibly verifying it before returning it
     def record_trace(self, args, extra):
         trace_inputs = self.get_trace_inputs(args, extra)
         if self.verify:
-            cloned_inputs = _clone_inputs(trace_inputs)
+            cloned_inputs = tuple(_clone_inputs(trace_inputs))
         with _time("record_trace", self.time), _fork_rng(self.verify):
             self.saved_trace = torch._C._tracer_enter(trace_inputs)
             out = self._run(*args)
@@ -168,7 +178,7 @@ class Traceable(object):
             return function._unflatten(self.run_trace(trace_inputs), self.proto)
 
         # verify an already created trace...
-        cloned_inputs = _clone_inputs(trace_inputs)
+        cloned_inputs = tuple(_clone_inputs(trace_inputs))
         with _time("run_real", self.time), _fork_rng():
             out_real = self._run(*args)
         flat_trace_out = self.run_trace(cloned_inputs)

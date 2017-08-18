@@ -6,6 +6,7 @@
 #include "torch/csrc/jit/assert.h"
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/THP.h"
+#include "torch/csrc/DynamicTypes.h"
 
 #include <sstream>
 
@@ -120,17 +121,22 @@ PyObject * THPTracer_enter(PyObject *_unused, PyObject *args)
   }
   THPUtils_assert(PyTuple_Check(input_objs), "inputs argument is "
     "expected to be a tuple, but got %s", THPUtils_typename(input_objs));
-  Py_ssize_t num_inputs = PyTuple_GET_SIZE(input_objs);
 
-  variable_list inputs;
+  Py_ssize_t num_inputs = PyTuple_GET_SIZE(input_objs);
+  std::vector<tracer::TraceInput> trace_inputs;
+  trace_inputs.reserve(num_inputs);
   for (int i = 0; i < num_inputs; i++) {
     PyObject* input_obj = PyTuple_GET_ITEM(input_objs, i);
-    THPUtils_assert(THPVariable_Check(input_obj), "element %d of input "
-        "tuple is not a Variable", i);
-    inputs.emplace_back(((THPVariable*)input_obj)->cdata);
+    if (THPVariable_Check(input_obj)) {
+      trace_inputs.emplace_back(((THPVariable*)input_obj)->cdata);
+    } else if (THPModule_isTensor(input_obj)) {
+      trace_inputs.emplace_back(torch::createTensor(input_obj));
+    } else {
+      throw std::runtime_error("non-variable, non-tensor input");
+    }
   }
 
-  return THPTracingState_Wrap(tracer::enter(inputs));
+  return THPTracingState_Wrap(tracer::enter(std::move(trace_inputs)));
   END_HANDLE_TH_ERRORS
 }
 

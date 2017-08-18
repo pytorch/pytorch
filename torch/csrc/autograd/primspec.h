@@ -12,7 +12,8 @@ namespace torch { namespace autograd {
 #ifdef WITH_TOFFEE
 
 struct PrimSpecContext {
-  std::shared_ptr<jit::Graph> graph;
+  jit::Graph* graph;
+  const std::unordered_map<void*, jit::Node*>* buffer_map;
   int batch_norm_count = 0;
 };
 

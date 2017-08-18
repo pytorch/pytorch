@@ -298,6 +298,13 @@ class TestJit(TestCase):
         trace, _ = torch.jit.record_trace(nn.BatchNorm2d(2), x)
         self.assertToffeeExpected(torch._C._jit_pass_export(trace))
 
+    def test_batchnorm_verify(self):
+        bn = torch.jit.traced(nn.BatchNorm2d(1), enabled=True, verify=True)
+        x = Variable(torch.randn(5, 1))
+        z = bn(x)
+        z2 = bn(x)
+        self.assertEqual(z, z2)
+
     def test_conv(self):
         x = Variable(torch.randn(20, 16, 50, 40).fill_(1.0), requires_grad=True)
         trace, _ = torch.jit.record_trace(nn.Conv2d(16, 13, 3, bias=False), x)

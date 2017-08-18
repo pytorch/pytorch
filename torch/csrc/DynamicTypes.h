@@ -17,6 +17,7 @@ void registerPyTypeObject(
 PyObject* createPyObject(at::Tensor& tensor);
 PyTypeObject* getPyTypeObject(const at::Tensor& tensor);
 //rename to createPyObject when THPP is removed
+// Creates a at::Tensor from a PyObject.  Does NOT steal the PyObject reference.
 at::Tensor createTensor(PyObject *data);
 
 }  // namespace torch

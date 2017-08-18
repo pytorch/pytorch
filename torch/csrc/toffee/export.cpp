@@ -27,10 +27,13 @@ std::string node_name(Node* n) {
 // semantics.
 // Eventually this should just be part of init_pass but we should avoid
 // tight coupling of the JIT and Toffee IR exporter until ready.
-std::shared_ptr<Graph> ToToffeeIR(std::shared_ptr<Graph>& g) {
+std::shared_ptr<Graph> ToToffeeIR(std::shared_ptr<Graph>& g,
+                                  const std::unordered_map<void*, Node*>& buffer_map) {
   torch::autograd::PrimSpecContext ctx;
   std::unordered_map<Node*, Node*> env;
-  ctx.graph = std::make_shared<Graph>();
+  std::shared_ptr<Graph> out_graph = std::make_shared<Graph>();
+  ctx.graph = out_graph.get();
+  ctx.buffer_map = &buffer_map;
   for (auto input : g->inputs())
     env[input] = ctx.graph->addInput()->setType(input->typeOption());
   auto envFn = [&env](Node * n) {
@@ -134,7 +137,7 @@ std::shared_ptr<Graph> ToToffeeIR(std::shared_ptr<Graph>& g) {
   for (auto output : g->outputs()) {
     ctx.graph->registerOutput(env.at(output));
   }
-  return std::move(ctx.graph);
+  return std::move(out_graph);
 }
 
 static void encodeTensor(toffee::TensorProto * p, const at::Tensor & tensor) {
@@ -257,8 +260,10 @@ static void encodeGraph(toffee::GraphProto * p_g, std::shared_ptr<Graph> & g, co
 }
 
 // Exports a graph to ToffeeIR
-std::string ExportGraph(std::shared_ptr<Graph>& g_, const std::vector<at::Tensor> & initializers) {
-  auto g = ToToffeeIR(g_);
+std::string ExportGraph(std::shared_ptr<Graph>& g_,
+                        const std::unordered_map<void*, Node*>& buffer_map,
+                        const std::vector<at::Tensor> & initializers) {
+  auto g = ToToffeeIR(g_, buffer_map);
   toffee::GraphProto p_g;
   p_g.set_name("torch-jit-export");
   encodeGraph(&p_g, g, initializers);

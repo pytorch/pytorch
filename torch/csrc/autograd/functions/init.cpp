@@ -18,8 +18,8 @@ struct BatchNormCtor {
     BatchNormParams params;
 
     TupleParser parser(args, 6);
-    parser.parse(params.running_mean, "running_mean");
-    parser.parse(params.running_var, "running_var");
+    parser.parse(params.cached_running_mean, "running_mean");
+    parser.parse(params.cached_running_var, "running_var");
     parser.parse(params.training, "training");
     parser.parse(params.momentum, "momentum");
     parser.parse(params.eps, "eps");
@@ -122,9 +122,9 @@ PyObject* getTensorAttr(PyObject* obj, void* _unused)
 static struct PyGetSetDef batch_norm_forward_properties[] = {
   THP_FUNCTION_DEFAULT_PROPERTIES,
   {(char*)"running_mean", (getter)getTensorAttr<BatchNormForward, BatchNormParams,
-                                         &BatchNormParams::running_mean>, NULL, NULL, NULL},
+                                         &BatchNormParams::cached_running_mean>, NULL, NULL, NULL},
   {(char*)"running_var", (getter)getTensorAttr<BatchNormForward, BatchNormParams,
-                                         &BatchNormParams::running_var>, NULL, NULL, NULL},
+                                         &BatchNormParams::cached_running_var>, NULL, NULL, NULL},
   {(char*)"training", (getter)getValueAttr<BatchNormForward, bool, BatchNormParams,
                                          &BatchNormParams::training, long, PyBool_FromLong>, NULL, NULL, NULL},
   {(char*)"momentum", (getter)getValueAttr<BatchNormForward, double, BatchNormParams,
@@ -139,9 +139,9 @@ static struct PyGetSetDef batch_norm_forward_properties[] = {
 static struct PyGetSetDef batch_norm_backward_properties[] = {
   THP_FUNCTION_DEFAULT_PROPERTIES,
   {(char*)"running_mean", (getter)getTensorAttr<BatchNormBackward, BatchNormParams,
-                                         &BatchNormParams::running_mean>, NULL, NULL, NULL},
+                                         &BatchNormParams::cached_running_mean>, NULL, NULL, NULL},
   {(char*)"running_var", (getter)getTensorAttr<BatchNormBackward, BatchNormParams,
-                                         &BatchNormParams::running_var>, NULL, NULL, NULL},
+                                         &BatchNormParams::cached_running_var>, NULL, NULL, NULL},
   {(char*)"training", (getter)getValueAttr<BatchNormBackward, bool, BatchNormParams,
                                          &BatchNormParams::training, long, PyBool_FromLong>, NULL, NULL, NULL},
   {(char*)"momentum", (getter)getValueAttr<BatchNormBackward, double, BatchNormParams,
@@ -156,9 +156,9 @@ static struct PyGetSetDef batch_norm_backward_properties[] = {
 static struct PyGetSetDef batch_norm_backward_backward_properties[] = {
   THP_FUNCTION_DEFAULT_PROPERTIES,
   {(char*)"running_mean", (getter)getTensorAttr<BatchNormBackwardBackward, BatchNormParams,
-                                         &BatchNormParams::running_mean>, NULL, NULL, NULL},
+                                         &BatchNormParams::cached_running_mean>, NULL, NULL, NULL},
   {(char*)"running_var", (getter)getTensorAttr<BatchNormBackwardBackward, BatchNormParams,
-                                         &BatchNormParams::running_var>, NULL, NULL, NULL},
+                                         &BatchNormParams::cached_running_var>, NULL, NULL, NULL},
   {(char*)"training", (getter)getValueAttr<BatchNormBackwardBackward, bool, BatchNormParams,
                                          &BatchNormParams::training, long, PyBool_FromLong>, NULL, NULL, NULL},
   {(char*)"momentum", (getter)getValueAttr<BatchNormBackwardBackward, double, BatchNormParams,

@@ -43,6 +43,8 @@ struct TracingState : public std::enable_shared_from_this<TracingState> {
     , active(false) {}
 
   std::shared_ptr<Graph> graph;
+  // void* is an unsafe TH.  NON-OWNING, so it might get invalidated
+  std::unordered_map<void*, Node*> buffer_map;
   bool active;
   std::mutex mutex;
   variable_list inputs; // Used only for the duration of first stage
@@ -128,16 +130,47 @@ inline Node* getValueTrace(const std::shared_ptr<TracingState>& state, const std
   return constant;
 }
 
+inline Node* getBufferTrace(const std::unordered_map<void*, Node*>& buffer_map, at::Tensor buf) {
+  auto it = buffer_map.find(buf.unsafeGetTH(false));
+  if (it == buffer_map.end()) {
+    throw std::runtime_error("untraced buffer");
+  } else {
+    return it->second;
+  }
+}
+
+// Only one field may be non-null
+struct TraceInput {
+  std::shared_ptr<Variable> variable;
+  at::Tensor buffer;
+  TraceInput(std::shared_ptr<Variable> variable) : variable(variable) {}
+  TraceInput(at::Tensor buffer) : buffer(buffer) {}
+};
+
 // Start tracing, treating 'inputs' as inputs to the trace, which can be
 // varied on subsequent invocations of the trace.  Any other variables
 // will be treated as constants.
-inline std::shared_ptr<TracingState> enter(const variable_list& inputs) {
+inline std::shared_ptr<TracingState> enter(std::vector<TraceInput>&& trace_inputs) {
   auto state = std::make_shared<TracingState>();
-  for (auto& input : inputs) {
-    JIT_ASSERT(input->tracing_state.state.expired());
-    Node *input_node = state->graph->addInput();
-    setValueTrace(state, input, input_node);
-    input_node->inferTypeFrom(input->data);
+  // TODO: Figure out what's going on with batchnorm backwards...
+  variable_list inputs;
+  for (auto& trace_input : trace_inputs) {
+    if (trace_input.variable != nullptr) {
+      JIT_ASSERT(!trace_input.buffer.defined());
+      auto& input = trace_input.variable;
+      JIT_ASSERT(input->tracing_state.state.expired());
+      Node *input_node = state->graph->addInput();
+      setValueTrace(state, input, input_node);
+      input_node->inferTypeFrom(input->data);
+      inputs.push_back(input);
+    } else {
+      JIT_ASSERT(trace_input.buffer.defined());
+      // NON-owning reference.  Pointers may be dead!
+      auto& buffer = trace_input.buffer;
+      Node* n = state->graph->addInput();
+      state->buffer_map.insert({buffer.unsafeGetTH(false), n});
+      n->inferTypeFrom(buffer);
+    }
   }
   state->active = true;
   state->inputs = inputs;
