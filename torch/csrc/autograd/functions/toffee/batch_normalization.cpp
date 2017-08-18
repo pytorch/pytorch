@@ -9,12 +9,10 @@ void BatchNormForward::primspec(PrimSpecContext* ctx, jit::node_list inputs, jit
   p_n->set_op_type("SpatialBN");
 
   // X, Scale, Bias
-  for (auto n : inputs) {
-    p_n->add_input(ctx->node(n));
-  }
-  for (auto n : outputs) {
-    p_n->add_output(ctx->node(n));
-  }
+  p_n->add_input(ctx->node(inputs[0]));
+  p_n->add_output(ctx->node(outputs[0]));
+  p_n->add_input(ctx->node(inputs[1]));
+  p_n->add_input(ctx->node(inputs[2]));
 
   toffee::AttributeProto* attr;
 
@@ -26,19 +24,29 @@ void BatchNormForward::primspec(PrimSpecContext* ctx, jit::node_list inputs, jit
   ADD_ATTR("is_test",i,0);
   ADD_ATTR("epsilon",f,eps);
   ADD_ATTR("order",s,"NCHW");
-  ADD_ATTR("momentum",f,momentum);
+  ADD_ATTR("momentum",f,1-momentum);
 
   auto typ = inputs.at(1)->type()->cast<torch::jit::TensorType>();
   int64_t the_size = typ->sizes()[0];
   std::stringstream ss;
   ss << the_size << "_" << ctx->batch_norm_count;
   std::string suffix = ss.str();
-  auto sm = "saved_mean_"+suffix;
-  auto sv = "saved_var_"+suffix;
+  auto sm = "saved_mean_" + suffix;
+  auto sv = "saved_var_" + suffix;
   ctx->graph->add_input(sm);
   ctx->graph->add_input(sv);
   p_n->add_input(sm);
+  p_n->add_output(sm);
   p_n->add_input(sv);
+  p_n->add_output(sv);
+
+  // dummy output
+  for(int i = 3; i < 5; i++) {
+    p_n->add_output(
+        "batch_norm_dead_output_" + std::to_string(i)+std::to_string(ctx->batch_norm_count)
+    );
+  }
+
   ctx->batch_norm_count++;
 }
 
