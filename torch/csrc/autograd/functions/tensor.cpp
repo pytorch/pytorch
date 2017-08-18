@@ -88,7 +88,7 @@ auto Narrow::apply(const variable_list& inputs) -> variable_list {
 }
 
 auto Cat::apply(const variable_list& inputs) -> variable_list {
-  auto num_inputs = inputs.size();
+  std::make_signed<size_t>::type num_inputs = inputs.size();
   if (num_inputs == 0) {
     throw std::runtime_error("Cat operation expect at least one argument.");
   }
