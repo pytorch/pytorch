@@ -4,7 +4,6 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/net.h"
 #include "caffe2/proto/caffe2.pb.h"
-#include "caffe2/utils/string_utils.h"
 
 namespace caffe2 {
 
@@ -46,88 +45,6 @@ std::vector<int> PatternNetTransform::GetPatternTraversalOrder(
   return ordered_ops;
 }
 
-/**
- * This allows for the use of * and | to match operator types,
- * engines, or any other property that is represented by strings.
- *
- * For example, if we wanted to match an operator to Conv or FC, we can give:
- * "Conv|FC" as the type() of that op.
- */
-bool match_string(string p, string s) {
-  if (p == "*") { // star accepts anything
-    return true;
-  }
-  // TODO(benz): memoize this. (high constant factor boost in performance)
-  vector<string> choices = split('|', p);
-  for (const string& candidate : choices) {
-    if (candidate == s) {
-      return true;
-    }
-  }
-  return false;
-}
-
-/**
- * This ensures that each named arg that exists in the pattern exists in g_op,
- * is equal in value.
- */
-bool match_arguments(const OperatorDef& p_op, const OperatorDef& g_op) {
-  for (const auto& p_arg : p_op.arg()) {
-    if (!p_arg.has_name()) {
-      continue;
-    }
-    bool found = false;
-    for (const auto& g_arg : g_op.arg()) {
-      if (p_arg.name() == g_arg.name()) {
-        found = true;
-        if (p_arg.has_f()) {
-          if (!g_arg.has_f() || p_arg.f() != g_arg.f()) {
-            return false;
-          }
-        }
-        if (p_arg.has_i()) {
-          if (!g_arg.has_i() || p_arg.i() != g_arg.i()) {
-            return false;
-          }
-        }
-        if (p_arg.has_s()) {
-          if (!g_arg.has_s() || !match_string(p_arg.s(), g_arg.s())) {
-            return false;
-          }
-        }
-        if (p_arg.floats_size() != g_arg.floats_size()) {
-          return false;
-        }
-        for (int i = 0; i < p_arg.floats_size(); i++) {
-          if (p_arg.floats(i) != g_arg.floats(i)) {
-            return false;
-          }
-        }
-        if (p_arg.ints_size() != g_arg.ints_size()) {
-          return false;
-        }
-        for (int i = 0; i < p_arg.ints_size(); i++) {
-          if (p_arg.ints(i) != g_arg.ints(i)) {
-            return false;
-          }
-        }
-        if (p_arg.strings_size() != g_arg.strings_size()) {
-          return false;
-        }
-        for (int i = 0; i < p_arg.strings_size(); i++) {
-          if (!match_string(p_arg.strings(i), g_arg.strings(i))) {
-            return false;
-          }
-        }
-      }
-    }
-    if (!found) {
-      return false;
-    }
-  }
-  return true;
-}
-
 bool compare_ops(
     const OperatorDef& p_op,
     const OperatorDef& g_op,
@@ -135,7 +52,7 @@ bool compare_ops(
   // must specify a type for pattern operators
   CAFFE_ENFORCE(
       p_op.has_type(), "Types must be specificed for all pattern operators.");
-  if (!match_string(p_op.type(), g_op.type())) {
+  if (!MatchStrings(p_op.type(), g_op.type())) {
     return false;
   }
   // ensure number of inputs are the same
@@ -157,16 +74,15 @@ bool compare_ops(
   }
 
   // make sure engine is the same (if specified in pattern)
-  if (p_op.has_engine() && !match_string(p_op.engine(), g_op.engine())) {
+  if (p_op.has_engine() && !MatchStrings(p_op.engine(), g_op.engine())) {
     return false;
   }
   // If argument_match is specified, make sure those are the same.
   if (arg_match) {
-    if (!match_arguments(p_op, g_op)) {
+    if (!MatchArguments(p_op, g_op)) {
       return false;
     }
   }
-
   return true;
 }
 
