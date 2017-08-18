@@ -152,7 +152,7 @@ const char* cublasGetErrorString(cublasStatus_t error);
 const char* curandGetErrorString(curandStatus_t error);
 
 // CUDA: various checks for different function calls.
-#define CUDA_ENFORCE(condition)     \
+#define CUDA_ENFORCE(condition, ...)     \
   do {                              \
     cudaError_t error = condition;  \
     CAFFE_ENFORCE_EQ(               \
@@ -163,7 +163,7 @@ const char* curandGetErrorString(curandStatus_t error);
         ":",                        \
         __LINE__,                   \
         ": ",                       \
-        cudaGetErrorString(error)); \
+        cudaGetErrorString(error), ##__VA_ARGS__); \
   } while (0)
 #define CUDA_CHECK(condition)                                 \
   do {                                                        \

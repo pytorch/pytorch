@@ -7,6 +7,7 @@
 #include <unordered_map>
 
 #include "caffe2/core/allocator.h"
+#include "caffe2/core/event.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/typeid.h"
 #include "caffe2/proto/caffe2.pb.h"
@@ -15,8 +16,6 @@
 CAFFE2_DECLARE_bool(caffe2_report_cpu_memory_usage);
 
 namespace caffe2 {
-
-typedef std::mt19937 rand_gen_type;
 
 /**
  * The CPU Context, representing the bare minimum of what a Context class in
@@ -34,6 +33,14 @@ typedef std::mt19937 rand_gen_type;
  * implementing if you want to write your own context class:
  * - void SwitchToDevice(): any necessary code to switch to the device before
  *     running anything.
+ * - void WaitEvent(const Event& ev): make the current context to wait on
+ *     an event. For example, for cuda, this is the equivalent of
+ *     cudaStreamWaitEvent. For CPU context, it essentially synchronizes the
+ *     event.
+ * - void Record(Event* ev): record the async activities on the current context
+ *     to the event. For example, for cuda, this is the equivalent of
+ *     cudaEventRecord on the current stream. For CPU context, it is always
+ *     synchronous.
  * - void FinishDeviceComputation(): any wrapping-up work after all the
  *     computation of the operator is done. If there are errors during the
  *     execution, throw exception. For example, in a CUDAContext, this function
@@ -53,6 +60,7 @@ typedef std::mt19937 rand_gen_type;
  */
 class CPUContext final {
  public:
+  typedef std::mt19937 rand_gen_type;
   CPUContext() : random_seed_(math::randomNumberSeed()) {}
   explicit CPUContext(const DeviceOption& option)
       : random_seed_(
@@ -66,6 +74,14 @@ class CPUContext final {
   inline void SwitchToDevice(int /*stream_id*/) {}
   inline void SwitchToDevice() {
     SwitchToDevice(0);
+  }
+
+  inline void WaitEvent(const Event& ev) {
+    ev.Wait(CPU, this);
+  }
+  inline void Record(Event* ev) const {
+    CAFFE_ENFORCE(ev, "Event must not be null.");
+    ev->Record(CPU, this);
   }
 
   inline void FinishDeviceComputation() {}

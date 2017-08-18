@@ -30,6 +30,13 @@ class MKLContext final {
   ~MKLContext() {}
 
   inline void SwitchToDevice(int /*stream_id*/ = 0) {}
+  inline void WaitEvent(const Event& ev) {
+    ev.Wait(MKLDNN, this);
+  }
+  inline void Record(Event* ev) const {
+    CAFFE_ENFORCE(ev, "Event must not be null.");
+    ev->Record(MKLDNN, this);
+  }
   inline void FinishDeviceComputation() {}
 
   inline std::mt19937& RandGenerator() {
@@ -100,7 +107,6 @@ inline void MKLContext::CopyBytes<MKLContext, CPUContext>(
     void* dst) {
   memcpy(dst, src, nbytes);
 }
-
 } // namespace caffe2
 
 #endif // CAFFE2_UTILS_MKL_CONTEXT_H_
