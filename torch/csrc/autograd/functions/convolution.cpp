@@ -579,7 +579,7 @@ static at::Tensor compute_output(
         at::VolumetricDilatedConvolution_updateOutput(
             input, output, weight, bias, columns, ones,
 #ifdef _WIN32
-            (int)kernel_size[0], (int)kernel_size[2], (int)kernel_size[1]
+            (int)kernel_size[0], (int)kernel_size[2], (int)kernel_size[1],
 #else
             kernel_size[0], kernel_size[2], kernel_size[1],
 #endif  
@@ -630,7 +630,7 @@ static at::Tensor compute_output(
         at::VolumetricConvolutionMM_updateOutput(
             input, output, weight, bias, columns,
 #ifdef _WIN32
-            (int)kernel_size[0], (int)kernel_size[2], (int)kernel_size[1]
+            (int)kernel_size[0], (int)kernel_size[2], (int)kernel_size[1],
 #else
             kernel_size[0], kernel_size[2], kernel_size[1],
 #endif
@@ -675,7 +675,7 @@ static at::Tensor compute_grad_input(
         at::VolumetricDilatedConvolution_updateGradInput(
             input, grad_output, grad_input, weight, columns,
 #ifdef _WIN32
-            (int)kernel_size[0], (int)kernel_size[2], (int)kernel_size[1]
+            (int)kernel_size[0], (int)kernel_size[2], (int)kernel_size[1],
 #else
             kernel_size[0], kernel_size[2], kernel_size[1],
 #endif
@@ -726,7 +726,7 @@ static at::Tensor compute_grad_input(
         at::VolumetricConvolutionMM_updateGradInput(
             input, grad_output, grad_input, weight, columns, ones,
 #ifdef _WIN32
-            (int)kernel_size[0], (int)kernel_size[2], (int)kernel_size[1]
+            (int)kernel_size[0], (int)kernel_size[2], (int)kernel_size[1],
 #else
             kernel_size[0], kernel_size[2], kernel_size[1],
 #endif
@@ -779,7 +779,7 @@ static tensor_pair compute_grad_params(
         at::VolumetricDilatedConvolution_accGradParameters(
             input, grad_output, grad_weight, grad_bias, columns, ones,
 #ifdef _WIN32
-            (int)kernel_size[0], (int)kernel_size[2], (int)kernel_size[1]
+            (int)kernel_size[0], (int)kernel_size[2], (int)kernel_size[1],
 #else
             kernel_size[0], kernel_size[2], kernel_size[1],
 #endif
@@ -830,7 +830,7 @@ static tensor_pair compute_grad_params(
         at::VolumetricConvolutionMM_accGradParameters(
             input, grad_output, grad_weight, grad_bias, columns,
 #ifdef _WIN32
-            (int)kernel_size[0], (int)kernel_size[2], (int)kernel_size[1]
+            (int)kernel_size[0], (int)kernel_size[2], (int)kernel_size[1],
 #else
             kernel_size[0], kernel_size[2], kernel_size[1],
 #endif
