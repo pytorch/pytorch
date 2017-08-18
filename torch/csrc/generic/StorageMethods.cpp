@@ -127,15 +127,15 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
 
   if (offset < 0 || offset > buffer.len) {
     PyErr_Format(PyExc_ValueError,
-      "offset must be non-negative and no greater than buffer length (%lld), "
-      "but got %lld", (int64_t)offset, (int64_t)buffer.len);
+      "offset must be non-negative and no greater than buffer length (%" PRId64 "), "
+      "but got %" PRId64 "", (int64_t)offset, (int64_t)buffer.len);
     PyBuffer_Release(&buffer);
     return NULL;
   }
 
   if (count < 0) {
     if ((buffer.len - offset) % sizeof(real) != 0) {
-      PyErr_Format(PyExc_ValueError, "buffer size (%lld) must be a multiple "
+      PyErr_Format(PyExc_ValueError, "buffer size (%" PRId64 ") must be a multiple "
           "of element size (%d)", (int64_t)buffer.len, (int)sizeof(real));
       PyBuffer_Release(&buffer);
       return NULL;
@@ -144,8 +144,8 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
   }
 
   if (offset + (count * (Py_ssize_t)sizeof(real)) > buffer.len) {
-    PyErr_Format(PyExc_ValueError, "buffer has only %lld elements after offset "
-        "%ld, but specified a size of %lld", (int64_t)(buffer.len - offset),
+    PyErr_Format(PyExc_ValueError, "buffer has only %" PRId64 " elements after offset "
+        "%ld, but specified a size of %" PRId64 "", (int64_t)(buffer.len - offset),
         (int64_t)offset, (int64_t)count);
     PyBuffer_Release(&buffer);
     return NULL;

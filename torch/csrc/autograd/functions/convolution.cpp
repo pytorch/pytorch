@@ -95,7 +95,7 @@ auto ConvForward::output_size(at::Tensor& input, at::Tensor& weight) -> std::vec
   output_size[0] = in_size[0];
   output_size[1] = transposed ? weight_size[1] * groups : weight_size[0];
   for (int d = 2; d < dim; ++d) {
-    int kernel = dilation[d - 2] * (weight_size[d] - 1) + 1;
+    auto kernel = dilation[d - 2] * (weight_size[d] - 1) + 1;
     if (transposed) {
       output_size[d] = (in_size[d] - 1) * stride[d - 2] - (2 * padding[d - 2]) +
                        kernel + output_padding[d - 2];
@@ -131,7 +131,7 @@ static std::shared_ptr<Variable> subvariable(std::shared_ptr<Variable> var, int 
 }
 
 static at::Tensor cat(const tensor_list& tensors, int dim) {
-  int num_inputs = tensors.size();
+  auto num_inputs = tensors.size();
   if (num_inputs == 0) {
     return at::Tensor();
   }
@@ -153,7 +153,7 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
   auto weight = inputs[1]->data;
   auto bias = inputs[2] ? inputs[2]->data : at::Tensor();
 
-  int k = input.ndimension();
+  auto k = input.ndimension();
   if (k == 3) {
     view1d_as_2d();
     input = view4d(input);
@@ -254,7 +254,7 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
   input = input.contiguous();
   auto grad_output = grad_outputs[0]->data.contiguous();
 
-  int k = input.ndimension();
+  auto k = input.ndimension();
   if (k == 3) {
     input = view4d(input);
     weight = view4d(weight);
@@ -567,14 +567,22 @@ static at::Tensor compute_output(
       if (dim == 4) {
         at::SpatialDilatedConvolution_updateOutput(
             input, output, weight, bias, columns, ones,
+#ifdef _WIN32
+            (int)kernel_size[1], (int)kernel_size[0],
+#else
             kernel_size[1], kernel_size[0],
+#endif
             params.stride[1], params.stride[0],
             params.padding[1], params.padding[0],
             params.dilation[1], params.dilation[0]); goto done;
       } else if (dim == 5) {
         at::VolumetricDilatedConvolution_updateOutput(
             input, output, weight, bias, columns, ones,
+#ifdef _WIN32
+            (int)kernel_size[0], (int)kernel_size[2], (int)kernel_size[1]
+#else
             kernel_size[0], kernel_size[2], kernel_size[1],
+#endif  
             params.stride[0], params.stride[2], params.stride[1],
             params.padding[0], params.padding[2], params.padding[1],
             params.dilation[0], params.dilation[2], params.dilation[1]); goto done;
@@ -586,7 +594,11 @@ static at::Tensor compute_output(
       if (dim == 4) {
         at::SpatialFullConvolution_updateOutput(
             input, output, weight, bias, columns, ones,
+#ifdef _WIN32
+            (int)kernel_size[1], (int)kernel_size[0],
+#else
             kernel_size[1], kernel_size[0],
+#endif
             params.stride[1], params.stride[0],
             params.padding[1], params.padding[0],
             params.output_padding[1], params.output_padding[0]); goto done;
@@ -602,7 +614,11 @@ static at::Tensor compute_output(
       if (dim == 4) {
         at::SpatialConvolutionMM_updateOutput(
             input, output, weight, bias, columns, ones,
+#ifdef _WIN32
+            (int)kernel_size[1], (int)kernel_size[0],
+#else
             kernel_size[1], kernel_size[0],
+#endif
             params.stride[1], params.stride[0],
             params.padding[1], params.padding[0]); goto done;
       } else if (dim == 5 && input.type().isCuda()) {
@@ -613,7 +629,11 @@ static at::Tensor compute_output(
       } else if (dim == 5) {
         at::VolumetricConvolutionMM_updateOutput(
             input, output, weight, bias, columns,
+#ifdef _WIN32
+            (int)kernel_size[0], (int)kernel_size[2], (int)kernel_size[1]
+#else
             kernel_size[0], kernel_size[2], kernel_size[1],
+#endif
             params.stride[0], params.stride[2], params.stride[1],
             params.padding[0], params.padding[2], params.padding[1]); goto done;
       }
@@ -643,14 +663,22 @@ static at::Tensor compute_grad_input(
       if (dim == 4) {
         at::SpatialDilatedConvolution_updateGradInput(
             input, grad_output, grad_input, weight, columns,
+#ifdef _WIN32
+            (int)kernel_size[1], (int)kernel_size[0],
+#else
             kernel_size[1], kernel_size[0],
+#endif
             params.stride[1], params.stride[0],
             params.padding[1], params.padding[0],
             params.dilation[1], params.dilation[0]); goto done;
       } else if (dim == 5) {
         at::VolumetricDilatedConvolution_updateGradInput(
             input, grad_output, grad_input, weight, columns,
+#ifdef _WIN32
+            (int)kernel_size[0], (int)kernel_size[2], (int)kernel_size[1]
+#else
             kernel_size[0], kernel_size[2], kernel_size[1],
+#endif
             params.stride[0], params.stride[2], params.stride[1],
             params.padding[0], params.padding[2], params.padding[1],
             params.dilation[0], params.dilation[2], params.dilation[1]); goto done;
@@ -662,7 +690,11 @@ static at::Tensor compute_grad_input(
       if (dim == 4) {
         at::SpatialFullConvolution_updateGradInput(
             input, grad_output, grad_input, weight, columns,
+#ifdef _WIN32
+            (int)kernel_size[1], (int)kernel_size[0],
+#else
             kernel_size[1], kernel_size[0],
+#endif
             params.stride[1], params.stride[0],
             params.padding[1], params.padding[0],
             params.output_padding[1], params.output_padding[0]); goto done;
@@ -678,7 +710,11 @@ static at::Tensor compute_grad_input(
       if (dim == 4) {
         at::SpatialConvolutionMM_updateGradInput(
             input, grad_output, grad_input, weight, columns, ones,
+#ifdef _WIN32
+            (int)kernel_size[1], (int)kernel_size[0],
+#else
             kernel_size[1], kernel_size[0],
+#endif
             params.stride[1], params.stride[0],
             params.padding[1], params.padding[0]); goto done;
       } else if (dim == 5 && input.type().isCuda()) {
@@ -689,7 +725,11 @@ static at::Tensor compute_grad_input(
       } else if (dim == 5) {
         at::VolumetricConvolutionMM_updateGradInput(
             input, grad_output, grad_input, weight, columns, ones,
+#ifdef _WIN32
+            (int)kernel_size[0], (int)kernel_size[2], (int)kernel_size[1]
+#else
             kernel_size[0], kernel_size[2], kernel_size[1],
+#endif
             params.stride[0], params.stride[2], params.stride[1],
             params.padding[0], params.padding[2], params.padding[1]); goto done;
       }
@@ -727,14 +767,22 @@ static tensor_pair compute_grad_params(
       if (dim == 4) {
         at::SpatialDilatedConvolution_accGradParameters(
             input, grad_output, grad_weight, grad_bias, columns, ones,
+#ifdef _WIN32
+            (int)kernel_size[1], (int)kernel_size[0],
+#else
             kernel_size[1], kernel_size[0],
+#endif
             params.stride[1], params.stride[0],
             params.padding[1], params.padding[0],
             params.dilation[1], params.dilation[0], 1.0); goto done;
       } else if (dim == 5) {
         at::VolumetricDilatedConvolution_accGradParameters(
             input, grad_output, grad_weight, grad_bias, columns, ones,
+#ifdef _WIN32
+            (int)kernel_size[0], (int)kernel_size[2], (int)kernel_size[1]
+#else
             kernel_size[0], kernel_size[2], kernel_size[1],
+#endif
             params.stride[0], params.stride[2], params.stride[1],
             params.padding[0], params.padding[2], params.padding[1],
             params.dilation[0], params.dilation[2], params.dilation[1], 1.0); goto done;
@@ -746,7 +794,11 @@ static tensor_pair compute_grad_params(
       if (dim == 4) {
         at::SpatialFullConvolution_accGradParameters(
             input, grad_output, grad_weight, grad_bias, columns, ones,
+#ifdef _WIN32
+            (int)kernel_size[1], (int)kernel_size[0],
+#else
             kernel_size[1], kernel_size[0],
+#endif
             params.stride[1], params.stride[0],
             params.padding[1], params.padding[0],
             params.output_padding[1], params.output_padding[0], 1.0); goto done;
@@ -762,7 +814,11 @@ static tensor_pair compute_grad_params(
       if (dim == 4) {
         at::SpatialConvolutionMM_accGradParameters(
             input, grad_output, grad_weight, grad_bias, columns, ones,
+#ifdef _WIN32
+            (int)kernel_size[1], (int)kernel_size[0],
+#else
             kernel_size[1], kernel_size[0],
+#endif
             params.stride[1], params.stride[0],
             params.padding[1], params.padding[0], 1.0); goto done;
       } else if (dim == 5 && input.type().isCuda()) {
@@ -773,7 +829,11 @@ static tensor_pair compute_grad_params(
       } else if (dim == 5) {
         at::VolumetricConvolutionMM_accGradParameters(
             input, grad_output, grad_weight, grad_bias, columns,
+#ifdef _WIN32
+            (int)kernel_size[0], (int)kernel_size[2], (int)kernel_size[1]
+#else
             kernel_size[0], kernel_size[2], kernel_size[1],
+#endif
             params.stride[0], params.stride[2], params.stride[1],
             params.padding[0], params.padding[2], params.padding[1], 1.0); goto done;
       }

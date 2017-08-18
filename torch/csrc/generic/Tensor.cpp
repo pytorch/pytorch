@@ -335,7 +335,7 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
           "sequences and there's no way to infer how many dimension should "
           "the tensor have");
       THPUtils_assert(length > 0, "given sequence has an invalid size of "
-          "dimension %lld: %lld", (int64_t)sizes.size(), (int64_t)length);
+          "dimension %" PRId64 ": %" PRId64 "", (int64_t)sizes.size(), (int64_t)length);
       item = PySequence_GetItem(item, 0);
       if (!item)
         return NULL;
@@ -536,8 +536,8 @@ static bool THPTensor_(_indexOnce)(PyObject *index, int &indexed_dim,
       throw python_error();
     }
     if (idx < 0 || idx >= dimsize) {
-      PyErr_Format(PyExc_IndexError, "index %lld is out of range for dimension "
-          "%lld (of size %lld)", (int64_t)idx, (int64_t)indexed_dim, (int64_t)dimsize);
+      PyErr_Format(PyExc_IndexError, "index %" PRId64 " is out of range for dimension "
+          "%" PRId64 " (of size %" PRId64 ")", (int64_t)idx, (int64_t)indexed_dim, (int64_t)dimsize);
       throw python_error();
     }
 
@@ -834,8 +834,8 @@ static bool THPTensor_(_convertToTensorIndexers)(
       for (ptrdiff_t i = 0; i < THIndexTensor_(nElement)(LIBRARY_STATE flat.get()); ++i) {
         int64_t indexAtDim = THTensor_fastGet1d(flat.get(), i);
         if (indexAtDim >= sizeAtDim) {
-          PyErr_Format(PyExc_IndexError, "index %lld from broadcast indexer is out of range "
-              "for dimension %lld (of size %lld)",
+          PyErr_Format(PyExc_IndexError, "index %" PRId64 " from broadcast indexer is out of range "
+              "for dimension %" PRId64 " (of size %" PRId64 ")",
               (int64_t)indexAtDim, (int64_t)dim, (int64_t)sizeAtDim);
 
           // Clean up Indexers

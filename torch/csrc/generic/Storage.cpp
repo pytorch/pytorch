@@ -249,7 +249,7 @@ static int THPStorage_(set)(THPStorage *self, PyObject *index, PyObject *value)
     if (!THPUtils_parseSlice(index, len, &start, &stop, &step, &slicelength))
       return -1;
     if (step != 1) {
-      THPUtils_setError("Trying to slice with a step of %lld, but only a step of "
+      THPUtils_setError("Trying to slice with a step of %" PRId64 ", but only a step of "
           "1 is supported", (int64_t)step);
       return 0;
     }
