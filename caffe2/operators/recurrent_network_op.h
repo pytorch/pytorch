@@ -302,8 +302,10 @@ class RecurrentNetworkOp final : public Operator<Context> {
       stepWorkspaces.resize(seqLen);
     }
 
-    if (!has_backward_pass && stepWorkspaces.size() != 2) {
-      // Use alternating stepWorkspaces when forward_only=True
+    if (!has_backward_pass && stepWorkspaces.size() < 2) {
+      // Use alternating stepWorkspaces when forward_only=True.
+      // Note that the step workspaces can be shared by other ops, thus
+      // we cannot shrink it to 2 if there are more than 2 step workspaces.
       stepWorkspaces.resize(2);
     }
 
