@@ -92,15 +92,18 @@ class TestCheckpoint(TestCase):
 
     def test_single_checkpoint(self):
         # test single node
-        with tempfile.NamedTemporaryFile() as tmp:
+        try:
+            tmpdir = tempfile.mkdtemp()
 
             def builder():
                 ws = workspace.C.Workspace()
                 session = LocalSession(ws)
-                checkpoint = CheckpointManager(tmp.name, 'minidb')
+                checkpoint = CheckpointManager(tmpdir, 'temp_node', 'minidb')
                 return session, checkpoint
 
             self.run_with(builder)
+        finally:
+            shutil.rmtree(tmpdir)
 
         # test multi-node
         try:
@@ -187,7 +190,7 @@ class TestCheckpoint(TestCase):
             for node_id in range(num_nodes):
                 epoch = 5
                 node_name = 'trainer:%d' % node_id
-                expected_db_name = tmpdir + '/' + node_name + '.000005'
+                expected_db_name = tmpdir + '/' + node_name + '.5'
                 self.assertEquals(
                     checkpoint.get_ckpt_db_name(node_name, epoch),
                     expected_db_name)
