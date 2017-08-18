@@ -16,6 +16,10 @@
  * above, whichever is greater.*/
 #define MIN_GLOBAL_SCRATCH_SPACE_PER_DEVICE 32768 * sizeof(float)
 
+/* Maximum number of P2P connections (if there are more than 9 then P2P is
+ * enabled in groups of 8). */
+#define THC_CUDA_MAX_PEER_SIZE 8
+
 THCCudaResourcesPerDevice* THCState_getDeviceResourcePtr(
   THCState *state, int device);
 
@@ -96,11 +100,18 @@ void THCudaInit(THCState* state)
   // p2pAccessEnabled records if p2p copies are allowed between pairs of
   // devices. Values include "1" (copy allowed), "0" (copy not allowed), and
   // "-1" (unknown).
+  // Currently the max number of gpus in P2P group is 8, so if there are more
+  // we enable P2P in groups of 8
   state->p2pAccessEnabled = (int**) malloc(sizeof(int*) * numDevices);
   for (int i = 0; i < numDevices; ++i) {
     state->p2pAccessEnabled[i] = (int*) malloc(sizeof(int) * numDevices);
-    memset(state->p2pAccessEnabled[i], -1, sizeof(int) * numDevices);
-    state->p2pAccessEnabled[i][i] = 1;
+    for (int j = 0; j < numDevices; ++j)
+      if (i == j)
+        state->p2pAccessEnabled[i][j] = 1;
+      else if (j / THC_CUDA_MAX_PEER_SIZE != i / THC_CUDA_MAX_PEER_SIZE)
+        state->p2pAccessEnabled[i][j] = 0;
+      else
+        state->p2pAccessEnabled[i][j] = -1;
   }
 
   for (int i = 0; i < numDevices; ++i) {
@@ -848,12 +859,39 @@ cudaError_t THCudaFree(THCState *state, void *ptr)
   return allocator->free(allocator->state, ptr);
 }
 
+void* THCudaHostAlloc(THCState *state, size_t size)
+{
+  THCudaCheck(cudaGetLastError());
+  THAllocator* allocator = state->cudaHostAllocator;
+  return allocator->malloc(NULL, size);
+}
+
+void THCudaHostFree(THCState *state, void *ptr)
+{
+  THAllocator* allocator = state->cudaHostAllocator;
+  return allocator->free(NULL, ptr);
+}
+
+void THCudaHostRecord(THCState *state, void *ptr)
+{
+  if (state->cudaHostAllocator == &THCCachingHostAllocator) {
+    THCStream* stream = THCState_getStream(state);
+    THCCachingHostAllocator_recordEvent(ptr, stream);
+  }
+}
+
 cudaError_t THCudaMemGetInfo(THCState *state,  size_t* freeBytes, size_t* totalBytes)
 {
-  size_t cachedBytes = 0;
   size_t largestBlock = 0;
+  return THCudaMemGetInfoCached(state, freeBytes, totalBytes, &largestBlock);
+}
+
+cudaError_t THCudaMemGetInfoCached(THCState *state,  size_t* freeBytes, size_t* totalBytes, size_t* largestBlock)
+{
+  size_t cachedBytes = 0;
   THCDeviceAllocator* allocator = state->cudaDeviceAllocator;
 
+  *largestBlock = 0;
   /* get info from CUDA first */
   cudaError_t ret = cudaMemGetInfo(freeBytes, totalBytes);
   if (ret!= cudaSuccess)
@@ -865,11 +903,11 @@ cudaError_t THCudaMemGetInfo(THCState *state,  size_t* freeBytes, size_t* totalB
     return ret;
 
   /* not always true - our optimistic guess here */
-  largestBlock = *freeBytes;
+  *largestBlock = *freeBytes;
 
   if (allocator->cacheInfo != NULL)
-    allocator->cacheInfo(allocator->state, device, &cachedBytes, &largestBlock);
-
+    allocator->cacheInfo(allocator->state, device, &cachedBytes, largestBlock);
+  
   /* Adjust resulting free bytes number. largesBlock unused for now */
   *freeBytes += cachedBytes;
   return cudaSuccess;
@@ -916,3 +954,19 @@ void THCHeapUpdate(THCState *state, ptrdiff_t size) {
 
 #include "THCStorage.c"
 #include "THCAllocator.c"
+
+/* from THCHalf.h */
+
+half THC_float2half(float f)
+{
+  half h;
+  TH_float2halfbits(&f, &h.x);
+  return h;
+}
+
+float  THC_half2float(half h)
+{
+  float f;
+  TH_halfbits2float(&h.x, &f);
+  return f;
+}

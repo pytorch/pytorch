@@ -1,23 +1,31 @@
 
-static std::unique_ptr<thpp::Tensor> createTensor(thpp::Type type) {
+template<typename... Ts>
+static std::unique_ptr<thpp::Tensor> createTensor(thpp::Type type, Ts &... args) {
   if (type == thpp::Type::UCHAR)
-    return std::unique_ptr<thpp::Tensor>(new thpp::THTensor<unsigned char>());
+    return std::unique_ptr<thpp::Tensor>(
+        new thpp::THTensor<unsigned char>(std::forward<Ts>(args)...));
   else if (type == thpp::Type::CHAR)
-    return std::unique_ptr<thpp::Tensor>(new thpp::THTensor<char>());
+    return std::unique_ptr<thpp::Tensor>(
+        new thpp::THTensor<char>(std::forward<Ts>(args)...));
   else if (type == thpp::Type::SHORT)
-    return std::unique_ptr<thpp::Tensor>(new thpp::THTensor<short>());
+    return std::unique_ptr<thpp::Tensor>(
+        new thpp::THTensor<short>(std::forward<Ts>(args)...));
   else if (type == thpp::Type::INT)
-    return std::unique_ptr<thpp::Tensor>(new thpp::THTensor<int>());
+    return std::unique_ptr<thpp::Tensor>(
+        new thpp::THTensor<int>(std::forward<Ts>(args)...));
   else if (type == thpp::Type::LONG)
-    return std::unique_ptr<thpp::Tensor>(new thpp::THTensor<long>());
+    return std::unique_ptr<thpp::Tensor>(
+        new thpp::THTensor<long>(std::forward<Ts>(args)...));
   else if (type == thpp::Type::FLOAT)
-    return std::unique_ptr<thpp::Tensor>(new thpp::THTensor<float>());
+    return std::unique_ptr<thpp::Tensor>(
+        new thpp::THTensor<float>(std::forward<Ts>(args)...));
   else if (type == thpp::Type::DOUBLE)
-    return std::unique_ptr<thpp::Tensor>(new thpp::THTensor<double>());
+    return std::unique_ptr<thpp::Tensor>(
+        new thpp::THTensor<double>(std::forward<Ts>(args)...));
   throw std::invalid_argument("passed character doesn't represent a tensor type");
 }
 
-static void tensorConstruct(rpc::RPCMessage& raw_message) {
+static void tensorNew(rpc::RPCMessage& raw_message) {
   thpp::Type type = unpackType(raw_message);
   thd::object_id_type id = unpackTensor(raw_message);
   finalize(raw_message);
@@ -27,16 +35,55 @@ static void tensorConstruct(rpc::RPCMessage& raw_message) {
   );
 }
 
-static void tensorConstructWithSize(rpc::RPCMessage& raw_message) {
+static void tensorNewWithSize(rpc::RPCMessage& raw_message) {
   thpp::Type type = unpackType(raw_message);
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
+  thd::object_id_type id = unpackTensor(raw_message);
   THLongStorage *size = unpackTHLongStorage(raw_message);
   THLongStorage *stride = unpackTHLongStorage(raw_message);
   finalize(raw_message);
-  // TODO
+  workerTensors.emplace(
+    id,
+    createTensor(type, size, stride)
+  );
   THLongStorage_free(size);
   THLongStorage_free(stride);
-  throw std::runtime_error("construct with size thpp::is not yet implemented");
+}
+
+static void tensorNewWithStorage(rpc::RPCMessage& raw_message) {
+  thpp::Type type = unpackType(raw_message);
+  thd::object_id_type id = unpackTensor(raw_message);
+  thpp::Storage *storage = unpackRetrieveStorage(raw_message);
+  ptrdiff_t storageOffset = unpackInteger(raw_message);
+  THLongStorage *size = unpackTHLongStorage(raw_message);
+  THLongStorage *stride = unpackTHLongStorage(raw_message);
+  finalize(raw_message);
+  workerTensors.emplace(
+    id,
+    createTensor(type, *storage, storageOffset, size, stride)
+  );
+  THLongStorage_free(size);
+  THLongStorage_free(stride);
+}
+
+static void tensorNewWithTensor(rpc::RPCMessage& raw_message) {
+  thpp::Type type = unpackType(raw_message);
+  thd::object_id_type id = unpackTensor(raw_message);
+  thpp::Tensor *self = unpackRetrieveTensor(raw_message);
+  finalize(raw_message);
+  workerTensors.emplace(
+    id,
+    createTensor(type, *self)
+  );
+}
+
+static void tensorNewClone(rpc::RPCMessage& raw_message) {
+  thd::object_id_type id = unpackTensor(raw_message);
+  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
+  finalize(raw_message);
+  workerTensors.emplace(
+    id,
+    std::unique_ptr<thpp::Tensor>(tensor->clone())
+  );
 }
 
 static void tensorResize(rpc::RPCMessage& raw_message) {
@@ -237,8 +284,23 @@ static void tensorUnfold(rpc::RPCMessage& raw_message) {
   tensor->unfold(*src, dimension, size, step);
 }
 
+static void tensorSqueeze(rpc::RPCMessage& raw_message) {
+  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
+  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
+  finalize(raw_message);
+  tensor->squeeze(*src);
+}
+
+static void tensorSqueeze1d(rpc::RPCMessage& raw_message) {
+  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
+  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
+  int dimension = unpackInteger(raw_message);
+  finalize(raw_message);
+  tensor->squeeze(*src, dimension);
+}
+
 static void tensorFree(rpc::RPCMessage& raw_message) {
-  object_id_type tensor_id = unpackInteger(raw_message);
+  object_id_type tensor_id = unpackTensor(raw_message);
   (void)workerTensors.erase(tensor_id);
 }
 
@@ -324,6 +386,21 @@ static void tensorMaxall(rpc::RPCMessage& raw_message) {
   }
 }
 
+static void tensorMedianall(rpc::RPCMessage& raw_message) {
+  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
+  finalize(raw_message);
+
+  if (thpp::isInteger(tensor->type())) {
+    long long value = dynamic_cast<thpp::IntTensor*>(tensor)->medianall();
+    sendValueToMaster(value);
+  } else if (thpp::isFloat(tensor->type())) {
+    double value = dynamic_cast<thpp::FloatTensor*>(tensor)->medianall();
+    sendValueToMaster(value);
+  } else {
+    throw std::invalid_argument("expected scalar type");
+  }
+}
+
 static void tensorSumall(rpc::RPCMessage& raw_message) {
   thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
@@ -352,20 +429,6 @@ static void tensorProdall(rpc::RPCMessage& raw_message) {
   } else {
     throw std::invalid_argument("expected scalar type");
   }
-}
-
-static void tensorNeg(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
-  finalize(raw_message);
-  tensor->neg(*src);
-}
-
-static void tensorCinv(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
-  finalize(raw_message);
-  tensor->cinv(*src);
 }
 
 static void tensorAdd(rpc::RPCMessage& raw_message) {
@@ -729,8 +792,9 @@ static void tensorMax(rpc::RPCMessage& raw_message) {
   thpp::Tensor *indices_ = unpackRetrieveTensor(raw_message);
   thpp::Tensor *src = unpackRetrieveTensor(raw_message);
   int dimension = unpackInteger(raw_message);
+  int keepdim = unpackInteger(raw_message);
   finalize(raw_message);
-  tensor->max(*indices_, *src, dimension);
+  tensor->max(*indices_, *src, dimension, keepdim);
 }
 
 static void tensorMin(rpc::RPCMessage& raw_message) {
@@ -738,8 +802,9 @@ static void tensorMin(rpc::RPCMessage& raw_message) {
   thpp::Tensor *indices_ = unpackRetrieveTensor(raw_message);
   thpp::Tensor *src = unpackRetrieveTensor(raw_message);
   int dimension = unpackInteger(raw_message);
+  int keepdim = unpackInteger(raw_message);
   finalize(raw_message);
-  tensor->min(*indices_, *src, dimension);
+  tensor->min(*indices_, *src, dimension, keepdim);
 }
 
 static void tensorKthvalue(rpc::RPCMessage& raw_message) {
@@ -748,8 +813,9 @@ static void tensorKthvalue(rpc::RPCMessage& raw_message) {
   thpp::Tensor *src = unpackRetrieveTensor(raw_message);
   int k = unpackInteger(raw_message);
   int dimension = unpackInteger(raw_message);
+  int keepdim = unpackInteger(raw_message);
   finalize(raw_message);
-  tensor->kthvalue(*indices_, *src, k, dimension);
+  tensor->kthvalue(*indices_, *src, k, dimension, keepdim);
 }
 
 static void tensorMode(rpc::RPCMessage& raw_message) {
@@ -757,8 +823,9 @@ static void tensorMode(rpc::RPCMessage& raw_message) {
   thpp::Tensor *indices_ = unpackRetrieveTensor(raw_message);
   thpp::Tensor *src = unpackRetrieveTensor(raw_message);
   int dimension = unpackInteger(raw_message);
+  int keepdim = unpackInteger(raw_message);
   finalize(raw_message);
-  tensor->mode(*indices_, *src, dimension);
+  tensor->mode(*indices_, *src, dimension, keepdim);
 }
 
 static void tensorMedian(rpc::RPCMessage& raw_message) {
@@ -766,24 +833,27 @@ static void tensorMedian(rpc::RPCMessage& raw_message) {
   thpp::Tensor *indices_ = unpackRetrieveTensor(raw_message);
   thpp::Tensor *src = unpackRetrieveTensor(raw_message);
   int dimension = unpackInteger(raw_message);
+  int keepdim = unpackInteger(raw_message);
   finalize(raw_message);
-  tensor->median(*indices_, *src, dimension);
+  tensor->median(*indices_, *src, dimension, keepdim);
 }
 
 static void tensorSum(rpc::RPCMessage& raw_message) {
   thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
   thpp::Tensor *src = unpackRetrieveTensor(raw_message);
   int dimension = unpackInteger(raw_message);
+  int keepdim = unpackInteger(raw_message);
   finalize(raw_message);
-  tensor->sum(*src, dimension);
+  tensor->sum(*src, dimension, keepdim);
 }
 
 static void tensorProd(rpc::RPCMessage& raw_message) {
   thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
   thpp::Tensor *src = unpackRetrieveTensor(raw_message);
   int dimension = unpackInteger(raw_message);
+  int keepdim = unpackInteger(raw_message);
   finalize(raw_message);
-  tensor->prod(*src, dimension);
+  tensor->prod(*src, dimension, keepdim);
 }
 
 static void tensorCumsum(rpc::RPCMessage& raw_message) {

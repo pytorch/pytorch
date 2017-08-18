@@ -36,16 +36,14 @@ private:
 };
 
 template <typename ...Args>
-std::unique_ptr<RPCMessage> packMessage(
-                        function_id_type fid,
-                        const Args&... args
-                        );
+std::unique_ptr<RPCMessage> packMessage(function_id_type fid, const Args&... args);
 
 thpp::Type unpackType(RPCMessage& raw_message);
 thpp::Type peekType(RPCMessage& raw_message);
 double unpackFloat(RPCMessage& raw_message);
-std::uint16_t unpackFunctionId(RPCMessage& raw_message);
+function_id_type unpackFunctionId(RPCMessage& raw_message);
 long long unpackInteger(RPCMessage& raw_message);
+object_id_type unpackGenerator(RPCMessage& raw_message);
 object_id_type unpackTensor(RPCMessage& raw_message);
 object_id_type unpackStorage(RPCMessage& raw_message);
 THLongStorage* unpackTHLongStorage(RPCMessage& raw_message);

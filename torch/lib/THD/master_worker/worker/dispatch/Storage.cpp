@@ -55,7 +55,7 @@ static void storageGet(rpc::RPCMessage& raw_message) {
   }
 }
 
-static void storageConstruct(rpc::RPCMessage& raw_message) {
+static void storageNew(rpc::RPCMessage& raw_message) {
   thpp::Type storage_type = unpackType(raw_message);
   object_id_type storage_id = unpackStorage(raw_message);
   finalize(raw_message);
@@ -65,7 +65,7 @@ static void storageConstruct(rpc::RPCMessage& raw_message) {
   );
 }
 
-static void storageConstructWithSize(rpc::RPCMessage& raw_message) {
+static void storageNewWithSize(rpc::RPCMessage& raw_message) {
   thpp::Type storage_type = unpackType(raw_message);
   object_id_type storage_id = unpackStorage(raw_message);
   long long size = unpackInteger(raw_message);
@@ -76,7 +76,7 @@ static void storageConstructWithSize(rpc::RPCMessage& raw_message) {
   );
 }
 
-static void storageConstructWithSizeN(rpc::RPCMessage& raw_message, std::size_t size) {
+static void storageNewWithSizeN(rpc::RPCMessage& raw_message, std::size_t size) {
   thpp::Type storage_type = unpackType(raw_message);
   object_id_type storage_id = unpackStorage(raw_message);
   std::unique_ptr<thpp::Storage> storage = createStorage(storage_type, size);
@@ -107,20 +107,20 @@ static void storageConstructWithSizeN(rpc::RPCMessage& raw_message, std::size_t 
   );
 }
 
-static void storageConstructWithSize1(rpc::RPCMessage& raw_message) {
-  storageConstructWithSizeN(raw_message, 1);
+static void storageNewWithSize1(rpc::RPCMessage& raw_message) {
+  storageNewWithSizeN(raw_message, 1);
 }
 
-static void storageConstructWithSize2(rpc::RPCMessage& raw_message) {
-  storageConstructWithSizeN(raw_message, 2);
+static void storageNewWithSize2(rpc::RPCMessage& raw_message) {
+  storageNewWithSizeN(raw_message, 2);
 }
 
-static void storageConstructWithSize3(rpc::RPCMessage& raw_message) {
-  storageConstructWithSizeN(raw_message, 3);
+static void storageNewWithSize3(rpc::RPCMessage& raw_message) {
+  storageNewWithSizeN(raw_message, 3);
 }
 
-static void storageConstructWithSize4(rpc::RPCMessage& raw_message) {
-  storageConstructWithSizeN(raw_message, 4);
+static void storageNewWithSize4(rpc::RPCMessage& raw_message) {
+  storageNewWithSizeN(raw_message, 4);
 }
 
 static void storageFree(rpc::RPCMessage& raw_message) {

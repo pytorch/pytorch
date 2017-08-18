@@ -3,7 +3,7 @@ import sys
 import torch
 import traceback
 import unittest
-from torch.utils.data import Dataset, TensorDataset, DataLoader
+from torch.utils.data import Dataset, TensorDataset, DataLoader, ConcatDataset
 from common import TestCase, run_tests, TEST_NUMPY
 from common_nn import TEST_CUDA
 
@@ -29,6 +29,38 @@ class TestTensorDataset(TestCase):
         for i in range(15):
             self.assertEqual(t[i], source[i][0])
             self.assertEqual(l[i], source[i][1])
+
+
+class TestConcatDataset(TestCase):
+
+    def test_concat_two_singletons(self):
+        result = ConcatDataset([[0], [1]])
+        self.assertEqual(2, len(result))
+        self.assertEqual(0, result[0])
+        self.assertEqual(1, result[1])
+
+    def test_concat_two_non_singletons(self):
+        result = ConcatDataset([[0, 1, 2, 3, 4],
+                                [5, 6, 7, 8, 9]])
+        self.assertEqual(10, len(result))
+        self.assertEqual(0, result[0])
+        self.assertEqual(5, result[5])
+
+    def test_concat_two_non_singletons_with_empty(self):
+        # Adding an empty dataset somewhere is correctly handled
+        result = ConcatDataset([[0, 1, 2, 3, 4],
+                                [],
+                                [5, 6, 7, 8, 9]])
+        self.assertEqual(10, len(result))
+        self.assertEqual(0, result[0])
+        self.assertEqual(5, result[5])
+
+    def test_concat_raises_index_error(self):
+        result = ConcatDataset([[0, 1, 2, 3, 4],
+                                [5, 6, 7, 8, 9]])
+        with self.assertRaises(IndexError):
+            # this one goes to 11
+            result[11]
 
 
 class ErrorDataset(Dataset):
@@ -77,7 +109,7 @@ class TestDataLoader(TestCase):
         errors = 0
         while True:
             try:
-                it.next()
+                next(it)
             except NotImplementedError:
                 errors += 1
             except StopIteration:
@@ -90,6 +122,14 @@ class TestDataLoader(TestCase):
 
     def test_sequential_batch(self):
         self._test_sequential(DataLoader(self.dataset, batch_size=2))
+
+    def test_growing_dataset(self):
+        dataset = [torch.ones(4) for _ in range(4)]
+        dataloader_seq = DataLoader(dataset, shuffle=False)
+        dataloader_shuffle = DataLoader(dataset, shuffle=True)
+        dataset.append(torch.ones(4))
+        self.assertEqual(len(dataloader_seq), 5)
+        self.assertEqual(len(dataloader_shuffle), 5)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_sequential_pin_memory(self):
@@ -115,6 +155,29 @@ class TestDataLoader(TestCase):
 
     def test_shuffle_batch_workers(self):
         self._test_shuffle(DataLoader(self.dataset, batch_size=2, shuffle=True, num_workers=4))
+
+    def _test_batch_sampler(self, **kwargs):
+        # [(0, 1), (2, 3, 4), (5, 6), (7, 8, 9), ...]
+        batches = []
+        for i in range(0, 100, 5):
+            batches.append(tuple(range(i, i + 2)))
+            batches.append(tuple(range(i + 2, i + 5)))
+
+        dl = DataLoader(self.dataset, batch_sampler=batches, **kwargs)
+        self.assertEqual(len(dl), 40)
+        for i, (input, _target) in enumerate(dl):
+            if i % 2 == 0:
+                offset = i * 5 // 2
+                self.assertEqual(len(input), 2)
+                self.assertEqual(input, self.data[offset:offset + 2])
+            else:
+                offset = i * 5 // 2
+                self.assertEqual(len(input), 3)
+                self.assertEqual(input, self.data[offset:offset + 3])
+
+    def test_batch_sampler(self):
+        self._test_batch_sampler()
+        self._test_batch_sampler(num_workers=4)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_shuffle_pin_memory(self):
@@ -225,6 +288,49 @@ class TestStringDataLoader(TestCase):
         for batch_ndx, (s, n) in enumerate(loader):
             self.assertIsInstance(s[0], str)
             self.assertTrue(n.is_pinned())
+
+
+class DictDataset(Dataset):
+    def __len__(self):
+        return 4
+
+    def __getitem__(self, ndx):
+        return {
+            'a_tensor': torch.Tensor(4, 2).fill_(ndx),
+            'another_dict': {
+                'a_number': ndx,
+            },
+        }
+
+
+class TestDictDataLoader(TestCase):
+    def setUp(self):
+        self.dataset = DictDataset()
+
+    def test_sequential_batch(self):
+        loader = DataLoader(self.dataset, batch_size=2, shuffle=False)
+        batch_size = loader.batch_size
+        for i, sample in enumerate(loader):
+            idx = i * batch_size
+            self.assertEqual(set(sample.keys()), {'a_tensor', 'another_dict'})
+            self.assertEqual(set(sample['another_dict'].keys()), {'a_number'})
+
+            t = sample['a_tensor']
+            self.assertEqual(t.size(), torch.Size([batch_size, 4, 2]))
+            self.assertTrue((t[0] == idx).all())
+            self.assertTrue((t[1] == idx + 1).all())
+
+            n = sample['another_dict']['a_number']
+            self.assertEqual(n.size(), torch.Size([batch_size]))
+            self.assertEqual(n[0], idx)
+            self.assertEqual(n[1], idx + 1)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_pin_memory(self):
+        loader = DataLoader(self.dataset, batch_size=2, pin_memory=True)
+        for batch_ndx, sample in enumerate(loader):
+            self.assertTrue(sample['a_tensor'].is_pinned())
+            self.assertTrue(sample['another_dict']['a_number'].is_pinned())
 
 
 if __name__ == '__main__':

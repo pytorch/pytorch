@@ -184,16 +184,16 @@ tests = [
     OldModuleTest(nn.Sum,
                   (1,),
                   input_size=(2, 4, 5),
-                  reference_fn=lambda i, _: i.sum(1).squeeze(1)),
+                  reference_fn=lambda i, _: i.sum(1, keepdim=False)),
     OldModuleTest(nn.Sum,
                   (1, True),
                   input_size=(2, 4, 5),
-                  reference_fn=lambda i, _: i.sum(1).div(i.size(1)).squeeze(1),
+                  reference_fn=lambda i, _: i.sum(1, keepdim=False).div(i.size(1)),
                   desc='sizeAverage'),
     OldModuleTest(nn.Mean,
                   (1,),
                   input_size=(2, 4, 5),
-                  reference_fn=lambda i, _: torch.mean(i, 1).squeeze(1)),
+                  reference_fn=lambda i, _: torch.mean(i, 1, keepdim=False)),
     OldModuleTest(lambda: nn.Sequential().add(nn.GradientReversal()).add(nn.GradientReversal()),
                   input_size=(4, 3, 2, 2),
                   fullname='GradientReversal'),
@@ -233,19 +233,19 @@ tests = [
                   reference_fn=lambda i, _: torch.bmm(i[0], i[1].view(i[1].size(0), i[1].size(1), 1)).squeeze()),
     OldModuleTest(nn.Max,
                   input_size=(4, 5, 3),
-                  reference_fn=lambda i, _: torch.max(i, 0)[0].squeeze()),
+                  reference_fn=lambda i, _: torch.max(i, 0, False)[0]),
     OldModuleTest(nn.Max,
                   (1,),
                   input_size=(4, 5, 3),
-                  reference_fn=lambda i, _: torch.max(i, 1)[0].squeeze(),
+                  reference_fn=lambda i, _: torch.max(i, 1, False)[0],
                   desc='with_dimension'),
     OldModuleTest(nn.Min,
                   input_size=(4, 5, 3),
-                  reference_fn=lambda i, _: torch.min(i, 0)[0].squeeze()),
+                  reference_fn=lambda i, _: torch.min(i, 0, False)[0]),
     OldModuleTest(nn.Min,
                   (1,),
                   input_size=(4, 5, 3),
-                  reference_fn=lambda i, _: torch.min(i, 1)[0].squeeze(),
+                  reference_fn=lambda i, _: torch.min(i, 1, False)[0],
                   desc='with_dimension'),
     OldModuleTest(nn.MixtureTable,
                   tuple(),
@@ -532,7 +532,7 @@ for p in (1, 2, 1.5):
                       (p,),
                       input_size=(4, 5),
                       # Eh, we need to use p as a default, so it's passed by value
-                      reference_fn=lambda i, _, p=p: i.div(i.norm(p, 1).expand_as(i)),
+                      reference_fn=lambda i, _, p=p: i.div(i.norm(p, 1, True).expand_as(i)),
                       desc=str(p)),
     )
 for p in range(1, 4 + 1):
@@ -807,14 +807,14 @@ class TestNN(NNTestCase):
         str(m)
 
         output = m.forward(input)
-        output2 = input.sum(1).expand(4, 5).repeat(num_modules, 1)
+        output2 = input.sum(1, True).expand(4, 5).repeat(num_modules, 1)
         self.assertEqual(output2, output)
 
         gradInput = m.backward(input, torch.ones(output2.size()))
         gradInput2 = torch.ones(4, 2).fill_(num_modules * 5)
         self.assertEqual(gradInput, gradInput2)
 
-        gradWeight = input.sum(0).expand(5, 2)
+        gradWeight = input.sum(0, keepdim=True).expand(5, 2)
         for l in linears:
             self.assertEqual(gradWeight, l.gradWeight)
 
@@ -884,8 +884,8 @@ class TestNN(NNTestCase):
         output2 = [input, input, input]
         self.assertEqual(output2, output)
         gradInput = module.backward(input, gradOutput)
-        gradInput2 = [_gradOutput[0].sum(0).squeeze(0), _gradOutput[1].sum(
-            0).squeeze(0), [_gradOutput[2].sum(0).squeeze(0)]]
+        gradInput2 = [_gradOutput[0].sum(0, keepdim=False), _gradOutput[1].sum(
+            0, keepdim=False), [_gradOutput[2].sum(0, keepdim=False)]]
         self.assertTrue(isinstance(gradInput, list))
         self.assertFalse(isinstance(gradInput[0], list))
         self.assertFalse(isinstance(gradInput[1], list))

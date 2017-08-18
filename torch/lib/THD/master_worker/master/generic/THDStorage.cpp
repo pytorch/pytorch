@@ -6,21 +6,6 @@ using namespace thd;
 using namespace rpc;
 using namespace master;
 
-real THDStorage_(receiveValueFromWorker)(int worker_id) {
-  thpp::Type type = thpp::type_traits<real>::type;
-  if (thpp::isInteger(type)) {
-    IntScalar wrapped_value;
-    dataChannel->receive(wrapped_value, worker_id);
-    return static_cast<real>(wrapped_value.value());
-  } else if (thpp::isFloat(type)) {
-    FloatScalar wrapped_value;
-    dataChannel->receive(wrapped_value, worker_id);
-    return static_cast<real>(wrapped_value.value());
-  } else {
-    throw std::invalid_argument("expected scalar type");
-  }
-}
-
 static THDStorage* THDStorage_(_alloc)() {
   THDStorage* new_storage = new THDStorage();
   std::memset(reinterpret_cast<void*>(new_storage), 0, sizeof(new_storage));
@@ -35,12 +20,16 @@ ptrdiff_t THDStorage_(size)(const THDStorage* storage) {
   return storage->size;
 }
 
+size_t THDStorage_(elementSize)(void) {
+  return sizeof(real);
+}
+
 THDStorage* THDStorage_(new)() {
   THDStorage* storage = THDStorage_(_alloc)();
   thpp::Type type = thpp::type_traits<real>::type;
   masterCommandChannel->sendMessage(
     packMessage(
-      Functions::storageConstruct,
+      Functions::storageNew,
       type,
       storage
     ),
@@ -71,7 +60,7 @@ real THDStorage_(get)(const THDStorage* storage, ptrdiff_t offset) {
     ),
     THDState::s_current_worker
   );
-  return THDStorage_(receiveValueFromWorker)(storage->node_id);
+  return receiveValueFromWorker<real>(storage->node_id);
 }
 
 THDStorage* THDStorage_(newWithSize)(ptrdiff_t size) {
@@ -80,7 +69,7 @@ THDStorage* THDStorage_(newWithSize)(ptrdiff_t size) {
   storage->size = size;
   masterCommandChannel->sendMessage(
     packMessage(
-      Functions::storageConstructWithSize,
+      Functions::storageNewWithSize,
       type,
       storage,
       size
@@ -96,7 +85,7 @@ THDStorage* THDStorage_(newWithSize1)(real value) {
   storage->size = 1;
   masterCommandChannel->sendMessage(
     packMessage(
-      Functions::storageConstructWithSize1,
+      Functions::storageNewWithSize1,
       type,
       storage,
       value
@@ -112,7 +101,7 @@ THDStorage* THDStorage_(newWithSize2)(real value1, real value2) {
   storage->size = 2;
   masterCommandChannel->sendMessage(
     packMessage(
-      Functions::storageConstructWithSize1,
+      Functions::storageNewWithSize1,
       type,
       storage,
       value1,
@@ -129,7 +118,7 @@ THDStorage* THDStorage_(newWithSize3)(real value1, real value2, real value3) {
   storage->size = 3;
   masterCommandChannel->sendMessage(
     packMessage(
-      Functions::storageConstructWithSize1,
+      Functions::storageNewWithSize1,
       type,
       storage,
       value1,
@@ -147,7 +136,7 @@ THDStorage* THDStorage_(newWithSize4)(real value1, real value2, real value3, rea
   storage->size = 4;
   masterCommandChannel->sendMessage(
     packMessage(
-      Functions::storageConstructWithSize1,
+      Functions::storageNewWithSize1,
       type,
       storage,
       value1,

@@ -3,7 +3,8 @@ import importlib
 
 
 def _type(self, new_type=None, async=False):
-    """Casts this object to the specified type.
+    """Returns the type if `new_type` is not provided, else casts this object to
+    the specified type.
 
     If this is already of the correct type, no copy is performed and the
     original object is returned.
@@ -27,8 +28,8 @@ def _type(self, new_type=None, async=False):
             raise RuntimeError("Cannot cast sparse tensor to dense tensor")
         new_type_name = new_type.__module__ + '.' + new_type.__name__
         new_values_type_name = new_type_name.replace('.sparse', '')
-        new_values = self.values().type(new_values_type_name, async)
-        return new_type(self.indices(), new_values, self.size())
+        new_values = self._values().type(new_values_type_name, async)
+        return new_type(self._indices(), new_values, self.size())
     if new_type.is_sparse:
         raise RuntimeError("Cannot cast dense tensor to sparse tensor")
     return new_type(self.size()).copy_(self, async)
@@ -57,8 +58,8 @@ def _cuda(self, device=None, async=False):
     with torch.cuda.device(device):
         if self.is_sparse:
             new_type = getattr(torch.cuda.sparse, self.__class__.__name__)
-            indices = self.indices().cuda(device, async)
-            values = self.values().cuda(device, async)
+            indices = self._indices().cuda(device, async)
+            values = self._values().cuda(device, async)
             return new_type(indices, values, self.size())
         else:
             new_type = getattr(torch.cuda, self.__class__.__name__)
@@ -98,3 +99,47 @@ def _accumulate(iterable, fn=lambda x, y: x + y):
     for element in it:
         total = fn(total, element)
         yield total
+
+
+def _flatten_tensors(tensors):
+    """Flatten tensors into a single contiguous 1D buffer"""
+    if len(tensors) == 1:
+        return tensors[0].contiguous().view(-1)
+    numels = [tensor.numel() for tensor in tensors]
+    size = sum(numels)
+    offset = 0
+    flat = tensors[0].new(size)
+    for tensor, numel in zip(tensors, numels):
+        flat.narrow(0, offset, numel).copy_(tensor, broadcast=False)
+        offset += numel
+    return flat
+
+
+def _unflatten_tensors(flat, tensors):
+    """View a flat buffer using the sizes of tensors"""
+    outputs = []
+    offset = 0
+    for tensor in tensors:
+        numel = tensor.numel()
+        outputs.append(flat.narrow(0, offset, numel).view_as(tensor))
+        offset += numel
+    return tuple(outputs)
+
+
+def _take_tensors(tensors, size_limit):
+    """Groups tensors into lists of up to size_limit bytes"""
+    buf = []
+    size = 0
+    last_type = type(tensors[0]) if len(tensors) > 0 else None
+    for tensor in tensors:
+        t = type(tensor)
+        param_size = tensor.numel() * tensor.element_size()
+        if t is not last_type or (size + param_size > size_limit and size > 0):
+            yield buf
+            last_type = t
+            size = 0
+            buf = []
+        buf.append(tensor)
+        size += param_size
+    if len(buf) > 0:
+        yield buf

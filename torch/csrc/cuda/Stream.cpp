@@ -24,7 +24,7 @@ static PyObject * THCPStream_pynew(PyTypeObject *type, PyObject *args, PyObject 
     return NULL;
   }
 
-  THPObjectPtr ptr = type->tp_alloc(type, 0);
+  THPObjectPtr ptr(type->tp_alloc(type, 0));
   if (!ptr) {
     return NULL;
   }

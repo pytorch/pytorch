@@ -4,6 +4,7 @@ from string import Template
 from copy import deepcopy
 from .plugins import ArgcountChecker, OptionalArguments, ArgumentReferences, \
     BeforeAfterCall, ConstantArguments, ReturnArguments, GILRelease
+from ..shared import cwrap_common
 
 
 class cwrap(object):
@@ -35,11 +36,11 @@ class cwrap(object):
     DEFAULT_PLUGIN_CLASSES = [ArgcountChecker, ConstantArguments, OptionalArguments,
                               ArgumentReferences, BeforeAfterCall, ReturnArguments, GILRelease]
 
-    def __init__(self, source, destination=None, plugins=[], default_plugins=True):
+    def __init__(self, source, destination=None, plugins=None, default_plugins=True):
         if destination is None:
             destination = source.replace('.cwrap', '.cpp')
 
-        self.plugins = plugins
+        self.plugins = [] if plugins is None else plugins
         if default_plugins:
             defaults = [cls() for cls in self.DEFAULT_PLUGIN_CLASSES]
             self.plugins = defaults + self.plugins
@@ -51,7 +52,10 @@ class cwrap(object):
         with open(source, 'r') as f:
             declarations = f.read()
 
+        # wrap all the declarations in the source .cwrap file
         wrapper = self.wrap_declarations(declarations)
+
+        # let each plugin do any post-processing of the wrapped file
         for plugin in self.plugins:
             wrapper = plugin.process_full_file(wrapper)
 
@@ -73,7 +77,7 @@ class cwrap(object):
             elif line == ']]':
                 in_declaration = False
                 declaration = yaml.load('\n'.join(declaration_lines))
-                self.set_declaration_defaults(declaration)
+                cwrap_common.set_declaration_defaults(declaration)
 
                 # Pass declaration in a list - maybe some plugins want to add
                 # multiple wrappers
@@ -101,24 +105,6 @@ class cwrap(object):
 
         return '\n'.join(output)
 
-    def set_declaration_defaults(self, declaration):
-        declaration.setdefault('arguments', [])
-        declaration.setdefault('return', 'void')
-        if 'cname' not in declaration:
-            declaration['cname'] = declaration['name']
-        # Simulate multiple dispatch, even if it's not necessary
-        if 'options' not in declaration:
-            declaration['options'] = [{'arguments': declaration['arguments']}]
-            del declaration['arguments']
-        # Parse arguments (some of them can be strings)
-        for option in declaration['options']:
-            option['arguments'] = self.parse_arguments(option['arguments'])
-        # Propagate defaults from declaration to options
-        for option in declaration['options']:
-            for k, v in declaration.items():
-                if k != 'name' and k != 'options':
-                    option.setdefault(k, v)
-
     def parse_arguments(self, args):
         new_args = []
         for arg in args:
@@ -136,6 +122,10 @@ class cwrap(object):
         return new_args
 
     def search_plugins(self, fnname, args, fallback):
+        """Search plugins for the given function to call with args.
+
+        If not found, call fallback with args.
+        """
         for plugin in self.plugins:
             wrapper = getattr(plugin, fnname)(*args)
             if wrapper is not None:

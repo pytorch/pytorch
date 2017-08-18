@@ -1,12 +1,13 @@
 #ifndef THP_CUDNN_CONV_INC
 #define THP_CUDNN_CONV_INC
 
-#include <vector>
-#include <cudnn.h>
+#include "../Types.h"
 #include "THC/THC.h"
 
-#include "../Types.h"
 #include "Descriptors.h"
+
+#include <cudnn.h>
+#include <vector>
 
 namespace torch { namespace cudnn {
 

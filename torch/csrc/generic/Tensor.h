@@ -10,12 +10,14 @@
 
 struct THPTensor {
   PyObject_HEAD
+  // Invariant: After __new__ (not __init__), this field is always non-NULL.
   THTensor *cdata;
 };
 
 #if GENERATE_SPARSE
 struct THSPTensor {
   PyObject_HEAD
+  // Invariant: After __new__ (not __init__), this field is always non-NULL.
   THSTensor *cdata;
 };
 #endif

@@ -73,7 +73,7 @@ SET(AVX2_CODE "
 
   int main()
   {
-    __m256i a;
+    __m256i a = {0};
     a = _mm256_abs_epi16(a);
     return 0;
   }

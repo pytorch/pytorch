@@ -15,6 +15,7 @@ struct Scalar {
   virtual void* data() = 0;
   virtual const void* data() const = 0;
   virtual thpp::Type type() const = 0;
+  virtual Scalar* clone() const = 0;
 };
 
 template<typename real>
@@ -37,6 +38,10 @@ struct ScalarWrapper : Scalar {
 
   virtual thpp::Type type() const override {
     return thpp::type_traits<real>::type;
+  }
+
+  virtual ScalarWrapper* clone() const override {
+    return new ScalarWrapper(value());
   }
 
   real value() const {

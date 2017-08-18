@@ -17,6 +17,17 @@ CUDA_LIB ?= $(CUDA_HOME)/lib64
 CUDA_INC ?= $(CUDA_HOME)/include
 NVCC ?= $(CUDA_HOME)/bin/nvcc
 
+CUDA_VERSION ?= $(shell ls $(CUDA_LIB)/libcudart.so.* | head -1 | rev | cut -d "." -f -2 | rev)
+CUDA_MAJOR = $(shell echo $(CUDA_VERSION) | cut -d "." -f 1)
+CUDA_MINOR = $(shell echo $(CUDA_VERSION) | cut -d "." -f 2)
+
+ifeq ($(CUDA_MAJOR), 7)
+NVCC_GENCODE ?= -gencode=arch=compute_30,code=sm_30 \
+                -gencode=arch=compute_35,code=sm_35 \
+                -gencode=arch=compute_50,code=sm_50 \
+                -gencode=arch=compute_52,code=sm_52 \
+                -gencode=arch=compute_52,code=compute_52
+else
 NVCC_GENCODE ?= -gencode=arch=compute_30,code=sm_30 \
                 -gencode=arch=compute_35,code=sm_35 \
                 -gencode=arch=compute_50,code=sm_50 \
@@ -24,6 +35,7 @@ NVCC_GENCODE ?= -gencode=arch=compute_30,code=sm_30 \
                 -gencode=arch=compute_60,code=sm_60\
                 -gencode=arch=compute_61,code=sm_61 \
                 -gencode=arch=compute_60,code=compute_60
+endif
 
 CXXFLAGS   := -I$(CUDA_INC) -fPIC -fvisibility=hidden
 NVCUFLAGS  := -ccbin $(CXX) $(NVCC_GENCODE) -lineinfo -std=c++11 -maxrregcount 96
@@ -58,9 +70,6 @@ NCCL_MINOR   := 3
 NCCL_PATCH   := 4
 CXXFLAGS  += -DNCCL_MAJOR=$(NCCL_MAJOR) -DNCCL_MINOR=$(NCCL_MINOR) -DNCCL_PATCH=$(NCCL_PATCH)
 
-CUDA_VERSION ?= $(shell ls $(CUDA_LIB)/libcudart.so.* | head -1 | rev | cut -d "." -f -2 | rev)
-CUDA_MAJOR = $(shell echo $(CUDA_VERSION) | cut -d "." -f 1)
-CUDA_MINOR = $(shell echo $(CUDA_VERSION) | cut -d "." -f 2)
 CXXFLAGS  += -DCUDA_MAJOR=$(CUDA_MAJOR) -DCUDA_MINOR=$(CUDA_MINOR)
 
 .PHONY : all lib staticlib clean test mpitest install deb debian debclean forlib fortest forclean

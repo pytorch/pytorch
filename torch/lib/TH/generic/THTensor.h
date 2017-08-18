@@ -12,6 +12,8 @@ typedef struct THTensor
     long *stride;
     int nDimension;
 
+    // Note: storage->size may be greater than the recorded size
+    // of a tensor
     THStorage *storage;
     ptrdiff_t storageOffset;
     int refcount;
@@ -69,6 +71,10 @@ TH_API THTensor *THTensor_(newNarrow)(THTensor *tensor, int dimension_, long fir
 TH_API THTensor *THTensor_(newTranspose)(THTensor *tensor, int dimension1_, int dimension2_);
 TH_API THTensor *THTensor_(newUnfold)(THTensor *tensor, int dimension_, long size_, long step_);
 TH_API THTensor *THTensor_(newView)(THTensor *tensor, THLongStorage *size);
+TH_API THTensor *THTensor_(newExpand)(THTensor *tensor, THLongStorage *size);
+
+TH_API void THTensor_(expand)(THTensor *r, THTensor *tensor, THLongStorage *size);
+TH_API void THTensor_(expandNd)(THTensor **rets, THTensor **ops, int count);
 
 TH_API void THTensor_(resize)(THTensor *tensor, THLongStorage *size, THLongStorage *stride);
 TH_API void THTensor_(resizeAs)(THTensor *tensor, THTensor *src);

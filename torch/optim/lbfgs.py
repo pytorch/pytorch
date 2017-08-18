@@ -27,8 +27,8 @@ class LBFGS(Optimizer):
             step (default: max_iter * 1.25).
         tolerance_grad (float): termination tolerance on first order optimality
             (default: 1e-5).
-        tolerance_change (float): termination tolerance on function value/parameter
-            changes (default: 1e-9).
+        tolerance_change (float): termination tolerance on function
+            value/parameter changes (default: 1e-9).
         history_size (int): update history size (default: 100).
     """
 
@@ -70,7 +70,8 @@ class LBFGS(Optimizer):
         offset = 0
         for p in self._params:
             numel = p.numel()
-            p.data.add_(step_size, update[offset:offset + numel])
+            # view as to avoid deprecated pointwise semantics
+            p.data.add_(step_size, update[offset:offset + numel].view_as(p.data))
             offset += numel
         assert offset == self._numel()
 

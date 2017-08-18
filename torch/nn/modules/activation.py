@@ -1,3 +1,4 @@
+import warnings
 import torch
 from torch.nn.parameter import Parameter
 
@@ -10,16 +11,17 @@ class Threshold(Module):
 
     Threshold is defined as::
 
-         y =  x        if x >= threshold
-              value    if x <  threshold
+         y =  x        if x >  threshold
+              value    if x <= threshold
 
     Args:
         threshold: The value to threshold at
         value: The value to replace with
-        inplace: can optionally do the operation in-place
+        inplace: can optionally do the operation in-place. Default: False
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional dimensions
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
     Examples::
@@ -49,13 +51,15 @@ class Threshold(Module):
 
 
 class ReLU(Threshold):
-    """Applies the rectified linear unit function element-wise :math:`{ReLU}(x)= max(0, x)`
+    """Applies the rectified linear unit function element-wise
+    :math:`{ReLU}(x)= max(0, x)`
 
     Args:
-        inplace: can optionally do the operation in-place
+        inplace: can optionally do the operation in-place. Default: False
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional dimensions
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
     Examples::
@@ -106,12 +110,16 @@ class Hardtanh(Module):
     The range of the linear region :math:`[-1, 1]` can be adjusted
 
     Args:
-        min_value: minimum value of the linear region range
-        max_value: maximum value of the linear region range
-        inplace: can optionally do the operation in-place
+        min_val: minimum value of the linear region range. Default: -1
+        max_val: maximum value of the linear region range. Default: 1
+        inplace: can optionally do the operation in-place. Default: False
+
+    Keyword arguments :attr:`min_value` and :attr:`max_value`
+    have been deprecated in favor of :attr:`min_val` and :attr:`max_val`
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional dimensions
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
     Examples::
@@ -122,10 +130,17 @@ class Hardtanh(Module):
         >>> print(m(input))
     """
 
-    def __init__(self, min_value=-1, max_value=1, inplace=False):
+    def __init__(self, min_val=-1, max_val=1, inplace=False, min_value=None, max_value=None):
         super(Hardtanh, self).__init__()
-        self.min_val = min_value
-        self.max_val = max_value
+        if min_value is not None:
+            warnings.warn("keyword argument min_value is deprecated and renamed to min_val")
+            min_val = min_value
+        if max_value is not None:
+            warnings.warn("keyword argument max_value is deprecated and renamed to max_val")
+            max_val = max_value
+
+        self.min_val = min_val
+        self.max_val = max_val
         self.inplace = inplace
         assert self.max_val > self.min_val
 
@@ -144,10 +159,11 @@ class ReLU6(Hardtanh):
     """Applies the element-wise function :math:`{ReLU6}(x) = min(max(0,x), 6)`
 
     Args:
-        inplace: can optionally do the operation in-place
+        inplace: can optionally do the operation in-place. Default: False
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional dimensions
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
     Examples::
@@ -171,7 +187,8 @@ class Sigmoid(Module):
     """Applies the element-wise function :math:`f(x) = 1 / ( 1 + exp(-x))`
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional dimensions
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
     Examples::
@@ -190,10 +207,12 @@ class Sigmoid(Module):
 
 
 class Tanh(Module):
-    """Applies element-wise, :math:`f(x) = (exp(x) - exp(-x)) / (exp(x) + exp(-x))`
+    """Applies element-wise,
+    :math:`f(x) = (exp(x) - exp(-x)) / (exp(x) + exp(-x))`
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional dimensions
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
     Examples::
@@ -212,14 +231,16 @@ class Tanh(Module):
 
 
 class ELU(Module):
-    """Applies element-wise, :math:`f(x) = max(0,x) + min(0, alpha * (exp(x) - 1))`
+    """Applies element-wise,
+    :math:`f(x) = max(0,x) + min(0, alpha * (exp(x) - 1))`
 
     Args:
-        alpha: the alpha value for the ELU formulation
-        inplace: can optionally do the operation in-place
+        alpha: the alpha value for the ELU formulation. Default: 1.0
+        inplace: can optionally do the operation in-place. Default: False
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional dimensions
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
     Examples::
@@ -245,6 +266,76 @@ class ELU(Module):
             + inplace_str + ')'
 
 
+class SELU(Module):
+    """Applies element-wise,
+    :math:`f(x) = scale * (\max(0,x) + \min(0, alpha * (\exp(x) - 1)))`,
+    with ``alpha=1.6732632423543772848170429916717`` and
+    ``scale=1.0507009873554804934193349852946``.
+
+    More details can be found in the paper `Self-Normalizing Neural Networks`_ .
+
+    Args:
+        inplace (bool, optional): can optionally do the operation in-place. Default: False
+
+    Shape:
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
+        - Output: :math:`(N, *)`, same shape as the input
+
+    Examples::
+
+        >>> m = nn.SELU()
+        >>> input = autograd.Variable(torch.randn(2))
+        >>> print(input)
+        >>> print(m(input))
+
+    .. _Self-Normalizing Neural Networks: https://arxiv.org/abs/1706.02515
+    """
+
+    def __init__(self, inplace=False):
+        super(SELU, self).__init__()
+        self.inplace = inplace
+
+    def forward(self, input):
+        return F.selu(input, self.inplace)
+
+    def __repr__(self):
+        inplace_str = ' (inplace)' if self.inplace else ''
+        return self.__class__.__name__ + inplace_str
+
+
+class GLU(Module):
+    """Applies the gated linear unit function
+    :math:`{GLU}(a, b)= a \otimes \sigma(b)` where `a` is the first half of
+    the input vector and `b` is the second half.
+
+    Args:
+        dim (int): the dimension on which to split the input. Default: -1
+
+    Shape:
+        - Input: :math:`(*, N, *)` where `*` means, any number of additional
+          dimensions
+        - Output: :math:`(*, N / 2, *)`
+
+    Examples::
+
+        >>> m = nn.GLU()
+        >>> input = autograd.Variable(torch.randn(4, 2))
+        >>> print(input)
+        >>> print(m(input))
+    """
+
+    def __init__(self, dim=-1):
+        super(GLU, self).__init__()
+        self.dim = dim
+
+    def forward(self, input):
+        return F.glu(input, self.dim)
+
+    def __repr__(self):
+        return '{} (dim={})'.format(self.__class__.__name__, self.dim)
+
+
 class Hardshrink(Module):
     """Applies the hard shrinkage function element-wise
     Hardshrink is defined as::
@@ -256,7 +347,8 @@ class Hardshrink(Module):
         lambd: the lambda value for the Hardshrink formulation. Default: 0.5
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional dimensions
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
     Examples::
@@ -280,14 +372,16 @@ class Hardshrink(Module):
 
 
 class LeakyReLU(Module):
-    """Applies element-wise, :math:`f(x) = max(0, x) + {negative\_slope} * min(0, x)`
+    """Applies element-wise,
+    :math:`f(x) = max(0, x) + {negative\_slope} * min(0, x)`
 
     Args:
         negative_slope: Controls the angle of the negative slope. Default: 1e-2
-        inplace: can optionally do the operation in-place
+        inplace: can optionally do the operation in-place. Default: False
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional dimensions
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
     Examples::
@@ -317,7 +411,8 @@ class LogSigmoid(Module):
     """Applies element-wise :math:`LogSigmoid(x) = log( 1 / (1 + exp(-x_i)))`
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional dimensions
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
     Examples::
@@ -349,7 +444,8 @@ class Softplus(Module):
         threshold: values above this revert to a linear function. Default: 20
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional dimensions
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
     Examples::
@@ -386,7 +482,8 @@ class Softshrink(Module):
         lambd: the lambda value for the Softshrink formulation. Default: 0.5
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional dimensions
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
     Examples::
@@ -410,11 +507,11 @@ class Softshrink(Module):
 
 
 class PReLU(Module):
-    """Applies element-wise the function :math:`PReLU(x) = max(0,x) + a * min(0,x)`
-    Here "a" is a learnable parameter.
-    When called without arguments, nn.PReLU() uses a single parameter "a"
-    across all input channels. If called with nn.PReLU(nChannels), a separate
-    "a" is used for each input channel.
+    """Applies element-wise the function
+    :math:`PReLU(x) = max(0,x) + a * min(0,x)` Here "a" is a learnable
+    parameter. When called without arguments, nn.PReLU() uses a single
+    parameter "a" across all input channels. If called with nn.PReLU(nChannels),
+    a separate "a" is used for each input channel.
 
 
     .. note::
@@ -425,7 +522,8 @@ class PReLU(Module):
         init: the initial value of "a". Default: 0.25
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional dimensions
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
     Examples::
@@ -453,7 +551,8 @@ class Softsign(Module):
     """Applies element-wise, the function :math:`f(x) = x / (1 + |x|)`
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional dimensions
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
     Examples::
@@ -475,7 +574,8 @@ class Tanhshrink(Module):
     """Applies element-wise, :math:`Tanhshrink(x) = x - Tanh(x)`
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional dimensions
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
     Examples::
@@ -498,9 +598,7 @@ class Softmin(Module):
     rescaling them so that the elements of the n-dimensional output Tensor
     lie in the range `(0, 1)` and sum to 1
 
-    :math:`f(x) = exp(-x_i - {shift}) / sum_j exp(-x_j - {shift})`
-
-    where :math:`{shift} = max_i - x_i`
+    :math:`f(x) = exp(-x_i) / sum_j exp(-x_j)`
 
     Shape:
         - Input: :math:`(N, L)`
@@ -530,8 +628,8 @@ class Softmax(Module):
     rescaling them so that the elements of the n-dimensional output Tensor
     lie in the range (0,1) and sum to 1
 
-    Softmax is defined as :math:`f_i(x) = exp(x_i - shift) / sum_j exp(x_j - shift)`
-    where `shift = max_i x_i`
+    Softmax is defined as
+    :math:`f_i(x) = exp(x_i) / sum_j exp(x_j)`
 
     Shape:
         - Input: :math:`(N, L)`

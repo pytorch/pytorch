@@ -1,5 +1,9 @@
 #include "TensorDescriptor.hpp"
+#include "Cuda.hpp"
 #include <THPP/tensors/THTensor.hpp>
+#ifdef WITH_CUDA
+#include <THPP/tensors/THCTensor.hpp>
+#endif
 
 THDTensorDescriptor* THDTensorDescriptor_newFromTHDoubleTensor(THDoubleTensor *tensor) {
   THDoubleTensor_retain(tensor);
@@ -35,6 +39,44 @@ THDTensorDescriptor* THDTensorDescriptor_newFromTHByteTensor(THByteTensor *tenso
   THByteTensor_retain(tensor);
   return new thpp::THTensor<unsigned char>(tensor);
 }
+
+#ifdef WITH_CUDA
+
+THDTensorDescriptor* THDTensorDescriptor_newFromTHCudaDoubleTensor(THCudaDoubleTensor *tensor) {
+  THCudaDoubleTensor_retain(THDGetCudaState(), tensor);
+  return new thpp::THCTensor<double>(THDGetCudaState(), tensor);
+}
+
+THDTensorDescriptor* THDTensorDescriptor_newFromTHCudaFloatTensor(THCudaTensor *tensor) {
+  THCudaTensor_retain(THDGetCudaState(), tensor);
+  return new thpp::THCTensor<float>(THDGetCudaState(), tensor);
+}
+
+THDTensorDescriptor* THDTensorDescriptor_newFromTHCudaLongTensor(THCudaLongTensor *tensor) {
+  THCudaLongTensor_retain(THDGetCudaState(), tensor);
+  return new thpp::THCTensor<long>(THDGetCudaState(), tensor);
+}
+
+THDTensorDescriptor* THDTensorDescriptor_newFromTHCudaIntTensor(THCudaIntTensor *tensor) {
+  THCudaIntTensor_retain(THDGetCudaState(), tensor);
+  return new thpp::THCTensor<int>(THDGetCudaState(), tensor);
+}
+
+THDTensorDescriptor* THDTensorDescriptor_newFromTHCudaShortTensor(THCudaShortTensor *tensor) {
+  THCudaShortTensor_retain(THDGetCudaState(), tensor);
+  return new thpp::THCTensor<short>(THDGetCudaState(), tensor);
+}
+
+THDTensorDescriptor* THDTensorDescriptor_newFromTHCudaCharTensor(THCudaCharTensor *tensor) {
+  THCudaCharTensor_retain(THDGetCudaState(), tensor);
+  return new thpp::THCTensor<char>(THDGetCudaState(), tensor);
+}
+
+THDTensorDescriptor* THDTensorDescriptor_newFromTHCudaByteTensor(THCudaByteTensor *tensor) {
+  THCudaByteTensor_retain(THDGetCudaState(), tensor);
+  return new thpp::THCTensor<unsigned char>(THDGetCudaState(), tensor);
+}
+#endif
 
 THD_API void THDTensorDescriptor_free(THDTensorDescriptor* desc) {
   delete desc;

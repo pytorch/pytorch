@@ -128,3 +128,12 @@ torch._tensor_classes.add(IntTensor)
 torch._tensor_classes.add(ShortTensor)
 torch._tensor_classes.add(CharTensor)
 torch._tensor_classes.add(ByteTensor)
+
+_type_names = ['Double', 'Float', 'Long', 'Int', 'Short', 'Char', 'Byte']
+_locals = locals()
+_tensors = [_locals[t + 'Tensor'] for t in _type_names]
+_storages = [_locals[t + 'Storage'] for t in _type_names]
+for cls in _tensors + _storages:
+    cls.__module__ = 'torch.distributed'
+torch._C._init_names(_tensors + _storages)
+del _locals, _type_names, _tensors, _storages

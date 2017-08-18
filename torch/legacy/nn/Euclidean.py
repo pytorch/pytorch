@@ -82,7 +82,7 @@ class Euclidean(Module):
         else:
             self._repeat.add_(-1, self._expand2)
 
-        torch.norm(self._repeat, 2, 1, out=self.output)
+        torch.norm(self._repeat, 2, 1, True, out=self.output)
         self.output.resize_(batchSize, outputSize)
 
         return self.output
@@ -127,7 +127,7 @@ class Euclidean(Module):
         else:
             torch.mul(self._repeat, self._expand3, out=self._repeat2)
 
-        torch.sum(self._repeat2, 2, out=self.gradInput)
+        torch.sum(self._repeat2, 2, True, out=self.gradInput)
         self.gradInput.resize_as_(input)
 
         return self.gradInput
@@ -144,7 +144,7 @@ class Euclidean(Module):
         assert input.dim() == 2
         if self._sum is None:
             self._sum = input.new()
-        torch.sum(self._repeat2, 0, out=self._sum)
+        torch.sum(self._repeat2, 0, True, out=self._sum)
         self._sum.resize_(inputSize, outputSize)
         self.gradWeight.add_(-scale, self._sum)
 

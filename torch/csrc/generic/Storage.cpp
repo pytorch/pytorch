@@ -24,7 +24,7 @@ static void THPStorage_(dealloc)(THPStorage* self)
 
 static THStorage* THPStorage_(newWithAllocator)(long size, THAllocator* allocator)
 {
-#ifdef THC_GENERIC_FILE
+#if defined(THC_GENERIC_FILE) || defined(THD_GENERIC_FILE)
   THPUtils_setError(THPStorageStr " does not support custom allocators");
   return NULL;
 #else
@@ -37,7 +37,7 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
   HANDLE_TH_ERRORS
   Py_ssize_t num_args = args ? PyTuple_Size(args) : 0;
 
-  THPStoragePtr self = (THPStorage *)type->tp_alloc(type, 0);
+  THPStoragePtr self((THPStorage *)type->tp_alloc(type, 0));
   THPUtils_assert(self, "failed to allocate a " THPStorageStr " object");
   THAllocator* allocator = NULL;
 
@@ -87,6 +87,10 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
 
   // torch.Storage(view_source, [offset, [size]])
   if (num_args < 4 && THPStorage_(Check)(first_arg)) {
+#ifdef THD_GENERIC_FILE
+    THPUtils_setError("distributed storages don't support storage views");
+    return NULL;
+#else
     THPStorage *storage_arg = (THPStorage *)first_arg;
     long numel = storage_arg->cdata->size;
     long offset = 0;
@@ -113,16 +117,20 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
         size, numel - offset, offset);
 
     real *data_ptr = storage_arg->cdata->data + offset;
-    THStoragePtr storage = THStorage_(newWithData)(LIBRARY_STATE data_ptr, size);
+    THStoragePtr storage(THStorage_(newWithData)(LIBRARY_STATE data_ptr, size));
     storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_VIEW;
     storage->view = storage_arg->cdata;
     THStorage_(retain)(LIBRARY_STATE storage_arg->cdata);
     self->cdata = storage.release();
     return (PyObject*)self.release();
+#endif
   }
 
   // torch.Storage(sequence)
   if (num_args == 1 && PySequence_Check(first_arg)) {
+#ifdef THD_GENERIC_FILE
+    THPUtils_setError("distributed storages don't support construction from a sequence");
+#else
     Py_ssize_t length = PySequence_Length(first_arg);
     THPUtils_assert(length >= 0, "couldn't obtain the length of %s",
         THPUtils_typename(first_arg));
@@ -132,7 +140,7 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
       for (Py_ssize_t i = 0; i < length; i++) {
         item = PySequence_GetItem(first_arg, i);
         real value = THPUtils_(unpackReal)(item.get());
-#ifndef THC_GENERIC_FILE
+#if !defined(THC_GENERIC_FILE)
         self->cdata->data[i] = value;
 #else
         // TODO: this might be slow - consider batched updates?
@@ -148,9 +156,12 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
       return NULL;
     }
     return (PyObject*)self.release();
+#endif
   }
 
+#ifndef THD_GENERIC_FILE
 invalid_arguments:
+#endif
   THPUtils_invalidArguments(args, kwargs, THPStorageStr " constructor", 6,
           "no arguments",
           "(int size)",
@@ -186,6 +197,10 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
     return THPUtils_(newReal)(value);
   /* Slice index */
   } else if (PySlice_Check(index)) {
+#ifdef THD_GENERIC_FILE
+    THPUtils_setError("distributed storages don't support slicing");
+    return NULL;
+#else
     Py_ssize_t start, stop, slicelength, step;
     long len = THStorage_(size)(LIBRARY_STATE self->cdata);
     if (!THPUtils_parseSlice(index, len, &start, &stop, &step, &slicelength))
@@ -197,7 +212,7 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
     }
 
     real *data = THStorage_(data)(LIBRARY_STATE self->cdata);
-    THStoragePtr new_storage = THStorage_(newWithData)(LIBRARY_STATE data + start, slicelength);
+    THStoragePtr new_storage(THStorage_(newWithData)(LIBRARY_STATE data + start, slicelength));
     new_storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_VIEW;
     new_storage->view = self->cdata;
     THStorage_(retain)(LIBRARY_STATE self->cdata);
@@ -205,6 +220,7 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
     PyObject *_ret = THPStorage_(New)(new_storage);
     new_storage.release();
     return _ret;
+#endif
   }
   PyErr_Format(PyExc_TypeError, "can't index a " THPStorageStr " with %s",
       THPUtils_typename(index));
@@ -307,54 +323,60 @@ THPCopyList THStorage_(copy_functions);
 
 void THPStorage_(initCopyMethods)()
 {
+#ifndef THD_GENERIC_FILE
   auto& h = THStorage_(copy_functions);
   // copy from CPU types
-  THPInsertCopyFunction(h, &THStorage_(copyByte));
-  THPInsertCopyFunction(h, &THStorage_(copyChar));
-  THPInsertCopyFunction(h, &THStorage_(copyShort));
-  THPInsertCopyFunction(h, &THStorage_(copyInt));
-  THPInsertCopyFunction(h, &THStorage_(copyLong));
-  THPInsertCopyFunction(h, &THStorage_(copyHalf));
-  THPInsertCopyFunction(h, &THStorage_(copyFloat));
-  THPInsertCopyFunction(h, &THStorage_(copyDouble));
+  THPInsertStorageCopyFunction(h, &THStorage_(copyByte));
+  THPInsertStorageCopyFunction(h, &THStorage_(copyChar));
+  THPInsertStorageCopyFunction(h, &THStorage_(copyShort));
+  THPInsertStorageCopyFunction(h, &THStorage_(copyInt));
+  THPInsertStorageCopyFunction(h, &THStorage_(copyLong));
+  THPInsertStorageCopyFunction(h, &THStorage_(copyHalf));
+  THPInsertStorageCopyFunction(h, &THStorage_(copyFloat));
+  THPInsertStorageCopyFunction(h, &THStorage_(copyDouble));
 #ifdef THC_GENERIC_FILE
   // copy from GPU types
-  THPInsertCopyFunction(h, &THStorage_(copyCudaByte));
-  THPInsertCopyFunction(h, &THStorage_(copyCudaChar));
-  THPInsertCopyFunction(h, &THStorage_(copyCudaShort));
-  THPInsertCopyFunction(h, &THStorage_(copyCudaInt));
-  THPInsertCopyFunction(h, &THStorage_(copyCudaLong));
-  THPInsertCopyFunction(h, &THStorage_(copyCudaFloat));
-  THPInsertCopyFunction(h, &THStorage_(copyCudaDouble));
+  THPInsertStorageCopyFunction(h, &THStorage_(copyCudaByte));
+  THPInsertStorageCopyFunction(h, &THStorage_(copyCudaChar));
+  THPInsertStorageCopyFunction(h, &THStorage_(copyCudaShort));
+  THPInsertStorageCopyFunction(h, &THStorage_(copyCudaInt));
+  THPInsertStorageCopyFunction(h, &THStorage_(copyCudaLong));
+  THPInsertStorageCopyFunction(h, &THStorage_(copyCudaFloat));
+  THPInsertStorageCopyFunction(h, &THStorage_(copyCudaDouble));
 #ifdef CUDA_HALF_TENSOR
-  THPInsertCopyFunction(h, &THStorage_(copyCudaHalf));
+  THPInsertStorageCopyFunction(h, &THStorage_(copyCudaHalf));
 #endif
   // add CPU <- GPU copies to base type
   #define THCpuStorage_(name) TH_CONCAT_4(TH, Real, Storage_, name)
   extern THPCopyList THCpuStorage_(copy_functions);
   auto& b = THCpuStorage_(copy_functions);
-  THPInsertCopyFunction(b, &THCpuStorage_(copyCudaByte));
-  THPInsertCopyFunction(b, &THCpuStorage_(copyCudaChar));
-  THPInsertCopyFunction(b, &THCpuStorage_(copyCudaShort));
-  THPInsertCopyFunction(b, &THCpuStorage_(copyCudaInt));
-  THPInsertCopyFunction(b, &THCpuStorage_(copyCudaLong));
-  THPInsertCopyFunction(b, &THCpuStorage_(copyCudaFloat));
-  THPInsertCopyFunction(b, &THCpuStorage_(copyCudaDouble));
+  THPInsertStorageCopyFunction(b, &THCpuStorage_(copyCudaByte));
+  THPInsertStorageCopyFunction(b, &THCpuStorage_(copyCudaChar));
+  THPInsertStorageCopyFunction(b, &THCpuStorage_(copyCudaShort));
+  THPInsertStorageCopyFunction(b, &THCpuStorage_(copyCudaInt));
+  THPInsertStorageCopyFunction(b, &THCpuStorage_(copyCudaLong));
+  THPInsertStorageCopyFunction(b, &THCpuStorage_(copyCudaFloat));
+  THPInsertStorageCopyFunction(b, &THCpuStorage_(copyCudaDouble));
 #ifdef CUDA_HALF_TENSOR
-  THPInsertCopyFunction(b, &THCpuStorage_(copyCudaHalf));
+  THPInsertStorageCopyFunction(b, &THCpuStorage_(copyCudaHalf));
 #endif
   #undef THCpuStorage_
 #endif
+#endif // !defined(THD_GENERIC_FILE)
 }
 
 #include "StorageMethods.cpp"
+#ifndef THD_GENERIC_FILE
 #include "StorageSharing.cpp"
+#endif
 
 bool THPStorage_(init)(PyObject *module)
 {
   static std::vector<PyMethodDef> methods;
   THPUtils_addPyMethodDefs(methods, THPStorage_(methods));
+#ifndef THD_GENERIC_FILE
   THPUtils_addPyMethodDefs(methods, THPStorage_(sharingMethods));
+#endif
 
   THPStorageType.tp_methods = methods.data();
   THPStorageType.tp_members = THPStorage_(members);

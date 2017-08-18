@@ -39,7 +39,7 @@ class Cosine(Module):
 
         # y_j = (w_j * x) / ( || w_j || * || x || )
 
-        torch.norm(self.weight, 2, 1, out=self._weightNorm).add_(1e-12)
+        torch.norm(self.weight, 2, 1, out=self._weightNorm, keepdim=True).add_(1e-12)
 
         batchSize = input.size(0)
         nelement = self.output.nelement()
@@ -49,7 +49,7 @@ class Cosine(Module):
 
         self.output.addmm_(0., 1., input, self.weight.t())
 
-        torch.norm(input, 2, 1, out=self._inputNorm).add_(1e-12)
+        torch.norm(input, 2, 1, out=self._inputNorm, keepdim=True).add_(1e-12)
         self.output.div_(self._weightNorm.view(1, outputSize).expand_as(self.output))
         self.output.div_(self._inputNorm.expand_as(self.output))
         return self.output
@@ -85,7 +85,7 @@ class Cosine(Module):
         self.gradInput.copy_(input).div_(inputNorm)
         self._gradOutput.resize_as_(gradOutput).copy_(gradOutput)
         self._gradOutput.mul_(self.output)
-        torch.sum(self._gradOutput, 1, out=self._sum)
+        torch.sum(self._gradOutput, 1, out=self._sum, keepdim=True)
         self.gradInput.mul_(self._sum.expand_as(input))
 
         self._gradOutput.resize_as_(gradOutput).copy_(gradOutput)
@@ -116,7 +116,7 @@ class Cosine(Module):
             self._gradOutput = gradOutput.new()
         self._gradOutput.resize_as_(gradOutput).copy_(gradOutput)
         self._gradOutput.mul_(self.output)
-        torch.sum(self._gradOutput, 0, out=self._sum)
+        torch.sum(self._gradOutput, 0, out=self._sum, keepdim=True)
         grad = self._sum[0]
         grad.div_(self._weightNorm.select(1, 0))
         self._weight.mul_(grad.view(outputSize, 1).expand_as(self._weight))

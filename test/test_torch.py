@@ -25,7 +25,7 @@ class TestTorch(TestCase):
             'torch.DoubleTensor': 1e-8,
             'torch.FloatTensor': 1e-4,
         }
-        for tname, prec in types.items():
+        for tname, _prec in types.items():
             v1 = torch.randn(100).type(tname)
             v2 = torch.randn(100).type(tname)
             res1 = torch.dot(v1, v2)
@@ -62,6 +62,9 @@ class TestTorch(TestCase):
 
     def test_sinh(self):
         self._testMathByName('sinh')
+
+    def test_lgamma(self):
+        self._testMathByName('lgamma')
 
     def test_asin(self):
         self._testMath(torch.asin, lambda x: math.asin(x) if abs(x) <= 1 else float('nan'))
@@ -132,8 +135,20 @@ class TestTorch(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_has_storage_numpy(self):
-        arr = np.array([], dtype=np.float32)
-        self.assertIsNotNone(torch.Tensor(arr).storage())
+        for dtype in [np.float32, np.float64, np.int64,
+                      np.int32, np.int16, np.uint8]:
+            arr = np.array([1], dtype=dtype)
+            self.assertIsNotNone(torch.FloatTensor(arr).storage())
+            self.assertIsNotNone(torch.DoubleTensor(arr).storage())
+            self.assertIsNotNone(torch.IntTensor(arr).storage())
+            self.assertIsNotNone(torch.LongTensor(arr).storage())
+            self.assertIsNotNone(torch.ByteTensor(arr).storage())
+            if torch.cuda.is_available():
+                self.assertIsNotNone(torch.cuda.FloatTensor(arr).storage())
+                self.assertIsNotNone(torch.cuda.DoubleTensor(arr).storage())
+                self.assertIsNotNone(torch.cuda.IntTensor(arr).storage())
+                self.assertIsNotNone(torch.cuda.LongTensor(arr).storage())
+                self.assertIsNotNone(torch.cuda.ByteTensor(arr).storage())
 
     def _testSelection(self, torchfn, mathfn):
         # contiguous
@@ -155,18 +170,18 @@ class TestTorch(TestCase):
 
         # with indices
         m1 = torch.randn(100, 100)
-        res1val, res1ind = torchfn(m1, 1)
-        res2val = m1[:, 0:1].clone()
+        res1val, res1ind = torchfn(m1, 1, False)
+        res2val = m1[:, 0:1].clone().squeeze()
         res2ind = res1ind.clone().fill_(0)
         for i, j in iter_indices(m1):
-            if mathfn(res2val[i, 0], m1[i, j]) != res2val[i, 0]:
-                res2val[i, 0] = m1[i, j]
-                res2ind[i, 0] = j
+            if mathfn(res2val[i], m1[i, j]) != res2val[i]:
+                res2val[i] = m1[i, j]
+                res2ind[i] = j
 
         maxerr = 0
         for i in range(res1val.size(0)):
-            maxerr = max(maxerr, abs(res1val[i][0] - res2val[i][0]))
-            self.assertEqual(res1ind[i][0], res2ind[i][0])
+            maxerr = max(maxerr, abs(res1val[i] - res2val[i]))
+            self.assertEqual(res1ind[i], res2ind[i])
         self.assertLessEqual(abs(maxerr), 1e-5)
 
         # NaNs
@@ -184,6 +199,50 @@ class TestTorch(TestCase):
 
     def test_min(self):
         self._testSelection(torch.min, min)
+
+    @staticmethod
+    def _test_dim_reduction(self, cast):
+        dim_red_fns = [
+            "mean", "median", "mode", "norm", "prod",
+            "std", "sum", "var", "max", "min"]
+
+        def normfn_attr(t, dim, keepdim=False):
+            attr = getattr(torch, "norm")
+            return attr(t, 2, dim, keepdim)
+
+        for fn_name in dim_red_fns:
+            fn_attr = getattr(torch, fn_name) if fn_name != "norm" else normfn_attr
+
+            def fn(x, dim, keepdim=False):
+                ans = fn_attr(x, dim, keepdim=keepdim)
+                return ans if not isinstance(ans, tuple) else ans[0]
+
+            def test_multidim(x, dim):
+                self.assertEqual(fn(x, dim).unsqueeze(dim), fn(x, dim, keepdim=True))
+                self.assertEqual(x.ndimension() - 1, fn(x, dim).ndimension())
+                self.assertEqual(x.ndimension(), fn(x, dim, keepdim=True).ndimension())
+
+            # general case
+            x = cast(torch.randn(3, 4, 5))
+            dim = random.randint(0, 2)
+            test_multidim(x, dim)
+
+            # check 1-d behavior
+            x = cast(torch.randn(1))
+            dim = 0
+            self.assertEqual(fn(x, dim), fn(x, dim, keepdim=True))
+            self.assertEqual(x.ndimension(), fn(x, dim).ndimension())
+            self.assertEqual(x.ndimension(), fn(x, dim, keepdim=True).ndimension())
+
+            # check reducing of a singleton dimension
+            dims = [3, 4, 5]
+            singleton_dim = random.randint(0, 2)
+            dims[singleton_dim] = 1
+            x = cast(torch.randn(dims))
+            test_multidim(x, singleton_dim)
+
+    def test_dim_reduction(self):
+        self._test_dim_reduction(self, lambda t: t)
 
     def _testCSelection(self, torchfn, mathfn):
         # Two tensors
@@ -309,14 +368,33 @@ class TestTorch(TestCase):
         res_csub.sub_(scalar)
         self.assertEqual(res_add, res_csub)
 
-    def test_neg(self):
-        a = torch.randn(100, 90)
-        zeros = torch.Tensor().resize_as_(a).zero_()
+    @staticmethod
+    def _test_neg(self, cast):
+        float_types = ['torch.DoubleTensor', 'torch.FloatTensor', 'torch.LongTensor']
+        int_types = ['torch.IntTensor', 'torch.ShortTensor']
 
-        res_add = torch.add(zeros, -1, a)
-        res_neg = a.clone()
-        res_neg.neg_()
-        self.assertEqual(res_neg, res_add)
+        for t in float_types + int_types:
+            if t in float_types:
+                a = cast(torch.randn(100, 90).type(t))
+            else:
+                a = cast(torch.Tensor(100, 90).type(t).random_())
+            zeros = cast(torch.Tensor().type(t)).resize_as_(a).zero_()
+
+            res_add = torch.add(zeros, -1, a)
+            res_neg = a.clone()
+            res_neg.neg_()
+            self.assertEqual(res_neg, res_add)
+
+            # test out of place as well
+            res_neg_out_place = a.clone().neg()
+            self.assertEqual(res_neg_out_place, res_add)
+
+            # test via __neg__ operator
+            res_neg_op = -a.clone()
+            self.assertEqual(res_neg_op, res_add)
+
+    def test_neg(self):
+        self._test_neg(self, lambda t: t)
 
     def test_reciprocal(self):
         a = torch.randn(100, 89)
@@ -360,7 +438,7 @@ class TestTorch(TestCase):
         m1 = torch.Tensor(10, 10).uniform_(-10., 10.)
         res1 = m1.clone()
         res2 = m1.clone()
-        qs = torch.range(-5.1, 4.1)
+        qs = torch.arange(-5.1, 4.1)
         # Check the case where the divisor is a simple float
         for col_idx, q in enumerate(qs):
             # Reference
@@ -378,7 +456,7 @@ class TestTorch(TestCase):
         long_m1 = torch.LongTensor(10, 10).random_(-10, 10)
         long_res1 = long_m1.clone()
         long_res2 = long_m1.clone()
-        long_qs = torch.range(-5, 4).long()
+        long_qs = torch.arange(-5, 5).long()
         long_qs[5] = 5  # Can't handle the divisor=0 case
         for col_idx, long_q in enumerate(long_qs):
             # Reference
@@ -511,25 +589,25 @@ class TestTorch(TestCase):
         res2 = torch.Tensor().resize_as_(res[0]).zero_()
 
         res2.addbmm_(b1, b2)
-        self.assertEqual(res2, res.sum(0)[0])
+        self.assertEqual(res2, res.sum(0, False))
 
         res2.addbmm_(1, b1, b2)
-        self.assertEqual(res2, res.sum(0)[0] * 2)
+        self.assertEqual(res2, res.sum(0, False) * 2)
 
         res2.addbmm_(1., .5, b1, b2)
-        self.assertEqual(res2, res.sum(0)[0] * 2.5)
+        self.assertEqual(res2, res.sum(0, False) * 2.5)
 
         res3 = torch.addbmm(1, res2, 0, b1, b2)
         self.assertEqual(res3, res2)
 
         res4 = torch.addbmm(1, res2, .5, b1, b2)
-        self.assertEqual(res4, res.sum(0)[0] * 3)
+        self.assertEqual(res4, res.sum(0, False) * 3)
 
         res5 = torch.addbmm(0, res2, 1, b1, b2)
-        self.assertEqual(res5, res.sum(0)[0])
+        self.assertEqual(res5, res.sum(0, False))
 
         res6 = torch.addbmm(.1, res2, .5, b1, b2)
-        self.assertEqual(res6, res2 * .1 + res.sum(0) * .5)
+        self.assertEqual(res6, res2 * .1 + (res.sum(0) * .5))
 
     def test_baddbmm(self):
         num_batches = 10
@@ -636,7 +714,8 @@ class TestTorch(TestCase):
         m2 = torch.randn(10, 10 * 10)
         sm1 = m1[4]
         sm2 = m2[4]
-        res1 = torchfn(sm1, sm2)
+
+        res1 = torchfn(sm1, sm2.view(10, 10))
         res2 = reference_implementation(res1.clone())
         self.assertEqual(res1, res2)
 
@@ -645,7 +724,11 @@ class TestTorch(TestCase):
         m2 = torch.randn(10 * 10, 10 * 10)
         sm1 = m1[:, 4]
         sm2 = m2[:, 4]
+        # view as sm1.size()
+        sm2.set_(sm2.storage(), sm2.storage_offset(), sm1.size(), (sm2.stride()[0] * 10, sm2.stride()[0]))
         res1 = torchfn(sm1, sm2)
+        # reference_implementation assumes 1-d sm2
+        sm2.set_(sm2.storage(), sm2.storage_offset(), m2[:, 4].size(), m2[:, 4].stride())
         res2 = reference_implementation(res1.clone())
         self.assertEqual(res1, res2)
 
@@ -741,7 +824,7 @@ class TestTorch(TestCase):
             m1 = matrix.transpose(dim, 0).contiguous()
             # collapse non-dim dimensions.
             m2 = m1.clone().resize_(m1.size(0), int(math.floor(m1.nelement() / m1.size(0))))
-            norms = m2.norm(value, 1)
+            norms = m2.norm(value, 1, True)
             # clip
             new_norms = norms.clone()
             new_norms[torch.gt(norms, max_norm)] = max_norm
@@ -907,6 +990,401 @@ class TestTorch(TestCase):
         self.assertEqual(r1, r2, 0)
         self.assertEqual(r2, r3[:-1], 0)
 
+    @staticmethod
+    def _select_broadcastable_dims(dims_full=None):
+        # select full dimensionality
+        if dims_full is None:
+            dims_full = []
+            ndims = random.randint(1, 4)
+            dims_full = [random.randint(1, 8) for _ in range(ndims)]
+        else:
+            ndims = len(dims_full)
+
+        # select actual dimensions for ops:
+        # larger: full ndims, individual sizes may be reduced
+        # smaller: possibly reduced ndims, sizes may be reduced
+        smaller_ndims = random.randint(1, ndims)
+        dims_small = []
+        dims_large = []
+        for i in range(ndims - 1, -1, -1):
+            j = random.randint(1, 3)
+            if j == 1:  # no reduced singleton dimension
+                ds = dims_full[i]
+                dl = dims_full[i]
+            elif j == 2:  # larger may have reduced singleton dimension
+                ds = dims_full[i]
+                dl = 1 if len(dims_small) < smaller_ndims else dims_full[i]
+            elif j == 3:  # smaller may have reduced singleton dimension
+                ds = 1
+                dl = dims_full[i]
+            dims_large = [dl] + dims_large
+            if len(dims_small) < smaller_ndims:
+                dims_small = [ds] + dims_small
+        return (dims_small, dims_large, dims_full)
+
+    @staticmethod
+    def _test_broadcast(self, cast):
+
+        # all functions
+        fns = {
+            "dist", "atan2", "pow", "lerp", "add",
+            "sub", "mul", "div", "fmod", "remainder",
+            "eq", "ge", "gt", "le", "lt", "max", "min", "ne",
+            "addcdiv", "addcmul", "masked_scatter", "masked_select", "masked_fill",
+            "map", "map2", "copy"
+        }
+        # functions with three tensor arguments
+        fns_3_args = {"addcdiv", "addcmul", "map2"}
+
+        for fn in fns:
+            (dims_small, dims_large, dims_full) = self._select_broadcastable_dims()
+            small = cast(torch.randn(*dims_small).float())
+            large = cast(torch.randn(*dims_large).float())
+            small_expanded = small.expand(*dims_full)
+            large_expanded = large.expand(*dims_full)
+            small2 = None
+            small2_expanded = None
+            if fn in fns_3_args:
+                # create another smaller tensor
+                (dims_small2, _, _) = self._select_broadcastable_dims(dims_full)
+                small2 = cast(torch.randn(*dims_small2).float())
+                small2_expanded = small2.expand(*dims_full)
+
+            if hasattr(large_expanded, fn):
+                # run through tensor versions of functions
+                # and verify fully expanded inputs give same results
+                expanded = {large: large_expanded, small: small_expanded, small2: small2_expanded}
+
+                def tensorfn(myfn, t1, t2):
+                    if fn == "lerp":
+                        return myfn(t1, 0.5)
+                    elif fn == "masked_select":
+                        return myfn(t1 < 0)
+                    elif fn in fns_3_args:
+                        return myfn(1, t1, t2)
+                    else:
+                        return myfn(t1)
+
+                # test various orders
+                for first, second, third in [(large, small, small2), (small, large, small2),
+                                             (small2, small, large), (small2, large, small)]:
+                    if first is None:
+                        break  # ignore last iter when small2 is None
+                    method_expanded = getattr(expanded[first], fn)
+                    method = getattr(first, fn)
+                    r1 = tensorfn(method_expanded, expanded[second], expanded[third])
+                    r2 = tensorfn(method, second, third)
+                    self.assertEqual(r1, r2)
+
+            # now for torch. versions of functions
+            if hasattr(torch, fn):
+                fntorch = getattr(torch, fn)
+                expanded = {large: large_expanded, small: small_expanded, small2: small2_expanded}
+
+                def torchfn(t1, t2, t3):
+                    if fn == "lerp":
+                        return fntorch(t1, t2, 0.5)
+                    elif fn == "masked_select":
+                        return fntorch(t1, t2 < 0)
+                    elif fn in fns_3_args:
+                        return fntorch(t1, 1.0, t2, t3)
+                    else:
+                        return fntorch(t1, t2)
+
+                # test various orders
+                for first, second, third in [(large, small, small2), (small, large, small2),
+                                             (small2, small, large), (small2, large, small)]:
+                    if first is None:
+                        break  # ignore last iter when small2 is None
+                    r1 = torchfn(expanded[first], expanded[second], expanded[third])
+                    r2 = torchfn(first, second, third)
+                    self.assertEqual(r1, r2)
+
+            # now for in place functions
+            # in-place tensor is not broadcastable; test only guaranteed
+            # to work by broadcasting other argument(s)
+            if not hasattr(large_expanded, fn + "_"):
+                continue
+
+            # need to clone largeExpanded so we can reuse, since functions are in-place
+            large_expanded_clone = large_expanded.clone()
+
+            def tensorfn_inplace(t0, t1, t2=None):
+                t0_fn = getattr(t0, fn + "_")
+                if fn == "lerp":
+                    return t0_fn(t1, 0.5)
+                elif fn == "masked_scatter":
+                    return t0_fn(t1 < 0.5, cast(torch.arange(1, t0.nelement() + 1).float()))
+                elif fn == "masked_fill":
+                    return t0_fn(t1 < 0.5, 1.0)
+                elif fn == "map":
+                    return t0_fn(t1, lambda x, y: x + y)
+                elif fn == "map2":
+                    return t0_fn(t1, t2, lambda x, y, z: x + y + z)
+                elif fn in fns_3_args:
+                    return t0_fn(1.0, t1, t2)
+                else:
+                    return t0_fn(t1)
+            r1 = tensorfn_inplace(large_expanded, small_expanded, small2_expanded)
+            r2 = tensorfn_inplace(large_expanded_clone, small, small2)
+            # in-place pointwise operations don't actually work if the in-place
+            # tensor is 0-strided (numpy has the same issue)
+            if (0 not in large_expanded.stride() and 0 not in large_expanded_clone.stride()):
+                self.assertEqual(r1, r2)
+
+            def broadcastable(t0, t1, t2=None):
+                try:
+                    t1.expand_as(t0)
+                    if t2 is not None:
+                        t2.expand_as(t0)
+                except RuntimeError:
+                    return False
+                return True
+
+            def _test_in_place_broadcastable(t0, t1, t2=None):
+                if not broadcastable(t0, t1, t2):
+                    same_size = t0.numel() == t1.numel() and (t0.numel() == t2.numel() if t2 is not None else True)
+                    if not same_size:
+                        self.assertRaises(RuntimeError, lambda: tensorfn_inplace(t0, t1, t2))
+                else:
+                    tensorfn_inplace(t0, t1, t2)
+
+            if fn not in fns_3_args:
+                _test_in_place_broadcastable(small, large_expanded)
+                _test_in_place_broadcastable(small, large)
+            else:
+                _test_in_place_broadcastable(small2, small_expanded, large_expanded)
+                _test_in_place_broadcastable(small2, small, large)
+
+    def test_broadcast(self):
+        self._test_broadcast(self, lambda t: t)
+
+    @staticmethod
+    def _test_broadcast_fallback(self, cast):
+        # functions that should fallback to pointwise behavior
+        fns_fallback = {"add", "sub", "div", "mul", "pow", "fmod", "remainder",
+                        "eq", "ge", "gt", "le", "lt", "max", "min", "ne",
+                        "addcdiv", "addcmul", "masked_scatter", "masked_select", "masked_fill",
+                        "map", "map2", "copy", "dist", "atan2", "lerp"}
+        # functions with three tensor arguments
+        fns_3_args = {"addcdiv", "addcmul", "map2"}
+        # functions that don't broadcast result size_ -- don't check result shape but
+        # still run functions to verify that broadcastable arguments don't error out
+        fns_no_result_broadcast = {"masked_select"}
+
+        for fn in fns_fallback:
+            # case 1: both broadcastable and nElems equal -- verify that we broadcast
+            t0 = cast(torch.randn(1, 4).float())
+            t1 = cast(torch.randn(4, 1).float())
+            t2 = cast(torch.randn(4).float())
+            broadcast_size = torch.Size([4, 4])
+            if not hasattr(t0, fn):
+                continue
+            t0_fn = getattr(t0, fn)
+            t1_fn = getattr(t1, fn)
+
+            def tensorfn(myfn, t1, t2):
+                if fn == "lerp":
+                    return myfn(t1, 0.5)
+                elif fn == "masked_scatter":
+                    return myfn(t1 < 0.5, cast(torch.randn(4 * 4).float()))
+                elif fn == "masked_fill":
+                    return myfn(t1 < 0.5, 1.0)
+                elif fn == "masked_select":
+                    return myfn(t1 < 0.5)
+                elif fn == "map":
+                    return myfn(t1, lambda x, y: x + y)
+                elif fn == "map2":
+                    return myfn(t1, t2, lambda x, y, z: x + y + z)
+                elif fn in fns_3_args:
+                    return myfn(1.0, t1, t2)
+                else:
+                    return myfn(t1)
+            r0 = tensorfn(t0_fn, t1, t2)
+            r1 = tensorfn(t1_fn, t0, t2)
+            if torch.is_tensor(r0) and fn not in fns_no_result_broadcast:
+                self.assertEqual(broadcast_size, r0.size())
+                self.assertEqual(broadcast_size, r1.size())
+
+            # case 2: broadcastable and not nElemes equal -- tested by test_fallback
+
+            # case 3: not broadcastable nElems equal -- verify we fallback
+            for inplace in False, True:
+                t0 = cast(torch.randn(1, 6).float())
+                t1 = cast(torch.randn(2, 3).float())
+                t2 = cast(torch.randn(3, 2).float())
+                if not hasattr(t0, fn if not inplace else fn + "_"):
+                    continue
+                t0_fn = getattr(t0, fn if not inplace else fn + "_")
+                t1_fn = getattr(t1, fn if not inplace else fn + "_")
+                t2_fn = getattr(t2, fn if not inplace else fn + "_")
+
+                def verify_fallback_warnings(w):
+                    self.assertEqual(len(w), 1)
+                    self.assertTrue(issubclass(w[0].category, UserWarning))
+                    self.assertTrue("Falling back" in str(w[0].message))
+                with warnings.catch_warnings(record=True) as w:
+                    warnings.simplefilter('always', UserWarning)
+                    r0 = tensorfn(t0_fn, t1, t2)
+                    verify_fallback_warnings(w)
+                with warnings.catch_warnings(record=True) as w:
+                    warnings.simplefilter('always', UserWarning)
+                    r1 = tensorfn(t1_fn, t0, t2)
+                    verify_fallback_warnings(w)
+                with warnings.catch_warnings(record=True) as w:
+                    warnings.simplefilter('always', UserWarning)
+                    r2 = tensorfn(t2_fn, t0, t1)
+                    verify_fallback_warnings(w)
+                if torch.is_tensor(r0) and fn not in fns_no_result_broadcast:
+                    self.assertEqual(t0.size(), r0.size())
+                    self.assertEqual(t1.size(), r1.size())
+                    self.assertEqual(t2.size(), r2.size())
+
+            # case 4: not broadcastable and not nEleme equal -- tested by test_fallback
+
+    def test_broadcast_fallback(self):
+        self._test_broadcast_fallback(self, lambda t: t)
+
+    @staticmethod
+    def _test_broadcast_fused_matmul(self, cast):
+        fns = ["baddbmm", "addbmm", "addmm", "addmv", "addr"]
+
+        for fn in fns:
+            batch_dim = random.randint(1, 8)
+            n_dim = random.randint(1, 8)
+            m_dim = random.randint(1, 8)
+            p_dim = random.randint(1, 8)
+
+            def dims_full_for_fn():
+                if fn == "baddbmm":
+                    return ([batch_dim, n_dim, p_dim], [batch_dim, n_dim, m_dim], [batch_dim, m_dim, p_dim])
+                elif fn == "addbmm":
+                    return ([n_dim, p_dim], [batch_dim, n_dim, m_dim], [batch_dim, m_dim, p_dim])
+                elif fn == "addmm":
+                    return ([n_dim, p_dim], [n_dim, m_dim], [m_dim, p_dim])
+                elif fn == "addmv":
+                    return ([n_dim], [n_dim, m_dim], [m_dim])
+                elif fn == "addr":
+                    return ([n_dim, m_dim], [n_dim], [m_dim])
+                else:
+                    raise AssertionError("unknown function")
+
+            (t0_dims_full, t1_dims, t2_dims) = dims_full_for_fn()
+            (t0_dims_small, _, _) = self._select_broadcastable_dims(t0_dims_full)
+
+            t0_small = cast(torch.randn(*t0_dims_small).float())
+            t1 = cast(torch.randn(*t1_dims).float())
+            t2 = cast(torch.randn(*t2_dims).float())
+
+            t0_full = cast(t0_small.expand(*t0_dims_full))
+
+            fntorch = getattr(torch, fn)
+            r0 = fntorch(t0_small, t1, t2)
+            r1 = fntorch(t0_full, t1, t2)
+            self.assertEqual(r0, r1)
+
+    def test_broadcast_fused_matmul(self):
+        self._test_broadcast_fused_matmul(self, lambda t: t)
+
+    @staticmethod
+    def _test_broadcast_batched_matmul(self, cast):
+        n_dim = random.randint(1, 8)
+        m_dim = random.randint(1, 8)
+        p_dim = random.randint(1, 8)
+        full_batch_dims = [random.randint(1, 3) for i in range(random.randint(1, 3))]
+        (batch_dims_small, _, _) = self._select_broadcastable_dims(full_batch_dims)
+
+        def verify_batched_matmul(full_lhs, one_dimensional):
+            if not one_dimensional:
+                lhs_dims = [n_dim, m_dim]
+                rhs_dims = [m_dim, p_dim]
+                result_dims = [n_dim, p_dim]
+            else:
+                lhs_dims = [n_dim, m_dim] if full_lhs else [m_dim]
+                rhs_dims = [m_dim, p_dim] if not full_lhs else [m_dim]
+                result_dims = [n_dim] if full_lhs else [p_dim]
+
+            lhs_mat_dims = lhs_dims if len(lhs_dims) != 1 else [1, m_dim]
+            rhs_mat_dims = rhs_dims if len(rhs_dims) != 1 else [m_dim, 1]
+            full_mat_dims = lhs_mat_dims if full_lhs else rhs_mat_dims
+            dim0_dims = rhs_dims if full_lhs else lhs_dims
+            small_dims = batch_dims_small + (rhs_mat_dims if full_lhs else lhs_mat_dims)
+
+            small = cast(torch.randn(*(small_dims)).float())
+            dim0 = cast(torch.randn(*(dim0_dims)).float())
+            full = cast(torch.randn(*(full_batch_dims + full_mat_dims)).float())
+            if not one_dimensional:
+                (lhsTensors, rhsTensors) = ((full,), (small, dim0)) if full_lhs else ((small, dim0), (full,))
+            else:
+                (lhsTensors, rhsTensors) = ((full,), (dim0,)) if full_lhs else ((dim0,), (full,))
+
+            def maybe_squeeze_result(l, r, result):
+                if len(lhs_dims) == 1 and l.dim() != 1:
+                    return result.squeeze(-2)
+                elif len(rhs_dims) == 1 and r.dim() != 1:
+                    return result.squeeze(-1)
+                else:
+                    return result
+
+            for lhs in lhsTensors:
+                lhs_expanded = lhs.expand(*(torch.Size(full_batch_dims) + torch.Size(lhs_mat_dims)))
+                lhs_expanded_matmul_fn = getattr(lhs_expanded, "matmul")
+                for rhs in rhsTensors:
+                    rhs_expanded = ((rhs if len(rhs_dims) != 1 else rhs.unsqueeze(-1)).
+                                    expand(*(torch.Size(full_batch_dims) + torch.Size(rhs_mat_dims))))
+                    truth = maybe_squeeze_result(lhs_expanded, rhs_expanded, lhs_expanded_matmul_fn(rhs_expanded))
+                    for l in (lhs, lhs_expanded):
+                        for r in (rhs, rhs_expanded):
+                            l_matmul_fn = getattr(l, "matmul")
+                            result = maybe_squeeze_result(l, r, l_matmul_fn(r))
+                            self.assertEqual(truth, result)
+                            # test torch.matmul function as well
+                            torch_result = maybe_squeeze_result(l, r, torch.matmul(l, r))
+                            self.assertEqual(truth, torch_result)
+
+                # compare to bmm
+                bmm_result = (torch.bmm(lhs_expanded.contiguous().view(-1, *lhs_mat_dims),
+                                        rhs_expanded.contiguous().view(-1, *rhs_mat_dims)))
+                self.assertEqual(truth.view(-1, *result_dims), bmm_result.view(-1, *result_dims))
+
+        for indices in product((True, False), repeat=2):
+            verify_batched_matmul(*indices)
+
+    def test_broadcast_batched_matmul(self):
+        self._test_broadcast_batched_matmul(self, lambda t: t)
+
+    def test_matmul_out(self):
+
+        def check_matmul(size1, size2):
+            a = torch.randn(size1)
+            b = torch.randn(size2)
+            expected = torch.matmul(a, b)
+
+            out = torch.Tensor(expected.size()).zero_()
+            # make output non-contiguous
+            out = out.transpose(-1, -2).contiguous().transpose(-1, -2)
+            self.assertFalse(out.is_contiguous())
+
+            torch.matmul(a, b, out=out)
+            self.assertEqual(expected, out)
+
+        check_matmul((2, 3, 4), (2, 4, 5))
+        check_matmul((2, 3, 4), (4, 5))
+
+    def test_broadcast_copy_fn(self):
+        torch.zeros(5, 6).copy_(torch.zeros(6))
+
+        def verify_fallback_warnings(w):
+            self.assertEqual(len(w), 1)
+            self.assertTrue(issubclass(w[0].category, UserWarning))
+            self.assertTrue("Falling back" in str(w[0].message))
+
+        # suppress broadcastable warning
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter('always', UserWarning)
+            torch.zeros(5, 6).copy_(torch.zeros(30), broadcast=True)
+            verify_fallback_warnings(w)
+
     def test_randperm(self):
         _RNGState = torch.get_rng_state()
         res1 = torch.randperm(100)
@@ -1036,8 +1514,8 @@ class TestTorch(TestCase):
                        random.randint(1, SIZE),
                        random.randint(1, SIZE))
 
-        for kTries in range(3):
-            for dimTries in range(3):
+        for _kTries in range(3):
+            for _dimTries in range(3):
                 for transpose in (True, False):
                     for dir in (True, False):
                         testTensor = t
@@ -1064,26 +1542,26 @@ class TestTorch(TestCase):
         x0 = x.clone()
 
         k = random.randint(1, SIZE)
-        res1val, res1ind = torch.kthvalue(x, k)
+        res1val, res1ind = torch.kthvalue(x, k, False)
         res2val, res2ind = torch.sort(x)
 
-        self.assertEqual(res1val[:, :, 0], res2val[:, :, k - 1], 0)
-        self.assertEqual(res1ind[:, :, 0], res2ind[:, :, k - 1], 0)
+        self.assertEqual(res1val[:, :], res2val[:, :, k - 1], 0)
+        self.assertEqual(res1ind[:, :], res2ind[:, :, k - 1], 0)
         # test use of result tensors
         k = random.randint(1, SIZE)
         res1val = torch.Tensor()
         res1ind = torch.LongTensor()
-        torch.kthvalue(x, k, out=(res1val, res1ind))
+        torch.kthvalue(x, k, False, out=(res1val, res1ind))
         res2val, res2ind = torch.sort(x)
-        self.assertEqual(res1val[:, :, 0], res2val[:, :, k - 1], 0)
-        self.assertEqual(res1ind[:, :, 0], res2ind[:, :, k - 1], 0)
+        self.assertEqual(res1val[:, :], res2val[:, :, k - 1], 0)
+        self.assertEqual(res1ind[:, :], res2ind[:, :, k - 1], 0)
 
         # test non-default dim
         k = random.randint(1, SIZE)
-        res1val, res1ind = torch.kthvalue(x, k, 0)
+        res1val, res1ind = torch.kthvalue(x, k, 0, False)
         res2val, res2ind = torch.sort(x, 0)
-        self.assertEqual(res1val[0], res2val[k - 1], 0)
-        self.assertEqual(res1ind[0], res2ind[k - 1], 0)
+        self.assertEqual(res1val, res2val[k - 1], 0)
+        self.assertEqual(res1ind, res2ind[k - 1], 0)
 
         # non-contiguous
         y = x.narrow(1, 0, 1)
@@ -1107,25 +1585,32 @@ class TestTorch(TestCase):
             x = torch.rand(size, size)
             x0 = x.clone()
 
-            res1val, res1ind = torch.median(x)
+            nelem = x.nelement()
+            res1val = torch.median(x)
+            res2val, _ = torch.sort(x.view(nelem))
+            ind = int(math.floor((nelem + 1) / 2) - 1)
+
+            self.assertEqual(res2val[ind], res1val, 0)
+
+            res1val, res1ind = torch.median(x, dim=1, keepdim=False)
             res2val, res2ind = torch.sort(x)
             ind = int(math.floor((size + 1) / 2) - 1)
 
-            self.assertEqual(res2val.select(1, ind), res1val.select(1, 0), 0)
-            self.assertEqual(res2val.select(1, ind), res1val.select(1, 0), 0)
+            self.assertEqual(res2val.select(1, ind), res1val, 0)
+            self.assertEqual(res2val.select(1, ind), res1val, 0)
 
             # Test use of result tensor
             res2val = torch.Tensor()
             res2ind = torch.LongTensor()
-            torch.median(x, out=(res2val, res2ind))
+            torch.median(x, keepdim=False, out=(res2val, res2ind))
             self.assertEqual(res2val, res1val, 0)
             self.assertEqual(res2ind, res1ind, 0)
 
             # Test non-default dim
-            res1val, res1ind = torch.median(x, 0)
+            res1val, res1ind = torch.median(x, 0, keepdim=False)
             res2val, res2ind = torch.sort(x, 0)
-            self.assertEqual(res1val[0], res2val[ind], 0)
-            self.assertEqual(res1ind[0], res2ind[ind], 0)
+            self.assertEqual(res1val, res2val[ind], 0)
+            self.assertEqual(res1ind, res2ind[ind], 0)
 
             # input unchanged
             self.assertEqual(x, x0, 0)
@@ -1137,28 +1622,27 @@ class TestTorch(TestCase):
         x0 = x.clone()
 
         # Pre-calculated results.
-        res1val = torch.Tensor(SIZE, 1).fill_(1)
+        res1val = torch.Tensor(SIZE).fill_(1)
         # The indices are the position of the last appearance of the mode element.
-        res1ind = torch.LongTensor(SIZE, 1).fill_(1)
+        res1ind = torch.LongTensor(SIZE).fill_(1)
         res1ind[0] = SIZE - 1
         res1ind[1] = SIZE - 1
 
-        res2val, res2ind = torch.mode(x)
-
+        res2val, res2ind = torch.mode(x, keepdim=False)
         self.assertEqual(res1val, res2val, 0)
         self.assertEqual(res1ind, res2ind, 0)
 
         # Test use of result tensor
         res2val = torch.Tensor()
         res2ind = torch.LongTensor()
-        torch.mode(x, out=(res2val, res2ind))
+        torch.mode(x, keepdim=False, out=(res2val, res2ind))
         self.assertEqual(res1val, res2val, 0)
         self.assertEqual(res1ind, res2ind, 0)
 
         # Test non-default dim
-        res2val, res2ind = torch.mode(x, 0)
-        self.assertEqual(res1val.view(1, SIZE), res2val, 0)
-        self.assertEqual(res1ind.view(1, SIZE), res2ind, 0)
+        res2val, res2ind = torch.mode(x, 0, False)
+        self.assertEqual(res1val, res2val, 0)
+        self.assertEqual(res1ind, res2ind, 0)
 
         # input unchanged
         self.assertEqual(x, x0, 0)
@@ -1206,7 +1690,9 @@ class TestTorch(TestCase):
         z = torch.rand(2, 3, 4)
         for dim in range(4):
             res = torch.stack((x, y, z), dim)
+            res_neg = torch.stack((x, y, z), dim - 4)
             expected_size = x.size()[:dim] + (3,) + x.size()[dim:]
+            self.assertEqual(res, res_neg)
             self.assertEqual(res.size(), expected_size)
             self.assertEqual(res.select(dim, 0), x, 0)
             self.assertEqual(res.select(dim, 1), y, 0)
@@ -1396,6 +1882,12 @@ class TestTorch(TestCase):
              1.5543122344752192e-15, 4.0824829046386757e-01)
         ))
         check_qr(a, expected_q, expected_r)
+
+        # check big matrix
+        a = torch.randn(1000, 1000)
+        q, r = torch.qr(a)
+        a_qr = torch.mm(q, r)
+        self.assertEqual(a, a_qr, prec=1e-3)
 
     @skipIfNoLapack
     def test_ormqr(self):
@@ -1850,7 +2342,7 @@ class TestTorch(TestCase):
         target_value = torch.rand(1000)
         # Dramatically alter the internal state of the main generator
         _ = torch.rand(100000)
-        forked_value = torch.rand(gen, 1000)
+        forked_value = torch.rand(1000, generator=gen)
         self.assertEqual(target_value, forked_value, 0, "RNG has not forked correctly.")
 
     def test_boxMullerState(self):
@@ -2055,7 +2547,7 @@ class TestTorch(TestCase):
 
         lst = [list(range(i, i + 10)) for i in range(0, 100, 10)]
         tensor = torch.DoubleTensor(lst)
-        for i in range(100):
+        for _i in range(100):
             idx1_start = random.randrange(10)
             idx1_end = idx1_start + random.randrange(1, 10 - idx1_start + 1)
             idx1_step = random.randrange(1, 8)
@@ -2085,6 +2577,462 @@ class TestTorch(TestCase):
         self.assertRaises(TypeError, lambda: reference[0.0, :, 0.0:2.0])
         self.assertRaises(TypeError, lambda: reference[0.0, ..., 0.0:2.0])
         self.assertRaises(TypeError, lambda: reference[0.0, :, 0.0])
+
+    @staticmethod
+    def _test_advancedindex(self, conv_fn):
+        # Tests for Integer Array Indexing, Part I - Purely integer array
+        # indexing
+
+        def consec(size, start=1):
+            sequence = torch.ones(int(torch.Tensor(size).prod(0)[0])).cumsum(0)
+            sequence.add_(start - 1)
+            return sequence.view(*size)
+
+        # pick a random valid indexer type
+        def ri(indices):
+            choice = random.randint(0, 2)
+            if choice == 0:
+                return conv_fn(torch.LongTensor(indices))
+            elif choice == 1:
+                return list(indices)
+            else:
+                return tuple(indices)
+
+        # First, we will test indexing to generate return values
+
+        # Case 1: Purely Integer Array Indexing
+        reference = conv_fn(consec((10,)))
+        self.assertEqual(reference[ri([0]), ], consec((1,)))
+        self.assertEqual(reference[ri([3]), ], consec((1,), 4))
+        self.assertEqual(reference[ri([2, 3, 4]), ], consec((3,), 3))
+        self.assertEqual(reference[ri([0, 2, 4]), ], torch.Tensor([1, 3, 5]))
+
+        # setting values
+        reference[ri([0],), ] = -1
+        self.assertEqual(reference[ri([0]), ], torch.Tensor([-1]))
+        reference[ri([2, 3, 4]), ] = 3
+        self.assertEqual(reference[ri([2, 3, 4]), ], torch.Tensor([3, 3, 3]))
+        reference[ri([0, 2, 4]), ] = conv_fn(torch.Tensor([5, 4, 3]))
+        self.assertEqual(reference[ri([0, 2, 4]), ], torch.Tensor([5, 4, 3]))
+
+        # Tensor with stride != 1
+
+        # strided is [1, 3, 5, 7]
+        reference = conv_fn(consec((10,)))
+        strided = conv_fn(torch.Tensor())
+        strided.set_(reference.storage(), storage_offset=0,
+                     size=torch.Size([4]), stride=[2])
+
+        self.assertEqual(strided[ri([0]), ], torch.Tensor([1]))
+        self.assertEqual(strided[ri([3]), ], torch.Tensor([7]))
+        self.assertEqual(strided[ri([1, 2]), ], torch.Tensor([3, 5]))
+        self.assertEqual(strided[ri([[2, 1], [0, 3]]), ],
+                         torch.Tensor([[5, 3], [1, 7]]))
+
+        # stride is [4, 8]
+        strided = conv_fn(torch.Tensor())
+        strided.set_(reference.storage(), storage_offset=4,
+                     size=torch.Size([2]), stride=[4])
+        self.assertEqual(strided[ri([0]), ], torch.Tensor([5]))
+        self.assertEqual(strided[ri([1]), ], torch.Tensor([9]))
+        self.assertEqual(strided[ri([0, 1]), ], torch.Tensor([5, 9]))
+        self.assertEqual(strided[ri([[0, 1], [1, 0]]), ],
+                         torch.Tensor([[5, 9], [9, 5]]))
+
+        # reference is 1 2
+        #              3 4
+        #              5 6
+        reference = conv_fn(consec((3, 2)))
+        self.assertEqual(reference[ri([0, 1, 2]), ri([0])], torch.Tensor([1, 3, 5]))
+        self.assertEqual(reference[ri([0, 1, 2]), ri([1])], torch.Tensor([2, 4, 6]))
+        self.assertEqual(reference[ri([0]), ri([0])], consec((1,)))
+        self.assertEqual(reference[ri([2]), ri([1])], consec((1,), 6))
+        self.assertEqual(reference[[ri([0, 0]), ri([0, 1])]], torch.Tensor([1, 2]))
+        self.assertEqual(reference[[ri([0, 1, 1, 0, 2]), ri([1])]],
+                         torch.Tensor([2, 4, 4, 2, 6]))
+        self.assertEqual(reference[[ri([0, 0, 1, 1]), ri([0, 1, 0, 0])]],
+                         torch.Tensor([1, 2, 3, 3]))
+
+        rows = ri([[0, 0],
+                   [1, 2]])
+        columns = [0],
+        self.assertEqual(reference[rows, columns], torch.Tensor([[1, 1],
+                                                                [3, 5]]))
+
+        rows = ri([[0, 0],
+                   [1, 2]])
+        columns = ri([1, 0])
+        self.assertEqual(reference[rows, columns], torch.Tensor([[2, 1],
+                                                                [4, 5]]))
+        rows = ri([[0, 0],
+                   [1, 2]])
+        columns = ri([[0, 1],
+                      [1, 0]])
+        self.assertEqual(reference[rows, columns], torch.Tensor([[1, 2],
+                                                                [4, 5]]))
+
+        # setting values
+        reference[ri([0]), ri([1])] = -1
+        self.assertEqual(reference[ri([0]), ri([1])], torch.Tensor([-1]))
+        reference[ri([0, 1, 2]), ri([0])] = conv_fn(torch.Tensor([-1, 2, -4]))
+        self.assertEqual(reference[ri([0, 1, 2]), ri([0])], torch.Tensor([-1,
+                         2, -4]))
+        reference[rows, columns] = conv_fn(torch.Tensor([[4, 6], [2, 3]]))
+        self.assertEqual(reference[rows, columns],
+                         torch.Tensor([[4, 6], [2, 3]]))
+
+        # Verify still works with Tranposed (i.e. non-contiguous) Tensors
+
+        reference = conv_fn(torch.Tensor([[0, 1, 2, 3],
+                                          [4, 5, 6, 7],
+                                          [8, 9, 10, 11]])).t_()
+
+        # Tranposed: [[0, 4, 8],
+        #             [1, 5, 9],
+        #             [2, 6, 10],
+        #             [3, 7, 11]]
+
+        self.assertEqual(reference[ri([0, 1, 2]), ri([0])], torch.Tensor([0, 1,
+                         2]))
+        self.assertEqual(reference[ri([0, 1, 2]), ri([1])], torch.Tensor([4, 5,
+                         6]))
+        self.assertEqual(reference[ri([0]), ri([0])], torch.Tensor([0]))
+        self.assertEqual(reference[ri([2]), ri([1])], torch.Tensor([6]))
+        self.assertEqual(reference[[ri([0, 0]), ri([0, 1])]], torch.Tensor([0, 4]))
+        self.assertEqual(reference[[ri([0, 1, 1, 0, 3]), ri([1])]],
+                         torch.Tensor([4, 5, 5, 4, 7]))
+        self.assertEqual(reference[[ri([0, 0, 1, 1]), ri([0, 1, 0, 0])]],
+                         torch.Tensor([0, 4, 1, 1]))
+
+        rows = ri([[0, 0],
+                   [1, 2]])
+        columns = [0],
+        self.assertEqual(reference[rows, columns], torch.Tensor([[0, 0],
+                                                                [1, 2]]))
+
+        rows = ri([[0, 0],
+                   [1, 2]])
+        columns = ri([1, 0])
+        self.assertEqual(reference[rows, columns], torch.Tensor([[4, 0],
+                                                                [5, 2]]))
+        rows = ri([[0, 0],
+                   [1, 3]])
+        columns = ri([[0, 1],
+                      [1, 2]])
+        self.assertEqual(reference[rows, columns], torch.Tensor([[0, 4],
+                                                                [5, 11]]))
+
+        # setting values
+        reference[ri([0]), ri([1])] = -1
+        self.assertEqual(reference[ri([0]), ri([1])], torch.Tensor([-1]))
+        reference[ri([0, 1, 2]), ri([0])] = conv_fn(torch.Tensor([-1, 2, -4]))
+        self.assertEqual(reference[ri([0, 1, 2]), ri([0])], torch.Tensor([-1,
+                         2, -4]))
+        reference[rows, columns] = conv_fn(torch.Tensor([[4, 6], [2, 3]]))
+        self.assertEqual(reference[rows, columns],
+                         torch.Tensor([[4, 6], [2, 3]]))
+
+        # stride != 1
+
+        # strided is [[1 3 5 7],
+        #             [9 11 13 15]]
+
+        reference = conv_fn(torch.arange(0, 24).view(3, 8))
+        strided = conv_fn(torch.Tensor())
+        strided.set_(reference.storage(), 1, size=torch.Size([2, 4]),
+                     stride=[8, 2])
+
+        self.assertEqual(strided[ri([0, 1]), ri([0])], torch.Tensor([1, 9]))
+        self.assertEqual(strided[ri([0, 1]), ri([1])], torch.Tensor([3, 11]))
+        self.assertEqual(strided[ri([0]), ri([0])], torch.Tensor([1]))
+        self.assertEqual(strided[ri([1]), ri([3])], torch.Tensor([15]))
+        self.assertEqual(strided[[ri([0, 0]), ri([0, 3])]], torch.Tensor([1, 7]))
+        self.assertEqual(strided[[ri([1]), ri([0, 1, 1, 0, 3])]],
+                         torch.Tensor([9, 11, 11, 9, 15]))
+        self.assertEqual(strided[[ri([0, 0, 1, 1]), ri([0, 1, 0, 0])]],
+                         torch.Tensor([1, 3, 9, 9]))
+
+        rows = ri([[0, 0],
+                   [1, 1]])
+        columns = [0],
+        self.assertEqual(strided[rows, columns], torch.Tensor([[1, 1],
+                                                              [9, 9]]))
+
+        rows = ri([[0, 1],
+                   [1, 0]])
+        columns = ri([1, 2])
+        self.assertEqual(strided[rows, columns], torch.Tensor([[3, 13],
+                                                              [11, 5]]))
+        rows = ri([[0, 0],
+                   [1, 1]])
+        columns = ri([[0, 1],
+                      [1, 2]])
+        self.assertEqual(strided[rows, columns], torch.Tensor([[1, 3],
+                                                              [11, 13]]))
+
+        # setting values
+
+        # strided is [[10, 11],
+        #             [17, 18]]
+
+        reference = conv_fn(torch.arange(0, 24).view(3, 8))
+        strided = conv_fn(torch.Tensor())
+        strided.set_(reference.storage(), 10, size=torch.Size([2, 2]),
+                     stride=[7, 1])
+        self.assertEqual(strided[ri([0]), ri([1])], torch.Tensor([11]))
+        strided[ri([0]), ri([1])] = -1
+        self.assertEqual(strided[ri([0]), ri([1])], torch.Tensor([-1]))
+
+        reference = conv_fn(torch.arange(0, 24).view(3, 8))
+        strided = conv_fn(torch.Tensor())
+        strided.set_(reference.storage(), 10, size=torch.Size([2, 2]),
+                     stride=[7, 1])
+        self.assertEqual(strided[ri([0, 1]), ri([1, 0])], torch.Tensor([11,
+                         17]))
+        strided[ri([0, 1]), ri([1, 0])] = conv_fn(torch.Tensor([-1, 2]))
+        self.assertEqual(strided[ri([0, 1]), ri([1, 0])], torch.Tensor([-1,
+                         2]))
+
+        reference = conv_fn(torch.arange(0, 24).view(3, 8))
+        strided = conv_fn(torch.Tensor())
+        strided.set_(reference.storage(), 10, size=torch.Size([2, 2]),
+                     stride=[7, 1])
+
+        rows = ri([[0],
+                   [1]])
+        columns = ri([[0, 1],
+                      [0, 1]])
+        self.assertEqual(strided[rows, columns],
+                         torch.Tensor([[10, 11], [17, 18]]))
+        strided[rows, columns] = conv_fn(torch.Tensor([[4, 6], [2, 3]]))
+        self.assertEqual(strided[rows, columns],
+                         torch.Tensor([[4, 6], [2, 3]]))
+
+        # Tests using less than the number of dims, and ellipsis
+
+        # reference is 1 2
+        #              3 4
+        #              5 6
+        reference = conv_fn(consec((3, 2)))
+        self.assertEqual(reference[ri([0, 2]), ], torch.Tensor([[1, 2], [5, 6]]))
+        self.assertEqual(reference[ri([1]), ...], torch.Tensor([[3, 4]]))
+        self.assertEqual(reference[..., ri([1])], torch.Tensor([[2], [4], [6]]))
+
+        if TEST_NUMPY:
+            # we use numpy to compare against, to verify that our advanced
+            # indexing semantics are the same, and also for ease of test
+            # writing
+
+            def tensor_indices_to_np(tensor, indices):
+                # convert the Torch Tensor to a numpy array
+                if (tensor.is_cuda):
+                    tensor = tensor.cpu()
+                npt = tensor.numpy()
+
+                # convert indices
+                idxs = tuple(i.tolist() if isinstance(i, torch.LongTensor) else
+                             i for i in indices)
+
+                return npt, idxs
+
+            def get_numpy(tensor, indices):
+                npt, idxs = tensor_indices_to_np(tensor, indices)
+
+                # index and return as a Torch Tensor
+                return torch.Tensor(npt[idxs])
+
+            def set_numpy(tensor, indices, value):
+                if not isinstance(value, int):
+                    if value.is_cuda:
+                        value = value.cpu()
+                    value = value.numpy()
+
+                npt, idxs = tensor_indices_to_np(tensor, indices)
+                npt[idxs] = value
+                return npt
+
+            def assert_get_eq(tensor, indexer):
+                self.assertEqual(reference[indexer],
+                                 conv_fn(get_numpy(reference, indexer)))
+
+            def assert_set_eq(tensor, indexer, val):
+                pyt = tensor.clone()
+                numt = tensor.clone()
+                pyt[indexer] = val
+                numt = conv_fn(torch.Tensor(set_numpy(numt, indexer, val)))
+                self.assertEqual(pyt, numt)
+
+            def get_set_tensor(indexed, indexer):
+                set_size = indexed[indexer].size()
+                set_count = indexed[indexer].numel()
+                set_tensor = conv_fn(torch.randperm(set_count).view(set_size).double())
+                return set_tensor
+
+            # Tensor is  0  1  2  3  4
+            #            5  6  7  8  9
+            #           10 11 12 13 14
+            #           15 16 17 18 19
+            reference = conv_fn(torch.arange(0, 20).view(4, 5))
+
+            indices_to_test = [
+                # grab the second, fourth columns
+                [slice(None), [1, 3]],
+
+                # first, third rows,
+                [[0, 2], slice(None)],
+
+                # weird shape
+                [slice(None), [[0, 1],
+                               [2, 3]]]
+            ]
+
+            # only test dupes on gets
+            get_indices_to_test = indices_to_test + [[slice(None), [0, 1, 1, 2, 2]]]
+
+            for indexer in get_indices_to_test:
+                assert_get_eq(reference, indexer)
+
+            for indexer in indices_to_test:
+                assert_set_eq(reference, indexer, 44)
+                assert_set_eq(reference,
+                              indexer,
+                              get_set_tensor(reference, indexer))
+
+            reference = conv_fn(torch.arange(0, 160).view(4, 8, 5))
+
+            indices_to_test = [
+                [slice(None), slice(None), [0, 3, 4]],
+                [slice(None), [2, 4, 5, 7], slice(None)],
+                [[2, 3], slice(None), slice(None)],
+                [slice(None), [0, 2, 3], [1, 3, 4]],
+                [slice(None), [0], [1, 2, 4]],
+                [slice(None), [0, 1, 3], [4]],
+                [slice(None), [[0, 1], [1, 0]], [[2, 3], [3, 0]]],
+                [slice(None), [[0, 1], [1, 0]], [[2, 3]]],
+                [slice(None), [[0, 1], [2, 3]], [[0]]],
+                [slice(None), [[5, 6]], [[0, 3], [4, 4]]],
+                [slice(None), [[2]], [[0, 3], [4, 4]]],
+                [[0, 2, 3], [1, 3, 4], slice(None)],
+                [[0], [1, 2, 4], slice(None)],
+                [[0, 1, 3], [4], slice(None)],
+                [[[0, 1], [1, 0]], [[2, 1], [3, 5]], slice(None)],
+                [[[0, 1], [1, 0]], [[2, 3]], slice(None)],
+                [[[0, 1], [2, 3]], [[0]], slice(None)],
+                [[[2, 1]], [[0, 3], [4, 4]], slice(None)],
+                [[[2]], [[0, 3], [4, 1]], slice(None)],
+
+                # less dim, ellipsis
+                [[0, 2], ],
+                [[0, 2], slice(None)],
+                [[0, 2], Ellipsis],
+                [[0, 2], slice(None), Ellipsis],
+                [[0, 2], Ellipsis, slice(None)],
+                [[0, 2], [1, 3]],
+                [[0, 2], [1, 3], Ellipsis],
+                [Ellipsis, [1, 3], [2, 3]],
+                [Ellipsis, [2, 3, 4]],
+                [Ellipsis, slice(None), [2, 3, 4]],
+                [slice(None), Ellipsis, [2, 3, 4]],
+            ]
+
+            for indexer in indices_to_test:
+                assert_get_eq(reference, indexer)
+                assert_set_eq(reference, indexer, 212)
+                assert_set_eq(reference,
+                              indexer,
+                              get_set_tensor(reference, indexer))
+
+            reference = conv_fn(torch.arange(0, 1296).view(3, 9, 8, 6))
+
+            indices_to_test = [
+                [slice(None), slice(None), slice(None), [0, 3, 4]],
+                [slice(None), slice(None), [2, 4, 5, 7], slice(None)],
+                [slice(None), [2, 3], slice(None), slice(None)],
+                [[1, 2], slice(None), slice(None), slice(None)],
+                [slice(None), slice(None), [0, 2, 3], [1, 3, 4]],
+                [slice(None), slice(None), [0], [1, 2, 4]],
+                [slice(None), slice(None), [0, 1, 3], [4]],
+                [slice(None), slice(None), [[0, 1], [1, 0]], [[2, 3]]],
+                [slice(None), slice(None), [[0, 1], [2, 3]], [[0]]],
+                [slice(None), slice(None), [[5, 6]], [[0, 3], [4, 4]]],
+                [slice(None), [0, 2, 3], [1, 3, 4], slice(None)],
+                [slice(None), [0], [1, 2, 4], slice(None)],
+                [slice(None), [0, 1, 3], [4], slice(None)],
+                [slice(None), [[0, 1], [3, 4]], [[2, 3], [0, 1]], slice(None)],
+                [slice(None), [[0, 1], [3, 4]], [[2, 3]], slice(None)],
+                [slice(None), [[0, 1], [3, 2]], [[0]], slice(None)],
+                [slice(None), [[2, 1]], [[0, 3], [6, 4]], slice(None)],
+                [slice(None), [[2]], [[0, 3], [4, 2]], slice(None)],
+                [[0, 1, 2], [1, 3, 4], slice(None), slice(None)],
+                [[0], [1, 2, 4], slice(None), slice(None)],
+                [[0, 1, 2], [4], slice(None), slice(None)],
+                [[[0, 1], [0, 2]], [[2, 4], [1, 5]], slice(None), slice(None)],
+                [[[0, 1], [1, 2]], [[2, 0]], slice(None), slice(None)],
+                [[[2, 2]], [[0, 3], [4, 5]], slice(None), slice(None)],
+                [[[2]], [[0, 3], [4, 5]], slice(None), slice(None)],
+                [slice(None), [3, 4, 6], [0, 2, 3], [1, 3, 4]],
+                [slice(None), [2, 3, 4], [1, 3, 4], [4]],
+                [slice(None), [0, 1, 3], [4], [1, 3, 4]],
+                [slice(None), [6], [0, 2, 3], [1, 3, 4]],
+                [slice(None), [2, 3, 5], [3], [4]],
+                [slice(None), [0], [4], [1, 3, 4]],
+                [slice(None), [6], [0, 2, 3], [1]],
+                [slice(None), [[0, 3], [3, 6]], [[0, 1], [1, 3]], [[5, 3], [1, 2]]],
+                [[2, 2, 1], [0, 2, 3], [1, 3, 4], slice(None)],
+                [[2, 0, 1], [1, 2, 3], [4], slice(None)],
+                [[0, 1, 2], [4], [1, 3, 4], slice(None)],
+                [[0], [0, 2, 3], [1, 3, 4], slice(None)],
+                [[0, 2, 1], [3], [4], slice(None)],
+                [[0], [4], [1, 3, 4], slice(None)],
+                [[1], [0, 2, 3], [1], slice(None)],
+                [[[1, 2], [1, 2]], [[0, 1], [2, 3]], [[2, 3], [3, 5]], slice(None)],
+
+                # less dim, ellipsis
+                [Ellipsis, [0, 3, 4]],
+                [Ellipsis, slice(None), [0, 3, 4]],
+                [Ellipsis, slice(None), slice(None), [0, 3, 4]],
+                [slice(None), Ellipsis, [0, 3, 4]],
+                [slice(None), slice(None), Ellipsis, [0, 3, 4]],
+                [slice(None), [0, 2, 3], [1, 3, 4]],
+                [slice(None), [0, 2, 3], [1, 3, 4], Ellipsis],
+                [Ellipsis, [0, 2, 3], [1, 3, 4], slice(None)],
+                [[0], [1, 2, 4]],
+                [[0], [1, 2, 4], slice(None)],
+                [[0], [1, 2, 4], Ellipsis],
+                [[0], [1, 2, 4], Ellipsis, slice(None)],
+                [[1], ],
+                [[0, 2, 1], [3], [4]],
+                [[0, 2, 1], [3], [4], slice(None)],
+                [[0, 2, 1], [3], [4], Ellipsis],
+                [Ellipsis, [0, 2, 1], [3], [4]],
+            ]
+
+            for indexer in indices_to_test:
+                assert_get_eq(reference, indexer)
+                assert_set_eq(reference, indexer, 1333)
+                assert_set_eq(reference,
+                              indexer,
+                              get_set_tensor(reference, indexer))
+            indices_to_test += [
+                [slice(None), slice(None), [[0, 1], [1, 0]], [[2, 3], [3, 0]]],
+                [slice(None), slice(None), [[2]], [[0, 3], [4, 4]]],
+            ]
+            for indexer in indices_to_test:
+                assert_get_eq(reference, indexer)
+                assert_set_eq(reference, indexer, 1333)
+
+    def test_advancedindex(self):
+        self._test_advancedindex(self, lambda x: x)
+
+    @staticmethod
+    def _test_advancedindex_big(self, conv_fn):
+        reference = conv_fn(torch.arange(0, 123344).int())
+
+        self.assertEqual(reference[[0, 123, 44488, 68807, 123343], ],
+                         torch.LongTensor([0, 123, 44488, 68807, 123343]))
+
+    def test_advancedindex_big(self):
+        self._test_advancedindex_big(self, lambda x: x)
 
     def test_newindex(self):
         reference = self._consecutive((3, 3, 3))
@@ -2169,6 +3117,7 @@ class TestTorch(TestCase):
         self.assertEqual(dest, dest2)
 
     # Fill idx with valid indices.
+    @staticmethod
     def _fill_indices(self, idx, dim, dim_size, elems_per_row, m, n, o):
         for i in range(1 if dim == 0 else m):
             for j in range(1 if dim == 1 else n):
@@ -2177,7 +3126,8 @@ class TestTorch(TestCase):
                     ii[dim] = slice(0, idx.size(dim) + 1)
                     idx[tuple(ii)] = torch.randperm(dim_size)[0:elems_per_row]
 
-    def test_gather(self):
+    @staticmethod
+    def _test_gather(self, cast, test_bounds=True):
         m, n, o = random.randint(10, 20), random.randint(10, 20), random.randint(10, 20)
         elems_per_row = random.randint(1, 10)
         dim = random.randrange(3)
@@ -2186,10 +3136,13 @@ class TestTorch(TestCase):
         idx_size = [m, n, o]
         idx_size[dim] = elems_per_row
         idx = torch.LongTensor().resize_(*idx_size)
-        self._fill_indices(idx, dim, src.size(dim), elems_per_row, m, n, o)
+        TestTorch._fill_indices(self, idx, dim, src.size(dim), elems_per_row, m, n, o)
+
+        src = cast(src)
+        idx = cast(idx)
 
         actual = torch.gather(src, dim, idx)
-        expected = torch.Tensor().resize_(*idx_size)
+        expected = cast(torch.Tensor().resize_(*idx_size))
         for i in range(idx_size[0]):
             for j in range(idx_size[1]):
                 for k in range(idx_size[2]):
@@ -2198,69 +3151,73 @@ class TestTorch(TestCase):
                     expected[i, j, k] = src[tuple(ii)]
         self.assertEqual(actual, expected, 0)
 
-        idx[0][0][0] = 23
-        self.assertRaises(RuntimeError, lambda: torch.gather(src, dim, idx))
+        if test_bounds:
+            idx[0][0][0] = 23
+            self.assertRaises(RuntimeError, lambda: torch.gather(src, dim, idx))
 
-        src = torch.randn(3, 4, 5)
-        expected, idx = src.max(2)
+        src = cast(torch.randn(3, 4, 5))
+        expected, idx = src.max(2, True)
+        expected = cast(expected)
+        idx = cast(idx)
         actual = torch.gather(src, 2, idx)
         self.assertEqual(actual, expected, 0)
 
-    def test_scatter(self):
+    def test_gather(self):
+        self._test_gather(self, lambda t: t)
+
+    @staticmethod
+    def _test_scatter_base(self, cast, method, is_scalar=False, test_bounds=True):
         m, n, o = random.randint(10, 20), random.randint(10, 20), random.randint(10, 20)
         elems_per_row = random.randint(1, 10)
         dim = random.randrange(3)
 
         idx_size = [m, n, o]
         idx_size[dim] = elems_per_row
-        idx = torch.LongTensor().resize_(*idx_size)
-        self._fill_indices(idx, dim, ([m, n, o])[dim], elems_per_row, m, n, o)
-        src = torch.Tensor().resize_(*idx_size).normal_()
+        idx = cast(torch.LongTensor().resize_(*idx_size))
+        TestTorch._fill_indices(self, idx, dim, ([m, n, o])[dim], elems_per_row, m, n, o)
 
-        actual = torch.zeros(m, n, o).scatter_(dim, idx, src)
-        expected = torch.zeros(m, n, o)
+        if is_scalar:
+            src = random.random()
+        else:
+            src = cast(torch.Tensor(*idx_size).normal_())
+
+        base = cast(torch.randn(m, n, o))
+        actual = getattr(base.clone(), method)(dim, idx, src)
+        expected = base.clone()
         for i in range(idx_size[0]):
             for j in range(idx_size[1]):
                 for k in range(idx_size[2]):
                     ii = [i, j, k]
                     ii[dim] = idx[i, j, k]
-                    expected[tuple(ii)] = src[i, j, k]
+                    if method == 'scatter_' and not is_scalar:
+                        expected[tuple(ii)] = src[i, j, k]
+                    elif method == 'scatter_add_':
+                        expected[tuple(ii)] += src[i, j, k]
+                    else:
+                        expected[tuple(ii)] = src
         self.assertEqual(actual, expected, 0)
 
-        idx[0][0][0] = 34
-        self.assertRaises(RuntimeError, lambda: torch.zeros(m, n, o).scatter_(dim, idx, src))
+        if test_bounds:
+            idx[0][0][0] = 34
+            with self.assertRaises(RuntimeError):
+                getattr(base.clone(), method)(dim, idx, src)
+
+    def test_scatter(self):
+        self._test_scatter_base(self, lambda t: t, 'scatter_')
+
+    def test_scatterAdd(self):
+        self._test_scatter_base(self, lambda t: t, 'scatter_add_')
 
     def test_scatterFill(self):
-        m, n, o = random.randint(10, 20), random.randint(10, 20), random.randint(10, 20)
-        elems_per_row = random.randint(1, 10)
-        dim = random.randrange(3)
+        self._test_scatter_base(self, lambda t: t, 'scatter_', True)
 
-        val = random.random()
-        idx_size = [m, n, o]
-        idx_size[dim] = elems_per_row
-        idx = torch.LongTensor().resize_(*idx_size)
-        self._fill_indices(idx, dim, ([m, n, o])[dim], elems_per_row, m, n, o)
-
-        actual = torch.zeros(m, n, o).scatter_(dim, idx, val)
-        expected = torch.zeros(m, n, o)
-        for i in range(idx_size[0]):
-            for j in range(idx_size[1]):
-                for k in range(idx_size[2]):
-                    ii = [i, j, k]
-                    ii[dim] = idx[i, j, k]
-                    expected[tuple(ii)] = val
-        self.assertEqual(actual, expected, 0)
-
-        idx[0][0][0] = 28
-        self.assertRaises(RuntimeError, lambda: torch.zeros(m, n, o).scatter_(dim, idx, val))
-
-    def test_masked_copy(self):
+    def test_masked_scatter(self):
         num_copy, num_dest = 3, 10
         dest = torch.randn(num_dest)
         src = torch.randn(num_copy)
         mask = torch.ByteTensor((0, 0, 0, 0, 1, 0, 1, 0, 1, 0))
         dest2 = dest.clone()
-        dest.masked_copy_(mask, src)
+        dest.masked_scatter_(mask, src)
         j = 0
         for i in range(num_dest):
             if mask[i]:
@@ -2270,12 +3227,12 @@ class TestTorch(TestCase):
 
         # make source bigger than number of 1s in mask
         src = torch.randn(num_dest)
-        dest.masked_copy_(mask, src)
+        dest.masked_scatter_(mask, src)
 
         # make src smaller. this should fail
         src = torch.randn(num_copy - 1)
         with self.assertRaises(RuntimeError):
-            dest.masked_copy_(mask, src)
+            dest.masked_scatter_(mask, src)
 
     def test_masked_select(self):
         num_src = 10
@@ -2320,6 +3277,21 @@ class TestTorch(TestCase):
         res = torch.LongTensor((-bignumber,))
         self.assertGreater(res.abs()[0], 0)
 
+    def test_unbiased(self):
+        tensor = torch.randn(100)
+        self.assertEqual(tensor.var(0), tensor.var(0, unbiased=True))
+        self.assertEqual(tensor.var(), tensor.var(unbiased=True))
+        self.assertEqual(tensor.var(unbiased=False), tensor.var(0, unbiased=False)[0])
+
+        tensor = torch.FloatTensor([1.0, 2.0])
+        self.assertEqual(tensor.var(unbiased=True), 0.5)
+        self.assertEqual(tensor.var(unbiased=False), 0.25)
+
+        tensor = torch.randn(100)
+        self.assertEqual(tensor.std(0), tensor.std(0, unbiased=True))
+        self.assertEqual(tensor.std(), tensor.std(unbiased=True))
+        self.assertEqual(tensor.std(unbiased=False), tensor.std(0, unbiased=False)[0])
+
     def test_view(self):
         tensor = torch.rand(15)
         template = torch.rand(3, 5)
@@ -2332,7 +3304,9 @@ class TestTorch(TestCase):
         self.assertEqual(tensor.view(3, -1).size(), target)
         tensor_view = tensor.view(5, 3)
         tensor_view.fill_(random.uniform(0, 1))
-        self.assertEqual((tensor_view - tensor).abs().max(), 0)
+        # suppress broadcastable warning
+        with warnings.catch_warnings(record=True):
+            self.assertEqual((tensor_view - tensor).abs().max(), 0)
         self.assertEqual(empty.view_as(empty), empty)
         self.assertEqual(empty.view(0), empty)
         self.assertRaises(RuntimeError, lambda: tensor.view(15, 0))
@@ -2415,6 +3389,9 @@ class TestTorch(TestCase):
         self.assertEqual(t1.stride(), (120, 40, 10, 1))
         stride = (10, 360, 90, 1)
         t1.set_(t2.storage(), 0, size, stride)
+        self.assertEqual(t1.stride(), stride)
+        t1.set_(t2.storage(), 0, size=size, stride=stride)
+        self.assertEqual(t1.size(), size)
         self.assertEqual(t1.stride(), stride)
 
     def test_equal(self):
@@ -2724,7 +3701,7 @@ class TestTorch(TestCase):
             self.assertEqual(c[4], torch.FloatStorage(25).fill_(10), 0)
             c[1].fill_(20)
             self.assertEqual(c[1], c[3], 0)
-            self.assertEqual(c[4], c[5][1:4], 0)
+            self.assertEqual(c[4][1:4], c[5], 0)
 
             # check that serializing the same storage view object unpickles
             # it as one object not two (and vice versa)
@@ -2750,12 +3727,12 @@ class TestTorch(TestCase):
             torch.save(xh, f)
             f.seek(0)
             xh2 = torch.load(f)
-            self.assertEqual(xh, xh2)
+            self.assertEqual(xh.float(), xh2.float())
 
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_half_tensor_cuda(self):
         x = torch.randn(5, 5).half()
-        self.assertEqual(x.cuda().cpu(), x)
+        self.assertEqual(x.cuda(), x)
 
         xc = x.cuda()
         with tempfile.NamedTemporaryFile() as f:
@@ -2763,7 +3740,7 @@ class TestTorch(TestCase):
             f.seek(0)
             xc2 = torch.load(f)
             self.assertIsInstance(xc2, type(xc))
-            self.assertEqual(xc, xc2)
+            self.assertEqual(xc.float(), xc2.float())
 
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_serialization_cuda(self):
@@ -2787,15 +3764,8 @@ class TestTorch(TestCase):
         b = [a[i % 2] for i in range(4)]
         b += [a[0].storage()]
         b += [a[0].storage()[1:4]]
-        DATA_URL = 'https://download.pytorch.org/test_data/legacy_serialized.pt'
-        data_dir = os.path.join(os.path.dirname(__file__), 'data')
-        test_file_path = os.path.join(data_dir, 'legacy_serialized.pt')
-        succ = download_file(DATA_URL, test_file_path)
-        if not succ:
-            warnings.warn(("Couldn't download the test file for backwards compatibility! "
-                           "Tests will be incomplete!"), RuntimeWarning)
-            return
-        c = torch.load(test_file_path)
+        path = download_file('https://download.pytorch.org/test_data/legacy_serialized.pt')
+        c = torch.load(path)
         self.assertEqual(b, c, 0)
         self.assertTrue(isinstance(c[0], torch.FloatTensor))
         self.assertTrue(isinstance(c[1], torch.FloatTensor))
@@ -2807,7 +3777,7 @@ class TestTorch(TestCase):
         self.assertEqual(c[4], torch.FloatStorage(25).fill_(10), 0)
         c[1].fill_(20)
         self.assertEqual(c[1], c[3], 0)
-        self.assertEqual(c[4], c[5][1:4], 0)
+        self.assertEqual(c[4][1:4], c[5], 0)
 
     def test_serialization_container(self):
         def import_module(name, filename):
@@ -2822,7 +3792,6 @@ class TestTorch(TestCase):
             sys.modules[module.__name__] = module
             return module
 
-        import os
         with tempfile.NamedTemporaryFile() as checkpoint:
             fname = os.path.join(os.path.dirname(__file__), 'data/network1.py')
             module = import_module('tmpmodule', fname)
@@ -2846,15 +3815,7 @@ class TestTorch(TestCase):
                 self.assertTrue(w[0].category, 'SourceChangeWarning')
 
     def test_serialization_map_location(self):
-        DATA_URL = 'https://download.pytorch.org/test_data/gpu_tensors.pt'
-        data_dir = os.path.join(os.path.dirname(__file__), 'data')
-        test_file_path = os.path.join(data_dir, 'gpu_tensors.pt')
-        succ = download_file(DATA_URL, test_file_path)
-        if not succ:
-            warnings.warn(
-                "Couldn't download the test file for map_location! "
-                "Tests will be incomplete!", RuntimeWarning)
-            return
+        test_file_path = download_file('https://download.pytorch.org/test_data/gpu_tensors.pt')
 
         def map_location(storage, loc):
             return storage
@@ -2881,8 +3842,31 @@ class TestTorch(TestCase):
         self.assertEqual(floats.size(), 1)
         self.assertEqual(floats[0], 2.25)
 
+    def test_from_file(self):
+        size = 10000
+        with tempfile.NamedTemporaryFile() as f:
+            s1 = torch.FloatStorage.from_file(f.name, True, size)
+            t1 = torch.FloatTensor(s1).copy_(torch.randn(size))
+
+            # check mapping
+            s2 = torch.FloatStorage.from_file(f.name, True, size)
+            t2 = torch.FloatTensor(s2)
+            self.assertEqual(t1, t2, 0)
+
+            # check changes to t1 from t2
+            rnum = random.uniform(-1, 1)
+            t1.fill_(rnum)
+            self.assertEqual(t1, t2, 0)
+
+            # check changes to t2 from t1
+            rnum = random.uniform(-1, 1)
+            t2.fill_(rnum)
+            self.assertEqual(t1, t2, 0)
+
     def test_print(self):
         for t in torch._tensor_classes:
+            if t == torch.HalfTensor:
+                continue  # HalfTensor does not support fill
             if t in torch.sparse._sparse_tensor_classes:
                 continue
             if t.is_cuda and not torch.cuda.is_available():
@@ -2921,6 +3905,9 @@ class TestTorch(TestCase):
         x = torch.randn(5, 5)
         for i, sub in enumerate(x):
             self.assertEqual(sub, x[i])
+
+        x = torch.Tensor()
+        self.assertEqual(list(x), [])
 
     def test_accreal_type(self):
         x = torch.randn(2, 3, 4) * 10
@@ -3068,6 +4055,10 @@ class TestTorch(TestCase):
         expected = torch.arange(1, 126).view(5, 5, 5)[:, 1]
         self.assertEqual(torch.from_numpy(x), expected)
 
+        # check zero dimentional
+        x = np.zeros((0, 2))
+        self.assertRaises(RuntimeError, lambda: torch.from_numpy(x))
+
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_numpy_index(self):
         i = np.int32([0, 1, 2])
@@ -3129,6 +4120,10 @@ class TestTorch(TestCase):
             else:
                 self.assertFalse(x[idx] ^ y[idx])
 
+        invert_result = ~x
+        for idx in iter_indices(x):
+            self.assertEqual(1 - x[idx], invert_result[idx])
+
         x_clone = x.clone()
         x_clone &= y
         self.assertEqual(x_clone, and_result)
@@ -3159,6 +4154,21 @@ class TestTorch(TestCase):
         self.assertIsInstance(x * 2, torch.Size)
         self.assertIsInstance(x[:-1], torch.Size)
         self.assertIsInstance(x + x, torch.Size)
+
+    # unit test for THTensor_(copyTranspose)
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_big_transpose(self):
+        t = torch.rand(456, 789)
+        t1 = t.t().contiguous()
+        t2 = torch.from_numpy(t.numpy().transpose())
+        self.assertEqual(t1, t2)
+
+    def test_inplace_division(self):
+        t = torch.rand(5, 5)
+        id_before = id(t)
+        t /= 2
+        id_after = id(t)
+        self.assertEqual(id_before, id_after)
 
 # Functions to test negative dimension wrapping
 METHOD = 1
@@ -3223,7 +4233,6 @@ neg_dim_tests = [
     ('index_select', (10, 10), lambda: [DIM_ARG, idx_tensor((10,), 10)], [METHOD, FUNCTIONAL]),
     ('split', (10, 20), lambda: [5, DIM_ARG], [METHOD, FUNCTIONAL]),
     ('squeeze', (10, 1, 20, 1), lambda: [DIM_ARG], [METHOD, INPLACE_METHOD, FUNCTIONAL]),
-    ('stack', [(2, 3, 4), (2, 3, 4)], lambda: [DIM_ARG], [FUNCTIONAL]),
     ('unbind', (2, 3, 4), lambda: [DIM_ARG], [FUNCTIONAL]),
     ('unsqueeze', (10, 20), lambda: [DIM_ARG], [METHOD, INPLACE_METHOD, FUNCTIONAL], 1),
     ('cumprod', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),

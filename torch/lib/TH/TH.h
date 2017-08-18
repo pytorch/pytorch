@@ -12,6 +12,7 @@
 #include "THVector.h"
 #include "THLogAdd.h"
 #include "THRandom.h"
+#include "THSize.h"
 #include "THStorage.h"
 #include "THTensor.h"
 #include "THTensorApply.h"

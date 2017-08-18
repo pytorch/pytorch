@@ -8,4 +8,4 @@ enum THDReduceOp {
 };
 
 typedef int THDGroup;
-static THDGroup THDGroupWORLD = 0;
+const THDGroup THDGroupWORLD = 0;

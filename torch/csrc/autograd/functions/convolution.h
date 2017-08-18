@@ -1,8 +1,10 @@
 #pragma once
 
+#include <Python.h>
+#include <ATen/ATen.h>
 #include <memory>
 #include <vector>
-#include <THPP/THPP.h>
+#include <iostream>
 
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/variable.h"
@@ -31,7 +33,7 @@ struct ConvParams {
   bool is_output_padding_neg() const;
   bool is_padding_neg() const;
   void view1d_as_2d();
-  bool use_cudnn(const thpp::Tensor& input) const;
+  bool use_cudnn(const at::Tensor& input) const;
 };
 
 struct ConvForward : public Function, public ConvParams {
@@ -39,27 +41,30 @@ struct ConvForward : public Function, public ConvParams {
 
   virtual variable_list apply(const variable_list& inputs) override;
 
-  std::vector<long> output_size(thpp::Tensor& input, thpp::Tensor& weight);
+  std::vector<int64_t> output_size(at::Tensor& input, at::Tensor& weight);
 };
 
 struct ConvBackward : public Function, public ConvParams {
   ConvBackward(
       FunctionFlags flags,
       ConvParams params,
-      SavedVariable input,
-      SavedVariable weight,
-      SavedVariable bias,
+      const std::shared_ptr<Variable>& input,
+      const std::shared_ptr<Variable>& weight,
+      const std::shared_ptr<Variable>& bias,
       tensor_list columns,
       tensor_list ones,
       std::unique_ptr<torch::cudnn::Convolution> convolution)
     : Function(std::move(flags))
     , ConvParams(std::move(params))
-    , input_(std::move(input))
-    , weight_(std::move(weight))
-    , bias_(std::move(bias))
-    , columns(std::move(columns))
-    , ones(std::move(ones))
-    , convolution(std::move(convolution)) {}
+    , convolution(std::move(convolution)) {
+      if (is_executable) {
+        this->input_ = input->save(this);
+        this->weight_ = weight->save(this);
+        this->bias_ = Variable::save_opt(bias.get(), this);
+        this->columns = std::move(columns);
+        this->ones = std::move(ones);
+      }
+    }
 
   virtual variable_list apply(const variable_list& gradOutputs) override;
 
@@ -73,4 +78,32 @@ struct ConvBackward : public Function, public ConvParams {
   std::unique_ptr<torch::cudnn::Convolution> convolution;
 };
 
-}}
+struct ConvBackwardBackward : public Function, public ConvParams {
+  ConvBackwardBackward(
+      FunctionFlags flags,
+      ConvParams params,
+      const std::shared_ptr<Variable>& input,
+      const std::shared_ptr<Variable>& weight,
+      const std::shared_ptr<Variable>& bias,
+      const std::shared_ptr<Variable>& grad_output)
+    : Function(std::move(flags))
+    , ConvParams(std::move(params)) {
+      if (is_executable) {
+        this->input_ = input->save(this);
+        this->weight_ = weight->save(this);
+        this->bias_ = Variable::save_opt(bias.get(), this);
+        this->grad_output_ = grad_output->save(this);
+      }
+    }
+
+  virtual variable_list apply(const variable_list& grad_grad_inputs) override;
+
+  virtual void releaseVariables() override;
+
+  SavedVariable input_;
+  SavedVariable weight_;
+  SavedVariable bias_;
+  SavedVariable grad_output_;
+};
+
+}} // namespace torch::autograd

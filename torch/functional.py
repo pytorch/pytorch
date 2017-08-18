@@ -1,5 +1,11 @@
 import torch
 from ._utils import _range
+from operator import mul
+from functools import reduce
+
+__all__ = [
+    'split', 'chunk', 'stack', 'unbind', 'btriunpack', 'matmul',
+]
 
 
 def split(tensor, split_size, dim=0):
@@ -52,7 +58,7 @@ def stack(sequence, dim=0, out=None):
     if len(sequence) == 0:
         raise ValueError("stack expects a non-empty sequence of tensors")
     if dim < 0:
-        dim += sequence[0].dim()
+        dim += sequence[0].dim() + 1
     inputs = [t.unsqueeze(dim) for t in sequence]
     if out is None:
         return torch.cat(inputs, dim)
@@ -113,3 +119,129 @@ def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
         P = None
 
     return P, L, U
+
+
+def matmul(tensor1, tensor2, out=None):
+    """Matrix product of two tensors.
+
+    The behavior depends on the dimensionality of the tensors as follows:
+
+    - If both tensors are 1-dimensional, the dot product (scalar) is returned.
+    - If both arguments are 2-dimensional, the matrix-matrix product is returned.
+    - If the first argument is 1-dimensional and the second argument is 2-dimensional,
+      a 1 is prepended to its dimension for the purpose of the matrix multiply.
+      After the matrix multiply, the prepended dimension is removed.
+    - If the first argument is 2-dimensional and the second argument is 1-dimensional,
+      the matrix-vector product is returned.
+    - If both arguments are at least 1-dimensional and at least one argument is
+      N-dimensional (where N > 2), then a batched matrix multiply is returned.  If the first
+      argument is 1-dimensional, a 1 is prepended to its dimension for the purpose of the
+      batched matrix multiply and removed after.  If the second argument is 1-dimensional, a
+      1 is appended to its dimension for the purpose of the batched matrix multiple and removed after.
+      The non-matrix (i.e. batch) dimensions are :ref:`broadcasted <broadcasting-semantics>` (and thus
+      must be broadcastable).  For example, if :attr:`tensor1` is a `j x 1 x n x m` Tensor
+      and :attr:`tensor2` is a `k x m x p` Tensor, :attr:`out` will be an `j x k x n x p` Tensor.
+
+    .. note::
+
+        The 1-dimensional dot product version of this function does not support an :attr:`out` parameter.
+
+    Arguments:
+        tensor1 (Tensor): First tensor to be multiplied
+        tensor2 (Tensor): Second tensor to be multiplied
+        out (Tensor, optional): Output tensor
+    """
+    dim_tensor1 = tensor1.dim()
+    dim_tensor2 = tensor2.dim()
+    if dim_tensor1 == 1 and dim_tensor2 == 1:
+        if out is None:
+            return torch.dot(tensor1, tensor2)
+        else:
+            raise ValueError("out must be None for 1-d tensor matmul, returns a scalar")
+    if dim_tensor1 == 2 and dim_tensor2 == 1:
+        if out is None:
+            return torch.mv(tensor1, tensor2)
+        else:
+            return torch.mv(tensor1, tensor2, out=out)
+    elif dim_tensor1 == 1 and dim_tensor2 == 2:
+        if out is None:
+            return torch.mm(tensor1.unsqueeze(0), tensor2).squeeze_(0)
+        else:
+            return torch.mm(tensor1.unsqueeze(0), tensor2, out=out).squeeze_(0)
+    elif dim_tensor1 == 2 and dim_tensor2 == 2:
+        if out is None:
+            return torch.mm(tensor1, tensor2)
+        else:
+            return torch.mm(tensor1, tensor2, out=out)
+    elif dim_tensor1 >= 3 and (dim_tensor2 == 1 or dim_tensor2 == 2):
+        # optimization: use mm instead of bmm by folding tensor1's batch into
+        # its leading matrix dimension.
+
+        if dim_tensor2 == 1:
+            tensor2 = tensor2.unsqueeze(-1)
+
+        size1 = tensor1.size()
+        size2 = tensor2.size()
+        output_size = size1[:-1] + size2[-1:]
+
+        # fold the batch into the first dimension
+        tensor1 = tensor1.contiguous().view(-1, size1[-1])
+
+        if out is None or not out.is_contiguous():
+            output = torch.mm(tensor1, tensor2)
+        else:
+            output = torch.mm(tensor1, tensor2, out=out)
+
+        output = output.view(output_size)
+
+        if dim_tensor2 == 1:
+            output = output.squeeze(-1)
+
+        if out is not None:
+            out.set_(output)
+            return out
+
+        return output
+    elif (dim_tensor1 >= 1 and dim_tensor2 >= 1) and (dim_tensor1 >= 3 or dim_tensor2 >= 3):
+        # ensure each tensor size is at least 3-dimensional
+        tensor1_exp_size = torch.Size((1,) * max(3 - tensor1.dim(), 0) + tensor1.size())
+        # rhs needs to be a separate case since we can't freely expand 1s on the rhs, but can on lhs
+        if dim_tensor2 == 1:
+            tensor2 = tensor2.unsqueeze(1)
+        tensor2_exp_size = torch.Size((1,) * max(3 - tensor2.dim(), 0) + tensor2.size())
+
+        # expand the batch portion (i.e. cut off matrix dimensions and expand rest)
+        expand_batch_portion = torch._C._infer_size(tensor1_exp_size[:-2], tensor2_exp_size[:-2])
+
+        # flatten expanded batches
+        tensor1_expanded = tensor1.expand(*(expand_batch_portion + tensor1_exp_size[-2:])) \
+            .contiguous().view(reduce(mul, expand_batch_portion), *tensor1_exp_size[-2:])
+        tensor2_expanded = tensor2.expand(*(expand_batch_portion + tensor2_exp_size[-2:])) \
+            .contiguous().view(reduce(mul, expand_batch_portion), *tensor2_exp_size[-2:])
+
+        # reshape batches back into result
+        total_expansion = expand_batch_portion + (tensor1_exp_size[-2], tensor2_exp_size[-1])
+
+        def maybeSqueeze(tensor):
+            if dim_tensor1 == 1:
+                return tensor.squeeze(-2)
+            elif dim_tensor2 == 1:
+                return tensor.squeeze(-1)
+            else:
+                return tensor
+
+        if out is None or not out.is_contiguous():
+            output = torch.bmm(tensor1_expanded, tensor2_expanded)
+        else:
+            output = torch.bmm(tensor1_expanded, tensor2_expanded, out=out)
+
+        output = maybeSqueeze(output.view(total_expansion))
+
+        if out is not None:
+            out.set_(output)
+            return out
+
+        return output
+
+    raise ValueError("both arguments to __matmul__ need to be at least 1D, "
+                     "but they are {}D and {}D".format(dim_tensor1, dim_tensor2))

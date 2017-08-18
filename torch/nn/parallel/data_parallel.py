@@ -6,7 +6,6 @@ from .parallel_apply import parallel_apply
 
 
 class DataParallel(Module):
-
     """Implements data parallelism at the module level.
 
     This container parallelizes the application of the given module by
@@ -68,7 +67,7 @@ class DataParallel(Module):
         return scatter_kwargs(inputs, kwargs, device_ids, dim=self.dim)
 
     def parallel_apply(self, replicas, inputs, kwargs):
-        return parallel_apply(replicas, inputs, kwargs)
+        return parallel_apply(replicas, inputs, kwargs, self.device_ids[:len(replicas)])
 
     def gather(self, outputs, output_device):
         return gather(outputs, output_device, dim=self.dim)
@@ -101,6 +100,7 @@ def data_parallel(module, inputs, device_ids=None, output_device=None, dim=0, mo
     inputs, module_kwargs = scatter_kwargs(inputs, module_kwargs, device_ids, dim)
     if len(device_ids) == 1:
         return module(*inputs[0], **module_kwargs[0])
-    replicas = replicate(module, device_ids[:len(inputs)])
-    outputs = parallel_apply(replicas, inputs, module_kwargs)
+    used_device_ids = device_ids[:len(inputs)]
+    replicas = replicate(module, used_device_ids)
+    outputs = parallel_apply(replicas, inputs, module_kwargs, used_device_ids)
     return gather(outputs, output_device, dim)

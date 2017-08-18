@@ -1,6 +1,8 @@
 #pragma once
 
 #include "../THD.h"
+#include <string>
 
-THD_API bool THDProcessGroupInit(THDChannelType channel_type);
+THD_API void THDProcessGroupInit(THDChannelType channel_type, std::string init_method,
+                                 int world_size, std::string group_name, int rank);
 
