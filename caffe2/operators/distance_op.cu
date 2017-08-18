@@ -298,7 +298,7 @@ bool CosineSimilarityOp<float, CUDAContext>::RunOnDevice() {
     CAFFE_ENFORCE_EQ(X.dim32(i), Y.dim32(i));
   }
   const int N = X.ndim() > 0 ? X.dim32(0) : 1;
-  const int D = X.size() / N;
+  const int D = X.size_from_dim(1);
   result->Resize(N);
   float* result_data = result->mutable_data<float>();
   const float* X_data = X.data<float>();
@@ -342,7 +342,7 @@ bool CosineSimilarityGradientOp<float, CUDAContext>::RunOnDevice() {
   auto* dX = Output(DER_X_OUT);
   auto* dY = Output(DER_Y_OUT);
   const int N = X.ndim() > 0 ? X.dim32(0) : 1;
-  const int D = X.size() / N;
+  const int D = X.size_from_dim(1);
   CAFFE_ENFORCE(X.ndim() == Y.ndim());
   for (int i = 0; i < X.ndim(); ++i) {
     CAFFE_ENFORCE(X.dim32(i) == Y.dim32(i));
