@@ -190,10 +190,6 @@ void Node::lint() {
   // - Owning graph is non-null and consistent
   // - The "Select" invariant, when the node is MultiReturn
 
-  if (kind_ != kParam && kind_ != kReturn) {
-    JIT_ASSERT(*nodes_iter_ == this);
-  }
-
   {
     size_t i = 0;
     for (auto input : inputs_) {
@@ -306,7 +302,7 @@ void Graph::lint() {
     input->lint();
     check_node(input);
   }
-  for (auto n : nodes_) {
+  for (auto n : nodes()) {
     n->lint();
     JIT_ASSERT(n->kind_ != kParam);
     JIT_ASSERT(n->kind_ != kReturn);
@@ -333,7 +329,7 @@ void Graph::lint() {
   // - only one return node???
 
   node_set all_nodes_set(ALL_OF(all_nodes)); // NB: all_nodes is *unordered*
-  node_set nodes_set(ALL_OF(nodes_));
+  node_set nodes_set(ALL_OF(nodes()));
   node_set inputs_set(ALL_OF(inputs_));
   node_set output_set{output_};
   // TODO: Make a more type safe std::includes wrapper which disallows use on

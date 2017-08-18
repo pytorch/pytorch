@@ -29,18 +29,15 @@ std::unordered_map<std::string, constructor_type> constructors = {
 } // anonymous namespace
 
 void MatchJITOps(std::unique_ptr<Graph>& graph) {
-  auto & nodes = graph->nodes();
-  auto it = nodes.begin();
-  while (it != nodes.end()) {
+  auto nodes = graph->nodes();
+  for(auto it = nodes.begin(); it != nodes.end(); ++it) {
     PythonOp *p = (*it)->cast<PythonOp>();
     if (!p) {
-      ++it;
       continue;
     }
 
     auto ctor_it = constructors.find(p->name());
     if (ctor_it == constructors.end()) {
-      ++it;
       continue;
     }
     auto& constructor = ctor_it->second;
@@ -62,8 +59,7 @@ void MatchJITOps(std::unique_ptr<Graph>& graph) {
     }
 
     // Erasing p directly would invalidate iterator
-    ++it;
-    p->destroy();
+    it.destroyCurrent();
   }
 }
 

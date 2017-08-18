@@ -211,7 +211,7 @@ struct GraphFuser {
   }
 
   // returns where to continue scanning
-  graph_node_list::reverse_iterator scanNode(Node * consumer) {
+  graph_node_list::iterator scanNode(Node * consumer) {
     if(isFusable(consumer)) {
       // handle inputs in reverse topological order as well...
       // otherwise in f(a,a+b) it will appear a is used twice if we consider
@@ -245,11 +245,12 @@ struct GraphFuser {
     for(auto p : graph->inputs()) {
       topological_index[p] = i++;
     }
-    const auto & nodes = graph->nodes();
+    auto nodes = graph->nodes();
     for(auto consumer : nodes) {
       topological_index[consumer] = i++;
     }
     topological_index[graph->return_node()] = i++;
+
     for(auto it = nodes.rbegin(); it != nodes.rend();) {
       it = scanNode(*it);
     }

@@ -10,7 +10,6 @@
 #include <atomic>
 #include <algorithm>
 #include <unordered_set>
-#include <list>
 #include <cstdint>
 
 #include <ATen/ATen.h>
@@ -184,7 +183,8 @@ using pyobj_list = std::vector<THPObjectPtr>;
 template<typename T>
 using ArrayRef = at::ArrayRef<T>;
 using NodeKind = Symbol;
-using graph_node_list = std::list<Node*>;
+struct graph_node_list;
+struct graph_node_list_iterator;
 
 inline TypePtr getInitialType(NodeKind kind) {
   static TypePtr multiType = std::make_shared<MultiType>();
@@ -203,10 +203,21 @@ inline TypePtr getInitialType(NodeKind kind) {
 struct Node : public Attributes {
   TH_DISALLOW_COPY_AND_ASSIGN(Node);
   friend struct Graph;
+  friend graph_node_list;
+  friend graph_node_list_iterator;
 private:
-  graph_node_list::iterator nodes_iter_;
-  graph_node_list::iterator next() { return std::next(nodes_iter_); }
-  graph_node_list::iterator prev() { return std::prev(nodes_iter_); }
+  // each node but Return/Param
+  // is associated with exactly one place in the node list...
+  // of the graph_
+  // this circular is a doubly-linked list, the Return node is used as the sentinel for the beginning and end of the list
+  // such that the list never has null pointers
+  // next_in_graph[0] is next pointer
+  // next_in_graph[1] is prev pointer
+  // using an array to allow the same iterator class for forward and reverse node lists
+  // This list represents a topological sort
+  Node * next_in_graph[2] = {nullptr,nullptr};
+  Node* & next() { return next_in_graph[0]; }
+  Node* & prev() { return next_in_graph[1]; }
 
   const NodeKind kind_;
   std::vector<Node*> inputs_;
@@ -357,8 +368,8 @@ public:
   //          %5 = h(%1)
   //          %4 = g(%3)
   void insertBefore(Node * n) {
-    JIT_ASSERT(n->inGraphList());
-    insertAt(n->nodes_iter_);
+    JIT_ASSERT(n->inGraphList()&& !this->inGraphList());
+    insertAfter(n->prev());
   }
 
   // Insert unattached 'this' node after 'n' in the topological order.
@@ -371,8 +382,12 @@ public:
   //          %4 = g(%3)
   //          %5 = h(%1)
   void insertAfter(Node * n) {
-    JIT_ASSERT(n->inGraphList());
-    insertAt(n->next());
+    JIT_ASSERT(!inGraphList() && n->inGraphList());
+    Node * next = n->next();
+    n->next() = this;
+    this->prev() = n;
+    this->next() = next;
+    next->prev() = this;
   }
 
   // Move 'this' (already in the graph) after 'n' in the topological order.
@@ -432,16 +447,8 @@ public:
 
   // iterators of the node list starting at this node
   // useful for resuming a search starting at this node
-  graph_node_list::iterator iterator() {
-    JIT_ASSERT(inGraphList());
-    return nodes_iter_;
-  }
-  graph_node_list::reverse_iterator reverseIterator() {
-    JIT_ASSERT(inGraphList());
-    // newly created reverse_iterator points to an element preceding
-    // (in forward order) the one pointed to by forward iter used to create it
-    return graph_node_list::reverse_iterator(std::next(nodes_iter_));
-  }
+  graph_node_list_iterator iterator();
+  graph_node_list_iterator reverseIterator();
 
   // Remove 'this' from the instruction list and deallocate it.
   //
@@ -476,8 +483,6 @@ private:
     return use_it;
   }
 
-  void insertAt(graph_node_list::iterator it);
-
   // remove the use of input i, this sets input i to nullptr, but
   // is only used internally to Node before setting it to a new value
   // or erasing the entry from the list.
@@ -490,8 +495,19 @@ private:
     return input_node;
   }
 
-  bool inGraphList();
-  void removeFromList();
+  bool inGraphList() {
+    JIT_ASSERT(next() != nullptr || prev() == nullptr);
+    return next() != nullptr;
+  }
+  void removeFromList() {
+    JIT_ASSERT(inGraphList());
+    Node * next = this->next();
+    Node * prev = this->prev();
+    prev->next() = next;
+    next->prev() = prev;
+    this->next() = nullptr;
+    this->prev() = nullptr;
+  }
   void lint();
 protected:
   // subclasses must override
@@ -511,7 +527,80 @@ protected:
   }
 };
 
-/******************* Nodes required inside a Graph ****************************/
+struct graph_node_list_iterator {
+  graph_node_list_iterator()
+  : cur(nullptr), d(0) {}
+  graph_node_list_iterator(Node * cur, int d)
+  : cur(cur), d(d) {}
+  graph_node_list_iterator(const graph_node_list_iterator & rhs)
+  : cur(rhs.cur),d(rhs.d) {}
+  Node * operator*() { return cur; }
+  Node * operator->() { return cur; }
+  graph_node_list_iterator & operator++() {
+    JIT_ASSERT(cur);
+    cur = cur->next_in_graph[d];
+    return *this;
+  }
+  graph_node_list_iterator operator++(int) {
+    graph_node_list_iterator old = *this;
+    ++(*this);
+    return old;
+  }
+  // erase cur without invalidating this iterator
+  // named differently from destroy so that ->/. bugs do not
+  // silently cause the wrong one to be called.
+  // iterator will point to the previous entry after call
+  void destroyCurrent() {
+    Node * d = cur;
+    cur = cur->next_in_graph[d == 0 ? 1 : 0];
+    d->destroy();
+  }
+  graph_node_list_iterator reverse() {
+    return graph_node_list_iterator(cur, d = d == 0 ? 1 : 0);
+  }
+private:
+  Node * cur;
+  int d; //direction 0 is forward 1 is reverse, see next_in_graph
+};
+
+inline graph_node_list_iterator Node::iterator() {
+  return graph_node_list_iterator(this,0);
+}
+inline graph_node_list_iterator Node::reverseIterator() {
+  return iterator().reverse();
+}
+
+struct graph_node_list {
+  using iterator = graph_node_list_iterator;
+  graph_node_list_iterator begin() {
+    return graph_node_list_iterator(head->next_in_graph[d],d);
+  }
+  graph_node_list_iterator end() {
+    return graph_node_list_iterator(head,d);
+  }
+  graph_node_list_iterator rbegin() {
+    return reverse().begin();
+  }
+  graph_node_list_iterator rend() {
+    return reverse().end();
+  }
+  graph_node_list reverse() {
+    return graph_node_list(head, d == 0 ? 1 : 0);
+  }
+  graph_node_list(Node * head, int d)
+  : head(head), d(d) {}
+private:
+  Node * head;
+  int d;
+};
+
+static inline bool operator==(graph_node_list_iterator a,graph_node_list_iterator b) {
+  return *a == *b;
+}
+
+static inline bool operator!=(graph_node_list_iterator a,graph_node_list_iterator b) {
+  return *a != *b;
+}
 
 struct Graph {
 TH_DISALLOW_COPY_AND_ASSIGN(Graph);
@@ -529,7 +618,6 @@ private:
   // actual representation of Graph is done with
   // inputs, outputs, nodes
 
-  graph_node_list nodes_;
   std::unordered_set<Node*> all_nodes;
   size_t next_unique_;
 
@@ -540,6 +628,8 @@ public:
   : next_unique_(0)
   , new_node_stage_(0) {
     output_ = create(kReturn);
+    output_->next() = output_;
+    output_->prev() = output_;
     output_->stage_ = -1; // >= than all stages
   }
 
@@ -549,8 +639,8 @@ public:
   const node_list & outputs() {
     return output_->inputs();
   }
-  const graph_node_list & nodes() {
-    return nodes_;
+  graph_node_list nodes() {
+    return graph_node_list(output_,0);
   }
   Node * return_node() {
     return output_;
@@ -640,12 +730,14 @@ public:
   }
 
   Node * appendNode(Node * n) {
-    n->insertAt(nodes_.end());
+    JIT_ASSERT(n->graph_ == this && !n->inGraphList());
+    n->insertBefore(output_);
     return n;
   }
 
   Node * prependNode(Node * n) {
-    n->insertAt(nodes_.begin());
+    JIT_ASSERT(n->graph_ == this && !n->inGraphList());
+    n->insertAfter(output_);
     return n;
   }
 
@@ -668,28 +760,12 @@ private:
 };
 
 inline Node::Node(Graph * graph_, NodeKind kind_) :
-  nodes_iter_(graph_->nodes_.end()),
   kind_(kind_),
   graph_(graph_),
   unique_(graph_->next_unique_++),
   stage_(graph_->new_node_stage_),
   type_(getInitialType(kind_)) {
   graph_->all_nodes.emplace(this);
-}
-
-inline void Node::insertAt(graph_node_list::iterator it) {
-  JIT_ASSERT(!inGraphList())
-  nodes_iter_ = graph_->nodes_.insert(it, this);
-}
-
-inline bool Node::inGraphList() {
-  return nodes_iter_ != graph_->nodes_.end();
-}
-
-inline void Node::removeFromList() {
-  JIT_ASSERT(inGraphList());
-  graph_->nodes_.erase(nodes_iter_);
-  nodes_iter_ = graph_->nodes_.end();
 }
 
 inline void Node::destroy() {
@@ -760,7 +836,6 @@ inline void Node::destroy() {
 
 std::ostream& operator<<(std::ostream & out, Graph & g);
 std::ostream& operator<<(std::ostream & out, const Type & t);
-
 
 /************* All nodes not required to be defined before Graph **************/
 
