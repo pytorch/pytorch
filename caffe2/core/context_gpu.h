@@ -190,12 +190,11 @@ class CUDAContext final {
     CopyBytes<SrcContext, DstContext>(n * meta.itemsize(), src, dst);
   }
 
+ protected:
+  static void Delete(void* data);
   void set_stream_id(int stream_id) {
     stream_id_ = stream_id;
   }
-
- protected:
-  static void Delete(void* data);
 
   int gpu_id_;
   int stream_id_ = 0;
