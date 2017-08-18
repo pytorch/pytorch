@@ -852,6 +852,8 @@ inline void Node::destroy() {
   };
 
 // Mutable case
+// The IFM/ELSEIFM indicate that subclass *refinement* occurs.
+// This is only valid for node types for which we have subclasses.
 #define IR_IFM(x,Kind) GENERIC_IF(,k##Kind,x,Kind)
 #define IR_ELSEIFM(Kind) GENERIC_ELSEIF(,k##Kind,Kind)
 #define IR_ELSE() GENERIC_ELSE()

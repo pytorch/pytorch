@@ -70,7 +70,7 @@ PyObject * export_graph(PyObject *_unused, PyObject *args) {
 
   THPUtils_assert(THPTracingState_Check(py_state), "expected a TracingState instance");
   THPTracingState *state = (THPTracingState*)py_state;
-  return THPUtils_packString(ExportGraph(state->cdata->graph,initializers_));
+  return THPUtils_packString(ExportGraph(state->cdata->graph, state->cdata->buffer_map, initializers_));
   END_HANDLE_TH_ERRORS
 }
 #endif // WITH_TOFFEE

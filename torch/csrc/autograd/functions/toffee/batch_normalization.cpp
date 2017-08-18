@@ -15,6 +15,8 @@ jit::node_list BatchNormForward::primspec(PrimSpecContext* ctx, jit::node_list i
   if (inputs[2]->kind() != jit::kConstant || inputs.at(2)->t(jit::kValue).defined()) {
     bn->addInput(inputs[2]);
   }
+  bn->addInput(jit::tracer::getBufferTrace(*ctx->buffer_map, cached_running_mean));
+  bn->addInput(jit::tracer::getBufferTrace(*ctx->buffer_map, cached_running_var));
 
   bn->i_(jit::kis_test, !this->training);
   bn->f_(jit::kepsilon, eps);
@@ -25,23 +27,11 @@ jit::node_list BatchNormForward::primspec(PrimSpecContext* ctx, jit::node_list i
   auto orig_output = g->appendNode(g->createSelect(bn, 0));
   inplace_outputs.push_back(-1);
 
-  auto typ = inputs.at(1)->type()->cast<torch::jit::TensorType>();
-  int64_t the_size = typ->sizes()[0];
-  std::stringstream ss;
-  ss << the_size << "_" << ctx->batch_norm_count;
-  std::string suffix = ss.str();
-  auto sm = g->addInput()->setDebugName("saved_mean_" + suffix);
-  auto sv = g->addInput()->setDebugName("saved_var_" + suffix);
-
-  int64_t sm_start = bn->inputs().size();
-  bn->addInput(sm);
-  bn->addInput(sv);
-
   if(this->training) {
     g->appendNode(g->createSelect(bn, 1));
-    inplace_outputs.push_back(sm_start);
+    inplace_outputs.push_back(3);
     g->appendNode(g->createSelect(bn, 2));
-    inplace_outputs.push_back(sm_start+1);
+    inplace_outputs.push_back(4);
     // dummy output
     for(int i = 3; i < 5; i++) {
       g->appendNode(g->createSelect(bn, i)->setDebugName("batch_norm_dead_output"));
