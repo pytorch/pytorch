@@ -14,6 +14,7 @@ using namespace caffe2;
 
 static void BM_CUDAContextCreation(benchmark::State& state) {
   CAFFE2_SKIP_IF_NO_GPU;
+  volatile CUDAContext context_so_we_do_initialization_work;
   while (state.KeepRunning()) {
     volatile CUDAContext context;
   }
@@ -47,6 +48,26 @@ static void BM_cudaSetDevice(benchmark::State& state) {
   }
 }
 BENCHMARK(BM_cudaSetDevice);
+
+static void BM_cudaSetAndGetDevice(benchmark::State& state) {
+  CAFFE2_SKIP_IF_NO_GPU;
+  int total = NumCudaDevices();
+  int i = 0;
+  int id;
+  while (state.KeepRunning()) {
+    CUDA_ENFORCE(cudaSetDevice((i++) % total));
+    CUDA_ENFORCE(cudaGetDevice(&id));
+  }
+}
+BENCHMARK(BM_cudaSetAndGetDevice);
+
+static void BM_cudaSetSameDevice(benchmark::State& state) {
+  CAFFE2_SKIP_IF_NO_GPU;
+  while (state.KeepRunning()) {
+    CUDA_ENFORCE(cudaSetDevice(0));
+  }
+}
+BENCHMARK(BM_cudaSetSameDevice);
 
 static void BM_cudaStreamCreateSyncDelete(benchmark::State& state) {
   CAFFE2_SKIP_IF_NO_GPU;
