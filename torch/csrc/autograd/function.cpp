@@ -4,7 +4,6 @@
 
 #include "variable.h"
 #include "torch/csrc/jit/ir.h"
-#include "torch/csrc/autograd/functions/tensor.h"
 
 namespace torch { namespace autograd {
 
@@ -39,26 +38,17 @@ auto Function::name() -> std::string {
 // actually have any backing Python class. We still need to trace them!
 variable_list Function::tracedApply(variable_list inputs) {
   using namespace torch::jit;
-  bool is_traceable = static_cast<bool>(dynamic_cast<Identity*>(this));
   // Traceable Functions are completely transparent to the JIT.
-  if (is_traceable) {
+  if (is_traceable()) {
     return apply(inputs);
   }
   auto state = tracer::getTracingState(inputs);
-
-  // Register eval hooks if backward of this function is not traceable.
-  // This has to be done early, because it modifies inputs.
-  bool is_backward_traceable = false;
-  std::shared_ptr<tracer::EvalCommonState> eval_state;
-  if (!is_backward_traceable) {
-    eval_state = tracer::EvalExitHook::registerHook(state, inputs);
-  }
 
   // Insert a CppOp in the trace.
   auto& graph = state->graph;
   auto* this_node = graph->createCppOp(getSharedPtr());
   for (auto& input: inputs) {
-      this_node->addInput(tracer::getValueTrace(state, input));
+    this_node->addInput(tracer::getValueTrace(state, input));
   }
   graph->appendNode(this_node);
 
@@ -68,16 +58,27 @@ variable_list Function::tracedApply(variable_list inputs) {
   // Set up output traces.
   int num_outputs = outputs.size();
   for (int i = 0; i < num_outputs; ++i) {
-      auto& output = outputs[i];
-      Node* sel = graph->appendNode(graph->createSelect(this_node, i));
-      sel->inferTypeFrom(output->data);
-      tracer::setValueTrace(state, output, sel);
+    auto& output = outputs[i];
+    Node* sel = graph->appendNode(graph->createSelect(this_node, i));
+    sel->inferTypeFrom(output->data);
+    tracer::setValueTrace(state, output, sel);
   }
 
-  // Register the point where Eval region starts in backward.
-  // NOTE: this modifies outputs.
-  if (!is_backward_traceable) {
-    tracer::EvalEnterHook::registerHook(state, outputs, eval_state);
+  if (!passes_state_transparently()) {
+    // TODO: set up a context edge for Evals
+    // There's no point in wrapping functions in Eval, if we know they already are
+    // part of another Eval subgraph. This is both a small optimization, and
+    // it allows us to not implement saved_variables() in many functions.
+    if (!tracing_state->in_eval_subgraph) {
+      auto saved_vars = saved_variables();
+      if (!saved_vars)
+        throw std::runtime_error(std::string("saved_variables() needed but not implemented in ") + name());
+      variable_list bw_subgraph_inputs(inputs);
+      for (auto& saved_var : *saved_vars) {
+        bw_subgraph_inputs.emplace_back(saved_var.unpack(getSharedPtr()));
+      }
+      tracer::nontraceableBackwardSubgraph(bw_subgraph_inputs, outputs);
+    }
   }
   return outputs;
 }

@@ -36,7 +36,7 @@ struct Engine {
   // by following next_function references.
   void execute(
       const function_list& roots,
-      variable_list& inputs,
+      const variable_list& inputs,
       bool keep_graph,
       const callback_map& callbacks = callback_map());
 

@@ -43,64 +43,12 @@ struct TracingState : public std::enable_shared_from_this<TracingState> {
 
   std::unique_ptr<Graph> graph;
   bool active;
+  variable_list inputs; // Used only for the duration of first stage
 };
 
-namespace detail {
-
-template<typename Subclass>
-struct TracerHook : public autograd::FunctionPreHook {
-protected:
-  // Returns a vector of hooks that were registered. Subclasses can then perform additional initialization.
-  static std::shared_ptr<Subclass> registerHook(const std::shared_ptr<TracingState>& tracing_state, variable_list& inputs);
-
-  std::shared_ptr<TracingState> tracing_state;
-
-public:
-  virtual void run(variable_list& inputs) = 0;
-
-  // Handle both kinds of hooks. In case of post hooks we only care about outputs.
-  virtual variable_list operator()(const variable_list& _vars) {
-    variable_list vars(_vars);
-    for (auto& var : _vars)
-      JIT_ASSERT(var);
-    using this_type = typename std::remove_reference<decltype(*this)>::type;
-    std::call_once(flag, std::bind(&this_type::run, this, vars));
-    JIT_ASSERT(vars.size() == _vars.size());
-    for (auto& var : vars) {
-      JIT_ASSERT(var);
-    }
-    return vars;
-  }
-
-private:
-  std::once_flag flag;
+struct FunctionTracingState {
+  bool in_eval_subgraph = false;
 };
-
-////////////////////////////////////////////////////////////////////////////////
-// Trace hooks
-////////////////////////////////////////////////////////////////////////////////
-
-struct TraceEnterHook : public TracerHook<TraceEnterHook> {
-private:
-  friend struct TracerHook<TraceEnterHook>;
-
-  virtual void run(variable_list& inputs) override;
-
-public:
-  static void registerHook(const std::shared_ptr<TracingState>& tracing_state, variable_list& outputs);
-};
-
-struct TraceExitHook : public TracerHook<TraceExitHook> {
-private:
-  friend struct TracerHook<TraceExitHook>;
-
-  virtual void run(variable_list& outputs) override;
-
-public:
-  static void registerHook(const std::shared_ptr<TracingState>& tracing_state, variable_list& inputs);
-};
-
-} // namespace detail
 
 // Should a function which takes 'vars' as inputs be traced?
 // It sufficies for ONE variable to be tracing: any "untraced" variables
@@ -176,64 +124,48 @@ inline Node* getValueTrace(const std::shared_ptr<TracingState>& state, const std
 // Start tracing, treating 'inputs' as inputs to the trace, which can be
 // varied on subsequent invocations of the trace.  Any other variables
 // will be treated as constants.
-// XXX: this changes variables in inputs!
-inline std::shared_ptr<TracingState> enter(variable_list& inputs) {
+inline std::shared_ptr<TracingState> enter(const variable_list& inputs) {
   auto state = std::make_shared<TracingState>();
   for (auto& input : inputs) {
     JIT_ASSERT(input->tracing_state.state.expired());
-    input->tracing_state.state = state;
-    input->tracing_state.trace = state->graph->addInput();
-    input->tracing_state.trace->inferTypeFrom(input->data);
+    Node *input_node = state->graph->addInput();
+    setValueTrace(state, input, input_node);
+    input_node->inferTypeFrom(input->data);
   }
   state->active = true;
-  detail::TraceExitHook::registerHook(state, inputs);
+  state->inputs = inputs;
   return state;
 }
 
-// Exit a trace, treating 'outputs' as the outputs of the trace.  These
-// are the variables whose values will be computed upon subsequent
-// invocations of the trace.
-inline void exit(variable_list& outputs) {
-  auto state = getTracingState(outputs);
+namespace detail {
+
+// Exit code shared between exit and TraceExitHook::run
+inline void _exit(const std::shared_ptr<TracingState>& state, const variable_list& outputs) {
   for (auto& output : outputs) {
     state->graph->registerOutput(getValueTrace(state, output, true));
   }
   state->active = false;
-  detail::TraceEnterHook::registerHook(state, outputs);
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// Eval hooks
-////////////////////////////////////////////////////////////////////////////////
+// Marks a backwards subgraph that should be traced as the next stage.
+// Mutates some of the outputs.
+void traceBackward(const std::shared_ptr<TracingState>& state, const variable_list& inputs,
+                   const variable_list& outputs);
 
-struct EvalCommonState {
-  // Filled in by EvalEnterHook when ran
-  Node* eval_node;
-  std::shared_ptr<EvalCommonState> next_common_state;
-};
+} // namespace detail
 
-struct EvalEnterHook : public detail::TracerHook<EvalEnterHook> {
-private:
-  friend detail::TracerHook<EvalEnterHook>;
+// Exit a trace, treating 'outputs' as the outputs of the trace.  These
+// are the variables whose values will be computed upon subsequent
+// invocations of the trace.
+inline void exit(const variable_list& outputs) {
+  auto state = getTracingState(outputs);
+  detail::_exit(state, outputs);
+  detail::traceBackward(state, state->inputs, outputs);
+  state->inputs.clear();
+}
 
-  std::shared_ptr<EvalCommonState> common_state;
-
-  virtual void run(variable_list& vars) override;
-
-public:
-  static void registerHook(const std::shared_ptr<TracingState>& tracing_state, variable_list& outputs, std::shared_ptr<EvalCommonState> common_state);
-};
-
-struct EvalExitHook : public detail::TracerHook<EvalExitHook> {
-private:
-  friend detail::TracerHook<EvalExitHook>;
-
-  std::shared_ptr<EvalCommonState> common_state;
-
-  virtual void run(variable_list& vars) override;
-
-public:
-  static std::shared_ptr<EvalCommonState> registerHook(const std::shared_ptr<TracingState>& tracing_state, variable_list& inputs);
-};
+// Marks part of the backward graph as non-traceable (i.e. one that should be replaced
+// with an Eval in the trace).
+void nontraceableBackwardSubgraph(const variable_list& inputs, const variable_list& outputs);
 
 }}} // namespace torch::jit::tracer

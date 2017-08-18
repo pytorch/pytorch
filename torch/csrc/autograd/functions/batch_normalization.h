@@ -19,7 +19,7 @@ struct BatchNormParams {
   bool cudnn_enabled;
 };
 
-struct BatchNormForward : public Function, public BatchNormParams, public HasPrimSpec {
+struct BatchNormForward : public ForwardFunction<>, public BatchNormParams, public HasPrimSpec {
   BatchNormForward(BatchNormParams params)
     : BatchNormParams(std::move(params)) {}
 

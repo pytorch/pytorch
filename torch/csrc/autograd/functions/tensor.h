@@ -8,26 +8,26 @@
 
 namespace torch { namespace autograd {
 
-struct Identity : public Function {
+struct Identity : public TraceableFunction {
   Identity(FunctionFlags&& f)
-    : Function(std::move(f)) {};
+    : TraceableFunction(std::move(f)) {};
 
   virtual variable_list apply(const variable_list& inputs) override;
 };
 
-struct Clone : public Function {
+struct Clone : public ForwardFunction<> {
   Clone() {}
 
   virtual variable_list apply(const variable_list& inputs) override;
 };
 
-struct Contiguous : public Function {
+struct Contiguous : public ForwardFunction<> {
   Contiguous() {}
 
   virtual variable_list apply(const variable_list& inputs) override;
 };
 
-struct Transpose : public Function {
+struct Transpose : public ForwardFunction<> {
   Transpose(int64_t dim1, int64_t dim2)
     : dim1(dim1)
     , dim2(dim2) {}
@@ -38,7 +38,7 @@ struct Transpose : public Function {
   int64_t dim2;
 };
 
-struct View : public Function {
+struct View : public ForwardFunction<> {
   View(std::vector<int64_t> size)
     : size(size) {}
 
@@ -47,7 +47,7 @@ struct View : public Function {
   std::vector<int64_t> size;
 };
 
-struct Expand : public Function {
+struct Expand : public ForwardFunction<> {
   Expand(std::vector<int64_t> size)
     : size(size) {}
 
@@ -56,7 +56,7 @@ struct Expand : public Function {
   std::vector<int64_t> size;
 };
 
-struct Narrow : public Function {
+struct Narrow : public ForwardFunction<> {
   Narrow(int64_t dim, int64_t start, int64_t size)
     : dim(dim)
     , start(start)
@@ -69,7 +69,7 @@ struct Narrow : public Function {
   int64_t size;
 };
 
-struct Cat : public Function {
+struct Cat : public ForwardFunction<> {
   Cat(int64_t dim)
     : dim(dim) {}
 

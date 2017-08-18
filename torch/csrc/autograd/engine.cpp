@@ -301,7 +301,7 @@ struct ClearCallbacks {
 };
 
 auto Engine::execute(const function_list& input_roots,
-                     variable_list& inputs,
+                     const variable_list& inputs,
                      bool keep_graph,
                      const callback_map& callbacks) -> void {
   std::call_once(start_threads_flag, &Engine::start_threads, this);
