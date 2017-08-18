@@ -1165,4 +1165,40 @@ OPERATOR_SCHEMA(Size)
 
 REGISTER_CPU_OPERATOR(Size, SizeOp<CPUContext>);
 NO_GRADIENT(Size);
+
+template <>
+template <typename T>
+bool RangeOp<CPUContext>::DoRunOnDevice(
+    const T& start,
+    const T& step,
+    Tensor<CPUContext>* output) {
+  auto* output_data = output->template mutable_data<T>();
+  for (int i = 0; i < output->size(); ++i) {
+    output_data[i] = i * step + start;
+  }
+  return true;
+}
+
+OPERATOR_SCHEMA(Range)
+    .NumInputs(1, 3)
+    .NumOutputs(1)
+    .SetDoc(
+        "Values are generated within the half-open interval [start, stop) "
+        "(in other words, the interval including start but excluding stop). "
+        "When called with a single value, this will return `[0, v]` with the "
+        "result type inferred from the input types.")
+    .Input(
+        0,
+        "start",
+        "Optional scalar Tensor with the start of the interval (inclusive).")
+    .Input(1, "stop", "scalar Tensor with the end of the interval (exclusive)")
+    .Input(2, "step", "Optional scalar Tensor with spacing between values.")
+    .Output(
+        0,
+        "output",
+        "1D tensor of same type as inputs that contains the sequence.");
+
+REGISTER_CPU_OPERATOR(Range, RangeOp<CPUContext>);
+NO_GRADIENT(Range);
+
 } // namespace caffe2
