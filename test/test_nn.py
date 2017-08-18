@@ -224,8 +224,12 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
     def _do_extra_tests(self, test_case, module, input, target):
         if self.check_gradgrad:
             params = tuple(x for x in module.parameters())
-            _assertGradAndGradgradChecks(test_case, lambda x, y, *args, **kw: module(x, y),
-                                         (input, target) + params)
+            if not isinstance(input, tuple):
+                _assertGradAndGradgradChecks(test_case, lambda x, y, *args, **kw: module(x, y),
+                                             (input, target) + params)
+            else:
+                _assertGradAndGradgradChecks(test_case, lambda x, y, z, *args, **kw: module(x, y, z),
+                                             input + (target,) + params)
 
     def _get_target(self, target):
         return Variable(target, requires_grad=False)
@@ -3918,7 +3922,8 @@ for test_params in module_tests + new_module_tests:
     add_test(test)
     if 'check_eval' in test_params:
         # create a new test that is identical but that sets module.training to False
-        test_params['desc'] = test_params.get('desc', '') + 'eval'
+        desc = test_params.get('desc', None)
+        test_params['desc'] = 'eval' if desc is None else desc + '_eval'
 
         def gen_eval_constructor(constructor):
             def eval_constructor(*args, **kwargs):
@@ -3938,7 +3943,8 @@ for test_params in criterion_tests + new_criterion_tests:
     test = NewCriterionTest(**test_params)
     add_test(test)
     if 'check_no_size_average' in test_params:
-        test_params['desc'] = test_params.get('desc', '') + 'no_size_average'
+        desc = test_params.get('desc', None)
+        test_params['desc'] = 'eval' if desc is None else desc + '_no_size_average'
 
         def gen_no_size_average_constructor(constructor):
             def no_size_average_constructor(*args, **kwargs):

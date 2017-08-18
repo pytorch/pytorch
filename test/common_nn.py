@@ -399,7 +399,7 @@ criterion_tests = [
         module_name='MarginRankingLoss',
         input=(torch.randn(50).mul(10), torch.randn(50).mul(10)),
         target=torch.randn(50).sign(),
-        check_gradgrad=False,
+        check_no_size_average=True,
     ),
     dict(
         module_name='MarginRankingLoss',
@@ -407,7 +407,7 @@ criterion_tests = [
         input=(torch.randn(50).mul(10), torch.randn(50).mul(10)),
         target=torch.randn(50).sign(),
         desc='margin',
-        check_gradgrad=False,
+        check_no_size_average=True,
     ),
 ]
 
