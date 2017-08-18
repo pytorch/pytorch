@@ -4,6 +4,6 @@
 
 namespace torch { namespace jit {
 
-void MatchJITOps(std::unique_ptr<Graph>& graph);
+void MatchJITOps(std::shared_ptr<Graph>& graph);
 
 }}

@@ -295,6 +295,7 @@ tmp_install_path = lib_path + "/tmp_install"
 include_dirs += [
     cwd,
     os.path.join(cwd, "torch", "csrc"),
+    lib_path + "/pybind11/include",
     tmp_install_path + "/include",
     tmp_install_path + "/include/TH",
     tmp_install_path + "/include/THPP",
@@ -352,6 +353,7 @@ main_sources = [
     "torch/csrc/jit/assert.cpp",
     "torch/csrc/jit/init.cpp",
     "torch/csrc/jit/ir.cpp",
+    "torch/csrc/jit/python_ir.cpp",
     "torch/csrc/jit/graph_fuser.cpp",
     "torch/csrc/jit/init_pass.cpp",
     "torch/csrc/jit/dead_code_elimination.cpp",

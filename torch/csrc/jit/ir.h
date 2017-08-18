@@ -76,6 +76,11 @@ public:
       return static_cast<T*>(this);
     return nullptr;
   }
+  template<typename T>
+  T* expect() {
+    JIT_ASSERT(T::Kind == kind())
+    return static_cast<T*>(this);
+  }
 };
 
 // This node represents a single Tensor value
@@ -473,6 +478,11 @@ public:
       return static_cast<T*>(this);
     return nullptr;
   }
+  template<typename T>
+  T* expect() {
+    JIT_ASSERTM(T::Kind == kind(), "expected a %s but found a %s", symbolToString(T::Kind), symbolToString(kind()));
+    return static_cast<T*>(this);
+  }
 
   virtual ~Node() {}
 private:
@@ -839,6 +849,7 @@ inline void Node::destroy() {
 
 std::ostream& operator<<(std::ostream & out, Graph & g);
 std::ostream& operator<<(std::ostream & out, const Type & t);
+std::ostream& operator<<(std::ostream & out, Node & t);
 
 /************* All nodes not required to be defined before Graph **************/
 
@@ -912,6 +923,6 @@ inline Node * Graph::createCppOp(const std::shared_ptr<torch::autograd::Function
   return op->init(fn);
 }
 
-void LintGraph(std::unique_ptr<Graph>& graph);
+void LintGraph(std::shared_ptr<Graph>& graph);
 
 }} // namespace torch::jit

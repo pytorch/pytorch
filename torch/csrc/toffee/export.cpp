@@ -18,7 +18,7 @@ std::string node_name(Node* n) {
 }
 
 // Exports a graph to ToffeeIR
-std::string ExportGraph(std::unique_ptr<Graph>& g) {
+std::string ExportGraph(std::shared_ptr<Graph>& g) {
   toffee::GraphProto p_g;
   torch::autograd::PrimSpecContext ctx;
   ctx.graph = &p_g;

@@ -14,7 +14,7 @@ bool allSelectsUnused(Node* node) {
 
 } // anonymous namespace
 
-void EliminateDeadCode(std::unique_ptr<Graph>& graph) {
+void EliminateDeadCode(std::shared_ptr<Graph>& graph) {
   auto nodes = graph->nodes().reverse();
   for (auto it = nodes.begin(); it != nodes.end(); it++) {
     auto node = *it;
