@@ -197,12 +197,12 @@ void internedStringsTests () {
 
   assert(kParam == stringToSymbol("Param"));
   assert(kReturn == stringToSymbol("Return"));
-  assert(symbolToString(kReturn) == "Return");
+  assert(symbolToString(kReturn) == std::string("Return"));
   assert(stringToSymbol("What") == kLastSymbol);
   assert(stringToSymbol("What2") == kLastSymbol+1);
   assert(stringToSymbol("What") == kLastSymbol);
   assert(stringToSymbol("What2") == kLastSymbol+1);
-  assert(symbolToString(kLastSymbol+1) == "What2");
+  assert(symbolToString(kLastSymbol+1) == std::string("What2"));
 }
 
 

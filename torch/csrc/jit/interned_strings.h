@@ -37,7 +37,7 @@ enum BuiltinSymbol {
   kLastSymbol, //where we start counting for new symbols
 };
 
-const std::string & symbolToString(Symbol s);
+const char * symbolToString(Symbol s);
 Symbol stringToSymbol(const std::string & s);
 
 }}
