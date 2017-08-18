@@ -11,13 +11,13 @@ static void ConsumerFunction(int thread_idx) {
   int value;
   while (true) {
     if (!gQueue->Pop(&value)) return;
-    LOG(INFO) << "Emitting " << value << " from thread " << thread_idx;
+    VLOG(1) << "Emitting " << value << " from thread " << thread_idx;
   }
 }
 
 static void ProducerFunction(int thread_idx, int start, int count) {
   for (int i = 0; i < count; ++i) {
-    LOG(INFO) << "Pushing " << i + start << " from thread " << thread_idx;
+    VLOG(1) << "Pushing " << i + start << " from thread " << thread_idx;
     gQueue->Push(i + start);
   }
 }

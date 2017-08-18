@@ -717,16 +717,16 @@ TYPED_TEST(TypedTensorTest, BigTensorSerialization) {
       : static_cast<int64_t>(std::numeric_limits<int>::max()) + 1;
   int64_t size = d1 * d2;
   string db_source = (string)std::tmpnam(nullptr);
-  LOG(INFO) << "db_source: " << db_source;
+  VLOG(1) << "db_source: " << db_source;
 
   {
-    LOG(INFO) << "Test begin";
+    VLOG(1) << "Test begin";
     Blob blob;
     TensorCPU* tensor = blob.GetMutable<TensorCPU>();
-    LOG(INFO) << "Allocating blob";
+    VLOG(1) << "Allocating blob";
     tensor->Resize(d1, d2);
     auto mutableData = tensor->mutable_data<TypeParam>();
-    LOG(INFO) << "Filling out the blob";
+    VLOG(1) << "Filling out the blob";
     for (int64_t i = 0; i < size; ++i) {
       mutableData[i] = static_cast<TypeParam>(i);
     }
@@ -740,7 +740,7 @@ TYPED_TEST(TypedTensorTest, BigTensorSerialization) {
     };
     blob.Serialize("test", acceptor);
     VectorDB::registerData(db_source, std::move(data));
-    LOG(INFO) << "finished writing to DB";
+    VLOG(1) << "finished writing to DB";
   }
 
   {
@@ -760,10 +760,10 @@ TYPED_TEST(TypedTensorTest, BigTensorSerialization) {
     Workspace ws;
     auto load_op = CreateOperator(op_def, &ws);
     EXPECT_TRUE(load_op != nullptr);
-    LOG(INFO) << "Running operator";
+    VLOG(1) << "Running operator";
 
     load_op->Run();
-    LOG(INFO) << "Reading blob from workspace";
+    VLOG(1) << "Reading blob from workspace";
     auto new_blob = ws.GetBlob("test");
     EXPECT_TRUE(new_blob->IsType<TensorCPU>());
     const auto& new_tensor = new_blob->Get<TensorCPU>();
@@ -835,15 +835,15 @@ CAFFE_REGISTER_TYPED_CLASS(
 
 TEST(ContentChunks, Serialization) {
   string db_source = (string)std::tmpnam(nullptr);
-  LOG(INFO) << "db_source: " << db_source;
+  VLOG(1) << "db_source: " << db_source;
 
   {
-    LOG(INFO) << "Test begin";
+    VLOG(1) << "Test begin";
     Blob blob;
     DummyType* container = blob.GetMutable<DummyType>();
-    LOG(INFO) << "Allocating blob";
+    VLOG(1) << "Allocating blob";
     container->n_chunks = 10;
-    LOG(INFO) << "Filling out the blob";
+    VLOG(1) << "Filling out the blob";
     StringMap data;
     std::mutex mutex;
     auto acceptor = [&](const std::string& key, const std::string& value) {
@@ -852,7 +852,7 @@ TEST(ContentChunks, Serialization) {
     };
     blob.Serialize("test", acceptor);
     VectorDB::registerData(db_source, std::move(data));
-    LOG(INFO) << "finished writing to DB";
+    VLOG(1) << "finished writing to DB";
   }
 
   {
@@ -872,10 +872,10 @@ TEST(ContentChunks, Serialization) {
     Workspace ws;
     auto load_op = CreateOperator(op_def, &ws);
     EXPECT_TRUE(load_op != nullptr);
-    LOG(INFO) << "Running operator";
+    VLOG(1) << "Running operator";
 
     load_op->Run();
-    LOG(INFO) << "Reading blob from workspace";
+    VLOG(1) << "Reading blob from workspace";
     auto new_blob = ws.GetBlob("test");
     EXPECT_TRUE(new_blob->IsType<DummyType>());
     const auto& container = new_blob->Get<DummyType>();

@@ -115,6 +115,15 @@ class CUDAContext final {
     SwitchToDevice(0);
   }
 
+  inline void WaitEvent(const Event& ev) {
+    ev.Wait(CUDA, this);
+  }
+
+  inline void Record(Event* ev) const {
+    CAFFE_ENFORCE(ev, "Event must not be null.");
+    ev->Record(CUDA, this);
+  }
+
   void FinishDeviceComputation() {
     cudaStreamSynchronize(cuda_objects_.GetStream(gpu_id_, stream_id_));
     cudaError_t error = cudaGetLastError();

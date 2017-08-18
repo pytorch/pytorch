@@ -74,82 +74,6 @@ class ProfiledRange {
 
 } // namespace
 
-namespace internal {
-
-struct Stream {
-  explicit Stream(const DeviceOption& device_option) {
-    if (device_option.device_type() == CUDA) {
-      gpu_id_ = device_option.has_cuda_gpu_id() ? device_option.cuda_gpu_id()
-                                                : GetDefaultGPUID();
-      stream_ = CHECK_NOTNULL(CUDAContext::cuda_stream(gpu_id_, 0));
-    }
-  }
-
-  void wait(Event* event) const {
-    CAFFE_ENFORCE(event, "Event is invalid.");
-    event->outstanding_ = false;
-    if (!event->event_) {
-      return;
-    }
-
-    if (!stream_) {
-      CAFFE_ENFORCE(gpu_id_ == -1, "Gpu ID should be -1.");
-      CUDA_ENFORCE(cudaEventSynchronize(event->event_));
-      return;
-    }
-
-    CAFFE_ENFORCE(gpu_id_ != -1, "Gpu ID should not be -1.");
-    VLOG_IF(2, gpu_id_ != event->gpu_id_) << "Cross-device waiting: " << gpu_id_
-                                          << " waiting on " << event->gpu_id_;
-    DeviceGuard g(gpu_id_);
-    CUDA_ENFORCE(cudaStreamWaitEvent(stream_, event->event_, 0));
-  }
-
-  int gpu_id_{-1};
-  cudaStream_t stream_{nullptr};
-
- private:
-  DISABLE_COPY_AND_ASSIGN(Stream);
-};
-
-Event::Event(const DeviceOption& device_option) {
-  if (device_option.device_type() == CUDA) {
-    gpu_id_ = device_option.has_cuda_gpu_id() ? device_option.cuda_gpu_id()
-                                              : GetDefaultGPUID();
-    DeviceGuard g(gpu_id_);
-    CUDA_ENFORCE(cudaEventCreateWithFlags(
-        &event_, cudaEventDefault | cudaEventDisableTiming));
-  }
-}
-
-void Event::record(const Stream& stream) {
-  if (outstanding_) {
-    // TODO - should we do this?
-    stream.wait(this);
-  }
-  CAFFE_ENFORCE(!outstanding_, "Failed to wait on event before recording.");
-  CAFFE_ENFORCE(
-      stream.gpu_id_ == gpu_id_,
-      "Stream gpu id ",
-      stream.gpu_id_,
-      " doesn't match to ",
-      gpu_id_,
-      ".");
-  // We *never* use the default stream in Caffe2, so stream should
-  // never be NULL for a compute stream in Caffe2.
-  if (!stream.stream_) {
-    CAFFE_ENFORCE(!event_, "Stream is NULL, so should be the event.");
-    return;
-  }
-
-  CAFFE_ENFORCE(event_, "Event should not be NULL.");
-  DeviceGuard g(gpu_id_);
-  CUDA_ENFORCE(cudaEventRecord(event_, stream.stream_));
-  outstanding_ = true;
-}
-
-} // namespace internal
-
 AsyncDAGNet::AsyncDAGNet(
     const std::shared_ptr<const NetDef>& net_def,
     Workspace* ws)
@@ -160,11 +84,9 @@ AsyncDAGNet::AsyncDAGNet(
   for (int idx = 0; idx < net_def->op_size(); ++idx) {
     const OperatorDef& op_def = net_def->op(idx);
     if (!op_def.has_device_option() && net_def->has_device_option()) {
-      OperatorDef temp_def(op_def);
-      temp_def.mutable_device_option()->CopyFrom(net_def->device_option());
-      events_.emplace_back(new internal::Event(temp_def.device_option()));
+      events_.emplace_back(new Event(net_def->device_option()));
     } else {
-      events_.emplace_back(new internal::Event(op_def.device_option()));
+      events_.emplace_back(new Event(op_def.device_option()));
     }
   }
 }
@@ -172,8 +94,6 @@ AsyncDAGNet::AsyncDAGNet(
 bool AsyncDAGNet::RunAt(const std::vector<int>& chain) {
   CAFFE_ENFORCE(!chain.empty(), "Chain should not be empty.");
   const auto source_idx = chain.front();
-  internal::Stream stream{
-      operator_nodes_[source_idx].operator_->device_option()};
   const auto& parents = operator_nodes_[source_idx].parents_;
   // Help ensure that our chaining is correct by verifying at least
   // one parent recorded an event.
@@ -187,7 +107,8 @@ bool AsyncDAGNet::RunAt(const std::vector<int>& chain) {
   for (auto source_parent_idx : operator_nodes_[source_idx].parents_) {
     ProfiledRange r(
         operator_nodes_[source_parent_idx].operator_->debug_def(), kWaitColor);
-    stream.wait(events_[source_parent_idx].get());
+    operator_nodes_[source_idx].operator_->WaitEvent(
+        *events_[source_parent_idx]);
   }
 
   // We've waited on all our parent indices.
@@ -202,7 +123,7 @@ bool AsyncDAGNet::RunAt(const std::vector<int>& chain) {
   {
     ProfiledRange r(
         operator_nodes_[sink_idx].operator_->debug_def(), kRecordColor);
-    events_[sink_idx]->record(stream);
+    operator_nodes_[sink_idx].operator_->Record(events_[sink_idx].get());
   }
   CAFFE_ENFORCE(
       !eventRecorded_[sink_idx],
@@ -219,19 +140,9 @@ bool AsyncDAGNet::Run() {
 
   const auto result = DAGNetBase::Run();
 
-  // Synchronize execution of the network with respect to the host.
-  DeviceOption device_option;
-  device_option.set_device_type(CPU);
-  internal::Stream stream{device_option};
-
   // Potential optimization: we can pre-compute outstanding events.
   for (auto i = 0; i < events_.size(); ++i) {
-    auto& event = events_[i];
-    if (event->outstanding_) {
-      VLOG(2) << "Synchronizing host on outstanding event";
-      ProfiledRange r(operator_nodes_[i].operator_->debug_def(), kWaitColor);
-      stream.wait(event.get());
-    }
+    events_[i]->Finish();
   }
   return result;
 }

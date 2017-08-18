@@ -101,6 +101,14 @@ class OperatorBase {
   inline const vector<const Blob*>& Inputs() const { return inputs_; }
   inline const vector<Blob*>& Outputs() { return outputs_; }
 
+  virtual void WaitEvent(const Event& ev) {
+    CAFFE_NOT_IMPLEMENTED;
+  }
+
+  virtual void Record(Event* ev) {
+    CAFFE_NOT_IMPLEMENTED;
+  }
+
   virtual bool Run(int /* unused */ /*stream_id*/ = 0) {
     CAFFE_NOT_IMPLEMENTED;
   }
@@ -250,6 +258,19 @@ class Operator : public OperatorBase {
     return OperatorBase::template Input<Tensor<Context> >(idx); }
   inline Tensor<Context>* Output(int idx) {
     return OperatorBase::template Output<Tensor<Context>>(idx);
+  }
+
+  // Waits for a previous event. Note that to properly wait and run
+  // asynchronously, WaitEvent, RunAsync and Record should all be executed
+  // on the same CPU thread.
+  void WaitEvent(const Event& ev) final {
+    context_.SwitchToDevice();
+    context_.WaitEvent(ev);
+  }
+
+  void Record(Event* ev) final {
+    context_.SwitchToDevice();
+    context_.Record(ev);
   }
 
   // The run function of Operator switches to the device, and then carries out
