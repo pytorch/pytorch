@@ -6,7 +6,8 @@ from torch.autograd import Variable, Function
 from common import TestCase, run_tests
 
 # TODO: Un-jankify this
-toffee_only = unittest.skipIf(not hasattr(torch._C, "_jit_pass_export"), "no Toffee support")
+toffee_only = unittest.skipIf(not hasattr(
+    torch._C, "_jit_pass_export"), "no Toffee support")
 
 
 class TestJit(TestCase):
@@ -222,6 +223,19 @@ class TestJit(TestCase):
         # Run dead code elimination to remove unused trace nodes
         torch._C._jit_pass_dco(trace)
         self.assertExpected(str(trace))
+
+    def test_python_ir(self):
+        x = Variable(torch.Tensor([0.4]), requires_grad=True)
+        y = Variable(torch.Tensor([0.7]), requires_grad=True)
+
+        def doit(x, y):
+            return torch.sigmoid(torch.tanh(x * (x + y)))
+
+        traced, _ = torch.jit.record_trace(doit, x, y)
+        g = torch._C._jit_get_graph(traced)
+        # for node in g.nodes():
+        #     if node.kind() == "PythonOp":
+        #         print(node.scalar_args())
 
     def test_cpp(self):
         torch._C._jit_run_cpp_tests()

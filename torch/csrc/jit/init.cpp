@@ -33,7 +33,7 @@ namespace {
 
 using namespace torch::jit;
 
-using pass_type = void (std::unique_ptr<Graph>&);
+using pass_type = void (std::shared_ptr<Graph>&);
 
 template<pass_type pass>
 PyObject * wrap_pass(PyObject *_unused, PyObject *py_state) {

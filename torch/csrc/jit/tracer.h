@@ -42,7 +42,7 @@ struct TracingState : public std::enable_shared_from_this<TracingState> {
     : graph(new Graph())
     , active(false) {}
 
-  std::unique_ptr<Graph> graph;
+  std::shared_ptr<Graph> graph;
   bool active;
   std::mutex mutex;
   variable_list inputs; // Used only for the duration of first stage

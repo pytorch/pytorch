@@ -346,7 +346,7 @@ void Graph::lint() {
 
 }
 
-void LintGraph(std::unique_ptr<Graph>& graph) {
+void LintGraph(std::shared_ptr<Graph>& graph) {
   graph->lint();
 }
 

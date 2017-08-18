@@ -16,7 +16,7 @@ bool isSimpleMap(Node *node) {
 }
 
 struct GraphFuser {
-  std::unique_ptr<Graph>& graph;
+  std::shared_ptr<Graph>& graph;
 
   // Used to order nodes so we alway consider producer-consumer fusions
   // in reverse topological order.
@@ -25,7 +25,7 @@ struct GraphFuser {
   // Newly generated nodes will copy the location where they are inserted.
   std::unordered_map<Node*,size_t> topological_index;
 
-  GraphFuser(std::unique_ptr<Graph>& graph)
+  GraphFuser(std::shared_ptr<Graph>& graph)
   : graph(graph) {}
 
   bool isFusable(Node * node) {
@@ -257,7 +257,7 @@ struct GraphFuser {
   }
 };
 
-void FuseGraph(std::unique_ptr<Graph>& graph) {
+void FuseGraph(std::shared_ptr<Graph>& graph) {
   GraphFuser(graph).run();
 }
 

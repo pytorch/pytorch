@@ -4,7 +4,6 @@
 
 namespace torch { namespace jit {
 
-void EliminateDeadCode(std::unique_ptr<Graph>& graph);
+void EliminateDeadCode(std::shared_ptr<Graph>& graph);
 
 }}
-

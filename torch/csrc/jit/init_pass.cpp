@@ -28,7 +28,7 @@ std::unordered_map<std::string, constructor_type> constructors = {
 
 } // anonymous namespace
 
-void MatchJITOps(std::unique_ptr<Graph>& graph) {
+void MatchJITOps(std::shared_ptr<Graph>& graph) {
   auto nodes = graph->nodes();
   for(auto it = nodes.begin(); it != nodes.end(); ++it) {
     PythonOp *p = (*it)->cast<PythonOp>();

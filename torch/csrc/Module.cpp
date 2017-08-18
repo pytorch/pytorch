@@ -11,6 +11,7 @@
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/jit/init.h"
+#include "torch/csrc/jit/python_ir.h"
 
 #ifdef WITH_CUDNN
 #include "cudnn/Module.h"
@@ -826,7 +827,7 @@ PyMODINIT_FUNC PyInit__C()
   ASSERT_TRUE(THPFunction_initModule(module));
   ASSERT_TRUE(THPEngine_initModule(module));
   ASSERT_TRUE(THPTracer_initModule(module));
-
+  torch::jit::initPythonIRBindings(module);
   ASSERT_TRUE(THPDoubleStorage_init(module));
   ASSERT_TRUE(THPFloatStorage_init(module));
   ASSERT_TRUE(THPHalfStorage_init(module));
