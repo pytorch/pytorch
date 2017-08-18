@@ -321,7 +321,7 @@ class Concat(Function):
 
     @staticmethod
     def primspec(dim, *inputs):
-        return torch.toffee.op("Concat", *inputs, axis=dim)
+        return torch.toffee.op("Concat", *inputs, axis=dim, _outputs=(0, -1))
 
     @staticmethod
     def forward(ctx, dim, *inputs):
