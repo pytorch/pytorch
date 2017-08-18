@@ -1,3 +1,4 @@
+#include <cub/device/device_reduce.cuh>
 #include <cub/device/device_scan.cuh>
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/core/operator.h"
@@ -567,21 +568,40 @@ class CUDAUnsortedSegmentSumOp : public Operator<CUDAContext> {
     TIndex slize_sz = data.size_from_dim(1);
 
     K_tensor_.Resize(1);
-
     // Get maximum segment id so we can size the output.
     // This must be done synchronously with host.
-    MaxSegmentKernel<SIndex><<<
-        std::min((int)segment_ids.size(), CAFFE_MAXIMUM_NUM_BLOCKS),
-        CAFFE_CUDA_NUM_THREADS,
-        0,
-        context_.cuda_stream()>>>(
-        segment_ids.size(),
-        segment_ids.template data<SIndex>(),
-        K_tensor_.mutable_data<SIndex>());
+    if (segment_ids.size() > 4096) {
+      // when the input size is large, device reduce is better.
+      size_t tmp_storage_bytes = 0;
+      // the first call to `Max` do nothing, but set correct tmp_storage_bytes.
+      cub::DeviceReduce::Max(
+          nullptr,
+          tmp_storage_bytes,
+          segment_ids.template data<SIndex>(), // input device data
+          K_tensor_.template mutable_data<SIndex>(), // output device data
+          segment_ids.size(), // number of items
+          context_.cuda_stream());
+
+      // the second call do the real computation.
+      buffer_tensor_.Resize(tmp_storage_bytes);
+      cub::DeviceReduce::Max(
+          static_cast<void*>(buffer_tensor_.mutable_data<char>()),
+          tmp_storage_bytes,
+          segment_ids.template data<SIndex>(), // input device data
+          K_tensor_.template mutable_data<SIndex>(), // output device data
+          segment_ids.size(), // number of items
+          context_.cuda_stream());
+    } else {
+      MaxSegmentKernel<SIndex>
+          <<<1, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
+              segment_ids.size(),
+              segment_ids.template data<SIndex>(),
+              K_tensor_.mutable_data<SIndex>());
+    }
 
     SIndex K = 0;
     context_.CopyBytes<CUDAContext, CPUContext>(
-        sizeof(SIndex), K_tensor_.data<SIndex>(), &K);
+        sizeof(SIndex), K_tensor_.template data<SIndex>(), &K);
     context_.FinishDeviceComputation();
 
     auto dims = data.dims();
@@ -638,6 +658,7 @@ class CUDAUnsortedSegmentSumOp : public Operator<CUDAContext> {
   }
 
  private:
+  Tensor<CUDAContext> buffer_tensor_;
   Tensor<CUDAContext> K_tensor_;
   Tensor<CUDAContext> scaling_factors_; // for mean
 };
