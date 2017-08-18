@@ -6,22 +6,22 @@
  * access methods
  ******************************************************************************/
 
-TH_API int THSTensor_(nDimension)(const THSTensor *self)
+int THSTensor_(nDimension)(const THSTensor *self)
 {
   return self->nDimensionI + self->nDimensionV;
 }
 
-TH_API int THSTensor_(nDimensionI)(const THSTensor *self)
+int THSTensor_(nDimensionI)(const THSTensor *self)
 {
   return self->nDimensionI;
 }
 
-TH_API int THSTensor_(nDimensionV)(const THSTensor *self)
+int THSTensor_(nDimensionV)(const THSTensor *self)
 {
   return self->nDimensionV;
 }
 
-TH_API int64_t THSTensor_(size)(const THSTensor *self, int dim)
+int64_t THSTensor_(size)(const THSTensor *self, int dim)
 {
   THArgCheck((dim >= 0) && (dim < self->nDimensionI + self->nDimensionV),
       1, "dimension %d out of range of %dD tensor",
@@ -29,18 +29,18 @@ TH_API int64_t THSTensor_(size)(const THSTensor *self, int dim)
   return self->size[dim];
 }
 
-TH_API ptrdiff_t THSTensor_(nnz)(const THSTensor *self) {
+ptrdiff_t THSTensor_(nnz)(const THSTensor *self) {
   return self->nnz;
 }
 
-TH_API THLongStorage *THSTensor_(newSizeOf)(THSTensor *self)
+THLongStorage *THSTensor_(newSizeOf)(THSTensor *self)
 {
   THLongStorage *size = THLongStorage_newWithSize(self->nDimensionI + self->nDimensionV);
   THLongStorage_rawCopy(size, self->size);
   return size;
 }
 
-TH_API THLongTensor *THSTensor_(newIndices)(const THSTensor *self) {
+THLongTensor *THSTensor_(newIndices)(const THSTensor *self) {
   if (self->nnz == 0) {
     // Narrows don't work on 0-length tensors
     THLongTensor_retain(self->indices);
@@ -49,7 +49,7 @@ TH_API THLongTensor *THSTensor_(newIndices)(const THSTensor *self) {
   return THLongTensor_newNarrow(self->indices, 1, 0, self->nnz);
 }
 
-TH_API THTensor *THSTensor_(newValues)(const THSTensor *self) {
+THTensor *THSTensor_(newValues)(const THSTensor *self) {
   if (self->nnz == 0) {
     THTensor_(retain)(self->values);
     return self->values;
@@ -124,7 +124,7 @@ THSTensor* THSTensor_(_set)(THSTensor *self, THLongTensor *indices, THTensor *va
 /*** end helper methods ***/
 
 /* Empty init */
-TH_API THSTensor *THSTensor_(new)(void)
+THSTensor *THSTensor_(new)(void)
 {
   THSTensor *self = THAlloc(sizeof(THSTensor));
   THSTensor_(rawInit)(self);
@@ -132,12 +132,12 @@ TH_API THSTensor *THSTensor_(new)(void)
 }
 
 /* Pointer-copy init */
-TH_API THSTensor *THSTensor_(newWithTensor)(THLongTensor *indices, THTensor *values)
+THSTensor *THSTensor_(newWithTensor)(THLongTensor *indices, THTensor *values)
 {
   return THSTensor_(newWithTensorAndSize)(indices, values, NULL);
 }
 
-TH_API THSTensor *THSTensor_(newWithTensorAndSize)(THLongTensor *indices, THTensor *values, THLongStorage *sizes)
+THSTensor *THSTensor_(newWithTensorAndSize)(THLongTensor *indices, THTensor *values, THLongStorage *sizes)
 {  // If sizes are not given, it is inferred as max index of each dim.
   int64_t nDimI, nDimV;
   THLongTensor *ignore;
@@ -176,7 +176,7 @@ TH_API THSTensor *THSTensor_(newWithTensorAndSize)(THLongTensor *indices, THTens
   return self;
 }
 
-TH_API THSTensor *THSTensor_(newWithSize)(THLongStorage *size)
+THSTensor *THSTensor_(newWithSize)(THLongStorage *size)
 {
   THSTensor *self = THAlloc(sizeof(THSTensor));
   THSTensor_(rawInit)(self);
@@ -185,7 +185,7 @@ TH_API THSTensor *THSTensor_(newWithSize)(THLongStorage *size)
   return self;
 }
 
-TH_API THSTensor *THSTensor_(newWithSize1d)(int64_t size0)
+THSTensor *THSTensor_(newWithSize1d)(int64_t size0)
 {
   int64_t size[1] = {size0};
 
@@ -196,7 +196,7 @@ TH_API THSTensor *THSTensor_(newWithSize1d)(int64_t size0)
   return self;
 }
 
-TH_API THSTensor *THSTensor_(newWithSize2d)(int64_t size0, int64_t size1)
+THSTensor *THSTensor_(newWithSize2d)(int64_t size0, int64_t size1)
 {
   int64_t size[2] = {size0, size1};
 
@@ -207,7 +207,7 @@ TH_API THSTensor *THSTensor_(newWithSize2d)(int64_t size0, int64_t size1)
   return self;
 }
 
-TH_API THSTensor *THSTensor_(newWithSize3d)(int64_t size0, int64_t size1, int64_t size2)
+THSTensor *THSTensor_(newWithSize3d)(int64_t size0, int64_t size1, int64_t size2)
 {
   int64_t size[3] = {size0, size1, size2};
 
@@ -218,7 +218,7 @@ TH_API THSTensor *THSTensor_(newWithSize3d)(int64_t size0, int64_t size1, int64_
   return self;
 }
 
-TH_API THSTensor *THSTensor_(newWithSize4d)(int64_t size0, int64_t size1, int64_t size2, int64_t size3)
+THSTensor *THSTensor_(newWithSize4d)(int64_t size0, int64_t size1, int64_t size2, int64_t size3)
 {
   int64_t size[4] = {size0, size1, size2, size3};
 
@@ -229,7 +229,7 @@ TH_API THSTensor *THSTensor_(newWithSize4d)(int64_t size0, int64_t size1, int64_
   return self;
 }
 
-TH_API THSTensor *THSTensor_(newClone)(THSTensor *self) {
+THSTensor *THSTensor_(newClone)(THSTensor *self) {
   THSTensor *other = THSTensor_(new)();
   THSTensor_(rawResize)(other, self->nDimensionI, self->nDimensionV, self->size);
 
@@ -240,7 +240,7 @@ TH_API THSTensor *THSTensor_(newClone)(THSTensor *self) {
   return other;
 }
 
-TH_API THSTensor *THSTensor_(newTranspose)(THSTensor *self, int d1, int d2) {
+THSTensor *THSTensor_(newTranspose)(THSTensor *self, int d1, int d2) {
   THSTensor *other = THSTensor_(newClone)(self);
   THSTensor_(transpose)(other, d1, d2);
   return other;
@@ -250,7 +250,7 @@ TH_API THSTensor *THSTensor_(newTranspose)(THSTensor *self, int d1, int d2) {
  * reshaping methods
  ******************************************************************************/
 
-TH_API int THSTensor_(isSameSizeAs)(const THSTensor *self, const THSTensor* src)
+int THSTensor_(isSameSizeAs)(const THSTensor *self, const THSTensor* src)
 {
   int d;
   if (self->nDimensionI != src->nDimensionI || self->nDimensionV != src->nDimensionV)
@@ -263,13 +263,13 @@ TH_API int THSTensor_(isSameSizeAs)(const THSTensor *self, const THSTensor* src)
   return 1;
 }
 
-TH_API THSTensor *THSTensor_(resize)(THSTensor *self, THLongStorage *size)
+THSTensor *THSTensor_(resize)(THSTensor *self, THLongStorage *size)
 {
   THSTensor_(rawResize)(self, size->size, 0, size->data);
   return self;
 }
 
-TH_API THSTensor *THSTensor_(resizeAs)(THSTensor *self, THSTensor *src)
+THSTensor *THSTensor_(resizeAs)(THSTensor *self, THSTensor *src)
 {
   if(!THSTensor_(isSameSizeAs)(self, src)) {
     THSTensor_(rawResize)(self, src->nDimensionI, src->nDimensionV, src->size);
@@ -277,35 +277,35 @@ TH_API THSTensor *THSTensor_(resizeAs)(THSTensor *self, THSTensor *src)
   return self;
 }
 
-TH_API THSTensor *THSTensor_(resize1d)(THSTensor *self, int64_t size0)
+THSTensor *THSTensor_(resize1d)(THSTensor *self, int64_t size0)
 {
   int64_t size[1] = {size0};
   THSTensor_(rawResize)(self, 1, 0, size);
   return self;
 }
 
-TH_API THSTensor *THSTensor_(resize2d)(THSTensor *self, int64_t size0, int64_t size1)
+THSTensor *THSTensor_(resize2d)(THSTensor *self, int64_t size0, int64_t size1)
 {
   int64_t size[2] = {size0, size1};
   THSTensor_(rawResize)(self, 2, 0, size);
   return self;
 }
 
-TH_API THSTensor *THSTensor_(resize3d)(THSTensor *self, int64_t size0, int64_t size1, int64_t size2)
+THSTensor *THSTensor_(resize3d)(THSTensor *self, int64_t size0, int64_t size1, int64_t size2)
 {
   int64_t size[3] = {size0, size1, size2};
   THSTensor_(rawResize)(self, 3, 0, size);
   return self;
 }
 
-TH_API THSTensor *THSTensor_(resize4d)(THSTensor *self, int64_t size0, int64_t size1, int64_t size2, int64_t size3)
+THSTensor *THSTensor_(resize4d)(THSTensor *self, int64_t size0, int64_t size1, int64_t size2, int64_t size3)
 {
   int64_t size[4] = {size0, size1, size2, size3};
   THSTensor_(rawResize)(self, 4, 0, size);
   return self;
 }
 
-TH_API THTensor *THSTensor_(toDense)(THSTensor *self) {
+THTensor *THSTensor_(toDense)(THSTensor *self) {
   THLongStorage *size;
   THTensor *dst;
 
@@ -320,7 +320,7 @@ TH_API THTensor *THSTensor_(toDense)(THSTensor *self) {
   return dst;
 }
 
-TH_API void THSTensor_(copy)(THSTensor *self, THSTensor *src) {
+void THSTensor_(copy)(THSTensor *self, THSTensor *src) {
   if (self == src) return;
   THSTensor_(rawResize)(self, src->nDimensionI, src->nDimensionV, src->size);
   THSTensor_(_set)(self, src->indices, src->values);
@@ -329,7 +329,7 @@ TH_API void THSTensor_(copy)(THSTensor *self, THSTensor *src) {
 }
 
 // In place transpose
-TH_API void THSTensor_(transpose)(THSTensor *self, int d1, int d2) {
+void THSTensor_(transpose)(THSTensor *self, int d1, int d2) {
   int64_t nDimI = THSTensor_(nDimensionI)(self);
   int64_t nDimV = THSTensor_(nDimensionV)(self);
   THArgCheck(d1 < nDimI && d2 < nDimI, 0, "Transposed dimensions should be sparse. Got nDimI: %ld, d1: %ld, d2: %ld", nDimI, d1, d2);
@@ -348,7 +348,7 @@ TH_API void THSTensor_(transpose)(THSTensor *self, int d1, int d2) {
   THLongTensor_free(indices);
 }
 
-TH_API int THSTensor_(isCoalesced)(const THSTensor *self) {
+int THSTensor_(isCoalesced)(const THSTensor *self) {
   return self->coalesced;
 }
 
@@ -396,7 +396,7 @@ THTensor *THSTensor_(newValuesWithSizeOf)(THTensor *values, int64_t nnz) {
   return new_values;
 }
 
-TH_API THSTensor *THSTensor_(newCoalesce)(THSTensor *self) {
+THSTensor *THSTensor_(newCoalesce)(THSTensor *self) {
   if (self->nnz < 2) {
     self->coalesced = 1;
   }
@@ -467,7 +467,7 @@ TH_API THSTensor *THSTensor_(newCoalesce)(THSTensor *self) {
   return dst;
 }
 
-TH_API void THTensor_(sparseMask)(THSTensor *r_, THTensor *t, THSTensor *mask) {
+void THTensor_(sparseMask)(THSTensor *r_, THTensor *t, THSTensor *mask) {
   THArgCheck(mask->coalesced, 2, "mask is uncoalesced");
   THSTensor_(resizeAs)(r_, mask);
   if (mask->nnz == 0) {
@@ -513,7 +513,7 @@ TH_API void THTensor_(sparseMask)(THSTensor *r_, THTensor *t, THSTensor *mask) {
   THTensor_(free)(mask_values_);
 }
 
-TH_API void THSTensor_(free)(THSTensor *self)
+void THSTensor_(free)(THSTensor *self)
 {
   if(!self)
     return;
@@ -526,7 +526,7 @@ TH_API void THSTensor_(free)(THSTensor *self)
   }
 }
 
-TH_API void THSTensor_(retain)(THSTensor *self)
+void THSTensor_(retain)(THSTensor *self)
 {
   THAtomicIncrementRef(&self->refcount);
 }
