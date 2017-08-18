@@ -27,7 +27,7 @@ std::string getPythonName(const PyObject* obj, bool is_legacy) {
 }
 std::ostream& operator<<(std::ostream & out, Node & n) {
   if(n.kind() == kSelect)
-    out << "%" << n.base()->unique() << "." << n.offset();
+    out << "%" << n.input()->unique() << "." << n.offset();
   else
     out << "%" << n.unique();
   return out;

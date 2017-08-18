@@ -163,11 +163,11 @@ struct GraphFuser {
     if(producer->kind() != kSelect)
       return false;
     // and the select refers to a chunk,
-    auto * chunk = producer->base();
+    auto * chunk = producer->input();
     if(chunk->kind() != kChunk)
       return false;
     // and the thing being chunked is fusable into the consumer
-    Node * producer_for_chunk = chunk->base();
+    Node * producer_for_chunk = chunk->input();
     if(!isFusable(producer_for_chunk) || !allUsersAreThisConsumer(chunk,producer_for_chunk))
       return false;
     // and all uses of the chunk are in this consumer

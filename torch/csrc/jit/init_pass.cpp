@@ -14,7 +14,7 @@ Node * trivial_ctor(Graph *graph, PythonOp *p) {
 Node * chunk_ctor(Graph * graph, PythonOp * p) {
   auto num_chunks = PyLong_AsLong(p->scalar_args[0]);
   auto dim = PyLong_AsLong(p->scalar_args[1]);
-  return graph->createChunk(p->base(),num_chunks,dim);
+  return graph->createChunk(p->input(),num_chunks,dim);
 }
 
 std::unordered_map<std::string, constructor_type> constructors = {

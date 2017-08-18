@@ -258,7 +258,8 @@ public:
   }
   // lots of things like select/chunk have a single input, so we have a
   // helper to make accessing it easier
-  Node * base() {
+  Node * input() {
+    JIT_ASSERT(inputs_.size() == 1);
     return inputs_.at(0);
   }
   // select is used so frequently enought it is reasonable to have a helper
@@ -494,9 +495,17 @@ private:
   void lint();
 protected:
   // subclasses must override
+  // this function is used by createClone to initialize a new version
+  // of a node in another graph. It should allocate a new instance of the same
+  // concrete type as 'this', but in graph 'g' which might be different
+  // than graph_
   virtual Node * allocNewInstance(Graph * g) {
     return new Node(g,kind());
   }
+  // create a copy of all properties of Node s into this.
+  // subclasses should extend if they have additional informaiton to copy.
+  // 'this' will be allocated with s->allocNewInstance(g) so it should have
+  // the same concrete type as 's'
   virtual void cloneFrom(Node * s) {
     copyAttributes(*s);
   }
@@ -739,7 +748,7 @@ inline void Node::destroy() {
 /* example:
   Node * n = ...;
   IR_IF(n,Select)
-    cout << "Select of" << value->base() << "\n";
+    cout << "Select of" << value->input() << "\n";
   IR_ELSEIF(PythonOp)
     cout << value->pyobj << "\n";
   IR_ELSEIF(Add)
