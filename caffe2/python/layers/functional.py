@@ -35,7 +35,7 @@ class Functional(ModelLayer):
              output_names_or_num != 1)
         )
 
-        with scope.NameScope(self.name):
+        with scope.NameScope(self.name, reset=True):
             if isinstance(output_names_or_num, int):
                 struct_output_schema = schema.NewRecord(
                     model.net, schema.RawTuple(output_names_or_num))
