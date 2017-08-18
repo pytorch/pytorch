@@ -8,8 +8,6 @@ node {
     ints: 1
     ints: 1
   }
-  attribute {
-  }
 }
 name: "torch-jit-export"
 input: "1"
