@@ -263,3 +263,51 @@ class TestUtilityOps(hu.HypothesisTestCase):
             workspace.RunOperatorOnce(op)
             Y = workspace.FetchBlob('Y')
             np.testing.assert_array_equal(X, Y)
+
+    @given(**hu.gcs)
+    def test_range(self, gc, dc):
+        names = [
+            ('stop_',),
+            ('start_', 'stop_'),
+            ('start_', 'stop_', 'step_'),
+        ]
+        # Most random values aren't great here, so use a fixed set instead of
+        # hypothesis.
+        for inputs in (
+            (10,),
+            (np.float32(10.0),),
+            (0,),
+            (0, 0),
+            (10., 5.0, -1.),
+            (2, 10000),
+            (2, 10000, 20000),
+            (2, 10000, -1),
+        ):
+            inputs = [np.array(v) for v in inputs]
+            op = core.CreateOperator(
+                "Range",
+                names[len(inputs) - 1],
+                ["Y"]
+            )
+
+            self.assertReferenceChecks(
+                device_option=gc,
+                op=op,
+                inputs=inputs,
+                reference=lambda *x: [np.arange(*x)],
+            )
+            self.assertDeviceChecks(dc, op, inputs, [0])
+
+        with self.assertRaisesRegexp(RuntimeError, 'Step size cannot be 0'):
+            inputs = (np.array(0), np.array(10), np.array(0))
+            op = core.CreateOperator(
+                "Range",
+                names[len(inputs) - 1],
+                ["Y"]
+            )
+            self.assertReferenceChecks(
+                device_option=gc,
+                op=op,
+                inputs=inputs,
+                reference=lambda *x: [np.arange(*x)],
+            )

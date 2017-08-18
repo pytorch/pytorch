@@ -502,6 +502,10 @@ class HypothesisTestCase(test_util.TestCase):
         op.device_option.CopyFrom(device_option)
 
         with temp_workspace():
+            if (len(op.input) > len(inputs)):
+                raise ValueError(
+                    'must supply an input for each input on the op: %s vs %s' %
+                    (op.input, inputs))
             for (n, b) in zip(op.input, inputs):
                 workspace.FeedBlob(
                     n,

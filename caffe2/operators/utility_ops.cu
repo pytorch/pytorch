@@ -730,4 +730,28 @@ REGISTER_CUDA_OPERATOR(Unique, UniqueOp<CUDAContext>);
 #endif // THRUST_VERSION >= 100800
 
 REGISTER_CUDA_OPERATOR(Size, SizeOp<CUDAContext>);
+
+template <typename T>
+__global__ void RangeKernel(const int n, T* Y, T offset, T step) {
+  CUDA_1D_KERNEL_LOOP(index, n) {
+    Y[index] = index * step + offset;
+  }
+}
+
+template <>
+template <typename T>
+bool RangeOp<CUDAContext>::DoRunOnDevice(
+    const T& start,
+    const T& step,
+    Tensor<CUDAContext>* output) {
+  int N = output->size();
+  RangeKernel<<<
+      CAFFE_GET_BLOCKS(N),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context_.cuda_stream()>>>(N, output->mutable_data<T>(), start, step);
+  return true;
+}
+
+REGISTER_CUDA_OPERATOR(Range, RangeOp<CUDAContext>);
 }  // namespace caffe2

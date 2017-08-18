@@ -1,6 +1,8 @@
 #ifndef CAFFE2_OPERATORS_UTILITY_OPS_H_
 #define CAFFE2_OPERATORS_UTILITY_OPS_H_
 
+#include <math.h>
+
 #include "caffe2/core/common_omp.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
@@ -1739,6 +1741,72 @@ class AccumulateHistogramOp : public Operator<Context> {
   INPUT_TAGS(X_IN);
   OUTPUT_TAGS(CUR_HIST, ACC_HIST);
 };
+
+template <class Context>
+class RangeOp : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  USE_SIMPLE_CTOR_DTOR(RangeOp)
+
+  bool RunOnDevice() override {
+    return DispatchHelper<TensorTypes<int32_t, int64_t, float, double>>::call(
+        this, Input(0));
+  }
+
+  template <typename T>
+  bool DoRunWithType() {
+    T stop = 0;
+    T start = 0;
+    T step = 1;
+
+    for (int i = 0; i < InputSize(); ++i) {
+      CAFFE_ENFORCE_EQ(Input(0).ndim(), 0, "All inputs must be scalar.");
+    }
+
+    switch (InputSize()) {
+      case 1:
+        stop = Input(0).template data<T>()[0];
+        break;
+      case 2:
+        start = Input(0).template data<T>()[0];
+        stop = Input(1).template data<T>()[0];
+        break;
+      case 3:
+        step = Input(2).template data<T>()[0];
+        start = Input(0).template data<T>()[0];
+        stop = Input(1).template data<T>()[0];
+        break;
+    }
+    CAFFE_ENFORCE_NE(step, 0, "Step size cannot be 0.");
+    int length;
+    auto diff = stop - start;
+    if (std::is_integral<T>::value) {
+      // Avoid casting to and from floats in case it introduces rounding and
+      // avoid mod because the compiler doesn't strip unused code until later.
+      length = diff / step;
+      if (length * step < diff) {
+        length += 1;
+      }
+    } else {
+      length = static_cast<int>(ceil(diff / step));
+    }
+    auto* output = Output(0);
+    // Match numpy's behavior here.
+    if (length <= 0) {
+      output->Resize(0);
+      // Called for the side effect of setting the data.
+      output->template mutable_data<T>();
+      return true;
+    } else {
+      output->Resize(length);
+      return DoRunOnDevice<T>(start, step, output);
+    }
+  }
+
+  template <typename T>
+  bool DoRunOnDevice(const T& start, const T& step, Tensor<Context>* output);
+};
+
 } // namespace caffe2
 
 #endif // CAFFE2_OPERATORS_UTILITY_OPS_H_
