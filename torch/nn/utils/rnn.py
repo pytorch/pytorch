@@ -36,7 +36,8 @@ class PackedSequence(PackedSequence_):
         for i, batch_size in enumerate(self.batch_sizes):
             sum_batch_size += batch_size
             if i == len(self.batch_sizes) - 1:
-                indices.append(sum_batch_size - 1)
+                for j in range(batch_size):
+                    indices.append(sum_batch_size - 1 - j)
             elif batch_size > self.batch_sizes[i + 1]:
                 for j in range(batch_size - self.batch_sizes[i + 1]):
                     indices.append(sum_batch_size - 1 - j)
