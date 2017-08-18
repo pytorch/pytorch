@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <string>
 #include <unordered_map>
+#include <mutex>
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/jit/assert.h"
 
@@ -17,6 +18,7 @@ struct InternedStrings {
     #undef REGISTER_SYMBOL
   }
   Symbol symbol(const std::string & s) {
+    std::lock_guard<std::mutex> guard(mutex_);
     auto it = string_to_sym_.find(s);
     if(it != string_to_sym_.end())
       return it->second;
@@ -25,15 +27,27 @@ struct InternedStrings {
     sym_to_string_[k] = s;
     return k;
   }
-  const std::string & string(Symbol sym) {
-    auto it = sym_to_string_.find(sym);
-    JIT_ASSERT(it != sym_to_string_.end());
-    return it->second;
+  const char * string(Symbol sym) {
+    switch(sym) {
+      #define DEFINE_CASE(s) \
+        case k##s: return #s;
+      FORALL_BUILTIN_SYMBOLS(DEFINE_CASE)
+      #undef DEFINE_CASE
+        default:
+          return customString(sym);
+    }
   }
 private:
+  const char * customString(Symbol sym) {
+    std::lock_guard<std::mutex> guard(mutex_);
+    auto it = sym_to_string_.find(sym);
+    JIT_ASSERT(it != sym_to_string_.end());
+    return it->second.c_str();
+  }
   std::unordered_map<std::string, Symbol> string_to_sym_;
   std::unordered_map<Symbol, std::string> sym_to_string_;
   Symbol next_sym;
+  std::mutex mutex_;
 };
 
 static InternedStrings & globalStrings() {
@@ -41,7 +55,7 @@ static InternedStrings & globalStrings() {
   return s;
 }
 
-const std::string & symbolToString(Symbol s) {
+const char * symbolToString(Symbol s) {
   return globalStrings().string(s);
 }
 Symbol stringToSymbol(const std::string & s) {
