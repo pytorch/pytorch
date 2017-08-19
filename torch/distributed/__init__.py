@@ -20,7 +20,7 @@ def is_available():
     return torch._C._has_distributed()
 
 
-def init_process_group(backend, init_method='env://', **kwargs):
+def init_process_group(backend, init_method='env://', world_size=-1, group_name='', rank=-1):
     """Initializes the distributed package.
 
     Arguments:
@@ -31,11 +31,6 @@ def init_process_group(backend, init_method='env://', **kwargs):
         rank (int, optional): Rank of the current process.
         group_name (str, optional): Group name. See description of init methods.
     """
-    world_size = kwargs.pop('world_size', -1)
-    group_name = kwargs.pop('group_name', '')
-    rank = kwargs.pop('rank', -1)
-    assert len(kwargs) == 0, "got unexpected keyword arguments: %s" % ",".join(kwargs.keys())
-
     if not is_available():
         raise RuntimeError("PyTorch built without distributed support")
 
@@ -258,7 +253,7 @@ def gather(tensor, **kwargs):
     gather_list = kwargs.pop('gather_list', None)
     _group = kwargs.pop('group', group.WORLD)
     if kwargs:
-        raise RuntimeError("got unexpected kwargs")
+        raise RuntimeError("got unexpected kwargs: {}".format(kwargs))
     if dst == my_rank:
         if gather_list is None:
             raise RuntimeError("gather_list is a required argument in gather destination")
@@ -290,7 +285,7 @@ def scatter(tensor, **kwargs):
     scatter_list = kwargs.pop('scatter_list', None)
     _group = kwargs.pop('group', group.WORLD)
     if kwargs:
-        raise RuntimeError("got unexpected kwargs")
+        raise RuntimeError("got unexpected kwargs: {}".format(kwargs))
     if src == my_rank:
         if scatter_list is None:
             raise RuntimeError("scatter_list is a required argument in scatter source")
