@@ -15,6 +15,7 @@ from .rprop import Rprop
 from .rmsprop import RMSprop
 from .optimizer import Optimizer
 from .lbfgs import LBFGS
+from .lr_scheduler import *
 
 del adadelta
 del adagrad
@@ -26,3 +27,4 @@ del rprop
 del rmsprop
 del optimizer
 del lbfgs
+del lr_scheduler
