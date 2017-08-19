@@ -372,7 +372,7 @@ THCTensor_(median)(THCState *state,
                    int keepdim) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self));
 
-  int t_size_dim, k;
+  int64_t t_size_dim, k;
 
   t_size_dim = THCTensor_(size)(state, self, dimension);
 

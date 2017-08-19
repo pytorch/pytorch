@@ -156,7 +156,7 @@ void THCTensor_(indexAdd)(THCState *state, THCTensor *dst, int dim, THCudaLongTe
 
   ptrdiff_t numIndices = THCudaLongTensor_nElement(state, indices);
 
-  int64_t srcDims = THCTensor_(nDimension)(state, src);
+  int srcDims = THCTensor_(nDimension)(state, src);
   cudaStream_t stream = THCState_getCurrentStream(state);
 
   THArgCheck(THCudaLongTensor_nDimension(state, indices) == 1, 3,
@@ -274,7 +274,7 @@ void THCTensor_(indexFill)(THCState *state, THCTensor *dst, int dim, THCudaLongT
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, dst));
   THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, indices));
-  int64_t dims = THCTensor_(nDimension)(state, dst);
+  int dims = THCTensor_(nDimension)(state, dst);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
   dims = THCudaLongTensor_nDimension(state, indices);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 4, CUTORCH_DIM_WARNING);
@@ -513,7 +513,7 @@ void THCTensor_(calculateAdvancedIndexingOffsets)(
   ptrdiff_t baseOffset,
   THCudaLongTensor **indexers)
 {
-  int ndim = (int) THCTensor_(nDimension)(state, indexed);
+  int ndim = THCTensor_(nDimension)(state, indexed);
   THAssert(ndim <= MAX_ADVINDEX_CALC_DIMS);
 
   // Assert all Tensors are on the same GPU, and that the indexing Tensors are

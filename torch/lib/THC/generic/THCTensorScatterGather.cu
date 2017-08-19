@@ -203,7 +203,7 @@ void THCTensor_(scatterAdd)(THCState* state, THCTensor *tensor, int dim, THCudaL
              "Index tensor must have the same size as input tensor.");
   THLongStorage_free(indexDims);
 
-  for (int d = 0; d < (int) THCTensor_(nDimension)(state, tensor); d++) {
+  for (int d = 0; d < THCTensor_(nDimension)(state, tensor); d++) {
     if (d != dim) {
       THArgCheck(THCTensor_(size)(state, tensor, d) == THCTensor_(size)(state, src, d), 4,
                  "Input tensor must have same size as output tensor apart from the specified dimension");

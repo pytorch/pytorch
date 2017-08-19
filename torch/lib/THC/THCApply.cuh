@@ -117,7 +117,7 @@ inline bool getApplyGrid(THCState* state, ptrdiff_t totalElements, dim3& grid) {
   // which seems to be a good sweetspot for latency hiding
   grid = dim3(min((int64_t) THCCeilDiv(totalElements,
                                          (ptrdiff_t) THC_APPLY_THREADS_PER_BLOCK),
-                  (int64_t)(4 * numSM)));
+                  4LL * numSM));
   return true;
 }
 

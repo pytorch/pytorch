@@ -334,8 +334,8 @@ void THCTensor_(expandNd)(THCState *state, THCTensor **rets, THCTensor **ops, in
     THArgCheck(THCTensor_(nDimension)(state, ops[i]) > 0, i, "can't expand empty tensor %d", i);
   }
 
-  int64_t **op_sizes = (int64_t **)malloc(count * sizeof(int64_t *));
-  int64_t *op_dims = (int64_t *)malloc(count * sizeof(int64_t));
+  int64_t **op_sizes = (int64_t **)THAlloc(count * sizeof(int64_t *));
+  int64_t *op_dims = (int64_t *)THAlloc(count * sizeof(int64_t));
 
   for (int i = 0; i < count; ++i) {
     op_sizes[i] = ops[i]->size;
@@ -353,6 +353,8 @@ void THCTensor_(expandNd)(THCState *state, THCTensor **rets, THCTensor **ops, in
 
   if(ret != 0) {
     THLongStorage_free(sizes);
+    THFree(op_sizes);
+    THFree(op_dims);
     THError(error_buffer);
     return;
   }
@@ -362,6 +364,8 @@ void THCTensor_(expandNd)(THCState *state, THCTensor **rets, THCTensor **ops, in
   }
 
   THLongStorage_free(sizes);
+  THFree(op_sizes);
+  THFree(op_dims);
 }
 
 void THCTensor_(set)(THCState *state, THCTensor *self, THCTensor *src)
@@ -949,7 +953,7 @@ THCDescBuff THCTensor_(sizeDesc)(THCState *state, const THCTensor *tensor) {
   int i;
   for(i = 0; i < tensor->nDimension; i++) {
     if(n >= L) break;
-    n += snprintf(str+n, L-n, "%lld", tensor->size[i]);
+    n += snprintf(str+n, L-n, "%" PRId64, tensor->size[i]);
     if(i < tensor->nDimension-1) {
       n += snprintf(str+n, L-n, " x ");
     }
