@@ -280,7 +280,9 @@ IMPLEMENT_STATELESS(atan2)
 IMPLEMENT_STATELESS(pow)
 IMPLEMENT_STATELESS(lerp)
 IMPLEMENT_STATELESS(zeros)
+IMPLEMENT_STATELESS(zeros_like)
 IMPLEMENT_STATELESS(ones)
+IMPLEMENT_STATELESS(ones_like)
 IMPLEMENT_STATELESS(index_select)
 IMPLEMENT_STATELESS(addmm)
 IMPLEMENT_STATELESS(addmv)
@@ -671,7 +673,9 @@ static PyMethodDef TorchMethods[] = {
   {"pow",             (PyCFunction)THPModule_pow,               METH_VARARGS | METH_KEYWORDS, NULL},
   {"lerp",            (PyCFunction)THPModule_lerp,              METH_VARARGS | METH_KEYWORDS, NULL},
   {"zeros",           (PyCFunction)THPModule_zeros,             METH_VARARGS | METH_KEYWORDS, NULL},
+  {"zeros_like",      (PyCFunction)THPModule_zeros_like,        METH_VARARGS | METH_KEYWORDS, NULL},
   {"ones",            (PyCFunction)THPModule_ones,              METH_VARARGS | METH_KEYWORDS, NULL},
+  {"ones_like",       (PyCFunction)THPModule_ones_like,         METH_VARARGS | METH_KEYWORDS, NULL},
   {"index_select",    (PyCFunction)THPModule_index_select,      METH_VARARGS | METH_KEYWORDS, NULL},
   {"addmm",           (PyCFunction)THPModule_addmm,             METH_VARARGS | METH_KEYWORDS, NULL},
   {"addmv",           (PyCFunction)THPModule_addmv,             METH_VARARGS | METH_KEYWORDS, NULL},

@@ -129,6 +129,18 @@ PyObject * THPTensor_(setIndex)(THPTensor *self, PyObject *args)
 ]]
 
 [[
+  name: zeros_like
+  variants:
+    - function
+  auto_gpu: False
+  return: argument 0
+  arguments:
+    - arg: THTensor* result
+      output: True
+    - THTensor* input
+]]
+
+[[
   name: ones
   variants:
     - function
@@ -139,6 +151,18 @@ PyObject * THPTensor_(setIndex)(THPTensor *self, PyObject *args)
       output: True
     - arg: THSize* size
       long_args: True
+]]
+
+[[
+  name: ones_like
+  variants:
+    - function
+  auto_gpu: False
+  return: argument 0
+  arguments:
+    - arg: THTensor* result
+      output: True
+    - THTensor* input
 ]]
 
 [[
