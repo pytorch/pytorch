@@ -147,7 +147,7 @@ void THCTensor_(indexAdd)(THCState *state, THCTensor *dst, int dim, THCudaLongTe
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, dst, src));
   THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, indices));
 
-  int64_t dims = THCTensor_(nDimension)(state, dst);
+  int dims = THCTensor_(nDimension)(state, dst);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
   dims = THCTensor_(nDimension)(state, src);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 5, CUTORCH_DIM_WARNING);
