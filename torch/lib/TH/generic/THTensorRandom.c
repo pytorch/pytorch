@@ -13,7 +13,7 @@ void THTensor_(random)(THTensor *self, THGenerator *_generator)
 #elif defined(TH_REAL_IS_INT)
   TH_TENSOR_APPLY(real, self, *self_data = (int32_t)(THRandom_random(_generator) % (INT32_MAX+1UL)););
 #elif defined(TH_REAL_IS_LONG)
-  TH_TENSOR_APPLY(real, self, *self_data = (int64_t)THRandom_random(_generator););
+  TH_TENSOR_APPLY(real, self, *self_data = (int64_t)(THRandom_random(_generator) % (LONG_MAX+1UL)););
 #elif defined(TH_REAL_IS_FLOAT)
   TH_TENSOR_APPLY(real, self, *self_data = (float)(THRandom_random(_generator) % ((1UL << FLT_MANT_DIG)+1)););
 #elif defined(TH_REAL_IS_DOUBLE)
