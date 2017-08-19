@@ -195,11 +195,11 @@ class DistributedDataParallel(Module):
         self._grad_accs = []  # need to keep them in scope
         for device_idx, module in enumerate(self._module_copies):
             for p in module.parameters():
-                # TODO: no-op for these that don't require grad
-                p_tmp = p.expand_as(p)
-                grad_acc = p_tmp.grad_fn.next_functions[0][0]
-                grad_acc.register_hook(self._make_param_hook(p, device_idx))
-                self._grad_accs.append(grad_acc)
+                if p.requires_grad:
+                    p_tmp = p.expand_as(p)
+                    grad_acc = p_tmp.grad_fn.next_functions[0][0]
+                    grad_acc.register_hook(self._make_param_hook(p, device_idx))
+                    self._grad_accs.append(grad_acc)
 
     def _make_param_hook(self, param, device_idx):
         bucket_idx = self.bucket_map[param]
