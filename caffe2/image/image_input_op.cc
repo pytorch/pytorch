@@ -41,7 +41,28 @@ The dimension of the output image will always be cropxcrop
 )DOC")
     .Arg("batch_size", "Number of images to output for each run of the operator"
          ". Must be 1 or greater")
+    .Arg("label_type", "Type 0: single integer label for multi-class "
+         "classification. Type 1: sparse active label indices for multi-label "
+         "classification. Type 2: dense label embedding vector for label "
+         "embedding regression")
     .Arg("color", "Number of color channels (1 or 3). Defaults to 1")
+    .Arg("color_jitter", "Whether or not to do color jitter. Defaults to 0")
+    .Arg("img_saturation", "Image saturation scale used in color jittering. "
+         "Defaults to 0.4")
+    .Arg("img_brightness", "Image brightness scale used in color jittering. "
+         "Defaults to 0.4")
+    .Arg("img_contrast", "Image contrast scale used in color jittering. "
+         "Defaults to 0.4")
+    .Arg("color_lighting", "Whether or not to do color lighting."
+         " Defaults to 0")
+    .Arg("color_lighting_std", "Std of normal distribution where color lighting"
+        " scaling factor is sampled. Defaults to 0.1")
+    .Arg("scale_jitter_type", "Type 0: No scale jittering "
+          "Type 1: Inception-style scale jittering")
+    .Arg("label_type", "Type 0: single integer label for multi-class "
+        "classification. Type 1: sparse active label indices for multi-label "
+        "classification. Type 2: dense label embedding vector for label "
+        "embedding regression")
     .Arg("scale", "Scale the size of the smallest dimension of the image to"
          " this. Scale and minsize are mutually exclusive."
          " Must be larger than crop")
