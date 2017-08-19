@@ -791,6 +791,27 @@ class TestTorch(TestCase):
         torch.zeros(100, 100, out=res2)
         self.assertEqual(res1, res2)
 
+    def test_zeros_like(self):
+        expected = torch.zeros(100, 100)
+
+        res1 = torch.zeros_like(expected)
+        self.assertEqual(res1, expected)
+
+        res2 = torch.Tensor()
+        torch.zeros_like(expected, out=res2)
+        self.assertEqual(res2, expected)
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_zeros_like_cuda(self):
+        expected = torch.zeros(100, 100).cuda()
+
+        res1 = torch.zeros_like(expected)
+        self.assertEqual(res1, expected)
+
+        res2 = torch.Tensor().cuda()
+        torch.zeros_like(expected, out=res2)
+        self.assertEqual(res2, expected)
+
     def test_histc(self):
         x = torch.Tensor((2, 4, 2, 2, 5, 4))
         y = torch.histc(x, 5, 1, 5)  # nbins,  min,  max
@@ -802,6 +823,27 @@ class TestTorch(TestCase):
         res2 = torch.Tensor()
         torch.ones(100, 100, out=res2)
         self.assertEqual(res1, res2)
+
+    def test_ones_like(self):
+        expected = torch.ones(100, 100)
+
+        res1 = torch.ones_like(expected)
+        self.assertEqual(res1, expected)
+
+        res2 = torch.Tensor()
+        torch.ones_like(expected, out=res2)
+        self.assertEqual(res2, expected)
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_ones_like_cuda(self):
+        expected = torch.ones(100, 100).cuda()
+
+        res1 = torch.ones_like(expected)
+        self.assertEqual(res1, expected)
+
+        res2 = torch.Tensor().cuda()
+        torch.ones_like(expected, out=res2)
+        self.assertEqual(res2, expected)
 
     def test_diag(self):
         x = torch.rand(100, 100)

@@ -3096,6 +3096,26 @@ Example::
 
 """)
 
+add_docstr(torch._C.ones_like,
+           """
+ones_like(input, out=None) -> Tensor
+
+Returns a Tensor filled with the scalar value `1`, with the same size as :attr:`input`.
+
+Args:
+    input (Tensor): The size of the input will determine the size of the output.
+    out (Tensor, optional): the result Tensor
+
+Example::
+
+    >>> input = torch.FloatTensor(2, 3)
+    >>> torch.ones_like(input)
+
+     1  1  1
+     1  1  1
+    [torch.FloatTensor of size 2x3]
+""")
+
 # TODO
 # add_docstr(torch._C.orgqr,
 # """
@@ -4809,6 +4829,26 @@ Example::
      0
     [torch.FloatTensor of size 5]
 
+""")
+
+add_docstr(torch._C.zeros_like,
+           """
+zeros_like(input, out=None) -> Tensor
+
+Returns a Tensor filled with the scalar value `0`, with the same size as :attr:`input`.
+
+Args:
+    input (Tensor): The size of the input will determine the size of the output.
+    out (Tensor, optional): the result Tensor
+
+Example::
+
+    >>> input = torch.FloatTensor(2, 3)
+    >>> torch.zeros_like(input)
+
+     0  0  0
+     0  0  0
+    [torch.FloatTensor of size 2x3]
 """)
 
 add_docstr(torch._C.btrifact,
