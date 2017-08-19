@@ -197,7 +197,7 @@ class ReduceLROnPlateau(object):
 
     Example:
         >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
-        >>> scheduler = torch.optim.ReduceLROnPlateau(optimizer, 'min')
+        >>> scheduler = ReduceLROnPlateau(optimizer, 'min')
         >>> for epoch in range(10):
         >>>     train(...)
         >>>     val_loss = validate(...)
