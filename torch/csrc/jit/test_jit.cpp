@@ -168,13 +168,14 @@ static void fusionTests() {
 #else //WITH_CUDA
 void fusionTests() {}
 #endif
-
+struct Attr : public Attributes<Attr> {
+};
 void attributesTest() {
   auto one = kParam;
   auto two = kReturn;
   auto three = kConstant;
-  Attributes attr;
-  attr.f_(one,3.4).i_(two,5).s_(three,"what");
+  Attr attr;
+  attr.f_(one,3.4)->i_(two,5)->s_(three,"what");
   assert(attr.f(one) == 3.4);
   assert(attr.s(three) == "what");
   assert(attr.i(two) == 5);
@@ -185,7 +186,7 @@ void attributesTest() {
   attr.ss_(two, {"hi", "now"});
   assert(attr.ss(two).at(1) == "now");
 
-  Attributes attr2;
+  Attr attr2;
   attr2.copyAttributes(attr);
   assert(two.s(one) == "no");
   attr2.f_(one,5);

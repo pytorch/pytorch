@@ -12,6 +12,12 @@ namespace torch { namespace jit {
 enum class AttributeKind {
   f,fs,i,is,s,ss,t,ts,g,gs
 };
+static inline const char * toString(AttributeKind kind) {
+  static const char* names[] = {"f","fs","i","is","s","ss","t","ts","g","gs"};
+  JIT_ASSERT(size_t(kind) < sizeof(names)/sizeof(AttributeKind));
+  return names[int(kind)];
+}
+
 struct AttributeValue {
   AttributeValue(Symbol name)
   : name(name) {}
@@ -70,8 +76,11 @@ using GraphAttr = ScalarAttributeValue<std::shared_ptr<Graph>,AttributeKind::g>;
 using GraphsAttr = VectorAttributeValue<std::shared_ptr<Graph>,AttributeKind::gs>;
 
 
-// Tensor, shared_ptr<Graph>
-
+// CRTP so that Node which inherits Attributes can be return for
+// method chaining e.g:
+// Node * n = g->createNode(kSelect)->set_i(kOffset,3)->set_f(kValue,3.5);
+// we return Derived* pointers because Nodes are normally held as pointers.
+template<typename Derived>
 struct Attributes {
   Attributes() {}
   void copyAttributes(const Attributes & rhs) {
@@ -86,12 +95,22 @@ struct Attributes {
   AttributeKind kindOf(Symbol name) {
     return (*find(name,true))->kind();
   }
-  Attributes & removeAttribute(Symbol name) {
+  Derived* removeAttribute(Symbol name) {
     values_.erase(find(name,true));
-    return *this;
+    return This();
   }
+  bool hasAttributes() {
+    return values_.size() > 0;
+  }
+  std::vector<Symbol> attributeNames() {
+    std::vector<Symbol> names;
+    for(auto & a : values_)
+      names.push_back(a->name);
+    return names;
+  }
+
   #define CREATE_ACCESSOR(Kind, method) \
-  Attributes& method##_(Symbol name, Kind##Attr::ConstructorType v) { \
+  Derived* method##_(Symbol name, Kind##Attr::ConstructorType v) { \
     return set<Kind##Attr>(name,std::forward<Kind##Attr::ConstructorType>(v)); \
   } \
   Kind##Attr::ValueType& method(Symbol name) { \
@@ -110,8 +129,11 @@ struct Attributes {
 
   #undef CREATE_ACCESSOR
 private:
+  Derived* This() {
+    return static_cast<Derived*>(this);
+  }
   template<typename T>
-  Attributes & set(Symbol name, typename T::ConstructorType v) {
+  Derived* set(Symbol name, typename T::ConstructorType v) {
     auto it = find(name, false);
     auto nv = AVPtr(new T(name, std::forward<typename T::ConstructorType>(v)));
     if(it == values_.end()) {
@@ -119,7 +141,7 @@ private:
     } else {
       *it = std::move(nv);
     }
-    return *this;
+    return This();
   }
   template<typename T>
   typename T::ValueType & get(Symbol name) {
@@ -130,7 +152,7 @@ private:
   }
   using AVPtr = AttributeValue::Ptr;
   std::vector<AVPtr> values_;
-  using iterator = decltype(values_)::iterator;
+  using iterator = std::vector<AVPtr>::iterator;
   iterator find(Symbol name,bool required) {
     auto it = std::find_if(values_.begin(),values_.end(),[&](const AVPtr & v) {
       return v->name == name;

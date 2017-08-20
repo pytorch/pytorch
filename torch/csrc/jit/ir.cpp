@@ -109,6 +109,60 @@ std::ostream& operator<<(std::ostream & out, node_list_with_types l) {
   }
   return out;
 }
+template<typename T>
+void printPrimList(std::ostream & out, const std::vector<T> & items) {
+  out << "[";
+  int i = 0;
+  for(auto & item : items) {
+    if(i++ > 0)
+      out << ", ";
+    out << item;
+  }
+  out << "]";
+}
+void printAttributes(std::ostream & out, Node * n) {
+  out << "[";
+  auto names = n->attributeNames();
+  int i = 0;
+  for(auto name : names) {
+    if(i++ > 0)
+      out << ", ";
+    out << symbolToString(name) <<"=";
+    switch(n->kindOf(name)) {
+      case AttributeKind::f:
+        out << n->f(name);
+        break;
+      case AttributeKind::fs:
+        printPrimList(out,n->fs(name));
+        break;
+      case AttributeKind::i:
+        out << n->i(name);
+        break;
+      case AttributeKind::is:
+        printPrimList(out,n->is(name));
+        break;
+      case AttributeKind::s:
+        out << n->s(name);
+        break;
+      case AttributeKind::ss:
+        printPrimList(out,n->ss(name));
+        break;
+      case AttributeKind::t:
+        out << "<Tensor>";
+        break;
+      case AttributeKind::ts:
+        out << "[<Tensors>]";
+        break;
+      case AttributeKind::g:
+        out << "<Graph>";
+        break;
+      case AttributeKind::gs:
+        out << "[<Graphs>]";
+        break;
+    }
+  }
+  out << "]";
+}
 
 std::ostream& operator<<(std::ostream & out, Graph & g) {
   out << "graph(" << node_list_with_types(g.inputs()) << ") {\n";
@@ -147,6 +201,9 @@ std::ostream& operator<<(std::ostream & out, Graph & g) {
         out << "CppOp[" << value->name() << "]";
       IR_ELSE()
         out << symbolToString(n->kind());
+        if(n->hasAttributes()) {
+          printAttributes(out,n);
+        }
       IR_END()
       out << "(" << n->inputs() << "), uses = [";
       if(n->hasMultipleOutputs()) {
