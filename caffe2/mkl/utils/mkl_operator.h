@@ -30,7 +30,8 @@ template <typename T>
 class MKLOperator : public OperatorBase {
  public:
   explicit MKLOperator(const OperatorDef& operator_def, Workspace* ws)
-      : OperatorBase(operator_def, ws) {}
+      : OperatorBase(operator_def, ws),
+        context_(operator_def.device_option()) {}
   virtual ~MKLOperator() {}
 
   inline const MKLMemory<T>& Input(int idx) {
@@ -56,6 +57,19 @@ class MKLOperator : public OperatorBase {
     }
   }
 
+  // Waits for a previous event. Note that to properly wait and run
+  // asynchronously, WaitEvent, RunAsync and Record should all be executed
+  // on the same CPU thread.
+  void WaitEvent(const Event& ev) final {
+    context_.SwitchToDevice();
+    context_.WaitEvent(ev);
+  }
+
+  void Record(Event* ev) final {
+    context_.SwitchToDevice();
+    context_.Record(ev);
+  }
+
   virtual bool RunOnDevice() = 0;
 
   inline void ExecutePrimitive() {
@@ -63,6 +77,7 @@ class MKLOperator : public OperatorBase {
   }
 
  protected:
+  MKLContext context_;
   // The primitive used in the operator.
   PrimitiveWrapper<T> primitive_;
   // Size cache for all the input sizes.
