@@ -11,6 +11,26 @@ struct THPGenerator;
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/jit/python_tracer.h"
 
+// handle Tensor <-> at::Tensor conversions
+namespace pybind11 { namespace detail {
+    template <> struct type_caster<at::Tensor> {
+    public:
+        PYBIND11_TYPE_CASTER(at::Tensor, _("at::Tensor"));
+
+        bool load(handle src, bool) {
+            /* Extract PyObject from handle */
+            PyObject *source = src.ptr();
+            if(!THPModule_isTensor(source))
+              return false;
+            value = torch::createTensor(source);
+            return true;
+        }
+        static handle cast(at::Tensor src, return_value_policy /* policy */, handle /* parent */) {
+            return handle(torch::createPyObject(src));
+        }
+    };
+}} // namespace pybind11::detail
+
 namespace torch { namespace jit {
 
 void initPythonIRBindings(PyObject * module_) {
@@ -44,7 +64,7 @@ void initPythonIRBindings(PyObject * module_) {
     .GS(createChunk)
     .GS(createConstant)
     .GS(createFusionGroup)
-    .def("createClone",[](Graph & g, Node * n, py::handle fn) {
+    .def("createClone",[](Graph & g, Node * n, py::object fn) {
       return g.createClone(n, [&](Node * e) {
         return fn(e).cast<Node*>();
       });
@@ -72,11 +92,7 @@ void initPythonIRBindings(PyObject * module_) {
     .NS(hasMultipleOutputs)
     .NS(hasType)
     .NS(setType)
-    .def("inferTypeFrom",[](Node & n, py::handle output) {
-      auto pyobject = output.ptr();
-      JIT_ASSERT(THPModule_isTensor(pyobject));
-      n.inferTypeFrom(torch::createTensor(pyobject));
-    })
+    .NS(inferTypeFrom)
     // skip owningGraph because it returns a raw pointer to a otherwise
     // std::shared_ptr stored graph object, and would cause a double free
     .NS(unique)
@@ -97,6 +113,44 @@ void initPythonIRBindings(PyObject * module_) {
     .NS(removeInput)
     .NS(removeAllInputs)
     .NS(destroy)
+    // methods from Attributes
+    .def("copyAttributes",[](Node & n, Node & rhs) {
+      n.copyAttributes(rhs);
+    })
+    .def("hasAttribute",[](Node & n, const char * name) {
+      return n.hasAttribute(stringToSymbol(name));
+    })
+    .def("kindOf", [](Node & n, const char * name) {
+      return toString(n.kindOf(stringToSymbol(name)));
+    })
+    .def("removeAttribute",[](Node & n, const char * name) {
+      return n.removeAttribute(stringToSymbol(name));
+    })
+    .NS(hasAttributes)
+    .def("attributeNames",[](Node & n) {
+      auto names = n.attributeNames();
+      std::vector<std::string> names_s;
+      for(auto n : names)
+        names_s.push_back(symbolToString(n));
+      return names_s;
+    })
+    #define CREATE_ACCESSOR(Kind,method) \
+    def(#method "_",[](Node & n, const char * name, Kind##Attr::ValueType v) { \
+      return n . method ## _(stringToSymbol(name), std::move(v)); \
+    }) \
+    .def(#method, [](Node & n, const char * name) { \
+      return n.method(stringToSymbol(name)); \
+    })
+    .CREATE_ACCESSOR(Float,f)
+    .CREATE_ACCESSOR(Floats,fs)
+    .CREATE_ACCESSOR(String,s)
+    .CREATE_ACCESSOR(Strings,ss)
+    .CREATE_ACCESSOR(Int,i)
+    .CREATE_ACCESSOR(Ints,is)
+    .CREATE_ACCESSOR(Tensor,t)
+    .CREATE_ACCESSOR(Tensors,ts)
+    .CREATE_ACCESSOR(Graph,g)
+    .CREATE_ACCESSOR(Graphs,gs)
     .def("pyobj",[](Node & n) {
       return py::handle(n.expect<PythonOp>()->pyobj.get()).cast<py::object>();
     })
@@ -155,7 +209,7 @@ void initPythonIRBindings(PyObject * module_) {
   .def_readonly("user",&Use::user)
   .def_readonly("offset",&Use::offset);
 
-  m.def("_jit_get_graph", [](py::handle h_) {
+  m.def("_jit_get_graph", [](py::object h_) {
     auto py_state = h_.ptr();
     JIT_ASSERTM(THPTracingState_Check(py_state), "expected a TracingState instance");
     THPTracingState *state = (THPTracingState*)py_state;

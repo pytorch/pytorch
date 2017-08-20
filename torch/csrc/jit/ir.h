@@ -207,7 +207,7 @@ inline TypePtr getInitialType(NodeKind kind) {
 static constexpr int kNextDirection = 0;
 static constexpr int kPrevDirection = 1;
 
-struct Node : public Attributes {
+struct Node : public Attributes<Node> {
   TH_DISALLOW_COPY_AND_ASSIGN(Node);
   friend struct Graph;
   friend graph_node_list;

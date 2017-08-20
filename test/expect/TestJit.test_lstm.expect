@@ -3,8 +3,8 @@ graph(%1 : Double(80, 10), %2 : Double(80, 20), %3 : Double(80), %4 : Double(80)
   %11.0 : Double(3, 80), %11.1 : Handle = ^Addmm(1, 1, False)(%3, %5, %8.0), uses = [[%70.i0], []];
   %14.0 : Double(20!, 80!), %14.1 : Handle = ^Transpose(0, 1)(%2), uses = [[%17.i2], []];
   %17.0 : Double(3, 80), %17.1 : Handle = ^Addmm(1, 1, False)(%4, %6, %14.0), uses = [[%71.i0], []];
-  %71.0 : Double(3!, 20), %71.1 : Double(3!, 20), %71.2 : Double(3!, 20), %71.3 : Double(3!, 20) = Chunk(%17.0), uses = [[%67.i8], [%67.i6], [%67.i4], [%67.i2]];
-  %70.0 : Double(3!, 20), %70.1 : Double(3!, 20), %70.2 : Double(3!, 20), %70.3 : Double(3!, 20) = Chunk(%11.0), uses = [[%67.i7], [%67.i5], [%67.i3], [%67.i1]];
+  %71.0 : Double(3!, 20), %71.1 : Double(3!, 20), %71.2 : Double(3!, 20), %71.3 : Double(3!, 20) = Chunk[NumChunks=4, Dim=1](%17.0), uses = [[%67.i8], [%67.i6], [%67.i4], [%67.i2]];
+  %70.0 : Double(3!, 20), %70.1 : Double(3!, 20), %70.2 : Double(3!, 20), %70.3 : Double(3!, 20) = Chunk[NumChunks=4, Dim=1](%11.0), uses = [[%67.i7], [%67.i5], [%67.i3], [%67.i1]];
   %67.0 : Double(3, 20), %67.1 : Double(3, 20) = fusion_group_0(%7, %70.3, %71.3, %70.2, %71.2, %70.1, %71.1, %70.0, %71.0), uses = [[%0.i0], [%0.i1]];
   return (%67.0, %67.1);
 }
