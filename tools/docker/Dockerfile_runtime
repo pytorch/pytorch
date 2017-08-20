@@ -25,5 +25,3 @@ ENV LD_LIBRARY_PATH /usr/local/nvidia/lib:/usr/local/nvidia/lib64
 
 WORKDIR /workspace
 RUN chmod -R a+w /workspace
-
-RUN echo "source activate pytorch-py35" >> ~/.bashrc
