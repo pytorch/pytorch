@@ -200,6 +200,9 @@ inline TypePtr getInitialType(NodeKind kind) {
   }
 }
 
+static constexpr int kNextDirection = 0;
+static constexpr int kPrevDirection = 1;
+
 struct Node : public Attributes {
   TH_DISALLOW_COPY_AND_ASSIGN(Node);
   friend struct Graph;
@@ -215,9 +218,10 @@ private:
   // next_in_graph[1] is prev pointer
   // using an array to allow the same iterator class for forward and reverse node lists
   // This list represents a topological sort
+
   Node * next_in_graph[2] = {nullptr,nullptr};
-  Node* & next() { return next_in_graph[0]; }
-  Node* & prev() { return next_in_graph[1]; }
+  Node* & next() { return next_in_graph[kNextDirection]; }
+  Node* & prev() { return next_in_graph[kPrevDirection]; }
 
   const NodeKind kind_;
   std::vector<Node*> inputs_;
@@ -368,7 +372,7 @@ public:
   //          %5 = h(%1)
   //          %4 = g(%3)
   void insertBefore(Node * n) {
-    JIT_ASSERT(n->inGraphList()&& !this->inGraphList());
+    JIT_ASSERT(n->inGraphList());
     insertAfter(n->prev());
   }
 
@@ -529,7 +533,7 @@ protected:
 
 struct graph_node_list_iterator {
   graph_node_list_iterator()
-  : cur(nullptr), d(0) {}
+  : cur(nullptr), d(kNextDirection) {}
   graph_node_list_iterator(Node * cur, int d)
   : cur(cur), d(d) {}
   graph_node_list_iterator(const graph_node_list_iterator & rhs)
@@ -552,11 +556,11 @@ struct graph_node_list_iterator {
   // iterator will point to the previous entry after call
   void destroyCurrent() {
     Node * d = cur;
-    cur = cur->next_in_graph[d == 0 ? 1 : 0];
+    cur = cur->next_in_graph[d == kNextDirection ? kPrevDirection : kNextDirection];
     d->destroy();
   }
   graph_node_list_iterator reverse() {
-    return graph_node_list_iterator(cur, d = d == 0 ? 1 : 0);
+    return graph_node_list_iterator(cur, d == kNextDirection ? kPrevDirection : kNextDirection);
   }
 private:
   Node * cur;
@@ -585,7 +589,7 @@ struct graph_node_list {
     return reverse().end();
   }
   graph_node_list reverse() {
-    return graph_node_list(head, d == 0 ? 1 : 0);
+    return graph_node_list(head, d == kNextDirection ? kPrevDirection : kNextDirection);
   }
   graph_node_list(Node * head, int d)
   : head(head), d(d) {}
@@ -640,7 +644,7 @@ public:
     return output_->inputs();
   }
   graph_node_list nodes() {
-    return graph_node_list(output_,0);
+    return graph_node_list(output_,kNextDirection);
   }
   Node * return_node() {
     return output_;

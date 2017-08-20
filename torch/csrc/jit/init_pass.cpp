@@ -58,7 +58,6 @@ void MatchJITOps(std::unique_ptr<Graph>& graph) {
       single_select->destroy();
     }
 
-    // Erasing p directly would invalidate iterator
     it.destroyCurrent();
   }
 }
