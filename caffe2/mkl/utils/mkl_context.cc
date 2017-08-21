@@ -9,7 +9,7 @@ namespace caffe2 {
 void EventCreateMKLDNN(const DeviceOption& /* unused */, Event* /* unused */) {}
 void EventRecordMKLDNN(const void* /* unused */, Event* /* unused */) {}
 void EventWaitMKLDNNMKLDNN(const Event* /* unused */, void* /* unused */) {}
-void EventFinishMKLDNN(Event* /* unused */) {}
+void EventFinishMKLDNN(const Event* /* unused */) {}
 
 REGISTER_EVENT_CREATE_FUNCTION(MKLDNN, EventCreateMKLDNN);
 REGISTER_EVENT_RECORD_FUNCTION(MKLDNN, EventRecordMKLDNN);

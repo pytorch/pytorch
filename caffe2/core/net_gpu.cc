@@ -80,15 +80,6 @@ AsyncDAGNet::AsyncDAGNet(
     : DAGNetBase(net_def, ws) {
   VLOG(1) << "Constructing Async DAG Net " << net_def->name();
   eventRecorded_.resize(net_def->op_size());
-  events_.reserve(net_def->op_size());
-  for (int idx = 0; idx < net_def->op_size(); ++idx) {
-    const OperatorDef& op_def = net_def->op(idx);
-    if (!op_def.has_device_option() && net_def->has_device_option()) {
-      events_.emplace_back(new Event(net_def->device_option()));
-    } else {
-      events_.emplace_back(new Event(op_def.device_option()));
-    }
-  }
 }
 
 bool AsyncDAGNet::RunAt(const std::vector<int>& chain) {
@@ -107,8 +98,8 @@ bool AsyncDAGNet::RunAt(const std::vector<int>& chain) {
   for (auto source_parent_idx : operator_nodes_[source_idx].parents_) {
     ProfiledRange r(
         operator_nodes_[source_parent_idx].operator_->debug_def(), kWaitColor);
-    operator_nodes_[source_idx].operator_->WaitEvent(
-        *events_[source_parent_idx]);
+    operator_nodes_[source_idx].operator_->Wait(
+        *operator_nodes_[source_parent_idx].operator_);
   }
 
   // We've waited on all our parent indices.
@@ -123,7 +114,7 @@ bool AsyncDAGNet::RunAt(const std::vector<int>& chain) {
   {
     ProfiledRange r(
         operator_nodes_[sink_idx].operator_->debug_def(), kRecordColor);
-    operator_nodes_[sink_idx].operator_->Record(events_[sink_idx].get());
+    operator_nodes_[sink_idx].operator_->Record();
   }
   CAFFE_ENFORCE(
       !eventRecorded_[sink_idx],
@@ -140,9 +131,11 @@ bool AsyncDAGNet::Run() {
 
   const auto result = DAGNetBase::Run();
 
-  // Potential optimization: we can pre-compute outstanding events.
-  for (auto i = 0; i < events_.size(); ++i) {
-    events_[i]->Finish();
+  // Potential optimization: we can pre-compute outstanding events, as some
+  // chain's tail may already be covered by other chains.
+  for (const auto& chain : execution_chains_) {
+    const int tail_op_idx = chain.second.back();
+    operator_nodes_[tail_op_idx].operator_->event().Finish();
   }
   return result;
 }

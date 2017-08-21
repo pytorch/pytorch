@@ -6,6 +6,8 @@
 namespace caffe2 {
 
 TEST(EventCUDATest, EventBasics) {
+  if (!HasCudaGPU())
+    return;
   DeviceOption device_cpu;
   device_cpu.set_device_type(CPU);
   DeviceOption device_cuda;

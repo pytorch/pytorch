@@ -16,7 +16,7 @@ class Event;
 typedef void (*EventCreateFunction)(const DeviceOption& option, Event*);
 typedef void (*EventRecordFunction)(const void*, Event*);
 typedef void (*EventWaitFunction)(const Event*, void*);
-typedef void (*EventFinishFunction)(Event*);
+typedef void (*EventFinishFunction)(const Event*);
 
 class Event {
  public:
@@ -45,7 +45,7 @@ class Event {
     event_waiter_[waiter_type][type_](this, context);
   }
 
-  void Finish() {
+  void Finish() const {
     CAFFE_ENFORCE(event_finisher_[type_]);
     event_finisher_[type_](this);
   }

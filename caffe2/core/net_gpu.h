@@ -7,9 +7,10 @@
 
 namespace caffe2 {
 
-// Run an event-driven graph - before each operator chain, wait on
-// each parent operator for the chain source (Stream::wait), then
-// execute each operator (implicitly on the same stream).
+// Run an event-driven graph - before each operator chain, wait on each parent
+// operator for the chain source, then execute each operator. Due to the chain
+// construction mechanism, operators in the same chain implicitly runs on the
+// same stream.
 class AsyncDAGNet : public DAGNetBase {
  public:
   AsyncDAGNet(const std::shared_ptr<const NetDef>& net_def, Workspace* ws);
@@ -20,7 +21,6 @@ class AsyncDAGNet : public DAGNetBase {
   // Tracks whether a given op has had an event recorded in each
   // RunAt() iteration.
   std::vector<int32_t> eventRecorded_;
-  std::vector<std::unique_ptr<Event>> events_;
   DISABLE_COPY_AND_ASSIGN(AsyncDAGNet);
 };
 
