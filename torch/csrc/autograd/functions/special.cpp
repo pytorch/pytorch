@@ -101,6 +101,19 @@ variable_list Eval::filterRelevantOutputs(const variable_list& inputs, const var
   return relevant_outputs;
 }
 
+auto Eval::computeInputOrder(const variable_list& inputs, const placeholder_list& inherited_placeholders) -> edge_order {
+  edge_order input_order;
+  int idx = 0;
+  for (auto & input : inputs)
+    input_order.emplace(
+      std::make_pair(input->grad_fn ? input->grad_fn : input->grad_accumulator.lock(), input->output_nr),
+      idx++
+    );
+  for (auto & placeholder : inherited_placeholders)
+    input_order.emplace(placeholder->next_edge, idx++);
+  return input_order;
+}
+
 void Eval::replaceSubgraph(const variable_list& inputs, const variable_list& _outputs,
                            const placeholder_list& inherited_placeholders) {
   // _outputs has a prefix deliberately, because it's unlikely that anything else
@@ -136,6 +149,15 @@ void Eval::replaceSubgraph(const variable_list& inputs, const variable_list& _ou
   next_functions.insert(next_functions.begin(), subgraph.boundary.ends.begin(), subgraph.boundary.ends.end());
   is_executable = std::any_of(relevant_outputs.begin(), relevant_outputs.end(),
                               [](std::shared_ptr<Variable>& var) { return var->requires_grad; });
+
+  // Ensure placeholders and inputs are sorted in the same way.
+  edge_order input_order = computeInputOrder(inputs, inherited_placeholders);
+  std::sort(next_functions.begin(), next_functions.end(), [&input_order](const edge_type &a, const edge_type &b) {
+    return input_order.at(a) < input_order.at(b);
+  });
+  std::sort(placeholders.begin(), placeholders.end(), [&input_order](const std::shared_ptr<EvalOutput> &a, const std::shared_ptr<EvalOutput> &b) {
+    return input_order.at(a->next_edge) < input_order.at(b->next_edge);
+  });
 
   // Rebase outputs.
   for (auto & output : relevant_outputs) {
