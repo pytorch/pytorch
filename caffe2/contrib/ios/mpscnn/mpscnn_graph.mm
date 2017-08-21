@@ -295,8 +295,8 @@ bool tryConvertToMPSCNN(const NetDef& initNet, const NetDef& predictNet, NetDef*
     return false;
   }
 
-  if (SYSTEM_VERSION_EQUAL_TO(@"10.1.1")) {
-    LOG(ERROR) << "MPSCNN doesn't work for 10.1.1";
+  if (SYSTEM_VERSION_EQUAL_TO(@"10.1.1") || SYSTEM_VERSION_EQUAL_TO(@"10.0.2")) {
+    LOG(ERROR) << "MPSCNN doesn't work for 10.1.1/10.0.2";
     return false;
   }
 #undef SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO
