@@ -670,7 +670,6 @@ static void trace_create(PyObject* op_obj,
   }
 
   // Save scalar args and the calling convention
-  auto& graph = tracing_state->graph;
   auto num_args = PyTuple_GET_SIZE(input_objects);
   pyobj_list scalar_args;
   std::string arg_types;
@@ -686,6 +685,8 @@ static void trace_create(PyObject* op_obj,
       scalar_args.emplace_back(arg_object);
     }
   }
+
+  auto state_lock = tracing_state->lock();
 
   // Note [getValueTrace can allocate nodes]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -708,6 +709,7 @@ static void trace_create(PyObject* op_obj,
 
   // Construct the IR Node and its Selects
   Py_INCREF(op_obj);
+  auto& graph = tracing_state->graph;
   auto this_expr = graph->appendNode(graph->createPythonOp(
     THPObjectPtr(op_obj),
     arg_types,
