@@ -555,9 +555,9 @@ struct graph_node_list_iterator {
   // silently cause the wrong one to be called.
   // iterator will point to the previous entry after call
   void destroyCurrent() {
-    Node * d = cur;
+    Node * n = cur;
     cur = cur->next_in_graph[d == kNextDirection ? kPrevDirection : kNextDirection];
-    d->destroy();
+    n->destroy();
   }
   graph_node_list_iterator reverse() {
     return graph_node_list_iterator(cur, d == kNextDirection ? kPrevDirection : kNextDirection);
