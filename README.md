@@ -199,15 +199,9 @@ Dockerfile is supplied to build images with cuda support and cudnn v6. Build as 
 ```
 docker build -t pytorch .
 ```
-Alternatively, if you want a runtime image, build with
-
+Alternatively, if you want to use a runtime image, you can use the pre-built one from Docker Hub and run with nvidia-docker:
 ```
-docker build -t pytorch . -f tools/docker/Dockerfile_runtime
-
-```
-and run with nvidia-docker:
-```
-nvidia-docker run --rm -ti --ipc=host pytorch
+nvidia-docker run --rm -ti --ipc=host pytorch/pytorch:latest
 ```
 Please note that PyTorch uses shared memory to share data between processes, so if torch multiprocessing is used (e.g.
 for multithreaded data loaders) the default shared memory segment size that container runs with is not enough, and you
