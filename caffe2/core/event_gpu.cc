@@ -42,7 +42,7 @@ void EventRecordCUDA(const void* context, Event* event) {
       static_cast<const CUDAContext*>(context)->cuda_stream()));
 }
 
-void EventFinishCUDA(Event* event) {
+void EventFinishCUDA(const Event* event) {
   auto* wrapper = static_cast<CudaEventWrapper*>(event->event_.get());
   DeviceGuard g(wrapper->cuda_gpu_id_);
   CUDA_ENFORCE(cudaEventSynchronize(wrapper->cuda_event_));

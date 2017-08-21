@@ -12,7 +12,7 @@ EventFinishFunction Event::event_finisher_[MaxDeviceTypes];
 void EventCreateCPU(const DeviceOption& /* unused */, Event* /* unused */) {}
 void EventRecordCPU(const void* /* unused */, Event* /* unused */) {}
 void EventWaitCPUCPU(const Event* /* unused */, void* /* unused */) {}
-void EventFinishCPU(Event* /* unused */) {}
+void EventFinishCPU(const Event* /* unused */) {}
 
 REGISTER_EVENT_CREATE_FUNCTION(CPU, EventCreateCPU);
 REGISTER_EVENT_RECORD_FUNCTION(CPU, EventRecordCPU);

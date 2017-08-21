@@ -19,7 +19,8 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
       operator_def_(std::make_shared<OperatorDef>(operator_def)),
       device_option_(
           operator_def.has_device_option() ? operator_def.device_option()
-                                           : DeviceOption()) {
+                                           : DeviceOption()),
+      event_(device_option_) {
   for (const string& input_str : operator_def.input()) {
     auto* blob = ws->GetBlob(input_str);
     CAFFE_ENFORCE(

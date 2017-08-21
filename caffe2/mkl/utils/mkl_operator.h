@@ -65,9 +65,9 @@ class MKLOperator : public OperatorBase {
     context_.WaitEvent(ev);
   }
 
-  void Record(Event* ev) final {
+  void Record() final {
     context_.SwitchToDevice();
-    context_.Record(ev);
+    context_.Record(&event_);
   }
 
   virtual bool RunOnDevice() = 0;
