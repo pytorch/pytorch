@@ -199,7 +199,7 @@ Dockerfile is supplied to build images with cuda support and cudnn v6. Build as 
 ```
 docker build -t pytorch .
 ```
-Alternatively, if you want to use a runtime image, you can use the pre-built one from Docker Hub and run wiht nvidia-docker:
+Alternatively, if you want to use a runtime image, you can use the pre-built one from Docker Hub and run with nvidia-docker:
 ```
 nvidia-docker run --rm -ti --ipc=host pytorch/pytorch:latest
 ```
