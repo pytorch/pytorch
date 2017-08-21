@@ -140,7 +140,17 @@ OPERATOR_SCHEMA(NCCLAllreduce)
     .NumOutputs(1, CAFFE2_COMPILE_TIME_MAX_GPUS)
     .IdenticalTypeAndShape()
     .InputsCanCrossDevices()
-    .AllowOneToOneInplace();
+    .AllowOneToOneInplace()
+    .DeviceInferenceFunction([](const OperatorDef& def) {
+      std::vector<DeviceOption> opt;
+      for (int i = 0; i < def.input().size(); ++i) {
+        DeviceOption dev;
+        dev.set_device_type(1);
+        dev.set_cuda_gpu_id(i);
+        opt.push_back(dev);
+      }
+      return std::make_pair(opt, opt);
+    });
 SHOULD_NOT_DO_GRADIENT(NCCLAllreduce);
 
 REGISTER_CUDA_OPERATOR(NCCLBroadcast, NCCLBroadcastOp);
