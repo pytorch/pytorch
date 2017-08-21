@@ -34,6 +34,7 @@ struct Eval : Function {
     }
   };
   using edge_set = std::unordered_set<edge_type, edge_hasher>;
+  using edge_order = std::unordered_map<edge_type, int, edge_hasher>;
   using placeholder_list = std::vector<std::shared_ptr<EvalOutput>>;
 
   // This struct has only one member, but it's useful to e.g. add a set of all
@@ -65,6 +66,7 @@ struct Eval : Function {
       const placeholder_list& inherited_placeholders = placeholder_list());
 
   static variable_list filterRelevantOutputs(const variable_list& inputs, const variable_list& outputs);
+  edge_order computeInputOrder(const variable_list& inputs, const placeholder_list& inherited_placeholders);
 
   function_list roots;
   placeholder_list placeholders;
