@@ -7,6 +7,7 @@
 #include "torch/csrc/jit/init_pass.h"
 
 #include <memory>
+#include <mutex>
 #include <vector>
 #include <iostream>
 #include <cstdint>
@@ -43,7 +44,10 @@ struct TracingState : public std::enable_shared_from_this<TracingState> {
 
   std::unique_ptr<Graph> graph;
   bool active;
+  std::mutex mutex;
   variable_list inputs; // Used only for the duration of first stage
+
+  std::unique_lock<std::mutex> lock() { return std::unique_lock<std::mutex>(mutex); };
 };
 
 struct FunctionTracingState {

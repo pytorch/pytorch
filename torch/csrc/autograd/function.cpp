@@ -43,6 +43,7 @@ variable_list Function::tracedApply(variable_list inputs) {
     return apply(inputs);
   }
   auto state = tracer::getTracingState(inputs);
+  auto state_lock = state->lock();
 
   // Insert a CppOp in the trace.
   auto& graph = state->graph;
@@ -53,7 +54,9 @@ variable_list Function::tracedApply(variable_list inputs) {
   graph->appendNode(this_node);
 
   // Finally apply this Function.
+  state_lock.unlock();
   variable_list outputs = apply(inputs);
+  state_lock.lock();
 
   // Set up output traces.
   int num_outputs = outputs.size();
