@@ -320,6 +320,7 @@ std::unique_ptr<AutogradClosure> createAutogradClosure(Graph *graph) {
     if (node->hasMultipleOutputs()) {
       // Each use is a single Select node corresponding to an output
       for (auto& use : uses) {
+        if (use.user->type()->kind() == TypeKind::HandleType) continue;
         auto& select_uses = use.user->uses();
         output_uses_ptrs.emplace_back(&select_uses);
       }

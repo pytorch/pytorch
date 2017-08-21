@@ -1,12 +1,12 @@
 graph(%1 : Double(3, 10), %2 : Double(3, 20), %3 : Double(3, 20), %4 : Double(80, 10), %5 : Double(80, 20), %6 : Double(80), %7 : Double(80)) {
-  %8.0 : Double(10!, 80!) = ^Transpose(0, 1)(%4), uses = [[%10.i2]];
-  %10.0 : Double(3, 80) = ^Addmm(1, 1, False)(%6, %1, %8.0), uses = [[%55.i0]];
-  %12.0 : Double(20!, 80!) = ^Transpose(0, 1)(%5), uses = [[%14.i2]];
-  %14.0 : Double(3, 80) = ^Addmm(1, 1, False)(%7, %2, %12.0), uses = [[%56.i0]];
-  %56.0 : Double(3!, 20), %56.1 : Double(3!, 20), %56.2 : Double(3!, 20), %56.3 : Double(3!, 20) = Chunk(%14.0), uses = [[%52.i8], [%52.i6], [%52.i4], [%52.i2]];
-  %55.0 : Double(3!, 20), %55.1 : Double(3!, 20), %55.2 : Double(3!, 20), %55.3 : Double(3!, 20) = Chunk(%10.0), uses = [[%52.i7], [%52.i5], [%52.i3], [%52.i1]];
-  %52.0 : Double(3, 20), %52.1 : Double(3, 20) = fusion_group_0(%3, %55.3, %56.3, %55.2, %56.2, %55.1, %56.1, %55.0, %56.0), uses = [[%0.i0], [%0.i1]];
-  return (%52.0, %52.1);
+  %8.0 : Double(10!, 80!), %8.1 : Handle = ^Transpose(0, 1)(%4), uses = [[%11.i2], []];
+  %11.0 : Double(3, 80), %11.1 : Handle = ^Addmm(1, 1, False)(%6, %1, %8.0), uses = [[%70.i0], []];
+  %14.0 : Double(20!, 80!), %14.1 : Handle = ^Transpose(0, 1)(%5), uses = [[%17.i2], []];
+  %17.0 : Double(3, 80), %17.1 : Handle = ^Addmm(1, 1, False)(%7, %2, %14.0), uses = [[%71.i0], []];
+  %71.0 : Double(3!, 20), %71.1 : Double(3!, 20), %71.2 : Double(3!, 20), %71.3 : Double(3!, 20) = Chunk(%17.0), uses = [[%67.i8], [%67.i6], [%67.i4], [%67.i2]];
+  %70.0 : Double(3!, 20), %70.1 : Double(3!, 20), %70.2 : Double(3!, 20), %70.3 : Double(3!, 20) = Chunk(%11.0), uses = [[%67.i7], [%67.i5], [%67.i3], [%67.i1]];
+  %67.0 : Double(3, 20), %67.1 : Double(3, 20) = fusion_group_0(%3, %70.3, %71.3, %70.2, %71.2, %70.1, %71.1, %70.0, %71.0), uses = [[%0.i0], [%0.i1]];
+  return (%67.0, %67.1);
 }
 with fusion_group_0 = graph(%13 : Double(3, 20), %23 : Double(3!, 20), %24 : Double(3!, 20), %26 : Double(3!, 20), %27 : Double(3!, 20), %29 : Double(3!, 20), %30 : Double(3!, 20), %32 : Double(3!, 20), %33 : Double(3!, 20)) {
   %34 : Double(3, 20) = Add(%32, %33), uses = [%22.i0];

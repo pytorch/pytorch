@@ -46,16 +46,29 @@ void MatchJITOps(std::unique_ptr<Graph>& graph) {
     auto new_op = constructor(graph.get(), p);
     new_op->insertAfter(p);
 
-    if(new_op->hasMultipleOutputs()) {
+    if (new_op->hasMultipleOutputs()) {
+      auto uses = p->uses();
+      for (auto & use : uses) {
+        if (use.user->type()->kind() != TypeKind::HandleType) continue;
+        JIT_ASSERT(use.user->uses().size() == 0);
+        use.user->destroy();
+      }
       p->replaceAllUsesWith(new_op);
     } else {
-      // PythonOps are always multireturn. We need to remove the Select node.
-      JIT_ASSERT(p->uses().size() == 1);
-      auto single_select = p->uses()[0].user;
-      JIT_ASSERT(single_select->kind() == kSelect);
-      new_op->setType(single_select->type());
-      single_select->replaceAllUsesWith(new_op);
-      single_select->destroy();
+      // PythonOps are always multireturn.
+      // We need to replace the tensor Select node and remove the handle Select.
+      JIT_ASSERT(p->uses().size() == 2);
+      auto tensor_select = p->uses()[0].user;
+      auto handle_select = p->uses()[1].user;
+      JIT_ASSERT(tensor_select->type()->kind() == TypeKind::TensorType);
+      JIT_ASSERT(handle_select->type()->kind() == TypeKind::HandleType);
+      JIT_ASSERT(tensor_select->kind() == kSelect);
+      JIT_ASSERT(handle_select->kind() == kSelect);
+      JIT_ASSERT(handle_select->uses().size() == 0);
+      new_op->setType(tensor_select->type());
+      tensor_select->replaceAllUsesWith(new_op);
+      tensor_select->destroy();
+      handle_select->destroy();
     }
 
     it.destroyCurrent();

@@ -68,8 +68,16 @@ struct Eval : Function {
   static variable_list filterRelevantOutputs(const variable_list& inputs, const variable_list& outputs);
   edge_order computeInputOrder(const variable_list& inputs, const placeholder_list& inherited_placeholders);
 
+  static std::shared_ptr<Eval> getBackwardEval(const variable_list& inputs, const variable_list& outputs) {
+    auto relevant_outputs = filterRelevantOutputs(inputs, outputs);
+    if (relevant_outputs.size() == 0)
+      return nullptr;
+    return std::dynamic_pointer_cast<Eval>(relevant_outputs[0]->grad_fn);
+  }
+
   function_list roots;
   placeholder_list placeholders;
+  jit::Node* forward_ctx_select = nullptr;
   bool traceable = false;
 
 private:
