@@ -1,6 +1,52 @@
 #include "caffe2/operators/transpose_op.h"
+#ifdef CAFFE2_USE_HPTT
+
+#include <hptt.h>
 
 namespace caffe2 {
+
+namespace {
+template <typename T>
+bool tryRunWithHPTT(const std::vector<int>& axes, const TensorCPU& input, TensorCPU* output) {
+  if (!std::is_same<T, float>::value) {
+    return false;
+  }
+  std::vector<int> axes_cm(axes.size());
+  for (auto i = 0; i < axes.size(); ++i) {
+    axes_cm[i] = axes.size() - axes[i] - 1;
+  }
+  std::vector<int> idims_cm(axes.size());
+  std::vector<int> odims_cm(axes.size());
+  for (auto i = 0; i < axes.size(); ++i) {
+    odims_cm[i] = output->dim32(axes.size() - i - 1);
+    idims_cm[i] = input.dim32(axes.size() - i - 1);
+  }
+
+  auto plan = hptt::create_plan(axes_cm.data(),
+                                axes.size(),
+                                1.0,
+                                input.template data<float>(),
+                                idims_cm.data(),
+                                nullptr,
+                                0.0,
+                                output->template mutable_data<float>(),
+                                nullptr,
+                                hptt::ESTIMATE,
+                                1);
+  if (!plan) {
+    return false;
+  }
+  plan->execute();
+  return true;
+}
+} // namespace
+
+} // namespace caffe2
+#endif
+
+namespace caffe2 {
+
+
 
 #define COMPILE_TIME_MAX_TRANSPOSE_DIMS 10
 
@@ -9,6 +55,14 @@ template <typename T>
 bool TransposeOp<CPUContext>::DoRunWithType() {
   const auto& input = Input(0);
   auto* output = Output(0);
+
+#ifdef CAFFE2_USE_HPTT
+  if (tryRunWithHPTT<T>(axes_, input, output)) {
+    return true;
+  }
+#endif
+
+  int from_inds[COMPILE_TIME_MAX_TRANSPOSE_DIMS] = {0};
   size_t count = input.size();
   int num_axes = axes_.size();
   const T* from_data = input.template data<T>();
