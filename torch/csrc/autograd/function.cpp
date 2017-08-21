@@ -4,6 +4,7 @@
 
 #include "variable.h"
 #include "torch/csrc/jit/ir.h"
+#include "torch/csrc/autograd/functions/special.h"
 
 namespace torch { namespace autograd {
 
@@ -68,11 +69,15 @@ variable_list Function::tracedApply(variable_list inputs) {
   }
 
   if (!passes_state_transparently()) {
-    // TODO: set up a context edge for Evals
+    auto this_eval = dynamic_cast<Eval*>(this);
+    // Evals consume handle from a context edge of forward node
+    if (this_eval)
+      this_node->addInput(this_eval->forward_ctx_select);
     // There's no point in wrapping functions in Eval, if we know they already are
     // part of another Eval subgraph. This is both a small optimization, and
     // it allows us to not implement saved_variables() in many functions.
-    if (!tracing_state->in_eval_subgraph) {
+    bool should_trace_backward = tracing_state->in_eval_subgraph;
+    if (!should_trace_backward) {
       auto saved_vars = saved_variables();
       if (!saved_vars)
         throw std::runtime_error(std::string("saved_variables() needed but not implemented in ") + name());
@@ -82,8 +87,21 @@ variable_list Function::tracedApply(variable_list inputs) {
       }
       tracer::nontraceableBackwardSubgraph(bw_subgraph_inputs, outputs);
     }
+    bool has_backwards_eval = !should_trace_backward || this_eval;
+    if (has_backwards_eval)
+      setUpContextEdge(this_node, num_outputs, inputs, outputs);
   }
   return outputs;
+}
+
+void Function::setUpContextEdge(jit::Node* node, int ctx_output_nr,
+                                const variable_list& inputs, const variable_list& outputs) {
+  jit::Graph* graph = node->owningGraph();
+  jit::Node* ctx_select = graph->appendNode(graph->createSelect(node, ctx_output_nr));
+  ctx_select->setType(std::make_shared<jit::HandleType>());
+  auto backward_eval = Eval::getBackwardEval(inputs, outputs);
+  if (backward_eval)
+    backward_eval->forward_ctx_select = ctx_select;
 }
 
 }} // namespace torch::autograd

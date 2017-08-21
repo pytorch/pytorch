@@ -51,17 +51,11 @@ struct TraceExitHook : autograd::FunctionPostHook {
   void exitTrace(const variable_list& inputs, const variable_list& outputs) {
     detail::_exit(tracing_state, outputs);
     // Unfortunately there's no easy way to get handle of the backward node for current Eval.
-    auto & _eval_fn = getRelevantOutput(inputs, outputs)->grad_fn;
-    auto eval_fn = dynamic_cast<autograd::Eval*>(_eval_fn.get());
+    auto eval_fn = autograd::Eval::getBackwardEval(inputs, outputs);
+    if (!eval_fn) return;
     eval_fn->pre_hooks.emplace_back(std::make_shared<TraceEnterHook>(tracing_state));
     eval_fn->post_hooks.emplace_back(std::make_shared<TraceExitHook>(tracing_state));
     eval_fn->traceable = true;
-  }
-
-  Variable* getRelevantOutput(const variable_list& inputs, const variable_list& outputs) {
-    auto relevant_outputs = autograd::Eval::filterRelevantOutputs(inputs, outputs);
-    JIT_ASSERT(relevant_outputs.size() > 0);
-    return relevant_outputs[0].get();
   }
 
   std::shared_ptr<TracingState> tracing_state;

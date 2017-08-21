@@ -737,6 +737,7 @@ static void trace_create(PyObject* op_obj,
   // subgraphs AND we don't even materialize the forward function).
   if (!passes_state_transparently) {
     tracer::nontraceableBackwardSubgraph(input_vars, output_vars);
+    Function::setUpContextEdge(this_expr, num_outputs, input_vars, output_vars);
   }
 }
 

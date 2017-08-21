@@ -147,7 +147,6 @@ graph(%1, %8) {
 }
 */
 struct HandleType : public Type {
-private:
   friend struct Type;
 
   HandleType()
