@@ -1,0 +1,3 @@
+[submodule "torch/lib/gloo"]
+	path = torch/lib/gloo
+	url = https://github.com/facebookincubator/gloo
