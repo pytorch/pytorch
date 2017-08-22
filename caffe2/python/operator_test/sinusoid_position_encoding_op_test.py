@@ -21,19 +21,22 @@ MAX_TEST_AMPLITUDE = 10.0
 
 class TestSinusoidPositionEncodingOp(hu.HypothesisTestCase):
     @given(
-        positions=hu.arrays(
-            dims=[MAX_TEST_SEQUENCE_LENGTH, MAX_TEST_BATCH_SIZE],
+        positions_vec=hu.arrays(
+            dims=[MAX_TEST_SEQUENCE_LENGTH],
             dtype=np.int32,
             elements=st.integers(1, MAX_TEST_SEQUENCE_LENGTH)
         ),
         embedding_size=st.integers(1, MAX_TEST_EMBEDDING_SIZE),
+        batch_size=st.integers(1, MAX_TEST_BATCH_SIZE),
         alpha=st.floats(MIN_TEST_ALPHA, MAX_TEST_ALPHA),
         amplitude=st.floats(MIN_TEST_AMPLITUDE, MAX_TEST_AMPLITUDE),
         **hu.gcs_cpu_only
     )
     def test_sinusoid_embedding(
-        self, positions, embedding_size, alpha, amplitude, gc, dc
+        self, positions_vec, embedding_size, batch_size, alpha, amplitude, gc, dc
     ):
+        positions = np.tile(positions_vec, [batch_size, 1]).transpose()
+
         op = core.CreateOperator(
             "SinusoidPositionEncoding",
             ["positions"],
