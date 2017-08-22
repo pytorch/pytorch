@@ -5,6 +5,8 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+import six
+
 from caffe2.python import context
 
 
@@ -57,6 +59,13 @@ class Tags(object):
 
     def __exit__(self, type, value, traceback):
         TagContext.current().remove_tags(self.tags)
+
+    def __call__(self, func):
+        @six.wraps(func)
+        def wrapper(*args, **kwargs):
+            with self:
+                return func(*args, **kwargs)
+        return wrapper
 
 
 Tags.TRAIN_ONLY = [Tags.EXCLUDE_FROM_PREDICTION, Tags.EXCLUDE_FROM_EVAL,
