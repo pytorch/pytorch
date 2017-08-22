@@ -214,14 +214,32 @@ class MaxUnpool2d(Function):
         return output
 
     @staticmethod
-    @once_differentiable
     def backward(ctx, grad_output):
-        input, indices = ctx.saved_tensors
+        input, indices = ctx.saved_variables
+        return MaxUnpool2dBackward.apply(input, indices, grad_output, ctx.output_size), None, None
+
+
+class MaxUnpool2dBackward(Function):
+
+    @staticmethod
+    def forward(ctx, input, indices, grad_output, output_size):
+        ctx.output_size = output_size
+        ctx._backend = type2backend[type(input)]
+        ctx.save_for_backward(input, indices)
+
         grad_input = grad_output.new()
         ctx._backend.SpatialMaxUnpooling_updateGradInput(
             ctx._backend.library_state, input, grad_output, grad_input,
             indices, ctx.output_size[1], ctx.output_size[0])
-        return grad_input, None, None
+        return grad_input
+
+    @staticmethod
+    def backward(ctx, ggI):
+        input, indices = ctx.saved_variables
+        gI = None
+        ggO = MaxUnpool2d.apply(ggI, indices, ctx.output_size)
+
+        return gI, None, ggO, None
 
 
 class MaxUnpool3d(Function):

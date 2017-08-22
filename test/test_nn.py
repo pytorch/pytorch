@@ -3965,15 +3965,13 @@ add_test(NewModuleTest(
         nn.MaxPool1d(2, return_indices=True),
         nn.MaxUnpool1d(2)),
     input_size=(1, 1, 4),
-    fullname='MaxUnpool1d_net',
-    check_gradgrad=False,))
+    fullname='MaxUnpool1d_net',))
 add_test(NewModuleTest(
     constructor=lambda: UnpoolingNet(
         nn.MaxPool2d(2, return_indices=True),
         nn.MaxUnpool2d(2)),
     input_size=(1, 1, 2, 4),
-    fullname='MaxUnpool2d_net',
-    check_gradgrad=False,))
+    fullname='MaxUnpool2d_net',))
 add_test(NewModuleTest(
     constructor=lambda: UnpoolingNet(
         nn.MaxPool3d(2, return_indices=True),
