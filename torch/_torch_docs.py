@@ -4069,12 +4069,16 @@ Example::
 
 add_docstr(torch._C.std,
            """
-.. function:: std(input) -> float
+.. function:: std(input, unbiased=True) -> float
 
 Returns the standard-deviation of all elements in the :attr:`input` Tensor.
 
+If :attr:`unbiased` is false, then the standard-deviation will be calculated via
+the biased estimator. Otherwise, Bessel's correction will be used.
+
 Args:
     input (Tensor): the input `Tensor`
+    unbiased (bool): whether to use the unbiased estimation or not
 
 Example::
 
@@ -4088,7 +4092,7 @@ Example::
     1.3782334731508061
 
 
-.. function:: std(input, dim, keepdim=False, out=None) -> Tensor
+.. function:: std(input, dim, keepdim=False, unbiased=True, out=None) -> Tensor
 
 Returns the standard-deviation of each row of the :attr:`input` Tensor in the
 given dimension :attr:`dim`.
@@ -4098,10 +4102,14 @@ If :attr:`keepdim` is true, the output Tensor is of the same size as
 Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting
 in the output Tensor having 1 fewer dimension than :attr:`input`.
 
+If :attr:`unbiased` is false, then the standard-deviation will be calculated via
+the biased estimator. Otherwise, Bessel's correction will be used.
+
 Args:
     input (Tensor): the input `Tensor`
     dim (int): the dimension to reduce
     keepdim (bool): whether the output Tensor has :attr:`dim` retained or not
+    unbiased (bool): whether to use the unbiased estimation or not
     out (Tensor, optional): the result Tensor
 
 Example::
@@ -4709,12 +4717,16 @@ Example:
 
 add_docstr(torch._C.var,
            """
-.. function:: var(input) -> float
+.. function:: var(input, unbiased=True) -> float
 
 Returns the variance of all elements in the :attr:`input` Tensor.
 
+If :attr:`unbiased` is false, then the variance will be calculated via the
+biased estimator. Otherwise, Bessel's correction will be used.
+
 Args:
     input (Tensor): the input `Tensor`
+    unbiased (bool): whether to use the unbiased estimation or not
 
 Example::
 
@@ -4728,7 +4740,7 @@ Example::
     1.899527506513334
 
 
-.. function:: var(input, dim, keepdim=False, out=None) -> Tensor
+.. function:: var(input, dim, keepdim=False, unbiased=True, out=None) -> Tensor
 
 Returns the variance of each row of the :attr:`input` Tensor in the given
 dimension :attr:`dim`.
@@ -4738,10 +4750,14 @@ as :attr:`input` except in the dimension :attr:`dim` where they are of size 1.
 Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in
 the outputs Tensor having 1 fewer dimension than :attr:`input`.
 
+If :attr:`unbiased` is false, then the variance will be calculated via the
+biased estimator. Otherwise, Bessel's correction will be used.
+
 Args:
     input (Tensor): the input `Tensor`
     dim (int): the dimension to reduce
     keepdim (bool): whether the output Tensor has :attr:`dim` retained or not
+    unbiased (bool): whether to use the unbiased estimation or not
     out (Tensor, optional): the result Tensor
 
 Example::
