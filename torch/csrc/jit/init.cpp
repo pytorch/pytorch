@@ -7,6 +7,7 @@
 #include "torch/csrc/jit/dead_code_elimination.h"
 #include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/utils/python_strings.h"
+#include "torch/csrc/DynamicTypes.h"
 
 #ifdef WITH_TOFFEE
 #include "torch/csrc/toffee/export.h"
@@ -46,11 +47,30 @@ PyObject * wrap_pass(PyObject *_unused, PyObject *py_state) {
 }
 
 #ifdef WITH_TOFFEE
-PyObject * export_graph(PyObject *_unused, PyObject *py_state) {
+PyObject * export_graph(PyObject *_unused, PyObject *args) {
   HANDLE_TH_ERRORS
+  PyObject* py_state;
+  PyObject* initializers = nullptr;
+  if (!PyArg_ParseTuple(args, "O|O", &py_state, &initializers)) {
+    return NULL;
+  }
+
+  std::vector<at::Tensor> initializers_;
+  if(initializers) {
+    if (!PySequence_Check(initializers))
+      throw std::runtime_error("expected initializers to be a sequence");
+    auto N = PySequence_Length(initializers);
+    for(Py_ssize_t i = 0; i < N; ++i) {
+      auto tensor = PySequence_GetItem(initializers,i);
+      if(!THPModule_isTensor(tensor))
+        throw std::runtime_error("expected a tensor value in initializer dict");
+      initializers_.push_back(torch::createTensor(tensor));
+    }
+  }
+
   THPUtils_assert(THPTracingState_Check(py_state), "expected a TracingState instance");
   THPTracingState *state = (THPTracingState*)py_state;
-  return THPUtils_packString(ExportGraph(state->cdata->graph));
+  return THPUtils_packString(ExportGraph(state->cdata->graph,initializers_));
   END_HANDLE_TH_ERRORS
 }
 #endif // WITH_TOFFEE
@@ -72,7 +92,7 @@ struct PyMethodDef _THPJIT_methods[] = {
   {"_jit_pass_dco",  (PyCFunction)wrap_pass<EliminateDeadCode>, METH_O,     "dco"},
   {"_jit_pass_lint", (PyCFunction)wrap_pass<LintGraph>,       METH_O,       "lint"},
 #ifdef WITH_TOFFEE
-  {"_jit_pass_export", (PyCFunction)export_graph,             METH_O,       "export"},
+  {"_jit_pass_export", (PyCFunction)export_graph,             METH_VARARGS,       "export"},
 #endif // WITH_TOFFEE
   {"_jit_run_cpp_tests",(PyCFunction)run_cpp_tests,           METH_NOARGS,  NULL},
   {NULL}

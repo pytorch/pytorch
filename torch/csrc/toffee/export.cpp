@@ -19,7 +19,7 @@ std::string node_name(Node* n) {
 }
 
 // Exports a graph to ToffeeIR
-std::string ExportGraph(std::shared_ptr<Graph>& g) {
+std::string ExportGraph(std::shared_ptr<Graph>& g, const std::vector<at::Tensor> & initializers) {
   toffee::GraphProto p_g;
   torch::autograd::PrimSpecContext ctx;
   ctx.graph = &p_g;
@@ -30,6 +30,24 @@ std::string ExportGraph(std::shared_ptr<Graph>& g) {
   }
   for (auto output : g->outputs()) {
     p_g.add_output(node_name(output));
+  }
+
+  int inputs_count = 0;
+  for (auto & tensor : initializers) {
+    std::string name = p_g.input(inputs_count++);
+    auto p = p_g.add_initializer();
+    p->set_name(name);
+    for(auto d : tensor.sizes()) {
+      p->add_dims(d);
+    }
+    p->set_data_type(toffee::TensorProto_DataType_FLOAT);
+    //TODO: other types, we force conversion here
+    at::Tensor cont = tensor.toType(at::CPU(at::kFloat));
+    float * data = cont.data<float>();
+    int64_t N = cont.numel();
+    for(int64_t i = 0; i < N; ++i) {
+      p->add_float_data(data[i]);
+    }
   }
   for (auto node : g->nodes()) {
     if (node->kind() == kSelect) {
