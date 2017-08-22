@@ -3990,21 +3990,18 @@ new_module_tests = [
         module_name='AdaptiveMaxPool1d',
         constructor_args=(3,),
         input=torch.rand(1, 3, 5),
-        check_gradgrad=False,
     ),
     dict(
         module_name='AdaptiveMaxPool2d',
         constructor_args=(3,),
         input=torch.rand(1, 3, 5, 6),
         desc='single',
-        check_gradgrad=False,
     ),
     dict(
         module_name='AdaptiveMaxPool2d',
         constructor_args=((3, 4),),
         input=torch.rand(1, 3, 5, 6),
         desc='tuple',
-        check_gradgrad=False,
     ),
     dict(
         module_name='AdaptiveAvgPool1d',
