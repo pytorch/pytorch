@@ -1,8 +1,10 @@
-graph(%1 : Double(1), %2 : Double(1)) {
+graph(%1 : Double(1)
+      %2 : Double(1)) {
   %19.0 : Double(1) = fusion_group_0(%1, %2), uses = [[%0.i0]];
   return (%19.0);
 }
-with fusion_group_0 = graph(%5 : Double(1), %8 : Double(1)) {
+with fusion_group_0 = graph(%5 : Double(1)
+      %8 : Double(1)) {
   %9 : Double(1) = Add(%5, %8), uses = [%7.i1];
   %7 : Double(1) = Mul(%5, %9), uses = [%4.i0];
   %4 : Double(1) = Tanh(%7), uses = [%2.i0];

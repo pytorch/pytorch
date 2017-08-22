@@ -1,4 +1,10 @@
-graph(%1 : Double(3, 10), %2 : Double(3, 20), %3 : Double(3, 20), %4 : Double(80, 10), %5 : Double(80, 20), %6 : Double(80), %7 : Double(80)) {
+graph(%1 : Double(3, 10)
+      %2 : Double(3, 20)
+      %3 : Double(3, 20)
+      %4 : Double(80, 10)
+      %5 : Double(80, 20)
+      %6 : Double(80)
+      %7 : Double(80)) {
   %8.0 : Double(10!, 80!), %8.1 : Handle = ^Transpose(0, 1)(%4), uses = [[%11.i2], []];
   %11.0 : Double(3, 80), %11.1 : Handle = ^Addmm(1, 1, False)(%6, %1, %8.0), uses = [[%70.i0], []];
   %14.0 : Double(20!, 80!), %14.1 : Handle = ^Transpose(0, 1)(%5), uses = [[%17.i2], []];
@@ -8,7 +14,15 @@ graph(%1 : Double(3, 10), %2 : Double(3, 20), %3 : Double(3, 20), %4 : Double(80
   %67.0 : Double(3, 20), %67.1 : Double(3, 20) = fusion_group_0(%3, %70.3, %71.3, %70.2, %71.2, %70.1, %71.1, %70.0, %71.0), uses = [[%0.i0], [%0.i1]];
   return (%67.0, %67.1);
 }
-with fusion_group_0 = graph(%13 : Double(3, 20), %23 : Double(3!, 20), %24 : Double(3!, 20), %26 : Double(3!, 20), %27 : Double(3!, 20), %29 : Double(3!, 20), %30 : Double(3!, 20), %32 : Double(3!, 20), %33 : Double(3!, 20)) {
+with fusion_group_0 = graph(%13 : Double(3, 20)
+      %23 : Double(3!, 20)
+      %24 : Double(3!, 20)
+      %26 : Double(3!, 20)
+      %27 : Double(3!, 20)
+      %29 : Double(3!, 20)
+      %30 : Double(3!, 20)
+      %32 : Double(3!, 20)
+      %33 : Double(3!, 20)) {
   %34 : Double(3, 20) = Add(%32, %33), uses = [%22.i0];
   %31 : Double(3, 20) = Add(%29, %30), uses = [%20.i0];
   %28 : Double(3, 20) = Add(%26, %27), uses = [%18.i0];
