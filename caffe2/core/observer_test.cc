@@ -2,6 +2,8 @@
 #include <gtest/gtest.h>
 #include "caffe2/core/common.h"
 #include "caffe2/core/net.h"
+#include "caffe2/core/net_dag.h"
+#include "caffe2/core/net_simple.h"
 #include "caffe2/core/observer.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/registry.h"

@@ -1,7 +1,7 @@
 #include <htrace.hpp>
 
 #include "caffe2/contrib/prof/htrace_conf.h"
-#include "caffe2/core/net.h"
+#include "caffe2/core/net_dag.h"
 #include "caffe2/core/operator.h"
 
 namespace caffe2 {

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "caffe2/core/net.h"
+#include "caffe2/core/net_dag.h"
 #include "caffe2/proto/prof_dag.pb.h"
 
 namespace caffe2 {

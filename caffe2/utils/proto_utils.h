@@ -23,6 +23,9 @@ using ::google::protobuf::MessageLite;
 // protobuf-lite instead.
 std::string DeviceTypeName(const int32_t& d);
 
+// Returns if the two DeviceOptions are pointing to the same device.
+bool IsSameDevice(const DeviceOption& lhs, const DeviceOption& rhs);
+
 // Common interfaces that reads file contents into a string.
 bool ReadStringFromFile(const char* filename, string* str);
 bool WriteStringToFile(const string& str, const char* filename);

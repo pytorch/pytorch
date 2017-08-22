@@ -1,4 +1,4 @@
-#include "caffe2/core/net.h"
+#include "caffe2/core/net_dag.h"
 
 #include <set>
 #include <stack>
@@ -19,11 +19,6 @@ CAFFE2_DEFINE_bool(
 namespace caffe2 {
 
 namespace {
-
-bool sameDevice(const DeviceOption& lhs, const DeviceOption& rhs) {
-  return lhs.device_type() == rhs.device_type() &&
-      lhs.cuda_gpu_id() == rhs.cuda_gpu_id();
-}
 
 using OpIndex = int;
 DAGNetBase::ExecutionChains singleChains(
@@ -178,7 +173,7 @@ DAGNetBase::ExecutionChains computeChains(
     return (
         node_seen_count[cur.first] == 1 &&
         (chain.size() == 0 ||
-         sameDevice(
+         IsSameDevice(
              orig_nodes[cur.first].operator_->device_option(),
              orig_nodes[chain.back()].operator_->device_option())));
   };
@@ -613,33 +608,24 @@ vector<float> DAGNetBase::TEST_Benchmark(
   return vector<float>{millis / main_runs};
 }
 
-class DAGNet : public DAGNetBase {
- public:
-  using DAGNetBase::DAGNetBase;
+bool DAGNet::RunAt(const std::vector<int>& chain) {
+  const auto& net_name = name_.c_str();
+  for (const auto i : chain) {
+    const auto& opdef = operator_nodes_[i].operator_->debug_def();
+    const auto& op = operator_nodes_[i].operator_.get();
 
- protected:
-  bool RunAt(const std::vector<int>& chain) override {
-    const auto& net_name = name_.c_str();
-    for (const auto i : chain) {
-      const auto& opdef = operator_nodes_[i].operator_->debug_def();
-      const auto& op = operator_nodes_[i].operator_.get();
-
-      const auto& op_name = opdef.name().c_str();
-      const auto& op_type = opdef.type().c_str();
-      CAFFE_SDT(operator_start, net_name, op_name, op_type, op);
-      const auto success = operator_nodes_[i].operator_->Run();
-      CAFFE_SDT(operator_done, net_name, op_name, op_type, op);
-      if (!success) {
-        return false;
-      }
+    const auto& op_name = opdef.name().c_str();
+    const auto& op_type = opdef.type().c_str();
+    CAFFE_SDT(operator_start, net_name, op_name, op_type, op);
+    const auto success = operator_nodes_[i].operator_->Run();
+    CAFFE_SDT(operator_done, net_name, op_name, op_type, op);
+    if (!success) {
+      return false;
     }
-    return true;
   }
-};
-
-namespace {
+  return true;
+}
 
 REGISTER_NET(dag, DAGNet);
-}
 
 } // namespace caffe2
