@@ -7,9 +7,11 @@ import numpy as np
 import unittest
 
 from caffe2.proto import caffe2_pb2
-from caffe2.python import core, workspace, test_util, model_helper, brew
+from caffe2.python import core, workspace, test_util, model_helper, brew, build
 
 
+@unittest.skipIf(build.CAFFE2_NO_OPERATOR_SCHEMA,
+                 'Built with CAFFE2_NO_OPERATOR_SCHEMA')
 class TestShapeInference(test_util.TestCase):
 
     def testShapeInferenceSimpleFC(self):

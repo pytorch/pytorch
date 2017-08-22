@@ -693,6 +693,14 @@ void addGlobalMethods(py::module& m) {
 #endif // CAFFE2_HAS_MKL_DNN
       );
 
+  m.attr("define_caffe2_no_operator_schema") = py::bool_(
+#ifdef CAFFE2_NO_OPERATOR_SCHEMA
+      true
+#else // CAFFE2_NO_OPERATOR_SCHEMA
+      false
+#endif // CAFFE2_NO_OPERATOR_SCHEMA
+      );
+
   m.def("set_per_op_engine_pref", [](const PerOpEnginePrefType& pref) -> void {
     caffe2::SetPerOpEnginePref(pref);
   });
