@@ -58,7 +58,7 @@ class Tanh(InplaceFunction):
     def primspec(i, inplace=False):
         if inplace:
             return None
-        return torch.toffee.op("TanH", i)
+        return torch.toffee.op("Tanh", i)
 
     @staticmethod
     def forward(ctx, i, inplace=False):
