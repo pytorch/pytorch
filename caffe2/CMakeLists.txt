@@ -91,20 +91,9 @@ if (Caffe2_EXTERNAL_DEPENDENCIES)
 endif()
 
 # Write the macros file.
-file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/caffe2/core)
-file(WRITE ${PROJECT_BINARY_DIR}/caffe2/core/macros.h
-     "// Automatically generated header file for caffe2 macros. These \n"
-     "// macros are used to build the Caffe2 binary, and if you are \n"
-     "// building a dependent library, they will need to be set as well \n"
-     "// for your program to link correctly.\n\n"
-     "#pragma once\n\n")
-get_directory_property(tmp DIRECTORY ${PROJECT_SOURCE_DIR} COMPILE_DEFINITIONS)
-foreach(item ${tmp})
-  if (${item} MATCHES "CAFFE2.*")
-    file(APPEND ${PROJECT_BINARY_DIR}/caffe2/core/macros.h
-         "\n#ifndef ${item}\n#define ${item}\n#endif // ${item}\n")
-  endif()
-endforeach()
+configure_file(
+    ${PROJECT_SOURCE_DIR}/caffe2/core/macros.h.in
+    ${PROJECT_BINARY_DIR}/caffe2/core/macros.h)
 
 # Installing the header files
 install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
