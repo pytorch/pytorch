@@ -79,7 +79,16 @@ std::string ExportGraph(std::shared_ptr<Graph>& g) {
       toffee::NodeProto* p_n = generic_node();
       p_n->set_op_type("TanH");
     IR_ELSEIF(Constant)
-      throw std::runtime_error("Constant not supported yet");
+      // TODO: Do I need to assert here? error check?
+      if (!value->t(kValue).defined()) {
+        // do nothing
+        // TODO: Would be nice if we could easily assert all uses
+        // of undefined constants hard-code behavior in the export.
+        // Right now this will just silently generate dangling
+        // references.
+      } else {
+        throw std::runtime_error("Constant not supported yet");
+      }
     IR_ELSEIF(Return)
       JIT_ASSERT(0);
     IR_ELSEIF(Select)

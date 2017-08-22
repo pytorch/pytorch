@@ -1,0 +1,36 @@
+node {
+  input: "3"
+  input: "1"
+  input: "2"
+  input: "saved_mean_2_0"
+  input: "saved_var_2_0"
+  output: "5"
+  output: "saved_mean_2_0"
+  output: "saved_var_2_0"
+  output: "batch_norm_dead_output_30"
+  output: "batch_norm_dead_output_40"
+  op_type: "SpatialBN"
+  attribute {
+    name: "is_test"
+    i: 0
+  }
+  attribute {
+    name: "epsilon"
+    f: 1e-05
+  }
+  attribute {
+    name: "order"
+    s: "NCHW"
+  }
+  attribute {
+    name: "momentum"
+    f: 0.9
+  }
+}
+name: "torch-jit-export"
+input: "1"
+input: "2"
+input: "3"
+input: "saved_mean_2_0"
+input: "saved_var_2_0"
+output: "5"

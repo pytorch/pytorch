@@ -5,9 +5,16 @@ import unittest
 from torch.autograd import Variable, Function
 from common import TestCase, run_tests
 
+try:
+    import torchvision
+    HAS_TORCHVISION = True
+except ImportError:
+    HAS_TORCHVISION = False
+
 # TODO: Un-jankify this
 toffee_only = unittest.skipIf(not hasattr(
     torch._C, "_jit_pass_export"), "no Toffee support")
+skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 
 class TestJit(TestCase):
@@ -263,6 +270,42 @@ class TestJit(TestCase):
     def test_cpp(self):
         torch._C._jit_run_cpp_tests()
 
+    def test_batchnorm(self):
+        x = Variable(torch.randn(2, 2).fill_(1.0), requires_grad=True)
+        trace, _ = torch.jit.record_trace(nn.BatchNorm2d(2), x)
+        self.assertExpected(str(trace))
+
+    @toffee_only
+    def test_batchnorm_export(self):
+        x = Variable(torch.randn(2, 2).fill_(1.0), requires_grad=True)
+        trace, _ = torch.jit.record_trace(nn.BatchNorm2d(2), x)
+        self.assertExpected(torch._C._jit_pass_export(trace))
+
+    def test_conv(self):
+        x = Variable(torch.randn(20, 16, 50, 40).fill_(1.0), requires_grad=True)
+        trace, _ = torch.jit.record_trace(nn.Conv2d(16, 13, 3, bias=False), x)
+        self.assertExpected(str(trace))
+
+    @toffee_only
+    def test_conv_export(self):
+        x = Variable(torch.randn(20, 16, 50, 40).fill_(1.0), requires_grad=True)
+        trace, _ = torch.jit.record_trace(nn.Conv2d(16, 13, 3, bias=False), x)
+        self.assertExpected(torch._C._jit_pass_export(trace))
+
+    @skipIfNoTorchVision
+    def test_alexnet(self):
+        x = Variable(torch.randn(10, 3, 224, 224).fill_(1.0), requires_grad=True)
+        trace, _ = torch.jit.record_trace(torchvision.models.AlexNet(), x)
+        self.assertExpected(str(trace))
+        # NB: Purposely NOT testing protobuf export here
+
+    @skipIfNoTorchVision
+    def test_densenet(self):
+        x = Variable(torch.randn(10, 3, 224, 224).fill_(1.0), requires_grad=True)
+        dense121 = torchvision.models.DenseNet(num_init_features=64, growth_rate=32,
+                                               block_config=(6, 12, 24, 16))
+        trace, _ = torch.jit.record_trace(dense121, x)
+        # Densenet trace is pretty large, so we don't assert on it
 
 if __name__ == '__main__':
     run_tests()

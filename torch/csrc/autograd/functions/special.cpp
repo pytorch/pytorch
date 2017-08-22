@@ -26,8 +26,12 @@ auto Eval::getSubgraph(const variable_list& inputs, const variable_list& outputs
   // Prepare a set of all edges that shouldn't be followed during the search
   edge_set input_edges;
   input_edges.reserve(inputs.size());
-  for (auto & input : inputs)
+  for (auto & input : inputs) {
+    // TODO: Remove me when we get rid of null Variables
+    // See https://github.com/pytorch/pytorch/issues/2513
+    if (!input) continue;
     input_edges.emplace(input->grad_fn ? input->grad_fn : input->grad_accumulator.lock(), input->output_nr);
+  }
 
   // This is used to stop the search in situation 2 and find the corresponding placeholders.
   std::unordered_map<edge_type, std::shared_ptr<EvalOutput>, edge_hasher> inherited_edges;
@@ -38,7 +42,7 @@ auto Eval::getSubgraph(const variable_list& inputs, const variable_list& outputs
   }
 
   // Regular DFS data structures
-  std::unordered_set<Function*> seen;
+  std::unordered_set<Function*> seen { nullptr };
   std::vector<Function*> queue;
   for (auto & output : outputs) {
     auto ptr = output->grad_fn.get();
@@ -49,6 +53,7 @@ auto Eval::getSubgraph(const variable_list& inputs, const variable_list& outputs
 
   while (!queue.empty()) {
     auto fn = queue.back(); queue.pop_back();
+    JIT_ASSERT(fn);
     fn->tracing_state->in_eval_subgraph = true;
     int num_edges = fn->next_functions.size();
     for (int i = 0; i < num_edges; ++i) {
@@ -91,9 +96,16 @@ variable_list Eval::filterRelevantOutputs(const variable_list& inputs, const var
   relevant_outputs.reserve(outputs.size());
   edge_set ignored_grad_fns;
   ignored_grad_fns.reserve(inputs.size());
-  for (auto& input : inputs)
+  for (auto& input : inputs) {
+    // TODO: Remove me when we get rid of null Variables
+    // See https://github.com/pytorch/pytorch/issues/2513
+    if (!input) continue;
     ignored_grad_fns.emplace(input->grad_fn, input->output_nr);
+  }
   for (auto& output : outputs) {
+    // TODO: Remove me when we get rid of null Variables
+    // See https://github.com/pytorch/pytorch/issues/2513
+    if (!output) continue;
     if (!output->grad_fn) continue;
     if (ignored_grad_fns.count(std::make_pair(output->grad_fn, output->output_nr)) > 0) continue;
     relevant_outputs.emplace_back(output);
@@ -104,11 +116,15 @@ variable_list Eval::filterRelevantOutputs(const variable_list& inputs, const var
 auto Eval::computeInputOrder(const variable_list& inputs, const placeholder_list& inherited_placeholders) -> edge_order {
   edge_order input_order;
   int idx = 0;
-  for (auto & input : inputs)
+  for (auto & input : inputs) {
+    // TODO: Remove me when we get rid of null Variables
+    // See https://github.com/pytorch/pytorch/issues/2513
+    if (!input) continue;
     input_order.emplace(
       std::make_pair(input->grad_fn ? input->grad_fn : input->grad_accumulator.lock(), input->output_nr),
       idx++
     );
+  }
   for (auto & placeholder : inherited_placeholders)
     input_order.emplace(placeholder->next_edge, idx++);
   return input_order;

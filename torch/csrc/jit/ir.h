@@ -716,7 +716,13 @@ public:
     n->i_(kDim, dim);
     return n;
   }
+  Node * createUndefined() {
+    auto n = create(kConstant);
+    n->t_(kValue,at::Tensor());
+    return n;
+  }
   Node * createConstant(const at::Tensor& ref) {
+    JIT_ASSERT(ref.defined());
     AutoGPU guard(ref.type().isCuda() ? ref.get_device() : -1);
     auto n = create(kConstant);
     n->t_(kValue,ref.clone());
