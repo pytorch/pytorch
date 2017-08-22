@@ -13,7 +13,7 @@ node {
 node {
   input: "7"
   output: "10"
-  op_type: "TanH"
+  op_type: "Tanh"
 }
 node {
   input: "10"
