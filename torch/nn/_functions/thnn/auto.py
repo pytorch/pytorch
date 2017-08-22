@@ -6,7 +6,6 @@ from torch._thnn.utils import parse_header, THNN_H_PATH
 from torch.autograd import Variable
 from torch.autograd.function import Function, InplaceFunction, once_differentiable
 from torch._thnn import type2backend
-from .auto_double_backwards import double_backwards_fns
 
 from . import _all_functions
 
@@ -332,5 +331,7 @@ def _generate_function_classes(scope_dict):
             _all_functions.append(cls)
             _all_functions.append(backward_cls)
 
+
+from .auto_double_backwards import double_backwards_fns
 
 _generate_function_classes(locals())
