@@ -8,6 +8,7 @@ from functools import wraps
 from itertools import product
 from copy import deepcopy
 import __main__
+import errno
 
 import torch
 import torch.cuda
@@ -296,10 +297,13 @@ class TestCase(unittest.TestCase):
             try:
                 with open(expected_file) as f:
                     expected = f.read()
-            except FileNotFoundError:
-                raise RuntimeError(
-                    ("No expect file exists; to accept the current output, run:\n"
-                     "python {} {} --accept").format(__main__.__file__, munged_id))
+            except IOError as e:
+                if e.errno == errno.ENOENT:
+                    raise RuntimeError(
+                        ("No expect file exists; to accept the current output, run:\n"
+                         "python {} {} --accept").format(__main__.__file__, munged_id))
+                else:
+                    raise
             if hasattr(self, "assertMultiLineEqual"):
                 # Python 2.7 only
                 # NB: Python considers lhs "old" and rhs "new".
