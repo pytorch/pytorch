@@ -22,6 +22,7 @@ from torch.nn.utils import clip_grad_norm
 from torch.autograd import Variable, gradcheck
 from torch.autograd.gradcheck import gradgradcheck
 from torch.nn import Parameter
+from torch.nn.parallel._functions import Broadcast
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     module_tests, criterion_tests, TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
     TEST_CUDNN_VERSION
@@ -64,11 +65,18 @@ def _assertGradAndGradgradChecks(test_case, apply_fn, inputs):
     # if we get whether this failed on the gradcheck or the gradgradcheck.
     test_case.assertTrue(gradcheck(apply_fn, inputs))
     dummy_out = apply_fn(*inputs)
+
+    def randn_match_cpu_gpu(x):
+        a = torch.randn(x.size())
+        if x.is_cuda:
+            a = a.cuda(x.get_device())
+        return a
+
     if isinstance(dummy_out, tuple):
-        grad_y = tuple(Variable(torch.randn(x.size()), requires_grad=x.requires_grad)
+        grad_y = tuple(Variable(randn_match_cpu_gpu(x), requires_grad=x.requires_grad)
                        for x in dummy_out if isinstance(x, Variable))
     else:
-        grad_y = (Variable(torch.randn(dummy_out.size()), requires_grad=dummy_out.requires_grad),)
+        grad_y = (Variable(randn_match_cpu_gpu(dummy_out), requires_grad=dummy_out.requires_grad),)
 
     test_case.assertTrue(gradgradcheck(apply_fn, inputs, grad_y,))
 
@@ -1162,6 +1170,7 @@ class TestNN(NNTestCase):
         result[0].backward(grad)
         self.assertEqual(x.grad.data[:2], grad)
         self.assertEqual(x.grad.data[2:], grad.clone().zero_())
+        _assertGradAndGradgradChecks(self, lambda y: dp.scatter(y, (0, 1)), (x,))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_scatter_cpu(self):
@@ -1190,6 +1199,7 @@ class TestNN(NNTestCase):
         result.backward(grad)
         self.assertEqual(inputs[0].grad.data, grad[:2])
         self.assertEqual(inputs[1].grad.data, grad[2:])
+        _assertGradAndGradgradChecks(self, lambda x, y: dp.gather((x, y), output_device), inputs)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_gather_cpu(self):
@@ -1198,6 +1208,16 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_gather_gpu(self):
         self._test_gather(0)
+
+    def _test_broadcast_double_backwards(self, *tensors):
+        variables = tuple(Variable(t, requires_grad=True) for t in tensors)
+        _assertGradAndGradgradChecks(self, lambda *i: Broadcast.apply((0, 1), *i), variables)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    def test_broadcast_double_backwards_gpu(self):
+        self._test_broadcast_double_backwards(torch.randn(4, 4).cuda(),
+                                              torch.randn(4, 4).cuda(),
+                                              torch.randn(4, 4).cuda())
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_replicate(self):

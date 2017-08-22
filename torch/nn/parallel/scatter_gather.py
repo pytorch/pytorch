@@ -12,7 +12,7 @@ def scatter(inputs, target_gpus, dim=0):
     """
     def scatter_map(obj):
         if isinstance(obj, Variable):
-            return Scatter(target_gpus, dim=dim)(obj)
+            return Scatter.apply(target_gpus, None, dim, obj)
         assert not torch.is_tensor(obj), "Tensors not supported in scatter."
         if isinstance(obj, tuple):
             return tuple(zip(*map(scatter_map, obj)))
@@ -43,7 +43,7 @@ def gather(outputs, target_device, dim=0):
     def gather_map(outputs):
         out = outputs[0]
         if isinstance(out, Variable):
-            return Gather(target_device, dim=dim)(*outputs)
+            return Gather.apply(target_device, dim, *outputs)
         if out is None:
             return None
         return type(out)(map(gather_map, zip(*outputs)))
