@@ -332,6 +332,69 @@ __global__ void length_sum_gradient_kernel(
   }
 }
 
+template <typename T>
+__global__ void length_weighted_sum_gradient_kernel(
+    const T* grad_in,
+    const T* weights_in,
+    T* grad_out,
+    const int* prefix_sum_length_data,
+    int N,
+    int post,
+    int len_length) {
+  // len_length blocks
+  int group = blockIdx.x;
+
+  int start = group == 0 ? 0 : prefix_sum_length_data[group - 1];
+  int end = prefix_sum_length_data[group];
+  CUDA_KERNEL_ASSERT(start <= N);
+  CUDA_KERNEL_ASSERT(end <= N);
+
+  for (int i = threadIdx.x; i < post; i += blockDim.x) {
+    for (int line = start; line < end; ++line) {
+      grad_out[line * post + i] = weights_in[line] * grad_in[group * post + i];
+    }
+  }
+}
+
+template <typename T, typename IndexType, int NumThreads>
+__global__ void length_weighted_sum_with_main_input_gradient_kernel(
+    const T* grad_in,
+    const T* weights_in,
+    const T* data_in,
+    const IndexType* indices,
+    T* data_grad_out,
+    T* weights_grad_out,
+    const int* prefix_sum_length_data,
+    int N,
+    int post,
+    int len_length) {
+  // len_length blocks
+  int group = blockIdx.x;
+
+  int start = group == 0 ? 0 : prefix_sum_length_data[group - 1];
+  int end = prefix_sum_length_data[group];
+  CUDA_KERNEL_ASSERT(start <= N);
+  CUDA_KERNEL_ASSERT(end <= N);
+
+  // todo figure this num threads thing
+  typedef cub::BlockReduce<float, NumThreads> BlockReduce;
+  __shared__ typename BlockReduce::TempStorage temp_storage;
+
+  for (int line = start; line < end; ++line) {
+    T w_grad = 0;
+    for (int i = threadIdx.x; i < post; i += blockDim.x) {
+      auto g_in = grad_in[group * post + i];
+      data_grad_out[line * post + i] = weights_in[line] * g_in;
+      w_grad += g_in * data_in[indices[line] * post + i];
+    }
+    w_grad = BlockReduce(temp_storage).Reduce(w_grad, cub::Sum());
+    if (threadIdx.x == 0) {
+      weights_grad_out[line] = w_grad;
+    }
+    __syncthreads();
+  }
+}
+
 template <typename T, typename IndexType>
 __global__ void sparse_length_sum_kernel(
     const T* in,
@@ -354,6 +417,34 @@ __global__ void sparse_length_sum_kernel(
     T sum = (T)0;
     for (int line = start; line < end; ++line) {
       sum += in[indices[line] * post + i];
+    }
+    out[group * post + i] = sum;
+  }
+}
+
+template <typename T, typename IndexType>
+__global__ void sparse_length_weighted_sum_kernel(
+    const T* in,
+    const T* in_weights,
+    T* out,
+    const int* prefix_sum_length_data,
+    const IndexType* indices,
+    int N,
+    int post,
+    int len_length,
+    int len_indices) {
+  // len_length blocks
+  int group = blockIdx.x;
+
+  int start = group == 0 ? 0 : prefix_sum_length_data[group - 1];
+  int end = prefix_sum_length_data[group];
+  CUDA_KERNEL_ASSERT(start <= len_indices);
+  CUDA_KERNEL_ASSERT(end <= len_indices);
+
+  for (int i = threadIdx.x; i < post; i += blockDim.x) {
+    T sum = (T)0;
+    for (int line = start; line < end; ++line) {
+      sum += in_weights[line] * in[indices[line] * post + i];
     }
     out[group * post + i] = sum;
   }
@@ -488,6 +579,119 @@ class CUDASparseLengthsSumOp : public Operator<CUDAContext> {
   }
 
   enum { INDICES = 1, LENGTHS = 1 + (SparseFused ? 1 : 0) };
+
+ private:
+  // menber field to manage memory
+  Tensor<Context> inclusive_scan_buffer_;
+  Tensor<Context> inclusive_scan_length_buffer_;
+};
+
+template <typename T, class Context = CUDAContext, bool SparseFused = true>
+class CUDASparseLengthsWeightedSumOp : public Operator<CUDAContext> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  CUDASparseLengthsWeightedSumOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CUDAContext>(operator_def, ws) {}
+
+  ~CUDASparseLengthsWeightedSumOp() {}
+
+  bool RunOnDevice() override {
+    return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
+        this, Input(INDICES));
+  }
+
+  template <typename IndexType>
+  bool DoRunWithType() {
+    auto& dataInput = Input(DATA);
+    auto& weightsInput = Input(WEIGHTS);
+    auto& indicesInput = Input(INDICES);
+    auto& lengthsInput = Input(LENGTHS);
+    auto* output = Output(0);
+
+    CAFFE_ENFORCE_EQ(1, weightsInput.ndim(), "WEIGHTS must be a vector");
+    CAFFE_ENFORCE_EQ(1, indicesInput.ndim(), "INDICES must be a vector");
+    CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
+
+    const TIndex dataSize = dataInput.dim(0);
+    // Either first dim the data or how much we pull in indexies from it
+    const TIndex dataToReduceSize = indicesInput.dim(0);
+    const TIndex outputSize = lengthsInput.dim(0);
+    const int len_length = outputSize;
+
+    auto shape = dataInput.dims();
+    shape[0] = outputSize;
+    output->Resize(shape);
+
+    inclusive_scan_length_buffer_.ResizeLike(lengthsInput);
+    inclusive_scan_wrapper(
+        lengthsInput.template data<int>(),
+        len_length,
+        &inclusive_scan_buffer_,
+        &inclusive_scan_length_buffer_,
+        &context_);
+
+    const IndexType* indices = indicesInput.template data<IndexType>();
+    const T* in_data = dataInput.template data<T>();
+    const T* in_weights = weightsInput.template data<T>();
+    T* out_data = output->template mutable_data<T>();
+    auto* prefix_sum_length_data =
+        inclusive_scan_length_buffer_.template data<int>();
+    int N = dataSize;
+    int post = dataInput.size_from_dim(1);
+
+    if (post > 128) {
+      sparse_length_weighted_sum_kernel<T, IndexType>
+          <<<len_length, 512, 0, context_.cuda_stream()>>>(
+              in_data,
+              in_weights,
+              out_data,
+              prefix_sum_length_data,
+              indices,
+              N,
+              post,
+              len_length,
+              dataToReduceSize);
+    } else if (post > 64) {
+      sparse_length_weighted_sum_kernel<T, IndexType>
+          <<<len_length, 128, 0, context_.cuda_stream()>>>(
+              in_data,
+              in_weights,
+              out_data,
+              prefix_sum_length_data,
+              indices,
+              N,
+              post,
+              len_length,
+              dataToReduceSize);
+    } else if (post > 32) {
+      sparse_length_weighted_sum_kernel<T, IndexType>
+          <<<len_length, 64, 0, context_.cuda_stream()>>>(
+              in_data,
+              in_weights,
+              out_data,
+              prefix_sum_length_data,
+              indices,
+              N,
+              post,
+              len_length,
+              dataToReduceSize);
+    } else {
+      sparse_length_weighted_sum_kernel<T, IndexType>
+          <<<len_length, 32, 0, context_.cuda_stream()>>>(
+              in_data,
+              in_weights,
+              out_data,
+              prefix_sum_length_data,
+              indices,
+              N,
+              post,
+              len_length,
+              dataToReduceSize);
+    }
+    return true;
+  }
+
+  enum { DATA = 0, WEIGHTS = 1, INDICES = 2, LENGTHS = 3 };
 
  private:
   // menber field to manage memory
@@ -670,6 +874,9 @@ REGISTER_CUDA_OPERATOR_STR(
     "SparseLengthsSum",
     CUDASparseLengthsSumOp<float, CUDAContext, true>);
 REGISTER_CUDA_OPERATOR_STR(
+    "SparseLengthsWeightedSum",
+    CUDASparseLengthsWeightedSumOp<float, CUDAContext, true>);
+REGISTER_CUDA_OPERATOR_STR(
     "UnsortedSegmentSum",
     CUDAUnsortedSegmentSumOp<float, int, false>);
 REGISTER_CUDA_OPERATOR_STR(
@@ -746,6 +953,237 @@ class CUDASparseLengthsSumGradientWithIndicesOp : public Operator<CUDAContext> {
   Tensor<Context> inclusive_scan_buffer_;
   Tensor<Context> inclusive_scan_length_buffer_;
 };
+
+template <typename T, class Context = CUDAContext>
+class CUDASparseLengthsWeightedSumGradientWithIndicesOp
+    : public Operator<CUDAContext> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  CUDASparseLengthsWeightedSumGradientWithIndicesOp(
+      const OperatorDef& operator_def,
+      Workspace* ws)
+      : Operator<CUDAContext>(operator_def, ws) {}
+
+  ~CUDASparseLengthsWeightedSumGradientWithIndicesOp() {}
+
+  bool RunOnDevice() override {
+    auto& weightsInput = Input(0);
+    auto& segmentGradsInput = Input(1);
+    auto& lengthsInput = Input(2);
+    auto& indicesInput = Input(3);
+    auto* dataGradsOutput = Output(0);
+    CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
+    CAFFE_ENFORCE_EQ(1, weightsInput.ndim(), "WEIGHTS must be a vector");
+    int len_length = lengthsInput.dim(0);
+    CAFFE_ENFORCE(segmentGradsInput.ndim() > 0);
+    CAFFE_ENFORCE(len_length == segmentGradsInput.dim(0));
+
+    inclusive_scan_length_buffer_.ResizeLike(lengthsInput);
+    inclusive_scan_wrapper(
+        lengthsInput.template data<int>(),
+        len_length,
+        &inclusive_scan_buffer_,
+        &inclusive_scan_length_buffer_,
+        &context_);
+
+    // compute output size using length
+    auto* prefix_sum_length_data =
+        inclusive_scan_length_buffer_.template data<int>();
+
+    auto shape = segmentGradsInput.dims();
+    int output_0dim = indicesInput.dim(0);
+    shape[0] = output_0dim;
+    dataGradsOutput->Resize(shape);
+
+    const T* in_data = segmentGradsInput.template data<T>();
+    const T* in_weights = weightsInput.template data<T>();
+    T* out_data = dataGradsOutput->template mutable_data<T>();
+
+    int N = output_0dim;
+    int post = segmentGradsInput.size_from_dim(1);
+
+    if (post > 128) {
+      length_weighted_sum_gradient_kernel<T>
+          <<<len_length, 512, 0, context_.cuda_stream()>>>(
+              in_data,
+              in_weights,
+              out_data,
+              prefix_sum_length_data,
+              N,
+              post,
+              len_length);
+    } else if (post > 64) {
+      length_weighted_sum_gradient_kernel<T>
+          <<<len_length, 128, 0, context_.cuda_stream()>>>(
+              in_data,
+              in_weights,
+              out_data,
+              prefix_sum_length_data,
+              N,
+              post,
+              len_length);
+    } else if (post > 32) {
+      length_weighted_sum_gradient_kernel<T>
+          <<<len_length, 64, 0, context_.cuda_stream()>>>(
+              in_data,
+              in_weights,
+              out_data,
+              prefix_sum_length_data,
+              N,
+              post,
+              len_length);
+    } else {
+      length_weighted_sum_gradient_kernel<T>
+          <<<len_length, 32, 0, context_.cuda_stream()>>>(
+              in_data,
+              in_weights,
+              out_data,
+              prefix_sum_length_data,
+              N,
+              post,
+              len_length);
+    }
+
+    return true;
+  }
+
+ private:
+  // menber field to manage memory
+  Tensor<Context> inclusive_scan_buffer_;
+  Tensor<Context> inclusive_scan_length_buffer_;
+};
+
+template <typename T, class Context = CUDAContext>
+class CUDASparseLengthsIndicesInGradientWeightedSumWithMainInputGradientOp
+    : public Operator<CUDAContext> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  CUDASparseLengthsIndicesInGradientWeightedSumWithMainInputGradientOp(
+      const OperatorDef& operator_def,
+      Workspace* ws)
+      : Operator<CUDAContext>(operator_def, ws) {}
+
+  ~CUDASparseLengthsIndicesInGradientWeightedSumWithMainInputGradientOp() {}
+
+  bool RunOnDevice() override {
+    return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(this, Input(4));
+  }
+
+  template <typename IndexType>
+  bool DoRunWithType() {
+    auto& weightsInput = Input(0);
+    auto& segmentGradsInput = Input(1);
+    auto& lengthsInput = Input(2);
+    auto& dataInput = Input(3);
+    auto& indicesInput = Input(4);
+    auto* dataGradsOutput = Output(0);
+    auto* weightGradsOutput = Output(1);
+    CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
+    CAFFE_ENFORCE_EQ(1, weightsInput.ndim(), "WEIGHTS must be a vector");
+    int len_length = lengthsInput.dim(0);
+    CAFFE_ENFORCE(segmentGradsInput.ndim() > 0);
+    CAFFE_ENFORCE(len_length == segmentGradsInput.dim(0));
+
+    inclusive_scan_length_buffer_.ResizeLike(lengthsInput);
+    inclusive_scan_wrapper(
+        lengthsInput.template data<int>(),
+        len_length,
+        &inclusive_scan_buffer_,
+        &inclusive_scan_length_buffer_,
+        &context_);
+
+    // compute output size using length
+    auto* prefix_sum_length_data =
+        inclusive_scan_length_buffer_.template data<int>();
+
+    auto shape = segmentGradsInput.dims();
+    int output_0dim = indicesInput.dim(0);
+    shape[0] = output_0dim;
+    dataGradsOutput->Resize(shape);
+    weightGradsOutput->ResizeLike(indicesInput);
+
+    const T* in_data = dataInput.template data<T>();
+    const T* in_grads = segmentGradsInput.template data<T>();
+    const T* in_weights = weightsInput.template data<T>();
+    const IndexType* indices = indicesInput.template data<IndexType>();
+    T* out_data_grads = dataGradsOutput->template mutable_data<T>();
+    T* out_weight_grads = weightGradsOutput->template mutable_data<T>();
+
+    int N = output_0dim;
+    int post = segmentGradsInput.size_from_dim(1);
+
+    if (post > 128) {
+      length_weighted_sum_with_main_input_gradient_kernel<T, IndexType, 512>
+          <<<len_length, 512, 0, context_.cuda_stream()>>>(
+              in_grads,
+              in_weights,
+              in_data,
+              indices,
+              out_data_grads,
+              out_weight_grads,
+              prefix_sum_length_data,
+              N,
+              post,
+              len_length);
+    } else if (post > 64) {
+      length_weighted_sum_with_main_input_gradient_kernel<T, IndexType, 128>
+          <<<len_length, 128, 0, context_.cuda_stream()>>>(
+              in_grads,
+              in_weights,
+              in_data,
+              indices,
+              out_data_grads,
+              out_weight_grads,
+              prefix_sum_length_data,
+              N,
+              post,
+              len_length);
+    } else if (post > 32) {
+      length_weighted_sum_with_main_input_gradient_kernel<T, IndexType, 64>
+          <<<len_length, 64, 0, context_.cuda_stream()>>>(
+              in_grads,
+              in_weights,
+              in_data,
+              indices,
+              out_data_grads,
+              out_weight_grads,
+              prefix_sum_length_data,
+              N,
+              post,
+              len_length);
+    } else {
+      length_weighted_sum_with_main_input_gradient_kernel<T, IndexType, 32>
+          <<<len_length, 32, 0, context_.cuda_stream()>>>(
+              in_grads,
+              in_weights,
+              in_data,
+              indices,
+              out_data_grads,
+              out_weight_grads,
+              prefix_sum_length_data,
+              N,
+              post,
+              len_length);
+    }
+
+    return true;
+  }
+
+ private:
+  // menber field to manage memory
+  Tensor<Context> inclusive_scan_buffer_;
+  Tensor<Context> inclusive_scan_length_buffer_;
+};
+
+REGISTER_CUDA_OPERATOR(
+    SparseLengthsIndicesInGradientWeightedSumGradient,
+    CUDASparseLengthsWeightedSumGradientWithIndicesOp<float, CUDAContext>);
+
+REGISTER_CUDA_OPERATOR(
+    SparseLengthsIndicesInGradientWeightedSumWithMainInputGradient,
+    CUDASparseLengthsIndicesInGradientWeightedSumWithMainInputGradientOp<
+        float,
+        CUDAContext>);
 
 REGISTER_CUDA_OPERATOR(
     SparseLengthsIndicesInGradientSumGradient,

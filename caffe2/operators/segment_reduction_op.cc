@@ -2,6 +2,33 @@
 
 namespace caffe2 {
 
+// registering 4 input gradient with main output
+OPERATOR_SCHEMA(SparseLengthsIndicesInGradientWeightedSumWithMainInputGradient)
+    .NumInputs(5)
+    .NumOutputs(2);
+REGISTER_CPU_OPERATOR(
+    SparseLengthsIndicesInGradientWeightedSumWithMainInputGradient,
+    AbstractLengthsWithMainInputGradientOp<
+        float,
+        int,
+        CPUContext,
+        WeightedSumReducerDef::template ReducerGradient<float, CPUContext>,
+        true /*SparseFused*/,
+        true /*GradientNeedIndices*/>);
+
+// registering 4 input version
+OPERATOR_SCHEMA(SparseLengthsIndicesInGradientWeightedSumGradient)
+    .NumInputs(4)
+    .NumOutputs(1);
+REGISTER_CPU_OPERATOR(
+    SparseLengthsIndicesInGradientWeightedSumGradient,
+    AbstractLengthsGradientOp<
+        float,
+        int,
+        CPUContext,
+        WeightedSumReducerDef::template ReducerGradient<float, CPUContext>,
+        true /*GradientNeedIndices*/>);
+
 // registering 3 input version
 OPERATOR_SCHEMA(SparseLengthsIndicesInGradientSumGradient)
     .NumInputs(3)
@@ -115,8 +142,13 @@ REGISTER_SEGMENT_DEF_SCHEMA_GRADIENT_ONLY(AbstractSparseLengthsDef<
                                           CPUContext,
                                           SumReducerDef,
                                           true /*GradientNeedIndices*/>)
-REGISTER_SEGMENT_DEF_SCHEMA_GRADIENT_ONLY(
-    AbstractSparseLengthsDef<float, int, CPUContext, WeightedSumReducerDef>)
+REGISTER_SEGMENT_DEF_SCHEMA_GRADIENT_ONLY(AbstractSparseLengthsDef<
+                                          float,
+                                          int,
+                                          CPUContext,
+                                          WeightedSumReducerDef,
+                                          true /*GradientNeedIndices*/>)
+
 REGISTER_SEGMENT_DEF_SCHEMA_GRADIENT_ONLY(
     AbstractSparseLengthsDef<float, int, CPUContext, MeanReducerDef>)
 

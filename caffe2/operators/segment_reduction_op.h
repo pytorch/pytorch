@@ -1598,7 +1598,8 @@ template <
     typename TLengths,
     class Context,
     class ReducerGradient,
-    bool SparseFused = true>
+    bool SparseFused = true,
+    bool GradientNeedIndices = false>
 class AbstractLengthsWithMainInputGradientOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -1698,8 +1699,8 @@ class AbstractLengthsWithMainInputGradientOp : public Operator<Context> {
   //      SEGMENT_LEGNTHS, [INDICES]
   // orig_argXs represent original op's inputs and will be passed to the reducer
   // directly
-  static constexpr int kNumInputs =
-      ReducerGradient::originalInputs().size() + 3 + (SparseFused ? 1 : 0);
+  static constexpr int kNumInputs = ReducerGradient::originalInputs().size() +
+      3 + (SparseFused ? 1 : 0) + (GradientNeedIndices ? 1 : 0);
   enum _InputTags {
     SEGMENT_GRADS = ReducerGradient::originalInputs().size(),
     LENGTHS,

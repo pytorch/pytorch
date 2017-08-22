@@ -248,6 +248,32 @@ REFERENCES_SORTED = [
 ]
 
 
+def sparse_lengths_weighted_sum_ref(D, W, I, L):
+    R = np.zeros(shape=(len(L), ) + D.shape[1:], dtype=D.dtype)
+    line = 0
+    for g in range(len(L)):
+        for _ in range(L[g]):
+            R[g, :] += W[line] * D[I[line], :]
+            line += 1
+    return [R]
+
+
+def sparse_lengths_weighted_sum_grad_ref(
+        GO, fwd_out, fwd_in, grad_on_weights=False):
+    D, W, I, L = fwd_in
+    GI = np.zeros(shape=(len(I), ) + D.shape[1:], dtype=D.dtype)
+    GW = np.zeros(shape=W.shape, dtype=W.dtype) if grad_on_weights else None
+    line = 0
+    for g in range(len(L)):
+        for _ in range(L[g]):
+            GI[line, :] = W[line] * GO[g, :]
+            if GW is not None:
+                GW[line] = np.dot(GO[g].flatten(), D[I[line], :].flatten())
+            line += 1
+    print(GW)
+    return [(GI, I), GW, None, None]
+
+
 class TestSegmentOps(hu.HypothesisTestCase):
     def test_sorted_segment_ops(self):
         SegmentsTester()._test(
@@ -364,6 +390,32 @@ class TestSegmentOps(hu.HypothesisTestCase):
         op = core.CreateOperator("SparseLengthsSum", ["X", "Y", "Z"], "out")
         self.assertDeviceChecks(dc, op, [X, Y, Z], [0])
         self.assertGradientChecks(gc, op, [X, Y, Z], 0, [0])
+
+    @given(**hu.gcs)
+    def test_sparse_lengths_weighted_sum_gpu(self, gc, dc):
+        for grad_on_weights in (False, True):
+            D = np.random.rand(50, 3, 4, 5).astype(np.float32)
+            W = np.random.rand(10).astype(np.float32)
+            I = np.random.randint(0, 50, size=10).astype(np.int64)
+            L = np.asarray([4, 4, 2]).astype(np.int32)
+            op = core.CreateOperator(
+                "SparseLengthsWeightedSum",
+                ["D", "W", "I", "L"],
+                "out",
+                grad_on_weights=grad_on_weights)
+            self.assertDeviceChecks(dc, op, [D, W, I, L], [0])
+            self.assertReferenceChecks(
+                device_option=gc,
+                op=op,
+                inputs=[D, W, I, L],
+                reference=sparse_lengths_weighted_sum_ref,
+                threshold=1e-4,
+                output_to_grad='out',
+                grad_reference=partial(
+                    sparse_lengths_weighted_sum_grad_ref,
+                    grad_on_weights=grad_on_weights),
+            )
+            self.assertGradientChecks(gc, op, [D, W, I, L], 0, [0])
 
     @given(**hu.gcs)
     def test_sparse_lengths_indices_in_gradient_sum_gpu(self, gc, dc):
