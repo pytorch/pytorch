@@ -6,14 +6,16 @@ void ConvForward::primspec(PrimSpecContext* ctx, jit::node_list inputs, jit::nod
   toffee::NodeProto* p_n = ctx->graph->add_node();
   p_n->set_op_type("Conv");
 
-  // Basic (TODO: factor me out into helper on PrimSpecContext... maybe; this
-  // is predicated on us not making a better builder API)
-  for (auto n : inputs) {
-    p_n->add_input(ctx->node(n));
+  p_n->add_input(ctx->node(inputs.at(0)));
+  p_n->add_input(ctx->node(inputs.at(1)));
+  // TODO: Factor this logic into a helper, and make sure it gets applied
+  // consistently. See also batch_normalization.cpp
+  if (inputs.at(2)->kind() != jit::kConstant || inputs.at(2)->t(jit::kValue).defined()) {
+    p_n->add_input(ctx->node(inputs.at(2)));
   }
-  for (auto n : outputs) {
-    p_n->add_output(ctx->node(n));
-  }
+
+  p_n->add_output(ctx->node(outputs.at(0)));
+  JIT_ASSERT(outputs.at(1)->type()->kind() == jit::TypeKind::HandleType);
 
   toffee::AttributeProto* attr;
   // Irritatingly, Caffe2 requires us to specify kernels,

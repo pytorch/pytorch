@@ -111,7 +111,10 @@ inline void setValueTrace(const std::shared_ptr<TracingState>& state, const std:
 // This is one of the cases where a Variable can be created inside of a trace, and
 // if we treat it as a constant, everything will work out.
 inline Node* getValueTrace(const std::shared_ptr<TracingState>& state, const std::shared_ptr<Variable>& var, bool mustExist = false) {
-  JIT_ASSERTM(var, "Not supported. NULL Variables will need to be removed from autograd");
+  //JIT_ASSERTM(var, "Not supported. NULL Variables will need to be removed from autograd");
+  if (!var) {
+    return state->graph->appendNode(state->graph->createUndefined());
+  }
   auto var_state = var->tracing_state.state.lock();
   if (var_state) {
     JIT_ASSERT(var->tracing_state.state.lock() == state);
