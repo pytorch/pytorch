@@ -1,6 +1,7 @@
 #include <google/protobuf/text_format.h>
 #include <gtest/gtest.h>
 #include "caffe2/core/net.h"
+#include "caffe2/core/net_dag.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/scope_guard.h"
 

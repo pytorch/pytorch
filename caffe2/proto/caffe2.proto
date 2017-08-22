@@ -120,6 +120,8 @@ enum DeviceType {
 // different DeviceTypes, so currently all devices share the same DeviceOption
 // proto. Fields that are specific to a device type is ignored if the type does
 // not match.
+// Note: if you add fields to the DeviceOption, make sure you add the
+// corresponding changes to IsSameDevice() function in utils/proto_utils.{h,cc}.
 message DeviceOption {
   // [general] Options that need to be carried out before running the execution.
   // optional DeviceType device_type = 1 [ default = CPU ];

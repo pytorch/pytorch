@@ -39,6 +39,12 @@ std::string DeviceTypeName(const int32_t& d) {
   }
 };
 
+bool IsSameDevice(const DeviceOption& lhs, const DeviceOption& rhs) {
+  return (
+      lhs.device_type() == rhs.device_type() &&
+      lhs.cuda_gpu_id() == rhs.cuda_gpu_id());
+}
+
 bool ReadStringFromFile(const char* filename, string* str) {
   std::ifstream ifs(filename, std::ios::in);
   if (!ifs) {
