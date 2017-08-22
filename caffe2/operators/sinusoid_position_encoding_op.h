@@ -3,6 +3,8 @@
 
 #include "caffe2/core/operator.h"
 
+#include "Eigen/Core"
+
 namespace caffe2 {
 
 template <class Context>
@@ -34,23 +36,42 @@ class SinusoidPositionEncodingOp : public Operator<Context> {
     shape.push_back(embedding_size_);
     output->Resize(shape);
 
-    int N = positions.size();
+    int M = shape[0];
+    int K = shape[1];
     const Index* idxs = positions.template data<Index>();
     float* out = output->template mutable_data<float>();
 
-    for (int i = 0; i < N; ++i) {
-      float pos = (float)idxs[i];
+    float log_alpha = std::log(alpha_);
+    float max_alpha_pow =
+        ((float)embedding_size_ - 1.0f) / (float)embedding_size_;
 
-      for (int j = 0; j < embedding_size_; ++j) {
-        float exponent = (float)j / ((float)embedding_size_);
-        float dim_scale = std::pow(alpha_, exponent);
+    for (int i = 0; i < M; ++i) {
+      float pos = (float)idxs[i * K];
 
-        int loc = i * embedding_size_ + j;
-        if (j % 2 == 0) {
-          out[loc] = amplitude_ * std::sin(pos / dim_scale);
-        } else {
-          out[loc] = amplitude_ * std::cos(pos / dim_scale);
-        }
+      // Compute the embedding for position i, example 0 first
+      float* row = &out[i * K * embedding_size_];
+      Eigen::Map<Eigen::VectorXf> row_map(row, embedding_size_, 1);
+      auto row_array = row_map.array();
+
+      float log_pos = std::log(pos);
+      row_array.setLinSpaced(
+          embedding_size_, log_pos, log_pos - log_alpha * max_alpha_pow);
+      row_array = row_array.exp().eval();
+      // row_array[k] == pos / alpha^(k / embedding_size)
+
+      // Phase shift so that alternating elements are cosines
+      for (int k = 1; k < embedding_size_; k += 2) {
+        row[k] += (float)M_PI_2;
+      }
+      row_array = amplitude_ * row_array.sin().eval();
+
+      // Copy the embedding to position i in the other examples
+      for (int j = 1; j < K; ++j) {
+        int base = i * K * embedding_size_;
+        std::copy(
+            &out[base],
+            &out[base + embedding_size_],
+            &out[base + j * embedding_size_]);
       }
     }
     return true;

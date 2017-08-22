@@ -15,6 +15,7 @@ in https://arxiv.org/abs/1706.03762. Takes a 2-D tensor
 as an argument, and outputs a position encoding tensor of
 size (M x K x embedding_size). Here M is typically the max
 sequence length and K is typically the batch size.
+The input tensor must satisfy input[m, 0] == input[m, k] for all k.
 
 Encoded as amplitude * SIN(pos/alpha^(i/embedding_size)) if i is even,
 else amplitude * COS(pos/alpha^(i/embedding_size)). Here, pos is the position,
