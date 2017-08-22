@@ -4,3 +4,6 @@
 [submodule "torch/lib/pybind11"]
 	path = torch/lib/pybind11
 	url = https://github.com/pybind/pybind11
+[submodule "torch/lib/nanopb"]
+	path = torch/lib/nanopb
+	url = https://github.com/nanopb/nanopb.git
