@@ -25,6 +25,7 @@ from caffe2.python.layer_test_util import (
     OpSpec,
 )
 from caffe2.python.layers.layers import (
+    IdList,
     set_request_only,
     is_request_only_scalar,
 )
@@ -812,6 +813,32 @@ class TestLayers(LayersTestCase):
 
         schema.FeedRecord(input_record, [X])
         workspace.RunNetOnce(predict_net)
+
+    @given(
+        num_inputs=st.integers(1, 3),
+        batch_size=st.integers(5, 10)
+    )
+    def testMergeIdListsLayer(self, num_inputs, batch_size):
+        inputs = []
+        for _ in range(num_inputs):
+            lengths = np.random.randint(5, size=batch_size).astype(np.int32)
+            size = lengths.sum()
+            values = np.random.randint(1, 10, size=size).astype(np.int64)
+            inputs.append(lengths)
+            inputs.append(values)
+        input_schema = schema.Tuple(
+            *[schema.List(
+                schema.Scalar(dtype=np.int64, metadata=schema.Metadata(
+                    categorical_limit=20
+                ))) for _ in range(num_inputs)]
+        )
+
+        input_record = schema.NewRecord(self.model.net, input_schema)
+        schema.FeedRecord(input_record, inputs)
+        output_schema = self.model.MergeIdLists(input_record)
+        assert schema.equal_schemas(
+            output_schema, IdList,
+            check_field_names=False)
 
     @given(
         batch_size=st.integers(min_value=2, max_value=10),
