@@ -49,6 +49,11 @@ void MatchJITOps(std::unique_ptr<Graph>& graph) {
     if (new_op->hasMultipleOutputs()) {
       auto uses = p->uses();
       for (auto & use : uses) {
+        // Invariant: Node replacements never make use of opaque handles,
+        // so we drop them before we do the node replacement.  E.g., if
+        // an op previously returned %1 : Tensor, %2 : Handle, after
+        // replacement it will only return %1 : Tensor.
+        // NB: This code implies that init_pass doesn't work with backwards.
         if (use.user->type()->kind() != TypeKind::HandleType) continue;
         JIT_ASSERT(use.user->uses().size() == 0);
         use.user->destroy();
