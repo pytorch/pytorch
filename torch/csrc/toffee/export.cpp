@@ -43,6 +43,14 @@ std::string ExportGraph(std::unique_ptr<Graph>& g) {
       }
       if (node->type()->kind() == TypeKind::MultiType) {
         for (auto u : node->uses()) {
+          JIT_ASSERT(u.user->kind() == kSelect);
+          // Python operators whose backwards are not traceable will have
+          // handle outputs; at the moment ToffeeIR export only supports
+          // forwards only, so these will be unused
+          if (u.user->type()->kind() == TypeKind::HandleType) {
+            JIT_ASSERT(u.user->uses().empty());
+            continue;
+          }
           p_n->add_output(node_name(u.user));
         }
       } else {
