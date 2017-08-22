@@ -71,6 +71,7 @@ unique_ptr<OperatorBase> _CreateOperator(
   const auto op_type = operator_def.type();
   const auto device_type = operator_def.device_option().device_type();
 
+#ifndef CAFFE2_NO_OPERATOR_SCHEMA
   // first, check with OpSchema if the operator is legal.
   auto* schema = OpSchemaRegistry::Schema(op_type);
   if (schema) {
@@ -85,6 +86,7 @@ unique_ptr<OperatorBase> _CreateOperator(
     LOG(ERROR) << "Cannot find operator schema for " << op_type
                << ". Will skip schema checking.";
   }
+#endif
 
   // second try engines specified in the operator_def and preferred engines
   std::vector<std::string> engines{};
@@ -478,6 +480,7 @@ std::map<string, std::pair<DeviceOption, DeviceOption>> ValidateTensorDevices(
   std::map<string, std::pair<DeviceOption, DeviceOption>> mismatches;
   DeviceOption op_device = op_def.device_option();
 
+#ifndef CAFFE2_NO_OPERATOR_SCHEMA
   // Check from op schema if this op is used for crossing devices
   auto op_schema = OpSchemaRegistry::Schema(op_def.type());
   if (op_schema != nullptr) {
@@ -485,6 +488,7 @@ std::map<string, std::pair<DeviceOption, DeviceOption>> ValidateTensorDevices(
       return mismatches;
     }
   }
+#endif // CAFFE2_NO_OPERATOR_SCHEMA
 
   auto Check = [&](const Blob& blob, std::string blob_name) {
     TensorInfoCall tensor_info_fun = GetTensorInfoFunction(blob.meta().id());

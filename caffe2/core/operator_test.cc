@@ -251,14 +251,18 @@ TEST(OperatorTest, TestSetUpInputOutputCount) {
   op_def.add_output("output");
   EXPECT_NE(nullptr, ws.CreateBlob("input"));
   EXPECT_NE(nullptr, ws.CreateBlob("input2"));
+#ifndef CAFFE2_NO_OPERATOR_SCHEMA
   // JustTest will only accept one single input.
   ASSERT_ANY_THROW(CreateOperator(op_def, &ws));
+#endif
 
   op_def.clear_input();
   op_def.add_input("input");
   op_def.add_output("output2");
+#ifndef CAFFE2_NO_OPERATOR_SCHEMA
   // JustTest will only produce one single output.
   ASSERT_ANY_THROW(CreateOperator(op_def, &ws));
+#endif
 }
 
 TEST(OperatorTest, TestOutputValues) {
