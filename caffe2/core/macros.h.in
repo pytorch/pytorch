@@ -1,0 +1,24 @@
+// Automatically generated header file for caffe2 macros. These
+// macros are used to build the Caffe2 binary, and if you are
+// building a dependent library, they will need to be set as well
+// for your program to link correctly.
+
+#pragma once
+
+#cmakedefine CAFFE2_ANDROID
+#cmakedefine CAFFE2_FORCE_FALLBACK_CUDA_MPI
+#cmakedefine CAFFE2_HAS_MKL_DNN
+#cmakedefine CAFFE2_HAS_MKL_SGEMM_PACK
+#cmakedefine CAFFE2_PERF_WITH_AVX
+#cmakedefine CAFFE2_PERF_WITH_AVX2
+#cmakedefine CAFFE2_THREADPOOL_MAIN_IMBALANCE
+#cmakedefine CAFFE2_THREADPOOL_STATS
+#cmakedefine CAFFE2_UNIQUE_LONG_TYPEMETA
+#cmakedefine CAFFE2_USE_ACCELERATE
+#cmakedefine CAFFE2_USE_EIGEN_FOR_BLAS
+#cmakedefine CAFFE2_USE_FBCODE
+#cmakedefine CAFFE2_USE_GFLAGS
+#cmakedefine CAFFE2_USE_GOOGLE_GLOG
+#cmakedefine CAFFE2_USE_LITE_PROTO
+#cmakedefine CAFFE2_USE_MKL
+#cmakedefine CAFFE2_USE_NVTX
