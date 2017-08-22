@@ -546,10 +546,17 @@ class AdaptiveAvgPool1d(Function):
         return output
 
     @staticmethod
-    @once_differentiable
     def backward(ctx, grad_output):
+        input, = ctx.saved_variables
+        return AdaptiveAvgPool1dBackward.apply(input, grad_output), None
+
+
+class AdaptiveAvgPool1dBackward(Function):
+
+    @staticmethod
+    def forward(ctx, input, grad_output):
         backend = type2backend[type(grad_output)]
-        input, = ctx.saved_tensors
+        ctx.output_size = grad_output.size(-1)
         input2d = input.unsqueeze(2)
         grad_output2d = grad_output.unsqueeze(2)
         grad_input = grad_output2d.new()
@@ -557,7 +564,13 @@ class AdaptiveAvgPool1d(Function):
             backend.library_state,
             input2d, grad_output2d, grad_input)
         grad_input = grad_input.squeeze(2)
-        return grad_input, None
+        return grad_input
+
+    @staticmethod
+    def backward(ctx, ggI):
+        gI = Variable(ggI.data.new(ggI.size()).zero_())
+        ggO = AdaptiveAvgPool1d.apply(ggI, ctx.output_size)
+        return gI, ggO, None, None
 
 
 class AdaptiveAvgPool2d(Function):
@@ -575,15 +588,28 @@ class AdaptiveAvgPool2d(Function):
         return output
 
     @staticmethod
-    @once_differentiable
     def backward(ctx, grad_output):
+        input, = ctx.saved_variables
+        return AdaptiveAvgPool2dBackward.apply(input, grad_output), None
+
+
+class AdaptiveAvgPool2dBackward(Function):
+
+    @staticmethod
+    def forward(ctx, input, grad_output):
         backend = type2backend[type(grad_output)]
-        input, = ctx.saved_tensors
+        ctx.output_size = (grad_output.size(-2), grad_output.size(-1))
         grad_input = grad_output.new()
         backend.SpatialAdaptiveAveragePooling_updateGradInput(
             backend.library_state,
             input, grad_output, grad_input)
-        return grad_input, None
+        return grad_input
+
+    @staticmethod
+    def backward(ctx, ggI):
+        gI = Variable(ggI.data.new(ggI.size()).zero_())
+        ggO = AdaptiveAvgPool2d.apply(ggI, ctx.output_size)
+        return gI, ggO, None, None
 
 _all_functions.append(AvgPool2d)
 _all_functions.append(AvgPool2dBackward)
@@ -601,4 +627,6 @@ _all_functions.append(FractionalMaxPool2d)
 _all_functions.append(AdaptiveMaxPool1d)
 _all_functions.append(AdaptiveMaxPool2d)
 _all_functions.append(AdaptiveAvgPool1d)
+_all_functions.append(AdaptiveAvgPool1dBackward)
 _all_functions.append(AdaptiveAvgPool2d)
+_all_functions.append(AdaptiveAvgPool2dBackward)
