@@ -3739,7 +3739,6 @@ new_module_tests = [
         input_size=(1, 3, 5, 5),
         fullname='FractionalMaxPool2d_ratio',
         test_cuda=False,
-        check_gradgrad=False,
     ),
     dict(
         constructor=lambda: nn.FractionalMaxPool2d((2, 2), output_size=(
@@ -3747,7 +3746,6 @@ new_module_tests = [
         input_size=(1, 3, 7, 7),
         fullname='FractionalMaxPool2d_size',
         test_cuda=False,
-        check_gradgrad=False,
     ),
     dict(
         module_name='PixelShuffle',
