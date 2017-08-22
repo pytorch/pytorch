@@ -1,4 +1,8 @@
-graph(%1 : Double(2, 2), %2 : Double(2, 2), %9 : Double(2, 2), %31 : Double(2, 2!), %32 : Double(2, 2)) {
+graph(%1 : Double(2, 2)
+      %2 : Double(2, 2)
+      %9 : Double(2, 2)
+      %31 : Double(2, 2!)
+      %32 : Double(2, 2)) {
   %3.0 : Double(2, 2), %3.1 : Handle = ^MulConstant(2)(%2), uses = [[%6.i0], [%23.i1, %78.i1]];
   %6.0 : Double(2, 2), %6.1 : Handle = ^Mul()(%3.0, %1), uses = [[%0.i0], [%10.i1]];
   ---------------- stage 1 ----------------

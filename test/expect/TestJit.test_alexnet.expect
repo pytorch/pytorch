@@ -1,4 +1,20 @@
-graph(%1 : Double(64, 3, 11, 11), %2 : Double(64), %3 : Double(192, 64, 5, 5), %4 : Double(192), %5 : Double(384, 192, 3, 3), %6 : Double(384), %7 : Double(256, 384, 3, 3), %8 : Double(256), %9 : Double(256, 256, 3, 3), %10 : Double(256), %11 : Double(4096, 9216), %12 : Double(4096), %13 : Double(4096, 4096), %14 : Double(4096), %15 : Double(1000, 4096), %16 : Double(1000), %17 : Double(10, 3, 224, 224)) {
+graph(%1 : Double(64, 3, 11, 11)
+      %2 : Double(64)
+      %3 : Double(192, 64, 5, 5)
+      %4 : Double(192)
+      %5 : Double(384, 192, 3, 3)
+      %6 : Double(384)
+      %7 : Double(256, 384, 3, 3)
+      %8 : Double(256)
+      %9 : Double(256, 256, 3, 3)
+      %10 : Double(256)
+      %11 : Double(4096, 9216)
+      %12 : Double(4096)
+      %13 : Double(4096, 4096)
+      %14 : Double(4096)
+      %15 : Double(1000, 4096)
+      %16 : Double(1000)
+      %17 : Double(10, 3, 224, 224)) {
   %18.0 : Double(10, 64, 55, 55), %18.1 : Handle = CppOp[ConvForward](%17, %1, %2), uses = [[%21.i0], []];
   %21.0 : Double(10, 64, 55, 55), %21.1 : Handle = ^Threshold(0, 0, True)(%18.0), uses = [[%24.i0], []];
   %24.0 : Double(10, 64, 27, 27), %24.1 : Long(10, 64, 27, 27), %24.2 : Handle = ^MaxPool2d(3, 2, 0, 1, False)(%21.0), uses = [[%28.i0], [], []];
