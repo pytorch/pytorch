@@ -74,7 +74,7 @@ void checkError1D(const TensorCPU& t1, const TensorCPU& t2, float error) {
 
 // OpenGL: t1, CPU: t2
 void checkError(const TensorCPU& t1, const TensorCPU& t2, float error) {
-  CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+//  CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
 #if DEBUGGING
   gl_log(GL_LOG, "opengl_test output\n");
   gl_log(GL_LOG, "\nOpenGL output:\n");
@@ -243,7 +243,8 @@ void testOpenGLConv(int N,
                     int input_batch_size = 1,
                     int output_batch_size = 1,
                     int input_tile_x = 1,
-                    int input_tile_y = 1) {
+                    int input_tile_y = 1,
+                    bool tiling = false) {
   LOG(INFO) << "OpenGL Conv Test: "
             << "input C: " << C << ", output C: " << K << ", H: " << H << ", W: " << W
             << ", K: " << kernel_w << "x" << kernel_h << ", P: " << pad << ", S: " << stride
@@ -258,7 +259,7 @@ void testOpenGLConv(int N,
     } else {
       float* data = t->mutable_data<float>();
       for (int i = 0; i < t->size(); i++) {
-        data[i] = 1;
+        data[i] = -1;
       }
     }
 #if 0
@@ -351,7 +352,7 @@ void testOpenGLConv(int N,
       // Set prelu scale to i + 1
       float* data = t->mutable_data<float>();
       for (int i = 0; i < t->size(); i++) {
-        data[i] = 1;
+        data[i] = -0.5;
       }
     }
   }
@@ -406,15 +407,23 @@ void testOpenGLConv(int N,
       arg.set_i(stride);
     }
     if (poolOp != AveragePool && poolOp != MaxPool) {
-      {
-        auto& arg = *(op.add_arg());
-        arg.set_name("input_batch_size");
-        arg.set_i(input_batch_size);
-      }
-      {
-        auto& arg = *(op.add_arg());
-        arg.set_name("output_batch_size");
-        arg.set_i(output_batch_size);
+      if (tiling) {
+        {
+          auto& arg = *(op.add_arg());
+          arg.set_name("tiling");
+          arg.set_i(1);
+        }
+      } else {
+        {
+          auto& arg = *(op.add_arg());
+          arg.set_name("input_batch_size");
+          arg.set_i(input_batch_size);
+        }
+        {
+          auto& arg = *(op.add_arg());
+          arg.set_name("output_batch_size");
+          arg.set_i(output_batch_size);
+        }
       }
     }
     {
@@ -493,7 +502,8 @@ void testOpenGLConv(int N,
   checkError(t1, t2, error);
 }
 
-void testOpenGLPRelu(int N, int C, int H, int W, int prelu_size, float error) {
+void testOpenGLPRelu(
+    int N, int C, int H, int W, int prelu_size, int input_tile_x, int input_tile_y, float error) {
   LOG(INFO) << "OpenGL PRelu Test "
             << "C: " << C << ", H: " << H << ", W: " << W;
   Workspace ws;
@@ -519,6 +529,16 @@ void testOpenGLPRelu(int N, int C, int H, int W, int prelu_size, float error) {
     op.set_type("CopyToOpenGL");
     op.add_input("X_cpu");
     op.add_output("X_gl");
+    {
+      auto& arg = *(op.add_arg());
+      arg.set_name("tile_x");
+      arg.set_i(input_tile_x);
+    }
+    {
+      auto& arg = *(op.add_arg());
+      arg.set_name("tile_y");
+      arg.set_i(input_tile_y);
+    }
   }
 
   {
@@ -554,7 +574,7 @@ void testOpenGLPRelu(int N, int C, int H, int W, int prelu_size, float error) {
   checkError(ws.GetBlob("Y_cpu")->Get<TensorCPU>(), ws.GetBlob("Y_ref")->Get<TensorCPU>(), error);
 }
 
-void testOpenGLRelu(int N, int C, int H, int W, float error) {
+void testOpenGLRelu(int N, int C, int H, int W, int input_tile_x, int input_tile_y, float error) {
   LOG(INFO) << "OpenGL Relu Test "
             << "C: " << C << ", H: " << H << ", W: " << W;
   Workspace ws;
@@ -572,6 +592,16 @@ void testOpenGLRelu(int N, int C, int H, int W, float error) {
     op.set_type("CopyToOpenGL");
     op.add_input("X_cpu");
     op.add_output("X_gl");
+    {
+      auto& arg = *(op.add_arg());
+      arg.set_name("tile_x");
+      arg.set_i(input_tile_x);
+    }
+    {
+      auto& arg = *(op.add_arg());
+      arg.set_name("tile_y");
+      arg.set_i(input_tile_y);
+    }
   }
 
   {
@@ -1752,10 +1782,14 @@ void compareModelsForOpenGL(std::string name,
                             int channel,
                             std::string input_type,
                             std::string input_order) {
+
   if (name == "styleTransfer") {
-    auto* arg = predictNet.mutable_op(0)->mutable_arg(1);
-    CHECK_EQ(arg->name(), "noise_std");
-    arg->set_f(0.000001);
+    for (int i = 0; i < predictNet.mutable_op(0)->arg_size(); i++) {      
+      auto* arg = predictNet.mutable_op(0)->mutable_arg(i);
+      if (arg->name() == "noise_std") {
+        arg->set_f(0.000001);
+      }
+    }
   }
 
   for (auto i = 0; i < predictNet.op_size(); ++i) {
@@ -1924,7 +1958,7 @@ int runModelBenchmarks(caffe2::NetDef& init_net,
 #else
                                                               false
 #endif
-    );
+                                                              );
 
     Blob* blob = nullptr;
     if (!net_def.external_input_size()) {
@@ -2041,7 +2075,7 @@ void testGLTextureTypes() {
   gl_log(GL_LOG, "...done with %s\n", __PRETTY_FUNCTION__);
 }
 
-void squareFactors(int N, int& r1, int& r2) {
+static void squareFactors(int N, int& r1, int& r2) {
   int f = sqrt(N);
 
   if (f * f == N) {
@@ -2056,466 +2090,504 @@ void squareFactors(int N, int& r1, int& r2) {
 }
 
 void testOpenGL() {
-  // Test a bunch of different tiled convolutions
-  std::vector<int> channels({4, 8, 16});
+  {
+    // Test a bunch of different tiled convolutions
+    std::vector<int> channels({4, 8, 16, 32, 64, 128, 256, 512});
 
-  for (const auto& input_channels : channels) {
-    int tile_x, tile_y;
-    squareFactors(input_channels / 4, tile_x, tile_y);
+    for (const auto& input_channels : channels) {
+      int tile_x = 1, tile_y = 1;
+      squareFactors((input_channels + 3) / 4, tile_x, tile_y);
 
-    for (int size = 5; size < 1024; size *= 2) {
-      testOpenGLConv(1,
-                     input_channels,
-                     size,
-                     size,
-                     input_channels,
-                     3,
-                     3,
-                     0,
-                     1,
-                     Conv,
-                     0.5,
-                     true,
-                     1,
-                     1,
-                     tile_x,
-                     tile_y);
-    }
+      for (const auto& output_channels : channels) {
+        for (int size = 5; size < 8; size *= 2) {
+          testOpenGLConv(1,
+                         input_channels,
+                         size,
+                         size,
+                         output_channels,
+                         3,
+                         3,
+                         0,
+                         1,
+                         Conv,
+                         0.1 * input_channels / 8,
+                         true,
+                         1,
+                         1,
+                         tile_x,
+                         tile_y,
+                         true);
+        }
 
-    for (int size = 5; size < 1024; size *= 2) {
-      testOpenGLConv(1,
-                     input_channels,
-                     size,
-                     size,
-                     input_channels,
-                     3,
-                     3,
-                     0,
-                     1,
-                     ConvTranspose,
-                     0.5,
-                     true,
-                     1,
-                     1,
-                     tile_x,
-                     tile_y);
-    }
-  }
-
-  // Test various paddings and strides with tiled convolution
-  for (int kernel_size = 1; kernel_size <= 5; kernel_size++) {
-    for (int pad = 0; pad < kernel_size; pad++) {
-      for (int stride = 1; stride <= 8; stride++) {
-        testOpenGLConv(1,
-                       16,
-                       100,
-                       100,
-                       16,
-                       kernel_size,
-                       kernel_size,
-                       pad,
-                       stride,
-                       Conv,
-                       0.5,
-                       true,
-                       1,
-                       1,
-                       2,
-                       2);
+        for (int size = 5; size < 16; size *= 2) {
+          testOpenGLConv(1,
+                         input_channels,
+                         size,
+                         size,
+                         output_channels,
+                         3,
+                         3,
+                         0,
+                         1,
+                         ConvTranspose,
+                         0.1 * input_channels / 8,
+                         true,
+                         1,
+                         1,
+                         tile_x,
+                         tile_y,
+                         true);
+        }
       }
+    }
 
+    // Test various paddings and strides with tiled convolution
+    for (int kernel_size = 1; kernel_size <= 5; kernel_size++) {
+      for (int pad = 0; pad < kernel_size; pad++) {
+        for (int stride = 1; stride <= 8; stride++) {
+          testOpenGLConv(1,
+                         16,
+                         100,
+                         100,
+                         16,
+                         kernel_size,
+                         kernel_size,
+                         pad,
+                         stride,
+                         Conv,
+                         0.5,
+                         true,
+                         1,
+                         1,
+                         2,
+                         2,
+                         true);
+        }
+
+        for (int stride = 1; stride <= 8; stride++) {
+          testOpenGLConv(1,
+                         16,
+                         100,
+                         100,
+                         16,
+                         kernel_size,
+                         kernel_size,
+                         pad,
+                         stride,
+                         ConvTranspose,
+                         0.5,
+                         true,
+                         1,
+                         1,
+                         2,
+                         2,
+                         true);
+        }
+      }
+    }
+
+    // Test a bunch of batched convolutions
+    for (int kernel_size = 1; kernel_size <= 8; kernel_size++) {
       for (int stride = 1; stride <= 8; stride++) {
         testOpenGLConv(1,
                        16,
-                       100,
-                       100,
+                       10,
+                       10,
                        16,
                        kernel_size,
                        kernel_size,
-                       pad,
+                       0,
                        stride,
                        ConvTranspose,
-                       0.5,
+                       0.5 * (1 + kernel_size / 3.0),
                        true,
                        1,
+                       1);
+      }
+
+      for (int stride = 1; stride <= 8; stride++) {
+        testOpenGLConv(1,
+                       16,
+                       10,
+                       10,
+                       16,
+                       kernel_size,
+                       kernel_size,
+                       0,
+                       stride,
+                       Conv,
+                       0.5 * (1 + kernel_size / 3.0),
+                       true,
                        1,
-                       2,
-                       2);
+                       1);
       }
     }
-  }
-
-  testGLTextureTypes<uint8_t>();
-  testGLTextureTypes<float16_t>();
-
-  testOpenGLCopyOps(1, 4, 4, 4, 1e-2);
-  testOpenGLCopyOps(1, 3, 4, 4, 1e-2);
-  testOpenGLCopyOps(1, 2, 4, 4, 1e-2);
-  testOpenGLCopyOps(1, 1, 4, 4, 1e-2);
-  testOpenGLCopyOps(1, 4, 2, 2, 1e-2);
-  testOpenGLCopyOps(1, 4, 4, 4, 1e-2);
-  testOpenGLCopyOps(1, 4, 1, 1, 1e-2);
-  testOpenGLCopyOps(1, 4, 8, 8, 1e-2);
-  testOpenGLCopyOps(1, 6, 8, 3, 1e-2);
-  testOpenGLCopyOps(1, 4, 1, 2, 1e-2);
-  testOpenGLCopyOps(1, 8, 6, 1, 1e-2);
-  testOpenGLCopyOps(1, 8, 13, 18, 1e-2);
-  testOpenGLCopyOps(1, 16, 13, 18, 1e-2);
-  testOpenGLCopyOps(1, 13, 128, 90, 1e-2);
-  testOpenGLCopyOps(1, 16, 1280, 720, 1e-2);
-
-  testOpenGLCopyOps(1, 16, 4, 4, 1e-2, 2, 2);
-  testOpenGLCopyOps(1, 64, 16, 16, 1e-2, 2, 2);
-  testOpenGLCopyOps(1, 48, 13, 17, 1e-2, 3, 2);
-  testOpenGLCopyOps(1, 512, 1, 1, 1e-2, 4, 16);
-  testOpenGLCopyOps(1, 256, 7, 7, 1e-2, 8, 8);
-  testOpenGLCopyOps(1, 20, 13, 17, 1e-2, 5, 1);
-
-  // Test pooling operators
-  LOG(INFO) << "Test pooling operators";
-  testOpenGLConv(1, 4, 5, 5, 4, 3, 3, 0, 1, AveragePool, 0.01, true);
-  testOpenGLConv(1, 4, 5, 5, 4, 5, 5, 0, 1, AveragePool, 0.5, true);
-
-  testOpenGLConv(1, 4, 10, 10, 4, 3, 3, 0, 2, AveragePool, 0.01, true);
-  testOpenGLConv(1, 4, 10, 10, 4, 3, 3, 1, 2, AveragePool, 0.01, true);
-  testOpenGLConv(1, 4, 10, 10, 4, 3, 3, 2, 2, AveragePool, 0.01, true);
-
-  testOpenGLConv(1, 4, 10, 10, 4, 3, 3, 0, 2, MaxPool, 0.01, true);
-  testOpenGLConv(1, 4, 10, 10, 4, 3, 3, 1, 2, MaxPool, 0.01, true);
-  testOpenGLConv(1, 4, 10, 10, 4, 3, 3, 2, 2, MaxPool, 0.01, true);
-
-  // Test strided convolution
-  LOG(INFO) << "Test strided convolution";
-  testOpenGLConv(1, 4, 10, 10, 4, 3, 3, 0, 2, Conv, 0.5, true, 1, 1);
-  testOpenGLConv(1, 4, 10, 10, 4, 3, 3, 1, 2, Conv, 0.5, true, 1, 1);
-  testOpenGLConv(1, 4, 10, 10, 4, 3, 3, 2, 2, Conv, 0.5, true, 1, 1);
-
-  testOpenGLConv(1, 4, 10, 10, 4, 3, 3, 0, 3, Conv, 0.5, true, 1, 1);
-  testOpenGLConv(1, 4, 10, 10, 4, 3, 3, 1, 3, Conv, 0.5, true, 1, 1);
-  testOpenGLConv(1, 4, 10, 10, 4, 3, 3, 2, 3, Conv, 0.5, true, 1, 1);
-
-  // Test input batching
-  LOG(INFO) << "Test input batching";
-  testOpenGLConv(1, 4, 5, 5, 4, 3, 3, 0, 1, Conv, 0.5, false, 1, 1);
-  testOpenGLConv(1, 8, 5, 5, 4, 3, 3, 0, 1, Conv, 0.5, false, 2, 1);
-  testOpenGLConv(1, 12, 5, 5, 4, 3, 3, 0, 1, Conv, 0.5, false, 3, 1);
-  testOpenGLConv(1, 16, 5, 5, 4, 3, 3, 0, 1, Conv, 0.5, false, 4, 1);
-
-  testOpenGLConv(1, 4, 10, 10, 4, 3, 3, 0, 1, Conv, 1, true, 1, 1); // use random input
-  testOpenGLConv(1, 8, 10, 10, 4, 3, 3, 0, 1, Conv, 1, true, 2, 1); // use random input
-  testOpenGLConv(1, 12, 10, 10, 4, 3, 3, 0, 1, Conv, 2, true, 3, 1); // use random input
-  testOpenGLConv(1, 16, 10, 10, 4, 3, 3, 0, 1, Conv, 2, true, 4, 1); // use random input
-  testOpenGLConv(1, 32, 10, 10, 4, 3, 3, 0, 1, Conv, 4, true, 4, 1); // use random input
-
-  // Test output batching
-  LOG(INFO) << "Test output batching";
-  testOpenGLConv(1, 4, 5, 5, 4, 3, 3, 0, 1, Conv, 0.5, false, 1, 1);
-  testOpenGLConv(1, 4, 5, 5, 8, 3, 3, 0, 1, Conv, 0.5, false, 1, 2);
-  testOpenGLConv(1, 4, 5, 5, 12, 3, 3, 0, 1, Conv, 0.5, false, 1, 3);
-  testOpenGLConv(1, 4, 5, 5, 16, 3, 3, 0, 1, Conv, 0.5, false, 1, 4);
-
-  testOpenGLConv(1, 4, 10, 10, 4, 3, 3, 0, 1, Conv, 0.5, true, 1, 1); // use random input
-  testOpenGLConv(1, 4, 10, 10, 8, 3, 3, 0, 1, Conv, 1.5, true, 1, 2); // use random input
-  testOpenGLConv(1, 4, 10, 10, 12, 3, 3, 0, 1, Conv, 0.5, true, 1, 3); // use random input
-  testOpenGLConv(1, 4, 10, 10, 16, 3, 3, 0, 1, Conv, 0.5, true, 1, 4); // use random input
-
-  // Test both
-  LOG(INFO) << "Test both input and output batching";
-  testOpenGLConv(1, 4, 5, 5, 4, 3, 3, 0, 1, Conv, 0.5, false, 1, 1);
-  testOpenGLConv(1, 8, 5, 5, 8, 3, 3, 0, 1, Conv, 0.5, false, 2, 2);
-  testOpenGLConv(1, 12, 5, 5, 12, 3, 3, 0, 1, Conv, 0.5, false, 3, 3);
-
-  testOpenGLConv(1, 4, 10, 10, 4, 3, 3, 0, 1, Conv, 0.5, true, 1, 1); // use random input
-  testOpenGLConv(1, 8, 10, 10, 8, 3, 3, 0, 1, Conv, 1, true, 2, 2); // use random input
-  testOpenGLConv(1, 12, 10, 10, 12, 3, 3, 0, 1, Conv, 2, true, 3, 3); // use random input
-  testOpenGLConv(1, 16, 10, 10, 16, 3, 3, 0, 1, Conv, 4, true, 4, 4); // use random input
-
-  // Test different combination of batching
-  LOG(INFO) << "Test mixed input and output batching sizes";
-  testOpenGLConv(1, 16, 3, 3, 16, 3, 3, 0, 1, Conv, 4, false, 1, 2);
-  testOpenGLConv(1, 16, 3, 3, 16, 3, 3, 0, 1, Conv, 4, false, 2, 2);
-  testOpenGLConv(1, 16, 3, 3, 16, 3, 3, 0, 1, Conv, 4, false, 1, 4);
-  testOpenGLConv(1, 16, 3, 3, 16, 3, 3, 0, 1, Conv, 4, false, 2, 4);
-
-  testOpenGLConv(1, 16, 3, 3, 16, 3, 3, 0, 1, Conv, 4, false, 1, 1);
-  testOpenGLConv(1, 16, 3, 3, 16, 3, 3, 0, 1, Conv, 4, false, 2, 1);
-  testOpenGLConv(1, 16, 3, 3, 16, 3, 3, 0, 1, Conv, 4, false, 4, 1);
-  testOpenGLConv(1, 16, 3, 3, 16, 3, 3, 0, 1, Conv, 4, false, 4, 2);
-
-  testOpenGLConv(1, 16, 3, 3, 16, 3, 3, 0, 1, Conv, 4, true, 1, 1); // use random input
-  testOpenGLConv(1, 16, 3, 3, 16, 3, 3, 0, 1, Conv, 4, true, 2, 1); // use random input
-  testOpenGLConv(1, 16, 3, 3, 16, 3, 3, 0, 1, Conv, 4, true, 4, 1); // use random input
-  testOpenGLConv(1, 16, 3, 3, 16, 3, 3, 0, 1, Conv, 4, true, 4, 2); // use random input
-
-  testOpenGLConv(1, 16, 3, 3, 16, 3, 3, 0, 1, Conv, 4, true, 1, 1);
-  testOpenGLConv(1, 16, 3, 3, 16, 3, 3, 0, 1, Conv, 4, true, 2, 1);
-  testOpenGLConv(1, 16, 3, 3, 16, 3, 3, 0, 1, Conv, 4, true, 4, 1);
-  testOpenGLConv(1, 16, 3, 3, 16, 3, 3, 0, 1, Conv, 4, true, 4, 2);
-
-  testOpenGLConv(1, 16, 10, 10, 16, 3, 3, 0, 1, Conv, 4, true, 1, 1); // use random input
-  testOpenGLConv(1, 16, 10, 10, 16, 3, 3, 0, 1, Conv, 4, true, 1, 2); // use random input
-  testOpenGLConv(1, 16, 10, 10, 16, 3, 3, 0, 1, Conv, 4, true, 2, 1); // use random input
-  testOpenGLConv(1, 16, 10, 10, 16, 3, 3, 0, 1, Conv, 4, true, 2, 2); // use random input
-  testOpenGLConv(1, 16, 10, 10, 16, 3, 3, 0, 1, Conv, 4, true, 4, 1); // use random input
-  testOpenGLConv(1, 16, 10, 10, 16, 3, 3, 0, 1, Conv, 4, true, 1, 4); // use random input
-
-  // Test input/output channels
-  for (int i = 0; i < 4; i++) {
-    testOpenGLConv(1, 6, 10, 10, i, 3, 3, 0, 1, Conv, 4, true, 1, 1); // use random input
-    testOpenGLConv(1, 6, 10, 10, i, 3, 3, 0, 1, Conv, 4, true, 2, 1); // use random input
-  }
-
-  // Test large input size
-  LOG(INFO) << "Test large input size";
-  testOpenGLConv(1, 4, 1280, 720, 4, 3, 3, 0, 1, Conv, 1, true, 1, 1); // use random input
-  testOpenGLConv(1, 16, 1280, 720, 16, 3, 3, 0, 1, Conv, 4, true, 1, 1); // use random input
-  testOpenGLConv(1, 16, 1280, 720, 16, 3, 3, 0, 1, Conv, 4, true, 4, 4); // use random input
-
-  // Test non standard input size
-  testOpenGLConv(1, 16, 1285, 723, 16, 3, 3, 0, 1, Conv, 4, true, 1, 1); // use random input
-  testOpenGLConv(1, 16, 1277, 715, 16, 3, 3, 0, 1, Conv, 4, true, 4, 4); // use random input
-
-  // Test for different kernel size
-  LOG(INFO) << "Test kernel sizes 4 to 6";
-  for (int w = 4; w < 7; w++) {
-    testOpenGLConv(1, 4, 1280, 720, 4, w, w, 0, 1, Conv, 4 * (w / 3.0) * (w / 3.0), true, 1, 1);
-
-    testOpenGLConv(1, 4, 1285, 723, 4, w, w, 0, 1, Conv, 4 * (w / 3.0) * (w / 3.0), true, 1, 1);
-  }
-
-  // Test a bunch of Transposed Convolutions
-  for (int kernel_size = 1; kernel_size <= 8; kernel_size++) {
-    for (int stride = 1; stride <= 8; stride++) {
-      testOpenGLConv(1,
-                     4,
-                     10,
-                     10,
-                     4,
-                     kernel_size,
-                     kernel_size,
-                     0,
-                     stride,
-                     ConvTranspose,
-                     0.5 * (1 + kernel_size / 3.0),
-                     true,
-                     1,
-                     1);
+    for (const auto& channel : channels) {
+      int tile_x = 1, tile_y = 1;
+      squareFactors((channel + 3) / 4, tile_x, tile_y);
+      // clang-format off
+      testOpenGLConv(1, channel, 10, 10, channel, 3, 3, 0, 1, ConvPRelu, 0.1 * channel / 8, true, 1, 1, tile_x, tile_y, true);
+      testOpenGLConv(1, channel, 10, 10, channel, 3, 3, 0, 1, ConvTransposePRelu, 0.1 * channel / 8, true, 1, 1, tile_x, tile_y, true);
+      testOpenGLConv(1, channel, 10, 10, channel, 3, 3, 0, 1, ConvRelu, 0.1 * channel / 8, true, 1, 1, tile_x, tile_y, true);
+      testOpenGLConv(1, channel, 10, 10, channel, 3, 3, 0, 1, ConvTransposeRelu, 0.1 * channel / 8, true, 1, 1, tile_x, tile_y, true);
+      
+      testOpenGLPRelu(1, channel, 13, 4, channel, tile_x, tile_y, 0.1);
+      testOpenGLRelu(1, channel, 4, 17, tile_x, tile_y, 0.1);
+      // clang-format on
     }
   }
 
-  // Test for random failures
-  for (int i = 0; i < 10; i++) {
-    testOpenGLConv(1, 6, 111, 111, 3, 3, 3, 0, 2, ConvTranspose, 0.5, true, 2, 1);
+  {
+    testGLTextureTypes<uint8_t>();
+    testGLTextureTypes<float16_t>();
+
+    testOpenGLCopyOps(1, 4, 4, 4, 1e-2);
+    testOpenGLCopyOps(1, 3, 4, 4, 1e-2);
+    testOpenGLCopyOps(1, 2, 4, 4, 1e-2);
+    testOpenGLCopyOps(1, 1, 4, 4, 1e-2);
+    testOpenGLCopyOps(1, 4, 2, 2, 1e-2);
+    testOpenGLCopyOps(1, 4, 4, 4, 1e-2);
+    testOpenGLCopyOps(1, 4, 1, 1, 1e-2);
+    testOpenGLCopyOps(1, 4, 8, 8, 1e-2);
+    testOpenGLCopyOps(1, 6, 8, 3, 1e-2);
+    testOpenGLCopyOps(1, 4, 1, 2, 1e-2);
+    testOpenGLCopyOps(1, 8, 6, 1, 1e-2);
+    testOpenGLCopyOps(1, 8, 13, 18, 1e-2);
+    testOpenGLCopyOps(1, 16, 13, 18, 1e-2);
+    testOpenGLCopyOps(1, 13, 128, 90, 1e-2);
+    testOpenGLCopyOps(1, 16, 1280, 720, 1e-2);
+
+    testOpenGLCopyOps(1, 16, 4, 4, 1e-2, 2, 2);
+    testOpenGLCopyOps(1, 64, 16, 16, 1e-2, 2, 2);
+    testOpenGLCopyOps(1, 48, 13, 17, 1e-2, 3, 2);
+    testOpenGLCopyOps(1, 512, 1, 1, 1e-2, 4, 16);
+    testOpenGLCopyOps(1, 256, 7, 7, 1e-2, 8, 8);
+    testOpenGLCopyOps(1, 20, 13, 17, 1e-2, 5, 1);
+
+    // Test pooling operators
+    LOG(INFO) << "Test pooling operators";
+    testOpenGLConv(1, 4, 5, 5, 4, 3, 3, 0, 1, AveragePool, 0.01, true);
+    testOpenGLConv(1, 4, 5, 5, 4, 5, 5, 0, 1, AveragePool, 0.5, true);
+
+    testOpenGLConv(1, 4, 10, 10, 4, 3, 3, 0, 2, AveragePool, 0.01, true);
+    testOpenGLConv(1, 4, 10, 10, 4, 3, 3, 1, 2, AveragePool, 0.01, true);
+    testOpenGLConv(1, 4, 10, 10, 4, 3, 3, 2, 2, AveragePool, 0.01, true);
+
+    testOpenGLConv(1, 4, 10, 10, 4, 3, 3, 0, 2, MaxPool, 0.01, true);
+    testOpenGLConv(1, 4, 10, 10, 4, 3, 3, 1, 2, MaxPool, 0.01, true);
+    testOpenGLConv(1, 4, 10, 10, 4, 3, 3, 2, 2, MaxPool, 0.01, true);
+
+    // Test strided convolution
+    LOG(INFO) << "Test strided convolution";
+    testOpenGLConv(1, 4, 10, 10, 4, 3, 3, 0, 2, Conv, 0.5, true, 1, 1);
+    testOpenGLConv(1, 4, 10, 10, 4, 3, 3, 1, 2, Conv, 0.5, true, 1, 1);
+    testOpenGLConv(1, 4, 10, 10, 4, 3, 3, 2, 2, Conv, 0.5, true, 1, 1);
+
+    testOpenGLConv(1, 4, 10, 10, 4, 3, 3, 0, 3, Conv, 0.5, true, 1, 1);
+    testOpenGLConv(1, 4, 10, 10, 4, 3, 3, 1, 3, Conv, 0.5, true, 1, 1);
+    testOpenGLConv(1, 4, 10, 10, 4, 3, 3, 2, 3, Conv, 0.5, true, 1, 1);
+
+    // Test input batching
+    LOG(INFO) << "Test input batching";
+    testOpenGLConv(1, 4, 5, 5, 4, 3, 3, 0, 1, Conv, 0.5, false, 1, 1);
+    testOpenGLConv(1, 8, 5, 5, 4, 3, 3, 0, 1, Conv, 0.5, false, 2, 1);
+    testOpenGLConv(1, 12, 5, 5, 4, 3, 3, 0, 1, Conv, 0.5, false, 3, 1);
+    testOpenGLConv(1, 16, 5, 5, 4, 3, 3, 0, 1, Conv, 0.5, false, 4, 1);
+
+    testOpenGLConv(1, 4, 10, 10, 4, 3, 3, 0, 1, Conv, 1, true, 1, 1); // use random input
+    testOpenGLConv(1, 8, 10, 10, 4, 3, 3, 0, 1, Conv, 1, true, 2, 1); // use random input
+    testOpenGLConv(1, 12, 10, 10, 4, 3, 3, 0, 1, Conv, 2, true, 3, 1); // use random input
+    testOpenGLConv(1, 16, 10, 10, 4, 3, 3, 0, 1, Conv, 2, true, 4, 1); // use random input
+    testOpenGLConv(1, 32, 10, 10, 4, 3, 3, 0, 1, Conv, 4, true, 4, 1); // use random input
+
+    // Test output batching
+    LOG(INFO) << "Test output batching";
+    testOpenGLConv(1, 4, 5, 5, 4, 3, 3, 0, 1, Conv, 0.5, false, 1, 1);
+    testOpenGLConv(1, 4, 5, 5, 8, 3, 3, 0, 1, Conv, 0.5, false, 1, 2);
+    testOpenGLConv(1, 4, 5, 5, 12, 3, 3, 0, 1, Conv, 0.5, false, 1, 3);
+    testOpenGLConv(1, 4, 5, 5, 16, 3, 3, 0, 1, Conv, 0.5, false, 1, 4);
+
+    testOpenGLConv(1, 4, 10, 10, 4, 3, 3, 0, 1, Conv, 0.5, true, 1, 1); // use random input
+    testOpenGLConv(1, 4, 10, 10, 8, 3, 3, 0, 1, Conv, 1.5, true, 1, 2); // use random input
+    testOpenGLConv(1, 4, 10, 10, 12, 3, 3, 0, 1, Conv, 0.5, true, 1, 3); // use random input
+    testOpenGLConv(1, 4, 10, 10, 16, 3, 3, 0, 1, Conv, 0.5, true, 1, 4); // use random input
+
+    // Test both
+    LOG(INFO) << "Test both input and output batching";
+    testOpenGLConv(1, 4, 5, 5, 4, 3, 3, 0, 1, Conv, 0.5, false, 1, 1);
+    testOpenGLConv(1, 8, 5, 5, 8, 3, 3, 0, 1, Conv, 0.5, false, 2, 2);
+    testOpenGLConv(1, 12, 5, 5, 12, 3, 3, 0, 1, Conv, 0.5, false, 3, 3);
+
+    testOpenGLConv(1, 4, 10, 10, 4, 3, 3, 0, 1, Conv, 0.5, true, 1, 1); // use random input
+    testOpenGLConv(1, 8, 10, 10, 8, 3, 3, 0, 1, Conv, 1, true, 2, 2); // use random input
+    testOpenGLConv(1, 12, 10, 10, 12, 3, 3, 0, 1, Conv, 2, true, 3, 3); // use random input
+    testOpenGLConv(1, 16, 10, 10, 16, 3, 3, 0, 1, Conv, 4, true, 4, 4); // use random input
+
+    // Test different combination of batching
+    LOG(INFO) << "Test mixed input and output batching sizes";
+    testOpenGLConv(1, 16, 3, 3, 16, 3, 3, 0, 1, Conv, 4, false, 1, 2);
+    testOpenGLConv(1, 16, 3, 3, 16, 3, 3, 0, 1, Conv, 4, false, 2, 2);
+    testOpenGLConv(1, 16, 3, 3, 16, 3, 3, 0, 1, Conv, 4, false, 1, 4);
+    testOpenGLConv(1, 16, 3, 3, 16, 3, 3, 0, 1, Conv, 4, false, 2, 4);
+
+    testOpenGLConv(1, 16, 3, 3, 16, 3, 3, 0, 1, Conv, 4, false, 1, 1);
+    testOpenGLConv(1, 16, 3, 3, 16, 3, 3, 0, 1, Conv, 4, false, 2, 1);
+    testOpenGLConv(1, 16, 3, 3, 16, 3, 3, 0, 1, Conv, 4, false, 4, 1);
+    testOpenGLConv(1, 16, 3, 3, 16, 3, 3, 0, 1, Conv, 4, false, 4, 2);
+
+    testOpenGLConv(1, 16, 3, 3, 16, 3, 3, 0, 1, Conv, 4, true, 1, 1); // use random input
+    testOpenGLConv(1, 16, 3, 3, 16, 3, 3, 0, 1, Conv, 4, true, 2, 1); // use random input
+    testOpenGLConv(1, 16, 3, 3, 16, 3, 3, 0, 1, Conv, 4, true, 4, 1); // use random input
+    testOpenGLConv(1, 16, 3, 3, 16, 3, 3, 0, 1, Conv, 4, true, 4, 2); // use random input
+
+    testOpenGLConv(1, 16, 3, 3, 16, 3, 3, 0, 1, Conv, 4, true, 1, 1);
+    testOpenGLConv(1, 16, 3, 3, 16, 3, 3, 0, 1, Conv, 4, true, 2, 1);
+    testOpenGLConv(1, 16, 3, 3, 16, 3, 3, 0, 1, Conv, 4, true, 4, 1);
+    testOpenGLConv(1, 16, 3, 3, 16, 3, 3, 0, 1, Conv, 4, true, 4, 2);
+
+    testOpenGLConv(1, 16, 10, 10, 16, 3, 3, 0, 1, Conv, 4, true, 1, 1); // use random input
+    testOpenGLConv(1, 16, 10, 10, 16, 3, 3, 0, 1, Conv, 4, true, 1, 2); // use random input
+    testOpenGLConv(1, 16, 10, 10, 16, 3, 3, 0, 1, Conv, 4, true, 2, 1); // use random input
+    testOpenGLConv(1, 16, 10, 10, 16, 3, 3, 0, 1, Conv, 4, true, 2, 2); // use random input
+    testOpenGLConv(1, 16, 10, 10, 16, 3, 3, 0, 1, Conv, 4, true, 4, 1); // use random input
+    testOpenGLConv(1, 16, 10, 10, 16, 3, 3, 0, 1, Conv, 4, true, 1, 4); // use random input
+
+    // Test input/output channels
+    for (int i = 0; i < 4; i++) {
+      testOpenGLConv(1, 6, 10, 10, i, 3, 3, 0, 1, Conv, 4, true, 1, 1); // use random input
+      testOpenGLConv(1, 6, 10, 10, i, 3, 3, 0, 1, Conv, 4, true, 2, 1); // use random input
+    }
+
+    // Test large input size
+    LOG(INFO) << "Test large input size";
+    testOpenGLConv(1, 4, 1280, 720, 4, 3, 3, 0, 1, Conv, 1, true, 1, 1); // use random input
+    testOpenGLConv(1, 16, 1280, 720, 16, 3, 3, 0, 1, Conv, 4, true, 4, 4); // use random input
+
+    // Test non standard input size
+    testOpenGLConv(1, 16, 125, 73, 16, 3, 3, 0, 1, Conv, 4, true, 1, 1); // use random input
+    testOpenGLConv(1, 16, 127, 71, 16, 3, 3, 0, 1, Conv, 4, true, 4, 4); // use random input
+
+    // Test for different kernel size
+    LOG(INFO) << "Test kernel sizes 4 to 6";
+    for (int w = 4; w < 7; w++) {
+      testOpenGLConv(1, 4, 128, 72, 4, w, w, 0, 1, Conv, 4 * (w / 3.0) * (w / 3.0), true, 1, 1);
+    }
+
+    // Test for random failures
+    for (int i = 0; i < 10; i++) {
+      testOpenGLConv(1, 6, 111, 111, 3, 3, 3, 0, 2, ConvTranspose, 0.5, true, 2, 1);
+      testOpenGLConv(1, 16, 56, 56, 6, 4, 4, 0, 2, ConvTranspose, 0.5, true, 2, 2);
+    }
+
+    LOG(INFO) << "Test OpenGL ConvPRelu";
+    testOpenGLConv(1, 16, 6, 6, 16, 3, 3, 0, 1, ConvPRelu, 2, true, 1, 1);
+    testOpenGLConv(1, 4, 6, 6, 4, 3, 3, 0, 1, ConvPRelu, 1, true, 1, 1);
+    testOpenGLConv(1, 8, 6, 6, 8, 3, 3, 0, 1, ConvPRelu, 2, true, 2, 2);
+    testOpenGLConv(1, 16, 16, 16, 16, 3, 3, 0, 1, ConvPRelu, 4, true, 4, 4);
+    testOpenGLConv(1, 12, 16, 16, 8, 3, 3, 0, 1, ConvPRelu, 4, true, 3, 1);
+    testOpenGLConv(1, 16, 1280, 720, 16, 3, 3, 0, 1, ConvPRelu, 4, true, 4, 4);
+    testOpenGLConv(1, 16, 1280, 720, 16, 3, 3, 0, 1, ConvPRelu, 4, true, 1, 1);
+
+    LOG(INFO) << "Test OpenGL ConvTransposePRelu";
+    testOpenGLConv(1, 16, 6, 6, 16, 3, 3, 0, 1, ConvTransposePRelu, 2, true, 1, 1);
+    testOpenGLConv(1, 4, 6, 6, 4, 3, 3, 0, 1, ConvTransposePRelu, 1, true, 1, 1);
+    testOpenGLConv(1, 8, 6, 6, 8, 3, 3, 0, 1, ConvTransposePRelu, 2, true, 2, 2);
+    testOpenGLConv(1, 16, 16, 16, 16, 3, 3, 0, 1, ConvTransposePRelu, 4, true, 4, 4);
+    testOpenGLConv(1, 12, 16, 16, 8, 3, 3, 0, 1, ConvTransposePRelu, 4, true, 3, 1);
+    testOpenGLConv(1, 16, 1280, 720, 16, 3, 3, 0, 1, ConvTransposePRelu, 4, true, 4, 4);
+    testOpenGLConv(1, 16, 1280, 720, 16, 3, 3, 0, 1, ConvTransposePRelu, 4, true, 1, 1);
+
+    LOG(INFO) << "Test OpenGL ConvRelu";
+    testOpenGLConv(1, 16, 6, 6, 16, 3, 3, 0, 1, ConvRelu, 2, true, 1, 1);
+    testOpenGLConv(1, 4, 6, 6, 4, 3, 3, 0, 1, ConvRelu, 1, true, 1, 1);
+    testOpenGLConv(1, 8, 6, 6, 8, 3, 3, 0, 1, ConvRelu, 2, true, 2, 2);
+    testOpenGLConv(1, 16, 16, 16, 16, 3, 3, 0, 1, ConvRelu, 4, true, 4, 4);
+    testOpenGLConv(1, 12, 16, 16, 8, 3, 3, 0, 1, ConvRelu, 4, true, 3, 1);
+    testOpenGLConv(1, 16, 1280, 720, 16, 3, 3, 0, 1, ConvRelu, 4, true, 4, 4);
+    testOpenGLConv(1, 16, 1280, 720, 16, 3, 3, 0, 1, ConvRelu, 4, true, 1, 1);
+
+    LOG(INFO) << "Test OpenGL ConvTransposeRelu";
+    testOpenGLConv(1, 16, 6, 6, 16, 3, 3, 0, 1, ConvTransposeRelu, 2, true, 1, 1);
+    testOpenGLConv(1, 4, 6, 6, 4, 3, 3, 0, 1, ConvTransposeRelu, 1, true, 1, 1);
+    testOpenGLConv(1, 8, 6, 6, 8, 3, 3, 0, 1, ConvTransposeRelu, 2, true, 2, 2);
+    testOpenGLConv(1, 16, 16, 16, 16, 3, 3, 0, 1, ConvTransposeRelu, 4, true, 4, 4);
+    testOpenGLConv(1, 12, 16, 16, 8, 3, 3, 0, 1, ConvTransposeRelu, 4, true, 3, 1);
+    testOpenGLConv(1, 16, 1280, 720, 16, 3, 3, 0, 1, ConvTransposeRelu, 4, true, 4, 4);
+    testOpenGLConv(1, 16, 1280, 720, 16, 3, 3, 0, 1, ConvTransposeRelu, 4, true, 1, 1);
+
+    LOG(INFO) << "Test OpenGL PRelu";
+    testOpenGLPRelu(1, 4, 16, 16, 4, 1, 1, 0.1);
+    testOpenGLPRelu(1, 16, 16, 16, 1, 1, 1, 0.1);
+    testOpenGLPRelu(1, 12, 16, 16, 1, 1, 1, 0.1);
+    testOpenGLPRelu(1, 6, 640, 360, 6, 1, 1, 0.1);
+
+    LOG(INFO) << "Test OpenGL Relu";
+    testOpenGLRelu(1, 4, 16, 16, 1, 1, 0.1);
+    testOpenGLRelu(1, 16, 16, 16, 1, 1, 0.1);
+    testOpenGLRelu(1, 6, 640, 360, 1, 1, 0.1);
+
+    LOG(INFO) << "Test OpenGL Add";
+    testOpenGLAdd(1, 16, 640, 360, 0.1);
+    testOpenGLAdd(1, 16, 640, 360, 0.1);
+    testOpenGLAdd(1, 16, 640, 360, 0.1);
+    testOpenGLAdd(1, 12, 640, 360, 0.1);
+
+    LOG(INFO) << "Test OpenGL Sigmoid";
+    testOpenGLSigmoid(1, 4, 16, 16, 0.1);
+    testOpenGLSigmoid(1, 12, 64, 48, 0.1);
+    testOpenGLSigmoid(1, 6, 640, 360, 0.1);
+
+    LOG(INFO) << "Test OpenGL Tanh";
+    testOpenGLTanh(1, 4, 16, 16, 0.1);
+    testOpenGLTanh(1, 12, 64, 48, 0.1);
+    testOpenGLTanh(1, 6, 640, 360, 0.1);
+
+    LOG(INFO) << "Test OpenGL Mul";
+    testOpenGLMul(1, 4, 16, 16, 0.1);
+    testOpenGLMul(1, 12, 64, 48, 0.1);
+    testOpenGLMul(1, 6, 640, 360, 0.1);
+
+    LOG(INFO) << "Test OpenGL Concat";
+    testOpenGLConcat(1, std::vector<int>{4, 4}, 16, 16);
+    testOpenGLConcat(1, std::vector<int>{4, 4, 4}, 16, 16);
+    testOpenGLConcat(1, std::vector<int>{4, 4, 4, 4}, 16, 16);
+    testOpenGLConcat(1, std::vector<int>{8, 4, 12}, 16, 16);
+    testOpenGLConcat(1, std::vector<int>{12, 16, 8}, 16, 16);
+    testOpenGLConcat(1, std::vector<int>{60, 24, 36}, 16, 16);
+
+    LOG(INFO) << "Test OpenGL Softmax";
+    testOpenGLSoftmax(1, 100, 0.1);
+    testOpenGLSoftmax(1, 1000, 0.1);
+    testOpenGLSoftmax(1, 10000, 0.1);
+
+    LOG(INFO) << "Test OpenGL InstanceNorm";
+    testOpenGLInstanceNorm(1, 4, 16, 16, 0.2);
+    testOpenGLInstanceNorm(1, 4, 20, 20, 0.2);
+    testOpenGLInstanceNorm(1, 4, 128, 128, 0.2);
+    testOpenGLInstanceNorm(1, 12, 120, 140, 0.3);
+    testOpenGLInstanceNorm(1, 3, 120, 140, 0.2);
+    testOpenGLInstanceNorm(1, 4, 192, 192, 0.2);
+
+    testOpenGLInstanceNorm(1, 4, 258, 198, 0.2);
+    testOpenGLInstanceNorm(1, 8, 338, 198, 0.2);
+    testOpenGLInstanceNorm(1, 12, 334, 194, 0.2);
+    testOpenGLInstanceNorm(1, 16, 324, 184, 0.2);
+    testOpenGLInstanceNorm(1, 6, 640, 360, 0.2);
+
+    LOG(INFO) << "Test OpenGL InstanceNormPRelu";
+    testOpenGLInstanceNormPRelu(1, 4, 16, 16, 0.2);
+    testOpenGLInstanceNormPRelu(1, 4, 20, 20, 0.2);
+    testOpenGLInstanceNormPRelu(1, 4, 128, 128, 0.2);
+    testOpenGLInstanceNormPRelu(1, 12, 120, 140, 0.3);
+    testOpenGLInstanceNormPRelu(1, 3, 120, 140, 0.2);
+    testOpenGLInstanceNormPRelu(1, 4, 192, 192, 0.2);
+
+    testOpenGLInstanceNormPRelu(1, 4, 258, 198, 0.2);
+    testOpenGLInstanceNormPRelu(1, 8, 338, 198, 0.2);
+    testOpenGLInstanceNormPRelu(1, 12, 334, 194, 0.2);
+    testOpenGLInstanceNormPRelu(1, 16, 324, 184, 0.2);
+    testOpenGLInstanceNormPRelu(1, 6, 640, 360, 0.2);
+
+    LOG(INFO) << "Test OpenGL ResizeNearest";
+    testOpenGLResize(1, 4, 16, 16, 1, 1, 1, 0.1);
+    testOpenGLResize(1, 4, 16, 16, 2, 2, 1, 0.1);
+    testOpenGLResize(1, 4, 16, 16, 3, 3, 1, 0.1);
+    testOpenGLResize(1, 4, 16, 16, 4, 4, 1, 0.1);
+    testOpenGLResize(1, 16, 25, 25, 3, 3, 2, 0.1);
+    testOpenGLResize(1, 16, 25, 25, 3, 3, 4, 0.1);
+    testOpenGLResize(1, 12, 25, 25, 3, 3, 3, 0.1);
+    testOpenGLResize(1, 4, 720, 1280, 3, 3, 1, 0.1);
+
+    // debug style transfer
+    // conv
+    testOpenGLConv(1, 3, 82, 82, 8, 9, 9, 0, 1, Conv, 4, true, 1, 1);
+    testOpenGLConv(1, 8, 74, 74, 8, 3, 3, 0, 1, Conv, 4, true, 1, 1);
+    testOpenGLConv(1, 8, 82, 82, 12, 3, 3, 0, 1, Conv, 4, true, 1, 1);
+    testOpenGLConv(1, 12, 82, 82, 12, 3, 3, 0, 1, Conv, 4, true, 1, 1);
+
+    // convtranspose
     testOpenGLConv(1, 16, 56, 56, 6, 4, 4, 0, 2, ConvTranspose, 0.5, true, 2, 2);
+    testOpenGLConv(1, 6, 112, 112, 3, 4, 4, 0, 2, ConvTranspose, 0.5, true, 2, 1);
+
+    LOG(INFO) << "Test OpenGL PadImage";
+    testOpenGLPadImage(1, 3, 4, 4, 2, 0.01);
+    testOpenGLPadImage(1, 3, 50, 80, 10, 0.01);
+    testOpenGLPadImage(1, 12, 50, 80, 10, 0.01);
+
+    LOG(INFO) << "Test OpenGL Preprocess";
+    testOpenGLPreprocess(1, 4, 8, 8, 0.20);
+    testOpenGLPreprocess(1, 4, 1280, 720, 0.20);
+
+    LOG(INFO) << "Test OpenGL Deprocess";
+    testOpenGLDeprocess(1, 3, 8, 8, 0.01);
+    testOpenGLDeprocess(1, 3, 1280, 720, 0.01);
+
+    LOG(INFO) << "Test OpenGL NormalizePlanarYUV";
+    testOpenGLNormPlanarYUV(1, 3, 8, 8, 0.01);
+    testOpenGLNormPlanarYUV(1, 3, 192, 192, 0.01);
+
+    //  for (int i = 0; i < 4; i += 1) {
+    //    LOG(INFO) << "C: " << 4 << ", H: " << 1280 + i << ", W: " << 720 + i;
+    //    OpenGL_copyops_speedtest(1, 4, 1280, 720 + i, 4, 3, 3, 0, 0.5);
+    //  }
+
+    //  for (int i = 0; i < 1; i += 1) {
+    //    LOG(INFO) << "C: " << 16 << ", H: " << 1280 + i << ", W: " << 720 + i;
+    //    OpenGL_copyops_speedtest(1, 16, 1280, 720 + i, 16, 3, 3, 0, 0.5);
+    //  }
+    //
+    //  for (int i = 0; i < 9; i += 1) {
+    //    LOG(INFO) << "C: " << 16 << ", H: " << 1280 + i << ", W: " << 720 + i;
+    //    OpenGL_speedtest(1, 16, 1280, 720 + i, 16, 3, 3, 0, 0.5);
+    //  }
+
+    // Multi-Batch Tests
+    LOG(INFO) << "Test OpenGL Multi-batch Support";
+    testOpenGLCopyOps(2, 4, 4, 4, 1e-2);
+    testOpenGLCopyOps(3, 4, 4, 4, 1e-2);
+    testOpenGLCopyOps(5, 4, 4, 4, 1e-2);
+    testOpenGLConv(2, 4, 5, 5, 4, 3, 3, 0, 1, AveragePool, 0.01, true);
+    testOpenGLConv(2, 4, 10, 10, 4, 3, 3, 0, 2, MaxPool, 0.01, true);
+    testOpenGLConv(3, 4, 10, 10, 4, 3, 3, 0, 2, Conv, 0.5, true, 1, 1);
+    testOpenGLConv(5, 4, 10, 10, 4, 3, 3, 0, 2, Conv, 0.5, true, 1, 1);
+    testOpenGLConv(7, 4, 10, 10, 4, 3, 3, 0, 2, Conv, 0.5, true, 1, 1);
+    testOpenGLConv(11, 4, 10, 10, 4, 3, 3, 0, 2, Conv, 0.5, true, 1, 1);
+    testOpenGLConv(12, 4, 10, 10, 4, 3, 3, 0, 2, Conv, 0.5, true, 1, 1);
+    testOpenGLConv(21, 4, 10, 10, 4, 3, 3, 0, 2, Conv, 0.5, true, 1, 1);
+    testOpenGLConv(50, 4, 10, 10, 4, 3, 3, 0, 2, Conv, 0.5, true, 1, 1);
+    testOpenGLConv(3, 4, 10, 10, 4, 3, 3, 0, 2, ConvTranspose, 0.5, true, 1, 1);
+    testOpenGLConv(3, 16, 6, 6, 16, 3, 3, 0, 1, ConvPRelu, 2, true, 1, 1);
+    testOpenGLConv(3, 16, 6, 6, 16, 3, 3, 0, 1, ConvTransposePRelu, 2, true, 1, 1);
+
+    testOpenGLPRelu(3, 4, 16, 16, 4, 1, 1, 0.1);
+    testOpenGLPRelu(5, 4, 16, 16, 4, 1, 1, 0.1);
+
+    testOpenGLRelu(3, 4, 16, 16, 1, 1, 0.1);
+    testOpenGLRelu(7, 4, 16, 16, 1, 1, 0.1);
+
+    testOpenGLAdd(3, 16, 640, 360, 0.1);
+    testOpenGLAdd(9, 16, 640, 360, 0.1);
+
+    testOpenGLSigmoid(3, 4, 16, 16, 0.1);
+    testOpenGLSigmoid(11, 4, 16, 16, 0.1);
+
+    testOpenGLInstanceNorm(3, 4, 16, 16, 0.2);
+    testOpenGLInstanceNorm(13, 4, 16, 16, 0.2);
+
+    testOpenGLInstanceNormPRelu(3, 4, 16, 16, 0.2);
+    testOpenGLInstanceNormPRelu(15, 4, 16, 16, 0.2);
+
+    testOpenGLResize(3, 4, 16, 16, 1, 1, 1, 0.1);
+    testOpenGLResize(16, 4, 16, 16, 1, 1, 1, 0.1);
+
+    testOpenGLPadImage(3, 3, 4, 4, 2, 0.01);
+    testOpenGLPadImage(23, 3, 4, 4, 2, 0.01);
+
+    testOpenGLSoftmax(3, 1000, 0.1);
+    testOpenGLSoftmax(27, 100, 0.1);
+
+    testOpenGLNormPlanarYUV(4, 3, 192, 192, 0.01);
   }
-
-  LOG(INFO) << "Test OpenGL ConvPRelu";
-  testOpenGLConv(1, 16, 6, 6, 16, 3, 3, 0, 1, ConvPRelu, 2, true, 1, 1);
-  testOpenGLConv(1, 4, 6, 6, 4, 3, 3, 0, 1, ConvPRelu, 1, true, 1, 1);
-  testOpenGLConv(1, 8, 6, 6, 8, 3, 3, 0, 1, ConvPRelu, 2, true, 2, 2);
-  testOpenGLConv(1, 16, 16, 16, 16, 3, 3, 0, 1, ConvPRelu, 4, true, 4, 4);
-  testOpenGLConv(1, 12, 16, 16, 8, 3, 3, 0, 1, ConvPRelu, 4, true, 3, 1);
-  testOpenGLConv(1, 16, 1280, 720, 16, 3, 3, 0, 1, ConvPRelu, 4, true, 4, 4);
-  testOpenGLConv(1, 16, 1280, 720, 16, 3, 3, 0, 1, ConvPRelu, 4, true, 1, 1);
-
-  LOG(INFO) << "Test OpenGL ConvTransposePRelu";
-  testOpenGLConv(1, 16, 6, 6, 16, 3, 3, 0, 1, ConvTransposePRelu, 2, true, 1, 1);
-  testOpenGLConv(1, 4, 6, 6, 4, 3, 3, 0, 1, ConvTransposePRelu, 1, true, 1, 1);
-  testOpenGLConv(1, 8, 6, 6, 8, 3, 3, 0, 1, ConvTransposePRelu, 2, true, 2, 2);
-  testOpenGLConv(1, 16, 16, 16, 16, 3, 3, 0, 1, ConvTransposePRelu, 4, true, 4, 4);
-  testOpenGLConv(1, 12, 16, 16, 8, 3, 3, 0, 1, ConvTransposePRelu, 4, true, 3, 1);
-  testOpenGLConv(1, 16, 1280, 720, 16, 3, 3, 0, 1, ConvTransposePRelu, 4, true, 4, 4);
-  testOpenGLConv(1, 16, 1280, 720, 16, 3, 3, 0, 1, ConvTransposePRelu, 4, true, 1, 1);
-
-  LOG(INFO) << "Test OpenGL ConvRelu";
-  testOpenGLConv(1, 16, 6, 6, 16, 3, 3, 0, 1, ConvRelu, 2, true, 1, 1);
-  testOpenGLConv(1, 4, 6, 6, 4, 3, 3, 0, 1, ConvRelu, 1, true, 1, 1);
-  testOpenGLConv(1, 8, 6, 6, 8, 3, 3, 0, 1, ConvRelu, 2, true, 2, 2);
-  testOpenGLConv(1, 16, 16, 16, 16, 3, 3, 0, 1, ConvRelu, 4, true, 4, 4);
-  testOpenGLConv(1, 12, 16, 16, 8, 3, 3, 0, 1, ConvRelu, 4, true, 3, 1);
-  testOpenGLConv(1, 16, 1280, 720, 16, 3, 3, 0, 1, ConvRelu, 4, true, 4, 4);
-  testOpenGLConv(1, 16, 1280, 720, 16, 3, 3, 0, 1, ConvRelu, 4, true, 1, 1);
-
-  LOG(INFO) << "Test OpenGL ConvTransposeRelu";
-  testOpenGLConv(1, 16, 6, 6, 16, 3, 3, 0, 1, ConvTransposeRelu, 2, true, 1, 1);
-  testOpenGLConv(1, 4, 6, 6, 4, 3, 3, 0, 1, ConvTransposeRelu, 1, true, 1, 1);
-  testOpenGLConv(1, 8, 6, 6, 8, 3, 3, 0, 1, ConvTransposeRelu, 2, true, 2, 2);
-  testOpenGLConv(1, 16, 16, 16, 16, 3, 3, 0, 1, ConvTransposeRelu, 4, true, 4, 4);
-  testOpenGLConv(1, 12, 16, 16, 8, 3, 3, 0, 1, ConvTransposeRelu, 4, true, 3, 1);
-  testOpenGLConv(1, 16, 1280, 720, 16, 3, 3, 0, 1, ConvTransposeRelu, 4, true, 4, 4);
-  testOpenGLConv(1, 16, 1280, 720, 16, 3, 3, 0, 1, ConvTransposeRelu, 4, true, 1, 1);
-
-  LOG(INFO) << "Test OpenGL PRelu";
-  testOpenGLPRelu(1, 4, 16, 16, 4, 0.1);
-  testOpenGLPRelu(1, 4, 16, 16, 1, 0.1);
-  testOpenGLPRelu(1, 6, 640, 360, 6, 0.1);
-
-  LOG(INFO) << "Test OpenGL Relu";
-  testOpenGLRelu(1, 4, 16, 16, 0.1);
-  testOpenGLRelu(1, 4, 16, 16, 0.1);
-  testOpenGLRelu(1, 6, 640, 360, 0.1);
-
-  LOG(INFO) << "Test OpenGL Add";
-  testOpenGLAdd(1, 16, 640, 360, 0.1);
-  testOpenGLAdd(1, 16, 640, 360, 0.1);
-  testOpenGLAdd(1, 16, 640, 360, 0.1);
-  testOpenGLAdd(1, 12, 640, 360, 0.1);
-
-  LOG(INFO) << "Test OpenGL Sigmoid";
-  testOpenGLSigmoid(1, 4, 16, 16, 0.1);
-  testOpenGLSigmoid(1, 12, 64, 48, 0.1);
-  testOpenGLSigmoid(1, 6, 640, 360, 0.1);
-
-  LOG(INFO) << "Test OpenGL Tanh";
-  testOpenGLTanh(1, 4, 16, 16, 0.1);
-  testOpenGLTanh(1, 12, 64, 48, 0.1);
-  testOpenGLTanh(1, 6, 640, 360, 0.1);
-
-  LOG(INFO) << "Test OpenGL Mul";
-  testOpenGLMul(1, 4, 16, 16, 0.1);
-  testOpenGLMul(1, 12, 64, 48, 0.1);
-  testOpenGLMul(1, 6, 640, 360, 0.1);
-
-  LOG(INFO) << "Test OpenGL Concat";
-  testOpenGLConcat(1, std::vector<int>{4, 4}, 16, 16);
-  testOpenGLConcat(1, std::vector<int>{4, 4, 4}, 16, 16);
-  testOpenGLConcat(1, std::vector<int>{4, 4, 4, 4}, 16, 16);
-  testOpenGLConcat(1, std::vector<int>{8, 4, 12}, 16, 16);
-  testOpenGLConcat(1, std::vector<int>{12, 16, 8}, 16, 16);
-  testOpenGLConcat(1, std::vector<int>{60, 24, 36}, 16, 16);
-
-  LOG(INFO) << "Test OpenGL Softmax";
-  testOpenGLSoftmax(1, 100, 0.1);
-  testOpenGLSoftmax(1, 1000, 0.1);
-  testOpenGLSoftmax(1, 10000, 0.1);
-
-  LOG(INFO) << "Test OpenGL InstanceNorm";
-  testOpenGLInstanceNorm(1, 4, 16, 16, 0.2);
-  testOpenGLInstanceNorm(1, 4, 20, 20, 0.2);
-  testOpenGLInstanceNorm(1, 4, 128, 128, 0.2);
-  testOpenGLInstanceNorm(1, 12, 120, 140, 0.3);
-  testOpenGLInstanceNorm(1, 3, 120, 140, 0.2);
-  testOpenGLInstanceNorm(1, 4, 192, 192, 0.2);
-
-  testOpenGLInstanceNorm(1, 4, 258, 198, 0.2);
-  testOpenGLInstanceNorm(1, 8, 338, 198, 0.2);
-  testOpenGLInstanceNorm(1, 12, 334, 194, 0.2);
-  testOpenGLInstanceNorm(1, 16, 324, 184, 0.2);
-  testOpenGLInstanceNorm(1, 6, 640, 360, 0.2);
-
-  LOG(INFO) << "Test OpenGL InstanceNormPRelu";
-  testOpenGLInstanceNormPRelu(1, 4, 16, 16, 0.2);
-  testOpenGLInstanceNormPRelu(1, 4, 20, 20, 0.2);
-  testOpenGLInstanceNormPRelu(1, 4, 128, 128, 0.2);
-  testOpenGLInstanceNormPRelu(1, 12, 120, 140, 0.3);
-  testOpenGLInstanceNormPRelu(1, 3, 120, 140, 0.2);
-  testOpenGLInstanceNormPRelu(1, 4, 192, 192, 0.2);
-
-  testOpenGLInstanceNormPRelu(1, 4, 258, 198, 0.2);
-  testOpenGLInstanceNormPRelu(1, 8, 338, 198, 0.2);
-  testOpenGLInstanceNormPRelu(1, 12, 334, 194, 0.2);
-  testOpenGLInstanceNormPRelu(1, 16, 324, 184, 0.2);
-  testOpenGLInstanceNormPRelu(1, 6, 640, 360, 0.2);
-
-  LOG(INFO) << "Test OpenGL ResizeNearest";
-  testOpenGLResize(1, 4, 16, 16, 1, 1, 1, 0.1);
-  testOpenGLResize(1, 4, 16, 16, 2, 2, 1, 0.1);
-  testOpenGLResize(1, 4, 16, 16, 3, 3, 1, 0.1);
-  testOpenGLResize(1, 4, 16, 16, 4, 4, 1, 0.1);
-  testOpenGLResize(1, 16, 25, 25, 3, 3, 2, 0.1);
-  testOpenGLResize(1, 16, 25, 25, 3, 3, 4, 0.1);
-  testOpenGLResize(1, 12, 25, 25, 3, 3, 3, 0.1);
-  testOpenGLResize(1, 4, 720, 1280, 3, 3, 1, 0.1);
-
-  // debug style transfer
-  // conv
-  testOpenGLConv(1, 3, 82, 82, 8, 9, 9, 0, 1, Conv, 4, true, 1, 1);
-  testOpenGLConv(1, 8, 74, 74, 8, 3, 3, 0, 1, Conv, 4, true, 1, 1);
-  testOpenGLConv(1, 8, 82, 82, 12, 3, 3, 0, 1, Conv, 4, true, 1, 1);
-  testOpenGLConv(1, 12, 82, 82, 12, 3, 3, 0, 1, Conv, 4, true, 1, 1);
-
-  // convtranspose
-  testOpenGLConv(1, 16, 56, 56, 6, 4, 4, 0, 2, ConvTranspose, 0.5, true, 2, 2);
-  testOpenGLConv(1, 6, 112, 112, 3, 4, 4, 0, 2, ConvTranspose, 0.5, true, 2, 1);
-
-  LOG(INFO) << "Test OpenGL PadImage";
-  testOpenGLPadImage(1, 3, 4, 4, 2, 0.01);
-  testOpenGLPadImage(1, 3, 50, 80, 10, 0.01);
-  testOpenGLPadImage(1, 12, 50, 80, 10, 0.01);
-
-  LOG(INFO) << "Test OpenGL Preprocess";
-  testOpenGLPreprocess(1, 4, 8, 8, 0.20);
-  testOpenGLPreprocess(1, 4, 1280, 720, 0.20);
-
-  LOG(INFO) << "Test OpenGL Deprocess";
-  testOpenGLDeprocess(1, 3, 8, 8, 0.01);
-  testOpenGLDeprocess(1, 3, 1280, 720, 0.01);
-
-  LOG(INFO) << "Test OpenGL NormalizePlanarYUV";
-  testOpenGLNormPlanarYUV(1, 3, 8, 8, 0.01);
-  testOpenGLNormPlanarYUV(1, 3, 192, 192, 0.01);
-
-  //  for (int i = 0; i < 4; i += 1) {
-  //    LOG(INFO) << "C: " << 4 << ", H: " << 1280 + i << ", W: " << 720 + i;
-  //    OpenGL_copyops_speedtest(1, 4, 1280, 720 + i, 4, 3, 3, 0, 0.5);
-  //  }
-
-  //  for (int i = 0; i < 1; i += 1) {
-  //    LOG(INFO) << "C: " << 16 << ", H: " << 1280 + i << ", W: " << 720 + i;
-  //    OpenGL_copyops_speedtest(1, 16, 1280, 720 + i, 16, 3, 3, 0, 0.5);
-  //  }
-  //
-  //  for (int i = 0; i < 9; i += 1) {
-  //    LOG(INFO) << "C: " << 16 << ", H: " << 1280 + i << ", W: " << 720 + i;
-  //    OpenGL_speedtest(1, 16, 1280, 720 + i, 16, 3, 3, 0, 0.5);
-  //  }
-
-  // Multi-Batch Tests
-  LOG(INFO) << "Test OpenGL Multi-batch Support";
-  testOpenGLCopyOps(2, 4, 4, 4, 1e-2);
-  testOpenGLCopyOps(3, 4, 4, 4, 1e-2);
-  testOpenGLCopyOps(5, 4, 4, 4, 1e-2);
-  testOpenGLConv(2, 4, 5, 5, 4, 3, 3, 0, 1, AveragePool, 0.01, true);
-  testOpenGLConv(2, 4, 10, 10, 4, 3, 3, 0, 2, MaxPool, 0.01, true);
-  testOpenGLConv(3, 4, 10, 10, 4, 3, 3, 0, 2, Conv, 0.5, true, 1, 1);
-  testOpenGLConv(5, 4, 10, 10, 4, 3, 3, 0, 2, Conv, 0.5, true, 1, 1);
-  testOpenGLConv(7, 4, 10, 10, 4, 3, 3, 0, 2, Conv, 0.5, true, 1, 1);
-  testOpenGLConv(11, 4, 10, 10, 4, 3, 3, 0, 2, Conv, 0.5, true, 1, 1);
-  testOpenGLConv(12, 4, 10, 10, 4, 3, 3, 0, 2, Conv, 0.5, true, 1, 1);
-  testOpenGLConv(21, 4, 10, 10, 4, 3, 3, 0, 2, Conv, 0.5, true, 1, 1);
-  testOpenGLConv(50, 4, 10, 10, 4, 3, 3, 0, 2, Conv, 0.5, true, 1, 1);
-  testOpenGLConv(3, 4, 10, 10, 4, 3, 3, 0, 2, ConvTranspose, 0.5, true, 1, 1);
-  testOpenGLConv(3, 16, 6, 6, 16, 3, 3, 0, 1, ConvPRelu, 2, true, 1, 1);
-  testOpenGLConv(3, 16, 6, 6, 16, 3, 3, 0, 1, ConvTransposePRelu, 2, true, 1, 1);
-
-  testOpenGLPRelu(3, 4, 16, 16, 4, 0.1);
-  testOpenGLPRelu(5, 4, 16, 16, 4, 0.1);
-
-  testOpenGLRelu(3, 4, 16, 16, 0.1);
-  testOpenGLRelu(7, 4, 16, 16, 0.1);
-
-  testOpenGLAdd(3, 16, 640, 360, 0.1);
-  testOpenGLAdd(9, 16, 640, 360, 0.1);
-
-  testOpenGLSigmoid(3, 4, 16, 16, 0.1);
-  testOpenGLSigmoid(11, 4, 16, 16, 0.1);
-
-  testOpenGLInstanceNorm(3, 4, 16, 16, 0.2);
-  testOpenGLInstanceNorm(13, 4, 16, 16, 0.2);
-
-  testOpenGLInstanceNormPRelu(3, 4, 16, 16, 0.2);
-  testOpenGLInstanceNormPRelu(15, 4, 16, 16, 0.2);
-
-  testOpenGLResize(3, 4, 16, 16, 1, 1, 1, 0.1);
-  testOpenGLResize(16, 4, 16, 16, 1, 1, 1, 0.1);
-
-  testOpenGLPadImage(3, 3, 4, 4, 2, 0.01);
-  testOpenGLPadImage(23, 3, 4, 4, 2, 0.01);
-
-  testOpenGLSoftmax(3, 1000, 0.1);
-  testOpenGLSoftmax(27, 100, 0.1);
-
-  testOpenGLNormPlanarYUV(4, 3, 192, 192, 0.01);
 
   LOG(INFO) << "End of OpenGL tests";
 }

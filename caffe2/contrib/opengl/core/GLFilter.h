@@ -74,9 +74,10 @@ class GLFilter {
     }
   }
 
+  template <typename T>
   void attach_uniform_buffer(const binding* block,
                              GLuint bindingPoint,
-                             std::function<void(float16_t*, size_t)> loader);
+                             std::function<void(T*, size_t)> loader);
 
   void run(const std::vector<texture_attachment>& input,
            const std::vector<const GLTexture*>& output,
