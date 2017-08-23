@@ -3,7 +3,7 @@
 #ifdef WITH_TOFFEE
 #include <Python.h>
 #include "torch/csrc/jit/ir.h"
-#include <toffee/toffee.pb.h>
+#include "torch/csrc/toffee.h"
 #include <vector>
 #endif
 

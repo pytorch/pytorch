@@ -259,11 +259,6 @@ class clean(distutils.command.clean.clean):
 
 include_dirs = []
 
-# TODO: This is a hack: this needs to eventually be replaced with a sustainable
-# way of getting our hands on protobuf headers
-if os.getenv('CONDA_PREFIX'):
-    include_dirs.append(os.path.join(os.getenv('CONDA_PREFIX'), "include"))
-
 library_dirs = []
 extra_link_args = []
 extra_compile_args = ['-std=c++11', '-Wno-write-strings',
@@ -328,14 +323,19 @@ if platform.system() == 'Darwin':
     THD_LIB = os.path.join(lib_path, 'libTHD.1.dylib')
     NCCL_LIB = os.path.join(lib_path, 'libnccl.1.dylib')
 
+# static library only
+NANOPB_STATIC_LIB = os.path.join(lib_path, 'libprotobuf-nanopbd.a')
+
 if WITH_NCCL and (subprocess.call('ldconfig -p | grep libnccl >/dev/null', shell=True) == 0 or
                   subprocess.call('/sbin/ldconfig -p | grep libnccl >/dev/null', shell=True) == 0):
         SYSTEM_NCCL = True
 
 main_compile_args = ['-D_THP_CORE']
 main_libraries = ['shm']
-main_link_args = [TH_LIB, THS_LIB, THPP_LIB, THNN_LIB, ATEN_LIB]
+main_link_args = [TH_LIB, THS_LIB, THPP_LIB, THNN_LIB, ATEN_LIB, NANOPB_STATIC_LIB]
 main_sources = [
+    "torch/csrc/toffee.pb.cpp",
+    "torch/csrc/toffee.cpp",
     "torch/csrc/PtrWrapper.cpp",
     "torch/csrc/Module.cpp",
     "torch/csrc/Generator.cpp",
@@ -455,11 +455,7 @@ if WITH_CUDNN:
     ]
     extra_compile_args += ['-DWITH_CUDNN']
 
-include_dirs.append(tmp_install_path + "/include/toffee")
-TOFFEE_LIB = os.path.join(lib_path, 'libtoffee.so.1')
-if platform.system() == 'Darwin':
-    TOFFEE_LIB = os.path.join(lib_path, 'libtoffee.1.dylib')
-main_link_args += [TOFFEE_LIB]
+# Unconditionally enabled
 main_sources += [
     "torch/csrc/toffee/export.cpp",
     "torch/csrc/autograd/functions/toffee/convolution.cpp",

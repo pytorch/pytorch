@@ -49,6 +49,7 @@ function build() {
   BUILD_C_FLAGS=''
   case $1 in
       THCS | THCUNN ) BUILD_C_FLAGS=$C_FLAGS;;
+      nanopb ) BUILD_C_FLAGS=$C_FLAGS" -fPIC -fexceptions";;
       *) BUILD_C_FLAGS=$C_FLAGS" -fexceptions";;
   esac
   cmake ../../$1 -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/FindCUDA" \
@@ -76,6 +77,7 @@ function build() {
               -DTHD_SO_VERSION=1 \
               -DNO_CUDA=$((1-$WITH_CUDA)) \
               -DNCCL_EXTERNAL=1 \
+              -Dnanopb_BUILD_GENERATOR=0 \
               -DCMAKE_BUILD_TYPE=$([ $DEBUG ] && echo Debug || echo Release) \
               $2
   make install -j$(getconf _NPROCESSORS_ONLN)
@@ -128,7 +130,10 @@ done
 
 # If all the builds succeed we copy the libraries, headers,
 # binaries to torch/lib
+rm -rf $INSTALL_DIR/lib/cmake
+rm -rf $INSTALL_DIR/lib/python
 cp $INSTALL_DIR/lib/* .
+cp $INSTALL_DIR/lib64/* .
 cp THNN/generic/THNN.h .
 cp THCUNN/generic/THCUNN.h .
 cp -r $INSTALL_DIR/include .

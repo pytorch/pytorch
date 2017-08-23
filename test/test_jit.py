@@ -11,9 +11,14 @@ try:
 except ImportError:
     HAS_TORCHVISION = False
 
-# TODO: Un-jankify this
-toffee_only = unittest.skipIf(not hasattr(
-    torch._C, "_jit_pass_export"), "no Toffee support")
+try:
+    import toffee
+    import google.protobuf.text_format
+    HAS_TOFFEE = True
+except ImportError:
+    HAS_TOFFEE = False
+
+toffee_only = unittest.skipIf(not HAS_TOFFEE, "no toffee support library")
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 
@@ -35,6 +40,10 @@ class TestJit(TestCase):
 
         self.assertExpected(str(trace))
 
+    def assertToffeeExpected(self, binary_pb, subname=None):
+        graph_def = toffee.GraphProto.FromString(binary_pb)
+        self.assertExpected(google.protobuf.text_format.MessageToString(graph_def, float_format='.15g'), subname)
+
     @toffee_only
     def test_export(self):
         x = Variable(torch.Tensor([0.4]), requires_grad=True)
@@ -44,13 +53,13 @@ class TestJit(TestCase):
         z = -torch.sigmoid(torch.tanh(x * (x + y)))
         torch._C._tracer_exit((z,))
         torch._C._jit_pass_lint(trace)
-        self.assertExpected(torch._C._jit_pass_export(trace))
+        self.assertToffeeExpected(torch._C._jit_pass_export(trace))
 
     @toffee_only
     def test_export_view(self):
         x = Variable(torch.Tensor([0]), requires_grad=True)
         trace, _ = torch.jit.record_trace(lambda x: x.view(1, 1), x)
-        self.assertExpected(torch._C._jit_pass_export(trace))
+        self.assertToffeeExpected(torch._C._jit_pass_export(trace))
 
     @toffee_only
     def test_export_data(self):
@@ -58,7 +67,7 @@ class TestJit(TestCase):
         y = Variable(torch.Tensor([[1, 2], [3, 4]]), requires_grad=True)
         trace, _ = torch.jit.record_trace(lambda x, y: -torch.sigmoid(torch.tanh(x * (x + y))), x, y)
         initializers = [x.data]
-        self.assertExpected(torch._C._jit_pass_export(trace, initializers))
+        self.assertToffeeExpected(torch._C._jit_pass_export(trace, initializers))
 
     def test_lstm(self):
         # Careful: don't use fused backend (enabled with CUDA)
@@ -287,7 +296,7 @@ class TestJit(TestCase):
     def test_batchnorm_export(self):
         x = Variable(torch.randn(2, 2).fill_(1.0), requires_grad=True)
         trace, _ = torch.jit.record_trace(nn.BatchNorm2d(2), x)
-        self.assertExpected(torch._C._jit_pass_export(trace))
+        self.assertToffeeExpected(torch._C._jit_pass_export(trace))
 
     def test_conv(self):
         x = Variable(torch.randn(20, 16, 50, 40).fill_(1.0), requires_grad=True)
@@ -298,7 +307,7 @@ class TestJit(TestCase):
     def test_conv_export(self):
         x = Variable(torch.randn(20, 16, 50, 40).fill_(1.0), requires_grad=True)
         trace, _ = torch.jit.record_trace(nn.Conv2d(16, 13, 3, bias=False), x)
-        self.assertExpected(torch._C._jit_pass_export(trace))
+        self.assertToffeeExpected(torch._C._jit_pass_export(trace))
 
     @skipIfNoTorchVision
     def test_alexnet(self):

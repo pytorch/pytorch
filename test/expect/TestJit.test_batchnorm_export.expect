@@ -16,7 +16,7 @@ node {
   }
   attribute {
     name: "epsilon"
-    f: 1e-05
+    f: 9.99999974737875e-06
   }
   attribute {
     name: "order"
@@ -24,7 +24,7 @@ node {
   }
   attribute {
     name: "momentum"
-    f: 0.9
+    f: 0.899999976158142
   }
 }
 name: "torch-jit-export"
