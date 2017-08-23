@@ -5,8 +5,7 @@
 static void THNN_(SpatialAdaptiveMaxPooling_updateOutput_frame)(
           real *input_p,
           real *output_p,
-          THIndex_t *indx_p,
-          THIndex_t *indy_p,
+          THIndex_t *ind_p,
           long nslices,
           long iwidth,
           long iheight,
@@ -38,8 +37,7 @@ static void THNN_(SpatialAdaptiveMaxPooling_updateOutput_frame)(
         /* local pointers */
         real *ip = input_p   + k*strided + y_start*strideh + x_start*stridew;
         real *op = output_p  + k*owidth*oheight + i*owidth + j;
-        THIndex_t *indyp = indy_p + k*owidth*oheight + i*owidth + j;
-        THIndex_t *indxp = indx_p + k*owidth*oheight + i*owidth + j;
+        THIndex_t *indp = ind_p   + k*owidth*oheight + i*owidth + j;
 
         /* compute local max: */
         long maxindex = -1;
@@ -54,18 +52,16 @@ static void THNN_(SpatialAdaptiveMaxPooling_updateOutput_frame)(
             if (val > maxval)
             {
               maxval = val;
-              maxindex = tcntr;
+              maxindex = (y+y_start)*iwidth + (x+x_start);
             }
-            tcntr++;
           }
         }
 
         /* set output to local max */
         *op = maxval;
 
-        /* store location of max (x,y) */
-        *indyp = (maxindex / kW) + TH_INDEX_BASE;
-        *indxp = (maxindex % kW) + TH_INDEX_BASE;
+        /* store location of max */
+        *indp = maxindex + TH_INDEX_BASE;
       }
     }
   }
@@ -121,14 +117,14 @@ void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
   {
     THTensor_(resize3d)(output, nslices, oheight, owidth);
     /* indices will contain i,j locations for each output point */
-    THIndexTensor_(resize4d)(indices, 2, nslices, oheight, owidth);
+    THIndexTensor_(resize3d)(indices, nslices, oheight, owidth);
 
     input_data = THTensor_(data)(input);
     output_data = THTensor_(data)(output);
     indices_data = THIndexTensor_(data)(indices);
 
     THNN_(SpatialAdaptiveMaxPooling_updateOutput_frame)(input_data, output_data,
-                                                      indices_data+nslices*owidth*oheight, indices_data,
+                                                      indices_data,
                                                       nslices,
                                                       iwidth, iheight,
                                                       owidth, oheight,
@@ -141,7 +137,7 @@ void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
 
     THTensor_(resize4d)(output, nbatch, nslices, oheight, owidth);
     /* indices will contain i,j locations for each output point */
-    THIndexTensor_(resize5d)(indices, 2, nbatch, nslices, oheight, owidth);
+    THIndexTensor_(resize4d)(indices, nbatch, nslices, oheight, owidth);
 
     input_data = THTensor_(data)(input);
     output_data = THTensor_(data)(output);
@@ -151,7 +147,7 @@ void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
     for (p = 0; p < nbatch; p++)
     {
       THNN_(SpatialAdaptiveMaxPooling_updateOutput_frame)(input_data+p*istride_b, output_data+p*nslices*owidth*oheight,
-                                                        indices_data+(p+nbatch)*nslices*owidth*oheight, indices_data+p*nslices*owidth*oheight,
+                                                        indices_data+p*nslices*owidth*oheight,
                                                         nslices,
                                                         iwidth, iheight,
                                                         owidth, oheight,
@@ -164,8 +160,7 @@ void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
 static void THNN_(SpatialAdaptiveMaxPooling_updateGradInput_frame)(
           real *gradInput_p,
           real *gradOutput_p,
-          THIndex_t *indx_p,
-          THIndex_t *indy_p,
+          THIndex_t *ind_p,
           long nslices,
           long iwidth,
           long iheight,
@@ -178,8 +173,7 @@ static void THNN_(SpatialAdaptiveMaxPooling_updateGradInput_frame)(
   {
     real *gradInput_p_k = gradInput_p + k*iwidth*iheight;
     real *gradOutput_p_k = gradOutput_p + k*owidth*oheight;
-    THIndex_t *indx_p_k = indx_p + k*owidth*oheight;
-    THIndex_t *indy_p_k = indy_p + k*owidth*oheight;
+    THIndex_t *ind_p_k = ind_p + k*owidth*oheight;
 
     /* calculate max points */
     long i, j;
@@ -190,11 +184,10 @@ static void THNN_(SpatialAdaptiveMaxPooling_updateGradInput_frame)(
       {
         int x_start = (int)floor((float) j / owidth * iwidth);
         /* retrieve position of max */
-        long maxi = indy_p_k[i*owidth + j] - TH_INDEX_BASE + y_start;
-        long maxj = indx_p_k[i*owidth + j] - TH_INDEX_BASE + x_start;
+        long maxp = ind_p_k[i*owidth + j] - TH_INDEX_BASE;
 
         /* update gradient */
-        gradInput_p_k[maxi*iwidth + maxj] += gradOutput_p_k[i*owidth + j];
+        gradInput_p_k[maxp] += gradOutput_p_k[i*owidth + j];
       }
     }
   }
@@ -248,10 +241,10 @@ void THNN_(SpatialAdaptiveMaxPooling_updateGradInput)(
   if (input->nDimension == 3)
   {
     THNN_(SpatialAdaptiveMaxPooling_updateGradInput_frame)(gradInput_data, gradOutput_data,
-                                                         indices_data+nslices*owidth*oheight, indices_data,
-                                                         nslices,
-                                                         iwidth, iheight,
-                                                         owidth, oheight);
+                                                           indices_data,
+                                                           nslices,
+                                                           iwidth, iheight,
+                                                           owidth, oheight);
   }
   else
   {
@@ -260,10 +253,10 @@ void THNN_(SpatialAdaptiveMaxPooling_updateGradInput)(
     for (p = 0; p < nbatch; p++)
     {
       THNN_(SpatialAdaptiveMaxPooling_updateGradInput_frame)(gradInput_data+p*nslices*iwidth*iheight, gradOutput_data+p*nslices*owidth*oheight,
-                                                           indices_data+(p+nbatch)*nslices*owidth*oheight, indices_data+p*nslices*owidth*oheight,
-                                                           nslices,
-                                                           iwidth, iheight,
-                                                           owidth, oheight);
+                                                             indices_data+p*nslices*owidth*oheight,
+                                                             nslices,
+                                                             iwidth, iheight,
+                                                             owidth, oheight);
     }
   }
 
