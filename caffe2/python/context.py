@@ -6,6 +6,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import threading
+import six
 
 
 class ContextInfo(object):
@@ -74,6 +75,14 @@ def __exit__(self, *args):
         self._prev_exit(*args)
 
 
+def __call__(self, func):
+    @six.wraps(func)
+    def wrapper(*args, **kwargs):
+        with self:
+            return func(*args, **kwargs)
+    return wrapper
+
+
 @classmethod
 def current(cls, value=None, required=True):
     return get_active_context(cls, value, required)
@@ -95,6 +104,7 @@ class define_context(object):
         cls._ctx_class = cls
         cls.__enter__ = __enter__
         cls.__exit__ = __exit__
+        cls.__call__ = __call__
         cls.current = current
         return cls
 
