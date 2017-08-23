@@ -1717,7 +1717,10 @@ add_docstr_all('expand',
 expand(*sizes) -> Tensor
 
 Returns a new view of the tensor with singleton dimensions expanded
-to a larger size. -1 means not changing the size on that dimension.
+to a larger size.
+
+Passing -1 as the size for a dimension means not changing the size of
+that dimension.
 
 Tensor can be also expanded to a larger number of dimensions, and the
 new ones will be appended at the front. (For the new dimensions, the
@@ -1737,6 +1740,11 @@ Example:
     >>> x.size()
     torch.Size([3, 1])
     >>> x.expand(3, 4)
+     1  1  1  1
+     2  2  2  2
+     3  3  3  3
+    [torch.FloatTensor of size 3x4]
+    >>> x.expand(-1, 4)   # -1 means not changing the size of that dimension
      1  1  1  1
      2  2  2  2
      3  3  3  3
