@@ -3339,6 +3339,10 @@ class TestTorch(TestCase):
         self.assertEqual(expanded, unsqueezed)
         self.assertEqual(expanded.stride(), unsqueezed.stride())
 
+        # test -1 as target size
+        self.assertEqual(tensor.expand(4, -1, 5), tensor.expand(4, 8, 5))
+        self.assertRaises(RuntimeError, lambda: tensor2.expand(-1, -1))
+
     def test_repeat(self):
         result = torch.Tensor()
         tensor = torch.rand(8, 4)
