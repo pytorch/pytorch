@@ -74,6 +74,7 @@ void Workspace::PrintBlobSizes() {
 
 vector<string> Workspace::LocalBlobs() const {
   vector<string> names;
+  names.reserve(blob_map_.size());
   for (auto& entry : blob_map_) {
     names.push_back(entry.first);
   }
@@ -82,12 +83,20 @@ vector<string> Workspace::LocalBlobs() const {
 
 vector<string> Workspace::Blobs() const {
   vector<string> names;
+  names.reserve(blob_map_.size());
   for (auto& entry : blob_map_) {
     names.push_back(entry.first);
   }
   if (shared_) {
-    vector<string> shared_blobs = shared_->Blobs();
-    names.insert(names.end(), shared_blobs.begin(), shared_blobs.end());
+    for (const auto& forwarded : forwarded_blobs_) {
+      if (shared_->HasBlob(forwarded.second)) {
+        names.push_back(forwarded.first);
+      }
+    }
+    if (blob_inheritance_) {
+      const auto& shared_blobs = shared_->Blobs();
+      names.insert(names.end(), shared_blobs.begin(), shared_blobs.end());
+    }
   }
   return names;
 }
@@ -95,6 +104,10 @@ vector<string> Workspace::Blobs() const {
 Blob* Workspace::CreateBlob(const string& name) {
   if (HasBlob(name)) {
     VLOG(1) << "Blob " << name << " already exists. Skipping.";
+  } else if (forwarded_blobs_.count(name)) {
+    // possible if parent workspace deletes forwarded blob
+    VLOG(1) << "Blob " << name << " is already forwarded from parent workspace "
+            << "(blob " << forwarded_blobs_[name] << "). Skipping.";
   } else {
     VLOG(1) << "Creating blob " << name;
     blob_map_[name] = unique_ptr<Blob>(new Blob());
@@ -110,7 +123,7 @@ bool Workspace::RemoveBlob(const string& name) {
     return true;
   }
 
-  // won't go into share_ here
+  // won't go into shared_ here
   VLOG(1) << "Blob " << name << " not exists. Skipping.";
   return false;
 }
@@ -118,17 +131,21 @@ bool Workspace::RemoveBlob(const string& name) {
 const Blob* Workspace::GetBlob(const string& name) const {
   if (blob_map_.count(name)) {
     return blob_map_.at(name).get();
-  } else if (shared_ && shared_->HasBlob(name)) {
-    return shared_->GetBlob(name);
-  } else {
-    LOG(WARNING) << "Blob " << name << " not in the workspace.";
-    // TODO(Yangqing): do we want to always print out the list of blobs here?
-    // LOG(WARNING) << "Current blobs:";
-    // for (const auto& entry : blob_map_) {
-    //   LOG(WARNING) << entry.first;
-    // }
-    return nullptr;
+  } else if (shared_) {
+    if (forwarded_blobs_.count(name)) {
+      return shared_->GetBlob(forwarded_blobs_.at(name));
+    }
+    if (blob_inheritance_ && shared_->HasBlob(name)) {
+      return shared_->GetBlob(name);
+    }
   }
+  LOG(WARNING) << "Blob " << name << " not in the workspace.";
+  // TODO(Yangqing): do we want to always print out the list of blobs here?
+  // LOG(WARNING) << "Current blobs:";
+  // for (const auto& entry : blob_map_) {
+  //   LOG(WARNING) << entry.first;
+  // }
+  return nullptr;
 }
 
 Blob* Workspace::GetBlob(const string& name) {
