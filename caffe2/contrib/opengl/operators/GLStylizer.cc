@@ -154,7 +154,7 @@ class OpenGLTensorToTextureStylizerPreprocessOp : public Operator<CPUContext>,
 #else
                                                                                   false
 #endif
-    );
+                                                                                  );
     const int tile_x = 1, tile_y = 1;
     GLImageVector<uint8_t>* input_images = ImageAllocator<uint8_t>::newImage(
         num_images, input_width, input_height, kInputChannels, tile_x, tile_y, false);

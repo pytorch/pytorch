@@ -44,9 +44,10 @@ std::string GLFilter::process_replacements(std::string shader,
   return shader;
 }
 
+template <typename T>
 void GLFilter::attach_uniform_buffer(const binding* block,
                                      GLuint bindingPoint,
-                                     std::function<void(float16_t*, size_t)> loader) {
+                                     std::function<void(T*, size_t)> loader) {
   if (block->location >= 0) {
     if (bindingPoint < kMaxUniformBlocks) {
       if (uniformBlock[bindingPoint] == 0) {
@@ -72,11 +73,10 @@ void GLFilter::attach_uniform_buffer(const binding* block,
                << " at binding point " << bindingPoint;
       });
 
-      float16_t* blockData =
-          (float16_t*)glMapBufferRange(GL_UNIFORM_BUFFER,
-                                       0,
-                                       blockSize[bindingPoint],
-                                       GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT);
+      T* blockData = (T*)glMapBufferRange(GL_UNIFORM_BUFFER,
+                                          0,
+                                          blockSize[bindingPoint],
+                                          GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT);
       if (blockData != NULL) {
         // Copy the data into the mapped buffer
         if (loader)
@@ -108,6 +108,9 @@ void GLFilter::attach_uniform_buffer(const binding* block,
     throwRuntimeError([&](std::stringstream& errmsg) { errmsg << "unbound uniform block"; });
   }
 }
+
+template void GLFilter::attach_uniform_buffer<float16_t>(
+    const binding* block, GLuint bindingPoint, std::function<void(float16_t*, size_t)> loader);
 
 static const GLenum unused_capability[] = {GL_CULL_FACE,
                                            GL_BLEND,
