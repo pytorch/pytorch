@@ -12,17 +12,7 @@ namespace torch { namespace autograd {
 #ifdef WITH_TOFFEE
 
 struct PrimSpecContext {
-  // TODO: For now, this is hardcoded to write protobufs.  Possibly add
-  // an abstraction barrier here...
-  toffee::GraphProto* graph;
-  // TODO: add fresh name supply
-
-  // Get the Toffee name for a node in the IR
-  // TODO: add name conversion mapping (currently hardcoded using uniques from
-  // Node)
-  std::string node(jit::Node *n) {
-    return std::to_string(n->unique());
-  }
+  std::shared_ptr<jit::Graph> graph;
   int batch_norm_count = 0;
 };
 
@@ -42,7 +32,7 @@ struct HasPrimSpec {
   // TODO: Passing in Node* directly here feels like too tight coupling with the
   // IR.  Changing this to variable_list will reduce coupling (but it means we
   // can only run these AS we are executing.)
-  virtual void primspec(PrimSpecContext* ctx, jit::node_list inputs, jit::node_list outputs) = 0;
+  virtual jit::node_list primspec(PrimSpecContext* ctx, jit::node_list inputs) = 0;
 #endif // WITH_TOFFEE
 
 // The reason we have this macro is because the class definition in headers need
@@ -50,7 +40,7 @@ struct HasPrimSpec {
 // macro-controlled (don't define it if WITH_TOFFEE is not defined).  To make
 // this work we use a macro; as an added bonus it's less typing.
 #ifdef WITH_TOFFEE
-#define HAS_PRIMSPEC virtual void primspec(PrimSpecContext* ctx, jit::node_list inputs, jit::node_list outputs) override
+#define HAS_PRIMSPEC virtual jit::node_list primspec(PrimSpecContext* ctx, jit::node_list inputs) override
 #else // WITH_TOFFEE
 #define HAS_PRIMSPEC
 #endif // WITH_TOFFEE

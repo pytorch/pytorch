@@ -55,10 +55,10 @@ class Log1p(Function):
 class Tanh(InplaceFunction):
 
     @staticmethod
-    def primspec(i, inplace=False):
+    def primspec(g, i, inplace=False):
         if inplace:
             return None
-        return torch.toffee.op("Tanh", i)
+        return g.appendNode(g.create("Tanh", [i]))
 
     @staticmethod
     def forward(ctx, i, inplace=False):
@@ -86,10 +86,10 @@ class Tanh(InplaceFunction):
 class Sigmoid(InplaceFunction):
 
     @staticmethod
-    def primspec(i, inplace=False):
+    def primspec(g, i, inplace=False):
         if inplace:
             return None
-        return torch.toffee.op("Sigmoid", i)
+        return g.appendNode(g.create("Sigmoid", [i]))
 
     @staticmethod
     def forward(ctx, i, inplace=False):

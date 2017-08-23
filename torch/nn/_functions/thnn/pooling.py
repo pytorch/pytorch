@@ -10,16 +10,17 @@ from torch.nn.modules.utils import _single, _pair, _triple
 class MaxPool1d(Function):
 
     @staticmethod
-    def primspec(input, kernel_size, stride=None, padding=0, dilation=1,
+    def primspec(g, input, kernel_size, stride=None, padding=0, dilation=1,
                  ceil_mode=False):
         if ceil_mode:
             return None
-        return torch.toffee.op("MaxPool", input,
-                               kernel=kernel_size,
-                               stride=stride,
-                               pad=padding,
-                               dilation=dilation,
-                               _outputs=(0,))
+        stride = stride or kernel_size
+        n = g.appendNode(g.create("MaxPool", [input])
+                          .i_("kernel", kernel_size)
+                          .i_("pad", padding)
+                          .i_("dilation", dilation)
+                          .i_("stride", stride))
+        return (n, g.create("Unused"))
 
     @staticmethod
     def forward(ctx, input, kernel_size, stride=None, padding=0, dilation=1,
@@ -94,16 +95,16 @@ class MaxPool1dBackward(Function):
 class MaxPool2d(Function):
 
     @staticmethod
-    def primspec(input, kernel_size, stride=None, padding=0, dilation=1,
+    def primspec(g, input, kernel_size, stride=None, padding=0, dilation=1,
                  ceil_mode=False):
         if ceil_mode:
             return None
-        return torch.toffee.op("MaxPool", input,
-                               kernel=kernel_size,
-                               stride=stride,
-                               pad=padding,
-                               dilation=dilation,
-                               _outputs=(0,))
+        n = g.appendNode(g.create("MaxPool", [input])
+                          .i_("kernel", kernel_size)
+                          .i_("pad", padding)
+                          .i_("dilation", dilation)
+                          .i_("stride", stride))
+        return (n, g.create("Unused"))
 
     @staticmethod
     def forward(ctx, input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False):
@@ -397,15 +398,16 @@ class FractionalMaxPool2dBackward(Function):
 class AvgPool2d(Function):
 
     @staticmethod
-    def primspec(input, kernel_size, stride=None, padding=0,
+    def primspec(g, input, kernel_size, stride=None, padding=0,
                  ceil_mode=False, count_include_pad=True):
         if ceil_mode:
             return None
-        return torch.toffee.op("AveragePool", input,
-                               kernel=kernel_size,
-                               stride=stride,
-                               pad=padding,
-                               _outputs=(0,))
+        stride = stride or kernel_size
+        n = g.appendNode(g.create("AveragePool", [input])
+                          .i_("kernel", kernel_size)
+                          .i_("stride", stride)
+                          .i_("pad", padding))
+        return (n, g.create("Unused"))
 
     @staticmethod
     def forward(ctx, input, kernel_size, stride=None, padding=0,

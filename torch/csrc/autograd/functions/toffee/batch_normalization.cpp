@@ -1,60 +1,58 @@
 #include "torch/csrc/autograd/functions/batch_normalization.h"
 #include <sstream>
 
+#include "torch/csrc/jit/ir.h"
+
 namespace torch {
 namespace autograd {
 
-void BatchNormForward::primspec(PrimSpecContext* ctx, jit::node_list inputs, jit::node_list outputs) {
-  toffee::NodeProto* p_n = ctx->graph->add_node();
-  p_n->set_op_type("SpatialBN");
-
+jit::node_list BatchNormForward::primspec(PrimSpecContext* ctx, jit::node_list inputs) {
+  auto & g = ctx->graph;
+  auto bn = g->appendNode(g->create(jit::kSpatialBN,{inputs.at(0),inputs.at(1)}));
   // X, Scale, Bias
-  p_n->add_input(ctx->node(inputs[0]));
-  p_n->add_input(ctx->node(inputs[1]));
   // TODO: Factor this logic into a helper, and make sure it gets applied
   // consistently.  See also convolution.cpp
-  if (inputs[2]->kind() != jit::kConstant || inputs[2]->t(jit::kValue).defined()) {
-    p_n->add_input(ctx->node(inputs[2]));
+  if (inputs[2]->kind() != jit::kConstant || inputs.at(2)->t(jit::kValue).defined()) {
+    bn->addInput(inputs[2]);
   }
 
-  p_n->add_output(ctx->node(outputs[0]));
-  JIT_ASSERT(outputs.at(1)->type()->kind() == jit::TypeKind::HandleType);
+  bn->i_(jit::kis_test, !this->training);
+  bn->f_(jit::kepsilon, eps);
+  bn->s_(jit::korder,"NCHW");
+  bn->f_(jit::kmomentum,1-momentum);
 
-  toffee::AttributeProto* attr;
-
-  #define ADD_ATTR(name,format,value) \
-    attr = p_n->add_attribute(); \
-    attr->set_name(name); \
-    attr->set_##format(value);
-
-  ADD_ATTR("is_test",i,0);
-  ADD_ATTR("epsilon",f,eps);
-  ADD_ATTR("order",s,"NCHW");
-  ADD_ATTR("momentum",f,1-momentum);
+  std::vector<int64_t> inplace_outputs;
+  auto orig_output = g->appendNode(g->createSelect(bn, 0));
+  inplace_outputs.push_back(-1);
 
   auto typ = inputs.at(1)->type()->cast<torch::jit::TensorType>();
   int64_t the_size = typ->sizes()[0];
   std::stringstream ss;
   ss << the_size << "_" << ctx->batch_norm_count;
   std::string suffix = ss.str();
-  auto sm = "saved_mean_" + suffix;
-  auto sv = "saved_var_" + suffix;
-  ctx->graph->add_input(sm);
-  ctx->graph->add_input(sv);
-  p_n->add_input(sm);
-  p_n->add_output(sm);
-  p_n->add_input(sv);
-  p_n->add_output(sv);
+  auto sm = g->addInput()->setDebugName("saved_mean_" + suffix);
+  auto sv = g->addInput()->setDebugName("saved_var_" + suffix);
 
-  // dummy output
-  for(int i = 3; i < 5; i++) {
-    p_n->add_output(
-        "batch_norm_dead_output_" + std::to_string(i)+std::to_string(ctx->batch_norm_count)
-    );
+  int64_t sm_start = bn->inputs().size();
+  bn->addInput(sm);
+  bn->addInput(sv);
+
+  if(this->training) {
+    g->appendNode(g->createSelect(bn, 1));
+    inplace_outputs.push_back(sm_start);
+    g->appendNode(g->createSelect(bn, 2));
+    inplace_outputs.push_back(sm_start+1);
+    // dummy output
+    for(int i = 3; i < 5; i++) {
+      g->appendNode(g->createSelect(bn, i)->setDebugName("batch_norm_dead_output"));
+      inplace_outputs.push_back(-1);
+    }
   }
-
+  bn->is_(jit::kInPlaceOutputs,std::move(inplace_outputs));
   ctx->batch_norm_count++;
+  return {orig_output,  g->create(jit::kUnused)};
 }
+
 
 } // torch::autograd
 } // torch

@@ -9,34 +9,143 @@
 #include <google/protobuf/io/zero_copy_stream_impl.h>
 
 #include "torch/csrc/autograd/functions/convolution.h"
+#include "torch/csrc/jit/dead_code_elimination.h"
 
 #include <fstream>
+#undef NDEBUG
+#include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
+#define NDEBUG
+
+namespace py = pybind11;
 
 namespace torch { namespace jit {
 
 std::string node_name(Node* n) {
-  return std::to_string(n->unique());
+  return n->uniqueName();
 }
 
-// Exports a graph to ToffeeIR
-std::string ExportGraph(std::shared_ptr<Graph>& g, const std::vector<at::Tensor> & initializers) {
-  toffee::GraphProto p_g;
+template<typename R, typename T>
+static std::vector<R> mapv(const std::vector<T> & inputs, std::function<R(const T &)> fn) {
+  std::vector<R> r;
+  r.reserve(inputs.size());
+  for(auto & input : inputs)
+    r.push_back(fn(input));
+  return r;
+}
+// transform PythonOps and Cpp Ops into Node's that match ToffeeIR
+// semantics.
+// Eventually this should just be part of init_pass but we should avoid
+// tight coupling of the JIT and Toffee IR exporter until ready.
+std::shared_ptr<Graph> ToToffeeIR(std::shared_ptr<Graph>& g) {
   torch::autograd::PrimSpecContext ctx;
-  ctx.graph = &p_g;
-  int temp_next_unique = 0;
-  p_g.set_name("torch-jit-export");
-  for (auto input : g->inputs()) {
-    p_g.add_input(node_name(input));
+  std::unordered_map<Node*, Node*> env;
+  ctx.graph = std::make_shared<Graph>();
+  for (auto input : g->inputs())
+    env[input] = ctx.graph->addInput()->setType(input->typeOption());
+  auto envFn = [&](Node * n) {
+    return env.at(n);
+  };
+  // put the new outputs in our environment map, and
+  // copy the type from the input graph if they were not set by the
+  // primspec
+  auto setOutputs = [&](Node * node, const std::vector<Node*> & outputs) {
+    auto old_outputs = node->outputs();
+    JIT_ASSERTM(outputs.size() <= old_outputs.size(), "primspec produced too many outputs");
+    size_t i = 0;
+    for(auto & old : old_outputs) {
+      if(i >= outputs.size()) {
+        // primspecs do not deal with Handles at the moment
+        // so we map handles to Unused nodes
+        auto typ = old->typeOption();
+        JIT_ASSERTM(typ && typ->kind() == jit::TypeKind::HandleType,
+          "primspec produced too few outputs");
+        env[old] = ctx.graph->create(jit::kUnused);
+      } else {
+        if(!outputs[i]->hasType()) {
+          outputs[i]->setType(old->typeOption());
+          env[old] = outputs[i];
+        }
+      }
+      i++;
+    }
+  };
+  for (auto node : g->nodes()) {
+    IR_IF(node, Select)
+      //selects are translated by multi-return nodes.
+      JIT_ASSERT(env.count(value) > 0);
+    IR_ELSEIFM(CppOp)
+      if (auto fn = std::dynamic_pointer_cast<autograd::HasPrimSpec>(value->fn)) {
+        auto outputs = fn->primspec(&ctx, mapv<Node*,Node*>(node->inputs(),envFn));
+        setOutputs(node,outputs);
+      } else {
+        throw std::runtime_error("CppOp doesn't define primspec " + value->name());
+      }
+    IR_ELSEIFM(PythonOp)
+      auto pyobj = py::handle(value->pyobj.get());
+      if(!py::hasattr(pyobj, "primspec"))
+        throw std::runtime_error("PythonOp doesn't define primspec " + value->name());
+
+      py::object primspec_fn = pyobj.attr("primspec");
+
+      py::tuple py_primspec_args(1+value->cconv.size());
+
+      auto node_it = node->inputs().begin();
+      auto scalar_it = value->scalar_args.begin();
+      Py_ssize_t input_nr = 0;
+      py_primspec_args[input_nr++] = py::cast(ctx.graph);
+
+      for (auto arg_type : value->cconv) {
+        py::object obj;
+        if (arg_type == 's') {
+          JIT_ASSERTM(scalar_it != value->scalar_args.end(), "expected too many scalar args");
+          obj = py::reinterpret_borrow<py::object>(py::handle((scalar_it++)->get()));
+        } else if (arg_type == 't') {
+          JIT_ASSERTM(node_it != node->inputs().end(),
+            "expected too many inputs");
+          Node * n_i = envFn(*node_it++);
+          obj = py::cast(n_i);
+          Node * back = py::cast<Node*>(obj);
+          JIT_ASSERT(back == n_i);
+        } else {
+          throw std::runtime_error("unexpected calling convention");
+        }
+        py_primspec_args[input_nr++] = obj;
+      }
+      py::object raw_output = py::reinterpret_borrow<py::object>(PyObject_CallObject(primspec_fn.ptr(), py_primspec_args.ptr()));
+      if(!raw_output)
+        throw python_error();
+      if(raw_output.ptr() == Py_None)
+        throw std::runtime_error("PythonOp's primspec returned None, indicating conversion not supported " + value->name());
+      std::vector<Node*> outputs;
+      if(py::isinstance<Node>(raw_output)) {
+        outputs.push_back(py::cast<Node*>(raw_output));
+      } else {
+        outputs = py::cast<std::vector<Node*>>(raw_output);
+      }
+      setOutputs(node,outputs);
+    IR_ELSE()
+      if(node->kind() == kConstant && node->t(kValue).defined()) {
+        throw std::runtime_error("Constant not supported yet");
+      }
+      auto n_ = ctx.graph->createClone(node, envFn);
+      if(node->hasMultipleOutputs()) {
+        int i = 0;
+        for(auto s : node->uses()) {
+          env[s.user] = ctx.graph->createSelect(n_,i++);
+        }
+      } else {
+        env[node] = n_;
+      }
+    IR_END()
   }
   for (auto output : g->outputs()) {
-    p_g.add_output(node_name(output));
+    ctx.graph->registerOutput(env.at(output));
   }
+  return std::move(ctx.graph);
+}
 
-  int inputs_count = 0;
-  for (auto & tensor : initializers) {
-    std::string name = p_g.input(inputs_count++);
-    auto p = p_g.add_initializer();
-    p->set_name(name);
+static void encodeTensor(toffee::TensorProto * p, const at::Tensor & tensor) {
     for(auto d : tensor.sizes()) {
       p->add_dims(d);
     }
@@ -48,6 +157,64 @@ std::string ExportGraph(std::shared_ptr<Graph>& g, const std::vector<at::Tensor>
     for(int64_t i = 0; i < N; ++i) {
       p->add_float_data(data[i]);
     }
+}
+static void encodeGraph(toffee::GraphProto * p_g, std::shared_ptr<Graph> & g, const std::vector<at::Tensor> & initializers);
+static void addAttribute(toffee::NodeProto * n_p, jit::Node * n, jit::Symbol name) {
+  auto attr = n_p->add_attribute();
+  attr->set_name(jit::symbolToString(name));
+  switch(n->kindOf(name)) {
+    case AttributeKind::f:
+      attr->set_f(n->f(name));
+      break;
+    case AttributeKind::fs:
+      for(auto & v : n->fs(name))
+        attr->add_floats(v);
+      break;
+    case AttributeKind::i:
+      attr->set_i(n->i(name));
+      break;
+    case AttributeKind::is:
+      for(auto & v : n->is(name))
+        attr->add_ints(v);
+      break;
+    case AttributeKind::s:
+      attr->set_s(n->s(name));
+      break;
+    case AttributeKind::ss:
+      for(auto & v : n->ss(name))
+        attr->add_strings(v);
+      break;
+    case AttributeKind::t: {
+      //TODO: tensors but no tensor?
+      auto t = attr->add_tensors();
+      encodeTensor(t, n->t(name));
+    } break;
+    case AttributeKind::ts:
+      for(auto & v : n->ts(name)) {
+        auto t = attr->add_tensors();
+        encodeTensor(t, v);
+      }
+      break;
+    case AttributeKind::g: {
+      //TODO: graphs but no graph?
+      auto g = attr->add_graphs();
+      encodeGraph(g, n->g(name), {});
+    } break;
+    case AttributeKind::gs:
+      for(auto & v : n->gs(name)) {
+        auto g = attr->add_graphs();
+        encodeGraph(g, v, {});
+      }
+      break;
+  }
+}
+
+static void encodeGraph(toffee::GraphProto * p_g, std::shared_ptr<Graph> & g, const std::vector<at::Tensor> & initializers) {
+  for (auto input : g->inputs()) {
+    p_g->add_input(node_name(input));
+  }
+  for (auto output : g->outputs()) {
+    p_g->add_output(node_name(output));
   }
   for (auto node : g->nodes()) {
     if (node->kind() == kSelect) {
@@ -55,281 +222,54 @@ std::string ExportGraph(std::shared_ptr<Graph>& g, const std::vector<at::Tensor>
       // of the select invariant
       continue;
     }
-    auto generic_node = [&]() {
-      toffee::NodeProto* p_n = p_g.add_node();
-      for (auto input : node->inputs()) {
-        p_n->add_input(node_name(input));
-      }
-      if (node->type()->kind() == TypeKind::MultiType) {
-        for (auto u : node->uses()) {
-          JIT_ASSERT(u.user->kind() == kSelect);
-          // Python operators whose backwards are not traceable will have
-          // handle outputs; at the moment ToffeeIR export only supports
-          // forwards only, so these will be unused
-          if (u.user->type()->kind() == TypeKind::HandleType) {
-            JIT_ASSERT(u.user->uses().empty());
-            continue;
-          }
-          p_n->add_output(node_name(u.user));
-        }
+    auto p_n = p_g->add_node();
+    for(auto input : node->inputs()) {
+      p_n->add_input(node_name(input));
+    }
+    // jit::Node and toffee protobuf don't agree on how to represent
+    // so called 'inplace' operators that mutate inputs
+    // 'InPlaceOutputs' has an entry for each output of this node
+    // if the entry is >= 0, it specifies the index of the input
+    // which is mutated and returned as an output
+    // we use that to translate to ToffeeIR's replicated naming scheme
+    // where inputs/outputs will have the same name
+    std::vector<int64_t> * inplace_outputs = nullptr;
+    if(node->hasAttribute(jit::kInPlaceOutputs))
+      inplace_outputs = &node->is(jit::kInPlaceOutputs);
+    int i = 0;
+    for(auto output : node->outputs()) {
+      if(!inplace_outputs || inplace_outputs->at(i) < 0) {
+        p_n->add_output(node_name(output));
       } else {
-        p_n->add_output(node_name(node));
+        Node * input = node->inputs().at(inplace_outputs->at(i));
+        p_n->add_output(node_name(input));
       }
-      return p_n;
-    };
-    // See https://fb.quip.com/TbPaAzijnd3e
-    // TODO: Delete these
-    IR_IF(node, Add)
-      toffee::NodeProto* p_n = generic_node();
-      p_n->set_op_type("Add");
-    IR_ELSEIF(Mul)
-      toffee::NodeProto* p_n = generic_node();
-      p_n->set_op_type("Mul");
-    IR_ELSEIF(Negate)
-      toffee::NodeProto* p_n = generic_node();
-      p_n->set_op_type("Scale");
-      toffee::AttributeProto* attr = p_n->add_attribute();
-      attr->set_name("scale");
-      attr->set_f(-1);
-    IR_ELSEIF(Sigmoid)
-      toffee::NodeProto* p_n = generic_node();
-      p_n->set_op_type("Sigmoid");
-    IR_ELSEIF(Tanh)
-      toffee::NodeProto* p_n = generic_node();
-      p_n->set_op_type("TanH");
-    IR_ELSEIF(Constant)
-      // TODO: Do I need to assert here? error check?
-      if (!value->t(kValue).defined()) {
-        // do nothing
-        // TODO: Would be nice if we could easily assert all uses
-        // of undefined constants hard-code behavior in the export.
-        // Right now this will just silently generate dangling
-        // references.
-      } else {
-        throw std::runtime_error("Constant not supported yet");
-      }
-    IR_ELSEIF(Return)
-      JIT_ASSERT(0);
-    IR_ELSEIF(Select)
-      JIT_ASSERT(0);
-    IR_ELSEIF(Param)
-      JIT_ASSERT(0);
-    IR_ELSEIF(FusionGroup)
-      throw std::runtime_error("FusionGroup not supported.  Try exporting before fusing");
-    IR_ELSEIFM(CppOp)
-      if (auto fn = std::dynamic_pointer_cast<autograd::HasPrimSpec>(value->fn)) {
-        node_list outputs;
-        if (node->type()->kind() == TypeKind::MultiType) {
-          for (auto u : node->uses()) {
-            outputs.push_back(u.user);
-          }
-        } else {
-          outputs.push_back(node);
-        }
-        fn->primspec(&ctx, node->inputs(), outputs);
-      } else {
-        throw std::runtime_error("CppOp doesn't define primspec " + value->name());
-      }
-    IR_ELSEIFM(PythonOp)
-      // NB: All inplace designations are dropped
-
-      toffee::NodeProto* p_n = generic_node();
-
-      if (!PyObject_HasAttrString(value->pyobj.get(), "primspec")) {
-        throw std::runtime_error("PythonOp doesn't define primspec " + value->name());
-      }
-      THPObjectPtr primspec_fn(PyObject_GetAttrString(value->pyobj.get(), "primspec"));
-      if (!primspec_fn) throw python_error();
-      THPObjectPtr py_primspec_args(PyTuple_New(value->cconv.size()));
-      // Symbolically represent tensors as longs for now.  Hypothetically,
-      // we could pass a Variable in instead, which could allow for
-      // "modifications" to the inputs before they get glommed into the
-      // Toffee IR.
-
-      // TODO: This is copy-pasted from jit_closure.cpp
-      auto node_it = node->inputs().begin();
-      auto scalar_it = value->scalar_args.begin();
-      Py_ssize_t input_nr = 0;
-
-      for (auto arg_type : value->cconv) {
-        PyObject *obj;
-        if (arg_type == 's') {
-          if (scalar_it == value->scalar_args.end())
-            throw std::runtime_error("expected too many scalar args");
-          obj = (scalar_it++)->get();
-          Py_INCREF(obj);
-        } else if (arg_type == 't') {
-          if (node_it == node->inputs().end())
-            throw std::runtime_error("expected too many inputs");
-          // TODO: Send in something more reasonable here
-          obj = PyLong_FromLong(node_it - node->inputs().begin());
-          node_it++;
-        } else {
-          throw std::runtime_error("unexpected calling convention");
-        }
-        PyTuple_SET_ITEM(py_primspec_args.get(), input_nr++, obj);
-      }
-      THPObjectPtr raw_output(PyObject_CallObject(primspec_fn, py_primspec_args));
-      if (!raw_output) {
-        throw python_error();
-      }
-      if (raw_output == Py_None) {
-        throw std::runtime_error("PythonOp's primspec returned None, indicating conversion not supported " + value->name());
-      }
-      if (!PyDict_Check(raw_output.get())) throw std::runtime_error("primspec did not return a dict");
-
-      PyObject* py_op_type = PyDict_GetItemString(raw_output.get(), "name");
-      if (!py_op_type) throw std::runtime_error("primspec missing name key");
-      if (!THPUtils_checkString(py_op_type)) throw std::runtime_error("primspec returned a non-string name");
-      std::string op_type = THPUtils_unpackString(py_op_type);
-      p_n->set_op_type(op_type);
-
-      const toffee::OpSchema* op_schema = toffee::OpSchemaRegistry::Schema(op_type);
-      // For now, DON'T require op schema to exist
-
-      PyObject* py_inputs = PyDict_GetItemString(raw_output.get(), "inputs");
-      if (py_inputs) {
-        if (!PyTuple_Check(py_inputs)) throw std::runtime_error("primspec returned non-tuple inputs");
-
-        p_n->clear_input();
-        Py_ssize_t num_inputs = PyTuple_GET_SIZE(py_inputs);
-        for (int i = 0; i < num_inputs; i++) {
-          // TODO: better error message when at is out of bounds
-          p_n->add_input(node_name(node->inputs().at(PyLong_AsLong(PyTuple_GET_ITEM(py_inputs, i)))));
-        }
-      }
-      // otherwise, default to preserving the inputs directly
-
-      PyObject* py_attrs = PyDict_GetItemString(raw_output.get(), "attrs");
-      if (py_attrs) {
-        if (!PyDict_Check(py_attrs)) throw std::runtime_error("primspec did not return a dict attrs entry");
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        while (PyDict_Next(py_attrs, &pos, &key, &value)) {
-          if (!THPUtils_checkString(key)) throw std::runtime_error("non-string key in attrs from primspec");
-          if (THPUtils_unpackString(key) == "_outputs") {
-            // This is a special hack to handle cases when PyTorch supports
-            // more outputs than Toffee IR does OR the outputs are in the wrong
-            // order.
-            // TODO: if we drop an output that is used later, we must FAIL THE
-            // EXPORT. Right now I believe we just create a malformed ToffeeIR
-            // spec.
-            if (node->type()->kind() != TypeKind::MultiType) {
-              // NB: Actually, this can never happen because PythonOp is always
-              // multi-return (lol)
-              throw std::runtime_error("can't use _outputs for a function that doesn't return multiple things");
-            }
-            p_n->clear_output();
-            if (!PyTuple_Check(value)) throw std::runtime_error("_outputs was not tuple");
-            Py_ssize_t num_toffee_outputs = PyTuple_GET_SIZE(value);
-            for (Py_ssize_t i = 0; i < num_toffee_outputs; i++) {
-              PyObject *ix = PyTuple_GET_ITEM(value, i);
-              if (!THPUtils_checkLong(ix)) throw std::runtime_error("_outputs entry was not numeric index");
-              long l = THPUtils_unpackLong(ix);
-              if (l >= 0) {
-                p_n->add_output(node_name(node->uses().at(l).user));
-              } else {
-                // This is an extra Toffee IR output which PyTorch doesn't have.
-                // What we will do is just add a dummy output to work around
-                // this.
-                p_n->add_output("tmp" + std::to_string(temp_next_unique++));
-              }
-            }
-            continue;
-          }
-          toffee::AttributeProto* attr = p_n->add_attribute();
-          auto key_s = THPUtils_unpackString(key);
-          attr->set_name(key_s);
-          if (THPUtils_checkDouble(value)) {
-            // OK, so, sometimes a Python user will pass an integer, where
-            // really what we wanted was a float.  We'll use the Toffee IR
-            // schema to disambiguate this case, if it is available.
-            bool done = false;
-            do {
-              if (!op_schema) break;
-              auto attr_it = op_schema->attributes().find(key_s);
-              if (attr_it == op_schema->attributes().end()) break;
-              if (attr_it->second.type == toffee::OpSchema::AttrType::FLOAT) {
-                attr->set_f(THPUtils_unpackDouble(value));
-              } else if (attr_it->second.type == toffee::OpSchema::AttrType::INT) {
-                attr->set_i(THPUtils_unpackLong(value));
-              } else {
-                // We are NOT in the business of schema checking.  Fallback on
-                // detecting the type.
-                break;
-              }
-              done = true;
-            } while (0);
-            if (!done) {
-              // order matters, since all longs are doubles
-              if (THPUtils_checkLong(value)) {
-                attr->set_i(THPUtils_unpackLong(value));
-              } else {
-                attr->set_f(THPUtils_unpackDouble(value)); // TODO: precision?!
-              }
-            }
-          } else if (THPUtils_checkString(value)) {
-            // TODO: binary data?!
-            attr->set_s(THPUtils_unpackString(value));
-          } else if (PyTuple_Check(value)) {
-            Py_ssize_t num_value_items = PyTuple_GET_SIZE(value);
-            int seen_int = 0;
-            int seen_float = 0;
-            int seen_string = 0;
-            for (Py_ssize_t i = 0; i < num_value_items; i++) {
-              PyObject *elem = PyTuple_GET_ITEM(value, i);
-              if (THPUtils_checkDouble(elem)) {
-                // Copy paste BUT NOT QUITE job of the checkDouble logic from
-                // above.  This sort of code kind of makes me wish we didn't
-                // distinguish between FLOATS and FLOAT.
-                bool done = false;
-                do {
-                  if (!op_schema) break;
-                  auto attr_it = op_schema->attributes().find(key_s);
-                  if (attr_it == op_schema->attributes().end()) break;
-                  if (attr_it->second.type == toffee::OpSchema::AttrType::FLOATS) {
-                    attr->add_floats(THPUtils_unpackDouble(elem));
-                    seen_float = 1;
-                  } else if (attr_it->second.type == toffee::OpSchema::AttrType::INTS) {
-                    attr->add_ints(THPUtils_unpackLong(elem));
-                    seen_int = 1;
-                  } else {
-                    // We are NOT in the business of schema checking.  Fallback on
-                    // detecting the type.
-                    break;
-                  }
-                  done = true;
-                } while (0);
-                if (!done) {
-                  // order matters, since all longs are doubles
-                  if (THPUtils_checkLong(elem)) {
-                    attr->add_ints(THPUtils_unpackLong(elem));
-                    seen_int = 1;
-                  } else {
-                    attr->set_f(THPUtils_unpackDouble(elem)); // TODO: precision?!
-                    seen_float = 1;
-                  }
-                }
-              } else if (THPUtils_checkString(elem)) {
-                // TODO: binary data?!
-                attr->add_strings(THPUtils_unpackString(elem));
-                seen_string = 1;
-              } else {
-                // TODO: better message
-                throw std::runtime_error("unrecognized type of tuple entry in primspec attrs");
-              }
-              // TODO: Tensor constants?
-            }
-            if (seen_int + seen_float + seen_string > 1) {
-              throw std::runtime_error("cannot have multiple types in attribute tuple");
-            }
-          }
-        }
-      }
-    IR_ELSE()
-      throw std::runtime_error("Not supported");
-    IR_END()
+      i++;
+    }
+    p_n->set_op_type(symbolToString(node->kind()));
+    for(auto attr_name : node->attributeNames()) {
+      if(attr_name == kInPlaceOutputs)
+        continue;
+      addAttribute(p_n, node, attr_name);
+    }
   }
+  int inputs_count = 0;
+  for (auto & tensor : initializers) {
+    // TODO: stop using positions to determine which initializers
+    // match to which inputs
+    std::string name = p_g->input(inputs_count++);
+    auto p = p_g->add_initializer();
+    p->set_name(name);
+    encodeTensor(p, tensor);
+  }
+}
+
+// Exports a graph to ToffeeIR
+std::string ExportGraph(std::shared_ptr<Graph>& g_, const std::vector<at::Tensor> & initializers) {
+  auto g = ToToffeeIR(g_);
+  toffee::GraphProto p_g;
+  p_g.set_name("torch-jit-export");
+  encodeGraph(&p_g, g, initializers);
   std::string s;
   google::protobuf::TextFormat::PrintToString(p_g, &s);
   return s; // RVO

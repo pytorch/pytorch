@@ -1,17 +1,17 @@
 import torch.toffee
 
 
-def threshold_primspec(input, threshold=0, value=0, inplace=False):
-    if inplace:
+def threshold_primspec(g, input, threshold=0, value=0, inplace=False):
+    if inplace or threshold != 0 or value != 0:
         return None
-    if threshold == 0 and value == 0:
-        return torch.toffee.op("Relu", input)
+    r = g.appendNode(g.create("Relu", [input]))
+    return r
 
 
-def leakyrelu_primspec(input, negative_slope, inplace=False):
+def leakyrelu_primspec(g, input, negative_slope, inplace=False):
     if inplace:
         return None
-    return torch.toffee.op("LeakyRelu", input, alpha=negative_slope)
+    return g.appendNode(g.create("LeakyRelu", [input]).f_("alpha", negative_slope))
 
 
 primspec_fns = {

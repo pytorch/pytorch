@@ -27,9 +27,9 @@ std::string getPythonName(const PyObject* obj, bool is_legacy) {
 }
 std::ostream& operator<<(std::ostream & out, Node & n) {
   if(n.kind() == kSelect)
-    out << "%" << n.input()->unique() << "." << n.offset();
+    out << "%" << n.input()->uniqueName() << "." << n.offset();
   else
-    out << "%" << n.unique();
+    out << "%" << n.uniqueName();
   return out;
 }
 std::ostream& operator<<(std::ostream & out, const node_list & nodes) {
@@ -183,13 +183,7 @@ std::ostream& operator<<(std::ostream & out, Graph & g) {
         prev_stage = n->stage();
       }
       out << "  ";
-      node_list outputs;
-      if (n->hasMultipleOutputs()) {
-        for (auto u : n->uses())
-          outputs.push_back(u.user);
-      } else {
-        outputs.push_back(n);
-      }
+      node_list outputs = n->outputs();
       out << node_list_with_types(outputs);
       out << " = ";
       IR_IFM(n,PythonOp)

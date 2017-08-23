@@ -8,10 +8,10 @@ import math
 class Add(InplaceFunction):
 
     @staticmethod
-    def primspec(a, b, inplace=False):
+    def primspec(g, a, b, inplace=False):
         if inplace:
             return None
-        return torch.toffee.op("Add", a, b)
+        return g.appendNode(g.create("Add", [a, b]))
 
     @staticmethod
     def forward(ctx, a, b, inplace=False):
@@ -48,10 +48,10 @@ class Sub(InplaceFunction):
 class Mul(Function):
 
     @staticmethod
-    def primspec(a, b, inplace=False):
+    def primspec(g, a, b, inplace=False):
         if inplace:
             return None
-        return torch.toffee.op("Mul", a, b)
+        return g.appendNode(g.create("Mul", [a, b]))
 
     @staticmethod
     def forward(ctx, a, b):
@@ -229,10 +229,10 @@ class PowConstant(Function):
 class Negate(InplaceFunction):
 
     @staticmethod
-    def primspec(i, inplace=False):
+    def primspec(g, i, inplace=False):
         if inplace:
             return None
-        return torch.toffee.op("Scale", i, scale=float(-1))
+        return g.appendNode(g.create("Scale", [i]).f_("scale", -1))
 
     @staticmethod
     def forward(ctx, i, inplace=False):
