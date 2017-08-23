@@ -67,6 +67,7 @@ class PairwiseDotProduct(ModelLayer):
             [self.x_embeddings() + '_matmul'],
             trans_b=1,
         )
+
         if self.indices_to_gather:
             flattened = net.Flatten(
                 Y, Y + '_flatten',
