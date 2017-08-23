@@ -133,7 +133,9 @@ done
 rm -rf $INSTALL_DIR/lib/cmake
 rm -rf $INSTALL_DIR/lib/python
 cp $INSTALL_DIR/lib/* .
-cp $INSTALL_DIR/lib64/* .
+if [ -d "$INSTALL_DIR/lib64/" ]; then
+    cp $INSTALL_DIR/lib64/* .
+fi
 cp THNN/generic/THNN.h .
 cp THCUNN/generic/THCUNN.h .
 cp -r $INSTALL_DIR/include .
