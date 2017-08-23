@@ -78,7 +78,6 @@ REGISTER_CPU_OPERATOR(
     CopyOnDeviceLike,
     CopyOnDeviceLikeOp<CPUContext, CPUContext, CPUContext>);
 REGISTER_CPU_OPERATOR(Copy, CopyOp<CPUContext, CPUContext, CPUContext>);
-REGISTER_CPU_OPERATOR(Shape, ShapeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(LengthsToShape, LengthsToShapeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(HasElements, HasElementsOp<CPUContext>);
 REGISTER_CPU_OPERATOR(IsEmpty, IsEmptyOp<CPUContext>);
@@ -430,18 +429,6 @@ OPERATOR_SCHEMA(CopyOnDeviceLike)
     .Input(0, "input", "The input tensor.")
     .Input(1, "dst", "Tensor, on which device the copy will be performed.")
     .Output(0, "output", "Tensor that will contain a copy of the input.");
-
-OPERATOR_SCHEMA(Shape)
-    .NumInputs(1)
-    .NumOutputs(1)
-    .TensorInferenceFunction([](const OperatorDef& /*def*/,
-                                const vector<TensorShape>& in) {
-      vector<TensorShape> out(1);
-      out[0].add_dims(in[0].dims().size());
-      out[0].set_data_type(TensorProto::INT32);
-      return out;
-    })
-    .SetDoc("Produce a 1D int64 tensor with the shape of the input tensor.");
 
 OPERATOR_SCHEMA(HasElements)
     .NumInputs(1)
@@ -857,7 +844,6 @@ class GetEnsureDenseGradient : public GradientMakerBase {
 REGISTER_GRADIENT(EnsureDense, GetEnsureDenseGradient);
 
 SHOULD_NOT_DO_GRADIENT(Print);
-SHOULD_NOT_DO_GRADIENT(Shape);
 SHOULD_NOT_DO_GRADIENT(HasElements);
 SHOULD_NOT_DO_GRADIENT(IsEmpty);
 SHOULD_NOT_DO_GRADIENT(LengthsToShape);
