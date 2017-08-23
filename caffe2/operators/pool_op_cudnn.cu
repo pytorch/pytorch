@@ -8,6 +8,8 @@ namespace caffe2 {
 
 namespace {
 
+// Explicit fast paths for avg and max global pooling due to CuDNN global
+// pooling performance bug which makes pooling extremely slow.
 template <typename T>
 __global__ void
 global_avgpool_kernel_NCHW(const int NC, const int sz, const T* data, T* out) {
@@ -31,6 +33,41 @@ __global__ void
 global_avgpool_backward_NCHW(const int NC, const int sz, const T* dx, T* out) {
   CUDA_1D_KERNEL_LOOP(i, NC * sz) {
     out[i] = dx[i / sz] / sz;
+  }
+}
+
+template <typename T>
+__global__ void
+global_maxpool_kernel_NCHW(const int NC, const int sz, const T* data, T* out) {
+  typedef cub::BlockReduce<T, CAFFE_CUDA_NUM_THREADS> BlockReduce;
+  __shared__ typename BlockReduce::TempStorage temp_storage;
+  for (int j = blockIdx.x; j < NC; j += gridDim.x) {
+    T max(data[blockIdx.x * sz + threadIdx.x]);
+    for (int k = threadIdx.x; k < sz; k += blockDim.x) {
+      max = data[j * sz + k] > max ? data[j * sz + k] : max;
+    }
+    float totalmax = BlockReduce(temp_storage).Reduce(max, cub::Max());
+    if (threadIdx.x == 0) {
+      out[j] = totalmax;
+    }
+    __syncthreads();
+  }
+}
+
+template <typename T>
+__global__ void global_maxpool_backward_NCHW(
+    const int NC,
+    const int sz,
+    const T* dx,
+    T* out,
+    const T* x,
+    const T* in) {
+  CUDA_1D_KERNEL_LOOP(i, NC * sz) {
+    if (in[i] == x[i / sz]) {
+      out[i] = dx[i / sz];
+    } else {
+      out[i] = 0.0;
+    }
   }
 }
 
@@ -142,6 +179,15 @@ class CuDNNPoolOp : public ConvPoolOpBase<CUDAContext> {
       if (order_ == StorageOrder::NCHW && Y->size() == N * C) {
         if (mode_ == CUDNN_POOLING_AVERAGE_COUNT_EXCLUDE_PADDING) {
           global_avgpool_kernel_NCHW<float>
+              <<<std::min(N * C, CAFFE_MAXIMUM_NUM_BLOCKS),
+                 CAFFE_CUDA_NUM_THREADS,
+                 0,
+                 context_.cuda_stream()>>>(
+                  N * C, H * W * D, X.data<float>(), Y->mutable_data<float>());
+          return true;
+        }
+        if (mode_ == CUDNN_POOLING_MAX) {
+          global_maxpool_kernel_NCHW<float>
               <<<std::min(N * C, CAFFE_MAXIMUM_NUM_BLOCKS),
                  CAFFE_CUDA_NUM_THREADS,
                  0,
@@ -311,6 +357,20 @@ class CuDNNPoolGradientOp : public ConvPoolOpBase<CUDAContext> {
                   H * W * D,
                   dY.data<float>(),
                   dX->mutable_data<float>());
+          return true;
+        }
+        if (mode_ == CUDNN_POOLING_MAX) {
+          global_maxpool_backward_NCHW<float>
+              <<<CAFFE_GET_BLOCKS(dX->size()),
+                 CAFFE_CUDA_NUM_THREADS,
+                 0,
+                 context_.cuda_stream()>>>(
+                  N * C,
+                  H * W * D,
+                  dY.data<float>(),
+                  dX->mutable_data<float>(),
+                  Y.data<float>(),
+                  X.data<float>());
           return true;
         }
       }
