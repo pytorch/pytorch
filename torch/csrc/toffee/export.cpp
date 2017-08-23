@@ -1,12 +1,9 @@
 #include "torch/csrc/toffee/export.h"
+#include "torch/csrc/autograd/primspec.h"
 #include "torch/csrc/utils/python_numbers.h"
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/Exceptions.h"
-
-#include <toffee/toffee.pb.h>
-#include <toffee/defs/schema.h>
-#include <google/protobuf/text_format.h>
-#include <google/protobuf/io/zero_copy_stream_impl.h>
+#include "torch/csrc/toffee.h"
 
 #include "torch/csrc/autograd/functions/convolution.h"
 #include "torch/csrc/jit/dead_code_elimination.h"
@@ -265,9 +262,12 @@ std::string ExportGraph(std::shared_ptr<Graph>& g_, const std::vector<at::Tensor
   toffee::GraphProto p_g;
   p_g.set_name("torch-jit-export");
   encodeGraph(&p_g, g, initializers);
-  std::string s;
-  google::protobuf::TextFormat::PrintToString(p_g, &s);
-  return s; // RVO
+  size_t out_size;
+  pb_get_encoded_size(&out_size, toffee_GraphProto_fields, &p_g.proto);
+  std::string out(out_size, '\0');
+  pb_ostream_t ostream = pb_ostream_from_buffer(reinterpret_cast<pb_byte_t *>(&out[0]), out_size);
+  pb_encode(&ostream, toffee_GraphProto_fields, &p_g.proto);
+  return out; // RVO
 }
 
 }}
