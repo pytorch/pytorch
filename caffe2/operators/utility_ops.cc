@@ -65,7 +65,7 @@ REGISTER_CPU_OPERATOR(
     ScatterWeightedSumOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(Max, MaxOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(MaxGradient, MaxGradientOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(ScatterAssign, ScatterAssignOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(ScatterAssign, ScatterAssignOp<CPUContext>);
 // From whatever the current context, ensure the output is TensorCPU
 REGISTER_CPU_OPERATOR(
     EnsureCPUOutput,
