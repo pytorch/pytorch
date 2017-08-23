@@ -77,8 +77,9 @@ class NoGrad(Function):
 class Transpose(Function):
 
     @staticmethod
-    def primspec(i, dim1, dim2):
-        return torch.toffee.op("Transpose", i, axes=(dim1, dim2))
+    def primspec(g, i, dim1, dim2):
+        return (g.appendNode(g.create("Transpose", [i]))
+                .is_("axes", (dim1, dim2)))
 
     @staticmethod
     def forward(ctx, i, dim1, dim2):
@@ -95,8 +96,11 @@ class Transpose(Function):
 class View(Function):
 
     @staticmethod
-    def primspec(i, sizes):
-        return torch.toffee.op("Reshape", i, shape=sizes, _outputs=(0, -1))
+    def primspec(g, i, sizes):
+        n = g.appendNode(g.create("Reshape", [i]).is_("shape", sizes))
+        real_out = g.appendNode(g.createSelect(n, 0))
+        g.appendNode(g.createSelect(n, 1))
+        return real_out
 
     @staticmethod
     def forward(ctx, i, sizes):
@@ -320,8 +324,11 @@ class IndexSelect(Function):
 class Concat(Function):
 
     @staticmethod
-    def primspec(dim, *inputs):
-        return torch.toffee.op("Concat", *inputs, axis=dim, _outputs=(0, -1))
+    def primspec(g, dim, *inputs):
+        n = g.appendNode(g.create("Concat", inputs).i_("axis", dim))
+        real = g.appendNode(g.createSelect(n, 0))
+        g.appendNode(g.createSelect(n, 1))
+        return real
 
     @staticmethod
     def forward(ctx, dim, *inputs):
@@ -377,10 +384,10 @@ class Clone(Function):
 class Squeeze(InplaceFunction):
 
     @staticmethod
-    def primspec(input, dim, inplace=False):
+    def primspec(g, input, dim, inplace=False):
         if inplace:
             return None
-        return torch.toffee.op("Squeeze", input, dims=[dim])
+        return g.appendNode(g.create("Squeeze", [input]).is_("dims", [dim]))
 
     @staticmethod
     def forward(ctx, input, dim=None, inplace=False):

@@ -29,7 +29,8 @@ def _make_function_class_criterion(class_name, update_output, update_grad_input,
 
     @staticmethod
     def primspec(*args, **kwargs):
-        return primspec_fn(*args, **kwargs)
+        a = primspec_fn(*args, **kwargs)
+        return a
 
     @staticmethod
     def forward(ctx, input, target, *args):

@@ -27,7 +27,20 @@ _(NumChunks) \
 _(Dim) \
 _(Offset) \
 _(Value) \
-_(Subgraph)
+_(Subgraph) \
+_(SpatialBN) \
+_(Conv) \
+_(Unused) \
+_(is_test) \
+_(epsilon) \
+_(order) \
+_(momentum) \
+_(InPlaceOutputs) \
+_(kernels) \
+_(strides) \
+_(pads) \
+_(dilations) \
+_(group)
 
 enum BuiltinSymbol {
   #define DEFINE_SYMBOL(s) \

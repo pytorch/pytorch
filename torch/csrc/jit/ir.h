@@ -190,15 +190,19 @@ using NodeKind = Symbol;
 struct graph_node_list;
 struct graph_node_list_iterator;
 
-inline TypePtr getInitialType(NodeKind kind) {
+inline TypePtr multiType() {
   static TypePtr multiType = std::make_shared<MultiType>();
+  return multiType;
+}
+
+inline TypePtr getInitialType(NodeKind kind) {
   switch(kind) {
     case kPythonOp:
     case kCppOp:
     case kEval:
     case kChunk:
     case kFusionGroup:
-      return multiType;
+      return multiType();
     default:
       return nullptr;
   }
@@ -233,6 +237,7 @@ private:
   Graph* graph_;
   size_t unique_ = 0;          // unique id
   size_t stage_ = 0;           // 0-forward, 1-backward, 2-double-backward,...
+  std::string debug_name_;
 protected:
   TypePtr type_;
   Node(Graph * graph_, NodeKind kind_); //defined after graph
@@ -260,11 +265,23 @@ public:
   void inferTypeFrom(const at::Tensor& output) {
     setType(std::make_shared<TensorType>(output));
   }
+  Node* setDebugName(const std::string & name) {
+    debug_name_ = name;
+    return this;
+  }
+  const std::string & debugName() {
+    return debug_name_;
+  }
   Graph * owningGraph() {
     return graph_;
   }
   size_t unique() {
     return unique_;
+  }
+  std::string uniqueName() {
+    if(debug_name_.size() > 0)
+      return debugName() + "_" + std::to_string(unique());
+    return std::to_string(unique());
   }
   void setStage(size_t s) {
     stage_ = s;
@@ -280,6 +297,19 @@ public:
   Node * input() {
     JIT_ASSERT(inputs_.size() == 1);
     return inputs_.at(0);
+  }
+  // this is a function helps handle
+  // single and multi-return nodes in a consistent way
+  // it also provides a layer of abstraction if we
+  // ever need to change the way we represent multiple outputs
+  node_list outputs() {
+    if(!hasMultipleOutputs())
+      return { this };
+    std::vector<Node*> r;
+    r.reserve(uses().size());
+    for(auto & u : uses())
+      r.push_back(u.user);
+    return r;
   }
   // select is used so frequently enought it is reasonable to have a helper
   // to access the offset.
@@ -705,6 +735,9 @@ public:
   // this will change if Tuples ever become first class.
 
   Node * createSelect(Node * n, int64_t offset) {
+    if(!n->hasType())
+      n->setType(multiType());
+    JIT_ASSERTM(n->hasMultipleOutputs(), "trying to select from a node that doesn't return multiple outputs");
     auto r = create(kSelect,{n});
     r->i_(kOffset,offset);
     return r;

@@ -2,22 +2,16 @@
 
 namespace torch { namespace autograd {
 
-void ConvForward::primspec(PrimSpecContext* ctx, jit::node_list inputs, jit::node_list outputs) {
-  toffee::NodeProto* p_n = ctx->graph->add_node();
-  p_n->set_op_type("Conv");
+jit::node_list ConvForward::primspec(PrimSpecContext* ctx, jit::node_list inputs) {
+  auto & g = ctx->graph;
+  auto n = g->appendNode(g->create(jit::kConv,{inputs.at(0),inputs.at(1)}));
 
-  p_n->add_input(ctx->node(inputs.at(0)));
-  p_n->add_input(ctx->node(inputs.at(1)));
   // TODO: Factor this logic into a helper, and make sure it gets applied
   // consistently. See also batch_normalization.cpp
   if (inputs.at(2)->kind() != jit::kConstant || inputs.at(2)->t(jit::kValue).defined()) {
-    p_n->add_input(ctx->node(inputs.at(2)));
+    n->addInput(inputs.at(2));
   }
 
-  p_n->add_output(ctx->node(outputs.at(0)));
-  JIT_ASSERT(outputs.at(1)->type()->kind() == jit::TypeKind::HandleType);
-
-  toffee::AttributeProto* attr;
   // Irritatingly, Caffe2 requires us to specify kernels,
   // but we don't actually have that information directly
   // recorded in ConvForward.  So we have to reverse
@@ -27,41 +21,28 @@ void ConvForward::primspec(PrimSpecContext* ctx, jit::node_list inputs, jit::nod
   JIT_ASSERT(weight_type);
   auto weight_size = weight_type->sizes();
   std::vector<int64_t> kernel_size(weight_size.begin() + 2, weight_size.end());
-  attr = p_n->add_attribute();
-  attr->set_name("kernels");
-  for (int kernel : kernel_size) {
-    attr->add_ints(kernel);
-  }
+  n->is_(jit::kkernels,std::move(kernel_size));
+  std::vector<int64_t> kernel_stride(stride.begin(),stride.end());
+  n->is_(jit::kstrides,std::move(kernel_stride));
 
-  attr = p_n->add_attribute();
-  attr->set_name("strides");
-  for (int s : stride) {
-    attr->add_ints(s);
-  }
-  attr = p_n->add_attribute();
-  attr->set_name("pads");
-  for (int p : padding) {
-    attr->add_ints(p);
-  }
+  std::vector<int64_t> kernel_pads(padding.begin(),padding.end());
   // NB: Caffe2 let's specifying top and bottom pads separately;
   // PyTorch assumes it's symmetric
   for (int p : padding) {
-    attr->add_ints(p);
+    kernel_pads.push_back(p);
   }
-  attr = p_n->add_attribute();
-  attr->set_name("dilations");
-  for (int d : dilation) {
-    attr->add_ints(d);
-  }
+  n->is_(jit::kpads,std::move(kernel_pads));
+
+  std::vector<int64_t> kernel_dilations(dilation.begin(),dilation.end());
+  n->is_(jit::kdilations,std::move(kernel_dilations));
   // Not in Toffee?
   JIT_ASSERT(transposed == false);
   for (int p : output_padding) {
     JIT_ASSERT(p == 0);
   }
-  attr = p_n->add_attribute();
-  attr->set_name("group");
-  attr->set_i(groups);
+  n->i_(jit::kgroup,groups);
   // ignore benchmark/cudnn_enabled
+  return {n, g->create(jit::kUnused) };
 }
 
 }}

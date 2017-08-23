@@ -2,6 +2,7 @@
 // DO NOT REMOVE, this enables std containers to be recognized
 // with pybind11, removing the include disables the support
 #include <pybind11/stl.h>
+
 namespace py = pybind11;
 #include <iostream>
 #include <sstream>
@@ -95,11 +96,15 @@ void initPythonIRBindings(PyObject * module_) {
     .NS(inferTypeFrom)
     // skip owningGraph because it returns a raw pointer to a otherwise
     // std::shared_ptr stored graph object, and would cause a double free
+    .NS(debugName)
+    .NS(setDebugName)
     .NS(unique)
+    .NS(uniqueName)
     .NS(setStage)
     .NS(stage)
     .NS(inputs)
     .NS(input)
+    .NS(outputs)
     .NS(offset)
     .NS(uses)
     .NS(addInput)

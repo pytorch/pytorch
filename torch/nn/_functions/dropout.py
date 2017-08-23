@@ -11,11 +11,15 @@ class Dropout(InplaceFunction):
         return input.new().resize_as_(input)
 
     @staticmethod
-    def primspec(input, p=0.5, train=False, inplace=False):
+    def primspec(g, input, p=0.5, train=False, inplace=False):
         if inplace:
             return None
-        return torch.toffee.op("Dropout", input, ratio=p,
-                               is_test=not train, _outputs=(0, -1))
+        n = g.appendNode(g.create("Dropout", [input])
+                          .f_("ratio", p)
+                          .i_("is_test", not train))
+        real = g.appendNode(g.createSelect(n, 0))
+        g.appendNode(g.createSelect(n, 1))
+        return real
 
     @classmethod
     def forward(cls, ctx, input, p=0.5, train=False, inplace=False):
