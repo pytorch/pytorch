@@ -30,6 +30,7 @@ _(Value) \
 _(Subgraph) \
 _(SpatialBN) \
 _(Conv) \
+_(ConvTranspose) \
 _(Unused) \
 _(is_test) \
 _(epsilon) \
@@ -37,9 +38,13 @@ _(order) \
 _(momentum) \
 _(InPlaceOutputs) \
 _(kernels) \
+_(kernel) \
 _(strides) \
+_(stride) \
 _(pads) \
+_(pad) \
 _(dilations) \
+_(dilation) \
 _(group)
 
 enum BuiltinSymbol {
