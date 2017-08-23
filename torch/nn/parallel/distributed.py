@@ -150,10 +150,10 @@ class DistributedDataParallel(Module):
         self._start_reduction_threads()
 
     def forward(self, *inputs, **kwargs):
-        if len(self.device_ids) == 1:
-            return self.module(*inputs, **kwargs)
         inputs, kwargs = self.scatter(inputs, kwargs, self.device_ids)
         self._sync_params()
+        if len(self.device_ids) == 1:
+            return self.module(*inputs[0], **kwargs[0])
         outputs = self.parallel_apply(self._module_copies, inputs, kwargs)
         return self.gather(outputs, self.output_device)
 
@@ -296,7 +296,7 @@ class DistributedDataParallel(Module):
             # Wait for all copies to complete before starting the NCCL kernel
             for stream in reduction_streams:
                 stream.synchronize()
-            nccl.reduce(dev_coalesced, root=device_ids[0], streams=nccl_streams)
+            nccl.reduce(dev_coalesced, root=0, streams=nccl_streams)
 
             # From now on we're only going to work on the first device (from device_ids)
             grad_batch = dev_grad_batch[0]
