@@ -99,6 +99,7 @@ class View(Function):
     def primspec(g, i, sizes):
         n = g.appendNode(g.create("Reshape", [i]).is_("shape", sizes))
         real_out = g.appendNode(g.createSelect(n, 0))
+        # TODO: remove from toffee
         g.appendNode(g.createSelect(n, 1))
         return real_out
 
@@ -327,6 +328,7 @@ class Concat(Function):
     def primspec(g, dim, *inputs):
         n = g.appendNode(g.create("Concat", inputs).i_("axis", dim))
         real = g.appendNode(g.createSelect(n, 0))
+        # TODO: remove from toffee
         g.appendNode(g.createSelect(n, 1))
         return real
 
