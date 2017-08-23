@@ -108,21 +108,21 @@ def logsoftmax_double_backwards(ctx, ggI):
 
 def reflectionpad2d_double_backwards(ctx, ggI):
     gI = None
-    ggO = auto.ReflectionPad2d.apply(ggI, *ctx.additional_args)
+    ggO = torch.nn._functions.thnn.auto.ReflectionPad2d.apply(ggI, *ctx.additional_args)
 
     return gI, ggO, None, None, None, None
 
 
 def replicationpad2d_double_backwards(ctx, ggI):
     gI = None
-    ggO = auto.ReplicationPad2d.apply(ggI, *ctx.additional_args)
+    ggO = torch.nn._functions.thnn.auto.ReplicationPad2d.apply(ggI, *ctx.additional_args)
 
     return gI, ggO, None, None, None, None
 
 
 def replicationpad3d_double_backwards(ctx, ggI):
     gI = None
-    ggO = auto.ReplicationPad3d.apply(ggI, *ctx.additional_args)
+    ggO = torch.nn._functions.thnn.auto.ReplicationPad3d.apply(ggI, *ctx.additional_args)
 
     return gI, ggO, None, None, None, None
 
@@ -311,5 +311,3 @@ double_backwards_fns = {
     'SmoothL1Loss': smoothl1loss_double_backwards,
     'SoftMarginLoss': softmarginloss_double_backwards,
 }
-
-from . import auto
