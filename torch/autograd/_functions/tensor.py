@@ -389,7 +389,14 @@ class Squeeze(InplaceFunction):
     def primspec(g, input, dim, inplace=False):
         if inplace:
             return None
-        return g.appendNode(g.create("Squeeze", [input]).is_("dims", [dim]))
+        if dim is None:
+            dims = []
+            for i, size in enumerate(input.type().sizes()):
+                if size == 1:
+                    dims.append(i)
+        else:
+            dims = [dim]
+        return g.appendNode(g.create("Squeeze", [input]).is_("dims", dims))
 
     @staticmethod
     def forward(ctx, input, dim=None, inplace=False):
