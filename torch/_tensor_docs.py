@@ -1717,10 +1717,11 @@ add_docstr_all('expand',
 expand(*sizes) -> Tensor
 
 Returns a new view of the tensor with singleton dimensions expanded
-to a larger size.
+to a larger size. -1 means not changing the size on that dimension.
 
 Tensor can be also expanded to a larger number of dimensions, and the
-new ones will be appended at the front.
+new ones will be appended at the front. (For the new dimensions, the
+size cannot be set to -1.)
 
 Expanding a tensor does not allocate new memory, but only creates a
 new view on the existing tensor where a dimension of size one is
