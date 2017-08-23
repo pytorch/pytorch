@@ -117,6 +117,8 @@ def MakeArgument(key, value):
         argument.s = value
     elif isinstance(value, text_type):
         argument.s = value.encode('utf-8')
+    elif isinstance(value, caffe2_pb2.NetDef):
+        argument.n.CopyFrom(value)
     elif isinstance(value, Message):
         argument.s = value.SerializeToString()
     elif iterable and all(type(v) in [float, np.float_] for v in value):
@@ -136,6 +138,8 @@ def MakeArgument(key, value):
             v.encode('utf-8') if isinstance(v, text_type) else v
             for v in value
         )
+    elif iterable and all(isinstance(v, caffe2_pb2.NetDef) for v in value):
+        argument.nets.extend(value)
     elif iterable and all(isinstance(v, Message) for v in value):
         argument.strings.extend(v.SerializeToString() for v in value)
     else:

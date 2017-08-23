@@ -99,9 +99,11 @@ message Argument {
   optional float f = 2;
   optional int64 i = 3;
   optional bytes s = 4;
+  optional NetDef n = 8;
   repeated float floats = 5;
   repeated int64 ints = 6;
   repeated bytes strings = 7;
+  repeated NetDef nets = 9;
 }
 
 // DeviceType that Caffe2 currently supports.
