@@ -1,0 +1,12 @@
+{
+     global:
+         _TH*;
+         TH*;
+         *THP*;
+         *THCP*;
+         PyInit*;
+         init*;
+         state;
+     local:
+         *;
+ };

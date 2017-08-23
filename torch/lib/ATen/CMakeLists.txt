@@ -61,6 +61,10 @@ MESSAGE(STATUS "THNN_LIBRARIES: ${THNN_LIBRARIES}")
 IF ($ENV{TH_BINARY_BUILD})
   MESSAGE(STATUS "TH_BINARY_BUILD detected. Statically linking libstdc++")
   SET(CMAKE_CXX_FLAGS "-static-libstdc++ ${CMAKE_CXX_FLAGS}")
+  IF (UNIX AND NOT APPLE)
+    # hiding statically linked library symbols, this flag is not available for the linker under MACOSX
+    SET(CMAKE_CXX_FLAGS "-Wl,--exclude-libs,libstdc++.a ${CMAKE_CXX_FLAGS}")
+  ENDIF(UNIX AND NOT APPLE)
 ENDIF()
 
 IF(NO_CUDA)
