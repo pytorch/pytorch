@@ -53,7 +53,8 @@ jit::node_list ConvForward::primspec(PrimSpecContext* ctx, jit::node_list inputs
     }
     n->i_(jit::kgroup,groups);
   } else {
-    n->i_(jit::kkernel, all_equal<int64_t>(weight_size, "kernels"));
+    auto range = at::ArrayRef<int64_t>(weight_size.data() + 2, weight_size.size() - 2);
+    n->i_(jit::kkernel, all_equal<int64_t>(range, "kernels"));
     n->i_(jit::kstride, all_equal<int>(stride, "strides"));
     n->i_(jit::kpad, all_equal<int>(padding,"padding"));
     JIT_ASSERT(1 == all_equal<int>(dilation,"dialations"));
