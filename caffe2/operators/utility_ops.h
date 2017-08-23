@@ -7,7 +7,11 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
+#include "caffe2/core/types.h"
 #include "caffe2/utils/math.h"
+
+#include <map>
+#include <utility>
 
 namespace caffe2 {
 
@@ -568,28 +572,62 @@ class MaxGradientOp : public Operator<Context> {
  *
  * For now really works only on CPU because of INDICES access
  */
-template <typename T, class Context>
+template <class Context>
 class ScatterAssignOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  USE_SIMPLE_CTOR_DTOR(ScatterAssignOp);
+  virtual ~ScatterAssignOp() {}
+
+  ScatterAssignOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
+        runners_({{{TensorProto_DataType_INT32, TensorProto_DataType_FLOAT},
+                   &ScatterAssignOp::DoRun<int32_t, float>},
+                  {{TensorProto_DataType_INT32, TensorProto_DataType_FLOAT16},
+                   &ScatterAssignOp::DoRun<int32_t, float16>},
+                  {{TensorProto_DataType_INT64, TensorProto_DataType_FLOAT},
+                   &ScatterAssignOp::DoRun<int64_t, float>},
+                  {{TensorProto_DataType_INT64, TensorProto_DataType_FLOAT16},
+                   &ScatterAssignOp::DoRun<int64_t, float16>}}) {}
 
   bool RunOnDevice() override {
-    // Use run-time polymorphism
+    const auto& data = Input(DATA);
+    const auto& slices = Input(SLICES);
     auto& indices = Input(INDICES);
-    if (indices.template IsType<int32_t>()) {
-      DoRun<int32_t>();
-    } else if (indices.template IsType<int64_t>()) {
-      DoRun<int64_t>();
-    } else {
-      LOG(FATAL) << "Unsupported type of INDICES in ScatterAssignOp: "
-                 << indices.meta().name();
-    }
+
+    const auto dataType = TypeMetaToDataType(data.meta());
+    const auto slicesType = TypeMetaToDataType(slices.meta());
+    const auto indicesType = TypeMetaToDataType(indices.meta());
+    auto* output = Output(0);
+
+    auto runner = GetRunner(dataType, slicesType, indicesType);
+    (this->*runner)();
     return true;
   }
 
  private:
-  template <typename Index>
+  typedef void (ScatterAssignOp::*RunnerType)();
+  typedef std::
+      map<std::pair<TensorProto_DataType, TensorProto_DataType>, RunnerType>
+          RunnerMap;
+
+  RunnerMap runners_;
+
+  RunnerType GetRunner(
+      const TensorProto_DataType dataType,
+      const TensorProto_DataType slicesType,
+      const TensorProto_DataType indicesType) {
+    CAFFE_ENFORCE_EQ(dataType, slicesType, "Data and slice types must match");
+    auto it = runners_.find({indicesType, dataType});
+    CAFFE_ENFORCE(
+        it != runners_.end(),
+        "Could not find the runner corresponding to indicesType, dataType = ",
+        indicesType,
+        " ",
+        dataType);
+    return it->second;
+  }
+
+  template <typename Index, typename T>
   void DoRun() {
     auto& input = Input(DATA);
     auto& indices = Input(INDICES);
