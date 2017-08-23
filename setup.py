@@ -324,7 +324,7 @@ if platform.system() == 'Darwin':
     NCCL_LIB = os.path.join(lib_path, 'libnccl.1.dylib')
 
 # static library only
-NANOPB_STATIC_LIB = os.path.join(lib_path, 'libprotobuf-nanopbd.a')
+NANOPB_STATIC_LIB = os.path.join(lib_path, 'libprotobuf-nanopb.a')
 
 if WITH_NCCL and (subprocess.call('ldconfig -p | grep libnccl >/dev/null', shell=True) == 0 or
                   subprocess.call('/sbin/ldconfig -p | grep libnccl >/dev/null', shell=True) == 0):
