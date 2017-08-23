@@ -1,7 +1,7 @@
 node {
   input: "2"
   input: "1"
-  output: "5"
+  output: "4"
   op_type: "Conv"
   attribute {
     name: "kernels"
@@ -33,4 +33,4 @@ node {
 name: "torch-jit-export"
 input: "1"
 input: "2"
-output: "5"
+output: "4"

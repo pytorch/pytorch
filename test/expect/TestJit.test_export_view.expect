@@ -1,7 +1,7 @@
 node {
   input: "1"
   output: "3"
-  output: "tmp0"
+  output: "4"
   op_type: "Reshape"
   attribute {
     name: "shape"
