@@ -1,6 +1,7 @@
 #include <string>
 
 #include <gtest/gtest.h>
+#include "caffe2/core/common_gpu.h"
 #include "caffe2/core/operator.h"
 
 namespace caffe2 {
@@ -43,6 +44,8 @@ REGISTER_CUDA_OPERATOR(JustTest, JustTestCUDA);
 REGISTER_CUDNN_OPERATOR(JustTest, JustTestCUDNN);
 
 TEST(EnginePrefTest, GPUDeviceDefaultPreferredEngines) {
+  if (!HasCudaGPU())
+    return;
   OperatorDef op_def;
   Workspace ws;
   op_def.mutable_device_option()->set_device_type(CUDA);
