@@ -196,6 +196,33 @@ class TestPooling(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [X], [0])
         self.assertGradientChecks(gc, op, [X], 0, [0])
 
+    @given(sz=st.integers(1, 20),
+           batch_size=st.integers(1, 4),
+           engine=st.sampled_from(["", "CUDNN"]),
+           op_type=st.sampled_from(["MaxPool", "MaxPool2D"]),
+           **hu.gcs)
+    @settings(max_examples=3, timeout=10)
+    def test_global_max_pool_nchw(self, op_type, sz,
+                                  batch_size, engine, gc, dc):
+        ''' Special test to stress the fast path of NCHW max pool '''
+        op = core.CreateOperator(
+            op_type,
+            ["X"],
+            ["Y"],
+            stride=1,
+            kernel=sz,
+            pad=0,
+            order="NCHW",
+            engine=engine,
+        )
+
+        np.random.seed(1234)
+        X = np.random.rand(
+            batch_size, 3, sz, sz).astype(np.float32)
+
+        self.assertDeviceChecks(dc, op, [X], [0])
+        self.assertGradientChecks(gc, op, [X], 0, [0], stepsize=1e-4)
+
     @given(stride=st.integers(1, 3),
            pad=st.integers(0, 3),
            kernel=st.integers(1, 5),
