@@ -61,9 +61,9 @@ ncclResult_t enqueue(const void* sendbuff,
 {
   switch(type) {
   case ncclChar:
-    return enqueue<ColFunc, char, Op>(sendbuff, recvbuff, count, root, comm, stream);
+    return enqueue<ColFunc, int8_t, Op>(sendbuff, recvbuff, count, root, comm, stream);
   case ncclInt:
-    return enqueue<ColFunc, int, Op>(sendbuff, recvbuff, count, root, comm, stream);
+    return enqueue<ColFunc, int32_t, Op>(sendbuff, recvbuff, count, root, comm, stream);
 #ifdef CUDA_HAS_HALF
   case ncclHalf:
     return enqueue<ColFunc, half, Op>(sendbuff, recvbuff, count, root, comm, stream);
@@ -73,9 +73,9 @@ ncclResult_t enqueue(const void* sendbuff,
   case ncclDouble:
     return enqueue<ColFunc, double, Op>(sendbuff, recvbuff, count, root, comm, stream);
   case ncclInt64:
-    return enqueue<ColFunc, long long, Op>(sendbuff, recvbuff, count, root, comm, stream);
+    return enqueue<ColFunc, int64_t, Op>(sendbuff, recvbuff, count, root, comm, stream);
   case ncclUint64:
-    return enqueue<ColFunc, unsigned long long, Op>(sendbuff, recvbuff, count, root, comm, stream);
+    return enqueue<ColFunc, uint64_t, Op>(sendbuff, recvbuff, count, root, comm, stream);
   default:
     WARN("Invalid ncclType %d", type);
     return ncclInvalidType;
