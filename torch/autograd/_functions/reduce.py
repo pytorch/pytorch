@@ -71,7 +71,8 @@ class Prod(Function):
             exclusive_normal = exclusive_normal_nocp.cumprod(dim)
 
             def reverse_dim(var, dim):
-                return var.index_select(dim, Variable(torch.arange(var.size(dim) - 1, -1, -1)).long())
+                index = Variable(torch.arange(var.size(dim) - 1, -1, -1, out=var.data.new().long()))
+                return var.index_select(dim, index)
 
             narrow_reverse = reverse_dim(inp.narrow(dim, 1, inp.size(dim) - 1), dim)
             exclusive_reverse_nocp = torch.cat((ones, narrow_reverse), dim)
