@@ -1,5 +1,5 @@
 #ifdef CAFFE2_USE_MKL
-#include <mkl_service.h>
+#include <mkl.h>
 #endif
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
