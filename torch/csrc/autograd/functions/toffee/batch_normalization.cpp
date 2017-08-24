@@ -8,20 +8,15 @@ namespace autograd {
 
 jit::node_list BatchNormForward::primspec(PrimSpecContext* ctx, jit::node_list inputs) {
   auto & g = ctx->graph;
-  auto bn = g->appendNode(g->create(jit::kSpatialBN,{inputs.at(0),inputs.at(1)}));
   // X, Scale, Bias
-  // TODO: Factor this logic into a helper, and make sure it gets applied
-  // consistently.  See also convolution.cpp
-  if (inputs[2]->kind() != jit::kConstant || inputs.at(2)->t(jit::kValue).defined()) {
-    bn->addInput(inputs[2]);
-  }
+  auto bn = g->appendNode(g->create(jit::kSpatialBN,{inputs.at(0),inputs.at(1),inputs.at(2)}));
   bn->addInput(jit::tracer::getBufferTrace(*ctx->buffer_map, running_mean));
   bn->addInput(jit::tracer::getBufferTrace(*ctx->buffer_map, running_var));
 
   bn->i_(jit::kis_test, !this->training);
   bn->f_(jit::kepsilon, eps);
-  bn->s_(jit::korder,"NCHW");
-  bn->f_(jit::kmomentum,1-momentum);
+  bn->s_(jit::korder, "NCHW");
+  bn->f_(jit::kmomentum, 1 - momentum);
 
   std::vector<int64_t> inplace_outputs;
   auto orig_output = g->appendNode(g->createSelect(bn, 0));
