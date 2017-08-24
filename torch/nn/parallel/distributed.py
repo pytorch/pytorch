@@ -279,6 +279,7 @@ class DistributedDataParallel(Module):
             self._reduction_threads.append(threading.Thread(
                 target=self._reduction_thread_fn,
                 args=(reduction_queue, group_id, self.device_ids, reduction_streams, self._nccl_streams)))
+            self._reduction_threads[-1].daemon = True
             self._reduction_threads[-1].start()
 
     @staticmethod
