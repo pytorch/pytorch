@@ -128,12 +128,15 @@ class Traceable(object):
 
     def run_trace(self, trace_inputs):
         if self.saved_closure is None:
+            print(self.saved_trace)
             self.saved_closure = torch._C._jit_createAutogradClosure(
                 self.saved_trace)
         with _time("run_trace", self.time):
-            assert(self.saved_closure is not None)
-            return Variable._execution_engine.run_forward(
-                self.saved_closure, _varify(trace_inputs))
+            assert self.saved_closure is not None
+            ret = self.saved_closure()(*_varify(trace_inputs))
+            if not isinstance(ret, tuple):
+                ret = (ret,)
+            return ret
 
     def get_trace_inputs(self, args, extra):
         # TODO: don't discard keys from state_dict

@@ -70,11 +70,12 @@ struct GraphTask {
   // Notified when a task finishes executing.  Check outstanding_tasks to see
   // if all tasks are done.
   std::condition_variable not_done;
-  const Engine::callback_map& function_callbacks;
+  const Engine::pre_callback_map& pre_callbacks;
+  const Engine::post_callback_map& post_callbacks;
   std::unordered_map<Function*, InputBuffer> not_ready;
   std::unordered_map<Function*, int> dependencies;
 
-  GraphTask(bool keep_graph, const Engine::callback_map& function_callbacks)
+  GraphTask(bool keep_graph, const Engine::pre_callback_map& pre_callbacks, const Engine::post_callback_map& post_callbacks)
     : exception()
     , has_error(false)
     , outstanding_tasks(0)
@@ -82,7 +83,8 @@ struct GraphTask {
     , has_any_work(false)
     , mutex()
     , not_done()
-    , function_callbacks(function_callbacks)
+    , pre_callbacks(pre_callbacks)
+    , post_callbacks(post_callbacks)
     , not_ready()
     , dependencies() {}
 };
@@ -157,15 +159,21 @@ static variable_list call_function(FunctionTask& task) {
   auto& fn = *task.fn;
   auto inputs = call_pre_hooks(fn, InputBuffer::variables(std::move(task.inputs)));
 
-  auto& function_callbacks = task.base->function_callbacks;
-  auto callback_it = function_callbacks.find(&fn);
-  if (callback_it != function_callbacks.end()) {
-    auto& callback = callback_it->second;
+  auto& pre_callbacks = task.base->pre_callbacks;
+  for (auto it_p = pre_callbacks.equal_range(&fn); it_p.first != it_p.second; ++it_p.first) {
+    auto& callback = it_p.first->second;
     if (!callback(&fn, inputs)) return variable_list(fn.next_functions.size());
   }
 
-  auto fn_outputs = fn(inputs);
-  return call_post_hooks(fn, std::move(fn_outputs), std::move(inputs));
+  auto outputs = fn(inputs);
+
+  auto& post_callbacks = task.base->post_callbacks;
+  for (auto it_p = post_callbacks.equal_range(&fn); it_p.first != it_p.second; ++it_p.first) {
+    auto& callback = it_p.first->second;
+    if (!callback(&fn, inputs, outputs)) return variable_list(fn.next_functions.size());
+  }
+
+  return call_post_hooks(fn, std::move(outputs), std::move(inputs));
 }
 
 auto Engine::evaluate_function(FunctionTask& task) -> void {
@@ -303,12 +311,13 @@ struct ClearCallbacks {
 auto Engine::execute(const function_list& input_roots,
                      const variable_list& inputs,
                      bool keep_graph,
-                     const callback_map& callbacks) -> void {
+                     const pre_callback_map& pre_callbacks,
+                     const post_callback_map& post_callbacks) -> void {
   std::call_once(start_threads_flag, &Engine::start_threads, this);
   // Callbacks are only valid for the duration of this run and should always be cleared
-  ClearCallbacks _cb_guard(post_callbacks, post_callbacks_lock);
+  ClearCallbacks _cb_guard(final_callbacks, post_callbacks_lock);
 
-  GraphTask graph_task(keep_graph, callbacks);
+  GraphTask graph_task(keep_graph, pre_callbacks, post_callbacks);
 
   if (worker_device != NO_DEVICE) {
     // OK, time for some fancy footwork.  If we are here, it means that the
@@ -375,16 +384,16 @@ auto Engine::execute(const function_list& input_roots,
   // more callbacks (or they can be registered from other threads
   // while it's waiting.
   std::unique_lock<std::mutex> cb_lock(post_callbacks_lock);
-  for (std::size_t i = 0; i < post_callbacks.size(); ++i) {
+  for (std::size_t i = 0; i < final_callbacks.size(); ++i) {
     cb_lock.unlock();
-    post_callbacks[i]();
+    final_callbacks[i]();
     cb_lock.lock();
   }
 }
 
 void Engine::queue_callback(std::function<void()> callback) {
   std::lock_guard<std::mutex> lock(post_callbacks_lock);
-  post_callbacks.emplace_back(std::move(callback));
+  final_callbacks.emplace_back(std::move(callback));
 }
 
 auto Engine::ready_queue(int device) -> ReadyQueue& {

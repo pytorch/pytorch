@@ -1,7 +1,6 @@
 #include <Python.h>
 #include "torch/csrc/jit/python_tracer.h"
 
-#include "torch/csrc/autograd/jit_closure.h"
 #include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/jit/assert.h"
 #include "torch/csrc/utils/python_strings.h"
@@ -163,18 +162,5 @@ PyObject * THPTracer_exit(PyObject *_unused, PyObject *args)
 
   tracer::exit(outputs);
   Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-PyObject * THPTracer_createAutogradClosure(PyObject *_unused, PyObject *pystate) {
-  HANDLE_TH_ERRORS
-  THPUtils_assert(THPTracingState_Check(pystate), "getClosure expected a TracingState, but got %s",
-      THPUtils_typename(pystate));
-  auto& state = ((THPTracingState*)pystate)->cdata;
-
-  auto closure = createAutogradClosure(state->graph.get());
-
-  return THPWrapper_New(closure.release(),
-                        [](void *fn_list) { delete reinterpret_cast<AutogradClosure*>(fn_list); });
   END_HANDLE_TH_ERRORS
 }

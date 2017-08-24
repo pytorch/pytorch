@@ -200,18 +200,18 @@ variable_list Eval::apply(const variable_list& inputs) {
   return outputs;
 }
 
-Engine::callback_map Eval::getCallbacks(variable_list& outputs, std::mutex& outputs_mutex) {
-  Engine::callback_map callbacks;
+Engine::pre_callback_map Eval::getCallbacks(variable_list& outputs, std::mutex& outputs_mutex) {
+  Engine::pre_callback_map callbacks;
   int num_outputs = placeholders.size();
   for (int i = 0; i < num_outputs; ++i) {
     auto& output_fn = placeholders[i];
-    callbacks[output_fn.get()] = [&outputs, &outputs_mutex, i](Function* _unused, variable_list& inputs) -> bool {
+    callbacks.emplace(output_fn.get(), [&outputs, &outputs_mutex, i](Function* _unused, variable_list& inputs) -> bool {
       if (inputs.size() != 1)
         throw std::logic_error("placeholder callback received too many inputs");
       std::lock_guard<std::mutex> lock(outputs_mutex);
       outputs[i] = inputs[0];
       return false; // Stop at output nodes
-    };
+    });
   }
   return callbacks;
 }

@@ -33,6 +33,14 @@ using edge_type = std::pair<std::shared_ptr<Function>, int>;
 using function_list = std::vector<edge_type>;
 using saved_variable_list = std::vector<SavedVariable>;
 
+struct edge_hasher {
+  std::size_t operator()(const edge_type& edge) const {
+#define HASH_IDX(idx) std::hash<std::tuple_element<idx, edge_type>::type>()(std::get<idx>(edge))
+    // TODO: that's probably a bad hash function, but whatever
+    return HASH_IDX(0) ^ HASH_IDX(1);
+  }
+};
+
 // State used to create "backward" functions
 struct FunctionFlags {
   // Roughly speaking, is_executable corresponds to requires_grad.
@@ -116,8 +124,9 @@ struct Function : std::enable_shared_from_this<Function> {
 
   // An op is said to pass state transparently to backward, if the state consists
   // only of (Saved)Variables and only non-variable objects that parametrize the
-  // operation in some way that defines the graph structure. In particular,
-  // parametrization MUST NOT depend on the data of any Variable.
+  // operation in some way that defines the graph structure AND the backward function
+  // is traceable. In particular, parametrization MUST NOT depend on the data
+  // of any Variable.
   // NOTE: this value matters only if is_traceable() returns false.
   virtual inline bool passes_state_transparently() { return false; };
 
@@ -148,8 +157,7 @@ struct Function : std::enable_shared_from_this<Function> {
 // I chose this name, because the second situation is quite rare.
 template<bool transparent_state = false>
 struct ForwardFunction : public Function {
-  ForwardFunction() {}
-  ForwardFunction(FunctionFlags&& f): Function(std::move(f)) {}
+  using Function::Function;
 
   virtual inline std::unique_ptr<saved_variable_list> saved_variables() final {
     return std::unique_ptr<saved_variable_list>(new saved_variable_list());
@@ -162,8 +170,7 @@ struct ForwardFunction : public Function {
 
 // See Function::is_traceable() for definition.
 struct TraceableFunction : public Function {
-  TraceableFunction() {}
-  TraceableFunction(FunctionFlags&& f): Function(std::move(f)) {}
+  using Function::Function;
 
   virtual inline bool is_traceable() final { return true; };
 };

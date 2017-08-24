@@ -160,17 +160,26 @@ class TestJit(TestCase):
 
         trace = torch._C._tracer_enter((x, y))
 
-        z, _ = torch.max(x * (x + y), 0)
+        z = torch.sigmoid(x * (x + y))
         w = torch.abs(x * x * x + y)
 
         torch._C._tracer_exit((z, w))
         torch._C._jit_pass_lint(trace)
-        torch._C._jit_pass_init(trace)
+
+        (z * w).backward()
+        torch._C._jit_pass_dco(trace)
         torch._C._jit_pass_lint(trace)
-        closure = torch._C._jit_createAutogradClosure(trace)
-        z2, w2 = Variable._execution_engine.run_forward(closure, (x, y))
+
+        x_grad = x.grad.data.clone()
+        x.grad.data.zero_()
+
+        function = torch._C._jit_createAutogradClosure(trace)
+        torch._C._jit_pass_lint(trace)
+        z2, w2 = function()(x, y)
+        (z2 * w2).backward()
         self.assertEqual(z, z2)
         self.assertEqual(w, w2)
+        self.assertEqual(x.grad.data, x_grad)
 
     def test_constant(self):
         x = Variable(torch.randn(2, 2), requires_grad=True)
@@ -181,15 +190,15 @@ class TestJit(TestCase):
         z = x.matmul(y)
 
         torch._C._tracer_exit((z,))
-        closure = torch._C._jit_createAutogradClosure(trace)
+        function = torch._C._jit_createAutogradClosure(trace)
 
-        z2, = Variable._execution_engine.run_forward(closure, (x,))
+        z2 = function()(x)
         self.assertEqual(z, z2)
 
         y.data.fill_(1000)  # make sure the data has been cloned
 
         x2 = Variable(torch.ones(2, 2) * 2, requires_grad=True)
-        z3, = Variable._execution_engine.run_forward(closure, (x2,))
+        z3 = function()(x2)
         self.assertEqual(z3.data, torch.ones(2, 2) * 4)
 
     def test_c_function(self):

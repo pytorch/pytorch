@@ -9,8 +9,7 @@
 namespace torch { namespace autograd {
 
 struct Identity : public TraceableFunction {
-  Identity(FunctionFlags&& f)
-    : TraceableFunction(std::move(f)) {};
+  using TraceableFunction::TraceableFunction;
 
   virtual variable_list apply(const variable_list& inputs) override;
 };
@@ -75,6 +74,17 @@ struct Cat : public ForwardFunction<> {
 
   virtual variable_list apply(const variable_list& inputs) override;
 
+  int64_t dim;
+};
+
+struct Chunk : public Function {
+  Chunk(int64_t chunks, int64_t dim)
+    : chunks(chunks), dim(dim) {}
+
+  virtual variable_list apply(const variable_list& inputs) override;
+
+private:
+  int64_t chunks;
   int64_t dim;
 };
 

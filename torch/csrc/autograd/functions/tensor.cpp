@@ -7,6 +7,31 @@
 
 namespace torch { namespace autograd {
 
+namespace {
+
+tensor_list split(const at::Tensor & tensor, int split_size, int dim=0) {
+  if (dim < 0)
+    dim += tensor.dim();
+  auto dim_size = tensor.size(dim);
+  auto num_splits = (dim_size + split_size - 1) / split_size;
+  auto last_split_size = split_size - (split_size * num_splits - dim_size);
+  std::vector<at::Tensor> outputs;
+  for(int i = 0; i < num_splits; i++) {
+    auto sz =  (i < num_splits - 1) ? split_size : last_split_size;
+    outputs.push_back(tensor.narrow(dim,i*split_size, sz));
+  }
+  return outputs;
+}
+
+tensor_list chunk(const at::Tensor & tensor, int chunks, int dim=0) {
+  if (dim < 0)
+      dim += tensor.dim();
+  auto split_size = (tensor.size(dim) + chunks - 1) / chunks;
+  return split(tensor, split_size, dim);
+}
+
+} // anonymous namespace
+
 auto Identity::apply(const variable_list& inputs) -> variable_list {
   return inputs;
 };
@@ -104,6 +129,13 @@ auto Cat::apply(const variable_list& inputs) -> variable_list {
 
   return wrap_outputs(inputs, as_tensor_list(output), [&](FunctionFlags f) {
     return std::make_shared<Error>("Cat is not differentiable", std::move(f));
+  });
+}
+
+auto Chunk::apply(const variable_list& inputs) -> variable_list {
+  auto outputs = chunk(inputs[0]->data, chunks,dim);
+  return wrap_outputs(inputs, std::move(outputs), [](FunctionFlags f) {
+    return std::make_shared<Error>("Chunk is not differentiable", std::move(f));
   });
 }
 
