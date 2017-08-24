@@ -86,7 +86,7 @@ class WatcherThread(threading.Thread):
                         code.append("  %s" % (line.strip()))
 
             print("\n".join(code))
-            os.kill(os.getpid(), signal.SIGINT)
+            os.kill(os.getpid(), signal.SIGKILL)
 
 
 @contextlib.contextmanager
