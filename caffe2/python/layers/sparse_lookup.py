@@ -20,8 +20,11 @@ import operator
 
 
 class SparseLookup(ModelLayer):
-    _supported_reducers = ['PositionWeighted', 'LogMeanExp', 'LogSumExp', 'Max',
-                           'Mean', 'Sum', 'Sqrt', 'None']
+    _id_list_supported_reducers = ['PositionWeighted', 'LogMeanExp', 'LogSumExp',
+                                   'Max', 'Mean', 'Sum', 'Sqrt', 'None']
+
+    _id_score_list_supported_reducers = ['PositionWeighted', 'Mean', 'Sum',
+                                         'WeightedSum', 'WeightedMean', 'None']
 
     def __init__(self, model, input_record, inner_shape, reducer,
                  weight_init=None, weight_optim=None,
@@ -29,22 +32,18 @@ class SparseLookup(ModelLayer):
 
         super(SparseLookup, self).__init__(model, name, input_record, **kwargs)
 
-        if reducer == "PositionWeighted":
-            self.external_weights = input_record.values()
-
+        # TODO Add some asserts about input type
         if isinstance(inner_shape, int):
             inner_shape = [inner_shape]
         assert isinstance(inner_shape, list) or isinstance(inner_shape, tuple),\
             "Unexpected type for inner_shape, expected list or tuple, got {0}".\
             format(type(inner_shape))
 
-        # TODO Add some asserts about input type
-        assert reducer in self._supported_reducers, "Unsupported reducer: {}".\
-            format(reducer)
+        if reducer == "PositionWeighted":
+            self.external_weights = input_record.values()
         self.reducer = reducer
 
         input_dim = get_categorical_limit(input_record)
-
         assert input_dim is not None, "Unbounded features are not supported"
 
         scale = math.sqrt(1.0 / input_dim)
@@ -87,95 +86,118 @@ class SparseLookup(ModelLayer):
     def get_fp16_compatible_parameters(self):
         return [self.w]
 
+    # deal with sparse features of id_list type
+    def _add_ops_id_list(self, net):
+        assert self.reducer in self._id_list_supported_reducers, (
+            "Unsupported reducer: {} for ID_LIST".format(self.reducer)
+        )
+        if self.reducer in ['Sum', 'Mean']:
+            net.__getattr__('SparseLengths' + self.reducer)(
+                [
+                    self.w,
+                    self.input_record.items(),
+                    self.input_record.lengths(),
+                ],
+                self.output_schema.field_blobs(),
+                engine='fp16',
+            )
+        elif self.reducer == 'Sqrt':
+            sqrt_weight = net.LengthsToWeights(
+                [self.input_record.lengths()],
+                [self.input_record.lengths() + '_sqrt'],
+                power=0.5,
+            )
+            net.SparseLengthsWeightedSum(
+                [
+                    self.w,
+                    sqrt_weight,
+                    self.input_record.items(),
+                    self.input_record.lengths(),
+                ],
+                self.output_schema.field_blobs(),
+                engine='fp16',
+            )
+        elif self.reducer == 'None':
+            # Gather operator will gather the embedding for each id of
+            # each IdList.
+            net.Gather(
+                [
+                    self.w,
+                    self.input_record.items(),
+                ],
+                self.output_schema.field_blobs(),
+                engine='fp16',
+            )
+        else:
+            table_rows = net.Gather([self.w, self.input_record.items()])
+            segment_ids = net.LengthsToSegmentIds(
+                self.input_record.lengths(),
+                self.input_record.lengths() + '_sid'),
+            net.__getattr__('SortedSegmentRange' + self.reducer)(
+                [table_rows, segment_ids],
+                self.output_schema.field_blobs(),
+                engine='fp16',
+            )
+
+    # deal with sparse features of id_score_list type
+    def _add_ops_id_score_list(self, net):
+        assert self.reducer in self._id_score_list_supported_reducers, (
+            "Unsupported reducer: {} for ID_SCORE_LIST".format(self.reducer)
+        )
+        if self.reducer in ['WeightedSum', 'WeightedMean']:
+            net.__getattr__('SparseLengths' + self.reducer)(
+                [
+                    self.w,
+                    self.input_record.values(),
+                    self.input_record.keys(),
+                    self.input_record.lengths(),
+                ],
+                self.output_schema.field_blobs(),
+                engine='fp16',
+            )
+        elif self.reducer in ['Sum', 'Mean']:
+            net.__getattr__('SparseLengths' + self.reducer)(
+                [
+                    self.w,
+                    self.input_record.keys(),
+                    self.input_record.lengths(),
+                ],
+                self.output_schema.field_blobs(),
+                engine='fp16',
+            )
+        elif self.reducer == 'PositionWeighted':
+            net.SparseLengthsWeightedSum(
+                [
+                    self.w,
+                    self.external_weights,
+                    self.input_record.keys(),
+                    self.input_record.lengths(),
+                ],
+                self.output_schema.field_blobs(),
+                grad_on_weights=1,
+                engine='fp16',
+            )
+        elif self.reducer == 'None':
+            # Gather operator will gather the embedding for each id of
+            # each IdList.
+            net.Gather(
+                [
+                    self.w,
+                    self.input_record.keys(),
+                ],
+                self.output_schema.field_blobs(),
+                engine='fp16',
+            )
+        else:
+            raise "Only Sum, Mean, None are supported for IdScoreList input." +\
+                "Trying to create with {}".format(self.reducer)
+
     def add_ops(self, net):
         if schema.equal_schemas(self.input_record, IdList):
-            if self.reducer in ['Sum', 'Mean']:
-                net.__getattr__('SparseLengths' + self.reducer)(
-                    [
-                        self.w,
-                        self.input_record.items(),
-                        self.input_record.lengths(),
-                    ],
-                    self.output_schema.field_blobs(),
-                    engine='fp16',
-                )
-            elif self.reducer == 'Sqrt':
-                sqrt_weight = net.LengthsToWeights(
-                    [self.input_record.lengths()],
-                    [self.input_record.lengths() + '_sqrt'],
-                    power=0.5,
-                )
-                net.SparseLengthsWeightedSum(
-                    [
-                        self.w,
-                        sqrt_weight,
-                        self.input_record.items(),
-                        self.input_record.lengths(),
-                    ],
-                    self.output_schema.field_blobs(),
-                    engine='fp16',
-                )
-            elif self.reducer == 'None':
-                # Gather operator will gather the embedding for each id of
-                # each IdScoreList.
-                net.Gather(
-                    [
-                        self.w,
-                        self.input_record.items(),
-                    ],
-                    self.output_schema.field_blobs(),
-                    engine='fp16',
-                )
-            else:
-                table_rows = net.Gather([self.w, self.input_record.items()])
-                segment_ids = net.LengthsToSegmentIds(
-                    self.input_record.lengths(),
-                    self.input_record.lengths() + '_sid'),
-                net.__getattr__('SortedSegmentRange' + self.reducer)(
-                    [table_rows, segment_ids],
-                    self.output_schema.field_blobs(),
-                    engine='fp16',
-                )
-        elif schema.equal_schemas(
-                self.input_record,
-                IdScoreList,
-                check_field_types=False):
-            if self.reducer in ['Sum', 'Mean']:
-                net.__getattr__('SparseLengthsWeighted' + self.reducer)(
-                    [
-                        self.w,
-                        self.input_record.values(),
-                        self.input_record.keys(),
-                        self.input_record.lengths(),
-                    ],
-                    self.output_schema.field_blobs(),
-                    engine='fp16',
-                )
-            elif self.reducer == 'PositionWeighted':
-                net.SparseLengthsWeightedSum(
-                    [
-                        self.w,
-                        self.external_weights,
-                        self.input_record.keys(),
-                        self.input_record.lengths(),
-                    ],
-                    self.output_schema.field_blobs(),
-                    grad_on_weights=1,
-                    engine='fp16',
-                )
-            elif self.reducer == 'None':
-                # Gather operator will gather the embedding for each id of
-                # each IdList.
-                net.Gather(
-                    [
-                        self.w,
-                        self.input_record.keys(),
-                    ],
-                    self.output_schema.field_blobs(),
-                    engine='fp16',
-                )
-            else:
-                raise "Only Sum, Mean, None are supported for IdScoreList input." +\
-                    "Trying to create with {}".format(self.reducer)
+            self._add_ops_id_list(net)
+        elif schema.equal_schemas(self.input_record,
+                                  IdScoreList,
+                                  check_field_types=False):
+            self._add_ops_id_score_list(net)
         else:
             raise "Unsupported input type {0}".format(self.input_record)
