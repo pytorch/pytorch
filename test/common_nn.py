@@ -280,7 +280,7 @@ criterion_tests = [
         module_name='MSELoss',
         input=torch.randn(2, 3, 4, 5),
         target=torch.randn(2, 3, 4, 5),
-        reference_fn=lambda i, t, _: (i - t).abs().pow(2).sum() / i.numel(),
+        reference_fn=lambda i, t, m: (i - t).abs().pow(2).sum() / (i.numel() if m.size_average else 1),
         check_no_size_average=True,
     ),
     dict(
