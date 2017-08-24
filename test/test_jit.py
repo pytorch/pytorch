@@ -161,7 +161,7 @@ class TestJit(TestCase):
         trace = torch._C._tracer_enter((x, y))
 
         z = torch.sigmoid(x * (x + y))
-        w = torch.abs(x * x * x + y)
+        w = torch.abs(x * x * x + y) + Variable(torch.ones(1))
 
         torch._C._tracer_exit((z, w))
         torch._C._jit_pass_lint(trace)

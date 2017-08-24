@@ -127,6 +127,9 @@ struct Function : std::enable_shared_from_this<Function> {
   // operation in some way that defines the graph structure AND the backward function
   // is traceable. In particular, parametrization MUST NOT depend on the data
   // of any Variable.
+  // TODO: it might be possible to handle cases where backward is non-traceable
+  // but state passing could be considered transparent. This will probably depend
+  // on saved_variable_list being mutable.
   // NOTE: this value matters only if is_traceable() returns false.
   virtual inline bool passes_state_transparently() { return false; };
 
