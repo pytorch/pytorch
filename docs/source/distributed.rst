@@ -9,8 +9,9 @@ Distributed communication package - torch.distributed
 
 Currently torch.distributed supports three backends, each with
 different capabilities. The table below shows which functions are available
-for use with CPU / CUDA tensors. MPI supports cuda only iff the implementation
-used to build PyTorch supports it.
+for use with CPU / CUDA tensors.
+MPI supports cuda only if the implementation used to build PyTorch supports it.
+
 
 +------------+-----------+-----------+-----------+
 | Backend    | ``tcp``   | ``gloo``  | ``mpi``   |
@@ -35,6 +36,35 @@ used to build PyTorch supports it.
 +------------+-----+-----+-----+-----+-----+-----+
 | barrier    | ✓   | ✘   | ✓   | ✓   | ✓   | ?   |
 +------------+-----+-----+-----+-----+-----+-----+
+
+.. _distributed-basics:
+
+Basics
+------
+
+The `torch.distributed` package provides PyTorch support and communication primitives
+for multiprocess parallelism across several computation nodes running on one or more
+machines. The class :func:`torch.nn.parallel.DistributedDataParallel` builds on this
+functionality to provide synchronous distributed training as a wrapper around any
+PyTorch model. This differs from the kinds of parallelism provided by
+:module:`torch.multiprocessing` and :func:`torch.nn.DataParallel` in that it supports
+multiple network-connected machines and in that the user must explicitly launch a separate
+copy of the main training script for each process.
+
+In the single-machine synchronous case, `torch.distributed` or the
+:func:`torch.nn.parallel.DistributedDataParallel` wrapper may still have advantages over other
+approaches to data-parallelism, including :func:`torch.nn.DataParallel`:
+
+* Each process maintains its own optimizer and performs a complete optimization step with each
+  iteration. While this may appear redundant, since the gradients have already been gathered
+  together and averaged across processes and are thus the same for every process, this means
+  that no parameter broadcast step is needed, reducing time spent transferring tensors between
+  nodes.
+* Each process contains an independent Python interpreter, eliminating the extra interpreter
+  overhead and "GIL-thrashing" that comes from driving several execution threads, model
+  replicas, or GPUs from a single Python process. This is especially important for models that
+  make heavy use of the Python runtime, including models with recurrent layers or many small
+  components.
 
 Initialization
 --------------
