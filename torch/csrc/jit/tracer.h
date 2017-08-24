@@ -43,7 +43,9 @@ struct TracingState : public std::enable_shared_from_this<TracingState> {
     , active(false) {}
 
   std::shared_ptr<Graph> graph;
-  // void* is an unsafe TH.  NON-OWNING, so it might get invalidated
+  // void* is an unsafe TH.  NON-OWNING, so it might get invalidated.
+  // TODO: Perhaps, turn this into an owning reference.  The buffers
+  // are persistent, so this won't lead to a leak.
   std::unordered_map<void*, Node*> buffer_map;
   bool active;
   std::mutex mutex;
@@ -150,6 +152,10 @@ struct TraceInput {
 // Start tracing, treating 'inputs' as inputs to the trace, which can be
 // varied on subsequent invocations of the trace.  Any other variables
 // will be treated as constants.
+//
+// NB: Why does this take an rvalue reference?  We need to get a non-const
+// reference to at::Tensor buffer to call unsafeGetTH, but you can't get this
+// out of a const vector (silly std::vector...)
 inline std::shared_ptr<TracingState> enter(std::vector<TraceInput>&& trace_inputs) {
   auto state = std::make_shared<TracingState>();
   // TODO: Figure out what's going on with batchnorm backwards...

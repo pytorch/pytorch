@@ -158,7 +158,7 @@ std::shared_ptr<Graph> ToToffeeIR(std::shared_ptr<Graph>& g,
   for (auto output : g->outputs()) {
     ctx.graph->registerOutput(env.at(output));
   }
-  return std::move(out_graph);
+  return out_graph; // RVO
 }
 
 static void encodeTensor(toffee::TensorProto * p, const at::Tensor & tensor) {
