@@ -780,6 +780,9 @@ class Variable(_C._VariableBase):
     def gesv(self, a):
         return Gesv.apply(self, a)
 
+    def potrf(self, upper=True):
+        return Potrf.apply(self, upper)
+
     def multinomial(self, num_samples=1, replacement=False):
         return Multinomial(num_samples, replacement)(self)
 

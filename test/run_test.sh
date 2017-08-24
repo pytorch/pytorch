@@ -25,6 +25,7 @@ $PYCMD test_torch.py $@
 
 echo "Running autograd tests"
 $PYCMD test_autograd.py $@
+$PYCMD test_potrf.py $@
 
 echo "Running sparse tests"
 $PYCMD test_sparse.py $@
