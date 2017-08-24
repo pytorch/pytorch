@@ -770,8 +770,8 @@ static bool THPTensor_(_convertToTensorIndexers)(
     }
 
     if (!PySlice_Check(item)) {
-      // Returns NULL upon conversion failure
       PyObject *obj = PySequence_Fast_GET_ITEM(fast.get(), i);
+      // Returns NULL upon conversion failure
       THPIndexTensor *indexer = (THPIndexTensor *)PyObject_CallFunctionObjArgs(
           THPIndexTensorClass, obj, NULL);
       if (!indexer) {
