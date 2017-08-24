@@ -1,14 +1,36 @@
-#include <Python.h>
+#include "torch/csrc/utils/pybind.h"
 #include "batch_normalization.h"
 #include "convolution.h"
 #include "accumulate_grad.h"
 #include "basic_ops.h"
 #include "tensor.h"
 #include "special.h"
+#include "jit_closure.h"
 #include "torch/csrc/THP.h"
 #include "torch/csrc/autograd/python_cpp_function.h"
+#include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/utils/tuple_parser.h"
 #include "torch/csrc/DynamicTypes.h"
+
+namespace pybind11 { namespace detail {
+
+// handle Python <-> torch::autograd::Function conversions
+template <> struct type_caster<std::shared_ptr<torch::autograd::Function>> {
+public:
+  PYBIND11_TYPE_CASTER(std::shared_ptr<torch::autograd::Function>, _("std::shared_ptr<torch::autograd::Function>"));
+
+  bool load(handle src, bool) {
+    if (!THPFunction_Check(src.ptr())) return false;
+    value = THPFunction_asFunction((THPFunction*)src.ptr());
+    return true;
+  }
+  static handle cast(std::shared_ptr<torch::autograd::Function> src, return_value_policy /* policy */, handle /* parent */) {
+    auto fn = functionToPyObject(src);
+    return handle(fn);
+  }
+};
+
+}} // namespace pybind11::detail
 
 using namespace torch::autograd;
 using torch::TupleParser;
@@ -284,8 +306,30 @@ bool THPAutograd_initFunctions(PyObject* _unused)
   static PyTypeObject EvalClass;
   addClass<Eval, NoCtor>(module, EvalClass, "Eval");
 
+  static PyTypeObject AutogradClosureClass;
+  addClass<AutogradClosure, NoCtor>(module, AutogradClosureClass, "AutogradClosure");
+
   THPObjectPtr parent(PyImport_ImportModule("torch._C"));
   if (!parent) return false;
   PyModule_AddObject(parent.get(), "_functions", module.release());
   return true;
 }
+
+namespace torch { namespace autograd {
+
+void initAutogradClosureBindings(PyObject* module) {
+  auto m = py::handle(module).cast<py::module>();
+  py::class_<AutogradClosureFactory,std::shared_ptr<AutogradClosureFactory>>(m, "AutogradClosureFactory")
+    .def("__call__", &AutogradClosureFactory::construct)
+    ;
+
+  m.def("_jit_createAutogradClosure", [](py::object py_tracing_state) {
+    if (!THPTracingState_Check(py_tracing_state.ptr()))
+      throw std::runtime_error("expected a TracingState object");
+    auto & tracing_state = ((THPTracingState*)py_tracing_state.ptr())->cdata;
+    auto & graph = tracing_state->graph;
+    return std::make_shared<AutogradClosureFactory>(graph.get());
+  });
+}
+
+}}

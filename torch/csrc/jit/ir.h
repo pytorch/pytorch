@@ -589,19 +589,31 @@ struct graph_node_list_iterator {
     ++(*this);
     return old;
   }
+  graph_node_list_iterator & operator--() {
+    JIT_ASSERT(cur);
+    cur = cur->next_in_graph[reverseDir()];
+    return *this;
+  }
+  graph_node_list_iterator operator--(int) {
+    graph_node_list_iterator old = *this;
+    --(*this);
+    return old;
+  }
+
   // erase cur without invalidating this iterator
   // named differently from destroy so that ->/. bugs do not
   // silently cause the wrong one to be called.
   // iterator will point to the previous entry after call
   void destroyCurrent() {
     Node * n = cur;
-    cur = cur->next_in_graph[d == kNextDirection ? kPrevDirection : kNextDirection];
+    cur = cur->next_in_graph[reverseDir()];
     n->destroy();
   }
   graph_node_list_iterator reverse() {
-    return graph_node_list_iterator(cur, d == kNextDirection ? kPrevDirection : kNextDirection);
+    return graph_node_list_iterator(cur, reverseDir());
   }
 private:
+  int reverseDir() { return d == kNextDirection ? kPrevDirection : kNextDirection; }
   Node * cur;
   int d; //direction 0 is forward 1 is reverse, see next_in_graph
 };
@@ -967,3 +979,16 @@ inline Node * Graph::createCppOp(const std::shared_ptr<torch::autograd::Function
 void LintGraph(std::shared_ptr<Graph>& graph);
 
 }} // namespace torch::jit
+
+namespace std {
+
+template<>
+struct iterator_traits<torch::jit::graph_node_list_iterator> {
+  using difference_type = int64_t;
+  using value_type = torch::jit::Node*;
+  using pointer = torch::jit::Node**;
+  using reference = torch::jit::Node*&;
+  using iterator_category = bidirectional_iterator_tag;
+};
+
+}

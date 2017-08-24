@@ -41,19 +41,16 @@ struct Variable : std::enable_shared_from_this<Variable> {
       , version()
       , expected_version(-1) {}
 
-    SavedVariable(const Variable& variable, Function* saved_for)
+    SavedVariable(const Variable& variable, bool with_grad_fn)
       : data(variable.data)
       , has_grad_fn(variable.grad_fn != nullptr)
+      , grad_fn(with_grad_fn ? variable.grad_fn : nullptr)
       , grad_accumulator(variable.grad_accumulator)
       , version(variable.version_counter->new_saved_ref())
       , requires_grad(variable.requires_grad)
       , is_volatile(false)
       , expected_version(**variable.version_counter)
-      , tracing_state(variable.tracing_state) {
-        if (variable.grad_fn.get() != saved_for) {
-          grad_fn = variable.grad_fn;
-        }
-      }
+      , tracing_state(variable.tracing_state) {}
 
     at::Tensor data;
     // The gradient function associated with this node. If has_grad_fn
@@ -90,7 +87,11 @@ struct Variable : std::enable_shared_from_this<Variable> {
   std::shared_ptr<Function> get_grad_accumulator();
 
   inline SavedVariable save(Function* saved_for) {
-    return SavedVariable(*this, saved_for);
+    return SavedVariable(*this, grad_fn.get() != saved_for);
+  }
+
+  inline SavedVariable save(bool with_grad_fn) {
+    return SavedVariable(*this, with_grad_fn);
   }
 
   static inline SavedVariable save_opt(Variable* var, Function* saved_for) {

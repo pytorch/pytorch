@@ -26,13 +26,6 @@ struct EvalOutput : Function {
 };
 
 struct Eval : Function {
-  struct edge_hasher {
-    std::size_t operator()(const edge_type& edge) const {
-#define HASH_IDX(idx) std::hash<std::tuple_element<idx, edge_type>::type>()(std::get<idx>(edge))
-      // TODO: that's probably a bad hash function, but whatever
-      return HASH_IDX(0) ^ HASH_IDX(1);
-    }
-  };
   using edge_set = std::unordered_set<edge_type, edge_hasher>;
   using edge_order = std::unordered_map<edge_type, int, edge_hasher>;
   using placeholder_list = std::vector<std::shared_ptr<EvalOutput>>;
@@ -81,7 +74,7 @@ struct Eval : Function {
   bool traceable = false;
 
 private:
-  Engine::callback_map getCallbacks(variable_list& outputs, std::mutex& outputs_mutex);
+  Engine::pre_callback_map getCallbacks(variable_list& outputs, std::mutex& outputs_mutex);
 
   Subgraph getSubgraph(
       const variable_list& inputs,

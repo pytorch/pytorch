@@ -828,6 +828,8 @@ PyMODINIT_FUNC PyInit__C()
   ASSERT_TRUE(THPEngine_initModule(module));
   ASSERT_TRUE(THPTracer_initModule(module));
   torch::jit::initPythonIRBindings(module);
+  torch::autograd::initAutogradClosureBindings(module);
+
   ASSERT_TRUE(THPDoubleStorage_init(module));
   ASSERT_TRUE(THPFloatStorage_init(module));
   ASSERT_TRUE(THPHalfStorage_init(module));

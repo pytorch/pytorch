@@ -2,7 +2,6 @@
 
 #include "torch/csrc/autograd/engine.h"
 #include "torch/csrc/autograd/python_function.h"
-#include "torch/csrc/autograd/jit_closure.h"
 #include "torch/csrc/THP.h"
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/PtrWrapper.h"
@@ -58,10 +57,10 @@ struct CallbackContext {
 
 void compute_partial_exec_callbacks(const function_list& roots,
                                     const CallbackContext& ctx,
-                                    Engine::callback_map& map) {
+                                    Engine::pre_callback_map& map) {
   // This callback is used to suppress the computation of a node
   // if it is not necessary.
-  static Engine::callback_type abort_callback(
+  static Engine::pre_callback_type abort_callback(
       [](Function* fn, variable_list &vars) { return false; });
 
   std::vector<Function*> queue;
@@ -118,49 +117,50 @@ void compute_partial_exec_callbacks(const function_list& roots,
 PyObject *THPEngine_run_forward(THPEngine *self, PyObject *args, PyObject *kwargs)
 {
   HANDLE_TH_ERRORS
-  PyObject *pyclosure = NULL;
-  PyObject *inputs = NULL;
-  const char *accepted_kwargs[] = {"closure", "inputs", NULL};
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OO", (char**)accepted_kwargs,
-        &pyclosure, &inputs))
-    return NULL;
+  //PyObject *pyclosure = NULL;
+  //PyObject *inputs = NULL;
+  //const char *accepted_kwargs[] = {"closure", "inputs", NULL};
+  //if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OO", (char**)accepted_kwargs,
+        //&pyclosure, &inputs))
+    //return NULL;
 
-  THPUtils_assert(THPWrapper_check(pyclosure), "closure should be a PtrWrapper object");
-  THPUtils_assert(PyTuple_Check(inputs), "inputs should be a tuple");
+  //THPUtils_assert(THPWrapper_check(pyclosure), "closure should be a PtrWrapper object");
+  //THPUtils_assert(PyTuple_Check(inputs), "inputs should be a tuple");
 
-  variable_list var_inputs;
-  auto num_inputs = PyTuple_GET_SIZE(inputs);
-  var_inputs.reserve(1 + num_inputs);
-  var_inputs.emplace_back(nullptr); // For ConstantFactory
-  for (int i = 0; i < num_inputs; ++i) {
-    PyObject *input = PyTuple_GET_ITEM(inputs, i);
-    THPUtils_assert(THPVariable_Check(input), "%d input is not a Variable", i);
-    var_inputs.emplace_back(((THPVariable*)input)->cdata);
-  }
+  //variable_list var_inputs;
+  //auto num_inputs = PyTuple_GET_SIZE(inputs);
+  //var_inputs.reserve(1 + num_inputs);
+  //var_inputs.emplace_back(nullptr); // For ConstantFactory
+  //for (int i = 0; i < num_inputs; ++i) {
+    //PyObject *input = PyTuple_GET_ITEM(inputs, i);
+    //THPUtils_assert(THPVariable_Check(input), "%d input is not a Variable", i);
+    //var_inputs.emplace_back(((THPVariable*)input)->cdata);
+  //}
 
-  AutogradClosure *closure = reinterpret_cast<AutogradClosure*>(THPWrapper_get(pyclosure));
+  //AutogradClosure *closure = reinterpret_cast<AutogradClosure*>(THPWrapper_get(pyclosure));
 
-  variable_list outputs;
-  Engine::callback_map callbacks;
-  callbacks.emplace(closure->output.get(), [&outputs](Function* _unused, variable_list& inputs) -> bool {
-    outputs = inputs;
-    return false;
-  });
+  //variable_list outputs;
+  //Engine::callback_map callbacks;
+  //callbacks.emplace(closure->output.get(), [&outputs](Function* _unused, variable_list& inputs) -> bool {
+    //outputs = inputs;
+    //return false;
+  //});
 
-  try {
-    AutoNoGIL no_gil;
-    engine.execute(closure->roots, var_inputs, true, callbacks);
-  } catch (python_error &e) {
-    e.restore();
-    return nullptr;
-  }
+  //try {
+    //AutoNoGIL no_gil;
+    //engine.execute(closure->roots, var_inputs, true, callbacks);
+  //} catch (python_error &e) {
+    //e.restore();
+    //return nullptr;
+  //}
 
-  int num_outputs = outputs.size();
-  THPObjectPtr pyoutputs { PyTuple_New(num_outputs) };
-  for (int i = 0; i < num_outputs; ++i) {
-    PyTuple_SET_ITEM(pyoutputs.get(), i, THPVariable_Wrap(outputs[i]));
-  }
-  return pyoutputs.release();
+  //int num_outputs = outputs.size();
+  //THPObjectPtr pyoutputs { PyTuple_New(num_outputs) };
+  //for (int i = 0; i < num_outputs; ++i) {
+    //PyTuple_SET_ITEM(pyoutputs.get(), i, THPVariable_Wrap(outputs[i]));
+  //}
+  //return pyoutputs.release();
+  Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
@@ -218,7 +218,7 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     }
   }
 
-  Engine::callback_map callbacks;
+  Engine::pre_callback_map callbacks;
   CallbackContext ctx;
   if (inputs != NULL) {
     THPUtils_assert(PyTuple_Check(inputs), "inputs argument has to be a tuple");

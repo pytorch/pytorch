@@ -29,8 +29,11 @@ struct Engine {
   using ready_queue_type = std::deque<std::pair<std::shared_ptr<Function>, InputBuffer>>;
   using function_queue = std::vector<Function*>;
   using dependencies_type = std::unordered_map<Function*, int>;
-  using callback_type = std::function<bool (Function*, variable_list&)>;
-  using callback_map = std::unordered_map<Function*, callback_type>;
+
+  using pre_callback_type = std::function<bool (Function*, variable_list&)>;
+  using pre_callback_map = std::unordered_multimap<Function*, pre_callback_type>;
+  using post_callback_type = std::function<bool (Function*, variable_list&, variable_list&)>;
+  using post_callback_map = std::unordered_multimap<Function*, post_callback_type>;
 
   // Given a list of (Function, input number) pairs computes the value of the graph
   // by following next_function references.
@@ -38,7 +41,8 @@ struct Engine {
       const function_list& roots,
       const variable_list& inputs,
       bool keep_graph,
-      const callback_map& callbacks = callback_map());
+      const pre_callback_map& pre_callbacks = pre_callback_map(),
+      const post_callback_map& post_callbacks = post_callback_map());
 
   void queue_callback(std::function<void()> callback);
 
@@ -57,7 +61,7 @@ protected:
 
   std::once_flag start_threads_flag;
   std::vector<std::shared_ptr<ReadyQueue>> ready_queues;
-  std::vector<std::function<void()>> post_callbacks;
+  std::vector<std::function<void()>> final_callbacks;
   std::mutex post_callbacks_lock;
 };
 
