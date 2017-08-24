@@ -185,6 +185,18 @@ struct ConstantFactory : public Function {
   }
 };
 
+struct SimpleEval : public Function {
+  SimpleEval(const std::shared_ptr<Function>& fn)
+    : fn(fn) {}
+
+  virtual variable_list apply(const variable_list& inputs) {
+    return fn->apply(inputs);
+  }
+
+  std::shared_ptr<Function> fn;
+};
+
+
 static variable_list variablesFromTensors(at::TensorList tensors) {
   variable_list r;
   r.reserve(tensors.size());
@@ -284,6 +296,9 @@ std::unique_ptr<AutogradClosure> createAutogradClosure(Graph *graph) {
       } else {
         fn = std::make_shared<PythonCall>(value);
       }
+    // TODO: not sure if this works...
+    IR_ELSEIFM(CppOp)
+      fn = std::make_shared<SimpleEval>(value->fn);
     IR_ELSEIF(Select)
       // No-op. Selects are handled by their inputs.
       return;
