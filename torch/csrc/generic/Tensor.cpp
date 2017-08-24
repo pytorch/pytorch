@@ -200,7 +200,7 @@ THTensor* THPTensor_(fromNumpy)(PyObject *numpy_array) {
           new NumpyArrayAllocator(numpy_array)));
       result = THTensor_(newWithStorage)(LIBRARY_STATE storage, 0, sizes, strides);
     }
-    else 
+    else
 #endif
     {
       THStoragePtr storage(THStorage_(newWithSize)(LIBRARY_STATE storage_size));
@@ -770,13 +770,15 @@ static bool THPTensor_(_convertToTensorIndexers)(
     }
 
     if (!PySlice_Check(item)) {
+      PyObject *obj = PySequence_Fast_GET_ITEM(fast.get(), i);
       // Returns NULL upon conversion failure
       THPIndexTensor *indexer = (THPIndexTensor *)PyObject_CallFunctionObjArgs(
-          THPIndexTensorClass, PySequence_Fast_GET_ITEM(fast.get(), i), NULL);
+          THPIndexTensorClass, obj, NULL);
       if (!indexer) {
         PyErr_Format(PyExc_IndexError,
             "When performing advanced indexing the indexing objects must be LongTensors or "
-            "convertible to LongTensors");
+            "convertible to LongTensors. The indexing object at position %d is of type %s "
+            "and cannot be converted", i, THPUtils_typename(obj));
 
         // Clean up Indexers
         for (auto& idx : indexers) {
@@ -1335,7 +1337,7 @@ static bool THPTensor_(_index)(THPTensor *self, PyObject *index,
   tresult = THTensor_(newWithTensor)(LIBRARY_STATE self->cdata);
   sresult = NULL;
   int indexed_dim = 0;
-
+  int invalid_indexer_dim = 0;
 
   if(PyTuple_Check(index)) {
     // num_index_dim is the number of indices in the tuple, num_effective_index
@@ -1376,6 +1378,7 @@ static bool THPTensor_(_index)(THPTensor *self, PyObject *index,
         tresult = NULL;
         // overwrite this, so the message mentions the incorrect object
         index = dimidx;
+        invalid_indexer_dim = dim;
         break;
       }
     }
@@ -1390,17 +1393,20 @@ static bool THPTensor_(_index)(THPTensor *self, PyObject *index,
       return true;
   }
 
-  PyErr_Format(PyExc_TypeError, "indexing a tensor with an object of type %s. "
-      "The only supported types are integers, slices"
+  PyErr_Format(PyExc_TypeError,
+      "Performing basic indexing on a tensor and encountered an error indexing dim %d "
+      "with an object of type %s. The only supported types are integers, slices, "
 #ifdef WITH_NUMPY
-      ", numpy scalars and "
+      "numpy scalars, "
 #endif
+      "or if indexing with a "
 #ifndef THC_GENERIC_FILE
-      "torch.LongTensor or torch.ByteTensor as the only argument.",
+      "torch.LongTensor or torch.ByteTensor "
 #else
-      "torch.cuda.LongTensor or torch.cuda.ByteTensor as the only argument.",
+      "torch.cuda.LongTensor or torch.cuda.ByteTensor "
 #endif
-    THPUtils_typename(index));
+      "only a single Tensor may be passed.",
+    invalid_indexer_dim, THPUtils_typename(index));
   return false;
 }
 #undef IS_SCALAR
