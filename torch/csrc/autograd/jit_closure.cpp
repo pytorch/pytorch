@@ -269,7 +269,7 @@ std::unique_ptr<AutogradClosure> createAutogradClosure(Graph *graph) {
     auto& inputs = node->inputs();
     std::shared_ptr<Function> fn;
 
-    if (uses.size() == 0) return; // Dead code elimination
+    if (uses.size() == 0 && node->kind() != kParam) return; // Dead code elimination
 
 #define IR_ELSEIF_TRIVIAL(NAME, FNAME) \
     IR_ELSEIF(NAME) fn = std::make_shared<FNAME>();
