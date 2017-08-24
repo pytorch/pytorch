@@ -1079,6 +1079,7 @@ def InitEmptyRecord(net, schema_or_record, enforce_types=False):
             shape = [0] + list(blob_type.shape)
             net.ConstantFill([], blob, shape=shape, dtype=data_type)
         except TypeError:
+            logger.warning("Blob {} has type error".format(blob))
             # If data_type_for_dtype doesn't know how to resolve given numpy
             # type to core.DataType, that function can throw type error (for
             # example that would happen for cases of unknown types such as
