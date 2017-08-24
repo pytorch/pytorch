@@ -22,6 +22,7 @@ from torch.nn.utils import clip_grad_norm
 from torch.autograd import Variable, gradcheck
 from torch.autograd.gradcheck import gradgradcheck
 from torch.nn import Parameter
+from torch.nn.parallel._functions import Broadcast
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     module_tests, criterion_tests, TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
     TEST_CUDNN_VERSION
@@ -64,11 +65,18 @@ def _assertGradAndGradgradChecks(test_case, apply_fn, inputs):
     # if we get whether this failed on the gradcheck or the gradgradcheck.
     test_case.assertTrue(gradcheck(apply_fn, inputs))
     dummy_out = apply_fn(*inputs)
+
+    def randn_match_cpu_gpu(x):
+        a = torch.randn(x.size())
+        if x.is_cuda:
+            a = a.cuda(x.get_device())
+        return a
+
     if isinstance(dummy_out, tuple):
-        grad_y = tuple(Variable(torch.randn(x.size()), requires_grad=x.requires_grad)
+        grad_y = tuple(Variable(randn_match_cpu_gpu(x), requires_grad=x.requires_grad)
                        for x in dummy_out if isinstance(x, Variable))
     else:
-        grad_y = (Variable(torch.randn(dummy_out.size()), requires_grad=dummy_out.requires_grad),)
+        grad_y = (Variable(randn_match_cpu_gpu(dummy_out), requires_grad=dummy_out.requires_grad),)
 
     test_case.assertTrue(gradgradcheck(apply_fn, inputs, grad_y,))
 
@@ -216,8 +224,12 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
     def _do_extra_tests(self, test_case, module, input, target):
         if self.check_gradgrad:
             params = tuple(x for x in module.parameters())
-            _assertGradAndGradgradChecks(test_case, lambda x, y, *args, **kw: module(x, y),
-                                         (input, target) + params)
+            if not isinstance(input, tuple):
+                _assertGradAndGradgradChecks(test_case, lambda x, y, *args, **kw: module(x, y),
+                                             (input, target) + params)
+            else:
+                _assertGradAndGradgradChecks(test_case, lambda x, y, z, *args, **kw: module(x, y, z),
+                                             input + (target,) + params)
 
     def _get_target(self, target):
         return Variable(target, requires_grad=False)
@@ -856,29 +868,29 @@ class TestNN(NNTestCase):
         # check a known test example
         es = nn.EmbeddingBag(5, 2, mode=mode)
         es.weight.data.copy_(torch.arange(1, 11).resize_as_(es.weight.data))
-        input = Variable(torch.LongTensor([3, 1, 1, 1, 4]))
-        offsets = Variable(torch.LongTensor([0, 2]))
+        input = Variable(torch.LongTensor([3, 1, 1, 1, 4, 0]))
+        offsets = Variable(torch.LongTensor([0, 3]))
         grad_output = torch.arange(1, 5).view(2, 2).type(torch.Tensor)
 
         if mode == 'sum':
             expected_output = torch.Tensor(
-                [[10, 12],
-                 [15, 18]])
+                [[13, 16],
+                 [13, 16]])
             expected_grad_weight = torch.Tensor(
-                [[0, 0],
-                 [7, 10],
+                [[3, 4],
+                 [5, 8],
                  [0, 0],
                  [1, 2],
                  [3, 4]])
         else:
             expected_output = torch.Tensor(
-                [[10. / 2, 12. / 2],
-                 [15. / 3, 18. / 3]])
+                [[13. / 3, 16. / 3],
+                 [13. / 3, 16. / 3]])
             expected_grad_weight = torch.Tensor(
-                [[0., 0.],
-                 [1. / 2 + 3. / 3 + 3. / 3, 2. / 2 + 4. / 3 + 4. / 3],
+                [[3. / 3, 4. / 3],
+                 [1. / 3 + 1. / 3 + 3. / 3, 2. / 3 + 2. / 3 + 4. / 3],
                  [0., 0.],
-                 [1. / 2, 2. / 2],
+                 [1. / 3, 2. / 3],
                  [3. / 3, 4. / 3]])
 
         if cuda:
@@ -890,6 +902,15 @@ class TestNN(NNTestCase):
             expected_grad_weight = expected_grad_weight.cuda()
 
         output = es(input, offsets)
+        output.backward(grad_output)
+
+        self.assertEqual(output.data, expected_output)
+        self.assertEqual(es.weight.grad.data, expected_grad_weight)
+
+        # check same example except as 2D (2 x 3)
+        input = Variable(input.data.view(2, -1))
+        es.zero_grad()
+        output = es(input)
         output.backward(grad_output)
 
         self.assertEqual(output.data, expected_output)
@@ -1162,6 +1183,7 @@ class TestNN(NNTestCase):
         result[0].backward(grad)
         self.assertEqual(x.grad.data[:2], grad)
         self.assertEqual(x.grad.data[2:], grad.clone().zero_())
+        _assertGradAndGradgradChecks(self, lambda y: dp.scatter(y, (0, 1)), (x,))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_scatter_cpu(self):
@@ -1190,6 +1212,7 @@ class TestNN(NNTestCase):
         result.backward(grad)
         self.assertEqual(inputs[0].grad.data, grad[:2])
         self.assertEqual(inputs[1].grad.data, grad[2:])
+        _assertGradAndGradgradChecks(self, lambda x, y: dp.gather((x, y), output_device), inputs)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_gather_cpu(self):
@@ -1198,6 +1221,16 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_gather_gpu(self):
         self._test_gather(0)
+
+    def _test_broadcast_double_backwards(self, *tensors):
+        variables = tuple(Variable(t, requires_grad=True) for t in tensors)
+        _assertGradAndGradgradChecks(self, lambda *i: Broadcast.apply((0, 1), *i), variables)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    def test_broadcast_double_backwards_gpu(self):
+        self._test_broadcast_double_backwards(torch.randn(4, 4).cuda(),
+                                              torch.randn(4, 4).cuda(),
+                                              torch.randn(4, 4).cuda())
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_replicate(self):
@@ -3898,7 +3931,8 @@ for test_params in module_tests + new_module_tests:
     add_test(test)
     if 'check_eval' in test_params:
         # create a new test that is identical but that sets module.training to False
-        test_params['desc'] = test_params.get('desc', '') + 'eval'
+        desc = test_params.get('desc', None)
+        test_params['desc'] = 'eval' if desc is None else desc + '_eval'
 
         def gen_eval_constructor(constructor):
             def eval_constructor(*args, **kwargs):
@@ -3917,6 +3951,20 @@ for test_params in criterion_tests + new_criterion_tests:
     test_params['constructor'] = getattr(nn, name)
     test = NewCriterionTest(**test_params)
     add_test(test)
+    if 'check_no_size_average' in test_params:
+        desc = test_params.get('desc', None)
+        test_params['desc'] = 'eval' if desc is None else desc + '_no_size_average'
+
+        def gen_no_size_average_constructor(constructor):
+            def no_size_average_constructor(*args, **kwargs):
+                cons = constructor(*args, size_average=False, **kwargs)
+                return cons
+                no_size_average_constructor.__name__ = constructor.__name__
+                return no_size_average_constructor
+
+        test_params['constructor'] = gen_eval_constructor(test_params['constructor'])
+        test = NewCriterionTest(**test_params)
+        add_test(test)
 
 
 class UnpoolingNet(nn.Module):
