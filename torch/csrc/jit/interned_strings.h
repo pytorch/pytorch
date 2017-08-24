@@ -21,6 +21,7 @@ _(Negate) \
 _(Sigmoid) \
 _(Tanh) \
 _(Constant) \
+_(Undefined) \
 _(FusionGroup) \
 _(Chunk) \
 _(NumChunks) \
