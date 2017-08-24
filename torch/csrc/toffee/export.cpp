@@ -38,6 +38,7 @@ std::shared_ptr<Graph> ToToffeeIR(std::shared_ptr<Graph>& g,
   auto envFn = [&env](Node * n) {
     auto it = env.find(n);
     JIT_ASSERTM(it != env.end(), "Dangling node reference");
+    JIT_ASSERTM(it->second, "Unused node was subsequently used");
     return it->second;
   };
   std::unordered_map<void*, Node*> buffer_map;
@@ -61,6 +62,7 @@ std::shared_ptr<Graph> ToToffeeIR(std::shared_ptr<Graph>& g,
         auto typ = old->typeOption();
         JIT_ASSERTM(typ && typ->kind() == jit::TypeKind::HandleType,
           "primspec produced too few outputs");
+        env[old] = nullptr;
         if (!old->uses().empty()) {
           throw std::runtime_error("In Toffee export, handles should be unused");
         }
@@ -71,6 +73,7 @@ std::shared_ptr<Graph> ToToffeeIR(std::shared_ptr<Graph>& g,
             env[old] = outputs[i];
           }
         } else {
+          env[old] = nullptr;
           if (!old->uses().empty()) {
             throw std::runtime_error("In Toffee export, non-exported PyTorch return not supported " + std::to_string(i));
           }
@@ -82,10 +85,7 @@ std::shared_ptr<Graph> ToToffeeIR(std::shared_ptr<Graph>& g,
   for (auto node : g->nodes()) {
     IR_IF(node, Select)
       // Selects are translated by multi-return nodes.
-      if (!node->uses().empty()) {
-        // Select nodes with NO uses are omitted from env
-        JIT_ASSERT(env.count(value) > 0);
-      }
+      JIT_ASSERT(env.count(value) > 0);
     IR_ELSEIFM(CppOp)
       if (auto fn = std::dynamic_pointer_cast<autograd::HasPrimSpec>(value->fn)) {
         auto outputs = fn->primspec(&ctx, fmap<Node*,Node*>(node->inputs(),envFn));
