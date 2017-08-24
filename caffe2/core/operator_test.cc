@@ -90,9 +90,14 @@ TEST(OperatorTest, RegistryWorks) {
   op_def.set_type("JustTest");
   unique_ptr<OperatorBase> op = CreateOperator(op_def, &ws);
   EXPECT_NE(nullptr, op.get());
-  op_def.mutable_device_option()->set_device_type(CUDA);
-  op = CreateOperator(op_def, &ws);
-  EXPECT_NE(nullptr, op.get());
+  // After introducing events, CUDA operator creation has to have CUDA compiled
+  // as it needs to instantiate an Event object with CUDAContext. Thus we will
+  // guard this test below.
+  if (HasCudaRuntime()) {
+    op_def.mutable_device_option()->set_device_type(CUDA);
+    op = CreateOperator(op_def, &ws);
+    EXPECT_NE(nullptr, op.get());
+  }
 }
 
 TEST(OperatorTest, RegistryWrongDevice) {

@@ -94,3 +94,9 @@ endif()
 if (IOS)
   add_definitions("-mfpu=neon-fp16")
 endif()
+
+# ---[ If we are buidling on ios, we should turn off deprecated-declarations
+# due to protobuf.
+if (IOS)
+  add_definitions("-Wno-deprecated-declarations")
+endif()

@@ -1,6 +1,11 @@
 #ifndef CAFFE2_OPERATORS_SINUSOID_POSITION_ENCODING_OP_H_
 #define CAFFE2_OPERATORS_SINUSOID_POSITION_ENCODING_OP_H_
 
+#ifdef _MSC_VER
+#define _USE_MATH_DEFINES
+#endif // _MSC_VER
+#include <cmath>
+
 #include "caffe2/core/operator.h"
 
 #include "Eigen/Core"
