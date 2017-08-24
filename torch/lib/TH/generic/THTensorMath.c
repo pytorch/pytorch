@@ -1927,15 +1927,15 @@ void THTensor_(zeros)(THTensor *r_, THLongStorage *size)
   THTensor_(zero)(r_);
 }
 
-void THTensor_(zeros_like)(THTensor *r_, THTensor *input)
+void THTensor_(zerosLike)(THTensor *r_, THTensor *input)
 {
-  THTensor_(resize)(r_, THTensor_(newSizeOf)(input), NULL);
+  THTensor_(resizeAs)(r_, input);
   THTensor_(zero)(r_);
 }
 
-void THTensor_(ones_like)(THTensor *r_, THTensor *input)
+void THTensor_(onesLike)(THTensor *r_, THTensor *input)
 {
-  THTensor_(resize)(r_, THTensor_(newSizeOf)(input), NULL);
+  THTensor_(resizeAs)(r_, input);
   THTensor_(fill)(r_, 1);
 }
 

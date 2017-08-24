@@ -44,10 +44,10 @@ THCTensor_(zeros)(THCState *state, THCTensor *r_, THLongStorage *size)
 }
 
 THC_API void
-THCTensor_(zeros_like)(THCState *state, THCTensor *r_, THCTensor *input)
+THCTensor_(zerosLike)(THCState *state, THCTensor *r_, THCTensor *input)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, r_, input));
-  THCTensor_(resize)(state, r_, THCTensor_(newSizeOf)(state, input), NULL);
+  THCTensor_(resizeAs)(state, r_, input);
   THCTensor_(zero)(state, r_);
 }
 
@@ -60,10 +60,10 @@ THCTensor_(ones)(THCState *state, THCTensor *r_, THLongStorage *size)
 }
 
 THC_API void
-THCTensor_(ones_like)(THCState *state, THCTensor *r_, THCTensor *input)
+THCTensor_(onesLike)(THCState *state, THCTensor *r_, THCTensor *input)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, r_, input));
-  THCTensor_(resize)(state, r_, THCTensor_(newSizeOf)(state, input), NULL);
+  THCTensor_(resizeAs)(state, r_, input);
   THCTensor_(fill)(state, r_, ScalarConvert<int, real>::to(1));
 }
 
