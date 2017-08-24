@@ -11,6 +11,7 @@ import caffe2.python.hypothesis_test_util as hu
 from future.utils import viewvalues
 import hypothesis.strategies as st
 from hypothesis import given, settings
+import unittest
 
 
 def has_blob(proto, needle):
@@ -222,6 +223,7 @@ class MemongerTest(hu.HypothesisTestCase):
         np.testing.assert_almost_equal(loss, optimized_loss)
         np.testing.assert_almost_equal(grad, optimized_grad)
 
+    @unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
     def test_memonger_mix_cpu_gpu(self):
         '''
         Check that memonger does not make blobs cross CPU/GPU boundary
