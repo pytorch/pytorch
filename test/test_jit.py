@@ -316,6 +316,12 @@ class TestJit(TestCase):
         trace, _ = torch.jit.record_trace(nn.Conv2d(16, 13, 3, bias=False), x)
         self.assertToffeeExpected(torch._C._jit_pass_export(trace))
 
+    @toffee_only
+    def test_maxpool_export(self):
+        x = Variable(torch.randn(20, 16, 50))
+        trace, _ = torch.jit.record_trace(nn.MaxPool1d(3, stride=2), x)
+        self.assertToffeeExpected(torch._C._jit_pass_export(trace))
+
     @skipIfNoTorchVision
     def test_alexnet(self):
         x = Variable(torch.randn(10, 3, 224, 224).fill_(1.0), requires_grad=True)

@@ -1,0 +1,24 @@
+node {
+  input: "1"
+  output: "2"
+  op_type: "MaxPool"
+  attribute {
+    name: "kernel"
+    i: 3
+  }
+  attribute {
+    name: "pad"
+    i: 0
+  }
+  attribute {
+    name: "dilation"
+    i: 1
+  }
+  attribute {
+    name: "stride"
+    i: 2
+  }
+}
+name: "torch-jit-export"
+input: "1"
+output: "2"

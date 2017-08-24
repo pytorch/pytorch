@@ -173,6 +173,17 @@ void printAttributes(std::ostream & out, Node * n) {
 }
 
 std::ostream& operator<<(std::ostream & out, Graph & g) {
+  // Uncomment this to debug all_nodes issues
+  /*
+  {
+    size_t i = 0;
+    for (auto& n : g.all_nodes) {
+      if (i++ > 0) out << ", ";
+      out << *n;
+    }
+    out << "\n";
+  }
+  */
   out << "graph(" << node_list_with_types(g.inputs(), true) << ") {\n";
   std::vector<Node*> groups;
   size_t prev_stage = 0;
