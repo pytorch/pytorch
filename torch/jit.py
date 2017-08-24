@@ -128,7 +128,6 @@ class Traceable(object):
 
     def run_trace(self, trace_inputs):
         if self.saved_closure is None:
-            print(self.saved_trace)
             self.saved_closure = torch._C._jit_createAutogradClosure(
                 self.saved_trace)
         with _time("run_trace", self.time):

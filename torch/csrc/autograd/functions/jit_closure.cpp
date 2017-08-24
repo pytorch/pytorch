@@ -40,7 +40,7 @@ struct Placeholder : public Function {
 
 // Used for inputs of previous previous stages
 struct PrevStageInput : public Replicate {};
-// Used for inputs to the closure and
+// Used for inputs to the closure
 struct InputPlaceholder : public Placeholder {};
 // Used to mark places that will have to apply Evals from previous stages
 struct EvalPlaceholder : public Placeholder {};
@@ -111,6 +111,7 @@ struct PythonCall : public Function {
         if (scalar_it == scalar_args.end())
           throw std::runtime_error("expected too many scalar args");
         obj = (scalar_it++)->get();
+        Py_INCREF(obj);
       } else if (arg_type == 't') {
         if (var_it == inputs.end())
           throw std::runtime_error("expected too many inputs");
@@ -118,7 +119,6 @@ struct PythonCall : public Function {
       } else {
         throw std::runtime_error("unexpected calling convention");
       }
-      Py_INCREF(obj);
       PyTuple_SET_ITEM(py_inputs.get(), input_nr++, obj);
     }
 
@@ -281,7 +281,8 @@ struct CrossStageStateDesc {
 struct StageClosure {
   using node_fn_map_type = std::unordered_map<Node*, std::shared_ptr<Function>>;
 
-  StageClosure(Graph *graph, const CrossStageStateDesc& xstate, std::size_t stage) {
+  StageClosure(Graph *graph, const CrossStageStateDesc& xstate, std::size_t stage)
+    : const_factory(std::make_shared<ConstantFactory>()) {
     node_fn_map_type node_map;
     node_fn_map_type prev_stage_input_map;
 
@@ -349,6 +350,8 @@ struct StageClosure {
         captured_variables.emplace_back(fn.get(), 0, captured_node->unique());
       }
     }
+
+    roots.emplace_back(const_factory, 0);
   }
 
   // Returns a function implementing functionality of a given node,
@@ -391,10 +394,10 @@ struct StageClosure {
       fn->num_inputs = 1;
       return fn;
     IR_ELSEIF(Constant)
-      throw std::runtime_error("constants not supported");
-      //fn = std::make_shared<torch::autograd::WrapConstant>(value->t(kValue));
-      //const_factory->next_functions.emplace_back(fn, 0);
-      //fn->num_inputs = 1;
+      auto fn = std::make_shared<torch::autograd::WrapConstant>(value->t(kValue));
+      const_factory->next_functions.emplace_back(fn, 0);
+      fn->num_inputs = 1;
+      return fn;
     IR_ELSEIF(Chunk)
       return std::make_shared<Chunk>(value->i(kNumChunks), value->i(kDim));
     IR_ELSE()
@@ -463,12 +466,13 @@ struct StageClosure {
     }
   }
 
-  // Roots for a call to the engine. The list begins with nodes corresponding to inputs
-  // to apply, and PrevStageInput nodes afterwards
+  // Roots for a call to the engine. The list contains function in this order:
+  // [ apply input roots | prev stage input roots | constant factory ]
   function_list roots;
 
   // Output node
   std::shared_ptr<Function> output;
+  std::shared_ptr<ConstantFactory> const_factory;
 
   // These will be used by each instantiation of AutogradClosure to register hooks.
   std::vector<int> prev_stage_variables;                            // unique
@@ -568,6 +572,7 @@ variable_list AutogradClosure::apply(const variable_list& inputs) {
   });
   for (auto unique : desc->stages[stage].prev_stage_variables)
     input_leaves.emplace_back(std::make_shared<Variable>(saved_vars.at(unique), true, false));
+  input_leaves.emplace_back(nullptr); // for ConstantFactory
 
   auto& engine = python::PythonEngine::getDefaultEngine();
   engine.execute(stage_closure.roots, input_leaves, true, pre_callbacks, post_callbacks);

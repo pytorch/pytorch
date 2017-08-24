@@ -1,36 +1,8 @@
-#include <pybind11/pybind11.h>
-// DO NOT REMOVE, this enables std containers to be recognized
-// with pybind11, removing the include disables the support
-#include <pybind11/stl.h>
-
-namespace py = pybind11;
+#include "torch/csrc/utils/pybind.h"
 #include <iostream>
 #include <sstream>
 #include "torch/csrc/jit/ir.h"
-struct THPGenerator;
-#include "torch/csrc/Module.h"
-#include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/jit/python_tracer.h"
-
-// handle Tensor <-> at::Tensor conversions
-namespace pybind11 { namespace detail {
-    template <> struct type_caster<at::Tensor> {
-    public:
-        PYBIND11_TYPE_CASTER(at::Tensor, _("at::Tensor"));
-
-        bool load(handle src, bool) {
-            /* Extract PyObject from handle */
-            PyObject *source = src.ptr();
-            if(!THPModule_isTensor(source))
-              return false;
-            value = torch::createTensor(source);
-            return true;
-        }
-        static handle cast(at::Tensor src, return_value_policy /* policy */, handle /* parent */) {
-            return handle(torch::createPyObject(src));
-        }
-    };
-}} // namespace pybind11::detail
 
 namespace torch { namespace jit {
 
