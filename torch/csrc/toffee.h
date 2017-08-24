@@ -1,8 +1,10 @@
 #pragma once
 
 #include "torch/csrc/toffee.pb.h"
+#include "torch/csrc/jit/assert.h"
 
 #include <pb_encode.h>
+#include <ATen/ATen.h>
 
 // #include <toffee/schema.h>
 // #include <google/protobuf/text_format.h>
@@ -57,6 +59,8 @@ bool micropb_callback_list(pb_ostream_t *stream, const pb_field_t *field, void *
   }
   return true;
 }
+
+bool micropb_callback_tensor(pb_ostream_t *stream, const pb_field_t *field, void * const *arg);
 
 // MicroProto helper class
 template<typename T>
@@ -114,6 +118,14 @@ struct MicroProto {
     r.arg = static_cast<void*>(slot);
     return r; // RVO
   }
+
+  pb_callback_t tensor(at::Tensor* slot, const at::Tensor& t) {
+    *slot = t; // copy construct
+    pb_callback_t r;
+    r.funcs.encode = &micropb_callback_tensor;
+    r.arg = static_cast<void*>(slot);
+    return r; // RVO
+  }
 };
 
 // TODO: add more of these as necessary
@@ -132,18 +144,20 @@ class TensorProto : public MicroProto<toffee_TensorProto> {
 private:
   std::string name;
   unique_vector<int64_t> dims;
-  // TODO: write a callback that streams data from tensor directly.
-  // The current method is VERY INEFFICIENT (one dynamically allocated
-  // heap object for every entry in the tensor!)
-  unique_vector<float> float_data;
+  at::Tensor tensor_data;
 public:
   TensorProto() : MicroProto(toffee_TensorProto_init_default) {
     proto.dims       = list<int64_t>(&dims);
-    proto.float_data = list<float>(&float_data);
   }
   void set_name(const std::string& s) { proto.name = string(&name, s); }
   void add_dims(int64_t d) { dims.emplace_back(new int64_t(d)); }
-  void add_float_data(float f) { float_data.emplace_back(new float(f)); }
+  void add_tensor(const at::Tensor& t) {
+    if (t.type().scalarType() == at::kFloat) {
+      proto.float_data = tensor(&tensor_data, t);
+    } else {
+      JIT_ASSERTM(0, "non-float tensors not supported yet");
+    }
+  }
   void set_data_type(toffee_TensorProto_DataType t) { proto.has_data_type = true; proto.data_type = t; }
 };
 

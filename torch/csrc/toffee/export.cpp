@@ -8,6 +8,7 @@
 #include "torch/csrc/autograd/functions/convolution.h"
 #include "torch/csrc/jit/dead_code_elimination.h"
 #include "torch/csrc/utils/functional.h"
+#include <ATen/ATen.h>
 
 #include <fstream>
 #undef NDEBUG
@@ -168,11 +169,7 @@ static void encodeTensor(toffee::TensorProto * p, const at::Tensor & tensor) {
     p->set_data_type(toffee::TensorProto_DataType_FLOAT);
     //TODO: other types, we force conversion here
     at::Tensor cont = tensor.toType(at::CPU(at::kFloat));
-    float * data = cont.data<float>();
-    int64_t N = cont.numel();
-    for(int64_t i = 0; i < N; ++i) {
-      p->add_float_data(data[i]);
-    }
+    p->add_tensor(cont);
 }
 static void encodeGraph(toffee::GraphProto * p_g, std::shared_ptr<Graph> & g, const std::vector<at::Tensor> & initializers);
 static void addAttribute(toffee::NodeProto * n_p, jit::Node * n, jit::Symbol name) {
