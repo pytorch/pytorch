@@ -50,15 +50,6 @@ class ParameterInfo(object):
             ParameterType.SPARSE if isinstance(self.grad, core.GradientSlice)
             else ParameterType.DENSE)
 
-    def cloned_init_net(self):
-        if not self._cloned_init_net:
-            init_net, outputs = self.blob.Net().ClonePartial(
-                'param_%d_%s_init' % (self.param_id, self.name),
-                inputs=[],
-                outputs=[self.blob])
-            self._cloned_init_net = (init_net, outputs[0])
-        return self._cloned_init_net
-
     @property
     def parameter(self):
         return self.blob
