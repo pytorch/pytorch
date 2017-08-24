@@ -288,12 +288,11 @@ NetDef rewritePredictNetForOpenGL(const NetDef& predictNet, bool useTextureInput
     if (opKeySet.find(openGLOp) != opKeySet.end()) {
       op->set_type(openGLOp);
       openGLOps.insert(openGLOp);
-      
+
       // Do not check in
-//      auto* arg = op->add_arg();
-//      arg->set_name("tiling");
-//      arg->set_i(1);
-      
+      // auto* arg = op->add_arg();
+      // arg->set_name("tiling");
+      // arg->set_i(1);
     } else {
       needCopyOps = true;
     }

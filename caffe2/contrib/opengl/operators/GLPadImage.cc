@@ -73,7 +73,6 @@ void GLPadImage::pad(const GLImageVector<T>& input_images,
     int output_slices = output_image->slices;
 
     for (int is = 0; is < input_slices; is++) {
-      gl_log(GL_VERBOSE, "is: %d\n", is);
       run(std::vector<texture_attachment>({{input_image->textures[is], inputData}}),
           {output_image->textures.begin() + is, output_image->textures.begin() + is + 1},
           [&]() {
@@ -88,6 +87,17 @@ void GLPadImage::pad(const GLImageVector<T>& input_images,
 }
 
 namespace caffe2 {
+
+template <typename OPBase>
+static void computeOutputHW(OPBase* op, int H, int W, int* OH, int* OW) {
+  Tensor<CPUContext> input, output;
+  input.Resize(1, 1, H, W);
+  op->SetOutputSize(input, &output, 1);
+  CAFFE_ENFORCE_EQ(output.ndim(), 4);
+  *OH = output.dim(2);
+  *OW = output.dim(3);
+}
+
 template <class T>
 class OpenGLPadImageOp final : public ConvPoolOpBase<CPUContext>, ImageAllocator<T> {
  public:
@@ -105,17 +115,19 @@ class OpenGLPadImageOp final : public ConvPoolOpBase<CPUContext>, ImageAllocator
                   "Pooling op does not support stride right now.");
     // Pad op does not use kernel sizes, so we set it to 1 for computing the
     // output size.
-    kernel_[0] = kernel_[1] = 1;
+    kernel_.assign(pads_.size() / 2, 1);
   }
 
   bool RunOnDeviceWithOrderNCHW() override {
     const GLImageVector<T>& input = Inputs()[0]->template Get<GLImageVector<T>>();
-    const auto pH = pad_t();
-    const auto pW = pad_l();
+
     const int num_images = input.size();
-    const auto output_height = input.height() + 2 * pH;
-    const auto output_width = input.width() + 2 * pW;
+    const int input_width     = input.width();
+    const int input_height    = input.height();
     const int output_channels = input.channels();
+
+    int output_height, output_width;
+    computeOutputHW(this, input_height, input_width, &output_height, &output_width);
 
     int is_last = OperatorBase::GetSingleArgument<int>("is_last", 0);
 
@@ -126,7 +138,7 @@ class OpenGLPadImageOp final : public ConvPoolOpBase<CPUContext>, ImageAllocator
       _padImage.reset(new GLPadImage());
     }
 
-    _padImage->pad(input, *output, pW, pH);
+    _padImage->pad(input, *output, pad_l(), pad_t());
 
     Outputs()[0]->Reset(output);
 
