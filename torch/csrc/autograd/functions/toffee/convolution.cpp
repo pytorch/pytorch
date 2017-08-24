@@ -14,11 +14,10 @@ static T all_equal(at::ArrayRef<T> ts, const char * name) {
 
 jit::node_list ConvForward::primspec(PrimSpecContext* ctx, jit::node_list inputs) {
   auto & g = ctx->graph;
-  auto n = g->appendNode(g->create(!transposed ? jit::kConv : jit::kConvTranspose, {inputs.at(0),inputs.at(1)}));
+  auto n = g->appendNode(g->create(!transposed ? jit::kConv : jit::kConvTranspose,
+                                   {inputs.at(0), inputs.at(1)}));
 
-  // TODO: Factor this logic into a helper, and make sure it gets applied
-  // consistently. See also batch_normalization.cpp
-  if (inputs.at(2)->kind() != jit::kConstant || inputs.at(2)->t(jit::kValue).defined()) {
+  if (inputs.at(2)->kind() != jit::kUndefined) {
     n->addInput(inputs.at(2));
   }
 

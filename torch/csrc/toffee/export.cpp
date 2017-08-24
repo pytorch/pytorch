@@ -137,7 +137,7 @@ std::shared_ptr<Graph> ToToffeeIR(std::shared_ptr<Graph>& g,
       }
       setOutputs(node, outputs);
     IR_ELSE()
-      if(node->kind() == kConstant && node->t(kValue).defined()) {
+      if(node->kind() == kConstant) {
         throw std::runtime_error("Constant not supported yet");
       }
       auto n_ = ctx.graph->createClone(node, envFn);
@@ -238,7 +238,7 @@ static void encodeGraph(toffee::GraphProto * p_g, std::shared_ptr<Graph> & g, co
       // of the select invariant
       continue;
     }
-    if (node->kind() == kConstant && !node->t(kValue).defined() && node->uses().empty()) {
+    if (node->kind() == kUndefined && node->uses().empty()) {
       // Undefined nodes never show up in ToffeeIR; they're just a tool
       // to help primspecs do the right thing.
       continue;

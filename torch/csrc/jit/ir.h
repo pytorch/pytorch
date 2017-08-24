@@ -750,9 +750,7 @@ public:
     return n;
   }
   Node * createUndefined() {
-    auto n = create(kConstant);
-    n->t_(kValue,at::Tensor());
-    return n;
+    return create(kUndefined);
   }
   Node * createConstant(const at::Tensor& ref) {
     JIT_ASSERT(ref.defined());
