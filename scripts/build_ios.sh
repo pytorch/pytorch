@@ -35,6 +35,7 @@ cmake .. \
     -DCMAKE_BUILD_TYPE=Release \
     -DIOS_PLATFORM=${IOS_PLATFORM} \
     -DUSE_CUDA=OFF \
+    -DUSE_OPENCV=OFF \
     -DBUILD_TEST=OFF \
     -DBUILD_BINARY=OFF \
     -DCMAKE_C_FLAGS=-fembed-bitcode \

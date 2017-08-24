@@ -16,6 +16,10 @@ std::shared_ptr<void> shared_from_new(std::pair<void*, MemoryDeleter>&& p) {
 }
 }
 
+TEST(CUDATest, HasCudaRuntime) {
+  EXPECT_TRUE(HasCudaRuntime());
+}
+
 TEST(CUDAContextTest, TestAllocDealloc) {
   if (!HasCudaGPU()) return;
   CUDAContext context(0);

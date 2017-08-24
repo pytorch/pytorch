@@ -208,6 +208,19 @@ class SkipIndices<> {
   }
 };
 
+// A global variable to mark if Caffe2 has cuda linked to the current runtime.
+// Do not directly use this variable, but instead use the HasCudaRuntime()
+// function below.
+extern bool g_caffe2_has_cuda_linked;
+
+// HasCudaRuntime() tells the program whether the binary has Cuda runtime
+// linked. This function should not be used in static initialization functions
+// as the underlying boolean variable is going to be switched on when one
+// loads libcaffe2_gpu.so.
+inline bool HasCudaRuntime() {
+  return g_caffe2_has_cuda_linked;
+}
+
 }  // namespace caffe2
 
 #endif  // CAFFE2_CORE_COMMON_H_

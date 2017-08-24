@@ -233,7 +233,9 @@ TEST(NetTest, ChainingForDifferentDevices) {
           }
         }
 )DOC";
-  checkChainingAndRun(spec, {{0, {0}}, {1, {1, 2}}, {3, {3}}});
+  if (HasCudaRuntime()) {
+    checkChainingAndRun(spec, {{0, {0}}, {1, {1, 2}}, {3, {3}}});
+  }
 }
 
 TEST(NetTest, ChainingForFork) {

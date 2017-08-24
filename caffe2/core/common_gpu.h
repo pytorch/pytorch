@@ -90,6 +90,11 @@ int NumCudaDevices();
  * cuda gpus present in the machine, or there are hardware configuration
  * problems like an insufficient driver, this function will still return false,
  * meaning that there is no usable GPU present.
+ *
+ * In the open source build, it is possible that Caffe2's GPU code is
+ * dynamically loaded, and as a result a library could be only linked to the
+ * CPU code, but want to test if cuda is later available or not. In this case,
+ * one should use HasCudaRuntime() from common.h.
  */
 inline bool HasCudaGPU() { return NumCudaDevices() > 0; }
 

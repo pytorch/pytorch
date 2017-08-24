@@ -268,4 +268,18 @@ const char* curandGetErrorString(curandStatus_t error) {
   // To suppress compiler warning.
   return "Unrecognized curand error string";
 }
+
+// Turn on the flag g_caffe2_has_cuda_linked to true for HasCudaRuntime()
+// function.
+extern bool g_caffe2_has_cuda_linked;
+namespace {
+class CudaRuntimeFlagFlipper {
+ public:
+  CudaRuntimeFlagFlipper() {
+    g_caffe2_has_cuda_linked = true;
+  }
+};
+static CudaRuntimeFlagFlipper g_flipper;
+} // namespace
+
 }  // namespace caffe2
