@@ -24,6 +24,7 @@ class Optimizer(object):
         self._aux_params = AuxOptimizerParams(local=[], shared=[])
         self._instance_num = _optimizer_instance_count[self.__class__.__name__]
         _optimizer_instance_count[self.__class__.__name__] += 1
+        self._norm_ratio = None
 
     '''
     Adds optimization operators to the net for given parameter and its gradient
@@ -48,32 +49,35 @@ class Optimizer(object):
     def _run(self, net, param_init_net, param_info):
         raise Exception("Not Impelemented")
 
-    def get_cpu_lr_blob_name(self):
+    def get_cpu_blob_name(self, base_str):
         classname = self.__class__.__name__
-        return '%s_%d_lr_cpu' % (classname, self._instance_num)
+        return '%s_%d_%s_cpu' % (classname, self._instance_num, base_str)
 
-    def get_gpu_lr_blob_name(self, gpu_id):
+    def get_gpu_blob_name(self, base_str, gpu_id):
         classname = self.__class__.__name__
-        return '%s_%d_lr_gpu%d' % (classname, self._instance_num, gpu_id)
+        return '%s_%d_%s_gpu%d' % (
+            classname, self._instance_num, base_str, gpu_id
+        )
 
-    def get_lr_blob_name(self):
-        """Returns an LR blob name.
-        The name will be unique to the current device and optimizer instance.
+    def make_unique_blob_name(self, base_str):
+        """
+        Returns a blob name that will be unique to the current device
+        and optimizer instance.
         """
         current_scope = scope.CurrentDeviceScope()
         if current_scope is None:
-            return self.get_cpu_lr_blob_name()
+            return self.get_cpu_blob_name(base_str)
 
         if current_scope.device_type == caffe2_pb2.CUDA:
-            return self.get_gpu_lr_blob_name(current_scope.cuda_gpu_id)
+            return self.get_gpu_blob_name(base_str, current_scope.cuda_gpu_id)
         else:
-            return self.get_cpu_lr_blob_name()
+            return self.get_cpu_blob_name(base_str)
 
     def build_lr(self, net, param_init_net, base_learning_rate,
                  learning_rate_blob=None, policy="fixed",
                  iter_val=0, **kwargs):
         if learning_rate_blob is None:
-            learning_rate_blob = self.get_lr_blob_name()
+            learning_rate_blob = self.make_unique_blob_name('lr')
         if not param_init_net.BlobIsDefined(_OPTIMIZER_ITERATION_NAME):
             # Add training operators.
             with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU)):
@@ -98,7 +102,22 @@ class Optimizer(object):
             )
         else:
             lr = net.GetBlobRef(learning_rate_blob)
+
+        if self._norm_ratio is not None:
+            norm_ratio = net.CopyFromCPUInput(
+                self._norm_ratio, self.make_unique_blob_name('norm_ratio')
+            )
+            scaled_lr = net.Mul(
+                [lr, norm_ratio],
+                self.make_unique_blob_name('scaled_lr'),
+                broadcast=1,
+            )
+
+            return scaled_lr, iteration
         return lr, iteration
+
+    def add_norm_ratio(self, norm_ratio):
+        self._norm_ratio = norm_ratio
 
     @staticmethod
     def dedup(net, sparse_dedup_aggregator, grad):
@@ -503,17 +522,86 @@ def get_param_device(param_name, grad, param_to_device=None, default_device=None
     return device
 
 
-def _build(model, optimizer, weights_only=False, use_param_info_optim=True):
+def _calc_norm_ratio(model, params, name_scope, param_to_device, max_gradient_norm):
+    with core.NameScope(name_scope):
+        grad_squared_sums = []
+        for i, param in enumerate(params):
+            device = get_param_device(str(param.blob), param.grad, param_to_device)
+
+            with core.DeviceScope(device):
+                grad = (
+                    param.grad
+                    if not isinstance(
+                        param.grad,
+                        core.GradientSlice,
+                    ) else param.grad.values
+                )
+
+                grad_squared_sum_name = 'grad_{}_squared_sum'.format(i)
+                grad_squared_sum = model.net.SumSqrElements(
+                    grad,
+                    grad_squared_sum_name,
+                )
+                grad_squared_sum_cpu = model.net.EnsureCPUOutput(
+                    grad_squared_sum
+                )
+                grad_squared_sums.append(grad_squared_sum_cpu)
+
+        with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU)):
+            grad_squared_full_sum = model.net.Sum(
+                grad_squared_sums,
+                'grad_squared_full_sum',
+            )
+            global_norm = model.net.Pow(
+                grad_squared_full_sum,
+                'global_norm',
+                exponent=0.5,
+            )
+            clip_norm = model.param_init_net.ConstantFill(
+                [],
+                'clip_norm',
+                shape=[],
+                value=float(max_gradient_norm),
+            )
+            max_norm = model.net.Max(
+                [global_norm, clip_norm],
+                'max_norm',
+            )
+            norm_ratio = model.net.Div(
+                [clip_norm, max_norm],
+                'norm_ratio',
+            )
+            return norm_ratio
+
+
+def _build(
+    model,
+    optimizer,
+    weights_only=False,
+    use_param_info_optim=True,
+    max_gradient_norm=None,
+):
     param_to_device = _get_param_to_device(model)
 
     # Validate there are no duplicate params
     model.Validate()
 
-    # Call optimizer for each param
+    params = []
     for param_info in model.GetOptimizationParamInfo():
-        if weights_only:
-            if param_info.blob not in model.weights:
-                continue
+        if weights_only and param_info.blob not in model.weights:
+            continue
+        params.append(param_info)
+
+    if max_gradient_norm is not None:
+        norm_ratio = _calc_norm_ratio(
+            model, params,
+            'norm_clipped_grad_update',
+            param_to_device,
+            max_gradient_norm,
+        )
+        optimizer.add_norm_ratio(norm_ratio)
+
+    for param_info in params:
         param_name = str(param_info.blob)
 
         device = get_param_device(param_name, param_info.grad, param_to_device)
@@ -542,16 +630,20 @@ def add_weight_decay(model, weight_decay):
     )
 
 
-def build_sgd(model, base_learning_rate, **kwargs):
+def build_sgd(model, base_learning_rate, max_gradient_norm=None, **kwargs):
     sgd_optimizer = SgdOptimizer(base_learning_rate, **kwargs)
-    return _build(model, sgd_optimizer)
+    return _build(model, sgd_optimizer, max_gradient_norm=max_gradient_norm)
 
 
-def build_multi_precision_sgd(model, base_learning_rate, **kwargs):
+def build_multi_precision_sgd(
+    model, base_learning_rate, max_gradient_norm=None, **kwargs
+):
     multi_prec_sgd_optimizer = MultiPrecisionSgdOptimizer(
         base_learning_rate, **kwargs
     )
-    return _build(model, multi_prec_sgd_optimizer)
+    return _build(
+        model, multi_prec_sgd_optimizer, max_gradient_norm=max_gradient_norm
+    )
 
 
 def build_ftrl(model, engine="SIMD", **kwargs):
@@ -562,11 +654,17 @@ def build_ftrl(model, engine="SIMD", **kwargs):
     return _build(model, ftrl_optimizer)
 
 
-def build_adagrad(model, base_learning_rate, parameters=None, **kwargs):
+def build_adagrad(
+    model,
+    base_learning_rate,
+    parameters=None,
+    max_gradient_norm=None,
+    **kwargs
+):
     adagrad_optimizer = AdagradOptimizer(alpha=base_learning_rate, **kwargs)
-    return _build(model, adagrad_optimizer)
+    return _build(model, adagrad_optimizer, max_gradient_norm=max_gradient_norm)
 
 
-def build_adam(model, base_learning_rate, **kwargs):
+def build_adam(model, base_learning_rate, max_gradient_norm=None, **kwargs):
     adam_optimizer = AdamOptimizer(alpha=base_learning_rate, **kwargs)
-    return _build(model, adam_optimizer)
+    return _build(model, adam_optimizer, max_gradient_norm=max_gradient_norm)

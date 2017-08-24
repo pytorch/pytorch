@@ -5,7 +5,9 @@ from caffe2.python.optimizer import (
     build_sgd, build_multi_precision_sgd, build_ftrl,
     build_adagrad, build_adam, add_weight_decay, SgdOptimizer)
 from caffe2.python.optimizer_context import UseOptimizer
-from caffe2.python.optimizer_test_util import OptimizerTestBase
+from caffe2.python.optimizer_test_util import (
+    OptimizerTestBase, GradientClippingTestBase
+)
 from caffe2.python.test_util import TestCase
 from caffe2.python import workspace
 from caffe2.python.core import DataType
@@ -13,10 +15,10 @@ import numpy as np
 import unittest
 
 
-class TestSgd(OptimizerTestBase, TestCase):
-    def build_optimizer(self, model):
+class TestSgd(OptimizerTestBase, GradientClippingTestBase, TestCase):
+    def build_optimizer(self, model, **kwargs):
         self._skip_gpu = False
-        return build_sgd(model, base_learning_rate=0.1)
+        return build_sgd(model, base_learning_rate=0.1, **kwargs)
 
     def check_optimizer(self, optimizer):
         self.assertTrue(optimizer.get_auxiliary_parameters().shared)
@@ -26,10 +28,14 @@ class TestSgd(OptimizerTestBase, TestCase):
             np.testing.assert_allclose(np.array([1.0]), tensor, atol=1e-5)
 
 
-class TestMultiPrecisionSgd(OptimizerTestBase, TestCase):
-    def build_optimizer(self, model):
+class TestMultiPrecisionSgd(
+    OptimizerTestBase, GradientClippingTestBase, TestCase
+):
+    def build_optimizer(self, model, **kwargs):
         self._skip_gpu = False
-        return build_multi_precision_sgd(model, base_learning_rate=0.1)
+        return build_multi_precision_sgd(
+            model, base_learning_rate=0.1, **kwargs
+        )
 
     def check_optimizer(self, optimizer):
         self.assertTrue(optimizer.get_auxiliary_parameters().shared)
@@ -44,10 +50,17 @@ class TestMultiPrecisionSgd(OptimizerTestBase, TestCase):
 
 
 class TestFtrl(OptimizerTestBase, TestCase):
-    def build_optimizer(self, model):
+    def build_optimizer(self, model, **kwargs):
         self._skip_gpu = True
         return build_ftrl(
-            model, engine=None, alpha=1.0, beta=0.1, lambda1=0.0, lambda2=0.0)
+            model,
+            engine=None,
+            alpha=1.0,
+            beta=0.1,
+            lambda1=0.0,
+            lambda2=0.0,
+            **kwargs
+        )
 
     def check_optimizer(self, optimizer):
         self.assertFalse(optimizer.get_auxiliary_parameters().shared)
@@ -56,10 +69,10 @@ class TestFtrl(OptimizerTestBase, TestCase):
             workspace.FetchBlob(param)
 
 
-class TestAdagrad(OptimizerTestBase, TestCase):
-    def build_optimizer(self, model):
+class TestAdagrad(OptimizerTestBase, GradientClippingTestBase, TestCase):
+    def build_optimizer(self, model, **kwargs):
         self._skip_gpu = False
-        return build_adagrad(model, base_learning_rate=1.0)
+        return build_adagrad(model, base_learning_rate=1.0, **kwargs)
 
     def check_optimizer(self, optimizer):
         self.assertFalse(optimizer.get_auxiliary_parameters().shared)
@@ -68,10 +81,10 @@ class TestAdagrad(OptimizerTestBase, TestCase):
             workspace.FetchBlob(param)
 
 
-class TestAdam(OptimizerTestBase, TestCase):
-    def build_optimizer(self, model):
+class TestAdam(OptimizerTestBase, GradientClippingTestBase, TestCase):
+    def build_optimizer(self, model, **kwargs):
         self._skip_gpu = False
-        return build_adam(model, base_learning_rate=0.1)
+        return build_adam(model, base_learning_rate=0.1, **kwargs)
 
     def check_optimizer(self, optimizer):
         self.assertTrue(optimizer.get_auxiliary_parameters().shared)
@@ -122,7 +135,7 @@ class TestMultiOptimizers(TestCase):
         for op in model.net.Proto().op:
             if op.type == 'WeightedSum' and op.input[0] == 'fc1_w' or \
                     op.input[0] == 'fc1_b':
-                        fc1_lr_blobs.append(op.input[3])
+                fc1_lr_blobs.append(op.input[3])
         self.assertEqual(fc1_lr_blobs[0], fc1_lr_blobs[1])
 
         # Check different instance of the same optimizer has a different lr.
@@ -134,8 +147,8 @@ class TestMultiOptimizers(TestCase):
         for op in model.net.Proto().op:
             if op.type == 'WeightedSum' and op.input[0] == 'fc2_w' or \
                     op.input[0] == 'fc2_b':
-                        self.assertTrue(op.input[3] not in fc1_lr_blobs)
-                        fc2_lr_blobs.append(op.input[3])
+                self.assertTrue(op.input[3] not in fc1_lr_blobs)
+                fc2_lr_blobs.append(op.input[3])
         self.assertEqual(fc2_lr_blobs[0], fc2_lr_blobs[1])
 
         # Check different optimizer type case
@@ -147,9 +160,9 @@ class TestMultiOptimizers(TestCase):
         for op in model.net.Proto().op:
             if op.type == 'Adagrad' and op.input[0] == 'fc3_w' or \
                     op.input[0] == 'fc3_b':
-                        self.assertTrue(op.input[3] not in fc2_lr_blobs)
-                        self.assertTrue(op.input[3] not in fc1_lr_blobs)
-                        fc3_lr_blobs.append(op.input[3])
+                self.assertTrue(op.input[3] not in fc2_lr_blobs)
+                self.assertTrue(op.input[3] not in fc1_lr_blobs)
+                fc3_lr_blobs.append(op.input[3])
         self.assertEqual(fc3_lr_blobs[0], fc3_lr_blobs[1])
 
 

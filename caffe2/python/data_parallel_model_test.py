@@ -53,7 +53,9 @@ class DataParallelModelTest(TestCase):
             return [loss]
 
         def add_optimizer(model):
-            return optimizer.build_sgd(model, 0.1, policy="fixed")
+            return optimizer.build_sgd(
+                model, 0.1, policy="fixed", max_gradient_norm=5.0
+            )
 
         workspace.ResetWorkspace()
         model = cnn.CNNModelHelper(
