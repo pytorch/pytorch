@@ -20,7 +20,7 @@ class MaxPool1d(Function):
                           .i_("pad", padding)
                           .i_("dilation", dilation)
                           .i_("stride", stride))
-        return (n, g.create("Unused"))
+        return (n, None)
 
     @staticmethod
     def forward(ctx, input, kernel_size, stride=None, padding=0, dilation=1,
@@ -104,7 +104,7 @@ class MaxPool2d(Function):
                           .i_("pad", padding)
                           .i_("dilation", dilation)
                           .i_("stride", stride))
-        return (n, g.create("Unused"))
+        return (n, None)
 
     @staticmethod
     def forward(ctx, input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False):
@@ -407,7 +407,7 @@ class AvgPool2d(Function):
                           .i_("kernel", kernel_size)
                           .i_("stride", stride)
                           .i_("pad", padding))
-        return (n, g.create("Unused"))
+        return (n, None)
 
     @staticmethod
     def forward(ctx, input, kernel_size, stride=None, padding=0,

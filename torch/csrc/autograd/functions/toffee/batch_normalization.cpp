@@ -23,9 +23,9 @@ jit::node_list BatchNormForward::primspec(PrimSpecContext* ctx, jit::node_list i
   inplace_outputs.push_back(-1);
 
   if(this->training) {
-    g->appendNode(g->createSelect(bn, 1));
+    g->appendNode(g->createSelect(bn, 1)->setType(bn->inputs().at(3)->type()));
     inplace_outputs.push_back(3);
-    g->appendNode(g->createSelect(bn, 2));
+    g->appendNode(g->createSelect(bn, 2)->setType(bn->inputs().at(4)->type()));
     inplace_outputs.push_back(4);
     // dummy output
     for(int i = 3; i < 5; i++) {
@@ -35,7 +35,7 @@ jit::node_list BatchNormForward::primspec(PrimSpecContext* ctx, jit::node_list i
   }
   bn->is_(jit::kInPlaceOutputs,std::move(inplace_outputs));
   ctx->batch_norm_count++;
-  return {orig_output,  g->create(jit::kUnused)};
+  return {orig_output};
 }
 
 

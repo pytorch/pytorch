@@ -31,7 +31,6 @@ _(Subgraph) \
 _(SpatialBN) \
 _(Conv) \
 _(ConvTranspose) \
-_(Unused) \
 _(is_test) \
 _(epsilon) \
 _(order) \

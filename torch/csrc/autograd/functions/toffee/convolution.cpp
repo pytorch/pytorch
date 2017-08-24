@@ -60,7 +60,7 @@ jit::node_list ConvForward::primspec(PrimSpecContext* ctx, jit::node_list inputs
     JIT_ASSERT(1 == all_equal<int>(dilation,"dialations"));
   }
   // ignore benchmark/cudnn_enabled
-  return {n, g->create(jit::kUnused) };
+  return {n};
 }
 
 }}

@@ -28,36 +28,52 @@ std::string node_name(Node* n) {
 // Eventually this should just be part of init_pass but we should avoid
 // tight coupling of the JIT and Toffee IR exporter until ready.
 std::shared_ptr<Graph> ToToffeeIR(std::shared_ptr<Graph>& g,
-                                  const std::unordered_map<void*, Node*>& buffer_map) {
+                                  const std::unordered_map<void*, Node*>& old_buffer_map) {
   torch::autograd::PrimSpecContext ctx;
   std::unordered_map<Node*, Node*> env;
   std::shared_ptr<Graph> out_graph = std::make_shared<Graph>();
   ctx.graph = out_graph.get();
-  ctx.buffer_map = &buffer_map;
   for (auto input : g->inputs())
     env[input] = ctx.graph->addInput()->setType(input->typeOption());
   auto envFn = [&env](Node * n) {
-    return env.at(n);
+    auto it = env.find(n);
+    JIT_ASSERTM(it != env.end(), "Dangling node reference");
+    return it->second;
   };
+  std::unordered_map<void*, Node*> buffer_map;
+  for (auto kv : old_buffer_map) {
+    buffer_map[kv.first] = envFn(kv.second);
+  }
+  ctx.buffer_map = &buffer_map;
   // put the new outputs in our environment map, and
   // copy the type from the input graph if they were not set by the
   // primspec
-  auto setOutputs = [&](Node * node, const std::vector<Node*> & outputs) {
+  auto setOutputs = [&](Node * node, const node_list & outputs) {
     auto old_outputs = node->outputs();
     JIT_ASSERTM(outputs.size() <= old_outputs.size(), "primspec produced too many outputs");
     size_t i = 0;
     for(auto & old : old_outputs) {
+      // TODO: what if there are multiple trailing handle outputs?  That is
+      // a serious invariant violation...
       if(i >= outputs.size()) {
         // primspecs do not deal with Handles at the moment
         // so we map handles to Unused nodes
         auto typ = old->typeOption();
         JIT_ASSERTM(typ && typ->kind() == jit::TypeKind::HandleType,
           "primspec produced too few outputs");
-        env[old] = ctx.graph->create(jit::kUnused);
+        if (!old->uses().empty()) {
+          throw std::runtime_error("In Toffee export, handles should be unused");
+        }
       } else {
-        if(!outputs[i]->hasType()) {
-          outputs[i]->setType(old->typeOption());
-          env[old] = outputs[i];
+        if (outputs[i]) {
+          if (!outputs[i]->hasType()) {
+            outputs[i]->setType(old->typeOption());
+            env[old] = outputs[i];
+          }
+        } else {
+          if (!old->uses().empty()) {
+            throw std::runtime_error("In Toffee export, non-exported PyTorch return not supported " + std::to_string(i));
+          }
         }
       }
       i++;
@@ -65,12 +81,15 @@ std::shared_ptr<Graph> ToToffeeIR(std::shared_ptr<Graph>& g,
   };
   for (auto node : g->nodes()) {
     IR_IF(node, Select)
-      //selects are translated by multi-return nodes.
-      JIT_ASSERT(env.count(value) > 0);
+      // Selects are translated by multi-return nodes.
+      if (!node->uses().empty()) {
+        // Select nodes with NO uses are omitted from env
+        JIT_ASSERT(env.count(value) > 0);
+      }
     IR_ELSEIFM(CppOp)
       if (auto fn = std::dynamic_pointer_cast<autograd::HasPrimSpec>(value->fn)) {
         auto outputs = fn->primspec(&ctx, fmap<Node*,Node*>(node->inputs(),envFn));
-        setOutputs(node,outputs);
+        setOutputs(node, outputs);
       } else {
         throw std::runtime_error("CppOp doesn't define primspec " + value->name());
       }
@@ -110,22 +129,24 @@ std::shared_ptr<Graph> ToToffeeIR(std::shared_ptr<Graph>& g,
         throw python_error();
       if(raw_output.ptr() == Py_None)
         throw std::runtime_error("PythonOp's primspec returned None, indicating conversion not supported " + value->name());
-      std::vector<Node*> outputs;
+      node_list outputs;
       if(py::isinstance<Node>(raw_output)) {
         outputs.push_back(py::cast<Node*>(raw_output));
       } else {
         outputs = py::cast<std::vector<Node*>>(raw_output);
       }
-      setOutputs(node,outputs);
+      setOutputs(node, outputs);
     IR_ELSE()
       if(node->kind() == kConstant && node->t(kValue).defined()) {
         throw std::runtime_error("Constant not supported yet");
       }
       auto n_ = ctx.graph->createClone(node, envFn);
+      ctx.graph->appendNode(n_); // will be ignored by ToffeeIR
       if(node->hasMultipleOutputs()) {
         int i = 0;
         for(auto s : node->uses()) {
           auto new_node = ctx.graph->createSelect(n_,i++);
+          ctx.graph->appendNode(new_node);
           new_node->setType(s.user->typeOption());
           env[s.user] = new_node;
         }
@@ -217,6 +238,11 @@ static void encodeGraph(toffee::GraphProto * p_g, std::shared_ptr<Graph> & g, co
       // of the select invariant
       continue;
     }
+    if (node->kind() == kConstant && !node->t(kValue).defined() && node->uses().empty()) {
+      // Undefined nodes never show up in ToffeeIR; they're just a tool
+      // to help primspecs do the right thing.
+      continue;
+    }
     auto p_n = p_g->add_node();
     for(auto input : node->inputs()) {
       p_n->add_input(node_name(input));
@@ -264,6 +290,7 @@ std::string ExportGraph(std::shared_ptr<Graph>& g_,
                         const std::unordered_map<void*, Node*>& buffer_map,
                         const std::vector<at::Tensor> & initializers) {
   auto g = ToToffeeIR(g_, buffer_map);
+  g->lint();
   toffee::GraphProto p_g;
   p_g.set_name("torch-jit-export");
   encodeGraph(&p_g, g, initializers);

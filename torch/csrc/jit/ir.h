@@ -801,6 +801,8 @@ public:
       delete n;
   }
 
+  friend std::ostream& operator<<(std::ostream & out, Graph & g);
+
 private:
 
   void freeNode(Node * n) {
