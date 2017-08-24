@@ -74,7 +74,7 @@ void checkError1D(const TensorCPU& t1, const TensorCPU& t2, float error) {
 
 // OpenGL: t1, CPU: t2
 void checkError(const TensorCPU& t1, const TensorCPU& t2, float error) {
-//  CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+  CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
 #if DEBUGGING
   gl_log(GL_LOG, "opengl_test output\n");
   gl_log(GL_LOG, "\nOpenGL output:\n");
@@ -1784,7 +1784,7 @@ void compareModelsForOpenGL(std::string name,
                             std::string input_order) {
 
   if (name == "styleTransfer") {
-    for (int i = 0; i < predictNet.mutable_op(0)->arg_size(); i++) {      
+    for (int i = 0; i < predictNet.mutable_op(0)->arg_size(); i++) {
       auto* arg = predictNet.mutable_op(0)->mutable_arg(i);
       if (arg->name() == "noise_std") {
         arg->set_f(0.000001);
