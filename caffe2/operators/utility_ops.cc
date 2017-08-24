@@ -123,23 +123,23 @@ OPERATOR_SCHEMA(LengthsToShape).NumInputs(1).NumOutputs(1);
 OPERATOR_SCHEMA(Flatten)
     .NumInputs(1)
     .NumOutputs(1)
-    .TensorInferenceFunction(
-        [](const OperatorDef&, const vector<TensorShape>& in) {
-          vector<TensorShape> out(1);
-          int total = 1;
-          std::size_t index = 0;
-          for (auto d : in[0].dims()) {
-            // skip the first element
-            if (index++ == 0) {
-              continue;
-            }
-            total *= d;
-          }
-          out[0].set_data_type(in[0].data_type());
-          out[0].add_dims(in[0].dims(0));
-          out[0].add_dims(total);
-          return out;
-        })
+    .TensorInferenceFunction([](const OperatorDef&,
+                                const vector<TensorShape>& in) {
+      vector<TensorShape> out(1);
+      int total = 1;
+      std::size_t index = 0;
+      for (auto d : in[0].dims()) {
+        // skip the first element
+        if (index++ == 0) {
+          continue;
+        }
+        total *= d;
+      }
+      out[0].set_data_type(in[0].data_type());
+      out[0].add_dims(in[0].dims(0));
+      out[0].add_dims(total);
+      return out;
+    })
     .SetDoc(R"DOC(
 Flattens the input tensor into a 2D matrix, keeping the first dimension
 unchanged.
@@ -478,7 +478,19 @@ Example:
 )DOC")
     .Input(0, "DATA", "Tensor of rank r >= 1.")
     .Input(1, "INDICES", "Tensor of int32/int64 indices, of any rank q.")
-    .Output(0, "OUTPUT", "Tensor of rank q + (r - 1).");
+    .Output(0, "OUTPUT", "Tensor of rank q + (r - 1).")
+    .TensorInferenceFunction([](const OperatorDef& def,
+                                const vector<TensorShape>& in) {
+      vector<TensorShape> out(1);
+      for (int i = 0; i < in[1].dims_size(); ++i) {
+        out[0].add_dims(in[1].dims(i));
+      }
+      for (int i = 1; i < in[0].dims_size(); ++i) {
+        out[0].add_dims(in[0].dims(i));
+      }
+      out[0].set_data_type(in[0].data_type());
+      return out;
+    });
 
 OPERATOR_SCHEMA(GatherRanges)
     .NumInputs(2)
