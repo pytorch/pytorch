@@ -89,7 +89,7 @@ std::shared_ptr<Graph> ToToffeeIR(std::shared_ptr<Graph>& g,
       JIT_ASSERT(env.count(value) > 0);
     IR_ELSEIFM(CppOp)
       if (auto fn = std::dynamic_pointer_cast<autograd::HasPrimSpec>(value->fn)) {
-        auto outputs = fn->primspec(&ctx, fmap<Node*,Node*>(node->inputs(),envFn));
+        auto outputs = fn->primspec(&ctx, fmap(node->inputs(), envFn));
         setOutputs(node, outputs);
       } else {
         throw std::runtime_error("CppOp doesn't define primspec " + value->name());

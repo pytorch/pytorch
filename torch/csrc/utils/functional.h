@@ -4,8 +4,8 @@
 
 namespace torch {
 
-template<typename R, typename T>
-static std::vector<R> fmap(const std::vector<T> & inputs, std::function<R(const T &)> fn) {
+template<typename F, typename T, typename R = typename std::result_of<F(T)>::type>
+static std::vector<R> fmap(const std::vector<T> & inputs, const F& fn) {
   std::vector<R> r;
   r.reserve(inputs.size());
   for(auto & input : inputs)
