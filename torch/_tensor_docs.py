@@ -1714,7 +1714,7 @@ Example:
 
 add_docstr_all('expand',
                """
-expand(tensor, sizes) -> Tensor
+expand(*sizes) -> Tensor
 
 Returns a new view of the tensor with singleton dimensions expanded
 to a larger size.
