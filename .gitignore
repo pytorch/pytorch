@@ -12,6 +12,11 @@ torch/lib/build
 torch/lib/tmp_install
 torch/lib/include
 torch/lib/torch_shm_manager
+torch/csrc/autograd/generated/python_variable_methods.cpp
+torch/csrc/autograd/generated/Functions.h
+torch/csrc/autograd/generated/Functions.cpp
+torch/csrc/autograd/generated/VariableType.h
+torch/csrc/autograd/generated/VariableType.cpp
 torch/csrc/cudnn/cuDNN.cpp
 torch/csrc/nn/THNN.cwrap
 torch/csrc/nn/THNN.cpp

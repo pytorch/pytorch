@@ -8,7 +8,7 @@
 namespace torch { namespace autograd {
 
 struct Variable;
-using variable_list = std::vector<std::shared_ptr<Variable>>;
+using variable_list = std::vector<Variable>;
 
 struct FunctionPreHook {
   virtual ~FunctionPreHook() {}

@@ -71,7 +71,7 @@ struct Eval : Function {
     auto relevant_outputs = filterRelevantOutputs(inputs, outputs);
     if (relevant_outputs.size() == 0)
       return nullptr;
-    return std::dynamic_pointer_cast<Eval>(relevant_outputs[0]->grad_fn);
+    return std::dynamic_pointer_cast<Eval>(relevant_outputs[0].grad_fn());
   }
 
   virtual std::shared_ptr<Eval> newEval() {

@@ -32,7 +32,7 @@ import distutils.sysconfig
 cfg_vars = distutils.sysconfig.get_config_vars()
 for key, value in cfg_vars.items():
     if type(value) == str:
-            cfg_vars[key] = value.replace("-Wstrict-prototypes", "")
+        cfg_vars[key] = value.replace("-Wstrict-prototypes", "")
 
 ################################################################################
 # Monkey-patch setuptools to compile in parallel
@@ -209,6 +209,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
         from tools.cwrap.plugins.AssertNDim import AssertNDim
         from tools.cwrap.plugins.Broadcast import Broadcast
         from tools.cwrap.plugins.ProcessorSpecificPlugin import ProcessorSpecificPlugin
+        from tools.autograd.gen_variable_type import gen_variable_type
         thp_plugin = THPPlugin()
         cwrap('torch/csrc/generic/TensorMethods.cwrap', plugins=[
             ProcessorSpecificPlugin(), BoolOption(), thp_plugin,
@@ -218,6 +219,14 @@ class build_ext(setuptools.command.build_ext.build_ext):
         cwrap('torch/csrc/cudnn/cuDNN.cwrap', plugins=[
             CuDNNPlugin(), NullableArguments()
         ])
+        # Build ATen based Variable classes
+        autograd_gen_dir = 'torch/csrc/autograd/generated'
+        if not os.path.exists(autograd_gen_dir):
+            os.mkdir(autograd_gen_dir)
+        gen_variable_type(
+            'torch/lib/build/ATen/ATen/Declarations.yaml',
+            autograd_gen_dir)
+
         # It's an old-style class in Python 2.7...
         setuptools.command.build_ext.build_ext.run(self)
 
@@ -359,6 +368,7 @@ main_sources = [
     "torch/csrc/autograd/engine.cpp",
     "torch/csrc/autograd/function.cpp",
     "torch/csrc/autograd/variable.cpp",
+    "torch/csrc/autograd/saved_variable.cpp",
     "torch/csrc/autograd/input_buffer.cpp",
     "torch/csrc/autograd/python_function.cpp",
     "torch/csrc/autograd/python_cpp_function.cpp",
@@ -366,6 +376,9 @@ main_sources = [
     "torch/csrc/autograd/python_engine.cpp",
     "torch/csrc/autograd/python_hook.cpp",
     "torch/csrc/autograd/functions/jit_closure.cpp",
+    "torch/csrc/autograd/generated/VariableType.cpp",
+    "torch/csrc/autograd/generated/Functions.cpp",
+    "torch/csrc/autograd/generated/python_variable_methods.cpp",
     "torch/csrc/autograd/functions/batch_normalization.cpp",
     "torch/csrc/autograd/functions/convolution.cpp",
     "torch/csrc/autograd/functions/basic_ops.cpp",

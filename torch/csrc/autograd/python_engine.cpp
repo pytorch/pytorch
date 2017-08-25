@@ -10,6 +10,7 @@
 #include <unordered_set>
 
 using namespace torch::autograd;
+using at::Tensor;
 
 struct THPEngine {
     PyObject_HEAD
@@ -173,7 +174,7 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
 
     PyObject *grad = PyTuple_GET_ITEM(grad_variables, i);
     if (THPVariable_Check(grad)) {
-      grads[i] = ((THPVariable*)grad)->cdata;
+      grads[i] = Variable(((THPVariable*)grad)->cdata, true);
     } else {
       THPUtils_assert(grad == Py_None,
           "element %d of gradients tuple is not a Variable or None", i);
@@ -201,9 +202,11 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
       if (is_leaf) {
           grad_fn = input_var->cdata->grad_accumulator.lock();
       }
-      THPUtils_assert(grad_fn, "One of the differentiated Variables appears to not have "
-          "been used in the graph");
-      THPUtils_assert(grad_fn->is_executable, "One of the differentiated Variables does "
+      if (input_var->cdata->requires_grad) {
+        THPUtils_assert(grad_fn, "One of the differentiated Variables appears to not have "
+            "been used in the graph");
+      }
+      THPUtils_assert(grad_fn && grad_fn->is_executable, "One of the differentiated Variables does "
           "not require grad");
       auto& fn_info = ctx.output_map[grad_fn];
       fn_info.first.emplace_back(output_nr, i);

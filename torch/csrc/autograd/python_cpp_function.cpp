@@ -35,7 +35,7 @@ PyObject* THPCppFunction_call(PyObject* self, PyObject* args, PyObject *kwargs)
     if (!THPVariable_Check(arg)) {
       return PyErr_Format(PyExc_TypeError, "argument %d is not a Variable", i);
     }
-    vars[i] = ((THPVariable*)arg)->cdata;
+    vars[i] = Variable(((THPVariable*)arg)->cdata, true);
   }
 
   variable_list output;

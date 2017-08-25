@@ -7,6 +7,7 @@
 // and their derivatives). Some functions may be used as both.
 
 #include <Python.h>
+#include "torch/csrc/autograd/saved_variable.h"
 #include "torch/csrc/utils/auto_unique_ptr.h"
 #include "torch/csrc/autograd/function_hook.h"
 #include "torch/csrc/jit/tracer.h"
@@ -22,7 +23,7 @@ struct Function;
 struct Variable;
 
 using tensor_list = std::vector<at::Tensor>;
-using variable_list = std::vector<std::shared_ptr<Variable>>;
+using variable_list = std::vector<Variable>;
 using edge_type = std::pair<std::shared_ptr<Function>, int>;
 using function_list = std::vector<edge_type>;
 using saved_variable_list = std::vector<SavedVariable>;
@@ -178,12 +179,12 @@ struct apply_fn {
   apply_fn(Args&& ...args)
     : fn_(std::make_shared<T>(std::forward<Args>(args)...)) {}
 
-  std::shared_ptr<Variable> operator()(const variable_list& inputs) {
+  Variable operator()(const variable_list& inputs) {
     return (*fn_)(inputs)[0];
   }
 
   template<typename... Args>
-  std::shared_ptr<Variable> operator()(Args&& ...inputs) {
+  Variable operator()(Args&& ...inputs) {
     return (*fn_)(variable_list{inputs...})[0];
   }
 

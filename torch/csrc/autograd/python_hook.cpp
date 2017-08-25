@@ -10,6 +10,7 @@
 #include "torch/csrc/Exceptions.h"
 
 using torch::autograd::variable_list;
+using torch::autograd::Variable;
 
 static PyObject* wrap_variables(const variable_list& c_variables);
 static variable_list unwrap_variables(PyObject* py_variables);
@@ -50,7 +51,7 @@ auto PyFunctionPreHook::operator()(const variable_list& values) -> variable_list
   }
 
   variable_list results(values);
-  results[value_idx] = ((THPVariable*)value.get())->cdata;
+  results[value_idx] = Variable(((THPVariable*)value.get())->cdata, true);
   return results;
 }
 
@@ -109,7 +110,7 @@ static variable_list unwrap_variables(PyObject* py_variables)  {
     if (item == Py_None) {
       continue;
     } else if (THPVariable_Check(item)) {
-      results[i] = ((THPVariable*)item)->cdata;
+      results[i] = Variable(((THPVariable*)item)->cdata, true);
     } else {
       // this should never happen, but just in case...
       std::stringstream ss;

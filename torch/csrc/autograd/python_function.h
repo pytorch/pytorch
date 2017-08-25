@@ -8,6 +8,7 @@
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/autograd/saved_variable.h"
 #include "torch/csrc/utils/object_ptr.h"
 
 // (class, gpu id, sizes)
