@@ -199,7 +199,7 @@ elseif (${CUDA_VERSION} LESS 9.0) # CUDA 8.x
   list(APPEND CUDA_NVCC_FLAGS "-Wno-deprecated-gpu-targets")
 endif()
 
-include_directories(SYSTEM ${CUDA_INCLUDE_DIRS})
+caffe2_include_directories(${CUDA_INCLUDE_DIRS})
 list(APPEND Caffe2_DEPENDENCY_LIBS ${CUDA_CUDART_LIBRARY}
                               ${CUDA_curand_LIBRARY} ${CUDA_CUBLAS_LIBRARIES})
 

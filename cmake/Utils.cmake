@@ -445,3 +445,27 @@ function(caffe2_binary_target target_name_or_src)
   target_link_libraries(${__target} ${Caffe2_MAIN_LIBS} ${Caffe2_DEPENDENCY_LIBS})
   install(TARGETS ${__target} DESTINATION bin)
 endfunction()
+
+##############################################################################
+# Helper function to add paths to system include directories.
+#
+# Anaconda distributions typically contain a lot of packages and some
+# of those can conflict with headers/libraries that must be sourced
+# from elsewhere. This helper ensures that Anaconda paths are always
+# added AFTER other include paths, such that it does not accidentally
+# takes precedence when it shouldn't.
+#
+# This is just a heuristic and does not have any guarantees. We can
+# add other corner cases here (as long as they are generic enough).
+# A complete include path cross checker is a final resort if this
+# hacky approach proves insufficient.
+#
+function(caffe2_include_directories)
+  foreach(path IN LISTS ARGN)
+    if (${path} MATCHES "/anaconda")
+      include_directories(AFTER SYSTEM ${path})
+    else()
+      include_directories(BEFORE SYSTEM ${path})
+    endif()
+  endforeach()
+endfunction()
