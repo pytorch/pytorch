@@ -37,7 +37,7 @@ struct Engine {
 
   // Given a list of (Function, input number) pairs computes the value of the graph
   // by following next_function references.
-  void execute(
+  virtual void execute(
       const function_list& roots,
       const variable_list& inputs,
       bool keep_graph,
