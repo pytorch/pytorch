@@ -37,9 +37,6 @@ initializer {
   dims: 2
   dims: 2
   data_type: FLOAT
-  float_data: 1
-  float_data: 2
-  float_data: 3
-  float_data: 4
   name: "1"
+  raw_data: "\000\000\200?\000\000\000@\000\000@@\000\000\200@"
 }
