@@ -10,7 +10,7 @@ typedef struct {
   size_t stride[4];
 } FeatureLPPoolingSizes;
 
-inline size_t flpGetOffset(FeatureLPPoolingSizes* s,
+static inline size_t flpGetOffset(FeatureLPPoolingSizes* s,
                            size_t batch,
                            size_t feature,
                            size_t opt1,
@@ -21,7 +21,7 @@ inline size_t flpGetOffset(FeatureLPPoolingSizes* s,
     s->stride[3] * opt2;
 }
 
-inline size_t flpOutputSize(size_t inputSize,
+static inline size_t flpOutputSize(size_t inputSize,
                             size_t width,
                             size_t stride) {
   return ((inputSize - width) / stride) + 1;
