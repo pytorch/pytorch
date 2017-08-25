@@ -3,6 +3,9 @@
 #include <set>
 #include <unordered_set>
 
+#include "caffe2/utils/proto_utils.h"
+#include "google/protobuf/text_format.h"
+
 namespace caffe2 {
 namespace memonger {
 
@@ -230,9 +233,28 @@ class ComputeBlobRecyclingForDag {
       }
     }
 
+    NetDef optimized_net = apply_assignments(net);
+    LOG(INFO) << "Remapping " << mapping_.size() << " using "
+              << mapped_blobs_set.size() << " shared blobs.";
+    if (floats_saved_ > 0) {
+      LOG(INFO) << "Memonger saved approximately : "
+                << (floats_saved_ * 4.0 / 1024.0 / 1024.0) << " MB.";
+    }
+
+    return optimized_net;
+  }
+
+ private:
+  NetDef apply_assignments(const NetDef& net) {
     NetDef optimized_net = net;
     // Rename optimized_net blobs.
     for (int i = 0; i < optimized_net.op_size(); ++i) {
+      // Special handling for RNNs, which have internal nets that
+      // can refer to memongered blobs
+      if (optimized_net.op(i).type().find("RecurrentNetwork") == 0) {
+        apply_recurrent_blob_assignments(optimized_net.mutable_op(i));
+      }
+
       for (int j = 0; j < optimized_net.op(i).input_size(); ++j) {
         const string& input_name =
             get_blob_or_mapped_blob(optimized_net.op(i).input(j));
@@ -245,18 +267,41 @@ class ComputeBlobRecyclingForDag {
         optimized_net.mutable_op(i)->set_output(j, output_name);
       }
     }
-
-    LOG(INFO) << "Remapping " << mapping_.size() << " using "
-              << mapped_blobs_set.size() << " shared blobs.";
-    if (floats_saved_ > 0) {
-      LOG(INFO) << "Memonger saved approximately : "
-                << (floats_saved_ * 4.0 / 1024.0 / 1024.0) << " MB.";
-    }
-
     return optimized_net;
   }
 
- private:
+  void apply_recurrent_blob_assignments(OperatorDef* op) {
+    // Recursively map stepnets in RecurrentNetworks, and
+    // attach a mapping table
+    for (int i = 0; i < op->arg_size(); i++) {
+      Argument* arg = op->mutable_arg(i);
+      const string& name = arg->name();
+      if (name == "step_net" || name == "backward_step_net") {
+        NetDef step_net;
+        CAFFE_ENFORCE(
+            google::protobuf::TextFormat::ParseFromString(arg->s(), &step_net),
+            "Could not parse step net:",
+            name);
+        step_net = apply_assignments(step_net);
+        arg->set_s(ProtoDebugString(step_net));
+      }
+    }
+
+    // Store renamings
+    vector<string> inputs_outputs(op->input().begin(), op->input().end());
+    inputs_outputs.insert(
+        inputs_outputs.end(), op->output().begin(), op->output().end());
+
+    for (auto& b : inputs_outputs) {
+      string mapped = get_blob_or_mapped_blob(b);
+      if (b != mapped) {
+        Argument* map_arg = op->add_arg();
+        map_arg->set_name(b + ".rename");
+        map_arg->set_s(mapped);
+      }
+    }
+  }
+
   template <typename K, typename V>
   inline bool has_key(const std::unordered_map<K, V>& in_map, const K& key) {
     return in_map.find(key) != in_map.end();
