@@ -106,6 +106,27 @@ def logsoftmax_double_backwards(ctx, ggI):
     return gI, ggO, None, None, None, None
 
 
+def reflectionpad2d_double_backwards(ctx, ggI):
+    gI = None
+    ggO = torch.nn._functions.thnn.auto.ReflectionPad2d.apply(ggI, *ctx.additional_args)
+
+    return gI, ggO, None, None, None, None
+
+
+def replicationpad2d_double_backwards(ctx, ggI):
+    gI = None
+    ggO = torch.nn._functions.thnn.auto.ReplicationPad2d.apply(ggI, *ctx.additional_args)
+
+    return gI, ggO, None, None, None, None
+
+
+def replicationpad3d_double_backwards(ctx, ggI):
+    gI = None
+    ggO = torch.nn._functions.thnn.auto.ReplicationPad3d.apply(ggI, *ctx.additional_args)
+
+    return gI, ggO, None, None, None, None
+
+
 def softmax_double_backwards(ctx, ggI):
     t = ctx.saved_variables
     gO, output = t[1], t[2]
@@ -275,6 +296,9 @@ double_backwards_fns = {
     'LeakyReLU': leakyrelu_double_backwards,
     'LogSigmoid': logsigmoid_double_backwards,
     'LogSoftmax': logsoftmax_double_backwards,
+    'ReflectionPad2d': reflectionpad2d_double_backwards,
+    'ReplicationPad2d': replicationpad2d_double_backwards,
+    'ReplicationPad3d': replicationpad3d_double_backwards,
     'Softmax': softmax_double_backwards,
     'Softplus': softplus_double_backwards,
     'Softshrink': softshrink_double_backwards,

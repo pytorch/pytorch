@@ -3640,13 +3640,11 @@ new_module_tests = [
         module_name='ReflectionPad2d',
         constructor_args=((1, 2, 3, 4),),
         input_size=(2, 3, 8, 8),
-        check_gradgrad=False,
     ),
     dict(
         module_name='ReplicationPad2d',
         constructor_args=((1, 2, 3, 4),),
         input_size=(2, 3, 4, 4),
-        check_gradgrad=False,
     ),
     dict(
         module_name='ZeroPad2d',
@@ -3758,7 +3756,6 @@ new_module_tests = [
         module_name='ReplicationPad3d',
         constructor_args=((1, 2, 3, 4, 5, 6),),
         input_size=(2, 3, 5, 5, 5),
-        check_gradgrad=False,
     ),
     dict(
         module_name='Embedding',
@@ -3780,7 +3777,6 @@ new_module_tests = [
         input_size=(1, 3, 5, 5),
         fullname='FractionalMaxPool2d_ratio',
         test_cuda=False,
-        check_gradgrad=False,
     ),
     dict(
         constructor=lambda: nn.FractionalMaxPool2d((2, 2), output_size=(
@@ -3788,7 +3784,6 @@ new_module_tests = [
         input_size=(1, 3, 7, 7),
         fullname='FractionalMaxPool2d_size',
         test_cuda=False,
-        check_gradgrad=False,
     ),
     dict(
         module_name='PixelShuffle',
@@ -3903,21 +3898,18 @@ new_module_tests = [
         module_name='AdaptiveAvgPool1d',
         constructor_args=(3,),
         input=torch.rand(1, 3, 5),
-        check_gradgrad=False,
     ),
     dict(
         module_name='AdaptiveAvgPool2d',
         constructor_args=(3,),
         input=torch.rand(1, 3, 5, 6),
         desc='single',
-        check_gradgrad=False,
     ),
     dict(
         module_name='AdaptiveAvgPool2d',
         constructor_args=((3, 4),),
         input=torch.rand(1, 3, 5, 6),
         desc='tuple',
-        check_gradgrad=False,
     ),
     dict(
         module_name='SELU',
@@ -3997,15 +3989,13 @@ add_test(NewModuleTest(
         nn.MaxPool1d(2, return_indices=True),
         nn.MaxUnpool1d(2)),
     input_size=(1, 1, 4),
-    fullname='MaxUnpool1d_net',
-    check_gradgrad=False,))
+    fullname='MaxUnpool1d_net',))
 add_test(NewModuleTest(
     constructor=lambda: UnpoolingNet(
         nn.MaxPool2d(2, return_indices=True),
         nn.MaxUnpool2d(2)),
     input_size=(1, 1, 2, 4),
-    fullname='MaxUnpool2d_net',
-    check_gradgrad=False,))
+    fullname='MaxUnpool2d_net',))
 add_test(NewModuleTest(
     constructor=lambda: UnpoolingNet(
         nn.MaxPool3d(2, return_indices=True),

@@ -705,8 +705,9 @@ class FractionalMaxPool2d(Module):
             output_size = self.outh, self.outw
         else:
             output_ratio = self.rh, self.rw
-        return self._backend.FractionalMaxPool2d.apply(input, self.kw, self.kh, output_size, output_ratio,
-                                                       self.return_indices, self._random_samples)
+        ret = self._backend.FractionalMaxPool2d.apply(input, self.kw, self.kh, output_size, output_ratio,
+                                                      self._random_samples)
+        return ret if self.return_indices else ret[0]
 
 
 class LPPool2d(Module):
