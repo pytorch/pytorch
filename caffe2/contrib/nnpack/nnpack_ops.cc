@@ -1,6 +1,9 @@
+#include "caffe2/core/common.h"
+
 #ifdef CAFFE2_USE_MKL
 #include <mkl.h>
 #endif
+
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"

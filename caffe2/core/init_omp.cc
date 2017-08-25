@@ -1,5 +1,7 @@
 #include <stdlib.h>
 
+#include "caffe2/core/common.h"
+
 #ifdef _OPENMP
 #include "caffe2/core/common_omp.h"
 #endif  // _OPENMP

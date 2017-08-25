@@ -1,5 +1,8 @@
 #ifndef CAFFE2_UTILS_MKL_UTILS_H_
 #define CAFFE2_UTILS_MKL_UTILS_H_
+
+#include "caffe2/core/macros.h"  // For caffe2 macros.
+
 #ifdef CAFFE2_USE_MKL
 
 #include "caffe2/mkl/utils/mkl_version_check.h"
