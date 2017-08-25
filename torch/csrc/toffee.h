@@ -153,7 +153,7 @@ public:
   void add_dims(int64_t d) { dims.emplace_back(new int64_t(d)); }
   void add_tensor(const at::Tensor& t) {
     if (t.type().scalarType() == at::kFloat) {
-      proto.float_data = tensor(&tensor_data, t);
+      proto.raw_data = tensor(&tensor_data, t);
     } else {
       JIT_ASSERTM(0, "non-float tensors not supported yet");
     }

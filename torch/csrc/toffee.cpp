@@ -30,14 +30,9 @@ bool micropb_callback_tensor(pb_ostream_t *stream, const pb_field_t *field, void
   JIT_ASSERT(t->is_contiguous());
   // TODO: Generalize beyond float
   // Packed array format!
-  pb_encode_tag(stream, PB_WT_STRING, toffee_TensorProto_float_data_tag);
-  static_assert(sizeof(float) == 4, "float is not four bytes");
-  pb_encode_varint(stream, sizeof(float) * t->numel()); // number of bytes to write
-  // TODO: If you have a better way of doing this, I'm all ears.
-  float *addr = t->data<float>();
-  for (float *p = addr; p < addr + t->numel(); p++) {
-    if (!pb_encode_fixed32(stream, static_cast<void*>(p))) return false;
-  }
+  pb_encode_tag_for_field(stream, field);
+  pb_encode_string(stream, (pb_byte_t*)(t->data_ptr()),  sizeof(float)*t->numel());
+
   return true;
 }
 
