@@ -1702,10 +1702,6 @@ class TestNN(NNTestCase):
 
     def _test_Conv2d_naive_groups(self, test_type=torch.FloatTensor):
         # Check that grouped convolutions matches two half convolutions
-        if(test_type == torch.cuda.FloatTensor):
-            print("worked")
-        else:
-            print("worked2")
         m = nn.Conv2d(4, 4, kernel_size=3, groups=2).type(test_type)
         i = Variable(torch.randn(2, 4, 6, 6).type(test_type), requires_grad=True)
         output = m(i)
