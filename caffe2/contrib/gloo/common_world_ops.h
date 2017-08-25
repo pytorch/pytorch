@@ -129,5 +129,27 @@ class CreateCommonWorld final : public Operator<Context> {
   OUTPUT_TAGS(COMM);
 };
 
+class DestroyCommonWorld final : public Operator<CPUContext> {
+ public:
+  DestroyCommonWorld(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CPUContext>(operator_def, ws) {
+    cw_name_ = operator_def.input(0);
+  }
+
+  bool RunOnDevice() override {
+    const auto& context =
+        OperatorBase::Input<std::shared_ptr<::gloo::Context>>(0);
+
+    if (context) {
+      LOG(INFO) << "Closing connections: " << cw_name_;
+      context->closeConnections();
+    }
+    return true;
+  }
+
+ private:
+  std::string cw_name_;
+};
+
 } // namespace gloo
 } // namespace caffe2

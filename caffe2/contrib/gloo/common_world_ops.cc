@@ -28,6 +28,8 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
     GLOO,
     CreateCommonWorld<CPUContext>);
 
+REGISTER_CPU_OPERATOR_WITH_ENGINE(DestroyCommonWorld, GLOO, DestroyCommonWorld);
+
 } // namespace
 } // namespace gloo
 } // namespace caffe2

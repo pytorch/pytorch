@@ -391,7 +391,7 @@ class TestCase(hu.HypothesisTestCase):
         TestCase.test_counter += 1
         if os.getenv('COMM_RANK') is not None:
             self.run_test_distributed(
-                self._test_broadcast,
+                self._test_barrier,
                 device_option=device_option)
         else:
             with TemporaryDirectory() as tmpdir:
@@ -400,6 +400,60 @@ class TestCase(hu.HypothesisTestCase):
                     comm_size=comm_size,
                     device_option=device_option,
                     tmpdir=tmpdir)
+
+    def _test_close_connection(
+        self,
+        comm_rank=None,
+        comm_size=None,
+        tmpdir=None,
+    ):
+        '''
+        One node calls close connection, others wait it on barrier.
+        Test will check that all will exit eventually.
+        '''
+        # Caffe's for closers only:
+        # https://www.youtube.com/watch?v=QMFwFgG9NE8
+        closer = comm_rank == comm_size // 2,
+
+        store_handler, common_world = self.create_common_world(
+            comm_rank=comm_rank, comm_size=comm_size, tmpdir=tmpdir
+        )
+
+        net = core.Net("barrier_or_close")
+        if not closer:
+            net.Barrier(
+                [common_world],
+                [],
+                engine=op_engine)
+        else:
+            net.DestroyCommonWorld(
+                [common_world], [common_world], engine=op_engine)
+            # Sleep a bit to ensure others start the barrier
+            import time
+            time.sleep(0.1)
+
+        workspace.CreateNet(net)
+        workspace.RunNet(net.Name())
+
+    @given(comm_size=st.integers(min_value=2, max_value=8),
+           device_option=st.sampled_from([hu.cpu_do]))
+    def test_close_connection(self, comm_size, device_option):
+        import time
+        start_time = time.time()
+        TestCase.test_counter += 1
+        if os.getenv('COMM_RANK') is not None:
+            self.run_test_distributed(
+                self._test_close_connection,
+                device_option=device_option)
+        else:
+            with TemporaryDirectory() as tmpdir:
+                self.run_test_locally(
+                    self._test_close_connection,
+                    comm_size=comm_size,
+                    device_option=device_option,
+                    tmpdir=tmpdir)
+        # Check that test finishes quickly because connections get closed
+        self.assertLess(time.time() - start_time, 2.0)
 
 if __name__ == "__main__":
     import unittest
