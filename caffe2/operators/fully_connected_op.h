@@ -71,6 +71,12 @@ class FullyConnectedOp final : public Operator<Context> {
     Y->Resize(Y_shape_cache_);
     CAFFE_ENFORCE(M * N == Y->size(), dimErrorString());
 
+    if (X.size() == 0) {
+      // skip the rest of the computation if X is empty
+      Y->template mutable_data<T_Y>();
+      return true;
+    }
+
     // W * x
     math::Gemm<T_X, Context, Engine>(
         CblasNoTrans,
@@ -163,6 +169,28 @@ class FullyConnectedGradientOp : public Operator<Context> {
     auto* db = Output(1);
     dW->ResizeLike(W);
     db->Resize(N);
+
+    if (X.size() == 0) {
+      // generate a zero blob for db and dW when X is empty
+      math::Set<T_DB, Context>(
+          db->size(),
+          convert::To<float, T_DB>(0),
+          db->template mutable_data<T_DB>(),
+          &context_);
+      math::Set<T_DW, Context>(
+          dW->size(),
+          convert::To<float, T_DW>(0),
+          dW->template mutable_data<T_DW>(),
+          &context_);
+
+      if (OutputSize() == 3) {
+        auto* dX = Output(2);
+        dX->ResizeLike(X);
+        dX->template mutable_data<T_DX>();
+      }
+
+      return true;
+    }
 
     // Compute dW
     math::Gemm<T_DY, Context, Engine>(
