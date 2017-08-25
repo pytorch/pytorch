@@ -1,6 +1,8 @@
 # https://travis-ci.org/pytorch/pytorch
 language: python
 dist: trusty
+git:
+  submodules: false
 python:
     - 2.7.9
     - 2.7
@@ -21,6 +23,10 @@ install:
     - ccache --show-stats
     - travis_retry pip install --upgrade pip setuptools wheel
     - travis_retry pip install -r requirements.txt --only-binary=scipy
+    - git submodule update --init --recursive -- torch/lib/nanopb
+    - git submodule update --init --recursive -- torch/lib/gloo
+    - git submodule update --init --recursive -- torch/lib/pybind11
+    # Purposely excluded ToffeeIR
     - MAX_JOBS=8 python setup.py install
 
 addons:
