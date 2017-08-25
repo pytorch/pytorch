@@ -36,6 +36,20 @@ void PythonEngine::thread_on_exception(FunctionTask& task, std::exception& e) {
   Engine::thread_on_exception(task, e);
 }
 
+void PythonEngine::execute(
+    const function_list& roots,
+    const variable_list& inputs,
+    bool keep_graph,
+    const pre_callback_map& pre_callbacks,
+    const post_callback_map& post_callbacks) {
+  try {
+    Engine::execute(roots, inputs, keep_graph, pre_callbacks, post_callbacks);
+  } catch (python_error& e) {
+    e.restore();
+    throw;
+  }
+}
+
 PythonEngine& PythonEngine::getDefaultEngine() {
   return engine;
 }
@@ -216,12 +230,9 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     }
   }
 
-  try {
+  {
     AutoNoGIL no_gil;
     engine.execute(roots, grads, keep_graph, callbacks);
-  } catch (python_error &e) {
-    e.restore();
-    return nullptr;
   }
 
   if (ctx.outputs) {
