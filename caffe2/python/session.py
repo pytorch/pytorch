@@ -82,7 +82,7 @@ class Session(object):
         return self._open
 
     @classmethod
-    def compile(cls, runnable, workspace_type=None):
+    def compile(cls, runnable, workspace_type=None, setup_net_list=None):
         if isinstance(runnable, CompiledRunnable):
             assert cls == runnable.session_class, (
                 'Runnable was compiled for different session type. ' +
@@ -126,13 +126,24 @@ class Session(object):
                 step = core.execution_step('runnable', runnable)
                 tg.add(Task(step=step))
         compiled = CompiledRunnable(
-            cls._compile_task_group(tg), session_class=cls)
+            cls._compile_task_group(tg, setup_net_list), session_class=cls)
         cls._compiled_cache[runnable] = compiled
         return compiled
 
-    def run(self, runnable, workspace_type=None):
+    def run(self, runnable, workspace_type=None, setup_net_list=None):
+        """Run the given runnable.
+
+        Args:
+            runnable: Object recognized by the Session. Currently, we support
+                TaskGroup, Task, Plan, ExecutionStep, and Net.
+            workspace_type: A string defined in the WorkspaceType object.
+            setup_net_list: A list of Net objects or a list of NetDef protos.
+                So far this is only used by the DistributedSession, in which we
+                need to pass a list of special nets to setup the master.
+        """
         assert self.is_open(), 'Session is closed.'
-        self._run_compiled(self.compile(runnable, workspace_type).obj)
+        self._run_compiled(self.compile(runnable, workspace_type,
+                                        setup_net_list).obj)
 
     def close(self):
         if self.is_open():
@@ -146,7 +157,7 @@ class Session(object):
         raise NotImplementedError()
 
     @classmethod
-    def _compile_task_group(cls, task_group):
+    def _compile_task_group(cls, task_group, setup_net_list=None):
         return task_group
 
     def _do_close(self):
@@ -175,7 +186,7 @@ class LocalSession(Session):
         self._ws = ws or workspace.C.Workspace.current
 
     @classmethod
-    def _compile_task_group(cls, task_group):
+    def _compile_task_group(cls, task_group, setup_net_list=None):
         with Cluster():
             task = task_group.to_task()
         plan = core.Plan('task_group_plan')
