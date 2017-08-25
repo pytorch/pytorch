@@ -3968,16 +3968,16 @@ for test_params in criterion_tests + new_criterion_tests:
     add_test(test)
     if 'check_no_size_average' in test_params:
         desc = test_params.get('desc', None)
-        test_params['desc'] = 'eval' if desc is None else desc + '_no_size_average'
+        test_params['desc'] = 'no_size_average' if desc is None else desc + '_no_size_average'
 
         def gen_no_size_average_constructor(constructor):
             def no_size_average_constructor(*args, **kwargs):
                 cons = constructor(*args, size_average=False, **kwargs)
                 return cons
-                no_size_average_constructor.__name__ = constructor.__name__
-                return no_size_average_constructor
+            no_size_average_constructor.__name__ = constructor.__name__
+            return no_size_average_constructor
 
-        test_params['constructor'] = gen_eval_constructor(test_params['constructor'])
+        test_params['constructor'] = gen_no_size_average_constructor(test_params['constructor'])
         test = NewCriterionTest(**test_params)
         add_test(test)
 

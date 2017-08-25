@@ -23,6 +23,10 @@ TEST_CUDNN = TEST_CUDA and torch.backends.cudnn.is_acceptable(torch.cuda.FloatTe
 TEST_CUDNN_VERSION = TEST_CUDNN and torch.backends.cudnn.version()
 PRECISION = 1e-5
 
+
+def get_size_average(m):
+    return getattr(m, 'size_average', False) or getattr(m, 'sizeAverage', False)
+
 module_tests = [
     dict(
         module_name='Linear',
@@ -280,7 +284,7 @@ criterion_tests = [
         module_name='MSELoss',
         input=torch.randn(2, 3, 4, 5),
         target=torch.randn(2, 3, 4, 5),
-        reference_fn=lambda i, t, _: (i - t).abs().pow(2).sum() / i.numel(),
+        reference_fn=lambda i, t, m: (i - t).abs().pow(2).sum() / (i.numel() if get_size_average(m) else 1),
         check_no_size_average=True,
     ),
     dict(
