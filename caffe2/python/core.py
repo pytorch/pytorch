@@ -2213,13 +2213,24 @@ def InjectCrossDeviceCopies(net, blob_to_device=None):
                         out_blob, blob_to_device[out_blob], device, op
                     )
                 )
-        blob_to_device.update({o: d for d, o in zip(output_dev, op.output)})
         new_op = caffe2_pb2.OperatorDef()
         new_op.CopyFrom(op)
 
         new_list = [temp_remap.get(b, b) for b in new_op.input]
         del new_op.input[:]
         new_op.input.extend(new_list)
+
+        # keep inplace blobs inplace
+        original_inputs = list(op.input)
+        for i, out in enumerate(new_op.output):
+            try:
+                input_idx = original_inputs.index(out)
+                new_op.output[i] = new_op.input[input_idx]
+            except ValueError:
+                pass
+
+        blob_to_device.update(
+            {o: d for d, o in zip(output_dev, new_op.output)})
         new_net.extend_ops([new_op])
 
     return new_net, blob_to_device
