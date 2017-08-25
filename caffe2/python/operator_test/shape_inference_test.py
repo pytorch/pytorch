@@ -43,6 +43,22 @@ class TestShapeInference(test_util.TestCase):
         workspace.FeedBlob("y", np.random.rand(10).astype(np.float32))
         self.InferTensorRunAndCompare(model)
 
+    def testShapeInferenceReduceBackFrontX(self):
+        model = model_helper.ModelHelper(name="test_model")
+        model.net.ReduceBackSum(["x"], ["x_back_sum"])
+        model.net.ReduceBackMean(["x"], ["x_back_mean"])
+        model.net.ReduceFrontSum(["x"], ["x_front_sum"])
+        model.net.ReduceFrontMean(["x"], ["x_front_mean"])
+        workspace.FeedBlob("x", np.random.rand(10, 12, 18).astype(np.float32))
+        self.InferTensorRunAndCompare(model)
+
+    def testGather(self):
+        model = model_helper.ModelHelper(name="test_model")
+        model.net.Gather(["X", "idx"], "Y")
+        workspace.FeedBlob("X", np.random.rand(100, 4, 5).astype(np.float32))
+        workspace.FeedBlob("idx", np.array([[3, 18], [99, 4], [2, 5]]).astype(np.int32))
+        self.InferTensorRunAndCompare(model)
+
     def testShapeInferenceConvNet(self):
         model = model_helper.ModelHelper(name="convtest")
         model.NHWC2NCHW("data", "data_nchw")
@@ -53,7 +69,8 @@ class TestShapeInference(test_util.TestCase):
         brew.relu(model, 'conv1_spatbn_relu', 'conv1_spatbn_relu')
         brew.max_pool(model, 'conv1_spatbn_relu', 'pool1', kernel=3, stride=2)
         brew.fc(model, 'pool1', 'fc', dim_in=(64 * 56 * 56), dim_out=100)
-        model.Sigmoid('fc', 'fc_sigm')
+        brew.dropout(model, 'fc', 'fc_drop')
+        model.Sigmoid('fc_drop', 'fc_sigm')
         brew.softmax(model, 'fc_sigm', 'softmax')
         model.LabelCrossEntropy(['softmax', 'label'], 'xent')
         loss = model.AveragedLoss('xent', 'loss')
@@ -406,7 +423,7 @@ class TestShapeInference(test_util.TestCase):
                     np.array(shapes[b]).astype(np.int32),
                     np.array(correct_shapes[b]).astype(np.int32)
                 ),
-                "Shape {} mismatch: {} vs. {}".format(
+                "Shape {} mismatch: {} vs. correct {}".format(
                     b, shapes[b], correct_shapes[b]
                 )
             )

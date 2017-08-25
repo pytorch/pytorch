@@ -441,6 +441,16 @@ UnsortedSegment{op} but as if all input slices belong to a single segment.
   static void PopulateSchema(OpSchema& schema) {
     schema.Input(
         0, "DATA", "Input tensor to be reduced on the first dimension");
+    schema.TensorInferenceFunction([](const OperatorDef& def,
+                                      const vector<TensorShape>& in) {
+      CAFFE_ENFORCE_EQ(1, in.size());
+      ArgumentHelper helper(def);
+      int num_reduce_dims = helper.GetSingleArgument<int>("num_reduce_dim", 1);
+      typename ReducerDef::template Reducer<T, Context>::Meta ctx(true);
+      vector<TIndex> out_dims = ctx.getOutputShape(in[0], num_reduce_dims);
+      return vector<TensorShape>{
+          CreateTensorShape(out_dims, in[0].data_type())};
+    });
     ReducerDef::PopulateSchema(schema);
   }
   using ReducerGradient =
@@ -498,6 +508,16 @@ UnsortedSegment{op} but as if all input slices belong to a single segment.
   static void PopulateSchema(OpSchema& schema) {
     schema.Input(
         0, "DATA", "Input tensor to be reduced on the first dimension");
+    schema.TensorInferenceFunction([](const OperatorDef& def,
+                                      const vector<TensorShape>& in) {
+      CAFFE_ENFORCE_EQ(1, in.size());
+      ArgumentHelper helper(def);
+      int num_reduce_dims = helper.GetSingleArgument<int>("num_reduce_dim", 1);
+      typename ReducerDef::template Reducer<T, Context>::Meta ctx(false);
+      vector<TIndex> out_dims = ctx.getOutputShape(in[0], num_reduce_dims);
+      return vector<TensorShape>{
+          CreateTensorShape(out_dims, in[0].data_type())};
+    });
     ReducerDef::PopulateSchema(schema);
   }
   using ReducerGradient =

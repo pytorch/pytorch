@@ -444,12 +444,27 @@ OPERATOR_SCHEMA(IsEmpty)
     .NumInputs(1)
     .NumOutputs(1)
     .SetDoc("Returns true iff the input tensor has size == 0")
+    .ScalarType(::caffe2::TensorProto_DataType::TensorProto_DataType_BOOL)
     .Input(0, "tensor", "Tensor of any type.")
     .Output(0, "is_empty", "Scalar bool tensor. True if input is empty.");
 
 OPERATOR_SCHEMA(Gather)
     .NumInputs(2)
     .NumOutputs(1)
+    .TensorInferenceFunction([](const OperatorDef& def,
+                                const vector<TensorShape>& in) {
+      vector<TensorShape> out(0);
+      TensorShape output;
+      for(int d : in[1].dims()) {
+        output.add_dims(d);
+      }
+      for(int j = 1; j < in[0].dims_size(); j++) {
+        output.add_dims(in[0].dims(j));
+      }
+      output.set_data_type(in[0].data_type());
+      out.push_back(output);
+      return out;
+    })
     .SetDoc(R"DOC(
 Given DATA tensor of rank r >= 1, and INDICES tensor of rank q, gather
 entries of the outer-most dimension of DATA indexed by INDICES, and concatenate
