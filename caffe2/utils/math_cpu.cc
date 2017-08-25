@@ -17,15 +17,15 @@
 #include <random>
 #include <unordered_set>
 
-#ifdef CAFFE2_USE_MKL
-#include <mkl.h>
-#endif  // CAFFE2_USE_MKL
-
 #include "caffe2/utils/math.h"
 #include "caffe2/utils/cpu_neon.h"
 #include "caffe2/core/context.h"
 #include "Eigen/Core"
 #include "Eigen/Dense"
+
+#ifdef CAFFE2_USE_MKL
+#include <mkl.h>
+#endif  // CAFFE2_USE_MKL
 
 #if defined(_MSC_VER)
 #include <process.h>
