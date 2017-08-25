@@ -29,9 +29,7 @@ def variable_expandable(variable, old_size):
 
 
 def maybe_unexpand_or_view(variable, old_size):
-    var_expanded = True
-    if maybe_view:
-        var_expanded = variable_expandable(variable, old_size)
+    var_expanded = variable_expandable(variable, old_size)
 
     if var_expanded:
         return maybe_unexpand(variable, old_size)
