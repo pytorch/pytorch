@@ -27,7 +27,9 @@ void setTensorDescriptor(TensorDescriptor& desc, cudnnDataType_t dataType, THVoi
     inputSize[i] = (int) tensor->size[i];
     inputStride[i] = (int) tensor->stride[i];
   }
+#if CUDNN_VERSION < 7000
   inputSize[1] /= groups;
+#endif
   desc.set(dataType, tensor->nDimension, inputSize, inputStride);
 }
 
@@ -39,7 +41,9 @@ void setWeightDescriptor(FilterDescriptor& desc, cudnnDataType_t dataType, THVoi
   for (int i = 0; i < weight->nDimension; ++i) {
     weightSize[i] = (int) weight->size[i];
   }
+#if CUDNN_VERSION < 7000
   weightSize[0] /= groups;
+#endif
   desc.set(dataType, weight->nDimension, weightSize);
 }
 
@@ -329,6 +333,7 @@ void* tensorPointer(cudnnDataType_t dataType, THVoidTensor* tensor, int groupIdx
   int elementSize = dataSize(dataType);
   char* ptr = (char*) tensor->storage->data;
   ptr += elementSize * tensor->storageOffset;
+#if CUDNN_VERSION < 7000
   if (groupIdx > 0) {
     long size = 1;
     for (int i = dim; i < tensor->nDimension; ++i) {
@@ -336,6 +341,7 @@ void* tensorPointer(cudnnDataType_t dataType, THVoidTensor* tensor, int groupIdx
     }
     ptr += elementSize * size * groupIdx / groups;
   }
+#endif
   return ptr;
 }
 
@@ -369,12 +375,13 @@ static void check_input_size(THVoidTensor* input, THVoidTensor* weight, int grou
   if (input->nDimension > 5){
     throw std::runtime_error("input has more than 5 dimensions");
   }
-
+  
   if (input->size[1]/groups != weight->size[1]){
     std::stringstream ss;
     ss << "Need input.size[1] == " << weight->size[1] * groups << " but got " << input->size[1] << " instead.";
     throw std::runtime_error(ss.str());
   }
+  
 }
 
 static void check_bias_size(THVoidTensor* bias, THVoidTensor* weight, int groups, bool transposed)
@@ -478,7 +485,7 @@ Convolution::Convolution(
   else
     setTensorDescriptor(odesc_bias, dataType, input, 1);
   setWeightDescriptor(wdesc, dataType, weight, groups);
-  cdesc.set(dataType, pad.size(), pad.data(), stride.data(), dilation.data());
+  cdesc.set(dataType, pad.size(), pad.data(), stride.data(), dilation.data(), groups);
 }
 
 void cudnn_convolution_forward(
@@ -498,7 +505,11 @@ void cudnn_convolution_forward(
 
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
+#if CUDNN_VERSION < 7000
   for (int i = 0; i < groups; ++i) {
+#else
+    int i = 0;
+#endif
     void* input_ptr = tensorPointer(dataType, input, i, groups, 1);
     void* output_ptr = tensorPointer(dataType, output, i, groups, 1);
     void* weight_ptr = tensorPointer(dataType, weight, i, groups, 0);
@@ -507,7 +518,9 @@ void cudnn_convolution_forward(
       handle, &one, info->idesc.desc, input_ptr, info->wdesc.desc,
               weight_ptr, info->cdesc.desc, fwdAlg, workspace.data,
               workspace.size, &zero, info->odesc.desc, output_ptr));
+#if CUDNN_VERSION < 7000
   }
+#endif
 }
 
 void cudnn_convolution_add_bias(
@@ -547,16 +560,22 @@ void cudnn_convolution_backward_data(
 
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
+#if CUDNN_VERSION < 7000
   for (int i = 0; i < groups; ++i) {
+#else
+    int i = 0;
+#endif
     void* gradInput_ptr = tensorPointer(dataType, gradInput, i, groups, 1);
     void* gradOutput_ptr = tensorPointer(dataType, gradOutput, i, groups, 1);
     void* weight_ptr = tensorPointer(dataType, weight, i, groups, 0);
 
-    CHECK(cudnnConvolutionBackwardData(
-        handle, &one, info->wdesc.desc, weight_ptr, info->odesc.desc, gradOutput_ptr,
-        info->cdesc.desc, bwdDataAlg, workspace.data, workspace.size, &zero,
-        info->idesc.desc, gradInput_ptr));
+  CHECK(cudnnConvolutionBackwardData(
+      handle, &one, info->wdesc.desc, weight_ptr, info->odesc.desc, gradOutput_ptr,
+      info->cdesc.desc, bwdDataAlg, workspace.data, workspace.size, &zero,
+      info->idesc.desc, gradInput_ptr));
+#if CUDNN_VERSION < 7000
   }
+#endif
 }
 
 void cudnn_convolution_backward_filter(
@@ -578,20 +597,26 @@ void cudnn_convolution_backward_filter(
 
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
+#if CUDNN_VERSION < 7000
   for (int i = 0; i < groups; ++i) {
+#else
+    int i = 0;
+#endif
     void* input_ptr = tensorPointer(dataType, input, i, groups, 1);
     void* gradOutput_ptr = tensorPointer(dataType, gradOutput, i, groups, 1);
     void* gradWeight_ptr = tensorPointer(dataType, gradWeight, i, groups, 0);
-
+ 
     if (info->transposed) {
-        std::swap(input_ptr, gradOutput_ptr);
+      std::swap(input_ptr, gradOutput_ptr);
     }
 
     CHECK(cudnnConvolutionBackwardFilter(
-        handle, &one, info->idesc.desc, input_ptr, info->odesc.desc, gradOutput_ptr,
-        info->cdesc.desc, bwdFilterAlg, workspace.data, workspace.size, &zero,
-        info->wdesc.desc, gradWeight_ptr));
+      handle, &one, info->idesc.desc, input_ptr, info->odesc.desc, gradOutput_ptr,
+      info->cdesc.desc, bwdFilterAlg, workspace.data, workspace.size, &zero,
+      info->wdesc.desc, gradWeight_ptr));
+#if CUDNN_VERSION < 7000
   }
+#endif
 }
 
 void cudnn_convolution_backward_bias(

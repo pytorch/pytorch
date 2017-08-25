@@ -1129,6 +1129,13 @@ class TestNN(NNTestCase):
         indices.add_(1)
         self.assertRaises(RuntimeError, lambda: output.backward(grad_output))
 
+    def test_Conv2d_naive_groups(self):
+        self._test_Conv2d_naive_groups()
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_Conv2d_naive_groups_cuda(self):
+        self._test_Conv2d_naive_groups(torch.cuda.FloatTensor)
+
     def test_batchnorm_eval(self):
         self._test_batchnorm_eval()
 
@@ -1693,22 +1700,26 @@ class TestNN(NNTestCase):
                 else:
                     self.assertRaises(ValueError, lambda: m(i, (h, w)))
 
-    def test_Conv2d_naive_groups(self):
+    def _test_Conv2d_naive_groups(self, test_type=torch.FloatTensor):
         # Check that grouped convolutions matches two half convolutions
-        m = nn.Conv2d(4, 4, kernel_size=3, groups=2)
-        i = Variable(torch.randn(2, 4, 6, 6), requires_grad=True)
+        if(test_type == torch.cuda.FloatTensor):
+            print("worked")
+        else:
+            print("worked2")
+        m = nn.Conv2d(4, 4, kernel_size=3, groups=2).type(test_type)
+        i = Variable(torch.randn(2, 4, 6, 6).type(test_type), requires_grad=True)
         output = m(i)
-        grad_output = torch.randn(2, 4, 4, 4)
+        grad_output = torch.randn(2, 4, 4, 4).type(test_type)
         output.backward(grad_output)
 
-        m1 = nn.Conv2d(2, 2, kernel_size=3)
+        m1 = nn.Conv2d(2, 2, kernel_size=3).type(test_type)
         m1.weight.data.copy_(m.weight.data[:2])
         m1.bias.data.copy_(m.bias.data[:2])
         i1 = Variable(i.data[:, :2].contiguous(), requires_grad=True)
         output1 = m1(i1)
         output1.backward(grad_output[:, :2].contiguous())
 
-        m2 = nn.Conv2d(2, 2, kernel_size=3)
+        m2 = nn.Conv2d(2, 2, kernel_size=3).type(test_type)
         m2.weight.data.copy_(m.weight.data[2:])
         m2.bias.data.copy_(m.bias.data[2:])
         i2 = Variable(i.data[:, 2:].contiguous(), requires_grad=True)
@@ -1726,29 +1737,33 @@ class TestNN(NNTestCase):
     # For https://github.com/pytorch/pytorch/pull/1273
     # Almost identical to the above `test_Conv2d_naive_groups`
     def test_Conv2d_groups_nobias(self):
-        m = nn.Conv2d(4, 4, kernel_size=3, groups=2, bias=False)
-        i = Variable(torch.randn(2, 4, 6, 6), requires_grad=True)
-        output = m(i)
-        grad_output = torch.randn(2, 4, 4, 4)
-        output.backward(grad_output)
+        types = (torch.FloatTensor,)
+        if TEST_CUDA:
+            types += (torch.cuda.FloatTensor,)
+        for tp in types:
+            m = nn.Conv2d(4, 4, kernel_size=3, groups=2, bias=False).type(tp)
+            i = Variable(torch.randn(2, 4, 6, 6).type(tp), requires_grad=True)
+            output = m(i)
+            grad_output = torch.randn(2, 4, 4, 4).type(tp)
+            output.backward(grad_output)
 
-        m1 = nn.Conv2d(2, 2, kernel_size=3, bias=False)
-        m1.weight.data.copy_(m.weight.data[:2])
-        i1 = Variable(i.data[:, :2].contiguous(), requires_grad=True)
-        output1 = m1(i1)
-        output1.backward(grad_output[:, :2].contiguous())
+            m1 = nn.Conv2d(2, 2, kernel_size=3, bias=False).type(tp)
+            m1.weight.data.copy_(m.weight.data[:2])
+            i1 = Variable(i.data[:, :2].contiguous(), requires_grad=True)
+            output1 = m1(i1)
+            output1.backward(grad_output[:, :2].contiguous())
 
-        m2 = nn.Conv2d(2, 2, kernel_size=3, bias=False)
-        m2.weight.data.copy_(m.weight.data[2:])
-        i2 = Variable(i.data[:, 2:].contiguous(), requires_grad=True)
-        output2 = m2(i2)
-        output2.backward(grad_output[:, 2:].contiguous())
+            m2 = nn.Conv2d(2, 2, kernel_size=3, bias=False).type(tp)
+            m2.weight.data.copy_(m.weight.data[2:])
+            i2 = Variable(i.data[:, 2:].contiguous(), requires_grad=True)
+            output2 = m2(i2)
+            output2.backward(grad_output[:, 2:].contiguous())
 
-        self.assertEqual(output, torch.cat([output1, output2], 1))
-        self.assertEqual(i.grad.data,
-                         torch.cat([i1.grad.data, i2.grad.data], 1))
-        self.assertEqual(m.weight.grad.data,
-                         torch.cat([m1.weight.grad.data, m2.weight.grad.data], 0))
+            self.assertEqual(output, torch.cat([output1, output2], 1))
+            self.assertEqual(i.grad.data,
+                             torch.cat([i1.grad.data, i2.grad.data], 1))
+            self.assertEqual(m.weight.grad.data,
+                             torch.cat([m1.weight.grad.data, m2.weight.grad.data], 0))
 
     def test_MaxUnpool2d_output_size(self):
         m = nn.MaxPool2d(3, stride=2, return_indices=True)
