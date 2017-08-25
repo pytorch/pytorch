@@ -453,6 +453,63 @@ class MemongerTest(hu.HypothesisTestCase):
         np.testing.assert_almost_equal(loss1, optimized_loss1)
         np.testing.assert_almost_equal(loss2, optimized_loss2)
 
+    def test_rnn(self):
+        from caffe2.python import rnn_cell
+        T = 5
+        model = model_helper.ModelHelper()
+        seq_lengths, labels = \
+            model.net.AddExternalInputs(
+                'seq_lengths', 'labels',
+            )
+        init_blobs = []
+        for i in range(2):
+            hidden_init, cell_init = model.net.AddExternalInputs(
+                "hidden_init_{}".format(i),
+                "cell_init_{}".format(i)
+            )
+            init_blobs.extend([hidden_init, cell_init])
+        model.param_init_net.ConstantFill([], ["input"], shape=[T, 4, 10])
+        output, last_hidden, _, last_state = rnn_cell.LSTM(
+            model=model,
+            input_blob="input",
+            seq_lengths=seq_lengths,
+            initial_states=init_blobs,
+            dim_in=10,
+            dim_out=[10, 10],
+            scope="lstm1",
+            forward_only=False,
+            drop_states=True,
+            return_last_layer_only=True,
+        )
+        softmax, loss = model.net.SoftmaxWithLoss(
+            [model.Flatten(output), "labels"],
+            ['softmax', 'loss'],
+        )
+
+        model.AddGradientOperators([loss])
+        blobs_before = count_blobs(model.net.Proto())
+        optim_proto = memonger.share_grad_blobs(
+            model.net,
+            ["loss"],
+            set(viewvalues(model.param_to_grad)),
+            "",
+            share_activations=True,
+            dont_share_blobs=set(),
+        )
+        blobs_after = count_blobs(optim_proto)
+        self.assertLess(blobs_after, blobs_before)
+
+        # Run once to see all blobs are set up correctly
+        for init_blob in init_blobs:
+            workspace.FeedBlob(init_blob, np.zeros(
+                [1, 4, 10], dtype=np.float32
+            ))
+        workspace.FeedBlob("seq_lengths", np.array([T] * 4, dtype=np.int32))
+        workspace.FeedBlob("labels", np.random.rand(T).astype(np.int32))
+
+        workspace.RunNetOnce(model.param_init_net)
+        workspace.RunNetOnce(model.net)
+
     def test_compute_interference_graph_inplace_ops(self):
         m = model_helper.ModelHelper()
         m.Copy("b1", "b1")
