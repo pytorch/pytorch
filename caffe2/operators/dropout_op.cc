@@ -64,6 +64,15 @@ OPERATOR_SCHEMA(Dropout)
     .NumInputs(1)
     .NumOutputs(2)
     .AllowInplace({{0, 0}})
+    .TensorInferenceFunction([](const OperatorDef& def,
+                                const vector<TensorShape>& in) {
+      CAFFE_ENFORCE_EQ(1, in.size());
+      vector<TensorShape> out;
+      out.push_back(in[0]);
+      out.push_back(in[0]);
+      out[1].set_data_type(TensorProto_DataType_BOOL);
+      return out;
+    })
     .SetDoc(R"DOC(
 Dropout takes one input data (Tensor<float>) and produces two Tensor outputs,
 output (Tensor<float>) and mask (Tensor<bool>). Depending on whether it is in
@@ -72,12 +81,16 @@ copy of the input. Note that our implementation of Dropout does scaling in
 the training phase, so during testing nothing needs to be done.
 )DOC")
     .Arg("ratio", "(float, default 0.5) the ratio of random dropout")
-    .Arg("is_test", "(int, default 0) if nonzero, run dropout in test mode where "
-                    "the output is simply Y = X.")
+    .Arg(
+        "is_test",
+        "(int, default 0) if nonzero, run dropout in test mode where "
+        "the output is simply Y = X.")
     .Input(0, "data", "The input data as Tensor.")
     .Output(0, "output", "The output.")
-    .Output(1, "mask",
-            "The output mask. If is_test is nonzero, this output is not filled.");
+    .Output(
+        1,
+        "mask",
+        "The output mask. If is_test is nonzero, this output is not filled.");
 
 OPERATOR_SCHEMA(DropoutGrad)
     .NumInputs(2).NumOutputs(1).AllowInplace({{0, 0}});

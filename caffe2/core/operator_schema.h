@@ -348,8 +348,9 @@ class OpSchemaRegistry {
 };
 
 // Helper function for creating simple tensorproto with dimension and type
+template <typename T_I = int>
 inline TensorShape CreateTensorShape(
-    vector<int> dims,
+    vector<T_I> dims,
     ::caffe2::TensorProto_DataType dt) {
   TensorShape ts;
   for (int d : dims) {

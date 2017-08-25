@@ -6,6 +6,7 @@
 #include <array>
 
 #include "caffe2/core/context.h"
+#include "caffe2/core/tensor.h"
 #include "caffe2/utils/math.h"
 #include "caffe2/utils/proto_utils.h"
 
@@ -335,19 +336,29 @@ class BaseReducer {
 
     explicit Meta(bool first = true) : first_dim(first) {}
 
+    void computeMeta(const std::vector<TIndex>& dims, int skip_dims) {
+      first_dim ? block_shape.assign(dims.begin() + skip_dims, dims.end())
+                : block_shape.assign(dims.begin(), dims.end() - skip_dims);
+      block_size = first_dim ? size_from_dim_(skip_dims, dims)
+                             : size_from_dim_(dims.size() - skip_dims, dims);
+    }
+
     void
     observeInput(int input, const Tensor<CPUContext>& value, int skip_dims) {
       DCHECK_EQ(0, input);
       auto& dims = value.dims();
-      first_dim ? block_shape.assign(dims.begin() + skip_dims, dims.end())
-                : block_shape.assign(dims.begin(), dims.end() - skip_dims);
-      block_size = first_dim ? value.size_from_dim(skip_dims)
-                             : value.size_from_dim(value.ndim() - skip_dims);
+      computeMeta(dims, skip_dims);
     }
 
     void appendOutputShape(vector<TIndex>* output_shape) {
       output_shape->insert(
           output_shape->end(), block_shape.begin(), block_shape.end());
+    }
+
+    vector<TIndex> getOutputShape(const TensorShape& in, int skip_dims) {
+      vector<TIndex> dims(in.dims().begin(), in.dims().end());
+      computeMeta(dims, skip_dims);
+      return block_shape;
     }
   };
 
@@ -733,23 +744,7 @@ struct MeanReducerDef {
   static constexpr const char* doc =
       "Mean computes the element-wise mean of the input slices. "
       "Operation doesn't change the shape of the individual blocks.";
-  static void PopulateSchema(OpSchema& schema) {
-    schema.TensorInferenceFunction(
-        [](const OperatorDef& def, const vector<TensorShape>& in) {
-          CAFFE_ENFORCE_EQ(1, in.size());
-          const auto& input_shape = in[0];
-
-          ArgumentHelper helper(def);
-          auto num_reduce_dims =
-              helper.GetSingleArgument<int32_t>("num_reduce_dim", 1);
-          TensorShape output_shape;
-
-          for (auto i = num_reduce_dims; i < input_shape.dims().size(); ++i) {
-            output_shape.add_dims(input_shape.dims(i));
-          }
-          return std::vector<TensorShape>{output_shape};
-        });
-  }
+  static void PopulateSchema(OpSchema& /*schema*/) {}
 };
 
 } // namespace caffe2
