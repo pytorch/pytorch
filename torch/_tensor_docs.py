@@ -725,7 +725,7 @@ Torch C API as the given tensor.
 
 add_docstr_all('kthvalue',
                """
-kthvalue(k, dim=None) -> (Tensor, LongTensor)
+kthvalue(k, dim=None, keepdim=False) -> (Tensor, LongTensor)
 
 See :func:`torch.kthvalue`
 """)
@@ -867,28 +867,28 @@ See :func:`torch.masked_select`
 
 add_docstr_all('max',
                """
-max(dim=None) -> float or (Tensor, Tensor)
+max(dim=None, keepdim=False) -> float or (Tensor, Tensor)
 
 See :func:`torch.max`
 """)
 
 add_docstr_all('mean',
                """
-mean(dim=None) -> float or (Tensor, Tensor)
+mean(dim=None, keepdim=False) -> float or (Tensor, Tensor)
 
 See :func:`torch.mean`
 """)
 
 add_docstr_all('median',
                """
-median(dim=-1, values=None, indices=None) -> (Tensor, LongTensor)
+median(dim=None, keepdim=False) -> (Tensor, LongTensor)
 
 See :func:`torch.median`
 """)
 
 add_docstr_all('min',
                """
-min(dim=None) -> float or (Tensor, Tensor)
+min(dim=None, keepdim=False) -> float or (Tensor, Tensor)
 
 See :func:`torch.min`
 """)
@@ -902,7 +902,7 @@ See :func:`torch.mm`
 
 add_docstr_all('mode',
                """
-mode(dim=-1, values=None, indices=None) -> (Tensor, LongTensor)
+mode(dim=None, keepdim=False) -> (Tensor, LongTensor)
 
 See :func:`torch.mode`
 """)
@@ -1012,7 +1012,7 @@ See :func:`torch.nonzero`
 
 add_docstr_all('norm',
                """
-norm(p=2) -> float
+norm(p=2, dim=None, keepdim=False) -> float
 
 See :func:`torch.norm`
 """)
@@ -1092,7 +1092,7 @@ In-place version of :meth:`~Tensor.pow`
 
 add_docstr_all('prod',
                """
-prod() -> float
+prod(dim=None, keepdim=False) -> float
 
 See :func:`torch.prod`
 """)
@@ -1408,7 +1408,7 @@ In-place version of :meth:`~Tensor.squeeze`
 
 add_docstr_all('std',
                """
-std() -> float
+std(dim=None, unbiased=True, keepdim=False) -> float
 
 See :func:`torch.std`
 """)
@@ -1465,7 +1465,7 @@ In-place version of :meth:`~Tensor.sub`
 
 add_docstr_all('sum',
                """
-sum(dim=None) -> float
+sum(dim=None, keepdim=False) -> float
 
 See :func:`torch.sum`
 """)
@@ -1682,7 +1682,7 @@ In-place version of :meth:`~Tensor.unsqueeze`
 
 add_docstr_all('var',
                """
-var() -> float
+var(dim=None, unbiased=True, keepdim=False) -> float
 
 See :func:`torch.var`
 """)
