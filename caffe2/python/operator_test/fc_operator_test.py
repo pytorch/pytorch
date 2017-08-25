@@ -12,7 +12,7 @@ import numpy as np
 
 class TestFcOperator(hu.HypothesisTestCase):
 
-    @given(n=st.integers(1, 5), m=st.integers(1, 5),
+    @given(n=st.integers(1, 5), m=st.integers(0, 5),
            k=st.integers(1, 5),
            multi_dim=st.sampled_from([True, False]),
            **hu.gcs)
