@@ -364,7 +364,7 @@ class BCEWithLogitsLoss(Module):
 
 class HingeEmbeddingLoss(_Loss):
     r"""Measures the loss given an input `x` which is a 2D mini-batch tensor
-    and a labels `y`, a 1D tensor containg values (`1` or `-1`).
+    and a labels `y`, a 1D tensor containing values (`1` or `-1`).
     This is usually used for measuring whether two inputs are similar or
     dissimilar, e.g. using the L1 pairwise distance, and is typically used
     for learning nonlinear embeddings or semi-supervised learning::

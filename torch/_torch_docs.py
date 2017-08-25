@@ -1528,7 +1528,7 @@ Returns:
 
 .. note::
 
-    The returned matrices will always be tranposed, irrespective of the strides
+    The returned matrices will always be transposed, irrespective of the strides
     of the input matrices. That is, they will have stride `(1, m)` instead of
     `(m, 1)`.
 
