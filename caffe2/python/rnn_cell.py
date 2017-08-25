@@ -35,10 +35,19 @@ class RNNCell(object):
     As a result base class will provice apply_over_sequence method, which
     allows you to apply recurrent operations over a sequence of any length.
     '''
-    def __init__(self, name, forward_only=False):
+    def __init__(self, name, forward_only=False, initializer=None):
         self.name = name
         self.recompute_blobs = []
         self.forward_only = forward_only
+        self._initializer = initializer
+
+    @property
+    def initializer(self):
+        return self._initializer
+
+    @initializer.setter
+    def initializer(self, value):
+        self._initializer = value
 
     def scope(self, name):
         return self.name + '/' + name if self.name is not None else name
@@ -48,9 +57,16 @@ class RNNCell(object):
         model,
         inputs,
         seq_lengths,
-        initial_states,
+        initial_states=None,
         outputs_with_grads=None,
     ):
+        if initial_states is None:
+            with scope.NameScope(self.name):
+                if self.initializer is None:
+                    raise Exception("Either initial states"
+                                    "or initializer have to be set")
+                initial_states = self.initializer.create_states(model)
+
         preprocessed_inputs = self.prepare_input(model, inputs)
         step_model = ModelHelper(name=self.name, param_model=model)
         input_t, timestep = step_model.net.AddScopedExternalInputs(
@@ -181,6 +197,27 @@ class RNNCell(object):
         return state_outputs[output_sequence_index]
 
 
+class LSTMInitializer(object):
+    def __init__(self, hidden_size):
+        self.hidden_size = hidden_size
+
+    def create_states(self, model):
+        return [
+            model.create_param(
+                param_name='initial_hidden_state',
+                initializer=Initializer(operator_name='ConstantFill',
+                                        value=0.0),
+                shape=[self.hidden_size],
+            ),
+            model.create_param(
+                param_name='initial_cell_state',
+                initializer=Initializer(operator_name='ConstantFill',
+                                        value=0.0),
+                shape=[self.hidden_size],
+            )
+        ]
+
+
 class LSTMCell(RNNCell):
 
     def __init__(
@@ -190,9 +227,13 @@ class LSTMCell(RNNCell):
         forget_bias,
         memory_optimization,
         drop_states=False,
+        initializer=None,
         **kwargs
     ):
-        super(LSTMCell, self).__init__(**kwargs)
+        super(LSTMCell, self).__init__(initializer=initializer, **kwargs)
+        self.initializer = initializer or LSTMInitializer(
+            hidden_size=hidden_size)
+
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.forget_bias = float(forget_bias)
@@ -451,6 +492,17 @@ class DropoutCell(RNNCell):
         return output
 
 
+class MultiRNNCellInitializer(object):
+    def __init__(self, cells):
+        self.cells = cells
+
+    def create_states(self, model):
+        states = []
+        for cell in self.cells:
+            with core.NameScope(cell.name):
+                states.extend(cell.initializer.create_states(model))
+        return states
+
 class MultiRNNCell(RNNCell):
     '''
     Multilayer RNN via the composition of RNNCell instance.
@@ -520,6 +572,8 @@ class MultiRNNCell(RNNCell):
                     list(duplicates),
                 ),
             )
+
+        self.initializer = MultiRNNCellInitializer(cells)
 
     def prepare_input(self, model, input_blob):
         return self.cells[0].prepare_input(model, input_blob)
@@ -976,7 +1030,7 @@ def _LSTM(
 
     cells = []
     for i in range(num_layers):
-        name = '{}/layer_{}'.format(scope, i) if num_layers > 1 else scope
+        name = scope + "/layer_{}".format(i) if num_layers > 1 else scope
         cell = cell_class(
             input_size=(dim_in if i == 0 else dim_out[i - 1]),
             hidden_size=dim_out[i],
@@ -997,27 +1051,6 @@ def _LSTM(
     cell = (
         cell if static_rnn_unroll_size is None
         else UnrolledCell(cell, static_rnn_unroll_size))
-
-    if initial_states is None:
-        initial_states = []
-        for i in range(num_layers):
-            with core.NameScope(scope):
-                suffix = '_{}'.format(i) if num_layers > 1 else ''
-                initial_hidden = model.create_param(
-                    'initial_hidden_state' + suffix,
-                    shape=[dim_out[i]],
-                    initializer=Initializer('ConstantFill', value=0.0),
-                )
-                initial_cell = model.create_param(
-                    'initial_cell_state' + suffix,
-                    shape=[dim_out[i]],
-                    initializer=Initializer('ConstantFill', value=0.0),
-                )
-                initial_states.extend([initial_hidden, initial_cell])
-
-    assert len(initial_states) == 2 * num_layers, \
-            "Incorrect initial_states, was expecting 2 * num_layers elements" \
-            + " but had only {}".format(len(initial_states))
 
     # outputs_with_grads argument indexes into final layer
     outputs_with_grads = [4 * (num_layers - 1) + i for i in outputs_with_grads]

@@ -1303,6 +1303,7 @@ class RNNCellTest(hu.HypothesisTestCase):
            max_num_units=st.integers(1, 3),
            num_layers=st.integers(2, 3),
            batch_size=st.integers(1, 3))
+    @utils.debug
     def test_multi_lstm(
         self,
         input_length,
@@ -1363,10 +1364,12 @@ class RNNCellTest(hu.HypothesisTestCase):
 
         for i in range(num_layers):
             hidden_input_list.append(
-                workspace.FetchBlob('test/initial_hidden_state_{}'.format(i)),
+                workspace.FetchBlob(
+                    'test/test/layer_{}/initial_hidden_state'.format(i)),
             )
             cell_input_list.append(
-                workspace.FetchBlob('test/initial_cell_state_{}'.format(i)),
+                workspace.FetchBlob(
+                    'test/test/layer_{}/initial_cell_state'.format(i)),
             )
             i2h_w_list.append(
                 workspace.FetchBlob('test/layer_{}/i2h_w'.format(i)),
