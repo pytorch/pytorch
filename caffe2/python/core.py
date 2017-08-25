@@ -2485,6 +2485,8 @@ class ExecutionStep(object):
             step_proto.HasField('num_concurrent_instances') else None
         create_workspace = step_proto.create_workspace if\
             step_proto.HasField('create_workspace') else None
+        run_every_ms = step_proto.run_every_ms if\
+            step_proto.HasField('run_every_ms') else None
 
         return execution_step(
             step_proto.name,
@@ -2496,7 +2498,8 @@ class ExecutionStep(object):
             should_stop_blob=should_stop_blob,
             only_once=only_once,
             num_concurrent_instances=num_concurrent_instances,
-            create_workspace=create_workspace)
+            create_workspace=create_workspace,
+            run_every_ms=run_every_ms)
 
 
 def add_nets_in_order(step, net_list):
@@ -2612,7 +2615,8 @@ def execution_step(default_name,
                    should_stop_blob=None,
                    only_once=None,
                    num_concurrent_instances=None,
-                   create_workspace=False):
+                   create_workspace=False,
+                   run_every_ms=None):
     """
     Helper for creating an ExecutionStep.
     - steps_or_nets can be:
@@ -2648,6 +2652,8 @@ def execution_step(default_name,
         step.SetNumConcurrentInstances(num_concurrent_instances)
     if create_workspace:
         step.SetCreateWorkspace(True)
+    if run_every_ms:
+        step.RunEveryMillis(run_every_ms)
 
     if isinstance(steps_or_nets, ExecutionStep):
         step.AddSubstep(steps_or_nets)
