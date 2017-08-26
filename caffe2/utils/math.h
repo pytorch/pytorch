@@ -131,6 +131,21 @@ CAFFE2_DECLARE_BINARY_OP(Div);
 
 #undef CAFFE2_DECLARE_BINARY_OP
 
+template <typename T, class Context>
+void ReduceMin(
+    const int N,
+    const T* x,
+    T* y,
+    Tensor<Context>* scratch_ptr,
+    Context* context);
+template <typename T, class Context>
+void ReduceMax(
+    const int N,
+    const T* x,
+    T* y,
+    Tensor<Context>* scratch_ptr,
+    Context* context);
+
 // Adds batch sub-tensors elementwise to output. Stripe is the stripe length
 // and N is the number of elements to add (size of Y).
 template <typename T, class Context>
@@ -153,6 +168,10 @@ void RowwiseMax(const int N, const int D, const T* x, T* y,
 template <typename T, class Context>
 void ColwiseMax(const int N, const int D, const T* x, T* y,
                 Context* context);
+
+// Elemwise maximum of vector x and vector y. z[i] = max(x[i], y[i])
+template <typename T, class Context>
+void ElemwiseMax(const int N, const T* x, const T* y, T* z, Context* context);
 
 // Elemwise maximum of vector x and scalar alpha. y[i] = max(x[i], alpha)
 template <typename T, class Context>
@@ -375,6 +394,8 @@ template <class Context>
 void CopyMatrix(const size_t item_size, const int M, const int N, const void* A,
                 const int lda, void* B, const int ldb, Context* context);
 
+template <typename T, class Context>
+void CopyVector(const int N, const T* A, T* B, Context* context);
 
 uint32_t randomNumberSeed();
 
