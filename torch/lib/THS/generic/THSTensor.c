@@ -332,7 +332,7 @@ void THSTensor_(copy)(THSTensor *self, THSTensor *src) {
 void THSTensor_(transpose)(THSTensor *self, int d1, int d2) {
   int64_t nDimI = THSTensor_(nDimensionI)(self);
   int64_t nDimV = THSTensor_(nDimensionV)(self);
-  THArgCheck(d1 < nDimI && d2 < nDimI, 0, "Transposed dimensions should be sparse. Got nDimI: %ld, d1: %ld, d2: %ld", nDimI, d1, d2);
+  THArgCheck(d1 < nDimI && d2 < nDimI, 0, "Transposed dimensions should be sparse. Got nDimI: %" PRId64 ", d1: %" PRId64 ", d2: %" PRId64, nDimI, d1, d2);
   THLongTensor *indices = THSTensor_(newIndices)(self);
   ptrdiff_t i;
   for (i = 0; i < THSTensor_(nnz)(self); i++) {
