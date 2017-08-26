@@ -3,7 +3,6 @@
 #include <unordered_map>
 
 #include <TH/TH.h>
-#include "err.h"
 #include "libshm.h"
 
 
