@@ -265,13 +265,14 @@ class ReduceLROnPlateau(object):
         if self.in_cooldown:
             self.cooldown_counter -= 1
             self.num_bad_epochs = 0  # ignore any bad epochs in cooldown
+        else:
+            self.num_bad_epochs += 1
 
         if self.is_better(current, self.best):
             self.best = current
             self.num_bad_epochs = 0
             return self.STATUS_UPDATED_BEST
         else:
-            self.num_bad_epochs += 1
             if self.num_bad_epochs > self.patience:
                 self._reduce_lr(epoch)
                 self.cooldown_counter = self.cooldown
@@ -329,7 +330,7 @@ class ReduceLROnPlateauWithBacktrack(ReduceLROnPlateau):
                 {'model': self.model.state_dict(), 'optim': self.optimizer.state_dict()},
                 self.filename)
         elif status == self.STATUS_REDUCED_LR:
-            new_lrs = [ group['lr'] for group in self.optimizer.param_groups]
+            new_lrs = [group['lr'] for group in self.optimizer.param_groups]
             backtrack_dict = load(self.filename)
             self.optimizer.load_state_dict(backtrack_dict['optim'])
             self.model.load_state_dict(backtrack_dict['model'])
