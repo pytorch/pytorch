@@ -115,7 +115,12 @@ int GetDefaultGPUID();
 /**
  * Gets the current GPU id. This is a simple wrapper around cudaGetDevice().
  */
-int GetCurrentGPUID();
+int CaffeCudaGetDevice();
+
+/**
+ * Gets the current GPU id. This is a simple wrapper around cudaGetDevice().
+ */
+void CaffeCudaSetDevice(const int id);
 
 /**
  * Gets the GPU id that the current pointer is located at.
@@ -283,15 +288,14 @@ inline int CAFFE_GET_BLOCKS(const int N) {
 
 class DeviceGuard {
  public:
-  explicit DeviceGuard(int newDevice)
-      : previous_(GetCurrentGPUID()) {
+  explicit DeviceGuard(int newDevice) : previous_(CaffeCudaGetDevice()) {
     if (previous_ != newDevice) {
-      CUDA_ENFORCE(cudaSetDevice(newDevice));
+      CaffeCudaSetDevice(newDevice);
     }
   }
 
   ~DeviceGuard() noexcept {
-    CUDA_CHECK(cudaSetDevice(previous_));
+    CaffeCudaSetDevice(previous_);
   }
 
  private:
