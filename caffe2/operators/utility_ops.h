@@ -1318,8 +1318,9 @@ class SqueezeOp : public Operator<Context> {
     auto* output = Output(0);
     output->CopyFrom(input, &context_);
 
-    CAFFE_ENFORCE(
-        input.dims().back() + 1 >= dims_.size(),
+    CAFFE_ENFORCE_GT(
+        input.ndim(),
+        dims_.back(),
         "Input needs at least ",
         (dims_.back() + 1),
         " dimensions.");
