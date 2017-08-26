@@ -8,12 +8,15 @@ from __future__ import unicode_literals
 from collections import namedtuple, defaultdict
 from past.builtins import basestring
 
-from caffe2.python import core, scope
+import numpy as np
+
+from caffe2.python import core, scope, workspace
 from caffe2.python.modeling import parameter_info
 from caffe2.proto import caffe2_pb2
 
 
 _OPTIMIZER_ITERATION_NAME = "optimizer_iteration"
+_LEARNING_RATE_INJECTION = "lr_injection"
 
 AuxOptimizerParams = namedtuple("AuxOptimizerParams", ["local", "shared"])
 _optimizer_instance_count = defaultdict(int)
@@ -24,7 +27,7 @@ class Optimizer(object):
         self._aux_params = AuxOptimizerParams(local=[], shared=[])
         self._instance_num = _optimizer_instance_count[self.__class__.__name__]
         _optimizer_instance_count[self.__class__.__name__] += 1
-        self._norm_ratio = None
+        self._lr_multiplier = None
 
     '''
     Adds optimization operators to the net for given parameter and its gradient
@@ -103,21 +106,21 @@ class Optimizer(object):
         else:
             lr = net.GetBlobRef(learning_rate_blob)
 
-        if self._norm_ratio is not None:
-            norm_ratio = net.CopyFromCPUInput(
-                self._norm_ratio, self.make_unique_blob_name('norm_ratio')
+        if self._lr_multiplier is not None:
+            lr_multiplier = net.CopyFromCPUInput(
+                self._lr_multiplier, self.make_unique_blob_name('lr_multiplier')
             )
             scaled_lr = net.Mul(
-                [lr, norm_ratio],
+                [lr, lr_multiplier],
                 self.make_unique_blob_name('scaled_lr'),
                 broadcast=1,
             )
+            lr = scaled_lr
 
-            return scaled_lr, iteration
         return lr, iteration
 
-    def add_norm_ratio(self, norm_ratio):
-        self._norm_ratio = norm_ratio
+    def add_lr_multiplier(self, lr_multiplier):
+        self._lr_multiplier = lr_multiplier
 
     @staticmethod
     def dedup(net, sparse_dedup_aggregator, grad):
@@ -522,11 +525,40 @@ def get_param_device(param_name, grad, param_to_device=None, default_device=None
     return device
 
 
-def _calc_norm_ratio(model, params, name_scope, param_to_device, max_gradient_norm):
+def get_lr_injection():
+    """
+    Gets current value for lr_injection, a multiplier for all base
+    learning rates.
+    Must set allow_lr_injection=True when building optimizer, as it
+    relies on synchronization over CPU.
+    """
+    return workspace.FetchBlob(_LEARNING_RATE_INJECTION)
+
+
+def set_lr_injection(lr_injection_value):
+    """
+    Sets lr_injection, a multiplier for all base learning rates.
+    Must set allow_lr_injection=True when building optimizer, as it
+    relies on synchronization over CPU.
+    """
+    workspace.FeedBlob(
+        _LEARNING_RATE_INJECTION,
+        np.array(
+            [float(lr_injection_value)],
+            dtype=np.float32,
+        ),
+    )
+
+
+def _calc_norm_ratio(
+    model, params, name_scope, param_to_device, max_gradient_norm
+):
     with core.NameScope(name_scope):
         grad_squared_sums = []
         for i, param in enumerate(params):
-            device = get_param_device(str(param.blob), param.grad, param_to_device)
+            device = get_param_device(
+                str(param.blob), param.grad, param_to_device
+            )
 
             with core.DeviceScope(device):
                 grad = (
@@ -580,6 +612,7 @@ def _build(
     weights_only=False,
     use_param_info_optim=True,
     max_gradient_norm=None,
+    allow_lr_injection=False,
 ):
     param_to_device = _get_param_to_device(model)
 
@@ -592,14 +625,36 @@ def _build(
             continue
         params.append(param_info)
 
+    lr_multiplier = None
     if max_gradient_norm is not None:
-        norm_ratio = _calc_norm_ratio(
-            model, params,
+        lr_multiplier = _calc_norm_ratio(
+            model,
+            params,
             'norm_clipped_grad_update',
             param_to_device,
             max_gradient_norm,
         )
-        optimizer.add_norm_ratio(norm_ratio)
+
+    if allow_lr_injection:
+        if not model.net.BlobIsDefined(_LEARNING_RATE_INJECTION):
+            lr_injection = model.param_init_net.ConstantFill(
+                [],
+                _LEARNING_RATE_INJECTION,
+                shape=[1],
+                value=1.0,
+            )
+        else:
+            lr_injection = _LEARNING_RATE_INJECTION
+
+        if lr_multiplier is None:
+            lr_multiplier = lr_injection
+        else:
+            lr_multiplier = model.net.Mul(
+                [lr_multiplier, lr_injection],
+                'lr_multiplier',
+                broadcast=1,
+            )
+    optimizer.add_lr_multiplier(lr_multiplier)
 
     for param_info in params:
         param_name = str(param_info.blob)
@@ -630,19 +685,37 @@ def add_weight_decay(model, weight_decay):
     )
 
 
-def build_sgd(model, base_learning_rate, max_gradient_norm=None, **kwargs):
+def build_sgd(
+    model,
+    base_learning_rate,
+    max_gradient_norm=None,
+    allow_lr_injection=False,
+    **kwargs
+):
     sgd_optimizer = SgdOptimizer(base_learning_rate, **kwargs)
-    return _build(model, sgd_optimizer, max_gradient_norm=max_gradient_norm)
+    return _build(
+        model,
+        sgd_optimizer,
+        max_gradient_norm=max_gradient_norm,
+        allow_lr_injection=allow_lr_injection,
+    )
 
 
 def build_multi_precision_sgd(
-    model, base_learning_rate, max_gradient_norm=None, **kwargs
+    model,
+    base_learning_rate,
+    max_gradient_norm=None,
+    allow_lr_injection=False,
+    **kwargs
 ):
     multi_prec_sgd_optimizer = MultiPrecisionSgdOptimizer(
         base_learning_rate, **kwargs
     )
     return _build(
-        model, multi_prec_sgd_optimizer, max_gradient_norm=max_gradient_norm
+        model,
+        multi_prec_sgd_optimizer,
+        max_gradient_norm=max_gradient_norm,
+        allow_lr_injection=allow_lr_injection,
     )
 
 
@@ -659,12 +732,29 @@ def build_adagrad(
     base_learning_rate,
     parameters=None,
     max_gradient_norm=None,
+    allow_lr_injection=False,
     **kwargs
 ):
     adagrad_optimizer = AdagradOptimizer(alpha=base_learning_rate, **kwargs)
-    return _build(model, adagrad_optimizer, max_gradient_norm=max_gradient_norm)
+    return _build(
+        model,
+        adagrad_optimizer,
+        max_gradient_norm=max_gradient_norm,
+        allow_lr_injection=allow_lr_injection,
+    )
 
 
-def build_adam(model, base_learning_rate, max_gradient_norm=None, **kwargs):
+def build_adam(
+    model,
+    base_learning_rate,
+    max_gradient_norm=None,
+    allow_lr_injection=False,
+    **kwargs
+):
     adam_optimizer = AdamOptimizer(alpha=base_learning_rate, **kwargs)
-    return _build(model, adam_optimizer, max_gradient_norm=max_gradient_norm)
+    return _build(
+        model,
+        adam_optimizer,
+        max_gradient_norm=max_gradient_norm,
+        allow_lr_injection=allow_lr_injection,
+    )

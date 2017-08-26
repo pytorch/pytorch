@@ -6,7 +6,7 @@ from caffe2.python.optimizer import (
     build_adagrad, build_adam, add_weight_decay, SgdOptimizer)
 from caffe2.python.optimizer_context import UseOptimizer
 from caffe2.python.optimizer_test_util import (
-    OptimizerTestBase, GradientClippingTestBase
+    OptimizerTestBase, LRModificationTestBase
 )
 from caffe2.python.test_util import TestCase
 from caffe2.python import workspace
@@ -15,7 +15,7 @@ import numpy as np
 import unittest
 
 
-class TestSgd(OptimizerTestBase, GradientClippingTestBase, TestCase):
+class TestSgd(OptimizerTestBase, LRModificationTestBase, TestCase):
     def build_optimizer(self, model, **kwargs):
         self._skip_gpu = False
         return build_sgd(model, base_learning_rate=0.1, **kwargs)
@@ -29,7 +29,7 @@ class TestSgd(OptimizerTestBase, GradientClippingTestBase, TestCase):
 
 
 class TestMultiPrecisionSgd(
-    OptimizerTestBase, GradientClippingTestBase, TestCase
+    OptimizerTestBase, LRModificationTestBase, TestCase
 ):
     def build_optimizer(self, model, **kwargs):
         self._skip_gpu = False
@@ -69,7 +69,7 @@ class TestFtrl(OptimizerTestBase, TestCase):
             workspace.FetchBlob(param)
 
 
-class TestAdagrad(OptimizerTestBase, GradientClippingTestBase, TestCase):
+class TestAdagrad(OptimizerTestBase, LRModificationTestBase, TestCase):
     def build_optimizer(self, model, **kwargs):
         self._skip_gpu = False
         return build_adagrad(model, base_learning_rate=1.0, **kwargs)
@@ -81,7 +81,7 @@ class TestAdagrad(OptimizerTestBase, GradientClippingTestBase, TestCase):
             workspace.FetchBlob(param)
 
 
-class TestAdam(OptimizerTestBase, GradientClippingTestBase, TestCase):
+class TestAdam(OptimizerTestBase, LRModificationTestBase, TestCase):
     def build_optimizer(self, model, **kwargs):
         self._skip_gpu = False
         return build_adam(model, base_learning_rate=0.1, **kwargs)

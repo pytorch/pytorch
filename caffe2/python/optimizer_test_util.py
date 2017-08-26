@@ -7,7 +7,7 @@ from __future__ import unicode_literals
 
 import unittest
 import numpy as np
-from caffe2.python import brew, core, workspace, cnn
+from caffe2.python import brew, core, workspace, cnn, optimizer
 from caffe2.proto import caffe2_pb2
 from caffe2.python.modeling.initializers import (
         Initializer, pFP16Initializer)
@@ -150,7 +150,7 @@ class OptimizerTestBase(object):
         self.check_optimizer(optimizer)
 
 
-class GradientClippingTestBase(object):
+class LRModificationTestBase(object):
     """
     This is an abstract base class.
     Don't inherit from unittest.TestCase, and don't name it 'Test*'.
@@ -178,7 +178,7 @@ class GradientClippingTestBase(object):
     def test_global_norm_based_gradient_clipping(self):
         max_gradient_norm = 1
         model, perfect_model, data, label = self._createDense()
-        self.build_optimizer(model, max_gradient_norm=max_gradient_norm)
+        opt = self.build_optimizer(model, max_gradient_norm=max_gradient_norm)
 
         params = []
         for param in model.GetParams(top_scope=True):
@@ -193,11 +193,13 @@ class GradientClippingTestBase(object):
         workspace.FeedBlob('label', label[0])
         workspace.RunNetOnce(model.param_init_net)
         workspace.CreateNet(model.net, True)
-        for _ in range(1):
-            idx = np.random.randint(data.shape[0])
-            workspace.FeedBlob('data', data[idx])
-            workspace.FeedBlob('label', label[idx])
-            workspace.RunNet(model.net.Proto().name)
+        self.assertIsNotNone(opt._lr_multiplier)
+
+        # Run net once
+        idx = np.random.randint(data.shape[0])
+        workspace.FeedBlob('data', data[idx])
+        workspace.FeedBlob('label', label[idx])
+        workspace.RunNet(model.net.Proto().name)
 
         reference = self._gradient_ratio_reference(
             model,
@@ -208,5 +210,30 @@ class GradientClippingTestBase(object):
             'norm_clipped_grad_update/norm_ratio')
         np.testing.assert_almost_equal(norm_ratio, reference)
         self.assertTrue(
-            norm_ratio < 1.0, "Bad test, gradient not being scaled."
+            reference < 1.0, "Bad test, gradient not being scaled."
         )
+
+    def test_lr_injection(self):
+        model, perfect_model, data, label = self._createDense()
+        opt = self.build_optimizer(
+            model, max_gradient_norm=1, allow_lr_injection=True
+        )
+
+        workspace.FeedBlob('data', data[0])
+        workspace.FeedBlob('label', label[0])
+        workspace.RunNetOnce(model.param_init_net)
+        workspace.CreateNet(model.net, True)
+
+        # Test LR injection initialized properly
+        self.assertIsNotNone(opt._lr_multiplier)
+        self.assertEqual(optimizer.get_lr_injection(), 1)
+
+        # Test that we're able to modify the value of the lr_injection
+        optimizer.set_lr_injection(0)
+        self.assertEqual(optimizer.get_lr_injection(), 0)
+
+        # Test that setting the lr_injector properly propogates to the
+        # lr_multiplier. Here, we have both lr_injector and norm_ratio that
+        # affect the lr_multiplier
+        workspace.RunNet(model.net.Proto().name)
+        self.assertEqual(workspace.FetchBlob('lr_multiplier'), 0)
