@@ -555,6 +555,32 @@ DEFINE_SIMPLE_BINARY_FUNCTION(Div, /)
 // Eigen or via custom code.
 ////////////////////////////////////////////////////////////////////////////////
 
+#define CAFFE2_SPECIALIZED_REDUCEMIN(T)    \
+  template <>                              \
+  void ReduceMin<T, CPUContext>(           \
+      const int N,                         \
+      const T* x,                          \
+      T* y,                                \
+      Tensor<CPUContext>* /*scratch_ptr*/, \
+      CPUContext* /*context*/) {           \
+    *y = *std::min_element(x, x + N);      \
+  }
+CAFFE2_SPECIALIZED_REDUCEMIN(float)
+#undef CAFFE2_SPECIALIZED_REDUCEMIN
+
+#define CAFFE2_SPECIALIZED_REDUCEMAX(T)    \
+  template <>                              \
+  void ReduceMax<T, CPUContext>(           \
+      const int N,                         \
+      const T* x,                          \
+      T* y,                                \
+      Tensor<CPUContext>* /*scratch_ptr*/, \
+      CPUContext* /*context*/) {           \
+    *y = *std::max_element(x, x + N);      \
+  }
+CAFFE2_SPECIALIZED_REDUCEMAX(float)
+#undef CAFFE2_SPECIALIZED_REDUCEMAX
+
 #define CAFFE2_SPECIALIZED_ROWWISEMAX(T)                         \
   template <>                                                    \
   void RowwiseMax<T, CPUContext>(                                \
@@ -574,6 +600,17 @@ CAFFE2_SPECIALIZED_ROWWISEMAX(float)
   }
 CAFFE2_SPECIALIZED_COLWISEMAX(float)
 #undef CAFFE2_SPECIALIZED_COLWISEMAX
+
+#define CAFFE2_SPECIALIZED_ELEMWISEMAX(T)                                   \
+  template <>                                                               \
+  void ElemwiseMax<T, CPUContext>(                                          \
+      const int N, const T* x, const T* y, T* z, CPUContext* /*context*/) { \
+    std::transform(x, x + N, y, z, [](const T& x_i, const T& y_i) {         \
+      return std::max(x_i, y_i);                                            \
+    });                                                                     \
+  }
+CAFFE2_SPECIALIZED_ELEMWISEMAX(float)
+#undef CAFFE2_SPECIALIZED_ELEMWISEMAX
 
 #define CAFFE2_SPECIALIZED_MAXIMUM(T)                                          \
   template <>                                                                  \
@@ -1349,6 +1386,15 @@ void CopyMatrix<CPUContext>(
            itemsize * N);
   }
 }
+
+#define CAFFE2_SPECIALIZED_COPYVECTOR(T)                            \
+  template <>                                                       \
+  void CopyVector<T, CPUContext>(                                   \
+      const int N, const T* src, T* dst, CPUContext* /*context*/) { \
+    memcpy(dst, src, sizeof(T) * N);                                \
+  }
+CAFFE2_SPECIALIZED_COPYVECTOR(float)
+#undef CAFFE2_SPECIALIZED_COPYVECTOR
 
 uint32_t randomNumberSeed() {
   // Originally copied from folly::randomNumberSeed (at 418ad4)
