@@ -94,8 +94,13 @@ struct THCNumerics<int32_t> {
 
 template <>
 struct THCNumerics<int64_t> {
+#ifdef _MSC_VER
+  static inline __host__ __device__ int64_t min() { return _I64_MIN; }
+  static inline __host__ __device__ int64_t max() { return _I64_MAX; }
+#else
   static inline __host__ __device__ int64_t min() { return LONG_MIN; }
   static inline __host__ __device__ int64_t max() { return LONG_MAX; }
+#endif
 
   static inline __host__ __device__ bool lt(int64_t a, int64_t b) { return a < b; }
   static inline __host__ __device__ bool le(int64_t a, int64_t b) { return a <= b; }
