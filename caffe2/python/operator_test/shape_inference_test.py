@@ -319,6 +319,22 @@ class TestShapeInference(test_util.TestCase):
 
         self.InferTensorRunAndCompare(model)
 
+    def testConcat(self):
+        net = core.Net("concat")
+        net.Concat(["A", "B"], ["C", "splits"], axis=1)
+        net.Concat(["C", "D"], ["E"], order="NCHW")
+        (shapes, types) = workspace.InferShapesAndTypes(
+            [net],
+            {
+                'A': [10, 12, 9, 10],
+                'B': [10, 9, 9, 10],
+                'D': [10, 2, 9, 10]
+            }
+        )
+        self.assertEqual(shapes['C'], [10, 21, 9, 10])
+        self.assertEqual(shapes['splits'], [1, 1, 1, 1])
+        self.assertEqual(shapes['E'], [10, 23, 9, 10])
+
     def testSqueeze(self):
         net = core.Net("sq")
         net.Squeeze(["data"], ["data_squeezed"], dims=[3, 1])
