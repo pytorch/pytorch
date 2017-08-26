@@ -54,7 +54,11 @@ class DataParallelModelTest(TestCase):
 
         def add_optimizer(model):
             return optimizer.build_sgd(
-                model, 0.1, policy="fixed", max_gradient_norm=5.0
+                model,
+                0.1,
+                policy="fixed",
+                max_gradient_norm=5.0,
+                allow_lr_injection=True,
             )
 
         workspace.ResetWorkspace()
