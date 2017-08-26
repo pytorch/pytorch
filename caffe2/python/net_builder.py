@@ -7,7 +7,6 @@ from __future__ import unicode_literals
 
 from caffe2.python import core, context
 from caffe2.python.task import Task, TaskGroup
-from caffe2.python.control_ops_util import add_if_op, add_while_op
 
 
 @context.define_context()
@@ -29,22 +28,17 @@ class NetBuilder(object):
         step = core.to_execution_step(nb)
     """
     def __init__(self, name=None, _stop_blob_required=False,
-                 _stop_blob=None, _fullname=None, _use_control_ops=False):
-        self._parent = NetBuilder.current(required=False)
+                 _stop_blob=None, _fullname=None):
+        nb = NetBuilder.current(required=False)
         assert not _fullname or not name, 'Cannot set both _fullname and name'
-        assert not _use_control_ops or \
-            (not _stop_blob_required and not _stop_blob), \
-            'Stop blobs are not used with control operators'
         self.name = _fullname or '/'.join(
-            n for n in (self._parent.name if self._parent else None, name) if n
+            n for n in (nb.name if nb else None, name) if n
         )
         self._frozen = False
         self._current_net = None
         self._children = []
-        self._lexical_scope = set()
         self._stop_blob = _stop_blob
         self._stop_blob_required = _stop_blob_required
-        self._use_control_ops = _use_control_ops
 
     def stop_blob(self):
         """
@@ -54,8 +48,6 @@ class NetBuilder(object):
         in the current net, so it doesn't initialize it if the current net is
         the first of the builder.
         """
-        assert not self._use_control_ops, \
-            'Stop blobs are not used with control operators'
         if self._stop_blob is None:
             net = self.current_net()
             self._stop_blob = core.BlobReference(
@@ -66,8 +58,6 @@ class NetBuilder(object):
         return self._stop_blob
 
     def stop_if(self, blob):
-        assert not self._use_control_ops, \
-            'Stop blobs are not used with control operators'
         ops.Copy(blob, self.stop_blob())
         self._current_net = None
 
@@ -75,49 +65,13 @@ class NetBuilder(object):
         assert not self._frozen, (
             'This NetBuilder (%s) has been built already.' % self.name)
 
-    def _update_lexical_scope(self):
-        """
-        Updates lexical scope based on the current list of children.
-        Lexical scope contains names of blobs that are currently available
-        and were introduced in the net builder
-        """
-        self._lexical_scope = set()
-        for child in self._children:
-            if isinstance(child, core.Net):
-                self._lexical_scope |= child.UsedBlobNames()
-            elif isinstance(child, NetBuilder) and child._use_control_ops:
-                self._lexical_scope |= child._lexical_scope
-
-    def _collect_lexical_scopes(self):
-        """
-        Collects the names of all blobs currently visible in the net builder
-        """
-        scope = set(self._lexical_scope)
-        parent = self._parent
-        while parent:
-            scope |= parent._lexical_scope
-            parent = parent._parent
-        return scope
-
-    def _reset_children(self):
-        self._current_net = None
-        self._children = []
-        self._lexical_scope = set()
-
     def add(self, child):
         self._assert_mutable()
-
-        if self._use_control_ops:
-            assert isinstance(child, core.Net) or (
-                isinstance(child, NetBuilder) and child._use_control_ops), \
-                "Expected Net or NetBuilder with control ops"
-
         self._current_net = None
         self._children.append(child)
         # to-do : check it's not a dag net
         if isinstance(child, core.Net):
             self._current_net = child
-        self._update_lexical_scope()
         return child
 
     def current_net(self, name=None):
@@ -138,58 +92,12 @@ class NetBuilder(object):
         return self._children
 
     def __exit__(self, etype, *args):
-        self._update_lexical_scope()
         self.freeze()
         if etype is not None:
             return
         assert (not self._stop_blob_required) or self._stop_blob is not None, (
             'This NetBuilder (%s) requires a stop condition ' % self.name +
             'to be set with `stop` or `stop_if`')
-
-    @staticmethod
-    def merge_nets(nets_or_builders, outer_blob_names):
-        # Only nets or builders with control ops are allowed.
-        # Need to pay attention to external outputs, e.g.
-        #   ...
-        #   IfNet1 (cond_blob):
-        #       (Net1)
-        #           X = 1
-        #       IfNet2 (...):
-        #           X = X + 1
-        #   ...
-        # In this example there're two children in then branch of IfNet1:
-        # a subnet Net1 that creates blob X and sets its value to one, and
-        # a net builder IfNet2 that (conditionally) increments X.
-        # From IfNet2's point of view X is an external input
-        # and output blob, it will be put into IfNet2 net's external_output.
-        # At the same time, from the point of view of IfNet1 X is purely local.
-        # Net.AppendNet just merges external outputs of the networks, so
-        # without checking this the result of Net1.AppendNet(IfNet2's net)
-        # would have blob X in external_output
-
-        net = None
-        for n in nets_or_builders:
-            cur = None
-            if isinstance(n, NetBuilder):
-                assert n._use_control_ops, \
-                    "Merging of NetBuilder supported only for control ops"
-                nets = n.get()
-                assert len(nets) == 1 and isinstance(nets[0], core.Net), \
-                    "Invalid control op net builder"
-                cur = nets[0]
-            else:
-                assert isinstance(n, core.Net)
-                cur = n
-            if net:
-                net.AppendNet(cur)
-            else:
-                net = cur
-        if net:
-            # correct external output
-            external_outputs = [o for o in net.Proto().external_output
-                                    if o in outer_blob_names]
-            net.Proto().external_output[:] = external_outputs
-        return net
 
     def __str__(self):
         return self.name or 'Un-named NetBuilder'
@@ -324,37 +232,6 @@ class Operations(object):
             The example will print 'Will print' once.
         """
         return NetBuilder.current().add(_RunIf(cond, name=name))
-
-    def IfNet(self, cond, name=None):
-        """
-        Same as If, but uses 'If' operator instead of execution step logic
-        """
-        return NetBuilder.current().add(_RunIfNet(cond, name=name))
-
-    def Else(self, name=None):
-        """
-        Else branch of IfNet, has to be specified immediately after IfNet.
-            Example:
-                with ops.IfNet(ops.LT([x, y])):
-                    ...
-                with ops.Else():
-                    ...
-        """
-        return _RunElseNet(name=name)
-
-    def WhileNet(self, name=None):
-        """
-        NetBuilder for 'While' control operator
-        """
-        return NetBuilder.current().add(_RunWhileNet(name=name))
-
-    def Condition(self, name=None):
-        """
-        Loop's condition, executed within WhileNet context
-        """
-        assert isinstance(NetBuilder.current(), _RunWhileNet), \
-            "Use of Condition outside of WhileNet"
-        return _RunWhileCondition(name=name)
 
     def task_init(self):
         """
@@ -599,139 +476,3 @@ class _RunIf(_RunOnce):
         assert not self._is_else, 'Elif not allowed for an Else.'
         return NetBuilder.current().add(
             _RunIf(name=name or self.name, _already_ran=self._already_ran))
-
-
-class _RunIfNet(NetBuilder):
-    """
-    Generates a single net that uses If operator
-    """
-    def __init__(self, cond_blob, name=None):
-        NetBuilder.__init__(self, name=name, _use_control_ops=True)
-        assert cond_blob, 'Conditional blob is not specified for an If net'
-        self._cond_blob = cond_blob
-        self._then_net = None
-        self._else_net = None
-
-    def add(self, child):
-        return NetBuilder.add(self, child)
-
-    def __exit__(self, type, *args):
-        if type is None:
-            _then_nets = self._children
-            self._reset_children()
-
-            self._then_net = NetBuilder.merge_nets(
-                _then_nets, self._collect_lexical_scopes())
-            if not self._then_net:
-                self._then_net = core.Net('empty_then_net')
-
-            if_net = core.Net(self.name + '/if_net')
-            add_if_op(if_net, self._cond_blob, self._collect_lexical_scopes(),
-                        self._then_net, self._else_net)
-
-            self._current_net = if_net
-            self._children = [if_net]
-        NetBuilder.__exit__(self, type, *args)
-
-
-class _RunElseNet(NetBuilder):
-    """
-    Else branch for _RunIfNet builder
-    """
-    def __init__(self, name=None):
-        NetBuilder.__init__(self, name=name, _use_control_ops=True)
-        assert self._parent and len(self._parent._children) > 0 and \
-            isinstance(self._parent._children[-1], _RunIfNet), \
-            'Invalid use of Else builder'
-        self._if_builder = self._parent._children[-1]
-
-    def __exit__(self, type, *args):
-        if type is None:
-            _else_nets = self._children
-            self._reset_children()
-
-            self._if_builder._else_net = NetBuilder.merge_nets(
-                _else_nets, self._collect_lexical_scopes())
-            if self._if_builder._else_net:
-                if_else_net = core.Net(self.name + '/if_else_net')
-                add_if_op(
-                    if_else_net,
-                    self._if_builder._cond_blob,
-                    self._collect_lexical_scopes(),
-                    self._if_builder._then_net,
-                    self._if_builder._else_net)
-                self._if_builder._current_net = if_else_net
-                self._if_builder._children = [if_else_net]
-        NetBuilder.__exit__(self, type, *args)
-
-
-class _RunWhileNet(NetBuilder):
-    """
-    Generates a single net that uses While operator
-    """
-    def __init__(self, name=None):
-        NetBuilder.__init__(self, name=name, _use_control_ops=True)
-        self._cond_builder = None
-
-    def __exit__(self, type, *args):
-        if type is None:
-            assert self._cond_builder, \
-                'Condition builder must be specified in While op'
-
-            _cond_blob = self._cond_builder._cond_blob
-            _cond_net = self._cond_builder._cond_net
-
-            loop_body = self._children
-            self._reset_children()
-            loop_body_net = NetBuilder.merge_nets(
-                loop_body, self._collect_lexical_scopes())
-            if not loop_body_net:
-                loop_body_net = core.Net('empty_loop_body_net')
-
-            while_net = core.Net(self.name + '/while_net')
-            add_while_op(while_net, _cond_blob, self._collect_lexical_scopes(),
-                            loop_body_net, _cond_net)
-
-            self._current_net = while_net
-            self._children = [while_net]
-        NetBuilder.__exit__(self, type, *args)
-
-
-class _RunWhileCondition(NetBuilder):
-    """
-    Computes loop's condition, used in the context of WhileNet.
-    Last operator must have a single scalar boolean output that will be used
-    as a condition value, no other blobs created in the condition net are
-    visible outside of it
-    """
-    def __init__(self, name=None):
-        NetBuilder.__init__(self, name=name, _use_control_ops=True)
-        assert self._parent and isinstance(self._parent, _RunWhileNet), \
-            'Invalid use of loop condition builder'
-        self._cond_blob = None
-        self._cond_net = None
-
-    def __enter__(self):
-        builder = NetBuilder.__enter__(self)
-        assert not self._parent._cond_builder, \
-            'Multiple loop condition builders specified'
-        assert len(self._parent._children) == 0, \
-            'Condition definition must be specified before the loop\'s body'
-        self._parent._cond_builder = self
-        return builder
-
-    def __exit__(self, type, *args):
-        if type is None:
-            condition_body = self._children
-            self._reset_children()
-            self._cond_net = NetBuilder.merge_nets(
-                condition_body, self._collect_lexical_scopes())
-            assert self._cond_net, 'Invalid loop condition specified'
-            assert len(self._cond_net.Proto().op) > 0, 'Invalid condition net'
-            last_op = self._cond_net.Proto().op[-1]
-            assert len(last_op.output) == 1, 'Invalid condition net'
-            self._cond_blob = core.BlobReference(name=last_op.output[0], net=None)
-
-            self._current_net = self._cond_net
-            self._children = [self._cond_net]
-        NetBuilder.__exit__(self, type, *args)

@@ -1492,20 +1492,6 @@ class Net(object):
                     return True
         return blob_name in self._external_input_map
 
-    def UsedBlobNames(self):
-        """
-        Returns a set of blob names used in the net
-        """
-        blob_names = set()
-        for op in self._net.op:
-            blob_names |= set(op.input)
-            blob_names |= set(op.output)
-        if self._net.external_input:
-            blob_names |= set(self._net.external_input)
-        if self._net.external_output:
-            blob_names |= set(self._net.external_output)
-        return blob_names
-
     def GetBlobRef(self, blob_name):
         """
         Given the name of a blob produced by this net, return a BlobReference
