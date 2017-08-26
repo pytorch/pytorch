@@ -1,5 +1,6 @@
 from bisect import bisect_right
 from .optimizer import Optimizer
+from .. import load, save
 
 
 class _LRScheduler(object):
@@ -52,6 +53,7 @@ class LambdaLR(_LRScheduler):
         >>>     train(...)
         >>>     validate(...)
     """
+
     def __init__(self, optimizer, lr_lambda, last_epoch=-1):
         self.optimizer = optimizer
         if not isinstance(lr_lambda, list) and not isinstance(lr_lambda, tuple):
@@ -249,26 +251,34 @@ class ReduceLROnPlateau(object):
         self.cooldown_counter = 0
         self.num_bad_epochs = 0
 
+    """ Status codes to be returned by ReduceLROnPlateau.step() """
+    STATUS_WAITING = 1
+    STATUS_UPDATED_BEST = 2
+    STATUS_REDUCED_LR = 3
+
     def step(self, metrics, epoch=None):
         current = metrics
         if epoch is None:
             epoch = self.last_epoch = self.last_epoch + 1
         self.last_epoch = epoch
 
-        if self.is_better(current, self.best):
-            self.best = current
-            self.num_bad_epochs = 0
-        else:
-            self.num_bad_epochs += 1
-
         if self.in_cooldown:
             self.cooldown_counter -= 1
             self.num_bad_epochs = 0  # ignore any bad epochs in cooldown
 
-        if self.num_bad_epochs > self.patience:
-            self._reduce_lr(epoch)
-            self.cooldown_counter = self.cooldown
+        if self.is_better(current, self.best):
+            self.best = current
             self.num_bad_epochs = 0
+            return self.STATUS_UPDATED_BEST
+        else:
+            self.num_bad_epochs += 1
+            if self.num_bad_epochs > self.patience:
+                self._reduce_lr(epoch)
+                self.cooldown_counter = self.cooldown
+                self.num_bad_epochs = 0
+                return self.STATUS_REDUCED_LR
+            else:
+                return self.STATUS_WAITING
 
     def _reduce_lr(self, epoch):
         for i, param_group in enumerate(self.optimizer.param_groups):
@@ -303,3 +313,26 @@ class ReduceLROnPlateau(object):
         else:  # mode == 'max' and epsilon_mode == 'abs':
             self.is_better = lambda a, best: a > best + threshold
             self.mode_worse = -float('Inf')
+
+
+class ReduceLROnPlateauWithBacktrack(ReduceLROnPlateau):
+    def __init__(self, optimizer, model, filename='./best.pth', **kwargs):
+        self.filename = filename
+        self.model = model
+        super(ReduceLROnPlateauWithBacktrack, self).__init__(
+            optimizer=optimizer, **kwargs)
+
+    def step(self, metrics, epoch=None):
+        status = super(ReduceLROnPlateauWithBacktrack, self).step(metrics=metrics, epoch=epoch)
+        if status == self.STATUS_UPDATED_BEST:
+            save(
+                {'model': self.model.state_dict(), 'optim': self.optimizer.state_dict()},
+                self.filename)
+        elif status == self.STATUS_REDUCED_LR:
+            new_lrs = [ group['lr'] for group in self.optimizer.param_groups]
+            backtrack_dict = load(self.filename)
+            self.optimizer.load_state_dict(backtrack_dict['optim'])
+            self.model.load_state_dict(backtrack_dict['model'])
+            # Note that new_lr might not be saved_lr * gamma
+            for new_lr, group in zip(new_lrs, self.optimizer.param_groups):
+                group['lr'] = new_lr
