@@ -117,19 +117,9 @@ static void Caffe2InitializeCuda() {
       "max number of gpus expected (",
       CAFFE2_COMPILE_TIME_MAX_GPUS,
       "). Increase that and recompile the caffe binary.");
-  // Save the current device so we can restore it after moving across
-  // different devices.
-  int init_device;
-  CUDA_ENFORCE(cudaGetDevice(&init_device));
 
   for (int i = 0; i < NumCudaDevices(); ++i) {
-    auto err = cudaSetDevice(i);
-    if (err != cudaSuccess) {
-      LOG(WARNING)
-          << "Cannot use device " << i
-          << "due to the following error: " << cudaGetErrorString(err);
-      continue;
-    }
+    DeviceGuard g(i);
     // Enable peer access.
     const int peer_group = i / CAFFE2_CUDA_MAX_PEER_SIZE;
     const int peer_start = peer_group * CAFFE2_CUDA_MAX_PEER_SIZE;
@@ -152,8 +142,6 @@ static void Caffe2InitializeCuda() {
       }
     }
   }
-  // Restore the current device.
-  CUDA_ENFORCE(cudaSetDevice(init_device));
 
   RegisterTypeCallFunction(
     TypeMeta::Id<Tensor<CUDAContext>>(),
@@ -286,7 +274,7 @@ std::vector<long> CUDAContext::MaxMemoryByGpu() {
 
 namespace {
 void TrackMemoryAlloc(size_t nbytes) {
-  int this_gpu = GetCurrentGPUID();
+  int this_gpu = CaffeCudaGetDevice();
   g_total_by_gpu_map[this_gpu] += nbytes;
   g_max_by_gpu_map[this_gpu] =
       max(g_max_by_gpu_map[this_gpu], g_total_by_gpu_map[this_gpu]);
@@ -326,14 +314,14 @@ std::pair<void*, MemoryDeleter> CUDAContext::New(size_t nbytes) {
     CUDA_ENFORCE(cudaMalloc(&ptr, nbytes));
     if (FLAGS_caffe2_gpu_memory_tracking) {
       g_size_map[ptr] = nbytes;
-      g_cuda_device_affiliation[ptr] = GetCurrentGPUID();
+      g_cuda_device_affiliation[ptr] = CaffeCudaGetDevice();
     }
     return {ptr, Delete};
   case CudaMemoryPoolType::CUB:
     CUDA_ENFORCE(g_cub_allocator->DeviceAllocate(&ptr, nbytes));
-    g_cuda_device_affiliation[ptr] = GetCurrentGPUID();
+    g_cuda_device_affiliation[ptr] = CaffeCudaGetDevice();
     VLOG(2) << "CUB allocating pointer " << ptr << " on device "
-            << GetCurrentGPUID();
+            << CaffeCudaGetDevice();
     if (FLAGS_caffe2_gpu_memory_tracking) {
       g_size_map[ptr] = nbytes;
     }

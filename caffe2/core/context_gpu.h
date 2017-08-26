@@ -109,7 +109,7 @@ class CUDAContext final {
 
   inline void SwitchToDevice(int stream_id) {
     set_stream_id(stream_id);
-    CUDA_ENFORCE(cudaSetDevice(gpu_id_));
+    CaffeCudaSetDevice(gpu_id_);
   }
   inline void SwitchToDevice() {
     SwitchToDevice(0);

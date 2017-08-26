@@ -30,12 +30,12 @@ void EventRecordCUDA(const void* context, Event* event) {
   // When recording, one needs to make sure that the current gpu id is correct.
   // TODO(jiayq): move the enforce logic to the caller?
   CAFFE_ENFORCE_EQ(
-      GetCurrentGPUID(),
+      CaffeCudaGetDevice(),
       wrapper->cuda_gpu_id_,
       "When you call EventRecordCUDA, your current device should be the same "
       "as the device specified by the event.");
   CAFFE_ENFORCE_EQ(
-      GetCurrentGPUID(),
+      CaffeCudaGetDevice(),
       static_cast<const CUDAContext*>(context)->cuda_gpu_id());
   CUDA_ENFORCE(cudaEventRecord(
       wrapper->cuda_event_,
@@ -51,7 +51,7 @@ void EventFinishCUDA(const Event* event) {
 // Both waiter and event are cuda.
 void EventWaitCUDACUDA(const Event* event, void* context) {
   CAFFE_ENFORCE_EQ(
-      GetCurrentGPUID(),
+      CaffeCudaGetDevice(),
       static_cast<const CUDAContext*>(context)->cuda_gpu_id());
   CUDA_CHECK(cudaStreamWaitEvent(
       static_cast<CUDAContext*>(context)->cuda_stream(),

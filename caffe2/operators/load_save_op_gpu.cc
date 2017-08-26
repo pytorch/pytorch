@@ -8,7 +8,7 @@ void LoadOp<CUDAContext>::SetCurrentDevice(BlobProto* proto) {
   if (proto->has_tensor()) {
     auto* device_detail = proto->mutable_tensor()->mutable_device_detail();
     device_detail->set_device_type(CUDA);
-    device_detail->set_cuda_gpu_id(GetCurrentGPUID());
+    device_detail->set_cuda_gpu_id(CaffeCudaGetDevice());
   }
 }
 
