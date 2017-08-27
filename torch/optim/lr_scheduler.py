@@ -317,6 +317,54 @@ class ReduceLROnPlateau(object):
 
 
 class ReduceLROnPlateauWithBacktrack(ReduceLROnPlateau):
+    """Load training state from the best epoch and reduce learning
+    rate when a metric has stopped improving.
+    Models often benefit from reducing the learning rate by a factor
+    of 2-10 once learning stagnates. This scheduler reads a metrics
+    quantity and if no improvement is seen for a 'patience' number
+    of epochs, the learning rate is reduced, and the best state is
+    loaded.
+
+    Args:
+        optimizer (Optimizer): Wrapped optimizer.
+        model (torch.nn.Module): Model to be saved and backtracked.
+        filename (str): Directory to save the best state.
+        mode (str): One of `min`, `max`. In `min` mode, lr will
+            be reduced when the quantity monitored has stopped
+            decreasing; in `max` mode it will be reduced when the
+            quantity monitored has stopped increasing. Default: 'min'.
+        factor (float): Factor by which the learning rate will be
+            reduced. new_lr = lr * factor. Default: 0.1.
+        patience (int): Number of epochs with no improvement after
+            which learning rate will be reduced. Default: 10.
+        verbose (bool): If True, prints a message to stdout for
+            each update. Default: False.
+        threshold (float): Threshold for measuring the new optimum,
+            to only focus on significant changes. Default: 1e-4.
+        threshold_mode (str): One of `rel`, `abs`. In `rel` mode,
+            dynamic_threshold = best * ( 1 + threshold ) in 'max'
+            mode or best * ( 1 - threshold ) in `min` mode.
+            In `abs` mode, dynamic_threshold = best + threshold in
+            `max` mode or best - threshold in `min` mode. Default: 'rel'.
+        cooldown (int): Number of epochs to wait before resuming
+            normal operation after lr has been reduced. Default: 0.
+        min_lr (float or list): A scalar or a list of scalars. A
+            lower bound on the learning rate of all param groups
+            or each group respectively. Default: 0.
+        eps (float): Minimal decay applied to lr. If the difference
+            between new and old lr is smaller than eps, the update is
+            ignored. Default: 1e-8.
+
+    Example:
+        >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
+        >>> scheduler = ReduceLROnPlateau(optimizer, 'min')
+        >>> for epoch in range(10):
+        >>>     train(...)
+        >>>     val_loss = validate(...)
+        >>>     # Note that step should be called after validate()
+        >>>     scheduler.step(val_loss)
+    """
+
     def __init__(self, optimizer, model, filename='./best.pth', **kwargs):
         self.filename = filename
         self.model = model
