@@ -73,7 +73,7 @@ static void THNN_(unfolded_acc_row)(
 // #pragma omp parallel for private(c)
 	for (c = 0; c < inputFrameSize; c++) {
 		size_t kw, x;
-		long long ix = 0;
+		size_t ix = 0;
 
 		for (kw = 0; kw < kW; kw++) {
 			real *src = finput_data
@@ -81,7 +81,7 @@ static void THNN_(unfolded_acc_row)(
 			            + kw * (nOutputFrame);
 			real *dst = input_data + c * (nInputFrame);
 
-			ix = (long long)(kw);
+			ix = (size_t)(kw);
 			if (dW == 1) {
 			  real *dst_slice = dst + (size_t)(ix);
 			  THVector_(cadd)(dst_slice, dst_slice, src, 1, nOutputFrame);
@@ -116,11 +116,11 @@ static void THNN_(unfolded_copy_row)(
 		size_t rest = k % kW;
 		size_t kw = rest % kW;
 		size_t x;
-		long long ix;
+		size_t ix;
 		real *dst = finput_data + c * (kW * nOutputFrame) + kw * (nOutputFrame);
 		real *src = input_data + c * (nInputFrame);
 
-		ix = (long long)(kw);
+		ix = (size_t)(kw);
 		if (dW == 1) {
 			memcpy(dst, src+(size_t)(ix), sizeof(real) * (nOutputFrame));
 		} else {

@@ -130,7 +130,7 @@ class Variable(_C._VariableBase):
 
         The graph is differentiated using the chain rule. If the variable is
         non-scalar (i.e. its data has more than one element) and requires
-        gradient, the function additionaly requires specifying ``gradient``.
+        gradient, the function additionally requires specifying ``gradient``.
         It should be a tensor of matching type and location, that contains
         the gradient of the differentiated function w.r.t. ``self``.
 
@@ -779,6 +779,9 @@ class Variable(_C._VariableBase):
 
     def gesv(self, a):
         return Gesv.apply(self, a)
+
+    def potrf(self, upper=True):
+        return Potrf.apply(self, upper)
 
     def multinomial(self, num_samples=1, replacement=False):
         return Multinomial(num_samples, replacement)(self)

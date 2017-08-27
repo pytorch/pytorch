@@ -1,5 +1,6 @@
 import torch
 from torch.nn.parameter import Parameter
+from torch.autograd import Variable
 
 from .module import Module
 
@@ -198,7 +199,9 @@ class EmbeddingBag(Module):
                                  " fixed length sequences. However, found "
                                  "offsets of type {}".format(type(offsets)))
             else:
-                offsets = input.data.new(input.size(0)).fill_(input.size(1))
+                offsets = Variable(torch.arange(0, input.numel(), input.size(1),
+                                   out=input.data.new().long()))
+                input = input.view(-1)
         elif input.dim() != 1:
             raise ValueError("input has to be 1D or 2D Tensor,"
                              " but got Tensor of dimension {}".format(input.dim()))

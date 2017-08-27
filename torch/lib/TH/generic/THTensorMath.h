@@ -90,7 +90,9 @@ TH_API void THTensor_(cmaxValue)(THTensor *r, THTensor *t, real value);
 TH_API void THTensor_(cminValue)(THTensor *r, THTensor *t, real value);
 
 TH_API void THTensor_(zeros)(THTensor *r_, THLongStorage *size);
+TH_API void THTensor_(zerosLike)(THTensor *r_, THTensor *input);
 TH_API void THTensor_(ones)(THTensor *r_, THLongStorage *size);
+TH_API void THTensor_(onesLike)(THTensor *r_, THTensor *input);
 TH_API void THTensor_(diag)(THTensor *r_, THTensor *t, int k);
 TH_API void THTensor_(eye)(THTensor *r_, long n, long m);
 TH_API void THTensor_(arange)(THTensor *r_, accreal xmin, accreal xmax, accreal step);

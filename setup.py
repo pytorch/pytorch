@@ -79,6 +79,24 @@ distutils.unixccompiler.UnixCCompiler.link = patched_link
 # Custom build commands
 ################################################################################
 
+dep_libs = [
+    'TH', 'THS', 'THNN', 'THC', 'THCS', 'THCUNN', 'nccl', 'THPP', 'libshm',
+    'ATen', 'gloo', 'THD',
+]
+
+
+def build_libs(libs):
+    for lib in libs:
+        assert lib in dep_libs, 'invalid lib: {}'.format(lib)
+    if IS_WINDOWS:
+        build_libs_cmd = ['torch\\lib\\build_all.bat']
+    else:
+        build_libs_cmd = ['bash', 'torch/lib/build_libs.sh']
+    if WITH_CUDA:
+        build_libs_cmd += ['--with-cuda']
+    if subprocess.call(build_libs_cmd + libs) != 0:
+        sys.exit(1)
+
 
 class build_deps(Command):
     user_options = []
@@ -90,20 +108,33 @@ class build_deps(Command):
         pass
 
     def run(self):
-        from tools.nnwrap import generate_wrappers as generate_nn_wrappers
-        if IS_WINDOWS:
-            build_all_cmd = ['torch\\lib\\build_all.bat']
-        else:
-            build_all_cmd = ['bash', 'torch/lib/build_all.sh']
+        libs = ['TH', 'THS', 'THNN']
         if WITH_CUDA:
-            build_all_cmd += ['--with-cuda']
+            libs += ['THC', 'THCS', 'THCUNN']
         if WITH_NCCL and not SYSTEM_NCCL:
-            build_all_cmd += ['--with-nccl']
+            libs += ['nccl']
+        libs += ['THPP', 'libshm', 'ATen']
         if WITH_DISTRIBUTED:
-            build_all_cmd += ['--with-distributed']
-        if subprocess.call(build_all_cmd) != 0:
-            sys.exit(1)
+            if sys.platform == 'linux':
+                libs += ['gloo']
+            libs += ['THD']
+        build_libs(libs)
+
+        from tools.nnwrap import generate_wrappers as generate_nn_wrappers
         generate_nn_wrappers()
+
+
+build_dep_cmds = {}
+
+for lib in dep_libs:
+    # wrap in function to capture lib
+    class build_dep(build_deps):
+        description = 'Build {} external library'.format(lib)
+
+        def run(self):
+            build_libs([self.lib])
+    build_dep.lib = lib
+    build_dep_cmds['build_' + lib.lower()] = build_dep
 
 
 class build_module(Command):
@@ -512,26 +543,30 @@ else:
     except subprocess.CalledProcessError:
         pass
 
+cmdclass = {
+    'build': build,
+    'build_py': build_py,
+    'build_ext': build_ext,
+    'build_deps': build_deps,
+    'build_module': build_module,
+    'develop': develop,
+    'install': install,
+    'clean': clean,
+}
+cmdclass.update(build_dep_cmds)
 
 setup(name="torch", version=version,
       description="Tensors and Dynamic neural networks in Python with strong GPU acceleration",
       ext_modules=extensions,
-      cmdclass={
-          'build': build,
-          'build_py': build_py,
-          'build_ext': build_ext,
-          'build_deps': build_deps,
-          'build_module': build_module,
-          'develop': develop,
-          'install': install,
-          'clean': clean,
-      },
+      cmdclass=cmdclass,
       packages=packages,
       package_data={'torch': [
           'lib/*.so*', 'lib/*.dylib*', 'lib/*.dll',
           'lib/torch_shm_manager',
           'lib/*.h',
           'lib/include/TH/*.h', 'lib/include/TH/generic/*.h',
-          'lib/include/THC/*.h', 'lib/include/THC/generic/*.h']},
+          'lib/include/THC/*.h', 'lib/include/THC/generic/*.h',
+          'lib/include/ATen/*.h',
+      ]},
       install_requires=['pyyaml', 'numpy'],
       )
