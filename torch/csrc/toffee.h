@@ -226,6 +226,8 @@ private:
   unique_vector<TensorProto> initializers;
 public:
   GraphProto() : MicroProto(toffee_GraphProto_init_default) {
+    proto.has_version = true;
+    proto.version = toffee_Version_CURRENT_VERSION;
     proto.input  = list<std::string>(&inputs);
     proto.output = list<std::string>(&outputs);
     proto.node   = list<NodeProto, toffee_NodeProto_fields>(&nodes);
