@@ -177,7 +177,7 @@ std::vector<MulticastMessage> getMessages(struct sockaddr* addr, rank_type world
 
       if (recv_message_str == packed_msg) continue; // ignore multicast loopback
 
-      // We should ignore messages comming from different group
+      // We should ignore messages coming from different group
       auto recv_msg = MulticastMessage(recv_message_str);
       if (recv_msg.group_name != group_name) {
         continue;

@@ -48,7 +48,7 @@ def backward(variables, grad_variables=None, retain_graph=None, create_graph=Non
 
     The graph is differentiated using the chain rule. If any of ``variables``
     are non-scalar (i.e. their data has more than one element) and require
-    gradient, the function additionaly requires specifying ``grad_variables``.
+    gradient, the function additionally requires specifying ``grad_variables``.
     It should be a sequence of matching length, that contains gradient of
     the differentiated function w.r.t. corresponding variables (``None`` is an
     acceptable value for all variables that don't need gradient tensors).
