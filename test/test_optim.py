@@ -8,7 +8,8 @@ import torch.nn.functional as F
 from torch.optim import SGD
 from torch.autograd import Variable
 from torch import sparse
-from torch.optim.lr_scheduler import LambdaLR, StepLR, MultiStepLR, ExponentialLR, ReduceLROnPlateau
+from torch.optim.lr_scheduler import LambdaLR, StepLR, MultiStepLR, ExponentialLR, \
+    ReduceLROnPlateau, ReduceLROnPlateauWithBacktrack
 from common import TestCase, run_tests
 
 
@@ -535,6 +536,26 @@ class TestLRScheduler(TestCase):
                              lr_lambda=[lambda x1: 0.9 ** x1, lambda x2: 0.8 ** x2])
         epochs = 10
         self._test(scheduler, targets, epochs)
+
+    def test_reduce_lr_on_plateau_with_backtrack(self):
+        filename = './best.pth'
+        self.opt.param_groups[0]['lr'] = 0.5
+        self.opt.param_groups[1]['lr'] = 0.05
+        target1 = [0.5] * 3 + [0.05] * 3 + [0.005] * 3 + [0.0005] * 2
+        target2 = [t * 0.1 for t in target1]
+        targets = [target1, target2]
+        scheduler = ReduceLROnPlateauWithBacktrack(optimizer=self.opt, model=self.net, filename=filename, patience=2)
+        check_weight = self.net.conv1.weight.data.numpy().copy()  # save init
+        scheduler.step(metrics=0)  # this will write best.pth
+        for epoch in range(1, 10):
+            self.net.conv1.weight.data += 1.0
+            scheduler.step(metrics=0)
+            for param_group, target in zip(self.opt.param_groups, targets):
+                self.assertAlmostEqual(target[epoch], param_group['lr'],
+                                       msg='LR is wrong in epoch {}: expected {}, got {}'.format(
+                                           epoch, target[epoch], param_group['lr']), delta=1e-5)
+            # backtrack happens in epoch 3, 6, 9
+            self.assertAlmostEqual(self.net.conv1.weight.data.numpy(), check_weight + epoch % 3, delta=1e-5)
 
     def _test(self, scheduler, targets, epochs=10):
         for epoch in range(epochs):
