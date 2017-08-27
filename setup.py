@@ -89,7 +89,7 @@ def build_libs(libs):
     for lib in libs:
         assert lib in dep_libs, 'invalid lib: {}'.format(lib)
     if IS_WINDOWS:
-        build_libs_cmd = ['torch\\lib\\build_all.bat']
+        build_libs_cmd = ['torch\\lib\\build_libs.bat']
     else:
         build_libs_cmd = ['bash', 'torch/lib/build_libs.sh']
     if WITH_CUDA:

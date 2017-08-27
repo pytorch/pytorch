@@ -21,26 +21,24 @@ mkdir tmp_install
 
 IF "%~1"=="--with-cuda" (
   set /a NO_CUDA=0
+  shift
 ) ELSE (
   set /a NO_CUDA=1
 )
 
-call:build TH
-call:build THS
-call:build THNN
+:read_loop
+if "%1"=="" goto after_loop
+call:build %~1
+shift
+goto read_loop
 
-IF %NO_CUDA% EQU 0 (
-  call:build THC
-  call:build THCS 
-  call:build THCUNN
-)
-
-call:build THPP
-call:build libshm_windows
-call:build ATen
+:after_loop
 
 copy /Y tmp_install\lib\* .
-copy /Y tmp_install\bin\* .
+IF EXIST ".\tmp_install\bin" (
+  copy /Y tmp_install\bin\* .
+)
+xcopy /Y tmp_install\include .\include
 xcopy /Y THNN\generic\THNN.h .
 xcopy /Y THCUNN\generic\THCUNN.h .
 
