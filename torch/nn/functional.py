@@ -267,12 +267,29 @@ def avg_pool2d(input, kernel_size, stride=None, padding=0,
                                            ceil_mode, count_include_pad)
 
 
-def avg_pool3d(input, kernel_size, stride=None):
+def avg_pool3d(input, kernel_size, stride=None, padding=0,
+               ceil_mode=False, count_include_pad=True):
     """Applies 3D average-pooling operation in kt x kh x kw regions by step
     size dt x dh x dw steps. The number of output features is equal to the
     number of input planes / dt.
+
+    See :class:`~torch.nn.AvgPool3d` for details and output shape.
+
+    Args:
+        input: input tensor (minibatch x in_channels x iT x iH x iW)
+        kernel_size: size of the pooling region, a single number or a
+          tuple (kt x kh x kw)
+        stride: stride of the pooling operation, a single number or a
+          tuple (st x sh x sw). Default is equal to kernel size
+        padding: implicit zero padding on the input, a single number or
+          a tuple (padt x padh x padw), Default: 0
+        ceil_mode: when True, will use `ceil` instead of `floor` in the formula
+            to compute the output shape
+        count_include_pad: when True, will include the zero-padding in th
+            averaging calculation
     """
-    return _functions.thnn.AvgPool3d.apply(input, kernel_size, stride)
+    return _functions.thnn.AvgPool3d.apply(input, kernel_size, stride, padding,
+                                           ceil_mode, count_include_pad)
 
 
 # share the same interface
@@ -746,13 +763,20 @@ def cross_entropy(input, target, weight=None, size_average=True, ignore_index=-1
         ignore_index (int, optional): Specifies a target value that is ignored
                 and does not contribute to the input gradient. When size_average is
                 True, the loss is averaged over non-ignored targets. Default: -100
+
+    Examples::
+
+        >>> input = autograd.Variable(torch.randn(3, 5), requires_grad=True)
+        >>> target = autograd.Variable(torch.LongTensor(3).random_(5))
+        >>> loss = F.cross_entropy(input, target)
+        >>> loss.backward()
     """
     return nll_loss(log_softmax(input), target, weight, size_average, ignore_index)
 
 
 def binary_cross_entropy(input, target, weight=None, size_average=True):
     r"""Function that measures the Binary Cross Entropy
-    between the target and the output:
+    between the target and the output.
 
     See :class:`~torch.nn.BCELoss` for details.
 
@@ -765,6 +789,13 @@ def binary_cross_entropy(input, target, weight=None, size_average=True):
                 over observations for each minibatch. However, if the field
                 sizeAverage is set to False, the losses are instead summed
                 for each minibatch. Default: True
+
+    Examples::
+
+        >>> input = autograd.Variable(torch.randn(3), requires_grad=True)
+        >>> target = autograd.Variable(torch.LongTensor(3).random_(2))
+        >>> loss = F.binary_cross_entropy(F.sigmoid(input), target)
+        >>> loss.backward()
     """
     if not (target.size() == input.size()):
         warnings.warn("Using a target size ({}) that is different to the input size ({}) is deprecated. "
@@ -782,7 +813,7 @@ def binary_cross_entropy(input, target, weight=None, size_average=True):
 
 def binary_cross_entropy_with_logits(input, target, weight=None, size_average=True):
     r"""Function that measures Binary Cross Entropy between target and output
-    logits:
+    logits.
 
     See :class:`~torch.nn.BCEWithLogitsLoss` for details.
 
@@ -795,6 +826,13 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=Tr
                 over observations for each minibatch. However, if the field
                 sizeAverage is set to False, the losses are instead summed
                 for each minibatch. Default: True
+
+    Examples::
+
+         >>> input = autograd.Variable(torch.randn(3), requires_grad=True)
+         >>> target = autograd.Variable(torch.FloatTensor(3).random_(2))
+         >>> loss = F.binary_cross_entropy_with_logits(input, target)
+         >>> loss.backward()
     """
     if not (target.size() == input.size()):
         raise ValueError("Target size ({}) must be the same as input size ({})".format(target.size(), input.size()))

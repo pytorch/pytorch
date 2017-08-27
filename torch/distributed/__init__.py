@@ -1,6 +1,6 @@
 """
 torch.distributed provides an MPI-like interface for exchanging tensor
-data accross multi-machine networks. It supports a few different backends
+data across multi-machine networks. It supports a few different backends
 and initialization methods.
 """
 import torch
@@ -105,7 +105,7 @@ class _DistributedRequest(object):
 def get_rank():
     """Returns the rank of current process.
 
-    Rank is a unique identifier assigned to each process withing a distributed
+    Rank is a unique identifier assigned to each process within a distributed
     group. They are always consecutive integers ranging from 0 to ``world_size``.
     """
     assert torch.distributed._initialized
@@ -192,7 +192,7 @@ def broadcast(tensor, src, group=group.WORLD):
 
 
 def all_reduce(tensor, op=reduce_op.SUM, group=group.WORLD):
-    """Reduces the tensor data accross all machines in such a way that all get
+    """Reduces the tensor data across all machines in such a way that all get
     the final result.
 
     After the call ``tensor`` is going to be bitwise identical in all processes.
@@ -210,7 +210,7 @@ def all_reduce(tensor, op=reduce_op.SUM, group=group.WORLD):
 
 
 def reduce(tensor, dst, op=reduce_op.SUM, group=group.WORLD):
-    """Reduces the tensor data accross all machines.
+    """Reduces the tensor data across all machines.
 
     Only the process with rank ``dst`` is going to receive the final result.
 

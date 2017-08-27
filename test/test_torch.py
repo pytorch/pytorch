@@ -791,6 +791,27 @@ class TestTorch(TestCase):
         torch.zeros(100, 100, out=res2)
         self.assertEqual(res1, res2)
 
+    def test_zeros_like(self):
+        expected = torch.zeros(100, 100)
+
+        res1 = torch.zeros_like(expected)
+        self.assertEqual(res1, expected)
+
+        res2 = torch.Tensor()
+        torch.zeros_like(expected, out=res2)
+        self.assertEqual(res2, expected)
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_zeros_like_cuda(self):
+        expected = torch.zeros(100, 100).cuda()
+
+        res1 = torch.zeros_like(expected)
+        self.assertEqual(res1, expected)
+
+        res2 = torch.Tensor().cuda()
+        torch.zeros_like(expected, out=res2)
+        self.assertEqual(res2, expected)
+
     def test_histc(self):
         x = torch.Tensor((2, 4, 2, 2, 5, 4))
         y = torch.histc(x, 5, 1, 5)  # nbins,  min,  max
@@ -802,6 +823,27 @@ class TestTorch(TestCase):
         res2 = torch.Tensor()
         torch.ones(100, 100, out=res2)
         self.assertEqual(res1, res2)
+
+    def test_ones_like(self):
+        expected = torch.ones(100, 100)
+
+        res1 = torch.ones_like(expected)
+        self.assertEqual(res1, expected)
+
+        res2 = torch.Tensor()
+        torch.ones_like(expected, out=res2)
+        self.assertEqual(res2, expected)
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_ones_like_cuda(self):
+        expected = torch.ones(100, 100).cuda()
+
+        res1 = torch.ones_like(expected)
+        self.assertEqual(res1, expected)
+
+        res2 = torch.Tensor().cuda()
+        torch.ones_like(expected, out=res2)
+        self.assertEqual(res2, expected)
 
     def test_diag(self):
         x = torch.rand(100, 100)
@@ -3339,6 +3381,10 @@ class TestTorch(TestCase):
         self.assertEqual(expanded, unsqueezed)
         self.assertEqual(expanded.stride(), unsqueezed.stride())
 
+        # test -1 as target size
+        self.assertEqual(tensor.expand(4, -1, 5), tensor.expand(4, 8, 5))
+        self.assertRaises(RuntimeError, lambda: tensor2.expand(-1, -1))
+
     def test_repeat(self):
         result = torch.Tensor()
         tensor = torch.rand(8, 4)
@@ -4055,7 +4101,7 @@ class TestTorch(TestCase):
         expected = torch.arange(1, 126).view(5, 5, 5)[:, 1]
         self.assertEqual(torch.from_numpy(x), expected)
 
-        # check zero dimentional
+        # check zero dimensional
         x = np.zeros((0, 2))
         self.assertRaises(RuntimeError, lambda: torch.from_numpy(x))
 

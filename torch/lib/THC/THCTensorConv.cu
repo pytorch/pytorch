@@ -663,7 +663,7 @@ THC_API void THCudaTensor_conv2DRevgerm(THCState *state, THCudaTensor *output, f
   float *output_data = THCudaTensor_data(state, output);
 
   // kernel is called multiple times
-  // (the arbitrary split below is just here to make sure we dont go over 256 threads)
+  // (the arbitrary split below is just here to make sure we don't go over 256 threads)
   for (int sl=0; sl<nbatch; sl+=6) {
     // auto compute nb of blocks and threads
     dim3 blocks(nKernelPlane, nInputPlane);

@@ -71,7 +71,8 @@ class Prod(Function):
             exclusive_normal = exclusive_normal_nocp.cumprod(dim)
 
             def reverse_dim(var, dim):
-                return var.index_select(dim, Variable(torch.arange(var.size(dim) - 1, -1, -1)).long())
+                index = Variable(torch.arange(var.size(dim) - 1, -1, -1, out=var.data.new().long()))
+                return var.index_select(dim, index)
 
             narrow_reverse = reverse_dim(inp.narrow(dim, 1, inp.size(dim) - 1), dim)
             exclusive_reverse_nocp = torch.cat((ones, narrow_reverse), dim)
@@ -142,7 +143,7 @@ class _SelectionFunction(Function):
     has_all_reduce = True
     # additional_args is prepended before dim when calling the tensor
     # function. It's a no-op for subclasses other than kthvalue.
-    # kthvalue not only requires us to pass a dim, but also preceed it with k.
+    # kthvalue not only requires us to pass a dim, but also precede it with k.
 
     @classmethod
     def forward(cls, ctx, input, dim=None, keepdim=None, additional_args=tuple()):
