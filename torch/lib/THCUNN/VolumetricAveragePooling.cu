@@ -9,8 +9,12 @@
 
 template <typename Dtype, typename Acctype>
 __global__ void cuda_VolumetricAveragePooling_updateOutput(
-  THCDeviceTensor<Dtype, 4> input, THCDeviceTensor<Dtype, 4> output,
-  int kT, int kH, int kW, int dT, int dH, int dW, Acctype normFactor, int offsetZ)
+  THCDeviceTensor<Dtype, 4> input,
+  THCDeviceTensor<Dtype, 4> output,
+  int kT, int kH, int kW,
+  int dT, int dH, int dW,
+  int padT, int padH, int padW,
+  bool count_include_pad, int offsetZ)
 {
   int oCol   = blockIdx.x * blockDim.x + threadIdx.x;
   int oRow   = blockIdx.y * blockDim.y + threadIdx.y;
@@ -21,32 +25,40 @@ __global__ void cuda_VolumetricAveragePooling_updateOutput(
   {
     Acctype sum = 0.0;
 
-    int iColumn = oCol * dW;
-    int iRow    = oRow    * dH;
-    int iFrame  = oFrame  * dT;
+    int tstart = oFrame * dT - padT;
+    int hstart = oRow   * dH - padH;
+    int wstart = oCol   * dW - padW;
+    int tend = min(tstart + kT, input.getSize(1) + padT);
+    int hend = min(hstart + kH, input.getSize(2) + padH);
+    int wend = min(wstart + kW, input.getSize(3) + padW);
+    int pool_size = (tend - tstart) * (hend - hstart) * (wend - wstart);
+    tstart = max(tstart, 0);
+    hstart = max(hstart, 0);
+    wstart = max(wstart, 0);
+    tend = min(tend, input.getSize(1));
+    hend = min(hend, input.getSize(2));
+    wend = min(wend, input.getSize(3));
 
-    for (int frame = 0; frame < kT; ++frame)
+    Acctype divide_factor;
+    if (count_include_pad)
+      divide_factor = static_cast<Acctype>(pool_size);
+    else
+      divide_factor = static_cast<Acctype>((tend - tstart) * (hend - hstart) * (wend - wstart));
+
+    int ti, hi, wi;
+    for (ti = tstart; ti < tend; ++ti)
     {
-      if (iFrame + frame < input.getSize(1))
+      for (hi = hstart; hi < hend; ++hi)
       {
-        for (int row = 0; row < kH; ++row)
+        for (wi = wstart; wi < wend; ++wi)
         {
-          if (iRow + row < input.getSize(2))
-          {
-            for (int column = 0; column < kW; ++column)
-            {
-              if (iColumn + column < input.getSize(3))
-              {
-                Dtype val = input[slice][iFrame + frame][iRow + row][iColumn + column];
-                sum += val;
-              }
-            }
-          }
+          Dtype val = input[slice][ti][hi][wi];
+          sum += val;
         }
       }
     }
 
-    output[slice][oFrame][oRow][oCol] = ScalarConvert<Acctype, Dtype>::to(sum * normFactor);
+    output[slice][oFrame][oRow][oCol] = ScalarConvert<Acctype, Dtype>::to(sum / divide_factor);
   }
 }
 
@@ -54,9 +66,13 @@ __global__ void cuda_VolumetricAveragePooling_updateOutput(
 // performance reasons.
 //
 template<int KERNEL_WIDTH, typename Dtype, typename Acctype>
-__global__ void cuda_VolumetricAveragePooling_updateOutput(
-  THCDeviceTensor<Dtype, 4> input, THCDeviceTensor<Dtype, 4> output,
-  int kT, int kH, int dT, int dH, int dW, Acctype normFactor, int offsetZ)
+__global__ void cuda_VolumetricAveragePooling_updateOutput_fixedKW(
+  THCDeviceTensor<Dtype, 4> input,
+  THCDeviceTensor<Dtype, 4> output,
+  int kT, int kH,
+  int dT, int dH, int dW,
+  int padT, int padH, int padW,
+  bool count_include_pad, int offsetZ)
 {
   int oCol   = blockIdx.x * blockDim.x + threadIdx.x;
   int oRow   = blockIdx.y * blockDim.y + threadIdx.y;
@@ -67,45 +83,54 @@ __global__ void cuda_VolumetricAveragePooling_updateOutput(
   {
     Acctype sum = 0.0;
 
-    int iColumn = oCol * dW;
-    int iRow    = oRow    * dH;
-    int iFrame  = oFrame  * dT;
+    int tstart = oFrame * dT - padT;
+    int hstart = oRow   * dH - padH;
+    int wstart = oCol   * dW - padW;
+    int tend = min(tstart + kT, input.getSize(1) + padT);
+    int hend = min(hstart + kH, input.getSize(2) + padH);
+    int wend = min(wstart + KERNEL_WIDTH, input.getSize(3) + padW);
+    int pool_size = (tend - tstart) * (hend - hstart) * (wend - wstart);
+    tstart = max(tstart, 0);
+    hstart = max(hstart, 0);
+    wstart = max(wstart, 0);
+    tend = min(tend, input.getSize(1));
+    hend = min(hend, input.getSize(2));
+    wend = min(wend, input.getSize(3));
 
-    for (int frame = 0; frame < kT; ++frame)
+    Acctype divide_factor;
+    if (count_include_pad)
+      divide_factor = static_cast<Acctype>(pool_size);
+    else
+      divide_factor = static_cast<Acctype>((tend - tstart) * (hend - hstart) * (wend - wstart));
+
+    int ti, hi, wi;
+    for (ti = tstart; ti < tend; ++ti)
     {
-      if (iFrame + frame < input.getSize(1))
+      for (hi = hstart; hi < hend; ++hi)
       {
-        for (int row = 0; row < kH; ++row)
+        for (wi = wstart; wi < wend; ++wi)
         {
-          if (iRow + row < input.getSize(2))
-          {
-            for (int column = 0; column < KERNEL_WIDTH; ++column)
-            {
-              if (iColumn + column < input.getSize(3))
-              {
-                Dtype val = input[slice][iFrame + frame][iRow + row][iColumn + column];
-                sum += val;
-              }
-            }
-          }
+          Dtype val = input[slice][ti][hi][wi];
+          sum += val;
         }
       }
     }
 
-    output[slice][oFrame][oRow][oCol] = ScalarConvert<Acctype, Dtype>::to(sum * normFactor);
+    output[slice][oFrame][oRow][oCol] = ScalarConvert<Acctype, Dtype>::to(sum / divide_factor);
   }
 }
 
-#define LAUNCH_UPDATE_OUTPUT_KERNEL_WIDTH(KW) case KW:                  \
-  cuda_VolumetricAveragePooling_updateOutput<KW><<<grid, block>>>(      \
-    cudaInput, cudaOutput, kT, kH, dT, dH, dW, normFactor, offsetZ); \
+#define LAUNCH_UPDATE_OUTPUT_KERNEL_WIDTH(KW) case KW: \
+  cuda_VolumetricAveragePooling_updateOutput_fixedKW<KW, real, accreal><<<grid, block>>>( \
+    cudaInput, cudaOutput, kT, kH, dT, dH, dW, padT, padH, padW, count_include_pad, offsetZ); \
   break
 
 template <typename Dtype, typename Acctype>
 __global__ void cuda_VolumetricAveragePooling_updateGradInput_Stride1(
   THCDeviceTensor<Dtype, 4> gradOutput,
   THCDeviceTensor<Dtype, 4> gradInput,
-  int kT, int kH, int kW, Acctype normFactor, int offsetZ)
+  int kT, int kH, int kW,
+  Acctype normFactor, int offsetZ)
 {
   int iCol   = blockIdx.x * blockDim.x + threadIdx.x;
   int iRow   = blockIdx.y * blockDim.y + threadIdx.y;
@@ -148,7 +173,10 @@ template <typename Dtype, typename Acctype>
 __global__ void cuda_VolumetricAveragePooling_updateGradInput_atomicAdd(
   THCDeviceTensor<Dtype, 4> gradOutput,
   THCDeviceTensor<Dtype, 4> gradInput,
-  int kT, int kH, int kW, int dT, int dH, int dW, int offsetZ)
+  int kT, int kH, int kW,
+  int dT, int dH, int dW,
+  int padT, int padH, int padW,
+  bool count_include_pad, int offsetZ)
 {
   int oCol   = blockIdx.x * blockDim.x + threadIdx.x;
   int oRow   = blockIdx.y * blockDim.y + threadIdx.y;
@@ -158,13 +186,33 @@ __global__ void cuda_VolumetricAveragePooling_updateGradInput_atomicAdd(
   // guard against over-tiled threads
   if (oRow < gradOutput.getSize(2) && oCol < gradOutput.getSize(3))
   {
+    int tstart = oFrame * dT - padT;
+    int hstart = oRow   * dH - padH;
+    int wstart = oCol   * dW - padW;
+    int tend = min(tstart + kT, gradInput.getSize(1) + padT);
+    int hend = min(hstart + kH, gradInput.getSize(2) + padH);
+    int wend = min(wstart + kW, gradInput.getSize(3) + padW);
+    int pool_size = (tend - tstart) * (hend - hstart) * (wend - wstart);
+    tstart = max(tstart, 0);
+    hstart = max(hstart, 0);
+    wstart = max(wstart, 0);
+    tend = min(tend, gradInput.getSize(1));
+    hend = min(hend, gradInput.getSize(2));
+    wend = min(wend, gradInput.getSize(3));
+
+    Acctype divide_factor;
+    if (count_include_pad)
+      divide_factor = static_cast<Acctype>(pool_size);
+    else
+      divide_factor = static_cast<Acctype>((tend - tstart) * (hend - hstart) * (wend - wstart));
+
     Dtype val = ScalarConvert<Acctype, Dtype>::to(
-      ScalarConvert<Dtype, Acctype>::to(gradOutput[slice][oFrame][oRow][oCol]) / (kT * kH * kW));
-    for (int iFrame = oFrame * dT; iFrame < oFrame * dT + kT; ++iFrame)
+      ScalarConvert<Dtype, Acctype>::to(gradOutput[slice][oFrame][oRow][oCol]) / divide_factor);
+    for (int iFrame = tstart; iFrame < tend; ++iFrame)
     {
-      for (int iRow = oRow * dH; iRow < oRow * dH + kH; ++iRow)
+      for (int iRow = hstart; iRow < hend; ++iRow)
       {
-        for (int iCol = oCol * dW; iCol < oCol * dW + kW; ++iCol)
+        for (int iCol = wstart; iCol < wend; ++iCol)
         {
           atomicAdd(&gradInput[slice][iFrame][iRow][iCol], val);
         }
@@ -178,7 +226,9 @@ __global__ void cuda_VolumetricAveragePooling_updateGradInput(
   THCDeviceTensor<Dtype, 4> gradOutput,
   THCDeviceTensor<Dtype, 4> gradInput,
   int kT, int kH, int kW,
-  int dT, int dH, int dW, int offsetZ)
+  int dT, int dH, int dW,
+  int padT, int padH, int padW,
+  bool count_include_pad, int offsetZ)
 {
   int oCol   = blockIdx.x * blockDim.x + threadIdx.x;
   int oRow   = blockIdx.y * blockDim.y + threadIdx.y;
@@ -188,13 +238,33 @@ __global__ void cuda_VolumetricAveragePooling_updateGradInput(
   // guard against over-tiled threads
   if (oRow < gradOutput.getSize(2) && oCol < gradOutput.getSize(3))
   {
+    int tstart = oFrame * dT - padT;
+    int hstart = oRow   * dH - padH;
+    int wstart = oCol   * dW - padW;
+    int tend = min(tstart + kT, gradInput.getSize(1) + padT);
+    int hend = min(hstart + kH, gradInput.getSize(2) + padH);
+    int wend = min(wstart + kW, gradInput.getSize(3) + padW);
+    int pool_size = (tend - tstart) * (hend - hstart) * (wend - wstart);
+    tstart = max(tstart, 0);
+    hstart = max(hstart, 0);
+    wstart = max(wstart, 0);
+    tend = min(tend, gradInput.getSize(1));
+    hend = min(hend, gradInput.getSize(2));
+    wend = min(wend, gradInput.getSize(3));
+
+    Acctype divide_factor;
+    if (count_include_pad)
+      divide_factor = static_cast<Acctype>(pool_size);
+    else
+      divide_factor = static_cast<Acctype>((tend - tstart) * (hend - hstart) * (wend - wstart));
+
     Dtype val = ScalarConvert<Acctype, Dtype>::to(
-      ScalarConvert<Dtype, Acctype>::to(gradOutput[slice][oFrame][oRow][oCol]) / (kT * kH * kW));
-    for (int iFrame = oFrame * dT; iFrame < oFrame * dT + kT; ++iFrame)
+      ScalarConvert<Dtype, Acctype>::to(gradOutput[slice][oFrame][oRow][oCol]) / divide_factor);
+    for (int iFrame = tstart; iFrame < tend; ++iFrame)
     {
-      for (int iRow = oRow * dH; iRow < oRow * dH + kH; ++iRow)
+      for (int iRow = hstart; iRow < hend; ++iRow)
       {
-        for (int iCol = oCol * dW; iCol < oCol * dW + kW; ++iCol)
+        for (int iCol = wstart; iCol < wend; ++iCol)
         {
           gradInput[slice][iFrame][iRow][iCol] = val;
         }

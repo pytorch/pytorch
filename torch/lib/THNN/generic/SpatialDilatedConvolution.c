@@ -260,7 +260,8 @@ void THNN_(SpatialDilatedConvolution_updateGradInput)(
     // Unpack columns back into input:
     THNN_(col2im)(
       THTensor_(data)(gradColumns),
-      nInputPlane, inputHeight, inputWidth, kH, kW, padH, padW, dH, dW,
+      nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
+      kH, kW, padH, padW, dH, dW,
       dilationH, dilationW,
       THTensor_(data)(gradInput_n)
     );

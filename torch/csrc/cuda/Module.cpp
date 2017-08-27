@@ -13,6 +13,7 @@
 
 #include "THCP.h"
 
+#include "torch/csrc/utils/python_strings.h"
 #include "ModuleSparse.cpp"
 
 THCState *state;
@@ -117,6 +118,18 @@ PyObject * THCPModule_getDeviceCount_wrap(PyObject *self)
     ndevice = 0;
   }
   return PyLong_FromLong(ndevice);
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject * THCPModule_getDeviceName_wrap(PyObject *self, PyObject *arg)
+{
+  HANDLE_TH_ERRORS
+  THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to getDeviceName");
+  long device = THPUtils_unpackLong(arg);
+
+  cudaDeviceProp prop;
+  THCudaCheck(cudaGetDeviceProperties(&prop, device));
+  return THPUtils_packString(prop.name);
   END_HANDLE_TH_ERRORS
 }
 

@@ -45,7 +45,8 @@ class ConcatDataset(Dataset):
     Purpose: useful to assemble different existing datasets, possibly
     large-scale datasets as the concatenation operation is done in an
     on-the-fly manner.
-    Args:
+
+    Arguments:
         datasets (iterable): List of datasets to be concatenated
     """
 

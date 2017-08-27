@@ -59,7 +59,10 @@ These are all modules implemented in THNN:
 * [SpatialMaxPooling](#spatialmaxpooling)
 * [SpatialMaxUnpooling](#spatialmaxunpooling)
 * [SpatialSubSampling](#spatialsubsampling)
+* [SpatialReflectionPadding](#spatialreflectionpadding)
+* [SpatialReplicationPadding](#spatialreplicationpadding)
 * [SpatialUpSamplingNearest](#spatialupsamplingnearest)
+* [SpatialUpSamplingBilinear](#spatialupsamplingbilinear)
 * [Sqrt](#sqrt)
 * [Square](#square)
 * [Tanh](#tanh)
@@ -70,6 +73,9 @@ These are all modules implemented in THNN:
 * [VolumetricFullConvolution](#volumetricfullconvolution)
 * [VolumetricMaxPooling](#volumetricmaxpooling)
 * [VolumetricMaxUnpooling](#volumetricmaxunpooling)
+* [VolumetricReplicationPadding](#volumetricreplicationpadding)
+* [VolumetricUpSamplingNearest](#volumetricupsamplingnearest)
+* [VolumetricUpSamplingTrilinear](#volumetricupsamplingtrilinear)
 
 ## Abs
 ```C
@@ -1254,6 +1260,42 @@ void THNN_SpatialSubSampling_accGradParameters(
           int dW, int dH,
           real scale);
 ```
+## SpatialReflectionPadding
+```C
+TH_API void THNN_(SpatialReflectionPadding_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          int pad_l, int pad_r,
+          int pad_t, int pad_b);
+```
+```C
+TH_API void THNN_(SpatialReflectionPadding_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          int pad_l, int pad_r,
+          int pad_t, int pad_b);
+```
+## SpatialReplicationPadding
+```C
+TH_API void THNN_(SpatialReplicationPadding_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          int pad_l, int pad_r,
+          int pad_t, int pad_b);
+```
+```C
+TH_API void THNN_(SpatialReplicationPadding_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          int pad_l, int pad_r,
+          int pad_t, int pad_b);
+```
 ## SpatialUpSamplingNearest
 ```C
 void THNN_SpatialUpSamplingNearest_updateOutput(
@@ -1269,6 +1311,27 @@ void THNN_SpatialUpSamplingNearest_updateGradInput(
           THTensor *gradOutput,
           THTensor *gradInput,
           int scale_factor);
+```
+## SpatialUpSamplingBilinear
+```C
+TH_API void THNN_(SpatialUpSamplingBilinear_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+	        int outputHeight,
+          int outputWidth);
+```
+```C
+TH_API void THNN_(SpatialUpSamplingBilinear_updateGradInput)(
+          THNNState *state,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          int nbatch,
+          int nchannels,
+          int inputHeight,
+          int inputWidth,
+          int outputHeight,
+          int outputWidth);
 ```
 ## Sqrt
 ```C
@@ -1506,4 +1569,64 @@ void THNN_VolumetricMaxUnpooling_updateGradInput(
           int oT, int oW, int oH,
           int dT, int dW, int dH,
           int pT, int pW, int pH);
+```
+## VolumetricReplicationPadding
+```C
+TH_API void THNN_(VolumetricReplicationPadding_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          int pleft, int pright,
+          int ptop, int pbottom,
+          int pfront, int pback);
+```
+```C
+TH_API void THNN_(VolumetricReplicationPadding_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          int pleft, int pright,
+          int ptop, int pbottom,
+          int pfront, int pback);
+```
+## VolumetricUpSamplingNearest
+```C
+TH_API void THNN_(VolumetricUpSamplingNearest_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          int scale_factor);
+```
+```C
+TH_API void THNN_(VolumetricUpSamplingNearest_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          int scale_factor);
+```
+## VolumetricUpSamplingTrilinear
+```C
+TH_API void THNN_(VolumetricUpSamplingTrilinear_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          int outputDepth,
+          int outputHeight,
+          int outputWidth);
+```
+```C
+TH_API void THNN_(VolumetricUpSamplingTrilinear_updateGradInput)(
+          THNNState *state,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          int nbatch,
+          int nchannels,
+          int inputDepth,
+          int inputHeight,
+          int inputWidth,
+          int outputDepth,
+          int outputHeight,
+          int outputWidth);
 ```

@@ -272,6 +272,7 @@ void THNN_(VolumetricDilatedConvolution_updateGradInput)(
     THNN_(col2vol)(
       THTensor_(data)(gradColumns),
       nInputPlane, inputDepth, inputHeight, inputWidth,
+      outputDepth, outputHeight, outputWidth,
       kT, kH, kW, padT, padH, padW, dT, dH, dW,
       dilationT, dilationH, dilationW,
       THTensor_(data)(gradInput_n)

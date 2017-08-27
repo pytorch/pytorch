@@ -18,13 +18,14 @@ Creation Ops
 .. autofunction:: linspace
 .. autofunction:: logspace
 .. autofunction:: ones
+.. autofunction:: ones_like
 .. autofunction:: rand
 .. autofunction:: randn
 .. autofunction:: randperm
 .. autofunction:: arange
 .. autofunction:: range
 .. autofunction:: zeros
-
+.. autofunction:: zeros_like
 
 Indexing, Slicing, Joining, Mutating Ops
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -135,8 +135,20 @@ class TestTorch(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_has_storage_numpy(self):
-        arr = np.array([], dtype=np.float32)
-        self.assertIsNotNone(torch.Tensor(arr).storage())
+        for dtype in [np.float32, np.float64, np.int64,
+                      np.int32, np.int16, np.uint8]:
+            arr = np.array([1], dtype=dtype)
+            self.assertIsNotNone(torch.FloatTensor(arr).storage())
+            self.assertIsNotNone(torch.DoubleTensor(arr).storage())
+            self.assertIsNotNone(torch.IntTensor(arr).storage())
+            self.assertIsNotNone(torch.LongTensor(arr).storage())
+            self.assertIsNotNone(torch.ByteTensor(arr).storage())
+            if torch.cuda.is_available():
+                self.assertIsNotNone(torch.cuda.FloatTensor(arr).storage())
+                self.assertIsNotNone(torch.cuda.DoubleTensor(arr).storage())
+                self.assertIsNotNone(torch.cuda.IntTensor(arr).storage())
+                self.assertIsNotNone(torch.cuda.LongTensor(arr).storage())
+                self.assertIsNotNone(torch.cuda.ByteTensor(arr).storage())
 
     def _testSelection(self, torchfn, mathfn):
         # contiguous
@@ -188,7 +200,8 @@ class TestTorch(TestCase):
     def test_min(self):
         self._testSelection(torch.min, min)
 
-    def test_dim_reduction(self):
+    @staticmethod
+    def _test_dim_reduction(self, cast):
         dim_red_fns = [
             "mean", "median", "mode", "norm", "prod",
             "std", "sum", "var", "max", "min"]
@@ -198,24 +211,38 @@ class TestTorch(TestCase):
             return attr(t, 2, dim, keepdim)
 
         for fn_name in dim_red_fns:
-            x = torch.randn(3, 4, 5)
             fn_attr = getattr(torch, fn_name) if fn_name != "norm" else normfn_attr
 
-            def fn(t, dim, keepdim=False):
+            def fn(x, dim, keepdim=False):
                 ans = fn_attr(x, dim, keepdim=keepdim)
                 return ans if not isinstance(ans, tuple) else ans[0]
 
+            def test_multidim(x, dim):
+                self.assertEqual(fn(x, dim).unsqueeze(dim), fn(x, dim, keepdim=True))
+                self.assertEqual(x.ndimension() - 1, fn(x, dim).ndimension())
+                self.assertEqual(x.ndimension(), fn(x, dim, keepdim=True).ndimension())
+
+            # general case
+            x = cast(torch.randn(3, 4, 5))
             dim = random.randint(0, 2)
-            self.assertEqual(fn(x, dim).unsqueeze(dim), fn(x, dim, keepdim=True))
-            self.assertEqual(x.ndimension() - 1, fn(x, dim).ndimension())
-            self.assertEqual(x.ndimension(), fn(x, dim, keepdim=True).ndimension())
+            test_multidim(x, dim)
 
             # check 1-d behavior
-            x = torch.randn(1)
+            x = cast(torch.randn(1))
             dim = 0
             self.assertEqual(fn(x, dim), fn(x, dim, keepdim=True))
             self.assertEqual(x.ndimension(), fn(x, dim).ndimension())
             self.assertEqual(x.ndimension(), fn(x, dim, keepdim=True).ndimension())
+
+            # check reducing of a singleton dimension
+            dims = [3, 4, 5]
+            singleton_dim = random.randint(0, 2)
+            dims[singleton_dim] = 1
+            x = cast(torch.randn(dims))
+            test_multidim(x, singleton_dim)
+
+    def test_dim_reduction(self):
+        self._test_dim_reduction(self, lambda t: t)
 
     def _testCSelection(self, torchfn, mathfn):
         # Two tensors
@@ -764,6 +791,27 @@ class TestTorch(TestCase):
         torch.zeros(100, 100, out=res2)
         self.assertEqual(res1, res2)
 
+    def test_zeros_like(self):
+        expected = torch.zeros(100, 100)
+
+        res1 = torch.zeros_like(expected)
+        self.assertEqual(res1, expected)
+
+        res2 = torch.Tensor()
+        torch.zeros_like(expected, out=res2)
+        self.assertEqual(res2, expected)
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_zeros_like_cuda(self):
+        expected = torch.zeros(100, 100).cuda()
+
+        res1 = torch.zeros_like(expected)
+        self.assertEqual(res1, expected)
+
+        res2 = torch.Tensor().cuda()
+        torch.zeros_like(expected, out=res2)
+        self.assertEqual(res2, expected)
+
     def test_histc(self):
         x = torch.Tensor((2, 4, 2, 2, 5, 4))
         y = torch.histc(x, 5, 1, 5)  # nbins,  min,  max
@@ -775,6 +823,27 @@ class TestTorch(TestCase):
         res2 = torch.Tensor()
         torch.ones(100, 100, out=res2)
         self.assertEqual(res1, res2)
+
+    def test_ones_like(self):
+        expected = torch.ones(100, 100)
+
+        res1 = torch.ones_like(expected)
+        self.assertEqual(res1, expected)
+
+        res2 = torch.Tensor()
+        torch.ones_like(expected, out=res2)
+        self.assertEqual(res2, expected)
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_ones_like_cuda(self):
+        expected = torch.ones(100, 100).cuda()
+
+        res1 = torch.ones_like(expected)
+        self.assertEqual(res1, expected)
+
+        res2 = torch.Tensor().cuda()
+        torch.ones_like(expected, out=res2)
+        self.assertEqual(res2, expected)
 
     def test_diag(self):
         x = torch.rand(100, 100)
@@ -3312,6 +3381,10 @@ class TestTorch(TestCase):
         self.assertEqual(expanded, unsqueezed)
         self.assertEqual(expanded.stride(), unsqueezed.stride())
 
+        # test -1 as target size
+        self.assertEqual(tensor.expand(4, -1, 5), tensor.expand(4, 8, 5))
+        self.assertRaises(RuntimeError, lambda: tensor2.expand(-1, -1))
+
     def test_repeat(self):
         result = torch.Tensor()
         tensor = torch.rand(8, 4)
@@ -4028,7 +4101,7 @@ class TestTorch(TestCase):
         expected = torch.arange(1, 126).view(5, 5, 5)[:, 1]
         self.assertEqual(torch.from_numpy(x), expected)
 
-        # check zero dimentional
+        # check zero dimensional
         x = np.zeros((0, 2))
         self.assertRaises(RuntimeError, lambda: torch.from_numpy(x))
 
