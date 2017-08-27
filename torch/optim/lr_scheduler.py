@@ -357,7 +357,7 @@ class ReduceLROnPlateauWithBacktrack(ReduceLROnPlateau):
 
     Example:
         >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
-        >>> scheduler = ReduceLROnPlateau(optimizer, 'min')
+        >>> scheduler = ReduceLROnPlateauWithBacktrack(optimizer, model)
         >>> for epoch in range(10):
         >>>     train(...)
         >>>     val_loss = validate(...)
