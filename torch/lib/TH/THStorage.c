@@ -136,7 +136,7 @@ int THLongStorage_inferExpandGeometry(int64_t *tensorSizes, int64_t *tensorStrid
       if (dim < 0) {
         THFree(expandedSizesCalc);
         THFree(expandedStridesCalc);
-        snprintf(error_buffer, buffer_len, "The expanded size of the tensor (%ld) isn't allowed in a leading, non-existing dimension %ld.", targetSize, i);
+        snprintf(error_buffer, buffer_len, "The expanded size of the tensor (%" PRId64 ") isn't allowed in a leading, non-existing dimension %" PRId64 ".", targetSize, i);
         return -1;
       } else {
         targetSize = size;
