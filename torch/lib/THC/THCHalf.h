@@ -15,7 +15,7 @@
 
 #if CUDA_VERSION >= 9000
 #ifndef __cplusplus
-  typedef __half_raw half;
+typedef __half_raw half;
 #endif
 #endif
 

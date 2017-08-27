@@ -98,7 +98,7 @@ PyObject * THPTensor_(toNumpy)(THPTensor *self, PyObject *args) {
       strides.get(), self->cdata->storage->data + self->cdata->storageOffset,
       0, NPY_ARRAY_ALIGNED | NPY_ARRAY_WRITEABLE | NPY_ARRAY_C_CONTIGUOUS, nullptr));
   if (!array) {
-    THPUtils_setError("an error occured during conversion to numpy array");
+    THPUtils_setError("an error occurred during conversion to numpy array");
     return NULL;
   }
 
@@ -108,7 +108,7 @@ PyObject * THPTensor_(toNumpy)(THPTensor *self, PyObject *args) {
   Py_INCREF(self);
   if (PyArray_SetBaseObject((PyArrayObject*)(array.get()), (PyObject*)self) == -1) {
     Py_DECREF(self);
-    THPUtils_setError("an error occured during conversion to numpy array");
+    THPUtils_setError("an error occurred during conversion to numpy array");
     return NULL;
   }
 

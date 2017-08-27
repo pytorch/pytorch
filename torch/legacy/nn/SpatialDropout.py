@@ -21,7 +21,7 @@ class SpatialDropout(Module):
 
             self.noise.bernoulli_(1 - self.p)
             # We expand the random dropouts to the entire feature map because the
-            # features are likely correlated accross the map and so the dropout
+            # features are likely correlated across the map and so the dropout
             # should also be correlated.
             self.output.mul_(self.noise.expand_as(input))
         else:

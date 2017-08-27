@@ -162,6 +162,17 @@ def set_device(device):
         torch._C._cuda_setDevice(device)
 
 
+def get_device_name(device):
+    """Gets the name of a device.
+
+    Arguments:
+        device (int): device for which to return the name. This function is a
+            no-op if this argument is negative.
+    """
+    if device >= 0:
+        return torch._C._cuda_getDeviceName(device)
+
+
 @contextlib.contextmanager
 def stream(stream):
     """Context-manager that selects a given stream.

@@ -10,19 +10,10 @@ set -e
 
 # Options for building only a subset of the libraries
 WITH_CUDA=0
-WITH_NCCL=0
-WITH_DISTRIBUTED=0
-for arg in "$@"; do
-    if [[ "$arg" == "--with-cuda" ]]; then
-        WITH_CUDA=1
-    elif [[ "$arg" == "--with-nccl" ]]; then
-        WITH_NCCL=1
-    elif [[ "$arg" == "--with-distributed" ]]; then
-        WITH_DISTRIBUTED=1
-    else
-        echo "Unknown argument: $arg"
-    fi
-done
+if [[ "$1" == "--with-cuda" ]]; then
+  WITH_CUDA=1
+  shift
+fi
 
 cd "$(dirname "$0")/../.."
 BASE_DIR=$(pwd)
@@ -42,6 +33,11 @@ if [[ $(uname) == 'Darwin' ]]; then
     LD_POSTFIX_UNVERSIONED=".dylib"
 else
     LDFLAGS="$LDFLAGS -Wl,-rpath,\$ORIGIN"
+fi
+CPP_FLAGS=" -std=c++11 "
+GLOO_FLAGS=""
+if [[ $WITH_CUDA -eq 1 ]]; then
+    GLOO_FLAGS="-DUSE_CUDA=1 -DNCCL_ROOT_DIR=$INSTALL_DIR"
 fi
 
 # Used to build an individual library, e.g. build TH
@@ -98,6 +94,7 @@ function build() {
     cd ../..
   fi
 }
+
 function build_nccl() {
    mkdir -p build/nccl
    cd build/nccl
@@ -117,43 +114,16 @@ function build_nccl() {
 # In the torch/lib directory, create an installation directory
 mkdir -p tmp_install
 
-# We need to build the CPU libraries first, because they are used
-# in the CUDA libraries
-build TH
-build THS
-build THNN
-
-CPP_FLAGS=" -std=c++11 "
-if [[ $WITH_CUDA -eq 1 ]]; then
-    build THC
-    build THCS
-    build THCUNN
-fi
-if [[ $WITH_NCCL -eq 1 ]]; then
-    build_nccl
-fi
-
-# THPP has dependencies on both CPU and CUDA, so build it
-# after those libraries have been completed
-build THPP
-
-# The shared memory manager depends on TH
-build libshm
-build ATen
-
-# THD, gloo have dependencies on Torch, CUDA, NCCL etc.
-if [[ $WITH_DISTRIBUTED -eq 1 ]]; then
-    if [ "$(uname)" == "Linux" ]; then
-        if [ -d "gloo" ]; then
-            GLOO_FLAGS=""
-            if [[ $WITH_CUDA -eq 1 ]]; then
-                GLOO_FLAGS="-DUSE_CUDA=1 -DNCCL_ROOT_DIR=$INSTALL_DIR"
-            fi
-            build gloo "$GLOO_FLAGS"
-        fi
+# Build
+for arg in "$@"; do
+    if [[ "$arg" == "nccl" ]]; then
+        build_nccl
+    elif [[ "$arg" == "gloo" ]]; then
+        build gloo $GLOO_FLAGS
+    else
+        build $arg
     fi
-    build THD
-fi
+done
 
 # If all the builds succeed we copy the libraries, headers,
 # binaries to torch/lib
@@ -161,7 +131,9 @@ cp $INSTALL_DIR/lib/* .
 cp THNN/generic/THNN.h .
 cp THCUNN/generic/THCUNN.h .
 cp -r $INSTALL_DIR/include .
-cp $INSTALL_DIR/bin/* .
+if [ -d "$INSTALL_DIR/bin/" ]; then
+    cp $INSTALL_DIR/bin/* .
+fi
 
 # this is for binary builds
 if [[ $PYTORCH_BINARY_BUILD && $PYTORCH_SO_DEPS ]]

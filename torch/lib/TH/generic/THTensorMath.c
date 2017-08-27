@@ -1595,6 +1595,10 @@ void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
     THLongTensor_zero(indices_);
 
     if(t->size[dimension] == 1) {
+      if (!keepdim) {
+        THTensor_(squeeze1d)(values_, values_, dimension);
+        THLongTensor_squeeze1d(indices_, indices_, dimension);
+      }
       return;
     }
 
@@ -1671,6 +1675,10 @@ void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
     THLongTensor_zero(indices_);
 
     if(t->size[dimension] == 1) {
+      if (!keepdim) {
+        THTensor_(squeeze1d)(values_, values_, dimension);
+        THLongTensor_squeeze1d(indices_, indices_, dimension);
+      }
       return;
     }
 
@@ -1917,6 +1925,18 @@ void THTensor_(zeros)(THTensor *r_, THLongStorage *size)
 {
   THTensor_(resize)(r_, size, NULL);
   THTensor_(zero)(r_);
+}
+
+void THTensor_(zerosLike)(THTensor *r_, THTensor *input)
+{
+  THTensor_(resizeAs)(r_, input);
+  THTensor_(zero)(r_);
+}
+
+void THTensor_(onesLike)(THTensor *r_, THTensor *input)
+{
+  THTensor_(resizeAs)(r_, input);
+  THTensor_(fill)(r_, 1);
 }
 
 void THTensor_(ones)(THTensor *r_, THLongStorage *size)

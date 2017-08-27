@@ -190,6 +190,10 @@ THC_API void THCTensor_(mode)(THCState *state,
   if (sliceSize == 1) {
     THCTensor_(copy)(state, values, input);
     THCudaLongTensor_fill(state, indices, TH_INDEX_BASE);
+    if (!keepdim) {
+      THCTensor_(squeeze1d)(state, values, values, dimension);
+      THCudaLongTensor_squeeze1d(state, indices, indices, dimension);
+    }
     return;
   }
 
