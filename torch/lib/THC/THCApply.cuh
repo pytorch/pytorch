@@ -109,16 +109,16 @@ inline bool getApplyGrid(THCState* state, ptrdiff_t totalElements, dim3& grid) {
     return false;
   }
 
-  // Assume a reasonable number of SMs if no state is available
-  int numSM =
-    state ? THCState_getCurrentDeviceProperties(state)->multiProcessorCount : 15;
+  if(THCState_getCurrentDeviceProperties(state)->major < 3){
+    grid = dim3(min((long long) THCCeilDiv(totalElements,
+               (ptrdiff_t) THC_APPLY_THREADS_PER_BLOCK), (long long) 64*1024-1));
+    return true;
+  }
 
-  // 16 warps per block * 4 per SM gives 64 warps per SM at maximum,
-  // which seems to be a good sweetspot for latency hiding
-  grid = dim3(min((long long) THCCeilDiv(totalElements,
-                                         (ptrdiff_t) THC_APPLY_THREADS_PER_BLOCK),
-                  4LL * numSM));
+  grid = dim3((long long) THCCeilDiv(totalElements,
+              (ptrdiff_t) THC_APPLY_THREADS_PER_BLOCK) );
   return true;
+
 }
 
 template <typename TensorTypeA,
