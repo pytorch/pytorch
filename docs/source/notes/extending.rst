@@ -67,11 +67,11 @@ additional comments::
             # improve efficiency. If you want to make your code simpler, you can
             # skip them. Returning gradients for inputs that don't require it is
             # not an error.
-            if self.needs_input_grad[0]:
+            if ctx.needs_input_grad[0]:
                 grad_input = grad_output.mm(weight)
-            if self.needs_input_grad[1]:
+            if ctx.needs_input_grad[1]:
                 grad_weight = grad_output.t().mm(input)
-            if bias is not None and self.needs_input_grad[2]:
+            if bias is not None and ctx.needs_input_grad[2]:
                 grad_bias = grad_output.sum(0).squeeze(0)
 
             return grad_input, grad_weight, grad_bias

@@ -310,6 +310,7 @@ void THNN_(VolumetricDilatedConvolution_updateGradInput)(
       THCState_getCurrentStream(state),
       THCTensor_(data)(state, gradColumns),
       nInputPlane, inputDepth, inputHeight, inputWidth,
+      outputDepth, outputHeight, outputWidth,
       kT, kH, kW, padT, padH, padW, dT, dH, dW,
       dilationT, dilationH, dilationW,
       THCTensor_(data)(state, gradInput_n)

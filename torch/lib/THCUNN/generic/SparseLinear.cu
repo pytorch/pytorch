@@ -156,7 +156,7 @@ void THNN_(SparseLinear_accGradParameters)(
   THCTensor_(select)(state, sel, input, 1, 0); // rowInds
   THCTensor_(select)(state, cols, input, 1, 1); // colInds
   THCTensor_(cadd)(state, buf, sel, batchnum, cols); // colInds * buatchdim + rowInds
-  THCTensor_(sort)(state, buf, inds, buf, 0, 0); // Indicies are now in ind
+  THCTensor_(sort)(state, buf, inds, buf, 0, 0); // Indices are now in ind
   THCTensor_(indexSelect)(state, buf, input, 0, inds);
 
   THCTensor_(resize1d)(state, values, nnz);

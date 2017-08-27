@@ -277,6 +277,7 @@ tests = [
     ('view_as', small_3d, lambda t: [t(100, 10)],),
     ('zero', small_3d, lambda t: [],),
     ('zeros', small_3d, lambda t: [1, 2, 3, 4],),
+    ('eye', small_2d, lambda t: [3, 4],),
     ('rsqrt', lambda t: small_3d(t) + 1, lambda t: [], None, float_types),
     ('sinh', lambda t: small_3d(t).clamp(-1, 1), lambda t: [], None, float_types),
     ('tan', lambda t: small_3d(t).clamp(-1, 1), lambda t: [], None, float_types),
@@ -871,6 +872,9 @@ class TestCuda(TestCase):
 
     def test_btrisolve(self):
         TestTorch._test_btrisolve(self, lambda t: t.cuda())
+
+    def test_dim_reduction(self):
+        TestTorch._test_dim_reduction(self, lambda t: t.cuda())
 
     def test_tensor_gather(self):
         TestTorch._test_gather(self, lambda t: t.cuda(), False)

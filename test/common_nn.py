@@ -23,6 +23,10 @@ TEST_CUDNN = TEST_CUDA and torch.backends.cudnn.is_acceptable(torch.cuda.FloatTe
 TEST_CUDNN_VERSION = TEST_CUDNN and torch.backends.cudnn.version()
 PRECISION = 1e-5
 
+
+def get_size_average(m):
+    return getattr(m, 'size_average', False) or getattr(m, 'sizeAverage', False)
+
 module_tests = [
     dict(
         module_name='Linear',
@@ -240,13 +244,7 @@ criterion_tests = [
         module_name='NLLLoss',
         input=torch.rand(15, 10).log(),
         target=torch.Tensor(15).uniform_().mul(10).floor().long(),
-    ),
-    dict(
-        module_name='NLLLoss',
-        constructor_args=(None, False),
-        input=torch.rand(15, 10).log(),
-        target=torch.Tensor(15).uniform_().mul(10).floor().long(),
-        desc='no_size_average'
+        check_no_size_average=True,
     ),
     dict(
         module_name='NLLLoss',
@@ -280,27 +278,14 @@ criterion_tests = [
         module_name='KLDivLoss',
         input=torch.rand(10, 10).log(),
         target=torch.rand(10, 10),
-    ),
-    dict(
-        module_name='KLDivLoss',
-        constructor_args=(False,),
-        input=torch.rand(10, 10).log(),
-        target=torch.rand(10, 10),
-        desc='no_size_average',
+        check_no_size_average=True,
     ),
     dict(
         module_name='MSELoss',
         input=torch.randn(2, 3, 4, 5),
         target=torch.randn(2, 3, 4, 5),
-        reference_fn=lambda i, t, _: (i - t).abs().pow(2).sum() / i.numel(),
-    ),
-    dict(
-        module_name='MSELoss',
-        constructor_args=(False,),
-        input=torch.randn(2, 3, 4, 5),
-        target=torch.randn(2, 3, 4, 5),
-        reference_fn=lambda i, t, _: (i - t).abs().pow(2).sum(),
-        desc='no_size_average',
+        reference_fn=lambda i, t, m: (i - t).abs().pow(2).sum() / (i.numel() if get_size_average(m) else 1),
+        check_no_size_average=True,
     ),
     dict(
         module_name='BCELoss',
@@ -320,7 +305,6 @@ criterion_tests = [
         module_name='CrossEntropyLoss',
         input=torch.randn(15, 10),
         target=torch.Tensor(15).uniform_().mul(10).floor().long(),
-        check_gradgrad=False,
     ),
     dict(
         module_name='CrossEntropyLoss',
@@ -328,7 +312,6 @@ criterion_tests = [
         input=torch.randn(15, 10),
         target=torch.Tensor(15).uniform_().mul(10).floor().long(),
         desc='weights',
-        check_gradgrad=False,
     ),
     dict(
         module_name='NLLLoss2d',
@@ -360,13 +343,7 @@ criterion_tests = [
         input=torch.rand(10),
         target=torch.randn(10).gt(0).double().mul_(2).sub(1),
         desc='margin',
-    ),
-    dict(
-        module_name='HingeEmbeddingLoss',
-        constructor_args=(0.5, False),
-        input=torch.rand(10),
-        target=torch.randn(10).gt(0).double().mul_(2).sub(1),
-        desc='margin_no_size_average',
+        check_no_size_average=True,
     ),
     dict(
         module_name='MultiLabelMarginLoss',
@@ -398,19 +375,13 @@ criterion_tests = [
         module_name='SmoothL1Loss',
         input_size=(5, 10),
         target=torch.randn(5, 10),
-    ),
-    dict(
-        module_name='SmoothL1Loss',
-        constructor_args=(False,),
-        input_size=(5, 10),
-        target=torch.randn(5, 10),
-        desc='no_size_average',
+        check_no_size_average=True,
     ),
     dict(
         module_name='SoftMarginLoss',
         input_size=(5, 5),
         target=torch.randn(5, 5).sign(),
-        check_gradgrad=False,
+        check_no_size_average=True,
     ),
     dict(
         module_name='CosineEmbeddingLoss',
@@ -430,7 +401,7 @@ criterion_tests = [
         module_name='MarginRankingLoss',
         input=(torch.randn(50).mul(10), torch.randn(50).mul(10)),
         target=torch.randn(50).sign(),
-        check_gradgrad=False,
+        check_no_size_average=True,
     ),
     dict(
         module_name='MarginRankingLoss',
@@ -438,7 +409,7 @@ criterion_tests = [
         input=(torch.randn(50).mul(10), torch.randn(50).mul(10)),
         target=torch.randn(50).sign(),
         desc='margin',
-        check_gradgrad=False,
+        check_no_size_average=True,
     ),
 ]
 

@@ -388,7 +388,7 @@ void THNN_(SpatialDepthWiseConvolution_updateGradInput)(
       col2im<real, accreal>(
         THCState_getCurrentStream(state),
         THCTensor_(data)(state, gradColumns),
-        1, inputHeight, inputWidth, kH, kW, padH, padW, dH, dW,
+        1, inputHeight, inputWidth, outputHeight, outputWidth, kH, kW, padH, padW, dH, dW,
         1, 1, THCTensor_(data)(state, gradInput_i)
       );
       }

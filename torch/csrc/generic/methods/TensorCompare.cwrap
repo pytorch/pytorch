@@ -681,7 +681,9 @@
           output: True
         - THTensor* self
         - CONSTANT __last_dim
-        - CONSTANT false
+        - arg: bool descending
+          default: "false"
+          kwarg_only: True
     - arguments:
         - arg: THTensor* values
           output: True
@@ -690,16 +692,8 @@
         - THTensor* self
         - arg: long dim
           wrap_dim: self
-        - CONSTANT false
-    - arguments:
-        - arg: THTensor* values
-          output: True
-        - arg: THIndexTensor* indices
-          output: True
-        - THTensor* self
-        - arg: long dim
-          wrap_dim: self
-        - bool descending
+        - arg: bool descending
+          default: "false"
 ]]
 
 [[

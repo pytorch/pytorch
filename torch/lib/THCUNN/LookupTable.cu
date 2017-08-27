@@ -105,7 +105,7 @@ __global__ void cunn_LookupTable_accGradParametersKernel(
   int idx = blockIdx.x * 4 + threadIdx.y;
 
   // Each warp is responsible for an input into the LookupTable.
-  // If the preceeding input has the same as this input, then the warp
+  // If the preceding input has the same as this input, then the warp
   // exits immediately. The warp also processes subsequent inputs with the
   // same value.
   //
