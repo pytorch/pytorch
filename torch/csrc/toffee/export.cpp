@@ -273,30 +273,11 @@ static void encodeGraph(toffee::GraphProto * p_g, std::shared_ptr<Graph> & g, co
     for(auto input : node->inputs()) {
       p_n->add_input(node_name(input));
     }
-    // jit::Node and toffee protobuf don't agree on how to represent
-    // so called 'inplace' operators that mutate inputs
-    // 'InPlaceOutputs' has an entry for each output of this node
-    // if the entry is >= 0, it specifies the index of the input
-    // which is mutated and returned as an output
-    // we use that to translate to ToffeeIR's replicated naming scheme
-    // where inputs/outputs will have the same name
-    std::vector<int64_t> * inplace_outputs = nullptr;
-    if(node->hasAttribute(jit::kInPlaceOutputs))
-      inplace_outputs = &node->is(jit::kInPlaceOutputs);
-    int i = 0;
     for(auto output : node->outputs()) {
-      if(!inplace_outputs || inplace_outputs->at(i) < 0) {
-        p_n->add_output(node_name(output));
-      } else {
-        Node * input = node->inputs().at(inplace_outputs->at(i));
-        p_n->add_output(node_name(input));
-      }
-      i++;
+      p_n->add_output(node_name(output));
     }
     p_n->set_op_type(symbolToString(node->kind()));
     for(auto attr_name : node->attributeNames()) {
-      if(attr_name == kInPlaceOutputs)
-        continue;
       addAttribute(p_n, node, attr_name);
     }
   }
