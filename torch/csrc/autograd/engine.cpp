@@ -75,6 +75,8 @@ struct GraphTask {
   std::unordered_map<Function*, InputBuffer> not_ready;
   std::unordered_map<Function*, int> dependencies;
 
+  int owner;
+
   GraphTask(bool keep_graph, const Engine::pre_callback_map& pre_callbacks, const Engine::post_callback_map& post_callbacks)
     : exception()
     , has_error(false)
@@ -86,7 +88,8 @@ struct GraphTask {
     , pre_callbacks(pre_callbacks)
     , post_callbacks(post_callbacks)
     , not_ready()
-    , dependencies() {}
+    , dependencies()
+    , owner(NO_DEVICE) {}
 };
 
 auto ReadyQueue::push_front(FunctionTask item) -> void {
@@ -111,24 +114,61 @@ Engine::Engine() : ready_queues() {
 // This Engine's ReadyQueues and their corresponding threads are leaked here
 Engine::~Engine() = default;
 
-auto Engine::thread_main(std::shared_ptr<ReadyQueue> queue, int device) -> void {
+auto Engine::thread_init(int device) -> void {
   THInferNumThreads();
   AutoGPU guard(device);
   worker_device = device;
-  while (1) {
-    // TODO: cache worker threads
-    if (worker_device == NO_DEVICE) return; // We got replaced
+  thread_main(nullptr);
+}
+
+// NOTE: graph_tasks do not necessarily form a stack. Imagine this
+// case:
+//
+//    +----> Eval1
+//  Root
+//    +----> Eval2
+//
+// Once Root is executed, both Eval1 and Eval2 are added to the ready queue.
+// Next, Eval1 is run and this causes the worker to enter thread_main again.
+// Then, it pops the next task from the queue, but at this point it is Eval2.
+// It enters thread_main once again, but now with graph_task of Eval2, which is
+// completely unrelated to that of Eval1 (it's not a recursive call).
+// It's all ok and is handled right now, but it should be accounted for
+// in case this code is to be changed.
+auto Engine::thread_main(GraphTask *graph_task) -> void {
+  auto queue = ready_queues[worker_device + 1];
+  while (!graph_task || graph_task->outstanding_tasks > 0) {
     FunctionTask task = queue->pop_back();
-    if (!task.base->has_error.load()) {
+    if (task.fn && !task.base->has_error.load()) {
       try {
         evaluate_function(task);
       } catch (std::exception& e) {
         thread_on_exception(task, e);
       }
     }
-    if (--task.base->outstanding_tasks == 0) {
-      std::lock_guard<std::mutex> lock(task.base->mutex);
-      task.base->not_done.notify_all();
+    auto base_owner = task.base->owner;
+    // Task from a non-worker thread. Easy case.
+    if (base_owner == NO_DEVICE) {
+      if (--task.base->outstanding_tasks == 0) {
+        std::lock_guard<std::mutex> lock(task.base->mutex);
+        task.base->not_done.notify_all();
+      }
+    } else {
+      // If it's a task initiated from this thread, decrease the counter, but
+      // don't do anything - loop condition will do all checks for us next.
+      if (base_owner == worker_device) {
+        --task.base->outstanding_tasks;
+      // Otherwise send a dummy function task to the owning thread just to
+      // ensure that it's not sleeping. If it has work, it might see that
+      // graph_task->outstanding_tasks == 0 before it gets to the task, but
+      // it's a no-op anyway.
+      } else if (base_owner != worker_device) {
+        if (--task.base->outstanding_tasks == 0) {
+          // Synchronize outstanding_tasks with queue mutex
+          std::atomic_thread_fence(std::memory_order_release);
+          ready_queue(base_owner).push_front(FunctionTask(task.base, nullptr, InputBuffer(0)));
+        }
+      }
     }
   }
 }
@@ -319,29 +359,6 @@ auto Engine::execute(const function_list& input_roots,
 
   GraphTask graph_task(keep_graph, pre_callbacks, post_callbacks);
 
-  if (worker_device != NO_DEVICE) {
-    // OK, time for some fancy footwork.  If we are here, it means that the
-    // fn.apply from call_function has called into the engine reentrantly.  If
-    // we had green threads, we would block the thread of execution, and then
-    // kick back to the thread loop so the worker thread can do some more work.
-    // But we don't have green threads, so instead we have to block the
-    // entire OS level thread.  This means we need to spin up another
-    // worker to handle the requests on this device.
-    //
-    // For this scheme to work, a number of things have to be true:
-    //
-    // - The worker thread must not have taken out any locks.  At
-    //   least within this engine, this is the case.
-    // - We need a hard synchronization at the beginning and end
-    //   of the sub-worker thread, so that any thread-local
-    //   state can be passed from one worker thread to the
-    //   other in the end.
-    auto t = std::thread(&Engine::thread_main, this, ready_queues[worker_device + 1],
-                         worker_device);
-    t.detach();
-    worker_device = NO_DEVICE;
-  }
-
   std::unique_lock<std::mutex> lock(graph_task.mutex);
 
   auto graph_root = std::make_shared<GraphRoot>(input_roots, inputs);
@@ -366,10 +383,17 @@ auto Engine::execute(const function_list& input_roots,
   // Now compute the dependencies for all executable functions
   compute_dependencies(std::move(roots), graph_task);
 
-  // Wait for all tasks to complete
-  graph_task.not_done.wait(lock, [&graph_task]{
-    return graph_task.outstanding_tasks.load() == 0;
-  });
+  // Not a worker
+  if (worker_device == NO_DEVICE) {
+    // Wait for all tasks to complete
+    graph_task.not_done.wait(lock, [&graph_task]{
+      return graph_task.outstanding_tasks.load() == 0;
+    });
+  } else {
+    graph_task.owner = worker_device;
+    lock.unlock();
+    thread_main(&graph_task);
+  }
 
   // Check for an exception while running backwards
   if (graph_task.has_error.load()) {
@@ -412,10 +436,10 @@ auto Engine::start_threads() -> void {
   // One for CPU, plus one for every GPU device
   int num_threads = num_devices + 1;
   ready_queues = std::vector<std::shared_ptr<ReadyQueue>>(num_threads);
-  for (int i = 0; i < num_threads; ++i) {
-    auto& queue = ready_queues[i];
+  for (auto& queue : ready_queues)
     queue.reset(new ReadyQueue());
-    std::thread t(&Engine::thread_main, this, queue, i - 1);
+  for (int i = 0; i < num_threads; ++i) {
+    std::thread t(&Engine::thread_init, this, i - 1);
     t.detach();
   }
 }

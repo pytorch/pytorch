@@ -19,13 +19,13 @@ static torch::autograd::python::PythonEngine engine;
 
 namespace torch { namespace autograd { namespace python {
 
-void PythonEngine::thread_main(std::shared_ptr<ReadyQueue> queue, int device) {
+void PythonEngine::thread_init(int device) {
   // Create a PyThreadState, but release the GIL. This lets AutoGIL calls
   // inside thread_main acquire the GIL without having to create a new
   // PyThreadState each time.
   AutoGIL gil;
   AutoNoGIL no_gil;
-  Engine::thread_main(queue, device);
+  Engine::thread_init(device);
 }
 
 void PythonEngine::thread_on_exception(FunctionTask& task, std::exception& e) {
