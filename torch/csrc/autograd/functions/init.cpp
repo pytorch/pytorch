@@ -323,10 +323,7 @@ void initAutogradClosureBindings(PyObject* module) {
     .def("__call__", &AutogradClosureFactory::construct)
     ;
 
-  m.def("_jit_createAutogradClosure", [](py::object py_tracing_state) {
-    if (!THPTracingState_Check(py_tracing_state.ptr()))
-      throw std::runtime_error("expected a TracingState object");
-    auto & tracing_state = ((THPTracingState*)py_tracing_state.ptr())->cdata;
+  m.def("_jit_createAutogradClosure", [](jit::tracer::TracingState* tracing_state) {
     auto & graph = tracing_state->graph;
     return std::make_shared<AutogradClosureFactory>(graph.get());
   });
