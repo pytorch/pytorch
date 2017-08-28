@@ -14,6 +14,10 @@ import os
 
 
 def flatten(x):
+    """
+    Flatten an arbitrarily nested structure of Variables into
+    a tuple of Variables.
+    """
     return tuple(function._iter_variables(x))
 
 
