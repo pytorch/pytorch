@@ -735,6 +735,13 @@ PyObject* process_outputs(PyObject *op_obj, THPFunction* grad_fn, const Unpacked
   if (grad_fn->cdata.is_executable) {
     _mark_non_differentiable(grad_fn, t2var);
   }
+  // We need to capture these before _trace_create, because they might
+  // be used by an Eval node that will wrap grad_fn.
+  grad_fn->cdata.input_sizes.reserve(num_outputs);
+  for (int i = 0; i < num_outputs; ++i) {
+    THPVariable* py_var = (THPVariable*)PyTuple_GET_ITEM(outputs.get(), i);
+    grad_fn->cdata.input_sizes.emplace_back(py_var->cdata);
+  }
   // NOTE: _trace_create has to run before _save_variables, because we need
   // to assign traces to outputs before we convert them to SavedVariables.
   // On the other hand, it needs to go after _mark_non_differentiable, because
@@ -749,12 +756,6 @@ PyObject* process_outputs(PyObject *op_obj, THPFunction* grad_fn, const Unpacked
     grad_fn->to_save = NULL;
     Py_XDECREF(grad_fn->non_differentiable);
     grad_fn->non_differentiable = NULL;
-  }
-
-  grad_fn->cdata.input_sizes.reserve(num_outputs);
-  for (int i = 0; i < num_outputs; ++i) {
-    THPVariable* py_var = (THPVariable*)PyTuple_GET_ITEM(outputs.get(), i);
-    grad_fn->cdata.input_sizes.emplace_back(py_var->cdata);
   }
 
   // Unpack the output, unless .forward() returned a tuple

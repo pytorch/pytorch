@@ -20,7 +20,11 @@ struct EvalOutput : Function {
     // confuse some of the functions causing them to do unnecessary work.
     // TODO: it should be possible to improve this once we get rid of NULL Variables
     is_executable = true;
-    input_sizes.emplace_back(next_edge.first->input_sizes.at(next_edge.second));
+    if (next_edge.first) {
+      input_sizes.emplace_back(next_edge.first->input_sizes.at(next_edge.second));
+    } else {
+      input_sizes.emplace_back(nullptr);
+    }
   }
 
   virtual variable_list apply(const variable_list& inputs) override {
@@ -79,7 +83,13 @@ struct Eval : Function {
     return std::make_shared<Eval>();
   }
 
+  // Roots are empty if simple_graph is not NULL.
+  // simple_graph is an optimization of first backward stage - in this case
+  // all Eval subgraphs contain only a single gradient function, and the
+  // graph search on creation + call to the engine in apply can be elided
   function_list roots;
+  std::shared_ptr<Function> simple_graph;
+
   placeholder_list placeholders;
   jit::Node* forward_ctx_select = nullptr;
   bool traceable = false;
@@ -89,6 +99,11 @@ private:
   Engine::pre_callback_map getCallbacks(variable_list& outputs, std::mutex& outputs_mutex);
 
   Subgraph getSubgraph(
+      const variable_list& inputs,
+      const variable_list& outputs,
+      const placeholder_list& inherited_placeholders);
+
+  bool trySimpleEval(
       const variable_list& inputs,
       const variable_list& outputs,
       const placeholder_list& inherited_placeholders);
