@@ -33,6 +33,14 @@ class TestShapeInference(test_util.TestCase):
         self.assertEquals(shapes['fc2_b'], [55])
         self.assertEquals(shapes['fc2'], [64, 55])
 
+    def testFCAxis2(self):
+        model = model_helper.ModelHelper(name="test_model")
+        model.net.FC(["x", "w", "b"], ["y"], axis=2)
+        workspace.FeedBlob("x", np.random.rand(4, 20, 36).astype(np.float32))
+        workspace.FeedBlob("w", np.random.rand(36, 36).astype(np.float32))
+        workspace.FeedBlob("b", np.random.rand(36,).astype(np.float32))
+        self.InferTensorRunAndCompare(model)
+
     def testShapeInferenceDistances(self):
         model = model_helper.ModelHelper(name="test_model")
         model.SquaredL2Distance(["x", "y"], "zsq")

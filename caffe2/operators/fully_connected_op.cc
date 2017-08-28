@@ -21,7 +21,12 @@ OPERATOR_SCHEMA(FC)
       const int canonical_axis_w =
           canonical_axis_index_(axis_w, in[1].dims().size());
       const int N = size_to_dim_(canonical_axis_w, GetDimsVector(in[1]));
-      out[0] = CreateTensorShape(vector<int>{M, N}, TensorProto::FLOAT);
+
+      vector<int> y_shape(in[0].dims().begin(), in[0].dims().end());
+      CAFFE_ENFORCE_LE(canonical_axis + 1, y_shape.size());
+      y_shape.resize(canonical_axis + 1);
+      y_shape[canonical_axis] = N;
+      out[0] = CreateTensorShape(y_shape, in[0].data_type());
       return out;
     })
     .SetDoc(R"DOC(
