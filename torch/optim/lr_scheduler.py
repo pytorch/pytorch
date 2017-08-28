@@ -1,7 +1,6 @@
 import torch
 from bisect import bisect_right
 from .optimizer import Optimizer
-from .. import load, save
 
 
 class _LRScheduler(object):
