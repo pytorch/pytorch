@@ -89,6 +89,57 @@ auto Eval::getSubgraph(const variable_list& inputs, const variable_list& outputs
   return subgraph;
 }
 
+bool Eval::trySimpleEval(const variable_list& inputs, const variable_list& outputs,
+                         const placeholder_list& inherited_placeholders) {
+  using bitset_type = uint64_t;
+  constexpr std::size_t max_outputs = sizeof(bitset_type) * 8;
+
+  if (inherited_placeholders.size() != 0) return false;
+
+  auto& grad_fn = outputs[0]->grad_fn;
+  if (static_cast<std::size_t>(grad_fn->num_inputs) >= max_outputs) return false;
+  if (static_cast<std::size_t>(grad_fn->num_inputs) != outputs.size()) return false;
+
+  // Check that all outputs have the same grad_fn and cover all its inputs
+  bitset_type output_nrs = 0;
+  bitset_type expected_bitset = ((1 << grad_fn->num_inputs) - 1);
+  for (auto & output : outputs) {
+    if (output->grad_fn != grad_fn) return false;
+    output_nrs |= (1 << output->output_nr);
+  }
+  if (output_nrs != expected_bitset) return false;
+
+  // Check that grad_fn->next_functions matches the inputs exactly
+  auto num_inputs = inputs.size();
+  auto& grad_next_fns = grad_fn->next_functions;
+  if (num_inputs != grad_next_fns.size()) return false;
+  for (std::size_t i = 0; i < num_inputs; ++i) {
+    if (inputs[i]) {
+      const auto& input_grad = inputs[i]->grad_fn ? inputs[i]->grad_fn : inputs[i]->grad_accumulator.lock();
+      if (grad_next_fns[i].first != input_grad || grad_next_fns[i].second != inputs[i]->output_nr) return false;
+    } else {
+      if (grad_next_fns[i].first != nullptr) return false;
+    }
+  }
+
+  // Success! We still need to set up placeholders for next stages and to drop
+  // references to the graph.
+  next_functions = std::move(grad_next_fns);
+  grad_next_fns.reserve(num_inputs);
+  placeholders.reserve(num_inputs);
+  for (std::size_t i = 0; i < num_inputs; ++i) {
+    auto placeholder = std::make_shared<EvalOutput>(next_functions[i]);
+    grad_next_fns.emplace_back(placeholder, 0);
+    placeholders.emplace_back(std::move(placeholder));
+  }
+  is_executable = grad_fn->is_executable;
+  simple_graph = grad_fn;
+  input_sizes = grad_fn->input_sizes;
+  grad_fn->tracing_state->in_eval_subgraph = true;
+  return true;
+}
+
+
 // Here, a _relevant_ output is one that has a grad_fn (is not a leaf and is not
 // volatile) and is not one of the inputs (can happen because of passthrough).
 variable_list Eval::filterRelevantOutputs(const variable_list& inputs, const variable_list& outputs) {
@@ -134,50 +185,55 @@ bool Eval::replaceSubgraph(const variable_list& inputs, const variable_list& _ou
                            const placeholder_list& inherited_placeholders) {
   // _outputs has a prefix deliberately, because it's unlikely that anything else
   // than relevant_outputs will be needed inside this function.
+  // TODO: it would be useful to unpack inputs to their grad_fn/grad_accumulators to avoid
+  // all these ternary operators in functions above
   variable_list relevant_outputs = filterRelevantOutputs(inputs, _outputs);
 
   if (relevant_outputs.size() == 0)
     return false;
 
-  for (auto & output : relevant_outputs)
-    roots.emplace_back(output.grad_fn(), output.output_nr());
+  if (!trySimpleEval(inputs, relevant_outputs, inherited_placeholders)) {
+    roots.reserve(relevant_outputs.size());
+    for (auto & output : relevant_outputs)
+      roots.emplace_back(output.grad_fn(), output.output_nr());
 
-  auto subgraph = getSubgraph(inputs, relevant_outputs, inherited_placeholders);
+    auto subgraph = getSubgraph(inputs, relevant_outputs, inherited_placeholders);
 
-  // Prepare output placeholder nodes for each end.
-  std::unordered_map<edge_type, std::shared_ptr<EvalOutput>, edge_hasher> ends_to_outputs;
-  for (auto & placeholder : placeholders) {
-    ends_to_outputs[placeholder->next_edge] = placeholder;
-  }
-  for (auto & end : subgraph.boundary.ends) {
-    if (ends_to_outputs.count(end) == 0) {
-      placeholders.emplace_back(std::make_shared<EvalOutput>(end));
-      ends_to_outputs[end] = placeholders.back();
+    // Prepare output placeholder nodes for each end.
+    std::unordered_map<edge_type, std::shared_ptr<EvalOutput>, edge_hasher> ends_to_outputs;
+    for (auto & placeholder : placeholders) {
+      ends_to_outputs[placeholder->next_edge] = placeholder;
     }
+    for (auto & end : subgraph.boundary.ends) {
+      if (ends_to_outputs.count(end) == 0) {
+        placeholders.emplace_back(std::make_shared<EvalOutput>(end));
+        ends_to_outputs[end] = placeholders.back();
+      }
+    }
+
+    // Replace begins with pointers to output nodes.
+    // This detaches the subgraph from the full backward graph.
+    for (auto & begin : subgraph.boundary.begins) {
+      auto & fn = begin.first;
+      auto offset = begin.second;
+      fn->next_functions[offset] = std::make_pair(ends_to_outputs.at(fn->next_functions[offset]), 0);
+    }
+
+    // Replace subgraph with this node.
+    next_functions.insert(next_functions.begin(), subgraph.boundary.ends.begin(), subgraph.boundary.ends.end());
+    is_executable = std::any_of(relevant_outputs.begin(), relevant_outputs.end(),
+                                [](const Variable& var) { return var.requires_grad(); });
+    input_sizes = fmap<TensorMeta>(relevant_outputs);
+
+    // Ensure placeholders and inputs are sorted in the same way.
+    edge_order input_order = computeInputOrder(inputs, inherited_placeholders);
+    std::sort(next_functions.begin(), next_functions.end(), [&input_order](const edge_type &a, const edge_type &b) {
+      return input_order.at(a) < input_order.at(b);
+    });
+    std::sort(placeholders.begin(), placeholders.end(), [&input_order](const std::shared_ptr<EvalOutput> &a, const std::shared_ptr<EvalOutput> &b) {
+      return input_order.at(a->next_edge) < input_order.at(b->next_edge);
+    });
   }
-
-  // Replace begins with pointers to output nodes.
-  // This detaches the subgraph from the full backward graph.
-  for (auto & begin : subgraph.boundary.begins) {
-    auto & fn = begin.first;
-    auto offset = begin.second;
-    fn->next_functions[offset] = std::make_pair(ends_to_outputs.at(fn->next_functions[offset]), 0);
-  }
-
-  // Replace subgraph with this node.
-  next_functions.insert(next_functions.begin(), subgraph.boundary.ends.begin(), subgraph.boundary.ends.end());
-  is_executable = std::any_of(relevant_outputs.begin(), relevant_outputs.end(),
-                              [](const Variable& var) { return var.requires_grad(); });
-  input_sizes = fmap<TensorMeta>(relevant_outputs);
-
-  // Ensure placeholders and inputs are sorted in the same way.
-  edge_order input_order = computeInputOrder(inputs, inherited_placeholders);
-  std::sort(next_functions.begin(), next_functions.end(), [&input_order](const edge_type &a, const edge_type &b) {
-    return input_order.at(a) < input_order.at(b);
-  });
-  std::sort(placeholders.begin(), placeholders.end(), [&input_order](const std::shared_ptr<EvalOutput> &a, const std::shared_ptr<EvalOutput> &b) {
-    return input_order.at(a->next_edge) < input_order.at(b->next_edge);
-  });
 
   // Rebase outputs.
   for (auto & output : relevant_outputs) {
@@ -189,11 +245,16 @@ bool Eval::replaceSubgraph(const variable_list& inputs, const variable_list& _ou
 }
 
 variable_list Eval::apply(const variable_list& inputs) {
-  std::mutex outputs_mutex;
-  variable_list outputs(placeholders.size());
-  auto& engine = python::PythonEngine::getDefaultEngine();
-  auto exec_data = filterRoots(inputs);
-  engine.execute(exec_data.first, exec_data.second, true, getCallbacks(outputs, outputs_mutex));
+  variable_list outputs;
+  if (simple_graph) {
+    outputs = (*simple_graph)(inputs);
+  } else {
+    std::mutex outputs_mutex;
+    outputs.resize(placeholders.size());
+    auto& engine = python::PythonEngine::getDefaultEngine();
+    auto exec_data = filterRoots(inputs);
+    engine.execute(exec_data.first, exec_data.second, true, getCallbacks(outputs, outputs_mutex));
+  }
 
   auto bw_eval = newEval();
   bw_eval->replaceSubgraph(inputs, outputs, placeholders);
