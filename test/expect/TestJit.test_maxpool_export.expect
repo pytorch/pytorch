@@ -3,20 +3,21 @@ node {
   output: "2"
   op_type: "MaxPool"
   attribute {
-    name: "kernel"
-    i: 3
+    name: "kernels"
+    ints: 3
   }
   attribute {
-    name: "pad"
-    i: 0
+    name: "pads"
+    ints: 0
+    ints: 0
   }
   attribute {
-    name: "dilation"
-    i: 1
+    name: "dilations"
+    ints: 1
   }
   attribute {
-    name: "stride"
-    i: 2
+    name: "strides"
+    ints: 2
   }
 }
 name: "torch-jit-export"
