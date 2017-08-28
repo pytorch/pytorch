@@ -36,7 +36,7 @@ _(is_test) \
 _(epsilon) \
 _(order) \
 _(momentum) \
-_(InPlaceOutputs) \
+_(consumed_inputs) \
 _(kernels) \
 _(kernel) \
 _(strides) \
