@@ -1,3 +1,4 @@
+version: 1
 node {
   input: "2"
   input: "1"
