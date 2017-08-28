@@ -102,11 +102,11 @@ template <class T>
 class OpenGLPadImageOp final : public ConvPoolOpBase<CPUContext>, ImageAllocator<T> {
  public:
   OpenGLPadImageOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<CPUContext>(operator_def, ws) {
+      : ConvPoolOpBase<CPUContext>(operator_def, ws),
+        mode_(OperatorBase::GetSingleArgument<string>("mode", "")) {
     OPERATOR_NEEDS_FEATURE(order_ == StorageOrder::NCHW, "OpenGL only supports NCHW order.");
+    OPERATOR_NEEDS_FEATURE(mode_ == "reflect", "OpenGL only supports reflection");
 
-    OPERATOR_NEEDS_FEATURE(OperatorBase::GetSingleArgument<string>("mode", "") == "reflect",
-                           "OpenGL only supports reflection");
     CAFFE_ENFORCE(legacy_pad_ == LegacyPadding::NOTSET,
                   "Padding layer only supports explicit pad values.");
     CAFFE_ENFORCE(dilation_h() == 1 && dilation_w() == 1,
@@ -122,9 +122,10 @@ class OpenGLPadImageOp final : public ConvPoolOpBase<CPUContext>, ImageAllocator
     const GLImageVector<T>& input = Inputs()[0]->template Get<GLImageVector<T>>();
 
     const int num_images = input.size();
-    const int input_width     = input.width();
-    const int input_height    = input.height();
-    const int output_channels = input.channels();
+    const int input_width = input.width();
+    const int input_height = input.height();
+    const int input_channels = input.channels();
+    const int output_channels = input_channels;
 
     int output_height, output_width;
     computeOutputHW(this, input_height, input_width, &output_height, &output_width);
@@ -134,11 +135,15 @@ class OpenGLPadImageOp final : public ConvPoolOpBase<CPUContext>, ImageAllocator
     GLImageVector<T>* output = ImageAllocator<T>::newImage(
         num_images, output_width, output_height, output_channels, is_last);
 
-    if (!_padImage) {
-      _padImage.reset(new GLPadImage());
+    if (!padImage_) {
+      padImage_.reset(new GLPadImage());
+      LOG(INFO) << input_channels << ": " << input_height << " X " << input_width << " => "
+                << output_channels << ": " << output_height << " X " << output_width;
+      LOG(INFO) << "Padmode: " << mode_ << "pad_l = " << pad_l() << ", pad_r = " << pad_r()
+                << ", pad_t = " << pad_t() << ", pad_b = " << pad_b();
     }
 
-    _padImage->pad(input, *output, pad_l(), pad_t());
+    padImage_->pad(input, *output, pad_l(), pad_t());
 
     Outputs()[0]->Reset(output);
 
@@ -146,7 +151,8 @@ class OpenGLPadImageOp final : public ConvPoolOpBase<CPUContext>, ImageAllocator
   }
 
  private:
-  std::unique_ptr<GLPadImage> _padImage;
+  std::string mode_;
+  std::unique_ptr<GLPadImage> padImage_;
 };
 
 REGISTER_CPU_OPERATOR(OpenGLPadImage, OpenGLPadImageOp<float16_t>);

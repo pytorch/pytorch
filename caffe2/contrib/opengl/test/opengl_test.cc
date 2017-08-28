@@ -112,21 +112,28 @@ void checkError(const TensorCPU& t1, const TensorCPU& t2, float error) {
 #else
 
   int count = 0;
+  float maxError = 0, minError = 0;
   if (t1.template IsType<float>()) {
     for (auto i = 0; i < t1.size(); ++i) {
       const float t1_i = t1.template data<float>()[i];
       const float t2_i = t2.template data<float>()[i];
       if (!(absolute_error(t1_i, t2_i) <= error || relative_error(t1_i, t2_i) <= 0.08)) {
-        gl_log(GL_ERR,
-               "i: %d, GL: %.2f, CPU: %.2f, absolute error: %.2f, relative error: %.2f%%\n",
-               i,
-               t1_i,
-               t2_i,
-               absolute_error(t1_i, t2_i),
-               relative_error(t1_i, t2_i) * 100);
-        if (count++ == 10) {
-          break;
+        if (count < 10) {
+          gl_log(GL_ERR,
+                 "i: %d, GL: %.2f, CPU: %.2f, absolute error: %.2f, relative error: %.2f%%\n",
+                 i,
+                 t1_i,
+                 t2_i,
+                 absolute_error(t1_i, t2_i),
+                 relative_error(t1_i, t2_i) * 100);
         }
+        count++;
+      }
+      float err = t1_i - t2_i;
+      if (err > maxError) {
+        maxError = err;
+      } else if (err < minError) {
+        minError = err;
       }
     }
   } else if (t1.template IsType<uint8_t>()) {
@@ -134,19 +141,31 @@ void checkError(const TensorCPU& t1, const TensorCPU& t2, float error) {
       const uint8_t t1_i = t1.template data<uint8_t>()[i];
       const uint8_t t2_i = t2.template data<uint8_t>()[i];
       if (!(absolute_error(t1_i, t2_i) <= error || relative_error(t1_i, t2_i) <= 0.08)) {
-        gl_log(GL_ERR,
-               "i: %d, GL: %d, CPU: %d, absolute error: %.2f, relative error: %.2f%%\n",
-               i,
-               t1_i,
-               t2_i,
-               absolute_error(t1_i, t2_i),
-               relative_error(t1_i, t2_i) * 100);
-        if (count++ == 10) {
-          break;
+        if (count < 10) {
+          gl_log(GL_ERR,
+                 "i: %d, GL: %d, CPU: %d, absolute error: %.2f, relative error: %.2f%%\n",
+                 i,
+                 t1_i,
+                 t2_i,
+                 absolute_error(t1_i, t2_i),
+                 relative_error(t1_i, t2_i) * 100);
         }
+        count++;
+      }
+      float err = t1_i - t2_i;
+      if (err > maxError) {
+        maxError = err;
+      } else if (err < minError) {
+        minError = err;
       }
     }
   }
+  gl_log(GL_LOG,
+         "#errors = %d in %d, maxError = %f, minError = %f\n",
+         count,
+         (int)t1.size(),
+         maxError,
+         minError);
 #endif
 }
 
@@ -1337,7 +1356,8 @@ void OpenGL_speedtest(int N,
   net->TEST_Benchmark(1, 4, true);
 }
 
-void testOpenGLPadImage(int N, int C, int H, int W, int pad, float error) {
+void testOpenGLPadImage(
+    int N, int C, int H, int W, int pad_l, int pad_r, int pad_t, int pad_b, float error) {
   LOG(INFO) << "OpenGLPadImage Test";
   {
     Workspace ws;
@@ -1345,11 +1365,10 @@ void testOpenGLPadImage(int N, int C, int H, int W, int pad, float error) {
       auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
       t->Resize(N, C, H, W);
       CPUContext ctx;
-      //      math::RandGaussian<float, CPUContext>(t->size(), 0, 1, t->mutable_data<float>(),
-      //      &ctx);
-      for (auto i = 0; i < t->size(); ++i) {
-        t->mutable_data<float>()[i] = i + 1;
-      }
+      math::RandGaussian<float, CPUContext>(t->size(), 0, 1, t->mutable_data<float>(), &ctx);
+      //      for (auto i = 0; i < t->size(); ++i) {
+      //        t->mutable_data<float>()[i] = i + 1;
+      //      }
     }
 
     NetDef netdef;
@@ -1366,8 +1385,23 @@ void testOpenGLPadImage(int N, int C, int H, int W, int pad, float error) {
       op.add_input("X_gl");
       {
         auto& arg = *(op.add_arg());
-        arg.set_name("pad");
-        arg.set_i(pad);
+        arg.set_name("pad_l");
+        arg.set_i(pad_l);
+      }
+      {
+        auto& arg = *(op.add_arg());
+        arg.set_name("pad_r");
+        arg.set_i(pad_r);
+      }
+      {
+        auto& arg = *(op.add_arg());
+        arg.set_name("pad_t");
+        arg.set_i(pad_t);
+      }
+      {
+        auto& arg = *(op.add_arg());
+        arg.set_name("pad_b");
+        arg.set_i(pad_b);
       }
       {
         auto& arg = *(op.add_arg());
@@ -1395,8 +1429,23 @@ void testOpenGLPadImage(int N, int C, int H, int W, int pad, float error) {
       op.add_input("X_cpu");
       {
         auto& arg = *(op.add_arg());
-        arg.set_name("pad");
-        arg.set_i(pad);
+        arg.set_name("pad_l");
+        arg.set_i(pad_l);
+      }
+      {
+        auto& arg = *(op.add_arg());
+        arg.set_name("pad_r");
+        arg.set_i(pad_r);
+      }
+      {
+        auto& arg = *(op.add_arg());
+        arg.set_name("pad_t");
+        arg.set_i(pad_t);
+      }
+      {
+        auto& arg = *(op.add_arg());
+        arg.set_name("pad_b");
+        arg.set_i(pad_b);
       }
       {
         auto& arg = *(op.add_arg());
@@ -1787,7 +1836,7 @@ void compareModelsForOpenGL(std::string name,
     for (int i = 0; i < predictNet.mutable_op(0)->arg_size(); i++) {
       auto* arg = predictNet.mutable_op(0)->mutable_arg(i);
       if (arg->name() == "noise_std") {
-        arg->set_f(0.000001);
+        arg->set_f(0);
       }
     }
   }
@@ -1802,9 +1851,9 @@ void compareModelsForOpenGL(std::string name,
 
     NetDef truncatedOpenGLPredictNet = rewritePredictNetForOpenGL(truncatedPredictNet);
 
-    LOG(INFO) << "truncatedPredictNet";
-    dumpDefForOpenGL(truncatedPredictNet);
-
+    //    LOG(INFO) << "truncatedPredictNet";
+    //    dumpDefForOpenGL(truncatedPredictNet);
+    //
     LOG(INFO) << "truncatedOpenGLPredictNet";
     dumpDefForOpenGL(truncatedOpenGLPredictNet);
 
@@ -1844,9 +1893,8 @@ void compareModelsForOpenGL(std::string name,
       CAFFE_ENFORCE_EQ(input_order, "NHWC");
       CAFFE_ENFORCE_EQ(input_type, "uint8_t");
       t_gl->Resize(1, height, width, channel);
-      for (auto i = 0; i < t_gl->size(); ++i) {
-        t_gl->mutable_data<uint8_t>()[i] = i % 255;
-      }
+      uint8_t* input = t_gl->mutable_data<uint8_t>();
+      memcpy(input, t_cpu->mutable_data<uint8_t>(), t_cpu->capacity_nbytes());
     } else if (name == "segmentation") {
       CAFFE_ENFORCE_EQ(input_order, "NCHW");
       CAFFE_ENFORCE_EQ(input_type, "float");
@@ -1867,6 +1915,103 @@ void compareModelsForOpenGL(std::string name,
       const auto& mt = mws.GetBlob(m_name)->Get<TensorCPU>(); // GPU
       const auto& ct = cws.GetBlob(c_name)->Get<TensorCPU>(); // CPU
       checkError(mt, ct, 1);
+    }
+  }
+}
+
+void compareBatchedToTiledModels(std::string name,
+                                 const NetDef& initNet,
+                                 NetDef predictNet,
+                                 int width,
+                                 int height,
+                                 int channel,
+                                 std::string input_type,
+                                 std::string input_order) {
+
+  if (name == "styleTransfer") {
+    for (int i = 0; i < predictNet.mutable_op(0)->arg_size(); i++) {
+      auto* arg = predictNet.mutable_op(0)->mutable_arg(i);
+      if (arg->name() == "noise_std") {
+        arg->set_f(0);
+      }
+    }
+  }
+
+  for (auto i = 19; i < predictNet.op_size(); ++i) {
+    auto truncatedPredictNet = truncateAfter(predictNet, i);
+
+    // Change the last blob to external_output(0) for the predict net
+    auto output_blob = "_OUTPUT_BLOB__";
+    truncatedPredictNet.set_external_output(0, output_blob);
+    truncatedPredictNet.mutable_op(truncatedPredictNet.op_size() - 1)->set_output(0, output_blob);
+
+    NetDef bachedNet = rewritePredictNetForOpenGL(truncatedPredictNet, false, false);
+    NetDef tiledNet = rewritePredictNetForOpenGL(truncatedPredictNet, false, true);
+
+    LOG(INFO) << "truncatedPredictNet";
+    dumpDefForOpenGL(truncatedPredictNet);
+
+    LOG(INFO) << "truncatedOpenGLPredictNet";
+    dumpDefForOpenGL(bachedNet);
+
+    CPUContext ctx;
+
+    Workspace tws;
+    tws.RunNetOnce(initNet);
+
+    auto* t_batch = tws.CreateBlob(bachedNet.external_input(0))->GetMutable<TensorCPU>();
+    if (name == "styleTransfer") {
+      CAFFE_ENFORCE_EQ(input_order, "NHWC");
+      CAFFE_ENFORCE_EQ(input_type, "uint8_t");
+      t_batch->Resize(1, height, width, channel);
+      for (auto i = 0; i < t_batch->size(); ++i) {
+        t_batch->mutable_data<uint8_t>()[i] = i % 255;
+      }
+    } else if (name == "segmentation") {
+      CAFFE_ENFORCE_EQ(input_order, "NCHW");
+      CAFFE_ENFORCE_EQ(input_type, "float");
+      t_batch->Resize(1, channel, height, width);
+      float* input = t_batch->mutable_data<float>();
+      const int size = width * height;
+      // Limit input range to YUV
+      math::RandGaussian<float, CPUContext>(size, 0.5, 0.15, input, &ctx); // Y: 0 ~ 1
+      math::RandGaussian<float, CPUContext>(size, 0, 0.12, input + size, &ctx); // U: -0.436 ~ 0.436
+      math::RandGaussian<float, CPUContext>(
+          size, 0, 0.2, input + 2 * size, &ctx); // V: -0.615 ~ 0.615
+    } else {
+      CAFFE_THROW("CompareModels only works with style transfer and segmentation now");
+    }
+
+    Workspace bws;
+    bws.RunNetOnce(initNet);
+
+    auto* t_tiling = bws.CreateBlob(tiledNet.external_input(0))->GetMutable<TensorCPU>();
+    if (name == "styleTransfer") {
+      CAFFE_ENFORCE_EQ(input_order, "NHWC");
+      CAFFE_ENFORCE_EQ(input_type, "uint8_t");
+      t_tiling->Resize(1, height, width, channel);
+      uint8_t* input = t_tiling->mutable_data<uint8_t>();
+      memcpy(input, t_batch->mutable_data<uint8_t>(), t_batch->capacity_nbytes());
+
+    } else if (name == "segmentation") {
+      CAFFE_ENFORCE_EQ(input_order, "NCHW");
+      CAFFE_ENFORCE_EQ(input_type, "float");
+      t_tiling->Resize(1, channel, height, width);
+      float* input = t_tiling->mutable_data<float>();
+      memcpy(input, t_batch->mutable_data<float>(), t_batch->capacity_nbytes());
+    }
+
+    bws.RunNetOnce(bachedNet);
+    tws.RunNetOnce(tiledNet);
+
+    const auto batch_name = bachedNet.op(bachedNet.op_size() - 1).output(0);
+    const auto tile_name = tiledNet.op(tiledNet.op_size() - 1).output(0);
+
+    LOG(INFO) << "Checking correspondence for name: " << batch_name << ", idx: " << i;
+    {
+      const auto& bt = bws.GetBlob(batch_name)->Get<TensorCPU>(); // GPU
+      const auto& tt = tws.GetBlob(tile_name)->Get<TensorCPU>(); // CPU
+      checkError(bt, tt, 0.01);
     }
   }
 }
@@ -2230,7 +2375,7 @@ void testOpenGL() {
       testOpenGLConv(1, channel, 10, 10, channel, 3, 3, 0, 1, ConvTransposePRelu, 0.1 * channel / 8, true, 1, 1, tile_x, tile_y, true);
       testOpenGLConv(1, channel, 10, 10, channel, 3, 3, 0, 1, ConvRelu, 0.1 * channel / 8, true, 1, 1, tile_x, tile_y, true);
       testOpenGLConv(1, channel, 10, 10, channel, 3, 3, 0, 1, ConvTransposeRelu, 0.1 * channel / 8, true, 1, 1, tile_x, tile_y, true);
-      
+
       testOpenGLPRelu(1, channel, 13, 4, channel, tile_x, tile_y, 0.1);
       testOpenGLRelu(1, channel, 4, 17, tile_x, tile_y, 0.1);
       // clang-format on
@@ -2510,9 +2655,9 @@ void testOpenGL() {
     testOpenGLConv(1, 6, 112, 112, 3, 4, 4, 0, 2, ConvTranspose, 0.5, true, 2, 1);
 
     LOG(INFO) << "Test OpenGL PadImage";
-    testOpenGLPadImage(1, 3, 4, 4, 2, 0.01);
-    testOpenGLPadImage(1, 3, 50, 80, 10, 0.01);
-    testOpenGLPadImage(1, 12, 50, 80, 10, 0.01);
+    testOpenGLPadImage(1, 3, 11, 11, 0, 1, 0, 1, 0.001);
+    testOpenGLPadImage(1, 3, 50, 80, 0, 1, 0, 1, 0.001);
+    testOpenGLPadImage(1, 12, 50, 80, 10, 9, 10, 9, 0.001);
 
     LOG(INFO) << "Test OpenGL Preprocess";
     testOpenGLPreprocess(1, 4, 8, 8, 0.20);
@@ -2580,8 +2725,8 @@ void testOpenGL() {
     testOpenGLResize(3, 4, 16, 16, 1, 1, 1, 0.1);
     testOpenGLResize(16, 4, 16, 16, 1, 1, 1, 0.1);
 
-    testOpenGLPadImage(3, 3, 4, 4, 2, 0.01);
-    testOpenGLPadImage(23, 3, 4, 4, 2, 0.01);
+    testOpenGLPadImage(3, 3, 4, 4, 0, 1, 0, 1, 0.01);
+    testOpenGLPadImage(23, 3, 4, 4, 0, 1, 0, 1, 0.01);
 
     testOpenGLSoftmax(3, 1000, 0.1);
     testOpenGLSoftmax(27, 100, 0.1);

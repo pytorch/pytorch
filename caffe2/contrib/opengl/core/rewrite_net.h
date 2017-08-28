@@ -11,6 +11,8 @@ bool tryConvertToOpenGL(const NetDef& initNet,
                         bool useTextureInput = false);
 
 // Exposed for testing
-NetDef rewritePredictNetForOpenGL(const NetDef& predictNet, bool useTextureInput = false);
+NetDef rewritePredictNetForOpenGL(const NetDef& predictNet,
+                                  bool useTextureInput = false,
+                                  bool useTiling = false);
 void dumpDefForOpenGL(const NetDef& net);
 } // namespace caffe2
