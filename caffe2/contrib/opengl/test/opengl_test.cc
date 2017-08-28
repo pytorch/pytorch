@@ -2092,7 +2092,7 @@ static void squareFactors(int N, int& r1, int& r2) {
 void testOpenGL() {
   {
     // Test a bunch of different tiled convolutions
-    std::vector<int> channels({4, 8, 16, 32, 64, 128, 256, 512});
+    std::vector<int> channels({3, 4, 6, 8, 12, 16, 32, 64, 128, 256, 512});
 
     for (const auto& input_channels : channels) {
       int tile_x = 1, tile_y = 1;
