@@ -177,6 +177,11 @@ class CudaTransfer(Function):
 class Permute(Function):
 
     @staticmethod
+    def primspec(g, input, dim_indices):
+        return (g.appendNode(g.create("Transpose", [input]))
+                .is_("axes", dim_indices))
+
+    @staticmethod
     def forward(ctx, input, dim_indices):
         ctx.rev_dim_indices = [None for _ in range(len(dim_indices))]
         for i, dim_idx in enumerate(dim_indices):
