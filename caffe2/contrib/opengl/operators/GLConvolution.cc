@@ -272,8 +272,8 @@ class GLConvolution : public GLFilter {
       for (int ot = output_tile_range.x; ot < output_tile_range.y; ot++) {
         for (int y = 0; y < geometry.kernel_size.y; y++) {
           for (int x = 0; x < geometry.kernel_size.x; x++) {
-            for (int out = 0; out < std::min(4, output_channels); out++) {
-              for (int in = 0; in < std::min(4, input_channels); in++) {
+            for (int out = 0; out < std::min(4, (output_channels - ot * 4)); out++) {
+              for (int in = 0; in < std::min(4, (input_channels - it * 4)); in++) {
                 // clang-format off
                   if (geometry.transposed) {
                     typedef float(kernelTensor)[input_channels][output_channels][geometry.kernel_size.y][geometry.kernel_size.x];
@@ -620,17 +620,8 @@ void GLConvolution::convolution(const GLImageVector<T>& input_images,
 
     for (int is = 0; is < input_slices; is += input_batch_size) {
       for (int os = 0; os < output_slices; os += output_batch_size) {
-
         const int output_channels_per_batch =
             std::min(4 * output_tiles * output_batch_size, geometry.output_channels - 4 * os);
-
-        std::vector<texture_attachment> input_attachments;
-        for (int ib = 0; ib < input_batch_size; ib++) {
-          input_attachments.push_back({input_image->textures[is + ib], inputData[ib]});
-        }
-        for (int ib = 0; ib < output_batch_size; ib++) {
-          input_attachments.push_back({output_image->textures[os + ib], previousData[ib]});
-        }
 
         for (int ib = 0, it = 0; it < input_tiles; ib++, it += input_tile_chunk_size) {
           // process input tiles in chunks
@@ -667,18 +658,19 @@ void GLConvolution::convolution(const GLImageVector<T>& input_images,
             for (int ob = 0, ot = 0; ot < output_tiles; ob++, ot += output_tile_chunk_size) {
               attach_uniform_buffer<float16_t>(
                   kernel_block[ob], binding_point++, [&](float16_t* data, size_t size) {
+#if 0
                     const int kernel_block_size = (4 * input_tile_chunk_size) *
                                                   (4 * output_tile_chunk_size) *
                                                   geometry.kernel_size.y * geometry.kernel_size.x;
                     int kernel_block_idx = ib * output_tile_batch_size + ob;
-
                     if (kernel_block_buffers[kernel_block_idx] == nullptr) {
                       const int alignment = 32;
 #ifdef __ANDROID__
                       kernel_block_buffers[kernel_block_idx] =
                           (float16_t*)memalign(alignment, kernel_block_size * sizeof(float16_t));
 #else
-                      posix_memalign((void**)&kernel_block_buffers[kernel_block_idx], alignment, kernel_block_size * sizeof(float16_t));
+                                          posix_memalign((void**)&kernel_block_buffers[kernel_block_idx],
+                                          alignment, kernel_block_size * sizeof(float16_t));
 #endif
                       CAFFE_ENFORCE(kernel_block_buffers[kernel_block_idx]);
 
@@ -692,6 +684,14 @@ void GLConvolution::convolution(const GLImageVector<T>& input_images,
                     memcpy(data,
                            kernel_block_buffers[kernel_block_idx],
                            kernel_block_size * sizeof(float16_t));
+#else
+                    pack_kernel_data(data,
+                                     size,
+                                     input_image->channels,
+                                     output_image->channels,
+                                     {it, std::min(it + input_tile_chunk_size, input_tiles)},
+                                     {ot, std::min(ot + output_tile_chunk_size, output_tiles)});
+#endif
                   });
             }
           }
@@ -719,6 +719,14 @@ void GLConvolution::convolution(const GLImageVector<T>& input_images,
                     }
                   });
             }
+          }
+
+          std::vector<texture_attachment> input_attachments;
+          for (int ib = 0; ib < input_batch_size; ib++) {
+            input_attachments.push_back({input_image->textures[is + ib], inputData[ib]});
+          }
+          for (int ib = 0; ib < output_batch_size; ib++) {
+            input_attachments.push_back({output_image->textures[os + ib], previousData[ib]});
           }
 
           run(input_attachments,
@@ -880,8 +888,8 @@ class OpenGLConvOp final : public ConvPoolOpBase<CPUContext>, ImageAllocator<T> 
     const int input_tile_x = input.tile_x(), input_tile_y = input.tile_y();
     int output_tile_x = 1, output_tile_y = 1;
     int input_tiles = input_tile_x * input_tile_y, output_tiles = 1;
-    int input_tile_chunk_size = 1, output_tile_chunk_size = 1, input_tile_batch_size = 1,
-        output_tile_batch_size = 1;
+    int input_tile_chunk_size = 1, output_tile_chunk_size = 1;
+    int input_tile_batch_size = 1, output_tile_batch_size = 1;
 
     const bool tiling = GetSingleArgument<int>("tiling", input_tile_x > 1 || input_tile_y > 1);
 
