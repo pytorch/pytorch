@@ -251,7 +251,7 @@ void dumpDefForOpenGL(const NetDef& d) {
 //  }
 //}
 
-NetDef rewritePredictNetForOpenGL(const NetDef& predictNet, bool useTextureInput) {
+NetDef rewritePredictNetForOpenGL(const NetDef& predictNet, bool useTextureInput, bool useTiling) {
   CAFFE_ENFORCE_GE(predictNet.op_size(), 1);
   NetDef net;
   net.CopyFrom(predictNet);
@@ -289,10 +289,11 @@ NetDef rewritePredictNetForOpenGL(const NetDef& predictNet, bool useTextureInput
       op->set_type(openGLOp);
       openGLOps.insert(openGLOp);
 
-      // Do not check in
-      // auto* arg = op->add_arg();
-      // arg->set_name("tiling");
-      // arg->set_i(1);
+      if (useTiling) {
+        auto* arg = op->add_arg();
+        arg->set_name("tiling");
+        arg->set_i(1);
+      }
     } else {
       needCopyOps = true;
     }
