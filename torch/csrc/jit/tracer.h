@@ -148,6 +148,7 @@ struct TraceInput {
   at::Tensor buffer;
   TraceInput(std::shared_ptr<Variable> variable) : variable(variable) {}
   TraceInput(at::Tensor buffer) : buffer(buffer) {}
+  TraceInput() {}
 };
 
 // Start tracing, treating 'inputs' as inputs to the trace, which can be

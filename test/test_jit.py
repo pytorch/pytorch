@@ -53,13 +53,13 @@ class TestJit(TestCase):
         z = -torch.sigmoid(torch.tanh(x * (x + y)))
         torch._C._tracer_exit((z,))
         torch._C._jit_pass_lint(trace)
-        self.assertToffeeExpected(torch._C._jit_pass_export(trace))
+        self.assertToffeeExpected(trace.export())
 
     @toffee_only
     def test_export_view(self):
         x = Variable(torch.Tensor([0]), requires_grad=True)
         trace, _ = torch.jit.record_trace(lambda x: x.view(1, 1), x)
-        self.assertToffeeExpected(torch._C._jit_pass_export(trace))
+        self.assertToffeeExpected(trace.export())
 
     @toffee_only
     def test_export_data(self):
@@ -67,7 +67,7 @@ class TestJit(TestCase):
         y = Variable(torch.Tensor([[1, 2], [3, 4]]), requires_grad=True)
         trace, _ = torch.jit.record_trace(lambda x, y: -torch.sigmoid(torch.tanh(x * (x + y))), x, y)
         initializers = [x.data]
-        self.assertToffeeExpected(torch._C._jit_pass_export(trace, initializers))
+        self.assertToffeeExpected(trace.export(initializers))
 
     def test_lstm(self):
         # Careful: don't use fused backend (enabled with CUDA)
@@ -305,7 +305,7 @@ class TestJit(TestCase):
     def test_batchnorm_export(self):
         x = Variable(torch.randn(2, 2).fill_(1.0), requires_grad=True)
         trace, _ = torch.jit.record_trace(nn.BatchNorm2d(2), x)
-        self.assertToffeeExpected(torch._C._jit_pass_export(trace))
+        self.assertToffeeExpected(trace.export())
 
     def test_batchnorm_verify(self):
         bn = torch.jit.traced(nn.BatchNorm2d(1), enabled=True, verify=True)
@@ -323,13 +323,13 @@ class TestJit(TestCase):
     def test_conv_export(self):
         x = Variable(torch.randn(20, 16, 50, 40).fill_(1.0), requires_grad=True)
         trace, _ = torch.jit.record_trace(nn.Conv2d(16, 13, 3, bias=False), x)
-        self.assertToffeeExpected(torch._C._jit_pass_export(trace))
+        self.assertToffeeExpected(trace.export())
 
     @toffee_only
     def test_maxpool_export(self):
         x = Variable(torch.randn(20, 16, 50))
         trace, _ = torch.jit.record_trace(nn.MaxPool1d(3, stride=2), x)
-        self.assertToffeeExpected(torch._C._jit_pass_export(trace))
+        self.assertToffeeExpected(trace.export())
 
     @skipIfNoTorchVision
     def test_alexnet(self):

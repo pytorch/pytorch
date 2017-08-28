@@ -1,4 +1,7 @@
 #include <Python.h>
+#include <pybind11/pybind11.h>
+
+namespace py = pybind11;
 
 #include "THP.h"
 #include "torch/csrc/jit/ir.h"
@@ -39,41 +42,11 @@ using pass_type = void (std::shared_ptr<Graph>&);
 template<pass_type pass>
 PyObject * wrap_pass(PyObject *_unused, PyObject *py_state) {
   HANDLE_TH_ERRORS
-  THPUtils_assert(THPTracingState_Check(py_state), "expected a TracingState instance");
-  THPTracingState *state = (THPTracingState*)py_state;
-  pass(state->cdata->graph);
+  auto trace = py::handle(py_state).cast<tracer::TracingState*>();
+  pass(trace->graph);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
-
-#ifdef WITH_TOFFEE
-PyObject * export_graph(PyObject *_unused, PyObject *args) {
-  HANDLE_TH_ERRORS
-  PyObject* py_state;
-  PyObject* initializers = nullptr;
-  if (!PyArg_ParseTuple(args, "O|O", &py_state, &initializers)) {
-    return NULL;
-  }
-
-  std::vector<at::Tensor> initializers_;
-  if(initializers) {
-    if (!PySequence_Check(initializers))
-      throw std::runtime_error("expected initializers to be a sequence");
-    auto N = PySequence_Length(initializers);
-    for(Py_ssize_t i = 0; i < N; ++i) {
-      auto tensor = PySequence_GetItem(initializers,i);
-      if(!THPModule_isTensor(tensor))
-        throw std::runtime_error("expected a tensor value in initializer dict");
-      initializers_.push_back(torch::createTensor(tensor));
-    }
-  }
-
-  THPUtils_assert(THPTracingState_Check(py_state), "expected a TracingState instance");
-  THPTracingState *state = (THPTracingState*)py_state;
-  return THPUtils_packString(ExportGraph(state->cdata->graph, state->cdata->buffer_map, initializers_));
-  END_HANDLE_TH_ERRORS
-}
-#endif // WITH_TOFFEE
 
 PyObject * run_cpp_tests(PyObject *_unused, PyObject *_unused2) {
     HANDLE_TH_ERRORS
@@ -84,15 +57,10 @@ PyObject * run_cpp_tests(PyObject *_unused, PyObject *_unused2) {
 
 struct PyMethodDef _THPJIT_methods[] = {
   {"_jit_init",       (PyCFunction)THPJIT_initExtension,      METH_NOARGS,  NULL},
-  {"_tracer_enter",   (PyCFunction)THPTracer_enter,           METH_VARARGS, NULL},
-  {"_tracer_exit",    (PyCFunction)THPTracer_exit,            METH_VARARGS, NULL},
   {"_jit_pass_init", (PyCFunction)wrap_pass<MatchJITOps>,     METH_O,       "init"},
   {"_jit_pass_fuse", (PyCFunction)wrap_pass<FuseGraph>,       METH_O,       "fuse"},
   {"_jit_pass_dco",  (PyCFunction)wrap_pass<EliminateDeadCode>, METH_O,     "dco"},
   {"_jit_pass_lint", (PyCFunction)wrap_pass<LintGraph>,       METH_O,       "lint"},
-#ifdef WITH_TOFFEE
-  {"_jit_pass_export", (PyCFunction)export_graph,             METH_VARARGS,       "export"},
-#endif // WITH_TOFFEE
   {"_jit_run_cpp_tests",(PyCFunction)run_cpp_tests,           METH_NOARGS,  NULL},
   {NULL}
 };

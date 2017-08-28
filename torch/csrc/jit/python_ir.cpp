@@ -186,11 +186,8 @@ void initPythonIRBindings(PyObject * module_) {
   .def_readonly("user",&Use::user)
   .def_readonly("offset",&Use::offset);
 
-  m.def("_jit_get_graph", [](py::object h_) {
-    auto py_state = h_.ptr();
-    JIT_ASSERTM(THPTracingState_Check(py_state), "expected a TracingState instance");
-    THPTracingState *state = (THPTracingState*)py_state;
-    return state->cdata->graph;
+  m.def("_jit_get_graph", [](tracer::TracingState* s) {
+    return s->graph;
   });
 }
 }}
