@@ -16,10 +16,10 @@ class MaxPool1d(Function):
             return None
         stride = stride or kernel_size
         n = g.appendNode(g.create("MaxPool", [input])
-                          .i_("kernel", kernel_size)
-                          .i_("pad", padding)
-                          .i_("dilation", dilation)
-                          .i_("stride", stride))
+                          .is_("kernels", [kernel_size])
+                          .is_("pads", [padding] * 2)
+                          .is_("dilations", [dilation])
+                          .is_("strides", [stride]))
         return (n, None)
 
     @staticmethod
@@ -100,10 +100,10 @@ class MaxPool2d(Function):
         if ceil_mode:
             return None
         n = g.appendNode(g.create("MaxPool", [input])
-                          .i_("kernel", kernel_size)
-                          .i_("pad", padding)
-                          .i_("dilation", dilation)
-                          .i_("stride", stride))
+                          .is_("kernels", [kernel_size] * 2)
+                          .is_("pads", [padding] * 4)
+                          .is_("dilations", [dilation] * 2)
+                          .is_("strides", [stride] * 2))
         return (n, None)
 
     @staticmethod
@@ -404,9 +404,9 @@ class AvgPool2d(Function):
             return None
         stride = stride or kernel_size
         n = g.appendNode(g.create("AveragePool", [input])
-                          .i_("kernel", kernel_size)
-                          .i_("stride", stride)
-                          .i_("pad", padding))
+                          .is_("kernels", [kernel_size] * 2)
+                          .is_("strides", [stride] * 2)
+                          .is_("pads", [padding] * 4))
         return (n, None)
 
     @staticmethod
