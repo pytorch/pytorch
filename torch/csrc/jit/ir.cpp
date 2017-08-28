@@ -99,11 +99,16 @@ struct node_list_with_types {
 };
 std::ostream& operator<<(std::ostream & out, node_list_with_types l) {
   size_t i = 0;
+  size_t prev_stage = 0;
   for(auto n : l.nodes) {
     if(i++ > 0) {
       if (l.use_newlines) {
         // TODO: Indent here is hard-coded for "graph(": un-hard-code it
         out << "\n      ";
+        if (n->stage() != prev_stage) {
+          out << "-------- stage " << n->stage() << " --------\n      ";
+          prev_stage = n->stage();
+        }
       } else {
         out << ", ";
       }

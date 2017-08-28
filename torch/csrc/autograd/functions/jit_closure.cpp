@@ -32,6 +32,8 @@ struct Replicate : public Function {
   }
 };
 
+// This class is never put in the autograd graph: see InputPlaceholder
+// and EvalPlaceholder.
 struct Placeholder : public Function {
   virtual variable_list apply(const variable_list& inputs) {
     return inputs;
@@ -40,9 +42,43 @@ struct Placeholder : public Function {
 
 // Used for inputs of previous previous stages
 struct PrevStageInput : public Replicate {};
-// Used for inputs to the closure
+// Used for inputs to the closure (execution roots)
 struct InputPlaceholder : public Placeholder {};
-// Used to mark places that will have to apply Evals from previous stages
+// Used to mark places that will have to apply Evals from previous stages.
+//
+// Why do we need this?  Let us recall the raison d'etre of Eval nodes: they
+// exist so that when we compute an backwards autograd closure on the fly
+// while executing forwards, we can use exactly that closure when backwards
+// executes.  Morally, this closure is simply an input to the backwards
+// computation, and in the compiler IR representation, it's represented
+// precisely this way (with opaque Handle nodes.)
+//
+// However, the *autograd* execution model only accounts for Variable
+// input/outputs, which a Handle is not!  "So why not add non-Variable inputs
+// to autograd"?  Perhaps this could be made to work, but it is a bit awkward:
+// it would involve totally adding a new type of input to the execution model.
+// Autograd is not intended to be a general purpose programming language
+// runtime, so on balance, we decided to consider solutions which don't involve
+// adding new types of inputs to autograd, instead passing the closures "out
+// of band".
+//
+// By what mechanism, then, can we actually pass the closure?  Here is the idea.
+// Instead of actually inserting an "Eval" node, we instead insert an
+// EvalPlaceholder, which doesn't know anything about evaluating a closure.
+// Then, at the time when we want to partially apply the actual closure
+// (computed from the forwards pass), we stick a pre-callback on the EvalPlaceholder
+// that takes the inputs, does the actual Eval, and then passes on the outputs
+// (which the EvalPlaceholder subsequently passes through.)
+//
+// Remember that callbacks are NOT stored on a Function object itself: they are
+// registered on a per AutogradClosure (for which there may be multiple per
+// graph).  So we can't do something like mutate a
+// Eval Function to give it the autograd closure to run inside its main body:
+// that violates the invariant that autograd graphs are immutable!  (In other
+// words, the same EvalPlaceholder may be participating in multiple engine
+// executions) You truly must somehow associate these closures with the graph as
+// a whole, and there must be a mechanism to ferry this data to the Function
+// itself.  A callback is just the ticket.
 struct EvalPlaceholder : public Placeholder {};
 
 // Used for the graph output. Execution should be stopped by a callback before apply().
@@ -226,8 +262,55 @@ private:
 
 // A helper struct that precomputes and caches information regarding cross-stage
 // dependencies and state passing.
+//
+// Example:
+//    graph (%1,
+//           %2,
+//           ------ stage 1 ------
+//           %9,
+//           ------ stage 2 ------
+//           %31,
+//           %32) {
+//      %3.0, %3.1 = MulConstant(2)(%2)
+//      %6.0, %6.1 = Mul()(%3.0, %1)
+//      ---------------- stage 1 ----------------
+//      %10.0, %10.1, %10.2 = Eval(%9, %6.1)
+//      %23.0, %23.1 = Eval(%10.0, %3.1)
+//      ---------------- stage 2 ----------------
+//      %33.0, %33.1 = Eval(%32, %23.1)
+//      %44.0, %44.1, %44.2, %44.3 = Eval(%33.0, %31, %10.2)
+//      %78.0, %78.1 = Eval(%44.1, %3.1)
+//      return (%6.0, %10.1, %23.0, %44.0, %44.2, %78.0);
+//    }
+//
+// Then:
+//
+//    graph->stage() = 2
+//    stage_begins = [%3, %10, %33, %0] (0 = return node)
+//    stage_inputs = [
+//      [%1, %2],
+//      [%9],
+//      [%31, %32]
+//    ]
+//    stage_outputs = [
+//      [%6.0],
+//      [%10.1, %23],
+//      [%44.0, %44.2, %78.0]
+//    ]
+//    prev_stage_inputs = [
+//      [],  # Always empty!
+//      [%6.1, %3.1],
+//      [%23.1, %10.2, %3.1]
+//    ]
+//    cur_stage_captures = [
+//      [%6.1, %3.1],
+//      [%23.1, %10.2],
+//      [] # Always empty!
+//    ]
 struct CrossStageStateDesc {
   CrossStageStateDesc(Graph* graph)
+    // FYI: graph->stage() == the last stage we have traced
+    // (e.g., forwards+backwards = 1)
     : stage_inputs(graph->stage() + 1)
     , stage_outputs(graph->stage() + 1)
     , prev_stage_inputs(graph->stage() + 1)
@@ -258,13 +341,24 @@ struct CrossStageStateDesc {
     // take an iterator for stage i and i+1 as loop boundaries
     stage_begins.push_back(graph->return_node());
 
-    // Scatter inputs and outputs accross stage buckets
+    // Scatter inputs and outputs across stage buckets
     for (auto input : graph->inputs())
       stage_inputs[input->stage()].push_back(input);
     for (auto output : graph->outputs())
       stage_outputs[output->stage()].push_back(output);
+
+    JIT_ASSERT(prev_stage_inputs.front().empty());
+    JIT_ASSERT(cur_stage_captures.back().empty());
   }
 
+  // For each stage, the first Node in Graph's topological sort which
+  // is a member of this stage.  In general, the stages of nodes in
+  // a graph will look like this:
+  //
+  //      000000011111112222222E (E is the Return node)
+  //      ^      ^      ^      ^
+  //
+  // We have pointers to the caret'ed nodes.
   std::vector<Node*> stage_begins;
   std::vector<std::vector<Node*>> stage_inputs;
   std::vector<std::vector<Node*>> stage_outputs;
@@ -272,7 +366,7 @@ struct CrossStageStateDesc {
   // and handles) to current stage.
   std::vector<std::unordered_set<Node*>> prev_stage_inputs;
   // A set of all Nodes from this stage, that need their values to be captured
-  // (applies to both Variables and handles).
+  // for future stages (applies to both Variables and handles).
   std::vector<std::unordered_set<Node*>> cur_stage_captures;
 };
 
@@ -284,6 +378,8 @@ struct StageClosure {
   StageClosure(Graph *graph, const CrossStageStateDesc& xstate, std::size_t stage)
     : const_factory(std::make_shared<ConstantFactory>()) {
     node_fn_map_type node_map;
+    // This map caches PrevStageInputs for a given node, so that you don't
+    // create multiple PrevStageInput for the same node.
     node_fn_map_type prev_stage_input_map;
 
     // Prepare output node and compute an offset within return node inputs where
@@ -366,6 +462,7 @@ struct StageClosure {
         // All Eval nodes take context edges as an input, and we need to register
         // all such places
         auto & inputs = value->inputs();
+        JIT_ASSERT(inputs.size() > 0);
         auto handle_input = inputs[inputs.size() - 1];
         JIT_ASSERT(handle_input->type()->kind() == TypeKind::HandleType);
         prev_stage_handles.emplace_back(fn.get(), handle_input->unique());
@@ -405,6 +502,7 @@ struct StageClosure {
     IR_END()
   }
 
+  // Fill in the next_functions of the Function we just allocated
   void fillNextFunctions(Node *node, const std::shared_ptr<Function>& fn, node_fn_map_type& node_map, int output_offset, std::size_t stage) {
     auto graph = node->owningGraph();
     // Gather uses of each output
@@ -449,6 +547,8 @@ struct StageClosure {
     }
   }
 
+  // Possibly create PrevStageInputs for any uses of nodes from previous
+  // stages, and fill in their next_functions with our use.
   void registerPrevStageInputs(Node *node, const std::shared_ptr<Function>& fn,
                                node_fn_map_type& prev_stage_input_map) {
     const auto& inputs = node->inputs();
@@ -477,6 +577,8 @@ struct StageClosure {
   // These will be used by each instantiation of AutogradClosure to register hooks.
   std::vector<int> prev_stage_variables;                            // unique
   std::vector<std::pair<Function*, int>> prev_stage_handles;        // (placeholder, unique)
+  // After the function is run, take either a Variable or a backward handle, and
+  // put it in the environment under 'unique'.
   std::vector<std::tuple<Function*, int, int>> captured_variables;  // (function, output_nr, unique)
   std::vector<std::pair<Function*, int>> captured_handles;          // (function, unique)
 };
