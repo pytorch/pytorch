@@ -1,3 +1,4 @@
+import torch
 from bisect import bisect_right
 from .optimizer import Optimizer
 from .. import load, save
@@ -179,6 +180,16 @@ class ReduceLROnPlateau(object):
             reduced. new_lr = lr * factor. Default: 0.1.
         patience (int): Number of epochs with no improvement after
             which learning rate will be reduced. Default: 10.
+        backtrack (bool): If true, when reducing learning rate, the
+            scheduler would also load the best model and its
+            corresponding optimizer state. Parameters `model_to_save`
+            and `path_to_save` need to be specify for backtrack mode.
+        model_to_save (torch.nn.Module): If provided, the model and
+            the optimizer's state would be save when the best metrics
+            is updated. Default: None.
+        path_to_save (str): Directory to save the best model and state.
+            When model_to_save is None, this parameter would be ignored.
+            Default: './best.pth'.
         verbose (bool): If True, prints a message to stdout for
             each update. Default: False.
         threshold (float): Threshold for measuring the new optimum,
@@ -208,6 +219,7 @@ class ReduceLROnPlateau(object):
     """
 
     def __init__(self, optimizer, mode='min', factor=0.1, patience=10,
+                 backtrack=False, model_to_save=None, path_to_save='./best.pth',
                  verbose=False, threshold=1e-4, threshold_mode='rel',
                  cooldown=0, min_lr=0, eps=1e-8):
 
@@ -227,6 +239,24 @@ class ReduceLROnPlateau(object):
             self.min_lrs = list(min_lr)
         else:
             self.min_lrs = [min_lr] * len(optimizer.param_groups)
+
+        if model_to_save is not None:
+            if not isinstance(model_to_save, torch.nn.Module):
+                raise ValueError("model_to_save must be an instance of nn.Module, "
+                                 "got '{}'".format(model_to_save))
+            if not isinstance(path_to_save, str) or not path_to_save:
+                raise ValueError("path_to_save must be a non-empty string, "
+                                 "got '{}'".format(path_to_save))
+            self.model_to_save = model_to_save
+            self.path_to_save = path_to_save
+            self.save_best = True
+        else:
+            self.save_best = False
+
+        self.backtrack = backtrack
+        if self.backtrack and not self.save_best:
+            raise ValueError("To backtrack ReduceLROnPlateau, "
+                             "model_to_save and path_to_save must be provided.")
 
         self.patience = patience
         self.verbose = verbose
@@ -252,9 +282,9 @@ class ReduceLROnPlateau(object):
         self.num_bad_epochs = 0
 
     """ Status codes to be returned by ReduceLROnPlateau.step() """
-    STATUS_WAITING = 1
-    STATUS_UPDATED_BEST = 2
-    STATUS_REDUCED_LR = 3
+    STATUS_WAITING = "WAITING"
+    STATUS_UPDATED_BEST = "UPDATED_BEST"
+    STATUS_REDUCED_LR = "REDUCED_LR"
 
     def step(self, metrics, epoch=None):
         current = metrics
@@ -271,15 +301,26 @@ class ReduceLROnPlateau(object):
         if self.is_better(current, self.best):
             self.best = current
             self.num_bad_epochs = 0
+            if self.save_best:
+                torch.save(
+                    {'model': self.model_to_save.state_dict(), 'optim': self.optimizer.state_dict()},
+                    self.path_to_save)
             return self.STATUS_UPDATED_BEST
+        elif self.num_bad_epochs > self.patience:
+            self._reduce_lr(epoch)
+            self.cooldown_counter = self.cooldown
+            self.num_bad_epochs = 0
+            if self.backtrack:
+                new_lrs = [group['lr'] for group in self.optimizer.param_groups]
+                backtrack_dict = torch.load(self.path_to_save)
+                self.optimizer.load_state_dict(backtrack_dict['optim'])
+                self.model_to_save.load_state_dict(backtrack_dict['model'])
+                # Note that new_lr might not be saved_lr * gamma
+                for new_lr, group in zip(new_lrs, self.optimizer.param_groups):
+                    group['lr'] = new_lr
+            return self.STATUS_REDUCED_LR
         else:
-            if self.num_bad_epochs > self.patience:
-                self._reduce_lr(epoch)
-                self.cooldown_counter = self.cooldown
-                self.num_bad_epochs = 0
-                return self.STATUS_REDUCED_LR
-            else:
-                return self.STATUS_WAITING
+            return self.STATUS_WAITING
 
     def _reduce_lr(self, epoch):
         for i, param_group in enumerate(self.optimizer.param_groups):
@@ -314,74 +355,3 @@ class ReduceLROnPlateau(object):
         else:  # mode == 'max' and epsilon_mode == 'abs':
             self.is_better = lambda a, best: a > best + threshold
             self.mode_worse = -float('Inf')
-
-
-class ReduceLROnPlateauWithBacktrack(ReduceLROnPlateau):
-    """Load training state from the best epoch and reduce learning
-    rate when a metric has stopped improving.
-    Models often benefit from reducing the learning rate by a factor
-    of 2-10 once learning stagnates. This scheduler reads a metrics
-    quantity and if no improvement is seen for a 'patience' number
-    of epochs, the learning rate is reduced, and the best state is
-    loaded.
-
-    Args:
-        optimizer (Optimizer): Wrapped optimizer.
-        model (torch.nn.Module): Model to be saved and backtracked.
-        filename (str): Directory to save the best state.
-        mode (str): One of `min`, `max`. In `min` mode, lr will
-            be reduced when the quantity monitored has stopped
-            decreasing; in `max` mode it will be reduced when the
-            quantity monitored has stopped increasing. Default: 'min'.
-        factor (float): Factor by which the learning rate will be
-            reduced. new_lr = lr * factor. Default: 0.1.
-        patience (int): Number of epochs with no improvement after
-            which learning rate will be reduced. Default: 10.
-        verbose (bool): If True, prints a message to stdout for
-            each update. Default: False.
-        threshold (float): Threshold for measuring the new optimum,
-            to only focus on significant changes. Default: 1e-4.
-        threshold_mode (str): One of `rel`, `abs`. In `rel` mode,
-            dynamic_threshold = best * ( 1 + threshold ) in 'max'
-            mode or best * ( 1 - threshold ) in `min` mode.
-            In `abs` mode, dynamic_threshold = best + threshold in
-            `max` mode or best - threshold in `min` mode. Default: 'rel'.
-        cooldown (int): Number of epochs to wait before resuming
-            normal operation after lr has been reduced. Default: 0.
-        min_lr (float or list): A scalar or a list of scalars. A
-            lower bound on the learning rate of all param groups
-            or each group respectively. Default: 0.
-        eps (float): Minimal decay applied to lr. If the difference
-            between new and old lr is smaller than eps, the update is
-            ignored. Default: 1e-8.
-
-    Example:
-        >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
-        >>> scheduler = ReduceLROnPlateauWithBacktrack(optimizer, model)
-        >>> for epoch in range(10):
-        >>>     train(...)
-        >>>     val_loss = validate(...)
-        >>>     # Note that step should be called after validate()
-        >>>     scheduler.step(val_loss)
-    """
-
-    def __init__(self, optimizer, model, filename='./best.pth', **kwargs):
-        self.filename = filename
-        self.model = model
-        super(ReduceLROnPlateauWithBacktrack, self).__init__(
-            optimizer=optimizer, **kwargs)
-
-    def step(self, metrics, epoch=None):
-        status = super(ReduceLROnPlateauWithBacktrack, self).step(metrics=metrics, epoch=epoch)
-        if status == self.STATUS_UPDATED_BEST:
-            save(
-                {'model': self.model.state_dict(), 'optim': self.optimizer.state_dict()},
-                self.filename)
-        elif status == self.STATUS_REDUCED_LR:
-            new_lrs = [group['lr'] for group in self.optimizer.param_groups]
-            backtrack_dict = load(self.filename)
-            self.optimizer.load_state_dict(backtrack_dict['optim'])
-            self.model.load_state_dict(backtrack_dict['model'])
-            # Note that new_lr might not be saved_lr * gamma
-            for new_lr, group in zip(new_lrs, self.optimizer.param_groups):
-                group['lr'] = new_lr

@@ -9,7 +9,7 @@ from torch.optim import SGD
 from torch.autograd import Variable
 from torch import sparse
 from torch.optim.lr_scheduler import LambdaLR, StepLR, MultiStepLR, ExponentialLR, \
-    ReduceLROnPlateau, ReduceLROnPlateauWithBacktrack
+    ReduceLROnPlateau
 from common import TestCase, run_tests
 
 
@@ -544,7 +544,8 @@ class TestLRScheduler(TestCase):
         target1 = [0.5] * 3 + [0.05] * 3 + [0.005] * 3 + [0.0005] * 2
         target2 = [t * 0.1 for t in target1]
         targets = [target1, target2]
-        scheduler = ReduceLROnPlateauWithBacktrack(optimizer=self.opt, model=self.net, filename=filename, patience=2)
+        scheduler = ReduceLROnPlateau(optimizer=self.opt, backtrack=True,
+                                      model_to_save=self.net, path_to_save=filename, patience=2)
         check_weight = self.net.conv1.weight.data.numpy().copy()  # save init
         scheduler.step(metrics=0)  # this will write best.pth
         for epoch in range(1, 10):
