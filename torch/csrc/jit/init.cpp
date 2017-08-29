@@ -11,10 +11,7 @@ namespace py = pybind11;
 #include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/DynamicTypes.h"
-
-#ifdef WITH_TOFFEE
 #include "torch/csrc/toffee/export.h"
-#endif
 
 PyObject * THPJIT_initExtension(PyObject *_unused)
 {

@@ -28,14 +28,6 @@ using variable_list = std::vector<std::shared_ptr<Variable>>;
 // live.  Instead, they hold weak pointers to TracingState, to prevent leaks
 // from arising when a variable that participated in a trace outlives the
 // actual trace itself.
-//
-// Multi-threaded tracing is NOT yet supported: it is better to think of
-// tracing as a thread local affair, where we enter and then exit
-// a tracing region.  This not only coincides with how Python code
-// is run (GIL = single-threaded), but also how single Functions in
-// an autograd closure are applied.  Note that the execution of an
-// *entire* autograd closure is multithreaded, in which case extra
-// locking is necessary.
 
 struct TracingState : public std::enable_shared_from_this<TracingState> {
   TracingState()

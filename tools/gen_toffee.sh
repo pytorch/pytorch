@@ -1,7 +1,6 @@
 #!/bin/sh
-set -e
-set -x
-# Assumed to be run like ./gen_toffee.sh
+set -ex
+# Assumed to be run like tools/gen_toffee.sh
 (cd torch/lib/nanopb/generator/proto && make)
 protoc --plugin=protoc-gen-nanopb=$PWD/torch/lib/nanopb/generator/protoc-gen-nanopb \
        torch/lib/ToffeeIR/toffee/toffee.proto \
