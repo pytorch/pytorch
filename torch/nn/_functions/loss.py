@@ -170,25 +170,21 @@ class MarginRankingLoss(Function):
         return input1.new((output,))
 
     @staticmethod
-    @once_differentiable
     def backward(ctx, grad_output):
-        input1, input2, y = ctx.saved_tensors
-        grad_input1 = input1.new().resize_as_(input1)
-        grad_input2 = input2.new().resize_as_(input2)
+        input1, input2, y = ctx.saved_variables
+        grad_input1 = Variable(input1.data.new(input1.size()).zero_())
+        grad_input2 = Variable(input1.data.new(input1.size()).zero_())
 
-        dist = input1.clone()
-        dist.add_(-1, input2)
-        dist.mul_(-1).mul_(y)
-        dist.add_(ctx.margin)
+        dist = ((input1 - input2).mul_(-1) * y).add_(ctx.margin)
         mask = dist.ge(0)
 
-        grad_input1.copy_(mask)
-        grad_input1.mul_(-1).mul_(y)
-        grad_input2.copy_(mask)
-        grad_input2.mul_(y)
+        grad_input1.masked_fill_(mask, 1)
+        grad_input1 = grad_input1.mul_(-1) * y
+        grad_input2.masked_fill_(mask, 1) * y
+        grad_input2 = grad_input2 * y
 
         if ctx.size_average:
             grad_input1.div_(y.size(0))
             grad_input2.div_(y.size(0))
 
-        return grad_input1, grad_input2, None, None, None
+        return grad_input1 * grad_output, grad_input2 * grad_output, None, None, None

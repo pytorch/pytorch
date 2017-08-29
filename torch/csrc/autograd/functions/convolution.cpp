@@ -493,7 +493,7 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
   // Compute gI = convT(gO, ggW)
   std::shared_ptr<Variable> gI = nullptr;
   if (ggW) {
-    // select conv tranpose and swap stride and dilation
+    // select conv transpose and swap stride and dilation
     ConvParams gi_conv_params(*this);
     gi_conv_params.transposed = true;
     // Disable groups as they are handled separately
