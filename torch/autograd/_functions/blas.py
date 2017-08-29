@@ -18,7 +18,8 @@ class Addmm(InplaceFunction):
 
     @staticmethod
     def primspec(g, add_matrix, matrix1, matrix2, alpha=1, beta=1, inplace=False):
-        # Toffee does have caffe2
+        # TODO: manually insert the necessary scaling, since Toffee doesn't
+        # natively support it
         if alpha != 1 or beta != 1:
             return None
         return g.appendNode(g.create("FC", [matrix1, matrix2, add_matrix]))

@@ -338,13 +338,5 @@ class TestJit(TestCase):
         self.assertExpected(str(trace))
         # NB: Purposely NOT testing protobuf export here
 
-    @skipIfNoTorchVision
-    def test_densenet(self):
-        x = Variable(torch.randn(10, 3, 224, 224).fill_(1.0), requires_grad=True)
-        dense121 = torchvision.models.DenseNet(num_init_features=64, growth_rate=32,
-                                               block_config=(6, 12, 24, 16))
-        trace, _ = torch.jit.record_trace(dense121, x)
-        # Densenet trace is pretty large, so we don't assert on it
-
 if __name__ == '__main__':
     run_tests()

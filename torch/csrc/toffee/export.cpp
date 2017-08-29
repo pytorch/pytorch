@@ -52,14 +52,19 @@ std::shared_ptr<Graph> ToToffeeIR(std::shared_ptr<Graph>& g,
   // primspec
   auto setOutputs = [&](Node * node, const node_list & outputs) {
     auto old_outputs = node->outputs();
+    // The primspec can produce less outputs than the actual IR node,
+    // because many IR nodes have an implicit extra trailing output
+    // of type Handle, which is irrelevant for the purposes of export.
+    // It's bad design to ask the primspec() implementers to actually
+    // handle this!
     JIT_ASSERTM(outputs.size() <= old_outputs.size(), "primspec produced too many outputs");
     size_t i = 0;
     for(auto & old : old_outputs) {
       // TODO: what if there are multiple trailing handle outputs?  That is
       // a serious invariant violation...
       if(i >= outputs.size()) {
-        // primspecs do not deal with Handles at the moment
-        // so we map handles to Unused nodes
+        // primspecs do not deal with Handles at the moment, so we just
+        // assert the handle isn't actually used.
         auto typ = old->typeOption();
         JIT_ASSERTM(typ && typ->kind() == jit::TypeKind::HandleType,
           "primspec produced too few outputs");

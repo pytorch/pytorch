@@ -24,7 +24,7 @@ struct BatchNormForward : public ForwardFunction<>, public BatchNormParams, publ
     : BatchNormParams(std::move(params)) {}
 
   virtual variable_list apply(const variable_list& inputs) override;
-  HAS_PRIMSPEC;
+  virtual jit::node_list primspec(PrimSpecContext* ctx, jit::node_list inputs) override;
 };
 
 struct BatchNormBackward : public Function, public BatchNormParams {

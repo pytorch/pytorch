@@ -258,7 +258,6 @@ class clean(distutils.command.clean.clean):
 ################################################################################
 
 include_dirs = []
-
 library_dirs = []
 extra_link_args = []
 extra_compile_args = ['-std=c++11', '-Wno-write-strings',
@@ -380,6 +379,9 @@ main_sources = [
     "torch/csrc/autograd/functions/special.cpp",
     "torch/csrc/autograd/functions/utils.cpp",
     "torch/csrc/autograd/functions/init.cpp",
+    "torch/csrc/autograd/functions/toffee/convolution.cpp",
+    "torch/csrc/autograd/functions/toffee/batch_normalization.cpp",
+    "torch/csrc/toffee/export.cpp",
 ]
 main_sources += split_types("torch/csrc/Tensor.cpp")
 
@@ -454,14 +456,6 @@ if WITH_CUDNN:
         "torch/csrc/cudnn/Handles.cpp",
     ]
     extra_compile_args += ['-DWITH_CUDNN']
-
-# Unconditionally enabled
-main_sources += [
-    "torch/csrc/toffee/export.cpp",
-    "torch/csrc/autograd/functions/toffee/convolution.cpp",
-    "torch/csrc/autograd/functions/toffee/batch_normalization.cpp",
-]
-extra_compile_args += ['-DWITH_TOFFEE']
 
 if DEBUG:
     extra_compile_args += ['-O0', '-g']
