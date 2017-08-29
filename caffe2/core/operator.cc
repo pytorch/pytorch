@@ -316,6 +316,7 @@ static TensorShapes InferBlobShapesAndTypes(
   for (auto& defptr : nets) {
     // Hack to work with auto split gradients
     CaffeMap<string, string> unmatched_sum_blobs;
+    CaffeMap<string, TensorShape> reshape_cache;
 
     for (const OperatorDef& op : defptr.get()->op()) {
       // Hack to ignore queues
@@ -371,6 +372,13 @@ static TensorShapes InferBlobShapesAndTypes(
         }
       }
 
+      if (op.type() == "Reshape" && op.is_gradient_op()) {
+        CAFFE_ENFORCE(reshape_cache.find(op.input(1)) != reshape_cache.end());
+        TensorShape cached = reshape_cache[op.input(1)];
+        blob_desc[op.output(0)] = cached;
+        continue;
+      }
+
       std::vector<TensorShape> out;
       try {
         out = op_schema->InferTensor(op, input_desc);
@@ -396,10 +404,18 @@ static TensorShapes InferBlobShapesAndTypes(
             }
           }
         }
+
+        if (op.type() == "Reshape") {
+          // Reshape stores the original input shape to its second output
+          // blob. We need this for gradient reshape.
+          reshape_cache[op.output(1)] = input_desc[0];
+        }
+
       } catch (::caffe2::EnforceNotMet& enf) {
         LOG(ERROR) << "Shape inference error: " << enf.msg();
         LOG(ERROR) << "Operator: " << ProtoDebugString(op) << std::endl;
         LOG(ERROR) << "Returning empty results.";
+
         TensorShapes tps;
         return tps;
       }
