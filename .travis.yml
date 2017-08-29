@@ -23,10 +23,7 @@ install:
     - ccache --show-stats
     - travis_retry pip install --upgrade pip setuptools wheel
     - travis_retry pip install -r requirements.txt --only-binary=scipy
-    - git submodule update --init --recursive -- torch/lib/nanopb
-    - git submodule update --init --recursive -- torch/lib/gloo
-    - git submodule update --init --recursive -- torch/lib/pybind11
-    # Purposely excluded ToffeeIR
+    - git submodule update --init --recursive
     - MAX_JOBS=8 python setup.py install
 
 addons:
@@ -35,8 +32,6 @@ addons:
             - ubuntu-toolchain-r-test
         packages:
             - g++-5
-            - protobuf-compiler
-            - libprotobuf-dev
 
 script:
     - OMP_NUM_THREADS=2 ./test/run_test.sh
