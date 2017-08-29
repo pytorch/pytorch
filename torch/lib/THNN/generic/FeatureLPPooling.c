@@ -210,15 +210,17 @@ THNN_(FeatureLPPooling_updateOutput)(
   real* inputP = THTensor_(data)(input);
   real* outputP = THTensor_(data)(output);
 
+  size_t batch, opt1, opt2, outputFeature, i;
+
 #pragma omp parallel for
-  for (size_t batch = 0; batch < inputDesc.size[0]; ++batch) {
-    for (size_t opt1 = 0; opt1 < inputDesc.size[2]; ++opt1) {
-      for (size_t opt2 = 0; opt2 < inputDesc.size[3]; ++opt2) {
-        for (size_t outputFeature = 0;
+  for (batch = 0; batch < inputDesc.size[0]; ++batch) {
+    for (opt1 = 0; opt1 < inputDesc.size[2]; ++opt1) {
+      for (opt2 = 0; opt2 < inputDesc.size[3]; ++opt2) {
+        for (outputFeature = 0;
              outputFeature < outputDesc.size[1]; ++outputFeature) {
 
           accreal v = (accreal) 0;
-          for (size_t i = 0; i < width; ++i) {
+          for (i = 0; i < width; ++i) {
             size_t inputFeature = outputFeature * stride + i;
             if (inputFeature >= inputDesc.size[1]) {
               break;
@@ -304,11 +306,13 @@ THNN_(FeatureLPPooling_updateGradInput)(
   real* outputP = THTensor_(data)(output);
   real* inputP = THTensor_(data)(input);
 
+  size_t batch, opt1, opt2, outputFeature, i;
+
 #pragma omp parallel for
-  for (size_t batch = 0; batch < inputDesc.size[0]; ++batch) {
-    for (size_t opt1 = 0; opt1 < inputDesc.size[2]; ++opt1) {
-      for (size_t opt2 = 0; opt2 < inputDesc.size[3]; ++opt2) {
-        for (size_t outputFeature = 0;
+  for (batch = 0; batch < inputDesc.size[0]; ++batch) {
+    for (opt1 = 0; opt1 < inputDesc.size[2]; ++opt1) {
+      for (opt2 = 0; opt2 < inputDesc.size[3]; ++opt2) {
+        for (outputFeature = 0;
              outputFeature < outputDesc.size[1]; ++outputFeature) {
 
           // Load output (f(x_is)). It is possible that this is zero, in
@@ -321,7 +325,7 @@ THNN_(FeatureLPPooling_updateGradInput)(
             continue;
           }
 
-          for (size_t i = 0; i < width; ++i) {
+          for (i = 0; i < width; ++i) {
             size_t inputFeature = outputFeature * stride + i;
             THAssert(inputFeature < inputDesc.size[1]);
 
