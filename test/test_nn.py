@@ -2815,8 +2815,9 @@ class TestNN(NNTestCase):
         batch_size = 2
         for kern, inp_size, dilations in [(3, 6, [1, 2]), (3, 7, [1]), (4, 9, [1])]:
             for stride, padding, chan_in, chan_out, dilation in \
-                    product([1, 2], [0, 2], [2], [3], dilations):
-                no_weight = stride == 2
+                    product([1, 2], [0, 1, 2], [2], [3], dilations):
+                no_weight = False
+
                 result = self.run_conv_double_back_test(kern, stride,
                                                         padding, chan_in, chan_out,
                                                         batch_size, inp_size, dilation,
@@ -2834,11 +2835,11 @@ class TestNN(NNTestCase):
 
     def test_conv_double_backward_no_bias(self):
         kern = 3
-        stride = 1
-        padding = 2
+        stride = 2
         chan_in, chan_out = 2, 4
         batch_size = 2
-        inp_size = 6
+        inp_size = 5
+        padding = 1
         dilation = 1
         no_weight = False
         use_bias = True
@@ -2883,18 +2884,17 @@ class TestNN(NNTestCase):
                         "\ndilation: " + str(dilation) +
                         "\ngroups: " + str(groups))
 
-    def test_error_conv_double_backward(self):
+    def test_conv_double_backward_stride(self):
         batch_size = 2
 
         # Cannot provide ggW when stride is > 1
         for kern, inp_size, dilations in [(3, 5, [1, 2]), (3, 7, [1])]:
             for stride, padding, chan_in, chan_out, dilation in product([2], [0, 1], [1], [2], dilations):
                 no_weight = False
-                with self.assertRaises(RuntimeError):
-                    self.run_conv_double_back_test(kern, stride,
-                                                   padding, chan_in, chan_out,
-                                                   batch_size, inp_size, dilation,
-                                                   no_weight)
+                self.run_conv_double_back_test(kern, stride,
+                                               padding, chan_in, chan_out,
+                                               batch_size, inp_size, dilation,
+                                               no_weight)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_conv_double_backward_cuda(self):
@@ -3489,14 +3489,14 @@ new_module_tests = [
         desc='no_bias',
         check_gradgrad=False,
     ),
-    # TODO
-    # dict(
-    #     module_name='ConvTranspose1d',
-    #     constructor_args=(3, 4, 3, 2, 1, 1, 1, True, 2),
-    #     input_size=(1, 3, 6),
-    #     cudnn=True,
-    #     desc='dilated'
-    # ),
+    dict(
+        module_name='ConvTranspose1d',
+        constructor_args=(3, 4, 3, 2, 1, 1, 1, True, 2),
+        input_size=(1, 3, 6),
+        cudnn=True,
+        desc='dilated',
+        check_gradgrad=False,
+    ),
     dict(
         module_name='MaxPool1d',
         constructor_args=(4,),
@@ -3563,14 +3563,14 @@ new_module_tests = [
         input_size=(1, 3, 7, 6),
         check_gradgrad=False,
     ),
-    # TODO
-    # dict(
-    #     module_name='ConvTranspose2d',
-    #     constructor_args=(3, 4, 3, (2, 3), 1, (1, 1), 1, False, (2, 2)),
-    #     input_size=(1, 3, 6, 7),
-    #     cudnn=True,
-    #     desc='dilated'
-    # ),
+    dict(
+        module_name='ConvTranspose2d',
+        constructor_args=(3, 4, 3, (2, 3), 1, (1, 1), 1, False, (2, 2)),
+        input_size=(1, 3, 6, 7),
+        cudnn=True,
+        desc='dilated',
+        check_gradgrad=False,
+    ),
     dict(
         module_name='ConvTranspose2d',
         constructor_args=(3, 4, 3, (2, 3), 1, (1, 1), 1, False),
@@ -3713,14 +3713,14 @@ new_module_tests = [
         input_size=(1, 2, 4, 5, 4),
         check_gradgrad=False,
     ),
-    # TODO
-    # dict(
-    #     module_name='ConvTranspose3d',
-    #     constructor_args=(2, 3, (2, 3, 2), 1, 0, 0, 1, True, (2, 2, 2)),
-    #     cudnn=True,
-    #     input_size=(1, 2, 4, 5, 4),
-    #     desc='dilated'
-    # ),
+    dict(
+        module_name='ConvTranspose3d',
+        constructor_args=(2, 3, (2, 3, 2), 1, 0, 0, 1, True, (2, 2, 2)),
+        cudnn=True,
+        input_size=(1, 2, 4, 5, 4),
+        desc='dilated',
+        check_gradgrad=False,
+    ),
     dict(
         module_name='MaxPool3d',
         constructor_args=((2, 2, 2),),
