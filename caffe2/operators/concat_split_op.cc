@@ -25,6 +25,32 @@ OPERATOR_SCHEMA(Concat)
         "add_axis",
         "Pass 1 to add the axis specified in arg 'axis' to all "
         "input tensors")
+    .TensorInferenceFunction([](const OperatorDef& def,
+                                const vector<TensorShape>& in) {
+      ArgumentHelper helper(def);
+      const int axis = helper.HasArgument("axis")
+          ? helper.GetSingleArgument<int>("axis", -1)
+          : GetDimFromOrderString(
+                helper.GetSingleArgument<string>("order", ""));
+      bool add_axis = helper.GetSingleArgument<int>("add_axis", 0) != 0;
+      CAFFE_ENFORCE_GT(in.size(), 0);
+      vector<int> split_shape(1, in.size());
+      vector<int> out_shape(in[0].dims().begin(), in[0].dims().end());
+      if (add_axis) {
+        out_shape.insert(out_shape.begin() + axis, in.size());
+      } else {
+        for (int i = 1; i < in.size(); ++i) {
+          out_shape[axis] += in[i].dims(axis);
+        }
+      }
+      if (def.output_size() == 1) {
+        return vector<TensorShape>{
+            CreateTensorShape(out_shape, in[0].data_type())};
+      }
+      return vector<TensorShape>{
+          CreateTensorShape(out_shape, in[0].data_type()),
+          CreateTensorShape(split_shape, TensorProto::INT32)};
+    })
     .SetDoc("Concatenate a list of tensors into a single tensor")
     .Output(0, "concat_result", "Concatenated tensor")
     .Output(1, "split_info", "The dimensions of the inputs.");
