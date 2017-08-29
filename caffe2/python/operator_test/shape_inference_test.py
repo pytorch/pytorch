@@ -318,6 +318,7 @@ class TestShapeInference(test_util.TestCase):
 
         self.InferTensorRunAndCompare(model)
 
+
         model = model_helper.ModelHelper(name="test_model")
         model.Flatten("X", "Flat")
         model.Flatten("empty", "EmptyFlat")
@@ -332,6 +333,26 @@ class TestShapeInference(test_util.TestCase):
         workspace.FeedBlob("X", np.random.rand(4, 26, 32).astype(np.float32))
 
         self.InferTensorRunAndCompare(model)
+
+    def testConcat(self):
+        net = core.Net("concat")
+
+        net.Concat(["A", "B"], ["C", "splits"], axis=1)
+        net.Concat(["C", "D"], ["E"], order="NCHW")
+        net.Concat(["E", "F"], ["G"], add_axis=1, order="NHWC")
+        (shapes, types) = workspace.InferShapesAndTypes(
+            [net],
+            {
+                'A': [10, 12, 9, 10],
+                'B': [10, 9, 9, 10],
+                'D': [10, 2, 9, 10],
+                'F': [10, 23, 9, 10]
+            }
+        )
+        self.assertEqual(shapes['C'], [10, 21, 9, 10])
+        self.assertEqual(shapes['splits'], [2])
+        self.assertEqual(shapes['E'], [10, 23, 9, 10])
+        self.assertEqual(shapes['G'], [10, 23, 9, 2, 10])
 
     def testSqueeze(self):
         net = core.Net("sq")
