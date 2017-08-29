@@ -360,10 +360,9 @@ class WorkersPool {
     CreateWorkers(workers_count);
     assert(workers_count <= workers_.size());
     counter_to_decrement_when_ready_.Reset(workers_count);
-    int n = 0;
-    std::for_each(++tasks.begin(), tasks.end(), [this, &n](auto& task) {
-      workers_[n++]->StartWork(task.get());
-    });
+    for (auto task = 1; task < tasks.size(); ++task) {
+      workers_[task - 1]->StartWork(tasks[task].get());
+    }
     // Execute the remaining workload immediately on the current thread.
     auto& task = tasks.front();
     task->Run();
