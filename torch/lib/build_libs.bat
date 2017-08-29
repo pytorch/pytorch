@@ -38,7 +38,7 @@ copy /Y tmp_install\lib\* .
 IF EXIST ".\tmp_install\bin" (
   copy /Y tmp_install\bin\* .
 )
-xcopy /Y tmp_install\include .\include
+xcopy /Y /E tmp_install\include .
 xcopy /Y THNN\generic\THNN.h .
 xcopy /Y THCUNN\generic\THCUNN.h .
 
