@@ -56,6 +56,7 @@ class BlobsQueue : public std::enable_shared_from_this<BlobsQueue> {
   int64_t reader_{0};
   int64_t writer_{0};
   std::vector<std::vector<Blob*>> queue_;
+  const std::string name_;
 
   struct QueueStats {
     CAFFE_STAT_CTOR(QueueStats);
