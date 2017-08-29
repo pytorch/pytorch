@@ -21,11 +21,6 @@ echo Running optim tests
 %PYCMD% test_optim.py
 
 echo Running multiprocessing tests
-set MULTIPROCESSING_METHOD=""
-%PYCMD% test_multiprocessing.py
-set MULTIPROCESSING_METHOD=spawn
-%PYCMD% test_multiprocessing.py
-set MULTIPROCESSING_METHOD=forkserver
 %PYCMD% test_multiprocessing.py
 
 echo Running util tests
