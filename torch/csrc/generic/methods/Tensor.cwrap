@@ -133,7 +133,6 @@ PyObject * THPTensor_(setIndex)(THPTensor *self, PyObject *args)
   cname: zerosLike
   variants:
     - function
-  auto_gpu: False
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -159,7 +158,6 @@ PyObject * THPTensor_(setIndex)(THPTensor *self, PyObject *args)
   cname: onesLike
   variants:
     - function
-  auto_gpu: False
   return: argument 0
   arguments:
     - arg: THTensor* result

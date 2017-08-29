@@ -812,6 +812,13 @@ class TestTorch(TestCase):
         torch.zeros_like(expected, out=res2)
         self.assertEqual(res2, expected)
 
+    @unittest.skipIf(torch.cuda.device_count() < 2, 'only one GPU detected')
+    def test_zeros_like_multiple_device(self):
+        expected = torch.zeros(100, 100).cuda()
+        x = torch.cuda.FloatTensor(100, 100, device=1)
+        output = torch.zeros_like(x)
+        self.assertEqual(output, expected)
+
     def test_histc(self):
         x = torch.Tensor((2, 4, 2, 2, 5, 4))
         y = torch.histc(x, 5, 1, 5)  # nbins,  min,  max
@@ -844,6 +851,13 @@ class TestTorch(TestCase):
         res2 = torch.Tensor().cuda()
         torch.ones_like(expected, out=res2)
         self.assertEqual(res2, expected)
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, 'only one GPU detected')
+    def test_ones_like_multiple_device(self):
+        expected = torch.ones(100, 100).cuda()
+        x = torch.cuda.FloatTensor(100, 100, device=1)
+        output = torch.ones_like(x)
+        self.assertEqual(output, expected)
 
     def test_diag(self):
         x = torch.rand(100, 100)
