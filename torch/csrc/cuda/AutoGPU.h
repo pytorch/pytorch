@@ -5,7 +5,7 @@
 #include "THP.h"
 #include "torch/csrc/utils/auto_gpu.h"
 
-#if defined(WITH_CUDA) || defined(_MSC_VER)
+#if defined(WITH_CUDA) && defined(_MSC_VER)
 class THP_CLASS THCPAutoGPU : public AutoGPU {
 #else
 class THCPAutoGPU : public AutoGPU {
