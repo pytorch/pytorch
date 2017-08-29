@@ -8,11 +8,13 @@ from functools import wraps, reduce
 from contextlib import contextmanager
 
 import torch
+import torch.cuda
 import torch.distributed as dist
 from common import TestCase
 
 BACKEND = os.environ['BACKEND']
 TEMP_DIR = os.environ['TEMP_DIR']
+INIT_METHOD = os.getenv('INIT_METHOD', 'env://')
 MASTER_PORT = '29500'
 MASTER_ADDR = '127.0.0.1'
 
@@ -20,6 +22,20 @@ MASTER_ADDR = '127.0.0.1'
 if not dist.is_available():
     print('Distributed not available, skipping tests')
     sys.exit(0)
+
+SKIP_IF_NO_CUDA_EXIT_CODE = 75
+
+
+def skip_if_no_cuda_distributed(func):
+    func.skip_if_no_cuda_distributed = True
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if not torch.cuda.is_available():
+            sys.exit(SKIP_IF_NO_CUDA_EXIT_CODE)
+
+        return func(*args, **kwargs)
+    return wrapper
 
 
 @contextmanager
@@ -227,6 +243,7 @@ class _DistTestBase(object):
         self._test_broadcast_helper(group, group_id, rank)
 
     @unittest.skipIf(BACKEND != 'gloo', "Only Gloo backend supports CUDA allReduce")
+    @skip_if_no_cuda_distributed
     def test_broadcast_cuda(self):
         group, group_id, rank = self._init_global_test()
         self._test_broadcast_helper(group, group_id, rank, True)
@@ -332,6 +349,7 @@ class _DistTestBase(object):
         )
 
     @unittest.skipIf(BACKEND != 'gloo', "Only Gloo backend supports CUDA allReduce")
+    @skip_if_no_cuda_distributed
     def test_all_reduce_sum_cuda(self):
         group, group_id, rank = self._init_global_test()
         self._test_all_reduce_helper(
@@ -479,14 +497,14 @@ if BACKEND == 'tcp' or BACKEND == 'gloo':
     class TestTCPOrGloo(TestCase, _DistTestBase):
 
         MANAGER_PROCESS_RANK = -1
-        JOIN_TIMEOUT = 5
+        JOIN_TIMEOUT = 10
 
         @staticmethod
         def manager_join(fn):
             @wraps(fn)
             def wrapper(self):
                 if self.rank == self.MANAGER_PROCESS_RANK:
-                    self._join_and_reduce()
+                    self._join_and_reduce(fn)
                 else:
                     fn(self)
             return wrapper
@@ -523,7 +541,7 @@ if BACKEND == 'tcp' or BACKEND == 'gloo':
         def _run(self, rank):
             self.rank = rank
             try:
-                dist.init_process_group(backend=BACKEND)
+                dist.init_process_group(init_method=INIT_METHOD, backend=BACKEND, world_size=int(WORLD_SIZE))
             except RuntimeError as e:
                 if 'recompile' in e.args[0]:
                     sys.exit(0)
@@ -532,13 +550,25 @@ if BACKEND == 'tcp' or BACKEND == 'gloo':
             getattr(self, self.id().split(".")[2])()
             sys.exit(0)
 
-        def _join_and_reduce(self):
+        def _join_and_reduce(self, fn):
+            skip_ok = getattr(fn, "skip_if_no_cuda_distributed", False)
             for p in self.processes:
                 p.join(self.JOIN_TIMEOUT)
-                self.assertEqual(p.exitcode, 0)
+                if not skip_ok:
+                    self.assertEqual(p.exitcode, 0)
+
+            if skip_ok:
+                first_process = self.processes[0]
+                # do this first so we don't give an error message about mismatched exit codes if the first isn't valid
+                assert first_process.exitcode == 0 or first_process.exitcode == SKIP_IF_NO_CUDA_EXIT_CODE
+
+                for p in self.processes:
+                    self.assertEqual(p.exitcode, first_process.exitcode)
+                if first_process.exitcode == SKIP_IF_NO_CUDA_EXIT_CODE:
+                    raise unittest.SkipTest("cuda is not available")
 
 elif BACKEND == 'mpi':
-    dist.init_process_group(backend='mpi')
+    dist.init_process_group(init_method=INIT_METHOD, backend='mpi')
 
     class TestMPI(TestCase, _DistTestBase):
         pass

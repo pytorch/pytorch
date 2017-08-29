@@ -138,7 +138,7 @@ def scatter(tensor, devices, chunk_sizes=None, dim=0, streams=None):
         dim (int, optional): A dimension along which to chunk the tensor.
 
     Returns:
-        A tuple containing chunks of the ``tensor``, spread accross given
+        A tuple containing chunks of the ``tensor``, spread across given
         ``devices``.
     """
     if chunk_sizes is None:
