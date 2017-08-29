@@ -141,9 +141,6 @@ std::shared_ptr<Graph> ToToffeeIR(std::shared_ptr<Graph>& g,
       }
       setOutputs(node, outputs);
     IR_ELSE()
-      if(node->kind() == kConstant) {
-        throw std::runtime_error("Constant not supported yet");
-      }
       auto n_ = ctx.graph->createClone(node, envFn);
       ctx.graph->appendNode(n_); // will be ignored by ToffeeIR
       if(node->hasMultipleOutputs()) {
