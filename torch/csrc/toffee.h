@@ -124,9 +124,20 @@ struct MicroProto {
   }
 };
 
-// TODO: add more of these as necessary
-const toffee_TensorProto_DataType TensorProto_DataType_FLOAT = toffee_TensorProto_DataType_FLOAT;
+using DataType = toffee_TensorProto_DataType;
 
+#define DEFINE_CONST(C) \
+const auto k##C = toffee_TensorProto_DataType_##C;
+DEFINE_CONST(FLOAT)
+DEFINE_CONST(UINT8)
+DEFINE_CONST(INT8)
+DEFINE_CONST(UINT16)
+DEFINE_CONST(INT16)
+DEFINE_CONST(INT32)
+DEFINE_CONST(INT64)
+DEFINE_CONST(STRING)
+DEFINE_CONST(BOOL)
+#undef DEFINE_CONST
 // C++ wrappers which simulate the Google C++ Protobuf API
 //
 // These are NOT COMPLETE wrappers. If you find something is missing, add it!
@@ -148,11 +159,7 @@ public:
   void set_name(const std::string& s) { proto.name = string(&name, s); }
   void add_dims(int64_t d) { dims.emplace_back(new int64_t(d)); }
   void add_tensor(const at::Tensor& t) {
-    if (t.type().scalarType() == at::kFloat) {
-      proto.raw_data = tensor(&tensor_data, t);
-    } else {
-      JIT_ASSERTM(0, "non-float tensors not supported yet");
-    }
+    proto.raw_data = tensor(&tensor_data, t);
   }
   void set_data_type(toffee_TensorProto_DataType t) { proto.has_data_type = true; proto.data_type = t; }
 };

@@ -18,6 +18,7 @@ struct assert_error final : public std::exception {
   virtual const char* what() const noexcept { return msg.c_str(); }
 };
 
+[[noreturn]]
 void barf(const char *fmt, ...);
 
 }} // namespace torch::jit

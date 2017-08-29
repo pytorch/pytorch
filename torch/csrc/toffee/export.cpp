@@ -166,9 +166,38 @@ static void encodeTensor(toffee::TensorProto * p, const at::Tensor & tensor) {
     for(auto d : tensor.sizes()) {
       p->add_dims(d);
     }
-    p->set_data_type(toffee::TensorProto_DataType_FLOAT);
-    //TODO: other types, we force conversion here
-    at::Tensor cont = tensor.toType(at::CPU(at::kFloat));
+    at::ScalarType at_type;
+    toffee::DataType toffee_type;
+    switch(tensor.type().scalarType()) {
+      case at::kDouble:
+      case at::kFloat:
+      case at::kHalf:
+        toffee_type = toffee::kFLOAT;
+        at_type = at::kFloat;
+        break;
+      case at::kByte:
+      case at::kChar:
+        toffee_type = toffee::kINT8;
+        at_type = at::kByte;
+        break;
+      case at::kShort:
+        toffee_type = toffee::kINT16;
+        at_type = at::kShort;
+        break;
+      case at::kInt:
+        toffee_type = toffee::kINT32;
+        at_type = at::kInt;
+        break;
+      case at::kLong:
+        toffee_type = toffee::kINT64;
+        at_type = at::kLong;
+        break;
+      default:
+        jit::barf("unexpected tensor scalar type");
+        break;
+    }
+    p->set_data_type(toffee_type);
+    at::Tensor cont = tensor.toType(at::CPU(at_type)).contiguous();
     p->add_tensor(cont);
 }
 static void encodeGraph(toffee::GraphProto * p_g, std::shared_ptr<Graph> & g, const std::vector<at::Tensor> & initializers);
