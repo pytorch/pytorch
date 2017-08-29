@@ -79,7 +79,7 @@ additional comments::
 Now, to make it easier to use these custom ops, we recommend aliasing their
 ``apply`` method::
 
-    linear = Linear.aply
+    linear = Linear.apply
 
 Here, we give an additional example of a function that is parametrized by
 non-Variable arguments::
@@ -88,7 +88,7 @@ non-Variable arguments::
         @staticmethod
         def forward(ctx, tensor, constant):
             # ctx is a context object that can be used to stash information
-            for backward computation
+            # for backward computation
             ctx.constant = constant
             return tensor * constant
 
