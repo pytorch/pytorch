@@ -19,7 +19,7 @@ class LRNOpBase : public Operator<Context> {
         beta_(OperatorBase::GetSingleArgument<float>("beta", 0)),
         bias_(OperatorBase::GetSingleArgument<float>("bias", 1)),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<string>("order", "NHWC"))),
+            OperatorBase::GetSingleArgument<string>("order", "NCHW"))),
         pre_pad_((size_ - 1) / 2) {
     DCHECK_GT(size_, 0);
     DCHECK_EQ(size_ % 2, 1);
