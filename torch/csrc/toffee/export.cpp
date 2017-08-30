@@ -74,6 +74,9 @@ std::shared_ptr<Graph> ToToffeeIR(std::shared_ptr<Graph>& g,
           if (!outputs[i]->hasType()) {
             outputs[i]->setType(old->typeOption());
             env[old] = outputs[i];
+          } else {
+            // This case occurs if an input was just passed through
+            env[old] = outputs[i];
           }
         } else {
           env[old] = nullptr;
