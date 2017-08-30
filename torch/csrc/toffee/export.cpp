@@ -11,10 +11,8 @@
 #include <ATen/ATen.h>
 
 #include <fstream>
-#undef NDEBUG
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
-#define NDEBUG
 
 namespace py = pybind11;
 
