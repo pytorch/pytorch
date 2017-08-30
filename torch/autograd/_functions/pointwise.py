@@ -57,7 +57,7 @@ class Tanh(InplaceFunction):
     @staticmethod
     def primspec(g, i, inplace=False):
         # TODO: [Export inplace]
-        return g.appendNode(g.create("Tanh", [i]))
+        return g.op("Tanh", i)
 
     @staticmethod
     def forward(ctx, i, inplace=False):
@@ -86,8 +86,7 @@ class Sigmoid(InplaceFunction):
 
     @staticmethod
     def primspec(g, i, inplace=False):
-        # TODO: [Export inplace]
-        return g.appendNode(g.create("Sigmoid", [i]))
+        return g.op("Sigmoid", i)
 
     @staticmethod
     def forward(ctx, i, inplace=False):
