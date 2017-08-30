@@ -53,6 +53,14 @@ auto ConvParams::is_output_padding_neg() const -> bool {
   return is_non_neg;
 }
 
+auto ConvParams::is_output_padding_big() const -> bool {
+  bool is_big = false;
+  for (int i = 0; i < output_padding.size(); i++) {
+    is_big |= (output_padding[i] >= stride[i] || output_padding[i] >= dilation[i]);
+  }
+  return is_big;
+}
+
 auto ConvParams::is_padding_neg() const -> bool {
   bool is_non_neg = false;
   for (int p : padding) {
@@ -79,9 +87,9 @@ auto ConvParams::use_cudnn(const at::Tensor& input) const -> bool {
   if (is_dilated()) {
     cudaDeviceProp* prop = THCState_getCurrentDeviceProperties(state);
     // NOTE: extra parenthesis around numbers disable clang warnings about dead code
-    return ((CUDNN_VERSION >= (6021)) || (CUDNN_VERSION >= (6000) && prop->major >= 5));
+    return ((CUDNN_VERSION >= (6021)) || (CUDNN_VERSION >= (6000) && prop->major >= 5)) && !is_output_padding_big();
   }
-  return true;
+  return !is_output_padding_big();
 #endif
   return false;
 }
