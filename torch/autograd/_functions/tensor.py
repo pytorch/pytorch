@@ -78,6 +78,8 @@ class Transpose(Function):
 
     @staticmethod
     def primspec(g, i, dim1, dim2):
+        if dim1 == 0 and dim2 == 1:
+            return i
         return (g.appendNode(g.create("Transpose", [i]))
                 .is_("axes", (dim1, dim2)))
 
@@ -178,6 +180,8 @@ class Permute(Function):
 
     @staticmethod
     def primspec(g, input, dim_indices):
+        if dim_indices == range(0, len(dim_indices)):
+            return input
         return (g.appendNode(g.create("Transpose", [input]))
                 .is_("axes", dim_indices))
 
