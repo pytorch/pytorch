@@ -720,7 +720,74 @@ void testOpenGLAdd(int N, int C, int H, int W, float error = 0.1) {
   const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>(); // openGL
   const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>(); // CPU
 
-  checkError(ws.GetBlob("Y_cpu")->Get<TensorCPU>(), ws.GetBlob("Y_ref")->Get<TensorCPU>(), error);
+  checkError(t1, t2, error);
+}
+
+void testOpenGLSub(int N, int C, int H, int W, float error = 0.1) {
+  LOG(INFO) << "OpenGL Sub Test "
+            << "C: " << C << ", H: " << H << ", W: " << W;
+
+  Workspace ws;
+  {
+    auto* t0 = ws.CreateBlob("X_cpu0")->GetMutable<TensorCPU>();
+    t0->Resize(N, C, H, W);
+    CPUContext ctx0;
+    // Too noisy.
+    math::RandGaussian<float, CPUContext>(
+        t0->size(), 0, 30, t0->mutable_data<float>(), &ctx0);
+
+    auto* t1 = ws.CreateBlob("X_cpu1")->GetMutable<TensorCPU>();
+    t1->Resize(N, C, H, W);
+    CPUContext ctx1;
+    // Too noisy.
+    math::RandGaussian<float, CPUContext>(
+        t1->size(), 0, 30, t1->mutable_data<float>(), &ctx1);
+  }
+
+  NetDef netdef;
+  {
+    auto& op = *(netdef.add_op());
+    op.set_type("CopyToOpenGL");
+    op.add_input("X_cpu0");
+    op.add_output("X_gl0");
+  }
+
+  {
+    auto& op = *(netdef.add_op());
+    op.set_type("CopyToOpenGL");
+    op.add_input("X_cpu1");
+    op.add_output("X_gl1");
+  }
+
+  {
+    auto& op = *(netdef.add_op());
+    op.set_type("OpenGLSub");
+    op.add_input("X_gl0");
+    op.add_input("X_gl1");
+    op.add_output("Y_gl");
+  }
+
+  {
+    auto& op = *(netdef.add_op());
+    op.set_type("CopyFromOpenGL");
+    op.add_input("Y_gl");
+    op.add_output("Y_cpu");
+  }
+
+  {
+    auto& op = *(netdef.add_op());
+    op.set_type("Sub");
+    op.add_input("X_cpu0");
+    op.add_input("X_cpu1");
+    auto& arg = *(op.add_arg());
+    arg.set_name("order");
+    arg.set_s("NCHW");
+    op.add_output("Y_ref");
+  }
+  ws.RunNetOnce(netdef);
+  const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>(); // openGL
+  const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>(); // CPU
+  checkError(t2, t1, error);
 }
 
 void testOpenGLConcat(
@@ -1892,8 +1959,10 @@ void compareModelsForOpenGL(std::string name,
       float* input = t_cpu->mutable_data<float>();
       const int spatial_size = width * height;
       math::RandGaussian<float, CPUContext>(spatial_size, 0, 0.33, input, &ctx); // R Channel
-      math::RandGaussian<float, CPUContext>(spatial_size, 0, 0.33, input + spatial_size, &ctx); // G Channel
-      math::RandGaussian<float, CPUContext>(spatial_size, 0, 0.33, input + 2 * spatial_size, &ctx); // B Channel
+      math::RandGaussian<float, CPUContext>(
+          spatial_size, 0, 0.33, input + spatial_size, &ctx); // G Channel
+      math::RandGaussian<float, CPUContext>(
+          spatial_size, 0, 0.33, input + 2 * spatial_size, &ctx); // B Channel
       // Clamp Range of input [-1, +1]
       for (auto i = 0; i < t_cpu->size(); ++i) {
         input[i] = input[i] > 1 ? 1 : input[i] < -1 ? -1 : input[i];
@@ -1939,7 +2008,7 @@ void compareModelsForOpenGL(std::string name,
       const auto& mt = mws.GetBlob(m_name)->Get<TensorCPU>(); // GPU
       const auto& ct = cws.GetBlob(c_name)->Get<TensorCPU>(); // CPU
       if (name == "denoiser") {
-        checkError(mt, ct, 0.02);  // 1% of Scale
+        checkError(mt, ct, 0.02); // 1% of Scale
         LOG(INFO) << "Error Check Completed for Denoiser Layer: " << i;
       } else {
         checkError(mt, ct, 1);
@@ -2120,35 +2189,60 @@ int runModelBenchmarks(caffe2::NetDef& init_net,
     }
   } else {
     const int tile_x = 1, tile_y = 1;
-    ImageAllocator<uint8_t> allocator;
-    GLImageVector<uint8_t>* output_image = allocator.newImage(1,
-                                                              width,
-                                                              height,
-                                                              channel,
-                                                              tile_x,
-                                                              tile_y,
-#if CAFFE2_IOS
-                                                              true
-#else
-                                                              false
-#endif
-                                                              );
-
     Blob* blob = nullptr;
     if (!net_def.external_input_size()) {
       blob = workspace->CreateBlob("data");
     } else {
       blob = workspace->CreateBlob(net_def.external_input(0));
     }
-    blob->Reset(output_image);
-    const auto textures = (*output_image)[0]->textures;
-    for (int slice = 0; slice < textures.size(); slice++) {
-      textures[slice]->map_load([&](void* buffer,
-                                    size_t width,
-                                    size_t height,
-                                    size_t stride,
-                                    size_t channels,
-                                    const GLTexture::Type& type) {});
+    if (input_type == "float") {
+      ImageAllocator<float16_t> allocator;
+      GLImageVector<float16_t>* output_image = allocator.newImage(
+          1,
+          width,
+          height,
+          channel,
+          tile_x,
+          tile_y,
+#if CAFFE2_IOS
+          true
+#else
+          false
+#endif
+      );
+      blob->Reset(output_image);
+      for (auto& texture : (*output_image)[0]->textures) {
+        texture->map_load([&](void* buffer,
+                              size_t width,
+                              size_t height,
+                              size_t stride,
+                              size_t channels,
+                              const GLTexture::Type& type) {});
+      }
+    } else {
+      ImageAllocator<uint8_t> allocator;
+      GLImageVector<uint8_t>* output_image = allocator.newImage(
+          1,
+          width,
+          height,
+          channel,
+          tile_x,
+          tile_y,
+#if CAFFE2_IOS
+          true
+#else
+          false
+#endif
+      );
+      blob->Reset(output_image);
+      for (auto& texture : (*output_image)[0]->textures) {
+        texture->map_load([&](void* buffer,
+                              size_t width,
+                              size_t height,
+                              size_t stride,
+                              size_t channels,
+                              const GLTexture::Type& type) {});
+      }
     }
   }
 
@@ -2602,9 +2696,11 @@ void testOpenGL() {
 
     LOG(INFO) << "Test OpenGL Add";
     testOpenGLAdd(1, 16, 640, 360, 0.1);
-    testOpenGLAdd(1, 16, 640, 360, 0.1);
-    testOpenGLAdd(1, 16, 640, 360, 0.1);
     testOpenGLAdd(1, 12, 640, 360, 0.1);
+
+    LOG(INFO) << "Test OpenGL Sub";
+    testOpenGLSub(1, 16, 640, 360, 0.1);
+    testOpenGLSub(1, 12, 640, 360, 0.1);
 
     LOG(INFO) << "Test OpenGL Sigmoid";
     testOpenGLSigmoid(1, 4, 16, 16, 0.1);
