@@ -97,15 +97,14 @@ const char* GLPRelu::fragment_shader = R"GLSL(#version 300 es
 #define TILED_CONVOLUTION           $(TILED_CONVOLUTION)
 
 precision mediump float;
-precision mediump int;
-precision mediump sampler2D;
+precision highp int;
+
+TEXTURE_INPUT(inputData);
+TEXTURE_OUTPUT(0, outputData);
 
 const ivec2 outputTileSize = ivec2(OUTPUT_TILE_WIDTH, OUTPUT_TILE_HEIGHT);
 
 in highp vec2 v_texCoord;
-
-uniform sampler2D inputData;
-layout(location = 0) out mediump vec4 outputData0;
 
 #if !USE_RELU
 #if TILED_CONVOLUTION == 1
@@ -118,8 +117,6 @@ layout (std140) uniform scale_block {
   highp uvec4 scale;
 };
 #endif
-
-#define unpackHalf4x16(pd) vec4(unpackHalf2x16(pd.x), unpackHalf2x16(pd.y))
 #endif
 
 #if !USE_RELU
@@ -134,9 +131,10 @@ void main() {
   int tileNum = OUTPUT_TILE_X * tile.y + tile.x; // 1D output tile idx
   
   // output.data     = value > 0 ? value : value * weight;
-  vec4 value = texelFetch(inputData, texelCoord, 0);
+  vec4 value = TEXTURE_LOAD(inputData, texelCoord);
   vec4 preluValue = (tileNum % 2 == 0) ? unpackHalf4x16(scale[tileNum/2].xy) : unpackHalf4x16(scale[tileNum/2].zw);
-  outputData0 = mix(value * preluValue, value, vec4(greaterThan(value, vec4(0))));
+  value = mix(value * preluValue, value, vec4(greaterThan(value, vec4(0))));
+  outputData = TEXTURE_STORE(value);
 }
 
 #else
@@ -145,9 +143,9 @@ void main() {
   ivec2 inputSize = textureSize(inputData, 0);
   ivec2 texelCoord = ivec2(v_texCoord * vec2(inputSize));
 
-  // output.data     = value > 0 ? value : value * weight;
-  vec4 value = texelFetch(inputData, texelCoord, 0);
-  outputData0 = mix(value * unpackHalf4x16(scale.xy), value, vec4(greaterThan(value, vec4(0))));
+  vec4 value = TEXTURE_LOAD(inputData, texelCoord);
+  value = mix(value * unpackHalf4x16(scale.xy), value, vec4(greaterThan(value, vec4(0))));
+  outputData = TEXTURE_STORE(value);
 }
 #endif // TILED_CONVOLUTION
 
@@ -155,7 +153,8 @@ void main() {
 void main() {
   ivec2 inputSize = textureSize(inputData, 0);
   ivec2 texelCoord = ivec2(v_texCoord * vec2(inputSize));
-  outputData0 = max(texelFetch(inputData, texelCoord, 0), vec4(0.0));
+  vec4 value = TEXTURE_LOAD(inputData, texelCoord);
+  outputData = TEXTURE_STORE(max(value, vec4(0.0)));
 }
 #endif
 

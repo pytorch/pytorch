@@ -52,7 +52,6 @@ const char* GLSoftmaxReduce::fragment_shader = R"GLSL(#version 300 es
 
 precision highp float;
 precision mediump int;
-precision mediump sampler2D;
 
 in highp vec2 v_texCoord;
 
@@ -60,8 +59,8 @@ uniform ivec2 inputSize;
 uniform ivec2 outputSize;
 uniform ivec2 tileSize;
 
-uniform sampler2D inputData;
-layout(location = 0) out mediump vec4 outputData;
+TEXTURE_INPUT(inputData);
+TEXTURE_OUTPUT(0, outputData);
 
 void main() {
   ivec2 outputCoord = ivec2(v_texCoord * vec2(outputSize));
@@ -72,7 +71,7 @@ void main() {
   for (int y = 0; y < sumArea.y; y++) {
     for (int x = 0; x < sumArea.x; x++) {
       ivec2 idx = texelCoord + ivec2(x, y);
-      vec4 val = texelFetch(inputData, idx, 0);
+      vec4 val = TEXTURE_LOAD(inputData, idx);
 #if COMPUTE_SUM
       result += val;
 #else
@@ -81,7 +80,7 @@ void main() {
     }
   }
 
-  outputData = result;
+  outputData = TEXTURE_STORE(result);
 }
 
 )GLSL";
@@ -168,26 +167,25 @@ const char* GLSoftmaxScale::fragment_shader = R"GLSL(#version 300 es
 
 precision highp float;
 precision mediump int;
-precision mediump sampler2D;
 
 in highp vec2 v_texCoord;
 uniform ivec2 outputSize;
 
-uniform sampler2D inputData;
-uniform sampler2D maxData;
-uniform sampler2D sumData;
-layout(location = 0) out mediump vec4 outputData;
+TEXTURE_INPUT(inputData);
+TEXTURE_INPUT(maxData);
+TEXTURE_INPUT(sumData);
+TEXTURE_OUTPUT(0, outputData);
 
 void main() {
   ivec2 texelCoord = ivec2(v_texCoord * vec2(outputSize));
 
-  highp vec4 val = texelFetch(inputData, texelCoord, 0);
+  vec4 val = TEXTURE_LOAD(inputData, texelCoord);
 #if COMPUTE_EXP
-  highp vec4 maxVal = texelFetch(maxData, ivec2(0), 0);
-  outputData = exp(val - maxVal);
+  vec4 maxVal = TEXTURE_LOAD(maxData, ivec2(0));
+  outputData = TEXTURE_STORE(exp(val - maxVal));
 #else
-  highp vec4 sumVal = texelFetch(sumData, ivec2(0), 0);
-  outputData = val / sumVal;
+  vec4 sumVal = TEXTURE_LOAD(sumData, ivec2(0));
+  outputData = TEXTURE_STORE(val / sumVal);
 #endif
 }
 

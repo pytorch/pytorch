@@ -75,7 +75,6 @@ const char* GLReduce::fragment_shader = R"GLSL(#version 300 es
 
 precision mediump float;
 precision mediump int;
-precision mediump sampler2D;
 
 in highp vec2 v_texCoord;
 
@@ -86,11 +85,11 @@ uniform float inv_pixel_count;
 uniform float epsilon;
 
 #if COMPUTE_NORM
-uniform sampler2D averageData;
+TEXTURE_INPUT(averageData);
 #endif
 
-uniform sampler2D inputData;
-layout(location = 0) out mediump vec4 outputData;
+TEXTURE_INPUT(inputData);
+TEXTURE_OUTPUT(0, outputData);
 
 void main() {
   ivec2 outputCoord = ivec2(v_texCoord * vec2(outputSize));
@@ -99,27 +98,28 @@ void main() {
   highp vec4 sum = vec4(0.0);
 
 #if COMPUTE_NORM
-  vec4 avg = texelFetch(averageData, ivec2(0), 0);
+  vec4 avg = TEXTURE_LOAD(averageData, ivec2(0));
 #endif
 
   for (int y = 0; y < sumArea.y; y++) {
     for (int x = 0; x < sumArea.x; x++) {
       ivec2 idx = texelCoord + ivec2(x, y);
+      vec4 val = TEXTURE_LOAD(inputData, idx);
 #if COMPUTE_NORM
-      vec4 val = texelFetch(inputData, idx, 0) - avg;
+      val -= avg;
       sum += val * val;
 #else
-      sum += texelFetch(inputData, idx, 0);
+      sum += val;
 #endif
     }
   }
 
 #if COMPUTE_INV_STDEV
-  outputData = inversesqrt(sum * vec4(inv_pixel_count) + vec4(epsilon));
+  outputData = TEXTURE_STORE(inversesqrt(sum * vec4(inv_pixel_count) + vec4(epsilon)));
 #elif COMPUTE_NORM
-  outputData = sum * vec4(inv_pixel_count);
+  outputData = TEXTURE_STORE(sum * vec4(inv_pixel_count));
 #else
-  outputData = sum * vec4(inv_pixel_count) + vec4(epsilon);
+  outputData = TEXTURE_STORE(sum * vec4(inv_pixel_count) + vec4(epsilon));
 #endif
 }
 
@@ -244,7 +244,6 @@ const char* GLScale::fragment_shader = R"GLSL(#version 300 es
 
 precision mediump float;
 precision mediump int;
-precision mediump sampler2D;
 
 in highp vec2 v_texCoord;
 uniform ivec2 outputSize;
@@ -255,23 +254,25 @@ uniform vec4 bias_factor;
 uniform vec4 prelu_scale_factor;
 #endif
 
-uniform sampler2D inputData;
-uniform sampler2D averageData;
-uniform sampler2D normData;
-layout(location = 0) out mediump vec4 outputData;
+TEXTURE_INPUT(inputData);
+TEXTURE_INPUT(averageData);
+TEXTURE_INPUT(normData);
+TEXTURE_OUTPUT(0, outputData);
 
 void main() {
   ivec2 texelCoord = ivec2(v_texCoord * vec2(outputSize));
 
-  vec4 val = texelFetch(inputData, texelCoord, 0);
-  vec4 avg = texelFetch(averageData, ivec2(0), 0);
-  vec4 inv_stdev = texelFetch(normData, ivec2(0), 0);
+  vec4 val = TEXTURE_LOAD(inputData, texelCoord);
+  vec4 avg = TEXTURE_LOAD(averageData, ivec2(0));
+  vec4 inv_stdev = TEXTURE_LOAD(normData, ivec2(0));
 
 #if FUSE_PRELU
   vec4 result = (val - avg) * inv_stdev * scale_factor + bias_factor;
-  outputData = mix(result * prelu_scale_factor, result, vec4(greaterThan(result, vec4(0))));
+  vec4 o = mix(result * prelu_scale_factor, result, vec4(greaterThan(result, vec4(0))));
+  outputData = TEXTURE_STORE(o);
 #else
-  outputData = (val - avg) * inv_stdev * scale_factor + bias_factor;
+  vec4 o = (val - avg) * inv_stdev * scale_factor + bias_factor;
+  outputData = TEXTURE_STORE(o);
 #endif
 }
 

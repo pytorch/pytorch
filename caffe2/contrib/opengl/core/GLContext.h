@@ -11,6 +11,9 @@ class GLContext {
   std::function<const GLTexture*(const int width, const int height)> foreignTextureAllocator =
       nullptr;
 
+ protected:
+  bool half_float_supported = true;
+
  public:
   virtual void set_context() = 0;
   virtual void reset_context() = 0;
@@ -23,6 +26,10 @@ class GLContext {
 
   static bool GL_EXT_texture_border_clamp_defined();
 
+  inline bool halfFloatTextureSupported() {
+    return half_float_supported;
+  }
+
   void setTextureAllocator(
       std::function<const GLTexture*(const int width, const int height)> textureAllocator) {
     foreignTextureAllocator = textureAllocator;
@@ -33,7 +40,7 @@ class GLContext {
   }
 };
 
-bool supportOpenGLES3();
+bool supportOpenGLES3(bool* hfs = nullptr);
 
 bool isSupportedDevice();
 

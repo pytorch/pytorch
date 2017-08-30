@@ -56,7 +56,6 @@ const char* GLResizeNearest::fragment_shader = R"GLSL(#version 300 es
 
 precision mediump float;
 precision mediump int;
-precision mediump sampler2D;
 
 in highp vec2 v_texCoord;
 
@@ -64,15 +63,15 @@ uniform ivec2 inputSize;
 uniform ivec2 outputSize;
 uniform highp vec2 scale_reverse;
 
-uniform sampler2D inputData[BATCH_SIZE];
+TEXTURE_INPUT(inputData[BATCH_SIZE]);
 
-layout(location = 0) out mediump vec4 outputData0;
+TEXTURE_OUTPUT(0, outputData0);
 #if BATCH_SIZE > 1
-layout(location = 1) out mediump vec4 outputData1;
+TEXTURE_OUTPUT(1, outputData1);
 #if BATCH_SIZE > 2
-layout(location = 2) out mediump vec4 outputData2;
+TEXTURE_OUTPUT(2, outputData2);
 #if BATCH_SIZE > 3
-layout(location = 3) out mediump vec4 outputData3;
+TEXTURE_OUTPUT(3, outputData3);
 #endif
 #endif
 #endif
@@ -81,13 +80,17 @@ void main() {
   // it clamps to the edge by default
   ivec2 texelCoord = ivec2(v_texCoord * vec2(outputSize) * scale_reverse);
 
-  outputData0 = texelFetch(inputData[0], texelCoord, 0);
+  vec4 v0 = TEXTURE_LOAD(inputData[0], texelCoord);
+  outputData0 = TEXTURE_STORE(v0);
 #if BATCH_SIZE > 1
-  outputData1 = texelFetch(inputData[1], texelCoord, 0);
+  vec4 v1 = TEXTURE_LOAD(inputData[1], texelCoord);
+  outputData1 = TEXTURE_STORE(v1);
 #if BATCH_SIZE > 2
-  outputData2 = texelFetch(inputData[2], texelCoord, 0);
+  vec4 v2 = TEXTURE_LOAD(inputData[2], texelCoord);
+  outputData2 = TEXTURE_STORE(v2);
 #if BATCH_SIZE > 3
-  outputData3 = texelFetch(inputData[3], texelCoord, 0);
+  vec4 v3 = TEXTURE_LOAD(inputData[3], texelCoord);
+  outputData3 = TEXTURE_STORE(v3);
 #endif
 #endif
 #endif

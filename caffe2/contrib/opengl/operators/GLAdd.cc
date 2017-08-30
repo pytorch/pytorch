@@ -38,19 +38,20 @@ const char* GLAdd::fragment_shader = R"GLSL(#version 300 es
 
 precision mediump float;
 precision mediump int;
-precision mediump sampler2D;
 
 in highp vec2 v_texCoord;
 
 uniform ivec2 outputSize;
 
-uniform sampler2D inputData[2];
-
-layout(location = 0) out mediump vec4 outputData;
+TEXTURE_INPUT(inputData[2]);
+TEXTURE_OUTPUT(0, outputData);
 
 void main() {
     ivec2 texelCoord = ivec2(v_texCoord * vec2(outputSize));
-    outputData = texelFetch(inputData[0], texelCoord, 0) + texelFetch(inputData[1], texelCoord, 0);
+    vec4 A = TEXTURE_LOAD(inputData[0], texelCoord);
+    vec4 B = TEXTURE_LOAD(inputData[1], texelCoord);
+    vec4 value = A + B;
+    outputData = TEXTURE_STORE(value);
 }
 
 )GLSL";
