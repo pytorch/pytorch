@@ -1391,7 +1391,9 @@ void CopyMatrix<CPUContext>(
   template <>                                                       \
   void CopyVector<T, CPUContext>(                                   \
       const int N, const T* src, T* dst, CPUContext* /*context*/) { \
-    memcpy(dst, src, sizeof(T) * N);                                \
+    if (src != dst && N > 0) {                                      \
+      memcpy(dst, src, sizeof(T) * N);                              \
+    }                                                               \
   }
 CAFFE2_SPECIALIZED_COPYVECTOR(float)
 #undef CAFFE2_SPECIALIZED_COPYVECTOR
