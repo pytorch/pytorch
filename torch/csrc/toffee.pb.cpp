@@ -42,12 +42,11 @@ const pb_field_t toffee_GraphProto_fields[7] = {
     PB_LAST_FIELD
 };
 
-const pb_field_t toffee_TensorProto_fields[11] = {
+const pb_field_t toffee_TensorProto_fields[10] = {
     PB_FIELD(  1, INT64   , REPEATED, CALLBACK, FIRST, toffee_TensorProto, dims, dims, 0),
     PB_FIELD(  2, UENUM   , OPTIONAL, STATIC  , OTHER, toffee_TensorProto, data_type, dims, 0),
     PB_FIELD(  3, FLOAT   , REPEATED, CALLBACK, OTHER, toffee_TensorProto, float_data, data_type, 0),
-    PB_FIELD(  4, DOUBLE  , REPEATED, CALLBACK, OTHER, toffee_TensorProto, double_data, float_data, 0),
-    PB_FIELD(  5, INT32   , REPEATED, CALLBACK, OTHER, toffee_TensorProto, int32_data, double_data, 0),
+    PB_FIELD(  5, INT32   , REPEATED, CALLBACK, OTHER, toffee_TensorProto, int32_data, float_data, 0),
     PB_FIELD(  6, BYTES   , REPEATED, CALLBACK, OTHER, toffee_TensorProto, string_data, int32_data, 0),
     PB_FIELD(  7, INT64   , REPEATED, CALLBACK, OTHER, toffee_TensorProto, int64_data, string_data, 0),
     PB_FIELD(  8, STRING  , OPTIONAL, CALLBACK, OTHER, toffee_TensorProto, name, int64_data, 0),
@@ -95,11 +94,5 @@ PB_STATIC_ASSERT((pb_membersize(toffee_TensorProto, segment) < 65536 && pb_membe
 PB_STATIC_ASSERT((pb_membersize(toffee_TensorProto, segment) < 256 && pb_membersize(toffee_SparseTensorProto, indices) < 256 && pb_membersize(toffee_SparseTensorProto, values) < 256), YOU_MUST_DEFINE_PB_FIELD_16BIT_FOR_MESSAGES_toffee_AttributeProto_toffee_NodeProto_toffee_GraphProto_toffee_TensorProto_toffee_TensorProto_Segment_toffee_SparseTensorProto)
 #endif
 
-
-/* On some platforms (such as AVR), double is really float.
- * These are not directly supported by nanopb, but see example_avr_double.
- * To get rid of this error, remove any double fields from your .proto.
- */
-PB_STATIC_ASSERT(sizeof(double) == 8, DOUBLE_MUST_BE_8_BYTES)
 
 /* @@protoc_insertion_point(eof) */
