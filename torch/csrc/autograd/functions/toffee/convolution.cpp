@@ -14,8 +14,8 @@ static T all_equal(at::ArrayRef<T> ts, const char * name) {
 
 jit::node_list ConvForward::primspec(PrimSpecContext* ctx, jit::node_list inputs) {
   auto & g = ctx->graph;
-  auto n = g->appendNode(g->create(!transposed ? jit::kConv : jit::kConvTranspose,
-                                   {inputs.at(0), inputs.at(1)}));
+  auto n = g->create(!transposed ? jit::kConv : jit::kConvTranspose,
+                                   {inputs.at(0), inputs.at(1)});
 
   if (inputs.at(2)->kind() != jit::kUndefined) {
     n->addInput(inputs.at(2));
@@ -29,6 +29,16 @@ jit::node_list ConvForward::primspec(PrimSpecContext* ctx, jit::node_list inputs
   auto weight_type = inputs.at(1)->type()->cast<jit::TensorType>();
   JIT_ASSERT(weight_type);
   auto weight_size = weight_type->sizes();
+
+  // For ConvTranspose, we append zero filled bias if the bias=False to maintain
+  // compatibility with Caffe2
+  if(transposed) {
+    if(inputs.at(2)->kind() == jit::kUndefined) {
+      n->addInput(g->appendNode(g->createConstant(at::CPU(at::kFloat).zeros({weight_size[1]}))));
+    }
+  }
+
+  g->appendNode(n);
 
   if(!transposed) {
     std::vector<int64_t> kernel_size(weight_size.begin() + 2, weight_size.end());
