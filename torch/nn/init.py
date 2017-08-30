@@ -378,7 +378,7 @@ def sparse(tensor, sparsity, std=0.01):
 
     tensor.normal_(0, std)
     rows, cols = tensor.size(0), tensor.size(1)
-    num_zeros = int(math.ceil(cols * sparsity))
+    num_zeros = int(math.ceil(rows * sparsity))
 
     for col_idx in range(tensor.size(1)):
         row_indices = list(range(rows))

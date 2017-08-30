@@ -492,13 +492,15 @@ THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
     ldc = result_->stride[2];
   }
 
-  if (batch1->stride[transpose_result ? 2 : 1] == 1)
+  if (batch1->stride[transpose_result ? 2 : 1] == 1 && 
+   batch1->stride[transpose_result ? 1 : 2] != 0)
   {
     transpose_batch1 = 'n';
     batch1_ = batch1;
     lda = batch1_->stride[transpose_result ? 1 : 2];
   }
-  else if (batch1->stride[transpose_result ? 1 : 2] == 1)
+  else if (batch1->stride[transpose_result ? 1 : 2] == 1 && 
+   batch1->stride[transpose_result ? 2 : 1] != 0)
   {
     transpose_batch1 = 't';
     batch1_ = batch1;
@@ -511,13 +513,15 @@ THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
     lda = batch1_->stride[1];
   }
 
-  if (batch2->stride[transpose_result ? 2 : 1] == 1)
+  if (batch2->stride[transpose_result ? 2 : 1] == 1 && 
+   batch2->stride[transpose_result ? 1 : 2] != 0)
   {
     transpose_batch2 = 'n';
     batch2_ = batch2;
     ldb = batch2_->stride[transpose_result ? 1 : 2];
   }
-  else if (batch2->stride[transpose_result ? 1 : 2] == 1)
+  else if (batch2->stride[transpose_result ? 1 : 2] == 1 &&
+   batch2->stride[transpose_result ? 2 : 1] != 0)
   {
     transpose_batch2 = 't';
     batch2_ = batch2;
@@ -529,14 +533,14 @@ THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
     batch2_ = THCTensor_(newContiguous)(state, batch2);
     ldb = batch2_->stride[1];
   }
-
   long num_batches = result_->size[0];
 
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
   // Compute pointers to matrices in each batch.
+#if CUDA_VERSION < 8000  
   size_t matrices_size = num_batches * sizeof(real*);
 
-  // Copy pointers to device.
+//   Copy pointers to device.
   const real **d_matrices1, **d_matrices2;
   real **d_result_matrices;
   THCudaCheck(THCudaMalloc(state, (void**)&d_matrices1, matrices_size));
@@ -555,7 +559,6 @@ THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
   createBatchGemmBuffer<<<grid, block, 0, THCState_getCurrentStream(state)>>>(
     (const real**)d_result_matrices, THCTensor_(data)(state,result_),
     result_->stride[0], num_batches);
-
 #ifdef THC_REAL_IS_FLOAT
   THCudaBlas_SgemmBatched(
       state,
@@ -589,6 +592,38 @@ THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
   THCudaFree(state, d_matrices1);
   THCudaFree(state, d_matrices2);
   THCudaFree(state, d_result_matrices);
+  
+#else
+#ifdef THC_REAL_IS_FLOAT
+  THCudaBlas_SgemmStridedBatched(
+      state,
+      transpose_batch1,
+      transpose_batch2,
+      result_->size[transpose_result ? 2 : 1],
+      result_->size[transpose_result ? 1 : 2],
+      batch1_->size[transpose_result ? 1 : 2],
+      alpha,
+      THCTensor_(data)(state, batch1_), lda, batch1_->stride[0],
+      THCTensor_(data)(state, batch2_), ldb, batch2_->stride[0],
+      beta,
+      THCTensor_(data)(state, result_), ldc, result_->stride[0],      
+      num_batches);
+#elif defined(THC_REAL_IS_DOUBLE)
+  THCudaBlas_DgemmStridedBatched(
+      state,
+      transpose_batch1,
+      transpose_batch2,
+      result_->size[transpose_result ? 2 : 1],
+      result_->size[transpose_result ? 1 : 2],
+      batch1_->size[transpose_result ? 1 : 2],
+      alpha,
+      THCTensor_(data)(state, batch1_), lda, batch1_->stride[0],
+      THCTensor_(data)(state, batch2_), ldb, batch2_->stride[0],
+      beta,
+      THCTensor_(data)(state, result_), ldc, result_->stride[0],      
+      num_batches);
+#endif
+#endif
 
 #elif defined(THC_REAL_IS_HALF)
   // Currently no HgemmBatched in Cublas

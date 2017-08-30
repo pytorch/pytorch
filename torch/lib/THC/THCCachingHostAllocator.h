@@ -22,7 +22,7 @@
 THC_API THAllocator THCCachingHostAllocator;
 
 // Records an event in the specified stream. The allocation 'ptr' will not be
-// re-used until the event has occured.
+// re-used until the event has occurred.
 THC_API cudaError_t THCCachingHostAllocator_recordEvent(void *ptr, THCStream *stream);
 
 // Releases cached pinned memory allocations via cudaHostFree

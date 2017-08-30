@@ -979,6 +979,9 @@
   name: neg
   types:
     - floating_point
+    - Long
+    - Int
+    - Short
   backends:
     - CPU
     - CUDA
@@ -998,6 +1001,9 @@
   name: neg_
   types:
     - floating_point
+    - Long
+    - Int
+    - Short
   backends:
     - CPU
     - CUDA
@@ -1364,6 +1370,7 @@
         - THTensor* self
         - real value
     - cname: cadd
+      aten_sparse: True
       arguments:
         - arg: THTensor* result
           output: True
@@ -1374,6 +1381,7 @@
         - THTensor* other
     - sparse: True
       cname: spcadd
+      aten_dense_sparse: True
       arguments:
         - arg: THTensor* result
           output: True
@@ -1393,6 +1401,7 @@
         - THTensor* self
         - real value
     - cname: cadd
+      aten_sparse: True
       arguments:
         - THTensor* self
         - arg: THTensor* self
@@ -1402,6 +1411,7 @@
         - THTensor* other
     - sparse: True
       cname: spcadd
+      aten_dense_sparse: True
       arguments:
         - THTensor* self
         - THTensor* self
@@ -1694,7 +1704,7 @@
     - arg: THTensor* destination
       output: True
     - THTensor* self
-    - arg: long k
+    - arg: long diagonal
       default: 0
 ]]
 
@@ -1705,7 +1715,7 @@
   arguments:
     - THTensor* self
     - THTensor* self
-    - arg: long k
+    - arg: long diagonal
       default: 0
 ]]
 
@@ -1719,7 +1729,7 @@
     - arg: THTensor* destination
       output: True
     - THTensor* self
-    - arg: long k
+    - arg: long diagonal
       default: 0
 ]]
 
@@ -1730,7 +1740,7 @@
   arguments:
     - THTensor* self
     - THTensor* self
-    - arg: long k
+    - arg: long diagonal
       default: 0
 ]]
 
@@ -1753,6 +1763,7 @@
   name: eye
   backends:
     - CPU
+    - CUDA
   variants:
     - function
   return: argument 0

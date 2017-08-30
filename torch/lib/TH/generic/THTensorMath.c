@@ -1595,6 +1595,10 @@ void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
     THLongTensor_zero(indices_);
 
     if(t->size[dimension] == 1) {
+      if (!keepdim) {
+        THTensor_(squeeze1d)(values_, values_, dimension);
+        THLongTensor_squeeze1d(indices_, indices_, dimension);
+      }
       return;
     }
 
@@ -1671,6 +1675,10 @@ void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
     THLongTensor_zero(indices_);
 
     if(t->size[dimension] == 1) {
+      if (!keepdim) {
+        THTensor_(squeeze1d)(values_, values_, dimension);
+        THLongTensor_squeeze1d(indices_, indices_, dimension);
+      }
       return;
     }
 
@@ -1917,6 +1925,18 @@ void THTensor_(zeros)(THTensor *r_, THLongStorage *size)
 {
   THTensor_(resize)(r_, size, NULL);
   THTensor_(zero)(r_);
+}
+
+void THTensor_(zerosLike)(THTensor *r_, THTensor *input)
+{
+  THTensor_(resizeAs)(r_, input);
+  THTensor_(zero)(r_);
+}
+
+void THTensor_(onesLike)(THTensor *r_, THTensor *input)
+{
+  THTensor_(resizeAs)(r_, input);
+  THTensor_(fill)(r_, 1);
 }
 
 void THTensor_(ones)(THTensor *r_, THLongStorage *size)
@@ -2845,10 +2865,12 @@ TENSOR_IMPLEMENT_LOGICAL(ne,!=)
 
 #if defined(TH_REAL_IS_LONG)
 LAB_IMPLEMENT_BASIC_FUNCTION(abs,labs)
+LAB_IMPLEMENT_BASIC_FUNCTION(neg,-)
 #endif /* long only part */
 
 #if defined(TH_REAL_IS_SHORT) || defined(TH_REAL_IS_INT)
 LAB_IMPLEMENT_BASIC_FUNCTION(abs,abs)
+LAB_IMPLEMENT_BASIC_FUNCTION(neg,-)
 #endif /* int only part */
 
 #if defined(TH_REAL_IS_BYTE)

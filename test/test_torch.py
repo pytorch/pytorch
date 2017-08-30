@@ -135,8 +135,20 @@ class TestTorch(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_has_storage_numpy(self):
-        arr = np.array([], dtype=np.float32)
-        self.assertIsNotNone(torch.Tensor(arr).storage())
+        for dtype in [np.float32, np.float64, np.int64,
+                      np.int32, np.int16, np.uint8]:
+            arr = np.array([1], dtype=dtype)
+            self.assertIsNotNone(torch.FloatTensor(arr).storage())
+            self.assertIsNotNone(torch.DoubleTensor(arr).storage())
+            self.assertIsNotNone(torch.IntTensor(arr).storage())
+            self.assertIsNotNone(torch.LongTensor(arr).storage())
+            self.assertIsNotNone(torch.ByteTensor(arr).storage())
+            if torch.cuda.is_available():
+                self.assertIsNotNone(torch.cuda.FloatTensor(arr).storage())
+                self.assertIsNotNone(torch.cuda.DoubleTensor(arr).storage())
+                self.assertIsNotNone(torch.cuda.IntTensor(arr).storage())
+                self.assertIsNotNone(torch.cuda.LongTensor(arr).storage())
+                self.assertIsNotNone(torch.cuda.ByteTensor(arr).storage())
 
     def _testSelection(self, torchfn, mathfn):
         # contiguous
@@ -188,7 +200,8 @@ class TestTorch(TestCase):
     def test_min(self):
         self._testSelection(torch.min, min)
 
-    def test_dim_reduction(self):
+    @staticmethod
+    def _test_dim_reduction(self, cast):
         dim_red_fns = [
             "mean", "median", "mode", "norm", "prod",
             "std", "sum", "var", "max", "min"]
@@ -198,24 +211,38 @@ class TestTorch(TestCase):
             return attr(t, 2, dim, keepdim)
 
         for fn_name in dim_red_fns:
-            x = torch.randn(3, 4, 5)
             fn_attr = getattr(torch, fn_name) if fn_name != "norm" else normfn_attr
 
-            def fn(t, dim, keepdim=False):
+            def fn(x, dim, keepdim=False):
                 ans = fn_attr(x, dim, keepdim=keepdim)
                 return ans if not isinstance(ans, tuple) else ans[0]
 
+            def test_multidim(x, dim):
+                self.assertEqual(fn(x, dim).unsqueeze(dim), fn(x, dim, keepdim=True))
+                self.assertEqual(x.ndimension() - 1, fn(x, dim).ndimension())
+                self.assertEqual(x.ndimension(), fn(x, dim, keepdim=True).ndimension())
+
+            # general case
+            x = cast(torch.randn(3, 4, 5))
             dim = random.randint(0, 2)
-            self.assertEqual(fn(x, dim).unsqueeze(dim), fn(x, dim, keepdim=True))
-            self.assertEqual(x.ndimension() - 1, fn(x, dim).ndimension())
-            self.assertEqual(x.ndimension(), fn(x, dim, keepdim=True).ndimension())
+            test_multidim(x, dim)
 
             # check 1-d behavior
-            x = torch.randn(1)
+            x = cast(torch.randn(1))
             dim = 0
             self.assertEqual(fn(x, dim), fn(x, dim, keepdim=True))
             self.assertEqual(x.ndimension(), fn(x, dim).ndimension())
             self.assertEqual(x.ndimension(), fn(x, dim, keepdim=True).ndimension())
+
+            # check reducing of a singleton dimension
+            dims = [3, 4, 5]
+            singleton_dim = random.randint(0, 2)
+            dims[singleton_dim] = 1
+            x = cast(torch.randn(dims))
+            test_multidim(x, singleton_dim)
+
+    def test_dim_reduction(self):
+        self._test_dim_reduction(self, lambda t: t)
 
     def _testCSelection(self, torchfn, mathfn):
         # Two tensors
@@ -341,14 +368,33 @@ class TestTorch(TestCase):
         res_csub.sub_(scalar)
         self.assertEqual(res_add, res_csub)
 
-    def test_neg(self):
-        a = torch.randn(100, 90)
-        zeros = torch.Tensor().resize_as_(a).zero_()
+    @staticmethod
+    def _test_neg(self, cast):
+        float_types = ['torch.DoubleTensor', 'torch.FloatTensor', 'torch.LongTensor']
+        int_types = ['torch.IntTensor', 'torch.ShortTensor']
 
-        res_add = torch.add(zeros, -1, a)
-        res_neg = a.clone()
-        res_neg.neg_()
-        self.assertEqual(res_neg, res_add)
+        for t in float_types + int_types:
+            if t in float_types:
+                a = cast(torch.randn(100, 90).type(t))
+            else:
+                a = cast(torch.Tensor(100, 90).type(t).random_())
+            zeros = cast(torch.Tensor().type(t)).resize_as_(a).zero_()
+
+            res_add = torch.add(zeros, -1, a)
+            res_neg = a.clone()
+            res_neg.neg_()
+            self.assertEqual(res_neg, res_add)
+
+            # test out of place as well
+            res_neg_out_place = a.clone().neg()
+            self.assertEqual(res_neg_out_place, res_add)
+
+            # test via __neg__ operator
+            res_neg_op = -a.clone()
+            self.assertEqual(res_neg_op, res_add)
+
+    def test_neg(self):
+        self._test_neg(self, lambda t: t)
 
     def test_reciprocal(self):
         a = torch.randn(100, 89)
@@ -745,6 +791,34 @@ class TestTorch(TestCase):
         torch.zeros(100, 100, out=res2)
         self.assertEqual(res1, res2)
 
+    def test_zeros_like(self):
+        expected = torch.zeros(100, 100)
+
+        res1 = torch.zeros_like(expected)
+        self.assertEqual(res1, expected)
+
+        res2 = torch.Tensor()
+        torch.zeros_like(expected, out=res2)
+        self.assertEqual(res2, expected)
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_zeros_like_cuda(self):
+        expected = torch.zeros(100, 100).cuda()
+
+        res1 = torch.zeros_like(expected)
+        self.assertEqual(res1, expected)
+
+        res2 = torch.Tensor().cuda()
+        torch.zeros_like(expected, out=res2)
+        self.assertEqual(res2, expected)
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, 'only one GPU detected')
+    def test_zeros_like_multiple_device(self):
+        expected = torch.zeros(100, 100).cuda()
+        x = torch.cuda.FloatTensor(100, 100, device=1)
+        output = torch.zeros_like(x)
+        self.assertEqual(output, expected)
+
     def test_histc(self):
         x = torch.Tensor((2, 4, 2, 2, 5, 4))
         y = torch.histc(x, 5, 1, 5)  # nbins,  min,  max
@@ -756,6 +830,34 @@ class TestTorch(TestCase):
         res2 = torch.Tensor()
         torch.ones(100, 100, out=res2)
         self.assertEqual(res1, res2)
+
+    def test_ones_like(self):
+        expected = torch.ones(100, 100)
+
+        res1 = torch.ones_like(expected)
+        self.assertEqual(res1, expected)
+
+        res2 = torch.Tensor()
+        torch.ones_like(expected, out=res2)
+        self.assertEqual(res2, expected)
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_ones_like_cuda(self):
+        expected = torch.ones(100, 100).cuda()
+
+        res1 = torch.ones_like(expected)
+        self.assertEqual(res1, expected)
+
+        res2 = torch.Tensor().cuda()
+        torch.ones_like(expected, out=res2)
+        self.assertEqual(res2, expected)
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, 'only one GPU detected')
+    def test_ones_like_multiple_device(self):
+        expected = torch.ones(100, 100).cuda()
+        x = torch.cuda.FloatTensor(100, 100, device=1)
+        output = torch.ones_like(x)
+        self.assertEqual(output, expected)
 
     def test_diag(self):
         x = torch.rand(100, 100)
@@ -2296,7 +2398,7 @@ class TestTorch(TestCase):
         target_value = torch.rand(1000)
         # Dramatically alter the internal state of the main generator
         _ = torch.rand(100000)
-        forked_value = torch.rand(gen, 1000)
+        forked_value = torch.rand(1000, generator=gen)
         self.assertEqual(target_value, forked_value, 0, "RNG has not forked correctly.")
 
     def test_boxMullerState(self):
@@ -2546,7 +2648,7 @@ class TestTorch(TestCase):
         def ri(indices):
             choice = random.randint(0, 2)
             if choice == 0:
-                return torch.LongTensor(indices)
+                return conv_fn(torch.LongTensor(indices))
             elif choice == 1:
                 return list(indices)
             else:
@@ -2762,6 +2864,16 @@ class TestTorch(TestCase):
         self.assertEqual(strided[rows, columns],
                          torch.Tensor([[4, 6], [2, 3]]))
 
+        # Tests using less than the number of dims, and ellipsis
+
+        # reference is 1 2
+        #              3 4
+        #              5 6
+        reference = conv_fn(consec((3, 2)))
+        self.assertEqual(reference[ri([0, 2]), ], torch.Tensor([[1, 2], [5, 6]]))
+        self.assertEqual(reference[ri([1]), ...], torch.Tensor([[3, 4]]))
+        self.assertEqual(reference[..., ri([1])], torch.Tensor([[2], [4], [6]]))
+
         if TEST_NUMPY:
             # we use numpy to compare against, to verify that our advanced
             # indexing semantics are the same, and also for ease of test
@@ -2864,6 +2976,19 @@ class TestTorch(TestCase):
                 [[[0, 1], [2, 3]], [[0]], slice(None)],
                 [[[2, 1]], [[0, 3], [4, 4]], slice(None)],
                 [[[2]], [[0, 3], [4, 1]], slice(None)],
+
+                # less dim, ellipsis
+                [[0, 2], ],
+                [[0, 2], slice(None)],
+                [[0, 2], Ellipsis],
+                [[0, 2], slice(None), Ellipsis],
+                [[0, 2], Ellipsis, slice(None)],
+                [[0, 2], [1, 3]],
+                [[0, 2], [1, 3], Ellipsis],
+                [Ellipsis, [1, 3], [2, 3]],
+                [Ellipsis, [2, 3, 4]],
+                [Ellipsis, slice(None), [2, 3, 4]],
+                [slice(None), Ellipsis, [2, 3, 4]],
             ]
 
             for indexer in indices_to_test:
@@ -2917,6 +3042,25 @@ class TestTorch(TestCase):
                 [[0], [4], [1, 3, 4], slice(None)],
                 [[1], [0, 2, 3], [1], slice(None)],
                 [[[1, 2], [1, 2]], [[0, 1], [2, 3]], [[2, 3], [3, 5]], slice(None)],
+
+                # less dim, ellipsis
+                [Ellipsis, [0, 3, 4]],
+                [Ellipsis, slice(None), [0, 3, 4]],
+                [Ellipsis, slice(None), slice(None), [0, 3, 4]],
+                [slice(None), Ellipsis, [0, 3, 4]],
+                [slice(None), slice(None), Ellipsis, [0, 3, 4]],
+                [slice(None), [0, 2, 3], [1, 3, 4]],
+                [slice(None), [0, 2, 3], [1, 3, 4], Ellipsis],
+                [Ellipsis, [0, 2, 3], [1, 3, 4], slice(None)],
+                [[0], [1, 2, 4]],
+                [[0], [1, 2, 4], slice(None)],
+                [[0], [1, 2, 4], Ellipsis],
+                [[0], [1, 2, 4], Ellipsis, slice(None)],
+                [[1], ],
+                [[0, 2, 1], [3], [4]],
+                [[0, 2, 1], [3], [4], slice(None)],
+                [[0, 2, 1], [3], [4], Ellipsis],
+                [Ellipsis, [0, 2, 1], [3], [4]],
             ]
 
             for indexer in indices_to_test:
@@ -3250,6 +3394,10 @@ class TestTorch(TestCase):
         unsqueezed = tensor2.unsqueeze(0).unsqueeze(1)
         self.assertEqual(expanded, unsqueezed)
         self.assertEqual(expanded.stride(), unsqueezed.stride())
+
+        # test -1 as target size
+        self.assertEqual(tensor.expand(4, -1, 5), tensor.expand(4, 8, 5))
+        self.assertRaises(RuntimeError, lambda: tensor2.expand(-1, -1))
 
     def test_repeat(self):
         result = torch.Tensor()
@@ -3967,7 +4115,7 @@ class TestTorch(TestCase):
         expected = torch.arange(1, 126).view(5, 5, 5)[:, 1]
         self.assertEqual(torch.from_numpy(x), expected)
 
-        # check zero dimentional
+        # check zero dimensional
         x = np.zeros((0, 2))
         self.assertRaises(RuntimeError, lambda: torch.from_numpy(x))
 

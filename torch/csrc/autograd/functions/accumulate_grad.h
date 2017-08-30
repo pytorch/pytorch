@@ -1,7 +1,6 @@
 #pragma once
 
 #include <Python.h>
-#include <THPP/THPP.h>
 #include <memory>
 
 #include "torch/csrc/autograd/function.h"
@@ -21,5 +20,3 @@ struct AccumulateGrad : public Function {
 };
 
 }}
-
-

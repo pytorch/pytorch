@@ -2,6 +2,8 @@
 
 #include <stdbool.h>
 #include <unordered_map>
+#include <thread>
+#include <chrono>
 #include <TH/TH.h>
 #include <ATen/ATen.h>
 #include <THC/THCCachingAllocator.h>
@@ -11,6 +13,7 @@
 
 #include "THCP.h"
 
+#include "torch/csrc/utils/python_strings.h"
 #include "ModuleSparse.cpp"
 
 THCState *state;
@@ -115,6 +118,18 @@ PyObject * THCPModule_getDeviceCount_wrap(PyObject *self)
     ndevice = 0;
   }
   return PyLong_FromLong(ndevice);
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject * THCPModule_getDeviceName_wrap(PyObject *self, PyObject *arg)
+{
+  HANDLE_TH_ERRORS
+  THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to getDeviceName");
+  long device = THPUtils_unpackLong(arg);
+
+  cudaDeviceProp prop;
+  THCudaCheck(cudaGetDeviceProperties(&prop, device));
+  return THPUtils_packString(prop.name);
   END_HANDLE_TH_ERRORS
 }
 
@@ -246,19 +261,38 @@ PyObject * THCPModule_cudaSleep(PyObject *_unused, PyObject *cycles)
   END_HANDLE_TH_ERRORS
 }
 
+// We need to ensure that as long as a thread will NEVER loose the GIL as long as
+// it holds the CUDA mutex. Otherwise another thread might be scheduled and try to
+// e.g. allocate a new tensor which will cause a deadlock. It's enough to have a
+// single global, because it can be only set once (cudaMutex is not recursive)
+// by the thread that owns the mutex (obviously there can be only one such thread).
+static PyGILState_STATE cudaMutexGILState;
+
 PyObject * THCPModule_cudaLockMutex(PyObject *module)
 {
   auto mutex = THCCachingAllocator_getCudaFreeMutex();
-  {
-    AutoNoGIL no_gil;
-    mutex->lock();
+  // This has to be a busy loop because we **absolutely need to** hold the GIL
+  // or it's a recipe for a deadlock otherwise (if we let other Python threads
+  // run while we have the cudaMutex, but not the GIL, they might try to e.g.
+  // free a CUDA tensor and acquire the cudaMutex without giving up the GIL,
+  // because it happens deep within THC).
+  while (true) {
+    if (mutex->try_lock())
+      break;
+    {
+      AutoNoGIL no_gil;
+      std::this_thread::sleep_for(std::chrono::microseconds(10));
+    }
   }
+
+  cudaMutexGILState = PyGILState_Ensure();
   Py_RETURN_NONE;
 }
 
 PyObject * THCPModule_cudaUnlockMutex(PyObject *module)
 {
   auto mutex = THCCachingAllocator_getCudaFreeMutex();
+  PyGILState_Release(cudaMutexGILState);
   mutex->unlock();
   Py_RETURN_NONE;
 }
@@ -293,7 +327,7 @@ bool THCPModule_initCuda(PyObject *torch_module) {
   // TODO: register THCudaShutdown handler at exit
   return true;
 #undef ASSERT_TRUE
-  END_HANDLE_TH_ERRORS
+  END_HANDLE_TH_ERRORS_RET(false)
 }
 
 // Callback for python part. Used for additional initialization of python classes

@@ -74,6 +74,7 @@ class AffineGridGenerator(Function):
             ctx.is_cuda = True
             AffineGridGenerator._enforce_cudnn(theta)
             grid = theta.new(N, H, W, 2)
+            theta = theta.contiguous()
             torch._C._cudnn_affine_grid_generator_forward(theta, grid, N, C, H, W)
         else:
             ctx.is_cuda = False
@@ -97,6 +98,7 @@ class AffineGridGenerator(Function):
         if grad_grid.is_cuda:
             AffineGridGenerator._enforce_cudnn(grad_grid)
             grad_theta = grad_grid.new(N, 2, 3)
+            grad_grid = grad_grid.contiguous()
             torch._C._cudnn_affine_grid_generator_backward(grad_theta, grad_grid,
                                                            N, C, H, W)
         else:

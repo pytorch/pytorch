@@ -1,4 +1,3 @@
-from itertools import chain
 from collections import OrderedDict
 import functools
 
@@ -11,7 +10,7 @@ import torch.utils.hooks as hooks
 
 def _addindent(s_, numSpaces):
     s = s_.split('\n')
-    # dont do anything for single-line stuff
+    # don't do anything for single-line stuff
     if len(s) == 1:
         return s_
     first = s.pop(0)
@@ -138,6 +137,34 @@ class Module(object):
         return self
 
     def apply(self, fn):
+        """Applies ``fn`` recursively to every submodule (as returned by ``.children()``)
+        as well as self. Typical use includes initializing the parameters of a model
+        (see also :ref:`torch-nn-init`).
+
+        Example:
+            >>> def init_weights(m):
+            >>>     print(m)
+            >>>     if type(m) == nn.Linear:
+            >>>         m.weight.data.fill_(1.0)
+            >>>         print(m.weight)
+            >>>
+            >>> net = nn.Sequential(nn.Linear(2, 2), nn.Linear(2, 2))
+            >>> net.apply(init_weights)
+            Linear (2 -> 2)
+            Parameter containing:
+             1  1
+             1  1
+            [torch.FloatTensor of size 2x2]
+            Linear (2 -> 2)
+            Parameter containing:
+             1  1
+             1  1
+            [torch.FloatTensor of size 2x2]
+            Sequential (
+              (0): Linear (2 -> 2)
+              (1): Linear (2 -> 2)
+            )
+        """
         for module in self.children():
             module.apply(fn)
         fn(self)
@@ -362,7 +389,13 @@ class Module(object):
             if isinstance(param, Parameter):
                 # backwards compatibility for serialized parameters
                 param = param.data
-            own_state[name].copy_(param)
+            try:
+                own_state[name].copy_(param)
+            except:
+                print('While copying the parameter named {}, whose dimensions in the model are'
+                      ' {} and whose dimensions in the checkpoint are {}, ...'.format(
+                          name, own_state[name].size(), param.size()))
+                raise
 
         missing = set(own_state.keys()) - set(state_dict.keys())
         if len(missing) > 0:

@@ -3,15 +3,14 @@ from torch.autograd.function import Function
 
 class Softsign(Function):
 
-    def forward(self, input):
-        self.buffer = input.clone().abs_().add_(1)
-        self.buffer_squared = False
-        output = input.clone().div_(self.buffer)
-        return output
+    @staticmethod
+    def forward(ctx, input):
+        ctx.save_for_backward(input)
+        buffer = input.clone().abs_().add_(1)
+        return input.div(buffer)
 
-    def backward(self, grad_output):
-        if not self.buffer_squared:
-            self.buffer.mul_(self.buffer)
-            self.buffer_squared = True
-        grad_input = grad_output.clone().div_(self.buffer)
-        return grad_input
+    @staticmethod
+    def backward(ctx, grad_output):
+        input, = ctx.saved_variables
+        buffer = input.abs().add_(1)
+        return grad_output.div(buffer.mul(buffer))

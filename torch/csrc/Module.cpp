@@ -280,7 +280,9 @@ IMPLEMENT_STATELESS(atan2)
 IMPLEMENT_STATELESS(pow)
 IMPLEMENT_STATELESS(lerp)
 IMPLEMENT_STATELESS(zeros)
+IMPLEMENT_STATELESS(zeros_like)
 IMPLEMENT_STATELESS(ones)
+IMPLEMENT_STATELESS(ones_like)
 IMPLEMENT_STATELESS(index_select)
 IMPLEMENT_STATELESS(addmm)
 IMPLEMENT_STATELESS(addmv)
@@ -501,7 +503,8 @@ static PyObject *THPModule_setBackcompatBroadcastWarn(PyObject *module, PyObject
 
 static PyObject *THPModule_getBackcompatBroadcastWarn(PyObject *module)
 {
-  return getBackCompatBroadcastWarn() ? Py_True : Py_False;
+  if (getBackCompatBroadcastWarn()) Py_RETURN_TRUE;
+  else Py_RETURN_FALSE;
 }
 
 static PyObject *THPModule_setBackcompatKeepdimWarn(PyObject *module, PyObject *arg) {
@@ -513,7 +516,8 @@ static PyObject *THPModule_setBackcompatKeepdimWarn(PyObject *module, PyObject *
 
 static PyObject *THPModule_getBackcompatKeepdimWarn(PyObject *module)
 {
-  return getBackCompatKeepdimWarn() ? Py_True : Py_False;
+  if (getBackCompatKeepdimWarn()) Py_RETURN_TRUE;
+  else Py_RETURN_FALSE;
 }
 
 PyObject *THPModule_hasDistributed(PyObject *_unused)
@@ -530,6 +534,7 @@ extern PyObject * THCPModule_initExtension(PyObject *self);
 extern PyObject * THCPModule_setDevice_wrap(PyObject *self, PyObject *arg);
 extern PyObject * THCPModule_getDevice_wrap(PyObject *self);
 extern PyObject * THCPModule_getDeviceCount_wrap(PyObject *self);
+extern PyObject * THCPModule_getDeviceName_wrap(PyObject *self, PyObject *arg);
 extern PyObject * THCPModule_getCurrentStream_wrap(PyObject *self);
 extern PyObject * THCPModule_getCurrentBlasHandle_wrap(PyObject *self);
 extern PyObject * THCPModule_setStream_wrap(PyObject *self, PyObject *stream);
@@ -563,6 +568,7 @@ static PyMethodDef TorchMethods[] = {
   {"_cuda_setDevice",   (PyCFunction)THCPModule_setDevice_wrap,   METH_O,       NULL},
   {"_cuda_getDevice",   (PyCFunction)THCPModule_getDevice_wrap,   METH_NOARGS,  NULL},
   {"_cuda_getDeviceCount", (PyCFunction)THCPModule_getDeviceCount_wrap, METH_NOARGS, NULL},
+  {"_cuda_getDeviceName", (PyCFunction)THCPModule_getDeviceName_wrap, METH_O,   NULL},
   {"_cuda_getCurrentStream", (PyCFunction)THCPModule_getCurrentStream_wrap, METH_NOARGS, NULL},
   {"_cuda_getCurrentBlasHandle", (PyCFunction)THCPModule_getCurrentBlasHandle_wrap, METH_NOARGS, NULL},
   {"_cuda_setStream",    (PyCFunction)THCPModule_setStream_wrap,  METH_O, NULL},
@@ -669,7 +675,9 @@ static PyMethodDef TorchMethods[] = {
   {"pow",             (PyCFunction)THPModule_pow,               METH_VARARGS | METH_KEYWORDS, NULL},
   {"lerp",            (PyCFunction)THPModule_lerp,              METH_VARARGS | METH_KEYWORDS, NULL},
   {"zeros",           (PyCFunction)THPModule_zeros,             METH_VARARGS | METH_KEYWORDS, NULL},
+  {"zeros_like",      (PyCFunction)THPModule_zeros_like,        METH_VARARGS | METH_KEYWORDS, NULL},
   {"ones",            (PyCFunction)THPModule_ones,              METH_VARARGS | METH_KEYWORDS, NULL},
+  {"ones_like",       (PyCFunction)THPModule_ones_like,         METH_VARARGS | METH_KEYWORDS, NULL},
   {"index_select",    (PyCFunction)THPModule_index_select,      METH_VARARGS | METH_KEYWORDS, NULL},
   {"addmm",           (PyCFunction)THPModule_addmm,             METH_VARARGS | METH_KEYWORDS, NULL},
   {"addmv",           (PyCFunction)THPModule_addmv,             METH_VARARGS | METH_KEYWORDS, NULL},

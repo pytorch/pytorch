@@ -96,7 +96,7 @@ class Dropout2d(Module):
         self.inplace = inplace
 
     def forward(self, input):
-        return self._backend.Dropout2d.apply(input, self.p, self.training, self.inplace)
+        return F.dropout2d(input, self.p, self.training, self.inplace)
 
     def __repr__(self):
         inplace_str = ', inplace' if self.inplace else ''
@@ -149,7 +149,7 @@ class Dropout3d(Module):
         self.inplace = inplace
 
     def forward(self, input):
-        return self._backend.Dropout3d.apply(input, self.p, self.training, self.inplace)
+        return F.dropout3d(input, self.p, self.training, self.inplace)
 
     def __repr__(self):
         inplace_str = ', inplace' if self.inplace else ''

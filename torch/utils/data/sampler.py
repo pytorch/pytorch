@@ -72,6 +72,7 @@ class SubsetRandomSampler(Sampler):
 
 class WeightedRandomSampler(Sampler):
     """Samples elements from [0,..,len(weights)-1] with given probabilities (weights).
+
     Arguments:
         weights (list)   : a list of weights, not necessary summing up to one
         num_samples (int): number of samples to draw

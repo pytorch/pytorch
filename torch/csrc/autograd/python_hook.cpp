@@ -8,9 +8,7 @@
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/Exceptions.h"
-#include <THPP/THPP.h>
 
-using thpp::Tensor;
 using torch::autograd::variable_list;
 
 static PyObject* wrap_variables(const variable_list& c_variables);
@@ -158,23 +156,23 @@ static void check_single_result(PyObject* _original, PyObject* _result, PyObject
     throw python_error();
   }
 
-  auto& original = *((THPVariable*)_original)->cdata->data;
-  auto& result = *((THPVariable*)_result)->cdata->data;
+  auto& original = ((THPVariable*)_original)->cdata->data;
+  auto& result = ((THPVariable*)_result)->cdata->data;
 
-  if (original.type() != result.type()) {
+  if (original.type().ID() != result.type().ID()) {
     std::stringstream ss;
     auto name = hook_name(hook);
     ss << "hook '" << name << "' has changed the type of value (";
-    ss << "was " << thpp::toString(original.type()) << " got ";
-    ss << thpp::toString(result.type()) << ")";
+    ss << "was " << original.toString() << " got ";
+    ss << result.toString() << ")";
     throw std::runtime_error(ss.str());
   }
 
-  if (original.isCuda() != result.isCuda()) {
+  if (original.type().isCuda() != result.type().isCuda()) {
     std::stringstream ss;
     auto name = hook_name(hook);
     ss << "hook '" << name << "' has changed the type of value";
-    if (original.isCuda()) {
+    if (original.type().isCuda()) {
       ss << " (was CUDA tensor got CPU tensor)";
     } else {
       ss << " (was CPU tensor got CUDA tensor)";
@@ -182,7 +180,7 @@ static void check_single_result(PyObject* _original, PyObject* _result, PyObject
     throw std::runtime_error(ss.str());
   }
 
-  if (original.sizes() != result.sizes()) {
+  if (original.sizes().vec() != result.sizes().vec()) {
     std::stringstream ss;
     auto name = hook_name(hook);
     ss << "hook '" << name << "' has changed the size of value";

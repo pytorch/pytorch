@@ -129,6 +129,18 @@ PyObject * THPTensor_(setIndex)(THPTensor *self, PyObject *args)
 ]]
 
 [[
+  name: zeros_like
+  cname: zerosLike
+  variants:
+    - function
+  return: argument 0
+  arguments:
+    - arg: THTensor* result
+      output: True
+    - THTensor* input
+]]
+
+[[
   name: ones
   variants:
     - function
@@ -139,6 +151,18 @@ PyObject * THPTensor_(setIndex)(THPTensor *self, PyObject *args)
       output: True
     - arg: THSize* size
       long_args: True
+]]
+
+[[
+  name: ones_like
+  cname: onesLike
+  variants:
+    - function
+  return: argument 0
+  arguments:
+    - arg: THTensor* result
+      output: True
+    - THTensor* input
 ]]
 
 [[
@@ -544,6 +568,7 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
   name: clone
   cname: newClone
   return: THTensor*
+  aten_sparse: True
   arguments:
     - THTensor* self
 ]]
@@ -670,6 +695,7 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
     - function
   backends:
     - CPU
+    - CUDA
   return: argument 0
   before_arg_assign: |
     PyErr_WarnEx(PyExc_UserWarning, "torch.range is deprecated in favor of torch.arange "
@@ -690,6 +716,7 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
     - function
   backends:
     - CPU
+    - CUDA
   return: argument 0
   options:
       - arguments:
@@ -844,6 +871,8 @@ invalid_arguments:
 [[
   name: data_ptr
   defined_if: "!IS_DISTRIBUTED"
+  with_gil: True
+  auto_gpu: False
   return: void*
   cpu_half: True
   cname: data

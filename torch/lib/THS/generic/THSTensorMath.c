@@ -184,7 +184,7 @@ void THSTensor_(csub)(THSTensor *r_, THSTensor *t, real value, THSTensor *src) {
 
 void THSTensor_(cmul)(THSTensor *r_, THSTensor *t_, THSTensor *src_) {
   if(!THSTensor_(isSameSizeAs)(t_, src_)) {
-    THError("cadd operands have incompatible sizes or dimension types");
+    THError("cmul operands have incompatible sizes or dimension types");
   }
 
   if (src_->nnz == 0 || t_->nnz == 0) {

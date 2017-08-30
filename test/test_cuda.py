@@ -277,6 +277,7 @@ tests = [
     ('view_as', small_3d, lambda t: [t(100, 10)],),
     ('zero', small_3d, lambda t: [],),
     ('zeros', small_3d, lambda t: [1, 2, 3, 4],),
+    ('eye', small_2d, lambda t: [3, 4],),
     ('rsqrt', lambda t: small_3d(t) + 1, lambda t: [], None, float_types),
     ('sinh', lambda t: small_3d(t).clamp(-1, 1), lambda t: [], None, float_types),
     ('tan', lambda t: small_3d(t).clamp(-1, 1), lambda t: [], None, float_types),
@@ -285,6 +286,7 @@ tests = [
     ('qr', small_2d_lapack_skinny, lambda t: [], 'skinny', float_types),
     ('qr', small_2d_lapack_fat, lambda t: [], 'fat', float_types),
     ('qr', large_2d_lapack, lambda t: [], 'big', float_types),
+    ('inverse', new_t(20, 20), lambda t: [], None, float_types),
 
 ]
 
@@ -299,7 +301,7 @@ custom_precision = {
     'baddbmm': 1e-4,
     'rsqrt': 1e-4,
     'cumprod': 1e-4,
-    'qr': 1e-4,
+    'qr': 3e-4,
 }
 
 simple_pointwise = [
@@ -453,6 +455,9 @@ class TestCuda(TestCase):
     def test_type_conversions_same_gpu(self):
         x = torch.randn(5, 5).cuda(1)
         self.assertEqual(x.int().get_device(), 1)
+
+    def test_neg(self):
+        TestTorch._test_neg(self, lambda t: t.cuda())
 
     def _test_broadcast(self, input):
         if torch.cuda.device_count() < 2:
@@ -868,6 +873,9 @@ class TestCuda(TestCase):
     def test_btrisolve(self):
         TestTorch._test_btrisolve(self, lambda t: t.cuda())
 
+    def test_dim_reduction(self):
+        TestTorch._test_dim_reduction(self, lambda t: t.cuda())
+
     def test_tensor_gather(self):
         TestTorch._test_gather(self, lambda t: t.cuda(), False)
 
@@ -879,6 +887,14 @@ class TestCuda(TestCase):
 
     def test_tensor_scatterFill(self):
         TestTorch._test_scatter_base(self, lambda t: t.cuda(), 'scatter_', True, test_bounds=False)
+
+    def test_arange(self):
+        for t in ['IntTensor', 'LongTensor', 'FloatTensor', 'DoubleTensor']:
+            a = torch.cuda.__dict__[t]()
+            torch.arange(0, 10, out=a)
+            b = torch.__dict__[t]()
+            torch.arange(0, 10, out=b)
+            self.assertEqual(a, b.cuda())
 
     def test_nvtx(self):
         # Just making sure we can see the symbols

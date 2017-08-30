@@ -178,7 +178,10 @@ def get_parameters(fn, handle, weight_buf):
 
 
 def _copyParams(params_from, params_to):
+    assert len(params_from) == len(params_to)
     for layer_params_from, layer_params_to in zip(params_from, params_to):
+        # NOTE: these lists have all weights before all biases, so if the layer doesn't
+        # use biases, zip will terminate once layer_params_from ends and ignore them.
         for param_from, param_to in zip(layer_params_from, layer_params_to):
             assert param_from.type() == param_to.type()
             param_to.copy_(param_from, broadcast=False)
@@ -242,17 +245,21 @@ def forward(fn, input, hx, weight, output, hy):
         fn.cy_desc = cudnn.descriptor(cx) if cx is not None else None
 
         # create the weight buffer and copy the weights into it
-        num_weights = get_num_weights(
-            handle, fn.rnn_desc, fn.x_descs[0], fn.datatype)
-        fn.weight_buf = x.new(num_weights)
-        fn.w_desc = init_weight_descriptor(fn, fn.weight_buf)
-        w = fn.weight_buf
-        # this zero might not seem necessary, but it is in the case
-        # where biases are disabled; then they won't be copied and must be zero'd.
-        # Alternatively, _copyParams could be written more carefully.
-        w.zero_()
-        params = get_parameters(fn, handle, w)
-        _copyParams(weight, params)
+        if fn.weight_buf is None:
+            num_weights = get_num_weights(
+                handle, fn.rnn_desc, fn.x_descs[0], fn.datatype)
+            fn.weight_buf = x.new(num_weights)
+            fn.w_desc = init_weight_descriptor(fn, fn.weight_buf)
+            w = fn.weight_buf
+            # this zero might not seem necessary, but it is in the case
+            # where biases are disabled; then they won't be copied and must be zero'd.
+            # Alternatively, _copyParams could be written more carefully.
+            w.zero_()
+            params = get_parameters(fn, handle, w)
+            _copyParams(weight, params)
+        else:
+            fn.w_desc = init_weight_descriptor(fn, fn.weight_buf)
+            w = fn.weight_buf
 
         if tuple(hx.size()) != hidden_size:
             raise RuntimeError('Expected hidden size {}, got {}'.format(
@@ -269,7 +276,9 @@ def forward(fn, input, hx, weight, output, hy):
             fn.x_descs,
             ctypes.byref(workspace_size)
         ))
-        fn.workspace = torch.cuda.ByteTensor(workspace_size.value)
+        fn.workspace_size = workspace_size.value
+        with torch.cuda.device_of(input):
+            workspace = torch.cuda.ByteTensor(fn.workspace_size)
         if fn.requires_grad:
             reserve_size = ctypes.c_long()
             check_error(lib.cudnnGetRNNTrainingReserveSize(
@@ -292,7 +301,7 @@ def forward(fn, input, hx, weight, output, hy):
                 fn.y_descs, ctypes.c_void_p(y.data_ptr()),
                 fn.hy_desc, ctypes.c_void_p(hy.data_ptr()),
                 fn.cy_desc, ctypes.c_void_p(cy.data_ptr()) if cx is not None else None,
-                ctypes.c_void_p(fn.workspace.data_ptr()), fn.workspace.size(0),
+                ctypes.c_void_p(workspace.data_ptr()), workspace.size(0),
                 ctypes.c_void_p(fn.reserve.data_ptr()), fn.reserve.size(0)
             ))
         else:  # inference
@@ -307,7 +316,7 @@ def forward(fn, input, hx, weight, output, hy):
                 fn.y_descs, ctypes.c_void_p(y.data_ptr()),
                 fn.hy_desc, ctypes.c_void_p(hy.data_ptr()),
                 fn.cy_desc, ctypes.c_void_p(cy.data_ptr()) if cx is not None else None,
-                ctypes.c_void_p(fn.workspace.data_ptr()), fn.workspace.size(0)
+                ctypes.c_void_p(workspace.data_ptr()), workspace.size(0)
             ))
 
         if fn.batch_first and not is_input_packed:
@@ -372,6 +381,8 @@ def backward_grad(fn, input, hx, weight, output, grad_output, grad_hy, grad_inpu
         if not dhy.is_cuda or not dy.is_cuda or (dcy is not None and not dcy.is_cuda):
             raise RuntimeError('Gradients aren\'t CUDA tensors')
 
+        with torch.cuda.device_of(input):
+            workspace = torch.cuda.ByteTensor(fn.workspace_size)
         check_error(cudnn.lib.cudnnRNNBackwardData(
             handle,
             fn.rnn_desc,
@@ -386,7 +397,7 @@ def backward_grad(fn, input, hx, weight, output, grad_output, grad_hy, grad_inpu
             fn.x_descs, ctypes.c_void_p(dx.data_ptr()),
             fn.hx_desc, ctypes.c_void_p(dhx.data_ptr()),
             fn.cx_desc, ctypes.c_void_p(dcx.data_ptr()) if cx is not None else None,
-            ctypes.c_void_p(fn.workspace.data_ptr()), fn.workspace.size(0),
+            ctypes.c_void_p(workspace.data_ptr()), workspace.size(0),
             ctypes.c_void_p(fn.reserve.data_ptr()), fn.reserve.size(0)
         ))
 
@@ -439,6 +450,8 @@ def backward_weight(fn, input, hx, output, weight, grad_weight):
         y = output
         dw = fn.weight_buf.new().resize_as_(fn.weight_buf).zero_()
 
+        with torch.cuda.device_of(input):
+            workspace = torch.cuda.ByteTensor(fn.workspace_size)
         check_error(cudnn.lib.cudnnRNNBackwardWeights(
             handle,
             fn.rnn_desc,
@@ -446,7 +459,7 @@ def backward_weight(fn, input, hx, output, weight, grad_weight):
             fn.x_descs, ctypes.c_void_p(x.data_ptr()),
             fn.hx_desc, ctypes.c_void_p(hx.data_ptr()),
             fn.y_descs, ctypes.c_void_p(y.data_ptr()),
-            ctypes.c_void_p(fn.workspace.data_ptr()), fn.workspace.size(0),
+            ctypes.c_void_p(workspace.data_ptr()), workspace.size(0),
             fn.w_desc, ctypes.c_void_p(dw.data_ptr()),
             ctypes.c_void_p(fn.reserve.data_ptr()), fn.reserve.size(0)
         ))

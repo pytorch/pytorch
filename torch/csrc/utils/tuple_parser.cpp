@@ -42,19 +42,9 @@ auto TupleParser::parse(double& x, const std::string& param_name) -> void {
   x = THPUtils_unpackDouble(obj);
 }
 
-auto TupleParser::parse(std::unique_ptr<thpp::Tensor>& x, const std::string& param_name) -> void {
-  PyObject* obj = next_arg();
-  x = torch::createTensor(obj);
-}
-
-auto TupleParser::parse(std::shared_ptr<thpp::Tensor>& x, const std::string& param_name) -> void {
-  PyObject* obj = next_arg();
-  x.reset(torch::createTensor(obj)->clone_shallow());
-}
-
 auto TupleParser::parse(at::Tensor& x, const std::string& param_name) -> void {
   PyObject* obj = next_arg();
-  x = torch::createTensorAT(obj);
+  x = torch::createTensor(obj);
 }
 
 auto TupleParser::parse(std::vector<int>& x, const std::string& param_name) -> void {

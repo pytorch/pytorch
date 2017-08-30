@@ -4,6 +4,7 @@ torch.utils.data
 .. automodule:: torch.utils.data
 .. autoclass:: Dataset
 .. autoclass:: TensorDataset
+.. autoclass:: ConcatDataset
 .. autoclass:: DataLoader
 .. autoclass:: torch.utils.data.sampler.Sampler
 .. autoclass:: torch.utils.data.sampler.SequentialSampler

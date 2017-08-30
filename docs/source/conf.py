@@ -48,9 +48,13 @@ extensions = [
     'sphinx.ext.mathjax',
     'sphinx.ext.napoleon',
     'sphinx.ext.viewcode',
+    'sphinxcontrib.googleanalytics',
 ]
 
 napoleon_use_ivar = True
+
+googleanalytics_id = 'UA-90545585-1'
+googleanalytics_enabled = True
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
@@ -205,7 +209,7 @@ from sphinx import addnodes
 
 
 def patched_make_field(self, types, domain, items, **kw):
-    # `kw` catches `env=None` needed for newer sphinx while maingaining
+    # `kw` catches `env=None` needed for newer sphinx while maintaining
     #  backwards compatibility when passed along further down!
 
     # type: (List, unicode, Tuple) -> nodes.field

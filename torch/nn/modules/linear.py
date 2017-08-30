@@ -16,8 +16,10 @@ class Linear(Module):
             Default: True
 
     Shape:
-        - Input: :math:`(N, in\_features)`
-        - Output: :math:`(N, out\_features)`
+        - Input: :math:`(N, *, in\_features)` where `*` means any number of
+          additional dimensions
+        - Output: :math:`(N, *, out\_features)` where all but the last dimension
+          are the same shape as the input.
 
     Attributes:
         weight: the learnable weights of the module of shape
@@ -82,7 +84,7 @@ class Bilinear(Module):
 
         >>> m = nn.Bilinear(20, 30, 40)
         >>> input1 = autograd.Variable(torch.randn(128, 20))
-        >>> input1 = autograd.Variable(torch.randn(128, 30))
+        >>> input2 = autograd.Variable(torch.randn(128, 30))
         >>> output = m(input1, input2)
         >>> print(output.size())
     """

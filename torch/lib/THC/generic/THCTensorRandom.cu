@@ -34,6 +34,28 @@ THC_API void THCTensor_(normal)(THCState* state, THCTensor *self_, double mean, 
   THCTensor_(freeCopyTo)(state, self, self_);
 };
 
+THC_API void THCTensor_(normal_means)(THCState *state, THCTensor *self, THCTensor *means, double stddev) {
+  THCTensor_(resizeAs)(state, self, means);
+  THCTensor_(normal)(state, self, 0, stddev);
+  THCTensor_(cadd)(state, self, self, ScalarConvert<int, real>::to(1), means);
+}
+
+THC_API void THCTensor_(normal_stddevs)(THCState *state, THCTensor *self, double mean, THCTensor *stddevs)
+{
+  THCTensor_(resizeAs)(state, self, stddevs);
+  THCTensor_(normal)(state, self, 0, 1);
+  THCTensor_(cmul)(state, self, self, stddevs);
+  THCTensor_(add)(state, self, self, ScalarConvert<double, real>::to(mean));
+}
+
+THC_API void THCTensor_(normal_means_stddevs)(THCState *state, THCTensor *self, THCTensor *means, THCTensor *stddevs)
+{
+  THCTensor_(resizeAs)(state, self, means);
+  THCTensor_(normal)(state, self, 0, 1);
+  THCTensor_(cmul)(state, self, self, stddevs);
+  THCTensor_(cadd)(state, self, self, ScalarConvert<int, real>::to(1), means);
+}
+
 THC_API void THCTensor_(logNormal)(THCState* state, THCTensor *self_, double mean, double stdv)
 {
 

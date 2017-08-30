@@ -8,14 +8,17 @@ import torch
 class Sum(Function):
 
     @staticmethod
-    def forward(ctx, input, dim=None, keepdim=False):
+    def forward(ctx, input, dim=None, keepdim=None):
         ctx.dim = dim
-        ctx.keepdim = keepdim
+        ctx.keepdim = False if keepdim is None else keepdim
         ctx.input_size = input.size()
         if dim is None:
             return input.new((input.sum(),))
         else:
-            return input.sum(dim, keepdim)
+            if keepdim is not None:
+                return input.sum(dim, keepdim=keepdim)
+            else:
+                return input.sum(dim)
 
     @staticmethod
     def backward(ctx, grad_output):
@@ -33,16 +36,19 @@ class Sum(Function):
 class Prod(Function):
 
     @staticmethod
-    def forward(ctx, input, dim=None, keepdim=False):
+    def forward(ctx, input, dim=None, keepdim=None):
         ctx.dim = dim
-        ctx.keepdim = keepdim
+        ctx.keepdim = False if keepdim is None else keepdim
         ctx.input_size = input.size()
         if dim is None:
             ctx.result = input.prod()
             ctx.save_for_backward(input)
             return input.new((ctx.result,))
         else:
-            output = input.prod(dim, keepdim)
+            if keepdim is not None:
+                output = input.prod(dim, keepdim=keepdim)
+            else:
+                output = input.prod(dim)
             ctx.save_for_backward(input, output)
             return output
 
@@ -65,7 +71,8 @@ class Prod(Function):
             exclusive_normal = exclusive_normal_nocp.cumprod(dim)
 
             def reverse_dim(var, dim):
-                return var.index_select(dim, Variable(torch.arange(var.size(dim) - 1, -1, -1)).long())
+                index = Variable(torch.arange(var.size(dim) - 1, -1, -1, out=var.data.new().long()))
+                return var.index_select(dim, index)
 
             narrow_reverse = reverse_dim(inp.narrow(dim, 1, inp.size(dim) - 1), dim)
             exclusive_reverse_nocp = torch.cat((ones, narrow_reverse), dim)
@@ -105,14 +112,17 @@ class Prod(Function):
 class Mean(Function):
 
     @staticmethod
-    def forward(ctx, input, dim=None, keepdim=False):
+    def forward(ctx, input, dim=None, keepdim=None):
         ctx.dim = dim
-        ctx.keepdim = keepdim
+        ctx.keepdim = False if keepdim is None else keepdim
         ctx.input_size = input.size()
         if dim is None:
             return input.new((input.mean(),))
         else:
-            return input.mean(dim, keepdim)
+            if keepdim is not None:
+                return input.mean(dim, keepdim=keepdim)
+            else:
+                return input.mean(dim)
 
     @staticmethod
     def backward(ctx, grad_output):
@@ -133,13 +143,13 @@ class _SelectionFunction(Function):
     has_all_reduce = True
     # additional_args is prepended before dim when calling the tensor
     # function. It's a no-op for subclasses other than kthvalue.
-    # kthvalue not only requires us to pass a dim, but also preceed it with k.
+    # kthvalue not only requires us to pass a dim, but also precede it with k.
 
     @classmethod
-    def forward(cls, ctx, input, dim=None, keepdim=False, additional_args=tuple()):
+    def forward(cls, ctx, input, dim=None, keepdim=None, additional_args=tuple()):
         fn = getattr(input, cls.__name__.lower())
         ctx.dim = dim
-        ctx.keepdim = keepdim
+        ctx.keepdim = False if keepdim is None else keepdim
         ctx.additional_args = additional_args
         ctx.input_size = input.size()
         if ctx.dim is None and cls.has_all_reduce:
@@ -151,10 +161,13 @@ class _SelectionFunction(Function):
                 dim = input.dim() - 1
             else:
                 dim = ctx.dim
-            args = (dim, keepdim)
+            args = (dim,)
             if additional_args:
                 args = additional_args + args
-            output, indices = fn(*args)
+            if keepdim is not None:
+                output, indices = fn(*args, keepdim=keepdim)
+            else:
+                output, indices = fn(*args)
             ctx.save_for_backward(indices)
             ctx.mark_non_differentiable(indices)
             return output, indices
@@ -200,24 +213,27 @@ class Kthvalue(_SelectionFunction):
     has_all_reduce = False
 
     @classmethod
-    def forward(cls, ctx, input, k, dim=None, keepdim=False):
+    def forward(cls, ctx, input, k, dim=None, keepdim=None):
         return super(Kthvalue, cls).forward(ctx, input, dim, keepdim, (k,))
 
 
 class Norm(Function):
 
     @staticmethod
-    def forward(ctx, input, p=2, dim=None, keepdim=False):
+    def forward(ctx, input, p=2, dim=None, keepdim=None):
         ctx.p = p
         ctx.dim = dim
-        ctx.keepdim = keepdim
+        ctx.keepdim = False if keepdim is None else keepdim
 
         if dim is None:
             ctx.norm = input.norm(p)
             ctx.save_for_backward(input)
             return input.new((ctx.norm,))
         else:
-            output = input.norm(p, dim, keepdim)
+            if keepdim is not None:
+                output = input.norm(p, dim, keepdim=keepdim)
+            else:
+                output = input.norm(p, dim)
             ctx.save_for_backward(input, output)
             return output
 
