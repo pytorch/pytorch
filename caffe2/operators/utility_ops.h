@@ -1773,6 +1773,16 @@ class RangeOp : public Operator<Context> {
   }
 
   template <typename T>
+  T readScalarInput(const int index) {
+    if (std::is_same<Context, TensorCPU>::value) {
+      return Input(index).template data<T>()[0];
+    } else {
+      local_.template CopyFrom<Context>(Input(index));
+      return local_.template data<T>()[0];
+    }
+  }
+
+  template <typename T>
   bool DoRunWithType() {
     T stop = 0;
     T start = 0;
@@ -1784,16 +1794,16 @@ class RangeOp : public Operator<Context> {
 
     switch (InputSize()) {
       case 1:
-        stop = Input(0).template data<T>()[0];
+        stop = readScalarInput<T>(0);
         break;
       case 2:
-        start = Input(0).template data<T>()[0];
-        stop = Input(1).template data<T>()[0];
+        start = readScalarInput<T>(0);
+        stop = readScalarInput<T>(1);
         break;
       case 3:
-        step = Input(2).template data<T>()[0];
-        start = Input(0).template data<T>()[0];
-        stop = Input(1).template data<T>()[0];
+        step = readScalarInput<T>(2);
+        start = readScalarInput<T>(0);
+        stop = readScalarInput<T>(1);
         break;
     }
     CAFFE_ENFORCE_NE(step, 0, "Step size cannot be 0.");
@@ -1824,6 +1834,10 @@ class RangeOp : public Operator<Context> {
 
   template <typename T>
   bool DoRunOnDevice(const T& start, const T& step, Tensor<Context>* output);
+
+ private:
+  // local CPU tensor for copying constants.
+  TensorCPU local_;
 };
 
 } // namespace caffe2
