@@ -31,6 +31,7 @@ struct ConvParams {
 
   bool is_dilated() const;
   bool is_output_padding_neg() const;
+  bool is_output_padding_big() const;
   bool is_padding_neg() const;
   void view1d_as_2d();
   bool use_cudnn(const at::Tensor& input) const;
