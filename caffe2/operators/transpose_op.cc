@@ -12,14 +12,14 @@ bool tryRunWithHPTT(const std::vector<int>& axes, const TensorCPU& input, Tensor
     return false;
   }
   std::vector<int> axes_cm(axes.size());
-  for (auto i = 0; i < axes.size(); ++i) {
-    axes_cm[i] = axes.size() - axes[i] - 1;
-  }
   std::vector<int> idims_cm(axes.size());
-  std::vector<int> odims_cm(axes.size());
+
+  // Convert row-major index to column major.
+  auto cm = [&](int i) { return axes.size() - i - 1; };
+
   for (auto i = 0; i < axes.size(); ++i) {
-    odims_cm[i] = output->dim32(axes.size() - i - 1);
-    idims_cm[i] = input.dim32(axes.size() - i - 1);
+    axes_cm[i] = cm(axes[cm(i)]);
+    idims_cm[i] = input.dim32(cm(i));
   }
 
   auto plan = hptt::create_plan(axes_cm.data(),
