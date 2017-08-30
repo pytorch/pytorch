@@ -167,7 +167,7 @@ class TestJit(TestCase):
         torch._C._jit_pass_lint(trace)
 
         (z * w).backward()
-        torch._C._jit_pass_dco(trace)
+        torch._C._jit_pass_dce(trace)
         torch._C._jit_pass_lint(trace)
 
         x_grad = x.grad.data.clone()
@@ -254,7 +254,7 @@ class TestJit(TestCase):
         torch._C._jit_pass_lint(trace)
 
         # Run dead code elimination to remove unused trace nodes
-        torch._C._jit_pass_dco(trace)
+        torch._C._jit_pass_dce(trace)
         self.assertExpected(str(trace))
 
     def test_python_ir(self):
