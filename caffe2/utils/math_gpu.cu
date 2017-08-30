@@ -1680,17 +1680,19 @@ void CopyMatrix<CUDAContext>(
 }
 
 template <>
-void CopyVector(
+void CopyVector<float, CUDAContext>(
     const int N,
     const float* src,
     float* dst,
     CUDAContext* context) {
-  cudaMemcpyAsync(
-      dst,
-      src,
-      sizeof(float) * N,
-      cudaMemcpyDeviceToDevice,
-      context->cuda_stream());
+  if (src != dst && N > 0) {
+    cudaMemcpyAsync(
+        dst,
+        src,
+        sizeof(float) * N,
+        cudaMemcpyDeviceToDevice,
+        context->cuda_stream());
+  }
 }
 
 namespace {
