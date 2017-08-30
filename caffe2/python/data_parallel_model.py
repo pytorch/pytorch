@@ -779,9 +779,9 @@ def GetLearningRateBlobNames(model):
     '''
     if model._optimizer is not None:
         if model._device_type == caffe2_pb2.CPU:
-            return [model._optimizer.get_cpu_lr_blob_name()]
+            return [model._optimizer.get_cpu_blob_name('lr')]
         elif model._device_type == caffe2_pb2.CUDA:
-            return [model._optimizer.get_gpu_lr_blob_name(gpu)
+            return [model._optimizer.get_gpu_blob_name('lr', gpu)
                     for gpu in model._devices]
         else:
             raise Exception(
