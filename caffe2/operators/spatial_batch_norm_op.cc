@@ -186,7 +186,7 @@ OPERATOR_SCHEMA(SpatialBN)
         })
     .SetDoc(R"DOC(
 Carries out spatial batch normalization as described in the paper
-https://arxiv.org/abs/1502.03167. Depending on the mode it is being run,
+https://arxiv.org/abs/1502.03167 . Depending on the mode it is being run,
 there are multiple cases for the number of outputs, which we list below:
 
 Output case #1: Y, mean, var, saved_mean, saved_var
