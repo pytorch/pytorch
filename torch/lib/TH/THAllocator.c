@@ -33,14 +33,14 @@ THAllocator THDefaultAllocator = {
   &THDefaultAllocator_free
 };
 
-#if defined(_WIN32) || defined(HAVE_MMAP)
-
 struct THMapAllocatorContext_ {
   char *filename; /* file name */
   int flags;
   ptrdiff_t size; /* mapped size */
   int fd;
 };
+
+#if defined(_WIN32) || defined(HAVE_MMAP)
 
 #define TH_ALLOC_ALIGNMENT 64
 
