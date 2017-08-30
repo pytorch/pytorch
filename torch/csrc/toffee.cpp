@@ -26,12 +26,10 @@ bool micropb_encode<double, nullptr>(pb_ostream_t *stream, double* arg) {
 // TODO: I'm not entirely sure why this can't be in the header...
 bool micropb_callback_tensor(pb_ostream_t *stream, const pb_field_t *field, void * const *arg) {
   at::Tensor* t = static_cast<at::Tensor*>(*arg);
-  JIT_ASSERT(t->type().scalarType() == at::kFloat);
   JIT_ASSERT(t->is_contiguous());
-  // TODO: Generalize beyond float
   // Packed array format!
   pb_encode_tag_for_field(stream, field);
-  pb_encode_string(stream, (pb_byte_t*)(t->data_ptr()),  sizeof(float)*t->numel());
+  pb_encode_string(stream, (pb_byte_t*)(t->data_ptr()),  t->type().elementSizeInBytes()*t->numel());
 
   return true;
 }

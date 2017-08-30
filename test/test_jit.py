@@ -69,6 +69,14 @@ class TestJit(TestCase):
         initializers = [x.data]
         self.assertToffeeExpected(trace.export(initializers))
 
+    @toffee_only
+    def test_export_data_other_types(self):
+        x = Variable(torch.LongTensor([[1, 2], [3, 4]]), requires_grad=True)
+        y = Variable(torch.LongTensor([[1, 2], [3, 4]]), requires_grad=True)
+        trace, _ = torch.jit.record_trace(lambda x, y: x * y + x, x, y)
+        initializers = [x.data]
+        self.assertToffeeExpected(trace.export(initializers))
+
     def test_lstm(self):
         # Careful: don't use fused backend (enabled with CUDA)
         # Pasted from test_LSTM_cell
