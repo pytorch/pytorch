@@ -7,7 +7,7 @@
 namespace caffe2 {
 
 // Cuda memory is precious so let's do a lower ndim limit.
-#define COMPILE_TIME_CUDA_MAX_TRANSPOSE_DIMS 5
+#define COMPILE_TIME_CUDA_MAX_TRANSPOSE_DIMS 6
 
 namespace {
 // TODO(jiayq): one possible optimization is to copy the buffer into a shared
