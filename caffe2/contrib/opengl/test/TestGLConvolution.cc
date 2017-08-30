@@ -57,6 +57,8 @@ double BenchOp(const std::string& typ,
   def1.add_arg()->CopyFrom(caffe2::MakeArgument("pad_l", 0));
   def1.add_arg()->CopyFrom(caffe2::MakeArgument("pad_b", 0));
   def1.add_arg()->CopyFrom(caffe2::MakeArgument("pad_r", 0));
+  def1.add_arg()->CopyFrom(caffe2::MakeArgument(
+      "convolution_transform_strategy", std::string("PRECOMPUTE")));
 
   AddNoiseInput(std::vector<caffe2::TIndex>{1, inputC, inH, inW}, "X", ws);
   if (transposed) {
