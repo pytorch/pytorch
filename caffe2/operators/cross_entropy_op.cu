@@ -31,9 +31,14 @@ bool LabelCrossEntropyOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& label = Input(1);
   auto* Y = Output(0);
-  CAFFE_ENFORCE_EQ(X.ndim(), 2);
-  int N = X.dim32(0);
-  int D = X.dim32(1);
+  int N, D;
+  if (X.ndim() > 1) {
+    N = X.dim32(0);
+    D = X.size_from_dim(1);
+  } else {
+    N = 1;
+    D = X.dim32(0);
+  }
   CAFFE_ENFORCE(
       (label.ndim() == 1) || (label.ndim() == 2 && label.dim32(1) == 1));
   CAFFE_ENFORCE_EQ(label.dim32(0), N);
@@ -51,9 +56,14 @@ bool LabelCrossEntropyGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& label = Input(1);
   auto& dY = Input(2);
   auto* dX = Output(0);
-  CAFFE_ENFORCE_EQ(X.ndim(), 2);
-  int N = X.dim32(0);
-  int D = X.dim32(1);
+  int N, D;
+  if (X.ndim() > 1) {
+    N = X.dim32(0);
+    D = X.size_from_dim(1);
+  } else {
+    N = 1;
+    D = X.dim32(0);
+  }
   CAFFE_ENFORCE(
       (label.ndim() == 1) || (label.ndim() == 2 && label.dim32(1) == 1));
   CAFFE_ENFORCE_EQ(label.dim32(0), N);

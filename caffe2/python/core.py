@@ -312,6 +312,7 @@ def CreateOperator(
         operator.engine = engine
     # random seed is defined in the device option, so we need to do special
     # care.
+
     if 'random_seed' in kwargs:
         operator.device_option.random_seed = kwargs['random_seed']
         del kwargs['random_seed']
@@ -865,6 +866,7 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
     def _GetInitGradients(self, ys):
         input_to_grad = {}
         gradient_ops = []
+
         for y, g in viewitems(ys):
             autograd_op = None
             if g is None:
