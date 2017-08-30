@@ -6,8 +6,8 @@ node {
   input: "3"
   input: "4"
   output: "7"
-  output: "3"
-  output: "4"
+  output: "8"
+  output: "9"
   output: "batch_norm_dead_output_10"
   output: "batch_norm_dead_output_11"
   op_type: "SpatialBN"
@@ -26,6 +26,14 @@ node {
   attribute {
     name: "momentum"
     f: 0.899999976158142
+  }
+  attribute {
+    name: "consumed_inputs"
+    ints: 0
+    ints: 0
+    ints: 0
+    ints: 1
+    ints: 1
   }
 }
 name: "torch-jit-export"
