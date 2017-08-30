@@ -132,6 +132,8 @@ class Traceable(object):
 
     def run_trace(self, trace_inputs):
         if self.saved_closure is None:
+            # It's important to always run DCE, because backward can create a lot of unnecessary nodes
+            self._run_pass('dce', torch._C._jit_pass_dce)
             self.saved_closure = torch._C._jit_createAutogradClosure(
                 self.saved_trace)
         with _time("run_trace", self.time):

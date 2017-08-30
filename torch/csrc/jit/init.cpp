@@ -56,7 +56,7 @@ struct PyMethodDef _THPJIT_methods[] = {
   {"_jit_init",       (PyCFunction)THPJIT_initExtension,      METH_NOARGS,  NULL},
   {"_jit_pass_init", (PyCFunction)wrap_pass<MatchJITOps>,     METH_O,       "init"},
   {"_jit_pass_fuse", (PyCFunction)wrap_pass<FuseGraph>,       METH_O,       "fuse"},
-  {"_jit_pass_dco",  (PyCFunction)wrap_pass<EliminateDeadCode>, METH_O,     "dco"},
+  {"_jit_pass_dce",  (PyCFunction)wrap_pass<EliminateDeadCode>, METH_O,     "dce"},
   {"_jit_pass_lint", (PyCFunction)wrap_pass<LintGraph>,       METH_O,       "lint"},
   {"_jit_run_cpp_tests",(PyCFunction)run_cpp_tests,           METH_NOARGS,  NULL},
   {NULL}
