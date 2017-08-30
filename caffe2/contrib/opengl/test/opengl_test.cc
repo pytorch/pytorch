@@ -1885,6 +1885,19 @@ void compareModelsForOpenGL(std::string name,
       math::RandGaussian<float, CPUContext>(size, 0, 0.12, input + size, &ctx); // U: -0.436 ~ 0.436
       math::RandGaussian<float, CPUContext>(
           size, 0, 0.2, input + 2 * size, &ctx); // V: -0.615 ~ 0.615
+    } else if (name == "denoiser") {
+      CAFFE_ENFORCE_EQ(input_order, "NCHW");
+      CAFFE_ENFORCE_EQ(input_type, "float");
+      t_cpu->Resize(1, channel, height, width);
+      float* input = t_cpu->mutable_data<float>();
+      const int spatial_size = width * height;
+      math::RandGaussian<float, CPUContext>(spatial_size, 0, 0.33, input, &ctx); // R Channel
+      math::RandGaussian<float, CPUContext>(spatial_size, 0, 0.33, input + spatial_size, &ctx); // G Channel
+      math::RandGaussian<float, CPUContext>(spatial_size, 0, 0.33, input + 2 * spatial_size, &ctx); // B Channel
+      // Clamp Range of input [-1, +1]
+      for (auto i = 0; i < t_cpu->size(); ++i) {
+        input[i] = input[i] > 1 ? 1 : input[i] < -1 ? -1 : input[i];
+      }
     } else {
       CAFFE_THROW("CompareModels only works with style transfer and segmentation now");
     }
@@ -1906,6 +1919,12 @@ void compareModelsForOpenGL(std::string name,
       t_gl->Resize(1, channel, height, width);
       float* input = t_gl->mutable_data<float>();
       memcpy(input, t_cpu->mutable_data<float>(), t_cpu->capacity_nbytes());
+    } else if (name == "denoiser") {
+      CAFFE_ENFORCE_EQ(input_order, "NCHW");
+      CAFFE_ENFORCE_EQ(input_type, "float");
+      t_gl->Resize(1, channel, height, width);
+      float* input = t_gl->mutable_data<float>();
+      memcpy(input, t_cpu->mutable_data<float>(), t_cpu->capacity_nbytes());
     }
 
     cws.RunNetOnce(truncatedPredictNet);
@@ -1919,7 +1938,12 @@ void compareModelsForOpenGL(std::string name,
     {
       const auto& mt = mws.GetBlob(m_name)->Get<TensorCPU>(); // GPU
       const auto& ct = cws.GetBlob(c_name)->Get<TensorCPU>(); // CPU
-      checkError(mt, ct, 1);
+      if (name == "denoiser") {
+        checkError(mt, ct, 0.02);  // 1% of Scale
+        LOG(INFO) << "Error Check Completed for Denoiser Layer: " << i;
+      } else {
+        checkError(mt, ct, 1);
+      }
     }
   }
 }
