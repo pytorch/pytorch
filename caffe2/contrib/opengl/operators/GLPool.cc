@@ -84,7 +84,6 @@ const char* GLPool::fragment_shader = R"GLSL(#version 300 es
 
 precision mediump float;
 precision mediump int;
-precision mediump sampler2D;
 
 in highp vec2 v_texCoord;
 
@@ -96,9 +95,9 @@ const int channels = 4;
 uniform ivec2 kernelSize;
 uniform ivec2 outputSize;
 
-uniform sampler2D inputData;
+TEXTURE_INPUT(inputData);
 
-layout(location = 0) out mediump vec4 outputData;
+TEXTURE_OUTPUT(0, outputData);
 
 const bool no_bounds = bool(TEXTURE_BORDER_CLAMP) || all(equal(input_padding, ivec2(0)));
 
@@ -116,7 +115,8 @@ const float MIN_FLOAT = -exp2(14.0);
     for (int x = 0; x < kernelSize.x; x++) { \
       ivec2 idx = texelCoord + ivec2(x, y); \
       if (no_bounds || IN_BOUNDS(idx, ivec2(0), inputSize)) { \
-        pool = max(pool, texelFetch(inputData, idx, 0)); \
+        vec4 data = TEXTURE_LOAD(inputData, idx); \
+        pool = max(pool, data); \
       } \
     } \
   } \
@@ -129,7 +129,8 @@ const float MIN_FLOAT = -exp2(14.0);
     for (int x = 0; x < kernelSize.x; x++) { \
       ivec2 idx = texelCoord + ivec2(x, y); \
       if (no_bounds || IN_BOUNDS(idx, ivec2(0), inputSize)) { \
-        pool += texelFetch(inputData, idx, 0); \
+        vec4 data = TEXTURE_LOAD(inputData, idx); \
+        pool += data;\
       } \
     } \
   } \
@@ -152,7 +153,7 @@ void main() {
 
   POOL;
 
-  outputData = pool;
+  outputData = TEXTURE_STORE(pool);
 }
 )GLSL";
 

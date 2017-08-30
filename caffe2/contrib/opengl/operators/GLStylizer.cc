@@ -12,20 +12,25 @@ enum InputFormat { BGRA = 0, RGBA = 1 };
 
 class GLStylizer : public GLFilter {
   binding* inputData;
+  binding* outputSize;
   binding* mean;
   binding* noise_std;
   bool deprocess;
 
  public:
   GLStylizer(bool _deprocess = false, InputFormat input_format = BGRA)
-      : GLFilter(_deprocess ? "GLDeStylizer" : "GLStylizer",
-                 vertex_shader,
-                 fragment_shader,
-                 std::vector<binding*>({BINDING(inputData), BINDING(mean), BINDING(noise_std)}),
-                 {/* no uniform blocks */},
-                 {/* no attributes */},
-                 {{"DEPROCESS", caffe2::to_string(_deprocess)},
-                  {"RGBAINPUT", caffe2::to_string(input_format)}}),
+      : GLFilter(
+            _deprocess ? "GLDeStylizer" : "GLStylizer",
+            vertex_shader,
+            fragment_shader,
+            std::vector<binding*>({BINDING(inputData),
+                                   BINDING(mean),
+                                   BINDING(noise_std),
+                                   BINDING(outputSize)}),
+            {/* no uniform blocks */},
+            {/* no attributes */},
+            {{"DEPROCESS", caffe2::to_string(_deprocess)},
+             {"RGBAINPUT", caffe2::to_string(input_format)}}),
         deprocess(_deprocess) {}
 
   template <typename T1, typename T2>
@@ -50,12 +55,18 @@ precision mediump sampler2D;
 
 in highp vec2 v_texCoord;
 
+uniform ivec2 outputSize;
+
 uniform vec3 mean;
 uniform float noise_std;
 
-uniform sampler2D inputData;
-
+#if DEPROCESS
+TEXTURE_INPUT(inputData);
 layout(location = 0) out mediump vec4 outputData;
+#else
+uniform sampler2D inputData;
+TEXTURE_OUTPUT(0, outputData);
+#endif
 
 #if !DEPROCESS
 // http://byteblacksmith.com/improvements-to-the-canonical-one-liner-glsl-rand-for-opengl-es-2-0/
@@ -74,17 +85,21 @@ highp float rand(vec2 co) {
 #if RGBAINPUT
 void main() {
 #if DEPROCESS
-  outputData = vec4((texture(inputData, v_texCoord).rgb + mean) / 255.0, 1.0).bgra;
+  ivec2 texelCoord = ivec2(v_texCoord * vec2(outputSize));
+  vec4 val = TEXTURE_LOAD(inputData, texelCoord);
+  outputData = vec4((val.rgb + mean) / 255.0, 1.0).bgra;
 #else
-  outputData = vec4(255.0 * texture(inputData, v_texCoord).bgr - mean + vec3(noise_std * rand(v_texCoord)), 0.0);
+  outputData = TEXTURE_STORE(vec4(255.0 * texture(inputData, v_texCoord).bgr - mean + vec3(noise_std * rand(v_texCoord)), 0.0));
 #endif
 }
 #else
 void main() {
 #if DEPROCESS
-  outputData = vec4((texture(inputData, v_texCoord).rgb + mean) / 255.0, 1.0);
+  ivec2 texelCoord = ivec2(v_texCoord * vec2(outputSize));
+  vec4 val = TEXTURE_LOAD(inputData, texelCoord);
+  outputData = vec4((val.rgb + mean) / 255.0, 1.0);
 #else
-  outputData = vec4(255.0 * texture(inputData, v_texCoord).rgb - mean + vec3(noise_std * rand(v_texCoord)), 0.0);
+  outputData = TEXTURE_STORE(vec4(255.0 * texture(inputData, v_texCoord).rgb - mean + vec3(noise_std * rand(v_texCoord)), 0.0));
 #endif
 }
 #endif
@@ -101,6 +116,8 @@ void GLStylizer::stylize(const GLImage<T1>* input_image,
   run(std::vector<texture_attachment>({{input_image->textures[0], inputData}}),
       {output_image->textures[0]},
       [&]() {
+        glUniform2i(
+            outputSize->location, output_image->width, output_image->height);
         glUniform3f(mean->location, mean_values[0], mean_values[1], mean_values[2]);
         if (!deprocess) {
           glUniform1f(noise_std->location, noise_std_value);

@@ -40,22 +40,23 @@ const char* GLSigmoid::fragment_shader = R"GLSL(#version 300 es
 
 precision mediump float;
 precision mediump int;
-precision mediump sampler2D;
 
 in highp vec2 v_texCoord;
 
 uniform ivec2 outputSize;
 
-uniform sampler2D inputData;
-
-layout(location = 0) out mediump vec4 outputData;
+TEXTURE_INPUT(inputData);
+TEXTURE_OUTPUT(0, outputData);
 
 void main() {
   ivec2 texelCoord = ivec2(v_texCoord * vec2(outputSize));
+  vec4 value = TEXTURE_LOAD(inputData, ivec2(texelCoord));
 #if SIGMOID
-  outputData = vec4(1.0) / (vec4(1.0) + exp(-texelFetch(inputData, ivec2(texelCoord), 0)));
+  value = vec4(1.0) / (vec4(1.0) + exp(-value));
+  outputData = TEXTURE_STORE(value);
 #elif TANH
-  outputData = tanh(texelFetch(inputData, ivec2(texelCoord), 0));
+  value = tanh(value);
+  outputData = TEXTURE_STORE(value);
 #endif
 }
 

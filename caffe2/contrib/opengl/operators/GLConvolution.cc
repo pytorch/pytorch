@@ -338,8 +338,8 @@ uniform bool fusePRelu;
 
 uniform ivec2 inputTileRange;
 
-uniform sampler2D inputData[INPUT_BATCH_SIZE];
-uniform sampler2D previousData[OUTPUT_BATCH_SIZE];
+TEXTURE_INPUT(inputData[INPUT_BATCH_SIZE]);
+TEXTURE_INPUT(previousData[OUTPUT_BATCH_SIZE]);
 
 struct packedKernel {
   highp uvec4 packed_data[2];
@@ -375,13 +375,13 @@ layout (std140) uniform prelu_scale_block {
 
 #define unpackHalf4x16(pd) vec4(unpackHalf2x16(pd.x), unpackHalf2x16(pd.y))
 
-layout(location = 0) out mediump vec4 outputData0;
+TEXTURE_OUTPUT(0, outputData0);
 #if OUTPUT_BATCH_SIZE > 1
-layout(location = 1) out mediump vec4 outputData1;
+TEXTURE_OUTPUT(1, outputData1);
 #if OUTPUT_BATCH_SIZE > 2
-layout(location = 2) out mediump vec4 outputData2;
+TEXTURE_OUTPUT(2, outputData2);
 #if OUTPUT_BATCH_SIZE > 3
-layout(location = 3) out mediump vec4 outputData3;
+TEXTURE_OUTPUT(3, outputData3);
 #endif
 #endif
 #endif
@@ -401,7 +401,7 @@ const bool no_bounds = (TILED_CONVOLUTION == 0) && (bool(TEXTURE_BORDER_CLAMP) |
       int i = y * kernel_size.x + x; \
       ivec2 idx = tileCoord + ivec2(x, y) - input_padding; \
       if (no_bounds || IN_BOUNDS(idx, ivec2(0), inputTileSize * input_stride)) { \
-        vec4 data = texelFetch(inputData[0], inputTileOffset + idx / input_stride, 0); \
+        vec4 data = TEXTURE_LOAD(inputData[0], inputTileOffset + idx / input_stride); \
         mediump mat4 k = unpackKernel(kernel_block[ib].kernel_data[kernelIdx].data[i]); \
         sum += k * data; \
       } \
@@ -416,7 +416,7 @@ const bool no_bounds = (TILED_CONVOLUTION == 0) && (bool(TEXTURE_BORDER_CLAMP) |
     for (int x = 0; x < kernel_size.x; x++, i++) { \
       ivec2 idx = tileCoord + ivec2(x, y); \
       if (no_bounds || IN_BOUNDS(idx, ivec2(0), inputTileSize)) { \
-        vec4 data = texelFetch(inputData[0], inputTileOffset + idx, 0); \
+        vec4 data = TEXTURE_LOAD(inputData[0], inputTileOffset + idx); \
         mediump mat4 k = unpackKernel(kernel_block[ib].kernel_data[kernelIdx].data[i]); \
         sum += k * data; \
       } \
@@ -490,10 +490,13 @@ void main() {
   }
 
   vec4 biasValue = (tileNum % 2 == 0) ? unpackHalf4x16(bias[tileNum/2].xy) : unpackHalf4x16(bias[tileNum/2].zw);
-  vec4 value = sum + (accumulate ? texelFetch(previousData[0], texelCoord, 0) : biasValue);
+  vec4 prevData = TEXTURE_LOAD(previousData[0], texelCoord);
+  vec4 value = sum + (accumulate ? prevData : biasValue);
 
   vec4 preluValue = (tileNum % 2 == 0) ? unpackHalf4x16(scale[tileNum/2].xy) : unpackHalf4x16(scale[tileNum/2].zw);
-  outputData0 = fusePRelu ? mix(value * preluValue, value, vec4(greaterThan(value, vec4(0)))) : value;
+
+  vec4 o0 = fusePRelu ? mix(value * preluValue, value, vec4(greaterThan(value, vec4(0)))) : value;
+  outputData0 = TEXTURE_STORE(o0);
 }
 
 #else
@@ -508,7 +511,7 @@ void main() {
       int i = y * kernel_size.x + x; \
       ivec2 idx = texelCoord + ivec2(x, y) - input_padding; \
       if (no_bounds || IN_BOUNDS(idx, ivec2(0), inputSize * input_stride)) { \
-        vec4 data = texelFetch(inputData[ib], idx / input_stride, 0); \
+        vec4 data = TEXTURE_LOAD(inputData[ib], idx / input_stride); \
         for (int ob = 0; ob < OUTPUT_BATCH_SIZE; ob++) { \
           mediump mat4 k = unpackKernel(kernel_block[ib].kernel_data[ob].data[i]); \
           sum[ob] += k * data; \
@@ -525,7 +528,7 @@ void main() {
     for (int x = 0; x < kernel_size.x; x++, i++) { \
       ivec2 idx = coord + ivec2(x, y); \
       if (no_bounds || IN_BOUNDS(idx, ivec2(0), inputSize)) { \
-        vec4 data = texelFetch(inputData[ib], idx, 0); \
+        vec4 data = TEXTURE_LOAD(inputData[ib], idx); \
         for (int ob = 0; ob < OUTPUT_BATCH_SIZE; ob++) { \
           mediump mat4 k = unpackKernel(kernel_block[ib].kernel_data[ob].data[i]); \
           sum[ob] += k * data; \
@@ -582,17 +585,25 @@ void main() {
 #endif
 #endif
 
-  vec4 value = sum[0] + (accumulate ? texelFetch(previousData[0], texelCoord, 0) : unpackHalf4x16(bias[0].xy));
-  outputData0 = fusePRelu ? mix(value * unpackHalf4x16(scale[0].xy), value, vec4(greaterThan(value, vec4(0)))) : value;
+  vec4 prev0 = TEXTURE_LOAD(previousData[0], texelCoord);
+  vec4 value = sum[0] + (accumulate ? prev0: unpackHalf4x16(bias[0].xy));
+  vec4 o0 = fusePRelu ? mix(value * unpackHalf4x16(scale[0].xy), value, vec4(greaterThan(value, vec4(0)))) : value;
+  outputData0 = TEXTURE_STORE(o0);
 #if OUTPUT_BATCH_SIZE > 1
-  value = sum[1] + (accumulate ? texelFetch(previousData[1], texelCoord, 0) : unpackHalf4x16(bias[0].zw));
-  outputData1 = fusePRelu ? mix(value * unpackHalf4x16(scale[0].zw), value, vec4(greaterThan(value, vec4(0)))) : value;
+  vec4 prev1 = TEXTURE_LOAD(previousData[1], texelCoord);
+  value = sum[1] + (accumulate ? prev1 : unpackHalf4x16(bias[0].zw));
+  vec4 o1 = fusePRelu ? mix(value * unpackHalf4x16(scale[0].zw), value, vec4(greaterThan(value, vec4(0)))) : value;
+  outputData1 = TEXTURE_STORE(o1);
 #if OUTPUT_BATCH_SIZE > 2
-  value = sum[2] + (accumulate ? texelFetch(previousData[2], texelCoord, 0) : unpackHalf4x16(bias[1].xy));
-  outputData2 = fusePRelu ? mix(value * unpackHalf4x16(scale[1].xy), value, vec4(greaterThan(value, vec4(0)))) : value;
+  vec4 prev2 = TEXTURE_LOAD(previousData[2], texelCoord);
+  value = sum[2] + (accumulate ? prev2 : unpackHalf4x16(bias[1].xy));
+  vec4 o2 = fusePRelu ? mix(value * unpackHalf4x16(scale[1].xy), value, vec4(greaterThan(value, vec4(0)))) : value;
+  outputData2 = TEXTURE_STORE(o2);
 #if OUTPUT_BATCH_SIZE > 3
-  value = sum[3] + (accumulate ? texelFetch(previousData[3], texelCoord, 0) : unpackHalf4x16(bias[1].zw));
-  outputData3 = fusePRelu ? mix(value * unpackHalf4x16(scale[1].zw), value, vec4(greaterThan(value, vec4(0)))) : value;
+  vec4 prev3 = TEXTURE_LOAD(previousData[3], texelCoord);
+  value = sum[3] + (accumulate ? prev3: unpackHalf4x16(bias[1].zw));
+  vec4 o3 = fusePRelu ? mix(value * unpackHalf4x16(scale[1].zw), value, vec4(greaterThan(value, vec4(0)))) : value;
+  outputData3 = TEXTURE_STORE(o3);
 #endif
 #endif
 #endif

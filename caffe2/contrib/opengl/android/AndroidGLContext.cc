@@ -119,7 +119,7 @@ AndroidGLContext::AndroidGLContext() {
     _eglcontext = create_opengl_thread_context();
     LOG(INFO) << "New EGLContext created";
 
-    if (!supportOpenGLES3()) {
+    if (!supportOpenGLES3(&half_float_supported)) {
       CAFFE_THROW("OpenGL ES 3 not supported");
     }
 

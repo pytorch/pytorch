@@ -64,7 +64,7 @@ void checkError1D(const TensorCPU& t1, const TensorCPU& t2, float error) {
                absolute_error(t1_i, t2_i),
                relative_error(t1_i, t2_i) * 100);
         if (count++ == 10) {
-          break;
+          CAFFE_THROW("--- Test Failed ---");
         }
       }
     }
@@ -126,6 +126,8 @@ void checkError(const TensorCPU& t1, const TensorCPU& t2, float error) {
                  t2_i,
                  absolute_error(t1_i, t2_i),
                  relative_error(t1_i, t2_i) * 100);
+        } else {
+          CAFFE_THROW("--- Test Failed ---");
         }
         count++;
       }
@@ -149,6 +151,8 @@ void checkError(const TensorCPU& t1, const TensorCPU& t2, float error) {
                  t2_i,
                  absolute_error(t1_i, t2_i),
                  relative_error(t1_i, t2_i) * 100);
+        } else {
+          CAFFE_THROW("--- Test Failed ---");
         }
         count++;
       }
@@ -845,7 +849,8 @@ void testOpenGLTanh(int N, int C, int H, int W, float error) {
     auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
     t->Resize(N, C, H, W);
     CPUContext ctx;
-    math::RandGaussian<float, CPUContext>(t->size(), -3, 3, t->mutable_data<float>(), &ctx);
+    math::RandGaussian<float, CPUContext>(
+        t->size(), 0, 2, t->mutable_data<float>(), &ctx);
   }
 
   NetDef netdef;
@@ -2602,8 +2607,9 @@ void testOpenGL() {
 
     LOG(INFO) << "Test OpenGL Softmax";
     testOpenGLSoftmax(1, 100, 0.1);
+    testOpenGLSoftmax(1, 500, 0.1);
     testOpenGLSoftmax(1, 1000, 0.1);
-    testOpenGLSoftmax(1, 10000, 0.1);
+    testOpenGLSoftmax(1, 5000, 0.1);
 
     LOG(INFO) << "Test OpenGL InstanceNorm";
     testOpenGLInstanceNorm(1, 4, 16, 16, 0.2);
