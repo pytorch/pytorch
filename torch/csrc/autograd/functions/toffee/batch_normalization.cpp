@@ -15,8 +15,8 @@ jit::node_list BatchNormForward::primspec(PrimSpecContext* ctx, jit::node_list i
   if (inputs[2]->kind() != jit::kConstant || inputs.at(2)->t(jit::kValue).defined()) {
     bn->addInput(inputs[2]);
   }
-  bn->addInput(jit::tracer::getBufferTrace(*ctx->buffer_map, cached_running_mean));
-  bn->addInput(jit::tracer::getBufferTrace(*ctx->buffer_map, cached_running_var));
+  bn->addInput(jit::tracer::getBufferTrace(*ctx->buffer_map, running_mean));
+  bn->addInput(jit::tracer::getBufferTrace(*ctx->buffer_map, running_var));
 
   bn->i_(jit::kis_test, !this->training);
   bn->f_(jit::kepsilon, eps);

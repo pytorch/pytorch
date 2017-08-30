@@ -11,8 +11,8 @@
 namespace torch { namespace autograd {
 
 struct BatchNormParams {
-  at::Tensor cached_running_mean;
-  at::Tensor cached_running_var;
+  at::Tensor running_mean;
+  at::Tensor running_var;
   bool training;
   double momentum;
   double eps;
