@@ -81,9 +81,10 @@ class Transpose(Function):
         # Transpose, which is actually a permute.
         if dim1 == dim2:
             return i
+
         axes = list(range(len(i.type().sizes())))
         axes[dim1], axes[dim2] = axes[dim2], axes[dim1]
-        return g.appendNode(g.create("Transpose", [i])).is_("axes", axes)
+        return g.op("Transpose", i, axes_i=axes)
 
     @staticmethod
     def forward(ctx, i, dim1, dim2):
@@ -101,11 +102,8 @@ class View(Function):
 
     @staticmethod
     def primspec(g, i, sizes):
-        n = g.appendNode(g.create("Reshape", [i]).is_("shape", sizes))
-        real_out = g.appendNode(g.createSelect(n, 0))
-        # TODO: remove from toffee
-        g.appendNode(g.createSelect(n, 1))
-        return real_out
+        n, _ = g.op("Reshape", i, shape_i=sizes, outputs=2)
+        return n
 
     @staticmethod
     def forward(ctx, i, sizes):
@@ -184,8 +182,7 @@ class Permute(Function):
     def primspec(g, input, dim_indices):
         if dim_indices == range(0, len(dim_indices)):
             return input
-        return (g.appendNode(g.create("Transpose", [input]))
-                .is_("axes", dim_indices))
+        return g.op("Transpose", input, axes_i=dim_indices)
 
     @staticmethod
     def forward(ctx, input, dim_indices):
@@ -337,11 +334,8 @@ class Concat(Function):
 
     @staticmethod
     def primspec(g, dim, *inputs):
-        n = g.appendNode(g.create("Concat", inputs).i_("axis", dim))
-        real = g.appendNode(g.createSelect(n, 0))
-        # TODO: remove from toffee
-        g.appendNode(g.createSelect(n, 1))
-        return real
+        n, _ = g.op("Concat", *inputs, axis_i=dim, outputs=2)
+        return n
 
     @staticmethod
     def forward(ctx, dim, *inputs):
@@ -406,7 +400,7 @@ class Squeeze(InplaceFunction):
                     dims.append(i)
         else:
             dims = [dim]
-        return g.appendNode(g.create("Squeeze", [input]).is_("dims", dims))
+        return g.op("Squeeze", input, dims_i=dims)
 
     @staticmethod
     def forward(ctx, input, dim=None, inplace=False):

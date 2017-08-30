@@ -48,7 +48,7 @@ class Mul(Function):
     @staticmethod
     def primspec(g, a, b, inplace=False):
         # TODO: [Export inplace]
-        return g.appendNode(g.create("Mul", [a, b]))
+        return g.op("Mul", a, b)
 
     @staticmethod
     def forward(ctx, a, b):

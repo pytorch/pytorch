@@ -132,7 +132,7 @@ std::shared_ptr<Graph> ToToffeeIR(std::shared_ptr<Graph>& g,
       }
       py::object raw_output = py::reinterpret_steal<py::object>(PyObject_CallObject(primspec_fn.ptr(), py_primspec_args.ptr()));
       if(!raw_output)
-        throw python_error();
+        throw py::error_already_set();
       if(raw_output.ptr() == Py_None)
         throw std::runtime_error("PythonOp's primspec returned None, indicating conversion not supported " + value->name());
       node_list outputs;
