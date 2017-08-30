@@ -50,6 +50,10 @@ TypeID ${Type}::ID() const {
   return ${TypeID};
 }
 
+std::size_t ${Type}::elementSizeInBytes() const {
+  return sizeof(${ScalarType});
+}
+
 const char * ${Type}::typeString() {
   return "${Type}";
 }
