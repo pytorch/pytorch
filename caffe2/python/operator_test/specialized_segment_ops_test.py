@@ -13,45 +13,120 @@ import random
 
 
 class TestSpecializedSegmentOps(hu.HypothesisTestCase):
-    @given(nseg=st.integers(1, 20),
+
+    @given(batchsize=st.integers(1, 20),
            fptype=st.sampled_from([np.float16, np.float32]),
            fp16asint=st.booleans(),
-           bs=st.sampled_from([8, 17, 32, 64, 85, 96, 128, 163]), **hu.gcs)
-    def test_sparse_lengths_sum_cpu_fp32(
-            self, nseg, fptype, fp16asint, bs, gc, dc):
+           blocksize=st.sampled_from([8, 17, 32, 64, 85, 96, 128, 163]),
+           normalize_by_lengths=st.booleans(), **hu.gcs)
+    def test_sparse_lengths_sum_cpu(
+            self, batchsize, fptype, fp16asint, blocksize, normalize_by_lengths, gc, dc):
+
+        if normalize_by_lengths == False:
+            print("<test_sparse_lengths_sum_cpu>")
+        else:
+            print("<test_sparse_lengths_sum_mean_cpu>")
 
         tblsize = 300
         if fptype == np.float32:
-            X = np.random.rand(tblsize, bs).astype(np.float32)
+            Tbl = np.random.rand(tblsize, blocksize).astype(np.float32)
             atol = 1e-5
         else:
             if fp16asint:
-                X = (10.0 * np.random.rand(tblsize, bs)
-                     ).round().astype(np.float16)
+                Tbl = (10.0 * np.random.rand(tblsize, blocksize)
+                       ).round().astype(np.float16)
                 atol = 1e-3
             else:
-                X = np.random.rand(tblsize, bs).astype(np.float16)
+                Tbl = np.random.rand(tblsize, blocksize).astype(np.float16)
                 atol = 1e-1
 
-        ind = random.sample(range(1, 30), nseg)
-        Y = np.random.randint(0, tblsize, size=sum(ind)).astype(np.int64)
-        Z = np.asarray(ind).astype(np.int32)
-        op = core.CreateOperator("SparseLengthsSum", ["X", "Y", "Z"], "out")
+        # array of each row length
+        Lengths = np.random.randint(1, 30, size=batchsize).astype(np.int32)
+        # flat indices
+        Indices = np.random.randint(
+            0, tblsize, size=sum(Lengths)).astype(np.int64)
 
-        def sparse_lengths_sum_ref(X, Y, Z):
-            rptr = np.cumsum(np.insert(Z, [0], [0]))
-            out = np.zeros((len(Z), bs))
+        if normalize_by_lengths == False:
+            op = core.CreateOperator("SparseLengthsSum", [
+                                     "Tbl", "Indices", "Lengths"], "out")
+        else:
+            op = core.CreateOperator("SparseLengthsMean", [
+                                     "Tbl", "Indices", "Lengths"], "out")
+
+        self.ws.create_blob("Tbl").feed(Tbl)
+        self.ws.create_blob("Indices").feed(Indices)
+        self.ws.create_blob("Lengths").feed(Lengths)
+        self.ws.run(op)
+
+        def sparse_lengths_sum_ref(Tbl, Indices, Lengths):
+            rptr = np.cumsum(np.insert(Lengths, [0], [0]))
+            out = np.zeros((len(Lengths), blocksize))
+            if normalize_by_lengths == False:
+                for i in range(0, len(rptr[0:-1])):
+                    out[i] = Tbl[Indices[rptr[i]:rptr[i + 1]]].sum(axis=0)
+            else:
+                for i in range(0, len(rptr[0:-1])):
+                    out[i] = Tbl[Indices[rptr[i]:rptr[i + 1]]
+                                 ].sum(axis=0) * 1.0 / float(Lengths[i])
+
+            return out
+
+        np.testing.assert_allclose(self.ws.blobs[("out")].fetch(),
+                                   sparse_lengths_sum_ref(Tbl, Indices, Lengths), rtol=1e-3, atol=atol)
+
+    @given(batchsize=st.integers(1, 20),
+           fptype=st.sampled_from([np.float16, np.float32]),
+           fp16asint=st.booleans(),
+           blocksize=st.sampled_from([8, 17, 32, 64, 85, 96, 128, 163]),
+           **hu.gcs)
+    def test_sparse_lengths_weightedsum_cpu(
+            self, batchsize, fptype, fp16asint, blocksize, gc, dc):
+
+        print("<test_sparse_lengths_weightedsum_cpu>")
+
+        tblsize = 300
+        if fptype == np.float32:
+            Tbl = np.random.rand(tblsize, blocksize).astype(np.float32)
+            atol = 1e-5
+        else:
+            if fp16asint:
+                Tbl = (10.0 * np.random.rand(tblsize, blocksize)
+                       ).round().astype(np.float16)
+                atol = 1e-3
+            else:
+                Tbl = np.random.rand(tblsize, blocksize).astype(np.float16)
+                atol = 1e-1
+
+        # array of each row length
+        Lengths = np.random.randint(1, 30, size=batchsize).astype(np.int32)
+        # flat indices
+        Indices = np.random.randint(
+            0, tblsize, size=sum(Lengths)).astype(np.int64)
+        Weights = np.random.rand(sum(Lengths)).astype(np.float32)
+
+        op = core.CreateOperator("SparseLengthsWeightedSum", [
+                                 "Tbl", "Weights", "Indices", "Lengths"], "out")
+
+        self.ws.create_blob("Tbl").feed(Tbl)
+        self.ws.create_blob("Indices").feed(Indices)
+        self.ws.create_blob("Lengths").feed(Lengths)
+        self.ws.create_blob("Weights").feed(Weights)
+        self.ws.run(op)
+
+        def sparse_lengths_weightedsum_ref(Tbl, Weights, Indices, Lengths):
+            rptr = np.cumsum(np.insert(Lengths, [0], [0]))
+            out = np.zeros((len(Lengths), blocksize))
             for i in range(0, len(rptr[0:-1])):
-                out[i] = X[Y[rptr[i]:rptr[i + 1]]].sum(axis=0)
-            return [out]
+                w = Weights[rptr[i]:rptr[i + 1]]
+                out[i] = (Tbl[Indices[rptr[i]:rptr[i + 1]]]
+                          * w[:, np.newaxis]).sum(axis=0)
+            return out
 
-        self.assertReferenceChecks(
-            device_option=gc,
-            op=op,
-            inputs=[X, Y, Z],
-            reference=sparse_lengths_sum_ref,
-            atol=atol,
-        )
+        #print("Weights: " + str(Weights))
+        #print("computed_out: " + str(self.ws.blobs[("out")].fetch()))
+        #print("referenc_out: " + str(sparse_lengths_weightedsum_ref(Tbl, Weights, Indices, Lengths)))
+        np.testing.assert_allclose(self.ws.blobs[("out")].fetch(),
+                                   sparse_lengths_weightedsum_ref(Tbl, Weights, Indices, Lengths), rtol=1e-3, atol=atol)
 
 
 if __name__ == "__main__":
