@@ -16,8 +16,8 @@
 
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/auto_gpu.h"
+#include "torch/csrc/utils/disallow_copy.h"
 
-#include "torch/csrc/jit/DisallowCopy.h"
 #include "ATen/ArrayRef.h"
 #include "torch/csrc/jit/assert.h"
 #include "torch/csrc/jit/interned_strings.h"
