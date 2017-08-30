@@ -1,6 +1,6 @@
 #pragma once
 #include <torch/csrc/jit/ir.h>
-#include "torch/csrc/jit/DisallowCopy.h"
+#include "torch/csrc/utils/disallow_copy.h"
 #include "ATen/ATen.h"
 #include <cuda.h>
 #include <cuda_runtime.h>

@@ -1,8 +1,8 @@
 #include "torch/csrc/jit/fusion_compiler.h"
 #include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/DisallowCopy.h"
 #include "torch/csrc/jit/code_template.h"
 #include "torch/csrc/jit/resource_guard.h"
+#include "torch/csrc/utils/disallow_copy.h"
 #include "ATen/ATen.h"
 #include <nvrtc.h>
 #include <cuda.h>
