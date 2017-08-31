@@ -137,6 +137,9 @@ class DestroyCommonWorld final : public Operator<CPUContext> {
   }
 
   bool RunOnDevice() override {
+    if (OperatorBase::InputBlob(0).GetRaw() == nullptr) {
+      return true;
+    }
     const auto& context =
         OperatorBase::Input<std::shared_ptr<::gloo::Context>>(0);
 
