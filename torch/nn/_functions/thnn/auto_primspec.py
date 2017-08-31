@@ -1,6 +1,3 @@
-import torch.toffee
-
-
 def threshold_primspec(g, input, threshold=0, value=0, inplace=False):
     if inplace or threshold != 0 or value != 0:
         return None

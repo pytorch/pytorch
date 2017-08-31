@@ -1,7 +1,6 @@
 from torch.autograd import Variable
 from torch.autograd.function import Function, once_differentiable
 from torch._thnn import type2backend
-import torch.toffee
 
 from . import _all_functions
 from torch.nn.modules.utils import _single, _pair, _triple

@@ -1,5 +1,4 @@
 import torch
-import torch.toffee
 
 from ..function import Function, InplaceFunction
 from .utils import maybe_unexpand

@@ -1,6 +1,5 @@
 from functools import reduce
 import torch
-import torch.toffee
 from torch._utils import _accumulate
 
 from ..function import Function, InplaceFunction, once_differentiable
