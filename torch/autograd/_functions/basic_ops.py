@@ -8,8 +8,7 @@ class Add(InplaceFunction):
 
     @staticmethod
     def primspec(g, a, b, inplace=False):
-        if inplace:
-            return None
+        # TODO: [Export inplace]
         return g.appendNode(g.create("Add", [a, b]))
 
     @staticmethod
@@ -48,8 +47,7 @@ class Mul(Function):
 
     @staticmethod
     def primspec(g, a, b, inplace=False):
-        if inplace:
-            return None
+        # TODO: [Export inplace]
         return g.appendNode(g.create("Mul", [a, b]))
 
     @staticmethod
@@ -229,8 +227,7 @@ class Negate(InplaceFunction):
 
     @staticmethod
     def primspec(g, i, inplace=False):
-        if inplace:
-            return None
+        # TODO: [Export inplace]
         return g.appendNode(g.create("Scale", [i]).f_("scale", -1))
 
     @staticmethod
