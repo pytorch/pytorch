@@ -51,6 +51,7 @@ _known_working_ops = [
     "PackSegments",
     "Print",
     "PRelu",
+    "ReduceFrontSum",
     "Scale",
     "ScatterWeightedSum",
     "Sigmoid",
@@ -66,7 +67,7 @@ _known_working_ops = [
     "Transpose",
     "UnpackSegments",
     "WeightedSum",
-    "ReduceFrontSum",
+    "YellowFin"
 ]
 
 

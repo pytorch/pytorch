@@ -492,6 +492,134 @@ class AdamOptimizer(Optimizer):
         return
 
 
+class YellowFinOptimizer(Optimizer):
+    """YellowFin: An automatic tuner for momentum SGD
+
+    See https://arxiv.org/abs/1706.03471 for more details. This implementation
+    has separate learning rate and momentum per each parameter."""
+
+    def __init__(self,
+                 alpha=0.1,
+                 mu=0.0,
+                 beta=0.999,
+                 curv_win_width=20,
+                 zero_debias=True,
+                 epsilon=0.1**6,
+                 policy='fixed',
+                 sparse_dedup_aggregator=None,
+                 **kwargs):
+        super(YellowFinOptimizer, self).__init__()
+        self.alpha = alpha
+        self.mu = mu
+        self.beta = beta
+        self.curv_win_width = curv_win_width
+        self.zero_debias = zero_debias
+        self.epsilon = epsilon
+        self.policy = policy
+        self.sparse_dedup_aggregator = sparse_dedup_aggregator
+        self.init_kwargs = kwargs
+
+    def _run(self, net, param_init_net, param_info):
+
+        # Note: This is number of persistent scalars in YellowFin optimizer.
+        #       It should always be the number of scalars being used. The same
+        #       number should be used in class for the operation.
+        SCALARS_MEMORY_SIZE = 5
+
+        param = param_info.blob
+        grad = param_info.grad
+        moment = param_init_net.ConstantFill(
+            [param],
+            param + "_moment",
+            value=0.0
+        )
+        curv_win = param_init_net.ConstantFill(
+            [],
+            param + "_curv_win",
+            shape=[self.curv_win_width],
+            value=0.0
+        )
+        g_avg = param_init_net.ConstantFill(
+            [param],
+            param + "_g_avg",
+            value=0.0
+        )
+        g2_avg = param_init_net.ConstantFill(
+            [param],
+            param + "_g2_avg",
+            value=0.0
+        )
+        lr_avg = param_init_net.ConstantFill(
+            [],
+            param + "_lr_avg",
+            shape=[1],
+            value=self.alpha
+        )
+        mu_avg = param_init_net.ConstantFill(
+            [],
+            param + "_mu_avg",
+            shape=[1],
+            value=self.mu
+        )
+        scalars_memory = param_init_net.ConstantFill(
+            [],
+            param + "_scalars_memory",
+            shape=[SCALARS_MEMORY_SIZE],
+            value=0.0
+        )
+
+        assert self.alpha > 0
+        assert not isinstance(grad, core.GradientSlice), \
+            "Doesn't support sparse gradients"
+
+        if not param_init_net.BlobIsDefined(_OPTIMIZER_ITERATION_NAME):
+            # Add training operators.
+            with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU)):
+                iteration = param_init_net.ConstantFill(
+                    [],
+                    _OPTIMIZER_ITERATION_NAME,
+                    shape=[1],
+                    value=0,
+                    dtype=core.DataType.INT64)
+                iter_mutex = param_init_net.CreateMutex([],
+                                                        ["iteration_mutex"])
+                net.AtomicIter([iter_mutex, iteration], [iteration])
+        else:
+            iteration = param_init_net.GetBlobRef(_OPTIMIZER_ITERATION_NAME)
+
+        self._aux_params.shared.append(iteration)
+        self._aux_params.local.append(moment)
+        self._aux_params.local.append(lr_avg)
+        self._aux_params.local.append(mu_avg)
+        self._aux_params.local.append(curv_win)
+        self._aux_params.local.append(g_avg)
+        self._aux_params.local.append(g2_avg)
+        self._aux_params.local.append(scalars_memory)
+
+        yf_in_out_args = [
+            param,
+            moment,
+            lr_avg,
+            mu_avg,
+            curv_win,
+            g_avg,
+            g2_avg,
+            scalars_memory
+        ]
+
+        net.YellowFin(
+            yf_in_out_args + [grad, iteration],
+            yf_in_out_args,
+            beta=self.beta,
+            epsilon=self.epsilon,
+            curv_win_width=self.curv_win_width,
+            zero_debias=self.zero_debias)
+
+    def scale_learning_rate(self, scale):
+        self.alpha *= scale
+        return
+
+
 def _get_param_to_device(model):
     # Infer blob devices by going through the net and param_init_net
     # ops and observing the device used to create or use the blob.
@@ -758,3 +886,10 @@ def build_adam(
         max_gradient_norm=max_gradient_norm,
         allow_lr_injection=allow_lr_injection,
     )
+
+
+def build_yellowfin(model, base_learning_rate=0.1, **kwargs):
+    yellowfin_optimizer = YellowFinOptimizer(
+        alpha=base_learning_rate,
+        **kwargs)
+    return _build(model, yellowfin_optimizer)
