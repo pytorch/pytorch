@@ -110,12 +110,21 @@ vector<float> SimpleNet::TEST_Benchmark(
             << ". Iters per second: " << 1000.0 * main_runs / millis;
 
   vector<float> time_per_op(operators_.size(), 0);
+  vector<uint64_t> flops_per_op(operators_.size(), 0);
   CaffeMap<string, float> time_per_op_type;
   if (run_individual) {
     for (int i = 0; i < main_runs; ++i) {
       int idx = 0;
       for (auto& op : operators_) {
         const string& op_type = op->debug_def().type();
+        if (i == 0) { // Gather flops on the first run.
+          auto* schema = OpSchemaRegistry::Schema(op_type);
+          if (schema && schema->HasCostInferenceFunction()) {
+            vector<TensorShape> shapes = op->InputTensorShapes();
+            flops_per_op[idx] =
+                schema->InferCost(op->debug_def(), shapes).flops;
+          }
+        }
         timer.Start();
         CAFFE_ENFORCE(
             op->Run(),
@@ -139,8 +148,15 @@ vector<float> SimpleNet::TEST_Benchmark(
                ? op->debug_def().name()
                : (op->debug_def().output_size() ? op->debug_def().output(0)
                                                 : "NO_OUTPUT"));
+      std::stringstream flops_str;
+      if (flops_per_op[idx]) {
+        flops_str << " ("
+                  << to_string(1.0e-6 * flops_per_op[idx] / time_per_op[idx])
+                  << " GFLOPS)";
+      }
       LOG(INFO) << "Operator #" << idx << " (" << print_name << ", " << op_type
-                << ") " << time_per_op[idx] / main_runs << " ms/iter";
+                << ") " << time_per_op[idx] / main_runs << " ms/iter"
+                << flops_str.str();
       ++idx;
     }
     LOG(INFO) << "Time per operator type:";

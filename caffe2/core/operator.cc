@@ -39,6 +39,16 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
   }
 }
 
+TensorShape GetTensorShapeOfBlob(const Blob* b);
+
+vector<TensorShape> OperatorBase::InputTensorShapes() {
+  vector<TensorShape> tps;
+  for (const auto& blob : inputs_) {
+    tps.push_back(GetTensorShapeOfBlob(blob));
+  }
+  return tps;
+}
+
 namespace {
 
 PerOpEnginePrefType& g_per_op_engine_pref() {
@@ -452,6 +462,29 @@ static TensorShapes InferBlobShapesAndTypes(
   return tps;
 }
 
+TensorShape GetTensorShapeOfBlob(const Blob* b) {
+  TypeCall type_fun = GetTypeCallFunction(b->meta().id());
+  TensorInfoCall tensor_info_fun = GetTensorInfoFunction(b->meta().id());
+  TensorShape tp;
+
+  if (type_fun) {
+    tp.set_data_type(TypeMetaToDataType(type_fun(b->GetRaw())));
+  }
+  if (tensor_info_fun) {
+    bool _shares_data;
+    size_t _capacity;
+    DeviceOption _device;
+    auto shape =
+        tensor_info_fun(b->GetRaw(), &_shares_data, &_capacity, &_device);
+    for (auto d : shape) {
+      tp.add_dims(d);
+    }
+  } else {
+    tp.set_unknown_shape(true);
+  }
+  return tp;
+}
+
 TensorShapes InferBlobShapesAndTypesFromWorkspace(
     Workspace* ws,
     const vector<std::unique_ptr<NetDef>>& nets) {
@@ -460,25 +493,7 @@ TensorShapes InferBlobShapesAndTypesFromWorkspace(
   const std::vector<string>& ws_blobs = ws->Blobs();
   for (const auto& s : ws_blobs) {
     Blob* b = ws->GetBlob(s);
-    TypeCall type_fun = GetTypeCallFunction(b->meta().id());
-    TensorInfoCall tensor_info_fun = GetTensorInfoFunction(b->meta().id());
-    TensorShape tp;
-
-    if (type_fun) {
-        tp.set_data_type(TypeMetaToDataType(type_fun(b->GetRaw())));
-    }
-    if (tensor_info_fun) {
-      bool _shares_data;
-      size_t _capacity;
-      DeviceOption _device;
-      auto shape =
-          tensor_info_fun(b->GetRaw(), &_shares_data, &_capacity, &_device);
-      for (auto d : shape) {
-        tp.add_dims(d);
-      }
-    } else {
-      tp.set_unknown_shape(true);
-    }
+    TensorShape tp = GetTensorShapeOfBlob(b);
     blob_desc[s] = tp;
   }
   return InferBlobShapesAndTypes(blob_desc, nets);
