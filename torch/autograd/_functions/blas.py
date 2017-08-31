@@ -21,7 +21,9 @@ class Addmm(InplaceFunction):
         # natively support it
         if alpha != 1 or beta != 1:
             return None
-        return g.appendNode(g.create("FC", [matrix1, matrix2, add_matrix]))
+        # TODO: Talk to Toffee about why their FC involves a transpose
+        matrix2_t = g.appendNode(g.create("Transpose", [matrix2]))
+        return g.appendNode(g.create("FC", [matrix1, matrix2_t, add_matrix]))
 
     @staticmethod
     def forward(ctx, add_matrix, matrix1, matrix2, alpha=1, beta=1, inplace=False):

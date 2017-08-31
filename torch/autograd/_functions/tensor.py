@@ -77,10 +77,13 @@ class Transpose(Function):
 
     @staticmethod
     def primspec(g, i, dim1, dim2):
-        if dim1 == 0 and dim2 == 1:
+        # NB: Swap dim1 and dim2, which is different from Toffee's
+        # Transpose, which is actually a permute.
+        if dim1 == dim2:
             return i
-        return (g.appendNode(g.create("Transpose", [i]))
-                .is_("axes", (dim1, dim2)))
+        axes = list(range(len(i.type().sizes())))
+        axes[dim1], axes[dim2] = axes[dim2], axes[dim1]
+        return g.appendNode(g.create("Transpose", [i])).is_("axes", axes)
 
     @staticmethod
     def forward(ctx, i, dim1, dim2):
