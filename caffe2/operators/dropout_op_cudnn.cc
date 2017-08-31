@@ -150,7 +150,10 @@ bool CuDNNDropoutOp::DoRunWithType() {
     T* states_data = mask_and_states->template mutable_data<T>() +
       firstElementForStates<T>(reserve_space_size_in_bytes_);
     // set the dropout descriptor
-    CUDNN_ENFORCE(cudnnSetDropoutDescriptor(
+    {
+      // Need to protect  as clashes with NCCL
+      std::lock_guard<std::mutex> lk(CUDAContext::mutex());
+      CUDNN_ENFORCE(cudnnSetDropoutDescriptor(
         dropout_desc_,
         cudnn_wrapper_.inline_cudnn_handle(),
         ratio_,
@@ -158,6 +161,7 @@ bool CuDNNDropoutOp::DoRunWithType() {
         states_size_in_bytes_,
         0 // seed
         ));
+    }
   }
 
   // now actually run the computation
@@ -224,7 +228,10 @@ bool CuDNNDropoutGradientOp::DoRunWithType() {
         mask_and_states.template data<T>() +
         firstElementForStates<T>(reserve_space_size_in_bytes_));
     // set the dropout descriptor
-    CUDNN_ENFORCE(cudnnSetDropoutDescriptor(
+    {
+      // Need to protect  as clashes with NCCL
+      std::lock_guard<std::mutex> lk(CUDAContext::mutex());
+      CUDNN_ENFORCE(cudnnSetDropoutDescriptor(
         dropout_desc_,
         cudnn_wrapper_.inline_cudnn_handle(),
         ratio_,
@@ -232,6 +239,7 @@ bool CuDNNDropoutGradientOp::DoRunWithType() {
         states_size_in_bytes_,
         0 // seed
         ));
+     }
   }
 
   // run the computation
