@@ -7,15 +7,11 @@
 #include <ATen/ATen.h>
 
 #include "torch/csrc/jit/ir.h"
+#include "torch/csrc/jit/tracer_state.h"
 #include "torch/csrc/autograd/function_hook.h"
+#include "torch/csrc/utils/auto_unique_ptr.h"
 #include "torch/csrc/autograd/variable_version.h"
 #include "torch/csrc/Types.h"
-
-namespace torch { namespace jit { namespace tracer {
-
-struct TracingState;
-
-}}}
 
 namespace torch { namespace autograd {
 
@@ -24,24 +20,13 @@ struct Function;
 extern const char* ERR_BACKWARD_TWICE;
 
 struct Variable : std::enable_shared_from_this<Variable> {
-  struct ValueTracingState {
-    std::weak_ptr<torch::jit::tracer::TracingState> state;
-    // it's only valid to use this field if !state.exired()
-    torch::jit::Node* trace = nullptr;
-
-    void reset() {
-      state.reset();
-      trace = nullptr;
-    }
-  };
-
   struct SavedVariable {
     SavedVariable()
       : data()
       , version()
       , expected_version(-1) {}
 
-    SavedVariable(const Variable& variable, bool with_grad_fn)
+    SavedVariable(Variable& variable, bool with_grad_fn)
       : data(variable.data)
       , has_grad_fn(variable.grad_fn != nullptr)
       , grad_fn(with_grad_fn ? variable.grad_fn : nullptr)
@@ -49,8 +34,11 @@ struct Variable : std::enable_shared_from_this<Variable> {
       , version(variable.version_counter->new_saved_ref())
       , requires_grad(variable.requires_grad)
       , is_volatile(false)
-      , expected_version(**variable.version_counter)
-      , tracing_state(variable.tracing_state) {}
+      , expected_version(**variable.version_counter) {
+      if (variable.tracing_state) {
+        tracing_state.reset(new jit::tracer::ValueTracingState(*variable.tracing_state));
+      }
+    }
 
     at::Tensor data;
     // The gradient function associated with this node. If has_grad_fn
@@ -64,7 +52,7 @@ struct Variable : std::enable_shared_from_this<Variable> {
     bool requires_grad;
     bool is_volatile;
     int expected_version;
-    ValueTracingState tracing_state;
+    std::unique_ptr<jit::tracer::ValueTracingState> tracing_state;
 
     std::shared_ptr<Variable> unpack(std::shared_ptr<Function> saved_for=nullptr);
 
@@ -123,7 +111,7 @@ struct Variable : std::enable_shared_from_this<Variable> {
   PyObject *pyobj;  // weak reference
 
   // For use in torch::jit::tracer
-  ValueTracingState tracing_state;
+  auto_unique_ptr<jit::tracer::ValueTracingState> tracing_state;
 };
 
 using SavedVariable = Variable::SavedVariable;

@@ -91,7 +91,8 @@ auto SavedVariable::unpack(std::shared_ptr<Function> saved_for) -> std::shared_p
   if (requires_grad && !new_var->grad_fn && grad_accumulator.expired())
     throw std::logic_error("No grad accumulator for a saved leaf!");
   new_var->grad_accumulator = grad_accumulator;
-  new_var->tracing_state = tracing_state;
+  if (tracing_state)
+    new_var->tracing_state.reset(new jit::tracer::ValueTracingState(*tracing_state));
 
   return new_var;
 }

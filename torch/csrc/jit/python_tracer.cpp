@@ -65,7 +65,7 @@ namespace pybind11 { namespace detail {
 
 namespace torch { namespace jit {
 
-#define ASSERT_UNEXPIRED(METHOD_NAME) if (!s.graph) throw std::runtime_error("calling " METHOD_NAME " on an expired trace")
+#define ASSERT_UNEXPIRED(METHOD_NAME) if (s.is_expired()) throw std::runtime_error("calling " METHOD_NAME " on an expired trace")
 
 void initPythonTracerBindings(PyObject* module_) {
   auto m = py::handle(module_).cast<py::module>();
@@ -77,7 +77,7 @@ void initPythonTracerBindings(PyObject* module_) {
       return ss.str();
     })
     .def("__str__", [](const TracingState& s) -> std::string {
-      if (!s.graph) return "<expired TracingState>";
+      if (s.is_expired()) return "<expired TracingState>";
       std::ostringstream ss;
       ss << *s.graph;
       return ss.str();
@@ -93,8 +93,11 @@ void initPythonTracerBindings(PyObject* module_) {
     .def("graph", [](TracingState& s) {
       return s.graph;
     })
-    .def_property_readonly("valid", [](TracingState& s) {
-      return static_cast<bool>(s.graph);
+    .def_property_readonly("is_expired", [](TracingState& s) {
+      return s.is_expired();
+    })
+    .def_property_readonly("is_complete", [](TracingState& s) {
+      return s.is_complete();
     });
 
   m.def("_tracer_enter", [](std::vector<TraceInput> trace_inputs, std::size_t num_backwards) {

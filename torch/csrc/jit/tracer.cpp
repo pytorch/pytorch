@@ -19,7 +19,8 @@ struct TraceEval : autograd::Eval {
 
   virtual ~TraceEval() {
     auto state = weak_tracing_state.lock();
-    if (--state->eval_count == 0 && state->graph->stage() != state->num_stages - 1) {
+    if (!state) return;
+    if (--state->eval_count == 0 && !state->is_complete()) {
       state->graph = nullptr;
     }
   }
@@ -56,7 +57,7 @@ struct TraceEnterHook : autograd::FunctionPreHook {
     graph->advanceStage();
 
     for (auto & input : inputs) {
-      JIT_ASSERT(input->tracing_state.state.expired());
+      JIT_ASSERT(!detail::getValueState(tracing_state, input, false));
       Node *input_node = graph->addInput();
       setValueTrace(tracing_state, input, input_node);
       input_node->inferTypeFrom(input->data);
