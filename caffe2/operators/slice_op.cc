@@ -35,6 +35,41 @@ Example:
     .Input(2, "ends", "1D tensor: end-indices for each dimension of data.")
     .Arg("starts", "List of starting indices")
     .Arg("ends", "List of ending indices")
+    .TensorInferenceFunction([](const OperatorDef& def,
+                                const vector<TensorShape>& in) {
+      if (in.size() > 1) {
+        // Cannot compute shape inference when the splits are defined
+        // in data.
+        return vector<TensorShape>();
+      }
+      auto const& data = in[0];
+
+      ArgumentHelper helper(def);
+      auto starts = helper.GetRepeatedArgument<int>("starts", vector<int>());
+      auto ends = helper.GetRepeatedArgument<int>("ends", vector<int>());
+      vector<int> dst_sizes(data.dims_size());
+
+      for (int i = 0; i < data.dims_size(); ++i) {
+        if (i >= starts.size()) {
+          continue;
+        }
+        if (data.dims_size() > 0) {
+          auto start = starts[i];
+          auto end = ends[i];
+          if (start < 0) {
+            start = data.dims(i) + 1 + start;
+          }
+          if (end < 0) {
+            end = data.dims(i) + 1 + end;
+          }
+          dst_sizes[i] = end - start;
+        } else {
+          dst_sizes[i] = 0;
+        }
+      }
+      return vector<TensorShape>{
+          CreateTensorShape(dst_sizes, data.data_type())};
+    })
     .Output(0, "output", "Sliced data tensor.");
 
 OPERATOR_SCHEMA(SliceGradient);
