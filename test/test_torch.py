@@ -2887,6 +2887,15 @@ class TestTorch(TestCase):
                 [Ellipsis, [2, 3, 4]],
                 [Ellipsis, slice(None), [2, 3, 4]],
                 [slice(None), Ellipsis, [2, 3, 4]],
+
+                # ellipsis counts for nothing
+                [Ellipsis, slice(None), slice(None), [0, 3, 4]],
+                [slice(None), Ellipsis, slice(None), [0, 3, 4]],
+                [slice(None), slice(None), Ellipsis, [0, 3, 4]],
+                [slice(None), slice(None), [0, 3, 4], Ellipsis],
+                [Ellipsis, [[0, 1], [1, 0]], [[2, 1], [3, 5]], slice(None)],
+                [[[0, 1], [1, 0]], [[2, 1], [3, 5]], Ellipsis, slice(None)],
+                [[[0, 1], [1, 0]], [[2, 1], [3, 5]], slice(None), Ellipsis],
             ]
 
             for indexer in indices_to_test:
@@ -2959,6 +2968,8 @@ class TestTorch(TestCase):
                 [[0, 2, 1], [3], [4], slice(None)],
                 [[0, 2, 1], [3], [4], Ellipsis],
                 [Ellipsis, [0, 2, 1], [3], [4]],
+
+
             ]
 
             for indexer in indices_to_test:
