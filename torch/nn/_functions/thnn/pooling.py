@@ -12,7 +12,7 @@ class MaxPool1d(Function):
     def primspec(g, input, kernel_size, stride=None, padding=0, dilation=1,
                  ceil_mode=False):
         if ceil_mode:
-            return None
+            raise RuntimeError("ceil_mode not supported in MaxPool1d")
         stride = stride or kernel_size
         n = g.appendNode(g.create("MaxPool", [input])
                           .is_("kernels", [kernel_size])
@@ -97,7 +97,7 @@ class MaxPool2d(Function):
     def primspec(g, input, kernel_size, stride=None, padding=0, dilation=1,
                  ceil_mode=False):
         if ceil_mode:
-            return None
+            raise RuntimeError("ceil_mode not supported in MaxPool2d")
         n = g.appendNode(g.create("MaxPool", [input])
                           .is_("kernels", [kernel_size] * 2)
                           .is_("pads", [padding] * 4)
@@ -400,7 +400,7 @@ class AvgPool2d(Function):
     def primspec(g, input, kernel_size, stride=None, padding=0,
                  ceil_mode=False, count_include_pad=True):
         if ceil_mode:
-            return None
+            raise RuntimeError("ceil_mode not supported in AvgPool2d")
         stride = stride or kernel_size
         n = g.appendNode(g.create("AveragePool", [input])
                           .is_("kernels", [kernel_size] * 2)

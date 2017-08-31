@@ -395,8 +395,7 @@ class Squeeze(InplaceFunction):
 
     @staticmethod
     def primspec(g, input, dim, inplace=False):
-        if inplace:
-            return None
+        # TODO: [Export inplace]
         if dim is None:
             dims = []
             for i, size in enumerate(input.type().sizes()):
