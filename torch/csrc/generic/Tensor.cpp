@@ -642,7 +642,7 @@ static bool THPTensor_(_checkAdvancedIndexing)(THPTensor *indexed, PyObject *arg
   // adjacent
 
   long ndim = THTensor_(nDimension)(LIBRARY_STATE indexed->cdata);
-  if (PySequence_Check(arg) && PySequence_Size(arg) <= ndim) {
+  if (PySequence_Check(arg) && PySequence_Size(arg) <= ndim + 1) {
     THPObjectPtr fast = THPObjectPtr(PySequence_Fast(arg, NULL));
 
     bool sequenceFound = false;
@@ -650,7 +650,17 @@ static bool THPTensor_(_checkAdvancedIndexing)(THPTensor *indexed, PyObject *arg
     bool ellipsisFound = false;
     Py_ssize_t lastSeqDim = -1;
 
+    // Note that we can have ndim + 1 Tensors in the case where we have an ellipsis,
+    // because Python semantics allow it to be "thrown away" so to speak. If this is
+    // the case, we have to shift the dimension we are considering (in the indexed
+    // tensor) by -1 afer encountering the Ellipsis when accessing properties of
+    // the indexed Tensor
+    bool extraIndexer = PySequence_Fast_GET_SIZE(fast.get()) == ndim + 1;
+
     for (Py_ssize_t i = 0; i < PySequence_Fast_GET_SIZE(fast.get()); ++i) {
+      // see explanation above
+      int correspondingTensorDim = i + (extraIndexer && ellipsisFound ? -1 : 0);
+
       PyObject *item = PySequence_Fast_GET_ITEM(fast.get(), i);
       if (THPIndexTensor_Check(item) || PySequence_Check(item)) {
         sequenceFound = true;
@@ -664,7 +674,7 @@ static bool THPTensor_(_checkAdvancedIndexing)(THPTensor *indexed, PyObject *arg
         continue;
       }
       if (PySlice_Check(item)) {
-        long dimSize = THTensor_(size)(LIBRARY_STATE indexed->cdata, i);
+        long dimSize = THTensor_(size)(LIBRARY_STATE indexed->cdata, correspondingTensorDim);
         // Basically verify that the Slice is ':' and did not specify
         // a specific start, end or step
         Py_ssize_t start, end, length, step;
@@ -686,6 +696,11 @@ static bool THPTensor_(_checkAdvancedIndexing)(THPTensor *indexed, PyObject *arg
       }
       nonColonEllipsisFound = true;
       break;
+    }
+
+    // Check if we have ndim+1 indexing objects, that we found an ellipsis
+    if (PySequence_Size(arg) == ndim + 1 && !ellipsisFound) {
+      return false;
     }
 
     return sequenceFound && (!nonColonEllipsisFound);
@@ -787,9 +802,16 @@ static bool THPTensor_(_convertToTensorIndexers)(
 
       // If this is an ellipsis, the all subsequent advanced indexing
       // objects "positions" should be shifted, e.g. if we have a 5D Tensor
-      // x, and then x[..., [2, 3]], then the "position" of [2, 3] is 4
+      // x, and then x[..., [2, 3]], then the "position" of [2, 3] is 4,
+      //
+      // BUT ONLY IF, we don't have ndim other indexing objects, in which case
+      // the ellipsis creates a shift of -1 to counterbalance its "emptyness"
       if (Py_TYPE(item) == &PyEllipsis_Type) {
-        ellipsisOffset = THTensor_(nDimension)(LIBRARY_STATE indexed) - sequenceLength;
+        if (sequenceLength != (THTensor_(nDimension)(LIBRARY_STATE indexed) + 1)) {
+          ellipsisOffset = THTensor_(nDimension)(LIBRARY_STATE indexed) - sequenceLength;
+        } else {
+          ellipsisOffset = -1;
+        }
         continue;
       }
 
