@@ -23,24 +23,25 @@ CAFFE2_DECLARE_bool(caffe2_force_shared_col_buffer);
 namespace caffe2 {
 
 template <typename T, typename Context>
-void runTileContiguous(int tileId,
-                       int N,
-                       int M,
-                       int H,
-                       int W,
-                       int outputH,
-                       int outputW,
-                       int C,
-                       int kernelH,
-                       int kernelW,
-                       int strideH,
-                       int strideW,
-                       int padT,
-                       const T* filterData,
-                       const T* Xdata,
-                       T* colBufferData,
-                       T* Ydata,
-                       Context* context) {
+void runTileContiguous(
+    int tileId,
+    int N,
+    int M,
+    int H,
+    int W,
+    int outputH,
+    int outputW,
+    int C,
+    int kernelH,
+    int kernelW,
+    int strideH,
+    int strideW,
+    int padT,
+    const T* filterData,
+    const T* Xdata,
+    T* colBufferData,
+    T* Ydata,
+    Context* context) {
   // The tile size is exactly the length of a single row
   int tileSize = W;
 
@@ -48,20 +49,21 @@ void runTileContiguous(int tileId,
   auto currentTileStart = tileSize * tileId;
 
   // gemm tile
-  math::GemmEx<T, Context>(CblasTrans,
-                           CblasNoTrans,
-                           kernelDataSize,
-                           tileSize,
-                           M,
-                           1,
-                           filterData,
-                           kernelDataSize,
-                           Xdata + currentTileStart,
-                           H * W,
-                           0,
-                           colBufferData,
-                           tileSize,
-                           context);
+  math::GemmEx<T, Context>(
+      CblasTrans,
+      CblasNoTrans,
+      kernelDataSize,
+      tileSize,
+      M,
+      1,
+      filterData,
+      kernelDataSize,
+      Xdata + currentTileStart,
+      H * W,
+      0,
+      colBufferData,
+      tileSize,
+      context);
 
   // col2im tile
   // We assume that there is no padding in the columns (padL and padR
@@ -109,7 +111,8 @@ void runTileContiguous(int tileId,
     int offsetY = rowY * colBlockSize * numColBlocks + colY;
 
     T* colBufferPointer = colBufferData + c * tileSize;
-    T* yPointer = Ydata + c_im * outputH * (colBlockSize * numColBlocks) + offsetY;
+    T* yPointer =
+        Ydata + c_im * outputH * (colBlockSize * numColBlocks) + offsetY;
 
     int b = 0;
 #ifdef __ARM_NEON__
@@ -177,10 +180,14 @@ struct StoreInterleaved {};
 template <>
 struct StoreInterleaved<float, 1> {
 #ifdef __ARM_NEON__
-  inline static void store(float* p, float32x4_t v[1]) { vst1q_f32(p, v[0]); }
+  inline static void store(float* p, float32x4_t v[1]) {
+    vst1q_f32(p, v[0]);
+  }
 #endif
 
-  inline static void store(float* p, float v[1]) { p[0] = v[0]; }
+  inline static void store(float* p, float v[1]) {
+    p[0] = v[0];
+  }
 };
 
 template <>
@@ -232,18 +239,19 @@ struct StoreInterleaved<float, 4> {
 };
 
 template <int kStrideW>
-void reinterleaveRows(const float* src,
-                      const float* bias,
-                      int c,
-                      int h,
-                      float* dst,
-                      int outputC,
-                      int outputH,
-                      int outputW,
-                      int inputW,
-                      int kernelW,
-                      int strideW,
-                      int adjH) {
+void reinterleaveRows(
+    const float* src,
+    const float* bias,
+    int c,
+    int h,
+    float* dst,
+    int outputC,
+    int outputH,
+    int outputW,
+    int inputW,
+    int kernelW,
+    int strideW,
+    int adjH) {
   // Each row in src is of the form:
   // [w mod strideW == 0 elements]...[w mod strideW == strideW - 1
   // elements]
@@ -339,38 +347,41 @@ void reinterleaveRows(const float* src,
 }
 
 template <int N, typename T, typename Context>
-void reinterleaveMultithreaded(const T* y0,
-                               const Tensor<Context>& bias,
-                               T* y,
-                               int outputC,
-                               int outputH,
-                               int outputW,
-                               int inputW,
-                               int kernelW,
-                               int strideW,
-                               int adjH,
-                               ThreadPool* pool) {
+void reinterleaveMultithreaded(
+    const T* y0,
+    const Tensor<Context>& bias,
+    T* y,
+    int outputC,
+    int outputH,
+    int outputW,
+    int inputW,
+    int kernelW,
+    int strideW,
+    int adjH,
+    ThreadPool* pool) {
   // # channels times height
   size_t totalTiles = (size_t)outputC * outputH;
   FixedDivisor<int> divOutputH(outputH);
 
-#define REINTERLEAVE(N)                          \
-  do {                                           \
-    reinterleaveRows<N>(y0,                      \
-                        bias.template data<T>(), \
-                        c,                       \
-                        h,                       \
-                        y,                       \
-                        outputC,                 \
-                        outputH,                 \
-                        outputW,                 \
-                        inputW,                  \
-                        kernelW,                 \
-                        strideW,                 \
-                        adjH);                   \
+#define REINTERLEAVE(N)          \
+  do {                           \
+    reinterleaveRows<N>(         \
+        y0,                      \
+        bias.template data<T>(), \
+        c,                       \
+        h,                       \
+        y,                       \
+        outputC,                 \
+        outputH,                 \
+        outputW,                 \
+        inputW,                  \
+        kernelW,                 \
+        strideW,                 \
+        adjH);                   \
   } while (false)
 
-  std::function<void(int, size_t)> fnReinterleave = [&](int threadId, size_t tileId) {
+  std::function<void(int, size_t)> fnReinterleave = [&](int threadId,
+                                                        size_t tileId) {
     int h;
     int c;
     divOutputH.divMod((int)tileId, c, h);
@@ -523,12 +534,20 @@ bool ConvTransposeMobileOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   Tensor<Context>* Y = Output(0);
   const int N = X.dim32(0), M = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
   CAFFE_ENFORCE(filter.ndim() == 4, "filter must be 4D tensor");
-  CAFFE_ENFORCE(filter.dim32(0) == M, "filter number must be equal to input channel number");
+  CAFFE_ENFORCE(
+      filter.dim32(0) == M,
+      "filter number must be equal to input channel number");
   const int C = filter.dim32(1);
-  CAFFE_ENFORCE(filter.dim32(2) == kernel_h_, "filter height must be equal to kernel height");
-  CAFFE_ENFORCE(filter.dim32(3) == kernel_w_, "filter width must be equal to kernel width");
+  CAFFE_ENFORCE(
+      filter.dim32(2) == this->kernel_h(),
+      "filter height must be equal to kernel height");
+  CAFFE_ENFORCE(
+      filter.dim32(3) == this->kernel_w(),
+      "filter width must be equal to kernel width");
   CAFFE_ENFORCE(bias.ndim() == 1, "bias must be 1D tensor");
-  CAFFE_ENFORCE(bias.dim32(0) == C, "bias dimension must be equal to output channel number");
+  CAFFE_ENFORCE(
+      bias.dim32(0) == C,
+      "bias dimension must be equal to output channel number");
 
   ConvTransposeUnpoolBase<Context>::SetOutputSize(X, Y, C);
 
@@ -546,12 +565,12 @@ bool ConvTransposeMobileOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   // Initialize per-thread buffers for output
   // The main thread will write directly into the output Y, we just
   // need buffers for the worker threads
-  size_t colBlockSize = W + kernel_w_ / stride_w_;
-  size_t threadYBufferSize = C * outputH * colBlockSize * stride_w_;
+  size_t colBlockSize = W + this->kernel_w() / this->stride_w();
+  size_t threadYBufferSize = C * outputH * colBlockSize * this->stride_w();
   // Require 16 byte alignment, so 4-element alignment as these are floats.
   size_t threadYBufferSizeAligned =
-      ((C * outputH * colBlockSize * stride_w_ + 3) / 4) * 4;
-  size_t threadColBufferSize = C * kernel_h_ * kernel_w_ * W;
+      ((C * outputH * colBlockSize * this->stride_w() + 3) / 4) * 4;
+  size_t threadColBufferSize = C * this->kernel_h() * this->kernel_w() * W;
 
   // Work around GCC 4.9 bug when this is declared inside the inner lambda.
   auto runLocalTile = [&](TensorCPU* threadBuffer,
@@ -563,24 +582,25 @@ bool ConvTransposeMobileOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     auto localColBufferData = threadBuffer->template mutable_data<T>() +
         numThreads * threadYBufferSizeAligned + threadId * threadColBufferSize;
 
-    runTileContiguous<T, Context>(tileId,
-                                  N,
-                                  M,
-                                  H,
-                                  W,
-                                  outputH,
-                                  outputW,
-                                  C,
-                                  kernel_h_,
-                                  kernel_w_,
-                                  stride_h_,
-                                  stride_w_,
-                                  pad_t_,
-                                  filter.template data<T>(),
-                                  Xdata,
-                                  localColBufferData,
-                                  localYData,
-                                  &context_);
+    runTileContiguous<T, Context>(
+        tileId,
+        N,
+        M,
+        H,
+        W,
+        outputH,
+        outputW,
+        C,
+        this->kernel_h(),
+        this->kernel_w(),
+        this->stride_h(),
+        this->stride_w(),
+        this->pad_t(),
+        filter.template data<T>(),
+        Xdata,
+        localColBufferData,
+        localYData,
+        &context_);
   };
 
   auto f = [&](Tensor<Context>* threadBuffer) {
@@ -608,38 +628,44 @@ bool ConvTransposeMobileOp<T, Context>::RunOnDeviceWithOrderNCHW() {
       // Run tiled gemm and col2im in our threadpool; all of these tiles
       // are guaranteed to be full tiles
       // Each tile handles a single row of the input
-      pool->run([&](int threadId, int tileId) { runLocalTile(threadBuffer, threadId, tileId); }, H);
+      pool->run(
+          [&](int threadId, int tileId) {
+            runLocalTile(threadBuffer, threadId, tileId);
+          },
+          H);
 
       // We need to accumulate the per-thread results into the output
       // Y; the first worker thread (main thread) already produced its
       // results in Y
-      sumInto(threadBuffer->template mutable_data<T>(), toSum, threadYBufferSize);
+      sumInto(
+          threadBuffer->template mutable_data<T>(), toSum, threadYBufferSize);
 
 // y0 now contains the final output, but it is in deinterleaved
 // form. We have to re-interleave it to produce the final form in Y
 // This operation also handles adding the per-channel bias.
-#define REINTERLEAVE(N)                                                                \
-  do {                                                                                 \
-    reinterleaveMultithreaded<N, T, Context>(threadBuffer->template mutable_data<T>(), \
-                                             bias,                                     \
-                                             Ydata,                                    \
-                                             Y->dim32(1),                              \
-                                             Y->dim32(2),                              \
-                                             Y->dim32(3),                              \
-                                             W,                                        \
-                                             kernel_w_,                                \
-                                             stride_w_,                                \
-                                             this->adj_h_,                             \
-                                             pool);                                    \
+#define REINTERLEAVE(N)                           \
+  do {                                            \
+    reinterleaveMultithreaded<N, T, Context>(     \
+        threadBuffer->template mutable_data<T>(), \
+        bias,                                     \
+        Ydata,                                    \
+        Y->dim32(1),                              \
+        Y->dim32(2),                              \
+        Y->dim32(3),                              \
+        W,                                        \
+        this->kernel_w(),                         \
+        this->stride_w(),                         \
+        this->adj_h(),                            \
+        pool);                                    \
   } while (false)
 
-      if (stride_w_ == 1) {
+      if (this->stride_w() == 1) {
         REINTERLEAVE(1);
-      } else if (stride_w_ == 2) {
+      } else if (this->stride_w() == 2) {
         REINTERLEAVE(2);
-      } else if (stride_w_ == 3) {
+      } else if (this->stride_w() == 3) {
         REINTERLEAVE(3);
-      } else if (stride_w_ == 4) {
+      } else if (this->stride_w() == 4) {
         REINTERLEAVE(4);
       }
 

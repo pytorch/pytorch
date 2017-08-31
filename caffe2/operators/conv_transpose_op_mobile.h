@@ -22,9 +22,11 @@ class ConvTransposeMobileOp final : public ConvTransposeUnpoolBase<Context> {
   ConvTransposeMobileOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvTransposeUnpoolBase<Context>(operator_def, ws) {
     OPERATOR_NEEDS_FEATURE(order_ == StorageOrder::NCHW, "Only NCHW order is supported right now.");
-    OPERATOR_NEEDS_FEATURE(pad_l_ == 0, "operator does not handle row width padding");
-    OPERATOR_NEEDS_FEATURE(pad_r_ == 0, "operator does not handle row width padding");
-    OPERATOR_NEEDS_FEATURE(stride_w_ <= 4, "stride width must be <= 4");
+    OPERATOR_NEEDS_FEATURE(
+        this->pad_l() == 0, "operator does not handle row width padding");
+    OPERATOR_NEEDS_FEATURE(
+        this->pad_r() == 0, "operator does not handle row width padding");
+    OPERATOR_NEEDS_FEATURE(this->stride_w() <= 4, "stride width must be <= 4");
   }
 
   bool RunOnDeviceWithOrderNCHW() override;

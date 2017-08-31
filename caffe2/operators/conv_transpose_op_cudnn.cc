@@ -149,9 +149,9 @@ bool CudnnConvTransposeOp<T>::RunOnDevice() {
       M = X.dim32(3);
       H_out = Y->dim32(1);
       W_out = Y->dim32(2);
-      CAFFE_ENFORCE_EQ(filter.dim32(1), kernel_h_);
-      CAFFE_ENFORCE_EQ(filter.dim32(1), kernel_h_);
-      CAFFE_ENFORCE_EQ(filter.dim32(2), kernel_w_);
+      CAFFE_ENFORCE_EQ(filter.dim32(1), kernel_h());
+      CAFFE_ENFORCE_EQ(filter.dim32(1), kernel_h());
+      CAFFE_ENFORCE_EQ(filter.dim32(2), kernel_w());
       CAFFE_ENFORCE_EQ(filter.dim32(3), C);
       break;
     case StorageOrder::NCHW:
@@ -162,8 +162,8 @@ bool CudnnConvTransposeOp<T>::RunOnDevice() {
       H_out = Y->dim32(2);
       W_out = Y->dim32(3);
       CAFFE_ENFORCE_EQ(filter.dim32(1), C);
-      CAFFE_ENFORCE_EQ(filter.dim32(2), kernel_h_);
-      CAFFE_ENFORCE_EQ(filter.dim32(3), kernel_w_);
+      CAFFE_ENFORCE_EQ(filter.dim32(2), kernel_h());
+      CAFFE_ENFORCE_EQ(filter.dim32(3), kernel_w());
       break;
     default:
       LOG(FATAL) << "Unknown storage order: " << order_;
@@ -197,8 +197,8 @@ bool CudnnConvTransposeOp<T>::RunOnDevice() {
           GetCudnnTensorFormat(order_),
           M,
           C,
-          kernel_h_,
-          kernel_w_));
+          kernel_h(),
+          kernel_w()));
       CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
           bias_desc_,
           GetCudnnTensorFormat(order_),
@@ -219,22 +219,22 @@ bool CudnnConvTransposeOp<T>::RunOnDevice() {
         W_out));
     // Set the convolution descriptor
     CAFFE_ENFORCE_EQ(
-        pad_t_,
-        pad_b_,
+        pad_t(),
+        pad_b(),
         "The current padding scheme leads to unequal padding on the top and "
         "bottom, which is not supported by cudnn.");
     CAFFE_ENFORCE_EQ(
-        pad_l_,
-        pad_r_,
+        pad_l(),
+        pad_r(),
         "The current padding scheme leads to unequal padding on the left "
         "and right, which is not supported by cudnn.");
 #if CUDNN_VERSION_MIN(6,0,0)
     CUDNN_ENFORCE(cudnnSetConvolution2dDescriptor(
         conv_desc_,
-        pad_t_,
-        pad_l_,
-        stride_h_,
-        stride_w_,
+        pad_t(),
+        pad_l(),
+        stride_h(),
+        stride_w(),
         1,
         1,
         CUDNN_CROSS_CORRELATION,
@@ -242,10 +242,10 @@ bool CudnnConvTransposeOp<T>::RunOnDevice() {
 #else
     CUDNN_ENFORCE(cudnnSetConvolution2dDescriptor(
         conv_desc_,
-        pad_t_,
-        pad_l_,
-        stride_h_,
-        stride_w_,
+        pad_t(),
+        pad_l(),
+        stride_h(),
+        stride_w(),
         1,
         1,
         CUDNN_CROSS_CORRELATION));
@@ -366,9 +366,9 @@ bool CudnnConvTransposeGradientOp<T>::RunOnDevice() {
       M = X.dim32(3);
       H_out = dY.dim32(1);
       W_out = dY.dim32(2);
-      CAFFE_ENFORCE_EQ(filter.dim32(1), kernel_h_);
-      CAFFE_ENFORCE_EQ(filter.dim32(1), kernel_h_);
-      CAFFE_ENFORCE_EQ(filter.dim32(2), kernel_w_);
+      CAFFE_ENFORCE_EQ(filter.dim32(1), kernel_h());
+      CAFFE_ENFORCE_EQ(filter.dim32(1), kernel_h());
+      CAFFE_ENFORCE_EQ(filter.dim32(2), kernel_w());
       CAFFE_ENFORCE_EQ(filter.dim32(3), C);
       break;
     case StorageOrder::NCHW:
@@ -379,8 +379,8 @@ bool CudnnConvTransposeGradientOp<T>::RunOnDevice() {
       H_out = dY.dim32(2);
       W_out = dY.dim32(3);
       CAFFE_ENFORCE_EQ(filter.dim32(1), C);
-      CAFFE_ENFORCE_EQ(filter.dim32(2), kernel_h_);
-      CAFFE_ENFORCE_EQ(filter.dim32(3), kernel_w_);
+      CAFFE_ENFORCE_EQ(filter.dim32(2), kernel_h());
+      CAFFE_ENFORCE_EQ(filter.dim32(3), kernel_w());
       break;
     default:
       LOG(FATAL) << "Unknown storage order: " << order_;
@@ -414,8 +414,8 @@ bool CudnnConvTransposeGradientOp<T>::RunOnDevice() {
           GetCudnnTensorFormat(order_),
           M,
           C,
-          kernel_h_,
-          kernel_w_));
+          kernel_h(),
+          kernel_w()));
       CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
           bias_desc_,
           GetCudnnTensorFormat(order_),
@@ -436,22 +436,22 @@ bool CudnnConvTransposeGradientOp<T>::RunOnDevice() {
         W_out));
     // Set the convolution descriptor
     CAFFE_ENFORCE_EQ(
-        pad_t_,
-        pad_b_,
+        pad_t(),
+        pad_b(),
         "The current padding scheme leads to unequal padding on the top and "
         "bottom, which is not supported by cudnn.");
     CAFFE_ENFORCE_EQ(
-        pad_l_,
-        pad_r_,
+        pad_l(),
+        pad_r(),
         "The current padding scheme leads to unequal padding on the left "
         "and right, which is not supported by cudnn.");
 #if CUDNN_VERSION_MIN(6,0,0)
     CUDNN_ENFORCE(cudnnSetConvolution2dDescriptor(
         conv_desc_,
-        pad_t_,
-        pad_l_,
-        stride_h_,
-        stride_w_,
+        pad_t(),
+        pad_l(),
+        stride_h(),
+        stride_w(),
         1,
         1,
         CUDNN_CROSS_CORRELATION,
@@ -459,10 +459,10 @@ bool CudnnConvTransposeGradientOp<T>::RunOnDevice() {
 #else
     CUDNN_ENFORCE(cudnnSetConvolution2dDescriptor(
         conv_desc_,
-        pad_t_,
-        pad_l_,
-        stride_h_,
-        stride_w_,
+        pad_t(),
+        pad_l(),
+        stride_h(),
+        stride_w(),
         1,
         1,
         CUDNN_CROSS_CORRELATION));

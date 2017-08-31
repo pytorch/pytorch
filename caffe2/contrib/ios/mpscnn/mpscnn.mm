@@ -1071,7 +1071,7 @@ class MPSCNNConvTransposeOp final : public ConvTransposeUnpoolBase<CPUContext> {
       : ConvTransposeUnpoolBase<CPUContext>(operator_def, ws) {
     OPERATOR_NEEDS_FEATURE(this->order_ == StorageOrder::NCHW, "Metal only supports NCHW order.");
     CAFFE_ENFORCE_EQ(
-        kernel_w_, kernel_h_, "Metal only supports equal kernel dimensions");
+        kernel_w(), kernel_h(), "Metal only supports equal kernel dimensions");
   }
 
   bool RunOnDeviceWithOrderNCHW() override {
@@ -1087,18 +1087,18 @@ class MPSCNNConvTransposeOp final : public ConvTransposeUnpoolBase<CPUContext> {
     const int input_channels = filter.dim32(0);
 
     CAFFE_ENFORCE(X.featureChannels == input_channels, "");
-    CAFFE_ENFORCE(filter.dim32(2) == kernel_h_, "");
-    CAFFE_ENFORCE(filter.dim32(3) == kernel_w_, "");
+    CAFFE_ENFORCE(filter.dim32(2) == kernel_h(), "");
+    CAFFE_ENFORCE(filter.dim32(3) == kernel_w(), "");
     CAFFE_ENFORCE(bias.ndim() == 1, "");
     CAFFE_ENFORCE(bias.dim32(0) == output_channels, "");
 
-    const auto kH = kernel_h_;
-    const auto kW = kernel_w_;
+    const auto kH = kernel_h();
+    const auto kW = kernel_w();
 
     int output_height =
-        (X.height - 1) * stride_h_ + kH - pad_b_ - pad_t_ + adj_h_;
+        (X.height - 1) * stride_h() + kH - pad_b() - pad_t() + adj_h();
     int output_width =
-        (X.width - 1) * stride_w_ + kW - pad_l_ - pad_r_ + adj_w_;
+        (X.width - 1) * stride_w() + kW - pad_l() - pad_r() + adj_w();
 
     VLOG(2) << "Output height: " << output_height;
     VLOG(2) << "Output width:" << output_width;
@@ -1196,12 +1196,12 @@ class MPSCNNConvTransposeOp final : public ConvTransposeUnpoolBase<CPUContext> {
       caffe2::Timer cit;
       id<MTLComputePipelineState> state =
           getMPSCNNContext().getSpecializedPipelineState(@"col2im",
-                                                         {{ushort(kernel_h_),
-                                                           ushort(kernel_w_),
-                                                           ushort(stride_h_),
-                                                           ushort(stride_w_),
-                                                           ushort(pad_l_),
-                                                           ushort(pad_t_),
+                                                         {{ushort(kernel_h()),
+                                                           ushort(kernel_w()),
+                                                           ushort(stride_h()),
+                                                           ushort(stride_w()),
+                                                           ushort(pad_l()),
+                                                           ushort(pad_t()),
                                                            ushort(output.featureChannels),
                                                            ushort(output.numberOfImages),
                                                            ushort(gemmed.height),
