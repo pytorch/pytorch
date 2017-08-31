@@ -3,6 +3,7 @@
 #include "ATen/Storage.h"
 #include "ATen/Scalar.h"
 #include "ATen/SparseTensorRef.h"
+#include "ATen/ExpandUtils.h"
 
 #include <iostream>
 ${type_headers}
