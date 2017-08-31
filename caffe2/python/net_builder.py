@@ -427,13 +427,13 @@ class Operations(object):
         self.net().add_attribute(TaskGroup.LOCAL_SETUP, setup)
         return setup
 
-    def local_exit(self):
+    def local_exit(self, name=None):
         """
         Similar to `task_exit`, but executes at TaskGroup's exit instead,
         after all tasks of the group finished execution.
         This will run only once on each node.
         """
-        setup = _SetupBuilder(_SetupBuilder.EXIT)
+        setup = _SetupBuilder(_SetupBuilder.EXIT, name)
         self.net().add_attribute(TaskGroup.LOCAL_SETUP, setup)
         return setup
 
