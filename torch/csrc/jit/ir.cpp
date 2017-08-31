@@ -264,6 +264,10 @@ void Node::lint() {
   // - Stage is consistent (stage is >= all input stages)
   // - Owning graph is non-null and consistent
   // - The "Select" invariant, when the node is MultiReturn
+  //
+  // The handle invariant:
+  //    If a node takes a handle as an input, it is always the
+  //    LAST input of the node.  There is at most one handle input.
 
   {
     size_t i = 0;
@@ -272,6 +276,10 @@ void Node::lint() {
       JIT_ASSERT(std::find(ALL_OF(input->uses_), Use(this, i)) != input->uses_.end());
       JIT_ASSERT(stage_ >= input->stage_);
       JIT_ASSERT(graph_->all_nodes.count(this) == 1);
+      // Handle invariant
+      if (i != inputs_.size() - 1) {
+        JIT_ASSERT(!input->hasType() || input->type()->kind() != TypeKind::HandleType);
+      }
       i++;
     }
   }
