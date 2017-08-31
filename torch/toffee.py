@@ -21,8 +21,8 @@ def export(model, args, f, export_params=True, kwargs=None):
     Arguments:
         model (torch.nn.Module): the model to be exported.
         args (torch.autograd.Variable or tuple of variables): the inputs to
-            the model, e.g., such that ``model(*args)`` is a valid invocation
-            of the model.
+            the model, e.g., such that ``model(*args, **kwargs)`` is a valid
+            invocation of the model (see kwargs below).
         f: a file-like object (has to implement fileno that returns a file descriptor)
             or a string containing a file name.  A binary Protobuf will be written
             to this file.
@@ -51,5 +51,3 @@ def _export(model, args, f, export_params=True, kwargs=None):
         proto = trace.export()
     torch.serialization._with_file_like(f, "wb", lambda f: f.write(proto))
     return torch_out
-    # NB: It's very important that trace dies at the end of this function;
-    # otherwise you can't retrace the model.
