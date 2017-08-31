@@ -626,6 +626,10 @@ class TestAutograd(TestCase):
         check_index(x, y, ([1, 2], [0, 1], Ellipsis))
         check_index(x, y, (Ellipsis, [1, 2], [0, 1]))
 
+        # advanced indexing, with a tensor wrapped in a variable
+        z = Variable(torch.LongTensor([0, 1]))
+        check_index(x, y, (z, Ellipsis))
+
     def test_indexing_duplicates(self):
         x = torch.arange(1, 17).view(4, 4)
         y = Variable(x, requires_grad=True)

@@ -695,8 +695,16 @@ static bool THPTensor_(_convertToTensorIndexers)(
 
     if (!PySlice_Check(item)) {
       // Returns NULL upon conversion failure
+      PyObject *obj = PySequence_Fast_GET_ITEM(fast.get(), i);
+
+      // Need to check if this is a Variable, if so, extract the underyling Tensor
+      // to pass to the indexer constructor
+      if (THPVariable_Check(obj)) {
+        obj = ((THPVariable *)obj)->data;
+      }
+
       THPIndexTensor *indexer = (THPIndexTensor *)PyObject_CallFunctionObjArgs(
-          THPIndexTensorClass, PySequence_Fast_GET_ITEM(fast.get(), i), NULL);
+          THPIndexTensorClass, obj, NULL);
       if (!indexer) {
         PyErr_Format(PyExc_IndexError,
             "When performing advanced indexing the indexing objects must be LongTensors or "
