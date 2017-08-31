@@ -449,20 +449,6 @@ OPERATOR_SCHEMA(IsEmpty)
 OPERATOR_SCHEMA(Gather)
     .NumInputs(2)
     .NumOutputs(1)
-    .TensorInferenceFunction([](const OperatorDef& def,
-                                const vector<TensorShape>& in) {
-      vector<TensorShape> out(0);
-      TensorShape output;
-      for(int d : in[1].dims()) {
-        output.add_dims(d);
-      }
-      for(int j = 1; j < in[0].dims_size(); j++) {
-        output.add_dims(in[0].dims(j));
-      }
-      output.set_data_type(in[0].data_type());
-      out.push_back(output);
-      return out;
-    })
     .SetDoc(R"DOC(
 Given DATA tensor of rank r >= 1, and INDICES tensor of rank q, gather
 entries of the outer-most dimension of DATA indexed by INDICES, and concatenate
@@ -495,8 +481,8 @@ Example:
     .TensorInferenceFunction([](const OperatorDef& def,
                                 const vector<TensorShape>& in) {
       vector<TensorShape> out(1);
-      for (int i = 0; i < in[1].dims_size(); ++i) {
-        out[0].add_dims(in[1].dims(i));
+      for (auto d : in[1].dims()) {
+        out[0].add_dims(d);
       }
       for (int i = 1; i < in[0].dims_size(); ++i) {
         out[0].add_dims(in[0].dims(i));
