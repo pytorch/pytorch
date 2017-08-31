@@ -60,6 +60,11 @@ step.
 The 1st input is the queue and the last output is the status. The rest are
 data blobs.
 )DOC")
+    .Arg(
+        "num_records",
+        "(default 1) If > 1, multiple records will be dequeued and tensors "
+        "for each column will be concatenated. This requires all tensors in "
+        "the records to be at least 1D, and to have the same inner dimensions.")
     .Input(0, "queue", "The shared pointer for the BlobsQueue")
     .Output(0, "blob", "The blob to store the dequeued data")
     .Output(1, "status", "Is set to 0/1 depending on the success of dequeue");
