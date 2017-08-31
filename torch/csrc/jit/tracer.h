@@ -1,6 +1,7 @@
 #pragma once
 
 #include "torch/csrc/jit/ir.h"
+#include "torch/csrc/jit/tracer_state.h"
 #include "torch/csrc/jit/assert.h"
 #include "torch/csrc/autograd/function_hook.h"
 #include "torch/csrc/autograd/variable.h"
@@ -19,56 +20,47 @@ namespace torch { namespace jit { namespace tracer {
 using torch::autograd::Variable;
 using variable_list = std::vector<std::shared_ptr<Variable>>;
 
-// TracingState tracks the necessary state when we are tracing the execution of
-// autograd code; most importantly, it holds a reference to the actual IR
-// graph which we are recording the trace to.
-//
-// The liveness of a TracingState is expected to be a superset of the region
-// of code being traced; in particular, Variables do not keep a TracingState
-// live.  Instead, they hold weak pointers to TracingState, to prevent leaks
-// from arising when a variable that participated in a trace outlives the
-// actual trace itself.
+namespace detail {
 
-struct TracingState : public std::enable_shared_from_this<TracingState> {
-  TracingState(std::size_t num_stages)
-    : graph(new Graph())
-    , active(false)
-    , num_stages(num_stages)
-    , eval_count(0) {}
+inline ValueTracingStateElem* getValueState(const std::shared_ptr<TracingState>& state, const std::shared_ptr<Variable>& var, bool alloc = true) {
+  for (auto it = var->tracing_state->begin(); it != var->tracing_state->end();) {
+    auto ts = it->state.lock();
+    // GC of invalidated tracing states
+    if (!ts) {
+      auto current_it = it++;
+      var->tracing_state->erase(current_it);
+      continue;
+    } else if (ts == state) {
+      return &(*it);
+    }
+    ++it;
+  }
+  if (alloc) {
+    var->tracing_state->emplace_front();
+    auto & vts = var->tracing_state->front();
+    vts.state = state;
+    return &vts;
+  } else {
+    return nullptr;
+  }
+}
 
-  // XXX: graph can be NULL if it's a failed trace (failed = didn't capture all
-  // the stages we care about)
-  std::shared_ptr<Graph> graph;
-  bool active;
+inline bool isElemActive(const ValueTracingStateElem& vts) {
+  auto state = vts.state.lock();
+  return state && state->active;
+}
 
-  // Used to free the Graph as soon as we know this trace will fail
-  std::size_t num_stages;
-  std::atomic<std::size_t> eval_count;
+}
 
-  // void* is an unsafe TH.  NON-OWNING, so it might get invalidated.
-  // TODO: Perhaps, turn this into an owning reference.  The buffers
-  // are persistent, so this won't lead to a leak.
-  std::unordered_map<void*, Node*> buffer_map;
-
-  std::mutex mutex;
-  variable_list inputs; // Used only for the duration of first stage
-
-  std::unique_lock<std::mutex> lock() { return std::unique_lock<std::mutex>(mutex); };
-};
-
-struct FunctionTracingState {
-  bool in_eval_subgraph = false;
-};
 
 // Should a function which takes 'vars' as inputs be traced?
 // It sufficies for ONE variable to be tracing: any "untraced" variables
 // are treated as constants.
 inline bool isTracing(const variable_list& vars) {
   for (auto& var : vars) {
-    if (!var) continue;
-    auto state = var->tracing_state.state.lock();
-    if (state && state->active)
-        return true;
+    if (!var || !var->tracing_state) continue;
+    if (std::any_of(var->tracing_state->begin(), var->tracing_state->end(), detail::isElemActive))
+      return true;
   }
   return false;
 }
@@ -80,13 +72,12 @@ inline bool isTracing(const variable_list& vars) {
 inline std::shared_ptr<TracingState> getTracingState(const variable_list& vars) {
   std::shared_ptr<TracingState> state;
   for (auto& var : vars) {
-    if (!var) continue;
-    auto var_state = var->tracing_state.state.lock();
-    if (var_state) {
-      if (!state) {
-        state = var_state;
-      }
-      JIT_ASSERT(state == var_state);
+    if (!var || !var->tracing_state) continue;
+    for (auto & vts : *var->tracing_state) {
+      auto var_state = vts.state.lock();
+      if (!var_state || !var_state->active) continue;
+      if (!state) state = var_state;
+      JIT_ASSERT(var_state == state);
     }
   }
   JIT_ASSERT(state);
@@ -97,9 +88,8 @@ inline std::shared_ptr<TracingState> getTracingState(const variable_list& vars) 
 // 'setValueTrace' associates this node with an output variable, so that further operations
 // involving this variable know which node in the IR to reference.
 inline void setValueTrace(const std::shared_ptr<TracingState>& state, const std::shared_ptr<Variable>& var, Node *node) {
-  JIT_ASSERT(var->tracing_state.state.lock() == state || var->tracing_state.state.expired());
-  var->tracing_state.state = state;
-  var->tracing_state.trace = node;
+  auto vts = detail::getValueState(state, var);
+  vts->trace = node;
 }
 
 // Given a variable 'var', return the 'node' which represents the instruction
@@ -117,17 +107,17 @@ inline void setValueTrace(const std::shared_ptr<TracingState>& state, const std:
 // This is one of the cases where a Variable can be created inside of a trace, and
 // if we treat it as a constant, everything will work out.
 inline Node* getValueTrace(const std::shared_ptr<TracingState>& state, const std::shared_ptr<Variable>& var, bool mustExist = false) {
-  //JIT_ASSERTM(var, "Not supported. NULL Variables will need to be removed from autograd");
   if (!var) {
     return state->graph->appendNode(state->graph->createUndefined());
   }
-  auto var_state = var->tracing_state.state.lock();
-  if (var_state) {
-    JIT_ASSERT(var->tracing_state.state.lock() == state);
-    return var->tracing_state.trace;
+  if (mustExist) {
+    auto vts = detail::getValueState(state, var, false);
+    if (!vts) throw std::runtime_error("untraced variable");
+    return vts->trace;
   }
 
-  if (mustExist) throw std::runtime_error("untraced variable");
+  auto vts = detail::getValueState(state, var, true);
+  if (vts->trace) return vts->trace;
 
   Node *constant = state->graph->appendNode(state->graph->createConstant(var->data));
   constant->inferTypeFrom(var->data);
@@ -167,7 +157,6 @@ inline std::shared_ptr<TracingState> enter(std::vector<TraceInput>&& trace_input
     if (trace_input.variable != nullptr) {
       JIT_ASSERT(!trace_input.buffer.defined());
       auto& input = trace_input.variable;
-      JIT_ASSERT(input->tracing_state.state.expired());
       Node *input_node = state->graph->addInput();
       setValueTrace(state, input, input_node);
       input_node->inferTypeFrom(input->data);

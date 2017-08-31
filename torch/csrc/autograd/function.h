@@ -16,12 +16,6 @@
 #include <memory>
 #include <vector>
 
-namespace torch { namespace jit { namespace tracer {
-
-struct FunctionTracingState;
-
-}}}
-
 namespace torch { namespace autograd {
 
 struct Function;

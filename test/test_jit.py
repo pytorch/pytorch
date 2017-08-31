@@ -22,7 +22,7 @@ class TestJit(TestCase):
         x = Variable(torch.Tensor([0.4]), requires_grad=True)
         y = Variable(torch.Tensor([0.7]), requires_grad=True)
 
-        trace = torch._C._tracer_enter((x, y))
+        trace = torch._C._tracer_enter((x, y), 0)
         z = torch.sigmoid(torch.tanh(x * (x + y)))
         torch._C._tracer_exit((z,))
         torch._C._jit_pass_lint(trace)
@@ -122,7 +122,7 @@ class TestJit(TestCase):
         x = Variable(torch.Tensor([0.4]), requires_grad=True)
         y = Variable(torch.Tensor([0.7]), requires_grad=True)
 
-        trace = torch._C._tracer_enter((x, y))
+        trace = torch._C._tracer_enter((x, y), 1)
 
         z = torch.sigmoid(x * (x + y))
         w = torch.abs(x * x * x + y) + Variable(torch.ones(1))
@@ -148,7 +148,7 @@ class TestJit(TestCase):
     def test_constant(self):
         x = Variable(torch.randn(2, 2), requires_grad=True)
 
-        trace = torch._C._tracer_enter((x,))
+        trace = torch._C._tracer_enter((x,), 0)
 
         y = Variable(torch.diag(torch.Tensor([2, 2])))
         z = x.matmul(y)
@@ -169,7 +169,7 @@ class TestJit(TestCase):
         x = Variable(torch.randn(1, 3, 10, 10))
         m = nn.Conv2d(3, 8, 3, 1)
 
-        trace = torch._C._tracer_enter((x,) + tuple(m.parameters()))
+        trace = torch._C._tracer_enter((x,) + tuple(m.parameters()), 0)
         y = m(x)
         torch._C._tracer_exit((y,))
         self.assertExpected(str(trace))
@@ -184,13 +184,13 @@ class TestJit(TestCase):
                 return grad_output
 
         x = Variable(torch.Tensor([0]), requires_grad=True)
-        trace = torch._C._tracer_enter((x,))
+        trace = torch._C._tracer_enter((x,), 0)
         self.assertRaises(RuntimeError, lambda: Legacy()(x))
         torch._C._tracer_exit((x,))
 
     def test_inplace_transplant(self):
         x = Variable(torch.Tensor([0]), requires_grad=True)
-        trace = torch._C._tracer_enter((x,))
+        trace = torch._C._tracer_enter((x,), 0)
         y = x.clone()
         y.add_(2)
         y.add_(3)
@@ -204,7 +204,7 @@ class TestJit(TestCase):
         x = a
         y = a * b
 
-        trace = torch._C._tracer_enter((x, y))
+        trace = torch._C._tracer_enter((x, y), 2)
         z = y * 2 * x
         torch._C._tracer_exit((z,))
         torch._C._jit_pass_lint(trace)
@@ -231,20 +231,41 @@ class TestJit(TestCase):
             torch._C._tracer_exit((z,))
             return z, trace
 
+        def check(expired, complete):
+            self.assertEqual(trace.is_expired, expired)
+            self.assertEqual(trace.is_complete, complete)
+
         z, trace = record_trace(0)
+        check(False, True)
         del z
-        self.assertTrue(trace.valid)
-        del trace
+        check(False, True)
 
         z, trace = record_trace(1)
+        check(False, False)
         del z
-        self.assertFalse(trace.valid)
-        del trace
+        check(True, False)
 
         z, trace = record_trace(1)
+        check(False, False)
         z.sum().backward()
+        check(False, True)
         del z
-        self.assertTrue(trace.valid)
+        check(False, True)
+
+    def test_multiuse_fn(self):
+        x = Variable(torch.randn(2, 2), requires_grad=True)
+        w = Variable(torch.randn(2, 2), requires_grad=True)
+
+        @torch.jit.trace(parameters=[w])
+        def cell(x):
+            return x * w + 2
+
+        out = cell(cell(cell(x)))
+        self.assertIsNone(cell.saved_closure)
+
+        out.sum().backward()
+        cell(x)
+        self.assertIsNotNone(cell.saved_closure)
 
     def test_python_ir(self):
         x = Variable(torch.Tensor([0.4]), requires_grad=True)
