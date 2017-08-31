@@ -75,6 +75,7 @@ function build() {
               -DTHCUNN_SO_VERSION=1 \
               -DTHD_SO_VERSION=1 \
               -DNO_CUDA=$((1-$WITH_CUDA)) \
+              -DNCCL_EXTERNAL=1 \
               -DCMAKE_BUILD_TYPE=$([ $DEBUG ] && echo Debug || echo Release) \
               $2
   make install -j$(getconf _NPROCESSORS_ONLN)
