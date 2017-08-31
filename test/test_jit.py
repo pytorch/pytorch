@@ -221,6 +221,31 @@ class TestJit(TestCase):
         torch._C._jit_pass_dce(trace)
         self.assertExpected(str(trace))
 
+    def test_trace_expire(self):
+        x = Variable(torch.randn(2, 2), requires_grad=True)
+        y = Variable(torch.randn(2, 2), requires_grad=True)
+
+        def record_trace(num_backwards):
+            trace = torch._C._tracer_enter((x, y), num_backwards)
+            z = y * 2 * x
+            torch._C._tracer_exit((z,))
+            return z, trace
+
+        z, trace = record_trace(0)
+        del z
+        self.assertTrue(trace.valid)
+        del trace
+
+        z, trace = record_trace(1)
+        del z
+        self.assertFalse(trace.valid)
+        del trace
+
+        z, trace = record_trace(1)
+        z.sum().backward()
+        del z
+        self.assertTrue(trace.valid)
+
     def test_python_ir(self):
         x = Variable(torch.Tensor([0.4]), requires_grad=True)
         y = Variable(torch.Tensor([0.7]), requires_grad=True)
