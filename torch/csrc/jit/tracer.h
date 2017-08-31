@@ -30,16 +30,26 @@ using variable_list = std::vector<std::shared_ptr<Variable>>;
 // actual trace itself.
 
 struct TracingState : public std::enable_shared_from_this<TracingState> {
-  TracingState()
+  TracingState(std::size_t num_stages)
     : graph(new Graph())
-    , active(false) {}
+    , active(false)
+    , num_stages(num_stages)
+    , eval_count(0) {}
 
+  // XXX: graph can be NULL if it's a failed trace (failed = didn't capture all
+  // the stages we care about)
   std::shared_ptr<Graph> graph;
+  bool active;
+
+  // Used to free the Graph as soon as we know this trace will fail
+  std::size_t num_stages;
+  std::atomic<std::size_t> eval_count;
+
   // void* is an unsafe TH.  NON-OWNING, so it might get invalidated.
   // TODO: Perhaps, turn this into an owning reference.  The buffers
   // are persistent, so this won't lead to a leak.
   std::unordered_map<void*, Node*> buffer_map;
-  bool active;
+
   std::mutex mutex;
   variable_list inputs; // Used only for the duration of first stage
 
@@ -150,9 +160,8 @@ struct TraceInput {
 // NB: Why does this take an rvalue reference?  We need to get a non-const
 // reference to at::Tensor buffer to call unsafeGetTH, but you can't get this
 // out of a const vector (silly std::vector...)
-inline std::shared_ptr<TracingState> enter(std::vector<TraceInput>&& trace_inputs) {
-  auto state = std::make_shared<TracingState>();
-  // TODO: Figure out what's going on with batchnorm backwards...
+inline std::shared_ptr<TracingState> enter(std::vector<TraceInput>&& trace_inputs, std::size_t num_stages) {
+  auto state = std::make_shared<TracingState>(num_stages);
   variable_list inputs;
   for (auto& trace_input : trace_inputs) {
     if (trace_input.variable != nullptr) {

@@ -188,7 +188,7 @@ variable_list Eval::apply(const variable_list& inputs) {
   auto& engine = python::PythonEngine::getDefaultEngine();
   engine.execute(roots, inputs, true, getCallbacks(outputs, outputs_mutex));
 
-  auto bw_eval = std::make_shared<Eval>();
+  auto bw_eval = newEval();
   bw_eval->replaceSubgraph(inputs, outputs, placeholders);
 
   // This will prevent Function::traced_apply from marking the backward subgraph as non-traceable.

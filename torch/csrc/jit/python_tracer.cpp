@@ -65,6 +65,8 @@ namespace pybind11 { namespace detail {
 
 namespace torch { namespace jit {
 
+#define ASSERT_UNEXPIRED(METHOD_NAME) if (!s.graph) throw std::runtime_error("calling " METHOD_NAME " on an expired trace")
+
 void initPythonTracerBindings(PyObject* module_) {
   auto m = py::handle(module_).cast<py::module>();
   py::class_<TracingState,std::shared_ptr<TracingState>>(m, "TracingState")
@@ -74,23 +76,29 @@ void initPythonTracerBindings(PyObject* module_) {
       ss << "<TracingState " << (const void*)&s << ">";
       return ss.str();
     })
-    .def("__str__", [](const TracingState& s) {
+    .def("__str__", [](const TracingState& s) -> std::string {
+      if (!s.graph) return "<expired TracingState>";
       std::ostringstream ss;
       ss << *s.graph;
       return ss.str();
     })
     .def("export", [](TracingState& s, bool verbose) {
+      ASSERT_UNEXPIRED("export");
       return py::bytes(ExportGraph(s.graph, s.buffer_map, {}, verbose));
     })
     .def("export", [](TracingState& s, const std::vector<at::Tensor>& initializers, bool verbose) {
+      ASSERT_UNEXPIRED("export");
       return py::bytes(ExportGraph(s.graph, s.buffer_map, initializers, verbose));
     })
     .def("graph", [](TracingState& s) {
       return s.graph;
+    })
+    .def_property_readonly("valid", [](TracingState& s) {
+      return static_cast<bool>(s.graph);
     });
 
-  m.def("_tracer_enter", [](std::vector<TraceInput> trace_inputs) {
-    return enter(std::move(trace_inputs));
+  m.def("_tracer_enter", [](std::vector<TraceInput> trace_inputs, std::size_t num_backwards) {
+    return enter(std::move(trace_inputs), num_backwards + 1);
   });
   m.def("_tracer_exit", [](variable_list var_outputs) {
     tracer::exit(var_outputs);
