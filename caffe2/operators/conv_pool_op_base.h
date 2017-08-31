@@ -357,6 +357,43 @@ class ConvPoolOpBase : public Operator<Context> {
     CAFFE_NOT_IMPLEMENTED;
   }
 
+  static struct OpSchema::Cost CostInferenceForConv(
+      const OperatorDef& def,
+      const vector<TensorShape>& inputs) {
+    struct OpSchema::Cost c;
+    const TensorShape X = inputs[0];
+    const TensorShape W = inputs[1];
+
+    ArgumentHelper helper(def);
+    const auto order =
+        StringToStorageOrder(helper.GetSingleArgument<string>("order", "NCHW"));
+
+    unsigned long long X_h;
+    unsigned long long X_w;
+    unsigned long long kernel_h;
+    unsigned long long kernel_w;
+    unsigned long long in_channels;
+    unsigned long long out_channels;
+    if (order == StorageOrder::NHWC) {
+      X_h = X.dims(1);
+      X_w = X.dims(2);
+      kernel_h = W.dims(1);
+      kernel_w = W.dims(2);
+      in_channels = W.dims(3);
+      out_channels = W.dims(0);
+    } else {
+      X_h = X.dims(2);
+      X_w = X.dims(3);
+      kernel_h = W.dims(2);
+      kernel_w = W.dims(3);
+      in_channels = W.dims(1);
+      out_channels = W.dims(0);
+    }
+    c.flops = (X_h - kernel_h + 1) * (X_w - kernel_w + 1) * kernel_w *
+        kernel_h * in_channels * out_channels * 2;
+    return c;
+  }
+
   static vector<TensorShape> TensorInferenceForSchema(
       const OperatorDef& def,
       const vector<TensorShape>& in,

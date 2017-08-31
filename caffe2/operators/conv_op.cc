@@ -73,6 +73,7 @@ REGISTER_CPU_OPERATOR(Conv2D, ConvOp<float, CPUContext>);
 OPERATOR_SCHEMA(Conv2D)
     .NumInputs(2, 3)
     .NumOutputs(1)
+    .CostInferenceFunction(ConvPoolOpBase<CPUContext>::CostInferenceForConv)
     .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForConv)
     .FillUsing(ConvDocGenerator("2D "));
 
