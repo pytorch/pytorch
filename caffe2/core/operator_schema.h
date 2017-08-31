@@ -165,8 +165,8 @@ class OpSchema {
    * an operator such as FLOPs and total memory use.
    */
   struct Cost {
-    size_t flops; // Floating point operations.
-    size_t bytes_moved; // Total memory used.
+    uint64_t flops; // Floating point operations.
+    uint64_t bytes_moved; // Total memory used.
   };
   /**
    * @brief Registers a function that takes in an OperatorDef
@@ -180,11 +180,16 @@ class OpSchema {
   /**
    * @brief Register the Cost inference function.
    */
-  OpSchema& CostInferenceFunction(CostInferenceFunctionType function);
+  OpSchema& CostInferenceFunction(CostInferenceFunctionType&& function);
+  bool HasCostInferenceFunction() const {
+    return !!cost_inference_function_;
+  }
   inline struct Cost InferCost(
       const OperatorDef& def,
       const vector<TensorShape>& input_tensor_shape) const {
-    return cost_inference_function_(def, input_tensor_shape);
+    CAFFE_ENFORCE(
+        cost_inference_function_, "Cost inference function not defined.");
+    return (*cost_inference_function_)(def, input_tensor_shape);
   }
 
   // Functions to do documentation for the operator schema.
@@ -244,13 +249,6 @@ class OpSchema {
   }
 
  private:
-  [[noreturn]] Cost DefaultConstInferenceFunction(
-      const OperatorDef&,
-      const vector<TensorShape>&) {
-    CAFFE_THROW("No cost inference function registered.");
-  }
-
- private:
   string file_;
   string doc_;
   std::vector<std::pair<const char*, const char*>> arg_desc_{};
@@ -285,11 +283,7 @@ class OpSchema {
         }
         return out;
       };
-  CostInferenceFunctionType cost_inference_function_ = std::bind(
-      &OpSchema::DefaultConstInferenceFunction,
-      this,
-      std::placeholders::_1,
-      std::placeholders::_2);
+  std::unique_ptr<CostInferenceFunctionType> cost_inference_function_ = nullptr;
   DeviceInferenceFunctionType device_inference_function_ =
       [](const OperatorDef& def) {
         auto op_device =

@@ -100,6 +100,7 @@ class OperatorBase {
   inline int OutputSize() { return outputs_.size(); }
   inline const vector<const Blob*>& Inputs() const { return inputs_; }
   inline const vector<Blob*>& Outputs() { return outputs_; }
+  vector<TensorShape> InputTensorShapes();
 
   virtual void WaitEvent(const Event& ev) {
     CAFFE_NOT_IMPLEMENTED;
