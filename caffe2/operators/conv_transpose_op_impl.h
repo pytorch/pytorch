@@ -28,10 +28,10 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNCHW() {
       "filter number must be equal to input channel number");
   const int C = filter.dim32(1);
   CAFFE_ENFORCE(
-      filter.dim32(2) == kernel_h_,
+      filter.dim32(2) == this->kernel_h(),
       "filter height must be equal to kernel height");
   CAFFE_ENFORCE(
-      filter.dim32(3) == kernel_w_,
+      filter.dim32(3) == this->kernel_w(),
       "filter width must be equal to kernel width");
   CAFFE_ENFORCE(bias.ndim() == 1, "bias must be 1D tensor");
   CAFFE_ENFORCE(
@@ -39,7 +39,7 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNCHW() {
       "bias dimension must be equal to output channel number");
   ConvTransposeUnpoolBase<Context>::SetOutputSize(X, Y, C);
 
-  const int kernel_dim = C * kernel_h_ * kernel_w_;
+  const int kernel_dim = C * this->kernel_h() * this->kernel_w();
   const int input_image_size = H * W;
   const int output_image_size = Y->dim32(2) * Y->dim32(3);
 
@@ -58,7 +58,8 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   T* Ydata = Y->template mutable_data<T>();
 
   auto f = [&](Tensor<Context>* col_buffer) {
-    col_buffer->Resize(vector<TIndex>{C, kernel_h_, kernel_w_, H, W});
+    col_buffer->Resize(
+        vector<TIndex>{C, this->kernel_h(), this->kernel_w(), H, W});
     T* col_buffer_data = col_buffer->template mutable_data<T>();
     for (auto image_id = 0; image_id < N; ++image_id) {
       // Weight term
@@ -81,16 +82,16 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNCHW() {
           C,
           Y->dim32(2),
           Y->dim32(3),
-          kernel_h_,
-          kernel_w_,
+          this->kernel_h(),
+          this->kernel_w(),
           1,
           1,
-          pad_t_,
-          pad_l_,
-          pad_b_,
-          pad_r_,
-          stride_h_,
-          stride_w_,
+          this->pad_t(),
+          this->pad_l(),
+          this->pad_b(),
+          this->pad_r(),
+          this->stride_h(),
+          this->stride_w(),
           Ydata,
           &context_);
 
@@ -141,10 +142,10 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNHWC() {
       filter.dim32(0) == M,
       "filter number must be equal to input channel number");
   CAFFE_ENFORCE(
-      filter.dim32(1) == kernel_h_,
+      filter.dim32(1) == this->kernel_h(),
       "filter height must be equal to kernel height");
   CAFFE_ENFORCE(
-      filter.dim32(2) == kernel_w_,
+      filter.dim32(2) == this->kernel_w(),
       "filter width must be equal to kernel width");
   const int C = filter.dim32(3);
   CAFFE_ENFORCE(bias.ndim() == 1, "bias must be 1D tensor");
@@ -153,7 +154,7 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNHWC() {
       "bias dimension must be equal to output channel number");
   ConvTransposeUnpoolBase<Context>::SetOutputSize(X, Y, C);
 
-  const auto kernel_dim = C * kernel_h_ * kernel_w_;
+  const auto kernel_dim = C * this->kernel_h() * this->kernel_w();
   const auto input_image_size = H * W;
   const auto output_image_size = Y->dim32(1) * Y->dim32(2);
 
@@ -169,7 +170,8 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   T* Ydata = Y->template mutable_data<T>();
 
   auto f = [&](Tensor<Context>* /*col_buffer*/) {
-    col_buffer_.Resize(vector<TIndex>{H, W, kernel_h_, kernel_w_, C});
+    col_buffer_.Resize(
+        vector<TIndex>{H, W, this->kernel_h(), this->kernel_w(), C});
     T* col_buffer_data = col_buffer_.template mutable_data<T>();
     for (auto image_id = 0; image_id < N; ++image_id) {
       // Weight term
@@ -191,16 +193,16 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNHWC() {
           C,
           Y->dim32(1),
           Y->dim32(2),
-          kernel_h_,
-          kernel_w_,
+          this->kernel_h(),
+          this->kernel_w(),
           1,
           1,
-          pad_t_,
-          pad_l_,
-          pad_b_,
-          pad_r_,
-          stride_h_,
-          stride_w_,
+          this->pad_t(),
+          this->pad_l(),
+          this->pad_b(),
+          this->pad_r(),
+          this->stride_h(),
+          this->stride_w(),
           Ydata,
           &context_);
       // Bias term
@@ -243,18 +245,19 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   CAFFE_ENFORCE(filter.ndim() == 4);
   const int C = filter.dim32(1);
   CAFFE_ENFORCE(
-      filter.dim32(2) == kernel_h_,
+      filter.dim32(2) == this->kernel_h(),
       "filter height must be equal to kernel height");
   CAFFE_ENFORCE(
-      filter.dim32(3) == kernel_w_,
+      filter.dim32(3) == this->kernel_w(),
       "filter width must be equal to kernel width");
   dfilter->ResizeLike(filter);
   dbias->Resize(C);
 
-  const int kernel_dim = C * kernel_h_ * kernel_w_;
+  const int kernel_dim = C * this->kernel_h() * this->kernel_w();
   const int output_image_size = dY.dim32(2) * dY.dim32(3);
   // The col buffer is stored in CHW order as well
-  col_buffer_.Resize(vector<TIndex>{C, kernel_h_, kernel_w_, H, W});
+  col_buffer_.Resize(
+      vector<TIndex>{C, this->kernel_h(), this->kernel_w(), H, W});
   if (bias_multiplier_.size() != output_image_size) {
     bias_multiplier_.Resize(1, output_image_size);
     math::Set<T, Context>(
@@ -279,16 +282,16 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
         C,
         dY.dim32(2),
         dY.dim32(3),
-        kernel_h_,
-        kernel_w_,
+        this->kernel_h(),
+        this->kernel_w(),
         1,
         1,
-        pad_t_,
-        pad_l_,
-        pad_b_,
-        pad_r_,
-        stride_h_,
-        stride_w_,
+        this->pad_t(),
+        this->pad_l(),
+        this->pad_b(),
+        this->pad_r(),
+        this->stride_h(),
+        this->stride_w(),
         col_buffer_data,
         &context_);
     // Gemm
@@ -336,16 +339,16 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
           C,
           dY.dim32(2),
           dY.dim32(3),
-          kernel_h_,
-          kernel_w_,
+          this->kernel_h(),
+          this->kernel_w(),
           1,
           1,
-          pad_t_,
-          pad_l_,
-          pad_b_,
-          pad_r_,
-          stride_h_,
-          stride_w_,
+          this->pad_t(),
+          this->pad_l(),
+          this->pad_b(),
+          this->pad_r(),
+          this->stride_h(),
+          this->stride_w(),
           col_buffer_data,
           &context_);
       // Gemm
@@ -382,19 +385,20 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   // We simply use the values from the user
   CAFFE_ENFORCE(filter.ndim() == 4, "filter must be 4D tensor");
   CAFFE_ENFORCE(
-      filter.dim32(1) == kernel_h_,
+      filter.dim32(1) == this->kernel_h(),
       "filter height must be equal to kernel height");
   CAFFE_ENFORCE(
-      filter.dim32(2) == kernel_w_,
+      filter.dim32(2) == this->kernel_w(),
       "filter width must be equal to kernel width");
   const int C = filter.dim32(3);
   dfilter->ResizeLike(filter);
   dbias->Resize(C);
 
-  const int kernel_dim = C * kernel_h_ * kernel_w_;
+  const int kernel_dim = C * this->kernel_h() * this->kernel_w();
   const int output_image_size = dY.dim32(1) * dY.dim32(2);
   // The col buffer is stored in HWC order as well
-  col_buffer_.Resize(vector<TIndex>{H, W, kernel_h_, kernel_w_, C});
+  col_buffer_.Resize(
+      vector<TIndex>{H, W, this->kernel_h(), this->kernel_w(), C});
   if (bias_multiplier_.size() != output_image_size) {
     bias_multiplier_.Resize(1, output_image_size);
     math::Set<T, Context>(
@@ -419,16 +423,16 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
         C,
         dY.dim32(1),
         dY.dim32(2),
-        kernel_h_,
-        kernel_w_,
+        this->kernel_h(),
+        this->kernel_w(),
         1,
         1,
-        pad_t_,
-        pad_l_,
-        pad_b_,
-        pad_r_,
-        stride_h_,
-        stride_w_,
+        this->pad_t(),
+        this->pad_l(),
+        this->pad_b(),
+        this->pad_r(),
+        this->stride_h(),
+        this->stride_w(),
         col_buffer_data,
         &context_);
     // Gemm
@@ -476,16 +480,16 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
           C,
           dY.dim32(1),
           dY.dim32(2),
-          kernel_h_,
-          kernel_w_,
+          this->kernel_h(),
+          this->kernel_w(),
           1,
           1,
-          pad_t_,
-          pad_l_,
-          pad_b_,
-          pad_r_,
-          stride_h_,
-          stride_w_,
+          this->pad_t(),
+          this->pad_l(),
+          this->pad_b(),
+          this->pad_r(),
+          this->stride_h(),
+          this->stride_w(),
           col_buffer_data,
           &context_);
       // Gemm

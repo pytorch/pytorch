@@ -22,10 +22,11 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
            engine=st.sampled_from(["", "CUDNN", "BLOCK"]),
            shared_buffer=st.booleans(),
            **hu.gcs)
-    def test_convolution_transpose_layout(self, stride, pad, kernel, adj,
-                                          size, input_channels,
-                                          output_channels, batch_size,
-                                          engine, shared_buffer, gc, dc):
+    def test_convolution_transpose_layout_legacy_args(
+            self, stride, pad, kernel, adj,
+            size, input_channels,
+            output_channels, batch_size,
+            engine, shared_buffer, gc, dc):
         assume(adj < stride)
         X = np.random.rand(
             batch_size, size, size, input_channels).astype(np.float32) - 0.5
@@ -43,6 +44,65 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
                 kernel=kernel,
                 pad=pad,
                 adj=adj,
+                order=order,
+                engine=engine,
+                shared_buffer=int(shared_buffer),
+                device_option=gc,
+            )
+            if order == "NCHW":
+                X_f = X.transpose((0, 3, 1, 2))
+                w_f = w.transpose((0, 3, 1, 2))
+            else:
+                X_f = X
+                w_f = w
+            self.ws.create_blob("X").feed(X_f, device_option=gc)
+            self.ws.create_blob("w").feed(w_f, device_option=gc)
+            self.ws.create_blob("b").feed(b, device_option=gc)
+            self.ws.run(op)
+            outputs[order] = self.ws.blobs["Y"].fetch()
+        output_size = (size - 1) * stride + kernel + adj - 2 * pad
+        self.assertEqual(
+            outputs["NCHW"].shape,
+            (batch_size, output_channels, output_size, output_size))
+        np.testing.assert_allclose(
+            outputs["NCHW"],
+            outputs["NHWC"].transpose((0, 3, 1, 2)),
+            atol=1e-4,
+            rtol=1e-4)
+
+    @given(stride=st.integers(1, 3),
+           pad=st.integers(0, 3),
+           kernel=st.integers(1, 5),
+           adj=st.integers(0, 2),
+           size=st.integers(7, 10),
+           input_channels=st.integers(1, 8),
+           output_channels=st.integers(1, 8),
+           batch_size=st.integers(1, 3),
+           engine=st.sampled_from(["", "CUDNN", "BLOCK"]),
+           shared_buffer=st.booleans(),
+           **hu.gcs)
+    def test_convolution_transpose_layout(
+            self, stride, pad, kernel, adj,
+            size, input_channels,
+            output_channels, batch_size,
+            engine, shared_buffer, gc, dc):
+        assume(adj < stride)
+        X = np.random.rand(
+            batch_size, size, size, input_channels).astype(np.float32) - 0.5
+        w = np.random.rand(
+            input_channels, kernel, kernel, output_channels)\
+            .astype(np.float32) - 0.5
+        b = np.random.rand(output_channels).astype(np.float32) - 0.5
+        outputs = {}
+        for order in ["NCHW", "NHWC"]:
+            op = core.CreateOperator(
+                "ConvTranspose",
+                ["X", "w", "b"],
+                ["Y"],
+                strides=[stride] * 2,
+                kernels=[kernel] * 2,
+                pads=[pad] * 4,
+                adjs=[adj] * 2,
                 order=order,
                 engine=engine,
                 shared_buffer=int(shared_buffer),

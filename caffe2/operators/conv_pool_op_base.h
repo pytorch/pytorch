@@ -119,6 +119,7 @@ class ConvPoolOpBase : public Operator<Context> {
     if (pads_.size() == 0) {
       pads_.resize(kernel_.size() * 2, 0);
     }
+
     if (dilation_.size() == 0) {
       dilation_.resize(kernel_.size(), 1);
     }

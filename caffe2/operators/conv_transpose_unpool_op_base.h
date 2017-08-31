@@ -23,58 +23,106 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
             static_cast<LegacyPadding>(OperatorBase::GetSingleArgument<int>(
                 "legacy_pad",
                 LegacyPadding::NOTSET))),
-        pad_(OperatorBase::GetSingleArgument<int>("pad", 0)),
-        pad_t_(OperatorBase::GetSingleArgument<int>("pad_t", pad_)),
-        pad_l_(OperatorBase::GetSingleArgument<int>("pad_l", pad_)),
-        pad_b_(OperatorBase::GetSingleArgument<int>("pad_b", pad_)),
-        pad_r_(OperatorBase::GetSingleArgument<int>("pad_r", pad_)),
-        kernel_h_(OperatorBase::GetSingleArgument<int>(
-            "kernel_h",
-            OperatorBase::GetSingleArgument<int>("kernel", 0))),
-        kernel_w_(OperatorBase::GetSingleArgument<int>(
-            "kernel_w",
-            OperatorBase::GetSingleArgument<int>("kernel", 0))),
-        stride_h_(OperatorBase::GetSingleArgument<int>(
-            "stride_h",
-            OperatorBase::GetSingleArgument<int>("stride", 1))),
-        stride_w_(OperatorBase::GetSingleArgument<int>(
-            "stride_w",
-            OperatorBase::GetSingleArgument<int>("stride", 1))),
-        adj_h_(OperatorBase::GetSingleArgument<int>(
-            "adj_h",
-            OperatorBase::GetSingleArgument<int>("adj", 0))),
-        adj_w_(OperatorBase::GetSingleArgument<int>(
-            "adj_w",
-            OperatorBase::GetSingleArgument<int>("adj", 0))),
+        kernel_(OperatorBase::GetRepeatedArgument<int>("kernels")),
+        stride_(OperatorBase::GetRepeatedArgument<int>("strides")),
+        pads_(OperatorBase::GetRepeatedArgument<int>("pads")),
+        adj_(OperatorBase::GetRepeatedArgument<int>("adjs")),
         order_(StringToStorageOrder(
             OperatorBase::GetSingleArgument<string>("order", "NCHW"))),
         shared_buffer_(
             OperatorBase::GetSingleArgument<int>("shared_buffer", 0)),
         ws_(ws) {
-    CAFFE_ENFORCE(kernel_h_ > 0);
-    CAFFE_ENFORCE(kernel_w_ > 0);
     // For the padding, they should either be the legacy padding strategy
     // (VALID or SAME), or an explicit, non-negative value.
     if (legacy_pad_ == LegacyPadding::VALID ||
         legacy_pad_ == LegacyPadding::SAME) {
       CAFFE_ENFORCE(
-          !OperatorBase::HasArgument("pad") &&
-              !OperatorBase::HasArgument("pad_t") &&
-              !OperatorBase::HasArgument("pad_l") &&
-              !OperatorBase::HasArgument("pad_b") &&
-              !OperatorBase::HasArgument("pad_r"),
+          !OperatorBase::HasArgument("pads"),
           "If you use legacy padding VALID or SAME, you should not specify "
           "any specific padding values.");
     }
-    CAFFE_ENFORCE(pad_ >= 0);
-    CAFFE_ENFORCE(pad_t_ >= 0);
-    CAFFE_ENFORCE(pad_l_ >= 0);
-    CAFFE_ENFORCE(pad_b_ >= 0);
-    CAFFE_ENFORCE(pad_r_ >= 0);
-    CAFFE_ENFORCE(stride_h_ > 0);
-    CAFFE_ENFORCE(stride_w_ > 0);
-    CAFFE_ENFORCE(adj_h_ < stride_h_);
-    CAFFE_ENFORCE(adj_w_ < stride_w_);
+    // Get old arguments values.
+    if (OperatorBase::HasArgument("kernel")) {
+      kernel_.resize(2, OperatorBase::GetSingleArgument<int>("kernel", 0));
+    } else if (
+        OperatorBase::HasArgument("kernel_h") &&
+        OperatorBase::HasArgument("kernel_w")) {
+      kernel_.push_back(OperatorBase::GetSingleArgument<int>("kernel_h", 0));
+      kernel_.push_back(OperatorBase::GetSingleArgument<int>("kernel_w", 0));
+    }
+
+    if (OperatorBase::HasArgument("stride")) {
+      stride_.resize(2, OperatorBase::GetSingleArgument<int>("stride", 0));
+    } else if (
+        OperatorBase::HasArgument("stride_h") &&
+        OperatorBase::HasArgument("stride_w")) {
+      stride_.push_back(OperatorBase::GetSingleArgument<int>("stride_h", 0));
+      stride_.push_back(OperatorBase::GetSingleArgument<int>("stride_w", 0));
+    }
+
+    if (OperatorBase::HasArgument("adj")) {
+      adj_.resize(2, OperatorBase::GetSingleArgument<int>("adj", 0));
+    } else if (
+        OperatorBase::HasArgument("adj_h") &&
+        OperatorBase::HasArgument("adj_w")) {
+      adj_.push_back(OperatorBase::GetSingleArgument<int>("adj_h", 0));
+      adj_.push_back(OperatorBase::GetSingleArgument<int>("adj_w", 0));
+    }
+
+    if (OperatorBase::HasArgument("pad")) {
+      CAFFE_ENFORCE(
+          legacy_pad_ != LegacyPadding::VALID &&
+              legacy_pad_ != LegacyPadding::SAME,
+          "If you use legacy padding VALID or SAME, you should not specify "
+          "any specific padding values.");
+      pads_.resize(4, OperatorBase::GetSingleArgument<int>("pad", 0));
+    } else if (
+        OperatorBase::HasArgument("pad_t") &&
+        OperatorBase::HasArgument("pad_l") &&
+        OperatorBase::HasArgument("pad_b") &&
+        OperatorBase::HasArgument("pad_r")) {
+      CAFFE_ENFORCE(
+          legacy_pad_ != LegacyPadding::VALID &&
+              legacy_pad_ != LegacyPadding::SAME,
+          "If you use legacy padding VALID or SAME, you should not specify "
+          "any specific padding values.");
+      pads_.push_back(OperatorBase::GetSingleArgument<int>("pad_t", 0));
+      pads_.push_back(OperatorBase::GetSingleArgument<int>("pad_l", 0));
+      pads_.push_back(OperatorBase::GetSingleArgument<int>("pad_b", 0));
+      pads_.push_back(OperatorBase::GetSingleArgument<int>("pad_r", 0));
+    }
+
+    // Fill default values.
+    if (kernel_.size() == 0) {
+      kernel_.assign({0, 0});
+    }
+
+    if (stride_.size() == 0) {
+      stride_.resize(kernel_.size(), 1);
+    }
+
+    if (pads_.size() == 0) {
+      pads_.resize(kernel_.size() * 2, 0);
+    }
+
+    if (adj_.size() == 0) {
+      adj_.resize(kernel_.size(), 0);
+    }
+
+    CAFFE_ENFORCE_EQ(stride_.size(), kernel_.size());
+    CAFFE_ENFORCE_EQ(adj_.size(), kernel_.size());
+
+    if (legacy_pad_ != LegacyPadding::VALID &&
+        legacy_pad_ != LegacyPadding::SAME) {
+      CAFFE_ENFORCE_EQ(pads_.size(), 2 * kernel_.size());
+    }
+
+    for (int dim = 0; dim < kernel_.size(); ++dim) {
+      CAFFE_ENFORCE_GT(kernel_[dim], 0);
+      CAFFE_ENFORCE_GT(stride_[dim], 0);
+      CAFFE_ENFORCE_GE(adj_[dim], 0);
+      CAFFE_ENFORCE_LE(adj_[dim], stride_[dim]);
+    }
 
     // Create shared buffer mutex in the constructor
     // to avoid race-condition in DAGNet.
@@ -111,9 +159,21 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
     }
     int output_height = 0, output_width = 0;
     ComputeSizeAndPad(
-        H, stride_h_, kernel_h_, adj_h_, &pad_t_, &pad_b_, &output_height);
+        H,
+        stride_[0],
+        kernel_[0],
+        adj_[0],
+        &pads_[0],
+        &pads_[2],
+        &output_height);
     ComputeSizeAndPad(
-        W, stride_w_, kernel_w_, adj_w_, &pad_l_, &pad_r_, &output_width);
+        W,
+        stride_[1],
+        kernel_[1],
+        adj_[1],
+        &pads_[1],
+        &pads_[3],
+        &output_width);
     if (channel_first) {
       output->Resize(N, output_channel, output_height, output_width);
     } else {
@@ -152,19 +212,55 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
   int pad_;
 
  protected:
-  int pad_t_;
-  int pad_l_;
-  int pad_b_;
-  int pad_r_;
-  int kernel_h_;
-  int kernel_w_;
-  int stride_h_;
-  int stride_w_;
-  int adj_h_;
-  int adj_w_;
+  vector<int> kernel_;
+  vector<int> stride_;
+  vector<int> pads_;
+  vector<int> adj_;
   StorageOrder order_;
   bool shared_buffer_;
   Workspace* ws_;
+
+  // Accessors for 2D conv params.
+
+  inline int pad_t() const {
+    return pads_[0];
+  }
+
+  inline int pad_l() const {
+    return pads_[1];
+  }
+
+  inline int pad_b() const {
+    return pads_[2];
+  }
+
+  inline int pad_r() const {
+    return pads_[3];
+  }
+
+  inline int kernel_h() const {
+    return kernel_[0];
+  }
+
+  inline int kernel_w() const {
+    return kernel_[1];
+  }
+
+  inline int stride_h() const {
+    return stride_[0];
+  }
+
+  inline int stride_w() const {
+    return stride_[1];
+  }
+
+  inline int adj_h() const {
+    return adj_[0];
+  }
+
+  inline int adj_w() const {
+    return adj_[1];
+  }
 
   inline void ComputeSizeAndPad(
       const int in_size,
@@ -198,14 +294,10 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
 
 #define USE_CONV_TRANSPOSE_UNPOOL_BASE_FUNCTIONS(Context) \
   USE_OPERATOR_FUNCTIONS(Context);                        \
-  using ConvTransposeUnpoolBase<Context>::pad_t_;         \
-  using ConvTransposeUnpoolBase<Context>::pad_b_;         \
-  using ConvTransposeUnpoolBase<Context>::pad_l_;         \
-  using ConvTransposeUnpoolBase<Context>::pad_r_;         \
-  using ConvTransposeUnpoolBase<Context>::kernel_h_;      \
-  using ConvTransposeUnpoolBase<Context>::kernel_w_;      \
-  using ConvTransposeUnpoolBase<Context>::stride_h_;      \
-  using ConvTransposeUnpoolBase<Context>::stride_w_;      \
+  using ConvTransposeUnpoolBase<Context>::kernel_;        \
+  using ConvTransposeUnpoolBase<Context>::stride_;        \
+  using ConvTransposeUnpoolBase<Context>::pads_;          \
+  using ConvTransposeUnpoolBase<Context>::adj_;           \
   using ConvTransposeUnpoolBase<Context>::order_;         \
   using ConvTransposeUnpoolBase<Context>::shared_buffer_; \
   using ConvTransposeUnpoolBase<Context>::ws_
