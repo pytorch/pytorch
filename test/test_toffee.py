@@ -46,6 +46,11 @@ class TestToffee(TestCase):
         trace, _ = torch.jit.record_trace(lambda x: x.view(1, 1), x)
         self.assertToffeeExpected(trace.export())
 
+    def test_transpose(self):
+        x = Variable(torch.Tensor([[0, 1], [2, 3]]), requires_grad=True)
+        trace, _ = torch.jit.record_trace(lambda x: x.transpose(0, 1).transpose(1, 0), x)
+        self.assertToffeeExpected(trace.export())
+
     def test_params(self):
         x = Variable(torch.Tensor([[1, 2], [3, 4]]), requires_grad=True)
         y = Variable(torch.Tensor([[1, 2], [3, 4]]), requires_grad=True)
