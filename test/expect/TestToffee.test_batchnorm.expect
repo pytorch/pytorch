@@ -43,3 +43,27 @@ input: "3"
 input: "4"
 input: "5"
 output: "7"
+initializer {
+  dims: 2
+  data_type: FLOAT
+  name: "1"
+  raw_data: "\277Kh>\324\3350?"
+}
+initializer {
+  dims: 2
+  data_type: FLOAT
+  name: "2"
+  raw_data: "\000\000\000\000\000\000\000\000"
+}
+initializer {
+  dims: 2
+  data_type: FLOAT
+  name: "3"
+  raw_data: "\315\314\314=\315\314\314="
+}
+initializer {
+  dims: 2
+  data_type: FLOAT
+  name: "4"
+  raw_data: "fff?fff?"
+}
