@@ -76,8 +76,8 @@ class Module(object):
         Example:
             >>> self.register_buffer('running_mean', torch.zeros(num_features))
         """
-        if hasattr(self, name):
-            raise KeyError("attribute already exists '{}'".format(name))
+        if hasattr(self, name) and name not in self._buffers.keys():
+            raise KeyError("attribute '{}' already exists".format(name))
 
         self._buffers[name] = tensor
 
@@ -89,6 +89,10 @@ class Module(object):
         if '_parameters' not in self.__dict__:
             raise AttributeError(
                 "cannot assign parameter before Module.__init__() call")
+
+        if hasattr(self, name) and name not in self._parameters.keys():
+          raise KeyError("attribute '{}' already exists".format(name))
+
         if param is None:
             self._parameters[name] = None
         elif not isinstance(param, Parameter):
@@ -101,8 +105,6 @@ class Module(object):
                 "parameters must be created explicitly. To express '{0}' "
                 "as a function of another variable, compute the value in "
                 "the forward() method.".format(name))
-        elif name not in self._parameters.keys() and hasattr(self, name):
-            raise KeyError("attribute already exists '{}'".format(name))
         else:
             self._parameters[name] = param
 
@@ -114,8 +116,8 @@ class Module(object):
         if not isinstance(module, Module) and module is not None:
             raise TypeError("{} is not a Module subclass".format(
                 torch.typename(module)))
-        if hasattr(self, name):
-            raise KeyError("attribute already exists '{}'".format(name))
+        if hasattr(self, name) and name not in self._modules.keys():
+            raise KeyError("attribute '{}' already exists".format(name))
         self._modules[name] = module
 
     def _apply(self, fn):
