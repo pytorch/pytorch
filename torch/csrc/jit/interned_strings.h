@@ -27,7 +27,7 @@ _(Chunk) \
 _(NumChunks) \
 _(Dim) \
 _(Offset) \
-_(Value) \
+_(value) \
 _(Subgraph) \
 _(SpatialBN) \
 _(Conv) \
@@ -39,6 +39,7 @@ _(order) \
 _(momentum) \
 _(consumed_inputs) \
 _(kernels) \
+_(kernel_shape) \
 _(kernel) \
 _(strides) \
 _(stride) \

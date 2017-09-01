@@ -21,4 +21,6 @@ initializer {
   name: "1"
   raw_data: "\001\000\000\000\000\000\000\000\002\000\000\000\000\000\000\000\003\000\000\000\000\000\000\000\004\000\000\000\000\000\000\000"
 }
-producer_version: 1
+ir_version: 1
+producer_version: 20000
+producer_tag: "pytorch"

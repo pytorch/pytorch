@@ -137,10 +137,11 @@ struct MicroProto {
   }
 
   template<typename S, const pb_field_t* Field = nullptr>
-  pb_callback_t msg(S* slot) {
+  pb_callback_t msg(std::unique_ptr<S>* slot) {
+    *slot = std::unique_ptr<S>(new S()); // default construct
     pb_callback_t r;
     r.funcs.encode = &micropb_callback<S, Field>;
-    r.arg = static_cast<void*>(slot);
+    r.arg = static_cast<void*>(slot->get());
     return r; // RVO
   }
 };
@@ -208,8 +209,8 @@ public:
   void set_i(int64_t i) { proto.has_i = true; proto.i = i; }
   void set_s(std::string s_) { proto.s = string(&s, s_); }
   // See https://developers.google.com/protocol-buffers/docs/reference/cpp-generated#embeddedmessage
-  GraphProto* mutable_g() { proto.g = msg<GraphProto, toffee_GraphProto_fields>(g.get()); return g.get(); }
-  TensorProto* mutable_t() { proto.t = msg<TensorProto, toffee_TensorProto_fields>(t.get()); return t.get(); }
+  GraphProto* mutable_g() { proto.g = msg<GraphProto, toffee_GraphProto_fields>(&g); return g.get(); }
+  TensorProto* mutable_t() { proto.t = msg<TensorProto, toffee_TensorProto_fields>(&t); return t.get(); }
   void add_floats(float f) { floats.emplace_back(new float(f)); }
   void add_ints(int64_t i) { ints.emplace_back(new int64_t(i)); }
   void add_strings(std::string s) { strings.emplace_back(new std::string(s)); }
@@ -248,14 +249,20 @@ public:
 class GraphProto : public MicroProto<toffee_GraphProto> {
 private:
   std::string name;
+  std::string producer_tag;
   unique_vector<std::string> inputs;
   unique_vector<std::string> outputs;
   unique_vector<NodeProto> nodes;
   unique_vector<TensorProto> initializers;
 public:
   GraphProto() : MicroProto(toffee_GraphProto_init_default) {
+    proto.has_ir_version = true;
+    proto.ir_version = toffee_Version_IR_VERSION;
+    // TODO: stop hard-coding this
+    // TODO: check if this is supposed to be octal
     proto.has_producer_version = true;
-    proto.producer_version = toffee_Version_PRODUCER_VERSION;
+    proto.producer_version = 20000;
+    proto.producer_tag = string(&producer_tag, "pytorch");
     proto.input  = list<std::string>(&inputs);
     proto.output = list<std::string>(&outputs);
     proto.node   = list<NodeProto, toffee_NodeProto_fields>(&nodes);

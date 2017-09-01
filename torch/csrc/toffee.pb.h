@@ -16,11 +16,11 @@ extern "C" {
 
 /* Enum definitions */
 typedef enum _toffee_Version {
-    toffee_Version_PRODUCER_VERSION = 1
+    toffee_Version_IR_VERSION = 1
 } toffee_Version;
-#define _toffee_Version_MIN toffee_Version_PRODUCER_VERSION
-#define _toffee_Version_MAX toffee_Version_PRODUCER_VERSION
-#define _toffee_Version_ARRAYSIZE ((toffee_Version)(toffee_Version_PRODUCER_VERSION+1))
+#define _toffee_Version_MIN toffee_Version_IR_VERSION
+#define _toffee_Version_MAX toffee_Version_IR_VERSION
+#define _toffee_Version_ARRAYSIZE ((toffee_Version)(toffee_Version_IR_VERSION+1))
 
 typedef enum _toffee_TensorProto_DataType {
     toffee_TensorProto_DataType_UNDEFINED = 0,
@@ -73,11 +73,11 @@ typedef struct _toffee_GraphProto {
     pb_callback_t input;
     pb_callback_t output;
     pb_callback_t initializer;
-    bool has_producer_version;
-    int64_t producer_version;
     bool has_ir_version;
     int64_t ir_version;
-    pb_callback_t version_tag;
+    bool has_producer_version;
+    int64_t producer_version;
+    pb_callback_t producer_tag;
     pb_callback_t domain;
     pb_callback_t doc_string;
 /* @@protoc_insertion_point(struct:toffee_GraphProto) */
@@ -154,9 +154,9 @@ typedef struct _toffee_SparseTensorProto {
 #define toffee_GraphProto_input_tag              3
 #define toffee_GraphProto_output_tag             4
 #define toffee_GraphProto_initializer_tag        5
-#define toffee_GraphProto_producer_version_tag   6
-#define toffee_GraphProto_ir_version_tag         7
-#define toffee_GraphProto_version_tag_tag        8
+#define toffee_GraphProto_ir_version_tag         6
+#define toffee_GraphProto_producer_version_tag   7
+#define toffee_GraphProto_producer_tag_tag       8
 #define toffee_GraphProto_domain_tag             9
 #define toffee_GraphProto_doc_string_tag         10
 #define toffee_TensorProto_Segment_begin_tag     1

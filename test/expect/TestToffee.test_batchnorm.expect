@@ -66,4 +66,6 @@ initializer {
   name: "4"
   raw_data: "fff?fff?"
 }
-producer_version: 1
+ir_version: 1
+producer_version: 20000
+producer_tag: "pytorch"
