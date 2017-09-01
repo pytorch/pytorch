@@ -198,6 +198,7 @@ THTensor* THPTensor_(fromNumpy)(PyObject *numpy_array) {
           // See Note [Numpy memory management]
           &THNumpyArrayAllocator,
           new NumpyArrayAllocator(numpy_array)));
+      THStorage_(clearFlag)(storage.get(), TH_STORAGE_RESIZABLE);
       result = THTensor_(newWithStorage)(LIBRARY_STATE storage, 0, sizes, strides);
     }
     else
