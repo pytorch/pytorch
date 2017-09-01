@@ -5,6 +5,7 @@
 #include <unordered_map>
 
 #include "torch/csrc/jit/ir.h"
+#include "torch/csrc/jit/tracer_state.h"
 #include "torch/csrc/autograd/engine.h"
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/variable.h"
@@ -14,7 +15,7 @@ namespace torch { namespace autograd {
 struct MultiStageClosure;
 
 struct AutogradClosureFactory {
-  AutogradClosureFactory(torch::jit::Graph *graph);
+  AutogradClosureFactory(torch::jit::tracer::TracingState *graph);
 
   std::shared_ptr<Function> construct();
 

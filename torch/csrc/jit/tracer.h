@@ -3,6 +3,7 @@
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/tracer_state.h"
 #include "torch/csrc/jit/assert.h"
+#include "torch/csrc/utils/functional.h"
 #include "torch/csrc/autograd/function_hook.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/init_pass.h"
@@ -48,6 +49,12 @@ inline ValueTracingStateElem* getValueState(const std::shared_ptr<TracingState>&
 inline bool isElemActive(const ValueTracingStateElem& vts) {
   auto state = vts.state.lock();
   return state && state->active;
+}
+
+inline std::vector<std::pair<bool, bool>> getVarFlags(const variable_list& vars) {
+  return fmap(vars, [](const std::shared_ptr<Variable>& var) {
+    return std::make_pair(var->requires_grad, var->is_volatile);
+  });
 }
 
 }
@@ -170,6 +177,8 @@ inline std::shared_ptr<TracingState> enter(std::vector<TraceInput>&& trace_input
       n->inferTypeFrom(buffer);
     }
   }
+  // TODO: this might not work with the way we handle buffers
+  state->var_flags[0] = detail::getVarFlags(inputs);
   state->active = true;
   state->inputs = inputs;
   return state;
