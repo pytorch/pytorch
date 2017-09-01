@@ -18,11 +18,43 @@ CUDA instance.)::
 
     dummy_input = Variable(torch.randn(10, 3, 224, 224)).cuda()
     model = torchvision.models.alexnet(pretrained=True).cuda()
-    torch.toffee.export(model, dummy_input, "alexnet.proto")
+    torch.toffee.export(model, dummy_input, "alexnet.proto", verbose=True)
 
 The resulting ``alexnet.proto`` is a binary protobuf file which contains both
-the network structure and parameters of AlexNet.  You can verify and inspect
-the protobuf using the `ToffeeIR <https://github.com/ProjectToffee/ToffeeIR/>`_ library::
+the network structure and parameters of the model you exported
+(in this case, AlexNet).  The keyword argument ``verbose=True`` causes the
+exporter to print out a human-readable representation of the network::
+
+    # All parameters are encoded explicitly as inputs.  By convention,
+    # learned parameters (ala nn.Module.state_dict) are first, and the
+    # actual inputs are last.
+    graph(%1 : Float(64, 3, 11, 11)
+          %2 : Float(64)
+          # The definition sites of all variables are annotated with type
+          # information, specifying the type and size of tensors.
+          # For example, %3 is a 192 x 64 x 5 x 5 tensor of floats.
+          %3 : Float(192, 64, 5, 5)
+          %4 : Float(192)
+          # ---- omitted for brevity ----
+          %15 : Float(1000, 4096)
+          %16 : Float(1000)
+          %17 : Float(10, 3, 224, 224)) { # the actual input!
+      # Every statement consists of some output tensors (and their types),
+      # the operator to be run (with its attributes, e.g., kernels, strides,
+      # etc.), its input tensors (%17, %1)
+      %19 : UNKNOWN_TYPE = Conv[kernels=[11, 11], strides=[4, 4], pads=[2, 2, 2, 2], dilations=[1, 1], group=1](%17, %1), uses = [[%20.i0]];
+      # UNKNOWN_TYPE: sometimes type information is not known.  We hope to eliminate
+      # all such cases in a later release.
+      %20 : Float(10, 64, 55, 55) = Add[broadcast=1, axis=1](%19, %2), uses = [%21.i0];
+      %21 : Float(10, 64, 55, 55) = Relu(%20), uses = [%22.i0];
+      %22 : Float(10, 64, 27, 27) = MaxPool[kernels=[3, 3], pads=[0, 0, 0, 0], dilations=[1, 1], strides=[2, 2]](%21), uses = [%23.i0];
+      # ...
+      # Finally, a network returns some tensors
+      return (%58);
+    }
+
+You can also verify and inspect the actual (substantially more verbose) protobuf
+using the `ToffeeIR <https://github.com/ProjectToffee/ToffeeIR/>`_ library::
 
     import toffee
 
@@ -42,8 +74,8 @@ the backend for Caffe2::
     import toffee.backend.c2 as backend
     import numpy as np
 
-    caffe2_proto = backend.prepare(graph, device="CUDA:0") # or "CPU"
-    outputs = backend.run(caffe2_proto, np.rand(10, 3, 224, 224))
+    (caffe2_proto, caffe2_workspace) = backend.prepare(graph, device="CUDA:0") # or "CPU"
+    outputs = backend.run((caffe2_proto, caffe2_workspace), np.rand(10, 3, 224, 224))
     print(outputs[0])
 
 In the future, there will be backends for other frameworks as well.
@@ -57,7 +89,8 @@ Limitations
   dynamic, e.g., changes behavior depending on input data, the export
   won't be accurate.  Similarly, a trace is likely to be valid only
   for a specific input size (which is one reason why we require explicit inputs
-  on tracing.)
+  on tracing.)  We recommend examining the model trace and making sure
+  the traced operators look reasonable.
 
 * PyTorch and Caffe2 often have implementations of operators with some
   numeric differences.  Depending on model structure, these differences
@@ -100,7 +133,7 @@ list.  The operator set above is sufficient to export the following models:
 * DenseNet
 * Inception (warning: this model is highly sensitive to changes in operator
   implementation)
-* ResNet50
+* ResNet
 * SqueezeNet
 * SuperResolution
 * VGG
