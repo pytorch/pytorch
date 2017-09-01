@@ -38,11 +38,16 @@ if (WIN32)
   endif()
 elseif (ANDROID OR IOS)
   custom_protobuf_find()
-  # For Androd or iOS, we won't need to build the libprotoc and protoc binaries
-  # because we will use the host protoc to build the proto files.
-  set_target_properties(
-      libprotoc protoc PROPERTIES
-      EXCLUDE_FROM_ALL 1 EXCLUDE_FROM_DEFAULT_BUILD 1)
+  if (IOS_PLATFORM STREQUAL "WATCHOS")
+    # Unfortunately, WatchOS does not support building libprotoc and protoc,
+    # so we will need to exclude it. The problem of using EXCLUDE_FROM_ALL is
+    # that one is not going to be able to run cmake install. A proper solution
+    # has to be implemented by protobuf since we derive our cmake files from
+    # there.
+    set_target_properties(
+        libprotoc protoc PROPERTIES
+        EXCLUDE_FROM_ALL 1 EXCLUDE_FROM_DEFAULT_BUILD 1)
+  endif()
 else()
   find_package( Protobuf )
   if ( NOT (Protobuf_FOUND OR PROTOBUF_FOUND) )
