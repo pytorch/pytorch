@@ -33,7 +33,10 @@ std::shared_ptr<Graph> ToToffeeIR(std::shared_ptr<Graph>& g,
   std::shared_ptr<Graph> out_graph = std::make_shared<Graph>();
   ctx.graph = out_graph.get();
   for (auto input : g->inputs())
-    env[input] = ctx.graph->addInput()->setType(input->typeOption());
+    env[input] = ctx.graph
+      ->addInput()
+      ->setType(input->typeOption())
+      ->setDebugName(input->debugName());
   auto envFn = [&env](Node * n) {
     auto it = env.find(n);
     JIT_ASSERTM(it != env.end(), "Dangling node reference");
@@ -297,8 +300,12 @@ static void encodeGraph(toffee::GraphProto * p_g, std::shared_ptr<Graph> & g, co
 // Exports a graph to ToffeeIR
 std::string ExportGraph(std::shared_ptr<Graph>& g_,
                         const std::unordered_map<void*, Node*>& buffer_map,
-                        const std::vector<at::Tensor> & initializers) {
+                        const std::vector<at::Tensor> & initializers,
+                        bool verbose) {
   auto g = ToToffeeIR(g_, buffer_map);
+  if(verbose) {
+    std::cout << *g << "\n";
+  }
   g->lint();
   toffee::GraphProto p_g;
   p_g.set_name("torch-jit-export");

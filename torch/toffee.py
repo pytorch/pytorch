@@ -13,7 +13,7 @@ import collections
 from ._utils import _range
 
 
-def export(model, args, f, export_params=True, kwargs=None):
+def export(model, args, f, export_params=True, kwargs=None, verbose=False):
     """
     Export a model into Toffee format.  This exporter runs your model
     once in order to get a trace of its execution to be exported; at the
@@ -34,13 +34,7 @@ def export(model, args, f, export_params=True, kwargs=None):
             untrained model.
         kwargs (dict, optional): keyword inputs to the model.
     """
-    _export(model, args, f, export_params=export_params, kwargs=None)
 
-
-# Internal helper function which also returns the computed tensors, which
-# can be useful for comparing PyTorch's execution of the model with the
-# eventual runner.
-def _export(model, args, f, export_params=True, kwargs=None):
     # Special case for common case of passing a single Variable
     if isinstance(args, torch.autograd.Variable):
         args = (args, )
@@ -49,9 +43,9 @@ def _export(model, args, f, export_params=True, kwargs=None):
     trace, torch_out = torch.jit.record_trace(model, *args, **kwargs)
     # TODO: Don't allocate a in-memory string for the protobuf
     if export_params:
-        proto = trace.export(model.state_dict().values())
+        proto = trace.export(model.state_dict().values(), verbose)
     else:
-        proto = trace.export()
+        proto = trace.export(verbose)
     torch.serialization._with_file_like(f, "wb", lambda f: f.write(proto))
     return torch_out
 
