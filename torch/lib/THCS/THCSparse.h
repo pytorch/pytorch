@@ -1,6 +1,10 @@
 #ifndef THC_SPARSE_INC
 #define THC_SPARSE_INC
 
+#ifdef THCS_EXPORTS
+#define TH_EXPORTS
+#endif
+
 #include <THC/THCGeneral.h>
 
 TH_API void THCudaSparse_Xcoo2csr(THCState *state, const int *coorowind, int64_t nnz, int64_t m, int *csrrowptr);
