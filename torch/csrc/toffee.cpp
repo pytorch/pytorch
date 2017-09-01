@@ -24,7 +24,7 @@ bool micropb_encode<double, nullptr>(pb_ostream_t *stream, double* arg) {
 }
 
 // TODO: I'm not entirely sure why this can't be in the header...
-bool micropb_callback_tensor(pb_ostream_t *stream, const pb_field_t *field, void * const *arg) {
+bool micropb_callback_string_from_tensor(pb_ostream_t *stream, const pb_field_t *field, void * const *arg) {
   at::Tensor* t = static_cast<at::Tensor*>(*arg);
   JIT_ASSERT(t->is_contiguous());
   // Packed array format!

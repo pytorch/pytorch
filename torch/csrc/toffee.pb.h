@@ -16,11 +16,11 @@ extern "C" {
 
 /* Enum definitions */
 typedef enum _toffee_Version {
-    toffee_Version_CURRENT_VERSION = 1
+    toffee_Version_PRODUCER_VERSION = 1
 } toffee_Version;
-#define _toffee_Version_MIN toffee_Version_CURRENT_VERSION
-#define _toffee_Version_MAX toffee_Version_CURRENT_VERSION
-#define _toffee_Version_ARRAYSIZE ((toffee_Version)(toffee_Version_CURRENT_VERSION+1))
+#define _toffee_Version_MIN toffee_Version_PRODUCER_VERSION
+#define _toffee_Version_MAX toffee_Version_PRODUCER_VERSION
+#define _toffee_Version_ARRAYSIZE ((toffee_Version)(toffee_Version_PRODUCER_VERSION+1))
 
 typedef enum _toffee_TensorProto_DataType {
     toffee_TensorProto_DataType_UNDEFINED = 0,
@@ -46,6 +46,7 @@ typedef struct _toffee_NodeProto {
     pb_callback_t name;
     pb_callback_t op_type;
     pb_callback_t attribute;
+    pb_callback_t doc_string;
 /* @@protoc_insertion_point(struct:toffee_NodeProto) */
 } toffee_NodeProto;
 
@@ -56,6 +57,8 @@ typedef struct _toffee_AttributeProto {
     bool has_i;
     int64_t i;
     pb_callback_t s;
+    pb_callback_t t;
+    pb_callback_t g;
     pb_callback_t floats;
     pb_callback_t ints;
     pb_callback_t strings;
@@ -65,13 +68,18 @@ typedef struct _toffee_AttributeProto {
 } toffee_AttributeProto;
 
 typedef struct _toffee_GraphProto {
-    bool has_version;
-    int64_t version;
     pb_callback_t node;
     pb_callback_t name;
     pb_callback_t input;
     pb_callback_t output;
     pb_callback_t initializer;
+    bool has_producer_version;
+    int64_t producer_version;
+    bool has_ir_version;
+    int64_t ir_version;
+    pb_callback_t version_tag;
+    pb_callback_t domain;
+    pb_callback_t doc_string;
 /* @@protoc_insertion_point(struct:toffee_GraphProto) */
 } toffee_GraphProto;
 
@@ -87,13 +95,13 @@ typedef struct _toffee_TensorProto {
     pb_callback_t dims;
     bool has_data_type;
     toffee_TensorProto_DataType data_type;
+    bool has_segment;
+    toffee_TensorProto_Segment segment;
     pb_callback_t float_data;
     pb_callback_t int32_data;
     pb_callback_t string_data;
     pb_callback_t int64_data;
     pb_callback_t name;
-    bool has_segment;
-    toffee_TensorProto_Segment segment;
     pb_callback_t raw_data;
 /* @@protoc_insertion_point(struct:toffee_TensorProto) */
 } toffee_TensorProto;
@@ -110,16 +118,16 @@ typedef struct _toffee_SparseTensorProto {
 /* Default values for struct fields */
 
 /* Initializer values for message structs */
-#define toffee_AttributeProto_init_default       {{{NULL}, NULL}, false, 0, false, 0, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}}
-#define toffee_NodeProto_init_default            {{{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}}
-#define toffee_GraphProto_init_default           {false, 0, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}}
-#define toffee_TensorProto_init_default          {{{NULL}, NULL}, false, (toffee_TensorProto_DataType)0, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, false, toffee_TensorProto_Segment_init_default, {{NULL}, NULL}}
+#define toffee_AttributeProto_init_default       {{{NULL}, NULL}, false, 0, false, 0, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}}
+#define toffee_NodeProto_init_default            {{{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}}
+#define toffee_GraphProto_init_default           {{{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, false, 0, false, 0, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}}
+#define toffee_TensorProto_init_default          {{{NULL}, NULL}, false, (toffee_TensorProto_DataType)0, false, toffee_TensorProto_Segment_init_default, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}}
 #define toffee_TensorProto_Segment_init_default  {false, 0, false, 0}
 #define toffee_SparseTensorProto_init_default    {{{NULL}, NULL}, false, toffee_TensorProto_init_default, false, toffee_TensorProto_init_default}
-#define toffee_AttributeProto_init_zero          {{{NULL}, NULL}, false, 0, false, 0, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}}
-#define toffee_NodeProto_init_zero               {{{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}}
-#define toffee_GraphProto_init_zero              {false, 0, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}}
-#define toffee_TensorProto_init_zero             {{{NULL}, NULL}, false, (toffee_TensorProto_DataType)0, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, false, toffee_TensorProto_Segment_init_zero, {{NULL}, NULL}}
+#define toffee_AttributeProto_init_zero          {{{NULL}, NULL}, false, 0, false, 0, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}}
+#define toffee_NodeProto_init_zero               {{{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}}
+#define toffee_GraphProto_init_zero              {{{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, false, 0, false, 0, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}}
+#define toffee_TensorProto_init_zero             {{{NULL}, NULL}, false, (toffee_TensorProto_DataType)0, false, toffee_TensorProto_Segment_init_zero, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}}
 #define toffee_TensorProto_Segment_init_zero     {false, 0, false, 0}
 #define toffee_SparseTensorProto_init_zero       {{{NULL}, NULL}, false, toffee_TensorProto_init_zero, false, toffee_TensorProto_init_zero}
 
@@ -129,40 +137,47 @@ typedef struct _toffee_SparseTensorProto {
 #define toffee_NodeProto_name_tag                3
 #define toffee_NodeProto_op_type_tag             4
 #define toffee_NodeProto_attribute_tag           5
+#define toffee_NodeProto_doc_string_tag          6
 #define toffee_AttributeProto_name_tag           1
 #define toffee_AttributeProto_f_tag              2
 #define toffee_AttributeProto_i_tag              3
 #define toffee_AttributeProto_s_tag              4
-#define toffee_AttributeProto_floats_tag         5
-#define toffee_AttributeProto_ints_tag           6
-#define toffee_AttributeProto_strings_tag        7
-#define toffee_AttributeProto_tensors_tag        8
-#define toffee_AttributeProto_graphs_tag         9
-#define toffee_GraphProto_version_tag            1
-#define toffee_GraphProto_node_tag               2
-#define toffee_GraphProto_name_tag               3
-#define toffee_GraphProto_input_tag              4
-#define toffee_GraphProto_output_tag             5
-#define toffee_GraphProto_initializer_tag        6
+#define toffee_AttributeProto_t_tag              5
+#define toffee_AttributeProto_g_tag              6
+#define toffee_AttributeProto_floats_tag         7
+#define toffee_AttributeProto_ints_tag           8
+#define toffee_AttributeProto_strings_tag        9
+#define toffee_AttributeProto_tensors_tag        10
+#define toffee_AttributeProto_graphs_tag         11
+#define toffee_GraphProto_node_tag               1
+#define toffee_GraphProto_name_tag               2
+#define toffee_GraphProto_input_tag              3
+#define toffee_GraphProto_output_tag             4
+#define toffee_GraphProto_initializer_tag        5
+#define toffee_GraphProto_producer_version_tag   6
+#define toffee_GraphProto_ir_version_tag         7
+#define toffee_GraphProto_version_tag_tag        8
+#define toffee_GraphProto_domain_tag             9
+#define toffee_GraphProto_doc_string_tag         10
 #define toffee_TensorProto_Segment_begin_tag     1
 #define toffee_TensorProto_Segment_end_tag       2
 #define toffee_TensorProto_dims_tag              1
 #define toffee_TensorProto_data_type_tag         2
-#define toffee_TensorProto_float_data_tag        3
+#define toffee_TensorProto_segment_tag           3
+#define toffee_TensorProto_float_data_tag        4
 #define toffee_TensorProto_int32_data_tag        5
 #define toffee_TensorProto_string_data_tag       6
 #define toffee_TensorProto_int64_data_tag        7
 #define toffee_TensorProto_name_tag              8
-#define toffee_TensorProto_segment_tag           9
-#define toffee_TensorProto_raw_data_tag          10
+#define toffee_TensorProto_raw_data_tag          9
 #define toffee_SparseTensorProto_dims_tag        1
 #define toffee_SparseTensorProto_indices_tag     2
 #define toffee_SparseTensorProto_values_tag      3
 
 /* Struct field encoding specification for nanopb */
-extern const pb_field_t toffee_AttributeProto_fields[10];
-extern const pb_field_t toffee_NodeProto_fields[6];
-extern const pb_field_t toffee_GraphProto_fields[7];
+extern const pb_field_t toffee_AttributeProto_fields[12];
+extern const pb_field_t toffee_NodeProto_fields[7];
+extern const pb_field_t toffee_GraphProto_fields[11];
 extern const pb_field_t toffee_TensorProto_fields[10];
 extern const pb_field_t toffee_TensorProto_Segment_fields[3];
 extern const pb_field_t toffee_SparseTensorProto_fields[4];

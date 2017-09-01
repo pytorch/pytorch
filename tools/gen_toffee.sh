@@ -2,6 +2,9 @@
 set -ex
 # Assumed to be run like tools/gen_toffee.sh
 (cd torch/lib/nanopb/generator/proto && make)
+# It always searches the same dir as the proto, so
+# we have got to copy the option file over
+cp torch/csrc/toffee.options torch/lib/ToffeeIR/toffee/toffee.options
 protoc --plugin=protoc-gen-nanopb=$PWD/torch/lib/nanopb/generator/protoc-gen-nanopb \
        torch/lib/ToffeeIR/toffee/toffee.proto \
        --nanopb_out=-T:.
