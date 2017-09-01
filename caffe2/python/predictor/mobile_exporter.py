@@ -12,8 +12,9 @@ from caffe2.proto import caffe2_pb2
 def Export(workspace, net, params):
     """Returns init_net and predict_net suitable for writing to disk
        and loading into a Predictor"""
+    proto = net if isinstance(net, caffe2_pb2.NetDef) else net.Proto()
     predict_net = caffe2_pb2.NetDef()
-    predict_net.CopyFrom(net.Proto())
+    predict_net.CopyFrom(proto)
     init_net = caffe2_pb2.NetDef()
     # Populate the init_net.
     ssa, blob_versions = core.get_ssa(net)
@@ -64,7 +65,7 @@ def Export(workspace, net, params):
     del predict_net.external_input[:]
     predict_net.external_input.extend(input_blobs)
     # For populating weights
-    predict_net.external_input.extend(net.Proto().external_input)
+    predict_net.external_input.extend(proto.external_input)
     # Ensure the output is also consistent with what we want
     del predict_net.external_output[:]
     predict_net.external_output.extend(output_blobs)
