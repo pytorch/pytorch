@@ -54,7 +54,7 @@ SHOULD_NOT_DO_GRADIENT(YellowFin);
     const T pre_p = *distance_deb_ * *g_norm2_min_deb_;                     \
     const T p = (pre_p * pre_p) / (2.0f * *variance_);                      \
     const T w3 = (-std::sqrt(p * p + 4.0f / 27.0f * p * p * p) - p) / 2.0f; \
-    const T w3_sign = std::copysign(1.0f, w3);                              \
+    const T w3_sign = w3 > 0.0f ? 1.0f : -1.0f;                             \
     const T w = w3_sign * std::pow(std::abs(w3), 1.0f / 3.0f);              \
     const T y = w - p / 3.0f / w;                                           \
     const T root = y + 1.0f;                                                \
