@@ -2,6 +2,7 @@ import torch.autograd.function as function
 import torch._C
 from torch.autograd import Variable
 from torch.nn import Module
+from collections import defaultdict
 import itertools
 import types
 import contextlib
@@ -92,8 +93,50 @@ def _verify(flat_trace_out, flat_real_out):
 class Traceable(object):
     _next_trace_id = 0
     _dump_traces = os.environ.get('PYTORCH_JIT_DUMP', False)
+    VOLATILE = object()
 
-    def __init__(self, function_or_module, num_derivatives=1, parameters=None, trace_name=None, optimize=False, verify=False, time=False, enabled=True):
+    # Traceable holds multiple traces and switches between them based on
+    # inputs provided to a call. Things that need to be considered include
+    # non-Variable argument (e.g. num_layers=3; compared by equality) or
+    # Variable flags and sizes. TraceInfo is the object that is used to
+    # hold a trace for a single input configuration aka input_key.
+    class TraceInfo(object):
+        def __init__(self, trace_name):
+            self.traces = []
+            self.complete_trace = None
+            self.closure = None
+            self.trace_name = trace_name
+
+        def _run_pass(self, p):
+            name = p.__doc__
+            if Traceable._dump_traces:
+                with open("{}_{}_input.ir".format(self.trace_name, name), "w") as f:
+                    f.write(str(self.complete_trace))
+            p(self.complete_trace)
+            # TODO: Make linting optional
+            torch._C._jit_pass_lint(self.complete_trace)
+            if Traceable._dump_traces:
+                with open("{}_{}_output.ir".format(self.trace_name, name), "w") as f:
+                    f.write(str(self.complete_trace))
+
+        def compile_trace(self, optimize):
+            if optimize:
+                self._run_pass(torch._C._jit_pass_init)
+                self._run_pass(torch._C._jit_pass_fuse)
+
+            # It's important to always run DCE, because backward can create a lot of unnecessary nodes
+            self._run_pass(torch._C._jit_pass_dce)
+            self.closure = torch._C._jit_createAutogradClosure(self.complete_trace)
+
+        def check_traces(self):
+            self.traces = [t for t in self.traces if not t.is_expired]
+            for trace in self.traces:
+                if trace.is_complete:
+                    self.complete_trace = trace
+                    self.traces = []
+
+    def __init__(self, function_or_module, num_derivatives=1, parameters=None, trace_name=None,
+                 optimize=False, verify=False, time=False, enabled=True):
         """
         time - collect cuda timing stats for perf debugging
         verify - run the original code, and check it is within threshold
@@ -110,8 +153,6 @@ class Traceable(object):
             self._state_values = lambda: param_list
 
         self.trace_name = trace_name
-        self.saved_trace = None
-        self.saved_closure = None
         self.optimize = optimize
         self.verify = verify
         self.time = time
@@ -119,35 +160,21 @@ class Traceable(object):
         self.proto = None
         self.traces = []
         self.num_derivatives = num_derivatives
+        self.traces = defaultdict(lambda: Traceable.TraceInfo(trace_name))
         if self.trace_name is None:
             self.trace_name = "trace_{}".format(Traceable._next_trace_id)
             Traceable._next_trace_id += 1
 
-    def _run_pass(self, name, p):
-        if Traceable._dump_traces:
-            with open("{}_{}_input.ir".format(self.trace_name, name), "w") as f:
-                f.write(str(self.saved_trace))
-        p(self.saved_trace)
-        # TODO: Make linting optional
-        torch._C._jit_pass_lint(self.saved_trace)
-        if Traceable._dump_traces:
-            with open("{}_{}_output.ir".format(self.trace_name, name), "w") as f:
-                f.write(str(self.saved_trace))
-
-    def compile_trace(self):
-        if self.optimize:
-            self._run_pass("init", torch._C._jit_pass_init)
-            self._run_pass("fuse", torch._C._jit_pass_fuse)
-
-        # It's important to always run DCE, because backward can create a lot of unnecessary nodes
-        self._run_pass('dce', torch._C._jit_pass_dce)
-        self.saved_closure = torch._C._jit_createAutogradClosure(
-            self.saved_trace)
+    def get_input_key(self, args):
+        if any(arg.volatile if isinstance(arg, Variable) else False for arg in args):
+            return self.VOLATILE
+        return tuple(arg.requires_grad if isinstance(arg, Variable) else arg
+                     for arg in args)
 
     def get_trace_inputs(self, args, extra=()):
         return tuple(itertools.chain(self._state_values(), flatten(args), extra))
 
-    def run_trace(self, args):
+    def run_closure(self, closure, args):
         if self.verify:
             cloned_args = tuple(_clone_inputs(args))
             with _time("run_real", self.time), _fork_rng(self.verify):
@@ -155,7 +182,7 @@ class Traceable(object):
 
         trace_inputs = self.get_trace_inputs(args)
         with _time("run_trace", self.time):
-            flat_out = self.saved_closure()(*_varify(trace_inputs))
+            flat_out = closure()(*_varify(trace_inputs))
         if not isinstance(flat_out, tuple):
             flat_out = (flat_out,)
 
@@ -164,23 +191,21 @@ class Traceable(object):
 
         return function._unflatten(flat_out, self.proto)
 
-    def check_traces(self):
-        for trace in self.traces:
-            if trace.is_complete:
-                self.saved_trace = trace
-                self.traces = []
-        self.traces = [t for t in self.traces if not t.is_expired]
-
-    # create and return a trace, possibly verifying it before returning it
-    def record_trace(self, args, extra=()):
+    def record_trace(self, args, is_volatile=False, extra=()):
         trace_inputs = self.get_trace_inputs(args, extra)
 
-        trace = torch._C._tracer_enter(trace_inputs, self.num_derivatives)
+        trace = torch._C._tracer_enter(trace_inputs, 0 if is_volatile else self.num_derivatives)
         out = self._run(*args)
         torch._C._tracer_exit(flatten(out))
-        self.traces.append(trace)
 
-        return out
+        return trace, out
+
+    def has_trace_for(self, *args):
+        trace_info = self.traces.get(self.get_input_key(args))
+        if trace_info is None:
+            return False
+        trace_info.check_traces()
+        return trace_info.complete_trace is not None
 
     def __call__(self, *args):
         # Run the real thing if tracing is disabled
@@ -188,19 +213,22 @@ class Traceable(object):
             with _time("run_real", self.time):
                 return self._run(*args)
 
+        input_key = self.get_input_key(args)
+        trace_info = self.traces[input_key]
         # Use the compiled closure if we have it already
-        if self.saved_closure is not None:
-            return self.run_trace(args)
+        if trace_info.closure is not None:
+            return self.run_closure(trace_info.closure, args)
 
         # Check if any of the traces in our pool are complete now
-        self.check_traces()
-        if self.saved_trace is not None:
-            self.compile_trace()
-            return self.run_trace(args)
+        trace_info.check_traces()
+        if trace_info.complete_trace is not None:
+            trace_info.compile_trace(self.optimize)
+            return self.run_closure(trace_info.closure, args)
 
         # Otherwise, we have to collect a new trace
-        return self.record_trace(args)
-
+        trace, out = self.record_trace(args, input_key == self.VOLATILE)
+        trace_info.traces.append(trace)
+        return out
 
 
 def record_trace(traceable, *args, **kwargs):
@@ -213,9 +241,7 @@ def record_trace(traceable, *args, **kwargs):
     TODO: document kwargs
     """
     parameters = kwargs.pop('parameters', ())
-    t = Traceable(traceable, **kwargs)
-    out = t.record_trace(args, parameters)
-    return t.traces[0], out
+    return Traceable(traceable, **kwargs).record_trace(args, extra=parameters)
 
 
 def traced(traceable, **traced_kwargs):
@@ -225,6 +251,7 @@ def traced(traceable, **traced_kwargs):
         return traceable
     else:
         return t
+
 
 def trace(**kwargs):
     return lambda traceable: traced(traceable, **kwargs)

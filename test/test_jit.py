@@ -2,6 +2,7 @@ import torch
 import torch.jit
 import torch.nn as nn
 import unittest
+from itertools import product
 from torch.autograd import Variable, Function
 from common import TestCase, run_tests
 import io
@@ -261,11 +262,52 @@ class TestJit(TestCase):
             return x * w + 2
 
         out = cell(cell(cell(x)))
-        self.assertIsNone(cell.saved_closure)
+        self.assertFalse(cell.has_trace_for(x))
 
         out.sum().backward()
-        cell(x)
-        self.assertIsNotNone(cell.saved_closure)
+        self.assertTrue(cell.has_trace_for(x))
+
+    def test_flags(self):
+        x = Variable(torch.randn(2, 2))
+        y = Variable(torch.randn(2, 2))
+
+        @torch.jit.traced
+        def fn(x, y):
+            return (x * x + y * y + x * y).sum()
+
+        grads = {}
+        for rx, ry in product((True, False), repeat=2):
+            x.requires_grad = rx
+            y.requires_grad = ry
+
+            self.assertFalse(fn.has_trace_for(x, y))
+            out = fn(x, y)
+
+            self.assertFalse(fn.has_trace_for(x, y))
+            for v, name, compute in [(x, 'x', rx), (y, 'y', ry)]:
+                if not compute:
+                    continue
+                grad_v, = torch.autograd.grad(out, v, retain_graph=True)
+                expected_grad = grads.setdefault(name, grad_v)
+                self.assertEqual(grad_v, expected_grad)
+            self.assertEqual(fn.has_trace_for(x, y), rx or ry)
+
+    def test_volatile_fallback(self):
+        """Check that Traceable falls back to num_backwards=0 if given volatile inputs"""
+        x = Variable(torch.randn(2, 2))
+        y = Variable(torch.randn(2, 2), requires_grad=True)
+
+        @torch.jit.traced
+        def fn(x, y):
+            return x * x + x * y
+
+        out = fn(x, y)
+        self.assertFalse(fn.has_trace_for(x, y))
+
+        x.volatile = True
+        self.assertFalse(fn.has_trace_for(x, y))
+        out = fn(x, y)
+        self.assertTrue(fn.has_trace_for(x, y))
 
     def test_python_ir(self):
         x = Variable(torch.Tensor([0.4]), requires_grad=True)
