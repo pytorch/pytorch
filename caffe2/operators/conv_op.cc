@@ -57,6 +57,7 @@ REGISTER_CPU_OPERATOR(Conv, ConvOp<float, CPUContext>);
 OPERATOR_SCHEMA(Conv)
     .NumInputs(2, 3)
     .NumOutputs(1)
+    .CostInferenceFunction(ConvPoolOpBase<CPUContext>::CostInferenceForConv)
     .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForConv)
     .FillUsing(ConvDocGenerator(""));
 
