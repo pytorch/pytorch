@@ -627,6 +627,72 @@ class TestNN(NNTestCase):
                                                    ('0.block', block), ('0.block.linear1', l1),
                                                    ('0.block.linear2', l2)])
 
+    def test_register_buffer_raises_error_if_attr_exists(self):
+        m = nn.Module()
+        m.attribute_name = 5
+        with self.assertRaises(KeyError):
+            m.register_buffer('attribute_name', torch.rand(5))
+
+        del m.attribute_name
+        m.register_parameter('attribute_name', nn.Parameter())
+        with self.assertRaises(KeyError):
+            m.register_buffer('attribute_name', torch.rand(5))
+
+        del m.attribute_name
+        m.add_module('attribute_name', nn.Module())
+        with self.assertRaises(KeyError):
+            m.register_buffer('attribute_name', torch.rand(5))
+
+    def test_register_buffer_allows_overwriting_with_same_name(self):
+        m = nn.Module()
+        buffer1 = torch.rand(5)
+        buffer2 = buffer1 + 5
+        m.register_buffer('buffer_name', buffer1)
+        self.assertEqual(m.buffer_name, buffer1)
+        m.register_buffer('buffer_name', buffer2)
+        self.assertEqual(m.buffer_name, buffer2)
+
+    def test_register_parameter_raises_error_if_attr_exists(self):
+        m = nn.Module()
+        m.attribute_name = 5
+        with self.assertRaises(KeyError):
+            m.register_parameter('attribute_name', nn.Parameter())
+
+        del m.attribute_name
+        m.register_buffer('attribute_name', torch.rand(5))
+        with self.assertRaises(KeyError):
+            m.register_parameter('attribute_name', nn.Parameter())
+
+        del m.attribute_name
+        m.add_module('attribute_name', nn.Module())
+        with self.assertRaises(KeyError):
+            m.register_parameter('attribute_name', nn.Parameter())
+
+    def test_register_parameter_allows_overwriting_with_same_name(self):
+        m = nn.Module()
+        param1 = nn.Parameter(torch.rand(5))
+        param2 = nn.Parameter(param1.data + 5)
+        m.register_parameter('param_name', param1)
+        self.assertEqual(m.param_name, param1)
+        m.register_parameter('param_name', param2)
+        self.assertEqual(m.param_name, param2)
+
+    def test_add_module_raises_error_if_attr_exists(self):
+        m = nn.Module()
+        m.attribute_name = 5
+        with self.assertRaises(KeyError):
+            m.add_module('attribute_name', nn.Module())
+
+        del m.attribute_name
+        m.register_buffer('attribute_name', torch.rand(5))
+        with self.assertRaises(KeyError):
+            m.add_module('attribute_name', nn.Module())
+
+        del m.attribute_name
+        m.register_parameter('attribute_name', nn.Parameter())
+        with self.assertRaises(KeyError):
+            m.add_module('attribute_name', nn.Module())
+
     def test_Sequential_getitem(self):
         l1 = nn.Linear(10, 20)
         l2 = nn.Linear(20, 30)
@@ -717,7 +783,9 @@ class TestNN(NNTestCase):
         self.assertEqual(net.empty, None)
         net.add_module('l3', l)
         self.assertEqual(net.l3, l)
-        self.assertRaises(KeyError, lambda: net.add_module('l', l))
+        l3 = nn.Linear(20, 10)
+        net.add_module('l', l3)
+        self.assertEqual(net.l, l3)
         self.assertRaises(TypeError, lambda: net.add_module('x', 'non-module'))
 
     def test_type(self):
