@@ -339,17 +339,21 @@ class TestYellowFin(OptimizerTestBase, TestCase):
         n_iter = 50
         cpu_device_opt = core.DeviceOption(caffe2_pb2.CPU)
         with core.DeviceScope(cpu_device_opt):
-            for zero_debias in [False, True]:
-                for grad_coef in [1.0, 0.1, 0.01]:
-                    self.compare_yellowfin_models(
-                        self.caffe2_yellowfin,
-                        self.numpy_yellowfin,
-                        zero_debias,
-                        grad_coef,
-                        n_dim,
-                        n_iter,
-                        gpu=False
-                    )
+            for zero_debias, grad_coef in [
+                (False, 1.0),
+                (False, 0.1),
+                (False, 0.01),
+                (True, 1.0)
+            ]:
+                self.compare_yellowfin_models(
+                    self.caffe2_yellowfin,
+                    self.numpy_yellowfin,
+                    zero_debias,
+                    grad_coef,
+                    n_dim,
+                    n_iter,
+                    gpu=False
+                )
 
     @unittest.skipIf(not workspace.has_gpu_support, "No gpu support")
     def test_caffe2_gpu_vs_numpy(self):
