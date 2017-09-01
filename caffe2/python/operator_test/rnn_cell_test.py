@@ -129,6 +129,8 @@ def compute_regular_attention_logits(
     attention_v,
     weighted_encoder_outputs,
     encoder_outputs_for_dot_product,
+    coverage_prev,
+    coverage_weights,
 ):
     weighted_hidden_t = np.dot(
         hidden_t,
@@ -151,6 +153,8 @@ def compute_recurrent_attention_logits(
     attention_v,
     weighted_encoder_outputs,
     encoder_outputs_for_dot_product,
+    coverage_prev,
+    coverage_weights,
 ):
     weighted_hidden_t = np.dot(
         hidden_t,
@@ -180,6 +184,8 @@ def compute_dot_attention_logits(
     attention_v,
     weighted_encoder_outputs,
     encoder_outputs_for_dot_product,
+    coverage_prev,
+    coverage_weights,
 ):
     hidden_t_for_dot_product = np.transpose(hidden_t, axes=[1, 2, 0])
     if (
@@ -200,6 +206,32 @@ def compute_dot_attention_logits(
     return np.transpose(attention_logits_t)
 
 
+def compute_coverage_attention_logits(
+    hidden_t,
+    weighted_decoder_hidden_state_t_w,
+    weighted_decoder_hidden_state_t_b,
+    attention_weighted_encoder_context_t_prev,
+    weighted_prev_attention_context_w,
+    weighted_prev_attention_context_b,
+    attention_v,
+    weighted_encoder_outputs,
+    encoder_outputs_for_dot_product,
+    coverage_prev,
+    coverage_weights,
+):
+    weighted_hidden_t = np.dot(
+        hidden_t,
+        weighted_decoder_hidden_state_t_w.T,
+    ) + weighted_decoder_hidden_state_t_b
+    coverage_part = coverage_prev.T * coverage_weights
+    encoder_part = weighted_encoder_outputs + coverage_part
+    attention_v = attention_v.reshape([-1])
+    return np.sum(
+        attention_v * np.tanh(encoder_part + weighted_hidden_t),
+        axis=2,
+    )
+
+
 def lstm_with_attention_reference(
     input,
     initial_hidden_state,
@@ -214,6 +246,7 @@ def lstm_with_attention_reference(
     weighted_decoder_hidden_state_t_w,
     weighted_decoder_hidden_state_t_b,
     weighted_encoder_outputs,
+    coverage_weights,
     attention_v,
     attention_zeros,
     compute_attention_logits,
@@ -239,6 +272,9 @@ def lstm_with_attention_reference(
     attention_weighted_encoder_context[0, :, :] = (
         initial_attention_weighted_encoder_context
     )
+    encoder_length = encoder_outputs.shape[0]
+    coverage = np.zeros(
+        shape=(decoder_input_length + 1, batch_size, encoder_length))
     for t in range(decoder_input_length):
         input_t = input[t].reshape(1, batch_size, decoder_input_dim)
         hidden_t_prev = hidden[t].reshape(1, batch_size, decoder_state_dim)
@@ -258,6 +294,8 @@ def lstm_with_attention_reference(
         hidden[t + 1] = hidden_t
         cell[t + 1] = cell_t
 
+        coverage_prev = coverage[t].reshape(1, batch_size, encoder_length)
+
         attention_logits_t = compute_attention_logits(
             hidden_t,
             weighted_decoder_hidden_state_t_w,
@@ -268,6 +306,8 @@ def lstm_with_attention_reference(
             attention_v,
             weighted_encoder_outputs,
             encoder_outputs_for_dot_product,
+            coverage_prev,
+            coverage_weights,
         )
 
         attention_logits_t_exp = np.exp(attention_logits_t)
@@ -275,6 +315,7 @@ def lstm_with_attention_reference(
             attention_logits_t_exp /
             np.sum(attention_logits_t_exp, axis=0).reshape([1, -1])
         )
+        coverage[t + 1, :, :] = coverage[t, :, :] + attention_weights_t.T
         attention_weighted_encoder_context[t + 1] = np.sum(
             (
                 encoder_outputs *
@@ -327,6 +368,7 @@ def lstm_with_regular_attention_reference(
         weighted_decoder_hidden_state_t_w=weighted_decoder_hidden_state_t_w,
         weighted_decoder_hidden_state_t_b=weighted_decoder_hidden_state_t_b,
         weighted_encoder_outputs=weighted_encoder_outputs,
+        coverage_weights=None,
         attention_v=attention_v,
         attention_zeros=attention_zeros,
         compute_attention_logits=compute_regular_attention_logits,
@@ -366,6 +408,7 @@ def lstm_with_recurrent_attention_reference(
         weighted_decoder_hidden_state_t_w=weighted_decoder_hidden_state_t_w,
         weighted_decoder_hidden_state_t_b=weighted_decoder_hidden_state_t_b,
         weighted_encoder_outputs=weighted_encoder_outputs,
+        coverage_weights=None,
         attention_v=attention_v,
         attention_zeros=attention_zeros,
         compute_attention_logits=compute_recurrent_attention_logits,
@@ -400,6 +443,7 @@ def lstm_with_dot_attention_reference(
         weighted_decoder_hidden_state_t_w=weighted_decoder_hidden_state_t_w,
         weighted_decoder_hidden_state_t_b=weighted_decoder_hidden_state_t_b,
         weighted_encoder_outputs=None,
+        coverage_weights=None,
         attention_v=None,
         attention_zeros=None,
         compute_attention_logits=compute_dot_attention_logits,
@@ -457,6 +501,46 @@ def lstm_with_dot_attention_reference_different_dim(
         encoder_outputs_transposed=encoder_outputs_transposed,
         weighted_decoder_hidden_state_t_w=weighted_decoder_hidden_state_t_w,
         weighted_decoder_hidden_state_t_b=weighted_decoder_hidden_state_t_b,
+    )
+
+
+def lstm_with_coverage_attention_reference(
+    input,
+    initial_hidden_state,
+    initial_cell_state,
+    initial_attention_weighted_encoder_context,
+    initial_coverage,
+    gates_w,
+    gates_b,
+    decoder_input_lengths,
+    weighted_decoder_hidden_state_t_w,
+    weighted_decoder_hidden_state_t_b,
+    weighted_encoder_outputs,
+    coverage_weights,
+    attention_v,
+    attention_zeros,
+    encoder_outputs_transposed,
+):
+    return lstm_with_attention_reference(
+        input=input,
+        initial_hidden_state=initial_hidden_state,
+        initial_cell_state=initial_cell_state,
+        initial_attention_weighted_encoder_context=(
+            initial_attention_weighted_encoder_context
+        ),
+        gates_w=gates_w,
+        gates_b=gates_b,
+        decoder_input_lengths=decoder_input_lengths,
+        encoder_outputs_transposed=encoder_outputs_transposed,
+        weighted_prev_attention_context_w=None,
+        weighted_prev_attention_context_b=None,
+        weighted_decoder_hidden_state_t_w=weighted_decoder_hidden_state_t_w,
+        weighted_decoder_hidden_state_t_b=weighted_decoder_hidden_state_t_b,
+        weighted_encoder_outputs=weighted_encoder_outputs,
+        coverage_weights=coverage_weights,
+        attention_v=attention_v,
+        attention_zeros=attention_zeros,
+        compute_attention_logits=compute_coverage_attention_logits,
     )
 
 
@@ -1147,6 +1231,36 @@ class RNNCellTest(hu.HypothesisTestCase):
             gc,
         )
 
+    @given(encoder_output_length=st.integers(2, 3),
+           encoder_output_dim=st.integers(1, 3),
+           decoder_input_length=st.integers(1, 3),
+           decoder_state_dim=st.integers(1, 3),
+           batch_size=st.integers(1, 3),
+           **hu.gcs)
+    def test_lstm_with_coverage_attention(
+        self,
+        encoder_output_length,
+        encoder_output_dim,
+        decoder_input_length,
+        decoder_state_dim,
+        batch_size,
+        gc,
+        dc,
+    ):
+        self.lstm_with_attention(
+            partial(
+                rnn_cell.LSTMWithAttention,
+                attention_type=AttentionType.SoftCoverage,
+            ),
+            encoder_output_length,
+            encoder_output_dim,
+            decoder_input_length,
+            decoder_state_dim,
+            batch_size,
+            lstm_with_coverage_attention_reference,
+            gc,
+        )
+
     def lstm_with_attention(
         self,
         create_lstm_with_attention,
@@ -1221,6 +1335,14 @@ class RNNCellTest(hu.HypothesisTestCase):
             ).astype(np.float32),
         )
         workspace.FeedBlob(
+            'external/LSTMWithAttention/coverage_weights',
+            np.random.randn(
+                encoder_output_length,
+                batch_size,
+                encoder_output_dim,
+            ).astype(np.float32),
+        )
+        workspace.FeedBlob(
             decoder_input_lengths,
             np.random.randint(
                 0,
@@ -1239,6 +1361,10 @@ class RNNCellTest(hu.HypothesisTestCase):
             initial_attention_weighted_encoder_context,
             np.random.randn(
                 1, batch_size, encoder_output_dim).astype(np.float32)
+        )
+        workspace.FeedBlob(
+            'external/LSTMWithAttention/initial_coverage',
+            np.zeros((1, batch_size, encoder_output_length)).astype(np.float32),
         )
         inputs = [workspace.FetchBlob(name) for name in op.input]
         self.assertReferenceChecks(

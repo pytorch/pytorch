@@ -19,6 +19,7 @@ from caffe2.python.attention import (
     apply_regular_attention,
     apply_recurrent_attention,
     apply_dot_attention,
+    apply_soft_coverage_attention,
 )
 from caffe2.python import core, recurrent, workspace, brew, scope
 from caffe2.python.modeling.parameter_sharing import ParameterSharing
@@ -708,6 +709,7 @@ class AttentionCell(RNNCell):
             AttentionType.Regular,
             AttentionType.Recurrent,
             AttentionType.Dot,
+            AttentionType.SoftCoverage,
         ]
         self.attention_type = attention_type
         self.attention_memory_optimization = attention_memory_optimization
@@ -721,8 +723,13 @@ class AttentionCell(RNNCell):
         timestep,
         extra_inputs=None,
     ):
-        decoder_prev_states = states[:-1]
-        attention_weighted_encoder_context_t_prev = states[-1]
+        if self.attention_type == AttentionType.SoftCoverage:
+            decoder_prev_states = states[:-2]
+            attention_weighted_encoder_context_t_prev = states[-2]
+            coverage_t_prev = states[-1]
+        else:
+            decoder_prev_states = states[:-1]
+            attention_weighted_encoder_context_t_prev = states[-1]
 
         assert extra_inputs is None
 
@@ -790,6 +797,24 @@ class AttentionCell(RNNCell):
                 scope=self.name,
                 encoder_lengths=self.encoder_lengths,
             )
+        elif self.attention_type == AttentionType.SoftCoverage:
+            (
+                attention_weighted_encoder_context_t,
+                self.attention_weights_3d,
+                attention_blobs,
+                coverage_t,
+            ) = apply_soft_coverage_attention(
+                model=model,
+                encoder_output_dim=self.encoder_output_dim,
+                encoder_outputs_transposed=self.encoder_outputs_transposed,
+                weighted_encoder_outputs=self.weighted_encoder_outputs,
+                decoder_hidden_state_t=self.hidden_t_intermediate,
+                decoder_hidden_state_dim=self.decoder_state_dim,
+                scope=self.name,
+                encoder_lengths=self.encoder_lengths,
+                coverage_t_prev=coverage_t_prev,
+                coverage_weights=self.coverage_weights,
+            )
         else:
             raise Exception('Attention type {} not implemented'.format(
                 self.attention_type
@@ -799,6 +824,9 @@ class AttentionCell(RNNCell):
             self.recompute_blobs.extend(attention_blobs)
 
         output = list(decoder_states) + [attention_weighted_encoder_context_t]
+        if self.attention_type == AttentionType.SoftCoverage:
+            output.append(coverage_t)
+
         output[self.decoder_cell.get_output_state_index()] = model.Copy(
             output[self.decoder_cell.get_output_state_index()],
             self.scope('hidden_t_external'),
@@ -834,12 +862,59 @@ class AttentionCell(RNNCell):
 
         return self.decoder_cell.prepare_input(model, input_blob)
 
+    def build_initial_coverage(self, model):
+        """
+        initial_coverage is always zeros of shape [encoder_length],
+        which shape must be determined programmatically dureing network
+        computation.
+
+        This method also sets self.coverage_weights, a separate transform
+        of encoder_outputs which is used to determine coverage contribution
+        tp attention.
+        """
+        assert self.attention_type == AttentionType.SoftCoverage
+
+        # [encoder_length, batch_size, encoder_output_dim]
+        self.coverage_weights = brew.fc(
+            model,
+            self.encoder_outputs,
+            self.scope('coverage_weights'),
+            dim_in=self.encoder_output_dim,
+            dim_out=self.encoder_output_dim,
+            axis=2,
+        )
+
+        encoder_length = model.net.Slice(
+            model.net.Shape(self.encoder_outputs),
+            starts=[0],
+            ends=[1],
+        )
+        if (
+            scope.CurrentDeviceScope() is not None and
+            scope.CurrentDeviceScope().device_type == caffe2_pb2.CUDA
+        ):
+            encoder_length = model.net.CopyGPUToCPU(
+                encoder_length,
+                'encoder_length_cpu',
+            )
+        # total attention weight applied across decoding steps_per_checkpoint
+        # shape: [encoder_length]
+        initial_coverage = model.net.ConstantFill(
+            encoder_length,
+            self.scope('initial_coverage'),
+            value=0.0,
+            input_as_shape=1,
+        )
+        return initial_coverage
+
     def get_state_names(self):
         state_names = list(self.decoder_cell.get_state_names())
         state_names[self.get_output_state_index()] = self.scope(
             'hidden_t_external',
         )
         state_names.append(self.scope('attention_weighted_encoder_context_t'))
+        if self.attention_type == AttentionType.SoftCoverage:
+            state_names.append(self.scope('coverage_t'))
         return state_names
 
     def get_output_dim(self):
@@ -849,7 +924,11 @@ class AttentionCell(RNNCell):
         return self.decoder_cell.get_output_state_index()
 
     def _prepare_output(self, model, states):
-        attention_context = states[-1]
+        if self.attention_type == AttentionType.SoftCoverage:
+            attention_context = states[-2]
+        else:
+            attention_context = states[-1]
+
         with core.NameScope(self.name or ''):
             output, _ = model.net.Concat(
                 [self.hidden_t_intermediate, attention_context],
@@ -863,11 +942,21 @@ class AttentionCell(RNNCell):
         return output
 
     def _prepare_output_sequence(self, model, state_outputs):
+        if self.attention_type == AttentionType.SoftCoverage:
+            decoder_state_outputs = state_outputs[:-4]
+        else:
+            decoder_state_outputs = state_outputs[:-2]
+
         decoder_output = self.decoder_cell._prepare_output_sequence(
             model,
-            state_outputs[:-2],
+            decoder_state_outputs,
         )
-        attention_context_index = 2 * (len(self.get_state_names()) - 1)
+
+        if self.attention_type == AttentionType.SoftCoverage:
+            attention_context_index = 2 * (len(self.get_state_names()) - 2)
+        else:
+            attention_context_index = 2 * (len(self.get_state_names()) - 1)
+
         with core.NameScope(self.name or ''):
             output, _ = model.net.Concat(
                 [
@@ -1415,15 +1504,18 @@ def LSTMWithAttention(
         attention_memory_optimization=attention_memory_optimization,
         forward_only=forward_only,
     )
+    initial_states = [
+        initial_decoder_hidden_state,
+        initial_decoder_cell_state,
+        initial_attention_weighted_encoder_context,
+    ]
+    if attention_type == AttentionType.SoftCoverage:
+        initial_states.append(cell.build_initial_coverage(model))
     _, result = cell.apply_over_sequence(
         model=model,
         inputs=decoder_inputs,
         seq_lengths=decoder_input_lengths,
-        initial_states=(
-            initial_decoder_hidden_state,
-            initial_decoder_cell_state,
-            initial_attention_weighted_encoder_context,
-        ),
+        initial_states=initial_states,
         outputs_with_grads=outputs_with_grads,
     )
     return result
