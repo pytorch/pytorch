@@ -40,9 +40,15 @@ class SparseToDenseOp final : public Operator<Context> {
     if (sparse_indices_len <= 0) {
       return 0;
     }
-    return 1 +
-        *std::max_element(
-               sparse_indices_vec, sparse_indices_vec + sparse_indices_len);
+
+    // Awkward way to get the max element to make it work with both CUDA
+    // and CPU.
+    max_element_.Resize(1);
+    TInd* max_element_ptr = max_element_.template mutable_data<TInd>();
+    math::ReduceMax<TInd>(sparse_indices_len, sparse_indices_vec, max_element_ptr,
+          &scratch_, &context_);
+    max_element_host_.CopyFrom(max_element_);
+    return 1 + max_element_host_.template data<TInd>()[0];
   }
 
   template <typename TInd>
@@ -104,6 +110,9 @@ class SparseToDenseOp final : public Operator<Context> {
 
  private:
   int output_first_dim_;
+  Tensor<Context> scratch_;
+  Tensor<CPUContext> max_element_host_;
+  Tensor<Context> max_element_;
 
   INPUT_TAGS(INDICES, VALUES, DATA_TO_INFER_DIM);
 };

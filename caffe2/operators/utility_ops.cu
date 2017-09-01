@@ -15,6 +15,8 @@
 namespace caffe2 {
 CAFFE_KNOWN_TYPE(const float*);
 
+REGISTER_CUDA_OPERATOR(EnsureDense, EnsureDenseOp<CUDAContext>);
+
 
 __global__ void NanCheckKernel(int N, const float* X, bool* result) {
   bool has_nan = false;
