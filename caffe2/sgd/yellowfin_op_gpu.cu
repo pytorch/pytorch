@@ -19,7 +19,7 @@ __global__ void GetLrMuKernel(
   const float pre_p = *distance_deb * *g_norm2_min_deb;
   const float p = (pre_p * pre_p) / (2.0f * *variance);
   const float w3 = (-sqrtf(p * p + 4.0f / 27.0f * p * p * p) - p) / 2.0f;
-  const float w3_sign = copysignf(1.0f, w3);
+  const float w3_sign = w3 > 0.0f ? 1.0f : -1.0f;
   const float w = w3_sign * powf(fabsf(w3), 1.0f / 3.0f);
   const float y = w - p / 3.0f / w;
   const float root = y + 1.0f;

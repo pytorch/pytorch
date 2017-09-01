@@ -142,7 +142,7 @@ class TestYellowFin(OptimizerTestBase, TestCase):
 
         p = distance ** 2 * h_min ** 2 / 2 / grad_var
         w3 = (-math.sqrt(p * p + 4.0 / 27.0 * p * p * p) - p) / 2.0
-        w = math.copysign(1.0, w3) * math.pow(math.fabs(w3), 1.0 / 3.0)
+        w = (1.0 if w3 > 0.0 else -1.0) * math.pow(math.fabs(w3), 1.0 / 3.0)
         y = w - p / 3.0 / w
         root = y + 1
         root = min(root, 1.0 - 1e-6)
