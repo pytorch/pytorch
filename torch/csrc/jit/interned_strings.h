@@ -31,6 +31,7 @@ _(Value) \
 _(Subgraph) \
 _(SpatialBN) \
 _(Conv) \
+_(Caffe2ConvTranspose) \
 _(ConvTranspose) \
 _(is_test) \
 _(epsilon) \
@@ -45,6 +46,8 @@ _(pads) \
 _(pad) \
 _(dilations) \
 _(dilation) \
+_(broadcast) \
+_(axis) \
 _(group)
 
 enum BuiltinSymbol {

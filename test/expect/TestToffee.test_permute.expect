@@ -4,21 +4,15 @@ node {
   op_type: "Transpose"
   attribute {
     name: "perm"
-    ints: 1
     ints: 0
-  }
-}
-node {
-  input: "2"
-  output: "3"
-  op_type: "Transpose"
-  attribute {
-    name: "perm"
     ints: 1
-    ints: 0
+    ints: 4
+    ints: 2
+    ints: 5
+    ints: 3
   }
 }
 name: "torch-jit-export"
 input: "1"
-output: "3"
+output: "2"
 producer_version: 1

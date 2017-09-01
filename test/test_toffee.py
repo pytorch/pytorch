@@ -51,6 +51,11 @@ class TestToffee(TestCase):
         trace, _ = torch.jit.record_trace(lambda x: x.transpose(0, 1).transpose(1, 0), x)
         self.assertToffeeExpected(trace.export(False))
 
+    def test_permute(self):
+        x = Variable(torch.Tensor([[[[[[0]]]]]]), requires_grad=True)
+        trace, _ = torch.jit.record_trace(lambda x: x.permute(0, 1, 4, 2, 5, 3), x)
+        self.assertToffeeExpected(trace.export(False))
+
     def test_params(self):
         x = Variable(torch.Tensor([[1, 2], [3, 4]]), requires_grad=True)
         y = Variable(torch.Tensor([[1, 2], [3, 4]]), requires_grad=True)
