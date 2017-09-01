@@ -62,6 +62,7 @@ struct TraceEnterHook : autograd::FunctionPreHook {
       setValueTrace(tracing_state, input, input_node);
       input_node->inferTypeFrom(input->data);
     }
+    tracing_state->var_flags[graph->stage()] = detail::getVarFlags(inputs);
   }
 
   std::weak_ptr<TracingState> weak_tracing_state;

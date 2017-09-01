@@ -35,7 +35,8 @@ struct TracingState : public std::enable_shared_from_this<TracingState> {
     : graph(new Graph())
     , active(false)
     , num_stages(num_stages)
-    , eval_count(0) {}
+    , eval_count(0)
+    , var_flags(num_stages) {}
 
   // XXX: graph can be NULL if it's a failed trace (failed = didn't capture all
   // the stages we care about)
@@ -50,6 +51,7 @@ struct TracingState : public std::enable_shared_from_this<TracingState> {
   // TODO: Perhaps, turn this into an owning reference.  The buffers
   // are persistent, so this won't lead to a leak.
   std::unordered_map<void*, Node*> buffer_map;
+  std::vector<std::vector<std::pair<bool, bool>>> var_flags;
 
   std::mutex mutex;
   variable_list inputs; // Used only for the duration of first stage

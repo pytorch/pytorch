@@ -324,8 +324,7 @@ void initAutogradClosureBindings(PyObject* module) {
     ;
 
   m.def("_jit_createAutogradClosure", [](jit::tracer::TracingState* tracing_state) {
-    auto & graph = tracing_state->graph;
-    return std::make_shared<AutogradClosureFactory>(graph.get());
+    return std::make_shared<AutogradClosureFactory>(tracing_state);
   });
 }
 

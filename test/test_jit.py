@@ -309,6 +309,24 @@ class TestJit(TestCase):
         out = fn(x, y)
         self.assertTrue(fn.has_trace_for(x, y))
 
+    def test_backward_flag_checks(self):
+        x = Variable(torch.randn(1), requires_grad=True)
+
+        @torch.jit.trace(num_derivatives=2)
+        def fn(x):
+            return x * x
+
+        grad_x, = torch.autograd.grad(fn(x), (x,), create_graph=True)
+        self.assertFalse(fn.has_trace_for(x))
+        grad_x.backward()
+        self.assertTrue(fn.has_trace_for(x))
+
+        with self.assertRaisesRegex(RuntimeError, 'different flags'):
+            fn(x).backward(Variable(torch.ones(1), requires_grad=True))
+        # TODO: enable once AutogradClosure registers prev stage inputs correctly
+        # grad_x, = torch.autograd.grad(fn(x), (x,), create_graph=True)
+        # grad_x.backward()
+
     def test_python_ir(self):
         x = Variable(torch.Tensor([0.4]), requires_grad=True)
         y = Variable(torch.Tensor([0.7]), requires_grad=True)
