@@ -1,7 +1,7 @@
 graph(%1 : Double(1)
       %2 : Double(1)) {
-  %19.0 : Double(1) = fusion_group_0(%1, %2), uses = [[%0.i0]];
-  return (%19.0);
+  %20 : Double(1) = fusion_group_0(%1, %2), uses = [[%0.i0]];
+  return (%20);
 }
 with fusion_group_0 = graph(%5 : Double(1)
       %8 : Double(1)) {

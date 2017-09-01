@@ -26,10 +26,7 @@ std::string getPythonName(const PyObject* obj, bool is_legacy) {
   }
 }
 std::ostream& operator<<(std::ostream & out, Node & n) {
-  if(n.kind() == kSelect)
-    out << "%" << n.input()->uniqueName() << "." << n.offset();
-  else
-    out << "%" << n.uniqueName();
+  out << "%" << n.uniqueName();
   return out;
 }
 std::ostream& operator<<(std::ostream & out, const node_list & nodes) {
@@ -391,10 +388,13 @@ void Graph::lint() {
     JIT_ASSERT(n->kind_ != kParam);
     JIT_ASSERT(n->kind_ != kReturn);
     for (auto input : n->inputs_) {
-      // TODO: Would much rather prefer to use the real node printer, because
-      // select nodes render as %10.1 instead of %12, so to interpret this
-      // you need to know how to translate between the two (not possible...)
-      JIT_ASSERTM(in_scope.count(input) == 1, "%%%d not in scope", input->unique_);
+      if (in_scope.count(input) != 1) {
+        if (n->kind_ == kSelect) {
+          JIT_ASSERTM(0, "%%%d (select node) not in scope; you probably forget to append it to the graph (you won't see this in the graph rendering)", input->unique_);
+        } else {
+          JIT_ASSERTM(0, "%%%d not in scope", input->unique_);
+        }
+      }
     }
     for (auto use : n->uses_) {
       JIT_ASSERT(in_scope.count(use.user) == 0);

@@ -15,29 +15,29 @@ graph(%1 : Double(64, 3, 11, 11)
       %15 : Double(1000, 4096)
       %16 : Double(1000)
       %17 : Double(10, 3, 224, 224)) {
-  %18.0 : Double(10, 64, 55, 55), %18.1 : Handle = CppOp[ConvForward](%17, %1, %2), uses = [[%21.i0], []];
-  %21.0 : Double(10, 64, 55, 55), %21.1 : Handle = ^Threshold(0, 0, True)(%18.0), uses = [[%24.i0], []];
-  %24.0 : Double(10, 64, 27, 27), %24.1 : Long(10, 64, 27, 27), %24.2 : Handle = ^MaxPool2d(3, 2, 0, 1, False)(%21.0), uses = [[%28.i0], [], []];
-  %28.0 : Double(10, 192, 27, 27), %28.1 : Handle = CppOp[ConvForward](%24.0, %3, %4), uses = [[%31.i0], []];
-  %31.0 : Double(10, 192, 27, 27), %31.1 : Handle = ^Threshold(0, 0, True)(%28.0), uses = [[%34.i0], []];
-  %34.0 : Double(10, 192, 13, 13), %34.1 : Long(10, 192, 13, 13), %34.2 : Handle = ^MaxPool2d(3, 2, 0, 1, False)(%31.0), uses = [[%38.i0], [], []];
-  %38.0 : Double(10, 384, 13, 13), %38.1 : Handle = CppOp[ConvForward](%34.0, %5, %6), uses = [[%41.i0], []];
-  %41.0 : Double(10, 384, 13, 13), %41.1 : Handle = ^Threshold(0, 0, True)(%38.0), uses = [[%44.i0], []];
-  %44.0 : Double(10, 256, 13, 13), %44.1 : Handle = CppOp[ConvForward](%41.0, %7, %8), uses = [[%47.i0], []];
-  %47.0 : Double(10, 256, 13, 13), %47.1 : Handle = ^Threshold(0, 0, True)(%44.0), uses = [[%50.i0], []];
-  %50.0 : Double(10, 256, 13, 13), %50.1 : Handle = CppOp[ConvForward](%47.0, %9, %10), uses = [[%53.i0], []];
-  %53.0 : Double(10, 256, 13, 13), %53.1 : Handle = ^Threshold(0, 0, True)(%50.0), uses = [[%56.i0], []];
-  %56.0 : Double(10, 256, 6, 6), %56.1 : Long(10, 256, 6, 6), %56.2 : Handle = ^MaxPool2d(3, 2, 0, 1, False)(%53.0), uses = [[%60.i0], [], []];
-  %60.0 : Double(10, 9216), %60.1 : Handle = ^View((10, 9216))(%56.0), uses = [[%63.i0], []];
-  %63.0 : Double(10, 9216), %63.1 : Handle = ^Dropout(0.5, True, False)(%60.0), uses = [[%69.i1], []];
-  %66.0 : Double(9216!, 4096!), %66.1 : Handle = ^Transpose(0, 1)(%11), uses = [[%69.i2], []];
-  %69.0 : Double(10, 4096), %69.1 : Handle = ^Addmm(1, 1, False)(%12, %63.0, %66.0), uses = [[%72.i0], []];
-  %72.0 : Double(10, 4096), %72.1 : Handle = ^Threshold(0, 0, True)(%69.0), uses = [[%75.i0], []];
-  %75.0 : Double(10, 4096), %75.1 : Handle = ^Dropout(0.5, True, False)(%72.0), uses = [[%81.i1], []];
-  %78.0 : Double(4096!, 4096!), %78.1 : Handle = ^Transpose(0, 1)(%13), uses = [[%81.i2], []];
-  %81.0 : Double(10, 4096), %81.1 : Handle = ^Addmm(1, 1, False)(%14, %75.0, %78.0), uses = [[%84.i0], []];
-  %84.0 : Double(10, 4096), %84.1 : Handle = ^Threshold(0, 0, True)(%81.0), uses = [[%90.i1], []];
-  %87.0 : Double(4096!, 1000!), %87.1 : Handle = ^Transpose(0, 1)(%15), uses = [[%90.i2], []];
-  %90.0 : Double(10, 1000), %90.1 : Handle = ^Addmm(1, 1, False)(%16, %84.0, %87.0), uses = [[%0.i0], []];
-  return (%90.0);
+  %19 : Double(10, 64, 55, 55), %20 : Handle = CppOp[ConvForward](%17, %1, %2), uses = [[%21.i0], []];
+  %22 : Double(10, 64, 55, 55), %23 : Handle = ^Threshold(0, 0, True)(%19), uses = [[%24.i0], []];
+  %25 : Double(10, 64, 27, 27), %26 : Long(10, 64, 27, 27), %27 : Handle = ^MaxPool2d(3, 2, 0, 1, False)(%22), uses = [[%28.i0], [], []];
+  %29 : Double(10, 192, 27, 27), %30 : Handle = CppOp[ConvForward](%25, %3, %4), uses = [[%31.i0], []];
+  %32 : Double(10, 192, 27, 27), %33 : Handle = ^Threshold(0, 0, True)(%29), uses = [[%34.i0], []];
+  %35 : Double(10, 192, 13, 13), %36 : Long(10, 192, 13, 13), %37 : Handle = ^MaxPool2d(3, 2, 0, 1, False)(%32), uses = [[%38.i0], [], []];
+  %39 : Double(10, 384, 13, 13), %40 : Handle = CppOp[ConvForward](%35, %5, %6), uses = [[%41.i0], []];
+  %42 : Double(10, 384, 13, 13), %43 : Handle = ^Threshold(0, 0, True)(%39), uses = [[%44.i0], []];
+  %45 : Double(10, 256, 13, 13), %46 : Handle = CppOp[ConvForward](%42, %7, %8), uses = [[%47.i0], []];
+  %48 : Double(10, 256, 13, 13), %49 : Handle = ^Threshold(0, 0, True)(%45), uses = [[%50.i0], []];
+  %51 : Double(10, 256, 13, 13), %52 : Handle = CppOp[ConvForward](%48, %9, %10), uses = [[%53.i0], []];
+  %54 : Double(10, 256, 13, 13), %55 : Handle = ^Threshold(0, 0, True)(%51), uses = [[%56.i0], []];
+  %57 : Double(10, 256, 6, 6), %58 : Long(10, 256, 6, 6), %59 : Handle = ^MaxPool2d(3, 2, 0, 1, False)(%54), uses = [[%60.i0], [], []];
+  %61 : Double(10, 9216), %62 : Handle = ^View((10, 9216))(%57), uses = [[%63.i0], []];
+  %64 : Double(10, 9216), %65 : Handle = ^Dropout(0.5, True, False)(%61), uses = [[%69.i1], []];
+  %67 : Double(9216!, 4096!), %68 : Handle = ^Transpose(0, 1)(%11), uses = [[%69.i2], []];
+  %70 : Double(10, 4096), %71 : Handle = ^Addmm(1, 1, False)(%12, %64, %67), uses = [[%72.i0], []];
+  %73 : Double(10, 4096), %74 : Handle = ^Threshold(0, 0, True)(%70), uses = [[%75.i0], []];
+  %76 : Double(10, 4096), %77 : Handle = ^Dropout(0.5, True, False)(%73), uses = [[%81.i1], []];
+  %79 : Double(4096!, 4096!), %80 : Handle = ^Transpose(0, 1)(%13), uses = [[%81.i2], []];
+  %82 : Double(10, 4096), %83 : Handle = ^Addmm(1, 1, False)(%14, %76, %79), uses = [[%84.i0], []];
+  %85 : Double(10, 4096), %86 : Handle = ^Threshold(0, 0, True)(%82), uses = [[%90.i1], []];
+  %88 : Double(4096!, 1000!), %89 : Handle = ^Transpose(0, 1)(%15), uses = [[%90.i2], []];
+  %91 : Double(10, 1000), %92 : Handle = ^Addmm(1, 1, False)(%16, %85, %88), uses = [[%0.i0], []];
+  return (%91);
 }
