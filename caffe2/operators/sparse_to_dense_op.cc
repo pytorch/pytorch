@@ -4,7 +4,6 @@
 
 namespace caffe2 {
 
-namespace {
 REGISTER_CPU_OPERATOR(SparseToDense, SparseToDenseOp<CPUContext>);
 
 OPERATOR_SCHEMA(SparseToDense)
@@ -47,6 +46,8 @@ output[j, ...] = 0 if j not in indices
         "len(mask)] + shape(default_value)` (if `lengths` is not provided the "
         "first dimension is omitted)");
 
+
+namespace {
 class GetSparseToDenseGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
@@ -56,5 +57,5 @@ class GetSparseToDenseGradient : public GradientMakerBase {
 };
 
 REGISTER_GRADIENT(SparseToDense, GetSparseToDenseGradient);
-} // namespace
+}
 } // namespace caffe2

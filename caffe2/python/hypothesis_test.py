@@ -2128,11 +2128,19 @@ class TestOperators(hu.HypothesisTestCase):
 
     @given(inp=_dtypes().flatmap(lambda dt: _tensor_and_indices(
         elements=st.floats(min_value=0, max_value=1), dtype=dt)),
-        **hu.gcs_cpu_only)
+        **hu.gcs)
     def test_sparse_to_dense(self, inp, gc, dc):
         first_dim, X, I = inp
+        if X.dtype != np.dtype('float32') and gc.device_type == 1:
+            # Cuda only support 32 bit float
+            print("Bailout {}".format(X.dtype))
+            return
+        if gc.device_type == 1:
+            # Cuda version only support int32
+            I = I.astype(np.int32)
+
         # values don't matter
-        D = np.zeros((first_dim,) + X.shape[1:])
+        D = np.zeros((first_dim,) + X.shape[1:]).astype(X.dtype)
 
         op = core.CreateOperator("SparseToDense", ["I", "X", "D"], ["Y"])
 
@@ -2143,8 +2151,6 @@ class TestOperators(hu.HypothesisTestCase):
             return [O]
 
         self.assertReferenceChecks(gc, op, [I, X, D], sparse_to_dense)
-        self.assertDeviceChecks(dc, op, [I, X, D], [0])
-
         X = X.astype(np.float32)
         self.assertGradientChecks(gc, op, [I, X, D], 1, [0])
 
