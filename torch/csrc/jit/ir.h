@@ -768,7 +768,7 @@ public:
     JIT_ASSERT(ref.defined());
     AutoGPU guard(ref.type().isCuda() ? ref.get_device() : -1);
     auto n = create(kConstant);
-    n->t_(kValue,ref.clone());
+    n->t_(kvalue, ref.clone());
     return n;
   }
   Node * createFusionGroup() {

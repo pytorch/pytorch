@@ -48,9 +48,9 @@ jit::node_list ConvForward::primspec(PrimSpecContext* ctx, jit::node_list inputs
   g->appendNode(n);
 
   std::vector<int64_t> kernel_size(weight_size.begin() + 2, weight_size.end());
-  n->is_(jit::kkernels,std::move(kernel_size));
+  n->is_(jit::kkernel_shape, std::move(kernel_size));
   std::vector<int64_t> kernel_stride(stride.begin(),stride.end());
-  n->is_(jit::kstrides,std::move(kernel_stride));
+  n->is_(jit::kstrides, std::move(kernel_stride));
 
   std::vector<int64_t> kernel_pads(padding.begin(),padding.end());
   // NB: Caffe2 let's specifying top and bottom pads separately;
@@ -60,16 +60,13 @@ jit::node_list ConvForward::primspec(PrimSpecContext* ctx, jit::node_list inputs
   }
   n->is_(jit::kpads,std::move(kernel_pads));
 
-  if(!transposed) {
-    std::vector<int64_t> kernel_dilations(dilation.begin(),dilation.end());
-    n->is_(jit::kdilations,std::move(kernel_dilations));
-    // Not in Toffee?
-    for (int p : output_padding) {
-      JIT_ASSERT(p == 0);
-    }
-    n->i_(jit::kgroup,groups);
-  } else {
-    JIT_ASSERT(1 == all_equal<int>(dilation,"dilations"));
+  std::vector<int64_t> kernel_dilations(dilation.begin(),dilation.end());
+  n->is_(jit::kdilations,std::move(kernel_dilations));
+  n->i_(jit::kgroup,groups);
+
+  // Not in Toffee?
+  for (int p : output_padding) {
+    JIT_ASSERT(p == 0);
   }
 
   // ignore benchmark/cudnn_enabled

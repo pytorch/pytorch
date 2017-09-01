@@ -14,7 +14,7 @@ jit::node_list BatchNormForward::primspec(PrimSpecContext* ctx, jit::node_list i
   bn->addInput(jit::tracer::getBufferTrace(*ctx->buffer_map, running_var));
   bn->i_(jit::kis_test, !this->training);
   bn->f_(jit::kepsilon, eps);
-  bn->s_(jit::korder, "NCHW");
+  //bn->s_(jit::korder, "NCHW");
   bn->f_(jit::kmomentum, 1 - momentum);
 
   auto orig_output = g->appendNode(g->createSelect(bn, 0));

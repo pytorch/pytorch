@@ -40,4 +40,6 @@ initializer {
   name: "1"
   raw_data: "\000\000\200?\000\000\000@\000\000@@\000\000\200@"
 }
-producer_version: 1
+ir_version: 1
+producer_version: 20000
+producer_tag: "pytorch"

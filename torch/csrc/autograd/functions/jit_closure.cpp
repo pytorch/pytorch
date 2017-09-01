@@ -491,7 +491,7 @@ struct StageClosure {
       fn->num_inputs = 1;
       return fn;
     IR_ELSEIF(Constant)
-      auto fn = std::make_shared<torch::autograd::WrapConstant>(value->t(kValue));
+      auto fn = std::make_shared<torch::autograd::WrapConstant>(value->t(kvalue));
       const_factory->next_functions.emplace_back(fn, 0);
       fn->num_inputs = 1;
       return fn;

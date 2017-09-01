@@ -245,8 +245,7 @@ static void addAttribute(toffee::NodeProto * n_p, jit::Node * n, jit::Symbol nam
         attr->add_strings(v);
       break;
     case AttributeKind::t: {
-      //TODO: tensors but no tensor?
-      auto t = attr->add_tensors();
+      auto t = attr->mutable_t();
       encodeTensor(t, n->t(name));
     } break;
     case AttributeKind::ts:
@@ -256,8 +255,7 @@ static void addAttribute(toffee::NodeProto * n_p, jit::Node * n, jit::Symbol nam
       }
       break;
     case AttributeKind::g: {
-      //TODO: graphs but no graph?
-      auto g = attr->add_graphs();
+      auto g = attr->mutable_g();
       encodeGraph(g, n->g(name), {});
     } break;
     case AttributeKind::gs:
