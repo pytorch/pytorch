@@ -76,7 +76,7 @@ class Module(object):
         Example:
             >>> self.register_buffer('running_mean', torch.zeros(num_features))
         """
-        if hasattr(self, name) and name not in self._buffers.keys():
+        if hasattr(self, name) and name not in self._buffers:
             raise KeyError("attribute '{}' already exists".format(name))
 
         self._buffers[name] = tensor
@@ -90,7 +90,7 @@ class Module(object):
             raise AttributeError(
                 "cannot assign parameter before Module.__init__() call")
 
-        if hasattr(self, name) and name not in self._parameters.keys():
+        if hasattr(self, name) and name not in self._parameters:
             raise KeyError("attribute '{}' already exists".format(name))
 
         if param is None:
@@ -116,7 +116,7 @@ class Module(object):
         if not isinstance(module, Module) and module is not None:
             raise TypeError("{} is not a Module subclass".format(
                 torch.typename(module)))
-        if hasattr(self, name) and name not in self._modules.keys():
+        if hasattr(self, name) and name not in self._modules:
             raise KeyError("attribute '{}' already exists".format(name))
         self._modules[name] = module
 
