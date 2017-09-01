@@ -147,7 +147,6 @@ elif [ "$TRAVIS_OS_NAME" = 'osx' ]; then
         glog \
         leveldb \
         lmdb \
-        opencv \
         protobuf
 
     # Install ccache symlink wrappers
