@@ -62,14 +62,6 @@ struct MakeAligned {
   }
 };
 
-#ifdef __ARM_NEON__
-#define GEMMLOWP_ARM_32 1
-#else
-#define GEMMLOWP_X86 1
-#endif
-
-#define GEMMLOWP_USE_BUSYWAIT 1
-
 const int kMaxBusyWaitNOPs = 32 * 1000 * 1000;
 
 #define GEMMLOWP_NOP "nop\n"
@@ -90,26 +82,6 @@ inline int Do256NOPs() {
 #undef GEMMLOWP_NOP16
 #undef GEMMLOWP_NOP4
 #undef GEMMLOWP_NOP
-
-inline void WriteBarrier() {
-#ifdef GEMMLOWP_ARM_32
-  asm volatile("" ::: "memory");
-#elif defined(GEMMLOWP_X86)
-  asm volatile("sfence" ::: "memory");
-#else
-#error "Unsupported architecture for WriteBarrier."
-#endif
-}
-
-inline void ReadBarrier() {
-#ifdef GEMMLOWP_ARM_32
-  asm volatile("" ::: "memory");
-#elif defined(GEMMLOWP_X86)
-  asm volatile("lfence" ::: "memory");
-#else
-#error "Unsupported architecture for ReadBarrier."
-#endif
-}
 
 // Waits until *var != initial_value.
 //
@@ -134,7 +106,7 @@ inline void ReadBarrier() {
 // so as to avoid permanently spinning.
 //
 template <typename T>
-T WaitForVariableChange(volatile T* var,
+T WaitForVariableChange(std::atomic<T>* var,
                         T initial_value,
                         pthread_cond_t* cond,
                         pthread_mutex_t* mutex) {
@@ -142,32 +114,34 @@ T WaitForVariableChange(volatile T* var,
   {
     int nops = 0;
     // First, trivial case where the variable already changed value.
-    T new_value = *var;
+    T new_value = var->load(std::memory_order_relaxed);
     if (new_value != initial_value) {
-      ReadBarrier();
+      std::atomic_thread_fence(std::memory_order_acquire);
       return new_value;
     }
     // Then try busy-waiting.
     while (nops < kMaxBusyWaitNOPs) {
       nops += Do256NOPs();
-      new_value = *var;
+      new_value = var->load(std::memory_order_relaxed);
       if (new_value != initial_value) {
-        ReadBarrier();
+        std::atomic_thread_fence(std::memory_order_acquire);
         return new_value;
       }
     }
   }
 
   // Finally, do real passive waiting.
-  pthread_mutex_lock(mutex);
-  T new_value = *var;
-  if (new_value == initial_value) {
-    pthread_cond_wait(cond, mutex);
-    new_value = *var;
-    assert(new_value != initial_value);
+  {
+    pthread_mutex_lock(mutex);
+    T new_value = var->load(std::memory_order_relaxed);
+    // Handle spurious wakeups.
+    while ((new_value = var->load(std::memory_order_relaxed)) == initial_value) {
+      pthread_cond_wait(cond, mutex);
+    }
+    DCHECK_NE(static_cast<size_t>(new_value), static_cast<size_t>(initial_value));
+    pthread_mutex_unlock(mutex);
+    return new_value;
   }
-  pthread_mutex_unlock(mutex);
-  return new_value;
 }
 
 // A BlockingCounter lets one thread to wait for N events to occur.
@@ -176,18 +150,14 @@ T WaitForVariableChange(volatile T* var,
 class BlockingCounter {
  public:
   BlockingCounter()
-      : cond_(PTHREAD_COND_INITIALIZER),
-        mutex_(PTHREAD_MUTEX_INITIALIZER),
-        count_(0),
-        initial_count_(0) {}
+      : cond_(PTHREAD_COND_INITIALIZER), mutex_(PTHREAD_MUTEX_INITIALIZER), count_(0) {}
 
   // Sets/resets the counter; initial_count is the number of
   // decrementing events that the Wait() call will be waiting for.
   void Reset(std::size_t initial_count) {
     pthread_mutex_lock(&mutex_);
-    assert(count_ == 0);
-    initial_count_ = initial_count;
-    count_ = initial_count_;
+    DCHECK_EQ(count_, 0);
+    count_ = initial_count;
     pthread_mutex_unlock(&mutex_);
   }
 
@@ -196,35 +166,29 @@ class BlockingCounter {
   // Otherwise (if the decremented count is still nonzero),
   // returns false.
   bool DecrementCount() {
-    pthread_mutex_lock(&mutex_);
-    assert(count_ > 0);
-    count_--;
-    WriteBarrier();
-    if (count_ == 0) {
+    const auto count_value = count_.fetch_sub(1, std::memory_order_relaxed) - 1;
+    DCHECK_GE(count_value, 0);
+    if (count_value == 0) {
+      pthread_mutex_lock(&mutex_);
       pthread_cond_signal(&cond_);
+      pthread_mutex_unlock(&mutex_);
     }
-    bool retval = count_ == 0;
-    pthread_mutex_unlock(&mutex_);
+    bool retval = count_value == 0;
     return retval;
   }
 
   // Waits for the N other threads (N having been set by Reset())
   // to hit the BlockingCounter.
   void Wait() {
-    while (count_) {
-      ReadBarrier();
-      const std::size_t count_value = count_;
-      if (count_value) {
-        WaitForVariableChange(&count_, count_value, &cond_, &mutex_);
-      }
+    while (size_t count_value = count_.load(std::memory_order_relaxed)) {
+      WaitForVariableChange(&count_, count_value, &cond_, &mutex_);
     }
   }
 
  private:
   pthread_cond_t cond_;
   pthread_mutex_t mutex_;
-  std::size_t count_;
-  std::size_t initial_count_;
+  std::atomic<std::size_t> count_;
 };
 
 // A workload for a worker.
@@ -237,7 +201,7 @@ struct Task {
 // A worker thread.
 class alignas(kGEMMLOWPCacheLineSize) Worker {
  public:
-  enum class State {
+  enum class State : uint8_t {
     ThreadStartup, // The initial state before the thread main loop runs.
     Ready, // Is not working, has not yet received new work to do.
     HasWork, // Has work to do.
@@ -263,23 +227,23 @@ class alignas(kGEMMLOWPCacheLineSize) Worker {
   // which is guarded by assertions.
   void ChangeState(State new_state) {
     pthread_mutex_lock(&state_mutex_);
-    assert(new_state != state_);
-    switch (state_) {
+    DCHECK(new_state != state_.load(std::memory_order_relaxed));
+    switch (state_.load(std::memory_order_relaxed)) {
     case State::ThreadStartup:
-      assert(new_state == State::Ready);
+      DCHECK(new_state == State::Ready);
       break;
     case State::Ready:
-      assert(new_state == State::HasWork || new_state == State::ExitAsSoonAsPossible);
+      DCHECK(new_state == State::HasWork || new_state == State::ExitAsSoonAsPossible);
       break;
     case State::HasWork:
-      assert(new_state == State::Ready || new_state == State::ExitAsSoonAsPossible);
+      DCHECK(new_state == State::Ready || new_state == State::ExitAsSoonAsPossible);
       break;
     default:
       abort();
     }
-    state_ = new_state;
+    state_.store(new_state, std::memory_order_relaxed);
     pthread_cond_signal(&state_cond_);
-    if (state_ == State::Ready) {
+    if (new_state == State::Ready) {
       counter_to_decrement_when_ready_->DecrementCount();
     }
     pthread_mutex_unlock(&state_mutex_);
@@ -301,7 +265,7 @@ class alignas(kGEMMLOWPCacheLineSize) Worker {
       switch (state_to_act_upon) {
       case State::HasWork:
         // Got work to do! So do it, and then revert to 'Ready' state.
-        assert(task_);
+        DCHECK(task_);
         task_->Run();
         task_ = nullptr;
         ChangeState(State::Ready);
@@ -322,11 +286,9 @@ class alignas(kGEMMLOWPCacheLineSize) Worker {
   // Called by the master thead to give this worker work to do.
   // It is only legal to call this if the worker
   void StartWork(Task* task) {
-    assert(!task_);
-    // task->local_allocator = &local_allocator_;
+    DCHECK(!task_);
     task_ = task;
-    WriteBarrier();
-    assert(state_ == State::Ready);
+    DCHECK(state_.load(std::memory_order_acquire) == State::Ready);
     ChangeState(State::HasWork);
   }
 
@@ -335,6 +297,7 @@ class alignas(kGEMMLOWPCacheLineSize) Worker {
   pthread_t thread_;
 
   // The task to be worked on.
+  // Visibility of writes to task_ guarded by state_mutex_.
   Task* task_;
 
   // The condition variable and mutex guarding state changes.
@@ -342,7 +305,7 @@ class alignas(kGEMMLOWPCacheLineSize) Worker {
   pthread_mutex_t state_mutex_;
 
   // The state enum tells if we're currently working, waiting for work, etc.
-  State state_;
+  std::atomic<State> state_;
 
   // pointer to the master's thread BlockingCounter object, to notify the
   // master thread of when this worker switches to the 'Ready' state.
@@ -354,11 +317,11 @@ class WorkersPool {
   WorkersPool() {}
 
   void Execute(const std::vector<std::shared_ptr<Task>>& tasks) {
-    assert(tasks.size() >= 1);
+    CAFFE_ENFORCE_GE(tasks.size(), 1);
     // One of the tasks will be run on the current thread.
     int workers_count = tasks.size() - 1;
     CreateWorkers(workers_count);
-    assert(workers_count <= workers_.size());
+    DCHECK_LE(workers_count, workers_.size());
     counter_to_decrement_when_ready_.Reset(workers_count);
     for (auto task = 1; task < tasks.size(); ++task) {
       workers_[task - 1]->StartWork(tasks[task].get());
