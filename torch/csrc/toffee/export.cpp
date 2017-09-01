@@ -203,7 +203,7 @@ static void encodeTensor(toffee::TensorProto * p, const at::Tensor & tensor) {
     }
     p->set_data_type(toffee_type);
     at::Tensor cont = tensor.toType(at::CPU(at_type)).contiguous();
-    p->add_tensor(cont);
+    p->set_raw_data(cont);
 }
 static void encodeGraph(toffee::GraphProto * p_g, std::shared_ptr<Graph> & g, const std::vector<at::Tensor> & initializers);
 static void addAttribute(toffee::NodeProto * n_p, jit::Node * n, jit::Symbol name) {

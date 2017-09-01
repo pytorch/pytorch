@@ -1,4 +1,3 @@
-version: 1
 node {
   input: "1"
   input: "2"
@@ -34,3 +33,4 @@ name: "torch-jit-export"
 input: "1"
 input: "2"
 output: "7"
+producer_version: 1

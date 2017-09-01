@@ -1,0 +1,18 @@
+# Note [Callback for nested messages]
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# nanopb's default translation for a nested, non-repeated (possibly
+# optional) message is to include it *inline* (no indirection), with
+# a boolean has_g/has_t field to indicate its presence or not.  Why
+# do we not like this?  It's not compatible with our ownership model,
+# where a TensorProto/GraphProto class owns the protobuf struct it
+# is constructing.  With the default translation, the protobuf struct
+# occurs in two places: a TensorProto, AND the parent protobuf struct
+# field.  That's bad.  Turning it back into a callback solves the
+# ownership problem.
+#
+# Two more bonuses: at the cost of an indirection, we no longer waste fields
+# when we aren't actually storing a graph/tensor; furthermore, circular
+# dependencies now work!
+
+toffee.AttributeProto.g type:FT_CALLBACK
+toffee.AttributeProto.t type:FT_CALLBACK

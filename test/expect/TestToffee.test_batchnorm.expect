@@ -1,4 +1,3 @@
-version: 1
 node {
   input: "5"
   input: "1"
@@ -67,3 +66,4 @@ initializer {
   name: "4"
   raw_data: "fff?fff?"
 }
+producer_version: 1

@@ -12,6 +12,8 @@
 
 namespace torch { namespace toffee {
 
+// Note [Unique vector]
+// ~~~~~~~~~~~~~~~~~~~~
 // Why do we need vectors of unique pointers?  A Google-style C++ Protobuf API
 // returns raw pointers T* which are expected to stay valid as long as the
 // enclosing protobuf is live.  However, if we store T directly in a vector, if
@@ -56,7 +58,7 @@ bool micropb_callback_list(pb_ostream_t *stream, const pb_field_t *field, void *
   return true;
 }
 
-bool micropb_callback_tensor(pb_ostream_t *stream, const pb_field_t *field, void * const *arg);
+bool micropb_callback_string_from_tensor(pb_ostream_t *stream, const pb_field_t *field, void * const *arg);
 
 // MicroProto helper class
 template<typename T>
@@ -91,8 +93,27 @@ struct MicroProto {
     return r; // RVO
   }
 
-  // NB: Needs to have been heap allocated from the get-go,
-  // because we're going to take over ownership
+  // Usage:
+  //    at::Tensor owning_slot;
+  //    proto.string_field = string_from_tensor(&owning_slot, value_to_set)
+  //
+  // This function takes an at::Tensor and copies it into the
+  // owning slot specified by 'slot'.  It then returns a callback
+  // intended to be assigned into the particular protobuf field.
+  // The employed callback reads out the tensor's data as if it
+  // were a string (adjusting for endianness, if necessary)
+  // writes it out to the protobuf.
+  //
+  // You should call this function IN THE SETTER METHOD, because
+  // the no-op callback is different from a callback with an undefined
+  // Tensor.
+  pb_callback_t string_from_tensor(at::Tensor* slot, const at::Tensor& t) {
+    *slot = t; // copy construct
+    pb_callback_t r;
+    r.funcs.encode = &micropb_callback_string_from_tensor;
+    r.arg = static_cast<void*>(slot);
+    return r; // RVO
+  }
 
   // Usage:
   //    unique_vector<ElemType> owning_slot;
@@ -115,10 +136,10 @@ struct MicroProto {
     return r; // RVO
   }
 
-  pb_callback_t tensor(at::Tensor* slot, const at::Tensor& t) {
-    *slot = t; // copy construct
+  template<typename S, const pb_field_t* Field = nullptr>
+  pb_callback_t msg(S* slot) {
     pb_callback_t r;
-    r.funcs.encode = &micropb_callback_tensor;
+    r.funcs.encode = &micropb_callback<S, Field>;
     r.arg = static_cast<void*>(slot);
     return r; // RVO
   }
@@ -151,16 +172,15 @@ class TensorProto : public MicroProto<toffee_TensorProto> {
 private:
   std::string name;
   unique_vector<int64_t> dims;
-  at::Tensor tensor_data;
+  at::Tensor raw_data;
 public:
   TensorProto() : MicroProto(toffee_TensorProto_init_default) {
     proto.dims       = list<int64_t>(&dims);
   }
   void set_name(const std::string& s) { proto.name = string(&name, s); }
   void add_dims(int64_t d) { dims.emplace_back(new int64_t(d)); }
-  void add_tensor(const at::Tensor& t) {
-    proto.raw_data = tensor(&tensor_data, t);
-  }
+  // Google Protobuf divergence!
+  void set_raw_data(const at::Tensor& t) { proto.raw_data = string_from_tensor(&raw_data, t); }
   void set_data_type(toffee_TensorProto_DataType t) { proto.has_data_type = true; proto.data_type = t; }
 };
 
@@ -168,6 +188,8 @@ class AttributeProto : public MicroProto<toffee_AttributeProto> {
 private:
   std::string name;
   std::string s;
+  std::unique_ptr<GraphProto> g;
+  std::unique_ptr<TensorProto> t;
   unique_vector<float> floats;
   unique_vector<int64_t> ints;
   unique_vector<std::string> strings;
@@ -185,6 +207,9 @@ public:
   void set_f(float f) { proto.has_f = true; proto.f = f; }
   void set_i(int64_t i) { proto.has_i = true; proto.i = i; }
   void set_s(std::string s_) { proto.s = string(&s, s_); }
+  // See https://developers.google.com/protocol-buffers/docs/reference/cpp-generated#embeddedmessage
+  GraphProto* mutable_g() { proto.g = msg<GraphProto, toffee_GraphProto_fields>(g.get()); return g.get(); }
+  TensorProto* mutable_t() { proto.t = msg<TensorProto, toffee_TensorProto_fields>(t.get()); return t.get(); }
   void add_floats(float f) { floats.emplace_back(new float(f)); }
   void add_ints(int64_t i) { ints.emplace_back(new int64_t(i)); }
   void add_strings(std::string s) { strings.emplace_back(new std::string(s)); }
@@ -229,8 +254,8 @@ private:
   unique_vector<TensorProto> initializers;
 public:
   GraphProto() : MicroProto(toffee_GraphProto_init_default) {
-    proto.has_version = true;
-    proto.version = toffee_Version_CURRENT_VERSION;
+    proto.has_producer_version = true;
+    proto.producer_version = toffee_Version_PRODUCER_VERSION;
     proto.input  = list<std::string>(&inputs);
     proto.output = list<std::string>(&outputs);
     proto.node   = list<NodeProto, toffee_NodeProto_fields>(&nodes);

@@ -10,48 +10,55 @@
 
 
 
-const pb_field_t toffee_AttributeProto_fields[10] = {
+const pb_field_t toffee_AttributeProto_fields[12] = {
     PB_FIELD(  1, STRING  , OPTIONAL, CALLBACK, FIRST, toffee_AttributeProto, name, name, 0),
     PB_FIELD(  2, FLOAT   , OPTIONAL, STATIC  , OTHER, toffee_AttributeProto, f, name, 0),
     PB_FIELD(  3, INT64   , OPTIONAL, STATIC  , OTHER, toffee_AttributeProto, i, f, 0),
     PB_FIELD(  4, BYTES   , OPTIONAL, CALLBACK, OTHER, toffee_AttributeProto, s, i, 0),
-    PB_FIELD(  5, FLOAT   , REPEATED, CALLBACK, OTHER, toffee_AttributeProto, floats, s, 0),
-    PB_FIELD(  6, INT64   , REPEATED, CALLBACK, OTHER, toffee_AttributeProto, ints, floats, 0),
-    PB_FIELD(  7, BYTES   , REPEATED, CALLBACK, OTHER, toffee_AttributeProto, strings, ints, 0),
-    PB_FIELD(  8, MESSAGE , REPEATED, CALLBACK, OTHER, toffee_AttributeProto, tensors, strings, &toffee_TensorProto_fields),
-    PB_FIELD(  9, MESSAGE , REPEATED, CALLBACK, OTHER, toffee_AttributeProto, graphs, tensors, &toffee_GraphProto_fields),
+    PB_FIELD(  5, MESSAGE , OPTIONAL, CALLBACK, OTHER, toffee_AttributeProto, t, s, &toffee_TensorProto_fields),
+    PB_FIELD(  6, MESSAGE , OPTIONAL, CALLBACK, OTHER, toffee_AttributeProto, g, t, &toffee_GraphProto_fields),
+    PB_FIELD(  7, FLOAT   , REPEATED, CALLBACK, OTHER, toffee_AttributeProto, floats, g, 0),
+    PB_FIELD(  8, INT64   , REPEATED, CALLBACK, OTHER, toffee_AttributeProto, ints, floats, 0),
+    PB_FIELD(  9, BYTES   , REPEATED, CALLBACK, OTHER, toffee_AttributeProto, strings, ints, 0),
+    PB_FIELD( 10, MESSAGE , REPEATED, CALLBACK, OTHER, toffee_AttributeProto, tensors, strings, &toffee_TensorProto_fields),
+    PB_FIELD( 11, MESSAGE , REPEATED, CALLBACK, OTHER, toffee_AttributeProto, graphs, tensors, &toffee_GraphProto_fields),
     PB_LAST_FIELD
 };
 
-const pb_field_t toffee_NodeProto_fields[6] = {
+const pb_field_t toffee_NodeProto_fields[7] = {
     PB_FIELD(  1, STRING  , REPEATED, CALLBACK, FIRST, toffee_NodeProto, input, input, 0),
     PB_FIELD(  2, STRING  , REPEATED, CALLBACK, OTHER, toffee_NodeProto, output, input, 0),
     PB_FIELD(  3, STRING  , OPTIONAL, CALLBACK, OTHER, toffee_NodeProto, name, output, 0),
     PB_FIELD(  4, STRING  , OPTIONAL, CALLBACK, OTHER, toffee_NodeProto, op_type, name, 0),
     PB_FIELD(  5, MESSAGE , REPEATED, CALLBACK, OTHER, toffee_NodeProto, attribute, op_type, &toffee_AttributeProto_fields),
+    PB_FIELD(  6, STRING  , OPTIONAL, CALLBACK, OTHER, toffee_NodeProto, doc_string, attribute, 0),
     PB_LAST_FIELD
 };
 
-const pb_field_t toffee_GraphProto_fields[7] = {
-    PB_FIELD(  1, INT64   , OPTIONAL, STATIC  , FIRST, toffee_GraphProto, version, version, 0),
-    PB_FIELD(  2, MESSAGE , REPEATED, CALLBACK, OTHER, toffee_GraphProto, node, version, &toffee_NodeProto_fields),
-    PB_FIELD(  3, STRING  , OPTIONAL, CALLBACK, OTHER, toffee_GraphProto, name, node, 0),
-    PB_FIELD(  4, STRING  , REPEATED, CALLBACK, OTHER, toffee_GraphProto, input, name, 0),
-    PB_FIELD(  5, STRING  , REPEATED, CALLBACK, OTHER, toffee_GraphProto, output, input, 0),
-    PB_FIELD(  6, MESSAGE , REPEATED, CALLBACK, OTHER, toffee_GraphProto, initializer, output, &toffee_TensorProto_fields),
+const pb_field_t toffee_GraphProto_fields[11] = {
+    PB_FIELD(  1, MESSAGE , REPEATED, CALLBACK, FIRST, toffee_GraphProto, node, node, &toffee_NodeProto_fields),
+    PB_FIELD(  2, STRING  , OPTIONAL, CALLBACK, OTHER, toffee_GraphProto, name, node, 0),
+    PB_FIELD(  3, STRING  , REPEATED, CALLBACK, OTHER, toffee_GraphProto, input, name, 0),
+    PB_FIELD(  4, STRING  , REPEATED, CALLBACK, OTHER, toffee_GraphProto, output, input, 0),
+    PB_FIELD(  5, MESSAGE , REPEATED, CALLBACK, OTHER, toffee_GraphProto, initializer, output, &toffee_TensorProto_fields),
+    PB_FIELD(  6, INT64   , OPTIONAL, STATIC  , OTHER, toffee_GraphProto, producer_version, initializer, 0),
+    PB_FIELD(  7, INT64   , OPTIONAL, STATIC  , OTHER, toffee_GraphProto, ir_version, producer_version, 0),
+    PB_FIELD(  8, STRING  , OPTIONAL, CALLBACK, OTHER, toffee_GraphProto, version_tag, ir_version, 0),
+    PB_FIELD(  9, STRING  , OPTIONAL, CALLBACK, OTHER, toffee_GraphProto, domain, version_tag, 0),
+    PB_FIELD( 10, STRING  , OPTIONAL, CALLBACK, OTHER, toffee_GraphProto, doc_string, domain, 0),
     PB_LAST_FIELD
 };
 
 const pb_field_t toffee_TensorProto_fields[10] = {
     PB_FIELD(  1, INT64   , REPEATED, CALLBACK, FIRST, toffee_TensorProto, dims, dims, 0),
     PB_FIELD(  2, UENUM   , OPTIONAL, STATIC  , OTHER, toffee_TensorProto, data_type, dims, 0),
-    PB_FIELD(  3, FLOAT   , REPEATED, CALLBACK, OTHER, toffee_TensorProto, float_data, data_type, 0),
+    PB_FIELD(  3, MESSAGE , OPTIONAL, STATIC  , OTHER, toffee_TensorProto, segment, data_type, &toffee_TensorProto_Segment_fields),
+    PB_FIELD(  4, FLOAT   , REPEATED, CALLBACK, OTHER, toffee_TensorProto, float_data, segment, 0),
     PB_FIELD(  5, INT32   , REPEATED, CALLBACK, OTHER, toffee_TensorProto, int32_data, float_data, 0),
     PB_FIELD(  6, BYTES   , REPEATED, CALLBACK, OTHER, toffee_TensorProto, string_data, int32_data, 0),
     PB_FIELD(  7, INT64   , REPEATED, CALLBACK, OTHER, toffee_TensorProto, int64_data, string_data, 0),
     PB_FIELD(  8, STRING  , OPTIONAL, CALLBACK, OTHER, toffee_TensorProto, name, int64_data, 0),
-    PB_FIELD(  9, MESSAGE , OPTIONAL, STATIC  , OTHER, toffee_TensorProto, segment, name, &toffee_TensorProto_Segment_fields),
-    PB_FIELD( 10, BYTES   , OPTIONAL, CALLBACK, OTHER, toffee_TensorProto, raw_data, segment, 0),
+    PB_FIELD(  9, BYTES   , OPTIONAL, CALLBACK, OTHER, toffee_TensorProto, raw_data, name, 0),
     PB_LAST_FIELD
 };
 
