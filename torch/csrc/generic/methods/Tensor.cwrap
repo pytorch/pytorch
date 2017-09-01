@@ -108,6 +108,10 @@ PyObject * THPTensor_(setIndex)(THPTensor *self, PyObject *args)
   return: self
   cname: resize
   cpu_half: True
+  before_call:
+    THPUtils_assert(arg_self->storage->flag & TH_STORAGE_RESIZABLE,
+      "calling resize_ on a tensor that has non-resizable storage. Clone it first "
+      "or create a new tensor instead.");
   arguments:
     - THTensor* self
     - arg: THSize* size
