@@ -1,6 +1,6 @@
 graph(%1 : Double(1, 3, 10, 10)
       %2 : Double(8, 3, 3, 3)
       %3 : Double(8)) {
-  %4.0 : Double(1, 8, 8, 8), %4.1 : Handle = CppOp[ConvForward](%1, %2, %3), uses = [[%0.i0], []];
-  return (%4.0);
+  %5 : Double(1, 8, 8, 8), %6 : Handle = CppOp[ConvForward](%1, %2, %3), uses = [[%0.i0], []];
+  return (%5);
 }
