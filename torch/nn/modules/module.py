@@ -91,7 +91,7 @@ class Module(object):
                 "cannot assign parameter before Module.__init__() call")
 
         if hasattr(self, name) and name not in self._parameters.keys():
-          raise KeyError("attribute '{}' already exists".format(name))
+            raise KeyError("attribute '{}' already exists".format(name))
 
         if param is None:
             self._parameters[name] = None
