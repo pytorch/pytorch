@@ -12,14 +12,24 @@ static T all_equal(at::ArrayRef<T> ts, const char * name) {
   return v;
 }
 
+// Note [Caffe2ConvTranspose]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ConvTranspose in Caffe2 is a bit silly: bias is mandatory.  But Toffee
+// has removed bias input from official ConvTranspose.  How can the Caffe2
+// backend do the translation?  It can't!  It's impossible!  So as a temporary
+// hack while we wait for Caffe2 to make bias optional, we are using a
+// Caffe2ConvTranspose experimental Toffee op which has a mandatory bias.
+// PyTorch has no trouble making the zero-filled tensor.
+//
+// For code simplicity, even if PyTorch was given a bias tensor, it is NOT
+// passed here; it's done as an external addition.  This is less efficient
+// but this code should be temporary anyway.
+
 jit::node_list ConvForward::primspec(PrimSpecContext* ctx, jit::node_list inputs) {
   auto & g = ctx->graph;
-  auto n = g->create(!transposed ? jit::kConv : jit::kConvTranspose,
+  // See Note [Caffe2ConvTranspose]
+  auto n = g->create(!transposed ? jit::kConv : jit::kCaffe2ConvTranspose,
                                    {inputs.at(0), inputs.at(1)});
-
-  if (inputs.at(2)->kind() != jit::kUndefined) {
-    n->addInput(inputs.at(2));
-  }
 
   // Irritatingly, Caffe2 requires us to specify kernels,
   // but we don't actually have that information directly
@@ -30,12 +40,9 @@ jit::node_list ConvForward::primspec(PrimSpecContext* ctx, jit::node_list inputs
   JIT_ASSERT(weight_type);
   auto weight_size = weight_type->sizes();
 
-  // For ConvTranspose, we append zero filled bias if the bias=False to maintain
-  // compatibility with Caffe2
+  // See Note [Caffe2ConvTranspose]
   if(transposed) {
-    if(inputs.at(2)->kind() == jit::kUndefined) {
-      n->addInput(g->appendNode(g->createConstant(at::CPU(at::kFloat).zeros({weight_size[1]}))));
-    }
+    n->addInput(g->appendNode(g->createConstant(at::CPU(at::kFloat).zeros({weight_size[1]}))));
   }
 
   g->appendNode(n);
@@ -62,10 +69,21 @@ jit::node_list ConvForward::primspec(PrimSpecContext* ctx, jit::node_list inputs
     }
     n->i_(jit::kgroup,groups);
   } else {
-    JIT_ASSERT(1 == all_equal<int>(dilation,"dialations"));
+    JIT_ASSERT(1 == all_equal<int>(dilation,"dilations"));
   }
+
   // ignore benchmark/cudnn_enabled
-  return {n};
+
+  if (inputs.at(2)->kind() != jit::kUndefined) {
+    // TODO: Set type here based on RETURN type (not available atm)
+    auto a_n = g->create(jit::kAdd, {g->appendNode(g->createSelect(n, 0)), inputs.at(2)});
+    a_n->i_(jit::kbroadcast, 1);
+    a_n->i_(jit::kaxis, 1);
+    g->appendNode(a_n);
+    return {a_n};
+  } else {
+    return {n};
+  }
 }
 
 }}

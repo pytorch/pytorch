@@ -1,7 +1,6 @@
 node {
   input: "1"
-  output: "3"
-  output: "4"
+  output: "2"
   op_type: "Reshape"
   attribute {
     name: "shape"
@@ -11,5 +10,5 @@ node {
 }
 name: "torch-jit-export"
 input: "1"
-output: "3"
+output: "2"
 producer_version: 1

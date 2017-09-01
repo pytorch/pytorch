@@ -391,7 +391,10 @@ void Graph::lint() {
     JIT_ASSERT(n->kind_ != kParam);
     JIT_ASSERT(n->kind_ != kReturn);
     for (auto input : n->inputs_) {
-      JIT_ASSERT(in_scope.count(input) == 1);
+      // TODO: Would much rather prefer to use the real node printer, because
+      // select nodes render as %10.1 instead of %12, so to interpret this
+      // you need to know how to translate between the two (not possible...)
+      JIT_ASSERTM(in_scope.count(input) == 1, "%%%d not in scope", input->unique_);
     }
     for (auto use : n->uses_) {
       JIT_ASSERT(in_scope.count(use.user) == 0);

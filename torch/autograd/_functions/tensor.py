@@ -84,7 +84,7 @@ class Transpose(Function):
 
         axes = list(range(len(i.type().sizes())))
         axes[dim1], axes[dim2] = axes[dim2], axes[dim1]
-        return g.op("Transpose", i, axes_i=axes)
+        return g.op("Transpose", i, perm_i=axes)
 
     @staticmethod
     def forward(ctx, i, dim1, dim2):
@@ -102,8 +102,7 @@ class View(Function):
 
     @staticmethod
     def primspec(g, i, sizes):
-        n, _ = g.op("Reshape", i, shape_i=sizes, outputs=2)
-        return n
+        return g.op("Reshape", i, shape_i=sizes)
 
     @staticmethod
     def forward(ctx, i, sizes):
@@ -182,7 +181,7 @@ class Permute(Function):
     def primspec(g, input, dim_indices):
         if dim_indices == range(0, len(dim_indices)):
             return input
-        return g.op("Transpose", input, axes_i=dim_indices)
+        return g.op("Transpose", input, perm_i=dim_indices)
 
     @staticmethod
     def forward(ctx, input, dim_indices):
@@ -400,7 +399,7 @@ class Squeeze(InplaceFunction):
                     dims.append(i)
         else:
             dims = [dim]
-        return g.op("Squeeze", input, dims_i=dims)
+        return g.op("Squeeze", input, axes_i=dims)
 
     @staticmethod
     def forward(ctx, input, dim=None, inplace=False):
