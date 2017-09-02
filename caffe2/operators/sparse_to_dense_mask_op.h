@@ -94,7 +94,7 @@ class SparseToDenseMaskOp : public SparseToDenseMaskBase<Context> {
 
     const int cols = this->featuresCount_;
     int rows = -1;
-    int32_t default_length = sparse_indices.dim32(0);
+    int32_t sparse_indices_length = sparse_indices.dim32(0);
     const int32_t* lengths_vec = nullptr;
     auto* output = Output(OUTPUTVALUE);
     Tensor<Context>* presence_mask = nullptr;
@@ -111,7 +111,7 @@ class SparseToDenseMaskOp : public SparseToDenseMaskBase<Context> {
     if (rows == -1) {
       // if the LENGTHS is not set, the output will be a vector
       rows = 1;
-      lengths_vec = &default_length;
+      lengths_vec = &sparse_indices_length;
     } else {
       shape.push_back(rows);
     }
@@ -140,6 +140,16 @@ class SparseToDenseMaskOp : public SparseToDenseMaskBase<Context> {
       math::Set<bool, Context>(
           rows * cols, false, presence_mask_data, &context_);
     }
+
+    CAFFE_ENFORCE(
+        (ConstEigenVectorArrayMap<TInd>(
+             sparse_indices_vec, sparse_indices_length) <
+         std::numeric_limits<int32_t>::max())
+                .all() &&
+            (ConstEigenVectorArrayMap<TInd>(
+                 sparse_indices_vec, sparse_indices_length) >= 0)
+                .all(),
+        "All indices must be representable as non-negative int32_t numbers");
 
     int32_t offset = 0;
     for (int r = 0; r < rows; r++) {
