@@ -63,7 +63,7 @@ bool ParseCaffeCommandLineFlags(int* pargc, char*** pargv) {
   for (int i = 1; i < *pargc; ++i) {
     string arg(argv[i]);
 
-    if (arg == "--help") {
+    if (arg.find("--help") != string::npos) {
       // Print the help message, and quit.
       std::cout << UsageMessage() << std::endl;
       std::cout << "Arguments: " << std::endl;

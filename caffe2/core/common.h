@@ -159,6 +159,7 @@ make_unique(Args&&...) = delete;
 // to_string implementation for Android related stuff.
 #ifndef __ANDROID__
 using std::to_string;
+using std::stoi;
 #else
 template <typename T>
 std::string to_string(T value)
@@ -166,6 +167,15 @@ std::string to_string(T value)
   std::ostringstream os;
   os << value;
   return os.str();
+}
+
+inline int stoi(const string& str)
+{
+  std::stringstream ss;
+  int n = 0;
+  ss << str;
+  ss >> n;
+  return n;
 }
 #endif
 

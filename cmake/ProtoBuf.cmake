@@ -26,6 +26,7 @@ function(custom_protobuf_find)
     message(STATUS "Using protobuf compiler ${PROTOBUF_PROTOC_EXECUTABLE}.")
   endif()
   set(Protobuf_FOUND TRUE PARENT_SCOPE)
+  set(Caffe2_IS_CUSTOM_PROTOBUF TRUE PARENT_SCOPE)
 endfunction()
 
 if (WIN32)
