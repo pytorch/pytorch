@@ -27,7 +27,8 @@ std::string node_name(Node* n) {
 // Eventually this should just be part of init_pass but we should avoid
 // tight coupling of the JIT and Toffee IR exporter until ready.
 std::shared_ptr<Graph> ToToffeeIR(std::shared_ptr<Graph>& g,
-                                  const std::unordered_map<void*, Node*>& old_buffer_map) {
+                                  const std::unordered_map<void*, Node*>& old_buffer_map,
+                                  bool verbose) {
   torch::autograd::PrimSpecContext ctx;
   std::unordered_map<Node*, Node*> env;
   std::shared_ptr<Graph> out_graph = std::make_shared<Graph>();
@@ -91,7 +92,7 @@ std::shared_ptr<Graph> ToToffeeIR(std::shared_ptr<Graph>& g,
       i++;
     }
   };
-  for (auto node : g->nodes()) {
+  auto visitNode = [&](Node * node) {
     IR_IF(node, Select)
       // Selects are translated by multi-return nodes.
       JIT_ASSERT(env.count(value) > 0);
@@ -160,7 +161,19 @@ std::shared_ptr<Graph> ToToffeeIR(std::shared_ptr<Graph>& g,
         env[node] = n_;
       }
     IR_END()
+  };
+  for(auto n : g->nodes()) {
+    try {
+      visitNode(n);
+    } catch(...) {
+      if(verbose) {
+        std::cerr << "Error occured while handling:\n" << *n << "\n";
+        std::cerr << "Exported graph so far:\n" << *out_graph << "\n";
+      }
+      throw;
+    }
   }
+
   for (auto output : g->outputs()) {
     ctx.graph->registerOutput(env.at(output));
   }
@@ -302,7 +315,7 @@ std::string ExportGraph(std::shared_ptr<Graph>& g_,
                         const std::unordered_map<void*, Node*>& buffer_map,
                         const std::vector<at::Tensor> & initializers,
                         bool verbose) {
-  auto g = ToToffeeIR(g_, buffer_map);
+  auto g = ToToffeeIR(g_, buffer_map, verbose);
   if(verbose) {
     std::cout << *g << "\n";
   }
