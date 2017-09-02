@@ -25,16 +25,16 @@ std::string getPythonName(const PyObject* obj, bool is_legacy) {
     return THPUtils_unpackString(name.get());
   }
 }
-std::ostream& operator<<(std::ostream & out, Node & n) {
-  out << "%" << n.uniqueName();
-  return out;
+void printNodeRef(std::ostream & out, Node * n) {
+  out << "%" << n->uniqueName();
 }
+
 std::ostream& operator<<(std::ostream & out, const node_list & nodes) {
   size_t i = 0;
   for(auto n : nodes) {
     if(i++ > 0)
       out << ", ";
-    out << *n;
+    printNodeRef(out, n);
   }
   return out;
 }
@@ -57,7 +57,8 @@ static void emitUses(std::ostream & out, Node * n) {
   for(auto u : n->uses()) {
     if(i++ > 0)
       out << ", ";
-    out << *u.user << ".i" << u.offset;
+    printNodeRef(out, u.user);
+    out << ".i" << u.offset;
   }
 }
 
@@ -110,8 +111,8 @@ std::ostream& operator<<(std::ostream & out, node_list_with_types l) {
         out << ", ";
       }
     }
-
-    out << *n << " : ";
+    printNodeRef(out, n);
+    out << " : ";
     if(n->hasType())
       out << *n->type();
     else
@@ -174,6 +175,56 @@ void printAttributes(std::ostream & out, Node * n) {
   out << "]";
 }
 
+std::ostream& printNode(std::ostream & out, Node * n, std::vector<Node*> * groups) {
+  node_list outputs = n->outputs();
+  out << node_list_with_types(outputs);
+  out << " = ";
+  IR_IFM(n,PythonOp)
+    out << "^" << value->name();
+    out << "(";
+    int i = 0;
+    for (auto& scalar : value->scalar_args) {
+      if (i++ > 0)
+        out << ", ";
+      out << scalar;
+    }
+    out << ")";
+  IR_ELSEIF(FusionGroup)
+    if(groups) {
+      out << "fusion_group_" << groups->size();
+      groups->push_back(value);
+    } else {
+      out << "fusion_group[" << *n->g(kSubgraph) << "]";
+    }
+  IR_ELSEIFM(CppOp)
+    out << "CppOp[" << value->name() << "]";
+  IR_ELSE()
+    out << symbolToString(n->kind());
+    if(n->hasAttributes()) {
+      printAttributes(out,n);
+    }
+  IR_END()
+  out << "(" << n->inputs() << "), uses = [";
+  if(n->hasMultipleOutputs()) {
+    size_t i = 0;
+    for(auto u : n->uses()) {
+      if(i++ > 0)
+        out << ", ";
+      out << "[";
+      emitUses(out,u.user);
+      out << "]";
+    }
+  } else {
+    emitUses(out,n);
+  }
+  out << "];\n";
+  return out;
+}
+
+std::ostream& operator<<(std::ostream & out, Node & n) {
+  return printNode(out, &n, nullptr);
+}
+
 std::ostream& operator<<(std::ostream & out, Graph & g) {
   // Uncomment this to debug all_nodes issues
   /*
@@ -196,44 +247,7 @@ std::ostream& operator<<(std::ostream & out, Graph & g) {
         prev_stage = n->stage();
       }
       out << "  ";
-      node_list outputs = n->outputs();
-      out << node_list_with_types(outputs);
-      out << " = ";
-      IR_IFM(n,PythonOp)
-        out << "^" << value->name();
-        out << "(";
-        int i = 0;
-        for (auto& scalar : value->scalar_args) {
-          if (i++ > 0)
-            out << ", ";
-          out << scalar;
-        }
-        out << ")";
-      IR_ELSEIF(FusionGroup)
-        out << "fusion_group_" << groups.size();
-        groups.push_back(value);
-      IR_ELSEIFM(CppOp)
-        out << "CppOp[" << value->name() << "]";
-      IR_ELSE()
-        out << symbolToString(n->kind());
-        if(n->hasAttributes()) {
-          printAttributes(out,n);
-        }
-      IR_END()
-      out << "(" << n->inputs() << "), uses = [";
-      if(n->hasMultipleOutputs()) {
-        size_t i = 0;
-        for(auto u : n->uses()) {
-          if(i++ > 0)
-            out << ", ";
-          out << "[";
-          emitUses(out,u.user);
-          out << "]";
-        }
-      } else {
-        emitUses(out,n);
-      }
-      out << "];\n";
+      printNode(out, n, &groups);
     }
   }
   out << "  return (" << g.outputs() << ");\n}\n";
