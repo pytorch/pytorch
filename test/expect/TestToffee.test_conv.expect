@@ -4,7 +4,7 @@ node {
   output: "4"
   op_type: "Conv"
   attribute {
-    name: "kernels"
+    name: "kernel_shape"
     ints: 3
     ints: 3
   }

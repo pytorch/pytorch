@@ -19,10 +19,6 @@ node {
     f: 9.99999974737875e-06
   }
   attribute {
-    name: "order"
-    s: "NCHW"
-  }
-  attribute {
     name: "momentum"
     f: 0.899999976158142
   }
