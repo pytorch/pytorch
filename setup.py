@@ -110,7 +110,7 @@ class build_deps(Command):
             libs += ['nccl']
         libs += ['THPP', 'libshm', 'ATen']
         if WITH_DISTRIBUTED:
-            if sys.platform == 'linux':
+            if sys.platform.startswith('linux'):
                 libs += ['gloo']
             libs += ['THD']
         build_libs(libs)
