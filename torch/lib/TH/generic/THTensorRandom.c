@@ -147,7 +147,7 @@ void THTensor_(multinomialAliasSetup)(THTensor *probs, THLongTensor *J, THTensor
       THTensor_fastSet1d(J, small, large);
       q_data[large * q->stride[0]] -= 1.0 - THTensor_fastGet1d(q, small);
 
-      if(q_data[large] < 1.0)
+      if(q_data[large * q->stride[0]] < 1.0)
         {
           THTensor_fastSet1d(smaller, small_c-1, large);
           large_c -= 1;
