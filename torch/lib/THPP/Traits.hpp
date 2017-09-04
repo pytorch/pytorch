@@ -91,16 +91,16 @@ struct type_traits<uint64_t> {
   static constexpr bool is_floating_point = false;
 };
 
-template <>
+template<>
 struct type_traits<std::conditional<std::is_same<int64_t, long>::value, long long, long>::type> {
-	static constexpr Type type = std::is_same<int64_t, long>::value ? Type::LONG_LONG : Type::LONG;
-	static constexpr bool is_floating_point = false;
+  static constexpr Type type = std::is_same<int64_t, long>::value ? Type::LONG_LONG : Type::LONG;
+  static constexpr bool is_floating_point = false;
 };
 
-template <>
+template<>
 struct type_traits<std::conditional<std::is_same<uint64_t, unsigned long>::value, unsigned long long, unsigned long>::type> {
-	static constexpr Type type = std::is_same<uint64_t, unsigned long>::value ? Type::ULONG_LONG : Type::ULONG;
-	static constexpr bool is_floating_point = false;
+  static constexpr Type type = std::is_same<uint64_t, unsigned long>::value ? Type::ULONG_LONG : Type::ULONG;
+  static constexpr bool is_floating_point = false;
 };
 
 template<typename T>
