@@ -6,8 +6,8 @@
   dynamic_cast<const THTensor&>(tensor)
 #define const_storage_cast(storage) \
   dynamic_cast<const THStorage<real>&>(storage)
-#define const_longlong_cast(tensor) \
-  dynamic_cast<const THTensor<int64_t>&>(tensor)
+#define const_long_cast(tensor) \
+  dynamic_cast<const THTensor<std::conditional<sizeof(long) == 8, long, int64_t>::type>&>(tensor)
 #define const_float_cast(tensor) \
   dynamic_cast<const THTensor<float>&>(tensor)
 #define const_double_cast(tensor) \
@@ -513,34 +513,34 @@ auto THTensor<real>::maskedSelect(const Tensor& src, const Tensor& mask) -> THTe
 
 template<>
 auto THTensor<real>::nonzero(const Tensor& subscript) -> THTensor& {
-  THTensor_(nonzero)(const_longlong_cast(subscript).tensor, tensor);
+  THTensor_(nonzero)(const_long_cast(subscript).tensor, tensor);
   return *this;
 }
 
 template<>
 auto THTensor<real>::indexSelect(const Tensor& src, int dim, const Tensor& index) -> THTensor& {
   THTensor_(indexSelect)(tensor, const_tensor_cast(src).tensor, dim,
-                         const_longlong_cast(index).tensor);
+                         const_long_cast(index).tensor);
   return *this;
 }
 
 template<>
 auto THTensor<real>::indexCopy(int dim, const Tensor& index, const Tensor& src) -> THTensor& {
-  THTensor_(indexCopy)(tensor, dim, const_longlong_cast(index).tensor,
+  THTensor_(indexCopy)(tensor, dim, const_long_cast(index).tensor,
                        const_tensor_cast(src).tensor);
   return *this;
 }
 
 template<>
 auto THTensor<real>::indexAdd(int dim, const Tensor& index, const Tensor& src) -> THTensor& {
-  THTensor_(indexAdd)(tensor, dim, const_longlong_cast(index).tensor,
+  THTensor_(indexAdd)(tensor, dim, const_long_cast(index).tensor,
                       const_tensor_cast(src).tensor);
   return *this;
 }
 
 template<>
 auto THTensor<real>::indexFill(int dim, const Tensor& index, scalar_type value) -> THTensor& {
-  THTensor_(indexFill)(tensor, dim, const_longlong_cast(index).tensor, value);
+  THTensor_(indexFill)(tensor, dim, const_long_cast(index).tensor, value);
   return *this;
 }
 
@@ -586,7 +586,7 @@ auto THTensor<real>::sort(const Tensor& ri, const Tensor& src,
                           int dimension, int desc) -> THTensor& {
   THTensor_(sort)(
     tensor,
-    const_longlong_cast(ri).tensor,
+    const_long_cast(ri).tensor,
     const_tensor_cast(src).tensor,
     dimension,
     desc
@@ -599,7 +599,7 @@ auto THTensor<real>::topk(const Tensor& ri, const Tensor& src,
                           int64_t k, int dim, int dir, int sorted) -> THTensor& {
   THTensor_(topk)(
     tensor,
-    const_longlong_cast(ri).tensor,
+    const_long_cast(ri).tensor,
     const_tensor_cast(src).tensor,
     k,
     dim,
@@ -1308,7 +1308,7 @@ auto THTensor<real>::multinomial(const Tensor& r, const Generator& _generator,
                                  int n_sample, int with_replacement) -> THTensor& {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
   THTensor_(multinomial)(
-    const_longlong_cast(r).tensor,
+    const_long_cast(r).tensor,
     const_generator_cast(_generator).generator,
     tensor,
     n_sample,
@@ -1336,7 +1336,7 @@ template<>
 auto THTensor<real>::gather(const Tensor& src, int dimension,
                             const Tensor& index) -> THTensor& {
   const THTensor &src_t = const_tensor_cast(src);
-  const THTensor<int64_t> &index_t = const_longlong_cast(index);
+  const THTensor<int64_t> &index_t = const_long_cast(index);
   THTensor_(gather)(tensor, src_t.tensor, dimension, index_t.tensor);
   return *this;
 }
@@ -1345,7 +1345,7 @@ template<>
 auto THTensor<real>::scatter(int dimension, const Tensor& index,
                              const Tensor& src) -> THTensor& {
   const THTensor &src_t = const_tensor_cast(src);
-  const THTensor<int64_t> &index_t = const_longlong_cast(index);
+  const THTensor<int64_t> &index_t = const_long_cast(index);
   THTensor_(scatter)(tensor, dimension, index_t.tensor, src_t.tensor);
   return *this;
 }
@@ -1353,7 +1353,7 @@ auto THTensor<real>::scatter(int dimension, const Tensor& index,
 template<>
 auto THTensor<real>::scatterFill(int dimension, const Tensor& index,
                                  scalar_type value) -> THTensor& {
-  const THTensor<int64_t> &index_t = const_longlong_cast(index);
+  const THTensor<int64_t> &index_t = const_long_cast(index);
   THTensor_(scatterFill)(tensor, dimension, index_t.tensor, value);
   return *this;
 }
@@ -1620,7 +1620,7 @@ template<>
 auto THTensor<real>::max(const Tensor& indices_, const Tensor& src,
                          int dimension, int keepdim) -> THTensor& {
   const THTensor &src_t = const_tensor_cast(src);
-  const THTensor<int64_t> &indices__t = const_longlong_cast(indices_);
+  const THTensor<int64_t> &indices__t = const_long_cast(indices_);
   THTensor_(max)(tensor, indices__t.tensor, src_t.tensor, dimension, keepdim);
   return *this;
 }
@@ -1629,7 +1629,7 @@ template<>
 auto THTensor<real>::min(const Tensor& indices_, const Tensor& src,
                          int dimension, int keepdim) -> THTensor& {
   const THTensor &src_t = const_tensor_cast(src);
-  const THTensor<int64_t> &indices__t = const_longlong_cast(indices_);
+  const THTensor<int64_t> &indices__t = const_long_cast(indices_);
   THTensor_(min)(tensor, indices__t.tensor, src_t.tensor, dimension, keepdim);
   return *this;
 }
@@ -1638,7 +1638,7 @@ template<>
 auto THTensor<real>::kthvalue(const Tensor& indices_, const Tensor& src,
                               int64_t k, int dimension, int keepdim) -> THTensor& {
   const THTensor &src_t = const_tensor_cast(src);
-  const THTensor<int64_t> &indices__t = const_longlong_cast(indices_);
+  const THTensor<int64_t> &indices__t = const_long_cast(indices_);
   THTensor_(kthvalue)(tensor, indices__t.tensor, src_t.tensor, k, dimension, keepdim);
   return *this;
 }
@@ -1647,7 +1647,7 @@ template<>
 auto THTensor<real>::mode(const Tensor& indices_, const Tensor& src,
                           int dimension, int keepdim) -> THTensor& {
   const THTensor &src_t = const_tensor_cast(src);
-  const THTensor<int64_t> &indices__t = const_longlong_cast(indices_);
+  const THTensor<int64_t> &indices__t = const_long_cast(indices_);
   THTensor_(mode)(tensor, indices__t.tensor, src_t.tensor, dimension, keepdim);
   return *this;
 }
@@ -1656,7 +1656,7 @@ template<>
 auto THTensor<real>::median(const Tensor& indices_, const Tensor& src,
                             int dimension, int keepdim) -> THTensor& {
   const THTensor &src_t = const_tensor_cast(src);
-  const THTensor<int64_t> &indices__t = const_longlong_cast(indices_);
+  const THTensor<int64_t> &indices__t = const_long_cast(indices_);
   THTensor_(median)(tensor, indices__t.tensor, src_t.tensor, dimension, keepdim);
   return *this;
 }

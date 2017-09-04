@@ -6,8 +6,8 @@
   dynamic_cast<const THCTensor&>(tensor)
 #define const_storage_cast(storage) \
   dynamic_cast<const THCStorage<real>&>(storage)
-#define const_longlong_cast(tensor) \
-  dynamic_cast<const THCTensor<int64_t>&>(tensor)
+#define const_long_cast(tensor) \
+dynamic_cast<const THCTensor<std::conditional<sizeof(long) == 8, long, int64_t>::type&>(tensor)
 #define const_float_cast(tensor) \
   dynamic_cast<const THCTensor<float>&>(tensor)
 #define const_double_cast(tensor) \
@@ -422,34 +422,34 @@ auto THCTensor<real>::maskedSelect(const Tensor& src, const Tensor& mask) -> THC
 
 template<>
 auto THCTensor<real>::nonzero(const Tensor& subscript) -> THCTensor& {
-  THCTensor_(nonzero)(state, const_longlong_cast(subscript).tensor, tensor);
+  THCTensor_(nonzero)(state, const_long_cast(subscript).tensor, tensor);
   return *this;
 }
 
 template<>
 auto THCTensor<real>::indexSelect(const Tensor& src, int dim, const Tensor& index) -> THCTensor& {
   THCTensor_(indexSelect)(state, tensor, const_tensor_cast(src).tensor, dim,
-                          const_longlong_cast(index).tensor);
+                          const_long_cast(index).tensor);
   return *this;
 }
 
 template<>
 auto THCTensor<real>::indexCopy(int dim, const Tensor& index, const Tensor& src) -> THCTensor& {
-  THCTensor_(indexCopy)(state, tensor, dim, const_longlong_cast(index).tensor,
+  THCTensor_(indexCopy)(state, tensor, dim, const_long_cast(index).tensor,
                         const_tensor_cast(src).tensor);
   return *this;
 }
 
 template<>
 auto THCTensor<real>::indexAdd(int dim, const Tensor& index, const Tensor& src) -> THCTensor& {
-  THCTensor_(indexAdd)(state, tensor, dim, const_longlong_cast(index).tensor,
+  THCTensor_(indexAdd)(state, tensor, dim, const_long_cast(index).tensor,
                        const_tensor_cast(src).tensor);
   return *this;
 }
 
 template<>
 auto THCTensor<real>::indexFill(int dim, const Tensor& index, scalar_type value) -> THCTensor& {
-  THCTensor_(indexFill)(state, tensor, dim, const_longlong_cast(index).tensor, cast_scalar(value));
+  THCTensor_(indexFill)(state, tensor, dim, const_long_cast(index).tensor, cast_scalar(value));
   return *this;
 }
 
@@ -493,7 +493,7 @@ auto THCTensor<real>::sort(const Tensor& ri, const Tensor& src,
   THCTensor_(sort)(
     state,
     tensor,
-    const_longlong_cast(ri).tensor,
+    const_long_cast(ri).tensor,
     const_tensor_cast(src).tensor,
     dimension,
     desc
@@ -508,7 +508,7 @@ auto THCTensor<real>::topk(const Tensor& ri, const Tensor& src,
   THCTensor_(topk)(
     state,
     tensor,
-    const_longlong_cast(ri).tensor,
+    const_long_cast(ri).tensor,
     const_tensor_cast(src).tensor,
     k,
     dim,
@@ -1215,7 +1215,7 @@ auto THCTensor<real>::multinomial(const Tensor& r, const Generator& _generator,
                                   int n_sample,
                                   int with_replacement) -> THCTensor& {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-  const THCTensor& r_t = const_longlong_cast(prob_dist).tensor;
+  const THCTensor& r_t = const_long_cast(prob_dist).tensor;
   THCTensor_(multinomial)(state, r_t.tensor, tensor, n_sample, with_replacement);
   return *this;
 #else
@@ -1239,7 +1239,7 @@ template<>
 auto THCTensor<real>::gather(const Tensor& src, int dimension,
                              const Tensor& index) -> THCTensor& {
   const THCTensor &src_t = const_tensor_cast(src);
-  const THCTensor<int64_t> &index_t = const_longlong_cast(index);
+  const THCTensor<int64_t> &index_t = const_long_cast(index);
   THCTensor_(gather)(state, tensor, src_t.tensor, dimension, index_t.tensor);
   return *this;
 }
@@ -1248,7 +1248,7 @@ template<>
 auto THCTensor<real>::scatter(int dimension, const Tensor& index,
                               const Tensor& src) -> THCTensor& {
   const THCTensor &src_t = const_tensor_cast(src);
-  const THCTensor<int64_t> &index_t = const_longlong_cast(index);
+  const THCTensor<int64_t> &index_t = const_long_cast(index);
   THCTensor_(scatter)(state, tensor, dimension, index_t.tensor, src_t.tensor);
   return *this;
 }
@@ -1256,7 +1256,7 @@ auto THCTensor<real>::scatter(int dimension, const Tensor& index,
 template<>
 auto THCTensor<real>::scatterFill(int dimension, const Tensor& index,
                                   scalar_type value) -> THCTensor& {
-  const THCTensor<int64_t> &index_t = const_longlong_cast(index);
+  const THCTensor<int64_t> &index_t = const_long_cast(index);
   THCTensor_(scatterFill)(state, tensor, dimension,
       index_t.tensor, cast_scalar(value));
   return *this;
@@ -1531,7 +1531,7 @@ template<>
 auto THCTensor<real>::max(const Tensor& indices_, const Tensor& src,
                           int dimension, int keepdim) -> THCTensor& {
   const THCTensor &src_t = const_tensor_cast(src);
-  const THCTensor<int64_t> &indices__t = const_longlong_cast(indices_);
+  const THCTensor<int64_t> &indices__t = const_long_cast(indices_);
   THCTensor_(max)(state, tensor, indices__t.tensor, src_t.tensor, dimension, keepdim);
   return *this;
 }
@@ -1540,7 +1540,7 @@ template<>
 auto THCTensor<real>::min(const Tensor& indices_, const Tensor& src,
                           int dimension, int keepdim) -> THCTensor& {
   const THCTensor &src_t = const_tensor_cast(src);
-  const THCTensor<int64_t> &indices__t = const_longlong_cast(indices_);
+  const THCTensor<int64_t> &indices__t = const_long_cast(indices_);
   THCTensor_(min)(state, tensor, indices__t.tensor, src_t.tensor, dimension, keepdim);
   return *this;
 }
