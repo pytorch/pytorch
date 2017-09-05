@@ -25,7 +25,7 @@ static T all_equal(at::ArrayRef<T> ts, const char * name) {
 // passed here; it's done as an external addition.  This is less efficient
 // but this code should be temporary anyway.
 
-jit::node_list ConvForward::primspec(PrimSpecContext* ctx, jit::node_list inputs) {
+jit::node_list ConvForward::symbolic(SymbolicContext* ctx, jit::node_list inputs) {
   auto & g = ctx->graph;
   // See Note [Caffe2ConvTranspose]
   auto n = g->create(!transposed ? jit::kConv : jit::kCaffe2ConvTranspose,

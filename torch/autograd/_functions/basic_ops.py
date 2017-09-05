@@ -7,7 +7,7 @@ import math
 class Add(InplaceFunction):
 
     @staticmethod
-    def primspec(g, a, b, inplace=False):
+    def symbolic(g, a, b, inplace=False):
         # TODO: [Export inplace]
         return g.appendNode(g.create("Add", [a, b]))
 
@@ -29,7 +29,7 @@ class Add(InplaceFunction):
 class Sub(InplaceFunction):
 
     @staticmethod
-    def primspec(g, a, b, inplace=False):
+    def symbolic(g, a, b, inplace=False):
         # TODO: [Export inplace]
         return g.appendNode(g.create("Sub", [a, b]))
 
@@ -51,7 +51,7 @@ class Sub(InplaceFunction):
 class Mul(Function):
 
     @staticmethod
-    def primspec(g, a, b, inplace=False):
+    def symbolic(g, a, b, inplace=False):
         # TODO: [Export inplace]
         return g.op("Mul", a, b)
 
@@ -231,7 +231,7 @@ class PowConstant(Function):
 class Negate(InplaceFunction):
 
     @staticmethod
-    def primspec(g, i, inplace=False):
+    def symbolic(g, i, inplace=False):
         # TODO: [Export inplace]
         return g.appendNode(g.create("Scale", [i]).f_("scale", -1))
 
