@@ -31,8 +31,8 @@ class SplitOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws),
         split_(OperatorBase::GetRepeatedArgument<int>("split")) {
     CAFFE_ENFORCE(
-        OperatorBase::HasArgument("axis") ^ OperatorBase::HasArgument("order"),
-        "You should either specify the dim to split, or the order "
+      !(OperatorBase::HasArgument("axis") && OperatorBase::HasArgument("order")),
+        "You shouldn't specify both the dim to split, and the order "
         "in the case of 4-D images.");
     if (OperatorBase::HasArgument("axis")) {
       axis_ = OperatorBase::GetSingleArgument<int>("axis", -1);
@@ -40,7 +40,7 @@ class SplitOp final : public Operator<Context> {
       add_axis_ = OperatorBase::GetSingleArgument<int>("add_axis", 0);
     } else {
       axis_ = GetDimFromOrderString(
-          OperatorBase::GetSingleArgument<string>("order", ""));
+          OperatorBase::GetSingleArgument<string>("order", "NCHW"));
       add_axis_ = 0;
     }
     CAFFE_ENFORCE_GE(axis_, 0);
@@ -63,15 +63,15 @@ class ConcatOp final : public Operator<Context> {
   ConcatOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws) {
     CAFFE_ENFORCE(
-        OperatorBase::HasArgument("axis") ^ OperatorBase::HasArgument("order"),
-        "You should either specify the dim to split, or the order "
+      !(OperatorBase::HasArgument("axis") && OperatorBase::HasArgument("order")),
+        "You shouldn't specify both the dim to concat, and the order "
         "in the case of 4-D images.");
     if (OperatorBase::HasArgument("axis")) {
       axis_ = OperatorBase::GetSingleArgument<int>("axis", -1);
       add_axis_ = OperatorBase::GetSingleArgument<int>("add_axis", 0);
     } else {
       axis_ = GetDimFromOrderString(
-          OperatorBase::GetSingleArgument<string>("order", ""));
+          OperatorBase::GetSingleArgument<string>("order", "NCHW"));
       add_axis_ = 0;
     }
     CAFFE_ENFORCE_GE(axis_, 0);
