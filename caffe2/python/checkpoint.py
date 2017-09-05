@@ -256,12 +256,6 @@ class MultiNodeCheckpointManager(object):
         assert self._node_managers is not None, 'init must be called first.'
         with TaskGroup(WorkspaceType.GLOBAL) as task_group:
             for node, manager in self._node_managers:
-                # TODO(aartibasant, T21070353): Enable the checkpoints for
-                # readers.
-                # The checkpointing for readers is broken because of D5582328.
-                # Disabling the reader checkpoints until it is fixed.
-                if "reader" in str(node):
-                    continue
                 with Node(node):
                     func(manager, *args, **kw)
             return task_group
