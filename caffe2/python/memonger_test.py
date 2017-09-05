@@ -727,3 +727,31 @@ class MemongerTest(hu.HypothesisTestCase):
             brew.sum(m2, [fc3a, fc3b], "out")
 
         self.assertFalse(memonger.verify_graph_equality(m.net.Proto(), m2.net.Proto()))
+
+    def test_release_blobs_when_used(self):
+        m = model_helper.ModelHelper()
+        fc1 = brew.fc(m, "data", "x", dim_in=2, dim_out=2)
+        fc2 = brew.fc(m, fc1, "y", dim_in=2, dim_out=2)
+        fc3 = brew.fc(m, fc1, "z", dim_in=2, dim_out=2)
+        fc4 = brew.fc(m, fc2, "u", dim_in=2, dim_out=2)
+        m.net.Alias(["u"], ["u_alias"])
+
+        brew.sum(m, [fc3, fc4], "out")
+
+        with_frees = memonger.release_blobs_when_used(m.net.Proto(), set("data"))
+
+        expect_frees = {"x", "y", "z"}  # out is external output
+                                        # and u is aliased so cannot be freed
+        found_frees = set()
+        for op in with_frees.op:
+            if op.type == "Free":
+                self.assertFalse(op.input[0] in found_frees)  # no double frees
+                found_frees.add(op.input[0])
+            else:
+                # Check a freed blob is not used anymore
+                for inp in op.input:
+                    self.assertFalse(inp in found_frees)
+                for outp in op.output:
+                    self.assertFalse(outp in found_frees)
+
+        self.assertEqual(expect_frees, found_frees)

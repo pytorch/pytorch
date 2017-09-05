@@ -9,7 +9,7 @@ import networkx as nx
 import collections
 import time
 import copy
-from caffe2.python import workspace
+from caffe2.python import workspace, core
 from caffe2.proto import caffe2_pb2
 import enum
 import logging
@@ -156,6 +156,128 @@ def optimize_inference_for_dag(net, input_blobs, namescope=""):
     assert verify_inplace_blobs(net.Proto(), optim), \
         "Inplace assignments differ in memonger net."
     return optim
+
+
+def estimate_memory_usage(protos, shapes, types, devicescope):
+    import numpy as np
+    '''
+    Estimate memory usage of a model. This is an estimate because
+    we assume a single threaded execution and miss some internal
+    memory usage of operators. Only estimates the memory for a given
+    device scope.
+
+    Also, currently it does not handle correctly if blob sizes vary
+    during execution, as it uses only the final blob size.
+
+    Returns (total, highwater, by op type) memory allocation in bytes.
+    '''
+    sizeofs = {
+        caffe2_pb2.TensorProto.DOUBLE: 8,
+        caffe2_pb2.TensorProto.FLOAT: 4,
+        caffe2_pb2.TensorProto.FLOAT16: 2,
+        caffe2_pb2.TensorProto.INT32: 4,
+        caffe2_pb2.TensorProto.INT8: 1,
+        caffe2_pb2.TensorProto.UINT8: 1,
+        caffe2_pb2.TensorProto.UINT16: 2,
+        caffe2_pb2.TensorProto.INT16: 2,
+        caffe2_pb2.TensorProto.BOOL: 1,
+        caffe2_pb2.TensorProto.INT64: 8,
+    }
+
+    def split_net(proto):
+        ops = [op for op in proto.op if
+               op.device_option == devicescope or op.type in {"Free", "Alias"}]
+        del proto.op[:]
+        proto.op.extend(ops)
+        return proto
+
+    def num_bytes(blob):
+        if blob not in shapes or blob not in types:
+            log.warning("Unknown blob encountered: {}".format(blob))
+            return 0
+        sizeof = sizeofs[types[blob]]
+        return sizeof * np.prod(shapes[blob])
+
+    protos = [split_net(proto) for proto in protos]
+    allocs_by_ops = collections.defaultdict(lambda: 0)
+
+    # Evaluate
+    current_allocated = 0
+    max_allocated = 0
+    total_allocated = 0
+    allocated = set()
+    for proto in protos:
+        for op in proto.op:
+            if op.type == "Free" or op.type == "Alias":
+                for o in op.output:
+                    if o in allocated:
+                        current_allocated -= num_bytes(o)
+                        allocated.remove(o)
+            else:
+                for output in op.output:
+                    if output not in allocated:
+                        nbytes = num_bytes(output)
+                        total_allocated += nbytes
+                        current_allocated += nbytes
+                        max_allocated = max(max_allocated, current_allocated)
+                        allocated.add(output)
+                        allocs_by_ops[op.type] += nbytes
+
+    return (total_allocated, max_allocated, allocs_by_ops)
+
+
+def release_blobs_when_used(netproto, dont_free_blobs, selector_fun=None):
+    '''
+    Insert Free-ops after a blob has been used the last time, so that its
+    memory can be reclaimed. Use this only with efficient caching memory
+    managers (such as CUB, --caffe2_cuda_memory_pool=cub).
+
+    Blobs used with Alias op won't be freed.
+
+    @dont_free_blobs:  is a set of blobs that should not be freed
+    @selector_fun:     optional lambda that return True if blob name
+                       can be released. Use for easy special filtering, like
+                       excluding blobs with "loss" in the name.
+
+    Returns a new protobuffer. To use with a model, use:
+        model.net._net = memonger.release_blobs_when_used(..)
+    '''
+    input_blobs = set()
+    can_release = set()
+    alias_blobs = set()
+    netproto = copy.deepcopy(netproto)
+
+    for op in netproto.op:
+        if op.type == 'Alias':
+            alias_blobs.add(op.input[0])
+            continue
+        for inp in op.input:
+            input_blobs.add(inp)
+        for outp in op.output:
+            if outp not in input_blobs:
+                if selector_fun is None or selector_fun(outp):
+                    can_release.add(outp)
+
+    # Remove such blobs that are not input at all and external outputs
+    can_release = can_release - set(netproto.external_output)
+    can_release = can_release.intersection(input_blobs)
+    can_release = can_release - dont_free_blobs
+    can_release = can_release - alias_blobs
+
+    ops = list(netproto.op)
+
+    # .. then find last use of each can-release blob, and insert a Free op
+    for j in reversed(range(0, len(netproto.op))):
+        op = netproto.op[j]
+        for inp in op.input:
+            if inp in can_release:
+                can_release.remove(inp)
+                ops.insert(j + 1, core.CreateOperator("Free", [inp], [inp]))
+
+    del netproto.op[:]
+    netproto.op.extend(ops)
+    return netproto
+
 
 def _find_source_nodes(g):
     ''' Return nodes without predecessors '''
