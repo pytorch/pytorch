@@ -22,11 +22,11 @@ std::string node_name(Node* n) {
   return n->uniqueName();
 }
 
-// transform PythonOps and Cpp Ops into Node's that match ONNXIR
+// transform PythonOps and Cpp Ops into Node's that match ONNX
 // semantics.
 // Eventually this should just be part of init_pass but we should avoid
 // tight coupling of the JIT and ONNX IR exporter until ready.
-std::shared_ptr<Graph> ToONNXIR(std::shared_ptr<Graph>& g,
+std::shared_ptr<Graph> ToONNX(std::shared_ptr<Graph>& g,
                                   const std::unordered_map<void*, Node*>& old_buffer_map,
                                   bool verbose) {
   torch::autograd::PrimSpecContext ctx;
@@ -148,7 +148,7 @@ std::shared_ptr<Graph> ToONNXIR(std::shared_ptr<Graph>& g,
       setOutputs(node, outputs);
     IR_ELSE()
       auto n_ = ctx.graph->createClone(node, envFn);
-      ctx.graph->appendNode(n_); // will be ignored by ONNXIR
+      ctx.graph->appendNode(n_); // will be ignored by ONNX
       if(node->hasMultipleOutputs()) {
         int i = 0;
         for(auto s : node->uses()) {
@@ -276,12 +276,12 @@ static void encodeGraph(onnx::GraphProto * p_g, std::shared_ptr<Graph> & g, cons
   }
   for (auto node : g->nodes()) {
     if (node->kind() == kSelect) {
-      // No select nodes in ONNXIR: instead we make use
+      // No select nodes in ONNX: instead we make use
       // of the select invariant
       continue;
     }
     if (node->kind() == kUndefined && node->uses().empty()) {
-      // Undefined nodes never show up in ONNXIR; they're just a tool
+      // Undefined nodes never show up in ONNX; they're just a tool
       // to help primspecs do the right thing.
       continue;
     }
@@ -308,12 +308,12 @@ static void encodeGraph(onnx::GraphProto * p_g, std::shared_ptr<Graph> & g, cons
   }
 }
 
-// Exports a graph to ONNXIR
+// Exports a graph to ONNX
 std::string ExportGraph(std::shared_ptr<Graph>& g_,
                         const std::unordered_map<void*, Node*>& buffer_map,
                         const std::vector<at::Tensor> & initializers,
                         bool verbose) {
-  auto g = ToONNXIR(g_, buffer_map, verbose);
+  auto g = ToONNX(g_, buffer_map, verbose);
   if(verbose) {
     std::cout << *g << "\n";
   }

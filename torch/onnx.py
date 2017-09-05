@@ -1,6 +1,6 @@
 """
 The torch.onnx module contains functions to export models into the ONNX
-IR format.  These models can be loaded with the ONNXIR library and then
+IR format.  These models can be loaded with the ONNX library and then
 converted to models which run on other deep learning frameworks.
 """
 

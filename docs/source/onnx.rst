@@ -51,7 +51,7 @@ exporter to print out a human-readable representation of the network::
     }
 
 You can also verify and inspect the actual (substantially more verbose) protobuf
-using the `ONNXIR <https://github.com/ProjectONNX/ONNXIR/>`_ library::
+using the `ONNX <https://github.com/ProjectToffee/onnx/>`_ library::
 
     import onnx
 
