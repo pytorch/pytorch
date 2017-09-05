@@ -7,10 +7,7 @@ Example: End-to-end AlexNet from PyTorch to Caffe2
 
 Here is a simple script which exports a pretrained AlexNet as defined in
 torchvision into Toffee IR.  It runs a single round of inference and then
-saves the resulting traced model to ``alexnet.proto``.  (We recommend
-running this inference on GPU, because PyTorch does not have an efficient
-CPU convolution implementation.  It may take some time to initialize the
-CUDA instance.)::
+saves the resulting traced model to ``alexnet.proto``::
 
     from torch.autograd import Variable
     import torch.toffee

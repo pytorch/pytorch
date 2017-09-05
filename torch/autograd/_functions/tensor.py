@@ -198,7 +198,7 @@ class Permute(Function):
 
     @staticmethod
     def primspec(g, input, dim_indices):
-        if dim_indices == range(0, len(dim_indices)):
+        if dim_indices == list(range(0, len(dim_indices))):
             return input
         return g.op("Transpose", input, perm_i=dim_indices)
 

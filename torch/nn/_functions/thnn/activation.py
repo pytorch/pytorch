@@ -11,6 +11,9 @@ class PReLU(Function):
 
     @staticmethod
     def primspec(g, input, weight):
+        # TODO: Properly support numel in type()
+        if all(s == 1 for s in weight.type().sizes()):
+            raise RuntimeError("single weight shared among input channels not supported")
         return g.appendNode(g.create("PRelu", [input, weight]))
 
     @staticmethod
