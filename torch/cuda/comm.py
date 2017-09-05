@@ -77,6 +77,7 @@ def reduce_add(inputs, destination=None):
     if destination is None:
         destination = torch.cuda.current_device()
     input_size = inputs[0].size()
+    nccl_root = None
     for i, inp in enumerate(inputs):
         assert inp.is_cuda, "reduce_add expects all inputs to be on GPUs"
         if inp.get_device() == destination:
@@ -86,6 +87,7 @@ def reduce_add(inputs, destination=None):
             expected = 'x'.join(str(x) for x in input_size)
             raise ValueError("input {} has invalid size: got {}, but expected "
                              "{}".format(i, got, expected))
+    assert nccl_root is not None, "reduce_add expects destination to be on the same GPU with one of the tensors"
     with torch.cuda.device(destination):
         result = type(inp)(input_size).zero_()
 
