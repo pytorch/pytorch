@@ -1779,15 +1779,8 @@ class TestNN(NNTestCase):
         expected_data = [[torch.arange(1, 6) + (i + 1) * 100 + 5 * n for i in range(batch_size)]
                          for n, batch_size in enumerate(batch_sizes)]
         expected_data = list(itertools.chain.from_iterable(expected_data))
-<<<<<<< HEAD
         expected_data = torch.cat(expected_data)
         expected_last_step_data = torch.stack([padded.data[length - 1, i] for i, length in enumerate(lengths)])
-
-=======
-        expected_data = torch.stack(expected_data, dim=0)
-        expected_last_step_data = torch.stack([padded.data[length - 1, i] for i, length in enumerate(lenghts)])
-        
->>>>>>> b7973a1a6f68ebee915285e68be4e3bb39a03109
         for batch_first in (True, False):
             src = padded
             if batch_first:
