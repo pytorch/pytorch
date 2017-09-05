@@ -6,46 +6,73 @@
 namespace caffe2 {
 
 template <typename T, class Context>
-bool NormalizeOp<T, Context>::RunOnDevice() {
-  auto& input = Input(0);
-  auto* output = Output(0);
-  auto m = input.dim32(input.ndim() - 1);
-  auto n = input.size() / m;
-  output->ResizeLike(input);
-  ConstEigenMatrixMap<T> inputMat(input.template data<T>(), m, n);
-  EigenMatrixMap<T> outputMat(output->template mutable_data<T>(), m, n);
-  outputMat = inputMat.colwise().normalized();
-  return true;
-}
+void NormalizeOp<T, Context>::DoNormalize(
+    const T* xData,
+    T* yData,
+    const int m,
+    const int n,
+    const int sf) {
+  using InnerStride = Eigen::InnerStride<Eigen::Dynamic>;
+  using StridedVec =
+      Eigen::Map<Eigen::Matrix<T, 1, Eigen::Dynamic>, 0, InnerStride>;
+  using ConstStridedVec =
+      Eigen::Map<const Eigen::Matrix<T, 1, Eigen::Dynamic>, 0, InnerStride>;
+
+  for (int i = 0; i < n; ++i) {
+    auto base = (i / sf) * sf * m + (i % sf);
+    ConstStridedVec xVec(xData + base, 1, m, InnerStride(sf));
+    auto norm = xVec.template lpNorm<2>();
+    if (norm != 0) {
+      StridedVec yVec(yData + base, 1, m, InnerStride(sf));
+      yVec = xVec / norm;
+    }
+  }
+};
 
 template <typename T, class Context>
-bool NormalizeGradientOp<T, Context>::RunOnDevice() {
-  auto& input = Input(INPUT);
-  DCHECK_EQ(input.ndim(), 2);
-  auto m = input.dim32(input.ndim() - 1);
-  auto n = input.size() / m;
-  Output(GRAD_IN)->ResizeLike(input);
-  ConstEigenArrayMap<T> inputMat(input.template data<T>(), m, n);
-  ConstEigenArrayMap<T> gradOutMat(Input(GRAD_OUT).template data<T>(), m, n);
-  EigenArrayMap<T> gradInMat(Output(GRAD_IN)->template mutable_data<T>(), m, n);
+void NormalizeGradientOp<T, Context>::DoNormalize(
+    const T* xData,
+    const T* gOutData,
+    T* gInData,
+    const int m,
+    const int n,
+    const int sf) {
+  using InnerStride = Eigen::InnerStride<Eigen::Dynamic>;
+  using StridedVec =
+      Eigen::Map<Eigen::Matrix<T, 1, Eigen::Dynamic>, 0, InnerStride>;
+  using ConstStridedVec =
+      Eigen::Map<const Eigen::Matrix<T, 1, Eigen::Dynamic>, 0, InnerStride>;
 
-  auto square = inputMat.square();
-  auto norm = square.colwise().sum().sqrt();
-  gradInMat = gradOutMat.rowwise() * norm.inverse() -
-      ((inputMat.rowwise() / norm.pow(3)).rowwise() *
-       (gradOutMat * inputMat).colwise().sum());
+  for (int i = 0; i < n; ++i) {
+    auto base = (i / sf) * sf * m + (i % sf);
+    ConstStridedVec xVec(xData + base, 1, m, InnerStride(sf));
+    ConstStridedVec gOutVec(gOutData + base, 1, m, InnerStride(sf));
 
-  return true;
-}
+    auto row_sum = xVec.dot(gOutVec);
+    auto row_norm = xVec.template lpNorm<2>();
+    auto row_norm_3 = pow(row_norm, 3);
+    if (row_norm != 0) {
+      StridedVec gInVec(gInData + base, 1, m, InnerStride(sf));
+      gInVec = (gOutVec / row_norm) - ((xVec / row_norm_3) * row_sum);
+    }
+  }
+};
 
 REGISTER_CPU_OPERATOR(Normalize, NormalizeOp<float, CPUContext>);
-OPERATOR_SCHEMA(Normalize).NumInputs(1).NumOutputs(1).SetDoc(R"DOC(
-Given a matrix, apply L2-normalization along the last dimension.
+OPERATOR_SCHEMA(Normalize)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .Arg("axis", "axis to normalize")
+    .SetDoc(R"DOC(
+Given a matrix, apply L2-normalization along the specified dimension.
 )DOC");
 
 REGISTER_CPU_OPERATOR(NormalizeGradient,
                       NormalizeGradientOp<float, CPUContext>);
-OPERATOR_SCHEMA(NormalizeGradient).NumInputs(2).NumOutputs(1);
+OPERATOR_SCHEMA(NormalizeGradient)
+    .NumInputs(2)
+    .NumOutputs(1)
+    .Arg("axis", "axis to normalize");
 
 class GetNormalizeGradient final : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
@@ -85,7 +112,11 @@ void NormalizeL1Op<T, Context>::DoNormalize(
 };
 
 REGISTER_CPU_OPERATOR(NormalizeL1, NormalizeL1Op<float, CPUContext>);
-OPERATOR_SCHEMA(NormalizeL1).NumInputs(1).NumOutputs(1).SetDoc(R"DOC(
+OPERATOR_SCHEMA(NormalizeL1)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .Arg("axis", "axis to normalize")
+    .SetDoc(R"DOC(
 Given a matrix, apply L1-normalization along the specified axis.
 )DOC");
 

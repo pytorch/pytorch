@@ -5,26 +5,35 @@
 
 namespace caffe2 {
 
-__global__ void
-NormalizeKernel(const int M, const int N, const float* data_in, float* out) {
+__global__ void NormalizeKernel(
+    const int m,
+    const int n,
+    const int sf,
+    const float* xData,
+    float* yData) {
   typedef cub::BlockReduce<float, CAFFE_CUDA_NUM_THREADS> BlockReduce;
   __shared__ BlockReduce::TempStorage temp_storage;
-  for (int i = blockIdx.x; i < M; i += gridDim.x) {
-    float sum_squares = 0.0;
-    __shared__ float row_sum_squares;
-    for (int j = threadIdx.x; j < N; j += blockDim.x) {
-      const float x_ij = data_in[i * N + j];
-      sum_squares += x_ij * x_ij;
+
+  for (int i = blockIdx.x; i < n; i += gridDim.x) {
+    auto base = (i / sf) * sf * m + (i % sf);
+
+    float sum = 0.0;
+    __shared__ float norm;
+    for (int j = threadIdx.x; j < m; j += blockDim.x) {
+      const auto x_ij = xData[base + j * sf];
+      sum += x_ij * x_ij;
     }
-    float reduce_result = BlockReduce(temp_storage).Sum(sum_squares);
+    float reduce_result = BlockReduce(temp_storage).Sum(sum);
 
     if (threadIdx.x == 0) {
-      row_sum_squares = reduce_result;
+      norm = sqrt(reduce_result);
     }
     __syncthreads();
-    for (int j = threadIdx.x; j < N; j += blockDim.x) {
-      const int index = i * N + j;
-      out[index] = data_in[index] / sqrt(row_sum_squares);
+    if (norm != 0) {
+      for (int j = threadIdx.x; j < m; j += blockDim.x) {
+        const auto index = base + j * sf;
+        yData[index] = xData[index] / norm;
+      }
     }
   }
 }
@@ -32,6 +41,7 @@ NormalizeKernel(const int M, const int N, const float* data_in, float* out) {
 __global__ void NormalizeGradientKernel(
     const int M,
     const int N,
+    const int SF,
     const float* in_mat,
     const float* grad_out_mat,
     float* grad_mat) {
@@ -44,8 +54,9 @@ __global__ void NormalizeGradientKernel(
     __shared__ float row_sum;
     __shared__ float row_norm;
     __shared__ float row_norm_3;
+    auto base = (i / SF) * SF * N + (i % SF);
     for (int j = threadIdx.x; j < N; j += blockDim.x) {
-      const int index = i * N + j;
+      int index = base + j * SF;
       sum += in_mat[index] * grad_out_mat[index];
       norm += in_mat[index] * in_mat[index];
     }
@@ -59,7 +70,7 @@ __global__ void NormalizeGradientKernel(
     }
     __syncthreads();
     for (int j = threadIdx.x; j < N; j += blockDim.x) {
-      const int index = i * N + j;
+      int index = base + j * SF;
       const float x_ij = in_mat[index];
       const float dy_ij = grad_out_mat[index];
       grad_mat[index] = (dy_ij / row_norm) - ((x_ij / row_norm_3) * row_sum);
@@ -68,19 +79,17 @@ __global__ void NormalizeGradientKernel(
 }
 
 template <>
-bool NormalizeOp<float, CUDAContext>::RunOnDevice() {
-  auto& X = Input(0);
-  auto* Y = Output(0);
-  Y->ResizeLike(X);
-  int N = X.dim32(X.ndim() - 1);
-  int M = X.size() / N;
+void NormalizeOp<float, CUDAContext>::DoNormalize(
+    const float* xData,
+    float* yData,
+    const int m,
+    const int n,
+    const int sf) {
   NormalizeKernel<<<
-      min(M, CAFFE_MAXIMUM_NUM_BLOCKS),
+      min(n, CAFFE_MAXIMUM_NUM_BLOCKS),
       CAFFE_CUDA_NUM_THREADS,
       0,
-      context_.cuda_stream()>>>(
-      M, N, X.data<float>(), Y->mutable_data<float>());
-  return true;
+      context_.cuda_stream()>>>(m, n, sf, xData, yData);
 }
 
 template <>
@@ -89,18 +98,18 @@ bool NormalizeGradientOp<float, CUDAContext>::RunOnDevice() {
   const auto& dY = Input(1);
   auto* dX = Output(0);
   dX->ResizeLike(X);
-  int N = X.dim32(X.ndim() - 1);
+
+  const auto canonical_axis =
+      X.canonical_axis_index(OperatorBase::GetSingleArgument<int>("axis", -1));
+  int N = X.dim32(canonical_axis);
   int M = X.size() / N;
+  const int SF = X.size_from_dim(canonical_axis + 1);
   NormalizeGradientKernel<<<
       min(M, CAFFE_MAXIMUM_NUM_BLOCKS),
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
-      M,
-      N,
-      X.data<float>(),
-      dY.data<float>(),
-      dX->mutable_data<float>());
+      M, N, SF, X.data<float>(), dY.data<float>(), dX->mutable_data<float>());
   return true;
 }
 
