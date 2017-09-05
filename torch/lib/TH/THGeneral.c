@@ -343,3 +343,41 @@ int THGetNumCores(void)
   return 1;
 #endif
 }
+
+#ifdef TH_BLAS_MKL
+extern int mkl_get_max_threads(void);
+#endif
+
+TH_API void THInferNumThreads(void)
+{
+#if defined(_OPENMP) && defined(TH_BLAS_MKL)
+  // If we are using MKL an OpenMP make sure the number of threads match.
+  // Otherwise, MKL and our OpenMP-enabled functions will keep changing the
+  // size of the OpenMP thread pool, resulting in worse performance (and memory
+  // leaks in GCC 5.4)
+  omp_set_num_threads(mkl_get_max_threads());
+#endif
+}
+
+TH_API THDescBuff _THSizeDesc(const long *size, const long ndim) {
+  const int L = TH_DESC_BUFF_LEN;
+  THDescBuff buf;
+  char *str = buf.str;
+  int n = 0;
+  n += snprintf(str, L-n, "[");
+  int i;
+  for(i = 0; i < ndim; i++) {
+    if(n >= L) break;
+    n += snprintf(str+n, L-n, "%ld", size[i]);
+    if(i < ndim-1) {
+      n += snprintf(str+n, L-n, " x ");
+    }
+  }
+  if(n < L - 2) {
+    snprintf(str+n, L-n, "]");
+  } else {
+    snprintf(str+L-5, 5, "...]");
+  }
+  return buf;
+}
+

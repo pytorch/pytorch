@@ -29,4 +29,5 @@ class Mul(Module):
         return self.gradInput
 
     def accGradParameters(self, input, gradOutput, scale=1):
-        self.gradWeight[0] = self.gradWeight[0] + scale * input.dot(gradOutput)
+        self.gradWeight[0] = (self.gradWeight[0] +
+                              scale * input.contiguous().view(-1).dot(gradOutput.contiguous().view(-1)))

@@ -40,7 +40,7 @@ class Normalize(Module):
                     else torch.LongTensor()
 
             torch.abs(input, out=self.buffer)
-            torch.max(self._indices, self.buffer, 1, out=self.norm)
+            torch.max(self._indices, self.buffer, 1, out=self.norm, keepdim=True)
             self.norm.add_(self.eps)
         else:
             if self.normp is None:
@@ -50,7 +50,7 @@ class Normalize(Module):
             else:
                 torch.pow(input, self.p, out=self.buffer)
 
-            torch.sum(self.buffer, 1, out=self.normp).add_(self.eps)
+            torch.sum(self.buffer, 1, out=self.normp, keepdim=True).add_(self.eps)
             torch.pow(self.normp, 1. / self.p, out=self.norm)
 
         torch.div(input, self.norm.view(-1, 1).expand_as(input), out=self._output)
@@ -107,7 +107,7 @@ class Normalize(Module):
         if self.buffer2 is None:
             self.buffer2 = input.new()  # nxd
         torch.mul(input, gradOutput, out=self.buffer2)
-        torch.sum(self.buffer2, 1, out=self.cross)
+        torch.sum(self.buffer2, 1, out=self.cross, keepdim=True)
 
         self.buffer.mul_(self.cross.expand_as(self.buffer))
         self._gradInput.add_(-1, self.buffer)

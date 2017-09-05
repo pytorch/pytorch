@@ -135,7 +135,7 @@ static PyObject * $name(PyObject *self, PyObject *args, PyObject *kwargs)
                     if arg['name'] in ['self', 'state', 'dataType', 'handle']:
                         arg['ignore_check'] = True
             declaration['options'] = self.filter_unique_options(declaration['options'])
-        return declarations
+        return [d for d in declarations if not d.get('only_register', False)]
 
     def filter_unique_options(self, options):
         def signature(option):

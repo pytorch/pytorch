@@ -49,6 +49,7 @@
 #define LIBRARY_STATE_NOARGS state
 #define LIBRARY_STATE state,
 #define LIBRARY_STATE_TYPE THCState*,
+#define LIBRARY_STATE_TYPE_NOARGS THCState*
 #define TH_GENERIC_FILE THC_GENERIC_FILE
 
 #define THHostTensor TH_CONCAT_3(TH,Real,Tensor)

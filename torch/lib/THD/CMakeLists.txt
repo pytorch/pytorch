@@ -1,4 +1,4 @@
-CMAKE_MINIMUM_REQUIRED(VERSION 3.0)
+CMAKE_MINIMUM_REQUIRED(VERSION 2.8)
 SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
 
 ################################################################################
@@ -18,11 +18,32 @@ FUNCTION(EXCLUDE_DIR list_name dir_name)
 ENDFUNCTION()
 
 ################################################################################
+SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
+
+INCLUDE(CheckCXXSourceCompiles)
+
+CHECK_CXX_SOURCE_COMPILES("
+#include <thread>
+
+thread_local int foo=1;
+
+int main() {
+  return 0;
+}" HAS_THREAD_LOCAL)
+
+IF(NOT HAS_THREAD_LOCAL)
+    MESSAGE(FATAL_ERROR "thread_local not supported. THD requires a compiler"
+                        " that supports thread_local. Please upgrade your "
+                        "compiler. If you are on OSX, upgrade to "
+                        "XCode 8 or newer.")
+ENDIF(NOT HAS_THREAD_LOCAL)
 
 FIND_PACKAGE(MPI)
 
+FIND_PACKAGE(Gloo)
+
 IF(NOT Torch_FOUND)
-    FIND_PACKAGE(Torch REQUIRED)
+  FIND_PACKAGE(Torch REQUIRED)
 ENDIF()
 
 IF(NOT TH_LIBRARIES)
@@ -48,13 +69,24 @@ ELSE()
       SET(THC_LIBRARIES "THC")
     ENDIF(NOT THC_LIBRARIES)
     MESSAGE(STATUS "THC_LIBRARIES: ${THC_LIBRARIES}")
+    ADD_DEFINITIONS(-DWITH_CUDA=1)
   ENDIF()
 ENDIF()
 
 IF(MPI_FOUND)
   ADD_DEFINITIONS(-DWITH_MPI=1)
 ENDIF()
+
+IF(GLOO_FOUND)
+  ADD_DEFINITIONS(-DWITH_GLOO=1)
+ENDIF()
+
 ADD_DEFINITIONS(-D_THD_CORE=1)
+
+IF ($ENV{TH_BINARY_BUILD})
+  MESSAGE(STATUS "TH_BINARY_BUILD detected. Statically linking libstdc++")
+  SET(CMAKE_CXX_FLAGS "-static-libstdc++ ${CMAKE_CXX_FLAGS}")
+ENDIF()
 
 # Can be compiled standalone
 IF(NOT THD_INSTALL_BIN_DIR OR NOT THD_INSTALL_LIB_DIR OR NOT THD_INSTALL_INCLUDE_DIR)
@@ -72,8 +104,15 @@ FILE(GLOB_RECURSE base_cpp "base/*.cpp")
 FILE(GLOB_RECURSE test_cpp "test/*.cpp")
 
 IF(NOT MPI_FOUND)
-  LIST(REMOVE_ITEM base_cpp "${CMAKE_CURRENT_SOURCE_DIR}/base/channels/DataChannelMPI.cpp")
+  LIST(REMOVE_ITEM base_cpp "${CMAKE_CURRENT_SOURCE_DIR}/base/data_channels/DataChannelMPI.cpp")
   LIST(REMOVE_ITEM test_cpp "${CMAKE_CURRENT_SOURCE_DIR}/test/data_channel_mpi_smoke.cpp")
+ENDIF()
+
+IF(NOT GLOO_FOUND)
+  LIST(REMOVE_ITEM base_cpp "${CMAKE_CURRENT_SOURCE_DIR}/base/data_channels/DataChannelGloo.cpp")
+  LIST(REMOVE_ITEM base_cpp "${CMAKE_CURRENT_SOURCE_DIR}/base/data_channels/Store.cpp")
+  LIST(REMOVE_ITEM test_cpp "${CMAKE_CURRENT_SOURCE_DIR}/test/data_channel_gloo_store.cpp")
+  LIST(REMOVE_ITEM test_cpp "${CMAKE_CURRENT_SOURCE_DIR}/test/data_channel_gloo_cache.cpp")
 ENDIF()
 
 EXCLUDE_DIR(master_worker_cpp ".*/dispatch/.*\\.cpp$")
@@ -84,8 +123,8 @@ SET(all_h THD.h ${base_h} ${process_group_h} ${master_worker_h})
 EXCLUDE_DIR(all_cpp ".*/generic/.*\\.cpp$")
 
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR})
+
 ADD_LIBRARY(THD SHARED ${all_cpp})
-SET_PROPERTY(TARGET THD PROPERTY CXX_STANDARD 11)
 
 IF(THD_SO_VERSION)
   MESSAGE(STATUS "THD_SO_VERSION: ${THD_SO_VERSION}")
@@ -94,14 +133,14 @@ IF(THD_SO_VERSION)
     SOVERSION ${THD_SO_VERSION})
 ENDIF(THD_SO_VERSION)
 
-TARGET_LINK_LIBRARIES(THD PRIVATE ${TH_LIBRARIES} ${THPP_LIBRARIES})
+TARGET_LINK_LIBRARIES(THD LINK_PRIVATE ${TH_LIBRARIES} ${THPP_LIBRARIES})
 IF(CUDA_FOUND)
-  TARGET_LINK_LIBRARIES(THD PRIVATE ${THC_LIBRARIES})
+  TARGET_LINK_LIBRARIES(THD LINK_PRIVATE ${THC_LIBRARIES})
 ENDIF()
 
 IF(MPI_FOUND)
   INCLUDE_DIRECTORIES(${MPI_INCLUDE_PATH})
-  TARGET_LINK_LIBRARIES(THD PRIVATE ${MPI_LIBRARIES})
+  TARGET_LINK_LIBRARIES(THD LINK_PRIVATE ${MPI_LIBRARIES})
 
   IF(MPI_COMPILE_FLAGS)
     SET_TARGET_PROPERTIES(THD PROPERTIES COMPILE_FLAGS "${MPI_COMPILE_FLAGS}")
@@ -112,21 +151,27 @@ IF(MPI_FOUND)
   ENDIF()
 ENDIF()
 
+IF(GLOO_FOUND)
+  INCLUDE_DIRECTORIES(${GLOO_INCLUDE_DIR})
+  TARGET_LINK_LIBRARIES(THD LINK_PRIVATE ${GLOO_LIBRARIES})
+ENDIF()
+
 # Test executables
-ENABLE_TESTING()
+IF(THD_WITH_TESTS)
+  ENABLE_TESTING()
+  FIND_PACKAGE(Threads)
+  FOREACH(test_source_file ${test_cpp})
+    # Prepare test names
+    GET_FILENAME_COMPONENT(test_source_file ${test_source_file} NAME)
+    STRING(REPLACE ".cpp" "" test_name ${test_source_file})
+    SET(test_executable_name "test_${test_name}")
 
-FIND_PACKAGE(Threads)
-FOREACH(test_source_file ${test_cpp})
-  # Prepare test names
-  GET_FILENAME_COMPONENT(test_source_file ${test_source_file} NAME)
-  STRING(REPLACE ".cpp" "" test_name ${test_source_file})
-  SET(test_executable_name "test_${test_name}")
-
-  ADD_EXECUTABLE(${test_executable_name} "test/${test_source_file}")
-  TARGET_LINK_LIBRARIES(${test_executable_name} THD ${TH_LIBRARIES} ${THPP_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT})
-  SET_PROPERTY(TARGET ${test_executable_name} PROPERTY CXX_STANDARD 11)
-  ADD_TEST(${test_name} ${test_executable_name})
-ENDFOREACH()
+    ADD_EXECUTABLE(${test_executable_name} "test/${test_source_file}")
+    TARGET_LINK_LIBRARIES(${test_executable_name} THD ${TH_LIBRARIES} ${THPP_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT})
+    SET_PROPERTY(TARGET ${test_executable_name} PROPERTY CXX_STANDARD 11)
+    ADD_TEST(${test_name} ${test_executable_name})
+  ENDFOREACH()
+ENDIF()
 
 INSTALL(TARGETS THD
   RUNTIME DESTINATION "${THD_INSTALL_BIN_DIR}"

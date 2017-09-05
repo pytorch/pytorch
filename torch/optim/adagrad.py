@@ -6,7 +6,8 @@ from .optimizer import Optimizer
 class Adagrad(Optimizer):
     """Implements Adagrad algorithm.
 
-    It has been proposed in `Adaptive Subgradient Methods for Online Learning and Stochastic Optimization`_.
+    It has been proposed in `Adaptive Subgradient Methods for Online Learning
+    and Stochastic Optimization`_.
 
     Arguments:
         params (iterable): iterable of parameters to optimize or dicts defining
@@ -15,8 +16,8 @@ class Adagrad(Optimizer):
         lr_decay (float, optional): learning rate decay (default: 0)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
 
-    .. _Adaptive Subgradient Methods for Online Learning and Stochastic Optimization:
-        http://jmlr.org/papers/v12/duchi11a.html
+    .. _Adaptive Subgradient Methods for Online Learning and Stochastic
+        Optimization: http://jmlr.org/papers/v12/duchi11a.html
     """
 
     def __init__(self, params, lr=1e-2, lr_decay=0, weight_decay=0):
@@ -64,9 +65,9 @@ class Adagrad(Optimizer):
                 clr = group['lr'] / (1 + (state['step'] - 1) * group['lr_decay'])
 
                 if p.grad.data.is_sparse:
-                    grad.contiguous()  # the update is non-linear so indices must be unique
-                    grad_indices = grad.indices()
-                    grad_values = grad.values()
+                    grad = grad.coalesce()  # the update is non-linear so indices must be unique
+                    grad_indices = grad._indices()
+                    grad_values = grad._values()
                     size = torch.Size([x for x in grad.size()])
 
                     def make_sparse(values):
@@ -75,8 +76,8 @@ class Adagrad(Optimizer):
                             return constructor()
                         return constructor(grad_indices, values, size)
                     state['sum'].add_(make_sparse(grad_values.pow(2)))
-                    std = state['sum'].sparse_mask(grad)
-                    std_values = std.values().sqrt_().add_(1e-10)
+                    std = state['sum']._sparse_mask(grad)
+                    std_values = std._values().sqrt_().add_(1e-10)
                     p.data.add_(-clr, make_sparse(grad_values / std_values))
                 else:
                     state['sum'].addcmul_(1, grad, grad)

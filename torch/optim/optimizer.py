@@ -33,7 +33,10 @@ class Optimizer(object):
 
         param_set = set()
         for group in self.param_groups:
-            group['params'] = list(group['params'])
+            if isinstance(group['params'], torch.autograd.Variable):
+                group['params'] = [group['params']]
+            else:
+                group['params'] = list(group['params'])
             group_set = set(group['params'])
             if not param_set.isdisjoint(group_set):
                 raise ValueError("some parameters appear in more than one "
@@ -57,7 +60,7 @@ class Optimizer(object):
                 if not param.requires_grad:
                     raise ValueError("optimizing a parameter that doesn't "
                                      "require gradients")
-                if param.creator is not None:
+                if not param.is_leaf:
                     raise ValueError("can't optimize a non-leaf Variable")
 
     def __getstate__(self):
@@ -131,9 +134,13 @@ class Optimizer(object):
     def zero_grad(self):
         """Clears the gradients of all optimized :class:`Variable` s."""
         for group in self.param_groups:
-            for param in group['params']:
-                if param.grad is not None:
-                    param.grad.data.zero_()
+            for p in group['params']:
+                if p.grad is not None:
+                    if p.grad.volatile:
+                        p.grad.data.zero_()
+                    else:
+                        data = p.grad.data
+                        p.grad = Variable(data.new().resize_as_(data).zero_())
 
     def step(self, closure):
         """Performs a single optimization step (parameter update).

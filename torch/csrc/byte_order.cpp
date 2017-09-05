@@ -26,7 +26,7 @@ static inline uint64_t decodeUInt64LE(const uint8_t *data) {
 }
 
 static inline uint64_t decodeUInt64BE(const uint8_t *data) {
-  return (((uint64_t)data[7])<< 0) | (((uint64_t)data[7])<< 8) |
+  return (((uint64_t)data[7])<< 0) | (((uint64_t)data[6])<< 8) |
          (((uint64_t)data[5])<<16) | (((uint64_t)data[4])<<24) |
          (((uint64_t)data[3])<<32) | (((uint64_t)data[2])<<40) |
          (((uint64_t)data[1])<<48) | (((uint64_t)data[0])<<56);
@@ -158,4 +158,3 @@ void THP_encodeDoubleBuffer(uint8_t* dst, const double* src, THPByteOrder order,
     }
   }
 }
-

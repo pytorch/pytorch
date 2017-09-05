@@ -70,7 +70,7 @@ void THNN_(TemporalSubSampling_updateOutput)(
   {
     THTensor_(narrow)(inputWindow, input, 0, k*dW, kW);
     THTensor_(select)(outputFrame, output, 0, k);
-    THTensor_(sum)(outputFrame, inputWindow, 0);
+    THTensor_(sum)(outputFrame, inputWindow, 0, 1);
     THTensor_(cmul)(outputFrame, outputFrame, weight);
     THTensor_(cadd)(outputFrame, outputFrame, 1, bias);
   }
@@ -143,7 +143,7 @@ void THNN_(TemporalSubSampling_accGradParameters)(
   {
     THTensor_(narrow)(inputWindow, input, 0, k*dW, kW);
     THTensor_(select)(gradOutputFrame, gradOutput, 0, k);
-    THTensor_(sum)(buffer, inputWindow, 0);
+    THTensor_(sum)(buffer, inputWindow, 0, 1);
     THTensor_(addcmul)(gradWeight, gradWeight, scale, buffer, gradOutputFrame);
     THTensor_(cadd)(gradBias, gradBias, scale, gradOutputFrame);
   }

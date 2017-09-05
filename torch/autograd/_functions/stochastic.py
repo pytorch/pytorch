@@ -23,8 +23,9 @@ class Multinomial(StochasticFunction):
         if probs.dim() == 1:
             probs = probs.unsqueeze(0)
             samples = samples.unsqueeze(0)
+            reward = reward.unsqueeze(0)
         # normalize probs (multinomial accepts weights)
-        probs /= probs.sum(1).expand_as(probs)
+        probs /= probs.sum(1, True).expand_as(probs)
         grad_probs = probs.new().resize_as_(probs).zero_()
         output_probs = probs.gather(1, samples)
         output_probs.add_(1e-6).reciprocal_()

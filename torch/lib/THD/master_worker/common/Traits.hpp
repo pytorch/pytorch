@@ -26,6 +26,8 @@ template <typename T, typename Head, typename... Tail>
 struct is_any_of<T, std::tuple<Head, Tail...>>
   : or_trait<std::is_same<T, Head>, is_any_of<T, std::tuple<Tail...>>> {};
 
+using THDGeneratorTypes = std::tuple<THDGenerator>;
+
 using THDTensorTypes = std::tuple<
     THDByteTensor,
     THDCharTensor,
@@ -57,6 +59,7 @@ struct map_to_ptr<Trait, std::tuple<Types...>> {
   >;
 };
 
+using THDGeneratorPtrTypes = map_to_ptr<std::add_const, THDGeneratorTypes>::type;
 using THDTensorPtrTypes = map_to_ptr<std::add_const, THDTensorTypes>::type;
 using THDStoragePtrTypes = map_to_ptr<std::add_const, THDStorageTypes>::type;
 

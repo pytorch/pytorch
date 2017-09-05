@@ -1,5 +1,6 @@
 #include "THCTensorMath.h"
 #include "THCGeneral.h"
+#include "THCAtomics.cuh"
 #include "THCApply.cuh"
 
 // Compute the offsets into the given tensors for a linear index. For the 't2'
@@ -92,7 +93,8 @@ __global__ void THCudaTensor_gatherKernel(
                                                           tensor, &tensorOffset,
                                                           src, &srcOffset);
 
-    IndexType indexValue = (IndexType)index.data[indexOffset] - TH_INDEX_BASE;
+    long indexValue = index.data[indexOffset] - TH_INDEX_BASE;
+    assert(indexValue >= 0 && indexValue < src.sizes[dim]);
     srcOffset += indexValue * src.strides[dim];
 
     tensor.data[tensorOffset] = src.data[srcOffset];
@@ -118,10 +120,38 @@ __global__ void THCudaTensor_scatterKernel(
                                                           src, &srcOffset,
                                                           tensor, &tensorOffset);
 
-    IndexType indexValue = (IndexType)index.data[indexOffset] - TH_INDEX_BASE;
+    long indexValue = index.data[indexOffset] - TH_INDEX_BASE;
+    assert(indexValue >= 0 && indexValue < tensor.sizes[dim]);
     tensorOffset += indexValue * tensor.strides[dim];
 
     tensor.data[tensorOffset] = src.data[srcOffset];
+  }
+}
+
+template <typename IndexType, typename Real, int Dims>
+__global__ void THCudaTensor_scatterAddKernel(
+    TensorInfo<Real, IndexType> tensor,
+    TensorInfo<Real, IndexType> src,
+    TensorInfo<long, IndexType> index,
+    const int dim,
+    const IndexType totalElements) {
+  for (IndexType linearId = blockIdx.x * blockDim.x + threadIdx.x;
+       linearId < totalElements;
+       linearId += gridDim.x * blockDim.x) {
+    IndexType tensorOffset = 0;
+    IndexType srcOffset = 0;
+    IndexType indexOffset = 0;
+
+    IndexToScatterGatherOffsets<IndexType, Real, Dims>::compute(linearId, dim,
+                                                          index, &indexOffset,
+                                                          src, &srcOffset,
+                                                          tensor, &tensorOffset);
+
+    long indexValue = index.data[indexOffset] - TH_INDEX_BASE;
+    assert(indexValue >= 0 && indexValue < tensor.sizes[dim]);
+    tensorOffset += indexValue * tensor.strides[dim];
+
+    atomicAdd(&tensor.data[tensorOffset], src.data[srcOffset]);
   }
 }
 
@@ -142,7 +172,8 @@ __global__ void THCudaTensor_scatterFillKernel(
                                                           index, &indexOffset,
                                                           tensor, &tensorOffset);
 
-    IndexType indexValue = (IndexType)index.data[indexOffset] - TH_INDEX_BASE;
+    long indexValue = index.data[indexOffset] - TH_INDEX_BASE;
+    assert(indexValue >= 0 && indexValue < tensor.sizes[dim]);
     tensorOffset += indexValue * tensor.strides[dim];
 
     tensor.data[tensorOffset] = value;

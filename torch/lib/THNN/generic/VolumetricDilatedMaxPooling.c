@@ -157,10 +157,11 @@ static void THNN_(VolumetricDilatedMaxPooling_updateOutput_frame)(
           THIndex_t *indzp = indz_p + k * otime * owidth * oheight
             + ti * owidth * oheight + i * owidth + j;
 
-          /* compute local max: */
-          real maxval = -THInf;
-          int x,y,z;
-          int mx, my, mz;
+	  /* compute local max: */
+	  real maxval = -THInf;
+	  int x,y,z;
+	  int mx, my, mz;
+	  mx = my = mz = -1;
 
           for (z = 0; z < kernel_t; z++)
           {
@@ -385,9 +386,11 @@ static void THNN_(VolumetricDilatedMaxPooling_updateGradInput_frame)(
           long maxi  = ((unsigned char*)(indzp))[1] * dilationH + i * dH - pH;
           long maxj  = ((unsigned char*)(indzp))[2] * dilationW + j * dW - pW;
 
-          /* update gradient */
-          gradInput_p_k[maxti * iheight * iwidth + maxi * iwidth + maxj] +=
-            gradOutput_p_k[ti * oheight * owidth + i * owidth + j];
+	  if (maxti != -1) {
+	    /* update gradient */
+	    gradInput_p_k[maxti * iheight * iwidth + maxi * iwidth + maxj] +=
+	      gradOutput_p_k[ti * oheight * owidth + i * owidth + j];
+	  }
         }
       }
     }

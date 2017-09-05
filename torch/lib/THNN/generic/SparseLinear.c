@@ -234,7 +234,7 @@ void THNN_(SparseLinear_accGradParameters)(
 
   // gradBias += gradOutput
   THTensor* buf = THTensor_(new)();
-  THTensor_(sum)(buf, gradOutput, 0);
+  THTensor_(sum)(buf, gradOutput, 0, 1);
   THTensor_(cadd)(gradBias, gradBias, scale, buf);
   THTensor_(free)(buf);
   THLongTensor_free(csc);

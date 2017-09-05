@@ -4,9 +4,35 @@
 #include <cassert>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <vector>
+
+constexpr char RANK_ENV[] = "RANK";
+constexpr char WORLD_SIZE_ENV[] = "WORLD_SIZE";
+constexpr char MASTER_PORT_ENV[] = "MASTER_PORT";
+constexpr char MASTER_ADDR_ENV[] = "MASTER_ADDR";
+
+struct Barrier {
+  Barrier() : _count(0) {}
+  Barrier(std::size_t count) : _count(count) {}
+
+  void wait() {
+    std::unique_lock<std::mutex> lock{_mutex};
+    if (--_count == 0) {
+      _cv.notify_all();
+    } else {
+      _cv.wait(lock);
+    }
+  }
+
+private:
+  std::mutex _mutex;
+  std::condition_variable _cv;
+  std::size_t _count;
+};
 
 template<typename T>
 typename std::enable_if<!std::numeric_limits<T>::is_integer, bool>::type
@@ -38,6 +64,12 @@ inline bool contains(std::vector<T> v, T value) {
 inline long nowInMilliseconds() {
   return std::chrono::duration_cast<std::chrono::milliseconds>
       (std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
+inline long long factorial(int n) {
+  long long a = 1;
+  for (long long i = 1; i <= n; ++i) { a *= i; }
+  return a;
 }
 
 #define ASSERT_TENSOR_VALUE(T, tensor, value) {            \

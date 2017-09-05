@@ -13,7 +13,7 @@ Data type                CPU tensor                    GPU tensor
 ======================== ===========================   ================================
 32-bit floating point    :class:`torch.FloatTensor`    :class:`torch.cuda.FloatTensor`
 64-bit floating point    :class:`torch.DoubleTensor`   :class:`torch.cuda.DoubleTensor`
-16-bit floating point    N/A                           :class:`torch.cuda.HalfTensor`
+16-bit floating point    :class:`torch.HalfTensor`     :class:`torch.cuda.HalfTensor`
 8-bit integer (unsigned) :class:`torch.ByteTensor`     :class:`torch.cuda.ByteTensor`
 8-bit integer (signed)   :class:`torch.CharTensor`     :class:`torch.cuda.CharTensor`
 16-bit integer (signed)  :class:`torch.ShortTensor`    :class:`torch.cuda.ShortTensor`
@@ -196,9 +196,10 @@ view of a storage and defines numeric operations on it.
    .. automethod:: lt
    .. automethod:: lt_
    .. automethod:: map_
-   .. automethod:: masked_copy_
+   .. automethod:: masked_scatter_
    .. automethod:: masked_fill_
    .. automethod:: masked_select
+   .. automethod:: matmul
    .. automethod:: max
    .. automethod:: mean
    .. automethod:: median

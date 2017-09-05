@@ -159,7 +159,8 @@ THC_API void THCTensor_(mode)(THCState *state,
                               THCTensor *values,
                               THCudaLongTensor *indices,
                               THCTensor *input,
-                              int dimension) {
+                              int dimension,
+                              int keepdim) {
   THLongStorage *dim;
   THCTensor *transposed, *contiguous, *valuesTransposed;
   THLongStorage *position;
@@ -189,6 +190,10 @@ THC_API void THCTensor_(mode)(THCState *state,
   if (sliceSize == 1) {
     THCTensor_(copy)(state, values, input);
     THCudaLongTensor_fill(state, indices, TH_INDEX_BASE);
+    if (!keepdim) {
+      THCTensor_(squeeze1d)(state, values, values, dimension);
+      THCudaLongTensor_squeeze1d(state, indices, indices, dimension);
+    }
     return;
   }
 
@@ -300,6 +305,11 @@ THC_API void THCTensor_(mode)(THCState *state,
     THCTensor_(free)(state, valuesTransposed);
     THCudaLongTensor_free(state, indicesTransposed);
     THCudaLongStorage_free(state, sortBuffer);
+  }
+
+  if (!keepdim) {
+    THCTensor_(squeeze1d)(state, values, values, dimension);
+    THCudaLongTensor_squeeze1d(state, indices, indices, dimension);
   }
 }
 

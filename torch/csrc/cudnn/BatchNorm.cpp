@@ -81,6 +81,7 @@ void cudnn_batch_norm_forward(
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
   if (training) {
+    THVoidTensor_assertContiguous(input);
     THVoidTensor_assertContiguous(bias);
     THVoidTensor_assertContiguous(running_mean);
     THVoidTensor_assertContiguous(running_var);
@@ -99,6 +100,7 @@ void cudnn_batch_norm_forward(
       tensorPointer(dataType, save_mean),
       tensorPointer(dataType, save_var)));
   } else {
+    THVoidTensor_assertContiguous(input);
     THVoidTensor_assertContiguous(bias);
     THVoidTensor_assertContiguous(running_mean);
     THVoidTensor_assertContiguous(running_var);
@@ -131,6 +133,13 @@ void cudnn_batch_norm_backward(
     mode = CUDNN_BATCHNORM_SPATIAL;
   }
 
+  THVoidTensor_assertContiguous(input);
+  THVoidTensor_assertContiguous(grad_output);
+  THVoidTensor_assertContiguous(grad_weight);
+  THVoidTensor_assertContiguous(grad_bias);
+  THVoidTensor_assertContiguous(save_mean);
+  THVoidTensor_assertContiguous(save_var);
+
   TensorDescriptor idesc;  // input descriptor
   TensorDescriptor odesc;  // output descriptor
   TensorDescriptor gdesc;  // grad_input descriptor
@@ -142,10 +151,7 @@ void cudnn_batch_norm_backward(
 
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
-  THVoidTensor_assertContiguous(grad_weight);
-  THVoidTensor_assertContiguous(grad_bias);
-  THVoidTensor_assertContiguous(save_mean);
-  THVoidTensor_assertContiguous(save_var);
+
   CHECK(cudnnBatchNormalizationBackward(
     handle, mode, &one, &zero, &one, &zero,
     idesc.desc, tensorPointer(dataType, input),

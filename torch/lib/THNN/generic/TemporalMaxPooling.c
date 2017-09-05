@@ -242,7 +242,8 @@ void THNN_(TemporalMaxPooling_updateGradInput)(
       {
         /* compute local max: */
         long maxindex = (long)xp[y];
-        gip[maxindex*framesize+y] += gop[y];
+	if (maxindex != -1)
+	  gip[maxindex*framesize+y] += gop[y];
       }
     }
   }
@@ -268,7 +269,8 @@ void THNN_(TemporalMaxPooling_updateGradInput)(
         {
           /* compute local max: */
           long maxindex = (long)xp[y];
-          gip[maxindex*framesize+y] += gop[y];
+	  if (maxindex != -1)
+	    gip[maxindex*framesize+y] += gop[y];
         }
       }
     }

@@ -13,8 +13,8 @@ class Adadelta(Optimizer):
             of squared gradients (default: 0.9)
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-6)
-        lr (float, optional): coefficient that scale delta before it is applied to the
-            parameters (default: 1.0)
+        lr (float, optional): coefficient that scale delta before it is applied
+            to the parameters (default: 1.0)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
 
     __ https://arxiv.org/abs/1212.5701

@@ -344,6 +344,31 @@ void THCudaBlas_SgemmBatched(THCState *state, char transa, char transb, long m, 
                                    (int)batchCount));
 }
 
+#if CUDA_VERSION >= 8000
+void THCudaBlas_SgemmStridedBatched(THCState *state, char transa, char transb, long m, long n, long k,
+                             float alpha, const float *a, long lda, long strideA, const float *b, long ldb, long strideB,
+                             float beta, float *c, long ldc, long strideC, long batchCount)
+{
+  if( (m >= INT_MAX) || (n >= INT_MAX) || (k >= INT_MAX) || (lda >= INT_MAX)  || (ldb >= INT_MAX) || (ldc >= INT_MAX) || (batchCount >= INT_MAX) )
+        
+  {
+    THError("Cublas_SgemmStridedBatched only supports m, n, k, lda, ldb, ldc, batchCount"
+            "with the bound [val] <= %d", INT_MAX);
+  }
+
+  adjustLd(transa, transb, m, n, k, &lda, &ldb, &ldc);
+  cublasOperation_t opa = convertTransToCublasOperation(transa);
+  cublasOperation_t opb = convertTransToCublasOperation(transb);
+
+  cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
+  cublasSetStream(handle, THCState_getCurrentStream(state));
+  THCublasCheck(cublasSgemmStridedBatched(handle,
+                                   opa, opb, (int)m, (int)n, (int)k,
+                                   &alpha, a, (int)lda, strideA, b, (int)ldb, strideB, &beta, c, (int)ldc, strideC,
+                                   (int)batchCount));
+}
+#endif
+
 void THCudaBlas_DgemmBatched(THCState *state, char transa, char transb, long m, long n, long k,
                              double alpha, const double *a[], long lda, const double *b[], long ldb,
                              double beta, double *c[], long ldc, long batchCount)
@@ -365,6 +390,30 @@ void THCudaBlas_DgemmBatched(THCState *state, char transa, char transb, long m, 
                                    &alpha, a, (int)lda, b, (int)ldb, &beta, c, (int)ldc,
                                    (int)batchCount));
 }
+
+#if CUDA_VERSION >= 8000
+void THCudaBlas_DgemmStridedBatched(THCState *state, char transa, char transb, long m, long n, long k,
+                             double alpha, const double *a, long lda, long strideA, const double *b, long ldb, long strideB,
+                             double beta, double *c, long ldc, long strideC, long batchCount)
+{
+  if( (m >= INT_MAX) || (n >= INT_MAX) || (k >= INT_MAX) || (lda >= INT_MAX)  || (ldb >= INT_MAX) || (ldc >= INT_MAX) || (batchCount >= INT_MAX) )
+  {
+    THError("Cublas_DgemmBatched only supports m, n, k, lda, ldb, ldc, batchCount"
+            "with the bound [val] <= %d", INT_MAX);
+  }
+
+  adjustLd(transa, transb, m, n, k, &lda, &ldb, &ldc);
+  cublasOperation_t opa = convertTransToCublasOperation(transa);
+  cublasOperation_t opb = convertTransToCublasOperation(transb);
+
+  cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
+  cublasSetStream(handle, THCState_getCurrentStream(state));
+  THCublasCheck(cublasDgemmStridedBatched(handle,
+                                   opa, opb, (int)m, (int)n, (int)k,
+                                   &alpha, a, (int)lda, strideA, b, (int)ldb, strideB, &beta, c, (int)ldc, strideC, 
+                                   (int)batchCount));
+}
+#endif
 
 /* Inverse */
 void THCudaBlas_Sgetrf(THCState *state, int n, float **a, int lda, int *pivot, int *info, int batchSize) {

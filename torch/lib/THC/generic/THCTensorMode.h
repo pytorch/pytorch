@@ -8,6 +8,7 @@ THC_API void THCTensor_(mode)(THCState *state,
                               THCTensor *values,
                               THCudaLongTensor *indices,
                               THCTensor *input,
-                              int dimension);
+                              int dimension,
+                              int keepdim);
 
 #endif // THC_GENERIC_FILE

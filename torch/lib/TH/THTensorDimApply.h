@@ -14,19 +14,38 @@
   int TH_TENSOR_DIM_APPLY_i; \
 \
   if( (DIMENSION < 0) || (DIMENSION >= TENSOR1->nDimension) ) \
-    THError("invalid dimension"); \
-  if( TENSOR1->nDimension != TENSOR2->nDimension ) \
-    THError("inconsistent tensor sizes"); \
-  if( TENSOR1->nDimension != TENSOR3->nDimension ) \
-    THError("inconsistent tensor sizes"); \
+    THError("invalid dimension %d (expected to be 0 <= dim < %d)", DIMENSION, TENSOR1->nDimension); \
+  int same_dims = 1;                                                    \
+  if( TENSOR1->nDimension != TENSOR2->nDimension ) {                    \
+    same_dims = 0;                                                      \
+  } \
+  if( TENSOR1->nDimension != TENSOR3->nDimension ) { \
+    same_dims = 0;                                   \
+  } \
+  if (same_dims == 0) { \
+    THDescBuff T1buff = _THSizeDesc(TENSOR1->size, TENSOR1->nDimension); \
+    THDescBuff T2buff = _THSizeDesc(TENSOR2->size, TENSOR2->nDimension); \
+    THDescBuff T3buff = _THSizeDesc(TENSOR3->size, TENSOR3->nDimension); \
+    THError("inconsistent tensor size, expected %s %s, %s %s and %s %s to have the same " \
+            "number of dimensions", #TENSOR1, T1buff.str, #TENSOR2, T2buff.str, #TENSOR3, T3buff.str); \
+  }                                                                     \
+  int shape_check_flag = 0;                                             \
   for(TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < TENSOR1->nDimension; TH_TENSOR_DIM_APPLY_i++) \
   { \
     if(TH_TENSOR_DIM_APPLY_i == DIMENSION) \
       continue; \
     if(TENSOR1->size[TH_TENSOR_DIM_APPLY_i] != TENSOR2->size[TH_TENSOR_DIM_APPLY_i]) \
-      THError("inconsistent tensor sizes"); \
+      shape_check_flag = 1;                                             \
     if(TENSOR1->size[TH_TENSOR_DIM_APPLY_i] != TENSOR3->size[TH_TENSOR_DIM_APPLY_i]) \
-      THError("inconsistent tensor sizes"); \
+      shape_check_flag = 1;                                             \
+  } \
+    \
+  if (shape_check_flag == 1) { \
+    THDescBuff T1buff = _THSizeDesc(TENSOR1->size, TENSOR1->nDimension); \
+    THDescBuff T2buff = _THSizeDesc(TENSOR2->size, TENSOR2->nDimension); \
+    THDescBuff T3buff = _THSizeDesc(TENSOR3->size, TENSOR3->nDimension); \
+    THError("Expected %s %s, %s %s and %s %s to have the same size in dimension %d", \
+            #TENSOR1, T1buff.str, #TENSOR2, T2buff.str, #TENSOR3, T3buff.str, DIMENSION); \
   } \
 \
   TH_TENSOR_DIM_APPLY_counter = (long*)THAlloc(sizeof(long)*(TENSOR1->nDimension)); \
@@ -119,15 +138,24 @@
   int TH_TENSOR_DIM_APPLY_i; \
 \
   if( (DIMENSION < 0) || (DIMENSION >= TENSOR1->nDimension) ) \
-    THError("invalid dimension"); \
-  if( TENSOR1->nDimension != TENSOR2->nDimension ) \
-    THError("inconsistent tensor sizes"); \
+    THError("invalid dimension %d (expected to be 0 <= dim < %d)", DIMENSION, TENSOR1->nDimension); \
+  if( TENSOR1->nDimension != TENSOR2->nDimension ) {                    \
+    THDescBuff T1buff = _THSizeDesc(TENSOR1->size, TENSOR1->nDimension); \
+    THDescBuff T2buff = _THSizeDesc(TENSOR2->size, TENSOR2->nDimension); \
+    THError("inconsistent tensor size, expected %s %s and %s %s to have the same " \
+            "number of dimensions", #TENSOR1, T1buff.str, #TENSOR2, T2buff.str);        \
+  }                                                                     \
+  int shape_check_flag = 0;                                             \
   for(TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < TENSOR1->nDimension; TH_TENSOR_DIM_APPLY_i++) \
   { \
     if(TH_TENSOR_DIM_APPLY_i == DIMENSION) \
       continue; \
-    if(TENSOR1->size[TH_TENSOR_DIM_APPLY_i] != TENSOR2->size[TH_TENSOR_DIM_APPLY_i]) \
-      THError("inconsistent tensor sizes"); \
+    if(TENSOR1->size[TH_TENSOR_DIM_APPLY_i] != TENSOR2->size[TH_TENSOR_DIM_APPLY_i]) { \
+      THDescBuff T1buff = _THSizeDesc(TENSOR1->size, TENSOR1->nDimension); \
+      THDescBuff T2buff = _THSizeDesc(TENSOR2->size, TENSOR2->nDimension); \
+      THError("Expected %s %s and %s %s to have the same size in dimension %d", \
+              #TENSOR1, T1buff.str, #TENSOR2, T2buff.str, DIMENSION);   \
+    }                                                                   \
   } \
 \
   TH_TENSOR_DIM_APPLY_counter = (long*)THAlloc(sizeof(long)*(TENSOR1->nDimension)); \

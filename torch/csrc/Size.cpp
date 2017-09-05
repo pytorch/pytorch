@@ -1,6 +1,7 @@
 #include "Size.h"
 
 #include <string>
+#include "torch/csrc/utils/python_strings.h"
 #include "THP.h"
 
 PyObject* THPSizeClass = NULL;
@@ -24,7 +25,7 @@ PyObject * THPSize_New(int dim, long *sizes)
 
 static PyObject * THPSize_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
-  THPObjectPtr self = PyTuple_Type.tp_new(type, args, kwargs);
+  THPObjectPtr self(PyTuple_Type.tp_new(type, args, kwargs));
   if (self) {
     for (Py_ssize_t i = 0; i < PyTuple_Size(self); ++i) {
       PyObject *item = PyTuple_GET_ITEM(self.get(), i);
@@ -47,11 +48,7 @@ static PyObject * THPSize_repr(THPSize *self)
     repr += std::to_string(PyLong_AsLong(PyTuple_GET_ITEM(self, i)));
   }
   repr += "])";
-#if PY_MAJOR_VERSION == 2
-  return PyString_FromString(repr.c_str());
-#else
-  return PyUnicode_FromString(repr.c_str());
-#endif
+  return THPUtils_packString(repr);
 }
 
 extern PyTypeObject THPSizeType;
@@ -59,13 +56,12 @@ extern PyTypeObject THPSizeType;
 template<typename FnType, FnType fn, typename ...Args>
 static PyObject* wrap_tuple_fn(Args ... args)
 {
-  PyObject *result = (*fn)(std::forward<Args>(args)...);
+  THPObjectPtr result((*fn)(std::forward<Args>(args)...));
   if (!result) return NULL;
-  if (PyTuple_Check(result)) {
-    return PyObject_CallFunctionObjArgs((PyObject*)&THPSizeType, result, NULL);
+  if (PyTuple_Check(result.get())) {
+    return PyObject_CallFunctionObjArgs((PyObject*)&THPSizeType, result.get(), NULL);
   }
-  Py_INCREF(result);
-  return result;
+  return result.release();
 }
 
 static auto sq_concat = PyTuple_Type.tp_as_sequence->sq_concat;

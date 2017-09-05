@@ -96,7 +96,7 @@ class CMul(Module):
         self._gradWeight = self.gradWeight.view(1, -1)
 
         torch.mul(self._input, self._gradOutput, out=self._repeat)
-        torch.sum(self._repeat, 0, out=self._sum)
+        torch.sum(self._repeat, 0, True, out=self._sum)
         self._gradWeight.add_(scale, self._sum)
 
     def type(self, type=None, tensorCache=None):

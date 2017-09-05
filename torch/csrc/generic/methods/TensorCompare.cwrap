@@ -1,5 +1,7 @@
 [[
   name: lt
+  variants:
+    - method
   return: argument 0
   options:
     - cname: ltValue
@@ -12,7 +14,8 @@
       arguments:
         - arg: THBoolTensor* result
           output: True
-        - THTensor* self
+        - arg: THTensor* self
+          broadcast: other fallback
         - THTensor* other
 ]]
 
@@ -28,13 +31,15 @@
     - cname: ltTensorT
       arguments:
         - THTensor* self
-        - THTensor* self
-        - THTensor* other
+        - arg: THTensor* self
+          broadcast: other inplace fallback
+        - arg: THTensor* other
 ]]
 
 [[
   name: lt
-  only_stateless: True
+  variants:
+    - function
   return: argument 0
   options:
     - cname: ltValue
@@ -47,7 +52,8 @@
       arguments:
         - arg: THBoolTensor* result
           output: True
-        - THTensor* tensor
+        - arg: THTensor* tensor
+          broadcast: other fallback
         - THTensor* other
     - cname: ltValueT
       arguments:
@@ -59,13 +65,16 @@
       arguments:
         - arg: THTensor* result
           output: True
-        - THTensor* tensor
+        - arg: THTensor* tensor
+          broadcast: other fallback
         - THTensor* other
 ]]
 
 
 [[
   name: gt
+  variants:
+    - method
   return: argument 0
   options:
     - cname: gtValue
@@ -78,7 +87,8 @@
       arguments:
         - arg: THBoolTensor* result
           output: True
-        - THTensor* self
+        - arg: THTensor* self
+          broadcast: other fallback
         - THTensor* other
 ]]
 
@@ -94,13 +104,15 @@
     - cname: gtTensorT
       arguments:
         - THTensor* self
-        - THTensor* self
+        - arg: THTensor* self
+          broadcast: other inplace fallback
         - THTensor* other
 ]]
 
 [[
   name: gt
-  only_stateless: True
+  variants:
+    - function
   return: argument 0
   options:
     - cname: gtValue
@@ -113,7 +125,8 @@
       arguments:
         - arg: THBoolTensor* result
           output: True
-        - THTensor* tensor
+        - arg: THTensor* tensor
+          broadcast: other fallback
         - THTensor* other
     - cname: gtValueT
       arguments:
@@ -125,13 +138,17 @@
       arguments:
         - arg: THTensor* result
           output: True
-        - THTensor* tensor
+        - arg: THTensor* tensor
+          broadcast: other fallback
         - THTensor* other
+
 ]]
 
 
 [[
   name: le
+  variants:
+    - method
   return: argument 0
   options:
     - cname: leValue
@@ -144,7 +161,8 @@
       arguments:
         - arg: THBoolTensor* result
           output: True
-        - THTensor* self
+        - arg: THTensor* self
+          broadcast: other fallback
         - THTensor* other
 ]]
 
@@ -160,13 +178,15 @@
     - cname: leTensorT
       arguments:
         - THTensor* self
-        - THTensor* self
+        - arg: THTensor* self
+          broadcast: other inplace fallback
         - THTensor* other
 ]]
 
 [[
   name: le
-  only_stateless: True
+  variants:
+    - function
   return: argument 0
   options:
     - cname: leValue
@@ -179,7 +199,8 @@
       arguments:
         - arg: THBoolTensor* result
           output: True
-        - THTensor* tensor
+        - arg: THTensor* tensor
+          broadcast: other fallback
         - THTensor* other
     - cname: leValueT
       arguments:
@@ -191,13 +212,16 @@
       arguments:
         - arg: THTensor* result
           output: True
-        - THTensor* tensor
+        - arg: THTensor* tensor
+          broadcast: other fallback
         - THTensor* other
 ]]
 
 
 [[
   name: ge
+  variants:
+    - method
   return: argument 0
   options:
     - cname: geValue
@@ -210,7 +234,8 @@
       arguments:
         - arg: THBoolTensor* result
           output: True
-        - THTensor* self
+        - arg: THTensor* self
+          broadcast: other fallback
         - THTensor* other
 ]]
 
@@ -226,13 +251,15 @@
     - cname: geTensorT
       arguments:
         - THTensor* self
-        - THTensor* self
+        - arg: THTensor* self
+          broadcast: other inplace fallback
         - THTensor* other
 ]]
 
 [[
   name: ge
-  only_stateless: True
+  variants:
+    - function
   return: argument 0
   options:
     - cname: geValue
@@ -245,7 +272,8 @@
       arguments:
         - arg: THBoolTensor* result
           output: True
-        - THTensor* tensor
+        - arg: THTensor* tensor
+          broadcast: other fallback
         - THTensor* other
     - cname: geValueT
       arguments:
@@ -257,13 +285,16 @@
       arguments:
         - arg: THTensor* result
           output: True
-        - THTensor* tensor
+        - arg: THTensor* tensor
+          broadcast: other fallback
         - THTensor* other
 ]]
 
 
 [[
   name: eq
+  variants:
+    - method
   return: argument 0
   options:
     - cname: eqValue
@@ -276,7 +307,8 @@
       arguments:
         - arg: THBoolTensor* result
           output: True
-        - THTensor* self
+        - arg: THTensor* self
+          broadcast: other fallback
         - THTensor* other
 ]]
 
@@ -292,13 +324,15 @@
     - cname: eqTensorT
       arguments:
         - THTensor* self
-        - THTensor* self
+        - arg: THTensor* self
+          broadcast: other inplace fallback
         - THTensor* other
 ]]
 
 [[
   name: eq
-  only_stateless: True
+  variants:
+    - function
   return: argument 0
   options:
     - cname: eqValue
@@ -311,7 +345,8 @@
       arguments:
         - arg: THBoolTensor* result
           output: True
-        - THTensor* tensor
+        - arg: THTensor* tensor
+          broadcast: other fallback
         - THTensor* other
     - cname: eqValueT
       arguments:
@@ -323,13 +358,16 @@
       arguments:
         - arg: THTensor* result
           output: True
-        - THTensor* tensor
+        - arg: THTensor* tensor
+          broadcast: other fallback
         - THTensor* other
 ]]
 
 
 [[
   name: ne
+  variants:
+    - method
   return: argument 0
   options:
     - cname: neValue
@@ -342,7 +380,8 @@
       arguments:
         - arg: THBoolTensor* result
           output: True
-        - THTensor* self
+        - arg: THTensor* self
+          broadcast: other fallback
         - THTensor* other
 ]]
 
@@ -358,13 +397,15 @@
     - cname: neTensorT
       arguments:
         - THTensor* self
-        - THTensor* self
+        - arg: THTensor* self
+          broadcast: other inplace fallback
         - THTensor* other
 ]]
 
 [[
   name: ne
-  only_stateless: True
+  variants:
+    - function
   return: argument 0
   options:
     - cname: neValue
@@ -377,7 +418,8 @@
       arguments:
         - arg: THBoolTensor* result
           output: True
-        - THTensor* tensor
+        - arg: THTensor* tensor
+          broadcast: other fallback
         - THTensor* other
     - cname: neValueT
       arguments:
@@ -389,13 +431,16 @@
       arguments:
         - arg: THTensor* result
           output: True
-        - THTensor* tensor
+        - arg: THTensor* tensor
+          broadcast: other fallback
         - THTensor* other
 ]]
 
 [[
   name: min
-  with_stateless: True
+  variants:
+    - method
+    - function
   options:
     - cname: minall
       return: real
@@ -406,7 +451,8 @@
       arguments:
       - arg: THTensor* result
         output: True
-      - THTensor* self
+      - arg: THTensor* self
+        broadcast: other fallback
       - THTensor* other
     - cname: min
       return: argument 0,1
@@ -418,11 +464,26 @@
         - THTensor* self
         - arg: long dim
           wrap_dim: self
+        - bool keepdim
+    - cname: min
+      return: argument 0,1
+      before_call: maybeThrowBackCompatKeepdimWarn("min");
+      arguments:
+        - arg: THTensor* min
+          output: True
+        - arg: THIndexTensor* min_indices
+          output: True
+        - THTensor* self
+        - arg: long dim
+          wrap_dim: self
+        - CONSTANT false
 ]]
 
 [[
   name: max
-  with_stateless: True
+  variants:
+    - method
+    - function
   options:
     - cname: maxall
       return: real
@@ -433,7 +494,8 @@
       arguments:
       - arg: THTensor* result
         output: True
-      - THTensor* self
+      - arg: THTensor* self
+        broadcast: other fallback
       - THTensor* other
     - cname: max
       return: argument 0,1
@@ -445,12 +507,28 @@
         - THTensor* self
         - arg: long dim
           wrap_dim: self
+        - bool keepdim
+    - cname: max
+      return: argument 0,1
+      before_call: maybeThrowBackCompatKeepdimWarn("max");
+      arguments:
+        - arg: THTensor* max
+          output: True
+        - arg: THIndexTensor* max_indices
+          output: True
+        - THTensor* self
+        - arg: long dim
+          wrap_dim: self
+        - CONSTANT false
 ]]
 
 [[
   name: kthvalue
-  defined_if: "!IS_CUDA"
-  with_stateless: True
+  backends:
+    - CPU
+  variants:
+    - method
+    - function
   return: argument 0,1
   options:
     - before_call: long __last_dim = THTensor_(nDimension)(LIBRARY_STATE ((THPTensor*)$arg2)->cdata)-1;
@@ -462,6 +540,19 @@
         - THTensor* self
         - long k
         - CONSTANT __last_dim
+        - bool keepdim
+    - before_call: |
+        long __last_dim = THTensor_(nDimension)(LIBRARY_STATE ((THPTensor*)$arg2)->cdata)-1;
+        maybeThrowBackCompatKeepdimWarn("kthvalue");
+      arguments:
+        - arg: THTensor* values
+          output: True
+        - arg: THIndexTensor* indices
+          output: True
+        - THTensor* self
+        - long k
+        - CONSTANT __last_dim
+        - CONSTANT false
     - arguments:
         - arg: THTensor* values
           output: True
@@ -471,11 +562,25 @@
         - long k
         - arg: long dim
           wrap_dim: self
+        - bool keepdim
+    - before_call: maybeThrowBackCompatKeepdimWarn("kthvalue");
+      arguments:
+        - arg: THTensor* values
+          output: True
+        - arg: THIndexTensor* indices
+          output: True
+        - THTensor* self
+        - long k
+        - arg: long dim
+          wrap_dim: self
+        - CONSTANT false
 ]]
 
 [[
   name: mode
-  with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0,1
   options:
     - before_call: long __last_dim = THTensor_(nDimension)(LIBRARY_STATE ((THPTensor*)$arg2)->cdata)-1;
@@ -486,6 +591,18 @@
           output: True
         - THTensor* self
         - CONSTANT __last_dim
+        - bool keepdim
+    - before_call: |
+        long __last_dim = THTensor_(nDimension)(LIBRARY_STATE ((THPTensor*)$arg2)->cdata)-1;
+        maybeThrowBackCompatKeepdimWarn("mode");
+      arguments:
+        - arg: THTensor* values
+          output: True
+        - arg: THIndexTensor* indices
+          output: True
+        - THTensor* self
+        - CONSTANT __last_dim
+        - CONSTANT false
     - arguments:
         - arg: THTensor* values
           output: True
@@ -494,15 +611,32 @@
         - THTensor* self
         - arg: long dim
           wrap_dim: self
+        - bool keepdim
+    - before_call: maybeThrowBackCompatKeepdimWarn("mode");
+      arguments:
+        - arg: THTensor* values
+          output: True
+        - arg: THIndexTensor* indices
+          output: True
+        - THTensor* self
+        - arg: long dim
+          wrap_dim: self
+        - CONSTANT false
 ]]
 
 [[
   name: median
-  defined_if: "!IS_CUDA"
-  with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0,1
   options:
-    - before_call: long __last_dim = THTensor_(nDimension)(LIBRARY_STATE ((THPTensor*)$arg2)->cdata)-1;
+    - cname: medianall
+      return: real
+      arguments:
+        - THTensor* self
+    - cname: median
+      before_call: long __last_dim = THTensor_(nDimension)(LIBRARY_STATE ((THPTensor*)$arg2)->cdata)-1;
       arguments:
         - arg: THTensor* values
           output: True
@@ -510,6 +644,17 @@
           output: True
         - THTensor* self
         - CONSTANT __last_dim
+        - bool keepdim
+    - before_call: maybeThrowBackCompatKeepdimWarn("median");
+      arguments:
+        - arg: THTensor* values
+          output: True
+        - arg: THIndexTensor* indices
+          output: True
+        - THTensor* self
+        - arg: long dim
+          wrap_dim: self
+        - CONSTANT false
     - arguments:
         - arg: THTensor* values
           output: True
@@ -518,11 +663,14 @@
         - THTensor* self
         - arg: long dim
           wrap_dim: self
+        - bool keepdim
 ]]
 
 [[
   name: sort
-  with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0,1
   options:
     - before_call: long __last_dim = THTensor_(nDimension)(LIBRARY_STATE ((THPTensor*)$arg2)->cdata)-1;
@@ -533,7 +681,9 @@
           output: True
         - THTensor* self
         - CONSTANT __last_dim
-        - CONSTANT false
+        - arg: bool descending
+          default: "false"
+          kwarg_only: True
     - arguments:
         - arg: THTensor* values
           output: True
@@ -542,22 +692,15 @@
         - THTensor* self
         - arg: long dim
           wrap_dim: self
-        - CONSTANT false
-    - arguments:
-        - arg: THTensor* values
-          output: True
-        - arg: THIndexTensor* indices
-          output: True
-        - THTensor* self
-        - arg: long dim
-          wrap_dim: self
-        - bool descending
+        - arg: bool descending
+          default: "false"
 ]]
 
 [[
   name: topk
-  defined_if: CUDA_FLOAT || !IS_CUDA
-  with_stateless: True
+  variants:
+    - method
+    - function
   return: argument 0,1
   options:
     - before_call: long __last_dim = THTensor_(nDimension)(LIBRARY_STATE ((THPTensor*)$arg2)->cdata)-1;
@@ -588,7 +731,11 @@
 
 [[
   name: all
-  defined_if: defined(TH_REAL_IS_BYTE) || defined(THC_REAL_IS_BYTE)
+  types:
+    - Byte
+  backends:
+    - CPU
+    - CUDA
   cname: logicalall
   return: bool
   arguments:
@@ -597,7 +744,11 @@
 
 [[
   name: any
-  defined_if: defined(TH_REAL_IS_BYTE) || defined(THC_REAL_IS_BYTE)
+  types:
+    - Byte
+  backends:
+    - CPU
+    - CUDA
   cname: logicalany
   return: bool
   arguments:

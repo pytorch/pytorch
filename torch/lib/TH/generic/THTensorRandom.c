@@ -23,6 +23,16 @@ void THTensor_(random)(THTensor *self, THGenerator *_generator)
 #endif
 }
 
+void THTensor_(clampedRandom)(THTensor *self, THGenerator *_generator, long min, long max) {
+  THArgCheck(max > min, 2, "max must be greater than min");
+  TH_TENSOR_APPLY(real, self, *self_data = (real)((THRandom_random(_generator) % (max - min)) + min);)
+}
+
+void THTensor_(cappedRandom)(THTensor *self, THGenerator *_generator, long max) {
+  THArgCheck(max > 0, 1, "max must be positive");
+  THTensor_(clampedRandom)(self, _generator, 0, max);
+}
+
 void THTensor_(geometric)(THTensor *self, THGenerator *_generator, double p)
 {
   TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_geometric(_generator, p););
@@ -55,6 +65,29 @@ void THTensor_(normal)(THTensor *self, THGenerator *_generator, double mean, dou
   TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_normal(_generator, mean, stdv););
 }
 
+void THTensor_(normal_means)(THTensor *self, THGenerator *gen, THTensor *means, double stddev)
+{
+  THTensor_(resizeAs)(self, means);
+  THTensor_(normal)(self, gen, 0, stddev);
+  THTensor_(cadd)(self, self, 1, means);
+}
+
+void THTensor_(normal_stddevs)(THTensor *self, THGenerator *gen, double mean, THTensor *stddevs)
+{
+  THTensor_(resizeAs)(self, stddevs);
+  THTensor_(normal)(self, gen, 0, 1);
+  THTensor_(cmul)(self, self, stddevs);
+  THTensor_(add)(self, self, mean);
+}
+
+void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, THTensor *means, THTensor *stddevs)
+{
+  THTensor_(resizeAs)(self, means);
+  THTensor_(normal)(self, gen, 0, 1);
+  THTensor_(cmul)(self, self, stddevs);
+  THTensor_(cadd)(self, self, 1, means);
+}
+
 void THTensor_(exponential)(THTensor *self, THGenerator *_generator, double lambda)
 {
   TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_exponential(_generator, lambda););
@@ -70,6 +103,116 @@ void THTensor_(logNormal)(THTensor *self, THGenerator *_generator, double mean, 
   TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_logNormal(_generator, mean, stdv););
 }
 
+
+void THTensor_(multinomialAliasSetup)(THTensor *probs, THLongTensor *J, THTensor *q)
+{
+  long inputsize = THTensor_(nElement)(probs);
+  long i = 0;
+  THLongTensor *smaller = THLongTensor_newWithSize1d(inputsize);
+  THLongTensor *larger = THLongTensor_newWithSize1d(inputsize);
+  long small_c = 0;
+  long large_c = 0;
+  THLongTensor_resize1d(J, inputsize);
+  THTensor_(resize1d)(q, inputsize);
+  real *q_data = THTensor_(data)(q);
+  long *J_data = THLongTensor_data(J);
+      
+  for(i = 0; i < inputsize; i++)
+    {
+      THTensor_fastSet1d(J, i, 0L);
+      real val = THTensor_fastGet1d(probs, i);
+      THTensor_fastSet1d(q, i, inputsize*val);
+      
+      if (inputsize * val < 1.0)
+        {
+          THTensor_fastSet1d(smaller, small_c, i);
+          small_c += 1;
+        }
+      else
+        {
+          THTensor_fastSet1d(larger, large_c, i);
+          large_c += 1;
+        }
+    }
+
+  // Loop through and create little binary mixtures that
+  // appropriately allocate the larger outcomes over the
+  // overall uniform mixture.
+  long large, small;
+  while(small_c > 0 && large_c > 0)
+    {
+      large = THTensor_fastGet1d(larger, large_c-1);
+      small = THTensor_fastGet1d(smaller, small_c-1);
+      
+      THTensor_fastSet1d(J, small, large);
+      q_data[large * q->stride[0]] -= 1.0 - THTensor_fastGet1d(q, small);
+
+      if(q_data[large] < 1.0)
+        {
+          THTensor_fastSet1d(smaller, small_c-1, large);
+          large_c -= 1;
+        }
+      else
+        {
+          THTensor_fastSet1d(larger, large_c-1, large);
+          small_c -= 1;
+        }
+    }
+
+  real q_min = THTensor_fastGet1d(q, inputsize-1);
+  real q_max = q_min;
+  real q_temp;
+  for(i=0; i < inputsize; i++)
+    {
+      q_temp = THTensor_fastGet1d(q, i);
+      if(q_temp < q_min)
+        q_min = q_temp;
+      else if(q_temp > q_max)
+        q_max = q_temp;
+    }
+  THArgCheckWithCleanup((q_min > 0),
+                        THCleanup(THLongTensor_free(smaller); THLongTensor_free(larger);), 2,
+                        "q_min is less than 0");
+  
+  if(q_max > 1)
+    {
+      for(i=0; i < inputsize; i++)
+        {
+          q_data[i*q->stride[0]] /= q_max;
+        }
+    }
+  for(i=0; i<inputsize; i++)
+    {
+      // sometimes an large index isn't added to J. 
+      // fix it by making the probability 1 so that J isn't indexed.
+      if(J_data[i] <= 0)
+        q_data[i] = 1.0;
+    }
+  THLongTensor_free(smaller);
+  THLongTensor_free(larger);
+}
+void THTensor_(multinomialAliasDraw)(THLongTensor *self, THGenerator *_generator, THLongTensor *J, THTensor *q)
+{
+  long K = THLongTensor_nElement(J);
+  long output_nelem = THLongTensor_nElement(self);
+  
+  int i = 0, _mask=0;
+  real _q;
+  long rand_ind, sample_idx, J_sample, kk_sample;
+  for(i=0; i< output_nelem; i++)
+    {
+      rand_ind = (long)THRandom_uniform(_generator, 0, K) ;
+      _q = THTensor_fastGet1d(q, rand_ind);
+
+      _mask = THRandom_bernoulli(_generator, _q);
+      
+      J_sample = THTensor_fastGet1d(J, rand_ind);
+
+      sample_idx = J_sample*(1 -_mask) + (rand_ind+1L) * _mask;
+
+      THTensor_fastSet1d(self, i, sample_idx-1L);
+    }
+}
 void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTensor *prob_dist, int n_sample, int with_replacement)
 {
   int start_dim = THTensor_(nDimension)(prob_dist);

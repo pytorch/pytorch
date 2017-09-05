@@ -25,3 +25,10 @@ Streams and events
 
 .. autoclass:: Event
    :members:
+
+NVIDIA Tools Extension (NVTX)
+-----------------------------
+
+.. autofunction:: torch.cuda.nvtx.mark
+.. autofunction:: torch.cuda.nvtx.range_push
+.. autofunction:: torch.cuda.nvtx.range_pop
