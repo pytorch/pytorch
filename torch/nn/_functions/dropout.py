@@ -11,7 +11,7 @@ class Dropout(InplaceFunction):
         return input.new().resize_as_(input)
 
     @staticmethod
-    def primspec(g, input, p=0.5, train=False, inplace=False):
+    def symbolic(g, input, p=0.5, train=False, inplace=False):
         if inplace:
             return None
         n = g.appendNode(g.create("Dropout", [input])
@@ -58,7 +58,7 @@ class Dropout(InplaceFunction):
 class FeatureDropout(Dropout):
 
     @staticmethod
-    def primspec(input, p=0.5, train=False, inplace=False):
+    def symbolic(input, p=0.5, train=False, inplace=False):
         return None
 
     @staticmethod

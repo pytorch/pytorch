@@ -6,7 +6,7 @@
 
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/autograd/primspec.h"
+#include "torch/csrc/autograd/symbolic.h"
 
 namespace torch { namespace autograd {
 
@@ -19,12 +19,12 @@ struct BatchNormParams {
   bool cudnn_enabled;
 };
 
-struct BatchNormForward : public ForwardFunction<>, public BatchNormParams, public HasPrimSpec {
+struct BatchNormForward : public ForwardFunction<>, public BatchNormParams, public HasSymbolic {
   BatchNormForward(BatchNormParams params)
     : BatchNormParams(std::move(params)) {}
 
   virtual variable_list apply(const variable_list& inputs) override;
-  virtual jit::node_list primspec(PrimSpecContext* ctx, jit::node_list inputs) override;
+  virtual jit::node_list symbolic(SymbolicContext* ctx, jit::node_list inputs) override;
 };
 
 struct BatchNormBackward : public Function, public BatchNormParams {

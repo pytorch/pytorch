@@ -8,7 +8,7 @@
 
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/autograd/primspec.h"
+#include "torch/csrc/autograd/symbolic.h"
 
 #ifdef WITH_CUDNN
 #include "torch/csrc/cudnn/Conv.h"
@@ -38,12 +38,12 @@ struct ConvParams {
   bool use_cudnn(const at::Tensor& input) const;
 };
 
-struct ConvForward : public ForwardFunction<>, public ConvParams, public HasPrimSpec {
+struct ConvForward : public ForwardFunction<>, public ConvParams, public HasSymbolic {
   explicit ConvForward(ConvParams params) : ConvParams(std::move(params)) {}
 
   virtual std::string name() override;
   virtual variable_list apply(const variable_list& inputs) override;
-  virtual jit::node_list primspec(PrimSpecContext* ctx, jit::node_list inputs) override;
+  virtual jit::node_list symbolic(SymbolicContext* ctx, jit::node_list inputs) override;
 
   std::vector<int64_t> output_size(at::Tensor& input, at::Tensor& weight);
 };

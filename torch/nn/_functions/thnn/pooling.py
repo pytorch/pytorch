@@ -9,7 +9,7 @@ from torch.nn.modules.utils import _single, _pair, _triple
 class MaxPool1d(Function):
 
     @staticmethod
-    def primspec(g, input, kernel_size, stride=None, padding=0, dilation=1,
+    def symbolic(g, input, kernel_size, stride=None, padding=0, dilation=1,
                  ceil_mode=False):
         if ceil_mode:
             raise RuntimeError("ceil_mode not supported in MaxPool1d")
@@ -94,7 +94,7 @@ class MaxPool1dBackward(Function):
 class MaxPool2d(Function):
 
     @staticmethod
-    def primspec(g, input, kernel_size, stride=None, padding=0, dilation=1,
+    def symbolic(g, input, kernel_size, stride=None, padding=0, dilation=1,
                  ceil_mode=False):
         if ceil_mode:
             raise RuntimeError("ceil_mode not supported in MaxPool2d")
@@ -397,7 +397,7 @@ class FractionalMaxPool2dBackward(Function):
 class AvgPool2d(Function):
 
     @staticmethod
-    def primspec(g, input, kernel_size, stride=None, padding=0,
+    def symbolic(g, input, kernel_size, stride=None, padding=0,
                  ceil_mode=False, count_include_pad=True):
         if ceil_mode:
             raise RuntimeError("ceil_mode not supported in AvgPool2d")

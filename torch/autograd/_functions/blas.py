@@ -16,7 +16,7 @@ def _get_output(ctx, arg, inplace=False):
 class Addmm(InplaceFunction):
 
     @staticmethod
-    def primspec(g, add_matrix, matrix1, matrix2, alpha=1, beta=1, inplace=False):
+    def symbolic(g, add_matrix, matrix1, matrix2, alpha=1, beta=1, inplace=False):
         # TODO: manually insert the necessary scaling, since ONNX doesn't
         # natively support it
         if alpha != 1 or beta != 1:

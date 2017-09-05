@@ -6,7 +6,7 @@
 namespace torch {
 namespace autograd {
 
-jit::node_list BatchNormForward::primspec(PrimSpecContext* ctx, jit::node_list inputs) {
+jit::node_list BatchNormForward::symbolic(SymbolicContext* ctx, jit::node_list inputs) {
   auto & g = ctx->graph;
   // X, Scale, Bias
   auto bn = g->appendNode(g->create(jit::kSpatialBN,{inputs.at(0),inputs.at(1),inputs.at(2)}));

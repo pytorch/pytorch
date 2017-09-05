@@ -55,7 +55,7 @@ class Log1p(Function):
 class Tanh(InplaceFunction):
 
     @staticmethod
-    def primspec(g, i, inplace=False):
+    def symbolic(g, i, inplace=False):
         # TODO: [Export inplace]
         return g.op("Tanh", i)
 
@@ -85,7 +85,7 @@ class Tanh(InplaceFunction):
 class Sigmoid(InplaceFunction):
 
     @staticmethod
-    def primspec(g, i, inplace=False):
+    def symbolic(g, i, inplace=False):
         return g.op("Sigmoid", i)
 
     @staticmethod
