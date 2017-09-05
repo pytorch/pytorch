@@ -1348,7 +1348,6 @@ class TestNN(NNTestCase):
         inputs = (i1, Variable(i2.data.new()))
         expected_outputs = (expected1, expected2.new())
 
-
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_multiple_input(self):
         class TestModule(nn.Module):
@@ -1433,18 +1432,18 @@ class TestNN(NNTestCase):
         expected_grads = []
         for param in l.parameters():
             expected_grads.append(param.grad.clone())
-        dev_ids_list = [ (0,1), (1,0)]
+        dev_ids_list = [(0, 1), (1, 0)]
         for dev_id in dev_ids_list:
-           with torch.cuda.device(dev_id[0]):
-               l.cuda()
-               l.zero_grad()
-               out = dp.data_parallel(l, i, dev_id)
-               loss = out.sum()
-               loss.backward()
-               self.assertEqual(out.get_device(), dev_id[0])
-               self.assertEqual(out.data, expected_out.data)
-               for expected, param in zip(expected_grads, l.parameters()):
-                   self.assertEqual(param.grad.data, expected.data)
+            with torch.cuda.device(dev_id[0]):
+                l.cuda()
+                l.zero_grad()
+                out = dp.data_parallel(l, i, dev_id)
+                loss = out.sum()
+                loss.backward()
+                self.assertEqual(out.get_device(), dev_id[0])
+                self.assertEqual(out.data, expected_out.data)
+                for expected, param in zip(expected_grads, l.parameters()):
+                    self.assertEqual(param.grad.data, expected.data)
 
         # Check for None device_ids
         l = l.cuda()
