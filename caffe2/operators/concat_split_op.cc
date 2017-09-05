@@ -10,7 +10,7 @@ OPERATOR_SCHEMA(Split)
     .Input(1, "split", "Optional list of output lengths (see also arg 'split')")
     .Arg("axis", "Which axis to split on")
     .Arg("split", "length of each output")
-    .Arg("order", "Either NHWC or NCWH, will split on C axis")
+    .Arg("order", "Either NHWC or NCWH, will split on C axis, defaults to NCHW")
     .SetDoc(R"DOC(Split a tensor into a list of tensors, along the specified
     'axis'. The lengths of the split can be specified using argument 'axis' or
     optional second input blob to the operator. Otherwise, the tensor is split
@@ -20,7 +20,7 @@ OPERATOR_SCHEMA(Concat)
     .NumInputs(1, INT_MAX)
     .NumOutputs(2)
     .Arg("axis", "Which axis to concat on")
-    .Arg("order", "Either NHWC or HCWH, will concat on C axis")
+    .Arg("order", "Either NHWC or HCWH, will concat on C axis, defaults to NCHW")
     .Arg(
         "add_axis",
         "Pass 1 to add the axis specified in arg 'axis' to all "
@@ -31,7 +31,7 @@ OPERATOR_SCHEMA(Concat)
       const int axis = helper.HasArgument("axis")
           ? helper.GetSingleArgument<int>("axis", -1)
           : GetDimFromOrderString(
-                helper.GetSingleArgument<string>("order", ""));
+                helper.GetSingleArgument<string>("order", "NCHW"));
       bool add_axis = helper.GetSingleArgument<int>("add_axis", 0) != 0;
       CAFFE_ENFORCE_GT(in.size(), 0);
       vector<int> split_shape(1, in.size());
