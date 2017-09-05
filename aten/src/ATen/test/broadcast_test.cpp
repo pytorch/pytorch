@@ -90,13 +90,6 @@ int main() {
     bScalar.get()->maybeScalar(true);
     assert((a + bScalar).equal(a + bScalar.expand(a.sizes())));
 
-    // shouldn't be able to "expand" to a scalar_type
-    try {
-      auto a = T.ones({1});
-      bScalar.add_(a);
-      assert(false);
-    } catch(std::runtime_error &e) {}
-
     // error: would have to expand inplace arg
     try {
       auto a = T.randn({1, 5});
@@ -120,13 +113,6 @@ int main() {
     auto bScalar = T.ones({1});
     bScalar.get()->maybeScalar(true);
     assert(a.addcmul_(bScalar, c).equal(aClone.addcmul_(bScalar.expand(a.sizes()), c.expand(a.sizes()))));
-
-    // shouldn't be able to "expand" to a scalar_type
-    try {
-      auto a = T.ones({1});
-      bScalar.addcmul_(a, a);
-      assert(false);
-    } catch(std::runtime_error &e) {}
 
     // error: would have to expand inplace arg
     try {
