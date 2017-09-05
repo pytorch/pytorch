@@ -8,7 +8,7 @@ from common import TestCase, run_tests
 import io
 
 try:
-    import onnx
+    import toffee as onnx
     import google.protobuf.text_format
     HAS_TOFFEE = True
 except ImportError:
