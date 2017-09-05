@@ -34,7 +34,10 @@ def export(model, args, f, export_params=True, kwargs=None, verbose=False):
             untrained model.
         kwargs (dict, optional): keyword inputs to the model.
     """
+    _export(model, args, f, export_params, kwargs, verbose)
 
+
+def _export(model, args, f, export_params=True, kwargs=None, verbose=False):
     # Special case for common case of passing a single Variable
     if isinstance(args, torch.autograd.Variable):
         args = (args, )
