@@ -255,9 +255,9 @@ class TestAutograd(TestCase):
     def test_grad_badcalls(self):
         x = Variable(torch.ones(1))
         y = x ** 2
-        with self.assertRaisesRegex(RuntimeError, 'unreachable'):
+        with self.assertRaisesRegex(RuntimeError, 'does not require grad'):
             torch.autograd.grad(x, y)
-        with self.assertRaisesRegex(RuntimeError, 'no graph nodes that require computing gradients'):
+        with self.assertRaisesRegex(RuntimeError, 'does not require grad'):
             torch.autograd.grad(y, x)
 
         x = Variable(torch.ones(1), requires_grad=True)
