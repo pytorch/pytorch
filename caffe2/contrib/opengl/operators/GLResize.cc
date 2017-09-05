@@ -11,89 +11,48 @@
 
 class GLResizeNearest : public GLFilter {
  public:
-  static constexpr int MaxBatchSize = 4;
+   binding* inputData;
+   binding* outputSize;
+   binding* scale_reverse;
 
-  binding* inputData[MaxBatchSize];
-  binding* inputSize;
-  binding* outputSize;
-  binding* scale_reverse;
+   GLResizeNearest()
+       : GLFilter("GLResizeNearest",
+                  vertex_shader,
+                  fragment_shader,
+                  std::vector<binding*>({BINDING(outputSize), BINDING(scale_reverse), BINDING(inputData)}),
+                  {/* no uniform blocks*/},
+                  {/* no attributes */},
+                  {/* replacements */}) {}
 
-  const int batch_size;
+   template <typename T>
+   void resize(const GLImageVector<T>& input_images,
+               const GLImageVector<T>& output_images,
+               float width_scale_rev,
+               float height_scale_rev);
 
-  const std::vector<binding*> input_bindings(int batch_size) {
-    std::vector<binding*> bindings(
-        {BINDING(inputSize), BINDING(outputSize), BINDING(scale_reverse)});
-    for (int i = 0; i < batch_size; i++) {
-      bindings.push_back(inputData[i] = new binding{"inputData[" + caffe2::to_string(i) + "]"});
-    }
-    return bindings;
-  }
-
-  GLResizeNearest(int _batch_size = 1)
-      : GLFilter("GLResizeNearest",
-                 vertex_shader,
-                 fragment_shader,
-                 input_bindings(_batch_size),
-                 {/* no uniform blocks*/},
-                 {/* no attributes */},
-                 {{"BATCH_SIZE", caffe2::to_string(_batch_size)}}),
-        batch_size(_batch_size) {}
-
-  template <typename T>
-  void resize(const GLImageVector<T>& input_images,
-              const GLImageVector<T>& output_images,
-              float width_scale_rev,
-              float height_scale_rev);
-
-  static const char* fragment_shader;
+   static const char* fragment_shader;
 };
 
 // MARK: GLSL
 
 const char* GLResizeNearest::fragment_shader = R"GLSL(#version 300 es
 
-#define BATCH_SIZE    $(BATCH_SIZE)
-
 precision mediump float;
 precision mediump int;
 
 in highp vec2 v_texCoord;
 
-uniform ivec2 inputSize;
 uniform ivec2 outputSize;
 uniform highp vec2 scale_reverse;
 
-TEXTURE_INPUT(inputData[BATCH_SIZE]);
-
-TEXTURE_OUTPUT(0, outputData0);
-#if BATCH_SIZE > 1
-TEXTURE_OUTPUT(1, outputData1);
-#if BATCH_SIZE > 2
-TEXTURE_OUTPUT(2, outputData2);
-#if BATCH_SIZE > 3
-TEXTURE_OUTPUT(3, outputData3);
-#endif
-#endif
-#endif
+TEXTURE_INPUT(inputData);
+TEXTURE_OUTPUT(0, outputData);
 
 void main() {
   // it clamps to the edge by default
   ivec2 texelCoord = ivec2(v_texCoord * vec2(outputSize) * scale_reverse);
-
-  vec4 v0 = TEXTURE_LOAD(inputData[0], texelCoord);
-  outputData0 = TEXTURE_STORE(v0);
-#if BATCH_SIZE > 1
-  vec4 v1 = TEXTURE_LOAD(inputData[1], texelCoord);
-  outputData1 = TEXTURE_STORE(v1);
-#if BATCH_SIZE > 2
-  vec4 v2 = TEXTURE_LOAD(inputData[2], texelCoord);
-  outputData2 = TEXTURE_STORE(v2);
-#if BATCH_SIZE > 3
-  vec4 v3 = TEXTURE_LOAD(inputData[3], texelCoord);
-  outputData3 = TEXTURE_STORE(v3);
-#endif
-#endif
-#endif
+  vec4 value = TEXTURE_LOAD(inputData, texelCoord);
+  outputData = TEXTURE_STORE(value);
 }
 )GLSL";
 
@@ -108,21 +67,17 @@ void GLResizeNearest::resize(const GLImageVector<T>& input_images,
     int input_slices = input_image->slices;
     int output_slices = output_image->slices;
 
-    for (int is = 0; is < input_slices; is += batch_size) {
-      std::vector<texture_attachment> input_attachments;
-      for (int ib = 0; ib < batch_size; ib++) {
-        input_attachments.push_back({input_image->textures[is + ib], inputData[ib]});
-      }
+    for (int is = 0; is < input_slices; is++) {
+      std::vector<texture_attachment> input_attachments({{input_image->textures[is], inputData}});
 
       run(input_attachments,
-          {output_image->textures.begin() + is, output_image->textures.begin() + is + batch_size},
+          {output_image->textures.begin() + is, output_image->textures.begin() + is + 1},
           [&]() {
-            glUniform2i(inputSize->location, input_image->width, input_image->height);
-            glUniform2i(outputSize->location, output_image->width, output_image->height);
+            glUniform2i(outputSize->location, output_image->texture_width, output_image->texture_height);
             glUniform2f(scale_reverse->location, width_scale_rev, height_scale_rev);
           },
-          output_image->width,
-          output_image->height);
+          output_image->texture_width,
+          output_image->texture_height);
     }
   }
 }
@@ -153,14 +108,15 @@ class OpenGLResizeNearestOp final : public Operator<CPUContext>, ImageAllocator<
     const int output_height = input_height * height_scale_;
     const int output_channels = input_channels;
 
+    const int input_tile_x = input.tile_x(), input_tile_y = input.tile_y();
+    const int output_tile_x = input_tile_x, output_tile_y = input_tile_y;
+
     int is_last = OperatorBase::GetSingleArgument<int>("is_last", 0);
     GLImageVector<T>* output = ImageAllocator<T>::newImage(
-        num_images, output_width, output_height, output_channels, is_last);
+        num_images, output_width, output_height, output_channels, output_tile_x, output_tile_y, is_last);
 
     if (!resizeNearest_) {
-      int batch_size = OperatorBase::GetSingleArgument<int>("batch_size", 1);
-      resizeNearest_.reset(new GLResizeNearest(batch_size));
-      LOG(INFO) << "batch_size = " << batch_size;
+      resizeNearest_.reset(new GLResizeNearest());
     }
     resizeNearest_->resize(input, *output, 1.0 / width_scale_, 1.0 / height_scale_);
     Outputs()[0]->Reset(output);

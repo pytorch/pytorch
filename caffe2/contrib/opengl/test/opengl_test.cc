@@ -282,7 +282,7 @@ void testOpenGLConv(int N,
     } else {
       float* data = t->mutable_data<float>();
       for (int i = 0; i < t->size(); i++) {
-        data[i] = -1;
+        data[i] = 1;
       }
     }
 #if 0
@@ -658,7 +658,7 @@ void testOpenGLRelu(int N, int C, int H, int W, int input_tile_x, int input_tile
   checkError(ws.GetBlob("Y_cpu")->Get<TensorCPU>(), ws.GetBlob("Y_ref")->Get<TensorCPU>(), error);
 }
 
-void testOpenGLAdd(int N, int C, int H, int W, float error = 0.1) {
+void testOpenGLAdd(int N, int C, int H, int W, float error = 0.1, int input_tile_x = 1, int input_tile_y = 1) {
   LOG(INFO) << "OpenGL Add Test "
             << "C: " << C << ", H: " << H << ", W: " << W;
   Workspace ws;
@@ -682,6 +682,16 @@ void testOpenGLAdd(int N, int C, int H, int W, float error = 0.1) {
     op.set_type("CopyToOpenGL");
     op.add_input("X_cpu0");
     op.add_output("X_gl0");
+    {
+      auto& arg = *(op.add_arg());
+      arg.set_name("tile_x");
+      arg.set_i(input_tile_x);
+    }
+    {
+      auto& arg = *(op.add_arg());
+      arg.set_name("tile_y");
+      arg.set_i(input_tile_y);
+    }
   }
 
   {
@@ -689,6 +699,16 @@ void testOpenGLAdd(int N, int C, int H, int W, float error = 0.1) {
     op.set_type("CopyToOpenGL");
     op.add_input("X_cpu1");
     op.add_output("X_gl1");
+    {
+      auto& arg = *(op.add_arg());
+      arg.set_name("tile_x");
+      arg.set_i(input_tile_x);
+    }
+    {
+      auto& arg = *(op.add_arg());
+      arg.set_name("tile_y");
+      arg.set_i(input_tile_y);
+    }
   }
 
   {
@@ -733,15 +753,13 @@ void testOpenGLSub(int N, int C, int H, int W, float error = 0.1) {
     t0->Resize(N, C, H, W);
     CPUContext ctx0;
     // Too noisy.
-    math::RandGaussian<float, CPUContext>(
-        t0->size(), 0, 30, t0->mutable_data<float>(), &ctx0);
+    math::RandGaussian<float, CPUContext>(t0->size(), 0, 30, t0->mutable_data<float>(), &ctx0);
 
     auto* t1 = ws.CreateBlob("X_cpu1")->GetMutable<TensorCPU>();
     t1->Resize(N, C, H, W);
     CPUContext ctx1;
     // Too noisy.
-    math::RandGaussian<float, CPUContext>(
-        t1->size(), 0, 30, t1->mutable_data<float>(), &ctx1);
+    math::RandGaussian<float, CPUContext>(t1->size(), 0, 30, t1->mutable_data<float>(), &ctx1);
   }
 
   NetDef netdef;
@@ -916,8 +934,7 @@ void testOpenGLTanh(int N, int C, int H, int W, float error) {
     auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
     t->Resize(N, C, H, W);
     CPUContext ctx;
-    math::RandGaussian<float, CPUContext>(
-        t->size(), 0, 2, t->mutable_data<float>(), &ctx);
+    math::RandGaussian<float, CPUContext>(t->size(), 0, 2, t->mutable_data<float>(), &ctx);
   }
 
   NetDef netdef;
@@ -1535,8 +1552,15 @@ void testOpenGLPadImage(
   }
 }
 
-void testOpenGLResize(
-    int N, int C, int H, int W, int width_scale, int height_scale, int batch_size, float error) {
+void testOpenGLResize(int N,
+                      int C,
+                      int H,
+                      int W,
+                      int width_scale,
+                      int height_scale,
+                      float error,
+                      int input_tile_x = 1,
+                      int input_tile_y = 1) {
   LOG(INFO) << "OpenGLResize Test";
   {
     Workspace ws;
@@ -1553,6 +1577,16 @@ void testOpenGLResize(
       op.set_type("CopyToOpenGL");
       op.add_input("X_cpu");
       op.add_output("X_gl");
+      {
+        auto& arg = *(op.add_arg());
+        arg.set_name("tile_x");
+        arg.set_i(input_tile_x);
+      }
+      {
+        auto& arg = *(op.add_arg());
+        arg.set_name("tile_y");
+        arg.set_i(input_tile_y);
+      }
     }
 
     {
@@ -1568,11 +1602,6 @@ void testOpenGLResize(
         auto& arg = *(op.add_arg());
         arg.set_name("height_scale");
         arg.set_f(height_scale);
-      }
-      {
-        auto& arg = *(op.add_arg());
-        arg.set_name("batch_size");
-        arg.set_i(batch_size);
       }
       {
         auto& arg = *(op.add_arg());
@@ -2125,7 +2154,9 @@ int runModelBenchmarks(caffe2::NetDef& init_net,
                        std::string input_order,
                        std::string engine, // "CPU", "OPENGL", or "MPSCNN"
                        bool run_individual,
-                       bool use_texture_input) {
+                       bool use_texture_input,
+                       bool use_tiling,
+                       bool run_fusion) {
   std::unique_ptr<caffe2::Workspace> workspace(new caffe2::Workspace());
 
   // caffe2::dumpDefForOpenGL(init_net);
@@ -2138,7 +2169,7 @@ int runModelBenchmarks(caffe2::NetDef& init_net,
   if (engine == "CPU") {
     net_def.CopyFrom(predict_net);
   } else if (engine == "OPENGL") {
-    if (!caffe2::tryConvertToOpenGL(init_net, predict_net, &net_def, use_texture_input)) {
+    if (!caffe2::tryConvertToOpenGL(init_net, predict_net, &net_def, use_texture_input, use_tiling, run_fusion)) {
       CAFFE_THROW("Failed to convert to openGL. Benchmark failed to run");
       return -1;
     }
@@ -2197,19 +2228,18 @@ int runModelBenchmarks(caffe2::NetDef& init_net,
     }
     if (input_type == "float") {
       ImageAllocator<float16_t> allocator;
-      GLImageVector<float16_t>* output_image = allocator.newImage(
-          1,
-          width,
-          height,
-          channel,
-          tile_x,
-          tile_y,
+      GLImageVector<float16_t>* output_image = allocator.newImage(1,
+                                                                  width,
+                                                                  height,
+                                                                  channel,
+                                                                  tile_x,
+                                                                  tile_y,
 #if CAFFE2_IOS
-          true
+                                                                  true
 #else
-          false
+                                                                  false
 #endif
-      );
+                                                                  );
       blob->Reset(output_image);
       for (auto& texture : (*output_image)[0]->textures) {
         texture->map_load([&](void* buffer,
@@ -2221,19 +2251,18 @@ int runModelBenchmarks(caffe2::NetDef& init_net,
       }
     } else {
       ImageAllocator<uint8_t> allocator;
-      GLImageVector<uint8_t>* output_image = allocator.newImage(
-          1,
-          width,
-          height,
-          channel,
-          tile_x,
-          tile_y,
+      GLImageVector<uint8_t>* output_image = allocator.newImage(1,
+                                                                width,
+                                                                height,
+                                                                channel,
+                                                                tile_x,
+                                                                tile_y,
 #if CAFFE2_IOS
-          true
+                                                                true
 #else
-          false
+                                                                false
 #endif
-      );
+                                                                );
       blob->Reset(output_image);
       for (auto& texture : (*output_image)[0]->textures) {
         texture->map_load([&](void* buffer,
@@ -2288,7 +2317,8 @@ int runModelBenchmarks(caffe2::NetDef& init_net,
         }
         glFinish();
 
-        LOG(INFO) << net_def.op(k).type() << ": " << (double)timer.MilliSeconds() / main_runs;
+        LOG(INFO) << "Operator #" << k << " " << net_def.op(k).type() << ": "
+                  << (double)timer.MilliSeconds() / main_runs;
       }
     }
   }
@@ -2501,6 +2531,10 @@ void testOpenGL() {
 
       testOpenGLPRelu(1, channel, 13, 4, channel, tile_x, tile_y, 0.1);
       testOpenGLRelu(1, channel, 4, 17, tile_x, tile_y, 0.1);
+      testOpenGLConv(1, channel, 16, 16, channel, 3, 3, 0, 2, MaxPool, 0.01, true, 1, 1, tile_x, tile_y, true);
+      testOpenGLConv(1, channel, 16, 16, channel, 3, 3, 0, 2, AveragePool, 0.01, true, 1, 1, tile_x, tile_y, true);
+      testOpenGLAdd(1, channel, 14, 8, 0.1, tile_x, tile_y);
+      testOpenGLResize(1, channel, 16, 16, 2, 2, 0.1, tile_x, tile_y);
       // clang-format on
     }
   }
@@ -2760,14 +2794,14 @@ void testOpenGL() {
     testOpenGLInstanceNormPRelu(1, 6, 640, 360, 0.2);
 
     LOG(INFO) << "Test OpenGL ResizeNearest";
-    testOpenGLResize(1, 4, 16, 16, 1, 1, 1, 0.1);
-    testOpenGLResize(1, 4, 16, 16, 2, 2, 1, 0.1);
-    testOpenGLResize(1, 4, 16, 16, 3, 3, 1, 0.1);
-    testOpenGLResize(1, 4, 16, 16, 4, 4, 1, 0.1);
-    testOpenGLResize(1, 16, 25, 25, 3, 3, 2, 0.1);
-    testOpenGLResize(1, 16, 25, 25, 3, 3, 4, 0.1);
-    testOpenGLResize(1, 12, 25, 25, 3, 3, 3, 0.1);
-    testOpenGLResize(1, 4, 720, 1280, 3, 3, 1, 0.1);
+    testOpenGLResize(1, 4, 16, 16, 1, 1, 0.1);
+    testOpenGLResize(1, 4, 16, 16, 2, 2, 0.1);
+    testOpenGLResize(1, 4, 16, 16, 3, 3, 0.1);
+    testOpenGLResize(1, 4, 16, 16, 4, 4, 0.1);
+    testOpenGLResize(1, 16, 25, 25, 3, 3, 0.1);
+    testOpenGLResize(1, 16, 25, 25, 3, 3, 0.1);
+    testOpenGLResize(1, 12, 25, 25, 3, 3, 0.1);
+    testOpenGLResize(1, 4, 720, 1280, 3, 3, 0.1);
 
     // debug style transfer
     // conv
@@ -2848,8 +2882,8 @@ void testOpenGL() {
     testOpenGLInstanceNormPRelu(3, 4, 16, 16, 0.2);
     testOpenGLInstanceNormPRelu(15, 4, 16, 16, 0.2);
 
-    testOpenGLResize(3, 4, 16, 16, 1, 1, 1, 0.1);
-    testOpenGLResize(16, 4, 16, 16, 1, 1, 1, 0.1);
+    testOpenGLResize(3, 4, 16, 16, 1, 1, 0.1);
+    testOpenGLResize(16, 4, 16, 16, 1, 1, 0.1);
 
     testOpenGLPadImage(3, 3, 4, 4, 0, 1, 0, 1, 0.01);
     testOpenGLPadImage(23, 3, 4, 4, 0, 1, 0, 1, 0.01);

@@ -76,13 +76,9 @@ std::string GLFilter::process_replacements(std::string shader,
   // Add some #defines for convenience
   std::string version_tag = "#version 300 es";
   if (GLContext::getGLContext()->halfFloatTextureSupported()) {
-    shader.insert(
-        shader.find(version_tag) + version_tag.size(),
-        half_float_texture_utils);
+    shader.insert(shader.find(version_tag) + version_tag.size(), half_float_texture_utils);
   } else {
-    shader.insert(
-        shader.find(version_tag) + version_tag.size(),
-        half_float_compat_texture_utils);
+    shader.insert(shader.find(version_tag) + version_tag.size(), half_float_compat_texture_utils);
   }
   shader.insert(shader.find(version_tag) + version_tag.size(), shader_utils);
   return shader;

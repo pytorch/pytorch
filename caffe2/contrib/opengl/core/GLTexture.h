@@ -13,14 +13,14 @@ class GLTexture {
 
     int dataSize() const {
       switch (type) {
-        case GL_UNSIGNED_INT:
-          return 4;
-        case GL_HALF_FLOAT:
-          return 2;
-        case GL_UNSIGNED_BYTE:
-          return 1;
-        default:
-          throw std::runtime_error("Unknown Texture Type");
+      case GL_UNSIGNED_INT:
+        return 4;
+      case GL_HALF_FLOAT:
+        return 2;
+      case GL_UNSIGNED_BYTE:
+        return 1;
+      default:
+        throw std::runtime_error("Unknown Texture Type");
       }
     }
 
