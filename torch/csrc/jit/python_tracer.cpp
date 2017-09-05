@@ -9,7 +9,7 @@ namespace py = pybind11;
 #include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/jit/assert.h"
-#include "torch/csrc/toffee/export.h"
+#include "torch/csrc/onnx/export.h"
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/THP.h"
 #include "torch/csrc/DynamicTypes.h"

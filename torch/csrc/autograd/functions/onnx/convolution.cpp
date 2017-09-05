@@ -14,11 +14,11 @@ static T all_equal(at::ArrayRef<T> ts, const char * name) {
 
 // Note [Caffe2ConvTranspose]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~
-// ConvTranspose in Caffe2 is a bit silly: bias is mandatory.  But Toffee
+// ConvTranspose in Caffe2 is a bit silly: bias is mandatory.  But ONNX
 // has removed bias input from official ConvTranspose.  How can the Caffe2
 // backend do the translation?  It can't!  It's impossible!  So as a temporary
 // hack while we wait for Caffe2 to make bias optional, we are using a
-// Caffe2ConvTranspose experimental Toffee op which has a mandatory bias.
+// Caffe2ConvTranspose experimental ONNX op which has a mandatory bias.
 // PyTorch has no trouble making the zero-filled tensor.
 //
 // For code simplicity, even if PyTorch was given a bias tensor, it is NOT
@@ -64,7 +64,7 @@ jit::node_list ConvForward::primspec(PrimSpecContext* ctx, jit::node_list inputs
   n->is_(jit::kdilations,std::move(kernel_dilations));
   n->i_(jit::kgroup,groups);
 
-  // Not in Toffee?
+  // Not in ONNX?
   for (int p : output_padding) {
     JIT_ASSERT(p == 0);
   }

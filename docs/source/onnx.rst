@@ -1,6 +1,6 @@
-torch.toffee
+torch.onnx
 ============
-.. automodule:: torch.toffee
+.. automodule:: torch.onnx
 
 Example: End-to-end AlexNet from PyTorch to Caffe2
 --------------------------------------------------
@@ -10,12 +10,12 @@ torchvision into Toffee IR.  It runs a single round of inference and then
 saves the resulting traced model to ``alexnet.proto``::
 
     from torch.autograd import Variable
-    import torch.toffee
+    import torch.onnx
     import torchvision
 
     dummy_input = Variable(torch.randn(10, 3, 224, 224)).cuda()
     model = torchvision.models.alexnet(pretrained=True).cuda()
-    torch.toffee.export(model, dummy_input, "alexnet.proto", verbose=True)
+    torch.onnx.export(model, dummy_input, "alexnet.proto", verbose=True)
 
 The resulting ``alexnet.proto`` is a binary protobuf file which contains both
 the network structure and parameters of the model you exported
@@ -51,14 +51,14 @@ exporter to print out a human-readable representation of the network::
     }
 
 You can also verify and inspect the actual (substantially more verbose) protobuf
-using the `ToffeeIR <https://github.com/ProjectToffee/ToffeeIR/>`_ library::
+using the `ONNXIR <https://github.com/ProjectONNX/ONNXIR/>`_ library::
 
-    import toffee
+    import onnx
 
-    graph = toffee.load("alexnet.proto")
+    graph = onnx.load("alexnet.proto")
 
     # Check that the IR is well formed
-    toffee.checker.check_graph(graph)
+    onnx.checker.check_graph(graph)
 
     # Print the IR
     print(str(graph))
@@ -68,7 +68,7 @@ To run the exported script with Caffe2, you will need to install
 the backend for Caffe2::
 
     # ...continuing from above
-    import toffee.backend.c2 as backend
+    import onnx.backend.c2 as backend
     import numpy as np
 
     (caffe2_proto, caffe2_workspace) = backend.prepare(graph, device="CUDA:0") # or "CPU"
@@ -80,7 +80,7 @@ In the future, there will be backends for other frameworks as well.
 Limitations
 -----------
 
-* The Toffee exporter is a *trace-based* exporter, which means that it
+* The ONNX exporter is a *trace-based* exporter, which means that it
   operates by executing your model once, and exporting the operators which
   were actually run during this run.  This means that if your model is
   dynamic, e.g., changes behavior depending on input data, the export

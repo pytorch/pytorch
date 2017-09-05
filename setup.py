@@ -333,8 +333,8 @@ main_compile_args = ['-D_THP_CORE']
 main_libraries = ['shm']
 main_link_args = [TH_LIB, THS_LIB, THPP_LIB, THNN_LIB, ATEN_LIB, NANOPB_STATIC_LIB]
 main_sources = [
-    "torch/csrc/toffee.pb.cpp",
-    "torch/csrc/toffee.cpp",
+    "torch/csrc/onnx.pb.cpp",
+    "torch/csrc/onnx.cpp",
     "torch/csrc/PtrWrapper.cpp",
     "torch/csrc/Module.cpp",
     "torch/csrc/Generator.cpp",
@@ -379,9 +379,9 @@ main_sources = [
     "torch/csrc/autograd/functions/special.cpp",
     "torch/csrc/autograd/functions/utils.cpp",
     "torch/csrc/autograd/functions/init.cpp",
-    "torch/csrc/autograd/functions/toffee/convolution.cpp",
-    "torch/csrc/autograd/functions/toffee/batch_normalization.cpp",
-    "torch/csrc/toffee/export.cpp",
+    "torch/csrc/autograd/functions/onnx/convolution.cpp",
+    "torch/csrc/autograd/functions/onnx/batch_normalization.cpp",
+    "torch/csrc/onnx/export.cpp",
 ]
 main_sources += split_types("torch/csrc/Tensor.cpp")
 
