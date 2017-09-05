@@ -1,6 +1,6 @@
 #pragma once
 
-#include "torch/csrc/toffee.pb.h"
+#include "torch/csrc/onnx.pb.h"
 #include "torch/csrc/jit/assert.h"
 
 #include <pb_encode.h>
@@ -10,7 +10,7 @@
 #include <fstream>
 #include <memory>
 
-namespace torch { namespace toffee {
+namespace torch { namespace onnx {
 
 // Note [Unique vector]
 // ~~~~~~~~~~~~~~~~~~~~
@@ -68,7 +68,7 @@ struct MicroProto {
 
   // The constructor takes the protobuf struct by value for initialization
   // (since it is a C-style struct).  In the constructor you're
-  // expected to call this with something like toffee_TensorProto_init_default
+  // expected to call this with something like onnx_TensorProto_init_default
   MicroProto(T proto) : proto(proto) {}
 
   // Usage:
@@ -146,10 +146,10 @@ struct MicroProto {
   }
 };
 
-using DataType = toffee_TensorProto_DataType;
+using DataType = onnx_TensorProto_DataType;
 
 #define DEFINE_CONST(C) \
-const auto k##C = toffee_TensorProto_DataType_##C;
+const auto k##C = onnx_TensorProto_DataType_##C;
 DEFINE_CONST(FLOAT)
 DEFINE_CONST(UINT8)
 DEFINE_CONST(INT8)
@@ -169,23 +169,23 @@ class NodeProto;
 class GraphProto;
 class TensorProto;
 
-class TensorProto : public MicroProto<toffee_TensorProto> {
+class TensorProto : public MicroProto<onnx_TensorProto> {
 private:
   std::string name;
   unique_vector<int64_t> dims;
   at::Tensor raw_data;
 public:
-  TensorProto() : MicroProto(toffee_TensorProto_init_default) {
+  TensorProto() : MicroProto(onnx_TensorProto_init_default) {
     proto.dims       = list<int64_t>(&dims);
   }
   void set_name(const std::string& s) { proto.name = string(&name, s); }
   void add_dims(int64_t d) { dims.emplace_back(new int64_t(d)); }
   // Google Protobuf divergence!
   void set_raw_data(const at::Tensor& t) { proto.raw_data = string_from_tensor(&raw_data, t); }
-  void set_data_type(toffee_TensorProto_DataType t) { proto.has_data_type = true; proto.data_type = t; }
+  void set_data_type(onnx_TensorProto_DataType t) { proto.has_data_type = true; proto.data_type = t; }
 };
 
-class AttributeProto : public MicroProto<toffee_AttributeProto> {
+class AttributeProto : public MicroProto<onnx_AttributeProto> {
 private:
   std::string name;
   std::string s;
@@ -197,20 +197,20 @@ private:
   unique_vector<TensorProto> tensors;
   unique_vector<GraphProto> graphs;
 public:
-  AttributeProto() : MicroProto(toffee_AttributeProto_init_default) {
+  AttributeProto() : MicroProto(onnx_AttributeProto_init_default) {
     proto.floats  = list<float>(&floats);
     proto.ints    = list<int64_t>(&ints);
     proto.strings = list<std::string>(&strings);
-    proto.tensors = list<TensorProto, toffee_TensorProto_fields>(&tensors);
-    proto.graphs  = list<GraphProto, toffee_GraphProto_fields>(&graphs);
+    proto.tensors = list<TensorProto, onnx_TensorProto_fields>(&tensors);
+    proto.graphs  = list<GraphProto, onnx_GraphProto_fields>(&graphs);
   }
   void set_name(const std::string& s) { proto.name = string(&name, s); }
   void set_f(float f) { proto.has_f = true; proto.f = f; }
   void set_i(int64_t i) { proto.has_i = true; proto.i = i; }
   void set_s(std::string s_) { proto.s = string(&s, s_); }
   // See https://developers.google.com/protocol-buffers/docs/reference/cpp-generated#embeddedmessage
-  GraphProto* mutable_g() { proto.g = msg<GraphProto, toffee_GraphProto_fields>(&g); return g.get(); }
-  TensorProto* mutable_t() { proto.t = msg<TensorProto, toffee_TensorProto_fields>(&t); return t.get(); }
+  GraphProto* mutable_g() { proto.g = msg<GraphProto, onnx_GraphProto_fields>(&g); return g.get(); }
+  TensorProto* mutable_t() { proto.t = msg<TensorProto, onnx_TensorProto_fields>(&t); return t.get(); }
   void add_floats(float f) { floats.emplace_back(new float(f)); }
   void add_ints(int64_t i) { ints.emplace_back(new int64_t(i)); }
   void add_strings(std::string s) { strings.emplace_back(new std::string(s)); }
@@ -222,17 +222,17 @@ public:
   GraphProto* add_graphs();
 };
 
-class NodeProto : public MicroProto<toffee_NodeProto> {
+class NodeProto : public MicroProto<onnx_NodeProto> {
 private:
   std::string op_type;
   unique_vector<std::string> inputs;
   unique_vector<std::string> outputs;
   unique_vector<AttributeProto> attributes;
 public:
-  NodeProto() : MicroProto(toffee_NodeProto_init_default) {
+  NodeProto() : MicroProto(onnx_NodeProto_init_default) {
     proto.input     = list<std::string>(&inputs);
     proto.output    = list<std::string>(&outputs);
-    proto.attribute = list<AttributeProto, toffee_AttributeProto_fields>(&attributes);
+    proto.attribute = list<AttributeProto, onnx_AttributeProto_fields>(&attributes);
   }
   void add_input(const std::string& s) { inputs.emplace_back(new std::string(s)); }
   void clear_input() { inputs.clear(); }
@@ -246,7 +246,7 @@ public:
   void set_op_type(const std::string& s) { proto.op_type= string(&op_type, s); }
 };
 
-class GraphProto : public MicroProto<toffee_GraphProto> {
+class GraphProto : public MicroProto<onnx_GraphProto> {
 private:
   std::string name;
   std::string producer_tag;
@@ -255,9 +255,9 @@ private:
   unique_vector<NodeProto> nodes;
   unique_vector<TensorProto> initializers;
 public:
-  GraphProto() : MicroProto(toffee_GraphProto_init_default) {
+  GraphProto() : MicroProto(onnx_GraphProto_init_default) {
     proto.has_ir_version = true;
-    proto.ir_version = toffee_Version_IR_VERSION;
+    proto.ir_version = onnx_Version_IR_VERSION;
     // TODO: stop hard-coding this
     // TODO: check if this is supposed to be octal
     proto.has_producer_version = true;
@@ -265,8 +265,8 @@ public:
     proto.producer_tag = string(&producer_tag, "pytorch");
     proto.input  = list<std::string>(&inputs);
     proto.output = list<std::string>(&outputs);
-    proto.node   = list<NodeProto, toffee_NodeProto_fields>(&nodes);
-    proto.initializer = list<TensorProto, toffee_TensorProto_fields>(&initializers);
+    proto.node   = list<NodeProto, onnx_NodeProto_fields>(&nodes);
+    proto.initializer = list<TensorProto, onnx_TensorProto_fields>(&initializers);
   }
   void set_name(const std::string& s) { proto.name = string(&name, s); }
   void add_input(const std::string& s) { inputs.emplace_back(new std::string(s)); }
@@ -284,4 +284,4 @@ public:
   }
 };
 
-}} // namespace torch::toffee
+}} // namespace torch::onnx

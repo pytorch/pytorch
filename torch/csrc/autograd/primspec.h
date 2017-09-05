@@ -2,7 +2,7 @@
 
 #include <Python.h>
 #include "torch/csrc/jit/ir.h"
-#include "torch/csrc/toffee.h"
+#include "torch/csrc/onnx.h"
 #include <vector>
 
 namespace torch { namespace autograd {
@@ -19,7 +19,7 @@ struct primspec_unconvertible : public std::runtime_error {
 
 
 struct HasPrimSpec {
-  // Add some nodes to the Toffee protobuf, under the assumption that this node
+  // Add some nodes to the ONNX protobuf, under the assumption that this node
   // as a whole has the represented inputs and outputs.  Raises a
   // primspec_unconvertible exception if conversion is not supported.
   virtual jit::node_list primspec(PrimSpecContext* ctx, jit::node_list inputs) = 0;

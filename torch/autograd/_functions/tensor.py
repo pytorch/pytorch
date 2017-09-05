@@ -96,7 +96,7 @@ class Transpose(Function):
 
     @staticmethod
     def primspec(g, i, dim1, dim2):
-        # NB: Swap dim1 and dim2, which is different from Toffee's
+        # NB: Swap dim1 and dim2, which is different from ONNX's
         # Transpose, which is actually a permute.
         if dim1 == dim2:
             return i

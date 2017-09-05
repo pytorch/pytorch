@@ -1,6 +1,6 @@
 """
-The torch.toffee module contains functions to export models into the Toffee
-IR format.  These models can be loaded with the ToffeeIR library and then
+The torch.onnx module contains functions to export models into the ONNX
+IR format.  These models can be loaded with the ONNXIR library and then
 converted to models which run on other deep learning frameworks.
 """
 
@@ -15,11 +15,11 @@ from ._utils import _range
 
 def export(model, args, f, export_params=True, kwargs=None, verbose=False):
     """
-    Export a model into Toffee format.  This exporter runs your model
+    Export a model into ONNX format.  This exporter runs your model
     once in order to get a trace of its execution to be exported; at the
     moment, it does not support dynamic models (e.g., RNNs.)
 
-    See also: :ref:`toffee-export`
+    See also: :ref:`onnx-export`
 
     Arguments:
         model (torch.nn.Module): the model to be exported.
