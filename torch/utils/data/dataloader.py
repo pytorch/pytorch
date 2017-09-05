@@ -16,6 +16,12 @@ else:
 _use_shared_memory = False
 """Whether to use shared memory in default_collate"""
 
+# These three constants represents special actions for the
+# workers
+STOP = 'stop'
+NEXT_QUEUE = 'next_queue'
+COLLATE = 'collate'
+
 
 class ExceptionWrapper(object):
     "Wraps an exception plus traceback to communicate across threads"
@@ -25,24 +31,51 @@ class ExceptionWrapper(object):
         self.exc_msg = "".join(traceback.format_exception(*exc_info))
 
 
-def _worker_loop(dataset, index_queue, data_queue, collate_fn):
+def _worker_loop(dataset, index_queues, collate_queues, data_queue, collate_fn):
     global _use_shared_memory
     _use_shared_memory = True
+    qid = 0
 
     torch.set_num_threads(1)
     while True:
+        index_queue = index_queues[qid]
+        collate_queue = collate_queues[qid]
         r = index_queue.get()
-        if r is None:
-            data_queue.put(None)
+        if r == STOP:
             break
-        idx, batch_indices = r
-        try:
-            samples = collate_fn([dataset[i] for i in batch_indices])
-        except Exception:
-            data_queue.put((idx, ExceptionWrapper(sys.exc_info())))
+        elif r == NEXT_QUEUE:
+            qid = (qid + 1) % len(index_queues)
+        elif r == COLLATE:
+            # We add this sentienl in the collate_queue to know when to stop
+            collate_queue.put(STOP)
+            batch_content = list(iter(collate_queue.get, STOP))
+            assert len(batch_content) > 0
+            batch_idx = batch_content[0][0]
+            assert all(batch[0] == batch_idx for batch in batch_content)
+            # Could reorder with a dict, not sure if it is worth it
+            batch_content.sort()
+            # Inspecting for exceptions after sort to preserve order
+            for _, sample_id, dataset_element in batch_content:
+                if isinstance(dataset_element, ExceptionWrapper):
+                    to_send = dataset_element
+                    break
+            else:
+                # Check for exception in the collate part
+                try:
+                    to_send = collate_fn([batch[2] for batch in batch_content])
+                except:
+                    to_send = ExceptionWrapper(sys.exc_info())
+            data_queue.put((batch_idx, to_send))
+            # Moving to the next queue since we compelted this batch
+            qid = (qid + 1) % len(index_queues)
         else:
-            data_queue.put((idx, samples))
-
+            batch_idx, sample_idx, dataset_idx = r
+            try:
+                element = dataset[dataset_idx]
+            except Exception:
+                collate_queue.put((batch_idx, sample_idx, ExceptionWrapper(sys.exc_info())))
+            else:
+                collate_queue.put((batch_idx, sample_idx, element))
 
 def _pin_memory_loop(in_queue, out_queue, done_event):
     while True:
@@ -128,20 +161,24 @@ def pin_memory_batch(batch):
 class DataLoaderIter(object):
     "Iterates once over the DataLoader's dataset, as specified by the sampler"
 
-    def __init__(self, loader):
+    def __init__(self, loader, buffering=2):
         self.dataset = loader.dataset
         self.collate_fn = loader.collate_fn
         self.batch_sampler = loader.batch_sampler
         self.num_workers = loader.num_workers
+        self.batches_outstanding = 0
         self.pin_memory = loader.pin_memory
         self.done_event = threading.Event()
 
         self.sample_iter = iter(self.batch_sampler)
 
         if self.num_workers > 0:
-            self.index_queue = multiprocessing.SimpleQueue()
+            # We need more than 0 buffers we are going to have workers
+            assert buffering > 0
+            self.buffering = buffering + 1  # we need one extra queue to wait
+            self.index_queues = [multiprocessing.SimpleQueue() for x in range(self.buffering)]
+            self.collate_queues = [multiprocessing.SimpleQueue() for x in range(self.buffering)]
             self.data_queue = multiprocessing.SimpleQueue()
-            self.batches_outstanding = 0
             self.shutdown = False
             self.send_idx = 0
             self.rcvd_idx = 0
@@ -150,7 +187,8 @@ class DataLoaderIter(object):
             self.workers = [
                 multiprocessing.Process(
                     target=_worker_loop,
-                    args=(self.dataset, self.index_queue, self.data_queue, self.collate_fn))
+                    args=(self.dataset, self.index_queues, self.collate_queues,
+                          self.data_queue, self.collate_fn))
                 for _ in range(self.num_workers)]
 
             for w in self.workers:
@@ -166,9 +204,7 @@ class DataLoaderIter(object):
                 self.pin_thread.daemon = True
                 self.pin_thread.start()
 
-            # prime the prefetch loop
-            for _ in range(2 * self.num_workers):
-                self._put_indices()
+            self._put_indices()
 
     def __len__(self):
         return len(self.batch_sampler)
@@ -191,7 +227,7 @@ class DataLoaderIter(object):
             raise StopIteration
 
         while True:
-            assert (not self.shutdown and self.batches_outstanding > 0)
+            assert not self.shutdown
             idx, batch = self.data_queue.get()
             self.batches_outstanding -= 1
             if idx != self.rcvd_idx:
@@ -206,13 +242,20 @@ class DataLoaderIter(object):
         return self
 
     def _put_indices(self):
-        assert self.batches_outstanding < 2 * self.num_workers
-        indices = next(self.sample_iter, None)
-        if indices is None:
-            return
-        self.index_queue.put((self.send_idx, indices))
-        self.batches_outstanding += 1
-        self.send_idx += 1
+        # While we have buffers available we send work
+        while self.send_idx - self.rcvd_idx < self.buffering - 1:
+            qid = self.send_idx % self.buffering
+            current_queue = self.index_queues[qid]
+            dataset_indicies = next(self.sample_iter, None)
+            if dataset_indicies is None:
+                break
+            self.batches_outstanding += 1
+            for idx, dataset_idx in enumerate(dataset_indicies):
+                current_queue.put((self.send_idx, idx, dataset_idx))
+            for _ in range(self.num_workers - 1):
+                current_queue.put(NEXT_QUEUE)
+            current_queue.put(COLLATE)
+            self.send_idx += 1
 
     def _process_next_batch(self, batch):
         self.rcvd_idx += 1
@@ -234,7 +277,10 @@ class DataLoaderIter(object):
             self.shutdown = True
             self.done_event.set()
             for _ in self.workers:
-                self.index_queue.put(None)
+                # Sending the STOP signal to all workers regardless of their
+                # current queue
+                for q in self.index_queues:
+                    q.put(STOP)
 
     def __del__(self):
         if self.num_workers > 0:
