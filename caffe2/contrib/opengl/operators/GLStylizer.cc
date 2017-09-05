@@ -18,28 +18,23 @@ class GLStylizer : public GLFilter {
   bool deprocess;
 
  public:
-  GLStylizer(bool _deprocess = false, InputFormat input_format = BGRA)
-      : GLFilter(
-            _deprocess ? "GLDeStylizer" : "GLStylizer",
-            vertex_shader,
-            fragment_shader,
-            std::vector<binding*>({BINDING(inputData),
-                                   BINDING(mean),
-                                   BINDING(noise_std),
-                                   BINDING(outputSize)}),
-            {/* no uniform blocks */},
-            {/* no attributes */},
-            {{"DEPROCESS", caffe2::to_string(_deprocess)},
-             {"RGBAINPUT", caffe2::to_string(input_format)}}),
-        deprocess(_deprocess) {}
+   GLStylizer(bool _deprocess = false, InputFormat input_format = BGRA)
+       : GLFilter(_deprocess ? "GLDeStylizer" : "GLStylizer",
+                  vertex_shader,
+                  fragment_shader,
+                  std::vector<binding*>({BINDING(inputData), BINDING(mean), BINDING(noise_std), BINDING(outputSize)}),
+                  {/* no uniform blocks */},
+                  {/* no attributes */},
+                  {{"DEPROCESS", caffe2::to_string(_deprocess)}, {"RGBAINPUT", caffe2::to_string(input_format)}}),
+         deprocess(_deprocess) {}
 
-  template <typename T1, typename T2>
-  void stylize(const GLImage<T1>* input_image,
-               const GLImage<T2>* output_image,
-               const float mean_values[3],
-               float noise_std_value);
+   template <typename T1, typename T2>
+   void stylize(const GLImage<T1>* input_image,
+                const GLImage<T2>* output_image,
+                const float mean_values[3],
+                float noise_std_value);
 
-  static const char* fragment_shader;
+   static const char* fragment_shader;
 };
 
 // MARK: GLSL
@@ -116,8 +111,7 @@ void GLStylizer::stylize(const GLImage<T1>* input_image,
   run(std::vector<texture_attachment>({{input_image->textures[0], inputData}}),
       {output_image->textures[0]},
       [&]() {
-        glUniform2i(
-            outputSize->location, output_image->width, output_image->height);
+        glUniform2i(outputSize->location, output_image->width, output_image->height);
         glUniform3f(mean->location, mean_values[0], mean_values[1], mean_values[2]);
         if (!deprocess) {
           glUniform1f(noise_std->location, noise_std_value);

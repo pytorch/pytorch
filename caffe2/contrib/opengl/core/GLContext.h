@@ -26,9 +26,7 @@ class GLContext {
 
   static bool GL_EXT_texture_border_clamp_defined();
 
-  inline bool halfFloatTextureSupported() {
-    return half_float_supported;
-  }
+  inline bool halfFloatTextureSupported() { return half_float_supported; }
 
   void setTextureAllocator(
       std::function<const GLTexture*(const int width, const int height)> textureAllocator) {

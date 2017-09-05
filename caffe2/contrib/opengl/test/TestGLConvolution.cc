@@ -57,8 +57,7 @@ double BenchOp(const std::string& typ,
   def1.add_arg()->CopyFrom(caffe2::MakeArgument("pad_l", 0));
   def1.add_arg()->CopyFrom(caffe2::MakeArgument("pad_b", 0));
   def1.add_arg()->CopyFrom(caffe2::MakeArgument("pad_r", 0));
-  def1.add_arg()->CopyFrom(caffe2::MakeArgument(
-      "convolution_transform_strategy", std::string("PRECOMPUTE")));
+  def1.add_arg()->CopyFrom(caffe2::MakeArgument("convolution_transform_strategy", std::string("PRECOMPUTE")));
 
   AddNoiseInput(std::vector<caffe2::TIndex>{1, inputC, inH, inW}, "X", ws);
   if (transposed) {
@@ -281,11 +280,11 @@ void TestGLConvolution() {
   // std::vector<int> sizes({208, 312, 416, 720, 1080});
   // std::vector<int> channels({16, 4});
   //
-  std::vector<int> sizes({14, 26, 52, 104});
+  std::vector<int> sizes({14, 26, 52, 104, 208});
   // std::vector<int> channels({24, 16, 4});
 
   //  std::vector<int> sizes({14});
-  std::vector<int> channels({64, 128, 256, 512});
+  std::vector<int> channels({32, 64, 128, 192, 256, 384, 512});
 
   std::vector<int> kernels({3});
 
@@ -321,19 +320,20 @@ void TestGLConvolution() {
           const double flops = double(input_channel) * output_channel * kernel * kernel *
                                (kernel == 1 ? space : space - 2) *
                                (kernel == 1 ? space : space - 2) * 2;
-          gl_log(GL_LOG,
-                 "Conv: X: %ix%i  \tC: %i -> %i\tK: %ix%i\t16b GPU GFLOPS: %.2f\t32b CPU GFLOPS:"
-                 "%.2f\tratio: "
-                 "%.2f\n",
-                 space,
-                 space,
-                 input_channel,
-                 output_channel,
-                 kernel,
-                 kernel,
-                 flops / gpuIterTime / 1E6,
-                 flops / cpuIterTime / 1E6,
-                 cpuIterTime / gpuIterTime);
+          // gl_log(GL_LOG,
+          printf(
+              "Conv: X: %ix%i  \tC: %i -> %i\tK: %ix%i\t16b GPU GFLOPS: %.2f\t32b CPU GFLOPS:"
+              "%.2f\tratio: "
+              "%.2f\n",
+              space,
+              space,
+              input_channel,
+              output_channel,
+              kernel,
+              kernel,
+              flops / gpuIterTime / 1E6,
+              flops / cpuIterTime / 1E6,
+              cpuIterTime / gpuIterTime);
         }
       }
     }

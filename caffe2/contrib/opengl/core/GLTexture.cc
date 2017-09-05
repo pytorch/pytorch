@@ -31,9 +31,7 @@ void arm_memcpy(volatile unsigned char* dst, volatile unsigned char* src, int sz
 
 const GLTexture::Type GLTexture::FP16 = {GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT};
 const GLTexture::Type GLTexture::UI8 = {GL_RGBA, GL_RGBA, GL_UNSIGNED_BYTE};
-const GLTexture::Type GLTexture::FP16_COMPAT = {GL_RG32UI,
-                                                GL_RG_INTEGER,
-                                                GL_UNSIGNED_INT};
+const GLTexture::Type GLTexture::FP16_COMPAT = {GL_RG32UI, GL_RG_INTEGER, GL_UNSIGNED_INT};
 
 void GLTexture::map_read(std::function<void(const void* buffer,
                                             size_t width,

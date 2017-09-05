@@ -18,6 +18,8 @@ class GLImage {
 
   const int tile_x;
   const int tile_y;
+  const int texture_width;
+  const int texture_height;
   const int slices;
 
   const std::vector<const GLTexture*> textures;
@@ -50,6 +52,8 @@ class GLImage {
         data_size(sizeof(T)),
         tile_x(_tile_x),
         tile_y(_tile_y),
+        texture_width(_width * _tile_x),
+        texture_height(_height * _tile_y),
         slices(channels_to_slices(_channels, _tile_x, _tile_y)),
         textures(allocate_textures(slices, texture_loader)) {
     CAFFE_ENFORCE_EQ(slices * tile_x * tile_y, (channels + 3) / 4);
@@ -68,13 +72,23 @@ class GLImage {
         data_size(sizeof(T)),
         tile_x(_tile_x),
         tile_y(_tile_y),
+        texture_width(_width * _tile_x),
+        texture_height(_height * _tile_y),
         slices(channels_to_slices(_channels, _tile_x, _tile_y)),
         textures(allocate_textures(slices, texture_loader)) {
     CAFFE_ENFORCE_EQ(slices * tile_x * tile_y, (channels + 3) / 4);
   }
 
   GLImage()
-      : width(0), height(0), channels(0), data_size(sizeof(T)), tile_x(0), tile_y(0), slices(0){};
+      : width(0),
+        height(0),
+        channels(0),
+        data_size(sizeof(T)),
+        tile_x(0),
+        tile_y(0),
+        texture_width(0),
+        texture_height(0),
+        slices(0){};
 
   virtual ~GLImage() {
     gl_log(GL_VERBOSE, "deleting GLImage\n");

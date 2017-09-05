@@ -4,10 +4,10 @@
 #include "../core/GLImage.h"
 #include "../core/ImageAllocator.h"
 
-#include <iostream>
-#include <vector>
 #include "caffe2/core/operator.h"
 #include "caffe2/core/timer.h"
+#include <iostream>
+#include <vector>
 
 class GLSub : public GLFilter {
  public:
@@ -15,22 +15,18 @@ class GLSub : public GLFilter {
   binding* outputSize;
 
   GLSub()
-      : GLFilter(
-            "GLSub",
-            vertex_shader,
-            fragment_shader,
-            std::vector<binding*>({BINDING(outputSize),
-                                   BINDING(inputData[0]),
-                                   BINDING(inputData[1])}),
-            {/* no uniform blocks */},
-            {/* no attributes */},
-            {/* no replacements */}) {}
+      : GLFilter("GLSub",
+                 vertex_shader,
+                 fragment_shader,
+                 std::vector<binding*>({BINDING(outputSize), BINDING(inputData[0]), BINDING(inputData[1])}),
+                 {/* no uniform blocks */},
+                 {/* no attributes */},
+                 {/* no replacements */}) {}
 
   template <typename T>
-  void sub(
-      const GLImageVector<T>& input_image0,
-      const GLImageVector<T>& input_image1,
-      const GLImageVector<T>& output_image);
+  void sub(const GLImageVector<T>& input_image0,
+           const GLImageVector<T>& input_image1,
+           const GLImageVector<T>& output_image);
 
   static const char* fragment_shader;
 };
@@ -59,10 +55,9 @@ void main() {
 )GLSL";
 
 template <typename T>
-void GLSub::sub(
-    const GLImageVector<T>& input_images0,
-    const GLImageVector<T>& input_images1,
-    const GLImageVector<T>& output_images) {
+void GLSub::sub(const GLImageVector<T>& input_images0,
+                const GLImageVector<T>& input_images1,
+                const GLImageVector<T>& output_images) {
   const int num_images = input_images0.size();
   for (int i = 0; i < num_images; i++) {
     GLImage<T>* input_image0 = input_images0[i];
@@ -77,14 +72,8 @@ void GLSub::sub(
       input_attachments.push_back({input_image1->textures[is], inputData[1]});
 
       run(input_attachments,
-          {output_image->textures.begin() + is,
-           output_image->textures.begin() + is + 1},
-          [&]() {
-            glUniform2i(
-                outputSize->location,
-                output_image->width,
-                output_image->height);
-          },
+          {output_image->textures.begin() + is, output_image->textures.begin() + is + 1},
+          [&]() { glUniform2i(outputSize->location, output_image->width, output_image->height); },
           output_image->width,
           output_image->height);
     }
@@ -97,20 +86,14 @@ class OpenGLSubOp final : public Operator<CPUContext>, ImageAllocator<T> {
  public:
   OpenGLSubOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<CPUContext>(operator_def, ws) {
-    OPERATOR_NEEDS_FEATURE(
-        OperatorBase::HasArgument("broadcast") == false,
-        "OpenGLSub does not support broadcast");
+    OPERATOR_NEEDS_FEATURE(OperatorBase::HasArgument("broadcast") == false, "OpenGLSub does not support broadcast");
 
-    OPERATOR_NEEDS_FEATURE(
-        OperatorBase::HasArgument("axis") == false,
-        "OpenGLSub does not support axis");
+    OPERATOR_NEEDS_FEATURE(OperatorBase::HasArgument("axis") == false, "OpenGLSub does not support axis");
   }
 
   bool RunOnDevice() override {
-    const GLImageVector<T>& input0 =
-        Inputs()[0]->template Get<GLImageVector<T>>();
-    const GLImageVector<T>& input1 =
-        Inputs()[1]->template Get<GLImageVector<T>>();
+    const GLImageVector<T>& input0 = Inputs()[0]->template Get<GLImageVector<T>>();
+    const GLImageVector<T>& input1 = Inputs()[1]->template Get<GLImageVector<T>>();
 
     CAFFE_ENFORCE_EQ(input0.size(), input1.size());
 

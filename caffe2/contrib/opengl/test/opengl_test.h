@@ -32,6 +32,8 @@ int runModelBenchmarks(caffe2::NetDef& init_net,
                        std::string input_type,
                        std::string input_order,
                        std::string engine,
-                       bool run_individual = false,
-                       bool use_texture_input = false);
+                       bool run_individual    = false,
+                       bool use_texture_input = false,
+                       bool use_tiling        = false,
+                       bool run_fusion        = true);
 } // namespace caffe2
