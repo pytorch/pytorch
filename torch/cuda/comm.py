@@ -74,22 +74,24 @@ def reduce_add(inputs, destination=None):
     """
     # TODO: try to find an input on another gpu, copy it,
     # and accumulate into the copy
+    if destination is None:
+        destination = torch.cuda.current_device()
     input_size = inputs[0].size()
     for i, inp in enumerate(inputs):
         assert inp.is_cuda, "reduce_add expects all inputs to be on GPUs"
+        if inp.get_device() == destination:
+            nccl_root = i
         if inp.size() != input_size:
             got = 'x'.join(str(x) for x in inp.size())
             expected = 'x'.join(str(x) for x in input_size)
             raise ValueError("input {} has invalid size: got {}, but expected "
                              "{}".format(i, got, expected))
-    if destination is None:
-        destination = torch.cuda.current_device()
     with torch.cuda.device(destination):
         result = type(inp)(input_size).zero_()
 
     if nccl.is_available(inputs) and inputs[0].get_device() == destination:
         outputs = [result] + [t.new(t.size()) for t in inputs[1:]]
-        nccl.reduce(inputs, outputs, root=destination)
+        nccl.reduce(inputs, outputs, root=nccl_root)
         return result
 
     for inp in inputs:
