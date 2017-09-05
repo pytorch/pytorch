@@ -50,8 +50,7 @@ exporter to print out a human-readable representation of the network::
       return (%58);
     }
 
-You can also verify and inspect the actual (substantially more verbose) protobuf
-using the `ONNX <https://github.com/ProjectToffee/onnx/>`_ library::
+You can also verify the protobuf using the `onnx <https://github.com/ProjectToffee/onnx/>`_ library::
 
     import onnx
 
@@ -60,8 +59,9 @@ using the `ONNX <https://github.com/ProjectToffee/onnx/>`_ library::
     # Check that the IR is well formed
     onnx.checker.check_graph(graph)
 
-    # Print the IR
-    print(str(graph))
+    # Printing a graph with embedded parameters is not recommended, as
+    # the default protobuf printer will dump ALL of the parameters
+    # (which will be very long.)
 
 To run the exported script with Caffe2, you will need to install
 `caffe2 <https://caffe2.ai/>`_.  Once these are installed, you can use
@@ -71,8 +71,12 @@ the backend for Caffe2::
     import onnx.backend.c2 as backend
     import numpy as np
 
-    (caffe2_proto, caffe2_workspace) = backend.prepare(graph, device="CUDA:0") # or "CPU"
-    outputs = backend.run((caffe2_proto, caffe2_workspace), np.rand(10, 3, 224, 224))
+    rep = backend.prepare(graph, device="CUDA:0") # or "CPU"
+    # For the Caffe2 backend:
+    #     rep.predict_net is the Caffe2 protobuf for the network
+    #     rep.workspace is the Caffe2 workspace for the network
+    #       (see the class toffee.backend.c2.Workspace)
+    outputs = backend.run(rep, np.rand(10, 3, 224, 224))
     print(outputs[0])
 
 In the future, there will be backends for other frameworks as well.
@@ -103,6 +107,7 @@ Supported operators
 In this tech preview, only the following operators are supported:
 
 * Add (inplace is discarded)
+* Sub (inplace is discarded)
 * Mul (inplace is discarded)
 * Negate (inplace is discarded)
 * Addmm (inplace is discarded, alpha and beta must be 1)
@@ -115,6 +120,8 @@ In this tech preview, only the following operators are supported:
 * Squeeze (inplace is discarded)
 * BatchNorm
 * Convolution
+* Embedding (only optional argument that is supported is ``padding_idx``)
+* Slice (only integer indexing is supported)
 * Dropout (inplace is discarded)
 * Relu (inplace is discarded)
 * LeakyRelu (inplace is discarded)
