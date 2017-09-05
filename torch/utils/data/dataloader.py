@@ -77,6 +77,7 @@ def _worker_loop(dataset, index_queues, collate_queues, data_queue, collate_fn):
             else:
                 collate_queue.put((batch_idx, sample_idx, element))
 
+
 def _pin_memory_loop(in_queue, out_queue, done_event):
     while True:
         try:
