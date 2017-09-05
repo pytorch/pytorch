@@ -161,7 +161,7 @@ def pin_memory_batch(batch):
 class DataLoaderIter(object):
     "Iterates once over the DataLoader's dataset, as specified by the sampler"
 
-    def __init__(self, loader, buffering=2):
+    def __init__(self, loader):
         self.dataset = loader.dataset
         self.collate_fn = loader.collate_fn
         self.batch_sampler = loader.batch_sampler
@@ -169,13 +169,13 @@ class DataLoaderIter(object):
         self.batches_outstanding = 0
         self.pin_memory = loader.pin_memory
         self.done_event = threading.Event()
+        # We need two more queues, one for the current batch and one
+        # to make workers wait for the next batch
+        self.buffering = loader.preload_batches + 2
 
         self.sample_iter = iter(self.batch_sampler)
 
         if self.num_workers > 0:
-            # We need more than 0 buffers we are going to have workers
-            assert buffering > 0
-            self.buffering = buffering + 1  # we need one extra queue to wait
             self.index_queues = [multiprocessing.SimpleQueue() for x in range(self.buffering)]
             self.collate_queues = [multiprocessing.SimpleQueue() for x in range(self.buffering)]
             self.data_queue = multiprocessing.SimpleQueue()
@@ -313,16 +313,21 @@ class DataLoader(object):
             if the dataset size is not divisible by the batch size. If False and
             the size of dataset is not divisible by the batch size, then the last batch
             will be smaller. (default: False)
+        preload_batches (int, optional): Number of batches that should be
+            preloaded in advance (default: 1)
     """
 
     def __init__(self, dataset, batch_size=1, shuffle=False, sampler=None, batch_sampler=None,
-                 num_workers=0, collate_fn=default_collate, pin_memory=False, drop_last=False):
+                 num_workers=0, collate_fn=default_collate, pin_memory=False, drop_last=False,
+                 preload_batches=1):
         self.dataset = dataset
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.collate_fn = collate_fn
         self.pin_memory = pin_memory
         self.drop_last = drop_last
+        self.preload_batches = preload_batches
+        assert self.preload_batches >= 0
 
         if batch_sampler is not None:
             if batch_size > 1 or shuffle or sampler is not None or drop_last:
