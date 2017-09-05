@@ -6,7 +6,7 @@ Example: End-to-end AlexNet from PyTorch to Caffe2
 --------------------------------------------------
 
 Here is a simple script which exports a pretrained AlexNet as defined in
-torchvision into Toffee IR.  It runs a single round of inference and then
+torchvision into ONNX.  It runs a single round of inference and then
 saves the resulting traced model to ``alexnet.proto``::
 
     from torch.autograd import Variable
