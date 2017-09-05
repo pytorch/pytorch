@@ -51,10 +51,8 @@ inline bool isElemActive(const ValueTracingStateElem& vts) {
   return state && state->active;
 }
 
-inline std::vector<std::pair<bool, bool>> getVarFlags(const variable_list& vars) {
-  return fmap(vars, [](const std::shared_ptr<Variable>& var) {
-    return std::make_pair(var->requires_grad, var->is_volatile);
-  });
+inline std::vector<VariableFlags> getVarFlags(const variable_list& vars) {
+  return fmap(vars, &VariableFlags::create);
 }
 
 }

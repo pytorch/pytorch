@@ -33,19 +33,12 @@ struct TraceEval : autograd::Eval {
     }
   }
 
-  std::weak_ptr<TracingState> weak_tracing_state;
-};
-
-struct TraceEnterHook : autograd::FunctionPreHook {
-  TraceEnterHook(const std::shared_ptr<TracingState>& tracing_state)
-    : weak_tracing_state(tracing_state) {}
-
-  virtual variable_list operator()(const variable_list& inputs) {
-    // TODO: this shouldn't be run only once - it might be possible that this stage is
-    // called multiple times, but e.g. only the second call is unrolled for as many
-    // stages as we want.
-    std::call_once(flag, &TraceEnterHook::enterTrace, this, std::ref(inputs));
-    return inputs;
+  virtual variable_list apply(const variable_list& inputs) {
+    auto should_trace = !flag.test_and_set();
+    if (should_trace) enterTrace(inputs);
+    auto outputs = Eval::apply(inputs);
+    if (should_trace) exitTrace(inputs, outputs);
+    return outputs;
   }
 
   void enterTrace(const variable_list& inputs) {
@@ -62,20 +55,7 @@ struct TraceEnterHook : autograd::FunctionPreHook {
       setValueTrace(tracing_state, input, input_node);
       input_node->inferTypeFrom(input->data);
     }
-    tracing_state->var_flags[graph->stage()] = detail::getVarFlags(inputs);
-  }
-
-  std::weak_ptr<TracingState> weak_tracing_state;
-  std::once_flag flag;
-};
-
-struct TraceExitHook : autograd::FunctionPostHook {
-  TraceExitHook(const std::shared_ptr<TracingState>& tracing_state)
-    : weak_tracing_state(tracing_state) {}
-
-  virtual variable_list operator()(const variable_list& outputs, const variable_list& inputs) {
-    std::call_once(flag, &TraceExitHook::exitTrace, this, std::ref(inputs), std::ref(outputs));
-    return outputs;
+    tracing_state->var_flags.at(graph->stage()) = detail::getVarFlags(inputs);
   }
 
   void exitTrace(const variable_list& inputs, const variable_list& outputs) {
@@ -83,15 +63,14 @@ struct TraceExitHook : autograd::FunctionPostHook {
     if (!tracing_state) return;
 
     detail::_exit(tracing_state, outputs);
-    // Unfortunately there's no easy way to get handle of the backward node for current Eval.
-    auto eval_fn = autograd::Eval::getBackwardEval(inputs, outputs);
-    if (!eval_fn) return;
-    eval_fn->pre_hooks.emplace_back(std::make_shared<TraceEnterHook>(tracing_state));
-    eval_fn->post_hooks.emplace_back(std::make_shared<TraceExitHook>(tracing_state));
+    auto stage = tracing_state->graph->stage();
+    tracing_state->output_edges[stage] = fmap(placeholders, [](const std::shared_ptr<autograd::EvalOutput> p) {
+      return p->next_edge;
+    });
   }
 
+  std::atomic_flag flag;
   std::weak_ptr<TracingState> weak_tracing_state;
-  std::once_flag flag;
 };
 
 } // anonymous namespace
@@ -99,14 +78,18 @@ struct TraceExitHook : autograd::FunctionPostHook {
 namespace detail {
 
 void traceBackward(const std::shared_ptr<TracingState>& tracing_state, const variable_list& inputs, const variable_list& outputs) {
-  // TODO: add note on how we depend on TracedEval being created in here
-  auto eval_fn = std::make_shared<TraceEval>(tracing_state);
-  eval_fn->replaceSubgraph(inputs, outputs);
-  eval_fn->pre_hooks.emplace_back(std::make_shared<TraceEnterHook>(tracing_state));
-  eval_fn->post_hooks.emplace_back(std::make_shared<TraceExitHook>(tracing_state));
+  // TODO: add note on how we depend on TracedEval being created in here if num_stages == 1
+  std::make_shared<TraceEval>(tracing_state)->replaceSubgraph(inputs, outputs);
 }
 
 } // namespace detail
+
+VariableFlags VariableFlags::create(const std::shared_ptr<Variable>& var) {
+  VariableFlags f;
+  f.requires_grad = var->requires_grad;
+  f.is_volatile = var->is_volatile;
+  return f;
+}
 
 void nontraceableBackwardSubgraph(const variable_list& inputs, const variable_list& outputs) {
   std::make_shared<autograd::Eval>()->replaceSubgraph(inputs, outputs);

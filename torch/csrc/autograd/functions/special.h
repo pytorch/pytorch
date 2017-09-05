@@ -59,7 +59,7 @@ struct Eval : Function {
 
   virtual variable_list apply(const variable_list& inputs) override;
 
-  void replaceSubgraph(
+  bool replaceSubgraph(
       const variable_list& inputs,
       const variable_list& outputs,
       const placeholder_list& inherited_placeholders = placeholder_list());

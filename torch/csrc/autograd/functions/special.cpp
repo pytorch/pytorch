@@ -130,11 +130,14 @@ auto Eval::computeInputOrder(const variable_list& inputs, const placeholder_list
   return input_order;
 }
 
-void Eval::replaceSubgraph(const variable_list& inputs, const variable_list& _outputs,
+bool Eval::replaceSubgraph(const variable_list& inputs, const variable_list& _outputs,
                            const placeholder_list& inherited_placeholders) {
   // _outputs has a prefix deliberately, because it's unlikely that anything else
   // than relevant_outputs will be needed inside this function.
   variable_list relevant_outputs = filterRelevantOutputs(inputs, _outputs);
+
+  if (relevant_outputs.size() == 0)
+    return false;
 
   for (auto & output : relevant_outputs)
     roots.emplace_back(output->grad_fn, output->output_nr);
@@ -180,6 +183,8 @@ void Eval::replaceSubgraph(const variable_list& inputs, const variable_list& _ou
     output->grad_fn = shared_from_this();
     output->output_nr = num_inputs++;
   }
+
+  return true;
 }
 
 variable_list Eval::apply(const variable_list& inputs) {
