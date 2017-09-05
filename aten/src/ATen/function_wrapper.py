@@ -137,8 +137,8 @@ CHECKED_CAST = {
             'checked_cast<${Backend}IntTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
     'THStorage*': CodeTemplate('checked_cast<${Storage}>(&${arg_name},"${arg_name}",${arg_pos}, false)'),
     'THGenerator*': CodeTemplate('check_generator(&${arg_name})'),
-    'THSize*': CodeTemplate('THLongStorageView::make(${arg_name}, ${zero_dim_to_one})'),
-    'THStride*': CodeTemplate('THLongStorageView::make(${arg_name}, ${zero_dim_to_one})'),
+    'THSize*': CodeTemplate('THLongStorageView::make(${arg_name}, true)'),
+    'THStride*': CodeTemplate('THLongStorageView::make(${arg_name}, true)'),
     'real': CodeTemplate('${arg_name}.to${ScalarName}()'),
     'accreal': CodeTemplate('${arg_name}.to${AccScalarName}()'),
     'TensorList': CodeTemplate('tensor_list_checked_cast<${Tensor}, Tensor, '
@@ -286,6 +286,12 @@ def create_generic(top_env, declarations):
                 return argument
 
     def get_broadcast_actuals(broadcast_arg, broadcast_inplace, broadcast_dims):
+        # return the actuals that will be passed to the broadcast function.
+        # 1) in the common case, this is the broadcasted argument (e.g. "self") followed by the tensors
+        #    that it is broadcasted against (comma-separated) (e.g. "self, tensor1, tensor2").
+        # 2) in the broadcast_dims case, this is the broadcasted argument (e.g. "self") followed by the sizes
+        #    it is broadcasted to (as an initializer list), so e.g. the specification
+        #    "mat1.dim0,mat2.dim1" gets transformed to "self, {mat1.size(0),mat2.size(1)}"
         if not broadcast_dims:
             broadcast_actuals = [broadcast_arg['name']] + broadcast_arg['broadcast'].split()[0].split(",")
         else:
@@ -336,6 +342,7 @@ def create_generic(top_env, declarations):
             top_env['type_method_definitions'].append(
                 TYPE_METHOD_DEFINITION.substitute(env))
         else:
+            # "s_" for "same size".
             option['method_prefix_derived'] = 's_' + option['method_prefix']
             same_size_option = option.copy()
             same_size_option['method_prefix'] = option['method_prefix_derived']
@@ -535,9 +542,7 @@ def create_derived(backend_type_env, declarations):
 
                     check_cast = CHECKED_CAST[arg['type']].substitute(
                         env, arg_name=arg['name'], arg_pos=count,
-                        null_okay=null_okay,
-                        # don't allow expansion to a scalar
-                        zero_dim_to_one='true' if not option['name'] == 'expand' else 'false')
+                        null_okay=null_okay)
                     body.append("auto {}_ = {};".format(
                         arg['name'], check_cast))
                 if drop_argument(arg, option):
