@@ -2,6 +2,7 @@
 #include "caffe2/core/logging.h"
 #include <atomic>
 #include <thread>
+#include <condition_variable>
 
 namespace caffe2 {
 
@@ -14,6 +15,8 @@ namespace caffe2 {
 // - removed custom allocator.
 // - Removed some ifdef's
 // - cache-line align Worker.
+// - use std::atomic instead of volatile and custom barriers.
+// - use std::mutex/std::condition_variable instead of raw pthreads.
 
 constexpr size_t kGEMMLOWPCacheLineSize = 64;
 
@@ -108,8 +111,8 @@ inline int Do256NOPs() {
 template <typename T>
 T WaitForVariableChange(std::atomic<T>* var,
                         T initial_value,
-                        pthread_cond_t* cond,
-                        pthread_mutex_t* mutex) {
+                        std::condition_variable* cond,
+                        std::mutex* mutex) {
   // If we are on a platform that supports it, spin for some time.
   {
     int nops = 0;
@@ -132,14 +135,14 @@ T WaitForVariableChange(std::atomic<T>* var,
 
   // Finally, do real passive waiting.
   {
-    pthread_mutex_lock(mutex);
+    std::unique_lock<std::mutex> g(*mutex);
     T new_value = var->load(std::memory_order_relaxed);
     // Handle spurious wakeups.
-    while ((new_value = var->load(std::memory_order_relaxed)) == initial_value) {
-      pthread_cond_wait(cond, mutex);
-    }
+    cond->wait(g, [&]() {
+      new_value = var->load(std::memory_order_relaxed);
+      return new_value != initial_value;
+    });
     DCHECK_NE(static_cast<size_t>(new_value), static_cast<size_t>(initial_value));
-    pthread_mutex_unlock(mutex);
     return new_value;
   }
 }
@@ -149,16 +152,12 @@ T WaitForVariableChange(std::atomic<T>* var,
 // to have finished working.
 class BlockingCounter {
  public:
-  BlockingCounter()
-      : cond_(PTHREAD_COND_INITIALIZER), mutex_(PTHREAD_MUTEX_INITIALIZER), count_(0) {}
-
   // Sets/resets the counter; initial_count is the number of
   // decrementing events that the Wait() call will be waiting for.
   void Reset(std::size_t initial_count) {
-    pthread_mutex_lock(&mutex_);
+    std::lock_guard<std::mutex> g(mutex_);
     DCHECK_EQ(count_, 0);
     count_ = initial_count;
-    pthread_mutex_unlock(&mutex_);
   }
 
   // Decrements the counter; if the counter hits zero, signals
@@ -169,9 +168,8 @@ class BlockingCounter {
     const auto count_value = count_.fetch_sub(1, std::memory_order_relaxed) - 1;
     DCHECK_GE(count_value, 0);
     if (count_value == 0) {
-      pthread_mutex_lock(&mutex_);
-      pthread_cond_signal(&cond_);
-      pthread_mutex_unlock(&mutex_);
+      std::lock_guard<std::mutex> g(mutex_);
+      cond_.notify_one();
     }
     bool retval = count_value == 0;
     return retval;
@@ -186,9 +184,9 @@ class BlockingCounter {
   }
 
  private:
-  pthread_cond_t cond_;
-  pthread_mutex_t mutex_;
-  std::atomic<std::size_t> count_;
+  std::condition_variable cond_;
+  std::mutex mutex_;
+  std::atomic<std::size_t> count_{0};
 };
 
 // A workload for a worker.
@@ -210,23 +208,21 @@ class alignas(kGEMMLOWPCacheLineSize) Worker {
 
   explicit Worker(BlockingCounter* counter_to_decrement_when_ready)
       : task_(nullptr),
-        state_cond_(PTHREAD_COND_INITIALIZER),
-        state_mutex_(PTHREAD_MUTEX_INITIALIZER),
         state_(State::ThreadStartup),
         counter_to_decrement_when_ready_(counter_to_decrement_when_ready) {
-    pthread_create(&thread_, nullptr, ThreadFunc, this);
+    thread_ = caffe2::make_unique<std::thread>([this]() { this->ThreadFunc(); });
   }
 
   ~Worker() {
     ChangeState(State::ExitAsSoonAsPossible);
-    pthread_join(thread_, nullptr);
+    thread_->join();
   }
 
   // Changes State; may be called from either the worker thread
   // or the master thread; however, not all state transitions are legal,
   // which is guarded by assertions.
   void ChangeState(State new_state) {
-    pthread_mutex_lock(&state_mutex_);
+    std::lock_guard<std::mutex> g(state_mutex_);
     DCHECK(new_state != state_.load(std::memory_order_relaxed));
     switch (state_.load(std::memory_order_relaxed)) {
     case State::ThreadStartup:
@@ -242,11 +238,10 @@ class alignas(kGEMMLOWPCacheLineSize) Worker {
       abort();
     }
     state_.store(new_state, std::memory_order_relaxed);
-    pthread_cond_signal(&state_cond_);
+    state_cond_.notify_one();
     if (new_state == State::Ready) {
       counter_to_decrement_when_ready_->DecrementCount();
     }
-    pthread_mutex_unlock(&state_mutex_);
   }
 
   // Thread entry point.
@@ -294,15 +289,15 @@ class alignas(kGEMMLOWPCacheLineSize) Worker {
 
  private:
   // The underlying thread.
-  pthread_t thread_;
+  std::unique_ptr<std::thread> thread_;
 
   // The task to be worked on.
   // Visibility of writes to task_ guarded by state_mutex_.
   Task* task_;
 
   // The condition variable and mutex guarding state changes.
-  pthread_cond_t state_cond_;
-  pthread_mutex_t state_mutex_;
+  std::condition_variable state_cond_;
+  std::mutex state_mutex_;
 
   // The state enum tells if we're currently working, waiting for work, etc.
   std::atomic<State> state_;
