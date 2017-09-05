@@ -40,7 +40,7 @@ Below you can find code for a ``Linear`` function from :mod:`torch.nn`, with
 additional comments::
 
     # Inherit from Function
-    class Linear(Function):
+    class LinearFunction(Function):
 
         # Note that both forward and backward are @staticmethods
         @staticmethod
@@ -79,7 +79,7 @@ additional comments::
 Now, to make it easier to use these custom ops, we recommend aliasing their
 ``apply`` method::
 
-    linear = Linear.apply
+    linear = LinearFunction.apply
 
 Here, we give an additional example of a function that is parametrized by
 non-Variable arguments::
@@ -145,6 +145,7 @@ This is how a ``Linear`` module can be implemented::
 
     class Linear(nn.Module):
         def __init__(self, input_features, output_features, bias=True):
+            super(Linear, self).__init__()
             self.input_features = input_features
             self.output_features = output_features
 
@@ -156,7 +157,7 @@ This is how a ``Linear`` module can be implemented::
             # .register_buffer() to register buffers.
             # nn.Parameters can never be volatile and, different than Variables,
             # they require gradients by default.
-            self.weight = nn.Parameter(torch.Tensor(input_features, output_features))
+            self.weight = nn.Parameter(torch.Tensor(output_features, input_features))
             if bias:
                 self.bias = nn.Parameter(torch.Tensor(output_features))
             else:
@@ -171,7 +172,7 @@ This is how a ``Linear`` module can be implemented::
 
         def forward(self, input):
             # See the autograd section for explanation of what happens here.
-            return Linear()(input, self.weight, self.bias)
+            return LinearFunction.apply(input, self.weight, self.bias)
 
 
 Writing custom C extensions
