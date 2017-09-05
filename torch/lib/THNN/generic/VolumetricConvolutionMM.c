@@ -109,22 +109,22 @@ static void THNN_(unfolded_acc_vol)(
           int pT,
           int pW,
           int pH,
-          int nInputPlane,
-          int inputDepth,
-          int inputWidth,
-          int inputHeight,
-          int outputDepth,
-          int outputWidth,
-          int outputHeight)
+          long nInputPlane,
+          long inputDepth,
+          long inputWidth,
+          long inputHeight,
+          long outputDepth,
+          long outputWidth,
+          long outputHeight)
 {
-  int nip;
+  long nip;
   real *input_data = THTensor_(data)(input);
   real *finput_data = THTensor_(data)(finput);
 
 //#pragma omp parallel for private(nip)
   for (nip = 0; nip < nInputPlane; nip++)
   {
-    int kt, kw, kh, t, y, x, it, ix, iy;
+    long kt, kw, kh, t, y, x, it, ix, iy;
     for (kt = 0; kt < kT; kt++)
     {
       for (kh = 0; kh < kH; kh++)
@@ -196,13 +196,13 @@ static void THNN_(unfolded_copy_vol)(
           int pT,
           int pW,
           int pH,
-          int nInputPlane,
-          int inputDepth,
-          int inputWidth,
-          int inputHeight,
-          int outputDepth,
-          int outputWidth,
-          int outputHeight)
+          long nInputPlane,
+          long inputDepth,
+          long inputWidth,
+          long inputHeight,
+          long outputDepth,
+          long outputWidth,
+          long outputHeight)
 {
   long k;
   real *input_data = THTensor_(data)(input);
@@ -210,13 +210,13 @@ static void THNN_(unfolded_copy_vol)(
 // #pragma omp parallel for private(k)
   for (k = 0; k < nInputPlane*kT*kH*kW; k++)
   {
-    int nip = k / (kT*kH*kW);
-    int rest = k % (kT*kH*kW);
-    int kt = rest / (kH*kW);
+    long nip = k / (kT*kH*kW);
+    long rest = k % (kT*kH*kW);
+    long kt = rest / (kH*kW);
     rest = rest % (kH*kW);
-    int kh = rest / kW;
-    int kw = rest % kW;
-    int t,x,y,it,ix,iy;
+    long kh = rest / kW;
+    long kw = rest % kW;
+    long t,x,y,it,ix,iy;
     real *dst = finput_data
       + nip * (kT*kH*kW*outputDepth*outputHeight*outputWidth)
       + kt  * (kH*kW*outputDepth*outputHeight*outputWidth)
