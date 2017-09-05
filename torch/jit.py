@@ -166,10 +166,14 @@ class Traceable(object):
             Traceable._next_trace_id += 1
 
     def get_input_key(self, args):
-        if any(arg.volatile if isinstance(arg, Variable) else False for arg in args):
-            return self.VOLATILE
-        return tuple(arg.requires_grad if isinstance(arg, Variable) else arg
-                     for arg in args)
+        is_volatile = any(arg.volatile if isinstance(arg, Variable) else False for arg in args)
+        if is_volatile:
+            def get_var_key(var):
+                return (var.size(), self.VOLATILE)
+        else:
+            def get_var_key(var):
+                return (var.size(), var.requires_grad)
+        return tuple(get_var_key(arg) if isinstance(arg, Variable) else arg for arg in args)
 
     def get_trace_inputs(self, args, extra=()):
         return tuple(itertools.chain(self._state_values(), flatten(args), extra))
@@ -191,7 +195,8 @@ class Traceable(object):
 
         return function._unflatten(flat_out, self.proto)
 
-    def record_trace(self, args, is_volatile=False, extra=()):
+    def record_trace(self, args, extra=()):
+        is_volatile = any(arg.volatile if isinstance(arg, Variable) else False for arg in args)
         trace_inputs = self.get_trace_inputs(args, extra)
 
         trace = torch._C._tracer_enter(trace_inputs, 0 if is_volatile else self.num_derivatives)
@@ -226,7 +231,7 @@ class Traceable(object):
             return self.run_closure(trace_info.closure, args)
 
         # Otherwise, we have to collect a new trace
-        trace, out = self.record_trace(args, input_key == self.VOLATILE)
+        trace, out = self.record_trace(args)
         trace_info.traces.append(trace)
         return out
 
