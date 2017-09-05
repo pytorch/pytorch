@@ -400,10 +400,10 @@ class TestTorch(TestCase):
         a = torch.randn(100, 89)
         zeros = torch.Tensor().resize_as_(a).zero_()
 
-        res_pow = torch.pow(a, -1)
+        res_div = 1 / a
         res_reciprocal = a.clone()
         res_reciprocal.reciprocal_()
-        self.assertEqual(res_reciprocal, res_pow)
+        self.assertEqual(res_reciprocal, res_div)
 
     def test_mul(self):
         m1 = torch.randn(10, 10)
@@ -668,22 +668,24 @@ class TestTorch(TestCase):
     def test_pow(self):
         # [res] torch.pow([res,] x)
 
-        # base - tensor, exponent - number
-        # contiguous
-        m1 = torch.randn(100, 100)
-        res1 = torch.pow(m1[4], 3)
-        res2 = res1.clone().zero_()
-        for i in range(res2.size(0)):
-            res2[i] = math.pow(m1[4][i], 3)
-        self.assertEqual(res1, res2)
+        # pow has dedicated implementation for different exponents
+        for exponent in [-2, -1, -0.5, 0.5, 1, 2, 3, 4]:
+            # base - tensor, exponent - number
+            # contiguous
+            m1 = torch.rand(100, 100) + 0.5
+            res1 = torch.pow(m1[4], exponent)
+            res2 = res1.clone().zero_()
+            for i in range(res2.size(0)):
+                res2[i] = math.pow(m1[4][i], exponent)
+            self.assertEqual(res1, res2)
 
-        # non-contiguous
-        m1 = torch.randn(100, 100)
-        res1 = torch.pow(m1[:, 4], 3)
-        res2 = res1.clone().zero_()
-        for i in range(res2.size(0)):
-            res2[i] = math.pow(m1[i, 4], 3)
-        self.assertEqual(res1, res2)
+            # non-contiguous
+            m1 = torch.rand(100, 100) + 0.5
+            res1 = torch.pow(m1[:, 4], exponent)
+            res2 = res1.clone().zero_()
+            for i in range(res2.size(0)):
+                res2[i] = math.pow(m1[i, 4], exponent)
+            self.assertEqual(res1, res2)
 
         # base - number, exponent - tensor
         # contiguous
