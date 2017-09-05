@@ -324,6 +324,11 @@ class TestJit(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'different flags'):
             fn(x).backward(Variable(torch.ones(1), requires_grad=True))
         # TODO: enable once AutogradClosure registers prev stage inputs correctly
+        # The problem is that the tracer sometimes catches unnecessary operations.
+        # For example, some ops will still return a valid grad, even though their
+        # next_function doesn't need it, and if two ops do it, they will get summed
+        # together - the Add function will have two inputs that don't require grad,
+        # and this causees some problems in jit_closure.cpp
         # grad_x, = torch.autograd.grad(fn(x), (x,), create_graph=True)
         # grad_x.backward()
 

@@ -12,13 +12,16 @@
 namespace torch { namespace autograd {
 
 struct Variable;
+struct Function;
 
 }}
 
 namespace torch { namespace jit { namespace tracer {
 
 using torch::autograd::Variable;
+using torch::autograd::Function;
 using variable_list = std::vector<std::shared_ptr<Variable>>;
+using function_list = std::vector<std::pair<std::shared_ptr<Function>, int>>;
 
 // TracingState tracks the necessary state when we are tracing the execution of
 // autograd code; most importantly, it holds a reference to the actual IR
@@ -30,13 +33,21 @@ using variable_list = std::vector<std::shared_ptr<Variable>>;
 // from arising when a variable that participated in a trace outlives the
 // actual trace itself.
 
+struct VariableFlags {
+  static VariableFlags create(const std::shared_ptr<Variable>& var);
+
+  bool requires_grad;
+  bool is_volatile;
+};
+
 struct TracingState : public std::enable_shared_from_this<TracingState> {
   TracingState(std::size_t num_stages)
     : graph(new Graph())
     , active(false)
     , num_stages(num_stages)
     , eval_count(0)
-    , var_flags(num_stages) {}
+    , var_flags(num_stages)
+    , output_edges(num_stages) {}
 
   // XXX: graph can be NULL if it's a failed trace (failed = didn't capture all
   // the stages we care about)
@@ -51,7 +62,8 @@ struct TracingState : public std::enable_shared_from_this<TracingState> {
   // TODO: Perhaps, turn this into an owning reference.  The buffers
   // are persistent, so this won't lead to a leak.
   std::unordered_map<void*, Node*> buffer_map;
-  std::vector<std::vector<std::pair<bool, bool>>> var_flags;
+  std::vector<std::vector<VariableFlags>> var_flags;
+  std::vector<function_list> output_edges;
 
   std::mutex mutex;
   variable_list inputs; // Used only for the duration of first stage
