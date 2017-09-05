@@ -13,14 +13,6 @@ int main() {
     assert(false);
   } catch(std::runtime_error &e) {}
 
-  // can't "expand" a Tensor to  Scalar
-  try {
-    auto tScalar = T.ones({1});
-    tScalar.get()->maybeScalar(true);
-    tScalar.expand({});
-    assert(false);
-  } catch (std::runtime_error &e) {}
-
   // 1) out-place function with 2 args
   {
     // basic
@@ -104,7 +96,7 @@ int main() {
       bScalar.add_(a);
       assert(false);
     } catch(std::runtime_error &e) {}
-    
+
     // error: would have to expand inplace arg
     try {
       auto a = T.randn({1, 5});
@@ -145,7 +137,7 @@ int main() {
       assert(false);
     } catch(std::runtime_error &e) {}
   }
-  
+
   // explicit dim specification
   {
     // basic

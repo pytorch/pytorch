@@ -21,11 +21,11 @@ std::tuple<Tensor, Tensor> expand_inplace(const Tensor &tensor, const Tensor &to
   return std::make_tuple(to_expand1.expand(tensor.sizes()), to_expand2.expand(tensor.sizes()));
 }
 
-std::vector<uint64_t> infer_size2(IntList a, IntList b) {
+std::vector<int64_t> infer_size2(IntList a, IntList b) {
   auto dimsA = a.size();
   auto dimsB = b.size();
   ptrdiff_t ndim = dimsA > dimsB ? dimsA : dimsB;
-  std::vector<uint64_t> expandedSizes(ndim);
+  std::vector<int64_t> expandedSizes(ndim);
 
   for (long i = ndim - 1; i >= 0; --i) {
     long offset = ndim - 1 - i;
@@ -52,7 +52,7 @@ std::tuple<Tensor, Tensor> expand_outplace(const Tensor &to_expand1, const Tenso
   }
 
   auto infer_size = infer_size2(to_expand1.sizes(), to_expand2.sizes());
-  IntList expanded_size(reinterpret_cast<int64_t*>(infer_size.data()), infer_size.size());
+  IntList expanded_size(infer_size);
   return std::make_tuple(to_expand1.expand(expanded_size), to_expand2.expand(expanded_size));
 }
 
@@ -64,9 +64,9 @@ std::tuple<Tensor, Tensor, Tensor> expand_outplace(const Tensor &to_expand1,
   }
 
   auto infer_size12 = infer_size2(to_expand1.sizes(), to_expand2.sizes());
-  IntList expanded_size12(reinterpret_cast<int64_t*>(infer_size12.data()), infer_size12.size());
+  IntList expanded_size12(infer_size12);
   auto infer_size = infer_size2(expanded_size12, to_expand3.sizes());
-  IntList expanded_size(reinterpret_cast<int64_t*>(infer_size.data()), infer_size.size());
+  IntList expanded_size(infer_size);
   return std::make_tuple(to_expand1.expand(expanded_size), to_expand2.expand(expanded_size), to_expand3.expand(expanded_size));
 }
 
