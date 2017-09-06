@@ -9,3 +9,6 @@ target_link_libraries(atest ATen)
 
 add_executable(broadcast_test broadcast_test.cpp)
 target_link_libraries(broadcast_test ATen)
+
+add_executable(wrapdim_test wrapdim_test.cpp)
+target_link_libraries(wrapdim_test ATen)
