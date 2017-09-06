@@ -764,6 +764,7 @@ OPERATOR_SCHEMA(EnsureDense)
     .NumInputs(1)
     .NumOutputs(1)
     .AllowInplace({{0, 0}})
+    .IdenticalTypeAndShape()
     .SetDoc(R"DOC(
 This operator converts dense or sparse gradients to dense ones.
 Therefore, sparse gradient can be back propagated to Operators that consume
