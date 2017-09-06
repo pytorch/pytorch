@@ -40,6 +40,11 @@ REGISTER_CUDA_OPERATOR_WITH_ENGINE(
     GLOO,
     CreateCommonWorld<CUDAContext>);
 
+REGISTER_CUDA_OPERATOR_WITH_ENGINE(
+    CloneCommonWorld,
+    GLOO,
+    CloneCommonWorld<CUDAContext>);
+
 } // namespace
 } // namespace gloo
 } // namespace caffe2

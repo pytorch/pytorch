@@ -5,6 +5,7 @@
 namespace caffe2 {
 // Communication operators do not have default engines.
 REGISTER_CUDA_OPERATOR(CreateCommonWorld, NoDefaultEngineOp<CUDAContext>);
+REGISTER_CUDA_OPERATOR(CloneCommonWorld, NoDefaultEngineOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(Broadcast, NoDefaultEngineOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(Reduce, NoDefaultEngineOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(Allgather, NoDefaultEngineOp<CUDAContext>);

@@ -28,6 +28,11 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
     GLOO,
     CreateCommonWorld<CPUContext>);
 
+REGISTER_CPU_OPERATOR_WITH_ENGINE(
+    CloneCommonWorld,
+    GLOO,
+    CloneCommonWorld<CPUContext>);
+
 REGISTER_CPU_OPERATOR_WITH_ENGINE(DestroyCommonWorld, GLOO, DestroyCommonWorld);
 
 } // namespace
