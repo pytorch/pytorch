@@ -704,6 +704,10 @@ class TestTorch(TestCase):
             res2[i] = math.pow(3, m1[i][4])
         self.assertEqual(res1, res2)
 
+    def test_rpow(self):
+        m = torch.randn(10, 10)
+        self.assertEqual(torch.pow(2, m), 2**m)
+
     def _test_cop(self, torchfn, mathfn):
         def reference_implementation(res2):
             for i, j in iter_indices(sm1):
