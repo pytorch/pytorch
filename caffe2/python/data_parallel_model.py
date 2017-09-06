@@ -21,6 +21,8 @@ dyndep.InitOpsLibrary("@/caffe2/caffe2/contrib/gloo:gloo_ops_gpu")
 log = logging.getLogger("data_parallel_model")
 log.setLevel(logging.INFO)
 
+_DEFAULT_TIMEOUT_SEC = 30
+
 
 def Parallelize_GPU(*args, **kwargs):
     kwargs['cpu_device'] = False
@@ -576,7 +578,10 @@ def RunNet(model, num_iterations):
             workspace.RunNet(net_iter, num_iterations)
 
 
-def Synchronize(model, timeout_sec=30):
+barrier_instance = 0
+
+
+def Synchronize(model, timeout_sec=_DEFAULT_TIMEOUT_SEC):
     log.info("Creating synchronization barrier net")
     assert model._rendezvous is not None, "Missing rendezvous"
     assert model._rendezvous['engine'] == 'GLOO', "Engine does not support barrier"
@@ -586,16 +591,12 @@ def Synchronize(model, timeout_sec=30):
     instance = barrier_instance
     barrier_instance += 1
     barrier_net = core.Net("sync_barrier_net_" + str(instance))
-    comm_world = barrier_net.CreateCommonWorld(
-        [model._rendezvous['kv_handler']] +
-        _GetCommonWorldToFork(model.param_init_net),
+    comm_world = _CreateOrCloneCommonWorld(
+        barrier_net,
         "sync_barrier_cw_" + str(instance),
-        name="sync_barrier_cw_op_" + str(instance),
-        size=model._rendezvous['num_shards'],
-        rank=model._rendezvous['shard_id'],
-        engine=model._rendezvous['engine'],
+        rendezvous=model._rendezvous,
         status_blob="sync_barrier_cw_status_" + str(instance),
-        timeout_ms=timeout_sec * 1000
+        timeout_sec=timeout_sec,
     )
     barrier_net.Barrier(
         inputs=[comm_world],
@@ -1012,18 +1013,14 @@ class CollectivesConcurrencyControl(object):
         common_world, control_input = [None, None]
         current_slot = self.counter % self.max_concurrent_context
         if len(self.common_worlds) < self.max_concurrent_context:
-            common_world = self.param_init_net.CreateCommonWorld(
-                [self.rendezvous['kv_handler']] +
-                _GetCommonWorldToFork(self.param_init_net),
+            common_world = _CreateOrCloneCommonWorld(
+                self.param_init_net,
                 "{}_{}_cw".format(self.name, current_slot),
-                name="{}_{}_cw_op".format(self.name, current_slot),
-                size=self.rendezvous['num_shards'],
-                rank=self.rendezvous['shard_id'],
-                engine=self.rendezvous['engine'],
+                rendezvous=self.rendezvous,
                 status_blob="create_{}_cw_{}_status".format(
                     self.name,
                     current_slot
-                )
+                ),
             )
             self.common_worlds.append(common_world)
             self.control_inputs.append(control_output_blob)
@@ -1453,18 +1450,61 @@ def OptimizeGradientMemory(model,
         )
 
 
-def _GetCommonWorldToFork(param_init_net):
-    '''
-    We can fork common worlds from existing ones. So inspect the param_init_net
-    for an already created commonworld
-    '''
-    for op in param_init_net.Proto().op:
-        if op.type == "CreateCommonWorld":
-            return [op.output[0]]
-    return []
+def _CreateOrCloneCommonWorld(
+        net,
+        common_world_blob,
+        rendezvous,
+        name=None,
+        status_blob=None,
+        timeout_sec=_DEFAULT_TIMEOUT_SEC):
+    timeout_ms = timeout_sec * 1000
 
+    # Check if there is an existing CreateCommonWorld
+    # with the same timeout we're looking for. If so,
+    # we can clone it instead of creating a new one.
+    existing = None
+    for op in net.Proto().op:
+        if op.type != "CreateCommonWorld":
+            continue
 
-barrier_instance = 0
+        # Find common world timeout
+        op_timeout_ms = -1
+        for arg in op.arg:
+            if arg.name == 'timeout_ms':
+                op_timeout_ms = arg.i
+                break
+        if op_timeout_ms != timeout_ms:
+            continue
+
+        # This common world was created with the same timeout we're
+        # looking for, so we can clone it
+        existing = op.output[0]
+        break
+
+    if name is None:
+        name = "{}_op".format(common_world_blob)
+
+    if existing is not None:
+        comm_world = net.CloneCommonWorld(
+            [existing],
+            common_world_blob,
+            name=name,
+            engine=rendezvous['engine'],
+            status_blob=status_blob,
+        )
+    else:
+        comm_world = net.CreateCommonWorld(
+            [rendezvous['kv_handler']],
+            common_world_blob,
+            name=name,
+            size=rendezvous['num_shards'],
+            rank=rendezvous['shard_id'],
+            engine=rendezvous['engine'],
+            status_blob=status_blob,
+            timeout_ms=timeout_ms,
+        )
+
+    return comm_world
 
 
 def _RunComparison(model, blob_name, device=None):

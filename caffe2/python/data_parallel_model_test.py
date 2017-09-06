@@ -996,3 +996,8 @@ class SparseDataParallelModelTestWithSharedIndices(TestCase):
 
         if workspace.NumCudaDevices() >= 8:
             self.run_model(V, list(range(8)))
+
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()
