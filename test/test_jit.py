@@ -267,6 +267,42 @@ class TestJit(TestCase):
         out.sum().backward()
         self.assertTrue(cell.has_trace_for(x))
 
+    def test_output_unflatten(self):
+        """Check that outputs of traced functions retain the original structure and nesting"""
+        x = Variable(torch.randn(2, 2), requires_grad=True)
+
+        def fn(x):
+            return (x * 2, (x ** 2, x + 4, (x + 2,), ), x * 4)
+
+        expected_out = fn(x)
+        fn = torch.jit.traced(fn)
+
+        def recursive_sum(obj):
+            if isinstance(obj, Variable):
+                return obj.sum()
+            else:
+                return sum(recursive_sum(o) for o in obj)
+
+        recursive_sum(fn(x)).backward()
+        self.assertTrue(fn.has_trace_for(x))
+        self.assertEqual(fn(x), expected_out)
+
+    def test_input_flatten(self):
+        """Check that inputs to traced functions are flattened"""
+        def make_var():
+            return Variable(torch.randn(1), requires_grad=True)
+        x = (make_var(), (make_var(), make_var()))
+
+        def fn(x, t):
+            y, z = t
+            return x * y * z
+
+        expected_out = fn(*x)
+        fn = torch.jit.traced(fn)
+        fn(*x).backward()
+        self.assertTrue(fn.has_trace_for(*x))
+        self.assertEqual(fn(x), expected_out)
+
     def test_flags(self):
         x = Variable(torch.randn(2, 2))
         y = Variable(torch.randn(2, 2))

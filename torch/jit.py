@@ -106,6 +106,7 @@ class Traceable(object):
             self.complete_trace = None
             self.closure = None
             self.trace_name = trace_name
+            self.proto = None
 
         def _run_pass(self, p):
             name = p.__doc__
@@ -157,8 +158,6 @@ class Traceable(object):
         self.verify = verify
         self.time = time
         self.enabled = enabled
-        self.proto = None
-        self.traces = []
         self.num_derivatives = num_derivatives
         self.traces = defaultdict(lambda: Traceable.TraceInfo(trace_name))
         if self.trace_name is None:
@@ -178,22 +177,21 @@ class Traceable(object):
     def get_trace_inputs(self, args, extra=()):
         return tuple(itertools.chain(self._state_values(), flatten(args), extra))
 
-    def run_closure(self, closure, args):
+    def run_closure(self, trace_info, args, trace_inputs):
         if self.verify:
             cloned_args = tuple(_clone_inputs(args))
             with _time("run_real", self.time), _fork_rng(self.verify):
                 flat_real_out = flatten((self._run(*cloned_args),))
 
-        trace_inputs = self.get_trace_inputs(args)
         with _time("run_trace", self.time):
-            flat_out = closure()(*_varify(trace_inputs))
+            flat_out = trace_info.closure()(*_varify(trace_inputs))
         if not isinstance(flat_out, tuple):
             flat_out = (flat_out,)
 
         if self.verify:
             _verify(flat_out, flat_real_out)
 
-        return function._unflatten(flat_out, self.proto)
+        return function._unflatten(flat_out, trace_info.proto)
 
     def record_trace(self, args, extra=()):
         is_volatile = any(arg.volatile if isinstance(arg, Variable) else False for arg in args)
@@ -206,7 +204,8 @@ class Traceable(object):
         return trace, out
 
     def has_trace_for(self, *args):
-        trace_info = self.traces.get(self.get_input_key(args))
+        trace_inputs = self.get_trace_inputs(args)
+        trace_info = self.traces.get(self.get_input_key(trace_inputs))
         if trace_info is None:
             return False
         trace_info.check_traces()
@@ -218,21 +217,24 @@ class Traceable(object):
             with _time("run_real", self.time):
                 return self._run(*args)
 
-        input_key = self.get_input_key(args)
+        trace_inputs = self.get_trace_inputs(args)
+        input_key = self.get_input_key(trace_inputs)
         trace_info = self.traces[input_key]
         # Use the compiled closure if we have it already
         if trace_info.closure is not None:
-            return self.run_closure(trace_info.closure, args)
+            return self.run_closure(trace_info, args, trace_inputs)
 
         # Check if any of the traces in our pool are complete now
         trace_info.check_traces()
         if trace_info.complete_trace is not None:
             trace_info.compile_trace(self.optimize)
-            return self.run_closure(trace_info.closure, args)
+            return self.run_closure(trace_info, args, trace_inputs)
 
         # Otherwise, we have to collect a new trace
         trace, out = self.record_trace(args)
         trace_info.traces.append(trace)
+        if trace_info.proto is None:
+            trace_info.proto = function._to_proto(out)
         return out
 
 
