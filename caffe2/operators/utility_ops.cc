@@ -567,7 +567,34 @@ Deduplicates input indices vector and optionally produces reverse remapping.
 There's no guarantees on the ordering of the output indices.
 )DOC")
     .Input(0, "indices", "1D tensor of int32 or int64 indices.")
-    .Output(0, "unique_indices", "1D tensor of deduped entries.");
+    .Output(0, "unique_indices", "1D tensor of deduped entries.")
+    .Output(
+        1,
+        "remapping",
+        "(optional) mapping from `indices` to `unique_indices`. This has the "
+        "same shape as `indices`. Its elements are the indices into "
+        "`unique_indices` such that `Gather(['unique_indices', 'remapping'])` "
+        "yields `indices`.")
+    .TensorInferenceFunction([](const OperatorDef& def,
+                                const vector<TensorShape>& in) {
+      std::vector<TensorShape> out(1);
+      out[0].set_data_type(in[0].data_type());
+      CAFFE_ENFORCE_EQ(in[0].dims_size(), 1);
+      if (in[0].dims(0) <= 1) {
+        // This special case is useful in some situation, e.g., when feeding
+        // tensor inference with empty tensor (where the first dim is the batch
+        // size)
+        out[0].add_dims(in[0].dims(0));
+      } else {
+        out[0].set_unknown_shape(true);
+      }
+      if (def.output_size() > 1) {
+        // Remapping has the same shape as the input tensor
+        out.push_back(in[0]);
+        out.back().set_data_type(TensorProto::INT32);
+      }
+      return out;
+    });
 
 OPERATOR_SCHEMA(LengthsToSegmentIds)
     .NumInputs(1)
