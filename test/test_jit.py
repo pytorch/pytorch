@@ -222,6 +222,29 @@ class TestJit(TestCase):
         torch._C._jit_pass_dce(trace)
         self.assertExpected(str(trace))
 
+    def test_backward_closure(self):
+        """Check that autograd closures handle multiple stages correctly."""
+        x = Variable(torch.randn(1), requires_grad=True)
+
+        @torch.jit.trace(num_derivatives=2)
+        def fn(x):
+            return x * x
+
+        # Generate trace
+        grad_x, = torch.autograd.grad(fn(x), (x,), create_graph=True)
+        self.assertFalse(fn.has_trace_for(x))
+        grad_x.backward()
+        self.assertTrue(fn.has_trace_for(x))
+
+        x_grad = x.grad.data.clone()
+        x.grad.data.zero_()
+
+        # Run the trace
+        grad_x, = torch.autograd.grad(fn(x), (x,), create_graph=True)
+        grad_x.backward()
+
+        self.assertEqual(x.grad.data, x_grad)
+
     def test_trace_expire(self):
         x = Variable(torch.randn(2, 2), requires_grad=True)
         y = Variable(torch.randn(2, 2), requires_grad=True)
@@ -359,14 +382,9 @@ class TestJit(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, 'different flags'):
             fn(x).backward(Variable(torch.ones(1), requires_grad=True))
-        # TODO: enable once AutogradClosure registers prev stage inputs correctly
-        # The problem is that the tracer sometimes catches unnecessary operations.
-        # For example, some ops will still return a valid grad, even though their
-        # next_function doesn't need it, and if two ops do it, they will get summed
-        # together - the Add function will have two inputs that don't require grad,
-        # and this causees some problems in jit_closure.cpp
-        # grad_x, = torch.autograd.grad(fn(x), (x,), create_graph=True)
-        # grad_x.backward()
+        with self.assertRaisesRegex(RuntimeError, 'different flags'):
+            grad_x, = torch.autograd.grad(fn(x), (x,), create_graph=True)
+            grad_x.backward(Variable(torch.ones(1), requires_grad=True))
 
     def test_python_ir(self):
         x = Variable(torch.Tensor([0.4]), requires_grad=True)

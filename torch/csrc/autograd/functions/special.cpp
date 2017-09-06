@@ -192,7 +192,8 @@ variable_list Eval::apply(const variable_list& inputs) {
   std::mutex outputs_mutex;
   variable_list outputs(placeholders.size());
   auto& engine = python::PythonEngine::getDefaultEngine();
-  engine.execute(roots, inputs, true, getCallbacks(outputs, outputs_mutex));
+  auto exec_data = filterRoots(inputs);
+  engine.execute(exec_data.first, exec_data.second, true, getCallbacks(outputs, outputs_mutex));
 
   auto bw_eval = newEval();
   bw_eval->replaceSubgraph(inputs, outputs, placeholders);
@@ -204,6 +205,25 @@ variable_list Eval::apply(const variable_list& inputs) {
   tracing_state->in_eval_subgraph = true;
 
   return outputs;
+}
+
+// TODO: once we clean up the stochastic function mess it should be possible to ignore
+// nullptr inputs in the Engine (it implies that the Variables is 0, so the jacobian vector
+// product will be all zero too).
+std::pair<function_list, variable_list> Eval::filterRoots(const variable_list& inputs) {
+  variable_list filtered_inputs;
+  function_list filtered_roots;
+  auto num_inputs = inputs.size();
+  if (roots.size() != num_inputs)
+    throw std::logic_error("inputs.size() != roots.size()");
+  filtered_inputs.reserve(num_inputs);
+  filtered_roots.reserve(num_inputs);
+  for (std::size_t i = 0; i < num_inputs; ++i) {
+    if (!inputs[i]) continue;
+    filtered_inputs.emplace_back(inputs[i]);
+    filtered_roots.emplace_back(roots[i]);
+  }
+  return std::make_pair(std::move(filtered_roots), std::move(filtered_inputs));
 }
 
 Engine::pre_callback_map Eval::getCallbacks(variable_list& outputs, std::mutex& outputs_mutex) {
