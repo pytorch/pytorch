@@ -458,13 +458,13 @@ void THCTensor_(select)(THCState *state, THCTensor *self, THCTensor *src, int di
 {
   int d;
 
+  THArgCheck(self->nDimension > 1, 1, "cannot select on a vector");
+  THArgCheck((dimension >= 0) && (dimension < self->nDimension), 3, "out of range");
+  THArgCheck((sliceIndex >= 0) && (sliceIndex < self->size[dimension]), 4, "out of range");
+
   if(!src)
     src = self;
-
-  THArgCheck(src->nDimension > 1, 1, "cannot select on a vector");
-  THArgCheck((dimension >= 0) && (dimension < src->nDimension), 3, "out of range");
-  THArgCheck((sliceIndex >= 0) && (sliceIndex < src->size[dimension]), 4, "out of range");
-
+  
   THCTensor_(set)(state, self, src);
   THCTensor_(narrow)(state, self, NULL, dimension, sliceIndex, 1);
   for(d = dimension; d < self->nDimension-1; d++)
