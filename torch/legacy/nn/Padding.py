@@ -10,7 +10,7 @@ class Padding(Module):
     # When nInputDim is provided, inputs larger than that value will be considered batches
     # where the actual dim to be padded will be dimension dim + 1.
 
-    def __init__(self, dim, pad, nInputDim=None, value=0, index=0):
+    def __init__(self, dim, pad, value=0, index=0, nInputDim=0):
         self.value = value
         self.index = index
         self.dim = dim
