@@ -357,8 +357,16 @@ if(USE_GLOO)
       set(BUILD_BENCHMARK OFF)
       add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/gloo)
       caffe2_include_directories(${PROJECT_SOURCE_DIR}/third_party/gloo)
+      caffe2_include_directories(${PROJECT_BINARY_DIR}/third_party/gloo)
       set(BUILD_TEST ${__BUILD_TEST})
       set(BUILD_BENCHMARK ${__BUILD_BENCHMARK})
+
+      # Add explicit dependency if NCCL is built from third_party.
+      # Without dependency, make -jN with N>1 can fail if the NCCL build
+      # hasn't finished when CUDA targets are linked.
+      if(NCCL_EXTERNAL)
+        add_dependencies(gloo_cuda nccl_external)
+      endif()
     endif()
     # Pick the right dependency depending on USE_CUDA
     if(NOT USE_CUDA)
