@@ -592,8 +592,9 @@ def create_derived(backend_type_env, declarations):
             if wrap_dim_arg is not None:
                 # wrap_dim specification can have (add) expressions, e.g. self+1
                 wrap_dim_params = wrap_dim_arg.split("+")
+                wrap_dim_params[0] = wrap_dim_params[0] + "_"
                 wrap_dim_target = wrap_dim_params[0]
-                wrap_dim_params[0] = "{}.dim()".format(wrap_dim_target)
+                wrap_dim_params[0] = "{}->dim()".format(wrap_dim_target)
                 wrap_dim_expr = "+".join(wrap_dim_params)
                 body.append(WRAP_DIM_GEN.substitute(
                     target=wrap_dim_target, dim=arg['name'], target_dim_expr=wrap_dim_expr,
