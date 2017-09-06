@@ -200,8 +200,9 @@ def Caffe2LSTM(args):
         )
         last_time = new_time
 
-    log.info("Done. Total EPS excluding 1st iteration: {}k".format(
+    log.info("Done. Total EPS excluding 1st iteration: {}k {}".format(
          np.sum(entry_counts[1:]) / (time.time() - start_time) // 100 / 10,
+         " (with RNN executor)" if args.rnn_executor else "",
     ))
 
     if (args.gpu):
@@ -296,6 +297,11 @@ def GetArgumentParser():
         help="Number of LSTM layers. All output dimensions are going to be"
              "of hidden_dim size",
     )
+    parser.add_argument(
+        "--rnn_executor",
+        action="store_true",
+        help="Whether to use RNN executor"
+    )
 
     return parser
 
@@ -303,14 +309,17 @@ def GetArgumentParser():
 if __name__ == '__main__':
     args, extra_args = GetArgumentParser().parse_known_args()
 
+    rnn_executor_opt = 1 if args.rnn_executor else 0
+
     workspace.GlobalInit([
         'caffe2',
         '--caffe2_log_level=0',
         '--caffe2_print_blob_sizes_at_exit=0',
+        '--caffe2_rnn_executor={}'.format(rnn_executor_opt),
         '--caffe2_gpu_memory_tracking=1'] + extra_args)
 
     device = core.DeviceOption(
-        caffe2_pb2.CUDA if args.gpu else caffe2_pb2.CPU, 0)
+        caffe2_pb2.CUDA if args.gpu else caffe2_pb2.CPU, 4)
 
     with core.DeviceScope(device):
         Benchmark(args)

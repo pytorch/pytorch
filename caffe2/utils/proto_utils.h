@@ -167,6 +167,9 @@ inline OperatorDef CreateOperatorDef(
       engine);
 }
 
+bool HasOutput(const OperatorDef& op, const std::string& output);
+bool HasInput(const OperatorDef& op, const std::string& input);
+
 /**
  * @brief A helper class to index into arguments.
  *

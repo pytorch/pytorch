@@ -129,7 +129,7 @@ def recurrent_net(
         x[1] for x in initial_cell_inputs] + references
     all_outputs = []
 
-    cell_net.Proto().type = 'rnn'
+    cell_net.Proto().type = 'simple'
 
     # Internal arguments used by RecurrentNetwork operator
 
@@ -147,6 +147,7 @@ def recurrent_net(
 
     # States held inputs to the cell net
     recurrent_states = []
+    backward_recurrent_mapping = {}
 
     for cell_input, _ in initial_cell_inputs:
         cell_input = str(cell_input)
@@ -179,7 +180,10 @@ def recurrent_net(
                 backward_links.append(
                     (backward_mapping[cell_input], states_grad, 0))
             else:
-                backward_links.append((cell_input + "_grad", states_grad, 0))
+                backward_links.append((recurrent_input_grad, states_grad, 0))
+
+            backward_recurrent_mapping[cell_output +
+                                       "_grad"] = cell_input + "_grad"
 
     for input_t, input_blob in inputs:
         forward_links.append((str(input_t), str(input_blob), 0))
@@ -235,6 +239,10 @@ def recurrent_net(
                         [output_blob],
                     )
 
+    def map_to_dual_list(m):
+        return [str(x) for x in list(m.keys())] + \
+               [str(x) for x in list(m.values())]
+
     backward_args = {}
     if backward_cell_net is not None:
         backward_mapping_keys = set(viewkeys(backward_mapping))
@@ -258,6 +266,8 @@ def recurrent_net(
             'recompute_blobs_on_backward': [
                 str(b) for b in recompute_blobs_on_backward
             ],
+            'backward_recurrent_mapping':
+                map_to_dual_list(backward_recurrent_mapping),
             'param_grads': param_grads,
         }
 
@@ -274,6 +284,8 @@ def recurrent_net(
         link_internal=[str(l) for l in link_internal],
         link_external=[str(l) for l in link_external],
         link_offset=link_offset,
+        enable_rnn_executor=1,
+        recurrent_mapping=map_to_dual_list(links),
         step_net=str(cell_net.Proto()),
         timestep="timestep" if timestep is None else str(timestep),
         **backward_args
