@@ -68,15 +68,17 @@ To run the exported script with Caffe2, you will need to install
 the backend for Caffe2::
 
     # ...continuing from above
-    import onnx.backend.c2 as backend
+    import onnx.backend.caffe2 as backend
     import numpy as np
 
     rep = backend.prepare(graph, device="CUDA:0") # or "CPU"
     # For the Caffe2 backend:
     #     rep.predict_net is the Caffe2 protobuf for the network
     #     rep.workspace is the Caffe2 workspace for the network
-    #       (see the class toffee.backend.c2.Workspace)
-    outputs = backend.run(rep, np.rand(10, 3, 224, 224))
+    #       (see the class onnx.backend.c2.Workspace)
+    outputs = rep.run(np.random.randn(10, 3, 224, 224).astype(np.float32))
+    # To run networks with more than one input, pass a tuple
+    # rather than a single numpy ndarray.
     print(outputs[0])
 
 In the future, there will be backends for other frameworks as well.
@@ -124,6 +126,7 @@ In this tech preview, only the following operators are supported:
 * Slice (only integer indexing is supported)
 * Dropout (inplace is discarded)
 * Relu (inplace is discarded)
+* PReLU (inplace is discarded, sharing a single weight among all channels is not supported)
 * LeakyRelu (inplace is discarded)
 * MaxPool1d (ceil_mode must be False)
 * MaxPool2d (ceil_mode must be False
@@ -141,6 +144,7 @@ list.  The operator set above is sufficient to export the following models:
 * SqueezeNet
 * SuperResolution
 * VGG
+* `word_language_model <https://github.com/pytorch/examples/tree/master/word_language_model>`_
 
 The interface for specifying operator definitions is highly experimental
 and undocumented; adventurous users should note that the APIs will probably
