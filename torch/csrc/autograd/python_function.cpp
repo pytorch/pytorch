@@ -642,6 +642,12 @@ PyObject* process_outputs(THPFunction* grad_fn, const UnpackedInput& unpacked, T
     grad_fn->non_differentiable = NULL;
   }
 
+  grad_fn->cdata.input_sizes.reserve(num_outputs);
+  for (int i = 0; i < num_outputs; ++i) {
+    THPVariable* py_var = (THPVariable*)PyTuple_GET_ITEM(outputs.get(), i);
+    grad_fn->cdata.input_sizes.emplace_back(py_var->cdata);
+  }
+
   // Unpack the output, unless .forward() returned a tuple
   if (unpack_output) {
     PyObject *output = PyTuple_GET_ITEM(outputs.get(), 0);
@@ -652,7 +658,7 @@ PyObject* process_outputs(THPFunction* grad_fn, const UnpackedInput& unpacked, T
   return outputs.release();
 }
 
-static void trace_create(PyObject* op_obj,
+static void trace_create(PyObject* op_obj, THPFunction* bw_obj,
         PyObject *input_objects, PyObject *output_objects,
         const variable_list& input_vars, const std::vector<bool>& is_variable_input) {
   if (!tracer::isTracing(input_vars))
@@ -740,6 +746,7 @@ static void trace_create(PyObject* op_obj,
     tracer::nontraceableBackwardSubgraph(input_vars, output_vars);
     Function::setUpContextEdge(this_expr, num_outputs, input_vars, output_vars);
   }
+
 }
 
 // Legacy codepath
@@ -808,7 +815,7 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
   THPObjectPtr outputs {process_outputs(ctx, unpacked_input, std::move(tensor_outputs),
                                         is_volatile)};
 
-  trace_create(cls, inputs, outputs, unpacked_input.input_vars, *ctx->is_variable_input);
+  trace_create(cls, ctx, inputs, outputs, unpacked_input.input_vars, *ctx->is_variable_input);
 
   return outputs.release();
   END_HANDLE_TH_ERRORS

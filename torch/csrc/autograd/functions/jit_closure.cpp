@@ -28,7 +28,6 @@ struct Replicate : public Function {
   }
 
   virtual variable_list apply(const variable_list& inputs) {
-    check_input_variables("Replicate", inputs, 1);
     return variable_list(next_functions.size(), inputs[0]);
   }
 };
@@ -103,6 +102,17 @@ struct SimpleEval : public Function {
   }
 
   std::shared_ptr<Function> fn;
+};
+
+struct EmitNull : public Function {
+  EmitNull() {
+    is_executable = true;
+    num_inputs = 0;
+  }
+
+  virtual variable_list apply(const variable_list& inputs) {
+    return {nullptr};
+  };
 };
 
 // Wraps a PythonOp and dispatches calls to Functions implemented in Python
@@ -501,6 +511,8 @@ struct StageClosure {
       return fn;
     IR_ELSEIF(Chunk)
       return std::make_shared<Chunk>(value->i(kNumChunks), value->i(kDim));
+    IR_ELSEIF(Undefined)
+      return std::make_shared<EmitNull>();
     IR_ELSE()
       throw std::runtime_error(std::string("unrecognized NodeKind: ") + symbolToString(node->kind()));
     IR_END()
@@ -675,7 +687,7 @@ AutogradClosure::AutogradClosure(const std::shared_ptr<MultiStageClosure>& desc,
     std::lock_guard<std::mutex> lock(this->capture_mutex);
     this->outputs.reserve(inputs.size());
     for (auto & input : inputs)
-      this->outputs.emplace_back(input.data());
+      this->outputs.emplace_back(input.opt_data());
     return false; // Stop execution
   });
 
@@ -697,16 +709,15 @@ variable_list AutogradClosure::apply(const variable_list& inputs) {
   if (num_inputs != stage_closure.var_flags.size())
     throw std::runtime_error("AutogradClosure received an incorrect number of inputs");
   for (std::size_t i = 0; i < num_inputs; ++i) {
-    auto & input = inputs[i];
     auto & flags = stage_closure.var_flags[i];
-    if (input.requires_grad() != flags.requires_grad || input.is_volatile() != flags.is_volatile)
+    if (!flags.verify(input))
       throw std::runtime_error("AutogradClosure received inputs with different flags");
   }
 
   // TODO: we could run all this with volatile variables, but we need to somehow capture handles
   // we should enable requires_grad only for the parts that need it
   auto input_leaves = fmap(inputs, [](const Variable& v) {
-    return make_variable(v.data(), v.requires_grad(), v.is_volatile());
+    return v.defined() ? make_variable(v.data(), v.requires_grad(), v.is_volatile()) : Variable();
   });
   for (auto unique : desc->stages[stage].prev_stage_variables)
     input_leaves.emplace_back(make_variable(saved_vars.at(unique), true, false));
