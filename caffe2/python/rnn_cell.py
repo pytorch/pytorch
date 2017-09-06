@@ -1396,7 +1396,7 @@ def cudnn_LSTM(model, input_blob, initial_states, dim_in, dim_out,
         (hidden_input_blob, cell_input_blob) = initial_states
         output, hidden_output, cell_output, rnn_scratch, dropout_states = \
             model.net.Recurrent(
-                [input_blob, cell_input_blob, cell_input_blob, weights],
+                [input_blob, hidden_input_blob, cell_input_blob, weights],
                 ["lstm_output", "lstm_hidden_output", "lstm_cell_output",
                  "lstm_rnn_scratch", "lstm_dropout_states"],
                 seed=random.randint(0, 100000),  # TODO: dropout seed
