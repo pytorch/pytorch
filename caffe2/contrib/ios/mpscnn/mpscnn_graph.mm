@@ -290,15 +290,11 @@ bool tryConvertToMPSCNN(const NetDef& initNet, const NetDef& predictNet, NetDef*
 #define SYSTEM_VERSION_EQUAL_TO(v) \
   ([[[UIDevice currentDevice] systemVersion] compare:v options:NSNumericSearch] == NSOrderedSame)
 
-  if (!SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO(@"10.0")) {
-    LOG(ERROR) << "The iOS version is < 10.0, so MPSCNN is not available";
+  if (!SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO(@"10.2")) {
+    LOG(ERROR) << "MPSCNN is unstable for ios version under 10.2.";
     return false;
   }
 
-  if (SYSTEM_VERSION_EQUAL_TO(@"10.1.1") || SYSTEM_VERSION_EQUAL_TO(@"10.0.2")) {
-    LOG(ERROR) << "MPSCNN doesn't work for 10.1.1/10.0.2";
-    return false;
-  }
 #undef SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO
 #undef SYSTEM_VERSION_EQUAL_TO
 
