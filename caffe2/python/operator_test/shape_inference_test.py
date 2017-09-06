@@ -334,6 +334,14 @@ class TestShapeInference(test_util.TestCase):
 
         self.InferTensorRunAndCompare(model)
 
+    def testShapeInferenceUnique(self):
+        for n in [0, 1]:
+            model = model_helper.ModelHelper(name="test_model")
+            model.Unique("X", ["Y"])
+            model.Unique("X", ["Z", "remap"])
+            workspace.FeedBlob("X", np.random.rand(n).astype(np.int64))
+            self.InferTensorRunAndCompare(model)
+
     def testLengthsSum(self):
         model = model_helper.ModelHelper(name="test_model")
         model.LengthsSum(["X", "length"], ["sum"])
