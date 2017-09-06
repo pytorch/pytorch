@@ -450,7 +450,7 @@ struct StageClosure {
           captured_variables.emplace_back(fn.get(), captured_node->i(kOffset), captured_node->unique());
         } else {
           JIT_ASSERT(captured_node->type()->kind() == TypeKind::HandleType);
-          captured_handles.emplace_back(fn.get(), captured_node->unique());
+          captured_handles.emplace(fn.get(), captured_node->unique());
         }
       } else {
         JIT_ASSERT(captured_node->type()->kind() == TypeKind::TensorType);
@@ -616,7 +616,7 @@ struct StageClosure {
   // After the function is run, take either a Variable or a backward handle, and
   // put it in the environment under 'unique'.
   std::vector<std::tuple<Function*, int, int>> captured_variables;  // (function, output_nr, unique)
-  std::vector<std::pair<Function*, int>> captured_handles;          // (function, unique)
+  std::unordered_map<Function*, int> captured_handles;              // (function, unique)
 };
 
 // Computes and stores an array of StageClosures for each stage in the graph
@@ -662,24 +662,35 @@ AutogradClosure::AutogradClosure(const std::shared_ptr<MultiStageClosure>& desc,
   for (auto & entry : stage_desc.captured_handles) {
     auto & fn = entry.first;
     auto saved_idx = entry.second;
-    // Evals already wrap their backwards
-    if (dynamic_cast<Eval*>(fn)) {
-      post_callbacks.emplace(fn, [this, saved_idx](Function* fn, variable_list& inputs, variable_list& outputs) {
+    // Evals already wrap their backwards and they will be handled in the
+    // next loop if needed
+    if (dynamic_cast<EvalPlaceholder*>(fn)) continue;
+    // Otherwise we have to wrap the backwards in a handle ourselves
+    post_callbacks.emplace(fn, [this, saved_idx](Function* fn, variable_list& inputs, variable_list& outputs) {
+      auto eval_fn = std::make_shared<Eval>();
+      eval_fn->replaceSubgraph(inputs, outputs);
+      std::lock_guard<std::mutex> lock(this->capture_mutex);
+      this->captured_handles[saved_idx] = std::move(eval_fn);
+      return true;
+    });
+  }
+
+  // Callbacks that run closures received from forward and optionally capture
+  // them for next stages
+  for (auto & entry : stage_desc.prev_stage_handles) {
+    int unique = entry.second;
+    // Check if we need to capture the handle for next stage too
+    auto it = stage_desc.captured_handles.find(entry.first);
+    int saved_idx = it == stage_desc.captured_handles.end() ? -1 : it->second;
+    post_callbacks.emplace(entry.first, [this, unique, saved_idx](Function* fn, variable_list& inputs, variable_list& outputs) {
+      outputs = (*this->saved_handles.at(unique))(inputs);
+      if (saved_idx != -1) {
         auto eval_fn = Eval::getBackwardEval(inputs, outputs);
         std::lock_guard<std::mutex> lock(this->capture_mutex);
         this->captured_handles[saved_idx] = std::move(eval_fn);
-        return true;
-      });
-    // Otherwise we have to wrap the backwards in a handle ourselves
-    } else {
-      post_callbacks.emplace(fn, [this, saved_idx](Function* fn, variable_list& inputs, variable_list& outputs) {
-        auto eval_fn = std::make_shared<Eval>();
-        eval_fn->replaceSubgraph(inputs, outputs);
-        std::lock_guard<std::mutex> lock(this->capture_mutex);
-        this->captured_handles[saved_idx] = std::move(eval_fn);
-        return true;
-      });
-    }
+      }
+      return true;
+    });
   }
 
   // A callback to capture the output
@@ -690,15 +701,6 @@ AutogradClosure::AutogradClosure(const std::shared_ptr<MultiStageClosure>& desc,
       this->outputs.emplace_back(input.opt_data());
     return false; // Stop execution
   });
-
-  // Callbacks that run closures received from forward
-  for (auto & entry : stage_desc.prev_stage_handles) {
-    int unique = entry.second;
-    pre_callbacks.emplace(entry.first, [this, unique](Function* fn, variable_list& inputs) {
-      inputs = (*this->saved_handles.at(unique))(inputs);
-      return true;
-    });
-  }
 }
 
 variable_list AutogradClosure::apply(const variable_list& inputs) {
