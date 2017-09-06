@@ -334,6 +334,7 @@ class TestYellowFin(OptimizerTestBase, TestCase):
                                 rtol=1e-2,
                                 err_msg=err_msg)
 
+    @unittest.skip("Results might vary too much. Only for individual use.")
     def test_caffe2_cpu_vs_numpy(self):
         n_dim = 1000000
         n_iter = 50
@@ -355,6 +356,7 @@ class TestYellowFin(OptimizerTestBase, TestCase):
                     gpu=False
                 )
 
+    @unittest.skip("Results might vary too much. Only for individual use.")
     @unittest.skipIf(not workspace.has_gpu_support, "No gpu support")
     def test_caffe2_gpu_vs_numpy(self):
         n_dim = 1000000
