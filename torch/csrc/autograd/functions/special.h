@@ -20,6 +20,7 @@ struct EvalOutput : Function {
     // confuse some of the functions causing them to do unnecessary work.
     // TODO: it should be possible to improve this once we get rid of NULL Variables
     is_executable = true;
+    input_sizes.emplace_back(next_edge.first->input_sizes.at(next_edge.second));
   }
 
   virtual variable_list apply(const variable_list& inputs) override {

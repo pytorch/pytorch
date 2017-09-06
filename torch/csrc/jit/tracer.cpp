@@ -50,8 +50,9 @@ struct TraceEval : autograd::Eval {
     graph->advanceStage();
 
     for (auto & input : inputs) {
-      JIT_ASSERT(!detail::getValueState(tracing_state, input, false));
       Node *input_node = graph->addInput();
+      if (!input) continue;
+      JIT_ASSERT(!detail::getValueState(tracing_state, input, false));
       setValueTrace(tracing_state, input, input_node);
       input_node->inferTypeFrom(input.data());
     }
@@ -83,13 +84,6 @@ void traceBackward(const std::shared_ptr<TracingState>& tracing_state, const var
 }
 
 } // namespace detail
-
-VariableFlags VariableFlags::create(const Variable& var) {
-  VariableFlags f;
-  f.requires_grad = var.requires_grad();
-  f.is_volatile = var.is_volatile();
-  return f;
-}
 
 void nontraceableBackwardSubgraph(const variable_list& inputs, const variable_list& outputs) {
   std::make_shared<autograd::Eval>()->replaceSubgraph(inputs, outputs);

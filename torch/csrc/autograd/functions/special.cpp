@@ -168,6 +168,7 @@ bool Eval::replaceSubgraph(const variable_list& inputs, const variable_list& _ou
   next_functions.insert(next_functions.begin(), subgraph.boundary.ends.begin(), subgraph.boundary.ends.end());
   is_executable = std::any_of(relevant_outputs.begin(), relevant_outputs.end(),
                               [](const Variable& var) { return var.requires_grad(); });
+  input_sizes = fmap<TensorMeta>(relevant_outputs);
 
   // Ensure placeholders and inputs are sorted in the same way.
   edge_order input_order = computeInputOrder(inputs, inherited_placeholders);
