@@ -65,10 +65,12 @@ OPERATOR_SCHEMA(Normalize)
     .Arg("axis", "axis to normalize")
     .SetDoc(R"DOC(
 Given a matrix, apply L2-normalization along the specified dimension.
-)DOC");
+)DOC")
+    .IdenticalTypeAndShape();
 
-REGISTER_CPU_OPERATOR(NormalizeGradient,
-                      NormalizeGradientOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(
+    NormalizeGradient,
+    NormalizeGradientOp<float, CPUContext>);
 OPERATOR_SCHEMA(NormalizeGradient)
     .NumInputs(2)
     .NumOutputs(1)
