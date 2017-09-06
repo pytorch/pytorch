@@ -9,7 +9,7 @@ from torch._C import _infer_size
 from . import _functions
 from .modules import utils
 from ._functions.linear import Bilinear
-from ._functions.padding import ConstantPad2d
+from ._functions.padding import ConstantPad1d, ConstantPad2d, ConstantPad3d
 from ._functions.vision import GridSampler, AffineGridGenerator
 from ..autograd import _functions as _autograd_functions
 from torch.autograd import Variable
@@ -1057,18 +1057,27 @@ def affine_grid(theta, size):
 def pad(input, pad, mode='constant', value=0):
     """Pads tensor.
 
-    Currently only 2D and 3D padding supported.
-    In case of 4D input tensor pad should be in form
+    1D, 2D and 3D padding supported.
+    1D: 3D input with padding in form (pad_l, pad_r)
+    2D: 4D input tensor pad should be in form
     (pad_l, pad_r, pad_t, pad_b ).
-    In case of 5D pad should be (pleft, pright, ptop, pbottom, pfront, pback)
+    3D: 5D pad should be (pleft, pright, ptop, pbottom, pfront, pback)
 
     Args:
-        input (Variable): 4D or 5D tensor
-        pad (tuple): 4-elem or 6-elem tuple
+        input (Variable): 3D, 4D or 5D tensor
+        pad (tuple): 2-, 4-, or 6-elem tuple
         mode: 'constant', 'reflect' or 'replicate'. Default: 'constant'
         value: fill value for 'constant' padding. Default: 0
     """
-    if input.dim() == 4:
+    if input.dim() == 3:
+        assert len(pad) == 2, '3D tensors expect 2 values for padding'
+        if mode == 'constant':
+            return ConstantPad1d.apply(input, pad, value)
+        elif mode == 'reflect':
+            return _functions.thnn.ReflectionPad1d.apply(input, *pad)
+        elif mode == 'replicate':
+            return _functions.thnn.ReplicationPad1d.apply(input, *pad)
+    elif input.dim() == 4:
         assert len(pad) == 4, '4D tensors expect 4 values for padding'
         if mode == 'constant':
             return ConstantPad2d.apply(input, pad, value)
@@ -1079,13 +1088,13 @@ def pad(input, pad, mode='constant', value=0):
     elif input.dim() == 5:
         assert len(pad) == 6, '5D tensors expect 6 values for padding'
         if mode == 'constant':
-            raise NotImplementedError
+            return ConstantPad3d.apply(input, pad, value)
         elif mode == 'reflect':
             raise NotImplementedError
         elif mode == 'replicate':
             return _functions.thnn.ReplicationPad3d.apply(input, *pad)
     else:
-        raise NotImplementedError("Only 4D and 5D padding is supported for now")
+        raise NotImplementedError("Only 3D, 4D, 5D padding is supported for now")
 
 
 # distance

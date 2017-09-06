@@ -3719,9 +3719,19 @@ new_module_tests = [
         desc='norm',
     ),
     dict(
+        module_name='ReflectionPad1d',
+        constructor_args=((1, 2),),
+        input_size=(2, 3, 8),
+    ),
+    dict(
         module_name='ReflectionPad2d',
         constructor_args=((1, 2, 3, 4),),
         input_size=(2, 3, 8, 8),
+    ),
+    dict(
+        module_name='ReplicationPad1d',
+        constructor_args=((1, 2),),
+        input_size=(2, 3, 4),
     ),
     dict(
         module_name='ReplicationPad2d',
@@ -3740,9 +3750,19 @@ new_module_tests = [
         desc='negative_dims'
     ),
     dict(
+        module_name='ConstantPad1d',
+        constructor_args=((1, 2), 2),
+        input_size=(2, 3, 4)
+    ),
+    dict(
         module_name='ConstantPad2d',
         constructor_args=((1, 2, 3, 4), 2),
         input_size=(2, 3, 4, 4)
+    ),
+    dict(
+        module_name='ConstantPad3d',
+        constructor_args=((1, 2, 3, 4, 1, 0), 2),
+        input_size=(2, 3, 4, 4, 5)
     ),
     dict(
         module_name='Conv3d',
