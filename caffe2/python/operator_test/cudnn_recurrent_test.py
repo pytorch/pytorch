@@ -48,10 +48,10 @@ class TestLSTMs(unittest.TestCase):
                 [1, batch_size, hidden_dim], dtype=np.float32
             ))
 
-            cudnn_output, cudnn_last_hidden, _, param_extract = rnn_cell.cudnn_LSTM(
+            cudnn_output, cudnn_last_hidden, cudnn_last_state, param_extract = rnn_cell.cudnn_LSTM(
                 model=cudnn_model,
                 input_blob=input_blob,
-                initial_states=("hidden_init_cudnn", "hidden_init_cudnn"),
+                initial_states=("hidden_init_cudnn", "cell_init_cudnn"),
                 dim_in=input_dim,
                 dim_out=hidden_dim,
                 scope="CUDNN",
@@ -63,7 +63,7 @@ class TestLSTMs(unittest.TestCase):
                 ), "CUDNN/loss"
             )
 
-            own_output, own_last_hidden, _, last_state, own_params = rnn_cell.LSTM(
+            own_output, own_last_hidden, _, own_last_state, own_params = rnn_cell.LSTM(
                 model=own_model,
                 input_blob=input_blob,
                 seq_lengths="seq_lengths",
@@ -97,6 +97,12 @@ class TestLSTMs(unittest.TestCase):
                 own_model.WeightedSum(
                     [param, ONE, own_model.param_to_grad[param], LR], param
                 )
+
+            # Copy states over
+            own_model.net.Copy(own_last_hidden, "hidden_init")
+            own_model.net.Copy(own_last_state, "cell_init")
+            cudnn_model.net.Copy(cudnn_last_hidden, "CUDNN/hidden_init_cudnn")
+            cudnn_model.net.Copy(cudnn_last_state, "CUDNN/cell_init_cudnn")
 
             workspace.RunNetOnce(cudnn_model.param_init_net)
             workspace.CreateNet(cudnn_model.net)
