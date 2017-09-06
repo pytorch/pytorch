@@ -21,7 +21,7 @@ inline std::tuple<Tensor, Tensor> expand_inplace(const Tensor &tensor, const Ten
   return std::make_tuple(to_expand1.expand(tensor.sizes()), to_expand2.expand(tensor.sizes()));
 }
 
-inline std::vector<int64_t> infer_size2(IntList a, InstList b) {
+inline std::vector<int64_t> infer_size2(IntList a, IntList b) {
   auto dimsA = a.size();
   auto dimsB = b.size();
   ptrdiff_t ndim = dimsA > dimsB ? dimsA : dimsB;
