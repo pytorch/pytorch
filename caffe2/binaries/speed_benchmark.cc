@@ -43,6 +43,12 @@ using std::vector;
 int main(int argc, char** argv) {
   caffe2::GlobalInit(&argc, &argv);
   unique_ptr<caffe2::Workspace> workspace(new caffe2::Workspace());
+
+  // Run initialization network.
+  caffe2::NetDef net_def;
+  CAFFE_ENFORCE(ReadProtoFromFile(caffe2::FLAGS_init_net, &net_def));
+  CAFFE_ENFORCE(workspace->RunNetOnce(net_def));
+
   // Load input.
   if (caffe2::FLAGS_input.size()) {
     vector<string> input_names = caffe2::split(',', caffe2::FLAGS_input);
@@ -54,7 +60,7 @@ int main(int argc, char** argv) {
       for (int i = 0; i < input_names.size(); ++i) {
         caffe2::BlobProto blob_proto;
         CAFFE_ENFORCE(caffe2::ReadProtoFromFile(input_files[i], &blob_proto));
-        workspace->GetBlob(input_names[i])->Deserialize(blob_proto);
+        workspace->CreateBlob(input_names[i])->Deserialize(blob_proto);
       }
     } else if (caffe2::FLAGS_input_dims.size()) {
       vector<string> input_dims_list = caffe2::split(';', caffe2::FLAGS_input_dims);
@@ -77,10 +83,7 @@ int main(int argc, char** argv) {
                   "input_dims is set.");
     }
   }
-  // Run initialization network.
-  caffe2::NetDef net_def;
-  CAFFE_ENFORCE(ReadProtoFromFile(caffe2::FLAGS_init_net, &net_def));
-  CAFFE_ENFORCE(workspace->RunNetOnce(net_def));
+
   // Run main network.
   CAFFE_ENFORCE(ReadProtoFromFile(caffe2::FLAGS_net, &net_def));
   caffe2::NetBase* net = workspace->CreateNet(net_def);
