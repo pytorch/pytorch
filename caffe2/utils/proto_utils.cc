@@ -362,6 +362,24 @@ CAFFE2_MAKE_REPEATED_ARGUMENT(int64_t, ints)
 CAFFE2_MAKE_REPEATED_ARGUMENT(string, strings)
 #undef CAFFE2_MAKE_REPEATED_ARGUMENT
 
+bool HasOutput(const OperatorDef& op, const std::string& output) {
+  for (const auto& outp : op.output()) {
+    if (outp == output) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool HasInput(const OperatorDef& op, const std::string& input) {
+  for (const auto& inp : op.input()) {
+    if (inp == input) {
+      return true;
+    }
+  }
+  return false;
+}
+
 const Argument& GetArgument(const OperatorDef& def, const string& name) {
   for (const Argument& arg : def.arg()) {
     if (arg.name() == name) {

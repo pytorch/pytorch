@@ -122,7 +122,7 @@ class OperatorBase {
   // computation on the corresponding context and record the event in its
   // event_ member object. If the specific operator does not support RunAsync,
   // it will simply be synchronous as a fallback.
-  virtual bool RunAsync(int /* unused */ stream_id = 0) {
+  virtual bool RunAsync(int stream_id = 0) {
     return Run(stream_id);
   }
 
@@ -200,6 +200,11 @@ class OperatorBase {
 
   const Event& event() const {
     return event_;
+  }
+
+  const std::string& type() {
+    CAFFE_ENFORCE(operator_def_.get() != nullptr);
+    return operator_def_->type();
   }
 
  public:
@@ -302,6 +307,7 @@ class Operator : public OperatorBase {
       if (observer_) {
         observer_->Stop();
       }
+
       return result;
     } catch (EnforceNotMet& err) {
       if (has_debug_def()) {

@@ -115,7 +115,6 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
             links={output_t_prev: output_t},
             scope="test_rnn_sum_mull",
         )
-
         workspace.blobs[input_blob] = input
         workspace.blobs[initial_input_blob] = initial_input
 
