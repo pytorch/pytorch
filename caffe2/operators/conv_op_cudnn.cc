@@ -137,7 +137,11 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
               desc_,
               cudnnTypeWrapper<T>::type,
               N,
+#if CUDNN_VERSION_MIN(7,0,0)
+              C,
+#else
               C / group_,
+#endif
               H,
               W,
               H * W * C,
@@ -145,7 +149,9 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
               W * C,
               C));
         } else {
+#if !CUDNN_VERSION_MIN(7,0,0)
           C = C / group_;
+#endif
           vector<int> dims = {N, H, W, D, C};
           vector<int> strides = {H * W * D * C, W * D * C, D * C, C, 1};
           CUDNN_ENFORCE(cudnnSetTensorNdDescriptor(
@@ -162,7 +168,11 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
               desc_,
               cudnnTypeWrapper<T>::type,
               N,
+#if CUDNN_VERSION_MIN(7,0,0)
+              C,
+#else
               C / group_,
+#endif
               H,
               W,
               C * H * W,
@@ -170,7 +180,9 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
               W,
               1));
         } else {
+#if !CUDNN_VERSION_MIN(7,0,0)
           C = C / group_;
+#endif
           vector<int> dims = {N, C, H, W, D};
           vector<int> strides = {C * H * W * D, H * W * D, W * D, D, 1};
           CUDNN_ENFORCE(cudnnSetTensorNdDescriptor(
@@ -341,15 +353,21 @@ bool CudnnConvOp::DoRunWithType() {
             filter_desc_,
             cudnnTypeWrapper<T_W>::type,
             GetCudnnTensorFormat(order_),
+#if CUDNN_VERSION_MIN(7,0,0)
+            M,
+#else
             M / group_,
+#endif
             C / group_,
             kernel_h(),
             kernel_w()));
       } else {
         vector<int> dims(filter.dims().begin(), filter.dims().end());
         dims[0] /= group_;
+#if !CUDNN_VERSION_MIN(7,0,0)
         order_ == StorageOrder::NCHW ? dims[1] /= group_
                                      : dims[filter.ndim() - 1] /= group_;
+#endif
         dims[filter.ndim() - 1] /= group_;
         CUDNN_ENFORCE(cudnnSetFilterNdDescriptor(
             filter_desc_,
@@ -699,13 +717,19 @@ bool CudnnConvGradientOp::DoRunWithType() {
             filter_desc_,
             cudnnTypeWrapper<T_W>::type,
             GetCudnnTensorFormat(order_),
+#if CUDNN_VERSION_MIN(7,0,0)
+            M,
+#else
             M / group_,
+#endif
             C / group_,
             kernel_h(),
             kernel_w()));
       } else {
         vector<int> dims(filter.dims().begin(), filter.dims().end());
+#if !CUDNN_VERSION_MIN(7,0,0)
         dims[0] /= group_;
+#endif
         order_ == StorageOrder::NCHW ? dims[1] /= group_
                                      : dims[filter.ndim() - 1] /= group_;
         CUDNN_ENFORCE(cudnnSetFilterNdDescriptor(
