@@ -111,7 +111,7 @@ def enumerate_options_due_to_default(declaration,
                 optional_args.append(i)
         for permutation in product((True, False), repeat=len(optional_args)):
             option_copy = deepcopy(option)
-            option_copy['canonical'] = sum(permutation) == len(optional_args)
+            option_copy['has_full_argument_list'] = sum(permutation) == len(optional_args)
             for i, bit in zip(optional_args, permutation):
                 arg = option_copy['arguments'][i]
                 # PyYAML interprets NULL as None...

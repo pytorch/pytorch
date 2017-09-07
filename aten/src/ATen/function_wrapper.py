@@ -172,6 +172,7 @@ ALLOC_WRAP = {
     'THIntegerTensor*': 'new ${Backend}IntTensor(context)',
 }
 
+# Replacements for constants when calling into TH
 CONSTANT_REPLACEMENTS = [
     ('AS_REAL', '${AS_REAL}'),
     ('THPDefaultGenerator->cdata',
@@ -181,6 +182,7 @@ CONSTANT_REPLACEMENTS = [
     ('__last_dim', 'self.ndimension()-1'),
 ]
 
+# Replacements for constants when calling other ATen functions
 INLINE_CONSTANT_REPLACEMENTS = [
     (r'AS_REAL\((.*)\)', r'\1'),
     ('THPDefaultGenerator->cdata', 'context->defaultGenerator(backend())'),
@@ -379,7 +381,7 @@ def create_generic(top_env, declarations):
         env = nested_dict(option, top_env)
 
         broadcast_arg = get_broadcast_argument(option)
-        if broadcast_arg is None and option['canonical']:
+        if broadcast_arg is None and option['has_full_argument_list']:
             top_env['type_method_declarations'].append(
                 TYPE_METHOD_DECLARATION.substitute(env))
             top_env['type_method_definitions'].append(
@@ -388,7 +390,7 @@ def create_generic(top_env, declarations):
             top_env['type_method_declarations'].append(
                 TYPE_METHOD_DECLARATION_NON_VIRTUAL.substitute(env))
 
-        if not option['canonical']:
+        if not option['has_full_argument_list']:
             # functions without the full list of arguments are implemented
             # inline in TypeMethods.h
             option['actuals_with_constants'] = get_actuals_with_constants(option)
@@ -442,9 +444,9 @@ def create_generic(top_env, declarations):
             'method_prefix': option['method_prefix_derived'],
             'arguments': formals,
             'method_of': method_of,
-            'canonical': option['canonical'],
             'returns': option['returns'],
             'inplace': option['inplace'],
+            'has_full_argument_list': option['has_full_argument_list'],
         })
 
     output_declarations = []
@@ -697,7 +699,7 @@ def create_derived(backend_type_env, declarations):
 
     for declaration in declarations:
         for option in declaration['options']:
-            if not option.get('skip', False) and option['canonical']:
+            if not option.get('skip', False) and option['has_full_argument_list']:
                 try:
                     process_option(option)
                 except NYIError:
