@@ -1,4 +1,5 @@
 cmake_minimum_required(VERSION 3.0)
+set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindCUDA ${CMAKE_MODULE_PATH})
 project(ATen)
 
 # RPATH stuff
@@ -46,14 +47,10 @@ add_subdirectory(lib/THS)
 if(NO_CUDA)
   message("disabling CUDA because NO_CUDA is set")
 else()
-  find_package(CUDA 5.5)
-  if(CUDA_FOUND)
-    add_subdirectory(lib/THC)
-    add_subdirectory(lib/THCUNN)
-    add_subdirectory(lib/THCS)
-  else()
-    message(STATUS "CUDA not found: disabling THC")
-  endif()
+  find_package(CUDA 5.5 REQUIRED)
+  add_subdirectory(lib/THC)
+  add_subdirectory(lib/THCUNN)
+  add_subdirectory(lib/THCS)
 endif()
 
 set(cwrap_files
