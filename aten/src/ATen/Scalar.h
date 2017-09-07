@@ -12,6 +12,8 @@ namespace at {
 
 class Scalar {
 public:
+  Scalar() : Scalar(0L) {}
+
   explicit Scalar(const Tensor & t)
   : tag(Tag::HAS_t), t(t) {
     AT_ASSERT(t.dim() == 0,"Attempting to create a Scalar from a %d dim tensor",t.dim());
