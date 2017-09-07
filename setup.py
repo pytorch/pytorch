@@ -268,12 +268,16 @@ extra_compile_args = ['-std=c++11', '-Wno-write-strings',
 cwd = os.path.dirname(os.path.abspath(__file__))
 lib_path = os.path.join(cwd, "torch", "lib")
 
+
 # Check if you remembered to check out submodules
-gloo_cmake = os.path.join(lib_path, "gloo", "CMakeLists.txt")
-if not os.path.exists(gloo_cmake):
-    print("Could not find {}".format(gloo_cmake))
-    print("Did you run 'git submodule update --init'?")
-    sys.exit(1)
+def check_file(f):
+    if not os.path.exists(f):
+        print("Could not find {}".format(f))
+        print("Did you run 'git submodule update --init'?")
+        sys.exit(1)
+check_file(os.path.join(lib_path, "gloo", "CMakeLists.txt"))
+check_file(os.path.join(lib_path, "nanopb", "CMakeLists.txt"))
+check_file(os.path.join(lib_path, "pybind11", "CMakeLists.txt"))
 
 tmp_install_path = lib_path + "/tmp_install"
 include_dirs += [
