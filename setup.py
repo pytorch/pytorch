@@ -264,16 +264,6 @@ extra_compile_args = ['-std=c++11', '-Wno-write-strings',
                       # Python 2.6 requires -fno-strict-aliasing, see
                       # http://legacy.python.org/dev/peps/pep-3123/
                       '-fno-strict-aliasing']
-if os.getenv('PYTORCH_BINARY_BUILD') and platform.system() == 'Linux':
-    print('PYTORCH_BINARY_BUILD found. Static linking libstdc++ on Linux')
-    # get path of libstdc++ and link manually.
-    # for reasons unknown, -static-libstdc++ doesn't fully link some symbols
-    CXXNAME = os.getenv('CXX', 'g++')
-    path = subprocess.check_output([CXXNAME, '-print-file-name=libstdc++.a'])
-    path = path[:-1]
-    if type(path) != str:  # python 3
-        path = path.decode(sys.stdout.encoding)
-    extra_link_args += [path]
 
 cwd = os.path.dirname(os.path.abspath(__file__))
 lib_path = os.path.join(cwd, "torch", "lib")
@@ -308,7 +298,9 @@ THNN_LIB = os.path.join(lib_path, 'libTHNN.so.1')
 THCUNN_LIB = os.path.join(lib_path, 'libTHCUNN.so.1')
 THPP_LIB = os.path.join(lib_path, 'libTHPP.so.1')
 ATEN_LIB = os.path.join(lib_path, 'libATen.so.1')
-THD_LIB = os.path.join(lib_path, 'libTHD.so.1')
+GLOO_LIB = os.path.join(lib_path, 'libgloo.a')
+GLOO_CUDA_LIB = os.path.join(lib_path, 'libgloo_cuda.a')
+THD_LIB = os.path.join(lib_path, 'libTHD.a')
 NCCL_LIB = os.path.join(lib_path, 'libnccl.so.1')
 if platform.system() == 'Darwin':
     TH_LIB = os.path.join(lib_path, 'libTH.1.dylib')
@@ -319,7 +311,6 @@ if platform.system() == 'Darwin':
     THCUNN_LIB = os.path.join(lib_path, 'libTHCUNN.1.dylib')
     THPP_LIB = os.path.join(lib_path, 'libTHPP.1.dylib')
     ATEN_LIB = os.path.join(lib_path, 'libATen.1.dylib')
-    THD_LIB = os.path.join(lib_path, 'libTHD.1.dylib')
     NCCL_LIB = os.path.join(lib_path, 'libnccl.1.dylib')
 
 # static library only
@@ -327,7 +318,7 @@ NANOPB_STATIC_LIB = os.path.join(lib_path, 'libprotobuf-nanopb.a')
 
 if WITH_NCCL and (subprocess.call('ldconfig -p | grep libnccl >/dev/null', shell=True) == 0 or
                   subprocess.call('/sbin/ldconfig -p | grep libnccl >/dev/null', shell=True) == 0):
-        SYSTEM_NCCL = True
+    SYSTEM_NCCL = True
 
 main_compile_args = ['-D_THP_CORE']
 main_libraries = ['shm']
@@ -406,7 +397,7 @@ if WITH_DISTRIBUTED:
         ]
         extra_compile_args += ['-DWITH_DISTRIBUTED_MW']
     include_dirs += [tmp_install_path + "/include/THD"]
-    main_link_args += [THD_LIB]
+    main_link_args += [THD_LIB, GLOO_LIB]
 
 if WITH_CUDA:
     cuda_lib_dirs = ['lib64', 'lib']
@@ -423,6 +414,8 @@ if WITH_CUDA:
     extra_compile_args += ['-DCUDA_LIB_PATH=' + cuda_lib_path]
     main_libraries += ['cudart', 'nvToolsExt', 'nvrtc', 'cuda']
     main_link_args += [THC_LIB, THCS_LIB, THCUNN_LIB]
+    if WITH_DISTRIBUTED and platform.system() == 'Linux':
+        main_link_args += [GLOO_CUDA_LIB]
     main_sources += [
         "torch/csrc/cuda/Module.cpp",
         "torch/csrc/cuda/Storage.cpp",
@@ -460,6 +453,19 @@ if WITH_CUDNN:
 if DEBUG:
     extra_compile_args += ['-O0', '-g']
     extra_link_args += ['-O0', '-g']
+
+if os.getenv('PYTORCH_BINARY_BUILD') and platform.system() == 'Linux':
+    print('PYTORCH_BINARY_BUILD found. Static linking libstdc++ on Linux')
+    # get path of libstdc++ and link manually.
+    # for reasons unknown, -static-libstdc++ doesn't fully link some symbols
+    CXXNAME = os.getenv('CXX', 'g++')
+    STDCPP_LIB = subprocess.check_output([CXXNAME, '-print-file-name=libstdc++.a'])
+    STDCPP_LIB = STDCPP_LIB[:-1]
+    if type(STDCPP_LIB) != str:  # python 3
+        STDCPP_LIB = STDCPP_LIB.decode(sys.stdout.encoding)
+    main_link_args += [STDCPP_LIB]
+    version_script = os.path.abspath("tools/pytorch.version")
+    extra_link_args += ['-Wl,--version-script=' + version_script]
 
 
 def make_relative_rpath(path):
