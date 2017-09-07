@@ -103,21 +103,23 @@ FILE(GLOB base_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "*.cpp")
 FILE(GLOB all_python RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "*.py")
 
 IF(NOT DEFINED cwrap_files)
-  SET(CWRAP_FILES_BASE ${CMAKE_CURRENT_SOURCE_DIR}/../../csrc  )
+  IF(NOT DEFINED CWRAP_FILES_BASE)
+    SET(CWRAP_FILES_BASE ${CMAKE_CURRENT_SOURCE_DIR}/../..  )
+  ENDIF()
   SET(cwrap_files
-  # ${CWRAP_FILES_BASE}/cudnn/cuDNN.cwrap
-    ${CWRAP_FILES_BASE}/generic/TensorMethods.cwrap
-  # ${CWRAP_FILES_BASE}/generic/methods/SparseTensor.cwrap
-    ${CWRAP_FILES_BASE}/generic/methods/Tensor.cwrap
-    ${CWRAP_FILES_BASE}/generic/methods/TensorApply.cwrap
-    ${CWRAP_FILES_BASE}/generic/methods/TensorCompare.cwrap
-    ${CWRAP_FILES_BASE}/generic/methods/TensorCuda.cwrap
-    ${CWRAP_FILES_BASE}/generic/methods/TensorMath.cwrap
-    ${CWRAP_FILES_BASE}/generic/methods/TensorRandom.cwrap
-  #  ${CWRAP_FILES_BASE}/generic/methods/TensorSerialization.cwrap
+  # ${CWRAP_FILES_BASE}/csrc/cudnn/cuDNN.cwrap
+    ${CWRAP_FILES_BASE}/csrc/generic/TensorMethods.cwrap
+  # ${CWRAP_FILES_BASE}/csrc/generic/methods/SparseTensor.cwrap
+    ${CWRAP_FILES_BASE}/csrc/generic/methods/Tensor.cwrap
+    ${CWRAP_FILES_BASE}/csrc/generic/methods/TensorApply.cwrap
+    ${CWRAP_FILES_BASE}/csrc/generic/methods/TensorCompare.cwrap
+    ${CWRAP_FILES_BASE}/csrc/generic/methods/TensorCuda.cwrap
+    ${CWRAP_FILES_BASE}/csrc/generic/methods/TensorMath.cwrap
+    ${CWRAP_FILES_BASE}/csrc/generic/methods/TensorRandom.cwrap
+  #  ${CWRAP_FILES_BASE}/csrc/generic/methods/TensorSerialization.cwrap
     ${CMAKE_CURRENT_SOURCE_DIR}/Local.cwrap
-    ${CMAKE_CURRENT_SOURCE_DIR}/../THNN/generic/THNN.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/../THCUNN/generic/THCUNN.h
+    ${CWRAP_FILES_BASE}/lib/THNN/generic/THNN.h
+    ${CWRAP_FILES_BASE}/lib/THCUNN/generic/THCUNN.h
   )
 ENDIF()
 
