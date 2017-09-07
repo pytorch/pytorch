@@ -46,7 +46,9 @@ def _export(model, args, f, export_params=True, kwargs=None, verbose=False):
     trace, torch_out = torch.jit.record_trace(model, *args, **kwargs)
     # TODO: Don't allocate a in-memory string for the protobuf
     if export_params:
-        proto = trace.export(model.state_dict().values(), verbose)
+        # NB: OrderedDict values is not actually a list, but trace.export is
+        # not duck-typed and expects an actual list.
+        proto = trace.export(list(model.state_dict().values()), verbose)
     else:
         proto = trace.export(verbose)
     torch.serialization._with_file_like(f, "wb", lambda f: f.write(proto))
