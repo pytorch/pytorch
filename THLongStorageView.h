@@ -11,6 +11,7 @@ public:
   // zero_dim_to_one converts an empty ArrayRef into [1]
   // empty_to_null converts an empty ArrayRef into a null THLongStorage
   static THLongStorageView make(ArrayRef<int64_t> ref, bool zero_dim_to_one = false, bool empty_to_null = false) {
+    assert(!(zero_dim_to_one && empty_to_null));
     return THLongStorageView(ref, zero_dim_to_one, empty_to_null);
   }
   operator THLongStorage*() {
