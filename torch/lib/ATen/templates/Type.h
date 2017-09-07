@@ -134,6 +134,7 @@ struct Type {
   ${type_method_declarations}
 protected:
   Context* context;
+  ${type_method_declarations_protected}
 };
 
 
