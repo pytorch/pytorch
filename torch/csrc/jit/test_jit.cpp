@@ -8,6 +8,7 @@
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/attributes.h"
 #include "torch/csrc/jit/interned_strings.h"
+#include <vector>
 
 namespace torch { namespace jit {
 
@@ -131,10 +132,14 @@ static void fusionTests() {
     std::vector<at::Tensor> inputs;
     std::vector<at::Tensor> outputs;
     for(size_t i = 0; i < graph.inputs().size(); i++) {
-      inputs.push_back(at::CUDA(at::kFloat).rand({128,128,32}).transpose(ti, tj));
+      std::vector<int64_t> dims = {128, 128, 32};
+      std::swap(dims[ti],dims[tj]);
+      inputs.push_back(at::CUDA(at::kFloat).rand(dims).transpose(ti, tj));
     }
     for(size_t i = 0; i < graph.outputs().size(); i++) {
-      outputs.push_back(at::CUDA(at::kFloat).zeros({128,128,32}).transpose(toi,toj));
+      std::vector<int64_t> dims = {128, 128, 32};
+      std::swap(dims[toi],dims[toj]);
+      outputs.push_back(at::CUDA(at::kFloat).zeros(dims).transpose(toi,toj));
     }
 
     auto t22 = inputs[4].sigmoid();
@@ -150,11 +155,7 @@ static void fusionTests() {
 
     //auto out0 = inputs[0]*inputs[1];
     comp.debugLaunchGraph(graph, inputs, outputs);
-    // TODO: Also check that the shapes match.  They don't, and this has not
-    // been working for a while.
-    // https://github.com/ezyang/pytorch/issues/206
-    float max_diff = (outputs.front().contiguous().view(-1) - out0.contiguous().view(-1)).abs().max().toDouble();
-    //std::cout << "max diff: " << max_diff << "\n";
+    float max_diff = (outputs.front() - out0).abs().max().toDouble();
     JIT_ASSERT(max_diff < 1e-6);
 
   };
