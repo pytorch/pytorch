@@ -111,13 +111,15 @@ def enumerate_options_due_to_default(declaration,
                 optional_args.append(i)
         for permutation in product((True, False), repeat=len(optional_args)):
             option_copy = deepcopy(option)
+            option_copy['canonical'] = sum(permutation) == len(optional_args)
             for i, bit in zip(optional_args, permutation):
                 arg = option_copy['arguments'][i]
+                # PyYAML interprets NULL as None...
+                arg['default'] = 'NULL' if arg['default'] is None else arg['default']
                 if not bit:
+                    arg['declared_type'] = arg['type']
                     arg['type'] = 'CONSTANT'
                     arg['ignore_check'] = True
-                    # PyYAML interprets NULL as None...
-                    arg['name'] = 'NULL' if arg['default'] is None else arg['default']
             new_options.append(option_copy)
     declaration['options'] = filter_unique_options(new_options,
                                                    allow_kwarg, type_to_signature, remove_self)
