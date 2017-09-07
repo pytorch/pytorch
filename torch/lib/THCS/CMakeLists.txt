@@ -46,15 +46,14 @@ endif()
 IF ($ENV{TH_BINARY_BUILD})
   MESSAGE(STATUS "TH_BINARY_BUILD detected. Statically linking libstdc++")
   SET(CMAKE_CXX_FLAGS "-static-libstdc++ ${CMAKE_CXX_FLAGS}")
+  IF (UNIX AND NOT APPLE)
+    # hiding statically linked library symbols, this flag is not available for the linker under MACOSX
+    SET(CMAKE_CXX_FLAGS "-Wl,--exclude-libs,libstdc++.a ${CMAKE_CXX_FLAGS}")
+  ENDIF(UNIX AND NOT APPLE)
 ENDIF()
 
 INCLUDE_DIRECTORIES(${CUDA_INCLUDE_DIRS})
 INCLUDE_DIRECTORIES("${CUDA_SDK_ROOT_DIR}/common/inc")
-
-IF ($ENV{TH_BINARY_BUILD})
-  MESSAGE(STATUS "TH_BINARY_BUILD detected. Statically linking libstdc++")
-  SET(CMAKE_CXX_FLAGS "-static-libstdc++ ${CMAKE_CXX_FLAGS}")
-ENDIF()
 
 IF(APPLE)
   IF(${CUDA_VERSION} LESS 6.0)
