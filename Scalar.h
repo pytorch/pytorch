@@ -68,6 +68,13 @@ public:
     } \
   }
 
+  Tensor toTensor() const {
+    if (Tag::HAS_t != tag) {
+      throw std::domain_error("Scalar is not backed by a Tensor");
+    }
+    return t;
+  }
+
   AT_FORALL_SCALAR_TYPES(DEFINE_ACCESSOR)
 
   //also support scalar.to<int64_t>();
