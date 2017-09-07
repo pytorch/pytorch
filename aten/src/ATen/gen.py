@@ -32,6 +32,7 @@ STORAGE_DERIVED_H = CodeTemplate.from_file(TEMPLATE_PATH + "/StorageDerived.h")
 TYPE_DERIVED_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDerived.cpp")
 TYPE_DERIVED_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDerived.h")
 TYPE_H = CodeTemplate.from_file(TEMPLATE_PATH + "/Type.h")
+TYPE_METHODS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeMethods.h")
 TYPE_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/Type.cpp")
 
 TENSOR_DERIVED_CPP = CodeTemplate.from_file(
@@ -83,6 +84,7 @@ top_env = {
     'type_headers': [],
     'type_method_declarations': [],
     'type_method_definitions': [],
+    'type_method_inline_definitions': [],
     'type_method_declarations_protected': [],
     'tensor_method_declarations': [],
     'tensor_method_definitions': [],
@@ -247,6 +249,7 @@ for backend in backends:
                 backend, density, scalar_type, declarations))
 
 write('Type.h', TYPE_H.substitute(top_env))
+write('TypeMethods.h', TYPE_METHODS_H.substitute(top_env))
 write('Type.cpp', TYPE_CPP.substitute(top_env))
 
 write('Tensor.h', TENSOR_H.substitute(top_env))
