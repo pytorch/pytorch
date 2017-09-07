@@ -1,4 +1,4 @@
-#include "torch/csrc/jit/init_pass.h"
+#include "torch/csrc/jit/passes/init_pass.h"
 #include <unordered_map>
 
 namespace torch { namespace jit {
