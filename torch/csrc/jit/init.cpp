@@ -4,7 +4,7 @@
 #include "torch/csrc/jit/python_ir.h"
 #include "torch/csrc/jit/export.h"
 #include "torch/csrc/jit/passes/graph_fuser.h"
-#include "torch/csrc/jit/passes/init_pass.h"
+#include "torch/csrc/jit/passes/onnx.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 
 
@@ -36,7 +36,7 @@ void initJITBindings(PyObject *module) {
   auto m = py::handle(module).cast<py::module>();
 
   m.def("_jit_init", loadPythonClasses)
-   .def("_jit_pass_init", graph_pass<MatchJITOps>)
+   .def("_jit_pass_onnx", ToONNX)
    .def("_jit_pass_fuse", graph_pass<FuseGraph>)
    .def("_jit_pass_dce", graph_pass<EliminateDeadCode>)
    .def("_jit_pass_lint", graph_pass<LintGraph>)

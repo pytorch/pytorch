@@ -109,7 +109,7 @@ class Traceable(object):
             self.proto = None
 
         def _run_pass(self, p):
-            name = p.__doc__
+            name = p.__name__.replace('_jit_pass_', '')
             if Traceable._dump_traces:
                 with open("{}_{}_input.ir".format(self.trace_name, name), "w") as f:
                     f.write(str(self.complete_trace))
@@ -121,12 +121,13 @@ class Traceable(object):
                     f.write(str(self.complete_trace))
 
         def compile_trace(self, optimize):
-            if optimize:
-                self._run_pass(torch._C._jit_pass_init)
-                self._run_pass(torch._C._jit_pass_fuse)
-
             # It's important to always run DCE, because backward can create a lot of unnecessary nodes
             self._run_pass(torch._C._jit_pass_dce)
+            if optimize:
+                self._run_pass(torch._C._jit_pass_onnx)
+                # TODO: fuse only when using CUDA
+                self._run_pass(torch._C._jit_pass_fuse)
+
             self.closure = torch._C._jit_createAutogradClosure(self.complete_trace)
 
         def check_traces(self):
@@ -153,6 +154,10 @@ class Traceable(object):
             param_list = list(parameters) if parameters is not None else []
             self._state_values = lambda: param_list
 
+        if trace_name is None:
+            trace_name = "trace_{}".format(Traceable._next_trace_id)
+            Traceable._next_trace_id += 1
+
         self.trace_name = trace_name
         self.optimize = optimize
         self.verify = verify
@@ -160,9 +165,6 @@ class Traceable(object):
         self.enabled = enabled
         self.num_derivatives = num_derivatives
         self.traces = defaultdict(lambda: Traceable.TraceInfo(trace_name))
-        if self.trace_name is None:
-            self.trace_name = "trace_{}".format(Traceable._next_trace_id)
-            Traceable._next_trace_id += 1
 
     def get_input_key(self, args):
         is_volatile = any(arg.volatile if isinstance(arg, Variable) else False for arg in args)
