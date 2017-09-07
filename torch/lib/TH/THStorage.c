@@ -34,11 +34,11 @@ THLongStorage *THLongStorage_newInferSize(THLongStorage *size, ptrdiff_t nElemen
   if (dim_infer != -1) {
     THDescBuff buf = THLongStorage_sizeDesc(size);
     THArgCheck(total_size > 0 && nElement % total_size == 0, 2,
-        "size '%s' is invalid for input of with %td elements", buf.str, nElement);
+        "size '%s' is invalid for input with %td elements", buf.str, nElement);
   } else {
     THDescBuff buf = THLongStorage_sizeDesc(size);
     THArgCheck(nElement == total_size, 2,
-        "size '%s' is invalid for input of with %td elements", buf.str, nElement);
+        "size '%s' is invalid for input with %td elements", buf.str, nElement);
   }
   THLongStorage* copy = THLongStorage_newWithSize(size->size);
   THLongStorage_copy(copy, size);
