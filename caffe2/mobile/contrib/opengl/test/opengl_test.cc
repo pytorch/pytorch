@@ -16,7 +16,7 @@
 #include "caffe2/utils/proto_utils.h"
 
 #ifdef CAFFE2_USE_MPSCNN
-#include "caffe2/contrib/ios/mpscnn/mpscnn.h"
+#include "caffe2/mobile/contrib/ios/mpscnn/mpscnn.h"
 #endif
 
 #define DEBUGGING false

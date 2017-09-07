@@ -5,7 +5,7 @@
 #include "caffe2/core/predictor.h"
 #include "caffe2/core/timer.h"
 
-#import "caffe2/contrib/ios/metal/MetalContext.h"
+#import "caffe2/mobile/contrib/ios/metal/MetalContext.h"
 
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
 
@@ -101,7 +101,7 @@ void BenchMPSCNN(
          t.MilliSeconds() / (float)niter);
 }
 
-#include "caffe2/contrib/ios/metal/FBMetalCNNConvolution.h"
+#include "/ios/metal/FBMetalCNNConvolution.h"
 
 static void testMetalConvolution(int input_width,
                                  int input_height,
