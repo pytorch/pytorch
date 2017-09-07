@@ -27,7 +27,7 @@ class TestJit(TestCase):
         z = torch.sigmoid(torch.tanh(x * (x + y)))
         torch._C._tracer_exit((z,))
         torch._C._jit_pass_lint(trace)
-        torch._C._jit_pass_init(trace)
+        torch._C._jit_pass_onnx(trace)
         torch._C._jit_pass_lint(trace)
         torch._C._jit_pass_fuse(trace)
         torch._C._jit_pass_lint(trace)
@@ -43,7 +43,7 @@ class TestJit(TestCase):
         trace, _ = torch.jit.record_trace(
             nn.LSTMCell(10, 20), input, (hx, cx))
         torch._C._jit_pass_lint(trace)
-        torch._C._jit_pass_init(trace)
+        torch._C._jit_pass_onnx(trace)
         torch._C._jit_pass_lint(trace)
         torch._C._jit_pass_fuse(trace)
         torch._C._jit_pass_lint(trace)
@@ -62,7 +62,7 @@ class TestJit(TestCase):
         trace, _ = torch.jit.record_trace(
             a_function, input, (hx, cx), parameters=lstm.parameters())
         torch._C._jit_pass_lint(trace)
-        torch._C._jit_pass_init(trace)
+        torch._C._jit_pass_onnx(trace)
         torch._C._jit_pass_lint(trace)
         torch._C._jit_pass_fuse(trace)
         torch._C._jit_pass_lint(trace)

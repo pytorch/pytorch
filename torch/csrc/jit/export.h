@@ -4,10 +4,7 @@
 
 namespace torch { namespace jit {
 
-// Exports a graph to ONNX
-std::string ExportGraph(std::shared_ptr<Graph>& graph,
-                        const std::unordered_map<void*, Node*>& buffer_map,
-                        const std::vector<at::Tensor> & initializers,
-                        bool verbose=false);
+std::string ExportGraph(const std::shared_ptr<Graph>& graph,
+                        const std::vector<at::Tensor> & initializers);
 
 }}

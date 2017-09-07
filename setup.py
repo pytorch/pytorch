@@ -378,7 +378,7 @@ main_sources = [
     "torch/csrc/jit/interned_strings.cpp",
     "torch/csrc/jit/export.cpp",
     "torch/csrc/jit/passes/graph_fuser.cpp",
-    "torch/csrc/jit/passes/init_pass.cpp",
+    "torch/csrc/jit/passes/onnx.cpp",
     "torch/csrc/jit/passes/dead_code_elimination.cpp",
     "torch/csrc/autograd/init.cpp",
     "torch/csrc/autograd/engine.cpp",
