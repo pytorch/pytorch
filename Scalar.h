@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <stdexcept>
 #include <string>
+#include "ATen/Context.h"
 #include "ATen/Half.h"
 #include "ATen/Type.h"
 #include "ATen/Utils.h"
@@ -69,10 +70,14 @@ public:
   }
 
   Tensor toTensor() const {
-    if (Tag::HAS_t != tag) {
-      throw std::domain_error("Scalar is not backed by a Tensor");
+    if (Tag::HAS_t == tag) {
+      return t;
+    } else if (Tag::HAS_d == tag) {
+      return CPU(kDouble).scalarTensor(*this);
+    } else {
+      assert(Tag::HAS_i == tag);
+      return CPU(kLong).scalarTensor(*this);
     }
-    return t;
   }
 
   AT_FORALL_SCALAR_TYPES(DEFINE_ACCESSOR)
