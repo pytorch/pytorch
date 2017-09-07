@@ -10,7 +10,19 @@ else:
 # temporary things we cannot handle
 EXCLUDE_PATTERN = "bernoulli.*|normal.*|exponential.*|random.*|arange.*"
 # what has to be done to add a Operation ...
-# 1. add virtual dispatch declaration to Type.h and default impl to Type.cpp
+# 1. if broadcasting, add (non-virtual) broadcast declaration to Type.h and definition to Type.cpp and
+#    rename underlying function
+TYPE_METHOD_DECLARATION_BROADCAST = CodeTemplate("""\
+${return_type} ${method_prefix}${api_name}(${formals}) ;
+""")
+TYPE_METHOD_DEFINITION_BROADCAST = CodeTemplate("""\
+${return_type} Type::${method_prefix}${api_name}(${formals}) {
+    Tensor ${broadcast_returns};
+    std::tie(${broadcast_returns}) = ${broadcast_function}(${broadcast_actuals});
+    return ${method_prefix_derived}${api_name}(${broadcast_modified_actuals});
+}
+""")
+# 2. add virtual dispatch declaration to Type.h and default impl to Type.cpp
 TYPE_METHOD_DECLARATION = CodeTemplate("""\
 virtual ${return_type} ${method_prefix}${api_name}(${formals}) ;
 """)
@@ -19,31 +31,31 @@ ${return_type} Type::${method_prefix}${api_name}(${formals}) {
     throw std::runtime_error(std::string("${api_name} is not implemented for type ") + toString());
 }
 """)
-# 2. add virtual override to TypeDerived.h
+# 3. add virtual override to TypeDerived.h
 TYPE_DERIVED_DECLARATION = CodeTemplate("""\
-virtual ${return_type} ${method_prefix}${api_name}(${formals}) override;
+virtual ${return_type} ${method_prefix_derived}${api_name}(${formals}) override;
 """)
-# 3. add override definition to TypeDerived.cpp
+# 4. add override definition to TypeDerived.cpp
 TYPE_DERIVED_DEFINITION = CodeTemplate("""\
-${return_type} ${Type}::${method_prefix}${api_name}(${formals}) {
+${return_type} ${Type}::${method_prefix_derived}${api_name}(${formals}) {
     ${type_definition_body}
 }
 """)
-# 4. add non-virtual declaration to Tensor.h
+# 5. add non-virtual declaration to Tensor.h
 TENSOR_METHOD_DECLARATION = CodeTemplate("""\
 ${return_type} ${api_name}(${method_formals})${const_mark};
 """)
-# 5. add non-virtual declaration to Tensor.cpp
+# 6. add non-virtual declaration to Tensor.cpp
 TENSOR_METHOD_DEFINITION = CodeTemplate("""\
 inline ${return_type} Tensor::${api_name}(${method_formals})${const_mark} {
     return type().${method_prefix}${api_name}(${method_actuals});
 }
 """)
-# 6. add a method declaration in Functions.h
+# 7. add a method declaration in Functions.h
 FUNCTION_DECLARATION = CodeTemplate("""\
 static inline ${return_type} ${api_name}(${formals});
 """)
-# 7. add a method definition in Functions.cpp
+# 8. add a method definition in Functions.cpp
 FUNCTION_DEFINITION = CodeTemplate("""\
 static inline ${return_type} ${api_name}(${formals}) {
     return ${inferred_type}.${api_name}(${actuals});
@@ -58,13 +70,10 @@ if(${check_name}.dim() == 0) {
     return static_cast<Type*>(this)->${method_prefix}${api_name}(${zero_dim_actuals});
 }""")
 
-SCALAR_EXPAND = CodeTemplate("""\
-Tensor ${name}__;
-if(${name}_->isScalar()) {
-    ${name}__ = ${name}.expand(${other}.sizes());
-    ${name}_ = static_cast<${Tensor}*>(${name}__.pImpl);
-}
-""")
+SPARSE_CHECK = CodeTemplate("""\
+if(${check_name}.type().isSparse()) {
+    return static_cast<Type*>(this)->${method_prefix}${api_name}(${sparse_actuals});
+}""")
 
 SPARSE_CHECK = CodeTemplate("""\
 if(${check_name}.type().isSparse()) {
@@ -133,8 +142,8 @@ CHECKED_CAST = {
             'checked_cast<${Backend}IntTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
     'THStorage*': CodeTemplate('checked_cast<${Storage}>(&${arg_name},"${arg_name}",${arg_pos}, false)'),
     'THGenerator*': CodeTemplate('check_generator(&${arg_name})'),
-    'THSize*': CodeTemplate('THLongStorageView::make(${arg_name},true)'),
-    'THStride*': CodeTemplate('THLongStorageView::make(${arg_name},true)'),
+    'THSize*': CodeTemplate('THLongStorageView::make(${arg_name}, true)'),
+    'THStride*': CodeTemplate('THLongStorageView::make(${arg_name}, true)'),
     'real': CodeTemplate('${arg_name}.to${ScalarName}()'),
     'accreal': CodeTemplate('${arg_name}.to${AccScalarName}()'),
     'TensorList': CodeTemplate('tensor_list_checked_cast<${Tensor}, Tensor, '
@@ -276,6 +285,30 @@ def create_generic(top_env, declarations):
     def format_formal(f):
         return '{} {}'.format(f['type'], f['name'])
 
+    def get_broadcast_argument(option):
+        for argument in option['arguments']:
+            if argument.get('broadcast'):
+                return argument
+
+    def get_broadcast_actuals(broadcast_arg, broadcast_inplace, broadcast_dims):
+        # return the actuals that will be passed to the broadcast function.
+        # 1) in the common case, this is the broadcasted argument (e.g. "self") followed by the tensors
+        #    that it is broadcasted against (comma-separated) (e.g. "self, tensor1, tensor2").
+        # 2) in the broadcast_dims case, this is the broadcasted argument (e.g. "self") followed by the sizes
+        #    it is broadcasted to (as an initializer list), so e.g. the specification
+        #    "mat1.dim0,mat2.dim1" gets transformed to "self, {mat1.size(0),mat2.size(1)}"
+        if not broadcast_dims:
+            broadcast_actuals = [broadcast_arg['name']] + broadcast_arg['broadcast'].split()[0].split(",")
+        else:
+            broadcast_dims_spec = broadcast_arg['broadcast'].split()[1].split(':')[1].split(',')
+            # generate size call for each dimension
+            broadcast_dims = ([x.split('.')[0] + '.size(' + x.split('.')[1].replace('dim', '') + ')'
+                              for x in broadcast_dims_spec])
+            broadcast_dims_init_list = '{' + ','.join(broadcast_dims) + '}'
+            broadcast_actuals = [broadcast_arg['name'], broadcast_dims_init_list]
+
+        return broadcast_actuals
+
     def process_option(option, output_options):
         option['inplace'] = re.search(
             '(^__i|[^_]_$)', option['api_name']) is not None
@@ -305,10 +338,44 @@ def create_generic(top_env, declarations):
         # another function-only variant can exist without the name colliding
         option['method_prefix'] = 'm_' if is_method and not is_function else ''
         env = nested_dict(option, top_env)
-        top_env['type_method_declarations'].append(
-            TYPE_METHOD_DECLARATION.substitute(env))
-        top_env['type_method_definitions'].append(
-            TYPE_METHOD_DEFINITION.substitute(env))
+
+        broadcast_arg = get_broadcast_argument(option)
+        if broadcast_arg is None:
+            option['method_prefix_derived'] = option['method_prefix']
+            top_env['type_method_declarations'].append(
+                TYPE_METHOD_DECLARATION.substitute(env))
+            top_env['type_method_definitions'].append(
+                TYPE_METHOD_DEFINITION.substitute(env))
+        else:
+            # "s_" for "same size".
+            option['method_prefix_derived'] = 's_' + option['method_prefix']
+            same_size_option = option.copy()
+            same_size_option['method_prefix'] = option['method_prefix_derived']
+            same_size_env = nested_dict(same_size_option, top_env)
+            top_env['type_method_declarations_protected'].append(
+                TYPE_METHOD_DECLARATION.substitute(same_size_env))
+            top_env['type_method_definitions'].append(
+                TYPE_METHOD_DEFINITION.substitute(same_size_env))
+
+            broadcast_inplace = 'inplace' in broadcast_arg['broadcast']
+            broadcast_dims = 'dims:' in broadcast_arg['broadcast']
+            option['broadcast_actuals'] = get_broadcast_actuals(broadcast_arg, broadcast_inplace, broadcast_dims)
+            if not broadcast_dims:
+                option['broadcast_returns'] = (["b_" + x for x in option['broadcast_actuals']
+                                               if x != broadcast_arg['name'] or not broadcast_inplace])
+            else:
+                option['broadcast_returns'] = ["b_" + broadcast_arg['name']]
+
+            option['broadcast_function'] = 'expand_' + ('inplace' if broadcast_inplace
+                                                        else 'size' if broadcast_dims else 'outplace')
+            option['broadcast_modified_actuals'] = ['b_' + y if 'b_' + y in option['broadcast_returns'] else y
+                                                    for y in option['actuals']]
+
+            env = nested_dict(option, top_env)
+            top_env['type_method_declarations'].append(
+                TYPE_METHOD_DECLARATION_BROADCAST.substitute(env))
+            top_env['type_method_definitions'].append(
+                TYPE_METHOD_DEFINITION_BROADCAST.substitute(env))
 
         if is_method:
             top_env['tensor_method_declarations'].append(
@@ -316,8 +383,9 @@ def create_generic(top_env, declarations):
             top_env['tensor_method_definitions'].append(
                 TENSOR_METHOD_DEFINITION.substitute(env))
             output_options.append({
-                'name': option['name'],
-                'arguments': [f for f in formals if f['name'] != 'self'],
+                'name': option['api_name'],
+                'method_prefix': option['method_prefix'],
+                'arguments': formals,
                 'method_of': 'Tensor',
                 'returns': option['returns'],
                 'inplace': option['inplace'],
@@ -326,7 +394,7 @@ def create_generic(top_env, declarations):
         if is_function:
             first_tensor = find_first_tensor(formals)
             output_option = {
-                'name': option['name'],
+                'name': option['api_name'],
                 'arguments': formals,
                 'returns': option['returns'],
                 'inplace': option['inplace'],
@@ -499,13 +567,6 @@ def create_derived(backend_type_env, declarations):
                 # also special handling where we zero some outputs.
                 if arg.get('cpu_zero', False) and not is_cuda:
                     body.append("{}.zero_();".format(arg['name']))
-
-                # handle scalars that occur on LHS of things like a - b
-                if 'broadcast' in arg and 'inplace' not in arg['broadcast']:
-                    other = arg['broadcast'].split(' ')[0].split(',')[0]
-                    body.append(SCALAR_EXPAND.substitute(env,
-                                                         name=arg['name'],
-                                                         other=other))
 
                 # dim() == 0 of all input tensors is and'd to form
                 # the test for whether the output is also a scalar
