@@ -864,8 +864,16 @@ def _AllReduce(devices, model, net, param, use_nccl=False, control_input=None):
         with core.DeviceScope(device_opt):
             net.Sum(blobs, [blobs[0]], name='dpm')
 
-    if len(devices) == 8:
-        # Special tree reduction for 8 gpus, TODO generalize like in muji.py
+    if len(devices) == 16:
+        # Special tree reduction for 16 gpus, TODO generalize like in muji.py
+        for j in range(8):
+            sumN(j * 2, j * 2 + 1)
+        for j in range(4):
+            sumN(j * 4, j * 4 + 2)
+        for j in range(2):
+            sumN(j * 8, j * 8 + 4)
+        sumN(0, 8)
+    elif len(devices) == 8:
         for j in range(4):
             sumN(j * 2, j * 2 + 1)
         for j in range(2):
@@ -1389,7 +1397,16 @@ def _ComputeBlobsToSync(model):
        "Some params not instantiated in param init net: {}".format(diff)
 
     # Remove duplicates and sort
-    blobs_to_sync = sorted(list(set(blobs_to_sync)))
+    prefixlen = len(model._device_prefix) + 1
+
+    def extract_sort_key(b):
+        # Sort first based on device id, and then by whole string
+        deviceid = int(b[prefixlen:b.index(scope._NAMESCOPE_SEPARATOR)])
+        return (deviceid, b)
+
+    blobs_to_sync = sorted(
+        list(set(blobs_to_sync)),
+        key=extract_sort_key)
 
     blobs_to_sync = [core.BlobReference(b) for b in blobs_to_sync]
     return (blobs_to_sync, sync_names)
