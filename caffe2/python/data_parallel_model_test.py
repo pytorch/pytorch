@@ -166,6 +166,10 @@ class DataParallelModelTest(TestCase):
                 result_8gpus = self.run_model(list(range(8)), gpu=gpu)
                 self.assertTrue(np.allclose(result_1gpus, result_8gpus))
 
+            if not gpu or workspace.NumCudaDevices() >= 16:
+                result_16gpus = self.run_model(list(range(16)), gpu=gpu)
+                self.assertTrue(np.allclose(result_1gpus, result_16gpus))
+
     def test_checkpoint_params(self):
         def add_input_ops(model):
             pass
