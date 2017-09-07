@@ -2,7 +2,7 @@
 
 #include <Python.h>
 #include "torch/csrc/jit/ir.h"
-#include "torch/csrc/onnx.h"
+#include "torch/csrc/onnx/onnx.h"
 #include <vector>
 
 namespace torch { namespace autograd {
