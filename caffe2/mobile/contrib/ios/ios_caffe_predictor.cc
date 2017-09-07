@@ -1,9 +1,9 @@
-#include "caffe2/contrib/ios/ios_caffe_predictor.h"
+#include "caffe2/mobile/contrib/ios/ios_caffe_predictor.h"
 #include "caffe2/core/flags.h"
 #include "caffe2/core/tensor.h"
 
 #if defined(CAFFE2_USE_MPSCNN) && CAFFE2_MOBILE
-#include "caffe2/contrib/ios/mpscnn/mpscnn.h"
+#include "caffe2/mobile/contrib/ios/mpscnn/mpscnn.h"
 #endif
 
 CAFFE2_DECLARE_bool(caffe2_force_shared_col_buffer);
