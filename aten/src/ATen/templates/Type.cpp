@@ -1,4 +1,5 @@
 #include "ATen/Type.h"
+#include "ATen/TypeMethods.h"
 #include "ATen/Tensor.h"
 #include "ATen/Storage.h"
 #include "ATen/Scalar.h"
