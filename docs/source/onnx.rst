@@ -50,7 +50,12 @@ exporter to print out a human-readable representation of the network::
       return (%58);
     }
 
-You can also verify the protobuf using the `onnx <https://github.com/ProjectToffee/onnx/>`_ library::
+You can also verify the protobuf using the `onnx <https://github.com/onnx/onnx/>`_ library.
+You can install ``onnx`` with conda::
+
+    conda install -c ezyang onnx
+
+Then, you can run::
 
     import onnx
 
@@ -59,13 +64,26 @@ You can also verify the protobuf using the `onnx <https://github.com/ProjectToff
     # Check that the IR is well formed
     onnx.checker.check_graph(graph)
 
-    # Printing a graph with embedded parameters is not recommended, as
-    # the default protobuf printer will dump ALL of the parameters
-    # (which will be very long.)
+    # Print a human readable representation of the graph
+    onnx.helper.printable_graph(graph)
 
-To run the exported script with Caffe2, you will need to install
-`caffe2 <https://caffe2.ai/>`_.  Once these are installed, you can use
-the backend for Caffe2::
+To run the exported script with `caffe2 <https://caffe2.ai/>`_, you will need three things:
+
+1. You'll need an install of Caffe2.  If you don't have one already,
+   you should make sure you have a Python 2 interpreter (Caffe2
+   doesn't officially support Python 3) and
+   `follow the install instructions <https://caffe2.ai/docs/getting-started.html>`_
+   (no Conda packaging for Caffe2 is available at the moment).
+
+2. You'll need `onnx-caffe2 <https://github.com/onnx/onnx-caffe2>`_, a
+   pure-Python library which provides a Caffe2 backend for ONNX.  You can install ``onnx-caffe2``
+   with conda or pip::
+
+      conda install -c ezyang onnx-caffe2
+      # OR
+      pip install onnx-caffe2
+
+Once these are installed, you can use the backend for Caffe2::
 
     # ...continuing from above
     import onnx.backend.caffe2 as backend
