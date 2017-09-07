@@ -1,4 +1,4 @@
-#include "torch/csrc/jit/graph_fuser.h"
+#include "torch/csrc/jit/passes/graph_fuser.h"
 #include <unordered_map>
 
 namespace torch { namespace jit {

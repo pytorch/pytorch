@@ -1,3 +1,7 @@
 #pragma once
 
-PyMethodDef* THPJIT_methods();
+namespace torch { namespace jit {
+
+void initJITBindings(PyObject *module);
+
+}}

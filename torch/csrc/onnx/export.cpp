@@ -6,7 +6,6 @@
 #include "torch/csrc/onnx.h"
 
 #include "torch/csrc/autograd/functions/convolution.h"
-#include "torch/csrc/jit/dead_code_elimination.h"
 #include "torch/csrc/utils/functional.h"
 #include <ATen/ATen.h>
 

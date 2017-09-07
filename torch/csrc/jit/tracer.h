@@ -6,7 +6,6 @@
 #include "torch/csrc/utils/functional.h"
 #include "torch/csrc/autograd/function_hook.h"
 #include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/init_pass.h"
 
 #include <memory>
 #include <mutex>
