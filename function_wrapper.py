@@ -437,15 +437,15 @@ def create_generic(top_env, declarations):
                 FUNCTION_DEFINITION.substitute(env))
             method_of.append('namespace')
 
-        if option['canonical']:
-            output_options.append({
-                'name': option['api_name'],
-                'method_prefix': option['method_prefix_derived'],
-                'arguments': formals,
-                'method_of': method_of,
-                'returns': option['returns'],
-                'inplace': option['inplace'],
-            })
+        output_options.append({
+            'name': option['api_name'],
+            'method_prefix': option['method_prefix_derived'],
+            'arguments': formals,
+            'method_of': method_of,
+            'canonical': option['canonical'],
+            'returns': option['returns'],
+            'inplace': option['inplace'],
+        })
 
     output_declarations = []
     for declaration in declarations:
