@@ -353,8 +353,6 @@ main_compile_args = ['-D_THP_CORE']
 main_libraries = ['shm']
 main_link_args = [TH_LIB, THS_LIB, THNN_LIB, ATEN_LIB, NANOPB_STATIC_LIB]
 main_sources = [
-    "torch/csrc/onnx.pb.cpp",
-    "torch/csrc/onnx.cpp",
     "torch/csrc/PtrWrapper.cpp",
     "torch/csrc/Module.cpp",
     "torch/csrc/Generator.cpp",
@@ -378,6 +376,7 @@ main_sources = [
     "torch/csrc/jit/tracer.cpp",
     "torch/csrc/jit/python_tracer.cpp",
     "torch/csrc/jit/interned_strings.cpp",
+    "torch/csrc/jit/export.cpp",
     "torch/csrc/jit/passes/graph_fuser.cpp",
     "torch/csrc/jit/passes/init_pass.cpp",
     "torch/csrc/jit/passes/dead_code_elimination.cpp",
@@ -406,7 +405,8 @@ main_sources = [
     "torch/csrc/autograd/functions/init.cpp",
     "torch/csrc/autograd/functions/onnx/convolution.cpp",
     "torch/csrc/autograd/functions/onnx/batch_normalization.cpp",
-    "torch/csrc/onnx/export.cpp",
+    "torch/csrc/onnx/onnx.pb.cpp",
+    "torch/csrc/onnx/onnx.cpp",
 ]
 main_sources += split_types("torch/csrc/Tensor.cpp")
 
