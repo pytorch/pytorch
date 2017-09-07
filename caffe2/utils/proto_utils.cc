@@ -190,7 +190,8 @@ ArgumentHelper::ArgumentHelper(const OperatorDef& def) {
             "but with different contents.",
             ProtoDebugString(def));
       } else {
-        LOG(WARNING) << "Duplicated argument name found in operator def: "
+        LOG(WARNING) << "Duplicated argument name [" << arg.name()
+                     << "] found in operator def: "
                      << ProtoDebugString(def);
       }
     }
@@ -202,7 +203,7 @@ ArgumentHelper::ArgumentHelper(const NetDef& netdef) {
   for (auto& arg : netdef.arg()) {
     CAFFE_ENFORCE(
         arg_map_.count(arg.name()) == 0,
-        "Duplicated argument name found in net def: ",
+        "Duplicated argument name [", arg.name(), "] found in net def: ",
         ProtoDebugString(netdef));
     arg_map_[arg.name()] = arg;
   }
