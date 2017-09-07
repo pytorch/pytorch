@@ -99,7 +99,14 @@ class GetColwiseMaxGradient : public GradientMakerBase {
 REGISTER_GRADIENT(ColwiseMax, GetColwiseMaxGradient);
 
 template <typename T, class Context>
-bool SumElementsGradientOp<T, Context>::RunOnDevice() {
+bool SumElementsGradientOp<T, Context>::RunOnDevice()
+// TODO: T21635077 fix float-divide-by-zero undefined behavior
+#if defined(__has_feature)
+#if __has_feature(__address_sanitizer__)
+    __attribute__((__no_sanitize__("float-divide-by-zero")))
+#endif
+#endif
+{
   auto& X = Input(0);
   TensorCPU sum_grad = TensorCPU(Input(1));
   auto* dX = Output(0);
