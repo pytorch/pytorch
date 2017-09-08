@@ -250,11 +250,18 @@ def Train(args):
                     prefix=args.run_id,
                 )
             )
+
+        # Expect interfaces to be comma separated.
+        # Use of multiple network interfaces is not yet complete,
+        # so simply use the first one in the list.
+        interfaces = args.distributed_interfaces.split(",")
         rendezvous = dict(
             kv_handler=store_handler,
             shard_id=shard_id,
             num_shards=num_shards,
             engine="GLOO",
+            transport=args.distributed_transport,
+            interface=interfaces[0],
             exit_nets=None)
     else:
         rendezvous = None
@@ -490,6 +497,10 @@ def main():
                         help='Data type used for training')
     parser.add_argument('--enable-tensor-core', action='store_true',
                         help='Enable Tensor Core math for Conv and FC ops')
+    parser.add_argument("--distributed_transport", type=str, default="tcp",
+                        help="Transport to use for distributed run [tcp|ibverbs]")
+    parser.add_argument("--distributed_interfaces", type=str, default="",
+                        help="Network interfaces to use for distributed run")
 
     args = parser.parse_args()
 
