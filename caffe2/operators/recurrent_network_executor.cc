@@ -141,7 +141,9 @@ void ThreadedRecurrentNetworkExecutor::WorkerFunction() {
     } catch (::caffe2::EnforceNotMet& enf) {
       std::unique_lock<std::mutex> lk(countdown_mtx_);
       LOG(ERROR) << "Crash at thread " << id << " timestep " << job.timestep
-                 << " " << enf.what();
+                 << " op:"
+                 << ProtoDebugString(step_net_def_.op(job.op_idx))
+                 << enf.what();
       job_queue_.NoMoreJobs();
       failed_ = true;
       cv_.notify_one();
