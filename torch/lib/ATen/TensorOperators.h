@@ -11,11 +11,11 @@ inline Tensor & Tensor::operator=(Scalar v) && {
   return assign_(v);
 }
 inline Tensor & Tensor::assign_(Scalar v) {
-  AT_ASSERT(dim() == 0, "attempting to assign a scalar to %d dim tensor",dim());
+  AT_ASSERT(dim() == 0, "attempting to assign a scalar to %d dim tensor", dim());
   pImpl->assign_(v);
   return *this;
 }
-inline Tensor Tensor::operator-() {
+inline Tensor Tensor::operator-() const {
   return neg();
 }
 inline Tensor& Tensor::operator+=(const Tensor & other) {
@@ -42,8 +42,8 @@ inline Tensor& Tensor::operator/=(const Tensor & other) {
 inline Tensor& Tensor::operator/=(Scalar other) {
   return div_(other);
 }
-inline Tensor Tensor::operator[](int64_t idx) {
-  return select(0,idx);
+inline Tensor Tensor::operator[](int64_t idx) const {
+  return select(0, idx);
 }
 
 #define AT_FORALL_BINARY_OPS(_) \

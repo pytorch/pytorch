@@ -10,11 +10,12 @@ else:
 # temporary things we cannot handle
 EXCLUDE_PATTERN = "bernoulli.*|normal.*|exponential.*|random.*|arange.*"
 # what has to be done to add a Operation ...
-# 1. if broadcasting, add (non-virtual) broadcast declaration to Type.h and definition to Type.cpp and
-#    rename underlying function
-TYPE_METHOD_DECLARATION_BROADCAST = CodeTemplate("""\
+# 1. if broadcasting or without the full list of arguments, add a non-virtual
+#    declaration under Type.h
+TYPE_METHOD_DECLARATION_NON_VIRTUAL = CodeTemplate("""\
 ${return_type} ${method_prefix}${api_name}(${formals}) ;
 """)
+# 2. broadcasting functions are implemented in Type.cpp
 TYPE_METHOD_DEFINITION_BROADCAST = CodeTemplate("""\
 ${return_type} Type::${method_prefix}${api_name}(${formals}) {
     Tensor ${broadcast_returns};
@@ -22,7 +23,13 @@ ${return_type} Type::${method_prefix}${api_name}(${formals}) {
     return ${method_prefix_derived}${api_name}(${broadcast_modified_actuals});
 }
 """)
-# 2. add virtual dispatch declaration to Type.h and default impl to Type.cpp
+# 3. functions without the full list of arguments are implemented in TypeMethods.h
+TYPE_METHOD_INLINE = CodeTemplate("""\
+inline ${return_type} Type::${method_prefix}${api_name}(${formals}) {
+    ${return_call}${method_prefix}${api_name}(${actuals_with_constants});
+}
+""")
+# 4. add virtual dispatch declaration to Type.h and default impl to Type.cpp
 TYPE_METHOD_DECLARATION = CodeTemplate("""\
 virtual ${return_type} ${method_prefix}${api_name}(${formals}) ;
 """)
@@ -31,31 +38,31 @@ ${return_type} Type::${method_prefix}${api_name}(${formals}) {
     throw std::runtime_error(std::string("${api_name} is not implemented for type ") + toString());
 }
 """)
-# 3. add virtual override to TypeDerived.h
+# 5. add virtual override to TypeDerived.h
 TYPE_DERIVED_DECLARATION = CodeTemplate("""\
 virtual ${return_type} ${method_prefix_derived}${api_name}(${formals}) override;
 """)
-# 4. add override definition to TypeDerived.cpp
+# 6. add override definition to TypeDerived.cpp
 TYPE_DERIVED_DEFINITION = CodeTemplate("""\
 ${return_type} ${Type}::${method_prefix_derived}${api_name}(${formals}) {
     ${type_definition_body}
 }
 """)
-# 5. add non-virtual declaration to Tensor.h
+# 7. add non-virtual declaration to Tensor.h
 TENSOR_METHOD_DECLARATION = CodeTemplate("""\
 ${return_type} ${api_name}(${method_formals})${const_mark};
 """)
-# 6. add non-virtual declaration to Tensor.cpp
+# 8. add non-virtual declaration to Tensor.cpp
 TENSOR_METHOD_DEFINITION = CodeTemplate("""\
 inline ${return_type} Tensor::${api_name}(${method_formals})${const_mark} {
     return type().${method_prefix}${api_name}(${method_actuals});
 }
 """)
-# 7. add a method declaration in Functions.h
+# 9. add a method declaration in Functions.h
 FUNCTION_DECLARATION = CodeTemplate("""\
 static inline ${return_type} ${api_name}(${formals});
 """)
-# 8. add a method definition in Functions.cpp
+# 10. add a method definition in Functions.cpp
 FUNCTION_DEFINITION = CodeTemplate("""\
 static inline ${return_type} ${api_name}(${formals}) {
     return ${inferred_type}.${api_name}(${actuals});
@@ -141,9 +148,9 @@ CHECKED_CAST = {
         CodeTemplate(
             'checked_cast<${Backend}IntTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
     'THStorage*': CodeTemplate('checked_cast<${Storage}>(&${arg_name},"${arg_name}",${arg_pos}, false)'),
-    'THGenerator*': CodeTemplate('check_generator(&${arg_name})'),
+    'THGenerator*': CodeTemplate('check_generator<${Backend}Generator>(&${arg_name})'),
     'THSize*': CodeTemplate('THLongStorageView::make(${arg_name}, true)'),
-    'THStride*': CodeTemplate('THLongStorageView::make(${arg_name}, true)'),
+    'THStride*': CodeTemplate('THLongStorageView::make(${arg_name}, false, true)'),
     'real': CodeTemplate('${arg_name}.to${ScalarName}()'),
     'accreal': CodeTemplate('${arg_name}.to${AccScalarName}()'),
     'TensorList': CodeTemplate('tensor_list_checked_cast<${Tensor}, Tensor, '
@@ -170,12 +177,20 @@ ALLOC_WRAP = {
     'THIntegerTensor*': 'new ${Backend}IntTensor(context)',
 }
 
+# Replacements for constants when calling into TH
 CONSTANT_REPLACEMENTS = [
     ('AS_REAL', '${AS_REAL}'),
     ('THPDefaultGenerator->cdata',
      'dynamic_cast<${Generator}&>(context->defaultGenerator(backend())).generator'),
     ('__storage_size.get\\(\\)',
      'THLongStorageView::make(static_cast<int64_t>(storage.size()))'),
+    ('__last_dim', 'self.ndimension()-1'),
+]
+
+# Replacements for constants when calling other ATen functions
+INLINE_CONSTANT_REPLACEMENTS = [
+    (r'AS_REAL\((.*)\)', r'\1'),
+    ('THPDefaultGenerator->cdata', 'context->defaultGenerator(backend())'),
     ('__last_dim', 'self.ndimension()-1'),
 ]
 
@@ -227,11 +242,17 @@ def create_generic(top_env, declarations):
             'type': type_str,
             'dynamic_type': DYNAMIC_TYPE.get(argument['type'], argument['type']),
         }
+        if 'default' in argument:
+            if 'if_true' in argument:
+                val = argument['default'] == argument['if_true']
+                translated['default'] = str(val).lower()
+            else:
+                translated['default'] = argument['default']
         if argument.get('output'):
             translated['output'] = True
         return translated
 
-    def get_formals(option):
+    def get_formals(option, include_constants=False):
         seen = set()
         result = []
 
@@ -244,13 +265,33 @@ def create_generic(top_env, declarations):
                 # only enable for a subset of Dense/Sparse ops
                 if not (option.get('aten_dense_sparse', False)):
                     raise NYIError("Sparse Tensor")
-            if is_real_argument_to_wrapper(argument):
+
+            if include_constants and argument['type'] == 'CONSTANT':
+                insert(argument)
+            elif is_real_argument_to_wrapper(argument):
                 insert(argument)
         for argument in option['arguments']:
             if argument.get('output') and not argument.get('allocate', False):
                 insert(argument)
 
         return [translate_formal(argument, option) for argument in result]
+
+    def get_actuals_with_constants(option):
+        actuals = []
+        for arg in get_formals(option, include_constants=True):
+            if arg['type'] != 'CONSTANT':
+                actuals.append(arg['name'])
+                continue
+            v = str(arg.get('default', arg['name']))
+            for pattern, replacement in INLINE_CONSTANT_REPLACEMENTS:
+                v = re.sub(pattern, replacement, v)
+            if v in {'NULL', 'nullptr'}:
+                if arg['name'] == 'stride':
+                    v = 'IntList()'
+                else:
+                    v = 'Tensor()'
+            actuals.append(v)
+        return actuals
 
     def get_return_types(option):
         ret = option['return']
@@ -316,37 +357,51 @@ def create_generic(top_env, declarations):
         if re.match(EXCLUDE_PATTERN, option['name']):
             print("Excluding {}".format(option['name']))
             raise NYIError("NYI")
+
         # print(yaml.dump(option))
         formals = get_formals(option)
         option['formals_list'] = formals
         option['formals'] = [format_formal(f) for f in formals]
         option['returns'] = get_return_types(option)
+        option['return_type'] = format_return_type(option['returns'])
+        option['return_call'] = 'return ' if option['return_type'] != 'void' else ''
         option['actuals'] = [f['name'] for f in formals]
 
         option['method_formals'] = [format_formal(f) for f in formals
                                     if f['name'] != 'self']
         option['method_actuals'] = [
             f['name'] if f['name'] != 'self' else '*this' for f in formals]
-        option['return_type'] = format_return_type(option['returns'])
 
         option['const_mark'] = '' if option['inplace'] else ' const'
 
         is_method = 'method' in option['variants']
         is_function = 'function' in option['variants']
+        first_tensor = find_first_tensor(formals)
+        is_namespace_function = is_function and first_tensor is not None
 
         # method-only things are prefixed with m_ in Type so that
         # another function-only variant can exist without the name colliding
         option['method_prefix'] = 'm_' if is_method and not is_function else ''
+        option['method_prefix_derived'] = option['method_prefix']
         env = nested_dict(option, top_env)
 
         broadcast_arg = get_broadcast_argument(option)
-        if broadcast_arg is None:
-            option['method_prefix_derived'] = option['method_prefix']
+        if broadcast_arg is None and option['has_full_argument_list']:
             top_env['type_method_declarations'].append(
                 TYPE_METHOD_DECLARATION.substitute(env))
             top_env['type_method_definitions'].append(
                 TYPE_METHOD_DEFINITION.substitute(env))
         else:
+            top_env['type_method_declarations'].append(
+                TYPE_METHOD_DECLARATION_NON_VIRTUAL.substitute(env))
+
+        if not option['has_full_argument_list']:
+            # functions without the full list of arguments are implemented
+            # inline in TypeMethods.h
+            option['actuals_with_constants'] = get_actuals_with_constants(option)
+            top_env['type_method_inline_definitions'].append(
+                TYPE_METHOD_INLINE.substitute(env))
+        elif broadcast_arg is not None:
             # "s_" for "same size".
             option['method_prefix_derived'] = 's_' + option['method_prefix']
             same_size_option = option.copy()
@@ -370,44 +425,34 @@ def create_generic(top_env, declarations):
                                                         else 'size' if broadcast_dims else 'outplace')
             option['broadcast_modified_actuals'] = ['b_' + y if 'b_' + y in option['broadcast_returns'] else y
                                                     for y in option['actuals']]
-
-            env = nested_dict(option, top_env)
-            top_env['type_method_declarations'].append(
-                TYPE_METHOD_DECLARATION_BROADCAST.substitute(env))
             top_env['type_method_definitions'].append(
                 TYPE_METHOD_DEFINITION_BROADCAST.substitute(env))
 
+        method_of = ['Type']
         if is_method:
             top_env['tensor_method_declarations'].append(
                 TENSOR_METHOD_DECLARATION.substitute(env))
             top_env['tensor_method_definitions'].append(
                 TENSOR_METHOD_DEFINITION.substitute(env))
-            output_options.append({
-                'name': option['api_name'],
-                'method_prefix': option['method_prefix'],
-                'arguments': formals,
-                'method_of': 'Tensor',
-                'returns': option['returns'],
-                'inplace': option['inplace'],
-            })
+            method_of.append('Tensor')
 
-        if is_function:
-            first_tensor = find_first_tensor(formals)
-            output_option = {
-                'name': option['api_name'],
-                'arguments': formals,
-                'returns': option['returns'],
-                'inplace': option['inplace'],
-            }
-            if first_tensor is not None:
-                option['inferred_type'] = 'infer_type({})'.format(first_tensor)
-                top_env['function_declarations'].append(
-                    FUNCTION_DECLARATION.substitute(env))
-                top_env['function_definitions'].append(
-                    FUNCTION_DEFINITION.substitute(env))
-            else:
-                output_option['method_of'] = 'Type'
-            output_options.append(output_option)
+        if is_namespace_function:
+            option['inferred_type'] = 'infer_type({})'.format(first_tensor)
+            top_env['function_declarations'].append(
+                FUNCTION_DECLARATION.substitute(env))
+            top_env['function_definitions'].append(
+                FUNCTION_DEFINITION.substitute(env))
+            method_of.append('namespace')
+
+        output_options.append({
+            'name': option['api_name'],
+            'method_prefix': option['method_prefix_derived'],
+            'arguments': formals,
+            'method_of': method_of,
+            'returns': option['returns'],
+            'inplace': option['inplace'],
+            'has_full_argument_list': option['has_full_argument_list'],
+        })
 
     output_declarations = []
     for declaration in declarations:
@@ -417,11 +462,7 @@ def create_generic(top_env, declarations):
                 process_option(option, output_options)
             except NYIError:
                 option['skip'] = True
-        if len(output_options) > 0:
-            output_declarations.append({
-                'name': output_options[0]['name'],
-                'options': output_options,
-            })
+        output_declarations.extend(output_options)
     return output_declarations
 
 
@@ -429,18 +470,24 @@ def create_derived(backend_type_env, declarations):
     type_object_declarations = []
     type_object_definitions = []
 
+    def replace_with_null(argument):
+        return (argument['type'] == 'THGenerator*' and
+                backend_type_env['Backend'] == 'CUDA')
+
     def requires_checked_cast(argument):
         return argument['type'] in CHECKED_CAST
 
     def nullable_argument(argument):
-        return (argument['type'] == 'THTensor*' and
-                argument.get('default', '') == 'nullptr')
+        return (argument['type'] in {'THIntegerTensor*', 'THTensor*'} and
+                argument.get('default', '') in {'NULL', 'nullptr'})
 
     def bool_option_is_string(argument):
         return 'if_true' in argument and isinstance(argument['if_true'], string_type)
 
     def get_argument(argument, option):
-        if requires_checked_cast(argument):
+        if replace_with_null(argument):
+            return 'NULL'
+        elif requires_checked_cast(argument):
             checked_use = CHECKED_USE.get(
                 argument['type'], '{}_').format(argument['name'])
             if nullable_argument(argument):
@@ -454,11 +501,11 @@ def create_derived(backend_type_env, declarations):
                 tpl = '({}) ? {} : {}'
             return tpl.format(argument['name'],
                               argument['if_true'], argument['if_false'])
-        elif argument['type'] == "CONSTANT":
+        elif argument['type'] == 'CONSTANT':
             # this is a bool that is actually a string...
             if bool_option_is_string(argument):
                 return '"{}"'.format(argument['name'])
-            v = str(argument['name'])
+            v = str(argument.get('default', argument['name']))
             for pattern, replacement in CONSTANT_REPLACEMENTS:
                 v = re.sub(pattern, replacement, v)
             return CodeTemplate(v).substitute(backend_type_env)
@@ -472,7 +519,7 @@ def create_derived(backend_type_env, declarations):
     def drop_argument(argument, option):
         return 'CUDA' in backend_type_env['Backend'] and (
             (option['mode'] == 'TH' and argument['type'] == 'THGenerator*') or
-            argument['name'] == 'THPDefaultGenerator->cdata')
+            argument.get('default') == 'THPDefaultGenerator->cdata')
 
     def get_arguments(option):
         return [get_argument(argument, option)
@@ -550,7 +597,7 @@ def create_derived(backend_type_env, declarations):
                         null_okay=null_okay)
                     body.append("auto {}_ = {};".format(
                         arg['name'], check_cast))
-                if drop_argument(arg, option):
+                if drop_argument(arg, option) or replace_with_null(arg):
                     body.append(
                         "(void) {}_; //silence unused warning".format(arg['name']))
                 # resize tensors for special ops that require it
@@ -657,7 +704,7 @@ def create_derived(backend_type_env, declarations):
 
     for declaration in declarations:
         for option in declaration['options']:
-            if not option.get('skip', False):
+            if not option.get('skip', False) and option['has_full_argument_list']:
                 try:
                     process_option(option)
                 except NYIError:
