@@ -6,12 +6,14 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 
-def concat(model, blobs_in, blob_out, order="NCHW", **kwargs):
+def concat(model, blobs_in, blob_out, **kwargs):
     """Depth Concat."""
+    if kwargs.get('order') and kwargs.get('axis'):
+        raise ValueError("Don't set both order and axis")
+
     return model.net.Concat(
         blobs_in,
         [blob_out, "_" + blob_out + "_concat_dims"],
-        order=order,
         **kwargs
     )[0]
 
