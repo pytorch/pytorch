@@ -356,6 +356,16 @@ class Tensor {
     return ss.str();
   }
 
+  void swap(Tensor<Context>& other) {
+    std::swap(dims_, other.dims_);
+    std::swap(size_, other.size_);
+    std::swap(meta_, other.meta_);
+    std::swap(data_, other.data_);
+    std::swap(shares_data_, other.shares_data_);
+    std::swap(capacity_, other.capacity_);
+    std::swap(reserved_, other.reserved_);
+  }
+
   /**
    * @brief Shares the data with another tensor.
    *
@@ -396,7 +406,8 @@ class Tensor {
    */
   template <typename T>
   void ShareExternalPointer(T* src, size_t capacity = 0) {
-    ShareExternalPointer(src, capacity, [](void*) -> void {});
+    ShareExternalPointer(
+        src, capacity, [](void*) -> void {}, true /* no ownership */);
   }
 
   /**
@@ -406,14 +417,23 @@ class Tensor {
    * reallocated or freed.
    */
   template <typename T, typename Deleter>
-  void ShareExternalPointer(T* src, size_t capacity, Deleter&& d) {
+  void ShareExternalPointer(
+      T* src,
+      size_t capacity,
+      Deleter&& d,
+      bool no_ownership = false) {
     ShareExternalPointer(
-        src, TypeMeta::Make<T>(), capacity, std::forward<Deleter>(d));
+        src,
+        TypeMeta::Make<T>(),
+        capacity,
+        std::forward<Deleter>(d),
+        no_ownership);
   }
 
   void
   ShareExternalPointer(void* src, const TypeMeta& meta, size_t capacity = 0) {
-    ShareExternalPointer(src, meta, capacity, [](void*) -> void {});
+    ShareExternalPointer(
+        src, meta, capacity, [](void*) -> void {}, true /* no ownership */);
   }
 
   template <class Deleter>
@@ -421,16 +441,22 @@ class Tensor {
       void* src,
       const TypeMeta& meta,
       size_t capacity,
-      Deleter&& d) {
+      Deleter&& d,
+      bool no_ownership = false) {
     meta_ = meta;
     CAFFE_ENFORCE_WITH_CALLER(
         meta_.id(),
         "To share with a raw external pointer you need to have meta "
         "already set.");
     CAFFE_ENFORCE_WITH_CALLER(
-        size_ > 0,
+        size_ >= 0,
         "To share data with a raw pointer, you need to set shape first.");
-    data_.reset(src, std::forward<Deleter>(d));
+    if (no_ownership) {
+      // We use aliasing contructor to avoid calling delete
+      data_ = std::shared_ptr<void>(std::shared_ptr<void>(), src);
+    } else {
+      data_.reset(src, std::forward<Deleter>(d));
+    }
     // Sets capacity. If not specified, we will implicitly assume that
     // the capacity is the current size.
     if (capacity) {
