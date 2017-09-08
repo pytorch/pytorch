@@ -49,12 +49,24 @@ class TestShapeInference(test_util.TestCase):
 
     def testShapeInferenceDistances(self):
         model = model_helper.ModelHelper(name="test_model")
-        model.SquaredL2Distance(["x", "y"], "zsq")
-        model.CosineSimilarity(["x", "y"], "zcos")
-        model.DotProduct(["x", "y"], "zdot")
+        model.net.L1Distance(["x1", "y1"], "dl1_D1")
+        model.net.SquaredL2Distance(["x1", "y1"], "dl2_D1")
+        model.net.CosineSimilarity(["x1", "y1"], "dcos_D1")
+        model.net.DotProduct(["x1", "y1"], "ddot_D1")
+        model.net.DotProductWithPadding(["x1", "y1"], "ddotpad_D1")
 
-        workspace.FeedBlob("x", np.random.rand(10).astype(np.float32))
-        workspace.FeedBlob("y", np.random.rand(10).astype(np.float32))
+        model.net.L1Distance(["x2", "y2"], "dl1_D2")
+        model.net.SquaredL2Distance(["x2", "y2"], "dl2_D2")
+        model.net.CosineSimilarity(["x2", "y2"], "dcos_D2")
+        model.net.DotProduct(["x2", "y2"], "ddot_D2")
+        model.net.DotProductWithPadding(["x2", "z2"], "ddotpad_D2")
+
+        workspace.FeedBlob("x1", np.random.rand(10).astype(np.float32))
+        workspace.FeedBlob("y1", np.random.rand(10).astype(np.float32))
+
+        workspace.FeedBlob("x2", np.random.rand(10, 5).astype(np.float32))
+        workspace.FeedBlob("y2", np.random.rand(10, 5).astype(np.float32))
+        workspace.FeedBlob("z2", np.random.rand(10, 4).astype(np.float32))
         self.InferTensorRunAndCompare(model)
 
     def testShapeInferenceReduceBackFrontX(self):
