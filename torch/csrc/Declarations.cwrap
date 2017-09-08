@@ -2909,12 +2909,14 @@
     - function
   return: argument 0
   options:
-    - cname: add
+    - cname: add_scaled
       arguments:
         - arg: THTensor* result
           output: True
         - THTensor* self
         - real value
+        - arg: real alpha
+          default: AS_REAL(1)
     - cname: cadd
       aten_sparse: True
       arguments:
@@ -2922,7 +2924,7 @@
           output: True
         - arg: THTensor* self
           broadcast: other fallback
-        - arg: real value
+        - arg: real alpha
           default: AS_REAL(1)
         - THTensor* other
     - sparse: True
@@ -2932,7 +2934,7 @@
         - arg: THTensor* result
           output: True
         - THTensor* self
-        - arg: real value
+        - arg: real alpha
           default: AS_REAL(1)
         - THSTensor* other
 ]]
@@ -2940,18 +2942,20 @@
   name: add_
   return: argument 0
   options:
-    - cname: add
+    - cname: add_scaled
       arguments:
         - THTensor* self
         - THTensor* self
         - real value
+        - arg: real alpha
+          default: AS_REAL(1)
     - cname: cadd
       aten_sparse: True
       arguments:
         - THTensor* self
         - arg: THTensor* self
           broadcast: other inplace fallback
-        - arg: real value
+        - arg: real alpha
           default: AS_REAL(1)
         - THTensor* other
     - sparse: True
@@ -2960,7 +2964,7 @@
       arguments:
         - THTensor* self
         - THTensor* self
-        - arg: real value
+        - arg: real alpha
           default: AS_REAL(1)
         - THSTensor* other
 ]]
@@ -2971,19 +2975,21 @@
     - function
   return: argument 0
   options:
-    - cname: sub
+    - cname: sub_scaled
       arguments:
         - arg: THTensor* result
           output: True
         - THTensor* self
         - real value
+        - arg: real alpha
+          default: AS_REAL(1)
     - cname: csub
       arguments:
         - arg: THTensor* result
           output: True
         - arg: THTensor* self
           broadcast: other fallback
-        - arg: real value
+        - arg: real alpha
           default: AS_REAL(1)
         - THTensor* other
 ]]
@@ -2991,17 +2997,19 @@
   name: sub_
   return: argument 0
   options:
-    - cname: sub
+    - cname: sub_scaled
       arguments:
         - THTensor* self
         - THTensor* self
         - real value
+        - arg: real alpha
+          default: AS_REAL(1)
     - cname: csub
       arguments:
         - THTensor* self
         - arg: THTensor* self
           broadcast: other inplace fallback
-        - arg: real value
+        - arg: real alpha
           default: AS_REAL(1)
         - THTensor* other
 ]]

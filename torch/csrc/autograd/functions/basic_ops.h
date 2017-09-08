@@ -55,8 +55,8 @@ struct Add : public ForwardFunction<true>, public HasSymbolic {
 };
 
 
-struct AddBackward : public Function {
-  AddBackward(FunctionFlags&& flags)
+struct AddBackward_Deprecated : public Function {
+  AddBackward_Deprecated(FunctionFlags&& flags)
     : Function(std::move(flags)) {}
 
   virtual variable_list apply(const variable_list& gradOutputs) override;
