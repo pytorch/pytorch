@@ -131,6 +131,7 @@ class GLImageVector {
   int height() const { return height_; }
   int tile_x() const { return tile_x_; }
   int tile_y() const { return tile_y_; }
+  int slices() const { return size() > 0 ? images_[0]->slices : 0; }
 
   GLImageVector(int num_images, int width, int height, int channels, int tile_x = 1, int tile_y = 1)
       : num_images_(num_images),

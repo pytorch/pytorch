@@ -883,6 +883,7 @@ public:
 
     if (tiling) {
       // Turn on tiling
+      CAFFE_ENFORCE_EQ(input.slices(), 1, "Input needs to be tiled in a single texture");
       computeOutputTiles(output_channels, output_tile_x, output_tile_y);
       output_tiles = output_tile_x * output_tile_y;
 
@@ -1034,6 +1035,7 @@ public:
 
     if (tiling) {
       // Turn on tiling
+      CAFFE_ENFORCE_EQ(input.slices(), 1, "Input needs to be tiled in a single texture");
       computeOutputTiles(output_channels, output_tile_x, output_tile_y);
       output_tiles = output_tile_x * output_tile_y;
 
