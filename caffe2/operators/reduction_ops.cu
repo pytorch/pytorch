@@ -7,7 +7,7 @@
 namespace caffe2 {
 
 REGISTER_CUDA_OPERATOR(SumElements, SumElementsOp<float, CUDAContext>);
-REGISTER_CUDA_OPERATOR(SumSqrElements, SumSqrElementsOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(SumSqrElements, SumSqrElementsOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(RowwiseMax, MaxReductionOp<float, CUDAContext, true>);
 REGISTER_CUDA_OPERATOR(ColwiseMax, MaxReductionOp<float, CUDAContext, false>);
 REGISTER_CUDA_OPERATOR(
@@ -50,6 +50,12 @@ __global__ void rowwise_max_gradient_kernel(
     }
   }
 }
+
+template <>
+bool SumSqrElementsOp<CUDAContext>::RunOnDevice() {
+  return DispatchHelper<TensorTypes<float, float16>>::call(this, Input(0));
+}
+
 
 __global__ void colwise_max_gradient_kernel(
     const int batch_size,

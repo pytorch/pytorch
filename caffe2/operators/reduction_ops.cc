@@ -3,7 +3,7 @@
 namespace caffe2 {
 
 REGISTER_CPU_OPERATOR(SumElements, SumElementsOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(SumSqrElements, SumSqrElementsOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(SumSqrElements, SumSqrElementsOp<CPUContext>);
 
 REGISTER_CPU_OPERATOR(
     SumElementsGradient,
