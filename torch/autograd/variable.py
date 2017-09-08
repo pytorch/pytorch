@@ -138,7 +138,7 @@ class Variable(_C._VariableBase):
         zero them before calling it.
 
         Arguments:
-            grad_variables (Tensor, Variable or None): Gradient w.r.t. the
+            gradient (Tensor, Variable or None): Gradient w.r.t. the
                 variable. If it is a tensor, it will be automatically converted
                 to a Variable that is volatile unless ``create_graph`` is True.
                 None values can be specified for scalar Variables or ones that
