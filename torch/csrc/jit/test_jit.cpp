@@ -159,6 +159,7 @@ static void fusionTests() {
 
     //auto out0 = inputs[0]*inputs[1];
     comp.debugLaunchGraph(graph, inputs, outputs);
+    JIT_ASSERT(out0.is_same_size(outputs.front()));
     float max_diff = (outputs.front() - out0).abs().max().toDouble();
     JIT_ASSERT(max_diff < 1e-6);
 
