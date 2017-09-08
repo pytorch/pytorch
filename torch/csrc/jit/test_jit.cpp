@@ -131,6 +131,10 @@ static void fusionTests() {
 
     std::vector<at::Tensor> inputs;
     std::vector<at::Tensor> outputs;
+    // We want to generate input/output tensors with dimension 128x128x32, but
+    // with different internal strides.  To do this, we generate a tensor
+    // with the "wrong" dimensions, and then use transpose to get an appropriately
+    // sized view.
     for(size_t i = 0; i < graph.inputs().size(); i++) {
       std::vector<int64_t> dims = {128, 128, 32};
       std::swap(dims[ti],dims[tj]);
