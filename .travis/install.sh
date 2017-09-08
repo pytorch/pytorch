@@ -162,7 +162,7 @@ fi
 ####################
 # pip dependencies #
 ####################
-pip install \
+sudo pip install \
     future \
     hypothesis \
     numpy \
@@ -216,6 +216,6 @@ if [ "$BUILD_NNPACK" = 'true' ]; then
         echo "OS \"$TRAVIS_OS_NAME\" is unknown"
         exit 1
     fi
-    pip install git+https://github.com/Maratyszcza/PeachPy
-    pip install git+https://github.com/Maratyszcza/confu
+    sudo pip install git+https://github.com/Maratyszcza/PeachPy
+    sudo pip install git+https://github.com/Maratyszcza/confu
 fi
