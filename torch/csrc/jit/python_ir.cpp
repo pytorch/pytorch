@@ -34,7 +34,6 @@ void initPythonIRBindings(PyObject * module_) {
       return g.create(stringToSymbol(str),inputs);
     })
     .GS(createSelect)
-    .GS(createChunk)
     .GS(createConstant)
     .GS(createFusionGroup)
     .def("createClone",[](Graph & g, Node * n, py::object fn) {

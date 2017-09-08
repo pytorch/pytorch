@@ -509,8 +509,6 @@ struct StageClosure {
       const_factory->next_functions.emplace_back(fn, 0);
       fn->num_inputs = 1;
       return fn;
-    IR_ELSEIF(Chunk)
-      return std::make_shared<Chunk>(value->i(kNumChunks), value->i(kDim));
     IR_ELSEIF(Undefined)
       return std::make_shared<EmitNull>();
     IR_ELSE()
