@@ -15,7 +15,7 @@ class CUDARecurrentNetworkExecutor : public RecurrentNetworkExecutorBase {
       const NetDef& step_net_def,
       std::map<string, string>& recurrent_input_map,
       std::string timestep_blob)
-      : RecurrentNetworkExecutorBase(step_net_def, recurrent_input_map, timestep_blob) {}
+  : RecurrentNetworkExecutorBase(step_net_def, recurrent_input_map, timestep_blob) {}
 
   ~CUDARecurrentNetworkExecutor();
 
@@ -65,11 +65,18 @@ class CUDARecurrentNetworkExecutor : public RecurrentNetworkExecutorBase {
     LOG(INFO) << "Analyzed ops for timestep parallelism: " << has_timestep_parallelism_;
  }
 
+ public:
+
+   void setMaxStreams(int n) {
+     max_cuda_streams_ = n;
+   }
+
  private:
   void _ExecRange(int from, int to);
 
   std::vector<cudaEvent_t> events_;
   bool has_timestep_parallelism_ = false;
+  int max_cuda_streams_ = 2;
 };
 }
 #endif

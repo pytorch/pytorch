@@ -7,6 +7,7 @@ from __future__ import unicode_literals
 
 from caffe2.proto import caffe2_pb2
 from caffe2.python import workspace, core, utils, rnn_cell, model_helper
+from caffe2.python import recurrent
 
 import argparse
 import numpy as np
@@ -109,6 +110,7 @@ def create_model(args, queue, label_queue, input_shape):
             print("Using DAG net type")
             model.net.Proto().type = 'dag'
             model.net.Proto().num_workers = 4
+
     elif args.implementation == "cudnn":
         # We need to feed a placeholder input so that RecurrentInitOp
         # can infer the dimensions.
@@ -146,6 +148,15 @@ def create_model(args, queue, label_queue, input_shape):
         workspace.FeedBlob(init_blob, np.zeros(
             [1, args.batch_size, sz], dtype=np.float32
         ))
+
+    if args.rnn_executor:
+        for op in model.net.Proto().op:
+            if op.type.startswith('RecurrentNetwork'):
+                recurrent.set_rnn_executor_config(
+                    op,
+                    num_threads=args.rnn_executor_num_threads,
+                    max_cuda_streams=args.rnn_executor_max_cuda_streams,
+                )
     return model, output
 
 
@@ -302,7 +313,18 @@ def GetArgumentParser():
         action="store_true",
         help="Whether to use RNN executor"
     )
-
+    parser.add_argument(
+        "--rnn_executor_num_threads",
+        type=int,
+        default=None,
+        help="Number of threads used by CPU RNN Executor"
+    )
+    parser.add_argument(
+        "--rnn_executor_max_cuda_streams",
+        type=int,
+        default=None,
+        help="Maximum number of CUDA streams used by RNN executor on GPU"
+    )
     return parser
 
 

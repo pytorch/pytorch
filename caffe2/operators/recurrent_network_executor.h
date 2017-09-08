@@ -360,7 +360,6 @@ protected:
   std::map<string, string> recurrent_input_map_;
   std::string timestep_blob_;
 
-  int num_threads_ = 4; // TODO: make configurable
   int max_parallel_timesteps_ = -1;
 };
 
@@ -368,7 +367,8 @@ template <class Context>
 std::unique_ptr<RecurrentNetworkExecutorBase> createRNNExecutor(
     const NetDef& step_net_def,
     std::map<string, string>& recurrent_input_map,
-    std::string timestep_blob);
+    std::string timestep_blob,
+    ArgumentHelper rnn_args);
 
 class ThreadedRecurrentNetworkExecutor : public RecurrentNetworkExecutorBase {
  public:
@@ -395,6 +395,10 @@ class ThreadedRecurrentNetworkExecutor : public RecurrentNetworkExecutorBase {
     return false;
   }
 
+  void setNumThreads(int n) {
+    num_threads_ = n;
+  }
+
  private:
   void _ExecRange(int from, int to);
 
@@ -412,6 +416,7 @@ class ThreadedRecurrentNetworkExecutor : public RecurrentNetworkExecutorBase {
   std::mutex countdown_mtx_;
   std::condition_variable cv_;
   std::vector<std::thread> workers_;
+  int num_threads_ = 4;
 };
 
 } // namespace caffe2

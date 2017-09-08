@@ -190,7 +190,8 @@ class RecurrentNetworkOp final : public Operator<Context> {
         recurrent_input_map[recurrent_mapping[i + n]] = recurrent_mapping[i];
       }
       rnnExecutor_ =
-          createRNNExecutor<Context>(stepNetDef_, recurrent_input_map, timestep_);
+          createRNNExecutor<Context>(stepNetDef_, recurrent_input_map, timestep_,
+              ArgumentHelper(operator_def));
     } else {
       // Fix for legacy models that pass "rnn" type net
       if (stepNetDef_.type() == "rnn") {
@@ -410,7 +411,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
     AddParamGradientAccumulationOps(operator_def);
 
     if (FLAGS_caffe2_rnn_executor && enable_rnn_executor_) {
-      InitializeExecutor();
+      InitializeExecutor(operator_def);
     }
   }
 
@@ -534,7 +535,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
     return links;
   }
 
-  void InitializeExecutor() {
+  void InitializeExecutor(const OperatorDef& operator_def) {
     VLOG(1) << "Use RecurrentNetworkExecutor for backward";
     std::map<string, string> recurrent_input_map;
     const auto recurrent_mapping =
@@ -545,7 +546,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
       recurrent_input_map[recurrent_mapping[i + n]] = recurrent_mapping[i];
     }
     rnnExecutor_ = createRNNExecutor<Context>(
-      stepNetDef_, recurrent_input_map, timestep_);
+      stepNetDef_, recurrent_input_map, timestep_, ArgumentHelper(operator_def));
   }
 
   void AddGradientInputAccumulationOps(const OperatorDef& operator_def) {
