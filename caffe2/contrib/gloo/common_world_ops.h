@@ -24,6 +24,10 @@ class CreateCommonWorld final : public Operator<Context> {
         size_(OperatorBase::template GetSingleArgument<int>("size", 0)),
         rank_(OperatorBase::template GetSingleArgument<int>("rank", 0)),
         sync_(OperatorBase::template GetSingleArgument<bool>("sync", false)),
+        transport_(OperatorBase::template GetSingleArgument<std::string>(
+                       "transport", "tcp")),
+        interface_(OperatorBase::template GetSingleArgument<std::string>(
+                       "interface", "")),
         status_blob_(
             OperatorBase::GetSingleArgument<std::string>("status_blob", "")),
         timeout_ms_(OperatorBase::GetSingleArgument<int>("timeout_ms", -1)),
@@ -32,10 +36,10 @@ class CreateCommonWorld final : public Operator<Context> {
         operator_def.has_name(), "CreateCommonWorld operator requires name");
     CAFFE_ENFORCE(rank_ >= 0 && rank_ < size_);
     name_ = operator_def.name();
-    device_ = createDevice();
     if (status_blob_ != "") {
       ws_->CreateBlob(status_blob_);
     }
+    initialize();
   }
 
   virtual ~CreateCommonWorld() {}
@@ -87,11 +91,29 @@ class CreateCommonWorld final : public Operator<Context> {
     }
   }
 
-  std::shared_ptr<::gloo::transport::Device> createDevice();
+  void initialize() {
+    // Share single device between all common worlds.
+    static std::once_flag once;
+    static std::shared_ptr<::gloo::transport::Device> device;
+    std::call_once(once, [&]() {
+        createDeviceAttr attr;
+        attr.transport = transport_;
+        attr.interface = interface_;
+        device = createDevice(attr);
+      });
+    device_ = device;
+
+    // Context specific initialization.
+    initializeForContext();
+  }
+
+  void initializeForContext();
 
   const int size_;
   const int rank_;
   const bool sync_;
+  const std::string transport_;
+  const std::string interface_;
   const std::string status_blob_;
   const int timeout_ms_;
   Workspace* ws_;

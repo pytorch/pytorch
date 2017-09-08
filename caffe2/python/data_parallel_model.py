@@ -1510,6 +1510,11 @@ def _CreateOrCloneCommonWorld(
             status_blob=status_blob,
         )
     else:
+        kwargs=dict()
+        if 'transport' in rendezvous:
+            kwargs['transport'] = rendezvous['transport']
+        if 'interface' in rendezvous:
+            kwargs['interface'] = rendezvous['interface']
         comm_world = net.CreateCommonWorld(
             [rendezvous['kv_handler']],
             common_world_blob,
@@ -1519,6 +1524,7 @@ def _CreateOrCloneCommonWorld(
             engine=rendezvous['engine'],
             status_blob=status_blob,
             timeout_ms=timeout_ms,
+            **kwargs
         )
 
     return comm_world
