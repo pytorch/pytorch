@@ -30,7 +30,12 @@ class ConvTransposeGradientOp final : public ConvTransposeUnpoolBase<Context> {
  public:
   USE_CONV_TRANSPOSE_UNPOOL_BASE_FUNCTIONS(Context);
   ConvTransposeGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvTransposeUnpoolBase<Context>(operator_def, ws) {}
+      : ConvTransposeUnpoolBase<Context>(operator_def, ws),
+        no_bias_(OperatorBase::GetSingleArgument<bool>("no_bias", false)) {
+    CAFFE_ENFORCE(
+        !(no_bias_ && OutputSize() == 3),
+        "If bias is not present, you should not have 3 grad output.");
+  }
 
   bool RunOnDeviceWithOrderNCHW() override;
   bool RunOnDeviceWithOrderNHWC() override;
@@ -38,10 +43,11 @@ class ConvTransposeGradientOp final : public ConvTransposeUnpoolBase<Context> {
  private:
   Tensor<Context> col_buffer_;
   Tensor<Context> bias_multiplier_;
+  const bool no_bias_;
   // input: X, W, dY
-  // output: dW, db, and optionally dX
+  // output: dW, optionally db and dX
   INPUT_TAGS(INPUT, FILTER, OUTPUT_GRAD);
-  OUTPUT_TAGS(FILTER_GRAD, BIAS_GRAD, INPUT_GRAD);
+  OUTPUT_TAGS(FILTER_GRAD, BIAS_OR_INPUT_GRAD, INPUT_GRAD);
 };
 
 } // namespace caffe2

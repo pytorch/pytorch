@@ -6,7 +6,7 @@ namespace caffe2 {
 REGISTER_CPU_OPERATOR(ConvTranspose, ConvTransposeOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(ConvTranspose)
-    .NumInputs(3)
+    .NumInputs(2, 3)
     .NumOutputs(1)
     .SetDoc(R"DOC(
     The transposed convolution consumes an input vector, the filter blob, and
@@ -38,7 +38,7 @@ OPERATOR_SCHEMA(ConvTranspose)
         2,
         "bias",
         "The 1D bias blob that is added through the convolution;"
-        "has size (C)")
+        "has size (C). Optional, if not passed, will treat it as all 0.")
     .Output(
         0,
         "Y",
