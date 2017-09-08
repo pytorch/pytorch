@@ -263,7 +263,7 @@ void reinterleaveRows(
   src += point * colBlockSize * kStrideW;
   dst += point * outputW;
 
-  float b = bias[c];
+  float b = bias ? bias[c] : 0;
 #ifdef __ARM_NEON__
   float32x4_t biasV = vdupq_n_f32(b);
 #endif
@@ -349,7 +349,7 @@ void reinterleaveRows(
 template <int N, typename T, typename Context>
 void reinterleaveMultithreaded(
     const T* y0,
-    const Tensor<Context>& bias,
+    const T* bias_data,
     T* y,
     int outputC,
     int outputH,
@@ -363,21 +363,21 @@ void reinterleaveMultithreaded(
   size_t totalTiles = (size_t)outputC * outputH;
   FixedDivisor<int> divOutputH(outputH);
 
-#define REINTERLEAVE(N)          \
-  do {                           \
-    reinterleaveRows<N>(         \
-        y0,                      \
-        bias.template data<T>(), \
-        c,                       \
-        h,                       \
-        y,                       \
-        outputC,                 \
-        outputH,                 \
-        outputW,                 \
-        inputW,                  \
-        kernelW,                 \
-        strideW,                 \
-        adjH);                   \
+#define REINTERLEAVE(N)  \
+  do {                   \
+    reinterleaveRows<N>( \
+        y0,              \
+        bias_data,       \
+        c,               \
+        h,               \
+        y,               \
+        outputC,         \
+        outputH,         \
+        outputW,         \
+        inputW,          \
+        kernelW,         \
+        strideW,         \
+        adjH);           \
   } while (false)
 
   std::function<void(int, size_t)> fnReinterleave = [&](int threadId,
@@ -530,7 +530,6 @@ template <typename T, class Context>
 bool ConvTransposeMobileOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const Tensor<Context>& X = Input(INPUT);
   auto& filter = Input(FILTER);
-  auto& bias = Input(BIAS);
   Tensor<Context>* Y = Output(0);
   const int N = X.dim32(0), M = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
   CAFFE_ENFORCE(filter.ndim() == 4, "filter must be 4D tensor");
@@ -544,10 +543,13 @@ bool ConvTransposeMobileOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   CAFFE_ENFORCE(
       filter.dim32(3) == this->kernel_w(),
       "filter width must be equal to kernel width");
-  CAFFE_ENFORCE(bias.ndim() == 1, "bias must be 1D tensor");
-  CAFFE_ENFORCE(
-      bias.dim32(0) == C,
-      "bias dimension must be equal to output channel number");
+  if (InputSize() == 3) {
+    auto& bias = Input(BIAS);
+    CAFFE_ENFORCE(bias.ndim() == 1, "bias must be 1D tensor");
+    CAFFE_ENFORCE(
+        bias.dim32(0) == C,
+        "bias dimension must be equal to output channel number");
+  }
 
   ConvTransposeUnpoolBase<Context>::SetOutputSize(X, Y, C);
 
@@ -643,20 +645,20 @@ bool ConvTransposeMobileOp<T, Context>::RunOnDeviceWithOrderNCHW() {
 // y0 now contains the final output, but it is in deinterleaved
 // form. We have to re-interleave it to produce the final form in Y
 // This operation also handles adding the per-channel bias.
-#define REINTERLEAVE(N)                           \
-  do {                                            \
-    reinterleaveMultithreaded<N, T, Context>(     \
-        threadBuffer->template mutable_data<T>(), \
-        bias,                                     \
-        Ydata,                                    \
-        Y->dim32(1),                              \
-        Y->dim32(2),                              \
-        Y->dim32(3),                              \
-        W,                                        \
-        this->kernel_w(),                         \
-        this->stride_w(),                         \
-        this->adj_h(),                            \
-        pool);                                    \
+#define REINTERLEAVE(N)                                              \
+  do {                                                               \
+    reinterleaveMultithreaded<N, T, Context>(                        \
+        threadBuffer->template mutable_data<T>(),                    \
+        InputSize() == 3 ? Input(BIAS).template data<T>() : nullptr, \
+        Ydata,                                                       \
+        Y->dim32(1),                                                 \
+        Y->dim32(2),                                                 \
+        Y->dim32(3),                                                 \
+        W,                                                           \
+        this->kernel_w(),                                            \
+        this->stride_w(),                                            \
+        this->adj_h(),                                               \
+        pool);                                                       \
   } while (false)
 
       if (this->stride_w() == 1) {
