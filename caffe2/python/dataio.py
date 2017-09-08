@@ -223,7 +223,7 @@ class ReaderBuilder(object):
     def splits(self, net):
         raise NotImplementedError()
 
-    def new_reader(self, split_reader=None):
+    def new_reader(self, split_reader=None, **kwargs):
         raise NotImplementedError()
 
 
@@ -254,8 +254,8 @@ class PipedReaderBuilder(ReaderBuilder):
     def splits(self, net):
         return self._builder.splits(net)
 
-    def new_reader(self, split_reader=None):
-        output = self._piper(self._builder.new_reader(split_reader))
+    def new_reader(self, split_reader=None, **kwargs):
+        output = self._piper(self._builder.new_reader(split_reader), **kwargs)
         return output if isinstance(output, Reader) else output.reader()
 
 
