@@ -9,7 +9,7 @@ from torch._C import _infer_size
 from . import _functions
 from .modules import utils
 from ._functions.linear import Bilinear
-from ._functions.padding import ConstantPad1d, ConstantPad2d, ConstantPad3d
+from ._functions.padding import ConstantPadNd
 from ._functions.vision import GridSampler, AffineGridGenerator
 from ..autograd import _functions as _autograd_functions
 from torch.autograd import Variable
@@ -1065,36 +1065,34 @@ def pad(input, pad, mode='constant', value=0):
 
     Args:
         input (Variable): 3D, 4D or 5D tensor
-        pad (tuple): 2-, 4-, or 6-elem tuple
+        pad (tuple): m-elem tuple, where m // 2 > input dimension and m % 2 == 0
         mode: 'constant', 'reflect' or 'replicate'. Default: 'constant'
         value: fill value for 'constant' padding. Default: 0
     """
-    if input.dim() == 3:
+    assert len(pad) % 2 == 0, 'padding length must be divisible by 2'
+    assert len(pad) // 2 <= len(input.size()), 'padding length too large'
+    if mode == 'constant':
+        return ConstantPadNd.apply(input, pad, value)
+    elif input.dim() == 3:
         assert len(pad) == 2, '3D tensors expect 2 values for padding'
-        if mode == 'constant':
-            return ConstantPad1d.apply(input, pad, value)
-        elif mode == 'reflect':
+        if mode == 'reflect':
             return _functions.thnn.ReflectionPad1d.apply(input, *pad)
         elif mode == 'replicate':
             return _functions.thnn.ReplicationPad1d.apply(input, *pad)
     elif input.dim() == 4:
         assert len(pad) == 4, '4D tensors expect 4 values for padding'
-        if mode == 'constant':
-            return ConstantPad2d.apply(input, pad, value)
-        elif mode == 'reflect':
+        if mode == 'reflect':
             return _functions.thnn.ReflectionPad2d.apply(input, *pad)
         elif mode == 'replicate':
             return _functions.thnn.ReplicationPad2d.apply(input, *pad)
     elif input.dim() == 5:
         assert len(pad) == 6, '5D tensors expect 6 values for padding'
-        if mode == 'constant':
-            return ConstantPad3d.apply(input, pad, value)
-        elif mode == 'reflect':
+        if mode == 'reflect':
             raise NotImplementedError
         elif mode == 'replicate':
             return _functions.thnn.ReplicationPad3d.apply(input, *pad)
     else:
-        raise NotImplementedError("Only 3D, 4D, 5D padding is supported for now")
+        raise NotImplementedError("Only 3D, 4D, 5D padding with non-constant padding are supported for now")
 
 
 # distance

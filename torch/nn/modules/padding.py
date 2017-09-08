@@ -2,9 +2,41 @@ from .module import Module
 from .utils import _pair, _quadruple, _ntuple
 from .. import functional as F
 
+
 # TODO: grad_output size asserts in THNN
 
-class ConstantPad1d(Module):
+
+class _ConstantPadNd(Module):
+    r"""Pads the input tensor boundaries with a constant value.
+
+    Args:
+        padding (int, tuple): the size of the padding. If is int, uses the same
+            padding in both boundaries. If a m-tuple, where m is divisible by
+            2, then padding is(begin_dim_pad, end_dim_pad, ...) for each pair
+            paddings starting from the last dimension of the input moving
+            forward.
+        value (int): value inserted into tensor as padding
+
+    Shape:
+        - Input: :math:`(N_i, D_j_{in})`
+        - Output: :math:`(N_i, D_j_{out})` where
+          :math:`J = len(padding) // 2`
+          :math:`j = (0, 1, ..., J)`
+          :math:`~j = (J, J-1, ..., 0)`
+          :math:`D_j_{out} = D_j_{in} + padding[~j*2] + padding[~j*2 + 1]`
+
+    """
+
+    def __init__(self, padding, value):
+        super(_ConstantPadNd, self).__init__()
+        self.padding = padding
+        self.value = value
+
+    def __repr__(self):
+        return self.__class__.__name__ + ' ' + str(self.padding)
+
+
+class ConstantPad1d(_ConstantPadNd):
     r"""Pads the input tensor boundaries with a constant value.
 
     Args:
@@ -28,7 +60,7 @@ class ConstantPad1d(Module):
     """
 
     def __init__(self, padding, value):
-        super(ConstantPad1d, self).__init__()
+        super(ConstantPad1d, self).__init__(padding, value)
         self.padding = _pair(padding)
         self.value = value
 
@@ -39,7 +71,7 @@ class ConstantPad1d(Module):
         return self.__class__.__name__ + ' ' + str(self.padding)
 
 
-class ConstantPad2d(Module):
+class ConstantPad2d(_ConstantPadNd):
     r"""Pads the input tensor boundaries with a constant value.
 
     Args:
@@ -64,7 +96,7 @@ class ConstantPad2d(Module):
     """
 
     def __init__(self, padding, value):
-        super(ConstantPad2d, self).__init__()
+        super(ConstantPad2d, self).__init__(padding, value)
         self.padding = _quadruple(padding)
         self.value = value
 
@@ -75,7 +107,7 @@ class ConstantPad2d(Module):
         return self.__class__.__name__ + ' ' + str(self.padding)
 
 
-class ConstantPad3d(Module):
+class ConstantPad3d(_ConstantPadNd):
     r"""Pads the input tensor boundaries with a constant value.
 
     Args:
@@ -102,7 +134,7 @@ class ConstantPad3d(Module):
     """
 
     def __init__(self, padding, value):
-        super(ConstantPad3d, self).__init__()
+        super(ConstantPad3d, self).__init__(padding, value)
         self.padding = _ntuple(6)(padding)
         self.value = value
 
@@ -288,7 +320,7 @@ class ReplicationPad3d(Module):
         return self.__class__.__name__ + ' ' + str(self.padding)
 
 
-class ZeroPad2d(Module):
+class ZeroPad2d(_ConstantPadNd):
     r"""Pads the input tensor boundaries with zero.
 
     Args:
@@ -313,7 +345,7 @@ class ZeroPad2d(Module):
     """
 
     def __init__(self, padding):
-        super(ZeroPad2d, self).__init__()
+        super(ZeroPad2d, self).__init__(padding, 0)
         self.padding = _quadruple(padding)
 
     def forward(self, input):
