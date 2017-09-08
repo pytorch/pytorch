@@ -217,6 +217,9 @@ class OpenGLPReluOp final : public Operator<CPUContext>, ImageAllocator<T> {
 
     const int input_tile_x = input.tile_x(), input_tile_y = input.tile_y();
     const int output_tile_x = input_tile_x, output_tile_y = input_tile_y;
+    if (input_tile_x > 1 || input_tile_y > 1) {
+      CAFFE_ENFORCE_EQ(input.slices(), 1, "Input needs to be tiled in a single texture");
+    }
 
     GLImageVector<T>* output = ImageAllocator<T>::newImage(num_images,
                                                            output_width,
