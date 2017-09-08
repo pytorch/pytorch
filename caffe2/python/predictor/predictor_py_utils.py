@@ -20,6 +20,8 @@ def create_predict_net(predictor_export_meta):
     net.Proto().external_output.extend(predictor_export_meta.outputs)
     if predictor_export_meta.net_type is not None:
         net.Proto().type = predictor_export_meta.net_type
+    if predictor_export_meta.num_workers is not None:
+        net.Proto().num_workers = predictor_export_meta.num_workers
     return net.Proto()
 
 
