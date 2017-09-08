@@ -13,7 +13,6 @@ constexpr int TOP_DESC_ID = 1;
 constexpr int TOP_GRADIENT_DESC_ID = 2;
 }  // namespace
 
-template <typename T>
 class CuDNNSoftmaxOp final : public Operator<CUDAContext> {
  public:
   explicit CuDNNSoftmaxOp(const OperatorDef& def, Workspace* ws)
@@ -27,7 +26,8 @@ class CuDNNSoftmaxOp final : public Operator<CUDAContext> {
     CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(desc_));
   }
 
-  bool RunOnDevice() override {
+  template <typename T>
+  bool DoRunWithType() {
     auto& X = Input(0);
     auto* Y = Output(0);
     const auto canonical_axis = X.canonical_axis_index(axis_);
@@ -59,6 +59,10 @@ class CuDNNSoftmaxOp final : public Operator<CUDAContext> {
     return true;
   }
 
+  bool RunOnDevice() override {
+    return DispatchHelper<TensorTypes<float, float16>>::call(this, Input(0));
+  }
+
  protected:
   CuDNNWrapper cudnn_wrapper_;
   int axis_;
@@ -67,7 +71,6 @@ class CuDNNSoftmaxOp final : public Operator<CUDAContext> {
 };
 
 
-template <typename T>
 class CuDNNSoftmaxGradientOp final : public Operator<CUDAContext> {
  public:
   explicit CuDNNSoftmaxGradientOp(const OperatorDef& def, Workspace* ws)
@@ -81,7 +84,8 @@ class CuDNNSoftmaxGradientOp final : public Operator<CUDAContext> {
     CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(desc_));
   }
 
-  bool RunOnDevice() override {
+  template <typename T>
+  bool DoRunWithType() {
     auto& Y = Input(0);
     auto& dY = Input(1);
     auto* dX = Output(0);
@@ -117,6 +121,10 @@ class CuDNNSoftmaxGradientOp final : public Operator<CUDAContext> {
     return true;
   }
 
+  bool RunOnDevice() override {
+    return DispatchHelper<TensorTypes<float, float16>>::call(this, Input(0));
+  }
+
  protected:
   CuDNNWrapper cudnn_wrapper_;
   int axis_;
@@ -125,9 +133,7 @@ class CuDNNSoftmaxGradientOp final : public Operator<CUDAContext> {
 };
 
 namespace {
-REGISTER_CUDNN_OPERATOR(Softmax, CuDNNSoftmaxOp<float>);
-REGISTER_CUDNN_OPERATOR(SoftmaxGradient, CuDNNSoftmaxGradientOp<float>);
-REGISTER_CUDNN_OPERATOR(SoftmaxFp16, CuDNNSoftmaxOp<float16>);
-REGISTER_CUDNN_OPERATOR(SoftmaxFp16Gradient, CuDNNSoftmaxGradientOp<float16>);
+REGISTER_CUDNN_OPERATOR(Softmax, CuDNNSoftmaxOp);
+REGISTER_CUDNN_OPERATOR(SoftmaxGradient, CuDNNSoftmaxGradientOp);
 }  // namespace
 }  // namespace caffe2
