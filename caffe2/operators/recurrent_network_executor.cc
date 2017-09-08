@@ -8,11 +8,16 @@ template <>
 std::unique_ptr<RecurrentNetworkExecutorBase> createRNNExecutor<CPUContext>(
     const NetDef& step_net_def,
     std::map<string, string>& recurrent_input_map,
-    std::string timestep_blob) {
-  std::unique_ptr<RecurrentNetworkExecutorBase> ptr(
-      new ThreadedRecurrentNetworkExecutor(
-          step_net_def, recurrent_input_map, timestep_blob));
-  return ptr;
+    std::string timestep_blob,
+    ArgumentHelper rnn_args) {
+  auto* exec = new ThreadedRecurrentNetworkExecutor(
+      step_net_def, recurrent_input_map, timestep_blob);
+  int num_threads = rnn_args.GetSingleArgument<int>("rnn_executor.num_threads", 0);
+  if (num_threads > 0) {
+    exec->setNumThreads(num_threads);
+    LOG(INFO) << "Set num threads: " << num_threads;
+  }
+  return std::unique_ptr<RecurrentNetworkExecutorBase>(exec);
 }
 
 bool ThreadedRecurrentNetworkExecutor::Run(int T) {
