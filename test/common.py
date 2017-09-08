@@ -269,8 +269,10 @@ class TestCase(unittest.TestCase):
     def assertExpected(self, s, subname=None):
         """
         Test that a string matches the recorded contents of a file
-        derived from the name of this test and subname.  You can
-        automatically update the recorded test output using --accept.
+        derived from the name of this test and subname.  This file
+        is placed in the 'expect' directory in the same directory
+        as the test script. You can automatically update the recorded test
+        output using --accept.
 
         If you call this multiple times in a single function, you must
         give a unique subname each time.
@@ -283,7 +285,11 @@ class TestCase(unittest.TestCase):
                 return text[len(prefix):]
             return text
         munged_id = remove_prefix(self.id(), "__main__.")
-        expected_file = os.path.join(os.path.dirname(os.path.realpath(__file__)),
+        # NB: we take __file__ from __main__, so we place the expect directory
+        # where the test script lives, NOT where test/common.py lives.  This
+        # doesn't matter in PyTorch where all test scripts are in the same
+        # directory as test/common.py, but it matters in onnx-pytorch
+        expected_file = os.path.join(os.path.dirname(os.path.realpath(__main__.__file__)),
                                      "expect",
                                      munged_id)
         if subname:
