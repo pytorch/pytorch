@@ -166,12 +166,18 @@ class RecurrentNetworkExecutorBase {
    * Add dependencies to ops in the next timestep that would write an op
    * that this op has as an input or output. This is special for RNNs,
    * since we can have ops running in different timesteps concurrently.
+   * Also, we need to check ops that output a blob that is input of
+   * of the op in question.
    */
   void add_race_conflict_dependencies(
       int opidx,
       std::vector<RNNNetOperator>& rnn_ops,
       std::set<int>* dep_ops) {
-    for (int i = 0; i < opidx; i++) {
+
+    for (int i = 0; i < rnn_ops.size(); i++) {
+      if (i == opidx) {
+        continue;
+      }
       if (rnn_ops[i].link_op && this->ignoreLinkDependencies()) {
         continue;
       }
@@ -182,10 +188,12 @@ class RecurrentNetworkExecutorBase {
             break;
           }
         }
-        for (auto& outp : step_net_def_.op(opidx).output()) {
-          if (outp == dep_blob) {
-            dep_ops->insert(i);
-            break;
+        if (i < opidx) {
+          for (auto& outp : step_net_def_.op(opidx).output()) {
+            if (outp == dep_blob) {
+              dep_ops->insert(i);
+              break;
+            }
           }
         }
       }
@@ -231,11 +239,13 @@ class RecurrentNetworkExecutorBase {
             timestep_ops_template_,
             &dependent_ops);
 
+        // Race conditions arise when operator writes a blob that is
+        // being read by another.
         if (!this->ignoreLinkDependencies()) {
-          // Race conditions arise when link ops can be run out-of-order.
           add_race_conflict_dependencies(
-              rnn_op.order, timestep_ops_template_, &dependent_ops);
+            rnn_op.order, timestep_ops_template_, &dependent_ops);
         }
+
         for (int i : dependent_ops) {
           rnn_op.dependencies.push_back(i);
         }
