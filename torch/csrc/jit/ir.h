@@ -200,7 +200,6 @@ inline TypePtr getInitialType(NodeKind kind) {
     case kPythonOp:
     case kCppOp:
     case kEval:
-    case kChunk:
     case kFusionGroup:
       return multiType();
     default:
@@ -755,12 +754,6 @@ public:
     return r;
   }
 
-  Node * createChunk(Node * input, int64_t numChunks, int64_t dim) {
-    auto n = create(kChunk,{input});
-    n->i_(kNumChunks,numChunks);
-    n->i_(kDim, dim);
-    return n;
-  }
   Node * createUndefined() {
     return create(kUndefined);
   }

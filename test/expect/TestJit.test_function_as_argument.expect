@@ -7,24 +7,32 @@ graph(%1 : Double(3, 10)
       %7 : Double(80)) {
   %8 : Double(10!, 80!) = Transpose[perm=[1, 0]](%4), uses = [%9.i0];
   %9 : UNKNOWN_TYPE = Transpose(%8), uses = [%10.i1];
-  %10 : Double(3, 80) = FC(%1, %9, %6), uses = [%14.i0];
+  %10 : Double(3, 80) = FC(%1, %9, %6), uses = [%32.i0];
   %11 : Double(20!, 80!) = Transpose[perm=[1, 0]](%5), uses = [%12.i0];
   %12 : UNKNOWN_TYPE = Transpose(%11), uses = [%13.i1];
-  %13 : Double(3, 80) = FC(%2, %12, %7), uses = [%14.i1];
-  %14 : Double(3, 80) = Add(%10, %13), uses = [%15.i0];
-  %16 : Double(3!, 20), %17 : Double(3!, 20), %18 : Double(3!, 20), %19 : Double(3!, 20) = Split[split=[20, 20, 20, 20], axis=1](%14), uses = [[%29.i4], [%29.i3], [%29.i2], [%29.i1]];
-  %30 : Double(3, 20), %31 : Double(3, 20) = fusion_group_0(%3, %19, %18, %17, %16), uses = [[%0.i0], [%0.i1]];
+  %13 : Double(3, 80) = FC(%2, %12, %7), uses = [%33.i0];
+  %36 : Double(3!, 20), %39 : Double(3!, 20), %42 : Double(3!, 20), %45 : Double(3!, 20) = Split[split=[20, 20, 20, 20], axis=1](%13), uses = [[%29.i8], [%29.i6], [%29.i4], [%29.i2]];
+  %35 : Double(3!, 20), %38 : Double(3!, 20), %41 : Double(3!, 20), %44 : Double(3!, 20) = Split[split=[20, 20, 20, 20], axis=1](%10), uses = [[%29.i7], [%29.i5], [%29.i3], [%29.i1]];
+  %30 : Double(3, 20), %31 : Double(3, 20) = fusion_group_0(%3, %44, %45, %41, %42, %38, %39, %35, %36), uses = [[%0.i0], [%0.i1]];
   return (%30, %31);
 }
 with fusion_group_0 = graph(%13 : Double(3, 20)
-      %15 : Double(3!, 20)
-      %17 : Double(3!, 20)
-      %19 : Double(3!, 20)
-      %21 : Double(3!, 20)) {
-  %22 : Double(3, 20) = Sigmoid(%21), uses = [%11.i0];
-  %20 : Double(3, 20) = Sigmoid(%19), uses = [%14.i0];
-  %18 : Double(3, 20) = Tanh(%17), uses = [%11.i1];
-  %16 : Double(3, 20) = Sigmoid(%15), uses = [%3.i0];
+      %23 : Double(3!, 20)
+      %24 : Double(3!, 20)
+      %26 : Double(3!, 20)
+      %27 : Double(3!, 20)
+      %29 : Double(3!, 20)
+      %30 : Double(3!, 20)
+      %32 : Double(3!, 20)
+      %33 : Double(3!, 20)) {
+  %34 : Double(3, 20) = Add(%32, %33), uses = [%22.i0];
+  %31 : Double(3, 20) = Add(%29, %30), uses = [%20.i0];
+  %28 : Double(3, 20) = Add(%26, %27), uses = [%18.i0];
+  %25 : Double(3, 20) = Add(%23, %24), uses = [%16.i0];
+  %22 : Double(3, 20) = Sigmoid(%34), uses = [%11.i0];
+  %20 : Double(3, 20) = Sigmoid(%31), uses = [%14.i0];
+  %18 : Double(3, 20) = Tanh(%28), uses = [%11.i1];
+  %16 : Double(3, 20) = Sigmoid(%25), uses = [%3.i0];
   %14 : Double(3, 20) = Mul(%20, %13), uses = [%8.i0];
   %11 : Double(3, 20) = Mul(%22, %18), uses = [%8.i1];
   %8 : Double(3, 20) = Add(%14, %11), uses = [%5.i0, %0.i1];

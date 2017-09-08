@@ -23,8 +23,8 @@ _(Tanh) \
 _(Constant) \
 _(Undefined) \
 _(FusionGroup) \
-_(Chunk) \
-_(NumChunks) \
+_(Split) \
+_(split) \
 _(Dim) \
 _(Offset) \
 _(value) \

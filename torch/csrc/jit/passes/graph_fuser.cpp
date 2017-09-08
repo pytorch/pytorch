@@ -149,6 +149,15 @@ struct GraphFuser {
     return group;
   }
 
+  bool isChunk(Node * node) {
+    if (node->kind() != kSplit) return false;
+    // All splits have to be equal
+    auto & splits = node->is(ksplit);
+    for (auto s : splits)
+      if (s != splits[0]) return false;
+    return true;
+  }
+
   // in places where op can be fused into a consumer but chunk is in the way
   // distribute chunk to op's operands:
   // replace a,b = chunk(op(x,y,z)) with:
@@ -160,32 +169,32 @@ struct GraphFuser {
 
   bool tryToMoveChunk(Node * consumer, Node * producer) {
     // if we are fusing a select,
-    if(producer->kind() != kSelect)
+    if (producer->kind() != kSelect)
       return false;
     // and the select refers to a chunk,
     auto * chunk = producer->input();
-    if(chunk->kind() != kChunk)
+    if (!isChunk(chunk))
       return false;
     // and the thing being chunked is fusable into the consumer
     Node * producer_for_chunk = chunk->input();
-    if(!isFusable(producer_for_chunk) || !allUsersAreThisConsumer(chunk,producer_for_chunk))
+    if (!isFusable(producer_for_chunk) || !allUsersAreThisConsumer(chunk,producer_for_chunk))
       return false;
     // and all uses of the chunk are in this consumer
-    for(auto s : chunk->uses()) {
-      for(auto u : s.user->uses()) {
-        if(u.user != consumer)
+    for (auto s : chunk->uses()) {
+      for (auto u : s.user->uses()) {
+        if (u.user != consumer)
           return false;
       }
     }
 
     std::vector<Node*> chunks;
     for(auto input : producer_for_chunk->inputs()) {
-      Node * c = graph->createChunk(input,chunk->i(kNumChunks),chunk->i(kDim));
-      insertAfter(c,chunk);
+      Node * c = graph->createClone(chunk, [input](Node*) { return input; });
+      insertAfter(c, chunk);
       chunks.push_back(c);
     }
 
-    //as we replace/remove the selects the use list changes, so copy it first
+    // as we replace/remove the selects the use list changes, so copy it first
     use_list copy_uses = chunk->uses();
     for(auto s : copy_uses) {
       Node* sel = s.user;
