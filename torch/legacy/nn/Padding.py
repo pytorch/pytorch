@@ -25,7 +25,7 @@ class Padding(Module):
         self.outputSize = torch.Size(outputSize)
         dim = self.dim
 
-        if hasattr(self, "nInputDim") and input.dim() != self.nInputDim:
+        if hasattr(self, "nInputDim") and self.nInputDim > 0 and input.dim() != self.nInputDim:
             dim = dim + 1
 
         self.output.resize_(self.outputSize)
@@ -52,7 +52,7 @@ class Padding(Module):
         self.gradInput.resize_as_(input)
         dim = self.dim
 
-        if hasattr(self, "nInputDim") and input.dim() != self.nInputDim:
+        if hasattr(self, "nInputDim") and self.nInputDim > 0 and input.dim() != self.nInputDim:
             dim = dim + 1
 
         index = self.index
