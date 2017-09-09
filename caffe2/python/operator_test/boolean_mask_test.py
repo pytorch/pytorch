@@ -3,8 +3,10 @@ from __future__ import division
 from __future__ import print_function
 
 import numpy as np
-from hypothesis import given
+from hypothesis import assume, given
 import hypothesis.strategies as st
+
+from caffe2.proto import caffe2_pb2
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
 
@@ -43,12 +45,24 @@ class TestBooleanMaskOp(hu.HypothesisTestCase):
         self.assertReferenceChecks(gc, op, [x, mask], ref)
         self.assertDeviceChecks(dc, op, [x, mask], [0])
 
+    @staticmethod
+    def _dtype_conversion(x, dtype, gc, dc):
+        """SequenceMask only supports fp16 with CUDA."""
+        if dtype == np.float16:
+            assume(gc.device_type == caffe2_pb2.CUDA)
+            dc = [d for d in dc if d.device_type == caffe2_pb2.CUDA]
+            x = x.astype(dtype)
+        return x, dc
+
     @given(x=hu.tensor(min_dim=2,
                        max_dim=5,
                        elements=st.floats(min_value=0.5, max_value=1.0)),
+           dtype=st.sampled_from([np.float32, np.float16]),
            **hu.gcs)
-    def test_sequence_mask_with_lengths(self, x, gc, dc):
-        fill_val = 1e-9  # finite fill value needed for gradient check
+    def test_sequence_mask_with_lengths(self, x, dtype, gc, dc):
+        x, dc = self._dtype_conversion(x, dtype, gc, dc)
+        # finite fill value needed for gradient check
+        fill_val = 1e-3 if dtype == np.float16 else 1e-9
         op = core.CreateOperator("SequenceMask",
                                  ["data", "lengths"],
                                  ["masked_data"],
@@ -76,9 +90,12 @@ class TestBooleanMaskOp(hu.HypothesisTestCase):
     @given(x=hu.tensor(min_dim=2,
                        max_dim=5,
                        elements=st.floats(min_value=0.5, max_value=1.0)),
+           dtype=st.sampled_from([np.float32, np.float16]),
            **hu.gcs)
-    def test_sequence_mask_with_window(self, x, gc, dc):
-        fill_val = 1e-9  # finite fill value needed for gradient check
+    def test_sequence_mask_with_window(self, x, dtype, gc, dc):
+        x, dc = self._dtype_conversion(x, dtype, gc, dc)
+        # finite fill value needed for gradient check
+        fill_val = 1e-3 if dtype == np.float16 else 1e-9
         radius = 2
         op = core.CreateOperator("SequenceMask",
                                  ["data", "centers"],
@@ -104,16 +121,21 @@ class TestBooleanMaskOp(hu.HypothesisTestCase):
 
         self.assertReferenceChecks(gc, op, [x, centers], ref)
         self.assertDeviceChecks(dc, op, [x, centers], [0])
-        self.assertGradientChecks(gc, op, [x, centers], 0, [0])
+
+        threshold = 0.4 if dtype == np.float16 else 0.005
+        self.assertGradientChecks(gc, op, [x, centers], 0, [0],
+                                  threshold=threshold)
 
     @given(x=hu.tensor(min_dim=2,
                        max_dim=5,
                        elements=st.floats(min_value=0.5, max_value=1.0)),
            mode=st.sampled_from(['upper', 'lower', 'upperdiag', 'lowerdiag']),
+           dtype=st.sampled_from([np.float32, np.float16]),
            **hu.gcs)
-    def test_sequence_mask_triangle(self, x, mode, gc, dc):
-        fill_val = 1e-9  # finite fill value needed for gradient check
-        x = np.array([[0, 1], [2, 3]], dtype=np.float32)
+    def test_sequence_mask_triangle(self, x, mode, dtype, gc, dc):
+        x, dc = self._dtype_conversion(x, dtype, gc, dc)
+        # finite fill value needed for gradient check
+        fill_val = 1e-3 if dtype == np.float16 else 1e-9
         op = core.CreateOperator("SequenceMask",
                                  ["data"],
                                  ["masked_data"],
@@ -148,4 +170,8 @@ class TestBooleanMaskOp(hu.HypothesisTestCase):
 
         self.assertReferenceChecks(gc, op, [x], ref)
         self.assertDeviceChecks(dc, op, [x], [0])
-        self.assertGradientChecks(gc, op, [x], 0, [0])
+
+        threshold = 0.4 if dtype == np.float16 else 0.005
+        stepsize = 0.1 if dtype == np.float16 else 0.05
+        self.assertGradientChecks(gc, op, [x], 0, [0],
+                                  threshold=threshold, stepsize=stepsize)

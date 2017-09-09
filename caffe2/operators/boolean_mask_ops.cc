@@ -218,6 +218,12 @@ class LowerDiagFunctor {
 
 template <>
 bool SequenceMaskOp<CPUContext>::RunOnDevice() {
+    return DispatchHelper<TensorTypes<float>>::call(this, Input(0));
+}
+
+template <>
+template <class T>
+bool SequenceMaskOp<CPUContext>::DoRunWithType() {
   const Tensor<CPUContext>* input = &Input(0);
   const Tensor<CPUContext>* sequence_lengths = nullptr;
   const Tensor<CPUContext>* window_centers = nullptr;
@@ -235,57 +241,58 @@ bool SequenceMaskOp<CPUContext>::RunOnDevice() {
   const int left = input->size_to_dim(canonical_axis);
   const int right = input->size_from_dim(canonical_axis);
 
-  float fill_val = (grad_ ? 0.0f : fill_val_);
+  T fill_val = convert::To<float, T>(grad_ ? 0.0f : fill_val_);
+
   if (mode_ == "sequence") {
     CAFFE_ENFORCE(
         sequence_lengths, "Sequence length not provided for mode 'sequence'!");
     MaskWithFunctor(
         left,
         right,
-        input->data<float>(),
+        input->data<T>(),
         SequenceFunctor(sequence_lengths->data<int>()),
         fill_val,
-        output->mutable_data<float>());
+        output->mutable_data<T>());
   } else if (mode_ == "window") {
     MaskWithFunctor(
         left,
         right,
-        input->data<float>(),
+        input->data<T>(),
         WindowFunctor(window_centers->data<int>(), radius_),
         fill_val,
-        output->mutable_data<float>());
+        output->mutable_data<T>());
   } else if (mode_ == "upper") {
     MaskWithFunctor(
         left,
         right,
-        input->data<float>(),
+        input->data<T>(),
         UpperFunctor(),
         fill_val,
-        output->mutable_data<float>());
+        output->mutable_data<T>());
   } else if (mode_ == "lower") {
     MaskWithFunctor(
         left,
         right,
-        input->data<float>(),
+        input->data<T>(),
         LowerFunctor(),
         fill_val,
-        output->mutable_data<float>());
+        output->mutable_data<T>());
   } else if (mode_ == "upperdiag") {
     MaskWithFunctor(
         left,
         right,
-        input->data<float>(),
+        input->data<T>(),
         UpperDiagFunctor(),
         fill_val,
-        output->mutable_data<float>());
+        output->mutable_data<T>());
   } else if (mode_ == "lowerdiag") {
     MaskWithFunctor(
         left,
         right,
-        input->data<float>(),
+        input->data<T>(),
         LowerDiagFunctor(),
         fill_val,
-        output->mutable_data<float>());
+        output->mutable_data<T>());
   } else {
     CAFFE_ENFORCE(false, "Unsupported mode for SequenceMaskOp!");
     return false;
