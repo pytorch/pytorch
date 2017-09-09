@@ -85,7 +85,6 @@ top_env = {
     'type_method_declarations': [],
     'type_method_definitions': [],
     'type_method_inline_definitions': [],
-    'type_method_declarations_protected': [],
     'tensor_method_declarations': [],
     'tensor_method_definitions': [],
     'function_declarations': [],
