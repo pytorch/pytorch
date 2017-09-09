@@ -228,7 +228,28 @@ def Train(args):
 
     num_shards = args.num_shards
     shard_id = args.shard_id
-    if num_shards > 1:
+
+    # Expect interfaces to be comma separated.
+    # Use of multiple network interfaces is not yet complete,
+    # so simply use the first one in the list.
+    interfaces = args.distributed_interfaces.split(",")
+
+    # Rendezvous using MPI when run with mpirun
+    if os.getenv("OMPI_COMM_WORLD_SIZE") is not None:
+        num_shards = int(os.getenv("OMPI_COMM_WORLD_SIZE", 1))
+        shard_id = int(os.getenv("OMPI_COMM_WORLD_RANK", 0))
+        if num_shards > 1:
+            rendezvous = dict(
+                kv_handler=None,
+                num_shards=num_shards,
+                shard_id=shard_id,
+                engine="GLOO",
+                transport=args.distributed_transport,
+                interface=interfaces[0],
+                mpi_rendezvous=True,
+                exit_nets=None)
+
+    elif num_shards > 1:
         # Create rendezvous for distributed computation
         store_handler = "store_handler"
         if args.redis_host is not None:
@@ -251,10 +272,6 @@ def Train(args):
                 )
             )
 
-        # Expect interfaces to be comma separated.
-        # Use of multiple network interfaces is not yet complete,
-        # so simply use the first one in the list.
-        interfaces = args.distributed_interfaces.split(",")
         rendezvous = dict(
             kv_handler=store_handler,
             shard_id=shard_id,
@@ -263,6 +280,7 @@ def Train(args):
             transport=args.distributed_transport,
             interface=interfaces[0],
             exit_nets=None)
+
     else:
         rendezvous = None
 

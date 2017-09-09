@@ -3,7 +3,14 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/tensor.h"
 
-#include <gloo/config.h>
+#if defined(GLOO_USE_MPI) && GLOO_USE_MPI
+#include <mutex>
+#endif
+
+#if defined(GLOO_USE_MPI) && GLOO_USE_MPI
+#include <mpi.h>
+#endif
+
 #include <gloo/transport/tcp/device.h>
 #if defined(GLOO_USE_IBVERBS) && GLOO_USE_IBVERBS
 #include <gloo/transport/ibverbs/device.h>
@@ -44,6 +51,27 @@ std::shared_ptr<::gloo::transport::Device> createDevice(
 
   CAFFE_THROW("Invalid transport: ", attr.transport);
 }
+
+#if defined(GLOO_USE_MPI) && GLOO_USE_MPI
+static std::mutex mpiMutex;
+static int mpiRefs = 0;
+
+void mpiInitialize() {
+  std::lock_guard<std::mutex> lock(mpiMutex);
+  if (mpiRefs++ == 0) {
+    auto rv = MPI_Init(nullptr, nullptr);
+    CAFFE_ENFORCE_EQ(rv, 0, "MPI_Init() failed");
+  }
+}
+
+void mpiFinalize() {
+  std::lock_guard<std::mutex> lock(mpiMutex);
+  if (--mpiRefs == 0) {
+    auto rv = MPI_Finalize();
+    CAFFE_ENFORCE_EQ(rv, 0, "MPI_Finalize() failed");
+  }
+}
+#endif
 
 } // namespace gloo
 } // namespace caffe2
