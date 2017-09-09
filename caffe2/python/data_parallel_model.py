@@ -1515,8 +1515,11 @@ def _CreateOrCloneCommonWorld(
             kwargs['transport'] = rendezvous['transport']
         if 'interface' in rendezvous:
             kwargs['interface'] = rendezvous['interface']
+        if 'mpi_rendezvous' in rendezvous:
+            kwargs['mpi_rendezvous'] = rendezvous['mpi_rendezvous']
+
         comm_world = net.CreateCommonWorld(
-            [rendezvous['kv_handler']],
+            rendezvous['kv_handler'] or [],
             common_world_blob,
             name=name,
             size=rendezvous['num_shards'],
@@ -1544,14 +1547,18 @@ def _RunComparison(model, blob_name, device=None):
 
         comparison_net = core.Net("allcompare_net")
 
+        kwargs=dict()
+        if 'mpi_rendezvous' in rendezvous:
+            kwargs['mpi_rendezvous'] = rendezvous['mpi_rendezvous']
         comm_world = comparison_net.CreateCommonWorld(
-            rendezvous['kv_handler'],
+            rendezvous['kv_handler'] or [],
             "initial_sync",
             name=model.net.Proto().name + ".cw_master_select",
             size=rendezvous['num_shards'],
             rank=rendezvous['shard_id'],
             engine=rendezvous['engine'],
             status_blob="cw_master_select",
+            **kwargs
         )
 
         blob_name_checksum = blob_name + "_checksum"

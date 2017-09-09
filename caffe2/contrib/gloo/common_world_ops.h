@@ -6,8 +6,13 @@
 #include "caffe2/distributed/store_handler.h"
 
 #include <gloo/common/error.h>
+#include <gloo/config.h>
 #include <gloo/rendezvous/context.h>
 #include <gloo/rendezvous/prefix_store.h>
+
+#if defined(GLOO_USE_MPI) && GLOO_USE_MPI
+#include <gloo/mpi/context.h>
+#endif
 
 namespace caffe2 {
 namespace gloo {
@@ -28,6 +33,8 @@ class CreateCommonWorld final : public Operator<Context> {
                        "transport", "tcp")),
         interface_(OperatorBase::template GetSingleArgument<std::string>(
                        "interface", "")),
+        mpi_rendezvous_(OperatorBase::template GetSingleArgument<bool>(
+                       "mpi_rendezvous", false)),
         status_blob_(
             OperatorBase::GetSingleArgument<std::string>("status_blob", "")),
         timeout_ms_(OperatorBase::GetSingleArgument<int>("timeout_ms", -1)),
@@ -40,25 +47,61 @@ class CreateCommonWorld final : public Operator<Context> {
       ws_->CreateBlob(status_blob_);
     }
     initialize();
+
+#if defined(GLOO_USE_MPI) && GLOO_USE_MPI
+    if (mpi_rendezvous_) {
+      mpiInitialize();
+    }
+#endif
   }
 
-  virtual ~CreateCommonWorld() {}
+  virtual ~CreateCommonWorld() {
+#if defined(GLOO_USE_MPI) && GLOO_USE_MPI
+    if (mpi_rendezvous_) {
+      mpiFinalize();
+    }
+#endif
+  }
 
-  bool RunOnDevice() override {
+  CommonWorld rendezvousWithMPI() {
+#if defined(GLOO_USE_MPI) && GLOO_USE_MPI
+    auto context = std::make_shared<::gloo::mpi::Context>(MPI_COMM_WORLD);
+    if (timeout_ms_ != -1) {
+      context->setTimeout(std::chrono::milliseconds(timeout_ms_));
+    }
+    context->connectFullMesh(device_);
+    return context;
+#else
+    CAFFE_THROW(
+      "Gloo was not compiled with MPI support. ",
+      "Please recompile with -DUSE_MPI=1.");
+#endif
+  }
+
+  CommonWorld rendezvousWithStore(
+      const std::unique_ptr<StoreHandler>& handler) {
     // Use PrefixStore to isolate different CreateCommonWorld instances
-    const auto& handler =
-        OperatorBase::Input<std::unique_ptr<StoreHandler>>(STORE_HANDLER);
     StoreHandlerWrapper wrapper(*handler);
     ::gloo::rendezvous::PrefixStore store(name_, wrapper);
+    auto context = std::make_shared<::gloo::rendezvous::Context>(rank_, size_);
+    if (timeout_ms_ != -1) {
+      context->setTimeout(std::chrono::milliseconds(timeout_ms_));
+    }
+    context->connectFullMesh(store, device_);
+    return context;
+  }
 
+  bool RunOnDevice() override {
     try {
-      // Create context and connect everyone to everyone
-      auto context =
-          std::make_shared<::gloo::rendezvous::Context>(rank_, size_);
-      if (timeout_ms_ != -1) {
-        context->setTimeout(std::chrono::milliseconds(timeout_ms_));
+      CommonWorld context;
+      if (mpi_rendezvous_) {
+        context = rendezvousWithMPI();
+      } else {
+        CAFFE_ENFORCE_EQ(InputSize(), 1, "Expected store handler input");
+        const auto& handler =
+            OperatorBase::Input<std::unique_ptr<StoreHandler>>(STORE_HANDLER);
+        context = rendezvousWithStore(handler);
       }
-      context->connectFullMesh(store, device_);
 
       // Switch pairs to synchronous mode if configured to do so
       if (sync_) {
@@ -114,6 +157,7 @@ class CreateCommonWorld final : public Operator<Context> {
   const bool sync_;
   const std::string transport_;
   const std::string interface_;
+  const bool mpi_rendezvous_;
   const std::string status_blob_;
   const int timeout_ms_;
   Workspace* ws_;
