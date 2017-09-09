@@ -58,6 +58,9 @@ inline void UpdateTimestepBlob(Workspace* ws, std::string blob_name, int t) {
       ->template mutable_data<int32_t>()[0] = t;
 }
 
+std::map<string, string> GetRecurrentMapping(
+  const std::vector<detail::Link>& links, bool backward);
+
 template <typename T, typename Context>
 void applyOffsetAlias(
     const OffsetAlias& oc,
@@ -182,15 +185,12 @@ class RecurrentNetworkOp final : public Operator<Context> {
 
     if (FLAGS_caffe2_rnn_executor && enable_rnn_executor_) {
       VLOG(1) << "Use RecurrentNetworkExecutor";
-      std::map<string, string> recurrent_input_map;
-      const auto recurrent_mapping =
-          OperatorBase::GetRepeatedArgument<std::string>("recurrent_mapping");
-      int n = recurrent_mapping.size() / 2;
-      for (int i = 0; i < n; i++) {
-        recurrent_input_map[recurrent_mapping[i + n]] = recurrent_mapping[i];
-      }
+      auto recurrent_map = detail::GetRecurrentMapping(links_, false /* backward */);
       rnnExecutor_ =
-          createRNNExecutor<Context>(stepNetDef_, recurrent_input_map, timestep_,
+          createRNNExecutor<Context>(
+              stepNetDef_,
+              recurrent_map,
+              timestep_,
               ArgumentHelper(operator_def));
     } else {
       // Fix for legacy models that pass "rnn" type net
@@ -537,16 +537,9 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
 
   void InitializeExecutor(const OperatorDef& operator_def) {
     VLOG(1) << "Use RecurrentNetworkExecutor for backward";
-    std::map<string, string> recurrent_input_map;
-    const auto recurrent_mapping =
-        OperatorBase::GetRepeatedArgument<std::string>(
-            "backward_recurrent_mapping");
-    int n = recurrent_mapping.size() / 2;
-    for (int i = 0; i < n; i++) {
-      recurrent_input_map[recurrent_mapping[i + n]] = recurrent_mapping[i];
-    }
+    auto recurrent_map = detail::GetRecurrentMapping(links_, true /* backward */);
     rnnExecutor_ = createRNNExecutor<Context>(
-      stepNetDef_, recurrent_input_map, timestep_, ArgumentHelper(operator_def));
+      stepNetDef_, recurrent_map, timestep_, ArgumentHelper(operator_def));
   }
 
   void AddGradientInputAccumulationOps(const OperatorDef& operator_def) {
