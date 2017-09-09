@@ -4,6 +4,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/tensor.h"
+#include "caffe2/utils/conversions.h"
 
 namespace caffe2 {
 
@@ -34,6 +35,9 @@ class SequenceMaskOp final : public Operator<Context> {
   }
 
   bool RunOnDevice() override;
+
+  template <typename T>
+  bool DoRunWithType();
 
  private:
   int axis_;
