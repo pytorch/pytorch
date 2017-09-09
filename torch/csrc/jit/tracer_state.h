@@ -40,6 +40,8 @@ struct TracingState : public std::enable_shared_from_this<TracingState> {
   TracingState(std::size_t num_stages)
     : graph(new Graph())
     , active(false)
+    , scope_root(std::unique_ptr<Scope>(new Scope()))
+    , current_scope(scope_root.get())
     , num_stages(num_stages)
     , eval_count(0)
     , var_flags(num_stages)
@@ -49,6 +51,9 @@ struct TracingState : public std::enable_shared_from_this<TracingState> {
   // the stages we care about)
   std::shared_ptr<Graph> graph;
   bool active;
+
+  std::unique_ptr<Scope> scope_root;
+  Scope * current_scope;
 
   // Used to free the Graph as soon as we know this trace will fail
   std::size_t num_stages;
@@ -73,6 +78,20 @@ struct TracingState : public std::enable_shared_from_this<TracingState> {
 
   bool is_complete() const {
     return !is_expired() && graph->stage() == num_stages - 1;
+  }
+
+  void push_scope(const std::string& scope_name) {
+    current_scope = current_scope->push(stringToSymbol(scope_name));
+    graph->setCurrentScope(current_scope);
+  }
+
+  void pop_scope() {
+    current_scope = current_scope->pop();
+    graph->setCurrentScope(current_scope);
+  }
+
+  Scope * get_current_scope() {
+    return current_scope;
   }
 };
 

@@ -32,6 +32,7 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
   }
 
   auto new_graph = std::make_shared<Graph>();
+  new_graph->setCurrentScope(state->get_current_scope());
   std::unordered_map<void*, Value*> new_buffer_map;
 
   torch::autograd::SymbolicContext ctx;
@@ -137,6 +138,10 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
       throw std::runtime_error(ss.str());
     }
 
+    for (auto& el: outputs) {
+      el->setScope(n->scope());
+    }
+
     setOutputs(op_name, n, outputs);
   };
 
@@ -208,6 +213,9 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
     IR_IFM(node, CppOp)
       if (auto fn = std::dynamic_pointer_cast<autograd::HasSymbolic>(value->fn)) {
         auto outputs = fn->symbolic(&ctx, fmap(node->inputs(), envFn), node->getSourceLocation());
+        for (auto& el: outputs) {
+          el->setScope(node->scope());
+        }
         setOutputs(value->name(), node, outputs);
       } else {
         cloneNode(node);

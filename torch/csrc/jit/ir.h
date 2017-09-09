@@ -70,6 +70,65 @@ struct SourceLocation {
   std::string python_traceback;
 };
 
+// Scope is a node of a trie that represents the tree of nested scopes.
+// Individual scopes are pushed and popped from TracingState, which holds a
+// pointer to the current scope. Each Node in Graph holds a pointer
+// to the scope that was current when the node was created.
+// The trie never needs to shrink, it only grows until it is disposed
+// of when TracingState is deallocated. Hence, pointers to scopes held by nodes
+// will always be valid as long as TracingState is alive.
+struct Scope {
+private:
+  Scope* parent_;
+  Symbol name_;
+  std::unordered_set<std::unique_ptr<Scope> > children_;
+public:
+  Scope() {
+    name_ = stringToSymbol("");
+    parent_ = NULL;
+  }
+  Scope(Scope* parent, Symbol name) {
+    name_ = name;
+    parent_ = parent;
+  }
+  Scope* push(Symbol name) {
+    Scope* newScope = new Scope(this, name);
+    children_.insert(std::unique_ptr<Scope>(newScope));
+    return newScope;
+  }
+  Scope* pop() {
+    if (parent_ == NULL) {
+      throw std::runtime_error("Cannot pop from Scope with no parent");
+    }
+    return parent_;
+  }
+  bool isRoot() {
+    return parent_ == NULL;
+  }
+  Scope* getRoot() {
+    Scope* current = this;
+    while (current->parent_) {
+      current = current->parent_;
+    }
+    return current;
+  }
+  Symbol name() {
+    return name_;
+  }
+  std::string namesFromRoot(const std::string& separator="/") {
+    std::string out = std::string(symbolToString(this->name_));
+    if (this->isRoot()) {
+      return out;
+    }
+    Scope* parent = this->parent_;
+    while (!parent->isRoot()) {
+      out = std::string(symbolToString(parent->name_)) + separator + out;
+      parent = parent->parent_;
+    }
+    return out;
+  }
+};
+
 // the list types are intentionally simple, but we type-def
 // them here so if we need to change them, refactoring will be easier
 using node_list = std::vector<Node*>;
@@ -197,6 +256,7 @@ private:
   Graph* graph_;
   std::shared_ptr<SourceLocation> source_location_;
   size_t stage_;
+  Scope* scope_;
 protected:
   Node(Graph * graph_, NodeKind kind_); //defined after graph
 public:
@@ -222,6 +282,18 @@ public:
   Node* setStage(size_t s) {
     stage_ = s;
     return this;
+  }
+  Scope* scope() {
+    return scope_;
+  }
+  void setScope(Scope* scope) {
+    scope_ = scope;
+  }
+  std::string scopeName() const {
+    if (scope_ == NULL) {
+      return "";
+    }
+    return scope_->namesFromRoot();
   }
   // NB: This returns an ArrayRef; that means that it will
   // get invalidated if you resize inputs (e.g., using addInput)
@@ -534,6 +606,7 @@ protected:
   // if you are going to preserve it.
   virtual void cloneFrom(Node * s) {
     setSourceLocation(s->getSourceLocation());
+    scope_ = s->scope_;
     copyAttributes(*s);
   }
 };
@@ -556,6 +629,8 @@ private:
 
   size_t new_node_stage_;
 
+  Scope * current_scope_;
+
   // holds outputs in a way that can be reflected
   // as a Use object
   // also used as the beginning/end of the circular node list to avoid
@@ -567,6 +642,7 @@ public:
   Graph()
   : next_unique_(0)
   , new_node_stage_(0)
+  , current_scope_(NULL)
   , output_(initOutput(create(kReturn, 0))), input_(create(kParam, 0)) {}
 
   at::ArrayRef<Value*> inputs() {
@@ -620,6 +696,9 @@ public:
   }
   const Node * return_node() const {
     return output_;
+  }
+  void setCurrentScope(Scope * scope) {
+    current_scope_ = scope;
   }
   Value * addInput(std::string name="") {
     Value * v = input_->addOutput();
@@ -676,7 +755,9 @@ public:
   }
   Node * createFusionGroup() {
     auto n = create(kFusionGroup, 0);
-    n->g_(kSubgraph,std::make_shared<Graph>());
+    auto subgraph = std::make_shared<Graph>();
+    subgraph->setCurrentScope(current_scope_);
+    n->g_(kSubgraph, subgraph);
     return n;
   }
   Node * createPythonOp(THPObjectPtr&& pyobj, const std::string & cconv, bool is_legacy, std::vector<VariableFlags> && var_flags, pyobj_list&& scalar_args);
@@ -779,7 +860,8 @@ inline void Value::replaceAllUsesWith(Value * newValue) {
 inline Node::Node(Graph * graph_, NodeKind kind_) :
   kind_(kind_),
   graph_(graph_),
-  stage_(graph_->new_node_stage_) {
+  stage_(graph_->new_node_stage_),
+  scope_(graph_->current_scope_) {
   graph_->all_nodes.emplace(this);
 }
 
