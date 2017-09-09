@@ -23,6 +23,7 @@ std::unique_ptr<RecurrentNetworkExecutorBase> createRNNExecutor<CPUContext>(
 bool ThreadedRecurrentNetworkExecutor::Run(int T) {
   CAFFE_ENFORCE(timestep_ops_.size() >= T);
   countdown_ = T * timestep_ops_[0].size();
+  finished_timesteps_ = 0;
 
   // Frontier
   CHECK(job_queue_.size() == 0);
@@ -40,6 +41,7 @@ bool ThreadedRecurrentNetworkExecutor::Run(int T) {
 bool ThreadedRecurrentNetworkExecutor::RunBackwards(int T) {
   CAFFE_ENFORCE(timestep_ops_.size() >= T);
   countdown_ = T * timestep_ops_[0].size();
+  finished_timesteps_ = 0;
 
   // Frontier
   CHECK(job_queue_.size() == 0);
@@ -139,7 +141,7 @@ void ThreadedRecurrentNetworkExecutor::WorkerFunction() {
 
     try {
       RunOp(job, id);
-      if (job.op_idx == num_ops_ - 1) {
+      if (job.op_idx == timestep_ops_template_.size() - 1) {
         finished_timesteps_.fetch_add(1);
       }
       num_jobs++;
@@ -160,9 +162,6 @@ void ThreadedRecurrentNetworkExecutor::WorkerFunction() {
 
 void ThreadedRecurrentNetworkExecutor::_Exec() {
   CAFFE_ENFORCE_EQ(false, failed_);
-
-  finished_timesteps_ = 0;
-  num_ops_ = timestep_ops_template_.size();
 
   // Start threads if not started
   std::unique_lock<std::mutex> lk(countdown_mtx_);
