@@ -359,6 +359,7 @@ class BeamSearchForwardOnly(object):
             backward_step_net='',
             timestep=str(self.timestep),
             outputs_with_grads=[],
+            enable_rnn_executor=1,
         )
         score_t_all, tokens_t_all, hypo_t_all, attention_t_all = results[:4]
 
