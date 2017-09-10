@@ -26,7 +26,7 @@ __global__ void elu_gradient_kernel(
     if (y[i] > 0) {
       dx[i] = dy[i];
     } else {
-      dx[i] = dy[i] * (dy[i] + alpha);
+      dx[i] = dy[i] * (y[i] + alpha);
     }
   }
 }
