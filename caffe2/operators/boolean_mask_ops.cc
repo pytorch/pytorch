@@ -68,7 +68,7 @@ bool BooleanMaskOp<CPUContext>::RunOnDevice() {
   dataOut->Resize(outShape);
   auto* outPtr = (char*)dataOut->raw_mutable_data(data.meta());
 
-  int64_t* out_vec;
+  int64_t* out_vec = nullptr;
   if (OutputSize() == 2) {
     auto* indicesOut = Output(1);
     indicesOut->Resize(numOutputs);
