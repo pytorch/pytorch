@@ -63,7 +63,7 @@ PyObject * THPVariable_NewWithFunction(PyObject *data, const std::shared_ptr<tor
   THPUtils_assert(THPModule_isTensor(data), "data must be a Tensor");
 
   Variable v(new VariableImpl(torch::createTensor(data)), false);
-  v.set_requires_grad(grad_fn->is_executable);
+  v.requires_grad() = grad_fn->is_executable;
   v.grad_fn() = grad_fn;
 
   PyObject* obj = THPVariable_NewWithVar((PyTypeObject*)THPVariableClass, std::move(v));
@@ -331,7 +331,7 @@ int THPVariable_set_volatile(THPVariable *self, PyObject *obj)
   THPUtils_assertRet(-1, PyBool_Check(obj), "volatile must be a bool");
   THPUtils_assertRet(-1, !self->cdata.grad_fn(),
       "volatile can only be set on leaf variables");
-  self->cdata.set_volatile(obj == Py_True);
+  self->cdata.is_volatile() = (obj == Py_True);
   return 0;
 }
 
@@ -359,7 +359,7 @@ int THPVariable_set_requires_grad(THPVariable *self, PyObject *obj)
     THPUtils_setError("you can only change requires_grad flags of leaf variables.%s", hint);
     return -1;
   }
-  var.set_requires_grad(obj == Py_True);
+  var.requires_grad() = (obj == Py_True);
   if (auto grad_accumulator = var.get()->grad_accumulator.lock()) {
     grad_accumulator->is_executable = var.requires_grad();
   }

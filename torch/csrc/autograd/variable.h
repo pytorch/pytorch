@@ -54,11 +54,11 @@ struct Variable : public at::Tensor {
   inline int current_version() const;
   inline int output_nr() const;
 
-  inline bool requires_grad() const;
-  inline void set_requires_grad(bool requires_grad);
+  inline const bool& requires_grad() const;
+  inline       bool& requires_grad();
 
-  inline bool is_volatile() const;
-  inline void set_volatile(bool is_volatile);
+  inline const bool& is_volatile() const;
+  inline       bool& is_volatile();
 
   inline Variable & operator=(Variable && rhs) &;
   inline Variable & operator=(const Variable & rhs) &;
@@ -167,18 +167,18 @@ inline int Variable::output_nr() const {
   return get()->output_nr;
 }
 
-inline bool Variable::requires_grad() const {
+inline const bool& Variable::requires_grad() const {
   return get()->requires_grad;
 }
-inline void Variable::set_requires_grad(bool requires_grad) {
-  get()->requires_grad = requires_grad;
+inline bool& Variable::requires_grad() {
+  return get()->requires_grad;
 }
 
-inline bool Variable::is_volatile() const {
+inline const bool& Variable::is_volatile() const {
   return get()->is_volatile;
 }
-inline void Variable::set_volatile(bool is_volatile) {
-  get()->is_volatile = is_volatile;
+inline bool& Variable::is_volatile() {
+  return get()->is_volatile;
 }
 
 inline Variable & Variable::operator=(Variable && rhs) & {

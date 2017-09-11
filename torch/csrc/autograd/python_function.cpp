@@ -555,7 +555,7 @@ static void _mark_non_differentiable(THPFunction *self, t2var_type &t2var)
       THPFunction_assert(false, "mark_non_differentiable only accepts function "
           "outputs");
     }
-    var->cdata.set_requires_grad(false);
+    var->cdata.requires_grad() = false;
   }
   Py_DECREF(self->non_differentiable);
   self->non_differentiable = NULL;
