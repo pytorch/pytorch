@@ -1549,268 +1549,9 @@ L = 20
 M = 10
 S = 5
 function_tests = [
-    (Add, (), ((M, M), (M, M))),
-    (Add, (), ((M, M), (M, )), 'broadcast_rhs'),
-    (Add, (), ((M, ), (M, M)), 'broadcast_lhs'),
-    (Add, (), ((M, 1, M), (S, M)), 'broadcast_all'),
-    (Sub, (), ((M, M), (M, M))),
-    (Sub, (), ((M, M), (M, )), 'broadcast_rhs'),
-    (Sub, (), ((M, ), (M, M)), 'broadcast_lhs'),
-    (Sub, (), ((M, 1, M), (S, M)), 'broadcast_all'),
-    (Mul, (), ((M, M), (M, M))),
-    (Mul, (), ((M, M), (M, )), 'broadcast_rhs'),
-    (Mul, (), ((M, ), (M, M)), 'broadcast_lhs'),
-    (Mul, (), ((M, 1, M), (S, M)), 'broadcast_all'),
-    (Div, (), ((M, M), torch.rand(M, M) + 5e-2)),
-    (Div, (), ((M, M), torch.rand(M, ) + 5e-2), 'broadcast_rhs'),
-    (Div, (), ((M, ), torch.rand(M, M) + 5e-2), 'broadcast_lhs'),
-    (Div, (), ((M, 1, M), torch.rand(S, M) + 5e-2), 'broadcast_all'),
-    (Pow, (), (torch.rand(M, M) + 1e-3, torch.rand(M, M) + 0.1)),
-    (Pow, (), (torch.rand(M, M) + 1e-3, torch.rand(M,) + 0.1), 'broadcast_rhs'),
-    (Pow, (), (torch.rand(M, ) + 1e-3, torch.rand(M, M) + 0.1), 'broadcast_lhs'),
-    (Pow, (), (torch.rand(M, 1) + 1e-3, torch.rand(1, M) + 0.1), 'broadcast_all'),
-    (AddConstant, (), ((2, 2), 3.14)),
-    (AddConstant, (), (3.14, (2, 2)), 'add_tensor'),
-    (SubConstant, (), ((L, L), 3.14)),
-    (SubConstant, (), (3.14, (L, L),), 'sub_tensor'),
-    (MulConstant, (), ((L, L), 3.14)),
-    (MulConstant, (), (3.14, (L, L)), 'mul_tensor'),
-    (DivConstant, (), (torch.rand(L, L) + 1e-1, 3.14)),
-    (DivConstant, (), (3.14, torch.rand(L, L) + 0.5,), 'div_tensor'),
-    (PowConstant, (), (torch.rand(L, L), 3)),
-    (PowConstant, (), (3.14, torch.rand(L, L)), 'tensor_power'),
-    # TODO: enable neg dim checks
-    (Transpose, (), (torch.rand(L, L), 0, 1)),
-    (Transpose, (), (torch.rand(S, S, S), 2, 0), '3d'),
-    (Permute, (), ((1, 2, 3, 4, 5, 6), torch.Size([0, 4, 3, 5, 1, 2]))),
-    (Index, (), (torch.rand(S, S, S), dont_convert([1, 2]))),
-    (Index, (), (torch.rand(S, S, S), slice(0, 3)), 'slice'),
-    (Index, (), (torch.rand(S, S, S), dont_convert([slice(0, 3), 1])), 'slice_index'),
-    (Index, (), (torch.rand(S, S, S), dont_convert([[0, 2, 3], [1, 3, 3], [0, 0, 2]])), 'adv_index'),
-    (Index, (), (torch.rand(S, S, S), dont_convert([[0, 0, 3], [1, 1, 3], [0, 0, 2]])), 'adv_index_dup'),
-    (Index, (), (torch.rand(S, S, S), dont_convert([slice(None), slice(None), [0, 3]])), 'adv_index_end'),
-    (Index, (), (torch.rand(S, S, S), dont_convert([slice(None), [0, 3], slice(None)])), 'adv_index_mid'),
-    (Index, (), (torch.rand(S, S, S), dont_convert([[0, 3], slice(None), slice(None)])), 'adv_index_beg'),
-    (Index, (), (torch.rand(S, S, S), dont_convert([[0, 3], [1, 2], slice(None)])), 'adv_index_comb'),
-    (Index, (), (torch.rand(S, S, S), dont_convert([[0, 3], ])), 'adv_index_sub'),
-    (Index, (), (torch.rand(S, S, S), dont_convert([[0, 3], slice(None)])), 'adv_index_sub_2'),
-    (Index, (), (torch.rand(S, S, S), dont_convert([[0, 3], Ellipsis])), 'adv_index_sub_3'),
-    (View, (), (torch.rand(S, S, S), torch.Size([S * S, S]))),
-    (Expand, (), ((1, S, 1, S, 1), torch.Size([5, S, 5, S, 5]))),
-    (Expand, (), ((S, 1), torch.Size([S, S, S])), 'new_dim'),
-    (Expand, (), ((1, S), torch.Size([S, S, S])), 'new_dim_front'),
-    (Expand, (), ((1, S), torch.Size([1, 1, S])), 'new_dim_front_old_front_1'),
-    (Expand, (), ((1,), torch.Size([S, S, S])), 'scalar'),
-    (Exp, (), (torch.rand(S, S, S),)),
-    (Log, (), (torch.rand(S, S, S) + 1e-2,)),
-    (Log1p, (), (torch.rand(S, S, S),)),
-    (Tanh, (), ((S, S, S),)),
-    (Sigmoid, (), ((S, S, S),)),
-    (Sinh, (), ((S, S, S),)),
-    (Cosh, (), ((S, S, S),)),
-    (Abs, (), ((S, S, S),)),
-    (Clamp, (), ((S, S, S), 0, 1)),
-    (Sqrt, (), (torch.rand(S, S, S) + 5e-4,)),
-    (Sin, (), ((S, S, S),)),
-    (Cos, (), ((S, S, S),)),
-    (Tan, (), (torch.randn(S, S, S).clamp(-1, 1),)),
-    (Asin, (), (torch.randn(S, S, S).clamp(-0.9, 0.9),)),
-    (Acos, (), (torch.randn(S, S, S).clamp(-0.9, 0.9),)),
-    (Atan, (), ((S, S, S),)),
-    (Atan2, (), ((S, S), (S, S))),
-    (Reciprocal, (), (torch.rand(S, S, S) + 0.1,)),
-    (Cmax, (), ((S, S, S), (S, S, S))),
-    (Cmax, (), ((S, S, S), (S,)), 'broadcast_rhs'),
-    (Cmax, (), ((S,), (S, S, S)), 'broadcast_lhs'),
-    (Cmax, (), ((S, 1, S), (S, S)), 'broadcast_all'),
-    (Cmin, (), ((S, S, S), (S, S, S))),
-    (Cmin, (), ((S, S, S), (S,)), 'broadcast_rhs'),
-    (Cmin, (), ((S,), (S, S, S)), 'broadcast_lhs'),
-    (Cmin, (), ((S, 1, S), (S, S)), 'broadcast_all'),
-    (Round, (), ((S, S, S),)),
-    (Sign, (), ((S, S, S),)),
-    (Trunc, (), ((S, S, S),)),
-    (Floor, (), ((S, S, S),)),
-    (Ceil, (), ((S, S, S),)),
-    (Frac, (), ((S, S, S),)),
-    (Fmod, (), ((S, S, S), 1.5)),
-    (Fmod, (), ((S, S, S), Variable(torch.rand(S, S, S) + 1.5, requires_grad=False)), 'tensor'),
-    (Fmod, (), ((S, S, S), Variable(torch.rand(S) + 1.5, requires_grad=False)), 'tensor_broadcast_rhs'),
-    (Fmod, (), ((S,), Variable(torch.rand(S, S, S) + 1.5, requires_grad=False)), 'tensor_broadcast_lhs'),
-    (Fmod, (), ((S, 1, S), Variable(torch.rand(S, S) + 1.5, requires_grad=False)), 'tensor_broadcast_all'),
-    (Lerp, (), ((S, S, S), (S, S, S), 0.2)),
-    (Lerp, (), ((S, S, S), (S,), 0.2), 'broadcast_rhs'),
-    (Lerp, (), ((S,), (S, S, S), 0.2), 'broadcast_lhs'),
-    (Lerp, (), ((S, 1, S), (S, S), 0.2), 'broadcast_all'),
-    (Rsqrt, (), (torch.rand(S, S, S) + 1e-2,)),
-    (Remainder, (), ((S, S, S), 1.5)),
-    (Remainder, (), ((S, S, S), Variable(torch.rand(S, S, S) + 1.5, requires_grad=False)), 'tensor'),
-    (Remainder, (), ((S, S, S), Variable(torch.rand(S) + 1.5, requires_grad=False)), 'tensor_broadcast_rhs'),
-    (Remainder, (), ((S,), Variable(torch.rand(S, S, S) + 1.5, requires_grad=False)), 'tensor_broadcast_lhs'),
-    (Remainder, (), ((S, 1, S), Variable(torch.rand(S, S) + 1.5, requires_grad=False)), 'tensor_broadcast_all'),
-    (CmaxConstant, (), ((S, S, S), 0.5)),
-    (CminConstant, (), ((S, S, S), 0.5)),
-    (Mean, (), ((S, S, S),)),
-    (Mean, (), ((S, S, S), 1), 'dim', [1]),
-    (Mean, (), ((S, S, S), 1, True), 'keepdim_dim', [1]),
-    (Mean, (), ((S,), 0), 'dim_1d', [1]),
-    (Mean, (), ((S,), 0, True), 'keepdim_1d', [1]),
-    (Sum, (), ((S, S, S),)),
-    (Sum, (), ((S, S, S), 1), 'dim', [1]),
-    (Sum, (), ((S, S, S), 1, True), 'keepdim_dim', [1]),
-    (Sum, (), ((S,), 0), 'dim_1d', [1]),
-    (Sum, (), ((S,), 0, True), 'keepdim_1d', [1]),
-    (Prod, (), ((S, S, S),)),
-    (Prod, (), (prod_zeros(S, [0, 1]),), 'zerosdim2'),
-    (Prod, (), (prod_zeros(S, [0, 2]),), 'zerosdim1'),
-    (Prod, (), (prod_zeros(S, [1, 2]),), 'zerosdim0'),
-    (Prod, (), (prod_single_zero(S),), 'single_zero'),
-    (Prod, (), ((S, S, S), 1), 'dim', [1]),
-    (Prod, (), (prod_zeros(S, [0, 1]), 1), 'zeros_dim2', [1]),
-    (Prod, (), (prod_zeros(S, [0, 2]), 1), 'zeros_dim1', [1]),
-    (Prod, (), (prod_zeros(S, [1, 2]), 1), 'zeros_dim0', [1]),
-    (Prod, (), ((S, S, S), 1, True), 'keepdim_dim', [1]),
-    (Prod, (), (prod_zeros(S, [0, 1]), 1, True), 'keepdim_zeros_dim2', [1]),
-    (Prod, (), (prod_zeros(S, [0, 2]), 1, True), 'keepdim_zeros_dim1', [1]),
-    (Prod, (), (prod_zeros(S, [1, 2]), 1, True), 'keepdim_zeros_dim0', [1]),
-    (Prod, (), ((S,), 0), 'dim_1d', [1]),
-    (Prod, (), ((S,), 0, True), 'keepdim_1d', [1]),
-    (Addmm, (), ((S, M), (S, S), (S, M)),),
-    (Addmm, (), ((1,), (S, S), (S, M)), 'broadcast_lhs'),
-    (Addmm, (), ((S, M), (S, S), (S, M), 0.1, 1), 'coef'),
-    (Addmm, (), ((1,), (S, S), (S, M), 0.1, 1), 'broadcast_lhs_coef'),
-    (Addbmm, (), ((S, M), (S, S, S), (S, S, M)),),
-    (Addbmm, (), ((1,), (S, S, S), (S, S, M)), 'broadcast_lhs'),
-    (Addbmm, (), ((S, M), (S, S, S), (S, S, M), 0.1, 0.4), 'coef'),
-    (Addbmm, (), ((1,), (S, S, S), (S, S, M), 0.1, 0.4), 'broadcast_lhs_coef'),
-    (Baddbmm, (), ((S, S, M), (S, S, S), (S, S, M)),),
-    (Baddbmm, (), ((1,), (S, S, S), (S, S, M)), 'broadcast_lhs'),
-    (Baddbmm, (), ((S, S, M), (S, S, S), (S, S, M), 0.1, 0.4), 'coef'),
-    (Baddbmm, (), ((1,), (S, S, S), (S, S, M), 0.1, 0.4), 'broadcast_lhs_coef'),
-    (Addmv, (), ((S,), (S, M), (M,)),),
-    (Addmv, (), ((1,), (S, M), (M,)), 'broadcast_lhs'),
-    (Addmv, (), ((S,), (S, M), (M,), 0.1, 0.4), 'coef'),
-    (Addmv, (), ((1,), (S, M), (M,), 0.1, 0.4), 'broadcast_lhs_coef'),
-    (Addr, (), ((S, M), (S,), (M,)),),
-    (Addr, (), ((1,), (S,), (M,)), 'broadcast_lhs'),
-    (Addr, (), ((S, M), (S,), (M,), 0.1, 0.4), 'coef'),
-    (Addr, (), ((1,), (S,), (M,), 0.1, 0.4), 'broadcast_lhs_coef'),
-    (Dot, (), ((L,), (L,)),),
-    (Max, (), ((S, S, S),),),
-    (Repeat, (), ((S, S, S, S), torch.Size([2, 3, 1, 2]))),
-    (Repeat, (), ((S, S, S, S), torch.Size([2, 2, 1, 3, 1, 2])), 'unsqueeze'),
-    (Cumsum, (), ((S, S, S), 0), 'dim0', [1]),
-    (Cumsum, (), ((S, S, S), 1), 'dim1', [1]),
-    (Cumsum, (), ((S,), 0), '1d', [1]),
-    (Cumprod, (), ((S, S, S), 0),),
-    (Cumprod, (), ((S, S, S), 1), 'dim1'),
-    (Cumprod, (), ((S,), 0), '1d'),
-    (Cumprod, (), (prod_zeros(S, [0, 1]), 1), 'zeros_dim2', [1]),
-    (Cumprod, (), (prod_zeros(S, [0, 2]), 1), 'zeros_dim1', [1]),
-    (Cumprod, (), (prod_zeros(S, [1, 2]), 1), 'zeros_dim0', [1]),
-    (Unfold, (), ((S, S, S), 1, 3, 1)),
-    (Unfold, (), ((S, S, S), 2, 3, 2), 'lastdim'),
-    (Min, (), ((S, S, S),),),
-    (Max, (), ((S, S, S), 1), 'dim', [1]),
-    (Min, (), ((S, S, S), 1), 'dim', [1]),
-    (Min, (), ((S,), 0), 'dim_1d', [1]),
-    (Max, (), ((S,), 0), 'dim_1d', [1]),
-    (Max, (), ((S, S, S), 1, True), 'keepdim_dim', [1]),
-    (Min, (), ((S, S, S), 1, True), 'keepdim_dim', [1]),
-    (Max, (), ((S,), 0, True), 'keepdim_dim_1d', [1]),
-    (Min, (), ((S,), 0, True), 'keepdim_dim_1d', [1]),
-    (Mode, (), ((S, S, S),),),
-    (Mode, (), ((S, S, S), 1), 'dim', [1]),
-    (Mode, (), ((S, S, S), 1, True), 'keepdim_dim', [1]),
-    (Mode, (), ((S,), 0), 'dim_1d', [1]),
-    (Mode, (), ((S,), 0, True), 'keepdim_dim_1d', [1]),
-    (Kthvalue, (), ((S, S, S), 2),),
-    (Kthvalue, (), ((S, S, S), 2, 0), 'dim0'),
-    (Kthvalue, (), ((S, S, S), 2, 0, True), "keepdim"),
-    (Kthvalue, (), ((S,), 2, 0), 'dim0_1d'),
-    (Kthvalue, (), ((S,), 2, 0, True), "keepdim_1d"),
-    (Median, (), ((S, S, S),),),
-    (Median, (), ((S, S, S), 0), 'dim0'),
-    (Median, (), ((S, S, S), 0, True), "keepdim"),
-    (Median, (), ((S,), 0), 'dim0_1d'),
-    (Median, (), ((S,), 0, True), "keepdim_1d"),
-    (Norm, (), (torch.rand(S, S, S) + 5e-2, 1.5), '1_5'),
-    (Norm, (), ((S, S, S),), '2'),
-    (Norm, (), ((S, S, S), 3), '3'),
-    (Norm, (), (torch.rand(S, S, S) + 5e-2, 1.5, 1), '1_5_dim', [2]),
-    (Norm, (), ((S, S, S), 2, 1), '2_dim', [2]),
-    (Norm, (), ((S, S, S), 3, 1), '3_dim', [2]),
-    (Norm, (), (torch.rand(S, S, S) + 5e-2, 1.5, 1, True), 'keepdim_1_5_dim', [2]),
-    (Norm, (), ((S, S, S), 2, 1, True), 'keepdim_2_dim', [2]),
-    (Norm, (), ((S, S, S), 3, 1, True), 'keepdim_3_dim', [2]),
-    (Norm, (), ((S,), 2, 0), '2_dim_1d', [2]),
-    (Norm, (), ((S,), 3, 0), '3_dim_1d', [2]),
-    (Norm, (), ((S,), 2, 0, True), 'keepdim_2_dim_1d', [2]),
-    (Norm, (), ((S,), 3, 0, True), 'keepdim_3_dim_1d', [2]),
-    (Addcmul, (), ((S, S), (S, S), (S, S))),
-    (Addcmul, (), ((S, S), (S, 1), (1, S)), 'broadcast_rhs'),
-    (Addcmul, (), ((1,), (S, S, 1), (1, S)), 'broadcast_all'),
-    (Addcmul, (), ((S, S), (S, S), (S, S), 0.6), 'scale'),
-    (Addcmul, (), ((S, S), (S, 1), (1, S), 0.6), 'broadcast_rhs_scale'),
-    (Addcmul, (), ((1,), (S, S, 1), (1, S), 0.6), 'broadcast_all_scale'),
-    (Addcdiv, (), ((S, S), (S, S), torch.rand(S, S) + 5e-2)),
-    (Addcdiv, (), ((S, S), (S, 1), torch.rand(1, S) + 5e-2), 'broadcast_rhs'),
-    (Addcdiv, (), ((1,), (S, S, 1), torch.rand(1, S) + 5e-2), 'broadcast_all'),
-    (Addcdiv, (), ((S, S), (S, S), torch.rand(S, S) + 5e-2, 0.6), 'scale'),
-    (Addcdiv, (), ((S, S), (S, 1), torch.rand(1, S) + 5e-2, 0.6), 'broadcast_rhs_scale'),
-    (Addcdiv, (), ((1,), (S, S, 1), torch.rand(1, S) + 5e-2, 0.6), 'broadcast_all_scale'),
-    (IndexAdd, (), ((S, S), 0, index_variable(2, S), (2, S))),
-    (IndexCopy, (), ((S, S), 0, index_perm_variable(2, S), (2, S))),
-    (IndexFill, (), ((S, S), 0, index_variable(2, S), 2)),
-    (IndexSelect, (), ((S, S), 0, index_variable(2, S))),
-    (Gather, (), ((M, S), 0, gather_variable((S, S), 1, M, True))),
-    # TODO: enable neg dim checks
-    (Gather, (), ((M, S), 1, gather_variable((M, S // 2), 0, S, True)), 'dim1'),
-    (Scatter, (), ((M, S), 0, gather_variable((S, S), 1, M), (S, S))),
-    (Scatter, (), ((M, S), 1, gather_variable((M, S // 2), 0, S), (M, S // 2)), 'dim1'),
-    (ScatterAdd, (), ((M, S), 0, gather_variable((S, S), 1, M), (S, S))),
-    (ScatterAdd, (), ((M, S), 1, gather_variable((M, S // 2), 0, S), (M, S // 2)), 'dim1'),
     (Concat, (), (0, (1, S, S), (2, S, S), (3, S, S))),
     (Concat, (), (-1, (S, S, 1), (S, S, 2), (S, S, 3)), 'negdim-1'),
     (Concat, (), (-2, (S, 1, S), (S, 2, S), (S, 3, S)), 'negdim-2'),
-    (Resize, (), ((S, S, S), torch.Size([S * S, S]))),
-    (Diag, (), ((S, S),), '2d'),
-    (Diag, (), ((S,),), '1d'),
-    (Diag, (), ((S, S), 1), '2d_1'),
-    (Diag, (), ((S, S), 2), '2d_2'),
-    (Tril, (), ((S, S),)),
-    (Tril, (), ((S, S), 2), 'idx'),
-    (Triu, (), ((S, S),)),
-    (Triu, (), ((S, S), 2), 'idx'),
-    (Trace, (), ((S, S),)),
-    (Cross, (), ((S, 3), (S, 3))),
-    (Cross, (), ((S, 3, S), (S, 3, S), 1), 'dim'),
-    (Inverse, (), ((S, S),), '', (), [skipIfNoLapack]),
-    (Gesv, (), ((S, S), (S, S)), '', (), [skipIfNoLapack]),
-    (Clone, (), ((S, M, S),)),
-    (Squeeze, (), ((S, 1, M, 1), None)),
-    # TODO: enable neg dim checks
-    (Squeeze, (), ((S, 1, M, 1), 1), 'dim'),
-    (Unsqueeze, (), ((S, M, S), 0), '0'),
-    (Unsqueeze, (), ((S, M, S), 1), '1'),
-    # no lhs or all broadcast on MaskedScatter because it's always inplace
-    (MaskedScatter, (), ((S, S), Variable(torch.randn(S, S).gt(0), requires_grad=False), (S, S),)),
-    (MaskedScatter, (), ((S, S), Variable(torch.ones(S,).gt(0), requires_grad=False), (S, S),), 'broadcast_rhs'),
-    (MaskedFill, (), ((S, S), Variable(torch.randn(S, S).gt(0), requires_grad=False), 10)),
-    # no lhs or all broadcast on MaskedFill because it's always inplace
-    (MaskedFill, (), ((S, S), Variable(torch.randn(S,).gt(0), requires_grad=False), 10), 'broadcast_rhs'),
-    # ensure the mask isn't all zeros or else we get a tensor with 0 dimensions
-    (MaskedSelect, (), ((S, S), Variable(mask_not_all_zeros((S, S)), requires_grad=False))),
-    (MaskedSelect, (), ((S, S), Variable(mask_not_all_zeros((S,)), requires_grad=False)), 'broadcast_rhs'),
-    (MaskedSelect, (), ((S,), Variable(mask_not_all_zeros((S, S,)), requires_grad=False)), 'broadcast_lhs'),
-    (MaskedSelect, (), ((S, 1, S), Variable(mask_not_all_zeros((S, S)), requires_grad=False)), 'broadcast_all'),
-    (Sort, (), ((S, M, S),)),
-    (Sort, (), ((S, M, S), 1), 'dim'),
-    (Sort, (), ((S, M, S), 1, True), 'dim_desc'),
-    (Topk, (), ((S, M, S), 3)),
-    (Topk, (), ((S, M, S), 3, 1), 'dim'),
-    (Topk, (), ((S, M, S), 3, 1, True), 'dim_desc'),
-    (Topk, (), ((S, M, S), 3, 1, True, True), 'dim_desc_sort'),
 ]
 
 
@@ -1847,6 +1588,8 @@ method_tests = [
     ('pow', torch.rand(S, S, S) + 1e-3, (3.14,), 'constant'),
     ('__rpow__', torch.rand(S, S, S) + 1e-3, (3.14,), 'constant'),
     ('transpose', (1, 2, 3), (1, 2), 'dim', [0, 1]),
+    ('transpose', torch.rand(L, L), (0, 1), '2d'),
+    ('transpose', torch.rand(S, S, S), (2, 0), '3d'),
     ('t', (1, 2), ()),
     ('view', (S, S, S), (S * S, S),),
     ('view_as', (S, S, S), (Variable(torch.rand(S * S, S), requires_grad=False),)),
@@ -1864,24 +1607,28 @@ method_tests = [
     ('cosh', (S, S, S), ()),
     ('abs', (S, S, S), ()),
     ('clamp', (S, S, S), (0, 1)),
+    ('clamp', (S, S, S), (None, 0.5), 'min'),
+    ('clamp', (S, S, S), (0.5, None), 'max'),
     ('sqrt', torch.rand(S, S, S) + 5e-4, ()),
     ('sin', (S, S, S), ()),
     ('cos', (S, S, S), ()),
-    ('tan', (S, S, S), ()),
+    ('tan', torch.randn(S, S, S).clamp(-1, 1), ()),
     ('asin', torch.randn(S, S, S).clamp(-0.9, 0.9), ()),
     ('acos', torch.randn(S, S, S).clamp(-0.9, 0.9), ()),
     ('atan', (S, S, S), ()),
     ('atan2', (S, S, S), ((S, S, S),)),
-    ('reciprocal', (S, S, S), ()),
+    ('reciprocal', torch.rand(S, S, S) + 0.1, ()),
     ('round', (S, S, S), ()),
     ('sign', (S, S, S), ()),
     ('trunc', (S, S, S), ()),
     ('floor', (S, S, S), ()),
     ('ceil', (S, S, S), ()),
     ('rsqrt', torch.rand(S, S, S) + 1e-2, ()),
+    ('frac', (S, S, S), ()),
     ('fmod', (S, S, S), (1.5,)),
     ('fmod', (S, S, S), (Variable(torch.rand(S, S, S) + 1.5, requires_grad=False),), 'tensor'),
     ('fmod', (S,), (Variable(torch.rand(S, S, S) + 1.5, requires_grad=False),), 'tensor_broadcast_lhs'),
+    ('fmod', (S, S, S), (Variable(torch.rand(S) + 1.5, requires_grad=False),), 'tensor_broadcast_rhs'),
     ('fmod', (S, 1, S), (Variable(torch.rand(S, S) + 1.5, requires_grad=False),), 'tensor_broacast_all'),
     ('remainder', (S, S, S), (1.5,)),
     ('remainder', (S, S, S), (Variable(torch.rand(S, S, S) + 1.5, requires_grad=False),), 'tensor'),
@@ -1939,6 +1686,16 @@ method_tests = [
     ('prod', (S, S, S), (1, True,), 'keepdim_dim', [0]),
     ('prod', (S,), (0,), 'dim_1d', [0]),
     ('prod', (S,), (0, True), 'keepdim_1d', [0]),
+    ('prod', prod_zeros(S, [0, 1]), (), 'zerodims2'),
+    ('prod', prod_zeros(S, [0, 2]), (), 'zerodims1'),
+    ('prod', prod_zeros(S, [1, 2]), (), 'zerodims0'),
+    ('prod', prod_zeros(S, [0, 1]), (1,), 'zeros_dims2', [0]),
+    ('prod', prod_zeros(S, [0, 2]), (1,), 'zeros_dims1', [0]),
+    ('prod', prod_zeros(S, [1, 2]), (1,), 'zeros_dims0', [0]),
+    ('prod', prod_zeros(S, [0, 1]), (1, True), 'keepdim_zeros_dims2', [0]),
+    ('prod', prod_zeros(S, [0, 2]), (1, True), 'keepdim_zeros_dims1', [0]),
+    ('prod', prod_zeros(S, [1, 2]), (1, True), 'keepdim_zeros_dims0', [0]),
+    ('prod', prod_single_zero(S), (), 'single_zero'),
     ('var', (S, S, S), ()),
     ('var', (S, S, S), (1,), 'dim', [0]),
     ('var', (S, S, S), (1, True, True), 'keepdim_dim', [0]),
@@ -1952,10 +1709,16 @@ method_tests = [
     ('renorm', (S, S, S), (2, 1, 0.5), 'dim', [1]),
     ('renorm', (S, S, S), (1, 2, 3), 'norm_1'),
     ('repeat', (S, S, S, S), (2, 3, 1, 4)),
-    ('cumsum', (S, S, S), (1,)),
-    ('cumsum', (S,), (0,), '1d'),
+    ('repeat', (S, S, S, S), (2, 2, 1, 3, 1, 2), 'unsqueeze'),
+    ('cumsum', (S, S, S), (1,), 'dim0', [0]),
+    ('cumsum', (S, S, S), (1,), 'dim1', [0]),
+    ('cumsum', (S,), (0,), '1d', [0]),
+    ('cumprod', (S, S, S), (0,)),
     ('cumprod', (S, S, S), (1,), 'dim1', [0]),
-    ('cumprod', prod_zeros(S, [0, 1]), (1,), 'zeros_dim', [0]),
+    ('cumprod', (S,), (0,), '1d'),
+    ('cumprod', prod_zeros(S, [0, 1]), (1,), 'zeros_dim2', [0]),
+    ('cumprod', prod_zeros(S, [0, 2]), (1,), 'zeros_dim1', [0]),
+    ('cumprod', prod_zeros(S, [1, 2]), (1,), 'zeros_dim0', [0]),
     ('unfold', (S, S, S, S), (1, 3, 1)),
     ('unfold', (S, S, S), (2, 3, 2), 'lastdim'),
     ('addmm', (S, M), ((S, S), (S, M)),),
@@ -2003,10 +1766,19 @@ method_tests = [
     ('addcdiv', (S, S), (0.5, (S, 1), (1, S)), 'scale_broadcast_rhs'),
     ('addcdiv', (1,), (0.5, (S, S, 1), (1, S)), 'scale_broadcast_all'),
     ('norm', (S, S, S), (2,)),
-    ('norm', (S, S, S), (2, 1), 'dim', [1]),
-    ('norm', (S, S, S), (2, 1, True), 'keepdim_dim', [0]),
-    ('norm', (S,), (2, 0), 'dim_1d', [1]),
-    ('norm', (S,), (2, 0, True), 'keepdim_dim_1d', [0]),
+    ('norm', (S, S, S), (3,), '3'),
+    ('norm', torch.rand(S, S, S) + 5e-2, (1.5,), '1_5'),
+    ('norm', (S, S, S), (2, 1), '2_dim', [1]),
+    ('norm', (S, S, S), (3, 1), '3_dim', [1]),
+    ('norm', torch.rand(S, S, S) + 5e-2, (1.5, 1), '1_5_dim', [1]),
+    ('norm', (S, S, S), (2, 1, True), 'keepdim_2_dim', [1]),
+    ('norm', (S, S, S), (3, 1, True), 'keepdim_3_dim', [1]),
+    ('norm', torch.rand(S, S, S) + 5e-2, (1.5, 1, True), 'keepdim_1_5_dim', [1]),
+    ('norm', (S,), (2, 0), '2_dim_1d', [1]),
+    ('norm', (S,), (3, 0), '3_dim_1d', [1]),
+    ('norm', (S,), (2, 0, True), 'keepdim_2_dim_1d', [1]),
+    ('norm', (S,), (3, 0, True), 'keepdim_3_dim_1d', [1]),
+    ('clone', (S, M, S), ()),
     ('dist', (S, S, S), ((S, S, S),)),
     ('dist', (S, S, S), ((S,),), 'broadcast_rhs'),
     ('dist', (S,), ((S, S, S),), 'broadcast_lhs'),
@@ -2015,18 +1787,24 @@ method_tests = [
     ('dist', (S, S, S), ((S,), 4), '4_broadcast_rhs'),
     ('dist', (S,), ((S, S, S), 4), '4_broadcast_lhs'),
     ('dist', (S, 1, S), ((S, S), 4), '4_broadcast_all'),
-    ('index_select', (S, S, S), (0, index_variable(2, S)), 'dim', [0]),
     ('diag', (M, M), (), '2d'),
     ('diag', (M,), (), '1d'),
+    ('diag', (M, M), (1,), '2d_1'),
+    ('diag', (M, M), (2,), '2d_2'),
     ('tril', (M, M), ()),
+    ('tril', (M, M), (2,), 'idx'),
     ('triu', (M, M), ()),
+    ('triu', (M, M), (2,), 'idx'),
     ('trace', (M, M), ()),
     ('cross', (S, 3), ((S, 3),)),
     ('cross', (S, 3, S), ((S, 3, S), 1), 'dim'),
+    ('index_select', (S, S, S), (0, index_variable(2, S)), 'dim', [0]),
+    ('index_add', (S, S), (0, index_variable(2, S), (2, S)), 'dim', [0]),
+    ('index_copy', (S, S), (0, index_perm_variable(2, S), (2, S)), 'dim', [0]),
+    ('index_fill', (S, S), (0, index_variable(2, S), 2), 'dim', [0]),
     ('inverse', (S, S), (), '', (), [skipIfNoLapack]),
     ('gesv', (S, S), ((S, S),), '', (), [skipIfNoLapack]),
     ('potrf', _make_cov(S), (True,), '', (), [skipIfNoLapack]),
-    ('clone', (S, M, S), ()),
     ('eq', (S, S, S), ((S, S, S),)),
     ('eq', (S, S, S), ((1,),), 'broadcast_rhs'),
     ('eq', (1,), ((S, S, S),), 'broadcast_lhs'),
@@ -2066,6 +1844,12 @@ method_tests = [
     ('unsqueeze', (S, S, S), (0,), 'first', [0]),
     ('unsqueeze', (S, S, S), (1,), 'middle', [0]),
     ('unsqueeze', (S, S, S), (3,), 'last', [0]),
+    ('gather', (M, S), (0, gather_variable((S, S), 1, M, True)), 'dim0', [0]),
+    ('gather', (M, S), (1, gather_variable((M, S // 2), 0, S, True)), 'dim1', [0]),
+    ('scatter', (M, S), (0, gather_variable((S, S), 1, M), (S, S)), 'dim0', [0]),
+    ('scatter', (M, S), (1, gather_variable((M, S // 2), 0, S), (M, S // 2)), 'dim1', [0]),
+    ('scatter_add', (M, S), (0, gather_variable((S, S), 1, M), (S, S)), 'dim0', [0]),
+    ('scatter_add', (M, S), (1, gather_variable((M, S // 2), 0, S), (M, S // 2)), 'dim1', [0]),
     ('masked_select', (M, M), (Variable(mask_not_all_zeros((M, M)), requires_grad=False),)),
     ('masked_select', (M, M), (Variable(mask_not_all_zeros((M,)), requires_grad=False),), 'broadcast_rhs'),
     ('masked_select', (M,), (Variable(mask_not_all_zeros((M, M)), requires_grad=False),), 'broadcast_lhs'),
@@ -2077,11 +1861,28 @@ method_tests = [
     ('masked_scatter_', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False), (M, M))),
     ('masked_scatter_', (M, M), (Variable(torch.ByteTensor(M,).bernoulli_(), requires_grad=False), (M, M)),
      'broadcast_rhs'),
+    ('resize', (S, S, S), (torch.Size([S * S, S])), 'fewer_dims'),
+    ('resize_as', (S, S, S), (Variable(torch.randn((S * S, S)), requires_grad=False),)),
+    ('sort', (S, M, S), ()),
+    ('sort', (S, M, S), (1,), 'dim'),
+    ('sort', (S, M, S), (1, True), 'dim_desc'),
+    ('topk', (S, M, S), (3,)),
+    ('topk', (S, M, S), (3, 1), 'dim'),
+    ('topk', (S, M, S), (3, 1, True), 'dim_desc'),
+    ('topk', (S, M, S), (3, 1, True, True), 'dim_desc_sort'),
+    ('__getitem__', torch.randn(S, S, S), (dont_convert([1, 2]),)),
+    ('__getitem__', torch.randn(S, S, S), (slice(0, 3),), 'slice'),
+    ('__getitem__', torch.randn(S, S, S), (dont_convert([slice(0, 3), 1]),), 'slice_index'),
+    ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 2, 3], [1, 3, 3], [0, 0, 2]]),), 'adv_index'),
+    ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 0, 3], [1, 1, 3], [0, 0, 2]]),), 'adv_index_dup'),
+    ('__getitem__', torch.randn(S, S, S), (dont_convert([slice(None), slice(None), [0, 3]]),), 'adv_index_end'),
+    ('__getitem__', torch.randn(S, S, S), (dont_convert([slice(None), [0, 3], slice(None)]),), 'adv_index_mid'),
+    ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 3], slice(None), slice(None)]),), 'adv_index_beg'),
+    ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 3], [1, 2], slice(None)]),), 'adv_index_comb'),
+    ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 3], ]),), 'adv_index_sub'),
+    ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 3], slice(None)]),), 'adv_index_sub_2'),
+    ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 3], Ellipsis]),), 'adv_index_sub_3'),
 ]
-# TODO: mm, bmm, mv, ger
-# TODO: sort, topk (problem with indices)
-# TODO: indexAdd, indexCopy, indexFill
-# TODO: resize, resize_as (tensors only have resize_ and resize_as_)
 # TODO: clamp with min/max
 
 
@@ -2280,10 +2081,37 @@ EXCLUDE_GRADCHECK = {
 }
 
 
+def exclude_tensor_method(name, test_name):
+    # there are no tensor equivalents for these (inplace or out)
+    exclude_all_tensor_method_by_test_name = {
+        'test_clamp_min',
+        'test_clamp_max',
+    }
+    # there are no out-of-place tensor equivalents for these
+    exclude_outplace_tensor_method = {
+        'index_add',
+        'index_copy',
+        'index_fill',
+        'resize',
+        'resize_as',
+        'scatter',
+        'scatter_add',
+    }
+    if test_name in exclude_all_tensor_method_by_test_name:
+        return True
+    is_rhs_operator = name[:3] == "__r" and name[-2:] == "__"
+    is_inplace = name[-1] == "_" and not is_rhs_operator
+    if not is_inplace and name in exclude_outplace_tensor_method:
+        return True
+    return False
+
+
 def gradgradcheck_method_precision_override(test_name):
     # these are just empirical observations, we should improve
     gradgradcheck_precision_override = {
         'test_norm': {'atol': 2e-2, 'rtol': 1e-2},
+        'test_norm_1_5': {'atol': 1.5e-2, 'rtol': 1e-2},
+        'test_norm_3': {'atol': 5e-2, 'rtol': 1e-2},
         'test_dist': {'atol': 5e-2, 'rtol': 1e-2},
         'test_dist_4': {'atol': 8e-2, 'rtol': 1e-2},
     }
@@ -2295,6 +2123,19 @@ def gradgradcheck_method_precision_override(test_name):
         elif 'broadcast_all' in test_name:
             override = {'atol': override['atol'] * S * S, 'rtol': override['atol'] * S * S}
     return override
+
+
+def run_grad_and_gradgrad_checks(test_case, test_name, apply_method, output_variable, input_variables):
+    test_case.assertTrue(gradcheck(apply_method, input_variables, eps=1e-6, atol=PRECISION))
+
+    grad_y = generate_gradoutput(output_variable, non_contiguous=True)
+    gradgradcheck_precision_override = gradgradcheck_method_precision_override(test_name)
+    if gradgradcheck_precision_override is not None:
+        atol = gradgradcheck_precision_override['atol']
+        rtol = gradgradcheck_precision_override['rtol']
+        test_case.assertTrue(gradgradcheck(apply_method, input_variables, grad_y, atol=atol, rtol=rtol))
+    else:
+        test_case.assertTrue(gradgradcheck(apply_method, input_variables, grad_y,))
 
 for test in method_tests:
     name, self_size, args = test[:3]
@@ -2320,33 +2161,21 @@ for test in method_tests:
                 self_tensor = deepcopy(self_variable.data)
                 args_tensor = deepcopy(unpack_variables(args_variable))
                 output_variable = getattr(self_variable, name)(*args_variable)
-                output_tensor = getattr(self_tensor, name)(*args_tensor)
-                if not torch.is_tensor(output_tensor) and not isinstance(output_tensor, tuple):
-                    output_tensor = torch.DoubleTensor((output_tensor,))
-                self.assertEqual(unpack_variables(output_variable), output_tensor)
-                # TODO: check that both have changed after adding all inplace ops
-
-                def apply_method(*inputs):
-                    return getattr(inputs[0], name)(*inputs[1:])
+                if not exclude_tensor_method(name, test_name):
+                    output_tensor = getattr(self_tensor, name)(*args_tensor)
+                    if not torch.is_tensor(output_tensor) and not isinstance(output_tensor, tuple):
+                        output_tensor = torch.DoubleTensor((output_tensor,))
+                    self.assertEqual(unpack_variables(output_variable), output_tensor)
+                    # TODO: check that both have changed after adding all inplace ops
 
                 if not is_inplace and name not in EXCLUDE_GRADCHECK:
-                    self.assertTrue(gradcheck(apply_method,
-                                              (self_variable,) + args_variable,
-                                              eps=1e-6, atol=PRECISION))
-
-                    grad_y = generate_gradoutput(output_variable, non_contiguous=True)
-                    gradgradcheck_precision_override = gradgradcheck_method_precision_override(test_name)
-                    if gradgradcheck_precision_override is not None:
-                        atol = gradgradcheck_precision_override['atol']
-                        rtol = gradgradcheck_precision_override['rtol']
-                        self.assertTrue(gradgradcheck(apply_method,
-                                        (self_variable,) + args_variable, grad_y, atol=atol, rtol=rtol))
-                    else:
-                        self.assertTrue(gradgradcheck(apply_method,
-                                                      (self_variable,) + args_variable, grad_y,))
+                    run_grad_and_gradgrad_checks(self, test_name,
+                                                 lambda *inputs: getattr(inputs[0], name)(*inputs[1:]),
+                                                 output_variable, (self_variable,) + args_variable)
 
                 # functional interface tests
-                if hasattr(torch, name) and name not in EXCLUDE_FUNCTIONAL:
+                if (hasattr(torch, name) and name not in EXCLUDE_FUNCTIONAL and
+                        not exclude_tensor_method(name, test_name)):
                     f_args_variable = (self_variable,) + args_variable
                     f_args_tensor = (self_tensor,) + args_tensor
                     output_variable = getattr(torch, name)(*f_args_variable)
@@ -2354,6 +2183,14 @@ for test in method_tests:
                     if not torch.is_tensor(output_tensor) and not isinstance(output_tensor, tuple):
                         output_tensor = torch.DoubleTensor((output_tensor,))
                     self.assertEqual(unpack_variables(output_variable), output_tensor)
+
+                    if name not in EXCLUDE_GRADCHECK:
+                        run_grad_and_gradgrad_checks(self, test_name, lambda *inputs: getattr(torch, name)(*inputs),
+                                                     output_variable, f_args_variable)
+                    if isinstance(output_variable, torch.autograd.Variable):
+                        output_variable.backward(torch.randn(*output_variable.size()).type_as(output_variable.data))
+                        self.assertTrue(type(self_variable.data) == type(self_variable.grad.data))
+                        self.assertTrue(self_variable.size() == self_variable.grad.size())
 
                 # check for correct type of input.data and input.grad.data
                 if not is_inplace:
