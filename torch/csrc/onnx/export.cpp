@@ -311,8 +311,10 @@ static void encodeGraph(onnx::GraphProto * p_g, std::shared_ptr<Graph> & g, cons
 // Exports a graph to ONNX
 std::string ExportGraph(std::shared_ptr<Graph>& g_,
                         const std::unordered_map<void*, Node*>& buffer_map,
-                        const std::vector<at::Tensor> & initializers,
-                        bool verbose) {
+                        const std::vector<std::string> & input_names,
+                        const std::vector<std::string> & output_names,
+                        bool verbose,
+                        const std::vector<at::Tensor> & initializers) {
   auto g = ToONNX(g_, buffer_map, verbose);
   if(verbose) {
     std::cout << *g << "\n";

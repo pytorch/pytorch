@@ -13,7 +13,8 @@ import collections
 from ._utils import _range
 
 
-def export(model, args, f, export_params=True, kwargs=None, verbose=False):
+def export(model, args, f, export_params=True, kwargs=None, verbose=False,
+           input_names=(), output_names=()):
     """
     Export a model into ONNX format.  This exporter runs your model
     once in order to get a trace of its execution to be exported; at the
@@ -32,12 +33,17 @@ def export(model, args, f, export_params=True, kwargs=None, verbose=False):
         export_params (bool, default True): if specified, all parameters will
             be exported.  Set this to False if you are exporting an
             untrained model.
+        input_names (list, default []): if specified, a list of strings which
+        will be used in ONNX as the names of the inputs of the model.
+        output_names (list, default []): if specified, a list of strings which
+        will be used in ONNX as the name sof the outputs of the output.
         kwargs (dict, optional): keyword inputs to the model.
     """
     _export(model, args, f, export_params, kwargs, verbose)
 
 
-def _export(model, args, f, export_params=True, kwargs=None, verbose=False):
+def _export(model, args, f, export_params=True, kwargs=None, verbose=False,
+            input_names=(), output_names=()):
     # Special case for common case of passing a single Variable
     if isinstance(args, torch.autograd.Variable):
         args = (args, )
@@ -48,9 +54,15 @@ def _export(model, args, f, export_params=True, kwargs=None, verbose=False):
     if export_params:
         # NB: OrderedDict values is not actually a list, but trace.export is
         # not duck-typed and expects an actual list.
-        proto = trace.export(list(model.state_dict().values()), verbose)
+        initializers = list(model.state_dict().values())
     else:
-        proto = trace.export(verbose)
+        initializers = list()
+
+    proto = trace.export(input_names,
+                         output_names,
+                         verbose,
+                         initializers)
+
     torch.serialization._with_file_like(f, "wb", lambda f: f.write(proto))
     return torch_out
 
