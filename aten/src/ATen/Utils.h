@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ArrayRef.h"
+#include <sstream>
 
 namespace at {
 
@@ -46,6 +47,23 @@ static inline std::vector<TH*> tensor_list_checked_cast(ArrayRef<TBase> tensors,
     }
   }
   return casted;
+}
+
+static inline int64_t maybe_wrap_dim(int64_t dim, int64_t dim_post_expr) {
+  int64_t corrected_dim = std::max<int64_t>(dim_post_expr, 0);
+  if (corrected_dim <= 0) {
+    std::ostringstream oss;
+    oss << "dimension specified as " << dim << " but tensor has no dimensions";
+    throw std::runtime_error(oss.str());
+  }
+  if (dim < -(corrected_dim) || dim >= (corrected_dim)) {
+    std::ostringstream oss;
+    oss << "dimension out of range (expected to be in range of [" << -(corrected_dim)
+        << ", " << (corrected_dim)-1 << "], but got " << dim << ")",
+    throw std::runtime_error(oss.str());
+  }
+  if (dim  < 0) dim += corrected_dim;
+  return dim;
 }
 
 } // at
