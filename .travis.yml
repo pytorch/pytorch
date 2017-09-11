@@ -2,7 +2,7 @@
 language: python
 dist: trusty
 git:
-  submodules: false
+  submodules: true
 python:
     - 2.7.9
     - 2.7
