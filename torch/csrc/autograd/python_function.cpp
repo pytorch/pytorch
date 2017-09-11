@@ -334,7 +334,7 @@ static void _mark_dirty(THPFunction *self, t2var_type &t2var,
   self->dirty_tensors = NULL;
 }
 
-static void _transplant_var(VariableTensor& var, const std::shared_ptr<Function>& fn, int output_nr, bool is_volatile)
+static void _transplant_var(VariableImpl& var, const std::shared_ptr<Function>& fn, int output_nr, bool is_volatile)
 {
   if (is_volatile) {
     var.grad_fn = nullptr;

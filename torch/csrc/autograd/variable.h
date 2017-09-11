@@ -20,10 +20,10 @@
 namespace torch { namespace autograd {
 
 using at::Tensor;
-struct VariableTensor;
+struct VariableImpl;
 
 struct Variable : public at::Tensor {
-  inline Variable(VariableTensor * self, bool retain);
+  inline Variable(VariableImpl * self, bool retain);
   Variable() : Tensor() {}
   Variable(const Variable & rhs) : Tensor(rhs) {}
   Variable(Variable && rhs) noexcept : Tensor(std::move(rhs)) {}
@@ -31,7 +31,7 @@ struct Variable : public at::Tensor {
   explicit Variable(Tensor const & rhs) : Tensor(rhs) {}
   explicit Variable(Tensor && rhs) noexcept : Tensor(std::move(rhs)) {}
 
-  inline VariableTensor* get() const;
+  inline VariableImpl* get() const;
 
   inline const Tensor & data() const;
   inline       Tensor & data();
@@ -67,12 +67,12 @@ struct Variable : public at::Tensor {
   operator Tensor() const { return Tensor(pImpl, true); }
 };
 
-struct VariableTensor : public at::TensorImpl {
+struct VariableImpl : public at::TensorImpl {
 public:
-  explicit VariableTensor(at::Tensor data);
-  VariableTensor(at::Tensor data, std::shared_ptr<Function> grad_fn);
-  VariableTensor(at::Tensor data, bool requires_grad, bool is_volatile=false);
-  virtual ~VariableTensor();
+  explicit VariableImpl(at::Tensor data);
+  VariableImpl(at::Tensor data, std::shared_ptr<Function> grad_fn);
+  VariableImpl(at::Tensor data, bool requires_grad, bool is_volatile=false);
+  virtual ~VariableImpl();
   virtual const char * toString() const override;
   virtual at::IntList sizes() override;
   virtual at::IntList strides() override;
@@ -110,11 +110,11 @@ public:
   friend struct VariableType;
 };
 
-inline Variable::Variable(VariableTensor * self, bool retain) : Tensor(self, retain) {
+inline Variable::Variable(VariableImpl * self, bool retain) : Tensor(self, retain) {
 }
 
-inline VariableTensor* Variable::get() const {
-  return static_cast<VariableTensor*>(pImpl);
+inline VariableImpl* Variable::get() const {
+  return static_cast<VariableImpl*>(pImpl);
 }
 
 inline const Tensor & Variable::data() const {

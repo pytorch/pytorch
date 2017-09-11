@@ -63,7 +63,7 @@ PyObject * THPVariable_NewWithFunction(PyObject *data, const std::shared_ptr<tor
 {
   THPUtils_assert(THPModule_isTensor(data), "data must be a Tensor");
 
-  Variable v(new VariableTensor(torch::createTensor(data), grad_fn->is_executable), false);
+  Variable v(new VariableImpl(torch::createTensor(data), grad_fn->is_executable), false);
   v.grad_fn() = grad_fn;
 
   PyObject* obj = THPVariable_NewWithVar((PyTypeObject*)THPVariableClass, v);
@@ -77,7 +77,7 @@ PyObject * THPVariable_NewWithFunction(PyObject *data, const std::shared_ptr<tor
 // This function DOES NOT steal a reference to data
 PyObject * THPVariable_NewVolatile(PyObject *data)
 {
-  Variable v(new VariableTensor(torch::createTensor(data), false, true), false);
+  Variable v(new VariableImpl(torch::createTensor(data), false, true), false);
   PyObject* obj = THPVariable_NewWithVar((PyTypeObject*)THPVariableClass, v);
   if (obj) {
     ((THPVariable*)obj)->data = data;
@@ -89,7 +89,7 @@ PyObject * THPVariable_NewVolatile(PyObject *data)
 // This function DOES NOT steal a reference to data
 PyObject * THPVariable_NewLeaf(PyObject *data)
 {
-  Variable v(new VariableTensor(torch::createTensor(data)), false);
+  Variable v(new VariableImpl(torch::createTensor(data)), false);
   PyObject* obj = THPVariable_NewWithVar((PyTypeObject*)THPVariableClass, v);
   if (obj) {
     ((THPVariable*)obj)->data = data;
@@ -171,9 +171,9 @@ PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject *kwds)
   Variable var;
   if (grad_fn) {
     auto grad_fn_ = THPFunction_asFunction((THPFunction*)grad_fn);
-    var.reset(new VariableTensor(torch::createTensor(data), grad_fn_), false);
+    var.reset(new VariableImpl(torch::createTensor(data), grad_fn_), false);
   } else {
-    var.reset(new VariableTensor(torch::createTensor(data), requires_grad, is_volatile), false);
+    var.reset(new VariableImpl(torch::createTensor(data), requires_grad, is_volatile), false);
   }
 
   PyObject* self = THPVariable_NewWithVar(type, var);
@@ -275,7 +275,7 @@ int THPVariable_set_data(THPVariable *self, PyObject *data)
   Tensor tensor = torch::createTensor(data);
   if (&self->cdata->data.type() != &tensor.type()) {
     // we change the type of var.data so we must change the type of var
-    auto newType = VariableTensor::getType(tensor);
+    auto newType = VariableImpl::getType(tensor);
     self->cdata->*get(TensorImpl_Type()) = newType;
   }
   self->cdata->data = tensor;

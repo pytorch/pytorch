@@ -69,7 +69,7 @@ Tensor & VariableType::checked_unpack(const Tensor & t, const char * name, int p
      toString(),pos,name);
  }
  if (&t.type() == this) {
-   return static_cast<VariableTensor*>(t.pImpl)->data;
+   return static_cast<VariableImpl*>(t.pImpl)->data;
  }
  runtime_error("Expected object of type %s but found type %s for argument #%d '%s'",
    toString(),t.type().toString(),pos,name);

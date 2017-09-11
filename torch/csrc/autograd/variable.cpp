@@ -7,7 +7,7 @@ using namespace at;
 
 namespace torch { namespace autograd {
 
-VariableTensor::VariableTensor(Tensor data_, bool requires_grad, bool is_volatile)
+VariableImpl::VariableImpl(Tensor data_, bool requires_grad, bool is_volatile)
   : TensorImpl(getType(data_))
   , data(std::move(data_))
   , grad()
@@ -21,55 +21,55 @@ VariableTensor::VariableTensor(Tensor data_, bool requires_grad, bool is_volatil
   }
 }
 
-VariableTensor::VariableTensor(Tensor data, std::shared_ptr<Function> grad_fn)
-  : VariableTensor(std::move(data))
+VariableImpl::VariableImpl(Tensor data, std::shared_ptr<Function> grad_fn)
+  : VariableImpl(std::move(data))
 {
   this->grad_fn = grad_fn;
   requires_grad = grad_fn->is_executable;
   output_nr = grad_fn->num_inputs++;
 }
 
-VariableTensor::VariableTensor(Tensor data)
-  : VariableTensor(std::move(data), false, false)
+VariableImpl::VariableImpl(Tensor data)
+  : VariableImpl(std::move(data), false, false)
 {
 }
 
-VariableTensor::~VariableTensor() {
+VariableImpl::~VariableImpl() {
 }
 
-const char * VariableTensor::toString() const {
+const char * VariableImpl::toString() const {
   return "Variable";
 }
 
-IntList VariableTensor::sizes() {
+IntList VariableImpl::sizes() {
   return data.sizes();
 }
 
-int64_t VariableTensor::dim() {
+int64_t VariableImpl::dim() {
   return data.dim();
 }
 
-const char * VariableTensor::typeString() {
+const char * VariableImpl::typeString() {
   return "VariableType";
 }
 
-void * VariableTensor::unsafeGetTH(bool retain) {
+void * VariableImpl::unsafeGetTH(bool retain) {
   return data.unsafeGetTH(retain);
 }
 
-IntList VariableTensor::strides() {
+IntList VariableImpl::strides() {
   return data.strides();
 }
 
-Scalar VariableTensor::localScalar() {
+Scalar VariableImpl::localScalar() {
   return data.pImpl->localScalar();
 }
 
-void VariableTensor::assign_(Scalar s) {
+void VariableImpl::assign_(Scalar s) {
   data.assign_(s);
 }
 
-std::shared_ptr<Function> VariableTensor::get_grad_accumulator() {
+std::shared_ptr<Function> VariableImpl::get_grad_accumulator() {
   if (grad_fn) {
     throw std::logic_error("get_grad_accumulator() should be only called on leaf Variables");
   }
@@ -108,7 +108,7 @@ struct VariableTypes {
 
 } // anonymous namespace
 
-Type* VariableTensor::getType(const Tensor& tensor)
+Type* VariableImpl::getType(const Tensor& tensor)
 {
   if (!tensor.defined()) {
     throw std::runtime_error("tensor is undefined");
@@ -116,7 +116,7 @@ Type* VariableTensor::getType(const Tensor& tensor)
   return getType(tensor.type());
 }
 
-Type* VariableTensor::getType(const Type& baseType)
+Type* VariableImpl::getType(const Type& baseType)
 {
   static VariableTypes vt;
   return vt.types[static_cast<int>(baseType.ID())].get();

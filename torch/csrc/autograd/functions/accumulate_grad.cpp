@@ -54,7 +54,7 @@ auto AccumulateGrad::apply(const variable_list& grads) -> variable_list {
   } else {
     // If grad is non-volatile, it should stay like that
     if (new_grad.is_volatile()) {
-      new_grad = Variable(new VariableTensor(new_grad.data()), false);
+      new_grad = Variable(new VariableImpl(new_grad.data()), false);
     }
     variable.grad() = apply_fn<Add>()(grad, new_grad);
   }

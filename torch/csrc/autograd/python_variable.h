@@ -10,7 +10,7 @@
 struct THPVariable {
     PyObject_HEAD
     // Payload
-    torch::autograd::VariableTensor* cdata;
+    torch::autograd::VariableImpl* cdata;
     // Tensor this wraps (corresponds to Python attr 'data').
     // It assumed that a THPVariable is *uniquely* identified by the
     // tensor it wraps.
