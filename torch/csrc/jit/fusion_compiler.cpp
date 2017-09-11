@@ -16,9 +16,9 @@
 
 namespace torch { namespace jit {
 
-std::vector<bool> findContiguous(
-  at::IntList sizes,
-  at::IntList strides) {
+std::vector<bool> TensorDesc::findContiguous(
+    const at::IntList& sizes,
+    const at::IntList& strides) {
   JIT_ASSERT(sizes.size() == strides.size());
   std::vector<bool> cont(sizes.size());
   for(size_t i = 0; i < sizes.size(); ++i) {
@@ -28,53 +28,56 @@ std::vector<bool> findContiguous(
   return cont;
 }
 
-// compress dimensions when the tensor is marked as cont
-// anytime we do a compression, we assert that it is valid for this particular tensor.
-static void compressContiguous(
-  at::IntList sizes,
-  at::IntList strides,
-  const std::vector<bool> & cont,
-  uint32_t * c_sizes,
-  uint32_t * c_strides) {
-  size_t compressed_dims = 0;
-  size_t cur = 0;
-  size_t ndim = sizes.size();
-  while(cur < ndim) {
-    size_t total_size = sizes[cur];
-    cur++;
-    while(cont[cur-1] && cur < ndim) {
-      JIT_ASSERT(strides[cur-1] == sizes[cur]*strides[cur]);
-      total_size *= sizes[cur];
-      cur++;
-    }
-   // cur starts pointing at the beginning of run to compress
-   // cur ends one _after_ the terminating false or end of list.
-   // total_size is the size of all dimensions [begin,end)
-   // examples:
-   // f = not cont.
-   // t = cont.
-   // x = don't care, including past end of list
-   // s = start of cur
-   // e = end of cur
+namespace {
 
-
-   // f x x x
-   // s e
-
-   //  t f x x
-   //  s   e
-
-   //  t t f x
-   //  s     e
-
-    c_sizes[compressed_dims] = total_size;
-    c_strides[compressed_dims] = strides[cur-1];
-    compressed_dims++;
-  }
-  JIT_ASSERT(!cont.back() || strides.back() == 1);
+static int ceilDiv(int a, int b) {
+  return (a + b - 1) / b;
 }
 
-static auto compilation_unit_template = CodeTemplate(R"(
+std::ostream& operator<<(std::ostream & out, const TensorDesc & d) {
+  out << d.scalar_type << "[";
+  for(auto b : d.contiguity)
+    out << b << ";";
+  out << "]";
+  return out;
+}
+
+// We're using three CUDA APIs, so define a few helpers for error handling
+static void nvrtcCheck(nvrtcResult result,const char * file, int line) {
+  if(result != NVRTC_SUCCESS) {
+    std::stringstream ss;
+    ss << file << ":" << line << ": " << nvrtcGetErrorString(result);
+    throw std::runtime_error(ss.str());
+  }
+}
+#define JIT_NVRTC_CHECK(result) nvrtcCheck(result,__FILE__,__LINE__);
+
+static void cuCheck(CUresult result, const char * file, int line) {
+  if(result != CUDA_SUCCESS) {
+    const char * str;
+    cuGetErrorString(result, &str);
+    std::stringstream ss;
+    ss << file << ":" << line << ": " << str;
+    throw std::runtime_error(ss.str());
+  }
+}
+#define JIT_CU_CHECK(result) cuCheck(result,__FILE__,__LINE__);
+
+static void cudaCheck(cudaError_t result, const char * file, int line) {
+  if(result != cudaSuccess) {
+    std::stringstream ss;
+    ss << file << ":" << line << ": " << cudaGetErrorString(result);
+    throw std::runtime_error(ss.str());
+  }
+}
+#define JIT_CUDA_CHECK(result) cudaCheck(result,__FILE__,__LINE__);
+
+////////////////////////////////////////////////////////////////////////////////
+// Code generation
+
+namespace codegen {
+
+auto compilation_unit_template = CodeTemplate(R"(
 typedef ${IndexType} IndexType;
 template<typename T, size_t N>
 struct TensorInfo {
@@ -99,13 +102,13 @@ void ${kernelName}(IndexType totalElements, ${formals}) {
 // curDimIndex = linearId % sizes[i]; // % sizes[i] is not needed for d == 0, because we already guard for numel outside the index calculation
 // offset += curDimIndex*strides[i]; // *strides[i] is optional if list_is_cont becaause strides.back() == 1
 // linearId /= sizes[i];
-static auto dim_calc = CodeTemplate(R"(
+auto dim_calc = CodeTemplate(R"(
 //printf("tensor ${tensor} sizes[${d}] = %d, strides[${d}] = %d\n", ${tensor}.sizes[${d}],${tensor}.strides[${d}]);
 size_t ${tensor}_dimIndex${d} = ${tensor}_linearIndex ${mod_sizes};
 ${tensor}_offset += ${tensor}_dimIndex${d} ${times_stride};
 )");
 
-static void emitIndexingFor(std::ostream & out, const std::string & tensor, int ndim, bool last_is_cont) {
+void emitIndexingFor(std::ostream & out, const std::string & tensor, int ndim, bool last_is_cont) {
   TemplateEnv env;
   env.s("tensor",tensor);
   out << format("IndexType ${tensor}_offset = 0;\n",env);
@@ -122,27 +125,19 @@ static void emitIndexingFor(std::ostream & out, const std::string & tensor, int 
   }
 }
 
-static std::ostream& operator<<(std::ostream & out, const TensorDesc & d) {
-  out << d.scalar_type << "[";
-  for(auto b : d.contiguity)
-    out << b << ";";
-  out << "]";
-  return out;
-}
-
-static std::string nodeName(Node * n) {
-  return "n"+std::to_string(n->unique());
+std::string nodeName(Node * n) {
+  return "n" + std::to_string(n->unique());
 }
 
 // TODO: we need to support double-precision
-static std::unordered_map<NodeKind,std::string> simple_map_ops = {
+std::unordered_map<NodeKind,std::string> simple_map_ops = {
   {kSigmoid,         "1.f / (1.f + expf(-${0}))"},
   {kTanh,            "tanhf(${0})"},
   {kMul,             "${0} * ${1}"},
   {kAdd,             "${0} + ${1}"},
 };
 
-const char * toCString(at::ScalarType type) {
+const char * scalarTypeName(at::ScalarType type) {
   switch(type) {
     #define DEFINE_CASE(ctype,name,_) \
       case at::ScalarType::name: return #ctype;
@@ -154,8 +149,8 @@ const char * toCString(at::ScalarType type) {
 }
 
 void emitCompilationUnit(std::ostream & out,
-  const std::string & name,
-  AnnotatedGraph & agraph) {
+                         const std::string & name,
+                         AnnotatedGraph & agraph) {
   Graph& subgraph = *agraph.graph;
   TemplateEnv env;
   env.s("kernelName",name);
@@ -171,7 +166,7 @@ void emitCompilationUnit(std::ostream & out,
     emitIndexingFor(tensorOffsets, tensor, nDim,  desc.lastIsContiguous());
     env.s("tensor",tensor);
     env.d("nDim",nDim);
-    env.s("scalar_type",toCString(desc.scalar_type));
+    env.s("scalar_type",scalarTypeName(desc.scalar_type));
     formals.push_back(format("TensorInfo<${scalar_type},${nDim}> ${tensor}",env));
   };
   {
@@ -213,69 +208,39 @@ void emitCompilationUnit(std::ostream & out,
   out << compilation_unit_template.format(env);
 }
 
-static void nvrtcCheck(nvrtcResult result,const char * file, int line) {
-  if(result != NVRTC_SUCCESS) {
-    std::stringstream ss;
-    ss << file << ":" << line << ": " << nvrtcGetErrorString(result);
-    throw std::runtime_error(ss.str());
-  }
-}
-#define JIT_NVRTC_CHECK(result) \
-  nvrtcCheck(result,__FILE__,__LINE__);
+////////////////////////////////////////////////////////////////////////////////
 
-static void cuCheck(CUresult result, const char * file, int line) {
-  if(result != CUDA_SUCCESS) {
-    const char * str;
-    cuGetErrorString(result, &str);
-    std::stringstream ss;
-    ss << file << ":" << line << ": " << str;
-    throw std::runtime_error(ss.str());
-  }
-}
-#define JIT_CU_CHECK(result) \
-  cuCheck(result,__FILE__,__LINE__);
+} // codegen namespace
+} // anonymous namespace
 
-static void cudaCheck(cudaError_t result, const char * file, int line) {
-  if(result != cudaSuccess) {
-    std::stringstream ss;
-    ss << file << ":" << line << ": " << cudaGetErrorString(result);
-    throw std::runtime_error(ss.str());
-  }
-}
-#define JIT_CUDA_CHECK(result) \
-    cudaCheck(result,__FILE__,__LINE__);
-
-static int ceilDiv(int a, int b) {
-  return (a + b - 1) / b;
-}
-
-//host-side view of TensorInfo
-//note dims[0], because we need to dynamically allocate the dims
+// Host-side view of TensorInfo (that visivle for the kernel is defined above).
+// Note dims[0] - we need to dynamically allocate the dims.
 struct TensorInfo {
   void * data;
   uint32_t sizes_strides[0];
-  uint32_t* sizes(size_t nDim) {
-    return &sizes_strides[0];
-  }
-  uint32_t* strides(size_t nDim) {
-    return &sizes_strides[nDim];
-  }
+
+  uint32_t* sizes(size_t nDim) { return &sizes_strides[0]; }
+  uint32_t* strides(size_t nDim) { return &sizes_strides[nDim]; }
 };
 
 CompiledFusionFunction::CompiledFusionFunction(const std::string & name, AnnotatedGraph & agraph)
-: name(name), input_desc(agraph.input_desc), output_desc(agraph.output_desc) {
-  std::stringstream cu;
-  emitCompilationUnit(cu, name, agraph);
-  compliation_unit = cu.str();
-  nvrtcProgram program;
-  JIT_NVRTC_CHECK(nvrtcCreateProgram(&program,compliation_unit.c_str(), NULL, 0, nullptr, nullptr));
-  cudaDeviceProp deviceProp;
+  : name(name)
+  , input_desc(agraph.input_desc)
+  , output_desc(agraph.output_desc) {
   JIT_CUDA_CHECK(cudaGetDevice(&device));
-  JIT_CUDA_CHECK(cudaGetDeviceProperties(&deviceProp, device));
-  std::string compute = "--gpu-architecture=compute_" + std::to_string(deviceProp.major) + std::to_string(deviceProp.minor);
+  JIT_CUDA_CHECK(cudaGetDeviceProperties(&prop, device));
+
+  std::stringstream cu;
+  codegen::emitCompilationUnit(cu, name, agraph);
+  compliation_unit = cu.str();
+
+  nvrtcProgram program;
+  JIT_NVRTC_CHECK(nvrtcCreateProgram(&program, compliation_unit.c_str(), NULL, 0, nullptr, nullptr));
+
+  std::string compute = "--gpu-architecture=compute_" + std::to_string(prop.major) + std::to_string(prop.minor);
   std::vector<const char *> args = {"--std=c++11", compute.c_str()};
   nvrtcResult result = nvrtcCompileProgram(program, args.size(), args.data());
-  if(result == NVRTC_ERROR_COMPILATION) {
+  if (result == NVRTC_ERROR_COMPILATION) {
     size_t logsize;
     nvrtcGetProgramLogSize(program, &logsize);
     std::vector<char> log(logsize);
@@ -287,6 +252,7 @@ CompiledFusionFunction::CompiledFusionFunction(const std::string & name, Annotat
     JIT_NVRTC_CHECK(nvrtcDestroyProgram(&program));
   });
   JIT_NVRTC_CHECK(result);
+
   size_t ptx_size;
   JIT_NVRTC_CHECK(nvrtcGetPTXSize(program, &ptx_size));
   ptx.resize(ptx_size);
@@ -297,26 +263,84 @@ CompiledFusionFunction::CompiledFusionFunction(const std::string & name, Annotat
 
   JIT_CU_CHECK(cuOccupancyMaxActiveBlocksPerMultiprocessor(
     &maxBlocks, function, 128, 0));
-  JIT_CUDA_CHECK(cudaGetDeviceProperties(&prop, device));
   maxBlocks *= prop.multiProcessorCount;
 }
+
 CompiledFusionFunction::~CompiledFusionFunction() {
   JIT_CU_CHECK(cuModuleUnload(module));
 }
 
+namespace {
+
+// Tries to compress sizes and strides according to cont. Emits the result t
+// c_sizes, c_strides and throws an error on failure (if can't compress)
+void compressContiguous(
+    at::IntList sizes,
+    at::IntList strides,
+    const std::vector<bool> & cont,
+    uint32_t * c_sizes,
+    uint32_t * c_strides) {
+  size_t compressed_dims = 0;
+  size_t cur = 0;
+  size_t ndim = sizes.size();
+  while(cur < ndim) {
+    size_t total_size = sizes[cur];
+    cur++;
+    while(cont[cur-1] && cur < ndim) {
+      JIT_ASSERT(strides[cur-1] == sizes[cur]*strides[cur]);
+      total_size *= sizes[cur];
+      cur++;
+    }
+   // cur starts pointing at the beginning of run to compress
+   // cur ends one _after_ the terminating false or end of list.
+   // total_size is the size of all dimensions [begin,end)
+   // examples:
+   // f = not cont.
+   // t = cont.
+   // x = don't care, including past end of list
+   // s = start of cur
+   // e = end of cur
+
+
+   // f x x x
+   // s e
+
+   //  t f x x
+   //  s   e
+
+   //  t t f x
+   //  s     e
+
+    c_sizes[compressed_dims] = total_size;
+    c_strides[compressed_dims] = strides[cur-1];
+    compressed_dims++;
+  }
+  JIT_ASSERT(!cont.back() || strides.back() == 1);
+}
+
+} // anonymous namespace
+
 void CompiledFusionFunction::launch(at::ArrayRef<at::Tensor> inputs, at::ArrayRef<at::Tensor> outputs) {
   JIT_ASSERT(inputs.size() == input_desc.size());
   JIT_ASSERT(outputs.size() == output_desc.size());
-  size_t uncompressedDim = input_desc.at(0).contiguity.size();
+  // XXX: this code assumes that inputs are 32-bit addressable
+  // XXX: this code assumes that all inputs are of the same size
+  JIT_ASSERT(inputs[0].numel() <= std::numeric_limits<uint32_t>::max());
   uint32_t numel = inputs[0].numel();
-  size_t maxPossibleTensorInfoSize = sizeof(TensorInfo) + 2*sizeof(uint32_t)*uncompressedDim;
+  // Compute the storage needed to store TensorInfo structs for inputs and outputs.
+  size_t uncompressedDim = input_desc.at(0).contiguity.size();
+  size_t maxPossibleTensorInfoSize = sizeof(TensorInfo) + 2 * sizeof(uint32_t) * uncompressedDim;
   size_t maxPossibleBufferSize = maxPossibleTensorInfoSize * (inputs.size() + outputs.size());
   std::vector<char> buffer(maxPossibleBufferSize);
   char * buffer_next = buffer.data();
+  // A vector of arguments to the kernel. It's (numel, *input_descs, *output_descs)
   std::vector<void*> arguments;
   arguments.reserve(1 + inputs.size() + outputs.size());
+  // Asserts that t's dims can be compressed in the same way as in desc
+  // (that's what the kernel assumes), and appends it to the arguments vector.
   auto addTensorInfo = [&](TensorDesc & desc, const at::Tensor & t) {
-    size_t nDim = desc.nDim(); //the compressed dim
+    size_t nDim = desc.nDim(); // NOTE: this is the compressed dim
+    JIT_ASSERT(nDim <= uncompressedDim); // We'd overflow the space otherwise
     auto ti = reinterpret_cast<TensorInfo*>(buffer_next);
     ti->data = t.data_ptr();
     compressContiguous(t.sizes(), t.strides(), desc.contiguity, ti->sizes(nDim), ti->strides(nDim));
@@ -324,23 +348,15 @@ void CompiledFusionFunction::launch(at::ArrayRef<at::Tensor> inputs, at::ArrayRe
     arguments.push_back(ti);
   };
   arguments.push_back(&numel);
-  {
-    size_t i = 0;
-    for(auto & desc : input_desc) {
-      addTensorInfo(desc,inputs[i++]);
-    }
-  }
-  {
-    size_t i = 0;
-    for(auto & desc : output_desc) {
-      addTensorInfo(desc,outputs[i++]);
-    }
-  }
+  for (std::size_t i = 0; i < input_desc.size(); ++i)
+    addTensorInfo(input_desc[i], inputs[i]);
+  for (std::size_t i = 0; i < output_desc.size(); ++i)
+    addTensorInfo(output_desc[i], outputs[i]);
   launch(numel, arguments.data());
 }
 
 void CompiledFusionFunction::launch(uint32_t numel, void ** arguments) {
-  int numBlocks = std::min(maxBlocks,ceilDiv(numel,blockSize));
+  int numBlocks = std::min(maxBlocks, ceilDiv(numel, blockSize));
   //std::cout << "maxBlocks = " << maxBlocks << " needed blocks: " << ceilDiv(numel,blockSize)
   //          << " numblocks =  " << numBlocks;
 
@@ -353,10 +369,6 @@ void CompiledFusionFunction::launch(uint32_t numel, void ** arguments) {
     nullptr));
 }
 
-
-
-
-FusionCompiler::FusionCompiler() {}
 std::shared_ptr<CompiledFusionFunction> FusionCompiler::getOrCompile(AnnotatedGraph & agraph) {
   std::stringstream key;
   key << *agraph.graph << "\n";
@@ -368,11 +380,12 @@ std::shared_ptr<CompiledFusionFunction> FusionCompiler::getOrCompile(AnnotatedGr
   for(auto & i : agraph.output_desc)
     key << i << "\n";
   std::string key_ = key.str();
+
   auto it = cache.find(key_);
-  if(it == cache.end()) {
+  if (it == cache.end()) {
     std::string name = "kernel_" + std::to_string(cache.size());
-    auto func = std::make_shared<CompiledFusionFunction>(name,agraph);
-    it = cache.emplace(key_,std::move(func)).first;
+    auto func = std::make_shared<CompiledFusionFunction>(name, agraph);
+    it = cache.emplace(key_, std::move(func)).first;
   }
   return it->second;
 }
@@ -380,12 +393,10 @@ std::shared_ptr<CompiledFusionFunction> FusionCompiler::getOrCompile(AnnotatedGr
 std::shared_ptr<CompiledFusionFunction> FusionCompiler::getOrCompile(Graph & graph) {
   AnnotatedGraph agraph { &graph };
   for(auto & input : graph.inputs()) {
-    TensorType * t = input->type()->cast<TensorType>();
-    agraph.input_desc.push_back(TensorDesc(t->scalarType(),t->sizes(),t->strides()));
+    agraph.input_desc.emplace_back(input->type()->expect<TensorType>());
   }
   for(auto & output : graph.outputs()) {
-    TensorType * t = output->type()->cast<TensorType>();
-    agraph.output_desc.push_back(TensorDesc(t->scalarType(),t->sizes(),t->strides()));
+    agraph.output_desc.emplace_back(output->type()->expect<TensorType>());
   }
   return getOrCompile(agraph);
 }
