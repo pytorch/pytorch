@@ -610,59 +610,14 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject *args) {
   return std::make_pair(std::move(unpacked), std::move(flags));
 }
 
-PyObject* process_outputs(THPFunction* grad_fn, const UnpackedInput& unpacked, THPObjectPtr&& raw_output, bool is_volatile) {
-  bool unpack_output = ensure_tuple(raw_output);
-
-  auto num_outputs = PyTuple_GET_SIZE(raw_output.get());
-
-  THPObjectPtr outputs(PyTuple_New(num_outputs));
-  if (!outputs) throw python_error();
-
-  grad_fn->cdata.num_inputs = num_outputs;
-
-  // Initialize t2var map
-  t2var_type t2var;
-  for (auto& c_var : unpacked.input_vars) {
-    THPVariable* py_var = (THPVariable*)c_var.get()->pyobj;
-    t2var.emplace(py_var->data, py_var);
-  }
-
-  std::unordered_set<PyObject *> dirty_inputs;
-  _mark_dirty(grad_fn, t2var, dirty_inputs);
-  _wrap_outputs(grad_fn, t2var, dirty_inputs, raw_output, outputs, is_volatile);
-  _join_version_counters(grad_fn, t2var);
-  if (grad_fn->cdata.is_executable) {
-    _mark_non_differentiable(grad_fn, t2var);
-    _save_variables(grad_fn, t2var);
-  } else {
-    // Remove unnecessary attributes
-    Py_XDECREF(grad_fn->to_save);
-    grad_fn->to_save = NULL;
-    Py_XDECREF(grad_fn->non_differentiable);
-    grad_fn->non_differentiable = NULL;
-  }
-
-  grad_fn->cdata.input_sizes.reserve(num_outputs);
-  for (int i = 0; i < num_outputs; ++i) {
-    THPVariable* py_var = (THPVariable*)PyTuple_GET_ITEM(outputs.get(), i);
-    grad_fn->cdata.input_sizes.emplace_back(py_var->cdata);
-  }
-
-  // Unpack the output, unless .forward() returned a tuple
-  if (unpack_output) {
-    PyObject *output = PyTuple_GET_ITEM(outputs.get(), 0);
-    Py_INCREF(output);
-    return output;
-  }
-
-  return outputs.release();
-}
-
-static void trace_create(PyObject* op_obj, THPFunction* bw_obj,
+static void _trace_create(PyObject* op_obj, THPFunction* bw_obj,
         PyObject *input_objects, PyObject *output_objects,
-        const variable_list& input_vars, const std::vector<bool>& is_variable_input) {
+        const variable_list& input_vars) {
   if (!tracer::isTracing(input_vars))
     return;
+
+  if (!op_obj)
+    throw std::runtime_error("Tracing of legacy functions is not supported");
 
   auto tracing_state = tracer::getTracingState(input_vars);
 
@@ -684,7 +639,7 @@ static void trace_create(PyObject* op_obj, THPFunction* bw_obj,
   scalar_args.reserve(num_args);
   for (int i = 0; i < num_args; i++) {
     PyObject *arg_object = PyTuple_GET_ITEM(input_objects, i);
-    if (is_variable_input[i]) {
+    if (THPVariable_Check(arg_object)) {
       arg_types.push_back('t');
     } else {
       arg_types.push_back('s');
@@ -746,7 +701,57 @@ static void trace_create(PyObject* op_obj, THPFunction* bw_obj,
     tracer::nontraceableBackwardSubgraph(input_vars, output_vars);
     Function::setUpContextEdge(this_expr, num_outputs, input_vars, output_vars);
   }
+}
 
+PyObject* process_outputs(PyObject *op_obj, THPFunction* grad_fn, const UnpackedInput& unpacked, PyObject *inputs, THPObjectPtr&& raw_output, bool is_volatile) {
+  bool unpack_output = ensure_tuple(raw_output);
+
+  auto num_outputs = PyTuple_GET_SIZE(raw_output.get());
+
+  THPObjectPtr outputs(PyTuple_New(num_outputs));
+  if (!outputs) throw python_error();
+
+  grad_fn->cdata.num_inputs = num_outputs;
+
+  // Initialize t2var map
+  t2var_type t2var;
+  for (auto& c_var : unpacked.input_vars) {
+    THPVariable* py_var = (THPVariable*)c_var->pyobj;
+    t2var.emplace(py_var->data, py_var);
+  }
+
+  std::unordered_set<PyObject *> dirty_inputs;
+  _mark_dirty(grad_fn, t2var, dirty_inputs);
+  _wrap_outputs(grad_fn, t2var, dirty_inputs, raw_output, outputs, is_volatile);
+  _join_version_counters(grad_fn, t2var);
+  // NOTE: _trace_create has to run before _save_variables, because we need
+  // to assign traces to outputs before we convert them to SavedVariables
+  _trace_create(op_obj, grad_fn, inputs, outputs, unpacked.input_vars);
+  if (grad_fn->cdata.is_executable) {
+    _mark_non_differentiable(grad_fn, t2var);
+    _save_variables(grad_fn, t2var);
+  } else {
+    // Remove unnecessary attributes
+    Py_XDECREF(grad_fn->to_save);
+    grad_fn->to_save = NULL;
+    Py_XDECREF(grad_fn->non_differentiable);
+    grad_fn->non_differentiable = NULL;
+  }
+
+  grad_fn->cdata.input_sizes.reserve(num_outputs);
+  for (int i = 0; i < num_outputs; ++i) {
+    THPVariable* py_var = (THPVariable*)PyTuple_GET_ITEM(outputs.get(), i);
+    grad_fn->cdata.input_sizes.emplace_back(py_var->cdata);
+  }
+
+  // Unpack the output, unless .forward() returned a tuple
+  if (unpack_output) {
+    PyObject *output = PyTuple_GET_ITEM(outputs.get(), 0);
+    Py_INCREF(output);
+    return output;
+  }
+
+  return outputs.release();
 }
 
 // Legacy codepath
@@ -766,11 +771,7 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *_inputs)
   THPObjectPtr raw_output(PyObject_CallObject(forward_fn, unpacked_input.tensor_input));
   if (!raw_output) return NULL;
 
-  if (tracer::isTracing(unpacked_input.input_vars)) {
-    throw std::runtime_error("legacy tracing not supported");
-  }
-
-  return process_outputs(self, unpacked_input, std::move(raw_output), is_volatile);
+  return process_outputs(nullptr, self, unpacked_input, _inputs, std::move(raw_output), is_volatile);
   END_HANDLE_TH_ERRORS
 }
 
@@ -811,11 +812,8 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
   THPObjectPtr tensor_outputs(PyObject_CallObject(forward_fn, ctx_tensor_input));
   if (!tensor_outputs) return NULL;
 
-
-  THPObjectPtr outputs {process_outputs(ctx, unpacked_input, std::move(tensor_outputs),
-                                        is_volatile)};
-
-  trace_create(cls, ctx, inputs, outputs, unpacked_input.input_vars, *ctx->is_variable_input);
+  THPObjectPtr outputs {process_outputs(cls, ctx, unpacked_input, inputs,
+                                        std::move(tensor_outputs), is_volatile)};
 
   return outputs.release();
   END_HANDLE_TH_ERRORS
