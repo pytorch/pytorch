@@ -88,37 +88,31 @@ public:
 struct TensorType : public Type {
   friend struct Type;
   TensorType(const at::Tensor& tensor)
-    : Type(TypeKind::TensorType), scalar_type_(tensor.type().scalarType()) {
-      auto ndim = tensor.dim();
-      sizes_.resize(ndim);
-      strides_.resize(ndim);
-      // NOTE: This is not memcpy! These are assignments.
-      std::copy(tensor.sizes().begin(), tensor.sizes().end(), sizes_.begin());
-      std::copy(tensor.strides().begin(), tensor.strides().end(), strides_.begin());
-  }
-  TensorType(at::ScalarType type, const std::vector<int64_t> & sizes)
-  : Type(TypeKind::TensorType), scalar_type_(type), sizes_(sizes) {
-    strides_.resize(sizes_.size());
-    strides_.back() = 1;
-    for(size_t i = sizes_.size() - 1; i > 0; i--) {
-      strides_[i-1] = strides_[i]*sizes_[i];
-    }
-  }
+    : Type(TypeKind::TensorType)
+    , scalar_type_(tensor.type().scalarType())
+    , device_(tensor.type().isCuda() ? tensor.get_device() : -1)
+    , sizes_(tensor.sizes())
+    , strides_(tensor.strides()) {}
+public:
   static const TypeKind Kind = TypeKind::TensorType;
-  at::ScalarType scalarType() const {
-    return scalar_type_;
-  }
-  const std::vector<std::int64_t>& sizes() const {
-    return sizes_;
-  }
-  const std::vector<std::int64_t>& strides() const {
-    return strides_;
-  }
+
+  at::ScalarType scalarType() const { return scalar_type_; }
+  int device() const { return device_; }
+  const std::vector<std::int64_t>& sizes() const { return sizes_; }
+  const std::vector<std::int64_t>& strides() const { return strides_; }
+
   TypePtr contiguous() const {
-    return std::make_shared<TensorType>(scalar_type_,sizes_);
+    auto t = std::make_shared<TensorType>(*this);
+    t->strides_.resize(sizes_.size());
+    t->strides_.back() = 1;
+    for(size_t i = t->strides_.size() - 1; i > 0; i--) {
+      t->strides_[i-1] = t->strides_[i] * t->sizes_[i];
+    }
+    return t;
   }
 private:
   at::ScalarType scalar_type_;
+  int device_;
   std::vector<int64_t> sizes_;
   std::vector<int64_t> strides_;
 };

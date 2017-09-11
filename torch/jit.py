@@ -125,7 +125,6 @@ class Traceable(object):
             self._run_pass(torch._C._jit_pass_dce)
             if optimize:
                 self._run_pass(torch._C._jit_pass_onnx)
-                # TODO: fuse only when using CUDA
                 self._run_pass(torch._C._jit_pass_fuse)
 
             self.closure = torch._C._jit_createAutogradClosure(self.complete_trace)
