@@ -401,7 +401,7 @@ if WITH_DISTRIBUTED:
         ]
         extra_compile_args += ['-DWITH_DISTRIBUTED_MW']
     include_dirs += [tmp_install_path + "/include/THD"]
-    main_link_args += [THD_LIB]
+    main_link_args += [THD_LIB, THPP_LIB]
     if platform.system() == 'Linux':
         main_link_args += [GLOO_LIB]
 
