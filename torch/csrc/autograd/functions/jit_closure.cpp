@@ -709,7 +709,7 @@ variable_list AutogradClosure::apply(const variable_list& inputs) {
     return Variable(new VariableImpl(v.data(), v.requires_grad(), v.is_volatile()), false);
   });
   for (auto unique : desc->stages[stage].prev_stage_variables)
-    input_leaves.emplace_back(new VariableImpl(saved_vars.at(unique), true, false), false);
+    input_leaves.emplace_back(Variable(new VariableImpl(saved_vars.at(unique), true, false), false));
   input_leaves.emplace_back(Variable()); // for ConstantFactory
 
   auto& engine = python::PythonEngine::getDefaultEngine();
