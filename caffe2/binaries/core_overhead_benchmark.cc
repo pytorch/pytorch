@@ -171,6 +171,16 @@ static void BM_OperatorCreationCUDA(benchmark::State& state) {
 }
 BENCHMARK(BM_OperatorCreationCUDA);
 
+static void BM_RawAllocDeallocCPU(benchmark::State& state) {
+  while (state.KeepRunning()) {
+    // Allocating only 1 byte in order to measure the overhead.
+    auto ptr_and_deleter = GetCPUAllocator()->New(1);
+    // Deallocate.
+    ptr_and_deleter.second(ptr_and_deleter.first);
+  }
+}
+BENCHMARK(BM_RawAllocDeallocCPU);
+
 static void BM_TensorAllocDeallocCPU(benchmark::State& state) {
   Tensor<CPUContext> tensor;
   // small allocation
