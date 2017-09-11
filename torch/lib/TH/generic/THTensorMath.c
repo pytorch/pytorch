@@ -3201,10 +3201,7 @@ void THTensor_(linspace)(THTensor *r_, real a, real b, long n)
   }
 
   if(n == 1) {
-     TH_TENSOR_APPLY(real, r_,
-             *r__data = a;
-             i++;
-           );
+    THTensor_(set1d)(r_, 0, a);
   } else {
      TH_TENSOR_APPLY(real, r_,
              *r__data = a + i*(b-a)/((real)(n-1));
@@ -3224,10 +3221,7 @@ void THTensor_(logspace)(THTensor *r_, real a, real b, long n)
   }
 
   if(n == 1) {
-    TH_TENSOR_APPLY(real, r_,
-        *r__data = TH_MATH_NAME(pow)(10.0, a);
-        i++;
-        );
+    THTensor_(set1d)(r_, 0, TH_MATH_NAME(pow)(10.0, a));
   } else {
     TH_TENSOR_APPLY(real, r_,
         *r__data = TH_MATH_NAME(pow)(10.0, a + i*(b-a)/((real)(n-1)));
