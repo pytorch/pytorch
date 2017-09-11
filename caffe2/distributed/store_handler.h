@@ -17,14 +17,34 @@ class StoreHandler {
 
   virtual ~StoreHandler();
 
+  /*
+   * Set data for the key if it doesn't exist.
+   * If the key exists the data should be the same as the existing key.
+   */
   virtual void set(const std::string& name, const std::string& data) = 0;
 
+  /*
+   * Get the data for the key.
+   * The call should wait until the key is stored with default timeout
+   * and return data if set else fail.
+   */
   virtual std::string get(const std::string& name) = 0;
 
+  /*
+   * Does an atomic add operation on the key and returns the latest updated
+   * value.
+   * Note: To access the current value for this counter call with value = 0
+   */
   virtual int64_t add(const std::string& name, int64_t value) = 0;
 
+  /*
+   * Check if a keys exist in the store.
+   */
   virtual bool check(const std::vector<std::string>& names) = 0;
 
+  /*
+   * Wait for Keys to be stored.
+   */
   virtual void wait(
       const std::vector<std::string>& names,
       const std::chrono::milliseconds& timeout = kDefaultTimeout) = 0;
