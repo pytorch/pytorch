@@ -405,6 +405,7 @@ main_sources = [
     "torch/csrc/autograd/functions/init.cpp",
     "torch/csrc/autograd/functions/onnx/convolution.cpp",
     "torch/csrc/autograd/functions/onnx/batch_normalization.cpp",
+    "torch/csrc/autograd/functions/onnx/basic_ops.cpp",
     "torch/csrc/onnx/onnx.pb.cpp",
     "torch/csrc/onnx/onnx.cpp",
 ]

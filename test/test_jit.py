@@ -5,6 +5,7 @@ import torch.nn.functional as F
 import unittest
 from itertools import product
 from torch.autograd import Variable, Function
+from torch.autograd.function import traceable
 from common import TestCase, run_tests
 import io
 
@@ -119,6 +120,27 @@ class TestJit(TestCase):
         z2 = traced(x, y)
         self.assertEqual(z, torch.sigmoid(torch.tanh(x * (x + y))))
         self.assertEqual(z, z2)
+
+    def test_assign_traces(self):
+        """Check that output Variables are assign traces before they are saved."""
+        @traceable
+        class MyFn(Function):
+            @staticmethod
+            def forward(ctx, a):
+                out = a * 2
+                ctx.save_for_backward(out)
+                return out
+
+            @staticmethod
+            def backward(ctx, grad_a):
+                a, = ctx.saved_variables
+                return a * grad_a
+
+        x = Variable(torch.randn(10, 10), requires_grad=True)
+        trace, out = torch.jit.record_trace(MyFn.apply, x)
+        out.sum().backward()
+        torch._C._jit_pass_dce(trace)
+        self.assertExpected(str(trace))
 
     def test_traced_module(self):
         input = Variable(torch.randn(3, 10))

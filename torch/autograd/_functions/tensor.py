@@ -2,7 +2,7 @@ from functools import reduce
 import torch
 from torch._utils import _accumulate
 
-from ..function import Function, InplaceFunction, once_differentiable
+from ..function import Function, InplaceFunction, once_differentiable, traceable
 from ..variable import Variable
 from .utils import maybe_unexpand
 
@@ -92,6 +92,7 @@ class NoGrad(Function):
     __call__ = _do_forward
 
 
+@traceable
 class Transpose(Function):
 
     @staticmethod
@@ -596,6 +597,7 @@ class Topk(_MultiSelectionFunction):
         return _MultiSelectionFunction.forward(ctx, input, dim, return_indices, args)
 
 
+@traceable
 class Chunk(Function):
 
     @staticmethod

@@ -1,9 +1,9 @@
 graph(%1 : UNKNOWN_TYPE
       %2 : UNKNOWN_TYPE) {
-  %4 : Double(1), %5 : Handle = Add[note=from_pyop, some_value=1](%1, %2), uses = [[%6.i1], []];
-  %7 : Double(1), %8 : Handle = Mul[note=from_pyop, some_value=0](%1, %4), uses = [[%9.i0], []];
-  %10 : Double(1), %11 : Handle = Tanh[note=from_pyop, some_value=0](%7), uses = [[%12.i0], []];
-  %13 : Double(1), %14 : Handle = Sigmoid[note=from_pyop, some_value=0](%10), uses = [[%0.i0], []];
-  %15 : UNKNOWN_TYPE = TensorTest[a=<Tensor>](), uses = [];
-  return (%13);
+  %4 : Double(1) = Add[note=from_pyop, some_value=1](%1, %2), uses = [[%5.i1]];
+  %6 : Double(1) = Mul[note=from_pyop, some_value=0](%1, %4), uses = [[%7.i0]];
+  %8 : Double(1) = Tanh[note=from_pyop, some_value=0](%6), uses = [[%9.i0]];
+  %10 : Double(1) = Sigmoid[note=from_pyop, some_value=0](%8), uses = [[%0.i0]];
+  %11 : UNKNOWN_TYPE = TensorTest[a=<Tensor>](), uses = [];
+  return (%10);
 }

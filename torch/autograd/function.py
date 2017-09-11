@@ -159,6 +159,9 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixi
     # only for backward compatibility
     __call__ = _C._FunctionBase._do_forward
 
+    # for the tracer
+    is_traceable = False
+
     @staticmethod
     def forward(*args, **kwargs):
         """Performs the operation.
@@ -217,6 +220,21 @@ def once_differentiable(fn):
         return err_fn(*[Variable(o, **kwargs) if o is not None else None
                       for o in outputs])
     return wrapper
+
+
+def traceable(fn_cls):
+    """Marks Function as traceable for the JIT.
+
+    Traceable functions have additional restrictions - they can't pass any
+    data-dependent values to backward (e.g. Prod passes the output, which makes
+    it non-traceable), and their backward should be implemented entirely in terms
+    of operations on autograd Variables in all cases (even when grads are volatile).
+
+    DON'T USE THIS DECORATOR. IT IS FOR INTERNAL USE ONLY AND SHOULD BE HANDLED WITH
+    CARE (or can give incorrect results otherwise).
+    """
+    fn_cls.is_traceable = True
+    return fn_cls
 
 
 class InplaceFunction(Function):
