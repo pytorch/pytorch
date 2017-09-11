@@ -15,7 +15,8 @@ void InputBuffer::add(size_t pos, Variable var) {
   }
   auto& item = buffer[pos];
   if (!item.first.defined()) {
-    buffer[pos] = std::make_pair<>(std::move(var), var.current_version());
+    auto current_version = var.current_version();
+    buffer[pos] = std::make_pair<>(std::move(var), current_version);
   } else {
     auto result = apply_fn<Add>()(item.first, std::move(var));
     buffer[pos] = std::make_pair<>(std::move(result), 0);
