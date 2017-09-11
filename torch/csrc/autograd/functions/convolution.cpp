@@ -55,7 +55,7 @@ auto ConvParams::is_output_padding_neg() const -> bool {
 
 auto ConvParams::is_output_padding_big() const -> bool {
   bool is_big = false;
-  for (int i = 0; i < output_padding.size(); i++) {
+  for (size_t i = 0; i < output_padding.size(); i++) {
     is_big |= (output_padding[i] >= stride[i] || output_padding[i] >= dilation[i]);
   }
   return is_big;
