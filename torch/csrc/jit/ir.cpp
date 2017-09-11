@@ -40,8 +40,8 @@ std::ostream& operator<<(std::ostream & out, const node_list & nodes) {
 }
 
 static std::ostream& operator<<(std::ostream & out, THPObjectPtr& obj) {
-   THPObjectPtr repr { PyObject_Repr(obj.get()) };
-   return out << THPUtils_unpackString(repr.get());
+   THPObjectPtr str { PyObject_Str(obj.get()) };
+   return out << THPUtils_unpackString(str.get());
 }
 
 std::string PythonOp::name() {
