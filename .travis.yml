@@ -24,6 +24,7 @@ install:
     - travis_retry pip install --upgrade pip setuptools wheel
     - travis_retry pip install -r requirements.txt --only-binary=scipy
     - git submodule update --init --recursive
+    - python setup.py clean
     - MAX_JOBS=8 python setup.py install
 
 addons:
