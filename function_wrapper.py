@@ -82,22 +82,6 @@ if(${check_name}.type().isSparse()) {
     return static_cast<Type*>(this)->${method_prefix}${api_name}(${sparse_actuals});
 }""")
 
-WRAP_DIM_GEN = CodeTemplate("""\
-auto ${target}${dim}_ = std::max<${type}>(${target_dim_expr}, 0);
-if (${target}${dim}_ <= 0) {
-  std::ostringstream oss;
-  oss << "dimension specified as " << ${dim} << " but tensor has no dimensions";
-  throw std::runtime_error(oss.str());
-}
-if (${dim} < -(${target}${dim}_) || ${dim} >= (${target}${dim}_)) {
-  std::ostringstream oss;
-  oss << "dimension out of range (expected to be in range of [" << -(${target}${dim}_)
-      << ", " << (${target}${dim}_)-1 << "], but got " << ${dim} << ")",
-  throw std::runtime_error(oss.str());
-}
-if (${dim}  < 0) ${dim} += ${target}${dim}_;
-""")
-
 
 class NYIError(Exception):
     """Indicates we don't support this declaration yet"""
@@ -596,9 +580,7 @@ def create_derived(backend_type_env, declarations):
                 wrap_dim_target = wrap_dim_params[0]
                 wrap_dim_params[0] = "{}->dim()".format(wrap_dim_target)
                 wrap_dim_expr = "+".join(wrap_dim_params)
-                body.append(WRAP_DIM_GEN.substitute(
-                    target=wrap_dim_target, dim=arg['name'], target_dim_expr=wrap_dim_expr,
-                    type=DYNAMIC_TYPE[arg['type']]))
+                body.append("{} = maybe_wrap_dim({}, {});".format(arg['name'], arg['name'], wrap_dim_expr))
 
             # only generated checked casts the first time we see it
             if not arg['name'] in seen_names and requires_checked_cast(arg):
