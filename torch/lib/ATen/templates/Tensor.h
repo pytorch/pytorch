@@ -126,7 +126,7 @@ struct Tensor {
   template<typename T>
   T * data() const;
 
-  void * unsafeGetTH(bool retain) {
+  void * unsafeGetTH(bool retain) const {
     return pImpl->unsafeGetTH(retain);
   }
 

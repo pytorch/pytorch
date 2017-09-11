@@ -13,7 +13,7 @@ namespace at {
 
 class Scalar {
 public:
-  Scalar() : Scalar(0L) {}
+  Scalar() : Scalar(int64_t(0)) {}
 
   explicit Scalar(const Tensor & t)
   : tag(Tag::HAS_t), t(t) {

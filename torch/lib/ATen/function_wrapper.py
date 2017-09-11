@@ -350,12 +350,14 @@ def create_generic(top_env, declarations):
 
         return broadcast_actuals
 
+    excluded_names = set()
+
     def process_option(option, output_options):
         option['inplace'] = re.search(
             '(^__i|[^_]_$)', option['api_name']) is not None
 
         if re.match(EXCLUDE_PATTERN, option['name']):
-            print("Excluding {}".format(option['name']))
+            excluded_names.add(option['name'])
             raise NYIError("NYI")
 
         # print(yaml.dump(option))
@@ -463,6 +465,7 @@ def create_generic(top_env, declarations):
             except NYIError:
                 option['skip'] = True
         output_declarations.extend(output_options)
+    print("ATen Excluded: {}".format(excluded_names))
     return output_declarations
 
 
@@ -573,6 +576,17 @@ def create_derived(backend_type_env, declarations):
             if arg['type'] == 'THSize*':
                 scalar_check_is_from_size = True
                 scalar_check = '{}.size() == 0'.format(arg['name'])
+
+            wrap_dim_arg = arg.get('wrap_dim', None)
+            if wrap_dim_arg is not None:
+                # wrap_dim specification can have (add) expressions, e.g. self+1
+                wrap_dim_params = wrap_dim_arg.split("+")
+                wrap_dim_params[0] = wrap_dim_params[0] + "_"
+                wrap_dim_target = wrap_dim_params[0]
+                wrap_dim_params[0] = "{}->dim()".format(wrap_dim_target)
+                wrap_dim_expr = "+".join(wrap_dim_params)
+                body.append("{} = maybe_wrap_dim({}, {});".format(arg['name'], arg['name'], wrap_dim_expr))
+
             # only generated checked casts the first time we see it
             if not arg['name'] in seen_names and requires_checked_cast(arg):
                 seen_names.add(arg['name'])

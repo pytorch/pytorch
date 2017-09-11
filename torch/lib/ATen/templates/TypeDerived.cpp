@@ -9,6 +9,7 @@
 #include "ATen/Utils.h"
 #include "ATen/THLongStorageView.h"
 #include <iostream>
+#include <sstream>
 
 namespace at {
 
