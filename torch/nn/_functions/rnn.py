@@ -3,6 +3,7 @@ from torch.autograd import Function, NestedIOFunction, Variable
 import torch.backends.cudnn as cudnn
 from .. import functional as F
 from .thnn import rnnFusedPointwise as fusedBackend
+import itertools
 
 try:
     import torch.backends.cudnn.rnn
@@ -64,6 +65,12 @@ def GRUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
     return hy
 
 
+if hasattr(itertools, 'izip'):
+    izip = itertools.izip
+else:
+    izip = zip
+
+
 def StackedRNN(inners, num_layers, lstm=False, dropout=0, train=True):
 
     num_directions = len(inners)
@@ -74,7 +81,11 @@ def StackedRNN(inners, num_layers, lstm=False, dropout=0, train=True):
         next_hidden = []
 
         if lstm:
-            hidden = list(zip(*hidden))
+            # NB: Be sure to use the generator version of zip here in
+            # Python 2, since the evaluation order differs (Python 2
+            # evaluates all of the first argument, and then evaluates
+            # all of the second argument; generator version interleaves.)
+            hidden = list(izip(*hidden))
 
         for i in range(num_layers):
             all_output = []

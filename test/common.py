@@ -283,7 +283,7 @@ class TestCase(unittest.TestCase):
                 return text[len(prefix):]
             return text
         munged_id = remove_prefix(self.id(), "__main__.")
-        expected_file = os.path.join(os.path.dirname(os.path.realpath(__file__)),
+        expected_file = os.path.join(os.path.dirname(os.path.realpath(__main__.__file__)),
                                      "expect",
                                      munged_id)
         if subname:
