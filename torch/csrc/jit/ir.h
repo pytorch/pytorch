@@ -952,11 +952,17 @@ struct CppOp : public Node {
   std::shared_ptr<torch::autograd::Function> fn;
   std::string name();
   CppOp* init(std::shared_ptr<torch::autograd::Function> fn) {
+    JIT_ASSERT(fn);
     this->fn = std::move(fn);
     return this;
   }
   virtual Node * allocNewInstance(Graph * g) override {
     return new CppOp(g);
+  }
+  virtual void cloneFrom(Node * other_) override {
+    Node::cloneFrom(other_);
+    auto other = other_->cast<CppOp>();
+    this->fn = other->fn;
   }
 };
 inline Node * Graph::createCppOp(const std::shared_ptr<torch::autograd::Function> & fn) {
