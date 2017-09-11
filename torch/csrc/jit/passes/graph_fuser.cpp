@@ -28,8 +28,12 @@ struct GraphFuser {
   GraphFuser(std::shared_ptr<Graph>& graph)
   : graph(graph) {}
 
+  bool isCuda(Node * node) {
+    return node->type()->expect<TensorType>()->device() != -1;
+  }
+
   bool isFusable(Node * node) {
-    return isSimpleMap(node) || node->kind() == kFusionGroup;
+    return (isSimpleMap(node) && isCuda(node)) || node->kind() == kFusionGroup;
   }
 
   // necessary condition for fusion. If all of the uses of producer are consumer

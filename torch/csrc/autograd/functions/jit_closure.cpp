@@ -259,8 +259,9 @@ struct FusionGroupFunction : public Function {
       outputs.push_back(at::CUDA(od.scalar_type).tensor(data.back().sizes()));
     }
     function->launch(data, outputs);
-    // TODO: use wrap_outputs to properly build the graph
-    throw std::runtime_error("FusionGroupFunction not implemented yet");
+    return fmap(outputs, [](const at::Tensor& t) {
+      return std::make_shared<Variable>(t, false, false);
+    });
   }
 private:
   std::shared_ptr<CompiledFusionFunction> function;
@@ -495,8 +496,9 @@ struct StageClosure {
 #undef IR_ELSEIF_TRIVIAL
     IR_ELSEIF(FusionGroup)
 #ifdef WITH_CUDA
+      // TODO: make this more robust - handle device and contiguity changes!
       auto fusion_fn = sharedFusionCompiler().getOrCompile(*value->g(kSubgraph));
-      return std::make_shared<FusionGroupFunction>(fusion_fn);
+      return std::make_shared<FusionGroupFunction>(std::move(fusion_fn));
 #else
       throw std::runtime_error("don't know how to execute FusionGroups without CUDA");
 #endif

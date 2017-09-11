@@ -1,6 +1,7 @@
 import torch
 import torch.jit
 import torch.nn as nn
+import torch.nn.functional as F
 import unittest
 from itertools import product
 from torch.autograd import Variable, Function
@@ -29,19 +30,32 @@ class TestJit(TestCase):
         torch._C._jit_pass_lint(trace)
         torch._C._jit_pass_onnx(trace)
         torch._C._jit_pass_lint(trace)
-        torch._C._jit_pass_fuse(trace)
-        torch._C._jit_pass_lint(trace)
 
         self.assertExpected(str(trace))
 
-    def test_lstm(self):
-        # Careful: don't use fused backend (enabled with CUDA)
-        # Pasted from test_LSTM_cell
-        input = Variable(torch.randn(3, 10))
-        hx = Variable(torch.randn(3, 20))
-        cx = Variable(torch.randn(3, 20))
+    @unittest.skipIf(not torch.cuda.is_available(), "fuser requires CUDA")
+    def test_lstm_fusion(self):
+        input = Variable(torch.randn(3, 10).cuda())
+        hx = Variable(torch.randn(3, 20).cuda())
+        cx = Variable(torch.randn(3, 20).cuda())
+        module = nn.LSTMCell(10, 20).cuda()  # Just to allocate weights with correct sizes
+
+        def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
+            hx, cx = hidden
+            gates = F.linear(input, w_ih, b_ih) + F.linear(hx, w_hh, b_hh)
+
+            ingate, forgetgate, cellgate, outgate = gates.chunk(4, 1)
+            ingate = F.sigmoid(ingate)
+            forgetgate = F.sigmoid(forgetgate)
+            cellgate = F.tanh(cellgate)
+            outgate = F.sigmoid(outgate)
+
+            cy = (forgetgate * cx) + (ingate * cellgate)
+            hy = outgate * F.tanh(cy)
+            return hy, cy
+
         trace, _ = torch.jit.record_trace(
-            nn.LSTMCell(10, 20), input, (hx, cx))
+            LSTMCell, input, (hx, cx), *module.parameters())
         torch._C._jit_pass_lint(trace)
         torch._C._jit_pass_onnx(trace)
         torch._C._jit_pass_lint(trace)
@@ -63,8 +77,6 @@ class TestJit(TestCase):
             a_function, input, (hx, cx), parameters=lstm.parameters())
         torch._C._jit_pass_lint(trace)
         torch._C._jit_pass_onnx(trace)
-        torch._C._jit_pass_lint(trace)
-        torch._C._jit_pass_fuse(trace)
         torch._C._jit_pass_lint(trace)
         self.assertExpected(str(trace))
 
