@@ -144,6 +144,7 @@ class TestAutograd(TestCase):
             y.backward(go2)
 
             # That's the only case when we can accumulate in-place
+            # TODO: reconsider this logic (see accumulate_grad.cpp)
             if start_volatile:
                 expected_grad = x_grad_clone * 2
             else:

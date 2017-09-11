@@ -21,7 +21,7 @@ struct InputBuffer {
   InputBuffer(InputBuffer&& other) = default;
 
   // Accumulates the variable at a specified index.
-  void add(size_t idx, const Variable& var);
+  void add(size_t idx, Variable var);
 
   int device() const;
 

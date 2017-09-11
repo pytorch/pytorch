@@ -135,7 +135,7 @@ static at::Tensor subtensor(at::Tensor& tensor, int dim, int groups, int g) {
   return tensor.narrow(dim, n * g, n).contiguous();
 }
 
-static Variable subvariable(Variable var, int dim, int groups, int g) {
+static Variable subvariable(const Variable& var, int dim, int groups, int g) {
   int64_t n = var.sizes()[dim] / groups;
   auto result = apply_fn<Narrow>(dim, n * g, n)(var);
   return result;
@@ -164,11 +164,7 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
 
   auto input = inputs[0].data().contiguous();
   auto weight = inputs[1].data();
-
-  Tensor bias;
-  if (inputs[2].defined()) {
-    bias = inputs[2].data();
-  }
+  auto bias = inputs[2].opt_data();
 
   int k = input.ndimension();
   if (k == 3) {

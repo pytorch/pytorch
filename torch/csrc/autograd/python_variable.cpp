@@ -19,6 +19,8 @@ using namespace torch::autograd;
 
 PyObject *THPVariableClass = NULL;
 
+// Creates a new Python object for a Variable. The Variable must not already
+// have a PyObject* associated with it.
 static PyObject* THPVariable_NewWithVar(PyTypeObject* type, const Variable& var)
 {
   PyObject* obj = type->tp_alloc(type, 0);
@@ -47,11 +49,13 @@ PyObject * THPVariable_Wrap(const Variable& var)
     return obj;
   }
 
-  PyObject* obj = THPVariable_NewWithVar((PyTypeObject *)THPVariableClass, var);
+  THPObjectPtr obj(THPVariable_NewWithVar((PyTypeObject *)THPVariableClass, var));
   if (obj) {
-    ((THPVariable*)obj)->data = torch::createPyObject(var.data());
+    PyObject* data = torch::createPyObject(var.data());
+    if (!data) return NULL;
+    ((THPVariable*)obj.get())->data = data;
   }
-  return obj;
+  return obj.release();
 }
 
 // This function DOES NOT steal a reference to data

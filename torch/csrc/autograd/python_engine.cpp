@@ -10,7 +10,6 @@
 #include <unordered_set>
 
 using namespace torch::autograd;
-using at::Tensor;
 
 struct THPEngine {
     PyObject_HEAD

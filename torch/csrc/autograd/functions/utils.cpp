@@ -14,9 +14,7 @@ variable_list wrap_outputs(const variable_list& inputs, tensor_list&& outputs,
   if (flags.is_volatile) {
     for (auto& output : outputs) {
       if (output.defined()) {
-        auto pImpl = new VariableTensor(output);
-        pImpl->is_volatile = true;
-        result.emplace_back(pImpl, false);
+        result.emplace_back(new VariableTensor(output, false, true), false);
       } else {
         result.emplace_back();
       }

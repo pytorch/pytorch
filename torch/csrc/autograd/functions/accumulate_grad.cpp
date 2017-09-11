@@ -22,8 +22,6 @@ auto AccumulateGrad::apply(const variable_list& grads) -> variable_list {
 
   if (!grads[0].defined())
     return {};
-  if (!variable.defined())
-    throw std::logic_error("leaf variable was freed");
   if (variable.grad_fn())
     throw std::logic_error("leaf variable has been moved into the graph interior");
   if (variable.current_version() != 0)
@@ -33,6 +31,10 @@ auto AccumulateGrad::apply(const variable_list& grads) -> variable_list {
   for (auto& hook : variable.hooks()) {
     new_grad = (*hook)({new_grad})[0];
   }
+
+  // TODO: Currently if var.grad is volatile and new-grad is non-volatile we
+  // accumulate in-place. We should reconsider this and perhaps add the
+  // gradients out-of-place.
 
   auto& grad = variable.grad();
   if (!grad.defined()) {
@@ -50,7 +52,7 @@ auto AccumulateGrad::apply(const variable_list& grads) -> variable_list {
       grad.data() += new_grad.data();
     }
   } else {
-    // Once the grad becomes not volatile, it should stay like that
+    // If grad is non-volatile, it should stay like that
     if (new_grad.is_volatile()) {
       new_grad = Variable(new VariableTensor(new_grad.data()), false);
     }

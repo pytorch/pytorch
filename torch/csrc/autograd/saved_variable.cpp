@@ -8,22 +8,23 @@ namespace torch { namespace autograd {
 
 SavedVariable::SavedVariable(const Variable& variable, Function* saved_for)
   : SavedVariable() {
-  if (variable.defined()) {
-    data = variable.data();
-    requires_grad = variable.requires_grad();
-    is_volatile = variable.is_volatile();
-    expected_version = variable.current_version();
-    version = variable.get()->version_counter->new_saved_ref();
-    has_grad_fn = variable.grad_fn() != nullptr;
-    if (!has_grad_fn) {
-      grad_accumulator = variable.grad_accumulator();
-    }
-    if (variable.grad_fn().get() != saved_for) {
-      grad_fn = variable.grad_fn();
-    }
-    if (variable.tracing_state()) {
-      tracing_state.reset(new jit::tracer::ValueTracingState(*variable.tracing_state()));
-	  }
+  if (!variable.defined()) {
+    return;
+  }
+  data = variable.data();
+  requires_grad = variable.requires_grad();
+  is_volatile = variable.is_volatile();
+  expected_version = variable.current_version();
+  version = variable.get()->version_counter->new_saved_ref();
+  has_grad_fn = variable.grad_fn() != nullptr;
+  if (!has_grad_fn) {
+    grad_accumulator = variable.grad_accumulator();
+  }
+  if (variable.grad_fn().get() != saved_for) {
+    grad_fn = variable.grad_fn();
+  }
+  if (variable.tracing_state()) {
+    tracing_state.reset(new jit::tracer::ValueTracingState(*variable.tracing_state()));
   }
 }
 
@@ -42,9 +43,7 @@ auto SavedVariable::unpack(std::shared_ptr<Function> saved_for) const -> Variabl
         "inplace operation");
   }
 
-  Variable var(new VariableTensor(data), false);
-  var.set_requires_grad(requires_grad);
-  var.set_volatile(is_volatile);
+  Variable var(new VariableTensor(data, requires_grad, is_volatile), false);
   if (has_grad_fn && !grad_fn) {
     if (!saved_for) {
       // If saving the grad_fn would create a circular reference, then it must
