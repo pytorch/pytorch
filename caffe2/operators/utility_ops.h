@@ -1391,7 +1391,8 @@ class UnsafeCoalesceOp final : public Operator<Context> {
 
       Output(i)->ResizeLike(Input(i));
       Output(i)->ShareExternalPointer(
-          coalesced->template mutable_data<uint8_t>() + coalesced_offset,
+          static_cast<void*>(
+              coalesced->template mutable_data<uint8_t>() + coalesced_offset),
           Input(i).meta(),
           input_nbytes);
       coalesced_offset += roundToAlignment(input_nbytes);
