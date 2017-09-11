@@ -63,9 +63,35 @@ class BatchOneHotOp final : public Operator<Context> {
   }
 
   template <typename T>
-  bool DoRunWithType();
+  bool DoRunWithType() {
+    auto& input = Input(X);
+    auto& lens = Input(LENS);
+    auto& vals = Input(VALS);
+    CAFFE_ENFORCE_GE(input.ndim(), 2);
+    auto batch_size = input.dim(0);
+    auto in_dim = input.size_from_dim(1);
+    CAFFE_ENFORCE_GE(in_dim, 1);
+    CAFFE_ENFORCE_GE(batch_size, 1);
+    CAFFE_ENFORCE_EQ(lens.size(), in_dim);
+
+    auto output = Output(ONE_HOT);
+    output->Resize(batch_size, vals.size());
+    if (output->size() == 0) {
+      return true;
+    }
+    return DoBatchOneHotOp<T>(batch_size, in_dim, input, lens, vals, output);
+  }
 
  protected:
+  template <typename T>
+  bool DoBatchOneHotOp(
+      TIndex batch_size,
+      TIndex in_dim,
+      const Tensor<Context>& input,
+      const Tensor<Context>& lens,
+      const Tensor<Context>& vals,
+      Tensor<Context>* output);
+
   INPUT_TAGS(X, LENS, VALS);
   OUTPUT_TAGS(ONE_HOT);
 };
