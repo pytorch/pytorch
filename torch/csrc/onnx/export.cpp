@@ -18,10 +18,6 @@ namespace py = pybind11;
 
 namespace torch { namespace jit {
 
-std::string node_name(Node* n) {
-  return n->uniqueName();
-}
-
 // transform PythonOps and Cpp Ops into Node's that match ONNX
 // semantics.
 // Eventually this should just be part of init_pass but we should avoid
@@ -218,7 +214,11 @@ static void encodeTensor(onnx::TensorProto * p, const at::Tensor & tensor) {
     at::Tensor cont = tensor.toType(at::CPU(at_type)).contiguous();
     p->set_raw_data(cont);
 }
-static void encodeGraph(onnx::GraphProto * p_g, std::shared_ptr<Graph> & g, const std::vector<at::Tensor> & initializers);
+static void encodeGraph(onnx::GraphProto * p_g, std::shared_ptr<Graph> & g,
+  const std::vector<std::string> & input_names,
+  const std::vector<std::string> & output_names,
+  const std::vector<at::Tensor> & initializers);
+
 static void addAttribute(onnx::NodeProto * n_p, jit::Node * n, jit::Symbol name) {
   auto attr = n_p->add_attribute();
   attr->set_name(jit::symbolToString(name));
@@ -256,18 +256,46 @@ static void addAttribute(onnx::NodeProto * n_p, jit::Node * n, jit::Symbol name)
       break;
     case AttributeKind::g: {
       auto g = attr->mutable_g();
-      encodeGraph(g, n->g(name), {});
+      encodeGraph(g, n->g(name), {}, {}, {});
     } break;
     case AttributeKind::gs:
       for(auto & v : n->gs(name)) {
         auto g = attr->add_graphs();
-        encodeGraph(g, v, {});
+        encodeGraph(g, v, {}, {}, {});
       }
       break;
   }
 }
 
-static void encodeGraph(onnx::GraphProto * p_g, std::shared_ptr<Graph> & g, const std::vector<at::Tensor> & initializers) {
+
+static void encodeGraph(onnx::GraphProto * p_g, std::shared_ptr<Graph> & g,
+  const std::vector<std::string> & input_names,
+  const std::vector<std::string> & output_names,
+  const std::vector<at::Tensor> & initializers) {
+
+  std::unordered_map<Node *, std::string> node_names;
+  auto initNames = [&](const node_list & nodes, const std::vector<std::string> & names) {
+    JIT_ASSERT(names.size() <= nodes.size());
+    size_t idx = nodes.size() - names.size();
+    for (auto & name : names) {
+      auto node = nodes.at(idx++);
+      auto it = node_names.find(node);
+      // rarely, output nodes may be repeated
+      // if this happens, we just take the first name we find for it as its name
+      if(it == node_names.end()) {
+        node_names[node] = name;
+      }
+    }
+  };
+  initNames(g->inputs(), input_names);
+  initNames(g->outputs(), output_names);
+  auto node_name = [&](Node * n) {
+    auto it = node_names.find(n);
+    if(it != node_names.end())
+      return it->second;
+    return "$" + n->uniqueName();
+  };
+
   for (auto input : g->inputs()) {
     p_g->add_input(node_name(input));
   }
@@ -322,7 +350,7 @@ std::string ExportGraph(std::shared_ptr<Graph>& g_,
   g->lint();
   onnx::GraphProto p_g;
   p_g.set_name("torch-jit-export");
-  encodeGraph(&p_g, g, initializers);
+  encodeGraph(&p_g, g, input_names, output_names, initializers);
   size_t out_size;
   pb_get_encoded_size(&out_size, onnx_GraphProto_fields, &p_g.proto);
   std::string out(out_size, '\0');

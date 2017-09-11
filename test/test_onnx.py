@@ -86,5 +86,17 @@ class TestONNX(TestCase):
         x = Variable(torch.randn(20, 16, 50))
         self.assertONNXExpected(export_to_string(nn.MaxPool1d(3, stride=2), x))
 
+    def test_names(self):
+        x = Variable(torch.Tensor([[1, 2], [3, 4]]), requires_grad=True)
+        y = Variable(torch.Tensor([[1, 2], [3, 4]]), requires_grad=True)
+
+        class M(nn.Module):
+            def forward(self, x, y):
+                return -torch.sigmoid(torch.tanh(x * (x + y)))
+
+        f = io.BytesIO()
+        torch.onnx.export(M(), (x, y), f, input_names=["x", "y"], output_names="z")
+        self.assertONNXExpected(f.getvalue())
+
 if __name__ == '__main__':
     run_tests()

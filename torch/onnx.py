@@ -13,6 +13,12 @@ import collections
 from ._utils import _range
 
 
+def _no_reserved(names):
+    for n in names:
+        if n.startswith('$'):
+            raise ValueError("exported names cannot begin with '$' but found '{}'".format(n))
+
+
 def export(model, args, f, export_params=True, kwargs=None, verbose=False,
            input_names=(), output_names=()):
     """
@@ -33,17 +39,23 @@ def export(model, args, f, export_params=True, kwargs=None, verbose=False,
         export_params (bool, default True): if specified, all parameters will
             be exported.  Set this to False if you are exporting an
             untrained model.
-        input_names (list, default []): if specified, a list of strings which
+        input_names (list, default ()): if specified, a list of strings which
         will be used in ONNX as the names of the inputs of the model.
-        output_names (list, default []): if specified, a list of strings which
-        will be used in ONNX as the name sof the outputs of the output.
+        output_names (list, default ()): if specified, a list of strings which
+        will be used in ONNX as the name of the outputs of the output.
         kwargs (dict, optional): keyword inputs to the model.
     """
-    _export(model, args, f, export_params, kwargs, verbose)
+    _export(model, args, f, export_params, kwargs, verbose, input_names, output_names)
 
 
 def _export(model, args, f, export_params=True, kwargs=None, verbose=False,
             input_names=(), output_names=()):
+
+    if (len(set(input_names) | set(output_names)) != len(input_names) + len(output_names)):
+        raise ValueError("duplicate definition of a name in input_names ({}) and output_names ({})".
+                         format(input_names, output_names))
+    _no_reserved(input_names)
+    _no_reserved(output_names)
     # Special case for common case of passing a single Variable
     if isinstance(args, torch.autograd.Variable):
         args = (args, )
