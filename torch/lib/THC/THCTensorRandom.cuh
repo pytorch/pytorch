@@ -92,7 +92,7 @@ condDiv(T *q, long *J, long inputsize, T q_max) {
 // Normalizes the L1 norm of every row to 1; used by multinomial
 template <typename T>
 __global__ void renormRowsL1(T* dist, long rows, long cols) {
-  extern __shared__ __align__(sizeof(T)) unsigned char my_smem[];
+  extern __shared__  unsigned char my_smem[];
   T *smem = reinterpret_cast<T *>(my_smem);
 
   for (long row = blockIdx.x; row < rows; row += gridDim.x) {
@@ -153,7 +153,7 @@ sampleMultinomialOnce(long* dest,
                       int categories,
                       T* sampled,
                       T* dist) {
-  extern __shared__ __align__(sizeof(AccT)) unsigned char my_smem[];
+  extern __shared__  unsigned char my_smem[];
   __shared__ bool found;
 
   // Shared Memory hold blockdim.x T for holding the cumulative sum,
