@@ -160,24 +160,24 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     THPUtils_assert(THPVariable_Check(_variable), "element %d of variables "
         "tuple is not a Variable", i);
     auto& variable = ((THPVariable*)_variable)->cdata;
-    THPUtils_assert(!variable->is_volatile,
+    THPUtils_assert(!variable.is_volatile(),
         "element %d of variables tuple is volatile", i);
     // If grad_fn is NULL (as is the case for a leaf node), we instead
     // interpret the gradient function to be a grad accumulator,
     // which will accumulate its inputs into the grad property of the
     // variable. These nodes get suppressed in some situations,
     // see "suppress grad accumulation" below.
-    auto grad_fn = variable->grad_fn ? variable->grad_fn : variable->get_grad_accumulator();
-    int output_nr = variable->grad_fn ? variable->output_nr : 0;
+    auto grad_fn = variable.grad_fn() ? variable.grad_fn() : variable.grad_accumulator();
+    int output_nr = variable.grad_fn() ? variable.output_nr() : 0;
     roots[i] = std::make_pair<>(std::move(grad_fn), output_nr);
 
     PyObject *grad = PyTuple_GET_ITEM(grad_variables, i);
     if (THPVariable_Check(grad)) {
-      grads[i] = Variable(((THPVariable*)grad)->cdata, true);
+      grads[i] = ((THPVariable*)grad)->cdata;
     } else {
       THPUtils_assert(grad == Py_None,
           "element %d of gradients tuple is not a Variable or None", i);
-      THPUtils_assert(!variable->requires_grad,
+      THPUtils_assert(!variable.requires_grad(),
           "element %d of gradients tuple is None, but the corresponding Variable requires grad");
     }
   }
@@ -195,13 +195,13 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
       THPUtils_assert(THPVariable_Check(input),
           "all inputs have to be Variables, but got %s", THPUtils_typename(input));
       THPVariable *input_var = (THPVariable*)input;
-      auto grad_fn = input_var->cdata->grad_fn;
-      int output_nr = input_var->cdata->output_nr;
+      auto grad_fn = input_var->cdata.grad_fn();
+      int output_nr = input_var->cdata.output_nr();
       bool is_leaf = !grad_fn;
       if (is_leaf) {
-          grad_fn = input_var->cdata->grad_accumulator.lock();
+          grad_fn = input_var->cdata.get()->grad_accumulator.lock();
       }
-      if (input_var->cdata->requires_grad) {
+      if (input_var->cdata.requires_grad()) {
         THPUtils_assert(grad_fn, "One of the differentiated Variables appears to not have "
             "been used in the graph");
       }

@@ -27,7 +27,7 @@ namespace pybind11 { namespace detail {
     bool load(handle src, bool) {
       PyObject *source = src.ptr();
       if (THPVariable_Check(source)) {
-        value = TraceInput(Variable(((THPVariable*)source)->cdata, true));
+        value = TraceInput(((THPVariable*)source)->cdata);
         return true;
       } else if (THPModule_isTensor(source)) {
         value = TraceInput(torch::createTensor(source));
@@ -51,7 +51,7 @@ namespace pybind11 { namespace detail {
     bool load(handle src, bool) {
       PyObject *source = src.ptr();
       if (THPVariable_Check(source)) {
-        value = Variable(((THPVariable*)source)->cdata, true);
+        value = ((THPVariable*)source)->cdata;
         return true;
       } else {
         return false;

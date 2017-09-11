@@ -51,7 +51,7 @@ auto PyFunctionPreHook::operator()(const variable_list& values) -> variable_list
   }
 
   variable_list results(values);
-  results[value_idx] = Variable(((THPVariable*)value.get())->cdata, true);
+  results[value_idx] = ((THPVariable*)value.get())->cdata;
   return results;
 }
 
@@ -110,7 +110,7 @@ static variable_list unwrap_variables(PyObject* py_variables)  {
     if (item == Py_None) {
       continue;
     } else if (THPVariable_Check(item)) {
-      results[i] = Variable(((THPVariable*)item)->cdata, true);
+      results[i] = ((THPVariable*)item)->cdata;
     } else {
       // this should never happen, but just in case...
       std::stringstream ss;
@@ -157,8 +157,8 @@ static void check_single_result(PyObject* _original, PyObject* _result, PyObject
     throw python_error();
   }
 
-  auto& original = ((THPVariable*)_original)->cdata->data;
-  auto& result = ((THPVariable*)_result)->cdata->data;
+  auto& original = ((THPVariable*)_original)->cdata.data();
+  auto& result = ((THPVariable*)_result)->cdata.data();
 
   if (original.type().ID() != result.type().ID()) {
     std::stringstream ss;

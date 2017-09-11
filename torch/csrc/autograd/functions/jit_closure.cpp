@@ -171,7 +171,7 @@ struct PythonCall : public Function {
       if (!THPVariable_Check(output))
         throw std::runtime_error("Function.apply returned a non-Variable output");
       THPVariable *var = (THPVariable*)output;
-      var_result.emplace_back(Variable(var->cdata, true));
+      var_result.emplace_back(var->cdata);
     }
 
     return var_result;

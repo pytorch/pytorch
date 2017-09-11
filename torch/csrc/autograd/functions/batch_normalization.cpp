@@ -211,7 +211,7 @@ auto BatchNormBackward::releaseVariables() -> void {
 Variable getReturnTupleVar(PyObject *p, Py_ssize_t pos) {
   PyObject *item = PyTuple_GET_ITEM(p, pos);
   if (item != Py_None) {
-    return Variable(((THPVariable*)item)->cdata, true);
+    return ((THPVariable*)item)->cdata;
   }
   return Variable();
 }
