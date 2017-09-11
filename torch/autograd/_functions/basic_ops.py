@@ -1,9 +1,10 @@
 import torch
-from ..function import Function, InplaceFunction
+from ..function import Function, InplaceFunction, traceable
 from .utils import maybe_unexpand, maybe_unexpand_or_view
 import math
 
 
+@traceable
 class Add(InplaceFunction):
 
     @staticmethod
@@ -26,6 +27,7 @@ class Add(InplaceFunction):
         return maybe_unexpand(grad_output, ctx.a_size), maybe_unexpand_or_view(grad_output, ctx.b_size), None
 
 
+@traceable
 class Sub(InplaceFunction):
 
     @staticmethod
@@ -48,6 +50,7 @@ class Sub(InplaceFunction):
         return maybe_unexpand(grad_output, ctx.a_size), maybe_unexpand_or_view(grad_output.neg(), ctx.b_size), None
 
 
+@traceable
 class Mul(Function):
 
     @staticmethod
@@ -68,6 +71,7 @@ class Mul(Function):
         return maybe_unexpand(grad_output.mul(b), ctx.a_size), maybe_unexpand_or_view(grad_output.mul(a), ctx.b_size)
 
 
+@traceable
 class Div(Function):
 
     @staticmethod
@@ -86,6 +90,7 @@ class Div(Function):
         return maybe_unexpand(grad_a, ctx.a_size), maybe_unexpand_or_view(grad_b, ctx.b_size)
 
 
+@traceable
 class Pow(Function):
 
     @staticmethod
@@ -107,6 +112,7 @@ def sort_args(a, b):
     return (a, b, True) if torch.is_tensor(a) else (b, a, False)
 
 
+@traceable
 class AddConstant(InplaceFunction):
 
     @staticmethod
@@ -126,6 +132,7 @@ class AddConstant(InplaceFunction):
             return None, grad_output, None
 
 
+@traceable
 class SubConstant(InplaceFunction):
 
     @staticmethod
@@ -152,6 +159,7 @@ class SubConstant(InplaceFunction):
             return None, grad_output.neg(), None
 
 
+@traceable
 class MulConstant(InplaceFunction):
 
     @staticmethod
@@ -172,6 +180,7 @@ class MulConstant(InplaceFunction):
             return None, grad_input, None
 
 
+@traceable
 class DivConstant(InplaceFunction):
 
     @staticmethod
@@ -205,6 +214,7 @@ class DivConstant(InplaceFunction):
                 return None, grad_output.mul(v_rep).mul(v_rep).mul_(-ctx.constant), None
 
 
+@traceable
 class PowConstant(Function):
 
     @staticmethod
@@ -228,6 +238,7 @@ class PowConstant(Function):
             return None, grad_output.mul(var_result).mul_(math.log(ctx.constant))
 
 
+@traceable
 class Negate(InplaceFunction):
 
     @staticmethod

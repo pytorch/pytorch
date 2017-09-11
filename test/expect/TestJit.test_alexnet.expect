@@ -29,15 +29,15 @@ graph(%1 : Double(64, 3, 11, 11)
   %54 : Double(10, 256, 13, 13), %55 : Handle = ^Threshold(0, 0, True)(%51), uses = [[%56.i0], []];
   %57 : Double(10, 256, 6, 6), %58 : Long(10, 256, 6, 6), %59 : Handle = ^MaxPool2d(3, 2, 0, 1, False)(%54), uses = [[%60.i0], [], []];
   %61 : Double(10, 9216), %62 : Handle = ^View((10, 9216))(%57), uses = [[%63.i0], []];
-  %64 : Double(10, 9216), %65 : Handle = ^Dropout(0.5, True, False)(%61), uses = [[%69.i1], []];
-  %67 : Double(9216!, 4096!), %68 : Handle = ^Transpose(0, 1)(%11), uses = [[%69.i2], []];
-  %70 : Double(10, 4096), %71 : Handle = ^Addmm(1, 1, False)(%12, %64, %67), uses = [[%72.i0], []];
-  %73 : Double(10, 4096), %74 : Handle = ^Threshold(0, 0, True)(%70), uses = [[%75.i0], []];
-  %76 : Double(10, 4096), %77 : Handle = ^Dropout(0.5, True, False)(%73), uses = [[%81.i1], []];
-  %79 : Double(4096!, 4096!), %80 : Handle = ^Transpose(0, 1)(%13), uses = [[%81.i2], []];
-  %82 : Double(10, 4096), %83 : Handle = ^Addmm(1, 1, False)(%14, %76, %79), uses = [[%84.i0], []];
-  %85 : Double(10, 4096), %86 : Handle = ^Threshold(0, 0, True)(%82), uses = [[%90.i1], []];
-  %88 : Double(4096!, 1000!), %89 : Handle = ^Transpose(0, 1)(%15), uses = [[%90.i2], []];
-  %91 : Double(10, 1000), %92 : Handle = ^Addmm(1, 1, False)(%16, %85, %88), uses = [[%0.i0], []];
-  return (%91);
+  %64 : Double(10, 9216), %65 : Handle = ^Dropout(0.5, True, False)(%61), uses = [[%68.i1], []];
+  %67 : Double(9216!, 4096!) = ^Transpose(0, 1)(%11), uses = [[%68.i2]];
+  %69 : Double(10, 4096), %70 : Handle = ^Addmm(1, 1, False)(%12, %64, %67), uses = [[%71.i0], []];
+  %72 : Double(10, 4096), %73 : Handle = ^Threshold(0, 0, True)(%69), uses = [[%74.i0], []];
+  %75 : Double(10, 4096), %76 : Handle = ^Dropout(0.5, True, False)(%72), uses = [[%79.i1], []];
+  %78 : Double(4096!, 4096!) = ^Transpose(0, 1)(%13), uses = [[%79.i2]];
+  %80 : Double(10, 4096), %81 : Handle = ^Addmm(1, 1, False)(%14, %75, %78), uses = [[%82.i0], []];
+  %83 : Double(10, 4096), %84 : Handle = ^Threshold(0, 0, True)(%80), uses = [[%87.i1], []];
+  %86 : Double(4096!, 1000!) = ^Transpose(0, 1)(%15), uses = [[%87.i2]];
+  %88 : Double(10, 1000), %89 : Handle = ^Addmm(1, 1, False)(%16, %83, %86), uses = [[%0.i0], []];
+  return (%88);
 }

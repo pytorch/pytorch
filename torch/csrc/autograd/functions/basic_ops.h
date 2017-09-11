@@ -6,6 +6,7 @@
 
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/autograd/symbolic.h"
 
 namespace torch { namespace autograd {
 
@@ -46,10 +47,11 @@ struct GraphRoot : public Function {
   variable_list outputs;
 };
 
-struct Add : public ForwardFunction<> {
+struct Add : public ForwardFunction<true>, public HasSymbolic {
   Add() {}
 
   virtual variable_list apply(const variable_list& inputs) override;
+  virtual jit::node_list symbolic(SymbolicContext* ctx, jit::node_list inputs) override;
 };
 
 
@@ -58,6 +60,7 @@ struct AddBackward : public Function {
     : Function(std::move(flags)) {}
 
   virtual variable_list apply(const variable_list& gradOutputs) override;
+  virtual bool is_traceable() override { return true; }
 };
 
 struct Mul : public ForwardFunction<> {
