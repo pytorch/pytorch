@@ -26,6 +26,8 @@ auto AccumulateGrad::apply(const variable_list& grads) -> variable_list {
     throw std::logic_error("leaf variable has been moved into the graph interior");
   if (variable.current_version() != 0)
     throw std::runtime_error("leaf variable was used in an inplace operation");
+  if (!variable.requires_grad())
+    return {};
 
   auto new_grad = grads[0];
   for (auto& hook : variable.hooks()) {
