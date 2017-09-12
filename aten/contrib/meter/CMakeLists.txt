@@ -17,7 +17,7 @@ set(src
   MSEMeter.cc
 )
 
-add_library(xtmeter SHARED ${src})
+add_library(xtmeter ${TH_LINK_STYLE} ${src})
 target_link_libraries(xtmeter ATen)
 
 add_executable(test-meter test/basic.cc ${BACKWARD_ENABLE})
