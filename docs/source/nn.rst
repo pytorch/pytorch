@@ -408,6 +408,11 @@ Linear layers
 .. autoclass:: Linear
     :members:
 
+:hidden:`Bilinear`
+~~~~~~~~~~~~~~~~
+
+.. autoclass:: Bilinear
+    :members:
 
 Dropout layers
 ----------------------------------
