@@ -62,9 +62,6 @@ struct Variable : public at::Tensor {
 
   inline Variable & operator=(Variable && rhs) &;
   inline Variable & operator=(const Variable & rhs) &;
-
-  // implicit conversion to Tensor
-  operator Tensor() const { return Tensor(pImpl, true); }
 };
 
 struct VariableImpl : public at::TensorImpl {
@@ -109,6 +106,19 @@ public:
   auto_unique_ptr<jit::tracer::ValueTracingState> tracing_state;
   friend struct VariableType;
 };
+
+inline Variable make_variable(at::Tensor data) {
+  return Variable(new VariableImpl(std::move(data)), false);
+}
+
+inline Variable make_variable(at::Tensor data, std::shared_ptr<Function> grad_fn) {
+  return Variable(new VariableImpl(std::move(data), std::move(grad_fn)), false);
+}
+
+inline Variable make_variable(at::Tensor data, bool requires_grad, bool is_volatile=false) {
+  return Variable(new VariableImpl(std::move(data), requires_grad, is_volatile), false);
+}
+
 
 inline Variable::Variable(VariableImpl * self, bool retain) : Tensor(self, retain) {
 }

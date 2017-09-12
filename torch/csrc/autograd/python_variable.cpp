@@ -62,7 +62,7 @@ PyObject * THPVariable_NewWithFunction(PyObject *data, const std::shared_ptr<tor
 {
   THPUtils_assert(THPModule_isTensor(data), "data must be a Tensor");
 
-  Variable v(new VariableImpl(torch::createTensor(data)), false);
+  Variable v = make_variable(torch::createTensor(data));
   v.requires_grad() = grad_fn->is_executable;
   v.grad_fn() = grad_fn;
 
@@ -77,7 +77,7 @@ PyObject * THPVariable_NewWithFunction(PyObject *data, const std::shared_ptr<tor
 // This function DOES NOT steal a reference to data
 PyObject * THPVariable_NewVolatile(PyObject *data)
 {
-  Variable v(new VariableImpl(torch::createTensor(data), false, true), false);
+  Variable v = make_variable(torch::createTensor(data), false, true);
   PyObject* obj = THPVariable_NewWithVar((PyTypeObject*)THPVariableClass, std::move(v));
   if (obj) {
     ((THPVariable*)obj)->data = data;
@@ -89,7 +89,7 @@ PyObject * THPVariable_NewVolatile(PyObject *data)
 // This function DOES NOT steal a reference to data
 PyObject * THPVariable_NewLeaf(PyObject *data)
 {
-  Variable v(new VariableImpl(torch::createTensor(data)), false);
+  Variable v = make_variable(torch::createTensor(data));
   PyObject* obj = THPVariable_NewWithVar((PyTypeObject*)THPVariableClass, std::move(v));
   if (obj) {
     ((THPVariable*)obj)->data = data;
@@ -174,9 +174,9 @@ PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject *kwds)
   Variable var;
   if (grad_fn) {
     auto grad_fn_ = THPFunction_asFunction((THPFunction*)grad_fn);
-    var = Variable(new VariableImpl(torch::createTensor(data), grad_fn_), false);
+    var = make_variable(torch::createTensor(data), grad_fn_);
   } else {
-    var = Variable(new VariableImpl(torch::createTensor(data), requires_grad, is_volatile), false);
+    var = make_variable(torch::createTensor(data), requires_grad, is_volatile);
   }
 
   PyObject* self = THPVariable_NewWithVar(type, std::move(var));
