@@ -392,7 +392,7 @@ void Node::lint() {
     JIT_ASSERT(inputs_.size() == 2);
   IR_ELSEIF(Mul)
     JIT_ASSERT(inputs_.size() == 2);
-  IR_ELSEIF(Negate)
+  IR_ELSEIF(Neg)
     JIT_ASSERT(inputs_.size() == 1);
   IR_ELSEIF(Sigmoid)
     JIT_ASSERT(inputs_.size() == 1);

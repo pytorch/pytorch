@@ -17,13 +17,14 @@ _(Return) \
 _(Eval) \
 _(Add) \
 _(Mul) \
-_(Negate) \
+_(Neg) \
 _(Sigmoid) \
 _(Tanh) \
 _(Constant) \
 _(Undefined) \
 _(FusionGroup) \
 _(Split) \
+_(AddConstant) \
 _(split) \
 _(Dim) \
 _(Offset) \
