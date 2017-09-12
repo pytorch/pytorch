@@ -2284,6 +2284,8 @@ for test in method_tests:
         test_name = basic_test_name + ''.join('_neg' + str(i) for i, idx in enumerate(dim_perm) if idx < 0)
         new_args = tuple(new_args)
 
+        # for-loop bodies don't define scopes, so we have to save the variables
+        # we want to close over in some way
         def do_test(self, name=name, self_size=self_size, args=new_args, test_name=test_name):
             def check(name):
                 self_variable = create_input((self_size,), requires_grad=False)[0]
