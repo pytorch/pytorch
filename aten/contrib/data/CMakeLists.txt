@@ -22,7 +22,7 @@ set(src
   TransformDataset.cc
 )
 
-add_library(xtdata SHARED ${src})
+add_library(xtdata ${TH_LINK_STYLE} ${src})
 target_link_libraries(xtdata ATen)
 
 include_directories(.)
