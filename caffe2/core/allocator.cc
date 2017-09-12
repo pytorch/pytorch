@@ -15,8 +15,6 @@ CAFFE2_DEFINE_bool(
 
 namespace caffe2 {
 
-void NoDelete(void*) {}
-
 static std::unique_ptr<CPUAllocator> g_cpu_allocator(new DefaultCPUAllocator());
 CPUAllocator* GetCPUAllocator() {
   return g_cpu_allocator.get();
