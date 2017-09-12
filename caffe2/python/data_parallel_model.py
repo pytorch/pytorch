@@ -122,6 +122,7 @@ def Parallelize(
     # Store some information in the model -- a bit ugly
     model_helper_obj._devices = devices
     model_helper_obj._rendezvous = rendezvous
+    model_helper_obj._broadcast_context = None
     model_helper_obj._grad_names = []
 
     assert isinstance(model_helper_obj, model_helper.ModelHelper)
@@ -325,6 +326,7 @@ def Parallelize_GPU_BMUF(
     reset_momentum_sgd=False,
     warmup_iterations=None,
     max_concurrent_distributed_ops=4,
+    add_blobs_to_sync=None,
 ):
     '''
     Function to create model that run on many GPUs and creates a net for
@@ -346,6 +348,7 @@ def Parallelize_GPU_BMUF(
     model_helper_obj._rendezvous = rendezvous
     model_helper_obj._device_type = caffe2_pb2.CUDA
     model_helper_obj._device_prefix = 'gpu'
+    model_helper_obj._broadcast_context = None
     master_gpu_opt = core.DeviceOption(caffe2_pb2.CUDA, master_gpu)
 
     num_shards = rendezvous['num_shards'] if rendezvous else 1
@@ -457,7 +460,7 @@ def Parallelize_GPU_BMUF(
 
     # (Step-1) Update models for num_local_iterations.
 
-    # (Step-2) Comute post-local-updates average of the params.
+    # (Step-2) Compute post-local-updates average of the params.
     # Sum model params across GPUs and store resutls in param_avg blob.
     _AllReduceBlobs(
         model_parameter_names,
@@ -527,6 +530,13 @@ def Parallelize_GPU_BMUF(
         model_parameter_names,
         max_concurrent_distributed_ops
     )
+
+    # Add additional syncs
+    if add_blobs_to_sync is not None:
+        AddBlobSync(
+            model_helper_obj,
+            add_blobs_to_sync,
+            net=model_helper_obj._global_model_param_updates_net)
 
     # Reset momentum-SGD parameters
     if reset_momentum_sgd:
@@ -911,6 +921,27 @@ def _SyncAllParams(
         )
 
 
+def AddBlobSync(model, blobs, net=None):
+    if len(blobs) == 0:
+        return
+    net = model.net if net is None else net
+    for b in blobs:
+        assert not b.startswith(model._device_prefix), \
+            "Provide unprefixed blob name: {}".format(b)
+        model._device_grouped_blobs[b] = {
+            d: core.BlobReference("{}_{}/{}".format(model._device_prefix, d, b))
+            for d in model._devices
+        }
+
+    _SyncAllParams(
+        model._devices,
+        model,
+        model.param_init_net,
+        net,
+        model._rendezvous,
+        set(blobs))
+
+
 def _SyncAllParamsDistributed(
     devices,
     model,
@@ -925,12 +956,14 @@ def _SyncAllParamsDistributed(
     gpu_device_opt = core.DeviceOption(model._device_type, devices[0])
     cpu_device_opt = core.DeviceOption(caffe2_pb2.CPU)
 
-    context = CollectivesConcurrencyControl(
-        "broadcast",
-        max_concurrent_distributed_ops,
-        init_net,
-        rendezvous
-    )
+    if model._broadcast_context is None:
+        model._broadcast_context = CollectivesConcurrencyControl(
+            "broadcast",
+            max_concurrent_distributed_ops,
+            init_net,
+            rendezvous
+        )
+    context = model._broadcast_context
 
     for param_name in sorted(unique_param_names):
         master_param = model._device_grouped_blobs[param_name][devices[0]]
