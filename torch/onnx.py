@@ -15,8 +15,8 @@ from ._utils import _range
 
 def _no_reserved(names):
     for n in names:
-        if n.startswith('$'):
-            raise ValueError("exported names cannot begin with '$' but found '{}'".format(n))
+        if len(n) > 0 and n[0].isdigit():
+            raise ValueError("exported names cannot begin with a number but found '{}'".format(n))
 
 
 def export(model, args, f, export_params=True, kwargs=None, verbose=False,
@@ -40,9 +40,11 @@ def export(model, args, f, export_params=True, kwargs=None, verbose=False,
             be exported.  Set this to False if you are exporting an
             untrained model.
         input_names (list, default ()): if specified, a list of strings which
-        will be used in ONNX as the names of the inputs of the model.
+             will be used in ONNX as the names of the inputs of the model.
+             If args has nested tuples, this list is in the order resulting from flattening
+             the nesting into a single list.
         output_names (list, default ()): if specified, a list of strings which
-        will be used in ONNX as the name of the outputs of the output.
+             will be used in ONNX as the name of the outputs of the output.
         kwargs (dict, optional): keyword inputs to the model.
     """
     _export(model, args, f, export_params, kwargs, verbose, input_names, output_names)

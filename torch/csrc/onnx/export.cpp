@@ -281,10 +281,12 @@ static void encodeGraph(onnx::GraphProto * p_g, std::shared_ptr<Graph> & g,
       auto node = nodes.at(idx++);
       auto it = node_names.find(node);
       // rarely, output nodes may be repeated
-      // if this happens, we just take the first name we find for it as its name
-      if(it == node_names.end()) {
-        node_names[node] = name;
+      // if this happens, we just fail since using output_names is ambiguous in this case
+      if(it != node_names.end()) {
+        jit::barf("output '%s' and '%s' are the same node, so they cannot have the same output name",
+        name.c_str(), it->second.c_str());
       }
+      node_names[node] = name;
     }
   };
   initNames(g->inputs(), input_names);
@@ -293,7 +295,7 @@ static void encodeGraph(onnx::GraphProto * p_g, std::shared_ptr<Graph> & g,
     auto it = node_names.find(n);
     if(it != node_names.end())
       return it->second;
-    return "$" + n->uniqueName();
+    return n->uniqueName();
   };
 
   for (auto input : g->inputs()) {

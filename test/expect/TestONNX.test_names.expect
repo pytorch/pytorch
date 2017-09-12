@@ -1,27 +1,27 @@
 node {
   input: "x"
   input: "y"
-  output: "$3"
+  output: "3"
   op_type: "Add"
 }
 node {
   input: "x"
-  input: "$3"
-  output: "$4"
+  input: "3"
+  output: "4"
   op_type: "Mul"
 }
 node {
-  input: "$4"
-  output: "$5"
+  input: "4"
+  output: "5"
   op_type: "Tanh"
 }
 node {
-  input: "$5"
-  output: "$6"
+  input: "5"
+  output: "6"
   op_type: "Sigmoid"
 }
 node {
-  input: "$6"
+  input: "6"
   output: "z"
   op_type: "Scale"
   attribute {
