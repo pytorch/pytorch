@@ -29,7 +29,7 @@ class TestOneHotOps(hu.HypothesisTestCase):
         x=hu.tensor(
             min_dim=2, max_dim=2, dtype=np.int32,
             elements=st.integers(min_value=0, max_value=10)),
-        **hu.gcs)
+        **hu.gcs_cpu_only)
     def test_batch_one_hot(self, x, gc, dc):
         d = x.shape[1]
         lens = []
@@ -52,7 +52,7 @@ class TestOneHotOps(hu.HypothesisTestCase):
                 p += lens[i]
             return (ret, )
 
-        op = core.CreateOperator('BatchOneHot', ["X", "LENS", "VALS"], ["ONE_HOT"])
+        op = core.CreateOperator('BatchOneHot', ["X", "LENS", "VALS"], ["Y"])
         self.assertReferenceChecks(gc, op, [x, lens, vals], ref)
 
     @given(
