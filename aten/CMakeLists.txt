@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.0)
 set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindCUDA ${CMAKE_MODULE_PATH})
 project(ATen)
 
+cmake_policy(SET CMP0012 NEW)
+
 # RPATH stuff
 # see https://cmake.org/Wiki/CMake_RPATH_handling
 if(APPLE)
@@ -60,6 +62,11 @@ set(cwrap_files
 include_directories(
 ${CMAKE_CURRENT_SOURCE_DIR}/src/THNN
 ${CMAKE_CURRENT_SOURCE_DIR}/src/THCUNN)
+
+if(NOT TH_LINK_STYLE)
+  set(TH_LINK_STYLE SHARED)
+endif()
+
 
 add_subdirectory(src/ATen)
 include_directories(

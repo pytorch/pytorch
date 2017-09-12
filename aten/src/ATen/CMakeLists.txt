@@ -165,7 +165,7 @@ filter_list(generated_h generated_cpp "\\.h$")
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR}/..)
 # so the build can find the generated header files
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_BINARY_DIR})
-ADD_LIBRARY(ATen SHARED ${all_cpp})
+ADD_LIBRARY(ATen ${TH_LINK_STYLE} ${all_cpp})
 SET_TARGET_PROPERTIES(ATen PROPERTIES VERSION 1 SOVERSION 1)
 
 if(NOT ${CMAKE_VERSION} VERSION_LESS "3.1")
