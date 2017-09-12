@@ -111,7 +111,7 @@ struct EmitNull : public Function {
   }
 
   virtual variable_list apply(const variable_list& inputs) {
-    return {nullptr};
+    return {Variable()};
   };
 };
 
@@ -260,7 +260,7 @@ struct FusionGroupFunction : public Function {
     }
     function->launch(data, outputs);
     return fmap(outputs, [](const at::Tensor& t) {
-      return std::make_shared<Variable>(t, false, false);
+      return Variable(new VariableImpl(t, false, false), false);
     });
   }
 private:
@@ -712,7 +712,7 @@ variable_list AutogradClosure::apply(const variable_list& inputs) {
     throw std::runtime_error("AutogradClosure received an incorrect number of inputs");
   for (std::size_t i = 0; i < num_inputs; ++i) {
     auto & flags = stage_closure.var_flags[i];
-    if (!flags.verify(input))
+    if (!flags.verify(inputs[i]))
       throw std::runtime_error("AutogradClosure received inputs with different flags");
   }
 

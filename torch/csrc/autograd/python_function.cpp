@@ -724,7 +724,7 @@ PyObject* process_outputs(PyObject *op_obj, THPFunction* grad_fn, const Unpacked
   // Initialize t2var map
   t2var_type t2var;
   for (auto& c_var : unpacked.input_vars) {
-    THPVariable* py_var = (THPVariable*)c_var->pyobj;
+    THPVariable* py_var = (THPVariable*)c_var.get()->pyobj;
     t2var.emplace(py_var->data, py_var);
   }
 

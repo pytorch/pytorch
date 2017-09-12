@@ -219,7 +219,7 @@ std::pair<function_list, variable_list> Eval::filterRoots(const variable_list& i
   filtered_inputs.reserve(num_inputs);
   filtered_roots.reserve(num_inputs);
   for (std::size_t i = 0; i < num_inputs; ++i) {
-    if (!inputs[i]) continue;
+    if (!inputs[i].defined()) continue;
     filtered_inputs.emplace_back(inputs[i]);
     filtered_roots.emplace_back(roots[i]);
   }

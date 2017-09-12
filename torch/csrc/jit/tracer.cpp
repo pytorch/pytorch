@@ -51,7 +51,7 @@ struct TraceEval : autograd::Eval {
 
     for (auto & input : inputs) {
       Node *input_node = graph->addInput();
-      if (!input) continue;
+      if (!input.defined()) continue;
       JIT_ASSERT(!detail::getValueState(tracing_state, input, false));
       setValueTrace(tracing_state, input, input_node);
       input_node->inferTypeFrom(input.data());
