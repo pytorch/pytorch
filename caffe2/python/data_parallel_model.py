@@ -1511,7 +1511,11 @@ def _CreateOrCloneCommonWorld(
         rendezvous,
         name=None,
         status_blob=None,
-        timeout_sec=_DEFAULT_TIMEOUT_SEC):
+        timeout_sec=None):
+
+    if timeout_sec is None:
+        timeout_sec = _DEFAULT_TIMEOUT_SEC
+
     timeout_ms = timeout_sec * 1000
 
     # Check if there is an existing CreateCommonWorld
