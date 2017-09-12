@@ -130,11 +130,14 @@ std::string nodeName(Node * n) {
 }
 
 // TODO: we need to support double-precision
-std::unordered_map<NodeKind,std::string> simple_map_ops = {
-  {kSigmoid,         "1.f / (1.f + expf(-${0}))"},
-  {kTanh,            "tanhf(${0})"},
-  {kMul,             "${0} * ${1}"},
-  {kAdd,             "${0} + ${1}"},
+std::unordered_map<NodeKind,std::function<std::string(Node*)>> simple_map_ops = {
+  {kSigmoid,         [](Node*) { return "1.f / (1.f + expf(-${0}))"; }},
+  {kTanh,            [](Node*) { return "tanhf(${0})"; }},
+  {kMul,             [](Node*) { return "${0} * ${1}"; }},
+  {kAdd,             [](Node*) { return "${0} + ${1}"; }},
+  {kNeg,             [](Node*) { return "(-${0})"; }},
+  // TODO: support both float and int constants
+  {kAddConstant,     [](Node* n) { return std::to_string(n->f(kvalue)) + " + ${0}"; }},
 };
 
 const char * scalarTypeName(at::ScalarType type) {
@@ -193,7 +196,7 @@ void emitCompilationUnit(std::ostream & out,
       env.s(std::to_string(i++),nodeName(in));
     }
     env.s("node",nodeName(n));
-    env.s("rhs",format(simple_map_ops.at(n->kind()),env));
+    env.s("rhs",format(simple_map_ops.at(n->kind())(n),env));
     body << format("auto ${node} = ${rhs};\n",env);
   }
   for(auto o : subgraph.outputs()) {
