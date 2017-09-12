@@ -169,6 +169,23 @@ class develop(setuptools.command.develop.develop):
         setuptools.command.develop.develop.run(self)
 
 
+def monkey_patch_THD_link_flags():
+    '''
+    THD's dynamic link deps are not determined until after build_deps is run
+    So, we need to monkey-patch them in later
+    '''
+    # read tmp_install_path/THD_deps.txt for THD's dynamic linkage deps
+    with open(tmp_install_path + '/THD_deps.txt', 'r') as f:
+        thd_deps_ = f.read()
+    thd_deps = []
+    # remove empty lines
+    for l in thd_deps_.split(';'):
+        if l != '':
+            thd_deps.append(l)
+
+    C.extra_link_args += thd_deps
+
+
 class build_ext(setuptools.command.build_ext.build_ext):
 
     def run(self):
@@ -193,6 +210,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
             print('-- Not using NCCL')
         if WITH_DISTRIBUTED:
             print('-- Building with distributed package ')
+            monkey_patch_THD_link_flags()
         else:
             print('-- Building without distributed package')
 
@@ -309,10 +327,7 @@ THC_LIB = os.path.join(lib_path, 'libTHC.so.1')
 THCS_LIB = os.path.join(lib_path, 'libTHCS.so.1')
 THNN_LIB = os.path.join(lib_path, 'libTHNN.so.1')
 THCUNN_LIB = os.path.join(lib_path, 'libTHCUNN.so.1')
-THPP_LIB = os.path.join(lib_path, 'libTHPP.so.1')
 ATEN_LIB = os.path.join(lib_path, 'libATen.so.1')
-GLOO_LIB = os.path.join(lib_path, 'libgloo.a')
-GLOO_CUDA_LIB = os.path.join(lib_path, 'libgloo_cuda.a')
 THD_LIB = os.path.join(lib_path, 'libTHD.a')
 NCCL_LIB = os.path.join(lib_path, 'libnccl.so.1')
 if platform.system() == 'Darwin':
@@ -322,7 +337,6 @@ if platform.system() == 'Darwin':
     THCS_LIB = os.path.join(lib_path, 'libTHCS.1.dylib')
     THNN_LIB = os.path.join(lib_path, 'libTHNN.1.dylib')
     THCUNN_LIB = os.path.join(lib_path, 'libTHCUNN.1.dylib')
-    THPP_LIB = os.path.join(lib_path, 'libTHPP.1.dylib')
     ATEN_LIB = os.path.join(lib_path, 'libATen.1.dylib')
     NCCL_LIB = os.path.join(lib_path, 'libnccl.1.dylib')
 
@@ -335,7 +349,7 @@ if WITH_NCCL and (subprocess.call('ldconfig -p | grep libnccl >/dev/null', shell
 
 main_compile_args = ['-D_THP_CORE']
 main_libraries = ['shm']
-main_link_args = [TH_LIB, THS_LIB, THPP_LIB, THNN_LIB, ATEN_LIB, NANOPB_STATIC_LIB]
+main_link_args = [TH_LIB, THS_LIB, THNN_LIB, ATEN_LIB, NANOPB_STATIC_LIB]
 main_sources = [
     "torch/csrc/onnx.pb.cpp",
     "torch/csrc/onnx.cpp",
@@ -414,9 +428,7 @@ if WITH_DISTRIBUTED:
         ]
         extra_compile_args += ['-DWITH_DISTRIBUTED_MW']
     include_dirs += [tmp_install_path + "/include/THD"]
-    main_link_args += [THD_LIB, THPP_LIB]
-    if platform.system() == 'Linux':
-        main_link_args += [GLOO_LIB]
+    main_link_args += [THD_LIB]
 
 if WITH_CUDA:
     cuda_lib_dirs = ['lib64', 'lib']
@@ -433,8 +445,6 @@ if WITH_CUDA:
     extra_compile_args += ['-DCUDA_LIB_PATH=' + cuda_lib_path]
     main_libraries += ['cudart', 'nvToolsExt', 'nvrtc', 'cuda']
     main_link_args += [THC_LIB, THCS_LIB, THCUNN_LIB]
-    if WITH_DISTRIBUTED and platform.system() == 'Linux':
-        main_link_args += [GLOO_CUDA_LIB]
     main_sources += [
         "torch/csrc/cuda/Module.cpp",
         "torch/csrc/cuda/Storage.cpp",
