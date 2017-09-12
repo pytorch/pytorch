@@ -25,6 +25,9 @@ _(Undefined) \
 _(FusionGroup) \
 _(Split) \
 _(AddConstant) \
+_(Transpose) \
+_(Concat) \
+_(Reshape) \
 _(split) \
 _(Dim) \
 _(Offset) \
@@ -50,6 +53,8 @@ _(dilations) \
 _(dilation) \
 _(broadcast) \
 _(axis) \
+_(perm) \
+_(shape) \
 _(group)
 
 enum BuiltinSymbol {
