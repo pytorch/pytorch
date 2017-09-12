@@ -483,6 +483,12 @@ void Graph::lint() {
   sum_set.insert(ALL_OF(output_set));
   JIT_ASSERT(std::includes(ALL_OF(sum_set), ALL_OF(all_nodes_set)));
 
+  // graph->stage() should be equal to max(node.stage for node in graph->nodes())
+  if (nodes().begin() == nodes().end()) {
+    JIT_ASSERT(stage() == 0);
+  } else {
+    JIT_ASSERT(stage() == nodes().rbegin()->stage());
+  }
 }
 
 void LintGraph(std::shared_ptr<Graph>& graph) {

@@ -114,11 +114,11 @@ class Traceable(object):
                 with open("{}_{}_input.ir".format(self.trace_name, name), "w") as f:
                     f.write(str(self.complete_trace))
             p(self.complete_trace)
-            # TODO: Make linting optional
-            torch._C._jit_pass_lint(self.complete_trace)
             if Traceable._dump_traces:
                 with open("{}_{}_output.ir".format(self.trace_name, name), "w") as f:
                     f.write(str(self.complete_trace))
+            # TODO: Make linting optional
+            torch._C._jit_pass_lint(self.complete_trace)
 
         def compile_trace(self, optimize):
             # It's important to always run DCE, because backward can create a lot of unnecessary nodes
