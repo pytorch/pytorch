@@ -14,7 +14,7 @@ AccumulateGrad::AccumulateGrad(Variable variable_)
    : variable(std::move(variable_)) {
   num_inputs = 1;
   is_executable = 1;
-  input_sizes.emplace_back(_variable);
+  input_sizes.emplace_back(variable_);
 }
 
 auto AccumulateGrad::apply(const variable_list& grads) -> variable_list {

@@ -63,7 +63,7 @@ variable_list Function::tracedApply(variable_list inputs) {
   int num_outputs = outputs.size();
   for (int i = 0; i < num_outputs; ++i) {
     auto& output = outputs[i];
-    if (!output) {
+    if (!output.defined()) {
       auto & edge = next_functions[i];
       auto & meta = edge.first->input_sizes.at(edge.second);
       output = meta.recreate();

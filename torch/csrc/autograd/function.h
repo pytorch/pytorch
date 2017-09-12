@@ -28,21 +28,21 @@ using edge_type = std::pair<std::shared_ptr<Function>, int>;
 using function_list = std::vector<edge_type>;
 using saved_variable_list = std::vector<SavedVariable>;
 
+// TODO: Explain why TensorMetas don't preserve volatile/requires_grad status
 struct TensorMeta {
-  TensorMeta(const std::shared_ptr<Variable>& var) {
-    defined = static_cast<bool>(var);
-    if (defined) {
-      sizes = var->data.sizes();
-      device = var->data.type().isCuda() ? var->data.get_device() : -1;
-      type = &var->data.type();
+  TensorMeta(const Variable& var) {
+    if (var.defined()) {
+      sizes = var.data().sizes();
+      device = var.data().type().isCuda() ? var.data().get_device() : -1;
+      type = &var.data().type();
     }
   }
 
-  std::shared_ptr<Variable> recreate() {
+  Variable recreate() {
     AutoGPU gpu_guard(device);
     if (!defined)
       throw std::logic_error("Recreating undefined TensorMeta");
-    return std::make_shared<Variable>(type->zeros(sizes), false, false);
+    return Variable(new VariableImpl(type->zeros(sizes), false, false), false);
   }
 
   std::vector<int64_t> sizes;

@@ -215,21 +215,21 @@ void nontraceableBackwardSubgraph(const variable_list& inputs, const variable_li
 
 // These definitions require Variable struct to be defined, so they can't be
 // in tracer_state.h
-inline VariableFlags VariableFlags::of(const std::shared_ptr<Variable>& var) {
+inline VariableFlags VariableFlags::of(const Variable& var) {
   VariableFlags f;
-  if (var) {
+  if (var.defined()) {
     f.was_null = false;
-    f.requires_grad = var->requires_grad;
-    f.is_volatile = var->is_volatile;
+    f.requires_grad = var.requires_grad();
+    f.is_volatile = var.is_volatile();
   } else {
     f.was_null = true;
   }
   return f;
 }
 
-inline bool VariableFlags::verify(const std::shared_ptr<Variable>& var) {
-  if (!var) return was_null;
-  return !was_null && requires_grad == var->requires_grad && is_volatile == var->is_volatile;
+inline bool VariableFlags::verify(const Variable& var) {
+  if (!var.defined()) return was_null;
+  return !was_null && requires_grad == var.requires_grad() && is_volatile == var.is_volatile();
 }
 
 }}} // namespace torch::jit::tracer
