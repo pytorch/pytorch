@@ -230,6 +230,7 @@ struct GraphFuser {
 
   // returns where to continue scanning
   graph_node_list::iterator scanNode(Node * consumer) {
+    auto stage_guard = graph->setStageTemporary(consumer->stage());
     if(isFusable(consumer)) {
       // handle inputs in reverse topological order as well...
       // otherwise in f(a,a+b) it will appear a is used twice if we consider
@@ -242,6 +243,8 @@ struct GraphFuser {
         return topological_index[a] > topological_index[b];
       });
       for(auto producer : inputs) {
+        // Don't fuse accross stage boundaries
+        if (producer->stage() != consumer->stage()) continue;
         if(tryToMoveChunk(consumer,producer)) {
           // the chunk before this consumer was re-arranged to allow fusion,
           // we scan this consumer again to perform the fusion

@@ -23,6 +23,7 @@
 #include "torch/csrc/jit/assert.h"
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/jit/attributes.h"
+#include "torch/csrc/jit/resource_guard.h"
 
 namespace torch { namespace autograd {
 
@@ -277,8 +278,9 @@ public:
       return debugName() + "_" + std::to_string(unique());
     return std::to_string(unique());
   }
-  void setStage(size_t s) {
+  Node* setStage(size_t s) {
     stage_ = s;
+    return this;
   }
   size_t stage() {
     return stage_;
@@ -704,8 +706,16 @@ public:
   void advanceStage() {
     new_node_stage_++;
   }
+  void setStage(size_t new_stage) {
+    new_node_stage_ = new_stage;
+  }
   size_t stage() {
     return new_node_stage_;
+  }
+  ResourceGuard setStageTemporary(size_t s) {
+    auto prev_stage = new_node_stage_;
+    new_node_stage_ = s;
+    return ResourceGuard([prev_stage, this]() { this->new_node_stage_ = prev_stage; });
   }
 
   void eraseInput(size_t i) {

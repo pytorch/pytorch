@@ -47,7 +47,8 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
     env[input] = ctx.graph
       ->addInput()
       ->setType(input->typeOption())
-      ->setDebugName(input->debugName());
+      ->setDebugName(input->debugName())
+      ->setStage(input->stage());
   }
   for (auto kv : state->buffer_map) {
     new_buffer_map[kv.first] = envFn(kv.second);
@@ -152,6 +153,8 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
       cloneNode(node);
       continue;
     }
+    // Needed so that symbolic calls create nodes with correct stages.
+    auto stage_guard = new_graph->setStageTemporary(node->stage());
     IR_IF(node, Select)
       // Selects are translated by multi-return nodes.
       JIT_ASSERT(env.count(value) > 0);
@@ -178,6 +181,8 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
     ctx.graph->registerOutput(env.at(output));
   }
 
+  // Copy stage from original graph
+  new_graph->setStage(state->graph->stage());
   state->graph = std::move(new_graph);
   state->buffer_map = std::move(new_buffer_map);
 }
