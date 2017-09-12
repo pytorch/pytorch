@@ -4,9 +4,6 @@
 [submodule "third_party/nccl"]
 	path = third_party/nccl
 	url = https://github.com/nvidia/nccl.git
-[submodule "third_party/cnmem"]
-	path = third_party/cnmem
-	url = https://github.com/nvidia/cnmem.git
 [submodule "third_party/cub"]
 	path = third_party/cub
 	url = https://github.com/NVlabs/cub.git
