@@ -1490,7 +1490,7 @@ class TestAutograd(TestCase):
                            Variable(torch.randn(3, S, S), requires_grad=True),
                            0)
         f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-        run_functional_checks(self, "test_cat",
+        run_functional_checks(self, "test_cat", "cat",
                               lambda a, b, c, dim: torch.cat((a, b, c), dim),
                               True, f_args_variable, f_args_tensor)
 
@@ -1500,7 +1500,7 @@ class TestAutograd(TestCase):
                            Variable(torch.randn(S, S, 3), requires_grad=True),
                            -1)
         f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-        run_functional_checks(self, "test_cat_negdim_1",
+        run_functional_checks(self, "test_cat_negdim_1", "cat",
                               lambda a, b, c, dim: torch.cat((a, b, c), dim),
                               True, f_args_variable, f_args_tensor)
 
@@ -1510,7 +1510,7 @@ class TestAutograd(TestCase):
                            Variable(torch.randn(S, 3, S), requires_grad=True),
                            -2)
         f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-        run_functional_checks(self, "test_cat_negdim_2",
+        run_functional_checks(self, "test_cat_negdim_2", "cat",
                               lambda a, b, c, dim: torch.cat((a, b, c), dim),
                               True, f_args_variable, f_args_tensor)
 
@@ -1578,11 +1578,6 @@ class dont_convert(tuple):
 L = 20
 M = 10
 S = 5
-function_tests = [
-    (Concat, (), (0, (1, S, S), (2, S, S), (3, S, S))),
-    (Concat, (), (-1, (S, S, 1), (S, S, 2), (S, S, 3)), 'negdim-1'),
-    (Concat, (), (-2, (S, 1, S), (S, 2, S), (S, 3, S)), 'negdim-2'),
-]
 
 
 # (name, size, args...)
@@ -1986,119 +1981,6 @@ def generate_gradoutput(dummy_out, non_contiguous=False):
 
     return grad_y
 
-ignore_inplace = set((
-    'test_DivConstantFunction_by_tensor',
-
-))
-
-# these are just empirical observations, we should improve
-gradgradcheck_precision_override = {
-    'test_NormFunction_1_5': {'atol': 1.5e-2, 'rtol': 1e-2},
-    'test_NormFunction_2': {'atol': 2e-2, 'rtol': 1e-2},
-    'test_NormFunction_3': {'atol': 5e-2, 'rtol': 1e-2},
-}
-
-for test in function_tests:
-    cls, constructor_args, call_args = test[:3]
-    basic_test_name = 'test_{}Function'.format(cls.__name__)
-    if len(test) >= 4:
-        basic_test_name += '_' + test[3]
-
-    dim_args_idx = test[4] if len(test) == 5 else []
-
-    skipTestIf = test[5] if len(test) == 6 else []
-
-    for dim_perm in product([-1, 1], repeat=len(dim_args_idx)):
-        test_name = basic_test_name + ''.join('_neg' + str(i) for i, idx in enumerate(dim_perm) if idx < 0)
-
-        def make_neg_dims(args):
-            for i in dim_args_idx:
-                assert isinstance(args[i], int), test_name
-            return tuple(arg * dim_perm[dim_args_idx.index(i)] if i in dim_args_idx else arg
-                         for i, arg in enumerate(args))
-        if cls._is_legacy:
-            new_constructor_args = make_neg_dims(constructor_args)
-            new_call_args = call_args
-        else:
-            assert len(constructor_args) == 0, test_name
-            new_constructor_args = constructor_args
-            new_call_args = make_neg_dims(call_args)
-
-        def do_test(self, cls=cls, constructor_args=new_constructor_args,
-                    call_args=new_call_args, test_name=test_name):
-            input = create_input(call_args, non_contiguous="View" not in cls.__name__)
-            if cls._is_legacy:
-                def apply_fn(*input):
-                    return cls(*constructor_args)(*input)
-
-                def apply_inplace_fn(*input):
-                    return cls(*constructor_args, inplace=True)(*input)
-            else:
-                def apply_fn(*input):
-                    return cls.apply(*input)
-
-                def apply_inplace_fn(*input):
-                    args = input + (True,)  # for Python 2.7
-                    return cls.apply(*args)
-            self.assertTrue(gradcheck(apply_fn, input, eps=1e-6, atol=PRECISION))
-
-            # check for correct type of input.data and input.grad.data
-            output = apply_fn(*input)
-            if isinstance(output, torch.autograd.Variable):
-                output.backward(torch.randn(*output.size()).type_as(output.data))
-                for inp in input:
-                    if isinstance(inp, torch.autograd.Variable) and inp.grad is not None:
-                        self.assertTrue(type(inp.data) == type(inp.grad.data))
-                        self.assertTrue(inp.size() == inp.grad.size())
-
-            dummy_out = apply_fn(*input)
-            grad_y = generate_gradoutput(dummy_out, non_contiguous=True)
-
-            if test_name in gradgradcheck_precision_override:
-                atol = gradgradcheck_precision_override[test_name]['atol']
-                rtol = gradgradcheck_precision_override[test_name]['rtol']
-                self.assertTrue(gradgradcheck(apply_fn, input, grad_y, atol=atol, rtol=rtol))
-            else:
-                self.assertTrue(gradgradcheck(apply_fn, input, grad_y,))
-
-            # can't broadcast inplace to left hand side
-            broadcast_skip_inplace = 'broadcast_lhs' in test_name or 'broadcast_all' in test_name
-            if test_name not in ignore_inplace and not broadcast_skip_inplace and issubclass(cls, InplaceFunction):
-                output = apply_fn(*input)
-                if not isinstance(output, tuple):
-                    output = (output,)
-                inplace_input = deepcopy(input)
-                inplace_input_copy = tuple(i + 0 if i is not None else None for i in inplace_input)
-                inplace_output = apply_inplace_fn(*inplace_input_copy)
-                if not isinstance(inplace_output, tuple):
-                    inplace_output = (inplace_output,)
-                self.assertEqual(inplace_output, output)
-                # Check that gradient is the same
-                for inp_i, i in zip(inplace_input, input):
-                    if not isinstance(inp_i, Variable):
-                        assert not isinstance(i, Variable)
-                        continue
-                    if inp_i.grad is not None:
-                        inp_i.grad.data.zero_()
-                    if i.grad is not None:
-                        i.grad.data.zero_()
-                for io, o in zip(inplace_output, output):
-                    grad = torch.randn(*io.size()).double()
-                    io.backward(grad)
-                    o.backward(grad)
-                for inp_i, i in zip(inplace_input, input):
-                    if not isinstance(inp_i, Variable):
-                        continue
-                    self.assertEqual(inp_i.grad, i.grad)
-
-        assert not hasattr(TestAutograd, test_name), 'Two tests have the same name: ' + test_name
-
-        for skip in skipTestIf:
-            do_test = skip(do_test)
-
-        setattr(TestAutograd, test_name, do_test)
-
-
 EXCLUDE_FUNCTIONAL = {
     'addmm',
     'addbmm',
@@ -2149,8 +2031,10 @@ def gradgradcheck_method_precision_override(test_name):
     override = gradgradcheck_precision_override.get(non_broadcasted_test_name)
     if override:
         if 'broadcast_lhs' in test_name or 'broadcast_rhs' in test_name:
+            # errors accumulated across 1 dimension
             override = {'atol': override['atol'] * S, 'rtol': override['atol'] * S}
         elif 'broadcast_all' in test_name:
+            # errors accumulated across multiple dimensions
             override = {'atol': override['atol'] * S * S, 'rtol': override['atol'] * S * S}
     return override
 
@@ -2168,13 +2052,14 @@ def run_grad_and_gradgrad_checks(test_case, test_name, apply_method, output_vari
         test_case.assertTrue(gradgradcheck(apply_method, input_variables, grad_y,))
 
 
-def run_functional_checks(test_case, test_name, apply_fn, run_grad_checks,
+def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
                           f_args_variable, f_args_tensor):
     output_variable = apply_fn(*f_args_variable)
-    output_tensor = apply_fn(*f_args_tensor)
-    if not torch.is_tensor(output_tensor) and not isinstance(output_tensor, tuple):
-        output_tensor = torch.DoubleTensor((output_tensor,))
-    test_case.assertEqual(unpack_variables(output_variable), output_tensor)
+    if not exclude_tensor_method(name, test_name):
+        output_tensor = apply_fn(*f_args_tensor)
+        if not torch.is_tensor(output_tensor) and not isinstance(output_tensor, tuple):
+            output_tensor = torch.DoubleTensor((output_tensor,))
+        test_case.assertEqual(unpack_variables(output_variable), output_tensor)
 
     if run_grad_checks:
         run_grad_and_gradgrad_checks(test_case, test_name, apply_fn,
@@ -2204,9 +2089,8 @@ for test in method_tests:
             def check(name):
                 is_rhs_operator = name[:3] == "__r" and name[-2:] == "__"
                 is_inplace = name[-1] == "_" and not is_rhs_operator
-                requires_grad = False if is_inplace else True
-                self_variable = create_input((self_size,), requires_grad=requires_grad)[0]
-                args_variable = create_input(args, requires_grad=requires_grad)
+                self_variable = create_input((self_size,), requires_grad=not is_inplace)[0]
+                args_variable = create_input(args, requires_grad=not is_inplace)
                 self_tensor = deepcopy(self_variable.data)
                 args_tensor = deepcopy(unpack_variables(args_variable))
                 output_variable = getattr(self_variable, name)(*args_variable)
@@ -2223,13 +2107,13 @@ for test in method_tests:
                                                  output_variable, (self_variable,) + args_variable)
 
                 # functional interface tests
-                if (hasattr(torch, name) and name not in EXCLUDE_FUNCTIONAL and
-                        not exclude_tensor_method(name, test_name)):
+                if hasattr(torch, name) and name not in EXCLUDE_FUNCTIONAL:
                     f_args_variable = (self_variable,) + args_variable
                     f_args_tensor = (self_tensor,) + args_tensor
-                    run_functional_checks(self, test_name,
+                    # could run the gradchecks again, but skip since we did it for the methods above.
+                    run_functional_checks(self, test_name, name,
                                           lambda *inputs: getattr(torch, name)(*inputs),
-                                          name not in EXCLUDE_GRADCHECK, f_args_variable, f_args_tensor)
+                                          False, f_args_variable, f_args_tensor)
 
                 # check for correct type of input.data and input.grad.data
                 if not is_inplace:
@@ -2258,7 +2142,7 @@ for test in method_tests:
 
                         try:
                             inplace_output_variable = (
-                                getattr(*inplace_self_variable_copy, inplace_name)(*inplace_args_variable_copy))
+                                getattr(inplace_self_variable_copy[0], inplace_name)(*inplace_args_variable_copy))
                         except RuntimeError as err:
                             if 'only supports scalar multiplication' in str(err):
                                 return
