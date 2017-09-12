@@ -250,10 +250,6 @@ struct PinnedCPUAllocator final : CPUAllocator {
     return {data, Delete};
   }
 
-  MemoryDeleter GetDeleter() override {
-    return Delete;
-  }
-
  private:
   static void Delete(void* data) {
     // Caffe2 uses a lazy way to figure out if one is actually going to use GPUs

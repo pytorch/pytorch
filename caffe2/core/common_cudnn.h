@@ -325,7 +325,7 @@ struct CuDNNWorkspace {
     if (nbytes_ < nbytes) {
       reset();
       auto data_and_deleter = CUDAContext::New(nbytes);
-      data_ = {data_and_deleter.first, data_and_deleter.second};
+      data_ = {data_and_deleter.first, std::move(data_and_deleter.second)};
       nbytes_ = nbytes;
     }
     CAFFE_ENFORCE_GE(nbytes_, nbytes);
@@ -338,7 +338,7 @@ struct CuDNNWorkspace {
   }
 
  private:
-  std::unique_ptr<void, MemoryDeleter> data_{nullptr, NoDelete};
+  std::unique_ptr<void, MemoryDeleter> data_{nullptr};
   size_t nbytes_{0};
 };
 

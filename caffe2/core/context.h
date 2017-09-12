@@ -97,7 +97,11 @@ class CPUContext final {
     auto data_and_deleter = GetCPUAllocator()->New(nbytes);
     if (FLAGS_caffe2_report_cpu_memory_usage) {
       reporter_.New(data_and_deleter.first, nbytes);
-      data_and_deleter.second = ReportAndDelete;
+      auto original_deleter = data_and_deleter.second;
+      data_and_deleter.second = [original_deleter](void* data) {
+        reporter_.Delete(data);
+        original_deleter(data);
+      };
     }
     return data_and_deleter;
   }
@@ -134,12 +138,6 @@ class CPUContext final {
   int random_seed_{1701};
   std::unique_ptr<rand_gen_type> random_generator_;
   static MemoryAllocationReporter reporter_;
-
- private:
-  static void ReportAndDelete(void* ptr) {
-    reporter_.Delete(ptr);
-    GetCPUAllocator()->GetDeleter()(ptr);
-  }
 };
 
 template<>
