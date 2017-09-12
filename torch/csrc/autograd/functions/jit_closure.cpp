@@ -115,6 +115,22 @@ struct EmitNull : public Function {
   };
 };
 
+// A hack that will let us implement some of the ops we care
+// about before the major Python -> C++ Function migration
+struct LambdaFunction : public Function {
+  LambdaFunction(int num_inputs, std::function<variable_list(const variable_list&)> fn)
+    : fn(fn) {
+    is_executable = true;
+    num_inputs = num_inputs;
+  }
+
+  virtual variable_list apply(const variable_list& inputs) {
+    return fn(inputs);
+  }
+
+  std::function<variable_list(const variable_list&)> fn;
+};
+
 // Wraps a PythonOp and dispatches calls to Functions implemented in Python
 struct PythonCall : public Function {
   PythonCall(PythonOp *op)
@@ -259,8 +275,8 @@ struct FusionGroupFunction : public Function {
       outputs.push_back(at::CUDA(od.scalar_type).tensor(data.back().sizes()));
     }
     function->launch(data, outputs);
-    return fmap(outputs, [](const at::Tensor& t) {
-      return Variable(new VariableImpl(t, false, false), false);
+    return wrap_outputs(inputs, std::move(outputs), [](FunctionFlags f) {
+      return std::make_shared<torch::autograd::Error>("FusionGroupFunction is not differentiable", std::move(f));
     });
   }
 private:
@@ -513,6 +529,26 @@ struct StageClosure {
       return fn;
     IR_ELSEIF(Undefined)
       return std::make_shared<EmitNull>();
+    IR_ELSEIF(Transpose) // NOTE: Transpose in ONNX is Permute in Torch
+      auto permutation = value->is(kperm);
+      if (permutation != std::vector<int64_t>({1, 0}))
+        throw std::runtime_error("Transpose isn't fully supported in closure compiler");
+      return std::make_shared<LambdaFunction>(1, [](const variable_list& vars) -> variable_list {
+        return variable_list{Variable(new VariableImpl(vars[0].data().transpose(1, 0), vars[0].requires_grad(), false), false)};
+      });
+    IR_ELSEIF(Reshape)
+      auto shape = value->is(kshape);
+      return std::make_shared<LambdaFunction>(1, [shape](const variable_list& vars) -> variable_list {
+        return variable_list{Variable(new VariableImpl(vars[0].data().view(shape), vars[0].requires_grad(), false), false)};
+      });
+    IR_ELSEIF(Split)
+      auto dim = value->i(kaxis);
+      auto splits = value->is(ksplit);
+      if (!std::equal(splits.begin() + 1, splits.end(), splits.begin()))
+        throw std::runtime_error("Don't know how to compile Split with different output shapes");
+      return std::make_shared<torch::autograd::Chunk>(splits.size(), dim);
+    IR_ELSEIF(Concat)
+      return std::make_shared<torch::autograd::Cat>(value->i(kaxis));
     IR_ELSE()
       throw std::runtime_error(std::string("unrecognized NodeKind: ") + symbolToString(node->kind()));
     IR_END()
