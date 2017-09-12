@@ -212,7 +212,7 @@ struct WrapConstant : public Function {
     if (inputs.size() != 1 || inputs[0].defined())
       throw std::logic_error("WrapConstant nodes should only receive a single NULL input");
     AutoGPU guard(value);
-    return {Variable(new VariableImpl(value.clone()), false)};
+    return {make_variable(value.clone())};
   }
 
   at::Tensor value;
@@ -706,10 +706,10 @@ variable_list AutogradClosure::apply(const variable_list& inputs) {
   // TODO: we could run all this with volatile variables, but we need to somehow capture handles
   // we should enable requires_grad only for the parts that need it
   auto input_leaves = fmap(inputs, [](const Variable& v) {
-    return Variable(new VariableImpl(v.data(), v.requires_grad(), v.is_volatile()), false);
+    return make_variable(v.data(), v.requires_grad(), v.is_volatile());
   });
   for (auto unique : desc->stages[stage].prev_stage_variables)
-    input_leaves.emplace_back(Variable(new VariableImpl(saved_vars.at(unique), true, false), false));
+    input_leaves.emplace_back(make_variable(saved_vars.at(unique), true, false));
   input_leaves.emplace_back(Variable()); // for ConstantFactory
 
   auto& engine = python::PythonEngine::getDefaultEngine();

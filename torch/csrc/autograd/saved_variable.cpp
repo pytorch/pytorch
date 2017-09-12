@@ -43,7 +43,7 @@ auto SavedVariable::unpack(std::shared_ptr<Function> saved_for) const -> Variabl
         "inplace operation");
   }
 
-  Variable var(new VariableImpl(data, requires_grad, is_volatile), false);
+  Variable var = make_variable(data, requires_grad, is_volatile);
   if (has_grad_fn && !grad_fn) {
     if (!saved_for) {
       // If saving the grad_fn would create a circular reference, then it must
