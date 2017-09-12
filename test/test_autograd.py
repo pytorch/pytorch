@@ -1484,6 +1484,36 @@ class TestAutograd(TestCase):
         out.sum().backward()
         self.assertEqual(x.grad.data, y_data)
 
+    def test_cat(self):
+        f_args_variable = (Variable(torch.randn(1, S, S), requires_grad=True),
+                           Variable(torch.randn(2, S, S), requires_grad=True),
+                           Variable(torch.randn(3, S, S), requires_grad=True),
+                           0)
+        f_args_tensor = deepcopy(unpack_variables(f_args_variable))
+        run_functional_checks(self, "test_cat",
+                              lambda a, b, c, dim: torch.cat((a, b, c), dim),
+                              True, f_args_variable, f_args_tensor)
+
+    def test_cat_negdim_1(self):
+        f_args_variable = (Variable(torch.randn(S, S, 1), requires_grad=True),
+                           Variable(torch.randn(S, S, 2), requires_grad=True),
+                           Variable(torch.randn(S, S, 3), requires_grad=True),
+                           -1)
+        f_args_tensor = deepcopy(unpack_variables(f_args_variable))
+        run_functional_checks(self, "test_cat_negdim_1",
+                              lambda a, b, c, dim: torch.cat((a, b, c), dim),
+                              True, f_args_variable, f_args_tensor)
+
+    def test_cat_negdim_2(self):
+        f_args_variable = (Variable(torch.randn(S, 1, S), requires_grad=True),
+                           Variable(torch.randn(S, 2, S), requires_grad=True),
+                           Variable(torch.randn(S, 3, S), requires_grad=True),
+                           -2)
+        f_args_tensor = deepcopy(unpack_variables(f_args_variable))
+        run_functional_checks(self, "test_cat_negdim_2",
+                              lambda a, b, c, dim: torch.cat((a, b, c), dim),
+                              True, f_args_variable, f_args_tensor)
+
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
@@ -2137,6 +2167,25 @@ def run_grad_and_gradgrad_checks(test_case, test_name, apply_method, output_vari
     else:
         test_case.assertTrue(gradgradcheck(apply_method, input_variables, grad_y,))
 
+
+def run_functional_checks(test_case, test_name, apply_fn, run_grad_checks,
+                          f_args_variable, f_args_tensor):
+    output_variable = apply_fn(*f_args_variable)
+    output_tensor = apply_fn(*f_args_tensor)
+    if not torch.is_tensor(output_tensor) and not isinstance(output_tensor, tuple):
+        output_tensor = torch.DoubleTensor((output_tensor,))
+    test_case.assertEqual(unpack_variables(output_variable), output_tensor)
+
+    if run_grad_checks:
+        run_grad_and_gradgrad_checks(test_case, test_name, apply_fn,
+                                     output_variable, f_args_variable)
+
+    self_variable = f_args_variable[0]
+    if isinstance(output_variable, torch.autograd.Variable) and self_variable is not None:
+        output_variable.backward(torch.randn(*output_variable.size()).type_as(output_variable.data))
+        test_case.assertTrue(type(self_variable.data) == type(self_variable.grad.data))
+        test_case.assertTrue(self_variable.size() == self_variable.grad.size())
+
 for test in method_tests:
     name, self_size, args = test[:3]
     basic_test_name = 'test_' + name + ('_' + test[3] if len(test) >= 4 else '')
@@ -2178,19 +2227,9 @@ for test in method_tests:
                         not exclude_tensor_method(name, test_name)):
                     f_args_variable = (self_variable,) + args_variable
                     f_args_tensor = (self_tensor,) + args_tensor
-                    output_variable = getattr(torch, name)(*f_args_variable)
-                    output_tensor = getattr(torch, name)(*f_args_tensor)
-                    if not torch.is_tensor(output_tensor) and not isinstance(output_tensor, tuple):
-                        output_tensor = torch.DoubleTensor((output_tensor,))
-                    self.assertEqual(unpack_variables(output_variable), output_tensor)
-
-                    if name not in EXCLUDE_GRADCHECK:
-                        run_grad_and_gradgrad_checks(self, test_name, lambda *inputs: getattr(torch, name)(*inputs),
-                                                     output_variable, f_args_variable)
-                    if isinstance(output_variable, torch.autograd.Variable):
-                        output_variable.backward(torch.randn(*output_variable.size()).type_as(output_variable.data))
-                        self.assertTrue(type(self_variable.data) == type(self_variable.grad.data))
-                        self.assertTrue(self_variable.size() == self_variable.grad.size())
+                    run_functional_checks(self, test_name,
+                                          lambda *inputs: getattr(torch, name)(*inputs),
+                                          name not in EXCLUDE_GRADCHECK, f_args_variable, f_args_tensor)
 
                 # check for correct type of input.data and input.grad.data
                 if not is_inplace:
