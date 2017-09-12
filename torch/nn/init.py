@@ -333,6 +333,9 @@ def orthogonal(tensor, gain=1):
 
     rows = tensor.size(0)
     cols = tensor[0].numel()
+    if rows < cols:
+        tensor.transpose(0, 1)
+        rows, cols = cols, rows
     flattened = torch.Tensor(rows, cols).normal_(0, 1)
     # Compute the qr factorization
     q, r = torch.qr(flattened)
@@ -340,16 +343,11 @@ def orthogonal(tensor, gain=1):
     d = torch.diag(r, 0)
     ph = d.sign()
     q *= ph.expand_as(q)
-    # Pad zeros to Q (if rows smaller than cols)
-    if rows < cols:
-        padding = torch.zeros(rows, cols - rows)
-        if q.is_cuda:
-            q = torch.cat([q, padding.cuda()], 1)
-        else:
-            q = torch.cat([q, padding], 1)
 
     tensor.view_as(q).copy_(q)
     tensor.mul_(gain)
+    if cols > rows:
+        tensor.tranpose(0, 1)
     return tensor
 
 
