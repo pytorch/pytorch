@@ -47,7 +47,7 @@ for multiprocess parallelism across several computation nodes running on one or 
 machines. The class :func:`torch.nn.parallel.DistributedDataParallel` builds on this
 functionality to provide synchronous distributed training as a wrapper around any
 PyTorch model. This differs from the kinds of parallelism provided by
-:module:`torch.multiprocessing` and :func:`torch.nn.DataParallel` in that it supports
+:doc:`multiprocessing` and :func:`torch.nn.DataParallel` in that it supports
 multiple network-connected machines and in that the user must explicitly launch a separate
 copy of the main training script for each process.
 

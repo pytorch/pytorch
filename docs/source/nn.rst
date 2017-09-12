@@ -409,7 +409,7 @@ Linear layers
     :members:
 
 :hidden:`Bilinear`
-~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: Bilinear
     :members:
