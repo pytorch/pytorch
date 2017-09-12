@@ -44,6 +44,9 @@ def bmuf_process(filestore_dir, process_id, shared_results, nesterov=False):
         sq = model.SquaredL2Distance([sigm, "label"], "sq")
         loss = model.AveragedLoss(sq, "loss")
         loss = model.Scale(loss, scale=loss_scale)
+
+        # For testing explicit sync
+        model.param_init_net.UniformFill([], ["sync_num"], shape=[1])
         return [loss]
 
     def _input_builder_fun(model):
@@ -105,7 +108,8 @@ def bmuf_process(filestore_dir, process_id, shared_results, nesterov=False):
         _param_update_fun,
         devices=gpu_ids,
         rendezvous=rendezvous,
-        nesterov=nesterov
+        nesterov=nesterov,
+        add_blobs_to_sync=["sync_num"],
     )
 
     data_parallel_model.RunInitNet(model)
@@ -143,6 +147,13 @@ def bmuf_process(filestore_dir, process_id, shared_results, nesterov=False):
     results['b_1_'] = b_1_
     results['w_1_'] = w_1_
 
+    # Test sync
+    if process_id == 0:
+        workspace.FeedBlob(
+            model._device_prefix + "_0/sync_num",
+            np.array([2603]).astype(np.float32),
+            device_option=core.DeviceOption(model._device_type, 0))
+
     # Compute block gradients.
     b_g_ = workspace.FetchBlob("gpu_{}/fc_b_g".format(_gpu_pid(0, process_id)))
     w_g_ = workspace.FetchBlob("gpu_{}/fc_w_g".format(_gpu_pid(0, process_id)))
@@ -169,10 +180,16 @@ def bmuf_process(filestore_dir, process_id, shared_results, nesterov=False):
     results['w_1'] = w_1
     results['b_1'] = b_1
 
+    # Test add_blobs_to_sync
+    for j in model._devices:
+        sync = workspace.FetchBlob(
+            model._device_prefix + "_{}/sync_num".format(j))[0]
+        results['sync_{}'.format(j)] = sync
+
     shared_results[process_id] = results
 
 
-class DistrubitedTest(unittest.TestCase):
+class DistributedTest(unittest.TestCase):
 
     def test_bmuf_distributed(self):
         self._test_bmuf_distributed()
@@ -223,6 +240,11 @@ class DistrubitedTest(unittest.TestCase):
         v_b = results[0]['v_b']
         v_w_ = results[0]['v_w_']
         v_w = results[0]['v_w']
+
+        for pid in results.keys():
+            for k in results[pid].keys():
+                if k.startswith("sync_num"):
+                    self.assertEqual(2603, results[pid][k])
 
         # Check block gradients are correct.
         np.testing.assert_almost_equal(v_b, 0.75 * v_b_ + g_b)
