@@ -7,36 +7,37 @@ namespace caffe2 {
 
 template <>
 template <typename T>
-bool BatchOneHotOp<CPUContext>::DoBatchOneHotOp(
-    const TIndex batch_size,
-    const TIndex in_dim,
-    const Tensor<CPUContext>& input,
-    const Tensor<CPUContext>& lens,
-    const Tensor<CPUContext>& vals,
-    Tensor<CPUContext>* output) {
-  const auto* input_data = input.template data<T>();
+bool BatchOneHotOp<CPUContext>::DoRunWithType() {
+  auto& input = Input(X);
+  auto& lens = Input(LENS);
+  auto& vals = Input(VALS);
+  CAFFE_ENFORCE_GE(input.ndim(), 1);
+  auto N = input.dim(0);
+  auto D = input.size_from_dim(1);
+  CAFFE_ENFORCE_EQ(lens.size(), D);
+
   const auto* lens_data = lens.template data<int32_t>();
-  const auto* vals_data = vals.template data<T>();
-
-  const TIndex out_dim = vals.size();
-  TIndex len_sum = 0;
-  for (TIndex i = 0; i < in_dim; i++) {
+  TIndex output_dim = 0;
+  for (TIndex i = 0; i < D; i++) {
     CAFFE_ENFORCE_GE(lens_data[i], 0);
-    len_sum += lens_data[i];
+    output_dim += lens_data[i];
   }
-  CAFFE_ENFORCE_EQ(out_dim, len_sum);
+  CAFFE_ENFORCE_EQ(vals.size(), output_dim);
+  auto* output = Output(ONE_HOT);
+  output->Resize(N, output_dim);
 
+  const auto* input_data = input.template data<T>();
+  const auto* vals_data = vals.template data<T>();
   auto* output_data = output->template mutable_data<T>();
-  memset(output_data, 0, output->nbytes());
   // eigen is column-major
-  auto input_m = ConstEigenMatrixMap<T>(input_data, in_dim, batch_size);
-  auto output_m = EigenMatrixMap<T>(output_data, out_dim, batch_size);
+  auto input_m = ConstEigenMatrixMap<T>(input_data, D, N);
+  auto output_m = EigenMatrixMap<T>(output_data, output_dim, N);
 
   // `p` is the column position in output_data, that points to the next
   // column to be filled.
   TIndex p = 0;
   // one-hot encoding for each example.
-  for (TIndex j = 0; j < in_dim; j++) {
+  for (TIndex j = 0; j < D; j++) {
     for (TIndex t = 0; t < lens_data[j]; t++) {
       output_m.row(p) =
           input_m.row(j).cwiseEqual(vals_data[p]).template cast<T>();
