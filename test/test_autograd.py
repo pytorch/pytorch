@@ -141,12 +141,11 @@ class TestAutograd(TestCase):
             y.backward(go1, retain_graph=True)
             x_grad = x.grad
             x_grad_clone = x.grad.data.clone()
-
-            del x
             y.backward(go2)
 
             # That's the only case when we can accumulate in-place
-            if start_volatile and end_volatile:
+            # TODO: reconsider this logic (see accumulate_grad.cpp)
+            if start_volatile:
                 expected_grad = x_grad_clone * 2
             else:
                 expected_grad = x_grad_clone

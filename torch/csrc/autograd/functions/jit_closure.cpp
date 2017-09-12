@@ -209,10 +209,10 @@ struct WrapConstant : public Function {
   }
 
   virtual variable_list apply(const variable_list& inputs) {
-    if (inputs.size() != 1 || inputs[0])
+    if (inputs.size() != 1 || inputs[0].defined())
       throw std::logic_error("WrapConstant nodes should only receive a single NULL input");
-    AutoGPU guard(value.type().isCuda() ? value.get_device() : -1);
-    return {std::make_shared<Variable>(value.clone(), false, false)};
+    AutoGPU guard(value);
+    return {Variable(new VariableImpl(value.clone()), false)};
   }
 
   at::Tensor value;
@@ -226,7 +226,7 @@ struct ConstantFactory : public Function {
   }
 
   virtual variable_list apply(const variable_list& inputs) {
-    if (inputs.size() != 1 || inputs[0])
+    if (inputs.size() != 1 || inputs[0].defined())
       throw std::logic_error("ConstantFactory nodes should only receive a single NULL input");
     return variable_list(next_functions.size());
   }
@@ -241,7 +241,7 @@ struct FusionGroupFunction : public Function {
     // compiled for
     std::vector<at::Tensor> data;
     for(auto & input : inputs)
-      data.push_back(input->data);
+      data.push_back(input.data());
     AutoGPU guard(data.back());
     std::vector<at::Tensor> outputs;
     outputs.reserve(function->outputDescriptors().size());
@@ -641,7 +641,7 @@ AutogradClosure::AutogradClosure(const std::shared_ptr<MultiStageClosure>& desc,
     auto saved_idx = std::get<2>(entry);
     post_callbacks.emplace(fn, [this, saved_idx, output_offset](Function* fn, variable_list& inputs, variable_list& outputs) {
       std::lock_guard<std::mutex> lock(this->capture_mutex);
-      this->captured_vars[saved_idx] = outputs[output_offset]->data;
+      this->captured_vars[saved_idx] = outputs[output_offset].data();
       return true;
     });
   }
@@ -675,7 +675,7 @@ AutogradClosure::AutogradClosure(const std::shared_ptr<MultiStageClosure>& desc,
     std::lock_guard<std::mutex> lock(this->capture_mutex);
     this->outputs.reserve(inputs.size());
     for (auto & input : inputs)
-      this->outputs.emplace_back(input->data);
+      this->outputs.emplace_back(input.data());
     return false; // Stop execution
   });
 
@@ -699,18 +699,18 @@ variable_list AutogradClosure::apply(const variable_list& inputs) {
   for (std::size_t i = 0; i < num_inputs; ++i) {
     auto & input = inputs[i];
     auto & flags = stage_closure.var_flags[i];
-    if (input->requires_grad != flags.requires_grad || input->is_volatile != flags.is_volatile)
+    if (input.requires_grad() != flags.requires_grad || input.is_volatile() != flags.is_volatile)
       throw std::runtime_error("AutogradClosure received inputs with different flags");
   }
 
   // TODO: we could run all this with volatile variables, but we need to somehow capture handles
   // we should enable requires_grad only for the parts that need it
-  auto input_leaves = fmap(inputs, [](const std::shared_ptr<Variable>& v) {
-    return std::make_shared<Variable>(v->data, v->requires_grad, v->is_volatile);
+  auto input_leaves = fmap(inputs, [](const Variable& v) {
+    return Variable(new VariableImpl(v.data(), v.requires_grad(), v.is_volatile()), false);
   });
   for (auto unique : desc->stages[stage].prev_stage_variables)
-    input_leaves.emplace_back(std::make_shared<Variable>(saved_vars.at(unique), true, false));
-  input_leaves.emplace_back(nullptr); // for ConstantFactory
+    input_leaves.emplace_back(Variable(new VariableImpl(saved_vars.at(unique), true, false), false));
+  input_leaves.emplace_back(Variable()); // for ConstantFactory
 
   auto& engine = python::PythonEngine::getDefaultEngine();
   engine.execute(stage_closure.roots, input_leaves, true, pre_callbacks, post_callbacks);

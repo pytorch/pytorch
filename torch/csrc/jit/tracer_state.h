@@ -20,7 +20,7 @@ namespace torch { namespace jit { namespace tracer {
 
 using torch::autograd::Variable;
 using torch::autograd::Function;
-using variable_list = std::vector<std::shared_ptr<Variable>>;
+using variable_list = std::vector<Variable>;
 using function_list = std::vector<std::pair<std::shared_ptr<Function>, int>>;
 
 // TracingState tracks the necessary state when we are tracing the execution of
@@ -34,7 +34,7 @@ using function_list = std::vector<std::pair<std::shared_ptr<Function>, int>>;
 // actual trace itself.
 
 struct VariableFlags {
-  static VariableFlags create(const std::shared_ptr<Variable>& var);
+  static VariableFlags create(const Variable& var);
 
   bool requires_grad;
   bool is_volatile;

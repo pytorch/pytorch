@@ -37,7 +37,7 @@ namespace pybind11 { namespace detail {
       }
     }
     static handle cast(TraceInput src, return_value_policy /* policy */, handle /* parent */) {
-      if (src.variable) {
+      if (src.variable.defined()) {
         return handle(THPVariable_Wrap(src.variable));
       } else {
         return handle(torch::createPyObject(src.buffer));
@@ -45,9 +45,9 @@ namespace pybind11 { namespace detail {
     }
   };
 
-  template<> struct type_caster<std::shared_ptr<Variable>> {
+  template<> struct type_caster<Variable> {
   public:
-    PYBIND11_TYPE_CASTER(std::shared_ptr<Variable>, _("torch::autograd::Variable"));
+    PYBIND11_TYPE_CASTER(Variable, _("torch::autograd::Variable"));
     bool load(handle src, bool) {
       PyObject *source = src.ptr();
       if (THPVariable_Check(source)) {
@@ -57,7 +57,7 @@ namespace pybind11 { namespace detail {
         return false;
       }
     }
-    static handle cast(std::shared_ptr<Variable> src, return_value_policy /* policy */, handle /* parent */) {
+    static handle cast(Variable src, return_value_policy /* policy */, handle /* parent */) {
       return handle(THPVariable_Wrap(src));
     }
   };

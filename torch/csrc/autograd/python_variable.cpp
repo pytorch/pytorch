@@ -11,52 +11,65 @@
 #include "torch/csrc/cuda/AutoGPU.h"
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/Exceptions.h"
+#include "torch/csrc/autograd/variable.h"
 
 
+using namespace at;
 using namespace torch::autograd;
 
 PyObject *THPVariableClass = NULL;
 
-static PyObject* THPVariable_NewWithVar(PyTypeObject* type, std::shared_ptr<Variable> var)
+// Creates a new Python object for a Variable. The Variable must not already
+// have a PyObject* associated with it.
+static PyObject* THPVariable_NewWithVar(PyTypeObject* type, Variable var)
 {
   PyObject* obj = type->tp_alloc(type, 0);
   if (obj) {
     auto v = (THPVariable*) obj;
-    new (&v->cdata) std::shared_ptr<Variable>(std::move(var));
-    if (auto fn = dynamic_cast<PyFunction*>(v->cdata->grad_fn.get())) {
+    new (&v->cdata) Variable(std::move(var));
+    v->cdata.get()->pyobj = obj;
+    if (auto fn = dynamic_cast<PyFunction*>(v->cdata.grad_fn().get())) {
       // Create a new reference to the THPFunction. This ensures that ref count
       // of the THPFunction is at least the number of referring THPVariables.
-      v->cdata->grad_fn = THPFunction_asFunction((THPFunction*)fn->obj);
+      v->cdata.grad_fn() = THPFunction_asFunction((THPFunction*)fn->obj);
     }
   }
   return obj;
 }
 
-PyObject * THPVariable_Wrap(const std::shared_ptr<Variable>& var)
+PyObject * THPVariable_Wrap(const Variable& var)
 {
-  if (!var) {
+  if (!var.defined()) {
     Py_RETURN_NONE;
-  } else if (var->pyobj) {
-    Py_INCREF(var->pyobj);
-  } else {
-    var->pyobj = THPVariable_NewWithVar((PyTypeObject *)THPVariableClass, var);
-    THPVariable* py_var = (THPVariable*)var->pyobj;
-    py_var->data = torch::createPyObject(var->data);
   }
-  return var->pyobj;
+
+  if (auto obj = var.get()->pyobj) {
+    Py_INCREF(obj);
+    return obj;
+  }
+
+  THPObjectPtr obj(THPVariable_NewWithVar((PyTypeObject *)THPVariableClass, var));
+  if (obj) {
+    PyObject* data = torch::createPyObject(var.data());
+    if (!data) return NULL;
+    ((THPVariable*)obj.get())->data = data;
+  }
+  return obj.release();
 }
 
 // This function DOES NOT steal a reference to data
 PyObject * THPVariable_NewWithFunction(PyObject *data, const std::shared_ptr<torch::autograd::Function>& grad_fn)
 {
   THPUtils_assert(THPModule_isTensor(data), "data must be a Tensor");
-  auto v = std::make_shared<Variable>(torch::createTensor(data), grad_fn->is_executable, false);
-  v->grad_fn = grad_fn;
-  PyObject* obj = THPVariable_NewWithVar((PyTypeObject*)THPVariableClass, v);
+
+  Variable v(new VariableImpl(torch::createTensor(data)), false);
+  v.requires_grad() = grad_fn->is_executable;
+  v.grad_fn() = grad_fn;
+
+  PyObject* obj = THPVariable_NewWithVar((PyTypeObject*)THPVariableClass, std::move(v));
   if (obj) {
-    v->pyobj = obj;
-    Py_INCREF(data);
     ((THPVariable*)obj)->data = data;
+    Py_INCREF(data);
   }
   return obj;
 }
@@ -64,10 +77,9 @@ PyObject * THPVariable_NewWithFunction(PyObject *data, const std::shared_ptr<tor
 // This function DOES NOT steal a reference to data
 PyObject * THPVariable_NewVolatile(PyObject *data)
 {
-  auto v = std::make_shared<Variable>(torch::createTensor(data), false, true);
-  PyObject* obj = THPVariable_NewWithVar((PyTypeObject*)THPVariableClass, v);
+  Variable v(new VariableImpl(torch::createTensor(data), false, true), false);
+  PyObject* obj = THPVariable_NewWithVar((PyTypeObject*)THPVariableClass, std::move(v));
   if (obj) {
-    v->pyobj = obj;
     ((THPVariable*)obj)->data = data;
     Py_INCREF(data);
   }
@@ -77,10 +89,9 @@ PyObject * THPVariable_NewVolatile(PyObject *data)
 // This function DOES NOT steal a reference to data
 PyObject * THPVariable_NewLeaf(PyObject *data)
 {
-  auto v = std::make_shared<Variable>(torch::createTensor(data), false, false);
-  PyObject* obj = THPVariable_NewWithVar((PyTypeObject*)THPVariableClass, v);
+  Variable v(new VariableImpl(torch::createTensor(data)), false);
+  PyObject* obj = THPVariable_NewWithVar((PyTypeObject*)THPVariableClass, std::move(v));
   if (obj) {
-    v->pyobj = obj;
     ((THPVariable*)obj)->data = data;
     Py_INCREF(data);
   }
@@ -91,11 +102,11 @@ static int THPVariable_traverse(THPVariable *self, visitproc visit, void *arg)
 {
   Py_VISIT(self->data);
   Py_VISIT(self->backward_hooks);
-  if (self->cdata) {
-    if (auto fn = dynamic_cast<PyFunction*>(self->cdata->grad_fn.get())) {
+  if (self->cdata.defined()) {
+    if (auto fn = dynamic_cast<PyFunction*>(self->cdata.grad_fn().get())) {
       Py_VISIT(fn->obj);
     }
-    for (auto& hook : self->cdata->hooks) {
+    for (auto& hook : self->cdata.hooks()) {
       if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
         Py_VISIT(pyhook->dict);
       }
@@ -108,11 +119,11 @@ static int THPVariable_clear(THPVariable *self)
 {
   Py_CLEAR(self->data);
   Py_CLEAR(self->backward_hooks);
-  if (self->cdata) {
-    if (auto grad_acc = self->cdata->grad_accumulator.lock()) {
+  if (self->cdata.defined()) {
+    if (auto grad_acc = self->cdata.get()->grad_accumulator.lock()) {
       grad_acc->pre_hooks.clear();
     }
-    self->cdata->pyobj = nullptr;
+    self->cdata.get()->pyobj = nullptr;
   }
   self->cdata.reset();
   return 0;
@@ -122,7 +133,7 @@ static void THPVariable_dealloc(THPVariable* self)
 {
   PyObject_GC_UnTrack(self);
   THPVariable_clear(self);
-  self->cdata.~shared_ptr<Variable>();
+  self->cdata.~Variable();
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
@@ -157,20 +168,19 @@ PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject *kwds)
   THPUtils_assert(THPModule_isTensor(data), "Variable data has to "
           "be a tensor, but got %s", THPUtils_typename(data));
 
-  std::shared_ptr<Variable> var;
+  Variable var;
   if (grad_fn) {
-    var = std::make_shared<Variable>(torch::createTensor(data), THPFunction_asFunction((THPFunction*)grad_fn));
+    auto grad_fn_ = THPFunction_asFunction((THPFunction*)grad_fn);
+    var = Variable(new VariableImpl(torch::createTensor(data), grad_fn_), false);
   } else {
-    var = std::make_shared<Variable>(torch::createTensor(data), requires_grad, is_volatile);
+    var = Variable(new VariableImpl(torch::createTensor(data), requires_grad, is_volatile), false);
   }
-  PyObject* self = THPVariable_NewWithVar(type, var);
+
+  PyObject* self = THPVariable_NewWithVar(type, std::move(var));
   if (self) {
-    var->pyobj = self;
-    ((THPVariable*)self)->cdata = var;
     ((THPVariable*)self)->data = data;
     Py_INCREF(data);
   }
-
   return self;
 }
 
@@ -197,38 +207,62 @@ typedef int (*setter)(PyObject *, PyObject *, void *);
 
 PyObject *THPVariable_get_version(THPVariable *self)
 {
-  auto& var = *self->cdata;
-  return PyInt_FromLong(**var.version_counter);
+  auto& var = self->cdata;
+  return PyInt_FromLong(var.current_version());
 }
 
 PyObject *THPVariable_get_grad_fn(THPVariable *self)
 {
-  auto& var = *self->cdata;
-  if (!var.grad_fn) {
+  auto& var = self->cdata;
+  if (!var.grad_fn()) {
     Py_RETURN_NONE;
   }
-  return functionToPyObject(var.grad_fn);
+  return functionToPyObject(var.grad_fn());
 }
 
 int THPVariable_set_grad_fn(THPVariable *self, PyObject *obj)
 {
   THPUtils_assertRet(-1, obj == Py_None, "_grad_fn can be only set to None");
-  self->cdata->grad_fn = nullptr;
+  self->cdata.grad_fn() = nullptr;
   return 0;
 }
 
 PyObject *THPVariable_is_leaf(THPVariable *self)
 {
-  return PyBool_FromLong(!self->cdata->grad_fn);
+  return PyBool_FromLong(!self->cdata.grad_fn());
 }
 
 PyObject * THPVariable_get_data(THPVariable *self)
 {
   if (!self->data) {
-    self->data = torch::createPyObject(self->cdata->data);
+    self->data = torch::createPyObject(self->cdata.data());
   }
-  Py_INCREF(self->data);
+  Py_XINCREF(self->data);
   return self->data;
+}
+
+namespace {
+
+// XXX: This is a hack to access private TensorImpl::type_
+// http://bloglitb.blogspot.com/2011/12/access-to-private-members-safer.html
+// This is currently needed because module.float() changes the type of the
+// data field of each variable. We should fix this and not allow changing the
+// type of var.data.
+
+template<typename Tag, typename Tag::type M>
+struct Rob {
+  friend typename Tag::type get(Tag) {
+    return M;
+  }
+};
+
+struct TensorImpl_Type {
+  typedef Type* TensorImpl::*type;
+  friend type get(TensorImpl_Type);
+};
+
+template struct Rob<TensorImpl_Type, &TensorImpl::type_>;
+
 }
 
 int THPVariable_set_data(THPVariable *self, PyObject *data)
@@ -238,26 +272,26 @@ int THPVariable_set_data(THPVariable *self, PyObject *data)
   Py_INCREF(data);
   Py_XDECREF(self->data);
   self->data = data;
-  auto& var = *self->cdata;
-  auto tensor = torch::createTensor(data);
-  var.data.swap(tensor);
+  Tensor tensor = torch::createTensor(data);
+  if (&self->cdata.data().type() != &tensor.type()) {
+    // we change the type of var.data so we must change the type of var
+    auto newType = VariableImpl::getType(tensor);
+    self->cdata.get()->*get(TensorImpl_Type()) = newType;
+  }
+  self->cdata.data() = tensor;
   return 0;
 }
 
 PyObject *THPVariable_get_grad(THPVariable *self)
 {
-  auto& var = *self->cdata;
-  if (!var.grad) {
-    Py_RETURN_NONE;
-  }
-  return THPVariable_Wrap(var.grad);
+  return THPVariable_Wrap(self->cdata.grad());
 }
 
 int THPVariable_set_grad(THPVariable *self, PyObject *other)
 {
-  auto& var = *self->cdata;
+  auto& var = self->cdata;
   if (other == Py_None) {
-    var.grad.reset();
+    var.grad().reset();
     return 0;
   }
 
@@ -266,60 +300,56 @@ int THPVariable_set_grad(THPVariable *self, PyObject *other)
   THPUtils_assertRet(-1, self != (THPVariable*)other,
       "can't assign Variable as its own grad");
 
+  auto& data = var.data();
   auto& other_var = ((THPVariable*)other)->cdata;
+  auto& other_data = other_var.data();
 
   // Make sure the data is ok
-  THPUtils_assertRet(-1, other_var->data.type().ID() == var.data.type().ID(),
+  THPUtils_assertRet(-1, other_data.type().ID() == data.type().ID(),
       "assigned grad has data of a different type");
-  THPUtils_assertRet(-1, other_var->data.type().isCuda() == var.data.type().isCuda(),
+  THPUtils_assertRet(-1, other_data.type().isCuda() == data.type().isCuda(),
       "assigned grad has data located on a different device");
-  if (var.data.type().isCuda()) {
-    THPUtils_assertRet(-1, other_var->data.get_device() == var.data.get_device(),
+  if (data.type().isCuda()) {
+    THPUtils_assertRet(-1, other_data.get_device() == data.get_device(),
         "assigned grad has data located on a different device");
   }
-  THPUtils_assertRet(-1, other_var->data.sizes().vec() == var.data.sizes().vec(),
+  THPUtils_assertRet(-1, other_data.sizes().vec() == data.sizes().vec(),
       "assigned grad has data of a different size");
 
-  var.grad = other_var;
-  if (auto grad_acc = var.grad_accumulator.lock()) {
-    ((AccumulateGrad*)grad_acc.get())->variable_grad = other_var;
-  }
+  var.grad() = other_var;
   return 0;
 }
 
 PyObject *THPVariable_get_volatile(THPVariable *self)
 {
-  auto& var = *self->cdata;
-  return PyBool_FromLong(var.is_volatile);
+  auto& var = self->cdata;
+  return PyBool_FromLong(var.is_volatile());
 }
 
 int THPVariable_set_volatile(THPVariable *self, PyObject *obj)
 {
   THPUtils_assertRet(-1, PyBool_Check(obj), "volatile must be a bool");
-  THPUtils_assertRet(-1, !self->cdata->grad_fn,
+  THPUtils_assertRet(-1, !self->cdata.grad_fn(),
       "volatile can only be set on leaf variables");
-  auto& var = *self->cdata;
-  var.is_volatile = (obj == Py_True);
+  self->cdata.is_volatile() = (obj == Py_True);
   return 0;
 }
 
 PyObject *THPVariable_get_output_nr(THPVariable *self)
 {
-  auto& var = *self->cdata;
-  return PyInt_FromLong(var.output_nr);
+  return PyInt_FromLong(self->cdata.output_nr());
 }
 
 PyObject *THPVariable_get_requires_grad(THPVariable *self)
 {
-  auto& var = *self->cdata;
-  return PyBool_FromLong(var.requires_grad);
+  return PyBool_FromLong(self->cdata.requires_grad());
 }
 
 int THPVariable_set_requires_grad(THPVariable *self, PyObject *obj)
 {
   THPUtils_assertRet(-1, PyBool_Check(obj), "requires_grad must be a bool");
-  auto& var = *self->cdata;
-  if (var.grad_fn) {
+  auto& var = self->cdata;
+  if (var.grad_fn()) {
     const char *hint = "";
     if (obj == Py_False) {
       hint = " If you want to use a computed variable in a subgraph "
@@ -329,9 +359,9 @@ int THPVariable_set_requires_grad(THPVariable *self, PyObject *obj)
     THPUtils_setError("you can only change requires_grad flags of leaf variables.%s", hint);
     return -1;
   }
-  var.requires_grad = obj == Py_True;
-  if (auto grad_accumulator = var.grad_accumulator.lock()) {
-    grad_accumulator->is_executable = var.requires_grad;
+  var.requires_grad() = (obj == Py_True);
+  if (auto grad_accumulator = var.get()->grad_accumulator.lock()) {
+    grad_accumulator->is_executable = var.requires_grad();
   }
   return 0;
 }
@@ -353,9 +383,9 @@ int THPVariable_set_backwards_hooks(THPVariable *self, PyObject *obj)
   Py_XINCREF(obj);
   Py_XDECREF(self->backward_hooks);
   self->backward_hooks = obj;
-  self->cdata->hooks.clear();
+  self->cdata.hooks().clear();
   if (obj) {
-    self->cdata->hooks.emplace_back(new PyFunctionPreHook(obj, 0));
+    self->cdata.hooks().emplace_back(new PyFunctionPreHook(obj, 0));
   }
   return 0;
 }
@@ -416,8 +446,17 @@ PyTypeObject THPVariableType = {
   THPVariable_pynew                      /* tp_new */
 };
 
+namespace torch { namespace autograd {
+
+extern PyMethodDef variable_methods[];
+
+}}
+
 bool THPVariable_initModule(PyObject *module)
 {
+  static std::vector<PyMethodDef> methods;
+  THPUtils_addPyMethodDefs(methods, torch::autograd::variable_methods);
+  THPVariableType.tp_methods = methods.data();
   if (PyType_Ready(&THPVariableType) < 0)
     return false;
   Py_INCREF(&THPVariableType);

@@ -38,7 +38,7 @@ auto Identity::apply(const variable_list& inputs) -> variable_list {
 
 auto Clone::apply(const variable_list& inputs) -> variable_list {
   check_input_variables("Clone", inputs, 1);
-  auto& input = inputs[0]->data;
+  auto& input = inputs[0].data();
   AutoGPU guard(input);
 
   at::Tensor output = input.clone();
@@ -50,7 +50,7 @@ auto Clone::apply(const variable_list& inputs) -> variable_list {
 
 auto Contiguous::apply(const variable_list& inputs) -> variable_list {
   check_input_variables("Contiguous", inputs, 1);
-  auto& input = inputs[0]->data;
+  auto& input = inputs[0].data();
   AutoGPU guard(input);
 
   at::Tensor output = input.contiguous();
@@ -63,7 +63,7 @@ auto Contiguous::apply(const variable_list& inputs) -> variable_list {
 auto Transpose::apply(const variable_list& inputs) -> variable_list {
   check_input_variables("Transpose", inputs, 1);
 
-  auto& input = inputs[0]->data;
+  auto& input = inputs[0].data();
   AutoGPU guard(input);
 
   at::Tensor output = input.transpose(dim1, dim2);
@@ -76,7 +76,7 @@ auto Transpose::apply(const variable_list& inputs) -> variable_list {
 auto View::apply(const variable_list& inputs) -> variable_list {
   check_input_variables("View", inputs, 1);
 
-  auto& input = inputs[0]->data;
+  auto& input = inputs[0].data();
   AutoGPU guard(input);
 
   at::Tensor output = input.view(size);
@@ -89,7 +89,7 @@ auto View::apply(const variable_list& inputs) -> variable_list {
 auto Expand::apply(const variable_list& inputs) -> variable_list {
   check_input_variables("Expand", inputs, 1);
 
-  auto& input = inputs[0]->data;
+  auto& input = inputs[0].data();
   AutoGPU guard(input);
 
   at::Tensor output = input.expand(size);
@@ -102,7 +102,7 @@ auto Expand::apply(const variable_list& inputs) -> variable_list {
 auto Narrow::apply(const variable_list& inputs) -> variable_list {
   check_input_variables("Narrow", inputs, 1);
 
-  auto& input = inputs[0]->data;
+  auto& input = inputs[0].data();
   AutoGPU guard(input);
 
   at::Tensor output = input.narrow(dim, start, size);
@@ -118,12 +118,12 @@ auto Cat::apply(const variable_list& inputs) -> variable_list {
     throw std::runtime_error("Cat operation expect at least one argument.");
   }
 
-  auto& input = inputs[0]->data;
+  auto& input = inputs[0].data();
   AutoGPU guard(input);
 
   std::vector<at::Tensor> tensors(num_inputs);
   for (int i = 0; i < num_inputs; ++i) {
-    tensors[i] = inputs[i]->data;
+    tensors[i] = inputs[i].data();
   }
   auto output = input.type().cat(tensors, dim);
 
@@ -133,7 +133,7 @@ auto Cat::apply(const variable_list& inputs) -> variable_list {
 }
 
 auto Chunk::apply(const variable_list& inputs) -> variable_list {
-  auto outputs = chunk(inputs[0]->data, chunks,dim);
+  auto outputs = chunk(inputs[0].data(), chunks,dim);
   return wrap_outputs(inputs, std::move(outputs), [](FunctionFlags f) {
     return std::make_shared<Error>("Chunk is not differentiable", std::move(f));
   });

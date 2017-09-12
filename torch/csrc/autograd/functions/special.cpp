@@ -29,8 +29,8 @@ auto Eval::getSubgraph(const variable_list& inputs, const variable_list& outputs
   for (auto & input : inputs) {
     // TODO: Remove me when we get rid of null Variables
     // See https://github.com/pytorch/pytorch/issues/2513
-    if (!input) continue;
-    input_edges.emplace(input->grad_fn ? input->grad_fn : input->grad_accumulator.lock(), input->output_nr);
+    if (!input.defined()) continue;
+    input_edges.emplace(input.grad_fn() ? input.grad_fn() : input.grad_accumulator(), input.output_nr());
   }
 
   // This is used to stop the search in situation 2 and find the corresponding placeholders.
@@ -45,7 +45,7 @@ auto Eval::getSubgraph(const variable_list& inputs, const variable_list& outputs
   std::unordered_set<Function*> seen { nullptr };
   std::vector<Function*> queue;
   for (auto & output : outputs) {
-    auto ptr = output->grad_fn.get();
+    auto ptr = output.grad_fn().get();
     bool unseen = seen.emplace(ptr).second;
     if (unseen)
       queue.emplace_back(ptr);
@@ -99,15 +99,15 @@ variable_list Eval::filterRelevantOutputs(const variable_list& inputs, const var
   for (auto& input : inputs) {
     // TODO: Remove me when we get rid of null Variables
     // See https://github.com/pytorch/pytorch/issues/2513
-    if (!input) continue;
-    ignored_grad_fns.emplace(input->grad_fn, input->output_nr);
+    if (!input.defined()) continue;
+    ignored_grad_fns.emplace(input.grad_fn(), input.output_nr());
   }
   for (auto& output : outputs) {
     // TODO: Remove me when we get rid of null Variables
     // See https://github.com/pytorch/pytorch/issues/2513
-    if (!output) continue;
-    if (!output->grad_fn) continue;
-    if (ignored_grad_fns.count(std::make_pair(output->grad_fn, output->output_nr)) > 0) continue;
+    if (!output.defined()) continue;
+    if (!output.grad_fn()) continue;
+    if (ignored_grad_fns.count(std::make_pair(output.grad_fn(), output.output_nr())) > 0) continue;
     relevant_outputs.emplace_back(output);
   }
   return relevant_outputs;
@@ -119,9 +119,9 @@ auto Eval::computeInputOrder(const variable_list& inputs, const placeholder_list
   for (auto & input : inputs) {
     // TODO: Remove me when we get rid of null Variables
     // See https://github.com/pytorch/pytorch/issues/2513
-    if (!input) continue;
+    if (!input.defined()) continue;
     input_order.emplace(
-      std::make_pair(input->grad_fn ? input->grad_fn : input->grad_accumulator.lock(), input->output_nr),
+      std::make_pair(input.grad_fn() ? input.grad_fn() : input.grad_accumulator(), input.output_nr()),
       idx++
     );
   }
@@ -140,7 +140,7 @@ bool Eval::replaceSubgraph(const variable_list& inputs, const variable_list& _ou
     return false;
 
   for (auto & output : relevant_outputs)
-    roots.emplace_back(output->grad_fn, output->output_nr);
+    roots.emplace_back(output.grad_fn(), output.output_nr());
 
   auto subgraph = getSubgraph(inputs, relevant_outputs, inherited_placeholders);
 
@@ -167,7 +167,7 @@ bool Eval::replaceSubgraph(const variable_list& inputs, const variable_list& _ou
   // Replace subgraph with this node.
   next_functions.insert(next_functions.begin(), subgraph.boundary.ends.begin(), subgraph.boundary.ends.end());
   is_executable = std::any_of(relevant_outputs.begin(), relevant_outputs.end(),
-                              [](std::shared_ptr<Variable>& var) { return var->requires_grad; });
+                              [](const Variable& var) { return var.requires_grad(); });
 
   // Ensure placeholders and inputs are sorted in the same way.
   edge_order input_order = computeInputOrder(inputs, inherited_placeholders);
@@ -180,8 +180,8 @@ bool Eval::replaceSubgraph(const variable_list& inputs, const variable_list& _ou
 
   // Rebase outputs.
   for (auto & output : relevant_outputs) {
-    output->grad_fn = shared_from_this();
-    output->output_nr = num_inputs++;
+    output.grad_fn() = shared_from_this();
+    output.get()->output_nr = num_inputs++;
   }
 
   return true;

@@ -128,7 +128,7 @@ PyObject* THPCppFunction_register_hook_dict(PyObject* self, PyObject* _var)
   auto var = (THPVariable*)_var;
   auto& fn = *((THPCppFunction*)self)->cdata;
   fn.pre_hooks.push_back(std::make_shared<PyFunctionPreHook>(
-      var->backward_hooks, var->cdata->output_nr));
+      var->backward_hooks, var->cdata.output_nr()));
   Py_RETURN_NONE;
 }
 

@@ -1,105 +1,125 @@
 #include "torch/csrc/autograd/variable.h"
 
+#include "torch/csrc/autograd/generated/VariableType.h"
 #include "torch/csrc/autograd/functions/accumulate_grad.h"
-#include "torch/csrc/utils/auto_gpu.h"
 
-using namespace torch;
+using namespace at;
 
 namespace torch { namespace autograd {
 
-Variable::Variable(
-  at::Tensor data,
-  bool requires_grad,
-  bool is_volatile)
-    : data(data)
-    , grad_fn(nullptr)
-    , grad(nullptr)
-    , version_counter(new VariableVersion())
-    , requires_grad(requires_grad)
-    , is_volatile(is_volatile)
-    , output_nr(0)
-    , pyobj(nullptr)
-{
-  if (!this->data.defined()) {
-    throw std::runtime_error("Variable data is NULL");
+VariableImpl::VariableImpl(Tensor data_, bool requires_grad, bool is_volatile)
+  : TensorImpl(getType(data_))
+  , data(std::move(data_))
+  , grad()
+  , version_counter(new VariableVersion())
+  , requires_grad(requires_grad)
+  , is_volatile(is_volatile)
+  , output_nr(0)
+  , pyobj(nullptr) {
+  if (!data.defined()) {
+    throw std::runtime_error("data is undefined");
   }
 }
 
-Variable::Variable(
-  at::Tensor data,
-  std::shared_ptr<Function> grad_fn)
-    : data(data)
-    , grad_fn(grad_fn)
-    , grad(nullptr)
-    , version_counter(new VariableVersion())
-    , requires_grad(grad_fn->is_executable)
-    , is_volatile(false)
-    , output_nr(grad_fn->num_inputs++)
-    , pyobj(nullptr)
+VariableImpl::VariableImpl(Tensor data, std::shared_ptr<Function> grad_fn)
+  : VariableImpl(std::move(data))
 {
-  if (!this->data.defined()) {
-    throw std::runtime_error("Variable data is NULL");
-  }
+  this->grad_fn = grad_fn;
+  requires_grad = grad_fn->is_executable;
+  output_nr = grad_fn->num_inputs++;
 }
 
-auto Variable::get_grad_accumulator() -> std::shared_ptr<Function> {
+VariableImpl::VariableImpl(Tensor data)
+  : VariableImpl(std::move(data), false, false)
+{
+}
+
+VariableImpl::~VariableImpl() {
+}
+
+const char * VariableImpl::toString() const {
+  return "Variable";
+}
+
+IntList VariableImpl::sizes() {
+  return data.sizes();
+}
+
+int64_t VariableImpl::dim() {
+  return data.dim();
+}
+
+const char * VariableImpl::typeString() {
+  return "VariableType";
+}
+
+void * VariableImpl::unsafeGetTH(bool retain) {
+  return data.unsafeGetTH(retain);
+}
+
+IntList VariableImpl::strides() {
+  return data.strides();
+}
+
+Scalar VariableImpl::localScalar() {
+  return data.pImpl->localScalar();
+}
+
+void VariableImpl::assign_(Scalar s) {
+  data.assign_(s);
+}
+
+std::shared_ptr<Function> VariableImpl::get_grad_accumulator() {
   if (grad_fn) {
     throw std::logic_error("get_grad_accumulator() should be only called on leaf Variables");
   }
-  if (is_volatile) return nullptr;
+  if (!requires_grad) {
+    return nullptr;
+  }
 
   std::lock_guard<std::mutex> lock(grad_accumulator_lock);
 
   auto result = grad_accumulator.lock();
   if (result) return result;
 
-  result = std::make_shared<AccumulateGrad>(shared_from_this());
+  result = std::make_shared<AccumulateGrad>(Variable(this, true));
   grad_accumulator = result;
   return result;
 }
 
-auto SavedVariable::unpack(std::shared_ptr<Function> saved_for) -> std::shared_ptr<Variable> {
-  if (!data.defined()) {
-    if (version) {
-      throw std::runtime_error(ERR_BACKWARD_TWICE);
+namespace {
+
+struct VariableTypes {
+  VariableTypes() {
+    auto& context = at::globalContext();
+    for (int p = 0; p < static_cast<int>(Backend::NumOptions); ++p) {
+      for (int s = 0; s < static_cast<int>(ScalarType::NumOptions); s++) {
+        auto baseType = context.type_registry[p][s].get();
+        if (baseType) {
+          auto id = static_cast<int>(baseType->ID());
+          types[id].reset(new VariableType(&context, baseType));
+        }
+      }
     }
-    return nullptr;
   }
 
-  int current_version = **version;
-  if (expected_version != current_version) {
-    throw std::runtime_error("one of the variables "
-        "needed for gradient computation has been modified by an "
-        "inplace operation");
-  }
+  std::unique_ptr<Type> types[static_cast<int>(TypeID::NumOptions)];
+};
 
-  auto new_var = std::make_shared<Variable>(data, requires_grad, is_volatile);
-  if (has_grad_fn && !grad_fn) {
-    if (!saved_for) {
-      // If saving the grad_fn would create a circular reference, then it must
-      // be passed in to the unpack function.
-      throw std::runtime_error("No grad_fn for non-leaf saved variable");
-    }
-    new_var->grad_fn = saved_for;
-  } else {
-    new_var->grad_fn = grad_fn;
-  }
-  new_var->version_counter->join_with(*version);
-  // If a Variable is a leaf (no grad_fn saved), and it requires_grad, then we
-  // should have saved the grad accumulator. Even if the Variable no longer
-  // alive, the accumulator should be kept alive by the references in the graph).
-  if (requires_grad && !new_var->grad_fn && grad_accumulator.expired())
-    throw std::logic_error("No grad accumulator for a saved leaf!");
-  new_var->grad_accumulator = grad_accumulator;
-  if (tracing_state)
-    new_var->tracing_state.reset(new jit::tracer::ValueTracingState(*tracing_state));
+} // anonymous namespace
 
-  return new_var;
+Type* VariableImpl::getType(const Tensor& tensor)
+{
+  if (!tensor.defined()) {
+    throw std::runtime_error("tensor is undefined");
+  }
+  return getType(tensor.type());
 }
 
-const char* ERR_BACKWARD_TWICE =
-    "Trying to backward through the graph a second time, but the buffers have "
-    "already been freed. Specify retain_graph=True when calling backward "
-    "the first time.";
+Type* VariableImpl::getType(const Type& baseType)
+{
+  static VariableTypes vt;
+  return vt.types[static_cast<int>(baseType.ID())].get();
+}
 
 }} // namespace torch::autograd
