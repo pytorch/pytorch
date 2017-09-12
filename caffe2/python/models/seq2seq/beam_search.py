@@ -7,6 +7,7 @@ from __future__ import unicode_literals
 
 from collections import namedtuple
 from caffe2.python import core
+import caffe2.python.models.seq2seq.seq2seq_util as seq2seq_util
 from caffe2.python.models.seq2seq.seq2seq_model_helper import Seq2SeqModelHelper
 
 
@@ -36,14 +37,13 @@ class BeamSearchForwardOnly(object):
         ['initial_value', 'state_prev_link', 'state_link'],
     )
 
-    def __init__(self, beam_size, model, go_token_id, eos_token_id):
+    def __init__(self, beam_size, model, eos_token_id):
         self.beam_size = beam_size
         self.model = model
         self.step_model = Seq2SeqModelHelper(
             name='step_model',
             param_model=self.model,
         )
-        self.go_token_id = go_token_id
         self.eos_token_id = eos_token_id
 
         (
@@ -89,6 +89,7 @@ class BeamSearchForwardOnly(object):
         state_configs,
         word_rewards=None,
         possible_translation_tokens=None,
+        go_token_id=seq2seq_util.GO_ID,
     ):
         # [beam_size, beam_size]
         best_scores_per_hypo, best_tokens_per_hypo = self.step_model.net.TopK(
@@ -248,7 +249,7 @@ class BeamSearchForwardOnly(object):
             [],
             'initial_tokens',
             shape=[1],
-            value=float(self.go_token_id),
+            value=float(go_token_id),
             dtype=core.DataType.FLOAT,
         )
         initial_hypo = self.model.param_init_net.ConstantFill(

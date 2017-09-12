@@ -311,7 +311,6 @@ class Seq2SeqModelCaffe2EnsembleDecoder(object):
         beam_decoder = BeamSearchForwardOnly(
             beam_size=self.beam_size,
             model=self.model,
-            go_token_id=seq2seq_util.GO_ID,
             eos_token_id=seq2seq_util.EOS_ID,
         )
         step_model = beam_decoder.get_step_model()
@@ -389,6 +388,7 @@ class Seq2SeqModelCaffe2EnsembleDecoder(object):
             attentions=attention_weights_average,
             state_configs=state_configs,
             word_rewards=word_rewards,
+            go_token_id=seq2seq_util.GO_ID,
         )
 
         workspace.RunNetOnce(self.model.param_init_net)
