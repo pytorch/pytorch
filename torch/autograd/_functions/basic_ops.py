@@ -136,6 +136,14 @@ class AddConstant(InplaceFunction):
 class SubConstant(InplaceFunction):
 
     @staticmethod
+    def symbolic(g, a, b, inplace=False):
+        tensor_first = isinstance(a, torch._C.Node)
+        if tensor_first:
+            return g.op("SubConstant", a, value_f=b)
+        else:
+            return g.op("AddConstant", g.op("Neg", b).typeAs(b), value_f=a)
+
+    @staticmethod
     def forward(ctx, a, b, inplace=False):
         tensor, constant, ctx.tensor_first = sort_args(a, b)
         if ctx.tensor_first:

@@ -162,6 +162,9 @@ void checkGraph(const std::shared_ptr<Graph>& graph) {
               "maybe it doesn't implement a symbolic definition?");
 #undef GET_NAME
     }
+    if (node->kind() == kAddConstant) {
+      throw std::runtime_error("can't serialize PyTorch-only node AddConstant (not implemented yet)");
+    }
   }
 }
 

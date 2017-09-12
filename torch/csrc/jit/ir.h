@@ -93,7 +93,7 @@ struct TensorType : public Type {
     , device_(tensor.type().isCuda() ? tensor.get_device() : -1)
     , sizes_(tensor.sizes())
     , strides_(tensor.strides()) {}
-public:
+
   static const TypeKind Kind = TypeKind::TensorType;
 
   at::ScalarType scalarType() const { return scalar_type_; }
