@@ -385,6 +385,11 @@ class BaseReducerGradient {
     return false;
   }
 
+  // True if the backward op requires the output of the forward op.
+  static bool requiresForwardOutput() {
+    return false;
+  }
+
   struct Meta {
     TIndex block_size;
     vector<TIndex> block_shape;
@@ -743,6 +748,92 @@ struct MeanReducerDef {
   static constexpr const char* name = "Mean";
   static constexpr const char* doc =
       "Mean computes the element-wise mean of the input slices. "
+      "Operation doesn't change the shape of the individual blocks.";
+  static void PopulateSchema(OpSchema& /*schema*/) {}
+};
+
+template <typename T, class Context>
+class MaxReducer;
+template <typename T, class Context>
+class MaxReducerGradient;
+
+template <typename T>
+class MaxReducer<T, CPUContext> : public BaseReducer {
+ public:
+  using FixedDispatch = FixedValues<1>;
+
+  MaxReducer(const Meta& meta, T* out, CPUContext* /*context*/)
+      : out_(out), current_size_(0) {}
+
+  template <int FixedSize>
+  void process(
+      const Meta& meta,
+      const T* in,
+      TIndex /*offset*/,
+      CPUContext* context) {
+    CAFFE_ENFORCE(
+        meta.first_dim,
+        "MaxReducer implemented only for front dimensions reduction");
+    if (current_size_ > 0) {
+      EigenVectorMap<T> output_vec(out_, meta.block_size);
+      output_vec =
+          output_vec.cwiseMax(ConstEigenVectorMap<T>(in, meta.block_size));
+    } else {
+      memcpy(out_, in, sizeof(T) * meta.block_size);
+    }
+    ++current_size_;
+  }
+
+ private:
+  T* out_;
+  int current_size_;
+};
+
+template <typename T, class Context>
+class MaxReducerGradient : public BaseReducerGradient {
+ public:
+  static bool requiresDataInput(const OperatorDef& /*def*/) {
+    return true;
+  }
+
+  static bool requiresForwardOutput() {
+    return true;
+  }
+
+  using FixedDispatch = FixedValues<1>;
+
+  MaxReducerGradient(
+      const Meta& /*meta*/,
+      const T* s_grad,
+      CPUContext* /*context*/)
+      : s_grad_(s_grad) {}
+
+  template <int FixedSize>
+  void fillGradWithMainInputAndForwardOutput(
+      const Meta& meta,
+      const T* data,
+      T* data_grad,
+      const T* forward_output,
+      TIndex /*offset*/,
+      Context* /*context*/,
+      const int /*length*/) {
+    for (TIndex i = 0; i < meta.block_size; ++i) {
+      data_grad[i] = data[i] == forward_output[i] ? s_grad_[i] : 0;
+    }
+  }
+
+ private:
+  const T* s_grad_;
+};
+
+struct MaxReducerDef {
+  template <typename T, class Context>
+  using Reducer = MaxReducer<T, Context>;
+  template <typename T, class Context>
+  using ReducerGradient = MaxReducerGradient<T, Context>;
+  static constexpr const char* name = "Max";
+  static constexpr const char* doc =
+      "Max computes the element-wise max of the input slices. "
       "Operation doesn't change the shape of the individual blocks.";
   static void PopulateSchema(OpSchema& /*schema*/) {}
 };
