@@ -35,13 +35,22 @@ class NetBase {
  public:
   NetBase(const std::shared_ptr<const NetDef>& net_def, Workspace* ws);
   virtual ~NetBase() noexcept {}
-  virtual bool Run() = 0;
+  virtual bool RunAsync() = 0;
+  virtual bool SupportsAsync() = 0;
+  inline const vector<const Event*>& events() const {
+    return events_;
+  }
 
-  // RunAsync runs the net on the current stream, but potentially does
-  // not synchronize with respect to the host, and thus may require
-  // external synchronization (with respect to the current stream)
-  // after execution.
-  virtual bool RunAsync() { return Run(); }
+  inline bool Run() {
+    if (!RunAsync()) {
+      return false;
+    }
+    for (const Event* event : events_) {
+      event->Finish();
+    }
+    return true;
+  }
+
   /**
    * Benchmarks a network.
    *
@@ -95,6 +104,7 @@ class NetBase {
   vector<string> external_output_;
   string name_;
   std::unique_ptr<NetObserver> observer_;
+  vector<const Event*> events_;
 
   DISABLE_COPY_AND_ASSIGN(NetBase);
 };

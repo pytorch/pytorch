@@ -195,7 +195,7 @@ class RecurrentNetworkOp final : public Operator<Context> {
     } else {
       // Fix for legacy models that pass "rnn" type net
       if (stepNetDef_.type() == "rnn") {
-        stepNetDef_.set_type("simple");
+        stepNetDef_.set_type("async_simple");
       }
       CAFFE_ENFORCE(stepNetDef_.type() != "async_dag");
     }
