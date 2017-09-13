@@ -222,17 +222,6 @@ void testOpenGLCopyOps(int N, int C, int H, int W, float error, int tile_x = 1, 
   checkError(t1, t2, error);
 }
 
-typedef enum {
-  AveragePool,
-  MaxPool,
-  Conv,
-  ConvTranspose,
-  ConvPRelu,
-  ConvTransposePRelu,
-  ConvRelu,
-  ConvTransposeRelu
-} PoolOp;
-
 const char* glPoolOperationName[] = {"OpenGLAveragePool",
                                      "OpenGLMaxPool",
                                      "OpenGLConv",
@@ -262,12 +251,12 @@ void testOpenGLConv(int N,
                     int stride,
                     PoolOp poolOp,
                     float error,
-                    bool random_input = true,
-                    int input_batch_size = 1,
-                    int output_batch_size = 1,
-                    int input_tile_x = 1,
-                    int input_tile_y = 1,
-                    bool tiling = false) {
+                    bool random_input,
+                    int input_batch_size,
+                    int output_batch_size,
+                    int input_tile_x,
+                    int input_tile_y,
+                    bool tiling) {
   LOG(INFO) << "OpenGL Conv Test: "
             << "input C: " << C << ", output C: " << K << ", H: " << H << ", W: " << W
             << ", K: " << kernel_w << "x" << kernel_h << ", P: " << pad << ", S: " << stride
@@ -658,7 +647,8 @@ void testOpenGLRelu(int N, int C, int H, int W, int input_tile_x, int input_tile
   checkError(ws.GetBlob("Y_cpu")->Get<TensorCPU>(), ws.GetBlob("Y_ref")->Get<TensorCPU>(), error);
 }
 
-void testOpenGLAdd(int N, int C, int H, int W, float error = 0.1, int input_tile_x = 1, int input_tile_y = 1) {
+void testOpenGLAdd(
+    int N, int C, int H, int W, float error = 0.1, int input_tile_x = 1, int input_tile_y = 1) {
   LOG(INFO) << "OpenGL Add Test "
             << "C: " << C << ", H: " << H << ", W: " << W;
   Workspace ws;
@@ -2169,7 +2159,8 @@ int runModelBenchmarks(caffe2::NetDef& init_net,
   if (engine == "CPU") {
     net_def.CopyFrom(predict_net);
   } else if (engine == "OPENGL") {
-    if (!caffe2::tryConvertToOpenGL(init_net, predict_net, &net_def, use_texture_input, use_tiling, run_fusion)) {
+    if (!caffe2::tryConvertToOpenGL(
+            init_net, predict_net, &net_def, use_texture_input, use_tiling, run_fusion)) {
       CAFFE_THROW("Failed to convert to openGL. Benchmark failed to run");
       return -1;
     }
@@ -2239,7 +2230,7 @@ int runModelBenchmarks(caffe2::NetDef& init_net,
 #else
                                                                   false
 #endif
-                                                                  );
+      );
       blob->Reset(output_image);
       for (auto& texture : (*output_image)[0]->textures) {
         texture->map_load([&](void* buffer,
@@ -2262,7 +2253,7 @@ int runModelBenchmarks(caffe2::NetDef& init_net,
 #else
                                                                 false
 #endif
-                                                                );
+      );
       blob->Reset(output_image);
       for (auto& texture : (*output_image)[0]->textures) {
         texture->map_load([&](void* buffer,
@@ -2373,19 +2364,9 @@ void testGLTextureTypes() {
   gl_log(GL_LOG, "...done with %s\n", __PRETTY_FUNCTION__);
 }
 
-static void squareFactors(int N, int& r1, int& r2) {
-  int f = sqrt(N);
-
-  if (f * f == N) {
-    r1 = r2 = f;
-  } else {
-    while (N % f != 0) {
-      f--;
-    }
-    r1 = N / f;
-    r2 = f;
-  }
-}
+namespace caffe2 {
+  void squareFactors(int N, int& r1, int& r2);
+};
 
 void testOpenGL() {
   {
@@ -2394,7 +2375,7 @@ void testOpenGL() {
 
     for (const auto& input_channels : channels) {
       int tile_x = 1, tile_y = 1;
-      squareFactors((input_channels + 3) / 4, tile_x, tile_y);
+      caffe2::squareFactors((input_channels + 3) / 4, tile_x, tile_y);
 
       for (const auto& output_channels : channels) {
         for (int size = 5; size < 8; size *= 2) {
@@ -2522,7 +2503,7 @@ void testOpenGL() {
     }
     for (const auto& channel : channels) {
       int tile_x = 1, tile_y = 1;
-      squareFactors((channel + 3) / 4, tile_x, tile_y);
+      caffe2::squareFactors((channel + 3) / 4, tile_x, tile_y);
       // clang-format off
       testOpenGLConv(1, channel, 10, 10, channel, 3, 3, 0, 1, ConvPRelu, 0.1 * channel / 8, true, 1, 1, tile_x, tile_y, true);
       testOpenGLConv(1, channel, 10, 10, channel, 3, 3, 0, 1, ConvTransposePRelu, 0.1 * channel / 8, true, 1, 1, tile_x, tile_y, true);

@@ -19,13 +19,17 @@ class GLFilter {
   GLuint program = 0;
   GLuint frameBuffer = 0;
   static constexpr int kMaxUniformBlocks = 12;
-  GLuint uniformBlock[kMaxUniformBlocks] = {0};
-  GLint blockSize[kMaxUniformBlocks] = {0};
+  struct uniformBlockInfo {
+    GLuint buffer;
+    GLint size;
+    bool initialized;
+  };
+  std::vector<std::vector<uniformBlockInfo>> uniformBlock;
   bool frame_buffer_initialized = false;
 
   // glGetError() can be expensive, we should turn error checking off when we're done with debugging
 
-  static constexpr bool check_opengl_errors = true;
+  static constexpr bool check_opengl_errors = false;
 
  public:
   typedef std::vector<std::pair<std::string, std::string>> replacements_t;
@@ -77,7 +81,8 @@ class GLFilter {
   template <typename T>
   void attach_uniform_buffer(const binding* block,
                              GLuint bindingPoint,
-                             std::function<void(T*, size_t)> loader);
+                             std::function<void(T*, size_t)> loader,
+                             int batch = -1);
 
   void run(const std::vector<texture_attachment>& input,
            const std::vector<const GLTexture*>& output,

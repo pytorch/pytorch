@@ -18,7 +18,8 @@ class GLSub : public GLFilter {
       : GLFilter("GLSub",
                  vertex_shader,
                  fragment_shader,
-                 std::vector<binding*>({BINDING(outputSize), BINDING(inputData[0]), BINDING(inputData[1])}),
+                 std::vector<binding*>(
+                     {BINDING(outputSize), BINDING(inputData[0]), BINDING(inputData[1])}),
                  {/* no uniform blocks */},
                  {/* no attributes */},
                  {/* no replacements */}) {}
@@ -86,9 +87,11 @@ class OpenGLSubOp final : public Operator<CPUContext>, ImageAllocator<T> {
  public:
   OpenGLSubOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<CPUContext>(operator_def, ws) {
-    OPERATOR_NEEDS_FEATURE(OperatorBase::HasArgument("broadcast") == false, "OpenGLSub does not support broadcast");
+    OPERATOR_NEEDS_FEATURE(OperatorBase::HasArgument("broadcast") == false,
+                           "OpenGLSub does not support broadcast");
 
-    OPERATOR_NEEDS_FEATURE(OperatorBase::HasArgument("axis") == false, "OpenGLSub does not support axis");
+    OPERATOR_NEEDS_FEATURE(OperatorBase::HasArgument("axis") == false,
+                           "OpenGLSub does not support axis");
   }
 
   bool RunOnDevice() override {

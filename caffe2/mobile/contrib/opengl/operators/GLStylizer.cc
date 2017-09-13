@@ -18,23 +18,25 @@ class GLStylizer : public GLFilter {
   bool deprocess;
 
  public:
-   GLStylizer(bool _deprocess = false, InputFormat input_format = BGRA)
-       : GLFilter(_deprocess ? "GLDeStylizer" : "GLStylizer",
-                  vertex_shader,
-                  fragment_shader,
-                  std::vector<binding*>({BINDING(inputData), BINDING(mean), BINDING(noise_std), BINDING(outputSize)}),
-                  {/* no uniform blocks */},
-                  {/* no attributes */},
-                  {{"DEPROCESS", caffe2::to_string(_deprocess)}, {"RGBAINPUT", caffe2::to_string(input_format)}}),
-         deprocess(_deprocess) {}
+  GLStylizer(bool _deprocess = false, InputFormat input_format = BGRA)
+      : GLFilter(_deprocess ? "GLDeStylizer" : "GLStylizer",
+                 vertex_shader,
+                 fragment_shader,
+                 std::vector<binding*>(
+                     {BINDING(inputData), BINDING(mean), BINDING(noise_std), BINDING(outputSize)}),
+                 {/* no uniform blocks */},
+                 {/* no attributes */},
+                 {{"DEPROCESS", caffe2::to_string(_deprocess)},
+                  {"RGBAINPUT", caffe2::to_string(input_format)}}),
+        deprocess(_deprocess) {}
 
-   template <typename T1, typename T2>
-   void stylize(const GLImage<T1>* input_image,
-                const GLImage<T2>* output_image,
-                const float mean_values[3],
-                float noise_std_value);
+  template <typename T1, typename T2>
+  void stylize(const GLImage<T1>* input_image,
+               const GLImage<T2>* output_image,
+               const float mean_values[3],
+               float noise_std_value);
 
-   static const char* fragment_shader;
+  static const char* fragment_shader;
 };
 
 // MARK: GLSL
@@ -165,7 +167,7 @@ class OpenGLTensorToTextureStylizerPreprocessOp : public Operator<CPUContext>,
 #else
                                                                                   false
 #endif
-                                                                                  );
+    );
     const int tile_x = 1, tile_y = 1;
     GLImageVector<uint8_t>* input_images = ImageAllocator<uint8_t>::newImage(
         num_images, input_width, input_height, kInputChannels, tile_x, tile_y, false);

@@ -251,7 +251,10 @@ void dumpDefForOpenGL(const NetDef& d) {
 //  }
 //}
 
-NetDef rewritePredictNetForOpenGL(const NetDef& predictNet, bool useTextureInput, bool useTiling, bool runFusion) {
+NetDef rewritePredictNetForOpenGL(const NetDef& predictNet,
+                                  bool useTextureInput,
+                                  bool useTiling,
+                                  bool runFusion) {
   CAFFE_ENFORCE_GE(predictNet.op_size(), 1);
   NetDef net;
   net.CopyFrom(predictNet);

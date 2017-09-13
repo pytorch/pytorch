@@ -43,7 +43,7 @@ class CopyToOpenGLOp final : public Operator<CPUContext>, ImageAllocator<T> {
 #else
                                                                  false
 #endif
-                                                                 );
+    );
 
     if (output_image->tile_x() > 1 || output_image->tile_y() > 1) {
       LOG(INFO) << "CopyToOpenGLOp tiling: " << output_image->tile_x() << ":"
