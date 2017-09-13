@@ -5,32 +5,6 @@
 
 namespace caffe2 {
 
-namespace {
-
-// Round up N to nearest multiple of A.
-size_t roundUp(size_t n, size_t a) {
-  return n + ((-n % a) + a) % a;
-}
-
-constexpr size_t alignmentBytes = 128;
-
-// Returns the index into mask_and_states where states_data begins.
-// Ensures that states_data is properly aligned.
-template <typename T>
-size_t firstElementForStates(size_t mask_bytes) {
-  return roundUp(mask_bytes, alignmentBytes) / sizeof(T);
-}
-
-// Calculate the required size of the tensor which holds the data for both
-// "reserveSpace" (mask) and "states" (RNG states).
-template <typename T>
-vector<size_t> sizeForMaskAndStates(
-    size_t mask_bytes, size_t states_bytes) {
-  return vector<size_t>{firstElementForStates<T>(mask_bytes) +
-    (roundUp(states_bytes, sizeof(T)) / sizeof(T))};
-}
-
-}
 
 class CuDNNDropoutOp final : public Operator<CUDAContext> {
  public:
@@ -49,6 +23,12 @@ class CuDNNDropoutOp final : public Operator<CUDAContext> {
     CUDNN_ENFORCE(cudnnDropoutGetStatesSize(
         cudnn_wrapper_.inline_cudnn_handle(),
         reinterpret_cast<size_t*>(&states_size_in_bytes_)));
+
+    if (!is_test_) {
+      scratch_blob_ = ws->CreateBlob(
+        scratch_blob_name(operator_def.output(1)));
+      CAFFE_ENFORCE(scratch_blob_);
+    }
   }
 
   ~CuDNNDropoutOp() noexcept {
@@ -61,6 +41,10 @@ class CuDNNDropoutOp final : public Operator<CUDAContext> {
 
   bool RunOnDevice() override;
 
+  static string scratch_blob_name(string mask_blob_name) {
+    return "cudnn_dropout_scratch_" + mask_blob_name;
+  }
+
  protected:
   CuDNNWrapper cudnn_wrapper_;
   cudnnTensorDescriptor_t data_desc_;
@@ -70,6 +54,8 @@ class CuDNNDropoutOp final : public Operator<CUDAContext> {
 
   float ratio_;
   bool is_test_;
+
+  Blob* scratch_blob_ = nullptr;
 
   size_t states_size_in_bytes_, reserve_space_size_in_bytes_;
   // Input: X, Output: Y, mask_and_states
@@ -91,6 +77,11 @@ class CuDNNDropoutGradientOp final : public Operator<CUDAContext> {
     CUDNN_ENFORCE(cudnnDropoutGetStatesSize(
         cudnn_wrapper_.inline_cudnn_handle(),
         reinterpret_cast<size_t*>(&states_size_in_bytes_)));
+
+    // Share scratch with the forward op
+    scratch_blob_ = ws->GetBlob(
+        CuDNNDropoutOp::scratch_blob_name(operator_def.input(1)));
+    CAFFE_ENFORCE(scratch_blob_);
   }
 
   ~CuDNNDropoutGradientOp() noexcept {
@@ -110,6 +101,8 @@ class CuDNNDropoutGradientOp final : public Operator<CUDAContext> {
 
   vector<TIndex> cudnn_input_dims_;
 
+  Blob* scratch_blob_;
+
   float ratio_;
   bool is_test_;
 
@@ -121,7 +114,7 @@ template <typename T, typename M>
 bool CuDNNDropoutOp::DoRunWithType() {
   const auto& X = Input(0);
   auto* Y = Output(0);
-  auto* mask_and_states = Output(1);
+  auto* mask = Output(1);
 
   auto size_prod = 1;
   for (auto dim : X.dims()) {
@@ -129,8 +122,9 @@ bool CuDNNDropoutOp::DoRunWithType() {
   }
 
   // Reshape tensor descriptors if necessary
-  if (X.dims() != cudnn_input_dims_) {
-    VLOG(1) << "Setting descriptors";
+  if (X.dims() != cudnn_input_dims_ && !is_test_) {
+    CAFFE_ENFORCE(scratch_blob_);
+    Tensor<CUDAContext>* states = scratch_blob_->GetMutable<Tensor<CUDAContext>>();
     cudnn_input_dims_ = X.dims();
     CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
         data_desc_,
@@ -140,16 +134,17 @@ bool CuDNNDropoutOp::DoRunWithType() {
         1,
         1,
         1));
+
     // get the reserve space we need
     CUDNN_ENFORCE(cudnnDropoutGetReserveSpaceSize(
-        data_desc_, &reserve_space_size_in_bytes_));
-    // resize the output to hold both mask and states
-    mask_and_states->Resize(sizeForMaskAndStates<T>(
-          reserve_space_size_in_bytes_, states_size_in_bytes_));
-    // get location of states data in mask_and_states
-    T* states_data = mask_and_states->template mutable_data<T>() +
-      firstElementForStates<T>(reserve_space_size_in_bytes_);
-    // set the dropout descriptor
+       data_desc_, &reserve_space_size_in_bytes_));
+
+    mask->Resize(reserve_space_size_in_bytes_);
+    states->Resize(states_size_in_bytes_);
+
+    // set the dropout descriptor (note: need to allocate the states data
+    // before acquiring the mutex)
+    uint8_t* states_data = states->mutable_data<uint8_t>();
     {
       // Need to protect  as clashes with NCCL
       std::lock_guard<std::mutex> lk(CUDAContext::mutex());
@@ -179,7 +174,7 @@ bool CuDNNDropoutOp::DoRunWithType() {
         X.template data<T>(),
         data_desc_,
         Y->template mutable_data<T>(),
-        mask_and_states->raw_mutable_data(),
+        mask->mutable_data<uint8_t>(),
         reserve_space_size_in_bytes_));
   }
   return true;
@@ -202,7 +197,8 @@ bool CuDNNDropoutOp::RunOnDevice() {
 template <typename T, typename M>
 bool CuDNNDropoutGradientOp::DoRunWithType() {
   const auto& dY = Input(0);
-  const auto& mask_and_states = Input(1);
+  const auto& mask = Input(1);
+  const Tensor<CUDAContext>& states = scratch_blob_->Get<Tensor<CUDAContext>>();
   auto* dX = Output(0);
 
   auto size_prod = 1;
@@ -220,13 +216,11 @@ bool CuDNNDropoutGradientOp::DoRunWithType() {
         1,
         1,
         1));
+
     // get the reserve space we need
     CUDNN_ENFORCE(cudnnDropoutGetReserveSpaceSize(
         data_desc_, &reserve_space_size_in_bytes_));
-    // get location of states data in mask_and_states
-    T* states_data = const_cast<T*>(
-        mask_and_states.template data<T>() +
-        firstElementForStates<T>(reserve_space_size_in_bytes_));
+
     // set the dropout descriptor
     {
       // Need to protect  as clashes with NCCL
@@ -235,7 +229,7 @@ bool CuDNNDropoutGradientOp::DoRunWithType() {
         dropout_desc_,
         cudnn_wrapper_.inline_cudnn_handle(),
         ratio_,
-        states_data,
+        const_cast<uint8_t*>(states.data<uint8_t>()),
         states_size_in_bytes_,
         0 // seed
         ));
@@ -243,7 +237,7 @@ bool CuDNNDropoutGradientOp::DoRunWithType() {
   }
 
   // run the computation
-  void* mask_data = const_cast<void*>(mask_and_states.raw_data());
+  void* mask_data = const_cast<void*>(mask.raw_data());
   CUDNN_ENFORCE(cudnnDropoutBackward(
       cudnn_wrapper_.inline_cudnn_handle(),
       dropout_desc_,
