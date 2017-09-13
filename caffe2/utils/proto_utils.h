@@ -1,9 +1,10 @@
 #ifndef CAFFE2_UTILS_PROTO_UTILS_H_
 #define CAFFE2_UTILS_PROTO_UTILS_H_
 
-#include "google/protobuf/message_lite.h"
-#ifndef CAFFE2_USE_LITE_PROTO
-#include "google/protobuf/message.h"
+#ifdef CAFFE2_USE_LITE_PROTO
+#include <google/protobuf/message_lite.h>
+#else // CAFFE2_USE_LITE_PROTO
+#include <google/protobuf/message.h>
 #endif  // !CAFFE2_USE_LITE_PROTO
 
 #include "caffe2/core/logging.h"
