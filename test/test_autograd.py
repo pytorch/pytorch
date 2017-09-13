@@ -1514,6 +1514,66 @@ class TestAutograd(TestCase):
                               lambda a, b, c, dim: torch.cat((a, b, c), dim),
                               True, f_args_variable, f_args_tensor)
 
+    def test_variable_traverse(self):
+        def get_out_and_unrefed_cycle():
+            inp = Variable(torch.randn(10), requires_grad=True)
+            tmp = inp.view(10, 1)
+            out = tmp.view(10)
+
+            # Create a reference cycle that contains an
+            # intermediary Variable in the graph
+            my_list = []
+            my_list.append(tmp)
+            my_list.append(my_list)
+
+            return out
+
+        out = get_out_and_unrefed_cycle()
+        gc.collect()
+        # This will segfault if things have been erroneously released
+        out.backward(torch.randn(out.size()))
+
+    # TODO: FIX-ME
+    def test_variable_uncollectable_cycle(self):
+        # Set this to true to create an uncollectable cycle
+        fail = False
+        import weakref
+
+        def get_out_and_unrefed_cycle_and_weakref():
+            inp = Variable(torch.randn(10), requires_grad=True)
+            tmp1 = inp.view(10, 1)
+            tmp2 = tmp1.view(10, 1)
+            out = tmp2.view(10)
+
+            ref1 = weakref.ref(tmp2)
+            if fail:
+                # Here we create a cycle between a variable
+                # and a function in the graph that is not it's
+                # own .grad_fn
+                tmp1.grad_fn.smth_else = tmp2
+                ref2 = weakref.ref(tmp1.grad_fn)
+            else:
+                # Here we create a cycle between a variable
+                # and its .grad_fn
+                tmp2.grad_fn.smth = tmp2
+                ref2 = weakref.ref(tmp2.grad_fn)
+
+            return out, ref1, ref2
+
+        out, ref1, ref2 = get_out_and_unrefed_cycle_and_weakref()
+        self.assertIsNotNone(ref1())
+        self.assertIsNotNone(ref2())
+        out.backward(torch.randn(out.size()))
+        self.assertIsNotNone(ref1())
+        self.assertIsNotNone(ref2())
+        del out
+        self.assertIsNotNone(ref1())
+        self.assertIsNotNone(ref2())
+        gc.collect()
+        # If there is an uncollectable cycle, this will fail
+        self.assertIsNone(ref1())
+        self.assertIsNone(ref2())
+
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
