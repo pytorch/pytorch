@@ -161,6 +161,10 @@ bool tryFuseAdjacentOps(const Analysis& analysis,
   if (it == fusionOpportunities.end()) {
     return false;
   }
+  // MPSCNNConvRelu and MPSCNNConvSigmoid cannot be in-place
+  if (currentOp.type() == "MPSCNNConv" && currentOp.input(0) == nextOp.output(0)) {
+    return false;
+  }
   LOG(INFO) << "Found a fusion between adjacent ops: (" << currentOp.type() << ", " << nextOp.type()
             << ") -> " << it->second;
   fusedOp->CopyFrom(currentOp);
