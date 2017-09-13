@@ -125,8 +125,16 @@ IF(NOT DEFINED cwrap_files)
   )
 ENDIF()
 
+
+IF(DEFINED ENV{PYTORCH_PYTHON})
+  message(STATUS "Using python found in $ENV{PYTORCH_PYTHON}")
+  SET(PYCMD "$ENV{PYTORCH_PYTHON}")
+ELSE()
+  SET(PYCMD "python")
+ENDIF()
+
 SET(GEN_COMMAND
-    python ${CMAKE_CURRENT_SOURCE_DIR}/gen.py ${CUDA_FLAG}
+    ${PYCMD} ${CMAKE_CURRENT_SOURCE_DIR}/gen.py ${CUDA_FLAG}
     -s ${CMAKE_CURRENT_SOURCE_DIR}
     ${cwrap_files}
 )
