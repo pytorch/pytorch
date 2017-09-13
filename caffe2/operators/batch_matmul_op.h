@@ -7,17 +7,26 @@
 
 namespace caffe2 {
 
-template <typename T, class Context, class Engine = DefaultEngine>
+template <class Context, class Engine = DefaultEngine>
 class BatchMatMulOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   BatchMatMulOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         trans_a_(OperatorBase::GetSingleArgument<int>("trans_a", 0)),
-        trans_b_(OperatorBase::GetSingleArgument<int>("trans_b", 0)) {}
+        trans_b_(OperatorBase::GetSingleArgument<int>("trans_b", 0)),
+        use_scratch_(OperatorBase::GetSingleArgument<int>("use_scratch", 0)) {
+    if (use_scratch_)
+      scratch_ = std::make_shared<Tensor<Context> >();
+  }
   ~BatchMatMulOp() {}
 
   bool RunOnDevice() override {
+    return DispatchHelper<TensorTypes<float>>::call(this, Input(0));
+  }
+
+  template <typename T>
+  bool DoRunWithType() {
     const auto& A = Input(0);
     const auto& B = Input(1);
     auto* Y = Output(0);
@@ -65,29 +74,32 @@ class BatchMatMulOp final : public Operator<Context> {
     }
 
     // Y = A * B
-    auto a_offset = A.size() / A.dim(0);
-    auto b_offset = B.size() / B.dim(0);
-    auto y_offset = a_dim0 * b_dim1;
-    for (int i = 0; i < A.dim32(0); ++i) {
-      math::Gemm<T, Context, Engine>(
-          trans_a_ ? CblasTrans : CblasNoTrans,
-          trans_b_ ? CblasTrans : CblasNoTrans,
-          a_dim0,
-          b_dim1,
-          a_dim1,
-          1,
-          A.template data<T>() + a_offset * i,
-          B.template data<T>() + b_offset * i,
-          0,
-          Y->template mutable_data<T>() + y_offset * i,
-          &context_);
-    }
+    math::GemmBatched<T, Context, Engine>(
+        trans_a_ ? CblasTrans : CblasNoTrans,
+        trans_b_ ? CblasTrans : CblasNoTrans,
+        A.size(),
+        A.dim32(0),
+        B.size(),
+        B.dim32(0),
+        a_dim0, // M
+        b_dim1, // N
+        a_dim1, // K
+        1,
+        A.template data<T>(),
+        B.template data<T>(),
+        0,
+        Y->template mutable_data<T>(),
+        &context_,
+        use_scratch_ ? scratch_.get() : nullptr);
     return true;
   }
 
  protected:
   bool trans_a_;
   bool trans_b_;
+
+  bool use_scratch_;
+  std::shared_ptr<Tensor<Context> > scratch_;
 };
 
 } // namespace caffe2
