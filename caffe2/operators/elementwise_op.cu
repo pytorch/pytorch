@@ -146,12 +146,12 @@ reduce_sum_like_post1(const T* g_idata, T* g_odata, int pre, int N) {
     return;
   }
 
-  T sum = (T)0;
+  float sum = 0.0;
   for (int i = 0; i < pre; ++i) {
-    sum += g_idata[i * N + n];
+    sum += convert::To<T, float>(g_idata[i * N + n]);
   }
 
-  g_odata[n] = sum;
+  g_odata[n] = convert::To<float, T>(sum);
 }
 
 template <typename T>
@@ -180,25 +180,58 @@ void device_reduce(
       context->cuda_stream());
 }
 
+template <>
+void device_reduce<float16>(
+    const float16* in,
+    float16* out,
+    int N,
+    Tensor<CUDAContext>* buffer,
+    CUDAContext* context) {
+  auto buffer_size = 1;
+
+  if (buffer->size() != buffer_size) {
+    buffer->Resize(buffer_size);
+
+    math::Set<float16, CUDAContext>(
+        N,
+        convert::To<float,float16>(1.),
+        buffer->mutable_data<float16>(),
+        context);
+  }
+
+  CUBLAS_ENFORCE(cublasDotEx(
+              context->cublas_handle(),
+              N,
+              in,
+              CUDA_R_16F,
+              1,
+              buffer->data<float16>(),
+              CUDA_R_16F,
+              0,
+              out,
+              CUDA_R_16F,
+              CUDA_R_32F));
+}
+
 template <typename T, int BLOCK_THREADS>
 __global__ void
 reduce_sum_like(const T* g_idata, T* g_odata, int pre, int N, int post) {
   int n = blockIdx.x;
-  T sum = (T)0;
+  float sum = 0.0;
   int limit = pre * post;
   for (int i = threadIdx.x; i < limit; i += blockDim.x) {
     int curPre = i / post;
     int curPost = i % post;
 
-    sum += g_idata[curPre * N * post + n * post + curPost];
+    sum += convert::To<T, float>(g_idata[curPre * N * post + n * post + curPost]);
   }
   // uses a shared memory reduction within block
-  typedef cub::BlockReduce<T, BLOCK_THREADS> BlockReduceT;
+  typedef cub::BlockReduce<float, BLOCK_THREADS> BlockReduceT;
   // Shared memory
   __shared__ typename BlockReduceT::TempStorage temp_storage;
-  T aggregate = BlockReduceT(temp_storage).Sum(sum);
+  float aggregate = BlockReduceT(temp_storage).Sum(sum);
   if (threadIdx.x == 0) {
-    g_odata[n] = aggregate;
+    g_odata[n] = convert::To<float, T>(aggregate);
   }
 }
 } // namespace
@@ -265,6 +298,11 @@ bool SumReduceLikeOp<CUDAContext>::DoRunWithType() {
     }
   }
   return true;
+}
+
+template <>
+bool SumReduceLikeOp<CUDAContext>::RunOnDevice() {
+  return DispatchHelper<TensorTypes<float, float16>>::call(this, Input(0));
 }
 
 REGISTER_CUDA_OPERATOR(SumReduceLike, SumReduceLikeOp<CUDAContext>);
