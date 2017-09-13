@@ -492,12 +492,19 @@ class Tensor {
     if (meta_ == meta && (data_.get() || size_ == 0)) {
       return data_.get();
     } else {
+      bool had_special_dtor = meta_.dtor() != nullptr;
       meta_ = meta;
       CAFFE_ENFORCE_WITH_CALLER(
           size_ >= 0,
           "Tensor is not initialized. You probably need to call Resize() "
           "before calling mutable_data()");
-      if (size_ == 0) {
+
+      // We can reuse the existing buffer if the current data does not have
+      // a special destructor and the new data doesn't have a special
+      // constructor.
+      if (size_ == 0 ||
+          (meta.ctor() == nullptr && !had_special_dtor &&
+           capacity_ >= size_ * meta_.itemsize())) {
         return data_.get();
       }
       if (meta.ctor()) {
@@ -544,16 +551,16 @@ class Tensor {
   /**
    * Returns a typed pointer of the underlying storage.
    *
-   * If the existing data does not match the desired type, it will be deleted
-   * and a new storage will be created.
+   * For fundamental types, we reuse possible existing storage if there
+   * is sufficient capacity.
    */
-  template <typename T>
-  inline T* mutable_data() {
-    if ((size_ == 0 || data_.get()) && IsType<T>()) {
-      return static_cast<T*>(data_.get());
+   template <typename T>
+    inline T* mutable_data() {
+      if ((size_ == 0 || data_.get()) && IsType<T>()) {
+        return static_cast<T*>(data_.get());
+      }
+      return static_cast<T*>(raw_mutable_data(TypeMeta::Make<T>()));
     }
-    return static_cast<T*>(raw_mutable_data(TypeMeta::Make<T>()));
-  }
 
 
   /**
