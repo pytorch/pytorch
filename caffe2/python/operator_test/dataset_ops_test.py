@@ -526,6 +526,17 @@ class TestDatasetOps(TestCase):
             actual = FetchRecord(batch)
             _assert_records_equal(actual, entry)
 
+        """
+        Trim a dataset
+        """
+        trim_net = core.Net('trim_ds')
+        ds.trim(trim_net, multiple_of=2)
+        workspace.RunNetOnce(trim_net)
+        trimmed = FetchRecord(ds.content())
+        EXPECTED_SIZES = [2, 2, 3, 3, 2, 2, 2, 6, 2, 3, 3, 4, 4, 2, 2, 2]
+        actual_sizes = [d.shape[0] for d in trimmed.field_blobs()]
+        self.assertEquals(EXPECTED_SIZES, actual_sizes)
+
     def test_last_n_window_ops(self):
         collect_net = core.Net('collect_net')
         collect_net.GivenTensorFill(

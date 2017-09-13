@@ -210,6 +210,17 @@ class Dataset(object):
         self.name = name or 'dataset'
         self.field_blobs = fields.field_blobs() if fields.has_blobs() else None
 
+    def trim(self, net, multiple_of):
+        """
+        Trims the contents of this dataset so that the number of records is
+        multiple of the given argument.
+        """
+        net.TrimDataset(
+            self.field_blobs,
+            self.field_blobs,
+            fields=self.fields,
+            multiple_of=multiple_of)
+
     def init_empty(self, init_net):
         """Initialize the blobs for this dataset with empty values.
 

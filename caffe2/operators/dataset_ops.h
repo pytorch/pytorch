@@ -157,6 +157,10 @@ class TreeWalker {
       return fieldId_;
     }
 
+    inline TOffset offset() const {
+      return walker_.offset(fieldId_);
+    }
+
    private:
     const TreeWalker& walker_;
     const int fieldId_;

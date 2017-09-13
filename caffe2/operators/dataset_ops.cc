@@ -133,6 +133,7 @@ void TreeIterator::advance(
 
 TreeWalker::TreeWalker(const vector<const Blob*>& inputs, TreeCursor& cursor)
     : inputs_(inputs), cursor_(cursor), sizes_(cursor.it.numOffsetFields()) {
+  CAFFE_ENFORCE_EQ(inputs.size(), cursor.it.fields().size());
   if (cursor.offsets.empty()) {
     cursor.offsets.assign(cursor.it.numOffsetFields(), 0);
   }
@@ -969,6 +970,41 @@ class CollectTensorOp final : public Operator<Context> {
   int numVisited_;
 };
 
+class TrimDatasetOp : public Operator<CPUContext> {
+ public:
+  TrimDatasetOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator(operator_def, ws),
+        iterator_(OperatorBase::GetRepeatedArgument<std::string>("fields")),
+        multiple_of_(OperatorBase::GetSingleArgument<int>("multiple_of", 1)) {
+    CAFFE_ENFORCE_GE(multiple_of_, 1);
+  }
+
+  bool RunOnDevice() override {
+    TreeCursor cursor(iterator_);
+    TreeWalker walker(Inputs(), cursor);
+
+    int trimmedSize = (walker.size() / multiple_of_) * multiple_of_;
+    if (trimmedSize == walker.size()) {
+      // we already satisfy the condition
+      return true;
+    }
+    // advance desired number of records
+    for (int i = 0; i < trimmedSize; ++i) {
+      walker.advance();
+    }
+    // trim each column to the offset
+    for (int col = 0; col < walker.fields().size(); ++col) {
+      auto newOuterSize = walker.fields().at(col).offset();
+      Output(col)->Shrink(newOuterSize);
+    }
+    return true;
+  }
+
+ private:
+  TreeIterator iterator_;
+  int multiple_of_;
+};
+
 REGISTER_CPU_OPERATOR(CreateTreeCursor, CreateTreeCursorOp);
 REGISTER_CPU_OPERATOR(ResetCursor, ResetCursorOp);
 REGISTER_CPU_OPERATOR(ReadNextBatch, ReadNextBatchOp);
@@ -984,6 +1020,7 @@ REGISTER_CPU_OPERATOR(ConcatTensorVector, ConcatTensorVectorOp<CPUContext>);
 REGISTER_CPU_OPERATOR(CollectTensor, CollectTensorOp<CPUContext>);
 REGISTER_CPU_OPERATOR(PackRecords, PackRecordsOp);
 REGISTER_CPU_OPERATOR(UnPackRecords, UnPackRecordsOp);
+REGISTER_CPU_OPERATOR(TrimDataset, TrimDatasetOp);
 
 OPERATOR_SCHEMA(CreateTreeCursor)
     .NumInputs(0)
@@ -1249,6 +1286,20 @@ operators.
         "One dimensional tensor having a complex type of SharedTensorVectorPtr."
         " In order to reverse it back to the original input it has to be "
         "inserted into UnPackRecordsOp.");
+
+OPERATOR_SCHEMA(TrimDataset)
+    .NumInputs(1, INT_MAX)
+    .NumOutputs(1, INT_MAX)
+    .SetDoc(R"DOC(
+Trim the given dataset inplace, given the dataset blobs and the field specs.
+Trimming happens such that the dataset will contain the largest possible number
+of records that is a multiple of the 'multiple_of' argument.
+)DOC")
+    .EnforceInplace([](int input, int output) { return input == output; })
+    .Arg(
+        "fields",
+        "List of strings representing the string names in the format"
+        "specified in the doc for CreateTreeCursor.");
 
 OPERATOR_SCHEMA(UnPackRecords)
     .NumInputs(1, INT_MAX)
