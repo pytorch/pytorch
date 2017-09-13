@@ -1048,7 +1048,7 @@ class TestAutograd(TestCase):
             self.assertIs(type(x.float().cuda().data), torch.cuda.FloatTensor)
             self.assertIs(type(x.int().cuda().data), torch.cuda.IntTensor)
             self.assertIs(type(x.int().cuda().cpu().data), torch.IntTensor)
-            if torch.cuda.device_count() > 2:
+            if torch.cuda.device_count() >= 2:
                 x2 = x.float().cuda(1)
                 self.assertIs(type(x2.data), torch.cuda.FloatTensor)
                 self.assertIs(x2.get_device(), 1)
@@ -1058,6 +1058,10 @@ class TestAutograd(TestCase):
                 x2 = x2.cuda(1)
                 self.assertIs(type(x2.data), torch.cuda.FloatTensor)
                 self.assertIs(x2.get_device(), 1)
+                y = Variable(torch.randn(5).cuda(1), requires_grad=True)
+                y.cpu().sum().backward()
+                self.assertIs(y.grad.get_device(), 1)
+                self.assertIs(y.long().data.get_device(), 1)
 
         for t in [torch.DoubleTensor, torch.FloatTensor, torch.IntTensor, torch.ByteTensor]:
             for var in (True, False):

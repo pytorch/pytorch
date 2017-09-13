@@ -166,11 +166,16 @@ class Type(Function):
     @staticmethod
     def forward(ctx, i, dest_type):
         ctx.input_type = type(i)
+        ctx.input_device = -1 if not i.is_cuda else i.get_device()
         return i.type(dest_type)
 
     @staticmethod
     def backward(ctx, grad_output):
-        return grad_output.type(ctx.input_type), None
+        if ctx.input_device == -1:
+            return grad_output.type(ctx.input_type), None
+        else:
+            with torch.cuda.device(ctx.input_device):
+                return grad_output.type(ctx.input_type), None
 
 
 class CudaTransfer(Function):
