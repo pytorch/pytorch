@@ -28,6 +28,15 @@ NetBase::NetBase(
           def->external_output().begin(),
           def->external_output().end()),
       name_(def->name()) {
+  // Check that node_name is empty for all ops
+  for (const OperatorDef& op : def->op()) {
+    if (op.has_device_option()) {
+      CAFFE_ENFORCE(
+          !op.device_option().has_node_name(),
+          "node_name must be empty for all operators at execution time.");
+    }
+  }
+
   // Go through the operators and make sure that blobs are correctly made.
   std::set<string> known_blobs(
       external_input_.begin(), external_input_.end());

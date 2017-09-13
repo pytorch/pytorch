@@ -4,11 +4,11 @@
 #include <cerrno>
 #include <fstream>
 
-#include "google/protobuf/io/coded_stream.h"
-#include "google/protobuf/io/zero_copy_stream_impl.h"
+#include <google/protobuf/io/coded_stream.h>
+#include <google/protobuf/io/zero_copy_stream_impl.h>
 
 #ifndef CAFFE2_USE_LITE_PROTO
-#include "google/protobuf/text_format.h"
+#include <google/protobuf/text_format.h>
 #endif  // !CAFFE2_USE_LITE_PROTO
 
 #include "caffe2/core/logging.h"
@@ -42,7 +42,8 @@ std::string DeviceTypeName(const int32_t& d) {
 bool IsSameDevice(const DeviceOption& lhs, const DeviceOption& rhs) {
   return (
       lhs.device_type() == rhs.device_type() &&
-      lhs.cuda_gpu_id() == rhs.cuda_gpu_id());
+      lhs.cuda_gpu_id() == rhs.cuda_gpu_id() &&
+      lhs.node_name() == rhs.node_name());
 }
 
 bool ReadStringFromFile(const char* filename, string* str) {
