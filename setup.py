@@ -365,6 +365,7 @@ main_sources = [
     "torch/csrc/byte_order.cpp",
     "torch/csrc/utils.cpp",
     "torch/csrc/expand_utils.cpp",
+    "torch/csrc/utils/invalid_arguments.cpp",
     "torch/csrc/utils/object_ptr.cpp",
     "torch/csrc/utils/tuple_parser.cpp",
     "torch/csrc/allocators.cpp",
