@@ -106,9 +106,7 @@ _vis_template = string.Template("""
 
   <style type="text/css">
     #mynetwork {
-      width: 1920px;
-      height: 1080px;
-      border: 1px solid lightgray;
+      height: 100vh;
     }
   </style>
 </head>
@@ -159,21 +157,27 @@ def _write_vis(self, filename):
         if (i, n) in existing:
             return
         existing.add((i, n))
-        edges.append({
+        e = {
             'from': n.unique(),
             'to': i.unique(),
             'arrows': 'from',
-        })
+        }
+        if i.stage() != n.stage():
+            e['color'] = 'green'
+        edges.append(e)
 
     counts = {}
+    offset = 0
     for n in self.nodes():
-        if len(n.uses()) == 0 or n.kind() == 'Select':
+        if len(n.uses()) == 0 or n.kind() == 'Select' or n.kind() == 'Undefined':
             continue
-        ident = counts.get(n.kind(),0)
+        ident = counts.get(n.kind(), 0)
         counts[n.kind()] = ident + 1
         d = {
             'id': n.unique(),
             'label': '{}_{}'.format(n.kind(), ident),
+            'y': offset,
+            'fixed': {'y': True},
         }
         if n in self.outputs():
             d['shape'] = 'triangle'
@@ -182,6 +186,7 @@ def _write_vis(self, filename):
             add_edge(i, n)
 
         nodes.append(d)
+        offset += 30
 
     result = _vis_template.substitute(nodes=json.dumps(nodes),
                                       edges=json.dumps(edges),
