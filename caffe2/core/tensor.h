@@ -64,7 +64,6 @@ inline int canonical_axis_index_(int axis_index, int ndims) {
   return axis_index;
 }
 
-
 /**
  * @brief Tensor is the basic class in Caffe2 that stores a contiguous memory
  * with its shape information.
@@ -399,50 +398,23 @@ class Tensor {
   /**
    * @brief Shares the data with an externally managed pointer.
    *
-   * This is similar to ShareData() but the tensor does not take over ownership
-   * of the pointer, so the caller can explicitly manage the memory storage.
-   * One needs to make sure that the external memory is deallocated only after
-   * the tensor finishes using it.
+   * This is similar to ShareData() but the source is a pointer with an advanced
+   * deleter option. In default, no deletion takes place, and one needs to make
+   * sure that the external memory is deallocated only after the tensor finishes
+   * using it. If a Deleter object is passed in, when this tensor is reallocated
+   * or freed, the deleter function is going to be called.
    */
-  template <typename T>
-  void ShareExternalPointer(T* src, size_t capacity = 0) {
-    ShareExternalPointer(
-        src, capacity, [](void*) -> void {}, true /* no ownership */);
+  template <typename T, typename Deleter = MemoryDeleter>
+  void ShareExternalPointer(T* src, size_t capacity = 0, Deleter d = nullptr) {
+    ShareExternalPointer(src, TypeMeta::Make<T>(), capacity, d);
   }
 
-  /**
-   * @brief Shares the data with an externally managed pointer.
-   *
-   * This overload takes a Deleter functor to be called when this tensor is
-   * reallocated or freed.
-   */
-  template <typename T, typename Deleter>
-  void ShareExternalPointer(
-      T* src,
-      size_t capacity,
-      Deleter&& d,
-      bool no_ownership = false) {
-    ShareExternalPointer(
-        src,
-        TypeMeta::Make<T>(),
-        capacity,
-        std::forward<Deleter>(d),
-        no_ownership);
-  }
-
-  void
-  ShareExternalPointer(void* src, const TypeMeta& meta, size_t capacity = 0) {
-    ShareExternalPointer(
-        src, meta, capacity, [](void*) -> void {}, true /* no ownership */);
-  }
-
-  template <class Deleter>
+  template <typename Deleter = MemoryDeleter>
   void ShareExternalPointer(
       void* src,
       const TypeMeta& meta,
-      size_t capacity,
-      Deleter&& d,
-      bool no_ownership = false) {
+      size_t capacity = 0,
+      Deleter d = nullptr) {
     meta_ = meta;
     CAFFE_ENFORCE_WITH_CALLER(
         meta_.id(),
@@ -451,11 +423,13 @@ class Tensor {
     CAFFE_ENFORCE_WITH_CALLER(
         size_ >= 0,
         "To share data with a raw pointer, you need to set shape first.");
-    if (no_ownership) {
-      // We use aliasing contructor to avoid calling delete
+    // Check if the deleter is a MemoryDeleter and is a simple nullptr.
+    if (std::is_same<MemoryDeleter, Deleter>::value &&
+        reinterpret_cast<MemoryDeleter*>(&d)[0] == nullptr) {
+      // Use aliasing constructor trick to avoid calling the destructor.
       data_ = std::shared_ptr<void>(std::shared_ptr<void>(), src);
     } else {
-      data_.reset(src, std::forward<Deleter>(d));
+      data_.reset(src, d);
     }
     // Sets capacity. If not specified, we will implicitly assume that
     // the capacity is the current size.
@@ -533,7 +507,7 @@ class Tensor {
         auto size = size_;
         auto dtor = meta_.dtor();
         auto ptr_and_deleter = Context::New(size_ * meta_.itemsize());
-        auto deleter = std::move(ptr_and_deleter.second);
+        auto deleter = ptr_and_deleter.second;
         data_.reset(
             ptr_and_deleter.first, [size, dtor, deleter](void* ptr) -> void {
               dtor(ptr, size);
@@ -543,7 +517,7 @@ class Tensor {
       } else {
         // For fundamental type, new and delete is easier.
         auto ptr_and_deleter = Context::New(size_ * meta_.itemsize());
-        data_.reset(ptr_and_deleter.first, std::move(ptr_and_deleter.second));
+        data_.reset(ptr_and_deleter.first, ptr_and_deleter.second);
       }
       capacity_ = size_ * meta_.itemsize();
       return data_.get();
