@@ -37,13 +37,20 @@ class BeamSearchForwardOnly(object):
         ['initial_value', 'state_prev_link', 'state_link'],
     )
 
-    def __init__(self, beam_size, model, eos_token_id):
+    def __init__(
+        self,
+        beam_size,
+        model,
+        eos_token_id,
+        go_token_id=seq2seq_util.GO_ID,
+    ):
         self.beam_size = beam_size
         self.model = model
         self.step_model = Seq2SeqModelHelper(
             name='step_model',
             param_model=self.model,
         )
+        self.go_token_id = go_token_id
         self.eos_token_id = eos_token_id
 
         (
@@ -89,7 +96,7 @@ class BeamSearchForwardOnly(object):
         state_configs,
         word_rewards=None,
         possible_translation_tokens=None,
-        go_token_id=seq2seq_util.GO_ID,
+        go_token_id=None,
     ):
         # [beam_size, beam_size]
         best_scores_per_hypo, best_tokens_per_hypo = self.step_model.net.TopK(
@@ -245,13 +252,20 @@ class BeamSearchForwardOnly(object):
             value=0.0,
             dtype=core.DataType.FLOAT,
         )
-        initial_tokens = self.model.param_init_net.ConstantFill(
-            [],
-            'initial_tokens',
-            shape=[1],
-            value=float(go_token_id),
-            dtype=core.DataType.FLOAT,
-        )
+        if go_token_id:
+            initial_tokens = self.model.net.Copy(
+                [go_token_id],
+                'initial_tokens',
+            )
+        else:
+            initial_tokens = self.model.param_init_net.ConstantFill(
+                [],
+                'initial_tokens',
+                shape=[1],
+                value=float(self.go_token_id),
+                dtype=core.DataType.FLOAT,
+            )
+
         initial_hypo = self.model.param_init_net.ConstantFill(
             [],
             'initial_hypo',
