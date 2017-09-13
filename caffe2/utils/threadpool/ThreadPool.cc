@@ -51,20 +51,44 @@ std::unique_ptr<ThreadPool> ThreadPool::defaultThreadPool() {
 #endif
 
   if (applyCap) {
-    // 1 core  -> 1 thread
-    // 2 cores -> 2 threads
-    // 4 cores -> 2 threads
-    // 8 cores -> 4 threads
-    // more, continue limiting to half of available cores
-
-    if (numThreads <= 3) {
-      // no change
-    } else if (numThreads <= 5) {
-      // limit to 4 - seems to work well for 2+2, 4+1, 4+0.
-      numThreads = 4;
-    } else {
-      // Use half the cores
-      numThreads = numThreads / 2;
+    switch (numThreads) {
+#if CAFFE2_ANDROID && defined(__arm__)
+      case 4:
+          switch (android_getCpuIdArm() & UINT32_C(0xFF00FFF0)) {
+            case UINT32_C(0x51002110): /* Snapdragon 820 Kryo Silver */
+            case UINT32_C(0x51002010): /* Snapdragon 821 Kryo Silver */
+            case UINT32_C(0x51002050): /* Snapdragon 820/821 Kryo Gold */
+              /* Kryo: 2+2 big.LITTLE */
+              numThreads = 2;
+              break;
+            default:
+              /* Anything else: assume homogeneous architecture */
+              numThreads = 4;
+              break;
+          }
+        break;
+#endif
+      case 5:
+        /* 4+1 big.LITTLE */
+        numThreads = 4;
+        break;
+      case 6:
+        /* 2+4 big.LITTLE */
+        numThreads = 2;
+        break;
+      case 8:
+        /* 4+4 big.LITTLE */
+        numThreads = 4;
+        break;
+      case 10:
+        /* 4+4+2 Min.Med.Max, running on Med cores */
+        numThreads = 4;
+        break;
+      default:
+        if (numThreads > 4) {
+          numThreads = numThreads / 2;
+        }
+        break;
     }
   }
   LOG(INFO) << "Constructing thread pool with " << numThreads << " threads";
