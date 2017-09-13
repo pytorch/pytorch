@@ -11,7 +11,8 @@ std::unordered_set<NodeKind> simple_mappable = {
   kMul,
   kAdd,
   kNeg,
-  kAddConstant
+  kAddConstant,
+  kConcat,
 };
 
 bool isSimpleMap(Node *node) {

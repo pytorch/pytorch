@@ -88,11 +88,21 @@ def _verify(flat_trace_out, flat_real_out):
             raise RuntimeError("JIT and real computation mismatch")
 
 
+_dump_traces = os.environ.get('PYTORCH_JIT_DUMP', False)
+
+
+def _dump_trace(trace_name, name, suffix, complete_trace):
+    if not _dump_traces:
+        return
+    filename = "{}_{}_{}".format(trace_name, name, suffix)
+    with open(filename + ".ir", "w") as f:
+        f.write(str(complete_trace))
+    complete_trace.graph().write_vis(filename + ".html")
+
 # holds run() to run the function and self.inputs which
 # are all the variable inputs
 class Traceable(object):
     _next_trace_id = 0
-    _dump_traces = os.environ.get('PYTORCH_JIT_DUMP', False)
     VOLATILE = object()
 
     # Traceable holds multiple traces and switches between them based on
@@ -110,13 +120,9 @@ class Traceable(object):
 
         def _run_pass(self, p):
             name = p.__name__.replace('_jit_pass_', '')
-            if Traceable._dump_traces:
-                with open("{}_{}_input.ir".format(self.trace_name, name), "w") as f:
-                    f.write(str(self.complete_trace))
+            _dump_trace(self.trace_name, name, 'input', self.complete_trace)
             p(self.complete_trace)
-            if Traceable._dump_traces:
-                with open("{}_{}_output.ir".format(self.trace_name, name), "w") as f:
-                    f.write(str(self.complete_trace))
+            _dump_trace(self.trace_name, name, 'output', self.complete_trace)
             # TODO: Make linting optional
             torch._C._jit_pass_lint(self.complete_trace)
 
