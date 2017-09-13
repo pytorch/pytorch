@@ -13,7 +13,7 @@ from caffe2.proto import caffe2_pb2
 import caffe2.python.hypothesis_test_util as hu
 
 from functools import partial
-from hypothesis import given
+from hypothesis import assume, given
 from hypothesis import settings as ht_settings
 import hypothesis.strategies as st
 import numpy as np
@@ -1394,8 +1394,14 @@ class RNNCellTest(hu.HypothesisTestCase):
     @given(n=st.integers(1, 10),
            d=st.integers(1, 10),
            t=st.integers(1, 10),
+           dtype=st.sampled_from([np.float32, np.float16]),
            **hu.gcs)
-    def test_lstm_unit_recurrent_network(self, n, d, t, dc, gc):
+    def test_lstm_unit_recurrent_network(self, n, d, t, dtype, dc, gc):
+        if dtype == np.float16:
+            # only supported with CUDA
+            assume(gc.device_type == caffe2_pb2.CUDA)
+            dc = [do for do in dc if do.device_type == caffe2_pb2.CUDA]
+
         op = core.CreateOperator(
             'LSTMUnit',
             [
@@ -1406,9 +1412,9 @@ class RNNCellTest(hu.HypothesisTestCase):
                 'timestep',
             ],
             ['hidden_t', 'cell_t'])
-        cell_t_prev = np.random.randn(1, n, d).astype(np.float32)
-        hidden_t_prev = np.random.randn(1, n, d).astype(np.float32)
-        gates = np.random.randn(1, n, 4 * d).astype(np.float32)
+        cell_t_prev = np.random.randn(1, n, d).astype(dtype)
+        hidden_t_prev = np.random.randn(1, n, d).astype(dtype)
+        gates = np.random.randn(1, n, 4 * d).astype(dtype)
         seq_lengths = np.random.randint(1, t + 1, size=(n,)).astype(np.int32)
         timestep = np.random.randint(0, t, size=(1,)).astype(np.int32)
         inputs = [hidden_t_prev, cell_t_prev, gates, seq_lengths, timestep]
@@ -1416,13 +1422,25 @@ class RNNCellTest(hu.HypothesisTestCase):
         self.assertDeviceChecks(
             dc, op, inputs, [0],
             input_device_options=input_device_options)
+
+        kwargs = {}
+        if dtype == np.float16:
+            kwargs['threshold'] = 1e-1  # default is 1e-4
+
         self.assertReferenceChecks(
             gc, op, inputs, lstm_unit,
-            input_device_options=input_device_options)
+            input_device_options=input_device_options,
+            **kwargs)
+
+        kwargs = {}
+        if dtype == np.float16:
+            kwargs['threshold'] = 0.5  # default is 0.005
+
         for i in range(2):
             self.assertGradientChecks(
                 gc, op, inputs, i, [0, 1],
-                input_device_options=input_device_options)
+                input_device_options=input_device_options,
+                **kwargs)
 
     @given(input_length=st.integers(2, 5),
            dim_in=st.integers(1, 3),

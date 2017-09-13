@@ -3,6 +3,7 @@
 
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
+#include "caffe2/utils/conversions.h"
 
 namespace caffe2 {
 namespace detail {
@@ -28,7 +29,7 @@ void LSTMUnit(
     bool drop_states,
     T* C,
     T* H,
-    const T forget_bias,
+    const float forget_bias,
     Context* /*context*/) {
   for (int n = 0; n < N; ++n) {
     const bool valid = t < seqLengths[n];
@@ -44,7 +45,7 @@ void LSTMUnit(
         }
       } else {
         const T i = sigmoid(X[d]);
-        const T f = sigmoid(X[1 * D + d] + forget_bias);
+        const T f = sigmoid(X[1 * D + d] + convert::To<float, T>(forget_bias));
         const T o = sigmoid(X[2 * D + d]);
         const T g = host_tanh(X[3 * D + d]);
         const T c_prev = C_prev[d];
@@ -78,7 +79,7 @@ void LSTMUnitGradient(
     T* H_prev_diff,
     T* C_prev_diff,
     T* X_diff,
-    const T forget_bias,
+    const float forget_bias,
     Context* /*context*/) {
   for (int n = 0; n < N; ++n) {
     const bool valid = t < seqLengths[n];
@@ -105,7 +106,7 @@ void LSTMUnitGradient(
         *g_diff = 0;
       } else {
         const T i = sigmoid(X[d]);
-        const T f = sigmoid(X[1 * D + d] + forget_bias);
+        const T f = sigmoid(X[1 * D + d] + convert::To<float, T>(forget_bias));
         const T o = sigmoid(X[2 * D + d]);
         const T g = host_tanh(X[3 * D + d]);
         const T c_prev = C_prev[d];
@@ -133,13 +134,13 @@ void LSTMUnitGradient(
 }
 } // namespace detail
 
-template <typename T, typename Context>
+template <typename Context>
 class LSTMUnitOp : public Operator<Context> {
  public:
   LSTMUnitOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         forget_bias_(
-            static_cast<T>(OperatorBase::template GetSingleArgument<float>(
+            static_cast<float>(OperatorBase::template GetSingleArgument<float>(
                 "forget_bias",
                 0.0))),
         drop_states_(OperatorBase::template GetSingleArgument<bool>(
@@ -148,7 +149,8 @@ class LSTMUnitOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   using Operator<Context>::Operator;
 
-  bool RunOnDevice() override {
+  template <typename T>
+  bool DoRunWithType() {
     // Extract N
     const auto N = Input(CELL_T_M_1).dim(1);
 
@@ -184,23 +186,27 @@ class LSTMUnitOp : public Operator<Context> {
     return true;
   }
 
+  bool RunOnDevice() override {
+    return DoRunWithType<float>();
+  }
+
  protected:
   INPUT_TAGS(HIDDEN_T_M_1, CELL_T_M_1, GATES, SEQ_LENGTHS, TIMESTEP);
   OUTPUT_TAGS(HIDDEN_T, CELL_T);
 
-  T forget_bias_;
+  float forget_bias_;
 
  private:
   bool drop_states_;
 };
 
-template <typename T, typename Context>
+template <typename Context>
 class LSTMUnitGradientOp : public Operator<Context> {
  public:
   LSTMUnitGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         forget_bias_(
-            static_cast<T>(OperatorBase::template GetSingleArgument<float>(
+            static_cast<float>(OperatorBase::template GetSingleArgument<float>(
                 "forget_bias",
                 0.0))),
         drop_states_(OperatorBase::template GetSingleArgument<bool>(
@@ -208,7 +214,8 @@ class LSTMUnitGradientOp : public Operator<Context> {
             false)) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  bool RunOnDevice() override {
+  template <typename T>
+  bool DoRunWithType() {
     // Extract N
     const auto N = Input(CELL_T_M_1).dim(1);
 
@@ -253,6 +260,10 @@ class LSTMUnitGradientOp : public Operator<Context> {
     return true;
   }
 
+  bool RunOnDevice() override {
+    return DoRunWithType<float>();
+  }
+
  protected:
   INPUT_TAGS(
       HIDDEN_T_M_1,
@@ -266,7 +277,7 @@ class LSTMUnitGradientOp : public Operator<Context> {
       CELL_T_GRAD, );
   OUTPUT_TAGS(HIDDEN_T_M_1_GRAD, CELL_T_M_1_GRAD, GATES_GRAD);
 
-  T forget_bias_;
+  float forget_bias_;
 
  private:
   bool drop_states_;
