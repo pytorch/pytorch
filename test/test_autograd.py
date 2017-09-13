@@ -1514,6 +1514,24 @@ class TestAutograd(TestCase):
                               lambda a, b, c, dim: torch.cat((a, b, c), dim),
                               True, f_args_variable, f_args_tensor)
 
+    def test_variable_traverse(self):
+        def get_out_and_unrefed_cycle():
+            inp = Variable(torch.randn(10), requires_grad=True)
+            tmp = inp.view(10, 1)
+            out = tmp.view(10)
+
+            # Create a reference cycle that contains an
+            # intermediary Variable in the graph
+            my_list = []
+            my_list.append(tmp)
+            my_list.append(my_list)
+
+            return out
+
+        out = get_out_and_unrefed_cycle()
+        gc.collect()
+        # This will segfault if things have been erroneously released
+        out.backward(torch.randn(out.size()))
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
