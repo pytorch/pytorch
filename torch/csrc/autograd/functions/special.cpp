@@ -96,7 +96,7 @@ bool Eval::trySimpleEval(const variable_list& inputs, const variable_list& outpu
 
   if (inherited_placeholders.size() != 0) return false;
 
-  auto& grad_fn = outputs[0]->grad_fn;
+  auto& grad_fn = outputs[0].grad_fn();
   if (static_cast<std::size_t>(grad_fn->num_inputs) >= max_outputs) return false;
   if (static_cast<std::size_t>(grad_fn->num_inputs) != outputs.size()) return false;
 
@@ -104,8 +104,8 @@ bool Eval::trySimpleEval(const variable_list& inputs, const variable_list& outpu
   bitset_type output_nrs = 0;
   bitset_type expected_bitset = ((1 << grad_fn->num_inputs) - 1);
   for (auto & output : outputs) {
-    if (output->grad_fn != grad_fn) return false;
-    output_nrs |= (1 << output->output_nr);
+    if (output.grad_fn() != grad_fn) return false;
+    output_nrs |= (1 << output.output_nr());
   }
   if (output_nrs != expected_bitset) return false;
 
@@ -114,9 +114,9 @@ bool Eval::trySimpleEval(const variable_list& inputs, const variable_list& outpu
   auto& grad_next_fns = grad_fn->next_functions;
   if (num_inputs != grad_next_fns.size()) return false;
   for (std::size_t i = 0; i < num_inputs; ++i) {
-    if (inputs[i]) {
-      const auto& input_grad = inputs[i]->grad_fn ? inputs[i]->grad_fn : inputs[i]->grad_accumulator.lock();
-      if (grad_next_fns[i].first != input_grad || grad_next_fns[i].second != inputs[i]->output_nr) return false;
+    if (inputs[i].defined()) {
+      const auto& input_grad = inputs[i].grad_fn() ? inputs[i].grad_fn() : inputs[i].grad_accumulator();
+      if (grad_next_fns[i].first != input_grad || grad_next_fns[i].second != inputs[i].output_nr()) return false;
     } else {
       if (grad_next_fns[i].first != nullptr) return false;
     }

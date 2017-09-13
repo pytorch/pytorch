@@ -23,7 +23,7 @@ struct EvalOutput : Function {
     if (next_edge.first) {
       input_sizes.emplace_back(next_edge.first->input_sizes.at(next_edge.second));
     } else {
-      input_sizes.emplace_back(nullptr);
+      input_sizes.emplace_back(Variable());
     }
   }
 
