@@ -10,6 +10,9 @@ import torch.autograd
 import torch.serialization
 import re
 import collections
+import string
+import json
+import math
 from ._utils import _range
 
 
@@ -88,4 +91,103 @@ def _op(self, opname, *args, **kwargs):
         return n
     return tuple(self.appendNode(self.createSelect(n, i)) for i in _range(outputs))
 
+
 torch._C.Graph.op = _op
+
+
+_vis_template = string.Template("""
+<!doctype html>
+<html>
+<head>
+  <title>Network | Basic usage</title>
+
+  <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/vis/4.20.1/vis.min.js"></script>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/vis/4.20.1/vis.min.css" rel="stylesheet" type="text/css" />
+
+  <style type="text/css">
+    #mynetwork {
+      width: 1920px;
+      height: 1080px;
+      border: 1px solid lightgray;
+    }
+  </style>
+</head>
+<body>
+
+<div id="mynetwork"></div>
+
+<script type="text/javascript">
+  // create an array with nodes
+  var nodes = new vis.DataSet(
+    $nodes
+  );
+
+  // create an array with edges
+  var edges = new vis.DataSet(
+    $edges
+  );
+
+  // create a network
+  var container = document.getElementById('mynetwork');
+  var data = {
+    nodes: nodes,
+    edges: edges
+  };
+  var options = $options;
+  var network = new vis.Network(container, data, options);
+</script>
+</body>
+</html>
+""")
+
+
+def _write_vis(self, filename):
+    nodes = []
+    edges = []
+    options = {}
+    for n, i in enumerate(self.inputs()):
+        nodes.append({
+            'id': i.unique(),
+            'label': 'input {}'.format(n),
+            'shape': 'square',
+        })
+
+    existing = set()
+
+    def add_edge(i_, n):
+        i = i_ if i_.kind() != 'Select' else i_.input()
+        if (i, n) in existing:
+            return
+        existing.add((i, n))
+        edges.append({
+            'from': n.unique(),
+            'to': i.unique(),
+            'arrows': 'from',
+        })
+
+    counts = {}
+    for n in self.nodes():
+        if len(n.uses()) == 0 or n.kind() == 'Select':
+            continue
+        ident = counts.get(n.kind(),0)
+        counts[n.kind()] = ident + 1
+        d = {
+            'id': n.unique(),
+            'label': '{}_{}'.format(n.kind(), ident),
+        }
+        if n in self.outputs():
+            d['shape'] = 'triangle'
+
+        for i in n.inputs():
+            add_edge(i, n)
+
+        nodes.append(d)
+
+    result = _vis_template.substitute(nodes=json.dumps(nodes),
+                                      edges=json.dumps(edges),
+                                      options=json.dumps(options))
+    with open(filename, 'w') as f:
+        f.write(result)
+
+
+torch._C.Graph.write_vis = _write_vis
