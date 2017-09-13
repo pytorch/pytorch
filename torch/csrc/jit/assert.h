@@ -28,9 +28,21 @@ void barf(const char *fmt, ...);
     ::torch::jit::barf("%s:%u: %s: Assertion `%s` failed.", __FILE__, __LINE__, __func__, #cond); \
   }
 
-//note: msg must be a string literal
-//node: In, ##__VA_ARGS '##' supresses the comma if __VA_ARGS__ is empty
-#define JIT_ASSERTM(cond, msg, ...) \
+// The trailing ' ' argument is a hack to deal with the extra comma when ... is empty.
+// Another way to solve this is ##__VA_ARGS__ in _JIT_ASSERTM, but this is a non-portable
+// extension we shouldn't use.
+#define JIT_ASSERTM(...) _JIT_ASSERTM(__VA_ARGS__, ' ')
+
+// Note: msg must be a string literal
+#define _JIT_ASSERTM(cond, msg, ...) \
   if (__builtin_expect(!(cond), 0)) { \
-    ::torch::jit::barf("%s:%u: %s: Assertion `%s` failed: " msg , __FILE__, __LINE__, __func__, #cond,##__VA_ARGS__); \
+    ::torch::jit::barf("%s:%u: %s: Assertion `%s` failed: " msg, __FILE__, __LINE__, __func__, #cond, __VA_ARGS__); \
+  }
+
+#define JIT_EXPECTM(...) _JIT_EXPECTM(__VA_ARGS__, ' ')
+
+// Note: msg must be a string literal
+#define _JIT_EXPECTM(cond, msg, ...) \
+  if (__builtin_expect(!(cond), 0)) { \
+    ::torch::jit::barf("%s:%u: %s: " msg, __FILE__, __LINE__, __func__, __VA_ARGS__); \
   }
