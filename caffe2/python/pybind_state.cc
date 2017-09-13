@@ -613,7 +613,6 @@ void addObjectMethods(py::module& m) {
     return caffe2::db::Caffe2DBRegistry()->Keys();
   });
 
-
   // OpSchema
   py::class_<OpSchema> op_schema(m, "OpSchema");
   op_schema.def_property_readonly("file", &OpSchema::file)
@@ -624,9 +623,18 @@ void addObjectMethods(py::module& m) {
       .def_property_readonly("args", &OpSchema::args)
       .def_property_readonly("input_desc", &OpSchema::input_desc)
       .def_property_readonly("output_desc", &OpSchema::output_desc)
+      .def_property_readonly("max_input", &OpSchema::max_input)
+      .def_property_readonly("max_output", &OpSchema::max_output)
+      .def_property_readonly("min_input", &OpSchema::min_input)
+      .def_property_readonly("min_output", &OpSchema::min_output)
+      .def_property_readonly("inf", &OpSchema::inf)
       // Note: this does not work yet, we will need to figure out how to pass
       // protobuf objects.
       .def("infer_tensor", &OpSchema::InferTensor)
+      .def("CalculateOutput", &OpSchema::CalculateOutput)
+      .def("num_inputs_allowed", &OpSchema::num_inputs_allowed)
+      .def("num_outputs_allowed", &OpSchema::num_outputs_allowed)
+      .def("num_inputs_outputs_allowed", &OpSchema::num_inputs_outputs_allowed)
       .def_static(
           "get", &OpSchemaRegistry::Schema, py::return_value_policy::reference)
       .def_static(
@@ -803,7 +811,7 @@ void addGlobalMethods(py::module& m) {
     std::vector<std::string> alternatives;
     int editTolerance = 3;
     for (auto it : caffe2::CPUOperatorRegistry()->Keys()) {
-      if(editDistance(it, name, editTolerance) < editTolerance + 1) {
+      if (editDistance(it, name, editTolerance) < editTolerance + 1) {
         alternatives.push_back(it);
       }
     }

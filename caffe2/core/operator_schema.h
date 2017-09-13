@@ -37,18 +37,21 @@ constexpr int kCannotComputeNumOutputs = -1;
 class OpSchema {
  public:
   OpSchema() : file_("unknown"), line_(0) {}
-  OpSchema(const string& file, const int line)
-      : file_(file), line_(line) {}
+  OpSchema(const string& file, const int line) : file_(file), line_(line) {}
 
   /**
    * @brief Returns the file that the op schema is registered from.
    */
-  inline const string& file() const { return file_; }
+  inline const string& file() const {
+    return file_;
+  }
 
   /**
    * @brief Returns the line in file that the op schema is registered from.
    */
-  inline int line() const { return line_; }
+  inline int line() const {
+    return line_;
+  }
 
   /**
    * @brief Returns the docstring of the op schema.
@@ -246,6 +249,38 @@ class OpSchema {
    */
   int CalculateOutput(int num_input) const;
 
+  int min_input() const {
+    return min_input_;
+  }
+
+  int max_input() const {
+    return max_input_;
+  }
+
+  int min_output() const {
+    return min_output_;
+  }
+
+  int max_output() const {
+    return max_output_;
+  }
+
+  bool num_inputs_allowed(int x) const {
+    return num_inputs_allowed_(x);
+  }
+
+  bool num_outputs_allowed(int x) const {
+    return num_outputs_allowed_(x);
+  }
+
+  bool num_inputs_outputs_allowed(int x, int y) const {
+    return num_inputs_outputs_allowed_(x, y);
+  }
+
+  int inf() const {
+    return std::numeric_limits<int>::max();
+  }
+
   friend std::ostream& operator<<(std::ostream& out, const OpSchema& schema);
 
   const std::vector<Argument>& args() const {
@@ -295,18 +330,19 @@ class OpSchema {
   int max_output_ = std::numeric_limits<int>::max();
   bool private_ = false;
   bool inputs_can_cross_devices_ = false;
-  std::function<bool(int)> num_inputs_allowed_
-      = [](int) { return true; };
-  std::function<bool(int)> num_outputs_allowed_
-      = [](int) { return true; };
-  std::function<bool(int, int)> num_inputs_outputs_allowed_
-      = [](int, int) { return true; };
+  std::function<bool(int)> num_inputs_allowed_ = [](int) { return true; };
+  std::function<bool(int)> num_outputs_allowed_ = [](int) { return true; };
+  std::function<bool(int, int)> num_inputs_outputs_allowed_ = [](int, int) {
+    return true;
+  };
   std::function<int(int)> calculate_output_;
   // In default, any in-place operation is neither allowed nor enforced.
-  std::function<bool(int, int)> inplace_allowed_
-      = [](int, int) { return false; };
-  std::function<bool(int, int)> inplace_enforced_
-      = [](int, int) { return false; };
+  std::function<bool(int, int)> inplace_allowed_ = [](int, int) {
+    return false;
+  };
+  std::function<bool(int, int)> inplace_enforced_ = [](int, int) {
+    return false;
+  };
   TensorInferenceFunctionType tensor_inference_function_ =
       [](const OperatorDef& def, const vector<TensorShape>&) {
         vector<TensorShape> out;
@@ -333,16 +369,16 @@ class OpSchema {
  */
 class OpSchemaRegistry {
  public:
-  static OpSchema& NewSchema(
-      const string& key, const string& file, const int line) {
+  static OpSchema&
+  NewSchema(const string& key, const string& file, const int line) {
     auto& m = map();
     if (m.count(key)) {
       const auto& schema = m[key];
       std::ios_base::Init init;
-      std::cerr << "Trying to register schema with name "
-                << key << " from file " << file << " line " << line
-                << ", but it is already registered from file "
-                << schema.file() << " line " << schema.line();
+      std::cerr << "Trying to register schema with name " << key
+                << " from file " << file << " line " << line
+                << ", but it is already registered from file " << schema.file()
+                << " line " << schema.line();
       abort();
     }
     m.emplace(std::make_pair(key, OpSchema(file, line)));
@@ -407,7 +443,7 @@ InferOpInputOutputDevice(const OperatorDef& op) {
   return op_schema->InferDevice(op);
 }
 
-}  // namespace caffe2
+} // namespace caffe2
 
 #ifndef CAFFE2_NO_OPERATOR_SCHEMA
 
@@ -431,4 +467,4 @@ InferOpInputOutputDevice(const OperatorDef& op) {
 
 #endif // CAFFE2_NO_OPERATOR_SCHEMA
 
-#endif  // CAFFE2_CORE_OPERATOR_SCHEMA_H_
+#endif // CAFFE2_CORE_OPERATOR_SCHEMA_H_
