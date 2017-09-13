@@ -142,7 +142,7 @@ class OpSchema {
    */
   OpSchema& TensorInferenceFunction(TensorInferenceFunctionType function);
   /**
-   * @brief Seets the tensor inference function to produce the same output as
+   * @brief Sets the tensor inference function to produce the same output as
    * the input.
    */
   OpSchema& IdenticalTypeAndShape();
