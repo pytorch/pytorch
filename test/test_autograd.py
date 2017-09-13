@@ -1537,6 +1537,7 @@ class TestAutograd(TestCase):
         # This will segfault if things have been erroneously released
         out.backward(torch.randn(out.size()))
 
+
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
         shape = (shape,)
