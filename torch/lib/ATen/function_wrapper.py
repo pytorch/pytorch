@@ -409,7 +409,7 @@ def create_generic(top_env, declarations):
             same_size_option = option.copy()
             same_size_option['method_prefix'] = option['method_prefix_derived']
             same_size_env = nested_dict(same_size_option, top_env)
-            top_env['type_method_declarations_protected'].append(
+            top_env['type_method_declarations'].append(
                 TYPE_METHOD_DECLARATION.substitute(same_size_env))
             top_env['type_method_definitions'].append(
                 TYPE_METHOD_DEFINITION.substitute(same_size_env))
