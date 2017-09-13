@@ -91,11 +91,11 @@ class TestShapeInference(test_util.TestCase):
         brew.conv(model, "data_nchw", 'conv1', 3, 64,
                    weight_init=("MSRAFill", {}), kernel=7,
                    stride=2, pad=3, no_bias=0)
-        brew.spatial_bn(model, 'conv1', 'conv1_spatbn_relu', 64, epsilon=1e-3)
+        brew.spatial_bn(model, 'conv1', 'conv1_spatbn_relu', 64, epsilon=1e-3, is_test=False)
         brew.relu(model, 'conv1_spatbn_relu', 'conv1_spatbn_relu')
         brew.max_pool(model, 'conv1_spatbn_relu', 'pool1', kernel=3, stride=2)
         brew.fc(model, 'pool1', 'fc', dim_in=(64 * 56 * 56), dim_out=100)
-        brew.dropout(model, 'fc', 'fc_drop')
+        brew.dropout(model, 'fc', 'fc_drop', is_test=False)
         model.Sigmoid('fc_drop', 'fc_sigm')
         brew.softmax(model, 'fc_sigm', 'softmax')
         model.LabelCrossEntropy(['softmax', 'label'], 'xent')

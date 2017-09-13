@@ -143,30 +143,37 @@ ImageInputOp<Context>::ImageInputOp(
       batch_size_(
           OperatorBase::template GetSingleArgument<int>("batch_size", 0)),
       label_type_(static_cast<LABEL_TYPE>(
-        OperatorBase::template GetSingleArgument<int>("label_type", 0))),
+          OperatorBase::template GetSingleArgument<int>("label_type", 0))),
       num_labels_(
           OperatorBase::template GetSingleArgument<int>("num_labels", 0)),
       color_(OperatorBase::template GetSingleArgument<int>("color", 1)),
       color_jitter_(
-        OperatorBase::template GetSingleArgument<int>("color_jitter", 0)),
+          OperatorBase::template GetSingleArgument<int>("color_jitter", 0)),
       img_saturation_(OperatorBase::template GetSingleArgument<float>(
-        "img_saturation", 0.4)),
+          "img_saturation",
+          0.4)),
       img_brightness_(OperatorBase::template GetSingleArgument<float>(
-        "img_brightness", 0.4)),
-      img_contrast_(OperatorBase::template GetSingleArgument<float>(
-        "img_contrast", 0.4)),
+          "img_brightness",
+          0.4)),
+      img_contrast_(
+          OperatorBase::template GetSingleArgument<float>("img_contrast", 0.4)),
       color_lighting_(
-        OperatorBase::template GetSingleArgument<int>("color_lighting", 0)),
+          OperatorBase::template GetSingleArgument<int>("color_lighting", 0)),
       color_lighting_std_(OperatorBase::template GetSingleArgument<float>(
-        "color_lighting_std", 0.1)),
+          "color_lighting_std",
+          0.1)),
       scale_jitter_type_(static_cast<SCALE_JITTER_TYPE>(
-        OperatorBase::template GetSingleArgument<int>("scale_jitter_type", 0))),
+          OperatorBase::template GetSingleArgument<int>(
+              "scale_jitter_type",
+              0))),
       scale_(OperatorBase::template GetSingleArgument<int>("scale", -1)),
       minsize_(OperatorBase::template GetSingleArgument<int>("minsize", -1)),
       warp_(OperatorBase::template GetSingleArgument<int>("warp", 0)),
       crop_(OperatorBase::template GetSingleArgument<int>("crop", -1)),
       mirror_(OperatorBase::template GetSingleArgument<int>("mirror", 0)),
-      is_test_(OperatorBase::template GetSingleArgument<int>("is_test", 0)),
+      is_test_(OperatorBase::template GetSingleArgument<int>(
+          OpSchema::Arg_IsTest,
+          0)),
       use_caffe_datum_(
           OperatorBase::template GetSingleArgument<int>("use_caffe_datum", 0)),
       gpu_transform_(OperatorBase::template GetSingleArgument<int>(

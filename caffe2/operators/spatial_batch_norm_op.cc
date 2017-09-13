@@ -161,7 +161,7 @@ OPERATOR_SCHEMA(SpatialBN)
     .TensorInferenceFunction(
         [](const OperatorDef& def, const vector<TensorShape>& in) {
           ArgumentHelper helper(def);
-          bool is_test = helper.GetSingleArgument<int>("is_test", 0);
+          bool is_test = helper.GetSingleArgument<int>(OpSchema::Arg_IsTest, 0);
 
           if (!is_test) {
             vector<TensorShape> out;

@@ -475,4 +475,118 @@ TEST(EnginePrefTest, SetOpEnginePref) {
   SetGlobalEnginePref({});
 }
 
+class JustTestWithRequiredArg : public JustTest {
+ public:
+  using JustTest::JustTest;
+  bool Run(int /* unused */ /*stream_id*/) override {
+    return true;
+  }
+  string type() override {
+    return "JustTestWithRequiredArg";
+  }
+};
+
+REGISTER_CPU_OPERATOR(JustTestWithRequiredArg, JustTestWithRequiredArg);
+OPERATOR_SCHEMA(JustTestWithRequiredArg)
+    .NumInputs(0, 1)
+    .NumOutputs(0, 1)
+    .Arg("test_arg", "this arg is required", true);
+
+TEST(RequiredArg, Basic) {
+  OperatorDef op_def;
+  Workspace ws;
+  op_def.set_type("JustTestWithRequiredArg");
+
+  {
+    try {
+      CreateOperator(op_def, &ws);
+      LOG(FATAL) << "No exception was thrown";
+    } catch (const std::exception& e) {
+      LOG(INFO) << "Exception thrown (expected): " << e.what();
+    }
+  }
+
+  {
+    op_def.add_arg()->CopyFrom(MakeArgument("test_arg", 1));
+    const auto op = CreateOperator(op_def, &ws);
+    EXPECT_NE(nullptr, op.get());
+    EXPECT_EQ(
+        static_cast<JustTest*>(op.get())->type(), "JustTestWithRequiredArg");
+  }
+}
+
+class JustTestWithStandardIsTestArg : public JustTest {
+ public:
+  using JustTest::JustTest;
+  bool Run(int /* unused */ /*stream_id*/) override {
+    return true;
+  }
+  string type() override {
+    return "JustTestWithStandardIsTestArg";
+  }
+};
+
+REGISTER_CPU_OPERATOR(
+    JustTestWithStandardIsTestArg,
+    JustTestWithStandardIsTestArg);
+OPERATOR_SCHEMA(JustTestWithStandardIsTestArg)
+    .NumInputs(0, 1)
+    .NumOutputs(0, 1)
+    .ArgIsTest("this is_test arg is required");
+
+TEST(IsTestArg, standard) {
+  OperatorDef op_def;
+  Workspace ws;
+  op_def.set_type("JustTestWithStandardIsTestArg");
+
+  {
+    try {
+      CreateOperator(op_def, &ws);
+      LOG(FATAL) << "No exception was thrown";
+    } catch (const std::exception& e) {
+      LOG(INFO) << "Exception thrown (expected): " << e.what();
+    }
+  }
+
+  {
+    op_def.add_arg()->CopyFrom(MakeArgument("is_test", 1));
+    const auto op = CreateOperator(op_def, &ws);
+    EXPECT_NE(nullptr, op.get());
+    EXPECT_EQ(
+        static_cast<JustTest*>(op.get())->type(),
+        "JustTestWithStandardIsTestArg");
+  }
+}
+
+class JustTestWithNonStandardIsTestArg : public JustTest {
+ public:
+  using JustTest::JustTest;
+  bool Run(int /* unused */ /*stream_id*/) override {
+    return true;
+  }
+  string type() override {
+    return "JustTestWithNonStandardIsTestArg";
+  }
+};
+
+REGISTER_CPU_OPERATOR(
+    JustTestWithNonStandardIsTestArg,
+    JustTestWithNonStandardIsTestArg);
+OPERATOR_SCHEMA(JustTestWithNonStandardIsTestArg)
+    .NumInputs(0, 1)
+    .NumOutputs(0, 1)
+    .Arg("is_test", "this is_test arg is not required");
+
+TEST(IsTestArg, non_standard) {
+  OperatorDef op_def;
+  Workspace ws;
+  op_def.set_type("JustTestWithNonStandardIsTestArg");
+
+  const auto op = CreateOperator(op_def, &ws);
+  EXPECT_NE(nullptr, op.get());
+  EXPECT_EQ(
+      static_cast<JustTest*>(op.get())->type(),
+      "JustTestWithNonStandardIsTestArg");
+}
+
 }  // namespace caffe2

@@ -113,8 +113,8 @@ class GetSpatialBNGradient : public GradientMakerBase {
   vector<OperatorDef> GetGradientDefs() override {
     // Check if we are in training or testing mode.
     bool is_test = false;
-    if (ArgumentHelper::HasArgument(def_, "is_test")) {
-      const auto& arg = GetArgument(def_, "is_test");
+    if (ArgumentHelper::HasArgument(def_, OpSchema::Arg_IsTest)) {
+      const auto& arg = GetArgument(def_, OpSchema::Arg_IsTest);
       CAFFE_ENFORCE(arg.has_i());
       is_test = arg.i();
     }

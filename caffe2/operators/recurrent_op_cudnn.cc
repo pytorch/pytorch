@@ -248,7 +248,7 @@ bool RecurrentOp<T>::RunOnDevice() {
     return this->Output(i)->template mutable_data<T>();
   };
 
-  if (OperatorBase::GetSingleArgument<int>("is_test", 0)) {
+  if (OperatorBase::GetSingleArgument<int>(OpSchema::Arg_IsTest, 0)) {
     cudnn_wrapper_.with_cudnn_state(0, [&](CuDNNState* state) {
       CUDNN_ENFORCE(cudnnRNNForwardInference(
           state->cudnn_handle(),

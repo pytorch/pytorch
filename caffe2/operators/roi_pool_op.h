@@ -13,7 +13,7 @@ class RoIPoolOp final : public Operator<Context> {
  public:
   RoIPoolOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        is_test_(OperatorBase::GetSingleArgument<int>("is_test", 0)),
+        is_test_(OperatorBase::GetSingleArgument<int>(OpSchema::Arg_IsTest, 0)),
         order_(StringToStorageOrder(
             OperatorBase::GetSingleArgument<string>("order", "NCHW"))),
         pooled_height_(OperatorBase::GetSingleArgument<int>("pooled_h", 1)),

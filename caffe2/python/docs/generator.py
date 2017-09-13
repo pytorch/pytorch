@@ -145,20 +145,20 @@ class OperatorDoc(object):
             formatter.addTable(table, (table == []))
 
     def generateInterface(self, formatter):
-        def makeDesc(title, desc):
+        def makeDesc(title, args):
             f = formatter.clone()
             f.addEmphasis(title, 1)
             out = [(f.dump(), '')]
-            for name, doc in desc:
+            for arg in args:
                 f = formatter.clone()
-                f.addCode(name, inline=True)
-                out.append((f.dump(), doc or ''))
+                f.addCode(arg.name, inline=True)
+                out.append((f.dump(), arg.description or ''))
             return out
 
         tuples = []
 
-        if self.schema.arg_desc:
-            tuples += makeDesc('Arguments', self.schema.arg_desc)
+        if self.schema.args:
+            tuples += makeDesc('Arguments', self.schema.args)
 
         if self.schema.input_desc:
             tuples += makeDesc('Inputs', self.schema.input_desc)
