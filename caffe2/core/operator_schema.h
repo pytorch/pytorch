@@ -194,7 +194,40 @@ class OpSchema {
 
   // Functions to do documentation for the operator schema.
   OpSchema& SetDoc(const string& doc);
-  OpSchema& Arg(const char* name, const char* description);
+
+  struct Argument {
+    Argument(const char* name, const char* description, bool required)
+        : name_{name}, description_{description}, required_{required} {}
+
+    const char* name() const {
+      return name_;
+    }
+
+    const char* description() const {
+      return description_;
+    }
+
+    bool is_required() const {
+      return required_;
+    }
+
+   private:
+    const char* name_;
+    const char* description_;
+    const bool required_;
+  };
+
+  OpSchema&
+  Arg(const char* name, const char* description, bool required = false);
+
+#define DECLARE_STANDARD_ARG(name, str) \
+  static const char* Arg_##name;        \
+  OpSchema& Arg##name(const char* description);
+
+  DECLARE_STANDARD_ARG(IsTest, is_test)
+
+#undef DECLARE_STANDARD_ARG
+
   OpSchema& Input(const int n, const char* name, const char* description);
   OpSchema& Output(const int n, const char* name, const char* description);
   // Calls the passed function with `this` as an argument. Useful for
@@ -215,13 +248,14 @@ class OpSchema {
 
   friend std::ostream& operator<<(std::ostream& out, const OpSchema& schema);
 
-  const std::vector<std::pair<const char*, const char*>>& arg_desc() {
-    return arg_desc_;
+  const std::vector<Argument>& args() const {
+    return args_;
   }
-  const std::vector<std::pair<const char*, const char*>>& input_desc() {
+
+  const std::vector<std::pair<const char*, const char*>>& input_desc() const {
     return input_desc_;
   }
-  const std::vector<std::pair<const char*, const char*>>& output_desc() {
+  const std::vector<std::pair<const char*, const char*>>& output_desc() const {
     return output_desc_;
   }
   bool private_op() {
@@ -251,7 +285,7 @@ class OpSchema {
  private:
   string file_;
   string doc_;
-  std::vector<std::pair<const char*, const char*>> arg_desc_{};
+  std::vector<Argument> args_{};
   std::vector<std::pair<const char*, const char*>> input_desc_{};
   std::vector<std::pair<const char*, const char*>> output_desc_{};
   int line_ = 0;

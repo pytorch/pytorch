@@ -13,7 +13,7 @@ class SpatialBNOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   SpatialBNOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        is_test_(OperatorBase::GetSingleArgument<int>("is_test", 0)),
+        is_test_(OperatorBase::GetSingleArgument<int>(OpSchema::Arg_IsTest, 0)),
         epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5)),
         momentum_(OperatorBase::GetSingleArgument<float>("momentum", 0.9)),
         order_(StringToStorageOrder(
@@ -46,7 +46,7 @@ class SpatialBNGradientOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   SpatialBNGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        is_test_(OperatorBase::GetSingleArgument<int>("is_test", 0)),
+        is_test_(OperatorBase::GetSingleArgument<int>(OpSchema::Arg_IsTest, 0)),
         epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5)),
         order_(StringToStorageOrder(
             OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {

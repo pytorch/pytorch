@@ -103,7 +103,9 @@ VideoInputOp<Context>::VideoInputOp(
           OperatorBase::template GetSingleArgument<int>("num_of_labels", 0)),
       use_local_file_(
           OperatorBase::template GetSingleArgument<int>("use_local_file", 0)),
-      is_test_(OperatorBase::template GetSingleArgument<int>("is_test", 0)),
+      is_test_(OperatorBase::template GetSingleArgument<int>(
+          OpSchema::Arg_IsTest,
+          0)),
       im_extension_(
           OperatorBase::template GetSingleArgument<string>("im_extension", "")),
       num_decode_threads_(

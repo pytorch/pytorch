@@ -615,13 +615,13 @@ void addObjectMethods(py::module& m) {
 
 
   // OpSchema
-  py::class_<OpSchema>(m, "OpSchema")
-      .def_property_readonly("file", &OpSchema::file)
+  py::class_<OpSchema> op_schema(m, "OpSchema");
+  op_schema.def_property_readonly("file", &OpSchema::file)
       .def_property_readonly("line", &OpSchema::line)
       .def_property_readonly("private", &OpSchema::private_op)
       .def_property_readonly(
           "doc", &OpSchema::doc, py::return_value_policy::reference)
-      .def_property_readonly("arg_desc", &OpSchema::arg_desc)
+      .def_property_readonly("args", &OpSchema::args)
       .def_property_readonly("input_desc", &OpSchema::input_desc)
       .def_property_readonly("output_desc", &OpSchema::output_desc)
       // Note: this does not work yet, we will need to figure out how to pass
@@ -641,6 +641,11 @@ void addObjectMethods(py::module& m) {
           "get_gradient_impl",
           DefinitionGetter(GradientRegistry()),
           py::return_value_policy::reference);
+
+  py::class_<OpSchema::Argument>(op_schema, "Argument")
+      .def_property_readonly("name", &OpSchema::Argument::name)
+      .def_property_readonly("description", &OpSchema::Argument::description)
+      .def_property_readonly("required", &OpSchema::Argument::is_required);
 
   py::class_<Predictor>(m, "Predictor")
       .def(
