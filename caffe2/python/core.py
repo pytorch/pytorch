@@ -433,7 +433,7 @@ class IR(object):
         for op in operators:
             if op.type == 'StopGradient':
                 if op.output[0] not in self.input_usages:
-                    raise Exception("""StopGradient's output '{}' is orphan.
+                    raise ValueError("""StopGradient's output '{}' is orphan.
 You typically want to specify same input and output for
 StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
 
