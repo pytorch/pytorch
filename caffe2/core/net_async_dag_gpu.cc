@@ -77,6 +77,14 @@ AsyncDAGNet::AsyncDAGNet(
     : DAGNetBase(net_def, ws) {
   VLOG(1) << "Constructing Async DAG Net " << net_def->name();
   eventRecorded_.resize(net_def->op_size());
+
+  // For all chains, their tail should consist the list of events that we are
+  // needing for synchronization in the Run() inteface.
+  events_.reserve(execution_chains_.size());
+  for (const auto& chain : execution_chains_) {
+    const int tail_op_idx = chain.second.back();
+    events_.push_back(&operator_nodes_[tail_op_idx].operator_->event());
+  }
 }
 
 bool AsyncDAGNet::RunAt(const std::vector<int>& chain) {
@@ -123,18 +131,11 @@ bool AsyncDAGNet::RunAt(const std::vector<int>& chain) {
   return success;
 }
 
-bool AsyncDAGNet::Run() {
+bool AsyncDAGNet::RunAsync() {
   // Reset the event tracking at each iteration
   eventRecorded_.assign(eventRecorded_.size(), 0);
 
-  const auto result = DAGNetBase::Run();
-
-  // Potential optimization: we can pre-compute outstanding events, as some
-  // chain's tail may already be covered by other chains.
-  for (const auto& chain : execution_chains_) {
-    const int tail_op_idx = chain.second.back();
-    operator_nodes_[tail_op_idx].operator_->event().Finish();
-  }
+  const auto result = DAGNetBase::RunAsync();
   return result;
 }
 

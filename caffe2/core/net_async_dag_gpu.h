@@ -17,8 +17,11 @@ namespace caffe2 {
 class AsyncDAGNet : public DAGNetBase {
  public:
   AsyncDAGNet(const std::shared_ptr<const NetDef>& net_def, Workspace* ws);
+  bool SupportsAsync() override {
+    return true;
+  }
   bool RunAt(const std::vector<int>& chain) override;
-  bool Run() override;
+  bool RunAsync() override;
 
  protected:
   // Tracks whether a given op has had an event recorded in each

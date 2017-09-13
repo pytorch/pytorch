@@ -22,12 +22,16 @@ class HTraceDAGNet : public DAGNetBase {
     }
   }
 
-  bool Run() override {
+  bool SupportsAsync() override {
+    return false;
+  }
+
+  bool RunAsync() override {
     htrace::Scope run_scope(
         htrace_tracer_,
         htrace_root_scope_.GetSpanId(),
         "run-scope-" + caffe2::to_string(run_count_++));
-    return DAGNetBase::Run();
+    return DAGNetBase::RunAsync();
   }
 
   ~HTraceDAGNet() {

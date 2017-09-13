@@ -417,7 +417,7 @@ DAGNetBase::~DAGNetBase() {
   }
 }
 
-bool DAGNetBase::Run() {
+bool DAGNetBase::RunAsync() {
   if (observer_) {
     observer_->Start();
   }

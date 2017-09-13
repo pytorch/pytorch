@@ -1,5 +1,5 @@
-#ifndef CAFFE2_CORE_NET_SIMPLE_H_
-#define CAFFE2_CORE_NET_SIMPLE_H_
+#ifndef CAFFE2_CORE_NET_SIMPLE_ASYNC_H_
+#define CAFFE2_CORE_NET_SIMPLE_ASYNC_H_
 
 #include <vector>
 
@@ -16,13 +16,15 @@ namespace caffe2 {
 // This is the very basic structure you need to run a network - all it
 // does is simply to run everything in sequence. If you want more fancy control
 // such as a DAG-like execution, check out other better net implementations.
-class SimpleNet : public NetBase {
+class AsyncSimpleNet : public NetBase {
  public:
-  SimpleNet(const std::shared_ptr<const NetDef>& net_def, Workspace* ws);
+  AsyncSimpleNet(const std::shared_ptr<const NetDef>& net_def, Workspace* ws);
+
   bool SupportsAsync() override {
-    return false;
+    return true;
   }
   bool RunAsync() override;
+
   vector<float> TEST_Benchmark(
       const int warmup_runs,
       const int main_runs,
@@ -45,9 +47,9 @@ class SimpleNet : public NetBase {
  protected:
   vector<unique_ptr<OperatorBase>> operators_;
 
-  DISABLE_COPY_AND_ASSIGN(SimpleNet);
+  DISABLE_COPY_AND_ASSIGN(AsyncSimpleNet);
 };
 
 } // namespace caffe2
 
-#endif // CAFFE2_CORE_NET_SIMPLE_H_
+#endif // CAFFE2_CORE_NET_SIMPLE_ASYNC_H_

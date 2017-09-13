@@ -40,7 +40,7 @@ SimpleNet::SimpleNet(
   }
 }
 
-bool SimpleNet::Run() {
+bool SimpleNet::RunAsync() {
   if (observer_) {
     observer_->Start();
   }
@@ -55,19 +55,6 @@ bool SimpleNet::Run() {
   }
   if (observer_) {
     observer_->Stop();
-  }
-  return true;
-}
-
-bool SimpleNet::RunAsync() {
-  VLOG(1) << "Running net " << name_;
-  for (auto& op : operators_) {
-    VLOG(1) << "Running operator " << op->debug_def().name() << "("
-            << op->debug_def().type() << ").";
-    if (!op->RunAsync()) {
-      LOG(ERROR) << "Operator failed: " << ProtoDebugString(op->debug_def());
-      return false;
-    }
   }
   return true;
 }

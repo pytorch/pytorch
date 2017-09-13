@@ -45,7 +45,7 @@ class DAGNetBase : public NetBase {
   using ExecutionChains = std::unordered_map<int, std::vector<int>>;
   DAGNetBase(const std::shared_ptr<const NetDef>& net_def, Workspace* ws);
   ~DAGNetBase() override;
-  bool Run() override;
+  bool RunAsync() override;
   // WorkerFunction() is a function wrapper to allow us to run worker threads.
   // It checks out one ready-to-run operator from the job queue, runs it,
   // notifies all its children, and for any children that is ready, enqueues
@@ -95,6 +95,9 @@ class DAGNet : public DAGNetBase {
 
  protected:
   bool RunAt(const std::vector<int>& chain) override;
+  bool SupportsAsync() override {
+    return false;
+  }
 };
 
 } // namespace caffe2

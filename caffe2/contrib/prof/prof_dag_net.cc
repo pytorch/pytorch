@@ -43,7 +43,7 @@ void ProfDAGNet::ValidateOpTensorDevices() {
   }
 }
 
-bool ProfDAGNet::Run() {
+bool ProfDAGNet::RunAsync() {
   runs_++;
 
   // don't collect statistics from first run

@@ -21,7 +21,10 @@ class ProfDAGNet : public DAGNetBase {
  public:
   ProfDAGNet(const std::shared_ptr<const NetDef>& net_def, Workspace* ws);
   ~ProfDAGNet();
-  bool Run() override;
+  bool SupportsAsync() override {
+    return false;
+  }
+  bool RunAsync() override;
   ProfDAGProtos GetOperatorStats();
 
  protected:
