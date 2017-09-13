@@ -32,28 +32,29 @@ class GLPool : public GLFilter {
   const descriptor geometry;
 
   GLPool(const descriptor& _geometry, PoolType poolType, bool _tiling)
-      : GLFilter("GLPool",
-                 vertex_shader,
-                 fragment_shader,
-                 {
-                     BINDING(inputData), BINDING(kernelSize), BINDING(outputSize),
-                 },
-                 {/* no uniform blocks */},
-                 {/* no attributes */},
-                 {{"KERNEL_SIZE_X", caffe2::to_string(_geometry.kernel_size.x)},
-                  {"KERNEL_SIZE_Y", caffe2::to_string(_geometry.kernel_size.y)},
-                  {"INPUT_PADDING_X", caffe2::to_string(_geometry.input_padding.x)},
-                  {"INPUT_PADDING_Y", caffe2::to_string(_geometry.input_padding.y)},
-                  {"INPUT_STRIDE_X", caffe2::to_string(_geometry.input_stride.x)},
-                  {"INPUT_STRIDE_Y", caffe2::to_string(_geometry.input_stride.y)},
-                  {"INPUT_TILE_WIDTH", caffe2::to_string(_geometry.input_tile_size.x)},
-                  {"INPUT_TILE_HEIGHT", caffe2::to_string(_geometry.input_tile_size.y)},
-                  {"OUTPUT_TILE_WIDTH", caffe2::to_string(_geometry.output_tile_size.x)},
-                  {"OUTPUT_TILE_HEIGHT", caffe2::to_string(_geometry.output_tile_size.y)},
-                  {"TILED_POOLING", caffe2::to_string(_tiling)},
-                  {"TEXTURE_BORDER_CLAMP",
-                   caffe2::to_string(GLContext::getGLContext()->GL_EXT_texture_border_clamp_defined())},
-                  {"MAX_POOL", caffe2::to_string(poolType == MaxPool)}}),
+      : GLFilter(
+            "GLPool",
+            vertex_shader,
+            fragment_shader,
+            {
+                BINDING(inputData), BINDING(kernelSize), BINDING(outputSize),
+            },
+            {/* no uniform blocks */},
+            {/* no attributes */},
+            {{"KERNEL_SIZE_X", caffe2::to_string(_geometry.kernel_size.x)},
+             {"KERNEL_SIZE_Y", caffe2::to_string(_geometry.kernel_size.y)},
+             {"INPUT_PADDING_X", caffe2::to_string(_geometry.input_padding.x)},
+             {"INPUT_PADDING_Y", caffe2::to_string(_geometry.input_padding.y)},
+             {"INPUT_STRIDE_X", caffe2::to_string(_geometry.input_stride.x)},
+             {"INPUT_STRIDE_Y", caffe2::to_string(_geometry.input_stride.y)},
+             {"INPUT_TILE_WIDTH", caffe2::to_string(_geometry.input_tile_size.x)},
+             {"INPUT_TILE_HEIGHT", caffe2::to_string(_geometry.input_tile_size.y)},
+             {"OUTPUT_TILE_WIDTH", caffe2::to_string(_geometry.output_tile_size.x)},
+             {"OUTPUT_TILE_HEIGHT", caffe2::to_string(_geometry.output_tile_size.y)},
+             {"TILED_POOLING", caffe2::to_string(_tiling)},
+             {"TEXTURE_BORDER_CLAMP",
+              caffe2::to_string(GLContext::getGLContext()->GL_EXT_texture_border_clamp_defined())},
+             {"MAX_POOL", caffe2::to_string(poolType == MaxPool)}}),
         geometry(_geometry) {}
   ~GLPool() {}
 
@@ -69,7 +70,8 @@ class GLPool : public GLFilter {
         run({{input_image->textures[is], inputData}},
             {output_image->textures[is]},
             [&]() {
-              glUniform2i(outputSize->location, output_image->texture_width, output_image->texture_height);
+              glUniform2i(
+                  outputSize->location, output_image->texture_width, output_image->texture_height);
               glUniform2i(kernelSize->location, geometry.kernel_size.x, geometry.kernel_size.y);
             },
             output_image->texture_width,
@@ -275,8 +277,13 @@ class GLPoolOp final : public ConvPoolOpBase<CPUContext>, ImageAllocator<float16
     const int input_tile_x = input.tile_x(), input_tile_y = input.tile_y();
     const int output_tile_x = input_tile_x, output_tile_y = input_tile_y;
 
-    GLImageVector<T>* output = ImageAllocator<T>::newImage(
-        num_images, output_width, output_height, output_channels, output_tile_x, output_tile_y, is_last);
+    GLImageVector<T>* output = ImageAllocator<T>::newImage(num_images,
+                                                           output_width,
+                                                           output_height,
+                                                           output_channels,
+                                                           output_tile_x,
+                                                           output_tile_y,
+                                                           is_last);
 
     GLPool::descriptor geometry{input_channels,
                                 {kernel_w(), kernel_h()},
@@ -286,9 +293,10 @@ class GLPoolOp final : public ConvPoolOpBase<CPUContext>, ImageAllocator<float16
                                 {output_height, output_width}};
 
     if (!glPool_) {
-      LOG(INFO) << input_channels << ": " << input_height << " X " << input_width << " => " << output_channels << ": "
-                << output_height << " X " << output_width << " Kernel: " << kernel_w() << "X" << kernel_h()
-                << " Tiling: " << input_tile_x << "X" << input_tile_y;
+      LOG(INFO) << input_channels << ": " << input_height << " X " << input_width << " => "
+                << output_channels << ": " << output_height << " X " << output_width
+                << " Kernel: " << kernel_w() << "X" << kernel_h() << " Tiling: " << input_tile_x
+                << "X" << input_tile_y;
 
       glPool_.reset(new GLPool(geometry, poolType, input_tile_x > 1 || input_tile_y > 1));
     }
