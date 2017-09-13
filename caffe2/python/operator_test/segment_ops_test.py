@@ -219,6 +219,8 @@ def max_grad(grad_out, outputs, inputs):
     flat_grad_in = np.zeros(flat_inputs.shape)
     flat_grad_out = np.array(grad_out).flatten()
     blocks = inputs[0].shape[0]
+    if blocks == 0:
+        return np.zeros(inputs[0].shape)
     block_size = flat_inputs.shape[0] // blocks
 
     for i in range(block_size):
@@ -247,6 +249,9 @@ REFERENCES_SORTED = [
     ('RangeMax', max_fwd, max_grad),
 ]
 
+REFERENCES_LENGTHS_ONLY = [
+    ('Max', partial(np.amax, axis=0), max_grad),
+]
 
 def sparse_lengths_weighted_sum_ref(D, W, I, L):
     R = np.zeros(shape=(len(L), ) + D.shape[1:], dtype=D.dtype)
@@ -341,7 +346,7 @@ class TestSegmentOps(hu.HypothesisTestCase):
                 max_value=5,
                 allow_empty=True
             ),
-            REFERENCES_ALL
+            REFERENCES_ALL + REFERENCES_LENGTHS_ONLY
         )(self)
 
     def test_sparse_lengths_ops(self):
