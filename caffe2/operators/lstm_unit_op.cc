@@ -1,7 +1,7 @@
 #include "lstm_unit_op.h"
 
 namespace caffe2 {
-REGISTER_CPU_OPERATOR(LSTMUnit, LSTMUnitOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(LSTMUnit, LSTMUnitOp<CPUContext>);
 OPERATOR_SCHEMA(LSTMUnit)
     .NumInputs(5)
     .NumOutputs(2)
@@ -16,7 +16,7 @@ value at X{t][n] >= seqLengths[n].
 
 )DOC")
     .Arg("forget_bias", "Bias term to add in while calculating forget gate");
-REGISTER_CPU_OPERATOR(LSTMUnitGradient, LSTMUnitGradientOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(LSTMUnitGradient, LSTMUnitGradientOp<CPUContext>);
 OPERATOR_SCHEMA(LSTMUnitGradient).NumInputs(9).NumOutputs(3);
 
 class GetLSTMUnitGradient : public GradientMakerBase {
