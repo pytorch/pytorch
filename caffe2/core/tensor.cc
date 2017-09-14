@@ -57,7 +57,7 @@ std::string TensorPrinter::MetaStr(const Tensor<CPUContext>& tensor) {
 }
 
 static CaffeMap<CaffeTypeId, TypeCall> type_call_registry_ {
-  {TypeMeta::Id<Tensor<CPUContext>>(), GetTensorType<Tensor<CPUContext>>}
+  {TypeMeta::Id<Tensor<CPUContext>>(), GetTensorType<CPUContext>}
 };
 
 TypeCall GetTypeCallFunction(CaffeTypeId id) {
@@ -73,7 +73,7 @@ void RegisterTypeCallFunction(CaffeTypeId id, TypeCall c) {
 }
 
 static CaffeMap<CaffeTypeId, TensorInfoCall> tensor_info_call_registry_{
-    {TypeMeta::Id<Tensor<CPUContext>>(), GetTensorInfo<Tensor<CPUContext>>}};
+    {TypeMeta::Id<Tensor<CPUContext>>(), GetTensorInfo<CPUContext>}};
 
 TensorInfoCall GetTensorInfoFunction(CaffeTypeId id) {
   auto f = tensor_info_call_registry_.find(id);
