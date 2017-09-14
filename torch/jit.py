@@ -99,6 +99,7 @@ def _dump_trace(trace_name, name, suffix, complete_trace):
         f.write(str(complete_trace))
     complete_trace.graph().write_vis(filename + ".html")
 
+
 # holds run() to run the function and self.inputs which
 # are all the variable inputs
 class Traceable(object):

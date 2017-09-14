@@ -12,7 +12,6 @@ std::unordered_set<NodeKind> simple_mappable = {
   kAdd,
   kNeg,
   kAddConstant,
-  kConcat,
 };
 
 bool isSimpleMap(Node *node) {
@@ -40,6 +39,27 @@ struct GraphFuser {
     if (!node->hasType()) return false;
     if (node->kind() == kFusionGroup) return true;
     return isSimpleMap(node) && isCuda(node);
+  }
+
+  // Can this node produce an _output_ of a fusion group?
+  // all Fusable nodes can do this, but additionally Concat, which normally cannot be fused
+  // because it is not a simple map, can be put in a fusion group
+  // as long as no items in the group read the output of concat
+  bool isFusableAsExitNode(Node * node) {
+    if(isFusable(node))
+      return true;
+    if(node->kind() != kConcat || !isCuda(node))
+      return false;
+
+    // this concat fusion only works when all the inputs are the same size
+    // otherwise they cannot partipate in the same map
+    auto sizes = node->inputs().at(0)->type()->expect<TensorType>()->sizes();
+    for(auto i : node->inputs()) {
+      if(sizes != i->type()->expect<TensorType>()->sizes()){
+        return false;
+      }
+    }
+    return true;
   }
 
   // necessary condition for fusion. If all of the uses of producer are consumer
@@ -232,7 +252,7 @@ struct GraphFuser {
   // returns where to continue scanning
   graph_node_list::iterator scanNode(Node * consumer) {
     auto stage_guard = graph->setStageTemporary(consumer->stage());
-    if(isFusable(consumer)) {
+    if(isFusableAsExitNode(consumer)) {
       // handle inputs in reverse topological order as well...
       // otherwise in f(a,a+b) it will appear a is used twice if we consider
       // the f-a fusion before the f-(a+b) fusion first.
