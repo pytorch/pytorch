@@ -6,14 +6,14 @@ namespace caffe2 {
 
 template <typename Context>
 void momentum_sgd_update(
-    int N,
+    const int N,
     const float* g,
     const float* m,
     float* ng,
     float* nm,
     const float* lr,
-    float momentum,
-    bool nesterov,
+    const float momentum,
+    const bool nesterov,
     float* param,
     Context* /*context*/) {
   const float LR = lr[0];
