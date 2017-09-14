@@ -1928,7 +1928,7 @@ class Net(object):
             for op in self._net.op:
                 op.engine = "CUDNN"
     def RunAllOnMKL(self):
-        """A convenient function to run everything on the GPU."""
+        """A convenient function to run everything using MKLDNN."""
         device_option = caffe2_pb2.DeviceOption()
         device_option.device_type = caffe2_pb2.MKLDNN
         self._net.device_option.CopyFrom(device_option)
