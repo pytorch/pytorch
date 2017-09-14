@@ -218,27 +218,6 @@ void GemmEx(
     const int ldc,
     Context* context);
 
-// GemmBatched provides a simple abstraction into library routines
-template <typename T, class Context, class Engine = DefaultEngine>
-void GemmBatched(
-    const CBLAS_TRANSPOSE TransA,
-    const CBLAS_TRANSPOSE TransB,
-    const int A_size,
-    const int A_batches,
-    const int B_size,
-    const int B_batches,
-    const int M,
-    const int N,
-    const int K,
-    const float alpha,
-    const T* A,
-    const T* B,
-    const float beta,
-    T* C,
-    Context* context,
-    Tensor<Context>* scratch = nullptr,
-    TensorProto::DataType math_type = TensorProto_DataType_FLOAT);
-
 // Gemv always takes in a M*N matrix A, and depending on whether we set TransA
 // to Trans, the output is:
 // CblasNoTrans: x is an N dim vector and y is an M dim vector.
