@@ -1,0 +1,16 @@
+graph(%1 : Double(4, 4)
+      %2 : Double(4, 4)) {
+  %9 : Double(4!, 2), %10 : Double(4!, 2) = Split[split=[2, 2], axis=1](%1), uses = [[%16.i0], [%16.i2]];
+  %12 : Double(4!, 2), %13 : Double(4!, 2) = Split[split=[2, 2], axis=1](%2), uses = [[%16.i1], [%16.i3]];
+  %17 : Double(4, 2) = fusion_group_0(%9, %12, %10, %13), uses = [[%0.i0]];
+  return (%17);
+}
+with fusion_group_0 = graph(%4 : Double(4!, 2)
+      %5 : Double(4!, 2)
+      %7 : Double(4!, 2)
+      %8 : Double(4!, 2)) {
+  %9 : Double(4, 2) = Add(%7, %8), uses = [%3.i1];
+  %6 : Double(4, 2) = Add(%4, %5), uses = [%3.i0];
+  %3 : Double(4, 2) = Mul(%6, %9), uses = [%0.i0];
+  return (%3);
+}
