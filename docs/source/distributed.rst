@@ -86,7 +86,7 @@ Currently three initialization methods are supported:
 TCP initialization
 ^^^^^^^^^^^^^^^^^^
 
-There are two ways to intialize using TCP, both requiring a network address
+There are two ways to initialize using TCP, both requiring a network address
 reachable from all processes and a desired ``world_size``. The first way
 requires specifying an address that belongs to the rank 0 process. This first way of
 initialization requires that all processes have manually specified ranks.
