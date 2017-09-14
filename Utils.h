@@ -2,6 +2,7 @@
 
 #include "ArrayRef.h"
 #include <sstream>
+#include <typeinfo>
 
 namespace at {
 
@@ -19,10 +20,10 @@ static inline T* checked_cast(Base* expr, const char * name, int pos, bool allow
     runtime_error("Expected a Tensor of type %s but found an undefined Tensor for argument #%d '%s'",
       T::typeString(),pos,name);
   }
-  if(auto result = dynamic_cast<T*>(expr))
-    return result;
-  runtime_error("Expected object of type %s but found type %s for argument #%d '%s'",
-    T::typeString(),expr->type().toString(),pos,name);
+  if (typeid(*expr) != typeid(T))
+    runtime_error("Expected object of type %s but found type %s for argument #%d '%s'",
+      T::typeString(),expr->type().toString(),pos,name);
+  return static_cast<T*>(expr);
 }
 
 // Converts a TensorList (i.e. ArrayRef<Tensor> to the underlying TH* Tensor Pointer)

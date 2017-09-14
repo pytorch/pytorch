@@ -196,8 +196,10 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
         write(env['Storage'] + ".cpp", STORAGE_DERIVED_CPP.substitute(env))
         write(env['Storage'] + ".h", STORAGE_DERIVED_H.substitute(env))
         env['TensorDenseOrSparse'] = TENSOR_DENSE_CPP.substitute(env)
+        env['THTensor_nDimension'] = 'tensor->nDimension'
     else:
         env['TensorDenseOrSparse'] = TENSOR_SPARSE_CPP.substitute(env)
+        env['THTensor_nDimension'] = 'tensor->nDimensionI + tensor->nDimensionV'
 
     write(env['Type'] + ".cpp", TYPE_DERIVED_CPP.substitute(env))
     write(env['Type'] + ".h", TYPE_DERIVED_H.substitute(env))
