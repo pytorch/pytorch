@@ -55,7 +55,7 @@ def downloadFromURLToFile(url, filename):
     try:
         print("Downloading from {url}".format(url=url))
         response = urllib.urlopen(url)
-        size = int(response.info().getheader('Content-Length').strip())
+        size = int(response.info().get('Content-Length').strip())
         downloaded_size = 0
         chunk = min(size, 8192)
         print("Writing to {filename}".format(filename=filename))
