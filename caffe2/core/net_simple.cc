@@ -6,6 +6,7 @@
 #include <unordered_set>
 
 #include "caffe2/core/operator.h"
+#include "caffe2/core/static_tracepoint.h"
 #include "caffe2/core/timer.h"
 #include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/utils/proto_utils.h"
@@ -44,12 +45,19 @@ bool SimpleNet::RunAsync() {
   if (observer_) {
     observer_->Start();
   }
+  const auto& net_name = name_.c_str();
   VLOG(1) << "Running net " << name_;
   for (auto& op : operators_) {
-    VLOG(1) << "Running operator " << op->debug_def().name() << "("
-            << op->debug_def().type() << ").";
-    if (!op->Run()) {
-      LOG(ERROR) << "Operator failed: " << ProtoDebugString(op->debug_def());
+    const auto& opdef = op->debug_def();
+    const auto& op_ptr = op.get();
+    const auto& op_name = opdef.name().c_str();
+    const auto& op_type = opdef.type().c_str();
+    VLOG(1) << "Running operator " << op_name << "(" << op_type << ").";
+    CAFFE_SDT(operator_start, net_name, op_name, op_type, op_ptr);
+    bool res = op->Run();
+    CAFFE_SDT(operator_done, net_name, op_name, op_type, op_ptr);
+    if (!res) {
+      LOG(ERROR) << "Operator failed: " << ProtoDebugString(opdef);
       return false;
     }
   }
