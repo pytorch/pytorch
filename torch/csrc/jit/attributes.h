@@ -89,20 +89,20 @@ struct Attributes {
       values_.push_back(i->clone());
     }
   }
-  bool hasAttribute(Symbol name) {
+  bool hasAttribute(Symbol name) const {
     return find(name,false) != values_.end();
   }
-  AttributeKind kindOf(Symbol name) {
+  AttributeKind kindOf(Symbol name) const {
     return (*find(name,true))->kind();
   }
   Derived* removeAttribute(Symbol name) {
     values_.erase(find(name,true));
     return This();
   }
-  bool hasAttributes() {
+  bool hasAttributes() const {
     return values_.size() > 0;
   }
-  std::vector<Symbol> attributeNames() {
+  std::vector<Symbol> attributeNames() const {
     std::vector<Symbol> names;
     for(auto & a : values_)
       names.push_back(a->name);
@@ -113,7 +113,7 @@ struct Attributes {
   Derived* method##_(Symbol name, Kind##Attr::ConstructorType v) { \
     return set<Kind##Attr>(name,std::forward<Kind##Attr::ConstructorType>(v)); \
   } \
-  Kind##Attr::ValueType& method(Symbol name) { \
+  const Kind##Attr::ValueType& method(Symbol name) const { \
     return get<Kind##Attr>(name); \
   }
   CREATE_ACCESSOR(Float,f)
@@ -144,17 +144,28 @@ private:
     return This();
   }
   template<typename T>
-  typename T::ValueType & get(Symbol name) {
+  typename T::ValueType & get(Symbol name) const {
     auto it = find(name, true);
     T* child = dynamic_cast<T*>(it->get());
     JIT_ASSERT(child != nullptr);
     return child->value();
   }
   using AVPtr = AttributeValue::Ptr;
+  // NB: For determinism, we use a vector rather than a hash map.  This does
+  // mean that lookups are O(n), so you shouldn't use Attributes to store
+  // a big pile of messages.
   std::vector<AVPtr> values_;
   using iterator = std::vector<AVPtr>::iterator;
-  iterator find(Symbol name,bool required) {
-    auto it = std::find_if(values_.begin(),values_.end(),[&](const AVPtr & v) {
+  iterator find(Symbol name, bool required) {
+    auto it = std::find_if(values_.begin(), values_.end(),[&](const AVPtr & v) {
+      return v->name == name;
+    });
+    JIT_ASSERT(!required || it != values_.end());
+    return it;
+  }
+  using const_iterator = std::vector<AVPtr>::const_iterator;
+  const_iterator find(Symbol name, bool required) const {
+    auto it = std::find_if(values_.begin(), values_.end(),[&](const AVPtr & v) {
       return v->name == name;
     });
     JIT_ASSERT(!required || it != values_.end());

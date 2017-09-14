@@ -26,6 +26,7 @@
 #include "torch/csrc/jit/attributes.h"
 #include "torch/csrc/jit/resource_guard.h"
 #include "torch/csrc/jit/type.h"
+#include "torch/csrc/jit/graph_node_list.h"
 
 namespace torch { namespace autograd {
 
@@ -71,8 +72,6 @@ using pyobj_list = std::vector<THPObjectPtr>;
 template<typename T>
 using ArrayRef = at::ArrayRef<T>;
 using NodeKind = Symbol;
-struct graph_node_list;
-struct graph_node_list_iterator;
 
 inline TypePtr getInitialType(NodeKind kind) {
   switch(kind) {
@@ -86,14 +85,12 @@ inline TypePtr getInitialType(NodeKind kind) {
   }
 }
 
-static constexpr int kNextDirection = 0;
-static constexpr int kPrevDirection = 1;
-
 struct Node : public Attributes<Node> {
   TH_DISALLOW_COPY_AND_ASSIGN(Node);
   friend struct Graph;
   friend graph_node_list;
   friend graph_node_list_iterator;
+  friend const_graph_node_list_iterator;
 private:
   // each node but Return/Param
   // is associated with exactly one place in the node list...
@@ -105,9 +102,11 @@ private:
   // using an array to allow the same iterator class for forward and reverse node lists
   // This list represents a topological sort
 
-  Node * next_in_graph[2] = {nullptr,nullptr};
+  Node* next_in_graph[2] = { nullptr, nullptr };
   Node* & next() { return next_in_graph[kNextDirection]; }
   Node* & prev() { return next_in_graph[kPrevDirection]; }
+  Node* const & next() const { return next_in_graph[kNextDirection]; }
+  Node* const & prev() const { return next_in_graph[kPrevDirection]; }
 
   const NodeKind kind_;
   std::vector<Node*> inputs_;
@@ -150,16 +149,16 @@ public:
     debug_name_ = name;
     return this;
   }
-  const std::string & debugName() {
+  const std::string & debugName() const {
     return debug_name_;
   }
-  Graph * owningGraph() {
+  Graph * owningGraph() const {
     return graph_;
   }
-  size_t unique() {
+  size_t unique() const {
     return unique_;
   }
-  std::string uniqueName() {
+  std::string uniqueName() const {
     if(debug_name_.size() > 0)
       return debugName() + "_" + std::to_string(unique());
     return std::to_string(unique());
@@ -168,15 +167,15 @@ public:
     stage_ = s;
     return this;
   }
-  size_t stage() {
+  size_t stage() const {
     return stage_;
   }
-  const std::vector<Node*>& inputs() {
+  const std::vector<Node*>& inputs() const {
     return inputs_;
   }
   // lots of things like select/chunk have a single input, so we have a
   // helper to make accessing it easier
-  Node * input() {
+  Node * input() const {
     JIT_ASSERT(inputs_.size() == 1);
     return inputs_.at(0);
   }
@@ -195,10 +194,10 @@ public:
   }
   // select is used so frequently enought it is reasonable to have a helper
   // to access the offset.
-  size_t offset() {
+  size_t offset() const {
     return size_t(i(kOffset));
   }
-  const use_list & uses() {
+  const use_list & uses() const {
     return uses_;
   }
 
@@ -378,6 +377,8 @@ public:
   // useful for resuming a search starting at this node
   graph_node_list_iterator iterator();
   graph_node_list_iterator reverseIterator();
+  const_graph_node_list_iterator iterator() const;
+  const_graph_node_list_iterator reverseIterator() const;
 
   // Remove 'this' from the instruction list and deallocate it.
   //
@@ -429,7 +430,7 @@ private:
     return input_node;
   }
 
-  bool inGraphList() {
+  bool inGraphList() const {
     JIT_ASSERT(next() != nullptr || prev() == nullptr);
     return next() != nullptr;
   }
@@ -442,7 +443,7 @@ private:
     this->next() = nullptr;
     this->prev() = nullptr;
   }
-  void lint();
+  void lint() const;
 protected:
   // subclasses must override
   // this function is used by createClone to initialize a new version
@@ -461,93 +462,6 @@ protected:
   }
 };
 
-struct graph_node_list_iterator {
-  graph_node_list_iterator()
-  : cur(nullptr), d(kNextDirection) {}
-  graph_node_list_iterator(Node * cur, int d)
-  : cur(cur), d(d) {}
-  graph_node_list_iterator(const graph_node_list_iterator & rhs)
-  : cur(rhs.cur),d(rhs.d) {}
-  Node * operator*() { return cur; }
-  Node * operator->() { return cur; }
-  graph_node_list_iterator & operator++() {
-    JIT_ASSERT(cur);
-    cur = cur->next_in_graph[d];
-    return *this;
-  }
-  graph_node_list_iterator operator++(int) {
-    graph_node_list_iterator old = *this;
-    ++(*this);
-    return old;
-  }
-  graph_node_list_iterator & operator--() {
-    JIT_ASSERT(cur);
-    cur = cur->next_in_graph[reverseDir()];
-    return *this;
-  }
-  graph_node_list_iterator operator--(int) {
-    graph_node_list_iterator old = *this;
-    --(*this);
-    return old;
-  }
-
-  // erase cur without invalidating this iterator
-  // named differently from destroy so that ->/. bugs do not
-  // silently cause the wrong one to be called.
-  // iterator will point to the previous entry after call
-  void destroyCurrent() {
-    Node * n = cur;
-    cur = cur->next_in_graph[reverseDir()];
-    n->destroy();
-  }
-  graph_node_list_iterator reverse() {
-    return graph_node_list_iterator(cur, reverseDir());
-  }
-private:
-  int reverseDir() { return d == kNextDirection ? kPrevDirection : kNextDirection; }
-  Node * cur;
-  int d; //direction 0 is forward 1 is reverse, see next_in_graph
-};
-
-inline graph_node_list_iterator Node::iterator() {
-  return graph_node_list_iterator(this,0);
-}
-inline graph_node_list_iterator Node::reverseIterator() {
-  return iterator().reverse();
-}
-
-struct graph_node_list {
-  using iterator = graph_node_list_iterator;
-  graph_node_list_iterator begin() {
-    return graph_node_list_iterator(head->next_in_graph[d],d);
-  }
-  graph_node_list_iterator end() {
-    return graph_node_list_iterator(head,d);
-  }
-  graph_node_list_iterator rbegin() {
-    return reverse().begin();
-  }
-  graph_node_list_iterator rend() {
-    return reverse().end();
-  }
-  graph_node_list reverse() {
-    return graph_node_list(head, d == kNextDirection ? kPrevDirection : kNextDirection);
-  }
-  graph_node_list(Node * head, int d)
-  : head(head), d(d) {}
-private:
-  Node * head;
-  int d;
-};
-
-static inline bool operator==(graph_node_list_iterator a,graph_node_list_iterator b) {
-  return *a == *b;
-}
-
-static inline bool operator!=(graph_node_list_iterator a,graph_node_list_iterator b) {
-  return *a != *b;
-}
-
 struct Graph {
 TH_DISALLOW_COPY_AND_ASSIGN(Graph);
 friend struct Node;
@@ -564,7 +478,7 @@ private:
   // actual representation of Graph is done with
   // inputs, outputs, nodes
 
-  std::unordered_set<Node*> all_nodes;
+  std::unordered_set<const Node*> all_nodes;
   size_t next_unique_;
 
   size_t new_node_stage_;
@@ -586,7 +500,10 @@ public:
     return output_->inputs();
   }
   graph_node_list nodes() {
-    return graph_node_list(output_,kNextDirection);
+    return graph_node_list(output_, kNextDirection);
+  }
+  const graph_node_list nodes() const {
+    return graph_node_list(output_, kNextDirection);
   }
   Node * return_node() {
     return output_;
@@ -604,7 +521,7 @@ public:
   void setStage(size_t new_stage) {
     new_node_stage_ = new_stage;
   }
-  size_t stage() {
+  size_t stage() const {
     return new_node_stage_;
   }
   ResourceGuard setStageTemporary(size_t s) {
@@ -697,12 +614,12 @@ public:
   }
 
   // Checks well-formedness and invariants of graph
-  void lint();
+  void lint() const;
   // for use in debugger
-  void dump();
+  void dump() const;
 
   ~Graph() {
-    for (Node * n : all_nodes)
+    for (const Node * n : all_nodes)
       delete n;
   }
 
@@ -757,8 +674,9 @@ inline Node* Node::makeMultireturn() {
 // This is only valid for node types for which we have subclasses.
 #define IR_IFM(x,Kind) GENERIC_IF(,k##Kind,x,Kind)
 #define IR_ELSEIFM(Kind) GENERIC_ELSEIF(,k##Kind,Kind)
-#define IR_ELSE() GENERIC_ELSE()
-#define IR_END() GENERIC_END()
+
+#define IR_IFM_CONST(x,Kind) GENERIC_IF(const,k##Kind,x,Kind)
+#define IR_ELSEIFM_CONST(Kind) GENERIC_ELSEIF(const,k##Kind,Kind)
 
 #define IR_IF(x, Kind) \
   auto && __match_key = x; \
@@ -769,6 +687,9 @@ inline Node* Node::makeMultireturn() {
     } break; \
     case ::torch::jit::k##Kind: { \
       auto * value = __match_key; (void) value;
+
+#define IR_ELSE() GENERIC_ELSE()
+#define IR_END() GENERIC_END()
 
 /* example:
   Node * n = ...;
@@ -865,19 +786,19 @@ inline Node * Graph::createCppOp(const std::shared_ptr<torch::autograd::Function
   return op->init(fn);
 }
 
+inline graph_node_list_iterator Node::iterator() {
+  return graph_node_list_iterator(this, 0);
+}
+inline graph_node_list_iterator Node::reverseIterator() {
+  return iterator().reverse();
+}
+inline const_graph_node_list_iterator Node::iterator() const {
+  return const_graph_node_list_iterator(this, 0);
+}
+inline const_graph_node_list_iterator Node::reverseIterator() const {
+  return iterator().reverse();
+}
+
 void LintGraph(std::shared_ptr<Graph>& graph);
 
 }} // namespace torch::jit
-
-namespace std {
-
-template<>
-struct iterator_traits<torch::jit::graph_node_list_iterator> {
-  using difference_type = int64_t;
-  using value_type = torch::jit::Node*;
-  using pointer = torch::jit::Node**;
-  using reference = torch::jit::Node*&;
-  using iterator_category = bidirectional_iterator_tag;
-};
-
-}
