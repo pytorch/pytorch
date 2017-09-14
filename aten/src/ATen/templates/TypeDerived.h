@@ -6,7 +6,7 @@
 
 namespace at {
 
-struct ${Type} : public Type {
+struct ${Type} final : public Type {
   explicit ${Type}(Context* context);
   virtual ScalarType scalarType() override;
   virtual Backend backend() override;

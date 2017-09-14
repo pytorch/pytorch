@@ -26,7 +26,7 @@ IntList ${Tensor}::sizes() {
 int64_t ${Tensor}::dim() {
   if(isScalar())
     return 0;
-  int64_t d = ${THTensor}_nDimension(${state,}tensor);
+  int64_t d = ${THTensor_nDimension};
   // See Note [Undefined-dim versus 0-dim]
   if (d != 0)
     return d;
