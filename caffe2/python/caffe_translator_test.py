@@ -3,7 +3,6 @@
 # that all the results look right. In default, it is disabled unless you
 # explicitly want to run it.
 
-from caffe2.proto import caffe2_pb2
 from caffe.proto import caffe_pb2
 from google.protobuf import text_format
 import numpy as np
@@ -27,21 +26,23 @@ def setUpModule():
             'data/testdata/caffe_translator/bvlc_reference_caffenet.caffemodel')
         .read()
     )
-    net, pretrained_params = caffe_translator.TranslateModel(
-        caffenet, caffenet_pretrained, is_test=True
-    )
-    with open('data/testdata/caffe_translator/'
-              'bvlc_reference_caffenet.translatedmodel',
-              'w') as fid:
-        fid.write(str(net))
-    for param in pretrained_params.protos:
-        workspace.FeedBlob(param.name, utils.Caffe2TensorToNumpyArray(param))
-    # Let's also feed in the data from the Caffe test code.
-    data = np.load('data/testdata/caffe_translator/data_dump.npy').astype(
-        np.float32)
-    workspace.FeedBlob('data', data)
-    # Actually running the test.
-    workspace.RunNetOnce(net.SerializeToString())
+    for remove_legacy_pad in [True, False]:
+        net, pretrained_params = caffe_translator.TranslateModel(
+            caffenet, caffenet_pretrained, is_test=True,
+            remove_legacy_pad=remove_legacy_pad
+        )
+        with open('data/testdata/caffe_translator/'
+                  'bvlc_reference_caffenet.translatedmodel',
+                  'w') as fid:
+            fid.write(str(net))
+        for param in pretrained_params.protos:
+            workspace.FeedBlob(param.name, utils.Caffe2TensorToNumpyArray(param))
+        # Let's also feed in the data from the Caffe test code.
+        data = np.load('data/testdata/caffe_translator/data_dump.npy').astype(
+            np.float32)
+        workspace.FeedBlob('data', data)
+        # Actually running the test.
+        workspace.RunNetOnce(net.SerializeToString())
 
 
 class TestNumericalEquivalence(test_util.TestCase):
