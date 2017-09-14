@@ -5,6 +5,7 @@
 import argparse
 import copy
 import logging
+import re
 import numpy as np  # noqa
 
 from caffe2.proto import caffe2_pb2, caffe2_legacy_pb2
@@ -47,6 +48,123 @@ def _ShouldInclude(net_state, layer):
     return ret
 
 
+def _GetLegacyDims(net, net_params, dummy_input, legacy_pad_ops):
+    dim_map = {}
+    current = workspace.CurrentWorkspace()
+    workspace.SwitchWorkspace('legacypad', True)
+    for param in net_params.protos:
+        workspace.FeedBlob(param.name, utils.Caffe2TensorToNumpyArray(param))
+    external_input = net.op[0].input[0]
+    workspace.FeedBlob(external_input, dummy_input)
+    # Get dimensions with legacy pad
+    for i in range(len(net.op)):
+        op_def = net.op[i]
+        workspace.RunOperatorOnce(op_def)
+        if i in legacy_pad_ops:
+            output = op_def.output[0]
+            blob_legacy = workspace.FetchBlob(output)
+            dim_map[i] = blob_legacy.shape
+    workspace.SwitchWorkspace(current)
+    return dim_map
+
+
+def _GetLegacyPadArgs(op_def, arg_map):
+    pads = {}
+    keys = ['pad_l', 'pad_t', 'pad_r', 'pad_b']
+    is_pad = 'pad' in arg_map
+    if is_pad:
+        for k in keys:
+            pads[k] = arg_map['pad'].i
+    else:
+        pads = {x: arg_map[x].i for x in keys}
+    return pads
+
+
+def _AdjustDims(op_def, arg_map, pads, dim1, dim2):
+    n1, c1, h1, w1 = dim1
+    n2, c2, h2, w2 = dim2
+    assert(n1 == n2)
+    assert(c1 == c2)
+    is_pad = 'pad' in arg_map
+    if h1 != h2 or w1 != w2:
+        if h1 == h2 + 1:
+            pads['pad_b'] += 1
+        elif h1 != h2:
+            raise Exception("Unexpected dimensions for height:", h1, h2)
+        if w1 == w2 + 1:
+            pads['pad_r'] += 1
+        elif w1 != w2:
+            raise Exception("Unexpected dimensions for width:", w1, w2)
+        if is_pad:
+            op_def.arg.remove(arg_map['pad'])
+            args = []
+            for name in pads.keys():
+                arg = caffe2_pb2.Argument()
+                arg.name = name
+                arg.i = pads[name]
+                args.append(arg)
+            op_def.arg.extend(args)
+        else:
+            for name in pads.keys():
+                arg_map[name].i = pads[name]
+
+
+def _RemoveLegacyPad(net, net_params, input_dims):
+    legacy_pad_ops = []
+    for i in range(len(net.op)):
+        op_def = net.op[i]
+        if re.match(r'^(Conv|ConvTranspose|MaxPool|AveragePool)(\dD)?$',
+                    op_def.type):
+            for arg in op_def.arg:
+                if arg.name == 'legacy_pad':
+                    legacy_pad_ops.append(i)
+                    break
+    if legacy_pad_ops:
+        n, c, h, w = input_dims
+        dummy_input = np.random.randn(n, c, h, w).astype(np.float32)
+        dim_map = _GetLegacyDims(net, net_params, dummy_input, legacy_pad_ops)
+
+        # Running with the legacy pad argument removed
+        # compare the dimensions and adjust pad argument when necessary
+        current = workspace.CurrentWorkspace()
+        workspace.SwitchWorkspace("legacypad-removed", True)
+
+        external_input = net.op[0].input[0]
+        workspace.FeedBlob(external_input, dummy_input)
+        for param in net_params.protos:
+            workspace.FeedBlob(param.name, utils.Caffe2TensorToNumpyArray(param))
+
+        for i in range(len(net.op)):
+            op_def = net.op[i]
+            if i in legacy_pad_ops:
+                arg_map = {}
+                for arg in op_def.arg:
+                    arg_map[arg.name] = arg
+                pads = _GetLegacyPadArgs(op_def, arg_map)
+                # remove legacy pad arg
+                for j in range(len(op_def.arg)):
+                    arg = op_def.arg[j]
+                    if arg.name == 'legacy_pad':
+                        del op_def.arg[j]
+                        break
+                output = op_def.output[0]
+                # use a new name to avoid the interference with inplace
+                nonlegacy_output = output + '_nonlegacy'
+                op_def.output[0] = nonlegacy_output
+                workspace.RunOperatorOnce(op_def)
+                blob_nonlegacy = workspace.FetchBlob(nonlegacy_output)
+                # reset output name
+                op_def.output[0] = output
+
+                dim1 = dim_map[i]
+                dim2 = blob_nonlegacy.shape
+                _AdjustDims(op_def, arg_map, pads, dim1, dim2)
+
+            workspace.RunOperatorOnce(op_def)
+        workspace.SwitchWorkspace(current)
+    return net
+
+
 class TranslatorRegistry(object):
     registry_ = {}
 
@@ -81,6 +199,7 @@ class TranslatorRegistry(object):
         pretrained_net,
         is_test=False,
         net_state=None,
+        remove_legacy_pad=False
     ):
         net_state = caffe_pb2.NetState() if net_state is None else net_state
         net = caffe2_pb2.NetDef()
@@ -122,6 +241,17 @@ class TranslatorRegistry(object):
                 layer, pretrained_blobs, is_test)
             net.op.extend(operators)
             net_params.protos.extend(params)
+        if remove_legacy_pad:
+            input_dims = []
+            if caffe_net.input_dim:
+                input_dims = caffe_net.input_dim
+            elif caffe_net.input_shape:
+                input_dims = caffe_net.input_shape[0].dim
+            else:
+                # getting input dimension from first layer
+                input_dims = caffe_net.layer[0].input_param.shape[0].dim
+            print("Input dims: ", input_dims)
+            net = _RemoveLegacyPad(net, net_params, input_dims)
         return net, net_params
 
 
@@ -692,8 +822,12 @@ if __name__ == '__main__':
         description="Utilitity to convert pretrained caffe models to Caffe2 models.")
     parser.add_argument("prototext", help="Caffe prototext.")
     parser.add_argument("caffemodel", help="Caffe trained model.")
-    parser.add_argument("--init_net", help="Caffe2 initialization net.", default="init_net.pb")
-    parser.add_argument("--predict_net", help="Caffe2 prediction net.", default="predict_net.pb")
+    parser.add_argument("--init_net", help="Caffe2 initialization net.",
+                        default="init_net.pb")
+    parser.add_argument("--predict_net", help="Caffe2 prediction net.",
+                        default="predict_net.pb")
+    parser.add_argument("--keep_legacy_pad", help="Keep legacy pad",
+                        action="store_true", default=False)
     args = parser.parse_args()
 
     caffenet = caffe_pb2.NetParameter()
@@ -710,7 +844,8 @@ if __name__ == '__main__':
         open(input_caffemodel, 'rb').read()
     )
     net, pretrained_params = TranslateModel(
-        caffenet, caffenet_pretrained, is_test=True
+        caffenet, caffenet_pretrained, is_test=True,
+        remove_legacy_pad=not args.keep_legacy_pad
     )
 
     # Assume there is one input and one output
@@ -722,9 +857,9 @@ if __name__ == '__main__':
     net.external_output.extend([external_output])
     init_net = ConvertTensorProtosToInitNet(pretrained_params, external_input)
 
-    for param in pretrained_params.protos:
-        workspace.FeedBlob(param.name, utils.Caffe2TensorToNumpyArray(param))
     with open(output_predict_net, 'wb') as f:
         f.write(net.SerializeToString())
+    with open(output_predict_net + 'txt', 'w') as f:
+        f.write(str(net))
     with open(output_init_net, 'wb') as f:
         f.write(init_net.SerializeToString())
