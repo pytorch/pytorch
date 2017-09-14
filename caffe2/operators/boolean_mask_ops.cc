@@ -165,13 +165,15 @@ namespace {
 
 class SequenceFunctor {
  public:
-  explicit SequenceFunctor(const int* sl) : sl(sl) {}
+  explicit SequenceFunctor(const int* sl, const size_t len) : sl_(sl), len_(len) {}
   bool operator()(int i, int j, float /* val*/) {
-    return j >= sl[i];
+    CAFFE_ENFORCE(i < len_, "Out of bound.");
+    return j >= sl_[i];
   }
 
  private:
-  const int* sl;
+  const int* sl_;
+  const size_t len_;
 };
 
 class WindowFunctor {
@@ -250,7 +252,7 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
         left,
         right,
         input->data<T>(),
-        SequenceFunctor(sequence_lengths->data<int>()),
+        SequenceFunctor(sequence_lengths->data<int>(), sequence_lengths->size()),
         fill_val,
         output->mutable_data<T>());
   } else if (mode_ == "window") {
