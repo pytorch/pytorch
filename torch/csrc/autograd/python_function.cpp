@@ -520,6 +520,9 @@ static void _join_version_counters(THPFunction *self, t2var_type &t2var)
     // Now we're sure it's really a pair!
     THPVariable *v1, *v2;
     try {
+      // NB: According to the documentation, v1 is an input tensor, and v2
+      // is an output tensor, but we don't actually check this (version
+      // counter joining is symmetric in any case.)
       v1 = t2var.at(PyTuple_GET_ITEM(shared_tuple, 0));
       v2 = t2var.at(PyTuple_GET_ITEM(shared_tuple, 1));
     } catch(std::out_of_range &e) {
