@@ -6,9 +6,7 @@ template <>
 bool DropoutOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto* Y = Output(0);
-  auto* mask = Output(1);
   Y->Resize(X.dims());
-  mask->Resize(X.dims());
   if (is_test_) {
     if (Y != &X) {
       context_.Copy<float, CPUContext, CPUContext>(
@@ -22,6 +20,8 @@ bool DropoutOp<float, CPUContext>::RunOnDevice() {
     std::bernoulli_distribution dist(1. - ratio_);
     const float* Xdata = X.data<float>();
     float* Ydata = Y->mutable_data<float>();
+    auto mask = Output(1);
+    mask->Resize(X.dims());
     bool* mask_data = mask->mutable_data<bool>();
     auto& gen = context_.RandGenerator();
     for (int i = 0; i < X.size(); ++i) {
@@ -35,9 +35,7 @@ bool DropoutOp<float, CPUContext>::RunOnDevice() {
 template <>
 bool DropoutGradientOp<float, CPUContext>::RunOnDevice() {
   auto& dY = Input(0);
-  auto& mask = Input(1);
   auto* dX = Output(0);
-  CAFFE_ENFORCE_EQ(dY.size(), mask.size());
   dX->Resize(dY.dims());
   if (is_test_) {
     if (dX != &dY) {
@@ -46,6 +44,8 @@ bool DropoutGradientOp<float, CPUContext>::RunOnDevice() {
     }
     return true;
   } else {
+    auto& mask = Input(1);
+    CAFFE_ENFORCE_EQ(dY.size(), mask.size());
     const float* dYdata = dY.data<float>();
     const bool* mask_data = mask.data<bool>();
     float* dXdata = dX->mutable_data<float>();
@@ -62,15 +62,19 @@ REGISTER_CPU_OPERATOR(DropoutGrad, DropoutGradientOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(Dropout)
     .NumInputs(1)
-    .NumOutputs(2)
+    .NumOutputs(1, 2)
     .AllowInplace({{0, 0}})
     .TensorInferenceFunction([](const OperatorDef& def,
                                 const vector<TensorShape>& in) {
       CAFFE_ENFORCE_EQ(1, in.size());
       vector<TensorShape> out;
+      ArgumentHelper argsHelper(def);
       out.push_back(in[0]);
-      out.push_back(in[0]);
-      out[1].set_data_type(TensorProto_DataType_BOOL);
+      auto output_mask = !argsHelper.GetSingleArgument<bool>("is_test", 0);
+      if (output_mask) {
+        out.push_back(in[0]);
+        out[1].set_data_type(TensorProto_DataType_BOOL);
+      }
       return out;
     })
     .SetDoc(R"DOC(
@@ -93,16 +97,26 @@ the training phase, so during testing nothing needs to be done.
         "The output mask. If is_test is nonzero, this output is not filled.");
 
 OPERATOR_SCHEMA(DropoutGrad)
-    .NumInputs(2).NumOutputs(1).AllowInplace({{0, 0}});
+    .NumInputs(1, 2)
+    .NumOutputs(1)
+    .AllowInplace({{0, 0}});
 
 class GetDropoutGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
-    return SingleGradientDef(
-        "DropoutGrad", "",
-        vector<string>{GO(0), O(1)},
-        vector<string>{GI(0)});
+    ArgumentHelper argshelper(def_);
+    auto is_test = argshelper.GetSingleArgument<bool>("is_test", 0);
+    if (is_test) {
+      return SingleGradientDef(
+          "DropoutGrad", "", vector<string>{GO(0)}, vector<string>{GI(0)});
+    } else {
+      return SingleGradientDef(
+          "DropoutGrad",
+          "",
+          vector<string>{GO(0), O(1)},
+          vector<string>{GI(0)});
+    }
   }
 };
 REGISTER_GRADIENT(Dropout, GetDropoutGradient);
-}  // namespace caffe2
+} // namespace caffe2

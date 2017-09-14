@@ -29,7 +29,7 @@ class TestDropout(hu.HypothesisTestCase):
             dc = dc[:1]
 
         op = core.CreateOperator("Dropout", ["X"],
-                                 ["X" if in_place else "Y", "mask"],
+                                 ["X" if in_place else "Y"],
                                  ratio=ratio, engine=engine, is_test=True)
 
         self.assertDeviceChecks(dc, op, [X], [0])
@@ -44,9 +44,10 @@ class TestDropout(hu.HypothesisTestCase):
 
     @given(X=hu.tensor(),
            in_place=st.booleans(),
+           output_mask=st.booleans(),
            engine=st.sampled_from(["", "CUDNN"]),
            **hu.gcs)
-    def test_dropout_ratio0(self, X, in_place, engine, gc, dc):
+    def test_dropout_ratio0(self, X, in_place, output_mask, engine, gc, dc):
         """Test with ratio=0 for a deterministic reference impl."""
         # TODO(lukeyeager): enable this path when the op is fixed
         if in_place:
@@ -54,16 +55,19 @@ class TestDropout(hu.HypothesisTestCase):
             assume(gc.device_type != caffe2_pb2.CUDA)
             # If in-place on CPU, don't compare with GPU
             dc = dc[:1]
-
+        is_test = not output_mask
         op = core.CreateOperator("Dropout", ["X"],
-                                 ["X" if in_place else "Y", "mask"],
-                                 ratio=0.0, engine=engine)
+                                 ["X" if in_place else "Y"] +
+                                 (["mask"] if output_mask else []),
+                                 ratio=0.0, engine=engine,
+                                 is_test=is_test)
 
         self.assertDeviceChecks(dc, op, [X], [0])
-        self.assertGradientChecks(gc, op, [X], 0, [0])
+        if not is_test:
+            self.assertGradientChecks(gc, op, [X], 0, [0])
 
         def reference_dropout_ratio0(x):
-            return x, np.ones(x.shape, dtype=np.bool)
+            return (x,) if is_test else (x, np.ones(x.shape, dtype=np.bool))
         self.assertReferenceChecks(
             gc, op, [X], reference_dropout_ratio0,
             # Don't check the mask with cuDNN because it's packed data
