@@ -151,9 +151,9 @@ const char * scalarTypeName(at::ScalarType type) {
   }
 }
 
-void emitCompilationUnit(std::ostream & out,
-                         const std::string & name,
-                         AnnotatedGraph & agraph) {
+std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
+                                            const std::string & name,
+                                            AnnotatedGraph & agraph) {
   Graph& subgraph = *agraph.graph;
   TemplateEnv env;
   env.s("kernelName",name);
@@ -177,10 +177,25 @@ void emitCompilationUnit(std::ostream & out,
     for(auto p : subgraph.inputs())
       emitFormal(p,agraph.input_desc[i++]);
   }
+  std::vector<ConcatDesc> concat_desc;
+  std::vector<Node*> flat_output_nodes;
   {
     size_t i = 0;
-    for(auto o : subgraph.outputs())
-      emitFormal(o,agraph.output_desc[i++]);
+    for(auto o : subgraph.outputs()) {
+      auto & desc = agraph.output_desc[i++];
+      if(o->kind() != kConcat) {
+        emitFormal(o, desc);
+        concat_desc.emplace_back();
+        flat_output_nodes.push_back(o);
+      } else {
+        size_t nInputs = o->inputs().size();
+        concat_desc.emplace_back(desc, nInputs, o->i(kaxis));
+        for(auto c : o->inputs()) {
+          emitFormal(c, *concat_desc.back().subtensorDesc);
+          flat_output_nodes.push_back(c);
+        }
+      }
+    }
   }
   size_t formal_count = 0;
   for(auto p : subgraph.inputs()) {
@@ -191,6 +206,8 @@ void emitCompilationUnit(std::ostream & out,
     body << format("auto ${node} = ${access};\n",env);
   }
   for(auto n : subgraph.nodes()) {
+    if(n->kind() == kConcat)
+      continue; // Concat nodes by narrowing the output Tensors before the kernel runs
     size_t i = 0;
     for(auto in : n->inputs()) {
       env.s(std::to_string(i++),nodeName(in));
@@ -199,7 +216,7 @@ void emitCompilationUnit(std::ostream & out,
     env.s("rhs",format(simple_map_ops.at(n->kind())(n),env));
     body << format("auto ${node} = ${rhs};\n",env);
   }
-  for(auto o : subgraph.outputs()) {
+  for(auto o : flat_output_nodes) {
     env.d("formal",formal_count++);
     env.s("access",format("t${formal}.data[t${formal}_offset]",env));
     env.s("node",nodeName(o));
@@ -209,6 +226,7 @@ void emitCompilationUnit(std::ostream & out,
   env.s("kernelBody",body.str());
   env.v("formals",formals);
   out << compilation_unit_template.format(env);
+  return concat_desc;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -234,7 +252,7 @@ CompiledFusionFunction::CompiledFusionFunction(const std::string & name, Annotat
   JIT_CUDA_CHECK(cudaGetDeviceProperties(&prop, device));
 
   std::stringstream cu;
-  codegen::emitCompilationUnit(cu, name, agraph);
+  concat_desc = codegen::emitCompilationUnit(cu, name, agraph);
   compliation_unit = cu.str();
 
   nvrtcProgram program;
@@ -326,19 +344,23 @@ void compressContiguous(
 void CompiledFusionFunction::launch(at::ArrayRef<at::Tensor> inputs, at::ArrayRef<at::Tensor> outputs) {
   JIT_ASSERT(inputs.size() == input_desc.size());
   JIT_ASSERT(outputs.size() == output_desc.size());
+  size_t flat_outputs_size = 0;
+  for(auto & c : concat_desc)
+    flat_outputs_size += c.nSubtensors;
   // XXX: this code assumes that inputs are 32-bit addressable
   // XXX: this code assumes that all inputs are of the same size
   JIT_ASSERT(inputs[0].numel() <= std::numeric_limits<uint32_t>::max());
   uint32_t numel = inputs[0].numel();
+  at::IntList map_size = inputs[0].sizes();
   // Compute the storage needed to store TensorInfo structs for inputs and outputs.
   size_t uncompressedDim = input_desc.at(0).contiguity.size();
   size_t maxPossibleTensorInfoSize = sizeof(TensorInfo) + 2 * sizeof(uint32_t) * uncompressedDim;
-  size_t maxPossibleBufferSize = maxPossibleTensorInfoSize * (inputs.size() + outputs.size());
+  size_t maxPossibleBufferSize = maxPossibleTensorInfoSize * (inputs.size() + flat_outputs_size);
   std::vector<char> buffer(maxPossibleBufferSize);
   char * buffer_next = buffer.data();
   // A vector of arguments to the kernel. It's (numel, *input_descs, *output_descs)
   std::vector<void*> arguments;
-  arguments.reserve(1 + inputs.size() + outputs.size());
+  arguments.reserve(1 + inputs.size() + flat_outputs_size);
   // Asserts that t's dims can be compressed in the same way as in desc
   // (that's what the kernel assumes), and appends it to the arguments vector.
   auto addTensorInfo = [&](TensorDesc & desc, const at::Tensor & t) {
@@ -353,8 +375,28 @@ void CompiledFusionFunction::launch(at::ArrayRef<at::Tensor> inputs, at::ArrayRe
   arguments.push_back(&numel);
   for (std::size_t i = 0; i < input_desc.size(); ++i)
     addTensorInfo(input_desc[i], inputs[i]);
-  for (std::size_t i = 0; i < output_desc.size(); ++i)
-    addTensorInfo(output_desc[i], outputs[i]);
+  for (std::size_t i = 0; i < output_desc.size(); ++i) {
+    auto & c = concat_desc[i];
+    at::Tensor o = outputs[i];
+    if(c.nSubtensors == 1) {
+      o.resize_(map_size);
+      addTensorInfo(output_desc[i], outputs[i]);
+    } else {
+      size_t small_size = map_size[c.dim];
+      std::vector<int64_t> concat_size(map_size.begin(), map_size.end());
+      concat_size[c.dim] = small_size * c.nSubtensors;
+      o.resize_(concat_size);
+      size_t offset = 0;
+      for(size_t j = 0; j < c.nSubtensors; ++j) {
+        // because the concatenated_output stays live, the underlying data
+        // in this view remains live through the end of this function
+        // so there is not need to hold onto this tensor
+        auto view = o.narrow(c.dim, offset, small_size);
+        addTensorInfo(*c.subtensorDesc, view);
+        offset += small_size;
+      }
+    }
+  }
   launch(numel, arguments.data());
 }
 

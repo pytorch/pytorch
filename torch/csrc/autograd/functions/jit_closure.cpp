@@ -120,8 +120,8 @@ struct EmitNull : public Function {
 struct LambdaFunction : public Function {
   LambdaFunction(int num_inputs, std::function<variable_list(const variable_list&)> fn)
     : fn(fn) {
-    is_executable = true;
-    num_inputs = num_inputs;
+    this->is_executable = true;
+    this->num_inputs = num_inputs;
   }
 
   virtual variable_list apply(const variable_list& inputs) {
@@ -272,7 +272,7 @@ struct FusionGroupFunction : public Function {
     std::vector<at::Tensor> outputs;
     outputs.reserve(function->outputDescriptors().size());
     for(auto & od : function->outputDescriptors()) {
-      outputs.push_back(at::CUDA(od.scalar_type).tensor(data.back().sizes()));
+      outputs.push_back(at::CUDA(od.scalar_type).tensor());
     }
     function->launch(data, outputs);
     return wrap_outputs(inputs, std::move(outputs), [](FunctionFlags f) {
