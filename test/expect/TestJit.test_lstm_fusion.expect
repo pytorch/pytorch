@@ -10,10 +10,10 @@ graph(%1 : Double(3, 10)
   %10 : Double(3, 80) = FC(%1, %9, %6), uses = [%32.i0];
   %11 : Double(20!, 80!) = Transpose[perm=[1, 0]](%5), uses = [%12.i0];
   %12 : UNKNOWN_TYPE = Transpose(%11), uses = [%13.i1];
-  %13 : Double(3, 80) = FC(%2, %12, %7), uses = [%33.i0];
-  %36 : Double(3!, 20), %39 : Double(3!, 20), %42 : Double(3!, 20), %45 : Double(3!, 20) = Split[split=[20, 20, 20, 20], axis=1](%13), uses = [[%29.i8], [%29.i6], [%29.i4], [%29.i2]];
-  %35 : Double(3!, 20), %38 : Double(3!, 20), %41 : Double(3!, 20), %44 : Double(3!, 20) = Split[split=[20, 20, 20, 20], axis=1](%10), uses = [[%29.i7], [%29.i5], [%29.i3], [%29.i1]];
-  %30 : Double(3, 20), %31 : Double(3, 20) = fusion_group_0(%3, %44, %45, %41, %42, %38, %39, %35, %36), uses = [[%0.i0], [%0.i1]];
+  %13 : Double(3, 80) = FC(%2, %12, %7), uses = [%37.i0];
+  %33 : Double(3!, 20), %34 : Double(3!, 20), %35 : Double(3!, 20), %36 : Double(3!, 20) = Split[split=[20, 20, 20, 20], axis=1](%10), uses = [[%29.i7], [%29.i5], [%29.i3], [%29.i1]];
+  %38 : Double(3!, 20), %39 : Double(3!, 20), %40 : Double(3!, 20), %41 : Double(3!, 20) = Split[split=[20, 20, 20, 20], axis=1](%13), uses = [[%29.i8], [%29.i6], [%29.i4], [%29.i2]];
+  %30 : Double(3, 20), %31 : Double(3, 20) = fusion_group_0(%3, %36, %41, %35, %40, %34, %39, %33, %38), uses = [[%0.i0], [%0.i1]];
   return (%30, %31);
 }
 with fusion_group_0 = graph(%13 : Double(3, 20)

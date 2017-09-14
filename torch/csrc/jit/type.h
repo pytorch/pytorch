@@ -62,6 +62,13 @@ struct TensorType : public Type {
     , device_(tensor.type().isCuda() ? tensor.get_device() : -1)
     , sizes_(tensor.sizes())
     , strides_(tensor.strides()) {}
+  TensorType(at::ScalarType scalar_type, int device, std::vector<int64_t> sizes, std::vector<int64_t> strides)
+    : Type(TypeKind::TensorType)
+    , scalar_type_(scalar_type)
+    , device_(device)
+    , sizes_(sizes)
+    , strides_(strides)
+    {}
 
   static const TypeKind Kind = TypeKind::TensorType;
 
@@ -69,6 +76,10 @@ struct TensorType : public Type {
   int device() const { return device_; }
   const std::vector<std::int64_t>& sizes() const { return sizes_; }
   const std::vector<std::int64_t>& strides() const { return strides_; }
+
+  TypePtr withSizesStrides(const std::vector<std::int64_t>& sizes, const std::vector<std::int64_t>& strides) const {
+    return std::make_shared<TensorType>(scalar_type_, device_, sizes, strides);
+  }
 
   TypePtr contiguous() const {
     auto t = std::make_shared<TensorType>(*this);

@@ -451,13 +451,18 @@ protected:
   // concrete type as 'this', but in graph 'g' which might be different
   // than graph_
   virtual Node * allocNewInstance(Graph * g) {
-    return new Node(g,kind());
+    return new Node(g, kind());
   }
   // create a copy of all properties of Node s into this.
-  // subclasses should extend if they have additional informaiton to copy.
+  // subclasses should extend if they have additional information to copy.
   // 'this' will be allocated with s->allocNewInstance(g) so it should have
   // the same concrete type as 's'
+  //
+  // NB: This does NOT clone stages.  You're expected to set the stage correctly
+  // if you are going to preserve it.
   virtual void cloneFrom(Node * s) {
+    if (s->hasType()) setType(s->type());
+    setDebugName(s->debugName());
     copyAttributes(*s);
   }
 };
@@ -595,7 +600,6 @@ public:
   Node * createClone(Node * n, std::function<Node*(Node*)> node_map) {
     //n can be from a different graph
     Node * r = n->allocNewInstance(this);
-    r->type_ = n->type_;
     r->cloneFrom(n);
     for(auto i : n->inputs()) {
       r->addInput(node_map(i));

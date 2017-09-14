@@ -44,11 +44,10 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
 
   // Initialize context and environment
   for (auto input : state->graph->inputs()) {
-    env[input] = ctx.graph
-      ->addInput()
-      ->setType(input->typeOption())
-      ->setDebugName(input->debugName())
-      ->setStage(input->stage());
+    Node* n = ctx.graph->createClone(input, envFn);
+    n->setStage(input->stage());
+    ctx.graph->addInput(n);
+    env[input] = n;
   }
   for (auto kv : state->buffer_map) {
     new_buffer_map[kv.first] = envFn(kv.second);
@@ -71,6 +70,9 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
     for (std::size_t i = 0; i < num_old_outputs; ++i) {
       auto old = old_outputs[i];
       if (outputs[i]) {
+        // Allow symbolic() to skip specifying the type of the return node.
+        // Unfortunately, they are on the hook for all internal nodes
+        // (though in practice, the types are not computed.)
         if (!outputs[i]->hasType()) {
           outputs[i]->setType(old->typeOption());
         }
@@ -92,17 +94,14 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
   // Clone the node (possibly including its Selects) and add it to the new graph
   auto cloneNode = [&](Node * node) {
     auto n_ = ctx.graph->createClone(node, envFn);
+    env[node] = n_;
     ctx.graph->appendNode(n_);
     if (node->hasMultipleOutputs()) {
-      int i = 0;
-      for(auto s : node->uses()) {
-        auto new_node = ctx.graph->createSelect(n_,i++);
+      for (auto s : node->uses()) {
+        auto new_node = ctx.graph->createClone(s.user, envFn);
         ctx.graph->appendNode(new_node);
-        new_node->setType(s.user->typeOption());
         env[s.user] = new_node;
       }
-    } else {
-      env[node] = n_;
     }
   };
 

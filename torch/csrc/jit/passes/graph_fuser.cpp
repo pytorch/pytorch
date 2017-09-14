@@ -5,6 +5,13 @@ namespace torch { namespace jit {
 
 namespace {
 
+// What is a simple mappable operator?  It is:
+//    - Has an output with the same types and sizes of its input
+//    - Single output
+//    - Can handle non-contiguous input
+//    - Produces contiguous output
+// Some of these restrictions may be relaxable, but you should
+// carefully read the code first, as we rely on these assumptions.
 std::unordered_set<NodeKind> simple_mappable = {
   kSigmoid,
   kTanh,
@@ -110,8 +117,8 @@ struct GraphFuser {
       inputs_map[input] = subgraph.inputs()[i++];
     }
     // add n's inputs to the fusion group's input list if we don't already have them
-    for(auto input : n->inputs()) {
-      if(inputs_map.count(input) == 0) {
+    for (auto input : n->inputs()) {
+      if (inputs_map.count(input) == 0) {
         auto in_group = subgraph.addInput();
         in_group->setType(input->typeOption());
         inputs_map[input] = in_group;
@@ -196,6 +203,14 @@ struct GraphFuser {
   // z0,z1 = chunk(z) (z0 has a's type, z1 has b's type)
   // a = op(x0,y0,z0) (a,b have their same size but are now contiguous)
   // b = op(x1,y1,x1)
+  //
+  // NB: Chunk motion only occurs with fusable consumers, which implies
+  // that there is always some other operation, e.g., a+b, that happens
+  // after the chunk, and will be put into the fusion group.  This is
+  // important, because distributing the chunk changes the contiguity
+  // of a and b, and so the results would be invalid, except that we know
+  // that simple_mappable operations will restore contiguity before
+  // we exit the fusion group.
 
   bool tryToMoveChunk(Node * consumer, Node * producer) {
     // if we are fusing a select,
@@ -217,33 +232,65 @@ struct GraphFuser {
       }
     }
 
-    std::vector<Node*> chunks;
-    for(auto input : producer_for_chunk->inputs()) {
-      Node * c = graph->createClone(chunk, [input](Node*) { return input; });
-      insertAfter(c, chunk);
-      chunks.push_back(c);
+    // TODO: Remove this restriction if we ever need to distribute across
+    // multiple return operators
+    JIT_ASSERT(!producer_for_chunk->hasMultipleOutputs());
+
+    // Make sure we lay out the nodes in the correct topological order.
+    // TODO: There should be some more enshrined way to do this
+    Node *last_node = chunk;
+
+    // apply chunk to each of op's operands
+    // chunked_inputs[input_nr][chunk_output_idx]
+    //  = Node* for chunk_output_idx'th output of the chunk(inputs[input_nr])
+    std::vector<std::vector<Node*>> chunked_inputs;
+    for (auto input : producer_for_chunk->inputs()) {
+      auto input_type = input->type()->cast<TensorType>();
+      // NB: I decided not to use cloneFrom here, because if we make cloneFrom
+      // copy selects one day, it is definitely not what you want here (selects
+      // have different types).
+      Node * input_chunk = graph->create(kSplit);
+      input_chunk->setType(multiType());
+      input_chunk->copyAttributes(*chunk);
+      input_chunk->addInput(input);
+      insertAfter(input_chunk, last_node);
+      last_node = input_chunk;
+      // TODO: Make this go away when we make helper function for
+      // setting up Selects.
+      size_t i = 0;
+      chunked_inputs.emplace_back(); // alas, to not be C++17
+      for (auto chunk_sel : chunk->outputs()) {
+          auto chunk_sel_type = chunk_sel->type()->cast<TensorType>();
+          Node * input_chunk_sel = graph->createSelect(input_chunk, i++);
+          input_chunk_sel->setType(
+            input_type->withSizesStrides(chunk_sel_type->sizes(),
+                                         chunk_sel_type->strides()));
+          insertAfter(input_chunk_sel, last_node);
+          last_node = input_chunk_sel;
+          chunked_inputs.back().push_back(input_chunk_sel);
+      }
     }
 
-    // as we replace/remove the selects the use list changes, so copy it first
-    use_list copy_uses = chunk->uses();
-    for(auto s : copy_uses) {
-      Node* sel = s.user;
-      size_t i = sel->offset();
-      size_t j = 0;
-      Node * new_output = graph->createClone(producer_for_chunk,[&](Node * n) {
-        auto & c = chunks[j++];
-        Node * ns = graph->createSelect(c,i);
-        ns->setType(sel->typeOption());
-        insertAfter(ns,c);
-        return ns;
-      });
-      if(sel->hasType()) {
-        new_output->setType(sel->type()->cast<TensorType>()->contiguous());
+    // apply the op to each chunk of the chunked operands,
+    // and then rewrite the graph to use them!
+    // NB: as we replace/remove the selects the use list changes, so copy it first
+    auto chunk_outputs = chunk->outputs();
+    for (auto chunk_sel : chunk->outputs()) {
+      auto chunk_sel_type = chunk_sel->type()->cast<TensorType>();
+      Node * chunked_op = graph->create(producer_for_chunk->kind());
+      chunked_op->copyAttributes(*producer_for_chunk);
+      // Invariant: mappable operators always produce contiguous output
+      chunked_op->setType(chunk_sel->type()->cast<TensorType>()->contiguous());
+      for (auto by_chunk_output_idx : chunked_inputs) {
+        chunked_op->addInput(by_chunk_output_idx.at(chunk_sel->offset()));
       }
-      insertAfter(new_output,s.user);
-      s.user->replaceAllUsesWith(new_output);
-      s.user->destroy();
+      insertAfter(chunked_op, last_node);
+      last_node = chunked_op;
+      chunk_sel->replaceAllUsesWith(chunked_op);
+      // NB: Temporarily breaking the Select invariant as we clean up
+      chunk_sel->destroy();
     }
+
     chunk->destroy();
     producer_for_chunk->destroy();
     return true;

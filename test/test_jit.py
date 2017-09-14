@@ -64,6 +64,23 @@ class TestJit(TestCase):
         torch._C._jit_pass_lint(trace)
         self.assertExpected(str(trace))
 
+    @unittest.skipIf(not torch.cuda.is_available(), "fuser requires CUDA")
+    def test_fusion_distribute(self):
+        def f(x, y):
+            z1, z2 = (x + y).chunk(2, dim=1)
+            return z1 * z2
+        x = Variable(torch.randn(4, 4).cuda())
+        y = Variable(torch.randn(4, 4).cuda())
+        trace, _ = torch.jit.record_trace(f, x, y)
+        torch._C._jit_pass_lint(trace)
+        self.assertExpected(str(trace), 'raw')
+        torch._C._jit_pass_onnx(trace)
+        torch._C._jit_pass_lint(trace)
+        self.assertExpected(str(trace), 'onnx')
+        torch._C._jit_pass_fuse(trace)
+        torch._C._jit_pass_lint(trace)
+        self.assertExpected(str(trace))
+
     def test_function_as_argument(self):
         # Careful: don't use fused backend (enabled with CUDA)
         # Pasted from test_LSTM_cell
