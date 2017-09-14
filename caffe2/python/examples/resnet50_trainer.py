@@ -1,4 +1,3 @@
-## @package resnet50_trainer
 # Module caffe2.python.examples.resnet50_trainer
 from __future__ import absolute_import
 from __future__ import division
@@ -365,6 +364,9 @@ def Train(args):
         cpu_device=args.use_cpu,
     )
 
+    workspace.RunNetOnce(train_model.param_init_net)
+    workspace.CreateNet(train_model.net)
+
     # Add test model, if specified
     test_model = None
     if (args.test_data is not None):
@@ -404,9 +406,6 @@ def Train(args):
         )
         workspace.RunNetOnce(test_model.param_init_net)
         workspace.CreateNet(test_model.net)
-
-    workspace.RunNetOnce(train_model.param_init_net)
-    workspace.CreateNet(train_model.net)
 
     epoch = 0
     # load the pre-trained model and reset epoch
