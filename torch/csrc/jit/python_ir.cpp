@@ -23,7 +23,7 @@ void initPythonIRBindings(PyObject * module_) {
     .def("nodes",[](Graph &g) {
       return py::make_iterator(g.nodes().begin(),g.nodes().end());
     })
-    .GS(addInput)
+    .def("addInput",[](Graph &g) { return g.addInput(); })
     .GS(advanceStage)
     .GS(stage)
     .GS(eraseInput)
