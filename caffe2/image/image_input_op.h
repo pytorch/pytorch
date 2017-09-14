@@ -128,6 +128,11 @@ class ImageInputOp final
   // Output type for GPU transform path
   TensorProto_DataType output_type_;
 
+  // random minsize
+  vector<int> random_scale_;
+  bool random_scaling_;
+
+
   // Working variables
   std::vector<std::mt19937> randgen_per_thread_;
 };
@@ -184,7 +189,16 @@ ImageInputOp<Context>::ImageInputOp(
       thread_pool_(std::make_shared<TaskThreadPool>(num_decode_threads_)),
       // output type only supported with CUDA and use_gpu_transform for now
       output_type_(
-          cast::GetCastDataType(ArgumentHelper(operator_def), "output_type")) {
+          cast::GetCastDataType(ArgumentHelper(operator_def), "output_type")),
+      random_scale_(
+          OperatorBase::template GetRepeatedArgument<int>("random_scale", {-1,-1})) {
+  if ((random_scale_[0] == -1) || (random_scale_[1] == -1)) {
+    random_scaling_ = false;
+  } else {
+    random_scaling_ = true;
+    minsize_ = random_scale_[0];
+  }
+
   mean_ = OperatorBase::template GetRepeatedArgument<float>(
     "mean_per_channel",
     {OperatorBase::template GetSingleArgument<float>("mean", 0.)});
@@ -259,6 +273,11 @@ ImageInputOp<Context>::ImageInputOp(
       "If the output sizes are specified, they must be specified for all "
       "additional outputs");
 
+  CAFFE_ENFORCE(random_scale_.size() == 2,
+      "Must provide [scale_min, scale_max]");
+  CAFFE_ENFORCE_GE(random_scale_[1], random_scale_[0],
+      "random scale must provide a range [min, max]");
+
   if (default_arg_.bounding_params.ymin < 0
       || default_arg_.bounding_params.xmin < 0
       || default_arg_.bounding_params.height < 0
@@ -293,13 +312,20 @@ ImageInputOp<Context>::ImageInputOp(
       default_arg_.bounding_params.width
               << ")";
   }
-  if (scale_ > 0) {
+  if (scale_ > 0 && !random_scaling_) {
     LOG(INFO) << "    Scaling image to " << scale_
               << (warp_ ? " with " : " without ") << "warping;";
   } else {
-    // Here, minsize_ > 0
-    LOG(INFO) << "    Ensuring minimum image size of " << minsize_
-              << (warp_ ? " with " : " without ") << "warping;";
+    if (random_scaling_) {
+      // randomly set min_size_ for each image
+      LOG(INFO) << "    Randomly scaling shortest side between "
+                << random_scale_[0] << " and "
+                << random_scale_[1];
+    } else {
+      // Here, minsize_ > 0
+      LOG(INFO) << "    Ensuring minimum image size of " << minsize_
+                << (warp_ ? " with " : " without ") << "warping;";
+    }
   }
   LOG(INFO) << "    " << (is_test_ ? "Central" : "Random")
             << " cropping image to " << crop_
@@ -624,12 +650,18 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
       inception_scale_jitter = RandomSizedCropping<Context>(img, crop_, randgen);
       // if a random crop is still not found, do simple random cropping later
     }
-  }
 
   if ((scale_jitter_type_ == NO_SCALE_JITTER) ||
     (scale_jitter_type_ == INCEPTION_STYLE && !inception_scale_jitter)) {
       int scaled_width, scaled_height;
       int scale_to_use = scale_ > 0 ? scale_ : minsize_;
+
+      // set the random minsize
+      if (random_scaling_) {
+        scale_to_use = std::uniform_int_distribution<>(random_scale_[0],
+                                                       random_scale_[1])(*randgen);
+      }
+
       if (warp_) {
         scaled_width = scale_to_use;
         scaled_height = scale_to_use;
@@ -660,6 +692,7 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
             cv::INTER_AREA);
         *img = scaled_img;
       }
+    }
   }
   // TODO(Yangqing): return false if any error happens.
   return true;
