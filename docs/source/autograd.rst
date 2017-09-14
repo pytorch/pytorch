@@ -53,3 +53,9 @@ gradients are correct.
 .. autoclass:: Function
     :members:
 
+Profiler
+--------
+
+.. autoclass:: torch.autograd.profiler.profile
+    :members:
+

@@ -13,6 +13,7 @@ import errno
 import torch
 import torch.cuda
 from torch.autograd import Variable
+from torch._six import string_classes
 
 
 torch.set_default_tensor_type('torch.DoubleTensor')
@@ -212,7 +213,7 @@ class TestCase(unittest.TestCase):
                 assertTensorsEqual(x._values(), y._values())
             else:
                 assertTensorsEqual(x, y)
-        elif type(x) == str and type(y) == str:
+        elif isinstance(x, string_classes) and isinstance(y, string_classes):
             super(TestCase, self).assertEqual(x, y)
         elif type(x) == set and type(y) == set:
             super(TestCase, self).assertEqual(x, y)
