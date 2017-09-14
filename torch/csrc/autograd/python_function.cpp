@@ -372,7 +372,8 @@ static void _transplant_var(VariableImpl& var, const std::shared_ptr<Function>& 
 // that produced these output tensors is inplace.  A mapping of *input*
 // tensors to variables (t2var) is used to test if this occurred, and
 // the set of dirty tensors (dirty_inputs) is used to figure out what to
-// do in this case.
+// do in this case.  After this method is run, t2var is extended with
+// mappings for output tensors as well.
 static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
     std::unordered_set<PyObject *> &dirty_inputs, PyObject *raw_output,
     PyObject *outputs, bool is_volatile)
@@ -499,6 +500,7 @@ static void _save_variables(THPFunction* self, t2var_type &t2var)
   self->to_save = NULL;
 }
 
+// t2var maps input and output tensors to variables
 static void _join_version_counters(THPFunction *self, t2var_type &t2var)
 {
   if (!self->shared_pairs) return;
@@ -721,7 +723,7 @@ PyObject* process_outputs(PyObject *op_obj, THPFunction* grad_fn, const Unpacked
 
   grad_fn->cdata.num_inputs = num_outputs;
 
-  // Initialize t2var map
+  // Initialize t2var map with input tensors
   t2var_type t2var;
   for (auto& c_var : unpacked.input_vars) {
     THPVariable* py_var = (THPVariable*)c_var.get()->pyobj;
@@ -731,6 +733,7 @@ PyObject* process_outputs(PyObject *op_obj, THPFunction* grad_fn, const Unpacked
   std::unordered_set<PyObject *> dirty_inputs;
   _mark_dirty(grad_fn, t2var, dirty_inputs);
   _wrap_outputs(grad_fn, t2var, dirty_inputs, raw_output, outputs, is_volatile);
+  // At this point, t2var contains output tensors as well
   _join_version_counters(grad_fn, t2var);
   if (grad_fn->cdata.is_executable) {
     _mark_non_differentiable(grad_fn, t2var);
