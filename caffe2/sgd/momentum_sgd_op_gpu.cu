@@ -5,14 +5,14 @@
 namespace caffe2 {
 
 __global__ void MomentumSGDKernel(
-    int N,
+    const int N,
     const float* g,
     const float* m,
     float* ng,
     float* nm,
     const float* lr,
-    float momentum,
-    bool nesterov,
+    const float momentum,
+    const bool nesterov,
     float* param) {
   const float LR = lr[0];
   if (!nesterov) {
@@ -37,17 +37,17 @@ __global__ void MomentumSGDKernel(
   }
 }
 
-template<>
+template <>
 void momentum_sgd_update<CUDAContext>(
-    int N,
+    const int N,
     const float* g,
     const float* m,
     float* ng,
     float* nm,
     const float* lr,
-    float momentum,
-    bool nesterov,
-    float *param,
+    const float momentum,
+    const bool nesterov,
+    float* param,
     CUDAContext* context) {
   MomentumSGDKernel<<<
       CAFFE_GET_BLOCKS(N),
