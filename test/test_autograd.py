@@ -544,6 +544,34 @@ class TestAutograd(TestCase):
         xd = x.data
         self.assertEqual(x.grad.data, 2 * xd * go_y + 6 * xd.pow(5) * go_z)
 
+    def test_save_output_nr(self):
+        x = Variable(torch.randn(10), requires_grad=True)
+
+        class MultiOutputFn(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x[:5], x[5:]
+
+            @staticmethod
+            def backward(ctx, *grad):
+                return torch.cat(grad)
+
+        a, b = MultiOutputFn.apply(x)
+        self.assertEqual(b.output_nr, 1)
+
+        class TestFn(Function):
+            @staticmethod
+            def forward(ctx, b):
+                ctx.save_for_backward(b)
+                return b * 2
+
+            @staticmethod
+            def backward(ctx, grad_b):
+                b, = ctx.saved_variables
+                self.assertEqual(b.output_nr, 1)
+
+        TestFn.apply(b).sum().backward()
+
     def test_volatile(self):
         x = Variable(torch.ones(5, 5), requires_grad=True)
         y = Variable(torch.ones(5, 5) * 4, volatile=True)

@@ -17,6 +17,7 @@ SavedVariable::SavedVariable(const Variable& variable, Function* saved_for)
   expected_version = variable.current_version();
   version = variable.get()->version_counter->new_saved_ref();
   has_grad_fn = variable.grad_fn() != nullptr;
+  output_nr = variable.output_nr();
   if (!has_grad_fn) {
     grad_accumulator = variable.grad_accumulator();
   }
@@ -54,6 +55,7 @@ auto SavedVariable::unpack(std::shared_ptr<Function> saved_for) const -> Variabl
   } else {
     var.grad_fn() = grad_fn;
   }
+  var.output_nr() = output_nr;
   var.get()->version_counter->join_with(*version);
 
   // If a Variable is a leaf (no grad_fn saved), and it requires_grad, then we

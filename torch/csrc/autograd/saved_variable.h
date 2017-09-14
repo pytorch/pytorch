@@ -41,6 +41,7 @@ struct SavedVariable {
   bool requires_grad;
   bool is_volatile;
   int expected_version;
+  int output_nr;
   std::unique_ptr<jit::tracer::ValueTracingState> tracing_state;
 
   Variable unpack(std::shared_ptr<Function> saved_for=nullptr) const;

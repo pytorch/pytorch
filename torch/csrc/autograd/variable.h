@@ -52,7 +52,8 @@ struct Variable : public at::Tensor {
   inline auto_unique_ptr<jit::tracer::ValueTracingState>& tracing_state() const;
 
   inline int current_version() const;
-  inline int output_nr() const;
+  inline const int& output_nr() const;
+  inline       int& output_nr();
 
   inline const bool& requires_grad() const;
   inline       bool& requires_grad();
@@ -173,7 +174,11 @@ inline int Variable::current_version() const {
   return **get()->version_counter;
 }
 
-inline int Variable::output_nr() const {
+inline const int& Variable::output_nr() const {
+  return get()->output_nr;
+}
+
+inline int& Variable::output_nr() {
   return get()->output_nr;
 }
 
