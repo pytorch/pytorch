@@ -393,6 +393,7 @@ public:
   }
 
   // Insert unattached 'this' node after 'n' in the topological order.
+  // Returns this (for chaining).
   //
   // Given:   %3 = f(%1, %2)
   //          %4 = g(%3)
@@ -401,12 +402,14 @@ public:
   // Result:  %3 = f(%1, %2)
   //          %5 = h(%1)
   //          %4 = g(%3)
-  void insertBefore(Node * n) {
+  Node* insertBefore(Node * n) {
     JIT_ASSERT(n->inGraphList());
     insertAfter(n->prev());
+    return this;
   }
 
   // Insert unattached 'this' node after 'n' in the topological order.
+  // Returns this (for chaining).
   //
   // Given: %3 = f(%1, %2)
   //        %4 = g(%3)
@@ -415,13 +418,14 @@ public:
   // Result:  %3 = f(%1, %2)
   //          %4 = g(%3)
   //          %5 = h(%1)
-  void insertAfter(Node * n) {
+  Node* insertAfter(Node * n) {
     JIT_ASSERT(!inGraphList() && n->inGraphList());
     Node * next = n->next();
     n->next() = this;
     this->prev() = n;
     this->next() = next;
     next->prev() = this;
+    return this;
   }
 
   // Move 'this' (already in the graph) after 'n' in the topological order.
@@ -478,6 +482,11 @@ public:
       dropInput(i);
     inputs_.clear();
   }
+
+  // Replaces all uses of this node with a single Select,
+  // and appends it after this in the graph.
+  // New node inherits the type of this.
+  Node* makeMultireturn();
 
   // iterators of the node list starting at this node
   // useful for resuming a search starting at this node
@@ -836,6 +845,18 @@ inline void Node::destroy() {
   removeAllInputs();
   removeFromList();
   graph_->freeNode(this);
+}
+
+inline Node* Node::makeMultireturn() {
+  JIT_ASSERT(!hasMultipleOutputs());
+  Node *select = graph_->create(kSelect);
+  select->i_(kOffset, 0);
+  select->setType(type_);
+  replaceAllUsesWith(select);
+  select->addInput(this);
+  select->insertAfter(this);
+  setType(multiType());
+  return select;
 }
 
 // Helper macros for constructing switch statements over Node types

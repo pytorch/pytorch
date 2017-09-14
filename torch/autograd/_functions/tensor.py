@@ -10,25 +10,6 @@ from .utils import maybe_unexpand
 class Index(Function):
 
     @staticmethod
-    def symbolic(g, i, index):
-        # We should only expect index as an integer in this case.
-        # We use "Slice" to get the index-th element in i,
-        # Then we reduce the dimension using "Reshape".
-        if not isinstance(index, int):
-            raise ValueError('Right now, only int-type index is suppported.')
-        starts = [0] * len(i.type().sizes())
-        starts[0] = index
-        starts_tensor = torch.IntTensor(starts)
-        starts_node = g.appendNode(g.create("Constant").t_("value", starts_tensor))
-        ends = list(i.type().sizes())
-        ends[0] = index + 1
-        ends_tensor = torch.IntTensor(ends)
-        ends_node = g.appendNode(g.create("Constant").t_("value", ends_tensor))
-        sizes = i.type().sizes()[1:]
-        slice_output = g.appendNode(g.create("Slice", [i, starts_node, ends_node]))
-        return g.appendNode(g.create("Reshape", [slice_output]).is_("shape", sizes))
-
-    @staticmethod
     def forward(ctx, i, index):
         ctx.input_size = i.size()
         ctx.index = index
@@ -358,8 +339,7 @@ class Concat(Function):
 
     @staticmethod
     def symbolic(g, dim, *inputs):
-        n, _ = g.op("Concat", *inputs, axis_i=dim, outputs=2)
-        return n
+        return g.op("Concat", *inputs, axis_i=dim)
 
     @staticmethod
     def forward(ctx, dim, *inputs):

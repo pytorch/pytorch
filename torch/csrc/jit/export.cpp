@@ -153,18 +153,64 @@ void encodeGraph(onnx::GraphProto * p_g, const std::shared_ptr<Graph> & g, const
   }
 }
 
-void checkGraph(const std::shared_ptr<Graph>& graph) {
-  for (auto node : graph->nodes()) {
-    if (node->kind() == kPythonOp || node->kind() == kCppOp) {
-#define GET_NAME(T) dynamic_cast<T*>(node)->name()
-      auto name = node->kind() == kPythonOp ? GET_NAME(PythonOp) : GET_NAME(CppOp);
-      throw std::runtime_error(std::string("Couldn't export ") + name + " function - "
+void standardizeGraph(const std::shared_ptr<Graph>& graph) {
+  for (auto it = graph->nodes().begin(); it != graph->nodes().end(); ++it) {
+#define FAIL_EXPORT(name) \
+      throw std::runtime_error(std::string("Couldn't export ") + name + " function - " \
               "maybe it doesn't implement a symbolic definition?");
-#undef GET_NAME
-    }
-    if (node->kind() == kAddConstant) {
+    IR_IF(*it, AddConstant)
       throw std::runtime_error("can't serialize PyTorch-only node AddConstant (not implemented yet)");
-    }
+    IR_ELSEIF(Concat)
+      JIT_ASSERT(!value->hasMultipleOutputs());
+      Node *real_output = value->makeMultireturn();
+      Node *fake_output = graph->createSelect(value, 1);
+      fake_output->insertAfter(real_output);
+    IR_ELSEIF(CppOp)
+      auto cpp_node = static_cast<torch::jit::CppOp*>(value);
+      FAIL_EXPORT(cpp_node->name())
+    IR_ELSEIF(PythonOp)
+      auto py_node = static_cast<torch::jit::PythonOp*>(value);
+      if (py_node->name() == "Index") {
+        if (py_node->scalar_args.size() != 1 ||
+            !THPUtils_checkLong(py_node->scalar_args[0].get())) {
+          throw std::runtime_error("ONNX export only support indexing with a single int");
+        }
+        auto index = THPUtils_unpackLong(py_node->scalar_args[0].get());
+        JIT_ASSERT(py_node->inputs().size() == 1);
+        auto input = py_node->inputs()[0];
+        auto input_type = input->type()->expect<TensorType>();
+        int64_t ndim = input_type->sizes().size();
+
+        // Create starts and ends
+        auto starts = at::CPU(at::kInt).zeros({ndim});
+        auto starts_data = starts.toIntData();
+        auto ends = at::CPU(at::kInt).tensor({ndim});
+        auto ends_data = ends.toIntData();
+
+        // Fill them to select out a single slice along first dim
+        starts_data[0] = index;
+        std::copy(input_type->sizes().begin(), input_type->sizes().end(), ends_data);
+        ends_data[0] = index + 1;
+
+        Node *starts_constant = graph->create(kConstant)->t_(kvalue, starts)->insertBefore(py_node);
+        Node *ends_constant = graph->create(kConstant)->t_(kvalue, ends)->insertBefore(py_node);
+
+        Node *slice = graph->create(kSlice, {input, starts_constant, ends_constant})
+                           ->insertBefore(py_node);
+        Node *squeeze = graph->create(kSqueeze, {slice})->is_(kaxes, {0})
+                             ->insertBefore(py_node);
+        auto first_select = py_node->uses()[0].user;
+        first_select->replaceAllUsesWith(squeeze);
+        for (auto use : py_node->uses())
+          use.user->destroy();
+        it.destroyCurrent();
+      } else {
+        FAIL_EXPORT(py_node->name())
+      }
+    IR_ELSE()
+      // Do nothing.
+    IR_END()
+#undef FAIL_EXPORT
   }
 }
 
@@ -172,7 +218,7 @@ void checkGraph(const std::shared_ptr<Graph>& graph) {
 
 std::string ExportGraph(const std::shared_ptr<Graph>& graph,
                         const std::vector<at::Tensor> & initializers) {
-  checkGraph(graph);
+  standardizeGraph(graph);
 
   onnx::GraphProto graph_proto;
   graph_proto.set_name("torch-jit-export");

@@ -21,12 +21,14 @@ _(Neg) \
 _(Sigmoid) \
 _(Tanh) \
 _(Constant) \
+_(Concat) \
+_(Slice) \
+_(Squeeze) \
 _(Undefined) \
 _(FusionGroup) \
 _(Split) \
 _(AddConstant) \
 _(Transpose) \
-_(Concat) \
 _(Reshape) \
 _(split) \
 _(Dim) \
@@ -55,6 +57,7 @@ _(broadcast) \
 _(axis) \
 _(perm) \
 _(shape) \
+_(axes) \
 _(group)
 
 enum BuiltinSymbol {
