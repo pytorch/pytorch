@@ -48,7 +48,7 @@ bool ProfDAGNet::RunAsync() {
 
   // don't collect statistics from first run
   if (runs_ <= 1) {
-    bool success = DAGNetBase::Run();
+    bool success = DAGNetBase::RunAsync();
     ValidateOpTensorDevices();
     return success;
   }
@@ -63,7 +63,7 @@ bool ProfDAGNet::RunAsync() {
 
   // create a copy and later collect the differences
   vector<Stats> time_per_op_run(time_per_op_);
-  bool success = DAGNetBase::Run();
+  bool success = DAGNetBase::RunAsync();
 
   // aggregate this run's stats per operator type
   CaffeMap<string, float> time_per_op_type_run;
