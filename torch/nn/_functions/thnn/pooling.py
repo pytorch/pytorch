@@ -15,10 +15,10 @@ class MaxPool1d(Function):
             raise RuntimeError("ceil_mode not supported in MaxPool1d")
         stride = stride or kernel_size
         n = g.appendNode(g.create("MaxPool", [input])
-                          .is_("kernel_shape", [kernel_size])
-                          .is_("pads", [padding] * 2)
-                          .is_("dilations", [dilation])
-                          .is_("strides", [stride]))
+                          .is_("kernel_shape", _single(kernel_size))
+                          .is_("pads", _single(padding))
+                          .is_("dilations", _single(dilation))
+                          .is_("strides", _single(stride)))
         return (n, None)
 
     @staticmethod
@@ -99,10 +99,10 @@ class MaxPool2d(Function):
         if ceil_mode:
             raise RuntimeError("ceil_mode not supported in MaxPool2d")
         n = g.appendNode(g.create("MaxPool", [input])
-                          .is_("kernel_shape", [kernel_size] * 2)
-                          .is_("pads", [padding] * 4)
-                          .is_("dilations", [dilation] * 2)
-                          .is_("strides", [stride] * 2))
+                          .is_("kernel_shape", _pair(kernel_size))
+                          .is_("pads", _pair(padding))
+                          .is_("dilations", _pair(dilation))
+                          .is_("strides", _pair(stride)))
         return (n, None)
 
     @staticmethod
@@ -168,6 +168,18 @@ class MaxPool2dBackward(Function):
 
 
 class MaxPool3d(Function):
+
+    @staticmethod
+    def symbolic(g, input, kernel_size, stride=None, padding=0, dilation=1,
+                 ceil_mode=False):
+        if ceil_mode:
+            raise RuntimeError("ceil_mode not supported in MaxPool3d")
+        n = g.appendNode(g.create("MaxPool", [input])
+                          .is_("kernel_shape", _triple(kernel_size))
+                          .is_("pads", _triple(padding))
+                          .is_("dilations", _triple(dilation))
+                          .is_("strides", _triple(stride)))
+        return (n, None)
 
     @staticmethod
     def forward(ctx, input, kernel_size, stride=None, padding=0, dilation=1,
