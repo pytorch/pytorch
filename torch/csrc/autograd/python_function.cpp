@@ -218,7 +218,12 @@ auto PyFunction::releaseVariables() -> void {
 auto PyFunction::name() -> std::string {
   AutoGIL gil;
   auto f = (THPFunction*) obj;
-  return std::string(Py_TYPE(f)->tp_name);
+  auto name = std::string(Py_TYPE(f)->tp_name);
+  THPObjectPtr _legacy(PyObject_GetAttrString(obj, "_is_legacy"));
+  if (_legacy == Py_True) {
+    name += "LegacyBackward";
+  }
+  return name;
 }
 
 auto PyFunction::getSharedPtr() -> std::shared_ptr<Function> {
@@ -775,6 +780,8 @@ PyObject* process_outputs(PyObject *op_obj, THPFunction* grad_fn, const Unpacked
 PyObject *THPFunction_do_forward(THPFunction *self, PyObject *_inputs)
 {
   HANDLE_TH_ERRORS
+  torch::autograd::profiler::RecordFunction record(Py_TYPE(self)->tp_name);
+
   auto info_pair = unpack_input<true>(_inputs);
   auto& unpacked_input = info_pair.first;
   auto& input_info = info_pair.second;
@@ -795,6 +802,7 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *_inputs)
 PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
 {
   HANDLE_TH_ERRORS
+  torch::autograd::profiler::RecordFunction record(((PyTypeObject*)cls)->tp_name);
 
   THPObjectPtr backward_cls(PyObject_GetAttrString(cls, "_backward_cls"));
   if (!backward_cls) return NULL;

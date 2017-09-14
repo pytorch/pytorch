@@ -15,6 +15,7 @@ import torch.nn.functional as F
 from torch.autograd import gradcheck
 from torch.autograd.gradcheck import gradgradcheck
 from torch.autograd.function import once_differentiable
+from torch.autograd.profiler import profile
 
 from common import TestCase, run_tests, skipIfNoLapack, parse_set_seed_once
 from torch.autograd._functions import *
@@ -1628,6 +1629,19 @@ class TestAutograd(TestCase):
         run_test((10,), 2)
         run_test((10, 10), 2)
         run_test((10,), 3)
+
+    def test_profiler(self):
+        x = Variable(torch.randn(10, 10))
+
+        with profile() as p:
+            y = x * 2 + 4
+
+        last_end = 0
+        names = ['MulConstant', 'AddConstant']
+        for info, expected_name in zip(p.function_events, names):
+            self.assertGreater(info.start, last_end)
+            self.assertEqual(info.name, expected_name)
+            last_end = info.end
 
 
 def index_variable(shape, max_indices):
