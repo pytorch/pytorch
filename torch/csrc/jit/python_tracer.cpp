@@ -1,67 +1,17 @@
 #include <Python.h>
 
-#include <pybind11/pybind11.h>
-// DO NOT REMOVE, this enables std containers to be recognized
-// with pybind11, removing the include disables the support
-#include <pybind11/stl.h>
-namespace py = pybind11;
-
 #include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/jit/assert.h"
 #include "torch/csrc/jit/export.h"
+#include "torch/csrc/jit/pybind.h"
 #include "torch/csrc/utils/python_strings.h"
-#include "torch/csrc/THP.h"
-#include "torch/csrc/DynamicTypes.h"
 
 #include <sstream>
 
 using namespace torch::autograd;
 using namespace torch::jit;
 using namespace torch::jit::tracer;
-
-namespace pybind11 { namespace detail {
-  template<> struct type_caster<TraceInput> {
-  public:
-    PYBIND11_TYPE_CASTER(TraceInput, _("torch::jit::tracer::TraceInput"));
-    bool load(handle src, bool) {
-      PyObject *source = src.ptr();
-      if (THPVariable_Check(source)) {
-        value = TraceInput(((THPVariable*)source)->cdata);
-        return true;
-      } else if (THPModule_isTensor(source)) {
-        value = TraceInput(torch::createTensor(source));
-        return true;
-      } else {
-        return false;
-      }
-    }
-    static handle cast(TraceInput src, return_value_policy /* policy */, handle /* parent */) {
-      if (src.variable.defined()) {
-        return handle(THPVariable_Wrap(src.variable));
-      } else {
-        return handle(torch::createPyObject(src.buffer));
-      }
-    }
-  };
-
-  template<> struct type_caster<Variable> {
-  public:
-    PYBIND11_TYPE_CASTER(Variable, _("torch::autograd::Variable"));
-    bool load(handle src, bool) {
-      PyObject *source = src.ptr();
-      if (THPVariable_Check(source)) {
-        value = ((THPVariable*)source)->cdata;
-        return true;
-      } else {
-        return false;
-      }
-    }
-    static handle cast(Variable src, return_value_policy /* policy */, handle /* parent */) {
-      return handle(THPVariable_Wrap(src));
-    }
-  };
-}}
 
 namespace torch { namespace jit {
 

@@ -1,43 +1,9 @@
-#include "torch/csrc/utils/pybind.h"
 #include <iostream>
 #include <sstream>
 #include "torch/csrc/jit/ir.h"
+#include "torch/csrc/jit/pybind.h"
 #include "torch/csrc/jit/python_tracer.h"
-
-namespace pybind11 { namespace detail {
-
-template <> struct type_caster<torch::jit::Symbol> {
-public:
-  PYBIND11_TYPE_CASTER(torch::jit::Symbol, _("Symbol"));
-
-  bool load(handle src, bool) {
-    try {
-      value = torch::jit::stringToSymbol(py::cast<std::string>(src));
-    } catch (std::exception& e) {
-      return false;
-    }
-    return true;
-  }
-
-  static handle cast(torch::jit::Symbol src, return_value_policy /* policy */, handle /* parent */) {
-    return py::cast(std::string(torch::jit::symbolToString(src)), return_value_policy::copy).release();
-  }
-};
-
-template <> struct type_caster<torch::jit::AttributeKind> {
-public:
-  PYBIND11_TYPE_CASTER(torch::jit::AttributeKind, _("AttributeKind"));
-
-  bool load(handle src, bool) {
-    return false;
-  }
-
-  static handle cast(torch::jit::AttributeKind src, return_value_policy /* policy */, handle /* parent */) {
-    return py::cast(std::string(torch::jit::toString(src)), return_value_policy::copy).release();
-  }
-};
-
-}} // namespace pybind11::detail
+#include "torch/csrc/utils/pybind.h"
 
 namespace torch { namespace jit {
 
