@@ -179,46 +179,6 @@ void GemmEx<float, CPUContext>(
 }
 
 template <>
-void GemmBatched<float, CPUContext>(
-    const CBLAS_TRANSPOSE TransA,
-    const CBLAS_TRANSPOSE TransB,
-    const int A_size,
-    const int A_batches,
-    const int B_size,
-    const int B_batches,
-    const int M,
-    const int N,
-    const int K,
-    const float alpha,
-    const float* A,
-    const float* B,
-    const float beta,
-    float* C,
-    CPUContext* context,
-    Tensor<CPUContext>*, /* scratch */
-    TensorProto::DataType /* math_type */) {
-
-  auto a_offset = A_size / A_batches;
-  auto b_offset = B_size / B_batches;
-  auto y_offset = M * N;
-  // loop over matrices in the batch
-  for (int i = 0; i < A_batches; ++i) {
-    math::Gemm<float, CPUContext>(
-        TransA,
-        TransB,
-        M,
-        N,
-        K,
-        1,
-        A + a_offset * i,
-        B + b_offset * i,
-        0,
-        C + y_offset * i,
-        context);
-  }
-}
-
-template <>
 void Gemv<float, CPUContext>(
     const CBLAS_TRANSPOSE TransA,
     const int M,

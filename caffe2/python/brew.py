@@ -61,7 +61,6 @@ class HelperWrapper(object):
         'add_weight_decay': add_weight_decay,
         'elementwise_linear': elementwise_linear,
         'layer_norm': layer_norm,
-        'batch_mat_mul' : batch_mat_mul,
     }
 
     def __init__(self, wrapped):

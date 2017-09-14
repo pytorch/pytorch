@@ -3,7 +3,7 @@
 
 namespace caffe2 {
 
-REGISTER_CPU_OPERATOR(BatchMatMul, BatchMatMulOp<CPUContext>);
+REGISTER_CPU_OPERATOR(BatchMatMul, BatchMatMulOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(BatchMatMul)
     .NumInputs(2)
@@ -55,21 +55,14 @@ class GetBatchMatMulGradient : public GradientMakerBase {
       trans_b = GetArgument(Def(), "trans_b").i();
     }
 
-    auto no_trans_arg = vector<Argument>();
-    auto trans_a_arg = vector<Argument>{
+    const auto no_trans_arg = vector<Argument>();
+    const auto trans_a_arg = vector<Argument>{
         MakeArgument<int>("trans_a", 1)};
-    auto trans_b_arg = vector<Argument>{
+    const auto trans_b_arg = vector<Argument>{
         MakeArgument<int>("trans_b", 1)};
-    auto trans_both_arg = vector<Argument>{
+    const auto trans_both_arg = vector<Argument>{
         MakeArgument<int>("trans_a", 1),
         MakeArgument<int>("trans_b", 1)};
-
-    if (ArgumentHelper::HasArgument(Def(), "use_scratch")) {
-      no_trans_arg.push_back(MakeArgument<int>("use_scratch", 1));
-      trans_a_arg.push_back(MakeArgument<int>("use_scratch", 1));
-      trans_b_arg.push_back(MakeArgument<int>("use_scratch", 1));
-      trans_both_arg.push_back(MakeArgument<int>("use_scratch", 1));
-    }
 
     if (trans_a) {
       if (trans_b) {
