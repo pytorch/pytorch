@@ -20,10 +20,12 @@
 #include "torch/csrc/utils/disallow_copy.h"
 
 #include "ATen/ArrayRef.h"
+#include "torch/csrc/jit/generic_if.h"
 #include "torch/csrc/jit/assert.h"
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/jit/attributes.h"
 #include "torch/csrc/jit/resource_guard.h"
+#include "torch/csrc/jit/type.h"
 
 namespace torch { namespace autograd {
 
@@ -42,120 +44,6 @@ struct Graph;
 // Node is the base class of the IR graph. It represents one computation
 // and dependencies on a list of values. The "prim-ops", so to speak.
 struct Node;
-
-#define TH_FORALL_TYPES(_) \
-_(MultiType) \
-_(TensorType) \
-_(HandleType)
-
-enum class TypeKind {
-#define DEFINE_TYPE(T) T,
-  TH_FORALL_TYPES(DEFINE_TYPE)
-#undef DEFINE_TYPE
-};
-
-struct Type;
-using TypePtr = std::shared_ptr<Type>;
-
-struct Type {
-private:
-  TypeKind kind_;
-
-protected:
-  Type(TypeKind kind)
-    : kind_(kind) {}
-
-public:
-  TypeKind kind() const {
-    return kind_;
-  }
-
-  // Dynamically cast this object to the subclass indicated by the
-  // template variable, returning nullptr if the cast is invalid..
-  template<typename T>
-  T* cast() {
-    if (T::Kind == kind())
-      return static_cast<T*>(this);
-    return nullptr;
-  }
-  template<typename T>
-  T* expect() {
-    JIT_ASSERT(T::Kind == kind())
-    return static_cast<T*>(this);
-  }
-};
-
-// This node represents a single Tensor value
-struct TensorType : public Type {
-  friend struct Type;
-  TensorType(const at::Tensor& tensor)
-    : Type(TypeKind::TensorType)
-    , scalar_type_(tensor.type().scalarType())
-    , device_(tensor.type().isCuda() ? tensor.get_device() : -1)
-    , sizes_(tensor.sizes())
-    , strides_(tensor.strides()) {}
-
-  static const TypeKind Kind = TypeKind::TensorType;
-
-  at::ScalarType scalarType() const { return scalar_type_; }
-  int device() const { return device_; }
-  const std::vector<std::int64_t>& sizes() const { return sizes_; }
-  const std::vector<std::int64_t>& strides() const { return strides_; }
-
-  TypePtr contiguous() const {
-    auto t = std::make_shared<TensorType>(*this);
-    t->strides_.resize(sizes_.size());
-    t->strides_.back() = 1;
-    for(size_t i = t->strides_.size() - 1; i > 0; i--) {
-      t->strides_[i-1] = t->strides_[i] * t->sizes_[i];
-    }
-    return t;
-  }
-private:
-  at::ScalarType scalar_type_;
-  int device_;
-  std::vector<int64_t> sizes_;
-  std::vector<int64_t> strides_;
-};
-
-// Type of multireturn nodes. Note that it doesn't mean that they must always
-// have multiple outputs, but each output will be represented with a select node.
-struct MultiType : public Type {
-  friend struct Type;
-
-  MultiType()
-    : Type(TypeKind::MultiType) {}
-
-public:
-  static const TypeKind Kind = TypeKind::MultiType;
-};
-
-// This value represents an opaque handle to external state.
-// Operators that produce/consume values of this type agree on
-// the format.
-
-/* Example Usage: passing state to opaque autograd Functions:
-graph(%1, %8) {
-  %2.0, %2.1 = ^AddConstant(2, False)(%1) // first output is Type::Handle, containing ctx
-  %4.0, %4.1 = ^Add(False)(%2.1, %1) // first output is Type::Handle, containing ctx
-  %6.0, %6.1 = ^Abs()(%4.1) // first output is Type::Handle, containing ctx
-  ---------------- stage 1 ----------------
-  %13 = AutogradOp[AbsBackward](%6.0, %8) // first argument is Type::Handle, consuming ctx
-  %15 = AutogradOp[AddBackward](%4.0, %13.0) // first argument is Type::Handle, consuming ctx
-  %18 = AutogradOp[AddConstantBackward](%2.0, %15.1) // first argument is Type::Handle, consuming ctx
-  %20 = AutogradOp[N5torch8autograd3AddE](%18.0, %18.0)
-  return (%6.0, %20.0);
-}
-*/
-struct HandleType : public Type {
-  friend struct Type;
-
-  HandleType()
-    : Type(TypeKind::HandleType) {}
-
-public:
-  static const TypeKind Kind = TypeKind::HandleType;
-};
 
 // Each use is represented by this type, see Node::uses()
 // 'user' is the consumer of the node, offset is the index into
@@ -185,11 +73,6 @@ using ArrayRef = at::ArrayRef<T>;
 using NodeKind = Symbol;
 struct graph_node_list;
 struct graph_node_list_iterator;
-
-inline TypePtr multiType() {
-  static TypePtr multiType = std::make_shared<MultiType>();
-  return multiType;
-}
 
 inline TypePtr getInitialType(NodeKind kind) {
   switch(kind) {
@@ -869,24 +752,6 @@ inline Node* Node::makeMultireturn() {
 // read 'between' these defines to see how they turn into a big switch
 // statement
 
-// TODO: I'm pretty sure Constness can be done with C++ templates, ala
-// std::is_const, but no time to work it out...
-#define GENERIC_IF(Constness, FullKind, x, Kind) \
-  auto && __match_key = x; \
-  switch(__match_key->kind()) { \
-    case FullKind: { \
-      auto * value = static_cast<Constness ::torch::jit::Kind*>(__match_key); (void) value;
-#define GENERIC_ELSEIF(Constness, FullKind, Kind) \
-    } break; \
-    case FullKind: { \
-      auto * value = static_cast<Constness ::torch::jit::Kind*>(__match_key); (void) value;
-#define GENERIC_ELSE() \
-    } break; \
-    default: {
-#define GENERIC_END() \
-    } break; \
-  };
-
 // Mutable case
 // The IFM/ELSEIFM indicate that subclass *refinement* occurs.
 // This is only valid for node types for which we have subclasses.
@@ -904,12 +769,6 @@ inline Node* Node::makeMultireturn() {
     } break; \
     case ::torch::jit::k##Kind: { \
       auto * value = __match_key; (void) value;
-
-// Immutable case
-#define TYPE_IF(x,Kind) GENERIC_IF(const,TypeKind::Kind,x,Kind)
-#define TYPE_ELSEIF(Kind) GENERIC_ELSEIF(const,TypeKind::Kind,Kind)
-#define TYPE_ELSE() GENERIC_ELSE()
-#define TYPE_END() GENERIC_END()
 
 /* example:
   Node * n = ...;

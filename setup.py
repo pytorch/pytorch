@@ -376,6 +376,7 @@ main_sources = [
     "torch/csrc/jit/tracer.cpp",
     "torch/csrc/jit/python_tracer.cpp",
     "torch/csrc/jit/interned_strings.cpp",
+    "torch/csrc/jit/type.cpp",
     "torch/csrc/jit/export.cpp",
     "torch/csrc/jit/passes/graph_fuser.cpp",
     "torch/csrc/jit/passes/onnx.cpp",
