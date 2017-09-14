@@ -314,6 +314,12 @@ Non-linear Activations
 .. autoclass:: Softmax
     :members:
 
+:hidden:`Softmax2d`
+~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: Softmax2d
+    :members:
+
 :hidden:`LogSoftmax`
 ~~~~~~~~~~~~~~~~~~~~
 
