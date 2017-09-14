@@ -12,6 +12,7 @@ from functools import wraps, reduce
 from operator import mul
 
 import torch
+import torch.backends.cudnn as cudnn
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.parallel as dp
@@ -2686,8 +2687,7 @@ class TestNN(NNTestCase):
         grid = Variable(torch.randn(N, H, W, 2), requires_grad=True)
         self.assertTrue(gradcheck(lambda inp, grid: F.grid_sample(inp, grid), (input, grid)))
 
-        # test CPU against CUDA
-        if TEST_CUDNN:
+        def test_cpu_against_cuda(N, C, H, W):
             def test_shape(N, C, IH, IW, H, W):
                 input_cpu = Variable(torch.randn(C, N, IH, IW).transpose(0, 1), requires_grad=True)
                 grid_cpu = Variable(torch.randn(H, N, W, 2).transpose(0, 1), requires_grad=True)
@@ -2736,6 +2736,20 @@ class TestNN(NNTestCase):
             H = random.randint(1, IH)
             W = random.randint(1, IW)
             test_shape(N, C, IH, IW, H, W)
+
+        # test CUDNN against CPU
+        if TEST_CUDNN:
+            test_cpu_against_cuda(N, C, H, W)
+
+        # test CUDA (without CUDNN) against CPU
+        if TEST_CUDA:
+
+            # GridSampler will automatically use CUDNN if it is available
+            # so we disable CUDNN temporarily
+            original_cudnn_enabled = cudnn.enabled
+            cudnn.enabled = False
+            test_cpu_against_cuda(N, C, H, W)
+            cudnn.enabled = original_cudnn_enabled
 
     def test_affine_grid(self):
         # test known input on CPU
