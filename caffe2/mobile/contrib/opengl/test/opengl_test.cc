@@ -2364,9 +2364,7 @@ void testGLTextureTypes() {
   gl_log(GL_LOG, "...done with %s\n", __PRETTY_FUNCTION__);
 }
 
-namespace caffe2 {
-  void squareFactors(int N, int& r1, int& r2);
-};
+void squareFactors(int N, int& r1, int& r2);
 
 void testOpenGL() {
   {
@@ -2375,7 +2373,7 @@ void testOpenGL() {
 
     for (const auto& input_channels : channels) {
       int tile_x = 1, tile_y = 1;
-      caffe2::squareFactors((input_channels + 3) / 4, tile_x, tile_y);
+      squareFactors((input_channels + 3) / 4, tile_x, tile_y);
 
       for (const auto& output_channels : channels) {
         for (int size = 5; size < 8; size *= 2) {
@@ -2503,7 +2501,7 @@ void testOpenGL() {
     }
     for (const auto& channel : channels) {
       int tile_x = 1, tile_y = 1;
-      caffe2::squareFactors((channel + 3) / 4, tile_x, tile_y);
+      squareFactors((channel + 3) / 4, tile_x, tile_y);
       // clang-format off
       testOpenGLConv(1, channel, 10, 10, channel, 3, 3, 0, 1, ConvPRelu, 0.1 * channel / 8, true, 1, 1, tile_x, tile_y, true);
       testOpenGLConv(1, channel, 10, 10, channel, 3, 3, 0, 1, ConvTransposePRelu, 0.1 * channel / 8, true, 1, 1, tile_x, tile_y, true);
