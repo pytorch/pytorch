@@ -1,0 +1,6 @@
+graph(%1 : Double(2)
+      %2 : Double(2)) {
+  %3 : Double(2) = Add(%1, %2), uses = [%5.i0, %5.i1];
+  %5 : Double(2) = Mul(%3, %3), uses = [%0.i0];
+  return (%5);
+}
