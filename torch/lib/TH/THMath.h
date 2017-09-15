@@ -39,13 +39,14 @@ static inline float TH_lerpf(float a, float b, float weight) {
 }
 
 
-static inline double TH_erfinvf( double y) {
+static inline double TH_erfinv(double y) {
     /* Function to calculate inverse error function.  Rational approximation
     is used to generate an initial approximation, which is then improved to
     full accuracy by two steps of Newton's method.  Code is a direct
     translation of the erfinv m file in matlab version 2.0.
     Author:  Gary L. Pavlis, Indiana University
     Date:  February 1996
+    Code from https://github.com/antelopeusersgroup/antelope_contrib/blob/master/lib/location/libgenloc/erfinv.c
     */
     double x,z,num,dem; /*working variables */
     /* coefficients in rational expansion */
@@ -74,6 +75,11 @@ static inline double TH_erfinvf( double y) {
     x = x - (erf(x) - y)/( (2.0/sqrt(M_PI))*exp(-x*x));
 
     return(x);
+}
+
+
+static inline float TH_erfinvf(float y) {
+  return TH_erfinv(double(y));
 }
 
 #endif // _THMATH_H
