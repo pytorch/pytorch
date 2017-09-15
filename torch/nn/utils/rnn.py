@@ -84,7 +84,7 @@ def pack_padded_sequence(input, lengths, batch_first=False):
     return PackedSequence(torch.cat(steps), batch_sizes)
 
 
-def pad_packed_sequence(sequence, batch_first=False):
+def pad_packed_sequence(sequence, padding_value=0.0, batch_first=False):
     """Pads a packed batch of variable length sequences.
 
     It is an inverse operation to :func:`pack_padded_sequence`.
@@ -97,6 +97,7 @@ def pad_packed_sequence(sequence, batch_first=False):
 
     Arguments:
         sequence (PackedSequence): batch to pad
+        padding_value (float, optional): values for padded elements
         batch_first (bool, optional): if True, the output will be in BxTx*
             format.
 
@@ -106,7 +107,7 @@ def pad_packed_sequence(sequence, batch_first=False):
     """
     var_data, batch_sizes = sequence
     max_batch_size = batch_sizes[0]
-    output = var_data.data.new(len(batch_sizes), max_batch_size, *var_data.size()[1:]).zero_()
+    output = var_data.data.new(len(batch_sizes), max_batch_size, *var_data.size()[1:]).fill_(padding_value)
     output = Variable(output)
 
     lengths = []
