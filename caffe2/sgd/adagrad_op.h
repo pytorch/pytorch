@@ -13,11 +13,12 @@ void adagrad_update(
     float* nw,
     float* nh,
     float epsilon,
+    float decay,
     const float* lr,
     Context* /*context*/) {
   for (auto i = 0; i < N; ++i) {
     float gi = g[i];
-    float hi = nh[i] = h[i] + gi * gi;
+    float hi = nh[i] = decay * h[i] + gi * gi;
     nw[i] = w[i] + lr[0] * gi / (std::sqrt(hi) + epsilon);
   }
 }
@@ -28,7 +29,9 @@ class AdagradOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   AdagradOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5f)) {}
+        epsilon_(OperatorBase::GetSingleArgument<T>("epsilon", 1e-5f)),
+        decay_(OperatorBase::GetSingleArgument<T>("decay", 1.0f)) {}
+
   bool RunOnDevice() override {
     CAFFE_ENFORCE(Input(GRAD).size() == Input(MOMENT_1).size());
     CAFFE_ENFORCE(Input(GRAD).size() == Input(PARAM).size());
@@ -42,6 +45,7 @@ class AdagradOp final : public Operator<Context> {
         Output(OUTPUT_PARAM)->template mutable_data<T>(),
         Output(OUTPUT_MOMENT_1)->template mutable_data<T>(),
         epsilon_,
+        decay_,
         Input(LR).template data<T>(),
         &context_);
     return true;
@@ -49,6 +53,7 @@ class AdagradOp final : public Operator<Context> {
 
  protected:
   T epsilon_;
+  T decay_;
   INPUT_TAGS(PARAM, MOMENT_1, GRAD, LR);
   OUTPUT_TAGS(OUTPUT_PARAM, OUTPUT_MOMENT_1);
 };
@@ -59,7 +64,10 @@ class SparseAdagradOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   SparseAdagradOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5f)) {}
+        epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5f)) {
+    const T decay = OperatorBase::GetSingleArgument<T>("decay", 1.0f);
+    CAFFE_ENFORCE_EQ(decay, 1.0, "Decay is not supported for SparseAdagradOp");
+  }
 
   bool RunOnDevice() override {
     // Enforce shapes
@@ -126,6 +134,7 @@ class SparseAdagradOp final : public Operator<Context> {
             paramOut + offsetIdx,
             momentOut + offsetIdx,
             epsilon_,
+            1.0f,
             lr,
             &context_);
       }

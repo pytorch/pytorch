@@ -324,11 +324,12 @@ class WeightDecayBuilder(Optimizer):
 
 
 class AdagradOptimizer(Optimizer):
-    def __init__(self, alpha=0.01, epsilon=1e-4, policy="fixed",
+    def __init__(self, alpha=0.01, epsilon=1e-4, decay=1, policy="fixed",
                  sparse_dedup_aggregator=None, engine='', **kwargs):
         super(AdagradOptimizer, self).__init__()
         self.alpha = alpha
         self.epsilon = epsilon
+        self.decay = decay
         self.policy = policy
         self.sparse_dedup_aggregator = sparse_dedup_aggregator
         self.engine = engine
@@ -361,6 +362,7 @@ class AdagradOptimizer(Optimizer):
                 [param, param_squared_sum, grad.indices, grad.values, lr],
                 [param, param_squared_sum],
                 epsilon=self.epsilon,
+                decay=float(self.decay),
                 engine=self.engine
             )
         else:
@@ -368,6 +370,7 @@ class AdagradOptimizer(Optimizer):
                 [param, param_squared_sum, grad, lr],
                 [param, param_squared_sum],
                 epsilon=self.epsilon,
+                decay=float(self.decay),
                 engine=self.engine
             )
 

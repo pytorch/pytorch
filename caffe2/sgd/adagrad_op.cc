@@ -25,7 +25,11 @@ and returns (new_param, new_history).
     .Input(3, "lr", "learning rate")
     .Output(0, "output_param", "Updated parameters")
     .Output(1, "output_moment", "Updated moment")
-    .Arg("epsilon", "Default 1e-5");
+    .Arg("epsilon", "Default 1e-5")
+    .Arg(
+        "decay",
+        "Default 1. If it is in (0, 1), the gradient square sum "
+        "is decayed by this factor.");
 
 REGISTER_CPU_OPERATOR(SparseAdagrad, SparseAdagradOp<float, CPUContext>);
 OPERATOR_SCHEMA(SparseAdagrad)

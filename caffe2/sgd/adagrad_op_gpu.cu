@@ -12,10 +12,11 @@ __global__ void AdagradUpdate(
     float* nw,
     float* nh,
     float epsilon,
+    float decay,
     const float* lr) {
   CUDA_1D_KERNEL_LOOP(i, N) {
     float gi = g[i];
-    float hi = nh[i] = h[i] + gi * gi;
+    float hi = nh[i] = decay * h[i] + gi * gi;
     nw[i] = w[i] + lr[0] * gi / (std::sqrt(hi) + epsilon);
   }
 }
@@ -29,13 +30,14 @@ void adagrad_update<CUDAContext>(
     float* nw,
     float* nh,
     float epsilon,
+    float decay,
     const float* lr,
     CUDAContext* context) {
   AdagradUpdate<<<
       CAFFE_GET_BLOCKS(N),
       CAFFE_CUDA_NUM_THREADS,
       0,
-      context->cuda_stream()>>>(N, w, g, h, nw, nh, epsilon, lr);
+      context->cuda_stream()>>>(N, w, g, h, nw, nh, epsilon, decay, lr);
 }
 
 template <typename SIndex>
