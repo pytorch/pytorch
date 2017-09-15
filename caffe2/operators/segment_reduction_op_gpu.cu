@@ -349,12 +349,12 @@ __global__ void length_sum_gradient_kernel(
   }
 }
 
-template <typename T>
+template <typename T, bool ExactBlock = false>
 __global__ void length_weighted_sum_gradient_kernel(
-    const T* grad_in,
-    const T* weights_in,
-    T* grad_out,
-    const int* prefix_sum_length_data,
+    const T* __restrict__ grad_in,
+    const T* __restrict__ weights_in,
+    T* __restrict__ grad_out,
+    const int* __restrict__ prefix_sum_length_data,
     int N,
     int post,
     int len_length) {
@@ -366,22 +366,32 @@ __global__ void length_weighted_sum_gradient_kernel(
   CUDA_KERNEL_ASSERT(start <= N);
   CUDA_KERNEL_ASSERT(end <= N);
 
-  for (int i = threadIdx.x; i < post; i += blockDim.x) {
-    for (int line = start; line < end; ++line) {
-      grad_out[line * post + i] = weights_in[line] * grad_in[group * post + i];
+  if (ExactBlock) {
+    grad_out += threadIdx.x;
+    grad_in += threadIdx.x;
+
+    for (int line = start + threadIdx.y; line < end; line += blockDim.y) {
+      grad_out[line * post] = weights_in[line] * grad_in[group * post];
+    }
+  } else {
+    for (int i = threadIdx.x; i < post; i += blockDim.x) {
+      for (int line = start; line < end; ++line) {
+        grad_out[line * post + i] =
+            weights_in[line] * grad_in[group * post + i];
+      }
     }
   }
 }
 
 template <typename T, typename IndexType, int NumThreads>
 __global__ void length_weighted_sum_with_main_input_gradient_kernel(
-    const T* grad_in,
-    const T* weights_in,
-    const T* data_in,
-    const IndexType* indices,
-    T* data_grad_out,
-    T* weights_grad_out,
-    const int* prefix_sum_length_data,
+    const T* __restrict__ grad_in,
+    const T* __restrict__ weights_in,
+    const T* __restrict__ data_in,
+    const IndexType* __restrict__ indices,
+    T* __restrict__ data_grad_out,
+    T* __restrict__ weights_grad_out,
+    const int* __restrict__ prefix_sum_length_data,
     int N,
     int post,
     int len_length) {
@@ -397,6 +407,7 @@ __global__ void length_weighted_sum_with_main_input_gradient_kernel(
   typedef cub::BlockReduce<float, NumThreads> BlockReduce;
   __shared__ typename BlockReduce::TempStorage temp_storage;
 
+  // TODO(wyiming): parallelize this outter loop
   for (int line = start; line < end; ++line) {
     T w_grad = 0;
     for (int i = threadIdx.x; i < post; i += blockDim.x) {
@@ -462,13 +473,13 @@ __global__ void sparse_length_sum_kernel(
   }
 }
 
-template <typename T, typename IndexType>
+template <typename T, typename IndexType, bool ExactBlock = false>
 __global__ void sparse_length_weighted_sum_kernel(
-    const T* in,
-    const T* in_weights,
-    T* out,
-    const int* prefix_sum_length_data,
-    const IndexType* indices,
+    const T* __restrict__ in,
+    const T* __restrict__ in_weights,
+    T* __restrict__ out,
+    const int* __restrict__ prefix_sum_length_data,
+    const IndexType* __restrict__ indices,
     int N,
     int post,
     int len_length,
@@ -481,12 +492,35 @@ __global__ void sparse_length_weighted_sum_kernel(
   CUDA_KERNEL_ASSERT(start <= len_indices);
   CUDA_KERNEL_ASSERT(end <= len_indices);
 
-  for (int i = threadIdx.x; i < post; i += blockDim.x) {
+  extern __shared__ T reduceVals[];
+
+  if (ExactBlock) {
     T sum = (T)0;
-    for (int line = start; line < end; ++line) {
-      sum += in_weights[line] * in[indices[line] * post + i];
+
+    in += threadIdx.x;
+    for (int line = start + threadIdx.y; line < end; line += blockDim.y) {
+      sum += in_weights[line] * in[indices[line] * post];
     }
-    out[group * post + i] = sum;
+
+    reduceVals[threadIdx.y * blockDim.x + threadIdx.x] = sum;
+    __syncthreads();
+
+    if (threadIdx.y == 0) {
+      sum = (T)0;
+      for (int i = 0; i < blockDim.y; ++i) {
+        sum += reduceVals[i * blockDim.x + threadIdx.x];
+      }
+
+      out[group * post + threadIdx.x] = sum;
+    }
+  } else {
+    for (int i = threadIdx.x; i < post; i += blockDim.x) {
+      T sum = (T)0;
+      for (int line = start; line < end; ++line) {
+        sum += in_weights[line] * in[indices[line] * post + i];
+      }
+      out[group * post + i] = sum;
+    }
   }
 }
 
@@ -659,33 +693,15 @@ class CUDASparseLengthsWeightedSumOp : public Operator<CUDAContext> {
     int N = dataSize;
     int post = dataInput.size_from_dim(1);
 
-    if (post > 128) {
-      sparse_length_weighted_sum_kernel<T, IndexType>
-          <<<len_length, 512, 0, context_.cuda_stream()>>>(
-              in_data,
-              in_weights,
-              out_data,
-              prefix_sum_length_data,
-              indices,
-              N,
-              post,
-              len_length,
-              dataToReduceSize);
-    } else if (post > 64) {
-      sparse_length_weighted_sum_kernel<T, IndexType>
-          <<<len_length, 128, 0, context_.cuda_stream()>>>(
-              in_data,
-              in_weights,
-              out_data,
-              prefix_sum_length_data,
-              indices,
-              N,
-              post,
-              len_length,
-              dataToReduceSize);
-    } else if (post > 32) {
-      sparse_length_weighted_sum_kernel<T, IndexType>
-          <<<len_length, 64, 0, context_.cuda_stream()>>>(
+    auto maxThreads =
+        GetDeviceProperty(CaffeCudaGetDevice()).maxThreadsPerBlock;
+    if (post <= maxThreads) {
+      int multiple = std::min(maxThreads / post, 16);
+      dim3 block(post, multiple);
+      size_t smem = sizeof(T) * post * multiple;
+
+      sparse_length_weighted_sum_kernel<T, IndexType, true>
+          <<<len_length, block, smem, context_.cuda_stream()>>>(
               in_data,
               in_weights,
               out_data,
@@ -696,8 +712,8 @@ class CUDASparseLengthsWeightedSumOp : public Operator<CUDAContext> {
               len_length,
               dataToReduceSize);
     } else {
-      sparse_length_weighted_sum_kernel<T, IndexType>
-          <<<len_length, 32, 0, context_.cuda_stream()>>>(
+      sparse_length_weighted_sum_kernel<T, IndexType, false>
+          <<<len_length, maxThreads, 0, context_.cuda_stream()>>>(
               in_data,
               in_weights,
               out_data,
@@ -1020,30 +1036,15 @@ class CUDASparseLengthsWeightedSumGradientWithIndicesOp
 
     int N = output_0dim;
     int post = segmentGradsInput.size_from_dim(1);
+    auto maxThreads =
+        GetDeviceProperty(CaffeCudaGetDevice()).maxThreadsPerBlock;
 
-    if (post > 128) {
-      length_weighted_sum_gradient_kernel<T>
-          <<<len_length, 512, 0, context_.cuda_stream()>>>(
-              in_data,
-              in_weights,
-              out_data,
-              prefix_sum_length_data,
-              N,
-              post,
-              len_length);
-    } else if (post > 64) {
-      length_weighted_sum_gradient_kernel<T>
-          <<<len_length, 128, 0, context_.cuda_stream()>>>(
-              in_data,
-              in_weights,
-              out_data,
-              prefix_sum_length_data,
-              N,
-              post,
-              len_length);
-    } else if (post > 32) {
-      length_weighted_sum_gradient_kernel<T>
-          <<<len_length, 64, 0, context_.cuda_stream()>>>(
+    if (post < maxThreads) {
+      int multiple = std::min(maxThreads / post, 16);
+      dim3 block(post, multiple);
+
+      length_weighted_sum_gradient_kernel<T, true>
+          <<<len_length, block, 0, context_.cuda_stream()>>>(
               in_data,
               in_weights,
               out_data,
@@ -1052,8 +1053,8 @@ class CUDASparseLengthsWeightedSumGradientWithIndicesOp
               post,
               len_length);
     } else {
-      length_weighted_sum_gradient_kernel<T>
-          <<<len_length, 32, 0, context_.cuda_stream()>>>(
+      length_weighted_sum_gradient_kernel<T, false>
+          <<<len_length, maxThreads, 0, context_.cuda_stream()>>>(
               in_data,
               in_weights,
               out_data,
