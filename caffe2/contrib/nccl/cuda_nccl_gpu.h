@@ -52,6 +52,7 @@ class NCCL {
   static void Broadcast(const NCCLExecution& ex);
   static void Reduce(const NCCLExecution& ex);
   static void AllGather(const NCCLExecution& ex);
+  static void ReduceScatter(const NCCLExecution& ex);
 };
 }
 }
