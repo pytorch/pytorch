@@ -79,7 +79,7 @@ static inline double TH_erfinv(double y) {
 
 
 static inline float TH_erfinvf(float y) {
-  return TH_erfinv(double(y));
+  return TH_erfinv((double)y);
 }
 
 #endif // _THMATH_H
