@@ -2,9 +2,11 @@ import math
 import tempfile
 import unittest
 from itertools import repeat
+
 import torch
 import torch.cuda
 import torch.cuda.comm as comm
+
 from test_torch import TestTorch
 from common import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests
 
@@ -18,7 +20,6 @@ if not torch.cuda.is_available():
 def is_floating(t):
     return type(t) in [torch.FloatTensor, torch.DoubleTensor,
                        torch.cuda.FloatTensor, torch.cuda.DoubleTensor]
-
 
 types = [
     torch.FloatTensor,
@@ -42,8 +43,6 @@ def number(floating, integer, t):
         return floating
     else:
         return integer
-
-
 # TODO: check HalfTensor
 
 S = 10
@@ -121,9 +120,7 @@ def large_2d_lapack(t):
 def new_t(*sizes):
     def tmp(t):
         return t(*sizes).copy_(torch.randn(*sizes))
-
     return tmp
-
 
 tests = [
     ('add', small_3d, lambda t: [number(3.14, 3, t)]),
@@ -324,7 +321,7 @@ simple_pointwise_float = [
     'log1p',
     'sigmoid',
     'erf',
-    'erfinv',
+    'erfinv'
     'sin',
     'sqrt',
     'tanh',
@@ -387,11 +384,11 @@ def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t, precision=1e-5):
         self.assertEqual(cpu_args, gpu_args, precision)
         # Compare results
         self.assertEqual(cpu_result, gpu_result, precision)
-
     return tmp
 
 
 class TestCuda(TestCase):
+
     @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
     def test_autogpu(self):
         x = torch.randn(5, 5).cuda()
@@ -947,6 +944,7 @@ if HAS_CUDA:
 
                 assert not hasattr(TestCuda, test_name), "Duplicated test name: " + test_name
                 setattr(TestCuda, test_name, compare_cpu_gpu(constr, arg_constr, name_inner, t, precision))
+
 
 if __name__ == '__main__':
     run_tests()
