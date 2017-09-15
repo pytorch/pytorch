@@ -50,6 +50,7 @@ def Parallelize(
     max_concurrent_distributed_ops=16,
     cpu_device=False,
     num_threads_per_device=4,
+    shared_model=False,
 ):
     '''
     Function to create a model that can run on many GPUs or CPUs.
@@ -88,6 +89,7 @@ def Parallelize(
       optimize_gradient_memory: whether to apply 'memonger' to share blobs
                         in gradient computation to reduce memory footprint
       cpu_device        Use CPU instead of GPU
+      shared_model      (only for CPU) use same parameters on each device
     '''
     assert scope.CurrentDeviceScope() is None \
         or scope.CurrentDeviceScope().device_type == caffe2_pb2.CPU, \
@@ -105,11 +107,16 @@ def Parallelize(
                 break
         model_helper_obj._device_type = caffe2_pb2.CUDA
         model_helper_obj._device_prefix = "gpu"
+        model_helper_obj._shared_model = False
         device_name = "GPU"
+        assert shared_model is False, "Shared model only supported on CPU"
     else:
         model_helper_obj._device_type = caffe2_pb2.CPU
         model_helper_obj._device_prefix = "cpu"
         device_name = "CPU"
+        model_helper_obj._shared_model = shared_model
+        if shared_model and rendezvous is not None:
+            assert "Shared model only supported on single-node currently"
 
     log.info("Parallelizing model for devices: {}".format(devices))
     extra_workers = 8 if rendezvous is not None else 0  # best-guess
@@ -246,6 +253,10 @@ def Parallelize(
     log.info("Post-iteration operators for updating params")
     num_shards = 1 if rendezvous is None else rendezvous['num_shards']
 
+    all_params = set(model_helper_obj.GetParams(''))
+    if shared_model:
+        _PruneParametersForSharing(model_helper_obj)
+
     if param_update_builder_fun is not None:
         for device in devices:
             device_opt = core.DeviceOption(model_helper_obj._device_type, device)
@@ -308,6 +319,9 @@ def Parallelize(
     ]
     model_helper_obj._data_parallel_model_nets = [model_helper_obj.net]
 
+    if shared_model:
+        _RemapParameterBlobsForSharedModel(model_helper_obj, all_params)
+
 
 def Parallelize_GPU_BMUF(
     model_helper_obj,
@@ -349,6 +363,7 @@ def Parallelize_GPU_BMUF(
     model_helper_obj._device_type = caffe2_pb2.CUDA
     model_helper_obj._device_prefix = 'gpu'
     model_helper_obj._broadcast_context = None
+    model_helper_obj._shared_model = False
     master_gpu_opt = core.DeviceOption(caffe2_pb2.CUDA, master_gpu)
 
     num_shards = rendezvous['num_shards'] if rendezvous else 1
@@ -839,6 +854,7 @@ def _Broadcast(devices, model, net, param, use_nccl=False):
 def _AllReduce(devices, model, net, param, use_nccl=False, control_input=None):
     blobs_group = list(viewvalues(model._device_grouped_blobs[param]))
     if model._device_type == caffe2_pb2.CUDA and use_nccl:
+        # TODO: for _shared_model, do only NCCLReduce
         model.NCCLAllreduce(
             blobs_group, blobs_group, control_input=control_input
         )
@@ -895,6 +911,7 @@ def _AllReduce(devices, model, net, param, use_nccl=False, control_input=None):
         sumN(0, 2)
     else:
         sumN(*range(len(devices)))
+    # TODO: for _shared_model, no need to broadcast
     _Broadcast(devices, model, net, param)
 
 
@@ -1027,6 +1044,55 @@ def _AllReduceBlobs(blob_names, devices, model, net, rendezvous, use_nccl,
             rendezvous,
             max_concurrent_distributed_ops,
         )
+
+
+def _PruneParametersForSharing(model):
+    assert model._shared_model
+    master_prefix = "{}_{}/".format(model._device_prefix, model._devices[0])
+
+    # Remove non-master parameters so that they will not receive parameter
+    # update operators.
+    model.params = model.GetParams(master_prefix)
+    paramset = set(model.params)
+
+    model.param_to_grad = {
+        p: model.param_to_grad[p]
+        for p in model.param_to_grad if p in paramset
+    }
+    model.weights = [w for w in model.weights if w in paramset]
+    model.biases = [w for w in model.biases if w in paramset]
+
+
+def _RemapParameterBlobsForSharedModel(model, all_params):
+    assert model._shared_model
+    master_prefix = "{}_{}/".format(
+        model._device_prefix, model._devices[0])
+    log.info("Remapping param blobs to master -> {}".format(master_prefix))
+    master_params = set(model.GetParams())
+
+    # Remove all but master params
+    def modify_ops(net):
+        ops = []
+        for op in net.Proto().op:
+            delete_op = False
+            # Delete ops that output non-master version of parameter
+            for outp in op.output:
+                if outp in all_params and outp not in master_params:
+                    delete_op = True
+                    log.debug("Delete b/c {}:  {}".format(outp, str(op)))
+                    break
+            if delete_op:
+                continue
+            # Remap inputs to point to the master param
+            for j, inp in enumerate(op.input):
+                if inp in all_params and inp not in master_params:
+                    op.input[j] = master_prefix + stripParamName(inp)
+            ops.append(op)
+        del net.Proto().op[:]
+        net.Proto().op.extend(ops)
+
+    modify_ops(model.param_init_net)
+    modify_ops(model.net)
 
 
 class CollectivesConcurrencyControl(object):
@@ -1227,7 +1293,8 @@ def _AllReduceBlobsSingleHost(blob_names, devices, model, net, use_nccl):
             with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU)):
                 # Poor man's allreduce
                 model.net.Sum(blobs_group, [blobs_group[0]])
-                _Broadcast(devices, model, model.net, blob_name)
+                if not model._shared_model:
+                    _Broadcast(devices, model, model.net, blob_name)
 
 
 def _BroadcastComputedParams(devices, model, rendezvous, use_nccl=False):
@@ -1417,22 +1484,29 @@ def _ValidateParams(params):
 def _ComputeBlobsToSync(model):
     '''
     We sync all blobs that are generated by param init net and
-    are 'data parallel', i.e assigned to a gpu
+    are 'data parallel', i.e assigned to a device
     '''
     sync_names = set()
-    blobs_to_sync = []
-    for op in model.param_init_net.Proto().op:
-        dp_outputs = [
-            o for o in op.output
-            if o.startswith("{}_".format(model._device_prefix))
-        ]
-        sync_names.update([stripParamName(o) for o in dp_outputs])
-        blobs_to_sync.extend(dp_outputs)
 
-    # Sanity check
-    diff = set(model._param_names) - sync_names
-    assert diff == set(), \
-       "Some params not instantiated in param init net: {}".format(diff)
+    # We don't sync params if the model is shared
+    if model._shared_model:
+        blobs_to_sync = [str(p) for p in model.GetComputedParams('')]
+        sync_names = [stripParamName(p) for p in blobs_to_sync]
+    else:
+        blobs_to_sync = []
+
+        for op in model.param_init_net.Proto().op:
+            dp_outputs = [
+                o for o in op.output
+                if o.startswith("{}_".format(model._device_prefix))
+            ]
+            sync_names.update([stripParamName(o) for o in dp_outputs])
+            blobs_to_sync.extend(dp_outputs)
+
+        # Sanity check
+        diff = set(model._param_names) - sync_names
+        assert diff == set(), \
+           "Some params not instantiated in param init net: {}".format(diff)
 
     # Remove duplicates and sort
     prefixlen = len(model._device_prefix) + 1
