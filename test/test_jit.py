@@ -476,6 +476,30 @@ class TestJit(TestCase):
         trace, _ = torch.jit.record_trace(nn.Conv2d(16, 13, 3, bias=False), x)
         self.assertExpected(str(trace))
 
+    def test_mini_wlm(self):
+        """Exercise null-edge pruning in the tracer."""
+
+        class MyModel(nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+                self.encoder = nn.Embedding(2, 2)
+
+            def forward(self, input, hidden):
+                emb = self.encoder(input)
+                hidden = hidden.clone()  # simulate some RNN operation
+                return emb, hidden
+
+        model = torch.jit.traced(MyModel(), verify=True)
+
+        x = Variable(torch.LongTensor([[0, 1], [1, 0]]))
+        y = Variable(torch.FloatTensor([0]))
+
+        z, _ = model(x, y)
+        z.sum().backward()
+
+        z, _ = model(x, y)
+        z.sum().backward()
+
     @skipIfNoTorchVision
     def test_alexnet(self):
         x = Variable(torch.randn(10, 3, 224, 224).fill_(1.0), requires_grad=True)
