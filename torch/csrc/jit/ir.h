@@ -517,6 +517,7 @@ public:
   }
 
   Node * addInput(Node* n) {
+    JIT_ASSERT(n->kind() == kParam);
     inputs_.push_back(n);
     return n;
   }
