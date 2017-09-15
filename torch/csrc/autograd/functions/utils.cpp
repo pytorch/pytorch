@@ -31,7 +31,6 @@ variable_list wrap_outputs(const variable_list& inputs, tensor_list&& outputs,
         result.emplace_back();
       }
     }
-    grad_fn->input_sizes = fmap<TensorMeta>(result);
   }
   return result;
 }

@@ -28,30 +28,6 @@ using edge_type = std::pair<std::shared_ptr<Function>, int>;
 using function_list = std::vector<edge_type>;
 using saved_variable_list = std::vector<SavedVariable>;
 
-// TODO: Explain why TensorMetas don't preserve volatile/requires_grad status
-struct TensorMeta {
-  TensorMeta(const Variable& var) {
-    if (var.defined()) {
-      sizes = var.data().sizes();
-      device = var.data().type().isCuda() ? var.data().get_device() : -1;
-      type = &var.data().type();
-    }
-  }
-
-  Variable recreate() {
-    AutoGPU gpu_guard(device);
-    if (!defined)
-      throw std::logic_error("Recreating undefined TensorMeta");
-    return Variable(new VariableImpl(type->zeros(sizes), false, false), false);
-  }
-
-  std::vector<int64_t> sizes;
-  int device;
-  at::Type* type;
-  bool defined;
-};
-using tensor_meta_list = std::vector<TensorMeta>;
-
 struct edge_hasher {
   std::size_t operator()(const edge_type& edge) const {
 #define HASH_IDX(idx) std::hash<std::tuple_element<idx, edge_type>::type>()(std::get<idx>(edge))
@@ -164,7 +140,6 @@ struct Function : std::enable_shared_from_this<Function> {
 
   int num_inputs;
   function_list next_functions;
-  tensor_meta_list input_sizes;
   bool is_executable;
   bool is_stochastic;
   std::vector<std::shared_ptr<FunctionPreHook>> pre_hooks;
