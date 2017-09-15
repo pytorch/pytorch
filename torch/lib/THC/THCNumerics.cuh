@@ -566,6 +566,7 @@ struct THCNumerics<float> {
   static inline __host__ __device__ bool ne(float a, float b) { return a != b; }
 
   static inline __host__ __device__  float lgamma(float a) { return lgammaf(a);}
+  static inline __host__ __device__  float erfinv(float a) { return erfinvf(a);}
   static inline __host__ __device__  float exp  (float a) { return   expf(a); }
   static inline __host__ __device__  float exp10(float a) { return exp10f(a); }
   static inline __host__ __device__  float log  (float a) { return   logf(a); }
@@ -587,8 +588,7 @@ struct THCNumerics<float> {
   static inline __host__ __device__  float tan  (float a) { return   tanf(a); }
   static inline __host__ __device__  float atan (float a) { return  atanf(a); }
   static inline __host__ __device__  float tanh (float a) { return  tanhf(a); }
-  static inline __host__ __device__  float erf (float a) { return  erff(a); }
-  static inline __host__ __device__  float erfinv (float a) { return  erfinvf(a); }
+  static inline __host__ __device__  float erf  (float a) { return   erff(a); }
   static inline __host__ __device__  float abs  (float a) { return   fabs(a); }
   static inline __host__ __device__  float round(float a) { return roundf(a); }
   static inline __host__ __device__  float frac (float a) { return a - truncf(a); }
@@ -613,6 +613,7 @@ struct THCNumerics<double> {
   static inline __host__ __device__ bool ne(double a, double b) { return a != b; }
 
   static inline __host__ __device__  double lgamma(double a) { return ::lgamma(a);}
+  static inline __host__ __device__  double erfinv(double a) { return ::erfinv(a);}
   static inline __host__ __device__  double exp  (double a) { return   ::exp(a); }
   static inline __host__ __device__  double exp10(double a) { return ::exp10(a); }
   static inline __host__ __device__  double log  (double a) { return   ::log(a); }
@@ -634,8 +635,7 @@ struct THCNumerics<double> {
   static inline __host__ __device__  double tan  (double a) { return   ::tan(a); }
   static inline __host__ __device__  double atan (double a) { return  ::atan(a); }
   static inline __host__ __device__  double tanh (double a) { return  ::tanh(a); }
-  static inline __host__ __device__  double erf (double a) { return  ::erf(a); }
-  static inline __host__ __device__  double erfinv (double a) { return  ::erfinv(a); }
+  static inline __host__ __device__  double erf  (double a) { return   ::erf(a); }
   static inline __host__ __device__  double abs  (double a) { return   ::abs(a); }
   static inline __host__ __device__  double round(double a) { return ::round(a); }
   static inline __host__ __device__  double frac (double a) { return a - ::trunc(a); }
