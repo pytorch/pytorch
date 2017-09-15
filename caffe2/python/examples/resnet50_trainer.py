@@ -55,7 +55,7 @@ def AddImageInput(model, reader, batch_size, img_size, dtype):
         reader, ["data", "label"],
         batch_size=batch_size,
         output_type=dtype,
-        use_gpu_transform=True,
+        use_gpu_transform=True if model._device_type == 1 else False,
         use_caffe_datum=True,
         mean=128.,
         std=128.,
@@ -395,6 +395,7 @@ def Train(args):
         rendezvous=rendezvous,
         optimize_gradient_memory=True,
         cpu_device=args.use_cpu,
+        shared_model=args.use_cpu,
     )
 
     workspace.RunNetOnce(train_model.param_init_net)

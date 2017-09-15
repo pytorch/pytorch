@@ -76,6 +76,7 @@ class DataParallelModelTest(TestCase):
             optimizer_builder_fun=add_optimizer,
             devices=devices,
             cpu_device=not gpu,
+            shared_model=not gpu,
         )
         data_parallel_model.AddBlobSync(model, ["sync_num"])
 
