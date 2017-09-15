@@ -98,6 +98,20 @@ class TestJit(TestCase):
         torch._C._jit_pass_lint(trace)
         self.assertExpected(str(trace))
 
+    def test_cse(self):
+        x = Variable(torch.Tensor([0.4, 0.3]), requires_grad=True)
+        y = Variable(torch.Tensor([0.7, 0.5]), requires_grad=True)
+
+        trace = torch._C._tracer_enter((x, y), 0)
+        z = (x + y) * (x + y)
+        torch._C._tracer_exit((z,))
+        torch._C._jit_pass_lint(trace)
+        torch._C._jit_pass_onnx(trace)
+        torch._C._jit_pass_lint(trace)
+        torch._C._jit_pass_cse(trace)
+
+        self.assertExpected(str(trace))
+
     def test_verify(self):
         x = Variable(torch.Tensor([0.4]), requires_grad=True)
         y = Variable(torch.Tensor([0.7]), requires_grad=True)
