@@ -481,7 +481,7 @@ class DropoutCell(RNNCell):
                 output = brew.dropout(
                     model,
                     output,
-                    str(output),
+                    str(output) + '_with_dropout_mask{}'.format(self.mask),
                     ratio=float(self.dropout_ratio),
                 )
                 self.mask += 1
