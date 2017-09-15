@@ -67,7 +67,7 @@ auto Eval::getSubgraph(const variable_list& inputs, const variable_list& outputs
     for (int i = 0; i < num_edges; ++i) {
       auto & edge = fn->next_functions[i];
       auto & next_fn = edge.first;
-      if (!next_fn) continue; // Null-edge pruning
+      if (!next_fn) continue; // See Note [Null-edge pruning]
       // Edge belongs to subgraph boundary. Register that and don't search along it.
       if (input_edges.count(edge) > 0) {
         subgraph.boundary.begins.emplace(fn->getSharedPtr(), i);
@@ -123,9 +123,12 @@ bool Eval::trySimpleEval(const variable_list& inputs, const variable_list& outpu
   auto& grad_next_fns = grad_fn->next_functions;
   if (num_inputs != grad_next_fns.size()) return false;
   for (std::size_t i = 0; i < num_inputs; ++i) {
-    // Unfortunately Null-edge pruning (see note at the top of the file) makes
-    // this case more complicated and it's not implemented for now.
-    // To fix it we'd need to filter grad_next_fns and outputs of apply in Eval::apply.
+    // Unfortunately, null edge pruning (see Note [Null-edge pruning]) applies to
+    // autograd functions which would otherwise be eligible for the SimpleEval
+    // optimization.  This makes everything more complicated, so for now we just don't
+    // attempt the optimization in this case.  To fix it properly,
+    // we'd need to filter grad_next_fns and outputs of apply in Eval::apply.
+    // The check below tests if null edge pruning occurred.
     if (!inputs[i].defined() || !grad_next_fns[i].first) return false;
     const auto& input_grad = inputs[i].grad_fn() ? inputs[i].grad_fn() : inputs[i].grad_accumulator();
     if (grad_next_fns[i].first != input_grad || grad_next_fns[i].second != inputs[i].output_nr()) return false;
@@ -283,17 +286,18 @@ std::pair<function_list, variable_list> Eval::filterRoots(const variable_list& i
   for (std::size_t i = 0; i < num_inputs; ++i) {
     // This check is the sole reason why this function is needed. The problem
     // with larger Evals is that they might trigger computation of nodes that
-    // would normally be ignored. For example consider a subgraph with multiple
-    // outputs and a backprop from an Variable that's derived from only one of
-    // them. This line prevents us form unnecessarily executing, and thus recording,
-    // nodes in the trace.
-    // If we didn't filter out roots that only get nullptr outputs,
-    // and we would pass nullptr inputs to roots that are executable, engine would
-    // discover them and would unnecessarily run computation that doesn't contribute
+    // would normally be ignored. For example, consider a subgraph with multiple
+    // outputs and a backprop from a Variable that's derived from only one of
+    // them. This line prevents us from unnecessarily executing, and thus recording,
+    // nodes in the trace which are unrelated to this Variable.
+    //
+    // If we didn't filter out roots that only get nullptr outputs, we would then
+    // pass nullptr inputs to roots that are executable. Then, the engine would
+    // discover them and would unnecessarily run a computation that doesn't contribute
     // to the overall grad and would complicate the trace.
-    // If the node gets only null inputs, it's guaranteed that
-    // the grad of its output w.r.t. anything is 0. Otherwise, we won't block any
-    // non-null outputs in here. This proves the correctness.
+    // If the node gets only nullptr inputs, it's guaranteed that
+    // the grad of its output w.r.t. anything is 0, so it is sound to just
+    // skip the computation entirely.
     if (!inputs[i].defined()) continue;
     filtered_inputs.emplace_back(inputs[i]);
     filtered_roots.emplace_back(roots[i]);

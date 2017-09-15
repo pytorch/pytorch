@@ -764,6 +764,7 @@ variable_list AutogradClosure::apply(const variable_list& inputs) {
   auto& engine = python::PythonEngine::getDefaultEngine();
   engine.execute(stage_closure.roots, input_leaves, true, pre_callbacks, post_callbacks);
 
+  // See Note [Null-edge pruning]
   auto relevant_inputs = filter(inputs, [](const Variable& var) { return var.defined() && var.requires_grad(); });
   auto result = wrap_outputs(relevant_inputs, std::move(outputs), [this](FunctionFlags f) -> std::shared_ptr<Function> {
     if (this->stage == this->desc->stages.size() - 1) {
