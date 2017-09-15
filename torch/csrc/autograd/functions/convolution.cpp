@@ -260,9 +260,10 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
 
   auto input = input_var.data();
   auto weight = weight_var.data();
-  auto bias = bias_var.defined() ? bias_var.data() : Tensor();
 
   AutoGPU guard(input);
+
+  auto bias = bias_var.defined() ? bias_var.data() : Tensor();
 
   input = input.contiguous();
   auto grad_output = grad_outputs[0].data().contiguous();
@@ -407,6 +408,8 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
   auto gO = grad_output_.unpack();
   auto weight = weight_.unpack();
   auto input = input_.unpack();
+
+  AutoGPU guard(input.data());
 
   // Compute ggO = conv(w, ggI) + conv(ggW, i) + ggb
   Variable ggO;

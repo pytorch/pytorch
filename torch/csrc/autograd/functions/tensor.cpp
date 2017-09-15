@@ -133,6 +133,7 @@ auto Cat::apply(const variable_list& inputs) -> variable_list {
 }
 
 auto Chunk::apply(const variable_list& inputs) -> variable_list {
+  AutoGPU guard(inputs[0].data());
   auto outputs = chunk(inputs[0].data(), chunks,dim);
   return wrap_outputs(inputs, std::move(outputs), [](FunctionFlags f) {
     return std::make_shared<Error>("Chunk is not differentiable", std::move(f));

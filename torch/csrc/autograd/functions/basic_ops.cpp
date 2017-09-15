@@ -13,6 +13,7 @@ auto Error::apply(const variable_list& grad_outputs) -> variable_list {
 auto DelayedError::apply(const variable_list& inputs) -> variable_list {
   tensor_list outputs;
   outputs.reserve(inputs.size());
+  AutoGPU guard(inputs[0]);
   for (auto& var : inputs) {
     // FIXME: share version counters
     outputs.emplace_back(var.defined() ? var.data() : Tensor());
