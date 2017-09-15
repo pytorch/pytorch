@@ -214,6 +214,10 @@ class OperatorBase {
     return observer_.get();
   }
 
+  const ObserverBase<OperatorBase>* GetObserver() const {
+    return observer_.get();
+  }
+
  private:
   Workspace* operator_ws_;
   std::shared_ptr<const OperatorDef> operator_def_;
