@@ -122,6 +122,10 @@ def tensor(min_dim=1, max_dim=4, dtype=np.float32, elements=None, **kwargs):
     return dims_.flatmap(lambda dims: arrays(dims, dtype, elements))
 
 
+def tensor1d(min_len=1, max_len=64, dtype=np.float32, elements=None):
+    return tensor(1, 1, dtype, elements, min_value=min_len, max_value=max_len)
+
+
 def segment_ids(size, is_sorted):
     if size == 0:
         return st.just(np.empty(shape=[0], dtype=np.int32))
@@ -222,6 +226,12 @@ def tensors(n, min_dim=1, max_dim=4, dtype=np.float32, elements=None, **kwargs):
     return dims_.flatmap(
         lambda dims: st.lists(arrays(dims, dtype, elements),
                               min_size=n, max_size=n))
+
+
+def tensors1d(n, min_len=1, max_len=64, dtype=np.float32, elements=None):
+    return tensors(
+        n, 1, 1, dtype, elements, min_value=min_len, max_value=max_len
+    )
 
 
 cpu_do = caffe2_pb2.DeviceOption()
