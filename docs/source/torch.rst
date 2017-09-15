@@ -109,6 +109,8 @@ Pointwise Ops
 .. autofunction:: tan
 .. autofunction:: tanh
 .. autofunction:: trunc
+.. autofunction:: erf
+.. autofunction:: erfinv
 
 
 Reduction Ops

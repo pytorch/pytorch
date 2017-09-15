@@ -109,8 +109,8 @@ class TestTorch(TestCase):
         self._testMath(torch.rsqrt, lambda x: 1 / math.sqrt(x) if x > 0 else float('nan'))
 
     def test_erfinv(self):
-        inputValues = [-1, -0.5, 0, 0.1, 1]
-        expectedOutput = [float('-inf'), -0.4769, 0, 0.0889, float('inf')]
+        inputValues = [-2, -1, -0.5, 0, 0.1, 1, 2]
+        expectedOutput = [float('nan'), float('-inf'), -0.4769, 0, 0.0889, float('inf'), float('nan')]
         precision_4dps = 0.0002
 
         def checkType(tensor):
