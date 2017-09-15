@@ -8,6 +8,7 @@ namespace caffe2 {
 struct Stats {
   float sum;
   float sqrsum;
+  size_t cnt;
 };
 
 /**
