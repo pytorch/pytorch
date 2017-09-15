@@ -4,6 +4,16 @@
 
 namespace torch { namespace autograd {
 
+// Note [Null-edge pruning]
+// Evals have a problem with null edges appearing in the graph, because there's
+// no way to tell the identity of the input (i.e. each nullptr might have been
+// a different input, all of them might have been a single input, etc.).
+// However, null edges are generally quite useless, so we can safely prune them,
+// by removing them from next_functions of Eval node and never allocating
+// placeholders for them. This is a bit annoying because backward subgraphs may
+// have many less outputs than forward graph had inputs, but I don't think there's
+// a way around it. It's a tiny perf optimization too :)
+
 // There's some subtlety involved in computing backwards of Eval functions,
 // because sometimes we need to inherit placeholders. There are two situations
 // in which it can happen:
@@ -27,8 +37,6 @@ auto Eval::getSubgraph(const variable_list& inputs, const variable_list& outputs
   edge_set input_edges;
   input_edges.reserve(inputs.size());
   for (auto & input : inputs) {
-    // TODO: Remove me when we get rid of null Variables
-    // See https://github.com/pytorch/pytorch/issues/2513
     if (!input.defined()) continue;
     input_edges.emplace(input.grad_fn() ? input.grad_fn() : input.grad_accumulator(), input.output_nr());
   }
@@ -42,7 +50,7 @@ auto Eval::getSubgraph(const variable_list& inputs, const variable_list& outputs
   }
 
   // Regular DFS data structures
-  std::unordered_set<Function*> seen { nullptr };
+  std::unordered_set<Function*> seen;
   std::vector<Function*> queue;
   for (auto & output : outputs) {
     auto ptr = output.grad_fn().get();
@@ -59,6 +67,7 @@ auto Eval::getSubgraph(const variable_list& inputs, const variable_list& outputs
     for (int i = 0; i < num_edges; ++i) {
       auto & edge = fn->next_functions[i];
       auto & next_fn = edge.first;
+      if (!next_fn) continue; // Null-edge pruning
       // Edge belongs to subgraph boundary. Register that and don't search along it.
       if (input_edges.count(edge) > 0) {
         subgraph.boundary.begins.emplace(fn->getSharedPtr(), i);
@@ -114,17 +123,17 @@ bool Eval::trySimpleEval(const variable_list& inputs, const variable_list& outpu
   auto& grad_next_fns = grad_fn->next_functions;
   if (num_inputs != grad_next_fns.size()) return false;
   for (std::size_t i = 0; i < num_inputs; ++i) {
-    if (inputs[i].defined()) {
-      const auto& input_grad = inputs[i].grad_fn() ? inputs[i].grad_fn() : inputs[i].grad_accumulator();
-      if (grad_next_fns[i].first != input_grad || grad_next_fns[i].second != inputs[i].output_nr()) return false;
-    } else {
-      if (grad_next_fns[i].first != nullptr) return false;
-    }
+    // Unfortunately Null-edge pruning (see note at the top of the file) makes
+    // this case more complicated and it's not implemented for now.
+    // To fix it we'd need to filter grad_next_fns and outputs of apply in Eval::apply.
+    if (!inputs[i].defined() || !grad_next_fns[i].first) return false;
+    const auto& input_grad = inputs[i].grad_fn() ? inputs[i].grad_fn() : inputs[i].grad_accumulator();
+    if (grad_next_fns[i].first != input_grad || grad_next_fns[i].second != inputs[i].output_nr()) return false;
   }
 
   // Success! We still need to set up placeholders for next stages and to drop
   // references to the graph.
-  next_functions = std::move(grad_next_fns);
+  std::swap(next_functions, grad_next_fns);
   grad_next_fns.reserve(num_inputs);
   placeholders.reserve(num_inputs);
   for (std::size_t i = 0; i < num_inputs; ++i) {
@@ -148,14 +157,10 @@ variable_list Eval::filterRelevantOutputs(const variable_list& inputs, const var
   edge_set ignored_grad_fns;
   ignored_grad_fns.reserve(inputs.size());
   for (auto& input : inputs) {
-    // TODO: Remove me when we get rid of null Variables
-    // See https://github.com/pytorch/pytorch/issues/2513
     if (!input.defined()) continue;
     ignored_grad_fns.emplace(input.grad_fn(), input.output_nr());
   }
   for (auto& output : outputs) {
-    // TODO: Remove me when we get rid of null Variables
-    // See https://github.com/pytorch/pytorch/issues/2513
     if (!output.defined()) continue;
     if (!output.grad_fn()) continue;
     if (ignored_grad_fns.count(std::make_pair(output.grad_fn(), output.output_nr())) > 0) continue;
@@ -168,8 +173,6 @@ auto Eval::computeInputOrder(const variable_list& inputs, const placeholder_list
   edge_order input_order;
   int idx = 0;
   for (auto & input : inputs) {
-    // TODO: Remove me when we get rid of null Variables
-    // See https://github.com/pytorch/pytorch/issues/2513
     if (!input.defined()) continue;
     input_order.emplace(
       std::make_pair(input.grad_fn() ? input.grad_fn() : input.grad_accumulator(), input.output_nr()),
@@ -280,6 +283,19 @@ std::pair<function_list, variable_list> Eval::filterRoots(const variable_list& i
   filtered_inputs.reserve(num_inputs);
   filtered_roots.reserve(num_inputs);
   for (std::size_t i = 0; i < num_inputs; ++i) {
+    // This check is the sole reason why this function is needed. The problem
+    // with larger Evals is that they might trigger computation of nodes that
+    // would normally be ignored. For example consider a subgraph with multiple
+    // outputs and a backprop from an Variable that's derived from only one of
+    // them. This line prevents us form unnecessarily executing, and thus recording,
+    // nodes in the trace.
+    // If we didn't filter out roots that only get nullptr outputs,
+    // and we would pass nullptr inputs to roots that are executable, engine would
+    // discover them and would unnecessarily run computation that doesn't contribute
+    // to the overall grad and would complicate the trace.
+    // If the node gets only null inputs, it's guaranteed that
+    // the grad of its output w.r.t. anything is 0. Otherwise, we won't block any
+    // non-null outputs in here. This proves the correctness.
     if (!inputs[i].defined()) continue;
     filtered_inputs.emplace_back(inputs[i]);
     filtered_roots.emplace_back(roots[i]);
