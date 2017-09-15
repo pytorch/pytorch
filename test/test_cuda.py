@@ -321,7 +321,7 @@ simple_pointwise_float = [
     'log1p',
     'sigmoid',
     'erf',
-    'erfinv'
+    'erfinv',
     'sin',
     'sqrt',
     'tanh',
