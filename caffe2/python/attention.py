@@ -27,7 +27,8 @@ def _calc_weighted_context(
     scope,
 ):
     # [batch_size, encoder_output_dim, 1]
-    attention_weighted_encoder_context = model.net.BatchMatMul(
+    attention_weighted_encoder_context = brew.batch_mat_mul(
+        model,
         [encoder_outputs_transposed, attention_weights_3d],
         s(scope, 'attention_weighted_encoder_context'),
     )
