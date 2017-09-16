@@ -115,8 +115,8 @@ class TestTorch(TestCase):
 
         def checkType(tensor):
             self.assertEqual(tensor(inputValues).erfinv(), tensor(expectedOutput), precision_4dps)
-            self.assertTrue(torch.equal(tensor([-1]).erfinv(), (tensor([float('-inf')]))))
-            self.assertTrue(torch.equal(tensor([1]).erfinv(), (tensor([float('inf')]))))
+            self.assertTrue(torch.equal(tensor([-1]).erfinv(), tensor([float('-inf')])))
+            self.assertTrue(torch.equal(tensor([1]).erfinv(), tensor([float('inf')])))
 
         checkType(torch.FloatTensor)
         checkType(torch.DoubleTensor)
