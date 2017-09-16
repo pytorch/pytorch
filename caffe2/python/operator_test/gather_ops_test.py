@@ -13,17 +13,20 @@ import hypothesis.extra.numpy as hnp
 
 class TestGatherOps(hu.HypothesisTestCase):
     @given(rows_num=st.integers(1, 10000),
-           index_num=st.integers(1, 5000),
+           index_num=st.integers(0, 5000),
            **hu.gcs)
     def test_gather_ops(self, rows_num, index_num, gc, dc):
         data = np.random.random((rows_num, 10, 20)).astype(np.float32)
-        ind = np.random.randint(rows_num, size=(index_num, 1)).astype('int32')
+        ind = np.random.randint(rows_num, size=(index_num, )).astype('int32')
         op = core.CreateOperator(
             'Gather',
             ['data', 'ind'],
             ['output'])
 
         def ref_gather(data, ind):
+            if ind.size == 0:
+                return [np.zeros((0, 10, 20)).astype(np.float32)]
+
             output = [r for r in [data[i] for i in ind]]
             return [output]
 
