@@ -26,14 +26,17 @@ class ImageInputOp final
   // SINGLE_LABEL: single integer label for multi-class classification
   // MULTI_LABEL_SPARSE: sparse active label indices for multi-label classification
   // MULTI_LABEL_DENSE: dense label embedding vector for label embedding regression
+  // MULTI_LABEL_WEIGHTED_SPARSE: sparse active label indices with per-label weights
+  // for multi-label classification
   enum LABEL_TYPE {
     SINGLE_LABEL = 0,
     MULTI_LABEL_SPARSE = 1,
-    MULTI_LABEL_DENSE = 2
+    MULTI_LABEL_DENSE = 2,
+    MULTI_LABEL_WEIGHTED_SPARSE = 3
   };
 
-// INCEPTION_STYLE: Random crop with size 8% - 100% image area and aspect ratio
-// in [3/4, 4/3]. Reference: GoogleNet paper
+  // INCEPTION_STYLE: Random crop with size 8% - 100% image area and aspect
+  // ratio in [3/4, 4/3]. Reference: GoogleNet paper
   enum SCALE_JITTER_TYPE {
     NO_SCALE_JITTER = 0,
     INCEPTION_STYLE = 1
@@ -123,6 +126,8 @@ class ImageInputOp final
 
   // thread pool for parse + decode
   int num_decode_threads_;
+  int additional_inputs_offset_;
+  int additional_inputs_count_;
   std::shared_ptr<TaskThreadPool> thread_pool_;
 
   // Output type for GPU transform path
@@ -210,6 +215,7 @@ ImageInputOp<Context>::ImageInputOp(
   vector<int> additional_output_sizes =
       OperatorBase::template GetRepeatedArgument<int>(
           "output_sizes", vector<int>(OutputSize() - 2, 1));
+  additional_inputs_count_ = OutputSize() - 2;
 
   default_arg_.bounding_params = {
     false,
@@ -251,6 +257,11 @@ ImageInputOp<Context>::ImageInputOp(
   if (label_type_ !=  SINGLE_LABEL) {
     CAFFE_ENFORCE_GT(num_labels_, 0,
       "Number of labels must be set for using either sparse label indices or dense label embedding.");
+  }
+  if (label_type_ == MULTI_LABEL_WEIGHTED_SPARSE) {
+    additional_inputs_offset_ = 3;
+  } else {
+    additional_inputs_offset_ = 2;
   }
   CAFFE_ENFORCE((scale_ > 0) != (minsize_ > 0),
                 "Must provide one and only one of scaling or minsize");
@@ -330,6 +341,8 @@ ImageInputOp<Context>::ImageInputOp(
   LOG(INFO) << "    " << (is_test_ ? "Central" : "Random")
             << " cropping image to " << crop_
             << (mirror_ ? " with " : " without ") << "random mirroring;";
+  LOG(INFO) << "Label Type: " << label_type_;
+  LOG(INFO) << "Num Labels: " << num_labels_;
 
   auto mit = mean_.begin();
   auto sit = std_.begin();
@@ -472,14 +485,15 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
     const TensorProto& image_proto = protos.protos(0);
     const TensorProto& label_proto = protos.protos(1);
     vector<TensorProto> additional_output_protos;
-
-    for (int i = 2; i < OutputSize(); ++i) {
+    int start = additional_inputs_offset_;
+    int end = start + additional_inputs_count_;
+    for (int i = start; i < end; ++i) {
       additional_output_protos.push_back(protos.protos(i));
     }
 
-    if (protos.protos_size() == OutputSize() + 1) {
+    if (protos.protos_size() == end + 1) {
       // We have bounding box information
-      const TensorProto& bounding_proto = protos.protos(OutputSize());
+      const TensorProto& bounding_proto = protos.protos(end);
       DCHECK_EQ(bounding_proto.data_type(), TensorProto::INT32);
       DCHECK_EQ(bounding_proto.int32_data_size(), 4);
       info.bounding_params.valid = true;
@@ -531,6 +545,15 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
         for (int i = 0; i < label_proto.float_data_size(); ++i) {
           label_data[(int)label_proto.float_data(i)] = 1.0;
         }
+      } else if (label_type_ == MULTI_LABEL_WEIGHTED_SPARSE) {
+        const TensorProto& weight_proto = protos.protos(2);
+        float* label_data =
+            prefetched_label_.mutable_data<float>() + item_id * num_labels_;
+        memset(label_data, 0, sizeof(float) * num_labels_);
+        for (int i = 0; i < label_proto.float_data_size(); ++i) {
+          label_data[(int)label_proto.float_data(i)] =
+              weight_proto.float_data(i);
+        }
       } else if (label_type_ == MULTI_LABEL_DENSE) {
         CAFFE_ENFORCE(label_proto.float_data_size() == num_labels_);
         float* label_data = prefetched_label_.mutable_data<float>() +
@@ -552,6 +575,14 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
         memset(label_data, 0, sizeof(int) * num_labels_);
         for (int i = 0; i < label_proto.int32_data_size(); ++i) {
           label_data[label_proto.int32_data(i)] = 1;
+        }
+      } else if (label_type_ == MULTI_LABEL_WEIGHTED_SPARSE) {
+        const TensorProto& weight_proto = protos.protos(2);
+        float* label_data =
+            prefetched_label_.mutable_data<float>() + item_id * num_labels_;
+        memset(label_data, 0, sizeof(float) * num_labels_);
+        for (int i = 0; i < label_proto.int32_data_size(); ++i) {
+          label_data[label_proto.int32_data(i)] = weight_proto.float_data(i);
         }
       } else if (label_type_ == MULTI_LABEL_DENSE) {
         CAFFE_ENFORCE(label_proto.int32_data_size() == num_labels_);
@@ -1072,18 +1103,18 @@ bool ImageInputOp<Context>::Prefetch() {
           LOG(FATAL) << "Unsupported label type.";
         }
 
-        for (int i = 2; i < OutputSize(); ++i) {
-          TensorProto additional_output_proto = protos.protos(i);
+        for (int i = 0; i < additional_inputs_count_; ++i) {
+          int index = additional_inputs_offset_ + i;
+          TensorProto additional_output_proto = protos.protos(index);
 
           if (additional_output_proto.data_type() == TensorProto::FLOAT) {
-            prefetched_additional_outputs_[i - 2]
-                .template mutable_data<float>();
+            prefetched_additional_outputs_[i].template mutable_data<float>();
           } else if (
               additional_output_proto.data_type() == TensorProto::INT32) {
-            prefetched_additional_outputs_[i - 2].template mutable_data<int>();
+            prefetched_additional_outputs_[i].template mutable_data<int>();
           } else if (
               additional_output_proto.data_type() == TensorProto::INT64) {
-            prefetched_additional_outputs_[i - 2].template mutable_data<int64_t>();
+            prefetched_additional_outputs_[i].template mutable_data<int64_t>();
           } else {
             LOG(FATAL) << "Unsupported output type.";
           }
