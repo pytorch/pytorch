@@ -109,9 +109,8 @@ class TestTorch(TestCase):
         self._testMath(torch.rsqrt, lambda x: 1 / math.sqrt(x) if x > 0 else float('nan'))
 
     def test_erfinv(self):
-
         def checkType(tensor):
-            inputValues = torch.randn(4, 4, out=tensor(4, 4).zero_())
+            inputValues = torch.randn(4, 4, out=tensor()).clamp(-2., 2.)
             self.assertEqual(tensor(inputValues).erf().erfinv(), tensor(inputValues))
             # test inf
             self.assertTrue(torch.equal(tensor([-1, 1]).erfinv(), tensor([float('-inf'), float('inf')])))
