@@ -215,6 +215,12 @@ bool GatherOp<CUDAContext>::DoRunWithType() {
   const Index* idxs = indices.template data<Index>();
   auto out = static_cast<float*>(output->raw_mutable_data(data.meta()));
 
+  // return early when the input is empty, since CUDA kernel will fail for
+  // empty input.
+  if (N <= 0) {
+    return true;
+  }
+
   GatherKernel<<<
       std::min(N, CAFFE_MAXIMUM_NUM_BLOCKS),
       CAFFE_CUDA_NUM_THREADS,
