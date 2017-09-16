@@ -2,9 +2,6 @@
 #define _THMATH_H
 #include <stdlib.h>
 #include <math.h>
-#include <float.h>
-#define MAXDOUBLE DBL_MAX
-#define CENTRAL_RANGE 0.7
 
 static inline double TH_sigmoid(double value) {
   return 1.0 / (1.0 + exp(-value));
@@ -40,16 +37,20 @@ static inline float TH_lerpf(float a, float b, float weight) {
 
 
 /*
-Code from https://github.com/antelopeusersgroup/antelope_contrib/blob/master/lib/location/libgenloc/erfinv.c
-Function to calculate inverse error function.  Rational approximation
+From https://github.com/antelopeusersgroup/antelope_contrib/blob/master/lib/location/libgenloc/erfinv.c.
+Modified output to be inf or -inf when input is 1 or -1.
+*/
+
+#define CENTRAL_RANGE 0.7
+
+static inline double TH_erfinv(double y) {
+/*Function to calculate inverse error function.  Rational approximation
 is used to generate an initial approximation, which is then improved to
 full accuracy by two steps of Newton's method.  Code is a direct
 translation of the erfinv m file in matlab version 2.0.
 Author:  Gary L. Pavlis, Indiana University
 Date:  February 1996
 */
-static inline double TH_erfinv(double y) {
-
     double x,z,num,dem; /*working variables */
     /* coefficients in rational expansion */
     double a[4]={ 0.886226899, -1.645349621,  0.914624893, -0.140543331};
@@ -78,10 +79,10 @@ static inline double TH_erfinv(double y) {
 
     return(x);
 }
-
+#undef CENTRAL_RANGE
 
 static inline float TH_erfinvf(float y) {
-  return TH_erfinv((double)y);
+  return (float) TH_erfinv((double)y);
 }
 
 #endif // _THMATH_H
