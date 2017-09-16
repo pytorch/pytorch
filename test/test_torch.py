@@ -19,7 +19,6 @@ SIZE = 100
 
 
 class TestTorch(TestCase):
-
     def test_dot(self):
         types = {
             'torch.DoubleTensor': 1e-8,
@@ -109,12 +108,14 @@ class TestTorch(TestCase):
         self._testMath(torch.rsqrt, lambda x: 1 / math.sqrt(x) if x > 0 else float('nan'))
 
     def test_erfinv(self):
-        inputValues = [-2, -1, -0.5, 0, 0.1, 1, 2]
-        expectedOutput = [float('nan'), float('-inf'), -0.4769, 0, 0.0889, float('inf'), float('nan')]
+        inputValues = [-2, -0.5, 0, 0.1, 2]
+        expectedOutput = [float('nan'), -0.4769, 0, 0.0889, float('nan')]
         precision_4dps = 0.0002
 
         def checkType(tensor):
             self.assertEqual(tensor(inputValues).erfinv(), tensor(expectedOutput), precision_4dps)
+            self.assertTrue(torch.equal(tensor([-1]).erfinv(), (tensor([float('-inf')]))))
+            self.assertTrue(torch.equal(tensor([1]).erfinv(), (tensor([float('inf')]))))
 
         checkType(torch.FloatTensor)
         checkType(torch.DoubleTensor)
@@ -720,7 +721,7 @@ class TestTorch(TestCase):
 
     def test_rpow(self):
         m = torch.randn(10, 10)
-        self.assertEqual(torch.pow(2, m), 2**m)
+        self.assertEqual(torch.pow(2, m), 2 ** m)
 
     def _test_cop(self, torchfn, mathfn):
         def reference_implementation(res2):
@@ -1201,6 +1202,7 @@ class TestTorch(TestCase):
                     return t0_fn(1.0, t1, t2)
                 else:
                     return t0_fn(t1)
+
             r1 = tensorfn_inplace(large_expanded, small_expanded, small2_expanded)
             r2 = tensorfn_inplace(large_expanded_clone, small, small2)
             # in-place pointwise operations don't actually work if the in-place
@@ -1276,6 +1278,7 @@ class TestTorch(TestCase):
                     return myfn(1.0, t1, t2)
                 else:
                     return myfn(t1)
+
             r0 = tensorfn(t0_fn, t1, t2)
             r1 = tensorfn(t1_fn, t0, t2)
             if torch.is_tensor(r0) and fn not in fns_no_result_broadcast:
@@ -1299,6 +1302,7 @@ class TestTorch(TestCase):
                     self.assertEqual(len(w), 1)
                     self.assertTrue(issubclass(w[0].category, UserWarning))
                     self.assertTrue("Falling back" in str(w[0].message))
+
                 with warnings.catch_warnings(record=True) as w:
                     warnings.simplefilter('always', UserWarning)
                     r0 = tensorfn(t0_fn, t1, t2)
@@ -1316,7 +1320,7 @@ class TestTorch(TestCase):
                     self.assertEqual(t1.size(), r1.size())
                     self.assertEqual(t2.size(), r2.size())
 
-            # case 4: not broadcastable and not nEleme equal -- tested by test_fallback
+                    # case 4: not broadcastable and not nEleme equal -- tested by test_fallback
 
     def test_broadcast_fallback(self):
         self._test_broadcast_fallback(self, lambda t: t)
@@ -2357,6 +2361,7 @@ class TestTorch(TestCase):
             for i in range(o3.size(1)):
                 for j in range(k.size(1)):
                     o32[i].add(torch.xcorr2(x[i + j - 1], k[j]))
+
         self._test_conv_corr_eq(lambda x, k: torch.xcorr3(x, k), reference)
 
     @unittest.skip("Not implemented yet")
@@ -2365,6 +2370,7 @@ class TestTorch(TestCase):
             for i in range(x.size(1)):
                 for j in range(k.size(1)):
                     o32[i].add(torch.xcorr2(x[i], k[k.size(1) - j + 1], 'F'))
+
         self._test_conv_corr_eq(lambda x, k: torch.xcorr3(x, k, 'F'), reference)
 
     @unittest.skip("Not implemented yet")
@@ -2373,6 +2379,7 @@ class TestTorch(TestCase):
             for i in range(o3.size(1)):
                 for j in range(k.size(1)):
                     o32[i].add(torch.conv2(x[i + j - 1], k[k.size(1) - j + 1]))
+
         self._test_conv_corr_eq(lambda x, k: torch.conv3(x, k), reference)
 
     @unittest.skip("Not implemented yet")
@@ -2381,6 +2388,7 @@ class TestTorch(TestCase):
             for i in range(o3.size(1)):
                 for j in range(k.size(1)):
                     o32[i + j - 1].add(torch.conv2(x[i], k[j], 'F'))
+
         self._test_conv_corr_eq(lambda x, k: torch.conv3(x, k, 'F'), reference)
 
     def test_logical(self):
@@ -2679,23 +2687,23 @@ class TestTorch(TestCase):
         # Case 1: Purely Integer Array Indexing
         reference = conv_fn(consec((10,)))
         self.assertEqual(reference[[0]], consec((1,)))
-        self.assertEqual(reference[ri([0]), ], consec((1,)))
-        self.assertEqual(reference[ri([3]), ], consec((1,), 4))
+        self.assertEqual(reference[ri([0]),], consec((1,)))
+        self.assertEqual(reference[ri([3]),], consec((1,), 4))
         self.assertEqual(reference[[2, 3, 4]], consec((3,), 3))
-        self.assertEqual(reference[ri([2, 3, 4]), ], consec((3,), 3))
-        self.assertEqual(reference[ri([0, 2, 4]), ], torch.Tensor([1, 3, 5]))
+        self.assertEqual(reference[ri([2, 3, 4]),], consec((3,), 3))
+        self.assertEqual(reference[ri([0, 2, 4]),], torch.Tensor([1, 3, 5]))
 
         # setting values
         reference[[0]] = -2
         self.assertEqual(reference[[0]], torch.Tensor([-2]))
         reference[[0]] = -1
-        self.assertEqual(reference[ri([0]), ], torch.Tensor([-1]))
+        self.assertEqual(reference[ri([0]),], torch.Tensor([-1]))
         reference[[2, 3, 4]] = 4
         self.assertEqual(reference[[2, 3, 4]], torch.Tensor([4, 4, 4]))
-        reference[ri([2, 3, 4]), ] = 3
-        self.assertEqual(reference[ri([2, 3, 4]), ], torch.Tensor([3, 3, 3]))
-        reference[ri([0, 2, 4]), ] = conv_fn(torch.Tensor([5, 4, 3]))
-        self.assertEqual(reference[ri([0, 2, 4]), ], torch.Tensor([5, 4, 3]))
+        reference[ri([2, 3, 4]),] = 3
+        self.assertEqual(reference[ri([2, 3, 4]),], torch.Tensor([3, 3, 3]))
+        reference[ri([0, 2, 4]),] = conv_fn(torch.Tensor([5, 4, 3]))
+        self.assertEqual(reference[ri([0, 2, 4]),], torch.Tensor([5, 4, 3]))
 
         # Tensor with stride != 1
 
@@ -2706,11 +2714,11 @@ class TestTorch(TestCase):
                      size=torch.Size([4]), stride=[2])
 
         self.assertEqual(strided[[0]], torch.Tensor([1]))
-        self.assertEqual(strided[ri([0]), ], torch.Tensor([1]))
-        self.assertEqual(strided[ri([3]), ], torch.Tensor([7]))
+        self.assertEqual(strided[ri([0]),], torch.Tensor([1]))
+        self.assertEqual(strided[ri([3]),], torch.Tensor([7]))
         self.assertEqual(strided[[1, 2]], torch.Tensor([3, 5]))
-        self.assertEqual(strided[ri([1, 2]), ], torch.Tensor([3, 5]))
-        self.assertEqual(strided[ri([[2, 1], [0, 3]]), ],
+        self.assertEqual(strided[ri([1, 2]),], torch.Tensor([3, 5]))
+        self.assertEqual(strided[ri([[2, 1], [0, 3]]),],
                          torch.Tensor([[5, 3], [1, 7]]))
 
         # stride is [4, 8]
@@ -2718,11 +2726,11 @@ class TestTorch(TestCase):
         strided.set_(reference.storage(), storage_offset=4,
                      size=torch.Size([2]), stride=[4])
         self.assertEqual(strided[[0]], torch.Tensor([5]))
-        self.assertEqual(strided[ri([0]), ], torch.Tensor([5]))
-        self.assertEqual(strided[ri([1]), ], torch.Tensor([9]))
+        self.assertEqual(strided[ri([0]),], torch.Tensor([5]))
+        self.assertEqual(strided[ri([1]),], torch.Tensor([9]))
         self.assertEqual(strided[[0, 1]], torch.Tensor([5, 9]))
-        self.assertEqual(strided[ri([0, 1]), ], torch.Tensor([5, 9]))
-        self.assertEqual(strided[ri([[0, 1], [1, 0]]), ],
+        self.assertEqual(strided[ri([0, 1]),], torch.Tensor([5, 9]))
+        self.assertEqual(strided[ri([[0, 1], [1, 0]]),],
                          torch.Tensor([[5, 9], [9, 5]]))
 
         # reference is 1 2
@@ -2743,26 +2751,26 @@ class TestTorch(TestCase):
                    [1, 2]])
         columns = [0],
         self.assertEqual(reference[rows, columns], torch.Tensor([[1, 1],
-                                                                [3, 5]]))
+                                                                 [3, 5]]))
 
         rows = ri([[0, 0],
                    [1, 2]])
         columns = ri([1, 0])
         self.assertEqual(reference[rows, columns], torch.Tensor([[2, 1],
-                                                                [4, 5]]))
+                                                                 [4, 5]]))
         rows = ri([[0, 0],
                    [1, 2]])
         columns = ri([[0, 1],
                       [1, 0]])
         self.assertEqual(reference[rows, columns], torch.Tensor([[1, 2],
-                                                                [4, 5]]))
+                                                                 [4, 5]]))
 
         # setting values
         reference[ri([0]), ri([1])] = -1
         self.assertEqual(reference[ri([0]), ri([1])], torch.Tensor([-1]))
         reference[ri([0, 1, 2]), ri([0])] = conv_fn(torch.Tensor([-1, 2, -4]))
         self.assertEqual(reference[ri([0, 1, 2]), ri([0])], torch.Tensor([-1,
-                         2, -4]))
+                                                                          2, -4]))
         reference[rows, columns] = conv_fn(torch.Tensor([[4, 6], [2, 3]]))
         self.assertEqual(reference[rows, columns],
                          torch.Tensor([[4, 6], [2, 3]]))
@@ -2779,9 +2787,9 @@ class TestTorch(TestCase):
         #             [3, 7, 11]]
 
         self.assertEqual(reference[ri([0, 1, 2]), ri([0])], torch.Tensor([0, 1,
-                         2]))
+                                                                          2]))
         self.assertEqual(reference[ri([0, 1, 2]), ri([1])], torch.Tensor([4, 5,
-                         6]))
+                                                                          6]))
         self.assertEqual(reference[ri([0]), ri([0])], torch.Tensor([0]))
         self.assertEqual(reference[ri([2]), ri([1])], torch.Tensor([6]))
         self.assertEqual(reference[[ri([0, 0]), ri([0, 1])]], torch.Tensor([0, 4]))
@@ -2794,26 +2802,26 @@ class TestTorch(TestCase):
                    [1, 2]])
         columns = [0],
         self.assertEqual(reference[rows, columns], torch.Tensor([[0, 0],
-                                                                [1, 2]]))
+                                                                 [1, 2]]))
 
         rows = ri([[0, 0],
                    [1, 2]])
         columns = ri([1, 0])
         self.assertEqual(reference[rows, columns], torch.Tensor([[4, 0],
-                                                                [5, 2]]))
+                                                                 [5, 2]]))
         rows = ri([[0, 0],
                    [1, 3]])
         columns = ri([[0, 1],
                       [1, 2]])
         self.assertEqual(reference[rows, columns], torch.Tensor([[0, 4],
-                                                                [5, 11]]))
+                                                                 [5, 11]]))
 
         # setting values
         reference[ri([0]), ri([1])] = -1
         self.assertEqual(reference[ri([0]), ri([1])], torch.Tensor([-1]))
         reference[ri([0, 1, 2]), ri([0])] = conv_fn(torch.Tensor([-1, 2, -4]))
         self.assertEqual(reference[ri([0, 1, 2]), ri([0])], torch.Tensor([-1,
-                         2, -4]))
+                                                                          2, -4]))
         reference[rows, columns] = conv_fn(torch.Tensor([[4, 6], [2, 3]]))
         self.assertEqual(reference[rows, columns],
                          torch.Tensor([[4, 6], [2, 3]]))
@@ -2842,19 +2850,19 @@ class TestTorch(TestCase):
                    [1, 1]])
         columns = [0],
         self.assertEqual(strided[rows, columns], torch.Tensor([[1, 1],
-                                                              [9, 9]]))
+                                                               [9, 9]]))
 
         rows = ri([[0, 1],
                    [1, 0]])
         columns = ri([1, 2])
         self.assertEqual(strided[rows, columns], torch.Tensor([[3, 13],
-                                                              [11, 5]]))
+                                                               [11, 5]]))
         rows = ri([[0, 0],
                    [1, 1]])
         columns = ri([[0, 1],
                       [1, 2]])
         self.assertEqual(strided[rows, columns], torch.Tensor([[1, 3],
-                                                              [11, 13]]))
+                                                               [11, 13]]))
 
         # setting values
 
@@ -2874,10 +2882,10 @@ class TestTorch(TestCase):
         strided.set_(reference.storage(), 10, size=torch.Size([2, 2]),
                      stride=[7, 1])
         self.assertEqual(strided[ri([0, 1]), ri([1, 0])], torch.Tensor([11,
-                         17]))
+                                                                        17]))
         strided[ri([0, 1]), ri([1, 0])] = conv_fn(torch.Tensor([-1, 2]))
         self.assertEqual(strided[ri([0, 1]), ri([1, 0])], torch.Tensor([-1,
-                         2]))
+                                                                        2]))
 
         reference = conv_fn(torch.arange(0, 24).view(3, 8))
         strided = conv_fn(torch.Tensor())
@@ -2900,7 +2908,7 @@ class TestTorch(TestCase):
         #              3 4
         #              5 6
         reference = conv_fn(consec((3, 2)))
-        self.assertEqual(reference[ri([0, 2]), ], torch.Tensor([[1, 2], [5, 6]]))
+        self.assertEqual(reference[ri([0, 2]),], torch.Tensor([[1, 2], [5, 6]]))
         self.assertEqual(reference[ri([1]), ...], torch.Tensor([[3, 4]]))
         self.assertEqual(reference[..., ri([1])], torch.Tensor([[2], [4], [6]]))
 
@@ -3127,7 +3135,7 @@ class TestTorch(TestCase):
     def _test_advancedindex_big(self, conv_fn):
         reference = conv_fn(torch.arange(0, 123344).int())
 
-        self.assertEqual(reference[[0, 123, 44488, 68807, 123343], ],
+        self.assertEqual(reference[[0, 123, 44488, 68807, 123343],],
                          torch.LongTensor([0, 123, 44488, 68807, 123343]))
 
     def test_advancedindex_big(self):
@@ -3135,6 +3143,7 @@ class TestTorch(TestCase):
 
     def test_newindex(self):
         reference = self._consecutive((3, 3, 3))
+
         # This relies on __index__() being correct - but we have separate tests for that
 
         def checkPartialAssign(index):
@@ -4273,6 +4282,7 @@ class TestTorch(TestCase):
         id_after = id(t)
         self.assertEqual(id_before, id_after)
 
+
 # Functions to test negative dimension wrapping
 METHOD = 1
 INPLACE_METHOD = 2
@@ -4325,6 +4335,7 @@ def make_neg_dim_test(name, tensor_arg, arg_constr, types, extra_dim=0):
 
 def idx_tensor(size, max_val):
     return torch.LongTensor(*size).random_(0, max_val - 1)
+
 
 neg_dim_tests = [
     ('narrow', (10, 20, 30), lambda: [DIM_ARG, 0, 5], [METHOD]),

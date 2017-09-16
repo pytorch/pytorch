@@ -57,7 +57,7 @@ static inline double TH_erfinv(double y) {
     double c[4]={-1.970840454, -1.624906493,  3.429567803,  1.641345311};
     double d[2]={ 3.543889200,  1.637067800};
     if(fabs(y) > 1.0) return (atof("NaN"));  /* This needs IEEE constant*/
-    if(fabs(y) == 1.0) return((copysign(1.0,y))*MAXDOUBLE);
+    if(fabs(y) == 1.0) return((copysign(1.0,y))*atof("INFINITY"));
     if( fabs(y) <= CENTRAL_RANGE )
     {
             z = y*y;
