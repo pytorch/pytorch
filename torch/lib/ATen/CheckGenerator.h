@@ -1,10 +1,15 @@
 #pragma once
-#include "ATen/CPUGenerator.h"
+
+#include "ATen/Generator.h"
+#include "ATen/Utils.h"
 
 namespace at {
-static inline CPUGenerator * check_generator(Generator* expr) {
-  if(auto result = dynamic_cast<CPUGenerator*>(expr))
+
+template <typename T>
+static inline T * check_generator(Generator* expr) {
+  if(auto result = dynamic_cast<T*>(expr))
     return result;
-  runtime_error("Expected a 'CPUGenerator' but found 'CUDAGenerator'");
+  runtime_error("Expected a '%s' but found '%s'", typeid(T).name(), typeid(expr).name());
 }
-}
+
+} // namespace at

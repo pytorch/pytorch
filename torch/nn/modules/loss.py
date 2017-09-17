@@ -400,7 +400,7 @@ class MultiLabelMarginLoss(_Loss):
         loss(x, y) = sum_ij(max(0, 1 - (x[y[j]] - x[i]))) / x.size(0)
 
     where `i == 0` to `x.size(0)`, `j == 0` to `y.size(0)`,
-    `y[j] != 0`, and `i != y[j]` for all `i` and `j`.
+    `y[j] >= 0`, and `i != y[j]` for all `i` and `j`.
 
     `y` and `x` must have the same size.
 

@@ -25,7 +25,7 @@ def calculate_gain(nonlinearity, param=None):
         param: optional parameter for the nonlinear function
 
     Examples:
-        >>> gain = nn.init.gain('leaky_relu')
+        >>> gain = nn.init.calculate_gain('leaky_relu')
     """
     linear_fns = ['linear', 'conv1d', 'conv2d', 'conv3d', 'conv_transpose1d', 'conv_transpose2d', 'conv_transpose3d']
     if nonlinearity in linear_fns or nonlinearity == 'sigmoid':
@@ -334,19 +334,19 @@ def orthogonal(tensor, gain=1):
     rows = tensor.size(0)
     cols = tensor[0].numel()
     flattened = torch.Tensor(rows, cols).normal_(0, 1)
+
+    if rows < cols:
+        flattened.t_()
+
     # Compute the qr factorization
     q, r = torch.qr(flattened)
     # Make Q uniform according to https://arxiv.org/pdf/math-ph/0609050.pdf
     d = torch.diag(r, 0)
     ph = d.sign()
     q *= ph.expand_as(q)
-    # Pad zeros to Q (if rows smaller than cols)
+
     if rows < cols:
-        padding = torch.zeros(rows, cols - rows)
-        if q.is_cuda:
-            q = torch.cat([q, padding.cuda()], 1)
-        else:
-            q = torch.cat([q, padding], 1)
+        q.t_()
 
     tensor.view_as(q).copy_(q)
     tensor.mul_(gain)

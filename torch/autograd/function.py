@@ -270,6 +270,24 @@ def _unflatten(input, proto):
 
     return unflatten_helper(input, proto)[0]
 
+
+# Return suitable 'prototype' that doesn't hold
+# references possibly big options from 'obj'
+def _to_proto(obj):
+    def helper(obj):
+        if isinstance(obj, torch.autograd.Variable):
+            return "HOLE"
+        elif obj is None:
+            return None
+        elif isinstance(obj, (list, tuple)):
+            type_ = type(obj)
+            return type_(helper(o) for o in obj)
+        else:
+            raise ValueError("NestedIOFunction doesn't know how to process "
+                             "an input object of type " + torch.typename(obj))
+    return helper(obj)
+
+
 _iter_variables = _iter_filter(lambda o: isinstance(o, torch.autograd.Variable))
 _iter_tensors = _iter_filter(torch.is_tensor)
 _iter_None_tensors = _iter_filter(lambda o: o is None or torch.is_tensor(o))

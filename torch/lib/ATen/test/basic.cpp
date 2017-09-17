@@ -8,13 +8,13 @@ extern "C" void THFloatTensor_fill(THFloatTensor *, float v);
 
 #include <iostream>
 #include <chrono>
+#include <string.h>
+#include <sstream>
+#include "test_assert.h"
 
 using namespace at;
 
-void check(bool c) {
-  if(!c)
-    throw std::runtime_error("check failed.");
-}
+
 
 static void test(Type & type) {
   {
@@ -22,16 +22,22 @@ static void test(Type & type) {
     auto a = type.tensor();
     a.resize_({3,4});
     std::cout << a.numel() << std::endl;
+    ASSERT(a.numel() == 12);
     a.resize_({5, 7});
     std::cout << a.numel() << std::endl;
+    ASSERT(a.numel() == 35);
+
   }
 
   {
     std::cout << "ones and dot:" << std::endl;
     Tensor b = type.ones({3, 4});
     std::cout << b << std::endl;
+    ASSERT(24 == (b+b).sum().toDouble());
     std::cout << b.numel() << std::endl;
+    ASSERT(12 == b.numel());
     std::cout << b.dot(b) << std::endl;
+    ASSERT(b.dot(b).toDouble() == 12);
   }
 
   {
@@ -91,6 +97,7 @@ static void test(Type & type) {
     }
     auto end = std::chrono::high_resolution_clock::now();
     std::cout << std::dec << "   " << std::chrono::duration_cast<std::chrono::milliseconds>(end-begin).count() << " ms" << std::endl;
+    ASSERT(norm(100000*d).toDouble() == norm(r).toDouble());
     std::cout << "   norm: " << norm(r).toDouble() << std::endl;
   }
 
@@ -104,6 +111,7 @@ static void test(Type & type) {
     }
     auto end = std::chrono::high_resolution_clock::now();
     std::cout << std::dec << "   " << std::chrono::duration_cast<std::chrono::milliseconds>(end-begin).count() << " ms" << std::endl;
+    ASSERT(norm(100000*d).toDouble() == norm(r).toDouble());
     std::cout << "   norm: " << norm(r).toDouble() << std::endl;
   }
 
@@ -111,6 +119,9 @@ static void test(Type & type) {
     std::cout << "isContiguous:" << std::endl;
     Tensor a = type.rand({3, 4});
     std::cout << a.is_contiguous() << std::endl;
+    ASSERT(a.is_contiguous());
+    a = a.transpose(0, 1);
+    ASSERT(!a.is_contiguous());
   }
 
   {
@@ -121,6 +132,7 @@ static void test(Type & type) {
     std::cout << a << std::endl;
     std::cout << b << std::endl;
     std::cout << c << std::endl;
+    ASSERT(c.equal(addmv(0, type.zeros({3}), 1, a,b)));
   }
 
   {
@@ -128,10 +140,12 @@ static void test(Type & type) {
     Tensor a = type.rand({2, 1});
     std::cout << a << std::endl;
     Tensor b = squeeze(a);
+    ASSERT(b.dim() == 1);
     std::cout << b << std::endl;
     a = type.rand({1});
     std::cout << a << std::endl;
     b = squeeze(a);
+    //TODO 0-dim squeeze
     std::cout << b << std::endl;
   }
 
@@ -143,12 +157,14 @@ static void test(Type & type) {
     std::cout << e << std::endl;
     a.copy_(e);
     std::cout << a << std::endl;
+    ASSERT(a.equal(e));
   }
 
   {
-    //TODO(zach): 0-dim
-    //std::cout << "abs(value):" << std::endl;
-    //std::cout << at::abs(-3);
+    std::cout << "abs(value):" << std::endl;
+    Tensor r = at::abs(type.scalarTensor(-3));
+    std::cout << r;
+    ASSERT(Scalar(r).toInt() == 3);
   }
 
 //TODO(zach): operator overloads
@@ -163,10 +179,11 @@ static void test(Type & type) {
 #endif
 
   {
-    std::cout << "adding a value with different type:" << std::endl;
+    std::cout << "adding a value with a salar:" << std::endl;
     Tensor a = type.rand({4, 3});
     std::cout << a << std::endl;
     std::cout << add(a, 1) << std::endl;
+    ASSERT((type.ones({4,3}) + a).equal(add(a,1)));
   }
 
   {
@@ -186,8 +203,8 @@ static void test(Type & type) {
       Tensor b = type.rand({3,4});
       std::cout << b + a << std::endl;
       std::cout << a + b << std::endl;
-      check((a+a).dim() == 0);
-      check((1+a).dim() == 0);
+      ASSERT((a+a).dim() == 0);
+      ASSERT((1+a).dim() == 0);
       auto c = type.rand({3,4});
       std::cout << c[1][2] << std::endl;
 
@@ -195,6 +212,7 @@ static void test(Type & type) {
       f[2] = type.zeros({4});
       f[1][0] = -1;
       std:: cout << f << std::endl;
+      ASSERT(Scalar(f[2][0]).toDouble() == 0);
   }
   {
     int a = 4;
@@ -207,21 +225,34 @@ static void test(Type & type) {
       Tensor a = CPU(kFloat).zeros({3,4});
       Tensor b = CPU(kFloat).ones({3,7});
       Tensor c = cat({a,b},1);
+      std::cout << c.sizes() << std::endl;
+      ASSERT(c.size(1) == 11);
       std::cout << c << std::endl;
 
       Tensor e = CPU(kFloat).rand({});
-      check(*e.data<float>()== e.sum().toFloat());
+      ASSERT(*e.data<float>()== e.sum().toFloat());
+  }
+  {
+    Tensor b = CPU(kFloat).ones({3,7})*.0000001f;
+    std::stringstream s;
+    s << b << "\n";
+    std::string expect = "1e-07 *";
+    ASSERT(s.str().substr(0,expect.size()) == expect);
   }
 
 }
 
-int main()
+int main(int argc, char ** argv)
 {
   std::cout << "=========================== CPU ===========================" << std::endl;
   test(CPU(kFloat));
   if(at::hasCUDA()) {
-    std::cout << "=========================== GPU ===========================" << std::endl;
-    test(CUDA(kFloat));
+    if(argc == 2 && 0 == strcmp(argv[1],"-n")) {
+      std::cout << "skipping cuda...\n";
+    } else {
+      std::cout << "=========================== GPU ===========================" << std::endl;
+      test(CUDA(kFloat));
+    }
   }
   return 0;
 }

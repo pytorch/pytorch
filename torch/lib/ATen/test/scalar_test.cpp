@@ -1,6 +1,7 @@
 #include <iostream>
 #include "ATen/ATen.h"
 #include "ATen/Dispatch.h"
+#include "test_assert.h"
 
 using std::cout;
 using namespace at;
@@ -68,6 +69,11 @@ int main() {
     cout << r << "\n";
   }
   cout << T.randn({10,10,2}) << "\n";
+
+  // check Scalar.toTensor on Scalars backed by different data types
+  ASSERT(bar.toTensor().type().scalarType() == kDouble);
+  ASSERT(what.toTensor().type().scalarType() == kLong);
+  ASSERT(Scalar(CPU(kFloat).ones({})).toTensor().type().scalarType() == kFloat);
 
   dispatch<Foo>(x.type(),x,prev_h);
   return 0;

@@ -30,6 +30,9 @@ def init_process_group(backend, init_method='env://', **kwargs):
         world_size (int, optional): Number of processes participating in the job.
         rank (int, optional): Rank of the current process.
         group_name (str, optional): Group name. See description of init methods.
+
+    To enable ``backend == mpi``, PyTorch needs to built from source on a system that
+    supports MPI.
     """
     world_size = kwargs.pop('world_size', -1)
     group_name = kwargs.pop('group_name', '')

@@ -1,0 +1,16 @@
+node {
+  input: "1"
+  output: "2"
+  op_type: "Reshape"
+  attribute {
+    name: "shape"
+    ints: 1
+    ints: 1
+  }
+}
+name: "torch-jit-export"
+input: "1"
+output: "2"
+ir_version: 1
+producer_version: 20000
+producer_tag: "pytorch"
