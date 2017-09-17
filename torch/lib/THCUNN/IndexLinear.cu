@@ -8,7 +8,7 @@ const int THREADS_PER_BLOCK = 256;
 const int THREADS_X = 32;
 const int THREADS_Y = THREADS_PER_BLOCK / THREADS_X;
 const int REPEAT = 32;
-const long NNZ_PER_BLOCK_MAX = 1024;
+const int64_t NNZ_PER_BLOCK_MAX = 1024;
 
 /* sign MACRO */
 #ifndef clamp
@@ -16,8 +16,8 @@ const long NNZ_PER_BLOCK_MAX = 1024;
 #endif
 
 __device__ double atomicExch(double *address, double val) {
-    unsigned long long int* address_as_ull = (unsigned long long int*)address;
-    unsigned long long res = atomicExch(address_as_ull, __double_as_longlong(val));
+    uint64_t* address_as_ull = (uint64_t*)address;
+    uint64_t res = atomicExch(address_as_ull, __double_as_longlong(val));
     return __longlong_as_double(res);
 }
 
@@ -27,14 +27,14 @@ void updateOutput(
     Ty *output,
     Ty *normalizedValues,
     const Ty *values,
-    const long *cumSumSizes,
-    const long *keys,
-    const long batchSize,
-    const long outDim,
+    const int64_t *cumSumSizes,
+    const int64_t *keys,
+    const int64_t batchSize,
+    const int64_t outDim,
     Ty *weight,
     const Ty *bias,
-    const long weightStride,
-    const long keysOffset,
+    const int64_t weightStride,
+    const int64_t keysOffset,
     const int maxNormalize,
     const int nnzPerBlock)
 {
@@ -53,10 +53,10 @@ void updateOutput(
      * http://arrayfire.com/licenses/BSD-3-Clause
      ********************************************************/
 
-    const long tidx = threadIdx.x;
-    const long tidy = threadIdx.y;
-    const long tid  = tidy * blockDim.x + tidx;
-    const long gidx = blockIdx.x * blockDim.x + tidx;
+    const int64_t tidx = threadIdx.x;
+    const int64_t tidy = threadIdx.y;
+    const int64_t tid  = tidy * blockDim.x + tidx;
+    const int64_t gidx = blockIdx.x * blockDim.x + tidx;
 
 
     Ty *nWeight = weight;
@@ -67,26 +67,26 @@ void updateOutput(
     bool within_N = (gidx < outDim);
 
     __shared__ Ty s_values[THREADS_PER_BLOCK];
-    __shared__ long s_keys[THREADS_PER_BLOCK];
+    __shared__ int64_t s_keys[THREADS_PER_BLOCK];
 
-    const long rowId = blockIdx.y;
+    const int64_t rowId = blockIdx.y;
     // if (rowId >= batchSize) return;
 
     // Load the nonzero column offsets for current row
-    const long batchStart = (rowId == 0 ? 0 : cumSumSizes[rowId - 1]) + blockIdx.z * nnzPerBlock;
-    const long batchEnd   = min(batchStart + nnzPerBlock, cumSumSizes[rowId]);
-    const long batchStride = blockDim.x * blockDim.y;
+    const int64_t batchStart = (rowId == 0 ? 0 : cumSumSizes[rowId - 1]) + blockIdx.z * nnzPerBlock;
+    const int64_t batchEnd   = min(batchStart + nnzPerBlock, cumSumSizes[rowId]);
+    const int64_t batchStride = blockDim.x * blockDim.y;
 
     Ty outVal = 0;
     // Since the number of nonzero elements might be greater than local memory available,
     // Load only part of the row into local memory, perform partial dot, repeat until done.
-    for (long id = batchStart; id < batchEnd; id += batchStride) {
+    for (int64_t id = batchStart; id < batchEnd; id += batchStride) {
         // Load the current chunk of the row into local memory
-        long lim = min(batchEnd - id, (long)batchStride);
+        int64_t lim = min(batchEnd - id, (int64_t)batchStride);
 
-        long key = tid < lim ? keys[id + tid] + keysOffset : -1;
+        int64_t key = tid < lim ? keys[id + tid] + keysOffset : -1;
         Ty val = tid < lim ? values[id + tid] : 0;
-        long nWeightOffset = key * weightStride;
+        int64_t nWeightOffset = key * weightStride;
 
         if (tid < lim && maxNormalize) {
             Ty *nWeightCurr = nWeight + nWeightOffset;
@@ -112,7 +112,7 @@ void updateOutput(
         __syncthreads();
 
         // Perform a single "dot" operation for each thread
-        for (long idy = tidy; within_N && idy < lim; idy += blockDim.y) {
+        for (int64_t idy = tidy; within_N && idy < lim; idy += blockDim.y) {
             outVal += s_values[idy] * weight[weightStride * s_keys[idy]];
         }
         __syncthreads();
@@ -121,7 +121,7 @@ void updateOutput(
     // s_values is no longer used at this point. Reuse it for reducing outVal.
     // A reduction along the y dimension now gives a single output value along x.
     s_values[tid] = outVal;
-    for (long y = blockDim.y / 2; y >= 1; y /= 2) {
+    for (int64_t y = blockDim.y / 2; y >= 1; y /= 2) {
         __syncthreads();
         if (tidy < y) s_values[tid] = s_values[tid] + s_values[tid + y * blockDim.x];
     }
@@ -146,31 +146,31 @@ void accGradWeight(
     Ty *gradWeight,
     const Ty *gradOutput,
     const Ty *values,
-    const long  *cumSumSizes,
-    const long  outDim,
-    const long  gradWeightStride,
+    const int64_t  *cumSumSizes,
+    const int64_t  outDim,
+    const int64_t  gradWeightStride,
     const Ty scale,
     const Ty weightDecay,
     const int maxNormalize)
 {
-    const long bidy = blockIdx.y;
-    const long tidx = threadIdx.x;
-    const long tidy = threadIdx.y;
-    const long tid  = tidy * blockDim.x + tidx;
-    const long ntid = blockDim.x * blockDim.y;
-    const long gidx = blockIdx.x * blockDim.x + tidx;
+    const int64_t bidy = blockIdx.y;
+    const int64_t tidx = threadIdx.x;
+    const int64_t tidy = threadIdx.y;
+    const int64_t tid  = tidy * blockDim.x + tidx;
+    const int64_t ntid = blockDim.x * blockDim.y;
+    const int64_t gidx = blockIdx.x * blockDim.x + tidx;
 
     // All the y threads in the block will use the same gradOutput value
     gradOutput += bidy * outDim;
     Ty gradOutVal = scale * (gidx < outDim ? gradOutput[gidx] : 0);
 
     // Calculate the amount of work for the current block / batch.
-    const long batchStart = bidy == 0 ? 0 : cumSumSizes[bidy - 1];
-    const long batchEnd   = cumSumSizes[bidy];
-    const long batchLimit = batchEnd - batchStart;
+    const int64_t batchStart = bidy == 0 ? 0 : cumSumSizes[bidy - 1];
+    const int64_t batchEnd   = cumSumSizes[bidy];
+    const int64_t batchLimit = batchEnd - batchStart;
 
     // Number of iterations required to finish the work for the current batch.
-    const long iters    = divup(batchLimit, ntid);
+    const int64_t iters    = divup(batchLimit, ntid);
 
     // Offset the values to the current batch.
     values += batchStart;
@@ -185,10 +185,10 @@ void accGradWeight(
     __shared__ Ty s_values[THREADS_PER_BLOCK];
 
     // Using iters to avoid divergence + synchtreads
-    for (long n = 0; n < iters; n++) {
-        long off = n * ntid;
-        long id = off + tid;
-        long lim = min(ntid, batchLimit - off);
+    for (int64_t n = 0; n < iters; n++) {
+        int64_t off = n * ntid;
+        int64_t id = off + tid;
+        int64_t lim = min(ntid, batchLimit - off);
 
         // Read the values required for the current iteration.
         s_values[tid] = id < batchLimit ? values[id] : 0;
@@ -196,13 +196,13 @@ void accGradWeight(
 
         if (gidx < outDim) {
             if (maxNormalize) {
-                for (long idy = tidy; idy < lim; idy += blockDim.y) {
+                for (int64_t idy = tidy; idy < lim; idy += blockDim.y) {
                     // gradOutVal is already scaled
                     gradWeight0[(off + idy) * gradWeightStride] = gradOutVal;
                 }
             }
 
-            for (long idy = tidy; idy < lim; idy += blockDim.y) {
+            for (int64_t idy = tidy; idy < lim; idy += blockDim.y) {
                 gradWeight1[(off + idy) * gradWeightStride] = s_values[idy] * gradOutVal;
             }
         }
@@ -217,15 +217,15 @@ __global__ static
 void accGradBias(
     Ty *buffer,
     const Ty *gradOutput,
-    const long  outDim,
-    const long  batchSize,
+    const int64_t  outDim,
+    const int64_t  batchSize,
     const Ty scale,
     const Ty weightDecay)
 {
     const int tidx = threadIdx.x;
     const int tidy = threadIdx.y;
     const int tid = tidy * blockDim.x + tidx;
-    const long idx = blockIdx.x * blockDim.x + tidx;
+    const int64_t idx = blockIdx.x * blockDim.x + tidx;
 
 
     Ty gradBiasVal = 0;
@@ -234,7 +234,7 @@ void accGradBias(
 
     // Each thread along y calculates the partial sum.
     if (idx < outDim) {
-        for (long idy = tidy; idy < batchSize; idy += blockDim.y) {
+        for (int64_t idy = tidy; idy < batchSize; idy += blockDim.y) {
             gradBiasVal += gradOutput[idy * outDim];
         }
     }
@@ -271,23 +271,23 @@ __global__ static
 void updateWeight(
     Ty *weight,
     const Ty *gradWeight,
-    const long *keys,
-    const long *cumSumSizes,
-    const long outDim,
-    const long gradWeightStride,
-    const long weightStride,
-    const long keysOffset,
+    const int64_t *keys,
+    const int64_t *cumSumSizes,
+    const int64_t outDim,
+    const int64_t gradWeightStride,
+    const int64_t weightStride,
+    const int64_t keysOffset,
     const Ty learningRate,
     const Ty weightDecay,
     const int maxNormalize,
-    const long batchId)
+    const int64_t batchId)
 {
-    long gidx = blockIdx.x * blockDim.x + threadIdx.x;
-    long gidy = blockIdx.y * blockDim.y + threadIdx.y;
+    int64_t gidx = blockIdx.x * blockDim.x + threadIdx.x;
+    int64_t gidy = blockIdx.y * blockDim.y + threadIdx.y;
 
     // Find the limits of the work to be done
-    const long batchStart = batchId == 0 ? 0 : cumSumSizes[batchId - 1];
-    const long batchEnd = cumSumSizes[batchId];
+    const int64_t batchStart = batchId == 0 ? 0 : cumSumSizes[batchId - 1];
+    const int64_t batchEnd = cumSumSizes[batchId];
 
     // When maxNormalize is turned on, the weight tensor will contain
     // an extra "maxNormalize" number of terms per output at the beginning.
@@ -306,10 +306,10 @@ void updateWeight(
     const Ty *gradWeight1 = gradWeight0 + (maxNormalize ? outDim : 0);
 
     if (gidx >= outDim) return;
-    for (long id = batchStart + gidy; id < batchEnd; id += blockDim.y * gridDim.y) {
+    for (int64_t id = batchStart + gidy; id < batchEnd; id += blockDim.y * gridDim.y) {
         Ty lr = learningRate;
         Ty wd = weightDecay;
-        long weightOffset = (keys[id] + keysOffset) * weightStride;
+        int64_t weightOffset = (keys[id] + keysOffset) * weightStride;
         Ty weightVal = weight[weightOffset];
 
         if (maxNormalize) {
@@ -339,28 +339,28 @@ template<typename Ty>
 __global__ static
 void accUpdateWeight(
     Ty *weight,
-    const long weightStride,
+    const int64_t weightStride,
     const Ty *gradOutput,
-    const long outDim,
+    const int64_t outDim,
     const Ty *values,
-    const long *cumSumSizes,
-    const long *keys,
-    const long keysOffset,
+    const int64_t *cumSumSizes,
+    const int64_t *keys,
+    const int64_t keysOffset,
     const Ty scale,
     const Ty weightDecay,
     const int maxNormalize,
-    const long batchId)
+    const int64_t batchId)
 {
     // Parallel along outDim.
-    long gidx = blockIdx.x * blockDim.x + threadIdx.x;
+    int64_t gidx = blockIdx.x * blockDim.x + threadIdx.x;
     // Parallel along the sparse input size for current batch.
-    long gidy = blockIdx.y * blockDim.y + threadIdx.y;
+    int64_t gidy = blockIdx.y * blockDim.y + threadIdx.y;
 
     if (gidx >= outDim) return;
 
     // Find the limits of the work to be done.
-    const long batchStart = batchId == 0 ? 0 : cumSumSizes[batchId - 1];
-    const long batchEnd = cumSumSizes[batchId];
+    const int64_t batchStart = batchId == 0 ? 0 : cumSumSizes[batchId - 1];
+    const int64_t batchEnd = cumSumSizes[batchId];
 
     gradOutput += batchId * outDim;
     Ty gradOutVal = scale * (gidx < outDim ? gradOutput[gidx] : 0);
@@ -374,9 +374,9 @@ void accUpdateWeight(
     Ty *nWeight = weight;
     weight += maxNormalize + gidx;
 
-    for (long id = batchStart + gidy; id < batchEnd; id += blockDim.y * gridDim.y) {
+    for (int64_t id = batchStart + gidy; id < batchEnd; id += blockDim.y * gridDim.y) {
         Ty wd = weightDecay;
-        long weightOffset = (keys[id] + keysOffset) * weightStride;
+        int64_t weightOffset = (keys[id] + keysOffset) * weightStride;
         Ty gradWeightVal = gradOutVal * values[id];
         Ty weightVal = weight[weightOffset];
 
@@ -405,7 +405,7 @@ void accUpdateWeight(
 void THNN_CudaHalfIndexLinear_updateOutput(
                   THCState *state,
                   THCudaLongTensor *keys,
-                  long keysOffset,
+                  int64_t keysOffset,
                   THCudaHalfTensor *values,
                   THCudaLongTensor *sizes,
                   THCudaLongTensor *cumSumSizes,
@@ -420,7 +420,7 @@ void THNN_CudaHalfIndexLinear_updateOutput(
 void THNN_CudaHalfIndexLinear_accGradParameters(
                   THCState *state,
                   THCudaLongTensor *keys,
-                  long keysOffset,
+                  int64_t keysOffset,
                   THCudaHalfTensor *values,
                   THCudaLongTensor *sizes,
                   THCudaLongTensor *cumSumSizes,
@@ -438,7 +438,7 @@ void THNN_CudaHalfIndexLinear_accGradParameters(
 void THNN_CudaHalfIndexLinear_accUpdateGradParameters(
                   THCState *state,
                   THCudaLongTensor *keys,
-                  long keysOffset,
+                  int64_t keysOffset,
                   THCudaHalfTensor *values,
                   THCudaLongTensor *sizes,
                   THCudaLongTensor *cumSumSizes,
@@ -458,7 +458,7 @@ void THNN_CudaHalfIndexLinear_updateParameters(
                   THCudaHalfTensor *bias,
                   THCudaLongTensor *runningKeys,
                   THCudaLongTensor *cumSumSizes,
-                  long keysOffset,
+                  int64_t keysOffset,
                   float weightDecay,
                   float learningRate) {
     THError("THCudaHalfTensor not supported with IndexLinear");

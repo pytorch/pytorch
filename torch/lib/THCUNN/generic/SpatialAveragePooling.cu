@@ -32,11 +32,11 @@ static inline void THNN_(SpatialAveragePooling_shapeCheck)(
              "padW = %d, padH = %d, kW = %d, kH = %d",
              padW, padH, kW, kH);
 
-  long nInputPlane = input->size[dimh-1];
-  long nInputRows = input->size[dimh];
-  long nInputCols = input->size[dimw];
-  long nOutputRows, nOutputCols;
-  long nOutputPlane = nInputPlane;
+  int64_t nInputPlane = input->size[dimh-1];
+  int64_t nInputRows = input->size[dimh];
+  int64_t nInputCols = input->size[dimw];
+  int64_t nOutputRows, nOutputCols;
+  int64_t nOutputPlane = nInputPlane;
 
   if(ceil_mode) {
     nOutputCols = ceil(float(nInputCols - kW + 2*padW) / float(dW)) + 1;
@@ -84,8 +84,8 @@ void THNN_(SpatialAveragePooling_updateOutput)(
        (state, input, NULL, kH, kW, dH, dW,
         padH, padW, ceil_mode);
 
-  long nInputCols, nInputRows, nInputPlane, batchSize;
-  long nOutputCols, nOutputRows;
+  int64_t nInputCols, nInputRows, nInputPlane, batchSize;
+  int64_t nOutputCols, nOutputRows;
 
   if (input->nDimension == 3) {
     nInputCols = input->size[2];
@@ -168,8 +168,8 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
   input = THCTensor_(newContiguous)(state, input);
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
 
-  long nInputCols, nInputRows, nInputPlane, batchSize;
-  long nOutputCols, nOutputRows;
+  int64_t nInputCols, nInputRows, nInputPlane, batchSize;
+  int64_t nOutputCols, nOutputRows;
   int dimCol = 2;
   int dimRow = 1;
 

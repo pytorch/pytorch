@@ -15,9 +15,9 @@ void THNN_(VolumetricFractionalMaxPooling_updateOutput)(
   int dimh = 1;
   int dimw = 2;
   int dimt = 3;
-  long numBatch = 1;
+  int64_t numBatch = 1;
 
-  long numInputDims = THCTensor_(nDimension)(state, input);
+  int64_t numInputDims = THCTensor_(nDimension)(state, input);
   THCUNN_argCheck(state, numInputDims == 4 || numInputDims == 5, 2, input,
                   "4D or 5D (batch mode) tensor expected for input, but got: %s");
 
@@ -30,10 +30,10 @@ void THNN_(VolumetricFractionalMaxPooling_updateOutput)(
   }
 
   /* sizes */
-  long numPlanes = THCTensor_(size)(state, input, planeDim);
-  long inputH = THCTensor_(size)(state, input, dimh);
-  long inputW = THCTensor_(size)(state, input, dimw);
-  long inputT = THCTensor_(size)(state, input, dimt);
+  int64_t numPlanes = THCTensor_(size)(state, input, planeDim);
+  int64_t inputH = THCTensor_(size)(state, input, dimh);
+  int64_t inputW = THCTensor_(size)(state, input, dimw);
+  int64_t inputT = THCTensor_(size)(state, input, dimt);
 
   THArgCheck(outputH + poolSizeH - 1 < inputH, 7,
              "poolSizeH (%d) too large relative to input height (%d)",
@@ -113,7 +113,7 @@ void THNN_(VolumetricFractionalMaxPooling_updateGradInput)(
   int dimw = 2;
   int dimt = 3;
 
-  long numInputDims = THCTensor_(nDimension)(state, input);
+  int64_t numInputDims = THCTensor_(nDimension)(state, input);
   if (numInputDims == 5) {
     dimh++;
     dimw++;
@@ -121,9 +121,9 @@ void THNN_(VolumetricFractionalMaxPooling_updateGradInput)(
   }
 
   /* sizes */
-  long inputH = THCTensor_(size)(state, input, dimh);
-  long inputW = THCTensor_(size)(state, input, dimw);
-  long inputT = THCTensor_(size)(state, input, dimt);
+  int64_t inputH = THCTensor_(size)(state, input, dimh);
+  int64_t inputW = THCTensor_(size)(state, input, dimw);
+  int64_t inputT = THCTensor_(size)(state, input, dimt);
 
   THArgCheck(outputH == THCTensor_(size)(state, gradOutput, dimh), 3,
                 "gradOutput height unexpected");
