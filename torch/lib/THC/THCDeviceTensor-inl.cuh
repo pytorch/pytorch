@@ -126,7 +126,7 @@ template <typename T, int Dim,
           typename IndexT, template <typename U> class PtrTraits>
 __host__ __device__ bool
 THCDeviceTensor<T, Dim, IndexT, PtrTraits>::isContiguous() const {
-  long prevSize = 1;
+  int64_t prevSize = 1;
 
   for (int i = Dim - 1; i >= 0; --i) {
     if (getSize(i) != (IndexT) 1) {

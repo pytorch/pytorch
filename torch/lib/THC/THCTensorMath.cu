@@ -82,14 +82,14 @@ class strided_range
 
 struct idx_functor
 {
-  long div;
-  long size;
+  int64_t div;
+  int64_t size;
 
   __host__ __device__
-  idx_functor(long div, long size) : div(div), size(size) {}
+  idx_functor(int64_t div, int64_t size) : div(div), size(size) {}
 
   __host__ __device__
-  long operator()(long val) {
+  int64_t operator()(int64_t val) {
     return (val / div) % size + TH_INDEX_BASE;
   }
 };
