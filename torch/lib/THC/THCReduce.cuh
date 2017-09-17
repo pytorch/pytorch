@@ -321,7 +321,7 @@ bool THC_reduceDim(THCState* state,
           block.y *= 2;
           ydim /= 2;
         }
-        THC_getGridFromTiles(THCCeilDiv(outElements, (int64_t)block.x), grid);
+        THC_getGridFromTiles(THCCeilDiv((int64_t)outElements, (int64_t)block.x), grid);
 
     }
   }
