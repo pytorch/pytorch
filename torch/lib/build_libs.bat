@@ -70,6 +70,7 @@ goto:eof
                   -DTHNN_SO_VERSION=1 ^
                   -DTHCUNN_SO_VERSION=1 ^
                   -DNO_CUDA=%NO_CUDA% ^
+                  -Dnanopb_BUILD_GENERATOR=0 ^
                   -DCMAKE_BUILD_TYPE=Release ^
                   -DLAPACK_LIBRARIES="%INSTALL_DIR%/lib/mkl_rt.lib" -DLAPACK_FOUND=TRUE 
                   :: debug/release
