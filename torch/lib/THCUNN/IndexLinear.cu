@@ -16,9 +16,9 @@ const int64_t NNZ_PER_BLOCK_MAX = 1024;
 #endif
 
 __device__ double atomicExch(double *address, double val) {
-    uint64_t* address_as_ull = (uint64_t*)address;
-    uint64_t res = atomicExch(address_as_ull, __double_as_longlong(val));
-    return __longlong_as_double(res);
+  unsigned long long int* address_as_ull = (unsigned long long int*)address;
+  unsigned long long res = atomicExch(address_as_ull, __double_as_longlong(val));
+  return __longlong_as_double(res);
 }
 
 template<typename Ty, bool train>

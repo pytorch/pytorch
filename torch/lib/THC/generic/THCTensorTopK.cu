@@ -93,7 +93,7 @@ THC_API void THCTensor_(topk)(THCState* state,
     THError("Slice to sort is too large");                              \
   }                                                                     \
                                                                         \
-  dim3 block(std::min(THCRoundUp(sliceSize, 32LL), 1024LL));            \
+  dim3 block(std::min(THCRoundUp(sliceSize, (int64_t) 32), (int64_t) 1024)); \
                                                                         \
   /* This is used as a template parameter to calculate indices. */      \
   /* We only specialize it if all collapsed dim sizes are the */        \

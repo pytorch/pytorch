@@ -65,10 +65,10 @@ struct AtomicAddIntegerImpl<T, 4> {
 template<typename T>
 struct AtomicAddIntegerImpl<T, 8> {
   inline __device__ void operator()(T *address, T val) {
-    uint64_t * address_as_ui = (uint64_t *) (address);
-    uint64_t old = *address_as_ui;
-    uint64_t newval;
-    uint64_t assumed;
+    unsigned long long * address_as_ui = (unsigned long long *) (address);
+    unsigned long long old = *address_as_ui;
+    unsigned long long newval;
+    unsigned long long assumed;
 
     do {
       assumed = old;
