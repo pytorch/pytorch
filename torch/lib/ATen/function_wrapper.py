@@ -629,13 +629,13 @@ def create_derived(backend_type_env, declarations):
                 if arg.get('cpu_zero', False) and not is_cuda:
                     body.append("{}.zero_();".format(arg['name']))
 
-                # dim() == 0 of all input tensors is and'd to form
+                # isScalar() for all input tensors is and'd to form
                 # the test for whether the output is also a scalar
                 if (not arg.get('output') and 'Tensor' in arg['type'] and
                         'TensorList' not in arg['type'] and
                         'THS' not in arg['type'] and
                         not scalar_check_is_from_size):
-                    check = '{}.dim() == 0'.format(arg['name'])
+                    check = '{}->isScalar()'.format(arg['name'] + '_')
                     scalar_check = (check if scalar_check is None
                                     else scalar_check + ' && ' + check)
 

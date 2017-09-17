@@ -9,7 +9,7 @@ $th_headers
 
 namespace at {
 
-struct ${Tensor} : public TensorImpl {
+struct ${Tensor} final : public TensorImpl {
 public:
   explicit ${Tensor}(Context* context);
   ${Tensor}(Context* context, ${THTensor} * tensor);
