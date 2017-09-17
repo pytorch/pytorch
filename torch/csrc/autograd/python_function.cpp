@@ -45,9 +45,8 @@ static PyObject* _allocate_grad_output(output_info_type& info, AutoGPU& gpu_guar
   PyObject *tensor_cls = std::get<0>(info);
   gpu_guard.setDevice(std::get<1>(info));
   std::vector<int64_t> &sizes = std::get<2>(info);
-  std::vector<long> long_sizes(sizes.begin(), sizes.end());
 
-  THPObjectPtr grad_size(THPSize_New(long_sizes.size(), long_sizes.data()));
+  THPObjectPtr grad_size(THPSize_New(sizes.size(), sizes.data()));
   if (!grad_size) throw python_error();
   THPObjectPtr new_grad(PyObject_CallFunctionObjArgs(tensor_cls, grad_size.get(), NULL));
   if (!new_grad) throw python_error();

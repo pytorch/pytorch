@@ -10,7 +10,7 @@ struct THPSize {
   PyTupleObject tuple;
 };
 
-PyObject * THPSize_New(int dim, long *sizes)
+PyObject * THPSize_New(int dim, int64_t *sizes)
 {
   PyTypeObject* type = (PyTypeObject*)THPSizeClass;
   PyObject* self = type->tp_alloc(type, dim);
