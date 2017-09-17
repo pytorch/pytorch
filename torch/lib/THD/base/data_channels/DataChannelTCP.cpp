@@ -454,7 +454,7 @@ void DataChannelTCP::reduce(thpp::Tensor& data, THDReduceOp operation,
   auto group_dst_rank = group.mustGetGroupRank(dst_rank);
   int dim = log2ceil(group.size());
   rank_type virtual_rank = (group_rank + group.size() - group_dst_rank) % group.size();
-  long long mask = 0;
+  int64_t mask = 0;
   auto result_tensor = std::unique_ptr<thpp::Tensor>(data.clone());
 
   for (int k = 0; k <= dim - 1; mask ^= (1 << k), ++k) {
@@ -503,7 +503,7 @@ void DataChannelTCP::broadcast(thpp::Tensor& data, rank_type src_rank,
   auto group_src_rank = group.mustGetGroupRank(src_rank);
   int dim = log2ceil(group.size());
   rank_type virtual_rank = (group_rank + group.size() - group_src_rank) % group.size();
-  long long mask = (1 << dim) - 1;
+  int64_t mask = (1 << dim) - 1;
 
   for (int k = dim - 1; k >= 0; --k) {
     mask ^= (1 << k); // clear bit `k`
