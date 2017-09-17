@@ -16,6 +16,7 @@ from tools.setup_helpers.env import check_env_flag
 from tools.setup_helpers.cuda import WITH_CUDA, CUDA_HOME
 from tools.setup_helpers.cudnn import WITH_CUDNN, CUDNN_LIB_DIR, CUDNN_INCLUDE_DIR
 from tools.setup_helpers.split_types import split_types
+
 DEBUG = check_env_flag('DEBUG')
 WITH_DISTRIBUTED = not check_env_flag('NO_DISTRIBUTED')
 WITH_DISTRIBUTED_MW = WITH_DISTRIBUTED and check_env_flag('WITH_DISTRIBUTED_MW')
@@ -31,7 +32,7 @@ import distutils.sysconfig
 cfg_vars = distutils.sysconfig.get_config_vars()
 for key, value in cfg_vars.items():
     if type(value) == str:
-            cfg_vars[key] = value.replace("-Wstrict-prototypes", "")
+        cfg_vars[key] = value.replace("-Wstrict-prototypes", "")
 
 ################################################################################
 # Monkey-patch setuptools to compile in parallel
@@ -79,7 +80,7 @@ distutils.unixccompiler.UnixCCompiler.link = patched_link
 
 dep_libs = [
     'TH', 'THS', 'THNN', 'THC', 'THCS', 'THCUNN', 'nccl', 'THPP', 'libshm',
-    'ATen', 'gloo', 'THD',
+    'ATen', 'gloo', 'THD', 'nanopb',
 ]
 
 
@@ -87,9 +88,11 @@ def build_libs(libs):
     for lib in libs:
         assert lib in dep_libs, 'invalid lib: {}'.format(lib)
     build_libs_cmd = ['bash', 'torch/lib/build_libs.sh']
+    my_env = os.environ.copy()
+    my_env["PYTORCH_PYTHON"] = sys.executable
     if WITH_CUDA:
         build_libs_cmd += ['--with-cuda']
-    if subprocess.call(build_libs_cmd + libs) != 0:
+    if subprocess.call(build_libs_cmd + libs, env=my_env) != 0:
         sys.exit(1)
 
 
@@ -108,9 +111,9 @@ class build_deps(Command):
             libs += ['THC', 'THCS', 'THCUNN']
         if WITH_NCCL and not SYSTEM_NCCL:
             libs += ['nccl']
-        libs += ['THPP', 'libshm', 'ATen']
+        libs += ['THPP', 'libshm', 'ATen', 'nanopb']
         if WITH_DISTRIBUTED:
-            if sys.platform == 'linux':
+            if sys.platform.startswith('linux'):
                 libs += ['gloo']
             libs += ['THD']
         build_libs(libs)
@@ -168,6 +171,23 @@ class develop(setuptools.command.develop.develop):
         setuptools.command.develop.develop.run(self)
 
 
+def monkey_patch_THD_link_flags():
+    '''
+    THD's dynamic link deps are not determined until after build_deps is run
+    So, we need to monkey-patch them in later
+    '''
+    # read tmp_install_path/THD_deps.txt for THD's dynamic linkage deps
+    with open(tmp_install_path + '/THD_deps.txt', 'r') as f:
+        thd_deps_ = f.read()
+    thd_deps = []
+    # remove empty lines
+    for l in thd_deps_.split(';'):
+        if l != '':
+            thd_deps.append(l)
+
+    C.extra_link_args += thd_deps
+
+
 class build_ext(setuptools.command.build_ext.build_ext):
 
     def run(self):
@@ -192,6 +212,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
             print('-- Not using NCCL')
         if WITH_DISTRIBUTED:
             print('-- Building with distributed package ')
+            monkey_patch_THD_link_flags()
         else:
             print('-- Building without distributed package')
 
@@ -208,6 +229,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
         from tools.cwrap.plugins.AssertNDim import AssertNDim
         from tools.cwrap.plugins.Broadcast import Broadcast
         from tools.cwrap.plugins.ProcessorSpecificPlugin import ProcessorSpecificPlugin
+        from tools.autograd.gen_variable_type import gen_variable_type
         thp_plugin = THPPlugin()
         cwrap('torch/csrc/generic/TensorMethods.cwrap', plugins=[
             ProcessorSpecificPlugin(), BoolOption(), thp_plugin,
@@ -217,6 +239,14 @@ class build_ext(setuptools.command.build_ext.build_ext):
         cwrap('torch/csrc/cudnn/cuDNN.cwrap', plugins=[
             CuDNNPlugin(), NullableArguments()
         ])
+        # Build ATen based Variable classes
+        autograd_gen_dir = 'torch/csrc/autograd/generated'
+        if not os.path.exists(autograd_gen_dir):
+            os.mkdir(autograd_gen_dir)
+        gen_variable_type(
+            'torch/lib/build/ATen/ATen/Declarations.yaml',
+            autograd_gen_dir)
+
         # It's an old-style class in Python 2.7...
         setuptools.command.build_ext.build_ext.run(self)
 
@@ -263,24 +293,26 @@ extra_compile_args = ['-std=c++11', '-Wno-write-strings',
                       # Python 2.6 requires -fno-strict-aliasing, see
                       # http://legacy.python.org/dev/peps/pep-3123/
                       '-fno-strict-aliasing']
-if os.getenv('PYTORCH_BINARY_BUILD') and platform.system() == 'Linux':
-    print('PYTORCH_BINARY_BUILD found. Static linking libstdc++ on Linux')
-    # get path of libstdc++ and link manually.
-    # for reasons unknown, -static-libstdc++ doesn't fully link some symbols
-    CXXNAME = os.getenv('CXX', 'g++')
-    path = subprocess.check_output([CXXNAME, '-print-file-name=libstdc++.a'])
-    path = path[:-1]
-    if type(path) != str:  # python 3
-        path = path.decode(sys.stdout.encoding)
-    extra_link_args += [path]
 
 cwd = os.path.dirname(os.path.abspath(__file__))
 lib_path = os.path.join(cwd, "torch", "lib")
+
+
+# Check if you remembered to check out submodules
+def check_file(f):
+    if not os.path.exists(f):
+        print("Could not find {}".format(f))
+        print("Did you run 'git submodule update --init'?")
+        sys.exit(1)
+check_file(os.path.join(lib_path, "gloo", "CMakeLists.txt"))
+check_file(os.path.join(lib_path, "nanopb", "CMakeLists.txt"))
+check_file(os.path.join(lib_path, "pybind11", "CMakeLists.txt"))
 
 tmp_install_path = lib_path + "/tmp_install"
 include_dirs += [
     cwd,
     os.path.join(cwd, "torch", "csrc"),
+    lib_path + "/pybind11/include",
     tmp_install_path + "/include",
     tmp_install_path + "/include/TH",
     tmp_install_path + "/include/THPP",
@@ -297,9 +329,8 @@ THC_LIB = os.path.join(lib_path, 'libTHC.so.1')
 THCS_LIB = os.path.join(lib_path, 'libTHCS.so.1')
 THNN_LIB = os.path.join(lib_path, 'libTHNN.so.1')
 THCUNN_LIB = os.path.join(lib_path, 'libTHCUNN.so.1')
-THPP_LIB = os.path.join(lib_path, 'libTHPP.so.1')
 ATEN_LIB = os.path.join(lib_path, 'libATen.so.1')
-THD_LIB = os.path.join(lib_path, 'libTHD.so.1')
+THD_LIB = os.path.join(lib_path, 'libTHD.a')
 NCCL_LIB = os.path.join(lib_path, 'libnccl.so.1')
 if platform.system() == 'Darwin':
     TH_LIB = os.path.join(lib_path, 'libTH.1.dylib')
@@ -308,19 +339,22 @@ if platform.system() == 'Darwin':
     THCS_LIB = os.path.join(lib_path, 'libTHCS.1.dylib')
     THNN_LIB = os.path.join(lib_path, 'libTHNN.1.dylib')
     THCUNN_LIB = os.path.join(lib_path, 'libTHCUNN.1.dylib')
-    THPP_LIB = os.path.join(lib_path, 'libTHPP.1.dylib')
     ATEN_LIB = os.path.join(lib_path, 'libATen.1.dylib')
-    THD_LIB = os.path.join(lib_path, 'libTHD.1.dylib')
     NCCL_LIB = os.path.join(lib_path, 'libnccl.1.dylib')
+
+# static library only
+NANOPB_STATIC_LIB = os.path.join(lib_path, 'libprotobuf-nanopb.a')
 
 if WITH_NCCL and (subprocess.call('ldconfig -p | grep libnccl >/dev/null', shell=True) == 0 or
                   subprocess.call('/sbin/ldconfig -p | grep libnccl >/dev/null', shell=True) == 0):
-        SYSTEM_NCCL = True
+    SYSTEM_NCCL = True
 
 main_compile_args = ['-D_THP_CORE']
 main_libraries = ['shm']
-main_link_args = [TH_LIB, THS_LIB, THPP_LIB, THNN_LIB, ATEN_LIB]
+main_link_args = [TH_LIB, THS_LIB, THNN_LIB, ATEN_LIB, NANOPB_STATIC_LIB]
 main_sources = [
+    "torch/csrc/onnx.pb.cpp",
+    "torch/csrc/onnx.cpp",
     "torch/csrc/PtrWrapper.cpp",
     "torch/csrc/Module.cpp",
     "torch/csrc/Generator.cpp",
@@ -331,27 +365,48 @@ main_sources = [
     "torch/csrc/byte_order.cpp",
     "torch/csrc/utils.cpp",
     "torch/csrc/expand_utils.cpp",
+    "torch/csrc/utils/invalid_arguments.cpp",
     "torch/csrc/utils/object_ptr.cpp",
     "torch/csrc/utils/tuple_parser.cpp",
     "torch/csrc/allocators.cpp",
     "torch/csrc/serialization.cpp",
+    "torch/csrc/jit/assert.cpp",
+    "torch/csrc/jit/init.cpp",
+    "torch/csrc/jit/ir.cpp",
+    "torch/csrc/jit/python_ir.cpp",
+    "torch/csrc/jit/graph_fuser.cpp",
+    "torch/csrc/jit/init_pass.cpp",
+    "torch/csrc/jit/dead_code_elimination.cpp",
+    "torch/csrc/jit/test_jit.cpp",
+    "torch/csrc/jit/tracer.cpp",
+    "torch/csrc/jit/python_tracer.cpp",
+    "torch/csrc/jit/interned_strings.cpp",
     "torch/csrc/autograd/init.cpp",
     "torch/csrc/autograd/engine.cpp",
     "torch/csrc/autograd/function.cpp",
     "torch/csrc/autograd/variable.cpp",
+    "torch/csrc/autograd/saved_variable.cpp",
     "torch/csrc/autograd/input_buffer.cpp",
     "torch/csrc/autograd/python_function.cpp",
     "torch/csrc/autograd/python_cpp_function.cpp",
     "torch/csrc/autograd/python_variable.cpp",
     "torch/csrc/autograd/python_engine.cpp",
     "torch/csrc/autograd/python_hook.cpp",
+    "torch/csrc/autograd/functions/jit_closure.cpp",
+    "torch/csrc/autograd/generated/VariableType.cpp",
+    "torch/csrc/autograd/generated/Functions.cpp",
+    "torch/csrc/autograd/generated/python_variable_methods.cpp",
     "torch/csrc/autograd/functions/batch_normalization.cpp",
     "torch/csrc/autograd/functions/convolution.cpp",
     "torch/csrc/autograd/functions/basic_ops.cpp",
     "torch/csrc/autograd/functions/tensor.cpp",
     "torch/csrc/autograd/functions/accumulate_grad.cpp",
+    "torch/csrc/autograd/functions/special.cpp",
     "torch/csrc/autograd/functions/utils.cpp",
     "torch/csrc/autograd/functions/init.cpp",
+    "torch/csrc/autograd/functions/onnx/convolution.cpp",
+    "torch/csrc/autograd/functions/onnx/batch_normalization.cpp",
+    "torch/csrc/onnx/export.cpp",
 ]
 main_sources += split_types("torch/csrc/Tensor.cpp")
 
@@ -391,7 +446,7 @@ if WITH_CUDA:
     extra_link_args.append('-Wl,-rpath,' + cuda_lib_path)
     extra_compile_args += ['-DWITH_CUDA']
     extra_compile_args += ['-DCUDA_LIB_PATH=' + cuda_lib_path]
-    main_libraries += ['cudart', 'nvToolsExt']
+    main_libraries += ['cudart', 'nvToolsExt', 'nvrtc', 'cuda']
     main_link_args += [THC_LIB, THCS_LIB, THCUNN_LIB]
     main_sources += [
         "torch/csrc/cuda/Module.cpp",
@@ -401,6 +456,7 @@ if WITH_CUDA:
         "torch/csrc/cuda/utils.cpp",
         "torch/csrc/cuda/expand_utils.cpp",
         "torch/csrc/cuda/serialization.cpp",
+        "torch/csrc/jit/fusion_compiler.cpp",
     ]
     main_sources += split_types("torch/csrc/cuda/Tensor.cpp")
 
@@ -429,6 +485,19 @@ if WITH_CUDNN:
 if DEBUG:
     extra_compile_args += ['-O0', '-g']
     extra_link_args += ['-O0', '-g']
+
+if os.getenv('PYTORCH_BINARY_BUILD') and platform.system() == 'Linux':
+    print('PYTORCH_BINARY_BUILD found. Static linking libstdc++ on Linux')
+    # get path of libstdc++ and link manually.
+    # for reasons unknown, -static-libstdc++ doesn't fully link some symbols
+    CXXNAME = os.getenv('CXX', 'g++')
+    STDCPP_LIB = subprocess.check_output([CXXNAME, '-print-file-name=libstdc++.a'])
+    STDCPP_LIB = STDCPP_LIB[:-1]
+    if type(STDCPP_LIB) != str:  # python 3
+        STDCPP_LIB = STDCPP_LIB.decode(sys.stdout.encoding)
+    main_link_args += [STDCPP_LIB]
+    version_script = os.path.abspath("tools/pytorch.version")
+    extra_link_args += ['-Wl,--version-script=' + version_script]
 
 
 def make_relative_rpath(path):

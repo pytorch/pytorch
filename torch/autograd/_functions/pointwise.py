@@ -1,3 +1,5 @@
+import torch
+
 from itertools import repeat
 
 from ..._thnn import type2backend
@@ -53,6 +55,11 @@ class Log1p(Function):
 class Tanh(InplaceFunction):
 
     @staticmethod
+    def symbolic(g, i, inplace=False):
+        # TODO: [Export inplace]
+        return g.op("Tanh", i)
+
+    @staticmethod
     def forward(ctx, i, inplace=False):
         if inplace:
             ctx.mark_dirty(i)
@@ -76,6 +83,10 @@ class Tanh(InplaceFunction):
 
 
 class Sigmoid(InplaceFunction):
+
+    @staticmethod
+    def symbolic(g, i, inplace=False):
+        return g.op("Sigmoid", i)
 
     @staticmethod
     def forward(ctx, i, inplace=False):

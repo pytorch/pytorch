@@ -37,30 +37,31 @@ namespace torch { namespace autograd {
 auto BatchNormForward::apply(const variable_list& inputs) -> variable_list {
   check_input_variables("BatchNorm", inputs, 3, 1);
 
+  AutoGPU guard(inputs[0]);
   auto& input = inputs[0];
   auto& weight = inputs[1];
   auto& bias = inputs[2];
-  AutoGPU guard(input->data);
 
-  auto num_features = input->data.sizes()[1];
+  auto num_features = input.sizes()[1];
   check_dims_match_num_input_features("running_mean", num_features, running_mean.numel());
   check_dims_match_num_input_features("running_var", num_features, running_var.numel());
-  if (weight){
-    check_dims_match_num_input_features("weight", num_features, weight->data.numel());
+  if (weight.defined()) {
+    check_dims_match_num_input_features("weight", num_features, weight.numel());
   }
-  if (bias){
-    check_dims_match_num_input_features("bias", num_features, bias->data.numel());
+  if (bias.defined()) {
+    check_dims_match_num_input_features("bias", num_features, bias.numel());
   }
 
   bool use_cudnn = false;
 #ifdef WITH_CUDNN
-  use_cudnn = (input->data.type().isCuda()
-               && input->data.type().scalarType() != at::kHalf
-               && weight && bias
+  use_cudnn = (input.type().isCuda()
+               && input.type().scalarType() != at::kHalf
+               && weight.defined() && bias.defined()
                && cudnn_enabled && CUDNN_VERSION >= 5110L);
 #endif
 
-  auto output = input->data.type().tensor(input->data.sizes());
+  auto input_data = input.data();
+  auto output = input_data.type().tensor(input.sizes());
   auto save_mean = running_mean.type().tensor(running_mean.sizes());
   auto save_std = running_var.type().tensor(running_var.sizes());
 
@@ -69,11 +70,11 @@ auto BatchNormForward::apply(const variable_list& inputs) -> variable_list {
     torch::cudnn::cudnn_batch_norm_forward(
         state,
         torch::cudnn::getCudnnHandle(),
-        torch::cudnn::getCudnnDataType(input->data),
-        (THVoidTensor*)input->data.unsafeGetTH(false),
+        torch::cudnn::getCudnnDataType(input),
+        (THVoidTensor*)input.unsafeGetTH(false),
         (THVoidTensor*)output.unsafeGetTH(false),
-        (THVoidTensor*)weight->data.unsafeGetTH(false),
-        (THVoidTensor*)bias->data.unsafeGetTH(false),
+        (THVoidTensor*)weight.unsafeGetTH(false),
+        (THVoidTensor*)bias.unsafeGetTH(false),
         (THVoidTensor*)running_mean.unsafeGetTH(false),
         (THVoidTensor*)running_var.unsafeGetTH(false),
         (THVoidTensor*)save_mean.unsafeGetTH(false),
@@ -83,19 +84,18 @@ auto BatchNormForward::apply(const variable_list& inputs) -> variable_list {
         eps);
 #endif
   } else {
-      at::Tensor nt;
-      at::BatchNormalization_updateOutput(
-        input->data,
-        output,
-        weight ? weight->data : nt,
-        bias ? bias->data : nt,
-        running_mean,
-        running_var,
-        save_mean,
-        save_std,
-        training,
-        momentum,
-        eps);
+    at::BatchNormalization_updateOutput(
+      input_data,
+      output,
+      weight.opt_data(),
+      bias.opt_data(),
+      running_mean,
+      running_var,
+      save_mean,
+      save_std,
+      training,
+      momentum,
+      eps);
   }
 
   auto outputs = as_tensor_list(std::move(output));
@@ -112,9 +112,9 @@ auto BatchNormBackward::apply(const variable_list& grad_outputs) -> variable_lis
   auto weight_var = this->weight.unpack();
   auto bias_var = this->bias.unpack();
 
-  auto input = input_var->data;
-  auto weight = weight_var ? weight_var->data : at::Tensor();
-  auto bias = bias_var ? bias_var->data : at::Tensor();
+  auto input = input_var.data();
+  auto weight = weight_var.opt_data();
+  auto bias = bias_var.opt_data();
 
   AutoGPU guard(input);
 
@@ -147,7 +147,7 @@ auto BatchNormBackward::apply(const variable_list& grad_outputs) -> variable_lis
     }
   }
 
-  auto grad_output = grad_outputs[0]->data.contiguous();
+  auto grad_output = grad_outputs[0].data().contiguous();
 
   if (use_cudnn && eps >= CUDNN_BN_MIN_EPSILON) {
 #ifdef WITH_CUDNN
@@ -208,9 +208,12 @@ auto BatchNormBackward::releaseVariables() -> void {
   bias.data.reset();
 }
 
-std::shared_ptr<torch::autograd::Variable> getReturnTupleVar(PyObject *p, Py_ssize_t pos) {
+Variable getReturnTupleVar(PyObject *p, Py_ssize_t pos) {
   PyObject *item = PyTuple_GET_ITEM(p, pos);
-  return item == Py_None ? nullptr : ((THPVariable*)item)->cdata;
+  if (item != Py_None) {
+    return ((THPVariable*)item)->cdata;
+  }
+  return Variable();
 }
 
 auto BatchNormBackwardBackward::apply(const variable_list& grad_grad_inputs) -> variable_list {
@@ -220,11 +223,12 @@ auto BatchNormBackwardBackward::apply(const variable_list& grad_grad_inputs) -> 
   auto ggb = grad_grad_inputs[2];
 
   auto input_var = input.unpack();
+  AutoGPU guard(input_var);
+
   auto weight_var = weight.unpack();
   auto gO_var = grad_output.unpack();
 
-  auto input = input_var->data;
-  AutoGPU guard(input);
+  auto input = input_var.data();
   AutoGIL gil;
 
   THPObjectPtr input_pvar(THPVariable_Wrap(input_var));
@@ -257,7 +261,7 @@ auto BatchNormBackwardBackward::apply(const variable_list& grad_grad_inputs) -> 
   auto gG_var = getReturnTupleVar(r, 1);
   auto ggO_var = getReturnTupleVar(r, 2);
 
-  if (weight_var) {
+  if (weight_var.defined()) {
     return {ggO_var, gI_var, gG_var};
   } else {
     return {ggO_var, gI_var};

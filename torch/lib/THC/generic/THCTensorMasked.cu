@@ -57,7 +57,7 @@ THCTensor_(maskedCopy)(THCState* state,
 
   // FIXME: there appears to be a bug in Thrust (CUDA 7.0) for mixed
   // iterator prefix sums? Convert `mask` to the same datatype as what
-  // we're accumulating the prefix sum in (long) to get around it
+  // we're accumulating the prefix sum in (int64_t) to get around it
   THCudaLongTensor* maskLong = THCudaLongTensor_new(state);
   THLongStorage* maskSizes = THCudaByteTensor_newSizeOf(state, mask);
   THCudaLongTensor_resize(state, maskLong, maskSizes, NULL);
@@ -69,9 +69,9 @@ THCTensor_(maskedCopy)(THCState* state,
   THLongStorage_free(maskSizes);
 
   THCThrustAllocator thrustAlloc(state);
-  thrust::device_ptr<long>
+  thrust::device_ptr<int64_t>
     maskData(THCudaLongTensor_data(state, maskLong));
-  thrust::device_ptr<long>
+  thrust::device_ptr<int64_t>
     maskPrefixSumData(THCudaLongTensor_data(state, maskPrefixSum));
 
   thrust::exclusive_scan(
@@ -90,7 +90,7 @@ THCTensor_(maskedCopy)(THCState* state,
   // maskPrefixSum
   bool status = THC_pointwiseApply3(
     state, tensor, mask, maskPrefixSum,
-    TensorMaskedCopyOp<real, unsigned char, long>(
+    TensorMaskedCopyOp<real, unsigned char, int64_t>(
       THCTensor_(data)(state, contigSrc)));
 
   THCTensor_(free)(state, contigSrc);
@@ -132,7 +132,7 @@ THCTensor_(maskedSelect)(THCState* state,
 
   // FIXME: there appears to be a bug in Thrust (CUDA 7.0) for mixed
   // iterator prefix sums? Convert `mask` to the same datatype as what
-  // we're accumulating the prefix sum in (long) to get around it
+  // we're accumulating the prefix sum in (int64_t) to get around it
   THCudaLongTensor* maskLong = THCudaLongTensor_new(state);
   THLongStorage* maskSizes = THCudaByteTensor_newSizeOf(state, mask);
   THCudaLongTensor_resize(state, maskLong, maskSizes, NULL);
@@ -144,9 +144,9 @@ THCTensor_(maskedSelect)(THCState* state,
   THLongStorage_free(maskSizes);
 
   THCThrustAllocator thrustAlloc(state);
-  thrust::device_ptr<long>
+  thrust::device_ptr<int64_t>
     maskData(THCudaLongTensor_data(state, maskLong));
-  thrust::device_ptr<long>
+  thrust::device_ptr<int64_t>
     maskPrefixSumData(THCudaLongTensor_data(state, maskPrefixSum));
 
   thrust::exclusive_scan(
@@ -160,7 +160,7 @@ THCTensor_(maskedSelect)(THCState* state,
   // Then copy over the masked elements at their desired output index
   bool status = THC_pointwiseApply3(
     state, mask, maskPrefixSum,
-    src, TensorMaskedSelectOp<real, unsigned char, long>(
+    src, TensorMaskedSelectOp<real, unsigned char, int64_t>(
       THCTensor_(data)(state, tensor)));
 
   THCudaLongTensor_free(state, maskLong);

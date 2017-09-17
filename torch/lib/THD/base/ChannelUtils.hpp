@@ -125,14 +125,14 @@ void recv_bytes(int socket, T* buffer, std::size_t length)
   }
 }
 
-inline port_type convertToPort(long port) {
+inline port_type convertToPort(int64_t port) {
   if ((port < 0) || (port >= std::numeric_limits<port_type>::max()))
     throw std::domain_error("invalid port (value out of range)");
 
   return static_cast<port_type>(port);
 }
 
-inline rank_type convertToRank(long rank, long min = 0) {
+inline rank_type convertToRank(int64_t rank, int64_t min = 0) {
   if ((rank < min) || (rank >= std::numeric_limits<rank_type>::max()))
     throw std::domain_error("invalid rank (value out of range)");
 

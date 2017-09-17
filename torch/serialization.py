@@ -100,6 +100,22 @@ def storage_to_tensor_type(storage):
     return getattr(module, storage_type.__name__.replace('Storage', 'Tensor'))
 
 
+def _with_file_like(f, mode, body):
+    """
+    Executes a body function with a file object for f, opening
+    it in 'mode' if it is a string filename.
+    """
+    new_fd = False
+    if isinstance(f, str) or (sys.version_info[0] == 2 and isinstance(f, unicode)):
+        new_fd = True
+        f = open(f, mode)
+    try:
+        return body(f)
+    finally:
+        if new_fd:
+            f.close()
+
+
 def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
     """Saves an object to a disk file.
 
@@ -112,15 +128,7 @@ def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
         pickle_module: module used for pickling metadata and objects
         pickle_protocol: can be specified to override the default protocol
     """
-    new_fd = False
-    if isinstance(f, str) or (sys.version_info[0] == 2 and isinstance(f, unicode)):
-        new_fd = True
-        f = open(f, "wb")
-    try:
-        return _save(obj, f, pickle_module, pickle_protocol)
-    finally:
-        if new_fd:
-            f.close()
+    return _with_file_like(f, "wb", lambda f: _save(obj, f, pickle_module, pickle_protocol))
 
 
 def _save(obj, f, pickle_module, pickle_protocol):

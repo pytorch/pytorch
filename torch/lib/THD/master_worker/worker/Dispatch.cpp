@@ -20,7 +20,7 @@ namespace worker {
 
 namespace detail {
 
-void sendValueToMaster(long long value) {
+void sendValueToMaster(int64_t value) {
   IntScalar scalar(value);
   dataChannel->send(scalar, 0);
 }

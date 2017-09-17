@@ -26,7 +26,7 @@ __host__ void initializeGenerator(THCState *state, Generator* gen)
 }
 
 /* Creates a new generator state given the seed. */
-__host__ void createGeneratorState(Generator* gen, unsigned long long seed)
+__host__ void createGeneratorState(Generator* gen, uint64_t seed)
 {
   if (curandMakeMTGP32Constants(mtgp32dc_params_fast_11213, gen->kernel_params) != CURAND_STATUS_SUCCESS)
   {

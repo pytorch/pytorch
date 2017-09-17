@@ -46,7 +46,7 @@ void THNN_(TemporalConvolution_updateOutput)(
 
   THCTensor *outputWindow, *inputWindow;
   int nInputFrame, nOutputFrame;
-  long k, i;
+  int64_t k, i;
 
   int dimS = 0; // sequence dimension
 
@@ -85,9 +85,9 @@ void THNN_(TemporalConvolution_updateOutput)(
     /* ouch */
     for(k = 0; nOutputFrame > 0; k++)
     {
-      long outputFrameStride = (kW-1)/dW+1;
-      long inputFrameStride = outputFrameStride*dW;
-      long nFrame = (nInputFrame-k*dW-kW)/inputFrameStride + 1;
+      int64_t outputFrameStride = (kW-1)/dW+1;
+      int64_t inputFrameStride = outputFrameStride*dW;
+      int64_t nFrame = (nInputFrame-k*dW-kW)/inputFrameStride + 1;
       nOutputFrame -= nFrame;
 
       THCTensor_(setStorage2d)(state, inputWindow, input->storage,
@@ -121,7 +121,7 @@ void THNN_(TemporalConvolution_updateOutput)(
     {
       THCTensor_(select)(state, outputSample, output, 0, i);
       THCTensor_(select)(state, inputSample, input, 0, i);
-      long nOutputSampleFrame = nOutputFrame;
+      int64_t nOutputSampleFrame = nOutputFrame;
 
       /* bias first */
       for(k = 0; k < nOutputFrame; k++)
@@ -133,9 +133,9 @@ void THNN_(TemporalConvolution_updateOutput)(
       /* ouch */
       for(k = 0; nOutputSampleFrame > 0; k++)
       {
-        long outputFrameStride = (kW-1)/dW+1;
-        long inputFrameStride = outputFrameStride*dW;
-        long nFrame = (nInputFrame-k*dW-kW)/inputFrameStride + 1;
+        int64_t outputFrameStride = (kW-1)/dW+1;
+        int64_t inputFrameStride = outputFrameStride*dW;
+        int64_t nFrame = (nInputFrame-k*dW-kW)/inputFrameStride + 1;
         nOutputSampleFrame -= nFrame;
 
         THCTensor_(setStorage2d)(state, inputWindow, inputSample->storage,
@@ -172,12 +172,12 @@ void THNN_(TemporalConvolution_updateGradInput)(
            THCTensor *weight,
            int kW, int dW) {
 
-  long nInputFrame;
-  long nOutputFrame;
+  int64_t nInputFrame;
+  int64_t nOutputFrame;
 
   THCTensor *gradOutputWindow;
   THCTensor *gradInputWindow;
-  long k, i;
+  int64_t k, i;
 
   int dimS = 0; // sequence dimension
 
@@ -210,9 +210,9 @@ void THNN_(TemporalConvolution_updateGradInput)(
     /* ouch */
     for(k = 0; nOutputFrame > 0; k++)
     {
-      long outputFrameStride = (kW-1)/dW+1;
-      long inputFrameStride = outputFrameStride*dW;
-      long nFrame = (nInputFrame-k*dW-kW)/inputFrameStride + 1;
+      int64_t outputFrameStride = (kW-1)/dW+1;
+      int64_t inputFrameStride = outputFrameStride*dW;
+      int64_t nFrame = (nInputFrame-k*dW-kW)/inputFrameStride + 1;
       nOutputFrame -= nFrame;
 
       THCTensor_(setStorage2d)(state, gradOutputWindow, gradOutput->storage,
@@ -232,19 +232,19 @@ void THNN_(TemporalConvolution_updateGradInput)(
   {
     THCTensor *gradOutputSample = THCTensor_(new)(state);
     THCTensor *gradInputSample = THCTensor_(new)(state);
-    long nBatchFrame = input->size[0];
+    int64_t nBatchFrame = input->size[0];
     for(i = 0; i < nBatchFrame; i++)
     {
       THCTensor_(select)(state, gradOutputSample, gradOutput, 0, i);
       THCTensor_(select)(state, gradInputSample, gradInput, 0, i);
-      long nOutputSampleFrame = nOutputFrame;
+      int64_t nOutputSampleFrame = nOutputFrame;
 
       /* ouch */
       for(k = 0; nOutputSampleFrame > 0; k++)
       {
-        long outputFrameStride = (kW-1)/dW+1;
-        long inputFrameStride = outputFrameStride*dW;
-        long nFrame = (nInputFrame-k*dW-kW)/inputFrameStride + 1;
+        int64_t outputFrameStride = (kW-1)/dW+1;
+        int64_t inputFrameStride = outputFrameStride*dW;
+        int64_t nFrame = (nInputFrame-k*dW-kW)/inputFrameStride + 1;
         nOutputSampleFrame -= nFrame;
 
         THCTensor_(setStorage2d)(state, gradOutputWindow, gradOutputSample->storage,
@@ -281,12 +281,12 @@ void THNN_(TemporalConvolution_accGradParameters)(
            accreal scale_) {
 
   real scale = ScalarConvert<accreal, real>::to(scale_);
-  long nInputFrame;
-  long nOutputFrame;
+  int64_t nInputFrame;
+  int64_t nOutputFrame;
 
   THCTensor *gradOutputWindow;
   THCTensor *inputWindow;
-  long k, i;
+  int64_t k, i;
 
   THNN_(TemporalConvolution_shapeCheck)
        (state, input, kW, dW, NULL);
@@ -319,9 +319,9 @@ void THNN_(TemporalConvolution_accGradParameters)(
     /* ouch */
     for(k = 0; nOutputFrame > 0; k++)
     {
-      long outputFrameStride = (kW-1)/dW+1;
-      long inputFrameStride = outputFrameStride*dW;
-      long nFrame = (nInputFrame-k*dW-kW)/inputFrameStride + 1;
+      int64_t outputFrameStride = (kW-1)/dW+1;
+      int64_t inputFrameStride = outputFrameStride*dW;
+      int64_t nFrame = (nInputFrame-k*dW-kW)/inputFrameStride + 1;
       nOutputFrame -= nFrame;
 
       THCTensor_(setStorage2d)(state, inputWindow, input->storage,
@@ -344,13 +344,13 @@ void THNN_(TemporalConvolution_accGradParameters)(
   {
     THCTensor *gradOutputSample = THCTensor_(new)(state);
     THCTensor *inputSample = THCTensor_(new)(state);
-    long nBatchFrame = input->size[0];
+    int64_t nBatchFrame = input->size[0];
 
     for(i = 0; i < nBatchFrame; i++)
     {
       THCTensor_(select)(state, gradOutputSample, gradOutput, 0, i);
       THCTensor_(select)(state, inputSample, input, 0, i);
-      long nOutputSampleFrame = nOutputFrame;
+      int64_t nOutputSampleFrame = nOutputFrame;
 
       /* bias first */
       for(k = 0; k < nOutputFrame; k++)
@@ -362,9 +362,9 @@ void THNN_(TemporalConvolution_accGradParameters)(
       /* ouch */
       for(k = 0; nOutputSampleFrame > 0; k++)
       {
-        long outputFrameStride = (kW-1)/dW+1;
-        long inputFrameStride = outputFrameStride*dW;
-        long nFrame = (nInputFrame-k*dW-kW)/inputFrameStride + 1;
+        int64_t outputFrameStride = (kW-1)/dW+1;
+        int64_t inputFrameStride = outputFrameStride*dW;
+        int64_t nFrame = (nInputFrame-k*dW-kW)/inputFrameStride + 1;
         nOutputSampleFrame -= nFrame;
 
         THCTensor_(setStorage2d)(state, inputWindow, inputSample->storage,

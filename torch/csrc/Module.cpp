@@ -9,6 +9,9 @@
 #include <ATen/ATen.h>
 
 #include "torch/csrc/utils/python_strings.h"
+#include "torch/csrc/jit/python_tracer.h"
+#include "torch/csrc/jit/init.h"
+#include "torch/csrc/jit/python_ir.h"
 
 #ifdef WITH_CUDNN
 #include "cudnn/Module.h"
@@ -555,6 +558,7 @@ extern PyObject * THCPModule_cudaUnlockMutex(PyObject *module);
 
 extern PyObject * THCSPModule_initExtension(PyObject *self);
 #endif
+extern PyObject * THPJIT_initExtension(PyObject *self);
 
 static PyMethodDef TorchMethods[] = {
   {"_initExtension",  (PyCFunction)THPModule_initExtension,   METH_O,       NULL},
@@ -795,6 +799,7 @@ PyMODINIT_FUNC PyInit__C()
 #endif
 
   THPUtils_addPyMethodDefs(methods, TorchMethods);
+  THPUtils_addPyMethodDefs(methods, THPJIT_methods());
 #ifdef WITH_CUDNN
   THPUtils_addPyMethodDefs(methods, THCUDNN_methods());
 #endif
@@ -821,7 +826,9 @@ PyMODINIT_FUNC PyInit__C()
   ASSERT_TRUE(THPVariable_initModule(module));
   ASSERT_TRUE(THPFunction_initModule(module));
   ASSERT_TRUE(THPEngine_initModule(module));
-
+  torch::jit::initPythonIRBindings(module);
+  torch::jit::initPythonTracerBindings(module);
+  torch::autograd::initAutogradClosureBindings(module);
   ASSERT_TRUE(THPDoubleStorage_init(module));
   ASSERT_TRUE(THPFloatStorage_init(module));
   ASSERT_TRUE(THPHalfStorage_init(module));

@@ -15,16 +15,17 @@ THC_API void THCTensor_(cat)(THCState *state, THCTensor *result, THCTensor *ta, 
 THC_API void THCTensor_(catArray)(THCState *state, THCTensor *result, THCTensor **inputs, int numInputs, int dimension);
 THC_API void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor, THCTensor *self);
 
-THC_API void THCTensor_(tril)(THCState *state, THCTensor *self, THCTensor *src, long k);
-THC_API void THCTensor_(triu)(THCState *state, THCTensor *self, THCTensor *src, long k);
-THC_API void THCTensor_(diag)(THCState *state, THCTensor *self, THCTensor *src, long k);
-THC_API void THCTensor_(eye)(THCState *state, THCTensor *self, long n, long m);
+THC_API void THCTensor_(tril)(THCState *state, THCTensor *self, THCTensor *src, int64_t k);
+THC_API void THCTensor_(triu)(THCState *state, THCTensor *self, THCTensor *src, int64_t k);
+THC_API void THCTensor_(diag)(THCState *state, THCTensor *self, THCTensor *src, int64_t k);
+THC_API void THCTensor_(eye)(THCState *state, THCTensor *self, int64_t n, int64_t k);
+
 THC_API accreal THCTensor_(trace)(THCState *state, THCTensor *self);
 
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
 
-THC_API void THCTensor_(linspace)(THCState *state, THCTensor *r_, real a, real b, long n);
-THC_API void THCTensor_(logspace)(THCState *state, THCTensor *r_, real a, real b, long n);
+THC_API void THCTensor_(linspace)(THCState *state, THCTensor *r_, real a, real b, int64_t n);
+THC_API void THCTensor_(logspace)(THCState *state, THCTensor *r_, real a, real b, int64_t n);
 
 #endif
 

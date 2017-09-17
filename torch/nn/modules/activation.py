@@ -696,7 +696,7 @@ class LogSoftmax(Module):
     """Applies the Log(Softmax(x)) function to an n-dimensional input Tensor.
     The LogSoftmax formulation can be simplified as
 
-    :math:`f_i(x) = log(1 / a * exp(x_i))` where :math:`a = sum_j exp(x_j)`
+    :math:`f_i(x) = log(exp(x_i) / sum_j exp(x_j) )`
 
     Shape:
         - Input: :math:`(N, L)`

@@ -6,7 +6,7 @@
 
 namespace at {
 
-struct ${Type} : public Type {
+struct ${Type} final : public Type {
   explicit ${Type}(Context* context);
   virtual ScalarType scalarType() override;
   virtual Backend backend() override;
@@ -18,6 +18,7 @@ struct ${Type} : public Type {
   virtual std::unique_ptr<Storage> storageFromBlob(void * data, int64_t size) override;
   virtual std::unique_ptr<Generator> generator() override;
   virtual const char * toString() const override;
+  virtual std::size_t elementSizeInBytes() const override;
   virtual TypeID ID() const override;
   static const char * typeString();
   Tensor unsafeTensorFromTH(void * th_pointer, bool retain) override;

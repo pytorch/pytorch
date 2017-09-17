@@ -10,6 +10,17 @@ class Dropout(InplaceFunction):
     def _make_noise(input):
         return input.new().resize_as_(input)
 
+    @staticmethod
+    def symbolic(g, input, p=0.5, train=False, inplace=False):
+        if inplace:
+            return None
+        n = g.appendNode(g.create("Dropout", [input])
+                          .f_("ratio", p)
+                          .i_("is_test", not train))
+        real = g.appendNode(g.createSelect(n, 0))
+        g.appendNode(g.createSelect(n, 1))
+        return real
+
     @classmethod
     def forward(cls, ctx, input, p=0.5, train=False, inplace=False):
         if p < 0 or p > 1:
@@ -45,6 +56,10 @@ class Dropout(InplaceFunction):
 
 
 class FeatureDropout(Dropout):
+
+    @staticmethod
+    def symbolic(input, p=0.5, train=False, inplace=False):
+        return None
 
     @staticmethod
     def _make_noise(input):

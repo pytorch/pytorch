@@ -9,10 +9,10 @@
 #define ROW_PTR2(t, r) (THCTensor_(data)(THCState *state, t) + (r) * (t)->stride[0])
 #define COL_PTR2(t, c) (THCTensor_(data)(THCState *state, t) + (c) * (t)->stride[1])
 
-#define I_INFO(tensor) getTensorInfo<THCIndexTensor, unsigned long>(state, tensor)
-#define V_INFO(tensor) getTensorInfo<THCTensor, unsigned long>(state, tensor)
+#define I_INFO(tensor) getTensorInfo<THCIndexTensor, uint64_t>(state, tensor)
+#define V_INFO(tensor) getTensorInfo<THCTensor, uint64_t>(state, tensor)
 
-THCudaIntTensor *THCSTensor_(toCSR)(THCState *state, THCIndexTensor *rowIndices, long dim, long nnz) {
+THCudaIntTensor *THCSTensor_(toCSR)(THCState *state, THCIndexTensor *rowIndices, int64_t dim, int64_t nnz) {
   THCudaIntTensor *csr = THCudaIntTensor_newWithSize1d(state, dim + 1);
   THCudaIntTensor *rowIndicesInt = THCudaIntTensor_newWithSize1d(state, rowIndices->size[0]);
   THCudaIntTensor_copyCudaLong(state, rowIndicesInt, rowIndices);
@@ -54,9 +54,9 @@ void THCSTensor_(spaddmm)(THCState *state, THCTensor *r_, real beta, THCTensor *
   THArgCheck(dense->nDimension == 2, 2,
       "matrices expected, got %dD tensor", dense->nDimension);
 
-  long m = THCSTensor_(size)(state, sparse_, 0);
-  long k = THCSTensor_(size)(state, sparse_, 1);
-  long n = THCTensor_(size)(state, dense, 1);
+  int64_t m = THCSTensor_(size)(state, sparse_, 0);
+  int64_t k = THCSTensor_(size)(state, sparse_, 1);
+  int64_t n = THCTensor_(size)(state, dense, 1);
 
   THCTensor_(resize2d)(state, r_, m, n);
 
@@ -69,7 +69,7 @@ void THCSTensor_(spaddmm)(THCState *state, THCTensor *r_, real beta, THCTensor *
 
   THCSTensor *sparse = THCSTensor_(newCoalesce)(state, sparse_);
 
-  long nnz = THCSTensor_(nnz)(state, sparse);
+  int64_t nnz = THCSTensor_(nnz)(state, sparse);
   indices = THCSTensor_(newIndices)(state, sparse);
   values = THCSTensor_(newValues)(state, sparse);
 
@@ -174,18 +174,18 @@ void THCSTensor_(hspmm)(THCState *state, THCSTensor *r_, real alpha, THCSTensor 
   THArgCheck(dense->nDimension == 2, 4,
       "matrices expected, got %dD tensor", dense->nDimension);
 
-  long m = THCSTensor_(size)(state, sparse_, 0);
-  long k = THCSTensor_(size)(state, sparse_, 1);
-  long n = THCTensor_(size)(state, dense, 1);
+  int64_t m = THCSTensor_(size)(state, sparse_, 0);
+  int64_t k = THCSTensor_(size)(state, sparse_, 1);
+  int64_t n = THCTensor_(size)(state, dense, 1);
 
   THArgCheck(THCTensor_(size)(state, dense, 0) == k, 4,
       "Expected dim 0 size %d, got %d", k, THCTensor_(size)(state, dense, 0));
-  long size[2] = {m, n};
+  int64_t size[2] = {m, n};
   THCSTensor_(rawResize)(state, r_, 1, 1, size);
 
   THCSTensor *sparse = THCSTensor_(newCoalesce)(state, sparse_);
 
-  long nnz = THCSTensor_(nnz)(state, sparse);
+  int64_t nnz = THCSTensor_(nnz)(state, sparse);
   THCIndexTensor *indices = THCIndexTensor_(newWithSize2d)(state, 1, nnz);
   // create values in column-major format to avoid copying in spaddmm
   THCTensor *values = THCTensor_(newWithSize2d)(state, n, nnz);
@@ -238,8 +238,8 @@ void THCSTensor_(spcadd)(THCState *state, THCTensor *r_, THCTensor *dense, real 
 
   THCIndexTensor *indices = THCSTensor_(newIndices)(state, sparse);
   THCTensor *values = THCSTensor_(newValues)(state, sparse);
-  long nDim = THCTensor_(nDimension)(state, dense);
-  long nDimI = THCSTensor_(nDimensionI)(state, sparse);
+  int64_t nDim = THCTensor_(nDimension)(state, dense);
+  int64_t nDimI = THCSTensor_(nDimensionI)(state, sparse);
 
  if (THCSTensor_(isCoalesced)(state, sparse)) {
     // TODO benchmark to decide whether to remove this special case
@@ -248,19 +248,19 @@ void THCSTensor_(spcadd)(THCState *state, THCTensor *r_, THCTensor *dense, real 
     if (sparse->nDimensionV == 0) {
       THArgCheck(getApplyGrid(state, nnz, grid), 1, CUTORCH_DIM_WARNING);
 
-      THCSTensor_sparseElementwiseKernelScalar<TensorCAddOp<real>, unsigned long, real>
+      THCSTensor_sparseElementwiseKernelScalar<TensorCAddOp<real>, uint64_t, real>
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
           TensorCAddOp<real>(value),
           V_INFO(r_), I_INFO(indices), V_INFO(values),
-          (unsigned long) nnz);
+          (uint64_t) nnz);
     } else {
       THArgCheck(getApplyGrid(state, nnz * block.x, grid), 1, CUTORCH_DIM_WARNING);
 
-      THCSTensor_sparseElementwiseKernel<TensorCAddOp<real>, unsigned long, real>
+      THCSTensor_sparseElementwiseKernel<TensorCAddOp<real>, uint64_t, real>
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
           TensorCAddOp<real>(value),
           V_INFO(r_), I_INFO(indices), V_INFO(values),
-          (unsigned long) nnz);
+          (uint64_t) nnz);
     }
   } else {
     THCIndexTensor *indices1D = THCSTensor_(newFlattenedIndices)(state, sparse);
@@ -274,8 +274,8 @@ void THCSTensor_(spcadd)(THCState *state, THCTensor *r_, THCTensor *dense, real 
       values = scaled;
     }
 
-    long view_rows = 1;
-    long view_columns = 1;
+    int64_t view_rows = 1;
+    int64_t view_columns = 1;
     THLongStorage *r_size = THCTensor_(newSizeOf)(state, r);
     for (int i = 0; i < nDimI; i++)
       view_rows *= r_size->data[i];
@@ -422,7 +422,7 @@ void THCSTensor_(cmul)(THCState *state, THCSTensor *r_, THCSTensor *t_, THCSTens
   // saving those because they can be overwritten when doing in-place operations
   ptrdiff_t t_nnz = t->nnz, s_nnz = src->nnz;
   ptrdiff_t max_nnz = t_nnz < s_nnz ? t_nnz : s_nnz;
-  long nDimI = src->nDimensionI;
+  int64_t nDimI = src->nDimensionI;
   THCIndexTensor *t_indices_ = THCSTensor_(newIndices)(state, t);
   THCTensor *t_values_ = THCSTensor_(newValues)(state, t);
   THCIndexTensor *s_indices_ = THCSTensor_(newIndices)(state, src);
@@ -433,24 +433,24 @@ void THCSTensor_(cmul)(THCState *state, THCSTensor *r_, THCSTensor *t_, THCSTens
   THCSTensor_(resizeAs)(state, r_, src);
   THCSTensor_(_move)(state, r_, r_indices_, r_values_);
 
-  long valueSize = t_values_->stride[0];
-  const dim3 block = dim3(min((long) getApplyBlock().x, valueSize));
+  int64_t valueSize = t_values_->stride[0];
+  const dim3 block = dim3(min((int64_t) getApplyBlock().x, valueSize));
   dim3 grid;
   THArgCheck(getApplyGrid(state, valueSize, grid), 1, CUTORCH_DIM_WARNING);
 
-  THCSTensor_valueSparseIntersectionKernel<TensorMulOp<real>, unsigned long, real>
+  THCSTensor_valueSparseIntersectionKernel<TensorMulOp<real>, uint64_t, real>
     <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
       TensorMulOp<real>(),
       I_INFO(r_indices_), I_INFO(t_indices_), I_INFO(s_indices_),
       V_INFO(r_values_), V_INFO(t_values_), V_INFO(s_values_),
-      (unsigned long)t_nnz, (unsigned long)s_nnz);
+      (uint64_t)t_nnz, (uint64_t)s_nnz);
   THCudaCheck(cudaGetLastError());
 
   THCudaLongStorage *resultNnz = THCudaLongStorage_newWithSize(state, 1);
-  THCSTensor_indexSparseIntersectionKernel<unsigned long, real>
+  THCSTensor_indexSparseIntersectionKernel<uint64_t, real>
     <<<1, 1, 0, THCState_getCurrentStream(state)>>>(
       I_INFO(r_indices_), I_INFO(t_indices_), I_INFO(s_indices_),
-      (unsigned long)t_nnz, (unsigned long)s_nnz, (unsigned long*)resultNnz->data);
+      (uint64_t)t_nnz, (uint64_t)s_nnz, (uint64_t*)resultNnz->data);
   THCudaCheck(cudaGetLastError());
   r_->nnz = THCudaLongStorage_get(state, resultNnz, 0);
   THCudaLongStorage_free(state, resultNnz);
