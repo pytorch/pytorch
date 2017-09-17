@@ -21,7 +21,7 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
     scale_ = Output(1);
   } else {
     if (!scale_) {
-      scale_ = &tmp_tensor_;
+      scale_ = &local_scale_tensor_;
     }
   }
   scale_->ResizeLike(X);
@@ -86,7 +86,7 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
     scale_ = Output(1);
   } else {
     if (!scale_) {
-      scale_ = &tmp_tensor_;
+      scale_ = &local_scale_tensor_;
     }
   }
   scale_->ResizeLike(X);
@@ -140,9 +140,9 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   const float* Xdata = X.data<float>();
   const float* Ydata = Y.data<float>();
   if (!scale_) {
-    scale_ = &tmp_tensor_;
-    scale_->ResizeLike(X);
+    scale_ = &local_scale_tensor_;
   }
+  scale_->ResizeLike(X);
   float* scale_data = scale_->mutable_data<float>();
   const float* dYdata = dY.data<float>();
   float* dXdata = dX->mutable_data<float>();
@@ -243,9 +243,9 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   DCHECK_EQ(X.size(), dY.size());
   dX->ResizeLike(X);
   if (!scale_) {
-    scale_ = &tmp_tensor_;
-    scale_->ResizeLike(X);
+    scale_ = &local_scale_tensor_;
   }
+  scale_->ResizeLike(X);
   TensorCPU padded_ratio(vector<TIndex>(1, C + size_ - 1));
   float* padded_ratio_data = padded_ratio.mutable_data<float>();
   float* scale_data = scale_->mutable_data<float>();

@@ -67,7 +67,7 @@ class LRNOp final : public LRNOpBase<T, Context> {
   // Input: X; Output: Y, scale.
   OUTPUT_TAGS(OUTPUT, SCALE);
   Tensor<Context>* scale_;
-  Tensor<Context> tmp_tensor_;
+  Tensor<Context> local_scale_tensor_;
 };
 
 template <typename T, class Context>
@@ -84,7 +84,7 @@ class LRNGradientOp final : public LRNOpBase<T, Context> {
   // Input: X, Y, scale, dY; Output: dX
   INPUT_TAGS(INPUT, OUTPUT, SCALE, OUTPUT_GRAD);
   Tensor<Context>* scale_;
-  Tensor<Context> tmp_tensor_;
+  Tensor<Context> local_scale_tensor_;
 };
 
 } // namespace caffe2
