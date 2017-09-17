@@ -497,7 +497,7 @@ if BACKEND == 'tcp' or BACKEND == 'gloo':
     class TestTCPOrGloo(TestCase, _DistTestBase):
 
         MANAGER_PROCESS_RANK = -1
-        JOIN_TIMEOUT = 5
+        JOIN_TIMEOUT = 10
 
         @staticmethod
         def manager_join(fn):

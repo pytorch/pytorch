@@ -14,102 +14,108 @@ struct THCNumerics {
 };
 
 template <>
-struct THCNumerics<unsigned char> {
-  static inline __host__ __device__ unsigned char min() { return 0; }
-  static inline __host__ __device__ unsigned char max() { return UCHAR_MAX; }
+struct THCNumerics<uint8_t> {
+  static inline __host__ __device__ uint8_t min() { return 0; }
+  static inline __host__ __device__ uint8_t max() { return UCHAR_MAX; }
 
-  static inline __host__ __device__ bool lt(unsigned char a, unsigned char b) { return a < b; }
-  static inline __host__ __device__ bool le(unsigned char a, unsigned char b) { return a <= b; }
-  static inline __host__ __device__ bool gt(unsigned char a, unsigned char b) { return a > b; }
-  static inline __host__ __device__ bool ge(unsigned char a, unsigned char b) { return a >= b; }
-  static inline __host__ __device__ bool eq(unsigned char a, unsigned char b) { return a == b; }
-  static inline __host__ __device__ bool ne(unsigned char a, unsigned char b) { return a != b; }
+  static inline __host__ __device__ bool lt(uint8_t a, uint8_t b) { return a < b; }
+  static inline __host__ __device__ bool le(uint8_t a, uint8_t b) { return a <= b; }
+  static inline __host__ __device__ bool gt(uint8_t a, uint8_t b) { return a > b; }
+  static inline __host__ __device__ bool ge(uint8_t a, uint8_t b) { return a >= b; }
+  static inline __host__ __device__ bool eq(uint8_t a, uint8_t b) { return a == b; }
+  static inline __host__ __device__ bool ne(uint8_t a, uint8_t b) { return a != b; }
 
-  static inline __host__ __device__  unsigned char add(unsigned char a, unsigned char b) { return a + b; }
-  static inline __host__ __device__  unsigned char mul(unsigned char a, unsigned char b) { return a * b; }
-  static inline __host__ __device__  unsigned char sub(unsigned char a, unsigned char b) { return a - b; }
-  static inline __host__ __device__  unsigned char div(unsigned char a, unsigned char b) { return a / b; }
-  static inline __host__ __device__  unsigned char abs(unsigned char a) { return abs(a); }
+  static inline __host__ __device__  uint8_t add(uint8_t a, uint8_t b) { return a + b; }
+  static inline __host__ __device__  uint8_t mul(uint8_t a, uint8_t b) { return a * b; }
+  static inline __host__ __device__  uint8_t sub(uint8_t a, uint8_t b) { return a - b; }
+  static inline __host__ __device__  uint8_t div(uint8_t a, uint8_t b) { return a / b; }
+  static inline __host__ __device__  uint8_t abs(uint8_t a) { return abs(a); }
 };
 
 template <>
-struct THCNumerics<char> {
-  static inline __host__ __device__ char min() { return CHAR_MIN; }
-  static inline __host__ __device__ char max() { return CHAR_MAX; }
+struct THCNumerics<int8_t> {
+  static inline __host__ __device__ int8_t min() { return CHAR_MIN; }
+  static inline __host__ __device__ int8_t max() { return CHAR_MAX; }
 
-  static inline __host__ __device__ bool lt(char a, char b) { return a < b; }
-  static inline __host__ __device__ bool le(char a, char b) { return a <= b; }
-  static inline __host__ __device__ bool gt(char a, char b) { return a > b; }
-  static inline __host__ __device__ bool ge(char a, char b) { return a >= b; }
-  static inline __host__ __device__ bool eq(char a, char b) { return a == b; }
-  static inline __host__ __device__ bool ne(char a, char b) { return a != b; }
+  static inline __host__ __device__ bool lt(int8_t a, int8_t b) { return a < b; }
+  static inline __host__ __device__ bool le(int8_t a, int8_t b) { return a <= b; }
+  static inline __host__ __device__ bool gt(int8_t a, int8_t b) { return a > b; }
+  static inline __host__ __device__ bool ge(int8_t a, int8_t b) { return a >= b; }
+  static inline __host__ __device__ bool eq(int8_t a, int8_t b) { return a == b; }
+  static inline __host__ __device__ bool ne(int8_t a, int8_t b) { return a != b; }
 
-  static inline __host__ __device__  char neg(char a) { return -a; }
-  static inline __host__ __device__  char add(char a, char b) { return a + b; }
-  static inline __host__ __device__  char mul(char a, char b) { return a * b; }
-  static inline __host__ __device__  char sub(char a, char b) { return a - b; }
-  static inline __host__ __device__  char div(char a, char b) { return a / b; }
-  static inline __host__ __device__  char abs(char a) { return ::abs((int)a); }
+  static inline __host__ __device__  int8_t neg(int8_t a) { return -a; }
+  static inline __host__ __device__  int8_t add(int8_t a, int8_t b) { return a + b; }
+  static inline __host__ __device__  int8_t mul(int8_t a, int8_t b) { return a * b; }
+  static inline __host__ __device__  int8_t sub(int8_t a, int8_t b) { return a - b; }
+  static inline __host__ __device__  int8_t div(int8_t a, int8_t b) { return a / b; }
+  static inline __host__ __device__  int8_t abs(int8_t a) { return ::abs((int)a); }
 };
 
 template <>
-struct THCNumerics<short> {
-  static inline __host__ __device__ short min() { return SHRT_MIN; }
-  static inline __host__ __device__ short max() { return SHRT_MAX; }
+struct THCNumerics<int16_t> {
+  static inline __host__ __device__ int16_t min() { return SHRT_MIN; }
+  static inline __host__ __device__ int16_t max() { return SHRT_MAX; }
 
-  static inline __host__ __device__ bool lt(short a, short b) { return a < b; }
-  static inline __host__ __device__ bool le(short a, short b) { return a <= b; }
-  static inline __host__ __device__ bool gt(short a, short b) { return a > b; }
-  static inline __host__ __device__ bool ge(short a, short b) { return a >= b; }
-  static inline __host__ __device__ bool eq(short a, short b) { return a == b; }
-  static inline __host__ __device__ bool ne(short a, short b) { return a != b; }
+  static inline __host__ __device__ bool lt(int16_t a, int16_t b) { return a < b; }
+  static inline __host__ __device__ bool le(int16_t a, int16_t b) { return a <= b; }
+  static inline __host__ __device__ bool gt(int16_t a, int16_t b) { return a > b; }
+  static inline __host__ __device__ bool ge(int16_t a, int16_t b) { return a >= b; }
+  static inline __host__ __device__ bool eq(int16_t a, int16_t b) { return a == b; }
+  static inline __host__ __device__ bool ne(int16_t a, int16_t b) { return a != b; }
 
-  static inline __host__ __device__  short neg(short a) { return -a; }
-  static inline __host__ __device__  short add(short a, short b) { return a + b; }
-  static inline __host__ __device__  short mul(short a, short b) { return a * b; }
-  static inline __host__ __device__  short sub(short a, short b) { return a - b; }
-  static inline __host__ __device__  short div(short a, short b) { return a / b; }
-  static inline __host__ __device__  short abs(short a) { return ::abs((int)a); }
+  static inline __host__ __device__  int16_t neg(int16_t a) { return -a; }
+  static inline __host__ __device__  int16_t add(int16_t a, int16_t b) { return a + b; }
+  static inline __host__ __device__  int16_t mul(int16_t a, int16_t b) { return a * b; }
+  static inline __host__ __device__  int16_t sub(int16_t a, int16_t b) { return a - b; }
+  static inline __host__ __device__  int16_t div(int16_t a, int16_t b) { return a / b; }
+  static inline __host__ __device__  int16_t abs(int16_t a) { return ::abs((int)a); }
 };
 
 template <>
-struct THCNumerics<int> {
-  static inline __host__ __device__ int min() { return INT_MIN; }
-  static inline __host__ __device__ int max() { return INT_MAX; }
+struct THCNumerics<int32_t> {
+  static inline __host__ __device__ int32_t min() { return INT_MIN; }
+  static inline __host__ __device__ int32_t max() { return INT_MAX; }
 
-  static inline __host__ __device__ bool lt(int a, int b) { return a < b; }
-  static inline __host__ __device__ bool le(int a, int b) { return a <= b; }
-  static inline __host__ __device__ bool gt(int a, int b) { return a > b; }
-  static inline __host__ __device__ bool ge(int a, int b) { return a >= b; }
-  static inline __host__ __device__ bool eq(int a, int b) { return a == b; }
-  static inline __host__ __device__ bool ne(int a, int b) { return a != b; }
+  static inline __host__ __device__ bool lt(int32_t a, int32_t b) { return a < b; }
+  static inline __host__ __device__ bool le(int32_t a, int32_t b) { return a <= b; }
+  static inline __host__ __device__ bool gt(int32_t a, int32_t b) { return a > b; }
+  static inline __host__ __device__ bool ge(int32_t a, int32_t b) { return a >= b; }
+  static inline __host__ __device__ bool eq(int32_t a, int32_t b) { return a == b; }
+  static inline __host__ __device__ bool ne(int32_t a, int32_t b) { return a != b; }
 
-  static inline __host__ __device__  int neg(int a) { return -a; }
-  static inline __host__ __device__  int add(int a, int b) { return a + b; }
-  static inline __host__ __device__  int mul(int a, int b) { return a * b; }
-  static inline __host__ __device__  int sub(int a, int b) { return a - b; }
-  static inline __host__ __device__  int div(int a, int b) { return a / b; }
-  static inline __host__ __device__  int abs(int a) { return ::abs(a); }
+  static inline __host__ __device__  int32_t neg(int32_t a) { return -a; }
+  static inline __host__ __device__  int32_t add(int32_t a, int32_t b) { return a + b; }
+  static inline __host__ __device__  int32_t mul(int32_t a, int32_t b) { return a * b; }
+  static inline __host__ __device__  int32_t sub(int32_t a, int32_t b) { return a - b; }
+  static inline __host__ __device__  int32_t div(int32_t a, int32_t b) { return a / b; }
+  static inline __host__ __device__  int32_t abs(int32_t a) { return ::abs(a); }
 };
 
 template <>
-struct THCNumerics<long> {
-  static inline __host__ __device__ long min() { return LONG_MIN; }
-  static inline __host__ __device__ long max() { return LONG_MAX; }
+struct THCNumerics<int64_t> {
+#ifdef _MSC_VER
+  static inline __host__ __device__ int64_t min() { return _I64_MIN; }
+  static inline __host__ __device__ int64_t max() { return _I64_MAX; }
+#else
+  static inline __host__ __device__ int64_t min() { return LONG_MIN; }
+  static inline __host__ __device__ int64_t max() { return LONG_MAX; }
+#endif
 
-  static inline __host__ __device__ bool lt(long a, long b) { return a < b; }
-  static inline __host__ __device__ bool le(long a, long b) { return a <= b; }
-  static inline __host__ __device__ bool gt(long a, long b) { return a > b; }
-  static inline __host__ __device__ bool ge(long a, long b) { return a >= b; }
-  static inline __host__ __device__ bool eq(long a, long b) { return a == b; }
-  static inline __host__ __device__ bool ne(long a, long b) { return a != b; }
+  static inline __host__ __device__ bool lt(int64_t a, int64_t b) { return a < b; }
+  static inline __host__ __device__ bool le(int64_t a, int64_t b) { return a <= b; }
+  static inline __host__ __device__ bool gt(int64_t a, int64_t b) { return a > b; }
+  static inline __host__ __device__ bool ge(int64_t a, int64_t b) { return a >= b; }
+  static inline __host__ __device__ bool eq(int64_t a, int64_t b) { return a == b; }
+  static inline __host__ __device__ bool ne(int64_t a, int64_t b) { return a != b; }
 
-  static inline __host__ __device__  long neg(long a) { return -a; }
-  static inline __host__ __device__  long add(long a, long b) { return a + b; }
-  static inline __host__ __device__  long mul(long a, long b) { return a * b; }
-  static inline __host__ __device__  long sub(long a, long b) { return a - b; }
-  static inline __host__ __device__  long div(long a, long b) { return a / b; };
-  static inline __host__ __device__  long abs(long a) { return labs(a); }
+
+  static inline __host__ __device__  int64_t neg(int64_t a) { return -a; }
+  static inline __host__ __device__  int64_t add(int64_t a, int64_t b) { return a + b; }
+  static inline __host__ __device__  int64_t mul(int64_t a, int64_t b) { return a * b; }
+  static inline __host__ __device__  int64_t sub(int64_t a, int64_t b) { return a - b; }
+  static inline __host__ __device__  int64_t div(int64_t a, int64_t b) { return a / b; };
+  static inline __host__ __device__  int64_t abs(int64_t a) { return labs(a); }
 };
 
 #ifdef CUDA_HALF_TENSOR

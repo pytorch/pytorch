@@ -6,6 +6,7 @@ import torch.sparse as sparse
 import torch.utils.hooks as hooks
 import warnings
 import weakref
+from torch._six import imap
 
 
 class Variable(_C._VariableBase):
@@ -138,7 +139,7 @@ class Variable(_C._VariableBase):
         zero them before calling it.
 
         Arguments:
-            grad_variables (Tensor, Variable or None): Gradient w.r.t. the
+            gradient (Tensor, Variable or None): Gradient w.r.t. the
                 variable. If it is a tensor, it will be automatically converted
                 to a Variable that is volatile unless ``create_graph`` is True.
                 None values can be specified for scalar Variables or ones that
@@ -868,7 +869,13 @@ class Variable(_C._VariableBase):
         return len(self.data)
 
     def __iter__(self):
-        return iter(map(lambda i: self[i], range(self.size(0))))
+        # NB: we use 'imap' and not 'map' here, so that in Python 2 we get a
+        # generator and don't eagerly perform all the indexes.  This could
+        # save us work, and also helps keep trace ordering deterministic
+        # (e.g., if you zip(*hiddens), the eager map will force all the
+        # indexes of hiddens[0] before hiddens[1], while the generator
+        # map will interleave them.)
+        return iter(imap(lambda i: self[i], range(self.size(0))))
 
     def __mod__(self, other):
         return self.remainder(other)

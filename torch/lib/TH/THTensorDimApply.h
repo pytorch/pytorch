@@ -4,12 +4,12 @@
 #define TH_TENSOR_DIM_APPLY3(TYPE1, TENSOR1, TYPE2, TENSOR2, TYPE3, TENSOR3, DIMENSION, CODE) \
 { \
   TYPE1 *TENSOR1##_data = NULL; \
-  long TENSOR1##_stride = 0, TENSOR1##_size = 0; \
+  int64_t TENSOR1##_stride = 0, TENSOR1##_size = 0; \
   TYPE2 *TENSOR2##_data = NULL; \
-  long TENSOR2##_stride = 0, TENSOR2##_size = 0; \
+  int64_t TENSOR2##_stride = 0, TENSOR2##_size = 0; \
   TYPE3 *TENSOR3##_data = NULL; \
-  long TENSOR3##_stride = 0, TENSOR3##_size = 0; \
-  long *TH_TENSOR_DIM_APPLY_counter = NULL; \
+  int64_t TENSOR3##_stride = 0, TENSOR3##_size = 0; \
+  int64_t *TH_TENSOR_DIM_APPLY_counter = NULL; \
   int TH_TENSOR_DIM_APPLY_hasFinished = 0; \
   int TH_TENSOR_DIM_APPLY_i; \
 \
@@ -48,7 +48,7 @@
             #TENSOR1, T1buff.str, #TENSOR2, T2buff.str, #TENSOR3, T3buff.str, DIMENSION); \
   } \
 \
-  TH_TENSOR_DIM_APPLY_counter = (long*)THAlloc(sizeof(long)*(TENSOR1->nDimension)); \
+  TH_TENSOR_DIM_APPLY_counter = (int64_t*)THAlloc(sizeof(int64_t)*(TENSOR1->nDimension)); \
   for(TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < TENSOR1->nDimension; TH_TENSOR_DIM_APPLY_i++) \
     TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i] = 0; \
 \
@@ -116,7 +116,7 @@
  * specified DIMENSION. This function makes it easy to store the output from reducing the
  * TENSOR at index. For example, in the sum example described below, we could instead do:
  *
- * long i = 0;
+ * int64_t i = 0;
  * TYPE1 sum;
  *
  * for (i = 0; i < TENSOR1##_size; ++i) {
@@ -130,10 +130,10 @@
 #define TH_TENSOR_DIM_APPLY2(TYPE1, TENSOR1, TYPE2, TENSOR2, DIMENSION, CODE) \
 { \
   TYPE1 *TENSOR1##_data = NULL; \
-  long TENSOR1##_stride = 0, TENSOR1##_size = 0; \
+  int64_t TENSOR1##_stride = 0, TENSOR1##_size = 0; \
   TYPE2 *TENSOR2##_data = NULL; \
-  long TENSOR2##_stride = 0, TENSOR2##_size = 0; \
-  long *TH_TENSOR_DIM_APPLY_counter = NULL; \
+  int64_t TENSOR2##_stride = 0, TENSOR2##_size = 0; \
+  int64_t *TH_TENSOR_DIM_APPLY_counter = NULL; \
   int TH_TENSOR_DIM_APPLY_hasFinished = 0; \
   int TH_TENSOR_DIM_APPLY_i; \
 \
@@ -158,7 +158,7 @@
     }                                                                   \
   } \
 \
-  TH_TENSOR_DIM_APPLY_counter = (long*)THAlloc(sizeof(long)*(TENSOR1->nDimension)); \
+  TH_TENSOR_DIM_APPLY_counter = (int64_t*)THAlloc(sizeof(int64_t)*(TENSOR1->nDimension)); \
   for(TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < TENSOR1->nDimension; TH_TENSOR_DIM_APPLY_i++) \
     TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i] = 0; \
 \
@@ -232,7 +232,7 @@
  * And at each point, we can access the data for each of the four elements of the Tensor via
  * TENSOR##_stride. So for example, if we wanted to sum the elements there, we could do:
  *
- * long i = 0;
+ * int64_t i = 0;
  * TYPE sum;
  * for (i = 0; i < TENSOR##_size; i++) {
  *  sum += TENSOR##_data[i * TENSOR##_stride]
@@ -256,8 +256,8 @@
 #define TH_TENSOR_DIM_APPLY(TYPE, TENSOR, DIMENSION, CODE) \
 { \
   TYPE *TENSOR##_data = NULL; \
-  long TENSOR##_stride = 0, TENSOR##_size = 0; \
-  long *TH_TENSOR_DIM_APPLY_counter = NULL; \
+  int64_t TENSOR##_stride = 0, TENSOR##_size = 0; \
+  int64_t *TH_TENSOR_DIM_APPLY_counter = NULL; \
   int TH_TENSOR_DIM_APPLY_hasFinished = 0; \
   int TH_TENSOR_DIM_APPLY_i; \
 \
@@ -268,7 +268,7 @@
   TENSOR##_stride = (TENSOR)->stride[DIMENSION]; \
   TENSOR##_size = TENSOR->size[DIMENSION]; \
   /* Counter stores the indices into the Tensor at any time */ \
-  TH_TENSOR_DIM_APPLY_counter = (long*)THAlloc(sizeof(long)*(TENSOR->nDimension)); \
+  TH_TENSOR_DIM_APPLY_counter = (int64_t*)THAlloc(sizeof(int64_t)*(TENSOR->nDimension)); \
   for(TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < TENSOR->nDimension; TH_TENSOR_DIM_APPLY_i++) \
     TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i] = 0; \
 \

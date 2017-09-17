@@ -198,6 +198,7 @@ THTensor* THPTensor_(fromNumpy)(PyObject *numpy_array) {
           // See Note [Numpy memory management]
           &THNumpyArrayAllocator,
           new NumpyArrayAllocator(numpy_array)));
+      THStorage_(clearFlag)(storage.get(), TH_STORAGE_RESIZABLE);
       result = THTensor_(newWithStorage)(LIBRARY_STATE storage, 0, sizes, strides);
     }
     else
@@ -587,6 +588,18 @@ static bool THPTensor_(_indexOnce)(PyObject *index, int &indexed_dim,
 
 #ifndef TH_REAL_IS_HALF
 
+static bool THPTensor_(_checkSingleSequenceTriggersAdvancedIndexing)(PyObject *arg) {
+  if (PySequence_Check(arg) && !PyTuple_Check(arg)) {
+    auto fast = THPObjectPtr(PySequence_Fast(arg, NULL));
+    for (Py_ssize_t i = 0; i < PySequence_Fast_GET_SIZE(fast.get()); ++i) {
+      if (!THPUtils_checkLong(PySequence_Fast_GET_ITEM(fast.get(), i)))
+        return false;
+    }
+    return true;
+  }
+  return false;
+}
+
 static bool THPTensor_(_checkBasicIntegerArrayIndexing)(THPTensor *indexed, PyObject *arg) {
   long ndim = THTensor_(nDimension)(LIBRARY_STATE indexed->cdata);
 
@@ -606,9 +619,11 @@ static bool THPTensor_(_checkBasicIntegerArrayIndexing)(THPTensor *indexed, PyOb
 static bool THPTensor_(_checkAdvancedIndexing)(THPTensor *indexed, PyObject *arg) {
   // Currently we only support two forms of advanced indexing:
   //
-  // 1. "Basic Integer Array Indexing" the integer-array indexing strategy
+  // 1. Indexing with a single non-tuple sequence, not nested within a sequence,
+  // that is composed only of integer indexers, e.g. x[[0, 1, 4]]
+  // 2. "Basic Integer Array Indexing" the integer-array indexing strategy
   // where we have ndim sequence/LongTensor arguments
-  // 2. Combining Advanced Indexing with ":", or "..." , with the limitation that
+  // 3. Combining Advanced Indexing with ":", or "..." , with the limitation that
   // the advanced indexing dimensions must be adjacent, i.e.:
   //
   // x[:, :, [1,2], [3,4], :] --> valid
@@ -616,15 +631,18 @@ static bool THPTensor_(_checkAdvancedIndexing)(THPTensor *indexed, PyObject *arg
   // x[[1,2], [3,4], ...] --> valid
   // x[:, [1,2], :, [3,4], :] --> not valid
 
-  // Verification, Step #1 -- ndim sequencers
+  // Verification, Step #1 - single non-tuple sequencer
+  if (THPTensor_(_checkSingleSequenceTriggersAdvancedIndexing)(arg)) return true;
+
+  // Verification, Step #2 -- ndim sequencers
   if (THPTensor_(_checkBasicIntegerArrayIndexing)(indexed, arg)) return true;
 
-  // Verification, Step #2 -- at least one sequencer, all the rest are
+  // Verification, Step #3 -- at least one sequencer, all the rest are
   // ':' and/or a single '...', can be less than ndim indexers, all sequencers
   // adjacent
 
   long ndim = THTensor_(nDimension)(LIBRARY_STATE indexed->cdata);
-  if (PySequence_Check(arg) && PySequence_Size(arg) <= ndim) {
+  if (PySequence_Check(arg) && PySequence_Size(arg) <= ndim + 1) {
     THPObjectPtr fast = THPObjectPtr(PySequence_Fast(arg, NULL));
 
     bool sequenceFound = false;
@@ -632,7 +650,17 @@ static bool THPTensor_(_checkAdvancedIndexing)(THPTensor *indexed, PyObject *arg
     bool ellipsisFound = false;
     Py_ssize_t lastSeqDim = -1;
 
+    // Note that we can have ndim + 1 Tensors in the case where we have an ellipsis,
+    // because Python semantics allow it to be "thrown away" so to speak. If this is
+    // the case, we have to shift the dimension we are considering (in the indexed
+    // tensor) by -1 afer encountering the Ellipsis when accessing properties of
+    // the indexed Tensor
+    bool extraIndexer = PySequence_Fast_GET_SIZE(fast.get()) == ndim + 1;
+
     for (Py_ssize_t i = 0; i < PySequence_Fast_GET_SIZE(fast.get()); ++i) {
+      // see explanation above
+      int correspondingTensorDim = i + (extraIndexer && ellipsisFound ? -1 : 0);
+
       PyObject *item = PySequence_Fast_GET_ITEM(fast.get(), i);
       if (THPIndexTensor_Check(item) || PySequence_Check(item)) {
         sequenceFound = true;
@@ -646,7 +674,7 @@ static bool THPTensor_(_checkAdvancedIndexing)(THPTensor *indexed, PyObject *arg
         continue;
       }
       if (PySlice_Check(item)) {
-        long dimSize = THTensor_(size)(LIBRARY_STATE indexed->cdata, i);
+        long dimSize = THTensor_(size)(LIBRARY_STATE indexed->cdata, correspondingTensorDim);
         // Basically verify that the Slice is ':' and did not specify
         // a specific start, end or step
         Py_ssize_t start, end, length, step;
@@ -668,6 +696,11 @@ static bool THPTensor_(_checkAdvancedIndexing)(THPTensor *indexed, PyObject *arg
       }
       nonColonEllipsisFound = true;
       break;
+    }
+
+    // Check if we have ndim+1 indexing objects, that we found an ellipsis
+    if (PySequence_Size(arg) == ndim + 1 && !ellipsisFound) {
+      return false;
     }
 
     return sequenceFound && (!nonColonEllipsisFound);
@@ -737,58 +770,72 @@ static bool THPTensor_(_convertToTensorIndexers)(
   // If they can be broadcasted, we store each of the broadcasted Tensors in the
   // output map, with the dimension of the original tensor as the key.
 
-  // Indexes all indexing Tensors (pre-broadcast) by which dimension they occurred.
-  // Because we rely upon the THPIndexTensor constructor to handle sequence -> tensor
-  // conversions, we store THPTensors rather than THTensors. We use an ordered map
-  // to maintain the order of Tensors via dimension. Because this is limited to
-  // ndim(Tensor), it should always be small + fast.
+  // indexingDims stores the indices containing an advanced index sequence, and indexers
+  // stores the corresponding indexing object, such that the indexer at indexers[i] is
+  // associated with the dm at indexingDims[i]. This is pre-broadcast.  Because we rely
+  // upon the THPIndexTensor constructor to handle sequence -> tensor conversions, we
+  // store THPTensors rather than THTensors.
 
   std::vector<Py_ssize_t> indexingDims;
   std::vector<THPIndexTensor*>indexers;
 
-      // The indexing matches advanced indexing requirements. In the case that
-      // the user has an Ellipsis, and/or less dimensions than are in the
-      // Tensor being indexed, we "fill in" empty Slices to these dimensions
-      // so that the the resulting advanced indexing code still works
-
-
-
-  // The top-level indexer should be a sequence, per the check above
-  THPObjectPtr fast(PySequence_Fast(index, NULL));
-  sequenceLength = PySequence_Fast_GET_SIZE(fast.get());
-  int ellipsisOffset = 0;
-
-  for (Py_ssize_t i = 0; i < sequenceLength; ++i) {
-    PyObject *item = PySequence_Fast_GET_ITEM(fast.get(), i);
-
-    // If this is an ellipsis, the all subsequent advanced indexing
-    // objects "positions" should be shifted, e.g. if we have a 5D Tensor
-    // x, and then x[..., [2, 3]], then the "position" of [2, 3] is 4
-    if (Py_TYPE(item) == &PyEllipsis_Type) {
-      ellipsisOffset = THTensor_(nDimension)(LIBRARY_STATE indexed) - sequenceLength;
-      continue;
+  if (THPTensor_(_checkSingleSequenceTriggersAdvancedIndexing)(index)) {
+    // Handle the special case where we only have a single indexer
+    THPIndexTensor *indexer = (THPIndexTensor *)PyObject_CallFunctionObjArgs(
+        THPIndexTensorClass, index, 0, NULL);
+    if (!indexer) {
+      PyErr_Format(PyExc_IndexError,
+        "When performing advanced indexing the indexing objects must be LongTensors or "
+        "convertible to LongTensors");
+      return false;
     }
+    indexingDims.push_back(0);
+    indexers.push_back(indexer);
+  } else {
+    // The top-level indexer should be a sequence, per the check above
+    THPObjectPtr fast(PySequence_Fast(index, NULL));
+    sequenceLength = PySequence_Fast_GET_SIZE(fast.get());
+    int ellipsisOffset = 0;
 
-    if (!PySlice_Check(item)) {
-      PyObject *obj = PySequence_Fast_GET_ITEM(fast.get(), i);
-      // Returns NULL upon conversion failure
-      THPIndexTensor *indexer = (THPIndexTensor *)PyObject_CallFunctionObjArgs(
-          THPIndexTensorClass, obj, NULL);
-      if (!indexer) {
-        PyErr_Format(PyExc_IndexError,
-            "When performing advanced indexing the indexing objects must be LongTensors or "
-            "convertible to LongTensors. The indexing object at position %d is of type %s "
-            "and cannot be converted", i, THPUtils_typename(obj));
+    for (Py_ssize_t i = 0; i < sequenceLength; ++i) {
+      PyObject *item = PySequence_Fast_GET_ITEM(fast.get(), i);
 
-        // Clean up Indexers
-        for (auto& idx : indexers) {
-          THIndexTensor_(free)(LIBRARY_STATE idx->cdata);
-          Py_DECREF(idx);
+      // If this is an ellipsis, the all subsequent advanced indexing
+      // objects "positions" should be shifted, e.g. if we have a 5D Tensor
+      // x, and then x[..., [2, 3]], then the "position" of [2, 3] is 4,
+      //
+      // BUT ONLY IF, we don't have ndim other indexing objects, in which case
+      // the ellipsis creates a shift of -1 to counterbalance its "emptyness"
+      if (Py_TYPE(item) == &PyEllipsis_Type) {
+        if (sequenceLength != (THTensor_(nDimension)(LIBRARY_STATE indexed) + 1)) {
+          ellipsisOffset = THTensor_(nDimension)(LIBRARY_STATE indexed) - sequenceLength;
+        } else {
+          ellipsisOffset = -1;
         }
-        return false;
+        continue;
       }
-      indexingDims.push_back(i + ellipsisOffset);
-      indexers.push_back(indexer);
+
+      if (!PySlice_Check(item)) {
+        PyObject *obj = PySequence_Fast_GET_ITEM(fast.get(), i);
+        // Returns NULL upon conversion failure
+        THPIndexTensor *indexer = (THPIndexTensor *)PyObject_CallFunctionObjArgs(
+            THPIndexTensorClass, obj, NULL);
+        if (!indexer) {
+          PyErr_Format(PyExc_IndexError,
+              "When performing advanced indexing the indexing objects must be LongTensors or "
+              "convertible to LongTensors. The indexing object at position %zd is of type %s "
+              "and cannot be converted", i, THPUtils_typename(obj));
+
+          // Clean up Indexers
+          for (auto& idx : indexers) {
+            THIndexTensor_(free)(LIBRARY_STATE idx->cdata);
+            Py_DECREF(idx);
+          }
+          return false;
+        }
+        indexingDims.push_back(i + ellipsisOffset);
+        indexers.push_back(indexer);
+      }
     }
   }
 

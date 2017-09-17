@@ -627,6 +627,72 @@ class TestNN(NNTestCase):
                                                    ('0.block', block), ('0.block.linear1', l1),
                                                    ('0.block.linear2', l2)])
 
+    def test_register_buffer_raises_error_if_attr_exists(self):
+        m = nn.Module()
+        m.attribute_name = 5
+        with self.assertRaises(KeyError):
+            m.register_buffer('attribute_name', torch.rand(5))
+
+        del m.attribute_name
+        m.register_parameter('attribute_name', nn.Parameter())
+        with self.assertRaises(KeyError):
+            m.register_buffer('attribute_name', torch.rand(5))
+
+        del m.attribute_name
+        m.add_module('attribute_name', nn.Module())
+        with self.assertRaises(KeyError):
+            m.register_buffer('attribute_name', torch.rand(5))
+
+    def test_register_buffer_allows_overwriting_with_same_name(self):
+        m = nn.Module()
+        buffer1 = torch.rand(5)
+        buffer2 = buffer1 + 5
+        m.register_buffer('buffer_name', buffer1)
+        self.assertEqual(m.buffer_name, buffer1)
+        m.register_buffer('buffer_name', buffer2)
+        self.assertEqual(m.buffer_name, buffer2)
+
+    def test_register_parameter_raises_error_if_attr_exists(self):
+        m = nn.Module()
+        m.attribute_name = 5
+        with self.assertRaises(KeyError):
+            m.register_parameter('attribute_name', nn.Parameter())
+
+        del m.attribute_name
+        m.register_buffer('attribute_name', torch.rand(5))
+        with self.assertRaises(KeyError):
+            m.register_parameter('attribute_name', nn.Parameter())
+
+        del m.attribute_name
+        m.add_module('attribute_name', nn.Module())
+        with self.assertRaises(KeyError):
+            m.register_parameter('attribute_name', nn.Parameter())
+
+    def test_register_parameter_allows_overwriting_with_same_name(self):
+        m = nn.Module()
+        param1 = nn.Parameter(torch.rand(5))
+        param2 = nn.Parameter(param1.data + 5)
+        m.register_parameter('param_name', param1)
+        self.assertEqual(m.param_name, param1)
+        m.register_parameter('param_name', param2)
+        self.assertEqual(m.param_name, param2)
+
+    def test_add_module_raises_error_if_attr_exists(self):
+        m = nn.Module()
+        m.attribute_name = 5
+        with self.assertRaises(KeyError):
+            m.add_module('attribute_name', nn.Module())
+
+        del m.attribute_name
+        m.register_buffer('attribute_name', torch.rand(5))
+        with self.assertRaises(KeyError):
+            m.add_module('attribute_name', nn.Module())
+
+        del m.attribute_name
+        m.register_parameter('attribute_name', nn.Parameter())
+        with self.assertRaises(KeyError):
+            m.add_module('attribute_name', nn.Module())
+
     def test_Sequential_getitem(self):
         l1 = nn.Linear(10, 20)
         l2 = nn.Linear(20, 30)
@@ -717,7 +783,9 @@ class TestNN(NNTestCase):
         self.assertEqual(net.empty, None)
         net.add_module('l3', l)
         self.assertEqual(net.l3, l)
-        self.assertRaises(KeyError, lambda: net.add_module('l', l))
+        l3 = nn.Linear(20, 10)
+        net.add_module('l', l3)
+        self.assertEqual(net.l, l3)
         self.assertRaises(TypeError, lambda: net.add_module('x', 'non-module'))
 
     def test_type(self):
@@ -1358,13 +1426,27 @@ class TestNN(NNTestCase):
         l = nn.Linear(10, 5).float().cuda()
         i = Variable(torch.randn(20, 10).float().cuda(1))
         l.cuda(1)
-        expected_out = l(i).data
-        l.cuda(0)
-        out = dp.data_parallel(l, i, (0, 1))
-        self.assertEqual(out.get_device(), 0)
-        self.assertEqual(out.data, expected_out)
+        expected_out = l(i)
+        loss = expected_out.sum()
+        loss.backward()
+        expected_grads = []
+        for param in l.parameters():
+            expected_grads.append(param.grad.clone())
+        dev_ids_list = [(0, 1), (1, 0)]
+        for dev_id in dev_ids_list:
+            with torch.cuda.device(dev_id[0]):
+                l.cuda()
+                l.zero_grad()
+                out = dp.data_parallel(l, i, dev_id)
+                loss = out.sum()
+                loss.backward()
+                self.assertEqual(out.get_device(), dev_id[0])
+                self.assertEqual(out.data, expected_out.data)
+                for expected, param in zip(expected_grads, l.parameters()):
+                    self.assertEqual(param.grad.data, expected.data)
 
         # Check for None device_ids
+        l = l.cuda()
         out = dp.data_parallel(l, i)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
@@ -2815,8 +2897,9 @@ class TestNN(NNTestCase):
         batch_size = 2
         for kern, inp_size, dilations in [(3, 6, [1, 2]), (3, 7, [1]), (4, 9, [1])]:
             for stride, padding, chan_in, chan_out, dilation in \
-                    product([1, 2], [0, 2], [2], [3], dilations):
-                no_weight = stride == 2
+                    product([1, 2], [0, 1, 2], [2], [3], dilations):
+                no_weight = False
+
                 result = self.run_conv_double_back_test(kern, stride,
                                                         padding, chan_in, chan_out,
                                                         batch_size, inp_size, dilation,
@@ -2834,11 +2917,11 @@ class TestNN(NNTestCase):
 
     def test_conv_double_backward_no_bias(self):
         kern = 3
-        stride = 1
-        padding = 2
+        stride = 2
         chan_in, chan_out = 2, 4
         batch_size = 2
-        inp_size = 6
+        inp_size = 5
+        padding = 1
         dilation = 1
         no_weight = False
         use_bias = True
@@ -2883,18 +2966,17 @@ class TestNN(NNTestCase):
                         "\ndilation: " + str(dilation) +
                         "\ngroups: " + str(groups))
 
-    def test_error_conv_double_backward(self):
+    def test_conv_double_backward_stride(self):
         batch_size = 2
 
         # Cannot provide ggW when stride is > 1
         for kern, inp_size, dilations in [(3, 5, [1, 2]), (3, 7, [1])]:
             for stride, padding, chan_in, chan_out, dilation in product([2], [0, 1], [1], [2], dilations):
                 no_weight = False
-                with self.assertRaises(RuntimeError):
-                    self.run_conv_double_back_test(kern, stride,
-                                                   padding, chan_in, chan_out,
-                                                   batch_size, inp_size, dilation,
-                                                   no_weight)
+                self.run_conv_double_back_test(kern, stride,
+                                               padding, chan_in, chan_out,
+                                               batch_size, inp_size, dilation,
+                                               no_weight)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_conv_double_backward_cuda(self):
@@ -3489,14 +3571,14 @@ new_module_tests = [
         desc='no_bias',
         check_gradgrad=False,
     ),
-    # TODO
-    # dict(
-    #     module_name='ConvTranspose1d',
-    #     constructor_args=(3, 4, 3, 2, 1, 1, 1, True, 2),
-    #     input_size=(1, 3, 6),
-    #     cudnn=True,
-    #     desc='dilated'
-    # ),
+    dict(
+        module_name='ConvTranspose1d',
+        constructor_args=(3, 4, 3, 2, 1, 1, 1, True, 2),
+        input_size=(1, 3, 6),
+        cudnn=True,
+        desc='dilated',
+        check_gradgrad=False,
+    ),
     dict(
         module_name='MaxPool1d',
         constructor_args=(4,),
@@ -3563,14 +3645,14 @@ new_module_tests = [
         input_size=(1, 3, 7, 6),
         check_gradgrad=False,
     ),
-    # TODO
-    # dict(
-    #     module_name='ConvTranspose2d',
-    #     constructor_args=(3, 4, 3, (2, 3), 1, (1, 1), 1, False, (2, 2)),
-    #     input_size=(1, 3, 6, 7),
-    #     cudnn=True,
-    #     desc='dilated'
-    # ),
+    dict(
+        module_name='ConvTranspose2d',
+        constructor_args=(3, 4, 3, (2, 3), 1, (1, 1), 1, False, (2, 2)),
+        input_size=(1, 3, 6, 7),
+        cudnn=True,
+        desc='dilated',
+        check_gradgrad=False,
+    ),
     dict(
         module_name='ConvTranspose2d',
         constructor_args=(3, 4, 3, (2, 3), 1, (1, 1), 1, False),
@@ -3713,14 +3795,14 @@ new_module_tests = [
         input_size=(1, 2, 4, 5, 4),
         check_gradgrad=False,
     ),
-    # TODO
-    # dict(
-    #     module_name='ConvTranspose3d',
-    #     constructor_args=(2, 3, (2, 3, 2), 1, 0, 0, 1, True, (2, 2, 2)),
-    #     cudnn=True,
-    #     input_size=(1, 2, 4, 5, 4),
-    #     desc='dilated'
-    # ),
+    dict(
+        module_name='ConvTranspose3d',
+        constructor_args=(2, 3, (2, 3, 2), 1, 0, 0, 1, True, (2, 2, 2)),
+        cudnn=True,
+        input_size=(1, 2, 4, 5, 4),
+        desc='dilated',
+        check_gradgrad=False,
+    ),
     dict(
         module_name='MaxPool3d',
         constructor_args=((2, 2, 2),),
@@ -3908,21 +3990,18 @@ new_module_tests = [
         module_name='AdaptiveMaxPool1d',
         constructor_args=(3,),
         input=torch.rand(1, 3, 5),
-        check_gradgrad=False,
     ),
     dict(
         module_name='AdaptiveMaxPool2d',
         constructor_args=(3,),
         input=torch.rand(1, 3, 5, 6),
         desc='single',
-        check_gradgrad=False,
     ),
     dict(
         module_name='AdaptiveMaxPool2d',
         constructor_args=((3, 4),),
         input=torch.rand(1, 3, 5, 6),
         desc='tuple',
-        check_gradgrad=False,
     ),
     dict(
         module_name='AdaptiveAvgPool1d',

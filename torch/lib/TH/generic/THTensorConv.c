@@ -7,14 +7,14 @@
 */
 void THTensor_(validXCorr2Dptr)(real *r_,
                                        real alpha,
-                                       real *t_, long ir, long ic,
-                                       real *k_, long kr, long kc,
-                                       long sr, long sc)
+                                       real *t_, int64_t ir, int64_t ic,
+                                       real *k_, int64_t kr, int64_t kc,
+                                       int64_t sr, int64_t sc)
 {
-  long or = (ir - kr) / sr + 1;
-  long oc = (ic - kc) / sc + 1;
+  int64_t or = (ir - kr) / sr + 1;
+  int64_t oc = (ic - kc) / sc + 1;
 
-  long xx, yy, kx, ky;
+  int64_t xx, yy, kx, ky;
 
   if ((sc != 1) || (oc < 4))  {
     /* regular convolution */
@@ -60,14 +60,14 @@ void THTensor_(validXCorr2Dptr)(real *r_,
 */
 void THTensor_(validConv2Dptr)(real *r_,
                                       real alpha,
-                                      real *t_, long ir, long ic,
-                                      real *k_, long kr, long kc,
-                                      long sr, long sc)
+                                      real *t_, int64_t ir, int64_t ic,
+                                      real *k_, int64_t kr, int64_t kc,
+                                      int64_t sr, int64_t sc)
 {
-  long or = (ir - kr) / sr + 1;
-  long oc = (ic - kc) / sc + 1;
+  int64_t or = (ir - kr) / sr + 1;
+  int64_t oc = (ic - kc) / sc + 1;
 
-  long xx, yy, kx, ky;
+  int64_t xx, yy, kx, ky;
 
   if ((sc != 1) || (oc < 4))  {
     /* regular convolution */
@@ -113,13 +113,13 @@ void THTensor_(validConv2Dptr)(real *r_,
 */
 void THTensor_(fullConv2Dptr)(real *r_,
                                      real alpha,
-                                     real *t_, long ir, long ic,
-                                     real *k_, long kr, long kc,
-                                     long sr, long sc)
+                                     real *t_, int64_t ir, int64_t ic,
+                                     real *k_, int64_t kr, int64_t kc,
+                                     int64_t sr, int64_t sc)
 {
-  long oc = (ic - 1) * sc + kc;
+  int64_t oc = (ic - 1) * sc + kc;
 
-  long xx, yy, kx, ky;
+  int64_t xx, yy, kx, ky;
 
   if ((sc != 1) || (ic < 4))  {
     /* regular convolution */
@@ -165,13 +165,13 @@ void THTensor_(fullConv2Dptr)(real *r_,
 */
 void THTensor_(fullXCorr2Dptr)(real *r_,
                                       real alpha,
-                                      real *t_, long ir, long ic,
-                                      real *k_, long kr, long kc,
-                                      long sr, long sc)
+                                      real *t_, int64_t ir, int64_t ic,
+                                      real *k_, int64_t kr, int64_t kc,
+                                      int64_t sr, int64_t sc)
 {
-  long oc = (ic - 1) * sc + kc;
+  int64_t oc = (ic - 1) * sc + kc;
 
-  long xx, yy, kx, ky;
+  int64_t xx, yy, kx, ky;
 
   if ((sc != 1) || (ic < 4))  {
     /* regular convolution */
@@ -180,7 +180,7 @@ void THTensor_(fullXCorr2Dptr)(real *r_,
         /* Outer product in two dimensions... (between input image and the mask) */
         real *po_ = r_ + yy*sr*oc + xx*sc;
         real *pw_ = k_ + kr*kc -1;
-        long kx, ky;
+        int64_t kx, ky;
         for(ky = 0; ky < kr; ky++)
         {
           real z = *t_ * alpha;
@@ -220,14 +220,14 @@ void THTensor_(fullXCorr2Dptr)(real *r_,
 */
 void THTensor_(validXCorr2DRevptr)(real *r_,
                                           real alpha,
-                                          real *t_, long ir, long ic,
-                                          real *k_, long kr, long kc,
-                                          long sr, long sc)
+                                          real *t_, int64_t ir, int64_t ic,
+                                          real *k_, int64_t kr, int64_t kc,
+                                          int64_t sr, int64_t sc)
 {
-  long or = ir - (kr - 1) * sr;
-  long oc = ic - (kc - 1) * sc;
+  int64_t or = ir - (kr - 1) * sr;
+  int64_t oc = ic - (kc - 1) * sc;
 
-  long xx, yy, kx, ky;
+  int64_t xx, yy, kx, ky;
 
   if ((sc != 1) || (kc < 4))  {
     /* regular convolution */
@@ -268,15 +268,15 @@ void THTensor_(validXCorr2DRevptr)(real *r_,
 */
 void THTensor_(validXCorr3Dptr)(real *r_,
                                        real alpha,
-                                       real *t_, long it, long ir, long ic,
-                                       real *k_, long kt, long kr, long kc,
-                                       long st, long sr, long sc)
+                                       real *t_, int64_t it, int64_t ir, int64_t ic,
+                                       real *k_, int64_t kt, int64_t kr, int64_t kc,
+                                       int64_t st, int64_t sr, int64_t sc)
 {
-  long ot = (it - kt) / st + 1;
-  long or = (ir - kr) / sr + 1;
-  long oc = (ic - kc) / sc + 1;
+  int64_t ot = (it - kt) / st + 1;
+  int64_t or = (ir - kr) / sr + 1;
+  int64_t oc = (ic - kc) / sc + 1;
 
-  long zz, xx, yy;
+  int64_t zz, xx, yy;
 
   for (zz = 0; zz < ot; zz++)
   {
@@ -288,7 +288,7 @@ void THTensor_(validXCorr3Dptr)(real *r_,
         real *pi_ = t_ + zz*st*ir*ic + yy*sr*ic + xx*sc;
         real *pw_ = k_;
         real sum = 0;
-        long kz, kx, ky;
+        int64_t kz, kx, ky;
         for(kz = 0; kz < kt; kz++)
         {
           for(ky = 0; ky < kr; ky++)
@@ -313,15 +313,15 @@ void THTensor_(validXCorr3Dptr)(real *r_,
 */
 void THTensor_(validConv3Dptr)(real *r_,
                                       real alpha,
-                                      real *t_, long it, long ir, long ic,
-                                      real *k_, long kt, long kr, long kc,
-                                      long st, long sr, long sc)
+                                      real *t_, int64_t it, int64_t ir, int64_t ic,
+                                      real *k_, int64_t kt, int64_t kr, int64_t kc,
+                                      int64_t st, int64_t sr, int64_t sc)
 {
-  long ot = (it - kt) / st + 1;
-  long or = (ir - kr) / sr + 1;
-  long oc = (ic - kc) / sc + 1;
+  int64_t ot = (it - kt) / st + 1;
+  int64_t or = (ir - kr) / sr + 1;
+  int64_t oc = (ic - kc) / sc + 1;
 
-  long zz, xx, yy;
+  int64_t zz, xx, yy;
 
   for(zz = 0; zz < ot; zz++)
   {
@@ -333,7 +333,7 @@ void THTensor_(validConv3Dptr)(real *r_,
         real *pi_ = t_ + zz*st*ir*ic + yy*sr*ic + xx*sc;
         real *pw_ = k_ + kt*kr*kc - 1;
         real sum = 0;
-        long kz, kx, ky;
+        int64_t kz, kx, ky;
         for(kz = 0; kz < kt; kz++)
         {
           for(ky = 0; ky < kr; ky++)
@@ -359,14 +359,14 @@ void THTensor_(validConv3Dptr)(real *r_,
 */
 void THTensor_(fullConv3Dptr)(real *r_,
                                      real alpha,
-                                     real *t_, long it, long ir, long ic,
-                                     real *k_, long kt, long kr, long kc,
-                                     long st, long sr, long sc)
+                                     real *t_, int64_t it, int64_t ir, int64_t ic,
+                                     real *k_, int64_t kt, int64_t kr, int64_t kc,
+                                     int64_t st, int64_t sr, int64_t sc)
 {
-  long or = (ir - 1) * sr + kr;
-  long oc = (ic - 1) * sc + kc;
+  int64_t or = (ir - 1) * sr + kr;
+  int64_t oc = (ic - 1) * sc + kc;
 
-  long zz, xx, yy;
+  int64_t zz, xx, yy;
 
   for(zz = 0; zz < it; zz++)
   {
@@ -377,7 +377,7 @@ void THTensor_(fullConv3Dptr)(real *r_,
         /* Outer product in two dimensions... (between input image and the mask) */
         real *po_ = r_ + zz*st*or*oc + yy*sr*oc + xx*sc;
         real *pw_ = k_;
-        long kz, kx, ky;
+        int64_t kz, kx, ky;
         /* printf("Output Plane : %ld,%ld,%ld, input val=%g\n",zz,yy,xx,*t_); */
         for(kz = 0; kz < kt; kz++)
         {
@@ -407,14 +407,14 @@ void THTensor_(fullConv3Dptr)(real *r_,
 */
 void THTensor_(fullXCorr3Dptr)(real *r_,
                                       real alpha,
-                                      real *t_, long it, long ir, long ic,
-                                      real *k_, long kt, long kr, long kc,
-                                      long st, long sr, long sc)
+                                      real *t_, int64_t it, int64_t ir, int64_t ic,
+                                      real *k_, int64_t kt, int64_t kr, int64_t kc,
+                                      int64_t st, int64_t sr, int64_t sc)
 {
-  long or = (ir - 1) * sr + kr;
-  long oc = (ic - 1) * sc + kc;
+  int64_t or = (ir - 1) * sr + kr;
+  int64_t oc = (ic - 1) * sc + kc;
 
-  long zz, xx, yy;
+  int64_t zz, xx, yy;
 
   for(zz = 0; zz < it; zz++)
   {
@@ -425,7 +425,7 @@ void THTensor_(fullXCorr3Dptr)(real *r_,
         /* Outer product in two dimensions... (between input image and the mask) */
         real *po_ = r_ + zz*st*or*oc + yy*sr*oc + xx*sc;
         real *pw_ = k_ + kt*kr*kc -1;
-        long kz, kx, ky;
+        int64_t kz, kx, ky;
         for(kz = 0; kz < kt; kz++)
         {
           for(ky = 0; ky < kr; ky++)
@@ -452,15 +452,15 @@ void THTensor_(fullXCorr3Dptr)(real *r_,
 */
 void THTensor_(validXCorr3DRevptr)(real *r_,
                                           real alpha,
-                                          real *t_, long it, long ir, long ic,
-                                          real *k_, long kt, long kr, long kc,
-                                          long st, long sr, long sc)
+                                          real *t_, int64_t it, int64_t ir, int64_t ic,
+                                          real *k_, int64_t kt, int64_t kr, int64_t kc,
+                                          int64_t st, int64_t sr, int64_t sc)
 {
-  long ot = it - (kt - 1) * st;
-  long or = ir - (kr - 1) * sr;
-  long oc = ic - (kc - 1) * sc;
+  int64_t ot = it - (kt - 1) * st;
+  int64_t or = ir - (kr - 1) * sr;
+  int64_t oc = ic - (kc - 1) * sc;
 
-  long zz, xx, yy;
+  int64_t zz, xx, yy;
   for(zz = 0; zz < kt; zz++)
   {
     for(yy = 0; yy < kr; yy++)
@@ -470,7 +470,7 @@ void THTensor_(validXCorr3DRevptr)(real *r_,
         real *po_ = r_;
         real *pi_ = t_ + zz*st*ir*ic + yy*sr*ic + xx*sc;
         real z = *k_++ * alpha;
-        long kz, kx, ky;
+        int64_t kz, kx, ky;
         for(kz = 0; kz < ot; kz++)
         {
           for(ky = 0; ky < or; ky++)
@@ -489,9 +489,9 @@ void THTensor_(validXCorr3DRevptr)(real *r_,
 
 void THTensor_(conv2d)(real* output_data,
                        real alpha,
-                       real* ptr_input, long nInputRows, long nInputCols,
-                       real* ptr_weight, long nKernelRows, long nKernelCols,
-                       long srow, long scol,
+                       real* ptr_input, int64_t nInputRows, int64_t nInputCols,
+                       real* ptr_weight, int64_t nKernelRows, int64_t nKernelCols,
+                       int64_t srow, int64_t scol,
                        const char *vf, const char *xc)
 {
   THArgCheck(*vf == 'V' || *vf == 'F', 7, "type of convolution can be 'V' or 'F'");
@@ -526,9 +526,9 @@ void THTensor_(conv2d)(real* output_data,
 
 void THTensor_(conv3d)(real* output_data,
                        real alpha,
-                       real* ptr_input, long nInputDepth, long nInputRows, long nInputCols,
-                       real* ptr_weight, long nKernelDepth, long nKernelRows, long nKernelCols,
-                       long sdepth, long srow, long scol,
+                       real* ptr_input, int64_t nInputDepth, int64_t nInputRows, int64_t nInputCols,
+                       real* ptr_weight, int64_t nKernelDepth, int64_t nKernelRows, int64_t nKernelCols,
+                       int64_t sdepth, int64_t srow, int64_t scol,
                        const char *vf, const char *xc)
 {
   THArgCheck(*vf == 'V' || *vf == 'F', 7, "type of convolution can be 'V' or 'F'");
@@ -561,7 +561,7 @@ void THTensor_(conv3d)(real* output_data,
                                 sdepth, srow, scol);
 }
 
-long THTensor_(convsize)(long x, long k, long s, const char* vf)
+int64_t THTensor_(convsize)(int64_t x, int64_t k, int64_t s, const char* vf)
 {
   THArgCheck(*vf == 'V' || *vf == 'F', 1, "type of convolution can be 'V' or 'F'");
   if (*vf == 'V')
@@ -578,19 +578,19 @@ long THTensor_(convsize)(long x, long k, long s, const char* vf)
   for sr,sc=1 this is equivalent to conv2Dger, but otherwise it is useful for
   calculating derivatives wrt a kernel that is applied with stride sr,sc != 1
 */
-void THTensor_(conv2DRevger)(THTensor *r_, real beta, real alpha, THTensor *t_, THTensor *k_, long srow, long scol)
+void THTensor_(conv2DRevger)(THTensor *r_, real beta, real alpha, THTensor *t_, THTensor *k_, int64_t srow, int64_t scol)
 {
-  long nInputPlane, nInputRows, nInputCols;
-  long nKernelPlane, nKernelRows, nKernelCols;
-  long nOutputPlane, nOutputRows, nOutputCols;
-  long istride0, kstride0;
+  int64_t nInputPlane, nInputRows, nInputCols;
+  int64_t nKernelPlane, nKernelRows, nKernelCols;
+  int64_t nOutputPlane, nOutputRows, nOutputCols;
+  int64_t istride0, kstride0;
   THTensor *input;
   THTensor *kernel;
   real *input_data;
   real *weight_data;
   real *output_data;
   ptrdiff_t nelem;
-  long k;
+  int64_t k;
 
   THArgCheck(t_->nDimension == 3 , 3, "input: 3D Tensor expected");
   THArgCheck(k_->nDimension == 3 , 4, "kernel: 3D Tensor expected");
@@ -631,7 +631,7 @@ void THTensor_(conv2DRevger)(THTensor *r_, real beta, real alpha, THTensor *t_, 
     for (k = 0; k < r_->size[0]*r_->size[1]; k++)
     {
       real* ptr_output = output_data + k*nOutputCols*nOutputRows;
-      long l;
+      int64_t l;
       for (l = 0; l < nOutputRows*nOutputCols; l++)
         ptr_output[l] = 0.0;
     }
@@ -643,7 +643,7 @@ void THTensor_(conv2DRevger)(THTensor *r_, real beta, real alpha, THTensor *t_, 
     for (k = 0; k < r_->size[0]*r_->size[1]; k++)
     {
       real* ptr_output = output_data + k*nOutputCols*nOutputRows;
-      long l;
+      int64_t l;
       for (l = 0; l < nOutputRows*nOutputCols; l++)
         ptr_output[l] *= beta;
     }
@@ -652,7 +652,7 @@ void THTensor_(conv2DRevger)(THTensor *r_, real beta, real alpha, THTensor *t_, 
 #pragma omp parallel for private(k)
   for(k = 0; k < nKernelPlane; k++)
   {
-    long i;
+    int64_t i;
     /* get kernel */
     real *ptr_weight = weight_data+k*kstride0;
 
@@ -685,19 +685,19 @@ void THTensor_(conv2DRevger)(THTensor *r_, real beta, real alpha, THTensor *t_, 
   for sr,sc=1 this is equivalent to conv2Dger, but otherwise it is useful for
   calculating derivatives wrt a kernel that is applied with stride sr,sc != 1
 */
-void THTensor_(conv2DRevgerm)(THTensor *r_, real beta, real alpha, THTensor *t_, THTensor *k_, long srow, long scol)
+void THTensor_(conv2DRevgerm)(THTensor *r_, real beta, real alpha, THTensor *t_, THTensor *k_, int64_t srow, int64_t scol)
 {
-  long nbatch, nInputPlane, nInputRows, nInputCols;
-  long nKernelPlane, nKernelRows, nKernelCols;
-  long nOutputRows, nOutputCols;
-  long istride0, kstride0, istride1, kstride1;
+  int64_t nbatch, nInputPlane, nInputRows, nInputCols;
+  int64_t nKernelPlane, nKernelRows, nKernelCols;
+  int64_t nOutputRows, nOutputCols;
+  int64_t istride0, kstride0, istride1, kstride1;
   THTensor *input;
   THTensor *kernel;
   real *input_data;
   real *weight_data;
   real *output_data;
   ptrdiff_t nelem;
-  long k;
+  int64_t k;
 
   THArgCheck(t_->nDimension == 4 , 3, "input: 4D Tensor expected");
   THArgCheck(k_->nDimension == 4 , 4, "kernel: 4D Tensor expected");
@@ -741,7 +741,7 @@ void THTensor_(conv2DRevgerm)(THTensor *r_, real beta, real alpha, THTensor *t_,
     for (k = 0; k < r_->size[0]*r_->size[1]; k++)
     {
       real* ptr_output = output_data + k*nOutputCols*nOutputRows;
-      long l;
+      int64_t l;
       for (l = 0; l < nOutputRows*nOutputCols; l++)
         ptr_output[l] = 0.0;
     }
@@ -753,7 +753,7 @@ void THTensor_(conv2DRevgerm)(THTensor *r_, real beta, real alpha, THTensor *t_,
     for (k = 0; k < r_->size[0]*r_->size[1]; k++)
     {
       real* ptr_output = output_data + k*nOutputCols*nOutputRows;
-      long l;
+      int64_t l;
       for (l = 0; l < nOutputRows*nOutputCols; l++)
         ptr_output[l] *= beta;
     }
@@ -762,10 +762,10 @@ void THTensor_(conv2DRevgerm)(THTensor *r_, real beta, real alpha, THTensor *t_,
 #pragma omp parallel for private(k)
   for(k = 0; k < nKernelPlane; k++)
   {
-    long i;
+    int64_t i;
     for(i = 0; i < nInputPlane; i++)
     {
-      long p;
+      int64_t p;
       for(p = 0; p < nbatch; p++)
       {
         /* get kernel */
@@ -796,12 +796,12 @@ void THTensor_(conv2DRevgerm)(THTensor *r_, real beta, real alpha, THTensor *t_,
   like rank1 update
   A <- xx' + beta*A
 */
-void THTensor_(conv2Dger)(THTensor *r_, real beta, real alpha, THTensor *t_, THTensor *k_, long srow, long scol, const char *vf, const char *xc)
+void THTensor_(conv2Dger)(THTensor *r_, real beta, real alpha, THTensor *t_, THTensor *k_, int64_t srow, int64_t scol, const char *vf, const char *xc)
 {
-  long nInputPlane, nInputRows, nInputCols;
-  long nKernelPlane, nKernelRows, nKernelCols;
-  long nOutputPlane, nOutputRows, nOutputCols;
-  long istride0, kstride0;
+  int64_t nInputPlane, nInputRows, nInputCols;
+  int64_t nKernelPlane, nKernelRows, nKernelCols;
+  int64_t nOutputPlane, nOutputRows, nOutputCols;
+  int64_t istride0, kstride0;
 
   THTensor *input;
   THTensor *kernel;
@@ -809,7 +809,7 @@ void THTensor_(conv2Dger)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
   real *weight_data;
   real *output_data;
   ptrdiff_t nelem;
-  long k;
+  int64_t k;
 
   THArgCheck(t_->nDimension == 3 , 3, "input: 3D Tensor expected");
   THArgCheck(k_->nDimension == 3 , 4, "kernel: 3D Tensor expected");
@@ -856,7 +856,7 @@ void THTensor_(conv2Dger)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
     for (k = 0; k < r_->size[0]*r_->size[1]; k++)
     {
       real* ptr_output = output_data + k*nOutputCols*nOutputRows;
-      long l;
+      int64_t l;
       for (l = 0; l < nOutputRows*nOutputCols; l++)
         ptr_output[l] = 0.0;
     }
@@ -868,7 +868,7 @@ void THTensor_(conv2Dger)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
     for (k = 0; k < r_->size[0]*r_->size[1]; k++)
     {
       real* ptr_output = output_data + k*nOutputCols*nOutputRows;
-      long l;
+      int64_t l;
       for (l = 0; l < nOutputRows*nOutputCols; l++)
         ptr_output[l] *= beta;
     }
@@ -877,7 +877,7 @@ void THTensor_(conv2Dger)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
 #pragma omp parallel for private(k)
   for(k = 0; k < nKernelPlane; k++)
   {
-    long i;
+    int64_t i;
     /* get kernel */
     real *ptr_weight = weight_data+k*kstride0;
 
@@ -929,19 +929,19 @@ void THTensor_(conv2Dger)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
   matrix vector product like
   y <- Ax + beta*y
 */
-void THTensor_(conv2Dmv)(THTensor *r_, real beta, real alpha, THTensor *t_, THTensor *k_, long srow, long scol, const char *vf, const char *xc)
+void THTensor_(conv2Dmv)(THTensor *r_, real beta, real alpha, THTensor *t_, THTensor *k_, int64_t srow, int64_t scol, const char *vf, const char *xc)
 {
-  long nInputPlane, nInputRows, nInputCols;
-  long nKernelRows, nKernelCols;
-  long nOutputPlane, nOutputRows, nOutputCols;
-  long istride0, kstride0, kstride1;
+  int64_t nInputPlane, nInputRows, nInputCols;
+  int64_t nKernelRows, nKernelCols;
+  int64_t nOutputPlane, nOutputRows, nOutputCols;
+  int64_t istride0, kstride0, kstride1;
   THTensor *input;
   THTensor* kernel;
   real *input_data;
   real *weight_data;
   real *output_data;
   ptrdiff_t nelem;
-  long k;
+  int64_t k;
 
   THArgCheck(t_->nDimension == 3 , 3, "input: 3D Tensor expected");
   THArgCheck(k_->nDimension == 4 , 4, "kernel: 4D Tensor expected");
@@ -994,7 +994,7 @@ void THTensor_(conv2Dmv)(THTensor *r_, real beta, real alpha, THTensor *t_, THTe
     for (k = 0; k < r_->size[0]; k++)
     {
       real* ptr_output = output_data + k*nOutputCols*nOutputRows;
-      long l;
+      int64_t l;
       for (l = 0; l < nOutputRows*nOutputCols; l++)
         ptr_output[l] = 0.0;
     }
@@ -1006,7 +1006,7 @@ void THTensor_(conv2Dmv)(THTensor *r_, real beta, real alpha, THTensor *t_, THTe
     for (k = 0; k < r_->size[0]; k++)
     {
       real* ptr_output = output_data + k*nOutputCols*nOutputRows;
-      long l;
+      int64_t l;
       for (l = 0; l < nOutputRows*nOutputCols; l++)
         ptr_output[l] *= beta;
     }
@@ -1015,7 +1015,7 @@ void THTensor_(conv2Dmv)(THTensor *r_, real beta, real alpha, THTensor *t_, THTe
 #pragma omp parallel for private(k)
   for(k = 0; k < nOutputPlane; k++)
   {
-    long i;
+    int64_t i;
     /* get output */
     real *ptr_output = output_data + k*nOutputCols*nOutputRows;
     for(i = 0; i < nInputPlane; i++)
@@ -1066,20 +1066,20 @@ void THTensor_(conv2Dmv)(THTensor *r_, real beta, real alpha, THTensor *t_, THTe
   matrix vector product like
   y <- Ax + beta*y
 */
-void THTensor_(conv2Dmm)(THTensor *r_, real beta, real alpha, THTensor *t_, THTensor *k_, long srow, long scol, const char *vf, const char *xc)
+void THTensor_(conv2Dmm)(THTensor *r_, real beta, real alpha, THTensor *t_, THTensor *k_, int64_t srow, int64_t scol, const char *vf, const char *xc)
 {
-  long nInputPlane, nInputRows, nInputCols;
-  long nKernelRows, nKernelCols;
-  long nOutputPlane, nOutputRows, nOutputCols;
-  long kstride0, kstride1;
+  int64_t nInputPlane, nInputRows, nInputCols;
+  int64_t nKernelRows, nKernelCols;
+  int64_t nOutputPlane, nOutputRows, nOutputCols;
+  int64_t kstride0, kstride1;
   THTensor *input;
   THTensor* kernel;
-  long nbatch;
+  int64_t nbatch;
   ptrdiff_t nelem;
   real *input_data;
   real *weight_data;
   real *output_data;
-  long p;
+  int64_t p;
 
   THArgCheck(t_->nDimension == 4 , 3, "input: 4D Tensor expected");
   THArgCheck(k_->nDimension == 4 , 4, "kernel: 4D Tensor expected");
@@ -1131,11 +1131,11 @@ void THTensor_(conv2Dmm)(THTensor *r_, real beta, real alpha, THTensor *t_, THTe
 #pragma omp parallel for private(p)
     for (p=0; p < r_->size[0]; p++)
     {
-      long k;
+      int64_t k;
       for (k = 0; k < r_->size[1]; k++)
       {
         real* ptr_output = output_data + p*nOutputPlane*nOutputRows*nOutputCols + k*nOutputCols*nOutputRows;
-        long l;
+        int64_t l;
         for (l = 0; l < nOutputRows*nOutputCols; l++)
           ptr_output[l] = 0.0;
       }
@@ -1147,11 +1147,11 @@ void THTensor_(conv2Dmm)(THTensor *r_, real beta, real alpha, THTensor *t_, THTe
 #pragma omp parallel for private(p)
     for(p=0; p < r_->size[0]; p++)
     {
-      long k;
+      int64_t k;
       for (k = 0; k < r_->size[1]; k++)
       {
         real* ptr_output = output_data + p*nOutputPlane*nOutputRows*nOutputCols + k*nOutputCols*nOutputRows;
-        long l;
+        int64_t l;
         for (l = 0; l < nOutputRows*nOutputCols; l++)
           ptr_output[l] *= beta;
       }
@@ -1161,10 +1161,10 @@ void THTensor_(conv2Dmm)(THTensor *r_, real beta, real alpha, THTensor *t_, THTe
 #pragma omp parallel for private(p)
   for(p=0; p < nbatch; p++)
   {
-    long k;
+    int64_t k;
     for(k = 0; k < nOutputPlane; k++)
     {
-      long i;
+      int64_t i;
       /* get output */
       real *ptr_output = output_data + p*nOutputPlane*nOutputCols*nOutputRows + k*nOutputCols*nOutputRows;
       for(i = 0; i < nInputPlane; i++)
@@ -1216,15 +1216,15 @@ void THTensor_(conv2Dmm)(THTensor *r_, real beta, real alpha, THTensor *t_, THTe
   scalar multiplication like
   y <- x*y + beta*y
 */
-void THTensor_(conv2Dmul)(THTensor *r_, real beta, real alpha, THTensor *t_, THTensor *k_, long srow, long scol, const char *vf, const char *xc)
+void THTensor_(conv2Dmul)(THTensor *r_, real beta, real alpha, THTensor *t_, THTensor *k_, int64_t srow, int64_t scol, const char *vf, const char *xc)
 {
   THTensor *input;
   THTensor* kernel;
-  long nInputRows;
-  long nInputCols;
-  long nKernelRows;
-  long nKernelCols;
-  long nOutputRows, nOutputCols;
+  int64_t nInputRows;
+  int64_t nInputCols;
+  int64_t nKernelRows;
+  int64_t nKernelCols;
+  int64_t nOutputRows, nOutputCols;
   real *ptr_input;
   real *ptr_weight;
   real *output_data;
@@ -1275,19 +1275,19 @@ void THTensor_(conv2Dmul)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
   component wise multiplication like
   y <- y.*x + beta*y
 */
-void THTensor_(conv2Dcmul)(THTensor *r_, real beta, real alpha, THTensor *t_, THTensor *k_, long srow, long scol, const char *vf, const char *xc)
+void THTensor_(conv2Dcmul)(THTensor *r_, real beta, real alpha, THTensor *t_, THTensor *k_, int64_t srow, int64_t scol, const char *vf, const char *xc)
 {
-  long nInputPlane, nInputRows, nInputCols;
-  long nKernelRows, nKernelCols;
-  long nOutputPlane, nOutputRows, nOutputCols;
-  long istride0, kstride0;
+  int64_t nInputPlane, nInputRows, nInputCols;
+  int64_t nKernelRows, nKernelCols;
+  int64_t nOutputPlane, nOutputRows, nOutputCols;
+  int64_t istride0, kstride0;
   THTensor *input;
   THTensor *kernel;
   real *input_data;
   real *weight_data;
   real *output_data;
   ptrdiff_t nelem;
-  long k;
+  int64_t k;
 
   THArgCheck(t_->nDimension == 3 , 3, "input: 3D Tensor expected");
   THArgCheck(k_->nDimension == 3 , 4, "kernel: 3D Tensor expected");
@@ -1352,20 +1352,20 @@ void THTensor_(conv2Dcmul)(THTensor *r_, real beta, real alpha, THTensor *t_, TH
   component wise multiplication like with a permutation map
   y <- y.*x + beta*y
 */
-void THTensor_(conv2Dmap)(THTensor *r_, real beta, real alpha, THTensor *t_, THTensor *k_, THTensor *map, long srow, long scol, const char *vf, const char *xc)
+void THTensor_(conv2Dmap)(THTensor *r_, real beta, real alpha, THTensor *t_, THTensor *k_, THTensor *map, int64_t srow, int64_t scol, const char *vf, const char *xc)
 {
-  long nInputPlane, nInputRows, nInputCols;
-  long nKernelRows, nKernelCols;
-  long nOutputPlane, nOutputRows, nOutputCols;
-  long istride0, kstride0;
+  int64_t nInputPlane, nInputRows, nInputCols;
+  int64_t nKernelRows, nKernelCols;
+  int64_t nOutputPlane, nOutputRows, nOutputCols;
+  int64_t istride0, kstride0;
   THTensor *input;
   THTensor* kernel;
   real *input_data;
   real *weight_data;
   real *output_data;
-  long nmaps;
+  int64_t nmaps;
   ptrdiff_t nelem;
-  long k;
+  int64_t k;
 
   THArgCheck(t_->nDimension == 3 , 3, "input: 3D Tensor expected");
   THArgCheck(k_->nDimension == 3 , 4, "kernel: 3D Tensor expected");
@@ -1412,8 +1412,8 @@ void THTensor_(conv2Dmap)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
   for(k = 0; k < nmaps; k++)
   {
     /* get indices */
-    long from = (long)THTensor_(get2d)(map,k,0)-1;
-    long to   = (long)THTensor_(get2d)(map,k,1)-1;
+    int64_t from = (int64_t)THTensor_(get2d)(map,k,0)-1;
+    int64_t to   = (int64_t)THTensor_(get2d)(map,k,1)-1;
 
     /* get kernel */
     real *ptr_weight = weight_data + k*kstride0;
@@ -1441,19 +1441,19 @@ void THTensor_(conv2Dmap)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
   calculating derivatives wrt a kernel that is applied with stride sr,sc != 1
 */
 void THTensor_(conv3DRevger)(THTensor *r_, real beta, real alpha, THTensor *t_, THTensor *k_,
-                             long sdepth, long srow, long scol)
+                             int64_t sdepth, int64_t srow, int64_t scol)
 {
-  long nInputPlane, nInputDepth, nInputRows, nInputCols;
-  long nKernelPlane, nKernelDepth, nKernelRows, nKernelCols;
-  long nOutputPlane, nOutputDepth, nOutputRows, nOutputCols;
-  long istride0, kstride0;
+  int64_t nInputPlane, nInputDepth, nInputRows, nInputCols;
+  int64_t nKernelPlane, nKernelDepth, nKernelRows, nKernelCols;
+  int64_t nOutputPlane, nOutputDepth, nOutputRows, nOutputCols;
+  int64_t istride0, kstride0;
   THTensor *input;
   THTensor *kernel;
   real *input_data;
   real *weight_data;
   real *output_data;
   ptrdiff_t nelem;
-  long k, i;
+  int64_t k, i;
 
   THArgCheck(t_->nDimension == 4 , 3, "input: 4D Tensor expected");
   THArgCheck(k_->nDimension == 4 , 4, "kernel: 4D Tensor expected");
@@ -1528,19 +1528,19 @@ void THTensor_(conv3DRevger)(THTensor *r_, real beta, real alpha, THTensor *t_, 
   A <- xx' + beta*A
 */
 void THTensor_(conv3Dger)(THTensor *r_, real beta, real alpha, THTensor *t_, THTensor *k_,
-                          long sdepth, long srow, long scol, const char *vf, const char *xc)
+                          int64_t sdepth, int64_t srow, int64_t scol, const char *vf, const char *xc)
 {
-  long nInputPlane, nInputDepth, nInputRows, nInputCols;
-  long nKernelPlane, nKernelDepth, nKernelRows, nKernelCols;
-  long nOutputPlane, nOutputDepth, nOutputRows, nOutputCols;
-  long istride0, kstride0;
+  int64_t nInputPlane, nInputDepth, nInputRows, nInputCols;
+  int64_t nKernelPlane, nKernelDepth, nKernelRows, nKernelCols;
+  int64_t nOutputPlane, nOutputDepth, nOutputRows, nOutputCols;
+  int64_t istride0, kstride0;
   THTensor *input;
   THTensor *kernel;
   real *input_data;
   real *weight_data;
   real *output_data;
   ptrdiff_t nelem;
-  long k, i;
+  int64_t k, i;
 
   THArgCheck(t_->nDimension == 4 , 3, "input: 4D Tensor expected");
   THArgCheck(k_->nDimension == 4 , 4, "kernel: 4D Tensor expected");
@@ -1620,19 +1620,19 @@ void THTensor_(conv3Dger)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
   y <- Ax + beta*y
 */
 void THTensor_(conv3Dmv)(THTensor *r_, real beta, real alpha, THTensor *t_, THTensor *k_,
-                         long sdepth, long srow, long scol, const char *vf, const char *xc)
+                         int64_t sdepth, int64_t srow, int64_t scol, const char *vf, const char *xc)
 {
-  long nInputPlane, nInputDepth, nInputRows, nInputCols;
-  long nKernelDepth, nKernelRows, nKernelCols;
-  long nOutputPlane, nOutputDepth, nOutputRows, nOutputCols;
-  long istride0, kstride0, kstride1;
+  int64_t nInputPlane, nInputDepth, nInputRows, nInputCols;
+  int64_t nKernelDepth, nKernelRows, nKernelCols;
+  int64_t nOutputPlane, nOutputDepth, nOutputRows, nOutputCols;
+  int64_t istride0, kstride0, kstride1;
   THTensor *input;
   THTensor *kernel;
   real *input_data;
   real *weight_data;
   real *output_data;
   ptrdiff_t nelem;
-  long k, i;
+  int64_t k, i;
 
   THArgCheck(t_->nDimension == 4 , 3, "input: 4D Tensor expected");
   THArgCheck(k_->nDimension == 5 , 4, "kernel: 5D Tensor expected");
@@ -1713,17 +1713,17 @@ void THTensor_(conv3Dmv)(THTensor *r_, real beta, real alpha, THTensor *t_, THTe
   y <- x*y + beta*y
 */
 void THTensor_(conv3Dmul)(THTensor *r_, real beta, real alpha, THTensor *t_, THTensor *k_,
-                          long sdepth, long srow, long scol, const char *vf, const char *xc)
+                          int64_t sdepth, int64_t srow, int64_t scol, const char *vf, const char *xc)
 {
   THTensor *input;
   THTensor* kernel;
-  long nInputDepth;
-  long nInputRows;
-  long nInputCols;
-  long nKernelDepth;
-  long nKernelRows;
-  long nKernelCols;
-  long nOutputDepth, nOutputRows, nOutputCols;
+  int64_t nInputDepth;
+  int64_t nInputRows;
+  int64_t nInputCols;
+  int64_t nKernelDepth;
+  int64_t nKernelRows;
+  int64_t nKernelCols;
+  int64_t nOutputDepth, nOutputRows, nOutputCols;
   real *ptr_input;
   real *ptr_weight;
   real *output_data;
@@ -1781,12 +1781,12 @@ void THTensor_(conv3Dmul)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
   y <- y.*x + beta*y
 */
 void THTensor_(conv3Dcmul)(THTensor *r_, real beta, real alpha, THTensor *t_, THTensor *k_,
-                           long sdepth, long srow, long scol, const char *vf, const char *xc)
+                           int64_t sdepth, int64_t srow, int64_t scol, const char *vf, const char *xc)
 {
-  long nInputPlane, nInputDepth, nInputRows, nInputCols;
-  long nKernelDepth, nKernelRows, nKernelCols;
-  long nOutputPlane, nOutputDepth, nOutputRows, nOutputCols;
-  long istride0, kstride0;
+  int64_t nInputPlane, nInputDepth, nInputRows, nInputCols;
+  int64_t nKernelDepth, nKernelRows, nKernelCols;
+  int64_t nOutputPlane, nOutputDepth, nOutputRows, nOutputCols;
+  int64_t istride0, kstride0;
 
   THTensor *input;
   THTensor *kernel;
@@ -1794,7 +1794,7 @@ void THTensor_(conv3Dcmul)(THTensor *r_, real beta, real alpha, THTensor *t_, TH
   real *weight_data;
   real *output_data;
   ptrdiff_t nelem;
-  long k;
+  int64_t k;
 
   THArgCheck(t_->nDimension == 4 , 3, "input: 3D Tensor expected");
   THArgCheck(k_->nDimension == 4 , 4, "kernel: 3D Tensor expected");
@@ -1866,12 +1866,12 @@ void THTensor_(conv3Dcmul)(THTensor *r_, real beta, real alpha, THTensor *t_, TH
   y <- y.*x + beta*y
 */
 void THTensor_(conv3Dmap)(THTensor *r_, real beta, real alpha, THTensor *t_, THTensor *k_, THTensor *map,
-                          long sdepth, long srow, long scol, const char *vf, const char *xc)
+                          int64_t sdepth, int64_t srow, int64_t scol, const char *vf, const char *xc)
 {
-  long nInputPlane, nInputDepth, nInputRows, nInputCols;
-  long nKernelDepth, nKernelRows, nKernelCols;
-  long nOutputPlane, nOutputDepth, nOutputRows, nOutputCols;
-  long istride0, kstride0;
+  int64_t nInputPlane, nInputDepth, nInputRows, nInputCols;
+  int64_t nKernelDepth, nKernelRows, nKernelCols;
+  int64_t nOutputPlane, nOutputDepth, nOutputRows, nOutputCols;
+  int64_t istride0, kstride0;
 
   THTensor *input;
   THTensor *kernel;
@@ -1879,8 +1879,8 @@ void THTensor_(conv3Dmap)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
   real *input_data;
   real *weight_data;
   real *output_data;
-  long nmaps;
-  long k;
+  int64_t nmaps;
+  int64_t k;
 
   THArgCheck(t_->nDimension == 4 , 3, "input: 4D Tensor expected");
   THArgCheck(k_->nDimension == 4 , 4, "kernel: 4D Tensor expected");
@@ -1934,8 +1934,8 @@ void THTensor_(conv3Dmap)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
   for(k = 0; k < nmaps; k++)
   {
     /* get indices */
-    long from = (long)THTensor_(get2d)(map,k,0)-1;
-    long to   = (long)THTensor_(get2d)(map,k,1)-1;
+    int64_t from = (int64_t)THTensor_(get2d)(map,k,0)-1;
+    int64_t to   = (int64_t)THTensor_(get2d)(map,k,1)-1;
 
     /* get kernel */
     real *ptr_weight = weight_data + k*kstride0;

@@ -1,6 +1,7 @@
 #ifndef THC_ATOMICS_INC
 #define THC_ATOMICS_INC
 
+#include "THC.h"
 #include "THCHalf.h"
 #include "THCNumerics.cuh"
 
@@ -10,12 +11,12 @@ struct AtomicAddIntegerImpl;
 template<typename T>
 struct AtomicAddIntegerImpl<T, 1> {
   inline __device__ void operator()(T *address, T val) {
-    unsigned int * address_as_ui =
-        (unsigned int *) (address - ((size_t)address & 3));
-    unsigned int old = *address_as_ui;
-    unsigned int shift = (((size_t)address & 3) * 8);
-    unsigned int sum;
-    unsigned int assumed;
+    uint32_t * address_as_ui =
+        (uint32_t *) (address - ((size_t)address & 3));
+    uint32_t old = *address_as_ui;
+    uint32_t shift = (((size_t)address & 3) * 8);
+    uint32_t sum;
+    uint32_t assumed;
 
     do {
       assumed = old;
@@ -29,12 +30,12 @@ struct AtomicAddIntegerImpl<T, 1> {
 template<typename T>
 struct AtomicAddIntegerImpl<T, 2> {
   inline __device__ void operator()(T *address, T val) {
-    unsigned int * address_as_ui =
-        (unsigned int *) ((char *)address - ((size_t)address & 2));
-    unsigned int old = *address_as_ui;
-    unsigned int sum;
-    unsigned int newval;
-    unsigned int assumed;
+    uint32_t * address_as_ui =
+        (uint32_t *) ((char *)address - ((size_t)address & 2));
+    uint32_t old = *address_as_ui;
+    uint32_t sum;
+    uint32_t newval;
+    uint32_t assumed;
 
     do {
       assumed = old;
@@ -48,10 +49,10 @@ struct AtomicAddIntegerImpl<T, 2> {
 template<typename T>
 struct AtomicAddIntegerImpl<T, 4> {
   inline __device__ void operator()(T *address, T val) {
-    unsigned int * address_as_ui = (unsigned int *) (address);
-    unsigned int old = *address_as_ui;
-    unsigned int newval;
-    unsigned int assumed;
+    uint32_t * address_as_ui = (uint32_t *) (address);
+    uint32_t old = *address_as_ui;
+    uint32_t newval;
+    uint32_t assumed;
 
     do {
       assumed = old;
@@ -64,10 +65,10 @@ struct AtomicAddIntegerImpl<T, 4> {
 template<typename T>
 struct AtomicAddIntegerImpl<T, 8> {
   inline __device__ void operator()(T *address, T val) {
-    unsigned long long * address_as_ui = (unsigned long long *) (address);
-    unsigned long long old = *address_as_ui;
-    unsigned long long newval;
-    unsigned long long assumed;
+    uint64_t * address_as_ui = (uint64_t *) (address);
+    uint64_t old = *address_as_ui;
+    uint64_t newval;
+    uint64_t assumed;
 
     do {
       assumed = old;
@@ -77,28 +78,28 @@ struct AtomicAddIntegerImpl<T, 8> {
   }
 };
 
-static inline __device__ void atomicAdd(unsigned char *address, unsigned char val) {
-  AtomicAddIntegerImpl<unsigned char, sizeof(unsigned char)>()(address, val);
+static inline __device__ void atomicAdd(uint8_t *address, uint8_t val) {
+  AtomicAddIntegerImpl<uint8_t, sizeof(uint8_t)>()(address, val);
 }
 
-static inline  __device__ void atomicAdd(char *address, char val) {
-  AtomicAddIntegerImpl<char, sizeof(char)>()(address, val);
+static inline  __device__ void atomicAdd(int8_t *address, int8_t val) {
+  AtomicAddIntegerImpl<int8_t, sizeof(int8_t)>()(address, val);
 }
 
-static inline  __device__ void atomicAdd(short *address, short val) {
-  AtomicAddIntegerImpl<short, sizeof(short)>()(address, val);
+static inline  __device__ void atomicAdd(int16_t *address, int16_t val) {
+  AtomicAddIntegerImpl<int16_t, sizeof(int16_t)>()(address, val);
 }
 
-static inline __device__ void atomicAdd(long *address, long val) {
-  AtomicAddIntegerImpl<long, sizeof(long)>()(address, val);
+static inline __device__ void atomicAdd(int64_t *address, int64_t val) {
+  AtomicAddIntegerImpl<int64_t, sizeof(int64_t)>()(address, val);
 }
 
 #ifdef CUDA_HALF_TENSOR
 static inline  __device__ void atomicAdd(half *address, half val) {
-  unsigned int * address_as_ui =
-      (unsigned int *) ((char *)address - ((size_t)address & 2));
-  unsigned int old = *address_as_ui;
-  unsigned int assumed;
+  uint32_t * address_as_ui =
+      (uint32_t *) ((char *)address - ((size_t)address & 2));
+  uint32_t old = *address_as_ui;
+  uint32_t assumed;
 
   do {
     assumed = old;
@@ -121,14 +122,14 @@ static inline  __device__ void atomicAdd(half *address, half val) {
 #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 600 || CUDA_VERSION < 8000)
 // from CUDA C Programmic Guide
 static inline  __device__  void atomicAdd(double *address, double val) {
-  unsigned long long int* address_as_ull = (unsigned long long int*)address;
-  unsigned long long int old = *address_as_ull;
-  unsigned long long int assumed;
+  uint64_t* address_as_ull = (uint64_t*)address;
+  uint64_t old = *address_as_ull;
+  uint64_t assumed;
 
   do {
     assumed = old;
-    old = atomicCAS(address_as_ull, assumed,
-                    __double_as_longlong(val +
+    old = atomicCAS((uint64_t *) address_as_ull, (uint64_t) assumed,
+                    (uint64_t) __double_as_longlong(val +
                     __longlong_as_double(assumed)));
 
     // Note: uses integer comparison to avoid hang in case of NaN (since NaN != NaN)

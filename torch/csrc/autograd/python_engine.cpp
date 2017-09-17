@@ -1,8 +1,10 @@
 #include "torch/csrc/autograd/python_engine.h"
 
 #include "torch/csrc/autograd/engine.h"
+#include "torch/csrc/autograd/python_function.h"
 #include "torch/csrc/THP.h"
 #include "torch/csrc/DynamicTypes.h"
+#include "torch/csrc/PtrWrapper.h"
 #include "torch/csrc/utils/auto_gil.h"
 
 #include <unordered_set>
@@ -13,26 +15,46 @@ struct THPEngine {
     PyObject_HEAD
 };
 
-struct PythonEngine : public Engine {
-  virtual void thread_main(std::shared_ptr<ReadyQueue> queue, int device) override {
-    // Create a PyThreadState, but release the GIL. This lets AutoGIL calls
-    // inside thread_main acquire the GIL without having to create a new
-    // PyThreadState each time.
-    AutoGIL gil;
-    AutoNoGIL no_gil;
-    Engine::thread_main(queue, device);
-  }
+static torch::autograd::python::PythonEngine engine;
 
-  virtual void thread_on_exception(FunctionTask& task, std::exception& e) override {
-    auto python_err = dynamic_cast<python_error*>(&e);
-    if (python_err) {
-      python_err->persist();
-    }
-    Engine::thread_on_exception(task, e);
-  }
-};
+namespace torch { namespace autograd { namespace python {
 
-static PythonEngine engine;
+void PythonEngine::thread_init(int device) {
+  // Create a PyThreadState, but release the GIL. This lets AutoGIL calls
+  // inside thread_main acquire the GIL without having to create a new
+  // PyThreadState each time.
+  AutoGIL gil;
+  AutoNoGIL no_gil;
+  Engine::thread_init(device);
+}
+
+void PythonEngine::thread_on_exception(FunctionTask& task, std::exception& e) {
+  auto python_err = dynamic_cast<python_error*>(&e);
+  if (python_err) {
+    python_err->persist();
+  }
+  Engine::thread_on_exception(task, e);
+}
+
+void PythonEngine::execute(
+    const function_list& roots,
+    const variable_list& inputs,
+    bool keep_graph,
+    const pre_callback_map& pre_callbacks,
+    const post_callback_map& post_callbacks) {
+  try {
+    Engine::execute(roots, inputs, keep_graph, pre_callbacks, post_callbacks);
+  } catch (python_error& e) {
+    e.restore();
+    throw;
+  }
+}
+
+PythonEngine& PythonEngine::getDefaultEngine() {
+  return engine;
+}
+
+}}} // namespace torch::autograd::python
 
 PyObject *THPEngineClass = NULL;
 
@@ -49,10 +71,10 @@ struct CallbackContext {
 
 void compute_partial_exec_callbacks(const function_list& roots,
                                     const CallbackContext& ctx,
-                                    Engine::callback_map& map) {
+                                    Engine::pre_callback_map& map) {
   // This callback is used to suppress the computation of a node
   // if it is not necessary.
-  static Engine::callback_type abort_callback(
+  static Engine::pre_callback_type abort_callback(
       [](Function* fn, variable_list &vars) { return false; });
 
   std::vector<Function*> queue;
@@ -138,16 +160,15 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     THPUtils_assert(THPVariable_Check(_variable), "element %d of variables "
         "tuple is not a Variable", i);
     auto& variable = ((THPVariable*)_variable)->cdata;
-    THPUtils_assert(!variable->is_volatile,
+    THPUtils_assert(!variable.is_volatile(),
         "element %d of variables tuple is volatile", i);
     // If grad_fn is NULL (as is the case for a leaf node), we instead
     // interpret the gradient function to be a grad accumulator,
     // which will accumulate its inputs into the grad property of the
-    // variable.  These nodes get suppressed in some situations,
+    // variable. These nodes get suppressed in some situations,
     // see "suppress grad accumulation" below.
-    auto grad_fn = variable->grad_fn ? variable->grad_fn : variable->get_grad_accumulator();
-    THPUtils_assert(grad_fn, "element %d of variables tuple does not require grad", i);
-    int output_nr = variable->grad_fn ? variable->output_nr : 0;
+    auto grad_fn = variable.grad_fn() ? variable.grad_fn() : variable.grad_accumulator();
+    int output_nr = variable.grad_fn() ? variable.output_nr() : 0;
     roots[i] = std::make_pair<>(std::move(grad_fn), output_nr);
 
     PyObject *grad = PyTuple_GET_ITEM(grad_variables, i);
@@ -156,31 +177,36 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     } else {
       THPUtils_assert(grad == Py_None,
           "element %d of gradients tuple is not a Variable or None", i);
-      THPUtils_assert(!variable->requires_grad,
+      THPUtils_assert(!variable.requires_grad(),
           "element %d of gradients tuple is None, but the corresponding Variable requires grad");
     }
   }
 
-  Engine::callback_map callbacks;
+  Engine::pre_callback_map callbacks;
   CallbackContext ctx;
   if (inputs != NULL) {
     THPUtils_assert(PyTuple_Check(inputs), "inputs argument has to be a tuple");
     int num_inputs = PyTuple_GET_SIZE(inputs);
     ctx.outputs = PyTuple_New(num_inputs);
+    if (!ctx.outputs) return NULL;
     // First, find all relevant functions and fill ctx.output_map
     for (int i = 0; i < num_inputs; ++i) {
       PyObject *input = PyTuple_GET_ITEM(inputs, i);
       THPUtils_assert(THPVariable_Check(input),
           "all inputs have to be Variables, but got %s", THPUtils_typename(input));
       THPVariable *input_var = (THPVariable*)input;
-      auto grad_fn = input_var->cdata->grad_fn;
-      int output_nr = input_var->cdata->output_nr;
+      auto grad_fn = input_var->cdata.grad_fn();
+      int output_nr = input_var->cdata.output_nr();
       bool is_leaf = !grad_fn;
       if (is_leaf) {
-          grad_fn = input_var->cdata->grad_accumulator.lock();
+          grad_fn = input_var->cdata.get()->grad_accumulator.lock();
       }
-      THPUtils_assert(grad_fn, "One of the differentiated Variables appears to not have "
-          "been used in the graph");
+      THPUtils_assert(input_var->cdata.requires_grad(),
+          "One of the differentiated Variables does not require grad");
+      THPUtils_assert(grad_fn,
+          "One of the differentiated Variables appears to not have been used in the graph");
+      THPUtils_assert(grad_fn->is_executable,
+          "One of the differentiated Variables has a non-executable grad_fn. Submit a bug report.");
       auto& fn_info = ctx.output_map[grad_fn];
       fn_info.first.emplace_back(output_nr, i);
       fn_info.second = is_leaf;
@@ -209,12 +235,9 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     }
   }
 
-  try {
+  {
     AutoNoGIL no_gil;
     engine.execute(roots, grads, keep_graph, callbacks);
-  } catch (python_error &e) {
-    e.restore();
-    return nullptr;
   }
 
   if (ctx.outputs) {

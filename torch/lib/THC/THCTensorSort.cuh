@@ -33,7 +33,7 @@ struct ThrustLTOp {
 // `sliceSize - 1`.
 template <typename IndexType, int Dim>
 __global__ void
-fillSliceWithIndex(TensorInfo<long, IndexType> out,
+fillSliceWithIndex(TensorInfo<int64_t, IndexType> out,
                    IndexType totalSlices,
                    IndexType sliceSize,
                    IndexType sliceStride) {
@@ -43,11 +43,11 @@ fillSliceWithIndex(TensorInfo<long, IndexType> out,
     return;
   }
 
-  const unsigned long offset =
-    IndexToOffset<long, IndexType, Dim>::get(slice, out);
-  long* base = &out.data[offset];
+  const uint64_t offset =
+    IndexToOffset<int64_t, IndexType, Dim>::get(slice, out);
+  int64_t* base = &out.data[offset];
 
-  for (long i = threadIdx.x; i < sliceSize; i += blockDim.x) {
+  for (int64_t i = threadIdx.x; i < sliceSize; i += blockDim.x) {
     // Torch indices are 1-based (hence the +1)
     base[i * sliceStride] = i + TH_INDEX_BASE;
   }
@@ -56,28 +56,28 @@ fillSliceWithIndex(TensorInfo<long, IndexType> out,
 // For slice sorting in Thrust; extracts a slice index from a linear
 // index and uses that for comparison
 struct SliceComp {
-  SliceComp(long size) : sliceSize(size) {}
+  SliceComp(int64_t size) : sliceSize(size) {}
 
-  __device__ bool operator()(const long& a, const long& b) const {
-    // Since the slices are guaranteed to be innermost, the segment is
-    // just via long division
-    long segA = a / sliceSize;
-    long segB = b / sliceSize;
+  __device__ bool operator()(const int64_t& a, const int64_t& b) const {
+    // Since the slices are guaranteed to be innermost,
+    // the segment is just via int64_t division
+    int64_t segA = a / sliceSize;
+    int64_t segB = b / sliceSize;
     return segA < segB;
   }
 
-  const long sliceSize;
+  const int64_t sliceSize;
 };
 
 // For sorting in Thurst; extracts a within-slice index from a linear index
 struct GlobalIndexToPerSliceIndex {
-  GlobalIndexToPerSliceIndex(long size) : sliceSize(size) {}
+  GlobalIndexToPerSliceIndex(int64_t size) : sliceSize(size) {}
 
-  __device__ inline void operator()(long& v) const {
+  __device__ inline void operator()(int64_t& v) const {
     v = v % sliceSize + TH_INDEX_BASE;
   }
 
-  const long sliceSize;
+  const int64_t sliceSize;
 };
 
 void THCudaLongTensor_fillSliceWithIndex(THCState* state,

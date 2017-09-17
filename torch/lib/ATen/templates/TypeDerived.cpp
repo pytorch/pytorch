@@ -9,6 +9,7 @@
 #include "ATen/Utils.h"
 #include "ATen/THLongStorageView.h"
 #include <iostream>
+#include <sstream>
 
 namespace at {
 
@@ -48,6 +49,10 @@ const char * ${Type}::toString() const {
 }
 TypeID ${Type}::ID() const {
   return ${TypeID};
+}
+
+std::size_t ${Type}::elementSizeInBytes() const {
+  return sizeof(${ScalarType});
 }
 
 const char * ${Type}::typeString() {

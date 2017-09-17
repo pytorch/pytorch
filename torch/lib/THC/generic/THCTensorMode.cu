@@ -20,14 +20,14 @@ THC_API void THCTensor_(calculateMode)(THCState *state,
     data += THLongStorage_data(position)[i] * THCTensor_(stride)(state, input, i);
   }
 
-  long nElement = THCTensor_(size)(state, input, THCTensor_(nDimension)(state, input) - 1);
+  int64_t nElement = THCTensor_(size)(state, input, THCTensor_(nDimension)(state, input) - 1);
   THCThrustAllocator thrustAlloc(state);
 
   // Wrap input data, sortBuffer, in Thrust device vectors
   thrust::device_ptr<real> vecPtr = thrust::device_pointer_cast(data);
   thrust::device_vector<real> iter(vecPtr, vecPtr + nElement);
-  thrust::device_ptr<long> sbPtr = thrust::device_pointer_cast(THCudaLongStorage_data(state, sortBuffer));
-  thrust::device_vector<long> seq(sbPtr, sbPtr + nElement);
+  thrust::device_ptr<int64_t> sbPtr = thrust::device_pointer_cast(THCudaLongStorage_data(state, sortBuffer));
+  thrust::device_vector<int64_t> seq(sbPtr, sbPtr + nElement);
 
   // Fill sortBuffer with [0, 1, 2, ... nElement - 1]
   thrust::sequence(
@@ -113,14 +113,14 @@ THC_API void THCTensor_(calculateMode)(THCState *state,
 #endif
 
   THAssert(positionIter != iter.end());
-  long index = TH_INDEX_BASE + seq[positionIter - iter.begin()];
+  int64_t index = TH_INDEX_BASE + seq[positionIter - iter.begin()];
 
   // Place mode, index in output
   ptrdiff_t valuesOffset = THCTensor_(storageOffset)(state, values);
-  long indicesOffset = THCudaLongTensor_storageOffset(state, indices);
+  int64_t indicesOffset = THCudaLongTensor_storageOffset(state, indices);
 
   for (int i = 0; i < THLongStorage_size(position); ++i) {
-    long pos = THLongStorage_data(position)[i];
+    int64_t pos = THLongStorage_data(position)[i];
     valuesOffset += THCTensor_(stride)(state, values, i) * pos;
     indicesOffset += THCudaLongTensor_stride(state, indices, i) * pos;
   }
@@ -137,7 +137,7 @@ THC_API void THCTensor_(dimApplyMode)(THCState *state,
                                int dimension,
                                THLongStorage *position,
                                int curDim) {
-  long ndim = THCTensor_(nDimension)(state, input);
+  int64_t ndim = THCTensor_(nDimension)(state, input);
 
   // Because we have transposed the Tensor, the data for the dimension we are mode'ing along
   // is always in the innermost dimension
@@ -166,7 +166,7 @@ THC_API void THCTensor_(mode)(THCState *state,
   THLongStorage *position;
   THCudaLongStorage *sortBuffer;
   THCudaLongTensor *indicesTransposed;
-  long ndim, sliceSize, slices;
+  int64_t ndim, sliceSize, slices;
 
 
   THAssert(THCTensor_(checkGPU)(state, 1, values));
@@ -219,7 +219,7 @@ THC_API void THCTensor_(mode)(THCState *state,
 
     // Set-up TensorInfo structs for passing to kernel
     TensorInfo<real, unsigned int> tiValues = getTensorInfo<THCTensor, unsigned int>(state, valuesTransposed);
-    TensorInfo<long, unsigned int> tiIndices = getTensorInfo<THCudaLongTensor, unsigned int>(state, indicesTransposed);
+    TensorInfo<int64_t, unsigned int> tiIndices = getTensorInfo<THCudaLongTensor, unsigned int>(state, indicesTransposed);
 
     // The number of blocks is the number of slices that we need to calculate the mode for. Each block
     // is responsible for computing a single mode
@@ -227,7 +227,7 @@ THC_API void THCTensor_(mode)(THCState *state,
     THC_getGridFromTiles(slices, grid);
 
     // The blocksize is two elements per thread, rounded up to the nearest power of 2
-    long ceilPowerOf2 = nextHighestPowerOf2(sliceSize);
+    int64_t ceilPowerOf2 = nextHighestPowerOf2(sliceSize);
 
     // Macro that calls kernel --> note that we set the block dimensions here, and
     // the amount of shared memory
