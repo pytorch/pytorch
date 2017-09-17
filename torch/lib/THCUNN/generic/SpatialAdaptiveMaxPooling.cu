@@ -33,7 +33,7 @@ void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
     input_data = THCTensor_(data)(state, input);
 
     THCTensor_(resize3d)(state, output, nInputPlane, nOutputRows, nOutputCols);
-    THCIndexTensor_(resize4d)(state, indices, 2, nInputPlane, nOutputRows, nOutputCols);
+    THCIndexTensor_(resize3d)(state, indices, nInputPlane, nOutputRows, nOutputCols);
 
     indices_data = THCIndexTensor_(data)(state, indices);
     output_data = THCTensor_(data)(state, output);
@@ -46,7 +46,7 @@ void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
 
     // run maxpool kernel
     adaptivemaxpool <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (input_data, output_data,
-                                   indices_data+nInputPlane*nOutputCols*nOutputRows, indices_data,
+                                   indices_data,
                                    nInputPlane, nInputRows, nInputCols, nOutputRows, nOutputCols,
                                    istride_h, istride_w, istride_d);
     THCudaCheck(cudaGetLastError());
@@ -65,7 +65,7 @@ void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
     input_data = THCTensor_(data)(state, input);
 
     THCTensor_(resize4d)(state, output, nbatch, nInputPlane, nOutputRows, nOutputCols);
-    THCIndexTensor_(resize5d)(state, indices, 2, nbatch, nInputPlane, nOutputRows, nOutputCols);
+    THCIndexTensor_(resize4d)(state, indices, nbatch, nInputPlane, nOutputRows, nOutputCols);
 
     indices_data = THCIndexTensor_(data)(state, indices);
     output_data = THCTensor_(data)(state, output);
@@ -78,7 +78,7 @@ void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
 
     // run maxpool kernel
     adaptivemaxpool <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (input_data, output_data,
-                                   indices_data+nbatch*nInputPlane*nOutputCols*nOutputRows, indices_data,
+                                   indices_data,
                                    nInputPlane, nInputRows, nInputCols, nOutputRows, nOutputCols,
                                    istride_h, istride_w, istride_d);
     THCudaCheck(cudaGetLastError());
@@ -130,14 +130,14 @@ void THNN_(SpatialAdaptiveMaxPooling_updateGradInput)(
     {
       // run updateGradInput kernel, accumulate gradients atomically
       atomicadaptivemaxgradinput <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (gradInput_data, gradOutput_data,
-                                          indices_data+nInputPlane*nOutputCols*nOutputRows, indices_data,
+                                          indices_data,
                                           nInputPlane, nInputRows, nInputCols, nOutputRows, nOutputCols);
     }
     else
     {
       // run updateGradInput kernel
       atomicadaptivemaxgradinput <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (gradInput_data, gradOutput_data,
-                                          indices_data+nInputPlane*nOutputCols*nOutputRows, indices_data,
+                                          indices_data,
                                           nInputPlane, nInputRows, nInputCols, nOutputRows, nOutputCols);
     }
     THCudaCheck(cudaGetLastError());
@@ -168,14 +168,14 @@ void THNN_(SpatialAdaptiveMaxPooling_updateGradInput)(
     {
       // run updateGradInput kernel, accumulate gradients atomically
       atomicadaptivemaxgradinput <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (gradInput_data, gradOutput_data,
-                                          indices_data+nbatch*nInputPlane*nOutputCols*nOutputRows, indices_data,
+                                          indices_data,
                                           nInputPlane, nInputRows, nInputCols, nOutputRows, nOutputCols);
     }
     else
     {
       // run updateGradInput kernel, accumulate gradients atomically
       adaptivemaxgradinput <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (gradInput_data, gradOutput_data,
-                                          indices_data+nbatch*nInputPlane*nOutputCols*nOutputRows, indices_data,
+                                          indices_data,
                                           nInputPlane, nInputRows, nInputCols, nOutputRows, nOutputCols);
     }
     THCudaCheck(cudaGetLastError());

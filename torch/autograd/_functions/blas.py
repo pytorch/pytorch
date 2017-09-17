@@ -16,6 +16,16 @@ def _get_output(ctx, arg, inplace=False):
 class Addmm(InplaceFunction):
 
     @staticmethod
+    def symbolic(g, add_matrix, matrix1, matrix2, alpha=1, beta=1, inplace=False):
+        # TODO: manually insert the necessary scaling, since ONNX doesn't
+        # natively support it
+        if alpha != 1 or beta != 1:
+            return None
+        # TODO: Talk to ONNX about why their FC involves a transpose
+        matrix2_t = g.op("Transpose", matrix2)
+        return g.op("FC", matrix1, matrix2_t, add_matrix)
+
+    @staticmethod
     def forward(ctx, add_matrix, matrix1, matrix2, alpha=1, beta=1, inplace=False):
         ctx.alpha = alpha
         ctx.beta = beta

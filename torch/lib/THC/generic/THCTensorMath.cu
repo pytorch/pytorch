@@ -207,7 +207,7 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
 
     // Template Declarations for dim = 1, 2, 3, 4
 #define HANDLE_CASE(DIMS) \
-  CatArrayBatchedCopy<real, unsigned int, DIMS><<<applyGrid, applyBlock, 0, stream->stream>>>(data, d_inputs, param, cat_dimension, param.outputStride[cat_dimension]);
+  CatArrayBatchedCopy<real, unsigned int, DIMS><<<catGrid, applyBlock, 0, stream->stream>>>(data, d_inputs, param, cat_dimension, param.outputStride[cat_dimension]);
 
     // Now we loop
     offset = 0;
@@ -243,15 +243,12 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
       // is based on.
       dim3 applyBlock = getApplyBlock();
 
-      // We also re-use the applyGrid - but note that we use the maximum number of
-      // elements for a given tensor in this grouping to determine the count
-      dim3 applyGrid;
-      getApplyGrid(state, cohortMax, applyGrid);
+      //Get grid where x dim fills half gpu and y dim is number of tensors.
+      //This will have cating two tensors fill the entire grid, but prevent
+      //many threads from needlessly load meta data if their sizes is small.
+      dim3 catGrid;
+      getCatGrid(state, j, catGrid);
 
-      // Next, we set our grid's y component to be the number of tensors in
-      // the batch. This will allow the kernel to determine which input
-      // tensor it is responsible for copying
-      applyGrid.y = j;
 
       switch (maxDim) {
         case 1:

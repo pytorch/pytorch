@@ -19,49 +19,24 @@ class Optimizer(object):
     """
 
     def __init__(self, params, defaults):
+        self.defaults = defaults
+
         if isinstance(params, Variable) or torch.is_tensor(params):
             raise TypeError("params argument given to the optimizer should be "
                             "an iterable of Variables or dicts, but got " +
                             torch.typename(params))
 
         self.state = defaultdict(dict)
-        self.param_groups = list(params)
-        if len(self.param_groups) == 0:
+        self.param_groups = []
+
+        param_groups = list(params)
+        if len(param_groups) == 0:
             raise ValueError("optimizer got an empty parameter list")
-        if not isinstance(self.param_groups[0], dict):
-            self.param_groups = [{'params': self.param_groups}]
+        if not isinstance(param_groups[0], dict):
+            param_groups = [{'params': param_groups}]
 
-        param_set = set()
-        for group in self.param_groups:
-            if isinstance(group['params'], torch.autograd.Variable):
-                group['params'] = [group['params']]
-            else:
-                group['params'] = list(group['params'])
-            group_set = set(group['params'])
-            if not param_set.isdisjoint(group_set):
-                raise ValueError("some parameters appear in more than one "
-                                 "parameter group")
-            param_set.update(group_set)
-
-        for name, default in defaults.items():
-            for i, group in enumerate(self.param_groups):
-                if default is required and name not in group:
-                    raise ValueError("parameter group " + str(i) + " didn't "
-                                     "specify a value of required optimization parameter " +
-                                     name)
-                else:
-                    group.setdefault(name, default)
-
-        for group in self.param_groups:
-            for param in group['params']:
-                if not isinstance(param, Variable):
-                    raise TypeError("optimizer can only optimize Variables, "
-                                    "but one of the params is " + torch.typename(param))
-                if not param.requires_grad:
-                    raise ValueError("optimizing a parameter that doesn't "
-                                     "require gradients")
-                if not param.is_leaf:
-                    raise ValueError("can't optimize a non-leaf Variable")
+        for param_group in param_groups:
+            self.add_param_group(param_group)
 
     def __getstate__(self):
         return {
@@ -150,3 +125,46 @@ class Optimizer(object):
                 returns the loss. Optional for most optimizers.
         """
         raise NotImplementedError
+
+    def add_param_group(self, param_group):
+        """Add a param group to the :class:`Optimizer` s `param_groups`.
+
+        This can be useful when fine tuning a pre-trained network as frozen layers can be made
+        trainable and added to the :class:`Optimizer` as training progresses.
+
+        Arguments:
+            param_group (dict): Specifies what Variables should be optimized along with group
+            specific optimization options.
+        """
+        assert isinstance(param_group, dict), "param group must be a dict"
+
+        params = param_group['params']
+        if isinstance(params, Variable):
+            param_group['params'] = [params]
+        else:
+            param_group['params'] = list(params)
+
+        for param in param_group['params']:
+            if not isinstance(param, Variable):
+                raise TypeError("optimizer can only optimize Variables, "
+                                "but one of the params is " + torch.typename(param))
+            if not param.requires_grad:
+                raise ValueError("optimizing a parameter that doesn't require gradients")
+            if not param.is_leaf:
+                raise ValueError("can't optimize a non-leaf Variable")
+
+        for name, default in self.defaults.items():
+            if default is required and name not in param_group:
+                raise ValueError("parameter group didn't specify a value of required optimization parameter " +
+                                 name)
+            else:
+                param_group.setdefault(name, default)
+
+        param_set = set()
+        for group in self.param_groups:
+            param_set.update(set(group['params']))
+
+        if not param_set.isdisjoint(set(param_group['params'])):
+            raise ValueError("some parameters appear in more than one parameter group")
+
+        self.param_groups.append(param_group)

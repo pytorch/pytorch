@@ -125,7 +125,6 @@ class EmbeddingBag(Module):
     Args:
         num_embeddings (int): size of the dictionary of embeddings
         embedding_dim (int): the size of each embedding vector
-        padding_idx (int, optional): If given, pads the output with zeros whenever it encounters the index.
         max_norm (float, optional): If given, will renormalize the embeddings to always have a norm lesser than this
         norm_type (float, optional): The p of the p-norm to compute for the max_norm option
         scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the frequency of
@@ -159,19 +158,20 @@ class EmbeddingBag(Module):
                    the input is considered to be of fixed-length sequences
         - Output: `(B, embedding_dim)`
 
-    Examples:
+    Examples::
 
-    >>> # an Embedding module containing 10 tensors of size 3
-    >>> embedding_sum = nn.EmbeddingBag(10, 3, mode='sum')
-    >>> # a batch of 2 samples of 4 indices each
-    >>> input = Variable(torch.LongTensor([1,2,4,5,4,3,2,9]))
-    >>> offsets = Variable(torch.LongTensor([0,4]))
-    >>> embedding_sum(input, offsets)
+        >>> # an Embedding module containing 10 tensors of size 3
+        >>> embedding_sum = nn.EmbeddingBag(10, 3, mode='sum')
+        >>> # a batch of 2 samples of 4 indices each
+        >>> input = Variable(torch.LongTensor([1,2,4,5,4,3,2,9]))
+        >>> offsets = Variable(torch.LongTensor([0,4]))
+        >>> embedding_sum(input, offsets)
 
-    Variable containing:
-    -0.7296 -4.6926  0.3295
-    -0.5186 -0.5631 -0.2792
-    [torch.FloatTensor of size 2x3]
+        Variable containing:
+        -0.7296 -4.6926  0.3295
+        -0.5186 -0.5631 -0.2792
+        [torch.FloatTensor of size 2x3]
+
     """
 
     def __init__(self, num_embeddings, embedding_dim,

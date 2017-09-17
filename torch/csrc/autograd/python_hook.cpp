@@ -10,6 +10,7 @@
 #include "torch/csrc/Exceptions.h"
 
 using torch::autograd::variable_list;
+using torch::autograd::Variable;
 
 static PyObject* wrap_variables(const variable_list& c_variables);
 static variable_list unwrap_variables(PyObject* py_variables);
@@ -156,8 +157,8 @@ static void check_single_result(PyObject* _original, PyObject* _result, PyObject
     throw python_error();
   }
 
-  auto& original = ((THPVariable*)_original)->cdata->data;
-  auto& result = ((THPVariable*)_result)->cdata->data;
+  auto& original = ((THPVariable*)_original)->cdata.data();
+  auto& result = ((THPVariable*)_result)->cdata.data();
 
   if (original.type().ID() != result.type().ID()) {
     std::stringstream ss;

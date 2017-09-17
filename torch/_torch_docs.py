@@ -4562,7 +4562,7 @@ Example::
 
 add_docstr(torch._C.tril,
            """
-tril(input, k=0, out=None) -> Tensor
+tril(input, diagonal=0, out=None) -> Tensor
 
 Returns the lower triangular part of the matrix (2D Tensor) :attr:`input`,
 the other elements of the result Tensor :attr:`out` are set to 0.
@@ -4570,15 +4570,15 @@ the other elements of the result Tensor :attr:`out` are set to 0.
 The lower triangular part of the matrix is defined as the elements on and
 below the diagonal.
 
-The argument :attr:`k` controls which diagonal to consider.
+The argument :attr:`diagonal` controls which diagonal to consider.
 
-- :attr:`k` = 0, is the main diagonal.
-- :attr:`k` > 0, is above the main diagonal.
-- :attr:`k` < 0, is below the main diagonal.
+- :attr:`diagonal` = 0, is the main diagonal.
+- :attr:`diagonal` > 0, is above the main diagonal.
+- :attr:`diagonal` < 0, is below the main diagonal.
 
 Args:
     input (Tensor): the input `Tensor`
-    k (int, optional): the diagonal to consider
+    diagonal (int, optional): the diagonal to consider
     out (Tensor, optional): The result `Tensor`
 
 Example::
@@ -4598,14 +4598,14 @@ Example::
      1.2469  0.0064 -1.6250
     [torch.FloatTensor of size 3x3]
 
-    >>> torch.tril(a, k=1)
+    >>> torch.tril(a, diagonal=1)
 
      1.3225  1.7304  0.0000
     -0.3052 -0.3111 -0.1809
      1.2469  0.0064 -1.6250
     [torch.FloatTensor of size 3x3]
 
-    >>> torch.tril(a, k=-1)
+    >>> torch.tril(a, diagonal=-1)
 
      0.0000  0.0000  0.0000
     -0.3052  0.0000  0.0000
@@ -4616,7 +4616,7 @@ Example::
 
 add_docstr(torch._C.triu,
            """
-triu(input, k=0, out=None) -> Tensor
+triu(input, diagonal=0, out=None) -> Tensor
 
 Returns the upper triangular part of the matrix (2D Tensor) :attr:`input`,
 the other elements of the result Tensor :attr:`out` are set to 0.
@@ -4624,15 +4624,15 @@ the other elements of the result Tensor :attr:`out` are set to 0.
 The upper triangular part of the matrix is defined as the elements on and
 above the diagonal.
 
-The argument :attr:`k` controls which diagonal to consider.
+The argument :attr:`diagonal` controls which diagonal to consider.
 
-- :attr:`k` = 0, is the main diagonal.
-- :attr:`k` > 0, is above the main diagonal.
-- :attr:`k` < 0, is below the main diagonal.
+- :attr:`diagonal` = 0, is the main diagonal.
+- :attr:`diagonal` > 0, is above the main diagonal.
+- :attr:`diagonal` < 0, is below the main diagonal.
 
 Args:
     input (Tensor): the input `Tensor`
-    k (int, optional): the diagonal to consider
+    diagonal (int, optional): the diagonal to consider
     out (Tensor, optional): The result `Tensor`
 
 Example::
@@ -4652,14 +4652,14 @@ Example::
      0.0000  0.0000 -1.6250
     [torch.FloatTensor of size 3x3]
 
-    >>> torch.triu(a, k=1)
+    >>> torch.triu(a, diagonal=1)
 
      0.0000  1.7304  1.4573
      0.0000  0.0000 -0.1809
      0.0000  0.0000  0.0000
     [torch.FloatTensor of size 3x3]
 
-    >>> torch.triu(a, k=-1)
+    >>> torch.triu(a, diagonal=-1)
 
      1.3225  1.7304  1.4573
     -0.3052 -0.3111 -0.1809

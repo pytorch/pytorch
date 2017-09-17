@@ -1,5 +1,5 @@
-#include <dlfcn.h>
 #include <Python.h>
+#include <dlfcn.h>
 
 PyObject* module;
 

@@ -42,7 +42,7 @@ PyObject* THPCppFunction_call(PyObject* self, PyObject* args, PyObject *kwargs)
 
   HANDLE_TH_ERRORS {
     AutoNoGIL nogil;
-    output = ((THPCppFunction*)self)->cdata->apply(vars);
+    output = (*((THPCppFunction*)self)->cdata)(vars);
   }
   END_HANDLE_TH_ERRORS
 
@@ -116,6 +116,10 @@ PyObject* THPCppFunction_next_functions(THPCppFunction* self, PyObject* hook)
   return py_functions.release();
 }
 
+PyObject* THPCppFunction_requires_grad(THPCppFunction* self) {
+  return PyBool_FromLong(self->cdata->is_executable);
+}
+
 PyObject* THPCppFunction_register_hook_dict(PyObject* self, PyObject* _var)
 {
   if (!THPVariable_Check(_var)) {
@@ -124,7 +128,7 @@ PyObject* THPCppFunction_register_hook_dict(PyObject* self, PyObject* _var)
   auto var = (THPVariable*)_var;
   auto& fn = *((THPCppFunction*)self)->cdata;
   fn.pre_hooks.push_back(std::make_shared<PyFunctionPreHook>(
-      var->backward_hooks, var->cdata->output_nr));
+      var->backward_hooks, var->cdata.output_nr()));
   Py_RETURN_NONE;
 }
 
