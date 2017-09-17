@@ -7,7 +7,7 @@
 #define const_storage_cast(storage) \
   dynamic_cast<const THCStorage<real>&>(storage)
 #define const_long_cast(tensor) \
-  dynamic_cast<const THCTensor<std::conditional<sizeof(long) == 8, long, int64_t>::type&>(tensor)
+  dynamic_cast<const THCTensor<int64_t>&>(tensor)
 #define const_float_cast(tensor) \
   dynamic_cast<const THCTensor<float>&>(tensor)
 #define const_double_cast(tensor) \
