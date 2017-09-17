@@ -2,10 +2,10 @@
 #error "You must define THS_GENERIC_FILE before including THSGenerateIntTypes.h"
 #endif
 
-#define real unsigned char
-#define accreal long
+#define real uint8_t
+#define accreal int64_t
 #define Real Byte
-#define THSInf UCHAR_MAX
+#define THSInf UINT8_MAX
 #define THS_REAL_IS_BYTE
 #line 1 THS_GENERIC_FILE
 #include THS_GENERIC_FILE
@@ -15,10 +15,10 @@
 #undef THSInf
 #undef THS_REAL_IS_BYTE
 
-#define real char
-#define accreal long
+#define real int8_t
+#define accreal int64_t
 #define Real Char
-#define THSInf CHAR_MAX
+#define THSInf INT8_MAX
 #define THS_REAL_IS_CHAR
 #line 1 THS_GENERIC_FILE
 #include THS_GENERIC_FILE
@@ -28,10 +28,10 @@
 #undef THSInf
 #undef THS_REAL_IS_CHAR
 
-#define real short
-#define accreal long
+#define real int16_t
+#define accreal int64_t
 #define Real Short
-#define THSInf SHRT_MAX
+#define THSInf INT16_MAX
 #define THS_REAL_IS_SHORT
 #line 1 THS_GENERIC_FILE
 #include THS_GENERIC_FILE
@@ -41,10 +41,10 @@
 #undef THSInf
 #undef THS_REAL_IS_SHORT
 
-#define real int
-#define accreal long
+#define real int32_t
+#define accreal int64_t
 #define Real Int
-#define THSInf INT_MAX
+#define THSInf INT32_MAX
 #define THS_REAL_IS_INT
 #line 1 THS_GENERIC_FILE
 #include THS_GENERIC_FILE
@@ -54,10 +54,10 @@
 #undef THSInf
 #undef THS_REAL_IS_INT
 
-#define real long
-#define accreal long
+#define real int64_t
+#define accreal int64_t
 #define Real Long
-#define THSInf LONG_MAX
+#define THSInf INT64_MAX
 #define THS_REAL_IS_LONG
 #line 1 THS_GENERIC_FILE
 #include THS_GENERIC_FILE
