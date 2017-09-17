@@ -22,7 +22,7 @@ struct thcs_tensor_traits {};
 namespace thpp {
 
 template<typename real>
-struct THCSTensor : public interface_traits<real>::tensor_interface_type {
+struct THPP_CLASS THCSTensor : public interface_traits<real>::tensor_interface_type {
   template<typename U>
   friend struct THCSTensor;
 
@@ -40,21 +40,21 @@ public:
   virtual THCSTensor* clone() const override;
   virtual THCSTensor* clone_shallow() override;
   virtual std::unique_ptr<Tensor> contiguous() const override;
-  virtual THCSTensor* newSelect(int dimension, long sliceIndex) const override;
-  virtual THCSTensor* newNarrow(int dimension, long firstIndex, long size) const override;
+  virtual THCSTensor* newSelect(int dimension, int64_t sliceIndex) const override;
+  virtual THCSTensor* newNarrow(int dimension, int64_t firstIndex, int64_t size) const override;
   virtual THCSTensor* newTranspose(int dimension1, int dimension2) const override;
-  virtual THCSTensor* newUnfold(int dimension, long size, long step) const override;
+  virtual THCSTensor* newUnfold(int dimension, int64_t size, int64_t step) const override;
   virtual THCSTensor* newExpand(const long_range& size) const override;
   virtual THCSTensor* newView(const long_range& size) const override;
 
   virtual int nDim() const override;
   virtual long_range sizes() const override;
   virtual long_range strides() const override;
-  virtual const long* rawSizes() const override;
-  virtual const long* rawStrides() const override;
+  virtual const int64_t* rawSizes() const override;
+  virtual const int64_t* rawStrides() const override;
   virtual std::size_t storageOffset() const override;
   virtual std::size_t elementSize() const override;
-  virtual long long numel() const override;
+  virtual int64_t numel() const override;
   virtual bool isContiguous() const override;
   virtual void* data() override;
   virtual const void* data() const override;
@@ -63,8 +63,8 @@ public:
   virtual THCSTensor& retain() override;
   virtual THCSTensor& free() override;
 
-  virtual THCSTensor& resize(const std::initializer_list<long>& new_size) override;
-  virtual THCSTensor& resize(const std::vector<long>& new_size) override;
+  virtual THCSTensor& resize(const std::initializer_list<int64_t>& new_size) override;
+  virtual THCSTensor& resize(const std::vector<int64_t>& new_size) override;
   virtual THCSTensor& resize(THLongStorage *size,
                             THLongStorage *stride) override;
   virtual THCSTensor& resizeAs(const Tensor& src) override;
@@ -79,13 +79,13 @@ public:
                                 THLongStorage *stride) override;
 
   virtual THCSTensor& narrow(const Tensor& src, int dimension,
-                           long firstIndex, long size) override;
+                           int64_t firstIndex, int64_t size) override;
   virtual THCSTensor& select(const Tensor& src, int dimension,
-                            long sliceIndex) override;
+                            int64_t sliceIndex) override;
   virtual THCSTensor& transpose(const Tensor& src, int dimension1,
                                int dimension2) override;
   virtual THCSTensor& unfold(const Tensor& src, int dimension,
-                            long size, long step) override;
+                            int64_t size, int64_t step) override;
   virtual THCSTensor& squeeze(const Tensor& src) override;
   virtual THCSTensor& squeeze(const Tensor& src, int dimension) override;
   virtual THCSTensor& unsqueeze(const Tensor& src, int dimension) override;
@@ -114,16 +114,16 @@ public:
                            const char *uplo, scalar_type tol) override;
 
   virtual THCSTensor& diag(const Tensor& src, int k) override;
-  virtual THCSTensor& eye(long n, long m) override;
+  virtual THCSTensor& eye(int64_t n, int64_t m) override;
   virtual THCSTensor& range(scalar_type xmin, scalar_type xmax,
                           scalar_type step) override;
-  virtual THCSTensor& randperm(const Generator& _generator, long n) override;
+  virtual THCSTensor& randperm(const Generator& _generator, int64_t n) override;
   virtual THCSTensor& sort(const Tensor& ri, const Tensor& src,
                        int dimension, int desc) override;
   virtual THCSTensor& topk(const Tensor& ri, const Tensor& src,
-                       long k, int dim, int dir, int sorted) override;
-  virtual THCSTensor& tril(const Tensor& src, long k) override;
-  virtual THCSTensor& triu(const Tensor& src, long k) override;
+                       int64_t k, int dim, int dir, int sorted) override;
+  virtual THCSTensor& tril(const Tensor& src, int64_t k) override;
+  virtual THCSTensor& triu(const Tensor& src, int64_t k) override;
   // TODO: remove in favor of cat
   virtual THCSTensor& catArray(const std::vector<Tensor*>& inputs,
                              int dimension) override;
@@ -178,15 +178,15 @@ public:
   virtual THCSTensor& var(const Tensor& src, int dimension, int biased, int keepdim) override;
   virtual THCSTensor& norm(const Tensor& src, scalar_type value, int dimension, int keepdim) override;
   virtual THCSTensor& renorm(const Tensor& src, scalar_type value, int dimension, scalar_type maxnorm) override;
-  virtual THCSTensor& histc(const Tensor& src, long nbins, scalar_type minvalue, scalar_type maxvalue) override;
-  virtual THCSTensor& bhistc(const Tensor& src, long nbins, scalar_type minvalue, scalar_type maxvalue) override;
+  virtual THCSTensor& histc(const Tensor& src, int64_t nbins, scalar_type minvalue, scalar_type maxvalue) override;
+  virtual THCSTensor& bhistc(const Tensor& src, int64_t nbins, scalar_type minvalue, scalar_type maxvalue) override;
   virtual scalar_type dist(const Tensor& src, scalar_type value) override;
   virtual scalar_type meanall() override;
   virtual scalar_type varall(int biased) override;
   virtual scalar_type stdall(int biased) override;
   virtual scalar_type normall(scalar_type value) override;
-  virtual THCSTensor& linspace(scalar_type a, scalar_type b, long n) override;
-  virtual THCSTensor& logspace(scalar_type a, scalar_type b, long n) override;
+  virtual THCSTensor& linspace(scalar_type a, scalar_type b, int64_t n) override;
+  virtual THCSTensor& logspace(scalar_type a, scalar_type b, int64_t n) override;
   virtual THCSTensor& rand(const Generator& _generator, THLongStorage *size) override;
   virtual THCSTensor& randn(const Generator& _generator, THLongStorage *size) override;
   virtual int logicalall() override;
@@ -275,7 +275,7 @@ public:
   virtual THCSTensor& match(const Tensor& m1, const Tensor& m2, scalar_type gain) override;
   virtual THCSTensor& max(const Tensor& indices_, const Tensor& src, int dimension, int keepdim) override;
   virtual THCSTensor& min(const Tensor& indices_, const Tensor& src, int dimension, int keepdim) override;
-  virtual THCSTensor& kthvalue(const Tensor& indices_, const Tensor& src, long k, int dimension, int keepdim) override;
+  virtual THCSTensor& kthvalue(const Tensor& indices_, const Tensor& src, int64_t k, int dimension, int keepdim) override;
   virtual THCSTensor& mode(const Tensor& indices_, const Tensor& src, int dimension, int keepdim) override;
   virtual THCSTensor& median(const Tensor& indices_, const Tensor& src, int dimension, int keepdim) override;
   virtual THCSTensor& sum(const Tensor& src, int dimension, int keepdim) override;

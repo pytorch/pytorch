@@ -1,19 +1,19 @@
 [[
   name: size
-  return: long
+  return: int64_t
   cpu_half: True
   arguments:
     - THTensor* self
-    - long dim
+    - int64_t dim
 ]]
 
 [[
   name: stride
-  return: long
+  return: int64_t
   cpu_half: True
   arguments:
     - THTensor* self
-    - long dim
+    - int64_t dim
 ]]
 
 
@@ -49,7 +49,7 @@
       output: True
     - THTensor* self
     - int dim
-    - long sliceIndex
+    - int64_t sliceIndex
   aten_custom_call: |
     int64_t ndim = self.dim();
     AT_ASSERT(ndim > 0, "select() cannot be applied to a 0-dim tensor.");

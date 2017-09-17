@@ -267,6 +267,8 @@
 
 #define THDoubleTensor_BERNOULLI_TENSOR THDoubleTensor_bernoulli_DoubleTensor
 #define THFloatTensor_BERNOULLI_TENSOR THFloatTensor_bernoulli_FloatTensor
+#define THCudaDoubleTensor_BERNOULLI_TENSOR THCudaDoubleTensor_bernoulli_DoubleTensor
+#define THCudaTensor_BERNOULLI_TENSOR THCudaTensor_bernoulli_FloatTensor
 
 [[
   name: bernoulli
@@ -294,12 +296,15 @@
 
 #undef THDoubleTensor_BERNOULLI_TENSOR
 #undef THFloatTensor_BERNOULLI_TENSOR
+#undef THCudaDoubleTensor_BERNOULLI_TENSOR
+#undef THCudaTensor_BERNOULLI_TENSOR
 
 [[
   name: bernoulli_
   defined_if: "!IS_DISTRIBUTED"
   backends:
     - CPU
+    - CUDA
   return: self
   options:
     - cname: bernoulli
@@ -316,62 +321,12 @@
         - arg: THGenerator* generator
           default: THPDefaultGenerator->cdata
           kwarg_only: True
-        - THFloatTensor* float_p
+        - BackendFloatTensor* float_p
     - cname: bernoulli_DoubleTensor
       arguments:
         - THTensor* self
         - arg: THGenerator* generator
           default: THPDefaultGenerator->cdata
           kwarg_only: True
-        - THDoubleTensor* float_p
-]]
-
-#define THCudaDoubleTensor_BERNOULLI_TENSOR THCudaDoubleTensor_bernoulli_DoubleTensor
-#define THCudaTensor_BERNOULLI_TENSOR THCudaTensor_bernoulli_FloatTensor
-
-[[
-  name: bernoulli
-  types:
-    - Float
-    - Double
-  backends:
-    - CUDA
-  return: argument 0
-  variants:
-    - method
-    - function
-  cname: BERNOULLI_TENSOR
-  before_call:
-    THTensor_(resizeAs)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata, ((THPTensor*)$arg1)->cdata);
-  arguments:
-    - arg: THTensor* output
-      output: True
-      resize: self
-    - THTensor* self
-]]
-
-#undef THCudaDoubleTensor_BERNOULLI_TENSOR
-#undef THCudaTensor_BERNOULLI_TENSOR
-
-[[
-  name: bernoulli_
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  return: self
-  options:
-    - cname: bernoulli
-      arguments:
-        - THTensor* self
-        - arg: double p
-          default: 0.5
-    - cname: bernoulli_FloatTensor
-      arguments:
-        - THTensor* self
-        - THCudaTensor* float_p
-    - cname: bernoulli_DoubleTensor
-      arguments:
-        - THTensor* self
-        - THCudaDoubleTensor* float_p
+        - BackendDoubleTensor* float_p
 ]]

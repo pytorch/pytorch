@@ -39,7 +39,11 @@ struct THMapAllocatorContext_ {
   char *filename; /* file name */
   int flags;
   ptrdiff_t size; /* mapped size */
+#ifdef _WIN32
+  HANDLE handle;
+#else
   int fd;
+#endif
 };
 
 #define TH_ALLOC_ALIGNMENT 64
@@ -68,17 +72,25 @@ THMapAllocatorContext *THMapAllocatorContext_new(const char *filename, int flags
   }
   ctx->flags = flags;
   ctx->size = 0;
+#ifdef _WIN32
+  ctx->handle = INVALID_HANDLE_VALUE;
+#else
   ctx->fd = -1;
+#endif
 
   return ctx;
 }
 
 THMapAllocatorContext *THMapAllocatorContext_newWithFd(const char *filename, int fd, int flags)
 {
+#ifdef _WIN32
+  THError("THMapAllocatorContext_newWithFd is unsupported on Windows");
+#else
   THMapAllocatorContext *ctx = THMapAllocatorContext_new(filename, flags);
   ctx->fd = fd;
 
   return ctx;
+#endif
 }
 
 char * THMapAllocatorContext_filename(THMapAllocatorContext *ctx)
@@ -88,7 +100,11 @@ char * THMapAllocatorContext_filename(THMapAllocatorContext *ctx)
 
 int THMapAllocatorContext_fd(THMapAllocatorContext *ctx)
 {
+#ifdef _WIN32
+  THError("THMapAllocatorContext_fd is unsupported on Windows");
+#else
   return ctx->fd;
+#endif
 }
 
 ptrdiff_t THMapAllocatorContext_size(THMapAllocatorContext *ctx)
@@ -105,15 +121,49 @@ void THMapAllocatorContext_free(THMapAllocatorContext *ctx)
 
 static void *_map_alloc(void* ctx_, ptrdiff_t size)
 {
-  if (size == 0) {
+  if (size == 0)
     return NULL;
-  }
 
   THMapAllocatorContext *ctx = ctx_;
   void *data = NULL;
 
 #ifdef _WIN32
+  if (ctx->flags & TH_ALLOCATOR_MAPPED_SHAREDMEM)
   {
+    char *filename;
+    LARGE_INTEGER hfilesz;
+
+    if (ctx->filename[0] == '/')
+      filename = ctx->filename + 1;
+    else
+      filename = ctx->filename;
+
+    hfilesz.QuadPart = size;
+
+    if (ctx->flags & TH_ALLOCATOR_MAPPED_EXCLUSIVE)
+    {
+      ctx->handle = CreateFileMapping(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, hfilesz.HighPart, hfilesz.LowPart, filename);
+    }
+    else if (ctx->flags & TH_ALLOCATOR_MAPPED_NOCREATE)
+    {
+      ctx->handle = OpenFileMapping(FILE_MAP_ALL_ACCESS, FALSE, filename);
+    }
+    else
+    {
+      THError("Excpected either TH_ALLOCATOR_MAPPED_EXCLUSIVE or TH_ALLOCATOR_MAPPED_NOCREATE");
+    }
+
+    if (ctx->handle == NULL)
+      THError("Couldn't open shared file mapping: <%s>, error code: <%d>", filename, GetLastError());
+
+    ctx->size = size;
+    data = MapViewOfFile(ctx->handle, FILE_MAP_ALL_ACCESS, 0, 0, size);
+    if (!data)
+      THError("Couldn't map view of shared file <%s>, error code: <%d>", filename, GetLastError());
+  }
+  else
+  {
+
     HANDLE hfile;
     HANDLE hmfile;
     LARGE_INTEGER hfilesz;
@@ -143,9 +193,7 @@ static void *_map_alloc(void* ctx_, ptrdiff_t size)
     }
 
     if (GetFileSizeEx(hfile, &hfilesz) == 0)
-    {
       THError("could not get file size: <%s>; error code: <%d>", ctx->filename, GetLastError());
-    }
 
     if(size > 0)
     {
@@ -342,6 +390,8 @@ static void THMapAllocator_free(void* ctx_, void* data) {
   THMapAllocatorContext *ctx = ctx_;
 
 #ifdef _WIN32
+  if ((ctx->flags & TH_ALLOCATOR_MAPPED_KEEPFD) || (ctx->flags & TH_ALLOCATOR_MAPPED_SHAREDMEM))
+    CloseHandle(ctx->handle);
   if(UnmapViewOfFile(data) == 0)
     THError("could not unmap the shared memory file");
 #else /* _WIN32 */

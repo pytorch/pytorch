@@ -22,18 +22,18 @@ void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
                   "3D or 4D (batch mode) tensor expected for input, but got: %s");
 
   if (input->nDimension == 3) {
-    long nInputCols = input->size[2];
-    long nInputRows = input->size[1];
-    long nInputPlane = input->size[0];
+    int64_t nInputCols = input->size[2];
+    int64_t nInputRows = input->size[1];
+    int64_t nInputPlane = input->size[0];
 
-    long istride_d = input->stride[0];
-    long istride_h = input->stride[1];
-    long istride_w = input->stride[2];
+    int64_t istride_d = input->stride[0];
+    int64_t istride_h = input->stride[1];
+    int64_t istride_w = input->stride[2];
 
     input_data = THCTensor_(data)(state, input);
 
     THCTensor_(resize3d)(state, output, nInputPlane, nOutputRows, nOutputCols);
-    THCIndexTensor_(resize4d)(state, indices, 2, nInputPlane, nOutputRows, nOutputCols);
+    THCIndexTensor_(resize3d)(state, indices, nInputPlane, nOutputRows, nOutputCols);
 
     indices_data = THCIndexTensor_(data)(state, indices);
     output_data = THCTensor_(data)(state, output);
@@ -46,26 +46,26 @@ void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
 
     // run maxpool kernel
     adaptivemaxpool <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (input_data, output_data,
-                                   indices_data+nInputPlane*nOutputCols*nOutputRows, indices_data,
+                                   indices_data,
                                    nInputPlane, nInputRows, nInputCols, nOutputRows, nOutputCols,
                                    istride_h, istride_w, istride_d);
     THCudaCheck(cudaGetLastError());
 
   } else {
     input = THCTensor_(newContiguous)(state, input);
-    long nInputCols = input->size[3];
-    long nInputRows = input->size[2];
-    long nInputPlane = input->size[1];
-    long nbatch = input->size[0];
+    int64_t nInputCols = input->size[3];
+    int64_t nInputRows = input->size[2];
+    int64_t nInputPlane = input->size[1];
+    int64_t nbatch = input->size[0];
 
-    long istride_d = input->stride[1];
-    long istride_h = input->stride[2];
-    long istride_w = input->stride[3];
+    int64_t istride_d = input->stride[1];
+    int64_t istride_h = input->stride[2];
+    int64_t istride_w = input->stride[3];
 
     input_data = THCTensor_(data)(state, input);
 
     THCTensor_(resize4d)(state, output, nbatch, nInputPlane, nOutputRows, nOutputCols);
-    THCIndexTensor_(resize5d)(state, indices, 2, nbatch, nInputPlane, nOutputRows, nOutputCols);
+    THCIndexTensor_(resize4d)(state, indices, nbatch, nInputPlane, nOutputRows, nOutputCols);
 
     indices_data = THCIndexTensor_(data)(state, indices);
     output_data = THCTensor_(data)(state, output);
@@ -78,7 +78,7 @@ void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
 
     // run maxpool kernel
     adaptivemaxpool <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (input_data, output_data,
-                                   indices_data+nbatch*nInputPlane*nOutputCols*nOutputRows, indices_data,
+                                   indices_data,
                                    nInputPlane, nInputRows, nInputCols, nOutputRows, nOutputCols,
                                    istride_h, istride_w, istride_d);
     THCudaCheck(cudaGetLastError());
@@ -105,11 +105,11 @@ void THNN_(SpatialAdaptiveMaxPooling_updateGradInput)(
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
 
   if (input->nDimension == 3) {
-    long nInputCols = input->size[2];
-    long nInputRows = input->size[1];
-    long nInputPlane = input->size[0];
-    long nOutputCols = gradOutput->size[2];
-    long nOutputRows = gradOutput->size[1];
+    int64_t nInputCols = input->size[2];
+    int64_t nInputRows = input->size[1];
+    int64_t nInputPlane = input->size[0];
+    int64_t nOutputCols = gradOutput->size[2];
+    int64_t nOutputRows = gradOutput->size[1];
 
     //bool atomic = (nInputCols%nOutputCols != 0) || (nInputRows%nOutputRows != 0);
 
@@ -130,24 +130,24 @@ void THNN_(SpatialAdaptiveMaxPooling_updateGradInput)(
     {
       // run updateGradInput kernel, accumulate gradients atomically
       atomicadaptivemaxgradinput <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (gradInput_data, gradOutput_data,
-                                          indices_data+nInputPlane*nOutputCols*nOutputRows, indices_data,
+                                          indices_data,
                                           nInputPlane, nInputRows, nInputCols, nOutputRows, nOutputCols);
     }
     else
     {
       // run updateGradInput kernel
       atomicadaptivemaxgradinput <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (gradInput_data, gradOutput_data,
-                                          indices_data+nInputPlane*nOutputCols*nOutputRows, indices_data,
+                                          indices_data,
                                           nInputPlane, nInputRows, nInputCols, nOutputRows, nOutputCols);
     }
     THCudaCheck(cudaGetLastError());
   } else {
-    long nInputCols = input->size[3];
-    long nInputRows = input->size[2];
-    long nInputPlane = input->size[1];
-    long nbatch = input->size[0];
-    long nOutputCols = gradOutput->size[3];
-    long nOutputRows = gradOutput->size[2];
+    int64_t nInputCols = input->size[3];
+    int64_t nInputRows = input->size[2];
+    int64_t nInputPlane = input->size[1];
+    int64_t nbatch = input->size[0];
+    int64_t nOutputCols = gradOutput->size[3];
+    int64_t nOutputRows = gradOutput->size[2];
 
     //bool atomic = //(nInputCols%nOutputCols != 0) || (nInputRows%nOutputRows != 0);
 
@@ -168,14 +168,14 @@ void THNN_(SpatialAdaptiveMaxPooling_updateGradInput)(
     {
       // run updateGradInput kernel, accumulate gradients atomically
       atomicadaptivemaxgradinput <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (gradInput_data, gradOutput_data,
-                                          indices_data+nbatch*nInputPlane*nOutputCols*nOutputRows, indices_data,
+                                          indices_data,
                                           nInputPlane, nInputRows, nInputCols, nOutputRows, nOutputCols);
     }
     else
     {
       // run updateGradInput kernel, accumulate gradients atomically
       adaptivemaxgradinput <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (gradInput_data, gradOutput_data,
-                                          indices_data+nbatch*nInputPlane*nOutputCols*nOutputRows, indices_data,
+                                          indices_data,
                                           nInputPlane, nInputRows, nInputCols, nOutputRows, nOutputCols);
     }
     THCudaCheck(cudaGetLastError());

@@ -320,6 +320,9 @@ class _TensorBase(object):
     def __pow__(self, other):
         return self.pow(other)
 
+    def __rpow__(self, other):
+        return torch.pow(other, self)
+
     def __ipow__(self, other):
         return self.pow_(other)
 

@@ -7,6 +7,11 @@ import math
 class Add(InplaceFunction):
 
     @staticmethod
+    def symbolic(g, a, b, inplace=False):
+        # TODO: [Export inplace]
+        return g.appendNode(g.create("Add", [a, b]))
+
+    @staticmethod
     def forward(ctx, a, b, inplace=False):
         ctx.a_size = a.size()
         ctx.b_size = b.size()
@@ -24,6 +29,11 @@ class Add(InplaceFunction):
 class Sub(InplaceFunction):
 
     @staticmethod
+    def symbolic(g, a, b, inplace=False):
+        # TODO: [Export inplace]
+        return g.appendNode(g.create("Sub", [a, b]))
+
+    @staticmethod
     def forward(ctx, a, b, inplace=False):
         ctx.a_size = a.size()
         ctx.b_size = b.size()
@@ -39,6 +49,11 @@ class Sub(InplaceFunction):
 
 
 class Mul(Function):
+
+    @staticmethod
+    def symbolic(g, a, b, inplace=False):
+        # TODO: [Export inplace]
+        return g.op("Mul", a, b)
 
     @staticmethod
     def forward(ctx, a, b):
@@ -214,6 +229,11 @@ class PowConstant(Function):
 
 
 class Negate(InplaceFunction):
+
+    @staticmethod
+    def symbolic(g, i, inplace=False):
+        # TODO: [Export inplace]
+        return g.appendNode(g.create("Scale", [i]).f_("scale", -1))
 
     @staticmethod
     def forward(ctx, i, inplace=False):

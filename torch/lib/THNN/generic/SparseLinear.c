@@ -19,24 +19,24 @@ static bool THNN_(checkInput)(THTensor* t)
   return t->nDimension == 2 && t->size[1] == 3;
 }
 
-static bool THNN_(checkSize2D)(THTensor* t, long size0, long size1)
+static bool THNN_(checkSize2D)(THTensor* t, int64_t size0, int64_t size1)
 {
   return t->nDimension == 2 && t->size[0] == size0 && t->size[1] == size1;
 }
 
-static bool THNN_(checkSize1D)(THTensor* t, long size0)
+static bool THNN_(checkSize1D)(THTensor* t, int64_t size0)
 {
   return t->nDimension == 1 && t->size[0] == size0;
 }
 
-static void THNN_(set1d)(THTensor *t, long x0, real value) {
+static void THNN_(set1d)(THTensor *t, int64_t x0, real value) {
   THStorage_(set)(t->storage, t->storageOffset + x0*t->stride[0], value);
 }
-static real THNN_(get3d)(const THTensor *t, long x0, long x1, long x2) {
+static real THNN_(get3d)(const THTensor *t, int64_t x0, int64_t x1, int64_t x2) {
   return THStorage_(get)(t->storage, t->storageOffset +
                          x0*t->stride[0] + x1*t->stride[1] + x2*t->stride[2]);
 }
-static real THNN_(get2d)(const THTensor *t, long x0, long x1) {
+static real THNN_(get2d)(const THTensor *t, int64_t x0, int64_t x1) {
   return THStorage_(get)(t->storage, t->storageOffset +
                          x0*t->stride[0] + x1*t->stride[1]);
 }
@@ -48,16 +48,16 @@ void THNN_(SparseLinear_updateOutput)(
           THTensor *weight,
           THTensor *bias)
 {
-  long h, i, j, hp0, hp1;
-  long outDim = THTensor_(size)(weight, 0);
-  long inDim = THTensor_(size)(weight, 1);
-  long batchSize = THTensor_(size)(output, 0);
+  int64_t h, i, j, hp0, hp1;
+  int64_t outDim = THTensor_(size)(weight, 0);
+  int64_t inDim = THTensor_(size)(weight, 1);
+  int64_t batchSize = THTensor_(size)(output, 0);
 
   THArgCheck(THNN_(checkInput)(input), 2, "input must be in coo format, nnz x 3");
   THArgCheck(THTensor_(isContiguous)(output), 3, "output must be contiguous");
   THArgCheck(THNN_(checkSize1D)(bias, outDim), 5, "bias size wrong");
 
-  long nnz = THTensor_(size)(input, 0);
+  int64_t nnz = THTensor_(size)(input, 0);
 
   THLongTensor * csr = THLongTensor_newWithSize1d(batchSize+1);
   THLongTensor_zero(csr);
@@ -66,10 +66,10 @@ void THNN_(SparseLinear_updateOutput)(
 
 //#pragma omp parallel for private(i, h, hp0, hp1) schedule(static) if (nnz > 10000)
   for (i=0; i<nnz; i++) {
-    hp0 = (long)(THNN_(get2d)(input, i, 0)) - 1;
+    hp0 = (int64_t)(THNN_(get2d)(input, i, 0)) - 1;
     hp1 = (i+1 == nnz) ?
             batchSize :
-            (long)(THNN_(get2d)(input, i+1, 0)) - 1;
+            (int64_t)(THNN_(get2d)(input, i+1, 0)) - 1;
     if (hp0 != hp1) for (h = hp0; h < hp1; h++) {
       THLongTensor_set1d(csr, h+1, i+1);
     }
@@ -80,15 +80,15 @@ void THNN_(SparseLinear_updateOutput)(
   THTensor_(zero)(output);
 #pragma omp parallel for private(h, i) schedule(static) if (nnz > 10000)
   for (h = 0; h < batchSize; h++) {
-    long i_start = THLongTensor_get1d(csr, h);
-    long i_end = THLongTensor_get1d(csr, h+1);
+    int64_t i_start = THLongTensor_get1d(csr, h);
+    int64_t i_end = THLongTensor_get1d(csr, h+1);
     for (i = i_start; i < i_end; i++) {
       real val = THNN_(get2d)(input, i, 2);
       if (val == 0) {
         continue;
       }
 
-      long offset = (long)(THNN_(get2d)(input, i, 1)) - 1;
+      int64_t offset = (int64_t)(THNN_(get2d)(input, i, 1)) - 1;
       if (offset >= 0 && offset < inDim) {
         THBlas_(axpy)(outDim,
             val,
@@ -118,9 +118,9 @@ void THNN_(SparseLinear_legacyUpdateOutput)(
           THTensor *weight,
           THTensor *bias)
 {
-  long h, i;
-  long outDim = THTensor_(size)(weight, 0);
-  long inDim = THTensor_(size)(weight, 1);
+  int64_t h, i;
+  int64_t outDim = THTensor_(size)(weight, 0);
+  int64_t inDim = THTensor_(size)(weight, 1);
 
   THArgCheck(THNN_(checkLegacyInput)(input), 2, "input size must be batchsize x nnz x 2");
   THArgCheck(THTensor_(isContiguous)(output), 3, "output must be contiguous");
@@ -128,8 +128,8 @@ void THNN_(SparseLinear_legacyUpdateOutput)(
 
   weight = THTensor_(newContiguous)(weight);
 
-  long batchSize = THTensor_(size)(input, 0);
-  long nnz = THTensor_(size)(input, 1);
+  int64_t batchSize = THTensor_(size)(input, 0);
+  int64_t nnz = THTensor_(size)(input, 1);
   THTensor_(resize2d)(output, batchSize, outDim);
 
   // output = weight * input + bias
@@ -143,7 +143,7 @@ void THNN_(SparseLinear_legacyUpdateOutput)(
         continue;
       }
 
-      long offset = (long)(THNN_(get3d)(input, h, i, 0)) - 1;
+      int64_t offset = (int64_t)(THNN_(get3d)(input, h, i, 0)) - 1;
       if (offset >= 0 && offset < inDim) {
         THBlas_(axpy)(outDim,
                       val,
@@ -178,9 +178,9 @@ void THNN_(SparseLinear_accGradParameters)(
 {
   real weightDecay = TH_CONVERT_ACCREAL_TO_REAL(weightDecay_);
   real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
-  long h, i, col, hp0, hp1;
-  long outDim = THTensor_(size)(weight, 0);
-  long inDim = THTensor_(size)(weight, 1);
+  int64_t h, i, col, hp0, hp1;
+  int64_t outDim = THTensor_(size)(weight, 0);
+  int64_t inDim = THTensor_(size)(weight, 1);
 
   THArgCheck(THNN_(checkInput)(input), 2,
              "input must be in coo format, nnz x 3");
@@ -191,7 +191,7 @@ void THNN_(SparseLinear_accGradParameters)(
   THArgCheck(THTensor_(isContiguous)(gradOutput), 1,
              "gradOutput must be contiguous");
 
-  long nnz = THTensor_(size)(input, 0);
+  int64_t nnz = THTensor_(size)(input, 0);
 
   THLongTensor* csc = THLongTensor_newWithSize1d(inDim+1);
   THLongTensor_zero(csc);
@@ -199,10 +199,10 @@ void THNN_(SparseLinear_accGradParameters)(
 
 #pragma omp parallel for private(i, h, hp0, hp1) schedule(static) if (nnz > 10000)
   for (i = 0; i < nnz; i++) {
-    hp0 = (long)(THNN_(get2d)(input, i, 1)) - 1;
+    hp0 = (int64_t)(THNN_(get2d)(input, i, 1)) - 1;
     hp1 = (i+1 == nnz) ?
             inDim :
-            (long)(THNN_(get2d)(input, i+1, 1)) - 1;
+            (int64_t)(THNN_(get2d)(input, i+1, 1)) - 1;
     if (hp0 != hp1) for (h = hp0; h < hp1; h++) {
       THLongTensor_set1d(csc, h+1, i+1);
     }
@@ -211,13 +211,13 @@ void THNN_(SparseLinear_accGradParameters)(
   // gradWeight += gradOutput * input
 #pragma omp parallel for private(h, i, col) schedule(static) if (nnz > 10000)
   for (col = 0; col < inDim; col++) {
-    long i_start = THLongTensor_get1d(csc, col);
-    long i_end = THLongTensor_get1d(csc, col+1);
+    int64_t i_start = THLongTensor_get1d(csc, col);
+    int64_t i_end = THLongTensor_get1d(csc, col+1);
     for (i = i_start; i < i_end; i++) {
       real val = scale * THNN_(get2d)(input, i, 2);
 
-      h = (long)(THNN_(get2d)(input, i, 0)) - 1;
-      long offset = (long)(THNN_(get2d)(input, i, 1)) - 1;
+      h = (int64_t)(THNN_(get2d)(input, i, 0)) - 1;
+      int64_t offset = (int64_t)(THNN_(get2d)(input, i, 1)) - 1;
       if (offset >= 0 && offset < inDim) {
         THBlas_(axpy)(outDim,
             val,
@@ -258,9 +258,9 @@ void THNN_(SparseLinear_legacyAccGradParameters)(
 {
   real weightDecay = TH_CONVERT_ACCREAL_TO_REAL(weightDecay_);
   real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
-  long h, i;
-  long outDim = THTensor_(size)(weight, 0);
-  long inDim = THTensor_(size)(weight, 1);
+  int64_t h, i;
+  int64_t outDim = THTensor_(size)(weight, 0);
+  int64_t inDim = THTensor_(size)(weight, 1);
 
   THArgCheck(THNN_(checkLegacyInput)(input), 2,
              "input size must be batchsize x nnz x 2");
@@ -271,8 +271,8 @@ void THNN_(SparseLinear_legacyAccGradParameters)(
   THArgCheck(THTensor_(isContiguous)(gradOutput), 1,
              "gradOutput must be contiguous");
 
-  long batchSize = THTensor_(size)(input, 0);
-  long nnz = THTensor_(size)(input, 1);
+  int64_t batchSize = THTensor_(size)(input, 0);
+  int64_t nnz = THTensor_(size)(input, 1);
   THTensor_(resize2d)(gradOutput, batchSize, outDim);
 
   // gradWeight += gradOutput * input
@@ -285,7 +285,7 @@ void THNN_(SparseLinear_legacyAccGradParameters)(
         continue;
       }
 
-      long offset = (long)(THNN_(get3d)(input, h, i, 0)) - 1;
+      int64_t offset = (int64_t)(THNN_(get3d)(input, h, i, 0)) - 1;
       if (offset >= 0 && offset < inDim) {
         THBlas_(axpy)(outDim,
                       val,
@@ -323,9 +323,9 @@ void THNN_(SparseLinear_updateParameters)(
           accreal learningRate_)
 {
   real learningRate = TH_CONVERT_ACCREAL_TO_REAL(learningRate_);
-  long h, i;
-  long outDim = weight->size[0];
-  long inDim = weight->size[1];
+  int64_t h, i;
+  int64_t outDim = weight->size[0];
+  int64_t inDim = weight->size[1];
 
   THArgCheck(THNN_(checkSize2D)(gradWeight, outDim, inDim), 4,
              "gradWeight size wrong");
@@ -335,17 +335,17 @@ void THNN_(SparseLinear_updateParameters)(
              "input must be in coo format, nnz x 3");
 
 
-  long nnz = THTensor_(size)(lastInput, 0);
+  int64_t nnz = THTensor_(size)(lastInput, 0);
 
   // collect unique offsets of non-0 val in input
   THTensor* offsets = THTensor_(newWithSize1d)(nnz);
-  long cnt = 0;
+  int64_t cnt = 0;
   for (i = 0; i < nnz; i++) {
     real val = THNN_(get2d)(lastInput, i, 2);
     if (val == 0) {
       continue;
     }
-    long offset = (long)(THNN_(get2d)(lastInput, i, 1)) - 1;
+    int64_t offset = (int64_t)(THNN_(get2d)(lastInput, i, 1)) - 1;
     if (offset >= 0 && offset < inDim) {
       THNN_(set1d)(offsets, cnt++, offset);
     } else {
@@ -377,7 +377,7 @@ void THNN_(SparseLinear_updateParameters)(
   THTensor_(cadd)(bias, bias, -learningRate, gradBias);
 #pragma omp parallel for private(i) schedule(static) if (cnt * outDim > 10000)
   for (i = 0; i < cnt; i++) {
-    long offset = (long)uniqueOffsets_p[i];
+    int64_t offset = (int64_t)uniqueOffsets_p[i];
     THBlas_(axpy)(outDim,
                   -learningRate,
                   COL_PTR2(gradWeight, offset), gradWeight->stride[0],
@@ -397,9 +397,9 @@ void THNN_(SparseLinear_legacyUpdateParameters)(
           accreal learningRate_)
 {
   real learningRate = TH_CONVERT_ACCREAL_TO_REAL(learningRate_);
-  long h, i;
-  long outDim = weight->size[0];
-  long inDim = weight->size[1];
+  int64_t h, i;
+  int64_t outDim = weight->size[0];
+  int64_t inDim = weight->size[1];
 
   THArgCheck(THNN_(checkSize2D)(gradWeight, outDim, inDim), 4,
              "gradWeight size wrong");
@@ -409,19 +409,19 @@ void THNN_(SparseLinear_legacyUpdateParameters)(
              "input size must be batchsize x nnz x 2");
 
 
-  long batchSize = THTensor_(size)(lastInput, 0);
-  long nnz = THTensor_(size)(lastInput, 1);
+  int64_t batchSize = THTensor_(size)(lastInput, 0);
+  int64_t nnz = THTensor_(size)(lastInput, 1);
 
   // collect unique offsets of non-0 val in input
   THTensor* offsets = THTensor_(newWithSize1d)(batchSize * nnz);
-  long cnt = 0;
+  int64_t cnt = 0;
   for (h = 0; h < batchSize; h++) {
     for (i = 0; i < nnz; i++) {
       real val = THNN_(get3d)(lastInput, h, i, 1);
       if (val == 0 ) {
         continue;
       }
-      long offset = (long)(THNN_(get3d)(lastInput, h, i, 0)) - 1;
+      int64_t offset = (int64_t)(THNN_(get3d)(lastInput, h, i, 0)) - 1;
       if (offset >= 0 && offset < inDim) {
         THNN_(set1d)(offsets, cnt++, offset);
       } else {
@@ -453,7 +453,7 @@ void THNN_(SparseLinear_legacyUpdateParameters)(
   THTensor_(cadd)(bias, bias, -learningRate, gradBias);
 #pragma omp parallel for private(i) schedule(static) if (cnt * outDim > 10000)
   for (i = 0; i < cnt; i++) {
-    long offset = (long)uniqueOffsets_p[i];
+    int64_t offset = (int64_t)uniqueOffsets_p[i];
     THBlas_(axpy)(outDim,
                   -learningRate,
                   COL_PTR2(gradWeight, offset), gradWeight->stride[0],
@@ -469,10 +469,10 @@ void THNN_(SparseLinear_zeroGradParameters)(
           THTensor *gradBias,
           THTensor *lastInput)
 {
-  long h, i, j;
+  int64_t h, i, j;
 
-  long outDim = gradWeight->size[0];
-  long inDim = gradWeight->size[1];
+  int64_t outDim = gradWeight->size[0];
+  int64_t inDim = gradWeight->size[1];
 
   THArgCheck(THNN_(checkSize1D)(gradBias, outDim), 3, "gradBias size wrong");
   THArgCheck(THNN_(checkInput)(lastInput), 4,
@@ -480,7 +480,7 @@ void THNN_(SparseLinear_zeroGradParameters)(
 
   THTensor_(zero)(gradBias);
 
-  long nnz = THTensor_(size)(lastInput, 0);
+  int64_t nnz = THTensor_(size)(lastInput, 0);
 
 #pragma omp parallel for private(i, j) schedule(static) if (   \
   nnz * outDim > 10000)
@@ -489,13 +489,13 @@ void THNN_(SparseLinear_zeroGradParameters)(
       continue;
     }
 
-    long offset = (long)(THNN_(get2d)(lastInput, i, 1)) - 1;
+    int64_t offset = (int64_t)(THNN_(get2d)(lastInput, i, 1)) - 1;
     if (offset >= 0 && offset < inDim) {
       real* pGradWeight = COL_PTR2(gradWeight, offset);
       if (gradWeight->stride[0] == 1) {
         THVector_(fill)(pGradWeight, 0, outDim);
       } else {
-        long stride = gradWeight->stride[0];
+        int64_t stride = gradWeight->stride[0];
         for (j = 0; j < outDim; ++j) {
           pGradWeight[j * stride] = 0;
         }
@@ -515,10 +515,10 @@ void THNN_(SparseLinear_legacyZeroGradParameters)(
           THTensor *gradBias,
           THTensor *lastInput)
 {
-  long h, i, j;
+  int64_t h, i, j;
 
-  long outDim = gradWeight->size[0];
-  long inDim = gradWeight->size[1];
+  int64_t outDim = gradWeight->size[0];
+  int64_t inDim = gradWeight->size[1];
 
   THArgCheck(THNN_(checkSize1D)(gradBias, outDim), 3, "gradBias size wrong");
   THArgCheck(THNN_(checkLegacyInput)(lastInput), 4,
@@ -526,8 +526,8 @@ void THNN_(SparseLinear_legacyZeroGradParameters)(
 
   THTensor_(zero)(gradBias);
 
-  long batchSize = THTensor_(size)(lastInput, 0);
-  long nnz = THTensor_(size)(lastInput, 1);
+  int64_t batchSize = THTensor_(size)(lastInput, 0);
+  int64_t nnz = THTensor_(size)(lastInput, 1);
 
 #pragma omp parallel for private(h, i, j) schedule(static) if (   \
   batchSize > 1 && batchSize * nnz * outDim > 10000)
@@ -537,13 +537,13 @@ void THNN_(SparseLinear_legacyZeroGradParameters)(
         continue;
       }
 
-      long offset = (long)(THNN_(get3d)(lastInput, h, i, 0)) - 1;
+      int64_t offset = (int64_t)(THNN_(get3d)(lastInput, h, i, 0)) - 1;
       if (offset >= 0 && offset < inDim) {
         real* pGradWeight = COL_PTR2(gradWeight, offset);
         if (gradWeight->stride[0] == 1) {
           THVector_(fill)(pGradWeight, 0, outDim);
         } else {
-          long stride = gradWeight->stride[0];
+          int64_t stride = gradWeight->stride[0];
           for (j = 0; j < outDim; ++j) {
             pGradWeight[j * stride] = 0;
           }

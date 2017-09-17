@@ -7,6 +7,8 @@ import contextlib
 from functools import wraps
 from itertools import product
 from copy import deepcopy
+import __main__
+import errno
 
 import torch
 import torch.cuda
@@ -17,13 +19,17 @@ torch.set_default_tensor_type('torch.DoubleTensor')
 
 SEED = 0
 SEED_SET = 0
+ACCEPT = False
 
 
+# TODO rename me
 def parse_set_seed_once():
     global SEED
     global SEED_SET
+    global ACCEPT
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument('--seed', type=int, default=123)
+    parser.add_argument('--accept', action='store_true')
     args, remaining = parser.parse_known_args()
     if SEED_SET == 0:
         torch.manual_seed(args.seed)
@@ -31,6 +37,7 @@ def parse_set_seed_once():
             torch.cuda.manual_seed_all(args.seed)
         SEED = args.seed
         SEED_SET = 1
+    ACCEPT = args.accept
     remaining = [sys.argv[0]] + remaining
     return remaining
 
@@ -258,6 +265,57 @@ class TestCase(unittest.TestCase):
             if id(obj) == id(elem):
                 return
         raise AssertionError("object not found in iterable")
+
+    def assertExpected(self, s, subname=None):
+        """
+        Test that a string matches the recorded contents of a file
+        derived from the name of this test and subname.  This file
+        is placed in the 'expect' directory in the same directory
+        as the test script. You can automatically update the recorded test
+        output using --accept.
+
+        If you call this multiple times in a single function, you must
+        give a unique subname each time.
+        """
+        if not isinstance(s, str):
+            raise TypeError("assertExpected is strings only")
+
+        def remove_prefix(text, prefix):
+            if text.startswith(prefix):
+                return text[len(prefix):]
+            return text
+        munged_id = remove_prefix(self.id(), "__main__.")
+        # NB: we take __file__ from __main__, so we place the expect directory
+        # where the test script lives, NOT where test/common.py lives.  This
+        # doesn't matter in PyTorch where all test scripts are in the same
+        # directory as test/common.py, but it matters in onnx-pytorch
+        expected_file = os.path.join(os.path.dirname(os.path.realpath(__main__.__file__)),
+                                     "expect",
+                                     munged_id)
+        if subname:
+            expected_file += "-" + subname
+        expected_file += ".expect"
+        expected = None
+        if ACCEPT:
+            with open(expected_file, 'w') as f:
+                f.write(s)
+        else:
+            try:
+                with open(expected_file) as f:
+                    expected = f.read()
+            except IOError as e:
+                if e.errno == errno.ENOENT:
+                    raise RuntimeError(
+                        ("No expect file exists; to accept the current output, run:\n"
+                         "python {} {} --accept").format(__main__.__file__, munged_id))
+                else:
+                    raise
+            if hasattr(self, "assertMultiLineEqual"):
+                # Python 2.7 only
+                # NB: Python considers lhs "old" and rhs "new".
+                self.assertMultiLineEqual(expected, s)
+            else:
+                self.assertEqual(s, expected)
 
     if sys.version_info < (3, 2):
         # assertRaisesRegexp renamed assertRaisesRegex in 3.2

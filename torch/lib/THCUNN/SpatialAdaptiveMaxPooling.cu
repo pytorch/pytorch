@@ -11,7 +11,7 @@
  *    4D input, 4D output, 4D argmax x and y
  */
  template <typename T>
-__global__ void adaptivemaxpool(T *input, T *output, THCIndex_t *indices_x, THCIndex_t *indices_y,
+__global__ void adaptivemaxpool(T *input, T *output, THCIndex_t *indices,
                         int input_n, int input_h, int input_w,
                         int output_h, int output_w,
                         int strideh, int stridew,
@@ -35,8 +35,7 @@ __global__ void adaptivemaxpool(T *input, T *output, THCIndex_t *indices_x, THCI
   // select input/output plane
   output = output + o*output_w*output_h;
   input = input + i*strided;
-  indices_x = indices_x + o*output_w*output_h;
-  indices_y = indices_y + o*output_w*output_h;
+  indices = indices + o*output_w*output_h;
 
   // For all output pixels...
   for(yy = yy_start; yy < yy_end; yy+=yy_step) {
@@ -54,10 +53,8 @@ __global__ void adaptivemaxpool(T *input, T *output, THCIndex_t *indices_x, THCI
       // Compute the mean of the input image...
       T *ptr_input = input + y_start*strideh + x_start*stridew;
       T *ptr_output = output + yy*output_w + xx;
-      THCIndex_t *ptr_ind_x = indices_x + yy*output_w + xx;
-      THCIndex_t *ptr_ind_y = indices_y + yy*output_w + xx;
-      int argmax_x = -1;
-      int argmax_y = -1;
+      THCIndex_t *ptr_ind = indices + yy*output_w + xx;
+      int argmax = -1;
       T max = THCNumerics<T>::min();
       int kx, ky;
       for(ky = 0; ky < kH; ky++) {
@@ -65,16 +62,14 @@ __global__ void adaptivemaxpool(T *input, T *output, THCIndex_t *indices_x, THCI
           T val = ptr_input[kx*stridew];
           if (val > max) {
             max = val;
-            argmax_x = kx;
-            argmax_y = ky;
+            argmax = (ky+y_start)*input_w + kx+x_start;
           }
         }
         ptr_input += strideh; // next input line
       }
       // Update output and argmax
       *ptr_output = max;
-      *ptr_ind_x = argmax_x + TH_INDEX_BASE;
-      *ptr_ind_y = argmax_y + TH_INDEX_BASE;
+      *ptr_ind = argmax + TH_INDEX_BASE;
     }
   }
 }
@@ -84,7 +79,7 @@ __global__ void adaptivemaxpool(T *input, T *output, THCIndex_t *indices_x, THCI
  *    this function computes the gradInput from weight and gradOutput
  */
  template <typename T>
-__global__ void adaptivemaxgradinput(T *gradInput, T *gradOutput, THCIndex_t *indices_x, THCIndex_t *indices_y,
+__global__ void adaptivemaxgradinput(T *gradInput, T *gradOutput, THCIndex_t *indices,
                              int input_n, int input_h, int input_w,
                              int output_h, int output_w)
 {
@@ -107,8 +102,7 @@ __global__ void adaptivemaxgradinput(T *gradInput, T *gradOutput, THCIndex_t *in
   // select input/output plane
   gradOutput = gradOutput + o*output_w*output_h;
   gradInput = gradInput + i*input_w*input_h;
-  indices_x = indices_x + o*output_w*output_h;
-  indices_y = indices_y + o*output_w*output_h;
+  indices = indices + o*output_w*output_h;
 
   // compute gradInput
   for(yy = yy_start; yy < yy_end; yy+=yy_step) {
@@ -121,14 +115,12 @@ __global__ void adaptivemaxgradinput(T *gradInput, T *gradOutput, THCIndex_t *in
 
       T *ptr_gradInput = gradInput + y_start*input_w + x_start;
       T *ptr_gradOutput = gradOutput + yy*output_w + xx;
-      THCIndex_t *ptr_ind_x = indices_x + yy*output_w + xx;
-      THCIndex_t *ptr_ind_y = indices_y + yy*output_w + xx;
+      THCIndex_t *ptr_ind = indices + yy*output_w + xx;
       T z = *ptr_gradOutput;
 
-      int argmax_x = (*ptr_ind_x) - TH_INDEX_BASE;
-      int argmax_y = (*ptr_ind_y) - TH_INDEX_BASE;
+      int argmax = (*ptr_ind) - TH_INDEX_BASE - x_start - y_start*input_w;
 
-      ptr_gradInput[argmax_x + argmax_y*input_w] += z;
+      ptr_gradInput[argmax] += z;
     }
   }
 }
@@ -140,7 +132,7 @@ __global__ void adaptivemaxgradinput(T *gradInput, T *gradOutput, THCIndex_t *in
  */
  template <typename T>
 __global__ void atomicadaptivemaxgradinput(
-  T *gradInput, T *gradOutput, THCIndex_t *indices_x, THCIndex_t *indices_y,
+  T *gradInput, T *gradOutput, THCIndex_t *indices,
   int input_n, int input_h, int input_w, int output_h, int output_w
 )
 {
@@ -162,8 +154,7 @@ __global__ void atomicadaptivemaxgradinput(
   // select input/output plane
   gradOutput = gradOutput + o*output_w*output_h;
   gradInput = gradInput + i*input_w*input_h;
-  indices_x = indices_x + o*output_w*output_h;
-  indices_y = indices_y + o*output_w*output_h;
+  indices = indices + o*output_w*output_h;
 
   // compute gradInput
   for(yy = yy_start; yy < yy_end; yy+=yy_step) {
@@ -176,15 +167,13 @@ __global__ void atomicadaptivemaxgradinput(
 
       T *ptr_gradInput = gradInput + y_start*input_w + x_start;
       T *ptr_gradOutput = gradOutput + yy*output_w + xx;
-      THCIndex_t *ptr_ind_x = indices_x + yy*output_w + xx;
-      THCIndex_t *ptr_ind_y = indices_y + yy*output_w + xx;
+      THCIndex_t *ptr_ind = indices + yy*output_w + xx;
       T z = *ptr_gradOutput;
 
-      int argmax_x = (*ptr_ind_x) - TH_INDEX_BASE;
-      int argmax_y = (*ptr_ind_y) - TH_INDEX_BASE;
+      int argmax = (*ptr_ind) - TH_INDEX_BASE - x_start - y_start*input_w;
 
       // atomic add since different threads could update same variable
-      atomicAdd(&(ptr_gradInput[argmax_x + argmax_y*input_w]), z);
+      atomicAdd(&(ptr_gradInput[argmax]), z);
     }
   }
 }

@@ -177,15 +177,16 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3):
     # check if the backward multiplies by grad_output
     zero_gradients(inputs)
     output = _as_tuple(func(*inputs))
-    torch.autograd.backward(output, [o.data.new(o.size()).zero_() for o in output])
-    var_inputs = list(filter(lambda i: isinstance(i, Variable), inputs))
-    if not var_inputs:
-        raise RuntimeError("no Variables found in input")
-    for i in var_inputs:
-        if i.grad is None:
-            continue
-        if not i.grad.data.eq(0).all():
-            return False
+    if any([o.requires_grad for o in output]):
+        torch.autograd.backward(output, [o.data.new(o.size()).zero_() for o in output], create_graph=True)
+        var_inputs = list(filter(lambda i: isinstance(i, Variable), inputs))
+        if not var_inputs:
+            raise RuntimeError("no Variables found in input")
+        for i in var_inputs:
+            if i.grad is None:
+                continue
+            if not i.grad.data.eq(0).all():
+                return False
 
     return True
 

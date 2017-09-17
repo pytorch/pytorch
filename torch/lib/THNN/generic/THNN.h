@@ -48,7 +48,7 @@ TH_API void THNN_(ClassNLLCriterion_updateOutput)(
           bool sizeAverage,            // if true, the loss will be normalized by batch size and class weights
           THTensor *weights,           // [OPTIONAL] class weights
           THTensor *total_weight,      // [BUFFER]
-          long ignore_index);          // target index to ignore (loss = 0, gradInput = 0)
+          int64_t ignore_index);       // target index to ignore (loss = 0, gradInput = 0)
 TH_API void THNN_(ClassNLLCriterion_updateGradInput)(
           THNNState *state,            // library's state
           THTensor *input,             // input tensor (1D/2D)
@@ -57,7 +57,7 @@ TH_API void THNN_(ClassNLLCriterion_updateGradInput)(
           bool sizeAverage,            // if true, the loss will be normalized by batch size and class weights
           THTensor *weights,           // [OPTIONAL] class weights
           THTensor *total_weight,      // [BUFFER]
-          long ignore_index);          // target index to ignore (loss = 0, gradInput = 0)
+          int64_t ignore_index);       // target index to ignore (loss = 0, gradInput = 0)
 
 TH_API void THNN_(SpatialClassNLLCriterion_updateOutput)(
           THNNState *state,            // library's state
@@ -67,7 +67,7 @@ TH_API void THNN_(SpatialClassNLLCriterion_updateOutput)(
           bool sizeAverage,            // if true, the loss will be normalized by batch size and class weights
           THTensor *weights,           // [OPTIONAL] class weights
           THTensor *total_weight,      // [BUFFER]
-          long ignore_index);          // target index to ignore (loss = 0, gradInput = 0)
+          int64_t ignore_index);       // target index to ignore (loss = 0, gradInput = 0)
 TH_API void THNN_(SpatialClassNLLCriterion_updateGradInput)(
           THNNState *state,            // library's state
           THTensor *input,             // input tensor (4D)
@@ -76,7 +76,7 @@ TH_API void THNN_(SpatialClassNLLCriterion_updateGradInput)(
           bool sizeAverage,            // if true, the loss will be normalized by batch size and class weights
           THTensor *weights,           // [OPTIONAL] class weights
           THTensor *total_weight,      // [BUFFER]
-          long ignore_index);          // target index to ignore (loss = 0, gradInput = 0)
+          int64_t ignore_index);       // target index to ignore (loss = 0, gradInput = 0)
 
 
 TH_API void THNN_(ELU_updateOutput)(
@@ -465,7 +465,7 @@ TH_API void THNN_(SoftShrink_updateGradInput)(
 TH_API void THNN_(IndexLinear_updateOutput)(
           THNNState *state,
           THIndexTensor *keys,
-          long keysOffset,
+          int64_t keysOffset,
           THTensor *values,
           THIndexTensor *sizes,
           THIndexTensor *cumSumSizes,
@@ -477,7 +477,7 @@ TH_API void THNN_(IndexLinear_updateOutput)(
 TH_API void THNN_(IndexLinear_accGradParameters)(
           THNNState *state,
           THIndexTensor *keys,
-          long keysOffset,
+          int64_t keysOffset,
           THTensor *values,
           THIndexTensor *sizes,
           THIndexTensor *cumSumSizes,
@@ -492,7 +492,7 @@ TH_API void THNN_(IndexLinear_accGradParameters)(
 TH_API void THNN_(IndexLinear_accUpdateGradParameters)(
           THNNState *state,
           THIndexTensor *keys,
-          long keysOffset,
+          int64_t keysOffset,
           THTensor *values,
           THIndexTensor *sizes,
           THIndexTensor *cumSumSizes,
@@ -509,7 +509,7 @@ TH_API void THNN_(IndexLinear_updateParameters)(
           THTensor *bias,
           THIndexTensor *runningKeys,
           THIndexTensor *cumSumSizes,
-          long keysOffset,
+          int64_t keysOffset,
           accreal weightDecay,
           accreal learningRate);
 
@@ -863,8 +863,8 @@ TH_API void THNN_(SpatialConvolutionLocal_updateOutput)(
           int kW, int kH,
           int dW, int dH,
           int padW, int padH,
-          long inputWidth, long inputHeight,
-          long outputWidth, long outputHeight);
+          int64_t inputWidth, int64_t inputHeight,
+          int64_t outputWidth, int64_t outputHeight);
 TH_API void THNN_(SpatialConvolutionLocal_updateGradInput)(
           THNNState *state,
           THTensor *input,
@@ -876,8 +876,8 @@ TH_API void THNN_(SpatialConvolutionLocal_updateGradInput)(
           int kW, int kH,
           int dW, int dH,
           int padW, int padH,
-          long inputWidth, long inputHeight,
-          long outputWidth, long outputHeight);
+          int64_t inputWidth, int64_t inputHeight,
+          int64_t outputWidth, int64_t outputHeight);
 TH_API void THNN_(SpatialConvolutionLocal_accGradParameters)(
           THNNState *state,
           THTensor *input,
@@ -889,8 +889,8 @@ TH_API void THNN_(SpatialConvolutionLocal_accGradParameters)(
           int kW, int kH,
           int dW, int dH,
           int padW, int padH,
-          long inputWidth, long inputHeight,
-          long outputWidth, long outputHeight,
+          int64_t inputWidth, int64_t inputHeight,
+          int64_t outputWidth, int64_t outputHeight,
           accreal scale);
 
 TH_API void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(

@@ -52,7 +52,7 @@ auto THCStorage<real>::free() -> THCStorage& {
 }
 
 template<>
-auto THCStorage<real>::resize(long new_size) -> THCStorage& {
+auto THCStorage<real>::resize(int64_t new_size) -> THCStorage& {
   THCStorage_(resize)(state, storage, new_size);
   return *this;
 }

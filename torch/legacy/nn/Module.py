@@ -76,10 +76,11 @@ class Module(object):
                 grad.zero_()
 
     def updateParameters(self, learningRate):
-        params, gradParams = self.parameters()
-        if params:
-            for p, gp in zip(params, gradParams):
-                p.add_(-learningRate, gp)
+        if self.parameters() is not None:
+            params, gradParams = self.parameters()
+            if params:
+                for p, gp in zip(params, gradParams):
+                    p.add_(-learningRate, gp)
 
     def training(self):
         self.train = True

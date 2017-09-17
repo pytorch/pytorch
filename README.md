@@ -181,6 +181,10 @@ On OSX
 export CMAKE_PREFIX_PATH=[anaconda root directory]
 conda install numpy pyyaml setuptools cmake cffi
 ```
+#### Get the PyTorch source
+```bash
+git clone --recursive https://github.com/pytorch/pytorch
+```
 
 #### Install PyTorch
 On Linux

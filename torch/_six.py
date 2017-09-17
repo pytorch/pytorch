@@ -18,6 +18,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+import itertools
+
 
 def with_metaclass(meta, *bases):
     """Create a base class with a metaclass."""
@@ -29,3 +31,12 @@ def with_metaclass(meta, *bases):
         def __new__(cls, name, this_bases, d):
             return meta(name, bases, d)
     return type.__new__(metaclass, 'temporary_class', (), {})
+
+
+# A portable way of referring to the generator version of map
+# in both Python 2 and Python 3.
+# TODO: Move this into an appropriate utility library.
+if hasattr(itertools, 'imap'):
+    imap = itertools.imap
+else:
+    imap = map
