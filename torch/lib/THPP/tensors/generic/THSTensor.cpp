@@ -7,9 +7,9 @@
 #define const_storage_cast(storage) \
   dynamic_cast<const THStorage<real>&>(storage)
 #define const_long_cast(tensor) \
-  dynamic_cast<const THSTensor<long>&>(tensor)
+  dynamic_cast<const THSTensor<std::conditional<sizeof(long) == 8, long, int64_t>::type>&>(tensor)
 #define const_byte_cast(tensor) \
-  dynamic_cast<const THSTensor<unsigned char>&>(tensor)
+  dynamic_cast<const THSTensor<uint8_t>&>(tensor)
 
 template<>
 THSTensor<real>::THSTensor():
@@ -44,12 +44,12 @@ auto THSTensor<real>::contiguous() const -> std::unique_ptr<Tensor> {
 }
 
 template<>
-auto THSTensor<real>::newSelect(int dimension, long sliceIndex) const -> THSTensor* {
+auto THSTensor<real>::newSelect(int dimension, int64_t sliceIndex) const -> THSTensor* {
   throw std::runtime_error("newSelect is not yet available for sparse tensors");
 }
 
 template<>
-auto THSTensor<real>::newNarrow(int dimension, long firstIndex, long size) const -> THSTensor* {
+auto THSTensor<real>::newNarrow(int dimension, int64_t firstIndex, int64_t size) const -> THSTensor* {
   throw std::runtime_error("newNarrow is not yet available for sparse tensors");
 }
 
@@ -59,7 +59,7 @@ auto THSTensor<real>::newTranspose(int dimension1, int dimension2) const -> THST
 }
 
 template<>
-auto THSTensor<real>::newUnfold(int dimension, long size, long step) const -> THSTensor* {
+auto THSTensor<real>::newUnfold(int dimension, int64_t size, int64_t step) const -> THSTensor* {
   throw std::runtime_error("newUnfold is not yet available for sparse tensors");
 }
 
@@ -80,11 +80,11 @@ int THSTensor<real>::nDim() const {
 
 template<>
 auto THSTensor<real>::sizes() const -> long_range {
-  return std::vector<long>(tensor->size, tensor->size + tensor->nDimensionI);
+  return std::vector<int64_t>(tensor->size, tensor->size + tensor->nDimensionI);
 }
 
 template<>
-const long* THSTensor<real>::rawSizes() const {
+const int64_t* THSTensor<real>::rawSizes() const {
   return tensor->size;
 }
 
@@ -94,7 +94,7 @@ auto THSTensor<real>::strides() const -> long_range {
 }
 
 template<>
-const long* THSTensor<real>::rawStrides() const {
+const int64_t* THSTensor<real>::rawStrides() const {
   throw std::runtime_error("THSTensor::rawStrides() not supported");
 }
 
@@ -109,7 +109,7 @@ std::size_t THSTensor<real>::elementSize() const {
 }
 
 template<>
-long long THSTensor<real>::numel() const {
+int64_t THSTensor<real>::numel() const {
   throw std::runtime_error("THSTensor::numel not supported");
 }
 
@@ -139,12 +139,12 @@ const void* THSTensor<real>::cdata() const {
 }
 
 template<>
-auto THSTensor<real>::resize(const std::initializer_list<long> &new_size) -> THSTensor& {
+auto THSTensor<real>::resize(const std::initializer_list<int64_t> &new_size) -> THSTensor& {
   throw std::runtime_error("THSTensor::resize() not supported");
 }
 
 template<>
-auto THSTensor<real>::resize(const std::vector<long> &new_size) -> THSTensor& {
+auto THSTensor<real>::resize(const std::vector<int64_t> &new_size) -> THSTensor& {
   throw std::runtime_error("THSTensor::resize() not supported");
 }
 
@@ -188,14 +188,14 @@ auto THSTensor<real>::setStorage(const Storage& storage,
 template<>
 auto THSTensor<real>::narrow(const Tensor& src,
                              int dimension,
-                             long firstIndex,
-                             long size) -> THSTensor& {
+                             int64_t firstIndex,
+                             int64_t size) -> THSTensor& {
   throw std::runtime_error("THSTensor::narrow not supported");
 }
 
 template<>
 auto THSTensor<real>::select(const Tensor& src, int dimension,
-                             long sliceIndex) -> THSTensor& {
+                             int64_t sliceIndex) -> THSTensor& {
   throw std::runtime_error("THSTensor::select not supported");
 }
 
@@ -208,7 +208,7 @@ auto THSTensor<real>::transpose(const Tensor& src, int dimension1,
 
 template<>
 auto THSTensor<real>::unfold(const Tensor& src, int dimension,
-                             long size, long step) ->THSTensor& {
+                             int64_t size, int64_t step) ->THSTensor& {
   throw std::runtime_error("THSTensor::unfold not supported");
 }
 
@@ -379,7 +379,7 @@ auto THSTensor<real>::diag(const Tensor& src, int k) -> THSTensor& {
 }
 
 template<>
-auto THSTensor<real>::eye(long n, long m) -> THSTensor& {
+auto THSTensor<real>::eye(int64_t n, int64_t m) -> THSTensor& {
   throw std::runtime_error("THSTensor::eye() not supported");
 }
 
@@ -390,7 +390,7 @@ auto THSTensor<real>::range(scalar_type xmin, scalar_type xmax,
 }
 
 template<>
-auto THSTensor<real>::randperm(const Generator& _generator, long n) -> THSTensor& {
+auto THSTensor<real>::randperm(const Generator& _generator, int64_t n) -> THSTensor& {
   throw std::runtime_error("THSTensor::randperm() not supported");
 }
 
@@ -402,17 +402,17 @@ auto THSTensor<real>::sort(const Tensor& ri, const Tensor& src,
 
 template<>
 auto THSTensor<real>::topk(const Tensor& ri, const Tensor& src,
-                          long k, int dim, int dir, int sorted) -> THSTensor& {
+                          int64_t k, int dim, int dir, int sorted) -> THSTensor& {
   throw std::runtime_error("THSTensor::topk() not supported");
 }
 
 template<>
-auto THSTensor<real>::tril(const Tensor& src, long k) -> THSTensor& {
+auto THSTensor<real>::tril(const Tensor& src, int64_t k) -> THSTensor& {
   throw std::runtime_error("THSTensor::tril() not supported");
 }
 
 template<>
-auto THSTensor<real>::triu(const Tensor& src, long k) -> THSTensor& {
+auto THSTensor<real>::triu(const Tensor& src, int64_t k) -> THSTensor& {
   throw std::runtime_error("THSTensor::triu() not supported");
 }
 
@@ -624,12 +624,12 @@ auto THSTensor<real>::renorm(const Tensor& src, scalar_type value, int dimension
 }
 
 template<>
-auto THSTensor<real>::histc(const Tensor& src, long nbins, scalar_type minvalue, scalar_type maxvalue) -> THSTensor& {
+auto THSTensor<real>::histc(const Tensor& src, int64_t nbins, scalar_type minvalue, scalar_type maxvalue) -> THSTensor& {
   throw std::runtime_error("THSTensor::histc() not supported");
 }
 
 template<>
-auto THSTensor<real>::bhistc(const Tensor& src, long nbins, scalar_type minvalue, scalar_type maxvalue) -> THSTensor& {
+auto THSTensor<real>::bhistc(const Tensor& src, int64_t nbins, scalar_type minvalue, scalar_type maxvalue) -> THSTensor& {
   throw std::runtime_error("THSTensor::bhistc() not supported");
 }
 
@@ -659,12 +659,12 @@ auto THSTensor<real>::normall(scalar_type value) -> scalar_type {
 }
 
 template<>
-auto THSTensor<real>::linspace(scalar_type a, scalar_type b, long n) -> THSTensor& {
+auto THSTensor<real>::linspace(scalar_type a, scalar_type b, int64_t n) -> THSTensor& {
   throw std::runtime_error("THSTensor::linspace() not supported");
 }
 
 template<>
-auto THSTensor<real>::logspace(scalar_type a, scalar_type b, long n) -> THSTensor& {
+auto THSTensor<real>::logspace(scalar_type a, scalar_type b, int64_t n) -> THSTensor& {
   throw std::runtime_error("THSTensor::logspace() not supported");
 }
 
@@ -946,7 +946,7 @@ auto THSTensor<real>::min(const Tensor& indices_, const Tensor& src, int dimensi
 }
 
 template<>
-auto THSTensor<real>::kthvalue(const Tensor& indices_, const Tensor& src, long k, int dimension, int keepdim) -> THSTensor& {
+auto THSTensor<real>::kthvalue(const Tensor& indices_, const Tensor& src, int64_t k, int dimension, int keepdim) -> THSTensor& {
   throw std::runtime_error("THSTensor::kthvalue() not supported");
 }
 

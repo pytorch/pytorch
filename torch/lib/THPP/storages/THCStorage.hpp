@@ -42,7 +42,7 @@ public:
   virtual THCStorage& retain() override;
   virtual THCStorage& free() override;
 
-  virtual THCStorage& resize(long new_size) override;
+  virtual THCStorage& resize(int64_t new_size) override;
   virtual THCStorage& fill(scalar_type value) override;
   virtual THCStorage& set(std::size_t ind, scalar_type value) override;
   virtual THCStorage& fast_set(std::size_t ind, scalar_type value) override;

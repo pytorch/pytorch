@@ -7,13 +7,13 @@
 #define const_storage_cast(storage) \
   dynamic_cast<const THCStorage<real>&>(storage)
 #define const_long_cast(tensor) \
-  dynamic_cast<const THCTensor<long>&>(tensor)
+  dynamic_cast<const THCTensor<std::conditional<sizeof(long) == 8, long, int64_t>::type&>(tensor)
 #define const_float_cast(tensor) \
   dynamic_cast<const THCTensor<float>&>(tensor)
 #define const_double_cast(tensor) \
   dynamic_cast<const THCTensor<double>&>(tensor)
 #define const_byte_cast(tensor) \
-  dynamic_cast<const THCTensor<unsigned char>&>(tensor)
+  dynamic_cast<const THCTensor<uint8_t>&>(tensor)
 
 #ifdef THC_REAL_IS_HALF
 #define cast_scalar(v) THC_float2half(v)
@@ -57,12 +57,12 @@ auto THCTensor<real>::contiguous() const -> std::unique_ptr<Tensor> {
 }
 
 template<>
-auto THCTensor<real>::newSelect(int dimension, long sliceIndex) const -> THCTensor* {
+auto THCTensor<real>::newSelect(int dimension, int64_t sliceIndex) const -> THCTensor* {
   throw std::runtime_error("newSelect is not yet available for CUDA tensors");
 }
 
 template<>
-auto THCTensor<real>::newNarrow(int dimension, long firstIndex, long size) const -> THCTensor* {
+auto THCTensor<real>::newNarrow(int dimension, int64_t firstIndex, int64_t size) const -> THCTensor* {
   return new THCTensor(state, THCTensor_(newNarrow)(state, tensor, dimension, firstIndex, size));
 }
 
@@ -72,14 +72,14 @@ auto THCTensor<real>::newTranspose(int dimension1, int dimension2) const -> THCT
 }
 
 template<>
-auto THCTensor<real>::newUnfold(int dimension, long size, long step) const -> THCTensor* {
+auto THCTensor<real>::newUnfold(int dimension, int64_t size, int64_t step) const -> THCTensor* {
   throw std::runtime_error("newUnfold is not yet available for CUDA tensors");
 }
 
 template<>
 auto THCTensor<real>::newExpand(const long_range& size) const -> THCTensor* {
   THLongStorage *size_storage = THLongStorage_newWithSize(size.size());
-  std::memcpy(size_storage->data, size.data(), sizeof(long) * size.size());
+  std::memcpy(size_storage->data, size.data(), sizeof(int64_t) * size.size());
   // TODO this might leak on error
   auto expanded = new THCTensor(state, THCTensor_(newExpand)(state, tensor, size_storage));
   THLongStorage_free(size_storage);
@@ -89,7 +89,7 @@ auto THCTensor<real>::newExpand(const long_range& size) const -> THCTensor* {
 template<>
 auto THCTensor<real>::newView(const long_range& size) const -> THCTensor* {
   THLongStorage *size_storage = THLongStorage_newWithSize(size.size());
-  std::memcpy(size_storage->data, size.data(), sizeof(long) * size.size());
+  std::memcpy(size_storage->data, size.data(), sizeof(int64_t) * size.size());
   // TODO this might leak on error
   auto viewed = new THCTensor(state, THCTensor_(newView)(state, tensor, size_storage));
   THLongStorage_free(size_storage);
@@ -103,11 +103,11 @@ int THCTensor<real>::nDim() const {
 
 template<>
 auto THCTensor<real>::sizes() const -> long_range {
-  return std::vector<long>(tensor->size, tensor->size + tensor->nDimension);
+  return std::vector<int64_t>(tensor->size, tensor->size + tensor->nDimension);
 }
 
 template<>
-const long* THCTensor<real>::rawSizes() const {
+const int64_t* THCTensor<real>::rawSizes() const {
   return tensor->size;
 }
 
@@ -117,7 +117,7 @@ auto THCTensor<real>::strides() const -> long_range {
 }
 
 template<>
-const long* THCTensor<real>::rawStrides() const {
+const int64_t* THCTensor<real>::rawStrides() const {
   return tensor->stride;
 }
 
@@ -132,7 +132,7 @@ std::size_t THCTensor<real>::elementSize() const {
 }
 
 template<>
-long long THCTensor<real>::numel() const {
+int64_t THCTensor<real>::numel() const {
   return THCTensor_(numel)(state, tensor);
 }
 
@@ -162,13 +162,13 @@ const void* THCTensor<real>::cdata() const {
 }
 
 template<>
-auto THCTensor<real>::resize(const std::initializer_list<long> &new_size)
+auto THCTensor<real>::resize(const std::initializer_list<int64_t> &new_size)
     -> THCTensor& {
   return resize(new_size.begin(), new_size.end());
 }
 
 template<>
-auto THCTensor<real>::resize(const std::vector<long> &new_size) -> THCTensor& {
+auto THCTensor<real>::resize(const std::vector<int64_t> &new_size) -> THCTensor& {
   return resize(new_size.begin(), new_size.end());
 }
 
@@ -190,7 +190,7 @@ template<typename iterator>
 auto THCTensor<real>::resize(const iterator& begin,
                              const iterator& end) -> THCTensor& {
   THLongStorage *sizes = THLongStorage_newWithSize(std::distance(begin, end));
-  long *sizes_d = sizes->data;
+  int64_t *sizes_d = sizes->data;
   for (auto it = begin; it != end; ++it)
     *sizes_d++ = *it;
   // TODO this might leak on error
@@ -215,8 +215,8 @@ auto THCTensor<real>::setStorage(const Storage& storage,
                                  const long_range& stride) -> THCTensor& {
   auto raw_storage = dynamic_cast<const THCStorage<real>&>(storage).getRaw();
   int nDimension = size.size();
-  auto raw_size = const_cast<long*>(size.data());
-  auto raw_stride = const_cast<long*>(stride.empty() ? nullptr : stride.data());
+  auto raw_size = const_cast<int64_t*>(size.data());
+  auto raw_stride = const_cast<int64_t*>(stride.empty() ? nullptr : stride.data());
   THCTensor_(setStorageNd)(
       state, tensor, raw_storage, storageOffset, nDimension, raw_size, raw_stride);
   return *this;
@@ -240,8 +240,8 @@ auto THCTensor<real>::setStorage(const Storage& storage,
 template<>
 auto THCTensor<real>::narrow(const Tensor& src,
                             int dimension,
-                            long firstIndex,
-                            long size) -> THCTensor& {
+                            int64_t firstIndex,
+                            int64_t size) -> THCTensor& {
   THCTensor_(narrow)(state,
     tensor,
     const_tensor_cast(src).tensor,
@@ -254,7 +254,7 @@ auto THCTensor<real>::narrow(const Tensor& src,
 
 template<>
 auto THCTensor<real>::select(const Tensor& src, int dimension,
-                            long sliceIndex) -> THCTensor& {
+                            int64_t sliceIndex) -> THCTensor& {
   THCTensor_(select)(state,
     tensor,
     const_tensor_cast(src).tensor,
@@ -276,7 +276,7 @@ auto THCTensor<real>::transpose(const Tensor& src, int dimension1,
 
 template<>
 auto THCTensor<real>::unfold(const Tensor& src, int dimension,
-                            long size, long step) ->THCTensor& {
+                            int64_t size, int64_t step) ->THCTensor& {
   auto src_raw = const_tensor_cast(src).tensor;
   if (tensor != src_raw)
     set(src);
@@ -472,7 +472,7 @@ auto THCTensor<real>::diag(const Tensor& src, int k) -> THCTensor& {
 }
 
 template<>
-auto THCTensor<real>::eye(long n, long m) -> THCTensor& {
+auto THCTensor<real>::eye(int64_t n, int64_t m) -> THCTensor& {
   throw std::runtime_error("THCTensor::eye() not implemented");
 }
 
@@ -483,7 +483,7 @@ auto THCTensor<real>::range(scalar_type xmin, scalar_type xmax,
 }
 
 template<>
-auto THCTensor<real>::randperm(const Generator& _generator, long n) -> THCTensor& {
+auto THCTensor<real>::randperm(const Generator& _generator, int64_t n) -> THCTensor& {
   throw std::runtime_error("THCTensor::randperm() not implemented");
 }
 
@@ -503,7 +503,7 @@ auto THCTensor<real>::sort(const Tensor& ri, const Tensor& src,
 
 template<>
 auto THCTensor<real>::topk(const Tensor& ri, const Tensor& src,
-                           long k, int dim, int dir, int sorted) -> THCTensor& {
+                           int64_t k, int dim, int dir, int sorted) -> THCTensor& {
 #ifdef THC_REAL_IS_FLOAT
   THCTensor_(topk)(
     state,
@@ -522,13 +522,13 @@ auto THCTensor<real>::topk(const Tensor& ri, const Tensor& src,
 }
 
 template<>
-auto THCTensor<real>::tril(const Tensor& src, long k) -> THCTensor& {
+auto THCTensor<real>::tril(const Tensor& src, int64_t k) -> THCTensor& {
   THCTensor_(tril)(state, tensor, const_tensor_cast(src).tensor, k);
   return *this;
 }
 
 template<>
-auto THCTensor<real>::triu(const Tensor& src, long k) -> THCTensor& {
+auto THCTensor<real>::triu(const Tensor& src, int64_t k) -> THCTensor& {
   THCTensor_(triu)(state, tensor, const_tensor_cast(src).tensor, k);
   return *this;
 }
@@ -537,7 +537,8 @@ template<>
 auto THCTensor<real>::catArray(const std::vector<Tensor*>& inputs_vec,
                               int dimension) -> THCTensor& {
   int numInputs = inputs_vec.size();
-  tensor_type *inputs[numInputs];
+  // TOFIX: workaround for variable length arrays in MSVC
+  tensor_type **inputs = (tensor_type **) alloca(numInputs * sizeof(tensor_type*));
   for (std::size_t i = 0; i < numInputs; i++)
     inputs[i] = const_tensor_cast(*inputs_vec[i]).tensor;
   THCTensor_(catArray)(state, tensor, inputs, numInputs, dimension);
@@ -971,7 +972,7 @@ auto THCTensor<real>::renorm(const Tensor& src,
 
 template<>
 auto THCTensor<real>::histc(const Tensor& src,
-                            long nbins,
+                            int64_t nbins,
                             scalar_type minvalue,
                             scalar_type maxvalue) -> THCTensor& {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
@@ -986,7 +987,7 @@ auto THCTensor<real>::histc(const Tensor& src,
 
 template<>
 auto THCTensor<real>::bhistc(const Tensor& src,
-                             long nbins,
+                             int64_t nbins,
                              scalar_type minvalue,
                              scalar_type maxvalue) -> THCTensor& {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
@@ -1050,7 +1051,7 @@ auto THCTensor<real>::normall(scalar_type value) -> scalar_type {
 }
 
 template<>
-auto THCTensor<real>::linspace(scalar_type a, scalar_type b, long n) -> THCTensor& {
+auto THCTensor<real>::linspace(scalar_type a, scalar_type b, int64_t n) -> THCTensor& {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
   THCTensor_(linspace)(state, tensor, a, b, n);
   return *this;
@@ -1061,7 +1062,7 @@ auto THCTensor<real>::linspace(scalar_type a, scalar_type b, long n) -> THCTenso
 }
 
 template<>
-auto THCTensor<real>::logspace(scalar_type a, scalar_type b, long n) -> THCTensor& {
+auto THCTensor<real>::logspace(scalar_type a, scalar_type b, int64_t n) -> THCTensor& {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
   THCTensor_(logspace)(state, tensor, a, b, n);
   return *this;
@@ -1238,7 +1239,7 @@ template<>
 auto THCTensor<real>::gather(const Tensor& src, int dimension,
                              const Tensor& index) -> THCTensor& {
   const THCTensor &src_t = const_tensor_cast(src);
-  const THCTensor<long> &index_t = const_long_cast(index);
+  const THCTensor<int64_t> &index_t = const_long_cast(index);
   THCTensor_(gather)(state, tensor, src_t.tensor, dimension, index_t.tensor);
   return *this;
 }
@@ -1247,7 +1248,7 @@ template<>
 auto THCTensor<real>::scatter(int dimension, const Tensor& index,
                               const Tensor& src) -> THCTensor& {
   const THCTensor &src_t = const_tensor_cast(src);
-  const THCTensor<long> &index_t = const_long_cast(index);
+  const THCTensor<int64_t> &index_t = const_long_cast(index);
   THCTensor_(scatter)(state, tensor, dimension, index_t.tensor, src_t.tensor);
   return *this;
 }
@@ -1255,7 +1256,7 @@ auto THCTensor<real>::scatter(int dimension, const Tensor& index,
 template<>
 auto THCTensor<real>::scatterFill(int dimension, const Tensor& index,
                                   scalar_type value) -> THCTensor& {
-  const THCTensor<long> &index_t = const_long_cast(index);
+  const THCTensor<int64_t> &index_t = const_long_cast(index);
   THCTensor_(scatterFill)(state, tensor, dimension,
       index_t.tensor, cast_scalar(value));
   return *this;
@@ -1530,7 +1531,7 @@ template<>
 auto THCTensor<real>::max(const Tensor& indices_, const Tensor& src,
                           int dimension, int keepdim) -> THCTensor& {
   const THCTensor &src_t = const_tensor_cast(src);
-  const THCTensor<long> &indices__t = const_long_cast(indices_);
+  const THCTensor<int64_t> &indices__t = const_long_cast(indices_);
   THCTensor_(max)(state, tensor, indices__t.tensor, src_t.tensor, dimension, keepdim);
   return *this;
 }
@@ -1539,14 +1540,14 @@ template<>
 auto THCTensor<real>::min(const Tensor& indices_, const Tensor& src,
                           int dimension, int keepdim) -> THCTensor& {
   const THCTensor &src_t = const_tensor_cast(src);
-  const THCTensor<long> &indices__t = const_long_cast(indices_);
+  const THCTensor<int64_t> &indices__t = const_long_cast(indices_);
   THCTensor_(min)(state, tensor, indices__t.tensor, src_t.tensor, dimension, keepdim);
   return *this;
 }
 
 template<>
 auto THCTensor<real>::kthvalue(const Tensor& indices_, const Tensor& src,
-                               long k, int dimension, int keepdim) -> THCTensor& {
+                               int64_t k, int dimension, int keepdim) -> THCTensor& {
   throw std::runtime_error("unsupported operation 'kthvalue'");
 }
 

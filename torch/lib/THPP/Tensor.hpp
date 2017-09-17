@@ -16,8 +16,8 @@
 
 namespace thpp {
 
-struct Tensor {
-  using long_range = std::vector<long>;
+struct THPP_CLASS Tensor {
+  using long_range = std::vector<int64_t>;
 
   Tensor() {};
   Tensor(const Tensor& other) = delete;
@@ -27,21 +27,21 @@ struct Tensor {
   virtual Tensor* clone() const = 0;
   virtual Tensor* clone_shallow() = 0;
   virtual std::unique_ptr<Tensor> contiguous() const = 0;
-  virtual Tensor* newSelect(int dimension, long sliceIndex) const = 0;
-  virtual Tensor* newNarrow(int dimension, long firstIndex, long size) const = 0;
+  virtual Tensor* newSelect(int dimension, int64_t sliceIndex) const = 0;
+  virtual Tensor* newNarrow(int dimension, int64_t firstIndex, int64_t size) const = 0;
   virtual Tensor* newTranspose(int dimension1, int dimension2) const = 0;
-  virtual Tensor* newUnfold(int dimension, long size, long step) const = 0;
+  virtual Tensor* newUnfold(int dimension, int64_t size, int64_t step) const = 0;
   virtual Tensor* newExpand(const long_range& size) const = 0;
   virtual Tensor* newView(const long_range& size) const = 0;
 
   virtual int nDim() const = 0;
   virtual long_range sizes() const = 0;
   virtual long_range strides() const = 0;
-  virtual const long* rawSizes() const = 0;
-  virtual const long* rawStrides() const = 0;
+  virtual const int64_t* rawSizes() const = 0;
+  virtual const int64_t* rawStrides() const = 0;
   virtual std::size_t storageOffset() const = 0;
   virtual std::size_t elementSize() const = 0;
-  virtual long long numel() const = 0;
+  virtual int64_t numel() const = 0;
   virtual bool isContiguous() const = 0;
   virtual void* data() = 0;
   virtual const void* data() const = 0;
@@ -50,8 +50,8 @@ struct Tensor {
   virtual Tensor& retain() = 0;
   virtual Tensor& free() = 0;
 
-  virtual Tensor& resize(const std::initializer_list<long>& new_size) = 0;
-  virtual Tensor& resize(const std::vector<long>& new_size) = 0;
+  virtual Tensor& resize(const std::initializer_list<int64_t>& new_size) = 0;
+  virtual Tensor& resize(const std::vector<int64_t>& new_size) = 0;
   virtual Tensor& resize(THLongStorage *size,
                          THLongStorage *stride) = 0;
   virtual Tensor& resizeAs(const Tensor& src) = 0;
@@ -66,11 +66,11 @@ struct Tensor {
                              THLongStorage *stride) = 0;
   virtual Tensor& narrow(const Tensor& src,
                          int dimension,
-                         long firstIndex,
-                         long size) = 0;
-  virtual Tensor& select(const Tensor& src, int dimension, long sliceIndex) = 0;
+                         int64_t firstIndex,
+                         int64_t size) = 0;
+  virtual Tensor& select(const Tensor& src, int dimension, int64_t sliceIndex) = 0;
   virtual Tensor& transpose(const Tensor& src, int dimension1, int dimension2) = 0;
-  virtual Tensor& unfold(const Tensor& src, int dimension, long size, long step) = 0;
+  virtual Tensor& unfold(const Tensor& src, int dimension, int64_t size, int64_t step) = 0;
   virtual Tensor& squeeze(const Tensor& src) = 0;
   virtual Tensor& squeeze(const Tensor& src, int dimension) = 0;
   virtual Tensor& unsqueeze(const Tensor& src, int dimension) = 0;
@@ -110,7 +110,7 @@ struct Tensor {
   virtual Tensor& cremainder(const Tensor& src1, const Tensor& src2) = 0;
   virtual Tensor& max(const Tensor& indices_, const Tensor& src, int dimension, int keepdim) = 0;
   virtual Tensor& min(const Tensor& indices_, const Tensor& src, int dimension, int keepdim) = 0;
-  virtual Tensor& kthvalue(const Tensor& indices_, const Tensor& src, long k, int dimension, int keepdim) = 0;
+  virtual Tensor& kthvalue(const Tensor& indices_, const Tensor& src, int64_t k, int dimension, int keepdim) = 0;
   virtual Tensor& mode(const Tensor& indices_, const Tensor& src, int dimension, int keepdim) = 0;
   virtual Tensor& median(const Tensor& indices_, const Tensor& src, int dimension, int keepdim) = 0;
   virtual Tensor& sum(const Tensor& src, int dimension, int keepdim) = 0;
@@ -133,14 +133,14 @@ struct Tensor {
   virtual Tensor& indexAdd(int dim, const Tensor& index, const Tensor& src) = 0;
 
   virtual Tensor& diag(const Tensor& src, int k) = 0;
-  virtual Tensor& eye(long n, long m) = 0;
-  virtual Tensor& randperm(const Generator& _generator, long n) = 0;
+  virtual Tensor& eye(int64_t n, int64_t m) = 0;
+  virtual Tensor& randperm(const Generator& _generator, int64_t n) = 0;
   virtual Tensor& sort(const Tensor& ri, const Tensor& src,
                        int dimension, int desc) = 0;
   virtual Tensor& topk(const Tensor& ri, const Tensor& src,
-                       long k, int dim, int dir, int sorted) = 0;
-  virtual Tensor& tril(const Tensor& src, long k) = 0;
-  virtual Tensor& triu(const Tensor& src, long k) = 0;
+                       int64_t k, int dim, int dir, int sorted) = 0;
+  virtual Tensor& tril(const Tensor& src, int64_t k) = 0;
+  virtual Tensor& triu(const Tensor& src, int64_t k) = 0;
   virtual Tensor& catArray(const std::vector<Tensor*>& inputs, int dimension) = 0;
   virtual int equal(const Tensor& other) const = 0;
   virtual Tensor& ltTensor(const Tensor& r, const Tensor& tb) = 0;
@@ -289,21 +289,21 @@ struct TensorScalarInterface : public Tensor {
   virtual TensorScalarInterface& lerp(const Tensor& a, const Tensor& b, scalar_type weight) = 0;
   virtual TensorScalarInterface& norm(const Tensor& src, scalar_type value, int dimension, int keepdim) = 0;
   virtual TensorScalarInterface& renorm(const Tensor& src, scalar_type value, int dimension, scalar_type maxnorm) = 0;
-  virtual TensorScalarInterface& histc(const Tensor& src, long nbins, scalar_type minvalue, scalar_type maxvalue) = 0;
-  virtual TensorScalarInterface& bhistc(const Tensor& src, long nbins, scalar_type minvalue, scalar_type maxvalue) = 0;
+  virtual TensorScalarInterface& histc(const Tensor& src, int64_t nbins, scalar_type minvalue, scalar_type maxvalue) = 0;
+  virtual TensorScalarInterface& bhistc(const Tensor& src, int64_t nbins, scalar_type minvalue, scalar_type maxvalue) = 0;
 
   virtual scalar_type dist(const Tensor& src, scalar_type value) = 0;
   virtual scalar_type meanall() = 0;
   virtual scalar_type varall(int biased) = 0;
   virtual scalar_type stdall(int biased) = 0;
   virtual scalar_type normall(scalar_type value) = 0;
-  virtual TensorScalarInterface& linspace(scalar_type a, scalar_type b, long n) = 0;
-  virtual TensorScalarInterface& logspace(scalar_type a, scalar_type b, long n) = 0;
+  virtual TensorScalarInterface& linspace(scalar_type a, scalar_type b, int64_t n) = 0;
+  virtual TensorScalarInterface& logspace(scalar_type a, scalar_type b, int64_t n) = 0;
   virtual TensorScalarInterface& pstrf(const Tensor& rpiv, const Tensor& a,
                                        const char *uplo, scalar_type tol) = 0;
 };
 
 using FloatTensor = TensorScalarInterface<double>;
-using IntTensor = TensorScalarInterface<long long>;
+using IntTensor = TensorScalarInterface<int64_t>;
 
 } // namespace thpp
