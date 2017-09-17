@@ -108,7 +108,7 @@ void THDTensor_(min)(THDTensor *self, THDLongTensor *indices_, THDTensor *src, i
   }
 }
 
-void THDTensor_(kthvalue)(THDTensor *self, THDLongTensor *indices_, THDTensor *src, long k, int dimension, int keepdim) {
+void THDTensor_(kthvalue)(THDTensor *self, THDLongTensor *indices_, THDTensor *src, int64_t k, int dimension, int keepdim) {
   THArgCheck(dimension >= 0 && dimension < src->nDimension, 3, "dimension out of range");
   THArgCheck(k > 0 && k <= src->size[dimension], 2, "selected index out of range");
 
@@ -152,8 +152,8 @@ void THDTensor_(mode)(THDTensor *self, THDLongTensor *indices_, THDTensor *src, 
 void THDTensor_(median)(THDTensor *self, THDLongTensor *indices_, THDTensor *src, int dimension, int keepdim) {
   THArgCheck(dimension >= 0 && dimension < src->nDimension, 3, "dimension out of range");
 
-  long t_size_dim = src->size[dimension];
-  long k = (t_size_dim - 1) >> 1; /* take middle or one-before-middle element */
+  int64_t t_size_dim = src->size[dimension];
+  int64_t k = (t_size_dim - 1) >> 1; /* take middle or one-before-middle element */
 
   THDTensor_(kthvalue)(self, indices_, src, k + 1, dimension, keepdim);
 }
@@ -319,13 +319,13 @@ void THDTensor_(diag)(THDTensor *r_, THDTensor *t, int k) {
       1, "matrix or a vector expected");
 
   if (THDTensor_(nDimension)(t) == 1) {
-    long t_size = THDTensor_(size)(t, 0);
-    long sz = t_size + (k >= 0 ? k : -k);
+    int64_t t_size = THDTensor_(size)(t, 0);
+    int64_t sz = t_size + (k >= 0 ? k : -k);
 
     THDTensor_(resize2d)(r_, sz, sz);
     THDTensor_(zero)(r_);
   } else {
-    long sz;
+    int64_t sz;
     if (k >= 0)
       sz = std::min(THDTensor_(size)(t, 0), THDTensor_(size)(t, 1)-k);
     else
@@ -338,7 +338,7 @@ void THDTensor_(diag)(THDTensor *r_, THDTensor *t, int k) {
   );
 }
 
-void THDTensor_(eye)(THDTensor *r, long n, long m) {
+void THDTensor_(eye)(THDTensor *r, int64_t n, int64_t m) {
   THArgCheck(n > 0, 1, "invalid argument");
 
   if (m <= 0)
@@ -370,7 +370,7 @@ void THDTensor_(range)(THDTensor *r_, accreal xmin,
   );
 }
 
-void THDTensor_(randperm)(THDTensor *r_, THDGenerator *_generator, long n) {
+void THDTensor_(randperm)(THDTensor *r_, THDGenerator *_generator, int64_t n) {
   THArgCheck(n > 0, 1, "must be strictly positive");
   THDTensor_(resize1d)(r_, n);
 
@@ -407,12 +407,12 @@ void THDTensor_(sort)(THDTensor *rt_, THDLongTensor *ri_,
 }
 
 void THDTensor_(topk)(THDTensor *rt_, THDLongTensor *ri_,
-                      THDTensor *t, long k, int dim,
+                      THDTensor *t, int64_t k, int dim,
                       int dir, int sorted) {
   int numDims = THDTensor_(nDimension)(t);
   THArgCheck(dim >= 0 && dim < numDims, 3, "dim not in range");
 
-  long sliceSize = THDTensor_(size)(t, dim);
+  int64_t sliceSize = THDTensor_(size)(t, dim);
   THArgCheck(k > 0 && k <= sliceSize, 2, "k not in range for dimension");
 
   THLongStorage *topKSize = THDTensor_(newSizeOf)(t);
@@ -427,7 +427,7 @@ void THDTensor_(topk)(THDTensor *rt_, THDLongTensor *ri_,
   );
 }
 
-void THDTensor_(tril)(THDTensor *r_, THDTensor *t, long k) {
+void THDTensor_(tril)(THDTensor *r_, THDTensor *t, int64_t k) {
   THArgCheck(THDTensor_(nDimension)(t) == 2, 1, "expected a matrix");
 
   THDTensor_(resizeAs)(r_, t);
@@ -438,7 +438,7 @@ void THDTensor_(tril)(THDTensor *r_, THDTensor *t, long k) {
   );
 }
 
-void THDTensor_(triu)(THDTensor *r_, THDTensor *t, long k) {
+void THDTensor_(triu)(THDTensor *r_, THDTensor *t, int64_t k) {
   THArgCheck(THDTensor_(nDimension)(t) == 2, 1, "expected a matrix");
 
   THDTensor_(resizeAs)(r_, t);
@@ -458,7 +458,7 @@ void THDTensor_(cat)(THDTensor *r_, THDTensor *ta, THDTensor *tb, int dimension)
 void THDTensor_(catArray)(THDTensor *result, THDTensor **inputs,
                           int numInputs, int dimension) {
   THLongStorage *size;
-  long offset;
+  int64_t offset;
   int ndim = dimension + 1;
   int ldimension = dimension;
   bool allEmpty = true;
@@ -474,7 +474,7 @@ void THDTensor_(catArray)(THDTensor *result, THDTensor **inputs,
   size = THLongStorage_newWithSize(ndim);
 
   for (int i = 0; i < ndim; i++) {
-    long dimSize = i < inputs[0]->nDimension ?
+    int64_t dimSize = i < inputs[0]->nDimension ?
                    inputs[0]->size[i] :
                    std::min(inputs[0]->nDimension, 1);
     if (i == ldimension) {
@@ -485,7 +485,7 @@ void THDTensor_(catArray)(THDTensor *result, THDTensor **inputs,
       }
     } else {
       for (int j = 1; j < numInputs; j++) {
-        long sz = i < inputs[j]->nDimension ?
+        int64_t sz = i < inputs[j]->nDimension ?
                   inputs[j]->size[i] :
                   std::min(inputs[j]->nDimension, 1);
         if (dimSize != sz && dimSize && sz) {
@@ -785,7 +785,7 @@ accreal THDTensor_(stdall)(THDTensor *tensor, int biased) {
   return receiveValueFromWorker<accreal>(THDState::s_current_worker);
 }
 
-void THDTensor_(linspace)(THDTensor *r_, real a, real b, long n) {
+void THDTensor_(linspace)(THDTensor *r_, real a, real b, int64_t n) {
   THArgCheck(n > 1 || (n == 1 && (a == b)), 3, "invalid number of points");
 
   if (THDTensor_(nElement)(r_) != n) {
@@ -798,7 +798,7 @@ void THDTensor_(linspace)(THDTensor *r_, real a, real b, long n) {
   );
 }
 
-void THDTensor_(logspace)(THDTensor *r_, real a, real b, long n) {
+void THDTensor_(logspace)(THDTensor *r_, real a, real b, int64_t n) {
   THArgCheck(n > 1 || (n == 1 && (a == b)), 3, "invalid number of points");
 
   if (THDTensor_(nElement)(r_) != n) {
@@ -831,7 +831,7 @@ void THDTensor_(randn)(THDTensor *r_, THDGenerator *_generator,
   );
 }
 
-void THDTensor_(histc)(THDTensor *hist, THDTensor *tensor, long nbins,
+void THDTensor_(histc)(THDTensor *hist, THDTensor *tensor, int64_t nbins,
                        real minvalue, real maxvalue) {
   THDTensor_(resize1d)(hist, nbins);
 
@@ -841,7 +841,7 @@ void THDTensor_(histc)(THDTensor *hist, THDTensor *tensor, long nbins,
   );
 }
 
-void THDTensor_(bhistc)(THDTensor *hist, THDTensor *tensor, long nbins,
+void THDTensor_(bhistc)(THDTensor *hist, THDTensor *tensor, int64_t nbins,
                         real minvalue, real maxvalue) {
   THArgCheck(THDTensor_(nDimension)(tensor) < 3, 2,
              "invalid dimension %d, the input must be a 2d tensor",
