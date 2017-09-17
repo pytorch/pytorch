@@ -191,7 +191,7 @@ bool LRNOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
     scale_ = Output(1);
   } else {
     if (!scale_) {
-      scale_ = &tmp_tensor_;
+      scale_ = &local_scale_tensor_;
     }
   }
   scale_->ResizeLike(X);
@@ -224,7 +224,7 @@ bool LRNOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
     scale_ = Output(1);
   } else {
     if (!scale_) {
-      scale_ = &tmp_tensor_;
+      scale_ = &local_scale_tensor_;
     }
   }
   scale_->ResizeLike(X);
@@ -260,9 +260,9 @@ bool LRNGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   const float* Xdata = X.data<float>();
   const float* Ydata = Y.data<float>();
   if (!scale_) {
-    scale_ = &tmp_tensor_;
-    scale_->ResizeLike(X);
+    scale_ = &local_scale_tensor_;
   }
+  scale_->ResizeLike(X);
   float* scale_data = scale_->mutable_data<float>();
   int n_threads = N * H * W;
   LRNFillScaleNCHW<float><<<CAFFE_GET_BLOCKS(n_threads), CAFFE_CUDA_NUM_THREADS,
@@ -297,8 +297,9 @@ bool LRNGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   DCHECK_EQ(X.size(), dY.size());
   dX->ResizeLike(X);
   if (!scale_) {
-    scale_ = &tmp_tensor_;
+    scale_ = &local_scale_tensor_;
   }
+  scale_->ResizeLike(X);
 
   float* scale_data = scale_->mutable_data<float>();
   int n_threads = X.size();
