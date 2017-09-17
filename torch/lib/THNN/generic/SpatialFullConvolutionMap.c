@@ -39,22 +39,22 @@ void THNN_(SpatialFullConvolutionMap_updateOutput)(
   real *connTable_data = THTensor_(data)(connTable);
 
   /* and dims */
-  const long input_h = input->size[1];
-  const long input_w = input->size[2];
-  const long output_h = output->size[1];
-  const long output_w = output->size[2];
-  const long weight_h = weight->size[1];
-  const long weight_w = weight->size[2];
+  const int64_t input_h = input->size[1];
+  const int64_t input_w = input->size[2];
+  const int64_t output_h = output->size[1];
+  const int64_t output_w = output->size[2];
+  const int64_t weight_h = weight->size[1];
+  const int64_t weight_w = weight->size[2];
 
-  long p;
+  int64_t p;
 #pragma omp parallel for private(p)
   for (p = 0; p < nOutputPlane; p++)
   {
     /* add bias */
     real *ptr_output = output_data + p*output_w*output_h;
-    long j;
+    int64_t j;
     int nweight;
-    long k;
+    int64_t k;
 
     for (j = 0; j < output_h*output_w; j++)
       ptr_output[j] = bias_data[p];
@@ -111,18 +111,18 @@ void THNN_(SpatialFullConvolutionMap_updateGradInput)(
   real *connTable_data = THTensor_(data)(connTable);
 
   /* and dims */
-  const long input_h = input->size[1];
-  const long input_w = input->size[2];
-  const long output_h = gradOutput->size[1];
-  const long output_w = gradOutput->size[2];
-  const long kH = weight->size[1];
-  const long kW = weight->size[2];
+  const int64_t input_h = input->size[1];
+  const int64_t input_w = input->size[2];
+  const int64_t output_h = gradOutput->size[1];
+  const int64_t output_w = gradOutput->size[2];
+  const int64_t kH = weight->size[1];
+  const int64_t kW = weight->size[2];
 
-  long p;
+  int64_t p;
 #pragma omp parallel for private(p)
   for (p = 0; p < nInputPlane; p++)
   {
-    long k;
+    int64_t k;
     /* backward all */
     int nkernel = connTable->size[0];
     for (k = 0; k < nkernel; k++)
@@ -178,20 +178,20 @@ void THNN_(SpatialFullConvolutionMap_accGradParameters)(
   real *gradBias_data = THTensor_(data)(gradBias);
 
   /* and dims */
-  const long input_h  = input->size[1];
-  const long input_w  = input->size[2];
-  const long output_h = gradOutput->size[1];
-  const long output_w = gradOutput->size[2];
-  const long weight_h = gradWeight->size[1];
-  const long weight_w = gradWeight->size[2];
+  const int64_t input_h  = input->size[1];
+  const int64_t input_w  = input->size[2];
+  const int64_t output_h = gradOutput->size[1];
+  const int64_t output_w = gradOutput->size[2];
+  const int64_t weight_h = gradWeight->size[1];
+  const int64_t weight_w = gradWeight->size[2];
 
   /* gradients wrt bias */
-  long k;
+  int64_t k;
 #pragma omp parallel for private(k)
   for (k = 0; k < nOutputPlane; k++)
   {
     real *ptr_gradOutput = gradOutput_data + k*output_w*output_h;
-    long l;
+    int64_t l;
     for (l = 0; l < output_h*output_w; l++)
       gradBias_data[k] += scale*ptr_gradOutput[l];
   }

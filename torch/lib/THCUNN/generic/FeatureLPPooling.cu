@@ -61,7 +61,7 @@ THNN_(FeatureLPPooling_resizeForOutput)(THCState* state,
   int inputDim = THCTensor_(nDimension)(state, input);
   THAssert(inputDim >= 1 && inputDim <= 4);
 
-  long outSize =
+  int64_t outSize =
     lpPoolingOutputSize(THCTensor_(size)(state, input, 0), width, stride);
   if (batchMode) {
     THAssert(inputDim > 1);

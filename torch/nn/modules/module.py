@@ -76,6 +76,9 @@ class Module(object):
         Example:
             >>> self.register_buffer('running_mean', torch.zeros(num_features))
         """
+        if hasattr(self, name) and name not in self._buffers:
+            raise KeyError("attribute '{}' already exists".format(name))
+
         self._buffers[name] = tensor
 
     def register_parameter(self, name, param):
@@ -86,6 +89,10 @@ class Module(object):
         if '_parameters' not in self.__dict__:
             raise AttributeError(
                 "cannot assign parameter before Module.__init__() call")
+
+        if hasattr(self, name) and name not in self._parameters:
+            raise KeyError("attribute '{}' already exists".format(name))
+
         if param is None:
             self._parameters[name] = None
         elif not isinstance(param, Parameter):
@@ -106,11 +113,11 @@ class Module(object):
 
         The module can be accessed as an attribute using the given name.
         """
-        if hasattr(self, name):
-            raise KeyError("attribute already exists '{}'".format(name))
         if not isinstance(module, Module) and module is not None:
             raise TypeError("{} is not a Module subclass".format(
                 torch.typename(module)))
+        if hasattr(self, name) and name not in self._modules:
+            raise KeyError("attribute '{}' already exists".format(name))
         self._modules[name] = module
 
     def _apply(self, fn):
@@ -343,11 +350,14 @@ class Module(object):
         else:
             object.__delattr__(self, name)
 
-    def state_dict(self, destination=None, prefix=''):
+    def state_dict(self, destination=None, prefix='', keep_vars=False):
         """Returns a dictionary containing a whole state of the module.
 
         Both parameters and persistent buffers (e.g. running averages) are
         included. Keys are corresponding parameter and buffer names.
+
+        When keep_vars is true, it returns a Variable for each parameter
+        (rather than a Tensor).
 
         Example:
             >>> module.state_dict().keys()
@@ -357,13 +367,13 @@ class Module(object):
             destination = OrderedDict()
         for name, param in self._parameters.items():
             if param is not None:
-                destination[prefix + name] = param.data
+                destination[prefix + name] = param if keep_vars else param.data
         for name, buf in self._buffers.items():
             if buf is not None:
                 destination[prefix + name] = buf
         for name, module in self._modules.items():
             if module is not None:
-                module.state_dict(destination, prefix + name + '.')
+                module.state_dict(destination, prefix + name + '.', keep_vars=keep_vars)
         return destination
 
     def load_state_dict(self, state_dict):

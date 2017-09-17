@@ -177,10 +177,10 @@ static void THDiskFile_seek(THFile *self, size_t position)
 
 #if defined(_WIN64)
   THArgCheck(position <= (size_t)INT64_MAX, 2, "position must be smaller than INT64_MAX");
-  if(_fseeki64(dfself->handle, (__int64)position, SEEK_SET) < 0)
+  if(_fseeki64(dfself->handle, (int64_t)position, SEEK_SET) < 0)
 #elif defined(_WIN32)
   THArgCheck(position <= (size_t)LONG_MAX, 2, "position must be smaller than LONG_MAX");
-  if(fseek(dfself->handle, (long)position, SEEK_SET) < 0)
+  if(fseek(dfself->handle, (int32_t)position, SEEK_SET) < 0)
 #else
   THArgCheck(position <= (size_t)LLONG_MAX, 2, "position must be smaller than LLONG_MAX");
   if(fseeko(dfself->handle, (off_t)position, SEEK_SET) < 0)
@@ -218,9 +218,9 @@ static size_t THDiskFile_position(THFile *self)
   THArgCheck(dfself->handle != NULL, 1, "attempt to use a closed file");
 
 #if defined(_WIN64)
-  __int64 offset = _ftelli64(dfself->handle);
+  int64_t offset = _ftelli64(dfself->handle);
 #elif defined(_WIN32)
-  long offset = ftell(dfself->handle);
+  int32_t offset = ftell(dfself->handle);
 #else
   off_t offset = ftello(dfself->handle);
 #endif
@@ -365,7 +365,7 @@ READ_WRITE_METHODS(double, Double,
 
 
 /* For Long we need to rewrite everything, because of the special management of longSize */
-static size_t THDiskFile_readLong(THFile *self, long *data, size_t n)
+static size_t THDiskFile_readLong(THFile *self, int64_t *data, size_t n)
 {
   THDiskFile *dfself = (THDiskFile*)(self);
   size_t nread = 0L;
@@ -375,11 +375,11 @@ static size_t THDiskFile_readLong(THFile *self, long *data, size_t n)
 
   if(dfself->file.isBinary)
   {
-    if(dfself->longSize == 0 || dfself->longSize == sizeof(long))
+    if(dfself->longSize == 0 || dfself->longSize == sizeof(int64_t))
     {
-      nread = fread__(data, sizeof(long), n, dfself->handle);
-      if(!dfself->isNativeEncoding && (sizeof(long) > 1) && (nread > 0))
-        THDiskFile_reverseMemory(data, data, sizeof(long), nread);
+      nread = fread__(data, sizeof(int64_t), n, dfself->handle);
+      if(!dfself->isNativeEncoding && (sizeof(int64_t) > 1) && (nread > 0))
+        THDiskFile_reverseMemory(data, data, sizeof(int64_t), nread);
     } else if(dfself->longSize == 4)
     {
       nread = fread__(data, 4, n, dfself->handle);
@@ -407,7 +407,7 @@ static size_t THDiskFile_readLong(THFile *self, long *data, size_t n)
     size_t i;
     for(i = 0; i < n; i++)
     {
-      int ret = fscanf(dfself->handle, "%ld", &data[i]); if(ret <= 0) break; else nread++;
+      int ret = fscanf(dfself->handle, "%" PRId64, &data[i]); if(ret <= 0) break; else nread++;
     }
     if(dfself->file.isAutoSpacing && (n > 0))
     {
@@ -427,7 +427,7 @@ static size_t THDiskFile_readLong(THFile *self, long *data, size_t n)
   return nread;
 }
 
-static size_t THDiskFile_writeLong(THFile *self, long *data, size_t n)
+static size_t THDiskFile_writeLong(THFile *self, int64_t *data, size_t n)
 {
   THDiskFile *dfself = (THDiskFile*)(self);
   size_t nwrite = 0L;
@@ -437,17 +437,17 @@ static size_t THDiskFile_writeLong(THFile *self, long *data, size_t n)
 
   if(dfself->file.isBinary)
   {
-    if(dfself->longSize == 0 || dfself->longSize == sizeof(long))
+    if(dfself->longSize == 0 || dfself->longSize == sizeof(int64_t))
     {
       if(dfself->isNativeEncoding)
       {
-        nwrite = fwrite(data, sizeof(long), n, dfself->handle);
+        nwrite = fwrite(data, sizeof(int64_t), n, dfself->handle);
       }
       else
       {
-        char *buffer = THAlloc(sizeof(long)*n);
-        THDiskFile_reverseMemory(buffer, data, sizeof(long), n);
-        nwrite = fwrite(buffer, sizeof(long), n, dfself->handle);
+        char *buffer = THAlloc(sizeof(int64_t)*n);
+        THDiskFile_reverseMemory(buffer, data, sizeof(int64_t), n);
+        nwrite = fwrite(buffer, sizeof(int64_t), n, dfself->handle);
         THFree(buffer);
       }
     } else if(dfself->longSize == 4)
@@ -455,7 +455,7 @@ static size_t THDiskFile_writeLong(THFile *self, long *data, size_t n)
       int32_t *buffer = THAlloc(4*n);
       size_t i;
       for(i = 0; i < n; i++)
-        buffer[i] = data[i];
+        buffer[i] = (int32_t) data[i];
       if(!dfself->isNativeEncoding)
         THDiskFile_reverseMemory(buffer, buffer, 4, n);
       nwrite = fwrite(buffer, 4, n, dfself->handle);
@@ -469,7 +469,7 @@ static size_t THDiskFile_writeLong(THFile *self, long *data, size_t n)
       for(i = 0; i < n; i++)
       {
         buffer[2*i + !big_endian] = 0;
-        buffer[2*i + big_endian] = data[i];
+        buffer[2*i + big_endian] = (int32_t) data[i];
       }
       if(!dfself->isNativeEncoding)
         THDiskFile_reverseMemory(buffer, buffer, 8, n);
@@ -482,7 +482,7 @@ static size_t THDiskFile_writeLong(THFile *self, long *data, size_t n)
     size_t i;
     for(i = 0; i < n; i++)
     {
-      int ret = fprintf(dfself->handle, "%ld", data[i]); if(ret <= 0) break; else nwrite++;
+      int ret = fprintf(dfself->handle, "%" PRId64, data[i]); if(ret <= 0) break; else nwrite++;
       if( dfself->file.isAutoSpacing && (i < n-1) )
         fprintf(dfself->handle, " ");
     }
@@ -556,7 +556,7 @@ static size_t THDiskFile_readString(THFile *self, const char *format, char **str
         total += TBRS_BSZ;
         p = THRealloc(p, total);
       }
-      if (fgets(p+pos, total-pos, dfself->handle) == NULL) /* eof? */
+      if (fgets(p+pos, (int) (total-pos), dfself->handle) == NULL) /* eof? */
       {
         if(pos == 0)
         {

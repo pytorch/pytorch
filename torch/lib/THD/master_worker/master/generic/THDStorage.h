@@ -3,7 +3,7 @@
 #else
 
 typedef struct THDStorage {
-  unsigned long long storage_id;
+  uint64_t storage_id;
   ptrdiff_t size;
   int refcount;
   char flag;

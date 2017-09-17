@@ -1,5 +1,7 @@
 #pragma once
 
+#include "THPPGeneral.h"
+
 namespace thpp {
 
 /*

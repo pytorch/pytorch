@@ -46,7 +46,7 @@ struct GraphRoot : public Function {
   variable_list outputs;
 };
 
-struct Add : public Function {
+struct Add : public ForwardFunction<> {
   Add() {}
 
   virtual variable_list apply(const variable_list& inputs) override;
@@ -55,6 +55,19 @@ struct Add : public Function {
 
 struct AddBackward : public Function {
   AddBackward(FunctionFlags&& flags)
+    : Function(std::move(flags)) {}
+
+  virtual variable_list apply(const variable_list& gradOutputs) override;
+};
+
+struct Mul : public ForwardFunction<> {
+  Mul() {}
+
+  virtual variable_list apply(const variable_list& inputs) override;
+};
+
+struct MulBackward : public Function {
+  MulBackward(FunctionFlags&& flags)
     : Function(std::move(flags)) {}
 
   virtual variable_list apply(const variable_list& gradOutputs) override;

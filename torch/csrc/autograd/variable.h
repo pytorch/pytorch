@@ -1,92 +1,95 @@
 #pragma once
 
+// A wrapper around at::Tensor to represent autograd Variables. Variables
+// can be implicitly converted to an at::Tensor.
+
 #include <Python.h>
 #include <mutex>
 #include <memory>
+#include <vector>
 #include <functional>
 #include <ATen/ATen.h>
 
-#include "torch/csrc/autograd/function.h"
+#include "torch/csrc/jit/ir.h"
+#include "torch/csrc/jit/tracer_state.h"
+#include "torch/csrc/autograd/function_hook.h"
+#include "torch/csrc/utils/auto_unique_ptr.h"
 #include "torch/csrc/autograd/variable_version.h"
 #include "torch/csrc/Types.h"
 
 namespace torch { namespace autograd {
 
-extern const char* ERR_BACKWARD_TWICE;
+using at::Tensor;
+struct VariableImpl;
 
-struct Variable : std::enable_shared_from_this<Variable> {
+struct Variable : public at::Tensor {
+  inline Variable(VariableImpl * self, bool retain);
+  Variable() : Tensor() {}
+  Variable(const Variable & rhs) : Tensor(rhs) {}
+  Variable(Variable && rhs) noexcept : Tensor(std::move(rhs)) {}
 
-  struct SavedVariable {
-    SavedVariable()
-      : data()
-      , version()
-      , expected_version(-1) {}
+  explicit Variable(Tensor const & rhs) : Tensor(rhs) {}
+  explicit Variable(Tensor && rhs) noexcept : Tensor(std::move(rhs)) {}
 
-    SavedVariable(const Variable& variable, Function* saved_for)
-      : data(variable.data)
-      , has_grad_fn(variable.grad_fn != nullptr)
-      , grad_accumulator(variable.grad_accumulator)
-      , version(variable.version_counter->new_saved_ref())
-      , requires_grad(variable.requires_grad)
-      , is_volatile(false)
-      , expected_version(**variable.version_counter) {
-        if (variable.grad_fn.get() != saved_for) {
-          grad_fn = variable.grad_fn;
-        }
-      }
+  inline VariableImpl* get() const;
 
-    at::Tensor data;
-    // The gradient function associated with this node. If has_grad_fn
-    // is false, then this is a leaf node. Note that the grad_fn is not saved if
-    // it would create a circular reference. In that case, the grad_fn must be
-    // passed in to the unpack function when reconstructing the Variable.
-    bool has_grad_fn;
-    std::shared_ptr<Function> grad_fn;
-    std::weak_ptr<Function> grad_accumulator;
-    std::unique_ptr<VariableVersion> version;
-    bool requires_grad;
-    bool is_volatile;
-    int expected_version;
+  inline const Tensor & data() const;
+  inline       Tensor & data();
 
-    std::shared_ptr<Variable> unpack(std::shared_ptr<Function> saved_for=nullptr);
+  inline Tensor opt_data() const;
 
-    at::Tensor unpack_data(std::shared_ptr<Function> saved_for=nullptr) {
-      auto var = unpack(saved_for);
-      return var ? var->data : at::Tensor();
-    }
-  };
+  inline const Variable & grad() const;
+  inline       Variable & grad();
 
-  // WARNING: this registers the Variable as a new output
-  Variable(
-      at::Tensor data,
-      std::shared_ptr<Function> grad_fn);
+  inline const std::shared_ptr<Function>& grad_fn() const;
+  inline       std::shared_ptr<Function>& grad_fn();
 
-  Variable(
-      at::Tensor data,
-      bool requires_grad,
-      bool is_volatile);
+  std::shared_ptr<Function> grad_accumulator() const;
 
+  inline const std::vector<std::shared_ptr<FunctionPreHook>>& hooks() const;
+  inline       std::vector<std::shared_ptr<FunctionPreHook>>& hooks();
+
+  inline auto_unique_ptr<jit::tracer::ValueTracingState>& tracing_state() const;
+
+  inline int current_version() const;
+  inline const int& output_nr() const;
+  inline       int& output_nr();
+
+  inline const bool& requires_grad() const;
+  inline       bool& requires_grad();
+
+  inline const bool& is_volatile() const;
+  inline       bool& is_volatile();
+
+  inline Variable & operator=(Variable && rhs) &;
+  inline Variable & operator=(const Variable & rhs) &;
+};
+
+struct VariableImpl : public at::TensorImpl {
+public:
+  explicit VariableImpl(at::Tensor data);
+  VariableImpl(at::Tensor data, std::shared_ptr<Function> grad_fn);
+  VariableImpl(at::Tensor data, bool requires_grad, bool is_volatile=false);
+  virtual ~VariableImpl();
+  virtual const char * toString() const override;
+  virtual at::IntList sizes() override;
+  virtual at::IntList strides() override;
+  virtual int64_t dim() override;
+  virtual at::Scalar localScalar() override;
+  virtual void assign_(at::Scalar s) override;
+  virtual void * unsafeGetTH(bool retain) override;
+  static const char * typeString();
+
+  // Get the VariableType for a base Tensor type
+  static at::Type* getType(const at::Type& baseType);
+  static at::Type* getType(const at::Tensor& tensor);
+
+public:
   std::shared_ptr<Function> get_grad_accumulator();
 
-  inline SavedVariable save(Function* saved_for) {
-    return SavedVariable(*this, saved_for);
-  }
-
-  static inline SavedVariable save_opt(Variable* var, Function* saved_for) {
-    return var ? var->save(saved_for) : SavedVariable();
-  }
-
-  // TODO: should be at::Tensor&& if we are taking ownership?
-  static inline std::shared_ptr<Variable> of(at::Tensor data, bool is_volatile=false) {
-    if (!data.defined()) {
-      return std::shared_ptr<Variable>();
-    }
-    return std::make_shared<Variable>(data, false, is_volatile);
-  }
-
   at::Tensor data;
+  Variable grad;
   std::shared_ptr<Function> grad_fn;
-  std::shared_ptr<Variable> grad;
   std::unique_ptr<VariableVersion> version_counter;
   std::vector<std::shared_ptr<FunctionPreHook>> hooks;
   std::weak_ptr<Function> grad_accumulator;
@@ -99,8 +102,107 @@ struct Variable : std::enable_shared_from_this<Variable> {
   // correctly when this variable is passed to another function.
   int output_nr;
   PyObject *pyobj;  // weak reference
+
+  // For use in torch::jit::tracer
+  auto_unique_ptr<jit::tracer::ValueTracingState> tracing_state;
+  friend struct VariableType;
 };
 
-using SavedVariable = Variable::SavedVariable;
+inline Variable make_variable(at::Tensor data) {
+  return Variable(new VariableImpl(std::move(data)), false);
+}
+
+inline Variable make_variable(at::Tensor data, std::shared_ptr<Function> grad_fn) {
+  return Variable(new VariableImpl(std::move(data), std::move(grad_fn)), false);
+}
+
+inline Variable make_variable(at::Tensor data, bool requires_grad, bool is_volatile=false) {
+  return Variable(new VariableImpl(std::move(data), requires_grad, is_volatile), false);
+}
+
+
+inline Variable::Variable(VariableImpl * self, bool retain) : Tensor(self, retain) {
+}
+
+inline VariableImpl* Variable::get() const {
+  return static_cast<VariableImpl*>(pImpl);
+}
+
+inline const Tensor & Variable::data() const {
+  return get()->data;
+}
+inline Tensor & Variable::data() {
+  return get()->data;
+}
+
+inline Tensor Variable::opt_data() const {
+  if (!defined()) {
+    return Tensor();
+  }
+  return data();
+}
+
+inline const Variable & Variable::grad() const {
+  return get()->grad;
+}
+inline Variable & Variable::grad() {
+  return get()->grad;
+}
+
+inline const std::shared_ptr<Function>& Variable::grad_fn() const {
+  return get()->grad_fn;
+};
+inline std::shared_ptr<Function>& Variable::grad_fn() {
+  return get()->grad_fn;
+};
+inline std::shared_ptr<Function> Variable::grad_accumulator() const {
+  return get()->get_grad_accumulator();
+};
+
+inline const std::vector<std::shared_ptr<FunctionPreHook>>& Variable::hooks() const {
+  return get()->hooks;
+};
+inline std::vector<std::shared_ptr<FunctionPreHook>>& Variable::hooks() {
+  return get()->hooks;
+};
+
+inline auto_unique_ptr<jit::tracer::ValueTracingState>& Variable::tracing_state() const {
+  return get()->tracing_state;
+};
+
+inline int Variable::current_version() const {
+  return **get()->version_counter;
+}
+
+inline const int& Variable::output_nr() const {
+  return get()->output_nr;
+}
+
+inline int& Variable::output_nr() {
+  return get()->output_nr;
+}
+
+inline const bool& Variable::requires_grad() const {
+  return get()->requires_grad;
+}
+inline bool& Variable::requires_grad() {
+  return get()->requires_grad;
+}
+
+inline const bool& Variable::is_volatile() const {
+  return get()->is_volatile;
+}
+inline bool& Variable::is_volatile() {
+  return get()->is_volatile;
+}
+
+inline Variable & Variable::operator=(Variable && rhs) & {
+  rhs.swap(*this);
+  return *this;
+}
+inline Variable & Variable::operator=(const Variable & rhs) & {
+  Variable(rhs).swap(*this);
+  return *this;
+}
 
 }} // namespace torch::autograd

@@ -400,10 +400,10 @@ class TestTorch(TestCase):
         a = torch.randn(100, 89)
         zeros = torch.Tensor().resize_as_(a).zero_()
 
-        res_pow = torch.pow(a, -1)
+        res_div = 1 / a
         res_reciprocal = a.clone()
         res_reciprocal.reciprocal_()
-        self.assertEqual(res_reciprocal, res_pow)
+        self.assertEqual(res_reciprocal, res_div)
 
     def test_mul(self):
         m1 = torch.randn(10, 10)
@@ -668,22 +668,24 @@ class TestTorch(TestCase):
     def test_pow(self):
         # [res] torch.pow([res,] x)
 
-        # base - tensor, exponent - number
-        # contiguous
-        m1 = torch.randn(100, 100)
-        res1 = torch.pow(m1[4], 3)
-        res2 = res1.clone().zero_()
-        for i in range(res2.size(0)):
-            res2[i] = math.pow(m1[4][i], 3)
-        self.assertEqual(res1, res2)
+        # pow has dedicated implementation for different exponents
+        for exponent in [-2, -1, -0.5, 0.5, 1, 2, 3, 4]:
+            # base - tensor, exponent - number
+            # contiguous
+            m1 = torch.rand(100, 100) + 0.5
+            res1 = torch.pow(m1[4], exponent)
+            res2 = res1.clone().zero_()
+            for i in range(res2.size(0)):
+                res2[i] = math.pow(m1[4][i], exponent)
+            self.assertEqual(res1, res2)
 
-        # non-contiguous
-        m1 = torch.randn(100, 100)
-        res1 = torch.pow(m1[:, 4], 3)
-        res2 = res1.clone().zero_()
-        for i in range(res2.size(0)):
-            res2[i] = math.pow(m1[i, 4], 3)
-        self.assertEqual(res1, res2)
+            # non-contiguous
+            m1 = torch.rand(100, 100) + 0.5
+            res1 = torch.pow(m1[:, 4], exponent)
+            res2 = res1.clone().zero_()
+            for i in range(res2.size(0)):
+                res2[i] = math.pow(m1[i, 4], exponent)
+            self.assertEqual(res1, res2)
 
         # base - number, exponent - tensor
         # contiguous
@@ -701,6 +703,10 @@ class TestTorch(TestCase):
         for i in range(res2.size(0)):
             res2[i] = math.pow(3, m1[i][4])
         self.assertEqual(res1, res2)
+
+    def test_rpow(self):
+        m = torch.randn(10, 10)
+        self.assertEqual(torch.pow(2, m), 2**m)
 
     def _test_cop(self, torchfn, mathfn):
         def reference_implementation(res2):
@@ -812,6 +818,13 @@ class TestTorch(TestCase):
         torch.zeros_like(expected, out=res2)
         self.assertEqual(res2, expected)
 
+    @unittest.skipIf(torch.cuda.device_count() < 2, 'only one GPU detected')
+    def test_zeros_like_multiple_device(self):
+        expected = torch.zeros(100, 100).cuda()
+        x = torch.cuda.FloatTensor(100, 100, device=1)
+        output = torch.zeros_like(x)
+        self.assertEqual(output, expected)
+
     def test_histc(self):
         x = torch.Tensor((2, 4, 2, 2, 5, 4))
         y = torch.histc(x, 5, 1, 5)  # nbins,  min,  max
@@ -844,6 +857,13 @@ class TestTorch(TestCase):
         res2 = torch.Tensor().cuda()
         torch.ones_like(expected, out=res2)
         self.assertEqual(res2, expected)
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, 'only one GPU detected')
+    def test_ones_like_multiple_device(self):
+        expected = torch.ones(100, 100).cuda()
+        x = torch.cuda.FloatTensor(100, 100, device=1)
+        output = torch.ones_like(x)
+        self.assertEqual(output, expected)
 
     def test_diag(self):
         x = torch.rand(100, 100)
@@ -2644,14 +2664,20 @@ class TestTorch(TestCase):
 
         # Case 1: Purely Integer Array Indexing
         reference = conv_fn(consec((10,)))
+        self.assertEqual(reference[[0]], consec((1,)))
         self.assertEqual(reference[ri([0]), ], consec((1,)))
         self.assertEqual(reference[ri([3]), ], consec((1,), 4))
+        self.assertEqual(reference[[2, 3, 4]], consec((3,), 3))
         self.assertEqual(reference[ri([2, 3, 4]), ], consec((3,), 3))
         self.assertEqual(reference[ri([0, 2, 4]), ], torch.Tensor([1, 3, 5]))
 
         # setting values
-        reference[ri([0],), ] = -1
+        reference[[0]] = -2
+        self.assertEqual(reference[[0]], torch.Tensor([-2]))
+        reference[[0]] = -1
         self.assertEqual(reference[ri([0]), ], torch.Tensor([-1]))
+        reference[[2, 3, 4]] = 4
+        self.assertEqual(reference[[2, 3, 4]], torch.Tensor([4, 4, 4]))
         reference[ri([2, 3, 4]), ] = 3
         self.assertEqual(reference[ri([2, 3, 4]), ], torch.Tensor([3, 3, 3]))
         reference[ri([0, 2, 4]), ] = conv_fn(torch.Tensor([5, 4, 3]))
@@ -2665,8 +2691,10 @@ class TestTorch(TestCase):
         strided.set_(reference.storage(), storage_offset=0,
                      size=torch.Size([4]), stride=[2])
 
+        self.assertEqual(strided[[0]], torch.Tensor([1]))
         self.assertEqual(strided[ri([0]), ], torch.Tensor([1]))
         self.assertEqual(strided[ri([3]), ], torch.Tensor([7]))
+        self.assertEqual(strided[[1, 2]], torch.Tensor([3, 5]))
         self.assertEqual(strided[ri([1, 2]), ], torch.Tensor([3, 5]))
         self.assertEqual(strided[ri([[2, 1], [0, 3]]), ],
                          torch.Tensor([[5, 3], [1, 7]]))
@@ -2675,8 +2703,10 @@ class TestTorch(TestCase):
         strided = conv_fn(torch.Tensor())
         strided.set_(reference.storage(), storage_offset=4,
                      size=torch.Size([2]), stride=[4])
+        self.assertEqual(strided[[0]], torch.Tensor([5]))
         self.assertEqual(strided[ri([0]), ], torch.Tensor([5]))
         self.assertEqual(strided[ri([1]), ], torch.Tensor([9]))
+        self.assertEqual(strided[[0, 1]], torch.Tensor([5, 9]))
         self.assertEqual(strided[ri([0, 1]), ], torch.Tensor([5, 9]))
         self.assertEqual(strided[ri([[0, 1], [1, 0]]), ],
                          torch.Tensor([[5, 9], [9, 5]]))
@@ -2860,6 +2890,10 @@ class TestTorch(TestCase):
         self.assertEqual(reference[ri([1]), ...], torch.Tensor([[3, 4]]))
         self.assertEqual(reference[..., ri([1])], torch.Tensor([[2], [4], [6]]))
 
+        # verify too many indices fails
+        with self.assertRaises(IndexError):
+            reference[ri([1]), ri([0, 2]), ri([3])]
+
         if TEST_NUMPY:
             # we use numpy to compare against, to verify that our advanced
             # indexing semantics are the same, and also for ease of test
@@ -2975,6 +3009,15 @@ class TestTorch(TestCase):
                 [Ellipsis, [2, 3, 4]],
                 [Ellipsis, slice(None), [2, 3, 4]],
                 [slice(None), Ellipsis, [2, 3, 4]],
+
+                # ellipsis counts for nothing
+                [Ellipsis, slice(None), slice(None), [0, 3, 4]],
+                [slice(None), Ellipsis, slice(None), [0, 3, 4]],
+                [slice(None), slice(None), Ellipsis, [0, 3, 4]],
+                [slice(None), slice(None), [0, 3, 4], Ellipsis],
+                [Ellipsis, [[0, 1], [1, 0]], [[2, 1], [3, 5]], slice(None)],
+                [[[0, 1], [1, 0]], [[2, 1], [3, 5]], Ellipsis, slice(None)],
+                [[[0, 1], [1, 0]], [[2, 1], [3, 5]], slice(None), Ellipsis],
             ]
 
             for indexer in indices_to_test:

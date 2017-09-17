@@ -9,6 +9,7 @@
 #include <vector>
 #include <utility>
 #include <memory>
+#include <ATen/ATen.h>
 
 #include "torch/csrc/autograd/variable.h"
 
@@ -20,16 +21,16 @@ struct InputBuffer {
   InputBuffer(InputBuffer&& other) = default;
 
   // Accumulates the variable at a specified index.
-  void add(size_t idx, std::shared_ptr<Variable>&& var);
+  void add(size_t idx, Variable var);
 
   int device() const;
 
   // Returns the inputs as a list of variables. Destroys given InputBuffer.
-  static std::vector<std::shared_ptr<Variable>> variables(InputBuffer&& buffer);
+  static std::vector<Variable> variables(InputBuffer&& buffer);
 
 private:
   // (Variable, version at save)
-  std::vector<std::pair<std::shared_ptr<Variable>, int>> buffer;
+  std::vector<std::pair<Variable, int>> buffer;
 };
 
 }}  // namespace torch::autograd
