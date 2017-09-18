@@ -23,14 +23,21 @@ void barf(const char *fmt, ...);
 
 }} // namespace torch::jit
 
+#if defined(__GNUC__) || defined(__ICL) || defined(__clang__)
+#define EXPECT(x, y) (__builtin_expect((x),(y)))
+#else
+#define EXPECT(x, y) (x)
+#endif
+
+
 #define JIT_ASSERT(cond) \
-  if (__builtin_expect(!(cond), 0)) { \
+  if (EXPECT(!(cond), 0)) { \
     ::torch::jit::barf("%s:%u: %s: Assertion `%s` failed.", __FILE__, __LINE__, __func__, #cond); \
   }
 
 //note: msg must be a string literal
 //node: In, ##__VA_ARGS '##' supresses the comma if __VA_ARGS__ is empty
 #define JIT_ASSERTM(cond, msg, ...) \
-  if (__builtin_expect(!(cond), 0)) { \
+  if (EXPECT(!(cond), 0)) { \
     ::torch::jit::barf("%s:%u: %s: Assertion `%s` failed: " msg , __FILE__, __LINE__, __func__, #cond,##__VA_ARGS__); \
   }

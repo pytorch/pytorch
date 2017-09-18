@@ -1025,7 +1025,7 @@ int setObject(PyObject* obj, PyObject* value, void* _unused) {
   return 0;
 }
 
-template<typename M, M THPFunction::*ptr, PyObject* (*Convert)(long)>
+template<typename M, M THPFunction::*ptr, PyObject* (*Convert)(int64_t)>
 PyObject* getMember(PyObject* obj, void* _unused) {
   auto self = (THPFunction*)obj;
   return Convert(self->*ptr);

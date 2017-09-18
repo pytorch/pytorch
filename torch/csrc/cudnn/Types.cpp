@@ -48,7 +48,7 @@ void _THVoidTensor_assertContiguous(THVoidTensor *tensor, const std::string& nam
 {
   static const std::string error_str = "cuDNN requires contiguous ";
   // Contiguity check
-  long long expectedStride = 1;
+  int64_t expectedStride = 1;
   for (int i = tensor->nDimension-1; i >= 0; --i) {
     if (tensor->size[i] != 1) {
       if (tensor->stride[i] != expectedStride)

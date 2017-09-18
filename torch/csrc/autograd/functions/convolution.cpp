@@ -106,7 +106,7 @@ auto ConvForward::output_size(at::Tensor& input, at::Tensor& weight) -> std::vec
   output_size[0] = in_size[0];
   output_size[1] = transposed ? weight_size[1] * groups : weight_size[0];
   for (int d = 2; d < dim; ++d) {
-    int kernel = dilation[d - 2] * (weight_size[d] - 1) + 1;
+    auto kernel = dilation[d - 2] * (weight_size[d] - 1) + 1;
     if (transposed) {
       output_size[d] = (in_size[d] - 1) * stride[d - 2] - (2 * padding[d - 2]) +
                        kernel + output_padding[d - 2];
@@ -142,7 +142,7 @@ static Variable subvariable(const Variable& var, int dim, int groups, int g) {
 }
 
 static at::Tensor cat(const tensor_list& tensors, int dim) {
-  int num_inputs = tensors.size();
+  auto num_inputs = tensors.size();
   if (num_inputs == 0) {
     return at::Tensor();
   }
@@ -166,7 +166,7 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
   auto weight = inputs[1].data();
   auto bias = inputs[2].opt_data();
 
-  int k = input.ndimension();
+  auto k = input.ndimension();
   if (k == 3) {
     view1d_as_2d();
     input = view4d(input);
@@ -268,7 +268,7 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
   input = input.contiguous();
   auto grad_output = grad_outputs[0].data().contiguous();
 
-  int k = input.ndimension();
+  auto k = input.ndimension();
   if (k == 3) {
     input = view4d(input);
     weight = view4d(weight);
@@ -517,11 +517,11 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
 
     // calculate output_padding
     auto weight_size = weight.sizes();
-    std::vector<long> kernel_size(weight_size.begin() + 2, weight_size.end());
+    std::vector<int64_t> kernel_size(weight_size.begin() + 2, weight_size.end());
     auto input_size = input.sizes();
-    std::vector<long> input_shape(input_size.begin() + 2, input_size.end());
+    std::vector<int64_t> input_shape(input_size.begin() + 2, input_size.end());
     auto grad_output_size = gO.sizes();
-    std::vector<long> grad_output_shape(grad_output_size.begin() + 2, grad_output_size.end());
+    std::vector<int64_t> grad_output_shape(grad_output_size.begin() + 2, grad_output_size.end());
 
     if (kernel_size.size() == 1) {
       auto expected_input_shape = (kernel_size[0] - 1) * gi_conv_params.stride[1]
@@ -776,7 +776,11 @@ static tensor_pair compute_grad_params(
       if (dilated) {
         at::SpatialDilatedConvolution_accGradParameters(
             input, grad_output, grad_weight, grad_bias, columns, ones,
+#ifdef _WIN32
+            (int)kernel_size[1], (int)kernel_size[0],
+#else
             kernel_size[1], kernel_size[0],
+#endif
             params.stride[1], params.stride[0],
             params.padding[1], params.padding[0],
             params.dilation[1], params.dilation[0], 1.0); goto done;

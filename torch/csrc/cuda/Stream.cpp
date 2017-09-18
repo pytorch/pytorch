@@ -17,7 +17,7 @@ static PyObject * THCPStream_pynew(PyTypeObject *type, PyObject *args, PyObject 
 
   int flags = cudaStreamNonBlocking;
   int priority = 0;
-  unsigned long long cdata = 0;
+  uint64_t cdata = 0;
 
   static char *kwlist[] = {"priority", "_cdata", NULL};
   if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|iK", kwlist, &priority, &cdata)) {

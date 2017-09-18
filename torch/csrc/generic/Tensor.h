@@ -41,7 +41,7 @@ THP_API PyObject * THPTensor_(NewEmpty)(void);
 THP_API PyObject * THSPTensor_(NewEmpty)(void);
 #endif
 
-extern PyObject *THPTensorClass;
+THP_API PyObject *THPTensorClass;
 #if GENERATE_SPARSE
 extern PyObject *THSPTensorClass;
 #endif

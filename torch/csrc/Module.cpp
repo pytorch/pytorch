@@ -1,6 +1,9 @@
 #include <Python.h>
 #include <sys/types.h>
+
+#ifndef _MSC_VER
 #include <sys/socket.h>
+#endif
 
 #include <stdbool.h>
 #include <unordered_map>
@@ -336,7 +339,7 @@ static PyObject * TH_CONCAT_2(THPModule_, name)(PyObject *_unused, PyObject *arg
   PyObject *tensor = THPDefaultTensorClass;                                    \
   PyObject *key, *value;                                                       \
   Py_ssize_t pos = 0;                                                          \
-  for (int i = PyTuple_Size(args)-1; i >= 0; i--) {                            \
+  for (int i = (int) PyTuple_Size(args)-1; i >= 0; i--) {                            \
     PyObject *item = PyTuple_GET_ITEM(args, i);                                \
     if (THPModule_isTensor(item) || THPVariable_Check(item)) {                 \
       tensor = item;                                                           \
@@ -476,7 +479,7 @@ PyObject *THPModule_addDocStr(PyObject *_unused, PyObject *args)
 PyObject *THPModule_inferSize(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
-  Py_ssize_t num_args = args ? PyTuple_Size(args) : 0;
+  Py_ssize_t num_args = args ? (Py_ssize_t) PyTuple_Size(args) : 0;
   THPUtils_assert(num_args == 2, "expected exactly 2 arguments");
   PyObject *arg1 = PyTuple_GET_ITEM(args, 0);
   THPUtils_assert(THPSize_Check(arg1), "expected a torch.Size as argument 1");
@@ -491,7 +494,7 @@ PyObject *THPModule_inferSize(PyObject *_unused, PyObject *args)
   THLongStorage *sizes = sizes_guard.get();
 
   char error_buffer[1024];
-  int ret = THLongStorage_inferSize2(sizes, size1->data, size1->size, size2->data, size2->size, error_buffer, 1024);
+  int ret = (int) THLongStorage_inferSize2(sizes, size1->data, size1->size, size2->data, size2->size, error_buffer, 1024);
   THPUtils_assert(ret == 0, error_buffer);
   return THPSize_New(sizes->size, sizes->data);
   END_HANDLE_TH_ERRORS

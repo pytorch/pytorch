@@ -18,7 +18,11 @@ struct AutoGPU {
   }
 
   explicit AutoGPU(const at::Tensor& t) {
+#ifdef _WIN32
+    setDevice(t.type().isCuda() ? (int)t.get_device() : -1);
+#else
     setDevice(t.type().isCuda() ? t.get_device() : -1);
+#endif
   }
 
   ~AutoGPU() {

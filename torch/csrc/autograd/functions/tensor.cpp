@@ -113,7 +113,7 @@ auto Narrow::apply(const variable_list& inputs) -> variable_list {
 }
 
 auto Cat::apply(const variable_list& inputs) -> variable_list {
-  int num_inputs = inputs.size();
+  std::make_signed<size_t>::type num_inputs = inputs.size();
   if (num_inputs == 0) {
     throw std::runtime_error("Cat operation expect at least one argument.");
   }
@@ -125,7 +125,7 @@ auto Cat::apply(const variable_list& inputs) -> variable_list {
   for (int i = 0; i < num_inputs; ++i) {
     tensors[i] = inputs[i].data();
   }
-  auto output = input.type().cat(tensors, dim);
+  auto output = input.type().cat(tensors, (int)dim);
 
   return wrap_outputs(inputs, as_tensor_list(output), [&](FunctionFlags f) {
     return std::make_shared<Error>("Cat is not differentiable", std::move(f));
