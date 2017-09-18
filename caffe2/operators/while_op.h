@@ -17,7 +17,7 @@ class WhileOp final : public Operator<Context> {
         "loop_net must be specified in While operator");
     loop_net_def_ =
         this->template GetSingleArgument<NetDef>("loop_net", NetDef());
-    loop_net_ = ws->CreateNet(loop_net_def_, true);
+    loop_net_ = CreateNet(loop_net_def_, ws);
     CAFFE_ENFORCE(loop_net_, "Failed to initialize loop subnet");
 
     cond_net_ = nullptr;
@@ -26,7 +26,7 @@ class WhileOp final : public Operator<Context> {
     if (has_cond_net) {
       cond_net_def_ =
           this->template GetSingleArgument<NetDef>("cond_net", NetDef());
-      cond_net_ = ws->CreateNet(cond_net_def_, true);
+      cond_net_ = CreateNet(cond_net_def_, ws);
       CAFFE_ENFORCE(cond_net_, "Failed to initialize condition subnet");
     }
   }
@@ -36,10 +36,10 @@ class WhileOp final : public Operator<Context> {
 
  private:
   NetDef loop_net_def_;
-  NetBase* loop_net_;
+  std::unique_ptr<NetBase> loop_net_;
 
   NetDef cond_net_def_;
-  NetBase* cond_net_;
+  std::unique_ptr<NetBase> cond_net_;
 };
 
 } // namespace caffe2

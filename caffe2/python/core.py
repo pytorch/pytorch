@@ -13,6 +13,8 @@ from six import binary_type, string_types, text_type
 
 from caffe2.proto import caffe2_pb2
 from caffe2.python import scope, utils, workspace
+from caffe2.python.control_ops_grad import gen_do_gradient, gen_if_gradient
+
 import caffe2.python._import_c_extension as C
 import google.protobuf.text_format as protobuftx
 import pickle
@@ -1076,6 +1078,10 @@ class GradientRegistry(object):
         return ir.GetBackwardPass(ys)
 
 
+GradientRegistry.RegisterGradient('Do')(gen_do_gradient)
+GradientRegistry.RegisterGradient('If')(gen_if_gradient)
+
+
 def get_ssa(net, blob_versions=None):
     """
     Given a net, return a structure containing the version of each input and
@@ -1193,9 +1199,28 @@ def recurrent_network_op_remap(op, prefix, blob_remap):
             remap_proto(argument, blob_remap)
 
 
+def control_op_remap(op, prefix, blob_remap):
+    net_arg_names = []
+    if op.type == "If":
+        net_arg_names = ['then_net', 'else_net']
+    else:
+        net_arg_names = ['loop_net', 'cond_net']
+    for argument in op.arg:
+        if argument.name in net_arg_names:
+            assert argument.n, \
+                "Expected non empty net in " + op.type + "'s " + argument.name + " argument"
+            subnet = Net(argument.n)
+            remapped_subnet = subnet.Clone(
+                name=(subnet._net.name if subnet._net.name else '') + '_remapped',
+                blob_remap=blob_remap)
+            argument.n.CopyFrom(remapped_subnet.Proto())
+
+
 DEFAULT_REMAP_FUNCS = {
     'RecurrentNetwork': recurrent_network_op_remap,
     'RecurrentNetworkGradient': recurrent_network_op_remap,
+    'If': control_op_remap,
+    'While': control_op_remap,
 }
 
 

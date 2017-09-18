@@ -14,6 +14,9 @@ from caffe2.python.control_ops_util import add_if_op, add_while_op
 class NetBuilder(object):
     """
     Scope-driven mechanism for building nets, loops and conditional blocks.
+    Arguments:
+      name: NetBuilder's name
+      initial_scope: list of blobs that are available for reading/writing
     Example:
         from caffe2.python.net_builder import NetBuilder, ops
         with NetBuilder() as nb:
@@ -28,7 +31,7 @@ class NetBuilder(object):
             ops.Print(d, [])
         step = core.to_execution_step(nb)
     """
-    def __init__(self, name=None, _stop_blob_required=False,
+    def __init__(self, name=None, initial_scope=None, _stop_blob_required=False,
                  _stop_blob=None, _fullname=None, _use_control_ops=False):
         parent = NetBuilder.current(required=False)
         assert not _fullname or not name, 'Cannot set both _fullname and name'
@@ -44,8 +47,10 @@ class NetBuilder(object):
         if parent:
             # make sure parent has an up to date lexical scope computed
             parent._update_lexical_scope()
-        self._parent_lexical_scope = set(parent._lexical_scope) if parent else set()
-        self._lexical_scope = set(self._parent_lexical_scope)
+        self._init_lexical_scope = set(parent._lexical_scope) if parent else set()
+        if initial_scope:
+            self._init_lexical_scope |= set([str(b) for b in initial_scope])
+        self._lexical_scope = set(self._init_lexical_scope)
         self._stop_blob = _stop_blob
         self._stop_blob_required = _stop_blob_required
         self._use_control_ops = _use_control_ops
@@ -85,7 +90,7 @@ class NetBuilder(object):
         Lexical scope contains names of blobs that are currently available
         and were introduced in the net builder
         """
-        self._lexical_scope = set(self._parent_lexical_scope)
+        self._lexical_scope = set(self._init_lexical_scope)
         for child in self._children:
             if isinstance(child, core.Net):
                 self._lexical_scope |= child.UsedBlobNames()
@@ -95,7 +100,7 @@ class NetBuilder(object):
     def _reset_children(self):
         self._current_net = None
         self._children = []
-        self._lexical_scope = set(self._parent_lexical_scope)
+        self._lexical_scope = set(self._init_lexical_scope)
 
     def add(self, child):
         self._assert_mutable()
@@ -131,7 +136,14 @@ class NetBuilder(object):
         return self._children
 
     def __exit__(self, etype, *args):
-        self._update_lexical_scope()
+        if self._use_control_ops and len(self._children) > 0:
+            _children = self._children
+            self._reset_children()
+            merged_net = NetBuilder.merge_nets(
+                _children, self._lexical_scope)
+            assert merged_net, "Expected a non-empty merge of children"
+            self._children = [merged_net]
+
         self.freeze()
         if etype is not None:
             return

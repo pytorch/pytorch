@@ -15,15 +15,15 @@ class IfOp final : public Operator<Context> {
     CAFFE_ENFORCE(
         this->template HasSingleArgumentOfType<NetDef>("then_net"),
         "then_net must be specified in If operator");
-    then_net_def_ =
+    auto then_net_def =
         this->template GetSingleArgument<NetDef>("then_net", NetDef());
-    then_net_ = ws->CreateNet(then_net_def_, true);
+    then_net_ = CreateNet(then_net_def, ws);
     CAFFE_ENFORCE(then_net_, "Failed to initialize then subnet");
 
     if (this->template HasSingleArgumentOfType<NetDef>("else_net")) {
-      else_net_def_ =
+      auto else_net_def =
           this->template GetSingleArgument<NetDef>("else_net", NetDef());
-      else_net_ = ws->CreateNet(else_net_def_, true);
+      else_net_ = CreateNet(else_net_def, ws);
       CAFFE_ENFORCE(else_net_, "Failed to initialize else subnet");
     }
   }
@@ -32,11 +32,8 @@ class IfOp final : public Operator<Context> {
   bool RunOnDevice() override;
 
  private:
-  NetDef then_net_def_;
-  NetBase* then_net_ = nullptr;
-
-  NetDef else_net_def_;
-  NetBase* else_net_ = nullptr;
+  std::unique_ptr<NetBase> then_net_;
+  std::unique_ptr<NetBase> else_net_;
 };
 
 } // namespace caffe2
