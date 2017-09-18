@@ -45,16 +45,21 @@ if has_gpu_support:
     NumCudaDevices = C.num_cuda_devices
     SetDefaultGPUID = C.set_default_gpu_id
     GetDefaultGPUID = C.get_default_gpu_id
+    GetCUDAVersion = C.get_cuda_version
     GetCuDNNVersion = C.get_cudnn_version
 
     def GetCudaPeerAccessPattern():
         return np.asarray(C.get_cuda_peer_access_pattern())
+
+    GetDeviceProperties = C.get_device_properties
 else:
     NumCudaDevices = lambda: 0 # noqa
     SetDefaultGPUID = lambda x: None # noqa
     GetDefaultGPUID = lambda: 0 # noqa
     GetCuDNNVersion = lambda: 0 # noqa
+    GetCuDNNVersion = lambda: 0 # noqa
     GetCudaPeerAccessPattern = lambda: np.array([]) # noqa
+    GetDeviceProperties = lambda x: None # noqa
 
 
 def _GetFreeFlaskPort():
