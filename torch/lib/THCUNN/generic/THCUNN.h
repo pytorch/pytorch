@@ -1553,6 +1553,22 @@ TH_API void THNN_(VolumetricMaxUnpooling_updateGradInput)(
                   int dT, int dW, int dH,
                   int padT, int padW, int padH);
 
+TH_API void THNN_(VolumetricAdaptiveMaxPooling_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *output,
+                  THCIndexTensor *indices,
+                  int osizeT,
+                  int osizeW,
+                  int osizeH);
+
+TH_API void THNN_(VolumetricAdaptiveMaxPooling_updateGradInput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *gradOutput,
+                  THCTensor *gradInput,
+                  THCIndexTensor *indices);
+
 TH_API void THNN_(VolumetricAdaptiveAveragePooling_updateOutput)(
                   THCState *state,
                   THCTensor *input,

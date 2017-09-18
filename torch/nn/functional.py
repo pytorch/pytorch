@@ -412,6 +412,21 @@ def adaptive_max_pool2d(input, output_size, return_indices=False):
     return ret if return_indices else ret[0]
 
 
+def adaptive_max_pool3d(input, output_size, return_indices=False):
+    r"""Applies a 3D adaptive max pooling over an input signal composed of
+    several input planes.
+
+    See :class:`~torch.nn.AdaptiveMaxPool3d` for details and output shape.
+
+    Args:
+        output_size: the target output size (single integer or
+            triple-integer tuple)
+        return_indices: whether to return pooling indices. Default: False
+    """
+    ret = _functions.thnn.AdaptiveMaxPool3d.apply(input, output_size)
+    return ret if return_indices else ret[0]
+
+
 def adaptive_avg_pool1d(input, output_size):
     r"""Applies a 1D adaptive average pooling over an input signal composed of
     several input planes.
