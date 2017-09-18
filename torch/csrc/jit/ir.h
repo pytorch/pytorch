@@ -250,6 +250,9 @@ public:
   bool hasMultipleOutputs() const {
     return hasType() && type()->kind() == TypeKind::MultiType;
   }
+  bool isHandle() const {
+    return hasType() && type()->kind() == TypeKind::HandleType;
+  }
   bool hasType() const {
     return type_ != nullptr;
   }
@@ -812,6 +815,8 @@ public:
 
   // Checks well-formedness and invariants of graph
   void lint();
+  // for use in debugger
+  void dump();
 
   ~Graph() {
     for (Node * n : all_nodes)

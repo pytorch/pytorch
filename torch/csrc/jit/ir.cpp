@@ -491,6 +491,10 @@ void Graph::lint() {
   }
 }
 
+void Graph::dump() {
+  std::cout << *this << "\n";
+}
+
 void LintGraph(std::shared_ptr<Graph>& graph) {
   graph->lint();
 }
