@@ -1257,6 +1257,34 @@ TH_API void THNN_(TemporalReplicationPadding_updateGradInput)(
                   THCTensor *gradInput,
                   int padL, int padR);
 
+TH_API void THNN_(TemporalUpSamplingLinear_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *output,
+                  int outputWidth);
+
+TH_API void THNN_(TemporalUpSamplingLinear_updateGradInput)(
+                  THCState *state,
+                  THCTensor *gradOutput,
+                  THCTensor *gradInput,
+                  int nbatch,
+                  int nchannels,
+                  int inputWidth,
+                  int outputWidth);
+
+TH_API void THNN_(TemporalUpSamplingNearest_updateGradInput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *gradOutput,
+                  THCTensor *gradInput,
+                  int scale_factor);
+
+TH_API void THNN_(TemporalUpSamplingNearest_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *output,
+                  int scale_factor);
+
 TH_API void THNN_(Threshold_updateOutput)(
                   THCState *state,
                   THCTensor *input,
