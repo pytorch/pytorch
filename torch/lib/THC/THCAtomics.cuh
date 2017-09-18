@@ -96,10 +96,10 @@ static inline __device__ void atomicAdd(int64_t *address, int64_t val) {
 
 #ifdef CUDA_HALF_TENSOR
 static inline  __device__ void atomicAdd(half *address, half val) {
-  uint32_t * address_as_ui =
-      (uint32_t *) ((char *)address - ((size_t)address & 2));
-  uint32_t old = *address_as_ui;
-  uint32_t assumed;
+  unsigned int * address_as_ui =
+    (unsigned int *) ((char *)address - ((size_t)address & 2));
+  unsigned int old = *address_as_ui;
+  unsigned int assumed;
 
   do {
     assumed = old;
@@ -115,29 +115,29 @@ static inline  __device__ void atomicAdd(half *address, half val) {
 #endif
     old = (size_t)address & 2 ? (old & 0xffff) | (hsum.x << 16) : (old & 0xffff0000) | hsum.x;
     old = atomicCAS(address_as_ui, assumed, old);
-   } while (assumed != old);
+  } while (assumed != old);
 }
 #endif
 
 #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 600 || CUDA_VERSION < 8000)
 // from CUDA C Programmic Guide
 static inline  __device__  void atomicAdd(double *address, double val) {
-  uint64_t* address_as_ull = (uint64_t*)address;
-  uint64_t old = *address_as_ull;
-  uint64_t assumed;
+  unsigned long long int* address_as_ull = (unsigned long long int*)address;
+  unsigned long long int old = *address_as_ull;
+  unsigned long long int assumed;
 
   do {
     assumed = old;
-    old = atomicCAS((uint64_t *) address_as_ull, (uint64_t) assumed,
-                    (uint64_t) __double_as_longlong(val +
+    old = atomicCAS(address_as_ull, assumed,
+                    __double_as_longlong(val +
                     __longlong_as_double(assumed)));
 
     // Note: uses integer comparison to avoid hang in case of NaN (since NaN != NaN)
-  } while (assumed != old);
+} while (assumed != old);
 }
 #elif !defined(__CUDA_ARCH__) && (CUDA_VERSION < 8000)
-// This needs to be defined for the host side pass
-static inline  __device__  void atomicAdd(double *address, double val) { }
+  // This needs to be defined for the host side pass
+  static inline  __device__  void atomicAdd(double *address, double val) { }
 #endif
 
 #endif // THC_ATOMICS_INC
